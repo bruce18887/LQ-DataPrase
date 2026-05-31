@@ -3,8 +3,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
+import { useThemeStore } from '../../../stores/theme'
+const _tc = () => getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
+const themeStore = useThemeStore()
 
 interface ParetoData {
   categories: string[]
@@ -50,7 +53,7 @@ function renderChart() {
       axisPointer: {
         type: 'cross',
         crossStyle: {
-          color: '#999'
+          color: _tc()
         }
       },
       formatter: (params: any) => {
@@ -68,7 +71,8 @@ function renderChart() {
     },
     legend: {
       data: ['Count', 'Cumulative %'],
-      top: 30
+      top: 30,
+      textStyle: { color: _tc() }
     },
     grid: {
       left: '3%',
@@ -86,7 +90,8 @@ function renderChart() {
         axisLabel: {
           rotate: 45,
           interval: 0,
-          fontSize: 10
+          fontSize: 10,
+          color: _tc()
         }
       }
     ],
@@ -94,19 +99,23 @@ function renderChart() {
       {
         type: 'value',
         name: 'Count',
+        nameTextStyle: { color: _tc() },
         position: 'left',
         axisLabel: {
-          formatter: '{value}'
+          formatter: '{value}',
+          color: _tc()
         }
       },
       {
         type: 'value',
         name: 'Cumulative %',
+        nameTextStyle: { color: _tc() },
         position: 'right',
         min: 0,
         max: 100,
         axisLabel: {
-          formatter: '{value}%'
+          formatter: '{value}%',
+          color: _tc()
         }
       }
     ],
@@ -179,6 +188,10 @@ watch(() => props.data, () => {
 
 watch(() => props.title, () => {
   renderChart()
+})
+
+watch(() => themeStore.currentTheme, () => {
+  nextTick(() => renderChart())
 })
 </script>
 

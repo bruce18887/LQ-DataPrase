@@ -548,7 +548,7 @@ function formatMode(mode: number): string {
 
 .config-item {
   border-radius: 8px;
-  transition: all 0.3s ease;
+  transition: transform 0.3s ease, box-shadow 0.3s ease, background-color 0.3s ease;
 }
 
 .config-item:hover {

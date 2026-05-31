@@ -43,7 +43,7 @@ defineProps<Props>()
 .table-header {
   font-weight: 600;
   font-size: 12px;
-  color: #303133;
+  color: var(--text-primary);
   margin-bottom: 6px;
 }
 

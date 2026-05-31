@@ -16,6 +16,7 @@ body {
   color: var(--text-primary);
   font-size: var(--text-base);
   line-height: var(--leading-normal);
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 #app {
@@ -27,8 +28,32 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--text-primary);
   font-weight: var(--font-semibold);
   line-height: var(--leading-tight);
+  transition: color 0.3s ease;
 }
 
 h2 {
   margin-bottom: var(--spacing-5);
+}
+
+/* 主题切换平滑过渡 */
+:root {
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* 为所有使用CSS变量的元素添加过渡 */
+* {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-duration: 0.3s;
+  transition-timing-function: ease;
+}
+
+/* 排除不需要过渡的元素 */
+*:where(:not(:active):not(:focus):not(:hover)) {
+  transition-duration: 0.3s;
+}
+
+/* 保持动画和变换的原有过渡 */
+*[style*="transform"],
+*[style*="animation"] {
+  transition-property: background-color, border-color, color, fill, stroke, transform, opacity;
 }

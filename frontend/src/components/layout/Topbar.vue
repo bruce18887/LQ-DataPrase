@@ -9,7 +9,7 @@
       </el-breadcrumb>
     </div>
 
-    <!-- 右侧：搜索、通知、用户菜单 -->
+    <!-- 右侧：搜索、通知、主题切换、用户菜单 -->
     <div class="topbar-right">
       <!-- 搜索框 -->
       <div class="search-box">
@@ -23,10 +23,13 @@
         />
       </div>
 
+      <!-- 主题切换 -->
+      <ThemeToggle />
+
       <!-- 通知图标 -->
       <el-badge :value="notificationCount" :hidden="notificationCount === 0" class="notification-badge">
-        <el-button text circle class="icon-btn">
-          <el-icon :size="18"><Bell /></el-icon>
+        <el-button text circle class="icon-btn" aria-label="通知">
+          <el-icon :size="18" aria-hidden="true"><Bell /></el-icon>
         </el-button>
       </el-badge>
 
@@ -69,6 +72,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import { Search, Bell, User, ArrowDown, Setting, SwitchButton } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import ThemeToggle from '../common/ThemeToggle.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -208,7 +212,7 @@ const handleCommand = (command: string) => {
   background-color: var(--bg-primary);
   border-radius: 8px;
   box-shadow: none;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 :deep(.el-input__wrapper:hover) {
@@ -231,7 +235,7 @@ const handleCommand = (command: string) => {
 
 .icon-btn {
   color: var(--text-secondary);
-  transition: all 0.2s ease;
+  transition: color 0.2s ease, background-color 0.2s ease;
 }
 
 .icon-btn:hover {

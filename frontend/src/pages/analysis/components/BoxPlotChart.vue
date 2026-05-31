@@ -3,8 +3,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
+import { useThemeStore } from '../../../stores/theme'
+const _tc = () => getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
+const themeStore = useThemeStore()
 
 interface BoxPlotStats {
   min: number
@@ -128,7 +131,8 @@ function renderChart() {
       axisLabel: {
         rotate: categories.length > 10 ? 45 : 0,
         interval: 0,
-        fontSize: 10
+        fontSize: 10,
+        color: _tc()
       },
       splitLine: {
         show: false
@@ -137,6 +141,8 @@ function renderChart() {
     yAxis: {
       type: 'value',
       name: 'Value',
+      nameTextStyle: { color: _tc() },
+      axisLabel: { color: _tc() },
       splitArea: {
         show: true
       }
@@ -148,7 +154,7 @@ function renderChart() {
         data: boxData,
         itemStyle: {
           color: '#5470C6',
-          borderColor: '#2c3e50'
+          borderColor: _tc()
         },
         tooltip: {
           formatter: (param: any) => {
@@ -200,6 +206,10 @@ watch(() => props.data, () => {
 
 watch(() => props.title, () => {
   renderChart()
+})
+
+watch(() => themeStore.currentTheme, () => {
+  nextTick(() => renderChart())
 })
 </script>
 

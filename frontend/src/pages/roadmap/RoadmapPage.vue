@@ -55,7 +55,7 @@
           <span style="font-size: 14px; font-weight: bold">{{ percentage }}%</span>
         </template>
       </el-progress>
-      <div style="margin-top: 12px; color: #606266; font-size: 14px">
+      <div style="margin-top: 12px; color: var(--text-secondary); font-size: 14px">
         已完成 {{ stats.completed }} 项，部分完成 {{ stats.partial }} 项，待开发 {{ stats.todo }} 项
       </div>
     </el-card>
@@ -235,49 +235,49 @@ const p0Tasks = ref<Task[]>([
 const p1Tasks = ref<Task[]>([
   {
     id: 'TODO-07',
-    status: '📝',
+    status: '✅',
     task: 'Yield Trend 良率趋势 analysis:yield_trend + SPC 控制限',
     files: 'apps/analysis/views.py, services/statistics.py',
     section: '§2.1 / §2.2'
   },
   {
     id: 'TODO-08',
-    status: '📝',
+    status: '✅',
     task: '前端 YieldTrendChart.vue（折线图 + UCL/LCL 控制线）',
     files: 'frontend/src/pages/dashboard/',
     section: '§2.2'
   },
   {
     id: 'TODO-09',
-    status: '📝',
+    status: '✅',
     task: 'Yield By Zone 分区良率 compute_zonal_yield()',
     files: 'services/statistics.py',
     section: '§2.3'
   },
   {
     id: 'TODO-10',
-    status: '📝',
+    status: '✅',
     task: '前端 Wafer Map 分区高亮/分区统计',
     files: 'WaferMapPanel.vue',
     section: '§2.3'
   },
   {
     id: 'TODO-11',
-    status: '📝',
+    status: '✅',
     task: '前端 QQ Plot 组件 QQPlotChart.vue + 后端 analysis:qqplot',
     files: 'frontend + apps/analysis/views.py',
     section: '§3.2 / §7.2'
   },
   {
     id: 'TODO-12',
-    status: '📝',
+    status: '✅',
     task: '多 Lot 良率对比（扩展 multi_lot）',
     files: 'apps/analysis/views.py',
     section: '§1.2'
   },
   {
     id: 'TODO-13',
-    status: '📝',
+    status: '✅',
     task: 'UPH 计算 services/efficiency.py:compute_uph()',
     files: 'apps/analysis/services/efficiency.py',
     section: '§5.2'
@@ -481,14 +481,14 @@ const progressColor = computed(() => {
 }
 
 .page-title {
-  color: #2c3e50;
+  color: var(--text-primary);
   margin-bottom: 8px;
   font-size: 28px;
   font-weight: bold;
 }
 
 .page-subtitle {
-  color: #7f8c8d;
+  color: var(--text-secondary);
   font-size: 14px;
 }
 
@@ -528,7 +528,7 @@ const progressColor = computed(() => {
 
 .stat-partial {
   background: linear-gradient(135deg, #f9a825 0%, #ffd54f 100%);
-  color: #5d4037;
+  color: var(--text-primary);
 }
 
 .stat-todo {
@@ -544,7 +544,7 @@ const progressColor = computed(() => {
 .section-title {
   font-size: 20px;
   font-weight: bold;
-  color: #2c3e50;
+  color: var(--text-primary);
   margin: 30px 0 16px 0;
   padding-left: 12px;
   border-left: 4px solid #667eea;
@@ -583,7 +583,7 @@ const progressColor = computed(() => {
 
 .footer-text {
   text-align: center;
-  color: #bdc3c7;
+  color: var(--text-tertiary);
   font-size: 12px;
   margin-top: 30px;
   padding-bottom: 10px;

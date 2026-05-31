@@ -5,6 +5,9 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
+import { useThemeStore } from '../../../stores/theme'
+const _tc = () => getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
+const themeStore = useThemeStore()
 
 const props = defineProps<{
   result: any
@@ -165,10 +168,11 @@ function renderChart() {
     {
       type: 'value',
       name: '百分比 (%)',
+      nameTextStyle: { color: _tc() },
       position: 'left',
       min: 0,
       max: 100,
-      axisLabel: { formatter: '{value}%' },
+      axisLabel: { formatter: '{value}%', color: _tc() },
     },
   ]
 
@@ -176,9 +180,10 @@ function renderChart() {
     yAxes.push({
       type: 'value',
       name: '概率密度',
+      nameTextStyle: { color: _tc() },
       position: 'right',
       min: 0,
-      axisLabel: { formatter: (v: number) => v.toExponential(2) },
+      axisLabel: { formatter: (v: number) => v.toExponential(2), color: _tc() },
       splitLine: { show: false },
     })
   }
@@ -200,11 +205,11 @@ function renderChart() {
           name: {
             fontSize: 15,
             fontWeight: 'bold',
-            color: '#1565C0',
+            color: _tc(),
           },
           unit: {
             fontSize: 12,
-            color: '#5c6bc0',
+            color: _tc(),
             fontWeight: 500,
           },
           limit: {
@@ -232,7 +237,7 @@ function renderChart() {
         return html
       },
     },
-    legend: { data: series.map((s: any) => s.name), top: 'bottom', type: 'scroll' },
+    legend: { data: series.map((s: any) => s.name), top: 'bottom', type: 'scroll', textStyle: { color: _tc() } },
     toolbox: { feature: { saveAsImage: { name: `${props.selectedParam}_分析` } } },
     grid: { top: 55, bottom: 70, left: 55, right: hasNormal ? 75 : 55 },
     xAxis: {
@@ -242,7 +247,7 @@ function renderChart() {
       nameGap: 28,
       min: dMin,
       max: dMax,
-      axisLabel: { rotate: 45, show: true, interval: 0, fontSize: 9, formatter: (v: number) => v.toFixed(4) },
+      axisLabel: { rotate: 45, show: true, interval: 0, fontSize: 9, formatter: (v: number) => v.toFixed(4), color: _tc() },
       splitNumber: 24,
     },
     yAxis: yAxes,
@@ -267,6 +272,10 @@ watch(() => props.rangeType, () => {
 })
 
 watch(() => props.barWidthPercent, () => {
+  nextTick(() => renderChart())
+})
+
+watch(() => themeStore.currentTheme, () => {
   nextTick(() => renderChart())
 })
 

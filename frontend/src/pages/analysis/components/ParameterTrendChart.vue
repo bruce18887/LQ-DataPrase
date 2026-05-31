@@ -3,8 +3,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
+import { useThemeStore } from '../../../stores/theme'
+const _tc = () => getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
+const themeStore = useThemeStore()
 
 interface TrendPoint {
   file_id: number
@@ -167,7 +170,8 @@ function renderChart() {
     },
     legend: {
       data: ['Mean', 'Mean + Std', 'Mean - Std', 'CPK'],
-      top: 30
+      top: 30,
+      textStyle: { color: _tc() }
     },
     grid: {
       left: '3%',
@@ -181,25 +185,30 @@ function renderChart() {
       axisLabel: {
         rotate: 45,
         interval: 0,
-        fontSize: 10
+        fontSize: 10,
+        color: _tc()
       }
     },
     yAxis: [
       {
         type: 'value',
         name: 'Value',
+        nameTextStyle: { color: _tc() },
         position: 'left',
         axisLabel: {
-          formatter: '{value}'
+          formatter: '{value}',
+          color: _tc()
         }
       },
       {
         type: 'value',
         name: 'CPK',
+        nameTextStyle: { color: _tc() },
         position: 'right',
         min: 0,
         axisLabel: {
-          formatter: '{value}'
+          formatter: '{value}',
+          color: _tc()
         }
       }
     ],
@@ -231,6 +240,10 @@ watch(() => props.data, () => {
 
 watch(() => props.title, () => {
   renderChart()
+})
+
+watch(() => themeStore.currentTheme, () => {
+  nextTick(() => renderChart())
 })
 </script>
 

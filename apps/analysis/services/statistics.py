@@ -780,6 +780,114 @@ def compute_boxplot_stats(data: pd.Series) -> Dict[str, Any]:
     }
 
 
+def compute_yield_trend(file_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Compute yield trend across multiple files with SPC control limits.
+
+    Args:
+        file_data_list: List of dicts with 'df', 'metadata', 'file_id', 'filename', 'timestamp'
+
+    Returns:
+        Dictionary with files, trend_data, spc_limits, anomalies
+    """
+    if not file_data_list:
+        return {
+            'files': [],
+            'trend_data': [],
+            'spc_limits': {'ucl': None, 'cl': None, 'lcl': None},
+            'anomalies': []
+        }
+
+    files_info = []
+    trend_data = []
+    yield_values = []
+
+    for file_data in file_data_list:
+        df = file_data['df']
+        metadata = file_data.get('metadata', {})
+        file_id = file_data.get('file_id')
+        filename = file_data.get('filename', 'unknown')
+        timestamp = file_data.get('timestamp', '')
+
+        # Get bin statistics to compute pass/fail counts
+        bin_stats = calculate_fail_bin_statistics(df, metadata)
+
+        total_count = 0
+        pass_count = 0
+
+        for bin_name, bin_info in bin_stats.items():
+            count = bin_info.get('count', 0)
+            total_count += count
+            bn = str(bin_name)
+            if bn in ('1', 'Bin1'):
+                pass_count = count
+
+        # Fallback if no bin stats (e.g. no bin column found)
+        if total_count == 0:
+            total_count = len(df)
+
+        yield_pct = round((pass_count / total_count * 100), 2) if total_count > 0 else 0.0
+
+        files_info.append({
+            'file_id': file_id,
+            'filename': filename,
+            'timestamp': timestamp
+        })
+
+        trend_data.append({
+            'file_id': file_id,
+            'yield': yield_pct,
+            'total_count': total_count,
+            'pass_count': pass_count,
+            'fail_count': total_count - pass_count
+        })
+
+        yield_values.append(yield_pct)
+
+    # Calculate SPC control limits
+    n = len(yield_values)
+    if n > 1:
+        mean_yield = float(np.mean(yield_values))
+        std_yield = float(np.std(yield_values, ddof=0))
+        ucl = round(mean_yield + 3 * std_yield, 2)
+        cl = round(mean_yield, 2)
+        lcl = round(mean_yield - 3 * std_yield, 2)
+        lcl = max(lcl, 0.0)  # yield cannot be negative
+    elif n == 1:
+        mean_yield = yield_values[0]
+        ucl = cl = lcl = round(mean_yield, 2)
+    else:
+        ucl = cl = lcl = None
+
+    spc_limits = {
+        'ucl': ucl,
+        'cl': cl,
+        'lcl': lcl
+    }
+
+    # Identify anomalies (points outside control limits)
+    anomalies = []
+    if ucl is not None and lcl is not None and n > 1:
+        for fd, y in zip(file_data_list, yield_values):
+            is_anomaly = y > ucl or y < lcl
+            if is_anomaly:
+                reason = '超出上控制限' if y > ucl else '低于下控制限'
+                anomalies.append({
+                    'file_id': fd.get('file_id'),
+                    'filename': fd.get('filename', 'unknown'),
+                    'timestamp': fd.get('timestamp', ''),
+                    'yield': y,
+                    'reason': reason
+                })
+
+    return {
+        'files': files_info,
+        'trend_data': trend_data,
+        'spc_limits': spc_limits,
+        'anomalies': anomalies
+    }
+
+
 def compute_param_trend(file_data_list: List[Dict[str, Any]], param: str) -> Dict[str, Any]:
     """
     Compute parameter statistics trend across multiple files.
@@ -1081,3 +1189,158 @@ def compute_wafer_fail_data(df: pd.DataFrame, metadata: Optional[Dict] = None,
     
     stats = {'total': total, 'pass_count': pass_count, 'fail_count': fail_count, 'yield_pct': yield_pct}
     return fail_mask, stats
+
+
+def compute_zonal_yield(df: pd.DataFrame, metadata: Optional[Dict] = None,
+                        param: Optional[str] = None) -> Dict:
+    """
+    Compute yield breakdown by radial zones on a wafer.
+
+    Divides the wafer into 3 concentric zones (Center, Middle, Edge) based on
+    normalized distance from the wafer center, and calculates yield statistics
+    for each zone.
+
+    Args:
+        df: DataFrame containing wafer test data with X/Y coordinate columns.
+        metadata: Metadata dict (used for limit lookups when param is provided,
+                  or for auto-detecting fail mask when param is None).
+        param: Optional parameter name. If provided, uses the parameter's
+               spec limits (from metadata) to determine pass/fail per die.
+               If None, uses compute_wafer_fail_data to derive the fail mask
+               from all numeric columns with limits.
+
+    Returns:
+        Dictionary with:
+            zones: List of per-zone dicts {name, total, pass, fail, yield, display_order}
+            wafer_radius: Max distance from center in coordinate units
+            zone_boundaries: The normalized radius cutoffs [0.33, 0.66]
+    """
+    x_col, y_col = get_coord_columns(df)
+    if x_col is None or y_col is None:
+        return {
+            'zones': [],
+            'wafer_radius': 0,
+            'zone_boundaries': [0.33, 0.66],
+        }
+
+    x_vals = pd.to_numeric(get_1d_from(df, x_col), errors='coerce')
+    y_vals = pd.to_numeric(get_1d_from(df, y_col), errors='coerce')
+
+    cx = float(x_vals.mean())
+    cy = float(y_vals.mean())
+
+    distances = np.sqrt((x_vals - cx) ** 2 + (y_vals - cy) ** 2)
+    max_dist = float(distances.max())
+    if max_dist <= 0:
+        max_dist = 1.0  # fallback to avoid division by zero
+
+    norm_distances = distances / max_dist
+
+    # Determine fail pass mask
+    if param is not None and metadata is not None:
+        # Use the specific parameter's limits for pass/fail determination
+        if param in df.columns and param in metadata.get('mins', {}) and param in metadata.get('maxs', {}):
+            data_series = pd.to_numeric(get_1d_from(df, param), errors='coerce')
+            lower_limit = parse_limit_string(str(metadata['mins'][param]), data_series, 0.0, 0.0)
+            upper_limit = parse_limit_string(str(metadata['maxs'][param]), data_series, 0.0, 0.0)
+            fail_mask = (data_series < lower_limit) | (data_series > upper_limit)
+        else:
+            fail_mask = pd.Series([False] * len(df), index=df.index)
+    else:
+        # Use the generic wafer fail data detection
+        fail_mask, _ = compute_wafer_fail_data(df, metadata, selected_param=None)
+
+    # Zone definitions based on normalized radius
+    zone_defs = [
+        ('center_zone', '中心区', 0.0, 1.0 / 3.0, 0),
+        ('middle_zone', '中间区', 1.0 / 3.0, 2.0 / 3.0, 1),
+        ('edge_zone', '边缘区', 2.0 / 3.0, float('inf'), 2),
+    ]
+
+    zones_result = []
+    for zone_key, zone_name, r_low, r_high, display_order in zone_defs:
+        if r_high == float('inf'):
+            mask = norm_distances > r_low
+        else:
+            mask = (norm_distances > r_low) & (norm_distances <= r_high)
+
+        zone_total = int(mask.sum())
+        if zone_total == 0:
+            zones_result.append({
+                'name': zone_name,
+                'total': 0,
+                'pass': 0,
+                'fail': 0,
+                'yield': 0.0,
+                'display_order': display_order,
+            })
+            continue
+
+        zone_fail = int(fail_mask[mask].sum())
+        zone_pass = zone_total - zone_fail
+        zone_yield = round((zone_pass / zone_total) * 100, 2) if zone_total > 0 else 0.0
+
+        zones_result.append({
+            'name': zone_name,
+            'total': zone_total,
+            'pass': zone_pass,
+            'fail': zone_fail,
+            'yield': zone_yield,
+            'display_order': display_order,
+        })
+
+    return {
+        'zones': zones_result,
+        'wafer_radius': round(max_dist, 6),
+        'zone_boundaries': [round(1.0 / 3.0, 4), round(2.0 / 3.0, 4)],
+    }
+
+
+def compute_qqplot(data_series: pd.Series) -> Dict[str, Any]:
+    """
+    Compute QQ plot data for normality testing using scipy.stats.probplot.
+
+    Args:
+        data_series: Numeric data series to test for normality.
+
+    Returns:
+        Dictionary with theoretical quantiles, observed values, R-squared, and normality verdict.
+    """
+    clean = pd.to_numeric(data_series, errors='coerce').dropna()
+    clean = clean[np.isfinite(clean.values)]
+    if len(clean) < 3:
+        return {
+            'theoretical_quantiles': [],
+            'observed_quantiles': [],
+            'r_squared': 0.0,
+            'is_normal': False,
+            'n': len(clean),
+        }
+
+    try:
+        from scipy import stats as scipy_stats
+        # probplot returns ((osm, osr), (slope, intercept, r)) when fit=True
+        pp_result = scipy_stats.probplot(clean, dist='norm', fit=True)
+        (osm, osr) = pp_result[0]  # theoretical quantiles and sorted observed values
+        r = pp_result[1][2]         # correlation coefficient (R)
+        theoretical = [round(float(v), 6) for v in osm]
+        observed = [round(float(v), 6) for v in osr]
+
+        r_squared = round(r * r, 4)
+        is_normal = r_squared > 0.95
+
+        return {
+            'theoretical_quantiles': theoretical,
+            'observed_quantiles': observed,
+            'r_squared': r_squared,
+            'is_normal': is_normal,
+            'n': len(clean),
+        }
+    except Exception:
+        return {
+            'theoretical_quantiles': [],
+            'observed_quantiles': [],
+            'r_squared': 0.0,
+            'is_normal': False,
+            'n': len(clean),
+        }
