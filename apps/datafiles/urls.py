@@ -1,0 +1,21 @@
+from django.urls import include, path
+from rest_framework.routers import DefaultRouter
+
+from apps.datafiles.views import (
+    DataBrowserView,
+    DataFileViewSet,
+    FileActivateView,
+    FileUploadView,
+    ParseHistoryListView,
+)
+
+router = DefaultRouter()
+router.register(r'files', DataFileViewSet, basename='datafile')
+
+urlpatterns = [
+    path('', include(router.urls)),
+    path('upload/', FileUploadView.as_view(), name='file-upload'),
+    path('activate/<int:pk>/', FileActivateView.as_view(), name='file-activate'),
+    path('history/', ParseHistoryListView.as_view(), name='parse-history'),
+    path('browse/', DataBrowserView.as_view(), name='data-browse'),
+]

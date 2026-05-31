@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# Virtual Environment
+.venv/
+venv/
+env/
+ENV/
+
+# Django
+db.sqlite3
+*.log
+media/
+staticfiles/
+static_root/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Vue / Node
+node_modules/
+dist-ssr/
+*.local
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+.codebuddy/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Thumbs.db:encryptable
+
+# Docker
+docker-compose.override.yml
+
+# Playwright
+test-results/
+playwright-report/
+
+# Development artifacts
+.claude/
+skills/
+Data/
+token.txt
+test_*.py
+P0_*.md
+P0_*.py
+
+# OS
+*.bak
+*.tmp
