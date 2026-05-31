@@ -38,7 +38,7 @@ withDefaults(defineProps<Props>(), {
   background: var(--bg-secondary);
   border-radius: 8px;
   overflow: hidden;
-  transition: all 0.3s ease;
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
 }
 
 .dp-card--default {

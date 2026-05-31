@@ -1,6 +1,6 @@
 <template>
   <div>
-    <p style="color:#909399;margin-bottom:12px">对比两个文件的 Serial 数据差异（超出阈值 3% 标红）</p>
+    <p style="color:var(--text-secondary);margin-bottom:12px">对比两个文件的 Serial 数据差异（超出阈值 3% 标红）</p>
     <el-row :gutter="12">
       <el-col :span="6">
         <el-select v-model="localFile1" placeholder="文件1 (ATE)" style="width:100%">

@@ -38,6 +38,9 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
+import { useThemeStore } from '../../../stores/theme'
+const _tc = () => getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
+const themeStore = useThemeStore()
 
 const props = defineProps<{
   params: string[]
@@ -149,9 +152,10 @@ function renderChart() {
       data: series.map((s: any) => s.name),
       bottom: 5,
       type: 'scroll',
+      textStyle: { color: _tc() },
     },
-    xAxis: { type: 'value', name: data.param_x, min: xMin, max: xMax },
-    yAxis: { type: 'value', name: data.param_y, min: yMin, max: yMax },
+    xAxis: { type: 'value', name: data.param_x, min: xMin, max: xMax, axisLabel: { color: _tc() }, nameTextStyle: { color: _tc() } },
+    yAxis: { type: 'value', name: data.param_y, min: yMin, max: yMax, axisLabel: { color: _tc() }, nameTextStyle: { color: _tc() } },
     dataZoom: [
       { type: 'slider', xAxisIndex: 0, start: 0, end: 100 },
       { type: 'inside', xAxisIndex: 0 },
@@ -169,6 +173,10 @@ watch(() => props.chartData, () => {
     initChart()
     renderChart()
   })
+})
+
+watch(() => themeStore.currentTheme, () => {
+  nextTick(() => renderChart())
 })
 
 onMounted(() => {

@@ -5,6 +5,9 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
+import { useThemeStore } from '../../../stores/theme'
+const _tc = () => getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
+const themeStore = useThemeStore()
 
 const props = defineProps<{
   data: any
@@ -81,6 +84,7 @@ function renderChart() {
       data: series.map((s: any) => s.name),
       top: 'bottom',
       type: 'scroll',
+      textStyle: { color: _tc() },
     },
     toolbox: {
       feature: {
@@ -91,18 +95,20 @@ function renderChart() {
       type: 'category',
       data: continuousSerials,
       name: serialCol,
+      nameTextStyle: { color: _tc() },
       nameLocation: 'middle',
       nameGap: 30,
-      axisLabel: { rotate: 45, interval: 'auto' },
+      axisLabel: { rotate: 45, interval: 'auto', color: _tc() },
     },
     yAxis: {
       type: 'value',
       name: unit ? `${param} (${unit})` : param,
+      nameTextStyle: { color: _tc() },
       nameLocation: 'middle',
       nameGap: 40,
       min: data.y_min,
       max: data.y_max,
-      axisLabel: { formatter: (v: number) => v.toFixed(4) },
+      axisLabel: { formatter: (v: number) => v.toFixed(4), color: _tc() },
     },
     dataZoom: [
       { type: 'slider', xAxisIndex: 0, start: 0, end: 100 },
@@ -117,6 +123,10 @@ function resize() {
 }
 
 watch(() => props.data, () => {
+  nextTick(() => renderChart())
+})
+
+watch(() => themeStore.currentTheme, () => {
   nextTick(() => renderChart())
 })
 

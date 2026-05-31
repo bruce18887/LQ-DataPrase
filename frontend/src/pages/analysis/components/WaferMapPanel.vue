@@ -11,14 +11,15 @@
           <el-option v-for="p in params" :key="p" :label="p" :value="p" />
         </el-select>
       </el-col>
-      <el-col :span="5">
+      <el-col :span="7">
         <el-radio-group v-model="localColorBy" @change="onLoad" style="padding-top: 4px">
           <el-radio-button value="result">按结果</el-radio-button>
           <el-radio-button value="site">按 Site</el-radio-button>
+          <el-radio-button value="zone">分区模式</el-radio-button>
         </el-radio-group>
       </el-col>
       <el-col :span="6">
-        <span style="font-size: 12px; color: #909399; margin-right: 8px">图表高度</span>
+        <span style="font-size: 12px; color: var(--text-secondary); margin-right: 8px">图表高度</span>
         <el-slider v-model="localHeight" :min="400" :max="900" :step="50" show-input style="flex: 1" />
       </el-col>
       <el-col :span="3">
@@ -35,27 +36,64 @@
     <el-row v-if="waferData" :gutter="12" style="margin-bottom: 12px">
       <el-col :span="6">
         <el-card shadow="hover">
-          <div style="font-size: 12px; color: #909399">Total Dies</div>
+          <div style="font-size: 12px; color: var(--text-secondary)">Total Dies</div>
           <div style="font-size: 18px; font-weight: bold">{{ waferData.stats?.total ?? '-' }}</div>
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card shadow="hover">
-          <div style="font-size: 12px; color: #909399">Pass Dies</div>
+          <div style="font-size: 12px; color: var(--text-secondary)">Pass Dies</div>
           <div style="font-size: 18px; font-weight: bold; color: #2ECC71">{{ waferData.stats?.pass_count ?? '-' }}</div>
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card shadow="hover">
-          <div style="font-size: 12px; color: #909399">Fail Dies</div>
+          <div style="font-size: 12px; color: var(--text-secondary)">Fail Dies</div>
           <div style="font-size: 18px; font-weight: bold; color: #E74C3C">{{ waferData.stats?.fail_count ?? '-' }}</div>
         </el-card>
       </el-col>
       <el-col :span="6">
         <el-card shadow="hover">
-          <div style="font-size: 12px; color: #909399">Yield</div>
+          <div style="font-size: 12px; color: var(--text-secondary)">Yield</div>
           <div :style="{ fontSize: '18px', fontWeight: 'bold', color: (waferData.stats?.yield_pct ?? 0) >= 95 ? '#2ECC71' : (waferData.stats?.yield_pct ?? 0) >= 85 ? '#F39C12' : '#E74C3C' }">
             {{ waferData.stats?.yield_pct?.toFixed(1) ?? '-' }}%
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <!-- 分区良率统计 -->
+    <el-row v-if="localColorBy === 'zone' && zonalData?.zones?.length" :gutter="12" style="margin-bottom: 12px">
+      <el-col :span="8">
+        <el-card shadow="hover" :style="{ borderLeft: '3px solid #2ECC71' }">
+          <div style="font-size: 11px; color: var(--text-secondary)">中心区 Center Zone</div>
+          <div style="font-size: 16px; font-weight: bold; color: #2ECC71">
+            {{ getZoneYield('中心区') }}%
+          </div>
+          <div style="font-size: 11px; color: var(--text-secondary)">
+            {{ getZoneStat('中心区', 'pass') }} / {{ getZoneStat('中心区', 'total') }}
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :span="8">
+        <el-card shadow="hover" :style="{ borderLeft: '3px solid #F39C12' }">
+          <div style="font-size: 11px; color: var(--text-secondary)">中间区 Middle Zone</div>
+          <div style="font-size: 16px; font-weight: bold; color: #F39C12">
+            {{ getZoneYield('中间区') }}%
+          </div>
+          <div style="font-size: 11px; color: var(--text-secondary)">
+            {{ getZoneStat('中间区', 'pass') }} / {{ getZoneStat('中间区', 'total') }}
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :span="8">
+        <el-card shadow="hover" :style="{ borderLeft: '3px solid #E74C3C' }">
+          <div style="font-size: 11px; color: var(--text-secondary)">边缘区 Edge Zone</div>
+          <div style="font-size: 16px; font-weight: bold; color: #E74C3C">
+            {{ getZoneYield('边缘区') }}%
+          </div>
+          <div style="font-size: 11px; color: var(--text-secondary)">
+            {{ getZoneStat('边缘区', 'pass') }} / {{ getZoneStat('边缘区', 'total') }}
           </div>
         </el-card>
       </el-col>
@@ -70,11 +108,16 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
+import { useThemeStore } from '../../../stores/theme'
+import { analysisApi } from '../../../api/analysis'
+const _tc = () => getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
+const themeStore = useThemeStore()
 
 const props = defineProps<{
   params: string[]
   loading: boolean
   waferData: any
+  fileId?: number
 }>()
 
 const emit = defineEmits<{
@@ -88,15 +131,47 @@ const localHeight = ref(550)
 const localShowEdge = ref(true)
 const chartRef = ref<HTMLElement>()
 let chartInstance: echarts.ECharts | null = null
+const zonalData = ref<any>(null)
 
 const COLORS_WAFER_SITE_8 = ['#2ECC71', '#3498DB', '#9B59B6', '#E67E22', '#1ABC9C', '#F39C12', '#E74C3C', '#34495E']
 
+function getZoneYield(name: string): string {
+  const zone = zonalData.value?.zones?.find((z: any) => z.name === name)
+  return zone ? zone.yield.toFixed(1) : '-'
+}
+
+function getZoneStat(name: string, key: string): string | number {
+  const zone = zonalData.value?.zones?.find((z: any) => z.name === name)
+  return zone ? (zone[key] ?? '-') : '-'
+}
+
+async function fetchZonalYield() {
+  if (!props.fileId) return
+  try {
+    const { data } = await analysisApi.getZonalYield(props.fileId, localParam.value || undefined)
+    zonalData.value = data
+    if (chartInstance) {
+      renderChart()
+    }
+  } catch {
+    zonalData.value = null
+  }
+}
+
 function onLoad() {
+  zonalData.value = null
   emit('load', localParam.value, localColorBy.value)
+  if (localColorBy.value === 'zone' && props.fileId) {
+    fetchZonalYield()
+  }
 }
 
 function onLoadGlobal() {
+  zonalData.value = null
   emit('loadGlobal', localColorBy.value)
+  if (localColorBy.value === 'zone' && props.fileId) {
+    fetchZonalYield()
+  }
 }
 
 function onReRender() {
@@ -229,6 +304,39 @@ function renderChart() {
     })
   }
 
+  // Zone overlay circles for zone mode — draw as scatter points on circle paths (like Wafer Edge)
+  if (colorBy === 'zone' && wafer && zonalData.value?.zones?.length) {
+    const cx = wafer.center_x
+    const cy = wafer.center_y
+    const r = wafer.radius
+    if (cx != null && cy != null && r > 0) {
+      const zoneOverlayDefs = [
+        { name: '中心区', ratio: 1.0 / 3.0, color: '#2ECC71' },
+        { name: '中间区', ratio: 2.0 / 3.0, color: '#F39C12' },
+        { name: '边缘区', ratio: 1.0, color: '#E74C3C' },
+      ]
+      for (const zd of zoneOverlayDefs) {
+        const circlePoints: number[][] = []
+        const n = 120
+        const actualR = r * zd.ratio
+        for (let i = 0; i < n; i++) {
+          const angle = (2 * Math.PI * i) / n
+          circlePoints.push([cx + actualR * Math.cos(angle), cy + actualR * Math.sin(angle)])
+        }
+        series.push({
+          name: zd.name,
+          type: 'scatter',
+          symbol: 'circle',
+          symbolSize: 2,
+          data: circlePoints.map((pt) => ({ value: pt })),
+          itemStyle: { color: zd.color, opacity: 0.6 },
+          silent: true,
+          z: 1,
+        })
+      }
+    }
+  }
+
   const stats = data.stats || {}
   const yieldRate = pts.length > 0 ? ((100 * (stats.pass_count || 0)) / pts.length).toFixed(1) : '0.0'
   const legendData = series.map((s: any) => s.name)
@@ -260,6 +368,7 @@ function renderChart() {
       data: legendData,
       bottom: 10,
       type: 'scroll',
+      textStyle: { color: _tc() },
     },
     toolbox: {
       feature: {
@@ -274,14 +383,16 @@ function renderChart() {
     xAxis: {
       type: 'value',
       name: data.x_col ?? 'X',
+      nameTextStyle: { color: _tc() },
       scale: true,
-      axisLabel: { formatter: (v: number) => v.toFixed(0) },
+      axisLabel: { formatter: (v: number) => v.toFixed(0), color: _tc() },
     },
     yAxis: {
       type: 'value',
       name: data.y_col ?? 'Y',
+      nameTextStyle: { color: _tc() },
       scale: true,
-      axisLabel: { formatter: (v: number) => v.toFixed(0) },
+      axisLabel: { formatter: (v: number) => v.toFixed(0), color: _tc() },
     },
     dataZoom: [
       { type: 'slider', xAxisIndex: 0, start: 0, end: 100 },
@@ -302,6 +413,10 @@ watch(() => props.waferData, () => {
     initChart()
     renderChart()
   })
+})
+
+watch(() => themeStore.currentTheme, () => {
+  nextTick(() => renderChart())
 })
 
 onMounted(() => {

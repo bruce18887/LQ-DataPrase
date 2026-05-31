@@ -15,6 +15,9 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
+import { useThemeStore } from '../../../stores/theme'
+const _tc = () => getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
+const themeStore = useThemeStore()
 
 const props = defineProps<{
   loading: boolean
@@ -66,13 +69,13 @@ function renderChart() {
       type: 'category',
       data: params,
       splitArea: { show: true },
-      axisLabel: { rotate: 45, fontSize: 10 },
+      axisLabel: { rotate: 45, fontSize: 10, color: _tc() },
     },
     yAxis: {
       type: 'category',
       data: params,
       splitArea: { show: true },
-      axisLabel: { fontSize: 10 },
+      axisLabel: { fontSize: 10, color: _tc() },
     },
     visualMap: {
       min: -1,
@@ -106,6 +109,10 @@ watch(() => props.matrixData, () => {
     initChart()
     renderChart()
   })
+})
+
+watch(() => themeStore.currentTheme, () => {
+  nextTick(() => renderChart())
 })
 
 onMounted(() => {

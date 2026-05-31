@@ -29,6 +29,7 @@
           :params="params"
           :loading="loading"
           :wafer-data="waferData"
+          :file-id="selectedFileId ?? undefined"
           @load="loadWafer"
           @load-global="loadWaferGlobal"
         />

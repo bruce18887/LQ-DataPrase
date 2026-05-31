@@ -170,7 +170,7 @@
               </el-table-column>
               <el-table-column prop="mean" label="均值" width="120" align="right">
                 <template #default="{ row }">
-                  {{ row.mean.toFixed(4) }} <span style="color: #999">{{ row.unit }}</span>
+                  {{ row.mean.toFixed(4) }} <span style="color: var(--text-tertiary)">{{ row.unit }}</span>
                 </template>
               </el-table-column>
               <el-table-column prop="std" label="标准差" width="100" align="right">
@@ -183,7 +183,7 @@
                   <span v-if="row.lsl !== null && row.usl !== null" style="font-size: 12px">
                     {{ row.lsl.toFixed(4) }} ~ {{ row.usl.toFixed(4) }}
                   </span>
-                  <span v-else style="color: #999">未设置</span>
+                  <span v-else style="color: var(--text-tertiary)">未设置</span>
                 </template>
               </el-table-column>
             </el-table>
@@ -221,6 +221,14 @@
           <el-card shadow="hover" header="Top 10 Fail测试项">
             <div ref="failBarChart" style="height: 350px" role="img" aria-label="Top 10 Fail测试项柱状图" />
           </el-card>
+        </el-col>
+      </el-row>
+
+      <!-- ===== UPH 效率分析 ===== -->
+      <h2 class="section-title"><span aria-hidden="true">⚡</span> UPH 效率分析</h2>
+      <el-row :gutter="16" style="margin-bottom: 16px">
+        <el-col :span="24">
+          <UphCard :file-id="data?.file_id || null" />
         </el-col>
       </el-row>
 
@@ -271,7 +279,14 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
 import * as echarts from 'echarts'
+import { useThemeStore } from '../../stores/theme'
 import api from '../../api'
+import UphCard from './components/UphCard.vue'
+
+// Helper for theme-aware ECharts colors
+const _tc = () => getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
+const themeStore = useThemeStore()
+const _ts = () => getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || 'rgba(255,255,255,0.8)'
 
 interface DashboardData {
   file_id: number
@@ -395,12 +410,12 @@ function renderSiteYieldChart() {
     xAxis: {
       type: 'category',
       data: sites,
-      axisLabel: { fontSize: 12 },
+      axisLabel: { fontSize: 12, color: _tc() },
     },
     yAxis: {
       type: 'value',
       max: 100,
-      axisLabel: { formatter: '{value}%' },
+      axisLabel: { formatter: '{value}%', color: _tc() },
     },
     series: [{
       type: 'bar',
@@ -445,7 +460,7 @@ function renderYieldGaugeChart() {
       pointer: { icon: 'path://M12.8,0.7l12,40.1H0.7L12.8,0.7z', length: '60%', width: 6 },
       axisTick: { length: 10, lineStyle: { color: 'inherit', width: 2 } },
       splitLine: { length: 15, lineStyle: { color: 'inherit', width: 3 } },
-      axisLabel: { color: '#464646', fontSize: 10, distance: -40 },
+      axisLabel: { color: getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#fff', fontSize: 10, distance: -40 },
       title: { offsetCenter: [0, '-20%'], fontSize: 14 },
       detail: { fontSize: 24, offsetCenter: [0, '0%'], valueAnimation: true, formatter: '{value}%', color: 'inherit' },
       data: [{ value: Math.round(yieldPct * 100) / 100, name: '整体Yield' }],
@@ -465,7 +480,7 @@ function renderBinChart() {
 
   binChartInstance.setOption({
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { orient: 'vertical', left: 'left', top: 'center', type: 'scroll' },
+    legend: { orient: 'vertical', left: 'left', top: 'center', type: 'scroll', textStyle: { color: _tc() } },
     series: [{
       type: 'pie',
       radius: ['35%', '75%'],
@@ -492,11 +507,11 @@ function renderFailBarChart() {
   failBarChartInstance.setOption({
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     grid: { left: '3%', right: '8%', bottom: '3%', top: '3%', containLabel: true },
-    xAxis: { type: 'value' },
+    xAxis: { type: 'value', axisLabel: { color: _tc() } },
     yAxis: {
       type: 'category',
       data: top10.map((t) => (t.name.length > 25 ? t.name.slice(0, 25) + '...' : t.name)).reverse(),
-      axisLabel: { fontSize: 10 },
+      axisLabel: { fontSize: 10, color: _tc() },
     },
     series: [{
       type: 'bar',
@@ -543,7 +558,7 @@ function renderCpkDistChart() {
         text: '暂无CPK数据',
         left: 'center',
         top: 'center',
-        textStyle: { color: '#999', fontSize: 14 }
+        textStyle: { color: _ts(), fontSize: 14 }
       }
     })
     return
@@ -560,7 +575,7 @@ function renderCpkDistChart() {
 
   cpkDistChartInstance.setOption({
     tooltip: { trigger: 'item', formatter: '{b}: {c}个 ({d}%)' },
-    legend: { orient: 'vertical', left: 'left', top: 'center' },
+    legend: { orient: 'vertical', left: 'left', top: 'center', textStyle: { color: _tc() } },
     series: [{
       type: 'pie',
       radius: ['40%', '70%'],
@@ -587,6 +602,10 @@ function renderAllCharts() {
 }
 
 watch(data, async () => {
+  renderAllCharts()
+})
+
+watch(() => themeStore.currentTheme, () => {
   renderAllCharts()
 })
 

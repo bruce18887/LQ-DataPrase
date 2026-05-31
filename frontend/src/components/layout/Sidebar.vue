@@ -15,38 +15,38 @@
 
     <!-- 导航菜单 -->
     <nav class="nav-menu">
-      <div
+      <router-link
         v-for="item in menuItems"
         :key="item.path"
+        :to="item.path"
         class="menu-item"
         :class="{ active: isActive(item.path), hidden: item.requiresAdmin && !isAdmin }"
-        @click="navigateTo(item.path)"
       >
         <div class="menu-item-content">
-          <div class="menu-icon">
+          <div class="menu-icon" aria-hidden="true">
             <component :is="item.icon" />
           </div>
           <transition name="fade">
             <span v-show="!isCollapsed" class="menu-label">{{ item.label }}</span>
           </transition>
         </div>
-        <div v-if="isActive(item.path)" class="active-indicator"></div>
-      </div>
+        <div v-if="isActive(item.path)" class="active-indicator" aria-hidden="true"></div>
+      </router-link>
     </nav>
 
     <!-- 折叠按钮 -->
-    <div class="collapse-btn" @click="toggleCollapse">
-      <el-icon :size="18">
+    <button class="collapse-btn" @click="toggleCollapse" aria-label="折叠侧边栏">
+      <el-icon :size="18" aria-hidden="true">
         <DArrowLeft v-if="!isCollapsed" />
         <DArrowRight v-else />
       </el-icon>
-    </div>
+    </button>
   </aside>
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import {
   Odometer,
@@ -62,7 +62,6 @@ import {
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
-const router = useRouter()
 const authStore = useAuthStore()
 
 const isCollapsed = ref(false)
@@ -82,10 +81,6 @@ const menuItems = [
 
 const isActive = (path: string) => {
   return route.path === path || route.path.startsWith(path + '/')
-}
-
-const navigateTo = (path: string) => {
-  router.push(path)
 }
 
 const toggleCollapse = () => {
@@ -175,7 +170,10 @@ const toggleCollapse = () => {
   margin-bottom: 4px;
   cursor: pointer;
   border-radius: 8px;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, color 0.2s ease;
+  display: block;
+  text-decoration: none;
+  color: inherit;
 }
 
 .menu-item.hidden {
@@ -184,6 +182,11 @@ const toggleCollapse = () => {
 
 .menu-item:hover {
   background-color: var(--bg-tertiary);
+}
+
+.menu-item:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: -2px;
 }
 
 .menu-item.active {
@@ -246,15 +249,24 @@ const toggleCollapse = () => {
   align-items: center;
   justify-content: center;
   height: 48px;
-  border-top: 1px solid var(--border-default);
+  width: 100%;
   cursor: pointer;
   color: var(--text-secondary);
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, color 0.2s ease;
+  border: none;
+  border-top: 1px solid var(--border-default);
+  background: none;
+  font: inherit;
 }
 
 .collapse-btn:hover {
   background-color: var(--bg-tertiary);
   color: var(--brand-primary);
+}
+
+.collapse-btn:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: -2px;
 }
 
 /* 过渡动画 */

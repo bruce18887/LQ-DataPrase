@@ -6,6 +6,14 @@
         <el-radio-button value="distribution">数值分布</el-radio-button>
         <el-radio-button value="serial">序列分布</el-radio-button>
       </el-radio-group>
+      <el-checkbox
+        v-if="chartMode === 'distribution'"
+        v-model="showQQPlot"
+        size="small"
+        style="margin-left: 12px;"
+      >
+        显示QQ图
+      </el-checkbox>
     </div>
 
     <!-- 主内容区：左侧配置面板 + 右侧图表 -->
@@ -34,11 +42,45 @@
             @prev="prevParam"
             @next="nextParam"
           />
-          <StatsSummary :stat-cards="statCards" />
+          <div class="top-bar-right">
+            <StatsSummary :stat-cards="statCards" />
+            <el-tag
+              v-if="qqResult && showQQPlot"
+              :type="qqResult.is_normal ? 'success' : 'danger'"
+              size="small"
+              class="normality-tag"
+            >
+              {{ qqResult.is_normal ? '正态' : '非正态' }}
+            </el-tag>
+          </div>
         </div>
 
-        <!-- 图表 -->
-        <div class="chart-wrapper">
+        <!-- 图表：QQ图激活时上下布局（柱状图在上，QQ图在下） -->
+        <div
+          v-if="showQQPlot && chartMode === 'distribution' && histResult"
+          class="chart-vertical-layout"
+        >
+          <div class="chart-wrapper chart-wrapper--top">
+            <HistogramChart
+              :result="histResult"
+              :chart-config="chartConfig"
+              :range-type="rangeType"
+              :bar-width-percent="barWidthPercent"
+              :selected-param="localSelectedParam"
+            />
+          </div>
+          <div class="chart-wrapper chart-wrapper--bottom">
+            <QQPlotChart
+              :file-id="props.fileId"
+              :param="localSelectedParam"
+              :visible="showQQPlot"
+              :result="qqResult"
+              :loading="qqLoading"
+            />
+          </div>
+        </div>
+        <!-- 图表：默认全宽布局 -->
+        <div v-else class="chart-wrapper">
           <HistogramChart
             v-if="histResult && chartMode === 'distribution'"
             :result="histResult"
@@ -59,6 +101,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import api from '../../../api'
 import { useAnalysisStore } from '../../../stores/analysis'
 import ChartConfigPanel from './ChartConfigPanel.vue'
 import RangeComparisonTable from './RangeComparisonTable.vue'
@@ -67,6 +110,7 @@ import ParamSelector from './ParamSelector.vue'
 import StatsSummary from './StatsSummary.vue'
 import HistogramChart from './HistogramChart.vue'
 import SerialChart from './SerialChart.vue'
+import QQPlotChart from './QQPlotChart.vue'
 import { useHistogram } from '../composables/useHistogram'
 import { useSerialDistribution } from '../composables/useSerialDistribution'
 import { useSiteStats } from '../composables/useSiteStats'
@@ -125,6 +169,31 @@ const {
   rangeType
 )
 
+// ========== QQ Plot state ==========
+const showQQPlot = ref(false)
+const qqResult = ref<any>(null)
+const qqLoading = ref(false)
+
+async function loadQQPlot() {
+  if (!props.fileId || !localSelectedParam.value || !showQQPlot.value) {
+    qqResult.value = null
+    return
+  }
+  qqLoading.value = true
+  qqResult.value = null
+  try {
+    const { data } = await api.post('/analysis/qqplot/', {
+      file_id: props.fileId,
+      param: localSelectedParam.value,
+    })
+    qqResult.value = data
+  } catch {
+    qqResult.value = null
+  } finally {
+    qqLoading.value = false
+  }
+}
+
 // ========== Store sync ==========
 watch(chartMode, (val) => { analysisStore.chartMode = val })
 watch(chartConfig, (val) => { analysisStore.chartConfig = val }, { deep: true })
@@ -143,6 +212,30 @@ watch(histResult, () => {
   loadSiteStats()
   if (chartMode.value === 'serial') {
     loadSerialDistribution()
+  }
+  if (showQQPlot.value && chartMode.value === 'distribution') {
+    loadQQPlot()
+  }
+})
+
+// ========== QQ Plot orchestration ==========
+watch(showQQPlot, (val) => {
+  if (val) {
+    loadQQPlot()
+  } else {
+    qqResult.value = null
+  }
+})
+
+watch(localSelectedParam, () => {
+  if (showQQPlot.value) {
+    loadQQPlot()
+  }
+})
+
+watch(() => props.fileId, () => {
+  if (showQQPlot.value) {
+    loadQQPlot()
   }
 })
 
@@ -213,9 +306,25 @@ function nextParam() {
   min-width: 0;
 }
 
+.top-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.top-bar-right > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.normality-tag {
+  flex-shrink: 0;
+}
+
 .chart-wrapper {
   flex: 1;
-  min-height: 520px;
+  min-height: 480px;
   background: #fff;
   border-radius: 6px;
   border: 1px solid #e4e7ed;
@@ -224,5 +333,16 @@ function nextParam() {
 
 .chart-wrapper > * {
   height: 100%;
+}
+
+.chart-wrapper--bottom {
+  min-height: 400px;
+  margin-top: 12px;
+}
+
+.chart-vertical-layout {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 </style>

@@ -6,6 +6,8 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
 import router from './router'
 import './style.css'
+import './styles/element-plus-theme.css'  // Element Plus 夜晚主题覆盖
+import './styles/common-components-theme.css'  // 通用组件夜晚主题
 
 const app = createApp(App)
 

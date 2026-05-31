@@ -20,6 +20,7 @@
               v-model="form.username"
               placeholder="用户名"
               size="large"
+              autocomplete="username"
               class="neon-input"
             />
           </el-form-item>
@@ -29,6 +30,7 @@
               type="password"
               placeholder="密码"
               size="large"
+              autocomplete="current-password"
               show-password
               class="neon-input"
             />
@@ -42,14 +44,14 @@
               class="neon-button"
             >
               <span v-if="!loading">登 录</span>
-              <span v-else>登录中...</span>
+              <span v-else>登录中…</span>
             </el-button>
           </el-form-item>
         </el-form>
 
         <!-- 错误提示 -->
         <transition name="fade">
-          <p v-if="error" class="error-msg">{{ error }}</p>
+          <p v-if="error" class="error-msg" aria-live="polite">{{ error }}</p>
         </transition>
       </div>
     </div>
@@ -136,6 +138,15 @@ async function handleLogin() {
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .login-card {
+    animation: none;
+  }
+  .logo-icon {
+    animation: none;
+  }
+}
+
 /* Logo 区域 */
 .logo-section {
   display: flex;
@@ -192,7 +203,7 @@ async function handleLogin() {
   background-color: var(--bg-primary);
   border: 1px solid var(--border-default);
   box-shadow: none;
-  transition: all 0.3s ease;
+  transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 :deep(.neon-input .el-input__wrapper:hover) {
@@ -227,7 +238,7 @@ async function handleLogin() {
   font-weight: 600;
   letter-spacing: 2px;
   box-shadow: 0 0 20px rgba(37, 99, 235, 0.2);
-  transition: all 0.3s ease;
+  transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
 }
 
 :deep(.neon-button:hover) {

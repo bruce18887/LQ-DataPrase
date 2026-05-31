@@ -410,7 +410,7 @@ const viewDocumentation = (task: Task) => {
   border-radius: 12px;
   padding: 20px;
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   overflow: hidden;
 }
@@ -573,7 +573,7 @@ const viewDocumentation = (task: Task) => {
   cursor: pointer;
   color: #fff;
   font-size: 18px;
-  transition: all 0.2s;
+  transition: color 0.2s, background-color 0.2s;
 }
 
 .close-btn:hover {
@@ -698,7 +698,7 @@ const viewDocumentation = (task: Task) => {
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s;
+  transition: background-color 0.3s, color 0.3s;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -733,7 +733,7 @@ const viewDocumentation = (task: Task) => {
 /* 动画 */
 .slide-up-enter-active,
 .slide-up-leave-active {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .slide-up-enter-from {

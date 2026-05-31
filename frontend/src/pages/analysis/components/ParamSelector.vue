@@ -69,7 +69,7 @@ function onNext() {
 
 .selector-label {
   font-size: 11px;
-  color: #909399;
+  color: var(--text-secondary);
   font-weight: 500;
 }
 

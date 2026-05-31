@@ -42,4 +42,19 @@ export const analysisApi = {
       param
     })
   },
+  getYieldTrend(fileIds: number[]) {
+    return api.post('/analysis/yield_trend/', { file_ids: fileIds })
+  },
+  getQQPlot(fileId: number, param: string) {
+    return api.post('/analysis/qqplot/', { file_id: fileId, param })
+  },
+  getZonalYield(fileId: number, param?: string) {
+    return api.post('/analysis/zonal_yield/', { file_id: fileId, param })
+  },
+  getUph(fileId: number, testTimeCol?: string, manualTestTimeSec?: number) {
+    const payload: any = { file_id: fileId }
+    if (testTimeCol) payload.test_time_col = testTimeCol
+    if (manualTestTimeSec != null) payload.manual_test_time_sec = manualTestTimeSec
+    return api.post('/analysis/uph/', payload)
+  },
 }
