@@ -1,0 +1,669 @@
+/**
+ * Element Plus 夜晚主题覆盖
+ *
+ * 此文件覆盖 Element Plus 的默认 CSS 变量，使其在夜晚主题下正确显示
+ * 必须在 element-plus/dist/index.css 之后导入
+ */
+
+/* ========================================
+   夜晚主题 - Element Plus CSS 变量覆盖
+   ======================================== */
+
+:root[data-theme="night"],
+:root.theme-night {
+
+  /* ========== 基础颜色 ========== */
+  --el-color-white: #1a1a2e;
+  --el-color-black: #ffffff;
+
+  /* ========== 品牌色 ========== */
+  --el-color-primary: #f9a825;
+  --el-color-primary-light-3: #fbb752;
+  --el-color-primary-light-5: #fcc673;
+  --el-color-primary-light-7: #fdd594;
+  --el-color-primary-light-8: #fee4a5;
+  --el-color-primary-light-9: #fef2d2;
+  --el-color-primary-dark-2: #c78620;
+
+  /* ========== 语义色 ========== */
+  --el-color-success: #11998e;
+  --el-color-success-light-3: #3dafa5;
+  --el-color-success-light-5: #5fbdb5;
+  --el-color-success-light-7: #81cbc4;
+  --el-color-success-light-8: #92d5cf;
+  --el-color-success-light-9: #c9eae7;
+
+  --el-color-warning: #f9a825;
+  --el-color-warning-light-3: #fbb752;
+  --el-color-warning-light-5: #fcc673;
+  --el-color-warning-light-7: #fdd594;
+  --el-color-warning-light-8: #fee4a5;
+  --el-color-warning-light-9: #fef2d2;
+
+  --el-color-danger: #f5576c;
+  --el-color-danger-light-3: #f77889;
+  --el-color-danger-light-5: #f999a6;
+  --el-color-danger-light-7: #fbbac3;
+  --el-color-danger-light-8: #fdcbd1;
+  --el-color-danger-light-9: #fee5e8;
+
+  --el-color-error: #f5576c;
+  --el-color-error-light-3: #f77889;
+  --el-color-error-light-5: #f999a6;
+  --el-color-error-light-7: #fbbac3;
+  --el-color-error-light-8: #fdcbd1;
+  --el-color-error-light-9: #fee5e8;
+
+  --el-color-info: #4facfe;
+  --el-color-info-light-3: #72bdfe;
+  --el-color-info-light-5: #8ccbfe;
+  --el-color-info-light-7: #a5d9fe;
+  --el-color-info-light-8: #b4e1ff;
+  --el-color-info-light-9: #d9f0ff;
+
+  /* ========== 背景色 ========== */
+  --el-bg-color: #16213e;
+  --el-bg-color-page: #1a1a2e;
+  --el-bg-color-overlay: rgba(255, 255, 255, 0.08);
+
+  /* ========== 文本色 ========== */
+  --el-text-color-primary: #ffffff;
+  --el-text-color-regular: rgba(255, 255, 255, 0.8);
+  --el-text-color-secondary: rgba(255, 255, 255, 0.6);
+  --el-text-color-placeholder: rgba(255, 255, 255, 0.4);
+  --el-text-color-disabled: rgba(255, 255, 255, 0.3);
+
+  /* ========== 边框色 ========== */
+  --el-border-color: rgba(255, 255, 255, 0.1);
+  --el-border-color-light: rgba(255, 255, 255, 0.08);
+  --el-border-color-lighter: rgba(255, 255, 255, 0.06);
+  --el-border-color-extra-light: rgba(255, 255, 255, 0.04);
+  --el-border-color-dark: rgba(255, 255, 255, 0.15);
+  --el-border-color-darker: rgba(255, 255, 255, 0.2);
+
+  /* ========== 填充色 ========== */
+  --el-fill-color: rgba(255, 255, 255, 0.05);
+  --el-fill-color-light: rgba(255, 255, 255, 0.08);
+  --el-fill-color-lighter: rgba(255, 255, 255, 0.1);
+  --el-fill-color-extra-light: rgba(255, 255, 255, 0.03);
+  --el-fill-color-dark: rgba(255, 255, 255, 0.12);
+  --el-fill-color-darker: rgba(255, 255, 255, 0.15);
+  --el-fill-color-blank: transparent;
+
+  /* ========== 遮罩层 ========== */
+  --el-overlay-color: rgba(0, 0, 0, 0.7);
+  --el-overlay-color-light: rgba(0, 0, 0, 0.5);
+  --el-overlay-color-lighter: rgba(0, 0, 0, 0.3);
+
+  /* ========== 阴影 ========== */
+  --el-box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --el-box-shadow-light: 0 2px 8px rgba(0, 0, 0, 0.2);
+  --el-box-shadow-lighter: 0 1px 4px rgba(0, 0, 0, 0.15);
+  --el-box-shadow-dark: 0 8px 24px rgba(0, 0, 0, 0.4);
+
+  /* ========== 禁用状态 ========== */
+  --el-disabled-bg-color: rgba(255, 255, 255, 0.05);
+  --el-disabled-text-color: rgba(255, 255, 255, 0.3);
+  --el-disabled-border-color: rgba(255, 255, 255, 0.08);
+
+  /* ========== 表格 ========== */
+  --el-table-bg-color: #16213e;
+  --el-table-tr-bg-color: #16213e;
+  --el-table-header-bg-color: rgba(255, 255, 255, 0.05);
+  --el-table-row-hover-bg-color: rgba(255, 255, 255, 0.08);
+  --el-table-current-row-bg-color: rgba(249, 168, 37, 0.1);
+  --el-table-header-text-color: rgba(255, 255, 255, 0.9);
+  --el-table-text-color: rgba(255, 255, 255, 0.8);
+  --el-table-border-color: rgba(255, 255, 255, 0.1);
+  --el-table-fixed-box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+
+  /* ========== 输入框 ========== */
+  --el-input-bg-color: rgba(255, 255, 255, 0.05);
+  --el-input-border-color: rgba(255, 255, 255, 0.1);
+  --el-input-hover-border-color: #f9a825;
+  --el-input-focus-border-color: #f9a825;
+  --el-input-text-color: #ffffff;
+  --el-input-placeholder-color: rgba(255, 255, 255, 0.4);
+  --el-input-icon-color: rgba(255, 255, 255, 0.6);
+  --el-input-clear-hover-color: rgba(255, 255, 255, 0.8);
+
+  /* ========== 下拉菜单 ========== */
+  --el-dropdown-menu-box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --el-select-input-focus-border-color: #f9a825;
+
+  /* ========== 对话框 ========== */
+  --el-dialog-bg-color: #16213e;
+  --el-dialog-box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+
+  /* ========== 分页器 ========== */
+  --el-pagination-bg-color: rgba(255, 255, 255, 0.05);
+  --el-pagination-hover-color: #f9a825;
+  --el-pagination-button-disabled-bg-color: rgba(255, 255, 255, 0.03);
+
+  /* ========== 标签页 ========== */
+  --el-tabs-header-bg-color: rgba(255, 255, 255, 0.05);
+
+  /* ========== 消息提示 ========== */
+  --el-message-bg-color: #16213e;
+  --el-message-border-color: rgba(255, 255, 255, 0.1);
+
+  /* ========== 通知 ========== */
+  --el-notification-bg-color: #16213e;
+  --el-notification-border-color: rgba(255, 255, 255, 0.1);
+
+  /* ========== 弹出框 ========== */
+  --el-popover-bg-color: #16213e;
+  --el-popover-border-color: rgba(255, 255, 255, 0.1);
+
+  /* ========== 工具提示 ========== */
+  --el-tooltip-bg-color: rgba(0, 0, 0, 0.9);
+  --el-tooltip-text-color: #ffffff;
+}
+
+/* ========================================
+   组件特殊样式调整
+   ======================================== */
+
+/* 卡片 */
+:root[data-theme="night"] .el-card,
+:root.theme-night .el-card {
+  background-color: #16213e;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+:root[data-theme="night"] .el-card__header,
+:root.theme-night .el-card__header {
+  background-color: rgba(255, 255, 255, 0.05);
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+/* 按钮 */
+:root[data-theme="night"] .el-button--default,
+:root.theme-night .el-button--default {
+  background-color: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+:root[data-theme="night"] .el-button--default:hover,
+:root.theme-night .el-button--default:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-color: #f9a825;
+  color: #f9a825;
+}
+
+/* 输入框组 */
+:root[data-theme="night"] .el-input-group__prepend,
+:root[data-theme="night"] .el-input-group__append,
+:root.theme-night .el-input-group__prepend,
+:root.theme-night .el-input-group__append {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* 下拉菜单 */
+:root[data-theme="night"] .el-dropdown-menu,
+:root.theme-night .el-dropdown-menu {
+  background-color: #16213e;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+:root[data-theme="night"] .el-dropdown-menu__item:hover,
+:root.theme-night .el-dropdown-menu__item:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #f9a825;
+}
+
+/* 选择器下拉 */
+:root[data-theme="night"] .el-select-dropdown,
+:root.theme-night .el-select-dropdown {
+  background-color: #16213e;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+:root[data-theme="night"] .el-select-dropdown__item:hover,
+:root.theme-night .el-select-dropdown__item:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+:root[data-theme="night"] .el-select-dropdown__item.selected,
+:root.theme-night .el-select-dropdown__item.selected {
+  color: #f9a825;
+  font-weight: 600;
+}
+
+/* 日期选择器 */
+:root[data-theme="night"] .el-date-picker,
+:root[data-theme="night"] .el-picker-panel,
+:root.theme-night .el-date-picker,
+:root.theme-night .el-picker-panel {
+  background-color: #16213e;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+:root[data-theme="night"] .el-date-table td.available:hover,
+:root.theme-night .el-date-table td.available:hover {
+  color: #f9a825;
+}
+
+/* 折叠面板 */
+:root[data-theme="night"] .el-collapse-item__header,
+:root.theme-night .el-collapse-item__header {
+  background-color: rgba(255, 255, 255, 0.05);
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+:root[data-theme="night"] .el-collapse-item__wrap,
+:root.theme-night .el-collapse-item__wrap {
+  background-color: #16213e;
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+/* 标签页 */
+:root[data-theme="night"] .el-tabs--border-card,
+:root.theme-night .el-tabs--border-card {
+  background-color: #16213e;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+:root[data-theme="night"] .el-tabs--border-card > .el-tabs__header,
+:root.theme-night .el-tabs--border-card > .el-tabs__header {
+  background-color: rgba(255, 255, 255, 0.05);
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+:root[data-theme="night"] .el-tabs__item:hover,
+:root.theme-night .el-tabs__item:hover {
+  color: #f9a825;
+}
+
+:root[data-theme="night"] .el-tabs__item.is-active,
+:root.theme-night .el-tabs__item.is-active {
+  color: #f9a825;
+}
+
+/* 表单 */
+:root[data-theme="night"] .el-form-item__label,
+:root.theme-night .el-form-item__label {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* 分隔线 */
+:root[data-theme="night"] .el-divider,
+:root.theme-night .el-divider {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* 空状态 */
+:root[data-theme="night"] .el-empty__description,
+:root.theme-night .el-empty__description {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* 加载 */
+:root[data-theme="night"] .el-loading-mask,
+:root.theme-night .el-loading-mask {
+  background-color: rgba(26, 26, 46, 0.9);
+}
+
+/* 抽屉 */
+:root[data-theme="night"] .el-drawer,
+:root.theme-night .el-drawer {
+  background-color: #16213e;
+}
+
+:root[data-theme="night"] .el-drawer__header,
+:root.theme-night .el-drawer__header {
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+/* 面包屑 */
+:root[data-theme="night"] .el-breadcrumb__inner,
+:root.theme-night .el-breadcrumb__inner {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+:root[data-theme="night"] .el-breadcrumb__inner:hover,
+:root.theme-night .el-breadcrumb__inner:hover {
+  color: #f9a825;
+}
+
+:root[data-theme="night"] .el-breadcrumb__item:last-child .el-breadcrumb__inner,
+:root.theme-night .el-breadcrumb__item:last-child .el-breadcrumb__inner {
+  color: #ffffff;
+}
+
+/* 步骤条 */
+:root[data-theme="night"] .el-step__title,
+:root.theme-night .el-step__title {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+:root[data-theme="night"] .el-step__description,
+:root.theme-night .el-step__description {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* 树形控件 */
+:root[data-theme="night"] .el-tree,
+:root.theme-night .el-tree {
+  background-color: transparent;
+  color: #ffffff;
+}
+
+:root[data-theme="night"] .el-tree-node:hover,
+:root.theme-night .el-tree-node:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+:root[data-theme="night"] .el-tree-node.is-current,
+:root.theme-night .el-tree-node.is-current {
+  background-color: rgba(249, 168, 37, 0.1);
+}
+
+/* 菜单 */
+:root[data-theme="night"] .el-menu,
+:root.theme-night .el-menu {
+  background-color: #16213e;
+  border-right-color: rgba(255, 255, 255, 0.1);
+}
+
+:root[data-theme="night"] .el-menu-item:hover,
+:root.theme-night .el-menu-item:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #f9a825;
+}
+
+:root[data-theme="night"] .el-menu-item.is-active,
+:root.theme-night .el-menu-item.is-active {
+  color: #f9a825;
+  background-color: rgba(249, 168, 37, 0.1);
+}
+
+/* 滚动条 */
+:root[data-theme="night"] ::-webkit-scrollbar-thumb,
+:root.theme-night ::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+:root[data-theme="night"] ::-webkit-scrollbar-thumb:hover,
+:root.theme-night ::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+:root[data-theme="night"] ::-webkit-scrollbar-track,
+:root.theme-night ::-webkit-scrollbar-track {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* ========================================
+   增强优先级 - 确保所有组件正确应用
+   ======================================== */
+
+/* 表格强制覆盖 */
+:root[data-theme="night"] .el-table,
+:root.theme-night .el-table {
+  --el-table-bg-color: #16213e !important;
+  --el-table-tr-bg-color: #16213e !important;
+  background-color: #16213e !important;
+}
+
+:root[data-theme="night"] .el-table th.el-table__cell,
+:root.theme-night .el-table th.el-table__cell {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+:root[data-theme="night"] .el-table td.el-table__cell,
+:root.theme-night .el-table td.el-table__cell {
+  background-color: #16213e !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+:root[data-theme="night"] .el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell,
+:root.theme-night .el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
+  background-color: rgba(255, 255, 255, 0.02) !important;
+}
+
+:root[data-theme="night"] .el-table__body tr:hover > td.el-table__cell,
+:root.theme-night .el-table__body tr:hover > td.el-table__cell {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+:root[data-theme="night"] .el-table__empty-block,
+:root.theme-night .el-table__empty-block {
+  background-color: #16213e !important;
+}
+
+/* 输入框强制覆盖 */
+:root[data-theme="night"] .el-input__wrapper,
+:root.theme-night .el-input__wrapper {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1) inset !important;
+}
+
+:root[data-theme="night"] .el-input__wrapper:hover,
+:root.theme-night .el-input__wrapper:hover {
+  box-shadow: 0 0 0 1px #f9a825 inset !important;
+}
+
+:root[data-theme="night"] .el-input__wrapper.is-focus,
+:root.theme-night .el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 1px #f9a825 inset !important;
+}
+
+:root[data-theme="night"] .el-input__inner,
+:root.theme-night .el-input__inner {
+  color: #ffffff !important;
+  background-color: transparent !important;
+}
+
+:root[data-theme="night"] .el-input__inner::placeholder,
+:root.theme-night .el-input__inner::placeholder {
+  color: rgba(255, 255, 255, 0.4) !important;
+}
+
+/* 选择器强制覆盖 */
+:root[data-theme="night"] .el-select .el-input__wrapper,
+:root.theme-night .el-select .el-input__wrapper {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+:root[data-theme="night"] .el-select-dropdown,
+:root.theme-night .el-select-dropdown {
+  background-color: #16213e !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+:root[data-theme="night"] .el-select-dropdown__item,
+:root.theme-night .el-select-dropdown__item {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+:root[data-theme="night"] .el-select-dropdown__item:hover,
+:root.theme-night .el-select-dropdown__item:hover {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+:root[data-theme="night"] .el-select-dropdown__item.selected,
+:root.theme-night .el-select-dropdown__item.selected {
+  color: #f9a825 !important;
+  background-color: rgba(249, 168, 37, 0.1) !important;
+}
+
+/* 按钮强制覆盖 */
+:root[data-theme="night"] .el-button--default,
+:root.theme-night .el-button--default {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: #ffffff !important;
+}
+
+:root[data-theme="night"] .el-button--default:hover,
+:root.theme-night .el-button--default:hover {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  border-color: #f9a825 !important;
+  color: #f9a825 !important;
+}
+
+/* 分页器强制覆盖 */
+:root[data-theme="night"] .el-pagination,
+:root.theme-night .el-pagination {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+:root[data-theme="night"] .el-pagination button,
+:root.theme-night .el-pagination button {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+:root[data-theme="night"] .el-pagination button:hover,
+:root.theme-night .el-pagination button:hover {
+  color: #f9a825 !important;
+}
+
+:root[data-theme="night"] .el-pager li,
+:root.theme-night .el-pager li {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+:root[data-theme="night"] .el-pager li:hover,
+:root.theme-night .el-pager li:hover {
+  color: #f9a825 !important;
+}
+
+:root[data-theme="night"] .el-pager li.is-active,
+:root.theme-night .el-pager li.is-active {
+  background-color: #f9a825 !important;
+  color: #1a1a2e !important;
+}
+
+/* 对话框强制覆盖 */
+:root[data-theme="night"] .el-dialog,
+:root.theme-night .el-dialog {
+  background-color: #16213e !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+:root[data-theme="night"] .el-dialog__header,
+:root.theme-night .el-dialog__header {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+:root[data-theme="night"] .el-dialog__title,
+:root.theme-night .el-dialog__title {
+  color: #ffffff !important;
+}
+
+:root[data-theme="night"] .el-dialog__body,
+:root.theme-night .el-dialog__body {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+/* 消息框强制覆盖 */
+:root[data-theme="night"] .el-message,
+:root.theme-night .el-message {
+  background-color: #16213e !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+:root[data-theme="night"] .el-message__content,
+:root.theme-night .el-message__content {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* 通知强制覆盖 */
+:root[data-theme="night"] .el-notification,
+:root.theme-night .el-notification {
+  background-color: #16213e !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+:root[data-theme="night"] .el-notification__title,
+:root.theme-night .el-notification__title {
+  color: #ffffff !important;
+}
+
+:root[data-theme="night"] .el-notification__content,
+:root.theme-night .el-notification__content {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+/* Popper容器强制覆盖 */
+:root[data-theme="night"] .el-popper,
+:root.theme-night .el-popper {
+  background-color: #16213e !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+:root[data-theme="night"] .el-popper.is-dark,
+:root.theme-night .el-popper.is-dark {
+  background-color: rgba(0, 0, 0, 0.9) !important;
+  color: #ffffff !important;
+}
+
+/* 日期选择器强制覆盖 */
+:root[data-theme="night"] .el-picker-panel,
+:root.theme-night .el-picker-panel {
+  background-color: #16213e !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+:root[data-theme="night"] .el-date-picker__header-label,
+:root.theme-night .el-date-picker__header-label {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+:root[data-theme="night"] .el-picker-panel__icon-btn,
+:root.theme-night .el-picker-panel__icon-btn {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+:root[data-theme="night"] .el-date-table td.available:hover,
+:root.theme-night .el-date-table td.available:hover {
+  color: #f9a825 !important;
+}
+
+:root[data-theme="night"] .el-date-table td.today span,
+:root.theme-night .el-date-table td.today span {
+  color: #f9a825 !important;
+}
+
+/* 表单强制覆盖 */
+:root[data-theme="night"] .el-form-item__label,
+:root.theme-night .el-form-item__label {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* Textarea强制覆盖 */
+:root[data-theme="night"] .el-textarea__inner,
+:root.theme-night .el-textarea__inner {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: #ffffff !important;
+}
+
+:root[data-theme="night"] .el-textarea__inner:hover,
+:root.theme-night .el-textarea__inner:hover {
+  border-color: #f9a825 !important;
+}
+
+:root[data-theme="night"] .el-textarea__inner:focus,
+:root.theme-night .el-textarea__inner:focus {
+  border-color: #f9a825 !important;
+}
+
+:root[data-theme="night"] .el-textarea__inner::placeholder,
+:root.theme-night .el-textarea__inner::placeholder {
+  color: rgba(255, 255, 255, 0.4) !important;
+}
+

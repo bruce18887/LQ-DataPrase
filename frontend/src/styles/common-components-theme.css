@@ -1,0 +1,94 @@
+/**
+ * 通用组件夜晚主题样式
+ *
+ * 此文件包含项目中自定义组件的夜晚主题样式
+ * 包括工具栏、面板、容器等通用组件
+ */
+
+/* ========================================
+   工具栏 (Toolbar)
+   ======================================== */
+
+:root[data-theme="night"] .toolbar,
+:root[data-theme="night"] [class*="toolbar"],
+:root.theme-night .toolbar,
+:root.theme-night [class*="toolbar"] {
+  background-color: var(--bg-secondary) !important;
+  border-color: var(--border-default) !important;
+  color: var(--text-primary) !important;
+}
+
+/* ========================================
+   面板 (Panel)
+   ======================================== */
+
+:root[data-theme="night"] .panel,
+:root[data-theme="night"] [class*="panel"],
+:root.theme-night .panel,
+:root.theme-night [class*="panel"] {
+  background-color: var(--bg-secondary) !important;
+  border-color: var(--border-default) !important;
+}
+
+/* ========================================
+   容器 (Container)
+   ======================================== */
+
+:root[data-theme="night"] .container,
+:root.theme-night .container {
+  background-color: var(--bg-primary) !important;
+}
+
+/* ========================================
+   图表容器
+   ======================================== */
+
+:root[data-theme="night"] .chart-container,
+:root[data-theme="night"] [class*="chart"],
+:root.theme-night .chart-container,
+:root.theme-night [class*="chart"] {
+  background-color: transparent !important;
+}
+
+/* ========================================
+   通用白色背景覆盖
+   ======================================== */
+
+:root[data-theme="night"] [style*="background: #fff"],
+:root[data-theme="night"] [style*="background:#fff"],
+:root[data-theme="night"] [style*="background: white"],
+:root[data-theme="night"] [style*="background-color: #fff"],
+:root[data-theme="night"] [style*="background-color:#fff"],
+:root[data-theme="night"] [style*="background-color: white"],
+:root.theme-night [style*="background: #fff"],
+:root.theme-night [style*="background:#fff"],
+:root.theme-night [style*="background: white"],
+:root.theme-night [style*="background-color: #fff"],
+:root.theme-night [style*="background-color:#fff"],
+:root.theme-night [style*="background-color: white"] {
+  background-color: var(--bg-secondary) !important;
+}
+
+/* ========================================
+   通用浅色背景覆盖
+   ======================================== */
+
+:root[data-theme="night"] [style*="background: #f"],
+:root[data-theme="night"] [style*="background-color: #f"],
+:root.theme-night [style*="background: #f"],
+:root.theme-night [style*="background-color: #f"] {
+  background-color: var(--bg-tertiary) !important;
+}
+
+/* ========================================
+   通用深色文本覆盖
+   ======================================== */
+
+:root[data-theme="night"] [style*="color: #3"],
+:root[data-theme="night"] [style*="color: #6"],
+:root[data-theme="night"] [style*="color: #9"],
+:root.theme-night [style*="color: #3"],
+:root.theme-night [style*="color: #6"],
+:root.theme-night [style*="color: #9"] {
+  color: var(--text-primary) !important;
+}

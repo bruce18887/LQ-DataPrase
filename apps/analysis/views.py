@@ -23,6 +23,8 @@ from apps.analysis.services.statistics import (
     get_coord_columns,
     get_columns_with_limits,
     get_1d_from,
+    compute_qqplot,
+    compute_uph,
 )
 from apps.analysis.services.data_services import (
     compute_histogram_stats,
@@ -367,6 +369,55 @@ class AnalysisViewSet(viewsets.GenericViewSet):
             'filename': datafile.filename,
             'results': results
         }))
+
+    @action(detail=False, methods=['post'])
+    def qqplot(self, request):
+        """
+        Compute QQ plot data for normality testing of a single parameter.
+
+        Request body:
+        {
+            "file_id": 123,
+            "param": "Param1"
+        }
+        """
+        df, datafile, metadata, err = _load_df_from_request(request)
+        if err:
+            return Response({'error': err}, status=400)
+
+        param = request.data.get('param')
+        if not param:
+            return Response({'error': 'param_required'}, status=400)
+        if param not in df.columns:
+            return Response({'error': 'param_not_found'}, status=400)
+
+        data_series = get_1d_from(df, param)
+        result = compute_qqplot(data_series)
+
+        return Response(clean_data(result))
+
+    @action(detail=False, methods=['post'])
+    def uph(self, request):
+        """
+        Compute UPH (Units Per Hour) using the parallel-site throughput model.
+
+        Request body:
+        {
+            "file_id": 123,
+            "test_time_col": "Test_Time",      # optional override
+            "manual_test_time_sec": 8.5         # optional per-unit time (seconds)
+        }
+        """
+        df, datafile, metadata, err = _load_df_from_request(request)
+        if err:
+            return Response({'error': err}, status=400)
+
+        test_time_col = request.data.get('test_time_col')
+        manual_test_time_sec = request.data.get('manual_test_time_sec')
+        result = compute_uph(df, metadata, test_time_col=test_time_col,
+                             manual_test_time_sec=manual_test_time_sec)
+
+        return Response(clean_data(result))
 
     @action(detail=False, methods=['post'])
     def param_trend(self, request):

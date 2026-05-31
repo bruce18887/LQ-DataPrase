@@ -48,9 +48,11 @@ def build_to_excel_sheet(f, export_df, metadata, datafile_format_type):
     white bold text.  Freeze panes are set after the target-bin column
     at row 11.  Auto-filter is applied on row 11.
     """
+    # Rename the default sheet, don't create a new one
     sheet_name = "Data"
-    sheet_index = f.new_sheet(sheet_name)
-    f.set_active_sheet(sheet_index)
+    sheet_list = f.get_sheet_list()
+    if sheet_list:
+        f.set_sheet_name(sheet_list[0], sheet_name)
 
     header_style = make_header_style(f, 12)
     data_style = make_data_style(f)
@@ -118,6 +120,7 @@ def build_to_excel_sheet(f, export_df, metadata, datafile_format_type):
                 f.set_cell_value(sheet_name, cell, val)
 
     # ── Detect fail data on the (already filtered) dataframe ──
+    # Reset index BEFORE detect_fail_data to ensure indices start from 0
     export_df = export_df.reset_index(drop=True)
     fail_indices, _, fail_cells = detect_fail_data(export_df, metadata)
     fail_set = set(fail_indices)
@@ -126,24 +129,30 @@ def build_to_excel_sheet(f, export_df, metadata, datafile_format_type):
     # ── Write data starting at row 12 ──
     data_start = 12
     last_col_letter = excelize.column_number_to_name(num_cols)
-    data_end = data_start + len(export_df) - 1
 
-    if data_end >= data_start:
-        f.set_cell_style(sheet_name, f"A{data_start}", f"{last_col_letter}{data_end}", data_style)
+    # Convert to list for batch processing
+    df_values = export_df.values.tolist()
+    data_end_row = data_start + len(df_values) - 1
 
-    for r_idx, (_, row) in enumerate(export_df.iterrows()):
+    # Apply default data style to all data cells first
+    f.set_cell_style(sheet_name, f"A{data_start}", f"{last_col_letter}{data_end_row}", data_style)
+
+    # Write data rows in batch
+    for r_idx in range(len(df_values)):
         excel_row = data_start + r_idx
-        row_vals = [to_native(row[c]) for c in cols]
+        row_data = [to_native(v) for v in df_values[r_idx]]
         cell_ref = excelize.coordinates_to_cell_name(1, excel_row, False)
-        f.set_sheet_row(sheet_name, cell_ref, row_vals)
+        f.set_sheet_row(sheet_name, cell_ref, row_data)
 
-        if r_idx in fail_set:
-            for c_idx, col_name in enumerate(cols):
-                is_bin = (col_name == target_bin)
-                in_fail_cells = r_idx in fail_cells_map and col_name in fail_cells_map[r_idx]
-                if is_bin or in_fail_cells:
-                    cell = excelize.coordinates_to_cell_name(c_idx + 1, excel_row, False)
-                    f.set_cell_style(sheet_name, cell, cell, red_style)
+    # Apply red style to fail cells
+    for r_idx in fail_set:
+        excel_row = data_start + r_idx
+        for c_idx, col_name in enumerate(cols):
+            is_bin = (col_name == target_bin)
+            in_fail_cells = r_idx in fail_cells_map and col_name in fail_cells_map[r_idx]
+            if is_bin or in_fail_cells:
+                cell = excelize.coordinates_to_cell_name(c_idx + 1, excel_row, False)
+                f.set_cell_style(sheet_name, cell, cell, red_style)
 
     # ── Freeze panes ──
     target_bin_c_idx = (cols.index(target_bin) + 1) if target_bin in cols else 1

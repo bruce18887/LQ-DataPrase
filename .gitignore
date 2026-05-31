@@ -62,6 +62,9 @@ token.txt
 test_*.py
 P0_*.md
 P0_*.py
+test/
+*.md
+
 
 # OS
 *.bak
