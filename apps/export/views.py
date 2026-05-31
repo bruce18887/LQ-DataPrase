@@ -18,6 +18,7 @@ from .excel_builders import (
     build_to_excel_sheet, build_sigma_limit_sheet, build_batch_charts_xlsx,
 )
 from .export_ppt import build_batch_charts_pptx
+from .export_complete import export_to_xlsx_optimized, export_to_csv
 
 
 class ExportViewSet(viewsets.GenericViewSet):
@@ -39,25 +40,26 @@ class ExportViewSet(viewsets.GenericViewSet):
 
         export_df = df.copy()
 
-        if site_filter != '全部':
+        # Empty string / None means "no filter selected" (frontend default). Only
+        # an explicit, non-empty value other than the '全部' sentinel filters rows.
+        if site_filter and site_filter != '全部':
             site_col = get_site_column(df)
             if site_col:
                 export_df = export_df[export_df[site_col].astype(str) == str(site_filter)]
 
         export_df = export_df.reset_index(drop=True)
 
-        if passfail != '全部':
+        if passfail and passfail != '全部':
             fail_indices, _, _ = detect_fail_data(export_df, metadata)
             fail_set = set(fail_indices)
             if passfail == 'Fail':
                 export_df = export_df.loc[export_df.index.isin(fail_set)]
-            else:
+            elif passfail == 'Pass':
                 export_df = export_df.loc[~export_df.index.isin(fail_set)]
             export_df = export_df.reset_index(drop=True)
 
-        f = excelize.new_file()
-        build_to_excel_sheet(f, export_df, metadata, datafile.format_type)
-        buffer = save_excelize(f)
+        # Use old version's complete implementation
+        buffer = export_to_xlsx_optimized(export_df, metadata)
 
         fname = datafile.filename.rsplit('.', 1)[0]
         return FileResponse(io.BytesIO(buffer), as_attachment=True,
@@ -79,26 +81,18 @@ class ExportViewSet(viewsets.GenericViewSet):
         if df is None:
             return Response({'error': 'parse_failed'}, status=400)
 
-        export_df = df.copy()
+        # Use old version's complete CSV export (simplified - no raw_lines support for now)
+        csv_content = export_to_csv(
+            df, metadata,
+            site_filter=site_filter if site_filter != '全部' else None,
+            passfail_filter=passfail if passfail != '全部' else None,
+            keep_header=False,  # Simplified for now
+            match_original_format=False,
+            raw_lines=None
+        )
 
-        if site_filter != '全部':
-            site_col = get_site_column(df)
-            if site_col:
-                export_df = export_df[export_df[site_col].astype(str) == str(site_filter)]
-
-        export_df = export_df.reset_index(drop=True)
-
-        if passfail != '全部':
-            fail_indices, _, _ = detect_fail_data(export_df, metadata)
-            fail_set = set(fail_indices)
-            if passfail == 'Pass':
-                export_df = export_df.loc[~export_df.index.isin(fail_set)]
-            else:
-                export_df = export_df.loc[export_df.index.isin(fail_set)]
-
-        csv_content = export_df.to_csv(index=False)
         fname = datafile.filename.rsplit('.', 1)[0]
-        return FileResponse(io.BytesIO(csv_content.encode('utf-8-sig')), as_attachment=True,
+        return FileResponse(io.BytesIO(csv_content), as_attachment=True,
                             filename=f'{fname}_data.csv', content_type='text/csv')
 
     # ── sigma_limit ─────────────────────────────────────────────────
