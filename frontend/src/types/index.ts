@@ -15,6 +15,7 @@ export interface UserSettings {
   cpk_b_threshold: number
   cpk_c_threshold: number
   chart_engine: string
+  chart_renderer: 'svg' | 'canvas'
 }
 
 export interface DataFile {

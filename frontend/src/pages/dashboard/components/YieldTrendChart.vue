@@ -10,6 +10,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import * as echarts from 'echarts'
+import { getChartInitOpts } from '../../../utils/echarts-theme'
 import { useThemeStore } from '../../../stores/theme'
 import { analysisApi } from '../../../api/analysis'
 
@@ -84,7 +85,7 @@ function renderChart() {
   if (!chartRef.value || !chartData.value || error.value) return
 
   if (!chartInstance) {
-    chartInstance = echarts.init(chartRef.value)
+    chartInstance = echarts.init(chartRef.value, undefined, getChartInitOpts())
   } else {
     chartInstance.clear()
   }
@@ -219,6 +220,7 @@ watch(() => props.fileId, () => {
 })
 
 watch(() => themeStore.currentTheme, () => {
+  if (!chartRef.value?.isConnected) return
   nextTick(() => renderChart())
 })
 

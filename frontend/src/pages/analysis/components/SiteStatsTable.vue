@@ -6,14 +6,16 @@
       :data="siteStats"
       size="small"
       :border="true"
-      :header-cell-style="{ background: '#f5f5f5', fontSize: '10px', padding: '3px 2px' }"
-      :cell-style="{ fontSize: '10px', padding: '3px 4px' }"
+      :row-class-name="siteRowClass"
+      :header-cell-style="{ background: '#f5f5f5', fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
+      :cell-style="{ fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
+      table-layout="auto"
     >
-      <el-table-column prop="Site" label="Site" min-width="55" align="center" show-overflow-tooltip />
-      <el-table-column prop="Yield" label="Yield" min-width="60" align="center" show-overflow-tooltip />
-      <el-table-column prop="FailCount" label="Fail" width="42" align="center" />
-      <el-table-column prop="ExceedMin" label="&lt;Min" min-width="55" align="center" show-overflow-tooltip />
-      <el-table-column prop="ExceedMax" label="&gt;Max" min-width="55" align="center" show-overflow-tooltip />
+      <el-table-column prop="Site" label="Site" align="center" />
+      <el-table-column prop="Yield" label="Yield" align="center" />
+      <el-table-column prop="FailCount" label="Fail" align="center" />
+      <el-table-column prop="ExceedMin" label="&lt;Min" align="center" />
+      <el-table-column prop="ExceedMax" label="&gt;Max" align="center" />
     </el-table>
     <el-empty v-else-if="!siteStatsError" description="暂无数据" :image-size="40" />
     <div v-else class="error-msg">
@@ -37,6 +39,10 @@ interface Props {
 }
 
 defineProps<Props>()
+
+function siteRowClass({ row }: { row: SiteStatRow }) {
+  return row.FailCount > 0 ? 'site-fail-row' : ''
+}
 </script>
 
 <style scoped>
@@ -52,5 +58,20 @@ defineProps<Props>()
   color: #f5576c;
   font-size: 11px;
   text-align: center;
+}
+</style>
+
+<style>
+.el-table tr.site-fail-row > td {
+  background-color: #fdecea !important;
+  color: #dc2626 !important;
+  font-weight: 700;
+  text-shadow: 0 0 1px #fff, 0 0 2px #fff;
+}
+:root.theme-night .el-table tr.site-fail-row > td {
+  background-color: rgba(245, 87, 108, 0.28) !important;
+  color: #ff8a95 !important;
+  font-weight: 700;
+  text-shadow: 0 0 1px #1a1a2e, 0 0 2px #1a1a2e;
 }
 </style>

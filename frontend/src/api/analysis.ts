@@ -2,59 +2,53 @@ import api from './index'
 
 export const analysisApi = {
   getDashboard(fileId: number) {
-    return api.get('/dashboard/summary/', { params: { file_id: fileId } })
+    return api.get('/summary/', { params: { file_id: fileId } })
   },
   getHistogram(fileId: number, params: string[]) {
-    return api.post('/analysis/histogram/', { file_id: fileId, params })
+    return api.get('/analysis/histogram/', { params: { file_id: fileId, params } })
   },
   getWaferMap(fileId: number, param?: string) {
-    return api.post('/analysis/wafer_map/', { file_id: fileId, param })
+    return api.get('/analysis/wafer_map/', { params: { file_id: fileId, param } })
   },
   getSerialDistribution(fileId: number, param: string) {
-    return api.post('/analysis/serial_distribution/', { file_id: fileId, param })
+    return api.get('/analysis/serial_distribution/', { params: { file_id: fileId, param } })
   },
   getCorrelation(fileId: number, paramX: string, paramY: string) {
-    return api.post('/analysis/correlation/', { file_id: fileId, param_x: paramX, param_y: paramY })
+    return api.get('/analysis/correlation/', { params: { file_id: fileId, param_x: paramX, param_y: paramY } })
   },
   getMultiLotData(fileIds: number[], param: string) {
-    return api.post('/analysis/multi_lot/', { file_ids: fileIds, param })
+    return api.get('/analysis/multi_lot/', { params: { file_ids: fileIds, param } })
   },
   getCorrelationMatrix(fileId: number, params?: string[], method?: string) {
-    return api.post('/analysis/correlation_matrix/', {
-      file_id: fileId,
-      params: params || undefined,
-      method: method || 'pearson'
-    })
+    const query: Record<string, any> = { file_id: fileId }
+    if (params && params.length) query.params = params
+    if (method) query.method = method
+    return api.get('/analysis/correlation_matrix/', { params: query })
   },
   getBinTrend(fileIds: number[]) {
-    return api.post('/analysis/bin_trend/', { file_ids: fileIds })
+    return api.get('/analysis/bin_trend/', { params: { file_ids: fileIds } })
   },
   getBoxPlot(fileId: number, params: string[], groupBy?: string) {
-    return api.post('/analysis/boxplot/', {
-      file_id: fileId,
-      params,
-      group_by: groupBy
-    })
+    const query: Record<string, any> = { file_id: fileId, params }
+    if (groupBy) query.group_by = groupBy
+    return api.get('/analysis/boxplot/', { params: query })
   },
   getParamTrend(fileIds: number[], param: string) {
-    return api.post('/analysis/param_trend/', {
-      file_ids: fileIds,
-      param
-    })
+    return api.get('/analysis/param_trend/', { params: { file_ids: fileIds, param } })
   },
   getYieldTrend(fileIds: number[]) {
-    return api.post('/analysis/yield_trend/', { file_ids: fileIds })
+    return api.get('/analysis/yield_trend/', { params: { file_ids: fileIds } })
   },
   getQQPlot(fileId: number, param: string) {
-    return api.post('/analysis/qqplot/', { file_id: fileId, param })
+    return api.get('/analysis/qqplot/', { params: { file_id: fileId, param } })
   },
   getZonalYield(fileId: number, param?: string) {
-    return api.post('/analysis/zonal_yield/', { file_id: fileId, param })
+    return api.get('/analysis/zonal_yield/', { params: { file_id: fileId, param } })
   },
   getUph(fileId: number, testTimeCol?: string, manualTestTimeSec?: number) {
-    const payload: any = { file_id: fileId }
-    if (testTimeCol) payload.test_time_col = testTimeCol
-    if (manualTestTimeSec != null) payload.manual_test_time_sec = manualTestTimeSec
-    return api.post('/analysis/uph/', payload)
+    const query: Record<string, any> = { file_id: fileId }
+    if (testTimeCol) query.test_time_col = testTimeCol
+    if (manualTestTimeSec != null) query.manual_test_time_sec = manualTestTimeSec
+    return api.get('/analysis/uph/', { params: query })
   },
 }

@@ -11,6 +11,7 @@ from django.http import FileResponse
 
 from apps.datafiles.models import DataFile
 from apps.datafiles.parsers import get_parser
+from apps.datafiles.services import get_cached_parsed_file
 from apps.analysis.services.statistics import get_serial_column, get_1d_from
 
 class CorrelationViewSet(viewsets.GenericViewSet):
@@ -29,8 +30,7 @@ class CorrelationViewSet(viewsets.GenericViewSet):
         dfs = {}
         for fid, label in [(file1_id, 'ATE'), (file2_id, 'Bench')]:
             df_obj = get_object_or_404(DataFile, pk=fid, owner=request.user)
-            parser = get_parser(df_obj.format_type)
-            df, metadata = parser.parse(df_obj.file_path)
+            df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk)
             if df is None:
                 continue
             serial_col = get_serial_column(df)

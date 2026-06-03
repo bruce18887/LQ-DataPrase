@@ -5,6 +5,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
+import { getChartInitOpts } from '../../../utils/echarts-theme'
 import { useThemeStore } from '../../../stores/theme'
 const _tc = () => getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
 const themeStore = useThemeStore()
@@ -25,7 +26,7 @@ const COLORS_SITE_8 = ['#E53935', '#1E88E5', '#43A047', '#F9A825', '#8E24AA', '#
 function initChart() {
   if (!chartRef.value) return
   if (!chartInstance) {
-    chartInstance = echarts.init(chartRef.value)
+    chartInstance = echarts.init(chartRef.value, undefined, getChartInitOpts())
   }
 }
 
@@ -39,13 +40,12 @@ function renderChart() {
   const binCenters: number[] = r.bin_centers || []
   if (binCenters.length === 0) return
 
-  const dMin = binCenters[0]
-  const dMax = binCenters[binCenters.length - 1]
-
   const series: any[] = []
 
   const siteHists = r.site_histograms
   const hasSiteData = siteHists && Object.keys(siteHists).length > 1
+  const showNormal = props.chartConfig.includes('normal')
+  const hasNormal = showNormal && r.std > 0
 
   if (hasSiteData) {
     const sites = Object.keys(siteHists).sort((a, b) => Number(a) - Number(b))
@@ -61,6 +61,24 @@ function renderChart() {
         barWidth: `${props.barWidthPercent}%`,
       })
     }
+    // Add "All Site" series as semi-transparent overlay with percentage labels at top
+    const allSiteData = binCenters.map((center: number, i: number) => [center, r.bin_percentages?.[i] || 0])
+    series.push({
+      name: 'All Site',
+      type: 'bar',
+      yAxisIndex: 1,
+      data: allSiteData,
+      itemStyle: { color: '#90CAF9', opacity: 0.5 },
+      barWidth: `${props.barWidthPercent}%`,
+      label: {
+        show: true,
+        position: 'top',
+        formatter: (params: any) => params.data[1] > 0 ? `${params.data[1].toFixed(2)}%` : '',
+        fontSize: 10,
+        color: '#1565C0',
+        fontWeight: 'bold',
+      },
+    })
   } else {
     const barData = binCenters.map((center: number, i: number) => [center, r.bin_percentages?.[i] || 0])
     series.push({
@@ -141,9 +159,7 @@ function renderChart() {
     })
   }
 
-  const showNormal = props.chartConfig.includes('normal')
-  let hasNormal = false
-  if (showNormal && r.std > 0) {
+  if (hasNormal) {
     const xVals: number[] = binCenters
     const pdf = xVals.map(
       (x: number) =>
@@ -158,32 +174,64 @@ function renderChart() {
       smooth: true,
       lineStyle: { color: '#F57F17', width: 3 },
       symbol: 'none',
-      yAxisIndex: 1,
+      yAxisIndex: hasSiteData ? 2 : 1,
       z: 10,
     })
-    hasNormal = true
+  }
+
+  // Y-axis color scheme: left=blue, All Site=light blue, normal=orange
+  const AXIS_COLOR_LEFT = '#1E88E5'
+  const AXIS_COLOR_ALLSITE = '#42A5F5'
+  const AXIS_COLOR_NORMAL = '#F57F17'
+
+  // Auto-scale left Y-axis when multi-site (individual sites are typically <10%)
+  let leftYMax = 100
+  if (hasSiteData) {
+    let maxVal = 0
+    for (const site of Object.keys(siteHists)) {
+      for (const v of siteHists[site]) {
+        if (v > maxVal) maxVal = v
+      }
+    }
+    leftYMax = Math.ceil(maxVal / 5) * 5 + 5  // round up to next 5% + padding
   }
 
   const yAxes: any[] = [
     {
       type: 'value',
       name: '百分比 (%)',
-      nameTextStyle: { color: _tc() },
+      nameTextStyle: { color: AXIS_COLOR_LEFT, fontWeight: 'bold' },
       position: 'left',
       min: 0,
-      max: 100,
-      axisLabel: { formatter: '{value}%', color: _tc() },
+      max: leftYMax,
+      axisLabel: { formatter: '{value}%', color: AXIS_COLOR_LEFT },
+      axisLine: { show: true, lineStyle: { color: AXIS_COLOR_LEFT } },
     },
   ]
+
+  if (hasSiteData) {
+    yAxes.push({
+      type: 'value',
+      name: 'All Site (%)',
+      nameTextStyle: { color: AXIS_COLOR_ALLSITE, fontWeight: 'bold' },
+      position: 'right',
+      min: 0,
+      axisLabel: { formatter: '{value}%', color: AXIS_COLOR_ALLSITE },
+      axisLine: { show: true, lineStyle: { color: AXIS_COLOR_ALLSITE } },
+      splitLine: { show: false },
+    })
+  }
 
   if (hasNormal) {
     yAxes.push({
       type: 'value',
       name: '概率密度',
-      nameTextStyle: { color: _tc() },
+      nameTextStyle: { color: AXIS_COLOR_NORMAL, fontWeight: 'bold' },
       position: 'right',
+      offset: hasSiteData ? 50 : 0,
       min: 0,
-      axisLabel: { formatter: (v: number) => v.toExponential(2), color: _tc() },
+      axisLabel: { formatter: (v: number) => v.toExponential(2), color: AXIS_COLOR_NORMAL },
+      axisLine: { show: true, lineStyle: { color: AXIS_COLOR_NORMAL } },
       splitLine: { show: false },
     })
   }
@@ -239,14 +287,14 @@ function renderChart() {
     },
     legend: { data: series.map((s: any) => s.name), top: 'bottom', type: 'scroll', textStyle: { color: _tc() } },
     toolbox: { feature: { saveAsImage: { name: `${props.selectedParam}_分析` } } },
-    grid: { top: 55, bottom: 70, left: 55, right: hasNormal ? 75 : 55 },
+    grid: { top: 55, bottom: 70, left: 55, right: (hasSiteData && hasNormal) ? 120 : (hasSiteData || hasNormal) ? 80 : 55 },
     xAxis: {
       type: 'value',
       name: '',
       nameLocation: 'middle',
       nameGap: 28,
-      min: dMin,
-      max: dMax,
+      min: binCenters[0],
+      max: binCenters[binCenters.length - 1],
       axisLabel: { rotate: 45, show: true, interval: 0, fontSize: 9, formatter: (v: number) => v.toFixed(4), color: _tc() },
       splitNumber: 24,
     },
@@ -276,6 +324,7 @@ watch(() => props.barWidthPercent, () => {
 })
 
 watch(() => themeStore.currentTheme, () => {
+  if (!chartRef.value?.isConnected) return
   nextTick(() => renderChart())
 })
 

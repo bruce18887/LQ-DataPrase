@@ -1,9 +1,52 @@
 import logging
+import os
+from functools import lru_cache
 from pathlib import Path
+from typing import Optional, Tuple
+
+import pandas as pd
+
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import get_parser, BaseATEParser
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=64)
+def _cached_parse(file_id: int, owner_id: int) -> Tuple[Optional[pd.DataFrame], Optional[dict], Optional[str]]:
+    """Parse a DataFile and cache the result in memory.
+
+    Caches up to 64 parsed DataFrames keyed by ``(file_id, owner_id)``.
+    Callers must NOT mutate the returned DataFrame — treat it as read-only.
+    If you need a mutable copy, call ``.copy()`` yourself.
+
+    Returns ``(df, metadata, format_type)``.  Any element may be ``None``
+    on failure (missing file, parse error, etc.).
+    """
+    try:
+        qs = DataFile.objects.filter(pk=file_id, owner_id=owner_id)
+        datafile = qs.first()
+        if datafile is None:
+            return None, None, None
+        if not os.path.exists(datafile.file_path):
+            return None, None, datafile.format_type  # hint: file not on disk
+        parser = get_parser(datafile.format_type)
+        df, metadata = parser.parse(datafile.file_path)
+        if df is None:
+            return None, metadata, datafile.format_type
+        return df, metadata, datafile.format_type
+    except Exception as exc:
+        logger.warning("_cached_parse(%s, %s) failed: %s", file_id, owner_id, exc)
+        return None, None, None
+
+
+def get_cached_parsed_file(file_id: int, owner_id: int) -> Tuple[Optional[pd.DataFrame], Optional[dict], Optional[str]]:
+    """Public wrapper around ``_cached_parse``.
+
+    Returns ``(df, metadata, format_type)`` — same semantics as
+    ``parser.parse()`` but backed by a 64-entry LRU cache.
+    """
+    return _cached_parse(file_id, owner_id)
 
 
 def parse_and_save_datafile(file_path: str, user, filename: str, file_size: int) -> DataFile:

@@ -41,6 +41,8 @@ import Topbar from '../components/layout/Topbar.vue'
   overflow-x: hidden;
   background-color: var(--bg-primary);
   padding: 24px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-default) var(--bg-primary);
 }
 
 .content-area::-webkit-scrollbar {

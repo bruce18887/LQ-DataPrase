@@ -17,9 +17,6 @@ export const useAnalysisStore = defineStore('analysis', () => {
   // Tab3: 分布对比模式
   const comparisonMode = ref<'boxplot' | 'multilot'>('boxplot')
 
-  // Tab4: 趋势与失效模式
-  const analysisMode = ref<'trend' | 'pareto'>('trend')
-
   function reset() {
     selectedFileId.value = null
     selectedParam.value = ''
@@ -32,7 +29,6 @@ export const useAnalysisStore = defineStore('analysis', () => {
     customLow.value = null
     customHigh.value = null
     comparisonMode.value = 'boxplot'
-    analysisMode.value = 'trend'
   }
 
   return {
@@ -47,7 +43,6 @@ export const useAnalysisStore = defineStore('analysis', () => {
     customLow,
     customHigh,
     comparisonMode,
-    analysisMode,
     reset,
   }
 })

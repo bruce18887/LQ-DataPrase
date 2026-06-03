@@ -10,6 +10,7 @@ import excelize
 
 from apps.datafiles.models import DataFile
 from apps.datafiles.parsers import get_parser
+from apps.datafiles.services import get_cached_parsed_file
 from apps.export.excelize_helpers import save_excelize
 from apps.gage.services.rr_analysis import compute_rr_statistics
 from apps.gage.excelize_layout import build_summary_sheet, build_per_file_sheets
@@ -31,8 +32,7 @@ class GageViewSet(viewsets.GenericViewSet):
         file_datasets = []
         for fid in file_ids:
             df_obj = get_object_or_404(DataFile, pk=fid, owner=request.user)
-            parser = get_parser(df_obj.format_type)
-            df, metadata = parser.parse(df_obj.file_path)
+            df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk)
             if df is None:
                 continue
             if only_bin1:

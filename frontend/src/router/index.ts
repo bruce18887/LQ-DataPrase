@@ -14,6 +14,7 @@ const routes = [
     meta: { requiresAuth: true },
     children: [
       { path: '', redirect: '/dashboard' },
+      // 数据操作
       {
         path: 'dashboard',
         name: 'Dashboard',
@@ -27,6 +28,12 @@ const routes = [
         meta: { title: '数据管理' },
       },
       {
+        path: 'sftp',
+        name: 'SftpBrowser',
+        component: () => import('../pages/sftp/SftpBrowser.vue'),
+        meta: { title: 'SFTP 浏览器' },
+      },
+      {
         path: 'analysis',
         name: 'Analysis',
         component: () => import('../pages/analysis/AnalysisPage.vue'),
@@ -38,11 +45,12 @@ const routes = [
         component: () => import('../pages/data/BatchReport.vue'),
         meta: { title: '批次报表' },
       },
+      // 系统管理
       {
-        path: 'sftp',
-        name: 'SftpBrowser',
-        component: () => import('../pages/sftp/SftpBrowser.vue'),
-        meta: { title: 'SFTP 浏览器' },
+        path: 'admin/users',
+        name: 'UserManagement',
+        component: () => import('../pages/admin/UserManagement.vue'),
+        meta: { title: '用户管理' },
       },
       {
         path: 'settings',
@@ -55,12 +63,6 @@ const routes = [
         name: 'Roadmap',
         component: () => import('../pages/roadmap/RoadmapPage.vue'),
         meta: { title: '功能路线图' },
-      },
-      {
-        path: 'admin/users',
-        name: 'UserManagement',
-        component: () => import('../pages/admin/UserManagement.vue'),
-        meta: { title: '用户管理' },
       },
     ],
   },

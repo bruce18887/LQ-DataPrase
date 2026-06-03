@@ -177,7 +177,7 @@ watch(() => props.fileId, () => {
 }
 
 .uph-metric-primary {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
   color: #fff;
 }
 

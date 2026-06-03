@@ -10,6 +10,7 @@ import excelize
 
 from apps.datafiles.models import DataFile
 from apps.datafiles.parsers import get_parser
+from apps.datafiles.services import get_cached_parsed_file
 from apps.buyoff.services import compute_buyoff_stats
 from apps.buyoff.excelize_layout import build_buyoff_form
 from apps.export.excelize_helpers import save_excelize
@@ -28,8 +29,7 @@ class BuyoffViewSet(viewsets.GenericViewSet):
         all_cols = []
         for fid in file_ids:
             df_obj = get_object_or_404(DataFile, pk=fid, owner=request.user)
-            parser = get_parser(df_obj.format_type)
-            df, metadata = parser.parse(df_obj.file_path)
+            df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk)
             if df is None:
                 continue
             numeric_cols = [c for c in df.columns if df[c].dtype in ('int64', 'float64')]
@@ -68,8 +68,7 @@ class BuyoffViewSet(viewsets.GenericViewSet):
         datasets = {}
         for fid in file_ids:
             df_obj = get_object_or_404(DataFile, pk=fid, owner=request.user)
-            parser = get_parser(df_obj.format_type)
-            df, metadata = parser.parse(df_obj.file_path)
+            df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk)
             if df is None:
                 continue
             if only_bin1:
