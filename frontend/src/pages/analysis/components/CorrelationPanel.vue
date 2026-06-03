@@ -3,18 +3,18 @@
     <el-card header="🔗 测试项相关性分析" style="margin-top: 16px">
       <!-- 参数选择 -->
       <el-row :gutter="12" style="margin-bottom: 12px" align="middle">
-        <el-col :span="5">
+        <el-col :span="8">
           <el-select v-model="localX" placeholder="X轴测试项" filterable style="width: 100%">
             <el-option v-for="p in params" :key="p" :label="p" :value="p" />
           </el-select>
         </el-col>
-        <el-col :span="5">
+        <el-col :span="8">
           <el-select v-model="localY" placeholder="Y轴测试项" filterable style="width: 100%">
             <el-option v-for="p in params" :key="p" :label="p" :value="p" />
           </el-select>
         </el-col>
-        <el-col :span="3">
-          <el-button type="primary" @click="onAnalyze" :loading="loading">
+        <el-col :span="4">
+          <el-button type="primary" @click="onAnalyze" :loading="loading" style="width: 100%">
             分析相关性
           </el-button>
         </el-col>

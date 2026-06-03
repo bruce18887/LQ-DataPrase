@@ -40,7 +40,7 @@ export function useExport(
     }
   }
 
-  async function exportBatchCharts(params: string[], format: string) {
+  async function exportBatchCharts(params: string[], format: string, chartConfig?: Record<string, any>) {
     const fileId = getSelectedFileId()
     if (!fileId) return
     exporting.value = true
@@ -49,6 +49,7 @@ export function useExport(
         file_id: fileId,
         params,
         format,
+        ...chartConfig,
       }, { responseType: 'blob' })
       const fname = extractFilename(resp.headers?.['content-disposition']) || `batch_charts.${format === 'pptx' ? 'pptx' : 'xlsx'}`
       downloadBlob(resp.data as Blob, fname)

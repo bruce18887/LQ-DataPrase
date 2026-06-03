@@ -155,6 +155,13 @@ class ExportViewSet(viewsets.GenericViewSet):
         params = request.data.get('params', [])
         fmt = request.data.get('format', 'xlsx')
 
+        # Chart config from frontend
+        show_limit = request.data.get('show_limit', True)
+        show_3sigma = request.data.get('show_3sigma', False)
+        show_4sigma = request.data.get('show_4sigma', False)
+        show_6sigma = request.data.get('show_6sigma', True)
+        show_normal = request.data.get('show_normal', False)
+
         if not file_id:
             return Response({'error': 'file_id_required'}, status=400)
 
@@ -166,6 +173,8 @@ class ExportViewSet(viewsets.GenericViewSet):
         if not params:
             params = [c for c in df.columns if df[c].dtype in ('int64', 'float64')][:10]
 
+        site_col = get_site_column(df)
+
         if fmt == 'pptx':
             pptx_bytes = build_batch_charts_pptx(datafile, df, metadata, params)
             fname = datafile.filename.rsplit('.', 1)[0]
@@ -173,10 +182,14 @@ class ExportViewSet(viewsets.GenericViewSet):
                                 filename=f'{fname}_batch_charts.pptx',
                                 content_type='application/vnd.openxmlformats-officedocument.presentationml.presentation')
         else:
-            f = excelize.new_file()
-            build_batch_charts_xlsx(f, df, metadata, params)
-            buffer = save_excelize(f)
+            from .export_complete import build_batch_charts_xlsx_with_charts
+            xlsx_bytes = build_batch_charts_xlsx_with_charts(
+                df, metadata, params, site_col=site_col,
+                show_limit=show_limit, show_3sigma=show_3sigma,
+                show_4sigma=show_4sigma, show_6sigma=show_6sigma,
+                show_normal=show_normal,
+            )
             fname = datafile.filename.rsplit('.', 1)[0]
-            return FileResponse(io.BytesIO(buffer), as_attachment=True,
-                                filename=f'{fname}_batch_stats.xlsx',
+            return FileResponse(io.BytesIO(xlsx_bytes), as_attachment=True,
+                                filename=f'{fname}_batch_charts.xlsx',
                                 content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')

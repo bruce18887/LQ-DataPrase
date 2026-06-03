@@ -52,7 +52,6 @@
       <el-tab-pane label="&#128279; 相关性工具" name="correlation-tools">
         <CorrelationToolsTab
           :file-id="selectedFileId"
-          :files="files"
           :params="params"
         />
       </el-tab-pane>
