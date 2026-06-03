@@ -23,6 +23,7 @@ from apps.datafiles.serializers import (
     ParseHistorySerializer,
 )
 from apps.datafiles.tasks import parse_data_file_task
+from apps.datafiles.services import get_cached_parsed_file
 
 
 class DataFileViewSet(viewsets.ModelViewSet):
@@ -152,8 +153,7 @@ class DataBrowserView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        parser = get_parser(datafile.format_type)
-        df, metadata = parser.parse(datafile.file_path)
+        df, metadata, fmt = get_cached_parsed_file(datafile.id, request.user.pk)
         if df is None:
             return Response({'error': 'parse_failed'}, status=400)
 
@@ -174,33 +174,41 @@ class DataBrowserView(APIView):
                 'max': maxs.get(col, '') if isinstance(maxs, dict) else '',
             }
 
-        df_clean = df.replace({np.nan: None, np.inf: None, -np.inf: None})
-        all_rows_with_idx = list(enumerate(df_clean.to_dict(orient='records')))
-
         fail_set = set(fail_indices)
 
+        # Apply filters at DataFrame level (fast pandas ops) before paginating
         if search:
             search_lower = search.lower()
-            all_rows_with_idx = [
-                (orig_idx, row) for orig_idx, row in all_rows_with_idx
-                if any(search_lower in str(v).lower() for v in row.values())
-            ]
+            mask = df.apply(
+                lambda row: any(search_lower in str(v).lower() for v in row),
+                axis=1,
+            )
+            df = df[mask]
+            # Re-index after filter so fail_indices still map correctly
+            # Use original index values for fail_cells lookup
+            filtered_indices = df.index.tolist()
 
         if pass_filter:
             if pass_filter.upper() == 'PASS':
-                all_rows_with_idx = [(orig_idx, row) for orig_idx, row in all_rows_with_idx if orig_idx not in fail_set]
+                df = df[~df.index.isin(fail_set)]
             elif pass_filter.upper() == 'FAIL':
-                all_rows_with_idx = [(orig_idx, row) for orig_idx, row in all_rows_with_idx if orig_idx in fail_set]
+                df = df[df.index.isin(fail_set)]
 
-        for orig_idx, row in all_rows_with_idx:
-            row['__fail_cells__'] = json.dumps(fail_cells.get(orig_idx, []))
-
-        all_rows = [row for _, row in all_rows_with_idx]
-
-        total = len(all_rows)
+        total = len(df)
         start = (page - 1) * page_size
         end = start + page_size
-        paged_rows = all_rows[start:end]
+
+        # Slice first, then convert only the paged rows to dicts
+        paged_df = df.iloc[start:end]
+        paged_df_clean = paged_df.replace({np.nan: None, np.inf: None, -np.inf: None})
+        paged_rows = paged_df_clean.to_dict(orient='records')
+
+        # Attach fail_cells metadata using original DataFrame index
+        for i, (orig_idx, row) in enumerate(zip(paged_df.index, paged_rows)):
+            row['__fail_cells__'] = json.dumps(fail_cells.get(orig_idx, []))
+
+        parser = get_parser(datafile.format_type)
+        bin_column = parser.get_bin_column_name()
 
         return Response({
             'headers': list(df.columns),
@@ -212,5 +220,5 @@ class DataBrowserView(APIView):
             'fail_row_count': len(set(fail_indices)),
             'fail_mask': fail_mask,
             'col_meta': col_meta,
-            'bin_column': parser.get_bin_column_name(),
+            'bin_column': bin_column,
         })

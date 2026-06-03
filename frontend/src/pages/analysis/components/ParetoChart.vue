@@ -5,6 +5,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
+import { getChartInitOpts } from '../../../utils/echarts-theme'
 import { useThemeStore } from '../../../stores/theme'
 const _tc = () => getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
 const themeStore = useThemeStore()
@@ -26,7 +27,7 @@ let chartInstance: echarts.ECharts | null = null
 function initChart() {
   if (!chartRef.value) return
   if (!chartInstance) {
-    chartInstance = echarts.init(chartRef.value)
+    chartInstance = echarts.init(chartRef.value, undefined, getChartInitOpts())
   }
 }
 
@@ -191,6 +192,7 @@ watch(() => props.title, () => {
 })
 
 watch(() => themeStore.currentTheme, () => {
+  if (!chartRef.value?.isConnected) return
   nextTick(() => renderChart())
 })
 </script>

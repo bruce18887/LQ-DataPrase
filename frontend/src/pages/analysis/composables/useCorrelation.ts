@@ -6,8 +6,6 @@ export function useCorrelation(
 ) {
   const corrLoading = ref(false)
   const corrResult = ref<any>(null)
-  const corrPearsonR = ref<number | null>(null)
-  const corrAxisMode = ref('data')
 
   async function loadCorrelation(x: string, y: string) {
     const fileId = getSelectedFileId()
@@ -20,7 +18,6 @@ export function useCorrelation(
         param_y: y,
       })
       corrResult.value = data
-      corrPearsonR.value = data.pearson_r
     } catch {
       // silently fail
     } finally {
@@ -31,8 +28,6 @@ export function useCorrelation(
   return {
     corrLoading,
     corrResult,
-    corrPearsonR,
-    corrAxisMode,
     loadCorrelation,
   }
 }

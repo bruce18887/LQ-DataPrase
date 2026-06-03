@@ -10,6 +10,7 @@ from django.http import FileResponse
 
 from apps.datafiles.models import DataFile
 from apps.datafiles.parsers import get_parser, BaseATEParser
+from apps.datafiles.services import get_cached_parsed_file
 from apps.analysis.services.statistics import (
     calculate_fail_bin_statistics, get_site_column,
     get_bin_column_name, compute_site_yield_data,
@@ -64,8 +65,7 @@ class BatchReportViewSet(viewsets.GenericViewSet):
         phases = []
         for fid in file_ids:
             df_obj = DataFile.objects.get(pk=fid, owner=request.user)
-            parser = get_parser(df_obj.format_type)
-            df, metadata = parser.parse(df_obj.file_path)
+            df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk)
             if df is None:
                 continue
 

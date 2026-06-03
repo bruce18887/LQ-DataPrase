@@ -17,6 +17,7 @@ from apps.analysis.services.statistics import (
     compute_site_yield_data,
     get_bin_column_name,
 )
+from apps.datafiles.services import get_cached_parsed_file
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ def compute_bin_site_table(df, format_type, site_col):
 
 
 def compute_parameter_summary(df, metadata):
-    """计算参数统计摘要（Top 10关键参数的CPK）"""
+    """计算所有有规格限参数的 CPK 统计"""
     from apps.analysis.services.statistics import compute_cpk, parse_limit_string
 
     cols_with_limits = get_columns_with_limits(df, metadata)
@@ -82,11 +83,9 @@ def compute_parameter_summary(df, metadata):
             mean_val = float(data_series.mean())
             std_val = float(data_series.std(ddof=0))
 
-            # 获取规格限
             lsl_str = str(metadata.get('mins', {}).get(param, ''))
             usl_str = str(metadata.get('maxs', {}).get(param, ''))
 
-            # 严格过滤：必须至少有一个有效的limit
             has_valid_lsl = lsl_str and lsl_str.strip() and lsl_str.strip().lower() not in ('', 'nan', 'none', 'n/a')
             has_valid_usl = usl_str and usl_str.strip() and usl_str.strip().lower() not in ('', 'nan', 'none', 'n/a')
 
@@ -96,11 +95,9 @@ def compute_parameter_summary(df, metadata):
             lsl = parse_limit_string(lsl_str, data_series, 0.0, 0.0) if has_valid_lsl else float('-inf')
             usl = parse_limit_string(usl_str, data_series, 0.0, 0.0) if has_valid_usl else float('inf')
 
-            # 再次验证：如果解析后的limit无效，跳过
             if lsl == float('-inf') and usl == float('inf'):
                 continue
 
-            # 计算CPK
             cpk_result = compute_cpk(mean_val, std_val, lsl, usl)
 
             param_stats.append({
@@ -114,14 +111,12 @@ def compute_parameter_summary(df, metadata):
                 'lsl': round(lsl, 4) if lsl != float('-inf') else None,
                 'usl': round(usl, 4) if usl != float('inf') else None,
             })
-
-            # 只返回Top 10
-            if len(param_stats) >= 10:
-                break
         except Exception as e:
             logger.warning(f"compute_parameter_summary failed for {param}: {e}")
             continue
 
+    # Sort by CPK ascending (worst first)
+    param_stats.sort(key=lambda x: x['cpk'])
     return param_stats
 
 
@@ -198,10 +193,7 @@ class DashboardSummaryView(APIView):
             if not os.path.exists(file_path):
                 return Response({'error': 'file_not_found'})
 
-            format_type = datafile.format_type
-            parser = get_parser(format_type)
-            df, metadata = parser.parse(file_path)
-
+            df, metadata, fmt = get_cached_parsed_file(datafile.id, request.user.pk)
             if df is None:
                 return Response({'error': 'parse_failed'})
 
@@ -228,7 +220,7 @@ class DashboardSummaryView(APIView):
 
             site_yield_data = []
             if site_col:
-                bin_col = get_bin_column_name(format_type)
+                bin_col = get_bin_column_name(fmt)
                 if bin_col in df.columns:
                     try:
                         yd = compute_site_yield_data(df, bin_col, site_col)
@@ -246,7 +238,7 @@ class DashboardSummaryView(APIView):
             cols_with_limits = get_columns_with_limits(df, metadata)
 
             # 计算Bin×Site交叉表
-            bin_table_data, bin_site_columns = compute_bin_site_table(df, format_type, site_col)
+            bin_table_data, bin_site_columns = compute_bin_site_table(df, fmt, site_col)
 
             # 计算参数CPK统计
             param_stats = compute_parameter_summary(df, metadata)
@@ -263,7 +255,7 @@ class DashboardSummaryView(APIView):
                     'pass_count': total_pass,
                     'fail_count': fail_count,
                     'yield_pct': yield_pct,
-                    'format': format_type,
+                    'format': fmt,
                 },
                 'bin_pie_data': bin_pie_data,
                 'site_yield_data': site_yield_data,

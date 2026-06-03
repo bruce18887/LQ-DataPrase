@@ -78,19 +78,19 @@ export function useHistogram(
     const s4min = (r.mean || 0) - 4 * (r.std || 0)
     const s4max = (r.mean || 0) + 4 * (r.std || 0)
     const unit = r.unit || ''
-    const rdlGap = r.upper_limit != null && r.lower_limit != null ? ((r.upper_limit - r.lower_limit) / 25).toFixed(6) : '-'
-    const drGap = r.data_max != null && r.data_min != null ? ((r.data_max - r.data_min) / 25).toFixed(6) : '-'
-    const s3Gap = s3min != null && s3max != null ? ((s3max - s3min) / 25).toFixed(6) : '-'
-    const s4Gap = s4max != null && s4min != null ? ((s4max - s4min) / 25).toFixed(6) : '-'
-    const s6Gap = s6min != null && s6max != null ? ((s6max - s6min) / 25).toFixed(6) : '-'
+    const rdlGap = r.upper_limit != null && r.lower_limit != null ? ((r.upper_limit - r.lower_limit) / 25).toFixed(5) : '-'
+    const drGap = r.data_max != null && r.data_min != null ? ((r.data_max - r.data_min) / 25).toFixed(5) : '-'
+    const s3Gap = s3min != null && s3max != null ? ((s3max - s3min) / 25).toFixed(5) : '-'
+    const s4Gap = s4max != null && s4min != null ? ((s4max - s4min) / 25).toFixed(5) : '-'
+    const s6Gap = s6min != null && s6max != null ? ((s6max - s6min) / 25).toFixed(5) : '-'
 
     rangeTableData.value = [
-      { label: 'RowDataLimit', low: r.lower_limit?.toFixed(6) ?? '-', high: r.upper_limit?.toFixed(6) ?? '-', gap: rdlGap, unit },
-      { label: 'Data Range', low: r.data_min?.toFixed(6) ?? '-', high: r.data_max?.toFixed(6) ?? '-', gap: drGap, unit },
-      { label: 'CustomLimit', low: r.data_min?.toFixed(6) ?? '-', high: r.data_max?.toFixed(6) ?? '-', gap: drGap, unit },
-      { label: '3 Sigma', low: s3min?.toFixed(6) ?? '-', high: s3max?.toFixed(6) ?? '-', gap: s3Gap, unit },
-      { label: '4 Sigma', low: s4min?.toFixed(6) ?? '-', high: s4max?.toFixed(6) ?? '-', gap: s4Gap, unit },
-      { label: '6 Sigma', low: s6min?.toFixed(6) ?? '-', high: s6max?.toFixed(6) ?? '-', gap: s6Gap, unit },
+      { label: 'RowDataLimit', low: r.lower_limit?.toFixed(5) ?? '-', high: r.upper_limit?.toFixed(5) ?? '-', gap: rdlGap, unit },
+      { label: 'Data Range', low: r.data_min?.toFixed(5) ?? '-', high: r.data_max?.toFixed(5) ?? '-', gap: drGap, unit },
+      { label: 'CustomLimit', low: r.data_min?.toFixed(5) ?? '-', high: r.data_max?.toFixed(5) ?? '-', gap: drGap, unit },
+      { label: '3 Sigma', low: s3min?.toFixed(5) ?? '-', high: s3max?.toFixed(5) ?? '-', gap: s3Gap, unit },
+      { label: '4 Sigma', low: s4min?.toFixed(5) ?? '-', high: s4max?.toFixed(5) ?? '-', gap: s4Gap, unit },
+      { label: '6 Sigma', low: s6min?.toFixed(5) ?? '-', high: s6max?.toFixed(5) ?? '-', gap: s6Gap, unit },
     ]
   }
 

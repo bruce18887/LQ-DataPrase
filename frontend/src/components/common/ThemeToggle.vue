@@ -70,6 +70,12 @@ const toggleTheme = () => {
 }
 
 /* 图标淡入淡出动画 */
+@media (prefers-reduced-motion: reduce) {
+  .icon-fade-enter-active,
+  .icon-fade-leave-active { transition: none; }
+  .icon-fade-enter-from,
+  .icon-fade-leave-to { opacity: 0; transform: none; }
+}
 .icon-fade-enter-active,
 .icon-fade-leave-active {
   transition: opacity 0.3s ease, transform 0.3s ease;

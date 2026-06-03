@@ -3,6 +3,9 @@ import axios from 'axios'
 const api = axios.create({
   baseURL: '/api/v1',
   timeout: 30000,
+  paramsSerializer: {
+    indexes: null,
+  },
 })
 
 api.interceptors.request.use((config) => {

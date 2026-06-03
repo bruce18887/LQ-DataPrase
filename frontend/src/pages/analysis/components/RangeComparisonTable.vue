@@ -7,14 +7,15 @@
       border
       size="small"
       :row-class-name="rangeRowClass"
-      :header-cell-style="{ background: '#4a90d9', color: 'white', fontSize: '10px', padding: '3px 2px' }"
-      :cell-style="{ fontSize: '10px', padding: '3px 4px' }"
+      :header-cell-style="{ background: '#4a90d9', color: 'white', fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
+      :cell-style="{ fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
+      table-layout="auto"
     >
-      <el-table-column prop="label" label="" min-width="85" show-overflow-tooltip />
-      <el-table-column prop="low" label="Low" align="center" min-width="75" show-overflow-tooltip />
-      <el-table-column prop="high" label="High" align="center" min-width="75" show-overflow-tooltip />
-      <el-table-column prop="gap" label="Gap" align="center" min-width="65" show-overflow-tooltip />
-      <el-table-column prop="unit" label="Unit" width="42" align="center" />
+      <el-table-column prop="label" label="" align="left" />
+      <el-table-column prop="low" label="Low" align="center" />
+      <el-table-column prop="high" label="High" align="center" />
+      <el-table-column prop="gap" label="Gap" align="center" />
+      <el-table-column prop="unit" label="Unit" align="center" />
     </el-table>
   </el-card>
 </template>

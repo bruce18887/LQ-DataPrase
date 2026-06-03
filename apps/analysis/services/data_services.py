@@ -57,13 +57,24 @@ def compute_histogram_stats(df, metadata, param, site_col):
     rdl_max = stats['rdl'][1]
     data_gap = safe_gap(rdl_min, rdl_max)
     bin_start = rdl_min - 2.5 * data_gap
-    all_bins = np.array([bin_start + j * data_gap for j in range(26)])
+
+    # Build bin edges with underflow (-inf) and overflow (+inf) bins
+    # Excel pattern: [underflow] [bin1] [bin2] ... [binN] [overflow]
+    inner_edges = [bin_start + j * data_gap for j in range(26)]
+    all_bins = np.array([-np.inf] + inner_edges + [np.inf])
+    # 27 edges → 26 bins: 1 underflow + 24 normal + 1 overflow
+
+    total_count = len(data_series)
     hist_counts, _ = np.histogram(data_series.dropna(), bins=all_bins)
-    bin_centers = [(all_bins[i] + all_bins[i + 1]) / 2 for i in range(25)]
     bin_percentages = [
-        round(c / len(data_series) * 100, 2) if len(data_series) > 0 else 0
+        round(c / total_count * 100, 2) if total_count > 0 else 0
         for c in hist_counts
     ]
+
+    # Bin centers: underflow/overflow use edge values, normal bins use midpoint
+    bin_centers = [inner_edges[0] - data_gap]  # underflow center
+    bin_centers += [(inner_edges[i] + inner_edges[i + 1]) / 2 for i in range(25)]
+    bin_centers.append(inner_edges[-1] + data_gap)  # overflow center
 
     site_histograms = None
     if site_col and site_idx is not None and len(site_idx.unique()) > 1:
@@ -85,9 +96,9 @@ def compute_histogram_stats(df, metadata, param, site_col):
             vals = data_series[mask]
             if len(vals) > 0:
                 site_hist, _ = np.histogram(vals, bins=all_bins)
-                total = len(vals)
+                # Use total_count (all sites) as denominator, matching Excel
                 site_histograms[str(site)] = [
-                    round(c / total * 100, 2) if total > 0 else 0
+                    round(c / total_count * 100, 2) if total_count > 0 else 0
                     for c in site_hist
                 ]
 
@@ -301,7 +312,7 @@ def compute_correlation_scatter(df, param_x, param_y):
     series_data = []
     if site_col:
         site_idx = get_1d_from(df, site_col).loc[common_idx]
-        for site in sorted(site_idx.unique()):
+        for site in sorted(site_idx.unique(), key=str):
             smask = site_idx == site
             pts = [
                 [float(x_vals[i]), float(y_vals[i])]
@@ -415,7 +426,7 @@ def compute_serial_distribution_data(df, metadata, param, range_type,
     series_data = []
     if site_col:
         for si, site in enumerate(
-                sorted(serial_grouped[site_col].unique())):
+                sorted(serial_grouped[site_col].unique(), key=str)):
             sdf = serial_grouped[serial_grouped[site_col] == site]
             sv_col = param if param in serial_grouped.columns else serial_col
             sv = dict(zip(

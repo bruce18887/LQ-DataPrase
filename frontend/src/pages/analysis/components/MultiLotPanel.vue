@@ -124,6 +124,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue'
 import * as echarts from 'echarts'
+import { getChartInitOpts } from '../../../utils/echarts-theme'
 import { useThemeStore } from '../../../stores/theme'
 import api from '../../../api'
 import { ElMessage } from 'element-plus'
@@ -180,7 +181,7 @@ function onLoad() {
 function initChart() {
   if (!chartRef.value) return
   if (!chartInstance) {
-    chartInstance = echarts.init(chartRef.value)
+    chartInstance = echarts.init(chartRef.value, undefined, getChartInitOpts())
   }
 }
 
@@ -238,7 +239,7 @@ function yieldColor(pct: number): string {
 function initYieldChart() {
   if (!yieldChartRef.value) return
   if (!yieldChartInstance) {
-    yieldChartInstance = echarts.init(yieldChartRef.value)
+    yieldChartInstance = echarts.init(yieldChartRef.value, undefined, getChartInitOpts())
   }
 }
 
@@ -336,6 +337,7 @@ watch(activeTab, (tab) => {
 
 // Theme change -> re-render both charts
 watch(() => themeStore.currentTheme, () => {
+  if (!chartRef.value?.isConnected) return
   nextTick(() => {
     renderChart()
     renderYieldChart()

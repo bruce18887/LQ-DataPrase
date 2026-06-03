@@ -2,11 +2,14 @@
   <div>
     <h2>&#128200; 数据分析</h2>
 
-    <el-row :gutter="16" style="margin-bottom: 16px">
+    <el-row :gutter="16" style="margin-bottom: 16px" align="middle">
       <el-col :span="8">
         <el-select v-model="selectedFileId" placeholder="选择数据文件" @change="onFileChange" style="width: 100%">
           <el-option v-for="f in files" :key="f.id" :label="f.filename" :value="f.id" />
         </el-select>
+      </el-col>
+      <el-col :span="2">
+        <CircularProgress :loading="loading" />
       </el-col>
     </el-row>
 
@@ -45,16 +48,6 @@
         />
       </el-tab-pane>
 
-      <!-- ========== 趋势与失效 tab ========== -->
-      <el-tab-pane label="&#128200; 趋势与失效" name="trend-failure">
-        <TrendAndFailureTab
-          :file-id="selectedFileId"
-          :files="files"
-          :params="params"
-          :filename="selectedFileName"
-        />
-      </el-tab-pane>
-
       <!-- ========== 相关性工具 tab ========== -->
       <el-tab-pane label="&#128279; 相关性工具" name="correlation-tools">
         <CorrelationToolsTab
@@ -68,13 +61,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onActivated, watch, computed } from 'vue'
+import { ref, onMounted, onActivated, watch } from 'vue'
 import api from '../../api'
 import { useAnalysisStore } from '../../stores/analysis'
 import SingleParamTab from './components/SingleParamTab.vue'
+import CircularProgress from '../../components/common/CircularProgress.vue'
 import WaferMapPanel from './components/WaferMapPanel.vue'
 import DistributionComparisonTab from './components/DistributionComparisonTab.vue'
-import TrendAndFailureTab from './components/TrendAndFailureTab.vue'
 import CorrelationToolsTab from './components/CorrelationToolsTab.vue'
 
 const analysisStore = useAnalysisStore()
@@ -86,12 +79,6 @@ const params = ref<string[]>([])
 const loading = ref(false)
 const activeTab = ref(analysisStore.activeTab)
 
-// Computed property for selected file name
-const selectedFileName = computed(() => {
-  const file = files.value.find(f => f.id === selectedFileId.value)
-  return file?.filename || ''
-})
-
 // Wafer state
 const waferData = ref<any>(null)
 
@@ -101,16 +88,21 @@ const commonParams = ref<string[]>([])
 // ========== Lifecycle ==========
 onMounted(async () => {
   await loadFiles()
-  // If a file was previously selected, load its params
+  // Auto-select first file if nothing is selected
+  if (!selectedFileId.value && files.value.length > 0) {
+    selectedFileId.value = files.value[0].id
+  }
   if (selectedFileId.value) {
     await onFileChange()
   }
 })
 
 onActivated(async () => {
-  // 页面重新激活时刷新文件列表（可能上传了新文件）
   await loadFiles()
-  // If a file is selected, reload its params
+  // Auto-select first file if nothing is selected
+  if (!selectedFileId.value && files.value.length > 0) {
+    selectedFileId.value = files.value[0].id
+  }
   if (selectedFileId.value) {
     await onFileChange()
   }

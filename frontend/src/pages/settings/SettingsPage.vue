@@ -14,6 +14,13 @@
           </el-radio-group>
         </el-form-item>
 
+        <el-form-item label="ECharts 渲染器">
+          <el-radio-group v-model="settings.chart_renderer">
+            <el-radio value="svg">SVG（推荐 · 无损缩放 · 支持 CSS 操控）</el-radio>
+            <el-radio value="canvas">Canvas（大数据量时性能更好）</el-radio>
+          </el-radio-group>
+        </el-form-item>
+
         <el-form-item label="图表高度 (px)">
           <el-slider
             v-model="settings.chart_height"
@@ -169,6 +176,7 @@
 import { ref, onMounted } from 'vue'
 import { authApi } from '../../api/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { setChartRenderer } from '../../utils/echarts-theme'
 
 interface SettingsData {
   page_size: number
@@ -179,6 +187,7 @@ interface SettingsData {
   cpk_b_threshold: number
   cpk_c_threshold: number
   chart_engine: string
+  chart_renderer: 'svg' | 'canvas'
   aggrid_header_font_size: number
   recent_files: Array<{ id: number; name: string; accessed_at: string }>
   max_recent_files: number
@@ -194,6 +203,7 @@ const defaults: SettingsData = {
   cpk_b_threshold: 1.33,
   cpk_c_threshold: 1.0,
   chart_engine: 'echarts',
+  chart_renderer: 'svg' as const,
   aggrid_header_font_size: 11,
   recent_files: [],
   max_recent_files: 10,
@@ -244,6 +254,7 @@ async function loadSettings() {
       })
     }
     settings.value = merged as SettingsData
+    setChartRenderer(merged.chart_renderer as 'svg' | 'canvas')
     recentFiles.value = Array.isArray(data?.recent_files) ? data.recent_files : []
   } catch {
     // silently fall back to defaults
@@ -257,6 +268,7 @@ async function saveSettings() {
       recent_files: recentFiles.value,
     }
     await authApi.updateSettings(payload)
+    setChartRenderer(settings.value.chart_renderer)
     ElMessage.success('设置已保存')
   } catch {
     ElMessage.error('保存失败')

@@ -1,277 +1,261 @@
 <template>
   <div class="dashboard-page">
     <!-- 页面标题 -->
-    <div class="page-header">
-      <h1 class="page-title"><span aria-hidden="true">📊</span> 数据分析仪表板</h1>
-      <p class="page-subtitle">
-        数据文件: <b>{{ data?.filename || '未选择' }}</b>
-        <span v-if="data?.program_name"> | 程序: <b>{{ data.program_name }}</b></span>
-        | 更新时间: {{ updateTime }}
+    <header class="dash-header">
+      <h1 class="dash-title">
+        <span class="dash-title-icon" aria-hidden="true">📊</span>
+        <span class="dash-title-text">数据分析仪表板</span>
+      </h1>
+      <p class="dash-subtitle">
+        <span>文件: <b>{{ data?.filename || '未选择' }}</b></span>
+        <span v-if="data?.program_name" class="dash-subtitle-sep">|</span>
+        <span v-if="data?.program_name">程序: <b>{{ data.program_name }}</b></span>
+        <span class="dash-subtitle-sep">|</span>
+        <span>更新: {{ updateTime }}</span>
       </p>
+    </header>
+
+    <!-- 文件选择器 -->
+    <div class="dash-toolbar">
+      <el-select
+        v-model="selectedFileId"
+        placeholder="请选择数据文件"
+        @change="onFileChange"
+        :loading="filesLoading"
+        clearable
+        class="dash-file-select"
+      >
+        <el-option v-for="f in files" :key="f.id" :label="f.filename" :value="f.id" />
+      </el-select>
     </div>
 
-    <div v-if="loading" v-loading="loading" element-loading-text="加载仪表板数据..." style="min-height: 200px" />
+    <!-- 空态 / 加载态 / 错误态 -->
+    <el-empty v-if="!filesLoading && files.length === 0" description="暂无数据文件，请先在数据管理页面上传 ATE 数据文件" />
+    <div v-else-if="filesLoading && !data" v-loading="true" element-loading-text="加载文件列表..." style="min-height:200px" />
+    <div v-else-if="loading" v-loading="loading" element-loading-text="加载仪表板数据..." style="min-height:200px" />
+    <el-empty v-else-if="error" description="未选择数据文件或该文件暂无数据" />
 
-    <template v-else-if="error">
-      <el-empty description="暂无数据，请先在数据管理页面上传 ATE 数据文件" />
-    </template>
-
+    <!-- ==================== 数据态 ==================== -->
     <template v-else>
       <!-- ===== 核心指标卡片 ===== -->
-      <el-row :gutter="16">
-        <el-col :xs="24" :sm="12" :md="6">
-          <div class="metric-card metric-card-blue">
-            <div class="metric-label">📋 总记录数</div>
-            <div class="metric-value">{{ metrics.total_rows?.toLocaleString() }}</div>
-          </div>
-        </el-col>
-        <el-col :xs="24" :sm="12" :md="6">
-          <div class="metric-card metric-card-green">
-            <div class="metric-label">✅ Pass数量</div>
-            <div class="metric-value">{{ metrics.pass_count?.toLocaleString() }}</div>
-          </div>
-        </el-col>
-        <el-col :xs="24" :sm="12" :md="6">
-          <div class="metric-card metric-card-orange">
-            <div class="metric-label">📈 Yield</div>
-            <div class="metric-value">{{ metrics.yield_pct?.toFixed(2) }}%</div>
-            <div class="metric-sub">❌ Fail: {{ metrics.fail_count }}</div>
-          </div>
-        </el-col>
-        <el-col :xs="24" :sm="12" :md="6">
-          <div class="metric-card metric-card-purple">
-            <div class="metric-label">🔧 数据格式</div>
-            <div class="metric-value" style="font-size: 20px">{{ metrics.format }}</div>
-          </div>
-        </el-col>
-      </el-row>
+      <div class="kpi-row">
+        <div class="kpi-card kpi-card--blue">
+          <div class="kpi-icon">📋</div>
+          <div class="kpi-label">总记录数</div>
+          <div class="kpi-value">{{ metrics.total_rows?.toLocaleString() }}</div>
+        </div>
+        <div class="kpi-card kpi-card--green">
+          <div class="kpi-icon">✅</div>
+          <div class="kpi-label">Pass 数量</div>
+          <div class="kpi-value">{{ metrics.pass_count?.toLocaleString() }}</div>
+        </div>
+        <div class="kpi-card kpi-card--amber">
+          <div class="kpi-icon">📈</div>
+          <div class="kpi-label">Yield</div>
+          <div class="kpi-value">{{ metrics.yield_pct?.toFixed(2) }}<span class="kpi-unit">%</span></div>
+          <div class="kpi-sub">Fail: {{ metrics.fail_count?.toLocaleString() }}</div>
+        </div>
+        <div class="kpi-card kpi-card--slate">
+          <div class="kpi-icon">🔧</div>
+          <div class="kpi-label">数据格式</div>
+          <el-tag effect="dark" round size="small" type="info" class="kpi-tag">{{ metrics.format }}</el-tag>
+        </div>
+      </div>
 
-      <!-- ===== 质量警报面板 ===== -->
-      <div v-if="qualityAlerts.length > 0" style="margin-bottom: 16px">
+      <!-- ===== 质量警报 ===== -->
+      <div v-if="qualityAlerts.length" class="alerts-bar">
         <el-alert
-          v-for="alert in qualityAlerts"
-          :key="alert.type"
-          :type="alert.level"
-          :title="alert.message"
+          v-for="a in qualityAlerts"
+          :key="a.type"
+          :type="a.level"
+          :title="a.message"
           :closable="false"
           show-icon
-          style="margin-bottom: 10px"
+          class="alerts-bar-item"
         >
-          <template v-if="alert.params">
-            <div style="font-size: 12px; margin-top: 5px">
-              问题参数: {{ alert.params.join(', ') }}
-            </div>
+          <template v-if="a.params">
+            <div class="alerts-detail">问题参数: {{ a.params.join(', ') }}</div>
           </template>
-          <template v-if="alert.max_site">
-            <div style="font-size: 12px; margin-top: 5px">
-              最高: {{ alert.max_site }} | 最低: {{ alert.min_site }}
-            </div>
+          <template v-if="a.max_site">
+            <div class="alerts-detail">最高: {{ a.max_site }} | 最低: {{ a.min_site }}</div>
           </template>
         </el-alert>
       </div>
 
-      <!-- ===== Bin 分布饼图 ===== -->
-      <h2 class="section-title"><span aria-hidden="true">📋</span> Bin 分布</h2>
-      <el-row :gutter="16">
-        <el-col :xs="24" :lg="12">
-          <el-card shadow="hover" header="🔴 Bin 分布饼图">
-            <div ref="binChart" style="height: 420px" role="img" aria-label="Bin分布饼图" />
-          </el-card>
-        </el-col>
-        <el-col :xs="24" :lg="12">
-          <el-card shadow="hover">
-            <div ref="yieldGaugeChart" style="height: 200px" role="img" aria-label="整体Yield仪表盘" />
-            <el-row :gutter="12" style="margin-top: 8px">
-              <el-col :span="8">
-                <el-statistic title="最高" :value="siteYieldStats.max" suffix="%">
-                  <template #prefix>
-                    <el-tag size="small" type="success">{{ siteYieldStats.maxSite }}</el-tag>
-                  </template>
-                </el-statistic>
-              </el-col>
-              <el-col :span="8">
-                <el-statistic title="最低" :value="siteYieldStats.min" suffix="%">
-                  <template #prefix>
-                    <el-tag size="small" type="danger">{{ siteYieldStats.minSite }}</el-tag>
-                  </template>
-                </el-statistic>
-              </el-col>
-              <el-col :span="8">
-                <el-statistic title="差异" :value="siteYieldStats.diff" suffix="%" />
-              </el-col>
-            </el-row>
-          </el-card>
-        </el-col>
-      </el-row>
-
-      <!-- ===== Bin &times; Site 交叉表 ===== -->
-      <h2 class="section-title"><span aria-hidden="true">&#x1F4CA;</span> Bin &times; Site 交叉表</h2>
-      <el-row :gutter="16">
-        <el-col :xs="24" :lg="24">
-          <el-card shadow="hover">
-            <el-table
-              :data="binTableData"
-              stripe
-              size="small"
-              max-height="400"
-              :border="true"
-            >
-              <el-table-column prop="bin" label="Bin" width="80" align="center" fixed="left">
-                <template #default="{ row }">
-                  <el-tag :type="row.bin.includes('1') ? 'success' : row.bin === 'Total' ? 'info' : 'danger'" size="small">
-                    {{ row.bin }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column
-                v-for="col in binSiteColumns"
-                :key="col"
-                :prop="col"
-                :label="`Site ${col}`"
-                align="center"
-                min-width="100"
-              >
-                <template #default="{ row }">
-                  <span :class="row[col] > 0 ? 'cell-active' : 'cell-inactive'">
-                    {{ row[col] || 0 }}
-                  </span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="all_site" label="ALL Site" align="center" min-width="130" fixed="right">
-                <template #default="{ row }">
-                  <el-tag type="info" size="small">{{ row.all_site || 0 }}</el-tag>
-                </template>
-              </el-table-column>
-            </el-table>
-          </el-card>
-        </el-col>
-      </el-row>
-
-      <!-- ===== 参数质量分析 ===== -->
-      <h2 v-if="paramStats.length > 0" class="section-title"><span aria-hidden="true">📊</span> 参数质量分析 (Top 10 CPK)</h2>
-      <el-row v-if="paramStats.length > 0" :gutter="16">
-        <el-col :xs="24" :lg="14">
-          <el-card shadow="hover">
-            <el-table :data="paramStats" stripe size="small" max-height="350" :border="true">
-              <el-table-column prop="param" label="参数名称" min-width="150" show-overflow-tooltip />
-              <el-table-column prop="cpk" label="CPK" width="80" align="center">
-                <template #default="{ row }">
-                  <el-tag :type="getCpkTagType(row.cpk)" size="small">
-                    {{ row.cpk.toFixed(2) }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="cpk_level" label="等级" width="100" align="center">
-                <template #default="{ row }">
-                  <span :style="{ color: row.cpk_color, fontWeight: 'bold' }">
-                    {{ row.cpk_level }}
-                  </span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="mean" label="均值" width="120" align="right">
-                <template #default="{ row }">
-                  {{ row.mean.toFixed(4) }} <span style="color: var(--text-tertiary)">{{ row.unit }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="std" label="标准差" width="100" align="right">
-                <template #default="{ row }">
-                  {{ row.std.toFixed(4) }}
-                </template>
-              </el-table-column>
-              <el-table-column label="规格限" width="180" align="center">
-                <template #default="{ row }">
-                  <span v-if="row.lsl !== null && row.usl !== null" style="font-size: 12px">
-                    {{ row.lsl.toFixed(4) }} ~ {{ row.usl.toFixed(4) }}
-                  </span>
-                  <span v-else style="color: var(--text-tertiary)">未设置</span>
-                </template>
-              </el-table-column>
-            </el-table>
-          </el-card>
-        </el-col>
-        <el-col :xs="24" :lg="10">
-          <el-card shadow="hover" header="CPK分布统计">
-            <div ref="cpkDistChart" style="height: 350px" role="img" aria-label="CPK分布统计饼图" />
-          </el-card>
-        </el-col>
-      </el-row>
-
-      <!-- ===== 数据质量概览 ===== -->
-      <h2 class="section-title"><span aria-hidden="true">📉</span> Fail 测试项分析</h2>
-      <el-row :gutter="16">
-        <el-col :xs="24" :lg="12">
-          <el-card shadow="hover">
-            <el-table
-              :data="failTestItems"
-              stripe
-              size="small"
-              max-height="320"
-              :border="true"
-            >
-              <el-table-column prop="name" label="测试项名称" show-overflow-tooltip min-width="200" />
-              <el-table-column prop="fail_count" label="Fail数量" width="100" align="center" />
-              <el-table-column prop="percentage" label="占比(%)" width="100" align="center">
-                <template #default="{ row }">{{ row.percentage }}%</template>
-              </el-table-column>
-            </el-table>
-            <div class="fail-total">总Fail次数: {{ totalFailCount }}</div>
-          </el-card>
-        </el-col>
-        <el-col :xs="24" :lg="12">
-          <el-card shadow="hover" header="Top 10 Fail测试项">
-            <div ref="failBarChart" style="height: 350px" role="img" aria-label="Top 10 Fail测试项柱状图" />
-          </el-card>
-        </el-col>
-      </el-row>
-
-      <!-- ===== UPH 效率分析 ===== -->
-      <h2 class="section-title"><span aria-hidden="true">⚡</span> UPH 效率分析</h2>
-      <el-row :gutter="16" style="margin-bottom: 16px">
-        <el-col :span="24">
-          <UphCard :file-id="data?.file_id || null" />
-        </el-col>
-      </el-row>
-
-      <!-- ===== 数据质量概览 ===== -->
-      <h2 class="section-title"><span aria-hidden="true">🔍</span> 数据质量概览</h2>
-      <el-row :gutter="16">
-        <el-col :xs="24" :sm="8">
-          <div class="info-card">
-            <h4 class="info-card-title" style="color: #667eea;">📊 测试项统计</h4>
-            <p class="info-card-item">数值测试项: <b>{{ quality.numeric_items }}</b></p>
-            <p class="info-card-item">有Limit测试项: <b>{{ quality.items_with_limits }}</b></p>
-            <p class="info-card-item">Site数量: <b>{{ quality.site_count }}</b></p>
-          </div>
-        </el-col>
-        <el-col :xs="24" :sm="8">
-          <div class="info-card" style="border-left-color: #f5576c;">
-            <h4 class="info-card-title" style="color: #f5576c;">🎯 Bin 分布</h4>
-            <p class="info-card-item">Bin种类: <b>{{ quality.bin_types }}</b></p>
-            <p class="info-card-item">Fail Bin: <b>{{ quality.fail_bin_count }}</b></p>
-            <p class="info-card-item">Pass率: <b>{{ metrics.yield_pct?.toFixed(2) }}%</b></p>
-          </div>
-        </el-col>
-        <el-col :xs="24" :sm="8">
-          <div class="info-card" style="border-left-color: #11998e;">
-            <h4 class="info-card-title" style="color: #11998e;">⚠️ 关键问题</h4>
-            <p class="info-card-item">Top Fail项: <b>{{ topFailItem }}</b></p>
-            <p class="info-card-item">Fail次数: <b>{{ topFailCount }}</b></p>
-            <p class="info-card-item">总Fail项: <b>{{ failTestItems.length }}</b></p>
-          </div>
-        </el-col>
-      </el-row>
-
-      <!-- 导出按钮 -->
-      <div class="export-actions">
-        <el-button type="primary" size="large" :loading="exporting" @click="exportHtml">
-          <span aria-hidden="true">📥</span> 保存 HTML 报表
-        </el-button>
+      <!-- ===== Section: Bin 分布 ===== -->
+      <h2 class="sec-title"><span>📋</span> Bin 分布</h2>
+      <div class="panel-row panel-row--h420">
+        <div class="panel-card">
+          <div class="panel-head">🔴 Bin 分布饼图</div>
+          <div class="panel-body"><div ref="binChart" class="chart-fill" role="img" aria-label="Bin分布饼图" /></div>
+        </div>
+        <div class="panel-card">
+          <div class="panel-head">💹 Bin 占比一览</div>
+          <el-table :data="binPieTableData" stripe size="small" max-height="380" border class="panel-table">
+            <el-table-column prop="name" label="Bin" min-width="90">
+              <template #default="{ row }">
+                <el-tag :type="row.name.includes('1') ? 'success' : 'danger'" size="small">{{ row.name }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="value" label="数量" width="80" align="right" sortable />
+            <el-table-column prop="pct" label="占比" width="120" align="center">
+              <template #default="{ row }">
+                <el-progress :percentage="Number(row.pct)" :color="row.name.includes('1') ? '#059669' : '#dc2626'" :stroke-width="12" />
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
       </div>
 
-      <!-- 底部版权 -->
-      <p class="footer-text">
-        <span aria-hidden="true">📅</span> 最后更新: {{ updateTime }} | LiqunData ATE数据分析软件
-      </p>
+      <!-- ===== Section: Site 良率分布 & Yield ===== -->
+      <h2 class="sec-title"><span>🟢</span> Site 良率分布 &amp; Yield 分析</h2>
+      <div class="panel-row panel-row--h320">
+        <div class="panel-card">
+          <div class="panel-head">📊 Site 良率柱状图</div>
+          <div class="panel-body"><div ref="siteYieldBarChart" class="chart-fill" role="img" aria-label="Site良率柱状图" /></div>
+        </div>
+        <div class="panel-card panel-card--col">
+          <div ref="yieldGaugeChart" style="height:130px" role="img" aria-label="整体Yield仪表盘" />
+          <div class="yield-stats">
+            <div class="yield-stat">
+              <span class="yield-stat-tag" style="background:#05966920;color:#059669">{{ siteYieldStats.maxSite }}</span>
+              <span class="yield-stat-label">最高</span>
+              <span class="yield-stat-value">{{ siteYieldStats.max }}%</span>
+            </div>
+            <div class="yield-stat">
+              <span class="yield-stat-tag" style="background:#dc262620;color:#dc2626">{{ siteYieldStats.minSite }}</span>
+              <span class="yield-stat-label">最低</span>
+              <span class="yield-stat-value">{{ siteYieldStats.min }}%</span>
+            </div>
+            <div class="yield-stat">
+              <span class="yield-stat-tag" style="background:#6b728020;color:#6b7280">Δ</span>
+              <span class="yield-stat-label">差异</span>
+              <span class="yield-stat-value">{{ siteYieldStats.diff }}%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== Section: Bin × Site 交叉表 ===== -->
+      <h2 class="sec-title"><span>📊</span> Bin &times; Site 交叉表</h2>
+      <div class="panel-row panel-row--wider panel-row--h400">
+        <div class="panel-card panel-card--wider">
+          <div class="panel-head">📋 Bin × Site 数据</div>
+          <el-table :data="formattedBinTableData" stripe size="small" max-height="360" border class="panel-table">
+            <el-table-column prop="bin" label="Bin" width="80" align="center" fixed="left">
+              <template #default="{ row }">
+                <el-tag :type="row.bin.includes('1') ? 'success' : row.bin === 'Total' ? 'info' : 'danger'" size="small">{{ row.bin }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column v-for="col in binSiteColumns" :key="col" :prop="col" :label="`Site ${col}`" align="center" min-width="120">
+              <template #default="{ row }">
+                <span class="cell-count">{{ row[col] }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="all_site" label="ALL Site" align="center" min-width="140" fixed="right">
+              <template #default="{ row }">
+                <el-tag :type="row.bin === 'Total' ? 'info' : ''" size="small" effect="plain">{{ row.all_site }}</el-tag>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+        <div class="panel-card">
+          <div class="panel-head">📊 Bin × Site 柱状图</div>
+          <div class="panel-body"><div ref="binBarChart" class="chart-fill" role="img" aria-label="Bin×Site柱状图" /></div>
+        </div>
+      </div>
+
+      <!-- ===== Section: 参数质量分析 ===== -->
+      <h2 v-if="paramStats.length" class="sec-title"><span>📊</span> 参数质量分析 (Top 10 CPK)</h2>
+      <div v-if="paramStats.length" class="panel-row panel-row--wider panel-row--h350">
+        <div class="panel-card panel-card--wider">
+          <div class="panel-head">📋 CPK 参数表</div>
+          <el-table :data="topParamStats" stripe size="small" max-height="310" border class="panel-table">
+            <el-table-column prop="param" label="参数名称" min-width="140" show-overflow-tooltip />
+            <el-table-column prop="cpk" label="CPK" width="80" align="center">
+              <template #default="{ row }">
+                <el-tag :type="getCpkTagType(row.cpk)" size="small">{{ row.cpk.toFixed(2) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="cpk_level" label="等级" width="90" align="center">
+              <template #default="{ row }">
+                <span :style="{ color: row.cpk_color, fontWeight: 'bold' }">{{ row.cpk_level }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="mean" label="均值" width="120" align="right">
+              <template #default="{ row }">{{ row.mean.toFixed(4) }} <span class="cell-unit">{{ row.unit }}</span></template>
+            </el-table-column>
+            <el-table-column prop="std" label="标准差" width="90" align="right">
+              <template #default="{ row }">{{ row.std.toFixed(4) }}</template>
+            </el-table-column>
+            <el-table-column label="规格限" width="180" align="center">
+              <template #default="{ row }">
+                <span v-if="row.lsl !== null && row.usl !== null" class="cell-spec">{{ row.lsl.toFixed(4) }} ~ {{ row.usl.toFixed(4) }}</span>
+                <span v-else class="cell-na">未设置</span>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+        <div class="panel-card">
+          <div class="panel-head">CPK 分布统计</div>
+          <div class="panel-body"><div ref="cpkDistChart" class="chart-fill" role="img" aria-label="CPK分布统计饼图" /></div>
+        </div>
+      </div>
+
+      <!-- ===== Section: Fail 测试项分析 ===== -->
+      <h2 class="sec-title"><span>📉</span> Fail 测试项分析</h2>
+      <div class="panel-row panel-row--h320">
+        <div class="panel-card">
+          <div class="panel-head">📋 Fail 测试项明细</div>
+          <el-table :data="failTestItems" stripe size="small" max-height="280" border class="panel-table">
+            <el-table-column prop="name" label="测试项名称" show-overflow-tooltip min-width="180" />
+            <el-table-column prop="fail_count" label="Fail数量" width="90" align="center" />
+            <el-table-column prop="percentage" label="占比" width="80" align="center">
+              <template #default="{ row }">{{ row.percentage }}%</template>
+            </el-table-column>
+          </el-table>
+          <div class="fail-total">总 Fail 次数: <b>{{ totalFailCount }}</b></div>
+        </div>
+        <div class="panel-card">
+          <div class="panel-head">Top 10 Fail 测试项</div>
+          <div class="panel-body"><div ref="failBarChart" class="chart-fill" role="img" aria-label="Top 10 Fail测试项柱状图" /></div>
+        </div>
+      </div>
+
+      <!-- ===== Section: UPH 效率分析 ===== -->
+      <h2 class="sec-title"><span>⚡</span> UPH 效率分析</h2>
+      <UphCard :file-id="data?.file_id || null" />
+
+      <!-- ===== Section: 数据质量概览 ===== -->
+      <h2 class="sec-title"><span>🔍</span> 数据质量概览</h2>
+      <div class="summary-row">
+        <div class="summary-card summary-card--blue">
+          <h4>📊 测试项统计</h4>
+          <p>数值测试项: <b>{{ quality.numeric_items }}</b></p>
+          <p>有 Limit 测试项: <b>{{ quality.items_with_limits }}</b></p>
+          <p>Site 数量: <b>{{ quality.site_count }}</b></p>
+        </div>
+        <div class="summary-card summary-card--red">
+          <h4>🎯 Bin 分布</h4>
+          <p>Bin 种类: <b>{{ quality.bin_types }}</b></p>
+          <p>Fail Bin: <b>{{ quality.fail_bin_count }}</b></p>
+          <p>Pass 率: <b>{{ metrics.yield_pct?.toFixed(2) }}%</b></p>
+        </div>
+        <div class="summary-card summary-card--green">
+          <h4>⚠️ 关键问题</h4>
+          <p>Top Fail 项: <b>{{ topFailItem }}</b></p>
+          <p>Fail 次数: <b>{{ topFailCount }}</b></p>
+          <p>总 Fail 项: <b>{{ failTestItems.length }}</b></p>
+        </div>
+      </div>
+
+      <!-- 导出 -->
+      <div class="dash-footer">
+        <el-button type="primary" size="large" :loading="exporting" @click="exportHtml">
+          <span>📥</span> 保存 HTML 报表
+        </el-button>
+        <p class="dash-footer-note">📅 最后更新: {{ updateTime }} | LiqunData ATE 数据分析软件</p>
+      </div>
     </template>
   </div>
 </template>
@@ -279,8 +263,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
 import * as echarts from 'echarts'
+import { getChartInitOpts } from '../../utils/echarts-theme'
 import { useThemeStore } from '../../stores/theme'
 import api from '../../api'
+import { analysisApi } from '../../api/analysis'
 import UphCard from './components/UphCard.vue'
 
 // Helper for theme-aware ECharts colors
@@ -309,7 +295,10 @@ interface DashboardData {
   quality_alerts?: any[]
 }
 
-const loading = ref(true)
+const files = ref<any[]>([])
+const filesLoading = ref(true)
+const selectedFileId = ref<number | null>(null)
+const loading = ref(false)
 const error = ref(false)
 const exporting = ref(false)
 const data = ref<DashboardData | null>(null)
@@ -324,17 +313,19 @@ const qualityAlerts = ref<any[]>([])
 
 // Chart refs
 const binChart = ref<HTMLElement>()
-const siteYieldChart = ref<HTMLElement>()
 const yieldGaugeChart = ref<HTMLElement>()
 const failBarChart = ref<HTMLElement>()
 const cpkDistChart = ref<HTMLElement>()
+const binBarChart = ref<HTMLElement>()
+const siteYieldBarChart = ref<HTMLElement>()
 
 // Chart instances
 let binChartInstance: echarts.ECharts | null = null
-let siteYieldChartInstance: echarts.ECharts | null = null
 let yieldGaugeChartInstance: echarts.ECharts | null = null
 let failBarChartInstance: echarts.ECharts | null = null
 let cpkDistChartInstance: echarts.ECharts | null = null
+let binBarChartInstance: echarts.ECharts | null = null
+let siteYieldBarChartInstance: echarts.ECharts | null = null
 
 const siteYieldStats = computed(() => {
   const siteData = data.value?.site_yield_data || []
@@ -360,6 +351,46 @@ const siteYieldStats = computed(() => {
   }
 })
 
+const binPieTableData = computed(() => {
+  const pieData = data.value?.bin_pie_data || []
+  const total = pieData.reduce((s, item) => s + item.value, 0)
+  return pieData.map(item => ({
+    name: item.name,
+    value: item.value,
+    pct: total > 0 ? ((item.value / total) * 100).toFixed(1) : '0.0',
+  }))
+})
+
+/** Bin × Site 交叉表 — 格式化为 "count (pct%)" */
+const formattedBinTableData = computed(() => {
+  const raw = binTableData.value
+  const cols = binSiteColumns.value
+  if (!raw.length || !cols.length) return raw
+
+  // Find the "Total" row to get per-column totals
+  const totalRow = raw.find(r => r.bin === 'Total')
+  if (!totalRow) return raw
+
+  return raw.map(row => {
+    const formatted: Record<string, any> = { bin: row.bin, all_site: row.all_site }
+    for (const col of cols) {
+      const val = row[col] || 0
+      const colTotal = totalRow[col] || 1
+      const pct = colTotal > 0 ? ((val / colTotal) * 100).toFixed(1) : '0.0'
+      formatted[col] = `${val} (${pct}%)`
+    }
+    // Format ALL Site relative to grand total (Total row's all_site)
+    const grandTotal = totalRow.all_site || 1
+    const allPct = grandTotal > 0 ? ((row.all_site / grandTotal) * 100).toFixed(1) : '0.0'
+    if (row.bin === 'Total') {
+      formatted.all_site = row.all_site // Total row itself keeps raw number
+    } else {
+      formatted.all_site = `${row.all_site || 0} (${allPct}%)`
+    }
+    return formatted
+  })
+})
+
 const totalFailCount = computed(() => failTestItems.value.reduce((sum, item) => sum + item.fail_count, 0))
 
 const topFailItem = computed(() => {
@@ -369,6 +400,7 @@ const topFailItem = computed(() => {
 })
 
 const topFailCount = computed(() => failTestItems.value[0]?.fail_count ?? 0)
+const topParamStats = computed(() => paramStats.value.slice(0, 10))
 
 function getCpkTagType(cpk: number): string {
   if (cpk >= 1.67) return 'success'
@@ -376,63 +408,10 @@ function getCpkTagType(cpk: number): string {
   return 'danger'
 }
 
-function getSiteYieldColor(yieldVal: number): string {
-  if (yieldVal >= 95) return '#11998e'  // 绿色
-  if (yieldVal >= 90) return '#f9a825'  // 橙色
-  return '#f5576c'                       // 红色
-}
-
-function renderSiteYieldChart() {
-  if (!siteYieldChart.value || !data.value?.site_yield_data?.length) return
-  if (!siteYieldChartInstance) {
-    siteYieldChartInstance = echarts.init(siteYieldChart.value)
-  } else {
-    siteYieldChartInstance.clear()
-  }
-
-  const sites = data.value.site_yield_data.map((d) => d.Site)
-  const yields = data.value.site_yield_data.map((d) => {
-    const yieldValue = typeof d.Yield === 'string' ? parseFloat(d.Yield) : d.Yield
-    return isNaN(yieldValue) ? 0 : yieldValue
-  })
-  const colors = yields.map((y) => getSiteYieldColor(y))
-
-  siteYieldChartInstance.setOption({
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'shadow' },
-      formatter: (params: any) => {
-        const p = Array.isArray(params) ? params[0] : params
-        return `Site ${p.name}<br/>Yield: ${p.value.toFixed(2)}%`
-      },
-    },
-    grid: { left: '3%', right: '4%', bottom: '3%', top: '10%', containLabel: true },
-    xAxis: {
-      type: 'category',
-      data: sites,
-      axisLabel: { fontSize: 12, color: _tc() },
-    },
-    yAxis: {
-      type: 'value',
-      max: 100,
-      axisLabel: { formatter: '{value}%', color: _tc() },
-    },
-    series: [{
-      type: 'bar',
-      data: yields.map((y, i) => ({
-        value: y,
-        itemStyle: { color: colors[i] },
-      })),
-      barWidth: '50%',
-      label: { show: true, position: 'top', formatter: '{c}%', fontSize: 12, fontWeight: 'bold' },
-    }],
-  })
-}
-
 function renderYieldGaugeChart() {
   if (!yieldGaugeChart.value) return
   if (!yieldGaugeChartInstance) {
-    yieldGaugeChartInstance = echarts.init(yieldGaugeChart.value)
+    yieldGaugeChartInstance = echarts.init(yieldGaugeChart.value, undefined, getChartInitOpts())
   } else {
     yieldGaugeChartInstance.clear()
   }
@@ -451,9 +430,9 @@ function renderYieldGaugeChart() {
         lineStyle: {
           width: 8,
           color: [
-            [0.90, '#f5576c'],  // 0-90%: 红色
-            [0.95, '#f9a825'],  // 90-95%: 橙色
-            [1, '#11998e'],     // 95-100%: 绿色
+            [0.90, '#dc2626'],  // 0-90%: 红色
+            [0.95, '#d97706'],  // 90-95%: 橙色
+            [1, '#059669'],     // 95-100%: 绿色
           ],
         },
       },
@@ -471,12 +450,12 @@ function renderYieldGaugeChart() {
 function renderBinChart() {
   if (!binChart.value || !data.value?.bin_pie_data?.length) return
   if (!binChartInstance) {
-    binChartInstance = echarts.init(binChart.value)
+    binChartInstance = echarts.init(binChart.value, undefined, getChartInitOpts())
   } else {
     binChartInstance.clear()
   }
 
-  const allBinColors = ['#11998e', '#f5576c', '#f9a825', '#4facfe', '#a8edea', '#ff6b6b', '#74b9ff', '#fd79a8', '#e17055', '#00b894']
+  const allBinColors = ['#059669', '#dc2626', '#d97706', '#2563eb', '#7c3aed', '#ea580c', '#0284c7', '#db2777', '#c2410c', '#047857']
 
   binChartInstance.setOption({
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
@@ -497,7 +476,7 @@ function renderBinChart() {
 function renderFailBarChart() {
   if (!failBarChart.value || !failTestItems.value.length) return
   if (!failBarChartInstance) {
-    failBarChartInstance = echarts.init(failBarChart.value)
+    failBarChartInstance = echarts.init(failBarChart.value, undefined, getChartInitOpts())
   } else {
     failBarChartInstance.clear()
   }
@@ -520,7 +499,7 @@ function renderFailBarChart() {
         color: {
           type: 'linear',
           x: 0, y: 0, x2: 1, y2: 0,
-          colorStops: [{ offset: 0, color: '#f093fb' }, { offset: 1, color: '#f5576c' }],
+          colorStops: [{ offset: 0, color: '#f87171' }, { offset: 1, color: '#dc2626' }],
         },
       },
       label: { show: true, position: 'right', fontSize: 10 },
@@ -532,7 +511,7 @@ function renderCpkDistChart() {
   if (!cpkDistChart.value || !paramStats.value.length) return
 
   if (!cpkDistChartInstance) {
-    cpkDistChartInstance = echarts.init(cpkDistChart.value)
+    cpkDistChartInstance = echarts.init(cpkDistChart.value, undefined, getChartInitOpts())
   } else {
     cpkDistChartInstance.clear()
   }
@@ -566,11 +545,11 @@ function renderCpkDistChart() {
 
   // 定义颜色映射 - 根据等级前缀匹配
   const getColorByLevel = (levelName: string) => {
-    if (levelName.startsWith('A级')) return '#11998e'  // 绿色 - 优秀
-    if (levelName.startsWith('B级')) return '#f9a825'  // 黄色 - 良好
-    if (levelName.startsWith('C级')) return '#f5576c'  // 橙色 - 一般
-    if (levelName.startsWith('D级')) return '#999'     // 灰色 - 不足
-    return '#ccc'
+    if (levelName.startsWith('A级')) return '#059669'  // 绿色 - 优秀
+    if (levelName.startsWith('B级')) return '#d97706'  // 橙色 - 良好
+    if (levelName.startsWith('C级')) return '#dc2626'  // 红色 - 一般
+    if (levelName.startsWith('D级')) return '#9ca3af'  // 灰色 - 不足
+    return '#d1d5db'
   }
 
   cpkDistChartInstance.setOption({
@@ -591,13 +570,120 @@ function renderCpkDistChart() {
   })
 }
 
+function renderBinBarChart() {
+  if (!binBarChart.value || !binTableData.value.length || !binSiteColumns.value.length) return
+  if (!binBarChartInstance) {
+    binBarChartInstance = echarts.init(binBarChart.value, undefined, getChartInitOpts())
+  } else {
+    binBarChartInstance.clear()
+  }
+
+  // Filter out the 'Total' row, reverse so Bin 1 is at the top
+  const chartRows = binTableData.value.filter(r => r.bin !== 'Total').reverse()
+  const bins = chartRows.map(r => r.bin)
+  const sites = binSiteColumns.value
+
+  // Color palette for sites
+  const sitePalette = ['#11998e', '#f5576c', '#f9a825', '#4facfe', '#a8edea', '#ff6b6b', '#74b9ff', '#fd79a8']
+
+  const series = sites.map((site, idx) => ({
+    name: `Site ${site}`,
+    type: 'bar' as const,
+    data: chartRows.map(r => r[site] || 0),
+    itemStyle: { color: sitePalette[idx % sitePalette.length] },
+    barGap: '10%',
+    emphasis: { focus: 'series' as const },
+  }))
+
+  binBarChartInstance.setOption({
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params: any) => {
+        const items = Array.isArray(params) ? params : [params]
+        const total = items.reduce((s: number, p: any) => s + (p.value || 0), 0)
+        let html = `<b>${items[0].axisValue}</b><br/>`
+        items.forEach((p: any) => {
+          html += `${p.marker} ${p.seriesName}: <b>${p.value}</b><br/>`
+        })
+        html += `<hr style="margin:4px 0"/>合计: <b>${total}</b>`
+        return html
+      },
+    },
+    legend: {
+      bottom: 0,
+      textStyle: { color: _tc(), fontSize: 12 },
+    },
+    grid: { left: '3%', right: '4%', bottom: '12%', top: '5%', containLabel: true },
+    xAxis: { type: 'value', axisLabel: { color: _tc() } },
+    yAxis: {
+      type: 'category',
+      data: bins,
+      axisLabel: { color: _tc(), fontSize: 12 },
+      inverse: true,
+    },
+    series,
+  })
+}
+
+function renderSiteYieldBarChart() {
+  if (!siteYieldBarChart.value || !data.value?.site_yield_data?.length) return
+  if (!siteYieldBarChartInstance) {
+    siteYieldBarChartInstance = echarts.init(siteYieldBarChart.value, undefined, getChartInitOpts())
+  } else {
+    siteYieldBarChartInstance.clear()
+  }
+
+  const siteData = data.value.site_yield_data
+  const siteNames = siteData.map(d => d.Site)
+  const siteYields = siteData.map(d => {
+    const v = typeof d.Yield === 'string' ? parseFloat(d.Yield) : d.Yield
+    return isNaN(v) ? 0 : v
+  })
+
+  // Color: green ≥95%, orange 90-95%, red <90%
+  const getYieldColor = (y: number) => y >= 95 ? '#059669' : y < 90 ? '#dc2626' : '#d97706'
+
+  siteYieldBarChartInstance.setOption({
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params: any) => {
+        const p = Array.isArray(params) ? params[0] : params
+        return `<b>${p.name}</b><br/>Yield: <b>${p.value.toFixed(2)}%</b>`
+      },
+    },
+    grid: { left: '3%', right: '4%', bottom: '3%', top: '10%', containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: siteNames,
+      axisLabel: { fontSize: 12, color: _tc() },
+    },
+    yAxis: {
+      type: 'value',
+      max: 100,
+      axisLabel: { formatter: '{value}%', color: _tc() },
+    },
+    series: [{
+      type: 'bar',
+      data: siteYields.map(y => ({
+        value: y,
+        itemStyle: { color: getYieldColor(y) },
+      })),
+      barWidth: '50%',
+      label: { show: true, position: 'top', formatter: '{c}%', fontSize: 12, fontWeight: 'bold' },
+    }],
+  })
+}
+
 function renderAllCharts() {
   nextTick(() => {
-    renderSiteYieldChart()
+    renderSiteYieldBarChart()
     renderYieldGaugeChart()
     renderBinChart()
     renderFailBarChart()
     renderCpkDistChart()
+    renderBinBarChart()
   })
 }
 
@@ -606,7 +692,9 @@ watch(data, async () => {
 })
 
 watch(() => themeStore.currentTheme, () => {
-  renderAllCharts()
+  // If component is cached by keep-alive (DOM detached), skip expensive chart re-render
+  if (!binChart.value?.isConnected) return
+  requestAnimationFrame(() => renderAllCharts())
 })
 
 async function exportHtml() {
@@ -631,11 +719,55 @@ async function exportHtml() {
   }
 }
 
-onMounted(async () => {
-  updateTime.value = new Date().toLocaleTimeString('zh-CN')
+// 窗口 resize 处理（必须在 setup 同步阶段注册，不能在 async onMounted 的 await 之后）
+const handleResize = () => {
+  binChartInstance?.resize()
+  yieldGaugeChartInstance?.resize()
+  failBarChartInstance?.resize()
+  cpkDistChartInstance?.resize()
+  binBarChartInstance?.resize()
+  siteYieldBarChartInstance?.resize()
+}
+
+function disposeAllCharts() {
+  binChartInstance?.dispose(); binChartInstance = null
+  yieldGaugeChartInstance?.dispose(); yieldGaugeChartInstance = null
+  failBarChartInstance?.dispose(); failBarChartInstance = null
+  cpkDistChartInstance?.dispose(); cpkDistChartInstance = null
+  binBarChartInstance?.dispose(); binBarChartInstance = null
+  siteYieldBarChartInstance?.dispose(); siteYieldBarChartInstance = null
+}
+
+window.addEventListener('resize', handleResize)
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
+  disposeAllCharts()
+})
+
+async function loadFiles() {
+  filesLoading.value = true
   try {
-    const res = await api.get('/summary/')
-    if (res.data.error) { error.value = true; loading.value = false; return }
+    const { data } = await api.get('/files/')
+    files.value = Array.isArray(data) ? data : data.results || []
+  } catch {
+    files.value = []
+  } finally {
+    filesLoading.value = false
+  }
+}
+
+async function onFileChange() {
+  if (!selectedFileId.value) {
+    data.value = null
+    error.value = false
+    return
+  }
+  disposeAllCharts()
+  loading.value = true
+  error.value = false
+  try {
+    const res = await analysisApi.getDashboard(selectedFileId.value)
+    if (res.data.error) { error.value = true; return }
     const d = res.data as DashboardData
     data.value = d
     metrics.value = d.metrics
@@ -645,151 +777,508 @@ onMounted(async () => {
     binSiteColumns.value = d.bin_site_columns || []
     paramStats.value = d.param_stats || []
     qualityAlerts.value = d.quality_alerts || []
-    renderAllCharts()
   } catch {
     error.value = true
   } finally {
     loading.value = false
+    // Wait for DOM to re-render chart containers (v-else activates after loading=false)
+    await nextTick()
+    renderAllCharts()
   }
+}
 
-  // 窗口 resize 处理
-  const handleResize = () => {
-    binChartInstance?.resize()
-    siteYieldChartInstance?.resize()
-    yieldGaugeChartInstance?.resize()
-    failBarChartInstance?.resize()
-    cpkDistChartInstance?.resize()
+onMounted(async () => {
+  updateTime.value = new Date().toLocaleTimeString('zh-CN')
+  await loadFiles()
+  // Auto-select the latest file if nothing is already selected
+  if (files.value.length > 0) {
+    selectedFileId.value = files.value[0].id
+    await onFileChange()
+  } else {
+    loading.value = false
   }
-
-  window.addEventListener('resize', handleResize)
-
-  // 清理监听器
-  onUnmounted(() => {
-    window.removeEventListener('resize', handleResize)
-  })
 })
 </script>
 
 <style scoped>
+/* ================================================================
+   DataPhrase Dashboard — Industrial Data Terminal
+   Rigorously gridded, consistent heights, high information density.
+   ================================================================ */
+
+/* ----- Root & Containers ----- */
 .dashboard-page {
-  padding-bottom: 30px;
+  padding: 28px 32px;
+  background: linear-gradient(165deg, #f8f9fb 0%, #edeff2 100%);
+  min-height: 100%;
 }
 
-.page-header {
+/* ----- Header ----- */
+.dash-header {
   text-align: center;
-  margin-bottom: 25px;
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #e0e3e7;
 }
-
-.page-title {
-  color: var(--text-primary);
-  margin-bottom: 5px;
-  font-size: 24px;
+.dash-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 0 0 6px 0;
+  font-size: 26px;
+  font-weight: 750;
+  color: #1a1f2e;
+  letter-spacing: -0.3px;
 }
-
-.page-subtitle {
-  color: var(--text-secondary);
-  margin-bottom: 25px;
-  font-size: 14px;
+.dash-title-icon { font-size: 30px; }
+.dash-title-text {
+  background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 60%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
+.dash-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: #6b7280;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.dash-subtitle-sep { color: #d1d5db; }
 
-.metric-card {
-  padding: 20px;
-  border-radius: 8px;
-  color: var(--text-inverse);
+/* ----- Toolbar (file selector) ----- */
+.dash-toolbar {
+  margin-bottom: 20px;
+}
+.dash-file-select { width: 320px; max-width: 100%; }
+
+/* ================================================================
+   KPI Cards — 4-column grid
+   ================================================================ */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 20px;
+}
+@media (max-width: 992px) { .kpi-row { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 576px) { .kpi-row { grid-template-columns: 1fr; } }
+
+.kpi-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 18px 16px 14px;
   text-align: center;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06);
-  margin-bottom: 10px;
-  height: 120px;
   display: flex;
   flex-direction: column;
+  align-items: center;
   justify-content: center;
+  gap: 2px;
+  min-height: 112px;
+  position: relative;
+  overflow: hidden;
+  transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,.04);
+}
+@media (prefers-reduced-motion: reduce) {
+  .kpi-card { transition: none; }
+}
+.kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0,0,0,.08);
+}
+/* Top accent bar — invisible until hover */
+.kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  border-radius: 10px 10px 0 0;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform .25s ease;
+}
+.kpi-card:hover::before { transform: scaleX(1); }
+
+.kpi-card--blue  { --kpi-accent: #2563eb; }
+.kpi-card--green { --kpi-accent: #059669; }
+.kpi-card--amber { --kpi-accent: #d97706; }
+.kpi-card--slate { --kpi-accent: #4b5563; }
+.kpi-card--blue::before  { background: linear-gradient(90deg, #1d4ed8, #3b82f6); }
+.kpi-card--green::before { background: linear-gradient(90deg, #047857, #10b981); }
+.kpi-card--amber::before { background: linear-gradient(90deg, #b45309, #f59e0b); }
+.kpi-card--slate::before { background: linear-gradient(90deg, #374151, #6b7280); }
+
+.kpi-card:hover { border-color: var(--kpi-accent, #2563eb); }
+
+.kpi-icon   { font-size: 22px; line-height: 1; }
+.kpi-label  { font-size: 12px; color: #6b7280; font-weight: 500; text-transform: uppercase; letter-spacing: .4px; }
+.kpi-value  { font-size: 28px; font-weight: 700; color: #111827; line-height: 1.15; }
+.kpi-unit   { font-size: 16px; font-weight: 600; color: #6b7280; margin-left: 1px; }
+.kpi-sub    { font-size: 11px; color: #9ca3af; margin-top: 1px; }
+.kpi-tag    { margin-top: 4px; }
+
+/* ================================================================
+   Alerts Bar
+   ================================================================ */
+.alerts-bar { margin-bottom: 20px; }
+.alerts-bar-item { margin-bottom: 8px; }
+.alerts-detail { font-size: 12px; margin-top: 4px; }
+
+/* ================================================================
+   Section Title
+   ================================================================ */
+.sec-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 17px;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 24px 0 12px 0;
+  padding-left: 10px;
+  border-left: 3px solid #2563eb;
+  line-height: 1;
 }
 
-.metric-card-blue {
-  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+/* ================================================================
+   Panel Row — two-column grid with explicit height tiers
+   ================================================================ */
+.panel-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+@media (max-width: 992px) { .panel-row { grid-template-columns: 1fr; } }
+
+/* Width modifier: 14:10 split */
+@media (min-width: 993px) {
+  .panel-row--wider {
+    grid-template-columns: 7fr 5fr;
+  }
 }
 
-.metric-card-green {
-  background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+/* Height tiers — fixed on desktop, auto on mobile */
+.panel-row--h420 .panel-card { height: 420px; }
+.panel-row--h320 .panel-card { height: 320px; }
+.panel-row--h400 .panel-card { height: 400px; }
+.panel-row--h350 .panel-card { height: 350px; }
+@media (max-width: 992px) {
+  .panel-row--h420 .panel-card,
+  .panel-row--h320 .panel-card,
+  .panel-row--h400 .panel-card,
+  .panel-row--h350 .panel-card { height: auto; min-height: 300px; }
 }
 
-.metric-card-orange {
-  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+/* ================================================================
+   Panel Card
+   ================================================================ */
+.panel-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.04);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
-
-.metric-card-purple {
-  background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
-  color: var(--text-primary);
+.panel-card--col {
+  padding: 14px;
+  gap: 10px;
 }
-
-.metric-value {
-  font-size: 28px;
-  font-weight: bold;
-  margin: 8px 0;
-}
-
-.metric-label {
+.panel-head {
   font-size: 14px;
-  opacity: 0.9;
+  font-weight: 650;
+  color: #374151;
+  padding: 10px 16px;
+  border-bottom: 1px solid #f3f4f6;
+  background: #fafbfc;
+  flex-shrink: 0;
+}
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  padding: 8px;
+}
+.panel-table {
+  flex: 1;
+  min-height: 0;
+}
+.chart-fill {
+  width: 100%;
+  height: 100%;
 }
 
-.metric-sub {
-  font-size: 12px;
-  margin-top: 5px;
+/* ================================================================
+   Yield Stats (inside gauge card)
+   ================================================================ */
+.yield-stats {
+  display: flex;
+  gap: 12px;
+  justify-content: space-around;
 }
-
-.section-title {
-  font-size: 20px;
-  font-weight: bold;
-  color: var(--text-primary);
-  margin: 25px 0 15px 0;
-  padding-left: 12px;
-  border-left: 4px solid var(--brand-primary);
+.yield-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
 }
-
-.info-card {
-  background: var(--bg-secondary);
-  border-radius: 8px;
-  padding: 15px;
-  border-left: 4px solid var(--brand-primary);
-  margin-bottom: 10px;
+.yield-stat-tag {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: 4px;
 }
+.yield-stat-label { font-size: 11px; color: #6b7280; }
+.yield-stat-value { font-size: 18px; font-weight: 700; color: #1f2937; }
 
-.info-card-title {
+/* ================================================================
+   Summary Cards (数据质量概览)
+   ================================================================ */
+.summary-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 20px;
+}
+@media (max-width: 768px) { .summary-row { grid-template-columns: 1fr; } }
+
+.summary-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 18px 20px;
+  border-left: 3px solid #2563eb;
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+.summary-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,.06);
+}
+.summary-card h4 {
   margin: 0 0 10px 0;
+  font-size: 14px;
+  font-weight: 650;
 }
-
-.info-card-item {
-  margin: 5px 0;
+.summary-card p {
+  margin: 6px 0;
+  font-size: 13px;
+  color: #4b5563;
 }
+.summary-card p b {
+  color: #1f2937;
+}
+.summary-card--blue  { border-left-color: #2563eb; }
+.summary-card--blue  h4 { color: #2563eb; }
+.summary-card--red   { border-left-color: #dc2626; }
+.summary-card--red   h4 { color: #dc2626; }
+.summary-card--green { border-left-color: #059669; }
+.summary-card--green h4 { color: #059669; }
 
+/* ================================================================
+   Fail total
+   ================================================================ */
 .fail-total {
   text-align: right;
-  color: var(--color-error);
-  font-weight: bold;
-  margin-top: 8px;
+  color: #dc2626;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 8px 12px;
+  border-top: 1px solid #fee2e2;
+  background: #fef2f2;
+  margin-top: auto;
 }
 
-.export-actions {
-  text-align: center;
-  margin-top: 30px;
-}
+/* ================================================================
+   Table cell helpers
+   ================================================================ */
+.cell-active   { font-weight: 650; color: #1a1f2e; }
+.cell-inactive { font-weight: 400; color: #9ca3af; }
+.cell-count    { font-size: 12px; color: #374151; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cell-unit     { color: #9ca3af; font-size: 11px; }
+.cell-spec     { font-size: 12px; color: #374151; }
+.cell-na       { color: #9ca3af; }
 
-.footer-text {
+/* ================================================================
+   Footer
+   ================================================================ */
+.dash-footer {
   text-align: center;
-  color: var(--text-tertiary);
+  margin-top: 36px;
+}
+.dash-footer-note {
+  margin: 16px 0 0;
+  color: #9ca3af;
   font-size: 12px;
-  margin-top: 30px;
-  padding-bottom: 10px;
 }
 
-.cell-active {
-  font-weight: bold;
-  color: var(--text-primary);
+/* ================================================================
+   Animations
+   ================================================================ */
+@media (prefers-reduced-motion: no-preference) {
+  .dash-title-icon { animation: kpi-pulse 2.5s ease-in-out infinite; }
+}
+@keyframes kpi-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.08); opacity: .85; }
+}
+</style>
+
+<!-- ================================================================
+     Night Theme (data-theme="night") — Midnight Studio
+     Global (non-scoped) selectors to override light theme.
+     Follows NIGHT_THEME_STYLE_GUIDE.md colour system.
+     ================================================================ -->
+<style>
+:root.theme-night .dashboard-page {
+  background: linear-gradient(165deg, #1a1a2e 0%, #16213e 100%);
 }
 
-.cell-inactive {
-  font-weight: normal;
-  color: var(--text-tertiary);
+/* ----- Header ----- */
+:root.theme-night .dash-header {
+  border-bottom-color: rgba(255,255,255,0.1);
+}
+:root.theme-night .dash-title {
+  color: #ffffff;
+}
+:root.theme-night .dash-title-text {
+  background: linear-gradient(135deg, #f9a825 0%, #ffd54f 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+:root.theme-night .dash-subtitle {
+  color: rgba(255,255,255,0.6);
+}
+:root.theme-night .dash-subtitle b {
+  color: rgba(255,255,255,0.9);
+}
+:root.theme-night .dash-subtitle-sep {
+  color: rgba(255,255,255,0.15);
+}
+
+/* ----- KPI Cards ----- */
+:root.theme-night .kpi-card {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.1);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+:root.theme-night .kpi-card:hover {
+  background: rgba(255,255,255,0.1);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+:root.theme-night .kpi-card--blue  { --kpi-accent: #4facfe; }
+:root.theme-night .kpi-card--green { --kpi-accent: #11998e; }
+:root.theme-night .kpi-card--amber { --kpi-accent: #f9a825; }
+:root.theme-night .kpi-card--slate { --kpi-accent: rgba(255,255,255,0.4); }
+:root.theme-night .kpi-card--blue::before  { background: linear-gradient(90deg, #4facfe, #00f2fe); }
+:root.theme-night .kpi-card--green::before { background: linear-gradient(90deg, #11998e, #38ef7d); }
+:root.theme-night .kpi-card--amber::before { background: linear-gradient(90deg, #c17900, #f9a825); }
+:root.theme-night .kpi-card--slate::before { background: linear-gradient(90deg, rgba(255,255,255,0.2), rgba(255,255,255,0.4)); }
+:root.theme-night .kpi-label {
+  color: rgba(255,255,255,0.6);
+}
+:root.theme-night .kpi-value {
+  color: #ffffff;
+}
+:root.theme-night .kpi-unit {
+  color: rgba(255,255,255,0.6);
+}
+:root.theme-night .kpi-sub {
+  color: rgba(255,255,255,0.4);
+}
+
+/* ----- Section Title (gold accent per night theme) ----- */
+:root.theme-night .sec-title {
+  color: rgba(255,255,255,0.9);
+  border-left-color: #c17900;
+}
+
+/* ----- Panel Row & Card ----- */
+:root.theme-night .panel-card {
+  background: rgba(255,255,255,0.05);
+  border-color: rgba(255,255,255,0.1);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+:root.theme-night .panel-head {
+  background: rgba(255,255,255,0.03);
+  color: rgba(255,255,255,0.85);
+  border-bottom-color: rgba(255,255,255,0.06);
+}
+
+/* ----- Summary Cards ----- */
+:root.theme-night .summary-card {
+  background: rgba(255,255,255,0.05);
+  border-color: rgba(255,255,255,0.1);
+}
+:root.theme-night .summary-card:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+:root.theme-night .summary-card p {
+  color: rgba(255,255,255,0.7);
+}
+:root.theme-night .summary-card p b {
+  color: rgba(255,255,255,0.9);
+}
+:root.theme-night .summary-card--blue  { border-left-color: #4facfe; }
+:root.theme-night .summary-card--blue  h4 { color: #4facfe; }
+:root.theme-night .summary-card--red   { border-left-color: #f5576c; }
+:root.theme-night .summary-card--red   h4 { color: #f5576c; }
+:root.theme-night .summary-card--green { border-left-color: #38ef7d; }
+:root.theme-night .summary-card--green h4 { color: #38ef7d; }
+
+/* ----- Fail Total ----- */
+:root.theme-night .fail-total {
+  background: rgba(245,87,108,0.1);
+  border-top-color: rgba(245,87,108,0.2);
+}
+
+/* ----- Yield Stats ----- */
+:root.theme-night .yield-stat-label {
+  color: rgba(255,255,255,0.6);
+}
+:root.theme-night .yield-stat-value {
+  color: #ffffff;
+}
+
+/* ----- Table Cell Helpers ----- */
+:root.theme-night .cell-active {
+  color: rgba(255,255,255,0.9);
+}
+:root.theme-night .cell-inactive {
+  color: rgba(255,255,255,0.3);
+}
+:root.theme-night .cell-count {
+  color: rgba(255,255,255,0.8);
+}
+:root.theme-night .cell-unit {
+  color: rgba(255,255,255,0.4);
+}
+:root.theme-night .cell-spec {
+  color: rgba(255,255,255,0.8);
+}
+:root.theme-night .cell-na {
+  color: rgba(255,255,255,0.4);
+}
+
+/* ----- Footer ----- */
+:root.theme-night .dash-footer-note {
+  color: rgba(255,255,255,0.3);
+}
+
+/* ----- Pulse animation — gold tint for night ----- */
+@media (prefers-reduced-motion: no-preference) {
+  :root.theme-night .dash-title-icon {
+    animation-name: kpi-pulse-night;
+  }
+}
+@keyframes kpi-pulse-night {
+  0%, 100% { transform: scale(1); opacity: 1; text-shadow: 0 0 6px rgba(249,168,37,0.3); }
+  50%      { transform: scale(1.08); opacity: .85; text-shadow: 0 0 14px rgba(249,168,37,0.5); }
 }
 </style>

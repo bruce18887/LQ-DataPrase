@@ -1,11 +1,33 @@
 /**
- * ECharts 夜晚主题配置
+ * ECharts 主题 & 渲染器配置
  *
- * 此文件提供了一个函数，根据当前主题返回适当的ECharts配置
+ * 此文件提供了：
+ * 1. 根据当前主题返回适当的ECharts颜色配置
+ * 2. 统一的渲染器模式（SVG / Canvas），方便全局切换
  */
 
 import { useThemeStore } from '../stores/theme'
 import { computed } from 'vue'
+
+// ============================================================
+//  渲染器模式 — 全局单一切换点，改为 'canvas' 即可切回
+// ============================================================
+let _chartRenderer: 'svg' | 'canvas' = 'svg'
+
+/** 获取 echarts.init 的第三个参数（渲染器配置） */
+export function getChartInitOpts(): { renderer: 'svg' | 'canvas' } {
+  return { renderer: _chartRenderer }
+}
+
+/** 运行时动态设置渲染器 */
+export function setChartRenderer(renderer: 'svg' | 'canvas') {
+  _chartRenderer = renderer
+}
+
+/** 获取当前渲染器模式 */
+export function getChartRenderer(): 'svg' | 'canvas' {
+  return _chartRenderer
+}
 
 /**
  * 获取当前主题的ECharts颜色配置

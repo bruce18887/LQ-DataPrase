@@ -53,18 +53,29 @@ docker-compose.override.yml
 # Playwright
 test-results/
 playwright-report/
+frontend/test-results/
+frontend/playwright-report/
+frontend/e2e/.auth/
+frontend/e2e/.downloads/
 
 # Development artifacts
 .claude/
-skills/
-Data/
+.skills/
+.trae/documents/
+.data/
 token.txt
 test_*.py
 P0_*.md
 P0_*.py
+*.png
+Data/
 test/
-*.md
+# WSL/Virtual envs
+.venv-wsl/
+.worktrees/
 
+# Playwright MCP cache
+.playwright-mcp/
 
 # OS
 *.bak

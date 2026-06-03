@@ -1,0 +1,105 @@
+- main [ref=e4]:
+  - generic [ref=e6]:
+    - navigation [ref=e8]:
+      - link "All160" [ref=e9] [cursor=pointer]:
+        - /url: "#?"
+      - link "Passed157" [ref=e10] [cursor=pointer]:
+        - /url: "#?q=s%3Apassed"
+        - img [ref=e11]
+        - text: Passed157
+      - link "Failed3" [ref=e13] [cursor=pointer]:
+        - /url: "#?q=s%3Afailed"
+        - img [ref=e14]
+        - text: Failed3
+      - link "Flaky0" [ref=e16] [cursor=pointer]:
+        - /url: "#?q=s%3Aflaky"
+      - link "Skipped8" [ref=e17] [cursor=pointer]:
+        - /url: "#?q=s%3Askipped"
+        - img [ref=e18]
+        - text: Skipped8
+      - link "Speedboard" [ref=e20] [cursor=pointer]:
+        - /url: "#?speedboard"
+        - img [ref=e21]
+      - button "Settings" [ref=e23] [cursor=pointer]:
+        - img [ref=e24]
+    - generic [ref=e26]:
+      - img
+      - textbox "Search tests" [ref=e27]: s:failed
+  - generic [ref=e29]:
+    - generic [ref=e31]: "Filtered: 3 (2.2m)"
+    - generic [ref=e33]: 2026/6/1 23:15:43
+    - generic [ref=e34]: "Total time: 2.3m"
+  - button "Metadata" [ref=e35] [cursor=pointer]:
+    - img [ref=e36]
+    - text: Metadata
+  - generic [ref=e38]:
+    - button "exports/exports.spec.ts" [expanded] [ref=e39] [cursor=pointer]:
+      - img [ref=e40]
+      - text: exports/exports.spec.ts
+    - region [ref=e42]:
+      - list [ref=e43]:
+        - listitem [ref=e44]:
+          - generic [ref=e45]:
+            - generic [ref=e46]:
+              - img [ref=e48]
+              - generic [ref=e50]:
+                - link "@p2 导出 - Gage Summary › 可选文件足够则生成并下载 xlsx" [ref=e51] [cursor=pointer]:
+                  - /url: "#?q=s%3Afailed&testId=0aa6001d2435d26cb80c-11a703cb36cec4e1a52e"
+                - generic [ref=e52]:
+                  - generic [ref=e54] [cursor=pointer]: Edge
+                  - generic [ref=e55] [cursor=pointer]: p2
+                  - generic [ref=e56] [cursor=pointer]: exports
+            - generic [ref=e57]: 1.0m
+          - generic [ref=e59]:
+            - link "exports/exports.spec.ts:109" [ref=e60] [cursor=pointer]:
+              - /url: "#?q=s%3Afailed&testId=0aa6001d2435d26cb80c-11a703cb36cec4e1a52e"
+              - generic [ref=e61]: exports/exports.spec.ts:109
+            - link "View video" [ref=e62] [cursor=pointer]:
+              - /url: "#?q=s%3Afailed&testId=0aa6001d2435d26cb80c-11a703cb36cec4e1a52e&run=0&anchor=attachment-video"
+              - img [ref=e63]
+        - listitem [ref=e65]:
+          - generic [ref=e66]:
+            - generic [ref=e67]:
+              - img [ref=e69]
+              - generic [ref=e71]:
+                - link "@p2 导出 - Buyoff Form › 可选文件足够则生成并下载 xlsx" [ref=e72] [cursor=pointer]:
+                  - /url: "#?q=s%3Afailed&testId=0aa6001d2435d26cb80c-7398c6caaad54a7dbd82"
+                - generic [ref=e73]:
+                  - generic [ref=e75] [cursor=pointer]: Edge
+                  - generic [ref=e76] [cursor=pointer]: p2
+                  - generic [ref=e77] [cursor=pointer]: exports
+            - generic [ref=e78]: 1.0m
+          - generic [ref=e80]:
+            - link "exports/exports.spec.ts:160" [ref=e81] [cursor=pointer]:
+              - /url: "#?q=s%3Afailed&testId=0aa6001d2435d26cb80c-7398c6caaad54a7dbd82"
+              - generic [ref=e82]: exports/exports.spec.ts:160
+            - link "View video" [ref=e83] [cursor=pointer]:
+              - /url: "#?q=s%3Afailed&testId=0aa6001d2435d26cb80c-7398c6caaad54a7dbd82&run=0&anchor=attachment-video"
+              - img [ref=e84]
+  - generic [ref=e86]:
+    - button "auth/auth.spec.ts" [expanded] [ref=e87] [cursor=pointer]:
+      - img [ref=e88]
+      - text: auth/auth.spec.ts
+    - region [ref=e90]:
+      - list [ref=e91]:
+        - listitem [ref=e92]:
+          - generic [ref=e93]:
+            - generic [ref=e94]:
+              - img [ref=e96]
+              - generic [ref=e98]:
+                - link "@p0 认证与路由守卫 › @p1 401 响应自动清除登录态并跳登录" [ref=e99] [cursor=pointer]:
+                  - /url: "#?q=s%3Afailed&testId=11ab049aabb515b3eeb7-aa9f796e28c55ff5cb77"
+                - generic [ref=e100]:
+                  - generic [ref=e102] [cursor=pointer]: Edge
+                  - generic [ref=e103] [cursor=pointer]: p0
+                  - generic [ref=e104] [cursor=pointer]: p1
+                  - generic [ref=e105] [cursor=pointer]: p2
+                  - generic [ref=e106] [cursor=pointer]: auth
+            - generic [ref=e107]: 6.3s
+          - generic [ref=e109]:
+            - link "auth/auth.spec.ts:62" [ref=e110] [cursor=pointer]:
+              - /url: "#?q=s%3Afailed&testId=11ab049aabb515b3eeb7-aa9f796e28c55ff5cb77"
+              - generic [ref=e111]: auth/auth.spec.ts:62
+            - link "View video" [ref=e112] [cursor=pointer]:
+              - /url: "#?q=s%3Afailed&testId=11ab049aabb515b3eeb7-aa9f796e28c55ff5cb77&run=0&anchor=attachment-video"
+              - img [ref=e113]

@@ -11,24 +11,6 @@ export function useExport(
   getSelectedFileId: () => number | null
 ) {
   const exporting = ref(false)
-  const correlationMatrix = ref<any>(null)
-  const matrixLoading = ref(false)
-
-  async function loadCorrelationMatrix() {
-    const fileId = getSelectedFileId()
-    if (!fileId) return
-    matrixLoading.value = true
-    try {
-      const { data } = await api.post('/analysis/correlation_matrix/', {
-        file_id: fileId,
-      })
-      correlationMatrix.value = data
-    } catch {
-      // silently fail
-    } finally {
-      matrixLoading.value = false
-    }
-  }
 
   function downloadBlob(data: Blob, filename: string) {
     const url = window.URL.createObjectURL(data)
@@ -79,9 +61,6 @@ export function useExport(
 
   return {
     exporting,
-    correlationMatrix,
-    matrixLoading,
-    loadCorrelationMatrix,
     exportSigmaLimit,
     exportBatchCharts,
   }

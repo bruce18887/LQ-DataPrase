@@ -1,3 +1,4 @@
+import json
 import math
 import os
 
@@ -35,6 +36,7 @@ from apps.analysis.services.data_services import (
     compute_cpk_table_data,
 )
 from apps.analysis.services.limits import resolve_limits
+from apps.datafiles.services import get_cached_parsed_file
 
 
 def clean_data(data):
@@ -44,38 +46,53 @@ def clean_data(data):
         return {k: clean_data(v) for k, v in data.items()}
     elif isinstance(data, float):
         if math.isnan(data) or math.isinf(data):
-            return 0.0
+            return None
         return data
     else:
         return data
+
+
+def _getlist(request, key):
+    """Get a list from request.data (tolerant to both dict/JSON and QueryDict/form-data)
+    with request.query_params fallback."""
+    if hasattr(request.data, 'getlist'):
+        val = request.data.getlist(key)
+    else:
+        val = request.data.get(key)
+    if val:
+        return val if isinstance(val, list) else [val]
+    return request.query_params.getlist(key)
 
 
 def _load_df_from_request(request):
     file_id = request.data.get('file_id') or request.query_params.get('file_id')
     if not file_id:
         return None, None, None, 'file_id_required'
-    datafile = get_object_or_404(DataFile, pk=file_id, owner=request.user)
-    if not os.path.exists(datafile.file_path):
-        return None, datafile, None, 'file_not_found'
-
-    parser = get_parser(datafile.format_type)
-    df, metadata = parser.parse(datafile.file_path)
+    file_id = int(file_id)
+    df, metadata, fmt = get_cached_parsed_file(file_id, request.user.pk)
+    if df is None and fmt is not None:
+        # file_id valid but file not on disk or parse failed
+        return None, None, None, 'file_not_found_or_parse_failed'
     if df is None:
-        return None, datafile, None, 'parse_failed'
+        return None, None, None, 'file_not_found'
+    # Reconstruct datafile for the return contract (callers access .id etc.)
+    datafile = DataFile.objects.filter(pk=file_id, owner=request.user).first()
+    if datafile is None:
+        return None, None, None, 'file_not_found'
     return df, datafile, metadata, None
 
 
 class AnalysisViewSet(viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['get', 'post'])
     def histogram(self, request):
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
             return Response({'error': err}, status=400)
 
-        params = request.data.get('params')
-        ignore_no_limit = request.data.get('ignore_no_limit', False)
+        params = _getlist(request, 'params')
+        ignore_no_limit = (request.data.get('ignore_no_limit') or request.query_params.get('ignore_no_limit', '')).lower() in ('true', '1', 'yes')
 
         if not params:
             numeric_cols = [c for c in df.columns if df[c].dtype in ('int64', 'float64')]
@@ -109,7 +126,7 @@ class AnalysisViewSet(viewsets.GenericViewSet):
             'results': results,
         }))
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['get', 'post'])
     def wafer_map(self, request):
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
@@ -119,8 +136,8 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         if not x_col or not y_col:
             return Response({'error': 'no_coord_columns'})
 
-        param = request.data.get('param')
-        color_by = request.data.get('color_by', 'result')
+        param = request.data.get('param') or request.query_params.get('param')
+        color_by = request.data.get('color_by') or request.query_params.get('color_by', 'result')
 
         wm = compute_wafer_map_data(df, metadata, param, color_by, x_col, y_col)
 
@@ -133,19 +150,20 @@ class AnalysisViewSet(viewsets.GenericViewSet):
             'wafer': wm['wafer'],
         }))
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['get', 'post'])
     def multi_lot(self, request):
-        file_ids = request.data.get('file_ids', [])
-        param = request.data.get('param')
-        if not file_ids or len(file_ids) < 2:
+        file_ids = _getlist(request, 'file_ids')
+        param = request.data.get('param') or request.query_params.get('param')
+        if len(file_ids) < 2:
             return Response({'error': 'need_at_least_2_files'}, status=400)
 
         datasets = {}
         all_series = []
         for fid in file_ids:
             df_obj = get_object_or_404(DataFile, pk=fid, owner=request.user)
-            parser = get_parser(df_obj.format_type)
-            df, metadata = parser.parse(df_obj.file_path)
+            use_cache = False
+            # Can use cache only when we don't need the DB object for other fields
+            df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk)
             if df is None:
                 continue
             if param and param in df.columns:
@@ -165,15 +183,15 @@ class AnalysisViewSet(viewsets.GenericViewSet):
 
         return Response(clean_data(result))
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['get', 'post'])
     def correlation(self, request):
         """Return raw data for two selected parameters, organized by Site for scatter plot."""
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
             return Response({'error': err}, status=400)
 
-        param_x = request.data.get('param_x')
-        param_y = request.data.get('param_y')
+        param_x = request.data.get('param_x') or request.query_params.get('param_x')
+        param_y = request.data.get('param_y') or request.query_params.get('param_y')
         if not param_x or not param_y:
             return Response({'error': 'param_x_and_param_y_required'}, status=400)
 
@@ -184,18 +202,18 @@ class AnalysisViewSet(viewsets.GenericViewSet):
 
         return Response(clean_data(result))
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['get', 'post'])
     def serial_distribution(self, request):
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
             return Response({'error': err}, status=400)
 
-        param = request.data.get('param')
+        param = request.data.get('param') or request.query_params.get('param')
         if not param:
             return Response({'error': 'param_required'}, status=400)
 
-        chart_config = request.data.get('chart_config', [])
-        range_type = request.data.get('range_type', 'RDL')
+        chart_config = json.loads(request.data.get('chart_config') or request.query_params.get('chart_config', '[]'))
+        range_type = request.data.get('range_type') or request.query_params.get('range_type', 'RDL')
 
         result = compute_serial_distribution_data(
             df, metadata, param, range_type, chart_config)
@@ -204,13 +222,13 @@ class AnalysisViewSet(viewsets.GenericViewSet):
 
         return Response(clean_data(result))
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['get', 'post'])
     def cpk(self, request):
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
             return Response({'error': err}, status=400)
 
-        params = request.data.get('params')
+        params = _getlist(request, 'params')
         if not params:
             params = get_columns_with_limits(df, metadata)
 
@@ -218,159 +236,8 @@ class AnalysisViewSet(viewsets.GenericViewSet):
 
         return Response(clean_data(result))
 
-    @action(detail=False, methods=['post'])
-    def correlation_matrix(self, request):
-        """
-        Compute correlation matrix for multiple parameters.
 
-        Request body:
-        {
-            "file_id": 123,
-            "params": ["Param1", "Param2", "Param3"],  // Optional, defaults to all numeric params with limits
-            "method": "pearson"  // or "spearman", default is "pearson"
-        }
-        """
-        df, datafile, metadata, err = _load_df_from_request(request)
-        if err:
-            return Response({'error': err}, status=400)
-
-        params = request.data.get('params', [])
-        method = request.data.get('method', 'pearson')
-
-        # Validate method
-        if method not in ['pearson', 'spearman']:
-            return Response({'error': 'invalid_method'}, status=400)
-
-        # If no params specified, use all numeric columns with limits
-        if not params:
-            params = get_columns_with_limits(df, metadata)
-
-        # Compute correlation matrix
-        result = compute_correlation_matrix(df, params, method)
-
-        return Response(clean_data({
-            'file_id': datafile.id,
-            'filename': datafile.filename,
-            'params': result['params'],
-            'matrix': result['matrix'],
-            'sample_size': result['sample_size'],
-            'method': method
-        }))
-
-    @action(detail=False, methods=['post'])
-    def bin_trend(self, request):
-        """
-        Compute bin distribution trend across multiple files.
-
-        Request body:
-        {
-            "file_ids": [123, 124, 125],
-            "group_by": "file"  // Currently only "file" is supported
-        }
-        """
-        file_ids = request.data.get('file_ids', [])
-        if not file_ids or not isinstance(file_ids, list):
-            return Response({'error': 'file_ids_required'}, status=400)
-
-        # Load all files
-        dfs = []
-        metadatas = []
-        file_info = []
-
-        for file_id in file_ids:
-            try:
-                datafile = get_object_or_404(DataFile, pk=file_id, owner=request.user)
-
-                if not os.path.exists(datafile.file_path):
-                    continue
-
-                parser = get_parser(datafile.format_type)
-                df, metadata = parser.parse(datafile.file_path)
-
-                dfs.append(df)
-                metadatas.append(metadata)
-                file_info.append({
-                    'file_id': datafile.id,
-                    'filename': datafile.filename,
-                    'timestamp': datafile.created_at.strftime('%Y-%m-%d %H:%M:%S')
-                })
-            except Exception:
-                continue
-
-        if len(dfs) == 0:
-            return Response({'error': 'no_valid_files'}, status=400)
-
-        # Compute bin trend
-        result = compute_bin_trend(dfs, metadatas)
-
-        return Response(clean_data({
-            'files': file_info,
-            'bins': result['bins'],
-            'trend_data': result['trend_data'],
-            'yield_trend': result['yield_trend']
-        }))
-
-    @action(detail=False, methods=['post'])
-    def boxplot(self, request):
-        """
-        Compute box plot statistics for parameters.
-
-        Request body:
-        {
-            "file_id": 123,
-            "params": ["Param1", "Param2"],
-            "group_by": "site"  // Optional: "site", "bin", or null for overall
-        }
-        """
-        df, datafile, metadata, err = _load_df_from_request(request)
-        if err:
-            return Response({'error': err}, status=400)
-
-        params = request.data.get('params', [])
-        group_by = request.data.get('group_by', None)
-
-        if not params:
-            return Response({'error': 'params_required'}, status=400)
-
-        results = {}
-        site_col = get_site_column(df) if group_by == 'site' else None
-
-        for param in params:
-            if param not in df.columns:
-                continue
-
-            data_series = get_1d_from(df, param)
-
-            # Overall statistics
-            overall_stats = compute_boxplot_stats(data_series)
-
-            param_result = {
-                'overall': overall_stats
-            }
-
-            # Group by site if requested
-            if group_by == 'site' and site_col:
-                site_idx = get_1d_from(df, site_col)
-                by_site = {}
-
-                for site in sorted(site_idx.unique(), key=str):
-                    mask = (site_idx == site)
-                    if isinstance(mask, pd.Series):
-                        mask = mask.values
-                    site_data = data_series[mask]
-                    by_site[str(site)] = compute_boxplot_stats(site_data)
-
-                param_result['by_site'] = by_site
-
-            results[param] = param_result
-
-        return Response(clean_data({
-            'file_id': datafile.id,
-            'filename': datafile.filename,
-            'results': results
-        }))
-
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['get', 'post'])
     def qqplot(self, request):
         """
         Compute QQ plot data for normality testing of a single parameter.
@@ -385,7 +252,7 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         if err:
             return Response({'error': err}, status=400)
 
-        param = request.data.get('param')
+        param = request.data.get('param') or request.query_params.get('param')
         if not param:
             return Response({'error': 'param_required'}, status=400)
         if param not in df.columns:
@@ -396,7 +263,7 @@ class AnalysisViewSet(viewsets.GenericViewSet):
 
         return Response(clean_data(result))
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['get', 'post'])
     def uph(self, request):
         """
         Compute UPH (Units Per Hour) using the parallel-site throughput model.
@@ -412,77 +279,22 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         if err:
             return Response({'error': err}, status=400)
 
-        test_time_col = request.data.get('test_time_col')
-        manual_test_time_sec = request.data.get('manual_test_time_sec')
+        test_time_col = request.data.get('test_time_col') or request.query_params.get('test_time_col')
+        manual_test_time_sec = request.data.get('manual_test_time_sec') or request.query_params.get('manual_test_time_sec')
+        if manual_test_time_sec is not None:
+            manual_test_time_sec = float(manual_test_time_sec)
         result = compute_uph(df, metadata, test_time_col=test_time_col,
                              manual_test_time_sec=manual_test_time_sec)
 
         return Response(clean_data(result))
 
-    @action(detail=False, methods=['post'])
-    def param_trend(self, request):
-        """
-        Compute parameter statistics trend across multiple files.
 
-        Request body:
-        {
-            "file_ids": [123, 124, 125],
-            "param": "Param1",
-            "group_by": "file"  // Currently only "file" is supported
-        }
-        """
-        file_ids = request.data.get('file_ids', [])
-        param = request.data.get('param', '')
-
-        if not file_ids or not isinstance(file_ids, list):
-            return Response({'error': 'file_ids_required'}, status=400)
-
-        if not param:
-            return Response({'error': 'param_required'}, status=400)
-
-        # Load all files
-        dfs = []
-        metadatas = []
-        file_info = []
-
-        for file_id in file_ids:
-            try:
-                datafile = get_object_or_404(DataFile, pk=file_id, owner=request.user)
-
-                if not os.path.exists(datafile.file_path):
-                    continue
-
-                parser = get_parser(datafile.format_type)
-                df, metadata = parser.parse(datafile.file_path)
-
-                dfs.append(df)
-                metadatas.append(metadata)
-                file_info.append({
-                    'file_id': datafile.id,
-                    'filename': datafile.filename,
-                    'timestamp': datafile.created_at.strftime('%Y-%m-%d %H:%M:%S')
-                })
-            except Exception:
-                continue
-
-        if len(dfs) == 0:
-            return Response({'error': 'no_valid_files'}, status=400)
-
-        # Compute parameter trend
-        result = compute_param_trend(dfs, param, metadatas)
-
-        return Response(clean_data({
-            'files': file_info,
-            'param': result['param'],
-            'trend_data': result['trend_data'],
-            'limits': result['limits']
-        }))
 
 
 class StatisticsViewSet(viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['get', 'post'])
     def detect_fail(self, request):
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
@@ -514,7 +326,7 @@ class StatisticsViewSet(viewsets.GenericViewSet):
             'col_meta': col_meta,
         }))
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['get', 'post'])
     def bin_stats(self, request):
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
@@ -530,17 +342,17 @@ class StatisticsViewSet(viewsets.GenericViewSet):
             })
         return Response({'bin_stats': result})
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['get', 'post'])
     def site_stats(self, request):
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
             return Response({'error': err}, status=400)
 
-        param = request.data.get('param')
+        param = request.data.get('param') or request.query_params.get('param')
         if not param:
             return Response({'error': 'param_required'}, status=400)
 
-        range_type = request.data.get('range_type', 'RDL')
+        range_type = request.data.get('range_type') or request.query_params.get('range_type', 'RDL')
 
         data_series = get_1d_from(df, param).dropna()
         data_series = data_series[data_series.apply(lambda x: abs(x) < float('inf'))]
@@ -567,7 +379,7 @@ class StatisticsViewSet(viewsets.GenericViewSet):
             'site_data': site_result,
         }))
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['get', 'post'])
     def correlation_matrix(self, request):
         """
         Compute correlation matrix for multiple parameters.
@@ -583,8 +395,8 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         if err:
             return Response({'error': err}, status=400)
 
-        params = request.data.get('params')
-        method = request.data.get('method', 'pearson')
+        params = _getlist(request, 'params')
+        method = request.data.get('method') or request.query_params.get('method', 'pearson')
 
         # Validate method
         if method not in ['pearson', 'spearman', 'kendall']:
@@ -605,7 +417,7 @@ class StatisticsViewSet(viewsets.GenericViewSet):
             **result
         }))
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['get', 'post'])
     def bin_trend(self, request):
         """
         Compute bin distribution trend across multiple files.
@@ -616,7 +428,7 @@ class StatisticsViewSet(viewsets.GenericViewSet):
             "group_by": "file"  // Optional: "file" or "date"
         }
         """
-        file_ids = request.data.get('file_ids', [])
+        file_ids = _getlist(request, 'file_ids')
         if not file_ids:
             return Response({'error': 'file_ids_required'}, status=400)
 
@@ -628,8 +440,9 @@ class StatisticsViewSet(viewsets.GenericViewSet):
                 if not os.path.exists(datafile.file_path):
                     continue
 
-                parser = get_parser(datafile.format_type)
-                df, metadata = parser.parse(datafile.file_path)
+                df, metadata, fmt = get_cached_parsed_file(int(file_id), request.user.pk)
+                if df is None:
+                    continue
 
                 file_data_list.append({
                     'df': df,
@@ -648,7 +461,7 @@ class StatisticsViewSet(viewsets.GenericViewSet):
 
         return Response(clean_data(result))
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['get', 'post'])
     def boxplot(self, request):
         """
         Compute box plot statistics for parameters.
@@ -664,8 +477,8 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         if err:
             return Response({'error': err}, status=400)
 
-        params = request.data.get('params')
-        group_by = request.data.get('group_by')
+        params = _getlist(request, 'params')
+        group_by = request.data.get('group_by') or request.query_params.get('group_by')
 
         if not params:
             return Response({'error': 'params_required'}, status=400)
@@ -724,7 +537,7 @@ class StatisticsViewSet(viewsets.GenericViewSet):
             'results': results
         }))
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['get', 'post'])
     def param_trend(self, request):
         """
         Compute parameter statistics trend across multiple files.
@@ -736,8 +549,8 @@ class StatisticsViewSet(viewsets.GenericViewSet):
             "group_by": "file"  // Optional: "file" or "date"
         }
         """
-        file_ids = request.data.get('file_ids', [])
-        param = request.data.get('param')
+        file_ids = _getlist(request, 'file_ids')
+        param = request.data.get('param') or request.query_params.get('param')
 
         if not file_ids:
             return Response({'error': 'file_ids_required'}, status=400)
@@ -753,8 +566,9 @@ class StatisticsViewSet(viewsets.GenericViewSet):
                 if not os.path.exists(datafile.file_path):
                     continue
 
-                parser = get_parser(datafile.format_type)
-                df, metadata = parser.parse(datafile.file_path)
+                df, metadata, fmt = get_cached_parsed_file(int(file_id), request.user.pk)
+                if df is None:
+                    continue
 
                 file_data_list.append({
                     'df': df,

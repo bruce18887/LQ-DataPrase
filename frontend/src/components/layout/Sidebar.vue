@@ -15,23 +15,35 @@
 
     <!-- 导航菜单 -->
     <nav class="nav-menu">
-      <router-link
-        v-for="item in menuItems"
-        :key="item.path"
-        :to="item.path"
-        class="menu-item"
-        :class="{ active: isActive(item.path), hidden: item.requiresAdmin && !isAdmin }"
-      >
-        <div class="menu-item-content">
-          <div class="menu-icon" aria-hidden="true">
-            <component :is="item.icon" />
-          </div>
+      <template v-for="(item, index) in menuItems" :key="item.path">
+        <!-- 分组分隔线 -->
+        <div
+          v-if="item.groupStart && index > 0"
+          class="menu-divider"
+          :class="{ 'divider-collapsed': isCollapsed }"
+        >
+          <div class="divider-line"></div>
           <transition name="fade">
-            <span v-show="!isCollapsed" class="menu-label">{{ item.label }}</span>
+            <span v-show="!isCollapsed" class="divider-label">{{ item.groupLabel }}</span>
           </transition>
         </div>
-        <div v-if="isActive(item.path)" class="active-indicator" aria-hidden="true"></div>
-      </router-link>
+
+        <router-link
+          :to="item.path"
+          class="menu-item"
+          :class="{ active: isActive(item.path), hidden: item.requiresAdmin && !isAdmin }"
+        >
+          <div class="menu-item-content">
+            <div class="menu-icon" aria-hidden="true">
+              <component :is="item.icon" />
+            </div>
+            <transition name="fade">
+              <span v-show="!isCollapsed" class="menu-label">{{ item.label }}</span>
+            </transition>
+          </div>
+          <div v-if="isActive(item.path)" class="active-indicator" aria-hidden="true"></div>
+        </router-link>
+      </template>
     </nav>
 
     <!-- 折叠按钮 -->
@@ -69,14 +81,16 @@ const isCollapsed = ref(false)
 const isAdmin = computed(() => authStore.user?.role === 'administrator')
 
 const menuItems = [
-  { path: '/dashboard', label: '仪表板', icon: Odometer, requiresAdmin: false },
+  // 数据操作
+  { path: '/dashboard', label: '仪表板', icon: Odometer, requiresAdmin: false, groupStart: true, groupLabel: '数据操作' },
   { path: '/data', label: '数据管理', icon: Folder, requiresAdmin: false },
-  { path: '/analysis', label: '数据分析', icon: TrendCharts, requiresAdmin: false },
-  { path: '/roadmap', label: '功能路线图', icon: List, requiresAdmin: false },
-  { path: '/settings', label: '系统设置', icon: Setting, requiresAdmin: false },
-  { path: '/batch', label: '批次报表', icon: DataAnalysis, requiresAdmin: false },
   { path: '/sftp', label: 'SFTP浏览器', icon: Connection, requiresAdmin: false },
-  { path: '/admin/users', label: '用户管理', icon: User, requiresAdmin: true },
+  { path: '/analysis', label: '数据分析', icon: TrendCharts, requiresAdmin: false },
+  { path: '/batch', label: '批次报表', icon: DataAnalysis, requiresAdmin: false },
+  // 系统管理
+  { path: '/admin/users', label: '用户管理', icon: User, requiresAdmin: true, groupStart: true, groupLabel: '系统管理' },
+  { path: '/settings', label: '系统设置', icon: Setting, requiresAdmin: false },
+  { path: '/roadmap', label: '功能路线图', icon: List, requiresAdmin: false },
 ]
 
 const isActive = (path: string) => {
@@ -278,6 +292,41 @@ const toggleCollapse = () => {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* 分组分隔线 */
+.menu-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 12px 6px;
+  user-select: none;
+}
+
+.menu-divider.divider-collapsed {
+  justify-content: center;
+  padding: 12px 0 6px;
+}
+
+.divider-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border-default);
+}
+
+.divider-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.menu-divider.divider-collapsed .divider-line {
+  width: 20px;
+  flex: 0;
 }
 
 /* 折叠状态下的样式调整 */

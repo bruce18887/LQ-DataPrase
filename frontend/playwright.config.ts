@@ -1,4 +1,20 @@
 import { defineConfig, devices } from '@playwright/test'
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const PROJECT_ROOT = path.resolve(__dirname, '..')
+
+// venv Python（Windows 路径；其它平台用 PYTHON_BIN 覆盖）
+const PYTHON_BIN =
+  process.env.PYTHON_BIN || path.join(PROJECT_ROOT, '.venv', 'Scripts', 'python.exe')
+
+const FRONTEND_URL = 'http://localhost:3000'
+const BACKEND_PORT = '8000'
+const BACKEND_URL = `http://localhost:${BACKEND_PORT}`
+
+// 默认由 Playwright 自动拉起前后端；设 PW_NO_WEBSERVER=1 改为手动起服务
+const NO_WEBSERVER = process.env.PW_NO_WEBSERVER === '1'
 
 export default defineConfig({
   testDir: './e2e',
@@ -6,18 +22,98 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: 'html',
+  timeout: 60_000,
+  expect: { timeout: 10_000 },
+
+  // 全局前置：seed 用户 + 预植入 SampleData 到 DB（在所有项目之前）
+  globalSetup: path.join(__dirname, 'e2e', 'global-setup.ts'),
+
+  reporter: [['html', { open: 'never' }], ['list']],
+
+  // 测试产物（含失败截图/视频/trace）与下载文件目录
+  outputDir: './test-results',
+
+  // 📊 Playwright UI 模式下显示的元数据
+  metadata: {
+    title: 'DataPhrase E2E',
+    description: 'ATE 量产数据分析平台 — 端到端测试套件',
+    modules: 'smoke | auth | global | dashboard | data | analysis | batch | sftp | settings | roadmap | admin | exports',
+    priorities: '@p0 冒烟 | @p1 核心 | @p2 增强',
+  },
 
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: FRONTEND_URL,
     trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
     channel: 'msedge',
+    actionTimeout: 15_000,
+    navigationTimeout: 30_000,
   },
 
   projects: [
+    // 1) 登录态准备：登录 admin / user 并导出 storageState
+    {
+      name: 'setup',
+      testMatch: /fixtures[\\/]auth\.setup\.ts/,
+    },
+    // 2) 业务用例：默认使用 admin 登录态（仅含 localStorage token）
     {
       name: 'Edge',
-      use: { ...devices['Desktop Edge'] },
+      use: {
+        ...devices['Desktop Edge'],
+        channel: 'msedge',
+        storageState: path.join(__dirname, 'e2e', '.auth', 'admin.json'),
+      },
+      dependencies: ['setup'],
+      testIgnore: /fixtures[\\/]auth\.setup\.ts/,
+    },
+    // 3) 按优先级选择性运行（在 UI 中用 filter 切，或 CLI: --grep @p0）
+    {
+      name: 'P0',
+      use: { ...devices['Desktop Edge'], channel: 'msedge', storageState: path.join(__dirname, 'e2e', '.auth', 'admin.json') },
+      grep: /@p0/,
+      dependencies: ['setup'],
+      testIgnore: /fixtures[\\/]auth\.setup\.ts/,
+    },
+    {
+      name: 'P1',
+      use: { ...devices['Desktop Edge'], channel: 'msedge', storageState: path.join(__dirname, 'e2e', '.auth', 'admin.json') },
+      grep: /@p1/,
+      dependencies: ['setup'],
+      testIgnore: /fixtures[\\/]auth\.setup\.ts/,
+    },
+    {
+      name: 'P2',
+      use: { ...devices['Desktop Edge'], channel: 'msedge', storageState: path.join(__dirname, 'e2e', '.auth', 'admin.json') },
+      grep: /@p2/,
+      dependencies: ['setup'],
+      testIgnore: /fixtures[\\/]auth\.setup\.ts/,
     },
   ],
+
+  webServer: NO_WEBSERVER
+    ? undefined
+    : [
+        {
+          // Django 后端（development 配置 + sqlite）
+          command: `"${PYTHON_BIN}" manage.py runserver ${BACKEND_PORT} --noreload`,
+          cwd: PROJECT_ROOT,
+          url: `${BACKEND_URL}/api/schema/`,
+          reuseExistingServer: true,
+          timeout: 120_000,
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
+        {
+          // Vite 前端（/api 代理到 8000）
+          command: 'npm run dev',
+          cwd: __dirname,
+          url: FRONTEND_URL,
+          reuseExistingServer: true,
+          timeout: 120_000,
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
+      ],
 })

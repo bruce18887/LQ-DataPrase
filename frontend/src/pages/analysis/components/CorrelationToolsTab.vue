@@ -8,13 +8,6 @@
 
     <el-divider />
 
-    <!-- 相关性矩阵 -->
-    <CorrelationMatrixSection
-      :file-id="fileId"
-    />
-
-    <el-divider />
-
     <!-- 文件相关性 -->
     <FileCorrelationSection
       :files="files"
@@ -32,7 +25,6 @@
 
 <script setup lang="ts">
 import ParameterCorrelationSection from './correlation/ParameterCorrelationSection.vue'
-import CorrelationMatrixSection from './correlation/CorrelationMatrixSection.vue'
 import FileCorrelationSection from './correlation/FileCorrelationSection.vue'
 import BatchExportSection from './correlation/BatchExportSection.vue'
 

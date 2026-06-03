@@ -10,6 +10,7 @@ import excelize
 
 from apps.datafiles.models import DataFile
 from apps.datafiles.parsers import get_parser
+from apps.datafiles.services import get_cached_parsed_file
 from apps.analysis.services.statistics import (
     detect_fail_data, get_site_column,
 )
@@ -33,8 +34,7 @@ class ExportViewSet(viewsets.GenericViewSet):
         site_filter = request.data.get('site_filter', '全部')
 
         datafile = get_object_or_404(DataFile, pk=file_id, owner=request.user)
-        parser = get_parser(datafile.format_type)
-        df, metadata = parser.parse(datafile.file_path)
+        df, metadata, fmt = get_cached_parsed_file(int(file_id), request.user.pk)
         if df is None:
             return Response({'error': 'parse_failed'}, status=400)
 
@@ -76,8 +76,7 @@ class ExportViewSet(viewsets.GenericViewSet):
         site_filter = request.data.get('site_filter', '全部')
 
         datafile = get_object_or_404(DataFile, pk=file_id, owner=request.user)
-        parser = get_parser(datafile.format_type)
-        df, metadata = parser.parse(datafile.file_path)
+        df, metadata, fmt = get_cached_parsed_file(int(file_id), request.user.pk)
         if df is None:
             return Response({'error': 'parse_failed'}, status=400)
 
@@ -104,8 +103,7 @@ class ExportViewSet(viewsets.GenericViewSet):
         only_valid = request.data.get('only_valid_limits', False)
 
         datafile = get_object_or_404(DataFile, pk=file_id, owner=request.user)
-        parser = get_parser(datafile.format_type)
-        df, metadata = parser.parse(datafile.file_path)
+        df, metadata, fmt = get_cached_parsed_file(int(file_id), request.user.pk)
         if df is None:
             return Response({'error': 'parse_failed'}, status=400)
 
@@ -124,8 +122,7 @@ class ExportViewSet(viewsets.GenericViewSet):
     def html_report(self, request):
         file_id = request.data.get('file_id')
         datafile = get_object_or_404(DataFile, pk=file_id, owner=request.user)
-        parser = get_parser(datafile.format_type)
-        df, metadata = parser.parse(datafile.file_path)
+        df, metadata, fmt = get_cached_parsed_file(int(file_id), request.user.pk)
         if df is None:
             return Response({'error': 'parse_failed'}, status=400)
 
@@ -162,8 +159,7 @@ class ExportViewSet(viewsets.GenericViewSet):
             return Response({'error': 'file_id_required'}, status=400)
 
         datafile = get_object_or_404(DataFile, pk=file_id, owner=request.user)
-        parser = get_parser(datafile.format_type)
-        df, metadata = parser.parse(datafile.file_path)
+        df, metadata, fmt = get_cached_parsed_file(int(file_id), request.user.pk)
         if df is None:
             return Response({'error': 'parse_failed'}, status=400)
 

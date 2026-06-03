@@ -19,6 +19,8 @@
           :prefix-icon="Search"
           size="small"
           clearable
+          autocomplete="off"
+          aria-label="搜索功能"
           @keyup.enter="handleSearch"
         />
       </div>
@@ -35,7 +37,7 @@
 
       <!-- 用户菜单 -->
       <el-dropdown trigger="click" @command="handleCommand">
-        <div class="user-menu">
+        <div class="user-menu" tabindex="0" role="button" aria-haspopup="true" aria-expanded="false">
           <div class="user-avatar">
             <el-icon :size="18"><User /></el-icon>
           </div>
@@ -243,6 +245,12 @@ const handleCommand = (command: string) => {
   background-color: var(--bg-tertiary);
 }
 
+.icon-btn:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 /* 用户菜单 */
 .user-menu {
   display: flex;
@@ -256,6 +264,11 @@ const handleCommand = (command: string) => {
 
 .user-menu:hover {
   background-color: var(--bg-tertiary);
+}
+
+.user-menu:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
 }
 
 .user-avatar {

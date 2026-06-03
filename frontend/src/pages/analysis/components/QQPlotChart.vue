@@ -18,6 +18,7 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { Loading } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
+import { getChartInitOpts } from '../../../utils/echarts-theme'
 import { useThemeStore } from '../../../stores/theme'
 
 const _tc = () =>
@@ -48,7 +49,7 @@ function initChart() {
     chartInstance.dispose()
     chartInstance = null
   }
-  chartInstance = echarts.init(chartRef.value)
+  chartInstance = echarts.init(chartRef.value, undefined, getChartInitOpts())
 }
 
 function renderChart() {

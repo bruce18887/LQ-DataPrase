@@ -1,15 +1,11 @@
 <template>
   <div class="param-correlation-section">
-    <el-card header="🔗 参数相关性分析" shadow="hover" style="margin-bottom: 16px">
-      <CorrelationPanel
-        :params="params"
-        :loading="corrLoading"
-        :pearson-r="corrPearsonR"
-        :chart-data="corrResult"
-        v-model:axis-mode="corrAxisMode"
-        @analyze="loadCorrelation"
-      />
-    </el-card>
+    <CorrelationPanel
+      :params="params"
+      :loading="corrLoading"
+      :chart-data="corrResult"
+      @analyze="loadCorrelation"
+    />
   </div>
 </template>
 
@@ -22,17 +18,9 @@ const props = defineProps<{
   params: string[]
 }>()
 
-const {
-  corrLoading,
-  corrResult,
-  corrPearsonR,
-  corrAxisMode,
-  loadCorrelation,
-} = useCorrelation(() => props.fileId)
+const { corrLoading, corrResult, loadCorrelation } = useCorrelation(() => props.fileId)
 </script>
 
 <style scoped>
-.param-correlation-section {
-  width: 100%;
-}
+.param-correlation-section { width: 100%; }
 </style>
