@@ -11,12 +11,16 @@ class DataFileSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(
         source='get_status_display', read_only=True
     )
+    file_type_display = serializers.CharField(
+        source='get_file_type_display', read_only=True
+    )
 
     class Meta:
         model = DataFile
         fields = [
             'id', 'owner', 'filename', 'file_path', 'file_size',
-            'format_type', 'format_type_display', 'row_count', 'col_count',
+            'format_type', 'format_type_display', 'file_type', 'file_type_display',
+            'batch_name', 'row_count', 'col_count',
             'program_name', 'metadata', 'status', 'status_display',
             'created_at', 'updated_at',
         ]
@@ -31,12 +35,16 @@ class DataFileListSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(
         source='get_status_display', read_only=True
     )
+    file_type_display = serializers.CharField(
+        source='get_file_type_display', read_only=True
+    )
 
     class Meta:
         model = DataFile
         fields = [
             'id', 'owner', 'filename', 'file_size', 'format_type',
-            'format_type_display', 'row_count', 'col_count', 'program_name',
+            'format_type_display', 'file_type', 'file_type_display',
+            'batch_name', 'row_count', 'col_count', 'program_name',
             'status', 'status_display', 'created_at', 'updated_at',
         ]
 

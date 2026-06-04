@@ -14,3 +14,5 @@ matplotlib>=3.7
 paramiko>=2.10
 python-pptx>=0.6.21
 Pillow>=10.0
+py7zr>=0.20
+rarfile>=4.0

@@ -22,6 +22,8 @@ export interface DataFile {
   id: number
   filename: string
   format_type: string
+  file_type: string
+  batch_name: string
   row_count: number
   col_count: number
   program_name: string

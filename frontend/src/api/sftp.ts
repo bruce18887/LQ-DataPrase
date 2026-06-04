@@ -7,11 +7,23 @@ export const sftpApi = {
   disconnect() {
     return api.post('/sftp/disconnect/')
   },
-  listFiles(path: string) {
-    return api.get('/sftp/list_files/', { params: { path } })
+  listFiles(path: string, sortBy = 'name', sortOrder = 'asc') {
+    return api.get('/sftp/list_files/', { params: { path, sort_by: sortBy, sort_order: sortOrder } })
   },
   download(path: string) {
     return api.post('/sftp/download/', { path }, { responseType: 'blob' })
+  },
+  downloadDir(path: string, onlyData = false) {
+    return api.post('/sftp/download_dir/', { path, only_data: onlyData }, { responseType: 'blob' })
+  },
+  downloadBatch(paths: string[]) {
+    return api.post('/sftp/download_batch/', { paths }, { responseType: 'blob' })
+  },
+  downloadAndParse(path: string) {
+    return api.post('/sftp/download_and_parse/', { path })
+  },
+  downloadAndParseBatch(paths: string[]) {
+    return api.post('/sftp/download_and_parse/', { paths })
   },
   getConfigs() {
     return api.get('/sftp/configs/')

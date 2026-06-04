@@ -11,6 +11,18 @@ export const datafilesApi = {
       },
     })
   },
+  uploadMultiple(files: File[], onProgress?: (pct: number) => void) {
+    const formData = new FormData()
+    for (const f of files) {
+      formData.append('files', f)
+    }
+    return api.post('/upload/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (e) => {
+        if (e.total && onProgress) onProgress(Math.round((e.loaded * 100) / e.total))
+      },
+    })
+  },
   list() {
     return api.get('/files/')
   },

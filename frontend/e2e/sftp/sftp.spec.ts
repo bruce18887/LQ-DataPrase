@@ -215,3 +215,74 @@ test.describe('@p2 SFTP 真实下载（env-gated）', { tag: ['@p2', '@sftp'] },
     expect(size).toBeGreaterThan(0)
   })
 })
+
+test.describe('@p2 SFTP 下载解析（env-gated）', { tag: ['@p2', '@sftp'] }, () => {
+  test('连接成功后下载并解析首个文件，/files/ 中出现该文件', async ({ page }) => {
+    test.skip(
+      !SFTP_HOST,
+      'set SFTP_HOST/PORT/USERNAME/PASSWORD to run real SFTP download_and_parse',
+    )
+    if (!SFTP_HOST) {
+      console.log('[sftp] SFTP_HOST 未设置，跳过下载解析用例')
+      return
+    }
+
+    await gotoApp(page, '/sftp')
+
+    await page.getByPlaceholder('例如: 192.168.1.1').fill(SFTP_HOST)
+    const port = fieldByLabel(page, '端口')
+    await port.fill('')
+    await port.fill(SFTP_PORT)
+    await fieldByLabel(page, '用户名').fill(SFTP_USERNAME ?? '')
+    await fieldByLabel(page, '密码').fill(SFTP_PASSWORD ?? '')
+
+    await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes('/sftp/connect/') && r.request().method() === 'POST',
+        { timeout: 30_000 },
+      ),
+      page.getByRole('button', { name: '连接' }).click(),
+    ])
+
+    await expect(page.locator('.file-table')).toBeVisible({ timeout: 30_000 })
+
+    // Find first file row's "解析" button
+    const firstParseBtn = page
+      .locator('.file-table')
+      .getByRole('button', { name: '解析' })
+      .first()
+
+    if ((await firstParseBtn.count()) === 0) {
+      test.skip(true, '已连接但当前目录无可解析文件')
+      return
+    }
+    await expect(firstParseBtn).toBeVisible({ timeout: 30_000 })
+
+    // Get the file name from the row
+    const row = firstParseBtn.locator('xpath=ancestor::tr')
+    const fileName = await row.locator('.file-name').textContent()
+
+    // Click parse
+    await firstParseBtn.click()
+
+    // Wait for success message
+    await expect(page.getByText(/已下载并导入/).first()).toBeVisible({ timeout: 30_000 })
+
+    // Verify the file appears in /files/ API
+    const result = await page.evaluate(async () => {
+      const token = localStorage.getItem('access_token')
+      const res = await fetch('/api/v1/files/', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      const data = await res.json()
+      const files = Array.isArray(data) ? data : (data.results ?? [])
+      return {
+        status: res.status,
+        files: files.map((f: any) => ({ id: f.id, filename: f.filename, file_type: f.file_type })),
+      }
+    })
+    expect(result.status).toBe(200)
+    expect(result.files.some((f: any) => f.filename === fileName)).toBe(true)
+    console.log(`[sftp] 已下载解析文件 "${fileName}"，file_type: ${result.files.find((f: any) => f.filename === fileName)?.file_type}`)
+  })
+})
