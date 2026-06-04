@@ -17,6 +17,11 @@ class DataFile(models.Model):
         ('error', 'Error'),
     ]
 
+    FILE_TYPE_CHOICES = [
+        ('single', '单文件'),
+        ('batch', '批次文件'),
+    ]
+
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -26,6 +31,8 @@ class DataFile(models.Model):
     file_path = models.CharField(max_length=512)
     file_size = models.BigIntegerField()
     format_type = models.CharField(max_length=20, choices=FORMAT_CHOICES)
+    file_type = models.CharField(max_length=10, choices=FILE_TYPE_CHOICES, default='single')
+    batch_name = models.CharField(max_length=255, blank=True, default='')
     row_count = models.IntegerField(null=True, blank=True)
     col_count = models.IntegerField(null=True, blank=True)
     program_name = models.CharField(max_length=255, blank=True, default='')

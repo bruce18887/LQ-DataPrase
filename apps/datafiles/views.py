@@ -2,6 +2,9 @@ import csv
 import io
 import json
 import os
+import shutil
+import time
+import zipfile
 
 import numpy as np
 import pandas as pd
@@ -25,6 +28,117 @@ from apps.datafiles.serializers import (
 from apps.datafiles.tasks import parse_data_file_task
 from apps.datafiles.services import get_cached_parsed_file
 
+ARCHIVE_EXTENSIONS = {'.zip', '.7z', '.rar'}
+
+
+def _is_archive(filename):
+    return os.path.splitext(filename)[1].lower() in ARCHIVE_EXTENSIONS
+
+
+def _extract_archive(file_path, dest_dir):
+    """Extract ZIP/7z/RAR to dest_dir. Returns list of extracted file paths."""
+    ext = os.path.splitext(file_path)[1].lower()
+    extracted = []
+
+    if ext == '.zip':
+        with zipfile.ZipFile(file_path, 'r') as zf:
+            for info in zf.infolist():
+                if info.is_dir() or info.filename.startswith('__MACOSX'):
+                    continue
+                # Flatten: use only the basename
+                name = os.path.basename(info.filename)
+                if not name:
+                    continue
+                out_path = os.path.join(dest_dir, name)
+                with zf.open(info) as src, open(out_path, 'wb') as dst:
+                    dst.write(src.read())
+                extracted.append(out_path)
+
+    elif ext == '.7z':
+        import py7zr
+        with py7zr.SevenZipFile(file_path, 'r') as sz:
+            for name, bio in sz.readall().items():
+                basename = os.path.basename(name)
+                if not basename:
+                    continue
+                out_path = os.path.join(dest_dir, basename)
+                with open(out_path, 'wb') as dst:
+                    dst.write(bio.read())
+                extracted.append(out_path)
+
+    elif ext == '.rar':
+        import rarfile
+        with rarfile.RarFile(file_path) as rf:
+            for info in rf.infolist():
+                if info.is_dir():
+                    continue
+                basename = os.path.basename(info.filename)
+                if not basename:
+                    continue
+                out_path = os.path.join(dest_dir, basename)
+                with rf.open(info) as src, open(out_path, 'wb') as dst:
+                    dst.write(src.read())
+                extracted.append(out_path)
+
+    return extracted
+
+
+def _register_file(user, file_path, file_type='single', batch_name=''):
+    """Parse a file and create DataFile + ParseHistory records."""
+    filename = os.path.basename(file_path)
+    file_size = os.path.getsize(file_path)
+
+    format_type = 'Unknown'
+    program_name = ''
+    row_count, col_count = 0, 0
+
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            head = f.read(4096)
+        format_type = BaseATEParser.identify_format(head)
+        if format_type != 'Unknown':
+            parser = get_parser(format_type)
+            df, metadata = parser.parse(file_path)
+            if df is not None:
+                row_count = df.shape[0]
+                col_count = df.shape[1]
+                program_name = metadata.get('program_name', '')
+    except Exception:
+        pass
+
+    datafile = DataFile.objects.create(
+        owner=user,
+        filename=filename,
+        file_path=file_path,
+        file_size=file_size,
+        format_type=format_type if format_type != 'Unknown' else 'CTA8290D',
+        file_type=file_type,
+        batch_name=batch_name,
+        row_count=row_count,
+        col_count=col_count,
+        program_name=program_name,
+        status='ready' if format_type != 'Unknown' else 'error',
+    )
+
+    ParseHistory.objects.create(
+        user=user,
+        datafile=datafile,
+        filename=filename,
+        filepath=file_path,
+        format_type=datafile.format_type,
+        rows=row_count,
+        cols=col_count,
+    )
+
+    return datafile
+
+
+def _user_upload_dir(user_id, file_type='single'):
+    """Return per-user upload directory: media/data/<user_id>/<file_type>/"""
+    path = os.path.join(settings.MEDIA_ROOT, 'data', str(user_id), file_type)
+    os.makedirs(path, exist_ok=True)
+    return path
+
 
 class DataFileViewSet(viewsets.ModelViewSet):
     serializer_class = DataFileSerializer
@@ -41,68 +155,71 @@ class DataFileViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
 
+    def destroy(self, request, *args, **kwargs):
+        datafile = self.get_object()
+        # Delete physical file(s)
+        file_path = datafile.file_path
+        if datafile.file_type == 'batch' and datafile.batch_name:
+            # Batch: delete the entire batch directory
+            batch_dir = os.path.dirname(file_path)
+            if os.path.isdir(batch_dir):
+                shutil.rmtree(batch_dir, ignore_errors=True)
+        else:
+            # Single: delete just the file
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        datafile.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class FileUploadView(APIView):
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request):
-        serializer = FileUploadSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        # Support both single 'file' and multiple 'files' keys
+        files = request.FILES.getlist('files') or request.FILES.getlist('file')
+        if not files:
+            return Response({'error': '未选择文件'}, status=400)
 
-        uploaded_file = request.FILES['file']
+        upload_dir = _user_upload_dir(request.user.id, 'single')
+        created = []
 
-        upload_dir = os.path.join(settings.BASE_DIR, 'media', 'uploads')
-        os.makedirs(upload_dir, exist_ok=True)
+        for uploaded_file in files:
+            base_name = uploaded_file.name
+            file_path = os.path.join(upload_dir, base_name)
 
-        file_path = os.path.join(upload_dir, uploaded_file.name)
-        with open(file_path, 'wb+') as dest:
-            for chunk in uploaded_file.chunks():
-                dest.write(chunk)
+            # Handle filename collision
+            if os.path.exists(file_path):
+                ts = int(time.time())
+                name, ext = os.path.splitext(base_name)
+                file_path = os.path.join(upload_dir, f"{name}_{ts}{ext}")
 
-        format_type = 'Unknown'
-        program_name = ''
-        row_count, col_count = 0, 0
+            # Save uploaded file
+            with open(file_path, 'wb+') as dest:
+                for chunk in uploaded_file.chunks():
+                    dest.write(chunk)
 
-        try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                head = f.read(4096)
-            format_type = BaseATEParser.identify_format(head)
-
-            if format_type != 'Unknown':
-                parser = get_parser(format_type)
-                df, metadata = parser.parse(file_path)
-                if df is not None:
-                    row_count = df.shape[0]
-                    col_count = df.shape[1]
-                    program_name = metadata.get('program_name', '')
-        except Exception:
-            pass
-
-        datafile = DataFile.objects.create(
-            owner=request.user,
-            filename=uploaded_file.name,
-            file_path=file_path,
-            file_size=uploaded_file.size,
-            format_type=format_type if format_type != 'Unknown' else 'CTA8290D',
-            row_count=row_count,
-            col_count=col_count,
-            program_name=program_name,
-            status='ready' if format_type != 'Unknown' else 'error',
-        )
-
-        ParseHistory.objects.create(
-            user=request.user,
-            datafile=datafile,
-            filename=uploaded_file.name,
-            filepath=file_path,
-            format_type=format_type if format_type != 'Unknown' else 'CTA8290D',
-            rows=row_count,
-            cols=col_count,
-        )
+            # If archive, extract and register each extracted file
+            if _is_archive(base_name):
+                extract_dir = file_path + '_extracted'
+                os.makedirs(extract_dir, exist_ok=True)
+                try:
+                    extracted = _extract_archive(file_path, extract_dir)
+                    batch_name = os.path.splitext(base_name)[0]
+                    for ext_path in extracted:
+                        df = _register_file(request.user, ext_path, 'batch', batch_name)
+                        created.append(df)
+                except Exception:
+                    pass
+                # Remove the archive itself (keep extracted files)
+                os.remove(file_path)
+            else:
+                df = _register_file(request.user, file_path, 'single')
+                created.append(df)
 
         return Response(
-            DataFileSerializer(datafile).data,
+            DataFileSerializer(created, many=True).data,
             status=status.HTTP_201_CREATED,
         )
 

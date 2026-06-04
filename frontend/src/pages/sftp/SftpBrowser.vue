@@ -17,7 +17,7 @@
       </el-tag>
     </div>
 
-    <!-- 连接配置 -->
+    <!-- Connection Panel -->
     <el-card v-if="!connected" class="connect-card" shadow="hover">
       <template #header>
         <div class="card-header">
@@ -30,12 +30,7 @@
         <el-row :gutter="20">
           <el-col :span="8">
             <el-form-item label="主机" required>
-              <el-input
-                v-model="conn.host"
-                placeholder="例如: 192.168.1.1"
-                :prefix-icon="Monitor"
-                clearable
-              />
+              <el-input v-model="conn.host" placeholder="例如: 192.168.1.1" :prefix-icon="Monitor" clearable />
             </el-form-item>
           </el-col>
           <el-col :span="4">
@@ -64,7 +59,7 @@
         </el-form-item>
       </el-form>
 
-      <!-- 已保存配置 -->
+      <!-- Saved Configs -->
       <div v-if="savedConfigs.length > 0" class="saved-configs">
         <el-divider>
           <el-icon><Collection /></el-icon> 已保存配置
@@ -104,9 +99,9 @@
       </div>
     </el-card>
 
-    <!-- 文件浏览器 -->
+    <!-- File Browser -->
     <div v-else class="file-browser">
-      <!-- 工具栏 -->
+      <!-- Toolbar -->
       <el-card class="toolbar-card" shadow="never" :body-style="{ padding: '12px 20px' }">
         <el-row align="middle">
           <el-col :span="14">
@@ -147,15 +142,43 @@
         </el-row>
       </el-card>
 
-      <!-- 文件列表 -->
+      <!-- Batch Actions -->
+      <div class="batch-bar" v-if="fileItems.length > 0">
+        <el-checkbox v-model="allSelected" :indeterminate="isIndeterminate" @change="toggleSelectAll">
+          全选
+        </el-checkbox>
+        <el-button size="small" @click="invertSelection">反选</el-button>
+        <template v-if="selectedPaths.length > 0">
+          <el-divider direction="vertical" />
+          <el-tag type="info" size="small">已选 {{ selectedPaths.length }} 个文件</el-tag>
+          <el-button size="small" type="primary" @click="batchDownload" :loading="batchDownloading">
+            <el-icon><Download /></el-icon> 批量下载
+          </el-button>
+          <el-button size="small" type="success" @click="batchDownloadAndParse" :loading="batchParsing">
+            <el-icon><DataAnalysis /></el-icon> 批量下载解析
+          </el-button>
+        </template>
+      </div>
+
+      <!-- File List -->
       <el-card class="file-list-card" shadow="never">
         <el-table
           :data="filteredItems"
           @row-click="handleRow"
+          @sort-change="handleSortChange"
           class="file-table"
           :header-cell-style="{ background: '#f5f7fa', fontWeight: '600', fontSize: '13px' }"
         >
-          <el-table-column label="名称" min-width="280">
+          <el-table-column width="40" align="center">
+            <template #default="{row}">
+              <el-checkbox
+                v-if="!row.is_dir"
+                v-model="row._selected"
+                @click.stop
+              />
+            </template>
+          </el-table-column>
+          <el-table-column label="名称" min-width="280" column-key="name" sortable="custom" :sort-orders="['ascending', 'descending']">
             <template #default="{row}">
               <div class="file-name-cell" :class="{ 'is-dir': row.is_dir }">
                 <div class="file-icon">
@@ -169,21 +192,15 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="大小" width="120" align="right">
+          <el-table-column label="大小" width="120" align="right" column-key="size" sortable="custom" :sort-orders="['ascending', 'descending']">
             <template #default="{row}">
               <span v-if="row.is_dir" class="dir-label">文件夹</span>
               <span v-else class="file-size">{{ formatSize(row.size) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="修改时间" width="160" align="center">
+          <el-table-column label="修改时间" width="160" align="center" column-key="mtime" sortable="custom" :sort-orders="['ascending', 'descending']">
             <template #default="{row}">
               <span class="file-time">{{ row.mtime ? formatDate(row.mtime) : '-' }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="权限" width="80" align="center">
-            <template #default="{row}">
-              <el-tag v-if="row.mode" size="small" type="info" effect="plain">{{ formatMode(row.mode) }}</el-tag>
-              <span v-else>-</span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="220" align="center">
@@ -196,14 +213,13 @@
                   <el-icon><DataAnalysis /></el-icon> 解析
                 </el-button>
               </el-button-group>
-              <el-button v-else size="small" type="info" plain disabled>
-                <el-icon><FolderOpened /></el-icon> 文件夹
+              <el-button v-else size="small" type="info" plain @click.stop="navigateTo(currentPath + '/' + row.name)">
+                <el-icon><FolderOpened /></el-icon> 打开
               </el-button>
             </template>
           </el-table-column>
         </el-table>
 
-        <!-- 空状态 -->
         <el-empty v-if="filteredItems.length === 0" description="暂无文件" :image-size="100">
           <template #image>
             <el-icon :size="60" color="#dcdfe6"><FolderOpened /></el-icon>
@@ -211,7 +227,7 @@
         </el-empty>
       </el-card>
 
-      <!-- 统计信息 -->
+      <!-- Stats -->
       <div class="stats-bar">
         <el-tag type="info" effect="plain" size="small">
           <el-icon><Folder /></el-icon> {{ dirCount }} 个文件夹
@@ -222,13 +238,16 @@
         <el-tag type="info" effect="plain" size="small">
           <el-icon><PieChart /></el-icon> 总计 {{ formatSize(totalSize) }}
         </el-tag>
+        <el-tag effect="plain" size="small">
+          共 {{ items.length }} 项
+        </el-tag>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import {
   Folder, Document, FolderOpened, CircleCheck, CircleClose,
   Connection, Monitor, User, Lock, Link, Star, Collection,
@@ -254,12 +273,18 @@ const items = ref<any[]>([])
 const downloadingDir = ref(false)
 const savedConfigs = ref<SftpConfig[]>([])
 const searchQuery = ref('')
+const sortBy = ref('name')
+const sortOrder = ref<'asc' | 'desc'>('asc')
+const batchDownloading = ref(false)
+const batchParsing = ref(false)
 
 const pathSegments = computed(() => {
   const segs = currentPath.value.split('/').filter(Boolean)
   let path = ''
   return segs.map(s => { path += '/' + s; return { name: s, path } })
 })
+
+const fileItems = computed(() => items.value.filter(i => !i.is_dir))
 
 const filteredItems = computed(() => {
   if (!searchQuery.value) return items.value
@@ -271,6 +296,30 @@ const dirCount = computed(() => items.value.filter(i => i.is_dir).length)
 const fileCount = computed(() => items.value.filter(i => !i.is_dir).length)
 const totalSize = computed(() => items.value.filter(i => !i.is_dir).reduce((sum, i) => sum + (i.size || 0), 0))
 
+const selectedPaths = computed(() => {
+  return items.value
+    .filter(i => !i.is_dir && i._selected)
+    .map(i => currentPath.value + '/' + i.name)
+})
+
+const allSelected = computed({
+  get: () => fileItems.value.length > 0 && fileItems.value.every(i => i._selected),
+  set: () => {},
+})
+
+const isIndeterminate = computed(() => {
+  const selected = fileItems.value.filter(i => i._selected).length
+  return selected > 0 && selected < fileItems.value.length
+})
+
+function toggleSelectAll(val: boolean) {
+  fileItems.value.forEach(i => { i._selected = val })
+}
+
+function invertSelection() {
+  fileItems.value.forEach(i => { i._selected = !i._selected })
+}
+
 onMounted(() => {
   loadSavedConfigs()
 })
@@ -278,9 +327,7 @@ onMounted(() => {
 function loadSavedConfigs() {
   try {
     const data = localStorage.getItem('sftp_configs')
-    if (data) {
-      savedConfigs.value = JSON.parse(data)
-    }
+    if (data) savedConfigs.value = JSON.parse(data)
   } catch {
     savedConfigs.value = []
   }
@@ -294,21 +341,10 @@ function saveCurrentConfig() {
   if (!conn.value.host) return
   const name = prompt('配置名称:', conn.value.host)
   if (!name) return
-
   const existing = savedConfigs.value.findIndex(c => c.name === name)
-  const config: SftpConfig = {
-    name,
-    host: conn.value.host,
-    port: conn.value.port,
-    username: conn.value.username,
-    password: conn.value.password,
-  }
-
-  if (existing >= 0) {
-    savedConfigs.value[existing] = config
-  } else {
-    savedConfigs.value.push(config)
-  }
+  const config: SftpConfig = { name, ...conn.value }
+  if (existing >= 0) savedConfigs.value[existing] = config
+  else savedConfigs.value.push(config)
   saveConfigs()
   ElMessage.success('配置已保存')
 }
@@ -343,9 +379,9 @@ async function disconnect() {
 
 async function listFiles(path: string) {
   try {
-    const { data } = await sftpApi.listFiles(path)
+    const { data } = await sftpApi.listFiles(path, sortBy.value, sortOrder.value)
     currentPath.value = data.path
-    items.value = data.items
+    items.value = (data.items || []).map((item: any) => ({ ...item, _selected: false }))
   } catch { ElMessage.error('获取文件列表失败') }
 }
 
@@ -355,13 +391,26 @@ function navigateToParent() {
   const segs = currentPath.value.split('/').filter(Boolean)
   if (segs.length === 0) return
   segs.pop()
-  const parentPath = '/' + segs.join('/')
-  listFiles(parentPath || '/')
+  listFiles('/' + segs.join('/') || '/')
 }
 
 function handleRow(row: any) {
   if (row.is_dir) listFiles(currentPath.value + '/' + row.name)
 }
+
+// ------------------------------------------------------------------
+// Sorting (el-table sort-change)
+// ------------------------------------------------------------------
+
+function handleSortChange({ prop, order }: { prop: string; order: string | null }) {
+  sortBy.value = prop || 'name'
+  sortOrder.value = order === 'descending' ? 'desc' : 'asc'
+  listFiles(currentPath.value)
+}
+
+// ------------------------------------------------------------------
+// Download
+// ------------------------------------------------------------------
 
 async function downloadFile(row: any) {
   try {
@@ -378,55 +427,61 @@ async function downloadFile(row: any) {
 
 async function downloadAndParse(row: any) {
   try {
-    const resp = await sftpApi.download(currentPath.value + '/' + row.name)
-    const blob = resp.data as Blob
-    const file = new File([blob], row.name, { type: 'text/csv' })
-
-    const formData = new FormData()
-    formData.append('file', file)
-
-    const api = (await import('../../api')).default
-    await api.post('/upload/', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    })
-    ElMessage.success('文件已下载并导入到系统')
+    const { data } = await sftpApi.downloadAndParse(currentPath.value + '/' + row.name)
+    ElMessage.success(`文件 "${row.name}" 已下载并导入到系统`)
   } catch { ElMessage.error('下载并解析失败') }
 }
 
 async function downloadDirectory() {
   downloadingDir.value = true
   try {
-    const files = items.value.filter(item => !item.is_dir)
-    if (files.length === 0) {
-      ElMessage.warning('当前目录没有文件')
-      return
-    }
-
-    const zip = new (window as any).JSZip()
-    const folder = zip.folder(currentPath.value.split('/').pop() || 'download')
-
-    for (const file of files) {
-      try {
-        const resp = await sftpApi.download(currentPath.value + '/' + file.name)
-        const blob = resp.data as Blob
-        const arrayBuffer = await blob.arrayBuffer()
-        folder?.file(file.name, arrayBuffer)
-      } catch {
-        // Skip failed files
-      }
-    }
-
-    const content = await zip.generateAsync({ type: 'blob' })
-    const url = URL.createObjectURL(content)
+    const resp = await sftpApi.downloadDir(currentPath.value, false)
+    const dirName = currentPath.value.split('/').pop() || 'download'
+    const url = URL.createObjectURL(resp.data)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${currentPath.value.split('/').pop() || 'download'}.zip`
+    a.download = `${dirName}.zip`
     a.click()
     URL.revokeObjectURL(url)
     ElMessage.success('目录已打包下载')
   } catch { ElMessage.error('目录下载失败') }
   finally { downloadingDir.value = false }
 }
+
+async function batchDownload() {
+  if (selectedPaths.value.length === 0) return
+  batchDownloading.value = true
+  try {
+    const resp = await sftpApi.downloadBatch(selectedPaths.value)
+    const url = URL.createObjectURL(resp.data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'batch_download.zip'
+    a.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success(`已下载 ${selectedPaths.value.length} 个文件`)
+  } catch { ElMessage.error('批量下载失败') }
+  finally { batchDownloading.value = false }
+}
+
+async function batchDownloadAndParse() {
+  const selected = items.value.filter(i => !i.is_dir && i._selected)
+  if (selected.length === 0) return
+
+  batchParsing.value = true
+  try {
+    const paths = selected.map(i => currentPath.value + '/' + i.name)
+    const { data } = await sftpApi.downloadAndParseBatch(paths)
+    ElMessage.success(`已成功导入 ${data.files?.length || 0}/${selected.length} 个文件（批次: ${data.batch_name}）`)
+  } catch {
+    ElMessage.error('批量下载解析失败')
+  }
+  batchParsing.value = false
+}
+
+// ------------------------------------------------------------------
+// Helpers
+// ------------------------------------------------------------------
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return bytes + ' B'
@@ -445,14 +500,6 @@ function getFileExt(name: string): string {
   const ext = name.split('.').pop()
   return ext && ext !== name ? '.' + ext : ''
 }
-
-function formatMode(mode: number): string {
-  const perms = ['---', '--x', '-w-', '-wx', 'r--', 'r-x', 'rw-', 'rwx']
-  const owner = perms[(mode >> 6) & 7]
-  const group = perms[(mode >> 3) & 7]
-  const other = perms[mode & 7]
-  return owner + group + other
-}
 </script>
 
 <style scoped>
@@ -470,7 +517,7 @@ function formatMode(mode: number): string {
   background: var(--bg-secondary);
   border-radius: 8px;
   border: 1px solid var(--border-default);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow-sm);
 }
 
 .header-icon {
@@ -481,232 +528,84 @@ function formatMode(mode: number): string {
   height: 56px;
   background: var(--bg-primary);
   border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow-sm);
 }
 
-.header-title {
-  flex: 1;
-}
-
-.header-title h2 {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.header-subtitle {
-  margin: 4px 0 0;
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
-.status-tag {
-  font-size: 13px;
-  padding: 6px 14px;
-}
+.header-title { flex: 1; }
+.header-title h2 { margin: 0; font-size: 22px; font-weight: 600; color: var(--text-primary); }
+.header-subtitle { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); }
+.status-tag { font-size: 13px; padding: 6px 14px; }
 
 /* Connect Card */
-.connect-card {
-  border-radius: 8px;
-  margin-bottom: 20px;
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  font-size: 15px;
-  color: var(--text-primary);
-}
-
-.connect-form {
-  padding-top: 8px;
-}
-
-.form-actions {
-  margin-top: 8px;
-  margin-bottom: 0;
-}
-
-.form-actions :deep(.el-form-item__content) {
-  gap: 12px;
-}
+.connect-card { border-radius: 8px; margin-bottom: 20px; }
+.card-header { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; color: var(--text-primary); }
+.connect-form { padding-top: 8px; }
+.form-actions { margin-top: 8px; margin-bottom: 0; }
+.form-actions :deep(.el-form-item__content) { gap: 12px; }
 
 /* Saved Configs */
-.saved-configs {
-  margin-top: 16px;
-}
-
-.config-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 16px;
-  margin-top: 16px;
-}
-
-.config-item {
-  border-radius: 8px;
-  transition: transform 0.3s ease, box-shadow 0.3s ease, background-color 0.3s ease;
-}
-
-.config-item:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.08);
-}
-
-.config-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.config-name {
-  font-weight: 600;
-  font-size: 15px;
-  color: var(--text-primary);
-}
-
-.config-info {
-  margin-bottom: 12px;
-}
-
-.config-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  margin-bottom: 4px;
-}
-
-.config-actions {
-  display: flex;
-  gap: 8px;
-}
+.saved-configs { margin-top: 16px; }
+.config-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin-top: 16px; }
+.config-item { border-radius: 8px; transition: transform 0.3s ease, box-shadow 0.3s ease; }
+.config-item:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+.config-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.config-name { font-weight: 600; font-size: 15px; color: var(--text-primary); }
+.config-info { margin-bottom: 12px; }
+.config-row { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; }
+.config-actions { display: flex; gap: 8px; }
 
 /* File Browser */
-.file-browser {
-  animation: fadeIn 0.3s ease;
-}
+.file-browser { animation: fadeIn 0.3s ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
+.toolbar-card { border-radius: 8px; margin-bottom: 8px; }
+.breadcrumb-wrap { display: flex; align-items: center; gap: 8px; }
+.back-btn { margin-right: 4px; }
 
-.toolbar-card {
-  border-radius: 8px;
-  margin-bottom: 12px;
-}
-
-.breadcrumb-wrap {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.back-btn {
-  margin-right: 4px;
-}
-
-.file-list-card {
-  border-radius: 8px;
-  margin-bottom: 12px;
-}
-
-.file-table {
-  cursor: pointer;
-}
-
-.file-name-cell {
+/* Batch Bar */
+.batch-bar {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 4px 0;
-}
-
-.file-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  background: var(--bg-tertiary);
-  border-radius: 8px;
-  flex-shrink: 0;
-}
-
-.is-dir .file-icon {
-  background: rgba(217, 119, 6, 0.1);
-}
-
-.file-info {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.file-name {
-  font-size: 14px;
-  color: var(--text-primary);
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.is-dir .file-name {
-  color: var(--color-warning);
-  font-weight: 600;
-}
-
-.file-ext {
-  font-size: 12px;
-  color: var(--text-secondary);
-  background: var(--bg-tertiary);
-  padding: 1px 6px;
-  border-radius: 4px;
-  white-space: nowrap;
-}
-
-.file-size {
-  font-size: 13px;
-  color: var(--text-secondary);
-  font-family: 'Courier New', monospace;
-}
-
-.file-time {
-  font-size: 13px;
-  color: var(--text-tertiary);
-}
-
-.dir-label {
-  font-size: 12px;
-  color: var(--color-warning);
-  background: rgba(217, 119, 6, 0.1);
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-
-/* Stats Bar */
-.stats-bar {
-  display: flex;
-  gap: 12px;
-  justify-content: flex-end;
-  padding: 0 4px;
-}
-
-/* Element Plus Overrides */
-:deep(.el-card) {
-  background-color: var(--bg-secondary);
+  padding: 8px 16px;
+  margin-bottom: 8px;
+  background: var(--bg-secondary);
   border: 1px solid var(--border-default);
   border-radius: 8px;
 }
 
+/* File List */
+.file-list-card { border-radius: 8px; margin-bottom: 12px; }
+.file-table { cursor: pointer; }
+
+.file-name-cell { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+.file-icon {
+  display: flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; background: var(--bg-tertiary); border-radius: 8px; flex-shrink: 0;
+}
+.is-dir .file-icon { background: rgba(217, 119, 6, 0.1); }
+.file-info { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.file-name {
+  font-size: 14px; color: var(--text-primary); font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.is-dir .file-name { color: var(--color-warning); font-weight: 600; }
+.file-ext {
+  font-size: 12px; color: var(--text-secondary); background: var(--bg-tertiary);
+  padding: 1px 6px; border-radius: 4px; white-space: nowrap;
+}
+.file-size { font-size: 13px; color: var(--text-secondary); font-family: var(--font-mono); }
+.file-time { font-size: 13px; color: var(--text-tertiary); }
+.dir-label {
+  font-size: 12px; color: var(--color-warning);
+  background: rgba(217, 119, 6, 0.1); padding: 2px 8px; border-radius: 4px;
+}
+
+/* Stats */
+.stats-bar { display: flex; gap: 12px; justify-content: flex-end; padding: 0 4px; }
+
+/* Element Plus Overrides */
+:deep(.el-card) { background-color: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; }
 :deep(.el-table) {
   --el-table-bg-color: var(--bg-secondary);
   --el-table-tr-bg-color: var(--bg-secondary);
@@ -715,42 +614,13 @@ function formatMode(mode: number): string {
   --el-table-text-color: var(--text-primary);
   --el-table-row-hover-bg-color: var(--bg-tertiary);
 }
-
-:deep(.el-input__wrapper) {
-  background-color: var(--bg-primary);
-  border-radius: 8px;
-  box-shadow: 0 0 0 1px var(--border-default) inset;
-}
-
-:deep(.el-input__wrapper:hover) {
-  box-shadow: 0 0 0 1px var(--brand-primary) inset;
-}
-
-:deep(.el-input__wrapper.is-focus) {
-  box-shadow: 0 0 0 1px var(--brand-primary) inset;
-}
-
-:deep(.el-button) {
-  border-radius: 8px;
-}
-
-:deep(.el-divider) {
-  border-color: var(--border-default);
-}
-
-:deep(.el-breadcrumb__item) {
-  cursor: pointer;
-}
-
-:deep(.el-breadcrumb__item:hover .el-breadcrumb__inner) {
-  color: var(--brand-primary);
-}
-
-:deep(.el-breadcrumb__inner) {
-  color: var(--text-secondary);
-}
-
-:deep(.el-breadcrumb__separator) {
-  color: var(--text-tertiary);
-}
+:deep(.el-input__wrapper) { background-color: var(--bg-primary); border-radius: 8px; box-shadow: 0 0 0 1px var(--border-default) inset; }
+:deep(.el-input__wrapper:hover) { box-shadow: 0 0 0 1px var(--brand-primary) inset; }
+:deep(.el-input__wrapper.is-focus) { box-shadow: 0 0 0 1px var(--brand-primary) inset; }
+:deep(.el-button) { border-radius: 8px; }
+:deep(.el-divider) { border-color: var(--border-default); }
+:deep(.el-breadcrumb__item) { cursor: pointer; }
+:deep(.el-breadcrumb__item:hover .el-breadcrumb__inner) { color: var(--brand-primary); }
+:deep(.el-breadcrumb__inner) { color: var(--text-secondary); }
+:deep(.el-breadcrumb__separator) { color: var(--text-tertiary); }
 </style>
