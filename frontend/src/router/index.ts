@@ -41,9 +41,7 @@ const routes = [
       },
       {
         path: 'batch',
-        name: 'BatchReport',
-        component: () => import('../pages/data/BatchReport.vue'),
-        meta: { title: '批次报表' },
+        redirect: '/dashboard',
       },
       // 系统管理
       {

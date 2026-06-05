@@ -275,10 +275,3 @@ class DashboardSummaryView(APIView):
         except Exception as e:
             logger.exception(f"DashboardSummaryView error: {e}")
             return Response({'error': 'internal_error', 'detail': str(e)}, status=500)
-
-
-class BatchReportView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        return Response({'message': 'Batch report endpoint'})

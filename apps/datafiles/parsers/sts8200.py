@@ -65,6 +65,28 @@ class STS8200Parser(BaseATEParser):
                     program_name = os.path.basename(parts[1].strip(' ,"'))
                 break
         
+        # Extract header metadata
+        header_meta = self.extract_header_metadata(lines, {
+            'start_time': ['Beginning Time'],
+            'end_time': ['Ending Time'],
+            'lot_id': ['LOT_ID'],
+            'operator': ['User'],
+            'station': ['Tester ID'],
+            'tester_type': ['Tester ID'],
+            'total_test_time': ['Total Testing Time'],
+            'handler': ['Handler'],
+        })
+        # STS8200: station name is in line 0 (e.g. "STS8200-43 StationA")
+        if lines and 'station' not in header_meta:
+            header_meta['station'] = lines[0].strip()
+        # Extract device_name from Program path (e.g. "Z:\JAVBN281R3CYCAAV1.6\...")
+        if program_name and 'device_name' not in header_meta:
+            # Program is like JAVBN281R3CYCAAV1.6.pgs → extract device part
+            dev = program_name.replace('.pgs', '').replace('.DLL', '').replace('.dll', '')
+            if dev.upper().startswith('JAV'):
+                dev = dev[3:]  # remove JAV prefix
+            header_meta['device_name'] = dev
+
         metadata = {
             'format': self.format_type,
             'units': dict(zip(columns, units)),
@@ -72,6 +94,7 @@ class STS8200Parser(BaseATEParser):
             'maxs': dict(zip(columns, maxs)),
             'program_name': program_name,
             'file_path': file_path,
+            **header_meta,
         }
         return df, metadata
     

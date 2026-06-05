@@ -15,6 +15,8 @@
       </p>
     </header>
 
+    <el-tabs v-model="activeTab" class="dash-tabs">
+      <el-tab-pane label="📊 单文件分析" name="single">
     <!-- 文件选择器 -->
     <div class="dash-toolbar">
       <el-select
@@ -154,7 +156,7 @@
             </el-table-column>
             <el-table-column prop="all_site" label="ALL Site" align="center" min-width="140" fixed="right">
               <template #default="{ row }">
-                <el-tag :type="row.bin === 'Total' ? 'info' : ''" size="small" effect="plain">{{ row.all_site }}</el-tag>
+                <el-tag :type="row.bin === 'Total' ? 'info' : 'primary'" size="small" effect="plain">{{ row.all_site }}</el-tag>
               </template>
             </el-table-column>
           </el-table>
@@ -257,6 +259,12 @@
         <p class="dash-footer-note">📅 最后更新: {{ updateTime }} | LiqunData ATE 数据分析软件</p>
       </div>
     </template>
+      </el-tab-pane>
+
+      <el-tab-pane label="📦 批次良率" name="batch">
+        <BatchYieldTab />
+      </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
@@ -268,6 +276,7 @@ import { useThemeStore } from '../../stores/theme'
 import api from '../../api'
 import { analysisApi } from '../../api/analysis'
 import UphCard from './components/UphCard.vue'
+import BatchYieldTab from './components/BatchYieldTab.vue'
 
 // Helper for theme-aware ECharts colors
 const _tc = () => getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
@@ -300,6 +309,7 @@ const filesLoading = ref(true)
 const selectedFileId = ref<number | null>(null)
 const loading = ref(false)
 const error = ref(false)
+const activeTab = ref('single')
 const exporting = ref(false)
 const data = ref<DashboardData | null>(null)
 const metrics = ref({ total_rows: 0, pass_count: 0, fail_count: 0, yield_pct: 0, format: 'N/A' })
@@ -697,6 +707,12 @@ watch(() => themeStore.currentTheme, () => {
   requestAnimationFrame(() => renderAllCharts())
 })
 
+watch(activeTab, (val) => {
+  if (val === 'single') {
+    nextTick(() => handleResize())
+  }
+})
+
 async function exportHtml() {
   exporting.value = true
   try {
@@ -811,6 +827,24 @@ onMounted(async () => {
   padding: 28px 32px;
   background: linear-gradient(165deg, #f8f9fb 0%, #edeff2 100%);
   min-height: 100%;
+}
+
+/* ----- Tabs ----- */
+.dash-tabs {
+  margin-top: 8px;
+}
+
+.dash-tabs :deep(.el-tabs__header) {
+  margin-bottom: 16px;
+}
+
+.dash-tabs :deep(.el-tabs__item) {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dash-tabs :deep(.el-tabs__content) {
+  padding: 0;
 }
 
 /* ----- Header ----- */

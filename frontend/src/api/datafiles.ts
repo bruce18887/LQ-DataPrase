@@ -1,5 +1,13 @@
 import api from './index'
 
+export interface BatchDirInfo {
+  name: string
+  path: string
+  file_count: number
+  total_size: number
+  registered: boolean
+}
+
 export const datafilesApi = {
   upload(file: File, onProgress?: (pct: number) => void) {
     const formData = new FormData()
@@ -37,5 +45,16 @@ export const datafilesApi = {
   },
   history() {
     return api.get('/history/')
+  },
+
+  // Batch directory management
+  listBatchDirs() {
+    return api.get<BatchDirInfo[]>('/batch-dirs/')
+  },
+  importBatchDir(dirName: string) {
+    return api.post('/batch-dirs/import/', { dir_name: dirName })
+  },
+  deleteBatchDir(dirName: string) {
+    return api.delete(`/batch-dirs/${encodeURIComponent(dirName)}/`)
   },
 }

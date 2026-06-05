@@ -75,4 +75,24 @@ test.describe('仪表板', { tag: ['@p0', '@p1', '@p2', '@dashboard'] }, () => {
       await expectChartRendered(yieldGauge, 0)
     }
   })
+
+  test('@p2 批次良率 tab 可见并可切换', async ({ page }) => {
+    await gotoApp(page, '/dashboard')
+    await waitLoadingGone(page)
+
+    // 批次良率 tab should be visible
+    const batchTab = page.locator('.el-tabs__item').filter({ hasText: '批次良率' })
+    await expect(batchTab).toBeVisible()
+
+    // Click to switch
+    await batchTab.click()
+
+    // Batch selector should appear
+    await expect(page.locator('.batch-yield-tab')).toBeVisible()
+
+    // Switch back to single file tab
+    const singleTab = page.locator('.el-tabs__item').filter({ hasText: '单文件分析' })
+    await singleTab.click()
+    await expect(page.locator('.kpi-row')).toBeVisible()
+  })
 })
