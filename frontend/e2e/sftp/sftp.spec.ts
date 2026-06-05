@@ -266,7 +266,7 @@ test.describe('@p2 SFTP 下载解析（env-gated）', { tag: ['@p2', '@sftp'] },
     await firstParseBtn.click()
 
     // Wait for success message
-    await expect(page.getByText(/已下载并导入/).first()).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByText(/已导入/).first()).toBeVisible({ timeout: 30_000 })
 
     // Verify the file appears in /files/ API
     const result = await page.evaluate(async () => {
@@ -284,5 +284,61 @@ test.describe('@p2 SFTP 下载解析（env-gated）', { tag: ['@p2', '@sftp'] },
     expect(result.status).toBe(200)
     expect(result.files.some((f: any) => f.filename === fileName)).toBe(true)
     console.log(`[sftp] 已下载解析文件 "${fileName}"，file_type: ${result.files.find((f: any) => f.filename === fileName)?.file_type}`)
+  })
+})
+
+test.describe('@p2 SFTP 目录下载SSE（env-gated）', { tag: ['@p2', '@sftp'] }, () => {
+  test('连接后点击目录下载，进度条出现并完成', async ({ page }) => {
+    test.skip(
+      !SFTP_HOST,
+      'set SFTP_HOST/PORT/USERNAME/PASSWORD to run real SFTP directory download',
+    )
+    if (!SFTP_HOST) {
+      console.log('[sftp] SFTP_HOST 未设置，跳过目录下载用例')
+      return
+    }
+
+    await gotoApp(page, '/sftp')
+
+    await page.getByPlaceholder('例如: 192.168.1.1').fill(SFTP_HOST)
+    const port = fieldByLabel(page, '端口')
+    await port.fill('')
+    await port.fill(SFTP_PORT)
+    await fieldByLabel(page, '用户名').fill(SFTP_USERNAME ?? '')
+    await fieldByLabel(page, '密码').fill(SFTP_PASSWORD ?? '')
+
+    await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes('/sftp/connect/') && r.request().method() === 'POST',
+        { timeout: 30_000 },
+      ),
+      page.getByRole('button', { name: '连接' }).click(),
+    ])
+
+    await expect(page.locator('.file-table')).toBeVisible({ timeout: 30_000 })
+
+    // Find first directory row's "下载" button (the one in the dir action group)
+    const dirRows = page.locator('.file-table .is-dir')
+    if ((await dirRows.count()) === 0) {
+      test.skip(true, '已连接但当前目录无子目录')
+      return
+    }
+
+    // Click the first directory row to open it, then go back and download
+    const firstDirDownload = dirRows.first().locator('xpath=ancestor::tr').getByRole('button', { name: '下载' })
+    if ((await firstDirDownload.count()) === 0) {
+      test.skip(true, '目录行无下载按钮')
+      return
+    }
+
+    await firstDirDownload.click()
+
+    // Progress card should appear
+    await expect(page.locator('.download-progress-card')).toBeVisible({ timeout: 5_000 })
+
+    // Wait for download to complete (success message)
+    await expect(page.getByText(/已保存/).first()).toBeVisible({ timeout: 60_000 })
+
+    console.log('[sftp] 目录下载SSE完成')
   })
 })

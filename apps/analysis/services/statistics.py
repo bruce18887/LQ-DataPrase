@@ -843,11 +843,11 @@ def compute_site_yield_data(df: pd.DataFrame, bin_col: str, site_col: str, pass_
 
         yield_pct = (site_pass_count / site_total * 100) if site_total > 0 else 0.0
 
-        # 格式化Site名称：如果是整数则显示为整数，否则保留原样
+        # 格式化Site名称：加Site前缀
         try:
             site_num = float(site)
             if site_num == int(site_num):
-                site_display = str(int(site_num))
+                site_display = f'Site{int(site_num)}'
             else:
                 site_display = str(site)
         except:
@@ -861,7 +861,21 @@ def compute_site_yield_data(df: pd.DataFrame, bin_col: str, site_col: str, pass_
         })
         yield_values.append(yield_pct)
 
-    result = {'yield_data': yield_data_list, 'yield_values': yield_values}
+    # Build per-site per-bin breakdown: {site_display: {bin_name: count}}
+    site_breakdown = {}
+    for site in site_values:
+        try:
+            site_num = float(site)
+            site_display = f'Site{int(site_num)}' if site_num == int(site_num) else str(site)
+        except (ValueError, TypeError):
+            site_display = str(site)
+        bin_counts = {}
+        if site in site_bin_cross.columns:
+            for bv in site_bin_cross.index:
+                bin_counts[str(bv)] = int(site_bin_cross.loc[bv, site])
+        site_breakdown[site_display] = bin_counts
+
+    result = {'yield_data': yield_data_list, 'yield_values': yield_values, 'site_breakdown': site_breakdown}
 
     if yield_values:
         max_yield = max(yield_values)

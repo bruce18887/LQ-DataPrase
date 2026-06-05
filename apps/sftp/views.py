@@ -1,4 +1,4 @@
-import os, io, tempfile, zipfile, time
+import os, time, logging, json
 import paramiko
 from stat import S_ISDIR
 from rest_framework import viewsets, status
@@ -6,13 +6,21 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.core.cache import cache
-from django.http import FileResponse, StreamingHttpResponse
+from django.http import StreamingHttpResponse
+from apps.datafiles.views import _register_file
+
+logger = logging.getLogger(__name__)
 
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import get_parser, BaseATEParser
 from apps.datafiles.views import _user_upload_dir
 
 SFTP_CACHE_PREFIX = 'sftp_conn_'
+CSV_EXTENSIONS = {'.csv'}
+
+
+def _is_csv(filename):
+    return os.path.splitext(filename)[1].lower() in CSV_EXTENSIONS
 
 SORT_KEYS = {
     'name': lambda x: x['name'].lower(),
@@ -109,27 +117,38 @@ class SftpViewSet(viewsets.GenericViewSet):
             return Response({'error': str(e)}, status=400)
 
     # ------------------------------------------------------------------
-    # Download single file
+    # Download single file → save to media
     # ------------------------------------------------------------------
 
     @action(detail=False, methods=['post'])
     def download(self, request):
         remote_path = request.data.get('path')
+        if not _is_csv(remote_path):
+            return Response({'error': '仅支持 CSV 文件'}, status=400)
+
         transport, sftp = self._get_connection(request)
         if not sftp:
             return Response({'error': 'not_connected'}, status=400)
 
         try:
-            buf = io.BytesIO()
-            sftp.getfo(remote_path, buf)
-            buf.seek(0)
+            filename = os.path.basename(remote_path)
+            upload_dir = _user_upload_dir(request.user.id, 'single')
+            file_path = os.path.join(upload_dir, filename)
+            if os.path.exists(file_path):
+                ts = int(time.time())
+                name, ext = os.path.splitext(filename)
+                file_path = os.path.join(upload_dir, f"{name}_{ts}{ext}")
+
+            sftp.get(remote_path, file_path)
+            file_size = os.path.getsize(file_path)
             sftp.close()
             transport.close()
-
-            filename = os.path.basename(remote_path)
-            response = FileResponse(buf, as_attachment=True, filename=filename,
-                                   content_type='application/octet-stream')
-            return response
+            return Response({
+                'status': 'ok',
+                'filename': os.path.basename(file_path),
+                'size': file_size,
+                'path': file_path,
+            })
         except Exception as e:
             try:
                 sftp.close()
@@ -139,59 +158,74 @@ class SftpViewSet(viewsets.GenericViewSet):
             return Response({'error': str(e)}, status=400)
 
     # ------------------------------------------------------------------
-    # Download directory as ZIP (recursive)
+    # Download directory → save individual files to media (SSE progress)
     # ------------------------------------------------------------------
 
     @action(detail=False, methods=['post'])
     def download_dir(self, request):
         remote_path = request.data.get('path')
-        only_data = request.data.get('only_data', False)
 
         transport, sftp = self._get_connection(request)
         if not sftp:
             return Response({'error': 'not_connected'}, status=400)
 
-        try:
-            # Collect all files recursively
-            file_list = []
-            self._collect_files(sftp, remote_path, file_list, '', only_data)
+        # Collect CSV files only
+        file_list = []
+        self._collect_files(sftp, remote_path, file_list, '', True)
 
-            if not file_list:
-                sftp.close()
-                transport.close()
-                return Response({'error': '目录为空'}, status=400)
-
-            # Build ZIP in memory
-            buf = io.BytesIO()
-            dir_name = os.path.basename(remote_path.rstrip('/')) or 'download'
-            with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-                for remote_fp, rel_path, _size, _mtime in file_list:
-                    try:
-                        file_buf = io.BytesIO()
-                        sftp.getfo(remote_fp, file_buf)
-                        file_buf.seek(0)
-                        zf.writestr(f"{dir_name}/{rel_path}", file_buf.read())
-                    except:
-                        pass
-
-            buf.seek(0)
+        if not file_list:
             sftp.close()
             transport.close()
+            return Response({'error': '目录为空'}, status=400)
 
-            response = FileResponse(buf, as_attachment=True,
-                                   filename=f'{dir_name}.zip',
-                                   content_type='application/zip')
-            return response
-        except Exception as e:
+        dir_name = os.path.basename(remote_path.rstrip('/')) or 'download'
+        upload_dir = _user_upload_dir(request.user.id, 'batch')
+        local_dir = os.path.join(upload_dir, dir_name)
+        os.makedirs(local_dir, exist_ok=True)
+
+        total_bytes = sum(size for _, _, size, _ in file_list)
+        total_files = len(file_list)
+
+        def sse_generator():
+            bytes_done = 0
+            success_count = 0
+            start_time = time.time()
             try:
-                sftp.close()
-                transport.close()
-            except:
-                pass
-            return Response({'error': str(e)}, status=400)
+                for i, (remote_fp, rel_path, size, _mtime) in enumerate(file_list):
+                    local_file_path = os.path.join(local_dir, rel_path)
+                    os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
+                    try:
+                        sftp.get(remote_fp, local_file_path)
+                        bytes_done += size
+                        success_count += 1
+                        # Auto-register into database
+                        try:
+                            _register_file(request.user, local_file_path, 'batch', dir_name)
+                        except Exception as re:
+                            logger.warning(f"Auto-register failed for {local_file_path}: {re}")
+                        elapsed = time.time() - start_time
+                        speed = bytes_done / elapsed if elapsed > 0 else 0
+                        eta = (total_bytes - bytes_done) / speed if speed > 0 else 0
+                        yield f"data: {json.dumps({'event': 'progress', 'current': i + 1, 'total': total_files, 'filename': os.path.basename(rel_path), 'rel_path': rel_path, 'percent': round(bytes_done * 100 / total_bytes) if total_bytes else 100, 'speed': round(speed / 1048576, 2), 'eta': round(eta)})}\n\n"
+                    except Exception as e:
+                        logger.warning(f"SFTP download failed for {remote_fp}: {e}")
+                        yield f"data: {json.dumps({'event': 'error', 'filename': os.path.basename(rel_path), 'message': str(e)})}\n\n"
+            finally:
+                try:
+                    sftp.close()
+                    transport.close()
+                except Exception:
+                    pass
+
+            yield f"data: {json.dumps({'event': 'done', 'dir_name': dir_name, 'file_count': success_count, 'total': total_files, 'saved_dir': local_dir})}\n\n"
+
+        response = StreamingHttpResponse(sse_generator(), content_type='text/event-stream')
+        response['Cache-Control'] = 'no-cache'
+        response['X-Accel-Buffering'] = 'no'
+        return response
 
     # ------------------------------------------------------------------
-    # Batch download (multiple files as ZIP)
+    # Batch download (multiple files) → save to media
     # ------------------------------------------------------------------
 
     @action(detail=False, methods=['post'])
@@ -200,30 +234,41 @@ class SftpViewSet(viewsets.GenericViewSet):
         if not paths:
             return Response({'error': '未选择文件'}, status=400)
 
+        # Filter to CSV only
+        paths = [p for p in paths if _is_csv(p)]
+        if not paths:
+            return Response({'error': '未选择文件'}, status=400)
+
         transport, sftp = self._get_connection(request)
         if not sftp:
             return Response({'error': 'not_connected'}, status=400)
 
         try:
-            buf = io.BytesIO()
-            with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-                for remote_path in paths:
-                    try:
-                        file_buf = io.BytesIO()
-                        sftp.getfo(remote_path, file_buf)
-                        file_buf.seek(0)
-                        zf.writestr(os.path.basename(remote_path), file_buf.read())
-                    except:
-                        pass
+            upload_dir = _user_upload_dir(request.user.id, 'single')
+            saved = []
+            for remote_path in paths:
+                try:
+                    filename = os.path.basename(remote_path)
+                    file_path = os.path.join(upload_dir, filename)
+                    if os.path.exists(file_path):
+                        ts = int(time.time())
+                        name, ext = os.path.splitext(filename)
+                        file_path = os.path.join(upload_dir, f"{name}_{ts}{ext}")
+                    sftp.get(remote_path, file_path)
+                    saved.append({
+                        'filename': os.path.basename(file_path),
+                        'size': os.path.getsize(file_path),
+                    })
+                except Exception as e:
+                    logger.warning(f"SFTP batch download failed for {remote_path}: {e}")
 
-            buf.seek(0)
             sftp.close()
             transport.close()
-
-            response = FileResponse(buf, as_attachment=True,
-                                   filename='batch_download.zip',
-                                   content_type='application/zip')
-            return response
+            return Response({
+                'status': 'ok',
+                'files': saved,
+                'count': len(saved),
+            })
         except Exception as e:
             try:
                 sftp.close()
@@ -243,10 +288,13 @@ class SftpViewSet(viewsets.GenericViewSet):
         paths = request.data.get('paths', [])
 
         if paths:
-            # Batch mode: multiple files from same directory
+            paths = [p for p in paths if _is_csv(p)]
+            if not paths:
+                return Response({'error': '无 CSV 文件'}, status=400)
             return self._batch_download_parse(request, paths)
         elif remote_path:
-            # Single file mode
+            if not _is_csv(remote_path):
+                return Response({'error': '仅支持 CSV 文件'}, status=400)
             return self._single_download_parse(request, remote_path)
         else:
             return Response({'error': '需要 path 或 paths 参数'}, status=400)
@@ -427,9 +475,11 @@ class SftpViewSet(viewsets.GenericViewSet):
 
     def _collect_files(self, sftp, remote_dir, result, rel_prefix, only_data):
         """Recursively collect files from a remote directory."""
+        remote_dir = remote_dir.rstrip('/')
         try:
             attrs = sftp.listdir_attr(remote_dir)
-        except:
+        except Exception as e:
+            logger.warning(f"SFTP listdir failed for {remote_dir}: {e}")
             return
 
         for attr in attrs:
@@ -437,14 +487,12 @@ class SftpViewSet(viewsets.GenericViewSet):
             if name.startswith('.'):
                 continue
             remote_path = f"{remote_dir}/{name}"
-            if remote_dir.endswith('/'):
-                remote_path = f"{remote_dir}{name}"
             rel_path = f"{rel_prefix}{name}" if rel_prefix else name
 
             if S_ISDIR(attr.st_mode):
                 self._collect_files(sftp, remote_path, result, f"{rel_path}/", only_data)
             else:
                 ext = os.path.splitext(name)[1].lower()
-                if only_data and ext not in ('.csv', '.txt', '.dat'):
+                if only_data and ext != '.csv':
                     continue
                 result.append((remote_path, rel_path, attr.st_size, attr.st_mtime))

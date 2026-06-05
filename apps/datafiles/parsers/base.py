@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Optional, Tuple, Dict, List
 import pandas as pd
 import numpy as np
+import re
 import logging
 
 logger = logging.getLogger(__name__)
@@ -117,6 +118,43 @@ class BaseATEParser(ABC):
         elif 'ets datalog reporter' in content:
             return 'ETS88'
         return 'Unknown'
+
+    @staticmethod
+    def extract_header_metadata(lines: List[str], mapping: Dict[str, List[str]], scan_limit: int = 80) -> Dict[str, str]:
+        """Extract key-value metadata from header lines using flexible matching.
+
+        ``mapping`` maps canonical keys (e.g. 'start_time') to a list of
+        possible header labels (e.g. ['StartTime', 'Beginning Time']).
+        Matching is case-insensitive and ignores whitespace/underscores.
+        Returns a dict of canonical_key -> value.
+        """
+        result = {}
+        # Build a lookup: normalized_label -> canonical_key
+        label_to_key = {}
+        for canonical, labels in mapping.items():
+            for label in labels:
+                norm = re.sub(r'[\s_]+', '', label.lower())
+                label_to_key[norm] = canonical
+
+        for line in lines[:scan_limit]:
+            stripped = line.strip().rstrip(',')
+            if not stripped or stripped.startswith('['):
+                continue
+            # Try splitting on first comma or colon
+            for sep in [',', ':']:
+                if sep in stripped:
+                    parts = stripped.split(sep, 1)
+                    key_part = parts[0].strip()
+                    val_part = parts[1].strip() if len(parts) > 1 else ''
+                    # Remove trailing commas from value (CTA8280F padded format)
+                    val_part = val_part.rstrip(',').strip()
+                    norm_key = re.sub(r'[\s_]+', '', key_part.lower())
+                    if norm_key in label_to_key and val_part:
+                        canon = label_to_key[norm_key]
+                        if canon not in result:  # first match wins
+                            result[canon] = val_part
+                    break
+        return result
 
 NON_NUMERIC_COLUMNS = {
     'CTA8290D': ['Serial_No', 'Part_No', 'Dut_No', 'Site_No', 'SW_Bin', 'X_COORD', 'Y_COORD', 'QR_Code', 'Start_T', 'Alarm'],

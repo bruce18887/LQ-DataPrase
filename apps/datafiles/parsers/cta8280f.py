@@ -65,6 +65,20 @@ class CTA8280FParser(BaseATEParser):
                     program_name = os.path.basename(parts[1].strip(' ,"'))
                 break
         
+        # Extract header metadata
+        header_meta = self.extract_header_metadata(lines, {
+            'start_time': ['StartTime'],
+            'end_time': ['EndTime'],
+            'lot_id': ['LotID'],
+            'operator': ['Operator'],
+            'station': ['Test Station'],
+            'device_name': ['Device Name'],
+            'tester_type': ['Tester type'],
+            'test_type': ['TestType'],
+            'total_test_time': ['AllTestTime'],
+            'handler': ['HandlerType'],
+        })
+
         metadata = {
             'format': self.format_type,
             'units': dict(zip(columns, units)),
@@ -72,6 +86,7 @@ class CTA8280FParser(BaseATEParser):
             'maxs': dict(zip(columns, maxs)),
             'program_name': program_name,
             'file_path': file_path,
+            **header_meta,
         }
         return df, metadata
     

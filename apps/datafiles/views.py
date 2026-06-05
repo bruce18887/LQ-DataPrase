@@ -224,6 +224,132 @@ class FileUploadView(APIView):
         )
 
 
+class BatchDirListView(APIView):
+    """List batch directories on disk that may or may not have DataFile records."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        batch_base = _user_upload_dir(request.user.id, 'batch')
+        if not os.path.isdir(batch_base):
+            return Response([])
+
+        # Get all batch_names that already have DataFile records
+        registered = set(
+            DataFile.objects.filter(owner=request.user, file_type='batch')
+            .values_list('batch_name', flat=True)
+        )
+
+        # Get registered file paths per batch for partial-import detection
+        registered_files = {}
+        for df in DataFile.objects.filter(owner=request.user, file_type='batch').values('batch_name', 'file_path'):
+            registered_files.setdefault(df['batch_name'], set()).add(df['file_path'])
+
+        result = []
+        for entry in os.scandir(batch_base):
+            if not entry.is_dir():
+                continue
+            dir_name = entry.name
+            # Count CSV files and total size
+            file_count = 0
+            total_size = 0
+            disk_paths = set()
+            for root, _dirs, files in os.walk(entry.path):
+                for f in files:
+                    if not f.lower().endswith('.csv'):
+                        continue
+                    fp = os.path.join(root, f)
+                    disk_paths.add(fp)
+                    file_count += 1
+                    try:
+                        total_size += os.path.getsize(fp)
+                    except OSError:
+                        pass
+            # Skip directories with no CSV files
+            if file_count == 0:
+                continue
+            # Check registration: fully registered, partial, or none
+            batch_registered_paths = registered_files.get(dir_name, set())
+            is_registered = dir_name in registered
+            unregistered_count = len(disk_paths - batch_registered_paths)
+            result.append({
+                'name': dir_name,
+                'path': entry.path,
+                'file_count': file_count,
+                'total_size': total_size,
+                'registered': is_registered and unregistered_count == 0,
+            })
+
+        # Sort: unregistered first, then by name
+        result.sort(key=lambda x: (x['registered'], x['name']))
+        return Response(result)
+
+
+class BatchDirImportView(APIView):
+    """Import all files from a batch directory into DataFile records."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        dir_name = request.data.get('dir_name')
+        if not dir_name:
+            return Response({'error': 'dir_name is required'}, status=400)
+
+        batch_base = _user_upload_dir(request.user.id, 'batch')
+        dir_path = os.path.join(batch_base, dir_name)
+        if not os.path.isdir(dir_path):
+            return Response({'error': f'目录 "{dir_name}" 不存在'}, status=404)
+
+        # Get already-registered file paths for this batch (skip duplicates)
+        existing_paths = set(
+            DataFile.objects.filter(
+                owner=request.user, file_type='batch', batch_name=dir_name
+            ).values_list('file_path', flat=True)
+        )
+
+        created = []
+        for root, _dirs, files in os.walk(dir_path):
+            for f in files:
+                if not f.lower().endswith('.csv'):
+                    continue
+                fp = os.path.join(root, f)
+                if fp in existing_paths:
+                    continue  # already registered
+                try:
+                    df = _register_file(request.user, fp, 'batch', dir_name)
+                    created.append(df)
+                except Exception:
+                    continue
+
+        return Response(
+            DataFileSerializer(created, many=True).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class BatchDirDeleteView(APIView):
+    """Delete a batch directory from disk and its DataFile records."""
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, dir_name):
+        batch_base = _user_upload_dir(request.user.id, 'batch')
+        dir_path = os.path.join(batch_base, dir_name)
+        if not os.path.isdir(dir_path):
+            return Response({'error': f'目录 "{dir_name}" 不存在'}, status=404)
+
+        # Delete DataFile records for this batch
+        deleted_count, _ = DataFile.objects.filter(
+            owner=request.user, file_type='batch', batch_name=dir_name
+        ).delete()
+
+        # Delete directory from disk
+        shutil.rmtree(dir_path, ignore_errors=True)
+
+        return Response({
+            'status': 'ok',
+            'deleted_files': deleted_count,
+            'dir_name': dir_name,
+        })
+
+
 class FileActivateView(GenericAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = DataFileSerializer

@@ -127,6 +127,26 @@ class ETS88Parser(BaseATEParser):
                     program_name = os.path.basename(parts[1].strip(' ,"'))
                 break
         
+        # Extract header metadata (ETS88 header ~70 lines, time fields at file tail)
+        header_meta = self.extract_header_metadata(lines, {
+            'start_time': ['Data Collection Start Date', 'On'],
+            'end_time': ['Data Collection Stop  Date', 'Data Collection Stop Date'],
+            'lot_id': ['Datalog for Lot Number'],
+            'operator': ['Data collected by operator', 'Reporting Operator'],
+            'station': ['Data collected on station', 'Reporting Station'],
+            'device_name': ['Test Name'],
+            'tester_type': ['Tester_ID'],
+            'test_type': ['Data collection type'],
+            'handler': ['Handler/Prober ID', 'Handler_ID'],
+        }, scan_limit=80)
+        # ETS88 puts time fields at file tail — scan last 20 lines too (higher priority)
+        tail_meta = self.extract_header_metadata(lines[-20:], {
+            'start_time': ['Data Collection Start Date'],
+            'end_time': ['Data Collection Stop  Date', 'Data Collection Stop Date'],
+        })
+        for k, v in tail_meta.items():
+            header_meta[k] = v  # tail values override header (e.g. On → Data Collection Start Date)
+
         metadata = {
             'format': self.format_type,
             'units': dict(zip(columns, unit_columns)),
@@ -134,6 +154,7 @@ class ETS88Parser(BaseATEParser):
             'maxs': dict(zip(columns, max_columns)),
             'program_name': program_name,
             'file_path': file_path,
+            **header_meta,
         }
         return df, metadata
     

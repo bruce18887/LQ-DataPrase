@@ -132,9 +132,6 @@
               style="width: 200px; margin-right: 12px"
               :prefix-icon="Search"
             />
-            <el-button size="small" type="warning" @click="downloadDirectory" :loading="downloadingDir">
-              <el-icon><Download /></el-icon> 下载目录
-            </el-button>
             <el-button size="small" type="danger" plain @click="disconnect">
               <el-icon><CircleClose /></el-icon> 断开
             </el-button>
@@ -160,6 +157,21 @@
         </template>
       </div>
 
+      <!-- Download Progress (SSE) -->
+      <el-card v-if="downloading" class="download-progress-card" shadow="never">
+        <div class="progress-info">
+          <span class="progress-title">
+            <el-icon><Download /></el-icon> 正在下载目录...
+          </span>
+          <span class="progress-stats">{{ dlProgress.current }}/{{ dlProgress.total }} 文件</span>
+        </div>
+        <el-progress :percentage="dlProgress.percent" :stroke-width="12" :format="(p: number) => `${p}%`" />
+        <div class="progress-detail">
+          <span>{{ dlProgress.currentFile }}</span>
+          <span>{{ dlProgress.speed > 0 ? `${dlProgress.speed} MB/s` : '' }}{{ dlProgress.eta > 0 ? ` · 预计剩余 ${dlProgress.eta}s` : '' }}</span>
+        </div>
+      </el-card>
+
       <!-- File List -->
       <el-card class="file-list-card" shadow="never">
         <el-table
@@ -172,7 +184,7 @@
           <el-table-column width="40" align="center">
             <template #default="{row}">
               <el-checkbox
-                v-if="!row.is_dir"
+                v-if="!row.is_dir && isCsv(row.name)"
                 v-model="row._selected"
                 @click.stop
               />
@@ -205,17 +217,42 @@
           </el-table-column>
           <el-table-column label="操作" width="220" align="center">
             <template #default="{row}">
-              <el-button-group v-if="!row.is_dir">
-                <el-button size="small" @click.stop="downloadFile(row)">
-                  <el-icon><Download /></el-icon> 下载
-                </el-button>
-                <el-button size="small" type="primary" @click.stop="downloadAndParse(row)">
-                  <el-icon><DataAnalysis /></el-icon> 解析
-                </el-button>
-              </el-button-group>
-              <el-button v-else size="small" type="info" plain @click.stop="navigateTo(currentPath + '/' + row.name)">
-                <el-icon><FolderOpened /></el-icon> 打开
-              </el-button>
+              <div class="action-cell">
+                <el-button-group v-if="!row.is_dir">
+                  <el-button
+                    v-if="isCsv(row.name)"
+                    size="small"
+                    @click.stop="downloadFile(row)"
+                    :loading="isDownloading(`file_${row.name}`)"
+                  >
+                    <el-icon><Download /></el-icon> 下载
+                  </el-button>
+                  <el-button
+                    v-if="isCsv(row.name)"
+                    size="small"
+                    type="primary"
+                    @click.stop="downloadAndParse(row)"
+                    :loading="isDownloading(`parse_${row.name}`)"
+                  >
+                    <el-icon><DataAnalysis /></el-icon> 解析
+                  </el-button>
+                  <el-tag v-if="!isCsv(row.name)" type="info" size="small" effect="plain">仅支持 CSV</el-tag>
+                </el-button-group>
+                <el-button-group v-else>
+                  <el-button
+                    size="small"
+                    type="warning"
+                    plain
+                    @click.stop="downloadDirectory(row.name)"
+                    :loading="isDownloading(`dir_${row.name}`)"
+                  >
+                    <el-icon><Download /></el-icon> 下载
+                  </el-button>
+                  <el-button size="small" type="info" plain @click.stop="navigateTo(currentPath + '/' + row.name)">
+                    <el-icon><FolderOpened /></el-icon> 打开
+                  </el-button>
+                </el-button-group>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -270,13 +307,17 @@ const connected = ref(false)
 const connecting = ref(false)
 const currentPath = ref('/')
 const items = ref<any[]>([])
-const downloadingDir = ref(false)
 const savedConfigs = ref<SftpConfig[]>([])
 const searchQuery = ref('')
 const sortBy = ref('name')
 const sortOrder = ref<'asc' | 'desc'>('asc')
 const batchDownloading = ref(false)
 const batchParsing = ref(false)
+const downloadingRows = ref<Set<string>>(new Set())
+
+// SSE directory download progress
+const downloading = ref(false)
+const dlProgress = ref({ percent: 0, speed: 0, eta: 0, currentFile: '', current: 0, total: 0 })
 
 const pathSegments = computed(() => {
   const segs = currentPath.value.split('/').filter(Boolean)
@@ -284,7 +325,7 @@ const pathSegments = computed(() => {
   return segs.map(s => { path += '/' + s; return { name: s, path } })
 })
 
-const fileItems = computed(() => items.value.filter(i => !i.is_dir))
+const fileItems = computed(() => items.value.filter(i => !i.is_dir && isCsv(i.name)))
 
 const filteredItems = computed(() => {
   if (!searchQuery.value) return items.value
@@ -413,53 +454,65 @@ function handleSortChange({ prop, order }: { prop: string; order: string | null 
 // ------------------------------------------------------------------
 
 async function downloadFile(row: any) {
+  const key = `file_${row.name}`
+  downloadingRows.value.add(key)
   try {
-    const resp = await sftpApi.download(currentPath.value + '/' + row.name)
-    const url = URL.createObjectURL(resp.data)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = row.name
-    a.click()
-    URL.revokeObjectURL(url)
-    ElMessage.success('下载完成')
+    const { data } = await sftpApi.download(currentPath.value + '/' + row.name)
+    ElMessage.success(`已保存: ${data.filename} (${formatSize(data.size)})`)
   } catch { ElMessage.error('下载失败') }
+  finally { downloadingRows.value.delete(key) }
 }
 
 async function downloadAndParse(row: any) {
+  const key = `parse_${row.name}`
+  downloadingRows.value.add(key)
   try {
     const { data } = await sftpApi.downloadAndParse(currentPath.value + '/' + row.name)
-    ElMessage.success(`文件 "${row.name}" 已下载并导入到系统`)
+    ElMessage.success(`已导入: ${row.name}`)
   } catch { ElMessage.error('下载并解析失败') }
+  finally { downloadingRows.value.delete(key) }
 }
 
-async function downloadDirectory() {
-  downloadingDir.value = true
+async function downloadDirectory(dirName?: string) {
+  const path = dirName ? currentPath.value + '/' + dirName : currentPath.value
+  downloading.value = true
+  dlProgress.value = { percent: 0, speed: 0, eta: 0, currentFile: '', current: 0, total: 0 }
   try {
-    const resp = await sftpApi.downloadDir(currentPath.value, false)
-    const dirName = currentPath.value.split('/').pop() || 'download'
-    const url = URL.createObjectURL(resp.data)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${dirName}.zip`
-    a.click()
-    URL.revokeObjectURL(url)
-    ElMessage.success('目录已打包下载')
-  } catch { ElMessage.error('目录下载失败') }
-  finally { downloadingDir.value = false }
+    await sftpApi.downloadDirStream(
+      path,
+      false,
+      (data) => {
+        dlProgress.value = {
+          percent: data.percent,
+          speed: data.speed,
+          eta: data.eta,
+          currentFile: data.filename,
+          current: data.current,
+          total: data.total,
+        }
+      },
+      (data) => {
+        dlProgress.value.percent = 100
+        ElMessage.success(`目录 "${data.dir_name}" 已保存 (${data.file_count} 个文件)`)
+        setTimeout(() => { downloading.value = false }, 1000)
+      },
+      (msg) => {
+        ElMessage.error(msg || '目录下载失败')
+        downloading.value = false
+      },
+    )
+  } catch {
+    ElMessage.error('目录下载失败')
+    downloading.value = false
+  }
 }
 
 async function batchDownload() {
   if (selectedPaths.value.length === 0) return
   batchDownloading.value = true
   try {
-    const resp = await sftpApi.downloadBatch(selectedPaths.value)
-    const url = URL.createObjectURL(resp.data)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'batch_download.zip'
-    a.click()
-    URL.revokeObjectURL(url)
-    ElMessage.success(`已下载 ${selectedPaths.value.length} 个文件`)
+    const { data } = await sftpApi.downloadBatch(selectedPaths.value)
+    ElMessage.success(`已保存 ${data.count} 个文件到 media 目录`)
   } catch { ElMessage.error('批量下载失败') }
   finally { batchDownloading.value = false }
 }
@@ -499,6 +552,14 @@ function formatDate(timestamp: number): string {
 function getFileExt(name: string): string {
   const ext = name.split('.').pop()
   return ext && ext !== name ? '.' + ext : ''
+}
+
+function isCsv(name: string): boolean {
+  return name.toLowerCase().endsWith('.csv')
+}
+
+function isDownloading(key: string): boolean {
+  return downloadingRows.value.has(key)
 }
 </script>
 
@@ -599,6 +660,41 @@ function getFileExt(name: string): string {
 .dir-label {
   font-size: 12px; color: var(--color-warning);
   background: rgba(217, 119, 6, 0.1); padding: 2px 8px; border-radius: 4px;
+}
+
+/* Action Cell */
+.action-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.action-cell :deep(.el-button) { font-size: 12px; }
+.action-cell :deep(.el-button .el-icon) { margin-right: 2px; }
+
+/* Download Progress */
+.download-progress-card {
+  border-radius: 8px;
+  margin-bottom: 8px;
+  border-left: 4px solid var(--brand-primary);
+}
+.download-progress-card :deep(.el-card__body) { padding: 14px 20px; }
+.progress-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.progress-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+.progress-stats { font-size: 13px; color: var(--text-secondary); }
+.progress-detail {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 /* Stats */
