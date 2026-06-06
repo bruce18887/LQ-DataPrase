@@ -1,47 +1,20 @@
 <template>
   <div class="batch-yield-tab">
     <!-- Batch selector -->
-    <div class="batch-selector">
-      <el-select v-model="selectedBatch" placeholder="选择批次" clearable @change="onBatchChange" style="width: 300px">
-        <el-option v-for="b in batches" :key="b.batch_name" :label="`${b.batch_name} (${b.count}文件)`" :value="b.batch_name" />
-      </el-select>
-      <el-button type="primary" @click="loadBatchData" :loading="loading" :disabled="!selectedBatch">
-        🔍 加载批次报表
-      </el-button>
-      <el-button v-if="batchData" @click="exportExcel" :loading="exporting">
-        📥 导出 Excel
-      </el-button>
-    </div>
+    <BatchSelectorBar
+      :batches="batches"
+      :selected-batch="selectedBatch"
+      :loading="loading"
+      :exporting="exporting"
+      :has-data="!!batchData"
+      @update:selectedBatch="onBatchSelect"
+      @load="loadBatchData"
+      @export="exportExcel"
+    />
 
     <template v-if="batchData">
       <!-- 1. KPI Cards -->
-      <el-row :gutter="16" class="kpi-row">
-        <el-col :span="6">
-          <div class="kpi-card kpi-blue">
-            <div class="kpi-label">📥 CP+FT 投入数量</div>
-            <div class="kpi-value">{{ batchData.kpi.input_total?.toLocaleString() }}</div>
-          </div>
-        </el-col>
-        <el-col :span="6">
-          <div class="kpi-card kpi-green">
-            <div class="kpi-label">✅ 总 Pass</div>
-            <div class="kpi-value">{{ batchData.kpi.pass?.toLocaleString() }}</div>
-          </div>
-        </el-col>
-        <el-col :span="6">
-          <div class="kpi-card kpi-orange">
-            <div class="kpi-label">📈 整体良率</div>
-            <div class="kpi-value">{{ batchData.kpi.overall_yield }}%</div>
-            <div class="kpi-sub">Bin1 / CP+FT投入</div>
-          </div>
-        </el-col>
-        <el-col :span="6">
-          <div class="kpi-card kpi-purple">
-            <div class="kpi-label">❌ 总 Fail</div>
-            <div class="kpi-value">{{ batchData.kpi.fail?.toLocaleString() }}</div>
-          </div>
-        </el-col>
-      </el-row>
+      <KpiCards :kpi="batchData.kpi" />
 
       <!-- 2. Phase Summary + Aggregated Bin (1:1) -->
       <el-card v-if="batchData.phase_summary?.length" shadow="never" class="section-card">
@@ -71,7 +44,7 @@
           </el-col>
           <el-col :xs="24" :lg="12">
             <div class="chart-title">🔴 Bin 分布（全批次汇总）</div>
-            <div ref="aggBinChartRef" class="chart-container" />
+            <AggregatedBinChart :bin-distribution="batchData.bin_distribution || []" />
           </el-col>
         </el-row>
       </el-card>
@@ -113,13 +86,13 @@
         </el-table>
       </el-card>
 
-      <!-- 3. Yield Trend Combo Chart (Bar + Line) -->
+      <!-- 4. Yield Trend Combo Chart (Bar + Line) -->
       <el-card shadow="never" class="section-card">
         <template #header>📈 良率趋势</template>
-        <div ref="trendChartRef" class="chart-container" />
+        <YieldTrendChart ref="yieldTrendChartRef" :phases="batchData.phases || []" :spc-limits="batchData.trend_data?.spc_limits" />
       </el-card>
 
-      <!-- 4. QA Validation -->
+      <!-- 5. QA Validation -->
       <el-card v-if="batchData.qa_checks?.length" shadow="never" class="section-card">
         <template #header>🔍 QA 数量校验</template>
         <el-table :data="batchData.qa_checks" stripe size="small" :border="true">
@@ -130,7 +103,7 @@
         </el-table>
       </el-card>
 
-      <!-- 5. Site Yield Matrix -->
+      <!-- 6. Site Yield Matrix -->
       <el-card shadow="never" class="section-card">
         <template #header>🏭 各 Site 良率矩阵</template>
         <el-table :data="batchData.site_matrix" stripe size="small" :border="true" max-height="350">
@@ -156,7 +129,7 @@
         </el-table>
       </el-card>
 
-      <!-- 6. Bin Distribution & Site Pass Rate (combined, left table + right charts) -->
+      <!-- 7. Bin Distribution & Site Pass Rate (combined, left table + right charts) -->
       <el-card shadow="never" class="section-card">
         <template #header>📋 Bin 分布 & Site 通过率</template>
         <div class="bin-selector">
@@ -219,6 +192,10 @@ import * as echarts from 'echarts'
 import { getChartInitOpts } from '../../../utils/echarts-theme'
 import { ElMessage } from 'element-plus'
 import { batchApi } from '../../../api/batch'
+import BatchSelectorBar from './batch/BatchSelectorBar.vue'
+import KpiCards from './batch/KpiCards.vue'
+import YieldTrendChart from './batch/YieldTrendChart.vue'
+import AggregatedBinChart from './batch/AggregatedBinChart.vue'
 
 const batches = ref<any[]>([])
 const selectedBatch = ref('')
@@ -227,15 +204,14 @@ const exporting = ref(false)
 const batchData = ref<any>(null)
 const selectedPhase = ref('')
 
-// Chart refs
-const trendChartRef = ref<HTMLElement>()
+// Ref to child chart component
+const yieldTrendChartRef = ref<InstanceType<typeof YieldTrendChart>>()
+
+// Chart refs for phase-scoped analysis (remain inline)
 const siteChartRef = ref<HTMLElement>()
-const aggBinChartRef = ref<HTMLElement>()
 const binPieRef = ref<HTMLElement>()
 const binBarRef = ref<HTMLElement>()
-let trendChart: echarts.ECharts | null = null
 let siteChart: echarts.ECharts | null = null
-let aggBinChart: echarts.ECharts | null = null
 let binPieChart: echarts.ECharts | null = null
 let binBarChart: echarts.ECharts | null = null
 
@@ -252,11 +228,14 @@ function phaseLabel(p: any): string {
   return p.wafer_id ? `${p.phase}-W${p.wafer_id}` : p.phase
 }
 
+function onBatchSelect(val: string) {
+  selectedBatch.value = val
+  onBatchChange()
+}
+
 function onBatchChange() {
   // Dispose old chart instances before removing DOM (v-if="batchData")
-  trendChart?.dispose(); trendChart = null
   siteChart?.dispose(); siteChart = null
-  aggBinChart?.dispose(); aggBinChart = null
   binPieChart?.dispose(); binPieChart = null
   binBarChart?.dispose(); binBarChart = null
   batchData.value = null
@@ -297,7 +276,7 @@ async function loadBatchData() {
     }
     // Double nextTick + rAF: wait for v-if DOM mount + layout settle
     nextTick(() => {
-      requestAnimationFrame(() => renderAllCharts())
+      requestAnimationFrame(() => renderInlineCharts())
     })
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.error || '加载失败')
@@ -306,92 +285,15 @@ async function loadBatchData() {
   }
 }
 
-function renderAllCharts() {
-  renderTrendChart()
+function renderInlineCharts() {
   renderSiteChart()
-  renderAggBinChart()
   if (selectedPhaseData.value) {
     renderBinPieChart()
     renderBinBarChart()
   }
 }
 
-// 3. Yield Trend Combo (Bar + Line dual Y-axis)
-function renderTrendChart() {
-  if (!trendChartRef.value || !batchData.value?.phases?.length) return
-  if (!trendChart) trendChart = echarts.init(trendChartRef.value, undefined, getChartInitOpts())
-  else trendChart.clear()
-
-  const phases = batchData.value.phases
-  const spc = batchData.value.trend_data?.spc_limits || {}
-
-  trendChart.setOption({
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-    legend: { data: ['测试总数', 'Pass数量', '良率', 'UCL', 'CL', 'LCL'], top: 5, textStyle: { color: 'var(--text-primary)' } },
-    grid: { left: '3%', right: '4%', bottom: '3%', top: '18%', containLabel: true },
-    xAxis: {
-      type: 'category',
-      data: phases.map((p: any) => p.phase),
-      axisLine: { lineStyle: { color: 'var(--border-default)' } },
-      axisLabel: { color: 'var(--text-primary)' },
-    },
-    yAxis: [
-      {
-        type: 'value',
-        name: '数量',
-        position: 'left',
-        axisLine: { lineStyle: { color: 'var(--border-default)' } },
-        axisLabel: { color: 'var(--text-primary)' },
-        splitLine: { lineStyle: { color: 'var(--border-muted)' } },
-      },
-      {
-        type: 'value',
-        name: '良率(%)',
-        min: 0,
-        max: 100,
-        position: 'right',
-        axisLabel: { formatter: '{value}%', color: 'var(--text-primary)' },
-        nameTextStyle: { color: 'var(--text-primary)' },
-        axisLine: { lineStyle: { color: 'var(--border-default)' } },
-        splitLine: { show: false },
-      },
-    ],
-    series: [
-      {
-        name: '测试总数', type: 'bar', data: phases.map((p: any) => p.total),
-        itemStyle: { color: '#4facfe' }, barWidth: '25%',
-      },
-      {
-        name: 'Pass数量', type: 'bar', data: phases.map((p: any) => p.pass_count),
-        itemStyle: { color: '#11998e' }, barWidth: '25%',
-      },
-      {
-        name: '良率', type: 'line', yAxisIndex: 1,
-        data: phases.map((p: any) => p.yield_pct),
-        itemStyle: { color: '#f5576c' }, lineStyle: { width: 3 },
-        symbol: 'circle', symbolSize: 8,
-        label: { show: true, formatter: '{c}%', fontSize: 11, color: 'var(--text-primary)' },
-      },
-      ...(spc.ucl != null ? [{
-        name: 'UCL', type: 'line', yAxisIndex: 1,
-        data: Array(phases.length).fill(spc.ucl),
-        lineStyle: { type: 'dashed' as const, color: '#f5576c' }, symbol: 'none',
-      }] : []),
-      ...(spc.cl != null ? [{
-        name: 'CL', type: 'line', yAxisIndex: 1,
-        data: Array(phases.length).fill(spc.cl),
-        lineStyle: { type: 'dashed' as const, color: '#11998e' }, symbol: 'none',
-      }] : []),
-      ...(spc.lcl != null ? [{
-        name: 'LCL', type: 'line', yAxisIndex: 1,
-        data: Array(phases.length).fill(spc.lcl),
-        lineStyle: { type: 'dashed' as const, color: '#f5576c' }, symbol: 'none',
-      }] : []),
-    ],
-  })
-}
-
-// 5. Site Pass Rate bar chart — uses selected phase site data, falls back to batch-level
+// Site Pass Rate bar chart — uses selected phase site data, falls back to batch-level
 function renderSiteChart() {
   if (!siteChartRef.value) return
 
@@ -440,25 +342,6 @@ function renderSiteChart() {
       })),
       barWidth: '50%',
       label: { show: true, position: 'top', formatter: '{c}%', color: 'var(--text-primary)' },
-    }],
-  })
-}
-
-// Aggregated Bin pie chart
-function renderAggBinChart() {
-  if (!aggBinChartRef.value || !batchData.value?.bin_distribution?.length) return
-  if (!aggBinChart) aggBinChart = echarts.init(aggBinChartRef.value, undefined, getChartInitOpts())
-  else aggBinChart.clear()
-
-  aggBinChart.setOption({
-    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { orient: 'vertical', left: 'left', type: 'scroll', textStyle: { color: 'var(--text-primary)' } },
-    series: [{
-      type: 'pie',
-      radius: ['35%', '70%'],
-      center: ['60%', '50%'],
-      data: batchData.value.bin_distribution,
-      label: { formatter: '{b}\n{d}%', color: 'var(--text-primary)' },
     }],
   })
 }
@@ -541,10 +424,8 @@ async function exportExcel() {
 }
 
 function handleResize() {
-  // Guard: only resize if chart is alive and its DOM is still in document
-  if (trendChart && !trendChart.isDisposed()) trendChart.resize()
+  yieldTrendChartRef.value?.handleResize()
   if (siteChart && !siteChart.isDisposed()) siteChart.resize()
-  if (aggBinChart && !aggBinChart.isDisposed()) aggBinChart.resize()
   if (binPieChart && !binPieChart.isDisposed()) binPieChart.resize()
   if (binBarChart && !binBarChart.isDisposed()) binBarChart.resize()
 }
@@ -556,9 +437,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
-  trendChart?.dispose(); trendChart = null
   siteChart?.dispose(); siteChart = null
-  aggBinChart?.dispose(); aggBinChart = null
   binPieChart?.dispose(); binPieChart = null
   binBarChart?.dispose(); binBarChart = null
 })
@@ -571,53 +450,9 @@ defineExpose({ handleResize })
   padding: 0;
 }
 
-.batch-selector {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 20px;
-}
-
-.kpi-row {
-  margin-bottom: 20px;
-}
-
-.kpi-card {
-  padding: 20px 16px;
-  border-radius: 10px;
-  text-align: center;
-  color: #fff;
-}
-
-.kpi-blue { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-.kpi-green { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); }
-.kpi-orange { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
-.kpi-purple { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
-
-.kpi-value {
-  font-size: 28px;
-  font-weight: 700;
-  margin: 8px 0 4px;
-}
-
-.kpi-label {
-  font-size: 13px;
-  opacity: 0.9;
-}
-
-.kpi-sub {
-  font-size: 11px;
-  opacity: 0.7;
-  margin-top: 2px;
-}
-
 .section-card {
   margin-bottom: 16px;
   border-radius: 8px;
-}
-
-.charts-row {
-  margin-bottom: 16px;
 }
 
 .chart-container {
