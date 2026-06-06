@@ -1,351 +1,28 @@
 """
-Statistical analysis service for ATE test data.
-Transplanted from Streamlit project's src/analysis/analysis.py.
-All Streamlit dependencies (st.cache_data, st.error, etc.) have been removed.
+Cross-file and wafer-level analytics.
+
+Bin trends, yield trends, parameter trends, site statistics,
+wafer fail maps, zonal yield, and UPH calculations.
 """
-import math
 import logging
 from typing import Optional, Dict, List, Tuple, Any
 import pandas as pd
 import numpy as np
 
+from .helpers import (
+    get_1d_from,
+    get_site_column,
+    get_coord_columns,
+    ensure_numeric,
+)
+from .limits import (
+    parse_limit_string,
+    get_columns_with_limits,
+    calculate_fail_bin_statistics,
+)
+from .computations import compute_cpk
+
 logger = logging.getLogger(__name__)
-
-NON_NUMERIC_KEYWORDS = ['min', 'max', 'lower limit', 'upper limit', 'n/a', 'na', '-', 'none']
-
-BIN_COLUMN_MAPPING = {
-    'CTA8290D': 'SW_Bin',
-    'CTA8280F': 'SW_Bin',
-    'ETS88': 'Bin',
-    'STS8200': 'SOFT_BIN',
-}
-
-
-def get_bin_column_name(format_type: str) -> str:
-    return BIN_COLUMN_MAPPING.get(format_type, 'SW_Bin')
-
-
-def find_column_by_pattern(df: pd.DataFrame, patterns: List[str]) -> Optional[str]:
-    for col in df.columns:
-        col_lower = col.lower()
-        for pattern in patterns:
-            if pattern in col_lower:
-                return col
-    return None
-
-
-def get_site_column(df: pd.DataFrame) -> Optional[str]:
-    return find_column_by_pattern(df, ['site'])
-
-
-def get_serial_column(df: pd.DataFrame) -> Optional[str]:
-    return find_column_by_pattern(df, ['serial'])
-
-
-def get_coord_columns(df: pd.DataFrame) -> Tuple[Optional[str], Optional[str]]:
-    x_col = None
-    y_col = None
-    for col in df.columns:
-        col_lower = col.lower()
-        if 'x' in col_lower and 'coord' in col_lower:
-            x_col = col
-        elif 'y' in col_lower and 'coord' in col_lower:
-            y_col = col
-    return x_col, y_col
-
-
-def get_bin_column(df: pd.DataFrame, metadata: Dict) -> Optional[str]:
-    """Return the Bin column name based on metadata format type, if it exists in df."""
-    format_type = metadata.get('format', '')
-    target_col = get_bin_column_name(format_type)
-    if target_col and target_col in df.columns:
-        return target_col
-    return None
-
-
-def get_1d(series_or_df):
-    if isinstance(series_or_df, pd.DataFrame):
-        return series_or_df.iloc[:, 0]
-    return series_or_df
-
-
-def get_1d_from(df: pd.DataFrame, col: str) -> pd.Series:
-    s = df[col]
-    if isinstance(s, pd.DataFrame):
-        s = s.iloc[:, 0]
-    return s
-
-
-def ensure_numeric(df: pd.DataFrame, col: str) -> pd.Series:
-    return pd.to_numeric(get_1d_from(df, col), errors='coerce')
-
-
-def get_columns_with_limits(df: pd.DataFrame, metadata: Dict) -> List[str]:
-    cols_with_limits = []
-    for col in df.columns:
-        if col not in metadata.get('mins', {}) or col not in metadata.get('maxs', {}):
-            continue
-        min_str = str(metadata['mins'][col]).strip()
-        max_str = str(metadata['maxs'][col]).strip()
-        if not min_str or not max_str:
-            continue
-        if min_str.lower() in NON_NUMERIC_KEYWORDS or max_str.lower() in NON_NUMERIC_KEYWORDS:
-            continue
-        try:
-            float(min_str)
-            float(max_str)
-            cols_with_limits.append(col)
-        except (ValueError, TypeError):
-            continue
-    return cols_with_limits
-
-
-def parse_limit_string(limit_str: str, data_series: pd.Series, default_min: float = 0.0, default_max: float = 0.0) -> float:
-    limit_str_clean = limit_str.strip()
-    if limit_str_clean.lower() in NON_NUMERIC_KEYWORDS or not limit_str_clean:
-        if limit_str_clean.lower() in ['min', 'lower limit']:
-            return float(data_series.min()) if len(data_series) > 0 else default_min
-        elif limit_str_clean.lower() in ['max', 'upper limit']:
-            return float(data_series.max()) if len(data_series) > 0 else default_max
-        else:
-            return default_min
-    try:
-        return float(limit_str_clean)
-    except (ValueError, TypeError):
-        return default_min
-
-
-def detect_fail_data(df: pd.DataFrame, metadata: Dict, ignore_no_limit: bool = True) -> Tuple[List[int], List[str], Dict[int, List[str]]]:
-    fail_indices = []
-    fail_columns = []
-    fail_cells = {}
-    
-    format_type = metadata.get('format', 'CTA8290D')
-    target_bin_col = get_bin_column_name(format_type)
-    
-    fail_row_mask = pd.Series([False] * len(df), index=df.index)
-    if target_bin_col in df.columns:
-        fail_row_mask = ensure_numeric(df, target_bin_col) != 1
-    
-    cols_with_limits = get_columns_with_limits(df, metadata)
-    
-    for col in cols_with_limits:
-        min_val = float(str(metadata['mins'][col]).strip())
-        max_val = float(str(metadata['maxs'][col]).strip())
-        col_data = ensure_numeric(df, col)
-        fail_mask = fail_row_mask & ((col_data < min_val) | (col_data > max_val))
-        fail_rows = df.index[fail_mask].tolist()
-        for idx in fail_rows:
-            fail_indices.append(idx)
-            fail_columns.append(col)
-            if idx not in fail_cells:
-                fail_cells[idx] = []
-            fail_cells[idx].append(col)
-    
-    if target_bin_col in df.columns:
-        fail_bin_indices = df.index[fail_row_mask].tolist()
-        for idx in fail_bin_indices:
-            if idx not in fail_cells:
-                fail_cells[idx] = []
-            if target_bin_col not in fail_cells[idx]:
-                fail_cells[idx].append(target_bin_col)
-            if idx not in set(fail_indices):
-                fail_indices.append(idx)
-    
-    return fail_indices, fail_columns, fail_cells
-
-
-def calculate_fail_bin_statistics(df: pd.DataFrame, metadata: Dict) -> Dict:
-    format_type = metadata.get('format', 'CTA8290D')
-    target_bin_col = get_bin_column_name(format_type)
-    
-    if target_bin_col not in df.columns:
-        return {}
-    
-    bin_counts = get_1d_from(df, target_bin_col).value_counts().sort_index()
-    total_count = len(df)
-    
-    result = {}
-    for bin_value, count in bin_counts.items():
-        percentage = (count / total_count * 100) if total_count > 0 else 0.0
-        result[bin_value] = {'count': int(count), 'percentage': round(percentage, 2)}
-    
-    return result
-
-
-def calculate_fail_test_item_statistics(df: pd.DataFrame, metadata: Dict, ignore_no_limit: bool = True) -> Dict:
-    fail_indices, fail_columns, fail_cells = detect_fail_data(df, metadata, ignore_no_limit)
-    
-    if not fail_cells:
-        return {}
-    
-    format_type = metadata.get('format', 'CTA8290D')
-    target_bin_col = get_bin_column_name(format_type)
-    
-    test_item_fail_count = {}
-    total_fail_count = 0
-    
-    for row_idx, failed_cols in fail_cells.items():
-        for col in failed_cols:
-            if col == target_bin_col:
-                continue
-            if col not in test_item_fail_count:
-                test_item_fail_count[col] = 0
-            test_item_fail_count[col] += 1
-            total_fail_count += 1
-    
-    result = {}
-    for test_item, fail_count in test_item_fail_count.items():
-        percentage = (fail_count / total_fail_count * 100) if total_fail_count > 0 else 0.0
-        result[test_item] = {'fail_count': int(fail_count), 'percentage': round(percentage, 2)}
-    
-    return dict(sorted(result.items(), key=lambda x: x[1]['fail_count'], reverse=True))
-
-
-def compute_cpk(mean_val: float, std_val: float, cpk_lower: Optional[float], cpk_upper: Optional[float],
-                cpk_a: float = 1.67, cpk_b: float = 1.33, cpk_c: float = 1.0) -> Dict[str, Any]:
-    """
-    Compute Cp, Cpk, Pp, Ppk with quality levels.
-
-    Args:
-        mean_val: Mean of the data
-        std_val: Standard deviation (short-term, within-subgroup)
-        cpk_lower: Lower specification limit (LSL)
-        cpk_upper: Upper specification limit (USL)
-        cpk_a: Threshold for A-level quality (default 1.67)
-        cpk_b: Threshold for B-level quality (default 1.33)
-        cpk_c: Threshold for C-level quality (default 1.0)
-
-    Returns:
-        Dictionary with cp, cpk, pp, ppk values and their quality levels/colors
-    """
-    def get_quality_level(value: float) -> Tuple[str, str]:
-        """Get quality level and color for a capability index."""
-        if value >= cpk_a:
-            return "A级 (优秀)", "green"
-        elif value >= cpk_b:
-            return "B级 (良好)", "orange"
-        elif value >= cpk_c:
-            return "C级 (一般)", "darkorange"
-        else:
-            return "D级 (不足)", "red"
-
-    if std_val <= 0 or cpk_lower is None or cpk_upper is None:
-        return {
-            'cp': 0.0,
-            'cpk': 0.0,
-            'pp': 0.0,
-            'ppk': 0.0,
-            'cp_level': "N/A",
-            'cpk_level': "N/A",
-            'pp_level': "N/A",
-            'ppk_level': "N/A",
-            'cp_color': "gray",
-            'cpk_color': "gray",
-            'pp_color': "gray",
-            'ppk_color': "gray"
-        }
-
-    # Cp: Process Capability (potential capability, ignores centering)
-    cp = (cpk_upper - cpk_lower) / (6 * std_val)
-
-    # Cpk: Process Capability Index (actual capability, considers centering)
-    upper_cap = (cpk_upper - mean_val) / (3 * std_val)
-    lower_cap = (mean_val - cpk_lower) / (3 * std_val)
-    cpk = min(upper_cap, lower_cap)
-
-    # Pp: Process Performance (same as Cp, but uses overall std in practice)
-    # For single dataset without subgroups, Pp ≈ Cp
-    pp = cp  # In this implementation, we use the same std for both
-
-    # Ppk: Process Performance Index (same as Cpk, but uses overall std)
-    ppk = cpk  # In this implementation, we use the same std for both
-
-    cp_level, cp_color = get_quality_level(cp)
-    cpk_level, cpk_color = get_quality_level(cpk)
-    pp_level, pp_color = get_quality_level(pp)
-    ppk_level, ppk_color = get_quality_level(ppk)
-
-    return {
-        'cp': cp,
-        'cpk': cpk,
-        'pp': pp,
-        'ppk': ppk,
-        'cp_level': cp_level,
-        'cpk_level': cpk_level,
-        'pp_level': pp_level,
-        'ppk_level': ppk_level,
-        'cp_color': cp_color,
-        'cpk_color': cpk_color,
-        'pp_color': pp_color,
-        'ppk_color': ppk_color
-    }
-
-
-
-def compute_correlation_matrix(df: pd.DataFrame, params: List[str], method: str = 'pearson') -> Dict[str, Any]:
-    """
-    Compute pairwise correlation matrix for selected parameters.
-
-    Args:
-        df: DataFrame containing the data
-        params: List of parameter names to compute correlations for
-        method: Correlation method ('pearson', 'spearman', or 'kendall')
-
-    Returns:
-        Dictionary with correlation matrix and metadata
-    """
-    if not params or len(params) < 2:
-        return {
-            'params': [],
-            'matrix': [],
-            'sample_size': 0,
-            'method': method
-        }
-
-    # Filter to only include specified params that exist in df
-    valid_params = [p for p in params if p in df.columns]
-    if len(valid_params) < 2:
-        return {
-            'params': valid_params,
-            'matrix': [],
-            'sample_size': 0,
-            'method': method
-        }
-
-    # Select only numeric columns and drop NaN
-    df_subset = df[valid_params].copy()
-
-    # Convert to numeric, coercing errors to NaN
-    for col in df_subset.columns:
-        df_subset[col] = pd.to_numeric(df_subset[col], errors='coerce')
-
-    # Drop rows with any NaN values
-    df_clean = df_subset.dropna()
-
-    if len(df_clean) < 2:
-        return {
-            'params': valid_params,
-            'matrix': [[1.0] * len(valid_params) for _ in range(len(valid_params))],
-            'sample_size': len(df_clean),
-            'method': method
-        }
-
-    # Compute correlation matrix
-    corr_matrix = df_clean.corr(method=method)
-
-    # Convert to list of lists for JSON serialization
-    matrix_list = corr_matrix.values.tolist()
-
-    # Round values to 4 decimal places
-    matrix_list = [[round(val, 4) if not math.isnan(val) else 0.0 for val in row] for row in matrix_list]
-
-    return {
-        'params': valid_params,
-        'matrix': matrix_list,
-        'sample_size': len(df_clean),
-        'method': method
-    }
 
 
 def compute_bin_trend(file_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -424,76 +101,6 @@ def compute_bin_trend(file_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
         'bins': bins_sorted,
         'trend_data': trend_data,
         'yield_trend': yield_trend
-    }
-
-
-def compute_boxplot_stats(data: pd.Series) -> Dict[str, Any]:
-    """
-    Compute five-number summary + outliers for box plot.
-
-    Args:
-        data: Pandas Series of numeric data
-
-    Returns:
-        Dictionary with min, q1, median, q3, max, and outliers
-    """
-    if len(data) == 0:
-        return {
-            'min': 0.0,
-            'q1': 0.0,
-            'median': 0.0,
-            'q3': 0.0,
-            'max': 0.0,
-            'outliers': [],
-            'count': 0
-        }
-
-    # Remove NaN and infinite values
-    clean_data = data.dropna()
-    clean_data = clean_data[clean_data.apply(lambda x: abs(x) < float('inf'))]
-
-    if len(clean_data) == 0:
-        return {
-            'min': 0.0,
-            'q1': 0.0,
-            'median': 0.0,
-            'q3': 0.0,
-            'max': 0.0,
-            'outliers': [],
-            'count': 0
-        }
-
-    # Compute quartiles
-    q1 = float(clean_data.quantile(0.25))
-    median = float(clean_data.quantile(0.50))
-    q3 = float(clean_data.quantile(0.75))
-    iqr = q3 - q1
-
-    # Compute whiskers (1.5 * IQR rule)
-    lower_whisker = q1 - 1.5 * iqr
-    upper_whisker = q3 + 1.5 * iqr
-
-    # Find outliers
-    outliers = clean_data[(clean_data < lower_whisker) | (clean_data > upper_whisker)]
-    outliers_list = [round(float(x), 6) for x in outliers.tolist()]
-
-    # Min and max within whiskers (non-outlier range)
-    non_outliers = clean_data[(clean_data >= lower_whisker) & (clean_data <= upper_whisker)]
-    if len(non_outliers) > 0:
-        min_val = float(non_outliers.min())
-        max_val = float(non_outliers.max())
-    else:
-        min_val = float(clean_data.min())
-        max_val = float(clean_data.max())
-
-    return {
-        'min': round(min_val, 6),
-        'q1': round(q1, 6),
-        'median': round(median, 6),
-        'q3': round(q3, 6),
-        'max': round(max_val, 6),
-        'outliers': outliers_list,
-        'count': len(clean_data)
     }
 
 
@@ -693,57 +300,6 @@ def compute_param_trend(file_data_list: List[Dict[str, Any]], param: str) -> Dic
     }
 
 
-def compute_range_statistics(data_series: pd.Series, metadata: Dict, selected_param: str) -> Dict:
-    mean_val = float(data_series.mean()) if len(data_series) > 0 else 0.0
-    std_val = float(data_series.std(ddof=0)) if len(data_series) > 1 else 0.0
-    
-    if math.isnan(mean_val) or math.isinf(mean_val):
-        mean_val = 0.0
-    if math.isnan(std_val) or math.isinf(std_val):
-        std_val = 0.0
-    
-    unit = metadata.get('units', {}).get(selected_param, '')
-    
-    rdl_min = parse_limit_string(str(metadata.get('mins', {}).get(selected_param, '')), data_series, 0.0, 0.0)
-    rdl_max = parse_limit_string(str(metadata.get('maxs', {}).get(selected_param, '')), data_series, 0.0, 0.0)
-    rdl_gap = safe_gap(rdl_min, rdl_max)
-    
-    dr_min = float(data_series.min()) if len(data_series) > 0 else 0.0
-    dr_max = float(data_series.max()) if len(data_series) > 0 else 0.0
-    dr_gap = safe_gap(dr_min, dr_max)
-    
-    s3_min = mean_val - 3 * std_val
-    s3_max = mean_val + 3 * std_val
-    s3_gap = safe_gap(s3_min, s3_max)
-    
-    s4_min = mean_val - 4 * std_val
-    s4_max = mean_val + 4 * std_val
-    s4_gap = safe_gap(s4_min, s4_max)
-    
-    s6_min = mean_val - 6 * std_val
-    s6_max = mean_val + 6 * std_val
-    s6_gap = safe_gap(s6_min, s6_max)
-    
-    cl_min = float(data_series.min()) if len(data_series) > 0 else 0.0
-    cl_max = float(data_series.max()) if len(data_series) > 0 else 0.0
-    cl_gap = safe_gap(cl_min, cl_max)
-    
-    return {
-        'mean': mean_val, 'std': std_val, 'unit': unit,
-        'rdl': (rdl_min, rdl_max, rdl_gap),
-        'dr': (dr_min, dr_max, dr_gap),
-        'cl': (cl_min, cl_max, cl_gap),
-        's3': (s3_min, s3_max, s3_gap),
-        's4': (s4_min, s4_max, s4_gap),
-        's6': (s6_min, s6_max, s6_gap),
-    }
-
-
-def safe_gap(min_val: float, max_val: float) -> float:
-    gap = (max_val - min_val) / 20
-    return max(gap, 1e-9)
-
-
 def compute_site_stats(site_series: pd.Series, site_index, lower_limit: float, upper_limit: float,
                        spec_lower: Optional[float], spec_upper: Optional[float], is_serial: bool) -> List[Dict]:
     if isinstance(site_index, pd.DataFrame):
@@ -773,7 +329,7 @@ def compute_site_stats(site_series: pd.Series, site_index, lower_limit: float, u
             return (0, float(s), '')
         except (ValueError, TypeError):
             return (1, 0, str(s))
-    
+
     for site in sorted(totals.index, key=site_sort_key):
         total = int(totals.get(site, 0))
         fail_count = int(fail_counts.get(site, 0))
@@ -912,12 +468,12 @@ def compute_wafer_fail_data(df: pd.DataFrame, metadata: Optional[Dict] = None,
                         if lower_limit != 0.0 or upper_limit != 0.0:
                             col_fail = (data_series < lower_limit) | (data_series > upper_limit)
                             fail_mask = fail_mask | col_fail
-    
+
     total = len(df)
     pass_count = int((~fail_mask).sum())
     fail_count = int(fail_mask.sum())
     yield_pct = (pass_count / total * 100) if total > 0 else 0.0
-    
+
     stats = {'total': total, 'pass_count': pass_count, 'fail_count': fail_count, 'yield_pct': yield_pct}
     return fail_mask, stats
 
@@ -1025,56 +581,6 @@ def compute_zonal_yield(df: pd.DataFrame, metadata: Optional[Dict] = None,
         'wafer_radius': round(max_dist, 6),
         'zone_boundaries': [round(1.0 / 3.0, 4), round(2.0 / 3.0, 4)],
     }
-
-
-def compute_qqplot(data_series: pd.Series) -> Dict[str, Any]:
-    """
-    Compute QQ plot data for normality testing using scipy.stats.probplot.
-
-    Args:
-        data_series: Numeric data series to test for normality.
-
-    Returns:
-        Dictionary with theoretical quantiles, observed values, R-squared, and normality verdict.
-    """
-    clean = pd.to_numeric(data_series, errors='coerce').dropna()
-    clean = clean[np.isfinite(clean.values)]
-    if len(clean) < 3:
-        return {
-            'theoretical_quantiles': [],
-            'observed_quantiles': [],
-            'r_squared': 0.0,
-            'is_normal': False,
-            'n': len(clean),
-        }
-
-    try:
-        from scipy import stats as scipy_stats
-        # probplot returns ((osm, osr), (slope, intercept, r)) when fit=True
-        pp_result = scipy_stats.probplot(clean, dist='norm', fit=True)
-        (osm, osr) = pp_result[0]  # theoretical quantiles and sorted observed values
-        r = pp_result[1][2]         # correlation coefficient (R)
-        theoretical = [round(float(v), 6) for v in osm]
-        observed = [round(float(v), 6) for v in osr]
-
-        r_squared = round(r * r, 4)
-        is_normal = r_squared > 0.95
-
-        return {
-            'theoretical_quantiles': theoretical,
-            'observed_quantiles': observed,
-            'r_squared': r_squared,
-            'is_normal': is_normal,
-            'n': len(clean),
-        }
-    except Exception:
-        return {
-            'theoretical_quantiles': [],
-            'observed_quantiles': [],
-            'r_squared': 0.0,
-            'is_normal': False,
-            'n': len(clean),
-        }
 
 
 # Per-unit test-time column candidates, in priority order, across supported formats.
