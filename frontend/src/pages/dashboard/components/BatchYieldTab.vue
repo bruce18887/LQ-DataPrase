@@ -414,7 +414,7 @@ async function exportExcel() {
   exporting.value = true
   try {
     // Get file IDs from the batch
-    const resp = await batchApi.generateReport(
+    await batchApi.generateReport(
       batchData.value.phases.map((_: any, i: number) => i) // placeholder
     )
     ElMessage.info('导出功能开发中')

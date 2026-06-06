@@ -14,7 +14,7 @@ from apps.datafiles.models import DataFile
 from apps.datafiles.services import get_cached_parsed_file
 from apps.analysis.services.statistics import (
     calculate_fail_bin_statistics, get_site_column,
-    get_bin_column_name, compute_site_yield_data,
+    get_bin_column_name, compute_site_yield_data, compute_uph,
 )
 
 
@@ -170,6 +170,9 @@ class BatchReportViewSet(viewsets.GenericViewSet):
                 if wm:
                     wafer_id = wm.group(1)
 
+            # UPH per phase
+            uph_data = compute_uph(df, metadata)
+
             phases.append({
                 'filename': df_obj.filename,
                 'phase': phase_type,
@@ -193,6 +196,7 @@ class BatchReportViewSet(viewsets.GenericViewSet):
                 'site_pass': site_pass_map,
                 'bin_info': bin_info,
                 'program_name': df_obj.program_name or '',
+                'uph': uph_data,
             })
 
             file_data_list.append({
@@ -243,7 +247,7 @@ class BatchReportViewSet(viewsets.GenericViewSet):
         sorted_sites = sorted(all_sites)
         site_matrix = []
         for p in phases:
-            row = {'phase': p['phase']}
+            row = {'phase': p['phase'], 'wafer_id': p.get('wafer_id', '')}
             for site in sorted_sites:
                 st_val = p['site_total'].get(site, 0)
                 sp_val = p['site_pass'].get(site, 0)
@@ -277,7 +281,7 @@ class BatchReportViewSet(viewsets.GenericViewSet):
         qa_checks = []
         qa1 = next((p for p in phases if re.match(r'^QA1(_|$)', p['phase'], re.IGNORECASE)), None)
         qa_phases = [p for p in phases if p['phase'].startswith('QA')]
-        if qa1 and len(qa_phases) > 1:
+        if qa1 and len(qa_phases) >= 1:
             all_qa_pass = sum(p['pass_count'] for p in qa_phases)
             diff = all_qa_pass - qa1['total']
             qa_names = [p['phase'] for p in qa_phases]
