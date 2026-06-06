@@ -104,9 +104,14 @@ interface UphData {
   warnings: string[]
 }
 
-const props = defineProps<{
-  fileId: number | null
-}>()
+const props = withDefaults(defineProps<{
+  fileId?: number | null
+  /** Direct UPH data — when provided, skips API fetch (batch mode) */
+  uphData?: UphData | null
+}>(), {
+  fileId: null,
+  uphData: null,
+})
 
 const loading = ref(false)
 const error = ref(false)
@@ -139,8 +144,17 @@ async function fetchUph() {
   }
 }
 
+// When uphData is provided directly (batch mode), use it
+watch(() => props.uphData, (val) => {
+  if (val) {
+    data.value = val
+    error.value = false
+  }
+}, { immediate: true })
+
+// When fileId changes (single-file mode), fetch from API
 watch(() => props.fileId, () => {
-  fetchUph()
+  if (props.fileId) fetchUph()
 }, { immediate: true })
 </script>
 

@@ -3,7 +3,7 @@
     <!-- Logo 区域 -->
     <div class="logo-section">
       <div class="logo-icon">
-        <el-icon :size="28"><TrendCharts /></el-icon>
+        <el-icon :size="28" aria-hidden="true"><TrendCharts /></el-icon>
       </div>
       <transition name="fade">
         <div v-show="!isCollapsed" class="logo-text">
@@ -64,7 +64,6 @@ import {
   Odometer,
   Folder,
   TrendCharts,
-  List,
   Setting,
   DataAnalysis,
   Connection,
@@ -89,7 +88,6 @@ const menuItems = [
   // 系统管理
   { path: '/admin/users', label: '用户管理', icon: User, requiresAdmin: true, groupStart: true, groupLabel: '系统管理' },
   { path: '/settings', label: '系统设置', icon: Setting, requiresAdmin: false },
-  { path: '/roadmap', label: '功能路线图', icon: List, requiresAdmin: false },
 ]
 
 const isActive = (path: string) => {

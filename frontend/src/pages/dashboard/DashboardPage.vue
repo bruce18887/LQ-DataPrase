@@ -102,7 +102,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, onMounted, onActivated, watch, computed } from 'vue'
 import { useFilesStore } from '../../stores/files'
 import api from '../../api'
 import { analysisApi } from '../../api/analysis'
@@ -220,6 +220,10 @@ onMounted(async () => {
 
 // SFTP 导入等外部操作后自动刷新文件列表
 watch(() => filesStore.filesVersion, async () => {
+  await loadFiles()
+})
+// keep-alive 页面激活时刷新文件列表
+onActivated(async () => {
   await loadFiles()
 })
 </script>

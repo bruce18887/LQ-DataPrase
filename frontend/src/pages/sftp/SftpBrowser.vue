@@ -185,7 +185,7 @@ async function downloadAndParse(row: any) {
   const key = `parse_${row.name}`
   downloadingRows.value.add(key)
   try {
-    const { data } = await sftpApi.downloadAndParse(currentPath.value + '/' + row.name)
+    await sftpApi.downloadAndParse(currentPath.value + '/' + row.name)
     ElMessage.success(`已导入: ${row.name}`)
     filesStore.notifyFilesChanged()
   } catch { ElMessage.error('下载并解析失败') }

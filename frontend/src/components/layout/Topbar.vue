@@ -37,16 +37,16 @@
 
       <!-- 用户菜单 -->
       <el-dropdown trigger="click" @command="handleCommand">
-        <div class="user-menu" tabindex="0" role="button" aria-haspopup="true" aria-expanded="false">
+        <button class="user-menu" aria-haspopup="true" aria-expanded="false">
           <div class="user-avatar">
-            <el-icon :size="18"><User /></el-icon>
+            <el-icon :size="18" aria-hidden="true"><User /></el-icon>
           </div>
           <div class="user-info">
             <span class="user-name">{{ displayName }}</span>
             <span class="user-role">{{ roleLabel }}</span>
           </div>
-          <el-icon class="dropdown-icon"><ArrowDown /></el-icon>
-        </div>
+          <el-icon class="dropdown-icon" aria-hidden="true"><ArrowDown /></el-icon>
+        </button>
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item command="profile">
@@ -103,7 +103,6 @@ const breadcrumbs = computed(() => {
     dashboard: '仪表板',
     data: '数据管理',
     analysis: '数据分析',
-    roadmap: '功能路线图',
     settings: '系统设置',
     batch: '批次报表',
     sftp: 'SFTP浏览器',
@@ -260,6 +259,10 @@ const handleCommand = (command: string) => {
   border-radius: 8px;
   cursor: pointer;
   transition: background-color 0.2s ease;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
 }
 
 .user-menu:hover {

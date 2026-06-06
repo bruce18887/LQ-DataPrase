@@ -56,12 +56,8 @@ const routes = [
         component: () => import('../pages/settings/SettingsPage.vue'),
         meta: { title: '系统设置' },
       },
-      {
-        path: 'roadmap',
-        name: 'Roadmap',
-        component: () => import('../pages/roadmap/RoadmapPage.vue'),
-        meta: { title: '功能路线图' },
-      },
+      // 兜底：未匹配的路径重定向到仪表板
+      { path: ':pathMatch(.*)*', redirect: '/dashboard' },
     ],
   },
 ]
