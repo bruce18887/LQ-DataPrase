@@ -68,7 +68,7 @@ test_*.py
 P0_*.md
 P0_*.py
 *.png
-Data/
+/Data/
 test/
 # WSL/Virtual envs
 .venv-wsl/

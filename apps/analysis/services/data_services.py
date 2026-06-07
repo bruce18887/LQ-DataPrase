@@ -27,11 +27,19 @@ from apps.analysis.services.limits import resolve_limits
 # histogram
 # ---------------------------------------------------------------------------
 
-def compute_histogram_stats(df, metadata, param, site_col):
+def compute_histogram_stats(df, metadata, param, site_col,
+                            range_type='RDL', custom_low=None, custom_high=None):
     """Compute histogram binning, CPK stats, and per-site histograms.
 
     Returns the same dict that ``AnalysisViewSet.histogram`` built inline,
     or ``None`` when there is no valid data for *param*.
+
+    ``range_type`` selects which range drives the histogram binning (and thus
+    the X-axis span): ``'RDL'`` (spec limits), ``'DR'``/``'CL'`` (data range),
+    ``'S3'``/``'S4'``/``'S6'`` (±3/4/6 sigma).  CPK and per-site yield always
+    stay anchored to the spec limits (RDL) regardless of ``range_type``.
+    ``custom_low``/``custom_high`` override the binning range when
+    ``range_type == 'CL'`` and both are provided.
     """
     data_series = get_1d_from(df, param).dropna()
     data_series = data_series[data_series.apply(lambda x: abs(x) < float('inf'))]
@@ -53,10 +61,27 @@ def compute_histogram_stats(df, metadata, param, site_col):
             None, None, False
         )
 
-    rdl_min = stats['rdl'][0]
-    rdl_max = stats['rdl'][1]
-    data_gap = safe_gap(rdl_min, rdl_max)
-    bin_start = rdl_min - 2.5 * data_gap
+    # Binning range follows the selected range_type so the X-axis zooms to the
+    # region of interest (e.g. selecting "3 Sigma" spreads a tight distribution
+    # across the bins instead of collapsing it into a single RDL-width bin).
+    if range_type == 'CL' and custom_low is not None and custom_high is not None:
+        bin_min, bin_max = float(custom_low), float(custom_high)
+    else:
+        bin_min, bin_max = resolve_limits(range_type, stats)
+        if bin_min is None or bin_max is None:
+            bin_min, bin_max = stats['rdl'][0], stats['rdl'][1]
+
+    # Degenerate range (missing/zero-width limits, or std==0 for sigma ranges):
+    # fall back to the actual data range, then to a ±0.5 window, so ECharts
+    # never receives a zero-width axis.
+    if bin_min == bin_max:
+        bin_min = float(data_series.min())
+        bin_max = float(data_series.max())
+    if bin_min == bin_max:
+        bin_min -= 0.5
+        bin_max += 0.5
+    data_gap = safe_gap(bin_min, bin_max)
+    bin_start = bin_min - 2.5 * data_gap
 
     # Build bin edges with underflow (-inf) and overflow (+inf) bins
     # Excel pattern: [underflow] [bin1] [bin2] ... [binN] [overflow]

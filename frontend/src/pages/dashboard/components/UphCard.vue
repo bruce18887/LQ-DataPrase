@@ -3,8 +3,8 @@
     <template #header>
       <div class="uph-header">
         <span>⚡ UPH 效率分析</span>
-        <el-tag v-if="data" size="small" :type="data.source === 'column' ? 'success' : 'warning'">
-          {{ data.source === 'column' ? '自动检测' : '手动输入' }}
+        <el-tag v-if="data" size="small" :type="sourceTag.type">
+          {{ sourceTag.label }}
         </el-tag>
       </div>
     </template>
@@ -84,7 +84,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { analysisApi } from '../../../api/analysis'
 
 interface UphSiteData {
@@ -116,6 +116,14 @@ const props = withDefaults(defineProps<{
 const loading = ref(false)
 const error = ref(false)
 const data = ref<UphData | null>(null)
+
+// Source-aware tag: column=自动检测, batch=批次汇总, otherwise 手动输入
+const sourceTag = computed<{ type: 'success' | 'primary' | 'warning'; label: string }>(() => {
+  const source = data.value?.source
+  if (source === 'column') return { type: 'success', label: '自动检测' }
+  if (source === 'batch') return { type: 'primary', label: '批次汇总' }
+  return { type: 'warning', label: '手动输入' }
+})
 
 function formatTime(seconds: number): string {
   if (seconds < 60) return `${seconds.toFixed(1)}s`

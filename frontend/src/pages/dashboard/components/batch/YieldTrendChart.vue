@@ -4,8 +4,7 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import * as echarts from 'echarts'
-import { getChartInitOpts } from '../../../../utils/echarts-theme'
+import { initEchartsWhenReady, type EchartsHandle } from '../../../../utils/echarts-init'
 import { useThemeStore } from '../../../../stores/theme'
 
 const props = defineProps<{
@@ -14,27 +13,15 @@ const props = defineProps<{
 }>()
 
 const chartRef = ref<HTMLElement>()
-let chart: echarts.ECharts | null = null
+let handle: EchartsHandle | null = null
 
 const themeStore = useThemeStore()
 
-watch(() => themeStore.currentTheme, () => {
-  nextTick(() => renderChart())
-})
-
-watch(() => [props.phases, props.spcLimits], () => {
-  nextTick(() => renderChart())
-}, { deep: true })
-
-function renderChart() {
-  if (!chartRef.value || !props.phases?.length) return
-  if (!chart) chart = echarts.init(chartRef.value, undefined, getChartInitOpts())
-  else chart.clear()
-
-  const phases = props.phases
+function buildOption() {
+  const phases = props.phases || []
   const spc = props.spcLimits || {}
 
-  chart.setOption({
+  return {
     tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
     legend: { data: ['测试总数', 'Pass数量', '良率', 'UCL', 'CL', 'LCL'], top: 5, textStyle: { color: 'var(--text-primary)' } },
     grid: { left: '3%', right: '4%', bottom: '3%', top: '18%', containLabel: true },
@@ -97,20 +84,44 @@ function renderChart() {
         lineStyle: { type: 'dashed' as const, color: '#f5576c' }, symbol: 'none',
       }] : []),
     ],
+  }
+}
+
+function ensureChart() {
+  if (!chartRef.value) return
+  if (handle) {
+    handle.chart?.setOption(buildOption() as any, { notMerge: true, lazyUpdate: true })
+    return
+  }
+  handle = initEchartsWhenReady(chartRef.value, {
+    option: buildOption() as any,
+    reuse: true,
   })
 }
 
+watch(() => themeStore.currentTheme, () => {
+  nextTick(() => ensureChart())
+})
+
+watch(() => [props.phases, props.spcLimits], () => {
+  nextTick(() => ensureChart())
+}, { deep: true })
+
 function handleResize() {
-  if (chart && !chart.isDisposed()) chart.resize()
+  handle?.chart?.resize()
 }
 
 onMounted(() => {
   window.addEventListener('resize', handleResize)
+  // 首次挂载时主动触发：watch 默认不在初始化时触发，
+  // 而 props.phases/spcLimits 在挂载时已被父组件绑定，不存在"变化"
+  nextTick(() => ensureChart())
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
-  chart?.dispose(); chart = null
+  handle?.dispose()
+  handle = null
 })
 
 defineExpose({ handleResize })

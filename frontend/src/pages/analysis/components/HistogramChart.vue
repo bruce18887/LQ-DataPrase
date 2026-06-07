@@ -92,38 +92,20 @@ function renderChart() {
 
   const mk: any[] = []
 
-  let limitMin = r.lower_limit
-  let limitMax = r.upper_limit
-  switch (props.rangeType) {
-    case 'DR':
-    case 'CL':
-      limitMin = r.data_min
-      limitMax = r.data_max
-      break
-    case 'S3':
-      limitMin = r.sigma3_min ?? r.lower_limit
-      limitMax = r.sigma3_max ?? r.upper_limit
-      break
-    case 'S4':
-      limitMin = r.mean - 4 * r.std
-      limitMax = r.mean + 4 * r.std
-      break
-    case 'S6':
-      limitMin = r.sigma6_min ?? r.lower_limit
-      limitMax = r.sigma6_max ?? r.upper_limit
-      break
-  }
-
+  // Limit lines always mark the true spec limits (LSL/USL).  The range type
+  // only controls the binning / X-axis span (handled server-side); when zoomed
+  // into a sigma window the spec lines fall outside the axis and ECharts simply
+  // clips them — that is the intended behaviour.
   const showLimit = props.chartConfig.includes('limit')
-  if (showLimit && limitMin != null && limitMax != null) {
+  if (showLimit && r.lower_limit != null && r.upper_limit != null) {
     mk.push(
       {
-        xAxis: limitMin,
+        xAxis: r.lower_limit,
         lineStyle: { color: '#C62828', width: 3, type: 'dashed' },
         label: { show: true, formatter: 'LSL', position: 'end' },
       },
       {
-        xAxis: limitMax,
+        xAxis: r.upper_limit,
         lineStyle: { color: '#C62828', width: 3, type: 'dashed' },
         label: { show: true, formatter: 'USL', position: 'end' },
       },
@@ -160,17 +142,32 @@ function renderChart() {
   }
 
   if (hasNormal) {
-    const xVals: number[] = binCenters
-    const pdf = xVals.map(
-      (x: number) =>
-        (1 / (r.std * Math.sqrt(2 * Math.PI))) *
-        Math.exp(-0.5 * ((x - r.mean) / r.std) ** 2)
-    )
+    const binGap = binCenters.length > 1 ? Math.abs(binCenters[1] - binCenters[0]) : 1
+    const pdfFn = (x: number) =>
+      (1 / (r.std * Math.sqrt(2 * Math.PI))) *
+      Math.exp(-0.5 * ((x - r.mean) / r.std) ** 2)
+
+    // When std is tiny relative to bin spacing (e.g. 9e-5 vs 0.013), uniform
+    // sampling misses the narrow peak entirely.  Merge bin centers with extra
+    // points around the mean at ±1σ, ±2σ, …, ±6σ to guarantee the peak is
+    // captured regardless of how narrow the distribution is.
+    let xVals: number[]
+    if (r.std < binGap) {
+      const extra: number[] = [r.mean]
+      for (let k = 1; k <= 6; k++) {
+        extra.push(r.mean - k * r.std, r.mean + k * r.std)
+      }
+      xVals = [...binCenters, ...extra].sort((a, b) => a - b)
+    } else {
+      xVals = binCenters
+    }
+
+    const normalData = xVals.map((x: number) => [x, pdfFn(x)])
 
     series.push({
       name: '正态分布',
       type: 'line',
-      data: xVals.map((x: number, i: number) => [x, pdf[i]]),
+      data: normalData,
       smooth: true,
       lineStyle: { color: '#F57F17', width: 3 },
       symbol: 'none',

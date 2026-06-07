@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import get_parser, BaseATEParser
 from apps.datafiles.views import _user_upload_dir
+from .config_views import SftpConfigMixin
+from .models import SftpConfig
 
 SFTP_CACHE_PREFIX = 'sftp_conn_'
 CSV_EXTENSIONS = {'.csv'}
@@ -30,7 +32,7 @@ SORT_KEYS = {
 }
 
 
-class SftpViewSet(viewsets.GenericViewSet):
+class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
 
     def _get_conn_key(self, request):
@@ -54,10 +56,30 @@ class SftpViewSet(viewsets.GenericViewSet):
 
     @action(detail=False, methods=['post'])
     def connect(self, request):
-        host = request.data.get('host')
-        port = int(request.data.get('port', 22))
-        username = request.data.get('username')
-        password = request.data.get('password')
+        # When a saved config is referenced, load host/port/username and the
+        # decrypted password SERVER-SIDE so the stored password never travels
+        # to the browser. Direct host/username/password connect still works.
+        config_id = request.data.get('config_id')
+        config_name = request.data.get('config_name')
+
+        if config_id is not None or config_name:
+            cfg_qs = SftpConfig.objects.filter(owner=request.user)
+            if config_id is not None:
+                cfg_qs = cfg_qs.filter(id=config_id)
+            else:
+                cfg_qs = cfg_qs.filter(name=config_name)
+            cfg = cfg_qs.first()
+            if not cfg:
+                return Response({'status': 'error', 'message': '未找到配置'}, status=400)
+            host = cfg.host
+            port = cfg.port
+            username = cfg.username
+            password = cfg.get_password()
+        else:
+            host = request.data.get('host')
+            port = int(request.data.get('port', 22))
+            username = request.data.get('username')
+            password = request.data.get('password')
 
         try:
             transport = paramiko.Transport((host, port))
@@ -456,18 +478,6 @@ class SftpViewSet(viewsets.GenericViewSet):
             except:
                 pass
             return Response({'error': str(e)}, status=400)
-
-    # ------------------------------------------------------------------
-    # Configs (stubs)
-    # ------------------------------------------------------------------
-
-    @action(detail=False, methods=['get'])
-    def configs(self, request):
-        return Response({'configs': []})
-
-    @action(detail=False, methods=['post'])
-    def save_config(self, request):
-        return Response({'message': 'Config saved'})
 
     # ------------------------------------------------------------------
     # Helpers

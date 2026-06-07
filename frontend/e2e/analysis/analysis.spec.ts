@@ -56,6 +56,36 @@ test.describe('@p1 单参数分析', { tag: ['@p1', '@analysis'] }, () => {
     await expect(page.locator(`${SINGLE}`).getByText(/Mean|均值|N\b/i).first()).toBeVisible()
   })
 
+  test('@p1 切换范围类型触发 histogram 重新请求并重渲染', async ({ page }) => {
+    await enterAnalysis(page, RECOMMENDED.analysis)
+    await waitLoadingGone(page.locator(SINGLE))
+    await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
+
+    // 选「3 Sigma」应携带 range_type=S3 重新请求后端分箱（修复前后端忽略 range_type）
+    const respPromise = page.waitForResponse(
+      (r) =>
+        r.url().includes('/analysis/histogram/') &&
+        r.request().method() === 'POST' &&
+        r.status() < 500,
+      { timeout: 20_000 },
+    )
+
+    const panel = page.locator(`${SINGLE} .left-panel`)
+    await panel.locator('.el-select').filter({ hasText: 'RowDataLimit' }).first().click()
+    await page
+      .locator('.el-select-dropdown__item:visible')
+      .filter({ hasText: '3 Sigma' })
+      .first()
+      .click()
+
+    const resp = await respPromise
+    const body = resp.request().postData() || ''
+    expect(body, 'histogram 请求体应携带 range_type=S3').toContain('S3')
+
+    await waitLoadingGone(page.locator(SINGLE))
+    await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
+  })
+
   test('@p1 开启 QQ 图后渲染 QQ 图与正态性标签', async ({ page }) => {
     await enterAnalysis(page, RECOMMENDED.analysis)
     await waitLoadingGone(page.locator(SINGLE))

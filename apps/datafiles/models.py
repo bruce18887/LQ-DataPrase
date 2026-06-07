@@ -36,6 +36,10 @@ class DataFile(models.Model):
     row_count = models.IntegerField(null=True, blank=True)
     col_count = models.IntegerField(null=True, blank=True)
     program_name = models.CharField(max_length=255, blank=True, default='')
+    product_code = models.CharField(
+        max_length=32, blank=True, default='', db_index=True
+    )
+    source_mtime = models.DateTimeField(null=True, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default='pending'

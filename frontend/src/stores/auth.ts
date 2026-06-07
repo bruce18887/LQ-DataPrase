@@ -21,6 +21,21 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = profile
   }
 
+  // Restore the in-memory profile after a hard refresh: the token persists in
+  // localStorage (so isLoggedIn stays true), but `user` does not, which would
+  // otherwise leave the UI showing the "用户" fallback and isAdmin=false.
+  async function fetchProfile() {
+    if (!token.value) return
+    try {
+      const { data: profile } = await authApi.getProfile()
+      user.value = profile
+    } catch (err) {
+      // Token expired / invalid → drop the stale session.
+      logout()
+      throw err
+    }
+  }
+
   function logout() {
     if (refreshToken.value) {
       authApi.logout(refreshToken.value).catch(() => {
@@ -34,5 +49,5 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('refresh_token')
   }
 
-  return { token, refreshToken, user, isLoggedIn, isAdmin, login, logout }
+  return { token, refreshToken, user, isLoggedIn, isAdmin, login, logout, fetchProfile }
 })

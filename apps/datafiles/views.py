@@ -10,7 +10,9 @@ import numpy as np
 import pandas as pd
 from django.conf import settings
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import status, viewsets
+from rest_framework.decorators import action
 from rest_framework.generics import GenericAPIView, ListAPIView
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
@@ -27,6 +29,7 @@ from apps.datafiles.serializers import (
 )
 from apps.datafiles.tasks import parse_data_file_task
 from apps.datafiles.services import get_cached_parsed_file
+from apps.datafiles.utils import extract_product_code
 
 ARCHIVE_EXTENSIONS = {'.zip', '.7z', '.rar'}
 
@@ -83,8 +86,13 @@ def _extract_archive(file_path, dest_dir):
     return extracted
 
 
-def _register_file(user, file_path, file_type='single', batch_name=''):
-    """Parse a file and create DataFile + ParseHistory records."""
+def _register_file(user, file_path, file_type='single', batch_name='', source_mtime=None):
+    """Parse a file and create DataFile + ParseHistory records.
+
+    source_mtime: optional aware datetime of the original source file's
+    modification time. When None for archive-extracted/disk files, the
+    on-disk mtime is used; for direct uploads it stays None unless provided.
+    """
     filename = os.path.basename(file_path)
     file_size = os.path.getsize(file_path)
 
@@ -117,6 +125,8 @@ def _register_file(user, file_path, file_type='single', batch_name=''):
         row_count=row_count,
         col_count=col_count,
         program_name=program_name,
+        product_code=extract_product_code(filename),
+        source_mtime=source_mtime,
         status='ready' if format_type != 'Unknown' else 'error',
     )
 
@@ -140,9 +150,57 @@ def _user_upload_dir(user_id, file_type='single'):
     return path
 
 
+def _disk_mtime(file_path):
+    """Return the on-disk modification time as an aware datetime (or None)."""
+    try:
+        return timezone.make_aware(
+            timezone.datetime.fromtimestamp(os.path.getmtime(file_path)),
+            timezone.get_current_timezone(),
+        )
+    except (OSError, ValueError):
+        return None
+
+
+def _parse_last_modified(value):
+    """Parse a browser-provided last_modified epoch-ms value into a datetime.
+
+    Returns an aware datetime, or None if the value is absent/invalid.
+    """
+    if value in (None, ''):
+        return None
+    try:
+        seconds = float(value) / 1000.0
+        return timezone.make_aware(
+            timezone.datetime.fromtimestamp(seconds),
+            timezone.get_current_timezone(),
+        )
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def _delete_datafile_on_disk(datafile):
+    """Remove the on-disk file(s) backing a DataFile (best-effort)."""
+    file_path = datafile.file_path
+    try:
+        if datafile.file_type == 'batch' and datafile.batch_name:
+            # Batch: delete the entire batch directory
+            batch_dir = os.path.dirname(file_path)
+            if os.path.isdir(batch_dir):
+                shutil.rmtree(batch_dir, ignore_errors=True)
+        else:
+            # Single: delete just the file
+            if os.path.exists(file_path):
+                os.remove(file_path)
+    except OSError:
+        pass
+
+
 class DataFileViewSet(viewsets.ModelViewSet):
     serializer_class = DataFileSerializer
     permission_classes = [IsAuthenticated]
+    search_fields = ['filename', 'batch_name', 'program_name']
+    filterset_fields = ['product_code', 'format_type', 'file_type']
+    ordering_fields = ['created_at', 'source_mtime', 'filename', 'file_size']
 
     def get_queryset(self):
         return DataFile.objects.filter(owner=self.request.user)
@@ -157,19 +215,38 @@ class DataFileViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         datafile = self.get_object()
-        # Delete physical file(s)
-        file_path = datafile.file_path
-        if datafile.file_type == 'batch' and datafile.batch_name:
-            # Batch: delete the entire batch directory
-            batch_dir = os.path.dirname(file_path)
-            if os.path.isdir(batch_dir):
-                shutil.rmtree(batch_dir, ignore_errors=True)
-        else:
-            # Single: delete just the file
-            if os.path.exists(file_path):
-                os.remove(file_path)
+        _delete_datafile_on_disk(datafile)
         datafile.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=False, methods=['post'])
+    def bulk_delete(self, request):
+        """Delete multiple owned files at once: { "ids": [1, 2, 3] }."""
+        ids = request.data.get('ids') or []
+        if not isinstance(ids, list) or not ids:
+            return Response(
+                {'error': 'ids must be a non-empty list'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Owner-scoped: only the requesting user's files are ever touched.
+        qs = DataFile.objects.filter(owner=request.user, id__in=ids)
+        for datafile in qs:
+            _delete_datafile_on_disk(datafile)
+        deleted_count = qs.count()
+        qs.delete()
+        return Response({'deleted': deleted_count})
+
+    @action(detail=False, methods=['get'])
+    def product_codes(self, request):
+        """Distinct non-empty product codes for the current user's files."""
+        codes = (
+            DataFile.objects.filter(owner=request.user)
+            .exclude(product_code='')
+            .values_list('product_code', flat=True)
+            .distinct()
+            .order_by('product_code')
+        )
+        return Response({'product_codes': list(codes)})
 
 
 class FileUploadView(APIView):
@@ -182,12 +259,18 @@ class FileUploadView(APIView):
         if not files:
             return Response({'error': '未选择文件'}, status=400)
 
+        # Optional per-file last_modified (epoch ms), parallel to the files list.
+        last_modified_list = request.data.getlist('last_modified')
+
         upload_dir = _user_upload_dir(request.user.id, 'single')
         created = []
 
-        for uploaded_file in files:
+        for idx, uploaded_file in enumerate(files):
             base_name = uploaded_file.name
             file_path = os.path.join(upload_dir, base_name)
+
+            lm_value = last_modified_list[idx] if idx < len(last_modified_list) else None
+            browser_mtime = _parse_last_modified(lm_value)
 
             # Handle filename collision
             if os.path.exists(file_path):
@@ -208,14 +291,21 @@ class FileUploadView(APIView):
                     extracted = _extract_archive(file_path, extract_dir)
                     batch_name = os.path.splitext(base_name)[0]
                     for ext_path in extracted:
-                        df = _register_file(request.user, ext_path, 'batch', batch_name)
+                        # Archives preserve the original file mtime on disk.
+                        df = _register_file(
+                            request.user, ext_path, 'batch', batch_name,
+                            source_mtime=_disk_mtime(ext_path),
+                        )
                         created.append(df)
                 except Exception:
                     pass
                 # Remove the archive itself (keep extracted files)
                 os.remove(file_path)
             else:
-                df = _register_file(request.user, file_path, 'single')
+                df = _register_file(
+                    request.user, file_path, 'single',
+                    source_mtime=browser_mtime,
+                )
                 created.append(df)
 
         return Response(

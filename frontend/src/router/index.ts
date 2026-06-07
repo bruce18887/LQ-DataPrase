@@ -28,16 +28,16 @@ const routes = [
         meta: { title: '数据管理' },
       },
       {
-        path: 'sftp',
-        name: 'SftpBrowser',
-        component: () => import('../pages/sftp/SftpBrowser.vue'),
-        meta: { title: 'SFTP 浏览器' },
-      },
-      {
         path: 'analysis',
         name: 'Analysis',
         component: () => import('../pages/analysis/AnalysisPage.vue'),
         meta: { title: '数据分析' },
+      },
+      {
+        path: 'sftp',
+        name: 'SftpBrowser',
+        component: () => import('../pages/sftp/SftpBrowser.vue'),
+        meta: { title: 'SFTP 浏览器' },
       },
       {
         path: 'batch',
@@ -67,8 +67,19 @@ const router = createRouter({
   routes,
 })
 
-router.beforeEach((to, _from, next) => {
+router.beforeEach(async (to, _from, next) => {
   const auth = useAuthStore()
+  // After a hard refresh the token is rehydrated from localStorage but the
+  // profile is not — re-fetch it once so the username/role (and admin menus)
+  // render correctly instead of falling back to the "用户" placeholder.
+  if (auth.isLoggedIn && !auth.user) {
+    try {
+      await auth.fetchProfile()
+    } catch {
+      // Session invalid — fetchProfile already cleared it; fall through to the
+      // requiresAuth check below, which redirects to /login.
+    }
+  }
   if (to.meta.requiresAuth && !auth.isLoggedIn) {
     next('/login')
   } else if (to.path === '/login' && auth.isLoggedIn) {

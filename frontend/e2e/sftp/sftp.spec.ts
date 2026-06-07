@@ -18,12 +18,12 @@ import { captureDownload } from '../helpers/download'
  *   → 通过 .el-form-item（含 label 文本）内的输入框定位
  * - 连接按钮：button「连接」（含图标，行 58-60）
  * - 保存配置按钮：button「保存配置」（行 61-63）
- * - 已保存配置区：.saved-configs（仅 savedConfigs.length>0 时渲染，数据来自 localStorage 'sftp_configs'，行 68-104）
- * - 连接后文件表：.file-table / el-table（行 152-157）；断开按钮「断开」（行 143-145）；行内下载按钮「下载」（行 192）
+ * - 已保存配置区：.saved-configs（仅 savedConfigs.length>0 时渲染，数据来自后端 GET /sftp/configs/）
+ * - 连接后文件表：.file-table / el-table；断开按钮「断开」；行内下载按钮「下载」
  *
- * 注意：组件的“已保存配置”读取 localStorage（loadSavedConfigs / 'sftp_configs'，行 278-287），
- *       并未调用 sftpApi.getConfigs()（GET /sftp/configs/）。因此 @p2 既验证组件的本地态行为，
- *       又直接打后端 GET /sftp/configs/ 断言 200（后端 SftpViewSet.configs 返回 {configs: []}）。
+ * 注意：配置已改为后端持久化（GET /sftp/configs/、POST /sftp/save_config/、
+ *       POST /sftp/delete_config/），密码加密存储且永不回传浏览器。@p2 用例
+ *       通过 UI（保存配置对话框 + 已保存配置卡片 + 删除）走完整后端往返。
  */
 
 const SFTP_HOST = process.env.SFTP_HOST
@@ -80,45 +80,64 @@ test.describe('@p1 SFTP 页面渲染', { tag: ['@p1', '@sftp'] }, () => {
   })
 })
 
-test.describe('@p2 SFTP 已保存配置', { tag: ['@p2', '@sftp'] }, () => {
-  test('GET /sftp/configs/ 返回 200，本地无配置时不渲染已保存配置区', async ({ page }) => {
+test.describe('@p2 SFTP 已保存配置（后端持久化）', { tag: ['@p2', '@sftp'] }, () => {
+  // 唯一名称，避免与历史/并行数据冲突；测试自身负责清理。
+  const CFG_NAME = `e2e-cfg-${Date.now()}`
+
+  test('保存配置对话框 → 卡片含已保存密码标 → 删除', async ({ page }) => {
     await gotoApp(page, '/sftp')
-
-    // 1) 直接验证后端配置端点（带应用内 JWT，走 Vite /api 代理）返回 200。
-    //    组件本身不调用该端点（其配置来自 localStorage），故用页内 fetch 主动验证后端契约。
-    const status = await page.evaluate(async () => {
-      const token = localStorage.getItem('access_token')
-      const res = await fetch('/api/v1/sftp/configs/', {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-      return res.status
-    })
-    expect(status).toBe(200)
-
-    // 2) 组件态：localStorage 'sftp_configs' 为空 → .saved-configs 不渲染（v-if 守卫，行 68）。
-    //    清空以确保确定态，然后重新进入页面断言空态（无已保存配置区）。
-    await page.evaluate(() => localStorage.removeItem('sftp_configs'))
-    await page.reload()
-    await expect(page.locator('.main-layout')).toBeVisible({ timeout: 15_000 })
     await expect(page.locator('.connect-card')).toBeVisible()
-    await expect(page.locator('.saved-configs')).toHaveCount(0)
 
-    // 3) 写入一条本地配置 → 重新进入后已保存配置区出现且渲染该项（验证区域逻辑）。
-    await page.evaluate(() => {
-      localStorage.setItem(
-        'sftp_configs',
-        JSON.stringify([
-          { name: 'e2e-cfg', host: '10.0.0.1', port: 22, username: 'tester', password: 'x' },
-        ]),
-      )
-    })
-    await page.reload()
-    await expect(page.locator('.main-layout')).toBeVisible({ timeout: 15_000 })
-    await expect(page.locator('.saved-configs')).toBeVisible()
-    await expect(page.locator('.saved-configs .config-name')).toHaveText('e2e-cfg')
+    // 1) 填写连接表单（host/username 必填，启用「保存配置」按钮）。
+    await page.getByPlaceholder('例如: 192.168.1.1').fill('10.0.0.42')
+    await fieldByLabel(page, '用户名').fill('tester')
+    await fieldByLabel(page, '密码').fill('s3cret')
 
-    // 清理本地态，避免污染其它用例
-    await page.evaluate(() => localStorage.removeItem('sftp_configs'))
+    const saveBtn = page.getByRole('button', { name: '保存配置' })
+    await expect(saveBtn).toBeEnabled()
+
+    // 2) 打开命名对话框，校验空名拦截，再填入自定义名称提交。
+    await saveBtn.click()
+    const dialog = page.locator('.el-dialog').filter({ hasText: '保存配置' })
+    await expect(dialog).toBeVisible()
+
+    const nameInput = dialog.locator('input').first()
+    await nameInput.fill('')
+    await dialog.getByRole('button', { name: '保存', exact: true }).click()
+    // 名称为空时应有校验错误且对话框不关闭。
+    await expect(dialog.locator('.el-form-item__error')).toBeVisible()
+    await expect(dialog).toBeVisible()
+
+    await nameInput.fill(CFG_NAME)
+    await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes('/sftp/save_config/') && r.request().method() === 'POST',
+        { timeout: 15_000 },
+      ),
+      dialog.getByRole('button', { name: '保存', exact: true }).click(),
+    ])
+
+    // 3) 已保存配置区出现该卡片，且带「已保存密码」标签（has_password=true）。
+    const card = page
+      .locator('.saved-configs .config-item')
+      .filter({ has: page.locator('.config-name', { hasText: CFG_NAME }) })
+    await expect(card).toBeVisible()
+    await expect(card.locator('.pw-tag')).toHaveText(/已保存密码/)
+
+    // 4) 删除（确认弹窗 → 删除按钮）→ 卡片消失。
+    await card.getByRole('button', { name: '删除配置' }).click()
+    const confirm = page.locator('.el-message-box')
+    await expect(confirm).toBeVisible()
+    await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes('/sftp/delete_config/') && r.request().method() === 'POST',
+        { timeout: 15_000 },
+      ),
+      confirm.getByRole('button', { name: '删除', exact: true }).click(),
+    ])
+    await expect(
+      page.locator('.saved-configs .config-name', { hasText: CFG_NAME }),
+    ).toHaveCount(0)
   })
 })
 
