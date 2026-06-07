@@ -38,15 +38,27 @@ class SftpConfigSerializer(serializers.ModelSerializer):
     def get_has_password(self, obj) -> bool:
         return bool(obj.password_encrypted)
 
-    def create(self, validated_data):
+    def create(self, validated_data, **kwargs):
+        # ``owner`` is injected by the view via ``serializer.save(owner=...)``.
+        # The **kwargs signature is REQUIRED — DRF transparently forwards any
+        # extra kwargs from save() as keyword arguments, so without it the view
+        # raises ``TypeError: create() got an unexpected keyword argument
+        # 'owner'`` and the API returns 500.
+        owner = kwargs.pop('owner', None) or validated_data.pop('owner', None)
         password = validated_data.pop('password', None)
         instance = SftpConfig(**validated_data)
+        if owner is not None:
+            instance.owner = owner
         if password:
             instance.set_password(password)
         instance.save()
         return instance
 
-    def update(self, instance, validated_data):
+    def update(self, instance, validated_data, **kwargs):
+        # Mirror the create() signature: DRF forwards extra kwargs from
+        # save(). The view never needs to update ``owner`` here, but accepting
+        # the keyword keeps the contract consistent with create().
+        kwargs.pop('owner', None)
         password = validated_data.pop('password', None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)

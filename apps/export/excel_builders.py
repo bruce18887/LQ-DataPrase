@@ -107,9 +107,7 @@ def build_to_excel_sheet(f, export_df, metadata, datafile_format_type):
             try:
                 min_v = float(metadata['mins'][col_name])
                 max_v = float(metadata['maxs'][col_name])
-                v_cpk = round(
-                    min((max_v - v_avg) / (3 * v_std), (v_avg - min_v) / (3 * v_std)), 6
-                ) if v_std > 0 else 0
+                v_cpk = round(compute_cpk(v_avg, v_std, min_v, max_v)['cpk'], 6)
             except Exception:
                 v_cpk = 0
 

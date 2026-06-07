@@ -57,6 +57,16 @@
                 {{ f.format_type }} | {{ f.row_count }}行×{{ f.col_count }}列
               </div>
               <div style="color: var(--text-secondary); font-size:12px" v-if="f.program_name" class="program-name">{{ f.program_name }}</div>
+              <div v-if="f.tags && f.tags.length" class="tag-row">
+                <el-tag
+                  v-for="t in f.tags"
+                  :key="t"
+                  size="small"
+                  type="info"
+                  effect="plain"
+                  class="file-tag"
+                >{{ t }}</el-tag>
+              </div>
               <el-row :gutter="8" style="margin-top:8px">
                 <el-col :span="16">
                   <el-button size="small" type="primary" @click="emit('file-selected', f.id)" style="width: 100%">
@@ -75,32 +85,24 @@
       </div>
     </template>
 
-    <!-- Single files -->
-    <template v-if="singleFiles.length > 0">
+    <!-- Single files (table + pagination + search) -->
+    <template v-if="singleFilesRaw.length > 0 || filterKeyword || filterTag">
       <div class="section-label" v-if="batchGroups.length > 0 || unregisteredDirs.length > 0">📁 单文件</div>
-      <el-row :gutter="16">
-        <el-col :span="8" v-for="f in singleFiles" :key="f.id">
-          <el-card shadow="hover" :class="{ 'active-file': f.id === activeFileId }">
-            <div style="font-weight:bold; color: var(--text-primary)">{{ f.filename }}</div>
-            <div style="color: var(--text-secondary); font-size:12px; margin:4px 0">
-              {{ f.format_type }} | {{ f.row_count }}行×{{ f.col_count }}列
-            </div>
-            <div style="color: var(--text-secondary); font-size:12px" v-if="f.program_name" class="program-name">{{ f.program_name }}</div>
-            <el-row :gutter="8" style="margin-top:8px">
-              <el-col :span="16">
-                <el-button size="small" type="primary" @click="emit('file-selected', f.id)" style="width: 100%">
-                  {{ f.id === activeFileId ? '✓ 当前文件' : '浏览数据' }}
-                </el-button>
-              </el-col>
-              <el-col :span="8">
-                <el-button size="small" type="danger" @click="deleteFile(f)" aria-label="删除文件">
-                  <el-icon><Delete /></el-icon>
-                </el-button>
-              </el-col>
-            </el-row>
-          </el-card>
-        </el-col>
-      </el-row>
+      <FileSearchBar
+        :available-tags="allTags"
+        @change="onSearchChange"
+      />
+      <div v-if="filteredSingleFiles.length === 0" class="empty-filter">
+        <el-empty description="没有匹配的单文件" :image-size="80" />
+      </div>
+      <SingleFileTable
+        v-else
+        :files="filteredSingleFiles"
+        :active-file-id="activeFileId"
+        @file-selected="(id) => emit('file-selected', id)"
+        @delete-file="deleteFile"
+        @tags-updated="onSingleTagsUpdated"
+      />
     </template>
 
     <el-empty v-if="files.length === 0 && unregisteredDirs.length === 0" description="暂无文件" />
@@ -114,6 +116,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { datafilesApi, type BatchDirInfo } from '../../api/datafiles'
 import { useFilesStore } from '../../stores/files'
 import type { DataFile } from '../../types'
+import SingleFileTable from './components/SingleFileTable.vue'
+import FileSearchBar from './components/FileSearchBar.vue'
 
 const props = defineProps<{ activeFileId?: number }>()
 const emit = defineEmits<{ 'file-selected': [id: number] }>()
@@ -123,14 +127,34 @@ const uploadProgress = ref(0)
 const batchDirs = ref<BatchDirInfo[]>([])
 const importingDir = ref('')
 const filesStore = useFilesStore()
+const allTags = ref<string[]>([])
+const filterKeyword = ref('')
+const filterTag = ref('')
 
 // Sync batchDirs when files change externally (e.g. SFTP auto-import)
 watch(() => filesStore.filesVersion, () => {
   loadFiles()
   loadBatchDirs()
+  loadAllTags()
 })
 
-const singleFiles = computed(() => files.value.filter(f => f.file_type !== 'batch'))
+const singleFilesRaw = computed(() => files.value.filter(f => f.file_type !== 'batch'))
+
+const filteredSingleFiles = computed(() => {
+  const kw = filterKeyword.value.toLowerCase()
+  const tag = filterTag.value.toLowerCase()
+  return singleFilesRaw.value.filter((f) => {
+    if (tag) {
+      const tags = Array.isArray(f.tags) ? f.tags : []
+      if (!tags.some((t) => t.toLowerCase() === tag)) return false
+    }
+    if (!kw) return true
+    if ((f.filename || '').toLowerCase().includes(kw)) return true
+    if ((f.program_name || '').toLowerCase().includes(kw)) return true
+    const tags = Array.isArray(f.tags) ? f.tags : []
+    return tags.some((t) => t.toLowerCase().includes(kw))
+  })
+})
 
 const unregisteredDirs = computed(() => batchDirs.value.filter(d => !d.registered))
 
@@ -152,6 +176,29 @@ function formatSize(bytes: number): string {
   return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB'
 }
 
+function onSearchChange(payload: { keyword: string; tag: string }) {
+  filterKeyword.value = payload.keyword
+  filterTag.value = payload.tag
+}
+
+function onSingleTagsUpdated(updated: DataFile) {
+  // Replace the row in the source list so props change triggers el-table re-render.
+  // 直接修改 row.tags 不会触发响应式（Vue 不会深度追踪 props 内部对象），必须替换数组元素。
+  const next = files.value.map((f) => (f.id === updated.id ? { ...f, tags: [...updated.tags] } : f))
+  files.value = next
+  // Refresh the allTags list so the search bar reflects new entries
+  loadAllTags()
+}
+
+async function loadAllTags() {
+  try {
+    const { data } = await datafilesApi.listTags()
+    allTags.value = Array.isArray(data?.tags) ? data.tags : []
+  } catch {
+    allTags.value = []
+  }
+}
+
 async function handleUpload(options: { file: File }) {
   uploadProgress.value = 0
   try {
@@ -160,6 +207,7 @@ async function handleUpload(options: { file: File }) {
     })
     ElMessage.success(`${options.file.name} 上传成功`)
     await loadFiles()
+    await loadAllTags()
     filesStore.notifyFilesChanged()
   } catch {
     ElMessage.error(`${options.file.name} 上传失败`)
@@ -228,6 +276,7 @@ async function deleteFile(file: DataFile) {
     await datafilesApi.remove(file.id)
     ElMessage.success('文件已删除')
     await loadFiles()
+    await loadAllTags()
     filesStore.notifyFilesChanged()
   } catch (e: any) {
     if (e !== 'cancel') {
@@ -249,6 +298,7 @@ async function deleteBatch(group: { name: string; files: DataFile[] }) {
     }
     ElMessage.success(`批次 "${group.name}" 已删除`)
     await loadFiles()
+    await loadAllTags()
     filesStore.notifyFilesChanged()
   } catch (e: any) {
     if (e !== 'cancel') {
@@ -260,6 +310,7 @@ async function deleteBatch(group: { name: string; files: DataFile[] }) {
 onMounted(() => {
   loadFiles()
   loadBatchDirs()
+  loadAllTags()
 })
 </script>
 
@@ -282,6 +333,17 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
+}
+
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.file-tag {
+  font-size: 11px;
 }
 
 .batch-group {
@@ -328,6 +390,10 @@ onMounted(() => {
   font-weight: 600;
   color: var(--text-secondary);
   margin-bottom: 12px;
+}
+
+.empty-filter {
+  padding: 12px 0;
 }
 
 :deep(.el-upload-dragger) {

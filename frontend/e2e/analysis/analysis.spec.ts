@@ -8,7 +8,7 @@ import {
   sampleN,
 } from '../helpers/params'
 import { pickOption } from '../helpers/elplus'
-import { PARAM_SAMPLE_COUNT, RECOMMENDED } from '../fixtures/test-data'
+import { PARAM_SAMPLE_COUNT, RECOMMENDED, SINGLE_SITE_FILES } from '../fixtures/test-data'
 
 /**
  * 数据分析页（功能最密集）。使用 admin storageState + 预植入数据集。
@@ -243,5 +243,55 @@ test.describe('@p2 文件相关性', { tag: ['@p2', '@analysis'] }, () => {
     await expect(file2).toBeVisible()
     // 阈值输入框
     await expect(fileSection.locator('.el-input-number')).toBeVisible()
+  })
+})
+
+test.describe('@p2 单 SITE 直方图图例（§2 回归）', { tag: ['@p2', '@analysis'] }, () => {
+  /**
+   * 当文件 Site_No 列只含 1 个值时（典型如 QA2 阶段只跑 Site 4），
+   * 直方图图例文本必须是 `SiteN`（N=该站点编号），绝不能回退为「数据分布」。
+   * 实现见 apps/analysis/services/data_services.py §site_histograms
+   * （>= 1 守卫）和 frontend/src/pages/analysis/components/HistogramChart.vue
+   * hasSiteData / `Site${site}` 命名。
+   */
+  test('单 SITE 站点图例显示 SiteN 而非「数据分布」', async ({ page }) => {
+    test.slow()
+    await enterAnalysis(page, SINGLE_SITE_FILES.SITE_4)
+    await waitLoadingGone(page.locator(SINGLE))
+
+    // 选个最普通的参数（避免选到全空 / 全相等导致无数据）
+    const params = await listParams(page)
+    expect(params.length, '参数列表应非空').toBeGreaterThan(0)
+    await selectParam(page, params[0])
+
+    await waitLoadingGone(page.locator(SINGLE))
+    await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
+
+    // ECharts 会在内部把 legend 渲染成 <text> 元素（可能挂在外层容器或
+    // 自身的 svg 节点上）。整体查询 `${SINGLE} text` 拿全部文本。
+    const legendTexts = await page.locator(`${SINGLE} text`).allInnerTexts()
+    const flat = legendTexts.join(' | ')
+
+    // 必须出现「Site4」（fixture 是 QA2 阶段只跑 Site 4）
+    expect(flat, '单 SITE 图例应包含「Site4」').toMatch(/Site4/)
+    // 不能出现旧分支硬编码的「数据分布」
+    expect(flat, '单 SITE 时不应再出现「数据分布」字样').not.toMatch(/数据分布/)
+  })
+
+  test('gage_m_S1 单 Site1 文件图例也是 Site1', async ({ page }) => {
+    test.slow()
+    await enterAnalysis(page, SINGLE_SITE_FILES.SITE_1)
+    await waitLoadingGone(page.locator(SINGLE))
+
+    const params = await listParams(page)
+    expect(params.length).toBeGreaterThan(0)
+    await selectParam(page, params[0])
+    await waitLoadingGone(page.locator(SINGLE))
+    await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
+
+    const legendTexts = await page.locator(`${SINGLE} text`).allInnerTexts()
+    const flat = legendTexts.join(' | ')
+    expect(flat).toMatch(/Site1/)
+    expect(flat).not.toMatch(/数据分布/)
   })
 })

@@ -15,6 +15,7 @@ from apps.datafiles.services import get_cached_parsed_file
 from apps.analysis.services.statistics import (
     calculate_fail_bin_statistics, get_site_column,
     get_bin_column_name, compute_site_yield_data, compute_uph,
+    compute_pass_yield, is_pass_bin,
 )
 from apps.batch_report.aggregation import aggregate_bin_site_table, aggregate_uph
 
@@ -104,15 +105,16 @@ class BatchReportViewSet(viewsets.GenericViewSet):
 
             total = df.shape[0]
             bin_stats = calculate_fail_bin_statistics(df, metadata)
+            yield_result = compute_pass_yield(bin_stats, total)
+            pass_count = yield_result['pass_count']
+            fail_count = yield_result['fail_count']
+            yield_pct = yield_result['yield_pct']
 
-            pass_count = 0
             bin_info = []
             for bin_name, binfo in bin_stats.items():
                 count = binfo.get('count', 0)
                 pct = binfo.get('percentage', 0)
                 bn = str(bin_name)
-                if bn in ('1', 'Bin1'):
-                    pass_count = count
                 bin_agg[bn] += count
                 bin_info.append({
                     'name': bn,
@@ -120,9 +122,6 @@ class BatchReportViewSet(viewsets.GenericViewSet):
                     'pct': f"{pct:.2f}%",
                     'sites': {},
                 })
-
-            fail_count = total - pass_count
-            yield_pct = round(pass_count / total * 100, 2) if total > 0 else 0
 
             # Site yield
             site_col = get_site_column(df)
@@ -337,16 +336,16 @@ class BatchReportViewSet(viewsets.GenericViewSet):
 
             total_rows = df.shape[0]
             bin_stats = calculate_fail_bin_statistics(df, metadata)
-            total_pass = sum(1 for bv, s in bin_stats.items() if int(float(bv)) == 1)
+            yield_result = compute_pass_yield(bin_stats, total_rows)
 
             phases.append({
                 'filename': df_obj.filename,
                 'program_name': df_obj.program_name,
                 'format': df_obj.format_type,
                 'total': total_rows,
-                'pass_count': total_pass,
-                'fail_count': total_rows - total_pass,
-                'yield_pct': round((total_pass / total_rows * 100), 2) if total_rows > 0 else 0,
+                'pass_count': yield_result['pass_count'],
+                'fail_count': yield_result['fail_count'],
+                'yield_pct': yield_result['yield_pct'],
             })
 
         wb = Workbook()

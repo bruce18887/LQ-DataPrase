@@ -4,6 +4,10 @@ from rest_framework.test import APITestCase
 
 from apps.datafiles.models import DataFile
 from apps.datafiles.utils import extract_product_code
+from apps.datafiles.views import _user_upload_dir
+
+import os
+import shutil
 
 User = get_user_model()
 
@@ -17,17 +21,70 @@ class ExtractProductCodeTests(TestCase):
             'BPD60320_QA1.csv': 'BPD60320',
             'BPD60320_C01F40#AAA12603030006_FT1-FT1-1_R2603030042_20260305_204439.csv': 'BPD60320',
             'DA35_BPC50338_CL08D4.01#AEA3_414A07_2604140567_FT_20260420_164504.csv': 'BPC50338',
-            'BN281R3CYCAA_2604160006_TTTA803100.03_06_CP1_20260418161733.csv': 'BN281',
+            # Alphanumeric suffix is part of the product code — capture it.
+            'BN281R3CYCAA_2604160006_TTTA803100.03_06_CP1_20260418161733.csv': 'BN281R3CYCAA',
             'BPD93204_FT1_ETS163550_12252024.csv': 'BPD93204',
         }
         for filename, expected in cases.items():
             with self.subTest(filename=filename):
+                # When no program_name is supplied the function falls back to
+                # the historical filename-regex behaviour.
                 self.assertEqual(extract_product_code(filename), expected)
 
     def test_non_matching_returns_empty(self):
         self.assertEqual(extract_product_code('gage_m_S1.csv'), '')
         self.assertEqual(extract_product_code('random.csv'), '')
         self.assertEqual(extract_product_code(''), '')
+
+    def test_program_name_pts_pgs_pds(self):
+        # The data filename is the primary source — the CSV test-program
+        # name is only consulted when the filename doesn't expose a
+        # B-prefix token. Both sources are scanned with the same regex so
+        # trailing suffixes (``_FT_SAB_BPC50338XBAC_EN``,
+        # ``JAVBN281R3CYCAAV1.6``) collapse to the leading product code.
+        cases = {
+            'BPD60320_FT.csv':         ('BPD60320.pts',                       'BPD60320'),
+            'BPD60320_QA1.csv':         ('BPD60320.pgs',                       'BPD60320'),
+            'DA35_BPC50338_...':        ('BPC50338_FT_SAB_BPC50338XBAC_EN.pts', 'BPC50338'),
+            'BN281R3CYCAA_x.csv':       ('JAVBN281R3CYCAAV1.6.pgs',            'BN281R3CYCAA'),
+            'BPD93204_FT1_ETS163550.csv': ('BPD93204.pts',                      'BPD93204'),
+        }
+        for filename, (program_name, expected) in cases.items():
+            with self.subTest(filename=filename, program_name=program_name):
+                self.assertEqual(extract_product_code(filename, program_name), expected)
+
+    def test_program_name_extension_case_insensitive(self):
+        # Some tester hosts report the extension in upper case; treat that
+        # the same as the lower-case form.
+        self.assertEqual(extract_product_code('BPD60320.csv', 'BPD60320.PTS'), 'BPD60320')
+        self.assertEqual(extract_product_code('BPD60320.csv', 'BPD60320.Pgs'), 'BPD60320')
+
+    def test_program_name_with_directory(self):
+        # The parser feeds a basename already, but if a future caller passes
+        # a full path it should still work.
+        self.assertEqual(
+            extract_product_code('BPD60320.csv', 'Z:\\tests\\BPD60320.pts'),
+            'BPD60320',
+        )
+
+    def test_program_name_unknown_ext_falls_back_to_filename(self):
+        # If the program extension is not in the recognised set, the
+        # function falls back to scanning the data filename.
+        self.assertEqual(
+            extract_product_code('BPD60320_FT.csv', 'something.bin'),
+            'BPD60320',
+        )
+        # Same for the historical empty-program_name case.
+        self.assertEqual(
+            extract_product_code('BPD60320_FT.csv', ''),
+            'BPD60320',
+        )
+
+    def test_program_name_only_no_filename_match(self):
+        # Program-only path (e.g. STS8200 device-name "BN281" without
+        # a product-code-like token in the data filename).
+        self.assertEqual(extract_product_code('2604160006_x.csv', 'BN281.pts'), 'BN281')
+        self.assertEqual(extract_product_code('2604160006_x.csv', 'BN281.pgs'), 'BN281')
 
 
 def _make_datafile(owner, filename, **kwargs):
@@ -98,3 +155,189 @@ class ListFilterTests(APITestCase):
         _make_datafile(other, 'BN281R3CYCAA_x.csv')
         resp = self.client.get('/api/v1/files/product_codes/')
         self.assertNotIn('BN281', resp.data['product_codes'])
+
+
+class UserUploadDirTests(TestCase):
+    """Verify _user_upload_dir uses the user's username (not numeric id).
+
+    Regression test for the 2026-06-07 bug: `_user_upload_dir` had been
+    refactored in the project memory but the change never reached disk —
+    paths were still emitted as ``media/data/<id>/<file_type>/``. This locks
+    in the username-based layout so a future refactor can't silently
+    regress to id-based directories.
+    """
+
+    def setUp(self):
+        # _user_upload_dir creates the directory on disk, so capture a list
+        # of pre-existing entries under media/data so tearDown can clean up
+        # only the test-introduced ones.
+        from django.conf import settings
+        self._data_root = os.path.join(settings.MEDIA_ROOT, 'data')
+        self._pre_existing = set(os.listdir(self._data_root)) if os.path.isdir(self._data_root) else set()
+
+    def tearDown(self):
+        # Best-effort: remove only directories we created, leave admin/ and
+        # any other pre-existing user dirs alone.
+        if not os.path.isdir(self._data_root):
+            return
+        for name in os.listdir(self._data_root):
+            if name in self._pre_existing:
+                continue
+            full = os.path.join(self._data_root, name)
+            if os.path.isdir(full):
+                shutil.rmtree(full, ignore_errors=True)
+
+    def test_uses_username_not_id(self):
+        u = User.objects.create_user(username='admin', password='pw')
+        path = _user_upload_dir(u, 'single')
+        # Path must include the username segment and NOT the numeric id.
+        self.assertIn('admin', path)
+        self.assertNotIn(f'/{u.id}/', path)
+        # The relative suffix is media/data/<username>/<file_type>/.
+        self.assertTrue(
+            path.replace('\\', '/').endswith('/data/admin/single'),
+            f'unexpected path: {path!r}',
+        )
+
+    def test_file_type_segment(self):
+        u = User.objects.create_user(username='qa01', password='pw')
+        path = _user_upload_dir(u, 'batch')
+        self.assertTrue(path.replace('\\', '/').endswith('/data/qa01/batch'))
+
+    def test_separate_users_get_separate_dirs(self):
+        a = User.objects.create_user(username='alice', password='pw')
+        b = User.objects.create_user(username='bob', password='pw')
+        self.assertNotEqual(_user_upload_dir(a), _user_upload_dir(b))
+
+    def test_creates_directory_on_disk(self):
+        import os
+        u = User.objects.create_user(username='create_test_user', password='pw')
+        path = _user_upload_dir(u, 'single')
+        self.assertTrue(os.path.isdir(path), f'expected {path} to exist')
+
+    def test_none_user_raises(self):
+        with self.assertRaises(ValueError):
+            _user_upload_dir(None)
+
+    def test_unicode_username_is_safe(self):
+        # Django's UnicodeUsernameValidator allows letters from any script;
+        # ensure the path is built without raising on common non-ASCII names.
+        u = User.objects.create_user(username='alice测试', password='pw')
+        path = _user_upload_dir(u, 'single')
+        self.assertIn('alice测试', path)
+
+
+class NormalizeTagsTests(TestCase):
+    """Pure-function coverage for normalize_tags (see serializers.py)."""
+
+    def test_none_or_empty_returns_empty_list(self):
+        from apps.datafiles.serializers import normalize_tags
+        self.assertEqual(normalize_tags(None), [])
+        self.assertEqual(normalize_tags([]), [])
+        self.assertEqual(normalize_tags(''), [])
+
+    def test_trims_and_drops_empty_strings(self):
+        from apps.datafiles.serializers import normalize_tags
+        self.assertEqual(normalize_tags(['  alpha  ', '', '   ']), ['alpha'])
+
+    def test_case_insensitive_dedup_keeps_first_casing(self):
+        from apps.datafiles.serializers import normalize_tags
+        self.assertEqual(
+            normalize_tags(['Hot', 'HOT', 'hot', 'Lot']),
+            ['Hot', 'Lot'],
+        )
+
+    def test_non_string_raises(self):
+        from rest_framework import serializers as s
+        from apps.datafiles.serializers import normalize_tags
+        with self.assertRaises(s.ValidationError):
+            normalize_tags(['ok', 42])
+
+    def test_non_list_raises(self):
+        from rest_framework import serializers as s
+        from apps.datafiles.serializers import normalize_tags
+        with self.assertRaises(s.ValidationError):
+            normalize_tags('not-a-list')  # type: ignore[arg-type]
+
+    def test_max_length_enforced(self):
+        from rest_framework import serializers as s
+        from apps.datafiles.serializers import normalize_tags, TAG_MAX_LENGTH
+        too_long = 'a' * (TAG_MAX_LENGTH + 1)
+        with self.assertRaises(s.ValidationError):
+            normalize_tags([too_long])
+
+    def test_max_count_enforced(self):
+        from rest_framework import serializers as s
+        from apps.datafiles.serializers import normalize_tags, TAG_MAX_COUNT
+        with self.assertRaises(s.ValidationError):
+            normalize_tags([f't{i}' for i in range(TAG_MAX_COUNT + 1)])
+
+
+class DataFileTagsAPITests(APITestCase):
+    """End-to-end coverage for the §4 set_tags / list_tags endpoints."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='taguser', password='pw')
+        self.client.force_authenticate(self.user)
+        self.f1 = _make_datafile(self.user, 'BPD60320_FT.csv', tags=['Hot', 'PR_Phase1'])
+        self.f2 = _make_datafile(self.user, 'BPD93204_FT1.csv', tags=['PR_Phase1', 'COLD'])
+
+    def test_set_tags_overwrites_and_normalises(self):
+        resp = self.client.post(
+            f'/api/v1/files/{self.f1.id}/set_tags/',
+            {'tags': ['  New_Tag  ', 'NEW_TAG', '', 'Q2']},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.f1.refresh_from_db()
+        # Whitespace trimmed, case-insensitive dedup → New_Tag kept, Q2 kept.
+        self.assertEqual(self.f1.tags, ['New_Tag', 'Q2'])
+        self.assertEqual(resp.data['tags'], ['New_Tag', 'Q2'])
+
+    def test_set_tags_owner_scoped_404(self):
+        other = User.objects.create_user(username='other', password='pw')
+        f_other = _make_datafile(other, 'X.csv')
+        resp = self.client.post(
+            f'/api/v1/files/{f_other.id}/set_tags/',
+            {'tags': ['hack']},
+            format='json',
+        )
+        # get_object() applies the view's queryset, which is owner-scoped.
+        self.assertEqual(resp.status_code, 404)
+
+    def test_set_tags_validation_error_returns_400(self):
+        from apps.datafiles.serializers import TAG_MAX_COUNT
+        resp = self.client.post(
+            f'/api/v1/files/{self.f1.id}/set_tags/',
+            {'tags': [f't{i}' for i in range(TAG_MAX_COUNT + 1)]},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('tags', resp.data)
+
+    def test_list_tags_aggregates_user_files(self):
+        resp = self.client.post('/api/v1/files/list_tags/', {}, format='json')
+        self.assertEqual(resp.status_code, 200)
+        # Case-insensitive dedup: Hot, PR_Phase1, COLD → PR_Phase1, COLD, Hot
+        self.assertEqual(
+            sorted(resp.data['tags'], key=str.lower),
+            sorted(['Hot', 'PR_Phase1', 'COLD'], key=str.lower),
+        )
+
+    def test_list_tags_prefix_filter(self):
+        resp = self.client.post(
+            '/api/v1/files/list_tags/', {'prefix': 'pr'}, format='json',
+        )
+        self.assertEqual(resp.data['tags'], ['PR_Phase1'])
+
+    def test_list_tags_owner_scoped(self):
+        other = User.objects.create_user(username='other2', password='pw')
+        _make_datafile(other, 'X.csv', tags=['SECRET'])
+        resp = self.client.post('/api/v1/files/list_tags/', {}, format='json')
+        self.assertNotIn('SECRET', resp.data['tags'])
+
+    def test_list_tags_empty_when_no_files(self):
+        User.objects.filter(username='taguser').delete()
+        # Now there is no file at all. list_tags should return [].
+        resp = self.client.post('/api/v1/files/list_tags/', {}, format='json')
+        self.assertEqual(resp.data['tags'], [])

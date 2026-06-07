@@ -23,6 +23,17 @@ from .serializers import (
 MAX_LOGIN_ATTEMPTS = 5
 LOCKOUT_DURATION = timedelta(minutes=15)
 
+# Stable error codes the front-end branches on. Never rename — the
+# front-end LoginPage.vue switches on these strings to pick a Chinese
+# user-facing message.
+LOGIN_ERROR_CODES = {
+    'MISSING_CREDENTIALS': 'missing_credentials',
+    'USER_NOT_FOUND': 'user_not_found',
+    'INVALID_CREDENTIALS': 'invalid_credentials',
+    'ACCOUNT_DISABLED': 'account_disabled',
+    'ACCOUNT_LOCKED': 'account_locked',
+}
+
 
 def get_tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
@@ -32,12 +43,34 @@ def get_tokens_for_user(user):
     }
 
 
+def _error(code, detail, *, status_code, **extra):
+    """Standard error envelope so the front-end can pattern-match
+    on ``code`` without parsing free-form ``detail`` text."""
+    body = {'code': code, 'detail': detail}
+    body.update(extra)
+    return Response(body, status=status_code)
+
+
 class LoginView(APIView):
     permission_classes = [AllowAny]
+    # Login may take a beat (LDAP/SSO/etc) but not the full 30s axios
+    # timeout. Keep the server's hard limit tight so the user gets a
+    # meaningful "server slow" error rather than the generic timeout.
+    authentication_classes: list = []
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            missing = []
+            for field in ('username', 'password'):
+                if not serializer.validated_data.get(field):
+                    missing.append(field)
+            return _error(
+                LOGIN_ERROR_CODES['MISSING_CREDENTIALS'],
+                f'请填写 {"、".join(missing) if missing else "用户名和密码"}',
+                status_code=status.HTTP_400_BAD_REQUEST,
+                missing_fields=missing,
+            )
 
         username = serializer.validated_data['username']
         password = serializer.validated_data['password']
@@ -45,16 +78,32 @@ class LoginView(APIView):
         try:
             user = User.objects.get(username=username)
         except User.DoesNotExist:
-            return Response(
-                {'detail': 'Invalid username or password.'},
-                status=status.HTTP_401_UNAUTHORIZED,
+            return _error(
+                LOGIN_ERROR_CODES['USER_NOT_FOUND'],
+                f'用户名「{username}」不存在，请确认后重试',
+                status_code=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        # Disabled account is checked before lockout so the user gets a
+        # stable, fixable message ("ask the admin to re-enable") rather
+        # than a confusing "try again in 15 minutes".
+        if not user.is_active:
+            return _error(
+                LOGIN_ERROR_CODES['ACCOUNT_DISABLED'],
+                '账号已被禁用，请联系管理员',
+                status_code=status.HTTP_403_FORBIDDEN,
             )
 
         if user.lockout_until and user.lockout_until > timezone.now():
-            remaining = (user.lockout_until - timezone.now()).seconds // 60
-            return Response(
-                {'detail': f'Account locked. Try again in {remaining} minutes.'},
-                status=status.HTTP_423_LOCKED,
+            remaining_minutes = max(
+                1, (user.lockout_until - timezone.now()).seconds // 60 + 1
+            )
+            return _error(
+                LOGIN_ERROR_CODES['ACCOUNT_LOCKED'],
+                f'登录失败次数过多，账号已被锁定，请在 {remaining_minutes} 分钟后重试',
+                status_code=status.HTTP_423_LOCKED,
+                retry_after_minutes=remaining_minutes,
+                locked_until=user.lockout_until.isoformat(),
             )
 
         authenticated_user = authenticate(
@@ -67,14 +116,20 @@ class LoginView(APIView):
                 user.lockout_until = timezone.now() + LOCKOUT_DURATION
                 user.login_attempts = 0
                 user.save()
-                return Response(
-                    {'detail': 'Account locked due to too many failed attempts. Try again in 15 minutes.'},
-                    status=status.HTTP_423_LOCKED,
+                return _error(
+                    LOGIN_ERROR_CODES['ACCOUNT_LOCKED'],
+                    f'连续 {MAX_LOGIN_ATTEMPTS} 次登录失败，账号已被锁定 15 分钟',
+                    status_code=status.HTTP_423_LOCKED,
+                    retry_after_minutes=15,
+                    locked_until=user.lockout_until.isoformat(),
                 )
             user.save()
-            return Response(
-                {'detail': 'Invalid username or password.'},
-                status=status.HTTP_401_UNAUTHORIZED,
+            remaining = MAX_LOGIN_ATTEMPTS - user.login_attempts
+            return _error(
+                LOGIN_ERROR_CODES['INVALID_CREDENTIALS'],
+                '密码错误，请重试',
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                remaining_attempts=remaining,
             )
 
         user.login_attempts = 0
@@ -154,6 +209,21 @@ class UserManagementViewSet(viewsets.ModelViewSet):
         if self.action == 'create':
             return UserCreateSerializer
         return UserSerializer
+
+    def update(self, request, *args, **kwargs):
+        """
+        Force ``partial=True`` on PUT as well. DRF's default
+        ``ModelViewSet.update()`` hard-codes ``partial=False`` when
+        forwarding to ``get_serializer()``, so a plain
+        ``get_serializer`` override that sets ``partial=True`` by
+        default is silently ignored on PUT. The front-end
+        ``UserManagement.vue`` calls ``PUT /auth/users/<id>/ {is_active:
+        false}`` to disable a user — a *partial* update — and we
+        need the same lax semantics as ``UserProfileView.put()`` and
+        DRF's built-in PATCH handler.
+        """
+        kwargs['partial'] = True
+        return super().update(request, *args, **kwargs)
 
     @action(detail=True, methods=['post'])
     def reset_password(self, request, pk=None):

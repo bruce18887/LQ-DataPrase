@@ -108,6 +108,88 @@ def calculate_fail_bin_statistics(df: pd.DataFrame, metadata: Dict) -> Dict:
     return result
 
 
+def is_pass_bin(bin_value) -> bool:
+    """Check if a bin value represents 'pass' (Bin 1).
+
+    Handles all known variants: int 1, float 1.0, str "1", "1.0",
+    "Bin1", "Bin 1", "BIN1", etc.  Unified to replace 3 divergent
+    inline checks across dashboard/batch_report/export.
+    """
+    s = str(bin_value).strip()
+    # Numeric path: "1", "1.0", "1.00" etc.
+    try:
+        return int(float(s)) == 1
+    except (ValueError, TypeError):
+        pass
+    # Text path: "Bin1", "Bin 1", "BIN1" etc.
+    return s.lower().replace(" ", "") in ("bin1",)
+
+
+def compute_pass_yield(bin_stats: dict, total_rows: int) -> dict:
+    """Compute pass/fail counts and yield percentage from bin statistics.
+
+    Parameters
+    ----------
+    bin_stats : dict
+        Output of ``calculate_fail_bin_statistics`` —
+        ``{bin_value: {'count': int, 'percentage': float}}``.
+    total_rows : int
+        Total number of rows in the dataframe.
+
+    Returns
+    -------
+    dict with keys: ``pass_count``, ``fail_count``, ``yield_pct``.
+    """
+    pass_count = 0
+    for bin_value, info in bin_stats.items():
+        if is_pass_bin(bin_value):
+            pass_count += info.get('count', 0)
+    fail_count = total_rows - pass_count
+    yield_pct = round((pass_count / total_rows * 100), 2) if total_rows > 0 else 0.0
+    return {'pass_count': pass_count, 'fail_count': fail_count, 'yield_pct': yield_pct}
+
+
+def build_fail_mask(fail_cells: Dict[int, List[str]]) -> Dict[str, List[str]]:
+    """Convert fail_cells (int keys) to string-keyed mask for JSON serialization.
+
+    Parameters
+    ----------
+    fail_cells : dict
+        Output of ``detect_fail_data`` — ``{row_idx: [col_name, ...]}``.
+
+    Returns
+    -------
+    dict with string keys: ``{"0": ["col_a", "col_b"], ...}``.
+    """
+    return {str(idx): cols for idx, cols in fail_cells.items()}
+
+
+def build_col_meta(df: pd.DataFrame, metadata: Dict) -> Dict[str, Dict[str, str]]:
+    """Build per-column metadata (unit, min, max) for frontend display.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+    metadata : dict
+        Must contain ``units``, ``mins``, ``maxs`` keys.
+
+    Returns
+    -------
+    dict: ``{col_name: {'unit': str, 'min': str, 'max': str}}``.
+    """
+    units = metadata.get('units', {})
+    mins = metadata.get('mins', {})
+    maxs = metadata.get('maxs', {})
+    return {
+        col: {
+            'unit': units.get(col, '') if isinstance(units, dict) else '',
+            'min': mins.get(col, '') if isinstance(mins, dict) else '',
+            'max': maxs.get(col, '') if isinstance(maxs, dict) else '',
+        }
+        for col in df.columns
+    }
+
+
 def calculate_fail_test_item_statistics(df: pd.DataFrame, metadata: Dict, ignore_no_limit: bool = True) -> Dict:
     fail_indices, fail_columns, fail_cells = detect_fail_data(df, metadata, ignore_no_limit)
 

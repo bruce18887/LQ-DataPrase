@@ -1,6 +1,5 @@
 import io
 import pandas as pd
-from django.shortcuts import get_object_or_404
 from django.http import FileResponse
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -8,11 +7,10 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 import excelize
 
-from apps.datafiles.models import DataFile
-from apps.datafiles.parsers import get_parser
-from apps.datafiles.services import get_cached_parsed_file
+from apps.common.file_loading import load_user_file, FileLoadError
 from apps.analysis.services.statistics import (
     detect_fail_data, get_site_column,
+    calculate_fail_bin_statistics, compute_pass_yield,
 )
 from .excelize_helpers import save_excelize
 from .excel_builders import (
@@ -33,10 +31,10 @@ class ExportViewSet(viewsets.GenericViewSet):
         passfail = request.data.get('passfail', '全部')
         site_filter = request.data.get('site_filter', '全部')
 
-        datafile = get_object_or_404(DataFile, pk=file_id, owner=request.user)
-        df, metadata, fmt = get_cached_parsed_file(int(file_id), request.user.pk)
-        if df is None:
-            return Response({'error': 'parse_failed'}, status=400)
+        try:
+            df, datafile, metadata = load_user_file(request, file_id)
+        except FileLoadError as e:
+            return Response({'error': e.error_code}, status=400)
 
         export_df = df.copy()
 
@@ -75,10 +73,10 @@ class ExportViewSet(viewsets.GenericViewSet):
         keep_header = request.data.get('keep_header', False)
         site_filter = request.data.get('site_filter', '全部')
 
-        datafile = get_object_or_404(DataFile, pk=file_id, owner=request.user)
-        df, metadata, fmt = get_cached_parsed_file(int(file_id), request.user.pk)
-        if df is None:
-            return Response({'error': 'parse_failed'}, status=400)
+        try:
+            df, datafile, metadata = load_user_file(request, file_id)
+        except FileLoadError as e:
+            return Response({'error': e.error_code}, status=400)
 
         # Use old version's complete CSV export (simplified - no raw_lines support for now)
         csv_content = export_to_csv(
@@ -102,10 +100,10 @@ class ExportViewSet(viewsets.GenericViewSet):
         sigma_level = request.data.get('sigma', 3)
         only_valid = request.data.get('only_valid_limits', False)
 
-        datafile = get_object_or_404(DataFile, pk=file_id, owner=request.user)
-        df, metadata, fmt = get_cached_parsed_file(int(file_id), request.user.pk)
-        if df is None:
-            return Response({'error': 'parse_failed'}, status=400)
+        try:
+            df, datafile, metadata = load_user_file(request, file_id)
+        except FileLoadError as e:
+            return Response({'error': e.error_code}, status=400)
 
         f = excelize.new_file()
         build_sigma_limit_sheet(f, df, metadata, sigma_level, only_valid)
@@ -121,22 +119,16 @@ class ExportViewSet(viewsets.GenericViewSet):
     @action(detail=False, methods=['post'])
     def html_report(self, request):
         file_id = request.data.get('file_id')
-        datafile = get_object_or_404(DataFile, pk=file_id, owner=request.user)
-        df, metadata, fmt = get_cached_parsed_file(int(file_id), request.user.pk)
-        if df is None:
-            return Response({'error': 'parse_failed'}, status=400)
+        try:
+            df, datafile, metadata = load_user_file(request, file_id)
+        except FileLoadError as e:
+            return Response({'error': e.error_code}, status=400)
 
         total_rows = df.shape[0]
-        from apps.analysis.services.statistics import calculate_fail_bin_statistics
         bin_stats = calculate_fail_bin_statistics(df, metadata)
-        total_pass = 0
-        for bv, s in bin_stats.items():
-            try:
-                if int(float(bv)) == 1:
-                    total_pass = s['count']
-            except Exception:
-                pass
-        yield_pct = (total_pass / total_rows * 100) if total_rows > 0 else 0
+        yield_result = compute_pass_yield(bin_stats, total_rows)
+        total_pass = yield_result['pass_count']
+        yield_pct = yield_result['yield_pct']
 
         html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>ATE Report - {datafile.filename}</title>
 <style>body{{font-family:Arial;margin:20px}}h1{{color:#2c3e50}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #ddd;padding:8px;text-align:center}}th{{background:#2c3e50;color:white}}</style></head>
@@ -162,13 +154,10 @@ class ExportViewSet(viewsets.GenericViewSet):
         show_6sigma = request.data.get('show_6sigma', True)
         show_normal = request.data.get('show_normal', False)
 
-        if not file_id:
-            return Response({'error': 'file_id_required'}, status=400)
-
-        datafile = get_object_or_404(DataFile, pk=file_id, owner=request.user)
-        df, metadata, fmt = get_cached_parsed_file(int(file_id), request.user.pk)
-        if df is None:
-            return Response({'error': 'parse_failed'}, status=400)
+        try:
+            df, datafile, metadata = load_user_file(request, file_id)
+        except FileLoadError as e:
+            return Response({'error': e.error_code}, status=400)
 
         if not params:
             params = [c for c in df.columns if df[c].dtype in ('int64', 'float64')][:10]

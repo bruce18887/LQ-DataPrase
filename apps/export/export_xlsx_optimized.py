@@ -2,11 +2,14 @@
 
 import pandas as pd
 import excelize
-import tempfile
-import os
 from typing import Dict
 from apps.analysis.services.statistics import (
     ensure_numeric, get_bin_column_name, detect_fail_data,
+    compute_cpk,
+)
+from .excelize_helpers import (
+    make_header_style, make_data_style, make_red_style,
+    to_native, save_excelize,
 )
 from .export_csv import _convert_to_native_type
 
@@ -22,62 +25,11 @@ def export_to_xlsx_optimized(df: pd.DataFrame, metadata: Dict) -> bytes:
         cols = df.columns.tolist()
         num_cols = len(cols)
 
-        # 现代专业配色（与 buyoff 统一）
-        COLOR_HEADER_BG = "2C3E50"
-        COLOR_HEADER_FONT = "FFFFFF"
-        COLOR_DATA_BG = "F8F9FA"
-        COLOR_ALT_ROW = "EDF2F7"
-        COLOR_BORDER = "BDC3C7"
-        COLOR_FONT_DARK = "2C3E50"
-        COLOR_RED_BG = "F5B7B1"
-
-        header_style_id = f.new_style(excelize.Style(
-            font=excelize.Font(bold=True, size=12, color=COLOR_HEADER_FONT, family="Calibri"),
-            fill=excelize.Fill(type="pattern", color=[COLOR_HEADER_BG], pattern=1),
-            border=[
-                excelize.Border(type="left", color=COLOR_BORDER, style=2),
-                excelize.Border(type="top", color=COLOR_BORDER, style=2),
-                excelize.Border(type="bottom", color=COLOR_BORDER, style=2),
-                excelize.Border(type="right", color=COLOR_BORDER, style=2),
-            ],
-            alignment=excelize.Alignment(horizontal="center", vertical="center"),
-        ))
-
-        data_style_id = f.new_style(excelize.Style(
-            font=excelize.Font(size=10, color=COLOR_FONT_DARK, family="Calibri"),
-            fill=excelize.Fill(type="pattern", color=[COLOR_DATA_BG], pattern=1),
-            border=[
-                excelize.Border(type="left", color=COLOR_BORDER, style=1),
-                excelize.Border(type="top", color=COLOR_BORDER, style=1),
-                excelize.Border(type="bottom", color=COLOR_BORDER, style=1),
-                excelize.Border(type="right", color=COLOR_BORDER, style=1),
-            ],
-            alignment=excelize.Alignment(horizontal="center", vertical="center"),
-        ))
-
-        red_style_id = f.new_style(excelize.Style(
-            font=excelize.Font(bold=True, size=10, color="FFFFFF", family="Calibri"),
-            fill=excelize.Fill(type="pattern", color=[COLOR_RED_BG], pattern=1),
-            border=[
-                excelize.Border(type="left", color=COLOR_BORDER, style=1),
-                excelize.Border(type="top", color=COLOR_BORDER, style=1),
-                excelize.Border(type="bottom", color=COLOR_BORDER, style=1),
-                excelize.Border(type="right", color=COLOR_BORDER, style=1),
-            ],
-            alignment=excelize.Alignment(horizontal="center", vertical="center"),
-        ))
-
-        red_bin_style_id = f.new_style(excelize.Style(
-            font=excelize.Font(bold=True, size=10, color="FFFFFF", family="Calibri"),
-            fill=excelize.Fill(type="pattern", color=[COLOR_RED_BG], pattern=1),
-            border=[
-                excelize.Border(type="left", color=COLOR_BORDER, style=1),
-                excelize.Border(type="top", color=COLOR_BORDER, style=1),
-                excelize.Border(type="bottom", color=COLOR_BORDER, style=1),
-                excelize.Border(type="right", color=COLOR_BORDER, style=1),
-            ],
-            alignment=excelize.Alignment(horizontal="center", vertical="center"),
-        ))
+        # Shared styles from excelize_helpers
+        header_style_id = make_header_style(f, 12)
+        data_style_id = make_data_style(f)
+        red_style_id = make_red_style(f)
+        red_bin_style_id = red_style_id  # identical styling — no separate style needed
 
         for col_idx, col_name in enumerate(cols):
             cell = excelize.coordinates_to_cell_name(col_idx + 1, 1, False)
@@ -119,7 +71,7 @@ def export_to_xlsx_optimized(df: pd.DataFrame, metadata: Dict) -> bytes:
                 try:
                     min_val = float(metadata['mins'][col_name])
                     max_val = float(metadata['maxs'][col_name])
-                    col_cpk = round(min((max_val - col_avg) / (3 * col_std), (col_avg - min_val) / (3 * col_std)), 6) if col_std > 0 else 0
+                    col_cpk = round(compute_cpk(col_avg, col_std, min_val, max_val)['cpk'], 6)
                 except (ValueError, TypeError, KeyError):
                     col_cpk = 0
 
@@ -198,18 +150,7 @@ def export_to_xlsx_optimized(df: pd.DataFrame, metadata: Dict) -> bytes:
 
         f.auto_filter(sheet_name, f"A11:{last_cell}", [])
 
-        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp:
-            tmp_path = tmp.name
-
-        f.save_as(tmp_path)
-        f.close()
-
-        with open(tmp_path, 'rb') as tmp_file:
-            data = tmp_file.read()
-
-        os.unlink(tmp_path)
-
-        return data
+        return save_excelize(f)
 
     except Exception as e:
         f.close()

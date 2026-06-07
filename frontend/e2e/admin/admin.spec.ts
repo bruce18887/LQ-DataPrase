@@ -112,4 +112,49 @@ test.describe('用户管理 / 权限', { tag: ['@p1', '@p2', '@admin'] }, () => 
     await expect(page.getByText('已删除')).toBeVisible({ timeout: 15_000 })
     await expect(table.getByText(uniqueName, { exact: true })).toHaveCount(0, { timeout: 15_000 })
   })
+
+  /**
+   * 2026-06-07 回归：PUT /auth/users/<id>/ {is_active:false} 之前 400，
+   * 因为 DRF 默认 ModelViewSet.update() 不传 partial=True。
+   * 修复在 UserManagementViewSet.update() 中强制 partial=True。
+   * 该用例负责：点击「禁用」按钮 → 后端 200 → 状态文案变「已禁用」 → 再次点击 → 启用。
+   */
+  test('@p2 禁用 / 启用用户：单字段 PUT 200 后状态文案切换', async ({ page }) => {
+    await loginAs(page, 'admin')
+    await sidebarLink(page, '用户管理').click()
+    await expect(page).toHaveURL(/\/admin\/users/)
+
+    const table = page.locator('.el-table')
+    await expect(table).toBeVisible()
+
+    const uniqueName = `e2e_toggle_${Date.now()}`
+    await addUserField(page, '用户名').fill(uniqueName)
+    await addUserField(page, '密码').fill('e2ePass123')
+    await page.getByRole('button', { name: '添加', exact: true }).click()
+    await expect(page.getByText('用户已添加')).toBeVisible({ timeout: 15_000 })
+
+    const row = table.locator('tr').filter({ hasText: uniqueName })
+    await expect(row).toBeVisible({ timeout: 15_000 })
+
+    // 1) 禁用：点该行的「禁用」按钮 → 后端 200 → 状态变 已禁用
+    const toggleBtn = row.getByRole('button', { name: '禁用', exact: true })
+    await expect(toggleBtn).toBeVisible()
+    await toggleBtn.click()
+    await expect(page.getByText('状态已更新')).toBeVisible({ timeout: 15_000 })
+    // 表格刷新后状态文案变 已禁用，按钮文案变 启用
+    await expect(row.getByText('已禁用', { exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(row.getByRole('button', { name: '启用', exact: true })).toBeVisible()
+
+    // 2) 启用：点「启用」按钮 → 状态回到 active
+    await row.getByRole('button', { name: '启用', exact: true }).click()
+    await expect(page.getByText('状态已更新')).toBeVisible({ timeout: 15_000 })
+    await expect(row.getByRole('button', { name: '禁用', exact: true })).toBeVisible()
+
+    // 清理：删除该用户
+    await row.getByRole('button', { name: '删除', exact: true }).click()
+    const dialog = page.locator('.el-message-box')
+    await expect(dialog).toBeVisible()
+    await dialog.locator('.el-message-box__btns .el-button--primary').click()
+    await expect(page.getByText('已删除')).toBeVisible({ timeout: 15_000 })
+  })
 })

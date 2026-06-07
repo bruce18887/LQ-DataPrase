@@ -21,6 +21,18 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = profile
   }
 
+  /**
+   * Replace both tokens at once. Used by the axios 401 interceptor
+   * after a successful /auth/refresh/ call so the in-memory refs and
+   * localStorage stay in sync without going through login() again.
+   */
+  function setTokens(accessToken: string, newRefreshToken: string) {
+    token.value = accessToken
+    refreshToken.value = newRefreshToken
+    localStorage.setItem('access_token', accessToken)
+    localStorage.setItem('refresh_token', newRefreshToken)
+  }
+
   // Restore the in-memory profile after a hard refresh: the token persists in
   // localStorage (so isLoggedIn stays true), but `user` does not, which would
   // otherwise leave the UI showing the "用户" fallback and isAdmin=false.
@@ -49,5 +61,5 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('refresh_token')
   }
 
-  return { token, refreshToken, user, isLoggedIn, isAdmin, login, logout, fetchProfile }
+  return { token, refreshToken, user, isLoggedIn, isAdmin, login, logout, fetchProfile, setTokens }
 })

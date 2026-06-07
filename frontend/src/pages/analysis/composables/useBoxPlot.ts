@@ -1,5 +1,6 @@
-import { ref, type Ref } from 'vue'
+import { type Ref } from 'vue'
 import { analysisApi } from '../../../api/analysis'
+import { useAsyncData } from '../../../composables/useAsyncData'
 import { ElMessage } from 'element-plus'
 
 export function useBoxPlot(
@@ -7,8 +8,10 @@ export function useBoxPlot(
   selectedParams: Ref<string[]>,
   groupBy: Ref<string>
 ) {
-  const loading = ref(false)
-  const boxPlotData = ref<any>(null)
+  const { loading, data: boxPlotData, run } = useAsyncData<any>({
+    successMsg: '箱线图数据加载成功',
+    errorMsg: '加载箱线图数据失败',
+  })
 
   async function loadBoxPlot() {
     const fileId = getFileId()
@@ -16,27 +19,11 @@ export function useBoxPlot(
       ElMessage.warning('请至少选择一个参数')
       return
     }
-
-    loading.value = true
-    try {
-      const response = await analysisApi.getBoxPlot(
-        fileId,
-        selectedParams.value,
-        groupBy.value || undefined
-      )
-      boxPlotData.value = response.data.results
-      ElMessage.success('箱线图数据加载成功')
-    } catch (error: any) {
-      console.error('Failed to load box plot data:', error)
-      ElMessage.error(error.response?.data?.error || '加载箱线图数据失败')
-    } finally {
-      loading.value = false
-    }
+    await run(
+      () => analysisApi.getBoxPlot(fileId, selectedParams.value, groupBy.value || undefined),
+      (d: any) => d.results ?? d,
+    )
   }
 
-  return {
-    loading,
-    boxPlotData,
-    loadBoxPlot,
-  }
+  return { loading, boxPlotData, loadBoxPlot }
 }
