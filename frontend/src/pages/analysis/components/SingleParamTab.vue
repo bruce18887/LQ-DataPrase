@@ -143,7 +143,10 @@ const {
 } = useHistogram(
   () => props.fileId,
   localSelectedParam,
-  ignoreNoLimit
+  ignoreNoLimit,
+  rangeType,
+  customLow,
+  customHigh
 )
 
 // Composable: Serial Distribution

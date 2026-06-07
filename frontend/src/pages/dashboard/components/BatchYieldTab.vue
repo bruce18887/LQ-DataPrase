@@ -16,38 +16,33 @@
       <!-- 1. KPI Cards -->
       <KpiCards :kpi="batchData.kpi" />
 
-      <!-- 2. Phase Summary + Aggregated Bin (1:1) -->
+      <!-- 2. Phase Summary -->
       <el-card v-if="batchData.phase_summary?.length" shadow="never" class="section-card">
-        <template #header>📋 阶段总览 & Bin 分布</template>
-        <el-row :gutter="16">
-          <el-col :xs="24" :lg="12">
-            <el-table :data="batchData.phase_summary" stripe size="small" :border="true">
-              <el-table-column prop="phase" label="阶段" width="90" fixed />
-              <el-table-column prop="file_count" label="文件数" width="70" align="center" />
-              <el-table-column prop="total" label="测试总数" width="90" align="center" />
-              <el-table-column prop="pass_count" label="Pass" width="80" align="center" />
-              <el-table-column prop="fail_count" label="Fail" width="70" align="center">
-                <template #default="{row}">
-                  <span :style="{ color: row.fail_count > 0 ? 'var(--color-error)' : 'var(--color-success)', fontWeight: 'bold' }">
-                    {{ row.fail_count }}
-                  </span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="yield_pct" label="良率" width="90" align="center">
-                <template #default="{row}">
-                  <el-tag size="small" :type="row.yield_pct >= 95 ? 'success' : row.yield_pct >= 90 ? 'warning' : 'danger'">
-                    {{ row.yield_pct }}%
-                  </el-tag>
-                </template>
-              </el-table-column>
-            </el-table>
-          </el-col>
-          <el-col :xs="24" :lg="12">
-            <div class="chart-title">🔴 Bin 分布（全批次汇总）</div>
-            <AggregatedBinChart :bin-distribution="batchData.bin_distribution || []" />
-          </el-col>
-        </el-row>
+        <template #header>📋 阶段总览</template>
+        <el-table :data="batchData.phase_summary" stripe size="small" :border="true">
+          <el-table-column prop="phase" label="阶段" width="90" fixed />
+          <el-table-column prop="file_count" label="文件数" width="70" align="center" />
+          <el-table-column prop="total" label="测试总数" width="90" align="center" />
+          <el-table-column prop="pass_count" label="Pass" width="80" align="center" />
+          <el-table-column prop="fail_count" label="Fail" width="70" align="center">
+            <template #default="{row}">
+              <span :style="{ color: row.fail_count > 0 ? 'var(--color-error)' : 'var(--color-success)', fontWeight: 'bold' }">
+                {{ row.fail_count }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="yield_pct" label="良率" width="90" align="center">
+            <template #default="{row}">
+              <el-tag size="small" :type="row.yield_pct >= 95 ? 'success' : row.yield_pct >= 90 ? 'warning' : 'danger'">
+                {{ row.yield_pct }}%
+              </el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
       </el-card>
+
+      <!-- 2b. Single-file analysis chart set (reused components) -->
+      <BatchAnalysisCharts ref="analysisChartsRef" :batch-data="batchData" />
 
       <!-- 3. Phase Detail Table -->
       <el-card shadow="never" class="section-card">
@@ -129,14 +124,14 @@
         </el-table>
       </el-card>
 
-      <!-- 7. Bin Distribution & Site Pass Rate (combined, left table + right charts) -->
+      <!-- 7. Bin Distribution (per-phase, left table + right charts) -->
       <el-card shadow="never" class="section-card">
-        <template #header>📋 Bin 分布 & Site 通过率</template>
+        <template #header>📋 Bin 分布</template>
         <div class="bin-selector">
           <el-select v-model="selectedPhase" placeholder="选择阶段查看Bin分布" @change="onPhaseChange" style="width: 220px">
             <el-option v-for="p in batchData.phases" :key="phaseKey(p)" :label="phaseLabel(p)" :value="phaseKey(p)" />
           </el-select>
-          <span class="bin-hint">左侧表格与「阶段 Bin」图随阶段切换，「Site 通过率/Bin 汇总」为全批次汇总</span>
+          <span class="bin-hint">左侧表格与右侧 Bin 图随阶段切换</span>
         </div>
 
         <el-row :gutter="16">
@@ -161,22 +156,10 @@
 
           <!-- Right: charts (3/5) -->
           <el-col :xs="24" :lg="15">
-            <el-row :gutter="12">
-              <el-col :xs="24" :md="12">
-                <div class="chart-title">阶段 Fail Bin（{{ selectedPhase || '-' }}）</div>
-                <div ref="binPieRef" class="chart-container chart-sm" />
-              </el-col>
-              <el-col :xs="24" :md="12">
-                <div class="chart-title">🟢 Site 通过率（{{ selectedPhase || '全批次' }}）</div>
-                <div ref="siteChartRef" class="chart-container chart-sm" />
-              </el-col>
-            </el-row>
-            <el-row :gutter="12" style="margin-top: 12px;">
-              <el-col :span="24">
-                <div class="chart-title">阶段 Top Fail Bin（{{ selectedPhase || '-' }}）</div>
-                <div ref="binBarRef" class="chart-container chart-sm" />
-              </el-col>
-            </el-row>
+            <div class="chart-title">阶段 Fail Bin（{{ selectedPhase || '-' }}）</div>
+            <div ref="binPieRef" class="chart-container chart-sm" />
+            <div class="chart-title" style="margin-top: 12px;">阶段 Top Fail Bin（{{ selectedPhase || '-' }}）</div>
+            <div ref="binBarRef" class="chart-container chart-sm" />
           </el-col>
         </el-row>
       </el-card>
@@ -195,7 +178,7 @@ import { batchApi } from '../../../api/batch'
 import BatchSelectorBar from './batch/BatchSelectorBar.vue'
 import KpiCards from './batch/KpiCards.vue'
 import YieldTrendChart from './batch/YieldTrendChart.vue'
-import AggregatedBinChart from './batch/AggregatedBinChart.vue'
+import BatchAnalysisCharts from './batch/BatchAnalysisCharts.vue'
 
 const batches = ref<any[]>([])
 const selectedBatch = ref('')
@@ -204,14 +187,13 @@ const exporting = ref(false)
 const batchData = ref<any>(null)
 const selectedPhase = ref('')
 
-// Ref to child chart component
+// Ref to child chart components
 const yieldTrendChartRef = ref<InstanceType<typeof YieldTrendChart>>()
+const analysisChartsRef = ref<InstanceType<typeof BatchAnalysisCharts>>()
 
-// Chart refs for phase-scoped analysis (remain inline)
-const siteChartRef = ref<HTMLElement>()
+// Chart refs for phase-scoped Bin analysis (remain inline)
 const binPieRef = ref<HTMLElement>()
 const binBarRef = ref<HTMLElement>()
-let siteChart: echarts.ECharts | null = null
 let binPieChart: echarts.ECharts | null = null
 let binBarChart: echarts.ECharts | null = null
 
@@ -235,7 +217,6 @@ function onBatchSelect(val: string) {
 
 function onBatchChange() {
   // Dispose old chart instances before removing DOM (v-if="batchData")
-  siteChart?.dispose(); siteChart = null
   binPieChart?.dispose(); binPieChart = null
   binBarChart?.dispose(); binBarChart = null
   batchData.value = null
@@ -246,7 +227,6 @@ function onPhaseChange() {
   nextTick(() => {
     renderBinPieChart()
     renderBinBarChart()
-    renderSiteChart()
   })
 }
 
@@ -286,64 +266,10 @@ async function loadBatchData() {
 }
 
 function renderInlineCharts() {
-  renderSiteChart()
   if (selectedPhaseData.value) {
     renderBinPieChart()
     renderBinBarChart()
   }
-}
-
-// Site Pass Rate bar chart — uses selected phase site data, falls back to batch-level
-function renderSiteChart() {
-  if (!siteChartRef.value) return
-
-  // Prefer selected phase site data; fall back to batch-level
-  let d: any[] = []
-  const phase = selectedPhaseData.value
-  if (phase?.site_total && phase.site_pass && Object.keys(phase.site_total).length > 0) {
-    d = Object.keys(phase.site_total).map((site: string) => {
-      const total = phase.site_total[site] || 0
-      const pass = phase.site_pass[site] || 0
-      return { site, yield: total > 0 ? Math.round(pass / total * 10000) / 100 : 0 }
-    }).sort((a: any, b: any) => a.site.localeCompare(b.site))
-  } else if (batchData.value?.site_pass_data?.length) {
-    d = batchData.value.site_pass_data
-  }
-  if (!d.length) return
-
-  if (!siteChart) siteChart = echarts.init(siteChartRef.value, undefined, getChartInitOpts())
-  else siteChart.clear()
-
-  siteChart.setOption({
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: '3%', right: '4%', bottom: '3%', top: '10%', containLabel: true },
-    xAxis: {
-      type: 'category',
-      data: d.map((s: any) => s.site),
-      axisLine: { lineStyle: { color: 'var(--border-default)' } },
-      axisLabel: { color: 'var(--text-primary)' },
-    },
-    yAxis: {
-      type: 'value',
-      name: 'Yield%',
-      max: 100,
-      axisLabel: { formatter: '{value}%', color: 'var(--text-primary)' },
-      nameTextStyle: { color: 'var(--text-primary)' },
-      axisLine: { lineStyle: { color: 'var(--border-default)' } },
-      splitLine: { lineStyle: { color: 'var(--border-muted)' } },
-    },
-    series: [{
-      type: 'bar',
-      data: d.map((s: any) => ({
-        value: s.yield,
-        itemStyle: {
-          color: s.yield >= 95 ? '#11998e' : s.yield >= 90 ? '#f9a825' : '#f5576c',
-        },
-      })),
-      barWidth: '50%',
-      label: { show: true, position: 'top', formatter: '{c}%', color: 'var(--text-primary)' },
-    }],
-  })
 }
 
 // Per-phase Bin pie chart (fail bins only)
@@ -425,7 +351,7 @@ async function exportExcel() {
 
 function handleResize() {
   yieldTrendChartRef.value?.handleResize()
-  if (siteChart && !siteChart.isDisposed()) siteChart.resize()
+  analysisChartsRef.value?.handleResize()
   if (binPieChart && !binPieChart.isDisposed()) binPieChart.resize()
   if (binBarChart && !binBarChart.isDisposed()) binBarChart.resize()
 }
@@ -437,7 +363,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
-  siteChart?.dispose(); siteChart = null
   binPieChart?.dispose(); binPieChart = null
   binBarChart?.dispose(); binBarChart = null
 })

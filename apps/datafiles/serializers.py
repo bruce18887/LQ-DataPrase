@@ -21,7 +21,8 @@ class DataFileSerializer(serializers.ModelSerializer):
             'id', 'owner', 'filename', 'file_path', 'file_size',
             'format_type', 'format_type_display', 'file_type', 'file_type_display',
             'batch_name', 'row_count', 'col_count',
-            'program_name', 'metadata', 'status', 'status_display',
+            'program_name', 'product_code', 'source_mtime',
+            'metadata', 'status', 'status_display',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'owner', 'created_at', 'updated_at']
@@ -45,6 +46,7 @@ class DataFileListSerializer(serializers.ModelSerializer):
             'id', 'owner', 'filename', 'file_size', 'format_type',
             'format_type_display', 'file_type', 'file_type_display',
             'batch_name', 'row_count', 'col_count', 'program_name',
+            'product_code', 'source_mtime',
             'status', 'status_display', 'created_at', 'updated_at',
         ]
 

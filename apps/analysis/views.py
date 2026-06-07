@@ -64,6 +64,16 @@ def _getlist(request, key):
     return request.query_params.getlist(key)
 
 
+def _to_float(val):
+    """Parse a request value to float, returning None for blank/invalid input."""
+    if val in (None, ''):
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
 def _load_df_from_request(request):
     file_id = request.data.get('file_id') or request.query_params.get('file_id')
     if not file_id:
@@ -92,7 +102,7 @@ class AnalysisViewSet(viewsets.GenericViewSet):
             return Response({'error': err}, status=400)
 
         params = _getlist(request, 'params')
-        ignore_no_limit = (request.data.get('ignore_no_limit') or request.query_params.get('ignore_no_limit', '')).lower() in ('true', '1', 'yes')
+        ignore_no_limit = str(request.data.get('ignore_no_limit', '') or request.query_params.get('ignore_no_limit', '')).lower() in ('true', '1', 'yes')
 
         if not params:
             numeric_cols = [c for c in df.columns if df[c].dtype in ('int64', 'float64')]
@@ -112,10 +122,16 @@ class AnalysisViewSet(viewsets.GenericViewSet):
             cols_with_limits = set(get_columns_with_limits(df, metadata))
             params = [p for p in params if p in cols_with_limits]
 
+        range_type = request.data.get('range_type') or request.query_params.get('range_type', 'RDL')
+        custom_low = _to_float(request.data.get('custom_low') or request.query_params.get('custom_low'))
+        custom_high = _to_float(request.data.get('custom_high') or request.query_params.get('custom_high'))
+
         results = {}
         site_col = get_site_column(df)
         for param in params:
-            result = compute_histogram_stats(df, metadata, param, site_col)
+            result = compute_histogram_stats(
+                df, metadata, param, site_col,
+                range_type=range_type, custom_low=custom_low, custom_high=custom_high)
             if result is not None:
                 results[param] = result
 

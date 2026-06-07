@@ -16,6 +16,7 @@ from apps.analysis.services.statistics import (
     calculate_fail_bin_statistics, get_site_column,
     get_bin_column_name, compute_site_yield_data, compute_uph,
 )
+from apps.batch_report.aggregation import aggregate_bin_site_table, aggregate_uph
 
 
 def _build_phase_summary(phases):
@@ -292,6 +293,11 @@ class BatchReportViewSet(viewsets.GenericViewSet):
                 'status': '✅ 一致' if diff == 0 else f'⚠️ 差异 {diff} 颗',
             })
 
+        # Batch-level Bin×Site cross table + aggregated UPH (reuse single-file
+        # analysis components in the batch report). Pure helpers in aggregation.py.
+        bin_table_data, bin_site_columns = aggregate_bin_site_table(phases, sorted_sites)
+        batch_uph = aggregate_uph(phases)
+
         return Response({
             'batch_name': batch_name,
             'kpi': {
@@ -310,6 +316,9 @@ class BatchReportViewSet(viewsets.GenericViewSet):
             'bin_distribution': bin_distribution,
             'sorted_sites': sorted_sites,
             'site_matrix': site_matrix,
+            'bin_table_data': bin_table_data,
+            'bin_site_columns': bin_site_columns,
+            'uph': batch_uph,
             'qa_checks': qa_checks,
         })
 

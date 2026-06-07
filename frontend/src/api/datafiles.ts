@@ -8,10 +8,29 @@ export interface BatchDirInfo {
   registered: boolean
 }
 
+export interface ListFilesParams {
+  page?: number
+  search?: string
+  product_code?: string
+  format_type?: string
+  file_type?: string
+  ordering?: string
+}
+
+/** 仅保留有值的查询参数 */
+function cleanParams(params: ListFilesParams): Record<string, string | number> {
+  const out: Record<string, string | number> = {}
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') out[k] = v
+  }
+  return out
+}
+
 export const datafilesApi = {
   upload(file: File, onProgress?: (pct: number) => void) {
     const formData = new FormData()
     formData.append('file', file)
+    formData.append('last_modified', String(file.lastModified))
     return api.post('/upload/', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       onUploadProgress: (e) => {
@@ -23,6 +42,8 @@ export const datafilesApi = {
     const formData = new FormData()
     for (const f of files) {
       formData.append('files', f)
+      // 与 files 同序追加原始修改时间（epoch ms），供后端记录 source_mtime
+      formData.append('last_modified', String(f.lastModified))
     }
     return api.post('/upload/', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
@@ -33,6 +54,15 @@ export const datafilesApi = {
   },
   list() {
     return api.get('/files/')
+  },
+  listFiles(params: ListFilesParams = {}) {
+    return api.get('/files/', { params: cleanParams(params) })
+  },
+  bulkDelete(ids: number[]) {
+    return api.post('/files/bulk_delete/', { ids })
+  },
+  getProductCodes() {
+    return api.get<{ product_codes: string[] }>('/files/product_codes/')
   },
   activate(id: number) {
     return api.put(`/activate/${id}/`)

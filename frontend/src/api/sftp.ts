@@ -25,9 +25,36 @@ export interface SseErrorData {
   message: string
 }
 
+export interface SftpConfigItem {
+  id: number
+  name: string
+  host: string
+  port: number
+  username: string
+  has_password: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+export interface SftpConnectPayload {
+  host?: string
+  port?: number
+  username?: string
+  password?: string
+  config_id?: number
+  config_name?: string
+}
+
 export const sftpApi = {
-  connect(host: string, port: number, username: string, password: string) {
-    return api.post('/sftp/connect/', { host, port, username, password })
+  /**
+   * Connect to an SFTP server. Either supply explicit
+   * `{ host, port, username, password }` (legacy manual connect) OR a
+   * `{ config_name }` / `{ config_id }` referencing a saved config — in which
+   * case the backend decrypts the stored password server-side, so the password
+   * never travels to the browser.
+   */
+  connect(payload: SftpConnectPayload) {
+    return api.post('/sftp/connect/', payload)
   },
   disconnect() {
     return api.post('/sftp/disconnect/')
@@ -53,8 +80,11 @@ export const sftpApi = {
   getConfigs() {
     return api.get('/sftp/configs/')
   },
-  saveConfig(name: string, config: { host: string; port: number; username: string; password: string }) {
-    return api.post('/sftp/save_config/', { name, ...config })
+  saveConfig(payload: { name: string; host: string; port: number; username: string; password?: string }) {
+    return api.post('/sftp/save_config/', payload)
+  },
+  deleteConfig(payload: { name?: string; id?: number }) {
+    return api.post('/sftp/delete_config/', payload)
   },
 
   /**

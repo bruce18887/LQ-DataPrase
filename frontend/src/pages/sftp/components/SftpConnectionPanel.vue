@@ -25,8 +25,14 @@
           </el-form-item>
         </el-col>
         <el-col :span="6">
-          <el-form-item label="密码" required>
-            <el-input v-model="conn.password" type="password" show-password :prefix-icon="Lock" />
+          <el-form-item label="密码">
+            <el-input
+              v-model="conn.password"
+              type="password"
+              show-password
+              :prefix-icon="Lock"
+              :placeholder="activeConfig?.has_password ? '已保存，留空则用已存密码' : ''"
+            />
           </el-form-item>
         </el-col>
       </el-row>
@@ -34,7 +40,7 @@
         <el-button type="primary" native-type="submit" :loading="connecting" size="large">
           <el-icon><Link /></el-icon> 连接
         </el-button>
-        <el-button @click="saveCurrentConfig" :disabled="!conn.host" size="large">
+        <el-button @click="openSaveDialog" :disabled="!conn.host || !conn.username" size="large">
           <el-icon><Star /></el-icon> 保存配置
         </el-button>
       </el-form-item>
@@ -48,14 +54,18 @@
       <div class="config-grid">
         <el-card
           v-for="config in savedConfigs"
-          :key="config.name"
+          :key="config.id"
           class="config-item"
+          :class="{ 'config-active': activeConfig?.id === config.id }"
           shadow="hover"
           :body-style="{ padding: '16px' }"
         >
           <div class="config-header">
             <el-icon :size="20" color="#409EFF"><OfficeBuilding /></el-icon>
             <span class="config-name">{{ config.name }}</span>
+            <el-tag v-if="config.has_password" size="small" type="success" effect="plain" class="pw-tag">
+              <el-icon><Lock /></el-icon> 已保存密码
+            </el-tag>
           </div>
           <div class="config-info">
             <div class="config-row">
@@ -71,13 +81,32 @@
             <el-button type="primary" size="small" @click="loadConfig(config)">
               <el-icon><Switch /></el-icon> 加载
             </el-button>
-            <el-button type="danger" size="small" plain @click="deleteConfig(config.name)" aria-label="删除配置">
+            <el-button type="danger" size="small" plain @click="deleteConfig(config)" aria-label="删除配置">
               <el-icon><Delete /></el-icon>
             </el-button>
           </div>
         </el-card>
       </div>
     </div>
+
+    <!-- Save Config Name Dialog -->
+    <el-dialog v-model="saveDialogVisible" title="保存配置" width="420px" append-to-body>
+      <el-form @submit.prevent="confirmSave">
+        <el-form-item label="配置名称" label-width="80px" :error="nameError">
+          <el-input
+            v-model="configName"
+            placeholder="请输入配置名称"
+            maxlength="50"
+            clearable
+            @input="nameError = ''"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="saveDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="confirmSave">保存</el-button>
+      </template>
+    </el-dialog>
   </el-card>
 </template>
 
@@ -87,16 +116,9 @@ import {
   Connection, Monitor, User, Lock, Link, Star, Collection,
   OfficeBuilding, Switch, Delete,
 } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
-import { sftpApi } from '../../../api/sftp'
-
-export interface SftpConfig {
-  name: string
-  host: string
-  port: number
-  username: string
-  password: string
-}
+import { ElMessage, ElMessageBox } from 'element-plus'
+import axios from 'axios'
+import { sftpApi, type SftpConfigItem } from '../../../api/sftp'
 
 const emit = defineEmits<{
   connected: []
@@ -104,51 +126,110 @@ const emit = defineEmits<{
 
 const conn = ref({ host: '', port: 22, username: '', password: '' })
 const connecting = ref(false)
-const savedConfigs = ref<SftpConfig[]>([])
+const savedConfigs = ref<SftpConfigItem[]>([])
+// The saved config currently loaded into the form (if any). When set and the
+// password field is left empty, we connect by config_name so the stored
+// password stays server-side and never enters the browser.
+const activeConfig = ref<SftpConfigItem | null>(null)
+
+const saveDialogVisible = ref(false)
+const configName = ref('')
+const nameError = ref('')
+const saving = ref(false)
 
 onMounted(() => {
-  loadSavedConfigs()
+  refreshConfigs()
 })
 
-function loadSavedConfigs() {
+async function refreshConfigs() {
   try {
-    const data = localStorage.getItem('sftp_configs')
-    if (data) savedConfigs.value = JSON.parse(data)
+    const { data } = await sftpApi.getConfigs()
+    savedConfigs.value = data.configs || []
   } catch {
     savedConfigs.value = []
   }
 }
 
-function saveConfigs() {
-  localStorage.setItem('sftp_configs', JSON.stringify(savedConfigs.value))
+function openSaveDialog() {
+  if (!conn.value.host || !conn.value.username) return
+  configName.value = activeConfig.value?.name || conn.value.host
+  nameError.value = ''
+  saveDialogVisible.value = true
 }
 
-function saveCurrentConfig() {
-  if (!conn.value.host) return
-  const name = prompt('配置名称:', conn.value.host)
-  if (!name) return
-  const existing = savedConfigs.value.findIndex(c => c.name === name)
-  const config: SftpConfig = { name, ...conn.value }
-  if (existing >= 0) savedConfigs.value[existing] = config
-  else savedConfigs.value.push(config)
-  saveConfigs()
-  ElMessage.success('配置已保存')
+async function confirmSave() {
+  const name = configName.value.trim()
+  if (!name) {
+    nameError.value = '配置名称不能为空'
+    return
+  }
+  saving.value = true
+  try {
+    await sftpApi.saveConfig({
+      name,
+      host: conn.value.host,
+      port: conn.value.port,
+      username: conn.value.username,
+      password: conn.value.password,
+    })
+    saveDialogVisible.value = false
+    ElMessage.success('配置已保存')
+    await refreshConfigs()
+  } catch (err) {
+    if (axios.isAxiosError(err) && err.response?.status === 400) {
+      const data = err.response.data || {}
+      const msg = data.name?.[0] || data.host?.[0] || data.detail || '配置无效'
+      nameError.value = String(msg)
+    } else {
+      ElMessage.error('保存配置失败')
+    }
+  } finally {
+    saving.value = false
+  }
 }
 
-function loadConfig(config: SftpConfig) {
-  conn.value = { ...config }
+function loadConfig(config: SftpConfigItem) {
+  // Populate host/port/username only — the backend never returns the password.
+  conn.value = { host: config.host, port: config.port, username: config.username, password: '' }
+  activeConfig.value = config
 }
 
-function deleteConfig(name: string) {
-  savedConfigs.value = savedConfigs.value.filter(c => c.name !== name)
-  saveConfigs()
-  ElMessage.success('配置已删除')
+async function deleteConfig(config: SftpConfigItem) {
+  try {
+    await ElMessageBox.confirm(`确定删除配置 "${config.name}"？`, '删除配置', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+  try {
+    await sftpApi.deleteConfig({ name: config.name })
+    if (activeConfig.value?.id === config.id) activeConfig.value = null
+    ElMessage.success('配置已删除')
+    await refreshConfigs()
+  } catch {
+    ElMessage.error('删除配置失败')
+  }
 }
 
 async function doConnect() {
   connecting.value = true
   try {
-    await sftpApi.connect(conn.value.host, conn.value.port, conn.value.username, conn.value.password)
+    // Security-preferred: when a saved config is active and the user didn't type
+    // a new password, connect by config_name so the stored password is decrypted
+    // server-side and never reaches the browser. Otherwise use explicit fields.
+    if (activeConfig.value && !conn.value.password) {
+      await sftpApi.connect({ config_name: activeConfig.value.name })
+    } else {
+      await sftpApi.connect({
+        host: conn.value.host,
+        port: conn.value.port,
+        username: conn.value.username,
+        password: conn.value.password,
+      })
+    }
     ElMessage.success('已连接')
     emit('connected')
   } catch { ElMessage.error('连接失败') }
@@ -167,8 +248,10 @@ async function doConnect() {
 .config-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin-top: 16px; }
 .config-item { border-radius: 8px; transition: transform 0.3s ease, box-shadow 0.3s ease; }
 .config-item:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+.config-active { box-shadow: 0 0 0 2px var(--brand-primary) inset; }
 .config-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .config-name { font-weight: 600; font-size: 15px; color: var(--text-primary); }
+.pw-tag { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
 .config-info { margin-bottom: 12px; }
 .config-row { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; }
 .config-actions { display: flex; gap: 8px; }

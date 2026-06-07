@@ -83,8 +83,8 @@ const menuItems = [
   // 数据操作
   { path: '/dashboard', label: '仪表板', icon: Odometer, requiresAdmin: false, groupStart: true, groupLabel: '数据操作' },
   { path: '/data', label: '数据管理', icon: Folder, requiresAdmin: false },
-  { path: '/sftp', label: 'SFTP浏览器', icon: Connection, requiresAdmin: false },
   { path: '/analysis', label: '数据分析', icon: TrendCharts, requiresAdmin: false },
+  { path: '/sftp', label: 'SFTP浏览器', icon: Connection, requiresAdmin: false },
   // 系统管理
   { path: '/admin/users', label: '用户管理', icon: User, requiresAdmin: true, groupStart: true, groupLabel: '系统管理' },
   { path: '/settings', label: '系统设置', icon: Setting, requiresAdmin: false },

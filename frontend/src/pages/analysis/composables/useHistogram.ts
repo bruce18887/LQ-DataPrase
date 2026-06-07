@@ -4,7 +4,10 @@ import api from '../../../api'
 export function useHistogram(
   getSelectedFileId: () => number | null,
   localSelectedParam: Ref<string>,
-  ignoreNoLimit: Ref<boolean>
+  ignoreNoLimit: Ref<boolean>,
+  rangeType: Ref<string>,
+  customLow: Ref<number | null>,
+  customHigh: Ref<number | null>
 ) {
   const histResult = ref<any>(null)
   const statCards = ref<{ label: string; value: string; color?: string }[]>([])
@@ -20,6 +23,9 @@ export function useHistogram(
         file_id: fileId,
         params: [localSelectedParam.value],
         ignore_no_limit: ignoreNoLimit.value,
+        range_type: rangeType.value,
+        custom_low: rangeType.value === 'CL' ? customLow.value : null,
+        custom_high: rangeType.value === 'CL' ? customHigh.value : null,
       })
       histogramUpdateView(data.results as Record<string, any>)
     } catch {
@@ -100,6 +106,17 @@ export function useHistogram(
 
   watch(ignoreNoLimit, () => {
     loadHistogram()
+  })
+
+  // Range type / custom limits drive server-side binning → must re-fetch.
+  watch(rangeType, () => {
+    loadHistogram()
+  })
+
+  watch([customLow, customHigh], () => {
+    if (rangeType.value === 'CL') {
+      loadHistogram()
+    }
   })
 
   watch(getSelectedFileId, () => {

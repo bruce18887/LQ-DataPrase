@@ -1,5 +1,6 @@
 from datetime import timedelta
 from pathlib import Path
+import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -155,3 +156,8 @@ SESSION_COOKIE_AGE = 1800
 SESSION_SAVE_EVERY_REQUEST = True
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Optional Fernet key for encrypting saved SFTP config passwords. When unset,
+# apps.sftp.crypto derives a key from SECRET_KEY. Set this in the environment
+# to rotate the SFTP encryption key independently of SECRET_KEY.
+SFTP_CONFIG_KEY = os.environ.get('SFTP_CONFIG_KEY') or None
