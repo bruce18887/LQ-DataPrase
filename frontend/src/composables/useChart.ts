@@ -36,7 +36,21 @@ export function useChart(
   }
 
   function ensureInit(): boolean {
-    if (chartInstance.value) return true
+    if (chartInstance.value) {
+      // The container may be recreated when a v-if/v-else toggle destroys and
+      // remounts the <div ref="chartRef"> (e.g. QQPlotChart resets result=null
+      // between loads). A cached instance bound to the old, now-detached node
+      // would silently render to nothing — detect that and re-init on the live
+      // container. For charts whose container never toggles, the bound DOM is
+      // still the same element, so this is a no-op.
+      const boundDom = chartInstance.value.getDom?.() as HTMLElement | undefined
+      if (chartRef.value && boundDom === chartRef.value && boundDom.isConnected) {
+        return true
+      }
+      handle?.dispose()
+      handle = null
+      chartInstance.value = null
+    }
     if (!chartRef.value) return false
     const option = buildOption()
     handle = initEchartsWhenReady(chartRef.value, { option, reuse: true, timeout: 5_000 })

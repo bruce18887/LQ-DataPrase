@@ -22,7 +22,7 @@ function buildOption() {
   const spc = props.spcLimits || {}
 
   return {
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     legend: { data: ['测试总数', 'Pass数量', '良率', 'UCL', 'CL', 'LCL'], top: 5, textStyle: { color: 'var(--text-primary)' } },
     grid: { left: '3%', right: '4%', bottom: '3%', top: '18%', containLabel: true },
     xAxis: {

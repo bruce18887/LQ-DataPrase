@@ -55,6 +55,19 @@ def clean_data(data):
         return data
 
 
+def _filter_blank_params(params):
+    """Drop fully-blank / empty / whitespace-only column names from a params list.
+
+    Some parsers (CTA8280F trailing comma, etc.) yield an unnamed column
+    whose empty-string name passes the dtype check (all-NaN is float64)
+    but cannot be selected by users and would 400 the analysis endpoints
+    with `param_not_found`. Stripping blanks here keeps the param
+    selector honest and protects the QQ plot / histogram / wafer_map
+    fast paths uniformly.
+    """
+    return [p for p in params if p and str(p).strip()]
+
+
 def _load_df_from_request(request):
     file_id = request.data.get('file_id') or request.query_params.get('file_id')
     if not file_id:
@@ -91,6 +104,11 @@ class AnalysisViewSet(viewsets.GenericViewSet):
                 params = get_columns_with_limits(df, metadata)
             else:
                 params = numeric_cols
+            # Some parsers (CTA8280F trailing comma) yield an unnamed column
+            # whose empty string name passes the dtype check (all-NaN is float64)
+            # but cannot be selected by users and would 400 the analysis endpoints.
+            # Drop blanks so the param selector never offers a phantom option.
+            params = _filter_blank_params(params)
             # Fast path: only return param names, no heavy computation
             return Response({
                 'file_id': datafile.id,
@@ -110,6 +128,11 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         results = {}
         site_col = get_site_column(df)
         for param in params:
+            # Skip params not in the dataframe (e.g. a stale param sent during a
+            # file switch). Without this guard, get_1d_from -> df[param] raises
+            # KeyError -> 500. Mirrors the qqplot view's param_not_found guard.
+            if param not in df.columns:
+                continue
             result = compute_histogram_stats(
                 df, metadata, param, site_col,
                 range_type=range_type, custom_low=custom_low, custom_high=custom_high)

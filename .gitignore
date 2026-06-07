@@ -69,7 +69,8 @@ P0_*.md
 P0_*.py
 *.png
 /Data/
-test/
+/test/
+/tasks/
 # WSL/Virtual envs
 .venv-wsl/
 .worktrees/

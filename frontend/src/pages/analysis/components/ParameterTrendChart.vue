@@ -40,7 +40,7 @@ function buildOption() {
   return {
     title: { text: props.title || `Parameter Trend - ${param}`, left: 'center', textStyle: { fontSize: 16, fontWeight: 'bold' } },
     tooltip: {
-      trigger: 'axis', axisPointer: { type: 'cross' },
+      trigger: 'axis', axisPointer: { type: 'shadow' },
       formatter: (params: any) => {
         if (!Array.isArray(params)) return ''
         const idx = params[0].dataIndex

@@ -114,7 +114,7 @@ function buildOption() {
 
   return {
     title: { text: titleText, left: 'center', top: 6, textStyle: { rich: { name: { fontSize: 15, fontWeight: 'bold', color: tc }, unit: { fontSize: 12, color: tc, fontWeight: 500 }, limit: { fontSize: 12, color: '#E65100', fontWeight: 600, backgroundColor: '#FFF3E0', padding: [2, 6], borderRadius: 3 } } } },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, formatter: (params: any) => { const items = Array.isArray(params) ? params : [params]; let html = `值: ${Number(items[0].data[0]).toFixed(4)}<br/>`; for (const p of items) if (p.seriesName !== '规格限' && p.seriesName !== '正态分布' && p.data[1] != null) html += `${p.seriesName}: ${Number(p.data[1]).toFixed(2)}%<br/>`; return html } },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (params: any) => { const items = Array.isArray(params) ? params : [params]; let html = `值: ${Number(items[0].data[0]).toFixed(4)}<br/>`; for (const p of items) if (p.seriesName !== '规格限' && p.seriesName !== '正态分布' && p.data[1] != null) html += `${p.seriesName}: ${Number(p.data[1]).toFixed(2)}%<br/>`; return html } },
     legend: { data: series.map((s: any) => s.name), top: 'bottom', type: 'scroll', textStyle: { color: tc } },
     toolbox: { feature: { saveAsImage: { name: `${props.selectedParam}_分析` } } },
     grid: { top: 55, bottom: 70, left: 55, right: (hasSiteData && hasNormal) ? 120 : (hasSiteData || hasNormal) ? 80 : 55 },
