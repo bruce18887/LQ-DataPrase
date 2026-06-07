@@ -103,7 +103,102 @@ test.describe('@p1 单参数分析', { tag: ['@p1', '@analysis'] }, () => {
       .toBeGreaterThanOrEqual(2)
     await expect(page.locator(`${SINGLE} .normality-tag`)).toBeVisible()
   })
+
+  test('@p1 开启 QQ 图后逐个抽样参数不应触发 4xx/5xx (回归: 空列名 + cross axisPointer)', async ({ page }) => {
+    test.slow()
+    await enterAnalysis(page, RECOMMENDED.analysis)
+    await waitLoadingGone(page.locator(SINGLE))
+
+    // 关键断言 1: 参数下拉里不能出现空字符串（CTA8280F trailing comma 解析 bug 修复）
+    const all = await listParams(page)
+    expect(all.length, '参数列表应非空').toBeGreaterThan(0)
+    for (const p of all) {
+      expect(p, '参数下拉不应包含空字符串 / 纯空白列名').toBeTruthy()
+      expect(p.trim(), '参数下拉不应包含纯空白列名').toBe(p)
+    }
+
+    // 关键断言 2: 开启 QQ 图后, 抽样逐个切换, 不应出现 4xx/5xx
+    await page.getByText('显示QQ图').click()
+
+    // 等待首次 qqplot 200 之后, 后续切换也必须 200（避免空列名 400 + ECharts cross axisPointer 500）
+    const picks = sampleN(all, Math.min(PARAM_SAMPLE_COUNT, all.length))
+    console.log(`QQ 图抽样 (${picks.length}/${all.length}): ${picks.join(', ')}`)
+
+    for (const p of picks) {
+      // 等待本次 qqplot 响应, 状态必须 < 400
+      const respPromise = page.waitForResponse(
+        (r) => r.url().includes('/analysis/qqplot/'),
+        { timeout: 20_000 },
+      )
+      await selectParam(page, p)
+      const resp = await respPromise
+      expect(
+        resp.status(),
+        `切换到参数 ${p} 时 qqplot 不应 4xx/5xx (status=${resp.status()})`,
+      ).toBeLessThan(400)
+      await waitLoadingGone(page.locator(SINGLE))
+    }
+
+    // 关键断言 3: 控制台无 getAxesOnZeroOf / DOM width or height 报错
+    // （前几次复现 axisPointer: 'cross' + 动态 yAxis 触发的 TypeError）
+    const fatalErrors: string[] = []
+    page.on('pageerror', (err) => {
+      if (err.message.includes('getAxesOnZeroOf') || err.message.includes('DOM width or height')) {
+        fatalErrors.push(err.message)
+      }
+    })
+    // 触发一次 histogram 重请求, 让 ECharts 重新 setOption 验证 axisPointer fix
+    const histResp = page.waitForResponse(
+      (r) => r.url().includes('/analysis/histogram/') && r.status() < 500,
+      { timeout: 20_000 },
+    )
+    await page.getByText('显示QQ图').click() // 关闭
+    await page.waitForTimeout(300)
+    await page.getByText('显示QQ图').click() // 重新开启
+    await histResp
+    await page.waitForTimeout(500)
+    expect(fatalErrors, '页面运行时不应出现 axisPointer TypeError').toEqual([])
+  })
+
+  test('@p1 开启 QQ 图后连续切换参数, QQ 图持续渲染不空白 (回归: useChart v-if 容器重建后旧实例失效)', async ({ page }) => {
+    test.slow()
+    await enterAnalysis(page, RECOMMENDED.analysis)
+    await waitLoadingGone(page.locator(SINGLE))
+
+    const all = await listParams(page)
+    expect(all.length, '参数列表应非空').toBeGreaterThan(0)
+
+    // 开启 QQ 图并等待首次渲染
+    const firstQQ = page.waitForResponse(
+      (r) => r.url().includes('/analysis/qqplot/') && r.status() < 500,
+      { timeout: 20_000 },
+    )
+    await page.getByText('显示QQ图').click()
+    await firstQQ
+    await waitLoadingGone(page.locator(SINGLE))
+
+    // QQ 图容器（上下双图布局的下方）必须先渲染出来
+    const qqContainer = page.locator(`${SINGLE} .chart-wrapper--bottom .qqplot-container`)
+    await expectChartRendered(qqContainer, 0)
+
+    // 核心回归: 连续切换参数后, QQ 图区域不能因容器 v-if 重建而残留旧（脱离 DOM 的）
+    // ECharts 实例导致空白。每次切换后断言 QQ 容器内 SVG 仍有有效尺寸。
+    const picks = sampleN(all, Math.min(PARAM_SAMPLE_COUNT, all.length))
+    for (const p of picks) {
+      const respPromise = page.waitForResponse(
+        (r) => r.url().includes('/analysis/qqplot/'),
+        { timeout: 20_000 },
+      )
+      await selectParam(page, p)
+      const resp = await respPromise
+      expect(resp.status(), `切换到 ${p} 时 qqplot 不应 4xx/5xx`).toBeLessThan(400)
+      await waitLoadingGone(page.locator(SINGLE))
+      // 切换后 QQ 图必须仍然渲染（修复前这里会空白：SVG 缺失或尺寸为 0）
+      await expectChartRendered(qqContainer, 0)
+    }
+  })
 })
+
 
 test.describe('@p1 各分析 Tab 可达', { tag: ['@p1', '@analysis'] }, () => {
   const TABS = ['晶圆图', '分布对比', '相关性工具']

@@ -254,3 +254,15 @@
 - **Rule**: 任何「管理类 ViewSet + 前端只改一个字段的 PUT/PATCH」场景，后端**必须**在 `update()` 强制 `kwargs['partial'] = True`，否则必踩这个坑。`get_serializer()` 里加 `partial=True` **无效**——被 mixin 覆写
 - **Rule**: 当 `serializer.save(owner=...)` 在 ViewSet 里传额外 kwargs 时，序列化器 `create(self, validated_data, **kwargs)` 必须 `**kwargs` 透传。这与上一个坑是「DRF serializer 接受 kwargs 的两种边界」：save() 走 `**kwargs`，update()/partial_update() 走 `partial` 标志。**两套机制互相独立**，得分别处理
 - **Rule**: 给后端写 ViewSet 测试时，**必须**覆盖 4 种调用形态：① PUT 单字段（`partial=True` 路径）② PATCH 单字段（DRF 默认）③ PUT 全字段（确保没破坏完整替换）④ PUT 到不存在 id（404）。任意一种漏测，前端改动就可能悄悄回归
+
+## useChart v-if 容器重建后旧 ECharts 实例失效 → 图表空白（2026-06-07）
+
+- **现象**: gage_m_S4.csv → 数据分析 → 开「显示QQ图」→ 切换测试项，**QQ 图区域空白**（首次正常，之后变空白）。控制台偶发 `qqplot 400` / `histogram 500`。
+- **诊断走过的弯路**: 一开始只盯后端 status code（确实查到 histogram 缺 param 守卫会 500），但**用 APIClient 逐 param 测全 200**，无法复现。真正主因要用 Playwright 在真实浏览器里复现 + **看渲染**（截图发现 200 但 QQ 容器空白），不能只看网络层。
+- **主因（前端 `composables/useChart.ts`）**: `ensureInit()` 只要 `chartInstance.value` 存在就 `return true`。但 `QQPlotChart.vue` 的图表 `<div ref="chartRef">` 用 `v-else` 条件渲染——`loadQQPlot` 开头把 `qqResult=null` 销毁了该 div，数据回来后 Vue **重建一个新 div**。`chartInstance` 仍绑在**已脱离 DOM 的旧节点**上，`setOption` 渲染到 detached node → 新 div 永远空白。histogram 不复现是因为 `histResult` 从不被置 null，容器不销毁。
+- **Fix**: `ensureInit()` 在复用前校验 `chartInstance.getDom() === chartRef.value && isConnected`；不符则 `handle.dispose()` 并在当前（live）容器重建。对容器不切换的图表是 no-op。
+- **次因（后端 `analysis/views.py histogram`）**: 切文件瞬间子组件 watcher 用上一文件 stale param 发请求。`qqplot` 有 `if param not in df.columns -> 400` 守卫；`histogram` 没有 → `df[param]` KeyError → 500。Fix：循环内 `if param not in df.columns: continue`。
+- **回归测试**: e2e 断言「每次切 param 后 QQ 容器 SVG 仍有非零尺寸」——**已验证**：还原 useChart 前 e2e 必 fail，修复后 pass（这是「证明测试能抓到 bug」的关键步骤）。后端 3 个 APITestCase 锁 histogram 未知 param 返回 200。
+- **Rule**: 共享图表 composable（useChart）**必须**支持「容器被 v-if 销毁后重建」——缓存实例前校验 `getDom()` 仍是当前 live 的 ref 元素，否则 dispose 重建。任何「图表组件用 v-if/v-else 切换容器 + 数据中途置 null」的组合都会触发此 bug。
+- **Rule**: 排查「请求 200 但图表空白」类问题，**先在真实浏览器复现并截图看渲染**，而不是只在后端 APIClient 里循环测 status code——纯前端渲染/生命周期 bug 在后端测不出来。
+- **Rule**: 两个相似端点（histogram / qqplot）做同一件事（按 param 取列），守卫必须**对齐**——一个有 `param not in df.columns` 守卫、另一个没有，就是 500 的温床。新增/复制端点时 grep 同类守卫。

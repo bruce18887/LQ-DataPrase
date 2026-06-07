@@ -34,7 +34,7 @@ function buildOption() {
     },
     tooltip: {
       trigger: 'axis',
-      axisPointer: { type: 'cross', crossStyle: { color: tc } },
+      axisPointer: { type: 'shadow', crossStyle: { color: tc } },
       formatter: (params: any) => {
         if (!Array.isArray(params)) return ''
         let result = `<strong>${params[0].axisValue}</strong><br/>`

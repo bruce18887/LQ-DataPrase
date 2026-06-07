@@ -132,8 +132,12 @@ async function onFileChange() {
       ignore_no_limit: analysisStore.ignoreNoLimit,
     })
     const results = data.results as Record<string, any>
-    params.value = Object.keys(results || {})
-    if (params.value.length > 0 && !selectedParam.value) {
+    // Some parsers (e.g. CTA8280F trailing comma) yield an unnamed column whose
+    // empty string name flows through numeric_cols. Drop blanks so the param
+    // selector never offers a 400-bound empty option that breaks the QQ plot
+    // and other endpoints doing `if param not in df.columns`.
+    params.value = Object.keys(results || {}).filter((p) => p && p.trim() !== '')
+    if (params.value.length > 0 && (!selectedParam.value || !params.value.includes(selectedParam.value))) {
       selectedParam.value = params.value[0]
     }
   } catch {
