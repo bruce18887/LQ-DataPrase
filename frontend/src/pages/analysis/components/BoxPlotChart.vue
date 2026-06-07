@@ -3,53 +3,23 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import * as echarts from 'echarts'
-import { getChartInitOpts } from '../../../utils/echarts-theme'
-import { useThemeStore } from '../../../stores/theme'
-const _tc = () => getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
-const themeStore = useThemeStore()
+import { useChart } from '../../../composables/useChart'
+import { useEChartsTheme } from '../../../utils/echarts-theme'
 
 interface BoxPlotStats {
-  min: number
-  q1: number
-  median: number
-  q3: number
-  max: number
-  outliers: number[]
-  count: number
+  min: number; q1: number; median: number; q3: number; max: number; outliers: number[]; count: number
 }
-
 interface BoxPlotData {
-  param: string
-  overall?: BoxPlotStats
-  by_site?: Record<string, BoxPlotStats>
-  by_bin?: Record<string, BoxPlotStats>
+  param: string; overall?: BoxPlotStats; by_site?: Record<string, BoxPlotStats>; by_bin?: Record<string, BoxPlotStats>
 }
 
-const props = defineProps<{
-  data: BoxPlotData | null
-  title?: string
-}>()
+const props = defineProps<{ data: BoxPlotData | null; title?: string }>()
+const { colors } = useEChartsTheme()
 
-const chartRef = ref<HTMLElement>()
-let chartInstance: echarts.ECharts | null = null
-
-function initChart() {
-  if (!chartRef.value) return
-  if (!chartInstance) {
-    chartInstance = echarts.init(chartRef.value, undefined, getChartInitOpts())
-  }
-}
-
-function renderChart() {
-  if (!chartInstance || !props.data) return
-
-  chartInstance.clear()
-
+function buildOption() {
+  if (!props.data) return {}
+  const tc = colors.value.textColor
   const { overall, by_site, by_bin } = props.data
-
-  // Determine if we have grouped data
   const hasGroupedData = (by_site && Object.keys(by_site).length > 0) || (by_bin && Object.keys(by_bin).length > 0)
   const groupedData = by_site || by_bin || {}
 
@@ -58,167 +28,57 @@ function renderChart() {
   let outlierData: number[][] = []
 
   if (hasGroupedData) {
-    // Grouped box plots
     categories = Object.keys(groupedData).sort((a, b) => {
-      const numA = parseFloat(a)
-      const numB = parseFloat(b)
+      const numA = parseFloat(a); const numB = parseFloat(b)
       if (!isNaN(numA) && !isNaN(numB)) return numA - numB
       return a.localeCompare(b)
     })
-
     categories.forEach((group, idx) => {
       const stats = groupedData[group]
       boxData.push([stats.min, stats.q1, stats.median, stats.q3, stats.max])
-
-      // Add outliers
-      stats.outliers.forEach(outlier => {
-        outlierData.push([idx, outlier])
-      })
+      stats.outliers.forEach(o => outlierData.push([idx, o]))
     })
   } else if (overall) {
-    // Single box plot
     categories = [props.data.param]
     boxData.push([overall.min, overall.q1, overall.median, overall.q3, overall.max])
-
-    // Add outliers
-    overall.outliers.forEach(outlier => {
-      outlierData.push([0, outlier])
-    })
+    overall.outliers.forEach(o => outlierData.push([0, o]))
   }
 
-  const option: echarts.EChartsOption = {
-    title: {
-      text: props.title || `Box Plot - ${props.data.param}`,
-      left: 'center',
-      textStyle: {
-        fontSize: 16,
-        fontWeight: 'bold'
-      }
-    },
+  const fmt = (v: number) => v.toFixed(4)
+  return {
+    title: { text: props.title || `Box Plot - ${props.data.param}`, left: 'center', textStyle: { fontSize: 16, fontWeight: 'bold' } },
     tooltip: {
-      trigger: 'item',
-      axisPointer: {
-        type: 'shadow'
-      },
+      trigger: 'item', axisPointer: { type: 'shadow' },
       formatter: (params: any) => {
-        if (params.seriesName === 'Outliers') {
-          return `Outlier: ${params.value[1].toFixed(4)}`
-        }
-        const data = params.value
-        return `
-          <strong>${params.name}</strong><br/>
-          Max: ${data[5].toFixed(4)}<br/>
-          Q3: ${data[4].toFixed(4)}<br/>
-          Median: ${data[3].toFixed(4)}<br/>
-          Q1: ${data[2].toFixed(4)}<br/>
-          Min: ${data[1].toFixed(4)}
-        `
-      }
+        if (params.seriesName === 'Outliers') return `Outlier: ${params.value[1].toFixed(4)}`
+        const d = params.value
+        return `<strong>${params.name}</strong><br/>Max: ${fmt(d[5])}<br/>Q3: ${fmt(d[4])}<br/>Median: ${fmt(d[3])}<br/>Q1: ${fmt(d[2])}<br/>Min: ${fmt(d[1])}`
+      },
     },
-    grid: {
-      left: '10%',
-      right: '10%',
-      bottom: '15%',
-      containLabel: true
-    },
+    grid: { left: '10%', right: '10%', bottom: '15%', containLabel: true },
     xAxis: {
-      type: 'category',
-      data: categories,
-      boundaryGap: true,
-      nameGap: 30,
-      splitArea: {
-        show: false
-      },
-      axisLabel: {
-        rotate: categories.length > 10 ? 45 : 0,
-        interval: 0,
-        fontSize: 10,
-        color: _tc()
-      },
-      splitLine: {
-        show: false
-      }
+      type: 'category', data: categories, boundaryGap: true, nameGap: 30, splitArea: { show: false },
+      axisLabel: { rotate: categories.length > 10 ? 45 : 0, interval: 0, fontSize: 10, color: tc },
+      splitLine: { show: false },
     },
-    yAxis: {
-      type: 'value',
-      name: 'Value',
-      nameTextStyle: { color: _tc() },
-      axisLabel: { color: _tc() },
-      splitArea: {
-        show: true
-      }
-    },
+    yAxis: { type: 'value', name: 'Value', nameTextStyle: { color: tc }, axisLabel: { color: tc }, splitArea: { show: true } },
     series: [
       {
-        name: 'Box Plot',
-        type: 'boxplot',
-        data: boxData,
-        itemStyle: {
-          color: '#5470C6',
-          borderColor: _tc()
-        },
+        name: 'Box Plot', type: 'boxplot', data: boxData,
+        itemStyle: { color: '#5470C6', borderColor: tc },
         tooltip: {
-          formatter: (param: any) => {
-            return `
-              <strong>${param.name}</strong><br/>
-              Max: ${param.data[5].toFixed(4)}<br/>
-              Q3: ${param.data[4].toFixed(4)}<br/>
-              Median: ${param.data[3].toFixed(4)}<br/>
-              Q1: ${param.data[2].toFixed(4)}<br/>
-              Min: ${param.data[1].toFixed(4)}
-            `
-          }
-        }
-      },
-      {
-        name: 'Outliers',
-        type: 'scatter',
-        data: outlierData,
-        itemStyle: {
-          color: '#EE6666'
+          formatter: (p: any) =>
+            `<strong>${p.name}</strong><br/>Max: ${fmt(p.data[5])}<br/>Q3: ${fmt(p.data[4])}<br/>Median: ${fmt(p.data[3])}<br/>Q1: ${fmt(p.data[2])}<br/>Min: ${fmt(p.data[1])}`,
         },
-        symbolSize: 6
-      }
-    ]
+      },
+      { name: 'Outliers', type: 'scatter', data: outlierData, itemStyle: { color: '#EE6666' }, symbolSize: 6 },
+    ],
   }
-
-  chartInstance.setOption(option)
 }
 
-function handleResize() {
-  chartInstance?.resize()
-}
-
-onMounted(() => {
-  initChart()
-  renderChart()
-  window.addEventListener('resize', handleResize)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('resize', handleResize)
-  chartInstance?.dispose()
-  chartInstance = null
-})
-
-watch(() => props.data, () => {
-  renderChart()
-}, { deep: true })
-
-watch(() => props.title, () => {
-  renderChart()
-})
-
-watch(() => themeStore.currentTheme, () => {
-  if (!chartRef.value?.isConnected) return
-  nextTick(() => renderChart())
-})
+const { chartRef } = useChart(buildOption, [() => props.data, () => props.title])
 </script>
 
 <style scoped>
-.chart-container {
-  width: 100%;
-  height: 100%;
-  min-height: 400px;
-}
+.chart-container { width: 100%; height: 100%; min-height: 400px; }
 </style>

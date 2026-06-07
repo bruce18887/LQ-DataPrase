@@ -26,6 +26,8 @@ from apps.analysis.services.statistics import (
     get_1d_from,
     compute_qqplot,
     compute_uph,
+    build_fail_mask,
+    build_col_meta,
 )
 from apps.analysis.services.data_services import (
     compute_histogram_stats,
@@ -37,6 +39,7 @@ from apps.analysis.services.data_services import (
 )
 from apps.analysis.services.limits import resolve_limits
 from apps.datafiles.services import get_cached_parsed_file
+from apps.common.params import get_param, get_param_float, get_param_list
 
 
 def clean_data(data):
@@ -50,28 +53,6 @@ def clean_data(data):
         return data
     else:
         return data
-
-
-def _getlist(request, key):
-    """Get a list from request.data (tolerant to both dict/JSON and QueryDict/form-data)
-    with request.query_params fallback."""
-    if hasattr(request.data, 'getlist'):
-        val = request.data.getlist(key)
-    else:
-        val = request.data.get(key)
-    if val:
-        return val if isinstance(val, list) else [val]
-    return request.query_params.getlist(key)
-
-
-def _to_float(val):
-    """Parse a request value to float, returning None for blank/invalid input."""
-    if val in (None, ''):
-        return None
-    try:
-        return float(val)
-    except (TypeError, ValueError):
-        return None
 
 
 def _load_df_from_request(request):
@@ -101,8 +82,8 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         if err:
             return Response({'error': err}, status=400)
 
-        params = _getlist(request, 'params')
-        ignore_no_limit = str(request.data.get('ignore_no_limit', '') or request.query_params.get('ignore_no_limit', '')).lower() in ('true', '1', 'yes')
+        params = get_param_list(request,'params')
+        ignore_no_limit = str(get_param(request, 'ignore_no_limit', '')).lower() in ('true', '1', 'yes')
 
         if not params:
             numeric_cols = [c for c in df.columns if df[c].dtype in ('int64', 'float64')]
@@ -122,9 +103,9 @@ class AnalysisViewSet(viewsets.GenericViewSet):
             cols_with_limits = set(get_columns_with_limits(df, metadata))
             params = [p for p in params if p in cols_with_limits]
 
-        range_type = request.data.get('range_type') or request.query_params.get('range_type', 'RDL')
-        custom_low = _to_float(request.data.get('custom_low') or request.query_params.get('custom_low'))
-        custom_high = _to_float(request.data.get('custom_high') or request.query_params.get('custom_high'))
+        range_type = get_param(request, 'range_type', 'RDL')
+        custom_low = get_param_float(request, 'custom_low')
+        custom_high = get_param_float(request, 'custom_high')
 
         results = {}
         site_col = get_site_column(df)
@@ -152,8 +133,8 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         if not x_col or not y_col:
             return Response({'error': 'no_coord_columns'})
 
-        param = request.data.get('param') or request.query_params.get('param')
-        color_by = request.data.get('color_by') or request.query_params.get('color_by', 'result')
+        param = get_param(request, 'param')
+        color_by = get_param(request, 'color_by', 'result')
 
         wm = compute_wafer_map_data(df, metadata, param, color_by, x_col, y_col)
 
@@ -168,8 +149,8 @@ class AnalysisViewSet(viewsets.GenericViewSet):
 
     @action(detail=False, methods=['get', 'post'])
     def multi_lot(self, request):
-        file_ids = _getlist(request, 'file_ids')
-        param = request.data.get('param') or request.query_params.get('param')
+        file_ids = get_param_list(request,'file_ids')
+        param = get_param(request, 'param')
         if len(file_ids) < 2:
             return Response({'error': 'need_at_least_2_files'}, status=400)
 
@@ -206,8 +187,8 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         if err:
             return Response({'error': err}, status=400)
 
-        param_x = request.data.get('param_x') or request.query_params.get('param_x')
-        param_y = request.data.get('param_y') or request.query_params.get('param_y')
+        param_x = get_param(request, 'param_x')
+        param_y = get_param(request, 'param_y')
         if not param_x or not param_y:
             return Response({'error': 'param_x_and_param_y_required'}, status=400)
 
@@ -224,12 +205,12 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         if err:
             return Response({'error': err}, status=400)
 
-        param = request.data.get('param') or request.query_params.get('param')
+        param = get_param(request, 'param')
         if not param:
             return Response({'error': 'param_required'}, status=400)
 
-        chart_config = json.loads(request.data.get('chart_config') or request.query_params.get('chart_config', '[]'))
-        range_type = request.data.get('range_type') or request.query_params.get('range_type', 'RDL')
+        chart_config = json.loads(get_param(request, 'chart_config', '[]'))
+        range_type = get_param(request, 'range_type', 'RDL')
 
         result = compute_serial_distribution_data(
             df, metadata, param, range_type, chart_config)
@@ -244,7 +225,7 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         if err:
             return Response({'error': err}, status=400)
 
-        params = _getlist(request, 'params')
+        params = get_param_list(request,'params')
         if not params:
             params = get_columns_with_limits(df, metadata)
 
@@ -268,7 +249,7 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         if err:
             return Response({'error': err}, status=400)
 
-        param = request.data.get('param') or request.query_params.get('param')
+        param = get_param(request, 'param')
         if not param:
             return Response({'error': 'param_required'}, status=400)
         if param not in df.columns:
@@ -295,8 +276,8 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         if err:
             return Response({'error': err}, status=400)
 
-        test_time_col = request.data.get('test_time_col') or request.query_params.get('test_time_col')
-        manual_test_time_sec = request.data.get('manual_test_time_sec') or request.query_params.get('manual_test_time_sec')
+        test_time_col = get_param(request, 'test_time_col')
+        manual_test_time_sec = get_param(request, 'manual_test_time_sec')
         if manual_test_time_sec is not None:
             manual_test_time_sec = float(manual_test_time_sec)
         result = compute_uph(df, metadata, test_time_col=test_time_col,
@@ -319,20 +300,8 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         fail_indices, fail_columns, fail_cells = detect_fail_data(df, metadata)
         unique_fail_rows = len(set(fail_indices))
 
-        fail_mask = {}
-        for idx, cols in fail_cells.items():
-            fail_mask[str(idx)] = cols
-
-        col_meta = {}
-        units = metadata.get('units', {})
-        mins = metadata.get('mins', {})
-        maxs = metadata.get('maxs', {})
-        for col in df.columns:
-            col_meta[col] = {
-                'unit': units.get(col, '') if isinstance(units, dict) else '',
-                'min': mins.get(col, '') if isinstance(mins, dict) else '',
-                'max': maxs.get(col, '') if isinstance(maxs, dict) else '',
-            }
+        fail_mask = build_fail_mask(fail_cells)
+        col_meta = build_col_meta(df, metadata)
 
         return Response(clean_data({
             'fail_row_count': unique_fail_rows,
@@ -364,11 +333,11 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         if err:
             return Response({'error': err}, status=400)
 
-        param = request.data.get('param') or request.query_params.get('param')
+        param = get_param(request, 'param')
         if not param:
             return Response({'error': 'param_required'}, status=400)
 
-        range_type = request.data.get('range_type') or request.query_params.get('range_type', 'RDL')
+        range_type = get_param(request, 'range_type', 'RDL')
 
         data_series = get_1d_from(df, param).dropna()
         data_series = data_series[data_series.apply(lambda x: abs(x) < float('inf'))]
@@ -411,8 +380,8 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         if err:
             return Response({'error': err}, status=400)
 
-        params = _getlist(request, 'params')
-        method = request.data.get('method') or request.query_params.get('method', 'pearson')
+        params = get_param_list(request,'params')
+        method = get_param(request, 'method', 'pearson')
 
         # Validate method
         if method not in ['pearson', 'spearman', 'kendall']:
@@ -444,7 +413,7 @@ class StatisticsViewSet(viewsets.GenericViewSet):
             "group_by": "file"  // Optional: "file" or "date"
         }
         """
-        file_ids = _getlist(request, 'file_ids')
+        file_ids = get_param_list(request,'file_ids')
         if not file_ids:
             return Response({'error': 'file_ids_required'}, status=400)
 
@@ -493,8 +462,8 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         if err:
             return Response({'error': err}, status=400)
 
-        params = _getlist(request, 'params')
-        group_by = request.data.get('group_by') or request.query_params.get('group_by')
+        params = get_param_list(request,'params')
+        group_by = get_param(request, 'group_by')
 
         if not params:
             return Response({'error': 'params_required'}, status=400)
@@ -565,8 +534,8 @@ class StatisticsViewSet(viewsets.GenericViewSet):
             "group_by": "file"  // Optional: "file" or "date"
         }
         """
-        file_ids = _getlist(request, 'file_ids')
-        param = request.data.get('param') or request.query_params.get('param')
+        file_ids = get_param_list(request,'file_ids')
+        param = get_param(request, 'param')
 
         if not file_ids:
             return Response({'error': 'file_ids_required'}, status=400)

@@ -38,18 +38,15 @@
 
     <!-- Content -->
     <div class="tab-content">
-      <!-- 文件列表 -->
+      <!-- 文件列表（整合上传、标签、批次管理） -->
       <div v-show="activeTab === 'files'" class="content-section fade-in">
         <FileListTab
+          :active-file-id="activeFileId ?? undefined"
           @view-file="viewFile"
           @row-click="onRowClick"
           @total-change="fileTotal = $event"
+          @file-selected="onFileManagerSelect"
         />
-      </div>
-
-      <!-- 上传文件 -->
-      <div v-show="activeTab === 'upload'" class="content-section fade-in">
-        <FileManager @file-selected="onFileManagerSelect" />
       </div>
 
       <!-- 查看文件数据 -->
@@ -97,7 +94,6 @@
 import { ref, computed, onMounted, onActivated, watch } from 'vue'
 import api from '../../api'
 import { useFilesStore } from '../../stores/files'
-import FileManager from './FileManager.vue'
 import FileListTab from './components/FileListTab.vue'
 import DataBrowserAgGrid from './DataBrowserAgGrid.vue'
 import ExportToolsTab from './ExportToolsTab.vue'
@@ -122,7 +118,6 @@ const activeFileName = computed(() => {
 
 const tabs = [
   { key: 'files', label: '文件列表', icon: '📋' },
-  { key: 'upload', label: '上传文件', icon: '📤' },
   { key: 'view', label: '查看数据', icon: '🔍' },
   { key: 'export', label: '导出工具', icon: '📥' },
   { key: 'gage', label: 'Gage Summary', icon: '📊' },

@@ -29,6 +29,7 @@ export interface DataFile {
   program_name: string
   status: string
   created_at: string
+  tags?: string[]
 }
 
 export interface DashboardMetrics {

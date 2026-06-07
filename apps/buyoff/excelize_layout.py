@@ -6,7 +6,7 @@ import excelize
 from apps.export.excelize_helpers import (
     make_header_style, make_data_style, make_red_style,
     make_unit_style, make_title_style,
-    COLOR_BORDER, COLOR_FONT_DARK,
+    COLOR_BORDER, COLOR_FONT_DARK, thin_border,
 )
 
 # ── Section Colors ──
@@ -102,19 +102,19 @@ def build_buyoff_form(f, role_mapping, common_items, all_stats, datasets, ordere
     green_result_style = f.new_style(excelize.Style(
         font=excelize.Font(bold=True, size=10, color="145A32", family="Calibri"),
         fill=excelize.Fill(type="pattern", color=[COLOR_GREEN_BG], pattern=1),
-        border=[excelize.Border(type=t, color=COLOR_BORDER, style=1) for t in ("left", "top", "bottom", "right")],
+        border=thin_border(),
         alignment=excelize.Alignment(horizontal="center", vertical="center"),
     ))
     yellow_result_style = f.new_style(excelize.Style(
         font=excelize.Font(bold=True, size=10, color="7D6608", family="Calibri"),
         fill=excelize.Fill(type="pattern", color=[COLOR_YELLOW_BG], pattern=1),
-        border=[excelize.Border(type=t, color=COLOR_BORDER, style=1) for t in ("left", "top", "bottom", "right")],
+        border=thin_border(),
         alignment=excelize.Alignment(horizontal="center", vertical="center"),
     ))
     red_result_style = f.new_style(excelize.Style(
         font=excelize.Font(bold=True, size=10, color="FFFFFF", family="Calibri"),
         fill=excelize.Fill(type="pattern", color=[COLOR_RED_BG], pattern=1),
-        border=[excelize.Border(type=t, color=COLOR_BORDER, style=1) for t in ("left", "top", "bottom", "right")],
+        border=thin_border(),
         alignment=excelize.Alignment(horizontal="center", vertical="center"),
     ))
 

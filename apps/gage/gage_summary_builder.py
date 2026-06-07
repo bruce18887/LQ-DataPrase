@@ -2,10 +2,11 @@
 
 import pandas as pd
 import excelize
-from apps.analysis.services.statistics import ensure_numeric
+from apps.analysis.services.statistics import ensure_numeric, compute_cpk
 from apps.export.excelize_helpers import (
     make_header_style, make_data_style, make_title_style,
     COLOR_BORDER, COLOR_FONT_DARK, COLOR_DATA_BG, COLOR_RED_BG,
+    thin_border,
 )
 from apps.gage.services.rr_analysis import _calc_d2, _safe_float, SUMMARY_COLS, COL_RR_PCT
 from .gage_styles import (
@@ -234,19 +235,19 @@ def build_per_file_sheets(f, file_datasets, all_test_cols):
 
         light_blue_style = f.new_style(excelize.Style(
             fill=excelize.Fill(type="pattern", color=["D6EAF8"], pattern=1),
-            border=[excelize.Border(type=t, color="000000", style=1) for t in ("left", "top", "bottom", "right")],
+            border=thin_border("000000"),
         ))
         gray_style = f.new_style(excelize.Style(
             fill=excelize.Fill(type="pattern", color=["E0E0E0"], pattern=1),
-            border=[excelize.Border(type=t, color="000000", style=1) for t in ("left", "top", "bottom", "right")],
+            border=thin_border("000000"),
         ))
         stats_border_style = f.new_style(excelize.Style(
-            border=[excelize.Border(type=t, color="000000", style=1) for t in ("left", "top", "bottom", "right")],
+            border=thin_border("000000"),
             alignment=excelize.Alignment(horizontal="right"),
         ))
         stats_gray_style = f.new_style(excelize.Style(
             fill=excelize.Fill(type="pattern", color=["E0E0E0"], pattern=1),
-            border=[excelize.Border(type=t, color="000000", style=1) for t in ("left", "top", "bottom", "right")],
+            border=thin_border("000000"),
             alignment=excelize.Alignment(horizontal="right"),
         ))
 
@@ -354,4 +355,4 @@ def build_per_file_sheets(f, file_datasets, all_test_cols):
                     cpk_h = (float(high_val) - cmean) / (3 * cstd)
                     _set_cell(f, sheet_name, f"{cl}126", round(cpk_l, 6))
                     _set_cell(f, sheet_name, f"{cl}127", round(cpk_h, 6))
-                    _set_cell(f, sheet_name, f"{cl}128", round(min(cpk_l, cpk_h), 6))
+                    _set_cell(f, sheet_name, f"{cl}128", round(compute_cpk(cmean, cstd, float(low_val), float(high_val))['cpk'], 6))

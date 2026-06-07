@@ -59,13 +59,105 @@ test.describe('@p0 认证与路由守卫', { tag: ['@p0', '@p1', '@p2', '@auth']
     expect(token).toBeNull()
   })
 
-  test('@p1 401 响应自动清除登录态并跳登录', async ({ page }) => {
+  test('@p1 401 响应在 refresh_token 也失效时清除登录态并跳登录', async ({ page }) => {
+    // access_token 失效时拦截器会尝试 refresh；只有当 refresh_token
+    // 也无效时才会真正走 logout 重定向。这里同时损坏两个 token 来
+    // 模拟 refresh token 已被吊销/过期的最坏情况。
     await loginAs(page, 'admin')
-    // 伪造失效 token，触发受保护接口 401 → 响应拦截器 window.location.href='/login'
-    // 注意：window.location.href 会 abort PagePlay 的 page.goto（net::ERR_ABORTED），
+    await page.evaluate(() => {
+      localStorage.setItem('access_token', 'invalid.token.value')
+      localStorage.setItem('refresh_token', 'invalid.token.value')
+    })
+    // window.location.href 会 abort PagePlay 的 page.goto（net::ERR_ABORTED），
     // 故用 waitForURL 等待重定向，不对 goto 抛错断言。
-    await page.evaluate(() => localStorage.setItem('access_token', 'invalid.token.value'))
     page.goto('/data').catch(() => {})
     await page.waitForURL(/\/login/, { timeout: 15_000 })
+    const token = await page.evaluate(() => localStorage.getItem('access_token'))
+    expect(token).toBeNull()
+  })
+
+  test('@p2 /auth/refresh/ 返回新的 access 与 refresh（轮换 + 黑名单）', async ({ page }) => {
+    await loginAs(page, 'admin')
+    const originalAccess = await page.evaluate(() => localStorage.getItem('access_token'))
+    const originalRefresh = await page.evaluate(() => localStorage.getItem('refresh_token'))
+    expect(originalAccess).toBeTruthy()
+    expect(originalRefresh).toBeTruthy()
+
+    const result = await page.evaluate(async (refresh) => {
+      const r = await fetch('/api/v1/auth/refresh/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh }),
+      })
+      return { status: r.status, body: await r.json() }
+    }, originalRefresh!)
+
+    expect(result.status).toBe(200)
+    expect(result.body.access).toBeTruthy()
+    // ROTATE_REFRESH_TOKENS=True 必返回新 refresh；老 refresh 会被黑名单。
+    expect(result.body.refresh).toBeTruthy()
+    expect(result.body.access).not.toBe(originalAccess)
+    expect(result.body.refresh).not.toBe(originalRefresh)
+
+    // 老 refresh 已被吊销，第二次使用必 401。
+    const replay = await page.evaluate(async (refresh) => {
+      const r = await fetch('/api/v1/auth/refresh/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh }),
+      })
+      return r.status
+    }, originalRefresh!)
+    expect(replay).toBe(401)
+  })
+
+  test('@p2 access_token 失效但 refresh_token 有效时自动续签并放行原请求', async ({ page }) => {
+    // 这是「单页内连续操作跨过 30 min」场景的核心回归。
+    await loginAs(page, 'admin')
+    const originalAccess = await page.evaluate(() => localStorage.getItem('access_token'))
+    const originalRefresh = await page.evaluate(() => localStorage.getItem('refresh_token'))
+
+    // 伪造一个无效 access_token，refresh_token 保持原样可用
+    await page.evaluate(() => localStorage.setItem('access_token', 'invalid.token.value'))
+
+    // 触发受保护请求：拦截器收到 401 → 调 /auth/refresh/ 拿到新 token → 重发
+    await page.goto('/data')
+    await expect(page).toHaveURL(/\/data/, { timeout: 15_000 })
+
+    const newAccess = await page.evaluate(() => localStorage.getItem('access_token'))
+    const newRefresh = await page.evaluate(() => localStorage.getItem('refresh_token'))
+    expect(newAccess).toBeTruthy()
+    expect(newAccess).not.toBe('invalid.token.value')
+    // access token 续签过，必须不等于原值
+    expect(newAccess).not.toBe(originalAccess)
+    // refresh token 因为 ROTATE_REFRESH_TOKENS=True 也被换掉
+    expect(newRefresh).not.toBe(originalRefresh)
+  })
+
+  test('@p2 用户名不存在时显示「用户名「xxx」不存在」', async ({ page }) => {
+    // 不走 auth.setup 的 storageState，从干净状态开始
+    await page.goto('/login')
+    await page.getByPlaceholder('用户名').fill('ghost-user-does-not-exist')
+    await page.getByPlaceholder('密码').fill('whatever-12345')
+    await page.locator('button.neon-button').click()
+
+    // 错误提示 + 类别 class（user_not_found）都应出现
+    const hint = page.getByTestId('login-error-hint').or(page.locator('.error-msg'))
+    await expect(hint).toBeVisible({ timeout: 10_000 })
+    await expect(hint).toContainText('不存在')
+    await expect(page.locator('.error-msg--user_not_found')).toBeVisible()
+  })
+
+  test('@p2 错误密码显示「密码错误」+ 剩余尝试次数', async ({ page }) => {
+    await page.goto('/login')
+    await page.getByPlaceholder('用户名').fill(ACCOUNTS.admin.username)
+    await page.getByPlaceholder('密码').fill('wrong-password-xyz')
+    await page.locator('button.neon-button').click()
+
+    // LoginPage 自身 try/catch 内联展示错误（不走全局 401 → /login 拦截）
+    await expect(page.locator('.error-msg--invalid_credentials')).toBeVisible({
+      timeout: 10_000,
+    })
+    await expect(page.getByTestId('login-error-hint')).toContainText('次尝试')
   })
 })

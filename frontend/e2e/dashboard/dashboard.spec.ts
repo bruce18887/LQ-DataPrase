@@ -183,4 +183,90 @@ test.describe('仪表板', { tag: ['@p0', '@p1', '@p2', '@dashboard'] }, () => {
     const zeroSize = errs.filter((e) => /DOM width or height|getAxesOnZeroOf/i.test(e))
     expect(zeroSize, `不应出现 0 尺寸 ECharts 警告:\n${zeroSize.join('\n')}`).toEqual([])
   })
+
+  /**
+   * §3 回归：批次良率 Bin 分布卡下应堆叠 4 个子 section。
+   * 1) Bin 分布（per-phase 表格 + 饼图 + Top Fail 柱图）
+   * 2) 🟢 Site 良率分布 & Yield 分析
+   * 3) 📊 Bin × Site 交叉表 & 柱状图
+   * 4) ⚡ UPH 效率分析
+   * 必须 4 个图表容器都有尺寸 > 0（无 ECharts 0 尺寸警告）。
+   */
+  test('@p2 §3 批次良率 Bin 分布卡 4 子 section 全部渲染', async ({ page }) => {
+    const errors = collectConsoleErrors(page)
+    await gotoApp(page, '/dashboard')
+    await waitLoadingGone(page)
+
+    // 切到批次良率 tab
+    const batchTab = page.locator('.el-tabs__item').filter({ hasText: '批次良率' })
+    await batchTab.click()
+    await expect(page.locator('.batch-yield-tab')).toBeVisible()
+
+    // 等 list_batches 响应
+    await page
+      .waitForResponse(
+        (r) => r.url().includes('/batch-report/list_batches/'),
+        { timeout: 15_000 },
+      )
+      .catch(() => null)
+    await waitLoadingGone(page)
+
+    // 选第一个批次并加载
+    const batchSelect = page.locator('.batch-selector .el-select').first()
+    await expect(batchSelect).toBeVisible()
+    await batchSelect.click()
+    const firstOption = page.locator('.el-select-dropdown__item').first()
+    const optionVisible = await firstOption.isVisible({ timeout: 5_000 }).catch(() => false)
+    if (!optionVisible) {
+      test.skip(true, '当前环境无可用批次，跳过 §3 渲染断言')
+      return
+    }
+    await firstOption.click()
+
+    const dataResp = page
+      .waitForResponse(
+        (r) => /batch-report\/(yield_data|list_batches)/.test(r.url()),
+        { timeout: 30_000 },
+      )
+      .catch(() => null)
+    await page.getByRole('button', { name: /加载批次报表/ }).click()
+    const resp = await dataResp
+    if (!resp || resp.status() >= 400) {
+      test.skip(true, `批次数据接口返回 ${resp?.status() ?? 'no-resp'}，跳过 §3 渲染断言`)
+      return
+    }
+
+    // 1) 标题为「📋 Bin 分布」的卡片内，按出现顺序找到 4 个子 section
+    const binCard = page
+      .locator('.section-card')
+      .filter({ has: page.locator('.el-card__header', { hasText: '📋 Bin 分布' }) })
+      .first()
+    await expect(binCard, '应存在「📋 Bin 分布」主卡片').toBeVisible()
+
+    // 4 个子 section 标题（Bin 分布有 per-phase 标题 + 3 个 divider 标题）
+    await expect(binCard.locator('.chart-title', { hasText: /各阶段 Bin 明细/ })).toBeVisible()
+    await expect(binCard.locator('.bin-card-section-title', { hasText: /Site 良率分布/ })).toBeVisible()
+    await expect(binCard.locator('.bin-card-section-title', { hasText: /Bin .* Site 交叉表/ })).toBeVisible()
+    await expect(binCard.locator('.bin-card-section-title', { hasText: /UPH 效率分析/ })).toBeVisible()
+
+    // 2) 至少 4 个 ECharts 容器（Bin 饼图 / Top Fail 柱图 / Site 良率柱图 / Bin×Site 柱图 / Yield 仪表盘 …）
+    // Bin 分布卡内应有 4+ 个图表（per-phase 2 + Site 1 + Bin×Site 1 + 良率趋势单独卡 1）
+    const chartContainers = binCard.locator('.chart-container, .chart-fill, [aria-label*="图"]')
+    const chartCount = await chartContainers.count()
+    expect(chartCount, 'Bin 分布卡内图表容器数应 >= 4').toBeGreaterThanOrEqual(4)
+    // 每个 chart 容器内应能找到 svg 或 canvas
+    for (let i = 0; i < Math.min(chartCount, 6); i++) {
+      const container = chartContainers.nth(i)
+      const inner = container.locator('svg, canvas').first()
+      await expect(inner, `第 ${i} 个图表容器应有 svg/canvas`).toBeVisible({ timeout: 10_000 })
+      const box = await inner.boundingBox()
+      expect(box, `第 ${i} 个图表 svg/canvas 尺寸应 > 0`).not.toBeNull()
+      expect(box!.width).toBeGreaterThan(0)
+      expect(box!.height).toBeGreaterThan(0)
+    }
+
+    // 3) 控制台无 ECharts 0 尺寸警告
+    const zeroSize = errors.filter((e) => /DOM width or height|getAxesOnZeroOf/i.test(e))
+    expect(zeroSize, `§3 不应出现 0 尺寸 ECharts 警告:\n${zeroSize.join('\n')}`).toEqual([])
+  })
 })

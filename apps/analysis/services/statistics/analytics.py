@@ -18,6 +18,7 @@ from .helpers import (
 from .limits import (
     parse_limit_string,
     get_columns_with_limits,
+    compute_pass_yield,
     calculate_fail_bin_statistics,
 )
 from .computations import compute_cpk
@@ -135,22 +136,10 @@ def compute_yield_trend(file_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
 
         # Get bin statistics to compute pass/fail counts
         bin_stats = calculate_fail_bin_statistics(df, metadata)
-
-        total_count = 0
-        pass_count = 0
-
-        for bin_name, bin_info in bin_stats.items():
-            count = bin_info.get('count', 0)
-            total_count += count
-            bn = str(bin_name)
-            if bn in ('1', 'Bin1'):
-                pass_count = count
-
-        # Fallback if no bin stats (e.g. no bin column found)
-        if total_count == 0:
-            total_count = len(df)
-
-        yield_pct = round((pass_count / total_count * 100), 2) if total_count > 0 else 0.0
+        total_count = sum(info.get('count', 0) for info in bin_stats.values()) or len(df)
+        yield_result = compute_pass_yield(bin_stats, total_count)
+        pass_count = yield_result['pass_count']
+        yield_pct = yield_result['yield_pct']
 
         files_info.append({
             'file_id': file_id,

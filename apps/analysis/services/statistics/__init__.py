@@ -32,6 +32,10 @@ from .limits import (
     detect_fail_data,
     calculate_fail_bin_statistics,
     calculate_fail_test_item_statistics,
+    is_pass_bin,
+    compute_pass_yield,
+    build_fail_mask,
+    build_col_meta,
 )
 
 # ── computations ─────────────────────────────────────────────────────
@@ -77,6 +81,10 @@ __all__ = [
     'detect_fail_data',
     'calculate_fail_bin_statistics',
     'calculate_fail_test_item_statistics',
+    'is_pass_bin',
+    'compute_pass_yield',
+    'build_fail_mask',
+    'build_col_meta',
     # computations
     'compute_cpk',
     'compute_correlation_matrix',

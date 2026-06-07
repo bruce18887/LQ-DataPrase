@@ -124,6 +124,18 @@ def make_cpk_style(f, cpk_val):
     ))
 
 
+# ── Border Factories ──
+
+def thin_border(color=COLOR_BORDER):
+    """Return a list of 4 thin borders (left/top/bottom/right) for reuse."""
+    return [excelize.Border(type=t, color=color, style=1) for t in ("left", "top", "bottom", "right")]
+
+
+def medium_border(color=COLOR_BORDER):
+    """Return a list of 4 medium borders (left/top/bottom/right) for reuse."""
+    return [excelize.Border(type=t, color=color, style=2) for t in ("left", "top", "bottom", "right")]
+
+
 # ── Utilities ──
 
 def save_excelize(f):

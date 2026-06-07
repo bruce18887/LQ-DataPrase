@@ -102,7 +102,13 @@ def compute_histogram_stats(df, metadata, param, site_col,
     bin_centers.append(inner_edges[-1] + data_gap)  # overflow center
 
     site_histograms = None
-    if site_col and site_idx is not None and len(site_idx.unique()) > 1:
+    if site_col and site_idx is not None and len(site_idx.unique()) >= 1:
+        # Always populate site_histograms when a Site column is present,
+        # including the single-site case. Previously the `> 1` guard left
+        # the field as None for one-site files, so the front-end histogram
+        # mis-labelled the lone site as "数据分布". Single-site series are
+        # visually identical to multi-site ones in the chart; only the
+        # legend / colour assignment changes.
         site_histograms = {}
         site_idx_aligned = site_idx[data_series.index]
 

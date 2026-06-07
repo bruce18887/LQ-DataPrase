@@ -21,11 +21,13 @@ from rest_framework.views import APIView
 
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import BaseATEParser, get_parser
+from apps.analysis.services.statistics import detect_fail_data, build_fail_mask, build_col_meta
 from apps.datafiles.serializers import (
     DataFileListSerializer,
     DataFileSerializer,
     FileUploadSerializer,
     ParseHistorySerializer,
+    normalize_tags,
 )
 from apps.datafiles.tasks import parse_data_file_task
 from apps.datafiles.services import get_cached_parsed_file
@@ -125,7 +127,10 @@ def _register_file(user, file_path, file_type='single', batch_name='', source_mt
         row_count=row_count,
         col_count=col_count,
         program_name=program_name,
-        product_code=extract_product_code(filename),
+        # Prefer the CSV test-program name (PTS/PGS/PDS) over filename regex
+        # for product_code: the same product always reuses the same program,
+        # while data filenames may carry unrelated prefixes.
+        product_code=extract_product_code(filename, program_name),
         source_mtime=source_mtime,
         status='ready' if format_type != 'Unknown' else 'error',
     )
@@ -143,9 +148,18 @@ def _register_file(user, file_path, file_type='single', batch_name='', source_mt
     return datafile
 
 
-def _user_upload_dir(user_id, file_type='single'):
-    """Return per-user upload directory: media/data/<user_id>/<file_type>/"""
-    path = os.path.join(settings.MEDIA_ROOT, 'data', str(user_id), file_type)
+def _user_upload_dir(user, file_type='single'):
+    """Return per-user upload directory: media/data/<username>/<file_type>/
+
+    The directory is named after the user's login name (not the numeric id) so
+    that paths are stable across id changes and human-readable in shell
+    listings. Django's UnicodeUsernameValidator guarantees the username only
+    contains characters that are safe in filesystem paths on every supported
+    platform (POSIX + Windows), so no further sanitization is performed.
+    """
+    if user is None:
+        raise ValueError('_user_upload_dir requires a user instance')
+    path = os.path.join(settings.MEDIA_ROOT, 'data', str(user.username), file_type)
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -203,7 +217,37 @@ class DataFileViewSet(viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'source_mtime', 'filename', 'file_size']
 
     def get_queryset(self):
-        return DataFile.objects.filter(owner=self.request.user)
+        queryset = DataFile.objects.filter(owner=self.request.user)
+
+        # Custom search for tags (JSONField)
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            # Search in filename, program_name, and tags
+            from django.db.models import Q
+            q = Q(filename__icontains=search) | Q(program_name__icontains=search)
+            # For tags, we need to search within the JSON array
+            # SQLite doesn't support JSON array search natively, so we'll filter in Python
+            # For PostgreSQL, we could use __contains with a JSONB array
+            # For now, we'll do a simple approach: filter by filename/program_name first,
+            # then filter tags in Python if needed
+            queryset = queryset.filter(q)
+
+        # Filter by specific tag
+        tag = self.request.query_params.get('tag', '').strip()
+        if tag:
+            # Filter files that have this specific tag (case-insensitive)
+            # Since tags is a JSONField with a list, we need to check if the tag exists in the list
+            # This is database-specific; for SQLite we'll filter in Python
+            # For PostgreSQL, we could use __contains
+            tag_lower = tag.lower()
+            matching_ids = []
+            for df in queryset.values('id', 'tags'):
+                tags = df.get('tags') or []
+                if any(t.lower() == tag_lower for t in tags if isinstance(t, str)):
+                    matching_ids.append(df['id'])
+            queryset = queryset.filter(id__in=matching_ids)
+
+        return queryset
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -248,6 +292,59 @@ class DataFileViewSet(viewsets.ModelViewSet):
         )
         return Response({'product_codes': list(codes)})
 
+    @action(detail=True, methods=['post'])
+    def set_tags(self, request, pk=None):
+        """Overwrite the file's tag list. Body: ``{"tags": ["a", "b"]}``.
+
+        Owner-scoped: a 404 is returned if the file is not owned by the
+        requesting user. Validation (length / count / type) is delegated to
+        ``normalize_tags``; on success the response echoes the saved tags.
+        """
+        datafile = self.get_object()
+        try:
+            tags = normalize_tags(request.data.get('tags') or [])
+        except Exception as e:
+            return Response(
+                {'tags': [str(e)]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        datafile.tags = tags
+        datafile.save(update_fields=['tags', 'updated_at'])
+        return Response({'id': datafile.id, 'tags': datafile.tags})
+
+    @action(detail=False, methods=['post'])
+    def list_tags(self, request):
+        """Return distinct, de-dup'd tags the current user has ever used.
+
+        Body (optional): ``{"prefix": "PR"}`` — case-insensitive prefix filter
+        used by the front-end autocomplete. Tags from every file the user
+        owns are aggregated and returned in lexicographic order.
+        """
+        prefix = (request.data.get('prefix') or '').strip()
+        seen = {}
+        # Iterate over each file's tag list and collect distinct (case-insensitive)
+        # entries, preferring the first-seen casing as the canonical form.
+        for tag_list in (
+            DataFile.objects.filter(owner=request.user)
+            .exclude(tags=[])
+            .values_list('tags', flat=True)
+        ):
+            if not isinstance(tag_list, list):
+                continue
+            for t in tag_list:
+                if not isinstance(t, str):
+                    continue
+                t = t.strip()
+                if not t:
+                    continue
+                key = t.lower()
+                if key in seen:
+                    continue
+                if prefix and not key.startswith(prefix.lower()):
+                    continue
+                seen[key] = t
+        return Response({'tags': sorted(seen.values(), key=str.lower)})
+
 
 class FileUploadView(APIView):
     permission_classes = [IsAuthenticated]
@@ -262,7 +359,7 @@ class FileUploadView(APIView):
         # Optional per-file last_modified (epoch ms), parallel to the files list.
         last_modified_list = request.data.getlist('last_modified')
 
-        upload_dir = _user_upload_dir(request.user.id, 'single')
+        upload_dir = _user_upload_dir(request.user, 'single')
         created = []
 
         for idx, uploaded_file in enumerate(files):
@@ -319,7 +416,7 @@ class BatchDirListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        batch_base = _user_upload_dir(request.user.id, 'batch')
+        batch_base = _user_upload_dir(request.user, 'batch')
         if not os.path.isdir(batch_base):
             return Response([])
 
@@ -383,7 +480,7 @@ class BatchDirImportView(APIView):
         if not dir_name:
             return Response({'error': 'dir_name is required'}, status=400)
 
-        batch_base = _user_upload_dir(request.user.id, 'batch')
+        batch_base = _user_upload_dir(request.user, 'batch')
         dir_path = os.path.join(batch_base, dir_name)
         if not os.path.isdir(dir_path):
             return Response({'error': f'目录 "{dir_name}" 不存在'}, status=404)
@@ -420,7 +517,7 @@ class BatchDirDeleteView(APIView):
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, dir_name):
-        batch_base = _user_upload_dir(request.user.id, 'batch')
+        batch_base = _user_upload_dir(request.user, 'batch')
         dir_path = os.path.join(batch_base, dir_name)
         if not os.path.isdir(dir_path):
             return Response({'error': f'目录 "{dir_name}" 不存在'}, status=404)
@@ -490,22 +587,9 @@ class DataBrowserView(APIView):
         if df is None:
             return Response({'error': 'parse_failed'}, status=400)
 
-        from apps.analysis.services.statistics import detect_fail_data
         fail_indices, fail_columns, fail_cells = detect_fail_data(df, metadata)
-        fail_mask = {}
-        for idx, cols in fail_cells.items():
-            fail_mask[str(idx)] = cols
-
-        col_meta = {}
-        units = metadata.get('units', {})
-        mins = metadata.get('mins', {})
-        maxs = metadata.get('maxs', {})
-        for col in df.columns:
-            col_meta[col] = {
-                'unit': units.get(col, '') if isinstance(units, dict) else '',
-                'min': mins.get(col, '') if isinstance(mins, dict) else '',
-                'max': maxs.get(col, '') if isinstance(maxs, dict) else '',
-            }
+        fail_mask = build_fail_mask(fail_cells)
+        col_meta = build_col_meta(df, metadata)
 
         fail_set = set(fail_indices)
 

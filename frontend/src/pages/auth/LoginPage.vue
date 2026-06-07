@@ -51,7 +51,19 @@
 
         <!-- 错误提示 -->
         <transition name="fade">
-          <p v-if="error" class="error-msg" aria-live="polite">{{ error }}</p>
+          <p
+            v-if="error"
+            class="error-msg"
+            :class="`error-msg--${errorCategory}`"
+            aria-live="polite"
+          >
+            {{ error }}
+            <span
+              v-if="errorHint"
+              class="error-hint"
+              data-testid="login-error-hint"
+            >{{ errorHint }}</span>
+          </p>
         </transition>
       </div>
     </div>
@@ -59,11 +71,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { computed, ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import { TrendCharts } from '@element-plus/icons-vue'
 import GridBackground from '../../components/common/GridBackground.vue'
+import { parseLoginError, type LoginFailureCategory } from '../../api/auth'
 import type { FormInstance } from 'element-plus'
 
 const router = useRouter()
@@ -77,6 +90,32 @@ const rules = {
 }
 const loading = ref(false)
 const error = ref('')
+const errorCategory = ref<LoginFailureCategory>('unknown')
+const errorHint = ref('')
+
+const remainingAttempts = ref<number | null>(null)
+const retryAfterMinutes = ref<number | null>(null)
+
+const errorIcon = computed(() => {
+  // Exposed for future <el-icon> usage; kept as a mapping so the
+  // template can stay data-driven when the design wants an icon.
+  switch (errorCategory.value) {
+    case 'timeout':
+    case 'network_error':
+      return 'Connection'
+    case 'account_disabled':
+      return 'Lock'
+    case 'account_locked':
+      return 'Timer'
+    case 'user_not_found':
+    case 'invalid_credentials':
+      return 'WarningFilled'
+    case 'server_error':
+      return 'CircleClose'
+    default:
+      return 'WarningFilled'
+  }
+})
 
 async function handleLogin() {
   const valid = await formRef.value?.validate().catch(() => false)
@@ -84,12 +123,27 @@ async function handleLogin() {
 
   loading.value = true
   error.value = ''
+  errorHint.value = ''
+  errorCategory.value = 'unknown'
+  remainingAttempts.value = null
+  retryAfterMinutes.value = null
   try {
     await auth.login(form.username, form.password)
     router.push('/dashboard')
   } catch (e: unknown) {
-    const err = e as { response?: { data?: { detail?: string } } }
-    error.value = err.response?.data?.detail || '登录失败，请检查用户名和密码'
+    const info = parseLoginError(e)
+    error.value = info.message
+    errorCategory.value = info.category
+    // Secondary hint: countdown info that the user actually needs.
+    if (info.category === 'invalid_credentials' && info.remaining_attempts != null) {
+      errorHint.value = `（还剩 ${info.remaining_attempts} 次尝试机会）`
+      remainingAttempts.value = info.remaining_attempts
+    } else if (info.category === 'account_locked' && info.retry_after_minutes != null) {
+      errorHint.value = `（请在 ${info.retry_after_minutes} 分钟后重试）`
+      retryAfterMinutes.value = info.retry_after_minutes
+    } else if (info.category === 'account_disabled') {
+      errorHint.value = '（请联系系统管理员重新启用账号）'
+    }
   } finally {
     loading.value = false
   }
@@ -283,6 +337,33 @@ async function handleLogin() {
   border: 1px solid rgba(255, 107, 107, 0.3);
   border-radius: 8px;
   animation: shake 0.5s ease;
+  line-height: 1.6;
+}
+.error-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+/* Network / timeout: amber, not red — "your fault" vs "server's fault" */
+.error-msg--timeout,
+.error-msg--network_error {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+/* Disabled / locked: keep red, more emphatic */
+.error-msg--account_disabled,
+.error-msg--account_locked {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+/* Server error: muted grey-red, do not look like a user action issue */
+.error-msg--server_error {
+  color: #d97706;
+  background: rgba(217, 119, 6, 0.08);
+  border-color: rgba(217, 119, 6, 0.3);
 }
 
 @keyframes shake {

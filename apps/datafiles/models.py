@@ -41,6 +41,12 @@ class DataFile(models.Model):
     )
     source_mtime = models.DateTimeField(null=True, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
+    # User-defined free-form tags. Each element is a non-empty trimmed string.
+    # We intentionally store as JSONField (rather than a M2M ``DataFileTag``
+    # table) because the usage is per-user / per-file labels — no global
+    # "tag dimension" semantics. The list_tags action performs case-insensitive
+    # de-dup server-side, so callers may send a sloppy payload.
+    tags = models.JSONField(default=list, blank=True)
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default='pending'
     )

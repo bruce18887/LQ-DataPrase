@@ -55,6 +55,19 @@ export const SEEDED_FILES = {
   GAGE_S4: 'gage_m_S4.csv',
 } as const
 
+/**
+ * 单 SITE 测试 fixture。
+ *
+ * - SINGLE_SITE_QA2: BPD60320_QA2.csv — Site_No 列里只出现 4 一个值
+ *   （同一台机在 QA2 阶段只跑了 Site 4）。用于验证 §2 HistogramChart
+ *   单站点时图例文本为「Site4」而非「数据分布」。
+ * - SINGLE_SITE_S1: gage_m_S1.csv — 经典 Gage 数据，Site_No = 1。
+ */
+export const SINGLE_SITE_FILES = {
+  SITE_4: SEEDED_FILES.BUYOFF_QA2,
+  SITE_1: SEEDED_FILES.GAGE_S1,
+} as const
+
 /** 按测试场景推荐使用的文件 */
 export const RECOMMENDED = {
   /** 分析页默认选择（CTA8280F 参数最多，适合抽样 5 个参数） */

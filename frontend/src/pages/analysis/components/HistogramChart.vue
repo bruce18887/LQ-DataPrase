@@ -3,12 +3,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import * as echarts from 'echarts'
-import { getChartInitOpts } from '../../../utils/echarts-theme'
-import { useThemeStore } from '../../../stores/theme'
-const _tc = () => getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
-const themeStore = useThemeStore()
+import { useChart } from '../../../composables/useChart'
+import { useEChartsTheme } from '../../../utils/echarts-theme'
 
 const props = defineProps<{
   result: any
@@ -18,97 +14,55 @@ const props = defineProps<{
   selectedParam: string
 }>()
 
-const chartRef = ref<HTMLElement>()
-let chartInstance: echarts.ECharts | null = null
-
+const { colors } = useEChartsTheme()
 const COLORS_SITE_8 = ['#E53935', '#1E88E5', '#43A047', '#F9A825', '#8E24AA', '#00ACC1', '#F57C00', '#D81B60']
 
-function initChart() {
-  if (!chartRef.value) return
-  if (!chartInstance) {
-    chartInstance = echarts.init(chartRef.value, undefined, getChartInitOpts())
-  }
-}
-
-function renderChart() {
-  if (!chartInstance || !props.result) return
-
-  chartInstance.clear()
-
+function buildOption() {
   const r = props.result
-
+  if (!r) return {}
+  const tc = colors.value.textColor
   const binCenters: number[] = r.bin_centers || []
-  if (binCenters.length === 0) return
+  if (binCenters.length === 0) return {}
 
   const series: any[] = []
-
   const siteHists = r.site_histograms
-  const hasSiteData = siteHists && Object.keys(siteHists).length > 1
+  const siteKeys = siteHists ? Object.keys(siteHists) : []
+  const hasSiteData = siteKeys.length >= 1
   const showNormal = props.chartConfig.includes('normal')
   const hasNormal = showNormal && r.std > 0
 
   if (hasSiteData) {
-    const sites = Object.keys(siteHists).sort((a, b) => Number(a) - Number(b))
+    const sites = siteKeys.sort((a, b) => Number(a) - Number(b))
     for (let idx = 0; idx < sites.length; idx++) {
       const site = sites[idx]
       const hists: number[] = siteHists[site] || []
-      const barData = binCenters.map((center: number, i: number) => [center, hists[i] ?? 0])
       series.push({
-        name: `Site${site}`,
-        type: 'bar',
-        data: barData,
+        name: `Site${site}`, type: 'bar',
+        data: binCenters.map((c: number, i: number) => [c, hists[i] ?? 0]),
         itemStyle: { color: COLORS_SITE_8[idx % COLORS_SITE_8.length] },
         barWidth: `${props.barWidthPercent}%`,
       })
     }
-    // Add "All Site" series as semi-transparent overlay with percentage labels at top
-    const allSiteData = binCenters.map((center: number, i: number) => [center, r.bin_percentages?.[i] || 0])
     series.push({
-      name: 'All Site',
-      type: 'bar',
-      yAxisIndex: 1,
-      data: allSiteData,
-      itemStyle: { color: '#90CAF9', opacity: 0.5 },
-      barWidth: `${props.barWidthPercent}%`,
-      label: {
-        show: true,
-        position: 'top',
-        formatter: (params: any) => params.data[1] > 0 ? `${params.data[1].toFixed(2)}%` : '',
-        fontSize: 10,
-        color: '#1565C0',
-        fontWeight: 'bold',
-      },
+      name: 'All Site', type: 'bar', yAxisIndex: 1,
+      data: binCenters.map((c: number, i: number) => [c, r.bin_percentages?.[i] || 0]),
+      itemStyle: { color: '#90CAF9', opacity: 0.5 }, barWidth: `${props.barWidthPercent}%`,
+      label: { show: true, position: 'top', formatter: (p: any) => p.data[1] > 0 ? `${p.data[1].toFixed(2)}%` : '', fontSize: 10, color: '#1565C0', fontWeight: 'bold' },
     })
   } else {
-    const barData = binCenters.map((center: number, i: number) => [center, r.bin_percentages?.[i] || 0])
     series.push({
-      name: '数据分布',
-      type: 'bar',
-      data: barData,
-      itemStyle: { color: '#1E88E5' },
-      barWidth: `${props.barWidthPercent}%`,
+      name: '数据分布', type: 'bar',
+      data: binCenters.map((c: number, i: number) => [c, r.bin_percentages?.[i] || 0]),
+      itemStyle: { color: '#1E88E5' }, barWidth: `${props.barWidthPercent}%`,
     })
   }
 
   const mk: any[] = []
-
-  // Limit lines always mark the true spec limits (LSL/USL).  The range type
-  // only controls the binning / X-axis span (handled server-side); when zoomed
-  // into a sigma window the spec lines fall outside the axis and ECharts simply
-  // clips them — that is the intended behaviour.
   const showLimit = props.chartConfig.includes('limit')
   if (showLimit && r.lower_limit != null && r.upper_limit != null) {
     mk.push(
-      {
-        xAxis: r.lower_limit,
-        lineStyle: { color: '#C62828', width: 3, type: 'dashed' },
-        label: { show: true, formatter: 'LSL', position: 'end' },
-      },
-      {
-        xAxis: r.upper_limit,
-        lineStyle: { color: '#C62828', width: 3, type: 'dashed' },
-        label: { show: true, formatter: 'USL', position: 'end' },
-      },
+      { xAxis: r.lower_limit, lineStyle: { color: '#C62828', width: 3, type: 'dashed' }, label: { show: true, formatter: 'LSL', position: 'end' } },
+      { xAxis: r.upper_limit, lineStyle: { color: '#C62828', width: 3, type: 'dashed' }, label: { show: true, formatter: 'USL', position: 'end' } },
     )
   }
   if (props.chartConfig.includes('s3') && r.sigma3_min != null && r.sigma3_max != null) {
@@ -118,11 +72,9 @@ function renderChart() {
     )
   }
   if (props.chartConfig.includes('s4') && r.std > 0) {
-    const s4min = r.mean - 4 * r.std
-    const s4max = r.mean + 4 * r.std
     mk.push(
-      { xAxis: s4min, lineStyle: { color: '#00838F', width: 3, type: 'dotted' }, label: { show: true, formatter: '4σ下限', position: 'insideEndTop' } },
-      { xAxis: s4max, lineStyle: { color: '#00838F', width: 3, type: 'dotted' }, label: { show: true, formatter: '4σ上限', position: 'insideEndTop' } },
+      { xAxis: r.mean - 4 * r.std, lineStyle: { color: '#00838F', width: 3, type: 'dotted' }, label: { show: true, formatter: '4σ下限', position: 'insideEndTop' } },
+      { xAxis: r.mean + 4 * r.std, lineStyle: { color: '#00838F', width: 3, type: 'dotted' }, label: { show: true, formatter: '4σ上限', position: 'insideEndTop' } },
     )
   }
   if (props.chartConfig.includes('s6') && r.sigma6_min != null && r.sigma6_max != null) {
@@ -131,219 +83,50 @@ function renderChart() {
       { xAxis: r.sigma6_max, lineStyle: { color: '#E65100', width: 3, type: 'dotted' }, label: { show: true, formatter: '6σ上限', position: 'insideEndTop' } },
     )
   }
-
-  if (mk.length) {
-    series.push({
-      name: '规格限',
-      type: 'line',
-      data: [],
-      markLine: { symbol: 'none', precision: 4, data: mk },
-    })
-  }
+  if (mk.length) series.push({ name: '规格限', type: 'line', data: [], markLine: { symbol: 'none', precision: 4, data: mk } })
 
   if (hasNormal) {
     const binGap = binCenters.length > 1 ? Math.abs(binCenters[1] - binCenters[0]) : 1
-    const pdfFn = (x: number) =>
-      (1 / (r.std * Math.sqrt(2 * Math.PI))) *
-      Math.exp(-0.5 * ((x - r.mean) / r.std) ** 2)
-
-    // When std is tiny relative to bin spacing (e.g. 9e-5 vs 0.013), uniform
-    // sampling misses the narrow peak entirely.  Merge bin centers with extra
-    // points around the mean at ±1σ, ±2σ, …, ±6σ to guarantee the peak is
-    // captured regardless of how narrow the distribution is.
+    const pdfFn = (x: number) => (1 / (r.std * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * ((x - r.mean) / r.std) ** 2)
     let xVals: number[]
     if (r.std < binGap) {
       const extra: number[] = [r.mean]
-      for (let k = 1; k <= 6; k++) {
-        extra.push(r.mean - k * r.std, r.mean + k * r.std)
-      }
+      for (let k = 1; k <= 6; k++) extra.push(r.mean - k * r.std, r.mean + k * r.std)
       xVals = [...binCenters, ...extra].sort((a, b) => a - b)
-    } else {
-      xVals = binCenters
-    }
-
-    const normalData = xVals.map((x: number) => [x, pdfFn(x)])
-
-    series.push({
-      name: '正态分布',
-      type: 'line',
-      data: normalData,
-      smooth: true,
-      lineStyle: { color: '#F57F17', width: 3 },
-      symbol: 'none',
-      yAxisIndex: hasSiteData ? 2 : 1,
-      z: 10,
-    })
+    } else { xVals = binCenters }
+    series.push({ name: '正态分布', type: 'line', data: xVals.map((x: number) => [x, pdfFn(x)]), smooth: true, lineStyle: { color: '#F57F17', width: 3 }, symbol: 'none', yAxisIndex: hasSiteData ? 2 : 1, z: 10 })
   }
 
-  // Y-axis color scheme: left=blue, All Site=light blue, normal=orange
-  const AXIS_COLOR_LEFT = '#1E88E5'
-  const AXIS_COLOR_ALLSITE = '#42A5F5'
-  const AXIS_COLOR_NORMAL = '#F57F17'
-
-  // Auto-scale left Y-axis when multi-site (individual sites are typically <10%)
+  const AXIS_COLOR_LEFT = '#1E88E5'; const AXIS_COLOR_ALLSITE = '#42A5F5'; const AXIS_COLOR_NORMAL = '#F57F17'
   let leftYMax = 100
   if (hasSiteData) {
     let maxVal = 0
-    for (const site of Object.keys(siteHists)) {
-      for (const v of siteHists[site]) {
-        if (v > maxVal) maxVal = v
-      }
-    }
-    leftYMax = Math.ceil(maxVal / 5) * 5 + 5  // round up to next 5% + padding
+    for (const s of Object.keys(siteHists)) for (const v of siteHists[s]) if (v > maxVal) maxVal = v
+    leftYMax = Math.ceil(maxVal / 5) * 5 + 5
   }
+  const yAxes: any[] = [{ type: 'value', name: '百分比 (%)', nameTextStyle: { color: AXIS_COLOR_LEFT, fontWeight: 'bold' }, position: 'left', min: 0, max: leftYMax, axisLabel: { formatter: '{value}%', color: AXIS_COLOR_LEFT }, axisLine: { show: true, lineStyle: { color: AXIS_COLOR_LEFT } } }]
+  if (hasSiteData) yAxes.push({ type: 'value', name: 'All Site (%)', nameTextStyle: { color: AXIS_COLOR_ALLSITE, fontWeight: 'bold' }, position: 'right', min: 0, axisLabel: { formatter: '{value}%', color: AXIS_COLOR_ALLSITE }, axisLine: { show: true, lineStyle: { color: AXIS_COLOR_ALLSITE } }, splitLine: { show: false } })
+  if (hasNormal) yAxes.push({ type: 'value', name: '概率密度', nameTextStyle: { color: AXIS_COLOR_NORMAL, fontWeight: 'bold' }, position: 'right', offset: hasSiteData ? 50 : 0, min: 0, axisLabel: { formatter: (v: number) => v.toExponential(2), color: AXIS_COLOR_NORMAL }, axisLine: { show: true, lineStyle: { color: AXIS_COLOR_NORMAL } }, splitLine: { show: false } })
 
-  const yAxes: any[] = [
-    {
-      type: 'value',
-      name: '百分比 (%)',
-      nameTextStyle: { color: AXIS_COLOR_LEFT, fontWeight: 'bold' },
-      position: 'left',
-      min: 0,
-      max: leftYMax,
-      axisLabel: { formatter: '{value}%', color: AXIS_COLOR_LEFT },
-      axisLine: { show: true, lineStyle: { color: AXIS_COLOR_LEFT } },
-    },
-  ]
-
-  if (hasSiteData) {
-    yAxes.push({
-      type: 'value',
-      name: 'All Site (%)',
-      nameTextStyle: { color: AXIS_COLOR_ALLSITE, fontWeight: 'bold' },
-      position: 'right',
-      min: 0,
-      axisLabel: { formatter: '{value}%', color: AXIS_COLOR_ALLSITE },
-      axisLine: { show: true, lineStyle: { color: AXIS_COLOR_ALLSITE } },
-      splitLine: { show: false },
-    })
-  }
-
-  if (hasNormal) {
-    yAxes.push({
-      type: 'value',
-      name: '概率密度',
-      nameTextStyle: { color: AXIS_COLOR_NORMAL, fontWeight: 'bold' },
-      position: 'right',
-      offset: hasSiteData ? 50 : 0,
-      min: 0,
-      axisLabel: { formatter: (v: number) => v.toExponential(2), color: AXIS_COLOR_NORMAL },
-      axisLine: { show: true, lineStyle: { color: AXIS_COLOR_NORMAL } },
-      splitLine: { show: false },
-    })
-  }
-
-  // Build chart title: param name + unit + limit in center-top
   const unitStr = r.unit || ''
-  const limitStr = (r.lower_limit != null && r.upper_limit != null)
-    ? `Limit [${r.lower_limit.toFixed(4)}, ${r.upper_limit.toFixed(4)}]`
-    : ''
+  const limitStr = (r.lower_limit != null && r.upper_limit != null) ? `Limit [${r.lower_limit.toFixed(4)}, ${r.upper_limit.toFixed(4)}]` : ''
   const titleText = `{name|${props.selectedParam}}  {unit|${unitStr ? `(${unitStr})` : ''}}  {limit|${limitStr || ''}}`
 
-  chartInstance.setOption({
-    title: {
-      text: titleText,
-      left: 'center',
-      top: 6,
-      textStyle: {
-        rich: {
-          name: {
-            fontSize: 15,
-            fontWeight: 'bold',
-            color: _tc(),
-          },
-          unit: {
-            fontSize: 12,
-            color: _tc(),
-            fontWeight: 500,
-          },
-          limit: {
-            fontSize: 12,
-            color: '#E65100',
-            fontWeight: 600,
-            backgroundColor: '#FFF3E0',
-            padding: [2, 6],
-            borderRadius: 3,
-          },
-        },
-      },
-    },
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'cross' },
-      formatter: (params: any) => {
-        const items = Array.isArray(params) ? params : [params]
-        let html = `值: ${Number(items[0].data[0]).toFixed(4)}<br/>`
-        for (const p of items) {
-          if (p.seriesName !== '规格限' && p.seriesName !== '正态分布' && p.data[1] != null) {
-            html += `${p.seriesName}: ${Number(p.data[1]).toFixed(2)}%<br/>`
-          }
-        }
-        return html
-      },
-    },
-    legend: { data: series.map((s: any) => s.name), top: 'bottom', type: 'scroll', textStyle: { color: _tc() } },
+  return {
+    title: { text: titleText, left: 'center', top: 6, textStyle: { rich: { name: { fontSize: 15, fontWeight: 'bold', color: tc }, unit: { fontSize: 12, color: tc, fontWeight: 500 }, limit: { fontSize: 12, color: '#E65100', fontWeight: 600, backgroundColor: '#FFF3E0', padding: [2, 6], borderRadius: 3 } } } },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, formatter: (params: any) => { const items = Array.isArray(params) ? params : [params]; let html = `值: ${Number(items[0].data[0]).toFixed(4)}<br/>`; for (const p of items) if (p.seriesName !== '规格限' && p.seriesName !== '正态分布' && p.data[1] != null) html += `${p.seriesName}: ${Number(p.data[1]).toFixed(2)}%<br/>`; return html } },
+    legend: { data: series.map((s: any) => s.name), top: 'bottom', type: 'scroll', textStyle: { color: tc } },
     toolbox: { feature: { saveAsImage: { name: `${props.selectedParam}_分析` } } },
     grid: { top: 55, bottom: 70, left: 55, right: (hasSiteData && hasNormal) ? 120 : (hasSiteData || hasNormal) ? 80 : 55 },
-    xAxis: {
-      type: 'value',
-      name: '',
-      nameLocation: 'middle',
-      nameGap: 28,
-      min: binCenters[0],
-      max: binCenters[binCenters.length - 1],
-      axisLabel: { rotate: 45, show: true, interval: 0, fontSize: 9, formatter: (v: number) => v.toFixed(4), color: _tc() },
-      splitNumber: 24,
-    },
+    xAxis: { type: 'value', name: '', nameLocation: 'middle', nameGap: 28, min: binCenters[0], max: binCenters[binCenters.length - 1], axisLabel: { rotate: 45, show: true, interval: 0, fontSize: 9, formatter: (v: number) => v.toFixed(4), color: tc }, splitNumber: 24 },
     yAxis: yAxes,
     series,
-  })
-}
-
-function resize() {
-  chartInstance?.resize()
-}
-
-watch(() => props.result, () => {
-  nextTick(() => renderChart())
-})
-
-watch(() => props.chartConfig, () => {
-  nextTick(() => renderChart())
-}, { deep: true })
-
-watch(() => props.rangeType, () => {
-  nextTick(() => renderChart())
-})
-
-watch(() => props.barWidthPercent, () => {
-  nextTick(() => renderChart())
-})
-
-watch(() => themeStore.currentTheme, () => {
-  if (!chartRef.value?.isConnected) return
-  nextTick(() => renderChart())
-})
-
-onMounted(() => {
-  initChart()
-  if (props.result) {
-    renderChart()
   }
-  window.addEventListener('resize', resize)
-})
+}
 
-onUnmounted(() => {
-  window.removeEventListener('resize', resize)
-  chartInstance?.dispose()
-  chartInstance = null
-})
+const { chartRef } = useChart(buildOption, [() => props.result, () => props.chartConfig, () => props.rangeType, () => props.barWidthPercent, () => props.selectedParam])
 </script>
 
 <style scoped>
-.chart-container {
-  width: 100%;
-  height: 100%;
-  min-height: 400px;
-}
+.chart-container { width: 100%; height: 100%; min-height: 400px; }
 </style>

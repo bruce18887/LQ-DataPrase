@@ -139,6 +139,69 @@ test.describe('@p2 SFTP 已保存配置（后端持久化）', { tag: ['@p2', '@
       page.locator('.saved-configs .config-name', { hasText: CFG_NAME }),
     ).toHaveCount(0)
   })
+
+  test('重名保存 → 原位更新而非新增（§1 SFTP 序列化器 kwargs 回归）', async ({ page }) => {
+    const name = `e2e-cfg-dup-${Date.now()}`
+
+    await gotoApp(page, '/sftp')
+    await expect(page.locator('.connect-card')).toBeVisible()
+
+    // Helper: open save dialog, fill name, confirm.
+    const saveWithName = async (host: string) => {
+      await page.getByPlaceholder('例如: 192.168.1.1').fill(host)
+      await fieldByLabel(page, '用户名').fill('tester')
+      await fieldByLabel(page, '密码').fill('s3cret')
+      const saveBtn = page.getByRole('button', { name: '保存配置' })
+      await expect(saveBtn).toBeEnabled()
+      await saveBtn.click()
+      const dialog = page.locator('.el-dialog').filter({ hasText: '保存配置' })
+      await expect(dialog).toBeVisible()
+      const nameInput = dialog.locator('input').first()
+      await nameInput.fill(name)
+      await Promise.all([
+        page.waitForResponse(
+          (r) => r.url().includes('/sftp/save_config/') && r.request().method() === 'POST',
+          { timeout: 15_000 },
+        ),
+        dialog.getByRole('button', { name: '保存', exact: true }).click(),
+      ])
+      // The save must NOT 500 and must NOT show "保存配置失败" toast.
+      await expect(page.locator('.el-message.error, .el-notification.error').filter({
+        hasText: /保存配置失败/,
+      })).toHaveCount(0)
+    }
+
+    // 1) Initial save → 201 + 1 card.
+    await saveWithName('10.0.0.10')
+    let cards = page
+      .locator('.saved-configs .config-item')
+      .filter({ has: page.locator('.config-name', { hasText: name }) })
+    await expect(cards).toHaveCount(1)
+
+    // 2) Re-save under the SAME name with a different host → 200 (update), still 1 card.
+    await saveWithName('10.0.0.20')
+    cards = page
+      .locator('.saved-configs .config-item')
+      .filter({ has: page.locator('.config-name', { hasText: name }) })
+    await expect(cards).toHaveCount(1)
+    // And the host on the card should reflect the latest save (10.0.0.20).
+    await expect(cards.first()).toContainText('10.0.0.20')
+
+    // 3) Cleanup: delete the test config so parallel runs stay clean.
+    await cards.first().getByRole('button', { name: '删除配置' }).click()
+    const confirm = page.locator('.el-message-box')
+    await expect(confirm).toBeVisible()
+    await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes('/sftp/delete_config/') && r.request().method() === 'POST',
+        { timeout: 15_000 },
+      ),
+      confirm.getByRole('button', { name: '删除', exact: true }).click(),
+    ])
+    await expect(
+      page.locator('.saved-configs .config-name', { hasText: name }),
+    ).toHaveCount(0)
+  })
 })
 
 test.describe('@p1 SFTP 真实连接（env-gated）', { tag: ['@p1', '@sftp'] }, () => {

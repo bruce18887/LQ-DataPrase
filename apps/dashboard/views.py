@@ -16,6 +16,8 @@ from apps.analysis.services.statistics import (
     get_columns_with_limits,
     compute_site_yield_data,
     get_bin_column_name,
+    compute_pass_yield,
+    is_pass_bin,
 )
 from apps.datafiles.services import get_cached_parsed_file
 
@@ -201,22 +203,18 @@ class DashboardSummaryView(APIView):
             bin_stats = calculate_fail_bin_statistics(df, metadata)
             site_col = get_site_column(df)
 
-            total_pass = 0
+            yield_result = compute_pass_yield(bin_stats, total_rows)
+            total_pass = yield_result['pass_count']
+            fail_count = yield_result['fail_count']
+            yield_pct = yield_result['yield_pct']
+
             bin_pie_data = []
             for bv, s in bin_stats.items():
-                try:
-                    if int(float(bv)) == 1:
-                        total_pass = s['count']
-                except (ValueError, TypeError):
-                    pass
                 try:
                     label = f"Bin {int(float(bv))}" if bv is not None else "Bin 0"
                 except Exception:
                     label = f"Bin {bv}"
                 bin_pie_data.append({'name': label, 'value': s['count']})
-
-            fail_count = total_rows - total_pass
-            yield_pct = round((total_pass / total_rows * 100), 2) if total_rows > 0 else 0
 
             site_yield_data = []
             if site_col:

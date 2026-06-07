@@ -4,11 +4,31 @@ import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-SECRET_KEY = 'django-insecure-b&@*da(*2$=ac%q!!96zhi%=64@$j7u#$vu0qfv34@%no50=)q'
 
-DEBUG = True
+# ---------------------------------------------------------------------------
+# Security-critical settings
+# ---------------------------------------------------------------------------
+# ``SECRET_KEY`` and ``SFTP_CONFIG_KEY`` are read from the environment so the
+# same code can run in development, CI, and production without leaking
+# real keys into the repo. In production (DEBUG=False) both MUST be set —
+# the dev fallback below is intentionally insecure (django-insecure prefix)
+# to make accidental deployment loud and obvious.
+_SECRET_KEY_DEFAULT = 'django-insecure-b&@*da(*2$=ac%q!!96zhi%=64@$j7u#$vu0qfv34@%no50=)q'
+SECRET_KEY = os.environ.get('SECRET_KEY') or _SECRET_KEY_DEFAULT
 
-ALLOWED_HOSTS = ['*']
+DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('1', 'true', 'yes', 'on')
+
+ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', '*').split(',')
+
+# In production, refuse to start with the default secret key — it is signed
+# ``django-insecure-`` and is publicly known. CI/dev set ``DJANGO_DEBUG=True``
+# so the fallback is fine for those.
+if not DEBUG and (SECRET_KEY == _SECRET_KEY_DEFAULT or 'django-insecure' in SECRET_KEY):
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured(
+        'SECRET_KEY must be set to a real value in production '
+        '(DJANGO_DEBUG=False). Generate one with `python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"`.'
+    )
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -19,6 +39,10 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework_simplejwt',
+    # Required for BLACKLIST_AFTER_ROTATION=True (token rotation in
+    # /auth/refresh/). Without it the blacklist() call is silently
+    # swallowed and old refresh tokens keep working forever.
+    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'django_filters',
     'drf_spectacular',
@@ -157,7 +181,46 @@ SESSION_SAVE_EVERY_REQUEST = True
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Optional Fernet key for encrypting saved SFTP config passwords. When unset,
-# apps.sftp.crypto derives a key from SECRET_KEY. Set this in the environment
-# to rotate the SFTP encryption key independently of SECRET_KEY.
+# ---------------------------------------------------------------------------
+# SFTP session encryption & transient connection cache
+# ---------------------------------------------------------------------------
+# ``SFTP_CONFIG_KEY`` is the Fernet key that protects saved SftpConfig
+# passwords and SFTP session passwords at rest. It is a separate secret
+# from ``SECRET_KEY`` so it can be rotated without invalidating sessions
+# (and vice versa). Generate one with:
+#     python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# Leave unset in development; the ``apps.sftp.crypto`` helper falls back to
+# a PBKDF2 derivation from SECRET_KEY in that case. In production (DEBUG=False)
+# a real SFTP_CONFIG_KEY is REQUIRED — the PBKDF2 derivation from SECRET_KEY
+# is acceptable but loses key-rotation independence, so we warn.
 SFTP_CONFIG_KEY = os.environ.get('SFTP_CONFIG_KEY') or None
+
+if not DEBUG and not SFTP_CONFIG_KEY:
+    # Fall back to PBKDF2(SECRET_KEY) is technically allowed in production,
+    # but operators should explicitly opt in via this env var to make the
+    # intent clear and to enable independent key rotation. We do not hard-
+    # fail here — the crypto helper handles both cases — but we surface the
+    # warning so it shows up in deployment logs.
+    import warnings
+    warnings.warn(
+        'SFTP_CONFIG_KEY is not set in production. The SFTP password '
+        'encryption key will be derived from SECRET_KEY via PBKDF2. '
+        'Set SFTP_CONFIG_KEY to a real Fernet key for independent rotation.',
+        RuntimeWarning,
+        stacklevel=2,
+    )
+
+# TTL (in seconds) for the shared-Redis SFTP session cache. The session
+# password is encrypted at rest (Fernet) and only readable with the
+# SFTP_CONFIG_KEY (or derived from SECRET_KEY in dev).
+SFTP_SESSION_TTL = int(os.environ.get('SFTP_SESSION_TTL', '3600'))
+
+# Optional explicit Redis URL for the SFTP session cache. When unset, the
+# SFTP session cache resolves REDIS_URL, then CELERY_BROKER_URL.
+SFTP_SESSION_REDIS_URL = os.environ.get('SFTP_SESSION_REDIS_URL') or None
+
+# Project-wide Redis URL (used by Celery, the SFTP session cache, and
+# any other shared-Redis consumers). Setting it here keeps Celery and the
+# SFTP cache pointing at the same backend by default, but each consumer
+# can be redirected independently via its own override.
+REDIS_URL = os.environ.get('REDIS_URL') or CELERY_BROKER_URL

@@ -3,12 +3,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import * as echarts from 'echarts'
-import { getChartInitOpts } from '../../../utils/echarts-theme'
-import { useThemeStore } from '../../../stores/theme'
-const _tc = () => getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
-const themeStore = useThemeStore()
+import { useChart } from '../../../composables/useChart'
+import { useEChartsTheme } from '../../../utils/echarts-theme'
 
 interface ParetoData {
   categories: string[]
@@ -21,42 +17,24 @@ const props = defineProps<{
   title?: string
 }>()
 
-const chartRef = ref<HTMLElement>()
-let chartInstance: echarts.ECharts | null = null
+const { colors } = useEChartsTheme()
 
-function initChart() {
-  if (!chartRef.value) return
-  if (!chartInstance) {
-    chartInstance = echarts.init(chartRef.value, undefined, getChartInitOpts())
+function buildOption() {
+  const tc = colors.value.textColor
+  const d = props.data
+  if (!d || !d.categories || d.categories.length === 0) {
+    return {}
   }
-}
 
-function renderChart() {
-  if (!chartInstance || !props.data) return
-
-  chartInstance.clear()
-
-  const { categories, values, cumulative } = props.data
-
-  if (!categories || categories.length === 0) return
-
-  const option: echarts.EChartsOption = {
+  return {
     title: {
       text: props.title || 'Pareto Chart',
       left: 'center',
-      textStyle: {
-        fontSize: 16,
-        fontWeight: 'bold'
-      }
+      textStyle: { fontSize: 16, fontWeight: 'bold' },
     },
     tooltip: {
       trigger: 'axis',
-      axisPointer: {
-        type: 'cross',
-        crossStyle: {
-          color: _tc()
-        }
-      },
+      axisPointer: { type: 'cross', crossStyle: { color: tc } },
       formatter: (params: any) => {
         if (!Array.isArray(params)) return ''
         let result = `<strong>${params[0].axisValue}</strong><br/>`
@@ -68,133 +46,69 @@ function renderChart() {
           }
         })
         return result
-      }
+      },
     },
     legend: {
       data: ['Count', 'Cumulative %'],
       top: 30,
-      textStyle: { color: _tc() }
+      textStyle: { color: tc },
     },
-    grid: {
-      left: '3%',
-      right: '5%',
-      bottom: '15%',
-      containLabel: true
-    },
+    grid: { left: '3%', right: '5%', bottom: '15%', containLabel: true },
     xAxis: [
       {
         type: 'category',
-        data: categories,
-        axisPointer: {
-          type: 'shadow'
-        },
-        axisLabel: {
-          rotate: 45,
-          interval: 0,
-          fontSize: 10,
-          color: _tc()
-        }
-      }
+        data: d.categories,
+        axisPointer: { type: 'shadow' },
+        axisLabel: { rotate: 45, interval: 0, fontSize: 10, color: tc },
+      },
     ],
     yAxis: [
       {
         type: 'value',
         name: 'Count',
-        nameTextStyle: { color: _tc() },
+        nameTextStyle: { color: tc },
         position: 'left',
-        axisLabel: {
-          formatter: '{value}',
-          color: _tc()
-        }
+        axisLabel: { formatter: '{value}', color: tc },
       },
       {
         type: 'value',
         name: 'Cumulative %',
-        nameTextStyle: { color: _tc() },
+        nameTextStyle: { color: tc },
         position: 'right',
         min: 0,
         max: 100,
-        axisLabel: {
-          formatter: '{value}%',
-          color: _tc()
-        }
-      }
+        axisLabel: { formatter: '{value}%', color: tc },
+      },
     ],
     series: [
       {
         name: 'Count',
         type: 'bar',
-        data: values,
-        itemStyle: {
-          color: '#5470C6'
-        },
-        barWidth: '60%'
+        data: d.values,
+        itemStyle: { color: '#5470C6' },
+        barWidth: '60%',
       },
       {
         name: 'Cumulative %',
         type: 'line',
         yAxisIndex: 1,
-        data: cumulative,
-        itemStyle: {
-          color: '#EE6666'
-        },
-        lineStyle: {
-          width: 2
-        },
+        data: d.cumulative,
+        itemStyle: { color: '#EE6666' },
+        lineStyle: { width: 2 },
         symbol: 'circle',
         symbolSize: 6,
         markLine: {
           silent: true,
-          lineStyle: {
-            color: '#91CC75',
-            type: 'dashed',
-            width: 2
-          },
-          label: {
-            formatter: '80%',
-            position: 'end'
-          },
-          data: [
-            {
-              yAxis: 80
-            }
-          ]
-        }
-      }
-    ]
+          lineStyle: { color: '#91CC75', type: 'dashed', width: 2 },
+          label: { formatter: '80%', position: 'end' },
+          data: [{ yAxis: 80 }],
+        },
+      },
+    ],
   }
-
-  chartInstance.setOption(option)
 }
 
-function handleResize() {
-  chartInstance?.resize()
-}
-
-onMounted(() => {
-  initChart()
-  renderChart()
-  window.addEventListener('resize', handleResize)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('resize', handleResize)
-  chartInstance?.dispose()
-  chartInstance = null
-})
-
-watch(() => props.data, () => {
-  renderChart()
-}, { deep: true })
-
-watch(() => props.title, () => {
-  renderChart()
-})
-
-watch(() => themeStore.currentTheme, () => {
-  if (!chartRef.value?.isConnected) return
-  nextTick(() => renderChart())
-})
+const { chartRef } = useChart(buildOption, [() => props.data, () => props.title])
 </script>
 
 <style scoped>

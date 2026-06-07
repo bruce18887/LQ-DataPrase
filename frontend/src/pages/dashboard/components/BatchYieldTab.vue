@@ -18,7 +18,7 @@
 
       <!-- 2. Phase Summary -->
       <el-card v-if="batchData.phase_summary?.length" shadow="never" class="section-card">
-        <template #header>📋 阶段总览</template>
+        <template #header>📋 阶段汇总（明细）</template>
         <el-table :data="batchData.phase_summary" stripe size="small" :border="true">
           <el-table-column prop="phase" label="阶段" width="90" fixed />
           <el-table-column prop="file_count" label="文件数" width="70" align="center" />
@@ -41,12 +41,9 @@
         </el-table>
       </el-card>
 
-      <!-- 2b. Single-file analysis chart set (reused components) -->
-      <BatchAnalysisCharts ref="analysisChartsRef" :batch-data="batchData" />
-
       <!-- 3. Phase Detail Table -->
       <el-card shadow="never" class="section-card">
-        <template #header>📊 阶段总览</template>
+        <template #header>📊 阶段明细表</template>
         <el-table :data="batchData.phases" stripe size="small" :border="true" max-height="350">
           <el-table-column prop="phase" label="阶段" width="80" fixed />
           <el-table-column label="WAFER_ID" width="100" align="center">
@@ -124,9 +121,13 @@
         </el-table>
       </el-card>
 
-      <!-- 7. Bin Distribution (per-phase, left table + right charts) -->
+      <!-- 7. Bin Distribution + Site Yield + Bin×Site + UPH — 4 sub-sections
+           consolidated under a single "📋 Bin 分布" card. Each sub-section is
+           visually separated by an el-divider with a small heading. -->
       <el-card shadow="never" class="section-card">
         <template #header>📋 Bin 分布</template>
+
+        <!-- 7.1 Bin 分布（per-phase 表格 + Bin 饼图 + Top Fail Bin 柱图） -->
         <div class="bin-selector">
           <el-select v-model="selectedPhase" placeholder="选择阶段查看Bin分布" @change="onPhaseChange" style="width: 220px">
             <el-option v-for="p in batchData.phases" :key="phaseKey(p)" :label="phaseLabel(p)" :value="phaseKey(p)" />
@@ -162,6 +163,32 @@
             <div ref="binBarRef" class="chart-container chart-sm" />
           </el-col>
         </el-row>
+
+        <!-- 7.2 Site 良率分布 & Yield 分析 -->
+        <el-divider class="bin-card-divider">
+          <span class="bin-card-section-title">🟢 Site 良率分布 &amp; Yield 分析</span>
+        </el-divider>
+        <SiteYieldAnalysis
+          ref="siteYieldRef"
+          :site-yield-data="siteYieldData"
+          :overall-yield="overallYield"
+        />
+
+        <!-- 7.3 Bin × Site 交叉表 & 柱状图 -->
+        <el-divider class="bin-card-divider">
+          <span class="bin-card-section-title">📊 Bin &times; Site 交叉表 &amp; 柱状图</span>
+        </el-divider>
+        <BinSiteCrossTable
+          ref="binSiteRef"
+          :bin-table-data="binTableData"
+          :bin-site-columns="binSiteColumns"
+        />
+
+        <!-- 7.4 UPH 效率分析 -->
+        <el-divider class="bin-card-divider">
+          <span class="bin-card-section-title">⚡ UPH 效率分析</span>
+        </el-divider>
+        <UphCard :uph-data="uphData" />
       </el-card>
     </template>
 
@@ -178,7 +205,9 @@ import { batchApi } from '../../../api/batch'
 import BatchSelectorBar from './batch/BatchSelectorBar.vue'
 import KpiCards from './batch/KpiCards.vue'
 import YieldTrendChart from './batch/YieldTrendChart.vue'
-import BatchAnalysisCharts from './batch/BatchAnalysisCharts.vue'
+import SiteYieldAnalysis from './SiteYieldAnalysis.vue'
+import BinSiteCrossTable from './BinSiteCrossTable.vue'
+import UphCard from './UphCard.vue'
 
 const batches = ref<any[]>([])
 const selectedBatch = ref('')
@@ -189,7 +218,27 @@ const selectedPhase = ref('')
 
 // Ref to child chart components
 const yieldTrendChartRef = ref<InstanceType<typeof YieldTrendChart>>()
-const analysisChartsRef = ref<InstanceType<typeof BatchAnalysisCharts>>()
+const siteYieldRef = ref<InstanceType<typeof SiteYieldAnalysis>>()
+const binSiteRef = ref<InstanceType<typeof BinSiteCrossTable>>()
+
+// Computed props for the Site/Bin×Site/UPH sub-sections (consolidated under
+// the Bin 分布 card). Pulled from the same batch payload the standalone
+// BatchAnalysisCharts used to read.
+const siteYieldData = computed(() => {
+  const rows = batchData.value?.site_pass_data || []
+  return rows.map((r: any) => ({
+    Site: r.site,
+    Yield: r.yield,
+    Total: r.total,
+    PassCount: r.pass,
+  }))
+})
+
+const overallYield = computed(() => Number(batchData.value?.kpi?.overall_yield) || 0)
+
+const binTableData = computed(() => batchData.value?.bin_table_data || [])
+const binSiteColumns = computed(() => batchData.value?.bin_site_columns || [])
+const uphData = computed(() => batchData.value?.uph || null)
 
 // Chart refs for phase-scoped Bin analysis (remain inline)
 const binPieRef = ref<HTMLElement>()
@@ -351,7 +400,8 @@ async function exportExcel() {
 
 function handleResize() {
   yieldTrendChartRef.value?.handleResize()
-  analysisChartsRef.value?.handleResize()
+  siteYieldRef.value?.handleResize()
+  binSiteRef.value?.handleResize()
   if (binPieChart && !binPieChart.isDisposed()) binPieChart.resize()
   if (binBarChart && !binBarChart.isDisposed()) binBarChart.resize()
 }
@@ -406,6 +456,17 @@ defineExpose({ handleResize })
 .bin-hint {
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.bin-card-divider {
+  margin: 24px 0 16px;
+}
+
+.bin-card-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.3px;
 }
 
 .yield-good { color: var(--color-success); font-weight: 600; }

@@ -5,19 +5,16 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.core.cache import cache
 from django.http import StreamingHttpResponse
 from apps.datafiles.views import _register_file
 
 logger = logging.getLogger(__name__)
 
-from apps.datafiles.models import DataFile, ParseHistory
-from apps.datafiles.parsers import get_parser, BaseATEParser
 from apps.datafiles.views import _user_upload_dir
+from .cache import get_session, set_session, delete_session, SftpSessionCacheError
 from .config_views import SftpConfigMixin
 from .models import SftpConfig
 
-SFTP_CACHE_PREFIX = 'sftp_conn_'
 CSV_EXTENSIONS = {'.csv'}
 
 
@@ -35,11 +32,11 @@ SORT_KEYS = {
 class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
 
-    def _get_conn_key(self, request):
-        return f"{SFTP_CACHE_PREFIX}{request.user.id}"
-
     def _get_connection(self, request):
-        data = cache.get(self._get_conn_key(request))
+        try:
+            data = get_session(request.user.id)
+        except SftpSessionCacheError:
+            return None, None
         if not data:
             return None, None
         try:
@@ -85,16 +82,25 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
             transport = paramiko.Transport((host, port))
             transport.connect(username=username, password=password)
             transport.close()
-            cache.set(self._get_conn_key(request), {
-                'host': host, 'port': port, 'username': username, 'password': password,
-            }, timeout=3600)
-            return Response({'status': 'connected', 'host': host})
         except Exception as e:
             return Response({'status': 'error', 'message': str(e)}, status=400)
 
+        # Persist the session (password encrypted at rest) in Redis or
+        # Django's default cache as fallback.  If *both* fail, report an
+        # error so the user knows subsequent requests won't work.
+        try:
+            set_session(request.user.id, host, port, username, password)
+        except SftpSessionCacheError as e:
+            logger.error('Connect succeeded but session cache write failed: %s', e)
+            return Response(
+                {'status': 'error', 'message': '连接成功但会话缓存写入失败，请检查服务配置'},
+                status=500,
+            )
+        return Response({'status': 'connected', 'host': host})
+
     @action(detail=False, methods=['post'])
     def disconnect(self, request):
-        cache.delete(self._get_conn_key(request))
+        delete_session(request.user.id)
         return Response({'status': 'disconnected'})
 
     # ------------------------------------------------------------------
@@ -154,7 +160,7 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
 
         try:
             filename = os.path.basename(remote_path)
-            upload_dir = _user_upload_dir(request.user.id, 'single')
+            upload_dir = _user_upload_dir(request.user, 'single')
             file_path = os.path.join(upload_dir, filename)
             if os.path.exists(file_path):
                 ts = int(time.time())
@@ -201,7 +207,7 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
             return Response({'error': '目录为空'}, status=400)
 
         dir_name = os.path.basename(remote_path.rstrip('/')) or 'download'
-        upload_dir = _user_upload_dir(request.user.id, 'batch')
+        upload_dir = _user_upload_dir(request.user, 'batch')
         local_dir = os.path.join(upload_dir, dir_name)
         os.makedirs(local_dir, exist_ok=True)
 
@@ -266,7 +272,7 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
             return Response({'error': 'not_connected'}, status=400)
 
         try:
-            upload_dir = _user_upload_dir(request.user.id, 'single')
+            upload_dir = _user_upload_dir(request.user, 'single')
             saved = []
             for remote_path in paths:
                 try:
@@ -328,7 +334,7 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
 
         try:
             filename = os.path.basename(remote_path)
-            upload_dir = _user_upload_dir(request.user.id, 'batch')
+            upload_dir = _user_upload_dir(request.user, 'batch')
 
             # Handle collision
             file_path = os.path.join(upload_dir, filename)
@@ -338,51 +344,10 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
                 file_path = os.path.join(upload_dir, f"{name}_{ts}{ext}")
 
             sftp.get(remote_path, file_path)
-            file_size = os.path.getsize(file_path)
-
-            # Detect format
-            format_type = 'Unknown'
-            row_count, col_count = 0, 0
-            program_name = ''
-            try:
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    head = f.read(4096)
-                format_type = BaseATEParser.identify_format(head)
-                if format_type != 'Unknown':
-                    parser = get_parser(format_type)
-                    df, metadata = parser.parse(file_path)
-                    if df is not None:
-                        row_count = df.shape[0]
-                        col_count = df.shape[1]
-                        program_name = metadata.get('program_name', '')
-            except:
-                pass
-
-            datafile = DataFile.objects.create(
-                owner=request.user,
-                filename=os.path.basename(file_path),
-                file_path=file_path,
-                file_size=file_size,
-                format_type=format_type if format_type != 'Unknown' else 'CTA8290D',
-                file_type='single',
-                row_count=row_count,
-                col_count=col_count,
-                program_name=program_name,
-                status='ready' if format_type != 'Unknown' else 'error',
-            )
-
-            ParseHistory.objects.create(
-                user=request.user,
-                datafile=datafile,
-                filename=datafile.filename,
-                filepath=file_path,
-                format_type=datafile.format_type,
-                rows=row_count,
-                cols=col_count,
-            )
-
             sftp.close()
             transport.close()
+
+            datafile = _register_file(request.user, file_path, 'single')
             return Response({
                 'status': 'ok',
                 'files': [{'id': datafile.id, 'filename': datafile.filename}],
@@ -405,7 +370,7 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
             first_parent = os.path.basename(os.path.dirname(paths[0]))
             batch_name = first_parent or f"batch_{int(time.time())}"
 
-            upload_dir = _user_upload_dir(request.user.id, 'batch')
+            upload_dir = _user_upload_dir(request.user, 'batch')
             batch_dir = os.path.join(upload_dir, batch_name)
             os.makedirs(batch_dir, exist_ok=True)
 
@@ -416,51 +381,9 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
                     file_path = os.path.join(batch_dir, filename)
 
                     sftp.get(remote_path, file_path)
-                    file_size = os.path.getsize(file_path)
 
-                    # Detect format
-                    format_type = 'Unknown'
-                    row_count, col_count = 0, 0
-                    program_name = ''
-                    try:
-                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                            head = f.read(4096)
-                        format_type = BaseATEParser.identify_format(head)
-                        if format_type != 'Unknown':
-                            parser = get_parser(format_type)
-                            df, metadata = parser.parse(file_path)
-                            if df is not None:
-                                row_count = df.shape[0]
-                                col_count = df.shape[1]
-                                program_name = metadata.get('program_name', '')
-                    except:
-                        pass
-
-                    datafile = DataFile.objects.create(
-                        owner=request.user,
-                        filename=filename,
-                        file_path=file_path,
-                        file_size=file_size,
-                        format_type=format_type if format_type != 'Unknown' else 'CTA8290D',
-                        file_type='batch',
-                        batch_name=batch_name,
-                        row_count=row_count,
-                        col_count=col_count,
-                        program_name=program_name,
-                        status='ready' if format_type != 'Unknown' else 'error',
-                    )
-
-                    ParseHistory.objects.create(
-                        user=request.user,
-                        datafile=datafile,
-                        filename=filename,
-                        filepath=file_path,
-                        format_type=datafile.format_type,
-                        rows=row_count,
-                        cols=col_count,
-                    )
-
-                    created.append({'id': datafile.id, 'filename': filename})
+                    datafile = _register_file(request.user, file_path, 'batch', batch_name)
+                    created.append({'id': datafile.id, 'filename': datafile.filename})
                 except:
                     continue
 

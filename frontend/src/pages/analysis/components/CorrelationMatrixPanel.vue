@@ -13,40 +13,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import * as echarts from 'echarts'
-import { getChartInitOpts } from '../../../utils/echarts-theme'
-import { useThemeStore } from '../../../stores/theme'
-const _tc = () => getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
-const themeStore = useThemeStore()
+import { useChart } from '../../../composables/useChart'
+import { useEChartsTheme } from '../../../utils/echarts-theme'
 
-const props = defineProps<{
-  loading: boolean
-  matrixData: any
-}>()
+const props = defineProps<{ loading: boolean; matrixData: any }>()
+const emit = defineEmits<{ calculate: [] }>()
+const { colors } = useEChartsTheme()
 
-const emit = defineEmits<{
-  calculate: []
-}>()
+function onCalculate() { emit('calculate') }
 
-const chartRef = ref<HTMLElement>()
-let chartInstance: echarts.ECharts | null = null
-
-function onCalculate() {
-  emit('calculate')
-}
-
-function initChart() {
-  if (!chartRef.value) return
-  if (!chartInstance) {
-    chartInstance = echarts.init(chartRef.value, undefined, getChartInitOpts())
-  }
-}
-
-function renderChart() {
-  if (!chartInstance || !props.matrixData) return
-  chartInstance.clear()
-
+function buildOption() {
+  if (!props.matrixData) return {}
+  const tc = colors.value.textColor
   const data = props.matrixData
   const params: string[] = data.params || []
   const matrix: number[][] = data.matrix || []
@@ -58,72 +36,25 @@ function renderChart() {
     }
   }
 
-  chartInstance.setOption({
+  return {
     tooltip: {
       position: 'top',
-      formatter: (p: any) => {
-        return `${params[p.value[0]]} vs ${params[p.value[1]]}<br/>Pearson r: ${p.value[2].toFixed(4)}`
-      },
+      formatter: (p: any) => `${params[p.value[0]]} vs ${params[p.value[1]]}<br/>Pearson r: ${p.value[2].toFixed(4)}`,
     },
     grid: { left: '15%', right: '10%', top: '10%', bottom: '15%' },
-    xAxis: {
-      type: 'category',
-      data: params,
-      splitArea: { show: true },
-      axisLabel: { rotate: 45, fontSize: 10, color: _tc() },
-    },
-    yAxis: {
-      type: 'category',
-      data: params,
-      splitArea: { show: true },
-      axisLabel: { fontSize: 10, color: _tc() },
-    },
+    xAxis: { type: 'category', data: params, splitArea: { show: true }, axisLabel: { rotate: 45, fontSize: 10, color: tc } },
+    yAxis: { type: 'category', data: params, splitArea: { show: true }, axisLabel: { fontSize: 10, color: tc } },
     visualMap: {
-      min: -1,
-      max: 1,
-      calculable: true,
-      orient: 'horizontal',
-      left: 'center',
-      bottom: '0%',
-      inRange: {
-        color: ['#d73027', '#f46d43', '#fdae61', '#fee08b', '#e6f598', '#abdda4', '#66c2a5', '#3288bd'],
-      },
+      min: -1, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: '0%',
+      inRange: { color: ['#d73027', '#f46d43', '#fdae61', '#fee08b', '#e6f598', '#abdda4', '#66c2a5', '#3288bd'] },
     },
     series: [{
-      name: 'Pearson r',
-      type: 'heatmap',
-      data: heatmapData,
+      name: 'Pearson r', type: 'heatmap', data: heatmapData,
       label: { show: true, fontSize: 9, formatter: (p: any) => p.value[2].toFixed(2) },
-      emphasis: {
-        itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0, 0, 0, 0.5)' },
-      },
+      emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0, 0, 0, 0.5)' } },
     }],
-  })
+  }
 }
 
-function resize() {
-  chartInstance?.resize()
-}
-
-watch(() => props.matrixData, () => {
-  nextTick(() => {
-    initChart()
-    renderChart()
-  })
-})
-
-watch(() => themeStore.currentTheme, () => {
-  if (!chartRef.value?.isConnected) return
-  nextTick(() => renderChart())
-})
-
-onMounted(() => {
-  window.addEventListener('resize', resize)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('resize', resize)
-  chartInstance?.dispose()
-  chartInstance = null
-})
+const { chartRef } = useChart(buildOption, [() => props.matrixData])
 </script>
