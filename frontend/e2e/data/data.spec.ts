@@ -665,3 +665,98 @@ test.describe('数据管理 /data 当前文件下拉切换', { tag: ['@p1', '@p2
     await expect(fileSelect.locator('.el-select__placeholder')).toContainText(optionText, { timeout: 10_000 })
   })
 })
+
+/**
+ * 课题：100+ 文件的批次在「已导入批次」区域一次性渲染会撑高页面 + 视觉杂乱。
+ * 改为默认折叠，点击 header 或"全部展开"后才显示文件。
+ */
+test.describe('数据管理 /data 已导入批次展开/折叠', { tag: ['@p1', '@p2', '@data'] }, () => {
+  /** 当前环境的已注册批次列表（无则各用例 skip） */
+  async function getRegisteredBatches(page: import('@playwright/test').Page) {
+    // 用 page.request 走 storageState 自动带 token；先 goto 让 baseURL 生效。
+    await page.goto('/', { waitUntil: 'domcontentloaded' })
+    const res = await page.request.get('/api/v1/batch-dirs/')
+    const data = (await res.json()) as Array<{ name: string; registered: boolean; file_count: number }>
+    return (Array.isArray(data) ? data : []).filter((d) => d.registered)
+  }
+
+  test('@p1 默认折叠：进入页面后所有已导入批次不展示文件 tag', async ({ page }) => {
+    const registered = await getRegisteredBatches(page)
+    test.skip(registered.length === 0, '当前环境无已注册批次，跳过默认折叠断言')
+
+    await gotoApp(page, '/data')
+
+    await expect(page.locator('[data-testid^="batch-group-"]').first()).toBeVisible({ timeout: 15_000 })
+
+    for (const b of registered) {
+      await expect(page.locator(`[data-testid="batch-files-${b.name}"]`)).toBeHidden({ timeout: 5_000 })
+    }
+
+    const toggleAll = page.locator('[data-testid="batch-toggle-all"]')
+    await expect(toggleAll).toBeVisible()
+    await expect(toggleAll).toContainText('全部展开')
+  })
+
+  test('@p1 点击 header 展开：单个批次文件 tag 出现，header aria-expanded 切换', async ({ page }) => {
+    const registered = await getRegisteredBatches(page)
+    test.skip(registered.length === 0, '当前环境无已注册批次，跳过点击展开断言')
+
+    await gotoApp(page, '/data')
+
+    const first = registered[0]
+    const header = page.locator(`[data-testid="batch-header-${first.name}"]`)
+    const filesArea = page.locator(`[data-testid="batch-files-${first.name}"]`)
+
+    await expect(header).toBeVisible({ timeout: 15_000 })
+    await expect(filesArea).toBeHidden()
+
+    await header.click()
+    await expect(filesArea).toBeVisible({ timeout: 5_000 })
+    await expect(header).toHaveAttribute('aria-expanded', 'true')
+
+    await header.click()
+    await expect(filesArea).toBeHidden({ timeout: 5_000 })
+    await expect(header).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  test('@p2 全部展开/折叠：toggle-all 按钮一次切换所有批次', async ({ page }) => {
+    const registered = await getRegisteredBatches(page)
+    test.skip(registered.length === 0, '当前环境无已注册批次，跳过 toggle-all 断言')
+
+    await gotoApp(page, '/data')
+
+    const toggleAll = page.locator('[data-testid="batch-toggle-all"]')
+    await expect(toggleAll).toBeVisible({ timeout: 15_000 })
+    await expect(toggleAll).toContainText('全部展开')
+
+    await toggleAll.click()
+    for (const b of registered) {
+      await expect(page.locator(`[data-testid="batch-files-${b.name}"]`)).toBeVisible({ timeout: 5_000 })
+    }
+    await expect(toggleAll).toContainText('全部折叠')
+
+    await toggleAll.click()
+    for (const b of registered) {
+      await expect(page.locator(`[data-testid="batch-files-${b.name}"]`)).toBeHidden({ timeout: 5_000 })
+    }
+    await expect(toggleAll).toContainText('全部展开')
+  })
+
+  test('@p2 键盘可达性：header 用 Enter / Space 也能切换展开', async ({ page }) => {
+    const registered = await getRegisteredBatches(page)
+    test.skip(registered.length === 0, '当前环境无已注册批次，跳过键盘可达性断言')
+
+    await gotoApp(page, '/data')
+
+    const first = registered[0]
+    const header = page.locator(`[data-testid="batch-header-${first.name}"]`)
+    const filesArea = page.locator(`[data-testid="batch-files-${first.name}"]`)
+
+    await expect(header).toBeVisible({ timeout: 15_000 })
+    await header.focus()
+    await page.keyboard.press('Enter')
+    await expect(filesArea).toBeVisible({ timeout: 5_000 })
+    await page.keyboard.press('Space')
+    await expect(filesArea).toBeHidden({ timeout: 5_000 })
+  })
+})

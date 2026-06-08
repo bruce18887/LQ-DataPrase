@@ -62,7 +62,7 @@ class DataFileSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'owner', 'filename', 'file_path', 'file_size',
             'format_type', 'format_type_display', 'file_type', 'file_type_display',
-            'batch_name', 'row_count', 'col_count',
+            'batch_name', 'sub_batch', 'row_count', 'col_count',
             'program_name', 'product_code', 'source_mtime',
             'metadata', 'tags',
             'status', 'status_display',
@@ -91,7 +91,7 @@ class DataFileListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'owner', 'filename', 'file_size', 'format_type',
             'format_type_display', 'file_type', 'file_type_display',
-            'batch_name', 'row_count', 'col_count', 'program_name',
+            'batch_name', 'sub_batch', 'row_count', 'col_count', 'program_name',
             'product_code', 'source_mtime',
             'tags',
             'status', 'status_display', 'created_at', 'updated_at',

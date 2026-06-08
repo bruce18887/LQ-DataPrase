@@ -97,4 +97,17 @@ export const datafilesApi = {
   listTags(prefix = '') {
     return api.post<{ tags: string[] }>('/files/list_tags/', { prefix })
   },
+
+  // Data consistency check
+  checkConsistency() {
+    return api.get<{
+      orphaned_db_count: number
+      orphaned_disk_count: number
+      orphaned_db: Array<{ id: number; filename: string; batch_name: string; file_path: string }>
+      orphaned_disk: string[]
+    }>('/consistency-check/')
+  },
+  fixConsistency(action: 'delete_orphaned_db' | 'delete_orphaned_disk') {
+    return api.post<{ status: string; action: string; deleted_count: number }>('/consistency-check/', { action })
+  },
 }

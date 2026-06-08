@@ -8,6 +8,7 @@ import zipfile
 
 import numpy as np
 import pandas as pd
+from django.db import transaction
 from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -105,12 +106,13 @@ def _extract_archive(file_path, dest_dir):
     return extracted
 
 
-def _register_file(user, file_path, file_type='single', batch_name='', source_mtime=None):
+def _register_file(user, file_path, file_type='single', batch_name='', sub_batch='', source_mtime=None):
     """Parse a file and create DataFile + ParseHistory records.
 
     source_mtime: optional aware datetime of the original source file's
     modification time. When None for archive-extracted/disk files, the
     on-disk mtime is used; for direct uploads it stays None unless provided.
+    sub_batch: optional sub-batch name (subdirectory name within the batch).
     """
     filename = os.path.basename(file_path)
     file_size = os.path.getsize(file_path)
@@ -141,6 +143,7 @@ def _register_file(user, file_path, file_type='single', batch_name='', source_mt
         format_type=format_type if format_type != 'Unknown' else 'CTA8290D',
         file_type=file_type,
         batch_name=batch_name,
+        sub_batch=sub_batch,
         row_count=row_count,
         col_count=col_count,
         program_name=program_name,
@@ -456,7 +459,7 @@ class BatchDirListView(APIView):
         # dropped older batches once newer files filled page 1).
         batch_file_rows = {}
         for df in DataFile.objects.filter(owner=request.user, file_type='batch').values(
-            'id', 'filename', 'tags', 'batch_name', 'file_path',
+            'id', 'filename', 'tags', 'batch_name', 'sub_batch', 'file_path',
             'format_type', 'row_count', 'col_count', 'program_name',
             'status', 'created_at',
         ):
@@ -473,6 +476,7 @@ class BatchDirListView(APIView):
                 'program_name': df['program_name'],
                 'file_type': 'batch',
                 'batch_name': df['batch_name'],
+                'sub_batch': df['sub_batch'] or '',
                 'status': df['status'],
                 'created_at': df['created_at'].isoformat() if df['created_at'] else '',
             })
@@ -500,16 +504,16 @@ class BatchDirListView(APIView):
             # Skip directories with no CSV files
             if file_count == 0:
                 continue
-            # Check registration: fully registered, partial, or none
+            # Check registration: fully registered when all disk files are in DB
             batch_registered_paths = registered_files.get(dir_name, set())
-            is_registered = dir_name in registered
             unregistered_count = len(disk_paths - batch_registered_paths)
+            is_fully_registered = dir_name in registered and unregistered_count == 0
             result.append({
                 'name': dir_name,
                 'path': entry.path,
                 'file_count': file_count,
                 'total_size': total_size,
-                'registered': is_registered and unregistered_count == 0,
+                'registered': is_fully_registered,
                 'files': batch_file_rows.get(dir_name, []),
             })
 
@@ -543,18 +547,22 @@ class BatchDirImportView(APIView):
         )
 
         created = []
-        for root, _dirs, files in os.walk(dir_path):
-            for f in files:
-                if not _is_data_csv(f):
-                    continue
-                fp = os.path.join(root, f)
-                if os.path.normpath(fp) in existing_paths:
-                    continue  # already registered
-                try:
-                    df = _register_file(request.user, fp, 'batch', dir_name)
-                    created.append(df)
-                except Exception:
-                    continue
+        with transaction.atomic():
+            for root, _dirs, files in os.walk(dir_path):
+                for f in files:
+                    if not _is_data_csv(f):
+                        continue
+                    fp = os.path.join(root, f)
+                    if os.path.normpath(fp) in existing_paths:
+                        continue  # already registered
+                    # 提取子批次名（相对路径的第一级目录）
+                    rel_path = os.path.relpath(root, dir_path)
+                    sub_batch = rel_path if rel_path != '.' else ''
+                    try:
+                        df = _register_file(request.user, fp, 'batch', dir_name, sub_batch)
+                        created.append(df)
+                    except Exception:
+                        continue
 
         return Response(
             DataFileSerializer(created, many=True).data,
@@ -572,12 +580,14 @@ class BatchDirDeleteView(APIView):
         if not os.path.isdir(dir_path):
             return Response({'error': f'目录 "{dir_name}" 不存在'}, status=404)
 
-        # Delete DataFile records for this batch
-        deleted_count, _ = DataFile.objects.filter(
-            owner=request.user, file_type='batch', batch_name=dir_name
-        ).delete()
+        # Use transaction to ensure consistency
+        with transaction.atomic():
+            # Delete DataFile records for this batch
+            deleted_count, _ = DataFile.objects.filter(
+                owner=request.user, file_type='batch', batch_name=dir_name
+            ).delete()
 
-        # Delete directory from disk
+        # Delete directory from disk (outside transaction to avoid long locks)
         shutil.rmtree(dir_path, ignore_errors=True)
         clear_parse_cache()
 
@@ -690,3 +700,123 @@ class DataBrowserView(APIView):
             'col_meta': col_meta,
             'bin_column': bin_column,
         })
+
+
+class DataConsistencyCheckView(APIView):
+    """Check and fix data consistency between database and disk."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Check consistency: find orphaned DB records and orphaned disk files."""
+        user = request.user
+        batch_base = _user_upload_dir(user, 'batch')
+
+        # Get all batch files from database
+        db_files = DataFile.objects.filter(
+            owner=user, file_type='batch'
+        ).values_list('id', 'file_path', 'filename', 'batch_name')
+
+        orphaned_db = []  # DB records with missing disk files
+        for f_id, f_path, f_name, f_batch in db_files:
+            if not os.path.exists(f_path):
+                orphaned_db.append({
+                    'id': f_id,
+                    'filename': f_name,
+                    'batch_name': f_batch,
+                    'file_path': f_path,
+                })
+
+        # Get all disk files
+        disk_files = set()
+        if os.path.isdir(batch_base):
+            for root, _dirs, files in os.walk(batch_base):
+                for f in files:
+                    if _is_data_csv(f):
+                        disk_files.add(os.path.normpath(os.path.join(root, f)))
+
+        # Get all registered file paths
+        registered_paths = set(
+            os.path.normpath(p) for p in
+            DataFile.objects.filter(
+                owner=user, file_type='batch'
+            ).values_list('file_path', flat=True)
+        )
+
+        orphaned_disk = disk_files - registered_paths
+
+        return Response({
+            'orphaned_db_count': len(orphaned_db),
+            'orphaned_disk_count': len(orphaned_disk),
+            'orphaned_db': orphaned_db[:50],  # Limit to 50 for display
+            'orphaned_disk': list(orphaned_disk)[:50],
+        })
+
+    def post(self, request):
+        """Fix consistency issues."""
+        action = request.data.get('action')
+        if action not in ('delete_orphaned_db', 'delete_orphaned_disk'):
+            return Response(
+                {'error': 'action must be delete_orphaned_db or delete_orphaned_disk'},
+                status=400,
+            )
+
+        user = request.user
+        batch_base = _user_upload_dir(user, 'batch')
+
+        if action == 'delete_orphaned_db':
+            # Delete DB records with missing disk files
+            db_files = DataFile.objects.filter(
+                owner=user, file_type='batch'
+            ).values_list('id', 'file_path')
+
+            deleted_ids = []
+            for f_id, f_path in db_files:
+                if not os.path.exists(f_path):
+                    deleted_ids.append(f_id)
+
+            deleted_count = DataFile.objects.filter(id__in=deleted_ids).delete()[0]
+            clear_parse_cache()
+
+            return Response({
+                'status': 'ok',
+                'action': action,
+                'deleted_count': deleted_count,
+            })
+
+        elif action == 'delete_orphaned_disk':
+            # Delete disk files not in database
+            registered_paths = set(
+                os.path.normpath(p) for p in
+                DataFile.objects.filter(
+                    owner=user, file_type='batch'
+                ).values_list('file_path', flat=True)
+            )
+
+            deleted_count = 0
+            if os.path.isdir(batch_base):
+                for root, _dirs, files in os.walk(batch_base):
+                    for f in files:
+                        if _is_data_csv(f):
+                            fp = os.path.normpath(os.path.join(root, f))
+                            if fp not in registered_paths:
+                                try:
+                                    os.remove(fp)
+                                    deleted_count += 1
+                                except OSError:
+                                    pass
+
+            # Clean up empty directories
+            for root, dirs, files in os.walk(batch_base, topdown=False):
+                for d in dirs:
+                    dir_path = os.path.join(root, d)
+                    try:
+                        if not os.listdir(dir_path):
+                            os.rmdir(dir_path)
+                    except OSError:
+                        pass
+
+            return Response({
+                'status': 'ok',
+                'action': action,
+                'deleted_count': deleted_count,
+            })
