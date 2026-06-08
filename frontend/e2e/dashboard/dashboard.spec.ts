@@ -67,6 +67,39 @@ test.describe('仪表板', { tag: ['@p0', '@p1', '@p2', '@dashboard'] }, () => {
     await expectChartRendered(page, 0)
   })
 
+  /**
+   * 课题1 回归：单文件分析的 SiteYield / BinDistribution / BinSiteCrossTable 等图表
+   * 从直接 echarts.init 改为 initEchartsWhenReady（零尺寸容器保护）。
+   * 断言：各 role=img 图表容器内 svg/canvas 尺寸 > 0，且控制台无「DOM width or height」0 尺寸警告。
+   */
+  test('@p1 §课题1 单文件分析图表非空渲染且无 0 尺寸警告', async ({ page }) => {
+    const errors = collectConsoleErrors(page)
+    await gotoApp(page, '/dashboard')
+    await waitLoadingGone(page)
+
+    // 关键图表容器（aria-label 来自各组件模板）
+    const labels = [
+      'Bin分布饼图',
+      'Site良率柱状图',
+      '整体Yield仪表盘',
+      'Bin×Site柱状图',
+    ]
+    for (const label of labels) {
+      const img = page.getByRole('img', { name: label })
+      if (await img.count() === 0) continue  // 该文件无对应数据时容器可能不渲染
+      await expect(img.first(), `${label} 容器应可见`).toBeVisible({ timeout: 15_000 })
+      const inner = img.first().locator('svg, canvas').first()
+      await expect(inner, `${label} 应有 svg/canvas`).toBeVisible({ timeout: 15_000 })
+      const box = await inner.boundingBox()
+      expect(box, `${label} 尺寸应非空`).not.toBeNull()
+      expect(box!.width, `${label} 宽度 > 0`).toBeGreaterThan(0)
+      expect(box!.height, `${label} 高度 > 0`).toBeGreaterThan(0)
+    }
+
+    const zeroSize = errors.filter((e) => /DOM width or height|getAxesOnZeroOf/i.test(e))
+    expect(zeroSize, `不应出现 0 尺寸 ECharts 警告:\n${zeroSize.join('\n')}`).toEqual([])
+  })
+
   test('@p1 UPH 卡片显示', async ({ page }) => {
     await gotoApp(page, '/dashboard')
     await waitLoadingGone(page)

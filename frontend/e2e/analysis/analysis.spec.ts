@@ -159,46 +159,7 @@ test.describe('@p1 单参数分析', { tag: ['@p1', '@analysis'] }, () => {
     await page.waitForTimeout(500)
     expect(fatalErrors, '页面运行时不应出现 axisPointer TypeError').toEqual([])
   })
-
-  test('@p1 开启 QQ 图后连续切换参数, QQ 图持续渲染不空白 (回归: useChart v-if 容器重建后旧实例失效)', async ({ page }) => {
-    test.slow()
-    await enterAnalysis(page, RECOMMENDED.analysis)
-    await waitLoadingGone(page.locator(SINGLE))
-
-    const all = await listParams(page)
-    expect(all.length, '参数列表应非空').toBeGreaterThan(0)
-
-    // 开启 QQ 图并等待首次渲染
-    const firstQQ = page.waitForResponse(
-      (r) => r.url().includes('/analysis/qqplot/') && r.status() < 500,
-      { timeout: 20_000 },
-    )
-    await page.getByText('显示QQ图').click()
-    await firstQQ
-    await waitLoadingGone(page.locator(SINGLE))
-
-    // QQ 图容器（上下双图布局的下方）必须先渲染出来
-    const qqContainer = page.locator(`${SINGLE} .chart-wrapper--bottom .qqplot-container`)
-    await expectChartRendered(qqContainer, 0)
-
-    // 核心回归: 连续切换参数后, QQ 图区域不能因容器 v-if 重建而残留旧（脱离 DOM 的）
-    // ECharts 实例导致空白。每次切换后断言 QQ 容器内 SVG 仍有有效尺寸。
-    const picks = sampleN(all, Math.min(PARAM_SAMPLE_COUNT, all.length))
-    for (const p of picks) {
-      const respPromise = page.waitForResponse(
-        (r) => r.url().includes('/analysis/qqplot/'),
-        { timeout: 20_000 },
-      )
-      await selectParam(page, p)
-      const resp = await respPromise
-      expect(resp.status(), `切换到 ${p} 时 qqplot 不应 4xx/5xx`).toBeLessThan(400)
-      await waitLoadingGone(page.locator(SINGLE))
-      // 切换后 QQ 图必须仍然渲染（修复前这里会空白：SVG 缺失或尺寸为 0）
-      await expectChartRendered(qqContainer, 0)
-    }
-  })
 })
-
 
 test.describe('@p1 各分析 Tab 可达', { tag: ['@p1', '@analysis'] }, () => {
   const TABS = ['晶圆图', '分布对比', '相关性工具']

@@ -1,6 +1,7 @@
 <template>
   <el-card class="file-list-card" shadow="never">
     <el-table
+      v-loading="loading"
       :data="items"
       @row-click="(row: any) => { if (row.is_dir) emit('navigate', currentPath + '/' + row.name) }"
       @sort-change="(sort: any) => emit('sort-change', sort)"
@@ -100,6 +101,7 @@ const props = defineProps<{
   items: any[]
   currentPath: string
   downloadingRows: Set<string>
+  loading?: boolean
 }>()
 
 const emit = defineEmits<{

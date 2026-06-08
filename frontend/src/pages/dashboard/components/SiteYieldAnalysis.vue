@@ -30,9 +30,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
-import * as echarts from 'echarts'
-import { getChartInitOpts } from '../../../utils/echarts-theme'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { initEchartsWhenReady, type EchartsHandle } from '../../../utils/echarts-init'
 import { useThemeStore } from '../../../stores/theme'
 
 const themeStore = useThemeStore()
@@ -44,8 +43,8 @@ const props = defineProps<{
 
 const siteYieldBarChart = ref<HTMLElement>()
 const yieldGaugeChart = ref<HTMLElement>()
-let siteYieldBarChartInstance: echarts.ECharts | null = null
-let yieldGaugeChartInstance: echarts.ECharts | null = null
+let siteYieldBarHandle: EchartsHandle | null = null
+let yieldGaugeHandle: EchartsHandle | null = null
 
 function _tc() {
   return getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
@@ -74,14 +73,7 @@ const siteYieldStats = computed(() => {
   }
 })
 
-function renderSiteYieldBarChart() {
-  if (!siteYieldBarChart.value || !props.siteYieldData?.length) return
-  if (!siteYieldBarChartInstance) {
-    siteYieldBarChartInstance = echarts.init(siteYieldBarChart.value, undefined, getChartInitOpts())
-  } else {
-    siteYieldBarChartInstance.clear()
-  }
-
+function buildSiteYieldBarOption() {
   const siteData = props.siteYieldData
   const siteNames = siteData.map(d => d.Site)
   const siteYields = siteData.map(d => {
@@ -91,7 +83,7 @@ function renderSiteYieldBarChart() {
 
   const getYieldColor = (y: number) => y >= 95 ? '#059669' : y < 90 ? '#dc2626' : '#d97706'
 
-  siteYieldBarChartInstance.setOption({
+  return {
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
@@ -120,20 +112,13 @@ function renderSiteYieldBarChart() {
       barWidth: '50%',
       label: { show: true, position: 'top', formatter: '{c}%', fontSize: 12, fontWeight: 'bold' },
     }],
-  })
+  }
 }
 
-function renderYieldGaugeChart() {
-  if (!yieldGaugeChart.value) return
-  if (!yieldGaugeChartInstance) {
-    yieldGaugeChartInstance = echarts.init(yieldGaugeChart.value, undefined, getChartInitOpts())
-  } else {
-    yieldGaugeChartInstance.clear()
-  }
-
+function buildYieldGaugeOption() {
   const yieldPct = props.overallYield
 
-  yieldGaugeChartInstance.setOption({
+  return {
     series: [{
       type: 'gauge',
       startAngle: 180,
@@ -159,7 +144,25 @@ function renderYieldGaugeChart() {
       detail: { fontSize: 24, offsetCenter: [0, '0%'], valueAnimation: true, formatter: '{value}%', color: 'inherit' },
       data: [{ value: Math.round(yieldPct * 100) / 100, name: '整体Yield' }],
     }],
-  })
+  }
+}
+
+function renderSiteYieldBarChart() {
+  if (!siteYieldBarChart.value || !props.siteYieldData?.length) return
+  if (siteYieldBarHandle) {
+    siteYieldBarHandle.chart?.setOption(buildSiteYieldBarOption() as any, { notMerge: true, lazyUpdate: true })
+  } else {
+    siteYieldBarHandle = initEchartsWhenReady(siteYieldBarChart.value, { option: buildSiteYieldBarOption() as any, reuse: true })
+  }
+}
+
+function renderYieldGaugeChart() {
+  if (!yieldGaugeChart.value) return
+  if (yieldGaugeHandle) {
+    yieldGaugeHandle.chart?.setOption(buildYieldGaugeOption() as any, { notMerge: true, lazyUpdate: true })
+  } else {
+    yieldGaugeHandle = initEchartsWhenReady(yieldGaugeChart.value, { option: buildYieldGaugeOption() as any, reuse: true })
+  }
 }
 
 function renderAll() {
@@ -170,8 +173,8 @@ function renderAll() {
 }
 
 function handleResize() {
-  if (siteYieldBarChartInstance && !siteYieldBarChartInstance.isDisposed()) siteYieldBarChartInstance.resize()
-  if (yieldGaugeChartInstance && !yieldGaugeChartInstance.isDisposed()) yieldGaugeChartInstance.resize()
+  siteYieldBarHandle?.chart?.resize()
+  yieldGaugeHandle?.chart?.resize()
 }
 
 watch(() => [props.siteYieldData, props.overallYield], () => {
@@ -183,9 +186,15 @@ watch(() => themeStore.currentTheme, () => {
   nextTick(() => renderAll())
 })
 
+onMounted(() => {
+  window.addEventListener('resize', handleResize)
+  renderAll()
+})
+
 onBeforeUnmount(() => {
-  siteYieldBarChartInstance?.dispose(); siteYieldBarChartInstance = null
-  yieldGaugeChartInstance?.dispose(); yieldGaugeChartInstance = null
+  window.removeEventListener('resize', handleResize)
+  siteYieldBarHandle?.dispose(); siteYieldBarHandle = null
+  yieldGaugeHandle?.dispose(); yieldGaugeHandle = null
 })
 
 defineExpose({ handleResize })

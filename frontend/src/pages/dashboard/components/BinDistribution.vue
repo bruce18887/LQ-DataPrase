@@ -26,9 +26,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
-import * as echarts from 'echarts'
-import { getChartInitOpts } from '../../../utils/echarts-theme'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { initEchartsWhenReady, type EchartsHandle } from '../../../utils/echarts-init'
 import { useThemeStore } from '../../../stores/theme'
 
 const themeStore = useThemeStore()
@@ -38,7 +37,7 @@ const props = defineProps<{
 }>()
 
 const binChart = ref<HTMLElement>()
-let binChartInstance: echarts.ECharts | null = null
+let binHandle: EchartsHandle | null = null
 
 const binPieTableData = computed(() => {
   const pieData = props.binPieData || []
@@ -54,17 +53,10 @@ function _tc() {
   return getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
 }
 
-function renderBinChart() {
-  if (!binChart.value || !props.binPieData?.length) return
-  if (!binChartInstance) {
-    binChartInstance = echarts.init(binChart.value, undefined, getChartInitOpts())
-  } else {
-    binChartInstance.clear()
-  }
-
+function buildBinOption() {
   const allBinColors = ['#059669', '#dc2626', '#d97706', '#2563eb', '#7c3aed', '#ea580c', '#0284c7', '#db2777', '#c2410c', '#047857']
 
-  binChartInstance.setOption({
+  return {
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
     legend: { orient: 'vertical', left: 'left', top: 'center', type: 'scroll', textStyle: { color: _tc() } },
     series: [{
@@ -77,11 +69,20 @@ function renderBinChart() {
       emphasis: { label: { fontSize: 14, fontWeight: 'bold' } },
       itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
     }],
-  })
+  }
+}
+
+function renderBinChart() {
+  if (!binChart.value || !props.binPieData?.length) return
+  if (binHandle) {
+    binHandle.chart?.setOption(buildBinOption() as any, { notMerge: true, lazyUpdate: true })
+  } else {
+    binHandle = initEchartsWhenReady(binChart.value, { option: buildBinOption() as any, reuse: true })
+  }
 }
 
 function handleResize() {
-  if (binChartInstance && !binChartInstance.isDisposed()) binChartInstance.resize()
+  binHandle?.chart?.resize()
 }
 
 watch(() => props.binPieData, () => {
@@ -93,9 +94,15 @@ watch(() => themeStore.currentTheme, () => {
   nextTick(() => renderBinChart())
 })
 
+onMounted(() => {
+  window.addEventListener('resize', handleResize)
+  nextTick(() => renderBinChart())
+})
+
 onBeforeUnmount(() => {
-  binChartInstance?.dispose()
-  binChartInstance = null
+  window.removeEventListener('resize', handleResize)
+  binHandle?.dispose()
+  binHandle = null
 })
 
 defineExpose({ handleResize })

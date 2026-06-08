@@ -158,16 +158,13 @@ const filteredSingleFiles = computed(() => {
 
 const unregisteredDirs = computed(() => batchDirs.value.filter(d => !d.registered))
 
-const batchGroups = computed(() => {
-  const batches = files.value.filter(f => f.file_type === 'batch' && f.batch_name)
-  const groups = new Map<string, DataFile[]>()
-  for (const f of batches) {
-    const key = f.batch_name || 'unknown'
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key)!.push(f)
-  }
-  return Array.from(groups.entries()).map(([name, files]) => ({ name, files }))
-})
+// 已导入批次直接来自 batch-dirs（磁盘走查，返回全部批次），不再依赖分页 files —
+// 否则新下载文件占满第 1 页后，旧批次被挤出列表而“消失”。
+const batchGroups = computed(() =>
+  batchDirs.value
+    .filter(d => d.registered)
+    .map(d => ({ name: d.name, files: d.files })),
+)
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return bytes + ' B'

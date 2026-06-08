@@ -128,11 +128,6 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         results = {}
         site_col = get_site_column(df)
         for param in params:
-            # Skip params not in the dataframe (e.g. a stale param sent during a
-            # file switch). Without this guard, get_1d_from -> df[param] raises
-            # KeyError -> 500. Mirrors the qqplot view's param_not_found guard.
-            if param not in df.columns:
-                continue
             result = compute_histogram_stats(
                 df, metadata, param, site_col,
                 range_type=range_type, custom_low=custom_low, custom_high=custom_high)

@@ -49,6 +49,17 @@ def get_cached_parsed_file(file_id: int, owner_id: int) -> Tuple[Optional[pd.Dat
     return _cached_parse(file_id, owner_id)
 
 
+def clear_parse_cache() -> None:
+    """Drop the in-memory parsed-file cache.
+
+    ``functools.lru_cache`` has no per-key eviction, so we clear the whole
+    cache. Call this after deleting DataFile rows so a deleted (or replaced)
+    file can never be served from a stale cache entry. Entries re-populate
+    lazily on the next access, so the only cost is a re-parse on demand.
+    """
+    _cached_parse.cache_clear()
+
+
 def parse_and_save_datafile(file_path: str, user, filename: str, file_size: int) -> DataFile:
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
         file_head = f.read(4096)

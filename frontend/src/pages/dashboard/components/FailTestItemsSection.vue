@@ -22,9 +22,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onBeforeUnmount } from 'vue'
-import * as echarts from 'echarts'
-import { getChartInitOpts } from '../../../utils/echarts-theme'
+import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { initEchartsWhenReady, type EchartsHandle } from '../../../utils/echarts-init'
 import { useThemeStore } from '../../../stores/theme'
 
 const themeStore = useThemeStore()
@@ -35,23 +34,16 @@ const props = defineProps<{
 }>()
 
 const failBarChart = ref<HTMLElement>()
-let failBarChartInstance: echarts.ECharts | null = null
+let failBarHandle: EchartsHandle | null = null
 
 function _tc() {
   return getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
 }
 
-function renderFailBarChart() {
-  if (!failBarChart.value || !props.failTestItems.length) return
-  if (!failBarChartInstance) {
-    failBarChartInstance = echarts.init(failBarChart.value, undefined, getChartInitOpts())
-  } else {
-    failBarChartInstance.clear()
-  }
-
+function buildFailBarOption() {
   const top10 = props.failTestItems.slice(0, 10)
 
-  failBarChartInstance.setOption({
+  return {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     grid: { left: '3%', right: '8%', bottom: '3%', top: '3%', containLabel: true },
     xAxis: { type: 'value', axisLabel: { color: _tc() } },
@@ -72,11 +64,20 @@ function renderFailBarChart() {
       },
       label: { show: true, position: 'right', fontSize: 10 },
     }],
-  })
+  }
+}
+
+function renderFailBarChart() {
+  if (!failBarChart.value || !props.failTestItems.length) return
+  if (failBarHandle) {
+    failBarHandle.chart?.setOption(buildFailBarOption() as any, { notMerge: true, lazyUpdate: true })
+  } else {
+    failBarHandle = initEchartsWhenReady(failBarChart.value, { option: buildFailBarOption() as any, reuse: true })
+  }
 }
 
 function handleResize() {
-  if (failBarChartInstance && !failBarChartInstance.isDisposed()) failBarChartInstance.resize()
+  failBarHandle?.chart?.resize()
 }
 
 watch(() => props.failTestItems, () => {
@@ -88,8 +89,14 @@ watch(() => themeStore.currentTheme, () => {
   nextTick(() => renderFailBarChart())
 })
 
+onMounted(() => {
+  window.addEventListener('resize', handleResize)
+  nextTick(() => renderFailBarChart())
+})
+
 onBeforeUnmount(() => {
-  failBarChartInstance?.dispose(); failBarChartInstance = null
+  window.removeEventListener('resize', handleResize)
+  failBarHandle?.dispose(); failBarHandle = null
 })
 
 defineExpose({ handleResize })

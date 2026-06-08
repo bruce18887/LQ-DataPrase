@@ -29,9 +29,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
-import * as echarts from 'echarts'
-import { getChartInitOpts } from '../../../utils/echarts-theme'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { initEchartsWhenReady, type EchartsHandle } from '../../../utils/echarts-init'
 import { useThemeStore } from '../../../stores/theme'
 
 const themeStore = useThemeStore()
@@ -42,7 +41,7 @@ const props = defineProps<{
 }>()
 
 const binBarChart = ref<HTMLElement>()
-let binBarChartInstance: echarts.ECharts | null = null
+let binBarHandle: EchartsHandle | null = null
 
 function _tc() {
   return getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
@@ -76,14 +75,7 @@ const formattedBinTableData = computed(() => {
   })
 })
 
-function renderBinBarChart() {
-  if (!binBarChart.value || !props.binTableData.length || !props.binSiteColumns.length) return
-  if (!binBarChartInstance) {
-    binBarChartInstance = echarts.init(binBarChart.value, undefined, getChartInitOpts())
-  } else {
-    binBarChartInstance.clear()
-  }
-
+function buildBinBarOption() {
   const chartRows = props.binTableData.filter(r => r.bin !== 'Total').reverse()
   const bins = chartRows.map(r => r.bin)
   const sites = props.binSiteColumns
@@ -99,7 +91,7 @@ function renderBinBarChart() {
     emphasis: { focus: 'series' as const },
   }))
 
-  binBarChartInstance.setOption({
+  return {
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
@@ -127,11 +119,20 @@ function renderBinBarChart() {
       inverse: true,
     },
     series,
-  })
+  }
+}
+
+function renderBinBarChart() {
+  if (!binBarChart.value || !props.binTableData.length || !props.binSiteColumns.length) return
+  if (binBarHandle) {
+    binBarHandle.chart?.setOption(buildBinBarOption() as any, { notMerge: true, lazyUpdate: true })
+  } else {
+    binBarHandle = initEchartsWhenReady(binBarChart.value, { option: buildBinBarOption() as any, reuse: true })
+  }
 }
 
 function handleResize() {
-  if (binBarChartInstance && !binBarChartInstance.isDisposed()) binBarChartInstance.resize()
+  binBarHandle?.chart?.resize()
 }
 
 watch(() => [props.binTableData, props.binSiteColumns], () => {
@@ -143,8 +144,14 @@ watch(() => themeStore.currentTheme, () => {
   nextTick(() => renderBinBarChart())
 })
 
+onMounted(() => {
+  window.addEventListener('resize', handleResize)
+  nextTick(() => renderBinBarChart())
+})
+
 onBeforeUnmount(() => {
-  binBarChartInstance?.dispose(); binBarChartInstance = null
+  window.removeEventListener('resize', handleResize)
+  binBarHandle?.dispose(); binBarHandle = null
 })
 
 defineExpose({ handleResize })

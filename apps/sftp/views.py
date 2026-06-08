@@ -6,8 +6,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.http import StreamingHttpResponse
-from apps.datafiles.views import _register_file
-
+from apps.datafiles.views import _register_file, _is_summary_csv
 logger = logging.getLogger(__name__)
 
 from apps.datafiles.views import _user_upload_dir
@@ -220,7 +219,12 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
             start_time = time.time()
             try:
                 for i, (remote_fp, rel_path, size, _mtime) in enumerate(file_list):
-                    local_file_path = os.path.join(local_dir, rel_path)
+                    # rel_path uses '/' separators (built in _collect_files);
+                    # normalize to the OS separator so the stored DataFile
+                    # path matches os.walk output later (registered detection
+                    # in BatchDirListView relies on consistent separators).
+                    rel_path_os = rel_path.replace('/', os.sep)
+                    local_file_path = os.path.join(local_dir, rel_path_os)
                     os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
                     try:
                         sftp.get(remote_fp, local_file_path)
@@ -378,6 +382,8 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
             for remote_path in paths:
                 try:
                     filename = os.path.basename(remote_path)
+                    if _is_summary_csv(filename):
+                        continue  # summary dump, not test data
                     file_path = os.path.join(batch_dir, filename)
 
                     sftp.get(remote_path, file_path)
@@ -426,6 +432,8 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
                 self._collect_files(sftp, remote_path, result, f"{rel_path}/", only_data)
             else:
                 ext = os.path.splitext(name)[1].lower()
-                if only_data and ext != '.csv':
+                if only_data and (ext != '.csv' or _is_summary_csv(name)):
+                    # Skip non-CSV and summary dumps (Sum_*.csv): they are not
+                    # per-unit ATE data and must not be downloaded/registered.
                     continue
                 result.append((remote_path, rel_path, attr.st_size, attr.st_mtime))

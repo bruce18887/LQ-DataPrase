@@ -39,9 +39,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
-import * as echarts from 'echarts'
-import { getChartInitOpts } from '../../../utils/echarts-theme'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { initEchartsWhenReady, type EchartsHandle } from '../../../utils/echarts-init'
 import { useThemeStore } from '../../../stores/theme'
 
 const themeStore = useThemeStore()
@@ -51,7 +50,7 @@ const props = defineProps<{
 }>()
 
 const cpkDistChart = ref<HTMLElement>()
-let cpkDistChartInstance: echarts.ECharts | null = null
+let cpkDistHandle: EchartsHandle | null = null
 
 const topParamStats = computed(() => props.paramStats.slice(0, 10))
 
@@ -69,15 +68,7 @@ function getCpkTagType(cpk: number): string {
   return 'danger'
 }
 
-function renderCpkDistChart() {
-  if (!cpkDistChart.value || !props.paramStats.length) return
-
-  if (!cpkDistChartInstance) {
-    cpkDistChartInstance = echarts.init(cpkDistChart.value, undefined, getChartInitOpts())
-  } else {
-    cpkDistChartInstance.clear()
-  }
-
+function buildCpkDistOption() {
   // 统计CPK分布 - 使用实际的等级名称（带括号）
   const levels: Record<string, number> = {}
   props.paramStats.forEach(p => {
@@ -94,15 +85,14 @@ function renderCpkDistChart() {
 
   // 如果所有等级都是0，显示空状态
   if (chartData.length === 0) {
-    cpkDistChartInstance.setOption({
+    return {
       title: {
         text: '暂无CPK数据',
         left: 'center',
         top: 'center',
         textStyle: { color: _ts(), fontSize: 14 }
       }
-    })
-    return
+    }
   }
 
   // 定义颜色映射 - 根据等级前缀匹配
@@ -114,7 +104,7 @@ function renderCpkDistChart() {
     return '#d1d5db'
   }
 
-  cpkDistChartInstance.setOption({
+  return {
     tooltip: { trigger: 'item', formatter: '{b}: {c}个 ({d}%)' },
     legend: { orient: 'vertical', left: 'left', top: 'center', textStyle: { color: _tc() } },
     series: [{
@@ -129,11 +119,20 @@ function renderCpkDistChart() {
       label: { formatter: '{b}: {c}个\n({d}%)' },
       color: chartData.map(item => getColorByLevel(item.name))
     }]
-  })
+  }
+}
+
+function renderCpkDistChart() {
+  if (!cpkDistChart.value || !props.paramStats.length) return
+  if (cpkDistHandle) {
+    cpkDistHandle.chart?.setOption(buildCpkDistOption() as any, { notMerge: true, lazyUpdate: true })
+  } else {
+    cpkDistHandle = initEchartsWhenReady(cpkDistChart.value, { option: buildCpkDistOption() as any, reuse: true })
+  }
 }
 
 function handleResize() {
-  if (cpkDistChartInstance && !cpkDistChartInstance.isDisposed()) cpkDistChartInstance.resize()
+  cpkDistHandle?.chart?.resize()
 }
 
 watch(() => props.paramStats, () => {
@@ -145,8 +144,14 @@ watch(() => themeStore.currentTheme, () => {
   nextTick(() => renderCpkDistChart())
 })
 
+onMounted(() => {
+  window.addEventListener('resize', handleResize)
+  nextTick(() => renderCpkDistChart())
+})
+
 onBeforeUnmount(() => {
-  cpkDistChartInstance?.dispose(); cpkDistChartInstance = null
+  window.removeEventListener('resize', handleResize)
+  cpkDistHandle?.dispose(); cpkDistHandle = null
 })
 
 defineExpose({ handleResize })

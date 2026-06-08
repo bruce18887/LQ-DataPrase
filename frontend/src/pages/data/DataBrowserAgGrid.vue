@@ -90,13 +90,16 @@ import { ElMessage } from 'element-plus'
 import { Refresh, Download, Document } from '@element-plus/icons-vue'
 import api from '../../api'
 import { useThemeStore } from '../../stores/theme'
+import { useFilesStore } from '../../stores/files'
 
 // Register ag-grid modules (required since v33+)
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community'
 ModuleRegistry.registerModules([AllCommunityModule])
 
 const props = defineProps<{ fileId: number | null }>()
+const emit = defineEmits<{ 'file-missing': [] }>()
 const themeStore = useThemeStore()
+const filesStore = useFilesStore()
 const isDark = computed(() => themeStore.currentTheme === 'night')
 
 const searchCol = ref('')
@@ -235,6 +238,7 @@ watch(
   () => props.fileId,
   () => {
     if (props.fileId) loadData()
+    else clearGrid()
   }
 )
 
@@ -243,6 +247,19 @@ watch([passfail], () => {
     loadData()
   }
 })
+
+// 文件变更（删除等）后重新校验当前文件；若已被删除，后端 404 → 清空表格。
+watch(() => filesStore.filesVersion, () => {
+  if (props.fileId) loadData()
+})
+
+function clearGrid() {
+  rowData.value = []
+  allCols.value = []
+  colMeta.value = {}
+  failRowCount.value = 0
+  dataLoaded.value = false
+}
 
 async function loadData() {
   loading.value = true
@@ -271,8 +288,14 @@ async function loadData() {
     rowData.value = (resp.data.rows as Record<string, any>[]) ?? []
 
     dataLoaded.value = true
-  } catch {
-    ElMessage.error('加载失败')
+  } catch (e: any) {
+    if (e?.response?.status === 404) {
+      // 文件已被删除：清空残留表格并通知父级重置 activeFileId。
+      clearGrid()
+      emit('file-missing')
+    } else {
+      ElMessage.error('加载失败')
+    }
   } finally {
     loading.value = false
   }

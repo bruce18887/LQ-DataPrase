@@ -197,11 +197,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onActivated, nextTick, onBeforeUnmount, watch } from 'vue'
 import * as echarts from 'echarts'
 import { getChartInitOpts } from '../../../utils/echarts-theme'
 import { ElMessage } from 'element-plus'
 import { batchApi } from '../../../api/batch'
+import { useFilesStore } from '../../../stores/files'
 import BatchSelectorBar from './batch/BatchSelectorBar.vue'
 import KpiCards from './batch/KpiCards.vue'
 import YieldTrendChart from './batch/YieldTrendChart.vue'
@@ -215,6 +216,8 @@ const loading = ref(false)
 const exporting = ref(false)
 const batchData = ref<any>(null)
 const selectedPhase = ref('')
+
+const filesStore = useFilesStore()
 
 // Ref to child chart components
 const yieldTrendChartRef = ref<InstanceType<typeof YieldTrendChart>>()
@@ -291,6 +294,12 @@ async function loadBatches() {
   try {
     const { data } = await batchApi.listBatches()
     batches.value = data.batches || []
+    // Reconcile: if the currently-selected batch was deleted, clear the view
+    // so stale yield data doesn't linger after a delete/re-import.
+    if (selectedBatch.value && !batches.value.some((b: any) => b.batch_name === selectedBatch.value)) {
+      selectedBatch.value = ''
+      onBatchChange()
+    }
   } catch { /* ignore */ }
 }
 
@@ -409,6 +418,15 @@ function handleResize() {
 onMounted(() => {
   loadBatches()
   window.addEventListener('resize', handleResize)
+})
+
+// keep-alive 页面激活 / 文件变更（SFTP 下载、导入、删除）后刷新批次列表，
+// 否则新下载的批次不会出现在选择器里（DashboardPage 被 keep-alive 缓存）。
+onActivated(() => {
+  loadBatches()
+})
+watch(() => filesStore.filesVersion, () => {
+  loadBatches()
 })
 
 onBeforeUnmount(() => {

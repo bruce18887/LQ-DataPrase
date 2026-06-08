@@ -51,28 +51,38 @@
 
       <!-- 查看文件数据 -->
       <div v-show="activeTab === 'view'" class="content-section fade-in">
-        <div v-if="activeFileName" class="active-file-banner">
+        <div class="active-file-banner">
           <span class="banner-icon">📄</span>
           <span class="banner-label">当前文件</span>
-          <span class="banner-filename">{{ activeFileName }}</span>
+          <el-select
+            :model-value="activeFileId ?? undefined"
+            placeholder="请选择一个文件"
+            filterable
+            clearable
+            class="banner-file-select"
+            @update:model-value="onActiveFileSelect"
+          >
+            <el-option v-for="f in files" :key="f.id" :label="f.filename" :value="f.id" />
+          </el-select>
         </div>
-        <div v-else class="active-file-banner active-file-banner--empty">
-          <span class="banner-icon">💡</span>
-          <span class="banner-label">请先在文件列表中选择一个文件</span>
-        </div>
-        <DataBrowserAgGrid :file-id="activeFileId" />
+        <DataBrowserAgGrid :file-id="activeFileId" @file-missing="onFileMissing" />
       </div>
 
       <!-- 导出工具 -->
       <div v-show="activeTab === 'export'" class="content-section fade-in">
-        <div v-if="activeFileName" class="active-file-banner">
+        <div class="active-file-banner">
           <span class="banner-icon">📄</span>
           <span class="banner-label">当前文件</span>
-          <span class="banner-filename">{{ activeFileName }}</span>
-        </div>
-        <div v-else class="active-file-banner active-file-banner--empty">
-          <span class="banner-icon">💡</span>
-          <span class="banner-label">请先在文件列表中选择一个文件</span>
+          <el-select
+            :model-value="activeFileId ?? undefined"
+            placeholder="请选择一个文件"
+            filterable
+            clearable
+            class="banner-file-select"
+            @update:model-value="onActiveFileSelect"
+          >
+            <el-option v-for="f in files" :key="f.id" :label="f.filename" :value="f.id" />
+          </el-select>
         </div>
         <ExportToolsTab :files="files" :file-id="activeFileId" />
       </div>
@@ -91,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onActivated, watch } from 'vue'
+import { ref, onMounted, onActivated, watch } from 'vue'
 import api from '../../api'
 import { useFilesStore } from '../../stores/files'
 import FileListTab from './components/FileListTab.vue'
@@ -105,16 +115,7 @@ const files = ref<any[]>([])
 const fileTotal = ref(0)
 const activeTab = ref('files')
 const activeFileId = ref<number | null>(null)
-const selectedFileName = ref<string | null>(null)
 const filesStore = useFilesStore()
-
-const activeFileName = computed(() => {
-  if (!activeFileId.value) return null
-  return (
-    files.value.find(f => f.id === activeFileId.value)?.filename ??
-    selectedFileName.value
-  )
-})
 
 const tabs = [
   { key: 'files', label: '文件列表', icon: '📋' },
@@ -133,21 +134,30 @@ async function loadFiles() {
   }
 }
 
-function viewFile(id: number, filename?: string) {
+function viewFile(id: number, _filename?: string) {
   activeFileId.value = id
-  selectedFileName.value = filename ?? null
   activeTab.value = 'view'
 }
 
-function onRowClick(id: number, filename?: string) {
+function onRowClick(id: number, _filename?: string) {
   activeFileId.value = id
-  selectedFileName.value = filename ?? null
+}
+
+// 查看数据 / 导出工具 顶部下拉框选择文件
+function onActiveFileSelect(id: number | null | undefined) {
+  activeFileId.value = id ?? null
 }
 
 function onFileManagerSelect(fileId: number) {
   activeFileId.value = fileId
   activeTab.value = 'view'
   loadFiles()
+}
+
+// 当前查看的文件被删除时（DataBrowserAgGrid 收到后端 404）重置选择，
+// 避免「查看数据 / 导出」页残留已删除文件的状态。
+function onFileMissing() {
+  activeFileId.value = null
 }
 
 onMounted(loadFiles)
@@ -348,10 +358,6 @@ onActivated(loadFiles)
   font-size: 13px;
 }
 
-.active-file-banner--empty {
-  border-left-color: var(--color-warning);
-}
-
 .banner-icon {
   font-size: 15px;
   flex-shrink: 0;
@@ -363,13 +369,9 @@ onActivated(loadFiles)
   white-space: nowrap;
 }
 
-.banner-filename {
-  color: var(--text-primary);
-  font-weight: 600;
-  font-family: var(--font-mono);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.banner-file-select {
+  width: 320px;
+  max-width: 100%;
 }
 
 /* Fade-in animation */
