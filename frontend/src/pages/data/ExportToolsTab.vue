@@ -44,6 +44,7 @@
               <el-checkbox value="s6">6σ</el-checkbox>
               <el-checkbox value="normal">正态分布</el-checkbox>
             </el-checkbox-group>
+            <el-checkbox v-model="ignoreNoLimit" class="ignore-no-limit">忽略无Limit</el-checkbox>
             <div class="bar-width-group">
               <span class="bw-label">柱宽</span>
               <el-slider
@@ -96,20 +97,24 @@ import { ref, watch } from 'vue'
 import api from '../../api'
 import { useExport } from '../analysis/composables/useExport'
 import FileCorrelationSection from '../analysis/components/correlation/FileCorrelationSection.vue'
+import { useAnalysisStore } from '../../stores/analysis'
 
 const props = defineProps<{
   files: any[]
   fileId?: number | null
 }>()
 
+const analysisStore = useAnalysisStore()
+
 const selectedFileId = ref<number | null>(props.fileId ?? null)
 const params = ref<string[]>([])
 const localParams = ref<string[]>([])
 const localSigma = ref(3)
-const chartConfig = ref<string[]>(['limit', 's6'])
-const barWidthPercent = ref(80)
+const chartConfig = ref<string[]>(analysisStore.chartConfig)
+const barWidthPercent = ref(analysisStore.barWidthPercent)
+const ignoreNoLimit = ref(analysisStore.ignoreNoLimit)
 
-const { exporting, exportSigma, exportBatch } = useExport(selectedFileId)
+const { exporting, exportSigmaLimit, exportBatchCharts } = useExport(() => selectedFileId.value)
 
 // Sync fileId from parent
 watch(() => props.fileId, (id) => {
@@ -126,6 +131,11 @@ watch(selectedFileId, async (fileId) => {
     params.value = []
   }
 }, { immediate: true })
+
+// Persist UI config to store
+watch(chartConfig, (val) => { analysisStore.chartConfig = val }, { deep: true })
+watch(barWidthPercent, (val) => { analysisStore.barWidthPercent = val })
+watch(ignoreNoLimit, (val) => { analysisStore.ignoreNoLimit = val })
 
 function selectAll() {
   localParams.value = [...params.value]
@@ -144,11 +154,14 @@ function onBarWidthChange(val: number) {
 }
 
 function onExportSigma() {
-  exportSigma(localSigma.value)
+  exportSigmaLimit(localSigma.value, { onlyValidLimits: ignoreNoLimit.value })
 }
 
 function onExportBatch(format: string) {
-  exportBatch(localParams.value, format, { chartConfig: chartConfig.value })
+  exportBatchCharts(localParams.value, format, {
+    chartConfig: chartConfig.value,
+    barWidthPercent: barWidthPercent.value,
+  })
 }
 </script>
 
@@ -266,6 +279,16 @@ function onExportBatch(format: string) {
   padding-left: 3px;
 }
 
+.ignore-no-limit {
+  margin-left: 4px;
+  height: 28px;
+}
+
+.ignore-no-limit :deep(.el-checkbox__label) {
+  font-size: 12px;
+  padding-left: 3px;
+}
+
 .bar-width-group {
   display: flex;
   align-items: center;
@@ -323,6 +346,13 @@ function onExportBatch(format: string) {
 
 .sigma-select {
   width: 120px;
+}
+
+/* Brand-themed checkboxes (与 GageSummary / BuyoffForm 一致) */
+:deep(.el-checkbox) {
+  --el-checkbox-checked-bg-color: var(--brand-primary);
+  --el-checkbox-checked-input-border-color: var(--brand-primary);
+  --el-checkbox-checked-icon-color: var(--text-inverse);
 }
 
 /* ============================

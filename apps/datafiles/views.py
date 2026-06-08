@@ -30,7 +30,7 @@ from apps.datafiles.serializers import (
     normalize_tags,
 )
 from apps.datafiles.tasks import parse_data_file_task
-from apps.datafiles.services import get_cached_parsed_file
+from apps.datafiles.services import get_cached_parsed_file, clear_parse_cache
 from apps.datafiles.utils import extract_product_code
 
 ARCHIVE_EXTENSIONS = {'.zip', '.7z', '.rar'}
@@ -38,6 +38,23 @@ ARCHIVE_EXTENSIONS = {'.zip', '.7z', '.rar'}
 
 def _is_archive(filename):
     return os.path.splitext(filename)[1].lower() in ARCHIVE_EXTENSIONS
+
+
+def _is_summary_csv(filename):
+    """Return True for tester summary/aggregate dumps (``Sum_093518.csv``).
+
+    These files sit alongside the per-unit test data in a lot directory but
+    parse to zero data rows — they carry no test-program name and pollute the
+    dashboard's "latest ready file" pick. We never register or count them as
+    batch data. Single-file uploads/downloads are unaffected (an explicit
+    user action), so this predicate is only consulted on batch flows.
+    """
+    return os.path.basename(filename).lower().startswith('sum_')
+
+
+def _is_data_csv(filename):
+    """A CSV that holds real ATE data (i.e. a non-summary ``.csv``)."""
+    return filename.lower().endswith('.csv') and not _is_summary_csv(filename)
 
 
 def _extract_archive(file_path, dest_dir):
@@ -261,6 +278,7 @@ class DataFileViewSet(viewsets.ModelViewSet):
         datafile = self.get_object()
         _delete_datafile_on_disk(datafile)
         datafile.delete()
+        clear_parse_cache()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=False, methods=['post'])
@@ -278,6 +296,7 @@ class DataFileViewSet(viewsets.ModelViewSet):
             _delete_datafile_on_disk(datafile)
         deleted_count = qs.count()
         qs.delete()
+        clear_parse_cache()
         return Response({'deleted': deleted_count})
 
     @action(detail=False, methods=['get'])
@@ -426,10 +445,37 @@ class BatchDirListView(APIView):
             .values_list('batch_name', flat=True)
         )
 
-        # Get registered file paths per batch for partial-import detection
+        # Get registered file paths per batch for partial-import detection.
+        # Normalize separators: SFTP folder downloads historically stored
+        # mixed-separator paths (``...\batch\dir\sub/file.csv``) while os.walk
+        # below yields all-OS-separator paths — without normpath the set diff
+        # never matches and a fully-imported batch shows as "unregistered".
         registered_files = {}
-        for df in DataFile.objects.filter(owner=request.user, file_type='batch').values('batch_name', 'file_path'):
-            registered_files.setdefault(df['batch_name'], set()).add(df['file_path'])
+        # Per-batch DataFile rows for the frontend's "已导入批次" list, so the
+        # batch grouping no longer depends on the paginated /files/ page (which
+        # dropped older batches once newer files filled page 1).
+        batch_file_rows = {}
+        for df in DataFile.objects.filter(owner=request.user, file_type='batch').values(
+            'id', 'filename', 'tags', 'batch_name', 'file_path',
+            'format_type', 'row_count', 'col_count', 'program_name',
+            'status', 'created_at',
+        ):
+            registered_files.setdefault(df['batch_name'], set()).add(
+                os.path.normpath(df['file_path'])
+            )
+            batch_file_rows.setdefault(df['batch_name'], []).append({
+                'id': df['id'],
+                'filename': df['filename'],
+                'tags': df['tags'] or [],
+                'format_type': df['format_type'],
+                'row_count': df['row_count'],
+                'col_count': df['col_count'],
+                'program_name': df['program_name'],
+                'file_type': 'batch',
+                'batch_name': df['batch_name'],
+                'status': df['status'],
+                'created_at': df['created_at'].isoformat() if df['created_at'] else '',
+            })
 
         result = []
         for entry in os.scandir(batch_base):
@@ -442,10 +488,10 @@ class BatchDirListView(APIView):
             disk_paths = set()
             for root, _dirs, files in os.walk(entry.path):
                 for f in files:
-                    if not f.lower().endswith('.csv'):
+                    if not _is_data_csv(f):
                         continue
                     fp = os.path.join(root, f)
-                    disk_paths.add(fp)
+                    disk_paths.add(os.path.normpath(fp))
                     file_count += 1
                     try:
                         total_size += os.path.getsize(fp)
@@ -464,6 +510,7 @@ class BatchDirListView(APIView):
                 'file_count': file_count,
                 'total_size': total_size,
                 'registered': is_registered and unregistered_count == 0,
+                'files': batch_file_rows.get(dir_name, []),
             })
 
         # Sort: unregistered first, then by name
@@ -485,8 +532,11 @@ class BatchDirImportView(APIView):
         if not os.path.isdir(dir_path):
             return Response({'error': f'目录 "{dir_name}" 不存在'}, status=404)
 
-        # Get already-registered file paths for this batch (skip duplicates)
+        # Get already-registered file paths for this batch (skip duplicates).
+        # normpath both sides so mixed-separator legacy paths still dedup —
+        # otherwise re-importing would create duplicate DataFile rows.
         existing_paths = set(
+            os.path.normpath(p) for p in
             DataFile.objects.filter(
                 owner=request.user, file_type='batch', batch_name=dir_name
             ).values_list('file_path', flat=True)
@@ -495,10 +545,10 @@ class BatchDirImportView(APIView):
         created = []
         for root, _dirs, files in os.walk(dir_path):
             for f in files:
-                if not f.lower().endswith('.csv'):
+                if not _is_data_csv(f):
                     continue
                 fp = os.path.join(root, f)
-                if fp in existing_paths:
+                if os.path.normpath(fp) in existing_paths:
                     continue  # already registered
                 try:
                     df = _register_file(request.user, fp, 'batch', dir_name)
@@ -529,6 +579,7 @@ class BatchDirDeleteView(APIView):
 
         # Delete directory from disk
         shutil.rmtree(dir_path, ignore_errors=True)
+        clear_parse_cache()
 
         return Response({
             'status': 'ok',

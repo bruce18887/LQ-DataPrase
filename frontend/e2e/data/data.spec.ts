@@ -165,6 +165,37 @@ test.describe('数据管理 /data', { tag: ['@p0', '@p1', '@p2', '@data'] }, () 
     })
     expect(status).toBe(200)
   })
+
+  /**
+   * 课题2：SFTP 下载新批次后旧批次不应从「已导入批次」消失。
+   * 根因是前端从分页 20 条 files 分组，新文件占满首页后挤掉旧批次。
+   * 修复后「已导入批次」来自 batch-dirs（磁盘走查，全部批次 + 每批 files 列表）。
+   * 断言：batch-dirs 返回的已注册批次都带 files 数组（前端分组不再依赖分页）。
+   */
+  test('@p2 课题2 batch-dirs 已注册批次带 files 列表（不依赖分页）', async ({ page }) => {
+    await gotoApp(page, '/data')
+
+    const data = await page.evaluate(async () => {
+      const token = localStorage.getItem('access_token')
+      const res = await fetch('/api/v1/batch-dirs/', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      return { status: res.status, body: await res.json() }
+    })
+    expect(data.status).toBe(200)
+    expect(Array.isArray(data.body)).toBe(true)
+
+    const registered = (data.body as any[]).filter((d) => d.registered)
+    if (registered.length === 0) {
+      test.skip(true, '当前环境无已注册批次，跳过 files 列表断言')
+      return
+    }
+    // 每个已注册批次都应带非空 files 数组，且数量与 file_count 一致
+    for (const b of registered) {
+      expect(Array.isArray(b.files), `批次 ${b.name} 应有 files 数组`).toBe(true)
+      expect(b.files.length, `批次 ${b.name} files 数量应等于 file_count`).toBe(b.file_count)
+    }
+  })
 })
 
 test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删除/新列）', { tag: ['@p1', '@p2', '@data'] }, () => {
@@ -287,6 +318,71 @@ test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删�
     } else {
       // 不足一页时分页控件应隐藏
       await expect(page.locator('.file-list-tab .el-pagination')).toHaveCount(0)
+    }
+  })
+
+  test('@p2 产品筛选刷新(#6)：上传带产品码文件后下拉立即包含该产品码', async ({ page }) => {
+    await gotoApp(page, '/data')
+    await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
+
+    // 构造一个文件名即可解析出唯一产品码（B + 1~2 字母 + 数字）的临时文件。
+    const code = `BZJ${Date.now()}`
+    const uniqueName = `${code}_FT.csv`
+    const tmpPath = path.join(os.tmpdir(), uniqueName)
+    fs.copyFileSync(PRIMARY_SAMPLE_FILE, tmpPath)
+
+    try {
+      await page.locator('button').filter({ hasText: '上传文件' }).click()
+      await uploadFile(page, tmpPath)
+      await expectUploadSuccess(page)
+      await expect(page.locator('.el-table').getByText(uniqueName)).toBeVisible({ timeout: 15_000 })
+
+      // 不刷新页面，直接打开“全部产品”下拉——修复前下拉只在 onMounted 拉取，
+      // 新上传文件的产品码不会出现（甚至 no data）。修复后应立即包含该码。
+      await elSelectByPlaceholder(page.locator('.file-list-tab'), '全部产品').first().click()
+      await expect(
+        visibleSelectOptions(page).filter({ hasText: code }),
+      ).toHaveCount(1, { timeout: 10_000 })
+    } finally {
+      fs.rmSync(tmpPath, { force: true })
+    }
+  })
+
+  test('@p2 删除后无残留(#4)：删除正在查看的文件后查看数据页清空', async ({ page }) => {
+    await gotoApp(page, '/data')
+
+    const uniqueName = `e2e_stale_${Date.now()}.csv`
+    const tmpPath = path.join(os.tmpdir(), uniqueName)
+    fs.copyFileSync(PRIMARY_SAMPLE_FILE, tmpPath)
+
+    try {
+      // 上传并查看该文件，等待 ag-grid 渲染
+      await page.locator('button').filter({ hasText: '上传文件' }).click()
+      await uploadFile(page, tmpPath)
+      await expectUploadSuccess(page)
+      const row = page.locator('.el-table__row').filter({ hasText: uniqueName })
+      await expect(row).toBeVisible({ timeout: 15_000 })
+      await row.locator('button').filter({ hasText: '查看' }).click()
+      await expect(page.locator('.tab-btn.active')).toContainText('查看数据')
+      await expect(page.locator('.ag-root').first()).toBeVisible({ timeout: 30_000 })
+
+      // 回到文件列表删除该文件
+      await page.locator('.tab-btn').filter({ hasText: '文件列表' }).click()
+      const row2 = page.locator('.el-table__row').filter({ hasText: uniqueName })
+      await row2.locator('button').filter({ hasText: /删除/ }).click()
+      const confirmBtn = page.getByRole('button', { name: '删除', exact: true })
+      await expect(confirmBtn).toBeVisible({ timeout: 10_000 })
+      await confirmBtn.click()
+      await expect(page.getByText('文件已删除').first()).toBeVisible({ timeout: 15_000 })
+
+      // 切回查看数据页：修复前会残留已删除文件的旧表格；修复后当前文件下拉应清空，
+      // 回到 placeholder「请选择一个文件」状态。
+      await page.locator('.tab-btn').filter({ hasText: '查看数据' }).click()
+      const fileSelect = page.locator('.content-section:visible .banner-file-select').first()
+      await expect(fileSelect.locator('.el-select__wrapper')).toBeVisible({ timeout: 15_000 })
+      await expect(fileSelect.locator('.el-select__placeholder')).toContainText('请选择一个文件', { timeout: 15_000 })
+    } finally {
+      fs.rmSync(tmpPath, { force: true })
     }
   })
 })
@@ -516,5 +612,56 @@ test.describe('数据管理 /data 文件列表展开行（方案A）', { tag: ['
       await page.waitForTimeout(400)
       await expect(page.locator('.el-popper').filter({ hasText: /.+/ })).toHaveCount(0)
     }
+  })
+})
+
+/**
+ * 课题3：查看数据 / 导出工具 tab 的「当前文件」从只读横幅改为下拉框，
+ * 选择即切换 activeFileId。
+ */
+test.describe('数据管理 /data 当前文件下拉切换', { tag: ['@p1', '@p2', '@data'] }, () => {
+  test('@p1 查看数据：当前文件下拉框存在且可切换文件', async ({ page }) => {
+    await gotoApp(page, '/data')
+    // 先在文件列表点「查看」进入查看数据 tab
+    const firstRow = page.locator('.el-table .el-table__row').first()
+    await expect(firstRow).toBeVisible({ timeout: 15_000 })
+    await firstRow.locator('button').filter({ hasText: '查看' }).click()
+    await expect(page.locator('.tab-btn.active')).toContainText('查看数据')
+
+    // 顶部应出现当前文件下拉框（替代旧 banner-filename 只读文本）。
+    // view / export 两个 tab 用 v-show 同时存在于 DOM，需限定到当前可见的 section。
+    const fileSelect = page.locator('.content-section:visible .banner-file-select').first()
+    const wrapper = fileSelect.locator('.el-select__wrapper')
+    await expect(wrapper).toBeVisible({ timeout: 10_000 })
+    // 选中态非空（已带入查看的文件名，显示在 placeholder 复用的选中值上）
+    await expect(fileSelect.locator('.el-select__placeholder')).not.toHaveText('', { timeout: 10_000 })
+
+    // 打开下拉，至少有一个可选文件，选择第一个后表格仍渲染
+    await wrapper.click()
+    const firstOption = page.locator('.el-select-dropdown__item:visible').first()
+    await expect(firstOption).toBeVisible({ timeout: 10_000 })
+    await firstOption.click()
+    await expect(page.locator('.ag-root').first()).toBeVisible({ timeout: 30_000 })
+  })
+
+  test('@p2 导出工具：当前文件下拉框存在并可选择', async ({ page }) => {
+    await gotoApp(page, '/data')
+    await page.locator('.tab-btn').filter({ hasText: '导出工具' }).click()
+    await expect(page.locator('.tab-btn.active')).toContainText('导出工具')
+
+    // 顶部当前文件下拉框可见（用 wrapper 判定可见性，EP 真 input 在未聚焦时隐藏）。
+    // 限定到当前可见 section，避免命中 v-show 隐藏的查看数据 tab 下拉。
+    const fileSelect = page.locator('.content-section:visible .banner-file-select').first()
+    const wrapper = fileSelect.locator('.el-select__wrapper')
+    await expect(wrapper).toBeVisible({ timeout: 10_000 })
+
+    // 选择第一个文件，下拉可正常工作
+    await wrapper.click()
+    const firstOption = page.locator('.el-select-dropdown__item:visible').first()
+    const optionText = (await firstOption.textContent())?.trim() || ''
+    await expect(firstOption).toBeVisible({ timeout: 10_000 })
+    await firstOption.click()
+    // 选中后下拉显示该文件名（el-select__placeholder 复用为选中值展示）
+    await expect(fileSelect.locator('.el-select__placeholder')).toContainText(optionText, { timeout: 10_000 })
   })
 })

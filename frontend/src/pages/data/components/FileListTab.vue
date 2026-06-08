@@ -339,16 +339,13 @@ function truncateMiddle(s: string, max: number) {
 // Computed
 const unregisteredDirs = computed(() => batchDirs.value.filter(d => !d.registered))
 
-const batchGroups = computed(() => {
-  const batches = files.value.filter(f => f.file_type === 'batch' && f.batch_name)
-  const groups = new Map<string, any[]>()
-  for (const f of batches) {
-    const key = f.batch_name || 'unknown'
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key)!.push(f)
-  }
-  return Array.from(groups.entries()).map(([name, files]) => ({ name, files }))
-})
+// 已导入批次直接来自 batch-dirs（磁盘走查，返回全部批次），不再依赖分页 files —
+// 否则新下载文件占满第 1 页后，旧批次被挤出列表而“消失”。
+const batchGroups = computed(() =>
+  batchDirs.value
+    .filter(d => d.registered)
+    .map(d => ({ name: d.name, files: d.files })),
+)
 
 // Load files
 async function loadFiles() {
@@ -623,10 +620,14 @@ function tableRowClassName({ rowIndex }: { rowIndex: number }) {
   return rowIndex % 2 === 0 ? 'row-even' : 'row-odd'
 }
 
-// External operations (SFTP import/upload) refresh list
+// External operations (SFTP import/upload/delete) refresh list + product
+// filter. loadProductCodes() MUST be here too — previously the "全部产品"
+// dropdown only loaded on mount, so a freshly-uploaded file's product code
+// showed in the table but the filter dropdown stayed empty ("no data").
 watch(() => filesStore.filesVersion, () => {
   loadFiles()
   loadBatchDirs()
+  loadProductCodes()
 })
 
 onMounted(() => {

@@ -52,6 +52,7 @@
         :items="filteredItems"
         :current-path="currentPath"
         :downloading-rows="downloadingRows"
+        :loading="listLoading"
         @navigate="navigateTo"
         @sort-change="handleSortChange"
         @download="downloadFile"
@@ -94,6 +95,11 @@ const sortOrder = ref<'asc' | 'desc'>('asc')
 const batchDownloading = ref(false)
 const batchParsing = ref(false)
 const downloadingRows = ref<Set<string>>(new Set())
+// 卡顿根因：后端 _get_connection 每次请求都新建 paramiko.Transport 完成完整 SSH
+// 握手（用完即 close），socket 无法跨请求复用，故每次进目录都有握手延迟。后端连接
+// 池改动过大、超出本次范围；此处仅做体感优化：请求期间显示 loading 并屏蔽重复点击，
+// 避免连点叠加多次握手把卡顿放大。
+const listLoading = ref(false)
 
 // SSE directory download progress
 const downloading = ref(false)
@@ -152,11 +158,14 @@ async function disconnect() {
 }
 
 async function listFiles(path: string) {
+  if (listLoading.value) return  // 屏蔽请求未完成时的重复点击，避免叠加多次 SSH 握手
+  listLoading.value = true
   try {
     const { data } = await sftpApi.listFiles(path, sortBy.value, sortOrder.value)
     currentPath.value = data.path
     items.value = (data.items || []).map((item: any) => ({ ...item, _selected: false }))
   } catch { ElMessage.error('获取文件列表失败') }
+  finally { listLoading.value = false }
 }
 
 function navigateTo(path: string) { listFiles(path) }

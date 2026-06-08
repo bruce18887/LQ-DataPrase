@@ -86,6 +86,24 @@ class ExtractProductCodeTests(TestCase):
         self.assertEqual(extract_product_code('2604160006_x.csv', 'BN281.pts'), 'BN281')
         self.assertEqual(extract_product_code('2604160006_x.csv', 'BN281.pgs'), 'BN281')
 
+    def test_cpts_compound_program_extension(self):
+        # Regression (quest.txt #5): SFTP batch files whose data filename has
+        # no B-prefix token but whose CSV header program name is a ``.cpts``
+        # compound spec. Without ``.cpts`` in the recognised extensions the
+        # product code was silently dropped (product column showed empty).
+        self.assertEqual(
+            extract_product_code(
+                'R2602280062_FT1-RT2-1_20260314_091556.csv',
+                'BPC61320A_FT_AAA_BPD60320XBAF_PD.cpts',
+            ),
+            'BPC61320A',
+        )
+        # Case-insensitive extension still applies to .cpts.
+        self.assertEqual(
+            extract_product_code('R260_x.csv', 'BPC61320A_FT.CPTS'),
+            'BPC61320A',
+        )
+
 
 def _make_datafile(owner, filename, **kwargs):
     defaults = dict(
@@ -341,3 +359,107 @@ class DataFileTagsAPITests(APITestCase):
         # Now there is no file at all. list_tags should return [].
         resp = self.client.post('/api/v1/files/list_tags/', {}, format='json')
         self.assertEqual(resp.data['tags'], [])
+
+
+class BatchDirNormpathTests(APITestCase):
+    r"""quest.txt #2: legacy SFTP folder downloads stored mixed-separator
+    file paths (``...\dir\sub/file.csv``). Registered-detection and
+    import-dedup must reconcile them via ``os.path.normpath`` so a fully
+    imported batch isn't shown as "unregistered" (clickable import button)
+    and re-importing doesn't create duplicate DataFile rows.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='bd', password='pw')
+        self.client.force_authenticate(self.user)
+        self.batch_base = _user_upload_dir(self.user, 'batch')
+        self.dir_name = 'BE01-TEST'
+        self.csv_dir = os.path.join(self.batch_base, self.dir_name, 'R260')
+        os.makedirs(self.csv_dir, exist_ok=True)
+        self.csv_path = os.path.join(self.csv_dir, 'file.csv')
+        with open(self.csv_path, 'w') as f:
+            f.write('a,b\n1,2\n')
+        # Store a NON-normalized path (extra '.' segment) that only equals the
+        # on-disk os.walk path after normpath() — OS-independent stand-in for
+        # the Windows backslash/forward-slash mismatch.
+        stored = os.path.join(self.batch_base, self.dir_name, 'R260', '.', 'file.csv')
+        self.df = DataFile.objects.create(
+            owner=self.user, filename='file.csv', file_path=stored,
+            file_size=8, format_type='CTA8290D', file_type='batch',
+            batch_name=self.dir_name, status='ready',
+        )
+
+    def tearDown(self):
+        shutil.rmtree(os.path.join(self.batch_base, self.dir_name), ignore_errors=True)
+
+    def test_registered_detection_handles_separator_mismatch(self):
+        resp = self.client.get('/api/v1/batch-dirs/')
+        self.assertEqual(resp.status_code, 200)
+        entry = next((d for d in resp.data if d['name'] == self.dir_name), None)
+        self.assertIsNotNone(entry)
+        # Must be reported as fully registered, not falsely "unregistered".
+        self.assertTrue(entry['registered'])
+
+    def test_import_dedups_non_normalized_path(self):
+        before = DataFile.objects.filter(
+            owner=self.user, batch_name=self.dir_name
+        ).count()
+        resp = self.client.post(
+            '/api/v1/batch-dirs/import/', {'dir_name': self.dir_name}, format='json'
+        )
+        self.assertEqual(resp.status_code, 201)
+        after = DataFile.objects.filter(
+            owner=self.user, batch_name=self.dir_name
+        ).count()
+        # No duplicate row created for the already-registered file.
+        self.assertEqual(after, before)
+
+
+class SummaryFileSkipTests(APITestCase):
+    """quest.txt 旁注: ``Sum_*.csv`` summary dumps must never be counted or
+    registered as batch data — they parse to zero rows, carry no program
+    name, and pollute the dashboard's "latest ready file" pick.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='sf', password='pw')
+        self.client.force_authenticate(self.user)
+        self.batch_base = _user_upload_dir(self.user, 'batch')
+        self.dir_name = 'LOT-SUM'
+        self.dir_path = os.path.join(self.batch_base, self.dir_name)
+        os.makedirs(self.dir_path, exist_ok=True)
+        self.data_csv = os.path.join(self.dir_path, 'BPD60320_FT.csv')
+        self.sum_csv = os.path.join(self.dir_path, 'Sum_093518.csv')
+        for p in (self.data_csv, self.sum_csv):
+            with open(p, 'w') as f:
+                f.write('a,b\n1,2\n')
+
+    def tearDown(self):
+        shutil.rmtree(self.dir_path, ignore_errors=True)
+
+    def test_predicate(self):
+        from apps.datafiles.views import _is_summary_csv, _is_data_csv
+        self.assertTrue(_is_summary_csv('Sum_093518.csv'))
+        self.assertTrue(_is_summary_csv('sum_x.csv'))
+        self.assertFalse(_is_summary_csv('BPD60320_FT.csv'))
+        self.assertFalse(_is_data_csv('Sum_1.csv'))
+        self.assertTrue(_is_data_csv('R2602280062_FT1.csv'))
+
+    def test_list_excludes_summary_from_count(self):
+        resp = self.client.get('/api/v1/batch-dirs/')
+        self.assertEqual(resp.status_code, 200)
+        entry = next((d for d in resp.data if d['name'] == self.dir_name), None)
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry['file_count'], 1)  # only the real data file
+
+    def test_import_skips_summary(self):
+        resp = self.client.post(
+            '/api/v1/batch-dirs/import/', {'dir_name': self.dir_name}, format='json'
+        )
+        self.assertEqual(resp.status_code, 201)
+        names = set(
+            DataFile.objects.filter(
+                owner=self.user, batch_name=self.dir_name
+            ).values_list('filename', flat=True)
+        )
+        self.assertEqual(names, {'BPD60320_FT.csv'})

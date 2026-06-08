@@ -1,4 +1,5 @@
 import api from './index'
+import type { DataFile } from '../types'
 
 export interface BatchDirInfo {
   name: string
@@ -6,6 +7,7 @@ export interface BatchDirInfo {
   file_count: number
   total_size: number
   registered: boolean
+  files: DataFile[]
 }
 
 export interface ListFilesParams {

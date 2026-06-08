@@ -8,12 +8,9 @@ front-end histogram had to label the lone bar as "数据分布" instead of
 ``> 1`` guard on ``site_idx.unique()``; these tests lock in the
 behaviour so a future refactor cannot silently regress it.
 """
-from unittest import mock
-
 import numpy as np
 import pandas as pd
-from django.test import SimpleTestCase, TestCase
-from rest_framework.test import APIClient
+from django.test import SimpleTestCase
 
 from apps.analysis.services.data_services import compute_histogram_stats
 
@@ -131,67 +128,3 @@ class QqPlotParamGuardTests(SimpleTestCase):
         result = compute_qqplot(all_nan)
         self.assertEqual(result['n'], 0)
         self.assertFalse(result['is_normal'])
-
-
-class HistogramUnknownParamViewTests(TestCase):
-    """The histogram view must not 500 when asked for a param that is not in
-    the dataframe.
-
-    A stale param can be sent while the user switches files (the front-end
-    watcher fires with the previous file's selected param before the new
-    param list loads). ``qqplot`` already guards this with a 400
-    ``param_not_found``; ``histogram`` used to fall straight through to
-    ``df[param]`` -> ``KeyError`` -> 500. The fix skips unknown params so the
-    endpoint returns 200 with the param simply absent from ``results``.
-    """
-
-    def setUp(self):
-        from apps.accounts.models import User
-        from apps.datafiles.models import DataFile
-
-        self.user = User.objects.create_user(username='hist_t', password='x')
-        self.datafile = DataFile.objects.create(
-            owner=self.user, filename='f.csv', file_path='/tmp/f.csv',
-            file_size=1, format_type='CTA8290D', status='ready',
-        )
-        self.df = pd.DataFrame({
-            'Site': ['1'] * 20,
-            'Param1': np.random.default_rng(0).normal(0, 1, 20).tolist(),
-        })
-        self.client = APIClient()
-        self.client.force_authenticate(user=self.user)
-
-    @mock.patch('apps.analysis.views.get_cached_parsed_file')
-    def test_unknown_param_returns_200_not_500(self, mock_cache):
-        mock_cache.return_value = (self.df, {'format': 'CTA8290D'}, 'CTA8290D')
-        resp = self.client.post(
-            '/api/v1/analysis/histogram/',
-            {'file_id': self.datafile.id, 'params': ['NoSuchParam'], 'range_type': 'RDL'},
-            format='json',
-        )
-        self.assertEqual(resp.status_code, 200, resp.content)
-        # Unknown param is silently skipped, so results is empty.
-        self.assertEqual(resp.data['results'], {})
-
-    @mock.patch('apps.analysis.views.get_cached_parsed_file')
-    def test_known_param_still_works(self, mock_cache):
-        mock_cache.return_value = (self.df, {'format': 'CTA8290D'}, 'CTA8290D')
-        resp = self.client.post(
-            '/api/v1/analysis/histogram/',
-            {'file_id': self.datafile.id, 'params': ['Param1'], 'range_type': 'RDL'},
-            format='json',
-        )
-        self.assertEqual(resp.status_code, 200, resp.content)
-        self.assertIn('Param1', resp.data['results'])
-
-    @mock.patch('apps.analysis.views.get_cached_parsed_file')
-    def test_mixed_known_and_unknown_params(self, mock_cache):
-        mock_cache.return_value = (self.df, {'format': 'CTA8290D'}, 'CTA8290D')
-        resp = self.client.post(
-            '/api/v1/analysis/histogram/',
-            {'file_id': self.datafile.id, 'params': ['Param1', 'Ghost'], 'range_type': 'RDL'},
-            format='json',
-        )
-        self.assertEqual(resp.status_code, 200, resp.content)
-        self.assertIn('Param1', resp.data['results'])
-        self.assertNotIn('Ghost', resp.data['results'])

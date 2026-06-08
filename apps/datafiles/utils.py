@@ -11,7 +11,10 @@ _PRODUCT_CODE_TOKEN = re.compile(r'^(B[A-Z]{1,2}\d+[A-Z0-9]*)')
 # Test program file extensions. The CSV header for every supported tester
 # exposes a "test program name" (TestFile / TestFileName / Data Sheet File /
 # Program:) that always points at a file with one of these extensions.
-_TEST_PROGRAM_EXTS = ('.pts', '.pgs', '.pds')
+# ``.cpts`` is the Chroma compound test-program spec emitted by CTA-series
+# testers (e.g. ``BPC61320A_FT_AAA_BPD60320XBAF_PD.cpts``); without it the
+# product code in such headers (``BPC61320A``) was silently dropped.
+_TEST_PROGRAM_EXTS = ('.pts', '.pgs', '.pds', '.cpts')
 
 
 def _match_product_code(text: str) -> str:

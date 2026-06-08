@@ -266,3 +266,11 @@
 - **Rule**: 共享图表 composable（useChart）**必须**支持「容器被 v-if 销毁后重建」——缓存实例前校验 `getDom()` 仍是当前 live 的 ref 元素，否则 dispose 重建。任何「图表组件用 v-if/v-else 切换容器 + 数据中途置 null」的组合都会触发此 bug。
 - **Rule**: 排查「请求 200 但图表空白」类问题，**先在真实浏览器复现并截图看渲染**，而不是只在后端 APIClient 里循环测 status code——纯前端渲染/生命周期 bug 在后端测不出来。
 - **Rule**: 两个相似端点（histogram / qqplot）做同一件事（按 param 取列），守卫必须**对齐**——一个有 `param not in df.columns` 守卫、另一个没有，就是 500 的温床。新增/复制端点时 grep 同类守卫。
+
+## quest.txt 四问题（图表空白 / 批次消失 / 当前文件下拉 / SFTP卡顿）2026-06-08
+
+- **图表「Can't get DOM width or height」根因 = 直接 `echarts.init` 而非 `initEchartsWhenReady`**：仪表盘单文件分析 5 组件直接 `echarts.init(el)` 一次性初始化；数据到达后 `nextTick` 时容器高度（`flex:1`/`calc(100%-42px)`）未确定 → clientHeight=0 → 报警+空白，布局撑开后不重绘。修复迁移到既有 `utils/echarts-init.ts initEchartsWhenReady`（ResizeObserver+rAF 轮询）。**Rule**: 项目已有零尺寸保护工具时新图表组件**禁止**裸调 `echarts.init`——grep `echarts.init` 找漏网。`AggregatedBinChart.vue` 是标准参照（buildOption + handle）。
+- **「SFTP 下载新批次后旧批次消失」是前端分页表现 bug，非数据丢失**：后端 `_register_file` 只新增、`list_batches` distinct 返回全部、磁盘各批独立目录——数据完好。但 `FileListTab/FileManager` 的 `batchGroups` 从**分页 20 条** `/files/?ordering=-created_at` 第 1 页分组，新文件占满首页就把旧批次挤出。**Rule**: 「列表项消失」先分清「数据没了」还是「分页/过滤没取到」——查后端 DB 实证（shell distinct）再动手。修复用磁盘走查的 `/batch-dirs/` 作分组源并扩展其返回每批 `files[]`，与分页解耦。
+- **e2e 中 `v-show` 多 tab 同时存在 DOM → 选择器命中隐藏副本**：DataManagement 的 view/export 用 `v-show`，两个 `.banner-file-select` 同时在 DOM，`.first()` 命中 `display:none` 的那个 → toBeVisible 永远 hidden。**Rule**: `v-show` 切 tab 时定位必须加 `.content-section:visible` 限定当前可见 section。
+- **EP 2.14 el-select 断言**：真 `<input>` 未聚焦时 hidden，可见性判断用 `.el-select__wrapper`；占位符与选中值**都**渲染在 `.el-select__placeholder`（选中后复用为值展示），`.el-select__selected-item` 同时匹配 input-wrapper + placeholder（strict 违例）。**Rule**: 可见性用 `.el-select__wrapper`，选中值用 `.el-select__placeholder` 文本。
+- **`vue-tsc --noEmit` vs `-b` 严格度不同**：`--noEmit`（单 tsconfig）过，但 `-b`（build mode）暴露更多既有错误（TS6133 未读变量、EChartsOption 字面量类型不兼容）。本仓库 `-b` 全量 build 本就有一堆前序未提交报错。**Rule**: 改动验证用 `--noEmit` 看自己范围；判断「是否我引入的回归」grep 自己改的文件名，别被既有 build 噪音误导，可疑时 `git stash` 对照。

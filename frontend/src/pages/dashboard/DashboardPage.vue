@@ -206,25 +206,39 @@ async function onFileChange() {
   }
 }
 
-onMounted(async () => {
+// Reconcile the file selection after the list (re)loads. Without this, after
+// deleting the viewed file the dashboard kept rendering stale `data` (old
+// filename/program) and a frozen update time, because the watcher only
+// reloaded the file list. Now we drop stale data and re-pick the latest file.
+async function reconcileSelection() {
   updateTime.value = new Date().toLocaleTimeString('zh-CN')
-  await loadFiles()
-  // Auto-select the latest file if nothing is already selected
-  if (files.value.length > 0) {
+  if (files.value.length === 0) {
+    selectedFileId.value = null
+    data.value = null
+    error.value = false
+    loading.value = false
+    return
+  }
+  if (!selectedFileId.value || !files.value.some((f) => f.id === selectedFileId.value)) {
     selectedFileId.value = files.value[0].id
     await onFileChange()
-  } else {
-    loading.value = false
   }
+}
+
+onMounted(async () => {
+  await loadFiles()
+  await reconcileSelection()
 })
 
-// SFTP 导入等外部操作后自动刷新文件列表
+// SFTP 导入 / 删除等外部操作后刷新文件列表并复核选择
 watch(() => filesStore.filesVersion, async () => {
   await loadFiles()
+  await reconcileSelection()
 })
-// keep-alive 页面激活时刷新文件列表
+// keep-alive 页面激活时刷新文件列表并复核选择
 onActivated(async () => {
   await loadFiles()
+  await reconcileSelection()
 })
 </script>
 

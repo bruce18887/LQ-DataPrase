@@ -21,7 +21,7 @@ export function useExport(
     window.URL.revokeObjectURL(url)
   }
 
-  async function exportSigmaLimit(sigma: number) {
+  async function exportSigmaLimit(sigma: number, options?: { onlyValidLimits?: boolean }) {
     const fileId = getSelectedFileId()
     if (!fileId) return
     exporting.value = true
@@ -29,7 +29,7 @@ export function useExport(
       const resp = await api.post('/export/sigma_limit/', {
         file_id: fileId,
         sigma,
-        only_valid_limits: true,
+        only_valid_limits: options?.onlyValidLimits ?? true,
       }, { responseType: 'blob' })
       const fname = extractFilename(resp.headers?.['content-disposition']) || `sigma_limit_${sigma}sigma.xlsx`
       downloadBlob(resp.data as Blob, fname)
@@ -40,7 +40,7 @@ export function useExport(
     }
   }
 
-  async function exportBatchCharts(params: string[], format: string, chartConfig?: Record<string, any>) {
+  async function exportBatchCharts(params: string[], format: string, options?: Record<string, any>) {
     const fileId = getSelectedFileId()
     if (!fileId) return
     exporting.value = true
@@ -49,7 +49,7 @@ export function useExport(
         file_id: fileId,
         params,
         format,
-        ...chartConfig,
+        ...(options || {}),
       }, { responseType: 'blob' })
       const fname = extractFilename(resp.headers?.['content-disposition']) || `batch_charts.${format === 'pptx' ? 'pptx' : 'xlsx'}`
       downloadBlob(resp.data as Blob, fname)
