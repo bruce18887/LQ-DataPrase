@@ -375,3 +375,69 @@ class SftpConfigSerializerKwargsTests(TestCase):
         self.assertEqual(instance.owner_id, self.user.id)
         # And 'other' has no config of that name.
         self.assertFalse(SftpConfig.objects.filter(owner=other, name='inject').exists())
+
+
+class SftpConnectionReuseTests(APITestCase):
+    """End-to-end: repeated list_files requests reuse one pooled connection."""
+
+    def setUp(self):
+        from apps.sftp import pool
+        self.pool = pool
+        self.user = User.objects.create_user(username='reuse', password='pw')
+        self.client.force_authenticate(self.user)
+        # Start with an empty pool so call counts are deterministic.
+        for uid in list(pool._pool.keys()):
+            pool._pool.pop(uid, None)
+
+    def tearDown(self):
+        for uid in list(self.pool._pool.keys()):
+            self.pool._pool.pop(uid, None)
+
+    def _fake_sftp(self):
+        sftp = mock.MagicMock(name='SFTPClient')
+        sftp.listdir_attr.return_value = []  # empty dir is fine for this test
+        return sftp
+
+    def test_two_list_requests_build_connection_once(self):
+        from apps.sftp import pool
+        transport = mock.MagicMock()
+        transport.is_active.return_value = True
+        ctor = mock.MagicMock(return_value=transport)
+        session = {'host': 'h', 'port': 22, 'username': 'u', 'password': 'p'}
+
+        with mock.patch.object(pool.paramiko, 'Transport', ctor), \
+                mock.patch.object(pool.paramiko, 'SFTPClient') as sftp_cls, \
+                mock.patch.object(pool, 'get_session', return_value=session):
+            sftp_cls.from_transport.return_value = self._fake_sftp()
+
+            r1 = self.client.get('/api/v1/sftp/list_files/?path=/')
+            r2 = self.client.get('/api/v1/sftp/list_files/?path=/sub')
+
+        self.assertEqual(r1.status_code, 200)
+        self.assertEqual(r2.status_code, 200)
+        # Second request reused the pooled connection: no second handshake.
+        self.assertEqual(ctor.call_count, 1)
+
+    def test_list_without_session_returns_not_connected(self):
+        from apps.sftp import pool
+        with mock.patch.object(pool, 'get_session', return_value=None):
+            resp = self.client.get('/api/v1/sftp/list_files/?path=/')
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json().get('error'), 'not_connected')
+
+    def test_disconnect_closes_pooled_connection(self):
+        from apps.sftp import pool
+        transport = mock.MagicMock()
+        transport.is_active.return_value = True
+        ctor = mock.MagicMock(return_value=transport)
+        session = {'host': 'h', 'port': 22, 'username': 'u', 'password': 'p'}
+
+        with mock.patch.object(pool.paramiko, 'Transport', ctor), \
+                mock.patch.object(pool.paramiko, 'SFTPClient') as sftp_cls, \
+                mock.patch.object(pool, 'get_session', return_value=session):
+            sftp_cls.from_transport.return_value = self._fake_sftp()
+            self.client.get('/api/v1/sftp/list_files/?path=/')
+            self.assertIn(self.user.id, pool._pool)
+            self.client.post('/api/v1/sftp/disconnect/')
+
+        self.assertNotIn(self.user.id, pool._pool)

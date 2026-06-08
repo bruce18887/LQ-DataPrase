@@ -10,9 +10,10 @@ from apps.datafiles.views import _register_file, _is_summary_csv
 logger = logging.getLogger(__name__)
 
 from apps.datafiles.views import _user_upload_dir
-from .cache import get_session, set_session, delete_session, SftpSessionCacheError
+from .cache import set_session, delete_session, SftpSessionCacheError
 from .config_views import SftpConfigMixin
 from .models import SftpConfig
+from . import pool
 
 CSV_EXTENSIONS = {'.csv'}
 
@@ -32,19 +33,16 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
 
     def _get_connection(self, request):
+        """Return a pooled, live SFTPClient for the user, or None.
+
+        Connection lifecycle is owned by ``apps.sftp.pool`` — callers must NOT
+        close the returned client. On operation failure, call
+        ``pool.invalidate(request.user.id)`` so the bad connection is rebuilt.
+        """
         try:
-            data = get_session(request.user.id)
-        except SftpSessionCacheError:
-            return None, None
-        if not data:
-            return None, None
-        try:
-            transport = paramiko.Transport((data['host'], data['port']))
-            transport.connect(username=data['username'], password=data['password'])
-            sftp = paramiko.SFTPClient.from_transport(transport)
-            return transport, sftp
-        except:
-            return None, None
+            return pool.get_connection(request.user.id)
+        except pool.SftpPoolError:
+            return None
 
     # ------------------------------------------------------------------
     # Connect / Disconnect
@@ -100,6 +98,7 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
     @action(detail=False, methods=['post'])
     def disconnect(self, request):
         delete_session(request.user.id)
+        pool.close(request.user.id)
         return Response({'status': 'disconnected'})
 
     # ------------------------------------------------------------------
@@ -112,7 +111,7 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
         sort_by = request.query_params.get('sort_by', 'name')
         sort_order = request.query_params.get('sort_order', 'asc')
 
-        transport, sftp = self._get_connection(request)
+        sftp = self._get_connection(request)
         if not sftp:
             return Response({'error': 'not_connected'}, status=400)
 
@@ -132,15 +131,9 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
             reverse = sort_order == 'desc'
             items.sort(key=lambda x: (not x['is_dir'], key_fn(x)), reverse=reverse)
 
-            sftp.close()
-            transport.close()
             return Response({'path': path, 'items': items})
         except Exception as e:
-            try:
-                sftp.close()
-                transport.close()
-            except:
-                pass
+            pool.invalidate(request.user.id)
             return Response({'error': str(e)}, status=400)
 
     # ------------------------------------------------------------------
@@ -153,7 +146,7 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
         if not _is_csv(remote_path):
             return Response({'error': '仅支持 CSV 文件'}, status=400)
 
-        transport, sftp = self._get_connection(request)
+        sftp = self._get_connection(request)
         if not sftp:
             return Response({'error': 'not_connected'}, status=400)
 
@@ -168,8 +161,6 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
 
             sftp.get(remote_path, file_path)
             file_size = os.path.getsize(file_path)
-            sftp.close()
-            transport.close()
             return Response({
                 'status': 'ok',
                 'filename': os.path.basename(file_path),
@@ -177,11 +168,7 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
                 'path': file_path,
             })
         except Exception as e:
-            try:
-                sftp.close()
-                transport.close()
-            except:
-                pass
+            pool.invalidate(request.user.id)
             return Response({'error': str(e)}, status=400)
 
     # ------------------------------------------------------------------
@@ -192,7 +179,7 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
     def download_dir(self, request):
         remote_path = request.data.get('path')
 
-        transport, sftp = self._get_connection(request)
+        sftp = self._get_connection(request)
         if not sftp:
             return Response({'error': 'not_connected'}, status=400)
 
@@ -201,8 +188,6 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
         self._collect_files(sftp, remote_path, file_list, '', True)
 
         if not file_list:
-            sftp.close()
-            transport.close()
             return Response({'error': '目录为空'}, status=400)
 
         dir_name = os.path.basename(remote_path.rstrip('/')) or 'download'
@@ -242,12 +227,13 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
                     except Exception as e:
                         logger.warning(f"SFTP download failed for {remote_fp}: {e}")
                         yield f"data: {json.dumps({'event': 'error', 'filename': os.path.basename(rel_path), 'message': str(e)})}\n\n"
-            finally:
-                try:
-                    sftp.close()
-                    transport.close()
-                except Exception:
-                    pass
+            except GeneratorExit:
+                # Client disconnected mid-stream: connection state is unreliable.
+                pool.invalidate(request.user.id)
+                raise
+            except Exception:
+                pool.invalidate(request.user.id)
+                raise
 
             yield f"data: {json.dumps({'event': 'done', 'dir_name': dir_name, 'file_count': success_count, 'total': total_files, 'saved_dir': local_dir})}\n\n"
 
@@ -271,7 +257,7 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
         if not paths:
             return Response({'error': '未选择文件'}, status=400)
 
-        transport, sftp = self._get_connection(request)
+        sftp = self._get_connection(request)
         if not sftp:
             return Response({'error': 'not_connected'}, status=400)
 
@@ -294,19 +280,13 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
                 except Exception as e:
                     logger.warning(f"SFTP batch download failed for {remote_path}: {e}")
 
-            sftp.close()
-            transport.close()
             return Response({
                 'status': 'ok',
                 'files': saved,
                 'count': len(saved),
             })
         except Exception as e:
-            try:
-                sftp.close()
-                transport.close()
-            except:
-                pass
+            pool.invalidate(request.user.id)
             return Response({'error': str(e)}, status=400)
 
     # ------------------------------------------------------------------
@@ -332,7 +312,7 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
             return Response({'error': '需要 path 或 paths 参数'}, status=400)
 
     def _single_download_parse(self, request, remote_path):
-        transport, sftp = self._get_connection(request)
+        sftp = self._get_connection(request)
         if not sftp:
             return Response({'error': 'not_connected'}, status=400)
 
@@ -348,8 +328,6 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
                 file_path = os.path.join(upload_dir, f"{name}_{ts}{ext}")
 
             sftp.get(remote_path, file_path)
-            sftp.close()
-            transport.close()
 
             datafile = _register_file(request.user, file_path, 'single')
             return Response({
@@ -357,15 +335,11 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
                 'files': [{'id': datafile.id, 'filename': datafile.filename}],
             })
         except Exception as e:
-            try:
-                sftp.close()
-                transport.close()
-            except:
-                pass
+            pool.invalidate(request.user.id)
             return Response({'error': str(e)}, status=400)
 
     def _batch_download_parse(self, request, paths):
-        transport, sftp = self._get_connection(request)
+        sftp = self._get_connection(request)
         if not sftp:
             return Response({'error': 'not_connected'}, status=400)
 
@@ -393,19 +367,13 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
                 except:
                     continue
 
-            sftp.close()
-            transport.close()
             return Response({
                 'status': 'ok',
                 'batch_name': batch_name,
                 'files': created,
             })
         except Exception as e:
-            try:
-                sftp.close()
-                transport.close()
-            except:
-                pass
+            pool.invalidate(request.user.id)
             return Response({'error': str(e)}, status=400)
 
     # ------------------------------------------------------------------
