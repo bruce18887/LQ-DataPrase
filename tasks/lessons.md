@@ -1,5 +1,13 @@
 # Lessons Learned
 
+## SFTP — 每次请求重建连接导致点击卡顿
+
+- **Bug**: `SftpViewSet._get_connection` 每个请求都新建 `paramiko.Transport` 完成完整 SSH 握手（多个网络往返 ~300–500ms），用完即 `close()`。凭据虽缓存，但**连接本身没复用**，每次点击进目录都重付握手延迟（与带宽无关）。
+- **Fix**: 新增 `apps/sftp/pool.py` 进程内连接池，按 `user_id` 复用。复用前校验 `transport.is_active()` + 空闲 TTL（默认 300s），死/旧则用缓存凭据重建；操作失败调 `pool.invalidate` 丢弃坏连接；`disconnect` 调 `pool.close`。
+- **Rule**: 部署用 gunicorn **sync** worker（`--workers N` 无 `-k`），单 worker 串行处理请求 → 连接池**无需加锁**。若改用 gthread/gevent worker，paramiko 非线程安全，必须补 per-user 锁（已在 pool.py docstring 注明）。
+- **Rule**: SSE 流式下载（`download_dir`）的 generator 正常结束**不关连接**（留池复用），仅在 `GeneratorExit`/异常时 `invalidate`（流式中途连接状态不可靠）。
+- **Rule**: 改连接获取签名后，注意清理 views.py 里不再使用的 import（如 `get_session` 移到 pool 后）。
+
 ## 后端重构 — views.py 按职责拆分
 
 - **问题**: analysis/views.py 1383 行，gage/views.py 638 行，buyoff/views.py 482 行，export/views.py 525 行。一个文件混了请求解析、业务逻辑、Excel 布局三种职责。
