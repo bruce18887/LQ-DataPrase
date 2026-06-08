@@ -33,6 +33,7 @@ class DataFile(models.Model):
     format_type = models.CharField(max_length=20, choices=FORMAT_CHOICES)
     file_type = models.CharField(max_length=10, choices=FILE_TYPE_CHOICES, default='single')
     batch_name = models.CharField(max_length=255, blank=True, default='')
+    sub_batch = models.CharField(max_length=255, blank=True, default='', help_text='子批次名称（子目录名）')
     row_count = models.IntegerField(null=True, blank=True)
     col_count = models.IntegerField(null=True, blank=True)
     program_name = models.CharField(max_length=255, blank=True, default='')

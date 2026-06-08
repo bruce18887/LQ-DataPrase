@@ -6,6 +6,7 @@ from apps.datafiles.views import (
     BatchDirImportView,
     BatchDirListView,
     DataBrowserView,
+    DataConsistencyCheckView,
     DataFileViewSet,
     FileActivateView,
     FileUploadView,
@@ -24,4 +25,5 @@ urlpatterns = [
     path('batch-dirs/', BatchDirListView.as_view(), name='batch-dir-list'),
     path('batch-dirs/import/', BatchDirImportView.as_view(), name='batch-dir-import'),
     path('batch-dirs/<str:dir_name>/', BatchDirDeleteView.as_view(), name='batch-dir-delete'),
+    path('consistency-check/', DataConsistencyCheckView.as_view(), name='consistency-check'),
 ]

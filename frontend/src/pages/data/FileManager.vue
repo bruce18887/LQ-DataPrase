@@ -39,49 +39,77 @@
 
     <!-- Batch files grouped (registered) -->
     <template v-if="batchGroups.length > 0">
-      <div class="section-label">📦 已导入批次</div>
-      <div v-for="group in batchGroups" :key="group.name" class="batch-group">
-        <div class="batch-header">
+      <div class="section-label-row">
+        <span class="section-label">📦 已导入批次</span>
+        <el-button
+          size="small"
+          text
+          class="batch-toggle-all"
+          data-testid="batch-toggle-all"
+          @click="toggleAllBatches"
+        >
+          <el-icon><component :is="allBatchesExpanded ? ArrowUp : ArrowDown" /></el-icon>
+          {{ allBatchesExpanded ? '全部折叠' : '全部展开' }}
+        </el-button>
+      </div>
+      <div v-for="group in batchGroups" :key="group.name" class="batch-group" :data-testid="`batch-group-${group.name}`">
+        <div
+          class="batch-header batch-header-clickable"
+          role="button"
+          tabindex="0"
+          :aria-expanded="isBatchExpanded(group.name)"
+          :data-testid="`batch-header-${group.name}`"
+          @click="toggleBatch(group.name)"
+          @keydown.enter.prevent="toggleBatch(group.name)"
+          @keydown.space.prevent="toggleBatch(group.name)"
+        >
+          <el-icon class="batch-chevron" :class="{ 'batch-chevron-open': isBatchExpanded(group.name) }">
+            <ArrowRight />
+          </el-icon>
           <span class="batch-name">📦 {{ group.name }}</span>
           <span class="batch-count">{{ group.files.length }} 个文件</span>
           <div style="flex:1" />
-          <el-button size="small" type="danger" plain @click="deleteBatch(group)">
+          <el-button size="small" type="danger" plain @click.stop="deleteBatch(group)">
             <el-icon><Delete /></el-icon> 删除批次
           </el-button>
         </div>
-        <el-row :gutter="12">
-          <el-col :span="8" v-for="f in group.files" :key="f.id">
-            <el-card shadow="hover" :class="{ 'active-file': f.id === activeFileId }">
-              <div style="font-weight:bold; color: var(--text-primary)">{{ f.filename }}</div>
-              <div style="color: var(--text-secondary); font-size:12px; margin:4px 0">
-                {{ f.format_type }} | {{ f.row_count }}行×{{ f.col_count }}列
-              </div>
-              <div style="color: var(--text-secondary); font-size:12px" v-if="f.program_name" class="program-name">{{ f.program_name }}</div>
-              <div v-if="f.tags && f.tags.length" class="tag-row">
-                <el-tag
-                  v-for="t in f.tags"
-                  :key="t"
-                  size="small"
-                  type="info"
-                  effect="plain"
-                  class="file-tag"
-                >{{ t }}</el-tag>
-              </div>
-              <el-row :gutter="8" style="margin-top:8px">
-                <el-col :span="16">
-                  <el-button size="small" type="primary" @click="emit('file-selected', f.id)" style="width: 100%">
-                    {{ f.id === activeFileId ? '✓ 当前文件' : '浏览数据' }}
-                  </el-button>
-                </el-col>
-                <el-col :span="8">
-                  <el-button size="small" type="danger" @click="deleteFile(f)" aria-label="删除文件">
-                    <el-icon><Delete /></el-icon>
-                  </el-button>
-                </el-col>
-              </el-row>
-            </el-card>
-          </el-col>
-        </el-row>
+        <el-collapse-transition>
+          <div v-show="isBatchExpanded(group.name)" class="batch-files-grid" :data-testid="`batch-files-${group.name}`">
+            <el-row :gutter="12">
+              <el-col :span="8" v-for="f in group.files" :key="f.id">
+                <el-card shadow="hover" :class="{ 'active-file': f.id === activeFileId }">
+                  <div style="font-weight:bold; color: var(--text-primary)">{{ f.filename }}</div>
+                  <div style="color: var(--text-secondary); font-size:12px; margin:4px 0">
+                    {{ f.format_type }} | {{ f.row_count }}行×{{ f.col_count }}列
+                  </div>
+                  <div style="color: var(--text-secondary); font-size:12px" v-if="f.program_name" class="program-name">{{ f.program_name }}</div>
+                  <div v-if="f.tags && f.tags.length" class="tag-row">
+                    <el-tag
+                      v-for="t in f.tags"
+                      :key="t"
+                      size="small"
+                      type="info"
+                      effect="plain"
+                      class="file-tag"
+                    >{{ t }}</el-tag>
+                  </div>
+                  <el-row :gutter="8" style="margin-top:8px">
+                    <el-col :span="16">
+                      <el-button size="small" type="primary" @click="emit('file-selected', f.id)" style="width: 100%">
+                        {{ f.id === activeFileId ? '✓ 当前文件' : '浏览数据' }}
+                      </el-button>
+                    </el-col>
+                    <el-col :span="8">
+                      <el-button size="small" type="danger" @click.stop="deleteFile(f)" aria-label="删除文件">
+                        <el-icon><Delete /></el-icon>
+                      </el-button>
+                    </el-col>
+                  </el-row>
+                </el-card>
+              </el-col>
+            </el-row>
+          </div>
+        </el-collapse-transition>
       </div>
     </template>
 
@@ -111,7 +139,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { UploadFilled, Delete, Upload } from '@element-plus/icons-vue'
+import { UploadFilled, Delete, Upload, ArrowRight, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { datafilesApi, type BatchDirInfo } from '../../api/datafiles'
 import { useFilesStore } from '../../stores/files'
@@ -165,6 +193,37 @@ const batchGroups = computed(() =>
     .filter(d => d.registered)
     .map(d => ({ name: d.name, files: d.files })),
 )
+
+// 已导入批次默认折叠：单批次可能含 100+ 文件，全部展开会撑高页面。
+// 用户点击 header 单独展开需要的批次。
+const expandedBatches = ref<Set<string>>(new Set())
+
+function isBatchExpanded(name: string) {
+  return expandedBatches.value.has(name)
+}
+
+function toggleBatch(name: string) {
+  const next = new Set(expandedBatches.value)
+  if (next.has(name)) {
+    next.delete(name)
+  } else {
+    next.add(name)
+  }
+  expandedBatches.value = next
+}
+
+const allBatchesExpanded = computed(() => {
+  if (batchGroups.value.length === 0) return false
+  return batchGroups.value.every((g) => expandedBatches.value.has(g.name))
+})
+
+function toggleAllBatches() {
+  if (allBatchesExpanded.value) {
+    expandedBatches.value = new Set()
+  } else {
+    expandedBatches.value = new Set(batchGroups.value.map((g) => g.name))
+  }
+}
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return bytes + ' B'
@@ -226,6 +285,12 @@ async function loadBatchDirs() {
   try {
     const { data } = await datafilesApi.listBatchDirs()
     batchDirs.value = Array.isArray(data) ? data : []
+    // 清理已不存在的批次
+    const valid = new Set(batchGroups.value.map((g) => g.name))
+    const filtered = new Set([...expandedBatches.value].filter((n) => valid.has(n)))
+    if (filtered.size !== expandedBatches.value.size) {
+      expandedBatches.value = filtered
+    }
   } catch {
     // silently ignore
   }
@@ -368,6 +433,58 @@ onMounted(() => {
   margin-bottom: 12px;
 }
 
+.batch-header-clickable {
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 6px;
+  margin-left: -6px;
+  margin-right: -6px;
+  border-radius: 6px;
+  transition: background-color 0.15s ease;
+}
+
+.batch-header-clickable:hover {
+  background: var(--bg-primary);
+}
+
+.batch-header-clickable:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
+.batch-chevron {
+  font-size: 14px;
+  color: var(--text-tertiary);
+  transition: transform 0.2s ease, color 0.2s ease;
+  flex-shrink: 0;
+}
+
+.batch-chevron-open {
+  transform: rotate(90deg);
+  color: var(--brand-primary);
+}
+
+.section-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.section-label-row .section-label {
+  margin-bottom: 0;
+}
+
+.batch-toggle-all {
+  font-size: 12px;
+}
+
+.batch-files-grid {
+  /* 折叠/展开动画期间让 el-row 不溢出 */
+  overflow: hidden;
+}
+
 .batch-name {
   font-size: 14px;
   font-weight: 600;
@@ -411,5 +528,24 @@ onMounted(() => {
 
 :deep(.el-card:hover) {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+/* ============================
+   Night Theme Overrides
+   ============================ */
+:root[data-theme="night"] .batch-header-clickable:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+:root[data-theme="night"] .batch-chevron {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+:root[data-theme="night"] .batch-chevron-open {
+  color: var(--brand-primary);
+}
+
+:root[data-theme="night"] .batch-count {
+  background: rgba(255, 255, 255, 0.08);
 }
 </style>

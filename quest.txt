@@ -1,4 +1,5 @@
-1、SFTP下载了一个数据media\data\admin\batch\MP01-2606030002，控制台出现报错，信息为SiteYieldAnalysis.vue:80 [ECharts] Can't get DOM width or height. Please check dom.clientWidth and dom.clientHeight. They should not be 0.For example, you may need to call this in the callback of window.onload.BinDistribution.vue:60 [ECharts] Can't get DOM width or height. Please check dom.clientWidth and dom.clientHeight. They should not be 0.For example, you may need to call this in the callback of window.onload.BinSiteCrossTable.vue:82 [ECharts] Can't get DOM width or height. Please check dom.clientWidth and dom.clientHeight. They should not be 0.For example, you may need to call this in the callback of window.onload.等，然后我发现仪表盘的单文件分析有几个echarts看不到，空白
-2、SFTP下载一个批次后，旧的批次将不在已导入批次中显示，需要保留这样方便管理
-3、查看数据tab和导出工具tab的当前文件换成一个下拉框来进行选择文件
-4、SFTP浏览器每次点击都会有卡顿感，但我的网络很流畅需要分析下，不作为此次重点
+1、我导入了media\data\admin\batch\MP01-2605290015但文件列表没有显示产品名，是不是产品名的提取逻辑问题(先测试文件，再文件名)
+2、删除批次需要把该批次的文件夹也删掉比如media\data\admin\batch\MP01-2606030002就是删除留下来的
+3、你看media\data\admin\batch\MP01-2605290015里面是有很多子批次的，我们的文件批次管理能否适配子批次
+4、有时候e2e测试会搞得数据库和目前数据路径的文件匹配不上，比如media下没有的文件，而网页中会有
+5、帮我再分析和思考一下目前数据管理部分的流程还有没有问题，如有必要可以给出计划我来觉得进行优化

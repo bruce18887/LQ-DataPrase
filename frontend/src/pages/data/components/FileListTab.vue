@@ -49,6 +49,14 @@
           <el-icon><Delete /></el-icon>
           批量删除{{ selectedIds.length ? ` (${selectedIds.length})` : '' }}
         </el-button>
+        <el-button
+          type="warning"
+          plain
+          @click="showConsistencyCheck = true"
+        >
+          <el-icon><Tools /></el-icon>
+          数据修复
+        </el-button>
       </div>
     </div>
 
@@ -98,28 +106,83 @@
 
         <!-- Batch files grouped (registered) -->
         <template v-if="batchGroups.length > 0">
-          <div class="section-label">📦 已导入批次</div>
-          <div v-for="group in batchGroups" :key="group.name" class="batch-group">
-            <div class="batch-header">
+          <div class="section-label-row">
+            <span class="section-label">📦 已导入批次</span>
+            <el-button
+              size="small"
+              text
+              class="batch-toggle-all"
+              :data-testid="'batch-toggle-all'"
+              @click="toggleAllBatches"
+            >
+              <el-icon><component :is="allBatchesExpanded ? ArrowUp : ArrowDown" /></el-icon>
+              {{ allBatchesExpanded ? '全部折叠' : '全部展开' }}
+            </el-button>
+          </div>
+          <div v-for="group in batchGroups" :key="group.name" class="batch-group" :data-testid="`batch-group-${group.name}`">
+            <div
+              class="batch-header batch-header-clickable"
+              role="button"
+              tabindex="0"
+              :aria-expanded="isBatchExpanded(group.name)"
+              :data-testid="`batch-header-${group.name}`"
+              @click="toggleBatch(group.name)"
+              @keydown.enter.prevent="toggleBatch(group.name)"
+              @keydown.space.prevent="toggleBatch(group.name)"
+            >
+              <el-icon class="batch-chevron" :class="{ 'batch-chevron-open': isBatchExpanded(group.name) }">
+                <ArrowRight />
+              </el-icon>
               <span class="batch-name">📦 {{ group.name }}</span>
               <span class="batch-count">{{ group.files.length }} 个文件</span>
               <div style="flex:1" />
-              <el-button size="small" type="danger" plain @click="deleteBatch(group)">
+              <el-button
+                size="small"
+                type="danger"
+                plain
+                @click.stop="deleteBatch(group)"
+              >
                 <el-icon><Delete /></el-icon> 删除批次
               </el-button>
             </div>
-            <div class="batch-files">
-              <el-tag
-                v-for="f in group.files"
-                :key="f.id"
-                :type="f.id === activeFileId ? 'primary' : 'info'"
-                :effect="f.id === activeFileId ? 'dark' : 'plain'"
-                class="batch-file-tag"
-                @click="emit('file-selected', f.id)"
-              >
-                {{ f.filename }}
-              </el-tag>
-            </div>
+            <el-collapse-transition>
+              <div v-show="isBatchExpanded(group.name)" class="batch-files" :data-testid="`batch-files-${group.name}`">
+                <!-- 有子批次时按子批次分组显示 -->
+                <template v-if="group.subBatches && group.subBatches.length > 0">
+                  <div v-for="sub in group.subBatches" :key="sub.name" class="sub-batch-group">
+                    <div class="sub-batch-header">
+                      <span class="sub-batch-name">📁 {{ sub.name }}</span>
+                      <span class="sub-batch-count">{{ sub.files.length }} 个文件</span>
+                    </div>
+                    <div class="sub-batch-files">
+                      <el-tag
+                        v-for="f in sub.files"
+                        :key="f.id"
+                        :type="f.id === activeFileId ? 'primary' : 'info'"
+                        :effect="f.id === activeFileId ? 'dark' : 'plain'"
+                        class="batch-file-tag"
+                        @click="emit('file-selected', f.id)"
+                      >
+                        {{ f.filename }}
+                      </el-tag>
+                    </div>
+                  </div>
+                </template>
+                <!-- 无子批次时直接显示文件列表 -->
+                <template v-else>
+                  <el-tag
+                    v-for="f in group.files"
+                    :key="f.id"
+                    :type="f.id === activeFileId ? 'primary' : 'info'"
+                    :effect="f.id === activeFileId ? 'dark' : 'plain'"
+                    class="batch-file-tag"
+                    @click="emit('file-selected', f.id)"
+                  >
+                    {{ f.filename }}
+                  </el-tag>
+                </template>
+              </div>
+            </el-collapse-transition>
           </div>
         </template>
       </div>
@@ -271,12 +334,135 @@
         @current-change="onPageChange"
       />
     </div>
+
+    <!-- 数据一致性检查对话框 -->
+    <el-dialog
+      v-model="showConsistencyCheck"
+      title="数据一致性检查"
+      width="700px"
+      :close-on-click-modal="false"
+    >
+      <div v-if="!consistencyResult" v-loading="checkingConsistency">
+        <el-alert
+          title="数据一致性检查"
+          description="检查数据库记录与磁盘文件的一致性，修复可能的数据不一致问题。"
+          type="info"
+          :closable="false"
+          style="margin-bottom: 16px;"
+        />
+        <el-button type="primary" @click="runConsistencyCheck" :loading="checkingConsistency">
+          开始检查
+        </el-button>
+      </div>
+      <div v-else>
+        <el-descriptions :column="2" border style="margin-bottom: 16px;">
+          <el-descriptions-item label="孤立数据库记录">
+            <el-tag :type="consistencyResult.orphaned_db_count > 0 ? 'danger' : 'success'">
+              {{ consistencyResult.orphaned_db_count }} 条
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="孤立磁盘文件">
+            <el-tag :type="consistencyResult.orphaned_disk_count > 0 ? 'warning' : 'success'">
+              {{ consistencyResult.orphaned_disk_count }} 个
+            </el-tag>
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <!-- 孤立数据库记录 -->
+        <el-card v-if="consistencyResult.orphaned_db_count > 0" style="margin-bottom: 16px;">
+          <template #header>
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <span style="font-weight: 600;">孤立数据库记录</span>
+              <el-tag type="danger" size="small">磁盘文件已删除</el-tag>
+            </div>
+          </template>
+          <el-alert
+            title="这些记录对应的磁盘文件已不存在，删除后无法恢复。"
+            type="warning"
+            :closable="false"
+            show-icon
+            style="margin-bottom: 12px;"
+          />
+          <el-table :data="consistencyResult.orphaned_db" max-height="200" size="small">
+            <el-table-column prop="filename" label="文件名" min-width="200" />
+            <el-table-column prop="batch_name" label="批次" width="150" />
+          </el-table>
+          <div style="margin-top: 12px; padding: 12px; background: var(--bg-secondary); border-radius: 8px;">
+            <el-checkbox v-model="confirmDeleteOrphanedDb" style="margin-bottom: 8px;">
+              <span style="color: var(--color-danger); font-weight: 600;">
+                我已确认要删除这 {{ consistencyResult.orphaned_db_count }} 条孤立记录
+              </span>
+            </el-checkbox>
+            <el-button
+              type="danger"
+              size="small"
+              :disabled="!confirmDeleteOrphanedDb"
+              @click="fixConsistency('delete_orphaned_db')"
+              :loading="fixing"
+            >
+              <el-icon><Delete /></el-icon> 删除孤立记录
+            </el-button>
+          </div>
+        </el-card>
+
+        <!-- 孤立磁盘文件 -->
+        <el-card v-if="consistencyResult.orphaned_disk_count > 0" style="margin-bottom: 16px;">
+          <template #header>
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <span style="font-weight: 600;">孤立磁盘文件</span>
+              <el-tag type="warning" size="small">数据库中无记录</el-tag>
+            </div>
+          </template>
+          <el-alert
+            title="这些文件在数据库中没有记录，删除后无法通过网页恢复。"
+            type="warning"
+            :closable="false"
+            show-icon
+            style="margin-bottom: 12px;"
+          />
+          <el-table :data="consistencyResult.orphaned_disk.map(p => ({ path: p }))" max-height="200" size="small">
+            <el-table-column prop="path" label="文件路径" />
+          </el-table>
+          <div style="margin-top: 12px; padding: 12px; background: var(--bg-secondary); border-radius: 8px;">
+            <el-checkbox v-model="confirmDeleteOrphanedDisk" style="margin-bottom: 8px;">
+              <span style="color: var(--color-warning); font-weight: 600;">
+                我已确认要删除这 {{ consistencyResult.orphaned_disk_count }} 个孤立文件
+              </span>
+            </el-checkbox>
+            <el-button
+              type="warning"
+              size="small"
+              :disabled="!confirmDeleteOrphanedDisk"
+              @click="fixConsistency('delete_orphaned_disk')"
+              :loading="fixing"
+            >
+              <el-icon><Delete /></el-icon> 删除孤立文件
+            </el-button>
+          </div>
+        </el-card>
+
+        <!-- 无问题 -->
+        <div v-if="consistencyResult.orphaned_db_count === 0 && consistencyResult.orphaned_disk_count === 0"
+             style="text-align: center; padding: 30px;">
+          <el-icon :size="64" style="color: var(--color-success);"><CircleCheck /></el-icon>
+          <p style="color: var(--text-primary); margin-top: 12px; font-size: 16px;">
+            数据一致性检查通过，无问题发现。
+          </p>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showConsistencyCheck = false">关闭</el-button>
+        <el-button v-if="consistencyResult" type="primary" @click="consistencyResult = null">
+          重新检查
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
-import { Search, Delete, Upload, UploadFilled, Plus } from '@element-plus/icons-vue'
+import { Search, Delete, Upload, UploadFilled, Plus, ArrowRight, ArrowDown, ArrowUp, Tools, CircleCheck } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox, type ElTable } from 'element-plus'
 import { datafilesApi, type BatchDirInfo } from '../../../api/datafiles'
 import { useFilesStore } from '../../../stores/files'
@@ -313,9 +499,52 @@ let searchTimer: ReturnType<typeof setTimeout> | undefined
 const showUpload = ref(false)
 const uploadProgress = ref(0)
 
+// Data consistency check state
+const showConsistencyCheck = ref(false)
+const checkingConsistency = ref(false)
+const fixing = ref(false)
+const confirmDeleteOrphanedDb = ref(false)
+const confirmDeleteOrphanedDisk = ref(false)
+const consistencyResult = ref<{
+  orphaned_db_count: number
+  orphaned_disk_count: number
+  orphaned_db: Array<{ id: number; filename: string; batch_name: string; file_path: string }>
+  orphaned_disk: string[]
+} | null>(null)
+
 // Batch management state
 const batchDirs = ref<BatchDirInfo[]>([])
 const importingDir = ref('')
+// 已导入批次默认折叠：单批次可能含 100+ 文件，全部展开会撑高页面。
+// 用户点击 header 单独展开需要的批次。
+const expandedBatches = ref<Set<string>>(new Set())
+
+function isBatchExpanded(name: string) {
+  return expandedBatches.value.has(name)
+}
+
+function toggleBatch(name: string) {
+  const next = new Set(expandedBatches.value)
+  if (next.has(name)) {
+    next.delete(name)
+  } else {
+    next.add(name)
+  }
+  expandedBatches.value = next
+}
+
+const allBatchesExpanded = computed(() => {
+  if (batchGroups.value.length === 0) return false
+  return batchGroups.value.every((g) => expandedBatches.value.has(g.name))
+})
+
+function toggleAllBatches() {
+  if (allBatchesExpanded.value) {
+    expandedBatches.value = new Set()
+  } else {
+    expandedBatches.value = new Set(batchGroups.value.map((g) => g.name))
+  }
+}
 
 // Tag editing state
 const editingId = ref<number | null>(null)
@@ -340,12 +569,32 @@ function truncateMiddle(s: string, max: number) {
 const unregisteredDirs = computed(() => batchDirs.value.filter(d => !d.registered))
 
 // 已导入批次直接来自 batch-dirs（磁盘走查，返回全部批次），不再依赖分页 files —
-// 否则新下载文件占满第 1 页后，旧批次被挤出列表而“消失”。
-const batchGroups = computed(() =>
-  batchDirs.value
-    .filter(d => d.registered)
-    .map(d => ({ name: d.name, files: d.files })),
-)
+// 否则新下载文件占满第 1 页后，旧批次被挤出列表而”消失”。
+// 支持子批次：按 sub_batch 字段分组显示
+const batchGroups = computed(() => {
+  const registered = batchDirs.value.filter(d => d.registered)
+  return registered.map(d => {
+    // 按 sub_batch 分组
+    const subBatchMap = new Map<string, any[]>()
+    for (const f of d.files) {
+      const sub = f.sub_batch || ''
+      if (!subBatchMap.has(sub)) {
+        subBatchMap.set(sub, [])
+      }
+      subBatchMap.get(sub)!.push(f)
+    }
+    // 如果只有一个子批次（或无子批次），保持原有结构
+    if (subBatchMap.size <= 1) {
+      return { name: d.name, files: d.files, subBatches: [] }
+    }
+    // 多个子批次时，返回子批次分组
+    const subBatches = Array.from(subBatchMap.entries()).map(([sub, files]) => ({
+      name: sub,
+      files,
+    }))
+    return { name: d.name, files: d.files, subBatches }
+  })
+})
 
 // Load files
 async function loadFiles() {
@@ -388,6 +637,12 @@ async function loadBatchDirs() {
   try {
     const { data } = await datafilesApi.listBatchDirs()
     batchDirs.value = Array.isArray(data) ? data : []
+    // 清理已不存在的批次（用户可能在别的 tab 删了批次）
+    const valid = new Set(batchGroups.value.map((g) => g.name))
+    const filtered = new Set([...expandedBatches.value].filter((n) => valid.has(n)))
+    if (filtered.size !== expandedBatches.value.size) {
+      expandedBatches.value = filtered
+    }
   } catch {
     batchDirs.value = []
   }
@@ -432,16 +687,50 @@ async function deleteBatch(group: { name: string; files: any[] }) {
       '确认删除批次',
       { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
     )
-    for (const f of group.files) {
-      try { await datafilesApi.remove(f.id) } catch {}
-    }
+    // 调用 deleteBatchDir API，一次性删除目录和所有数据库记录
+    await datafilesApi.deleteBatchDir(group.name)
     ElMessage.success(`批次 "${group.name}" 已删除`)
-    await loadFiles()
+    await Promise.all([loadFiles(), loadBatchDirs()])
     filesStore.notifyFilesChanged()
   } catch (e: any) {
     if (e !== 'cancel') {
-      ElMessage.error('删除失败')
+      ElMessage.error(e?.response?.data?.error || '删除失败')
     }
+  }
+}
+
+// Data consistency check
+async function runConsistencyCheck() {
+  checkingConsistency.value = true
+  confirmDeleteOrphanedDb.value = false
+  confirmDeleteOrphanedDisk.value = false
+  try {
+    const { data } = await datafilesApi.checkConsistency()
+    consistencyResult.value = data
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || '检查失败')
+  } finally {
+    checkingConsistency.value = false
+  }
+}
+
+async function fixConsistency(action: 'delete_orphaned_db' | 'delete_orphaned_disk') {
+  const actionLabel = action === 'delete_orphaned_db' ? '孤立数据库记录' : '孤立磁盘文件'
+  try {
+    fixing.value = true
+    const { data } = await datafilesApi.fixConsistency(action)
+    ElMessage.success(`已删除 ${data.deleted_count} 个${actionLabel}`)
+    // 重置确认状态
+    confirmDeleteOrphanedDb.value = false
+    confirmDeleteOrphanedDisk.value = false
+    // 重新检查
+    await runConsistencyCheck()
+    await Promise.all([loadFiles(), loadBatchDirs()])
+    filesStore.notifyFilesChanged()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || '修复失败')
+  } finally {
+    fixing.value = false
   }
 }
 
@@ -749,6 +1038,53 @@ defineExpose({ reload: loadFiles })
   margin-bottom: 12px;
 }
 
+.batch-header-clickable {
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 6px;
+  margin-left: -6px;
+  margin-right: -6px;
+  border-radius: 6px;
+  transition: background-color 0.15s ease;
+}
+
+.batch-header-clickable:hover {
+  background: var(--bg-primary);
+}
+
+.batch-header-clickable:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
+.batch-chevron {
+  font-size: 14px;
+  color: var(--text-tertiary);
+  transition: transform 0.2s ease, color 0.2s ease;
+  flex-shrink: 0;
+}
+
+.batch-chevron-open {
+  transform: rotate(90deg);
+  color: var(--brand-primary);
+}
+
+.section-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.section-label-row .section-label {
+  margin-bottom: 0;
+}
+
+.batch-toggle-all {
+  font-size: 12px;
+}
+
 .batch-name {
   font-size: 14px;
   font-weight: 600;
@@ -782,6 +1118,42 @@ defineExpose({ reload: loadFiles })
 
 .batch-file-tag:hover {
   transform: translateY(-1px);
+}
+
+/* 子批次样式 */
+.sub-batch-group {
+  margin-bottom: 12px;
+  padding: 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-muted);
+  border-radius: 8px;
+}
+
+.sub-batch-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.sub-batch-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.sub-batch-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  padding: 2px 6px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+}
+
+.sub-batch-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 /* ============================
@@ -972,5 +1344,17 @@ defineExpose({ reload: loadFiles })
 
 :root[data-theme="night"] .batch-group.unregistered {
   border-left-color: var(--color-warning);
+}
+
+:root[data-theme="night"] .batch-header-clickable:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+:root[data-theme="night"] .batch-chevron {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+:root[data-theme="night"] .batch-chevron-open {
+  color: var(--brand-primary);
 }
 </style>

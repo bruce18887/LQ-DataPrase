@@ -24,9 +24,11 @@ export interface DataFile {
   format_type: string
   file_type: string
   batch_name: string
+  sub_batch?: string
   row_count: number
   col_count: number
   program_name: string
+  product_code?: string
   status: string
   created_at: string
   tags?: string[]
