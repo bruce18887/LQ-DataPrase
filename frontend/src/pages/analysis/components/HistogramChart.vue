@@ -125,6 +125,7 @@ function buildOption() {
 }
 
 const { chartRef } = useChart(buildOption, [() => props.result, () => props.chartConfig, () => props.rangeType, () => props.barWidthPercent, () => props.selectedParam])
+void chartRef // bound to <div ref="chartRef"> in template
 </script>
 
 <style scoped>

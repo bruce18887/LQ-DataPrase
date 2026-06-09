@@ -598,6 +598,43 @@ class BatchDirDeleteView(APIView):
         })
 
 
+class SubBatchDeleteView(APIView):
+    """Delete a sub-batch (subdirectory) from a batch directory."""
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, batch_name, sub_batch_name):
+        batch_base = _user_upload_dir(request.user, 'batch')
+        batch_dir = os.path.join(batch_base, batch_name)
+        sub_batch_dir = os.path.join(batch_dir, sub_batch_name)
+
+        if not os.path.isdir(batch_dir):
+            return Response({'error': f'批次目录 "{batch_name}" 不存在'}, status=404)
+
+        if not os.path.isdir(sub_batch_dir):
+            return Response({'error': f'子批次目录 "{sub_batch_name}" 不存在'}, status=404)
+
+        # Use transaction to ensure consistency
+        with transaction.atomic():
+            # Delete DataFile records for this sub-batch
+            deleted_count, _ = DataFile.objects.filter(
+                owner=request.user,
+                file_type='batch',
+                batch_name=batch_name,
+                sub_batch=sub_batch_name,
+            ).delete()
+
+        # Delete sub-batch directory from disk
+        shutil.rmtree(sub_batch_dir, ignore_errors=True)
+        clear_parse_cache()
+
+        return Response({
+            'status': 'ok',
+            'deleted_files': deleted_count,
+            'batch_name': batch_name,
+            'sub_batch_name': sub_batch_name,
+        })
+
+
 class FileActivateView(GenericAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = DataFileSerializer

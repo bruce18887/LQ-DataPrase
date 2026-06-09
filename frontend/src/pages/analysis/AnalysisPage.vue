@@ -38,14 +38,17 @@
         />
       </el-tab-pane>
 
-      <!-- ========== 分布对比 tab ========== -->
-      <el-tab-pane label="&#128202; 分布对比" name="distribution-comparison">
-        <DistributionComparisonTab
+      <!-- ========== 箱线图 tab ========== -->
+      <el-tab-pane label="&#128202; 箱线图" name="boxplot">
+        <BoxPlotSection
           :file-id="selectedFileId"
-          :files="files"
-          :params="params"
-          :common-params="commonParams"
+          :available-params="params"
         />
+      </el-tab-pane>
+
+      <!-- ========== 多文件分析 tab ========== -->
+      <el-tab-pane label="&#128200; 多文件分析" name="multi-file">
+        <MultiFileTab :files="files" />
       </el-tab-pane>
 
       <!-- ========== 相关性工具 tab ========== -->
@@ -66,7 +69,8 @@ import { useAnalysisStore } from '../../stores/analysis'
 import SingleParamTab from './components/SingleParamTab.vue'
 import CircularProgress from '../../components/common/CircularProgress.vue'
 import WaferMapPanel from './components/WaferMapPanel.vue'
-import DistributionComparisonTab from './components/DistributionComparisonTab.vue'
+import BoxPlotSection from './components/distribution/BoxPlotSection.vue'
+import MultiFileTab from './components/MultiFileTab.vue'
 import CorrelationToolsTab from './components/CorrelationToolsTab.vue'
 
 const analysisStore = useAnalysisStore()
@@ -80,9 +84,6 @@ const activeTab = ref(analysisStore.activeTab)
 
 // Wafer state
 const waferData = ref<any>(null)
-
-// Common params for multi-lot and distribution comparison
-const commonParams = ref<string[]>([])
 
 // ========== Lifecycle ==========
 onMounted(async () => {

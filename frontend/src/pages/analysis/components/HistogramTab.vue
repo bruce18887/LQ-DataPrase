@@ -61,9 +61,7 @@
     <CorrelationPanel
       :params="params"
       :loading="corrLoading"
-      :pearson-r="corrPearsonR"
       :chart-data="corrResult"
-      v-model:axis-mode="corrAxisMode"
       @analyze="loadCorrelation"
     />
 
@@ -100,6 +98,7 @@ import CorrelationMatrixPanel from './CorrelationMatrixPanel.vue'
 import { useHistogram } from '../composables/useHistogram'
 import { useSerialDistribution } from '../composables/useSerialDistribution'
 import { useCorrelation } from '../composables/useCorrelation'
+import { useCorrelationMatrix } from '../composables/useCorrelationMatrix'
 import { useSiteStats } from '../composables/useSiteStats'
 import { useExport } from '../composables/useExport'
 
@@ -154,8 +153,6 @@ const {
 const {
   corrLoading,
   corrResult,
-  corrPearsonR,
-  corrAxisMode,
   loadCorrelation,
 } = useCorrelation(() => props.selectedFileId)
 
@@ -170,15 +167,19 @@ const {
   rangeType
 )
 
-// Composable: Export & Correlation Matrix
+// Composable: Export
 const {
   exporting,
-  correlationMatrix,
-  matrixLoading,
-  loadCorrelationMatrix,
   exportSigmaLimit,
   exportBatchCharts,
 } = useExport(() => props.selectedFileId)
+
+// Composable: Correlation Matrix (separate from useCorrelation)
+const {
+  loading: matrixLoading,
+  matrixData: correlationMatrix,
+  loadCorrelationMatrix,
+} = useCorrelationMatrix(() => props.selectedFileId)
 
 // ========== Store sync ==========
 watch(chartMode, (val) => { analysisStore.chartMode = val })

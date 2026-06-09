@@ -89,6 +89,9 @@ export const datafilesApi = {
   deleteBatchDir(dirName: string) {
     return api.delete(`/batch-dirs/${encodeURIComponent(dirName)}/`)
   },
+  deleteSubBatch(batchName: string, subBatchName: string) {
+    return api.delete(`/batch-dirs/${encodeURIComponent(batchName)}/sub/${encodeURIComponent(subBatchName)}/`)
+  },
 
   // File tags
   setTags(id: number, tags: string[]) {

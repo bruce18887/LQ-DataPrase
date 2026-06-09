@@ -162,7 +162,7 @@ test.describe('@p1 单参数分析', { tag: ['@p1', '@analysis'] }, () => {
 })
 
 test.describe('@p1 各分析 Tab 可达', { tag: ['@p1', '@analysis'] }, () => {
-  const TABS = ['晶圆图', '分布对比', '相关性工具']
+  const TABS = ['晶圆图', '箱线图', '多文件分析', '相关性工具']
 
   for (const name of TABS) {
     test(`切换到「${name}」Tab 内容正常渲染`, async ({ page }) => {

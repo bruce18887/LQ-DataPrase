@@ -71,7 +71,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, reactive } from 'vue'
+import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import { TrendCharts } from '@element-plus/icons-vue'
@@ -95,27 +95,6 @@ const errorHint = ref('')
 
 const remainingAttempts = ref<number | null>(null)
 const retryAfterMinutes = ref<number | null>(null)
-
-const errorIcon = computed(() => {
-  // Exposed for future <el-icon> usage; kept as a mapping so the
-  // template can stay data-driven when the design wants an icon.
-  switch (errorCategory.value) {
-    case 'timeout':
-    case 'network_error':
-      return 'Connection'
-    case 'account_disabled':
-      return 'Lock'
-    case 'account_locked':
-      return 'Timer'
-    case 'user_not_found':
-    case 'invalid_credentials':
-      return 'WarningFilled'
-    case 'server_error':
-      return 'CircleClose'
-    default:
-      return 'WarningFilled'
-  }
-})
 
 async function handleLogin() {
   const valid = await formRef.value?.validate().catch(() => false)

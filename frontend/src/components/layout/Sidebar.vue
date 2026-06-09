@@ -65,7 +65,6 @@ import {
   Folder,
   TrendCharts,
   Setting,
-  DataAnalysis,
   Connection,
   User,
   DArrowLeft,

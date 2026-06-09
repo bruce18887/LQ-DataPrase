@@ -11,6 +11,7 @@ from apps.datafiles.views import (
     FileActivateView,
     FileUploadView,
     ParseHistoryListView,
+    SubBatchDeleteView,
 )
 
 router = DefaultRouter()
@@ -25,5 +26,6 @@ urlpatterns = [
     path('batch-dirs/', BatchDirListView.as_view(), name='batch-dir-list'),
     path('batch-dirs/import/', BatchDirImportView.as_view(), name='batch-dir-import'),
     path('batch-dirs/<str:dir_name>/', BatchDirDeleteView.as_view(), name='batch-dir-delete'),
+    path('batch-dirs/<str:batch_name>/sub/<str:sub_batch_name>/', SubBatchDeleteView.as_view(), name='sub-batch-delete'),
     path('consistency-check/', DataConsistencyCheckView.as_view(), name='consistency-check'),
 ]

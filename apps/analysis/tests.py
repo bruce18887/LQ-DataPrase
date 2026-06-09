@@ -128,3 +128,70 @@ class QqPlotParamGuardTests(SimpleTestCase):
         result = compute_qqplot(all_nan)
         self.assertEqual(result['n'], 0)
         self.assertFalse(result['is_normal'])
+
+
+class MultiFileAnalysisTests(SimpleTestCase):
+    """Multi-file (多文件分析) tab service logic.
+
+    Covers the common-test-item intersection (by exact column name), the
+    ``ignore_no_limit`` filter (keep only params with valid limits in every
+    file), and the per-file limit attached to each lot in the distribution.
+    """
+
+    @staticmethod
+    def _file(cols: dict, mins: dict, maxs: dict, fid: int = 1, name: str = 'f'):
+        df = pd.DataFrame(cols)
+        meta = {'format': 'CTA8290D', 'mins': mins, 'maxs': maxs, 'units': {}}
+        return (fid, df, meta, name)
+
+    def test_common_params_intersects_by_name(self):
+        from apps.analysis.services.data_services import compute_common_params
+
+        f1 = self._file(
+            {'A': [1.0, 2.0], 'B': [1.0, 2.0], 'Site': ['1', '2']},
+            {'A': '0', 'B': '0'}, {'A': '5', 'B': '5'}, fid=1)
+        f2 = self._file(
+            {'A': [1.0, 2.0], 'C': [1.0, 2.0], 'Site': ['1', '2']},
+            {'A': '0', 'C': '0'}, {'A': '5', 'C': '5'}, fid=2)
+        # 'Site' is object dtype → excluded; only 'A' is numeric in both.
+        self.assertEqual(compute_common_params([f1, f2]), ['A'])
+
+    def test_common_params_ignore_no_limit_keeps_only_limited(self):
+        from apps.analysis.services.data_services import compute_common_params
+
+        # 'A' has limits in both files; 'B' has limits only in f1.
+        f1 = self._file(
+            {'A': [1.0, 2.0], 'B': [1.0, 2.0]},
+            {'A': '0', 'B': '0'}, {'A': '5', 'B': '5'}, fid=1)
+        f2 = self._file(
+            {'A': [1.0, 2.0], 'B': [1.0, 2.0]},
+            {'A': '0'}, {'A': '5'}, fid=2)
+        self.assertEqual(compute_common_params([f1, f2]), ['A', 'B'])
+        # With ignore_no_limit, 'B' drops because f2 has no limit for it.
+        self.assertEqual(
+            compute_common_params([f1, f2], ignore_no_limit=True), ['A'])
+
+    def test_distribution_attaches_file_id_and_limits(self):
+        from apps.analysis.services.data_services import (
+            compute_multi_lot_distribution,
+        )
+
+        s1 = pd.Series([1.0, 2.0, 3.0])
+        s2 = pd.Series([2.0, 3.0, 4.0])
+        df1 = pd.DataFrame({'A': s1})
+        df2 = pd.DataFrame({'A': s2})
+        datasets = {
+            '1': {'df': df1, 'metadata': {'mins': {'A': '0'}, 'maxs': {'A': '5'}},
+                  'series': s1, 'name': 'f1', 'file_id': 1},
+            '2': {'df': df2, 'metadata': {'mins': {'A': 'MIN'}, 'maxs': {'A': 'MAX'}},
+                  'series': s2, 'name': 'f2', 'file_id': 2},
+        }
+        out = compute_multi_lot_distribution(datasets, [s1, s2], 'A')
+        lots = {lot['file_id']: lot for lot in out['lot_data']}
+        # File 1 has numeric limits → drawn.
+        self.assertEqual(lots[1]['lower_limit'], 0.0)
+        self.assertEqual(lots[1]['upper_limit'], 5.0)
+        # File 2's "MIN"/"MAX" markers are not valid numeric limits → omitted.
+        self.assertIsNone(lots[2]['lower_limit'])
+        self.assertIsNone(lots[2]['upper_limit'])
+

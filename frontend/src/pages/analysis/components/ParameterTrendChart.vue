@@ -60,6 +60,7 @@ function buildOption() {
 }
 
 const { chartRef } = useChart(buildOption, [() => props.data, () => props.title])
+void chartRef // bound to <div ref="chartRef"> in template
 </script>
 
 <style scoped>

@@ -3,6 +3,7 @@
     <div class="config-header">
       <span class="config-title">⚙️ 图表配置</span>
       <el-button
+        v-if="variant === 'full'"
         link
         size="small"
         class="more-btn"
@@ -18,15 +19,17 @@
       <div class="section-label">显示元素</div>
       <el-checkbox-group :model-value="chartConfig" @change="onChartConfigChange" class="config-checkboxes">
         <el-checkbox value="limit">Limit</el-checkbox>
-        <el-checkbox value="s3">3σ线</el-checkbox>
-        <el-checkbox value="s4">4σ线</el-checkbox>
-        <el-checkbox value="s6">6σ线</el-checkbox>
-        <el-checkbox value="normal">正态分布</el-checkbox>
+        <template v-if="variant === 'full'">
+          <el-checkbox value="s3">3σ线</el-checkbox>
+          <el-checkbox value="s4">4σ线</el-checkbox>
+          <el-checkbox value="s6">6σ线</el-checkbox>
+          <el-checkbox value="normal">正态分布</el-checkbox>
+        </template>
       </el-checkbox-group>
     </div>
 
-    <!-- 范围类型 -->
-    <div class="config-section">
+    <!-- 范围类型（仅单参数完整版） -->
+    <div v-if="variant === 'full'" class="config-section">
       <div class="section-label">范围类型</div>
       <el-select :model-value="rangeType" size="small" style="width: 100%" @change="onRangeTypeChange">
         <el-option label="RowDataLimit" value="RDL" />
@@ -39,7 +42,7 @@
     </div>
 
     <!-- CustomLimit 输入 -->
-    <div v-if="rangeType === 'CL'" class="config-section custom-limit-section">
+    <div v-if="variant === 'full' && rangeType === 'CL'" class="config-section custom-limit-section">
       <div class="section-label">自定义范围</div>
       <div class="custom-limit-inputs">
         <el-input-number
@@ -64,9 +67,9 @@
       </div>
     </div>
 
-    <!-- 半隐藏：柱状图宽度 -->
+    <!-- 柱状图宽度：完整版藏在「更多」里，多文件版直接展开 -->
     <el-collapse-transition>
-      <div v-show="showMore">
+      <div v-show="variant === 'multi-file' || showMore">
         <div class="config-section">
           <div class="section-label flex-between">
             <span>柱宽</span>
@@ -97,9 +100,13 @@ interface Props {
   ignoreNoLimit: boolean
   customLow?: number | null
   customHigh?: number | null
+  /** 'full' = 单参数分析完整配置；'multi-file' = 多文件分析阉割版（仅 Limit + 柱宽 + 忽略无Limit） */
+  variant?: 'full' | 'multi-file'
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  variant: 'full',
+})
 
 const emit = defineEmits<{
   (e: 'update:chartConfig', val: string[]): void

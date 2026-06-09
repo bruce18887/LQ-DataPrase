@@ -50,7 +50,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
 import { analysisApi } from '../../../api/analysis'
@@ -132,4 +132,5 @@ function buildOption() {
 }
 
 const { chartRef } = useChart(buildOption, [() => props.waferData, localShowEdge, localColorBy, zonalData])
+void chartRef // bound to <div ref="chartRef"> in template
 </script>
