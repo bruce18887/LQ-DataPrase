@@ -171,6 +171,7 @@ const { chartRef } = useChart(buildOption, [
   () => customMinX.value, () => customMaxX.value,
   () => customMinY.value, () => customMaxY.value,
 ])
+void chartRef // bound to <div ref="chartRef"> in template
 </script>
 
 <style scoped>

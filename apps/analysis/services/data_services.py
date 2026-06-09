@@ -18,6 +18,8 @@ from apps.analysis.services.statistics import (
     get_site_column,
     get_serial_column,
     get_bin_column,
+    get_columns_with_limits,
+    parse_limit_string,
     safe_gap,
 )
 from apps.analysis.services.limits import resolve_limits
@@ -242,6 +244,47 @@ def compute_wafer_map_data(df, metadata, param, color_by, x_col, y_col):
 # multi_lot
 # ---------------------------------------------------------------------------
 
+def compute_common_params(loaded, ignore_no_limit=False):
+    """Intersect numeric test-item names across multiple loaded files.
+
+    Args:
+        loaded: list of ``(file_id, df, metadata, filename)`` tuples.
+        ignore_no_limit: when True, keep only params that carry valid spec
+            limits in *every* selected file (so a per-file limit line can be
+            drawn). Otherwise return the plain numeric-column intersection.
+
+    Returns:
+        Sorted list of column names present (and numeric) in all files.
+    """
+    param_sets = []
+    for _fid, df, metadata, _filename in loaded:
+        numeric_cols = {
+            c for c in df.columns
+            if str(c).strip() and df[c].dtype in ('int64', 'float64')
+        }
+        if ignore_no_limit:
+            numeric_cols &= set(get_columns_with_limits(df, metadata))
+        param_sets.append(numeric_cols)
+    if not param_sets:
+        return []
+    return sorted(set.intersection(*param_sets))
+
+
+def _resolve_param_limits(df, metadata, param, series):
+    """Return ``(lower, upper)`` spec limits for *param*, or ``(None, None)``.
+
+    Only files whose *param* passes the same validity check as
+    ``get_columns_with_limits`` yield numeric limits; everything else (missing
+    column, non-numeric "MIN"/"MAX" markers, blank) returns ``(None, None)`` so
+    the front-end simply omits that file's limit line.
+    """
+    if param not in set(get_columns_with_limits(df, metadata)):
+        return None, None
+    lower = parse_limit_string(str(metadata.get('mins', {}).get(param, '')), series)
+    upper = parse_limit_string(str(metadata.get('maxs', {}).get(param, '')), series)
+    return round(float(lower), 6), round(float(upper), 6)
+
+
 def compute_multi_lot_distribution(datasets, all_series, param):
     """Compute multi-lot distribution bins and lot-level stats.
 
@@ -279,18 +322,22 @@ def compute_multi_lot_distribution(datasets, all_series, param):
         bar_data = [[bin_centers[i], pcts[i]] for i in range(bin_count)]
         mean_v = float(ds['series'].mean())
         std_v = float(ds['series'].std(ddof=0)) if len(ds['series']) > 1 else 0
-        mins_dict = ds.get('metadata', {}).get('mins', {})
-        maxs_dict = ds.get('metadata', {}).get('maxs', {})
-        fail = int(
-            (
-                (ds['series'] < mins_dict.get(param, -1e9))
-                | (ds['series'] > maxs_dict.get(param, 1e9))
-            ).sum()
+        lower_limit, upper_limit = _resolve_param_limits(
+            ds.get('df'), ds.get('metadata', {}), param, ds['series']
         )
+        # Fail count uses the parsed numeric limits (raw metadata mins/maxs are
+        # strings like "0" or "MIN", so comparing the series against them
+        # directly raises). When a bound is absent, treat it as ±inf.
+        lo = lower_limit if lower_limit is not None else -float('inf')
+        hi = upper_limit if upper_limit is not None else float('inf')
+        fail = int(((ds['series'] < lo) | (ds['series'] > hi)).sum())
         lot_data.append({
             'name': ds.get('name', fid),
+            'file_id': ds.get('file_id'),
             'color': colors[idx % len(colors)],
             'bar_data': bar_data,
+            'lower_limit': lower_limit,
+            'upper_limit': upper_limit,
             'mean': round(mean_v, 6),
             'std': round(std_v, 6),
             'count': len(ds['series']),

@@ -57,4 +57,5 @@ function buildOption() {
 }
 
 const { chartRef } = useChart(buildOption, [() => props.matrixData])
+void chartRef // bound to <div ref="chartRef"> in template
 </script>

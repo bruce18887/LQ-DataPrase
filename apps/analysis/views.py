@@ -33,6 +33,7 @@ from apps.analysis.services.data_services import (
     compute_histogram_stats,
     compute_wafer_map_data,
     compute_multi_lot_distribution,
+    compute_common_params,
     compute_correlation_scatter,
     compute_serial_distribution_data,
     compute_cpk_table_data,
@@ -167,27 +168,49 @@ class AnalysisViewSet(viewsets.GenericViewSet):
 
     @action(detail=False, methods=['get', 'post'])
     def multi_lot(self, request):
-        file_ids = get_param_list(request,'file_ids')
+        file_ids = get_param_list(request, 'file_ids')
         param = get_param(request, 'param')
         if len(file_ids) < 2:
             return Response({'error': 'need_at_least_2_files'}, status=400)
 
-        datasets = {}
-        all_series = []
+        # Load each selected file once (cached parse + DB row for filename).
+        loaded = []  # (file_id, df, metadata, filename)
         for fid in file_ids:
-            df_obj = get_object_or_404(DataFile, pk=fid, owner=request.user)
-            use_cache = False
-            # Can use cache only when we don't need the DB object for other fields
+            df_obj = DataFile.objects.filter(pk=fid, owner=request.user).first()
+            if df_obj is None:
+                continue
             df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk)
             if df is None:
                 continue
-            if param and param in df.columns:
+            loaded.append((int(fid), df, metadata, df_obj.filename))
+
+        if len(loaded) < 2:
+            return Response({'error': 'need_at_least_2_files'}, status=400)
+
+        # No param → lightweight call: return the common test items + file names
+        # so the front-end can populate the param selector before drawing.
+        if not param:
+            ignore_no_limit = str(
+                get_param(request, 'ignore_no_limit', '')
+            ).lower() in ('true', '1', 'yes')
+            return Response({
+                'common_params': compute_common_params(loaded, ignore_no_limit),
+                'file_names': [
+                    {'file_id': fid, 'filename': fn} for fid, _, _, fn in loaded
+                ],
+            })
+
+        # With param → per-file distribution (no SITE split; one series/file).
+        datasets = {}
+        all_series = []
+        for fid, df, metadata, filename in loaded:
+            if param in df.columns:
                 s = get_1d_from(df, param).dropna()
                 s = s[abs(s) < float('inf')]
                 if len(s) > 0:
                     datasets[str(fid)] = {
                         'df': df, 'metadata': metadata, 'series': s,
-                        'name': df_obj.filename[:20],
+                        'name': filename[:20], 'file_id': fid,
                     }
                     all_series.append(s)
 

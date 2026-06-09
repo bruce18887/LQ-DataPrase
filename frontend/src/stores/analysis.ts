@@ -14,8 +14,13 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const customLow = ref<number | null>(null)
   const customHigh = ref<number | null>(null)
 
-  // Tab3: 分布对比模式
-  const comparisonMode = ref<'boxplot' | 'multilot'>('boxplot')
+  // Tab: 多文件分析（multi-file）
+  const multiFileIds = ref<number[]>([])
+  const multiSelectedParam = ref('')
+  const multiFileNames = ref<Record<number, string>>({})
+  const multiChartConfig = ref<string[]>(['limit'])
+  const multiBarWidthPercent = ref(20)
+  const multiIgnoreNoLimit = ref(false)
 
   function reset() {
     selectedFileId.value = null
@@ -28,7 +33,12 @@ export const useAnalysisStore = defineStore('analysis', () => {
     ignoreNoLimit.value = false
     customLow.value = null
     customHigh.value = null
-    comparisonMode.value = 'boxplot'
+    multiFileIds.value = []
+    multiSelectedParam.value = ''
+    multiFileNames.value = {}
+    multiChartConfig.value = ['limit']
+    multiBarWidthPercent.value = 20
+    multiIgnoreNoLimit.value = false
   }
 
   return {
@@ -42,7 +52,12 @@ export const useAnalysisStore = defineStore('analysis', () => {
     ignoreNoLimit,
     customLow,
     customHigh,
-    comparisonMode,
+    multiFileIds,
+    multiSelectedParam,
+    multiFileNames,
+    multiChartConfig,
+    multiBarWidthPercent,
+    multiIgnoreNoLimit,
     reset,
   }
 })

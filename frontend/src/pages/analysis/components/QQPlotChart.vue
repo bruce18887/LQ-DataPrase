@@ -101,6 +101,7 @@ function buildOption() {
 }
 
 const { chartRef } = useChart(buildOption, [() => props.result, () => props.visible])
+void chartRef // bound to <div ref="chartRef"> in template
 </script>
 
 <style scoped>

@@ -153,6 +153,15 @@
                     <div class="sub-batch-header">
                       <span class="sub-batch-name">📁 {{ sub.name }}</span>
                       <span class="sub-batch-count">{{ sub.files.length }} 个文件</span>
+                      <div style="flex:1" />
+                      <el-button
+                        size="small"
+                        type="danger"
+                        plain
+                        @click.stop="deleteSubBatch(group.name, sub.name, sub.files)"
+                      >
+                        <el-icon><Delete /></el-icon> 删除子批次
+                      </el-button>
                     </div>
                     <div class="sub-batch-files">
                       <el-tag
@@ -699,6 +708,25 @@ async function deleteBatch(group: { name: string; files: any[] }) {
   }
 }
 
+async function deleteSubBatch(batchName: string, subBatchName: string, files: any[]) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除子批次 "${subBatchName}" 及其 ${files.length} 个文件吗？此操作不可恢复。`,
+      '确认删除子批次',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+    )
+    // 调用删除子批次API，同时删除数据库记录和磁盘目录
+    await datafilesApi.deleteSubBatch(batchName, subBatchName)
+    ElMessage.success(`子批次 "${subBatchName}" 已删除`)
+    await Promise.all([loadFiles(), loadBatchDirs()])
+    filesStore.notifyFilesChanged()
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      ElMessage.error(e?.response?.data?.error || '删除失败')
+    }
+  }
+}
+
 // Data consistency check
 async function runConsistencyCheck() {
   checkingConsistency.value = true
@@ -1134,6 +1162,7 @@ defineExpose({ reload: loadFiles })
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+  padding: 4px 0;
 }
 
 .sub-batch-name {

@@ -89,6 +89,7 @@ function buildOption() {
 }
 
 const { chartRef } = useChart(buildOption, [chartData])
+void chartRef // bound to <div ref="chartRef"> in template
 
 watch(() => props.fileId, () => fetchData())
 onMounted(() => fetchData())

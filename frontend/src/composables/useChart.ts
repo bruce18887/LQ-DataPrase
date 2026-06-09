@@ -8,22 +8,27 @@
  *
  * 用法：
  * ```ts
- * const { chartRef, chartInstance } = useChart(
+ * // chartRef 由 useTemplateRef('chartRef') 注册，模板里 <div ref="chartRef"> 自动绑定
+ * // useTemplateRef 让 vue-tsc 知道该变量被模板使用，避免 TS6133 "declared but never read"
+ * const { chartInstance } = useChart(
  *   () => ({ xAxis: { ... }, series: { ... } }),
  *   [() => props.data, () => props.config],
  * )
  * ```
+ *
+ * buildOption 使用泛型默认 EChartsOption，但允许传入宽松的对象字面量
+ * （如 fontWeight: 'bold'），由渲染端在调用时统一断言为 EChartsOption。
  */
-import { ref, watch, onMounted, onUnmounted, nextTick, type WatchSource, type Ref } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick, useTemplateRef, type WatchSource, type Ref } from 'vue'
 import type * as echarts from 'echarts'
 import { useThemeStore } from '../stores/theme'
 import { initEchartsWhenReady, type EchartsHandle } from '../utils/echarts-init'
 
-export function useChart(
-  buildOption: () => echarts.EChartsOption,
+export function useChart<T = echarts.EChartsOption>(
+  buildOption: () => T,
   sources?: WatchSource[],
 ) {
-  const chartRef = ref<HTMLElement>()
+  const chartRef = useTemplateRef<HTMLElement>('chartRef')
   const chartInstance: Ref<echarts.ECharts | null> = ref(null)
 
   const themeStore = useThemeStore()
@@ -31,7 +36,7 @@ export function useChart(
 
   function renderOption() {
     if (!chartInstance.value) return
-    const option = buildOption()
+    const option = buildOption() as unknown as echarts.EChartsOption
     chartInstance.value.setOption(option, { notMerge: true, lazyUpdate: true })
   }
 
@@ -52,7 +57,7 @@ export function useChart(
       chartInstance.value = null
     }
     if (!chartRef.value) return false
-    const option = buildOption()
+    const option = buildOption() as unknown as echarts.EChartsOption
     handle = initEchartsWhenReady(chartRef.value, { option, reuse: true, timeout: 5_000 })
     chartInstance.value = handle.chart
     // If chart inits asynchronously (zero-size container), poll for readiness

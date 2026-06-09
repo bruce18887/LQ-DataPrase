@@ -240,7 +240,7 @@ function onSearchChange(payload: { keyword: string; tag: string }) {
 function onSingleTagsUpdated(updated: DataFile) {
   // Replace the row in the source list so props change triggers el-table re-render.
   // 直接修改 row.tags 不会触发响应式（Vue 不会深度追踪 props 内部对象），必须替换数组元素。
-  const next = files.value.map((f) => (f.id === updated.id ? { ...f, tags: [...updated.tags] } : f))
+  const next = files.value.map((f) => (f.id === updated.id ? { ...f, tags: [...(updated.tags ?? [])] } : f))
   files.value = next
   // Refresh the allTags list so the search bar reflects new entries
   loadAllTags()
