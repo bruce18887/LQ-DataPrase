@@ -22,12 +22,20 @@ function displayName(lot: any): string {
   return props.fileNames[lot.file_id] || lot.name || `File ${lot.file_id}`
 }
 
+/** 智能格式化 X 轴刻度：整数不显示小数，非整数最多 2 位 */
+function formatAxisValue(v: number): string {
+  if (Number.isInteger(v)) return v.toString()
+  const s = v.toFixed(2)
+  return s.replace(/\.?0+$/, '')
+}
+
 function buildOption() {
   const r = props.lotData
   if (!r || !Array.isArray(r.lot_data) || r.lot_data.length === 0) return {}
   const tc = colors.value.textColor
   const lots: any[] = r.lot_data
   const showLimit = props.chartConfig.includes('limit')
+  const binCenters: number[] = r.bin_centers || []
 
   const series: any[] = []
   const legendData: string[] = []
@@ -35,7 +43,6 @@ function buildOption() {
   for (const lot of lots) {
     const dn = displayName(lot)
     legendData.push(dn)
-    // 每个文件一组柱：不拆 SITE，独立颜色 + 自定义图例名
     series.push({
       name: dn,
       type: 'bar',
@@ -44,30 +51,51 @@ function buildOption() {
       barWidth: `${props.barWidthPercent}%`,
       barGap: '10%',
     })
+  }
 
-    // 每个文件的 limit 线作为独立图例项（同色虚线），可单独开关
-    if (showLimit && lot.lower_limit != null && lot.upper_limit != null) {
-      const limitName = `${dn} Limit`
-      legendData.push(limitName)
-      series.push({
-        name: limitName,
-        type: 'line',
-        data: [],
-        color: lot.color,
-        markLine: {
-          symbol: 'none',
-          precision: 4,
-          lineStyle: { color: lot.color, type: 'dashed', width: 2 },
-          label: {
-            show: true,
-            color: lot.color,
-            fontSize: 10,
-            formatter: (p: any) => (p.dataIndex === 0 ? 'L' : 'U'),
-          },
-          data: [{ xAxis: lot.lower_limit }, { xAxis: lot.upper_limit }],
-        },
+  // Limit 线：合并相同值，简化标注
+  const mk: any[] = []
+  if (showLimit) {
+    // 按值合并 USL/LSL
+    const uslMap = new Map<number, any[]>()
+    const lslMap = new Map<number, any[]>()
+    for (const lot of lots) {
+      if (lot.upper_limit != null) {
+        const key = Number(lot.upper_limit.toFixed(6))
+        const arr = uslMap.get(key) || []
+        arr.push(lot)
+        uslMap.set(key, arr)
+      }
+      if (lot.lower_limit != null) {
+        const key = Number(lot.lower_limit.toFixed(6))
+        const arr = lslMap.get(key) || []
+        arr.push(lot)
+        lslMap.set(key, arr)
+      }
+    }
+    for (const [value, limitLots] of uslMap) {
+      const label = lots.length > 1
+        ? `USL=${formatAxisValue(value)}`
+        : `${displayName(limitLots[0])} USL=${formatAxisValue(value)}`
+      mk.push({
+        xAxis: value,
+        lineStyle: { color: limitLots[0].color, width: 2, type: 'dashed' },
+        label: { show: true, formatter: label, position: 'end', color: limitLots[0].color, fontSize: 10 },
       })
     }
+    for (const [value, limitLots] of lslMap) {
+      const label = lots.length > 1
+        ? `LSL=${formatAxisValue(value)}`
+        : `${displayName(limitLots[0])} LSL=${formatAxisValue(value)}`
+      mk.push({
+        xAxis: value,
+        lineStyle: { color: limitLots[0].color, width: 2, type: 'dashed' },
+        label: { show: true, formatter: label, position: 'end', color: limitLots[0].color, fontSize: 10 },
+      })
+    }
+  }
+  if (mk.length) {
+    series.push({ name: '规格限', type: 'line', data: [], markLine: { symbol: 'none', precision: 4, data: mk } })
   }
 
   const titleText = `${props.selectedParam}  ${r.global_mean != null ? `(μ=${r.global_mean})` : ''}`
@@ -96,13 +124,20 @@ function buildOption() {
     },
     legend: { data: legendData, top: 'bottom', type: 'scroll', textStyle: { color: tc } },
     toolbox: { feature: { saveAsImage: { name: `${props.selectedParam}_多文件对比` } } },
-    grid: { top: 50, bottom: 60, left: 55, right: 40 },
+    grid: { top: 50, bottom: 50, left: 55, right: 40 },
     xAxis: {
       type: 'value',
-      min: r.chart_min,
-      max: r.chart_max,
-      axisLabel: { rotate: 45, fontSize: 9, formatter: (v: number) => v.toFixed(4), color: tc },
-      splitNumber: 20,
+      min: binCenters.length > 0 ? binCenters[0] : r.chart_min,
+      max: binCenters.length > 0 ? binCenters[binCenters.length - 1] : r.chart_max,
+      axisLabel: {
+        rotate: 0,
+        show: true,
+        interval: 'auto',
+        fontSize: 10,
+        formatter: formatAxisValue,
+        color: tc,
+      },
+      splitNumber: 10,
     },
     yAxis: {
       type: 'value',

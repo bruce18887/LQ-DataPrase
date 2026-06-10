@@ -35,7 +35,8 @@ export function useMultiFile() {
     }
   }
 
-  async function loadDistribution(fileIds: number[], param: string) {
+  async function loadDistribution(fileIds: number[], param: string,
+                                    rangeType: string = 'S4') {
     if (fileIds.length < 2 || !param) {
       lotData.value = null
       return
@@ -43,6 +44,7 @@ export function useMultiFile() {
     await runDist(() => api.post('/analysis/multi_lot/', {
       file_ids: fileIds,
       param,
+      range_type: rangeType,
     }))
   }
 

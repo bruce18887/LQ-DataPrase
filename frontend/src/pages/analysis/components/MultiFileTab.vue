@@ -42,6 +42,18 @@
           :range-type="'RDL'"
         />
 
+        <!-- 范围类型 -->
+        <el-card shadow="hover" :body-style="{ padding: '12px' }">
+          <div class="section-label">范围类型</div>
+          <el-select v-model="rangeType" size="small" style="width: 100%">
+            <el-option label="Spec Limits (RDL)" value="RDL" />
+            <el-option label="Data Range (DR)" value="DR" />
+            <el-option label="3 Sigma (S3)" value="S3" />
+            <el-option label="4 Sigma (S4)" value="S4" />
+            <el-option label="6 Sigma (S6)" value="S6" />
+          </el-select>
+        </el-card>
+
         <!-- 当前测试项各文件统计 -->
         <el-card v-if="lotStats.length" shadow="hover" :body-style="{ padding: '8px' }">
           <div class="section-label">各文件统计</div>
@@ -110,6 +122,7 @@ const {
   multiChartConfig: chartConfig,
   multiBarWidthPercent: barWidthPercent,
   multiIgnoreNoLimit: ignoreNoLimit,
+  multiRangeType: rangeType,
 } = storeToRefs(analysisStore)
 
 const { loading, paramsLoading, commonParams, lotData, loadCommonParams, loadDistribution } = useMultiFile()
@@ -128,12 +141,59 @@ function colorOf(fid: number): string {
   return PALETTE[(idx < 0 ? 0 : idx) % PALETTE.length]
 }
 
-// 传给图表的最终图例名：自定义优先，否则用文件名
+/**
+ * 从多个文件名中自动提取差异部分作为图例名。
+ * 找到公共前缀和公共后缀，截去后保留中间的差异子串。
+ */
+function autoExtractLabel(filenames: string[]): string[] {
+  if (filenames.length <= 1) return filenames
+
+  // Find common prefix
+  let prefix = filenames[0]
+  for (let i = 1; i < filenames.length; i++) {
+    while (prefix.length > 0 && !filenames[i].startsWith(prefix)) {
+      prefix = prefix.slice(0, -1)
+    }
+  }
+
+  // Find common suffix
+  let suffix = filenames[0]
+  for (let i = 1; i < filenames.length; i++) {
+    while (suffix.length > 0 && !filenames[i].endsWith(suffix)) {
+      suffix = suffix.slice(1)
+    }
+  }
+
+  return filenames.map(f => {
+    let mid = f.slice(prefix.length)
+    if (suffix.length) mid = mid.slice(0, -suffix.length)
+    // Trim leading/trailing separators
+    mid = mid.replace(/^[_\-. ]+|[_\-. ]+$/g, '')
+    // Truncate at meaningful separator if too long
+    if (mid.length > 30) {
+      const sep = mid.search(/[_\-].{8,}/)
+      if (sep > 0) mid = mid.slice(0, sep)
+    }
+    return mid || f  // fallback to full name if empty
+  })
+}
+
+// 传给图表的最终图例名：自定义优先，否则自动提取差异部分
 const resolvedNames = computed<Record<number, string>>(() => {
   const map: Record<number, string> = {}
-  for (const f of selectedFileObjs.value) {
-    const custom = (fileNames.value[f.id] || '').trim()
-    map[f.id] = custom || f.filename
+  const customExists = selectedFileObjs.value.some(
+    f => (fileNames.value[f.id] || '').trim(),
+  )
+  if (!customExists) {
+    // Auto-extract: use differentiating parts as defaults
+    const names = selectedFileObjs.value.map(f => f.filename)
+    const labels = autoExtractLabel(names)
+    selectedFileObjs.value.forEach((f, i) => { map[f.id] = labels[i] })
+  } else {
+    for (const f of selectedFileObjs.value) {
+      const custom = (fileNames.value[f.id] || '').trim()
+      map[f.id] = custom || f.filename
+    }
   }
   return map
 })
@@ -159,14 +219,17 @@ async function reloadParams() {
     selectedParam.value = commonParams.value[0]
   } else {
     // 列表变了但当前项仍有效，主动刷新一次分布
-    await loadDistribution(fileIds.value, selectedParam.value)
+    await loadDistribution(fileIds.value, selectedParam.value, rangeType.value)
   }
 }
 
 watch(fileIds, () => { reloadParams() }, { deep: true })
 watch(ignoreNoLimit, () => { reloadParams() })
+watch(rangeType, () => {
+  if (selectedParam.value) loadDistribution(fileIds.value, selectedParam.value, rangeType.value)
+})
 watch(selectedParam, (p) => {
-  if (p) loadDistribution(fileIds.value, p)
+  if (p) loadDistribution(fileIds.value, p, rangeType.value)
   else lotData.value = null
 })
 

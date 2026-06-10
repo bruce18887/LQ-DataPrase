@@ -7,8 +7,9 @@ import { RECOMMENDED } from '../fixtures/test-data'
  * [多文件分析] tab（quest.txt 改造）：
  *  1. 由「多Lot对比」拆分为独立顶层 tab，良率对比已移除。
  *  2. 选 ≥2 文件 → 提取共有测试项（列名相同）→ 渲染柱状图。
- *  3. 不拆 SITE，每文件一个图例；每文件 limit 线独立图例。
+ *  3. 不拆 SITE，每文件一个图例；limit 线使用统一 markLine（规格限）。
  *  4. 文件可自定义图例名。
+ *  5. X 轴对齐单文件分析（bin_centers + splitNumber:24 + interval:0）。
  *
  * 数据：RECOMMENDED.buyoff 是同产品 3 个测试阶段（FT/QA1/QA2），共有测试项丰富。
  */
@@ -71,9 +72,9 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
     expect(box!.width).toBeGreaterThan(0)
     expect(box!.height).toBeGreaterThan(0)
 
-    // 图例：每文件一项 + 每文件 Limit 独立项
+    // 图例：每文件一项 + 统一规格限（markLine 模式）
     const legend = (await page.locator(`${TAB} text`).allTextContents()).join(' | ')
-    expect(legend, '图例应出现独立的 Limit 项').toMatch(/Limit/)
+    expect(legend, '图例应出现规格限项').toMatch(/规格限/)
     // 不应再出现良率对比（已移除）
     expect(legend).not.toMatch(/良率对比/)
   })
@@ -120,5 +121,68 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
     await expect(checkbox, '点击后应变为选中态').toHaveClass(/is-checked/, { timeout: 5_000 })
     const resp = await paramsResp
     expect(resp.status()).toBeLessThan(400)
+  })
+
+  test('范围类型切换 → 发送 range_type 参数', async ({ page }) => {
+    test.slow()
+    await enterMultiFile(page)
+    await pickFiles(page, [RECOMMENDED.buyoff[0], RECOMMENDED.buyoff[1]])
+    await page.waitForResponse(
+      (r) => r.url().includes('/analysis/multi_lot/') && r.status() < 500,
+      { timeout: 25_000 },
+    )
+    await expect(page.locator(`${TAB} .chart-wrapper svg`)).toBeVisible({ timeout: 15_000 })
+
+    // 切换到 DR (Data Range)，应触发带 range_type 的请求
+    const distResp = page.waitForResponse(
+      (r) =>
+        r.url().includes('/analysis/multi_lot/') &&
+        (r.request().postData() || '').includes('"range_type"') &&
+        r.status() < 500,
+      { timeout: 20_000 },
+    )
+    // 找到范围类型下拉（在 left-panel 中，非 ChartConfigPanel 内的）
+    const rangeSelect = page.locator(`${TAB} .left-panel .el-card`).filter({ hasText: '范围类型' }).locator('.el-select')
+    await rangeSelect.click()
+    const dropdown = page.locator('.el-select-dropdown:visible').last()
+    await dropdown.locator('.el-select-dropdown__item').filter({ hasText: 'Data Range' }).click()
+    const resp = await distResp
+    expect(resp.status()).toBeLessThan(400)
+  })
+
+  test('图例名自动提取差异部分（非完整文件名）', async ({ page }) => {
+    test.slow()
+    await enterMultiFile(page)
+    await pickFiles(page, [RECOMMENDED.buyoff[0], RECOMMENDED.buyoff[1]])
+    await page.waitForResponse(
+      (r) => r.url().includes('/analysis/multi_lot/') && r.status() < 500,
+      { timeout: 25_000 },
+    )
+    await expect(page.locator(`${TAB} .chart-wrapper svg`)).toBeVisible({ timeout: 15_000 })
+
+    // 图例文字不应包含完整文件名（应为自动提取的差异部分）
+    const legendTexts = await page.locator(`${TAB} text`).allTextContents()
+    const legend = legendTexts.join(' | ')
+    // 完整文件名通常含 .csv 后缀和长序列号，自动提取后不应有这些
+    expect(legend).not.toMatch(/\.csv/)
+  })
+
+  test('Limit 线标注简化为 USL=value 格式', async ({ page }) => {
+    test.slow()
+    await enterMultiFile(page)
+    await pickFiles(page, [RECOMMENDED.buyoff[0], RECOMMENDED.buyoff[1]])
+    await page.waitForResponse(
+      (r) => r.url().includes('/analysis/multi_lot/') && r.status() < 500,
+      { timeout: 25_000 },
+    )
+    await expect(page.locator(`${TAB} .chart-wrapper svg`)).toBeVisible({ timeout: 15_000 })
+
+    // Limit 标注应为 USL=xxx 或 LSL=xxx 格式（不含完整文件名）
+    const allTexts = await page.locator(`${TAB} text`).allTextContents()
+    const limitLabels = allTexts.filter(t => /USL|LSL/.test(t))
+    for (const label of limitLabels) {
+      // 应匹配 USL=123.45 或 LSL=123.45 格式
+      expect(label).toMatch(/^(USL|LSL)=\d/)
+    }
   })
 })

@@ -21,6 +21,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const multiChartConfig = ref<string[]>(['limit'])
   const multiBarWidthPercent = ref(20)
   const multiIgnoreNoLimit = ref(false)
+  const multiRangeType = ref('S4')
 
   function reset() {
     selectedFileId.value = null
@@ -39,6 +40,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     multiChartConfig.value = ['limit']
     multiBarWidthPercent.value = 20
     multiIgnoreNoLimit.value = false
+    multiRangeType.value = 'S4'
   }
 
   return {
@@ -58,6 +60,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     multiChartConfig,
     multiBarWidthPercent,
     multiIgnoreNoLimit,
+    multiRangeType,
     reset,
   }
 })
