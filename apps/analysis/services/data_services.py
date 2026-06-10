@@ -285,13 +285,66 @@ def _resolve_param_limits(df, metadata, param, series):
     return round(float(lower), 6), round(float(upper), 6)
 
 
-def compute_multi_lot_distribution(datasets, all_series, param):
+def _resolve_multi_range(range_type, combined, global_mean, global_std,
+                         all_dsets, param, custom_low=None, custom_high=None):
+    """Resolve bin range for multi-file chart.
+
+    Args:
+        range_type: One of 'RDL', 'DR', 'S3', 'S4', 'S6', 'CL'.
+        combined: Concatenated Series of all files.
+        global_mean: Mean of *combined*.
+        global_std: Std of *combined*.
+        all_dsets: List of dataset dicts (each has ``df``, ``metadata``, ...).
+        param: Parameter name.
+        custom_low/custom_high: Custom bounds for ``CL`` mode.
+
+    Returns:
+        ``(bin_min, bin_max)`` following the selected *range_type*.
+        Fallback chain: selected → RDL → DR (raw data range).
+    """
+    if range_type == 'CL' and custom_low is not None and custom_high is not None:
+        return float(custom_low), float(custom_high)
+
+    if range_type == 'DR':
+        return float(combined.min()), float(combined.max())
+
+    # RDL: use spec limits from metadata (union across files)
+    if range_type == 'RDL':
+        lowers, uppers = [], []
+        for ds in all_dsets:
+            lo, hi = _resolve_param_limits(
+                ds.get('df'), ds.get('metadata', {}), param, combined)
+            if lo is not None:
+                lowers.append(lo)
+            if hi is not None:
+                uppers.append(hi)
+        if lowers or uppers:
+            return (
+                min(lowers) if lowers else float(combined.min()),
+                max(uppers) if uppers else float(combined.max()),
+            )
+
+    # S3/S4/S6: mean ± N*std
+    if range_type in ('S3', 'S4', 'S6') and global_std > 0:
+        n = int(range_type[1])
+        return global_mean - n * global_std, global_mean + n * global_std
+
+    # Final fallback: raw data range
+    return float(combined.min()), float(combined.max())
+
+
+def compute_multi_lot_distribution(datasets, all_series, param,
+                                    range_type='S4', custom_low=None,
+                                    custom_high=None):
     """Compute multi-lot distribution bins and lot-level stats.
 
     Args:
         datasets: ``{fid: {series, metadata, name, ...}}``.
         all_series: List of ``pd.Series``, one per lot.
         param: Parameter name.
+        range_type: One of 'RDL', 'DR', 'S3', 'S4', 'S6', 'CL'.
+        custom_low: Custom lower bound (when ``range_type == 'CL'``).
+        custom_high: Custom upper bound (when ``range_type == 'CL'``).
 
     Returns:
         Dict with keys ``param``, ``global_mean``, ``global_std``,
@@ -303,11 +356,24 @@ def compute_multi_lot_distribution(datasets, all_series, param):
     combined = pd.concat(all_series)
     global_mean = float(combined.mean())
     global_std = float(combined.std(ddof=0)) if len(combined) > 1 else 0
-    min_val = float(combined.min())
-    max_val = float(combined.max())
+
+    # Resolve bin range based on range_type (smart range default: S4)
+    all_dsets = list(datasets.values())
+    bin_min, bin_max = _resolve_multi_range(
+        range_type, combined, global_mean, global_std,
+        all_dsets, param, custom_low, custom_high,
+    )
+    # Degenerate range fallback
+    if bin_min == bin_max:
+        bin_min = float(combined.min())
+        bin_max = float(combined.max())
+    if bin_min == bin_max:
+        bin_min -= 0.5
+        bin_max += 0.5
+
     bin_count = 25
-    bin_width = (max_val - min_val) / bin_count if max_val != min_val else 1
-    bins = np.linspace(min_val - bin_width / 2, max_val + bin_width / 2, bin_count + 1)
+    bin_width = (bin_max - bin_min) / bin_count
+    bins = np.linspace(bin_min - bin_width / 2, bin_max + bin_width / 2, bin_count + 1)
     bin_centers = [float((bins[i] + bins[i + 1]) / 2) for i in range(bin_count)]
 
     colors = ['#E53935', '#1E88E5', '#43A047', '#F9A825', '#8E24AA',

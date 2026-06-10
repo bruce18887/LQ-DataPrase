@@ -201,6 +201,10 @@ class AnalysisViewSet(viewsets.GenericViewSet):
             })
 
         # With param → per-file distribution (no SITE split; one series/file).
+        range_type = get_param(request, 'range_type', 'S4')
+        custom_low = get_param_float(request, 'custom_low')
+        custom_high = get_param_float(request, 'custom_high')
+
         datasets = {}
         all_series = []
         for fid, df, metadata, filename in loaded:
@@ -217,7 +221,10 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         if not all_series:
             return Response({'error': 'no_data'}, status=400)
 
-        result = compute_multi_lot_distribution(datasets, all_series, param)
+        result = compute_multi_lot_distribution(
+            datasets, all_series, param,
+            range_type=range_type, custom_low=custom_low, custom_high=custom_high,
+        )
 
         return Response(clean_data(result))
 
