@@ -219,7 +219,17 @@ class AnalysisViewSet(viewsets.GenericViewSet):
                     all_series.append(s)
 
         if not all_series:
-            return Response({'error': 'no_data'}, status=400)
+            return Response({
+                'param': param,
+                'global_mean': None,
+                'global_std': None,
+                'chart_min': 0,
+                'chart_max': 1,
+                'bin_centers': [],
+                'lot_data': [],
+                'global_lsl': None,
+                'global_usl': None,
+            })
 
         result = compute_multi_lot_distribution(
             datasets, all_series, param,

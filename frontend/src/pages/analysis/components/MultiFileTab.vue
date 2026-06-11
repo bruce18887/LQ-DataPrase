@@ -89,12 +89,17 @@
           </div>
           <div class="chart-wrapper">
             <MultiFileChart
-              v-if="lotData"
+              v-if="lotData && lotData.lot_data && lotData.lot_data.length > 0"
               :lot-data="lotData"
               :chart-config="chartConfig"
               :bar-width-percent="barWidthPercent"
               :file-names="resolvedNames"
               :selected-param="selectedParam"
+            />
+            <el-empty
+              v-else-if="lotData && selectedParam"
+              :description="`${selectedParam} 暂无有效数据`"
+              style="height: 100%; display: flex; align-items: center; justify-content: center;"
             />
           </div>
         </template>

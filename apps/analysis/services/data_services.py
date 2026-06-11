@@ -254,20 +254,35 @@ def compute_common_params(loaded, ignore_no_limit=False):
             drawn). Otherwise return the plain numeric-column intersection.
 
     Returns:
-        Sorted list of column names present (and numeric) in all files.
+        List of column names present (and numeric) in all files,
+        ordered by the file with the most parameters (preserving original order).
     """
     param_sets = []
+    param_orders = []  # Store original column order for each file
     for _fid, df, metadata, _filename in loaded:
-        numeric_cols = {
+        numeric_cols = [
             c for c in df.columns
             if str(c).strip() and df[c].dtype in ('int64', 'float64')
-        }
+        ]
         if ignore_no_limit:
-            numeric_cols &= set(get_columns_with_limits(df, metadata))
-        param_sets.append(numeric_cols)
+            numeric_cols = [c for c in numeric_cols if c in set(get_columns_with_limits(df, metadata))]
+        param_sets.append(set(numeric_cols))
+        param_orders.append(numeric_cols)
     if not param_sets:
         return []
-    return sorted(set.intersection(*param_sets))
+
+    common_params = set.intersection(*param_sets)
+
+    # Find the file with the most parameters and use its order
+    if not param_orders:
+        return sorted(common_params)
+
+    max_idx = max(range(len(param_orders)), key=lambda i: len(param_orders[i]))
+    ordered_params = param_orders[max_idx]
+
+    # Filter to only common params, preserving order
+    result = [p for p in ordered_params if p in common_params]
+    return result
 
 
 def _resolve_param_limits(df, metadata, param, series):
@@ -354,15 +369,65 @@ def compute_multi_lot_distribution(datasets, all_series, param,
         return None
 
     combined = pd.concat(all_series)
+    # Clean data: remove NaN and Inf values
+    combined = combined.dropna()
+    combined = combined[abs(combined) < float('inf')]
+    if len(combined) == 0:
+        return None
+
     global_mean = float(combined.mean())
     global_std = float(combined.std(ddof=0)) if len(combined) > 1 else 0
 
-    # Resolve bin range based on range_type (smart range default: S4)
+    # First pass: resolve per-file limits to determine global limit range
     all_dsets = list(datasets.values())
+    colors = ['#E53935', '#1E88E5', '#43A047', '#F9A825', '#8E24AA',
+              '#00ACC1', '#F57C00', '#D81B60']
+    lot_data_pre = []  # Pre-compute per-file stats
+    global_lsl = None  # Minimum LSL across all files
+    global_usl = None  # Maximum USL across all files
+
+    for idx, (fid, ds) in enumerate(datasets.items()):
+        # Clean per-file data
+        series = ds['series'].dropna()
+        series = series[abs(series) < float('inf')]
+        if len(series) == 0:
+            continue
+
+        mean_v = float(series.mean())
+        std_v = float(series.std(ddof=0)) if len(series) > 1 else 0
+        lower_limit, upper_limit = _resolve_param_limits(
+            ds.get('df'), ds.get('metadata', {}), param, series
+        )
+        # Track global min LSL and max USL
+        if lower_limit is not None:
+            global_lsl = min(global_lsl, lower_limit) if global_lsl is not None else lower_limit
+        if upper_limit is not None:
+            global_usl = max(global_usl, upper_limit) if global_usl is not None else upper_limit
+        lot_data_pre.append({
+            'fid': fid,
+            'ds': ds,
+            'series': series,  # Use cleaned series
+            'idx': idx,
+            'mean_v': mean_v,
+            'std_v': std_v,
+            'lower_limit': lower_limit,
+            'upper_limit': upper_limit,
+        })
+
+    # Resolve bin range: use range_type-based resolution, ensure all limit lines are visible
     bin_min, bin_max = _resolve_multi_range(
         range_type, combined, global_mean, global_std,
         all_dsets, param, custom_low, custom_high,
     )
+    # Expand range to include all limit lines (ensure each file's limits are fully visible)
+    if global_lsl is not None:
+        bin_min = min(bin_min, global_lsl)
+    if global_usl is not None:
+        bin_max = max(bin_max, global_usl)
+    # Add margin to ensure limit lines are not at the edge
+    margin = (bin_max - bin_min) * 0.05  # 5% margin
+    bin_min -= margin
+    bin_max += margin
     # Degenerate range fallback
     if bin_min == bin_max:
         bin_min = float(combined.min())
@@ -371,32 +436,33 @@ def compute_multi_lot_distribution(datasets, all_series, param,
         bin_min -= 0.5
         bin_max += 0.5
 
-    bin_count = 25
+    # Fixed 24 bins for X-axis
+    bin_count = 24
     bin_width = (bin_max - bin_min) / bin_count
-    bins = np.linspace(bin_min - bin_width / 2, bin_max + bin_width / 2, bin_count + 1)
+    bins = np.linspace(bin_min, bin_max, bin_count + 1)
     bin_centers = [float((bins[i] + bins[i + 1]) / 2) for i in range(bin_count)]
 
-    colors = ['#E53935', '#1E88E5', '#43A047', '#F9A825', '#8E24AA',
-              '#00ACC1', '#F57C00', '#D81B60']
+    # Second pass: compute histograms and assemble lot_data
     lot_data = []
-    for idx, (fid, ds) in enumerate(datasets.items()):
-        hist, _ = np.histogram(ds['series'], bins=bins)
+    for pre in lot_data_pre:
+        fid = pre['fid']
+        ds = pre['ds']
+        series = pre['series']  # Use cleaned series
+        idx = pre['idx']
+        hist, _ = np.histogram(series, bins=bins)
         pcts = [
-            round(c / len(ds['series']) * 100, 2) if len(ds['series']) > 0 else 0
+            round(c / len(series) * 100, 2) if len(series) > 0 else 0
             for c in hist
         ]
         bar_data = [[bin_centers[i], pcts[i]] for i in range(bin_count)]
-        mean_v = float(ds['series'].mean())
-        std_v = float(ds['series'].std(ddof=0)) if len(ds['series']) > 1 else 0
-        lower_limit, upper_limit = _resolve_param_limits(
-            ds.get('df'), ds.get('metadata', {}), param, ds['series']
-        )
+        lower_limit = pre['lower_limit']
+        upper_limit = pre['upper_limit']
         # Fail count uses the parsed numeric limits (raw metadata mins/maxs are
         # strings like "0" or "MIN", so comparing the series against them
         # directly raises). When a bound is absent, treat it as ±inf.
         lo = lower_limit if lower_limit is not None else -float('inf')
         hi = upper_limit if upper_limit is not None else float('inf')
-        fail = int(((ds['series'] < lo) | (ds['series'] > hi)).sum())
+        fail = int(((series < lo) | (series > hi)).sum())
         lot_data.append({
             'name': ds.get('name', fid),
             'file_id': ds.get('file_id'),
@@ -404,15 +470,15 @@ def compute_multi_lot_distribution(datasets, all_series, param,
             'bar_data': bar_data,
             'lower_limit': lower_limit,
             'upper_limit': upper_limit,
-            'mean': round(mean_v, 6),
-            'std': round(std_v, 6),
-            'count': len(ds['series']),
+            'mean': round(pre['mean_v'], 6),
+            'std': round(pre['std_v'], 6),
+            'count': len(series),
             'fail': fail,
             'yield_pct': round(
-                (len(ds['series']) - fail) / len(ds['series']) * 100, 2
+                (len(series) - fail) / len(series) * 100, 2
             ),
-            'min_v': round(float(ds['series'].min()), 6),
-            'max_v': round(float(ds['series'].max()), 6),
+            'min_v': round(float(series.min()), 6),
+            'max_v': round(float(series.max()), 6),
         })
 
     return {
@@ -423,6 +489,8 @@ def compute_multi_lot_distribution(datasets, all_series, param,
         'chart_max': round(float(bins[-1]), 6),
         'bin_centers': bin_centers,
         'lot_data': lot_data,
+        'global_lsl': round(float(global_lsl), 6) if global_lsl is not None else None,
+        'global_usl': round(float(global_usl), 6) if global_usl is not None else None,
     }
 
 

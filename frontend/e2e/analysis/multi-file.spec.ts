@@ -72,9 +72,11 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
     expect(box!.width).toBeGreaterThan(0)
     expect(box!.height).toBeGreaterThan(0)
 
-    // 图例：每文件一项 + 统一规格限（markLine 模式）
+    // 图例：每文件一项 + per-file limit 线（新实现：每个文件独立显示）
     const legend = (await page.locator(`${TAB} text`).allTextContents()).join(' | ')
-    expect(legend, '图例应出现规格限项').toMatch(/规格限/)
+    // 新实现中，limit线不再合并为"规格限"，而是每个文件独立显示
+    // 图例应包含文件名和 limit 信息
+    expect(legend, '图例应出现 USL/LSL 信息').toMatch(/USL|LSL/)
     // 不应再出现良率对比（已移除）
     expect(legend).not.toMatch(/良率对比/)
   })
@@ -167,7 +169,7 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
     expect(legend).not.toMatch(/\.csv/)
   })
 
-  test('Limit 线标注简化为 USL=value 格式', async ({ page }) => {
+  test('Limit 线标注包含文件名和规格限类型', async ({ page }) => {
     test.slow()
     await enterMultiFile(page)
     await pickFiles(page, [RECOMMENDED.buyoff[0], RECOMMENDED.buyoff[1]])
@@ -177,12 +179,129 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
     )
     await expect(page.locator(`${TAB} .chart-wrapper svg`)).toBeVisible({ timeout: 15_000 })
 
-    // Limit 标注应为 USL=xxx 或 LSL=xxx 格式（不含完整文件名）
+    // Limit 标注应包含文件名和规格限类型
     const allTexts = await page.locator(`${TAB} text`).allTextContents()
     const limitLabels = allTexts.filter(t => /USL|LSL/.test(t))
+
+    // 应该有至少 2 个 limit 标注（每个文件至少有一个 USL 或 LSL）
+    expect(limitLabels.length).toBeGreaterThanOrEqual(2)
+
     for (const label of limitLabels) {
-      // 应匹配 USL=123.45 或 LSL=123.45 格式
-      expect(label).toMatch(/^(USL|LSL)=\d/)
+      // 应匹配 "文件名 USL" 或 "文件名 LSL" 格式
+      expect(label).toMatch(/.+\s+(USL|LSL)$/)
     }
+  })
+
+  test('每个文件显示独立的 limit 线（含独立图例）', async ({ page }) => {
+    test.slow()
+    await enterMultiFile(page)
+    await pickFiles(page, [RECOMMENDED.buyoff[0], RECOMMENDED.buyoff[1]])
+    await page.waitForResponse(
+      (r) => r.url().includes('/analysis/multi_lot/') && r.status() < 500,
+      { timeout: 25_000 },
+    )
+    await expect(page.locator(`${TAB} .chart-wrapper svg`)).toBeVisible({ timeout: 15_000 })
+
+    // Limit 标注应包含文件名和规格限类型
+    const allTexts = await page.locator(`${TAB} text`).allTextContents()
+    const limitLabels = allTexts.filter(t => /USL|LSL/.test(t))
+
+    // 应该有至少 2 个 limit 标注（每个文件至少有一个 USL 或 LSL）
+    expect(limitLabels.length).toBeGreaterThanOrEqual(2)
+
+    // 每个 limit 标注应包含文件名和规格限类型
+    for (const label of limitLabels) {
+      // 应匹配 "文件名 USL" 或 "文件名 LSL" 格式
+      expect(label).toMatch(/.+\s+(USL|LSL)$/)
+    }
+  })
+
+  test('正态分布曲线复选框控制显示/隐藏', async ({ page }) => {
+    test.slow()
+    await enterMultiFile(page)
+    await pickFiles(page, [RECOMMENDED.buyoff[0], RECOMMENDED.buyoff[1]])
+    await page.waitForResponse(
+      (r) => r.url().includes('/analysis/multi_lot/') && r.status() < 500,
+      { timeout: 25_000 },
+    )
+    await expect(page.locator(`${TAB} .chart-wrapper svg`)).toBeVisible({ timeout: 15_000 })
+
+    // 初始状态：正态分布复选框未勾选
+    const normalCheckbox = page.locator(TAB).locator('.el-checkbox').filter({ hasText: '正态分布' })
+    await expect(normalCheckbox).not.toHaveClass(/is-checked/)
+
+    // 勾选正态分布复选框
+    await normalCheckbox.scrollIntoViewIfNeeded()
+    await normalCheckbox.getByText('正态分布').click()
+    await expect(normalCheckbox, '点击后应变为选中态').toHaveClass(/is-checked/, { timeout: 5_000 })
+
+    // 等待图表更新
+    await page.waitForTimeout(500)
+
+    // 验证图例中出现正态分布相关文字
+    const legendTexts = await page.locator(`${TAB} text`).allTextContents()
+    const legend = legendTexts.join(' | ')
+    expect(legend, '图例应出现正态分布项').toMatch(/正态分布/)
+
+    // 取消勾选
+    await normalCheckbox.getByText('正态分布').click()
+    await expect(normalCheckbox, '取消勾选后应变为未选中态').not.toHaveClass(/is-checked/, { timeout: 5_000 })
+  })
+
+  test('正态分布曲线显示独立的概率密度 Y 轴', async ({ page }) => {
+    test.slow()
+    await enterMultiFile(page)
+    await pickFiles(page, [RECOMMENDED.buyoff[0], RECOMMENDED.buyoff[1]])
+    await page.waitForResponse(
+      (r) => r.url().includes('/analysis/multi_lot/') && r.status() < 500,
+      { timeout: 25_000 },
+    )
+    await expect(page.locator(`${TAB} .chart-wrapper svg`)).toBeVisible({ timeout: 15_000 })
+
+    // 勾选正态分布复选框
+    const normalCheckbox = page.locator(TAB).locator('.el-checkbox').filter({ hasText: '正态分布' })
+    await normalCheckbox.scrollIntoViewIfNeeded()
+    await normalCheckbox.getByText('正态分布').click()
+    await page.waitForTimeout(500)
+
+    // 验证图例中出现概率密度相关文字（Y轴标签）
+    const allTexts = await page.locator(`${TAB} text`).allTextContents()
+    const text = allTexts.join(' | ')
+    expect(text, '应出现概率密度Y轴标签').toMatch(/概率密度/)
+  })
+
+  test('X 轴固定 24 个坐标', async ({ page }) => {
+    test.slow()
+    await enterMultiFile(page)
+
+    // 设置响应监听器
+    const distResponses: any[] = []
+    page.on('response', async (resp) => {
+      if (resp.url().includes('/analysis/multi_lot/') && resp.status() < 500) {
+        try {
+          const json = await resp.json()
+          if (json.bin_centers) {
+            distResponses.push(json)
+          }
+        } catch (e) {
+          // 忽略解析错误
+        }
+      }
+    })
+
+    await pickFiles(page, [RECOMMENDED.buyoff[0], RECOMMENDED.buyoff[1]])
+
+    // 等待图表渲染
+    await expect(page.locator(`${TAB} .chart-wrapper svg`)).toBeVisible({ timeout: 15_000 })
+
+    // 等待一段时间让所有响应完成
+    await page.waitForTimeout(3000)
+
+    // 验证 distribution 响应存在
+    expect(distResponses.length, '应收到 distribution 响应').toBeGreaterThan(0)
+    const distJson = distResponses[distResponses.length - 1] // 获取最新的响应
+
+    // 验证 bin_centers 数量固定为 24
+    expect(distJson.bin_centers.length, 'X 轴应固定为 24 个坐标').toBe(24)
   })
 })
