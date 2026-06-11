@@ -44,13 +44,63 @@
       <!-- 3. Phase Detail Table -->
       <el-card shadow="never" class="section-card">
         <template #header>📊 阶段明细表</template>
-        <el-table :data="batchData.phases" stripe size="small" :border="true" max-height="350">
+        <el-table :data="batchData.phases" stripe size="small" :border="true" max-height="350" :row-key="(row: any) => row.filename">
+          <el-table-column type="expand">
+            <template #default="{ row }">
+              <div class="phase-detail-expand">
+                <div class="detail-row">
+                  <span class="detail-label">完整文件名</span>
+                  <span class="detail-value mono">{{ row.filename }}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">测试程序</span>
+                  <span class="detail-value">{{ row.program_name || '---' }}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Lot ID</span>
+                  <span class="detail-value">{{ row.lot_id || '---' }}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">开始时间</span>
+                  <span class="detail-value">{{ row.start_time || '---' }}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">结束时间</span>
+                  <span class="detail-value">{{ row.end_time || '---' }}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">操作员</span>
+                  <span class="detail-value">{{ row.operator || '---' }}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">工站</span>
+                  <span class="detail-value">{{ row.station || '---' }}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Device</span>
+                  <span class="detail-value">{{ row.device_name || '---' }}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Tester</span>
+                  <span class="detail-value">{{ row.tester_type || '---' }}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">总测试时间</span>
+                  <span class="detail-value">{{ row.total_test_time || '---' }}</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Handler</span>
+                  <span class="detail-value">{{ row.handler || '---' }}</span>
+                </div>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column prop="phase" label="阶段" width="80" fixed />
           <el-table-column label="WAFER_ID" width="100" align="center">
             <template #default="{row}">{{ row.wafer_id || '-' }}</template>
           </el-table-column>
-          <el-table-column prop="program_name" label="程序名称" width="140" show-overflow-tooltip />
-          <el-table-column prop="lot_id" label="Lot ID" width="120" show-overflow-tooltip />
+          <el-table-column prop="program_name" label="程序名称" width="140" />
+          <el-table-column prop="lot_id" label="Lot ID" width="120" />
           <el-table-column prop="total" label="测试总数" width="90" align="center" />
           <el-table-column prop="pass_count" label="Pass" width="80" align="center" />
           <el-table-column prop="fail_count" label="Fail" width="70" align="center">
@@ -67,21 +117,21 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="start_time" label="开始时间" width="170" show-overflow-tooltip />
-          <el-table-column prop="end_time" label="结束时间" width="170" show-overflow-tooltip />
-          <el-table-column prop="operator" label="操作员" width="100" show-overflow-tooltip />
-          <el-table-column prop="station" label="工站" width="100" show-overflow-tooltip />
-          <el-table-column prop="device_name" label="Device" width="140" show-overflow-tooltip />
-          <el-table-column prop="tester_type" label="Tester" width="100" show-overflow-tooltip />
-          <el-table-column prop="total_test_time" label="总测试时间" width="110" show-overflow-tooltip />
-          <el-table-column prop="handler" label="Handler" width="100" show-overflow-tooltip />
+          <el-table-column prop="start_time" label="开始时间" width="170" />
+          <el-table-column prop="end_time" label="结束时间" width="170" />
+          <el-table-column prop="operator" label="操作员" width="100" />
+          <el-table-column prop="station" label="工站" width="100" />
+          <el-table-column prop="device_name" label="Device" width="140" />
+          <el-table-column prop="tester_type" label="Tester" width="100" />
+          <el-table-column prop="total_test_time" label="总测试时间" width="110" />
+          <el-table-column prop="handler" label="Handler" width="100" />
         </el-table>
       </el-card>
 
       <!-- 4. Yield Trend Combo Chart (Bar + Line) -->
       <el-card shadow="never" class="section-card">
         <template #header>📈 良率趋势</template>
-        <YieldTrendChart ref="yieldTrendChartRef" :phases="batchData.phases || []" :spc-limits="batchData.trend_data?.spc_limits" />
+        <YieldTrendChart ref="yieldTrendChartRef" :phases="batchData.phases || []" />
       </el-card>
 
       <!-- 5. QA Validation -->
@@ -516,5 +566,36 @@ defineExpose({ handleResize })
 
 :deep(.el-table__body tr:hover > td) {
   background-color: var(--bg-tertiary) !important;
+}
+
+.phase-detail-expand {
+  padding: 12px 20px;
+  background-color: var(--bg-secondary);
+}
+
+.detail-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.detail-label {
+  flex-shrink: 0;
+  width: 96px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+.detail-value {
+  font-size: 13px;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.detail-value.mono {
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 12px;
 }
 </style>

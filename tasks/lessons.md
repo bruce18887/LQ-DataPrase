@@ -282,3 +282,12 @@
 - **e2e 中 `v-show` 多 tab 同时存在 DOM → 选择器命中隐藏副本**：DataManagement 的 view/export 用 `v-show`，两个 `.banner-file-select` 同时在 DOM，`.first()` 命中 `display:none` 的那个 → toBeVisible 永远 hidden。**Rule**: `v-show` 切 tab 时定位必须加 `.content-section:visible` 限定当前可见 section。
 - **EP 2.14 el-select 断言**：真 `<input>` 未聚焦时 hidden，可见性判断用 `.el-select__wrapper`；占位符与选中值**都**渲染在 `.el-select__placeholder`（选中后复用为值展示），`.el-select__selected-item` 同时匹配 input-wrapper + placeholder（strict 违例）。**Rule**: 可见性用 `.el-select__wrapper`，选中值用 `.el-select__placeholder` 文本。
 - **`vue-tsc --noEmit` vs `-b` 严格度不同**：`--noEmit`（单 tsconfig）过，但 `-b`（build mode）暴露更多既有错误（TS6133 未读变量、EChartsOption 字面量类型不兼容）。本仓库 `-b` 全量 build 本就有一堆前序未提交报错。**Rule**: 改动验证用 `--noEmit` 看自己范围；判断「是否我引入的回归」grep 自己改的文件名，别被既有 build 噪音误导，可疑时 `git stash` 对照。
+
+## 联想输入 — el-autocomplete vs el-select + filterable 2026-06-10
+
+- **需求**: 所有输入框都要有联想/下拉选择功能（类似 Streamlit）。
+- **尝试 1 — el-autocomplete**: 提供输入联想但**丢失了下拉选择**功能。用户反馈"不能进行下拉 select 了"。
+- **正确方案 — el-select + filterable**: Element Plus 的 `el-select` 设置 `filterable` 属性后，同时支持输入过滤和下拉选择。配合 `filter-method` 自定义过滤（前缀优先）和自定义 option 模板（高亮匹配），完美满足需求。
+- **标签输入联想**: 原生 `<input>` + 自定义下拉建议列表（`.tag-suggestions`）。调用已有的 `listTags(prefix)` API，debounce 200ms。键盘导航（↑↓/Enter/Escape）。选择后自动提交标签。
+- **Rule**: 需求是"输入+下拉选择"时，优先用 `el-select + filterable`，不要用 `el-autocomplete`（后者只提供联想，不提供 select 体验）。纯标签输入场景可以用原生 input + 自定义下拉（更轻量）。
+- **Rule**: 标签联想的下拉建议要用 `@mousedown.prevent` 而非 `@click`，否则 blur 事件先触发导致输入框关闭，建议项点击无效。

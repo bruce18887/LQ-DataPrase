@@ -181,4 +181,64 @@ test.describe('批次报表 /batch', { tag: ['@p1', '@p2', '@batch'] }, () => {
       page.locator('.el-select').filter({ hasText: '选择批次' }).first(),
     ).toBeVisible()
   })
+
+  test('@p2 阶段明细表：展开行显示详细信息（替代 tooltip）', async ({ page }) => {
+    await gotoApp(page, '/batch')
+
+    // 切到「批次良率报表」tab
+    await page.getByRole('tab', { name: '📊 批次良率报表' }).click()
+
+    // 等待 list_batches 接口返回
+    await page.waitForResponse(
+      (r) => r.url().includes('/batch-report/list_batches/'),
+      { timeout: 15_000 },
+    )
+
+    // 选择第一个批次（如果有）
+    const batchSelect = page.locator('.el-select').filter({ hasText: '选择批次' }).first()
+    await batchSelect.click()
+    const dropdown = page.locator('.el-select-dropdown:visible').last()
+    const firstOption = dropdown.locator('.el-select-dropdown__item').first()
+
+    if (!(await firstOption.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      test.skip(true, '无可用批次数据，跳过阶段明细表测试')
+      return
+    }
+
+    // 选择批次并等待 batch_yield_data 接口
+    const yieldResp = page.waitForResponse(
+      (r) => r.url().includes('/batch-report/batch_yield_data/'),
+      { timeout: 30_000 },
+    )
+    await firstOption.click()
+    await yieldResp
+
+    // 阶段明细表可见
+    const phaseTable = page.locator('.el-card').filter({ hasText: '📊 阶段明细表' }).locator('.el-table')
+    await expect(phaseTable).toBeVisible({ timeout: 15_000 })
+
+    // 验证表格有 expand 列（展开按钮）
+    const expandButtons = phaseTable.locator('.el-table__expand-icon')
+    const expandCount = await expandButtons.count()
+
+    if (expandCount > 0) {
+      // 点击第一行的展开按钮
+      await expandButtons.first().click()
+      await page.waitForTimeout(300)
+
+      // 验证展开详情区域出现（包含 label-value 布局）
+      const expandContent = phaseTable.locator('.phase-detail-expand')
+      await expect(expandContent).toBeVisible({ timeout: 5_000 })
+
+      // 验证展开内容包含详细字段
+      await expect(expandContent).toContainText('完整文件名')
+      await expect(expandContent).toContainText('测试程序')
+      await expect(expandContent).toContainText('开始时间')
+      await expect(expandContent).toContainText('结束时间')
+
+      console.log('[batch] 阶段明细表展开行功能正常')
+    } else {
+      console.log('[batch] 阶段明细表无数据行，跳过展开测试')
+    }
+  })
 })

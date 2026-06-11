@@ -545,6 +545,87 @@ test.describe('数据管理 /data 文件列表增强（标签/上传/批次管�
       await expect(firstRow.locator('.el-tag').filter({ hasText: tagName })).toHaveCount(0, { timeout: 10_000 })
     }
   })
+
+  test('@p2 标签联想输入：输入时显示匹配的已有标签建议', async ({ page }) => {
+    await gotoApp(page, '/data')
+    await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
+
+    // 先通过 API 创建一个带标签的文件，确保有标签可联想
+    const tagPrefix = `E2E_AC_${Date.now()}`
+    const tag1 = `${tagPrefix}_AAA`
+    const tag2 = `${tagPrefix}_AAB`
+
+    const fileId = await page.evaluate(async () => {
+      const token = localStorage.getItem('access_token')
+      const res = await fetch('/api/v1/files/', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      const data = await res.json()
+      const list = Array.isArray(data) ? data : (data.results ?? [])
+      return list.length > 0 ? list[0].id : null
+    })
+
+    if (!fileId) {
+      test.skip(true, '当前用户无文件，无法测试标签联想')
+      return
+    }
+
+    // 设置两个带共同前缀的标签
+    await page.evaluate(async ({ id, tags }) => {
+      const token = localStorage.getItem('access_token')
+      await fetch(`/api/v1/files/${id}/set_tags/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ tags }),
+      })
+    }, { id: fileId, tags: [tag1, tag2] })
+
+    // 刷新加载新标签
+    await page.reload()
+    await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
+
+    // 找到第一行的添加标签按钮并点击
+    const firstRow = page.locator('.el-table .el-table__row').first()
+    const addBtn = firstRow.locator('button').filter({ hasText: /添加/ }).first()
+
+    if (await addBtn.isVisible()) {
+      await addBtn.click()
+      const tagInput = firstRow.locator('input.tag-native-input').first()
+      await expect(tagInput).toBeVisible({ timeout: 5_000 })
+
+      // 输入共同前缀，触发联想
+      await tagInput.fill(tagPrefix)
+      await page.waitForTimeout(400) // debounce 200ms + network
+
+      // 建议下拉应出现
+      const suggestions = firstRow.locator('.tag-suggestions')
+      await expect(suggestions).toBeVisible({ timeout: 5_000 })
+
+      // 应包含两个匹配项
+      const items = suggestions.locator('.tag-suggestion-item')
+      await expect(items).toHaveCount(2, { timeout: 5_000 })
+
+      // 点击第一个建议项，标签应自动添加
+      await items.first().click()
+      await expect(firstRow.locator('.el-tag').filter({ hasText: tagPrefix })).toHaveCount(1, { timeout: 10_000 })
+    }
+
+    // 清理：清空标签
+    await page.evaluate(async ({ id }) => {
+      const token = localStorage.getItem('access_token')
+      await fetch(`/api/v1/files/${id}/set_tags/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ tags: [] }),
+      })
+    }, { id: fileId })
+  })
 })
 
 test.describe('数据管理 /data 文件列表展开行（方案A）', { tag: ['@p1', '@p2', '@data'] }, () => {

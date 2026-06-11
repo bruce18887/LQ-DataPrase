@@ -151,15 +151,16 @@ class BatchReportViewSet(viewsets.GenericViewSet):
             # Priority: compound (EQC1-QA1, FT1-RT1, EQC1-2D3D) > standard (_CP1_, _FT1_)
             fname_upper = df_obj.filename.upper()
             phase_type = None
-            # 1) Compound: EQC1-QA2-1 → QA2, FT1-RT1-1 → RT1, EQC1-2D3D → 2D3D
-            m = re.search(r'(?:EQC\d+|QEC\d+|FT\d+)-(CP\d+|FT\d+|QA\d+|RT\d+|BF\d+|2D3D)', fname_upper)
+            # 1) Compound: EQC1_QA1-1 → QA1-1, FT1_FT1-1 → FT1-1, FT1_RT1-1 → RT1-1, EQC1-2D3D → 2D3D
+            #    Captures full identifier including sequence number (e.g., QA1-1, FT1-2, RT2-1)
+            m = re.search(r'(?:EQC\d+|QEC\d+|FT\d+)[_-]((?:CP|FT|QA|RT|BF)\d+(?:-\d+)?|2D3D)', fname_upper)
             if m:
                 phase_type = m.group(1)
             else:
-                # 2) Standard: _CP1_, _FT1_, _QA1_ — use underscore delimiter to avoid CP0283 (program code)
-                m = re.search(r'_(CP|FT|QA|RT|BF)(\d+)_', fname_upper)
+                # 2) Standard: _CP1_, _FT1-1_, _QA1-2_ — use underscore/hyphen delimiter to avoid CP0283 (program code)
+                m = re.search(r'_((?:CP|FT|QA|RT|BF)\d+(?:-\d+)?)[_-]', fname_upper)
                 if m:
-                    phase_type = f'{m.group(1)}{m.group(2)}'
+                    phase_type = m.group(1)
             if not phase_type:
                 phase_type = 'UNKNOWN'
 
