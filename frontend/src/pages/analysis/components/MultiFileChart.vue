@@ -22,11 +22,17 @@ function displayName(lot: any): string {
   return props.fileNames[lot.file_id] || lot.name || `File ${lot.file_id}`
 }
 
-/** 智能格式化 X 轴刻度：整数不显示小数，非整数最多 2 位 */
+/** 智能格式化 X 轴刻度：整数不显示小数，非整数最多 4 位 */
 function formatAxisValue(v: number): string {
   if (Number.isInteger(v)) return v.toString()
-  const s = v.toFixed(2)
+  const s = v.toFixed(4)
   return s.replace(/\.?0+$/, '')
+}
+
+/** 计算正态分布概率密度函数 */
+function normalPDF(x: number, mean: number, std: number): number {
+  if (std === 0) return 0
+  return (1 / (std * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * ((x - mean) / std) ** 2)
 }
 
 function buildOption() {
@@ -35,11 +41,13 @@ function buildOption() {
   const tc = colors.value.textColor
   const lots: any[] = r.lot_data
   const showLimit = props.chartConfig.includes('limit')
+  const showNormal = props.chartConfig.includes('normal')
   const binCenters: number[] = r.bin_centers || []
 
   const series: any[] = []
   const legendData: string[] = []
 
+  // 添加柱状图系列（每个文件独立颜色，显示百分比标签）
   for (const lot of lots) {
     const dn = displayName(lot)
     legendData.push(dn)
@@ -50,55 +58,126 @@ function buildOption() {
       itemStyle: { color: lot.color },
       barWidth: `${props.barWidthPercent}%`,
       barGap: '10%',
+      label: {
+        show: true,
+        position: 'top',
+        formatter: (params: any) => {
+          const value = params.data?.[1]
+          return value > 0 ? `${value.toFixed(2)}%` : ''
+        },
+        fontSize: 10,
+        color: lot.color,
+        fontWeight: 'bold',
+      },
     })
   }
 
-  // Limit 线：合并相同值，简化标注
-  const mk: any[] = []
+  // Limit 线：每个文件独立图例
   if (showLimit) {
-    // 按值合并 USL/LSL
-    const uslMap = new Map<number, any[]>()
-    const lslMap = new Map<number, any[]>()
     for (const lot of lots) {
+      const dn = displayName(lot)
+      const mk: any[] = []
       if (lot.upper_limit != null) {
-        const key = Number(lot.upper_limit.toFixed(6))
-        const arr = uslMap.get(key) || []
-        arr.push(lot)
-        uslMap.set(key, arr)
+        mk.push({
+          xAxis: lot.upper_limit,
+          lineStyle: { color: lot.color, width: 3, type: 'dashed' },
+          label: {
+            show: true,
+            formatter: `${dn} USL`,
+            position: 'end',
+            color: lot.color,
+            fontSize: 10,
+            fontWeight: 'bold',
+          },
+        })
       }
       if (lot.lower_limit != null) {
-        const key = Number(lot.lower_limit.toFixed(6))
-        const arr = lslMap.get(key) || []
-        arr.push(lot)
-        lslMap.set(key, arr)
+        mk.push({
+          xAxis: lot.lower_limit,
+          lineStyle: { color: lot.color, width: 3, type: 'dashed' },
+          label: {
+            show: true,
+            formatter: `${dn} LSL`,
+            position: 'end',
+            color: lot.color,
+            fontSize: 10,
+            fontWeight: 'bold',
+          },
+        })
+      }
+      if (mk.length) {
+        const limitX = lot.upper_limit ?? lot.lower_limit ?? binCenters[0]
+        series.push({
+          name: `${dn} 规格限`,
+          type: 'scatter',
+          data: [[limitX, 0]],
+          symbol: 'circle',
+          symbolSize: 0,
+          itemStyle: { color: lot.color },
+          markLine: { symbol: 'none', precision: 4, data: mk },
+        })
+        legendData.push(`${dn} 规格限`)
       }
     }
-    for (const [value, limitLots] of uslMap) {
-      const label = lots.length > 1
-        ? `USL=${formatAxisValue(value)}`
-        : `${displayName(limitLots[0])} USL=${formatAxisValue(value)}`
-      mk.push({
-        xAxis: value,
-        lineStyle: { color: limitLots[0].color, width: 2, type: 'dashed' },
-        label: { show: true, formatter: label, position: 'end', color: limitLots[0].color, fontSize: 10 },
-      })
-    }
-    for (const [value, limitLots] of lslMap) {
-      const label = lots.length > 1
-        ? `LSL=${formatAxisValue(value)}`
-        : `${displayName(limitLots[0])} LSL=${formatAxisValue(value)}`
-      mk.push({
-        xAxis: value,
-        lineStyle: { color: limitLots[0].color, width: 2, type: 'dashed' },
-        label: { show: true, formatter: label, position: 'end', color: limitLots[0].color, fontSize: 10 },
-      })
-    }
   }
-  if (mk.length) {
-    series.push({ name: '规格限', type: 'line', data: [], markLine: { symbol: 'none', precision: 4, data: mk } })
+
+  // 正态分布曲线：每个文件独立颜色
+  if (showNormal) {
+    for (const lot of lots) {
+      const dn = displayName(lot)
+      if (lot.std > 0 && binCenters.length > 0) {
+        // 生成平滑的正态分布曲线
+        const xMin = binCenters[0]
+        const xMax = binCenters[binCenters.length - 1]
+        const step = (xMax - xMin) / 100
+        const normalData: [number, number][] = []
+        for (let x = xMin; x <= xMax; x += step) {
+          normalData.push([x, normalPDF(x, lot.mean, lot.std)])
+        }
+        series.push({
+          name: `${dn} 正态分布`,
+          type: 'line',
+          data: normalData,
+          smooth: true,
+          lineStyle: { color: lot.color, width: 3, type: 'dotted' },
+          itemStyle: { color: lot.color },
+          symbol: 'none',
+          yAxisIndex: 1, // 使用独立的概率密度Y轴
+          z: 10,
+        })
+        legendData.push(`${dn} 正态分布`)
+      }
+    }
   }
 
   const titleText = `${props.selectedParam}  ${r.global_mean != null ? `(μ=${r.global_mean})` : ''}`
+
+  // 构建Y轴配置
+  const yAxisConfig: any[] = [
+    {
+      type: 'value',
+      name: '百分比 (%)',
+      nameTextStyle: { color: '#1E88E5', fontWeight: 'bold' },
+      position: 'left',
+      min: 0,
+      axisLabel: { formatter: '{value}%', color: '#1E88E5' },
+      axisLine: { show: true, lineStyle: { color: '#1E88E5' } },
+    },
+  ]
+
+  // 如果显示正态分布曲线，添加概率密度Y轴
+  if (showNormal) {
+    yAxisConfig.push({
+      type: 'value',
+      name: '概率密度',
+      nameTextStyle: { color: '#F57F17', fontWeight: 'bold' },
+      position: 'right',
+      min: 0,
+      axisLabel: { formatter: (v: number) => v.toExponential(2), color: '#F57F17' },
+      axisLine: { show: true, lineStyle: { color: '#F57F17' } },
+      splitLine: { show: false },
+    })
+  }
 
   return {
     title: {
@@ -124,28 +203,22 @@ function buildOption() {
     },
     legend: { data: legendData, top: 'bottom', type: 'scroll', textStyle: { color: tc } },
     toolbox: { feature: { saveAsImage: { name: `${props.selectedParam}_多文件对比` } } },
-    grid: { top: 50, bottom: 50, left: 55, right: 40 },
+    grid: { top: 55, bottom: 70, left: 55, right: showNormal ? 80 : 55 },
     xAxis: {
       type: 'value',
       min: binCenters.length > 0 ? binCenters[0] : r.chart_min,
       max: binCenters.length > 0 ? binCenters[binCenters.length - 1] : r.chart_max,
       axisLabel: {
-        rotate: 0,
+        rotate: 45,
         show: true,
-        interval: 'auto',
-        fontSize: 10,
+        interval: 0,
+        fontSize: 9,
         formatter: formatAxisValue,
         color: tc,
       },
-      splitNumber: 10,
+      splitNumber: 24,
     },
-    yAxis: {
-      type: 'value',
-      name: '百分比 (%)',
-      min: 0,
-      nameTextStyle: { color: tc },
-      axisLabel: { formatter: '{value}%', color: tc },
-    },
+    yAxis: yAxisConfig,
     series,
   }
 }

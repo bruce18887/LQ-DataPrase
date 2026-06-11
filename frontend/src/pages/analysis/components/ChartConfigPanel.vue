@@ -23,8 +23,8 @@
           <el-checkbox value="s3">3σ线</el-checkbox>
           <el-checkbox value="s4">4σ线</el-checkbox>
           <el-checkbox value="s6">6σ线</el-checkbox>
-          <el-checkbox value="normal">正态分布</el-checkbox>
         </template>
+        <el-checkbox value="normal">正态分布</el-checkbox>
       </el-checkbox-group>
     </div>
 

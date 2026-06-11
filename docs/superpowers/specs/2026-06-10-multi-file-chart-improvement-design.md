@@ -236,3 +236,279 @@ grid: { top: 50, bottom: 50, left: 55, right: 40 }
 - Visual: Compare before/after screenshots for both light and dark themes
 - Edge case: Files with no spec limits (RDL fallback to DR)
 - Edge case: Files with identical filenames (autoExtractLabel fallback)
+
+## 2026-06-11 Enhancement: Per-File Limit Lines, Limit-Based X-Axis, and Normal Distribution Curves
+
+### New Requirements
+
+1. **Per-file limit lines** — Each file displays its own limit lines (even if values are identical), with labels showing file name, limit value, and fail count
+2. **Limit-based X-axis** — X-axis range is determined by limit values: 20 bins inside the limit range (min LSL to max USL), 4 bins outside (2 on each side), total 24 bins
+3. **Normal distribution curves** — Each file has its own normal distribution curve, controlled by a checkbox, using an independent probability density Y-axis
+
+### Implementation Details
+
+#### 1. Backend Changes (`apps/analysis/services/data_services.py`)
+
+**Modified function: `compute_multi_lot_distribution()`**
+
+```python
+# New logic: collect all file limits first
+global_lsl = None  # Minimum LSL across all files
+global_usl = None  # Maximum USL across all files
+
+for fid, ds in datasets.items():
+    lower_limit, upper_limit = _resolve_param_limits(...)
+    if lower_limit is not None:
+        global_lsl = min(global_lsl, lower_limit) if global_lsl is not None else lower_limit
+    if upper_limit is not None:
+        global_usl = max(global_usl, upper_limit) if global_usl is not None else upper_limit
+
+# Limit-based X-axis: 20 inside + 4 outside
+if global_lsl is not None and global_usl is not None and global_lsl < global_usl:
+    limit_range = global_usl - global_lsl
+    bin_width_inside = limit_range / 20
+    bin_min = global_lsl - 2 * bin_width_inside  # 2 bins outside left
+    bin_max = global_usl + 2 * bin_width_inside  # 2 bins outside right
+    bin_count = 24
+else:
+    # Fallback to range_type-based resolution
+    bin_count = 25
+
+# Return values include global_lsl and global_usl
+return {
+    ...
+    'global_lsl': round(float(global_lsl), 6) if global_lsl is not None else None,
+    'global_usl': round(float(global_usl), 6) if global_usl is not None else None,
+}
+```
+
+#### 2. Frontend Changes (`MultiFileChart.vue`)
+
+**Limit lines: no longer merge identical values**
+
+```typescript
+// Each file displays its own limit lines
+for (const lot of lots) {
+  const dn = displayName(lot)
+  if (lot.upper_limit != null) {
+    const label = `${dn} USL=${formatAxisValue(lot.upper_limit)} (失效: ${lot.fail})`
+    mk.push({
+      xAxis: lot.upper_limit,
+      lineStyle: { color: lot.color, width: 2, type: 'dashed' },
+      label: {
+        show: true,
+        formatter: label,
+        position: 'end',
+        color: lot.color,
+        fontSize: 10,
+        backgroundColor: 'rgba(255,255,255,0.8)',
+        padding: [2, 4],
+        borderRadius: 2,
+      },
+    })
+  }
+  // Same for lower_limit...
+}
+```
+
+**Normal distribution curves**
+
+```typescript
+if (showNormal) {
+  for (const lot of lots) {
+    const dn = displayName(lot)
+    if (lot.std > 0 && binCenters.length > 0) {
+      const xMin = binCenters[0]
+      const xMax = binCenters[binCenters.length - 1]
+      const step = (xMax - xMin) / 100
+      const normalData: [number, number][] = []
+      for (let x = xMin; x <= xMax; x += step) {
+        normalData.push([x, normalPDF(x, lot.mean, lot.std)])
+      }
+      series.push({
+        name: `${dn} 正态分布`,
+        type: 'line',
+        data: normalData,
+        smooth: true,
+        lineStyle: { color: lot.color, width: 2, type: 'dashed' },
+        symbol: 'none',
+        yAxisIndex: 1,  // Independent probability density Y-axis
+        z: 10,
+      })
+    }
+  }
+}
+```
+
+**Dual Y-axis configuration**
+
+```typescript
+const yAxisConfig: any[] = [
+  {
+    type: 'value',
+    name: '百分比 (%)',
+    min: 0,
+    nameTextStyle: { color: tc },
+    axisLabel: { formatter: '{value}%', color: tc },
+  },
+]
+
+if (showNormal) {
+  yAxisConfig.push({
+    type: 'value',
+    name: '概率密度',
+    nameTextStyle: { color: tc },
+    axisLabel: { color: tc },
+    splitLine: { show: false },
+  })
+}
+```
+
+#### 3. ChartConfigPanel Changes
+
+Added "正态分布" checkbox for `variant='multi-file'`:
+
+```html
+<el-checkbox-group :model-value="chartConfig" @change="onChartConfigChange" class="config-checkboxes">
+  <el-checkbox value="limit">Limit</el-checkbox>
+  <template v-if="variant === 'full'">
+    <el-checkbox value="s3">3σ线</el-checkbox>
+    <el-checkbox value="s4">4σ线</el-checkbox>
+    <el-checkbox value="s6">6σ线</el-checkbox>
+  </template>
+  <el-checkbox value="normal">正态分布</el-checkbox>  <!-- Now available for both variants -->
+</el-checkbox-group>
+```
+
+### Testing Results
+
+**E2E Tests Added:**
+- ✅ 每个文件显示独立的 limit 线（含失效个数）
+- ✅ 正态分布曲线复选框控制显示/隐藏
+- ✅ 正态分布曲线显示独立的概率密度 Y 轴
+- ✅ X 轴基于 limit 值分配（24份）
+
+**All 13 multi-file analysis tests passed.**
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `apps/analysis/services/data_services.py` | Limit-based X-axis algorithm, global_lsl/global_usl return values |
+| `frontend/src/pages/analysis/components/MultiFileChart.vue` | Per-file limit lines, normal distribution curves, dual Y-axis |
+| `frontend/src/pages/analysis/components/ChartConfigPanel.vue` | Normal distribution checkbox for multi-file variant |
+| `frontend/e2e/analysis/multi-file.spec.ts` | 4 new test cases for new features |
+
+## 2026-06-11 Enhancement v2: Align with Single-File Analysis Style
+
+### New Requirements (User Feedback)
+
+1. **Limit labels** - Simplify to LSL/USL (same as single-file analysis), remove fail count from labels
+2. **Limit lines visibility** - Ensure all files' limit lines are fully visible (expand X-axis range)
+3. **X-axis fixed 24 coordinates** - Always use 24 bins
+4. **Bar chart style** - Add percentage labels on top (same as single-file analysis All Site style)
+
+### Implementation Details
+
+#### 1. Backend Changes (`apps/analysis/services/data_services.py`)
+
+**X-axis range expansion to include all limit lines:**
+
+```python
+# Resolve bin range using range_type
+bin_min, bin_max = _resolve_multi_range(...)
+
+# Expand range to include all limit lines
+if global_lsl is not None:
+    bin_min = min(bin_min, global_lsl)
+if global_usl is not None:
+    bin_max = max(bin_max, global_usl)
+
+# Add 5% margin to ensure limit lines are not at the edge
+margin = (bin_max - bin_min) * 0.05
+bin_min -= margin
+bin_max += margin
+
+# Fixed 24 bins
+bin_count = 24
+bins = np.linspace(bin_min, bin_max, bin_count + 1)
+bin_centers = [float((bins[i] + bins[i + 1]) / 2) for i in range(bin_count)]
+```
+
+#### 2. Frontend Changes (`MultiFileChart.vue`)
+
+**Simplified limit labels (same as single-file analysis):**
+
+```typescript
+if (lot.upper_limit != null) {
+  mk.push({
+    xAxis: lot.upper_limit,
+    lineStyle: { color: '#C62828', width: 3, type: 'dashed' },
+    label: {
+      show: true,
+      formatter: 'USL',  // Simplified label
+      position: 'end',
+      color: '#C62828',
+      fontSize: 12,
+      fontWeight: 'bold',
+    },
+  })
+}
+```
+
+**Bar chart with percentage labels:**
+
+```typescript
+series.push({
+  name: dn,
+  type: 'bar',
+  data: lot.bar_data,
+  itemStyle: { color: lot.color },
+  barWidth: `${props.barWidthPercent}%`,
+  barGap: '10%',
+  label: {
+    show: true,
+    position: 'top',
+    formatter: (params: any) => {
+      const value = params.data?.[1]
+      return value > 0 ? `${value.toFixed(2)}%` : ''
+    },
+    fontSize: 10,
+    color: lot.color,
+    fontWeight: 'bold',
+  },
+})
+```
+
+**X-axis configuration (same as single-file analysis):**
+
+```typescript
+xAxis: {
+  type: 'value',
+  min: binCenters.length > 0 ? binCenters[0] : r.chart_min,
+  max: binCenters.length > 0 ? binCenters[binCenters.length - 1] : r.chart_max,
+  axisLabel: {
+    rotate: 45,
+    show: true,
+    interval: 0,
+    fontSize: 9,
+    formatter: formatAxisValue,
+    color: tc,
+  },
+  splitNumber: 24,  // Fixed 24 coordinates
+}
+```
+
+### Testing Results
+
+**All 13 multi-file analysis E2E tests passed.**
+
+### Alignment with Single-File Analysis
+
+| Feature | Single-File Analysis | Multi-File Analysis (v2) |
+|---------|---------------------|-------------------------|
+| Limit labels | LSL/USL | LSL/USL ✅ |
+| X-axis coordinates | 24 | 24 ✅ |
+| Bar labels | Percentage values | Percentage values ✅ |
+| Y-axis config | Left percentage | Left percentage ✅ |
+| Normal distribution | Independent Y-axis | Independent Y-axis ✅ |
