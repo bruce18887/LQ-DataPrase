@@ -288,17 +288,30 @@
               class="file-tag"
               @close="removeTag(row, t)"
             >{{ t }}</el-tag>
-            <input
-              v-if="editingId === row.id"
-              ref="tagInputRef"
-              v-model="newTagValue"
-              type="text"
-              class="tag-native-input"
-              placeholder="新标签+回车"
-              maxlength="50"
-              @keyup.enter="commitNewTag(row)"
-              @blur="scheduleBlurCommit(row)"
-            />
+            <div v-if="editingId === row.id" class="tag-input-wrapper">
+              <input
+                ref="tagInputRef"
+                :value="newTagValue"
+                type="text"
+                class="tag-native-input"
+                placeholder="新标签+回车"
+                maxlength="50"
+                @input="onTagInput"
+                @keydown="onTagKeydown($event, row)"
+                @blur="scheduleBlurCommit(row)"
+              />
+              <div v-if="showTagSuggestions && tagSuggestions.length > 0" class="tag-suggestions">
+                <div
+                  v-for="(s, i) in tagSuggestions"
+                  :key="s"
+                  class="tag-suggestion-item"
+                  :class="{ 'is-active': i === selectedSuggestionIdx }"
+                  @mousedown.prevent="selectSuggestion(s)"
+                >
+                  {{ s }}
+                </div>
+              </div>
+            </div>
             <el-button
               v-else
               size="small"
@@ -559,6 +572,10 @@ function toggleAllBatches() {
 const editingId = ref<number | null>(null)
 const newTagValue = ref('')
 const tagInputRef = ref<any>(null)
+const tagSuggestions = ref<string[]>([])
+const showTagSuggestions = ref(false)
+const selectedSuggestionIdx = ref(-1)
+let tagSuggestTimer: ReturnType<typeof setTimeout> | undefined
 
 // Expand row state (driven by expand-row-keys)
 const expandedRowIds = ref<number[]>([])
@@ -850,6 +867,9 @@ async function onBulkDelete() {
 function startAddTag(row: any) {
   editingId.value = row.id
   newTagValue.value = ''
+  tagSuggestions.value = []
+  showTagSuggestions.value = false
+  selectedSuggestionIdx.value = -1
   nextTick(() => {
     const el = (tagInputRef.value as any)?.$el ?? tagInputRef.value
     if (el && typeof el.focus === 'function') el.focus()
@@ -909,6 +929,64 @@ async function removeTag(row: any, tag: string) {
     ElMessage.success(`已移除标签「${tag}」`)
   } catch {
     ElMessage.error('标签移除失败')
+  }
+}
+
+// Tag autocomplete suggestions
+async function fetchTagSuggestions(prefix: string) {
+  if (!prefix.trim()) {
+    tagSuggestions.value = []
+    showTagSuggestions.value = false
+    return
+  }
+  try {
+    const { data } = await datafilesApi.listTags(prefix.trim())
+    tagSuggestions.value = data.tags ?? []
+    showTagSuggestions.value = tagSuggestions.value.length > 0
+    selectedSuggestionIdx.value = -1
+  } catch {
+    tagSuggestions.value = []
+    showTagSuggestions.value = false
+  }
+}
+
+function onTagInput(e: Event) {
+  const val = (e.target as HTMLInputElement).value
+  newTagValue.value = val
+  if (tagSuggestTimer) clearTimeout(tagSuggestTimer)
+  tagSuggestTimer = setTimeout(() => fetchTagSuggestions(val), 200)
+}
+
+function selectSuggestion(tag: string) {
+  newTagValue.value = tag
+  showTagSuggestions.value = false
+  tagSuggestions.value = []
+  // Auto-commit the selected tag
+  const row = files.value.find((f: any) => f.id === editingId.value)
+  if (row) commitNewTag(row)
+}
+
+function onTagKeydown(e: KeyboardEvent, row: any) {
+  if (!showTagSuggestions.value) {
+    if (e.key === 'Enter') commitNewTag(row)
+    return
+  }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    selectedSuggestionIdx.value = Math.min(selectedSuggestionIdx.value + 1, tagSuggestions.value.length - 1)
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    selectedSuggestionIdx.value = Math.max(selectedSuggestionIdx.value - 1, -1)
+  } else if (e.key === 'Enter') {
+    e.preventDefault()
+    if (selectedSuggestionIdx.value >= 0) {
+      selectSuggestion(tagSuggestions.value[selectedSuggestionIdx.value])
+    } else {
+      showTagSuggestions.value = false
+      commitNewTag(row)
+    }
+  } else if (e.key === 'Escape') {
+    showTagSuggestions.value = false
   }
 }
 
@@ -1262,6 +1340,46 @@ defineExpose({ reload: loadFiles })
 
 .tag-native-input::placeholder {
   color: var(--text-tertiary);
+}
+
+.tag-input-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.tag-suggestions {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  min-width: 180px;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+  margin-bottom: 4px;
+}
+
+.tag-suggestion-item {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.tag-suggestion-item:hover,
+.tag-suggestion-item.is-active {
+  background: var(--bg-secondary);
+  color: var(--brand-primary);
+}
+
+:root[data-theme="night"] .tag-suggestions {
+  background: var(--bg-secondary);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.4);
 }
 
 /* ============================

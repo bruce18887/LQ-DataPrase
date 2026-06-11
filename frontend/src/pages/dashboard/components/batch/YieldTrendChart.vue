@@ -9,7 +9,6 @@ import { useThemeStore } from '../../../../stores/theme'
 
 const props = defineProps<{
   phases: any[]
-  spcLimits?: { ucl?: number | null; cl?: number | null; lcl?: number | null }
 }>()
 
 const chartRef = ref<HTMLElement>()
@@ -19,11 +18,10 @@ const themeStore = useThemeStore()
 
 function buildOption() {
   const phases = props.phases || []
-  const spc = props.spcLimits || {}
 
   return {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    legend: { data: ['测试总数', 'Pass数量', '良率', 'UCL', 'CL', 'LCL'], top: 5, textStyle: { color: 'var(--text-primary)' } },
+    legend: { data: ['测试总数', 'Pass数量', '良率'], top: 5, textStyle: { color: 'var(--text-primary)' } },
     grid: { left: '3%', right: '4%', bottom: '3%', top: '18%', containLabel: true },
     xAxis: {
       type: 'category',
@@ -68,21 +66,6 @@ function buildOption() {
         symbol: 'circle', symbolSize: 8,
         label: { show: true, formatter: '{c}%', fontSize: 11, color: 'var(--text-primary)' },
       },
-      ...(spc.ucl != null ? [{
-        name: 'UCL', type: 'line', yAxisIndex: 1,
-        data: Array(phases.length).fill(spc.ucl),
-        lineStyle: { type: 'dashed' as const, color: '#f5576c' }, symbol: 'none',
-      }] : []),
-      ...(spc.cl != null ? [{
-        name: 'CL', type: 'line', yAxisIndex: 1,
-        data: Array(phases.length).fill(spc.cl),
-        lineStyle: { type: 'dashed' as const, color: '#11998e' }, symbol: 'none',
-      }] : []),
-      ...(spc.lcl != null ? [{
-        name: 'LCL', type: 'line', yAxisIndex: 1,
-        data: Array(phases.length).fill(spc.lcl),
-        lineStyle: { type: 'dashed' as const, color: '#f5576c' }, symbol: 'none',
-      }] : []),
     ],
   }
 }
@@ -103,7 +86,7 @@ watch(() => themeStore.currentTheme, () => {
   nextTick(() => ensureChart())
 })
 
-watch(() => [props.phases, props.spcLimits], () => {
+watch(() => props.phases, () => {
   nextTick(() => ensureChart())
 }, { deep: true })
 
@@ -114,7 +97,7 @@ function handleResize() {
 onMounted(() => {
   window.addEventListener('resize', handleResize)
   // 首次挂载时主动触发：watch 默认不在初始化时触发，
-  // 而 props.phases/spcLimits 在挂载时已被父组件绑定，不存在"变化"
+  // 而 props.phases 在挂载时已被父组件绑定，不存在"变化"
   nextTick(() => ensureChart())
 })
 
