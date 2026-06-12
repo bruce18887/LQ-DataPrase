@@ -23,7 +23,7 @@ const SINGLE = '.single-param-tab'
 async function enterAnalysis(page: import('@playwright/test').Page, filename?: string) {
   await gotoApp(page, '/analysis')
   await selectAnalysisFile(page, filename)
-  await expect(page.getByRole('tab', { name: /单参数分析/ })).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
 }
 
 test.describe('@p0 数据分析 - 进入', { tag: ['@p0', '@analysis'] }, () => {
@@ -162,7 +162,7 @@ test.describe('@p1 单参数分析', { tag: ['@p1', '@analysis'] }, () => {
 })
 
 test.describe('@p1 各分析 Tab 可达', { tag: ['@p1', '@analysis'] }, () => {
-  const TABS = ['晶圆图', '箱线图', '多文件分析', '相关性工具']
+  const TABS = ['晶圆图', '箱线图', '多文件分析', '相关性对比']
 
   for (const name of TABS) {
     test(`切换到「${name}」Tab 内容正常渲染`, async ({ page }) => {
@@ -198,10 +198,55 @@ test.describe('@p2 晶圆图渲染', { tag: ['@p2', '@analysis'] }, () => {
   })
 })
 
+test.describe('@p1 箱线图', { tag: ['@p1', '@analysis'] }, () => {
+  test('箱线图选择参数后正常展示图表', async ({ page }) => {
+    await enterAnalysis(page, RECOMMENDED.analysis)
+    await page.getByRole('tab', { name: /箱线图/ }).click()
+
+    const panel = page.locator('.el-tabs__content .el-tab-pane').filter({ visible: true }).first()
+    await expect(panel).toBeVisible()
+
+    // Wait for params to load
+    await page.waitForTimeout(1000)
+
+    // Click generate button
+    const genBtn = panel.getByRole('button', { name: /生成箱线图/ })
+    if (await genBtn.isVisible().catch(() => false)) {
+      const resp = page.waitForResponse(
+        (r) => r.url().includes('/analysis/boxplot/') && r.status() < 500,
+        { timeout: 20_000 },
+      )
+      await genBtn.click()
+      const r = await resp
+      expect(r.status(), 'boxplot API 应返回 200').toBe(200)
+
+      // Chart should render
+      await expect
+        .poll(() => panel.locator('svg').count(), { timeout: 15_000 })
+        .toBeGreaterThanOrEqual(1)
+    }
+  })
+
+  test('箱线图工具栏有分组模式切换', async ({ page }) => {
+    await enterAnalysis(page, RECOMMENDED.analysis)
+    await page.getByRole('tab', { name: /箱线图/ }).click()
+
+    const panel = page.locator('.el-tabs__content .el-tab-pane').filter({ visible: true }).first()
+    await expect(panel).toBeVisible()
+
+    // Toolbar should have radio buttons for group modes
+    const toolbar = panel.locator('.toolbar')
+    await expect(toolbar).toBeVisible()
+
+    const buttons = toolbar.locator('.el-radio-button')
+    await expect(buttons).toHaveCount(3)
+  })
+})
+
 test.describe('@p1 测试项相关性分析', { tag: ['@p1', '@analysis'] }, () => {
   test('相关性散点图完整流程：选择参数 → 渲染图表 → 显示指标', async ({ page }) => {
     await enterAnalysis(page, RECOMMENDED.analysis)
-    await page.getByRole('tab', { name: /相关性工具/ }).click()
+    await page.getByRole('tab', { name: /相关性对比/ }).click()
 
     // 等待相关性面板出现
     const panel = page.locator('.correlation-panel')
@@ -244,7 +289,7 @@ test.describe('@p1 测试项相关性分析', { tag: ['@p1', '@analysis'] }, () 
 
   test('坐标轴范围：西格玛模式出现倍数选择器', async ({ page }) => {
     await enterAnalysis(page, RECOMMENDED.analysis)
-    await page.getByRole('tab', { name: /相关性工具/ }).click()
+    await page.getByRole('tab', { name: /相关性对比/ }).click()
 
     const panel = page.locator('.correlation-panel')
     await expect(panel).toBeVisible({ timeout: 10_000 })
@@ -287,7 +332,7 @@ test.describe('@p1 测试项相关性分析', { tag: ['@p1', '@analysis'] }, () 
 test.describe('@p2 文件相关性', { tag: ['@p2', '@analysis'] }, () => {
   test('文件相关性面板存在且可选文件', async ({ page }) => {
     await enterAnalysis(page, RECOMMENDED.analysis)
-    await page.getByRole('tab', { name: /相关性工具/ }).click()
+    await page.getByRole('tab', { name: /相关性对比/ }).click()
 
     const fileSection = page.locator('.file-correlation-section')
     await expect(fileSection).toBeVisible({ timeout: 10_000 })
