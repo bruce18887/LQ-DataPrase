@@ -3,11 +3,7 @@
     <h2>&#128200; 数据分析</h2>
 
     <el-form label-position="left" label-width="auto" class="analysis-file-selector" style="margin-bottom: 16px">
-      <el-form-item>
-        <template #label>
-          <span>选择数据文件</span>
-          <span class="file-hint">选择后自动加载参数列表，各 tab 中可选择参数进行分析</span>
-        </template>
+      <el-form-item label="选择数据文件">
         <el-select
           v-model="selectedFileId"
           placeholder="选择数据文件"
@@ -210,13 +206,6 @@ async function loadWaferGlobal(colorBy: string) {
 </script>
 
 <style scoped>
-/* ===== File hint label ===== */
-.file-hint {
-  font-size: 12px;
-  color: var(--text-secondary);
-  font-weight: 400;
-  margin-left: 8px;
-}
 
 /* ===== 文件选择器（label 与 input 同一行） ===== */
 .analysis-file-selector {
