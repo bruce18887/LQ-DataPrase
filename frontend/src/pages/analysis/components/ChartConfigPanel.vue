@@ -164,7 +164,7 @@ function onCustomHighChange(val: number | null) {
 }
 
 .more-btn:hover {
-  color: #409eff;
+  color: var(--color-primary, #409eff);
 }
 
 .config-section {
@@ -211,7 +211,7 @@ function onCustomHighChange(val: number | null) {
 }
 
 .custom-limit-section {
-  background: #f0f7ff;
+  background: var(--bg-tertiary, #f0f7ff);
   border-radius: 4px;
   padding: 8px;
   margin: -4px -4px 10px -4px;

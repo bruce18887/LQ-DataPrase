@@ -1,4 +1,4 @@
-# DataPhrase Streamlit 项目完整功能清单
+# LQ-DataPrase Streamlit 项目完整功能清单
 
 > **版本**: v0.2.0 Alpha  
 > **代码规模**: ~12,000+ 行 Python  

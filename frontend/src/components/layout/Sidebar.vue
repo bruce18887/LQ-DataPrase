@@ -7,7 +7,7 @@
       </div>
       <transition name="fade">
         <div v-show="!isCollapsed" class="logo-text">
-          <span class="logo-title">DataPhrase</span>
+          <span class="logo-title">LQ-DataPrase</span>
           <span class="logo-subtitle">ATE数据分析平台</span>
         </div>
       </transition>

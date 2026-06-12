@@ -1,4 +1,4 @@
-# DataPhrase E2E 测试（Playwright）
+# LQ-DataPrase E2E 测试（Playwright）
 
 基于 `@playwright/test` 的端到端测试套件。覆盖登录、路由守卫、各业务页面与导出能力。
 
@@ -80,11 +80,11 @@ npx playwright test e2e/dashboard   # 仅仪表板模块
 先手动启动后端（保持运行），再开 Playwright UI：
 ```bash
 # 终端 1：启动 Django（保持运行）
-cd /d C:\Users\Administrator\Desktop\DataPrase\DataPhrase_Django
+cd /d C:\Users\Administrator\Desktop\DataPrase\LQ-DataPrase
 .venv\Scripts\python.exe manage.py runserver 8000 --noreload
 
 # 终端 2：启动 Vite（保持运行，或让 Playwright webServer 自动起）
-cd /d C:\Users\Administrator\Desktop\DataPrase\DataPhrase_Django\frontend
+cd /d C:\Users\Administrator\Desktop\DataPrase\LQ-DataPrase\frontend
 npm run dev
 
 # 终端 2（或终端 3）：开 Playwright UI（禁止自动起后端避免冲突）
@@ -103,7 +103,7 @@ Playwright UI 打开后：
 
 侧边栏「测试」面板自动发现所有用例，显示为树形结构：
 ```
-DataPhrase E2E
+LQ-DataPrase E2E
 ├── @p0 @smoke 冒烟 - 页面可达
 │   ├── 仪表板 (/dashboard) 正常加载且无报错
 │   ├── 数据管理 (/data) 正常加载且无报错

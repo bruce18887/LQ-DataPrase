@@ -10,7 +10,7 @@
         </div>
 
         <!-- 品牌标题 -->
-        <h1 class="login-title">DataPhrase</h1>
+        <h1 class="login-title">LQ-DataPrase</h1>
         <p class="login-subtitle">ATE 数据分析平台</p>
 
         <!-- 登录表单 -->

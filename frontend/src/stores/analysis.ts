@@ -1,7 +1,11 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 export const useAnalysisStore = defineStore('analysis', () => {
+  const route = useRoute()
+  const router = useRouter()
+
   // 持久化状态
   const selectedFileId = ref<number | null>(null)
   const selectedParam = ref('')
@@ -22,6 +26,32 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const multiBarWidthPercent = ref(20)
   const multiIgnoreNoLimit = ref(false)
   const multiRangeType = ref('S4')
+
+  // Initialize from URL query params
+  function initFromQuery() {
+    const q = route.query
+    if (q.mf_ids) {
+      const ids = String(q.mf_ids).split(',').map(Number).filter(n => !isNaN(n))
+      if (ids.length >= 2) multiFileIds.value = ids
+    }
+    if (q.mf_param) multiSelectedParam.value = String(q.mf_param)
+    if (q.mf_range) multiRangeType.value = String(q.mf_range)
+  }
+
+  // Sync multi-file state to URL query params (debounced)
+  let syncTimer: ReturnType<typeof setTimeout> | null = null
+  function syncToQuery() {
+    if (syncTimer) clearTimeout(syncTimer)
+    syncTimer = setTimeout(() => {
+      const q: Record<string, string> = {}
+      if (multiFileIds.value.length >= 2) q.mf_ids = multiFileIds.value.join(',')
+      if (multiSelectedParam.value) q.mf_param = multiSelectedParam.value
+      if (multiRangeType.value && multiRangeType.value !== 'S4') q.mf_range = multiRangeType.value
+      router.replace({ query: { ...route.query, ...q } })
+    }, 300)
+  }
+
+  watch([multiFileIds, multiSelectedParam, multiRangeType], syncToQuery)
 
   function reset() {
     selectedFileId.value = null
@@ -61,6 +91,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     multiBarWidthPercent,
     multiIgnoreNoLimit,
     multiRangeType,
+    initFromQuery,
     reset,
   }
 })

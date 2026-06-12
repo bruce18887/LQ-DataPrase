@@ -77,9 +77,11 @@ function buildOption() {
     for (const lot of lots) {
       const dn = displayName(lot)
       const mk: any[] = []
-      if (lot.upper_limit != null) {
+      const upperLimit = lot.display_upper ?? lot.upper_limit
+      const lowerLimit = lot.display_lower ?? lot.lower_limit
+      if (upperLimit != null) {
         mk.push({
-          xAxis: lot.upper_limit,
+          xAxis: upperLimit,
           lineStyle: { color: lot.color, width: 3, type: 'dashed' },
           label: {
             show: true,
@@ -91,9 +93,9 @@ function buildOption() {
           },
         })
       }
-      if (lot.lower_limit != null) {
+      if (lowerLimit != null) {
         mk.push({
-          xAxis: lot.lower_limit,
+          xAxis: lowerLimit,
           lineStyle: { color: lot.color, width: 3, type: 'dashed' },
           label: {
             show: true,
@@ -106,7 +108,7 @@ function buildOption() {
         })
       }
       if (mk.length) {
-        const limitX = lot.upper_limit ?? lot.lower_limit ?? binCenters[0]
+        const limitX = upperLimit ?? lowerLimit ?? binCenters[0]
         series.push({
           name: `${dn} 规格限`,
           type: 'scatter',
@@ -157,11 +159,11 @@ function buildOption() {
     {
       type: 'value',
       name: '百分比 (%)',
-      nameTextStyle: { color: '#1E88E5', fontWeight: 'bold' },
+      nameTextStyle: { color: 'var(--color-primary, #1E88E5)', fontWeight: 'bold' },
       position: 'left',
       min: 0,
-      axisLabel: { formatter: '{value}%', color: '#1E88E5' },
-      axisLine: { show: true, lineStyle: { color: '#1E88E5' } },
+      axisLabel: { formatter: '{value}%', color: 'var(--color-primary, #1E88E5)' },
+      axisLine: { show: true, lineStyle: { color: 'var(--color-primary, #1E88E5)' } },
     },
   ]
 
@@ -170,11 +172,11 @@ function buildOption() {
     yAxisConfig.push({
       type: 'value',
       name: '概率密度',
-      nameTextStyle: { color: '#F57F17', fontWeight: 'bold' },
+      nameTextStyle: { color: 'var(--color-warning, #F57F17)', fontWeight: 'bold' },
       position: 'right',
       min: 0,
-      axisLabel: { formatter: (v: number) => v.toExponential(2), color: '#F57F17' },
-      axisLine: { show: true, lineStyle: { color: '#F57F17' } },
+      axisLabel: { formatter: (v: number) => v.toExponential(2), color: 'var(--color-warning, #F57F17)' },
+      axisLine: { show: true, lineStyle: { color: 'var(--color-warning, #F57F17)' } },
       splitLine: { show: false },
     })
   }

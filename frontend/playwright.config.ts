@@ -35,7 +35,7 @@ export default defineConfig({
 
   // 📊 Playwright UI 模式下显示的元数据
   metadata: {
-    title: 'DataPhrase E2E',
+    title: 'LQ-DataPrase E2E',
     description: 'ATE 量产数据分析平台 — 端到端测试套件',
     modules: 'smoke | auth | global | dashboard | data | analysis | batch | sftp | settings | roadmap | admin | exports',
     priorities: '@p0 冒烟 | @p1 核心 | @p2 增强',

@@ -314,4 +314,4 @@ const p0Tasks = ref<Task[]>([
 
 **创建日期**: 2026-05-31  
 **版本**: v1.0.0  
-**作者**: DataPhrase 开发团队
+**作者**: LQ-DataPrase 开发团队

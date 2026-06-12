@@ -244,7 +244,7 @@ onActivated(async () => {
 
 <style scoped>
 /* ================================================================
-   DataPhrase Dashboard — Industrial Data Terminal
+   LQ-DataPrase Dashboard — Industrial Data Terminal
    ================================================================ */
 
 /* ----- Root & Containers ----- */

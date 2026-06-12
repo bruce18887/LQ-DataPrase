@@ -1,4 +1,4 @@
-# DataPhrase 前端架构文档
+# LQ-DataPrase 前端架构文档
 
 ## 技术栈
 
