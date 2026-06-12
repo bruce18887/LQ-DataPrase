@@ -28,6 +28,7 @@ from apps.analysis.services.statistics import (
     compute_uph,
     build_fail_mask,
     build_col_meta,
+    ensure_numeric,
 )
 from apps.analysis.services.data_services import (
     compute_histogram_stats,
@@ -532,7 +533,7 @@ class StatisticsViewSet(viewsets.GenericViewSet):
             if param not in df.columns:
                 continue
 
-            data_series = get_1d_from(df, param)
+            data_series = ensure_numeric(df, param)
             param_result = {
                 'overall': compute_boxplot_stats(data_series)
             }

@@ -68,7 +68,7 @@ function buildOption() {
         itemStyle: { color: '#5470C6', borderColor: tc },
         tooltip: {
           formatter: (p: any) =>
-            `<strong>${p.name}</strong><br/>Max: ${fmt(p.data[5])}<br/>Q3: ${fmt(p.data[4])}<br/>Median: ${fmt(p.data[3])}<br/>Q1: ${fmt(p.data[2])}<br/>Min: ${fmt(p.data[1])}`,
+            `<strong>${p.name}</strong><br/>Max: ${fmt(p.data[4])}<br/>Q3: ${fmt(p.data[3])}<br/>Median: ${fmt(p.data[2])}<br/>Q1: ${fmt(p.data[1])}<br/>Min: ${fmt(p.data[0])}`,
         },
       },
       { name: 'Outliers', type: 'scatter', data: outlierData, itemStyle: { color: '#EE6666' }, symbolSize: 6 },
