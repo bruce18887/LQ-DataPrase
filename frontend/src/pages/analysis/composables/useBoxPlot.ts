@@ -1,11 +1,10 @@
-import { type Ref } from 'vue'
+import { type Ref, watch, computed } from 'vue'
 import { analysisApi } from '../../../api/analysis'
 import { useAsyncData } from '../../../composables/useAsyncData'
-import { ElMessage } from 'element-plus'
 
 export function useBoxPlot(
   getFileId: () => number | null,
-  selectedParams: Ref<string[]>,
+  selectedParam: Ref<string>,
   groupBy: Ref<string>
 ) {
   const { loading, data: boxPlotData, run } = useAsyncData<any>({
@@ -15,15 +14,24 @@ export function useBoxPlot(
 
   async function loadBoxPlot() {
     const fileId = getFileId()
-    if (!fileId || selectedParams.value.length === 0) {
-      ElMessage.warning('请至少选择一个参数')
-      return
-    }
+    if (!fileId || !selectedParam.value) return
     await run(
-      () => analysisApi.getBoxPlot(fileId, selectedParams.value, groupBy.value || undefined),
+      () => analysisApi.getBoxPlot(fileId, [selectedParam.value], groupBy.value || undefined),
       (d: any) => d.results ?? d,
     )
   }
 
-  return { loading, boxPlotData, loadBoxPlot }
+  /** 当前参数的统计信息 */
+  const stats = computed(() => {
+    if (!boxPlotData.value || !selectedParam.value) return null
+    const paramData = boxPlotData.value[selectedParam.value]
+    return paramData?.overall ?? null
+  })
+
+  // Auto-load on dependency change (same pattern as useHistogram)
+  watch(selectedParam, () => loadBoxPlot())
+  watch(groupBy, () => { if (selectedParam.value) loadBoxPlot() })
+  watch(getFileId, () => { if (getFileId() && selectedParam.value) loadBoxPlot() })
+
+  return { loading, boxPlotData, stats, loadBoxPlot }
 }
