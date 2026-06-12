@@ -4,7 +4,6 @@ import { ElMessage } from 'element-plus'
 
 export function useCorrelationMatrix(getFileId: () => number | null) {
   const { loading, data: matrixData, run } = useAsyncData<any>({
-    successMsg: '相关性矩阵计算完成',
     errorMsg: '相关性矩阵计算失败',
   })
 
@@ -13,7 +12,7 @@ export function useCorrelationMatrix(getFileId: () => number | null) {
     if (!fileId) { ElMessage.warning('请先选择数据文件'); return }
     const body: Record<string, any> = { file_id: fileId }
     if (params && params.length > 0) body.params = params
-    await run(() => api.post('/analysis/correlation_matrix/', body))
+    await run(() => api.post('/statistics/correlation_matrix/', body))
   }
 
   return { loading, matrixData, loadCorrelationMatrix }
