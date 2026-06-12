@@ -27,8 +27,9 @@ import { initEchartsWhenReady, type EchartsHandle } from '../utils/echarts-init'
 export function useChart<T = echarts.EChartsOption>(
   buildOption: () => T,
   sources?: WatchSource[],
+  refKey = 'chartRef',
 ) {
-  const chartRef = useTemplateRef<HTMLElement>('chartRef')
+  const chartRef = useTemplateRef<HTMLElement>(refKey)
   const chartInstance: Ref<echarts.ECharts | null> = ref(null)
 
   const themeStore = useThemeStore()

@@ -220,7 +220,7 @@ const { chartRef: scatterChartRef } = useChart(buildScatterOption, [
   () => sigmaX.value, () => sigmaY.value,
   () => customMinX.value, () => customMaxX.value,
   () => customMinY.value, () => customMaxY.value,
-])
+], 'scatterChartRef')
 
 watch(() => corrResult.value, (data) => {
   if (!data) return
@@ -272,7 +272,7 @@ function buildMatrixOption() {
   }
 }
 
-const { chartRef: matrixChartRef } = useChart(buildMatrixOption, [() => matrixData.value])
+const { chartRef: matrixChartRef } = useChart(buildMatrixOption, [() => matrixData.value], 'matrixChartRef')
 </script>
 
 <style scoped>
