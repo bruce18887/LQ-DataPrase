@@ -82,11 +82,19 @@
             filterable
             placeholder="默认全选"
             style="width: 100%"
-            @change="onMatrixParamsChange"
           >
             <el-option v-for="p in params" :key="p" :label="p" :value="p" />
           </el-select>
         </el-card>
+        <el-button
+          type="primary"
+          size="small"
+          :loading="matrixLoading"
+          style="width: 100%"
+          @click="onCalculateMatrix"
+        >
+          计算相关性矩阵
+        </el-button>
       </template>
     </template>
 
@@ -122,7 +130,7 @@
       <template v-if="viewMode === 'matrix'">
         <div class="chart-wrapper">
           <div v-if="matrixData" ref="matrixChartRef" class="chart-inner" />
-          <el-empty v-else description="切换到此视图自动计算 Pearson 相关系数矩阵" />
+          <el-empty v-else description="选择参数后点击「计算相关性矩阵」按钮" />
         </div>
       </template>
     </template>
@@ -296,17 +304,9 @@ watch(() => props.params, (newParams) => {
   }
 }, { immediate: true })
 
-// Auto-load matrix when switching to matrix mode with a file selected
-watch(viewMode, (mode) => {
-  if (mode === 'matrix' && props.fileId) {
-    loadCorrelationMatrix(selectedMatrixParams.value.length > 0 ? selectedMatrixParams.value : undefined)
-  }
-})
-
-function onMatrixParamsChange() {
-  if (props.fileId) {
-    loadCorrelationMatrix(selectedMatrixParams.value.length > 0 ? selectedMatrixParams.value : undefined)
-  }
+function onCalculateMatrix() {
+  if (!props.fileId) return
+  loadCorrelationMatrix(selectedMatrixParams.value.length > 0 ? selectedMatrixParams.value : undefined)
 }
 
 /** 显著性星号 */
