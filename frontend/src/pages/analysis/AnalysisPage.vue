@@ -2,22 +2,29 @@
   <div>
     <h2>&#128200; 数据分析</h2>
 
-    <el-row :gutter="16" style="margin-bottom: 16px" align="middle">
-      <el-col :span="8">
-        <el-select v-model="selectedFileId" placeholder="选择数据文件" @change="onFileChange" style="width: 100%">
+    <el-form label-position="left" label-width="auto" class="analysis-file-selector" style="margin-bottom: 16px">
+      <el-form-item>
+        <template #label>
+          <span>选择数据文件</span>
+          <span class="file-hint">选择后自动加载参数列表，各 tab 中可选择参数进行分析</span>
+        </template>
+        <el-select
+          v-model="selectedFileId"
+          placeholder="选择数据文件"
+          @change="onFileChange"
+          class="analysis-file-selector__select"
+        >
           <el-option v-for="f in files" :key="f.id" :label="f.filename" :value="f.id" />
         </el-select>
-      </el-col>
-      <el-col :span="2">
         <CircularProgress :loading="loading" />
-      </el-col>
-    </el-row>
+      </el-form-item>
+    </el-form>
 
     <el-empty v-if="files.length === 0" description="请先在数据管理页面上传数据文件" />
 
     <el-tabs v-if="selectedFileId" v-model="activeTab" type="border-card">
       <!-- ========== 单参数分析 tab ========== -->
-      <el-tab-pane label="&#128202; 单参数分析" name="single-param">
+      <el-tab-pane label="&#128202; 单文件分析" name="single-param">
         <SingleParamTab
           :file-id="selectedFileId"
           :params="params"
@@ -52,7 +59,7 @@
       </el-tab-pane>
 
       <!-- ========== 相关性工具 tab ========== -->
-      <el-tab-pane label="&#128279; 相关性工具" name="correlation-tools">
+      <el-tab-pane label="&#128279; 相关性对比" name="correlation-tools">
         <CorrelationToolsTab
           :file-id="selectedFileId"
           :params="params"
@@ -64,6 +71,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onActivated, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import api from '../../api'
 import { useAnalysisStore } from '../../stores/analysis'
 import SingleParamTab from './components/SingleParamTab.vue'
@@ -127,6 +135,11 @@ watch(() => analysisStore.ignoreNoLimit, () => { onFileChange() })
 async function onFileChange() {
   if (!selectedFileId.value) return
   loading.value = true
+  // Reset stale param list so the old file's params don't linger while
+  // the new file is loading. Otherwise the param dropdown keeps showing
+  // the previous selection and the user has no clue the file actually
+  // changed.
+  params.value = []
   try {
     const { data } = await api.post('/analysis/histogram/', {
       file_id: selectedFileId.value,
@@ -141,11 +154,24 @@ async function onFileChange() {
     if (params.value.length > 0 && (!selectedParam.value || !params.value.includes(selectedParam.value))) {
       selectedParam.value = params.value[0]
     }
-  } catch {
-    // silently fail
+  } catch (err: any) {
+    // Surface the error so silent 400s (e.g. stale file_path after the
+    // project root moved) don't look like "no loading happened". The
+    // server payload is a small JSON object with a single `error` key,
+    // e.g. {"error": "file_not_found_or_parse_failed"}.
+    const serverMsg = err?.response?.data?.error
+    const fallback = err?.message || '加载文件参数失败'
+    const detail = _ERROR_LABELS[serverMsg] || serverMsg || fallback
+    ElMessage.error(`无法加载文件参数：${detail}`)
   } finally {
     loading.value = false
   }
+}
+
+const _ERROR_LABELS: Record<string, string> = {
+  file_id_required: '请求缺少 file_id',
+  file_not_found: '文件不存在或已删除',
+  file_not_found_or_parse_failed: '文件在磁盘上找不到，或解析失败',
 }
 
 // ========== Wafer ==========
@@ -184,6 +210,47 @@ async function loadWaferGlobal(colorBy: string) {
 </script>
 
 <style scoped>
+/* ===== File hint label ===== */
+.file-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 400;
+  margin-left: 8px;
+}
+
+/* ===== 文件选择器（label 与 input 同一行） ===== */
+.analysis-file-selector {
+  align-items: center;
+}
+.analysis-file-selector :deep(.el-form-item) {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.analysis-file-selector :deep(.el-form-item__label) {
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.analysis-file-selector :deep(.el-form-item__content) {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+.analysis-file-selector__select {
+  width: 360px;
+  max-width: 100%;
+}
+@media (max-width: 720px) {
+  .analysis-file-selector__select {
+    width: 100%;
+  }
+}
+
 .param-select-dropdown .el-select-dropdown__list {
   max-height: 360px;
   overflow-y: auto;
