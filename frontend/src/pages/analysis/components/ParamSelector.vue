@@ -9,6 +9,7 @@
       size="small"
       style="width: 100%"
       :filter-method="filterMethod"
+      :virtual="filteredItems.length > 50"
       @change="onParamChange"
       @visible-change="onVisibleChange"
       popper-class="param-select-dropdown"
@@ -38,7 +39,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 
 interface ParamItem {
   value: string

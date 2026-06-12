@@ -5,8 +5,9 @@
       <el-col :span="6" class="left-panel">
         <!-- 文件多选 -->
         <el-card shadow="hover" :body-style="{ padding: '12px' }">
-          <div class="section-label">数据文件 (最少 2 个)</div>
+          <label class="section-label" for="multi-file-select">数据文件 (最少 2 个)</label>
           <el-select
+            id="multi-file-select"
             v-model="fileIds"
             multiple
             filterable
@@ -15,6 +16,7 @@
             placeholder="选择数据文件"
             size="small"
             style="width: 100%"
+            :virtual="files.length > 50"
           >
             <el-option v-for="f in files" :key="f.id" :label="f.filename" :value="f.id" />
           </el-select>
@@ -24,7 +26,9 @@
             <div class="section-label" style="margin-top: 10px">自定义图例名</div>
             <div v-for="f in selectedFileObjs" :key="f.id" class="name-row">
               <span class="name-dot" :style="{ background: colorOf(f.id) }" />
+              <label :for="`file-name-${f.id}`" class="sr-only">{{ f.filename }} 图例名</label>
               <el-input
+                :id="`file-name-${f.id}`"
                 v-model="fileNames[f.id]"
                 :placeholder="f.filename"
                 size="small"
@@ -44,8 +48,8 @@
 
         <!-- 范围类型 -->
         <el-card shadow="hover" :body-style="{ padding: '12px' }">
-          <div class="section-label">范围类型</div>
-          <el-select v-model="rangeType" size="small" style="width: 100%">
+          <label class="section-label" for="multi-range-type">范围类型</label>
+          <el-select id="multi-range-type" v-model="rangeType" size="small" style="width: 100%">
             <el-option label="Spec Limits (RDL)" value="RDL" />
             <el-option label="Data Range (DR)" value="DR" />
             <el-option label="3 Sigma (S3)" value="S3" />
@@ -140,7 +144,7 @@ const selectedFileObjs = computed(() =>
 )
 
 // file_id → 调色板颜色（与后端 colors 顺序一致）
-const PALETTE = ['#E53935', '#1E88E5', '#43A047', '#F9A825', '#8E24AA', '#00ACC1', '#F57C00', '#D81B60']
+const PALETTE = ['#0077BB', '#EE7733', '#009988', '#CC3311', '#33BBEE', '#EE3377', '#BBBBBB', '#648FFF']
 function colorOf(fid: number): string {
   const idx = fileIds.value.indexOf(fid)
   return PALETTE[(idx < 0 ? 0 : idx) % PALETTE.length]
@@ -193,11 +197,24 @@ const resolvedNames = computed<Record<number, string>>(() => {
     // Auto-extract: use differentiating parts as defaults
     const names = selectedFileObjs.value.map(f => f.filename)
     const labels = autoExtractLabel(names)
-    selectedFileObjs.value.forEach((f, i) => { map[f.id] = labels[i] })
+    // Deduplicate: append index suffix for duplicate labels
+    const seen = new Map<string, number>()
+    selectedFileObjs.value.forEach((f, i) => {
+      let label = labels[i]
+      const count = seen.get(label) ?? 0
+      if (count > 0) label = `${label} (${count + 1})`
+      seen.set(label, count + 1)
+      map[f.id] = label
+    })
   } else {
+    const seen = new Map<string, number>()
     for (const f of selectedFileObjs.value) {
       const custom = (fileNames.value[f.id] || '').trim()
-      map[f.id] = custom || f.filename
+      let label = custom || f.filename
+      const count = seen.get(label) ?? 0
+      if (count > 0) label = `${label} (${count + 1})`
+      seen.set(label, count + 1)
+      map[f.id] = label
     }
   }
   return map
@@ -239,6 +256,7 @@ watch(selectedParam, (p) => {
 })
 
 onMounted(() => {
+  analysisStore.initFromQuery()
   if (fileIds.value.length >= 2) reloadParams()
 })
 </script>
@@ -290,6 +308,13 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
+.name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+}
+
 .top-bar {
   display: flex;
   gap: 12px;
@@ -312,6 +337,7 @@ onMounted(() => {
   border-radius: 6px;
   border: 1px solid var(--border-default);
   overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04);
 }
 
 .chart-wrapper > * {

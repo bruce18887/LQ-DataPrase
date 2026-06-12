@@ -380,8 +380,7 @@ def compute_multi_lot_distribution(datasets, all_series, param,
 
     # First pass: resolve per-file limits to determine global limit range
     all_dsets = list(datasets.values())
-    colors = ['#E53935', '#1E88E5', '#43A047', '#F9A825', '#8E24AA',
-              '#00ACC1', '#F57C00', '#D81B60']
+    colors = ['#0077BB', '#EE7733', '#009988', '#CC3311', '#33BBEE', '#EE3377', '#BBBBBB', '#648FFF']
     lot_data_pre = []  # Pre-compute per-file stats
     global_lsl = None  # Minimum LSL across all files
     global_usl = None  # Maximum USL across all files
@@ -395,14 +394,28 @@ def compute_multi_lot_distribution(datasets, all_series, param,
 
         mean_v = float(series.mean())
         std_v = float(series.std(ddof=0)) if len(series) > 1 else 0
-        lower_limit, upper_limit = _resolve_param_limits(
+        spec_lower, spec_upper = _resolve_param_limits(
             ds.get('df'), ds.get('metadata', {}), param, series
         )
-        # Track global min LSL and max USL
-        if lower_limit is not None:
-            global_lsl = min(global_lsl, lower_limit) if global_lsl is not None else lower_limit
-        if upper_limit is not None:
-            global_usl = max(global_usl, upper_limit) if global_usl is not None else upper_limit
+        # Resolve display limits based on range_type (same logic as single-file)
+        if range_type == 'RDL':
+            display_lower, display_upper = spec_lower, spec_upper
+        elif range_type in ('S3', 'S4', 'S6') and std_v > 0:
+            n = int(range_type[1])
+            display_lower = mean_v - n * std_v
+            display_upper = mean_v + n * std_v
+        elif range_type == 'DR':
+            display_lower = float(series.min())
+            display_upper = float(series.max())
+        elif range_type == 'CL' and custom_low is not None and custom_high is not None:
+            display_lower, display_upper = custom_low, custom_high
+        else:
+            display_lower, display_upper = spec_lower, spec_upper
+        # Track global min LSL and max USL (for bin range, always use spec limits)
+        if spec_lower is not None:
+            global_lsl = min(global_lsl, spec_lower) if global_lsl is not None else spec_lower
+        if spec_upper is not None:
+            global_usl = max(global_usl, spec_upper) if global_usl is not None else spec_upper
         lot_data_pre.append({
             'fid': fid,
             'ds': ds,
@@ -410,8 +423,10 @@ def compute_multi_lot_distribution(datasets, all_series, param,
             'idx': idx,
             'mean_v': mean_v,
             'std_v': std_v,
-            'lower_limit': lower_limit,
-            'upper_limit': upper_limit,
+            'lower_limit': spec_lower,
+            'upper_limit': spec_upper,
+            'display_lower': display_lower,
+            'display_upper': display_upper,
         })
 
     # Resolve bin range: use range_type-based resolution, ensure all limit lines are visible
@@ -424,10 +439,6 @@ def compute_multi_lot_distribution(datasets, all_series, param,
         bin_min = min(bin_min, global_lsl)
     if global_usl is not None:
         bin_max = max(bin_max, global_usl)
-    # Add margin to ensure limit lines are not at the edge
-    margin = (bin_max - bin_min) * 0.05  # 5% margin
-    bin_min -= margin
-    bin_max += margin
     # Degenerate range fallback
     if bin_min == bin_max:
         bin_min = float(combined.min())
@@ -435,12 +446,20 @@ def compute_multi_lot_distribution(datasets, all_series, param,
     if bin_min == bin_max:
         bin_min -= 0.5
         bin_max += 0.5
+    data_gap = safe_gap(bin_min, bin_max)
+    bin_start = bin_min - 2.5 * data_gap
 
-    # Fixed 24 bins for X-axis
-    bin_count = 24
-    bin_width = (bin_max - bin_min) / bin_count
-    bins = np.linspace(bin_min, bin_max, bin_count + 1)
-    bin_centers = [float((bins[i] + bins[i + 1]) / 2) for i in range(bin_count)]
+    # Build bin edges with underflow (-inf) and overflow (+inf) bins
+    # Same pattern as single-file: [underflow] [bin1]..[bin24] [overflow]
+    inner_edges = [bin_start + j * data_gap for j in range(26)]
+    all_bins = np.array([-np.inf] + inner_edges + [np.inf])
+    # 27 edges → 26 bins: 1 underflow + 24 normal + 1 overflow
+
+    # Bin centers: underflow/overflow use edge values, normal bins use midpoint
+    bin_centers = [inner_edges[0] - data_gap]  # underflow center
+    bin_centers += [(inner_edges[i] + inner_edges[i + 1]) / 2 for i in range(25)]
+    bin_centers.append(inner_edges[-1] + data_gap)  # overflow center
+    bin_count = len(bin_centers)
 
     # Second pass: compute histograms and assemble lot_data
     lot_data = []
@@ -449,7 +468,7 @@ def compute_multi_lot_distribution(datasets, all_series, param,
         ds = pre['ds']
         series = pre['series']  # Use cleaned series
         idx = pre['idx']
-        hist, _ = np.histogram(series, bins=bins)
+        hist, _ = np.histogram(series, bins=all_bins)
         pcts = [
             round(c / len(series) * 100, 2) if len(series) > 0 else 0
             for c in hist
@@ -457,7 +476,9 @@ def compute_multi_lot_distribution(datasets, all_series, param,
         bar_data = [[bin_centers[i], pcts[i]] for i in range(bin_count)]
         lower_limit = pre['lower_limit']
         upper_limit = pre['upper_limit']
-        # Fail count uses the parsed numeric limits (raw metadata mins/maxs are
+        display_lower = pre['display_lower']
+        display_upper = pre['display_upper']
+        # Fail count uses the spec limits (raw metadata mins/maxs are
         # strings like "0" or "MIN", so comparing the series against them
         # directly raises). When a bound is absent, treat it as ±inf.
         lo = lower_limit if lower_limit is not None else -float('inf')
@@ -470,6 +491,8 @@ def compute_multi_lot_distribution(datasets, all_series, param,
             'bar_data': bar_data,
             'lower_limit': lower_limit,
             'upper_limit': upper_limit,
+            'display_lower': display_lower,
+            'display_upper': display_upper,
             'mean': round(pre['mean_v'], 6),
             'std': round(pre['std_v'], 6),
             'count': len(series),
@@ -485,8 +508,8 @@ def compute_multi_lot_distribution(datasets, all_series, param,
         'param': param,
         'global_mean': round(global_mean, 6),
         'global_std': round(global_std, 6),
-        'chart_min': round(float(bins[0]), 6),
-        'chart_max': round(float(bins[-1]), 6),
+        'chart_min': round(float(inner_edges[0]), 6),
+        'chart_max': round(float(inner_edges[-1]), 6),
         'bin_centers': bin_centers,
         'lot_data': lot_data,
         'global_lsl': round(float(global_lsl), 6) if global_lsl is not None else None,

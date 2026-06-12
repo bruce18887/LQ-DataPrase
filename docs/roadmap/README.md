@@ -81,4 +81,4 @@ docs/roadmap/
 
 **创建日期**: 2026-05-31  
 **版本**: v1.0.0  
-**维护者**: DataPhrase 开发团队
+**维护者**: LQ-DataPrase 开发团队

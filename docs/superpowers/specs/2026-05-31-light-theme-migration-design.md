@@ -6,7 +6,7 @@
 
 ## 概述
 
-将DataPhrase Django项目的前端UI从深色GitHub风格主题迁移到现代数据实验室浅色主题。本文档涵盖除Roadmap页面外的所有12个主要页面的迁移方案。
+将LQ-DataPrase Django项目的前端UI从深色GitHub风格主题迁移到现代数据实验室浅色主题。本文档涵盖除Roadmap页面外的所有12个主要页面的迁移方案。
 
 ## 背景
 

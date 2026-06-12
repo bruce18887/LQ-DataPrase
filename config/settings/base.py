@@ -170,8 +170,8 @@ CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'Asia/Shanghai'
 
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'DataPhrase API',
-    'DESCRIPTION': 'DataPhrase 数据分析平台 API 文档',
+    'TITLE': 'LQ-DataPrase API',
+    'DESCRIPTION': 'LQ-DataPrase 数据分析平台 API 文档',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
 }

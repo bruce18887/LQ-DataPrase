@@ -13,7 +13,7 @@ test.describe('@p0 认证与路由守卫', { tag: ['@p0', '@p1', '@p2', '@auth']
 
   test('登录页正常加载', async ({ page }) => {
     await page.goto('/login')
-    await expect(page.getByRole('heading', { level: 1, name: 'DataPhrase' })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 1, name: 'LQ-DataPrase' })).toBeVisible()
     await expect(page.getByPlaceholder('用户名')).toBeVisible()
     await expect(page.getByPlaceholder('密码')).toBeVisible()
     await expect(page.locator('button.neon-button')).toBeVisible()

@@ -67,6 +67,37 @@ const router = createRouter({
   routes,
 })
 
+// Save and restore scroll position for the .content-area container
+const scrollPositions = new Map<string, number>()
+
+router.afterEach((to, from) => {
+  // Restore scroll position after navigation
+  const toKey = to.fullPath
+  const savedTop = scrollPositions.get(toKey)
+  if (savedTop !== undefined) {
+    requestAnimationFrame(() => {
+      const el = document.querySelector('.content-area')
+      if (el) el.scrollTop = savedTop
+    })
+  } else if (to.path !== from.path) {
+    // Reset scroll on new page navigation (not same-page param changes)
+    const el = document.querySelector('.content-area')
+    if (el) el.scrollTop = 0
+  }
+})
+
+// Save scroll position before leaving a route
+router.beforeEach((_to, from) => {
+  const fromKey = from.fullPath
+  const el = document.querySelector('.content-area')
+  if (el) scrollPositions.set(fromKey, el.scrollTop)
+  // Limit map size
+  if (scrollPositions.size > 20) {
+    const firstKey = scrollPositions.keys().next().value
+    if (firstKey) scrollPositions.delete(firstKey)
+  }
+})
+
 router.beforeEach(async (to, _from, next) => {
   const auth = useAuthStore()
   // After a hard refresh the token is rehydrated from localStorage but the

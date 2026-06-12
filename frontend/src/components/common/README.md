@@ -1,4 +1,4 @@
-# DataPhrase 通用组件库
+# LQ-DataPrase 通用组件库
 
 工业技术风格的 Vue 3 组件库，采用深色主题和霓虹效果。
 

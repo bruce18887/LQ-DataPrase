@@ -1,4 +1,4 @@
-# DataPhrase Django 后端架构文档
+# LQ-DataPrase Django 后端架构文档
 
 ## 技术栈
 
@@ -14,7 +14,7 @@
 ## 项目结构
 
 ```
-DataPhrase_Django/
+LQ-DataPrase/
 ├── config/                    # Django 核心配置
 │   ├── settings/base.py       #   基础配置（INSTALLED_APPS, DATABASES, JWT等）
 │   └── settings/development.py#   开发覆盖（DEBUG=True, SQLite）
