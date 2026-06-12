@@ -1,96 +1,48 @@
 <!-- frontend/src/pages/analysis/components/distribution/BoxPlotSection.vue -->
 <template>
   <AnalysisTabLayout :loading="loading">
-    <!-- 工具栏：分组模式切换 -->
+    <!-- 工具栏：散点叠加开关 -->
     <template #toolbar>
-      <el-radio-group v-model="groupBy" size="small">
-        <el-radio-button value="">不分组</el-radio-button>
-        <el-radio-button value="site">按 Site 分组</el-radio-button>
-        <el-radio-button value="bin">按 Bin 分组</el-radio-button>
-      </el-radio-group>
-      <el-button
-        type="primary"
-        size="small"
-        :loading="loading"
-        :disabled="selectedParams.length === 0"
-        @click="loadData"
-      >
-        生成箱线图
-      </el-button>
+      <el-switch v-model="showJitter" size="small" active-text="显示散点叠加" />
     </template>
 
-    <!-- 左侧面板：参数选择 + 说明 -->
+    <!-- 左侧面板：参数选择 + 统计表格 -->
     <template #left-panel>
-      <el-card shadow="hover" :body-style="{ padding: '12px' }">
-        <label class="section-label">选择参数（可多选）</label>
-        <el-select
-          v-model="selectedParams"
-          multiple
-          filterable
-          placeholder="选择要分析的参数"
-          style="width: 100%"
-          :disabled="loading"
-        >
-          <el-option
-            v-for="param in availableParams"
-            :key="param"
-            :label="param"
-            :value="param"
-          />
-        </el-select>
-      </el-card>
-
-      <el-collapse>
-        <el-collapse-item title="箱线图说明" name="info">
-          <ul class="info-list">
-            <li>箱体表示数据的四分位数范围（Q1-Q3）</li>
-            <li>箱体中的线表示中位数</li>
-            <li>须（whiskers）延伸到 1.5×IQR 范围内的最大/最小值</li>
-            <li>红色点表示异常值（outliers）</li>
-          </ul>
-        </el-collapse-item>
-      </el-collapse>
+      <ParamSelector
+        :params="availableParams"
+        v-model:selected-param="localSelectedParam"
+        @prev="prevParam"
+        @next="nextParam"
+      />
+      <BoxPlotStatsTable :stats="stats" />
     </template>
 
-    <!-- 右侧面板：图表 -->
+    <!-- 右侧面板：统计卡片 + 图表 -->
     <template #right-panel>
-      <!-- 无数据时的空状态 -->
-      <el-empty
-        v-if="!loading && !boxPlotData"
-        description="请选择参数并点击生成箱线图"
-      />
+      <div class="top-bar">
+        <StatsSummary :stat-cards="statCards" />
+      </div>
 
-      <!-- 图表列表 -->
-      <div v-if="boxPlotData && !loading" class="boxplot-list">
-        <div
-          v-for="param in Object.keys(boxPlotData)"
-          :key="param"
-          class="boxplot-item"
-        >
-          <div class="boxplot-item__header">
-            <strong>{{ param }}</strong>
-            <span v-if="boxPlotData[param]?.overall" class="boxplot-stats">
-              Min: {{ boxPlotData[param].overall.min?.toFixed(4) }}
-              | Q1: {{ boxPlotData[param].overall.q1?.toFixed(4) }}
-              | Median: {{ boxPlotData[param].overall.median?.toFixed(4) }}
-              | Q3: {{ boxPlotData[param].overall.q3?.toFixed(4) }}
-              | Max: {{ boxPlotData[param].overall.max?.toFixed(4) }}
-              | Outliers: {{ boxPlotData[param].overall.outliers?.length ?? 0 }}
-            </span>
-          </div>
-          <div class="chart-wrapper">
-            <BoxPlotChart :data="{ param, ...boxPlotData[param] }" :title="`Box Plot - ${param}`" />
-          </div>
-        </div>
+      <div class="chart-wrapper">
+        <BoxPlotChart
+          v-if="currentParamData"
+          :data="currentParamData"
+          :title="`Box Plot - ${localSelectedParam}`"
+          :show-jitter="showJitter"
+        />
+        <el-empty v-else description="请选择参数" />
       </div>
     </template>
   </AnalysisTabLayout>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import AnalysisTabLayout from '../AnalysisTabLayout.vue'
+import ParamSelector from '../ParamSelector.vue'
+import StatsSummary from '../StatsSummary.vue'
 import BoxPlotChart from '../BoxPlotChart.vue'
+import BoxPlotStatsTable from './BoxPlotStatsTable.vue'
 import { useBoxPlot } from '../../composables/useBoxPlot'
 
 const props = defineProps<{
@@ -98,71 +50,79 @@ const props = defineProps<{
   availableParams: string[]
 }>()
 
-const selectedParams = ref<string[]>([])
-const groupBy = ref<string>('')
+const localSelectedParam = ref('')
+const groupBy = ref('site') // 固定按 Site 分组
+const showJitter = ref(false)
 
-const { loading, boxPlotData, loadBoxPlot } = useBoxPlot(
+const { loading, boxPlotData, stats } = useBoxPlot(
   () => props.fileId,
-  selectedParams,
+  localSelectedParam,
   groupBy
 )
 
-function loadData() {
-  loadBoxPlot()
-}
+/** 当前参数的箱线图数据 */
+const currentParamData = computed(() => {
+  if (!boxPlotData.value || !localSelectedParam.value) return null
+  const paramData = boxPlotData.value[localSelectedParam.value]
+  if (!paramData) return null
+  return { param: localSelectedParam.value, ...paramData }
+})
+
+/** 统计卡片 */
+const statCards = computed(() => {
+  if (!stats.value) return []
+  const s = stats.value
+  return [
+    { label: 'Min', value: s.min.toFixed(4) },
+    { label: 'Q1', value: s.q1.toFixed(4) },
+    { label: 'Median', value: s.median.toFixed(4) },
+    { label: 'Q3', value: s.q3.toFixed(4) },
+    { label: 'Max', value: s.max.toFixed(4) },
+    { label: 'Outliers', value: String(s.outliers.length) },
+  ]
+})
 
 // Auto-select first param when params change
 watch(() => props.availableParams, (newParams) => {
-  if (newParams.length > 0 && selectedParams.value.length === 0) {
-    selectedParams.value = [newParams[0]]
+  if (newParams.length > 0 && !localSelectedParam.value) {
+    localSelectedParam.value = newParams[0]
   }
 }, { immediate: true })
 
 // Reset when file changes
 watch(() => props.fileId, () => {
-  boxPlotData.value = null
-  selectedParams.value = []
+  localSelectedParam.value = ''
 })
+
+function prevParam() {
+  const idx = props.availableParams.indexOf(localSelectedParam.value)
+  if (idx > 0) {
+    localSelectedParam.value = props.availableParams[idx - 1]
+  } else if (props.availableParams.length > 0) {
+    localSelectedParam.value = props.availableParams[props.availableParams.length - 1]
+  }
+}
+
+function nextParam() {
+  const idx = props.availableParams.indexOf(localSelectedParam.value)
+  if (idx < props.availableParams.length - 1) {
+    localSelectedParam.value = props.availableParams[idx + 1]
+  } else if (props.availableParams.length > 0) {
+    localSelectedParam.value = props.availableParams[0]
+  }
+}
 </script>
 
 <style scoped>
-.section-label {
-  font-size: 11px;
-  color: var(--text-secondary);
-  margin-bottom: 4px;
-  font-weight: 500;
-  display: block;
-}
-
-.info-list {
-  margin: 0;
-  padding-left: 20px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  line-height: 1.8;
-}
-
-.boxplot-list {
+.top-bar {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.boxplot-item__header {
-  display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 
-.boxplot-item__header strong {
-  font-size: 14px;
-  color: var(--text-primary);
-}
-
-.boxplot-stats {
-  font-size: 12px;
-  color: var(--text-secondary);
+.top-bar :deep(.stats-summary) {
+  flex: 1;
 }
 
 .chart-wrapper {

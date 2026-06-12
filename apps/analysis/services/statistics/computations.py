@@ -8,6 +8,7 @@ import math
 from typing import Optional, Dict, List, Tuple, Any
 import pandas as pd
 import numpy as np
+from scipy import stats as sp_stats
 
 from .helpers import safe_gap, get_1d_from, get_coord_columns
 from .limits import parse_limit_string
@@ -151,9 +152,23 @@ def compute_correlation_matrix(df: pd.DataFrame, params: List[str], method: str 
     # Round values to 4 decimal places
     matrix_list = [[round(val, 4) if not math.isnan(val) else 0.0 for val in row] for row in matrix_list]
 
+    # Compute p-value matrix
+    n = len(valid_params)
+    p_matrix = np.ones((n, n))
+    for i in range(n):
+        for j in range(i + 1, n):
+            try:
+                _, p_val = sp_stats.pearsonr(df_clean.iloc[:, i], df_clean.iloc[:, j])
+                p_matrix[i, j] = p_val
+                p_matrix[j, i] = p_val
+            except Exception:
+                pass
+    p_matrix_list = [[round(val, 6) for val in row] for row in p_matrix.tolist()]
+
     return {
         'params': valid_params,
         'matrix': matrix_list,
+        'p_values': p_matrix_list,
         'sample_size': len(df_clean),
         'method': method
     }
@@ -218,6 +233,14 @@ def compute_boxplot_stats(data: pd.Series) -> Dict[str, Any]:
         min_val = float(clean_data.min())
         max_val = float(clean_data.max())
 
+    # Raw values for jitter overlay (subsample if too large)
+    MAX_RAW_POINTS = 2000
+    if len(clean_data) > MAX_RAW_POINTS:
+        step = len(clean_data) // MAX_RAW_POINTS
+        raw_values = clean_data.iloc[::step].round(6).tolist()
+    else:
+        raw_values = clean_data.round(6).tolist()
+
     return {
         'min': round(min_val, 6),
         'q1': round(q1, 6),
@@ -225,7 +248,8 @@ def compute_boxplot_stats(data: pd.Series) -> Dict[str, Any]:
         'q3': round(q3, 6),
         'max': round(max_val, 6),
         'outliers': outliers_list,
-        'count': len(clean_data)
+        'count': len(clean_data),
+        'raw_values': raw_values
     }
 
 

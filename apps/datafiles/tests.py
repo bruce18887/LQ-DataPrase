@@ -1,4 +1,4 @@
-from django.contrib.auth import get_user_model
+﻿﻿from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APITestCase
 
@@ -8,6 +8,8 @@ from apps.datafiles.views import _user_upload_dir
 
 import os
 import shutil
+import tempfile
+import time
 
 User = get_user_model()
 
@@ -463,3 +465,191 @@ class SummaryFileSkipTests(APITestCase):
             ).values_list('filename', flat=True)
         )
         self.assertEqual(names, {'BPD60320_FT.csv'})
+
+class ParseCacheInvalidationTests(TestCase):
+    """Regression: the parse cache must auto-invalidate when a DataFile's
+    ``file_path`` is re-pointed at a new on-disk location, otherwise
+    the analysis endpoints keep 400-ing with
+    ``file_not_found_or_parse_failed`` even after the DB row was fixed
+    (this is what happened when the project was moved from
+    ``DataPhrase_Django`` to ``LQ-DataPrase`` on 2026-06-12 -- the
+    move-management command rewrote ``file_path`` but the in-process
+    cache was still serving the old (None, None, fmt) entry).
+
+    The fix is to fold the file's on-disk mtime into the cache key, so
+    any path/content change forces a re-parse.
+    """
+
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(username='cache_user', password='pw')
+        # Two real on-disk files in a tmp dir, one with valid data, one empty.
+        self.tmp = tempfile.mkdtemp(prefix='parse_cache_test_')
+        self.good_path = os.path.join(self.tmp, 'good.csv')
+        with open(self.good_path, 'w') as f:
+            f.write('col1,col2\n1,2\n3,4\n')
+        self.bad_path = os.path.join(self.tmp, 'bad.csv')
+        with open(self.bad_path, 'w') as f:
+            f.write('not a real data file')
+        self.df = DataFile.objects.create(
+            owner=self.user,
+            filename='good.csv',
+            file_path=self.good_path,
+            file_size=os.path.getsize(self.good_path),
+            format_type='CTA8290D',
+            status='ready',
+        )
+        # Make sure no stale cache entry leaks in from another test.
+        from apps.datafiles.services import clear_parse_cache
+        clear_parse_cache()
+
+    def tearDown(self):
+        from apps.datafiles.services import clear_parse_cache
+        clear_parse_cache()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_cache_hits_when_path_unchanged(self):
+        from apps.datafiles.services import get_cached_parsed_file
+        df1, _, _ = get_cached_parsed_file(self.df.id, self.user.id)
+        self.assertIsNotNone(df1)
+        # Second call should hit the same cache entry (returns the same DataFrame).
+        df2, _, _ = get_cached_parsed_file(self.df.id, self.user.id)
+        self.assertIs(df1, df2, 'cache should return the same DataFrame object')
+
+    def test_cache_reparses_when_file_path_re_pointed(self):
+        from apps.datafiles.services import get_cached_parsed_file
+        # Prime the cache against the (working) good.csv.
+        df1, _, _ = get_cached_parsed_file(self.df.id, self.user.id)
+        self.assertIsNotNone(df1)
+        # Re-point at the bad file (still on disk, so the cache key's
+        # ``path_key`` derived from the new file's mtime will be different
+        # and bust the cache).
+        DataFile.objects.filter(pk=self.df.id).update(file_path=self.bad_path)
+        df2, _, fmt2 = get_cached_parsed_file(self.df.id, self.user.id)
+        # The bad file is not a parseable CSV -- df is None, fmt is CTA8290D.
+        # The crucial part: we did NOT get the old cached (df1, ...) back.
+        self.assertIsNot(df2, df1, 'cache must not return the previous (good) parse')
+        self.assertIsNone(df2)
+        self.assertEqual(fmt2, 'CTA8290D')
+
+    def test_cache_reparses_when_file_content_replaced(self):
+        from apps.datafiles.services import get_cached_parsed_file
+        df1, _, _ = get_cached_parsed_file(self.df.id, self.user.id)
+        self.assertIsNotNone(df1)
+        # Replace the on-disk file contents in place -- mtime_ns changes,
+        # which changes the cache key, which forces a re-parse.
+        with open(self.good_path, 'w') as f:
+            f.write('col1,col2\n99,98\n')
+        # Also bump mtime explicitly to defeat coarse-grained FS mtime
+        # resolution (Windows defaults to 100-ns FAT granularity, but
+        # two writes within the same tick would still differ at ns).
+        new_mtime = time.time() + 5
+        os.utime(self.good_path, (new_mtime, new_mtime))
+        df2, _, _ = get_cached_parsed_file(self.df.id, self.user.id)
+        # A fresh parse must have happened, so the DataFrame is a new
+        # object holding the new data.
+        self.assertIsNot(df2, df1)
+        self.assertIsNotNone(df2)
+        self.assertEqual(list(df2['col1']), [99])
+
+
+class FixMovedProjectPathsCommandTests(TestCase):
+    """Coverage for the ``fix_moved_project_paths`` management command:
+
+    * rewrites ``file_path`` from old project root to new project root
+    * leaves rows already under the new root untouched
+    * refuses to run if old and new roots are identical
+    * refuses to rewrite to a path whose target file is missing on disk
+    """
+
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(username='move_user', password='pw')
+        self.tmp = tempfile.mkdtemp(prefix='fix_paths_test_')
+        # Pretend the project was once at ``<tmp>/OldProject`` and is
+        # now at ``<tmp>/NewProject``. The DB rows still point at OldProject.
+        self.old_root = os.path.join(self.tmp, 'OldProject')
+        self.new_root = os.path.join(self.tmp, 'NewProject')
+        self.old_uploads = os.path.join(self.old_root, 'media', 'uploads')
+        self.new_uploads = os.path.join(self.new_root, 'media', 'uploads')
+        os.makedirs(self.old_uploads, exist_ok=True)
+        os.makedirs(self.new_uploads, exist_ok=True)
+        # Two files: one copied to new root, one only on old root (orphan).
+        self.copied_name = 'copied.csv'
+        self.orphan_name = 'orphan.csv'
+        with open(os.path.join(self.old_uploads, self.copied_name), 'w') as f:
+            f.write('a,b\n1,2\n')
+        with open(os.path.join(self.old_uploads, self.orphan_name), 'w') as f:
+            f.write('a,b\n3,4\n')
+        with open(os.path.join(self.new_uploads, self.copied_name), 'w') as f:
+            f.write('a,b\n1,2\n')  # real target the command should re-point at
+
+        self.df_copied = DataFile.objects.create(
+            owner=self.user, filename=self.copied_name,
+            file_path=os.path.join(self.old_uploads, self.copied_name),
+            file_size=8, format_type='CTA8290D', status='ready',
+        )
+        self.df_orphan = DataFile.objects.create(
+            owner=self.user, filename=self.orphan_name,
+            file_path=os.path.join(self.old_uploads, self.orphan_name),
+            file_size=8, format_type='CTA8290D', status='ready',
+        )
+        # Plus one row that already points at the new root �� must be left alone.
+        self.df_already_new = DataFile.objects.create(
+            owner=self.user, filename='already_new.csv',
+            file_path=os.path.join(self.new_uploads, 'already_new.csv'),
+            file_size=8, format_type='CTA8290D', status='ready',
+        )
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _run(self, *extra):
+        from io import StringIO
+        from django.core.management import call_command
+        out = StringIO()
+        call_command(
+            'fix_moved_project_paths',
+            '--old-root', self.old_root,
+            '--new-root', self.new_root,
+            *extra,
+            stdout=out,
+        )
+        return out.getvalue()
+
+    def test_rewrites_only_rows_with_target_on_disk(self):
+        output = self._run()
+        self.df_copied.refresh_from_db()
+        self.df_orphan.refresh_from_db()
+        self.df_already_new.refresh_from_db()
+        self.assertEqual(
+            self.df_copied.file_path,
+            os.path.join(self.new_uploads, self.copied_name),
+        )
+        # Orphan's target doesn't exist on the new root �� left alone.
+        self.assertEqual(
+            self.df_orphan.file_path,
+            os.path.join(self.old_uploads, self.orphan_name),
+        )
+        # Already-new row was never under the old root �� untouched.
+        self.assertEqual(
+            self.df_already_new.file_path,
+            os.path.join(self.new_uploads, 'already_new.csv'),
+        )
+        self.assertIn('rewrote 1', output)
+
+    def test_dry_run_does_not_touch_db(self):
+        self._run('--dry-run')
+        self.df_copied.refresh_from_db()
+        self.assertEqual(
+            self.df_copied.file_path,
+            os.path.join(self.old_uploads, self.copied_name),
+        )
+
+    def test_refuses_identical_roots(self):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        with self.assertRaises(CommandError):
+            call_command('fix_moved_project_paths',
+                         '--old-root', self.old_root,
+                         '--new-root', self.old_root)

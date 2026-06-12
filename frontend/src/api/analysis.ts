@@ -23,18 +23,18 @@ export const analysisApi = {
     const query: Record<string, any> = { file_id: fileId }
     if (params && params.length) query.params = params
     if (method) query.method = method
-    return api.get('/analysis/correlation_matrix/', { params: query })
+    return api.get('/statistics/correlation_matrix/', { params: query })
   },
   getBinTrend(fileIds: number[]) {
-    return api.get('/analysis/bin_trend/', { params: { file_ids: fileIds } })
+    return api.get('/statistics/bin_trend/', { params: { file_ids: fileIds } })
   },
   getBoxPlot(fileId: number, params: string[], groupBy?: string) {
     const query: Record<string, any> = { file_id: fileId, params }
     if (groupBy) query.group_by = groupBy
-    return api.get('/analysis/boxplot/', { params: query })
+    return api.get('/statistics/boxplot/', { params: query })
   },
   getParamTrend(fileIds: number[], param: string) {
-    return api.get('/analysis/param_trend/', { params: { file_ids: fileIds, param } })
+    return api.get('/statistics/param_trend/', { params: { file_ids: fileIds, param } })
   },
   getYieldTrend(fileIds: number[]) {
     return api.get('/analysis/yield_trend/', { params: { file_ids: fileIds } })

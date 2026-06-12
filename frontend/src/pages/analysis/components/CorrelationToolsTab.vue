@@ -7,25 +7,6 @@
         <el-radio-button value="scatter">散点图</el-radio-button>
         <el-radio-button value="matrix">相关性矩阵</el-radio-button>
       </el-radio-group>
-      <el-button
-        v-if="viewMode === 'scatter'"
-        type="primary"
-        size="small"
-        :loading="corrLoading"
-        :disabled="!localX || !localY"
-        @click="onAnalyze"
-      >
-        分析相关性
-      </el-button>
-      <el-button
-        v-if="viewMode === 'matrix'"
-        type="primary"
-        size="small"
-        :loading="matrixLoading"
-        @click="onCalculateMatrix"
-      >
-        计算相关性矩阵
-      </el-button>
     </template>
 
     <!-- 左侧面板 -->
@@ -43,6 +24,9 @@
           <el-select v-model="localY" placeholder="选择 Y 轴参数" filterable style="width: 100%">
             <el-option v-for="p in params" :key="p" :label="p" :value="p" />
           </el-select>
+        </el-card>
+        <el-card shadow="hover" :body-style="{ padding: '12px' }">
+          <el-switch v-model="showRegression" size="small" active-text="显示回归线" />
         </el-card>
 
         <!-- 坐标轴范围设置 -->
@@ -91,7 +75,17 @@
       <!-- 矩阵模式 -->
       <template v-if="viewMode === 'matrix'">
         <el-card shadow="hover" :body-style="{ padding: '12px' }">
-          <p class="hint-text">计算所有含 Limit 测试项的 Pearson 相关系数矩阵</p>
+          <label class="section-label">选择参数（可多选）</label>
+          <el-select
+            v-model="selectedMatrixParams"
+            multiple
+            filterable
+            placeholder="默认全选"
+            style="width: 100%"
+            @change="onMatrixParamsChange"
+          >
+            <el-option v-for="p in params" :key="p" :label="p" :value="p" />
+          </el-select>
         </el-card>
       </template>
     </template>
@@ -106,13 +100,21 @@
             <div class="metric-value" :class="rColorClass">{{ (corrResult?.pearson_r ?? 0).toFixed(4) }}</div>
           </div>
           <div class="metric-card">
+            <div class="metric-label">R²</div>
+            <div class="metric-value">{{ ((corrResult?.pearson_r ?? 0) ** 2).toFixed(4) }}</div>
+          </div>
+          <div class="metric-card">
             <div class="metric-label">数据点数</div>
             <div class="metric-value">{{ (corrResult?.n ?? 0).toLocaleString() }}</div>
+          </div>
+          <div v-if="regressionInfo" class="metric-card">
+            <div class="metric-label">回归方程</div>
+            <div class="metric-value regression-eq">{{ regressionInfo.equation }}</div>
           </div>
         </div>
         <div class="chart-wrapper">
           <div v-if="corrResult" ref="scatterChartRef" class="chart-inner" />
-          <el-empty v-else description="选择 X/Y 轴参数后点击分析相关性" />
+          <el-empty v-else description="选择 X/Y 轴参数以分析相关性" />
         </div>
       </template>
 
@@ -120,7 +122,7 @@
       <template v-if="viewMode === 'matrix'">
         <div class="chart-wrapper">
           <div v-if="matrixData" ref="matrixChartRef" class="chart-inner" />
-          <el-empty v-else description="点击按钮计算所有有 Limit 测试项的 Pearson 相关系数矩阵" />
+          <el-empty v-else description="切换到此视图自动计算 Pearson 相关系数矩阵" />
         </div>
       </template>
     </template>
@@ -148,6 +150,7 @@ const viewMode = ref<'scatter' | 'matrix'>('scatter')
 // ===== Scatter mode =====
 const localX = ref('')
 const localY = ref('')
+const showRegression = ref(true)
 const axisCollapse = ref<string[]>([])
 const axisModeX = ref<'data' | 'sigma' | 'custom'>('data')
 const axisModeY = ref<'data' | 'sigma' | 'custom'>('data')
@@ -166,9 +169,41 @@ const rColorClass = computed(() => {
   return 'r-weak'
 })
 
-function onAnalyze() {
-  if (localX.value && localY.value) loadCorrelation(localX.value, localY.value)
+/** 线性回归计算 */
+function linearRegression(points: number[][]): { slope: number; intercept: number } {
+  const n = points.length
+  if (n < 2) return { slope: 0, intercept: 0 }
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0
+  for (const [x, y] of points) {
+    sumX += x; sumY += y; sumXY += x * y; sumX2 += x * x
+  }
+  const denom = n * sumX2 - sumX * sumX
+  if (Math.abs(denom) < 1e-12) return { slope: 0, intercept: sumY / n }
+  const slope = (n * sumXY - sumX * sumY) / denom
+  const intercept = (sumY - slope * sumX) / n
+  return { slope, intercept }
 }
+
+/** 回归信息（方程 + R²） */
+const regressionInfo = computed(() => {
+  if (!corrResult.value) return null
+  const d = corrResult.value
+  const allPts: number[][] = []
+  for (const sd of d.series_data || []) for (const pt of sd.data || []) allPts.push(pt)
+  if (allPts.length < 2) return null
+  const { slope, intercept } = linearRegression(allPts)
+  const sign = intercept >= 0 ? '+' : '-'
+  return {
+    slope,
+    intercept,
+    equation: `y=${slope.toFixed(4)}x${sign}${Math.abs(intercept).toFixed(4)}`,
+  }
+})
+
+// Auto-load scatter when both X and Y are selected
+watch([localX, localY], ([x, y]) => {
+  if (x && y) loadCorrelation(x, y)
+})
 
 function computeRange(mode: string, sigma: number, cMin: number, cMax: number, vals: number[]) {
   if (mode === 'custom') return { min: cMin, max: cMax }
@@ -197,6 +232,24 @@ function buildScatterOption() {
   const xR = allX.length > 0 ? computeRange(axisModeX.value, sigmaX.value, customMinX.value, customMaxX.value, allX) : { min: undefined, max: undefined }
   const yR = allY.length > 0 ? computeRange(axisModeY.value, sigmaY.value, customMinY.value, customMaxY.value, allY) : { min: undefined, max: undefined }
 
+  // Regression line
+  if (showRegression.value && allX.length >= 2) {
+    const { slope, intercept } = linearRegression(allX.map((x, i) => [x, allY[i]]))
+    const xMin = xR.min ?? Math.min(...allX)
+    const xMax = xR.max ?? Math.max(...allX)
+    const r2 = (d.pearson_r ?? 0) ** 2
+    series.push({
+      name: '回归线',
+      type: 'line',
+      data: [[xMin, slope * xMin + intercept], [xMax, slope * xMax + intercept]],
+      lineStyle: { type: 'dashed', color: '#e66767', width: 2 },
+      symbol: 'none',
+      tooltip: {
+        formatter: () => `回归方程: y = ${slope.toFixed(4)}x + ${intercept.toFixed(4)}<br/>R² = ${r2.toFixed(4)}`,
+      },
+    })
+  }
+
   return {
     title: { text: `${d.param_x} vs ${d.param_y}`, subtext: `Pearson r = ${d.pearson_r?.toFixed(4) ?? '-'}`, left: 'center', textStyle: { color: tc, fontSize: 14 }, subtextStyle: { color: tc, fontSize: 12 } },
     toolbox: { feature: { saveAsImage: { title: '保存图片' }, restore: { title: '还原' } }, right: 10 },
@@ -216,6 +269,7 @@ function buildScatterOption() {
 
 const { chartRef: scatterChartRef } = useChart(buildScatterOption, [
   () => corrResult.value,
+  () => showRegression.value,
   () => axisModeX.value, () => axisModeY.value,
   () => sigmaX.value, () => sigmaY.value,
   () => customMinX.value, () => customMaxX.value,
@@ -232,10 +286,35 @@ watch(() => corrResult.value, (data) => {
 })
 
 // ===== Matrix mode =====
+const selectedMatrixParams = ref<string[]>([])
 const { loading: matrixLoading, matrixData, loadCorrelationMatrix } = useCorrelationMatrix(() => props.fileId)
 
-function onCalculateMatrix() {
-  loadCorrelationMatrix()
+// Initialize matrix params when props.params changes
+watch(() => props.params, (newParams) => {
+  if (newParams.length > 0 && selectedMatrixParams.value.length === 0) {
+    selectedMatrixParams.value = [...newParams]
+  }
+}, { immediate: true })
+
+// Auto-load matrix when switching to matrix mode with a file selected
+watch(viewMode, (mode) => {
+  if (mode === 'matrix' && props.fileId) {
+    loadCorrelationMatrix(selectedMatrixParams.value.length > 0 ? selectedMatrixParams.value : undefined)
+  }
+})
+
+function onMatrixParamsChange() {
+  if (props.fileId) {
+    loadCorrelationMatrix(selectedMatrixParams.value.length > 0 ? selectedMatrixParams.value : undefined)
+  }
+}
+
+/** 显著性星号 */
+function getSignificanceStars(p: number): string {
+  if (p < 0.001) return '***'
+  if (p < 0.01) return '**'
+  if (p < 0.05) return '*'
+  return ''
 }
 
 function buildMatrixOption() {
@@ -244,6 +323,7 @@ function buildMatrixOption() {
   const data = matrixData.value
   const params: string[] = data.params || []
   const matrix: number[][] = data.matrix || []
+  const pValues: number[][] = data.p_values || []
 
   const heatmapData: [number, number, number][] = []
   for (let i = 0; i < params.length; i++) {
@@ -255,7 +335,13 @@ function buildMatrixOption() {
   return {
     tooltip: {
       position: 'top',
-      formatter: (p: any) => `${params[p.value[0]]} vs ${params[p.value[1]]}<br/>Pearson r: ${p.value[2].toFixed(4)}`,
+      formatter: (p: any) => {
+        const r = p.value[2]
+        const pi = p.value[0], pj = p.value[1]
+        const pv = pValues[pi]?.[pj] ?? 1
+        const stars = getSignificanceStars(pv)
+        return `${params[pi]} vs ${params[pj]}<br/>Pearson r: ${r.toFixed(4)}${stars}<br/>p-value: ${pv.toFixed(6)}`
+      },
     },
     grid: { left: '15%', right: '10%', top: '10%', bottom: '15%' },
     xAxis: { type: 'category', data: params, splitArea: { show: true }, axisLabel: { rotate: 45, fontSize: 10, color: tc } },
@@ -266,7 +352,15 @@ function buildMatrixOption() {
     },
     series: [{
       name: 'Pearson r', type: 'heatmap', data: heatmapData,
-      label: { show: true, fontSize: 9, formatter: (p: any) => p.value[2].toFixed(2) },
+      label: {
+        show: true, fontSize: 9,
+        formatter: (p: any) => {
+          const r = p.value[2]
+          const pi = p.value[0], pj = p.value[1]
+          const pv = pValues[pi]?.[pj] ?? 1
+          return `${r.toFixed(2)}${getSignificanceStars(pv)}`
+        },
+      },
       emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0, 0, 0, 0.5)' } },
     }],
   }
@@ -292,7 +386,7 @@ const { chartRef: matrixChartRef } = useChart(buildMatrixOption, [() => matrixDa
 
 .top-bar {
   display: flex;
-  gap: 16px;
+  gap: 12px;
 }
 
 .metric-card {
@@ -322,6 +416,12 @@ const { chartRef: matrixChartRef } = useChart(buildMatrixOption, [() => matrixDa
 .metric-value.r-strong { color: #059669; }
 .metric-value.r-medium { color: #d97706; }
 .metric-value.r-weak { color: var(--text-primary, #303133); }
+
+.regression-eq {
+  font-size: 13px;
+  font-weight: 600;
+  word-break: break-all;
+}
 
 .chart-wrapper {
   flex: 1;
