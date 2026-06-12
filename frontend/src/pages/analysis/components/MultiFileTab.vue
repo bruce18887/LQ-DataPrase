@@ -90,6 +90,7 @@
               v-model:selected-param="selectedParam"
             />
             <div class="common-hint">共有测试项：{{ commonParams.length }} 项</div>
+            <CircularProgress :loading="loading" />
           </div>
           <div class="chart-wrapper">
             <MultiFileChart
@@ -120,6 +121,7 @@ import { useMultiFile } from '../composables/useMultiFile'
 import ChartConfigPanel from './ChartConfigPanel.vue'
 import ParamSelector from './ParamSelector.vue'
 import MultiFileChart from './MultiFileChart.vue'
+import CircularProgress from '../../../components/common/CircularProgress.vue'
 
 const props = defineProps<{ files: any[] }>()
 
