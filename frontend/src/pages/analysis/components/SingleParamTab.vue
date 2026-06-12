@@ -1,7 +1,6 @@
 <template>
-  <div class="single-param-tab">
-    <!-- 顶部工具栏：模式切换 -->
-    <div class="toolbar">
+  <AnalysisTabLayout :loading="histLoading">
+    <template #toolbar>
       <el-radio-group v-model="chartMode" size="small">
         <el-radio-button value="distribution">数值分布</el-radio-button>
         <el-radio-button value="serial">序列分布</el-radio-button>
@@ -14,89 +13,84 @@
       >
         显示QQ图
       </el-checkbox>
-    </div>
+    </template>
 
-    <!-- 主内容区：左侧配置面板 + 右侧图表 -->
-    <el-row :gutter="12" class="main-row">
-      <!-- 左侧配置面板 -->
-      <el-col :span="6" class="left-panel">
-        <ChartConfigPanel
-          v-model:chart-config="chartConfig"
-          v-model:range-type="rangeType"
-          v-model:bar-width-percent="barWidthPercent"
-          v-model:ignore-no-limit="ignoreNoLimit"
-          v-model:custom-low="customLow"
-          v-model:custom-high="customHigh"
+    <template #left-panel>
+      <ChartConfigPanel
+        v-model:chart-config="chartConfig"
+        v-model:range-type="rangeType"
+        v-model:bar-width-percent="barWidthPercent"
+        v-model:ignore-no-limit="ignoreNoLimit"
+        v-model:custom-low="customLow"
+        v-model:custom-high="customHigh"
+      />
+      <RangeComparisonTable :range-table-data="rangeTableData" :range-type="rangeType" />
+      <SiteStatsTable :site-stats="siteStats" :site-stats-error="siteStatsError" />
+    </template>
+
+    <template #right-panel>
+      <!-- 参数选择 + 统计摘要 -->
+      <div class="top-bar">
+        <ParamSelector
+          :params="params"
+          v-model:selected-param="localSelectedParam"
+          @prev="prevParam"
+          @next="nextParam"
         />
-        <RangeComparisonTable :range-table-data="rangeTableData" :range-type="rangeType" />
-        <SiteStatsTable :site-stats="siteStats" :site-stats-error="siteStatsError" />
-      </el-col>
-
-      <!-- 右侧图表区 -->
-      <el-col :span="18" class="right-panel" v-loading="histLoading" element-loading-text="正在分析数据...">
-        <!-- 参数选择 + 统计摘要 -->
-        <div class="top-bar">
-          <ParamSelector
-            :params="params"
-            v-model:selected-param="localSelectedParam"
-            @prev="prevParam"
-            @next="nextParam"
-          />
-          <div class="top-bar-right">
-            <StatsSummary :stat-cards="statCards" />
-            <el-tag
-              v-if="qqResult && showQQPlot"
-              :type="qqResult.is_normal ? 'success' : 'danger'"
-              size="small"
-              class="normality-tag"
-            >
-              {{ qqResult.is_normal ? '正态' : '非正态' }}
-            </el-tag>
-          </div>
+        <div class="top-bar-right">
+          <StatsSummary :stat-cards="statCards" />
+          <el-tag
+            v-if="qqResult && showQQPlot"
+            :type="qqResult.is_normal ? 'success' : 'danger'"
+            size="small"
+            class="normality-tag"
+          >
+            {{ qqResult.is_normal ? '正态' : '非正态' }}
+          </el-tag>
         </div>
+      </div>
 
-        <!-- 图表：QQ图激活时上下布局（柱状图在上，QQ图在下） -->
-        <div
-          v-if="showQQPlot && chartMode === 'distribution' && histResult"
-          class="chart-vertical-layout"
-        >
-          <div class="chart-wrapper chart-wrapper--top">
-            <HistogramChart
-              :result="histResult"
-              :chart-config="chartConfig"
-              :range-type="rangeType"
-              :bar-width-percent="barWidthPercent"
-              :selected-param="localSelectedParam"
-            />
-          </div>
-          <div class="chart-wrapper chart-wrapper--bottom">
-            <QQPlotChart
-              :file-id="props.fileId"
-              :param="localSelectedParam"
-              :visible="showQQPlot"
-              :result="qqResult"
-              :loading="qqLoading"
-            />
-          </div>
-        </div>
-        <!-- 图表：默认全宽布局 -->
-        <div v-else class="chart-wrapper">
+      <!-- 图表：QQ图激活时上下布局（柱状图在上，QQ图在下） -->
+      <div
+        v-if="showQQPlot && chartMode === 'distribution' && histResult"
+        class="chart-vertical-layout"
+      >
+        <div class="chart-wrapper chart-wrapper--top">
           <HistogramChart
-            v-if="histResult && chartMode === 'distribution'"
             :result="histResult"
             :chart-config="chartConfig"
             :range-type="rangeType"
             :bar-width-percent="barWidthPercent"
             :selected-param="localSelectedParam"
           />
-          <SerialChart
-            v-if="chartMode === 'serial'"
-            :data="serialDistData"
+        </div>
+        <div class="chart-wrapper chart-wrapper--bottom">
+          <QQPlotChart
+            :file-id="props.fileId"
+            :param="localSelectedParam"
+            :visible="showQQPlot"
+            :result="qqResult"
+            :loading="qqLoading"
           />
         </div>
-      </el-col>
-    </el-row>
-  </div>
+      </div>
+      <!-- 图表：默认全宽布局 -->
+      <div v-else class="chart-wrapper">
+        <HistogramChart
+          v-if="histResult && chartMode === 'distribution'"
+          :result="histResult"
+          :chart-config="chartConfig"
+          :range-type="rangeType"
+          :bar-width-percent="barWidthPercent"
+          :selected-param="localSelectedParam"
+        />
+        <SerialChart
+          v-if="chartMode === 'serial'"
+          :data="serialDistData"
+        />
+      </div>
+    </template>
+  </AnalysisTabLayout>
 </template>
 
 <script setup lang="ts">
@@ -111,6 +105,7 @@ import StatsSummary from './StatsSummary.vue'
 import HistogramChart from './HistogramChart.vue'
 import SerialChart from './SerialChart.vue'
 import QQPlotChart from './QQPlotChart.vue'
+import AnalysisTabLayout from './AnalysisTabLayout.vue'
 import { useHistogram } from '../composables/useHistogram'
 import { useSerialDistribution } from '../composables/useSerialDistribution'
 import { useSiteStats } from '../composables/useSiteStats'
@@ -263,37 +258,6 @@ function nextParam() {
 </script>
 
 <style scoped>
-.single-param-tab {
-  padding: 0;
-}
-
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 12px;
-  padding: 8px 12px;
-  background: #f8f9fa;
-  border-radius: 6px;
-  border: 1px solid #e4e7ed;
-}
-
-.main-row {
-  margin-bottom: 16px;
-}
-
-.left-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.right-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
 .top-bar {
   display: flex;
   gap: 12px;
