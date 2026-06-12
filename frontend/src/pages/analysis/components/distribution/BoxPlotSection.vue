@@ -1,9 +1,10 @@
 <!-- frontend/src/pages/analysis/components/distribution/BoxPlotSection.vue -->
 <template>
   <AnalysisTabLayout :loading="loading">
-    <!-- 工具栏：散点叠加开关 -->
+    <!-- 工具栏 -->
     <template #toolbar>
-      <el-switch v-model="showJitter" size="small" active-text="显示散点叠加" />
+      <el-switch v-model="ignoreNoLimit" size="small" active-text="Ignore No Limit" />
+      <el-switch v-model="showJitter" size="small" active-text="显示散点叠加" style="margin-left: 12px" />
     </template>
 
     <!-- 左侧面板：参数选择 + 统计表格 -->
@@ -44,15 +45,22 @@ import StatsSummary from '../StatsSummary.vue'
 import BoxPlotChart from '../BoxPlotChart.vue'
 import BoxPlotStatsTable from './BoxPlotStatsTable.vue'
 import { useBoxPlot } from '../../composables/useBoxPlot'
+import { useAnalysisStore } from '../../../../stores/analysis'
 
 const props = defineProps<{
   fileId: number | null
   availableParams: string[]
 }>()
 
+const analysisStore = useAnalysisStore()
+
 const localSelectedParam = ref('')
 const groupBy = ref('site') // 固定按 Site 分组
 const showJitter = ref(false)
+const ignoreNoLimit = ref(analysisStore.ignoreNoLimit)
+
+// Sync ignoreNoLimit to store (triggers parent re-fetch)
+watch(ignoreNoLimit, (val) => { analysisStore.ignoreNoLimit = val })
 
 const { loading, boxPlotData, stats } = useBoxPlot(
   () => props.fileId,

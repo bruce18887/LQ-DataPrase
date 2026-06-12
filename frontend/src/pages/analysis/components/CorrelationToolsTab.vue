@@ -7,6 +7,7 @@
         <el-radio-button value="scatter">散点图</el-radio-button>
         <el-radio-button value="matrix">相关性矩阵</el-radio-button>
       </el-radio-group>
+      <el-switch v-model="ignoreNoLimit" size="small" active-text="Ignore No Limit" style="margin-left: 12px" />
     </template>
 
     <!-- 左侧面板 -->
@@ -75,12 +76,18 @@
       <!-- 矩阵模式 -->
       <template v-if="viewMode === 'matrix'">
         <el-card shadow="hover" :body-style="{ padding: '12px' }">
-          <label class="section-label">选择参数（可多选）</label>
+          <div class="matrix-param-header">
+            <label class="section-label">选择参数（已选 {{ selectedMatrixParams.length }}/{{ params.length }}）</label>
+            <div class="matrix-param-actions">
+              <el-button link type="primary" size="small" @click="selectedMatrixParams = [...params]">全选</el-button>
+              <el-button link type="primary" size="small" @click="selectedMatrixParams = []">清空</el-button>
+            </div>
+          </div>
           <el-select
             v-model="selectedMatrixParams"
             multiple
             filterable
-            placeholder="默认全选"
+            placeholder="选择参数"
             style="width: 100%"
           >
             <el-option v-for="p in params" :key="p" :label="p" :value="p" />
@@ -90,10 +97,11 @@
           type="primary"
           size="small"
           :loading="matrixLoading"
+          :disabled="selectedMatrixParams.length < 2"
           style="width: 100%"
           @click="onCalculateMatrix"
         >
-          计算相关性矩阵
+          计算相关性矩阵（{{ selectedMatrixParams.length }} 项）
         </el-button>
       </template>
     </template>
@@ -144,16 +152,20 @@ import { useCorrelation } from '../composables/useCorrelation'
 import { useCorrelationMatrix } from '../composables/useCorrelationMatrix'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
+import { useAnalysisStore } from '../../../stores/analysis'
 
 const props = defineProps<{
   fileId: number | null
   params: string[]
 }>()
 
+const analysisStore = useAnalysisStore()
 const { colors } = useEChartsTheme()
 
 // View mode
 const viewMode = ref<'scatter' | 'matrix'>('scatter')
+const ignoreNoLimit = ref(analysisStore.ignoreNoLimit)
+watch(ignoreNoLimit, (val) => { analysisStore.ignoreNoLimit = val })
 
 // ===== Scatter mode =====
 const localX = ref('')
@@ -474,5 +486,21 @@ const { chartRef: matrixChartRef } = useChart(buildMatrixOption, [() => matrixDa
 
 :deep(.el-collapse-item__content) {
   padding: 8px 0 0 0;
+}
+
+.matrix-param-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.matrix-param-header .section-label {
+  margin-bottom: 0;
+}
+
+.matrix-param-actions {
+  display: flex;
+  gap: 4px;
 }
 </style>
