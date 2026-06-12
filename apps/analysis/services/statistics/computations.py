@@ -152,18 +152,19 @@ def compute_correlation_matrix(df: pd.DataFrame, params: List[str], method: str 
     # Round values to 4 decimal places
     matrix_list = [[round(val, 4) if not math.isnan(val) else 0.0 for val in row] for row in matrix_list]
 
-    # Compute p-value matrix
-    n = len(valid_params)
-    p_matrix = np.ones((n, n))
-    for i in range(n):
-        for j in range(i + 1, n):
-            try:
-                _, p_val = sp_stats.pearsonr(df_clean.iloc[:, i], df_clean.iloc[:, j])
-                p_matrix[i, j] = p_val
-                p_matrix[j, i] = p_val
-            except Exception:
-                pass
-    p_matrix_list = [[round(val, 6) for val in row] for row in p_matrix.tolist()]
+    # Compute p-value matrix (vectorized from correlation coefficients)
+    n_obs = len(df_clean)
+    r_values = corr_matrix.values
+    n_params = len(valid_params)
+    if n_obs > 2:
+        with np.errstate(divide='ignore', invalid='ignore'):
+            t_values = r_values * np.sqrt((n_obs - 2) / (1 - r_values ** 2))
+        p_values = 2 * (1 - sp_stats.t.cdf(np.abs(t_values), df=n_obs - 2))
+        np.fill_diagonal(p_values, 1.0)
+        p_values = np.nan_to_num(p_values, nan=1.0, posinf=1.0, neginf=1.0)
+    else:
+        p_values = np.ones((n_params, n_params))
+    p_matrix_list = [[round(val, 6) for val in row] for row in p_values.tolist()]
 
     return {
         'params': valid_params,

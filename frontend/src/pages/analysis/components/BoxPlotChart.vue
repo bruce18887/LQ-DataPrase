@@ -19,6 +19,8 @@ const props = withDefaults(defineProps<{ data: BoxPlotData | null; title?: strin
 })
 const { colors } = useEChartsTheme()
 
+const BOX_COLORS = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc', '#5383e0']
+
 function buildOption() {
   if (!props.data) return {}
   const tc = colors.value.textColor
@@ -30,6 +32,8 @@ function buildOption() {
   let boxData: number[][] = []
   let outlierData: number[][] = []
   let jitterSeries: any[] = []
+  // Track non-outlier range for Y-axis
+  let yMin = Infinity, yMax = -Infinity
 
   if (hasGroupedData) {
     categories = Object.keys(groupedData).sort((a, b) => {
@@ -41,8 +45,9 @@ function buildOption() {
       const stats = groupedData[group]
       boxData.push([stats.min, stats.q1, stats.median, stats.q3, stats.max])
       stats.outliers.forEach(o => outlierData.push([idx, o]))
+      yMin = Math.min(yMin, stats.min)
+      yMax = Math.max(yMax, stats.max)
 
-      // Jitter overlay
       if (props.showJitter && stats.raw_values && stats.raw_values.length > 0) {
         const jittered = stats.raw_values.map((v: number) => [
           idx + (Math.random() - 0.5) * 0.3,
@@ -53,7 +58,7 @@ function buildOption() {
           type: 'scatter',
           data: jittered,
           symbolSize: 3,
-          itemStyle: { color: '#73c0de', opacity: 0.35 },
+          itemStyle: { color: BOX_COLORS[idx % BOX_COLORS.length], opacity: 0.25 },
           silent: true,
         })
       }
@@ -62,8 +67,9 @@ function buildOption() {
     categories = [props.data.param]
     boxData.push([overall.min, overall.q1, overall.median, overall.q3, overall.max])
     overall.outliers.forEach(o => outlierData.push([0, o]))
+    yMin = overall.min
+    yMax = overall.max
 
-    // Jitter overlay for single category
     if (props.showJitter && overall.raw_values && overall.raw_values.length > 0) {
       const jittered = overall.raw_values.map((v: number) => [
         (Math.random() - 0.5) * 0.3,
@@ -74,50 +80,81 @@ function buildOption() {
         type: 'scatter',
         data: jittered,
         symbolSize: 3,
-        itemStyle: { color: '#73c0de', opacity: 0.35 },
+        itemStyle: { color: '#5470c6', opacity: 0.25 },
         silent: true,
       })
     }
   }
 
-  // Q1/Q3 markPoint annotations
-  const markPointData: any[] = []
-  boxData.forEach((d, idx) => {
-    markPointData.push(
-      { coord: [idx, d[1]], value: `Q1:${d[1].toFixed(4)}`, symbol: 'none', label: { show: true, position: 'left', fontSize: 10, color: tc } },
-      { coord: [idx, d[3]], value: `Q3:${d[3].toFixed(4)}`, symbol: 'none', label: { show: true, position: 'left', fontSize: 10, color: tc } },
-    )
-  })
+  // Y-axis padding: 10% margin on each side of non-outlier range
+  const yRange = yMax - yMin
+  const yPad = yRange > 0 ? yRange * 0.1 : Math.abs(yMax) * 0.1 || 1
+  const yAxisMin = yMin - yPad
+  const yAxisMax = yMax + yPad
 
   const fmt = (v: number) => v.toFixed(4)
-  return {
-    title: { text: props.title || `Box Plot - ${props.data.param}`, left: 'center', textStyle: { fontSize: 16, fontWeight: 'bold', color: tc } },
-    tooltip: {
-      trigger: 'item', axisPointer: { type: 'shadow' },
-      formatter: (params: any) => {
-        if (params.seriesName === 'Outliers' || params.seriesName.includes('数据点')) return `数值: ${params.value[1].toFixed(4)}`
-        const d = params.value
-        return `<strong>${params.name}</strong><br/>Max: ${fmt(d[5])}<br/>Q3: ${fmt(d[4])}<br/>Median: ${fmt(d[3])}<br/>Q1: ${fmt(d[2])}<br/>Min: ${fmt(d[1])}`
+
+  // Boxplot series per category (colored individually)
+  const boxSeries = categories.map((cat, idx) => ({
+    name: cat,
+    type: 'boxplot',
+    data: [boxData[idx]],
+    itemStyle: {
+      color: BOX_COLORS[idx % BOX_COLORS.length] + '30',
+      borderColor: BOX_COLORS[idx % BOX_COLORS.length],
+      borderWidth: 2,
+    },
+    emphasis: {
+      itemStyle: {
+        color: BOX_COLORS[idx % BOX_COLORS.length] + '50',
+        borderColor: BOX_COLORS[idx % BOX_COLORS.length],
+        borderWidth: 3,
       },
     },
-    grid: { left: '10%', right: '10%', bottom: '15%', containLabel: true },
+    tooltip: {
+      formatter: (p: any) => {
+        const d = p.data
+        return `<strong>${p.name}</strong><br/>` +
+          `<span style="color:${BOX_COLORS[idx % BOX_COLORS.length]}">■</span> Max: ${fmt(d[4])}<br/>` +
+          `<span style="color:${BOX_COLORS[idx % BOX_COLORS.length]}">■</span> Q3: ${fmt(d[3])}<br/>` +
+          `<span style="color:${BOX_COLORS[idx % BOX_COLORS.length]}">■</span> Median: ${fmt(d[2])}<br/>` +
+          `<span style="color:${BOX_COLORS[idx % BOX_COLORS.length]}">■</span> Q1: ${fmt(d[1])}<br/>` +
+          `<span style="color:${BOX_COLORS[idx % BOX_COLORS.length]}">■</span> Min: ${fmt(d[0])}`
+      },
+    },
+  }))
+
+  return {
+    title: {
+      text: props.title || `Box Plot - ${props.data.param}`,
+      left: 'center',
+      textStyle: { fontSize: 15, fontWeight: '600', color: tc },
+    },
+    tooltip: { trigger: 'item', axisPointer: { type: 'shadow' } },
+    grid: { left: '8%', right: '8%', bottom: '12%', top: '12%', containLabel: true },
     xAxis: {
-      type: 'category', data: categories, boundaryGap: true, nameGap: 30, splitArea: { show: false },
-      axisLabel: { rotate: categories.length > 10 ? 45 : 0, interval: 0, fontSize: 10, color: tc },
+      type: 'category', data: categories, boundaryGap: true, nameGap: 30,
+      splitArea: { show: false },
+      axisLine: { lineStyle: { color: tc } },
+      axisLabel: { rotate: categories.length > 10 ? 45 : 0, interval: 0, fontSize: 11, color: tc, fontWeight: 500 },
       splitLine: { show: false },
     },
-    yAxis: { type: 'value', name: 'Value', nameTextStyle: { color: tc }, axisLabel: { color: tc }, splitArea: { show: true } },
+    yAxis: {
+      type: 'value', name: 'Value',
+      min: yAxisMin, max: yAxisMax,
+      nameTextStyle: { color: tc, fontSize: 12, fontWeight: 500 },
+      axisLabel: { color: tc, fontSize: 11 },
+      splitLine: { lineStyle: { type: 'dashed', color: tc + '20' } },
+      splitArea: { show: false },
+    },
     series: [
+      ...boxSeries,
       {
-        name: 'Box Plot', type: 'boxplot', data: boxData,
-        itemStyle: { color: '#5470C6', borderColor: tc },
-        markPoint: { data: markPointData, animation: false },
-        tooltip: {
-          formatter: (p: any) =>
-            `<strong>${p.name}</strong><br/>Max: ${fmt(p.data[4])}<br/>Q3: ${fmt(p.data[3])}<br/>Median: ${fmt(p.data[2])}<br/>Q1: ${fmt(p.data[1])}<br/>Min: ${fmt(p.data[0])}`,
-        },
+        name: 'Outliers', type: 'scatter', data: outlierData,
+        itemStyle: { color: '#EE6666', borderColor: '#EE6666', opacity: 0.8 },
+        symbolSize: 7, symbol: 'circle',
+        tooltip: { formatter: (p: any) => `异常值: ${p.value[1].toFixed(4)}` },
       },
-      { name: 'Outliers', type: 'scatter', data: outlierData, itemStyle: { color: '#EE6666' }, symbolSize: 6 },
       ...jitterSeries,
     ],
   }

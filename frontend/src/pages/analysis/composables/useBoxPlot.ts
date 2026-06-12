@@ -8,7 +8,6 @@ export function useBoxPlot(
   groupBy: Ref<string>
 ) {
   const { loading, data: boxPlotData, run } = useAsyncData<any>({
-    successMsg: '箱线图数据加载成功',
     errorMsg: '加载箱线图数据失败',
   })
 
