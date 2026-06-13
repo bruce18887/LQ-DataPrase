@@ -602,6 +602,9 @@ def compute_serial_distribution_data(df, metadata, param, range_type,
 
     site_col = get_site_column(df)
 
+    # Deduplicate columns to prevent DataFrame-vs-Series issues
+    df = df.loc[:, ~df.columns.duplicated()]
+
     # -- Build grouped data (with / without site) -------------------------
     if site_col:
         sws = df[[serial_col, site_col, param]].copy()
