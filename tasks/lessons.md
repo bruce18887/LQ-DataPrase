@@ -292,23 +292,80 @@
 - **Rule**: 需求是"输入+下拉选择"时，优先用 `el-select + filterable`，不要用 `el-autocomplete`（后者只提供联想，不提供 select 体验）。纯标签输入场景可以用原生 input + 自定义下拉（更轻量）。
 - **Rule**: 标签联想的下拉建议要用 `@mousedown.prevent` 而非 `@click`，否则 blur 事件先触发导致输入框关闭，建议项点击无效。
 
-## QQ ͼ null r_squared ���� Vue �첽������debug-qqplot-sw-bin-bug��
+## QQ 图 null r_squared 引发 Vue 异步渲染 (debug-qqplot-sw-bin-bug)
 
-- **Bug**: QQPlotStatsTable.vue:32 д props.result.r_squared.toFixed(4)���Ժ�� JSON ��� 
-ull �� .toFixed() �� TypeError: Cannot read properties of null (reading 'toFixed')������ͬ������ Vue ��Ⱦ�������Ⱦ patch ����ͬʱ�� QQPlotChart �� -else �ջ��� chart container��prevVNode.component ��û���� �� �û�����������һ���޹���ͬ�� Cannot read properties of null (reading 'emitsOptions')������**������ stats table ���� chart**��
-- **��������**: SW_Bin �� soft-bin �����У�gage_m_S4.csv 100 ��ȫ 1.0����scipy.stats.probplot �� y ȫͬʱ���� NaN r �� DRF ���л��� 
-ull��
-- **Rule 1 �� JSON ���л��� NaN = null**����� scipy / 
-umpy / pandas ����� NaN �� DRF ���л��� JSON 
-ull��ǰ������"չʾ��"�� .toFixed() / .toLocaleString() ��**����**�� Number.isFinite ������
-  `	ypescript
+- **Bug**: 「QQPlotStatsTable.vue:32」直接对 `props.result.r_squared.toFixed(4)`。后端传过来的 JSON 中 `r_squared` 为 `null`，调用 `null.toFixed()` 抛 `TypeError: Cannot read properties of null (reading "toFixed")`。与此同时的还有 Vue 渲染错误信号 ` Cannot read properties of null (reading "emitsOptions")`，该错误是同一个 实例 在多个代理事件同步入队后渲染中的二次代理雪崩产生的广义 patch failure，原始代理事件是 `toFixed(null)`。
+
+- **根因**：`SW_Bin` 是 soft-bin 分类列，在 `gage_m_S4.csv` 中所有 100 行的值都是 `1.0`（软分类 `pass=1`）。后端 `compute_qqplot` 调 `scipy.stats.probplot(clean, dist="norm")` 时因 y 全同值计算的相关系数 r 为 NaN，DRF 序列化后 JSON 中变成 `null`。
+
+- **Rule 1 — JSON 序列化 NaN = null**：后端计算走 scipy / numpy / pandas 产生 NaN 时 DRF 默认序列化为 JSON `null`。前端取到任何可能为 null 的数字字段时，`.toFixed()` / `.toLocaleString()` 都应先 `Number.isFinite()` 护。
+
+  ```typescript
   const r2 = result.r_squared
   const text = typeof r2 === 'number' && Number.isFinite(r2) ? r2.toFixed(4) : 'N/A'
-  `
-- **Rule 2 �� TypeScript 
-umber ��������ʱ��ȫ**��interface { r_squared: number } �����ڲ��ܾ� 
-ull������ʱ .toFixed() �ر���ģʽ���������Ժ�� JSON ����ֵ�ֶ������� 
-umber | null����Ⱦ�� 	ypeof === 'number' && Number.isFinite(x) ������
-- **Rule 3 �� �û������"emitsOptions null"�Ǵμ�֢״**��ͬһʱ�� Vue �첽 patch �����������ö������һ��ðͷ��**��ץ pageerror �������׵��Ǹ�**���� page.on('pageerror') ��ȡ err.stack ������ջ������˳���Ҹ��򣻲�Ҫ��"��һ�λỰ�޹���ͬ��֢״"�󵼡�
-- **Rule 4 �� �ع���Ա��븲��"������"����**��gage-qqbox-repro.spec.ts ��һ��ֻ�� 5 ��"��"������PWM_Hz_IQ_VIN_12V ������������û���� soft-bin / ��ɢ / ȫֵͬ·��������û���ѡ SW_Bin ����ä�㡣**�ع�����׼�Ҫ��������һ��"ȫֵͬ / NaN / ��ɢ"����**����sw-bin-qqplot-repro.spec.ts �Ѽ��롣
-- **Rule 5 �� ���� instrumentation �� import ˳��**��__dbgState = computed(() => props.xxx) ������ props.xxx���� <script setup> �� defineProps ��ûִ�С������� defineProps �ٶ������� props �� computed / watch��instrumentation ��ҪǶ�� defineProps ֮��
+  ```
+
+- **Rule 2 — TypeScript interface 要先容错**：定义 props 类型时 不要写 `interface { r_squared: number }`。数据字段在后端会变 null，代码约束会隐藏问题。应写 `number | null`，渲染时叠加 `typeof === "number" && Number.isFinite(x)` 两重检查。
+
+- **Rule 3 — "emitsOptions null" 是二次代理例现"**：上报代理事件只是 patch 阶段的多组件代理问题雪崩的错误信号之一。需拼 pageerror 输出里面错误位置远越 "emitsOptions" 本上的代理事件。不要被错误位置误导为"是另一个独立 bug"。
+
+- **Rule 4 — 回归测试要覆盖“脆弱”数据路径**：`gage-qqbox-repro.spec.ts` 之前只选 5 个“好”参数（如 `PWM_Hz_IQ_VIN_12V`），未覆盖 `SW_Bin` 这类常量列。回归测试套件需要包含至少一个“全同值 / NaN / 离散”用例，如 `sw-bin-qqplot-repro.spec.ts`。
+
+- **Rule 5 — 加 instrumentation 注意 import 顺序**：`__dbgState = computed(() => props.xxx)` 引用了 `props.xxx`，但 `<script setup>` 里 `defineProps` 还未执行。要在 `defineProps` 之后再定义引用 props 的 computed / watch。
+
+## pd.to_numeric(bool) 不转 dtype + abs('str') 崩 — compute_boxplot_stats 容错（2026-06-13）
+
+- **Bug**: `apps/analysis/services/statistics/computations.py:compute_boxplot_stats` 接到 `Dut_Pass`（bool Series）或 `Site #`（str Series）就崩。两条崩路径：
+  1. **bool**：`pd.to_numeric(s, errors='coerce')` 对 bool Series **不**改 dtype（实测仍是 `bool`），`clean_data.quantile(0.25)` 返 `np.bool_`，`q3 - q1` 时 numpy 抛 `TypeError: numpy boolean subtract, the - operator, is not supported, use the bitwise_xor, the ^ operator, or the logical_xor function instead`。
+  2. **str**：`clean_data.apply(lambda x: abs(x) < float('inf'))` 在 string 上抛 `TypeError: bad operand type for abs(): 'str'`。
+- **触发面**：histogram 视图用 `dtype in ('int64', 'float64')` 严格过滤（`Dut_Pass` / `Site #` 都不在下拉里），**UI 上用户选不到**。但 boxplot 视图的 `_sanitize_numeric_params` 用 `is_numeric_dtype`，bool 返回 True → 直连 API 调 `/statistics/boxplot/?params=Dut_Pass` 就崩。
+- **复现验证**（`tasks/check_sampledata_null_r2.py`）：
+  - **98 个 bp_issues**（72× boolean / 26× string）跨所有 11 个 sample data 文件
+  - ETS88 文件 `BPD93204_FT1_ETS163550_12252024.csv` 不命中（它没有 `Dut_Pass` bool 列）；gage_m_S4 / R2601070008 / DA35_BPC50338 / Buyoff 三件套全中
+- **Fix（最小改动 scope）**：[computations.py:199-209](file:///c:/Users/Administrator/Desktop/DataPrase/LQ-DataPrase/apps/analysis/services/statistics/computations.py#L199-L209) 在入口处：
+  ```python
+  coerced = pd.to_numeric(data, errors='coerce').astype(float)  # 强制 float，bool->0.0/1.0
+  clean_data = coerced.dropna()
+  clean_data = clean_data[np.isfinite(clean_data)]              # 向量化替代 abs(x) < inf
+  ```
+  - `.astype(float)` 是关键——`pd.to_numeric` 单独不够，bool Series 不会被它改 dtype
+  - `np.isfinite(clean_data)` 同时挡 inf 和 nan，且在 str 上不会崩（coerce 阶段已经转 NaN）
+- **回归测试**：
+  - **Django 单元** [apps/analysis/tests.py:BoxPlotStatsDtypeToleranceTests](file:///c:/Users/Administrator/Desktop/DataPrase/LQ-DataPrase/apps/analysis/tests.py#L200-L268) — 5 用例：boolean / string / pure-string / 纯 bool 常量 / 正常数值；不依赖 DB
+  - **e2e** [frontend/e2e/analysis/boxplot-bool-params.spec.ts](file:///c:/Users/Administrator/Desktop/DataPrase/LQ-DataPrase/frontend/e2e/analysis/boxplot-bool-params.spec.ts) — 直连 `GET /api/v1/statistics/boxplot/?params=Dut_Pass` 断言 200 + overall.count=100 + min=0/max=1；`params=Site #` 断言 400 no_valid_params（不是 500）
+  - **回归扫描**：`tasks/check_sampledata_null_r2.py` 复跑后 `bp_issues = 0` ✓
+- **Rule 1**：任何 pandas 数值计算前做 `pd.to_numeric(...).astype(float)` 而不是只 `pd.to_numeric(...).errors='coerce'`，**bool 必须显式 astype(float)**，否则 dtype 保留崩后续。
+- **Rule 2**：过滤 inf / nan 用 `np.isfinite(clean_data)` 向量化，**不要**写 `clean_data.apply(lambda x: abs(x) < float('inf'))`——abs 在 string 上崩，apply 也比向量化慢 10x+。
+- **Rule 3**："前端过滤了某个 dtype → 后端不用管"是错误假设。**任何接 Series 的 service 函数都要容错所有 dtype**（bool / str / object / category），因为：1) 视图层过滤规则可能漂移；2) 直连 API / 脚本 / 后续 caller 可能绕过；3) validation 脚本必然直接调 service。
+- **Rule 4**：写新 stats service 之前**先扫一遍 sample data 里所有 dtype 分布**——`df.dtypes.value_counts()` 一行就能看到有没有 bool / object 漏网，比靠经验猜全面。
+- **Rule 5**：复跑诊断脚本确认 `bp_issues` 归零是验证修复的硬标准。光看"我自己写的小测试过了"不够——可能只是测试用例没覆盖到。
+
+## Pinia store 持久化导致 stale selectedParam 跨文件泄漏（2026-06-13）
+
+- **Bug**: 用户在 `gage_m_S4.csv`（file_id=14518）选了 `R_Kelvin_AGND` 作为单参数分析的目标测试项；切到 `BPD93204_FT1_ETS163550_12252024.csv`（file_id=14514，ETS88 格式，无此列）后，三个分析 API 同时报错：
+  - `POST /api/v1/analysis/qqplot/` 400
+  - `GET  /api/v1/statistics/boxplot/?params=R_Kelvin_AGND&group_by=site` 400
+  - `POST /api/v1/analysis/histogram/` **500**（KeyError）
+- **根因（前端 + 后端共谋）**：
+  1. `analysisStore.selectedParam` 在 Pinia 里被持久化（用户上次选的 param 跨页面刷新仍存）。`AnalysisPage.onFileChange` 只重新加载 `params` 列表，**没有重置** `selectedParam` / 持久化值。
+  2. `SingleParamTab.vue` 的 `watch(() => props.fileId)` 也只清空 `localSelectedParam`，但在父组件传 `selected-param` 之前已经先于 prop update 触发 → 竞态下仍可能带旧值发请求。
+  3. 后端 `histogram` 视图循环里 `df[param]` 不在白名单就 500；`qqplot` / `boxplot` 视图有 `param not in df.columns` 守卫返回 400。结果是同一根因出三种 status code——诊断时极易把 400 误判为「qqplot 自己有 bug」而漏掉真正的 stale param 主线。
+- **修复（双层防御）**：
+  1. **前端主修** — `AnalysisPage.onFileChange` 开头先 `params.value=[] / selectedParam.value='' / analysisStore.selectedParam=''`，再异步加载新文件参数（用第一个自动选中）。
+  2. **前端兜底** — `SingleParamTab` 增 `watch(() => props.fileId, () => { localSelectedParam.value = ''; if (showQQPlot.value) loadQQPlot() })`，防止父组件传参竞态。
+  3. **后端兜底** — `histogram` / `boxplot` / `qqplot` 视图在循环前 `valid_params = [p for p in params if p in df.columns]`；空集返回 400 `{error: 'no_valid_params', detail, requested, missing}` 而不是 500。
+- **关键陷阱 1（watch + v-model:selectedParam 双绑）**：`SingleParamTab` 用 `defineProps(['selectedParam'])` + `defineEmits(['update:selectedParam'])` 透传父组件 v-model。子组件 `watch(props.fileId)` 清的是自己 `localSelectedParam`，但**父组件绑的 `selectedParam` ref 仍带旧值**——必须从源头（`AnalysisPage`）清，否则 `v-model` 双向同步又把 stale 值推回来。
+- **关键陷阱 2（DRF test 客户端未 force_authenticate → 401）**：用 `APIRequestFactory` + 简单 `request.user = SimpleNamespace(...)` 调 view，DRF 的 `IsAuthenticated` 仍会拦截（permission 类检查的是 `request._auth` 而不是 `request.user`），视图永远 401。**必须** `from rest_framework.test import force_authenticate; force_authenticate(request, user=SimpleNamespace(pk=1, is_authenticated=True, is_active=True, is_anonymous=False, is_staff=False, is_superuser=False))`。`is_authenticated` 必须为 True 才能绕过。
+- **关键陷阱 3（mock DataFile 缺字段）**：测试 view 时 `datafile = types.SimpleNamespace(id=1, filename='x')` 是常见模式，但 `AnalysisViewSet.histogram` 里读 `datafile.format_type` 直接 AttributeError。**Rule**: mock datafile 时把 model 必读字段全列出来（`id, filename, format_type`），不要只放当前用例需要的。
+- **回归测试**（`apps/analysis/tests.py:StaleParamAcrossFileSwitchTests` 4 用例）：
+  - `test_histogram_view_returns_400_for_unknown_param` — 全 bogus param → 400 + `error: no_valid_params` + `missing: [__bogus__]` + `requested: [__bogus__]`
+  - `test_histogram_view_drops_partial_unknown_params` — 混合 param → 200，bogus 被丢、real 进 results（防「over-eager 守卫误伤合法 param」）
+  - `test_qqplot_view_returns_param_not_found_for_unknown_param` — POST qqplot bogus → 400 `param_not_found`
+  - `test_boxplot_view_returns_400_for_unknown_param` — GET boxplot bogus → 400 `no_valid_params` + `missing: [__bogus__]`
+- **e2e 测试**（`frontend/e2e/analysis/file-switch-param-reset.spec.ts`）：gage → ETS88 切文件，断言新文件首参 ≠ 旧文件首参 + 无 4xx/5xx 命中分析 API。
+- **Rule 1**：任何持久化到 Pinia / localStorage / Vuex 的"用户上次选择"（selectedFileId / selectedParam / selectedTab），**在文件/数据上下文切换时必须显式重置**。父组件 `onFileChange` / `onProjectChange` 入口处先 `state.value='' / store.value='' / analysisStore.x=''` 三件套清空，再异步加载新上下文。
+- **Rule 2**：跨多个相似端点（histogram / qqplot / boxplot）的"按 param 取列"操作，**守卫必须对齐**——一个有 `param in df.columns` 检查、另一个没有，就是状态码雪崩的根因。Code review 时 grep `if .* not in df.columns` 对比各 view 即可秒发现。
+- **Rule 3**：DRF view 单测想绕过 auth，**必须** `force_authenticate`（`rest_framework.test`），不能 `request.user = SimpleNamespace(...)`——后者只设了 user 属性，没改 `request._auth` / `request.successful_authenticator`，`IsAuthenticated` 仍拒。
+- **Rule 4**：mock DataFile / ORM 对象给视图用时，**第一步**先 grep view 里所有 `datafile.xxx` 引用，把必需字段列全（id / filename / format_type 是最低配），否则测试会因「业务逻辑改了但 mock 没改」间歇性挂。
+- **Rule 5**：「跨上下文状态泄漏」类 bug 必须**双层防御**——前端清状态 + 后端 validation。光前端清不够（用户多 tab / 深链接 / 旧版缓存都可能绕过）；光后端 validation 不够（用户看到 400 时已经疑惑「我刚才明明选对了」）。两层都在，重建到中间状态的路径都能被截。
+

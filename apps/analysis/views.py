@@ -3,6 +3,7 @@ import math
 import os
 
 import pandas as pd
+
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -168,12 +169,37 @@ class AnalysisViewSet(viewsets.GenericViewSet):
 
         results = {}
         site_col = get_site_column(df)
+        # Guard: drop requested params that don't exist in this file's
+        # DataFrame. The frontend param selector is built from the same
+        # /analysis/histogram/ fast path, but a stale `selectedParam` from
+        # a previous file can still be sent across (e.g. switching from
+        # `gage_m_S4.csv` → `BPD93204_FT1_ETS163550_12252024.csv` after
+        # picking `R_Kelvin_AGND`). Returning 400 with a structured
+        # payload lets the front end render a clear "param not in file"
+        # message instead of a 500 from `df[param]` KeyError inside
+        # `compute_histogram_stats`.
+        valid_params = [p for p in params if p in df.columns]
+        missing_params = [p for p in params if p not in df.columns]
+        if not valid_params:
+            return Response({
+                'error': 'no_valid_params',
+                'detail': '请求的参数均不在该文件中，请重新选择文件或参数',
+                'requested': params,
+                'missing': missing_params,
+            }, status=400)
+        params = valid_params
         for param in params:
-            result = compute_histogram_stats(
-                df, metadata, param, site_col,
-                range_type=range_type, custom_low=custom_low, custom_high=custom_high)
-            if result is not None:
-                results[param] = result
+            try:
+                result = compute_histogram_stats(
+                    df, metadata, param, site_col,
+                    range_type=range_type, custom_low=custom_low, custom_high=custom_high)
+                if result is not None:
+                    results[param] = result
+            except Exception:
+                # Re-raise so the 500 surfaces for any unexpected internal
+                # error (out-of-memory, division-by-zero, etc.). The
+                # param-not-in-df case is handled above as 400.
+                raise
 
         return Response(clean_data({
             'file_id': datafile.id,
@@ -370,7 +396,10 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         if not param:
             return Response({'error': 'param_required'}, status=400)
         if param not in df.columns:
-            return Response({'error': 'param_not_found'}, status=400)
+            return Response({
+                'error': 'param_not_found',
+                'detail': f'参数 {param!r} 不在该文件中',
+            }, status=400)
 
         data_series = get_1d_from(df, param)
         if isinstance(data_series, pd.DataFrame):
@@ -600,9 +629,20 @@ class StatisticsViewSet(viewsets.GenericViewSet):
             return Response({'error': 'params_required'}, status=400)
 
         # Filter out invalid params (blank, all-NaN, non-numeric)
+        requested_params = list(params)
         params = _sanitize_numeric_params(df, params)
         if not params:
-            return Response({'error': 'no_valid_params'}, status=400)
+            # Surface the requested-but-missing list so the front end can
+            # show a clear "param not in file" message (e.g. stale
+            # `R_Kelvin_AGND` after switching from gage_m_S4.csv to an
+            # ETS88 file). Mirrors the same shape as the histogram 400.
+            missing = [p for p in requested_params if p and str(p).strip() and p not in df.columns]
+            return Response({
+                'error': 'no_valid_params',
+                'detail': '请求的参数均不在该文件中，请重新选择文件或参数',
+                'requested': requested_params,
+                'missing': missing,
+            }, status=400)
 
         results = {}
 

@@ -271,7 +271,12 @@ watch(localSelectedParam, () => {
   }
 })
 
+// When the file changes, the parent component is responsible for resetting
+// the selectedParam (see AnalysisPage.onFileChange). This watcher is a
+// defense-in-depth fallback: if a parent path forgets to reset it, we
+// don't carry the stale value into the new file's chart APIs.
 watch(() => props.fileId, () => {
+  localSelectedParam.value = ''
   if (showQQPlot.value) {
     loadQQPlot()
   }

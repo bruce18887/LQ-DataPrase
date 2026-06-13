@@ -196,9 +196,17 @@ def compute_boxplot_stats(data: pd.Series) -> Dict[str, Any]:
             'count': 0
         }
 
-    # Remove NaN and infinite values
-    clean_data = data.dropna()
-    clean_data = clean_data[clean_data.apply(lambda x: abs(x) < float('inf'))]
+    # Coerce to float up-front so boolean Series (e.g. Dut_Pass / PASSFG) and
+    # string-coercible columns don't trip the bool/string pitfalls below:
+    #   - pd.to_numeric on a bool Series returns the SAME bool Series (no dtype
+    #     change), so .quantile() later tries `bool - bool` and raises
+    #     "numpy boolean subtract, the `-` operator, is not supported".
+    #   - abs('str') raises "bad operand type for abs(): 'str'".
+    # Errors='coerce' turns unparseable strings into NaN; .astype(float) is
+    # the explicit step that flips bool to float (0.0/1.0).
+    coerced = pd.to_numeric(data, errors='coerce').astype(float)
+    clean_data = coerced.dropna()
+    clean_data = clean_data[np.isfinite(clean_data)]
 
     if len(clean_data) == 0:
         return {

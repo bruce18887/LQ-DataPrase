@@ -122,11 +122,17 @@ watch(() => analysisStore.ignoreNoLimit, () => { onFileChange() })
 async function onFileChange() {
   if (!selectedFileId.value) return
   loading.value = true
-  // Reset stale param list so the old file's params don't linger while
-  // the new file is loading. Otherwise the param dropdown keeps showing
-  // the previous selection and the user has no clue the file actually
-  // changed.
+  // Reset stale state so the previous file's params (which may not exist
+  // in the new file) don't linger. Without this, a `R_Kelvin_AGND` selected
+  // on `gage_m_S4.csv` would still be sent to /analysis/{qqplot,histogram}/
+  // and /statistics/boxplot/ after switching to an ETS88 file that has no
+  // such column — causing simultaneous 400 (qqplot/boxplot: param_not_found
+  // / no_valid_params) and 500 (histogram: KeyError) responses.
   params.value = []
+  selectedParam.value = ''
+  // Also clear the persisted store value so a remount of the page
+  // (e.g. navigating away and back) does not restore the stale param.
+  analysisStore.selectedParam = ''
   try {
     const { data } = await api.post('/analysis/histogram/', {
       file_id: selectedFileId.value,
@@ -138,7 +144,7 @@ async function onFileChange() {
     // selector never offers a 400-bound empty option that breaks the QQ plot
     // and other endpoints doing `if param not in df.columns`.
     params.value = Object.keys(results || {}).filter((p) => p && p.trim() !== '')
-    if (params.value.length > 0 && (!selectedParam.value || !params.value.includes(selectedParam.value))) {
+    if (params.value.length > 0) {
       selectedParam.value = params.value[0]
     }
   } catch (err: any) {
