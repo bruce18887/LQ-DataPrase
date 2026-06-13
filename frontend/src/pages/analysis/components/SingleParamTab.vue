@@ -100,7 +100,8 @@
       </div>
       <!-- 图表：serial 模式或无数据时 -->
       <div v-else-if="chartMode === 'serial'" class="chart-wrapper">
-        <SerialChart :data="serialDistData" />
+        <SerialChart v-if="serialDistData" :data="serialDistData" />
+        <el-empty v-else description="当前参数无序列分布数据，请选择其他参数" />
       </div>
     </template>
   </AnalysisTabLayout>

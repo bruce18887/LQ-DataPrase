@@ -21,6 +21,7 @@ from apps.analysis.services.statistics import (
     compute_range_statistics,
     compute_site_stats,
     get_site_column,
+    get_serial_column,
     get_coord_columns,
     get_columns_with_limits,
     get_1d_from,
@@ -130,9 +131,16 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         ignore_no_limit = str(get_param(request, 'ignore_no_limit', '')).lower() in ('true', '1', 'yes')
 
         if not params:
+            # Exclude serial/site columns — they are metadata, not data params
+            _meta_cols = set()
+            _sc = get_serial_column(df)
+            if _sc: _meta_cols.add(_sc)
+            _stc = get_site_column(df)
+            if _stc: _meta_cols.add(_stc)
             numeric_cols = [c for c in df.columns
                            if df[c].dtype in ('int64', 'float64')
-                           and not df[c].dropna().empty]
+                           and not df[c].dropna().empty
+                           and c not in _meta_cols]
             if ignore_no_limit:
                 params = get_columns_with_limits(df, metadata)
             else:
@@ -300,6 +308,12 @@ class AnalysisViewSet(viewsets.GenericViewSet):
             return Response({'error': 'param_required'}, status=400)
         if param not in df.columns:
             return Response({'error': 'param_not_found'}, status=400)
+        # Reject serial/site columns as data param — they are grouping keys, not values
+        serial_col = get_serial_column(df)
+        site_col = get_site_column(df)
+        if param == serial_col or param == site_col:
+            return Response({'error': 'param_is_metadata',
+                             'detail': f'{param} 是分组列，不能作为数据参数'}, status=400)
         # Validate param has numeric data
         col = get_1d_from(df, param)
         if isinstance(col, pd.DataFrame):
