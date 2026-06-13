@@ -602,6 +602,10 @@ def compute_serial_distribution_data(df, metadata, param, range_type,
 
     site_col = get_site_column(df)
 
+    # param must differ from serial/site columns — they are grouping keys
+    if param == serial_col or param == site_col:
+        return None
+
     # Deduplicate columns to prevent DataFrame-vs-Series issues
     df = df.loc[:, ~df.columns.duplicated()]
 
