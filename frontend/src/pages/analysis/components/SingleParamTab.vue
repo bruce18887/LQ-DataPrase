@@ -82,7 +82,7 @@
             :selected-param="localSelectedParam"
           />
         </div>
-        <div v-if="showQQPlot" class="chart-wrapper chart-wrapper--bottom">
+        <div v-show="showQQPlot" class="chart-wrapper chart-wrapper--bottom">
           <QQPlotChart
             :file-id="props.fileId"
             :param="localSelectedParam"
@@ -91,10 +91,11 @@
             :loading="qqLoading"
           />
         </div>
-        <div v-if="showBoxPlot" class="chart-wrapper chart-wrapper--bottom">
+        <div v-show="showBoxPlot" class="chart-wrapper chart-wrapper--bottom">
           <BoxPlotChart
             :data="currentBoxPlotData"
             :show-jitter="showJitter"
+            :visible="showBoxPlot"
           />
         </div>
       </div>

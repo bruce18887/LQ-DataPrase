@@ -14,8 +14,9 @@ interface BoxPlotData {
   param: string; overall?: BoxPlotStats; by_site?: Record<string, BoxPlotStats>; by_bin?: Record<string, BoxPlotStats>
 }
 
-const props = withDefaults(defineProps<{ data: BoxPlotData | null; title?: string; showJitter?: boolean }>(), {
+const props = withDefaults(defineProps<{ data: BoxPlotData | null; title?: string; showJitter?: boolean; visible?: boolean }>(), {
   showJitter: false,
+  visible: true,
 })
 const { colors } = useEChartsTheme()
 
@@ -172,7 +173,7 @@ function buildOption() {
   }
 }
 
-const { chartRef } = useChart(buildOption, [() => props.data, () => props.title, () => props.showJitter])
+const { chartRef } = useChart(buildOption, [() => props.data, () => props.title, () => props.showJitter, () => props.visible])
 void chartRef // bound to <div ref="chartRef"> in template
 </script>
 
