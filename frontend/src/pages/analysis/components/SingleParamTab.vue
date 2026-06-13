@@ -193,7 +193,8 @@ const {
 } = useBoxPlot(
   () => props.fileId,
   localSelectedParam,
-  groupBy
+  groupBy,
+  showBoxPlot,
 )
 const currentBoxPlotData = computed(() => {
   if (!boxPlotData.value || !localSelectedParam.value) return null
