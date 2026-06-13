@@ -170,7 +170,8 @@ const {
   localSelectedParam,
   chartMode,
   chartConfig,
-  rangeType
+  rangeType,
+  computed(() => props.params),
 )
 
 // Composable: Site Stats
