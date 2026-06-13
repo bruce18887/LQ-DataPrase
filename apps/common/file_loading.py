@@ -47,59 +47,6 @@ def load_user_file(request, file_id=None, *, check_exists=False):
     return df, datafile, metadata
 
 
-def load_user_files(request, file_ids, *, only_bin1=False):
-    """Load multiple files' DataFrames for the current user.
-
-    Parameters
-    ----------
-    request : Request
-        DRF request.
-    file_ids : list[int | str]
-        List of file IDs to load.
-    only_bin1 : bool
-        If True, filter each DataFrame to Bin1-only rows.
-
-    Returns
-    -------
-    list[dict]
-        Each dict has keys: df, metadata, file_id, filename, datafile.
-        Files that fail to load are silently skipped.
-    """
-    results = []
-    for fid in file_ids:
-        try:
-            datafile = get_object_or_404(DataFile, pk=int(fid), owner=request.user)
-            df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk)
-            if df is None:
-                continue
-
-            if only_bin1:
-                df = _apply_bin1_filter(df, datafile)
-
-            results.append({
-                'df': df,
-                'metadata': metadata,
-                'file_id': int(fid),
-                'filename': datafile.filename,
-                'datafile': datafile,
-            })
-        except Exception:
-            continue
-    return results
-
-
-def _apply_bin1_filter(df, datafile):
-    """Filter DataFrame to Bin1-only rows."""
-    from apps.analysis.services.statistics import get_bin_column_name
-    import pandas as pd
-
-    bin_col = get_bin_column_name(datafile.format_type)
-    if bin_col and bin_col in df.columns:
-        bin_numeric = pd.to_numeric(df[bin_col], errors='coerce')
-        return df[bin_numeric == 1].copy()
-    return df
-
-
 class FileLoadError(Exception):
     """Raised when a file cannot be loaded."""
     def __init__(self, error_code):

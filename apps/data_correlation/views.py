@@ -10,7 +10,6 @@ from openpyxl.styles import PatternFill, Font, Alignment
 from django.http import FileResponse
 
 from apps.datafiles.models import DataFile
-from apps.datafiles.parsers import get_parser
 from apps.datafiles.services import get_cached_parsed_file
 from apps.analysis.services.statistics import get_serial_column, get_1d_from
 

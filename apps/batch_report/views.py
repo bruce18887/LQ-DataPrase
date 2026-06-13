@@ -15,7 +15,7 @@ from apps.datafiles.services import get_cached_parsed_file
 from apps.analysis.services.statistics import (
     calculate_fail_bin_statistics, get_site_column,
     get_bin_column_name, compute_site_yield_data, compute_uph,
-    compute_pass_yield, is_pass_bin,
+    compute_pass_yield,
 )
 from apps.batch_report.aggregation import aggregate_bin_site_table, aggregate_uph
 

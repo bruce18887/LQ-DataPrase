@@ -94,46 +94,11 @@ def make_title_style(f):
     ))
 
 
-def make_cpk_fill(f, cpk_val):
-    """Return fill colors list for a CPK value."""
-    if cpk_val >= 1.67:
-        return CPK_A_FILL
-    elif cpk_val >= 1.33:
-        return CPK_B_FILL
-    elif cpk_val >= 1.0:
-        return CPK_C_FILL
-    else:
-        return CPK_D_FILL
-
-
-def make_cpk_style(f, cpk_val):
-    """Create a style with CPK-based fill color."""
-    fill_color = make_cpk_fill(f, cpk_val)
-    return f.new_style(excelize.Style(
-        font=excelize.Font(bold=True, size=10,
-                           color="FFFFFF" if cpk_val < 1.33 else "000000",
-                           family="Calibri"),
-        fill=excelize.Fill(type="pattern", color=fill_color, pattern=1),
-        border=[
-            excelize.Border(type="left", color=COLOR_BORDER, style=1),
-            excelize.Border(type="top", color=COLOR_BORDER, style=1),
-            excelize.Border(type="bottom", color=COLOR_BORDER, style=1),
-            excelize.Border(type="right", color=COLOR_BORDER, style=1),
-        ],
-        alignment=excelize.Alignment(horizontal="center", vertical="center"),
-    ))
-
-
 # ── Border Factories ──
 
 def thin_border(color=COLOR_BORDER):
     """Return a list of 4 thin borders (left/top/bottom/right) for reuse."""
     return [excelize.Border(type=t, color=color, style=1) for t in ("left", "top", "bottom", "right")]
-
-
-def medium_border(color=COLOR_BORDER):
-    """Return a list of 4 medium borders (left/top/bottom/right) for reuse."""
-    return [excelize.Border(type=t, color=color, style=2) for t in ("left", "top", "bottom", "right")]
 
 
 # ── Utilities ──
@@ -181,10 +146,3 @@ def to_native(val):
         except (ValueError, TypeError):
             pass
     return str(val) if val is not None else ""
-
-
-def auto_widths(f, sheet, col_count, min_width=8, max_width=40):
-    """Set all column A..N to auto-computed widths.  Quick heuristic."""
-    for i in range(1, col_count + 1):
-        cl = excelize.column_number_to_name(i)
-        f.set_col_width(sheet, cl, cl, min_width)

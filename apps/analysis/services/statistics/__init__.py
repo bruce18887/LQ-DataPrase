@@ -48,14 +48,17 @@ from .computations import (
 )
 
 # ── analytics ────────────────────────────────────────────────────────
-from .analytics import (
+from .trends import (
     compute_bin_trend,
     compute_yield_trend,
     compute_param_trend,
+)
+from .site_yield import (
     compute_site_stats,
     compute_site_yield_data,
     compute_wafer_fail_data,
-    compute_zonal_yield,
+)
+from .uph import (
     TEST_TIME_COL_CANDIDATES,
     _detect_test_time_col,
     compute_uph,
@@ -98,7 +101,6 @@ __all__ = [
     'compute_site_stats',
     'compute_site_yield_data',
     'compute_wafer_fail_data',
-    'compute_zonal_yield',
     'TEST_TIME_COL_CANDIDATES',
     '_detect_test_time_col',
     'compute_uph',

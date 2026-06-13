@@ -13,7 +13,6 @@ from .models import User, UserSetting
 from .permissions import FeaturePermission
 from .serializers import (
     LoginSerializer,
-    PasswordChangeSerializer,
     TokenResponseSerializer,
     UserCreateSerializer,
     UserSerializer,
