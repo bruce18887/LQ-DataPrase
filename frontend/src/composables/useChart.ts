@@ -34,14 +34,18 @@ export function useChart<T = echarts.EChartsOption>(
 
   const themeStore = useThemeStore()
   let handle: EchartsHandle | null = null
+  let pollTimer: ReturnType<typeof setInterval> | null = null
+  let pollTimeout: ReturnType<typeof setTimeout> | null = null
+  let disposed = false
 
   function renderOption() {
-    if (!chartInstance.value) return
+    if (disposed || !chartInstance.value) return
     const option = buildOption() as unknown as echarts.EChartsOption
     chartInstance.value.setOption(option, { notMerge: true, lazyUpdate: true })
   }
 
   function ensureInit(): boolean {
+    if (disposed) return false
     if (chartInstance.value) {
       // The container may be recreated when a v-if/v-else toggle destroys and
       // remounts the <div ref="chartRef"> (e.g. QQPlotChart resets result=null
@@ -63,15 +67,22 @@ export function useChart<T = echarts.EChartsOption>(
     chartInstance.value = handle.chart
     // If chart inits asynchronously (zero-size container), poll for readiness
     if (!chartInstance.value) {
-      const poll = setInterval(() => {
+      clearPollTimers()
+      pollTimer = setInterval(() => {
+        if (disposed) { clearPollTimers(); return }
         if (handle?.chart) {
           chartInstance.value = handle.chart
-          clearInterval(poll)
+          clearPollTimers()
         }
       }, 100)
-      setTimeout(() => clearInterval(poll), 5_500)
+      pollTimeout = setTimeout(() => clearPollTimers(), 5_500)
     }
     return true
+  }
+
+  function clearPollTimers() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+    if (pollTimeout) { clearTimeout(pollTimeout); pollTimeout = null }
   }
 
   function resize() {
@@ -83,6 +94,7 @@ export function useChart<T = echarts.EChartsOption>(
   if (watcherSources.length > 0) {
     watch(watcherSources, () => {
       nextTick(() => {
+        if (disposed) return
         if (ensureInit()) renderOption()
       })
     })
@@ -90,17 +102,20 @@ export function useChart<T = echarts.EChartsOption>(
 
   // ── Theme watcher ──
   watch(() => themeStore.currentTheme, () => {
-    if (!chartRef.value?.isConnected) return
+    if (disposed || !chartRef.value?.isConnected) return
     renderOption()
   })
 
   // ── Lifecycle ──
   onMounted(() => {
+    disposed = false
     if (chartRef.value) ensureInit()
     window.addEventListener('resize', resize)
   })
 
   onUnmounted(() => {
+    disposed = true
+    clearPollTimers()
     window.removeEventListener('resize', resize)
     handle?.dispose()
     handle = null
