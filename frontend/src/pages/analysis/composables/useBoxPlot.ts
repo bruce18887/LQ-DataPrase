@@ -5,7 +5,8 @@ import { useAsyncData } from '../../../composables/useAsyncData'
 export function useBoxPlot(
   getFileId: () => number | null,
   selectedParam: Ref<string>,
-  groupBy: Ref<string>
+  groupBy: Ref<string>,
+  enabled?: Ref<boolean>,
 ) {
   const { loading, data: boxPlotData, run } = useAsyncData<any>({
     errorMsg: '加载箱线图数据失败',
@@ -14,6 +15,7 @@ export function useBoxPlot(
   async function loadBoxPlot() {
     const fileId = getFileId()
     if (!fileId || !selectedParam.value) return
+    if (enabled && !enabled.value) return
     await run(
       () => analysisApi.getBoxPlot(fileId, [selectedParam.value], groupBy.value || undefined),
       (d: any) => d.results ?? d,
@@ -31,6 +33,9 @@ export function useBoxPlot(
   watch(selectedParam, () => loadBoxPlot())
   watch(groupBy, () => { if (selectedParam.value) loadBoxPlot() })
   watch(getFileId, () => { if (getFileId() && selectedParam.value) loadBoxPlot() })
+  if (enabled) {
+    watch(enabled, (val) => { if (val && selectedParam.value) loadBoxPlot() })
+  }
 
   return { loading, boxPlotData, stats, loadBoxPlot }
 }
