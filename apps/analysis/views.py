@@ -268,7 +268,8 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         if not param:
             return Response({'error': 'param_required'}, status=400)
 
-        chart_config = json.loads(get_param(request, 'chart_config', '[]'))
+        chart_config_raw = get_param(request, 'chart_config', '[]')
+        chart_config = chart_config_raw if isinstance(chart_config_raw, list) else json.loads(chart_config_raw)
         range_type = get_param(request, 'range_type', 'RDL')
 
         result = compute_serial_distribution_data(
