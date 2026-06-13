@@ -42,6 +42,8 @@
       />
       <RangeComparisonTable :range-table-data="rangeTableData" :range-type="rangeType" />
       <SiteStatsTable :site-stats="siteStats" :site-stats-error="siteStatsError" />
+      <QQPlotStatsTable v-if="showQQPlot && qqResult" :result="qqResult" />
+      <BoxPlotStatsTable v-if="showBoxPlot" :stats="boxPlotOverallStats" />
     </template>
 
     <template #right-panel>
@@ -117,6 +119,8 @@ import HistogramChart from './HistogramChart.vue'
 import SerialChart from './SerialChart.vue'
 import QQPlotChart from './QQPlotChart.vue'
 import BoxPlotChart from './BoxPlotChart.vue'
+import QQPlotStatsTable from './QQPlotStatsTable.vue'
+import BoxPlotStatsTable from './distribution/BoxPlotStatsTable.vue'
 import AnalysisTabLayout from './AnalysisTabLayout.vue'
 import { useHistogram } from '../composables/useHistogram'
 import { useSerialDistribution } from '../composables/useSerialDistribution'
@@ -197,6 +201,7 @@ const currentBoxPlotData = computed(() => {
   if (!paramData) return null
   return { ...paramData, param: localSelectedParam.value }
 })
+const boxPlotOverallStats = computed(() => currentBoxPlotData.value?.overall ?? null)
 
 // ========== QQ Plot state ==========
 const showQQPlot = ref(false)
