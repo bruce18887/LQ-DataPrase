@@ -13,6 +13,22 @@
       >
         显示QQ图
       </el-checkbox>
+      <el-checkbox
+        v-if="chartMode === 'distribution'"
+        v-model="showBoxPlot"
+        size="small"
+        style="margin-left: 12px;"
+      >
+        显示箱线图
+      </el-checkbox>
+      <el-checkbox
+        v-if="showBoxPlot"
+        v-model="showJitter"
+        size="small"
+        style="margin-left: 12px;"
+      >
+        Jitter散点
+      </el-checkbox>
     </template>
 
     <template #left-panel>
@@ -50,9 +66,9 @@
         </div>
       </div>
 
-      <!-- 图表：QQ图激活时上下布局（柱状图在上，QQ图在下） -->
+      <!-- 图表：distribution 模式下根据开关上下排列 -->
       <div
-        v-if="showQQPlot && chartMode === 'distribution' && histResult"
+        v-if="chartMode === 'distribution' && histResult"
         class="chart-vertical-layout"
       >
         <div class="chart-wrapper chart-wrapper--top">
@@ -64,7 +80,7 @@
             :selected-param="localSelectedParam"
           />
         </div>
-        <div class="chart-wrapper chart-wrapper--bottom">
+        <div v-if="showQQPlot" class="chart-wrapper chart-wrapper--bottom">
           <QQPlotChart
             :file-id="props.fileId"
             :param="localSelectedParam"
@@ -73,28 +89,23 @@
             :loading="qqLoading"
           />
         </div>
+        <div v-if="showBoxPlot" class="chart-wrapper chart-wrapper--bottom">
+          <BoxPlotChart
+            :data="currentBoxPlotData"
+            :show-jitter="showJitter"
+          />
+        </div>
       </div>
-      <!-- 图表：默认全宽布局 -->
-      <div v-else class="chart-wrapper">
-        <HistogramChart
-          v-if="histResult && chartMode === 'distribution'"
-          :result="histResult"
-          :chart-config="chartConfig"
-          :range-type="rangeType"
-          :bar-width-percent="barWidthPercent"
-          :selected-param="localSelectedParam"
-        />
-        <SerialChart
-          v-if="chartMode === 'serial'"
-          :data="serialDistData"
-        />
+      <!-- 图表：serial 模式或无数据时 -->
+      <div v-else-if="chartMode === 'serial'" class="chart-wrapper">
+        <SerialChart :data="serialDistData" />
       </div>
     </template>
   </AnalysisTabLayout>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import api from '../../../api'
 import { useAnalysisStore } from '../../../stores/analysis'
 import ChartConfigPanel from './ChartConfigPanel.vue'
@@ -105,10 +116,12 @@ import StatsSummary from './StatsSummary.vue'
 import HistogramChart from './HistogramChart.vue'
 import SerialChart from './SerialChart.vue'
 import QQPlotChart from './QQPlotChart.vue'
+import BoxPlotChart from './BoxPlotChart.vue'
 import AnalysisTabLayout from './AnalysisTabLayout.vue'
 import { useHistogram } from '../composables/useHistogram'
 import { useSerialDistribution } from '../composables/useSerialDistribution'
 import { useSiteStats } from '../composables/useSiteStats'
+import { useBoxPlot } from '../composables/useBoxPlot'
 
 const props = defineProps<{
   fileId: number | null
@@ -166,6 +179,22 @@ const {
   localSelectedParam,
   rangeType
 )
+
+// Composable: BoxPlot
+const showBoxPlot = ref(false)
+const showJitter = ref(false)
+const groupBy = ref('site')
+const {
+  boxPlotData,
+} = useBoxPlot(
+  () => props.fileId,
+  localSelectedParam,
+  groupBy
+)
+const currentBoxPlotData = computed(() => {
+  if (!boxPlotData.value || !localSelectedParam.value) return null
+  return boxPlotData.value[localSelectedParam.value] ?? null
+})
 
 // ========== QQ Plot state ==========
 const showQQPlot = ref(false)
