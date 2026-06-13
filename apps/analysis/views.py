@@ -272,8 +272,12 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         chart_config = chart_config_raw if isinstance(chart_config_raw, list) else json.loads(chart_config_raw)
         range_type = get_param(request, 'range_type', 'RDL')
 
-        result = compute_serial_distribution_data(
-            df, metadata, param, range_type, chart_config)
+        try:
+            result = compute_serial_distribution_data(
+                df, metadata, param, range_type, chart_config)
+        except TypeError:
+            return Response({'error': 'serial_distribution_failed',
+                             'detail': '数据列存在重复或格式异常'}, status=400)
         if result is None:
             return Response({'error': 'no_serial_column'})
 
