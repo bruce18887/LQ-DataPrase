@@ -9,7 +9,7 @@ export function useBoxPlot(
   enabled?: Ref<boolean>,
 ) {
   const { loading, data: boxPlotData, run } = useAsyncData<any>({
-    errorMsg: '加载箱线图数据失败',
+    silent: true,
   })
 
   async function loadBoxPlot() {
