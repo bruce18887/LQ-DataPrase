@@ -70,6 +70,33 @@ def _filter_blank_params(params):
     return [p for p in params if p and str(p).strip()]
 
 
+def _sanitize_numeric_params(df, params):
+    """Filter params to only those that are valid numeric columns with data.
+
+    Removes: blank names, all-NaN columns, non-numeric columns, duplicate names.
+    """
+    # Deduplicate columns first
+    df = df.loc[:, ~df.columns.duplicated()]
+    valid = []
+    for p in params:
+        if not p or not str(p).strip():
+            continue
+        if p not in df.columns:
+            continue
+        col = df[p]
+        # If duplicate columns were collapsed, get_1d_from style extraction
+        if isinstance(col, pd.DataFrame):
+            col = col.iloc[:, 0]
+        # Skip all-NaN columns
+        if col.dropna().empty:
+            continue
+        # Skip non-numeric
+        if not pd.api.types.is_numeric_dtype(col):
+            continue
+        valid.append(p)
+    return valid
+
+
 def _load_df_from_request(request):
     file_id = request.data.get('file_id') or request.query_params.get('file_id')
     if not file_id:
@@ -81,6 +108,8 @@ def _load_df_from_request(request):
         return None, None, None, 'file_not_found_or_parse_failed'
     if df is None:
         return None, None, None, 'file_not_found'
+    # Deduplicate columns to prevent DataFrame-vs-Series issues downstream
+    df = df.loc[:, ~df.columns.duplicated()]
     # Reconstruct datafile for the return contract (callers access .id etc.)
     datafile = DataFile.objects.filter(pk=file_id, owner=request.user).first()
     if datafile is None:
@@ -101,7 +130,9 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         ignore_no_limit = str(get_param(request, 'ignore_no_limit', '')).lower() in ('true', '1', 'yes')
 
         if not params:
-            numeric_cols = [c for c in df.columns if df[c].dtype in ('int64', 'float64')]
+            numeric_cols = [c for c in df.columns
+                           if df[c].dtype in ('int64', 'float64')
+                           and not df[c].dropna().empty]
             if ignore_no_limit:
                 params = get_columns_with_limits(df, metadata)
             else:
@@ -267,6 +298,14 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         param = get_param(request, 'param')
         if not param:
             return Response({'error': 'param_required'}, status=400)
+        if param not in df.columns:
+            return Response({'error': 'param_not_found'}, status=400)
+        # Validate param has numeric data
+        col = get_1d_from(df, param)
+        if isinstance(col, pd.DataFrame):
+            col = col.iloc[:, 0]
+        if col.dropna().empty:
+            return Response({'error': 'param_no_valid_data'}, status=400)
 
         chart_config_raw = get_param(request, 'chart_config', '[]')
         chart_config = chart_config_raw if isinstance(chart_config_raw, list) else json.loads(chart_config_raw)
@@ -320,7 +359,15 @@ class AnalysisViewSet(viewsets.GenericViewSet):
             return Response({'error': 'param_not_found'}, status=400)
 
         data_series = get_1d_from(df, param)
-        result = compute_qqplot(data_series)
+        if isinstance(data_series, pd.DataFrame):
+            data_series = data_series.iloc[:, 0]
+        # Skip if column is all-NaN or non-numeric
+        if data_series.dropna().empty:
+            return Response({'error': 'param_no_valid_data'}, status=400)
+        try:
+            result = compute_qqplot(data_series)
+        except (TypeError, ValueError) as e:
+            return Response({'error': 'qqplot_failed', 'detail': str(e)}, status=400)
 
         return Response(clean_data(result))
 
@@ -455,10 +502,16 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         if not params:
             params = get_columns_with_limits(df, metadata)
 
+        # Filter to valid numeric params
+        params = _sanitize_numeric_params(df, params)
+
         if not params or len(params) < 2:
             return Response({'error': 'need_at_least_2_params', 'available_params': get_columns_with_limits(df, metadata)}, status=400)
 
-        result = compute_correlation_matrix(df, params, method)
+        try:
+            result = compute_correlation_matrix(df, params, method)
+        except (TypeError, ValueError) as e:
+            return Response({'error': 'correlation_failed', 'detail': str(e)}, status=400)
 
         return Response(clean_data({
             'file_id': datafile.id,
@@ -532,6 +585,11 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         if not params:
             return Response({'error': 'params_required'}, status=400)
 
+        # Filter out invalid params (blank, all-NaN, non-numeric)
+        params = _sanitize_numeric_params(df, params)
+        if not params:
+            return Response({'error': 'no_valid_params'}, status=400)
+
         results = {}
 
         for param in params:
@@ -539,6 +597,8 @@ class StatisticsViewSet(viewsets.GenericViewSet):
                 continue
 
             data_series = ensure_numeric(df, param)
+            if data_series.dropna().empty:
+                continue
             param_result = {
                 'overall': compute_boxplot_stats(data_series)
             }
