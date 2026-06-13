@@ -41,14 +41,6 @@
         />
       </el-tab-pane>
 
-      <!-- ========== 箱线图 tab ========== -->
-      <el-tab-pane label="&#128202; 箱线图" name="boxplot">
-        <BoxPlotSection
-          :file-id="selectedFileId"
-          :available-params="params"
-        />
-      </el-tab-pane>
-
       <!-- ========== 多文件分析 tab ========== -->
       <el-tab-pane label="&#128200; 多文件分析" name="multi-file">
         <MultiFileTab :files="files" />
@@ -73,7 +65,6 @@ import { useAnalysisStore } from '../../stores/analysis'
 import SingleParamTab from './components/SingleParamTab.vue'
 import CircularProgress from '../../components/common/CircularProgress.vue'
 import WaferMapPanel from './components/WaferMapPanel.vue'
-import BoxPlotSection from './components/distribution/BoxPlotSection.vue'
 import MultiFileTab from './components/MultiFileTab.vue'
 import CorrelationToolsTab from './components/CorrelationToolsTab.vue'
 
