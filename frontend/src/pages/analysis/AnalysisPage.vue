@@ -80,6 +80,9 @@ const activeTab = ref(analysisStore.activeTab)
 // Wafer state
 const waferData = ref<any>(null)
 
+// Track whether we've loaded params for the current file
+const loadedFileId = ref<number | null>(null)
+
 // ========== Lifecycle ==========
 onMounted(async () => {
   await loadFiles()
@@ -94,11 +97,20 @@ onMounted(async () => {
 
 onActivated(async () => {
   await loadFiles()
+
+  // If selected file no longer exists (e.g. deleted), reset selection
+  if (selectedFileId.value && !files.value.find(f => f.id === selectedFileId.value)) {
+    selectedFileId.value = null
+    loadedFileId.value = null
+  }
+
   // Auto-select first file if nothing is selected
   if (!selectedFileId.value && files.value.length > 0) {
     selectedFileId.value = files.value[0].id
   }
-  if (selectedFileId.value) {
+
+  // Only reload params if file changed or params not loaded yet
+  if (selectedFileId.value && selectedFileId.value !== loadedFileId.value) {
     await onFileChange()
   }
 })
@@ -147,6 +159,8 @@ async function onFileChange() {
     if (params.value.length > 0) {
       selectedParam.value = params.value[0]
     }
+    // Mark this file as loaded so onActivated won't reload unnecessarily
+    loadedFileId.value = selectedFileId.value
   } catch (err: any) {
     // Surface the error so silent 400s (e.g. stale file_path after the
     // project root moved) don't look like "no loading happened". The

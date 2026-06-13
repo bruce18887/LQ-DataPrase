@@ -29,10 +29,3 @@ class FeaturePermission(BasePermission):
 
     def has_object_permission(self, request, view, obj):
         return self.has_permission(request, view)
-
-
-def check_feature_permission(user, feature):
-    if not user or not user.is_authenticated:
-        return False
-    allowed_roles = FEATURE_PERMISSIONS.get(feature, [])
-    return user.role in allowed_roles

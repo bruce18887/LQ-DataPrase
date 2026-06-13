@@ -9,7 +9,6 @@ from django.http import FileResponse
 import excelize
 
 from apps.datafiles.models import DataFile
-from apps.datafiles.parsers import get_parser
 from apps.datafiles.services import get_cached_parsed_file
 from apps.buyoff.services import compute_buyoff_stats
 from apps.buyoff.excelize_layout import build_buyoff_form

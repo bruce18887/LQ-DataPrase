@@ -8,7 +8,6 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
 from apps.datafiles.models import DataFile
-from apps.datafiles.parsers import get_parser
 from apps.analysis.services.statistics import (
     calculate_fail_bin_statistics,
     calculate_fail_test_item_statistics,
@@ -17,7 +16,6 @@ from apps.analysis.services.statistics import (
     compute_site_yield_data,
     get_bin_column_name,
     compute_pass_yield,
-    is_pass_bin,
 )
 from apps.datafiles.services import get_cached_parsed_file
 

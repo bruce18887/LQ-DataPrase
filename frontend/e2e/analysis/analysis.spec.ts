@@ -199,47 +199,117 @@ test.describe('@p2 晶圆图渲染', { tag: ['@p2', '@analysis'] }, () => {
 })
 
 test.describe('@p1 箱线图', { tag: ['@p1', '@analysis'] }, () => {
-  test('箱线图选择参数后正常展示图表', async ({ page }) => {
+  test('箱线图 toggle 显示', async ({ page }) => {
     await enterAnalysis(page, RECOMMENDED.analysis)
-    await page.getByRole('tab', { name: /箱线图/ }).click()
+    await waitLoadingGone(page.locator(SINGLE))
 
-    const panel = page.locator('.el-tabs__content .el-tab-pane').filter({ visible: true }).first()
-    await expect(panel).toBeVisible()
+    // 切换到数值分布模式
+    await page.click('.el-radio-button:has-text("数值分布")')
 
-    // Wait for params to load
-    await page.waitForTimeout(1000)
+    // 点击显示箱线图 checkbox
+    const respPromise = page.waitForResponse(
+      (r) => r.url().includes('/statistics/boxplot/') && r.status() < 500,
+      { timeout: 20_000 },
+    )
+    await page.getByText('显示箱线图').click()
+    const resp = await respPromise
+    expect(resp.status(), 'boxplot API 应返回 200').toBe(200)
 
-    // Click generate button
-    const genBtn = panel.getByRole('button', { name: /生成箱线图/ })
-    if (await genBtn.isVisible().catch(() => false)) {
-      const resp = page.waitForResponse(
-        (r) => r.url().includes('/analysis/boxplot/') && r.status() < 500,
-        { timeout: 20_000 },
-      )
-      await genBtn.click()
-      const r = await resp
-      expect(r.status(), 'boxplot API 应返回 200').toBe(200)
+    // 验证图表渲染（SVG）
+    await expect
+      .poll(() => page.locator(`${SINGLE} .chart-wrapper--bottom svg`).count(), { timeout: 15_000 })
+      .toBeGreaterThanOrEqual(1)
 
-      // Chart should render
-      await expect
-        .poll(() => panel.locator('svg').count(), { timeout: 15_000 })
-        .toBeGreaterThanOrEqual(1)
-    }
+    // 验证统计表显示
+    await expect(page.locator('.boxplot-stats-table')).toBeVisible()
   })
 
-  test('箱线图工具栏有分组模式切换', async ({ page }) => {
+  test('箱线图 groupBy 切换', async ({ page }) => {
     await enterAnalysis(page, RECOMMENDED.analysis)
-    await page.getByRole('tab', { name: /箱线图/ }).click()
+    await waitLoadingGone(page.locator(SINGLE))
 
-    const panel = page.locator('.el-tabs__content .el-tab-pane').filter({ visible: true }).first()
-    await expect(panel).toBeVisible()
+    // 切换到数值分布模式
+    await page.click('.el-radio-button:has-text("数值分布")')
 
-    // Toolbar should have radio buttons for group modes
-    const toolbar = panel.locator('.toolbar')
-    await expect(toolbar).toBeVisible()
+    // 开启箱线图
+    const respPromise1 = page.waitForResponse(
+      (r) => r.url().includes('/statistics/boxplot/') && r.status() < 500,
+      { timeout: 20_000 },
+    )
+    await page.getByText('显示箱线图').click()
+    await respPromise1
 
-    const buttons = toolbar.locator('.el-radio-button')
-    await expect(buttons).toHaveCount(3)
+    // 切换到 bin 分组
+    const respPromise2 = page.waitForResponse(
+      (r) => r.url().includes('/statistics/boxplot/') && r.status() < 500,
+      { timeout: 20_000 },
+    )
+    await page.locator('.el-select:has-text("按 Site 分组")').click()
+    await page.locator('.el-select-dropdown__item:visible:has-text("按 Bin 分组")').click()
+    const resp2 = await respPromise2
+    expect(resp2.status(), 'boxplot API 应返回 200').toBe(200)
+
+    // 验证图表重新渲染
+    await expect
+      .poll(() => page.locator(`${SINGLE} .chart-wrapper--bottom svg`).count(), { timeout: 15_000 })
+      .toBeGreaterThanOrEqual(1)
+  })
+
+  test('箱线图 Jitter 散点切换', async ({ page }) => {
+    await enterAnalysis(page, RECOMMENDED.analysis)
+    await waitLoadingGone(page.locator(SINGLE))
+
+    // 切换到数值分布模式
+    await page.click('.el-radio-button:has-text("数值分布")')
+
+    // 开启箱线图
+    const respPromise = page.waitForResponse(
+      (r) => r.url().includes('/statistics/boxplot/') && r.status() < 500,
+      { timeout: 20_000 },
+    )
+    await page.getByText('显示箱线图').click()
+    await respPromise
+
+    // 开启 Jitter（不需要新的 API 调用）
+    await page.getByText('Jitter散点').click()
+
+    // 验证图表更新
+    await expect
+      .poll(() => page.locator(`${SINGLE} .chart-wrapper--bottom svg`).count(), { timeout: 15_000 })
+      .toBeGreaterThanOrEqual(1)
+  })
+
+  test('箱线图参数切换显示 loading', async ({ page }) => {
+    await enterAnalysis(page, RECOMMENDED.analysis)
+    await waitLoadingGone(page.locator(SINGLE))
+
+    // 切换到数值分布模式
+    await page.click('.el-radio-button:has-text("数值分布")')
+
+    // 开启箱线图
+    const respPromise1 = page.waitForResponse(
+      (r) => r.url().includes('/statistics/boxplot/') && r.status() < 500,
+      { timeout: 20_000 },
+    )
+    await page.getByText('显示箱线图').click()
+    await respPromise1
+
+    // 切换参数
+    const params = await listParams(page)
+    if (params.length > 1) {
+      const respPromise2 = page.waitForResponse(
+        (r) => r.url().includes('/statistics/boxplot/') && r.status() < 500,
+        { timeout: 20_000 },
+      )
+      await selectParam(page, params[1])
+      const resp2 = await respPromise2
+      expect(resp2.status(), 'boxplot API 应返回 200').toBe(200)
+
+      // 验证图表正确渲染
+      await expect
+        .poll(() => page.locator(`${SINGLE} .chart-wrapper--bottom svg`).count(), { timeout: 15_000 })
+        .toBeGreaterThanOrEqual(1)
+    }
   })
 })
 

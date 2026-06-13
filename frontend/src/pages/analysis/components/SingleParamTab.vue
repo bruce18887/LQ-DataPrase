@@ -29,6 +29,20 @@
       >
         Jitter散点
       </el-checkbox>
+      <el-select
+        v-if="showBoxPlot"
+        v-model="groupBy"
+        size="small"
+        style="width: 120px; margin-left: 8px"
+        placeholder="分组方式"
+      >
+        <el-option
+          v-for="opt in groupByOptions"
+          :key="opt.value"
+          :label="opt.label"
+          :value="opt.value"
+        />
+      </el-select>
     </template>
 
     <template #left-panel>
@@ -43,7 +57,16 @@
       <RangeComparisonTable :range-table-data="rangeTableData" :range-type="rangeType" />
       <SiteStatsTable :site-stats="siteStats" :site-stats-error="siteStatsError" />
       <QQPlotStatsTable v-if="showQQPlot && qqResult" :result="qqResult" />
-      <BoxPlotStatsTable v-if="showBoxPlot" :stats="boxPlotOverallStats" />
+      <BoxPlotStatsTable
+        v-if="showBoxPlot && boxPlotOverallStats && !boxPlotLoading"
+        :stats="boxPlotOverallStats"
+      />
+      <el-skeleton
+        v-else-if="showBoxPlot && boxPlotLoading"
+        :rows="4"
+        animated
+        style="margin-top: 8px;"
+      />
     </template>
 
     <template #right-panel>
@@ -91,7 +114,18 @@
             :loading="qqLoading"
           />
         </div>
-        <div v-if="showBoxPlot" :key="`bp-${localSelectedParam}`" class="chart-wrapper chart-wrapper--bottom">
+        <div
+          v-if="showBoxPlot"
+          :key="`bp-${localSelectedParam}`"
+          class="chart-wrapper chart-wrapper--bottom"
+          style="position: relative;"
+        >
+          <el-skeleton
+            v-if="boxPlotLoading"
+            :rows="6"
+            animated
+            style="position: absolute; inset: 0; z-index: 10; background: var(--el-bg-color);"
+          />
           <BoxPlotChart
             :data="currentBoxPlotData"
             :show-jitter="showJitter"
@@ -191,8 +225,14 @@ const {
 const showBoxPlot = ref(false)
 const showJitter = ref(false)
 const groupBy = ref('site')
+const groupByOptions = [
+  { label: '按 Site 分组', value: 'site' },
+  { label: '按 Bin 分组', value: 'bin' },
+  { label: '不分组', value: '' },
+]
 const {
   boxPlotData,
+  loading: boxPlotLoading,
 } = useBoxPlot(
   () => props.fileId,
   localSelectedParam,

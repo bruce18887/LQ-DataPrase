@@ -13,7 +13,6 @@ from apps.datafiles.parsers import get_parser
 from apps.datafiles.services import get_cached_parsed_file
 from apps.export.excelize_helpers import save_excelize
 from apps.gage.services.rr_analysis import compute_rr_statistics
-from apps.gage.excelize_layout import build_summary_sheet, build_per_file_sheets
 
 
 class GageViewSet(viewsets.GenericViewSet):
