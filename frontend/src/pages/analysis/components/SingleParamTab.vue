@@ -193,7 +193,9 @@ const {
 )
 const currentBoxPlotData = computed(() => {
   if (!boxPlotData.value || !localSelectedParam.value) return null
-  return boxPlotData.value[localSelectedParam.value] ?? null
+  const paramData = boxPlotData.value[localSelectedParam.value]
+  if (!paramData) return null
+  return { ...paramData, param: localSelectedParam.value }
 })
 
 // ========== QQ Plot state ==========

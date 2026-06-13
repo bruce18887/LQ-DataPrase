@@ -36,12 +36,15 @@ function buildOption() {
   let yMin = Infinity, yMax = -Infinity
 
   if (hasGroupedData) {
-    categories = Object.keys(groupedData).sort((a, b) => {
+    const sortedKeys = Object.keys(groupedData).sort((a, b) => {
       const numA = parseFloat(a); const numB = parseFloat(b)
       if (!isNaN(numA) && !isNaN(numB)) return numA - numB
       return a.localeCompare(b)
     })
-    categories.forEach((group, idx) => {
+    categories = sortedKeys.map(key =>
+      /^\d+(\.\d+)?$/.test(key) ? `Site ${key}` : key
+    )
+    sortedKeys.forEach((group, idx) => {
       const s = groupedData[group]
       boxData.push([s.min, s.q1, s.median, s.q3, s.max])
       s.outliers.forEach(o => outlierData.push([idx, o]))
@@ -50,7 +53,7 @@ function buildOption() {
 
       if (props.showJitter && s.raw_values && s.raw_values.length > 0) {
         jitterSeries.push({
-          name: `${group} 数据点`,
+          name: `${categories[idx]} 数据点`,
           type: 'scatter',
           data: s.raw_values.map((v: number) => [idx + (Math.random() - 0.5) * 0.3, v]),
           symbolSize: 3,
