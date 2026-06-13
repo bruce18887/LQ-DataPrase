@@ -19,7 +19,7 @@
  * buildOption 使用泛型默认 EChartsOption，但允许传入宽松的对象字面量
  * （如 fontWeight: 'bold'），由渲染端在调用时统一断言为 EChartsOption。
  */
-import { ref, watch, onMounted, onUnmounted, nextTick, useTemplateRef, type WatchSource, type Ref } from 'vue'
+import { ref, watch, onMounted, onUnmounted, useTemplateRef, type WatchSource, type Ref } from 'vue'
 import type * as echarts from 'echarts'
 import { useThemeStore } from '../stores/theme'
 import { initEchartsWhenReady, type EchartsHandle } from '../utils/echarts-init'
@@ -93,10 +93,8 @@ export function useChart<T = echarts.EChartsOption>(
   const watcherSources = sources ?? []
   if (watcherSources.length > 0) {
     watch(watcherSources, () => {
-      nextTick(() => {
-        if (disposed) return
-        if (ensureInit()) renderOption()
-      })
+      if (disposed) return
+      if (ensureInit()) renderOption()
     })
   }
 
