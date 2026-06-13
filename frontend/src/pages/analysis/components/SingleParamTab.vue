@@ -68,10 +68,12 @@
         </div>
       </div>
 
-      <!-- 图表区域 -->
-      <div class="chart-vertical-layout">
-        <!-- distribution 模式：柱状图 -->
-        <div v-if="chartMode === 'distribution' && histResult" class="chart-wrapper chart-wrapper--top">
+      <!-- 图表：distribution 模式 -->
+      <div
+        v-if="chartMode === 'distribution' && histResult"
+        class="chart-vertical-layout"
+      >
+        <div class="chart-wrapper chart-wrapper--top">
           <HistogramChart
             :result="histResult"
             :chart-config="chartConfig"
@@ -80,32 +82,27 @@
             :selected-param="localSelectedParam"
           />
         </div>
-
-        <!-- QQ 图（始终挂载，v-show 控制可见性） -->
-        <div v-show="chartMode === 'distribution' && showQQPlot" class="chart-wrapper chart-wrapper--bottom">
+        <div v-if="showQQPlot" class="chart-wrapper chart-wrapper--bottom">
           <QQPlotChart
             :file-id="props.fileId"
             :param="localSelectedParam"
-            :visible="chartMode === 'distribution' && showQQPlot"
+            :visible="showQQPlot"
             :result="qqResult"
             :loading="qqLoading"
           />
         </div>
-
-        <!-- 箱线图（始终挂载，v-show 控制可见性） -->
-        <div v-show="chartMode === 'distribution' && showBoxPlot" class="chart-wrapper chart-wrapper--bottom">
+        <div v-if="showBoxPlot" class="chart-wrapper chart-wrapper--bottom">
           <BoxPlotChart
             :data="currentBoxPlotData"
             :show-jitter="showJitter"
-            :visible="chartMode === 'distribution' && showBoxPlot"
+            :visible="showBoxPlot"
           />
         </div>
-
-        <!-- serial 模式 -->
-        <div v-if="chartMode === 'serial'" class="chart-wrapper">
-          <SerialChart v-if="serialDistData" :data="serialDistData" />
-          <el-empty v-else description="当前参数无序列分布数据，请选择其他参数" />
-        </div>
+      </div>
+      <!-- 图表：serial 模式 -->
+      <div v-else-if="chartMode === 'serial'" class="chart-wrapper">
+        <SerialChart v-if="serialDistData" :data="serialDistData" />
+        <el-empty v-else description="当前参数无序列分布数据，请选择其他参数" />
       </div>
     </template>
   </AnalysisTabLayout>
