@@ -291,3 +291,24 @@
 - **æ ‡ç­¾è¾“å…¥è”æƒ³**: åŸç”Ÿ `<input>` + è‡ªå®šä¹‰ä¸‹æ‹‰å»ºè®®åˆ—è¡¨ï¼ˆ`.tag-suggestions`ï¼‰ã€‚è°ƒç”¨å·²æœ‰çš„ `listTags(prefix)` APIï¼Œdebounce 200msã€‚é”®ç›˜å¯¼èˆªï¼ˆâ†‘â†“/Enter/Escapeï¼‰ã€‚é€‰æ‹©åè‡ªåŠ¨æäº¤æ ‡ç­¾ã€‚
 - **Rule**: éœ€æ±‚æ˜¯"è¾“å…¥+ä¸‹æ‹‰é€‰æ‹©"æ—¶ï¼Œä¼˜å…ˆç”¨ `el-select + filterable`ï¼Œä¸è¦ç”¨ `el-autocomplete`ï¼ˆåè€…åªæä¾›è”æƒ³ï¼Œä¸æä¾› select ä½“éªŒï¼‰ã€‚çº¯æ ‡ç­¾è¾“å…¥åœºæ™¯å¯ä»¥ç”¨åŸç”Ÿ input + è‡ªå®šä¹‰ä¸‹æ‹‰ï¼ˆæ›´è½»é‡ï¼‰ã€‚
 - **Rule**: æ ‡ç­¾è”æƒ³çš„ä¸‹æ‹‰å»ºè®®è¦ç”¨ `@mousedown.prevent` è€Œé `@click`ï¼Œå¦åˆ™ blur äº‹ä»¶å…ˆè§¦å‘å¯¼è‡´è¾“å…¥æ¡†å…³é—­ï¼Œå»ºè®®é¡¹ç‚¹å‡»æ— æ•ˆã€‚
+
+## QQ Í¼ null r_squared ´¥·¢ Vue Òì²½Á´±À£¨debug-qqplot-sw-bin-bug£©
+
+- **Bug**: QQPlotStatsTable.vue:32 Ğ´ props.result.r_squared.toFixed(4)£¬¶Ôºó¶Ë JSON ÀïµÄ 
+ull µ÷ .toFixed() ¡ú TypeError: Cannot read properties of null (reading 'toFixed')¡£´íÎóÍ¬²½Å×ÔÚ Vue äÖÈ¾º¯ÊıÀï£¬ÎÛÈ¾ patch Á´£»Í¬Ê±¿Ì QQPlotChart µÄ -else ¸Õ»»ÉÏ chart container£¬prevVNode.component »¹Ã»¹ÒÉÏ ¡ú ÓÃ»§¿´µ½µÄÊÇÉÏÒ»´ÎĞŞ¹ıµÄÍ¬¿î Cannot read properties of null (reading 'emitsOptions')¡ª¡ªµ«**¸ùÒòÊÇ stats table ²»ÊÇ chart**¡£
+- **´¥·¢Ìõ¼ş**: SW_Bin ÊÇ soft-bin ·ÖÀàÁĞ£¨gage_m_S4.csv 100 ĞĞÈ« 1.0£©¡£scipy.stats.probplot ÔÚ y È«Í¬Ê±·µ»Ø NaN r ¡ú DRF ĞòÁĞ»¯³É 
+ull¡£
+- **Rule 1 ¡ª JSON ĞòÁĞ»¯µÄ NaN = null**£ººó¶Ë scipy / 
+umpy / pandas Êä³öµÄ NaN ¾­ DRF ĞòÁĞ»¯³É JSON 
+ull£¬Ç°¶ËËùÓĞ"Õ¹Ê¾ÓÃ"µÄ .toFixed() / .toLocaleString() ¶¼**±ØĞë**ÓÃ Number.isFinite ÊØÎÀ£º
+  `	ypescript
+  const r2 = result.r_squared
+  const text = typeof r2 === 'number' && Number.isFinite(r2) ? r2.toFixed(4) : 'N/A'
+  `
+- **Rule 2 ¡ª TypeScript 
+umber ²»ÊÇÔËĞĞÊ±°²È«**£ºinterface { r_squared: number } ±àÒëÆÚ²»¾Ü¾ø 
+ull£¬ÔËĞĞÊ± .toFixed() ±Ø±À¡£Ä£Ê½£ºËùÓĞÀ´×Ôºó¶Ë JSON µÄÊıÖµ×Ö¶ÎÀàĞÍÓÃ 
+umber | null£¬äÖÈ¾ÓÃ 	ypeof === 'number' && Number.isFinite(x) ÊØÎÀ¡£
+- **Rule 3 ¡ª ÓÃ»§±¨¸æµÄ"emitsOptions null"ÊÇ´Î¼¶Ö¢×´**£ºÍ¬Ò»Ê±¿Ì Vue Òì²½ patch Á´±À»µ¿ÉÄÜÈÃ¶à¸ö´íÎóÒ»ÆğÃ°Í·¡£**ÏÈ×¥ pageerror Àï×îÔçÅ×µÄÄÇ¸ö**£¨ÔÚ page.on('pageerror') ÀïÈ¡ err.stack ¿´µ÷ÓÃÕ»£©£¬ÔÙË³×ÅÕÒ¸ùÒò£»²»Òª±»"ÉÏÒ»´Î»á»°ĞŞ¹ıµÄÍ¬¿îÖ¢×´"Îóµ¼¡£
+- **Rule 4 ¡ª »Ø¹é²âÊÔ±ØĞë¸²¸Ç"ÔàÊı¾İ"ÓÃÀı**£ºgage-qqbox-repro.spec.ts ÉÏÒ»°æÖ»ÓÃ 5 ¸ö"ºÃ"²ÎÊı£¨PWM_Hz_IQ_VIN_12V µÈÁ¬ĞøÁ¿£©£¬Ã»¸²¸Ç soft-bin / ÀëÉ¢ / È«Í¬ÖµÂ·¾¶£¬½á¹ûÓÃ»§³£Ñ¡ SW_Bin ³ÉÁËÃ¤µã¡£**»Ø¹é²âÊÔÌ×¼şÒª°üº¬ÖÁÉÙÒ»¸ö"È«Í¬Öµ / NaN / ÀëÉ¢"ÓÃÀı**¡ª¡ªsw-bin-qqplot-repro.spec.ts ÒÑ¼ÓÈë¡£
+- **Rule 5 ¡ª µ÷ÊÔ instrumentation µÄ import Ë³Ğò**£º__dbgState = computed(() => props.xxx) ÒıÓÃÁË props.xxx£¬µ« <script setup> µÄ defineProps »¹Ã»Ö´ĞĞ¡£±ØĞëÏÈ defineProps ÔÙ¶¨ÒåÒıÓÃ props µÄ computed / watch¡£instrumentation ¿éÒªÇ¶ÔÚ defineProps Ö®ºó¡£

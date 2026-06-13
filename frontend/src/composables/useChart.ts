@@ -19,7 +19,7 @@
  * buildOption 使用泛型默认 EChartsOption，但允许传入宽松的对象字面量
  * （如 fontWeight: 'bold'），由渲染端在调用时统一断言为 EChartsOption。
  */
-import { ref, watch, onMounted, onUnmounted, useTemplateRef, type WatchSource, type Ref } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick, useTemplateRef, type WatchSource, type Ref } from 'vue'
 import type * as echarts from 'echarts'
 import { useThemeStore } from '../stores/theme'
 import { initEchartsWhenReady, type EchartsHandle } from '../utils/echarts-init'
@@ -40,8 +40,18 @@ export function useChart<T = echarts.EChartsOption>(
 
   function renderOption() {
     if (disposed || !chartInstance.value) return
-    const option = buildOption() as unknown as echarts.EChartsOption
-    chartInstance.value.setOption(option, { notMerge: true, lazyUpdate: true })
+    try {
+      const option = buildOption() as unknown as echarts.EChartsOption
+      chartInstance.value.setOption(option, { notMerge: true, lazyUpdate: true })
+    } catch (err) {
+      // Swallow ECharts errors that originate from empty/invalid options during
+      // mount/unmount cycles — they can otherwise bubble up through Vue's
+      // component update chain and trigger "emitsOptions null" errors in dev.
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn('[useChart] setOption failed:', err)
+      }
+    }
   }
 
   function ensureInit(): boolean {
@@ -57,14 +67,26 @@ export function useChart<T = echarts.EChartsOption>(
       if (chartRef.value && boundDom === chartRef.value && boundDom.isConnected) {
         return true
       }
-      handle?.dispose()
+      try {
+        handle?.dispose()
+      } catch {
+        // Ignore disposal errors during fast mount/unmount cycles
+      }
       handle = null
       chartInstance.value = null
     }
     if (!chartRef.value) return false
-    const option = buildOption() as unknown as echarts.EChartsOption
-    handle = initEchartsWhenReady(chartRef.value, { option, reuse: true, timeout: 5_000 })
-    chartInstance.value = handle.chart
+    try {
+      const option = buildOption() as unknown as echarts.EChartsOption
+      handle = initEchartsWhenReady(chartRef.value, { option, reuse: true, timeout: 5_000 })
+      chartInstance.value = handle.chart
+    } catch (err) {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn('[useChart] init failed:', err)
+      }
+      return false
+    }
     // If chart inits asynchronously (zero-size container), poll for readiness
     if (!chartInstance.value) {
       clearPollTimers()
@@ -93,8 +115,10 @@ export function useChart<T = echarts.EChartsOption>(
   const watcherSources = sources ?? []
   if (watcherSources.length > 0) {
     watch(watcherSources, () => {
-      if (disposed) return
-      if (ensureInit()) renderOption()
+      nextTick(() => {
+        if (disposed) return
+        if (ensureInit()) renderOption()
+      })
     })
   }
 

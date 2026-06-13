@@ -19,7 +19,7 @@
 import { computed } from 'vue'
 
 interface QQPlotResult {
-  r_squared: number
+  r_squared: number | null
   is_normal: boolean
   n: number
 }
@@ -28,8 +28,13 @@ const props = defineProps<{ result: QQPlotResult | null }>()
 
 const tableData = computed(() => {
   if (!props.result) return []
+  // r_squared may be null when all observed values are identical (e.g. soft-bin
+  // columns like SW_Bin with constant value 1.0) — scipy.stats.probplot returns
+  // NaN for the correlation coefficient, which JSON-serializes to null.
+  const r2 = props.result.r_squared
+  const r2Text = typeof r2 === 'number' && Number.isFinite(r2) ? r2.toFixed(4) : 'N/A'
   return [
-    { label: 'R²', value: props.result.r_squared.toFixed(4) },
+    { label: 'R²', value: r2Text },
     { label: '正态性', value: props.result.is_normal ? '正态' : '非正态' },
     { label: '样本量', value: props.result.n },
   ]

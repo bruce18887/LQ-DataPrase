@@ -5,9 +5,10 @@
       <el-icon class="is-loading" style="font-size: 24px; margin-right: 8px;"><Loading /></el-icon>
       <span>正在计算QQ图...</span>
     </div>
-    <!-- Empty / no-data state -->
+    <!-- Empty / no-data state: plain div to avoid el-empty emitsOptions race -->
     <div v-else-if="!result || isEmptyResult" class="qqplot-placeholder">
-      <el-empty :description="!result ? '暂无QQ图数据' : '该参数无有效数值数据'" :image-size="80" />
+      <el-icon class="qqplot-placeholder__icon"><InfoFilled /></el-icon>
+      <span class="qqplot-placeholder__text">{{ !result ? '暂无QQ图数据' : '该参数无有效数值数据' }}</span>
     </div>
     <!-- Chart container -->
     <div v-else ref="chartRef" class="qqplot-container" />
@@ -16,7 +17,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Loading } from '@element-plus/icons-vue'
+import { Loading, InfoFilled } from '@element-plus/icons-vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
 
@@ -127,5 +128,13 @@ void chartRef // bound to <div ref="chartRef"> in template
   border: 1px solid var(--border-default);
   color: var(--text-secondary);
   font-size: 14px;
+  gap: 8px;
+}
+.qqplot-placeholder__icon {
+  font-size: 18px;
+  color: var(--text-secondary);
+}
+.qqplot-placeholder__text {
+  color: var(--text-secondary);
 }
 </style>

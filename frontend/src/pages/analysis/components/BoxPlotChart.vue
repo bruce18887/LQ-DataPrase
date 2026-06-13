@@ -1,9 +1,17 @@
 <!-- frontend/src/pages/analysis/components/BoxPlotChart.vue -->
 <template>
-  <div ref="chartRef" class="chart-container" style="width: 100%; height: 500px" />
+  <!-- No-data placeholder: avoid ECharts init with min=Infinity/max=-Infinity
+       which can throw via Vue's async update chain (emitsOptions null). -->
+  <div v-if="!hasValidData" class="boxplot-placeholder">
+    <el-icon class="boxplot-placeholder__icon"><InfoFilled /></el-icon>
+    <span class="boxplot-placeholder__text">{{ placeholderText }}</span>
+  </div>
+  <div v-else ref="chartRef" class="chart-container" style="width: 100%; height: 500px" />
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+import { InfoFilled } from '@element-plus/icons-vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
 
@@ -22,6 +30,26 @@ const { colors } = useEChartsTheme()
 
 const BOX_COLOR = '#5470c6'
 const JITTER_COLOR = '#73c0de'
+
+const hasValidData = computed(() => {
+  if (!props.data) return false
+  const { overall, by_site, by_bin } = props.data
+  if (overall && typeof overall.min === 'number' && Number.isFinite(overall.min)) return true
+  if (by_site && Object.keys(by_site).length > 0) {
+    const grp = by_site[Object.keys(by_site)[0]]
+    if (grp && typeof grp.min === 'number' && Number.isFinite(grp.min)) return true
+  }
+  if (by_bin && Object.keys(by_bin).length > 0) {
+    const grp = by_bin[Object.keys(by_bin)[0]]
+    if (grp && typeof grp.min === 'number' && Number.isFinite(grp.min)) return true
+  }
+  return false
+})
+
+const placeholderText = computed(() => {
+  if (!props.data) return '请先选择参数以查看箱线图'
+  return '该参数无有效数值数据，无法绘制箱线图'
+})
 
 function buildOption() {
   if (!props.data) return {}
@@ -47,8 +75,11 @@ function buildOption() {
     )
     sortedKeys.forEach((group, idx) => {
       const s = groupedData[group]
+      if (!s || !Number.isFinite(s.min) || !Number.isFinite(s.max)) return
       boxData.push([s.min, s.q1, s.median, s.q3, s.max])
-      s.outliers.forEach(o => outlierData.push([idx, o]))
+      if (Array.isArray(s.outliers)) {
+        s.outliers.forEach(o => outlierData.push([idx, o]))
+      }
       yMin = Math.min(yMin, s.min)
       yMax = Math.max(yMax, s.max)
 
@@ -66,7 +97,9 @@ function buildOption() {
   } else if (overall) {
     categories = [props.data.param]
     boxData.push([overall.min, overall.q1, overall.median, overall.q3, overall.max])
-    overall.outliers.forEach(o => outlierData.push([0, o]))
+    if (Array.isArray(overall.outliers)) {
+      overall.outliers.forEach(o => outlierData.push([0, o]))
+    }
     yMin = overall.min
     yMax = overall.max
 
@@ -80,6 +113,10 @@ function buildOption() {
         silent: true,
       })
     }
+  }
+
+  if (boxData.length === 0 || !Number.isFinite(yMin) || !Number.isFinite(yMax)) {
+    return {}
   }
 
   // Y-axis: focus on non-outlier range with padding
@@ -149,13 +186,17 @@ function buildOption() {
         },
         tooltip: {
           formatter: (p: any) => {
-            const d = p.data
+            const d = p?.data
+            if (!Array.isArray(d) || d.length < 5) {
+              return p?.name ? `<strong>${p.name}</strong>` : ''
+            }
+            const fmt = (n: any) => (typeof n === 'number' && Number.isFinite(n) ? n.toFixed(4) : 'N/A')
             return `<strong>${p.name}</strong><br/>` +
-              `Max: ${d[4].toFixed(4)}<br/>` +
-              `Q3: ${d[3].toFixed(4)}<br/>` +
-              `Median: ${d[2].toFixed(4)}<br/>` +
-              `Q1: ${d[1].toFixed(4)}<br/>` +
-              `Min: ${d[0].toFixed(4)}`
+              `Max: ${fmt(d[4])}<br/>` +
+              `Q3: ${fmt(d[3])}<br/>` +
+              `Median: ${fmt(d[2])}<br/>` +
+              `Q1: ${fmt(d[1])}<br/>` +
+              `Min: ${fmt(d[0])}`
           },
         },
       },
@@ -166,7 +207,11 @@ function buildOption() {
         itemStyle: { color: '#EE6666', opacity: 0.8 },
         symbolSize: 7,
         symbol: 'circle',
-        tooltip: { formatter: (p: any) => `异常值: ${p.value[1].toFixed(4)}` },
+        tooltip: { formatter: (p: any) => {
+          if (!p?.value || !Array.isArray(p.value) || p.value.length < 2) return ''
+          const v = p.value[1]
+          return `异常值: ${typeof v === 'number' && Number.isFinite(v) ? v.toFixed(4) : 'N/A'}`
+        }},
       },
       ...jitterSeries,
     ],
@@ -179,4 +224,24 @@ void chartRef // bound to <div ref="chartRef"> in template
 
 <style scoped>
 .chart-container { width: 100%; height: 100%; min-height: 400px; }
+.boxplot-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 500px;
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border-default);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+.boxplot-placeholder__icon {
+  font-size: 18px;
+  color: var(--text-secondary);
+}
+.boxplot-placeholder__text {
+  color: var(--text-secondary);
+}
 </style>
