@@ -126,10 +126,13 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
                     'mtime': entry.st_mtime,
                 })
 
-            # Sort: directories first, then by the requested key
+            # Sort: directories first (except when sorting by time, which is pure chronological)
             key_fn = SORT_KEYS.get(sort_by, SORT_KEYS['name'])
             reverse = sort_order == 'desc'
-            items.sort(key=lambda x: (not x['is_dir'], key_fn(x)), reverse=reverse)
+            if sort_by == 'mtime':
+                items.sort(key=key_fn, reverse=reverse)
+            else:
+                items.sort(key=lambda x: (not x['is_dir'], key_fn(x)), reverse=reverse)
 
             return Response({'path': path, 'items': items})
         except Exception as e:

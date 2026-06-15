@@ -1,24 +1,25 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+# Frontend 专属规则
+# 通用规则（node_modules、dist、.vscode、.DS_Store 等）见根目录 .gitignore
 
-node_modules
-dist
-dist-ssr
-*.local
+# Vite 缓存
+.vite/
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+# 前端 ESLint / Stylelint 缓存
+.eslintcache
+.stylelintcache
+
+# 前端测试覆盖
+coverage/
+.nyc_output/
+
+# 前端生产构建源映射
+*.map
+
+# 前端环境变量（示例应保留）
+.env
+.env.*
+!.env.example
+
+# Playwright 浏览器下载（CDN 缓存）
+.playwright-browsers/
+ms-playwright/

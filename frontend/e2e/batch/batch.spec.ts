@@ -241,4 +241,75 @@ test.describe('批次报表 /batch', { tag: ['@p1', '@p2', '@batch'] }, () => {
       console.log('[batch] 阶段明细表无数据行，跳过展开测试')
     }
   })
+
+  test('@p2 KPI 卡片：批次良率顶部 4 卡片渲染为与单文件一致的风格', async ({ page }) => {
+    await gotoApp(page, '/batch')
+
+    // 切到「批次良率报表」tab
+    await page.getByRole('tab', { name: '📊 批次良率报表' }).click()
+
+    // 等待 list_batches 接口返回
+    await page.waitForResponse(
+      (r) => r.url().includes('/batch-report/list_batches/'),
+      { timeout: 15_000 },
+    )
+
+    // 选择第一个批次（如果有）
+    const batchSelect = page.locator('.el-select').filter({ hasText: '选择批次' }).first()
+    await batchSelect.click()
+    const dropdown = page.locator('.el-select-dropdown:visible').last()
+    const firstOption = dropdown.locator('.el-select-dropdown__item').first()
+
+    if (!(await firstOption.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      test.skip(true, '无可用批次数据，跳过 KPI 卡片样式测试')
+      return
+    }
+
+    // 触发 batch_yield_data 拉取
+    const yieldResp = page.waitForResponse(
+      (r) => r.url().includes('/batch-report/batch_yield_data/'),
+      { timeout: 30_000 },
+    )
+    await firstOption.click()
+    await yieldResp
+
+    // ===== 验证 4 个 KPI 卡片渲染（与单文件同一套 class 体系） =====
+    const kpiRow = page.locator('.kpi-row').first()
+    await expect(kpiRow).toBeVisible({ timeout: 15_000 })
+
+    const cards = kpiRow.locator('.kpi-card')
+    await expect(cards).toHaveCount(4)
+
+    // 4 种 accent 变体必须齐全（保证双主题覆盖类能命中）
+    await expect(kpiRow.locator('.kpi-card--blue')).toHaveCount(1)
+    await expect(kpiRow.locator('.kpi-card--green')).toHaveCount(1)
+    await expect(kpiRow.locator('.kpi-card--amber')).toHaveCount(1)
+    await expect(kpiRow.locator('.kpi-card--slate')).toHaveCount(1)
+
+    // 每张卡片都有 icon / label / value（slate 卡用 el-tag 替代 value 文本）
+    for (const variant of ['blue', 'green', 'amber', 'slate'] as const) {
+      const card = kpiRow.locator(`.kpi-card--${variant}`)
+      await expect(card.locator('.kpi-icon')).toBeVisible()
+      await expect(card.locator('.kpi-label')).toBeVisible()
+    }
+
+    // 4 个标签文案（与单文件语义对齐）
+    await expect(kpiRow).toContainText('投入数量')
+    await expect(kpiRow).toContainText('总 Pass')
+    await expect(kpiRow).toContainText('整体良率')
+    await expect(kpiRow).toContainText('总 Fail')
+
+    // 良率卡片以「%」为单位；Fail 子行存在
+    const amberCard = kpiRow.locator('.kpi-card--amber')
+    await expect(amberCard.locator('.kpi-unit')).toContainText('%')
+    await expect(amberCard.locator('.kpi-sub')).toContainText('Fail:')
+
+    // slate 卡用 el-tag 展示 fail 计数（danger / success 二选一）
+    const slateTag = kpiRow.locator('.kpi-card--slate .kpi-tag .el-tag')
+    await expect(slateTag).toBeVisible()
+    const tagClass = (await slateTag.getAttribute('class')) || ''
+    expect(tagClass.includes('el-tag--danger') || tagClass.includes('el-tag--success')).toBe(true)
+
+    console.log('[batch] KPI 卡片样式与单文件一致（4 卡片 + accent + icon + tag）')
+  })
 })

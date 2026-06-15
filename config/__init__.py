@@ -1,3 +1,7 @@
-from .celery import app as celery_app
+try:
+    from .celery import app as celery_app
 
-__all__ = ('celery_app',)
+    __all__ = ('celery_app',)
+except ImportError:
+    # Celery is not installed (e.g. standalone/PyInstaller build).
+    pass
