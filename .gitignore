@@ -1,83 +1,123 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.egg-info/
-dist/
-build/
-*.egg
-.eggs/
+# ================== OS ==================
+.DS_Store
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
 
-# Virtual Environment
-.venv/
-venv/
-env/
-ENV/
-
-# Django
-db.sqlite3
-*.log
-media/
-staticfiles/
-static_root/
-
-# Celery
-celerybeat-schedule
-celerybeat.pid
-
-# Environment & Secrets
-.env
-.env.*
-!.env.example
-
-# Vue / Node
-node_modules/
-dist-ssr/
-*.local
-frontend/dist/
-
-# IDE
-.vscode/
+# ================== IDE / Editor ==================
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
 .idea/
 .codebuddy/
 *.swp
 *.swo
 *~
-.DS_Store
-Thumbs.db
-Thumbs.db:encryptable
+Session.vim
+.netrwhist
 
-# Docker
+# ================== Secrets ==================
+.env
+.env.*
+!.env.example
+
+# ================== Python ==================
+__pycache__/
+*.py[cod]
+*.pyo
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
+
+# ================== Virtual envs & worktrees ==================
+.venv/
+.venv-wsl/
+venv/
+env/
+ENV/
+.worktrees/
+
+# ================== Django ==================
+db.sqlite3
+db.sqlite3-journal
+*.log
+media/
+staticfiles/
+static_root/
+local_settings.py
+
+# ================== Celery ==================
+celerybeat-schedule
+celerybeat.pid
+*.pid
+
+# ================== Vue / Node / Frontend ==================
+node_modules/
+dist-ssr/
+*.local
+# Vite 缓存
+.vite/
+.parcel-cache/
+# 源映射（生产构建）
+*.map
+# 测试覆盖
+coverage/
+.nyc_output/
+# 前端环境变量
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# ================== Docker ==================
 docker-compose.override.yml
 
-# Playwright
+# ================== Playwright ==================
 test-results/
 playwright-report/
 frontend/test-results/
 frontend/playwright-report/
 frontend/e2e/.auth/
 frontend/e2e/.downloads/
+.playwright-mcp/
 
-# Development artifacts
+# ================== Project artifacts ==================
+# 工具/IDE 配置
 .claude/
 .skills/
 .trae/documents/
 .data/
+.codegraph/daemon.*
+# 调试与开发脚本
 token.txt
 test_*.py
 P0_*.md
 P0_*.py
-*.png
+debug-*.md
+DEBUG_*.md
+.dbg/
+# 项目约定不入库目录
 /Data/
 /test/
 /tasks/
-# WSL/Virtual envs
-.venv-wsl/
-.worktrees/
 
-# Playwright MCP cache
-.playwright-mcp/
-
-# OS
+# ================== Backups / Temp ==================
 *.bak
 *.tmp
+*.orig
+*.rej

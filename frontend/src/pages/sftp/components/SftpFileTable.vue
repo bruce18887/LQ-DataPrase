@@ -3,6 +3,7 @@
     <el-table
       v-loading="loading"
       :data="items"
+      :default-sort="{ prop: sortBy, order: sortOrder === 'desc' ? 'descending' : 'ascending' }"
       @row-click="(row: any) => { if (row.is_dir) emit('navigate', currentPath + '/' + row.name) }"
       @sort-change="(sort: any) => emit('sort-change', sort)"
       class="file-table"
@@ -17,7 +18,7 @@
           />
         </template>
       </el-table-column>
-      <el-table-column label="名称" min-width="280" column-key="name" sortable="custom" :sort-orders="['ascending', 'descending']">
+      <el-table-column label="名称" min-width="280" prop="name" column-key="name" sortable="custom" :sort-orders="['ascending', 'descending']">
         <template #default="{row}">
           <div class="file-name-cell" :class="{ 'is-dir': row.is_dir }">
             <div class="file-icon">
@@ -31,13 +32,13 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="大小" width="120" align="right" column-key="size" sortable="custom" :sort-orders="['ascending', 'descending']">
+      <el-table-column label="大小" width="120" align="right" prop="size" column-key="size" sortable="custom" :sort-orders="['ascending', 'descending']">
         <template #default="{row}">
           <span v-if="row.is_dir" class="dir-label">文件夹</span>
           <span v-else class="file-size">{{ formatSize(row.size) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="修改时间" width="160" align="center" column-key="mtime" sortable="custom" :sort-orders="['ascending', 'descending']">
+      <el-table-column label="修改时间" width="160" align="center" prop="mtime" column-key="mtime" sortable="custom" :sort-orders="['ascending', 'descending']">
         <template #default="{row}">
           <span class="file-time">{{ row.mtime ? formatDate(row.mtime) : '-' }}</span>
         </template>
@@ -102,6 +103,8 @@ const props = defineProps<{
   currentPath: string
   downloadingRows: Set<string>
   loading?: boolean
+  sortBy?: string
+  sortOrder?: 'asc' | 'desc'
 }>()
 
 const emit = defineEmits<{
