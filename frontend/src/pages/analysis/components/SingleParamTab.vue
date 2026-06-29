@@ -113,6 +113,7 @@
             :visible="showQQPlot"
             :result="qqResult"
             :loading="qqLoading"
+            :outlier-handling="outlierHandling"
           />
         </div>
         <div

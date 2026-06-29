@@ -11,7 +11,13 @@
       <span class="qqplot-placeholder__text">{{ !result ? '暂无QQ图数据' : '该参数无有效数值数据' }}</span>
     </div>
     <!-- Chart container -->
-    <div v-else ref="chartRef" class="qqplot-container" />
+    <div v-else class="qqplot-chart-inner">
+      <div ref="chartRef" class="qqplot-container" />
+      <OutlierHintBar
+        :mode="outlierHandling || 'off'"
+        :outlier-info="result?.outlier_info ?? null"
+      />
+    </div>
   </div>
 </template>
 
@@ -20,6 +26,7 @@ import { computed } from 'vue'
 import { Loading, InfoFilled } from '@element-plus/icons-vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
+import OutlierHintBar from './OutlierHintBar.vue'
 
 const props = defineProps<{
   fileId: number | null
@@ -27,6 +34,7 @@ const props = defineProps<{
   visible: boolean
   result: any
   loading: boolean
+  outlierHandling?: 'clip' | 'exclude' | 'off'
 }>()
 
 const { colors } = useEChartsTheme()
@@ -46,8 +54,27 @@ function buildOption() {
   if (theoretical.length === 0) return {}
 
   const tc = colors.value.textColor
-  const scatterData = theoretical.map((t, i) => [t, observed[i]])
-  const allValues = [...theoretical, ...observed]
+
+  // Apply outlier clipping
+  const outlierInfo = r.outlier_info
+  const handlingMode = props.outlierHandling || 'off'
+  let filteredTheoretical = theoretical
+  let filteredObserved = observed
+
+  if (handlingMode === 'clip' && outlierInfo?.has_outliers) {
+    const lb = outlierInfo.lower_bound
+    const ub = outlierInfo.upper_bound
+    const indices = observed
+      .map((v: number, i: number) => (v >= lb && v <= ub ? i : -1))
+      .filter((i: number) => i >= 0)
+    if (indices.length > 2) {
+      filteredTheoretical = indices.map((i: number) => theoretical[i])
+      filteredObserved = indices.map((i: number) => observed[i])
+    }
+  }
+
+  const scatterData = filteredTheoretical.map((t: number, i: number) => [t, filteredObserved[i]])
+  const allValues = [...filteredTheoretical, ...filteredObserved]
   const dataMin = Math.min(...allValues)
   const dataMax = Math.max(...allValues)
   const diagonal = [[dataMin, dataMin], [dataMax, dataMax]]
@@ -111,6 +138,11 @@ void chartRef // bound to <div ref="chartRef"> in template
   height: 100%;
   min-height: 400px;
   position: relative;
+}
+
+.qqplot-chart-inner {
+  display: flex;
+  flex-direction: column;
 }
 
 .qqplot-container {
