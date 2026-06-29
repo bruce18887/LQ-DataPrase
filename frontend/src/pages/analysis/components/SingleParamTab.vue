@@ -137,7 +137,7 @@
       </div>
       <!-- 图表：serial 模式 -->
       <div v-else-if="chartMode === 'serial'" class="chart-wrapper">
-        <SerialChart v-if="serialDistData" :data="serialDistData" />
+        <SerialChart v-if="serialDistData" :data="serialDistData" :outlier-handling="outlierHandling" />
         <el-empty v-else description="当前参数无序列分布数据，请选择其他参数" />
       </div>
     </template>
