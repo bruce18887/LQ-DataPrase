@@ -103,6 +103,7 @@
             :range-type="rangeType"
             :bar-width-percent="barWidthPercent"
             :selected-param="localSelectedParam"
+            :outlier-handling="outlierHandling"
           />
         </div>
         <div v-if="showQQPlot" :key="`qq-${localSelectedParam}`" class="chart-wrapper chart-wrapper--bottom">
@@ -144,7 +145,6 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import api from '../../../api'
 import { useAnalysisStore } from '../../../stores/analysis'
 import ChartConfigPanel from './ChartConfigPanel.vue'
 import RangeComparisonTable from './RangeComparisonTable.vue'
@@ -162,6 +162,7 @@ import { useHistogram } from '../composables/useHistogram'
 import { useSerialDistribution } from '../composables/useSerialDistribution'
 import { useSiteStats } from '../composables/useSiteStats'
 import { useBoxPlot } from '../composables/useBoxPlot'
+import { useQQPlot } from '../composables/useQQPlot'
 
 const props = defineProps<{
   fileId: number | null
@@ -181,6 +182,7 @@ const barWidthPercent = ref(analysisStore.barWidthPercent)
 const ignoreNoLimit = ref(analysisStore.ignoreNoLimit)
 const customLow = ref<number | null>(analysisStore.customLow)
 const customHigh = ref<number | null>(analysisStore.customHigh)
+const outlierHandling = ref(analysisStore.outlierHandling)
 
 // Composable: Histogram
 const {
@@ -247,30 +249,17 @@ const currentBoxPlotData = computed(() => {
 })
 const boxPlotOverallStats = computed(() => currentBoxPlotData.value?.overall ?? null)
 
-// ========== QQ Plot state ==========
+// Composable: QQ Plot
 const showQQPlot = ref(false)
-const qqResult = ref<any>(null)
-const qqLoading = ref(false)
-
-async function loadQQPlot() {
-  if (!props.fileId || !localSelectedParam.value || !showQQPlot.value) {
-    qqResult.value = null
-    return
-  }
-  qqLoading.value = true
-  qqResult.value = null
-  try {
-    const { data } = await api.post('/analysis/qqplot/', {
-      file_id: props.fileId,
-      param: localSelectedParam.value,
-    })
-    qqResult.value = data
-  } catch {
-    qqResult.value = null
-  } finally {
-    qqLoading.value = false
-  }
-}
+const {
+  qqLoading,
+  qqResult,
+  loadQQPlot,
+} = useQQPlot(
+  () => props.fileId,
+  localSelectedParam,
+  showQQPlot,
+)
 
 // ========== Store sync ==========
 watch(chartMode, (val) => { analysisStore.chartMode = val })
@@ -280,6 +269,8 @@ watch(barWidthPercent, (val) => { analysisStore.barWidthPercent = val })
 watch(ignoreNoLimit, (val) => { analysisStore.ignoreNoLimit = val })
 watch(customLow, (val) => { analysisStore.customLow = val })
 watch(customHigh, (val) => { analysisStore.customHigh = val })
+watch(outlierHandling, (val) => { analysisStore.outlierHandling = val })
+watch(() => analysisStore.outlierHandling, (val) => { outlierHandling.value = val })
 
 // ========== Cross-composable orchestration ==========
 watch([chartConfig, rangeType], () => {
@@ -296,30 +287,12 @@ watch(histResult, () => {
   }
 })
 
-// ========== QQ Plot orchestration ==========
-watch(showQQPlot, (val) => {
-  if (val) {
-    loadQQPlot()
-  } else {
-    qqResult.value = null
-  }
-})
-
-watch(localSelectedParam, () => {
-  if (showQQPlot.value) {
-    loadQQPlot()
-  }
-})
-
 // When the file changes, the parent component is responsible for resetting
 // the selectedParam (see AnalysisPage.onFileChange). This watcher is a
 // defense-in-depth fallback: if a parent path forgets to reset it, we
 // don't carry the stale value into the new file's chart APIs.
 watch(() => props.fileId, () => {
   localSelectedParam.value = ''
-  if (showQQPlot.value) {
-    loadQQPlot()
-  }
 })
 
 // ========== Param navigation ==========
