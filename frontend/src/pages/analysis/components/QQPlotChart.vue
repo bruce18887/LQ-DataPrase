@@ -128,7 +128,7 @@ function buildOption() {
   }
 }
 
-const { chartRef } = useChart(buildOption, [() => props.result, () => props.visible])
+const { chartRef } = useChart(buildOption, [() => props.result, () => props.visible, () => props.outlierHandling])
 void chartRef // bound to <div ref="chartRef"> in template
 </script>
 
