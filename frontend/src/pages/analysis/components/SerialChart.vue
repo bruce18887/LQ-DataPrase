@@ -1,12 +1,22 @@
 <template>
-  <div ref="chartRef" style="height: 450px" />
+  <div class="serial-chart-wrapper">
+    <div ref="chartRef" style="height: 450px" />
+    <OutlierHintBar
+      :mode="outlierHandling || 'off'"
+      :outlier-info="data?.outlier_info ?? null"
+    />
+  </div>
 </template>
 
 <script setup lang="ts">
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
+import OutlierHintBar from './OutlierHintBar.vue'
 
-const props = defineProps<{ data: any }>()
+const props = defineProps<{
+  data: any
+  outlierHandling?: 'clip' | 'exclude' | 'off'
+}>()
 const { colors } = useEChartsTheme()
 
 const SITE_COLORS = [
@@ -39,6 +49,20 @@ function buildOption() {
     subtext += ` [${d.lower_limit.toFixed(4)}, ${d.upper_limit.toFixed(4)}]`
   }
 
+  // Apply outlier clipping to y-axis
+  const outlierInfo = d.outlier_info
+  const handlingMode = props.outlierHandling || 'off'
+  let yAxisMin = d.y_min
+  let yAxisMax = d.y_max
+
+  if (handlingMode === 'clip' && outlierInfo?.has_outliers) {
+    yAxisMin = outlierInfo.lower_bound
+    yAxisMax = outlierInfo.upper_bound
+    const pad = (yAxisMax - yAxisMin) * 0.1
+    yAxisMin -= pad
+    yAxisMax += pad
+  }
+
   return {
     title: { text: `${param} Serial分布`, subtext, left: 'center', subtextStyle: { fontSize: 12 } },
     tooltip: {
@@ -55,7 +79,7 @@ function buildOption() {
     yAxis: {
       type: 'value', name: unit ? `${param} (${unit})` : param,
       nameTextStyle: { color: tc }, nameLocation: 'middle', nameGap: 40,
-      min: d.y_min, max: d.y_max, axisLabel: { formatter: (v: number) => v.toFixed(4), color: tc },
+      min: yAxisMin, max: yAxisMax, axisLabel: { formatter: (v: number) => v.toFixed(4), color: tc },
     },
     dataZoom: [
       { type: 'slider', xAxisIndex: 0, start: 0, end: 100 },
@@ -65,6 +89,6 @@ function buildOption() {
   }
 }
 
-const { chartRef } = useChart(buildOption, [() => props.data])
+const { chartRef } = useChart(buildOption, [() => props.data, () => props.outlierHandling])
 void chartRef // bound to <div ref="chartRef"> in template
 </script>
