@@ -132,6 +132,11 @@
           <div v-if="corrResult" ref="scatterChartRef" class="chart-inner" />
           <el-empty v-else description="选择 X/Y 轴参数以分析相关性" />
         </div>
+          <OutlierHintBar
+            v-if="corrResult"
+            :mode="outlierHandling"
+            :outlier-info="corrResult?.x_outlier_info ?? null"
+          />
       </template>
 
       <!-- 矩阵模式 -->
@@ -153,6 +158,7 @@ import { useCorrelationMatrix } from '../composables/useCorrelationMatrix'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
 import { useAnalysisStore } from '../../../stores/analysis'
+import OutlierHintBar from './OutlierHintBar.vue'
 
 const props = defineProps<{
   fileId: number | null
@@ -166,6 +172,10 @@ const { colors } = useEChartsTheme()
 const viewMode = ref<'scatter' | 'matrix'>('scatter')
 const ignoreNoLimit = ref(analysisStore.ignoreNoLimit)
 watch(ignoreNoLimit, (val) => { analysisStore.ignoreNoLimit = val })
+
+const outlierHandling = ref(analysisStore.outlierHandling)
+watch(outlierHandling, (val) => { analysisStore.outlierHandling = val })
+watch(() => analysisStore.outlierHandling, (val) => { outlierHandling.value = val })
 
 // ===== Scatter mode =====
 const localX = ref('')
@@ -252,6 +262,22 @@ function buildScatterOption() {
   const xR = allX.length > 0 ? computeRange(axisModeX.value, sigmaX.value, customMinX.value, customMaxX.value, allX) : { min: undefined, max: undefined }
   const yR = allY.length > 0 ? computeRange(axisModeY.value, sigmaY.value, customMinY.value, customMaxY.value, allY) : { min: undefined, max: undefined }
 
+  // Apply outlier clipping to axis ranges
+  if (outlierHandling.value === 'clip') {
+    if (d.x_outlier_info?.has_outliers) {
+      if (axisModeX.value === 'data') {
+        xR.min = d.x_outlier_info.lower_bound
+        xR.max = d.x_outlier_info.upper_bound
+      }
+    }
+    if (d.y_outlier_info?.has_outliers) {
+      if (axisModeY.value === 'data') {
+        yR.min = d.y_outlier_info.lower_bound
+        yR.max = d.y_outlier_info.upper_bound
+      }
+    }
+  }
+
   // Regression line
   if (showRegression.value && allX.length >= 2) {
     const { slope, intercept } = linearRegression(allX.map((x, i) => [x, allY[i]]))
@@ -294,7 +320,9 @@ const { chartRef: scatterChartRef } = useChart(buildScatterOption, [
   () => sigmaX.value, () => sigmaY.value,
   () => customMinX.value, () => customMaxX.value,
   () => customMinY.value, () => customMaxY.value,
+  () => outlierHandling.value,
 ], 'scatterChartRef')
+void scatterChartRef
 
 watch(() => corrResult.value, (data) => {
   if (!data) return
@@ -379,6 +407,7 @@ function buildMatrixOption() {
 }
 
 const { chartRef: matrixChartRef } = useChart(buildMatrixOption, [() => matrixData.value], 'matrixChartRef')
+void matrixChartRef
 </script>
 
 <style scoped>
