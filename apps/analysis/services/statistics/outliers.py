@@ -1,6 +1,6 @@
 """Outlier detection utilities for data visualization."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 import numpy as np
 import pandas as pd
 
@@ -62,11 +62,9 @@ def detect_outliers_iqr(
     # (data distribution is too extreme for IQR to be meaningful)
     if normal_count == 0:
         return {
-            'has_outliers': False,
-            'outlier_count': 0,
+            **empty_result,
             'lower_bound': round(lower_bound, 6),
             'upper_bound': round(upper_bound, 6),
-            'normal_count': 0,
         }
 
     result: Dict[str, Any] = {
