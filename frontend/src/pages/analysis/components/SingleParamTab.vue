@@ -351,9 +351,9 @@ function nextParam() {
 .chart-wrapper {
   flex: 1;
   min-height: 480px;
-  background: #fff;
+  background: var(--bg-secondary, #fff);
   border-radius: 6px;
-  border: 1px solid #e4e7ed;
+  border: 1px solid var(--border-default, #e4e7ed);
   overflow: hidden;
 }
 
