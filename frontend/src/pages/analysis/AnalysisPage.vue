@@ -14,6 +14,18 @@
         </el-select>
         <CircularProgress :loading="loading" />
       </el-form-item>
+      <el-form-item label="异常值处理">
+        <el-select
+          v-model="outlierHandling"
+          size="small"
+          class="analysis-file-selector__select"
+          style="width: 160px"
+        >
+          <el-option label="裁剪范围" value="clip" />
+          <el-option label="完全排除" value="exclude" />
+          <el-option label="不处理" value="off" />
+        </el-select>
+      </el-form-item>
     </el-form>
 
     <el-empty v-if="files.length === 0" description="请先在数据管理页面上传数据文件" />
@@ -76,6 +88,8 @@ const selectedParam = ref(analysisStore.selectedParam)
 const params = ref<string[]>([])
 const loading = ref(false)
 const activeTab = ref(analysisStore.activeTab)
+const outlierHandling = ref(analysisStore.outlierHandling)
+watch(outlierHandling, (val) => { analysisStore.outlierHandling = val })
 
 // Wafer state
 const waferData = ref<any>(null)
