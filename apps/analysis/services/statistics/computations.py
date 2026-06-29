@@ -12,6 +12,7 @@ from scipy import stats as sp_stats
 
 from .helpers import safe_gap, get_1d_from, get_coord_columns
 from .limits import parse_limit_string
+from .outliers import detect_outliers_iqr
 
 
 def compute_cpk(mean_val: float, std_val: float, cpk_lower: Optional[float], cpk_upper: Optional[float],
@@ -320,6 +321,7 @@ def compute_qqplot(data_series: pd.Series) -> Dict[str, Any]:
     """
     clean = pd.to_numeric(data_series, errors='coerce').dropna()
     clean = clean[np.isfinite(clean.values)]
+    outlier_info = detect_outliers_iqr(clean, include_values=False)
     if len(clean) < 3:
         return {
             'theoretical_quantiles': [],
@@ -327,6 +329,7 @@ def compute_qqplot(data_series: pd.Series) -> Dict[str, Any]:
             'r_squared': 0.0,
             'is_normal': False,
             'n': len(clean),
+            'outlier_info': outlier_info,
         }
 
     try:
@@ -347,6 +350,7 @@ def compute_qqplot(data_series: pd.Series) -> Dict[str, Any]:
             'r_squared': r_squared,
             'is_normal': is_normal,
             'n': len(clean),
+            'outlier_info': outlier_info,
         }
     except Exception:
         return {
@@ -355,4 +359,5 @@ def compute_qqplot(data_series: pd.Series) -> Dict[str, Any]:
             'r_squared': 0.0,
             'is_normal': False,
             'n': len(clean),
+            'outlier_info': outlier_info,
         }
