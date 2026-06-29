@@ -22,7 +22,6 @@
           style="width: 160px"
         >
           <el-option label="裁剪范围" value="clip" />
-          <el-option label="完全排除" value="exclude" />
           <el-option label="不处理" value="off" />
         </el-select>
       </el-form-item>

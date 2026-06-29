@@ -137,6 +137,11 @@
             :mode="outlierHandling"
             :outlier-info="corrResult?.x_outlier_info ?? null"
           />
+          <OutlierHintBar
+            v-if="corrResult"
+            :mode="outlierHandling"
+            :outlier-info="corrResult?.y_outlier_info ?? null"
+          />
       </template>
 
       <!-- 矩阵模式 -->

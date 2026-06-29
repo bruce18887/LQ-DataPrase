@@ -116,13 +116,13 @@ const hintText = computed(() => {
 }
 
 /* Dark theme */
-:root[data-theme='dark'] .outlier-hint-bar--clip {
+:root[data-theme='night'] .outlier-hint-bar--clip {
   background-color: #3e2723;
   color: #ffab91;
   border: 1px solid #5d4037;
 }
 
-:root[data-theme='dark'] .outlier-hint-bar--exclude {
+:root[data-theme='night'] .outlier-hint-bar--exclude {
   background-color: #3e1515;
   color: #ef9a9a;
   border: 1px solid #5d2020;
