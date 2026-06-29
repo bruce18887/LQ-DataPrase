@@ -46,6 +46,7 @@ from .computations import (
     compute_range_statistics,
     compute_qqplot,
 )
+from .outliers import detect_outliers_iqr
 
 # ── analytics ────────────────────────────────────────────────────────
 from .trends import (
@@ -94,6 +95,7 @@ __all__ = [
     'compute_boxplot_stats',
     'compute_range_statistics',
     'compute_qqplot',
+    'detect_outliers_iqr',
     # analytics
     'compute_bin_trend',
     'compute_yield_trend',
