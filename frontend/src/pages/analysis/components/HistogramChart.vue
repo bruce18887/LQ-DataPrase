@@ -32,21 +32,24 @@ function buildOption() {
   const binCenters: number[] = r.bin_centers || []
   if (binCenters.length === 0) return {}
 
-  // Apply outlier clipping to x-axis range
+  // Apply outlier clipping to x-axis range and filter data points
   const outlierInfo = r.outlier_info
   const handlingMode = props.outlierHandling || 'off'
   let xAxisMin: number | undefined = binCenters[0]
   let xAxisMax: number | undefined = binCenters[binCenters.length - 1]
+  let activeIndices: number[] = binCenters.map((_: number, i: number) => i)
 
   if (handlingMode === 'clip' && outlierInfo?.has_outliers) {
-    const normalCenters = binCenters.filter(
-      (c: number) => c >= outlierInfo.lower_bound && c <= outlierInfo.upper_bound
-    )
-    if (normalCenters.length > 0) {
-      xAxisMin = normalCenters[0]
-      xAxisMax = normalCenters[normalCenters.length - 1]
+    activeIndices = binCenters
+      .map((c: number, i: number) => (c >= outlierInfo.lower_bound && c <= outlierInfo.upper_bound ? i : -1))
+      .filter((i: number) => i >= 0)
+    if (activeIndices.length > 0) {
+      xAxisMin = binCenters[activeIndices[0]]
+      xAxisMax = binCenters[activeIndices[activeIndices.length - 1]]
     }
   }
+
+  const filteredBinCenters = activeIndices.map((i: number) => binCenters[i])
 
   const series: any[] = []
   const siteHists = r.site_histograms
@@ -62,21 +65,21 @@ function buildOption() {
       const hists: number[] = siteHists[site] || []
       series.push({
         name: `Site${site}`, type: 'bar',
-        data: binCenters.map((c: number, i: number) => [c, hists[i] ?? 0]),
+        data: activeIndices.map((i: number) => [binCenters[i], hists[i] ?? 0]),
         itemStyle: { color: COLORS_SITE_8[idx % COLORS_SITE_8.length] },
         barWidth: `${props.barWidthPercent}%`,
       })
     }
     series.push({
       name: 'All Site', type: 'bar', yAxisIndex: 1,
-      data: binCenters.map((c: number, i: number) => [c, r.bin_percentages?.[i] || 0]),
+      data: activeIndices.map((i: number) => [binCenters[i], r.bin_percentages?.[i] || 0]),
       itemStyle: { color: '#90CAF9', opacity: 0.5 }, barWidth: `${props.barWidthPercent}%`,
       label: { show: true, position: 'top', formatter: (p: any) => p.data[1] > 0 ? `${p.data[1].toFixed(2)}%` : '', fontSize: 10, color: '#1565C0', fontWeight: 'bold' },
     })
   } else {
     series.push({
       name: '数据分布', type: 'bar',
-      data: binCenters.map((c: number, i: number) => [c, r.bin_percentages?.[i] || 0]),
+      data: activeIndices.map((i: number) => [binCenters[i], r.bin_percentages?.[i] || 0]),
       itemStyle: { color: '#1E88E5' }, barWidth: `${props.barWidthPercent}%`,
     })
   }
@@ -110,14 +113,14 @@ function buildOption() {
   if (mk.length) series.push({ name: '规格限', type: 'line', data: [], markLine: { symbol: 'none', precision: 4, data: mk } })
 
   if (hasNormal) {
-    const binGap = binCenters.length > 1 ? Math.abs(binCenters[1] - binCenters[0]) : 1
+    const binGap = filteredBinCenters.length > 1 ? Math.abs(filteredBinCenters[1] - filteredBinCenters[0]) : 1
     const pdfFn = (x: number) => (1 / (r.std * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * ((x - r.mean) / r.std) ** 2)
     let xVals: number[]
     if (r.std < binGap) {
       const extra: number[] = [r.mean]
       for (let k = 1; k <= 6; k++) extra.push(r.mean - k * r.std, r.mean + k * r.std)
-      xVals = [...binCenters, ...extra].sort((a, b) => a - b)
-    } else { xVals = binCenters }
+      xVals = [...filteredBinCenters, ...extra].sort((a, b) => a - b)
+    } else { xVals = filteredBinCenters }
     series.push({ name: '正态分布', type: 'line', data: xVals.map((x: number) => [x, pdfFn(x)]), smooth: true, lineStyle: { color: '#F57F17', width: 3 }, symbol: 'none', yAxisIndex: hasSiteData ? 2 : 1, z: 10 })
   }
 
