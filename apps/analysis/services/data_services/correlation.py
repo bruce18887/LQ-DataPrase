@@ -6,6 +6,7 @@ from apps.analysis.services.statistics import (
     get_1d_from,
     get_site_column,
 )
+from apps.analysis.services.statistics.outliers import detect_outliers_iqr
 
 
 def compute_correlation_scatter(df, param_x, param_y):
@@ -29,6 +30,10 @@ def compute_correlation_scatter(df, param_x, param_y):
     common_idx = x_series.index.intersection(y_series.index)
     x_vals = x_series.loc[common_idx].astype(float)
     y_vals = y_series.loc[common_idx].astype(float)
+
+    # Detect outliers for both axes
+    x_outlier_info = detect_outliers_iqr(x_vals, include_values=False)
+    y_outlier_info = detect_outliers_iqr(y_vals, include_values=False)
 
     site_col = get_site_column(df)
     series_data = []
@@ -68,4 +73,6 @@ def compute_correlation_scatter(df, param_x, param_y):
         'n': n,
         'pearson_r': round(pearson_r, 6),
         'series_data': series_data,
+        'x_outlier_info': x_outlier_info,
+        'y_outlier_info': y_outlier_info,
     }
