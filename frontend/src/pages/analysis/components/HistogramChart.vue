@@ -1,10 +1,17 @@
 <template>
-  <div ref="chartRef" class="chart-container" />
+  <div class="histogram-chart-wrapper">
+    <div ref="chartRef" class="chart-container" />
+    <OutlierHintBar
+      :mode="outlierHandling || 'off'"
+      :outlier-info="result?.outlier_info ?? null"
+    />
+  </div>
 </template>
 
 <script setup lang="ts">
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
+import OutlierHintBar from './OutlierHintBar.vue'
 
 const props = defineProps<{
   result: any
@@ -12,6 +19,7 @@ const props = defineProps<{
   rangeType: string
   barWidthPercent: number
   selectedParam: string
+  outlierHandling?: 'clip' | 'exclude' | 'off'
 }>()
 
 const { colors } = useEChartsTheme()
@@ -23,6 +31,22 @@ function buildOption() {
   const tc = colors.value.textColor
   const binCenters: number[] = r.bin_centers || []
   if (binCenters.length === 0) return {}
+
+  // Apply outlier clipping to x-axis range
+  const outlierInfo = r.outlier_info
+  const handlingMode = props.outlierHandling || 'off'
+  let xAxisMin: number | undefined = binCenters[0]
+  let xAxisMax: number | undefined = binCenters[binCenters.length - 1]
+
+  if (handlingMode === 'clip' && outlierInfo?.has_outliers) {
+    const normalCenters = binCenters.filter(
+      (c: number) => c >= outlierInfo.lower_bound && c <= outlierInfo.upper_bound
+    )
+    if (normalCenters.length > 0) {
+      xAxisMin = normalCenters[0]
+      xAxisMax = normalCenters[normalCenters.length - 1]
+    }
+  }
 
   const series: any[] = []
   const siteHists = r.site_histograms
@@ -118,7 +142,7 @@ function buildOption() {
     legend: { data: series.map((s: any) => s.name), top: 'bottom', type: 'scroll', textStyle: { color: tc } },
     toolbox: { feature: { saveAsImage: { name: `${props.selectedParam}_分析` } } },
     grid: { top: 55, bottom: 70, left: 55, right: (hasSiteData && hasNormal) ? 120 : (hasSiteData || hasNormal) ? 80 : 55 },
-    xAxis: { type: 'value', name: '', nameLocation: 'middle', nameGap: 28, min: binCenters[0], max: binCenters[binCenters.length - 1], axisLabel: { rotate: 45, show: true, interval: 0, fontSize: 9, formatter: (v: number) => v.toFixed(4), color: tc }, splitNumber: 24 },
+    xAxis: { type: 'value', name: '', nameLocation: 'middle', nameGap: 28, min: xAxisMin, max: xAxisMax, axisLabel: { rotate: 45, show: true, interval: 0, fontSize: 9, formatter: (v: number) => v.toFixed(4), color: tc }, splitNumber: 24 },
     yAxis: yAxes,
     series,
   }
