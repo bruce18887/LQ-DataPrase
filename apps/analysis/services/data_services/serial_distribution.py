@@ -10,6 +10,7 @@ from apps.analysis.services.statistics import (
     get_serial_column,
 )
 from apps.analysis.services.limits import resolve_limits
+from apps.analysis.services.statistics.outliers import detect_outliers_iqr
 
 
 def compute_serial_distribution_data(df, metadata, param, range_type,
@@ -119,6 +120,7 @@ def compute_serial_distribution_data(df, metadata, param, range_type,
 
     # -- Stats & limits ---------------------------------------------------
     data_series = get_1d_from(df, param).dropna()
+    outlier_info = detect_outliers_iqr(data_series, include_values=False)
     stats = compute_range_statistics(data_series, metadata, param)
     mean_val = stats['mean']
     std_val = stats['std']
@@ -205,4 +207,5 @@ def compute_serial_distribution_data(df, metadata, param, range_type,
         'marks': marks,
         'y_min': y_min,
         'y_max': y_max,
+        'outlier_info': outlier_info,
     }
