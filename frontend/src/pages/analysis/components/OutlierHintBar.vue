@@ -2,7 +2,7 @@
   <div
     v-if="visible"
     class="outlier-hint-bar"
-    :class="`outlier-hint-bar--${mode}`"
+    :class="hintClass"
   >
     <el-tooltip
       v-if="outlierValues.length > 0"
@@ -23,7 +23,7 @@
       </span>
     </el-tooltip>
     <span v-else class="outlier-hint-bar__text">
-      <el-icon class="outlier-hint-bar__icon"><Warning /></el-icon>
+      <el-icon class="outlier-hint-bar__icon"><component :is="iconComponent" /></el-icon>
       {{ hintText }}
     </span>
   </div>
@@ -31,7 +31,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Warning } from '@element-plus/icons-vue'
+import { Warning, CircleCheck } from '@element-plus/icons-vue'
 
 export interface OutlierInfo {
   has_outliers: boolean
@@ -48,10 +48,19 @@ const props = defineProps<{
 }>()
 
 const visible = computed(() => {
-  if (!props.outlierInfo) return false
   if (props.mode === 'off') return false
-  return props.outlierInfo.has_outliers
+  if (!props.outlierInfo) return false
+  return true
 })
+
+const hasOutliers = computed(() => props.outlierInfo?.has_outliers === true)
+
+const hintClass = computed(() => {
+  if (!hasOutliers.value) return 'outlier-hint-bar--ok'
+  return `outlier-hint-bar--${props.mode}`
+})
+
+const iconComponent = computed(() => hasOutliers.value ? Warning : CircleCheck)
 
 const outlierValues = computed(() => {
   return props.outlierInfo?.outlier_values ?? []
@@ -60,6 +69,9 @@ const outlierValues = computed(() => {
 const hintText = computed(() => {
   if (!props.outlierInfo) return ''
   const info = props.outlierInfo
+  if (!info.has_outliers) {
+    return `异常值检测: 未发现异常值（IQR 范围: ${info.lower_bound.toFixed(4)} ~ ${info.upper_bound.toFixed(4)}）`
+  }
   const modeText = props.mode === 'clip' ? '已裁剪' : '已排除'
   const bounds = `（正常范围: ${info.lower_bound.toFixed(4)} ~ ${info.upper_bound.toFixed(4)}）`
   return `${modeText} ${info.outlier_count} 个异常值 ${bounds}`
@@ -86,6 +98,12 @@ const hintText = computed(() => {
   background-color: #fce4ec;
   color: #c62828;
   border: 1px solid #f8bbd0;
+}
+
+.outlier-hint-bar--ok {
+  background-color: #e8f5e9;
+  color: #2e7d32;
+  border: 1px solid #c8e6c9;
 }
 
 .outlier-hint-bar__text {
@@ -126,5 +144,11 @@ const hintText = computed(() => {
   background-color: #3e1515;
   color: #ef9a9a;
   border: 1px solid #5d2020;
+}
+
+:root[data-theme='night'] .outlier-hint-bar--ok {
+  background-color: #1b3a1b;
+  color: #81c784;
+  border: 1px solid #2e5a2e;
 }
 </style>
