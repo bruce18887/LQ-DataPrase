@@ -11,6 +11,7 @@ from apps.analysis.services.statistics import (
     get_site_column,
     safe_gap,
 )
+from apps.analysis.services.statistics.outliers import detect_outliers_iqr
 from apps.analysis.services.limits import resolve_limits
 
 
@@ -33,10 +34,30 @@ def compute_histogram_stats(df, metadata, param, site_col,
     if len(data_series) == 0:
         return None
 
+    # Detect outliers using IQR method
+    outlier_info = detect_outliers_iqr(data_series, include_values=False)
+
     stats = compute_range_statistics(data_series, metadata, param)
     cpk_result = compute_cpk(
         stats['mean'], stats['std'], stats['rdl'][0], stats['rdl'][1]
     )
+
+    # Compute filtered Cpk (excluding outliers)
+    filtered_cpk = None
+    if outlier_info['has_outliers'] and outlier_info['normal_count'] > 1:
+        normal_data = data_series[
+            (data_series >= outlier_info['lower_bound']) &
+            (data_series <= outlier_info['upper_bound'])
+        ]
+        if len(normal_data) > 1:
+            filtered_mean = float(normal_data.mean())
+            filtered_std = float(normal_data.std(ddof=0))
+            if filtered_std > 0:
+                filtered_cpk_result = compute_cpk(
+                    filtered_mean, filtered_std,
+                    stats['rdl'][0], stats['rdl'][1]
+                )
+                filtered_cpk = round(filtered_cpk_result['cpk'], 4)
 
     site_data = None
     site_idx = None
@@ -149,4 +170,6 @@ def compute_histogram_stats(df, metadata, param, site_col,
         'bin_centers': [round(c, 6) for c in bin_centers],
         'bin_percentages': bin_percentages,
         'total_count': len(data_series),
+        'outlier_info': outlier_info,
+        'filtered_cpk': filtered_cpk,
     }
