@@ -23,6 +23,10 @@ Session.vim
 .env
 .env.*
 !.env.example
+# Django / 应用密钥
+secret.key
+*.key
+!*.pubkey
 
 # ================== Python ==================
 __pycache__/
@@ -105,7 +109,7 @@ frontend/e2e/.downloads/
 .codegraph/daemon.*
 # 调试与开发脚本
 token.txt
-test_*.py
+/test_*.py
 P0_*.md
 P0_*.py
 debug-*.md
@@ -113,8 +117,13 @@ DEBUG_*.md
 .dbg/
 # 项目约定不入库目录
 /Data/
-/test/
+/test/*
+!/test/backend/
 /tasks/
+# PyInstaller 打包输出（与 build.bat 配套，保留 lq_dataprase.spec）
+/release/
+/dist/
+/build/
 
 # ================== Backups / Temp ==================
 *.bak
