@@ -1,0 +1,52 @@
+# electron-builder configuration for LQ-DataPrase
+#
+# The build sequence is:
+#   1. npm run build          – compile the Vue SPA to frontend/dist/
+#   2. npm run electron:build:ts – compile electron TS to frontend/electron-dist/
+#   3. build.bat              – PyInstaller packaging → dist/LQ-DataPrase/
+#   4. electron-builder       – package everything into an NSIS installer
+#
+# After installation the layout is:
+#   <install-dir>/
+#     app.asar                  ← frontend/dist/ + frontend/electron-dist/
+#     resources/
+#       LQ-DataPrase.exe        ← extraResources from dist/LQ-DataPrase/
+#       _internal/              ← PyInstaller bundle directory
+#
+# User data (db.sqlite3, media/, secret.key) is written to:
+#   %APPDATA%/lq-dataprase/     ← set via LQDP_BASE_DIR env var
+
+appId: com.lq-dataprase.app
+productName: LQ-DataPrase
+copyright: "Copyright © 2024 LQ-DataPrase"
+
+directories:
+  app: frontend
+  output: out
+
+files:
+  - "dist/**/*"
+  - "electron-dist/**/*"
+
+extraResources:
+  - from: "dist/LQ-DataPrase/"
+    to: "."
+    filter:
+      - "LQ-DataPrase.exe"
+      - "_internal/**"
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: LQ-DataPrase
+
+asar: true
+compression: normal

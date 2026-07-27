@@ -3,13 +3,37 @@ import axios, { AxiosError, type AxiosRequestConfig } from 'axios'
 import { authApi } from './auth'
 import { useAuthStore } from '../stores/auth'
 
+// ---------------------------------------------------------------------------
+// Electron backend URL detection
+// ---------------------------------------------------------------------------
+// When running inside Electron the main process passes the backend base URL
+// (e.g. "http://localhost:52341") via window.__backendUrl__. Build the full
+// API base from that. Falls back to "/api/v1" in web mode where Vite proxies
+// /api → localhost:8000.
+
+function getBaseUrl(): string {
+  if (typeof window !== 'undefined' && window.__backendUrl__) {
+    return `${window.__backendUrl__}/api/v1`
+  }
+  return '/api/v1'
+}
+
 const api = axios.create({
-  baseURL: '/api/v1',
+  baseURL: getBaseUrl(),
   timeout: 30000,
   paramsSerializer: {
     indexes: null,
   },
 })
+
+// Listen for dynamic backend URL changes from the Electron main process.
+// When the backend restarts on a different port the main process notifies
+// the renderer so Axios stays pointed at the correct address.
+if (typeof window !== 'undefined' && window.electronAPI?.onBackendUrlChange) {
+  window.electronAPI.onBackendUrlChange((url: string) => {
+    api.defaults.baseURL = `${url}/api/v1`
+  })
+}
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('access_token')
@@ -67,10 +91,18 @@ function forceLogout() {
   // through this same path. Drop tokens directly + redirect instead.
   localStorage.removeItem('access_token')
   localStorage.removeItem('refresh_token')
-  // Avoid the redirect loop if we are already on /login (e.g. user
-  // submits bad credentials from the login page).
-  if (!window.location.pathname.startsWith('/login')) {
-    window.location.href = '/login'
+  // In Electron the router uses hash history (#/login) because file://
+  // protocol does not support pushState.  In a browser, we use the
+  // standard path-based redirect.
+  const isElectron = typeof window !== 'undefined' && !!window.electronAPI
+  if (isElectron) {
+    if (!window.location.hash.startsWith('#/login')) {
+      window.location.hash = '#/login'
+    }
+  } else {
+    if (!window.location.pathname.startsWith('/login')) {
+      window.location.href = '/login'
+    }
   }
 }
 
