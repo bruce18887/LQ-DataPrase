@@ -16,7 +16,7 @@
 
     <!-- 图表元素开关 -->
     <div class="config-section">
-      <div class="section-label">显示元素</div>
+      <div class="section-label">显示元素</div> 
       <el-checkbox-group :model-value="chartConfig" @change="onChartConfigChange" class="config-checkboxes">
         <el-checkbox value="limit">Limit</el-checkbox>
         <template v-if="variant === 'full'">

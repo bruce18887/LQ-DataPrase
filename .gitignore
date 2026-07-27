@@ -13,6 +13,8 @@ $RECYCLE.BIN/
 !.vscode/launch.json
 .idea/
 .codebuddy/
+.codegraph/
+.trae/
 *.swp
 *.swo
 *~
@@ -88,8 +90,13 @@ frontend/.env
 frontend/.env.*
 !frontend/.env.example
 
-# ================== Docker ==================
+# ================== Docker (已移除 Docker 支持) ==================
+Dockerfile
+docker-compose.yml
 docker-compose.override.yml
+
+# ================== Pytest ==================
+.pytest_cache/
 
 # ================== Playwright ==================
 test-results/
@@ -106,7 +113,7 @@ frontend/e2e/.downloads/
 .skills/
 .trae/documents/
 .data/
-.codegraph/daemon.*
+.codegraph/
 # 调试与开发脚本
 token.txt
 /test_*.py
