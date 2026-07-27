@@ -91,6 +91,17 @@ def main():
     _setup_django()
     _bootstrap()
 
+    # When --port 0 is given (used by the Electron main process to auto-assign
+    # a free port), resolve a real port via the OS before starting runserver.
+    # Django's runserver does bind to a real port when given 0, but our startup
+    # banner would still show port 0 — breaking the Electron parent's regex
+    # that parses this line to discover where the backend is listening.
+    if args.port == 0:
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('', 0))
+            args.port = s.getsockname()[1]
+
     from django.core.management import call_command
 
     print(f'\n[server] Starting LQ-DataPrase on http://{args.host}:{args.port}')

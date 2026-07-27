@@ -28,10 +28,20 @@ FROZEN = getattr(sys, 'frozen', False)
 # temp dir which is read-only.  We redirect it to the directory that
 # contains the executable so that db.sqlite3, media/ and staticfiles/ land
 # next to the .exe and are user-visible / user-writable.
-if FROZEN:
+#
+# When running as an Electron child process the main process sets
+# ``LQDP_BASE_DIR`` to Electron's ``app.getPath('userData')`` so that
+# all writable files land in the OS-standard application data directory
+# instead of next to the (potentially read-only) installed executable.
+_LQDP_BASE = os.environ.get('LQDP_BASE_DIR')
+if _LQDP_BASE:
+    BASE_DIR = Path(_LQDP_BASE)
+elif FROZEN:
     BASE_DIR = Path(sys.executable).resolve().parent
-    # Patch the module-level reference that other code may have captured
-    # via ``from django.conf import settings``.
+
+# Patch the module-level reference that other code may have captured
+# via ``from django.conf import settings``.
+if _LQDP_BASE or FROZEN:
     import config.settings.base as _base
     _base.BASE_DIR = BASE_DIR
 
