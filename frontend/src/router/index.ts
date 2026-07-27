@@ -1,5 +1,10 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHistory, createWebHashHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+
+// Electron loads the SPA via file:// protocol, where HTML5 pushState routing
+// does not work. Fall back to hash-based routing (#/dashboard) when the
+// preload bridge is present.
+const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined
 
 const routes = [
   {
@@ -63,7 +68,7 @@ const routes = [
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: isElectron ? createWebHashHistory() : createWebHistory(),
   routes,
 })
 

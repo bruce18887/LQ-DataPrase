@@ -125,6 +125,24 @@ DEBUG_*.md
 /dist/
 /build/
 
+# ================== Electron ==================
+# electron-builder output
+/out/
+# Compiled Electron JS (the package.json in this dir is committed for CJS override)
+/frontend/electron-dist/*.js
+/frontend/electron-dist/*.js.map
+# Stale artifact from running electron:build:ts in wrong cwd
+/frontend/frontend/
+# Standalone server auto-generated key and DB
+/secret.key
+/db.sqlite3-journal
+/db.sqlite3-shm
+/db.sqlite3-wal
+
+# ================== Repo root JS (Electron tooling) ==================
+# Only the lock files and package.json are committed; node_modules is global
+/node_modules/
+
 # ================== Backups / Temp ==================
 *.bak
 *.tmp

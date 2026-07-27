@@ -3,10 +3,14 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "electron-dist/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
+    "electron:build:ts": "tsc -p ../electron/tsconfig.json",
+    "electron:dev": "npm run electron:build:ts && concurrently -k -n vite,electron -c blue,yellow \"vite\" \"wait-on http://localhost:3000 && cross-env ELECTRON_DEV=true electron .\"",
+    "electron:build": "cross-env VITE_ELECTRON=true npm run build && npm run electron:build:ts && cd .. && build.bat && electron-builder --config electron-builder.yml",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
@@ -32,9 +36,14 @@
     "@types/node": "^24.12.3",
     "@vitejs/plugin-vue": "^6.0.6",
     "@vue/tsconfig": "^0.9.1",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.0",
     "playwright": "^1.60.0",
     "typescript": "~6.0.2",
     "vite": "^8.0.12",
-    "vue-tsc": "^3.2.8"
+    "vue-tsc": "^3.2.8",
+    "wait-on": "^8.0.1"
   }
 }
