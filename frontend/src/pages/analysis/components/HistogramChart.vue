@@ -24,6 +24,30 @@ const props = defineProps<{
 
 const { colors } = useEChartsTheme()
 const COLORS_SITE_8 = ['#E53935', '#1E88E5', '#43A047', '#F9A825', '#8E24AA', '#00ACC1', '#F57C00', '#D81B60']
+const FAIL_BIN_COLOR = '#E53935'
+
+function isFailBin(center: number, lowerLimit: number | null, upperLimit: number | null): boolean {
+  if (lowerLimit != null && center < lowerLimit) return true
+  if (upperLimit != null && center > upperLimit) return true
+  return false
+}
+
+function buildBarData(
+  activeIndices: number[],
+  binCenters: number[],
+  values: number[],
+  lowerLimit: number | null,
+  upperLimit: number | null,
+): (number[] | { value: number[]; itemStyle: { color: string } })[] {
+  return activeIndices.map((i: number) => {
+    const center = binCenters[i]
+    const val = values[i] ?? 0
+    if (isFailBin(center, lowerLimit, upperLimit)) {
+      return { value: [center, val], itemStyle: { color: FAIL_BIN_COLOR } }
+    }
+    return [center, val]
+  })
+}
 
 function buildOption() {
   const r = props.result
@@ -32,23 +56,45 @@ function buildOption() {
   const binCenters: number[] = r.bin_centers || []
   if (binCenters.length === 0) return {}
 
-  // Apply outlier clipping to x-axis range and filter data points
+  // Outlier clipping: keep the X-axis range locked to the original bin_centers
+  // span (driven by range_type) so bar widths and Limit lines stay stable.
+  // Hide bins whose center falls outside the IQR bounds instead of zooming.
   const outlierInfo = r.outlier_info
   const handlingMode = props.outlierHandling || 'off'
-  let xAxisMin: number | undefined = binCenters[0]
-  let xAxisMax: number | undefined = binCenters[binCenters.length - 1]
-  let activeIndices: number[] = binCenters.map((_: number, i: number) => i)
+  const xAxisMin = binCenters[0]
+  const xAxisMax = binCenters[binCenters.length - 1]
 
-  if (handlingMode === 'clip' && outlierInfo?.has_outliers) {
-    activeIndices = binCenters
-      .map((c: number, i: number) => (c >= outlierInfo.lower_bound && c <= outlierInfo.upper_bound ? i : -1))
-      .filter((i: number) => i >= 0)
-    if (activeIndices.length > 0) {
-      xAxisMin = binCenters[activeIndices[0]]
-      xAxisMax = binCenters[activeIndices[activeIndices.length - 1]]
+  const shouldClip = handlingMode === 'clip' && outlierInfo?.has_outliers
+  let clipMin = shouldClip ? outlierInfo.lower_bound : -Infinity
+  let clipMax = shouldClip ? outlierInfo.upper_bound : Infinity
+
+  // RDL 模式下，原始 Limit 线内的数据不应被当作异常值隐藏。
+  // 将裁剪边界扩展到规格限，保证 LSL/USL 内部的 bin 始终可见。
+  if (shouldClip && props.rangeType === 'RDL' && r.lower_limit != null && r.upper_limit != null) {
+    clipMin = Math.min(clipMin, r.lower_limit)
+    clipMax = Math.max(clipMax, r.upper_limit)
+  }
+
+  // limit 外的 fail bin 必须始终可见（用户需要看到 fail 百分比）。
+  // 将裁剪边界扩展到包含 limit 外的所有 bin。
+  if (shouldClip && r.lower_limit != null) {
+    const minFailBin = binCenters.find((c: number) => c < r.lower_limit)
+    if (minFailBin != null) clipMin = Math.min(clipMin, minFailBin)
+  }
+  if (shouldClip && r.upper_limit != null) {
+    for (let i = binCenters.length - 1; i >= 0; i--) {
+      if (binCenters[i] > r.upper_limit) { clipMax = Math.max(clipMax, binCenters[i]); break }
     }
   }
 
+  let activeIndices = binCenters
+    .map((c: number, i: number) => (c >= clipMin && c <= clipMax ? i : -1))
+    .filter((i: number) => i >= 0)
+
+  // Guard against pathological bounds that exclude every bin.
+  if (activeIndices.length === 0) {
+    activeIndices = binCenters.map((_: number, i: number) => i)
+  }
   const filteredBinCenters = activeIndices.map((i: number) => binCenters[i])
 
   const series: any[] = []
@@ -65,21 +111,21 @@ function buildOption() {
       const hists: number[] = siteHists[site] || []
       series.push({
         name: `Site${site}`, type: 'bar',
-        data: activeIndices.map((i: number) => [binCenters[i], hists[i] ?? 0]),
+        data: buildBarData(activeIndices, binCenters, hists, r.lower_limit, r.upper_limit),
         itemStyle: { color: COLORS_SITE_8[idx % COLORS_SITE_8.length] },
         barWidth: `${props.barWidthPercent}%`,
       })
     }
     series.push({
       name: 'All Site', type: 'bar', yAxisIndex: 1,
-      data: activeIndices.map((i: number) => [binCenters[i], r.bin_percentages?.[i] || 0]),
+      data: buildBarData(activeIndices, binCenters, r.bin_percentages || [], r.lower_limit, r.upper_limit),
       itemStyle: { color: '#90CAF9', opacity: 0.5 }, barWidth: `${props.barWidthPercent}%`,
       label: { show: true, position: 'top', formatter: (p: any) => p.data[1] > 0 ? `${p.data[1].toFixed(2)}%` : '', fontSize: 10, color: '#1565C0', fontWeight: 'bold' },
     })
   } else {
     series.push({
       name: '数据分布', type: 'bar',
-      data: activeIndices.map((i: number) => [binCenters[i], r.bin_percentages?.[i] || 0]),
+      data: buildBarData(activeIndices, binCenters, r.bin_percentages || [], r.lower_limit, r.upper_limit),
       itemStyle: { color: '#1E88E5' }, barWidth: `${props.barWidthPercent}%`,
     })
   }
@@ -156,5 +202,20 @@ void chartRef // bound to <div ref="chartRef"> in template
 </script>
 
 <style scoped>
-.chart-container { width: 100%; height: 100%; min-height: 400px; }
+.histogram-chart-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.chart-container {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.outlier-hint-bar {
+  flex-shrink: 0;
+}
 </style>

@@ -25,6 +25,20 @@
           <el-option label="不处理" value="off" />
         </el-select>
       </el-form-item>
+      <el-form-item v-if="outlierHandling !== 'off'" label="敏感度">
+        <el-select
+          v-model="iqrMultiplier"
+          size="small"
+          class="analysis-file-selector__select"
+          style="width: 200px"
+        >
+          <el-option label="严格 (1.5x IQR)" :value="1.5" />
+          <el-option label="宽松 (3.0x IQR)" :value="3.0" />
+        </el-select>
+        <span style="margin-left: 8px; font-size: 12px; color: #909399">
+          {{ iqrMultiplier === 1.5 ? '标记轻微异常值' : '仅标记极端异常值' }}
+        </span>
+      </el-form-item>
     </el-form>
 
     <el-empty v-if="files.length === 0" description="请先在数据管理页面上传数据文件" />
@@ -89,6 +103,8 @@ const loading = ref(false)
 const activeTab = ref(analysisStore.activeTab)
 const outlierHandling = ref(analysisStore.outlierHandling)
 watch(outlierHandling, (val) => { analysisStore.outlierHandling = val })
+const iqrMultiplier = ref(analysisStore.iqrMultiplier)
+watch(iqrMultiplier, (val) => { analysisStore.iqrMultiplier = val })
 
 // Wafer state
 const waferData = ref<any>(null)

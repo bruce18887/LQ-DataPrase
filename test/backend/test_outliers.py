@@ -103,3 +103,96 @@ class TestDetectOutliersIqr:
         """None input should return safe defaults."""
         result = detect_outliers_iqr(None)
         assert result['has_outliers'] is False
+
+    def test_spec_limits_within_iqr(self):
+        """Data within spec limits but outside IQR should NOT be outliers."""
+        # Create data where IQR bounds are tighter than spec limits
+        # Q1=24.0, Q3=26.0, IQR=2.0
+        # IQR bounds: lower=24.0-1.5*2=21.0, upper=26.0+1.5*2=29.0
+        data = pd.Series([24.0] * 20 + [26.0] * 20 + [20.0, 30.0])
+        result_no_spec = detect_outliers_iqr(data)
+        # 20.0 and 30.0 are outside IQR bounds (21.0, 29.0)
+        assert result_no_spec['has_outliers'] is True
+        assert result_no_spec['outlier_count'] == 2
+
+        # With spec limits that include 20.0 and 30.0
+        result_with_spec = detect_outliers_iqr(data, spec_limits=(19.0, 31.0))
+        # Now bounds should be expanded to (19.0, 31.0), so no outliers
+        assert result_with_spec['has_outliers'] is False
+        assert result_with_spec['outlier_count'] == 0
+        assert result_with_spec['lower_bound'] == pytest.approx(19.0)
+        assert result_with_spec['upper_bound'] == pytest.approx(31.0)
+
+    def test_spec_limits_partial_coverage(self):
+        """Data partially within spec limits should have fewer outliers."""
+        # IQR bounds: lower=21.0, upper=29.0
+        data = pd.Series([24.0] * 20 + [26.0] * 20 + [20.0, 30.0, 35.0])
+        # Without spec limits: 20.0, 30.0, 35.0 are outliers
+        result_no_spec = detect_outliers_iqr(data)
+        assert result_no_spec['outlier_count'] == 3
+
+        # With spec limits (22.0, 32.0): bounds expand to (21.0, 32.0)
+        # 20.0 is still outlier, 30.0 is now within bounds, 35.0 is still outlier
+        result_with_spec = detect_outliers_iqr(data, spec_limits=(22.0, 32.0))
+        assert result_with_spec['outlier_count'] == 2
+        assert result_with_spec['lower_bound'] == pytest.approx(21.0)
+        assert result_with_spec['upper_bound'] == pytest.approx(32.0)
+
+    def test_spec_limits_outside_iqr(self):
+        """Spec limits wider than IQR should expand bounds."""
+        data = pd.Series([24.0] * 20 + [26.0] * 20 + [20.0, 30.0])
+        # IQR bounds: (21.0, 29.0)
+        # Spec limits: (15.0, 35.0) - wider than IQR
+        result = detect_outliers_iqr(data, spec_limits=(15.0, 35.0))
+        assert result['has_outliers'] is False
+        assert result['lower_bound'] == pytest.approx(15.0)
+        assert result['upper_bound'] == pytest.approx(35.0)
+
+    def test_spec_limits_none_values(self):
+        """Spec limits with None values should be ignored."""
+        data = pd.Series([24.0] * 20 + [26.0] * 20 + [20.0, 30.0])
+        result = detect_outliers_iqr(data, spec_limits=(None, None))
+        # Should behave same as no spec limits
+        assert result['has_outliers'] is True
+        assert result['outlier_count'] == 2
+
+    def test_spec_limits_one_side(self):
+        """Spec limits with only one side should expand only that bound."""
+        data = pd.Series([24.0] * 20 + [26.0] * 20 + [20.0, 30.0])
+        # IQR bounds: (21.0, 29.0)
+        # Only lower spec limit: (15.0, None)
+        result = detect_outliers_iqr(data, spec_limits=(15.0, None))
+        # Lower bound expanded to 15.0, upper bound stays at 29.0
+        assert result['lower_bound'] == pytest.approx(15.0)
+        assert result['upper_bound'] == pytest.approx(29.0)
+        # 20.0 is now within bounds, 30.0 is still outlier
+        assert result['outlier_count'] == 1
+
+    def test_iqr_multiplier_strict(self):
+        """Strict multiplier (1.5) should detect more outliers."""
+        # Data with some mild outliers
+        data = pd.Series([24.0] * 20 + [26.0] * 20 + [20.0, 30.0])
+        result_strict = detect_outliers_iqr(data, iqr_multiplier=1.5)
+        # IQR bounds: (21.0, 29.0)
+        # 20.0 and 30.0 are outliers
+        assert result_strict['outlier_count'] == 2
+
+    def test_iqr_multiplier宽松(self):
+        """宽松 multiplier (3.0) should detect fewer outliers."""
+        # Data with some mild outliers
+        data = pd.Series([24.0] * 20 + [26.0] * 20 + [20.0, 30.0])
+        result_宽松 = detect_outliers_iqr(data, iqr_multiplier=3.0)
+        # IQR bounds with 3.0 multiplier: (24.0-3.0*2.0, 26.0+3.0*2.0) = (18.0, 32.0)
+        # 20.0 and 30.0 are within bounds
+        assert result_宽松['outlier_count'] == 0
+        assert result_宽松['lower_bound'] == pytest.approx(18.0)
+        assert result_宽松['upper_bound'] == pytest.approx(32.0)
+
+    def test_iqr_multiplier_extreme_outliers(self):
+        """Extreme outliers should still be detected with 3.0 multiplier."""
+        # Data with extreme outliers
+        data = pd.Series([24.0] * 20 + [26.0] * 20 + [10.0, 40.0])
+        result = detect_outliers_iqr(data, iqr_multiplier=3.0)
+        # IQR bounds with 3.0 multiplier: (18.0, 32.0)
+        # 10.0 and 40.0 are still outliers
+        assert result['outlier_count'] == 2

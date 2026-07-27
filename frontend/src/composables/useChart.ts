@@ -38,6 +38,16 @@ export function useChart<T = echarts.EChartsOption>(
   let pollTimeout: ReturnType<typeof setTimeout> | null = null
   let disposed = false
 
+  // Expose the ECharts instance on the container DOM for debugging/tests.
+  watch(chartInstance, (instance) => {
+    if (!chartRef.value) return
+    if (instance) {
+      ;(chartRef.value as any).__echartsInstance__ = instance
+    } else {
+      delete (chartRef.value as any).__echartsInstance__
+    }
+  })
+
   function renderOption() {
     if (disposed || !chartInstance.value) return
     try {

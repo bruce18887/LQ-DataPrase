@@ -16,7 +16,8 @@ from apps.analysis.services.limits import resolve_limits
 
 
 def compute_histogram_stats(df, metadata, param, site_col,
-                            range_type='RDL', custom_low=None, custom_high=None):
+                            range_type='RDL', custom_low=None, custom_high=None,
+                            iqr_multiplier=1.5):
     """Compute histogram binning, CPK stats, and per-site histograms.
 
     Returns the same dict that ``AnalysisViewSet.histogram`` built inline,
@@ -28,30 +29,41 @@ def compute_histogram_stats(df, metadata, param, site_col,
     stay anchored to the spec limits (RDL) regardless of ``range_type``.
     ``custom_low``/``custom_high`` override the binning range when
     ``range_type == 'CL'`` and both are provided.
+    ``iqr_multiplier`` controls outlier detection sensitivity (default 1.5).
     """
     data_series = get_1d_from(df, param).dropna()
     data_series = data_series[data_series.apply(lambda x: abs(x) < float('inf'))]
     if len(data_series) == 0:
         return None
 
-    # Detect outliers using IQR method
-    outlier_info = detect_outliers_iqr(data_series, include_values=False)
-
     stats = compute_range_statistics(data_series, metadata, param)
+
+    # Detect outliers using IQR method, respecting spec limits (RDL)
+    outlier_info = detect_outliers_iqr(
+        data_series, include_values=True,
+        spec_limits=(stats['rdl'][0], stats['rdl'][1]),
+        iqr_multiplier=iqr_multiplier,
+    )
     cpk_result = compute_cpk(
         stats['mean'], stats['std'], stats['rdl'][0], stats['rdl'][1]
     )
 
-    # Compute filtered Cpk (excluding outliers)
+    # Compute filtered statistics (excluding outliers)
     filtered_cpk = None
+    filtered_mean = None
+    filtered_std = None
+    filtered_data_min = None
+    filtered_data_max = None
     if outlier_info['has_outliers'] and outlier_info['normal_count'] > 1:
         normal_data = data_series[
             (data_series >= outlier_info['lower_bound']) &
             (data_series <= outlier_info['upper_bound'])
         ]
         if len(normal_data) > 1:
-            filtered_mean = float(normal_data.mean())
-            filtered_std = float(normal_data.std(ddof=0))
+            filtered_mean = round(float(normal_data.mean()), 6)
+            filtered_std = round(float(normal_data.std(ddof=0)), 6)
+            filtered_data_min = round(float(normal_data.min()), 6)
+            filtered_data_max = round(float(normal_data.max()), 6)
             if filtered_std > 0:
                 filtered_cpk_result = compute_cpk(
                     filtered_mean, filtered_std,
@@ -89,11 +101,12 @@ def compute_histogram_stats(df, metadata, param, site_col,
         bin_min -= 0.5
         bin_max += 0.5
     data_gap = safe_gap(bin_min, bin_max)
-    bin_start = bin_min - 2.5 * data_gap
 
-    # Build bin edges with underflow (-inf) and overflow (+inf) bins
-    # Excel pattern: [underflow] [bin1] [bin2] ... [binN] [overflow]
-    inner_edges = [bin_start + j * data_gap for j in range(26)]
+    # Build bin edges with underflow (-inf) and overflow (+inf) bins.
+    # 25 inner edges create 24 normal bins that exactly cover
+    # [bin_min, bin_max]; the two catch-all bins keep values outside the
+    # selected range visible (and colourable as fail bins).
+    inner_edges = [bin_min + j * data_gap for j in range(25)]
     all_bins = np.array([-np.inf] + inner_edges + [np.inf])
     # 27 edges → 26 bins: 1 underflow + 24 normal + 1 overflow
 
@@ -104,9 +117,11 @@ def compute_histogram_stats(df, metadata, param, site_col,
         for c in hist_counts
     ]
 
-    # Bin centers: underflow/overflow use edge values, normal bins use midpoint
+    # Bin centers: underflow/overflow sit one gap outside the selected range,
+    # normal bins use midpoint so the 24 normal centers land inside
+    # [bin_min, bin_max].
     bin_centers = [inner_edges[0] - data_gap]  # underflow center
-    bin_centers += [(inner_edges[i] + inner_edges[i + 1]) / 2 for i in range(25)]
+    bin_centers += [(inner_edges[i] + inner_edges[i + 1]) / 2 for i in range(24)]
     bin_centers.append(inner_edges[-1] + data_gap)  # overflow center
 
     site_histograms = None
@@ -172,4 +187,8 @@ def compute_histogram_stats(df, metadata, param, site_col,
         'total_count': len(data_series),
         'outlier_info': outlier_info,
         'filtered_cpk': filtered_cpk,
+        'filtered_mean': filtered_mean,
+        'filtered_std': filtered_std,
+        'filtered_data_min': filtered_data_min,
+        'filtered_data_max': filtered_data_max,
     }

@@ -7,11 +7,17 @@ When frozen (packaged by PyInstaller), this script:
 3. Runs database migrations automatically
 4. Creates a default admin user if none exists
 5. Collects static files (frontend SPA + Django admin assets)
-6. Starts the Django development server on ``0.0.0.0:8000``
+6. Starts the Django development server
 
 Usage:
-    LQ-DataPrase.exe              # default port 8000
-    LQ-DataPrase.exe --port 9000  # custom port
+    LQ-DataPrase.exe                     # default port 8000
+    LQ-DataPrase.exe --port 9000         # custom port
+    LQ-DataPrase.exe --ready-fd 3        # write 'ready\\n' to fd 3 when server is up
+
+Electron integration:
+    When ``--ready-fd`` is provided, the script writes a JSON line to stdout
+    after the server starts listening:  {"event":"ready","port":<port>}
+    This allows the Electron host process to detect when the backend is ready.
 """
 
 import argparse
@@ -71,7 +77,11 @@ def _bootstrap():
 
     # Collect static files (only when the frontend dist is present)
     static_root = settings.STATIC_ROOT
-    frontend_dist = base / 'frontend_dist'
+    # In frozen builds, frontend_dist lives in sys._MEIPASS, not BASE_DIR.
+    if getattr(sys, 'frozen', False):
+        frontend_dist = Path(sys._MEIPASS) / 'frontend_dist'
+    else:
+        frontend_dist = base / 'frontend_dist'
     if frontend_dist.is_dir():
         print('[bootstrap] Collecting static files...')
         call_command('collectstatic', '--noinput', verbosity=0)
@@ -85,7 +95,14 @@ def main():
     parser = argparse.ArgumentParser(description='LQ-DataPrase Standalone Server')
     parser.add_argument('--port', type=int, default=8000, help='Port to listen on (default: 8000)')
     parser.add_argument('--host', default='0.0.0.0', help='Host to bind (default: 0.0.0.0)')
+    parser.add_argument('--ready-fd', type=int, default=None,
+                        help='File descriptor to write "ready\\n" when server is up (Electron integration)')
     args = parser.parse_args()
+
+    # Allow Electron to override the base directory (points to userData)
+    lqdp_base = os.environ.get('LQDP_BASE_DIR')
+    if lqdp_base:
+        os.environ.setdefault('LQDP_OVERRIDE_BASE_DIR', lqdp_base)
 
     _setup_path()
     _setup_django()
@@ -104,9 +121,31 @@ def main():
 
     from django.core.management import call_command
 
-    print(f'\n[server] Starting LQ-DataPrase on http://{args.host}:{args.port}')
+    port = args.port
+    # If port is 0, find a free port
+    if port == 0:
+        import socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind((args.host, 0))
+        port = sock.getsockname()[1]
+        sock.close()
+
+    print(f'\n[server] Starting LQ-DataPrase on http://{args.host}:{port}')
     print('[server] Press Ctrl+C to stop.\n')
-    call_command('runserver', f'{args.host}:{args.port}', '--noreload')
+
+    # Signal readiness to Electron via ready-fd
+    if args.ready_fd is not None:
+        import json
+        ready_msg = json.dumps({'event': 'ready', 'port': port, 'pid': os.getpid()})
+        try:
+            with open(args.ready_fd, 'w', encoding='utf-8') as f:
+                f.write(f'{ready_msg}\n')
+                f.flush()
+            print(f'[server] Ready signal written to fd {args.ready_fd}')
+        except OSError as e:
+            print(f'[server] Warning: could not write ready-fd {args.ready_fd}: {e}')
+
+    call_command('runserver', f'{args.host}:{port}', '--noreload')
 
 
 if __name__ == '__main__':

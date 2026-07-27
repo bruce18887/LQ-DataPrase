@@ -83,8 +83,12 @@ if _FRONTEND_DIST.is_dir():
     # Add frontend_dist to template dirs so the SPA catch-all can find index.html.
     TEMPLATES[0]['DIRS'] = [_FRONTEND_DIST]
 
-# WhiteNoise — serve compressed static files directly from Django.
-# Must be placed *before* SecurityMiddleware for best performance.
+# WhiteNoise — serve static files directly from Django.
+# Per WhiteNoise docs (https://whitenoise.readthedocs.io/en/latest/django.html),
+# it must be placed DIRECTLY AFTER SecurityMiddleware (so security headers
+# are set first and WhiteNoise can serve compressed static files correctly).
+# Placing it at the top would let static file serving pre-empt the
+# security middleware's header injection and break gzip/brotli responses.
 if 'whitenoise.middleware.WhiteNoiseMiddleware' not in MIDDLEWARE:
     _sec_idx = MIDDLEWARE.index('django.middleware.security.SecurityMiddleware')
     MIDDLEWARE.insert(_sec_idx + 1, 'whitenoise.middleware.WhiteNoiseMiddleware')

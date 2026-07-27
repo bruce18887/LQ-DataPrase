@@ -120,8 +120,11 @@ def compute_serial_distribution_data(df, metadata, param, range_type,
 
     # -- Stats & limits ---------------------------------------------------
     data_series = get_1d_from(df, param).dropna()
-    outlier_info = detect_outliers_iqr(data_series, include_values=False)
     stats = compute_range_statistics(data_series, metadata, param)
+    outlier_info = detect_outliers_iqr(
+        data_series, include_values=False,
+        spec_limits=(stats['rdl'][0], stats['rdl'][1]),
+    )
     mean_val = stats['mean']
     std_val = stats['std']
     spec_lower, spec_upper = resolve_limits(range_type, stats)

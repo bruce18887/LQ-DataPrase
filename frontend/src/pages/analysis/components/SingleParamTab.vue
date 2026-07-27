@@ -1,5 +1,5 @@
 <template>
-  <AnalysisTabLayout :loading="histLoading">
+  <AnalysisTabLayout :loading="histLoading" class="single-param-tab">
     <template #toolbar>
       <el-radio-group v-model="chartMode" size="small">
         <el-radio-button value="distribution">数值分布</el-radio-button>
@@ -184,6 +184,7 @@ const ignoreNoLimit = ref(analysisStore.ignoreNoLimit)
 const customLow = ref<number | null>(analysisStore.customLow)
 const customHigh = ref<number | null>(analysisStore.customHigh)
 const outlierHandling = ref(analysisStore.outlierHandling)
+const iqrMultiplier = ref(analysisStore.iqrMultiplier)
 
 // Composable: Histogram
 const {
@@ -197,7 +198,8 @@ const {
   ignoreNoLimit,
   rangeType,
   customLow,
-  customHigh
+  customHigh,
+  iqrMultiplier
 )
 
 // Composable: Serial Distribution

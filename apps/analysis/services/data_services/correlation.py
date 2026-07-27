@@ -5,11 +5,12 @@ import numpy as np
 from apps.analysis.services.statistics import (
     get_1d_from,
     get_site_column,
+    compute_range_statistics,
 )
 from apps.analysis.services.statistics.outliers import detect_outliers_iqr
 
 
-def compute_correlation_scatter(df, param_x, param_y):
+def compute_correlation_scatter(df, param_x, param_y, metadata=None):
     """Build scatter-point series and Pearson r for two parameters.
 
     Returns a dict with ``param_x``, ``param_y``, ``n``, ``pearson_r``,
@@ -31,9 +32,21 @@ def compute_correlation_scatter(df, param_x, param_y):
     x_vals = x_series.loc[common_idx].astype(float)
     y_vals = y_series.loc[common_idx].astype(float)
 
-    # Detect outliers for both axes
-    x_outlier_info = detect_outliers_iqr(x_vals, include_values=False)
-    y_outlier_info = detect_outliers_iqr(y_vals, include_values=False)
+    # Detect outliers for both axes, respecting spec limits (RDL)
+    x_spec_limits = None
+    y_spec_limits = None
+    if metadata:
+        x_stats = compute_range_statistics(x_vals, metadata, param_x)
+        y_stats = compute_range_statistics(y_vals, metadata, param_y)
+        x_spec_limits = (x_stats['rdl'][0], x_stats['rdl'][1])
+        y_spec_limits = (y_stats['rdl'][0], y_stats['rdl'][1])
+
+    x_outlier_info = detect_outliers_iqr(
+        x_vals, include_values=False, spec_limits=x_spec_limits,
+    )
+    y_outlier_info = detect_outliers_iqr(
+        y_vals, include_values=False, spec_limits=y_spec_limits,
+    )
 
     site_col = get_site_column(df)
     series_data = []

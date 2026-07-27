@@ -309,19 +309,28 @@ def compute_range_statistics(data_series: pd.Series, metadata: Dict, selected_pa
     }
 
 
-def compute_qqplot(data_series: pd.Series) -> Dict[str, Any]:
+def compute_qqplot(data_series: pd.Series, metadata: dict = None, param: str = None) -> Dict[str, Any]:
     """
     Compute QQ plot data for normality testing using scipy.stats.probplot.
 
     Args:
         data_series: Numeric data series to test for normality.
+        metadata: Optional metadata dict containing spec limits for outlier detection.
+        param: Optional parameter name to look up spec limits in metadata.
 
     Returns:
         Dictionary with theoretical quantiles, observed values, R-squared, and normality verdict.
     """
     clean = pd.to_numeric(data_series, errors='coerce').dropna()
     clean = clean[np.isfinite(clean.values)]
-    outlier_info = detect_outliers_iqr(clean, include_values=False)
+
+    # Detect outliers, respecting spec limits (RDL) if available
+    spec_limits = None
+    if metadata and param:
+        stats = compute_range_statistics(clean, metadata, param)
+        spec_limits = (stats['rdl'][0], stats['rdl'][1])
+
+    outlier_info = detect_outliers_iqr(clean, include_values=False, spec_limits=spec_limits)
     if len(clean) < 3:
         return {
             'theoretical_quantiles': [],
