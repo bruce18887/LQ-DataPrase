@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "../frontend/electron-dist",
+    "rootDir": ".",
+    "baseUrl": "..",
+    "paths": {
+      "*": ["frontend/node_modules/*"]
+    },
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": false,
+    "sourceMap": true,
+    "ignoreDeprecations": "6.0",
+    "typeRoots": ["../frontend/node_modules/@types"],
+    "types": ["node"]
+  },
+  "include": ["./**/*.ts"],
+  "exclude": ["node_modules"]
+}
