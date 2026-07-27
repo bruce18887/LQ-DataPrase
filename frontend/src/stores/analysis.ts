@@ -18,6 +18,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const customLow = ref<number | null>(null)
   const customHigh = ref<number | null>(null)
   const outlierHandling = ref<'clip' | 'exclude' | 'off'>('clip')
+  const iqrMultiplier = ref<number>(1.5)
 
   // Tab: 多文件分析（multi-file）
   const multiFileIds = ref<number[]>([])
@@ -66,6 +67,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     customLow.value = null
     customHigh.value = null
     outlierHandling.value = 'clip'
+    iqrMultiplier.value = 1.5
     multiFileIds.value = []
     multiSelectedParam.value = ''
     multiFileNames.value = {}
@@ -87,6 +89,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     customLow,
     customHigh,
     outlierHandling,
+    iqrMultiplier,
     multiFileIds,
     multiSelectedParam,
     multiFileNames,

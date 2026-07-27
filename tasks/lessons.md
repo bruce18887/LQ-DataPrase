@@ -340,6 +340,16 @@
 - **Rule 4**：写新 stats service 之前**先扫一遍 sample data 里所有 dtype 分布**——`df.dtypes.value_counts()` 一行就能看到有没有 bool / object 漏网，比靠经验猜全面。
 - **Rule 5**：复跑诊断脚本确认 `bp_issues` 归零是验证修复的硬标准。光看"我自己写的小测试过了"不够——可能只是测试用例没覆盖到。
 
+## E2E 选择器必须与实际 DOM class 一致（2026-06-30）
+
+- **问题**: `frontend/e2e/analysis/outlier-handling.spec.ts` 使用 `.single-param-tab .outlier-hint-bar` 定位异常值提示条，但 `SingleParamTab.vue` 根元素实际 class 是 `analysis-tab-layout`，导致测试报 "element(s) not found"。
+- **根因**: 测试写了一个组件根元素上并不存在的 class。Vue 3 `<script setup>` 里 props 虽然在模板可直接用，但 e2e 定位不能靠「假设」的 class。
+- **Fix**: 在 `SingleParamTab.vue` 的 `<AnalysisTabLayout>` 上显式加 `class="single-param-tab"`，Vue 的 fallthrough attributes 会自动合并到 `AnalysisTabLayout` 的根 div。
+- **验证**: `outlier-handling.spec.ts` 两个用例从 fail 变为 pass；分析页手动刷新后 `.single-param-tab` 确实存在。
+- **Rule 1**: 写 e2e 选择器前先用浏览器/Playwright trace 确认目标 class 真实存在于 DOM，不要凭组件名臆测。
+- **Rule 2**: 如果多个测试文件共享同一个根选择器常量（如 `SINGLE = '.single-param-tab'`），应保证该 class 在组件根元素上真实存在；否则统一改成实际存在的 class。
+- **Rule 3**: 给组件加 e2e 定位 class 时，优先加在组件根元素并通过 Vue fallthrough 透传，避免破坏组件内部结构。
+
 ## Pinia store 持久化导致 stale selectedParam 跨文件泄漏（2026-06-13）
 
 - **Bug**: 用户在 `gage_m_S4.csv`（file_id=14518）选了 `R_Kelvin_AGND` 作为单参数分析的目标测试项；切到 `BPD93204_FT1_ETS163550_12252024.csv`（file_id=14514，ETS88 格式，无此列）后，三个分析 API 同时报错：
@@ -367,5 +377,39 @@
 - **Rule 2**：跨多个相似端点（histogram / qqplot / boxplot）的"按 param 取列"操作，**守卫必须对齐**——一个有 `param in df.columns` 检查、另一个没有，就是状态码雪崩的根因。Code review 时 grep `if .* not in df.columns` 对比各 view 即可秒发现。
 - **Rule 3**：DRF view 单测想绕过 auth，**必须** `force_authenticate`（`rest_framework.test`），不能 `request.user = SimpleNamespace(...)`——后者只设了 user 属性，没改 `request._auth` / `request.successful_authenticator`，`IsAuthenticated` 仍拒。
 - **Rule 4**：mock DataFile / ORM 对象给视图用时，**第一步**先 grep view 里所有 `datafile.xxx` 引用，把必需字段列全（id / filename / format_type 是最低配），否则测试会因「业务逻辑改了但 mock 没改」间歇性挂。
-- **Rule 5**：「跨上下文状态泄漏」类 bug 必须**双层防御**——前端清状态 + 后端 validation。光前端清不够（用户多 tab / 深链接 / 旧版缓存都可能绕过）；光后端 validation 不够（用户看到 400 时已经疑惑「我刚才明明选对了」）。两层都在，重建到中间状态的路径都能被截。
+- **Rule 5**: 「跨上下文状态泄漏」类 bug 必须**双层防御**——前端清状态 + 后端 validation。光前端清不够（用户多 tab / 深链接 / 旧版缓存都可能绕过）；光后端 validation 不够（用户看到 400 时已经疑惑「我刚才明明选对了」）。两层都在，重建到中间状态的路径都能被截。
+
+## RDL 模式下异常值裁剪应以 Limit 线为硬边界（2026-07-01）
+
+- **问题**: `HistogramChart.vue` 在 RDL 模式下使用 IQR 边界裁剪，导致原始 Limit 线（LSL/USL）内部的 bin 被隐藏。
+- **根因**: 前端未区分 `rangeType`。RDL 的语义是”规格限范围内的数据为合法”，因此 Limit 线内不应被 IQR 边界裁剪掉。
+- **Fix**: 当 `rangeType === 'RDL'` 时，将 `clipMin/clipMax` 扩展到 `lower_limit/upper_limit`，保证 Limit 线内 bin 始终保留；其他 range_type 保持纯 IQR 裁剪。
+- **验证**: E2E 测试断言裁剪前后 X 轴范围一致、LSL/USL 仍存在、且非空 bin 数量不减少。
+- **Rule 1**: 异常值/裁剪类可视化逻辑必须结合当前 `rangeType` 的语义。不同 range_type 对”正常数据范围”的定义不同，不能一刀切地用同一套裁剪边界。
+- **Rule 2**: 写 E2E 测试时，若测试断言依赖某个控件状态（如 RDL 模式），应显式把被测对象设置到目标状态，而不是依赖 store 默认值。
+
+## 后端异常值检测必须考虑 RDL 规格限（2026-07-02）
+
+- **问题**: `detect_outliers_iqr` 函数使用纯 IQR 方法检测异常值，没有考虑 RDL（规格限）。导致在 RDL 范围内的数据可能被错误标记为异常值。
+- **根因**: 异常值检测函数没有接收 spec_limits 参数，无法知道 RDL 范围。
+- **Fix**: 为 `detect_outliers_iqr` 添加可选参数 `spec_limits: tuple = None`。当提供 spec_limits 时，将异常值边界扩展到 `min(lower_bound, spec_lower)` 和 `max(upper_bound, spec_upper)`，保证 spec_limits 范围内的数据不被视为异常值。
+- **影响范围**: 5 个调用点都需要更新：
+  - `histogram.py`: 传递 `stats['rdl']` 作为 spec_limits
+  - `serial_distribution.py`: 传递 `stats['rdl']` 作为 spec_limits
+  - `correlation.py`: 添加 metadata 参数，计算并传递 spec_limits
+  - `computations.py` (QQ plot): 添加 metadata 和 param 参数，计算并传递 spec_limits
+- **验证**: 单元测试验证 spec_limits 范围内的数据不被视为异常值，spec_limits 范围外的数据仍被标记为异常值。
+- **Rule 1**: 异常值检测函数必须考虑业务上下文（如 RDL 规格限），不能只依赖统计方法（IQR）。统计方法检测出的”异常值”在业务上下文中可能是合法数据。
+- **Rule 2**: 添加可选参数时，要确保向后兼容性。`spec_limits` 参数默认为 None，不影响现有调用。
+- **Rule 3**: 修改核心函数时，要更新所有调用点。使用 grep 查找所有调用点，确保没有遗漏。
+
+## 视图测试中 monkey-patch 必须 patch 实际消费模块（2026-07-02）
+
+- **问题**: `StaleParamAcrossFileSwitchTests` 想 mock `_load_df_from_request` 让视图不查数据库，但测试类继承 `SimpleTestCase` 时抛 `DatabaseOperationForbidden`。
+- **根因**: `apps/analysis/views/__init__.py` 把 `_load_df_from_request` 从 `_helpers.py` re-export，而 `analysis_views.py` / `statistics_views.py` 内部用 `from ._helpers import _load_df_from_request`。测试只 patch 了 `apps.analysis.views._load_df_from_request`，没有 patch 两个视图模块自己的绑定，导致视图仍走原始 helper 并查询 `DataFile`。
+- **Fix**: `_patched_view` 改为分别 patch `apps.analysis.views.analysis_views._load_df_from_request` 和 `apps.analysis.views.statistics_views._load_df_from_request`，并通过 `self.addCleanup(restore)` 在每次测试后还原。
+- **验证**: 4 个 stale-param 视图测试在 `SimpleTestCase` 下全部通过，不再触碰数据库。
+- **Rule 1**: `from module import func` 会在消费者模块创建独立的名称绑定。`module.func = fake` 不影响已经导入的消费者。想 mock 必须 patch 实际调用者模块里的名称。
+- **Rule 2**: 写视图层 monkey-patch 测试前，先确认被测视图的真实 import 路径（`from .helpers import x` 还是 `from package import x`），用 traceback 验证 patch 生效。
+- **Rule 3**: 测试结束后用 `addCleanup` 还原 monkey-patch，避免测试间状态污染；返回 restore 回调让调用方注册，比静态方法内部硬编码更灵活。
 

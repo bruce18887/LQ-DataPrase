@@ -26,12 +26,23 @@ const api = axios.create({
   },
 })
 
+/**
+ * Dynamically change the Axios base URL at runtime.
+ *
+ * Called by the Electron preload bridge when the backend restarts on a
+ * different port (e.g. after the user manually kills the python process and
+ * the main process auto-restarts it).
+ */
+export function setApiBaseURL(backendUrl: string): void {
+  api.defaults.baseURL = `${backendUrl}/api/v1`
+}
+
 // Listen for dynamic backend URL changes from the Electron main process.
 // When the backend restarts on a different port the main process notifies
 // the renderer so Axios stays pointed at the correct address.
 if (typeof window !== 'undefined' && window.electronAPI?.onBackendUrlChange) {
   window.electronAPI.onBackendUrlChange((url: string) => {
-    api.defaults.baseURL = `${url}/api/v1`
+    setApiBaseURL(url)
   })
 }
 

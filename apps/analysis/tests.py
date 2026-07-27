@@ -296,10 +296,10 @@ class StaleParamAcrossFileSwitchTests(SimpleTestCase):
     """
 
     @staticmethod
-    def _patched_view(monkey_target_module, df, datafile=None, metadata=None):
-        """Return ``(APIRequestFactory, force_authenticate)`` after monkey-patching
-        ``_load_df_from_request`` on the views module so it returns ``df``
-        without touching the database.
+    def _patched_view(df, datafile=None, metadata=None):
+        """Return ``(APIRequestFactory, force_authenticate, restore)`` after
+        monkey-patching ``_load_df_from_request`` on the concrete view modules
+        so it returns ``df`` without touching the database.
 
         We don't need a real DataFile / parsed file: the histogram / qqplot
         views branch on df.columns long before the heavy stats run. This
@@ -307,7 +307,7 @@ class StaleParamAcrossFileSwitchTests(SimpleTestCase):
         """
         import types
         from rest_framework.test import APIRequestFactory, force_authenticate
-        from apps.analysis import views as views_mod
+        from apps.analysis.views import analysis_views, statistics_views
 
         if datafile is None:
             datafile = types.SimpleNamespace(
@@ -319,8 +319,19 @@ class StaleParamAcrossFileSwitchTests(SimpleTestCase):
         def fake_load(request):
             return df, datafile, metadata, None
 
-        views_mod._load_df_from_request = fake_load
-        return APIRequestFactory(), force_authenticate
+        original_analysis = getattr(analysis_views, '_load_df_from_request', None)
+        original_statistics = getattr(statistics_views, '_load_df_from_request', None)
+
+        analysis_views._load_df_from_request = fake_load
+        statistics_views._load_df_from_request = fake_load
+
+        def restore():
+            if original_analysis is not None:
+                analysis_views._load_df_from_request = original_analysis
+            if original_statistics is not None:
+                statistics_views._load_df_from_request = original_statistics
+
+        return APIRequestFactory(), force_authenticate, restore
 
     @staticmethod
     def _authed_post(factory, force_authenticate, url, payload):
@@ -346,11 +357,11 @@ class StaleParamAcrossFileSwitchTests(SimpleTestCase):
 
     def test_histogram_view_returns_400_for_unknown_param(self):
         """POST /analysis/histogram/ with a param not in the file → 400."""
-        from apps.analysis import views as views_mod
         from apps.analysis.views import AnalysisViewSet
 
         df = pd.DataFrame({'Param0': [1.0, 2.0, 3.0], 'Param1': [4.0, 5.0, 6.0]})
-        factory, force_authenticate = self._patched_view(views_mod, df)
+        factory, force_authenticate, restore = self._patched_view(df)
+        self.addCleanup(restore)
 
         request = self._authed_post(factory, force_authenticate,
                                     '/api/v1/analysis/histogram/', {
@@ -373,11 +384,11 @@ class StaleParamAcrossFileSwitchTests(SimpleTestCase):
         Guards against an over-eager fix that would 400 the whole request
         just because one of the params is stale.
         """
-        from apps.analysis import views as views_mod
         from apps.analysis.views import AnalysisViewSet
 
         df = pd.DataFrame({'Param0': [1.0, 2.0, 3.0], 'Param1': [4.0, 5.0, 6.0]})
-        factory, force_authenticate = self._patched_view(views_mod, df)
+        factory, force_authenticate, restore = self._patched_view(df)
+        self.addCleanup(restore)
 
         request = self._authed_post(factory, force_authenticate,
                                     '/api/v1/analysis/histogram/', {
@@ -397,11 +408,11 @@ class StaleParamAcrossFileSwitchTests(SimpleTestCase):
 
     def test_qqplot_view_returns_param_not_found_for_unknown_param(self):
         """POST /analysis/qqplot/ with a param not in the file → 400 param_not_found."""
-        from apps.analysis import views as views_mod
         from apps.analysis.views import AnalysisViewSet
 
         df = pd.DataFrame({'Param0': [1.0, 2.0, 3.0]})
-        factory, force_authenticate = self._patched_view(views_mod, df)
+        factory, force_authenticate, restore = self._patched_view(df)
+        self.addCleanup(restore)
 
         request = self._authed_post(factory, force_authenticate,
                                     '/api/v1/analysis/qqplot/', {
@@ -417,11 +428,11 @@ class StaleParamAcrossFileSwitchTests(SimpleTestCase):
 
     def test_boxplot_view_returns_400_for_unknown_param(self):
         """GET /statistics/boxplot/ with a param not in the file → 400 no_valid_params."""
-        from apps.analysis import views as views_mod
         from apps.analysis.views import StatisticsViewSet
 
         df = pd.DataFrame({'Param0': [1.0, 2.0, 3.0]})
-        factory, force_authenticate = self._patched_view(views_mod, df)
+        factory, force_authenticate, restore = self._patched_view(df)
+        self.addCleanup(restore)
 
         request = self._authed_get(factory, force_authenticate,
                                    '/api/v1/statistics/boxplot/', {

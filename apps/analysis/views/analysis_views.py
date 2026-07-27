@@ -92,6 +92,7 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         range_type = get_param(request, 'range_type', 'RDL')
         custom_low = get_param_float(request, 'custom_low')
         custom_high = get_param_float(request, 'custom_high')
+        iqr_multiplier = get_param_float(request, 'iqr_multiplier', 1.5)
 
         results = {}
         site_col = get_site_column(df)
@@ -118,7 +119,8 @@ class AnalysisViewSet(viewsets.GenericViewSet):
             try:
                 result = compute_histogram_stats(
                     df, metadata, param, site_col,
-                    range_type=range_type, custom_low=custom_low, custom_high=custom_high)
+                    range_type=range_type, custom_low=custom_low, custom_high=custom_high,
+                    iqr_multiplier=iqr_multiplier)
                 if result is not None:
                     results[param] = result
             except Exception:
@@ -245,7 +247,7 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         if param_x not in df.columns or param_y not in df.columns:
             return Response({'error': 'param_not_found'}, status=400)
 
-        result = compute_correlation_scatter(df, param_x, param_y)
+        result = compute_correlation_scatter(df, param_x, param_y, metadata)
 
         return Response(clean_data(result))
 
@@ -334,7 +336,7 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         if data_series.dropna().empty:
             return Response({'error': 'param_no_valid_data'}, status=400)
         try:
-            result = compute_qqplot(data_series)
+            result = compute_qqplot(data_series, metadata, param)
         except (TypeError, ValueError) as e:
             return Response({'error': 'qqplot_failed', 'detail': str(e)}, status=400)
 

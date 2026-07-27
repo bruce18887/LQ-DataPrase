@@ -7,19 +7,22 @@
     <el-tooltip
       v-if="outlierValues.length > 0"
       placement="top"
-      :width="320"
+      :width="360"
     >
       <template #content>
         <div class="outlier-hint-bar__tooltip">
-          <div class="outlier-hint-bar__tooltip-title">异常值列表</div>
+          <div class="outlier-hint-bar__tooltip-title">
+            异常值列表（共 {{ outlierValues.length }} 个）
+          </div>
           <div class="outlier-hint-bar__tooltip-values">
-            {{ outlierValues.map(v => v.toFixed(4)).join(', ') }}
+            {{ displayedValues }}
           </div>
         </div>
       </template>
       <span class="outlier-hint-bar__text">
         <el-icon class="outlier-hint-bar__icon"><Warning /></el-icon>
         {{ hintText }}
+        <span class="outlier-hint-bar__action">悬停查看列表</span>
       </span>
     </el-tooltip>
     <span v-else class="outlier-hint-bar__text">
@@ -64,6 +67,18 @@ const iconComponent = computed(() => hasOutliers.value ? Warning : CircleCheck)
 
 const outlierValues = computed(() => {
   return props.outlierInfo?.outlier_values ?? []
+})
+
+const MAX_TOOLTIP_VALUES = 30
+
+const displayedValues = computed(() => {
+  const values = outlierValues.value
+  if (values.length === 0) return ''
+  const formatted = values.slice(0, MAX_TOOLTIP_VALUES).map(v => v.toFixed(4))
+  if (values.length > MAX_TOOLTIP_VALUES) {
+    formatted.push(`…等 ${values.length - MAX_TOOLTIP_VALUES} 个`)
+  }
+  return formatted.join(', ')
 })
 
 const hintText = computed(() => {
@@ -118,8 +133,16 @@ const hintText = computed(() => {
   flex-shrink: 0;
 }
 
+.outlier-hint-bar__action {
+  margin-left: 4px;
+  font-size: 11px;
+  opacity: 0.85;
+  text-decoration: underline;
+  cursor: help;
+}
+
 .outlier-hint-bar__tooltip {
-  max-width: 300px;
+  max-width: 340px;
 }
 
 .outlier-hint-bar__tooltip-title {

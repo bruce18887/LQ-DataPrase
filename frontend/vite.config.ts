@@ -21,4 +21,39 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    // Suppress "chunks larger than 500 kB" warnings — the analysis and
+    // data-management views legitimately bundle echarts/ag-grid which are
+    // large by nature. Code-splitting them further would hurt runtime perf.
+    chunkSizeWarningLimit: 1500,
+    rolldownOptions: {
+      onwarn(warning, defaultHandler) {
+        // @vueuse/core ships /* #__PURE__ */ annotations in positions that
+        // Rolldown cannot interpret. This is a known upstream issue and
+        // only affects dead-code elimination optimization, not correctness.
+        if (warning.code === 'INVALID_ANNOTATION' &&
+            warning.message?.includes('@vueuse/core')) {
+          return
+        }
+        defaultHandler(warning)
+      },
+      output: {
+        // Split vendor libs into separate chunks for better caching.
+        // Rolldown's manualChunks only accepts a function form.
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('echarts') || id.includes('vue-echarts') || id.includes('zrender')) {
+              return 'echarts-vendor'
+            }
+            if (id.includes('ag-grid')) {
+              return 'ag-grid-vendor'
+            }
+            if (id.includes('element-plus') || id.includes('@element-plus')) {
+              return 'element-vendor'
+            }
+          }
+        },
+      },
+    },
+  },
 })

@@ -60,7 +60,7 @@ _hiddenimports += [
     'apps.datafiles.views.__init__',
     'apps.datafiles.views._helpers',
     'apps.datafiles.views.browse_views',
-    'apps.datafiles.views.upload_views',
+    'apps.datafiles.views.file_views',
     'apps.datafiles.views.batch_views',
     'apps.datafiles.urls',
     'apps.datafiles.serializers',
@@ -72,7 +72,6 @@ _hiddenimports += [
     'apps.analysis.models',
     'apps.analysis.views',
     'apps.analysis.urls',
-    'apps.analysis.serializers',
     'apps.analysis.apps',
     'apps.analysis.services',
     'apps.analysis.services.statistics',
@@ -145,9 +144,12 @@ _hiddenimports += [
     'django.db.migrations',
     'django.core.management',
     'django.core.management.commands.migrate',
-    'django.core.management.commands.collectstatic',
     'django.core.management.commands.runserver',
-    'django.core.management.commands.createsuperuser',
+    # Django 6+ moved these commands out of django.core.management.commands:
+    #   collectstatic  -> django.contrib.staticfiles.management.commands
+    #   createsuperuser -> django.contrib.auth.management.commands
+    'django.contrib.staticfiles.management.commands.collectstatic',
+    'django.contrib.auth.management.commands.createsuperuser',
     'django.core.handlers.wsgi',
     'django.core.servers.basehttp',
     'django.middleware.security',
@@ -238,33 +240,53 @@ _hiddenimports += [
 # ---------------------------------------------------------------------------
 from PyInstaller.utils.hooks import collect_all
 
+# Set DJANGO_SETTINGS_MODULE so collect_all can properly introspect Django
+# subpackages (rest_framework.schemas, django.contrib.gis.utils, etc.).
+# Without this, collect_all emits ImproperlyConfigured warnings and skips
+# modules that require settings to be loaded.
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.standalone')
+import django  # noqa: E402
+django.setup()
+
 # Critical packages that need full collection (templates, static, migrations)
+# NOTE: Only list packages that genuinely need collect_all (i.e. ship data
+# files or templates). For pure-Python packages, the hiddenimports list above
+# is sufficient and much faster.
 _full_collect = [
-    'django',
-    'rest_framework',
+    'rest_framework',          # templates, static
     'rest_framework_simplejwt',
     'django_filters',
-    'drf_spectacular',
+    'drf_spectacular',         # schemas, static
     'corsheaders',
     'whitenoise',
-    'pandas',
-    'numpy',
-    'scipy',
-    'matplotlib',
-    'PIL',
-    'cryptography',
-    'paramiko',
-    'nacl',
-    'bcrypt',
-    'openpyxl',
-    'lxml',
-    'pptx',
+    'openpyxl',                # templates
+    'lxml',                    # data files
+    'pptx',                    # templates
     'py7zr',
-    'rarfile',
     'excelize',
 ]
 
-for pkg in _full_collect:
+# Django needs special handling: collect_all('django') pulls in ALL database
+# backends (mysql, postgres, oracle, gis) and contrib apps we don't use,
+# adding ~35s to the build. Instead, collect only the subpackages we need.
+_django_subpackages = [
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    'django.contrib.auth.management',
+    'django.contrib.auth.management.commands',
+    'django.contrib.staticfiles.management',
+    'django.contrib.staticfiles.management.commands',
+    'django.template',
+    'django.templatetags',
+    'django.views',
+    'django.views.generic',
+    'django.db.backends.sqlite3',
+]
+for pkg in _django_subpackages:
     try:
         datas, binaries, hiddenimports = collect_all(pkg)
         _datas += datas
@@ -272,6 +294,66 @@ for pkg in _full_collect:
         _hiddenimports += hiddenimports
     except Exception:
         pass
+
+# Scientific packages: collect_all on these is extremely slow (pandas ~10s,
+# scipy ~15s, matplotlib ~10s) because they recursively scan thousands of
+# submodules. We only need specific subpackages, so collect those directly.
+_science_subpackages = [
+    'pandas.core',
+    'pandas.io',
+    'pandas.compat',
+    'pandas._libs',
+    'pandas.api',
+    'pandas.util',
+    'pandas.tseries',
+    'pandas.plotting',
+    'numpy.core',
+    'numpy._core',
+    'numpy.lib',
+    'numpy.linalg',
+    'numpy.fft',
+    'numpy.random',
+    'numpy.ma',
+    'numpy.polynomial',
+    'numpy.ctypeslib',
+    'scipy.stats',
+    'scipy.special',
+    'scipy.interpolate',
+    'scipy.optimize',
+    'scipy._lib',
+    'scipy.linalg',
+    'scipy.fft',
+    'matplotlib',
+    'matplotlib.backends',
+    'PIL',
+    'cryptography',
+    'paramiko',
+    'nacl',
+    'bcrypt',
+]
+for pkg in _science_subpackages:
+    try:
+        datas, binaries, hiddenimports = collect_all(pkg)
+        _datas += datas
+        _binaries += binaries
+        _hiddenimports += hiddenimports
+    except Exception:
+        pass
+
+# collect_all() recursively pulls in test subpackages (e.g. scipy.stats.tests,
+# numpy.f2py.tests) as hidden imports. PyInstaller's `excludes` option does
+# NOT filter entries already in `hiddenimports`, so we must strip them here.
+# This cuts the Analysis phase from ~95s down to ~30s and shrinks the bundle.
+_test_patterns = (
+    '.tests.', '.tests',
+    '.test_',  # some packages use test_<name> convention
+)
+def _is_test_module(name: str) -> bool:
+    parts = name.split('.')
+    # Match <pkg>.tests or <pkg>.tests.<anything>
+    return any(p == 'tests' for p in parts[1:])  # skip leading part
+
+_hiddenimports = [m for m in _hiddenimports if not _is_test_module(m)]
 
 # ---------------------------------------------------------------------------
 # Exclusions — save space by removing things we don't need
@@ -296,6 +378,59 @@ _excludes = [
     'notebook',
     'pytest',
     'playwright',
+    # Django database backends we don't use (only sqlite3 is needed)
+    'django.db.backends.mysql',
+    'django.db.backends.postgresql',
+    'django.db.backends.oracle',
+    'django.db.backends.base',
+    # Django contrib apps we don't use
+    'django.contrib.gis',
+    'django.contrib.postgres',
+    'django.contrib.sitemaps',
+    'django.contrib.sites',
+    'django.contrib.flatpages',
+    'django.contrib.redirects',
+    'django.contrib.humanize',
+    'django.contrib.webdesign',
+    # Matplotlib backends we don't use (only backend_agg is needed)
+    'matplotlib.backends.backend_tk',
+    'matplotlib.backends.backend_qt',
+    'matplotlib.backends.backend_gtk',
+    'matplotlib.backends.backend_wx',
+    'matplotlib.backends.backend_macosx',
+    # Test subpackages of scientific libraries — pulled in by collect_all but
+    # never needed at runtime. Excluding them speeds up the Analysis phase
+    # and shrinks the bundle.
+    'pandas.tests',
+    'numpy.tests',
+    'numpy.f2py.tests',
+    'numpy.lib.tests',
+    'numpy.ma.tests',
+    'numpy.linalg.tests',
+    'numpy.fft.tests',
+    'numpy.random.tests',
+    'numpy.typing.tests',
+    'numpy.core.tests',
+    'numpy.distutils.tests',
+    'scipy._lib.tests',
+    'scipy.cluster.tests',
+    'scipy.constants.tests',
+    'scipy.datasets.tests',
+    'scipy.differentiate.tests',
+    'scipy.fft.tests',
+    'scipy.fftpack.tests',
+    'scipy.integrate.tests',
+    'scipy.interpolate.tests',
+    'scipy.io.tests',
+    'scipy.linalg.tests',
+    'scipy.ndimage.tests',
+    'scipy.optimize.tests',
+    'scipy.signal.tests',
+    'scipy.sparse.tests',
+    'scipy.spatial.tests',
+    'scipy.special.tests',
+    'scipy.stats.tests',
+    'matplotlib.tests',
 ]
 
 # ---------------------------------------------------------------------------

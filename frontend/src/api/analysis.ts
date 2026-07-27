@@ -4,8 +4,10 @@ export const analysisApi = {
   getDashboard(fileId: number) {
     return api.get('/summary/', { params: { file_id: fileId } })
   },
-  getHistogram(fileId: number, params: string[]) {
-    return api.get('/analysis/histogram/', { params: { file_id: fileId, params } })
+  getHistogram(fileId: number, params: string[], iqrMultiplier?: number) {
+    const query: Record<string, any> = { file_id: fileId, params }
+    if (iqrMultiplier != null) query.iqr_multiplier = iqrMultiplier
+    return api.get('/analysis/histogram/', { params: query })
   },
   getWaferMap(fileId: number, param?: string) {
     return api.get('/analysis/wafer_map/', { params: { file_id: fileId, param } })

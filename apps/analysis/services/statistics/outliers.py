@@ -1,6 +1,6 @@
 """Outlier detection utilities for data visualization."""
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 import numpy as np
 import pandas as pd
 
@@ -8,18 +8,34 @@ import pandas as pd
 def detect_outliers_iqr(
     data: pd.Series,
     include_values: bool = False,
+    spec_limits: Optional[Tuple[float, float]] = None,
+    iqr_multiplier: float = 1.5,
 ) -> Dict[str, Any]:
     """Detect outliers using the IQR (Interquartile Range) method.
 
-    Uses the standard 1.5xIQR rule:
-        lower_bound = Q1 - 1.5 * IQR
-        upper_bound = Q3 + 1.5 * IQR
+    Uses the IQR rule with configurable multiplier:
+        lower_bound = Q1 - iqr_multiplier * IQR
+        upper_bound = Q3 + iqr_multiplier * IQR
+
+    Common multiplier values:
+        - 1.5: Standard (Tukey's fences), detects mild outliers
+        - 3.0: Extreme outliers only, keeps more data points
+
+    When ``spec_limits`` is provided, the outlier bounds are expanded to
+    include the spec limits.  This ensures that data points within the
+    spec limits (RowDataLimit) are never flagged as outliers, even if
+    they fall outside the IQR range.
 
     Args:
         data: Raw numeric data series.
         include_values: If True, include the full outlier_values list in the
             response. Set to False for "clip" mode (saves bandwidth) and True
             for "exclude" mode.
+        spec_limits: Optional (lower, upper) tuple of spec limits.  When
+            provided, the outlier bounds are expanded to include these values,
+            so data within spec limits is never treated as outliers.
+        iqr_multiplier: Multiplier for IQR (default 1.5). Use 3.0 for extreme
+            outliers only, which keeps more "mildly" abnormal data points.
 
     Returns:
         Dict with keys: has_outliers, outlier_count, lower_bound,
@@ -51,8 +67,17 @@ def detect_outliers_iqr(
     q3 = float(clean.quantile(0.75))
     iqr = q3 - q1
 
-    lower_bound = q1 - 1.5 * iqr
-    upper_bound = q3 + 1.5 * iqr
+    lower_bound = q1 - iqr_multiplier * iqr
+    upper_bound = q3 + iqr_multiplier * iqr
+
+    # Expand bounds to include spec limits (RDL).
+    # Data within spec limits should never be treated as outliers.
+    if spec_limits is not None:
+        spec_lower, spec_upper = spec_limits
+        if spec_lower is not None:
+            lower_bound = min(lower_bound, spec_lower)
+        if spec_upper is not None:
+            upper_bound = max(upper_bound, spec_upper)
 
     outlier_mask = (clean < lower_bound) | (clean > upper_bound)
     outlier_count = int(outlier_mask.sum())
