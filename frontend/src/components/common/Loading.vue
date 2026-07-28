@@ -1,6 +1,6 @@
 <template>
-  <div class="dp-loading" :style="{ width: size, height: size }">
-    <div class="dp-loading__spinner" :style="spinnerStyle"></div>
+  <div class="dp-loading" :style="{ width: size, height: size }" role="status" aria-live="polite" aria-label="加载中">
+    <div class="dp-loading__spinner" :style="spinnerStyle" aria-hidden="true"></div>
   </div>
 </template>
 
@@ -23,7 +23,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   size: '50px',
-  color: '#2563eb'
+  color: 'var(--brand-primary)'
 })
 
 const spinnerStyle = computed(() => ({
@@ -42,14 +42,24 @@ const spinnerStyle = computed(() => ({
 .dp-loading__spinner {
   width: 100%;
   height: 100%;
-  border: 3px solid rgba(37, 99, 235, 0.15);
+  position: relative;
+  border: 3px solid color-mix(in srgb, var(--brand-primary) 15%, transparent);
   border-top-color: var(--brand-primary);
   border-right-color: var(--brand-primary);
   border-radius: 50%;
   animation: dp-spin 0.8s linear infinite;
   box-shadow:
-    0 0 15px rgba(37, 99, 235, 0.25),
-    inset 0 0 15px rgba(37, 99, 235, 0.1);
+    0 0 15px color-mix(in srgb, var(--brand-primary) 25%, transparent),
+    inset 0 0 15px color-mix(in srgb, var(--brand-primary) 10%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dp-loading__spinner {
+    animation: none;
+  }
+  .dp-loading__spinner::before {
+    animation: none;
+  }
 }
 
 @keyframes dp-spin {

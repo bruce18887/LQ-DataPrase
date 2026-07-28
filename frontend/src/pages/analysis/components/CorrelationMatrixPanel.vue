@@ -18,7 +18,7 @@ import { useEChartsTheme } from '../../../utils/echarts-theme'
 
 const props = defineProps<{ loading: boolean; matrixData: any }>()
 const emit = defineEmits<{ calculate: [] }>()
-const { colors } = useEChartsTheme()
+const { colors, isDark } = useEChartsTheme()
 
 function onCalculate() { emit('calculate') }
 
@@ -46,7 +46,9 @@ function buildOption() {
     yAxis: { type: 'category', data: params, splitArea: { show: true }, axisLabel: { fontSize: 10, color: tc } },
     visualMap: {
       min: -1, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: '0%',
-      inRange: { color: ['#d73027', '#f46d43', '#fdae61', '#fee08b', '#e6f598', '#abdda4', '#66c2a5', '#3288bd'] },
+      inRange: { color: isDark.value
+        ? ['#ef5350', '#ff7043', '#ffa726', '#ffee58', '#9ccc65', '#4db6ac', '#26a69a', '#42a5f5']
+        : ['#d73027', '#f46d43', '#fdae61', '#fee08b', '#e6f598', '#abdda4', '#66c2a5', '#3288bd'] },
     },
     series: [{
       name: 'Pearson r', type: 'heatmap', data: heatmapData,

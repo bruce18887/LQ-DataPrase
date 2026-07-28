@@ -61,13 +61,18 @@ withDefaults(defineProps<Props>(), {
   margin-bottom: 20px;
   color: var(--text-tertiary);
   opacity: 0.6;
-  animation: dp-float 3s ease-in-out infinite;
 }
 
 .dp-empty__icon svg {
   width: 100%;
   height: 100%;
-  filter: drop-shadow(0 0 8px rgba(37, 99, 235, 0.15));
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--brand-primary) 15%, transparent));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .dp-empty__icon {
+    animation: dp-float 3s ease-in-out infinite;
+  }
 }
 
 .dp-empty__text {
@@ -97,6 +102,6 @@ withDefaults(defineProps<Props>(), {
 }
 
 .dp-empty:hover .dp-empty__icon svg {
-  filter: drop-shadow(0 0 12px rgba(37, 99, 235, 0.3));
+  filter: drop-shadow(0 0 12px color-mix(in srgb, var(--brand-primary) 30%, transparent));
 }
 </style>

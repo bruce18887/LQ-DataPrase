@@ -6,15 +6,17 @@
         <el-icon :size="28" aria-hidden="true"><TrendCharts /></el-icon>
       </div>
       <transition name="fade">
-        <div v-show="!isCollapsed" class="logo-text">
-          <span class="logo-title">LQ-DataPrase</span>
-          <span class="logo-subtitle">ATE数据分析平台</span>
-        </div>
+        <h1 v-show="!isCollapsed" class="logo-text">
+          <router-link to="/dashboard" class="logo-link">
+            <span class="logo-title">LQ-DataPrase</span>
+            <span class="logo-subtitle">ATE数据分析平台</span>
+          </router-link>
+        </h1>
       </transition>
     </div>
 
     <!-- 导航菜单 -->
-    <nav class="nav-menu">
+    <nav class="nav-menu" aria-label="主导航">
       <template v-for="(item, index) in menuItems" :key="item.path">
         <!-- 分组分隔线 -->
         <div
@@ -32,6 +34,7 @@
           :to="item.path"
           class="menu-item"
           :class="{ active: isActive(item.path), hidden: item.requiresAdmin && !isAdmin }"
+          :aria-current="isActive(item.path) ? 'page' : undefined"
         >
           <div class="menu-item-content">
             <div class="menu-icon" aria-hidden="true">
@@ -47,7 +50,7 @@
     </nav>
 
     <!-- 折叠按钮 -->
-    <button class="collapse-btn" @click="toggleCollapse" aria-label="折叠侧边栏">
+    <button class="collapse-btn" @click="toggleCollapse" :aria-label="isCollapsed ? '展开侧边栏' : '折叠侧边栏'" :aria-expanded="!isCollapsed">
       <el-icon :size="18" aria-hidden="true">
         <DArrowLeft v-if="!isCollapsed" />
         <DArrowRight v-else />
@@ -102,11 +105,13 @@ const toggleCollapse = () => {
 .sidebar {
   width: 240px;
   height: 100vh;
+  height: 100dvh;
   background-color: var(--bg-secondary);
   display: flex;
   flex-direction: column;
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
+  z-index: 100;
   overflow: hidden;
   border-right: 1px solid var(--border-default);
 }
@@ -137,11 +142,19 @@ const toggleCollapse = () => {
   flex-shrink: 0;
 }
 
+.logo-link {
+  text-decoration: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .logo-text {
   display: flex;
   flex-direction: column;
   gap: 2px;
   overflow: hidden;
+  margin: 0;
 }
 
 .logo-title {
@@ -331,8 +344,30 @@ const toggleCollapse = () => {
   padding: 12px 0;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .menu-item,
+  .menu-item-content,
+  .collapse-btn,
+  .logo-section {
+    transition: none;
+  }
+  .fade-enter-active,
+  .fade-leave-active {
+    transition: none;
+  }
+}
+
 .sidebar.collapsed .active-indicator {
   left: 0;
   width: 3px;
+}
+
+/* 移动端：小屏自动折叠侧边栏 */
+@media (max-width: 768px) {
+  .sidebar { width: 64px; }
+  .logo-section { justify-content: center; padding: 20px 8px; }
+  .menu-item-content { justify-content: center; padding: 12px 0; }
+  .collapse-btn { display: none; }
 }
 </style>

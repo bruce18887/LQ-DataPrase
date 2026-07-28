@@ -37,42 +37,44 @@ withDefaults(defineProps<Props>(), {
 }
 
 .dp-badge--success {
-  background: rgba(5, 150, 105, 0.1);
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
   color: var(--color-success);
   border: 1px solid var(--color-success);
   box-shadow:
-    0 0 8px rgba(5, 150, 105, 0.2),
-    inset 0 0 8px rgba(5, 150, 105, 0.05);
+    0 0 8px color-mix(in srgb, var(--color-success) 20%, transparent),
+    inset 0 0 8px color-mix(in srgb, var(--color-success) 5%, transparent);
 }
 
 .dp-badge--warning {
-  background: rgba(217, 119, 6, 0.1);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
   color: var(--color-warning);
   border: 1px solid var(--color-warning);
   box-shadow:
-    0 0 8px rgba(217, 119, 6, 0.2),
-    inset 0 0 8px rgba(217, 119, 6, 0.05);
+    0 0 8px color-mix(in srgb, var(--color-warning) 20%, transparent),
+    inset 0 0 8px color-mix(in srgb, var(--color-warning) 5%, transparent);
 }
 
 .dp-badge--error {
-  background: rgba(220, 38, 38, 0.1);
+  background: color-mix(in srgb, var(--color-error) 10%, transparent);
   color: var(--color-error);
   border: 1px solid var(--color-error);
   box-shadow:
-    0 0 8px rgba(220, 38, 38, 0.2),
-    inset 0 0 8px rgba(220, 38, 38, 0.05);
+    0 0 8px color-mix(in srgb, var(--color-error) 20%, transparent),
+    inset 0 0 8px color-mix(in srgb, var(--color-error) 5%, transparent);
 }
 
 .dp-badge--info {
-  background: rgba(37, 99, 235, 0.1);
+  background: color-mix(in srgb, var(--color-info) 10%, transparent);
   color: var(--color-info);
   border: 1px solid var(--color-info);
   box-shadow:
-    0 0 8px rgba(37, 99, 235, 0.2),
-    inset 0 0 8px rgba(37, 99, 235, 0.05);
+    0 0 8px color-mix(in srgb, var(--color-info) 20%, transparent),
+    inset 0 0 8px color-mix(in srgb, var(--color-info) 5%, transparent);
 }
 
-.dp-badge:hover {
-  transform: scale(1.05);
+@media (prefers-reduced-motion: no-preference) {
+  .dp-badge:hover {
+    transform: scale(1.05);
+  }
 }
 </style>

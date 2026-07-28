@@ -3,7 +3,7 @@
     <!-- Header -->
     <div class="page-header">
       <div class="header-icon">
-        <el-icon :size="32" color="#409EFF" aria-hidden="true"><FolderOpened /></el-icon>
+        <el-icon :size="32" aria-hidden="true"><FolderOpened /></el-icon>
       </div>
       <div class="header-title">
         <h2>SFTP 浏览器</h2>
@@ -299,6 +299,7 @@ function formatSize(bytes: number): string {
   background: var(--bg-primary);
   border-radius: 8px;
   box-shadow: var(--shadow-sm);
+  color: var(--brand-primary);
 }
 
 .header-title { flex: 1; }

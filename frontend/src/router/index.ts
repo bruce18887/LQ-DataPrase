@@ -11,7 +11,7 @@ const routes = [
     path: '/login',
     name: 'Login',
     component: () => import('../pages/auth/LoginPage.vue'),
-    meta: { requiresAuth: false },
+    meta: { requiresAuth: false, title: '登录' },
   },
   {
     path: '/',
@@ -61,8 +61,13 @@ const routes = [
         component: () => import('../pages/settings/SettingsPage.vue'),
         meta: { title: '系统设置' },
       },
-      // 兜底：未匹配的路径重定向到仪表板
-      { path: ':pathMatch(.*)*', redirect: '/dashboard' },
+      // 404 页面
+      {
+        path: ':pathMatch(.*)*',
+        name: 'NotFound',
+        component: () => import('../pages/NotFoundPage.vue'),
+        meta: { title: '页面未找到' },
+      },
     ],
   },
 ]
@@ -76,6 +81,19 @@ const router = createRouter({
 const scrollPositions = new Map<string, number>()
 
 router.afterEach((to, from) => {
+  // Update document title
+  const title = to.meta.title
+  document.title = title ? `${title} - LQ-DataPrase` : 'LQ-DataPrase'
+
+  // Move focus to main content on page navigation
+  if (to.path !== from.path) {
+    // Use nextTick-equivalent timing to ensure DOM is ready
+    requestAnimationFrame(() => {
+      const main = document.getElementById('main-content')
+      if (main) main.focus({ preventScroll: true })
+    })
+  }
+
   // Restore scroll position after navigation
   const toKey = to.fullPath
   const savedTop = scrollPositions.get(toKey)
