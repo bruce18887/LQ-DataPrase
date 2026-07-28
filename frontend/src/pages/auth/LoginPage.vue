@@ -14,7 +14,7 @@
         <p class="login-subtitle">ATE 数据分析平台</p>
 
         <!-- 登录表单 -->
-        <el-form ref="formRef" :model="form" :rules="rules" @submit.prevent="handleLogin">
+        <el-form ref="formRef" :model="form" :rules="rules" label-width="80px" @submit.prevent="handleLogin">
           <el-form-item prop="username" label="用户名" required>
             <el-input
               v-model="form.username"
@@ -231,6 +231,15 @@ async function handleLogin() {
 /* 表单样式覆盖 */
 :deep(.el-form-item) {
   margin-bottom: 24px;
+  align-items: center;
+}
+
+:deep(.el-form-item__label) {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  line-height: 1.2;
+  color: var(--text-primary);
 }
 
 :deep(.el-form-item__error) {
