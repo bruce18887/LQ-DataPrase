@@ -15,21 +15,23 @@
 
         <!-- 登录表单 -->
         <el-form ref="formRef" :model="form" :rules="rules" @submit.prevent="handleLogin">
-          <el-form-item prop="username">
+          <el-form-item prop="username" label="用户名" required>
             <el-input
               v-model="form.username"
-              placeholder="用户名"
+              placeholder="请输入用户名"
               size="large"
+              name="username"
               autocomplete="username"
               class="neon-input"
             />
           </el-form-item>
-          <el-form-item prop="password">
+          <el-form-item prop="password" label="密码" required>
             <el-input
               v-model="form.password"
               type="password"
-              placeholder="密码"
+              placeholder="请输入密码"
               size="large"
+              name="password"
               autocomplete="current-password"
               show-password
               class="neon-input"
@@ -148,26 +150,31 @@ async function handleLogin() {
   border: 1px solid var(--brand-primary);
   border-radius: 16px;
   box-shadow:
-    0 0 20px rgba(37, 99, 235, 0.2),
-    0 0 40px rgba(37, 99, 235, 0.1),
-    inset 0 0 60px rgba(37, 99, 235, 0.03);
+    0 0 20px rgba(var(--brand-primary-rgb), 0.2),
+    0 0 40px rgba(var(--brand-primary-rgb), 0.1),
+    inset 0 0 60px rgba(var(--brand-primary-rgb), 0.03);
   position: relative;
   z-index: 1;
-  animation: cardGlow 3s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .login-card {
+    animation: cardGlow 3s ease-in-out infinite;
+  }
 }
 
 @keyframes cardGlow {
   0%, 100% {
     box-shadow:
-      0 0 20px rgba(37, 99, 235, 0.2),
-      0 0 40px rgba(37, 99, 235, 0.1),
-      inset 0 0 60px rgba(37, 99, 235, 0.03);
+      0 0 20px rgba(var(--brand-primary-rgb), 0.2),
+      0 0 40px rgba(var(--brand-primary-rgb), 0.1),
+      inset 0 0 60px rgba(var(--brand-primary-rgb), 0.03);
   }
   50% {
     box-shadow:
-      0 0 30px rgba(37, 99, 235, 0.3),
-      0 0 60px rgba(37, 99, 235, 0.15),
-      inset 0 0 80px rgba(37, 99, 235, 0.05);
+      0 0 30px rgba(var(--brand-primary-rgb), 0.3),
+      0 0 60px rgba(var(--brand-primary-rgb), 0.15),
+      inset 0 0 80px rgba(var(--brand-primary-rgb), 0.05);
   }
 }
 
@@ -189,7 +196,7 @@ async function handleLogin() {
 
 .logo-icon {
   color: var(--brand-primary);
-  filter: drop-shadow(0 0 10px rgba(37, 99, 235, 0.4));
+  filter: drop-shadow(0 0 10px rgba(var(--brand-primary-rgb),0.4));
   animation: logoFloat 3s ease-in-out infinite;
 }
 
@@ -210,7 +217,7 @@ async function handleLogin() {
   color: var(--text-primary);
   margin: 0 0 8px;
   letter-spacing: 2px;
-  text-shadow: 0 0 20px rgba(37, 99, 235, 0.3);
+  text-shadow: 0 0 20px rgba(var(--brand-primary-rgb),0.3);
 }
 
 .login-subtitle {
@@ -227,7 +234,7 @@ async function handleLogin() {
 }
 
 :deep(.el-form-item__error) {
-  color: #ff6b6b;
+  color: var(--color-error);
   font-size: 12px;
 }
 
@@ -246,9 +253,9 @@ async function handleLogin() {
 :deep(.neon-input .el-input__wrapper.is-focus) {
   border-color: var(--brand-primary);
   box-shadow:
-    0 0 10px rgba(37, 99, 235, 0.2),
-    0 0 20px rgba(37, 99, 235, 0.1),
-    inset 0 0 10px rgba(37, 99, 235, 0.05);
+    0 0 10px rgba(var(--brand-primary-rgb),0.2),
+    0 0 20px rgba(var(--brand-primary-rgb),0.1),
+    inset 0 0 10px rgba(var(--brand-primary-rgb),0.05);
 }
 
 :deep(.neon-input .el-input__inner) {
@@ -270,15 +277,15 @@ async function handleLogin() {
   font-size: 16px;
   font-weight: 600;
   letter-spacing: 2px;
-  box-shadow: 0 0 20px rgba(37, 99, 235, 0.2);
+  box-shadow: 0 0 20px rgba(var(--brand-primary-rgb),0.2);
   transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
 }
 
 :deep(.neon-button:hover) {
   transform: translateY(-2px);
   box-shadow:
-    0 0 30px rgba(37, 99, 235, 0.3),
-    0 4px 20px rgba(37, 99, 235, 0.2);
+    0 0 30px rgba(var(--brand-primary-rgb),0.3),
+    0 4px 20px rgba(var(--brand-primary-rgb),0.2);
   background: var(--brand-primary-hover);
 }
 
@@ -307,42 +314,48 @@ async function handleLogin() {
 
 /* 错误提示 */
 .error-msg {
-  color: #ff6b6b;
+  color: var(--color-error);
   text-align: center;
   margin-top: 16px;
   font-size: 13px;
   padding: 12px;
-  background: rgba(255, 107, 107, 0.1);
-  border: 1px solid rgba(255, 107, 107, 0.3);
+  background: color-mix(in srgb, var(--color-error) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-error) 30%, transparent);
   border-radius: 8px;
-  animation: shake 0.5s ease;
   line-height: 1.6;
 }
+
+@media (prefers-reduced-motion: no-preference) {
+  .error-msg {
+    animation: shake 0.5s ease;
+  }
+}
+
 .error-hint {
   display: block;
   margin-top: 4px;
   font-size: 12px;
   opacity: 0.85;
 }
-/* Network / timeout: amber, not red — "your fault" vs "server's fault" */
+/* Network / timeout: amber, not red */
 .error-msg--timeout,
 .error-msg--network_error {
-  color: #f59e0b;
-  background: rgba(245, 158, 11, 0.08);
-  border-color: rgba(245, 158, 11, 0.3);
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
 }
-/* Disabled / locked: keep red, more emphatic */
+/* Disabled / locked */
 .error-msg--account_disabled,
 .error-msg--account_locked {
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.08);
-  border-color: rgba(239, 68, 68, 0.4);
+  color: var(--color-error-emphasis);
+  background: color-mix(in srgb, var(--color-error) 8%, transparent);
+  border-color: color-mix(in srgb, var(--color-error) 40%, transparent);
 }
-/* Server error: muted grey-red, do not look like a user action issue */
+/* Server error */
 .error-msg--server_error {
-  color: #d97706;
-  background: rgba(217, 119, 6, 0.08);
-  border-color: rgba(217, 119, 6, 0.3);
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
 }
 
 @keyframes shake {

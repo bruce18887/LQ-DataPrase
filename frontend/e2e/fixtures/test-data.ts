@@ -100,8 +100,6 @@ export const ROUTES = [
   { path: '/dashboard', title: '仪表板', menu: '仪表板' },
   { path: '/data', title: '数据管理', menu: '数据管理' },
   { path: '/analysis', title: '数据分析', menu: '数据分析' },
-  { path: '/batch', title: '批次报表', menu: '批次报表' },
   { path: '/sftp', title: 'SFTP 浏览器', menu: 'SFTP浏览器' },
   { path: '/settings', title: '系统设置', menu: '系统设置' },
-  { path: '/roadmap', title: '功能路线图', menu: '功能路线图' },
 ] as const

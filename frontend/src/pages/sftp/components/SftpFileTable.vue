@@ -7,7 +7,6 @@
       @row-click="(row: any) => { if (row.is_dir) emit('navigate', currentPath + '/' + row.name) }"
       @sort-change="(sort: any) => emit('sort-change', sort)"
       class="file-table"
-      :header-cell-style="{ background: '#f5f7fa', fontWeight: '600', fontSize: '13px' }"
     >
       <el-table-column width="40" align="center">
         <template #default="{row}">
@@ -22,8 +21,8 @@
         <template #default="{row}">
           <div class="file-name-cell" :class="{ 'is-dir': row.is_dir }">
             <div class="file-icon">
-              <el-icon v-if="row.is_dir" :size="22" color="#E6A23C"><Folder /></el-icon>
-              <el-icon v-else :size="22" color="#409EFF"><Document /></el-icon>
+              <el-icon v-if="row.is_dir" :size="22"><Folder /></el-icon>
+              <el-icon v-else :size="22"><Document /></el-icon>
             </div>
             <div class="file-info">
               <span class="file-name">{{ row.name }}</span>
@@ -43,7 +42,7 @@
           <span class="file-time">{{ row.mtime ? formatDate(row.mtime) : '-' }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="220" align="center">
+      <el-table-column label="操作" width="220" align="center" fixed="right">
         <template #default="{row}">
           <div class="action-cell">
             <el-button-group v-if="!row.is_dir">
@@ -87,7 +86,7 @@
 
     <el-empty v-if="items.length === 0" description="暂无文件" :image-size="100">
       <template #image>
-        <el-icon :size="60" color="#dcdfe6"><FolderOpened /></el-icon>
+        <el-icon :size="60"><FolderOpened /></el-icon>
       </template>
     </el-empty>
   </el-card>
@@ -151,6 +150,8 @@ function isDownloading(key: string): boolean {
   display: flex; align-items: center; justify-content: center;
   width: 36px; height: 36px; background: var(--bg-tertiary); border-radius: 8px; flex-shrink: 0;
 }
+.file-icon :deep(.el-icon) { color: var(--brand-primary); }
+.is-dir .file-icon :deep(.el-icon) { color: var(--color-warning); }
 .is-dir .file-icon { background: rgba(217, 119, 6, 0.1); }
 .file-info { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .file-name {
@@ -172,4 +173,10 @@ function isDownloading(key: string): boolean {
 .action-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .action-cell :deep(.el-button) { font-size: 12px; }
 .action-cell :deep(.el-button .el-icon) { margin-right: 2px; }
+
+/* Table header override */
+.file-table :deep(.el-table__header th) { background: var(--bg-tertiary); font-weight: 600; font-size: 13px; }
+
+/* Empty icon */
+.file-list-card :deep(.el-empty .el-icon) { color: var(--text-tertiary); }
 </style>

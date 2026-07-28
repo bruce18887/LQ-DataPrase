@@ -35,7 +35,7 @@
           <el-option label="严格 (1.5x IQR)" :value="1.5" />
           <el-option label="宽松 (3.0x IQR)" :value="3.0" />
         </el-select>
-        <span style="margin-left: 8px; font-size: 12px; color: #909399">
+        <span class="sensitivity-hint">
           {{ iqrMultiplier === 1.5 ? '标记轻微异常值' : '仅标记极端异常值' }}
         </span>
       </el-form-item>
@@ -273,6 +273,12 @@ async function loadWaferGlobal(colorBy: string) {
 .analysis-file-selector__select {
   width: 360px;
   max-width: 100%;
+}
+
+.sensitivity-hint {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--text-tertiary);
 }
 @media (max-width: 720px) {
   .analysis-file-selector__select {

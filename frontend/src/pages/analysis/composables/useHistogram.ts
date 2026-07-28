@@ -1,6 +1,7 @@
-import { ref, watch, type Ref } from 'vue'
+import { ref, watch, computed, type Ref } from 'vue'
 import api from '../../../api'
 import { useAsyncData } from '../../../composables/useAsyncData'
+import { useThemeStore } from '../../../stores/theme'
 
 export function useHistogram(
   getSelectedFileId: () => number | null,
@@ -15,6 +16,15 @@ export function useHistogram(
   const statCards = ref<{ label: string; value: string; color?: string }[]>([])
   const rangeTableData = ref<any[]>([])
   const { loading: histLoading, run } = useAsyncData<any>({ silent: true })
+
+  const themeStore = useThemeStore()
+  const isDark = computed(() => themeStore.currentTheme === 'night')
+  const clrs = computed<Record<string, string>>(() => {
+    if (isDark.value) {
+      return { green: '#14b8a6', orange: '#fcd34d', darkorange: '#fb923c', red: '#fb7185', gray: '#9CA3AF' }
+    }
+    return { green: '#4CAF50', orange: '#FF9800', darkorange: '#FF5722', red: '#F44336', gray: '#9E9E9E' }
+  })
 
   async function loadHistogram() {
     const fileId = getSelectedFileId()
@@ -31,12 +41,13 @@ export function useHistogram(
     if (result?.results) histogramUpdateView(result.results as Record<string, any>)
   }
 
+  let lastResults: Record<string, any> | null = null
+
   function histogramUpdateView(results: Record<string, any>) {
+    lastResults = results
     const r = results[localSelectedParam.value]
     if (!r) return
     histResult.value = r
-    const clrs: Record<string, string> = { green: '#4CAF50', orange: '#FF9800', darkorange: '#FF5722', red: '#F44336', gray: '#9E9E9E' }
-
     // Use filtered statistics when outliers are present
     const hasOutliers = r.outlier_info?.has_outliers === true
     const displayMean = hasOutliers && r.filtered_mean != null ? r.filtered_mean : r.mean
@@ -58,7 +69,7 @@ export function useHistogram(
       { label: 'Min', value: displayMin?.toFixed(4) ?? '-' },
       { label: 'Max', value: displayMax?.toFixed(4) ?? '-' },
       { label: 'Range', value: rangeVal != null ? rangeVal.toFixed(4) : '-' },
-      { label: 'CPK', value: r.filtered_cpk != null ? `${r.filtered_cpk.toFixed(4)} (filtered)` : (r.cpk != null ? `${r.cpk.toFixed(4)} (${r.cpk_level})` : '-'), color: clrs[r.cpk_color] ?? undefined },
+      { label: 'CPK', value: r.filtered_cpk != null ? `${r.filtered_cpk.toFixed(4)} (filtered)` : (r.cpk != null ? `${r.cpk.toFixed(4)} (${r.cpk_level})` : '-'), color: clrs.value[r.cpk_color] ?? undefined },
       { label: '3σ', value: s3min != null && s3max != null ? `[${s3min.toFixed(4)}, ${s3max.toFixed(4)}]` : '-' },
       { label: '6σ', value: s6min != null && s6max != null ? `[${s6min.toFixed(4)}, ${s6max.toFixed(4)}]` : '-' },
     ]
@@ -79,6 +90,10 @@ export function useHistogram(
       { label: `6 Sigma${cutSuffix}`, low: s6min?.toFixed(5) ?? '-', high: s6max?.toFixed(5) ?? '-', gap: s6Gap, unit },
     ]
   }
+
+  watch(isDark, () => {
+    if (lastResults) histogramUpdateView(lastResults)
+  })
 
   watch(localSelectedParam, () => loadHistogram())
   watch(ignoreNoLimit, () => loadHistogram())

@@ -8,13 +8,17 @@ import Button from './Button.vue'
 import Badge from './Badge.vue'
 import Loading from './Loading.vue'
 import Empty from './Empty.vue'
+import CircularProgress from './CircularProgress.vue'
+import GridBackground from './GridBackground.vue'
 
 export {
   Card,
   Button,
   Badge,
   Loading,
-  Empty
+  Empty,
+  CircularProgress,
+  GridBackground,
 }
 
 export default {
@@ -22,5 +26,7 @@ export default {
   Button,
   Badge,
   Loading,
-  Empty
+  Empty,
+  CircularProgress,
+  GridBackground,
 }

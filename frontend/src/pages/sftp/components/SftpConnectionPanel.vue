@@ -61,7 +61,7 @@
           :body-style="{ padding: '16px' }"
         >
           <div class="config-header">
-            <el-icon :size="20" color="#409EFF"><OfficeBuilding /></el-icon>
+            <el-icon :size="20"><OfficeBuilding /></el-icon>
             <span class="config-name">{{ config.name }}</span>
             <el-tag v-if="config.has_password" size="small" type="success" effect="plain" class="pw-tag">
               <el-icon><Lock /></el-icon> 已保存密码
@@ -215,6 +215,10 @@ async function deleteConfig(config: SftpConfigItem) {
 }
 
 async function doConnect() {
+  if (!conn.value.host || !conn.value.username) {
+    ElMessage.warning('请输入主机地址和用户名')
+    return
+  }
   connecting.value = true
   try {
     // Security-preferred: when a saved config is active and the user didn't type
@@ -250,6 +254,7 @@ async function doConnect() {
 .config-item:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
 .config-active { box-shadow: 0 0 0 2px var(--brand-primary) inset; }
 .config-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.config-header :deep(.el-icon) { color: var(--brand-primary); }
 .config-name { font-weight: 600; font-size: 15px; color: var(--text-primary); }
 .pw-tag { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
 .config-info { margin-bottom: 12px; }

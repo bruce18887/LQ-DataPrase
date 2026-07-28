@@ -12,7 +12,7 @@
     </div>
     <!-- Chart container -->
     <div v-else class="qqplot-chart-inner">
-      <div ref="chartRef" class="qqplot-container" />
+      <div ref="chartRef" class="qqplot-container" role="img" aria-label="QQ 正态分布图" />
       <OutlierHintBar
         :mode="outlierHandling || 'off'"
         :outlier-info="result?.outlier_info ?? null"
