@@ -14,7 +14,6 @@ urlpatterns = [
     path('api/v1/', include('apps.gage.urls')),
     path('api/v1/', include('apps.export.urls')),
     path('api/v1/', include('apps.sftp.urls')),
-    path('api/v1/', include('apps.data_correlation.urls')),
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/schema/swagger/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
 ]

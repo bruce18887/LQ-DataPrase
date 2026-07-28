@@ -16,8 +16,10 @@ import { app } from 'electron'
 
 export interface BackendInfo {
   port: number
-  pid: number
-  process: ChildProcess
+  pid: number | null
+  process: ChildProcess | null
+  /** Whether this process was spawned by Electron and should be stopped on quit. */
+  managed: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -113,22 +115,72 @@ function waitForBackend(port: number, timeoutMs: number = 15000): Promise<void> 
 }
 
 // ---------------------------------------------------------------------------
+// Dev backend detection
+// ---------------------------------------------------------------------------
+
+const DEV_BACKEND_PORT = 8000
+const DEV_BACKEND_URL = `http://127.0.0.1:${DEV_BACKEND_PORT}`
+
+/**
+ * Probe the browser development backend on localhost:8000.
+ *
+ * In dev mode we want Electron to share the same Django process as the
+ * browser so both use the same SQLite database (project root db.sqlite3).
+ */
+function detectDevBackend(timeoutMs: number = 3000): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = http.get(`${DEV_BACKEND_URL}/api/v1/`, (res) => {
+      // Any response (even 401) means the dev server is alive.
+      res.resume()
+      resolve(true)
+    })
+
+    req.on('error', () => resolve(false))
+
+    req.setTimeout(timeoutMs, () => {
+      req.destroy()
+      resolve(false)
+    })
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 /**
- * Spawn the Python backend and wait until it is ready to serve requests.
+ * Prepare the Python backend for Electron.
  *
- * The backend's ``--port 0`` flag tells it to bind an OS-assigned free port.
- * We parse the startup banner to learn which port was chosen, then HTTP-poll
- * that port until the server responds.
+ * In production this spawns the PyInstaller-built exe and waits until it is
+ * ready. The backend's ``--port 0`` flag binds an OS-assigned free port; we
+ * parse the startup banner to discover the port and then HTTP-poll it.
+ *
+ * In dev mode we do **not** spawn a backend. Instead we detect the browser
+ * dev server on localhost:8000 and reuse it so Electron and the browser share
+ * the same SQLite database.
  *
  * The ``LQDP_BASE_DIR`` env var is set in the child's environment so the
  * backend writes ``db.sqlite3``, ``media/``, and ``secret.key`` into the
  * Electron userData directory instead of next to the (potentially read-only)
  * executable.
  */
-export function spawnBackend(isDev: boolean): Promise<BackendInfo> {
+export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
+  // In dev mode Electron should share the browser's Django backend so both
+  // use the same SQLite database. Detect localhost:8000 instead of spawning
+  // a second backend process.
+  if (isDev) {
+    const hasDevBackend = await detectDevBackend()
+    if (hasDevBackend) {
+      console.log(`[electron] Reusing dev backend at ${DEV_BACKEND_URL}`)
+    } else {
+      console.warn(
+        `[electron] No dev backend found at ${DEV_BACKEND_URL}. ` +
+          `Start it with: python manage.py runserver ${DEV_BACKEND_PORT}`
+      )
+    }
+    return { port: DEV_BACKEND_PORT, pid: null, process: null, managed: false }
+  }
+
   return new Promise((resolve, reject) => {
     const { exe, args, cwd } = getBackendPath(isDev)
     const userDataPath = app.getPath('userData')
@@ -162,7 +214,7 @@ export function spawnBackend(isDev: boolean): Promise<BackendInfo> {
 
         waitForBackend(port)
           .then(() => {
-            resolve({ port: port!, pid: child.pid!, process: child })
+            resolve({ port: port!, pid: child.pid ?? null, process: child, managed: true })
           })
           .catch((err) => {
             child.kill()
@@ -221,9 +273,17 @@ export function spawnBackend(isDev: boolean): Promise<BackendInfo> {
  */
 export function stopBackend(info: BackendInfo): Promise<void> {
   return new Promise((resolve) => {
-    const { process: child, pid } = info
+    // Unmanaged backends (e.g. the dev server on localhost:8000) are owned by
+    // the developer, so Electron must not kill them on quit.
+    if (!info.managed || !info.process) {
+      resolve()
+      return
+    }
 
-    if (child.killed || child.exitCode !== null) {
+    const child = info.process
+    const pid = info.pid
+
+    if (!pid || child.killed || child.exitCode !== null) {
       resolve()
       return
     }
