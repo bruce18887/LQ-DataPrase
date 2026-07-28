@@ -47,11 +47,11 @@ withDefaults(defineProps<Props>(), {
 
 .dp-card--elevated {
   border: 1px solid var(--border-default);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow-md);
 }
 
 .dp-card--elevated:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-lg);
   transform: translateY(-2px);
 }
 
@@ -62,16 +62,30 @@ withDefaults(defineProps<Props>(), {
 .dp-card--neon {
   border: 1px solid var(--brand-primary);
   box-shadow:
-    0 0 10px rgba(37, 99, 235, 0.2),
-    0 0 20px rgba(37, 99, 235, 0.1),
-    inset 0 0 10px rgba(37, 99, 235, 0.05);
+    0 0 10px color-mix(in srgb, var(--brand-primary) 20%, transparent),
+    0 0 20px color-mix(in srgb, var(--brand-primary) 10%, transparent),
+    inset 0 0 10px color-mix(in srgb, var(--brand-primary) 5%, transparent);
 }
 
 .dp-card--neon:hover {
   box-shadow:
-    0 0 15px rgba(37, 99, 235, 0.3),
-    0 0 30px rgba(37, 99, 235, 0.15),
-    inset 0 0 15px rgba(37, 99, 235, 0.08);
+    0 0 15px color-mix(in srgb, var(--brand-primary) 30%, transparent),
+    0 0 30px color-mix(in srgb, var(--brand-primary) 15%, transparent),
+    inset 0 0 15px color-mix(in srgb, var(--brand-primary) 8%, transparent);
+}
+
+:root.theme-night .dp-card--neon {
+  box-shadow:
+    0 0 10px var(--brand-primary),
+    0 0 20px color-mix(in srgb, var(--brand-primary) 50%, transparent),
+    inset 0 0 10px color-mix(in srgb, var(--brand-primary) 25%, transparent);
+}
+
+:root.theme-night .dp-card--neon:hover {
+  box-shadow:
+    0 0 15px var(--brand-primary),
+    0 0 30px color-mix(in srgb, var(--brand-primary) 50%, transparent),
+    inset 0 0 15px color-mix(in srgb, var(--brand-primary) 40%, transparent);
 }
 
 .dp-card__header {

@@ -35,10 +35,13 @@
     <el-empty v-if="!filesLoading && files.length === 0" description="暂无数据文件，请先在数据管理页面上传 ATE 数据文件" />
     <div v-else-if="filesLoading && !data" v-loading="true" element-loading-text="加载文件列表..." style="min-height:200px" />
     <div v-else-if="loading" v-loading="loading" element-loading-text="加载仪表板数据..." style="min-height:200px" />
-    <el-empty v-else-if="error" description="未选择数据文件或该文件暂无数据" />
+    <el-empty v-else-if="error && !data" description="未选择数据文件或该文件暂无数据" />
+
+    <!-- 部分错误提示 -->
+    <el-alert v-if="error && data" type="warning" title="部分数据加载失败，已显示缓存内容" :closable="false" show-icon style="margin-bottom: 16px" />
 
     <!-- ==================== 数据态 ==================== -->
-    <template v-else>
+    <template v-if="data">
       <!-- 核心指标卡片 -->
       <KpiCards :metrics="metrics" />
 
@@ -189,8 +192,20 @@ async function onFileChange() {
   error.value = false
   try {
     const res = await analysisApi.getDashboard(selectedFileId.value)
-    if (res.data.error) { error.value = true; return }
     const d = res.data as DashboardData
+    if (res.data.error) {
+      // Partial error: render whatever data came along
+      data.value = d
+      metrics.value = d.metrics
+      failTestItems.value = d.fail_test_items || []
+      quality.value = { ...d.quality_overview, fail_bin_count: d.quality_overview?.fail_bin_count || 0 }
+      binTableData.value = d.bin_table_data || []
+      binSiteColumns.value = d.bin_site_columns || []
+      paramStats.value = d.param_stats || []
+      qualityAlerts.value = d.quality_alerts || []
+      error.value = true
+      return
+    }
     data.value = d
     metrics.value = d.metrics
     failTestItems.value = d.fail_test_items

@@ -5,7 +5,18 @@
 </template>
 
 <script setup lang="ts">
-// 网格背景组件 - 工业技术风格
+/**
+ * GridBackground 网格背景组件
+ * 工业技术风格 — 使用当前主题品牌色绘制装饰性网格
+ */
+interface Props {
+  /** 网格单元大小，默认 50px */
+  gridSize?: number
+}
+
+withDefaults(defineProps<Props>(), {
+  gridSize: 50,
+})
 </script>
 
 <style scoped>
@@ -15,13 +26,13 @@
   height: 100%;
   background-color: var(--bg-primary);
   background-image:
-    linear-gradient(rgba(37, 99, 235, 0.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(37, 99, 235, 0.08) 1px, transparent 1px);
+    linear-gradient(rgba(var(--brand-primary-rgb), 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--brand-primary-rgb), 0.08) 1px, transparent 1px);
   background-size: 50px 50px;
   background-position: center center;
 }
 
-/* 添加渐变遮罩效果 */
+/* 渐变遮罩 — 浅色主题 */
 .grid-background::before {
   content: '';
   position: absolute;
@@ -32,7 +43,7 @@
   background: radial-gradient(
     circle at center,
     transparent 0%,
-    rgba(250, 251, 252, 0.6) 100%
+    var(--bg-primary) 100%
   );
   pointer-events: none;
 }

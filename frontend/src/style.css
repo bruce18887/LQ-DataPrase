@@ -1,6 +1,7 @@
 /* 导入设计系统样式 */
 @import './styles/variables.css';
 @import './styles/utilities.css';
+@import './styles/print.css';
 
 /* 全局重置 */
 * {
@@ -40,27 +41,14 @@ h2 {
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-/* 为所有使用CSS变量的元素添加过渡 */
-* {
-  transition-property: background-color, border-color, color, fill, stroke;
-  transition-duration: 0.3s;
-  transition-timing-function: ease;
-}
-
-/* 排除不需要过渡的元素 */
-*:where(:not(:active):not(:focus):not(:hover)) {
-  transition-duration: 0.3s;
-}
-
-/* 保持动画和变换的原有过渡 */
-*[style*="transform"],
-*[style*="animation"] {
-  transition-property: background-color, border-color, color, fill, stroke, transform, opacity;
+/* 主题切换过渡：仅 body 级别继承，避免 O(n) 性能损耗 */
+body {
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* Focus visible styles for keyboard navigation */
 :focus-visible {
-  outline: 2px solid var(--color-primary, #409eff);
+  outline: 2px solid var(--brand-primary);
   outline-offset: 2px;
   border-radius: 2px;
 }
@@ -69,9 +57,29 @@ button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 select:focus-visible,
-textarea:focus-visible {
-  outline: 2px solid var(--color-primary, #409eff);
+textarea:focus-visible,
+[tabindex]:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--brand-primary);
   outline-offset: 2px;
+}
+
+/* Skip-to-content link */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 12px;
+  z-index: 9999;
+  padding: 8px 16px;
+  background: var(--brand-primary);
+  color: var(--text-inverse);
+  border-radius: 4px;
+  font-size: var(--text-sm);
+  text-decoration: none;
+  transition: top 0.2s ease;
+}
+.skip-link:focus {
+  top: 12px;
 }
 
 /* Reduced motion: disable non-essential animations */

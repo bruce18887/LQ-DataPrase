@@ -1,13 +1,30 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="LQ-DataPrase — ATE 数据分析平台，提供良率分析、CPK统计、晶圆图可视化等功能" />
     <meta name="theme-color" id="theme-color-meta" content="#fafbfc" />
     <title>LQ-DataPrase</title>
+    <script>
+      // FOUC 防护：在首帧渲染前设置主题属性
+      (function() {
+        var t = localStorage.getItem('theme');
+        if (t) {
+          document.documentElement.setAttribute('data-theme', t);
+          if (t === 'night') document.documentElement.classList.add('theme-night');
+        }
+      })();
+    </script>
   </head>
   <body>
+    <noscript>
+      <div style="padding: 40px; text-align: center; font-family: sans-serif;">
+        <h1>LQ-DataPrase</h1>
+        <p>此应用需要启用 JavaScript。请在你的浏览器设置中启用 JavaScript 后刷新页面。</p>
+      </div>
+    </noscript>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

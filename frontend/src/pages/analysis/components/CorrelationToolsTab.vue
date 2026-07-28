@@ -171,7 +171,7 @@ const props = defineProps<{
 }>()
 
 const analysisStore = useAnalysisStore()
-const { colors } = useEChartsTheme()
+const { colors, isDark } = useEChartsTheme()
 
 // View mode
 const viewMode = ref<'scatter' | 'matrix'>('scatter')
@@ -293,7 +293,7 @@ function buildScatterOption() {
       name: '回归线',
       type: 'line',
       data: [[xMin, slope * xMin + intercept], [xMax, slope * xMax + intercept]],
-      lineStyle: { type: 'dashed', color: '#e66767', width: 2 },
+      lineStyle: { type: 'dashed', color: colors.value.seriesColors[3], width: 2 },
       symbol: 'none',
       tooltip: {
         formatter: () => `回归方程: y = ${slope.toFixed(4)}x + ${intercept.toFixed(4)}<br/>R² = ${r2.toFixed(4)}`,
@@ -393,7 +393,9 @@ function buildMatrixOption() {
     yAxis: { type: 'category', data: params, splitArea: { show: true }, axisLabel: { fontSize: 10, color: tc } },
     visualMap: {
       min: -1, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: '0%',
-      inRange: { color: ['#d73027', '#f46d43', '#fdae61', '#fee08b', '#e6f598', '#abdda4', '#66c2a5', '#3288bd'] },
+      inRange: { color: isDark.value
+        ? ['#ef5350', '#ff7043', '#ffa726', '#ffee58', '#9ccc65', '#4db6ac', '#26a69a', '#42a5f5']
+        : ['#d73027', '#f46d43', '#fdae61', '#fee08b', '#e6f598', '#abdda4', '#66c2a5', '#3288bd'] },
     },
     series: [{
       name: 'Pearson r', type: 'heatmap', data: heatmapData,
@@ -459,8 +461,8 @@ void matrixChartRef
   color: var(--text-primary, #303133);
 }
 
-.metric-value.r-strong { color: #059669; }
-.metric-value.r-medium { color: #d97706; }
+.metric-value.r-strong { color: var(--color-success); }
+.metric-value.r-medium { color: var(--color-warning); }
 .metric-value.r-weak { color: var(--text-primary, #303133); }
 
 .regression-eq {
