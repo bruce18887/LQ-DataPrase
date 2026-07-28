@@ -23,6 +23,67 @@ export interface BackendInfo {
 }
 
 // ---------------------------------------------------------------------------
+// Logging (mirrors the logger in main.ts so backend.ts can also be tested
+// independently without pulling in main.ts).
+// ---------------------------------------------------------------------------
+// Delay log directory initialization until the first write so that importing
+// this module before Electron has finished booting does not crash the app.
+
+let backendLogFile = ''
+
+function formatBackendLog(level: string, args: unknown[]): string {
+  const message = args
+    .map((a) => {
+      if (a instanceof Error) {
+        return `${a.message}\n${a.stack ?? ''}`
+      }
+      if (typeof a === 'object' && a !== null) {
+        try {
+          return JSON.stringify(a)
+        } catch {
+          return String(a)
+        }
+      }
+      return String(a)
+    })
+    .join(' ')
+  return `[${new Date().toISOString()}] [${level}] ${message}\n`
+}
+
+function initBackendLog(): void {
+  if (backendLogFile) return
+  const dir = path.join(app.getPath('userData'), 'logs')
+  fs.mkdirSync(dir, { recursive: true })
+  backendLogFile = path.join(dir, 'backend.log')
+}
+
+function writeBackendLog(level: string, args: unknown[]): void {
+  try {
+    if (!backendLogFile) initBackendLog()
+    fs.appendFileSync(backendLogFile, formatBackendLog(level, args))
+  } catch {
+    // Logging must never crash the app.
+  }
+}
+
+const mainLog = console.log
+const mainError = console.error
+const mainWarn = console.warn
+
+console.log = (...args: unknown[]) => {
+  writeBackendLog('INFO', args)
+  mainLog(...args)
+}
+console.error = (...args: unknown[]) => {
+  writeBackendLog('ERROR', args)
+  mainError(...args)
+}
+console.warn = (...args: unknown[]) => {
+  writeBackendLog('WARN', args)
+  mainWarn(...args)
+}
+
+// ---------------------------------------------------------------------------
 // Locate the backend executable / command
 // ---------------------------------------------------------------------------
 
@@ -69,8 +130,11 @@ function getBackendPath(isDev: boolean): { exe: string; args: string[]; cwd: str
   }
   // Production: the backend exe lives in extraResources (process.resourcesPath).
   const resourcesPath = process.resourcesPath
+  const exePath = path.join(resourcesPath, 'LQ-DataPrase.exe')
+  console.log(`[electron] Resolved backend exe: ${exePath}`)
+  console.log(`[electron] Backend exe exists: ${fs.existsSync(exePath)}`)
   return {
-    exe: path.join(resourcesPath, 'LQ-DataPrase.exe'),
+    exe: exePath,
     args: ['--port', '0'],
     cwd: resourcesPath,
   }
@@ -80,9 +144,10 @@ function getBackendPath(isDev: boolean): { exe: string; args: string[]; cwd: str
 // HTTP polling – wait until the Django server responds
 // ---------------------------------------------------------------------------
 
-function waitForBackend(port: number, timeoutMs: number = 15000): Promise<void> {
+function waitForBackend(port: number, timeoutMs: number = 60000): Promise<void> {
   return new Promise((resolve, reject) => {
     const startTime = Date.now()
+    console.log(`[electron] Polling backend on http://127.0.0.1:${port}/api/v1/ (timeout ${timeoutMs}ms)`)
 
     function poll(): void {
       if (Date.now() - startTime > timeoutMs) {
@@ -93,14 +158,18 @@ function waitForBackend(port: number, timeoutMs: number = 15000): Promise<void> 
       const req = http.get(`http://127.0.0.1:${port}/api/v1/`, (res) => {
         // Any response – even a 401 from the missing JWT – proves the server
         // is up and running.
+        console.log(`[electron] Backend responded with status ${res.statusCode}`)
         res.resume()
         resolve()
       })
 
-      req.on('error', () => {
+      req.on('error', (err) => {
         // Exponential-ish backoff capped at 1 second.
         const elapsed = Date.now() - startTime
         const delay = Math.min(100 * Math.pow(2, Math.floor(elapsed / 1000)), 1000)
+        if (elapsed % 5000 < 1000) {
+          console.log(`[electron] Backend poll error after ${elapsed}ms: ${err.message}`)
+        }
         setTimeout(poll, delay)
       })
 
@@ -162,7 +231,7 @@ function detectDevBackend(timeoutMs: number = 3000): Promise<boolean> {
  * The ``LQDP_BASE_DIR`` env var is set in the child's environment so the
  * backend writes ``db.sqlite3``, ``media/``, and ``secret.key`` into the
  * Electron userData directory instead of next to the (potentially read-only)
- * executable.
+ * installed executable.
  */
 export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
   // In dev mode Electron should share the browser's Django backend so both
@@ -185,6 +254,9 @@ export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
     const { exe, args, cwd } = getBackendPath(isDev)
     const userDataPath = app.getPath('userData')
 
+    console.log(`[electron] Spawning backend: ${exe} ${args.join(' ')} (cwd: ${cwd})`)
+    console.log(`[electron] Backend userData (LQDP_BASE_DIR): ${userDataPath}`)
+
     // Ensure the userData directory exists before the backend tries to write into it.
     fs.mkdirSync(userDataPath, { recursive: true })
 
@@ -203,7 +275,9 @@ export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
     let startupOutput = ''
 
     child.stdout?.on('data', (data: Buffer) => {
-      startupOutput += data.toString()
+      const text = data.toString()
+      startupOutput += text
+      console.log(`[backend-stdout] ${text}`)
 
       // Parse "[server] Starting LQ-DataPrase on http://0.0.0.0:{port}"
       // from the accumulated output (not individual chunks) because Node
@@ -211,12 +285,15 @@ export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
       const match = startupOutput.match(/Starting LQ-DataPrase on http:\/\/[\d.]+:(\d+)/)
       if (match && port === null) {
         port = parseInt(match[1], 10)
+        console.log(`[electron] Parsed backend port: ${port}`)
 
         waitForBackend(port)
           .then(() => {
+            console.log(`[electron] Backend confirmed ready on port ${port}`)
             resolve({ port: port!, pid: child.pid ?? null, process: child, managed: true })
           })
           .catch((err) => {
+            console.error(`[electron] waitForBackend failed:`, err)
             child.kill()
             reject(err)
           })
@@ -224,21 +301,23 @@ export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
     })
 
     child.stderr?.on('data', (data: Buffer) => {
-      process.stderr.write(`[backend] ${data.toString()}`)
+      const text = data.toString()
+      console.error(`[backend-stderr] ${text}`)
     })
 
     child.on('error', (err) => {
+      console.error(`[electron] Failed to spawn backend process (${exe}):`, err)
       reject(new Error(`Failed to spawn backend process (${exe}): ${err.message}`))
     })
 
     child.on('exit', (code, signal) => {
       if (port === null) {
-        reject(
-          new Error(
-            `Backend exited before becoming ready (code=${code}, signal=${signal}). ` +
-              `Last output: ${startupOutput.slice(-500)}`
-          )
+        const err = new Error(
+          `Backend exited before becoming ready (code=${code}, signal=${signal}). ` +
+            `Last output: ${startupOutput.slice(-1000)}`
         )
+        console.error('[electron]', err)
+        reject(err)
         return
       }
       // Backend crashed after successful startup. Log and let the UI
@@ -249,18 +328,21 @@ export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
       )
     })
 
-    // Safety net – the backend should output its port within 30 seconds.
+    // Safety net – the backend should output its port within 600 seconds.
+    // First-time runs need to migrate the database, which on slow disks or
+    // under antivirus scanning can take several minutes. We keep the window
+    // hidden during this time; the UI appears as soon as the backend responds.
     setTimeout(() => {
       if (port === null) {
-        reject(
-          new Error(
-            `Backend did not output port within 30 s. ` +
-              `Output so far: ${startupOutput.slice(-500)}`
-          )
+        const err = new Error(
+          `Backend did not output port within 600 s. ` +
+            `Output so far: ${startupOutput.slice(-1000)}`
         )
+        console.error('[electron]', err)
+        reject(err)
         child.kill()
       }
-    }, 30000)
+    }, 600000)
   })
 }
 

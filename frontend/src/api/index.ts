@@ -13,8 +13,11 @@ import { useAuthStore } from '../stores/auth'
 
 function getBaseUrl(): string {
   if (typeof window !== 'undefined' && window.__backendUrl__) {
+    console.log(`[api] Using Electron backend URL: ${window.__backendUrl__}`)
     return `${window.__backendUrl__}/api/v1`
   }
+  // Running in a normal browser: Vite dev server proxies /api to localhost:8000.
+  console.log('[api] Using browser fallback base URL: /api/v1')
   return '/api/v1'
 }
 
@@ -25,6 +28,14 @@ const api = axios.create({
     indexes: null,
   },
 })
+
+// Sanity check: in Electron production mode we must have a backend URL.
+if (typeof window !== 'undefined' && window.electronAPI && !window.__backendUrl__) {
+  console.error(
+    '[api] Electron detected but __backendUrl__ is empty. ' +
+      'API requests will fail because file:// protocol cannot resolve /api/v1.'
+  )
+}
 
 /**
  * Dynamically change the Axios base URL at runtime.
@@ -50,6 +61,9 @@ api.interceptors.request.use((config) => {
   const token = localStorage.getItem('access_token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
+  }
+  if (config.url) {
+    console.log(`[api] Request: ${config.method?.toUpperCase() ?? 'GET'} ${config.url}`)
   }
   return config
 })
@@ -118,12 +132,21 @@ function forceLogout() {
 }
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    console.log(`[api] Response: ${response.status} ${response.config.url ?? ''}`)
+    return response
+  },
   async (error: AxiosError) => {
     const status = error.response?.status
     const originalRequest = error.config as
       | (AxiosRequestConfig & { _retry?: boolean })
       | undefined
+
+    console.error(
+      `[api] Request failed: ${error.config?.method?.toUpperCase() ?? 'GET'} ` +
+        `${error.config?.url ?? '(unknown url)'} - ` +
+        `status=${status ?? 'no response'}, code=${error.code ?? 'none'}, message=${error.message}`
+    )
 
     if (status !== 401) {
       return Promise.reject(error)

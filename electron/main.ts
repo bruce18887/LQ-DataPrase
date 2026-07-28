@@ -8,11 +8,77 @@
  * 4. Application menu – File/Edit/View/Help with IPC bridge to renderer
  */
 
-import { app, BrowserWindow, Menu } from 'electron'
+import { app, BrowserWindow, Menu, dialog } from 'electron'
 import * as path from 'path'
+import * as fs from 'fs'
 import { spawnBackend, stopBackend } from './backend'
 import type { BackendInfo } from './backend'
 import { registerIpcHandlers } from './ipc-handlers'
+
+// ---------------------------------------------------------------------------
+// Logging
+// ---------------------------------------------------------------------------
+// Production Electron apps have no visible stdout, so persist logs to the
+// userData directory. This is essential for diagnosing "cannot connect to
+// backend" reports from end users.
+//
+// We intentionally do NOT initialize the log file until app.whenReady()
+// because some Electron versions crash if file I/O happens before the
+// app module has finished its internal initialization.
+
+let LOG_FILE = ''
+
+function formatLogMessage(level: string, args: unknown[]): string {
+  const message = args
+    .map((a) => {
+      if (a instanceof Error) {
+        return `${a.message}\n${a.stack ?? ''}`
+      }
+      if (typeof a === 'object' && a !== null) {
+        try {
+          return JSON.stringify(a)
+        } catch {
+          return String(a)
+        }
+      }
+      return String(a)
+    })
+    .join(' ')
+  return `[${new Date().toISOString()}] [${level}] ${message}\n`
+}
+
+function initLogger(): void {
+  if (LOG_FILE) return
+  const logDir = path.join(app.getPath('userData'), 'logs')
+  fs.mkdirSync(logDir, { recursive: true })
+  LOG_FILE = path.join(logDir, 'main.log')
+}
+
+function logToFile(level: string, args: unknown[]): void {
+  try {
+    if (!LOG_FILE) initLogger()
+    fs.appendFileSync(LOG_FILE, formatLogMessage(level, args))
+  } catch {
+    // Logging must never crash the app.
+  }
+}
+
+const originalLog = console.log
+const originalError = console.error
+const originalWarn = console.warn
+
+console.log = (...args: unknown[]) => {
+  logToFile('INFO', args)
+  originalLog(...args)
+}
+console.error = (...args: unknown[]) => {
+  logToFile('ERROR', args)
+  originalError(...args)
+}
+console.warn = (...args: unknown[]) => {
+  logToFile('WARN', args)
+  originalWarn(...args)
+}
 
 // ---------------------------------------------------------------------------
 // State
@@ -28,6 +94,7 @@ const isDev = process.env.ELECTRON_DEV === 'true'
 // ---------------------------------------------------------------------------
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
+  console.warn('[electron] Another instance is already running. Quitting.')
   app.quit()
 }
 
@@ -179,6 +246,11 @@ async function createWindow(): Promise<BrowserWindow> {
     )
   })
 
+  win.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    const levels = ['debug', 'log', 'warn', 'error']
+    console.log(`[renderer:${levels[level] ?? level}] ${message} (${sourceId}:${line})`)
+  })
+
   win.on('closed', () => {
     console.log('[electron] Window closed')
     mainWindow = null
@@ -198,26 +270,48 @@ async function createWindow(): Promise<BrowserWindow> {
     // In production the frontend/dist/ directory sits in the ASAR next to
     // electron-dist/. Using a relative path + file:// protocol means we must
     // have built the SPA with `base: './'` so asset references are relative.
-    await win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
+    const indexPath = path.join(__dirname, '..', 'dist', 'index.html')
+    console.log(`[electron] Loading production file: ${indexPath}`)
+    console.log(`[electron] __dirname: ${__dirname}`)
+    try {
+      await win.loadFile(indexPath)
+    } catch (err) {
+      console.error('[electron] Failed to load production index.html:', err)
+      throw err
+    }
   }
 
   return win
 }
 
 // ---------------------------------------------------------------------------
+// Backend startup failure UI
+// ---------------------------------------------------------------------------
+function showBackendErrorDialog(err: unknown): void {
+  const detail = err instanceof Error ? err.message : String(err)
+  dialog.showErrorBox(
+    'LQ-DataPrase 启动失败',
+    `无法启动本地服务进程，请查看日志文件排查问题。\n\n日志路径：${LOG_FILE}\n\n错误详情：${detail}`
+  )
+}
+
+// ---------------------------------------------------------------------------
 // App lifecycle
 // ---------------------------------------------------------------------------
 app.whenReady().then(async () => {
+  console.log('[electron] App ready')
   createMenu()
 
   // Start the Python backend
   try {
+    console.log('[electron] Starting backend...')
     backendInfo = await spawnBackend(isDev)
     backendUrl = `http://localhost:${backendInfo.port}`
     const managedLabel = backendInfo.managed ? '(managed)' : '(external)'
     console.log(`[electron] Backend ready on ${backendUrl} ${managedLabel}`)
   } catch (err) {
     console.error('[electron] Failed to start backend:', err)
+    showBackendErrorDialog(err)
     // Continue without backend – the UI will show connection errors.
   }
 
@@ -236,6 +330,7 @@ app.whenReady().then(async () => {
 
   // Also send via IPC for dynamic port changes (e.g. backend restart).
   if (mainWindow && backendUrl) {
+    console.log('[electron] Sending backend-url-change to renderer:', backendUrl)
     mainWindow.webContents.send('backend-url-change', backendUrl)
   }
 
@@ -255,6 +350,7 @@ app.whenReady().then(async () => {
 // On a second launch attempt, focus the existing window instead of starting
 // a second instance.
 app.on('second-instance', () => {
+  console.log('[electron] Second instance detected, focusing existing window')
   if (mainWindow) {
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.focus()
@@ -262,12 +358,14 @@ app.on('second-instance', () => {
 })
 
 app.on('window-all-closed', () => {
+  console.log('[electron] All windows closed')
   if (process.platform !== 'darwin') {
     app.quit()
   }
 })
 
 app.on('before-quit', async () => {
+  console.log('[electron] before-quit, stopping backend')
   if (backendInfo) {
     await stopBackend(backendInfo)
   }

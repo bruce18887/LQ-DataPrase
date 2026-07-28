@@ -95,7 +95,7 @@
             >{{ t }}</el-tag>
             <div v-if="editingId === row.id" class="tag-input-wrapper">
               <input
-                ref="tagInputRef"
+                :ref="tagInputRef"
                 :value="newTagValue"
                 type="text"
                 class="tag-native-input"

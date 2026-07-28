@@ -92,20 +92,34 @@ export function initEchartsWhenReady(
     }
   }
 
-  // 1) 立即尝试一次（容器可能已经就绪）
-  if (tryInit()) {
+  // Build a handle whose `chart` getter always reflects the current value
+  // of the closure variable. Without the getter, a deferred-init chart (where
+  // the container only gets size after this function returns) would have its
+  // instance trapped in the closure while handle.chart stays null forever,
+  // making theme-switch / data-update / resize a silent no-op.
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+  function buildHandle(): EchartsHandle {
     return {
-      chart,
+      get chart() {
+        return chart
+      },
       dispose: () => {
         disposed = true
         observer?.disconnect()
         if (timer) clearInterval(timer)
         if (raf != null) cancelAnimationFrame(raf)
+        if (timeoutId != null) clearTimeout(timeoutId)
         chart?.dispose()
         chart = null
         cleanup.length = 0
       },
     }
+  }
+
+  // 1) 立即尝试一次（容器可能已经就绪）
+  if (tryInit()) {
+    return buildHandle()
   }
 
   // 2) ResizeObserver 监听容器尺寸变化
@@ -127,26 +141,14 @@ export function initEchartsWhenReady(
   })
 
   // 4) 超时兜底：超时后不再尝试 init，但保留 chart 句柄
-  const timeoutId = setTimeout(() => {
+  timeoutId = setTimeout(() => {
     observer?.disconnect()
     observer = null
     if (timer) { clearInterval(timer); timer = null }
     if (raf != null) { cancelAnimationFrame(raf); raf = null }
     // 不 throw，调用方可选择重试或忽略
   }, timeout)
-  cleanup.push(() => clearTimeout(timeoutId))
+  cleanup.push(() => { if (timeoutId != null) clearTimeout(timeoutId) })
 
-  return {
-    chart,
-    dispose: () => {
-      disposed = true
-      observer?.disconnect()
-      if (timer) clearInterval(timer)
-      if (raf != null) cancelAnimationFrame(raf)
-      clearTimeout(timeoutId)
-      chart?.dispose()
-      chart = null
-      cleanup.length = 0
-    },
-  }
+  return buildHandle()
 }

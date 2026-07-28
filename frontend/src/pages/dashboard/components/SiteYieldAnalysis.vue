@@ -210,16 +210,18 @@ defineExpose({ handleResize })
 }
 .panel-card {
   flex: 1;
+  display: flex;
+  flex-direction: column;
   background: var(--bg-secondary);
   border: 1px solid var(--border-default);
   border-radius: 8px;
   overflow: hidden;
 }
 .panel-card--col {
-  display: flex;
-  flex-direction: column;
+  /* panel-card already sets flex column */
 }
 .panel-head {
+  flex-shrink: 0;
   padding: 10px 16px;
   font-weight: 600;
   font-size: 14px;
@@ -228,8 +230,9 @@ defineExpose({ handleResize })
   border-bottom: 1px solid var(--border-default);
 }
 .panel-body {
-  padding: 12px;
   flex: 1;
+  min-height: 0;
+  padding: 12px;
 }
 .chart-fill {
   width: 100%;

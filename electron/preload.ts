@@ -20,9 +20,12 @@ function getBackendUrlFromArgs(): string {
 }
 
 const initialBackendUrl = getBackendUrlFromArgs() || process.env.ELECTRON_BACKEND_URL || ''
-if (initialBackendUrl) {
-  contextBridge.exposeInMainWorld('__backendUrl__', initialBackendUrl)
-}
+
+// Always expose __backendUrl__ so the renderer can distinguish "running in
+// Electron without a backend" from "running in a normal browser". An empty
+// string is a valid value; the renderer uses `window.electronAPI` to detect
+// Electron mode.
+contextBridge.exposeInMainWorld('__backendUrl__', initialBackendUrl)
 
 contextBridge.exposeInMainWorld('electronAPI', {
   // ---- Backend URL ---------------------------------------------------------

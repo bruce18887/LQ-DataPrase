@@ -1,9 +1,15 @@
 {
+  "name": "lq-dataprase",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "pyinstaller": ".venv\\Scripts\\python.exe -m PyInstaller lq_dataprase.spec --noconfirm",
+    "dist:win:dir": "cross-env VITE_ELECTRON=true ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ npm run build --prefix frontend && npm run electron:build:ts --prefix frontend && npm run pyinstaller && npx electron-builder --config electron-builder.yml --win --dir",
+    "dist:win": "cross-env VITE_ELECTRON=true ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ npm run build --prefix frontend && npm run electron:build:ts --prefix frontend && npm run pyinstaller && npx electron-builder --config electron-builder.yml --win"
+  },
   "devDependencies": {
-    "concurrently": "^9.2.4",
     "cross-env": "^7.0.3",
     "electron": "^33.4.11",
-    "electron-builder": "^25.1.8",
-    "wait-on": "^8.0.5"
+    "electron-builder": "^25.1.8"
   }
 }
