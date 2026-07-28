@@ -93,7 +93,19 @@ if 'whitenoise.middleware.WhiteNoiseMiddleware' not in MIDDLEWARE:
     _sec_idx = MIDDLEWARE.index('django.middleware.security.SecurityMiddleware')
     MIDDLEWARE.insert(_sec_idx + 1, 'whitenoise.middleware.WhiteNoiseMiddleware')
 
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+# Use compressed but non-manifest storage. ManifestStaticFilesStorage computes
+# content hashes for every file, which makes the first collectstatic very slow
+# (tens of seconds) and can cause the Electron frontend to time out waiting for
+# the backend on a fresh install. CompressedStaticFilesStorage still serves
+# pre-compressed .gz files at runtime without the manifest overhead.
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedStaticFilesStorage'
+
+# In the standalone executable we serve static files directly from each app's
+# static/ directory and from STATICFILES_DIRS (the bundled frontend_dist). This
+# avoids an expensive ``collectstatic`` pass on every first run, which was the
+# main cause of the "cannot connect to server" timeout in the packaged app.
+WHITENOISE_USE_FINDERS = True
+WHITENOISE_AUTOREFRESH = False
 
 # ---------------------------------------------------------------------------
 # Celery — disabled (no broker required)

@@ -3,8 +3,8 @@
 # The build sequence is:
 #   1. npm run build          – compile the Vue SPA to frontend/dist/
 #   2. npm run electron:build:ts – compile electron TS to frontend/electron-dist/
-#   3. build.bat              – PyInstaller packaging → dist/LQ-DataPrase/
-#   4. electron-builder       – package everything into an NSIS installer
+#   3. npm run pyinstaller    – PyInstaller packaging → dist/LQ-DataPrase/
+#   4. electron-builder       – package everything into installer + portable zip
 #
 # After installation the layout is:
 #   <install-dir>/
@@ -23,6 +23,7 @@ copyright: "Copyright © 2024 LQ-DataPrase"
 directories:
   app: frontend
   output: out
+  buildResources: build
 
 files:
   - "dist/**/*"
@@ -39,6 +40,9 @@ win:
   target:
     - target: nsis
       arch: [x64]
+    - target: zip
+      arch: [x64]
+  icon: build/icon.ico
 
 nsis:
   oneClick: false
@@ -47,6 +51,36 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: LQ-DataPrase
+  uninstallDisplayName: LQ-DataPrase
+  artifactName: "${productName}-${version}-Setup.${ext}"
+  # Custom hooks: ask during uninstall whether to delete user data
+  # (db.sqlite3, uploaded data files, logs) stored in %APPDATA%\LQ-DataPrase.
+  include: build/installer.nsh
 
-asar: true
-compression: normal
+# Disable ASAR packaging. On Windows the ASAR file is frequently locked by
+# the IDE/indexer after a build, preventing subsequent rebuilds from overwriting
+# it. Keeping files unpacked avoids this lock and makes debugging easier.
+asar: false
+
+# Compression: 'store' skips the NSIS 7z solid-compression pass entirely,
+# saving ~30s per build. The resulting Setup.exe is larger (~450 MB vs ~218 MB)
+# but installs just as fast — the 'install time' bottleneck is file I/O, not
+# decompression CPU. Use 'normal' for release builds.
+
+# During development, use 'store' to skip compression and save ~30s per build.
+# For release builds, switch to 'normal'.
+compression: "store"
+
+# Skip @electron/rebuild. This project has no native Node.js addons — all C++
+# code lives in the PyInstaller-packaged Python backend. Disabling it saves
+# ~5s on every build and avoids an unnecessary node-gyp dependency chain.
+npmRebuild: false
+
+# Use the npmmirror Electron mirror so that packaging does not need to reach
+# GitHub from mainland networks. The mirror must serve the same .zip layout as
+# the official Electron release artifacts.
+electronDownload:
+  mirror: "https://npmmirror.com/mirrors/electron/"
+
+# Do not attempt to publish to GitHub Releases automatically.
+publish: null

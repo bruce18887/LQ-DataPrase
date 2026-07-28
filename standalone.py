@@ -60,35 +60,52 @@ def _bootstrap():
     os.makedirs(settings.STATIC_ROOT, exist_ok=True)
 
     # Run migrations
-    print('[bootstrap] Running database migrations...')
-    call_command('migrate', '--run-syncdb', verbosity=1)
+    print('[bootstrap] Running database migrations...', flush=True)
+    call_command('migrate', '--run-syncdb', verbosity=0)
 
     # Create default admin user if no superuser exists
     from django.contrib.auth import get_user_model
     User = get_user_model()
     if not User.objects.filter(is_superuser=True).exists():
-        print('[bootstrap] Creating default admin user (admin / admin123)...')
+        print('[bootstrap] Creating default admin user (admin / admin123)...', flush=True)
         User.objects.create_superuser(
             username='admin',
             password='admin123',
             email='admin@localhost',
         )
-        print('[bootstrap] IMPORTANT: Change the default password after first login!')
+        print('[bootstrap] IMPORTANT: Change the default password after first login!', flush=True)
 
     # Collect static files (only when the frontend dist is present)
-    static_root = settings.STATIC_ROOT
-    # In frozen builds, frontend_dist lives in sys._MEIPASS, not BASE_DIR.
-    if getattr(sys, 'frozen', False):
-        frontend_dist = Path(sys._MEIPASS) / 'frontend_dist'
+    # In the standalone build we use WhiteNoise's finders to serve static files
+    # directly from each app's static/ directory and from STATICFILES_DIRS. This
+    # avoids a lengthy ``collectstatic`` pass on first run, which was the main
+    # cause of the "cannot connect to server" startup timeout.
+    if getattr(settings, 'WHITENOISE_USE_FINDERS', False):
+        print('[bootstrap] Serving static files via WhiteNoise finders, skipping collectstatic.', flush=True)
     else:
-        frontend_dist = base / 'frontend_dist'
-    if frontend_dist.is_dir():
-        print('[bootstrap] Collecting static files...')
-        call_command('collectstatic', '--noinput', verbosity=0)
+        static_root = settings.STATIC_ROOT
+        # In frozen builds, frontend_dist lives in sys._MEIPASS, not BASE_DIR.
+        if getattr(sys, 'frozen', False):
+            frontend_dist = Path(sys._MEIPASS) / 'frontend_dist'
+        else:
+            frontend_dist = base / 'frontend_dist'
+        if frontend_dist.is_dir():
+            # Skip collectstatic if the output directory already exists and is
+            # non-empty. The frontend assets bundled with PyInstaller never change
+            # at runtime, so re-collecting on every start only wastes time.
+            static_root_path = Path(static_root)
+            if static_root_path.is_dir() and any(static_root_path.iterdir()):
+                print('[bootstrap] Static files already collected, skipping collectstatic.', flush=True)
+            else:
+                print('[bootstrap] Collecting static files...', flush=True)
+                import time as _time
+                _cs_start = _time.time()
+                call_command('collectstatic', '--noinput', verbosity=0)
+                print(f'[bootstrap] collectstatic finished in {_time.time() - _cs_start:.2f}s', flush=True)
 
-    print(f'[bootstrap] Database : {settings.DATABASES["default"]["NAME"]}')
-    print(f'[bootstrap] Media dir: {media}')
-    print(f'[bootstrap] Static   : {static_root}')
+    print(f'[bootstrap] Database : {settings.DATABASES["default"]["NAME"]}', flush=True)
+    print(f'[bootstrap] Media dir: {media}', flush=True)
+    print(f'[bootstrap] Static   : {settings.STATIC_ROOT}', flush=True)
 
 
 def main():
@@ -130,8 +147,8 @@ def main():
         port = sock.getsockname()[1]
         sock.close()
 
-    print(f'\n[server] Starting LQ-DataPrase on http://{args.host}:{port}')
-    print('[server] Press Ctrl+C to stop.\n')
+    print(f'\n[server] Starting LQ-DataPrase on http://{args.host}:{port}', flush=True)
+    print('[server] Press Ctrl+C to stop.\n', flush=True)
 
     # Signal readiness to Electron via ready-fd
     if args.ready_fd is not None:
@@ -141,9 +158,9 @@ def main():
             with open(args.ready_fd, 'w', encoding='utf-8') as f:
                 f.write(f'{ready_msg}\n')
                 f.flush()
-            print(f'[server] Ready signal written to fd {args.ready_fd}')
+            print(f'[server] Ready signal written to fd {args.ready_fd}', flush=True)
         except OSError as e:
-            print(f'[server] Warning: could not write ready-fd {args.ready_fd}: {e}')
+            print(f'[server] Warning: could not write ready-fd {args.ready_fd}: {e}', flush=True)
 
     call_command('runserver', f'{args.host}:{port}', '--noreload')
 

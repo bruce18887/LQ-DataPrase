@@ -175,6 +175,19 @@ test.describe('@p1 各分析 Tab 可达', { tag: ['@p1', '@analysis'] }, () => {
       await expect(page.locator('.main-layout')).toBeVisible()
     })
   }
+
+  test('@p1 切换 Tab 后返回单文件分析直方图仍渲染', async ({ page }) => {
+    await enterAnalysis(page, RECOMMENDED.analysis)
+    await waitLoadingGone(page.locator(SINGLE))
+    await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
+
+    // 切到其它 tab 再切回，验证 echarts 在 display:none 恢复后能正确 resize/重绘
+    await page.getByRole('tab', { name: /晶圆图/ }).click()
+    await page.getByRole('tab', { name: /单文件分析/ }).click()
+
+    await waitLoadingGone(page.locator(SINGLE))
+    await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
+  })
 })
 
 test.describe('@p2 晶圆图渲染', { tag: ['@p2', '@analysis'] }, () => {

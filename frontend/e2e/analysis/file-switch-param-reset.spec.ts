@@ -32,9 +32,11 @@ import {
   listParams,
   selectParam,
 } from '../helpers/params'
+import { expectChartRendered, waitLoadingGone } from '../helpers/charts'
 import { SEEDED_FILES } from '../fixtures/test-data'
 
 const LAYOUT = '.analysis-tab-layout'
+const SINGLE = '.single-param-tab'
 
 /**
  * Build a regex that matches the network call we expect to fire when
@@ -159,5 +161,24 @@ test.describe('@regression file switch resets selectedParam', () => {
     await selectAnalysisFile(page, SEEDED_FILES.ETS88_FT)
     await page.waitForTimeout(2000)
     await expect(page.locator(LAYOUT)).toBeVisible()
+  })
+
+  test('切换文件后直方图应重新渲染（非空白）', async ({ page }) => {
+    // Regression for "加载第二个文件后 echarts 变成空白".
+    // The histogram chart container is recreated when the new file's
+    // params load. useChart must re-render once the async ECharts init
+    // completes, otherwise the chart area stays blank.
+    await gotoApp(page, '/analysis')
+
+    await selectAnalysisFile(page, SEEDED_FILES.GAGE_S4)
+    await expect(
+      page.getByRole('tab', { name: /单文件分析/ }),
+    ).toBeVisible({ timeout: 20_000 })
+    await waitLoadingGone(page.locator(SINGLE))
+    await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
+
+    await selectAnalysisFile(page, SEEDED_FILES.ETS88_FT)
+    await waitLoadingGone(page.locator(SINGLE))
+    await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
   })
 })

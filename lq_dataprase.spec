@@ -450,6 +450,12 @@ pyz = PYZ(a.pure)
 # ---------------------------------------------------------------------------
 # Executable
 # ---------------------------------------------------------------------------
+# UPX is enabled only on the bootloader EXE (~3 MB). The collection of
+# 314 .pyd/.dll binaries (317 MB total) is left uncompressed because:
+#   1. The NSIS installer re-compresses everything with LZMA/7z anyway.
+#   2. Double-compression (UPX + 7z) wastes ~7s with negligible size gain.
+#   3. Skipping UPX at COLLECT level avoids the runtime decompression step
+#      when the .pyd/.dll is loaded by the OS (faster cold start).
 exe = EXE(
     pyz,
     a.scripts,
@@ -472,7 +478,6 @@ coll = COLLECT(
     a.binaries,
     a.datas,
     strip=False,
-    upx=True,
-    upx_exclude=[],
+    upx=False,
     name='LQ-DataPrase',
 )

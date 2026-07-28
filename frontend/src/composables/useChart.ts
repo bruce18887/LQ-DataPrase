@@ -19,7 +19,7 @@
  * buildOption 使用泛型默认 EChartsOption，但允许传入宽松的对象字面量
  * （如 fontWeight: 'bold'），由渲染端在调用时统一断言为 EChartsOption。
  */
-import { ref, watch, onMounted, onUnmounted, nextTick, useTemplateRef, type WatchSource, type Ref } from 'vue'
+import { ref, watch, onMounted, onUnmounted, onActivated, nextTick, useTemplateRef, type WatchSource, type Ref } from 'vue'
 import type * as echarts from 'echarts'
 import { useThemeStore } from '../stores/theme'
 import { initEchartsWhenReady, type EchartsHandle } from '../utils/echarts-init'
@@ -36,6 +36,8 @@ export function useChart<T = echarts.EChartsOption>(
   let handle: EchartsHandle | null = null
   let pollTimer: ReturnType<typeof setInterval> | null = null
   let pollTimeout: ReturnType<typeof setTimeout> | null = null
+  let resizeObserver: ResizeObserver | null = null
+  let resizeRaf: ReturnType<typeof requestAnimationFrame> | null = null
   let disposed = false
 
   // Expose the ECharts instance on the container DOM for debugging/tests.
@@ -86,6 +88,8 @@ export function useChart<T = echarts.EChartsOption>(
       chartInstance.value = null
     }
     if (!chartRef.value) return false
+    // 避免 initEchartsWhenReady 的异步等待期间被重复调用，产生多余的 observer/轮询。
+    if (handle) return true
     try {
       const option = buildOption() as unknown as echarts.EChartsOption
       handle = initEchartsWhenReady(chartRef.value, { option, reuse: true, timeout: 5_000 })
@@ -97,7 +101,10 @@ export function useChart<T = echarts.EChartsOption>(
       }
       return false
     }
-    // If chart inits asynchronously (zero-size container), poll for readiness
+    // If chart inits asynchronously (zero-size container), poll for readiness.
+    // Once the instance is available we must re-render with the latest option,
+    // because the watcher that triggered ensureInit already fired while the
+    // instance was still null and will not fire again until the sources change.
     if (!chartInstance.value) {
       clearPollTimers()
       pollTimer = setInterval(() => {
@@ -105,6 +112,7 @@ export function useChart<T = echarts.EChartsOption>(
         if (handle?.chart) {
           chartInstance.value = handle.chart
           clearPollTimers()
+          renderOption()
         }
       }, 100)
       pollTimeout = setTimeout(() => clearPollTimers(), 5_500)
@@ -117,8 +125,48 @@ export function useChart<T = echarts.EChartsOption>(
     if (pollTimeout) { clearTimeout(pollTimeout); pollTimeout = null }
   }
 
+  function clearResizeRaf() {
+    if (resizeRaf != null) {
+      cancelAnimationFrame(resizeRaf)
+      resizeRaf = null
+    }
+  }
+
   function resize() {
     chartInstance.value?.resize()
+  }
+
+  /**
+   * 持续监听容器尺寸变化。解决 el-tabs/keep-alive/路由缓存 等场景下：
+   * - 容器从 display:none /  detached 恢复为可见时，ECharts 实例需要 resize() 才能重绘；
+   * - 容器首次获得尺寸时，若异步 init 尚未完成则触发 ensureInit()；
+   * - 容器被替换（v-if 切换）后，在新 DOM 上重建 observer。
+   */
+  function setupResizeObserver() {
+    if (typeof ResizeObserver === 'undefined' || !chartRef.value) return
+    resizeObserver?.disconnect()
+    resizeObserver = new ResizeObserver(() => {
+      if (disposed || !chartRef.value?.isConnected) return
+      const rect = chartRef.value.getBoundingClientRect()
+      if (rect.width === 0 || rect.height === 0) return
+      clearResizeRaf()
+      resizeRaf = requestAnimationFrame(() => {
+        if (disposed || !chartRef.value?.isConnected) return
+        if (chartInstance.value) {
+          const boundDom = chartInstance.value.getDom?.() as HTMLElement | undefined
+          if (boundDom === chartRef.value) {
+            resize()
+            // 容器刚从隐藏恢复时，lazyUpdate 可能未实际绘制，用当前 option 重新渲染
+            renderOption()
+          } else {
+            ensureInit()
+          }
+        } else {
+          if (ensureInit()) renderOption()
+        }
+      })
+    })
+    resizeObserver.observe(chartRef.value)
   }
 
   // ── Data watchers ──
@@ -142,12 +190,26 @@ export function useChart<T = echarts.EChartsOption>(
   onMounted(() => {
     disposed = false
     if (chartRef.value) ensureInit()
+    setupResizeObserver()
     window.addEventListener('resize', resize)
+  })
+
+  // keep-alive 重新激活时：DOM 可能从 detached 恢复，实例需要重新校验/resize
+  onActivated(() => {
+    disposed = false
+    if (ensureInit()) {
+      resize()
+      renderOption()
+    }
+    setupResizeObserver()
   })
 
   onUnmounted(() => {
     disposed = true
     clearPollTimers()
+    clearResizeRaf()
+    resizeObserver?.disconnect()
+    resizeObserver = null
     window.removeEventListener('resize', resize)
     handle?.dispose()
     handle = null
