@@ -10,7 +10,7 @@ export function useFileCorrelation() {
 
   async function loadFileCorrelation(file1: number, file2: number, threshold: number) {
     if (!file1 || !file2) { ElMessage.warning('请选择两个文件'); return }
-    await run(() => api.post('/correlation/analyze/', { file1_id: file1, file2_id: file2, threshold }))
+    await run(() => api.post('/analysis/file-correlation/', { file1_id: file1, file2_id: file2, threshold }))
   }
 
   return { loading, result, loadFileCorrelation }

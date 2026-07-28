@@ -188,7 +188,12 @@ async function createWindow(): Promise<BrowserWindow> {
     // In dev the Vite server is running on :3000
     console.log('[electron] Loading dev URL http://localhost:3000')
     await win.loadURL('http://localhost:3000')
-    win.webContents.openDevTools()
+    // Only open DevTools on demand. Auto-opening it floods the terminal with
+    // benign Chromium-internal noise (Unknown VE context: language-mismatch,
+    // Autofill.enable / Autofill.setAddresses not found, etc.).
+    if (process.env.ELECTRON_OPEN_DEVTOOLS === 'true') {
+      win.webContents.openDevTools()
+    }
   } else {
     // In production the frontend/dist/ directory sits in the ASAR next to
     // electron-dist/. Using a relative path + file:// protocol means we must
@@ -209,7 +214,8 @@ app.whenReady().then(async () => {
   try {
     backendInfo = await spawnBackend(isDev)
     backendUrl = `http://localhost:${backendInfo.port}`
-    console.log(`[electron] Backend ready on ${backendUrl}`)
+    const managedLabel = backendInfo.managed ? '(managed)' : '(external)'
+    console.log(`[electron] Backend ready on ${backendUrl} ${managedLabel}`)
   } catch (err) {
     console.error('[electron] Failed to start backend:', err)
     // Continue without backend – the UI will show connection errors.

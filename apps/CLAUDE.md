@@ -21,7 +21,7 @@ LQ-DataPrase/
 │   ├── celery.py              #   Celery 配置
 │   ├── urls.py                #   根路由（10个app + Swagger）
 │   ├── wsgi.py / asgi.py      #   部署入口
-├── apps/                      # 9 个 Django 应用
+├── apps/                      # 8 个 Django 应用
 │   ├── accounts/              #   用户认证/权限/设置（User/UserSetting）
 │   ├── datafiles/             #   文件管理/解析（DataFile/ParseHistory + 4个parser）
 │   ├── analysis/              #   数据分析（9个@action端点 + services子包）
@@ -30,8 +30,7 @@ LQ-DataPrase/
 │   ├── buyoff/                #   买断管理
 │   ├── gage/                  #   量具 R&R（services/rr_analysis.py）
 │   ├── export/                #   数据导出（Excel/PPT，含excel_builders/export_ppt）
-│   ├── sftp/                  #   SFTP 文件浏览
-│   └── data_correlation/      #   数据关联分析
+│   └── sftp/                  #   SFTP 文件浏览
 ├── requirements/              # base.txt + production.txt
 ├── manage.py                  # 默认使用 config.settings.development
 ├── pytest.ini                 # pytest 配置
@@ -95,7 +94,6 @@ LQ-DataPrase/
 | `gage` | 量具 R&R | views.py, services/rr_analysis.py, tests.py |
 | `export` | 数据导出（Excel/PPT） | views.py, excel_builders.py, export_ppt.py, export_complete.py, excelize_helpers.py |
 | `sftp` | SFTP 文件浏览 | views.py, tests.py |
-| `data_correlation` | 数据关联分析 | views.py, tests.py |
 
 ---
 
@@ -126,23 +124,23 @@ SIMPLE_JWT = {
 }
 ```
 
-### 已安装应用（12 个自定义应用）
+### 已安装应用（11 个自定义应用）
 
 ```python
 INSTALLED_APPS = [
     # Django 内置...
     'rest_framework', 'rest_framework_simplejwt', 'corsheaders',
     'django_filters', 'drf_spectacular', 'celery',
-    # 自定义应用（9 个）
+    # 自定义应用（8 个）
     'apps.accounts', 'apps.datafiles', 'apps.analysis', 'apps.dashboard',
     'apps.batch_report', 'apps.buyoff', 'apps.gage', 'apps.export',
-    'apps.sftp', 'apps.data_correlation',
+    'apps.sftp',
 ]
 ```
 
 ### 路由 (`config/urls.py`)
 
-根路径重定向到 Swagger（`/api/schema/swagger/`）。10 个 app 路由统一挂载到 `/api/v1/` 下。
+根路径重定向到 Swagger（`/api/schema/swagger/`）。9 个 app 路由统一挂载到 `/api/v1/` 下。
 
 ### 语言时区
 
