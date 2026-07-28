@@ -17,7 +17,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const ignoreNoLimit = ref(false)
   const customLow = ref<number | null>(null)
   const customHigh = ref<number | null>(null)
-  const outlierHandling = ref<'clip' | 'exclude' | 'off'>('clip')
+  const outlierHandling = ref<'clip' | 'exclude' | 'off'>('off')
   const iqrMultiplier = ref<number>(1.5)
 
   // Tab: 多文件分析（multi-file）
@@ -27,7 +27,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const multiChartConfig = ref<string[]>(['limit'])
   const multiBarWidthPercent = ref(20)
   const multiIgnoreNoLimit = ref(false)
-  const multiRangeType = ref('S4')
+  const multiRangeType = ref('RDL')
 
   // Initialize from URL query params
   function initFromQuery() {
@@ -48,7 +48,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
       const q: Record<string, string> = {}
       if (multiFileIds.value.length >= 2) q.mf_ids = multiFileIds.value.join(',')
       if (multiSelectedParam.value) q.mf_param = multiSelectedParam.value
-      if (multiRangeType.value && multiRangeType.value !== 'S4') q.mf_range = multiRangeType.value
+      if (multiRangeType.value && multiRangeType.value !== 'RDL') q.mf_range = multiRangeType.value
       router.replace({ query: { ...route.query, ...q } })
     }, 300)
   }
@@ -66,7 +66,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     ignoreNoLimit.value = false
     customLow.value = null
     customHigh.value = null
-    outlierHandling.value = 'clip'
+    outlierHandling.value = 'off'
     iqrMultiplier.value = 1.5
     multiFileIds.value = []
     multiSelectedParam.value = ''
@@ -74,7 +74,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     multiChartConfig.value = ['limit']
     multiBarWidthPercent.value = 20
     multiIgnoreNoLimit.value = false
-    multiRangeType.value = 'S4'
+    multiRangeType.value = 'RDL'
   }
 
   return {

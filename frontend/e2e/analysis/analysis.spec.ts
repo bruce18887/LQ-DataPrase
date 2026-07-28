@@ -161,6 +161,23 @@ test.describe('@p1 单参数分析', { tag: ['@p1', '@analysis'] }, () => {
   })
 })
 
+test.describe('@p1 默认配置', { tag: ['@p1', '@analysis'] }, () => {
+  test('异常值处理默认为「不处理」', async ({ page }) => {
+    await enterAnalysis(page, RECOMMENDED.analysis)
+    // 第二个 analysis-file-selector__select 为异常值处理下拉框
+    const outlierSelect = page.locator('.analysis-file-selector__select').nth(1)
+    await expect(outlierSelect).toHaveText('不处理')
+  })
+
+  test('多文件分析范围类型默认为 RDL', async ({ page }) => {
+    await enterAnalysis(page, RECOMMENDED.analysis)
+    await page.getByRole('tab', { name: /多文件分析/ }).click()
+    // 通过内部 input#multi-range-type 定位到对应的 el-select 包装器
+    const rangeSelect = page.locator('.el-select:has(#multi-range-type)')
+    await expect(rangeSelect).toHaveText('Spec Limits (RDL)')
+  })
+})
+
 test.describe('@p1 各分析 Tab 可达', { tag: ['@p1', '@analysis'] }, () => {
   const TABS = ['晶圆图', '箱线图', '多文件分析', '相关性对比']
 
