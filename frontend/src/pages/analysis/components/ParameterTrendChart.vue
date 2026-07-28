@@ -26,15 +26,15 @@ function buildOption() {
   const lowerBand = trend_data.map(d => d.mean - d.std)
 
   const series: any[] = [
-    { name: 'Mean', type: 'line', data: meanData, itemStyle: { color: '#5470C6' }, lineStyle: { width: 3 }, symbol: 'circle', symbolSize: 8, yAxisIndex: 0 },
-    { name: 'Mean + Std', type: 'line', data: upperBand, itemStyle: { color: '#91CC75' }, lineStyle: { type: 'dashed', width: 1 }, symbol: 'none', yAxisIndex: 0 },
-    { name: 'Mean - Std', type: 'line', data: lowerBand, itemStyle: { color: '#91CC75' }, lineStyle: { type: 'dashed', width: 1 }, symbol: 'none', areaStyle: { color: 'rgba(145, 204, 117, 0.2)' }, yAxisIndex: 0 },
-    { name: 'CPK', type: 'line', data: cpkData, itemStyle: { color: '#EE6666' }, lineStyle: { width: 2 }, symbol: 'diamond', symbolSize: 8, yAxisIndex: 1 },
+    { name: 'Mean', type: 'line', data: meanData, itemStyle: { color: colors.value.seriesColors[0] }, lineStyle: { width: 3 }, symbol: 'circle', symbolSize: 8, yAxisIndex: 0 },
+    { name: 'Mean + Std', type: 'line', data: upperBand, itemStyle: { color: colors.value.seriesColors[1] }, lineStyle: { type: 'dashed', width: 1 }, symbol: 'none', yAxisIndex: 0 },
+    { name: 'Mean - Std', type: 'line', data: lowerBand, itemStyle: { color: colors.value.seriesColors[1] }, lineStyle: { type: 'dashed', width: 1 }, symbol: 'none', areaStyle: { color: colors.value.seriesColors[1] + '33' }, yAxisIndex: 0 },
+    { name: 'CPK', type: 'line', data: cpkData, itemStyle: { color: colors.value.seriesColors[3] }, lineStyle: { width: 2 }, symbol: 'diamond', symbolSize: 8, yAxisIndex: 1 },
   ]
 
   const markLines: any[] = []
-  if (limits.usl !== null) markLines.push({ name: 'USL', yAxis: limits.usl, lineStyle: { color: '#F56C6C', type: 'solid', width: 2 }, label: { formatter: 'USL', position: 'end' } })
-  if (limits.lsl !== null) markLines.push({ name: 'LSL', yAxis: limits.lsl, lineStyle: { color: '#F56C6C', type: 'solid', width: 2 }, label: { formatter: 'LSL', position: 'end' } })
+  if (limits.usl !== null) markLines.push({ name: 'USL', yAxis: limits.usl, lineStyle: { color: colors.value.seriesColors[3], type: 'solid', width: 2 }, label: { formatter: 'USL', position: 'end' } })
+  if (limits.lsl !== null) markLines.push({ name: 'LSL', yAxis: limits.lsl, lineStyle: { color: colors.value.seriesColors[3], type: 'solid', width: 2 }, label: { formatter: 'LSL', position: 'end' } })
   if (markLines.length > 0) series[0].markLine = { silent: true, data: markLines }
 
   return {

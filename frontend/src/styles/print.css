@@ -1,0 +1,68 @@
+/**
+ * 打印样式
+ * 隐藏导航元素，优化报表和图表打印输出
+ */
+@media print {
+  /* 隐藏导航 */
+  .sidebar,
+  .topbar,
+  .skip-link,
+  .theme-toggle {
+    display: none !important;
+  }
+
+  /* 全宽内容 */
+  .main-layout {
+    display: block !important;
+    height: auto !important;
+  }
+
+  .main-content {
+    width: 100% !important;
+  }
+
+  .content-area {
+    overflow: visible !important;
+  }
+
+  /* 移除背景和阴影 */
+  * {
+    background: transparent !important;
+    color: #000 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  /* 保留表格边框 */
+  table {
+    border-collapse: collapse !important;
+  }
+
+  th, td {
+    border: 1px solid #000 !important;
+  }
+
+  /* 图表容器 */
+  .chart-container {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* KPI 卡片 */
+  .kpi-card {
+    break-inside: avoid;
+    border: 1px solid #ccc !important;
+  }
+
+  /* 链接 */
+  a[href]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.8em;
+  }
+
+  /* 页面断点 */
+  h2 {
+    break-before: auto;
+    page-break-after: avoid;
+  }
+}

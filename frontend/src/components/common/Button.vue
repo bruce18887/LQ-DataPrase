@@ -41,7 +41,7 @@ withDefaults(defineProps<Props>(), {
 
 .dp-button--primary:hover {
   background: var(--brand-primary-hover);
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+  box-shadow: 0 4px 12px rgba(var(--brand-primary-rgb), 0.25);
   transform: translateY(-1px);
 }
 
@@ -65,20 +65,27 @@ withDefaults(defineProps<Props>(), {
   border: 1px solid var(--brand-primary);
   color: var(--brand-primary);
   box-shadow:
-    0 0 5px rgba(37, 99, 235, 0.2),
-    inset 0 0 5px rgba(37, 99, 235, 0.05);
+    0 0 5px rgba(var(--brand-primary-rgb), 0.2),
+    inset 0 0 5px rgba(var(--brand-primary-rgb), 0.05);
 }
 
 .dp-button--neon:hover {
-  background: rgba(37, 99, 235, 0.08);
+  background: rgba(var(--brand-primary-rgb), 0.08);
   box-shadow:
-    0 0 15px rgba(37, 99, 235, 0.4),
-    0 0 30px rgba(37, 99, 235, 0.2),
-    inset 0 0 10px rgba(37, 99, 235, 0.1);
+    0 0 15px rgba(var(--brand-primary-rgb), 0.4),
+    0 0 30px rgba(var(--brand-primary-rgb), 0.2),
+    inset 0 0 10px rgba(var(--brand-primary-rgb), 0.1);
   transform: translateY(-1px);
 }
 
 .dp-button--neon:active {
   transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dp-button--primary:hover,
+  .dp-button--neon:hover {
+    transform: none;
+  }
 }
 </style>

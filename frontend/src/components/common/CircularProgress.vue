@@ -1,7 +1,15 @@
 <template>
   <transition name="cp-fade">
-    <div v-if="visible" class="circular-progress" :title="`加载中 ${displayPct}%`">
-      <svg viewBox="0 0 100 100" class="cp-svg">
+    <div
+      v-if="visible"
+      class="circular-progress"
+      role="progressbar"
+      :aria-valuenow="displayPct"
+      aria-valuemin="0"
+      aria-valuemax="100"
+      :aria-label="`加载中 ${displayPct}%`"
+    >
+      <svg viewBox="0 0 100 100" class="cp-svg" aria-hidden="true">
         <!-- background ring -->
         <circle cx="50" cy="50" r="42" class="cp-bg" />
         <!-- progress ring -->
@@ -12,14 +20,14 @@
           :style="{ strokeDashoffset: dashOffset }"
         />
       </svg>
-      <span v-if="!done" class="cp-text">{{ displayPct }}%</span>
-      <span v-else class="cp-check">✓</span>
+      <span v-if="!done" class="cp-text" aria-hidden="true">{{ displayPct }}%</span>
+      <span v-else class="cp-check" aria-hidden="true">✓</span>
     </div>
   </transition>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 
 const CIRCUMFERENCE = 2 * Math.PI * 42 // ≈ 263.9
 
@@ -81,6 +89,11 @@ function stopProgress() {
   if (_doneTimer) { clearTimeout(_doneTimer); _doneTimer = null }
 }
 
+// Cleanup on unmount to prevent memory leaks
+onBeforeUnmount(() => {
+  stopProgress()
+})
+
 watch(() => props.loading, (val) => {
   if (val) {
     startProgress()
@@ -110,47 +123,33 @@ watch(() => props.loading, (val) => {
 }
 .cp-bg {
   fill: none;
-  stroke: #e5e7eb;
+  stroke: var(--bg-tertiary);
   stroke-width: 5;
 }
 .cp-ring {
   fill: none;
-  stroke: #2563eb;
+  stroke: var(--brand-primary);
   stroke-width: 5;
   stroke-linecap: round;
   stroke-dasharray: 263.9;
   transition: stroke-dashoffset 0.25s ease;
 }
 .cp-ring--done {
-  stroke: #059669;
+  stroke: var(--color-success);
 }
 .cp-text {
   position: absolute;
   font-size: 12px;
   font-weight: 700;
-  color: #2563eb;
+  color: var(--brand-primary);
   user-select: none;
 }
 .cp-check {
   position: absolute;
   font-size: 18px;
   font-weight: 700;
-  color: #059669;
+  color: var(--color-success);
   user-select: none;
-}
-
-/* ----- night theme ----- */
-:root.theme-night .cp-bg {
-  stroke: rgba(255,255,255,0.12);
-}
-:root.theme-night .cp-text {
-  color: #4facfe;
-}
-:root.theme-night .cp-ring--done {
-  stroke: #38ef7d;
-}
-:root.theme-night .cp-check {
-  color: #38ef7d;
 }
 
 /* transition */
@@ -158,4 +157,19 @@ watch(() => props.loading, (val) => {
 .cp-fade-leave-active { transition: opacity .2s ease; }
 .cp-fade-enter-from { opacity: 0; transform: scale(0.6); }
 .cp-fade-leave-to   { opacity: 0; }
+
+/* reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .cp-ring {
+    transition: none;
+  }
+  .cp-fade-enter-active,
+  .cp-fade-leave-active {
+    transition: none;
+  }
+  .cp-fade-enter-from {
+    opacity: 0;
+    transform: none;
+  }
+}
 </style>

@@ -9,6 +9,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import api from '../../../api'
 
 const props = defineProps<{
@@ -36,6 +37,7 @@ async function exportHtml() {
     window.URL.revokeObjectURL(url)
   } catch (error) {
     console.error('导出失败:', error)
+    ElMessage.error('导出 HTML 报表失败，请稍后重试')
   } finally {
     exporting.value = false
   }
@@ -52,7 +54,7 @@ async function exportHtml() {
 }
 .dash-footer-note {
   margin: 16px 0 0;
-  color: #9ca3af;
+  color: var(--text-tertiary);
   font-size: 12px;
 }
 </style>

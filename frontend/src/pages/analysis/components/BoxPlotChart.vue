@@ -28,8 +28,9 @@ const props = withDefaults(defineProps<{ data: BoxPlotData | null; title?: strin
 })
 const { colors } = useEChartsTheme()
 
-const BOX_COLOR = '#5470c6'
-const JITTER_COLOR = '#73c0de'
+const boxColor = computed(() => colors.value.seriesColors[0])
+const jitterColor = computed(() => colors.value.seriesColors[4])
+const outlierColor = computed(() => colors.value.seriesColors[3])
 
 const hasValidData = computed(() => {
   if (!props.data) return false
@@ -89,7 +90,7 @@ function buildOption() {
           type: 'scatter',
           data: s.raw_values.map((v: number) => [idx + (Math.random() - 0.5) * 0.3, v]),
           symbolSize: 3,
-          itemStyle: { color: JITTER_COLOR, opacity: 0.25 },
+          itemStyle: { color: jitterColor.value, opacity: 0.25 },
           silent: true,
         })
       }
@@ -109,7 +110,7 @@ function buildOption() {
         type: 'scatter',
         data: overall.raw_values.map((v: number) => [(Math.random() - 0.5) * 0.3, v]),
         symbolSize: 3,
-        itemStyle: { color: JITTER_COLOR, opacity: 0.25 },
+        itemStyle: { color: jitterColor.value, opacity: 0.25 },
         silent: true,
       })
     }
@@ -173,14 +174,14 @@ function buildOption() {
         type: 'boxplot',
         data: boxData,
         itemStyle: {
-          color: BOX_COLOR + '30',
-          borderColor: BOX_COLOR,
+          color: boxColor.value + '30',
+          borderColor: boxColor.value,
           borderWidth: 2,
         },
         emphasis: {
           itemStyle: {
-            color: BOX_COLOR + '50',
-            borderColor: BOX_COLOR,
+            color: boxColor.value + '50',
+            borderColor: boxColor.value,
             borderWidth: 3,
           },
         },
@@ -204,7 +205,7 @@ function buildOption() {
         name: 'Outliers',
         type: 'scatter',
         data: outlierData,
-        itemStyle: { color: '#EE6666', opacity: 0.8 },
+        itemStyle: { color: outlierColor.value, opacity: 0.8 },
         symbolSize: 7,
         symbol: 'circle',
         tooltip: { formatter: (p: any) => {

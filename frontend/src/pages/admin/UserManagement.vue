@@ -319,6 +319,24 @@ onMounted(loadUsers)
   background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
 }
 
+/* Night theme KPI card overrides */
+:root.theme-night .kpi-card {
+  color: var(--text-primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+:root.theme-night .kpi-card--blue {
+  background: linear-gradient(135deg, #1e3a5f 0%, #162d4a 100%);
+}
+:root.theme-night .kpi-card--green {
+  background: linear-gradient(135deg, #0d4733 0%, #0a3325 100%);
+}
+:root.theme-night .kpi-card--orange {
+  background: linear-gradient(135deg, #5c3d0e 0%, #4a2e08 100%);
+}
+:root.theme-night .kpi-card--purple {
+  background: linear-gradient(135deg, #3d2370 0%, #2d1a5e 100%);
+}
+
 .kpi-card__icon {
   font-size: 36px;
   flex-shrink: 0;

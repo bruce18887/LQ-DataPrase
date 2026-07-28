@@ -11,17 +11,16 @@
 
     <!-- 右侧：搜索、通知、主题切换、用户菜单 -->
     <div class="topbar-right">
-      <!-- 搜索框 -->
+      <!-- 搜索框（开发中） -->
       <div class="search-box">
         <el-input
           v-model="searchQuery"
-          placeholder="搜索..."
+          placeholder="搜索（开发中）"
           :prefix-icon="Search"
           size="small"
-          clearable
+          disabled
           autocomplete="off"
-          aria-label="搜索功能"
-          @keyup.enter="handleSearch"
+          aria-label="搜索功能（开发中）"
         />
       </div>
 
@@ -36,8 +35,8 @@
       </el-badge>
 
       <!-- 用户菜单 -->
-      <el-dropdown trigger="click" @command="handleCommand">
-        <button class="user-menu" aria-haspopup="true" aria-expanded="false">
+      <el-dropdown trigger="click" @command="handleCommand" @visible-change="onDropdownVisibleChange">
+        <button class="user-menu" aria-haspopup="true" :aria-expanded="dropdownVisible">
           <div class="user-avatar">
             <el-icon :size="18" aria-hidden="true"><User /></el-icon>
           </div>
@@ -73,7 +72,6 @@ import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import { Search, Bell, User, ArrowDown, Setting, SwitchButton } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
 import ThemeToggle from '../common/ThemeToggle.vue'
 
 const route = useRoute()
@@ -82,6 +80,11 @@ const authStore = useAuthStore()
 
 const searchQuery = ref('')
 const notificationCount = ref(0)
+const dropdownVisible = ref(false)
+
+const onDropdownVisibleChange = (visible: boolean) => {
+  dropdownVisible.value = visible
+}
 
 const displayName = computed(() => {
   return authStore.user?.display_name || authStore.user?.username || '用户'
@@ -122,16 +125,10 @@ const breadcrumbs = computed(() => {
   return items
 })
 
-const handleSearch = () => {
-  if (searchQuery.value.trim()) {
-    ElMessage.info(`搜索功能开发中: ${searchQuery.value}`)
-  }
-}
-
 const handleCommand = (command: string) => {
   switch (command) {
     case 'profile':
-      ElMessage.info('个人资料功能开发中')
+      // 个人资料功能开发中，暂不跳转
       break
     case 'settings':
       router.push('/settings')
@@ -318,7 +315,7 @@ const handleCommand = (command: string) => {
 :deep(.el-dropdown-menu) {
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-default);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-lg);
 }
 
 :deep(.el-dropdown-menu__item) {
@@ -335,5 +332,13 @@ const handleCommand = (command: string) => {
 
 :deep(.el-dropdown-menu__item .el-icon) {
   font-size: 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar *,
+  .dropdown-icon,
+  .user-menu {
+    transition: none !important;
+  }
 }
 </style>

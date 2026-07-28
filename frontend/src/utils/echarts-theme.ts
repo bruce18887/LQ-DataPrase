@@ -67,14 +67,14 @@ export function useEChartsTheme() {
 
         // 系列颜色（图表数据颜色）
         seriesColors: [
-          '#f9a825', // 金色
-          '#11998e', // 青绿
+          '#fdd835', // 金色
+          '#14b8a6', // 青绿
           '#4facfe', // 蓝色
-          '#f5576c', // 粉红
+          '#fb7185', // 粉红
           '#38ef7d', // 绿色
           '#ffd54f', // 浅金
           '#00f2fe', // 浅蓝
-          '#f093fb', // 浅粉
+          '#fda4af', // 浅粉
         ]
       }
     } else {
@@ -94,9 +94,9 @@ export function useEChartsTheme() {
         tooltipText: '#303133',
         seriesColors: [
           '#2563eb', // 专业蓝
-          '#059669', // 绿色
-          '#d97706', // 橙色
-          '#dc2626', // 红色
+          '#047857', // 绿色
+          '#b45309', // 橙色
+          '#b91c1c', // 红色
           '#0284c7', // 蓝色
           '#7c3aed', // 紫色
           '#ea580c', // 深橙

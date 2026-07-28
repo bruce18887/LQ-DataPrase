@@ -21,7 +21,7 @@
   /* ========== 文本色 ========== */
   --text-primary: #1f2937;
   --text-secondary: #6b7280;
-  --text-tertiary: #9ca3af;
+  --text-tertiary: #717880;
   --text-inverse: #ffffff;
 
   /* ========== 品牌色 ========== */
@@ -30,15 +30,19 @@
   --brand-primary-hover: #1d4ed8;
   --brand-secondary-hover: #c2410c;
 
+  /* ========== 品牌色 RGB 分量（用于 rgba()/box-shadow 透明度）========== */
+  --brand-primary-rgb: 37, 99, 235;
+  --brand-primary-hover-rgb: 29, 78, 216;
+
   /* ========== 语义色 ========== */
-  --color-success: #059669;
-  --color-success-emphasis: #047857;
-  --color-warning: #d97706;
-  --color-warning-emphasis: #b45309;
-  --color-error: #dc2626;
-  --color-error-emphasis: #b91c1c;
-  --color-info: #0284c7;
-  --color-info-emphasis: #0369a1;
+  --color-success: #047857;
+  --color-success-emphasis: #065f46;
+  --color-warning: #b45309;
+  --color-warning-emphasis: #92400e;
+  --color-error: #b91c1c;
+  --color-error-emphasis: #991b1b;
+  --color-info: #0369a1;
+  --color-info-emphasis: #075985;
 
   /* ========== 阴影 ========== */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
@@ -68,18 +72,22 @@
   --text-inverse: #1a1a2e;
 
   /* ========== 品牌色 ========== */
-  --brand-primary: #f9a825;
+  --brand-primary: #fdd835;
   --brand-secondary: #11998e;
-  --brand-primary-hover: #ffd54f;
+  --brand-primary-hover: #ffeb3b;
   --brand-secondary-hover: #38ef7d;
 
+  /* ========== 品牌色 RGB 分量（用于 rgba()/box-shadow 透明度）========== */
+  --brand-primary-rgb: 253, 216, 53;
+  --brand-primary-hover-rgb: 255, 235, 59;
+
   /* ========== 语义色 ========== */
-  --color-success: #11998e;
-  --color-success-emphasis: #38ef7d;
-  --color-warning: #f9a825;
-  --color-warning-emphasis: #ffd54f;
-  --color-error: #f5576c;
-  --color-error-emphasis: #f093fb;
+  --color-success: #14b8a6;
+  --color-success-emphasis: #2dd4bf;
+  --color-warning: #fcd34d;
+  --color-warning-emphasis: #fde68a;
+  --color-error: #fb7185;
+  --color-error-emphasis: #fda4af;
   --color-info: #4facfe;
   --color-info-emphasis: #00f2fe;
 

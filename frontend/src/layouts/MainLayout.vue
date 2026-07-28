@@ -1,11 +1,12 @@
 <template>
   <div class="main-layout">
+    <a href="#main-content" class="skip-link">跳转到主内容</a>
     <Sidebar />
     <div class="main-content">
       <Topbar />
-      <main class="content-area">
+      <main id="main-content" class="content-area" tabindex="-1">
         <router-view v-slot="{ Component }">
-          <keep-alive>
+          <keep-alive :max="10">
             <component :is="Component" />
           </keep-alive>
         </router-view>
@@ -23,6 +24,7 @@ import Topbar from '../components/layout/Topbar.vue'
 .main-layout {
   display: flex;
   height: 100vh;
+  height: 100dvh;
   background-color: var(--bg-primary);
   overflow: hidden;
 }
