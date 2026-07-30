@@ -51,6 +51,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveFileDialog: (defaultName?: string): Promise<string | null> =>
     ipcRenderer.invoke('save-file-dialog', defaultName),
 
+  // ---- Zoom ----------------------------------------------------------------
+  getZoomFactor: (): Promise<number> => ipcRenderer.invoke('get-zoom-factor'),
+
+  setZoomFactor: (factor: number): Promise<void> =>
+    ipcRenderer.invoke('set-zoom-factor', factor),
+
   // ---- App metadata --------------------------------------------------------
   getAppVersion: (): Promise<string> => ipcRenderer.invoke('get-app-version'),
 

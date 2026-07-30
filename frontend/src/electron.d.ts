@@ -37,6 +37,12 @@ export interface ElectronAPI {
   /** Returns the current OS platform ('win32', 'darwin', 'linux', etc.). */
   getPlatform(): string
 
+  /** Returns the current web contents zoom factor (1 = 100%). */
+  getZoomFactor(): Promise<number>
+
+  /** Sets the web contents zoom factor (clamped between 0.5 and 2.0). */
+  setZoomFactor(factor: number): Promise<void>
+
   /** Register a callback for the File > Open File menu item. */
   onMenuOpenFile(callback: () => void): () => void
 
