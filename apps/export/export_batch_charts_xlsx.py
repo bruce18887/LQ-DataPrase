@@ -172,12 +172,16 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
         ws_summary.column_dimensions[get_column_letter(col)].width = min(col_max_widths.get(col, 15), 40)
 
     # ── Per-parameter detail sheets: create chart + sheet one by one ──
+    # openpyxl lazily reads image data during wb.save(), so we must keep each
+    # buffer alive until after save() and close them all at the end.
+    open_buffers = []
+
     for idx, (title, entry) in enumerate(zip(processed_params, summary_data_list)):
         stats_data = entry.get('stats_data', {})
         site_stats_list = entry.get('site_stats', [])
         chart_data = entry.get('chart_data', {})
 
-        # Create histogram image on demand and release as soon as possible
+        # Create histogram image on demand
         img_buffer = _create_histogram_chart(
             df, metadata, title, chart_data['data_series'],
             chart_data['mean_val'], chart_data['std_val'],
@@ -189,6 +193,7 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
         if img_buffer.getbuffer().nbytes == 0:
             img_buffer.close()
             continue
+        open_buffers.append(img_buffer)
 
         param_safe = title.replace("/", "_").replace("\\", "_").replace(" ", "_").replace("-", "_")[:28]
         try:
@@ -271,9 +276,12 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
         img.width = 800
         img.height = 450
         ws.add_image(img, f'A{chart_row}')
-        img_buffer.close()
 
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
-    return output.getvalue()
+    result = output.getvalue()
+    output.close()
+    for buf in open_buffers:
+        buf.close()
+    return result

@@ -63,7 +63,10 @@ def _create_histogram_chart(
         site_col_1d = site_df[site_col]
         if isinstance(site_col_1d, pd.DataFrame):
             site_col_1d = site_col_1d.iloc[:, 0]
-        site_df[selected_param] = pd.to_numeric(site_df[selected_param], errors='coerce')
+        selected_col_1d = site_df[selected_param]
+        if isinstance(selected_col_1d, pd.DataFrame):
+            selected_col_1d = selected_col_1d.iloc[:, 0]
+        site_df[selected_param] = pd.to_numeric(selected_col_1d, errors='coerce')
         grouped = site_df.groupby(site_col_1d)
 
         for idx, site in enumerate(site_values):

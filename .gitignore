@@ -125,6 +125,23 @@ DEBUG_*.md
 /test/*
 !/test/backend/
 /tasks/
+# 过程/设计文档（内部使用，不入仓库）
+/docs/plans/
+/docs/specs/
+/docs/tasks/
+# AI 助手与样式指南文档
+apps/CLAUDE.md
+frontend/CLAUDE.md
+frontend/LIGHT_THEME_STYLE_GUIDE.md
+frontend/NIGHT_THEME_STYLE_GUIDE.md
+# 前端模板占位文件与未使用资源
+frontend/README.md
+frontend/src/assets/vite.svg
+frontend/src/assets/vue.svg
+frontend/src/assets/hero.png
+frontend/e2e/theme/screenshots/
+# 构建日志
+frontend/build-out.txt
 # PyInstaller 打包输出（与 build.bat 配套，保留 lq_dataprase.spec）
 /release/
 /dist/
@@ -133,9 +150,8 @@ DEBUG_*.md
 # ================== Electron ==================
 # electron-builder output
 /out/
-# Compiled Electron JS (the package.json in this dir is committed for CJS override)
-/frontend/electron-dist/*.js
-/frontend/electron-dist/*.js.map
+# Compiled Electron JS and generated package.json (recreated by electron:build:ts)
+/frontend/electron-dist/
 # Stale artifact from running electron:build:ts in wrong cwd
 /frontend/frontend/
 # Standalone server auto-generated key and DB
