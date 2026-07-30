@@ -199,7 +199,8 @@ const {
   rangeType,
   customLow,
   customHigh,
-  iqrMultiplier
+  iqrMultiplier,
+  outlierHandling
 )
 
 // Composable: Serial Distribution

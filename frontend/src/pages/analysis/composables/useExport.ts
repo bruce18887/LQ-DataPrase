@@ -33,8 +33,9 @@ export function useExport(
       }, { responseType: 'blob' })
       const fname = extractFilename(resp.headers?.['content-disposition']) || `sigma_limit_${sigma}sigma.xlsx`
       downloadBlob(resp.data as Blob, fname)
-    } catch {
-      // silently fail
+    } catch (err) {
+      console.error('[useExport] sigma_limit failed:', err)
+      throw err
     } finally {
       exporting.value = false
     }
@@ -50,11 +51,15 @@ export function useExport(
         params,
         format,
         ...(options || {}),
-      }, { responseType: 'blob' })
+      }, {
+        responseType: 'blob',
+        timeout: 300000, // 5 min for large batch exports
+      })
       const fname = extractFilename(resp.headers?.['content-disposition']) || `batch_charts.${format === 'pptx' ? 'pptx' : 'xlsx'}`
       downloadBlob(resp.data as Blob, fname)
-    } catch {
-      // silently fail
+    } catch (err) {
+      console.error('[useExport] batch_charts failed:', err)
+      throw err
     } finally {
       exporting.value = false
     }

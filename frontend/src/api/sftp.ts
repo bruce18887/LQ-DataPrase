@@ -99,8 +99,11 @@ export const sftpApi = {
     onError: (msg: string) => void,
   ) {
     const token = localStorage.getItem('access_token')
+    // Re-use the axios base URL so this works in Electron (file://) as well as
+    // the browser dev/prod builds, where absolute paths resolve incorrectly.
+    const baseUrl = (api.defaults.baseURL || '/api/v1').replace(/\/$/, '')
     try {
-      const response = await fetch('/api/v1/sftp/download_dir/', {
+      const response = await fetch(`${baseUrl}/sftp/download_dir/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

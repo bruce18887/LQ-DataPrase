@@ -26,7 +26,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onActivated, onBeforeUnmount } from 'vue'
 import { initEchartsWhenReady, type EchartsHandle } from '../../../utils/echarts-init'
 import { useThemeStore } from '../../../stores/theme'
 
@@ -99,10 +99,15 @@ onMounted(() => {
   nextTick(() => renderBinChart())
 })
 
+onActivated(() => {
+  // keep-alive 重新激活后，旧实例可能绑定到已 detached 的 DOM，强制重建
+  if (binHandle) { binHandle.dispose(); binHandle = null }
+  nextTick(() => renderBinChart())
+})
+
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
-  binHandle?.dispose()
-  binHandle = null
+  binHandle?.dispose(); binHandle = null
 })
 
 defineExpose({ handleResize })

@@ -217,30 +217,17 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     page.on('pageerror', (err) => consoleErrors.push(err.message))
 
     await gotoApp(page, '/data')
-    // 切到 "导出工具" tab (DataManagement.vue:120-125 tabs-nav > button.tab-btn)
+    // 切到 "导出工具" tab (DataManagement.vue tabs-nav > button.tab-btn)
     await page.locator('.tab-btn').filter({ hasText: '导出工具' }).click()
 
-    // ExportToolsTab 内的关键控件可见
-    await expect(page.getByText('批量导出参数分布图')).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText('忽略无Limit')).toBeVisible()
-    await expect(page.getByText('Limit')).toBeVisible()
-    await expect(page.getByText('6σ')).toBeVisible()
-
-    const sigmaBtn = page.getByRole('button', { name: /导出 Sigma Limit/ })
-    const xlsxBtn = page.getByRole('button', { name: /批量导出 Excel/ })
-    const pptxBtn = page.getByRole('button', { name: /批量导出 PPT/ })
-    await expect(sigmaBtn).toBeVisible()
-    await expect(xlsxBtn).toBeVisible()
-    await expect(pptxBtn).toBeVisible()
-
-    // 等待 /files/ 返回，确保 el-select 下拉有可选文件
+    // 等待 /files/ 返回，确保 banner 下拉有可选文件
     await page.waitForResponse(
       (r) => /\/files\/?(\?|$)/.test(r.url()) && r.status() === 200,
       { timeout: 15_000 },
     ).catch(() => {})
 
-    // 选择第一个文件 (ExportToolsTab.vue:15-24)
-    const fileSelect = elSelectByPlaceholder(page, '选择文件').first()
+    // 在父级 banner 中选择第一个文件 (DataManagement.vue 当前文件选择器)
+    const fileSelect = page.locator('.active-file-banner:visible .el-select').first()
     await fileSelect.click()
     const dropdown = page.locator('.el-select-dropdown:visible')
     await dropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
@@ -257,11 +244,35 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     await dropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
     await page.waitForTimeout(200)
 
-    // 等待参数列表加载（ExportToolsTab.vue:124-132 拉 /analysis/histogram/）
+    // 等待参数列表加载（ExportToolsTab.vue 拉 /analysis/histogram/）
     await page.waitForResponse(
       (r) => /\/analysis\/histogram\/?/.test(new URL(r.url()).pathname) && r.status() === 200,
       { timeout: 15_000 },
     ).catch(() => {})
+
+    // 选择第一个参数，确保批量导出按钮可用
+    const paramSelect = page.locator('.export-tools .el-select').filter({ hasText: '点击选择要导出的参数' }).first()
+    await paramSelect.click()
+    const paramDropdown = page.locator('.el-select-dropdown:visible')
+    await paramDropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
+    const paramOptions = paramDropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
+    if (await paramOptions.count() > 0) {
+      await paramOptions.first().click()
+    }
+    await paramDropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
+
+    // ExportToolsTab 内的关键控件可见（使用 exact 避免匹配到其他 tab 的相似文本）
+    await expect(page.getByText('批量导出参数分布图')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('忽略无Limit')).toBeVisible()
+    await expect(page.getByText('Limit', { exact: true })).toBeVisible()
+    await expect(page.getByText('6σ', { exact: true })).toBeVisible()
+
+    const sigmaBtn = page.getByRole('button', { name: /导出 Sigma Limit/ })
+    const xlsxBtn = page.getByRole('button', { name: /批量导出 Excel/ })
+    const pptxBtn = page.getByRole('button', { name: /批量导出 PPT/ })
+    await expect(sigmaBtn).toBeVisible()
+    await expect(xlsxBtn).toBeVisible()
+    await expect(pptxBtn).toBeVisible()
 
     // 点击导出 Sigma Limit：必须触发 /export/sigma_limit/ 200 请求
     const respPromise = page.waitForResponse(
@@ -273,6 +284,96 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     expect(resp.status(), 'sigma_limit 不应 5xx').toBeLessThan(500)
 
     // 核心回归断言：使用错误的函数名应抛出的 TypeError 不应出现
+    const offendingErrors = consoleErrors.filter((e) =>
+      /exportSigma is not a function|exportBatch is not a function/.test(e),
+    )
+    expect(offendingErrors, '不应出现 exportSigma/exportBatch 解析错误').toEqual([])
+  })
+
+  test('选择多个参数后可批量导出 Excel（覆盖全选路径）', async ({ page }) => {
+    test.slow()
+
+    const consoleErrors: string[] = []
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') consoleErrors.push(msg.text())
+    })
+    page.on('pageerror', (err) => consoleErrors.push(err.message))
+
+    await gotoApp(page, '/data')
+    await page.locator('.tab-btn').filter({ hasText: '导出工具' }).click()
+
+    await page.waitForResponse(
+      (r) => /\/files\/?(\?|$)/.test(r.url()) && r.status() === 200,
+      { timeout: 15_000 },
+    ).catch(() => {})
+
+    // 选择第一个文件
+    const fileSelect = page.locator('.active-file-banner:visible .el-select').first()
+    await fileSelect.click()
+    const dropdown = page.locator('.el-select-dropdown:visible')
+    await dropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
+    await page.waitForTimeout(200)
+    const options = dropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
+    if (await options.count() === 0) {
+      await page.keyboard.press('Escape')
+      test.skip(true, '无可用上传文件')
+      return
+    }
+    await options.first().click()
+    await dropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
+    await page.waitForTimeout(200)
+
+    // 等待参数列表加载
+    await page.waitForResponse(
+      (r) => /\/analysis\/histogram\/?/.test(new URL(r.url()).pathname) && r.status() === 200,
+      { timeout: 15_000 },
+    ).catch(() => {})
+
+    // 全选参数：E2E 环境参数过多时可能导致后端超时，因此最多选 20 个
+    const panel = page.locator('.export-tools')
+    const paramSelect = panel.locator('.el-select').filter({ hasText: '点击选择要导出的参数' }).first()
+    await paramSelect.click()
+    const paramDropdown = page.locator('.el-select-dropdown:visible')
+    await paramDropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
+    const paramOptions = paramDropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
+    const paramCount = await paramOptions.count()
+    if (paramCount === 0) {
+      await page.keyboard.press('Escape')
+      test.skip(true, '该文件无可导出参数')
+      return
+    }
+    const selectLimit = Math.min(paramCount, 20)
+    for (let i = 0; i < selectLimit; i++) {
+      await paramOptions.nth(i).click()
+    }
+    await page.keyboard.press('Escape')
+    await paramDropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
+
+    // 确认已选计数
+    await expect(panel.locator('.step-count')).toContainText(`已选 ${selectLimit}`)
+
+    // 批量导出 Excel：后端大图生成可能较慢，给 180 秒超时
+    const respPromise = page.waitForResponse(
+      (r) => /\/export\/batch_charts\/?$/.test(new URL(r.url()).pathname),
+      { timeout: 180_000 },
+    )
+    const dlPromise = page.waitForEvent('download', { timeout: 180_000 }).catch(() => null)
+
+    const xlsxBtn = page.getByRole('button', { name: /批量导出 Excel/ })
+    await expect(xlsxBtn).toBeEnabled()
+    await xlsxBtn.click()
+
+    const [resp, dl] = await Promise.all([respPromise, dlPromise])
+    expect(resp.status(), 'batch_charts 不应 5xx/超时').toBeLessThan(500)
+
+    if (dl) {
+      const name = dl.suggestedFilename()
+      console.log(`[export-tools] downloaded ${name}`)
+      expect(name.toLowerCase()).toMatch(/\.xlsx$/)
+    } else {
+      console.log(`[export-tools] 未捕获下载，响应状态=${resp.status()}`)
+    }
+
     const offendingErrors = consoleErrors.filter((e) =>
       /exportSigma is not a function|exportBatch is not a function/.test(e),
     )

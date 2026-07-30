@@ -22,7 +22,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, nextTick, onMounted, onActivated, onBeforeUnmount } from 'vue'
 import { initEchartsWhenReady, type EchartsHandle } from '../../../utils/echarts-init'
 import { useThemeStore } from '../../../stores/theme'
 
@@ -91,6 +91,11 @@ watch(() => themeStore.currentTheme, () => {
 
 onMounted(() => {
   window.addEventListener('resize', handleResize)
+  nextTick(() => renderFailBarChart())
+})
+
+onActivated(() => {
+  if (failBarHandle) { failBarHandle.dispose(); failBarHandle = null }
   nextTick(() => renderFailBarChart())
 })
 

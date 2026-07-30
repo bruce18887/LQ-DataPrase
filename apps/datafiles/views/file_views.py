@@ -20,8 +20,6 @@ from apps.datafiles.serializers import (
 from apps.datafiles.services import clear_parse_cache
 
 from ._helpers import (
-    _is_archive,
-    _extract_archive,
     _register_file,
     _user_upload_dir,
     _disk_mtime,
@@ -179,6 +177,16 @@ class FileUploadView(APIView):
         if not files:
             return Response({'error': '未选择文件'}, status=400)
 
+        # Only plain CSV files are supported for upload.
+        allowed_exts = {'.csv'}
+        for uploaded_file in files:
+            ext = os.path.splitext(uploaded_file.name)[1].lower()
+            if ext not in allowed_exts:
+                return Response(
+                    {'error': f'仅支持 CSV 文件，无法上传 {uploaded_file.name}'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         # Optional per-file last_modified (epoch ms), parallel to the files list.
         last_modified_list = request.data.getlist('last_modified')
 
@@ -203,30 +211,11 @@ class FileUploadView(APIView):
                 for chunk in uploaded_file.chunks():
                     dest.write(chunk)
 
-            # If archive, extract and register each extracted file
-            if _is_archive(base_name):
-                extract_dir = file_path + '_extracted'
-                os.makedirs(extract_dir, exist_ok=True)
-                try:
-                    extracted = _extract_archive(file_path, extract_dir)
-                    batch_name = os.path.splitext(base_name)[0]
-                    for ext_path in extracted:
-                        # Archives preserve the original file mtime on disk.
-                        df = _register_file(
-                            request.user, ext_path, 'batch', batch_name,
-                            source_mtime=_disk_mtime(ext_path),
-                        )
-                        created.append(df)
-                except Exception:
-                    pass
-                # Remove the archive itself (keep extracted files)
-                os.remove(file_path)
-            else:
-                df = _register_file(
-                    request.user, file_path, 'single',
-                    source_mtime=browser_mtime,
-                )
-                created.append(df)
+            df = _register_file(
+                request.user, file_path, 'single',
+                source_mtime=browser_mtime,
+            )
+            created.append(df)
 
         return Response(
             DataFileSerializer(created, many=True).data,
