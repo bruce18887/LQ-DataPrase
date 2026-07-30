@@ -13,6 +13,19 @@ export function registerIpcHandlers(getBackendUrl: () => string): void {
     return getBackendUrl()
   })
 
+  // ---- Zoom ----------------------------------------------------------------
+  ipcMain.handle('get-zoom-factor', () => {
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    return win?.webContents.getZoomFactor() ?? 1
+  })
+
+  ipcMain.handle('set-zoom-factor', (_event, factor: number) => {
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    if (!win) return
+    const clamped = Math.min(Math.max(factor, 0.5), 2)
+    win.webContents.setZoomFactor(clamped)
+  })
+
   // ---- App metadata --------------------------------------------------------
   ipcMain.handle('get-app-version', () => {
     return app.getVersion()

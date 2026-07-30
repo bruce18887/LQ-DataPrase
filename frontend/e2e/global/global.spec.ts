@@ -46,6 +46,41 @@ test.describe('@p2 主题切换', { tag: ['@p2', '@global'] }, () => {
   })
 })
 
+test.describe('@p2 Ctrl+滚轮页面缩放', { tag: ['@p2', '@global'] }, () => {
+  test('Ctrl+滚轮放大/缩小页面并持久化到 localStorage', async ({ page }) => {
+    await gotoApp(page, '/dashboard')
+
+    const getZoom = () => page.evaluate(() => document.documentElement.style.zoom || '1')
+    const getStoredZoom = () => page.evaluate(() => localStorage.getItem('lqdp-zoom-factor'))
+
+    await expect.poll(getZoom).toBe('1')
+
+    // 模拟 Ctrl+向上滚轮放大
+    await page.evaluate(() => {
+      const event = new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, bubbles: true })
+      window.dispatchEvent(event)
+    })
+    await expect.poll(getZoom).not.toBe('1')
+    const zoomedIn = parseFloat(await getZoom())
+    expect(zoomedIn).toBeGreaterThan(1)
+    expect(parseFloat((await getStoredZoom()) ?? '1')).toBe(zoomedIn)
+
+    // 模拟 Ctrl+向下滚轮缩小
+    await page.evaluate(() => {
+      const event = new WheelEvent('wheel', { deltaY: 100, ctrlKey: true, bubbles: true })
+      window.dispatchEvent(event)
+    })
+    await expect.poll(async () => parseFloat(await getZoom())).toBeLessThan(zoomedIn)
+
+    // Ctrl+0 恢复 100%
+    await page.keyboard.down('Control')
+    await page.keyboard.press('0')
+    await page.keyboard.up('Control')
+    await expect.poll(getZoom).toBe('1')
+    expect(await getStoredZoom()).toBe('1')
+  })
+})
+
 // 角色相关用例：清空 storageState，实时 UI 登录使 user/isAdmin 生效
 test.describe('@p1 Topbar 与角色', { tag: ['@p1', '@p2', '@global'] }, () => {
   test.use({ storageState: { cookies: [], origins: [] } })
