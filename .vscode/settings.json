@@ -1,8 +1,0 @@
-{
-  "playwright.env": {
-    "PW_NO_WEBSERVER": "1"
-  },
-  "playwright.config": "frontend/playwright.config.ts",
-  "playwright.reuseBrowser": true,
-  "playwright.showTrace": true
-}
