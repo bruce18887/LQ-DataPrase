@@ -260,6 +260,15 @@ export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
     // Ensure the userData directory exists before the backend tries to write into it.
     fs.mkdirSync(userDataPath, { recursive: true })
 
+    // Set LQDP_BACKEND_CONSOLE=1 (or true) to keep the backend console window
+    // visible on Windows. Useful for debugging backend startup / crashes.
+    // Also supports the --backend-console command-line switch for packaged apps.
+    const showBackendConsole =
+      process.env.LQDP_BACKEND_CONSOLE === '1' ||
+      process.env.LQDP_BACKEND_CONSOLE === 'true' ||
+      app.commandLine.hasSwitch('backend-console')
+    console.log(`[electron] showBackendConsole=${showBackendConsole} (env=${process.env.LQDP_BACKEND_CONSOLE ?? 'unset'})`)
+
     const child = spawn(exe, args, {
       cwd,
       env: {
@@ -268,7 +277,7 @@ export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
         LQDP_BASE_DIR: userDataPath,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
+      windowsHide: !showBackendConsole,
     })
 
     let port: number | null = null

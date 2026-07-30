@@ -3,7 +3,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, nextTick, onMounted, onActivated, onBeforeUnmount } from 'vue'
 import { initEchartsWhenReady, type EchartsHandle } from '../../../../utils/echarts-init'
 import { useThemeStore } from '../../../../stores/theme'
 
@@ -98,6 +98,11 @@ onMounted(() => {
   window.addEventListener('resize', handleResize)
   // 首次挂载时主动触发：watch 默认不在初始化时触发，
   // 而 props.phases 在挂载时已被父组件绑定，不存在"变化"
+  nextTick(() => ensureChart())
+})
+
+onActivated(() => {
+  if (handle) { handle.dispose(); handle = null }
   nextTick(() => ensureChart())
 })
 

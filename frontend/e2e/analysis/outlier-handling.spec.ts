@@ -82,11 +82,26 @@ function hasLimitMarkLines(option: any) {
   return formatters.includes('LSL') && formatters.includes('USL')
 }
 
-function countNonEmptyBins(option: any) {
+function extractLimitLines(option: any): { lower: number | null; upper: number | null } {
+  const lines = option?.series?.flatMap((s: any) => s.markLine?.data || []) || []
+  let lower: number | null = null
+  let upper: number | null = null
+  for (const line of lines) {
+    if (line.label?.formatter === 'LSL' && line.xAxis != null) lower = Number(line.xAxis)
+    if (line.label?.formatter === 'USL' && line.xAxis != null) upper = Number(line.xAxis)
+  }
+  return { lower, upper }
+}
+
+function countNonEmptyBins(option: any, lower: number, upper: number) {
   const barSeries = (option?.series || []).filter((s: any) => s.type === 'bar')
   let total = 0
   for (const s of barSeries) {
-    total += (s.data || []).filter((d: any) => (Array.isArray(d) ? d[1] : d) > 0).length
+    total += (s.data || []).filter((d: any) => {
+      const center = Array.isArray(d) ? d[0] : d.value?.[0]
+      const value = Array.isArray(d) ? d[1] : d.value?.[1]
+      return center >= lower && center <= upper && value > 0
+    }).length
   }
   return total
 }
@@ -190,8 +205,11 @@ test.describe('@p1 异常值处理', { tag: ['@p1', '@analysis'] }, () => {
     expect(hasLimitMarkLines(clippedOption), '裁剪后应保留 LSL/USL 线').toBe(true)
 
     // In RDL mode, bins inside the original Limit lines must not be hidden.
-    const baselineNonEmpty = countNonEmptyBins(baselineOption)
-    const clippedNonEmpty = countNonEmptyBins(clippedOption)
+    const { lower, upper } = extractLimitLines(clippedOption)
+    expect(lower, '应能读取 LSL').not.toBeNull()
+    expect(upper, '应能读取 USL').not.toBeNull()
+    const baselineNonEmpty = countNonEmptyBins(baselineOption, lower!, upper!)
+    const clippedNonEmpty = countNonEmptyBins(clippedOption, lower!, upper!)
     expect(clippedNonEmpty, 'RDL 裁剪后 Limit 线内非空 bin 不应减少').toBeGreaterThanOrEqual(baselineNonEmpty)
   })
 })

@@ -474,6 +474,10 @@ onMounted(() => {
 // 否则新下载的批次不会出现在选择器里（DashboardPage 被 keep-alive 缓存）。
 onActivated(() => {
   loadBatches()
+  // 内联图表在 keep-alive 缓存期间实例可能绑定到 detached DOM，强制重建
+  if (binPieChart && !binPieChart.isDisposed()) { binPieChart.dispose(); binPieChart = null }
+  if (binBarChart && !binBarChart.isDisposed()) { binBarChart.dispose(); binBarChart = null }
+  nextTick(() => renderInlineCharts())
 })
 watch(() => filesStore.filesVersion, () => {
   loadBatches()

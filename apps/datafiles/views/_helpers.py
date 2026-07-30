@@ -2,7 +2,6 @@
 
 import os
 import shutil
-import zipfile
 
 from django.conf import settings
 from django.utils import timezone
@@ -10,12 +9,6 @@ from django.utils import timezone
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import BaseATEParser, get_parser
 from apps.datafiles.utils import extract_product_code
-
-ARCHIVE_EXTENSIONS = {'.zip', '.7z', '.rar'}
-
-
-def _is_archive(filename):
-    return os.path.splitext(filename)[1].lower() in ARCHIVE_EXTENSIONS
 
 
 def _is_summary_csv(filename):
@@ -33,54 +26,6 @@ def _is_summary_csv(filename):
 def _is_data_csv(filename):
     """A CSV that holds real ATE data (i.e. a non-summary ``.csv``)."""
     return filename.lower().endswith('.csv') and not _is_summary_csv(filename)
-
-
-def _extract_archive(file_path, dest_dir):
-    """Extract ZIP/7z/RAR to dest_dir. Returns list of extracted file paths."""
-    ext = os.path.splitext(file_path)[1].lower()
-    extracted = []
-
-    if ext == '.zip':
-        with zipfile.ZipFile(file_path, 'r') as zf:
-            for info in zf.infolist():
-                if info.is_dir() or info.filename.startswith('__MACOSX'):
-                    continue
-                # Flatten: use only the basename
-                name = os.path.basename(info.filename)
-                if not name:
-                    continue
-                out_path = os.path.join(dest_dir, name)
-                with zf.open(info) as src, open(out_path, 'wb') as dst:
-                    dst.write(src.read())
-                extracted.append(out_path)
-
-    elif ext == '.7z':
-        import py7zr
-        with py7zr.SevenZipFile(file_path, 'r') as sz:
-            for name, bio in sz.readall().items():
-                basename = os.path.basename(name)
-                if not basename:
-                    continue
-                out_path = os.path.join(dest_dir, basename)
-                with open(out_path, 'wb') as dst:
-                    dst.write(bio.read())
-                extracted.append(out_path)
-
-    elif ext == '.rar':
-        import rarfile
-        with rarfile.RarFile(file_path) as rf:
-            for info in rf.infolist():
-                if info.is_dir():
-                    continue
-                basename = os.path.basename(info.filename)
-                if not basename:
-                    continue
-                out_path = os.path.join(dest_dir, basename)
-                with rf.open(info) as src, open(out_path, 'wb') as dst:
-                    dst.write(src.read())
-                extracted.append(out_path)
-
-    return extracted
 
 
 def _register_file(user, file_path, file_type='single', batch_name='', sub_batch='', source_mtime=None):

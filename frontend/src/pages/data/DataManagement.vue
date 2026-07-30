@@ -26,6 +26,8 @@
         <button
           v-for="tab in tabs"
           :key="tab.key"
+          role="tab"
+          :aria-selected="activeTab === tab.key"
           :class="['tab-btn', { active: activeTab === tab.key }]"
           @click="activeTab = tab.key"
         >
@@ -39,7 +41,7 @@
     <!-- Content -->
     <div class="tab-content">
       <!-- 文件列表（整合上传、标签、批次管理） -->
-      <div v-show="activeTab === 'files'" class="content-section fade-in">
+      <div v-show="activeTab === 'files'" role="tabpanel" class="content-section fade-in">
         <FileListTab
           :active-file-id="activeFileId ?? undefined"
           @view-file="viewFile"
@@ -50,7 +52,7 @@
       </div>
 
       <!-- 查看文件数据 -->
-      <div v-show="activeTab === 'view'" class="content-section fade-in">
+      <div v-show="activeTab === 'view'" role="tabpanel" class="content-section fade-in">
         <div class="active-file-banner">
           <span class="banner-icon">📄</span>
           <span class="banner-label">当前文件</span>
@@ -69,7 +71,7 @@
       </div>
 
       <!-- 导出工具 -->
-      <div v-show="activeTab === 'export'" class="content-section fade-in">
+      <div v-show="activeTab === 'export'" role="tabpanel" class="content-section fade-in">
         <div class="active-file-banner">
           <span class="banner-icon">📄</span>
           <span class="banner-label">当前文件</span>
@@ -87,13 +89,18 @@
         <ExportToolsTab :files="files" :file-id="activeFileId" />
       </div>
 
+      <!-- 文件对比 -->
+      <div v-show="activeTab === 'compare'" role="tabpanel" class="content-section fade-in">
+        <FileCorrelationSection :files="files" />
+      </div>
+
       <!-- Gage Summary -->
-      <div v-show="activeTab === 'gage'" class="content-section fade-in">
+      <div v-show="activeTab === 'gage'" role="tabpanel" class="content-section fade-in">
         <GageSummary />
       </div>
 
       <!-- Buyoff Form -->
-      <div v-show="activeTab === 'buyoff'" class="content-section fade-in">
+      <div v-show="activeTab === 'buyoff'" role="tabpanel" class="content-section fade-in">
         <BuyoffForm />
       </div>
     </div>
@@ -109,6 +116,7 @@ import DataBrowserAgGrid from './DataBrowserAgGrid.vue'
 import ExportToolsTab from './ExportToolsTab.vue'
 import GageSummary from './GageSummary.vue'
 import BuyoffForm from './BuyoffForm.vue'
+import FileCorrelationSection from '../analysis/components/correlation/FileCorrelationSection.vue'
 
 // 用于导出下拉与当前文件名解析的轻量全量列表（FileListTab 自管分页列表）
 const files = ref<any[]>([])
@@ -121,6 +129,7 @@ const tabs = [
   { key: 'files', label: '文件列表', icon: '📋' },
   { key: 'view', label: '查看数据', icon: '🔍' },
   { key: 'export', label: '导出工具', icon: '📥' },
+  { key: 'compare', label: '文件对比', icon: '📁' },
   { key: 'gage', label: 'Gage Summary', icon: '📊' },
   { key: 'buyoff', label: 'Buyoff Form', icon: '📝' },
 ]

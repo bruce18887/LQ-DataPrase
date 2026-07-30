@@ -4,13 +4,14 @@
       <el-upload
         drag
         :http-request="handleUpload"
-        accept=".csv,.txt,.dat,.zip,.7z,.rar"
+        :before-upload="beforeUpload"
+        accept=".csv"
         :show-file-list="false"
         multiple
       >
         <el-icon :size="48"><UploadFilled /></el-icon>
         <div class="upload-text">拖拽文件到此处 或 <em>点击上传</em></div>
-        <div class="upload-hint">支持多文件上传，ZIP/7z/RAR 压缩包会自动解压</div>
+        <div class="upload-hint">仅支持 CSV 文件，非 CSV 文件将被拒绝</div>
       </el-upload>
       <el-progress
         v-if="uploadProgress > 0 && uploadProgress < 100"
@@ -36,6 +37,14 @@ const emit = defineEmits<{
 }>()
 
 const uploadProgress = ref(0)
+
+function beforeUpload(file: File): boolean {
+  if (!file.name.toLowerCase().endsWith('.csv')) {
+    ElMessage.error(`${file.name} 不是 CSV 文件，仅支持 .csv 格式`)
+    return false
+  }
+  return true
+}
 
 async function handleUpload(options: { file: File }) {
   uploadProgress.value = 0

@@ -10,7 +10,8 @@ export function useHistogram(
   rangeType: Ref<string>,
   customLow: Ref<number | null>,
   customHigh: Ref<number | null>,
-  iqrMultiplier: Ref<number> = ref(1.5)
+  iqrMultiplier: Ref<number> = ref(1.5),
+  outlierHandling: Ref<'clip' | 'exclude' | 'off'> = ref('off'),
 ) {
   const histResult = ref<any>(null)
   const statCards = ref<{ label: string; value: string; color?: string }[]>([])
@@ -48,12 +49,13 @@ export function useHistogram(
     const r = results[localSelectedParam.value]
     if (!r) return
     histResult.value = r
-    // Use filtered statistics when outliers are present
+    // Only apply filtered statistics when outlier handling is actually enabled.
     const hasOutliers = r.outlier_info?.has_outliers === true
-    const displayMean = hasOutliers && r.filtered_mean != null ? r.filtered_mean : r.mean
-    const displayStd = hasOutliers && r.filtered_std != null ? r.filtered_std : r.std
-    const displayMin = hasOutliers && r.filtered_data_min != null ? r.filtered_data_min : r.data_min
-    const displayMax = hasOutliers && r.filtered_data_max != null ? r.filtered_data_max : r.data_max
+    const useFiltered = hasOutliers && outlierHandling.value !== 'off'
+    const displayMean = useFiltered && r.filtered_mean != null ? r.filtered_mean : r.mean
+    const displayStd = useFiltered && r.filtered_std != null ? r.filtered_std : r.std
+    const displayMin = useFiltered && r.filtered_data_min != null ? r.filtered_data_min : r.data_min
+    const displayMax = useFiltered && r.filtered_data_max != null ? r.filtered_data_max : r.data_max
 
     const rangeVal = displayMax != null && displayMin != null ? displayMax - displayMin : null
     // Always use displayMean/displayStd for sigma calculations (filtered when outliers present)
@@ -75,7 +77,7 @@ export function useHistogram(
     ]
     const s4min = (displayMean || 0) - 4 * (displayStd || 0); const s4max = (displayMean || 0) + 4 * (displayStd || 0)
     const unit = r.unit || ''
-    const cutSuffix = hasOutliers ? ' (cut)' : ''
+    const cutSuffix = useFiltered ? ' (cut)' : ''
     const rdlGap = r.upper_limit != null && r.lower_limit != null ? ((r.upper_limit - r.lower_limit) / 25).toFixed(5) : '-'
     const drGap = displayMax != null && displayMin != null ? ((displayMax - displayMin) / 25).toFixed(5) : '-'
     const s3Gap = s3min != null && s3max != null ? ((s3max - s3min) / 25).toFixed(5) : '-'
@@ -100,6 +102,7 @@ export function useHistogram(
   watch(rangeType, () => loadHistogram())
   watch([customLow, customHigh], () => { if (rangeType.value === 'CL') loadHistogram() })
   watch(iqrMultiplier, () => loadHistogram())
+  watch(outlierHandling, () => { if (lastResults) histogramUpdateView(lastResults) })
   watch(getSelectedFileId, () => { if (getSelectedFileId() && localSelectedParam.value) loadHistogram() })
 
   return { histResult, statCards, rangeTableData, loadHistogram, histLoading }

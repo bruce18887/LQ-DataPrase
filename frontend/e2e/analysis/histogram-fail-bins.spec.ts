@@ -5,8 +5,6 @@ import { waitLoadingGone } from '../helpers/charts'
 import { SEEDED_FILES } from '../fixtures/test-data'
 
 const SINGLE = '.single-param-tab'
-const FAIL_BIN_COLOR = '#E53935'
-
 async function getHistogramChartOption(page: import('@playwright/test').Page): Promise<any | null> {
   for (let i = 0; i < 50; i++) {
     const option = await page.evaluate((selector) => {
@@ -22,7 +20,7 @@ async function getHistogramChartOption(page: import('@playwright/test').Page): P
   return null
 }
 
-function extractBarData(series: any): { center: number; value: number; color?: string }[] {
+function extractBarData(series: any): { center: number; value: number; hasCustomStyle?: boolean }[] {
   return (series.data || []).map((d: any) => {
     if (Array.isArray(d)) {
       return { center: d[0], value: d[1] }
@@ -30,7 +28,7 @@ function extractBarData(series: any): { center: number; value: number; color?: s
     return {
       center: d.value?.[0] ?? 0,
       value: d.value?.[1] ?? 0,
-      color: d.itemStyle?.color,
+      hasCustomStyle: !!d.itemStyle,
     }
   })
 }
@@ -47,7 +45,7 @@ function extractLimitLines(option: any): { lower: number | null; upper: number |
 }
 
 test.describe('@p1 柱状图 Fail Bin 可视化', { tag: ['@p1', '@analysis'] }, () => {
-  test('RDL 模式下超出 Limit 的 bin 显示为红色', async ({ page }) => {
+  test('RDL 模式下超出 Limit 的 bin 保持原始 series 颜色', async ({ page }) => {
     await gotoApp(page, '/analysis')
     await selectAnalysisFile(page, SEEDED_FILES.STS8200_CP)
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
@@ -61,6 +59,12 @@ test.describe('@p1 柱状图 Fail Bin 可视化', { tag: ['@p1', '@analysis'] },
       await selectParam(page, 'Igss_3V')
       await waitLoadingGone(page.locator(SINGLE))
     }
+    // Fail bins are only visible when outlier handling is disabled.
+    const outlierSelect = page.locator('.el-form-item').filter({ hasText: '异常值处理' }).locator('.el-select').first()
+    await outlierSelect.click()
+    await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '不处理' }).first().click()
+    await waitLoadingGone(page.locator(SINGLE))
+
     // Wait for the chart to render the target param.
     await expect(page.locator(`${SINGLE} .chart-container`)).toBeVisible({ timeout: 10_000 })
     await page.waitForTimeout(500)
@@ -75,20 +79,18 @@ test.describe('@p1 柱状图 Fail Bin 可视化', { tag: ['@p1', '@analysis'] },
     const barSeries = (option.series || []).filter((s: any) => s.type === 'bar')
     expect(barSeries.length, '应至少存在一个 bar series').toBeGreaterThan(0)
 
-    // Find non-empty bars outside the Limit lines and assert they are red.
-    let foundFailBinColor = false
+    // Fail bins should not have any per-bar itemStyle override; they keep the
+    // original series color so they match the legend.
     let failBinCount = 0
     for (const s of barSeries) {
       const bars = extractBarData(s)
       for (const bar of bars) {
         if (bar.value > 0 && (bar.center < lower! || bar.center > upper!)) {
           failBinCount++
-          expect(bar.color, `fail bin (center=${bar.center}) 应为红色`).toBe(FAIL_BIN_COLOR)
-          foundFailBinColor = true
+          expect(bar.hasCustomStyle, `fail bin (center=${bar.center}) 不应有自定义 itemStyle`).toBeFalsy()
         }
       }
     }
     expect(failBinCount, '应存在超出 Limit 的非空 fail bin').toBeGreaterThan(0)
-    expect(foundFailBinColor, '应至少有一个红色 fail bin').toBe(true)
   })
 })

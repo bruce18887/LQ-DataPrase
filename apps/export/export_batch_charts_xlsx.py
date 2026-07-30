@@ -69,9 +69,8 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
 
     col_max_widths = {i: _get_text_width(summary_headers[i - 1]) for i in range(1, len(summary_headers) + 1)}
 
-    # ── Process each parameter ──
-    chart_images = []
-    titles = []
+    # ── Process each parameter: compute stats only, defer image creation ──
+    processed_params = []
     summary_data_list = []
 
     param_order = {col: idx for idx, col in enumerate(df.columns)}
@@ -99,6 +98,7 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
             site_idx = get_1d_from(df, site_col)
             site_stats = compute_site_stats(site_series, site_idx, rdl_min, rdl_max, None, None, False) or []
 
+        processed_params.append(selected_param)
         summary_data_list.append({
             'stats_data': {
                 'param_name': selected_param, 'mean_val': round(mean_val, 4),
@@ -110,20 +110,17 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
                 'unit': stats.get('unit', ''),
             },
             'site_stats': site_stats,
+            'chart_data': {
+                'data_series': data_series,
+                'mean_val': mean_val,
+                'std_val': std_val,
+                'rdl_min': rdl_min,
+                'rdl_max': rdl_max,
+            },
         })
 
-        # Create histogram image
-        img_buffer = _create_histogram_chart(
-            df, metadata, selected_param, data_series, mean_val, std_val,
-            rdl_min, rdl_max, show_limit=show_limit, show_3sigma=show_3sigma,
-            show_4sigma=show_4sigma, show_6sigma=show_6sigma,
-            show_normal=show_normal, site_col=site_col
-        )
-        chart_images.append(img_buffer)
-        titles.append(selected_param)
-
     # ── Fill summary rows ──
-    for param_idx, (selected_param, entry) in enumerate(zip(params_sorted, [d for d in summary_data_list]), 1):
+    for param_idx, (selected_param, entry) in enumerate(zip(processed_params, summary_data_list), 1):
         stats_data = entry['stats_data']
         site_stats_list = entry['site_stats']
 
@@ -174,19 +171,30 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
     for col in range(1, len(summary_headers) + 1):
         ws_summary.column_dimensions[get_column_letter(col)].width = min(col_max_widths.get(col, 15), 40)
 
-    # ── Per-parameter detail sheets ──
-    for idx, (img_buffer, title) in enumerate(zip(chart_images, titles)):
+    # ── Per-parameter detail sheets: create chart + sheet one by one ──
+    for idx, (title, entry) in enumerate(zip(processed_params, summary_data_list)):
+        stats_data = entry.get('stats_data', {})
+        site_stats_list = entry.get('site_stats', [])
+        chart_data = entry.get('chart_data', {})
+
+        # Create histogram image on demand and release as soon as possible
+        img_buffer = _create_histogram_chart(
+            df, metadata, title, chart_data['data_series'],
+            chart_data['mean_val'], chart_data['std_val'],
+            chart_data['rdl_min'], chart_data['rdl_max'],
+            show_limit=show_limit, show_3sigma=show_3sigma,
+            show_4sigma=show_4sigma, show_6sigma=show_6sigma,
+            show_normal=show_normal, site_col=site_col
+        )
         if img_buffer.getbuffer().nbytes == 0:
+            img_buffer.close()
             continue
+
         param_safe = title.replace("/", "_").replace("\\", "_").replace(" ", "_").replace("-", "_")[:28]
         try:
             ws = wb.create_sheet(title=param_safe)
         except ValueError:
             ws = wb.create_sheet(title=f"Chart_{idx}")
-
-        entry = summary_data_list[idx] if idx < len(summary_data_list) else {}
-        stats_data = entry.get('stats_data', {})
-        site_stats_list = entry.get('site_stats', [])
 
         # Stats header
         header_row = ["统计项", "Low Limit", "High Limit", "Unit"]
@@ -263,6 +271,7 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
         img.width = 800
         img.height = 450
         ws.add_image(img, f'A{chart_row}')
+        img_buffer.close()
 
     output = io.BytesIO()
     wb.save(output)

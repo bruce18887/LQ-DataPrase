@@ -24,29 +24,13 @@ const props = defineProps<{
 
 const { colors } = useEChartsTheme()
 const COLORS_SITE_8 = ['#E53935', '#1E88E5', '#43A047', '#F9A825', '#8E24AA', '#00ACC1', '#F57C00', '#D81B60']
-const FAIL_BIN_COLOR = '#E53935'
-
-function isFailBin(center: number, lowerLimit: number | null, upperLimit: number | null): boolean {
-  if (lowerLimit != null && center < lowerLimit) return true
-  if (upperLimit != null && center > upperLimit) return true
-  return false
-}
 
 function buildBarData(
   activeIndices: number[],
   binCenters: number[],
   values: number[],
-  lowerLimit: number | null,
-  upperLimit: number | null,
-): (number[] | { value: number[]; itemStyle: { color: string } })[] {
-  return activeIndices.map((i: number) => {
-    const center = binCenters[i]
-    const val = values[i] ?? 0
-    if (isFailBin(center, lowerLimit, upperLimit)) {
-      return { value: [center, val], itemStyle: { color: FAIL_BIN_COLOR } }
-    }
-    return [center, val]
-  })
+): number[][] {
+  return activeIndices.map((i: number) => [binCenters[i], values[i] ?? 0])
 }
 
 function buildOption() {
@@ -69,22 +53,11 @@ function buildOption() {
   let clipMax = shouldClip ? outlierInfo.upper_bound : Infinity
 
   // RDL 模式下，原始 Limit 线内的数据不应被当作异常值隐藏。
-  // 将裁剪边界扩展到规格限，保证 LSL/USL 内部的 bin 始终可见。
+  // 将裁剪边界扩展到规格限，保证 LSL/USL 内部的 bin 始终可见，
+  // 同时让 X 轴范围保持与未裁剪时一致。
   if (shouldClip && props.rangeType === 'RDL' && r.lower_limit != null && r.upper_limit != null) {
     clipMin = Math.min(clipMin, r.lower_limit)
     clipMax = Math.max(clipMax, r.upper_limit)
-  }
-
-  // limit 外的 fail bin 必须始终可见（用户需要看到 fail 百分比）。
-  // 将裁剪边界扩展到包含 limit 外的所有 bin。
-  if (shouldClip && r.lower_limit != null) {
-    const minFailBin = binCenters.find((c: number) => c < r.lower_limit)
-    if (minFailBin != null) clipMin = Math.min(clipMin, minFailBin)
-  }
-  if (shouldClip && r.upper_limit != null) {
-    for (let i = binCenters.length - 1; i >= 0; i--) {
-      if (binCenters[i] > r.upper_limit) { clipMax = Math.max(clipMax, binCenters[i]); break }
-    }
   }
 
   let activeIndices = binCenters
@@ -102,7 +75,9 @@ function buildOption() {
   const siteKeys = siteHists ? Object.keys(siteHists) : []
   const hasSiteData = siteKeys.length >= 1
   const showNormal = props.chartConfig.includes('normal')
-  const hasNormal = showNormal && r.std > 0
+  const normalMean = shouldClip && r.filtered_mean != null ? r.filtered_mean : r.mean
+  const normalStd = shouldClip && r.filtered_std != null ? r.filtered_std : r.std
+  const hasNormal = showNormal && normalStd > 0
 
   if (hasSiteData) {
     const sites = siteKeys.sort((a, b) => Number(a) - Number(b))
@@ -111,21 +86,21 @@ function buildOption() {
       const hists: number[] = siteHists[site] || []
       series.push({
         name: `Site${site}`, type: 'bar',
-        data: buildBarData(activeIndices, binCenters, hists, r.lower_limit, r.upper_limit),
+        data: buildBarData(activeIndices, binCenters, hists),
         itemStyle: { color: COLORS_SITE_8[idx % COLORS_SITE_8.length] },
         barWidth: `${props.barWidthPercent}%`,
       })
     }
     series.push({
       name: 'All Site', type: 'bar', yAxisIndex: 1,
-      data: buildBarData(activeIndices, binCenters, r.bin_percentages || [], r.lower_limit, r.upper_limit),
+      data: buildBarData(activeIndices, binCenters, r.bin_percentages || []),
       itemStyle: { color: '#90CAF9', opacity: 0.5 }, barWidth: `${props.barWidthPercent}%`,
       label: { show: true, position: 'top', formatter: (p: any) => p.data[1] > 0 ? `${p.data[1].toFixed(2)}%` : '', fontSize: 10, color: '#1565C0', fontWeight: 'bold' },
     })
   } else {
     series.push({
       name: '数据分布', type: 'bar',
-      data: buildBarData(activeIndices, binCenters, r.bin_percentages || [], r.lower_limit, r.upper_limit),
+      data: buildBarData(activeIndices, binCenters, r.bin_percentages || []),
       itemStyle: { color: '#1E88E5' }, barWidth: `${props.barWidthPercent}%`,
     })
   }
@@ -160,11 +135,11 @@ function buildOption() {
 
   if (hasNormal) {
     const binGap = filteredBinCenters.length > 1 ? Math.abs(filteredBinCenters[1] - filteredBinCenters[0]) : 1
-    const pdfFn = (x: number) => (1 / (r.std * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * ((x - r.mean) / r.std) ** 2)
+    const pdfFn = (x: number) => (1 / (normalStd * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * ((x - normalMean) / normalStd) ** 2)
     let xVals: number[]
-    if (r.std < binGap) {
-      const extra: number[] = [r.mean]
-      for (let k = 1; k <= 6; k++) extra.push(r.mean - k * r.std, r.mean + k * r.std)
+    if (normalStd < binGap) {
+      const extra: number[] = [normalMean]
+      for (let k = 1; k <= 6; k++) extra.push(normalMean - k * normalStd, normalMean + k * normalStd)
       xVals = [...filteredBinCenters, ...extra].sort((a, b) => a - b)
     } else { xVals = filteredBinCenters }
     series.push({ name: '正态分布', type: 'line', data: xVals.map((x: number) => [x, pdfFn(x)]), smooth: true, lineStyle: { color: '#F57F17', width: 3 }, symbol: 'none', yAxisIndex: hasSiteData ? 2 : 1, z: 10 })
@@ -187,7 +162,22 @@ function buildOption() {
 
   return {
     title: { text: titleText, left: 'center', top: 6, textStyle: { rich: { name: { fontSize: 15, fontWeight: 'bold', color: tc }, unit: { fontSize: 12, color: tc, fontWeight: 500 }, limit: { fontSize: 12, color: '#E65100', fontWeight: 600, backgroundColor: '#FFF3E0', padding: [2, 6], borderRadius: 3 } } } },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (params: any) => { const items = Array.isArray(params) ? params : [params]; let html = `值: ${Number(items[0].data[0]).toFixed(4)}<br/>`; for (const p of items) if (p.seriesName !== '规格限' && p.seriesName !== '正态分布' && p.data[1] != null) html += `${p.seriesName}: ${Number(p.data[1]).toFixed(2)}%<br/>`; return html } },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params: any) => {
+        const items = Array.isArray(params) ? params : [params]
+        const first = items[0]
+        const firstX = Array.isArray(first.data) ? first.data[0] : first.data.value?.[0]
+        let html = `值: ${Number(firstX).toFixed(4)}<br/>`
+        for (const p of items) {
+          if (p.seriesName === '规格限' || p.seriesName === '正态分布') continue
+          const y = Array.isArray(p.data) ? p.data[1] : p.data.value?.[1]
+          if (y != null) html += `${p.seriesName}: ${Number(y).toFixed(2)}%<br/>`
+        }
+        return html
+      },
+    },
     legend: { data: series.map((s: any) => s.name), top: 'bottom', type: 'scroll', textStyle: { color: tc } },
     toolbox: { feature: { saveAsImage: { name: `${props.selectedParam}_分析` } } },
     grid: { top: 55, bottom: 70, left: 55, right: (hasSiteData && hasNormal) ? 120 : (hasSiteData || hasNormal) ? 80 : 55 },
