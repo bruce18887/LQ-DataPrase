@@ -271,7 +271,7 @@ async function saveSettings() {
     setChartRenderer(settings.value.chart_renderer)
     ElMessage.success('设置已保存')
   } catch {
-    ElMessage.error('保存失败')
+    // 错误 toast 由 axios 拦截器统一弹出
   }
 }
 

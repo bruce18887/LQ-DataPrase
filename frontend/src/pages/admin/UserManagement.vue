@@ -181,30 +181,8 @@ async function loadUsers() {
     const { data } = await api.get('/auth/users/')
     users.value = Array.isArray(data) ? data : data.results || []
   } catch {
-    ElMessage.error('加载用户失败')
+    // 错误 toast 由 axios 拦截器统一弹出（utils/error.ts formatError）
   }
-}
-
-function formatError(err: unknown, fallback: string): string {
-  // Surface the server's `detail` / first validation error so the
-  // user can actually tell what went wrong. A blanket "操作失败"
-  // is useless when the failure is "username 已存在" or "无权操作".
-  const ax = err as {
-    response?: {
-      data?: { detail?: string; [field: string]: unknown }
-    }
-    message?: string
-  }
-  const data = ax.response?.data
-  if (data) {
-    if (typeof data.detail === 'string') return data.detail
-    for (const [field, msgs] of Object.entries(data)) {
-      if (Array.isArray(msgs) && msgs.length) {
-        return `${field}: ${msgs[0]}`
-      }
-    }
-  }
-  return ax.message || fallback
 }
 
 async function addUser() {
@@ -213,8 +191,8 @@ async function addUser() {
     ElMessage.success('用户已添加')
     newUser.value = { username: '', password: '', role: 'user' }
     loadUsers()
-  } catch (e) {
-    ElMessage.error(formatError(e, '添加失败'))
+  } catch {
+    // 错误 toast 由 axios 拦截器统一弹出
   }
 }
 
@@ -223,8 +201,8 @@ async function toggleUser(user: User) {
     await api.put(`/auth/users/${user.id}/`, { is_active: !user.is_active })
     ElMessage.success('状态已更新')
     loadUsers()
-  } catch (e) {
-    ElMessage.error(formatError(e, '操作失败'))
+  } catch {
+    // 错误 toast 由 axios 拦截器统一弹出
   }
 }
 
@@ -239,12 +217,8 @@ async function resetPassword(user: User) {
       new_password: '123456',
     })
     ElMessage.success('密码已重置')
-  } catch (e) {
-    // ElMessageBox.confirm rejects with a string "cancel"; only
-    // surface real network/server errors.
-    if (e && typeof e === 'object' && 'response' in e) {
-      ElMessage.error(formatError(e, '重置密码失败'))
-    }
+  } catch {
+    // ElMessageBox.confirm 取消会 reject "cancel"；真实错误 toast 由拦截器弹出
   }
 }
 
@@ -253,8 +227,8 @@ async function unlockUser(user: User) {
     await api.post(`/auth/users/${user.id}/unlock/`)
     ElMessage.success('账户已解锁')
     loadUsers()
-  } catch (e) {
-    ElMessage.error(formatError(e, '解锁失败'))
+  } catch {
+    // 错误 toast 由 axios 拦截器统一弹出
   }
 }
 
@@ -264,10 +238,8 @@ async function deleteUser(user: User) {
     await api.delete(`/auth/users/${user.id}/`)
     ElMessage.success('已删除')
     loadUsers()
-  } catch (e) {
-    if (e && typeof e === 'object' && 'response' in e) {
-      ElMessage.error(formatError(e, '删除失败'))
-    }
+  } catch {
+    // ElMessageBox.confirm 取消会 reject "cancel"；真实错误 toast 由拦截器弹出
   }
 }
 

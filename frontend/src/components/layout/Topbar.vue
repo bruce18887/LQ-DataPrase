@@ -27,6 +27,17 @@
       <!-- 主题切换 -->
       <ThemeToggle />
 
+      <!-- 版本徽章：点击打开「关于」对话框 -->
+      <button
+        class="version-badge"
+        type="button"
+        title="点击查看版本信息"
+        aria-label="版本 v{{ APP_VERSION }}，点击查看详情"
+        @click="openAbout"
+      >
+        v{{ APP_VERSION }}
+      </button>
+
       <!-- 通知图标 -->
       <el-badge :value="notificationCount" :hidden="notificationCount === 0" class="notification-badge">
         <el-button text circle class="icon-btn" aria-label="通知">
@@ -73,10 +84,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import { Search, Bell, User, ArrowDown, Setting, SwitchButton } from '@element-plus/icons-vue'
 import ThemeToggle from '../common/ThemeToggle.vue'
+import { useAboutDialog } from '../../composables/useAboutDialog'
+import { APP_VERSION } from '../../utils/version'
 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const { open: openAbout } = useAboutDialog()
 
 const searchQuery = ref('')
 const notificationCount = ref(0)
@@ -219,6 +233,30 @@ const handleCommand = (command: string) => {
 
 :deep(.el-input__wrapper.is-focus) {
   box-shadow: 0 0 0 1px var(--brand-primary), 0 0 8px rgba(37, 99, 235, 0.2);
+}
+
+/* 版本徽章 */
+.version-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.version-badge:hover {
+  color: var(--brand-primary);
+  border-color: var(--brand-primary);
+}
+
+.version-badge:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
 }
 
 /* 通知图标 */

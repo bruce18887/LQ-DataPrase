@@ -16,11 +16,12 @@ export async function captureDownload(
   page: Page,
   trigger: () => Promise<void>,
   subdir = '',
+  timeout = 60_000,
 ): Promise<{ savedPath: string; suggestedName: string; size: number }> {
   const dir = subdir ? path.join(DOWNLOAD_DIR, subdir) : DOWNLOAD_DIR
   fs.mkdirSync(dir, { recursive: true })
 
-  const [download] = await Promise.all([page.waitForEvent('download', { timeout: 60_000 }), trigger()])
+  const [download] = await Promise.all([page.waitForEvent('download', { timeout }), trigger()])
 
   const suggestedName = download.suggestedFilename()
   const savedPath = path.join(dir, suggestedName)

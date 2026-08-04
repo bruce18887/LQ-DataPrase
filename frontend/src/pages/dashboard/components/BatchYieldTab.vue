@@ -366,8 +366,8 @@ async function loadBatchData() {
     nextTick(() => {
       requestAnimationFrame(() => renderInlineCharts())
     })
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.error || '加载失败')
+  } catch {
+    // 错误 toast 由 axios 拦截器统一弹出
   } finally {
     loading.value = false
   }

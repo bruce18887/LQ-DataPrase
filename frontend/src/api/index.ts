@@ -1,7 +1,29 @@
 import axios, { AxiosError, type AxiosRequestConfig } from 'axios'
+import { ElMessage } from 'element-plus'
 
 import { authApi } from './auth'
 import { useAuthStore } from '../stores/auth'
+import { formatError } from '../utils/error'
+
+// 请求级逃生口：设为 true 时该请求的错误不弹全局提示（调用方自行处理，
+// 如表单行内校验、静默轮询）。
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    silent?: boolean
+  }
+}
+
+// 同一错误消息 2 秒内只弹一次，避免图表联动等并发场景的 toast 轰炸。
+let lastToastMessage = ''
+let lastToastAt = 0
+
+function toastError(message: string) {
+  const now = Date.now()
+  if (message === lastToastMessage && now - lastToastAt < 2000) return
+  lastToastMessage = message
+  lastToastAt = now
+  ElMessage.error(message)
+}
 
 // ---------------------------------------------------------------------------
 // Electron backend URL detection
@@ -110,6 +132,14 @@ function isAuthEndpoint(url?: string): boolean {
   return !!url && url.includes('/auth/')
 }
 
+// 这几个端点的错误由页面/管线自行处理，拦截器不弹全局 toast：
+// 登录页有内联错误 UI，refresh 在 401 刷新管线中静默处理。
+const NO_TOAST_ENDPOINTS = ['/auth/login/', '/auth/refresh/', '/auth/logout/']
+
+function shouldToastError(url: string): boolean {
+  return !NO_TOAST_ENDPOINTS.some((endpoint) => url.includes(endpoint))
+}
+
 function forceLogout() {
   // The store's logout() posts /auth/logout/, which would itself be
   // intercepted and (because we have no valid refresh token) bounce
@@ -149,6 +179,11 @@ api.interceptors.response.use(
     )
 
     if (status !== 401) {
+      // 统一错误提示：未标记 silent 的请求直接弹全局 toast。
+      // login/refresh/logout 由页面内联 UI / 401 管线自行处理，不在此提示。
+      if (shouldToastError(error.config?.url ?? '') && !error.config?.silent) {
+        toastError(formatError(error))
+      }
       return Promise.reject(error)
     }
 

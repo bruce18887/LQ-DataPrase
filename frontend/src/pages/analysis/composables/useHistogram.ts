@@ -38,7 +38,7 @@ export function useHistogram(
       custom_low: rangeType.value === 'CL' ? customLow.value : null,
       custom_high: rangeType.value === 'CL' ? customHigh.value : null,
       iqr_multiplier: iqrMultiplier.value,
-    }))
+    }, { silent: true }))
     if (result?.results) histogramUpdateView(result.results as Record<string, any>)
   }
 

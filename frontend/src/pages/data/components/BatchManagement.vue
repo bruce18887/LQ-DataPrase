@@ -217,8 +217,8 @@ async function importDir(dir: BatchDirInfo) {
     await loadBatchDirs()
     filesStore.notifyFilesChanged()
     emit('data-changed')
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.error || '导入失败')
+  } catch {
+    // 错误 toast 由 axios 拦截器统一弹出
   } finally {
     importingDir.value = ''
   }
@@ -236,10 +236,8 @@ async function deleteDir(dir: BatchDirInfo) {
     await loadBatchDirs()
     filesStore.notifyFilesChanged()
     emit('data-changed')
-  } catch (e: any) {
-    if (e !== 'cancel') {
-      ElMessage.error(e?.response?.data?.error || '删除失败')
-    }
+  } catch {
+    // ElMessageBox 取消 reject "cancel"；真实错误 toast 由拦截器弹出
   }
 }
 
@@ -255,10 +253,8 @@ async function deleteBatch(group: { name: string; files: any[] }) {
     await loadBatchDirs()
     filesStore.notifyFilesChanged()
     emit('data-changed')
-  } catch (e: any) {
-    if (e !== 'cancel') {
-      ElMessage.error(e?.response?.data?.error || '删除失败')
-    }
+  } catch {
+    // ElMessageBox 取消 reject "cancel"；真实错误 toast 由拦截器弹出
   }
 }
 
@@ -274,10 +270,8 @@ async function deleteSubBatch(batchName: string, subBatchName: string, files: an
     await loadBatchDirs()
     filesStore.notifyFilesChanged()
     emit('data-changed')
-  } catch (e: any) {
-    if (e !== 'cancel') {
-      ElMessage.error(e?.response?.data?.error || '删除失败')
-    }
+  } catch {
+    // ElMessageBox 取消 reject "cancel"；真实错误 toast 由拦截器弹出
   }
 }
 

@@ -2,6 +2,12 @@ import { test, expect } from '@playwright/test'
 import { ROUTES } from '../fixtures/test-data'
 import { gotoApp, sidebarLink } from '../helpers/nav'
 import { loginAs } from '../helpers/auth'
+// 根 package.json 为版本单一事实源（vite 构建时注入，electron-builder 打包版本）
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+const rootPkgVersion: string = JSON.parse(
+  readFileSync(fileURLToPath(new URL('../../../package.json', import.meta.url)), 'utf-8'),
+).version as string
 
 /**
  * 跨页/全局能力：侧边栏导航、主题切换、Topbar 角色显示、管理员菜单可见性。
@@ -78,6 +84,66 @@ test.describe('@p2 Ctrl+滚轮页面缩放', { tag: ['@p2', '@global'] }, () => 
     await page.keyboard.up('Control')
     await expect.poll(getZoom).toBe('1')
     expect(await getStoredZoom()).toBe('1')
+  })
+
+  test('缩放时右下角显示当前百分比指示器，停止后自动消失', async ({ page }) => {
+    await gotoApp(page, '/dashboard')
+
+    const indicator = page.locator('.zoom-indicator')
+    await expect(indicator).toHaveCount(0)
+
+    // 连续放大到 150%（5 步 × 0.1）
+    for (let i = 0; i < 5; i++) {
+      await page.evaluate(() => {
+        const event = new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, bubbles: true })
+        window.dispatchEvent(event)
+      })
+    }
+
+    await expect(indicator).toBeVisible()
+    await expect(indicator).toHaveText('缩放 150%')
+
+    // 缩小一步 → 百分比实时更新
+    await page.evaluate(() => {
+      const event = new WheelEvent('wheel', { deltaY: 100, ctrlKey: true, bubbles: true })
+      window.dispatchEvent(event)
+    })
+    await expect(indicator).toHaveText('缩放 140%')
+
+    // 停止滚动 → 指示器自动隐藏（防抖 800ms + 过渡动画）
+    await expect(indicator).not.toBeVisible({ timeout: 5_000 })
+
+    // Ctrl+0 重置也会短暂提示 100%
+    await page.keyboard.down('Control')
+    await page.keyboard.press('0')
+    await page.keyboard.up('Control')
+    await expect(indicator).toHaveText('缩放 100%')
+  })
+})
+
+test.describe('@p2 版本显示', { tag: ['@p2', '@global'] }, () => {
+  test('顶栏显示版本徽章，点击弹出「关于」对话框', async ({ page }) => {
+    // 版本单一事实源：根 package.json（vite 构建时注入，与 electron-builder 一致）
+    const version = rootPkgVersion
+    await gotoApp(page, '/dashboard')
+
+    const badge = page.locator('.version-badge')
+    await expect(badge).toBeVisible()
+    await expect(badge).toHaveText(`v${version}`)
+
+    // 点击徽章 → 关于对话框
+    await badge.click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByRole('heading', { name: '关于 LQ-DataPrase' })).toBeVisible()
+    await expect(dialog.getByText('LQ-DataPrase', { exact: true })).toBeVisible()
+    await expect(dialog.getByText(`v${version}`)).toBeVisible()
+    await expect(dialog.getByText(/构建/)).toBeVisible()
+    await expect(dialog.getByText(/运行环境/)).toBeVisible()
+
+    // 可关闭
+    await dialog.getByRole('button', { name: '关闭' }).click()
+    await expect(dialog).not.toBeVisible()
   })
 })
 

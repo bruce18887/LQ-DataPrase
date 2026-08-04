@@ -163,8 +163,8 @@ async function runCheck() {
   try {
     const { data } = await datafilesApi.checkConsistency()
     consistencyResult.value = data
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.error || '检查失败')
+  } catch {
+    // 错误 toast 由 axios 拦截器统一弹出
   } finally {
     checking.value = false
   }
@@ -180,8 +180,8 @@ async function fixConsistency(action: 'delete_orphaned_db' | 'delete_orphaned_di
     confirmDeleteDisk.value = false
     await runCheck()
     emit('done')
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.error || '修复失败')
+  } catch {
+    // 错误 toast 由 axios 拦截器统一弹出
   } finally {
     fixing.value = false
   }

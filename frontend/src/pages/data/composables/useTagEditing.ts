@@ -74,8 +74,8 @@ export function useTagEditing(
       row.tags = data.tags
       onTagChanged?.(row)
       ElMessage.success(`已添加标签「${t}」`)
-    } catch (e: any) {
-      ElMessage.error(e?.response?.data?.tags?.[0] || '标签更新失败')
+    } catch {
+      // 错误 toast 由 axios 拦截器统一弹出
     } finally {
       editingId.value = null
       newTagValue.value = ''
@@ -92,7 +92,7 @@ export function useTagEditing(
       onTagChanged?.(row)
       ElMessage.success(`已移除标签「${tag}」`)
     } catch {
-      ElMessage.error('标签移除失败')
+      // 错误 toast 由 axios 拦截器统一弹出
     }
   }
 

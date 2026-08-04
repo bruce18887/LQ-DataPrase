@@ -19,7 +19,7 @@ export function useSiteStats(
       file_id: fileId,
       param: localSelectedParam.value,
       range_type: rangeType.value,
-    }))
+    }, { silent: true }))
     if (result?.error) {
       siteStatsError.value = result.error
       siteStats.value = []

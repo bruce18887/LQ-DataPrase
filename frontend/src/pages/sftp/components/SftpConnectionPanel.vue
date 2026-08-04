@@ -165,13 +165,14 @@ async function confirmSave() {
   }
   saving.value = true
   try {
+    // silent：字段校验错误在表单项内联展示（拦截器提示会与其重复）
     await sftpApi.saveConfig({
       name,
       host: conn.value.host,
       port: conn.value.port,
       username: conn.value.username,
       password: conn.value.password,
-    })
+    }, { silent: true })
     saveDialogVisible.value = false
     ElMessage.success('配置已保存')
     await refreshConfigs()
@@ -180,9 +181,8 @@ async function confirmSave() {
       const data = err.response.data || {}
       const msg = data.name?.[0] || data.host?.[0] || data.detail || '配置无效'
       nameError.value = String(msg)
-    } else {
-      ElMessage.error('保存配置失败')
     }
+    // 非 400 错误：拦截器统一弹出全局提示
   } finally {
     saving.value = false
   }
@@ -210,7 +210,7 @@ async function deleteConfig(config: SftpConfigItem) {
     ElMessage.success('配置已删除')
     await refreshConfigs()
   } catch {
-    ElMessage.error('删除配置失败')
+    // 错误 toast 由 axios 拦截器统一弹出
   }
 }
 
@@ -236,7 +236,7 @@ async function doConnect() {
     }
     ElMessage.success('已连接')
     emit('connected')
-  } catch { ElMessage.error('连接失败') }
+  } catch { /* 错误 toast 由 axios 拦截器统一弹出 */ }
   finally { connecting.value = false }
 }
 </script>

@@ -3,9 +3,7 @@ import { useAsyncData } from '../../../composables/useAsyncData'
 import { ElMessage } from 'element-plus'
 
 export function useCorrelationMatrix(getFileId: () => number | null) {
-  const { loading, data: matrixData, run } = useAsyncData<any>({
-    errorMsg: '相关性矩阵计算失败',
-  })
+  const { loading, data: matrixData, run } = useAsyncData<any>()
 
   async function loadCorrelationMatrix(params?: string[]) {
     const fileId = getFileId()

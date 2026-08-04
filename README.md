@@ -243,6 +243,7 @@ http://localhost:8000/api/schema/swagger/
 
 - [前端架构文档](frontend/CLAUDE.md)
 - [后端架构文档](apps/CLAUDE.md)
+- [用户操作指南](docs/user-guide/README.md)
 - [ATE 量产测试关键指标](docs/reference/ATE_量产测试关键指标.md)
 - [ATE 指标实现指南](docs/reference/ATE_指标实现指南.md)
 

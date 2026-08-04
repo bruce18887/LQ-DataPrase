@@ -20,7 +20,8 @@ export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  // 本地也保留 1 次重试：dev 环境 Vite/Django 长时间运行后可能劣化（Vite 进程偶发退出）
+  retries: process.env.CI ? 2 : 1,
   workers: process.env.CI ? 1 : undefined,
   timeout: 60_000,
   expect: { timeout: 10_000 },

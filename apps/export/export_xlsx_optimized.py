@@ -29,7 +29,6 @@ def export_to_xlsx_optimized(df: pd.DataFrame, metadata: Dict) -> bytes:
         header_style_id = make_header_style(f, 12)
         data_style_id = make_data_style(f)
         red_style_id = make_red_style(f)
-        red_bin_style_id = red_style_id  # identical styling — no separate style needed
 
         for col_idx, col_name in enumerate(cols):
             cell = excelize.coordinates_to_cell_name(col_idx + 1, 1, False)
@@ -106,13 +105,6 @@ def export_to_xlsx_optimized(df: pd.DataFrame, metadata: Dict) -> bytes:
 
         fail_indices, fail_columns, fail_cells = detect_fail_data(df, metadata)
 
-        fail_row_indices = set()
-        fail_col_idx_map = {col_name: idx for idx, col_name in enumerate(cols)}
-        fail_cells_by_row_idx = {}
-        for idx, col_list in fail_cells.items():
-            fail_row_indices.add(idx)
-            fail_cells_by_row_idx[idx] = set(fail_col_idx_map.get(c, -1) for c in col_list if c in fail_col_idx_map)
-
         data_start_row = 12
 
         df_values = df.values.tolist()
@@ -126,16 +118,15 @@ def export_to_xlsx_optimized(df: pd.DataFrame, metadata: Dict) -> bytes:
             cell_ref = excelize.coordinates_to_cell_name(1, excel_row, False)
             f.set_sheet_row(sheet_name, cell_ref, row_data)
 
+        # ── Fail 标红 ──
+        # 原实现「每个 fail 行 × 每列 set_cell_style」在万行 × 百列文件下产生数十万次
+        # Python→C 调用（ETS88 1438 行实测 62s），导致前端 30s 超时 → Broken pipe。
+        # 改为 fail 行整行标红：每行一次范围样式调用（fail 行数 ≈ 千级 → 毫秒级）。
+        # 视觉变化：fail 行的整行（含非 fail 单元格）标红，定位更醒目。
+        fail_row_indices = set(fail_cells.keys())
         for row_idx in fail_row_indices:
             excel_row = data_start_row + row_idx
-            row_fail_col_indices = fail_cells_by_row_idx.get(row_idx, set())
-
-            for col_idx in range(num_cols):
-                cell = excelize.coordinates_to_cell_name(col_idx + 1, excel_row, False)
-                if cols[col_idx] == target_bin_col:
-                    f.set_cell_style(sheet_name, cell, cell, red_bin_style_id)
-                elif col_idx in row_fail_col_indices:
-                    f.set_cell_style(sheet_name, cell, cell, red_style_id)
+            f.set_cell_style(sheet_name, f"A{excel_row}", f"{last_col_name}{excel_row}", red_style_id)
 
         last_cell = excelize.coordinates_to_cell_name(num_cols, 11, False)
         bin_col_letter = excelize.column_number_to_name(target_bin_col_idx + 1)

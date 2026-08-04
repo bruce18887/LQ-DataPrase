@@ -145,7 +145,7 @@ async function loadData() {
     ElMessage.success('参数趋势数据加载成功')
   } catch (error: any) {
     console.error('Failed to load parameter trend data:', error)
-    ElMessage.error(error.response?.data?.error || '加载参数趋势数据失败')
+    // 错误 toast 由 axios 拦截器统一弹出
   } finally {
     loading.value = false
   }

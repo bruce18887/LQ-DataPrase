@@ -62,10 +62,14 @@ test.describe('@p1 单参数分析', { tag: ['@p1', '@analysis'] }, () => {
     await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
 
     // 选「3 Sigma」应携带 range_type=S3 重新请求后端分箱（修复前后端忽略 range_type）
+    // 注意：必须过滤请求体 —— 页面加载时 onFileChange 会发一个瘦请求
+    // ({file_id, ignore_no_limit})，若其响应晚于本监听注册时刻返回，会被
+    // waitForResponse 误捕获（后端慢时确定性复现），导致断言拿到瘦请求体。
     const respPromise = page.waitForResponse(
       (r) =>
         r.url().includes('/analysis/histogram/') &&
         r.request().method() === 'POST' &&
+        r.request().postData()?.includes('"S3"') === true &&
         r.status() < 500,
       { timeout: 20_000 },
     )

@@ -55,7 +55,7 @@ async function handleUpload(options: { file: File }) {
     ElMessage.success(`${options.file.name} 上传成功`)
     emit('upload-success')
   } catch {
-    ElMessage.error(`${options.file.name} 上传失败`)
+    // 错误 toast 由 axios 拦截器统一弹出
   } finally {
     uploadProgress.value = 0
   }

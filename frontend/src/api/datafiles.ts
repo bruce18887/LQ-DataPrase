@@ -19,11 +19,38 @@ export interface ListFilesParams {
   ordering?: string
 }
 
+export interface BrowseParams {
+  datafile_id: number
+  page?: number
+  page_size?: number
+  search?: string
+  pass_filter?: string
+}
+
+export interface BrowseColMeta {
+  unit: string
+  min: string
+  max: string
+}
+
+export interface BrowseResponse {
+  headers: string[]
+  rows: Record<string, any>[]
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
+  fail_row_count: number
+  fail_mask: Record<string, unknown>
+  col_meta: Record<string, BrowseColMeta>
+  bin_column: string
+}
+
 /** 仅保留有值的查询参数 */
-function cleanParams(params: ListFilesParams): Record<string, string | number> {
+function cleanParams<T extends object>(params: T): Record<string, string | number> {
   const out: Record<string, string | number> = {}
   for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== null && v !== '') out[k] = v
+    if (v !== undefined && v !== null && v !== '') out[k] = v as string | number
   }
   return out
 }
@@ -72,8 +99,8 @@ export const datafilesApi = {
   remove(id: number) {
     return api.delete(`/files/${id}/`)
   },
-  browse(params: { page?: number; search?: string; passfail?: string }) {
-    return api.get('/browse/', { params })
+  browse(params: BrowseParams) {
+    return api.get<BrowseResponse>('/browse/', { params: cleanParams(params) })
   },
   history() {
     return api.get('/history/')

@@ -17,7 +17,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const ignoreNoLimit = ref(false)
   const customLow = ref<number | null>(null)
   const customHigh = ref<number | null>(null)
-  const outlierHandling = ref<'clip' | 'exclude' | 'off'>('clip')
+  const outlierHandling = ref<'clip' | 'exclude' | 'off'>('off')
   const iqrMultiplier = ref<number>(1.5)
 
   // Tab: 多文件分析（multi-file）
@@ -66,7 +66,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     ignoreNoLimit.value = false
     customLow.value = null
     customHigh.value = null
-    outlierHandling.value = 'clip'
+    outlierHandling.value = 'off'
     iqrMultiplier.value = 1.5
     multiFileIds.value = []
     multiSelectedParam.value = ''

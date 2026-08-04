@@ -2,6 +2,8 @@
  * useAsyncData — 统一异步数据加载 composable
  *
  * 解决 9+ 个 analysis composable 中重复的 loading/error/try-catch/ElMessage 样板。
+ * 错误提示由 axios 拦截器统一弹出（见 api/index.ts），这里只负责 loading
+ * 状态和 error.value 内联展示数据。
  *
  * 用法：
  * ```ts
@@ -15,10 +17,11 @@
 import { ref, type Ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
+import { formatError } from '../utils/error'
+
 export interface UseAsyncDataOptions {
   successMsg?: string
-  errorMsg?: string
-  /** If true, suppress all ElMessage notifications */
+  /** If true, suppress the success ElMessage notification */
   silent?: boolean
 }
 
@@ -50,9 +53,9 @@ export function useAsyncData<T = any>(opts?: UseAsyncDataOptions): UseAsyncDataR
       if (!opts?.silent && opts?.successMsg) ElMessage.success(opts.successMsg)
       return value
     } catch (e: any) {
-      const msg = e?.response?.data?.error || e?.message || '操作失败'
-      error.value = msg
-      if (!opts?.silent) ElMessage.error(opts?.errorMsg || msg)
+      // 错误 toast 由 axios 拦截器统一弹出（api/index.ts），这里只记录
+      // 内联展示用的 error.value。
+      error.value = formatError(e)
       return null
     } finally {
       loading.value = false

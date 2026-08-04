@@ -287,7 +287,9 @@ class UserManagementViewSetTests(TestCase):
             {'username': 'other-user'}, format='json',
         )
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('username', resp.data)
+        # 统一异常格式后字段错误嵌套在 detail 下（code/message 供前端 toast）。
+        self.assertEqual(resp.data['code'], 'validation_error')
+        self.assertIn('username', resp.data['detail'])
 
     def test_unauthenticated_cannot_toggle(self):
         anon = APIClient()

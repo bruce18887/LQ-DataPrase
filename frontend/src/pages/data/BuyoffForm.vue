@@ -214,7 +214,7 @@ async function analyze() {
     analysisResult.value = data as AnalysisResult
     ElMessage.success(`找到 ${data.common_count} 个共同测试项`)
   } catch {
-    ElMessage.error('分析失败')
+    // 错误 toast 由 axios 拦截器统一弹出
   } finally {
     loading.value = false
   }
@@ -236,7 +236,7 @@ async function generate() {
     URL.revokeObjectURL(url)
     ElMessage.success('Buyoff Form 已下载')
   } catch {
-    ElMessage.error('生成失败')
+    // 错误 toast 由 axios 拦截器统一弹出
   } finally {
     loading.value = false
   }
