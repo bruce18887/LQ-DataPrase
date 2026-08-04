@@ -2,26 +2,12 @@ import { ref } from 'vue'
 import type { AxiosRequestConfig } from 'axios'
 
 import api from '../../../api'
-
-function extractFilename(contentDisposition: string | null | undefined): string | null {
-  if (!contentDisposition) return null
-  const match = contentDisposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/)
-  return match ? decodeURIComponent(match[1]) : null
-}
+import { downloadBlob, extractFilenameFromContentDisposition } from '../../../utils/download'
 
 export function useExport(
   getSelectedFileId: () => number | null
 ) {
   const exporting = ref(false)
-
-  function downloadBlob(data: Blob, filename: string) {
-    const url = window.URL.createObjectURL(data)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = filename
-    link.click()
-    window.URL.revokeObjectURL(url)
-  }
 
   async function exportSigmaLimit(
     sigma: number,
@@ -37,7 +23,7 @@ export function useExport(
         sigma,
         only_valid_limits: options?.onlyValidLimits ?? true,
       }, { responseType: 'blob', ...requestConfig })
-      const fname = extractFilename(resp.headers?.['content-disposition']) || `sigma_limit_${sigma}sigma.xlsx`
+      const fname = extractFilenameFromContentDisposition(resp.headers?.['content-disposition']) || `sigma_limit_${sigma}sigma.xlsx`
       downloadBlob(resp.data as Blob, fname)
     } catch (err) {
       console.error('[useExport] sigma_limit failed:', err)
@@ -67,7 +53,7 @@ export function useExport(
         timeout: 300000, // 5 min for large batch exports
         ...requestConfig,
       })
-      const fname = extractFilename(resp.headers?.['content-disposition']) || `batch_charts.${format === 'pptx' ? 'pptx' : 'xlsx'}`
+      const fname = extractFilenameFromContentDisposition(resp.headers?.['content-disposition']) || `batch_charts.${format === 'pptx' ? 'pptx' : 'xlsx'}`
       downloadBlob(resp.data as Blob, fname)
     } catch (err) {
       console.error('[useExport] batch_charts failed:', err)

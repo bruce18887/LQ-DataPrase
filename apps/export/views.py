@@ -8,6 +8,7 @@ from rest_framework.permissions import IsAuthenticated
 import excelize
 
 from apps.common.file_loading import load_user_file, FileLoadError
+from apps.common.export_naming import base_export_context, render_export_filename
 from apps.analysis.services.statistics import (
     detect_fail_data, get_site_column,
     calculate_fail_bin_statistics, compute_pass_yield,
@@ -59,9 +60,13 @@ class ExportViewSet(viewsets.GenericViewSet):
         # Use old version's complete implementation
         buffer = export_to_xlsx_optimized(export_df, metadata)
 
-        fname = datafile.filename.rsplit('.', 1)[0]
+        fname = render_export_filename(
+            request.user, 'to_excel', 'xlsx',
+            {**base_export_context(request.user),
+             'filename': datafile.filename.rsplit('.', 1)[0]},
+        )
         return FileResponse(io.BytesIO(buffer), as_attachment=True,
-                            filename=f'{fname}_analysis.xlsx',
+                            filename=fname,
                             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
     # ── to_csv ──────────────────────────────────────────────────────
@@ -88,9 +93,13 @@ class ExportViewSet(viewsets.GenericViewSet):
             raw_lines=None
         )
 
-        fname = datafile.filename.rsplit('.', 1)[0]
+        fname = render_export_filename(
+            request.user, 'to_csv', 'csv',
+            {**base_export_context(request.user),
+             'filename': datafile.filename.rsplit('.', 1)[0]},
+        )
         return FileResponse(io.BytesIO(csv_content), as_attachment=True,
-                            filename=f'{fname}_data.csv', content_type='text/csv')
+                            filename=fname, content_type='text/csv')
 
     # ── sigma_limit ─────────────────────────────────────────────────
 
@@ -109,9 +118,14 @@ class ExportViewSet(viewsets.GenericViewSet):
         build_sigma_limit_sheet(f, df, metadata, sigma_level, only_valid)
         buffer = save_excelize(f)
 
-        fname = datafile.filename.rsplit('.', 1)[0]
+        fname = render_export_filename(
+            request.user, 'sigma_limit', 'xlsx',
+            {**base_export_context(request.user),
+             'filename': datafile.filename.rsplit('.', 1)[0],
+             'sigma': sigma_level},
+        )
         return FileResponse(io.BytesIO(buffer), as_attachment=True,
-                            filename=f'{fname}_{sigma_level}sigma_Limit.xlsx',
+                            filename=fname,
                             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
     # ── html_report ─────────────────────────────────────────────────
@@ -135,9 +149,17 @@ class ExportViewSet(viewsets.GenericViewSet):
 <body><h1>ATE 数据分析报告</h1><p>文件: {datafile.filename} | 格式: {datafile.format_type} | 程序: {datafile.program_name}</p>
 <h2>核心指标</h2><table><tr><th>总记录数</th><th>Pass</th><th>Fail</th><th>Yield</th></tr>
 <tr><td>{total_rows}</td><td>{total_pass}</td><td>{total_rows - total_pass}</td><td>{yield_pct:.2f}%</td></tr></table></body></html>"""
-        return Response(io.BytesIO(html.encode('utf-8')).read(), status=200,
-                        content_type='text/html; charset=utf-8',
-                        headers={'Content-Disposition': f'attachment; filename="{datafile.filename}_report.html"'})
+        # FileResponse (not Response + hand-written header): Django wsgi response
+        # headers are latin-1 only — a hand-written Content-Disposition with a
+        # Chinese source filename raises UnicodeEncodeError. FileResponse emits
+        # RFC 5987 filename*=UTF-8''... encoding automatically.
+        fname = render_export_filename(
+            request.user, 'html_report', 'html',
+            {**base_export_context(request.user),
+             'filename': datafile.filename.rsplit('.', 1)[0]},
+        )
+        return FileResponse(io.BytesIO(html.encode('utf-8')), as_attachment=True,
+                            filename=fname, content_type='text/html; charset=utf-8')
 
     # ── batch_charts ────────────────────────────────────────────────
 
@@ -164,11 +186,14 @@ class ExportViewSet(viewsets.GenericViewSet):
 
         site_col = get_site_column(df)
 
+        base_ctx = {**base_export_context(request.user),
+                    'filename': datafile.filename.rsplit('.', 1)[0]}
+
         if fmt == 'pptx':
             pptx_bytes = build_batch_charts_pptx(datafile, df, metadata, params)
-            fname = datafile.filename.rsplit('.', 1)[0]
+            fname = render_export_filename(request.user, 'batch_charts', 'pptx', base_ctx)
             return FileResponse(io.BytesIO(pptx_bytes), as_attachment=True,
-                                filename=f'{fname}_batch_charts.pptx',
+                                filename=fname,
                                 content_type='application/vnd.openxmlformats-officedocument.presentationml.presentation')
         else:
             from .export_complete import build_batch_charts_xlsx_with_charts
@@ -178,7 +203,7 @@ class ExportViewSet(viewsets.GenericViewSet):
                 show_4sigma=show_4sigma, show_6sigma=show_6sigma,
                 show_normal=show_normal,
             )
-            fname = datafile.filename.rsplit('.', 1)[0]
+            fname = render_export_filename(request.user, 'batch_charts', 'xlsx', base_ctx)
             return FileResponse(io.BytesIO(xlsx_bytes), as_attachment=True,
-                                filename=f'{fname}_batch_charts.xlsx',
+                                filename=fname,
                                 content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')

@@ -126,6 +126,8 @@
       </el-form>
     </el-card>
 
+    <ExportTemplateSettings v-model:templates="settings.export_filename_templates" />
+
     <el-card class="settings-section">
       <template #header>
         <span class="section-title">📁 最近文件列表</span>
@@ -173,6 +175,9 @@ import { ref, onMounted } from 'vue'
 import { authApi } from '../../api/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { setChartRenderer } from '../../utils/echarts-theme'
+import type { ExportTypeKey } from '../../types'
+import { EXPORT_TEMPLATE_META, EXPORT_TEMPLATE_KEYS } from '../../constants/export-templates'
+import ExportTemplateSettings from './components/ExportTemplateSettings.vue'
 
 interface SettingsData {
   page_size: number
@@ -188,6 +193,15 @@ interface SettingsData {
   recent_files: Array<{ id: number; name: string; accessed_at: string }>
   max_recent_files: number
   histogram_label_offset: number
+  export_filename_templates: Record<ExportTypeKey, string>
+}
+
+function defaultTemplates(): Record<ExportTypeKey, string> {
+  const result = {} as Record<ExportTypeKey, string>
+  EXPORT_TEMPLATE_KEYS.forEach((key) => {
+    result[key] = EXPORT_TEMPLATE_META[key].default
+  })
+  return result
 }
 
 const defaults: SettingsData = {
@@ -204,6 +218,7 @@ const defaults: SettingsData = {
   recent_files: [],
   max_recent_files: 10,
   histogram_label_offset: 4,
+  export_filename_templates: defaultTemplates(),
 }
 
 const settings = ref<SettingsData>({ ...defaults })
@@ -252,6 +267,16 @@ async function loadSettings() {
           ;(merged as Record<string, unknown>)[key] = data[key]
         }
       })
+    }
+    // 导出文件名模板逐 key 合并：后端返回的完整表缺 key 时补默认
+    const remoteTemplates = (data as Record<string, unknown>)?.export_filename_templates
+    if (remoteTemplates && typeof remoteTemplates === 'object') {
+      const mergedTemplates = { ...defaultTemplates() }
+      EXPORT_TEMPLATE_KEYS.forEach((key) => {
+        const v = (remoteTemplates as Record<string, unknown>)[key]
+        if (typeof v === 'string') mergedTemplates[key] = v
+      })
+      merged.export_filename_templates = mergedTemplates
     }
     settings.value = merged as SettingsData
     setChartRenderer(merged.chart_renderer as 'svg' | 'canvas')

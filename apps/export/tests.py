@@ -199,3 +199,92 @@ class ExportApiTests(APITestCase):
         buf = b''.join(resp.streaming_content)
         wb = openpyxl.load_workbook(io.BytesIO(buf))
         self.assertEqual(wb['总览'].max_row, 1 + len(numeric_cols), '总览表头 + 每参数一行')
+
+
+def _parse_content_disposition(cd: str) -> str:
+    """从 Content-Disposition 提取 RFC 5987 filename*= 或 filename= 的文件名。"""
+    import re as _re
+    star = _re.search(r"filename\*\s*=\s*(?:UTF-8'')?([^;]+)", cd)
+    if star:
+        return _re.sub(r'^"|"$', '', star.group(1).strip()).replace('%20', ' ')
+    plain = _re.search(r'filename\s*=\s*"?([^";]+)"?', cd)
+    return plain.group(1).strip() if plain else ''
+
+
+@unittest.skipUnless(
+    os.path.exists(GAGE_S1_PATH),
+    'SampleData/Gage 目录不存在（跳过）',
+)
+class ExportFilenameTemplateApiTests(APITestCase):
+    """导出文件名自定义模板端到端（设置 → 导出 → Content-Disposition）。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='tpluser', password='pw')
+        self.client.force_authenticate(self.user)
+        self.datafile = DataFile.objects.create(
+            owner=self.user,
+            filename='gage_m_S1.csv',
+            file_path=GAGE_S1_PATH,
+            file_size=os.path.getsize(GAGE_S1_PATH),
+            format_type='CTA8290D',
+            status='ready',
+        )
+
+    def _set_template(self, key: str, template: str):
+        resp = self.client.put('/api/v1/auth/settings/',
+                               {'export_filename_templates': {key: template}},
+                               format='json')
+        self.assertEqual(resp.status_code, 200, resp.data)
+
+    def test_to_excel_custom_template_with_datetime(self):
+        self._set_template('to_excel', '{filename}_{datetime}')
+        resp = self.client.post('/api/v1/export/to_excel/', {'file_id': self.datafile.id})
+        self.assertEqual(resp.status_code, 200)
+        name = _parse_content_disposition(resp['Content-Disposition'])
+        self.assertRegex(name, r'^gage_m_S1_\d{8}_\d{6}\.xlsx$')
+
+    def test_to_csv_default_template(self):
+        resp = self.client.post('/api/v1/export/to_csv/', {'file_id': self.datafile.id})
+        self.assertEqual(resp.status_code, 200)
+        name = _parse_content_disposition(resp['Content-Disposition'])
+        self.assertEqual(name, 'gage_m_S1_data.csv')
+
+    def test_sigma_limit_sigma_variable(self):
+        self._set_template('sigma_limit', '{filename}_{sigma}sigma')
+        resp = self.client.post('/api/v1/export/sigma_limit/',
+                                {'file_id': self.datafile.id, 'sigma': 6}, format='json')
+        self.assertEqual(resp.status_code, 200)
+        name = _parse_content_disposition(resp['Content-Disposition'])
+        self.assertEqual(name, 'gage_m_S1_6sigma.xlsx')
+
+    def test_batch_charts_both_formats(self):
+        self._set_template('batch_charts', '{filename}_charts')
+        for fmt in ('xlsx', 'pptx'):
+            resp = self.client.post('/api/v1/export/batch_charts/',
+                                    {'file_id': self.datafile.id, 'params': [],
+                                     'format': fmt}, format='json')
+            self.assertEqual(resp.status_code, 200, fmt)
+            name = _parse_content_disposition(resp['Content-Disposition'])
+            self.assertEqual(name, f'gage_m_S1_charts.{fmt}')
+
+    def test_html_report_chinese_filename_encoded(self):
+        """中文源文件名 → FileResponse 自动 RFC 5987 编码（回归：手写 header 会
+        UnicodeEncodeError，且会带上 .csv 扩展名）。"""
+        self.datafile.filename = '测试_文件.csv'
+        self.datafile.save()
+        self._set_template('html_report', '{filename}_report')
+        resp = self.client.post('/api/v1/export/html_report/', {'file_id': self.datafile.id})
+        self.assertEqual(resp.status_code, 200)
+        cd = resp['Content-Disposition']
+        self.assertIn("filename*=", cd)
+        star = cd.split("filename*=")[1].split("''", 1)[1].split(';')[0].strip()
+        import urllib.parse
+        decoded = urllib.parse.unquote(star)
+        self.assertEqual(decoded, '测试_文件_report.html')
+
+    def test_sanitize_applied_in_response(self):
+        self._set_template('to_excel', '{filename}:bad?')
+        resp = self.client.post('/api/v1/export/to_excel/', {'file_id': self.datafile.id})
+        self.assertEqual(resp.status_code, 200)
+        name = _parse_content_disposition(resp['Content-Disposition'])
+        self.assertEqual(name, 'gage_m_S1_bad_.xlsx')

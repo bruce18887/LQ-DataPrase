@@ -1,4 +1,6 @@
 from rest_framework import serializers
+
+from apps.common.export_naming import EXPORT_TEMPLATE_DEFAULTS, MAX_TEMPLATE_LENGTH
 from .models import User, UserSetting
 
 
@@ -53,7 +55,28 @@ class UserSettingSerializer(serializers.ModelSerializer):
             'cpk_a_threshold', 'cpk_b_threshold', 'cpk_c_threshold',
             'chart_engine', 'aggrid_header_font_size',
             'recent_files', 'max_recent_files', 'histogram_label_offset',
+            'export_filename_templates',
         ]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Always expose the full 8-key table (defaults merged with overrides)
+        templates = data.get('export_filename_templates') or {}
+        data['export_filename_templates'] = {**EXPORT_TEMPLATE_DEFAULTS, **templates}
+        return data
+
+    def validate_export_filename_templates(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError('export_filename_templates 必须是对象')
+        for key, tpl in value.items():
+            if not isinstance(key, str) or key not in EXPORT_TEMPLATE_DEFAULTS:
+                raise serializers.ValidationError(f'未知导出类型: {key}')
+            if not isinstance(tpl, str):
+                raise serializers.ValidationError(f'{key} 的模板必须是字符串')
+            if len(tpl) > MAX_TEMPLATE_LENGTH:
+                raise serializers.ValidationError(
+                    f'{key} 的模板不能超过 {MAX_TEMPLATE_LENGTH} 字符')
+        return value
 
 
 class PasswordChangeSerializer(serializers.Serializer):

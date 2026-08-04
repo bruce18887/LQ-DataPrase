@@ -100,6 +100,7 @@ import HistogramColumnDialog from './components/browser/HistogramColumnDialog.vu
 import DataQualityBar from './components/browser/DataQualityBar.vue'
 import BinCellContextMenu from './components/browser/BinCellContextMenu.vue'
 import { useBinCellMenu } from './composables/useBinCellMenu'
+import { downloadBlob, sanitizeFilename, extractFilenameFromContentDisposition } from '../../utils/download'
 
 // Register ag-grid modules (required since v33+)
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community'
@@ -422,6 +423,7 @@ async function exportExcel() {
       { responseType: 'blob', timeout: 600000 }
     )
     downloadBlob(resp.data as Blob, resolveExportName(resp.headers as Record<string, string>, 'export.xlsx', '_analysis.xlsx'))
+    ElMessage.success('下载完成')
   } catch {
     // 错误 toast 由 axios 拦截器统一弹出
   } finally {
@@ -438,6 +440,7 @@ async function exportCsv() {
       { responseType: 'blob', timeout: 600000 }
     )
     downloadBlob(resp.data as Blob, resolveExportName(resp.headers as Record<string, string>, 'export.csv', '_data.csv'))
+    ElMessage.success('下载完成')
   } catch {
     // 错误 toast 由 axios 拦截器统一弹出
   } finally {
@@ -447,38 +450,13 @@ async function exportCsv() {
 
 /** 导出文件名：优先解析后端 Content-Disposition，其次用文件名兜底，最后默认名 */
 function resolveExportName(headers: Record<string, string>, fallback: string, suffix: string): string {
-  const cd = headers['content-disposition']
-  if (cd) {
-    const star = /filename\*\s*=\s*(?:UTF-8'')?([^;]+)/i.exec(cd)
-    if (star) return sanitizeFilename(decodeURIComponent(star[1].trim()))
-    const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(cd)
-    if (plain) return sanitizeFilename(plain[1].trim())
-  }
+  const parsed = extractFilenameFromContentDisposition(headers['content-disposition'])
+  if (parsed) return parsed
   if (props.fileName) {
     const base = props.fileName.replace(/\.csv$/i, '')
     return sanitizeFilename(`${base}${suffix}`)
   }
   return fallback
-}
-
-function sanitizeFilename(name: string): string {
-  return name.replace(/[\\/:*?"<>|]/g, '_')
-}
-
-function downloadBlob(data: Blob, filename: string) {
-  const url = URL.createObjectURL(data)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.style.display = 'none'
-  document.body.appendChild(a)
-  a.click()
-  // 延迟 revoke：确保浏览器已开始下载 blob（立即 revoke 可能导致下载中断）
-  setTimeout(() => {
-    URL.revokeObjectURL(url)
-    a.remove()
-  }, 1000)
-  ElMessage.success('下载完成')
 }
 </script>
 

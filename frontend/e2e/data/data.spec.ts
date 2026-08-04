@@ -652,14 +652,14 @@ test.describe('数据管理 /data 文件列表展开行（方案A）', { tag: ['
     }
 
     // 1) 默认未展开：行内不应有 .row-detail
-    await expect(page.locator('.el-table__expanded-row .row-detail')).toHaveCount(0)
+    await expect(page.locator('.el-table__expanded-cell .row-detail')).toHaveCount(0)
 
     // 2) 点击展开按钮
     const expandTrigger = firstRow.locator('.el-table__expand-icon').first()
     await expandTrigger.click()
 
     // 3) 展开后 .row-detail 出现
-    const detail = page.locator('.el-table__expanded-row .row-detail').first()
+    const detail = page.locator('.el-table__expanded-cell .row-detail').first()
     await expect(detail).toBeVisible({ timeout: 5_000 })
 
     // 4) 完整文件名在展开行内可见（不依赖 middle-ellipsis 截断）
@@ -681,7 +681,8 @@ test.describe('数据管理 /data 文件列表展开行（方案A）', { tag: ['
     await filenameCell.hover()
     await page.waitForTimeout(400)
     // hover 文件名后，不应有 popper 出现
-    await expect(page.locator('.el-popper').filter({ hasText: /.+/ })).toHaveCount(0)
+    // el-select/el-tooltip 的 popper 常驻 DOM 且 display:none，只断言可见的（hover 不应弹出 tooltip）
+      await expect(page.locator('.el-popper:visible').filter({ hasText: /.+/ })).toHaveCount(0)
 
     // 移开
     await page.mouse.move(0, 0)
@@ -691,7 +692,8 @@ test.describe('数据管理 /data 文件列表展开行（方案A）', { tag: ['
     if (await programCell.isVisible()) {
       await programCell.hover()
       await page.waitForTimeout(400)
-      await expect(page.locator('.el-popper').filter({ hasText: /.+/ })).toHaveCount(0)
+      // el-select/el-tooltip 的 popper 常驻 DOM 且 display:none，只断言可见的（hover 不应弹出 tooltip）
+      await expect(page.locator('.el-popper:visible').filter({ hasText: /.+/ })).toHaveCount(0)
     }
   })
 })

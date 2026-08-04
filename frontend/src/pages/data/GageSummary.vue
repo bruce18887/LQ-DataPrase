@@ -100,6 +100,7 @@ import { ref, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { datafilesApi } from '../../api/datafiles'
 import { gageApi } from '../../api/gage'
+import { downloadBlob, extractFilenameFromContentDisposition } from '../../utils/download'
 
 interface SiteSlot {
   key: string
@@ -180,12 +181,10 @@ async function generate() {
       ignoreNoLimit.value,
     )
     progress.value = 100
-    const url = URL.createObjectURL(resp.data as Blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'Gage_Summary.xlsx'
-    a.click()
-    URL.revokeObjectURL(url)
+    const fname = extractFilenameFromContentDisposition(
+      (resp.headers as Record<string, string>)?.['content-disposition'],
+    ) ?? 'Gage_Summary.xlsx'
+    downloadBlob(resp.data as Blob, fname)
     ElMessage.success('Gage Summary 已下载')
   } catch {
     // 错误 toast 由 axios 拦截器统一弹出

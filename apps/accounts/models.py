@@ -45,6 +45,9 @@ class UserSetting(models.Model):
     recent_files = models.JSONField(default=list)
     max_recent_files = models.IntegerField(default=10)
     histogram_label_offset = models.IntegerField(default=4)
+    # Per-export-type filename templates: {export_type: template}
+    # (keys/defaults in apps.common.export_naming.EXPORT_TEMPLATE_DEFAULTS)
+    export_filename_templates = models.JSONField(default=dict, blank=True)
 
     class Meta:
         db_table = 'accounts_user_setting'

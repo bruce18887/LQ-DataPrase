@@ -10,6 +10,7 @@ import excelize
 from django.http import FileResponse
 
 from apps.export.excelize_helpers import make_header_style, make_data_style, save_excelize
+from apps.common.export_naming import base_export_context, render_export_filename
 
 from apps.datafiles.models import DataFile
 from apps.datafiles.services import get_cached_parsed_file
@@ -368,6 +369,12 @@ class BatchReportViewSet(viewsets.GenericViewSet):
         if phases:
             f.set_cell_style("Batch Report", "A2", f"G{len(phases) + 1}", data_style)
 
+        fname = render_export_filename(
+            request.user, 'batch_report', 'xlsx',
+            {**base_export_context(request.user),
+             'batch_name': request.data.get('batch_name', ''),
+             'file_count': len(phases)},
+        )
         return FileResponse(io.BytesIO(save_excelize(f)), as_attachment=True,
-                           filename='Batch_Report.xlsx',
+                           filename=fname,
                            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
