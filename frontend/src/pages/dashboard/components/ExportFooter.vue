@@ -9,7 +9,6 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { ElMessage } from 'element-plus'
 import api from '../../../api'
 
 const props = defineProps<{

@@ -18,15 +18,23 @@ COLOR_NORMAL = '#F57F17'
 
 
 def _get_export_dpi():
-    return 150
+    # Excel 嵌入图以固定 EMU 尺寸显示（openpyxl Image 800×450px），与源分辨率
+    # 无关；150→100 后清晰度不降反升，PNG 体积约降 2/3（10.9MB → 4-6MB）。
+    return 100
 
 
-def _create_histogram_chart(
-    df, metadata, selected_param, data_series, mean_val, std_val,
-    rdl_min, rdl_max, show_limit=True, show_3sigma=False,
-    show_4sigma=False, show_6sigma=False, show_normal=False, site_col=None
+def _render_histogram_payload(
+    param, data_series, site_values, site_series,
+    mean_val, std_val, rdl_min, rdl_max,
+    show_limit=True, show_3sigma=False, show_4sigma=False,
+    show_6sigma=False, show_normal=False,
 ):
-    """Ported from old project: create matplotlib histogram with site grouping."""
+    """渲染单个参数直方图 PNG，返回 io.BytesIO。
+
+    与 _create_histogram_chart 同逻辑，但入参全部为可 pickle 的标量/ndarray
+    （data_series/site_series 为 ndarray，site_values 为标量列表）——
+    供 chart_workers 多进程渲染调用，不依赖 DataFrame。
+    """
     plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS']
     plt.rcParams['axes.unicode_minus'] = False
 
@@ -55,30 +63,21 @@ def _create_histogram_chart(
                         bbox=dict(boxstyle='round,pad=0.15', facecolor='white', edgecolor=exp_color, alpha=0.85),
                         clip_on=False)
 
-    if site_col and site_col in df.columns:
-        site_values = sorted(df[site_col].dropna().unique(), key=lambda x: (isinstance(x, float), x))
-        n_sites = len(site_values)
-        bar_width = data_gap * 0.8 / n_sites
-        site_df = df[[site_col, selected_param]].copy()
-        site_col_1d = site_df[site_col]
-        if isinstance(site_col_1d, pd.DataFrame):
-            site_col_1d = site_col_1d.iloc[:, 0]
-        selected_col_1d = site_df[selected_param]
-        if isinstance(selected_col_1d, pd.DataFrame):
-            selected_col_1d = selected_col_1d.iloc[:, 0]
-        site_df[selected_param] = pd.to_numeric(selected_col_1d, errors='coerce')
-        grouped = site_df.groupby(site_col_1d)
+    if site_series is not None:
+        param_ser = pd.to_numeric(pd.Series(data_series), errors='coerce')
+        grouped = pd.DataFrame({'site': pd.Series(site_series), 'val': param_ser}).groupby('site')
+        bar_width = data_gap * 0.8 / len(site_values) if site_values else data_gap * 0.8
 
         for idx, site in enumerate(site_values):
             if site in grouped.groups:
-                sdata = grouped.get_group(site)[selected_param].dropna()
+                sdata = grouped.get_group(site)['val'].dropna()
             else:
                 sdata = pd.Series(dtype=float)
             total = len(sdata)
             hist, _ = np.histogram(sdata, bins=all_bins)
             hist_percent = [round((count / total) * 100, 2) if total > 0 else 0 for count in hist]
             bar_data = [hist_percent[i] if i < len(hist_percent) else 0 for i in range(25)]
-            offset = (idx - n_sites / 2 + 0.5) * bar_width
+            offset = (idx - len(site_values) / 2 + 0.5) * bar_width
             bar_x = [x_labels[i] + offset for i in range(25)]
 
             ax.bar(
@@ -87,9 +86,8 @@ def _create_histogram_chart(
                 label=f'Site{site}%', edgecolor='white', linewidth=0.5
             )
     else:
-        data_clean = data_series
-        hist, _ = np.histogram(data_clean, bins=all_bins)
-        total = len(data_clean)
+        hist, _ = np.histogram(data_series, bins=all_bins)
+        total = len(data_series)
         hist_percent = [round((count / total) * 100, 2) if total > 0 else 0 for count in hist]
         bar_data = [hist_percent[i] if i < len(hist_percent) else 0 for i in range(25)]
         ax.bar(x_labels, bar_data, width=data_gap * 0.9, color='#1E88E5', alpha=0.7, label='数据分布', edgecolor='white', linewidth=0.5)
@@ -140,7 +138,7 @@ def _create_histogram_chart(
             _add_vline_label(ax, upper, f'{label_prefix}上限', color)
 
     ax.legend(fontsize=8, loc='upper center', bbox_to_anchor=(0.5, -0.2), ncol=4)
-    ax.set_title(selected_param, fontsize=14, fontweight='bold', color='#0066cc', pad=15)
+    ax.set_title(param, fontsize=14, fontweight='bold', color='#0066cc', pad=15)
     plt.tight_layout()
 
     img_buffer = io.BytesIO()
@@ -148,3 +146,29 @@ def _create_histogram_chart(
     plt.close(fig)
     img_buffer.seek(0)
     return img_buffer
+
+
+def _create_histogram_chart(
+    df, metadata, selected_param, data_series, mean_val, std_val,
+    rdl_min, rdl_max, show_limit=True, show_3sigma=False,
+    show_4sigma=False, show_6sigma=False, show_normal=False, site_col=None
+):
+    """薄包装：从 DataFrame 提取 site 数据后委托 _render_histogram_payload。
+
+    （主进程串行兜底路径保留此签名；并行路径直接用 _render_histogram_payload。）
+    """
+    site_values = None
+    site_series = None
+    if site_col and site_col in df.columns:
+        site_series_raw = df[site_col]
+        if isinstance(site_series_raw, pd.DataFrame):
+            site_series_raw = site_series_raw.iloc[:, 0]
+        site_values = sorted(site_series_raw.dropna().unique(), key=lambda x: (isinstance(x, float), x))
+        site_series = site_series_raw.to_numpy()
+    return _render_histogram_payload(
+        selected_param, data_series.to_numpy(), site_values, site_series,
+        mean_val, std_val, rdl_min, rdl_max,
+        show_limit=show_limit, show_3sigma=show_3sigma,
+        show_4sigma=show_4sigma, show_6sigma=show_6sigma,
+        show_normal=show_normal,
+    )

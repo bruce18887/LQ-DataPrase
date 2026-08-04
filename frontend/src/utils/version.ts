@@ -1,7 +1,7 @@
 /**
  * 应用版本与构建信息。
  *
- * 版本单一事实源：根 package.json（electron-builder 打包版本，app.getVersion()
+ * 版本单一事实源：frontend/package.json（electron-builder 打包版本，app.getVersion()
  * 与之一致），由 vite.config.ts 在构建时注入为 __APP_VERSION__ / __BUILD_COMMIT__
  * / __BUILD_DATE__ 三个全局常量。此处为同步常量，UI 可直接使用。
  */

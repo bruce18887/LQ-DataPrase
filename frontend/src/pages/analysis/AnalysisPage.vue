@@ -84,7 +84,6 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onActivated, watch } from 'vue'
-import { ElMessage } from 'element-plus'
 import api from '../../api'
 import { useAnalysisStore } from '../../stores/analysis'
 import SingleParamTab from './components/SingleParamTab.vue'

@@ -6,9 +6,10 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from openpyxl import Workbook
-from openpyxl.styles import PatternFill, Font, Alignment
+import excelize
 from django.http import FileResponse
+
+from apps.export.excelize_helpers import make_header_style, make_data_style, save_excelize
 
 from apps.datafiles.models import DataFile
 from apps.datafiles.services import get_cached_parsed_file
@@ -349,26 +350,24 @@ class BatchReportViewSet(viewsets.GenericViewSet):
                 'yield_pct': yield_result['yield_pct'],
             })
 
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Batch Report"
-        hf = PatternFill(start_color="2C3E50", end_color="2C3E50", fill_type="solid")
-        hfn = Font(bold=True, color="FFFFFF")
-        ca = Alignment(horizontal="center", vertical="center")
+        f = excelize.new_file()
+        f.set_sheet_name("Sheet1", "Batch Report")
+        header_style = make_header_style(f, 11)
+        data_style = make_data_style(f)
 
         headers = ['文件名', '程序', '格式', '总数', 'Pass', 'Fail', '良率']
-        for c, h in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=c, value=h)
-            cell.fill = hf
-            cell.font = hfn
-            cell.alignment = ca
+        f.set_sheet_row("Batch Report", "A1", headers)
+        f.set_cell_style("Batch Report", "A1", "G1", header_style)
 
         for r, p in enumerate(phases, 2):
-            for c, v in enumerate([p['filename'], p['program_name'], p['format'], p['total'], p['pass_count'], p['fail_count'], f"{p['yield_pct']}%"], 1):
-                ws.cell(row=r, column=c, value=v)
+            row_vals = [
+                p['filename'], p['program_name'], p['format'], p['total'],
+                p['pass_count'], p['fail_count'], f"{p['yield_pct']}%",
+            ]
+            f.set_sheet_row("Batch Report", f"A{r}", row_vals)
+        if phases:
+            f.set_cell_style("Batch Report", "A2", f"G{len(phases) + 1}", data_style)
 
-        buffer = io.BytesIO()
-        wb.save(buffer)
-        buffer.seek(0)
-        return FileResponse(buffer, as_attachment=True, filename='Batch_Report.xlsx',
+        return FileResponse(io.BytesIO(save_excelize(f)), as_attachment=True,
+                           filename='Batch_Report.xlsx',
                            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')

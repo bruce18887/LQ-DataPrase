@@ -46,6 +46,74 @@ async function pickFileFromBanner(page: Page, filename: string) {
   await option.click()
 }
 
+/**
+ * 从 /browse/ API 拿全量行，定位测试所需的确定性行：
+ * - failIdx/failCols/binValue：首个 bin != 1 的行及其 __fail_cells__
+ * - passIdx：首个 bin == 1 的行
+ * - farIdx/farCol：首个「含非 bin fail 列且该列在 headers 中 index >= 50」的行（346 列文件必在屏幕外）
+ * - binOnlyIdx：首个 __fail_cells__ 恰为 [bin] 的行（仅 bin fail，无测试列越限）
+ */
+async function fetchBinFailInfo(page: Page, filename: string) {
+  return page.evaluate(async (filename) => {
+    const token = localStorage.getItem('access_token')
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
+    const files = await fetch(`/api/v1/files/?search=${encodeURIComponent(filename)}`, { headers }).then((r) => r.json())
+    const file = ((files.results ?? files) as any[]).find((f: any) => f.filename === filename)
+    const d = await fetch(`/api/v1/browse/?datafile_id=${file.id}&page_size=99999`, { headers }).then((r) => r.json())
+    const rows = (d.rows ?? []) as Record<string, any>[]
+    const colHeaders = (d.headers ?? []) as string[]
+    const bin = d.bin_column as string
+    const parseFail = (r: Record<string, any>): string[] => JSON.parse(r.__fail_cells__ ?? '[]')
+    const info = {
+      bin,
+      failIdx: -1,
+      binValue: '',
+      failCols: [] as string[],
+      passIdx: -1,
+      farIdx: -1,
+      farCol: '',
+      binOnlyIdx: -1,
+    }
+    for (let i = 0; i < rows.length; i++) {
+      const v = rows[i][bin]
+      const isFail = v !== null && v !== undefined && v !== '' && Number(v) !== 1
+      if (isFail) {
+        const fc = parseFail(rows[i])
+        if (info.failIdx === -1) {
+          info.failIdx = i
+          info.binValue = String(v)
+          info.failCols = fc
+        }
+        if (info.farIdx === -1 && fc.length > 1) {
+          const far = fc.find((c) => c !== bin && colHeaders.indexOf(c) >= 50)
+          if (far) {
+            info.farIdx = i
+            info.farCol = far
+          }
+        }
+        if (info.binOnlyIdx === -1 && fc.length === 1 && fc[0] === bin) {
+          info.binOnlyIdx = i
+        }
+      } else if (info.passIdx === -1 && v !== null && v !== undefined && v !== '' && Number(v) === 1) {
+        info.passIdx = i
+      }
+    }
+    return info
+  }, filename)
+}
+
+/** 目标行若未渲染（rowBuffer=10 外的行），滚动垂直视口使其渲染（v33+ 垂直滚动在 ag-body-vertical-scroll-viewport） */
+async function ensureRowRendered(page: Page, rowIndex: number) {
+  const row = page.locator(`.ag-pinned-left-cols-container .ag-row[row-index="${rowIndex}"]`)
+  if ((await row.count()) === 0) {
+    await page
+      .locator('.ag-body-vertical-scroll-viewport')
+      .evaluate((el, idx) => { (el as HTMLElement).scrollTop = idx * 30 }, rowIndex)
+  }
+  await expect(row).toBeVisible({ timeout: 10_000 })
+  return row
+}
+
 test.describe('数据管理 → 查看数据页优化', { tag: ['@p0', '@p1', '@p2', '@data'] }, () => {
   test('@p0 未选文件：空态引导 + 去文件列表按钮', async ({ page }) => {
     await gotoApp(page, '/data')
@@ -277,6 +345,7 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@p0', '@p1', '@
   })
 
   test('@p3 质量概览条：Total/Pass/Fail/Yield 与 /summary/ API 一致', async ({ page }) => {
+    // GAGE_S1（100 行）：小文件避免 CTA8280F（10000 行）加载压力；API 对比必须用同一文件
     await openViewTab(page, SEEDED_FILES.GAGE_S1)
 
     const qualityBar = viewScope(page).locator('.quality-bar')
@@ -295,7 +364,7 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@p0', '@p1', '@
         fail: d.metrics.fail_count,
         yield: d.metrics.yield_pct,
       }
-    }, SEEDED_FILES.CTA8280F_FT)
+    }, SEEDED_FILES.GAGE_S1)
 
     await expect(qualityBar.locator('.chip').filter({ hasText: 'Total' })).toContainText(
       m.total.toLocaleString(),
@@ -310,5 +379,144 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@p0', '@p1', '@
     await expect(qualityBar.locator('.chip').filter({ hasText: 'Yield' })).toContainText(`${m.yield}%`)
     // 质量条不含冗余的「CPK 低」参数 tag（alerts 里的质量警报保留）
     await expect(qualityBar).not.toContainText('CPK 低')
+  })
+
+  test('@p2 右键 Fail Bin 单元格：弹出定位菜单 + 各关闭路径', async ({ page }) => {
+    // CTA8280F 含 1289 个 fail 行（GAGE 文件全 pass，无场景）
+    await openViewTab(page, SEEDED_FILES.CTA8280F_FT)
+    const info = await fetchBinFailInfo(page, SEEDED_FILES.CTA8280F_FT)
+    if (info.failIdx === -1) test.skip(true, '种子文件无 fail 行')
+
+    const failCell = page
+      .locator(`.ag-pinned-left-cols-container .ag-row[row-index="${info.failIdx}"] .ag-cell`)
+      .first()
+    await expect(failCell).toBeVisible({ timeout: 30_000 })
+    // fail 单元格红色高亮（light 主题 #dc2626）
+    await expect(failCell).toHaveCSS('background-color', 'rgb(220, 38, 38)')
+
+    // 右键 → 菜单可见，内容含菜单项 / 行号 / bin 值
+    await failCell.click({ button: 'right' })
+    const menu = page.locator('.bin-cell-menu')
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    await expect(menu).toContainText('定位到 Fail 单元格')
+    await expect(menu).toContainText(`第 ${info.failIdx + 1} 行`)
+    await expect(menu).toContainText(String(info.binValue))
+
+    // 关闭路径 1：Escape
+    await page.keyboard.press('Escape')
+    await expect(menu).not.toBeVisible({ timeout: 3_000 })
+
+    // 关闭路径 2：点击表格其他单元格
+    await failCell.click({ button: 'right' })
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    await page.locator('.ag-center-cols-container .ag-row').first().locator('.ag-cell').first().click()
+    await expect(menu).not.toBeVisible({ timeout: 3_000 })
+
+    // 关闭路径 3：菜单开着滚表格（wheel）
+    await failCell.click({ button: 'right' })
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    await page.mouse.wheel(0, 300)
+    await expect(menu).not.toBeVisible({ timeout: 3_000 })
+
+    // 关闭路径 4：再次右键 pass 单元格（且不弹新菜单）
+    await failCell.click({ button: 'right' })
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    const passRow = await ensureRowRendered(page, info.passIdx)
+    await passRow.locator('.ag-cell').first().click({ button: 'right' })
+    await expect(menu).not.toBeVisible({ timeout: 3_000 })
+    await page.waitForTimeout(500)
+    await expect(page.locator('.bin-cell-menu')).toHaveCount(0)
+    await expect(page.locator('.el-dialog')).not.toBeVisible()
+  })
+
+  test('@p2 右键 Pass Bin 单元格不弹菜单（放行浏览器菜单）', async ({ page }) => {
+    await openViewTab(page, SEEDED_FILES.CTA8280F_FT)
+    const info = await fetchBinFailInfo(page, SEEDED_FILES.CTA8280F_FT)
+
+    const passRow = await ensureRowRendered(page, info.passIdx)
+    await passRow.locator('.ag-cell').first().click({ button: 'right' })
+    await page.waitForTimeout(600)
+    await expect(page.locator('.bin-cell-menu')).toHaveCount(0)
+    await expect(page.locator('.el-dialog')).not.toBeVisible()
+
+    // 合成事件精确验证：未 preventDefault（浏览器复制菜单放行）
+    const prevented = await passRow
+      .locator('.ag-cell')
+      .first()
+      .evaluate((el) => {
+        const ev = new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 10,
+          clientY: 10,
+        })
+        el.dispatchEvent(ev)
+        return ev.defaultPrevented
+      })
+    expect(prevented).toBe(false)
+  })
+
+  test('@p2 菜单「定位到 Fail 单元格」：横向滚动到 fail 列 + flash', async ({ page }) => {
+    await openViewTab(page, SEEDED_FILES.CTA8280F_FT)
+    const info = await fetchBinFailInfo(page, SEEDED_FILES.CTA8280F_FT)
+    if (info.farIdx === -1) test.skip(true, '无远列 fail 行')
+
+    const farRow = await ensureRowRendered(page, info.farIdx)
+
+    // 前置：farCol 在屏幕外（列虚拟化 → 无此 header 元素）
+    await expect(page.locator(`.ag-header-cell[col-id="${info.farCol}"]`)).not.toBeVisible()
+
+    const hScroll = page.locator('.ag-body-horizontal-scroll-viewport')
+    const before = await hScroll.evaluate((el) => el.scrollLeft)
+
+    // 右键该行 pinned bin 单元格 → 点菜单项
+    await farRow.locator('.ag-cell').first().click({ button: 'right' })
+    const menu = page.locator('.bin-cell-menu')
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    await menu.locator('.bin-cell-menu__item').click()
+    await expect(menu).not.toBeVisible({ timeout: 3_000 })
+
+    // 横向滚动发生（ensureColumnVisible）
+    await expect
+      .poll(async () => hScroll.evaluate((el) => el.scrollLeft), { timeout: 5_000 })
+      .toBeGreaterThan(before)
+
+    // farCol 列头与 fail 单元格已滚入视图
+    await expect(page.locator(`.ag-header-cell[col-id="${info.farCol}"]`)).toBeVisible({
+      timeout: 10_000,
+    })
+    const failCell = page.locator(
+      `.ag-center-cols-container .ag-row[row-index="${info.farIdx}"] .ag-cell[col-id="${info.farCol}"]`,
+    )
+    await expect(failCell).toBeVisible({ timeout: 10_000 })
+
+    // flash 高亮（~1s 瞬态类，poll 抓）
+    await expect
+      .poll(async () => (await failCell.getAttribute('class')) ?? '', { timeout: 3_000 })
+      .toContain('ag-cell-data-changed')
+  })
+
+  test('@p2 仅 Bin fail 行：定位只 flash 不横向滚动', async ({ page }) => {
+    // CTA8290D 含仅 bin fail 行（无测试列越限）；CTA8280F 的 fail 行均带越限测试列
+    await openViewTab(page, SEEDED_FILES.CTA8290D_FT)
+    const info = await fetchBinFailInfo(page, SEEDED_FILES.CTA8290D_FT)
+    if (info.binOnlyIdx === -1) test.skip(true, '无仅 bin fail 行')
+
+    const binRow = await ensureRowRendered(page, info.binOnlyIdx)
+    const hScroll = page.locator('.ag-body-horizontal-scroll-viewport')
+    const before = await hScroll.evaluate((el) => el.scrollLeft)
+
+    const binCell = binRow.locator('.ag-cell').first()
+    await binCell.click({ button: 'right' })
+    const menu = page.locator('.bin-cell-menu')
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    await menu.locator('.bin-cell-menu__item').click()
+    await expect(menu).not.toBeVisible({ timeout: 3_000 })
+
+    // pinned bin 单元格 flash（目标列即 bin 列本身，无需横向滚动）
+    await expect
+      .poll(async () => (await binCell.getAttribute('class')) ?? '', { timeout: 3_000 })
+      .toContain('ag-cell-data-changed')
+    expect(await hScroll.evaluate((el) => el.scrollLeft)).toBe(before)
   })
 })

@@ -180,3 +180,60 @@ class AggregateUphTests(TestCase):
             self.assertIn(key, agg)
         for s in agg['by_site']:
             self.assertEqual(set(s.keys()), {'site', 'tested', 'uph'})
+
+
+# ── generate_report API 测试（2026-08-04 迁移 excelize 后新增）──
+
+import io
+import os
+
+import openpyxl
+from django.contrib.auth import get_user_model
+from rest_framework.test import APITestCase
+
+from apps.datafiles.models import DataFile
+
+User = get_user_model()
+
+SAMPLE_GAGE = os.path.join(
+    os.path.dirname(__file__), '..', '..', 'Data', 'SampleData', 'Gage', 'gage_m_S1.csv',
+)
+
+
+class GenerateReportApiTests(APITestCase):
+    """POST /api/v1/batch-report/generate_report/：excelize 生成批次报表。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='batchuser', password='pw')
+        self.client.force_authenticate(self.user)
+        self.f1 = DataFile.objects.create(
+            owner=self.user, filename='gage_m_S1.csv', file_path=SAMPLE_GAGE,
+            file_size=os.path.getsize(SAMPLE_GAGE), format_type='CTA8290D',
+            file_type='batch', batch_name='BATCH1', status='ready',
+        )
+
+    def test_generate_report_excel(self):
+        """200 + FileResponse 头 + 7 列表头与数据行可读回。"""
+        resp = self.client.post('/api/v1/batch-report/generate_report/',
+                                {'file_ids': [self.f1.id]}, format='json')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            resp['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        self.assertIn('attachment', resp['Content-Disposition'])
+        buf = b''.join(resp.streaming_content)
+        ws = openpyxl.load_workbook(io.BytesIO(buf))['Batch Report']
+        headers = [ws.cell(1, c).value for c in range(1, 8)]
+        self.assertEqual(headers, ['文件名', '程序', '格式', '总数', 'Pass', 'Fail', '良率'])
+        self.assertEqual(ws.max_row, 2, '表头 + 1 个数据文件行')
+        self.assertEqual(ws.cell(2, 1).value, 'gage_m_S1.csv')
+        self.assertIn('%', ws.cell(2, 7).value, '良率列应为百分比字符串')
+        # 表头样式（excelize make_header_style 深色底）
+        self.assertEqual(ws.cell(1, 1).fill.start_color.rgb.upper(), 'FF2C3E50')
+
+    def test_generate_report_no_files(self):
+        """file_ids 为空 → 400。"""
+        resp = self.client.post('/api/v1/batch-report/generate_report/',
+                                {'file_ids': []}, format='json')
+        self.assertEqual(resp.status_code, 400)

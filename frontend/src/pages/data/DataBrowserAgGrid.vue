@@ -58,6 +58,7 @@
           :suppressFieldDotNotation="true"
           :animateRows="true"
           :rowClassRules="rowClassRules"
+          @grid-ready="onGridReady"
         />
         <el-empty v-else-if="dataLoaded" description="没有匹配的数据" :image-size="80" />
       </div>
@@ -70,6 +71,18 @@
       :param="analyzeParam"
       :unit="colMeta[analyzeParam]?.unit ?? ''"
       @close="histDialogVisible = false"
+    />
+
+    <!-- 固定 Bin 列 fail 单元格右键菜单（定位到该行 Fail 单元格） -->
+    <BinCellContextMenu
+      :visible="binMenuVisible"
+      :x="binMenuX"
+      :y="binMenuY"
+      :row-index="binMenuRowIndex"
+      :bin-value="binMenuBinValue"
+      :fail-cols="binMenuFailCols"
+      @close="closeBinMenu"
+      @goto-fail="goToFailCell"
     />
   </div>
 </template>
@@ -85,6 +98,8 @@ import { useFilesStore } from '../../stores/files'
 import DataBrowserToolbar from './components/browser/DataBrowserToolbar.vue'
 import HistogramColumnDialog from './components/browser/HistogramColumnDialog.vue'
 import DataQualityBar from './components/browser/DataQualityBar.vue'
+import BinCellContextMenu from './components/browser/BinCellContextMenu.vue'
+import { useBinCellMenu } from './composables/useBinCellMenu'
 
 // Register ag-grid modules (required since v33+)
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community'
@@ -135,19 +150,24 @@ const analyzeParam = ref('')
 /**
  * 右键列头 → 打开该列分布直方图。
  * ag-grid 表头单元格渲染 col-id 属性，事件委托无需自定义 headerComponent；
- * body 单元格右键放行（保留浏览器复制菜单）。
+ * 右键固定 Bin 列 fail 单元格 → 弹定位菜单（handleBodyContextMenu 内部 preventDefault）；
+ * 其余 body 单元格右键放行（保留浏览器复制菜单）。
  */
 function onGridContextMenu(e: MouseEvent) {
+  closeBinMenu() // 任何右键先关旧菜单
   const header = (e.target as HTMLElement).closest('.ag-header-cell')
-  if (!header) return
-  e.preventDefault()
-  const col = header.getAttribute('col-id')
-  if (!col || !allCols.value.includes(col)) return
-  // 非数值列（Serial 等）不弹
-  const v = rowData.value[0]?.[col]
-  if (v === null || v === undefined || v === '' || Number.isNaN(Number(v))) return
-  analyzeParam.value = col
-  histDialogVisible.value = true
+  if (header) {
+    e.preventDefault()
+    const col = header.getAttribute('col-id')
+    if (!col || !allCols.value.includes(col)) return
+    // 非数值列（Serial 等）不弹
+    const v = rowData.value[0]?.[col]
+    if (v === null || v === undefined || v === '' || Number.isNaN(Number(v))) return
+    analyzeParam.value = col
+    histDialogVisible.value = true
+    return
+  }
+  handleBodyContextMenu(e)
 }
 
 // System columns that should appear first
@@ -195,6 +215,20 @@ const displayCols = computed(() => {
 
   return cols
 })
+
+// ── 固定 Bin 列 fail 单元格右键菜单（判定链 + 定位逻辑见 composable） ──
+const {
+  visible: binMenuVisible,
+  x: binMenuX,
+  y: binMenuY,
+  rowIndex: binMenuRowIndex,
+  binValue: binMenuBinValue,
+  failCols: binMenuFailCols,
+  onGridReady,
+  close: closeBinMenu,
+  handleBodyContextMenu,
+  goToFailCell,
+} = useBinCellMenu({ pinnedCol, displayCols })
 
 // ── Site 本地过滤 ──
 const siteCol = computed(() => {
@@ -319,7 +353,11 @@ watch(() => filesStore.filesVersion, () => {
   if (props.fileId) loadData()
 })
 
+// Site 本地筛选触发行重排 → 右键菜单索引失效，关闭
+watch(filteredRowData, () => closeBinMenu())
+
 function clearGrid() {
+  closeBinMenu()
   rowData.value = []
   allCols.value = []
   colMeta.value = {}
@@ -331,6 +369,7 @@ async function loadData() {
     clearGrid()
     return
   }
+  closeBinMenu()
   const seq = ++loadSeq
   loading.value = true
   try {
@@ -472,6 +511,8 @@ function downloadBlob(data: Blob, filename: string) {
   --ag-header-column-separator-color: var(--border-default);
   --ag-input-focus-border-color: var(--brand-primary);
   --ag-range-selection-border-color: var(--brand-primary);
+  /* flashCells 定位反馈色（light：品牌蓝） */
+  --ag-value-change-value-highlight-background-color: rgba(37, 99, 235, 0.35);
 }
 
 :deep(.ag-custom-theme.ag-theme-quartz .ag-row.row-odd) {
@@ -541,5 +582,10 @@ function downloadBlob(data: Blob, filename: string) {
 /* Brand-accent selection row */
 :root.theme-night .ag-custom-theme.ag-theme-quartz .ag-row-selected {
   background-color: rgba(79, 172, 254, 0.18) !important;
+}
+
+/* flashCells 定位反馈色（dark：琥珀黄，与暗色系对比明显） */
+:root.theme-night .ag-custom-theme.ag-theme-quartz {
+  --ag-value-change-value-highlight-background-color: rgba(253, 216, 53, 0.4);
 }
 </style>
