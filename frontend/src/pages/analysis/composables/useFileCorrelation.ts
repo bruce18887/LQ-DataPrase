@@ -5,7 +5,6 @@ import { ElMessage } from 'element-plus'
 export function useFileCorrelation() {
   const { loading, data: result, run } = useAsyncData<any>({
     successMsg: '文件相关性分析完成',
-    errorMsg: '文件相关性分析失败',
   })
 
   async function loadFileCorrelation(file1: number, file2: number, threshold: number) {

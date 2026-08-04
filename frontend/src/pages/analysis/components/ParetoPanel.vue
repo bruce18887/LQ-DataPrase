@@ -106,7 +106,7 @@ async function loadData() {
     ElMessage.success('Pareto 数据加载成功')
   } catch (error: any) {
     console.error('Failed to load Pareto data:', error)
-    ElMessage.error(error.response?.data?.error || '加载 Pareto 数据失败')
+    // 错误 toast 由 axios 拦截器统一弹出
   } finally {
     loading.value = false
   }

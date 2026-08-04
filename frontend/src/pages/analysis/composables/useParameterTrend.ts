@@ -9,7 +9,6 @@ export function useParameterTrend(
 ) {
   const { loading, data: trendData, run } = useAsyncData<any>({
     successMsg: '参数趋势数据加载成功',
-    errorMsg: '加载参数趋势数据失败',
   })
 
   async function loadParameterTrend() {

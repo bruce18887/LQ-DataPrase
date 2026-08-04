@@ -190,24 +190,11 @@ async function onFileChange() {
     }
     // Mark this file as loaded so onActivated won't reload unnecessarily
     loadedFileId.value = selectedFileId.value
-  } catch (err: any) {
-    // Surface the error so silent 400s (e.g. stale file_path after the
-    // project root moved) don't look like "no loading happened". The
-    // server payload is a small JSON object with a single `error` key,
-    // e.g. {"error": "file_not_found_or_parse_failed"}.
-    const serverMsg = err?.response?.data?.error
-    const fallback = err?.message || '加载文件参数失败'
-    const detail = _ERROR_LABELS[serverMsg] || serverMsg || fallback
-    ElMessage.error(`无法加载文件参数：${detail}`)
+  } catch {
+    // 错误 toast 由 axios 拦截器统一弹出（ERROR_CODE_MAP 覆盖机器码文案）
   } finally {
     loading.value = false
   }
-}
-
-const _ERROR_LABELS: Record<string, string> = {
-  file_id_required: '请求缺少 file_id',
-  file_not_found: '文件不存在或已删除',
-  file_not_found_or_parse_failed: '文件在磁盘上找不到，或解析失败',
 }
 
 // ========== Wafer ==========

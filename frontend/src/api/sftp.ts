@@ -1,3 +1,5 @@
+import type { AxiosRequestConfig } from 'axios'
+
 import api from './index'
 
 export interface SseProgressData {
@@ -56,8 +58,8 @@ export const sftpApi = {
   connect(payload: SftpConnectPayload) {
     return api.post('/sftp/connect/', payload)
   },
-  disconnect() {
-    return api.post('/sftp/disconnect/')
+  disconnect(config?: AxiosRequestConfig) {
+    return api.post('/sftp/disconnect/', undefined, config)
   },
   listFiles(path: string, sortBy = 'name', sortOrder = 'asc') {
     return api.get('/sftp/list_files/', { params: { path, sort_by: sortBy, sort_order: sortOrder } })
@@ -80,8 +82,8 @@ export const sftpApi = {
   getConfigs() {
     return api.get('/sftp/configs/')
   },
-  saveConfig(payload: { name: string; host: string; port: number; username: string; password?: string }) {
-    return api.post('/sftp/save_config/', payload)
+  saveConfig(payload: { name: string; host: string; port: number; username: string; password?: string }, config?: AxiosRequestConfig) {
+    return api.post('/sftp/save_config/', payload, config)
   },
   deleteConfig(payload: { name?: string; id?: number }) {
     return api.post('/sftp/delete_config/', payload)

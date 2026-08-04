@@ -1,103 +1,97 @@
 <template>
   <div>
-    <!-- 控制栏 -->
-    <el-row :gutter="12" style="margin-bottom: 12px">
-      <el-col :span="6">
-        <el-input v-model="searchCol" placeholder="搜索列名…" clearable aria-label="搜索" />
-      </el-col>
-      <el-col :span="4">
-        <el-select v-model="searchTestCol" placeholder="搜索测试项" clearable aria-label="搜索列">
-          <el-option label="全部显示" value="" />
-          <el-option v-for="c in allCols" :key="c" :label="c" :value="c" />
-        </el-select>
-      </el-col>
-      <el-col :span="3">
-        <el-select v-model="passfail" placeholder="Pass/Fail筛选" aria-label="Pass/Fail筛选">
-          <el-option label="全部" value="" />
-          <el-option label="Pass" value="Pass" />
-          <el-option label="Fail" value="Fail" />
-        </el-select>
-      </el-col>
-      <el-col :span="3">
-        <el-select v-model="siteFilter" placeholder="Site筛选" aria-label="站点筛选">
-          <el-option label="全部 Site" value="" />
-          <el-option v-for="s in 8" :key="s" :label="'Site ' + s" :value="String(s)" />
-        </el-select>
-      </el-col>
-      <el-col :span="4">
-        <el-select v-model="autosizeMode" placeholder="列宽自适应" aria-label="列宽模式">
-          <el-option label="适应内容宽度" value="fitCellContents" />
-          <el-option label="适应网格宽度" value="fitGridWidth" />
-          <el-option label="手动调整" value="none" />
-        </el-select>
-      </el-col>
-      <el-col :span="6">
-        <el-input v-model="pinnedCol" placeholder="固定列（留空则不固定）" clearable aria-label="固定列数" />
-      </el-col>
-    </el-row>
+    <!-- 控制栏（DataBrowserToolbar：筛选控件 + 全文搜索 + 操作按钮） -->
+    <DataBrowserToolbar
+      :search-col="searchCol"
+      :search-test-col="searchTestCol"
+      :passfail="passfail"
+      :site-filter="siteFilter"
+      :site-options="siteOptions"
+      :site-col-disabled="siteColDisabled"
+      :autosize-mode="autosizeMode"
+      :pinned-col="pinnedCol"
+      :hidden-cols="hiddenCols"
+      :all-cols="allCols"
+      :loading="loading"
+      :exporting-excel="exportingExcel"
+      :exporting-csv="exportingCsv"
+      @update:search-col="searchCol = $event"
+      @update:search-test-col="searchTestCol = $event"
+      @update:passfail="passfail = $event"
+      @update:site-filter="siteFilter = $event"
+      @update:autosize-mode="autosizeMode = $event"
+      @update:pinned-col="pinnedCol = $event"
+      @update:hidden-cols="hiddenCols = $event"
+      @load="loadData"
+      @export-excel="exportExcel"
+      @export-csv="exportCsv"
+    />
 
-    <!-- 操作按钮 -->
-    <el-row style="margin-bottom: 12px">
-      <el-col>
-        <el-button @click="loadData" type="primary" :loading="loading">
-          <el-icon><Refresh /></el-icon> 加载数据
-        </el-button>
-        <el-button @click="exportExcel" :loading="exporting">
-          <el-icon><Download /></el-icon> 导出 Excel
-        </el-button>
-        <el-button @click="exportCsv" :loading="exporting">
-          <el-icon><Document /></el-icon> 导出 CSV
-        </el-button>
-      </el-col>
-    </el-row>
+    <!-- 质量概览条（复用 /summary/ 接口，失败静默隐藏） -->
+    <DataQualityBar :file-id="fileId" />
 
     <!-- 数据表格 -->
     <div v-loading="loading">
       <p v-if="dataLoaded" style="margin-bottom: 8px; font-size: 14px">
         共 <b>{{ rowCount }}</b> 条数据
         <span v-if="failRowCount > 0" style="color: var(--color-error); margin-left: 12px; font-weight: bold">
-          （Fail: {{ failRowCount }} 行）
+          （Fail: {{ failRowCount }} 行<template v-if="siteFilter">，Site {{ siteFilter }} 过滤后</template>）
         </span>
       </p>
-      <div class="ag-grid-wrapper">
+      <div class="ag-grid-wrapper" :style="gridWrapperStyle" @contextmenu="onGridContextMenu">
+        <el-empty v-if="!fileId" description="请先在上方选择文件" :image-size="80">
+          <el-button type="primary" @click="emit('goto-files')">去文件列表选择</el-button>
+        </el-empty>
         <ag-grid-vue
-        v-if="dataLoaded && rowCount > 0"
-        :class="['ag-theme-quartz', isDark ? 'ag-theme-quartz-dark' : '', 'ag-custom-theme']"
-        :style="{ height: `${tableHeight}px`, width: '100%', contain: 'layout style' }"
-        :columnDefs="columnDefs"
-        :rowData="rowData"
-        :defaultColDef="defaultColDef"
-        :autoSizeStrategy="autoSizeStrategy"
-        :rowHeight="30"
-        :headerHeight="35"
-        :rowBuffer="10"
-        :enableCellTextSelection="true"
-        :ensureDomOrder="true"
-        :suppressFieldDotNotation="true"
-        :animateRows="true"
-        :rowClassRules="rowClassRules"
-      />
-      <el-empty v-else-if="dataLoaded" description="没有匹配的数据" :image-size="80" />
+          v-else-if="dataLoaded && rowCount > 0"
+          :class="['ag-theme-quartz', isDark ? 'ag-theme-quartz-dark' : '', 'ag-custom-theme']"
+          :style="{ height: `${tableHeight}px`, width: '100%', contain: 'layout style' }"
+          :columnDefs="columnDefs"
+          :rowData="filteredRowData"
+          :defaultColDef="defaultColDef"
+          :autoSizeStrategy="autoSizeStrategy"
+          :rowHeight="30"
+          :headerHeight="35"
+          :rowBuffer="10"
+          :enableCellTextSelection="true"
+          :ensureDomOrder="true"
+          :suppressFieldDotNotation="true"
+          :animateRows="true"
+          :rowClassRules="rowClassRules"
+        />
+        <el-empty v-else-if="dataLoaded" description="没有匹配的数据" :image-size="80" />
       </div>
     </div>
+
+    <!-- 列直方图对话框（右键列名打开，复用分析页 HistogramChart + StatsSummary） -->
+    <HistogramColumnDialog
+      :visible="histDialogVisible"
+      :file-id="props.fileId"
+      :param="analyzeParam"
+      :unit="colMeta[analyzeParam]?.unit ?? ''"
+      @close="histDialogVisible = false"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { AgGridVue } from 'ag-grid-vue3'
 import { ElMessage } from 'element-plus'
-import { Refresh, Download, Document } from '@element-plus/icons-vue'
 import api from '../../api'
+import { datafilesApi } from '../../api/datafiles'
 import { useThemeStore } from '../../stores/theme'
 import { useFilesStore } from '../../stores/files'
+import DataBrowserToolbar from './components/browser/DataBrowserToolbar.vue'
+import HistogramColumnDialog from './components/browser/HistogramColumnDialog.vue'
+import DataQualityBar from './components/browser/DataQualityBar.vue'
 
 // Register ag-grid modules (required since v33+)
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community'
 ModuleRegistry.registerModules([AllCommunityModule])
 
-const props = defineProps<{ fileId: number | null }>()
-const emit = defineEmits<{ 'file-missing': [] }>()
+const props = defineProps<{ fileId: number | null; fileName?: string }>()
+const emit = defineEmits<{ 'file-missing': []; 'goto-files': [] }>()
 const themeStore = useThemeStore()
 const filesStore = useFilesStore()
 const isDark = computed(() => themeStore.currentTheme === 'night')
@@ -108,15 +102,53 @@ const passfail = ref('')
 const siteFilter = ref('')
 const autosizeMode = ref('none')
 const pinnedCol = ref('')
+const hiddenCols = ref<string[]>([])
 const loading = ref(false)
-const exporting = ref(false)
+const exportingExcel = ref(false)
+const exportingCsv = ref(false)
 const dataLoaded = ref(false)
-const tableHeight = ref(700)
+
+// 表格高度随视口自适应（页头 + tab + 横幅 + 控制栏约 320px 固定占位）
+const TABLE_TOP_OFFSET = 320
+const tableHeight = ref(Math.max(320, window.innerHeight - TABLE_TOP_OFFSET))
+function onResize() {
+  tableHeight.value = Math.max(320, window.innerHeight - TABLE_TOP_OFFSET)
+}
+onMounted(() => window.addEventListener('resize', onResize))
+onUnmounted(() => window.removeEventListener('resize', onResize))
+
+const gridWrapperStyle = computed(() => ({
+  containIntrinsicSize: `auto ${tableHeight.value}px`,
+}))
 
 const allCols = ref<string[]>([])
 const rowData = ref<Record<string, any>[]>([])
 const colMeta = ref<Record<string, { unit: string; min: string; max: string }>>({})
-const failRowCount = ref(0)
+
+// 请求竞态防护：快速切换筛选时丢弃过期响应
+let loadSeq = 0
+
+// ── 列直方图（右键列名打开） ──
+const histDialogVisible = ref(false)
+const analyzeParam = ref('')
+
+/**
+ * 右键列头 → 打开该列分布直方图。
+ * ag-grid 表头单元格渲染 col-id 属性，事件委托无需自定义 headerComponent；
+ * body 单元格右键放行（保留浏览器复制菜单）。
+ */
+function onGridContextMenu(e: MouseEvent) {
+  const header = (e.target as HTMLElement).closest('.ag-header-cell')
+  if (!header) return
+  e.preventDefault()
+  const col = header.getAttribute('col-id')
+  if (!col || !allCols.value.includes(col)) return
+  // 非数值列（Serial 等）不弹
+  const v = rowData.value[0]?.[col]
+  if (v === null || v === undefined || v === '' || Number.isNaN(Number(v))) return
+  analyzeParam.value = col
+  histDialogVisible.value = true
+}
 
 // System columns that should appear first
 const SYSTEM_COLS = ['SOFT_BIN', 'SW_Bin', 'HARD_BIN', 'Site', 'SITE', 'site', 'X', 'Y', 'x', 'y', 'Serial', 'SERIAL', 'serial', 'Wafer', 'WAFER', 'wafer', 'Device', 'DEVICE', 'device']
@@ -133,6 +165,11 @@ const displayCols = computed(() => {
   if (searchCol.value) {
     const q = searchCol.value.toLowerCase()
     cols = cols.filter(c => c.toLowerCase().includes(q))
+  }
+
+  // 用户主动隐藏的列
+  if (hiddenCols.value.length) {
+    cols = cols.filter((c) => !hiddenCols.value.includes(c))
   }
 
   // Sort: system first
@@ -159,7 +196,34 @@ const displayCols = computed(() => {
   return cols
 })
 
-const rowCount = computed(() => rowData.value.length)
+// ── Site 本地过滤 ──
+const siteCol = computed(() => {
+  if (!allCols.value.length) return ''
+  return allCols.value.find((c) => /site/i.test(c) && isSystemCol(c)) ?? ''
+})
+const siteColDisabled = computed(() => !siteCol.value)
+const siteOptions = computed(() => {
+  if (!siteCol.value) return []
+  const seen = new Set<string>()
+  for (const r of rowData.value) {
+    const v = r[siteCol.value]
+    if (v !== null && v !== undefined && v !== '') seen.add(String(v))
+  }
+  return [...seen].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+})
+
+/** 表格实际显示的行（Site 本地过滤，与导出 site_filter 语义一致） */
+const filteredRowData = computed(() => {
+  if (!siteFilter.value || !siteCol.value) return rowData.value
+  return rowData.value.filter((r) => String(r[siteCol.value]) === siteFilter.value)
+})
+
+const rowCount = computed(() => filteredRowData.value.length)
+
+/** Fail 行数：基于过滤后行本地计算（后端 fail_row_count 是文件级全量，与筛选语义不一致） */
+const failRowCount = computed(() =>
+  filteredRowData.value.filter((r) => (JSON.parse(r.__fail_cells__ ?? '[]') as string[]).length > 0).length
+)
 
 const columnDefs = computed<any[]>(() => {
   const defs: any[] = []
@@ -237,15 +301,17 @@ const rowClassRules = {
 watch(
   () => props.fileId,
   () => {
+    // 切换文件后 Site/隐藏列选项属于旧文件，重置避免误导
+    siteFilter.value = ''
+    hiddenCols.value = []
     if (props.fileId) loadData()
     else clearGrid()
   }
 )
 
-watch([passfail], () => {
-  if (dataLoaded.value) {
-    loadData()
-  }
+// Pass/Fail 切换即重新加载（含未加载数据时预先选择，选文件后按当前筛选生效）
+watch(passfail, () => {
+  if (props.fileId) loadData()
 })
 
 // 文件变更（删除等）后重新校验当前文件；若已被删除，后端 404 → 清空表格。
@@ -257,44 +323,50 @@ function clearGrid() {
   rowData.value = []
   allCols.value = []
   colMeta.value = {}
-  failRowCount.value = 0
   dataLoaded.value = false
 }
 
 async function loadData() {
+  if (!props.fileId) {
+    clearGrid()
+    return
+  }
+  const seq = ++loadSeq
   loading.value = true
   try {
-    const resp = await api.get('/browse/', {
-      params: {
-        datafile_id: props.fileId,
-        page_size: 99999,
-        pass_filter: passfail.value,
-      },
+    const resp = await datafilesApi.browse({
+      datafile_id: props.fileId,
+      page_size: 99999,
+      pass_filter: passfail.value,
     })
+    if (seq !== loadSeq) return // 已有更新的请求，丢弃本次响应
+    const data = resp.data
 
-    allCols.value = (resp.data.headers as string[]) ?? []
-    failRowCount.value = resp.data.fail_row_count ?? 0
+    allCols.value = data.headers ?? []
 
-    const rawColMeta = (resp.data.col_meta ?? {}) as Record<string, { unit: string; min: string; max: string }>
+    const rawColMeta = (data.col_meta ?? {}) as Record<string, { unit: string; min: string; max: string }>
     colMeta.value = rawColMeta
 
+    const binCol = data.bin_column as string
     if (!pinnedCol.value) {
-      const binCol = resp.data.bin_column as string
+      // 首次加载：自动固定 Bin 列
       if (binCol && allCols.value.includes(binCol)) {
         pinnedCol.value = binCol
       }
+    } else if (!allCols.value.includes(pinnedCol.value)) {
+      // 切换文件后旧固定列失效：回退到 Bin 列
+      pinnedCol.value = binCol && allCols.value.includes(binCol) ? binCol : ''
     }
 
-    rowData.value = (resp.data.rows as Record<string, any>[]) ?? []
+    rowData.value = (data.rows as Record<string, any>[]) ?? []
 
     dataLoaded.value = true
   } catch (e: any) {
     if (e?.response?.status === 404) {
       // 文件已被删除：清空残留表格并通知父级重置 activeFileId。
+      // （错误 toast 由 axios 拦截器统一弹出）
       clearGrid()
       emit('file-missing')
-    } else {
-      ElMessage.error('加载失败')
     }
   } finally {
     loading.value = false
@@ -302,35 +374,56 @@ async function loadData() {
 }
 
 async function exportExcel() {
-  exporting.value = true
+  exportingExcel.value = true
   try {
     const resp = await api.post(
       '/export/to_excel/',
       { file_id: props.fileId, passfail: passfail.value, site_filter: siteFilter.value },
-      { responseType: 'blob' }
+      // 大文件（万行×百列）excelize 导出可达数十秒，必须单独放宽超时（全局 30s 会 abort → Broken pipe）
+      { responseType: 'blob', timeout: 600000 }
     )
-    downloadBlob(resp.data as Blob, 'export.xlsx')
+    downloadBlob(resp.data as Blob, resolveExportName(resp.headers as Record<string, string>, 'export.xlsx', '_analysis.xlsx'))
   } catch {
-    ElMessage.error('导出失败')
+    // 错误 toast 由 axios 拦截器统一弹出
   } finally {
-    exporting.value = false
+    exportingExcel.value = false
   }
 }
 
 async function exportCsv() {
-  exporting.value = true
+  exportingCsv.value = true
   try {
     const resp = await api.post(
       '/export/to_csv/',
       { file_id: props.fileId, passfail: passfail.value, site_filter: siteFilter.value },
-      { responseType: 'blob' }
+      { responseType: 'blob', timeout: 600000 }
     )
-    downloadBlob(resp.data as Blob, 'export.csv')
+    downloadBlob(resp.data as Blob, resolveExportName(resp.headers as Record<string, string>, 'export.csv', '_data.csv'))
   } catch {
-    ElMessage.error('导出失败')
+    // 错误 toast 由 axios 拦截器统一弹出
   } finally {
-    exporting.value = false
+    exportingCsv.value = false
   }
+}
+
+/** 导出文件名：优先解析后端 Content-Disposition，其次用文件名兜底，最后默认名 */
+function resolveExportName(headers: Record<string, string>, fallback: string, suffix: string): string {
+  const cd = headers['content-disposition']
+  if (cd) {
+    const star = /filename\*\s*=\s*(?:UTF-8'')?([^;]+)/i.exec(cd)
+    if (star) return sanitizeFilename(decodeURIComponent(star[1].trim()))
+    const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(cd)
+    if (plain) return sanitizeFilename(plain[1].trim())
+  }
+  if (props.fileName) {
+    const base = props.fileName.replace(/\.csv$/i, '')
+    return sanitizeFilename(`${base}${suffix}`)
+  }
+  return fallback
+}
+
+function sanitizeFilename(name: string): string {
+  return name.replace(/[\\/:*?"<>|]/g, '_')
 }
 
 function downloadBlob(data: Blob, filename: string) {
@@ -338,8 +431,14 @@ function downloadBlob(data: Blob, filename: string) {
   const a = document.createElement('a')
   a.href = url
   a.download = filename
+  a.style.display = 'none'
+  document.body.appendChild(a)
   a.click()
-  URL.revokeObjectURL(url)
+  // 延迟 revoke：确保浏览器已开始下载 blob（立即 revoke 可能导致下载中断）
+  setTimeout(() => {
+    URL.revokeObjectURL(url)
+    a.remove()
+  }, 1000)
   ElMessage.success('下载完成')
 }
 </script>
@@ -424,24 +523,6 @@ function downloadBlob(data: Blob, filename: string) {
 :deep(.ag-custom-theme.ag-theme-quartz .ag-header-cell-sorted-asc .ag-header-cell-label,
       .ag-custom-theme.ag-theme-quartz .ag-header-cell-sorted-desc .ag-header-cell-label) {
   color: var(--text-primary);
-}
-
-:deep(.el-input) {
-  --el-input-bg-color: var(--bg-primary);
-  --el-input-border-color: var(--border-default);
-  --el-input-hover-border-color: var(--brand-primary);
-  --el-input-focus-border-color: var(--brand-primary);
-  --el-input-text-color: var(--text-primary);
-  --el-input-placeholder-color: var(--text-secondary);
-}
-
-:deep(.el-input__wrapper) {
-  background-color: var(--bg-primary);
-  border-radius: 8px;
-}
-
-:deep(.el-select) {
-  --el-select-input-focus-border-color: var(--brand-primary);
 }
 </style>
 

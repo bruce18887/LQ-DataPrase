@@ -64,6 +64,14 @@ declare global {
      */
     __backendUrl__?: string
   }
+
+  // 构建时由 vite.config.ts 注入的应用元数据
+  /** 应用版本（单一事实源：根 package.json，与 electron-builder 打包版本一致） */
+  const __APP_VERSION__: string
+  /** 构建时 git short-hash，排障用 */
+  const __BUILD_COMMIT__: string
+  /** 构建日期（YYYY-MM-DD） */
+  const __BUILD_DATE__: string
 }
 
 export {}

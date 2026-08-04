@@ -37,7 +37,7 @@ async function exportHtml() {
     window.URL.revokeObjectURL(url)
   } catch (error) {
     console.error('导出失败:', error)
-    ElMessage.error('导出 HTML 报表失败，请稍后重试')
+    // 错误 toast 由 axios 拦截器统一弹出
   } finally {
     exporting.value = false
   }

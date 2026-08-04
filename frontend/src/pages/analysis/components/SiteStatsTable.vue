@@ -6,16 +6,17 @@
       :data="siteStats"
       size="small"
       :border="true"
+      scrollbar-always-on
       :row-class-name="siteRowClass"
       :header-cell-style="{ background: '#f5f5f5', fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
       :cell-style="{ fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
       table-layout="auto"
     >
-      <el-table-column prop="Site" label="Site" align="center" />
-      <el-table-column prop="Yield" label="Yield" align="center" />
-      <el-table-column prop="FailCount" label="Fail" align="center" />
-      <el-table-column prop="ExceedMin" label="&lt;Min" align="center" />
-      <el-table-column prop="ExceedMax" label="&gt;Max" align="center" />
+      <el-table-column prop="Site" label="Site" align="center" min-width="65" />
+      <el-table-column prop="Yield" label="Yield" align="center" min-width="75" />
+      <el-table-column prop="FailCount" label="Fail" align="center" min-width="55" />
+      <el-table-column prop="ExceedMin" label="&lt;Min" align="center" min-width="60" />
+      <el-table-column prop="ExceedMax" label="&gt;Max" align="center" min-width="60" />
     </el-table>
     <el-empty v-else-if="!siteStatsError" description="暂无数据" :image-size="40" />
     <div v-else class="error-msg">

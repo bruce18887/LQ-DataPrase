@@ -61,13 +61,19 @@
             placeholder="请选择一个文件"
             filterable
             clearable
+            aria-label="当前文件"
             class="banner-file-select"
             @update:model-value="onActiveFileSelect"
           >
             <el-option v-for="f in files" :key="f.id" :label="f.filename" :value="f.id" />
           </el-select>
         </div>
-        <DataBrowserAgGrid :file-id="activeFileId" @file-missing="onFileMissing" />
+        <DataBrowserAgGrid
+          :file-id="activeFileId"
+          :file-name="activeFileName"
+          @file-missing="onFileMissing"
+          @goto-files="activeTab = 'files'"
+        />
       </div>
 
       <!-- 导出工具 -->
@@ -80,6 +86,7 @@
             placeholder="请选择一个文件"
             filterable
             clearable
+            aria-label="当前文件"
             class="banner-file-select"
             @update:model-value="onActiveFileSelect"
           >
@@ -108,7 +115,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onActivated, watch } from 'vue'
+import { ref, computed, onMounted, onActivated, watch } from 'vue'
 import api from '../../api'
 import { useFilesStore } from '../../stores/files'
 import FileListTab from './components/FileListTab.vue'
@@ -136,7 +143,8 @@ const tabs = [
 
 async function loadFiles() {
   try {
-    const { data } = await api.get('/files/')
+    // 查看数据/导出工具顶部的文件下拉需能选任意文件，不能受默认分页（20 条）限制
+    const { data } = await api.get('/files/', { params: { page_size: 9999 } })
     files.value = data.results || data
   } catch {
     files.value = []
@@ -147,6 +155,12 @@ function viewFile(id: number, _filename?: string) {
   activeFileId.value = id
   activeTab.value = 'view'
 }
+
+// 当前查看文件的文件名（供导出文件名兜底解析）
+const activeFileName = computed(() => {
+  const f = files.value.find((f: any) => f.id === activeFileId.value)
+  return f?.filename ?? undefined
+})
 
 function onRowClick(id: number, _filename?: string) {
   activeFileId.value = id

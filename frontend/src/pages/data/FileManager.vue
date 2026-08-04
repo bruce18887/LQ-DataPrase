@@ -266,7 +266,7 @@ async function handleUpload(options: { file: File }) {
     await loadAllTags()
     filesStore.notifyFilesChanged()
   } catch {
-    ElMessage.error(`${options.file.name} 上传失败`)
+    // 错误 toast 由 axios 拦截器统一弹出
   } finally {
     uploadProgress.value = 0
   }
@@ -303,8 +303,8 @@ async function importDir(dir: BatchDirInfo) {
     ElMessage.success(`批次 "${dir.name}" 已导入`)
     await Promise.all([loadFiles(), loadBatchDirs()])
     filesStore.notifyFilesChanged()
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.error || '导入失败')
+  } catch {
+    // 错误 toast 由 axios 拦截器统一弹出
   } finally {
     importingDir.value = ''
   }
@@ -321,10 +321,8 @@ async function deleteDir(dir: BatchDirInfo) {
     ElMessage.success(`目录 "${dir.name}" 已删除`)
     await Promise.all([loadFiles(), loadBatchDirs()])
     filesStore.notifyFilesChanged()
-  } catch (e: any) {
-    if (e !== 'cancel') {
-      ElMessage.error(e?.response?.data?.error || '删除失败')
-    }
+  } catch {
+    // ElMessageBox 取消 reject "cancel"；真实错误 toast 由拦截器弹出
   }
 }
 
@@ -340,10 +338,8 @@ async function deleteFile(file: DataFile) {
     await loadFiles()
     await loadAllTags()
     filesStore.notifyFilesChanged()
-  } catch (e: any) {
-    if (e !== 'cancel') {
-      ElMessage.error('删除失败')
-    }
+  } catch {
+    // ElMessageBox 取消 reject "cancel"；真实错误 toast 由拦截器弹出
   }
 }
 
@@ -362,10 +358,8 @@ async function deleteBatch(group: { name: string; files: DataFile[] }) {
     await loadFiles()
     await loadAllTags()
     filesStore.notifyFilesChanged()
-  } catch (e: any) {
-    if (e !== 'cancel') {
-      ElMessage.error('删除失败')
-    }
+  } catch {
+    // ElMessageBox 取消 reject "cancel"；真实错误 toast 由拦截器弹出
   }
 }
 

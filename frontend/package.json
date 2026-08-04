@@ -1,7 +1,7 @@
 {
   "name": "lq-dataprase",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "LQ-DataPrase 数据分析平台",
   "author": "LQ-DataPrase Team",
   "type": "module",

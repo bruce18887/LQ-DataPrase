@@ -325,10 +325,8 @@ async function deleteFile(row: any) {
     ElMessage.success('文件已删除')
     await loadFiles()
     filesStore.notifyFilesChanged()
-  } catch (e: any) {
-    if (e !== 'cancel') {
-      ElMessage.error('删除失败')
-    }
+  } catch {
+    // ElMessageBox 取消 reject "cancel"；真实错误 toast 由拦截器弹出
   }
 }
 
@@ -351,8 +349,8 @@ async function onBulkDelete() {
     }
     await loadFiles()
     filesStore.notifyFilesChanged()
-  } catch (e: any) {
-    if (e !== 'cancel') ElMessage.error('批量删除失败')
+  } catch {
+    // ElMessageBox 取消 reject "cancel"；真实错误 toast 由拦截器弹出
   }
 }
 

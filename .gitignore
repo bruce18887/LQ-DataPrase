@@ -129,6 +129,7 @@ DEBUG_*.md
 /docs/plans/
 /docs/specs/
 /docs/tasks/
+/docs/user-guide/
 # AI 助手与样式指南文档
 apps/CLAUDE.md
 frontend/CLAUDE.md

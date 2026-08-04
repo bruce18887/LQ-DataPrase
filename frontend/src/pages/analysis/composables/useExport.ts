@@ -1,4 +1,6 @@
 import { ref } from 'vue'
+import type { AxiosRequestConfig } from 'axios'
+
 import api from '../../../api'
 
 function extractFilename(contentDisposition: string | null | undefined): string | null {
@@ -21,7 +23,11 @@ export function useExport(
     window.URL.revokeObjectURL(url)
   }
 
-  async function exportSigmaLimit(sigma: number, options?: { onlyValidLimits?: boolean }) {
+  async function exportSigmaLimit(
+    sigma: number,
+    options?: { onlyValidLimits?: boolean },
+    requestConfig?: AxiosRequestConfig,
+  ) {
     const fileId = getSelectedFileId()
     if (!fileId) return
     exporting.value = true
@@ -30,7 +36,7 @@ export function useExport(
         file_id: fileId,
         sigma,
         only_valid_limits: options?.onlyValidLimits ?? true,
-      }, { responseType: 'blob' })
+      }, { responseType: 'blob', ...requestConfig })
       const fname = extractFilename(resp.headers?.['content-disposition']) || `sigma_limit_${sigma}sigma.xlsx`
       downloadBlob(resp.data as Blob, fname)
     } catch (err) {
@@ -41,7 +47,12 @@ export function useExport(
     }
   }
 
-  async function exportBatchCharts(params: string[], format: string, options?: Record<string, any>) {
+  async function exportBatchCharts(
+    params: string[],
+    format: string,
+    options?: Record<string, any>,
+    requestConfig?: AxiosRequestConfig,
+  ) {
     const fileId = getSelectedFileId()
     if (!fileId) return
     exporting.value = true
@@ -54,6 +65,7 @@ export function useExport(
       }, {
         responseType: 'blob',
         timeout: 300000, // 5 min for large batch exports
+        ...requestConfig,
       })
       const fname = extractFilename(resp.headers?.['content-disposition']) || `batch_charts.${format === 'pptx' ? 'pptx' : 'xlsx'}`
       downloadBlob(resp.data as Blob, fname)

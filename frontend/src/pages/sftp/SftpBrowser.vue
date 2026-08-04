@@ -153,7 +153,8 @@ function onConnected() {
 }
 
 async function disconnect() {
-  try { await sftpApi.disconnect() } catch {}
+  // silent：断连失败静默处理，不弹全局错误提示（保持原有行为）
+  try { await sftpApi.disconnect({ silent: true }) } catch {}
   connected.value = false
   items.value = []
   currentPath.value = '/'
@@ -166,7 +167,7 @@ async function listFiles(path: string) {
     const { data } = await sftpApi.listFiles(path, sortBy.value, sortOrder.value)
     currentPath.value = data.path
     items.value = (data.items || []).map((item: any) => ({ ...item, _selected: false }))
-  } catch { ElMessage.error('获取文件列表失败') }
+  } catch { /* 错误 toast 由 axios 拦截器统一弹出 */ }
   finally { listLoading.value = false }
 }
 
@@ -188,7 +189,7 @@ async function downloadFile(row: any) {
   try {
     const { data } = await sftpApi.download(currentPath.value + '/' + row.name)
     ElMessage.success(`已保存: ${data.filename} (${formatSize(data.size)})`)
-  } catch { ElMessage.error('下载失败') }
+  } catch { /* 错误 toast 由 axios 拦截器统一弹出 */ }
   finally { downloadingRows.value.delete(key) }
 }
 
@@ -199,7 +200,7 @@ async function downloadAndParse(row: any) {
     await sftpApi.downloadAndParse(currentPath.value + '/' + row.name)
     ElMessage.success(`已导入: ${row.name}`)
     filesStore.notifyFilesChanged()
-  } catch { ElMessage.error('下载并解析失败') }
+  } catch { /* 错误 toast 由 axios 拦截器统一弹出 */ }
   finally { downloadingRows.value.delete(key) }
 }
 
@@ -233,7 +234,8 @@ async function downloadDirectory(dirName?: string) {
       },
     )
   } catch {
-    ElMessage.error('目录下载失败')
+    // downloadDirStream 走原生 fetch，其失败经 onError 回调提示（见上），
+    // 此处仅兜底重置下载状态。
     downloading.value = false
   }
 }
@@ -244,7 +246,7 @@ async function batchDownload() {
   try {
     const { data } = await sftpApi.downloadBatch(selectedPaths.value)
     ElMessage.success(`已保存 ${data.count} 个文件到 media 目录`)
-  } catch { ElMessage.error('批量下载失败') }
+  } catch { /* 错误 toast 由 axios 拦截器统一弹出 */ }
   finally { batchDownloading.value = false }
 }
 
@@ -259,7 +261,7 @@ async function batchDownloadAndParse() {
     ElMessage.success(`已成功导入 ${data.files?.length || 0}/${selected.length} 个文件（批次: ${data.batch_name}）`)
     filesStore.notifyFilesChanged()
   } catch {
-    ElMessage.error('批量下载解析失败')
+    // 错误 toast 由 axios 拦截器统一弹出
   }
   batchParsing.value = false
 }

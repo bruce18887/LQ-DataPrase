@@ -147,20 +147,20 @@ test.describe('@p1 异常值处理', { tag: ['@p1', '@analysis'] }, () => {
 
     const outlierSelect = page.locator('.el-form-item').filter({ hasText: '异常值处理' }).locator('.el-select').first()
 
-    // Default store state is clip, so hint bar should be visible.
-    await expect(page.locator(`${SINGLE} .outlier-hint-bar`)).toBeVisible({ timeout: 10_000 })
-
-    // Switch to "不处理".
-    await outlierSelect.click()
-    await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '不处理' }).first().click()
-    await waitLoadingGone(page.locator(SINGLE))
+    // 默认状态为「不处理」，提示条应不可见。
     await expect(page.locator(`${SINGLE} .outlier-hint-bar`)).not.toBeVisible()
 
-    // Switch back to "裁剪范围".
+    // Switch to "裁剪范围" → 提示条出现。
     await outlierSelect.click()
     await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '裁剪范围' }).first().click()
     await waitLoadingGone(page.locator(SINGLE))
     await expect(page.locator(`${SINGLE} .outlier-hint-bar`)).toBeVisible({ timeout: 10_000 })
+
+    // Switch back to "不处理" → 提示条消失。
+    await outlierSelect.click()
+    await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '不处理' }).first().click()
+    await waitLoadingGone(page.locator(SINGLE))
+    await expect(page.locator(`${SINGLE} .outlier-hint-bar`)).not.toBeVisible()
   })
 
   test('RowDataLimit 下裁剪不缩小 X 轴范围且保留 Limit 线', async ({ page }) => {

@@ -15,9 +15,7 @@ export function useMultiFile() {
   const fileNames = ref<{ file_id: number; filename: string }[]>([])
 
   const { loading: paramsLoading, run: runParams } = useAsyncData<any>({ silent: true })
-  const { loading, data: lotData, run: runDist } = useAsyncData<any>({
-    errorMsg: '加载多文件分布数据失败',
-  })
+  const { loading, data: lotData, run: runDist } = useAsyncData<any>()
 
   async function loadCommonParams(fileIds: number[], ignoreNoLimit: boolean) {
     if (fileIds.length < 2) {

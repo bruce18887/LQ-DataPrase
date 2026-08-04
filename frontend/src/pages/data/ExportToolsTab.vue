@@ -82,7 +82,8 @@ watch(barWidthPercent, (val) => { analysisStore.barWidthPercent = val })
 watch(ignoreNoLimit, (val) => { analysisStore.ignoreNoLimit = val })
 
 function onExportSigma() {
-  exportSigmaLimit(localSigma.value, { onlyValidLimits: ignoreNoLimit.value }).catch(() => {
+  // silent + 页面提示：保留超时/失败的定制文案，避免与拦截器全局提示重复
+  exportSigmaLimit(localSigma.value, { onlyValidLimits: ignoreNoLimit.value }, { silent: true }).catch(() => {
     ElMessage.error('Sigma Limit 导出失败，请稍后重试')
   })
 }
@@ -95,7 +96,7 @@ function onExportBatch(format: string) {
     show_6sigma: chartConfig.value.includes('s6'),
     show_normal: chartConfig.value.includes('normal'),
   }
-  exportBatchCharts(localParams.value, format, options).catch((err: any) => {
+  exportBatchCharts(localParams.value, format, options, { silent: true }).catch((err: any) => {
     const msg = err?.code === 'ECONNABORTED' || err?.message?.includes('timeout')
       ? '导出超时，请减少参数数量后重试'
       : '批量导出失败，请稍后重试'

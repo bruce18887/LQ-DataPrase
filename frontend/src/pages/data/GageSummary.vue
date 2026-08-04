@@ -188,7 +188,7 @@ async function generate() {
     URL.revokeObjectURL(url)
     ElMessage.success('Gage Summary 已下载')
   } catch {
-    ElMessage.error('生成失败')
+    // 错误 toast 由 axios 拦截器统一弹出
   } finally {
     clearInterval(progressInterval)
     loading.value = false

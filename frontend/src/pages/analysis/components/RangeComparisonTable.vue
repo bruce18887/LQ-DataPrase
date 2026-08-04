@@ -6,16 +6,17 @@
       :data="rangeTableData"
       border
       size="small"
+      scrollbar-always-on
       :row-class-name="rangeRowClass"
       :header-cell-style="{ background: '#4a90d9', color: 'white', fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
       :cell-style="{ fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
       table-layout="auto"
     >
-      <el-table-column prop="label" label="" align="left" />
-      <el-table-column prop="low" label="Low" align="center" />
-      <el-table-column prop="high" label="High" align="center" />
-      <el-table-column prop="gap" label="Gap" align="center" />
-      <el-table-column prop="unit" label="Unit" align="center" />
+      <el-table-column prop="label" label="" align="left" min-width="95" />
+      <el-table-column prop="low" label="Low" align="center" min-width="60" />
+      <el-table-column prop="high" label="High" align="center" min-width="60" />
+      <el-table-column prop="gap" label="Gap" align="center" min-width="60" />
+      <el-table-column prop="unit" label="Unit" align="center" min-width="50" />
     </el-table>
   </el-card>
 </template>

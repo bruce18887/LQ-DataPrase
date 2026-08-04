@@ -36,7 +36,7 @@ export function usePareto(
       ElMessage.success('Pareto数据加载成功')
     } catch (error: any) {
       console.error('Failed to load Pareto data:', error)
-      ElMessage.error('加载Pareto数据失败')
+      // 错误 toast 由 axios 拦截器统一弹出
     } finally {
       loading.value = false
     }
