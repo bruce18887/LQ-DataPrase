@@ -128,16 +128,76 @@ export const datafilesApi = {
     return api.post<{ tags: string[] }>('/files/list_tags/', { prefix })
   },
 
-  // Data consistency check
+  // Data consistency check / repair center
   checkConsistency() {
-    return api.get<{
-      orphaned_db_count: number
-      orphaned_disk_count: number
-      orphaned_db: Array<{ id: number; filename: string; batch_name: string; file_path: string }>
-      orphaned_disk: string[]
-    }>('/consistency-check/')
+    return api.get<ConsistencyCheckResult>('/consistency-check/')
   },
-  fixConsistency(action: 'delete_orphaned_db' | 'delete_orphaned_disk') {
-    return api.post<{ status: string; action: string; deleted_count: number }>('/consistency-check/', { action })
+  fixConsistency(action: ConsistencyFixAction) {
+    // import/fix may reparse many files — the axios default 30s timeout is
+    // too tight for large orphan sets, so those calls get a 120s budget.
+    const config = action === 'delete_orphaned_db' || action === 'delete_orphaned_disk'
+      ? {}
+      : { timeout: 120_000 }
+    return api.post<FixConsistencyResponse>('/consistency-check/', { action }, config)
   },
+}
+
+// ── Consistency check / repair center types ──────────────────────────
+
+export interface OrphanedDbRecord {
+  id: number
+  filename: string
+  batch_name: string
+  sub_batch: string
+  file_path: string
+}
+
+export interface OrphanedDiskFile {
+  path: string
+  filename: string
+  batch_name: string
+  sub_batch: string
+}
+
+export interface MissingProductCodeFile {
+  id: number
+  filename: string
+  batch_name: string
+  sub_batch: string
+  file_type: 'single' | 'batch'
+  preview_code: string
+  reparse_needed: boolean
+  file_missing: boolean
+}
+
+export interface ConsistencyCheckResult {
+  orphaned_db_count: number
+  orphaned_db: OrphanedDbRecord[]
+  orphaned_disk_count: number
+  orphaned_disk: OrphanedDiskFile[]
+  missing_product_code_count: number
+  missing_product_code: MissingProductCodeFile[]
+}
+
+export type ConsistencyFixAction =
+  | 'delete_orphaned_db'
+  | 'delete_orphaned_disk'
+  | 'import_orphaned_disk'
+  | 'fix_product_codes'
+
+export interface FixConsistencyResponse {
+  status: string
+  action: ConsistencyFixAction
+  deleted_count?: number
+  imported_count?: number
+  skipped_count?: number
+  fixed_count?: number
+  still_missing_count?: number
+  results?: Array<{
+    id: number
+    filename: string
+    product_code: string
+    status: 'fixed' | 'still_missing'
+    reason: '' | 'no_match' | 'file_missing'
+  }>
 }

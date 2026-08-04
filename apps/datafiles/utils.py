@@ -18,20 +18,41 @@ _TEST_PROGRAM_EXTS = ('.pts', '.pgs', '.pds', '.cpts')
 
 
 def _match_product_code(text: str) -> str:
-    """Return the first B-prefix product-code token found in ``text``.
+    """Return the product-code token found in ``text``.
 
     ``text`` is split on ``_`` and each token is tested against
-    ``_PRODUCT_CODE_TOKEN``. Returns ``''`` when ``text`` is empty or no
-    token matches. Used for both data filenames and test-program basenames
-    so the same rule applies to every source.
+    ``_PRODUCT_CODE_TOKEN``. **Whole-token matches win**: a token that is
+    exactly a product code (``BPD93204``) is returned immediately, before a
+    prefix of it that merely *starts* like one. Without a whole-token match
+    the first partial match is used — the trailing characters after the
+    captured prefix are treated as unrelated (e.g. ``BPD80350XBAD`` from
+    ``BPD80350XBAD-FB``, or the ``BP01`` inside ``BP01-2605220057`` when no
+    real product code is present). Returns ``''`` when ``text`` is empty or
+    no token matches.
+
+    Why precedence matters (real filenames):
+        ``C01Q_BP01-2605220057_BPD93204_...``  -> ``BPD93204`` (whole token),
+        NOT ``BP01`` — the BP01-... token is a batch marker whose regex
+        prefix would otherwise win by position.
+        ``BPC61320A_FT_AAA_BPD60320XBAF_PD.cpts`` -> ``BPC61320A`` (first
+        whole token), NOT the longer ``BPD60320XBAF`` suffix.
+
+    Used for both data filenames and test-program basenames so the same
+    rule applies to every source.
     """
     if not text:
         return ''
+    partial = ''
     for token in text.split('_'):
         match = _PRODUCT_CODE_TOKEN.match(token)
-        if match:
-            return match.group(1)
-    return ''
+        if not match:
+            continue
+        code = match.group(1)
+        if code == token:
+            return code  # whole-token match — unambiguous, take it
+        if not partial:
+            partial = code
+    return partial
 
 
 def _program_basename(program_name: str) -> str:
@@ -65,6 +86,9 @@ def extract_product_code(filename: str, program_name: str = '') -> str:
         ``BPD93204_FT1_...csv``     -> ``BPD93204``
         ``BN281R3CYCAA_...csv``     -> ``BN281R3CYCAA`` (full token, including
                                                     alphanumeric suffix)
+        ``C01Q_BP01-2605220057_BPD93204__H0GG80#AAA12605220057__R2605230015_ETS165943_05242026.csv``
+                                    -> ``BPD93204`` (the whole token wins over
+                                    the ``BP01`` prefix of the batch marker)
 
     Fallback: if the data filename does **not** expose a B-prefix token
     (e.g. STS8200 device data named ``2604160006_x.csv``), the function
