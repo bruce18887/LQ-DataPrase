@@ -149,3 +149,76 @@ def _delete_datafile_on_disk(datafile):
                 os.remove(file_path)
     except OSError:
         pass
+
+
+def _batch_ctx(file_path, batch_base):
+    """Derive (batch_name, sub_batch) for a file under the batch base dir.
+
+    Semantics match ``BatchDirImportView.post``: batch_name is the first path
+    segment below ``batch_base``, sub_batch is everything in between (multi-level
+    subdirectories joined with os.sep). A file sitting directly in ``batch_base``
+    yields an empty batch_name (edge case, tolerated by the UI as "—").
+    """
+    rel = os.path.relpath(file_path, batch_base)
+    parts = rel.split(os.sep)
+    batch_name = parts[0] if len(parts) >= 2 else ''
+    sub_batch = os.sep.join(parts[1:-1]) if len(parts) >= 3 else ''
+    return batch_name, sub_batch
+
+
+def _resolve_product_code(filename, file_path, program_name):
+    """Full product-code extraction chain: DB program_name first, reparse fallback.
+
+    Returns ``(code, refreshed_program_name)``. ``code`` is ``''`` when neither
+    source yields a match. ``refreshed_program_name`` is the program name
+    recovered by reparsing the file header (``''`` when not reparsed or nothing
+    found) — callers may persist it so future fixes start from a warmer cache.
+    """
+    code = extract_product_code(filename, program_name)
+    if code:
+        return code, ''
+    if not os.path.exists(file_path):
+        return '', ''
+    # Reparse the file header for its test-program name (mirrors _register_file).
+    refreshed = ''
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            head = f.read(4096)
+        format_type = BaseATEParser.identify_format(head)
+        if format_type != 'Unknown':
+            df, metadata = get_parser(format_type).parse(file_path)
+            if df is not None:
+                refreshed = metadata.get('program_name', '')
+    except Exception:
+        pass
+    return extract_product_code(filename, refreshed), refreshed
+
+
+def _scan_orphaned_disk(user):
+    """Scan the user's batch dir for disk CSVs with no registered DataFile.
+
+    Returns a sorted list of ``(file_path, batch_name, sub_batch)`` tuples —
+    the single source of truth for the "orphaned disk file" set, shared by the
+    consistency check's GET (listing) and POST (import / delete) actions so the
+    set definition cannot drift.
+    """
+    batch_base = _user_upload_dir(user, 'batch')
+    registered_paths = set(
+        os.path.normpath(p) for p in
+        DataFile.objects.filter(
+            owner=user, file_type='batch'
+        ).values_list('file_path', flat=True)
+    )
+    orphans = []
+    if os.path.isdir(batch_base):
+        for root, _dirs, files in os.walk(batch_base):
+            for f in files:
+                if not _is_data_csv(f):
+                    continue
+                fp = os.path.normpath(os.path.join(root, f))
+                if fp in registered_paths:
+                    continue
+                batch_name, sub_batch = _batch_ctx(fp, batch_base)
+                orphans.append((fp, batch_name, sub_batch))
+    orphans.sort(key=lambda item: (item[1], item[0]))
+    return orphans

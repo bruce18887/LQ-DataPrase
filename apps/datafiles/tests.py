@@ -26,12 +26,46 @@ class ExtractProductCodeTests(TestCase):
             # Alphanumeric suffix is part of the product code — capture it.
             'BN281R3CYCAA_2604160006_TTTA803100.03_06_CP1_20260418161733.csv': 'BN281R3CYCAA',
             'BPD93204_FT1_ETS163550_12252024.csv': 'BPD93204',
+            # C01Q batch markers carry a BP01-... prefix that must NOT win
+            # over the real whole-token product code.
+            'C01Q_BP01-2605220057_BPD93204__H0GG80#AAA12605220057__R2605230015_ETS165943_05242026.csv': 'BPD93204',
         }
         for filename, expected in cases.items():
             with self.subTest(filename=filename):
                 # When no program_name is supplied the function falls back to
                 # the historical filename-regex behaviour.
                 self.assertEqual(extract_product_code(filename), expected)
+
+    def test_whole_token_beats_partial_prefix(self):
+        # A token that is exactly a product code wins over an earlier token
+        # whose regex only matches a prefix (the BP01 in "BP01-2605220057"
+        # is a batch marker, not the product).
+        self.assertEqual(
+            extract_product_code(
+                'C01Q_BP01-2605220057_BPD93204__H0GG80#AAA12605220057__R2605230015_ETS165943_05242026.csv',
+            ),
+            'BPD93204',
+        )
+        self.assertEqual(
+            extract_product_code('BP01-2605220057_BPD93204_QA1.csv'),
+            'BPD93204',
+        )
+        # Compound .cpts program: first whole token wins over the longer
+        # BPD60320XBAF suffix (both are whole tokens in their own right).
+        self.assertEqual(
+            extract_product_code(
+                'R2602280062_FT1-RT2-1.csv',
+                'BPC61320A_FT_AAA_BPD60320XBAF_PD.cpts',
+            ),
+            'BPC61320A',
+        )
+        # Partial match alone still works as a fallback (dash-suffix token).
+        self.assertEqual(
+            extract_product_code('BPD80350XBAD-FB_2503310007_C005X6_14_CP1_20250415194938.csv'),
+            'BPD80350XBAD',
+        )
+        # ... and a lone partial prefix remains the best available answer.
+        self.assertEqual(extract_product_code('X_BP01-2605220057.csv'), 'BP01')
 
     def test_non_matching_returns_empty(self):
         self.assertEqual(extract_product_code('gage_m_S1.csv'), '')
@@ -653,3 +687,330 @@ class FixMovedProjectPathsCommandTests(TestCase):
             call_command('fix_moved_project_paths',
                          '--old-root', self.old_root,
                          '--new-root', self.old_root)
+
+
+class ConsistencyCheckTests(APITestCase):
+    """数据修复中心：GET 三区块扫描（孤立 DB 记录 / 孤立磁盘文件 / 产品名缺失）
+    与 POST 修复动作（import_orphaned_disk / fix_product_codes），含角色权限与
+    既有 delete 动作回归。
+    """
+
+    def setUp(self):
+        # The main actor is an administrator so every action is permitted;
+        # the role matrix itself is covered by test_post_role_permissions.
+        self.user = User.objects.create_user(username='cc', password='pw')
+        self.user.role = 'administrator'
+        self.user.save()
+        self.other = User.objects.create_user(username='cc2', password='pw')
+        self.client.force_authenticate(self.user)
+        self.batch_base = _user_upload_dir(self.user, 'batch')
+        self.other_base = _user_upload_dir(self.other, 'batch')
+
+    def tearDown(self):
+        shutil.rmtree(self.batch_base, ignore_errors=True)
+        shutil.rmtree(self.other_base, ignore_errors=True)
+
+    def _write(self, rel_path, content='a,b\n1,2\n'):
+        """Write a file under the current user's batch base, returning its path."""
+        path = os.path.join(self.batch_base, rel_path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            f.write(content)
+        return os.path.normpath(path)
+
+    def _get(self):
+        return self.client.get('/api/v1/consistency-check/')
+
+    def _post(self, action):
+        return self.client.post(
+            '/api/v1/consistency-check/', {'action': action}, format='json'
+        )
+
+    # ── GET：孤立数据库记录 ──────────────────────────────────────────
+
+    def test_get_orphaned_db_records(self):
+        _make_datafile(
+            self.user, 'BPD60320_FT.csv', file_type='batch', batch_name='LOT-A',
+            sub_batch='S1', file_path='C:\\nonexistent\\x.csv',
+        )
+        resp = self._get()
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['orphaned_db_count'], 1)
+        entry = resp.data['orphaned_db'][0]
+        self.assertEqual(entry['filename'], 'BPD60320_FT.csv')
+        self.assertEqual(entry['batch_name'], 'LOT-A')
+        self.assertEqual(entry['sub_batch'], 'S1')
+        self.assertIn('file_path', entry)
+
+    # ── GET：孤立磁盘文件（结构化 + 批次聚合） ───────────────────────
+
+    def test_get_orphaned_disk_structured(self):
+        path = self._write('LOT-A/R260/BPD60320_FT.csv')
+        resp = self._get()
+        self.assertEqual(resp.data['orphaned_disk_count'], 1)
+        entry = resp.data['orphaned_disk'][0]
+        self.assertEqual(entry['path'], path)
+        self.assertEqual(entry['filename'], 'BPD60320_FT.csv')
+        self.assertEqual(entry['batch_name'], 'LOT-A')
+        self.assertEqual(entry['sub_batch'], 'R260')
+
+    def test_get_orphaned_disk_excludes_registered_and_summary(self):
+        path = self._write('LOT-A/BPD60320_FT.csv')
+        self._write('LOT-A/Sum_093518.csv')
+        DataFile.objects.create(
+            owner=self.user, filename='BPD60320_FT.csv', file_path=path,
+            file_size=100, format_type='CTA8290D', file_type='batch',
+            batch_name='LOT-A',
+        )
+        resp = self._get()
+        self.assertEqual(resp.data['orphaned_disk_count'], 0)
+
+    def test_get_display_truncates_at_50(self):
+        for i in range(60):
+            self._write(f'LOT-T/f{i}.csv')
+        resp = self._get()
+        self.assertEqual(resp.data['orphaned_disk_count'], 60)  # count is full
+        self.assertEqual(len(resp.data['orphaned_disk']), 50)   # display slice
+
+    # ── GET：产品名缺失 ──────────────────────────────────────────────
+
+    def test_get_missing_product_code_preview_from_program(self):
+        path = self._write('LOT-A/2604160006_x.csv')
+        _make_datafile(
+            self.user, '2604160006_x.csv', program_name='BN281.pts',
+            product_code='', file_path=path, file_type='batch', batch_name='LOT-A',
+        )
+        resp = self._get()
+        self.assertEqual(resp.data['missing_product_code_count'], 1)
+        entry = resp.data['missing_product_code'][0]
+        self.assertEqual(entry['preview_code'], 'BN281')
+        self.assertFalse(entry['reparse_needed'])
+        self.assertFalse(entry['file_missing'])
+
+    def test_get_missing_product_code_flags(self):
+        on_disk = self._write('LOT-A/x.csv')
+        _make_datafile(
+            self.user, 'x.csv', program_name='', product_code='',
+            file_path=on_disk, file_type='batch', batch_name='LOT-A',
+        )
+        _make_datafile(
+            self.user, 'random.csv', program_name='', product_code='',
+            file_path='C:\\gone\\random.csv', file_type='single',
+        )
+        # Not missing — must never appear in the list.
+        _make_datafile(self.user, 'BPD60320_FT.csv', product_code='BPD60320')
+        resp = self._get()
+        by_name = {e['filename']: e for e in resp.data['missing_product_code']}
+        self.assertEqual(set(by_name), {'x.csv', 'random.csv'})
+        self.assertTrue(by_name['x.csv']['reparse_needed'])
+        self.assertFalse(by_name['x.csv']['file_missing'])
+        self.assertFalse(by_name['random.csv']['reparse_needed'])
+        self.assertTrue(by_name['random.csv']['file_missing'])
+        self.assertIn('file_type', by_name['x.csv'])
+
+    def test_get_owner_scoped(self):
+        # Other user's orphaned disk file and missing-product-code row must
+        # not leak into this user's check.
+        other_path = os.path.join(self.other_base, 'LOT-X', 'other.csv')
+        os.makedirs(os.path.dirname(other_path), exist_ok=True)
+        with open(other_path, 'w') as f:
+            f.write('a,b\n1,2\n')
+        _make_datafile(
+            self.other, 'other.csv', program_name='', product_code='',
+            file_path=other_path,
+        )
+        resp = self._get()
+        self.assertEqual(resp.data['orphaned_disk_count'], 0)
+        self.assertEqual(resp.data['missing_product_code_count'], 0)
+
+    # ── POST：import_orphaned_disk ───────────────────────────────────
+
+    def test_import_orphaned_disk(self):
+        self._write('LOT-A/BPD60320_FT.csv')                 # batch root level
+        self._write('LOT-B/R260/2604160006_x.csv')           # sub-batch
+        self._write('LOT-B/R260/Sum_1.csv')                  # summary: skipped
+        resp = self._post('import_orphaned_disk')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['imported_count'], 2)
+        self.assertEqual(resp.data['skipped_count'], 0)
+
+        rows = {
+            df.filename: df for df in DataFile.objects.filter(owner=self.user)
+        }
+        self.assertEqual(set(rows), {'BPD60320_FT.csv', '2604160006_x.csv'})
+        bpd = rows['BPD60320_FT.csv']
+        self.assertEqual(bpd.file_type, 'batch')
+        self.assertEqual(bpd.batch_name, 'LOT-A')
+        self.assertEqual(bpd.sub_batch, '')
+        self.assertEqual(bpd.product_code, 'BPD60320')
+        num = rows['2604160006_x.csv']
+        self.assertEqual(num.batch_name, 'LOT-B')
+        self.assertEqual(num.sub_batch, 'R260')
+
+        # The imported set is no longer orphaned on the next check.
+        self.assertEqual(self._get().data['orphaned_disk_count'], 0)
+
+    def test_import_orphaned_disk_idempotent(self):
+        self._write('LOT-A/BPD60320_FT.csv')
+        self._post('import_orphaned_disk')
+        before = DataFile.objects.filter(owner=self.user).count()
+        resp = self._post('import_orphaned_disk')
+        self.assertEqual(resp.data['imported_count'], 0)
+        self.assertEqual(DataFile.objects.filter(owner=self.user).count(), before)
+
+    # ── POST：fix_product_codes ──────────────────────────────────────
+
+    def test_fix_from_stored_program_name(self):
+        path = self._write('LOT-A/2604160006_x.csv')
+        df = _make_datafile(
+            self.user, '2604160006_x.csv', program_name='BN281.pts',
+            product_code='', file_path=path, file_type='batch', batch_name='LOT-A',
+        )
+        resp = self._post('fix_product_codes')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['fixed_count'], 1)
+        self.assertEqual(resp.data['still_missing_count'], 0)
+        result = resp.data['results'][0]
+        self.assertEqual(result['status'], 'fixed')
+        self.assertEqual(result['product_code'], 'BN281')
+        df.refresh_from_db()
+        self.assertEqual(df.product_code, 'BN281')
+        # Stored program_name already had a match — not rewritten.
+        self.assertEqual(df.program_name, 'BN281.pts')
+
+    def test_fix_reparses_file_for_program_name(self):
+        # A self-contained mini CTA8280F file: filename WITHOUT the B-prefix
+        # token so the filename source cannot match, header carrying a
+        # TestFileName program (BPD60320.pts) the fix must recover by
+        # reparsing. (A real sample was considered, but its program name
+        # ``JAVBN281R3CYCAAV1.6.pgs`` does not start with a B token, so the
+        # program-name path of extract_product_code cannot match it.)
+        content = (
+            '[CTA8280F]\n'
+            'TestFileName,BPD60320.pts\n'
+            '[Data]\n'
+            'col1,col2\n'
+            'mm,mm\n'
+            '0,0\n'
+            '1,1\n'
+            '1,1\n'
+            '1,1\n'
+        )
+        tmp = tempfile.mkdtemp(prefix='cc_fix_')
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        target = os.path.join(tmp, '2604_repair_x.csv')
+        with open(target, 'w') as f:
+            f.write(content)
+        df = _make_datafile(
+            self.user, '2604_repair_x.csv', program_name='', product_code='',
+            file_path=target, file_type='batch',
+        )
+        resp = self._post('fix_product_codes')
+        self.assertEqual(resp.data['fixed_count'], 1)
+        self.assertEqual(resp.data['results'][0]['product_code'], 'BPD60320')
+        df.refresh_from_db()
+        self.assertEqual(df.product_code, 'BPD60320')
+        # Reparse refreshed the stored program name too.
+        self.assertEqual(df.program_name, 'BPD60320.pts')
+
+    def test_fix_cannot_resolve(self):
+        on_disk = self._write('LOT-A/random.csv')  # unparseable content
+        _make_datafile(
+            self.user, 'random.csv', program_name='', product_code='',
+            file_path=on_disk, file_type='batch', batch_name='LOT-A',
+        )
+        _make_datafile(
+            self.user, 'gone.csv', program_name='', product_code='',
+            file_path='C:\\gone\\gone.csv', file_type='single',
+        )
+        resp = self._post('fix_product_codes')
+        self.assertEqual(resp.data['fixed_count'], 0)
+        self.assertEqual(resp.data['still_missing_count'], 2)
+        by_name = {r['filename']: r for r in resp.data['results']}
+        self.assertEqual(by_name['random.csv']['reason'], 'no_match')
+        self.assertEqual(by_name['gone.csv']['reason'], 'file_missing')
+        self.assertTrue(
+            DataFile.objects.filter(owner=self.user, product_code='').count() == 2
+        )
+
+    def test_fix_and_import_owner_scoped(self):
+        other_path = os.path.join(self.other_base, 'LOT-X', 'other.csv')
+        os.makedirs(os.path.dirname(other_path), exist_ok=True)
+        with open(other_path, 'w') as f:
+            f.write('a,b\n1,2\n')
+        _make_datafile(
+            self.other, 'other.csv', program_name='BN281.pts', product_code='',
+            file_path=other_path,
+        )
+        imp = self._post('import_orphaned_disk')
+        self.assertEqual(imp.data['imported_count'], 0)
+        fix = self._post('fix_product_codes')
+        self.assertEqual(fix.data['fixed_count'], 0)
+        self.assertEqual(fix.data['still_missing_count'], 0)
+        other_df = DataFile.objects.get(owner=self.other, filename='other.csv')
+        self.assertEqual(other_df.product_code, '')
+
+    # ── 回归：既有 delete 动作 ───────────────────────────────────────
+
+    def test_delete_orphaned_db_regression(self):
+        _make_datafile(
+            self.user, 'gone.csv', file_type='batch', batch_name='LOT-A',
+            file_path='C:\\gone\\gone.csv',
+        )
+        kept_path = self._write('LOT-A/kept.csv')
+        DataFile.objects.create(
+            owner=self.user, filename='kept.csv', file_path=kept_path,
+            file_size=100, format_type='CTA8290D', file_type='batch',
+            batch_name='LOT-A',
+        )
+        resp = self._post('delete_orphaned_db')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['deleted_count'], 1)
+        self.assertTrue(
+            DataFile.objects.filter(owner=self.user, filename='kept.csv').exists()
+        )
+        self.assertFalse(
+            DataFile.objects.filter(owner=self.user, filename='gone.csv').exists()
+        )
+
+    def test_delete_orphaned_disk_regression(self):
+        orphan = self._write('LOT-A/orphan.csv')
+        kept = self._write('LOT-A/kept.csv')
+        DataFile.objects.create(
+            owner=self.user, filename='kept.csv', file_path=kept,
+            file_size=100, format_type='CTA8290D', file_type='batch',
+            batch_name='LOT-A',
+        )
+        empty_dir = os.path.join(self.batch_base, 'LOT-EMPTY')
+        os.makedirs(empty_dir, exist_ok=True)
+        resp = self._post('delete_orphaned_disk')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['deleted_count'], 1)
+        self.assertFalse(os.path.exists(orphan))
+        self.assertTrue(os.path.exists(kept))
+        self.assertFalse(os.path.exists(empty_dir))  # empty dir cleaned up
+
+    # ── 权限：POST 按 action 分角色 ─────────────────────────────────
+
+    def test_post_role_permissions(self):
+        viewer = User.objects.create_user(username='cc_viewer', password='pw')
+        viewer.role = 'viewer'
+        viewer.save()
+        self.client.force_authenticate(viewer)
+        self.assertEqual(self._get().status_code, 200)  # viewer may check
+        for action in ('delete_orphaned_db', 'delete_orphaned_disk',
+                       'import_orphaned_disk', 'fix_product_codes'):
+            self.assertEqual(self._post(action).status_code, 403, action)
+
+        regular = User.objects.create_user(username='cc_user', password='pw')
+        regular.role = 'user'
+        regular.save()
+        self.client.force_authenticate(regular)
+        self.assertEqual(self._post('delete_orphaned_db').status_code, 403)
+        self.assertEqual(self._post('delete_orphaned_disk').status_code, 403)
+        self.assertEqual(self._post('import_orphaned_disk').status_code, 200)
+        self.assertEqual(self._post('fix_product_codes').status_code, 200)
+
+    def test_post_invalid_action(self):
+        resp = self._post('nonsense')
+        self.assertEqual(resp.status_code, 400)
