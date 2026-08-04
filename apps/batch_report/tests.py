@@ -16,6 +16,15 @@ def _phase_with_bins(bin_info):
     return {'phase': 'CP1', 'bin_info': bin_info}
 
 
+def _filename_from_cd(cd: str) -> str:
+    """提取 Content-Disposition 的 filename*= 或 filename= 文件名。"""
+    star = re.search(r"filename\*\s*=\s*(?:UTF-8'')?([^;]+)", cd)
+    if star:
+        return star.group(1).strip().strip('"')
+    plain = re.search(r'filename\s*=\s*"?([^";]+)"?', cd)
+    return plain.group(1).strip() if plain else cd
+
+
 class AggregateBinSiteTableTests(TestCase):
     def setUp(self):
         # 2 phases, 2 sites (A, B), 2 bins (pass '1', fail '2').
@@ -186,6 +195,7 @@ class AggregateUphTests(TestCase):
 
 import io
 import os
+import re
 
 import openpyxl
 from django.contrib.auth import get_user_model
@@ -237,3 +247,39 @@ class GenerateReportApiTests(APITestCase):
         resp = self.client.post('/api/v1/batch-report/generate_report/',
                                 {'file_ids': []}, format='json')
         self.assertEqual(resp.status_code, 400)
+
+
+class GenerateReportFilenameTemplateTests(APITestCase):
+    """批次报表导出文件名模板。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='batchuser', password='pw')
+        self.client.force_authenticate(self.user)
+        self.files = []
+        for i in range(2):
+            f = DataFile.objects.create(
+                owner=self.user, filename=f'gage_m_S{i + 1}.csv', file_path=SAMPLE_GAGE,
+                file_size=os.path.getsize(SAMPLE_GAGE), format_type='CTA8290D',
+                file_type='batch', batch_name='BATCH1', status='ready',
+            )
+            self.files.append(f)
+
+    def test_default_template_contains_datetime(self):
+        import re as _re
+        resp = self.client.post('/api/v1/batch-report/generate_report/',
+                                {'file_ids': [f.id for f in self.files]}, format='json')
+        self.assertEqual(resp.status_code, 200)
+        m = _re.search(r'Batch_Report_\d{8}_\d{6}\.xlsx', resp['Content-Disposition'])
+        self.assertIsNotNone(m, f'默认模板应含日期时间戳: {resp["Content-Disposition"]}')
+
+    def test_custom_template_with_batch_name_and_file_count(self):
+        resp = self.client.put('/api/v1/auth/settings/',
+                               {'export_filename_templates': {
+                                   'batch_report': 'BR_{batch_name}_{file_count}'}},
+                               format='json')
+        self.assertEqual(resp.status_code, 200, resp.data)
+        resp = self.client.post('/api/v1/batch-report/generate_report/',
+                                {'file_ids': [f.id for f in self.files],
+                                 'batch_name': 'BATCH_001'}, format='json')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(_filename_from_cd(resp['Content-Disposition']), 'BR_BATCH_001_2.xlsx')

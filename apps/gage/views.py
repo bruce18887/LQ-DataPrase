@@ -12,6 +12,7 @@ from apps.datafiles.models import DataFile
 from apps.datafiles.parsers import get_parser
 from apps.datafiles.services import get_cached_parsed_file
 from apps.export.excelize_helpers import save_excelize
+from apps.common.export_naming import base_export_context, render_export_filename
 from apps.gage.services.rr_analysis import compute_rr_statistics
 
 
@@ -53,5 +54,9 @@ class GageViewSet(viewsets.GenericViewSet):
         from apps.gage.excelize_layout import build_gage_summary_excel
         save_buffer = build_gage_summary_excel(file_datasets, ignore_no_limit)
 
-        return FileResponse(io.BytesIO(save_buffer), as_attachment=True, filename='Gage_Summary.xlsx',
+        fname = render_export_filename(
+            request.user, 'gage', 'xlsx',
+            {**base_export_context(request.user), 'file_count': len(file_datasets)},
+        )
+        return FileResponse(io.BytesIO(save_buffer), as_attachment=True, filename=fname,
                             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')

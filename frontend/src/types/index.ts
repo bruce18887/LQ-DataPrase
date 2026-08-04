@@ -6,6 +6,10 @@ export interface User {
   role: 'administrator' | 'user' | 'viewer'
 }
 
+export type ExportTypeKey =
+  | 'to_excel' | 'to_csv' | 'sigma_limit' | 'html_report'
+  | 'batch_charts' | 'batch_report' | 'buyoff' | 'gage'
+
 export interface UserSettings {
   page_size: number
   chart_height: number
@@ -16,6 +20,7 @@ export interface UserSettings {
   cpk_c_threshold: number
   chart_engine: string
   chart_renderer: 'svg' | 'canvas'
+  export_filename_templates: Record<ExportTypeKey, string>
 }
 
 export interface DataFile {

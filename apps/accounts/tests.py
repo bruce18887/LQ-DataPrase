@@ -13,7 +13,7 @@ Covers the behaviour the front-end axios interceptor relies on:
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.test import APIClient
+from rest_framework.test import APIClient, APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken
 
@@ -311,3 +311,69 @@ class UserManagementViewSetTests(TestCase):
             {'is_active': False}, format='json',
         )
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class UserSettingsApiTests(APITestCase):
+    """GET/PUT /api/v1/auth/settings/ with export_filename_templates."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='alice', password='strong-pass-123',
+        )
+        self.client.force_authenticate(user=self.user)
+        self.url = reverse('settings')
+
+    def test_get_settings_returns_all_template_keys(self):
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        templates = resp.data['export_filename_templates']
+        self.assertEqual(
+            set(templates.keys()),
+            {'to_excel', 'to_csv', 'sigma_limit', 'html_report',
+             'batch_charts', 'batch_report', 'buyoff', 'gage'},
+        )
+        # Defaults match the built-in templates
+        self.assertEqual(templates['to_excel'], '{filename}_analysis')
+
+    def test_put_updates_template_and_round_trips(self):
+        resp = self.client.put(
+            self.url,
+            {'export_filename_templates': {'to_excel': '{filename}_{datetime}'}},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.data['export_filename_templates']['to_excel'],
+                         '{filename}_{datetime}')
+
+    def test_put_unknown_key_returns_400(self):
+        resp = self.client.put(
+            self.url,
+            {'export_filename_templates': {'not_a_type': 'x'}},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_put_non_string_template_returns_400(self):
+        resp = self.client.put(
+            self.url,
+            {'export_filename_templates': {'to_excel': 123}},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_put_oversized_template_returns_400(self):
+        resp = self.client.put(
+            self.url,
+            {'export_filename_templates': {'to_excel': 'x' * 201}},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_put_non_dict_returns_400(self):
+        resp = self.client.put(
+            self.url,
+            {'export_filename_templates': ['to_excel']},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)

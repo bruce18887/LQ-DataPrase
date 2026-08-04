@@ -55,13 +55,15 @@ def build_batch_charts_pptx(datafile, df, metadata, params):
             continue
 
         stats = compute_range_statistics(data_series, metadata, param)
-        cpk_val, cpk_level, _ = compute_cpk(
+        cpk_result = compute_cpk(
             stats['mean'], stats['std'], stats['rdl'][0], stats['rdl'][1]
         )
+        cpk_val = cpk_result['cpk']
+        cpk_level = cpk_result.get('cpk_color', 'gray')
 
         # Create matplotlib chart
         fig, ax = plt.subplots(figsize=(8, 4.5))
-        rdl_min, rdl_max = stats['rdl']
+        rdl_min, rdl_max, _ = stats['rdl']
         gap = (rdl_max - rdl_min) / 25 if rdl_max != rdl_min else 0.01
         bin_start = rdl_min - 2.5 * gap
         bins = np.array([bin_start + j * gap for j in range(26)])

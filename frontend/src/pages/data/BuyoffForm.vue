@@ -139,6 +139,7 @@ import { ref, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { datafilesApi } from '../../api/datafiles'
 import { buyoffApi } from '../../api/buyoff'
+import { downloadBlob, extractFilenameFromContentDisposition } from '../../utils/download'
 
 interface AnalysisResult {
   common_items: string[]
@@ -228,12 +229,10 @@ async function generate() {
   loading.value = true
   try {
     const resp = await buyoffApi.generateForm(assignedFileIds.value, onlyBin1.value, roleAssignments.value)
-    const url = URL.createObjectURL(resp.data as Blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'Buyoff_Form.xlsx'
-    a.click()
-    URL.revokeObjectURL(url)
+    const fname = extractFilenameFromContentDisposition(
+      (resp.headers as Record<string, string>)?.['content-disposition'],
+    ) ?? 'Buyoff_Form.xlsx'
+    downloadBlob(resp.data as Blob, fname)
     ElMessage.success('Buyoff Form 已下载')
   } catch {
     // 错误 toast 由 axios 拦截器统一弹出

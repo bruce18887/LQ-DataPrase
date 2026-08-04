@@ -13,6 +13,7 @@ from apps.datafiles.services import get_cached_parsed_file
 from apps.buyoff.services import compute_buyoff_stats
 from apps.buyoff.excelize_layout import build_buyoff_form
 from apps.export.excelize_helpers import save_excelize
+from apps.common.export_naming import base_export_context, render_export_filename
 
 
 class BuyoffViewSet(viewsets.GenericViewSet):
@@ -124,5 +125,9 @@ class BuyoffViewSet(viewsets.GenericViewSet):
         build_buyoff_form(f, role_mapping, common_items, all_stats, datasets, ordered_roles)
 
         buffer = save_excelize(f)
-        return FileResponse(io.BytesIO(buffer), as_attachment=True, filename='Buyoff_Form.xlsx',
+        fname = render_export_filename(
+            request.user, 'buyoff', 'xlsx',
+            {**base_export_context(request.user), 'file_count': len(file_ids)},
+        )
+        return FileResponse(io.BytesIO(buffer), as_attachment=True, filename=fname,
                             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
