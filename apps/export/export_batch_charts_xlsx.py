@@ -1,6 +1,11 @@
 """Batch charts Excel export with embedded histogram images."""
 
 import io
+import os
+from concurrent.futures import ProcessPoolExecutor
+
+import pandas as pd
+
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -13,6 +18,7 @@ from apps.analysis.services.statistics import (
     get_1d_from, compute_range_statistics, compute_cpk, compute_site_stats,
 )
 from .charts import _create_histogram_chart
+from .chart_workers import render_histogram_worker
 
 HEADER_FILL = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
 HEADER_FONT = Font(color="FFFFFF", bold=True, size=11)
@@ -171,25 +177,73 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
     for col in range(1, len(summary_headers) + 1):
         ws_summary.column_dimensions[get_column_letter(col)].width = min(col_max_widths.get(col, 15), 40)
 
-    # ── Per-parameter detail sheets: create chart + sheet one by one ──
+    # ── Per-parameter detail sheets: parallel chart rendering + sheets ──
     # openpyxl lazily reads image data during wb.save(), so we must keep each
     # buffer alive until after save() and close them all at the end.
     open_buffers = []
+
+    # 预提取 site 数据（可 pickle 的 ndarray/标量，供多进程任务）
+    site_series = None
+    site_values = None
+    if site_col and site_col in df.columns:
+        site_series_raw = df[site_col]
+        if isinstance(site_series_raw, pd.DataFrame):
+            site_series_raw = site_series_raw.iloc[:, 0]
+        site_values = sorted(site_series_raw.dropna().unique(), key=lambda x: (isinstance(x, float), x))
+        site_series = site_series_raw.to_numpy()
+
+    # 多进程并行渲染全部参数图表（瓶颈在 matplotlib 渲染；worker 见 chart_workers.py）
+    png_results = {}
+    try:
+        workers = min(8, max(2, os.cpu_count() or 4))
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            futures = {}
+            for title, entry in zip(processed_params, summary_data_list):
+                chart_data = entry['chart_data']
+                futures[title] = ex.submit(
+                    render_histogram_worker,
+                    {
+                        'param': title,
+                        'data_series': chart_data['data_series'].to_numpy(),
+                        'site_values': site_values,
+                        'site_series': site_series,
+                        'mean_val': chart_data['mean_val'],
+                        'std_val': chart_data['std_val'],
+                        'rdl_min': chart_data['rdl_min'],
+                        'rdl_max': chart_data['rdl_max'],
+                        'show_limit': show_limit,
+                        'show_3sigma': show_3sigma,
+                        'show_4sigma': show_4sigma,
+                        'show_6sigma': show_6sigma,
+                        'show_normal': show_normal,
+                    },
+                )
+            for title in processed_params:
+                try:
+                    png_results[title] = futures[title].result()
+                except Exception:
+                    png_results[title] = None  # 单参数失败 → 串行兜底
+    except Exception:
+        png_results = {}  # 并行整体失败 → 全量串行兜底（与现状等价）
 
     for idx, (title, entry) in enumerate(zip(processed_params, summary_data_list)):
         stats_data = entry.get('stats_data', {})
         site_stats_list = entry.get('site_stats', [])
         chart_data = entry.get('chart_data', {})
 
-        # Create histogram image on demand
-        img_buffer = _create_histogram_chart(
-            df, metadata, title, chart_data['data_series'],
-            chart_data['mean_val'], chart_data['std_val'],
-            chart_data['rdl_min'], chart_data['rdl_max'],
-            show_limit=show_limit, show_3sigma=show_3sigma,
-            show_4sigma=show_4sigma, show_6sigma=show_6sigma,
-            show_normal=show_normal, site_col=site_col
-        )
+        # Chart PNG: parallel result first, fall back to serial render
+        png = png_results.get(title)
+        if png is None:
+            img_buffer = _create_histogram_chart(
+                df, metadata, title, chart_data['data_series'],
+                chart_data['mean_val'], chart_data['std_val'],
+                chart_data['rdl_min'], chart_data['rdl_max'],
+                show_limit=show_limit, show_3sigma=show_3sigma,
+                show_4sigma=show_4sigma, show_6sigma=show_6sigma,
+                show_normal=show_normal, site_col=site_col
+            )
+        else:
+            img_buffer = io.BytesIO(png)
         if img_buffer.getbuffer().nbytes == 0:
             img_buffer.close()
             continue

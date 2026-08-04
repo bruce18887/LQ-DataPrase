@@ -2,11 +2,11 @@ import { test, expect } from '@playwright/test'
 import { ROUTES } from '../fixtures/test-data'
 import { gotoApp, sidebarLink } from '../helpers/nav'
 import { loginAs } from '../helpers/auth'
-// 根 package.json 为版本单一事实源（vite 构建时注入，electron-builder 打包版本）
+// frontend/package.json 为版本单一事实源（vite 构建时注入，electron-builder 打包版本）
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-const rootPkgVersion: string = JSON.parse(
-  readFileSync(fileURLToPath(new URL('../../../package.json', import.meta.url)), 'utf-8'),
+const appPkgVersion: string = JSON.parse(
+  readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf-8'),
 ).version as string
 
 /**
@@ -123,8 +123,8 @@ test.describe('@p2 Ctrl+滚轮页面缩放', { tag: ['@p2', '@global'] }, () => 
 
 test.describe('@p2 版本显示', { tag: ['@p2', '@global'] }, () => {
   test('顶栏显示版本徽章，点击弹出「关于」对话框', async ({ page }) => {
-    // 版本单一事实源：根 package.json（vite 构建时注入，与 electron-builder 一致）
-    const version = rootPkgVersion
+    // 版本单一事实源：frontend/package.json（vite 构建时注入，与 electron-builder 一致）
+    const version = appPkgVersion
     await gotoApp(page, '/dashboard')
 
     const badge = page.locator('.version-badge')

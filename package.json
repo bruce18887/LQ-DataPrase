@@ -1,6 +1,7 @@
 {
   "name": "lq-dataprase",
-  "version": "0.1.0",
+  "version": "0.0.0",
+  "_versionNote": "应用版本单一事实源为 frontend/package.json（electron-builder 与 UI 均从它读取）。本字段仅为 npm 元数据，发版时不要修改。",
   "private": true,
   "scripts": {
     "pyinstaller": ".venv\\Scripts\\python.exe -m PyInstaller lq_dataprase.spec --noconfirm",

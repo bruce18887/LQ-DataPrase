@@ -7,10 +7,11 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-// 版本单一事实源：根 package.json —— electron-builder 打包版本（app.getVersion()）
+// 版本单一事实源：frontend/package.json —— electron-builder 打包版本
+// （app.getVersion()，因 directories.app 指向 frontend 而读取该文件）
 // 与此处注入的前端版本保持一致。
-const rootPkg = JSON.parse(
-  readFileSync(path.resolve(__dirname, '../package.json'), 'utf-8'),
+const appPkg = JSON.parse(
+  readFileSync(path.resolve(__dirname, './package.json'), 'utf-8'),
 ) as { version: string }
 
 /** git short-hash，便于排障定位用户运行的代码版本（非 git 环境回退 unknown） */
@@ -29,7 +30,7 @@ export default defineConfig({
   // npm script.
   base: process.env.VITE_ELECTRON === 'true' ? './' : '/',
   define: {
-    __APP_VERSION__: JSON.stringify(rootPkg.version),
+    __APP_VERSION__: JSON.stringify(appPkg.version),
     __BUILD_COMMIT__: JSON.stringify(gitShortHash()),
     __BUILD_DATE__: JSON.stringify(new Date().toISOString().slice(0, 10)),
   },
