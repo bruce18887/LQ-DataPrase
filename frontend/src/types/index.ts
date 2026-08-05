@@ -64,3 +64,21 @@ export interface FailTestItem {
   fail_count: number
   percentage: number
 }
+
+/** 仪表板「测试项总览」：合并 CPK 参数表与 Fail 测试项明细（一行一个测试项） */
+export interface TestItemOverview {
+  name: string
+  data_count: number
+  mean: number | null
+  std: number | null
+  min: number | null
+  max: number | null
+  lsl: number | null
+  usl: number | null
+  cpk: number | null
+  cpk_level: string | null
+  cpk_color: string | null
+  unit: string
+  fail_count: number
+  percentage: number
+}

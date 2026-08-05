@@ -66,13 +66,10 @@
         :bin-site-columns="binSiteColumns"
       />
 
-      <!-- 参数质量分析 (CPK) -->
-      <CpkAnalysisSection :param-stats="paramStats" />
-
-      <!-- Fail 测试项分析 -->
-      <FailTestItemsSection
-        :fail-test-items="failTestItems"
-        :total-fail-count="totalFailCount"
+      <!-- 测试项总览（合并 CPK 参数表 + Fail 测试项明细） -->
+      <TestItemOverviewSection
+        :items="testItemOverview"
+        :file-id="data?.file_id || null"
       />
 
       <!-- UPH 效率分析 -->
@@ -116,9 +113,9 @@ import QualityAlerts from './components/QualityAlerts.vue'
 import BinDistribution from './components/BinDistribution.vue'
 import SiteYieldAnalysis from './components/SiteYieldAnalysis.vue'
 import BinSiteCrossTable from './components/BinSiteCrossTable.vue'
-import CpkAnalysisSection from './components/CpkAnalysisSection.vue'
-import FailTestItemsSection from './components/FailTestItemsSection.vue'
+import TestItemOverviewSection from './components/TestItemOverviewSection.vue'
 import DataQualityOverview from './components/DataQualityOverview.vue'
+import type { TestItemOverview } from '../../types'
 import ExportFooter from './components/ExportFooter.vue'
 
 const filesStore = useFilesStore()
@@ -141,6 +138,7 @@ interface DashboardData {
   bin_table_data?: any[]
   bin_site_columns?: string[]
   param_stats?: any[]
+  test_item_overview?: TestItemOverview[]
   quality_alerts?: any[]
 }
 
@@ -157,10 +155,8 @@ const quality = ref({ numeric_items: 0, items_with_limits: 0, site_count: 0, bin
 const binTableData = ref<any[]>([])
 const binSiteColumns = ref<string[]>([])
 const updateTime = ref('')
-const paramStats = ref<any[]>([])
+const testItemOverview = ref<TestItemOverview[]>([])
 const qualityAlerts = ref<any[]>([])
-
-const totalFailCount = computed(() => failTestItems.value.reduce((sum, item) => sum + item.fail_count, 0))
 
 const topFailItem = computed(() => {
   if (!failTestItems.value.length) return '无'
@@ -201,7 +197,7 @@ async function onFileChange() {
       quality.value = { ...d.quality_overview, fail_bin_count: d.quality_overview?.fail_bin_count || 0 }
       binTableData.value = d.bin_table_data || []
       binSiteColumns.value = d.bin_site_columns || []
-      paramStats.value = d.param_stats || []
+      testItemOverview.value = d.test_item_overview || []
       qualityAlerts.value = d.quality_alerts || []
       error.value = true
       return
@@ -212,7 +208,7 @@ async function onFileChange() {
     quality.value = { ...d.quality_overview, fail_bin_count: d.quality_overview.fail_bin_count || 0 }
     binTableData.value = d.bin_table_data || []
     binSiteColumns.value = d.bin_site_columns || []
-    paramStats.value = d.param_stats || []
+    testItemOverview.value = d.test_item_overview || []
     qualityAlerts.value = d.quality_alerts || []
   } catch {
     error.value = true
@@ -492,6 +488,12 @@ onActivated(async () => {
 }
 :root.theme-night .cell-na {
   color: rgba(255,255,255,0.4);
+}
+:root.theme-night .cell-fail {
+  color: #f5576c;
+}
+:root.theme-night .overview-total {
+  color: rgba(255,255,255,0.5);
 }
 
 /* ----- Footer ----- */
