@@ -1,7 +1,9 @@
 import logging
+import math
 import os
 
 import pandas as pd
+from django.http import Http404
 from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -67,57 +69,99 @@ def compute_bin_site_table(df, format_type, site_col):
         return [], []
 
 
-def compute_parameter_summary(df, metadata):
-    """计算所有有规格限参数的 CPK 统计"""
+def _has_valid_limit(limit_str) -> bool:
+    """规格限字符串是否为有效值（非空且非 NaN/None/N/A 等关键字）。"""
+    if limit_str is None:
+        return False
+    s = str(limit_str).strip()
+    return bool(s) and s.lower() not in ('', 'nan', 'none', 'n/a')
+
+
+def compute_test_item_overview(df, metadata, fail_stats):
+    """合并「CPK 参数表」与「Fail 测试项明细」：一行一个测试项。
+
+    行集 = 有规格限的参数（全部，不再 Top10）∪ 出现 Fail 的测试项；
+    行序 = df.columns 原始顺序（前端默认排序）。
+    无规格限的 fail 项：统计列返回 None（前端显示 N/A）；
+    无 fail 的参数：fail_count / percentage 返回 0。
+    """
     from apps.analysis.services.statistics import compute_cpk, parse_limit_string
 
-    cols_with_limits = get_columns_with_limits(df, metadata)
-    param_stats = []
+    # 限值判定沿用原 compute_parameter_summary 的宽松语义：单边限参数也保留
+    # （缺失侧以 -inf/+inf 传入 compute_cpk 计算单边 CPK，输出时转 None）。
+    fail_set = set(fail_stats)
+    rows = []
 
-    for param in cols_with_limits:
-        try:
-            data_series = df[param].dropna()
-            if len(data_series) == 0:
-                continue
+    for param in df.columns:
+        has_valid_lsl = _has_valid_limit(metadata.get('mins', {}).get(param, ''))
+        has_valid_usl = _has_valid_limit(metadata.get('maxs', {}).get(param, ''))
+        is_limit_param = has_valid_lsl or has_valid_usl
 
-            mean_val = float(data_series.mean())
-            std_val = float(data_series.std(ddof=0))
-
-            lsl_str = str(metadata.get('mins', {}).get(param, ''))
-            usl_str = str(metadata.get('maxs', {}).get(param, ''))
-
-            has_valid_lsl = lsl_str and lsl_str.strip() and lsl_str.strip().lower() not in ('', 'nan', 'none', 'n/a')
-            has_valid_usl = usl_str and usl_str.strip() and usl_str.strip().lower() not in ('', 'nan', 'none', 'n/a')
-
-            if not (has_valid_lsl or has_valid_usl):
-                continue
-
-            lsl = parse_limit_string(lsl_str, data_series, 0.0, 0.0) if has_valid_lsl else float('-inf')
-            usl = parse_limit_string(usl_str, data_series, 0.0, 0.0) if has_valid_usl else float('inf')
-
-            if lsl == float('-inf') and usl == float('inf'):
-                continue
-
-            cpk_result = compute_cpk(mean_val, std_val, lsl, usl)
-
-            param_stats.append({
-                'param': param,
-                'mean': round(mean_val, 4),
-                'std': round(std_val, 4),
-                'cpk': round(cpk_result['cpk'], 3),
-                'cpk_level': cpk_result['cpk_level'],
-                'cpk_color': cpk_result['cpk_color'],
-                'unit': metadata.get('units', {}).get(param, ''),
-                'lsl': round(lsl, 4) if lsl != float('-inf') else None,
-                'usl': round(usl, 4) if usl != float('inf') else None,
-            })
-        except Exception as e:
-            logger.warning(f"compute_parameter_summary failed for {param}: {e}")
+        if not is_limit_param and param not in fail_set:
             continue
 
-    # Sort by CPK ascending (worst first)
-    param_stats.sort(key=lambda x: x['cpk'])
-    return param_stats
+        row = {
+            'name': param,
+            'data_count': 0,
+            'mean': None, 'std': None, 'min': None, 'max': None,
+            'lsl': None, 'usl': None,
+            'cpk': None, 'cpk_level': None, 'cpk_color': None,
+            'unit': metadata.get('units', {}).get(param, ''),
+            'fail_count': int(fail_stats.get(param, {}).get('fail_count', 0)),
+            'percentage': round(float(fail_stats.get(param, {}).get('percentage', 0.0)), 2),
+        }
+
+        if is_limit_param:
+            try:
+                series = df[param]
+                if isinstance(series, pd.DataFrame):  # 重复列名兜底，取第一列
+                    series = series.iloc[:, 0]
+                data_series = pd.to_numeric(series, errors='coerce').dropna()
+                if len(data_series) > 0:
+                    row['data_count'] = int(len(data_series))
+                    row['mean'] = round(float(data_series.mean()), 4)
+                    row['std'] = round(float(data_series.std(ddof=0)), 4)
+                    row['min'] = round(float(data_series.min()), 4)
+                    row['max'] = round(float(data_series.max()), 4)
+
+                    lsl = parse_limit_string(
+                        str(metadata['mins'][param]), data_series, 0.0, 0.0) if has_valid_lsl else float('-inf')
+                    usl = parse_limit_string(
+                        str(metadata['maxs'][param]), data_series, 0.0, 0.0) if has_valid_usl else float('inf')
+                    row['lsl'] = round(lsl, 4) if lsl != float('-inf') else None
+                    row['usl'] = round(usl, 4) if usl != float('inf') else None
+
+                    if not (lsl == float('-inf') and usl == float('inf')):
+                        cpk_result = compute_cpk(row['mean'], row['std'], lsl, usl)
+                        if math.isfinite(cpk_result['cpk']):  # 防 inf 破坏 JSON
+                            row['cpk'] = round(cpk_result['cpk'], 3)
+                            row['cpk_level'] = cpk_result['cpk_level']
+                            row['cpk_color'] = cpk_result['cpk_color']
+            except Exception as e:
+                logger.warning(f"compute_test_item_overview failed for {param}: {e}")
+
+        rows.append(row)
+
+    return rows
+
+
+def _derive_param_stats(overview_rows):
+    """从 overview 派生原 param_stats 字段契约（CPK 升序，最差在前）。
+
+    与旧 compute_parameter_summary 的键集/舍入一致，compute_quality_alerts
+    依赖其 cpk 键；从 overview 派生保证两处数据不会漂移。
+    """
+    return sorted(
+        (
+            {
+                'param': r['name'], 'mean': r['mean'], 'std': r['std'],
+                'cpk': r['cpk'], 'cpk_level': r['cpk_level'], 'cpk_color': r['cpk_color'],
+                'unit': r['unit'], 'lsl': r['lsl'], 'usl': r['usl'],
+            }
+            for r in overview_rows if r['cpk'] is not None
+        ),
+        key=lambda x: x['cpk'],
+    )
 
 
 def compute_quality_alerts(yield_pct, param_stats, site_yield_data):
@@ -236,8 +280,9 @@ class DashboardSummaryView(APIView):
             # 计算Bin×Site交叉表
             bin_table_data, bin_site_columns = compute_bin_site_table(df, fmt, site_col)
 
-            # 计算参数CPK统计
-            param_stats = compute_parameter_summary(df, metadata)
+            # 合并参数CPK统计与Fail测试项明细为测试项总览（行序=原始列序）
+            test_item_overview = compute_test_item_overview(df, metadata, test_item_stats)
+            param_stats = _derive_param_stats(test_item_overview)
 
             # 生成质量警报
             quality_alerts = compute_quality_alerts(yield_pct, param_stats, site_yield_data)
@@ -266,8 +311,12 @@ class DashboardSummaryView(APIView):
                 'bin_table_data': bin_table_data,
                 'bin_site_columns': bin_site_columns,
                 'param_stats': param_stats,
+                'test_item_overview': test_item_overview,
                 'quality_alerts': quality_alerts,
             })
+        except Http404:
+            # get_object_or_404 的 404 语义不能被兜底吞掉
+            raise
         except Exception as e:
             logger.exception(f"DashboardSummaryView error: {e}")
             return Response({'error': 'internal_error', 'detail': str(e)}, status=500)

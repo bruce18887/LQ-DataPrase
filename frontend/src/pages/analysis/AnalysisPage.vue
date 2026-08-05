@@ -111,6 +111,12 @@ const waferData = ref<any>(null)
 // Track whether we've loaded params for the current file
 const loadedFileId = ref<number | null>(null)
 
+// keep-alive 组件首次挂载后 onActivated 也会触发一次。若它再次执行
+// onFileChange，会把 onMounted 中按 jumpParam（仪表板跳转参数）选中的值
+// 覆盖回 params[0]（第二次读取 store 时 jumpParam 已被清空）。首次挂载
+// 完全由 onMounted 处理，onActivated 只在从缓存恢复时同步。
+let firstActivated = true
+
 // ========== Lifecycle ==========
 onMounted(async () => {
   await loadFiles()
@@ -125,6 +131,16 @@ onMounted(async () => {
 
 onActivated(async () => {
   await loadFiles()
+  if (firstActivated) {
+    firstActivated = false
+    return  // 首次挂载由 onMounted 处理，避免双 onFileChange 覆盖跳转参数
+  }
+
+  // 仪表板「测试项总览」跳转可能在本页 keep-alive 缓存期间改过 store，
+  // setup 快照不会自动同步，需重新读 store 覆盖 ref
+  if (analysisStore.selectedFileId) {
+    selectedFileId.value = analysisStore.selectedFileId
+  }
 
   // If selected file no longer exists (e.g. deleted), reset selection
   if (selectedFileId.value && !files.value.find(f => f.id === selectedFileId.value)) {
@@ -140,6 +156,12 @@ onActivated(async () => {
   // Only reload params if file changed or params not loaded yet
   if (selectedFileId.value && selectedFileId.value !== loadedFileId.value) {
     await onFileChange()
+  }
+
+  // 同文件跳转时 onFileChange 被跳过，在此兜底选中 store 中的参数
+  // （正常返回时 store 值 = 页面自身上次选择，幂等无害）
+  if (analysisStore.selectedParam && params.value.includes(analysisStore.selectedParam)) {
+    selectedParam.value = analysisStore.selectedParam
   }
 })
 
@@ -162,6 +184,8 @@ watch(() => analysisStore.ignoreNoLimit, () => { onFileChange() })
 async function onFileChange() {
   if (!selectedFileId.value) return
   loading.value = true
+  // 仪表板「测试项总览」跳转可能在 store 预置了目标参数，必须在清空前捕获
+  const jumpParam = analysisStore.selectedParam
   // Reset stale state so the previous file's params (which may not exist
   // in the new file) don't linger. Without this, a `R_Kelvin_AGND` selected
   // on `gage_m_S4.csv` would still be sent to /analysis/{qqplot,histogram}/
@@ -185,7 +209,10 @@ async function onFileChange() {
     // and other endpoints doing `if param not in df.columns`.
     params.value = Object.keys(results || {}).filter((p) => p && p.trim() !== '')
     if (params.value.length > 0) {
-      selectedParam.value = params.value[0]
+      // 跳转的 param 若存在于新文件则优先选中，否则回退首个参数（自愈）
+      selectedParam.value = (jumpParam && params.value.includes(jumpParam))
+        ? jumpParam
+        : params.value[0]
     }
     // Mark this file as loaded so onActivated won't reload unnecessarily
     loadedFileId.value = selectedFileId.value

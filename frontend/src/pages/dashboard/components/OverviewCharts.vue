@@ -1,58 +1,32 @@
 <template>
-  <div v-if="paramStats.length">
-    <h2 class="sec-title"><span>📊</span> 参数质量分析 (Top 10 CPK)</h2>
-    <div class="panel-row panel-row--wider panel-row--h350">
-      <div class="panel-card panel-card--wider">
-        <div class="panel-head">📋 CPK 参数表</div>
-        <el-table :data="topParamStats" stripe size="small" max-height="310" border class="panel-table">
-          <el-table-column prop="param" label="参数名称" min-width="140" show-overflow-tooltip />
-          <el-table-column prop="cpk" label="CPK" width="80" align="center">
-            <template #default="{ row }">
-              <el-tag :type="getCpkTagType(row.cpk)" size="small">{{ row.cpk.toFixed(2) }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="cpk_level" label="等级" width="90" align="center">
-            <template #default="{ row }">
-              <span :style="{ color: row.cpk_color, fontWeight: 'bold' }">{{ row.cpk_level }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="mean" label="均值" width="120" align="right">
-            <template #default="{ row }">{{ row.mean.toFixed(4) }} <span class="cell-unit">{{ row.unit }}</span></template>
-          </el-table-column>
-          <el-table-column prop="std" label="标准差" width="90" align="right">
-            <template #default="{ row }">{{ row.std.toFixed(4) }}</template>
-          </el-table-column>
-          <el-table-column label="规格限" width="180" align="center">
-            <template #default="{ row }">
-              <span v-if="row.lsl !== null && row.usl !== null" class="cell-spec">{{ row.lsl.toFixed(4) }} ~ {{ row.usl.toFixed(4) }}</span>
-              <span v-else class="cell-na">未设置</span>
-            </template>
-          </el-table-column>
-        </el-table>
-      </div>
-      <div class="panel-card">
-        <div class="panel-head">CPK 分布统计</div>
-        <div class="panel-body"><div ref="cpkDistChart" class="chart-fill" role="img" aria-label="CPK分布统计饼图" /></div>
-      </div>
+  <div class="panel-row panel-row--h320">
+    <div class="panel-card">
+      <div class="panel-head">CPK 分布统计</div>
+      <div class="panel-body"><div ref="cpkDistChart" class="chart-fill" role="img" aria-label="CPK分布统计饼图" /></div>
+    </div>
+    <div class="panel-card">
+      <div class="panel-head">Top 10 Fail 测试项</div>
+      <div class="panel-body"><div ref="failBarChart" class="chart-fill" role="img" aria-label="Top 10 Fail测试项柱状图" /></div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onActivated, onBeforeUnmount } from 'vue'
+import { ref, watch, nextTick, onMounted, onActivated, onBeforeUnmount } from 'vue'
 import { initEchartsWhenReady, type EchartsHandle } from '../../../utils/echarts-init'
 import { useThemeStore } from '../../../stores/theme'
+import type { TestItemOverview } from '../../../types'
 
 const themeStore = useThemeStore()
 
 const props = defineProps<{
-  paramStats: any[]
+  items: TestItemOverview[]
 }>()
 
 const cpkDistChart = ref<HTMLElement>()
+const failBarChart = ref<HTMLElement>()
 let cpkDistHandle: EchartsHandle | null = null
-
-const topParamStats = computed(() => props.paramStats.slice(0, 10))
+let failBarHandle: EchartsHandle | null = null
 
 function _tc() {
   return getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
@@ -62,28 +36,20 @@ function _ts() {
   return getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || 'rgba(255,255,255,0.8)'
 }
 
-function getCpkTagType(cpk: number): string {
-  if (cpk >= 1.67) return 'success'
-  if (cpk >= 1.33) return 'warning'
-  return 'danger'
-}
-
+/* ── CPK 分布饼图 ── */
 function buildCpkDistOption() {
-  // 统计CPK分布 - 使用实际的等级名称（带括号）
   const levels: Record<string, number> = {}
-  props.paramStats.forEach(p => {
+  props.items.forEach(p => {
     const level = p.cpk_level || ''
     if (level) {
       levels[level] = (levels[level] || 0) + 1
     }
   })
 
-  // 过滤掉值为0的等级
   const chartData = Object.entries(levels)
     .filter(([_, value]) => value > 0)
     .map(([name, value]) => ({ name, value }))
 
-  // 如果所有等级都是0，显示空状态
   if (chartData.length === 0) {
     return {
       title: {
@@ -95,7 +61,6 @@ function buildCpkDistOption() {
     }
   }
 
-  // 定义颜色映射 - 根据等级前缀匹配
   const getColorByLevel = (levelName: string) => {
     if (levelName.startsWith('A级')) return '#059669'  // 绿色 - 优秀
     if (levelName.startsWith('B级')) return '#d97706'  // 橙色 - 良好
@@ -123,7 +88,7 @@ function buildCpkDistOption() {
 }
 
 function renderCpkDistChart() {
-  if (!cpkDistChart.value || !props.paramStats.length) return
+  if (!cpkDistChart.value || !props.items.length) return
   if (cpkDistHandle) {
     cpkDistHandle.chart?.setOption(buildCpkDistOption() as any, { notMerge: true, lazyUpdate: true })
   } else {
@@ -131,54 +96,81 @@ function renderCpkDistChart() {
   }
 }
 
-function handleResize() {
-  cpkDistHandle?.chart?.resize()
+/* ── Top 10 Fail 柱状图 ── */
+function buildFailBarOption() {
+  const top10 = props.items
+    .filter((t) => t.fail_count > 0)
+    .sort((a, b) => b.fail_count - a.fail_count)
+    .slice(0, 10)
+
+  return {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    grid: { left: '3%', right: '8%', bottom: '3%', top: '3%', containLabel: true },
+    xAxis: { type: 'value', axisLabel: { color: _tc() } },
+    yAxis: {
+      type: 'category',
+      data: top10.map((t) => (t.name.length > 25 ? t.name.slice(0, 25) + '...' : t.name)).reverse(),
+      axisLabel: { fontSize: 10, color: _tc() },
+    },
+    series: [{
+      type: 'bar',
+      data: top10.map((t) => t.fail_count).reverse(),
+      itemStyle: {
+        color: {
+          type: 'linear',
+          x: 0, y: 0, x2: 1, y2: 0,
+          colorStops: [{ offset: 0, color: '#f87171' }, { offset: 1, color: '#dc2626' }],
+        },
+      },
+      label: { show: true, position: 'right', fontSize: 10 },
+    }],
+  }
 }
 
-watch(() => props.paramStats, () => {
-  nextTick(() => renderCpkDistChart())
+function renderFailBarChart() {
+  if (!failBarChart.value || !props.items.length) return
+  if (failBarHandle) {
+    failBarHandle.chart?.setOption(buildFailBarOption() as any, { notMerge: true, lazyUpdate: true })
+  } else {
+    failBarHandle = initEchartsWhenReady(failBarChart.value, { option: buildFailBarOption() as any, reuse: true })
+  }
+}
+
+function handleResize() {
+  cpkDistHandle?.chart?.resize()
+  failBarHandle?.chart?.resize()
+}
+
+watch(() => props.items, () => {
+  nextTick(() => { renderCpkDistChart(); renderFailBarChart() })
 }, { deep: true, immediate: true })
 
 // 主题切换时重新渲染图表，更新文字颜色
 watch(() => themeStore.currentTheme, () => {
-  nextTick(() => renderCpkDistChart())
+  nextTick(() => { renderCpkDistChart(); renderFailBarChart() })
 })
 
 onMounted(() => {
   window.addEventListener('resize', handleResize)
-  nextTick(() => renderCpkDistChart())
+  nextTick(() => { renderCpkDistChart(); renderFailBarChart() })
 })
 
 onActivated(() => {
   if (cpkDistHandle) { cpkDistHandle.dispose(); cpkDistHandle = null }
-  nextTick(() => renderCpkDistChart())
+  if (failBarHandle) { failBarHandle.dispose(); failBarHandle = null }
+  nextTick(() => { renderCpkDistChart(); renderFailBarChart() })
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
   cpkDistHandle?.dispose(); cpkDistHandle = null
+  failBarHandle?.dispose(); failBarHandle = null
 })
 
 defineExpose({ handleResize })
 </script>
 
 <style scoped>
-/* ================================================================
-   Section Title
-   ================================================================ */
-.sec-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 17px;
-  font-weight: 700;
-  color: #1f2937;
-  margin: 24px 0 12px 0;
-  padding-left: 10px;
-  border-left: 3px solid #2563eb;
-  line-height: 1;
-}
-
 /* ================================================================
    Panel Row — two-column grid
    ================================================================ */
@@ -190,15 +182,9 @@ defineExpose({ handleResize })
 }
 @media (max-width: 992px) { .panel-row { grid-template-columns: 1fr; } }
 
-@media (min-width: 993px) {
-  .panel-row--wider {
-    grid-template-columns: 7fr 5fr;
-  }
-}
-
-.panel-row--h350 .panel-card { height: 350px; }
+.panel-row--h320 .panel-card { height: 320px; }
 @media (max-width: 992px) {
-  .panel-row--h350 .panel-card { height: auto; min-height: 300px; }
+  .panel-row--h320 .panel-card { height: auto; min-height: 300px; }
 }
 
 /* ================================================================
@@ -227,19 +213,8 @@ defineExpose({ handleResize })
   min-height: 0;
   padding: 8px;
 }
-.panel-table {
-  flex: 1;
-  min-height: 0;
-}
 .chart-fill {
   width: 100%;
   height: 100%;
 }
-
-/* ================================================================
-   Table cell helpers
-   ================================================================ */
-.cell-unit { color: #9ca3af; font-size: 11px; }
-.cell-spec { font-size: 12px; color: #374151; }
-.cell-na   { color: #9ca3af; }
 </style>

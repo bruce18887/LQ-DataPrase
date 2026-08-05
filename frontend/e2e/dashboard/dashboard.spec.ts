@@ -302,4 +302,137 @@ test.describe('仪表板', { tag: ['@p0', '@p1', '@p2', '@dashboard'] }, () => {
     const zeroSize = errors.filter((e) => /DOM width or height|getAxesOnZeroOf/i.test(e))
     expect(zeroSize, `§3 不应出现 0 尺寸 ECharts 警告:\n${zeroSize.join('\n')}`).toEqual([])
   })
+
+  /**
+   * 测试项总览（TestItemOverviewSection.vue）：合并 CPK 参数表 + Fail 测试项明细
+   * 为一张全宽大表（排序/分页/点击行跳转分析页），下方并排 CPK 分布饼图 + Top 10 Fail 柱状图。
+   */
+  test('@p1 测试项总览表格渲染（表头 + 下方两图表非空）', async ({ page }) => {
+    const errors = collectConsoleErrors(page)
+    await gotoApp(page, '/dashboard')
+    await waitLoadingGone(page)
+
+    // 总览区标题与表格
+    await expect(page.getByRole('heading', { name: /测试项总览/ }).first()).toBeVisible()
+    const table = page.locator('.overview-table')
+    await expect(table).toBeVisible({ timeout: 20_000 })
+
+    // 表头列
+    const headers = ['参数名称', '数据点数', 'Mean', 'STD', 'Min', 'Max', 'LSL', 'USL', 'CPK', 'CPK Level', 'Fail数量', 'Fail占比']
+    for (const h of headers) {
+      await expect(table.locator('th', { hasText: h }).first(), `表头应含 ${h}`).toBeVisible()
+    }
+
+    // 页脚统计与分页
+    await expect(page.getByText(/共 \d+ 项/)).toBeVisible()
+    await expect(page.locator('.overview-footer .el-pagination')).toBeVisible()
+
+    // 下方两图表容器：aria-label 可见且 svg/canvas 尺寸 > 0
+    const chartLabels = ['CPK分布统计饼图', 'Top 10 Fail测试项柱状图']
+    for (const label of chartLabels) {
+      const img = page.getByRole('img', { name: label })
+      if (await img.count() === 0) continue  // 无数据时容器不渲染
+      await expect(img.first(), `${label} 容器应可见`).toBeVisible({ timeout: 15_000 })
+      const inner = img.first().locator('svg, canvas').first()
+      await expect(inner, `${label} 应有 svg/canvas`).toBeVisible({ timeout: 15_000 })
+      const box = await inner.boundingBox()
+      expect(box, `${label} 尺寸应非空`).not.toBeNull()
+      expect(box!.width, `${label} 宽度 > 0`).toBeGreaterThan(0)
+      expect(box!.height, `${label} 高度 > 0`).toBeGreaterThan(0)
+    }
+
+    // 控制台无 ECharts 0 尺寸警告
+    const zeroSize = errors.filter((e) => /DOM width or height|getAxesOnZeroOf/i.test(e))
+    expect(zeroSize, `不应出现 0 尺寸 ECharts 警告:\n${zeroSize.join('\n')}`).toEqual([])
+  })
+
+  test('@p1 测试项总览点击列头排序（CPK 升序/降序）', async ({ page }) => {
+    await gotoApp(page, '/dashboard')
+    await waitLoadingGone(page)
+
+    const table = page.locator('.overview-table')
+    await expect(table).toBeVisible({ timeout: 20_000 })
+    const bodyRows = table.locator('.el-table__body-wrapper tr.el-table__row')
+    if (await bodyRows.count() < 2) {
+      test.skip(true, '总览表不足 2 行，跳过排序断言')
+      return
+    }
+
+    const cpkOf = async (row: import('@playwright/test').Locator) => {
+      const text = await row.locator('.el-tag').first().innerText()
+      return parseFloat(text)
+    }
+
+    // 升序：首行 cpk <= 次行 cpk
+    const cpkHeader = table.locator('th', { hasText: /^CPK$/ }).first()
+    await cpkHeader.click()
+    await page.waitForTimeout(300)
+    let first = await cpkOf(bodyRows.nth(0))
+    let second = await cpkOf(bodyRows.nth(1))
+    expect(first, `升序首行 cpk ${first} <= 次行 ${second}`).toBeLessThanOrEqual(second)
+
+    // 再点一次 → 降序：首行 cpk >= 次行 cpk
+    await cpkHeader.click()
+    await page.waitForTimeout(300)
+    first = await cpkOf(bodyRows.nth(0))
+    second = await cpkOf(bodyRows.nth(1))
+    expect(first, `降序首行 cpk ${first} >= 次行 ${second}`).toBeGreaterThanOrEqual(second)
+  })
+
+  test('@p2 测试项总览分页切换', async ({ page }) => {
+    await gotoApp(page, '/dashboard')
+    await waitLoadingGone(page)
+
+    const table = page.locator('.overview-table')
+    await expect(table).toBeVisible({ timeout: 20_000 })
+    const pagination = page.locator('.overview-footer .el-pagination')
+    await expect(pagination).toBeVisible()
+
+    const pageCount = await pagination.locator('.el-pager li').count()
+    if (pageCount <= 1) {
+      test.skip(true, '总览表不足两页，跳过翻页断言')
+      return
+    }
+
+    const firstName = async () => (await table.locator('.el-table__body-wrapper tr.el-table__row .cell-param').first().innerText()).trim()
+    const namePage1 = await firstName()
+    await pagination.locator('.el-pager li').nth(1).click()
+    await page.waitForTimeout(300)
+    const namePage2 = await firstName()
+    expect(namePage2, '第 2 页首行参数名应与第 1 页不同').not.toBe(namePage1)
+  })
+
+  test('@p2 测试项总览点击行跳转分析页并选中参数', async ({ page }) => {
+    await gotoApp(page, '/dashboard')
+    await waitLoadingGone(page)
+
+    const table = page.locator('.overview-table')
+    await expect(table).toBeVisible({ timeout: 20_000 })
+    const bodyRows = table.locator('.el-table__body-wrapper tr.el-table__row')
+    if (await bodyRows.count() < 1) {
+      test.skip(true, '总览表无数据行，跳过跳转断言')
+      return
+    }
+
+    const paramName = (await bodyRows.first().locator('.cell-param').innerText()).trim()
+    await bodyRows.first().click()
+
+    // 跳转到数据分析页
+    await page.waitForURL(/\/analysis/, { timeout: 15_000 })
+    // 参数选择器应选中参数（选中值渲染为 select 文本而非 input value）。
+    // 若点击的参数是非数值列（metadata 有占位限值但分析页 histogram 不返回），
+    // 会自愈回退到首个可分析参数——两种都算跳转成功。
+    const paramSelect = page.locator('.param-selector .el-select')
+    await expect(paramSelect).toBeVisible({ timeout: 15_000 })
+    await expect.poll(async () => (await paramSelect.innerText()).trim(), {
+      message: `参数选择器应有选中值（点击 ${paramName}）`,
+      timeout: 15_000,
+    }).not.toContain('输入搜索或选择参数')
+    const selected = (await paramSelect.innerText()).trim()
+    if (selected !== paramName) {
+      expect(selected, `回退场景应选中非空参数（点击 ${paramName}）`).not.toBe('')
+    }
+    // 直方图渲染（至少 1 个图表）
+    await waitForCharts(page, 1)
+  })
 })
