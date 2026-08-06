@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import os from 'node:os'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PROJECT_ROOT = path.resolve(__dirname, '..')
@@ -105,6 +106,12 @@ export default defineConfig({
           timeout: 120_000,
           stdout: 'pipe',
           stderr: 'pipe',
+          // 系统存储路径配置（system_config.json）隔离到临时文件，
+          // 避免 e2e 修改路径时污染项目根目录
+          env: {
+            ...process.env,
+            LQDP_SYSTEM_CONFIG_FILE: path.join(os.tmpdir(), 'lqdp-e2e-system-config.json'),
+          },
         },
         {
           // Vite 前端（/api 代理到 8000）

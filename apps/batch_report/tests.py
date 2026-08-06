@@ -283,3 +283,95 @@ class GenerateReportFilenameTemplateTests(APITestCase):
                                  'batch_name': 'BATCH_001'}, format='json')
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(_filename_from_cd(resp['Content-Disposition']), 'BR_BATCH_001_2.xlsx')
+
+
+class BatchYieldPhaseParsingTests(APITestCase):
+    """GET /api/v1/batch-report/batch_yield_data/：UIS 阶段解析 + 分阶段良率 + 短文件名回退。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='phaseuser', password='pw')
+        self.client.force_authenticate(self.user)
+        self.batch = 'UISBATCH'
+        for fname in (
+            'LOT_UISBATCH_CP1_20260726.csv',
+            'BPD80590_C01JC6#AAA1A12606290025_UIS1.0_P262702101_20260715001944.csv',
+            'LOT_UISBATCH_FT1_20260726.csv',
+        ):
+            DataFile.objects.create(
+                owner=self.user, filename=fname, file_path=SAMPLE_GAGE,
+                file_size=os.path.getsize(SAMPLE_GAGE), format_type='CTA8290D',
+                file_type='batch', batch_name=self.batch, status='ready',
+            )
+
+    def _fetch(self, batch_name=None):
+        return self.client.get(
+            f'/api/v1/batch-report/batch_yield_data/?batch_name={batch_name or self.batch}'
+        )
+
+    def test_uis_phase_parsed_and_ordered_cp_uis_ft(self):
+        resp = self._fetch()
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            [p['phase'] for p in resp.data['phases']],
+            ['CP1', 'UIS1.0', 'FT1'],
+            '阶段应按 CP → UIS → FT 排序',
+        )
+        self.assertIn('UIS1.0', [s['phase'] for s in resp.data['phase_summary']])
+        # 增量字段：phase 与 phase_summary 均带 stage（前端过滤/树形分组用）
+        self.assertEqual([p['stage'] for p in resp.data['phases']], ['CP', 'UIS', 'FT'])
+        self.assertEqual(
+            {s['phase']: s['stage'] for s in resp.data['phase_summary']},
+            {'CP1': 'CP', 'UIS1.0': 'UIS', 'FT1': 'FT'},
+        )
+
+    def test_stage_yields_cp_uis_ft_separate(self):
+        resp = self._fetch()
+        stages = resp.data['stage_yields']
+        self.assertEqual([s['stage'] for s in stages], ['CP', 'UIS', 'FT'])
+        self.assertEqual([s['file_count'] for s in stages], [1, 1, 1])
+        total_all = sum(p['total'] for p in resp.data['phases'])
+        self.assertEqual(sum(s['total'] for s in stages), total_all)
+        for s in stages:
+            self.assertEqual(s['pass_count'] + s['fail_count'], s['total'])
+        # UIS 独立成行、不混入整体良率 KPI（input_total 仅 CP+FT）
+        self.assertEqual(resp.data['kpi']['input_total'],
+                         sum(p['total'] for p in resp.data['phases']
+                             if p['phase'].startswith(('CP', 'FT'))))
+
+    def test_unrecognized_phase_falls_back_to_short_filename(self):
+        fname = 'BPD80590_C01JC6#AAA1A12606290025_HW_P262702101_20260726200657.csv'
+        DataFile.objects.create(
+            owner=self.user, filename=fname, file_path=SAMPLE_GAGE,
+            file_size=os.path.getsize(SAMPLE_GAGE), format_type='CTA8290D',
+            file_type='batch', batch_name='HWBATCH', status='ready',
+        )
+        resp = self._fetch('HWBATCH')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['phases'][0]['phase'],
+                         'BPD80590_C01JC6#AAA1A12606290025_HW_P262702101_20260726200657')
+        self.assertEqual(resp.data['stage_yields'][0]['stage'], '其他')
+
+    def test_rt_qa_fold_into_ft_stage(self):
+        """RT/QA 与 FT 同属 FT 阶段：分阶段良率只出现 FT 一行聚合三阶段文件。"""
+        for fname in (
+            'LOT_FTGROUP_RT1_20260726.csv',
+            'LOT_FTGROUP_QA1_20260726.csv',
+            'LOT_FTGROUP_FT1_20260726.csv',
+        ):
+            DataFile.objects.create(
+                owner=self.user, filename=fname, file_path=SAMPLE_GAGE,
+                file_size=os.path.getsize(SAMPLE_GAGE), format_type='CTA8290D',
+                file_type='batch', batch_name='FTGROUP', status='ready',
+            )
+        resp = self._fetch('FTGROUP')
+        self.assertEqual(resp.status_code, 200)
+        # 三个阶段文件都归入 FT stage
+        self.assertEqual([s['stage'] for s in resp.data['stage_yields']], ['FT'])
+        self.assertEqual(resp.data['stage_yields'][0]['file_count'], 3)
+        # phase 明细级阶段名保持独立（FT1/RT1/QA1 不合并）
+        self.assertEqual(
+            [p['phase'] for p in resp.data['phases']],
+            ['FT1', 'RT1', 'QA1'],
+            '阶段明细仍按 FT → RT → QA 排序',
+        )
+        self.assertEqual([p['stage'] for p in resp.data['phases']], ['FT', 'FT', 'FT'])

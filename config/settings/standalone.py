@@ -46,6 +46,20 @@ if _LQDP_BASE or FROZEN:
     _base.BASE_DIR = BASE_DIR
 
 # ---------------------------------------------------------------------------
+# System storage path config (system_config.json) — MUST run before DATABASES
+# is defined below: a configured ``data_dir`` migrates db.sqlite3 + media/
+# and becomes the effective BASE_DIR; a configured ``temp_dir`` redirects
+# tempfile. ``secret.key`` and the config file stay anchored to the fixed
+# original dir (regenerating the key would break SFTP password decryption).
+# ---------------------------------------------------------------------------
+_ORIG_BASE_DIR = BASE_DIR
+SYSTEM_CONFIG_ANCHOR_DIR = _ORIG_BASE_DIR
+from apps.common.system_config import apply_system_config  # noqa: E402
+BASE_DIR = apply_system_config(_ORIG_BASE_DIR)
+import config.settings.base as _base
+_base.BASE_DIR = BASE_DIR
+
+# ---------------------------------------------------------------------------
 # Core overrides
 # ---------------------------------------------------------------------------
 DEBUG = False
@@ -128,7 +142,7 @@ SFTP_SESSION_REDIS_URL = ''
 # ---------------------------------------------------------------------------
 # Secret key — auto-generated and persisted to ``secret.key`` next to the exe.
 # ---------------------------------------------------------------------------
-_SECRET_FILE = BASE_DIR / 'secret.key'
+_SECRET_FILE = _ORIG_BASE_DIR / 'secret.key'
 
 if os.environ.get('SECRET_KEY'):
     SECRET_KEY = os.environ['SECRET_KEY']

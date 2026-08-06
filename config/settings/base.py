@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'django_filters',
     'drf_spectacular',
     'celery',
+    'apps.common',
     'apps.accounts',
     'apps.datafiles',
     'apps.analysis',

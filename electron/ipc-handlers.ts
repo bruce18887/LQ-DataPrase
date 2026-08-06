@@ -31,6 +31,16 @@ export function registerIpcHandlers(getBackendUrl: () => string): void {
     return app.getVersion()
   })
 
+  // ---- App restart ----------------------------------------------------------
+  // Used by the settings page to apply storage-path changes. app.quit() (NOT
+  // app.exit(0)) fires main.ts's before-quit handler, which gracefully stops
+  // the Django child before the process relaunches.
+  ipcMain.handle('restart-app', () => {
+    app.relaunch()
+    app.quit()
+    return true
+  })
+
   // ---- File open dialog ----------------------------------------------------
   ipcMain.handle(
     'open-file-dialog',

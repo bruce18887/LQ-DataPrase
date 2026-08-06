@@ -15,6 +15,15 @@ const TEMPLATE_KEYS = [
   'batch_charts', 'batch_report', 'buyoff', 'gage',
 ]
 
+/**
+ * 设置页已重构为左侧竖排标签页：进入 /settings 后需先点击「导出模板」tab
+ * 才能与模板控件交互（SettingsPage.vue el-tab-pane）。
+ */
+async function gotoExportTab(page: import('@playwright/test').Page) {
+  await gotoApp(page, '/settings')
+  await page.getByRole('tab', { name: '📄 导出模板' }).click()
+}
+
 async function restoreTemplates(page: import('@playwright/test').Page) {
   await page.evaluate(async () => {
     const resp = await fetch('/api/v1/auth/settings/', {
@@ -45,7 +54,7 @@ async function restoreTemplates(page: import('@playwright/test').Page) {
 
 test.describe('@p1 导出文件名模板', { tag: ['@p1', '@settings'] }, () => {
   test('渲染：卡片 + 8 行模板输入 + 插入变量/恢复默认可见', async ({ page }) => {
-    await gotoApp(page, '/settings')
+    await gotoExportTab(page)
     await expect(page.getByText('📄 导出文件名')).toBeVisible()
 
     for (const key of TEMPLATE_KEYS) {
@@ -59,7 +68,7 @@ test.describe('@p1 导出文件名模板', { tag: ['@p1', '@settings'] }, () => 
   })
 
   test('保存并持久化：修改 to_excel 模板 → 保存 → reload 保留', async ({ page }) => {
-    await gotoApp(page, '/settings')
+    await gotoExportTab(page)
     const input = page.getByTestId('template-input-to_excel')
     await input.fill('{filename}_{datetime}')
 
@@ -73,6 +82,7 @@ test.describe('@p1 导出文件名模板', { tag: ['@p1', '@settings'] }, () => 
     await expect(page.locator('.el-message').filter({ hasText: /保存|成功/ })).toBeVisible()
 
     await page.reload()
+    await page.getByRole('tab', { name: '📄 导出模板' }).click()
     await expect(page.getByTestId('template-input-to_excel')).toHaveValue('{filename}_{datetime}')
 
     await restoreTemplates(page)
@@ -81,7 +91,7 @@ test.describe('@p1 导出文件名模板', { tag: ['@p1', '@settings'] }, () => 
 
 test.describe('@p2 导出文件名模板交互', { tag: ['@p2', '@settings'] }, () => {
   test('插入变量：选择 datetime → 追加到模板末尾 + 预览含时间戳', async ({ page }) => {
-    await gotoApp(page, '/settings')
+    await gotoExportTab(page)
     const input = page.getByTestId('template-input-to_csv')
     await input.fill('{filename}')
 
@@ -103,7 +113,7 @@ test.describe('@p2 导出文件名模板交互', { tag: ['@p2', '@settings'] }, 
   })
 
   test('逐行恢复默认：修改 sigma_limit 后点该行恢复默认', async ({ page }) => {
-    await gotoApp(page, '/settings')
+    await gotoExportTab(page)
     const input = page.getByTestId('template-input-sigma_limit')
     await input.fill('{sigma}custom')
     await page.getByTestId('template-reset-sigma_limit').click()
@@ -111,7 +121,7 @@ test.describe('@p2 导出文件名模板交互', { tag: ['@p2', '@settings'] }, 
   })
 
   test('非法字符清洗：模板含 * ? 预览显示 _ 替换', async ({ page }) => {
-    await gotoApp(page, '/settings')
+    await gotoExportTab(page)
     const input = page.getByTestId('template-input-to_excel')
     await input.fill('{filename}*bad?')
     const preview = await page.getByTestId('template-preview-to_excel').textContent()
@@ -120,7 +130,7 @@ test.describe('@p2 导出文件名模板交互', { tag: ['@p2', '@settings'] }, 
 
   test('端到端下载名：设置 {filename}_{datetime} → 导出 Excel → 下载名匹配', async ({ page }) => {
     try {
-      await gotoApp(page, '/settings')
+      await gotoExportTab(page)
       const input = page.getByTestId('template-input-to_excel')
       await input.fill('{filename}_{datetime}')
       await page.getByRole('button', { name: '💾 保存设置' }).click()

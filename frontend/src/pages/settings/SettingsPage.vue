@@ -2,162 +2,30 @@
   <div class="settings-page">
     <h2>⚙️ 系统设置</h2>
 
-    <el-card class="settings-section">
-      <template #header>
-        <span class="section-title">📊 图表与显示</span>
-      </template>
-      <el-form :model="settings" label-width="160px">
-        <el-form-item label="图表渲染引擎">
-          <el-radio-group v-model="settings.chart_engine">
-            <el-radio value="echarts">交互式 ECharts</el-radio>
-            <el-radio value="matplotlib">静态 Matplotlib</el-radio>
-          </el-radio-group>
-        </el-form-item>
-
-        <el-form-item label="ECharts 渲染器">
-          <el-radio-group v-model="settings.chart_renderer">
-            <el-radio value="svg">SVG（推荐 · 无损缩放 · 支持 CSS 操控）</el-radio>
-            <el-radio value="canvas">Canvas（大数据量时性能更好）</el-radio>
-          </el-radio-group>
-        </el-form-item>
-
-        <el-form-item label="图表高度 (px)">
-          <el-slider
-            v-model="settings.chart_height"
-            :min="300"
-            :max="800"
-            :step="50"
-            show-input
-          />
-        </el-form-item>
-
-        <el-form-item label="图表 DPI">
-          <el-input-number
-            v-model="settings.chart_dpi"
-            :min="72"
-            :max="600"
-            :step="1"
-          />
-        </el-form-item>
-
-        <el-form-item label="直方图标签偏移">
-          <el-input-number
-            v-model="settings.histogram_label_offset"
-            :min="0"
-            :max="20"
-            :step="1"
-          />
-        </el-form-item>
-      </el-form>
-    </el-card>
-
-    <el-card class="settings-section">
-      <template #header>
-        <span class="section-title">📋 表格设置</span>
-      </template>
-      <el-form :model="settings" label-width="160px">
-        <el-form-item label="默认每页行数">
-          <el-select v-model="settings.page_size">
-            <el-option :value="50" label="50" />
-            <el-option :value="100" label="100" />
-            <el-option :value="200" label="200" />
-            <el-option :value="500" label="500" />
-          </el-select>
-        </el-form-item>
-
-        <el-form-item label="表格高度">
-          <el-select v-model="settings.table_height">
-            <el-option :value="500" label="500" />
-            <el-option :value="600" label="600" />
-            <el-option :value="700" label="700" />
-            <el-option :value="800" label="800" />
-            <el-option :value="900" label="900" />
-            <el-option :value="1000" label="1000" />
-          </el-select>
-        </el-form-item>
-
-        <el-form-item label="表头字号">
-          <el-slider
-            v-model="settings.aggrid_header_font_size"
-            :min="8"
-            :max="18"
-            :step="1"
-            show-input
-          />
-        </el-form-item>
-      </el-form>
-    </el-card>
-
-    <el-card class="settings-section">
-      <template #header>
-        <span class="section-title">📐 CPK 阈值设置</span>
-      </template>
-      <el-form :model="settings" label-width="160px">
-        <el-form-item label="CPK A 级阈值">
-          <el-input-number
-            v-model="settings.cpk_a_threshold"
-            :min="1" :max="3" :step="0.01" :precision="2"
-            aria-describedby="cpk-a-hint"
-            @change="onCpkAChanged"
-          />
-          <span id="cpk-a-hint" class="threshold-hint">≥ {{ settings.cpk_a_threshold }} 为 A 级（优）</span>
-        </el-form-item>
-
-        <el-form-item label="CPK B 级阈值">
-          <el-input-number
-            v-model="settings.cpk_b_threshold"
-            :min="0.5" :max="settings.cpk_a_threshold - 0.01"
-            :step="0.01" :precision="2"
-            aria-describedby="cpk-b-hint"
-            @change="onCpkBChanged"
-          />
-          <span id="cpk-b-hint" class="threshold-hint">≥ {{ settings.cpk_b_threshold }} 且 &lt; {{ settings.cpk_a_threshold }} 为 B 级</span>
-        </el-form-item>
-
-        <el-form-item label="CPK C 级阈值">
-          <el-input-number
-            v-model="settings.cpk_c_threshold"
-            :min="0" :max="settings.cpk_b_threshold - 0.01"
-            :step="0.01" :precision="2"
-            aria-describedby="cpk-c-hint"
-          />
-          <span id="cpk-c-hint" class="threshold-hint">≥ {{ settings.cpk_c_threshold }} 且 &lt; {{ settings.cpk_b_threshold }} 为 C 级</span>
-        </el-form-item>
-      </el-form>
-    </el-card>
-
-    <ExportTemplateSettings v-model:templates="settings.export_filename_templates" />
-
-    <el-card class="settings-section">
-      <template #header>
-        <span class="section-title">📁 最近文件列表</span>
-      </template>
-      <div v-if="recentFiles.length > 0" class="recent-files">
-        <div class="recent-files__header">
-          <span>最多保留</span>
-          <el-input-number
-            v-model="settings.max_recent_files"
-            :min="1"
-            :max="50"
-            :step="1"
-            size="small"
-            style="margin-left: 8px; width: 120px"
-          />
-          <span>个最近文件</span>
-        </div>
-        <el-table :data="recentFiles" stripe size="small">
-          <el-table-column label="序号" type="index" width="60" />
-          <el-table-column prop="id" label="文件 ID" width="100" />
-          <el-table-column prop="name" label="文件名" min-width="200" />
-          <el-table-column label="访问时间" width="170">
-            <template #default="{ row }">
-              {{ formatDate(row.accessed_at) }}
-            </template>
-          </el-table-column>
-        </el-table>
-      </div>
-      <el-empty v-else description="暂无最近文件" />
-    </el-card>
+    <el-tabs v-model="activeTab" tab-position="left" class="settings-tabs">
+      <el-tab-pane name="display" label="📊 显示设置">
+        <ChartSettingsForm :settings="settings" />
+      </el-tab-pane>
+      <el-tab-pane name="table" label="📋 表格设置">
+        <TableSettingsForm :settings="settings" />
+      </el-tab-pane>
+      <el-tab-pane name="cpk" label="📐 CPK 阈值">
+        <CpkSettingsForm :settings="settings" />
+      </el-tab-pane>
+      <el-tab-pane name="export" label="📄 导出模板">
+        <ExportTemplateSettings v-model:templates="settings.export_filename_templates" />
+      </el-tab-pane>
+      <el-tab-pane name="paths" label="📁 存储路径">
+        <SystemPathsSettings />
+      </el-tab-pane>
+      <el-tab-pane name="recent" label="🕐 最近文件">
+        <RecentFilesSettings
+          :recent-files="recentFiles"
+          :max-recent-files="settings.max_recent_files"
+          @update:max-recent-files="settings.max_recent_files = $event"
+        />
+      </el-tab-pane>
+    </el-tabs>
 
     <div class="settings-actions">
       <el-button type="primary" size="large" @click="saveSettings">
@@ -175,26 +43,14 @@ import { ref, onMounted } from 'vue'
 import { authApi } from '../../api/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { setChartRenderer } from '../../utils/echarts-theme'
-import type { ExportTypeKey } from '../../types'
+import type { ExportTypeKey, SettingsData } from '../../types'
 import { EXPORT_TEMPLATE_META, EXPORT_TEMPLATE_KEYS } from '../../constants/export-templates'
+import ChartSettingsForm from './components/ChartSettingsForm.vue'
+import TableSettingsForm from './components/TableSettingsForm.vue'
+import CpkSettingsForm from './components/CpkSettingsForm.vue'
+import SystemPathsSettings from './components/SystemPathsSettings.vue'
+import RecentFilesSettings from './components/RecentFilesSettings.vue'
 import ExportTemplateSettings from './components/ExportTemplateSettings.vue'
-
-interface SettingsData {
-  page_size: number
-  chart_height: number
-  table_height: number
-  chart_dpi: number
-  cpk_a_threshold: number
-  cpk_b_threshold: number
-  cpk_c_threshold: number
-  chart_engine: string
-  chart_renderer: 'svg' | 'canvas'
-  aggrid_header_font_size: number
-  recent_files: Array<{ id: number; name: string; accessed_at: string }>
-  max_recent_files: number
-  histogram_label_offset: number
-  export_filename_templates: Record<ExportTypeKey, string>
-}
 
 function defaultTemplates(): Record<ExportTypeKey, string> {
   const result = {} as Record<ExportTypeKey, string>
@@ -221,41 +77,10 @@ const defaults: SettingsData = {
   export_filename_templates: defaultTemplates(),
 }
 
+const activeTab = ref('display')
 const settings = ref<SettingsData>({ ...defaults })
 
 const recentFiles = ref<Array<{ id: number; name: string; accessed_at: string }>>([])
-
-function onCpkAChanged() {
-  if (settings.value.cpk_b_threshold >= settings.value.cpk_a_threshold) {
-    settings.value.cpk_b_threshold = parseFloat((settings.value.cpk_a_threshold - 0.34).toFixed(2))
-    ElMessage.warning('CPK B 已自动调整为低于 CPK A')
-  }
-  if (settings.value.cpk_c_threshold >= settings.value.cpk_b_threshold) {
-    settings.value.cpk_c_threshold = parseFloat((settings.value.cpk_b_threshold - 0.33).toFixed(2))
-    ElMessage.warning('CPK C 已自动调整为低于 CPK B')
-  }
-}
-
-function onCpkBChanged() {
-  if (settings.value.cpk_b_threshold >= settings.value.cpk_a_threshold) {
-    settings.value.cpk_b_threshold = parseFloat((settings.value.cpk_a_threshold - 0.01).toFixed(2))
-    ElMessage.warning('CPK B 不能高于 CPK A，已自动调整')
-  }
-  if (settings.value.cpk_c_threshold >= settings.value.cpk_b_threshold) {
-    settings.value.cpk_c_threshold = parseFloat((settings.value.cpk_b_threshold - 0.01).toFixed(2))
-    ElMessage.warning('CPK C 已自动调整为低于 CPK B')
-  }
-  if (settings.value.cpk_c_threshold < 0) {
-    settings.value.cpk_c_threshold = 0
-  }
-}
-
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return '-'
-  const d = new Date(dateStr)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
 
 async function loadSettings() {
   try {
@@ -326,32 +151,34 @@ onMounted(() => {
   color: var(--text-primary);
 }
 
-.settings-section {
-  margin-bottom: 20px;
+.settings-tabs {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
-.section-title {
-  font-weight: 600;
-  font-size: 16px;
-  color: var(--text-primary);
+:deep(.el-tabs__header) {
+  background-color: var(--bg-tertiary);
+  border-right: 1px solid var(--border-default);
+  border-bottom: none;
 }
 
-.threshold-hint {
-  margin-left: 12px;
-  font-size: 13px;
+:deep(.el-tabs__item) {
   color: var(--text-secondary);
+  justify-content: flex-start;
 }
 
-.recent-files {
-  margin-bottom: 8px;
+:deep(.el-tabs__item.is-active) {
+  color: var(--brand-primary);
 }
 
-.recent-files__header {
-  margin-bottom: 12px;
-  display: flex;
-  align-items: center;
-  font-size: 14px;
-  color: var(--text-secondary);
+:deep(.el-tabs__active-bar) {
+  background-color: var(--brand-primary);
+}
+
+:deep(.el-tabs__content) {
+  padding: 20px 24px;
 }
 
 .settings-actions {
@@ -359,18 +186,6 @@ onMounted(() => {
   gap: 16px;
   margin-top: 24px;
   margin-bottom: 40px;
-}
-
-:deep(.el-card) {
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-default);
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06);
-}
-
-:deep(.el-card__header) {
-  background-color: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border-default);
 }
 
 :deep(.el-form-item__label) {

@@ -37,6 +37,9 @@ export interface ElectronAPI {
   /** Returns the current OS platform ('win32', 'darwin', 'linux', etc.). */
   getPlatform(): string
 
+  /** Relaunches the app (gracefully stops the backend child first). */
+  restartApp(): Promise<boolean>
+
   /** Returns the current web contents zoom factor (1 = 100%). */
   getZoomFactor(): Promise<number>
 

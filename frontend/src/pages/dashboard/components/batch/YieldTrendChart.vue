@@ -27,7 +27,11 @@ function buildOption() {
       type: 'category',
       data: phases.map((p: any) => p.phase),
       axisLine: { lineStyle: { color: 'var(--border-default)' } },
-      axisLabel: { color: 'var(--text-primary)' },
+      axisLabel: {
+        color: 'var(--text-primary)',
+        // 回退短文件名较长，截断防标签重叠；tooltip 显示完整阶段名
+        formatter: (val: string) => (val.length > 12 ? val.slice(0, 12) + '…' : val),
+      },
     },
     yAxis: [
       {

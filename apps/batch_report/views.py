@@ -20,6 +20,9 @@ from apps.analysis.services.statistics import (
     compute_pass_yield,
 )
 from apps.batch_report.aggregation import aggregate_bin_site_table, aggregate_uph
+from apps.batch_report.phase_parsing import (
+    detect_phase, phase_sort_key, stage_of, stage_sort_key,
+)
 
 
 def _build_phase_summary(phases):
@@ -40,6 +43,7 @@ def _build_phase_summary(phases):
         yield_pct = round(data['pass'] / data['total'] * 100, 2) if data['total'] > 0 else 0
         summary.append({
             'phase': phase_name,
+            'stage': stage_of(phase_name),
             'file_count': len(data['files']),
             'total': data['total'],
             'pass_count': data['pass'],
@@ -48,14 +52,7 @@ def _build_phase_summary(phases):
         })
 
     # Sort by same phase order
-    PHASE_ORDER = {'CP': 0, 'FT': 1, 'BF': 2, 'RT': 3, 'QA': 4, '2D3D': 5, 'UNKNOWN': 99}
-    def sort_key(s):
-        for prefix, order in PHASE_ORDER.items():
-            if s['phase'].startswith(prefix):
-                m = re.search(r'(\d+)', s['phase'])
-                return (order, int(m.group(1)) if m else 0)
-        return (99, 0)
-    summary.sort(key=sort_key)
+    summary.sort(key=lambda s: phase_sort_key(s['phase']))
     return summary
 
 
@@ -149,27 +146,13 @@ class BatchReportViewSet(viewsets.GenericViewSet):
                         for site in all_sites:
                             bi['sites'][site] = site_breakdown.get(site, {}).get(bi['name'], 0)
 
-            # Detect phase type from filename
-            # Priority: compound (EQC1-QA1, FT1-RT1, EQC1-2D3D) > standard (_CP1_, _FT1_)
-            fname_upper = df_obj.filename.upper()
-            phase_type = None
-            # 1) Compound: EQC1_QA1-1 → QA1-1, FT1_FT1-1 → FT1-1, FT1_RT1-1 → RT1-1, EQC1-2D3D → 2D3D
-            #    Captures full identifier including sequence number (e.g., QA1-1, FT1-2, RT2-1)
-            m = re.search(r'(?:EQC\d+|QEC\d+|FT\d+)[_-]((?:CP|FT|QA|RT|BF)\d+(?:-\d+)?|2D3D)', fname_upper)
-            if m:
-                phase_type = m.group(1)
-            else:
-                # 2) Standard: _CP1_, _FT1-1_, _QA1-2_ — use underscore/hyphen delimiter to avoid CP0283 (program code)
-                m = re.search(r'_((?:CP|FT|QA|RT|BF)\d+(?:-\d+)?)[_-]', fname_upper)
-                if m:
-                    phase_type = m.group(1)
-            if not phase_type:
-                phase_type = 'UNKNOWN'
+            # Detect phase type from filename (compound > standard > short filename fallback)
+            phase_type = detect_phase(df_obj.filename)
 
             # Extract WAFER_ID from CP filenames: _05_CP1_ → 05
             wafer_id = ''
             if phase_type.startswith('CP'):
-                wm = re.search(r'_(\d{2})_CP', fname_upper)
+                wm = re.search(r'_(\d{2})_CP', df_obj.filename.upper())
                 if wm:
                     wafer_id = wm.group(1)
 
@@ -179,6 +162,7 @@ class BatchReportViewSet(viewsets.GenericViewSet):
             phases.append({
                 'filename': df_obj.filename,
                 'phase': phase_type,
+                'stage': stage_of(phase_type),
                 'wafer_id': wafer_id,
                 'lot_id': metadata.get('lot_id', '') or df_obj.program_name or '-',
                 'total': total,
@@ -250,7 +234,7 @@ class BatchReportViewSet(viewsets.GenericViewSet):
         sorted_sites = sorted(all_sites)
         site_matrix = []
         for p in phases:
-            row = {'phase': p['phase'], 'wafer_id': p.get('wafer_id', '')}
+            row = {'phase': p['phase'], 'stage': p['stage'], 'wafer_id': p.get('wafer_id', '')}
             for site in sorted_sites:
                 st_val = p['site_total'].get(site, 0)
                 sp_val = p['site_pass'].get(site, 0)
@@ -265,20 +249,29 @@ class BatchReportViewSet(viewsets.GenericViewSet):
             row['all_ratio'] = f"{p['pass_count']}/{p['total']}"
             site_matrix.append(row)
 
-        # Sort phases by semiconductor test flow: CP → FT/BF → RT → QA → 2D3D
-        PHASE_ORDER = {'CP': 0, 'FT': 1, 'BF': 2, 'RT': 3, 'QA': 4, '2D3D': 5, 'UNKNOWN': 99}
+        # Sort phases by semiconductor test flow: CP → UIS → FT/BF → RT → QA → 2D3D
+        phases.sort(key=lambda p: phase_sort_key(p['phase']))
 
-        def phase_sort_key(p):
-            name = p['phase']
-            for prefix, order in PHASE_ORDER.items():
-                if name.startswith(prefix):
-                    # Secondary sort by number (CP1 < CP2, QA1 < QA2)
-                    m = re.search(r'(\d+)', name)
-                    num = int(m.group(1)) if m else 0
-                    return (order, num)
-            return (99, 0)
-
-        phases.sort(key=phase_sort_key)
+        # Stage-level yield stats (CP/UIS/FT 分别统计): aggregate phases by flow stage
+        stage_groups = defaultdict(lambda: {'total': 0, 'pass': 0, 'fail': 0, 'files': 0})
+        for p in phases:
+            stage = stage_of(p['phase'])
+            stage_groups[stage]['total'] += p['total']
+            stage_groups[stage]['pass'] += p['pass_count']
+            stage_groups[stage]['fail'] += p['fail_count']
+            stage_groups[stage]['files'] += 1
+        stage_yields = []
+        for stage, data in stage_groups.items():
+            yield_pct = round(data['pass'] / data['total'] * 100, 2) if data['total'] > 0 else 0
+            stage_yields.append({
+                'stage': stage,
+                'file_count': data['files'],
+                'total': data['total'],
+                'pass_count': data['pass'],
+                'fail_count': data['fail'],
+                'yield_pct': yield_pct,
+            })
+        stage_yields.sort(key=lambda s: stage_sort_key(s['stage']))
 
         # QA validation
         qa_checks = []
@@ -313,6 +306,7 @@ class BatchReportViewSet(viewsets.GenericViewSet):
             },
             'phases': phases,
             'phase_summary': _build_phase_summary(phases),
+            'stage_yields': stage_yields,
             'trend_data': trend,
             'site_pass_data': site_pass_data,
             'bin_distribution': bin_distribution,

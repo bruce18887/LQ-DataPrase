@@ -213,6 +213,15 @@ test.describe('批次报表 /batch', { tag: ['@p1', '@p2', '@batch'] }, () => {
     await firstOption.click()
     await yieldResp
 
+    // 阶段明细表在 CollapsibleSection 中默认折叠 —— 先展开
+    const detailHeaderBtn = page
+      .locator('.el-card__header', { hasText: '📊 阶段明细表' })
+      .first()
+      .locator('button')
+    if ((await detailHeaderBtn.textContent().catch(() => ''))?.includes('展开')) {
+      await detailHeaderBtn.click()
+    }
+
     // 阶段明细表可见
     const phaseTable = page.locator('.el-card').filter({ hasText: '📊 阶段明细表' }).locator('.el-table')
     await expect(phaseTable).toBeVisible({ timeout: 15_000 })
