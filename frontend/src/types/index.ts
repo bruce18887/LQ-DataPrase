@@ -23,6 +23,24 @@ export interface UserSettings {
   export_filename_templates: Record<ExportTypeKey, string>
 }
 
+/** 系统设置页完整设置项（GET/PUT /auth/settings/ 的载荷）。 */
+export interface SettingsData {
+  page_size: number
+  chart_height: number
+  table_height: number
+  chart_dpi: number
+  cpk_a_threshold: number
+  cpk_b_threshold: number
+  cpk_c_threshold: number
+  chart_engine: string
+  chart_renderer: 'svg' | 'canvas'
+  aggrid_header_font_size: number
+  recent_files: Array<{ id: number; name: string; accessed_at: string }>
+  max_recent_files: number
+  histogram_label_offset: number
+  export_filename_templates: Record<ExportTypeKey, string>
+}
+
 export interface DataFile {
   id: number
   filename: string
@@ -57,6 +75,25 @@ export interface SiteYield {
   yield: string
   pass: number
   total: number
+}
+
+export interface StageYield {
+  stage: string
+  file_count: number
+  total: number
+  pass_count: number
+  fail_count: number
+  yield_pct: number
+}
+
+export interface PhaseSummary {
+  phase: string
+  stage: string
+  file_count: number
+  total: number
+  pass_count: number
+  fail_count: number
+  yield_pct: number
 }
 
 export interface FailTestItem {

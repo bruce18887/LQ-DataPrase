@@ -62,6 +62,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   getPlatform: (): string => process.platform,
 
+  // ---- App restart --------------------------------------------------------
+  restartApp: (): Promise<boolean> => ipcRenderer.invoke('restart-app'),
+
   // ---- Menu callbacks ------------------------------------------------------
   onMenuOpenFile: (callback: () => void): (() => void) => {
     const handler = (): void => callback()

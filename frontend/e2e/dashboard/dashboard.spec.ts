@@ -10,6 +10,10 @@ import { expectChartRendered, waitForCharts, waitLoadingGone } from '../helpers/
 async function waitBatchYieldCharts(page: import('@playwright/test').Page, timeout = 15_000) {
   // 复用组件渲染多个 ECharts 容器（Site 柱状/Yield 仪表盘 + Bin×Site 柱状图 + 良率趋势等）
   await waitForCharts(page, 1, timeout)
+
+  // Bin 分布卡（CollapsibleSection）默认折叠：先展开，复用组件才挂载
+  await expandCollapsedSection(page, '📋 Bin 分布')
+
   // 复用的单文件组件 section 标题
   const siteYieldTitle = page.getByText(/Site 良率分布/).first()
   const binSiteTitle = page.getByText(/Bin .* Site 交叉表/).first()
@@ -24,6 +28,23 @@ async function waitBatchYieldCharts(page: import('@playwright/test').Page, timeo
   const yieldContainer = yieldTitle.locator('xpath=ancestor::*[contains(@class,"section-card")][1]//div[contains(@class,"chart-container")]')
   await expect(yieldContainer).toBeVisible()
   return { yieldContainer }
+}
+
+/**
+ * 展开 CollapsibleSection 折叠卡（标题含 title 文本、按钮文案为「展开 ▼」时点击）。
+ * 幂等：已展开（文案为「收起 ▲」）时跳过。
+ */
+async function expandCollapsedSection(page: import('@playwright/test').Page, title: string) {
+  const btn = page
+    .locator('.el-card__header', { hasText: title })
+    .first()
+    .locator('button')
+  if (await btn.isVisible().catch(() => false)) {
+    const text = (await btn.textContent()) || ''
+    if (text.includes('展开')) {
+      await btn.click()
+    }
+  }
 }
 
 /**
@@ -275,6 +296,9 @@ test.describe('仪表板', { tag: ['@p0', '@p1', '@p2', '@dashboard'] }, () => {
       .filter({ has: page.locator('.el-card__header', { hasText: '📋 Bin 分布' }) })
       .first()
     await expect(binCard, '应存在「📋 Bin 分布」主卡片').toBeVisible()
+
+    // Bin 分布卡默认折叠（CollapsibleSection）——先展开，子 section 才挂载
+    await expandCollapsedSection(page, '📋 Bin 分布')
 
     // 4 个子 section 标题（Bin 分布有 per-phase 标题 + 3 个 divider 标题）
     await expect(binCard.locator('.chart-title', { hasText: /各阶段 Bin 明细/ })).toBeVisible()
