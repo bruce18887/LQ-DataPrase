@@ -132,7 +132,10 @@ function onResize() {
   tableHeight.value = Math.max(320, window.innerHeight - TABLE_TOP_OFFSET)
 }
 onMounted(() => window.addEventListener('resize', onResize))
-onUnmounted(() => window.removeEventListener('resize', onResize))
+onUnmounted(() => {
+  window.removeEventListener('resize', onResize)
+  if (passfailTimer) clearTimeout(passfailTimer)
+})
 
 const gridWrapperStyle = computed(() => ({
   containIntrinsicSize: `auto ${tableHeight.value}px`,
@@ -345,9 +348,15 @@ watch(
   }
 )
 
-// Pass/Fail 切换即重新加载（含未加载数据时预先选择，选文件后按当前筛选生效）
+// Pass/Fail 切换即重新加载（含未加载数据时预先选择，选文件后按当前筛选生效）。
+// 300ms 防抖：快速连点 Pass/Fail/All 只发最后一次全量请求（page_size 99999）
+let passfailTimer: ReturnType<typeof setTimeout> | null = null
 watch(passfail, () => {
-  if (props.fileId) loadData()
+  if (passfailTimer) clearTimeout(passfailTimer)
+  passfailTimer = setTimeout(() => {
+    passfailTimer = null
+    if (props.fileId) loadData()
+  }, 300)
 })
 
 // 文件变更（删除等）后重新校验当前文件；若已被删除，后端 404 → 清空表格。

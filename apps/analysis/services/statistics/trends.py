@@ -11,7 +11,7 @@ from .limits import (
     compute_pass_yield,
 )
 from .computations import compute_cpk
-from .helpers import NON_NUMERIC_KEYWORDS, get_1d_from
+from .helpers import NON_NUMERIC_KEYWORDS, get_1d_from, filter_finite
 
 logger = logging.getLogger(__name__)
 
@@ -245,8 +245,7 @@ def compute_param_trend(file_data_list: List[Dict[str, Any]], param: str) -> Dic
             continue
 
         # Get data series
-        data_series = get_1d_from(df, param).dropna()
-        data_series = data_series[data_series.apply(lambda x: abs(x) < float('inf'))]
+        data_series = filter_finite(get_1d_from(df, param))
 
         if len(data_series) == 0:
             continue

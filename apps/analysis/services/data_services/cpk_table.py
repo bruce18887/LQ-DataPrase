@@ -4,6 +4,7 @@ from apps.analysis.services.statistics import (
     compute_cpk,
     compute_range_statistics,
     get_1d_from,
+    filter_finite,
 )
 
 
@@ -15,9 +16,7 @@ def compute_cpk_table_data(df, metadata, params):
     """
     results = {}
     for param in params:
-        data_series = get_1d_from(df, param).dropna()
-        data_series = data_series[
-            data_series.apply(lambda x: abs(x) < float('inf'))]
+        data_series = filter_finite(get_1d_from(df, param))
         if len(data_series) == 0:
             continue
 
@@ -28,9 +27,9 @@ def compute_cpk_table_data(df, metadata, params):
         results[param] = {
             'mean': round(stats['mean'], 6),
             'std': round(stats['std'], 6),
-            'cp': round(cpk_result['cp'], 4),
+            'cp': round(cpk_result['cp'], 4) if cpk_result['cp'] is not None else None,
             'cpk': round(cpk_result['cpk'], 4),
-            'pp': round(cpk_result['pp'], 4),
+            'pp': round(cpk_result['pp'], 4) if cpk_result['pp'] is not None else None,
             'ppk': round(cpk_result['ppk'], 4),
             'cp_level': cpk_result['cp_level'],
             'cpk_level': cpk_result['cpk_level'],

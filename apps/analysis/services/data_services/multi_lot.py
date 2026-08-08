@@ -107,7 +107,7 @@ def _resolve_multi_range(range_type, combined, global_mean, global_std,
 
     # S3/S4/S6: mean ± N*std
     if range_type in ('S3', 'S4', 'S6') and global_std > 0:
-        n = int(range_type[1])
+        n = int(range_type[1:])  # S3→3 / S10→10（[1] 只取一位，S10+ 会解析错）
         return global_mean - n * global_std, global_mean + n * global_std
 
     # Final fallback: raw data range
@@ -167,7 +167,7 @@ def compute_multi_lot_distribution(datasets, all_series, param,
         if range_type == 'RDL':
             display_lower, display_upper = spec_lower, spec_upper
         elif range_type in ('S3', 'S4', 'S6') and std_v > 0:
-            n = int(range_type[1])
+            n = int(range_type[1:])  # S3→3 / S10→10（[1] 只取一位，S10+ 会解析错）
             display_lower = mean_v - n * std_v
             display_upper = mean_v + n * std_v
         elif range_type == 'DR':

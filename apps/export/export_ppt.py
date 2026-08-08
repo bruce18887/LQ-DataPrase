@@ -13,7 +13,7 @@ from pptx import Presentation
 from pptx.util import Inches
 
 from apps.analysis.services.statistics import (
-    compute_cpk, compute_range_statistics, get_1d_from,
+    compute_cpk, compute_range_statistics, get_1d_from, filter_finite,
 )
 from apps.export.charts import build_histogram_bins
 
@@ -50,8 +50,7 @@ def build_batch_charts_pptx(datafile, df, metadata, params):
     for param in params:
         if param not in df.columns:
             continue
-        data_series = get_1d_from(df, param).dropna()
-        data_series = data_series[data_series.apply(lambda x: abs(x) < float('inf'))]
+        data_series = filter_finite(get_1d_from(df, param))
         if len(data_series) == 0:
             continue
 

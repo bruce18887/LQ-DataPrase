@@ -15,7 +15,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.drawing.image import Image as XlImage
 
 from apps.analysis.services.statistics import (
-    get_1d_from, compute_range_statistics, compute_cpk, compute_site_stats,
+    get_1d_from, filter_finite, compute_range_statistics, compute_cpk, compute_site_stats,
 )
 from .charts import _create_histogram_chart
 from .chart_workers import render_histogram_worker
@@ -85,8 +85,7 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
     for selected_param in params_sorted:
         if selected_param not in df.columns:
             continue
-        data_series = get_1d_from(df, selected_param).dropna()
-        data_series = data_series[data_series.apply(lambda x: abs(x) < float('inf'))]
+        data_series = filter_finite(get_1d_from(df, selected_param))
         if len(data_series) == 0:
             continue
 

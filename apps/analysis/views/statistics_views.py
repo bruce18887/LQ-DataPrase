@@ -23,6 +23,7 @@ from apps.analysis.services.statistics import (
     get_site_column,
     get_columns_with_limits,
     get_1d_from,
+    filter_finite,
     build_fail_mask,
     build_col_meta,
     ensure_numeric,
@@ -96,8 +97,7 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         if get_bool_param(request, 'data_only_bin1'):
             df = filter_bin1_rows(df, metadata)
 
-        data_series = get_1d_from(df, param).dropna()
-        data_series = data_series[data_series.apply(lambda x: abs(x) < float('inf'))]
+        data_series = filter_finite(get_1d_from(df, param))
         site_col = get_site_column(df)
 
         if not site_col:

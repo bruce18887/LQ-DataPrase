@@ -209,18 +209,14 @@ class AnalysisViewSet(viewsets.GenericViewSet):
             }, status=400)
         params = valid_params
         for param in params:
-            try:
-                result = compute_histogram_stats(
-                    df, metadata, param, site_col,
-                    range_type=range_type, custom_low=custom_low, custom_high=custom_high,
-                    iqr_multiplier=iqr_multiplier)
-                if result is not None:
-                    results[param] = result
-            except Exception:
-                # Re-raise so the 500 surfaces for any unexpected internal
-                # error (out-of-memory, division-by-zero, etc.). The
-                # param-not-in-df case is handled above as 400.
-                raise
+            # 计算路径不吞异常：任何意外内部错误直接 500 暴露（param 不在 df
+            # 的情况已在上面作为 400 处理）
+            result = compute_histogram_stats(
+                df, metadata, param, site_col,
+                range_type=range_type, custom_low=custom_low, custom_high=custom_high,
+                iqr_multiplier=iqr_multiplier)
+            if result is not None:
+                results[param] = result
 
         return Response(clean_data({
             'file_id': datafile.id,
@@ -266,7 +262,7 @@ class AnalysisViewSet(viewsets.GenericViewSet):
             df_obj = DataFile.objects.filter(pk=fid, owner=request.user).first()
             if df_obj is None:
                 continue
-            df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk)
+            df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk, df_obj)
             if df is None:
                 continue
             loaded.append((int(fid), df, metadata, df_obj.filename))
@@ -487,7 +483,7 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         dfs = {}
         for fid, label in [(file1_id, 'ATE'), (file2_id, 'Bench')]:
             df_obj = get_object_or_404(DataFile, pk=fid, owner=request.user)
-            df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk)
+            df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk, df_obj)
             if df is None:
                 continue
             serial_col = get_serial_column(df)

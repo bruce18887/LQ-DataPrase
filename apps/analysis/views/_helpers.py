@@ -116,7 +116,7 @@ def _load_files_from_request(request, file_ids):
             if not os.path.exists(datafile.file_path):
                 continue
 
-            df, metadata, fmt = get_cached_parsed_file(int(file_id), request.user.pk)
+            df, metadata, fmt = get_cached_parsed_file(int(file_id), request.user.pk, datafile)
             if df is None:
                 continue
 

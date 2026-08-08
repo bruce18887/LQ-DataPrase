@@ -11,7 +11,7 @@ export function useSiteStats(
 ) {
   const siteStats = ref<any[]>([])
   const siteStatsError = ref('')
-  const { run } = useAsyncData<any>({ silent: true })
+  const { run, error } = useAsyncData<any>({ silent: true })
 
   async function loadSiteStats() {
     const fileId = getSelectedFileId()
@@ -23,7 +23,12 @@ export function useSiteStats(
       range_type: rangeType.value,
       data_only_bin1: dataOnlyBin1?.value ?? false,
     }, { silent: true }))
-    if (result?.error) {
+    // HTTP 4xx/5xx → useAsyncData 的 error ref 置位（此前只处理 200+body.error，
+    // 非 200 时表格静默空白无提示）
+    if (error.value) {
+      siteStatsError.value = error.value
+      siteStats.value = []
+    } else if (result?.error) {
       siteStatsError.value = result.error
       siteStats.value = []
     } else {
