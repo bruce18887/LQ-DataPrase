@@ -86,10 +86,11 @@ class DataBrowserView(APIView):
         # Apply filters at DataFrame level (fast pandas ops) before paginating
         if search:
             search_lower = search.lower()
-            mask = df.apply(
-                lambda row: any(search_lower in str(v).lower() for v in row),
-                axis=1,
-            )
+            # 向量化全文搜索：逐列 str.contains（原实现逐行逐值 Python 调用，
+            # 10000×188 需 188 万次；regex=False 防搜索词含正则字符被当正则）
+            mask = df.astype(str).apply(
+                lambda col: col.str.lower().str.contains(search_lower, na=False, regex=False)
+            ).any(axis=1)
             df = df[mask]
             # Re-index after filter so fail_indices still map correctly
             # Use original index values for fail_cells lookup

@@ -68,16 +68,16 @@ function buildOption() {
   if (activeIndices.length === 0) {
     activeIndices = binCenters.map((_: number, i: number) => i)
   }
-  const filteredBinCenters = activeIndices.map((i: number) => binCenters[i])
 
   const series: any[] = []
   const siteHists = r.site_histograms
   const siteKeys = siteHists ? Object.keys(siteHists) : []
   const hasSiteData = siteKeys.length >= 1
   const showNormal = props.chartConfig.includes('normal')
-  const normalMean = shouldClip && r.filtered_mean != null ? r.filtered_mean : r.mean
-  const normalStd = shouldClip && r.filtered_std != null ? r.filtered_std : r.std
-  const hasNormal = showNormal && normalStd > 0
+  // 正态曲线数据统一来自后端 result（normal_curve / filtered_normal_curve，
+  // 公式单一来源在后端），与 KDE/标记线同源原则一致——前端不再本地实现高斯公式
+  const normalCurve = shouldClip && r.filtered_normal_curve != null ? r.filtered_normal_curve : r.normal_curve
+  const hasNormal = showNormal && Array.isArray(normalCurve) && normalCurve.length > 1
   const hasKde = props.chartConfig.includes('kde') && Array.isArray(r.kde_curve) && r.kde_curve.length > 1
   // Density axes are independent: KDE gets its own purple axis on the far
   // left, the normal curve keeps the original orange axis on the right.
@@ -158,15 +158,7 @@ function buildOption() {
   if (mk.length) series.push({ name: '规格限', type: 'line', data: [], markLine: { symbol: 'none', precision: 4, data: mk } })
 
   if (hasNormal) {
-    const binGap = filteredBinCenters.length > 1 ? Math.abs(filteredBinCenters[1] - filteredBinCenters[0]) : 1
-    const pdfFn = (x: number) => (1 / (normalStd * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * ((x - normalMean) / normalStd) ** 2)
-    let xVals: number[]
-    if (normalStd < binGap) {
-      const extra: number[] = [normalMean]
-      for (let k = 1; k <= 6; k++) extra.push(normalMean - k * normalStd, normalMean + k * normalStd)
-      xVals = [...filteredBinCenters, ...extra].sort((a, b) => a - b)
-    } else { xVals = filteredBinCenters }
-    series.push({ name: '正态分布', type: 'line', data: xVals.map((x: number) => [x, pdfFn(x)]), smooth: true, lineStyle: { color: '#F57F17', width: 3 }, symbol: 'none', yAxisIndex: normalAxisIdx, z: 10 })
+    series.push({ name: '正态分布', type: 'line', data: normalCurve as any[], smooth: true, lineStyle: { color: '#F57F17', width: 3 }, symbol: 'none', yAxisIndex: normalAxisIdx, z: 10 })
   }
 
   if (hasKde) {

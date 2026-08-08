@@ -73,6 +73,22 @@ def get_1d_from(df: pd.DataFrame, col: str) -> pd.Series:
     return s
 
 
+def normal_pdf_curve(mean: float, std: float, x_min: float, x_max: float,
+                     n_points: int = 200) -> Optional[List[List[float]]]:
+    """正态 PDF 曲线采样，与 ``kde_curve`` 同格式 ``[[x, y], ...]``。
+
+    公式单一来源：前端 ECharts 与导出 matplotlib 都消费本函数的结果
+    （此前三处各自实现高斯公式，改一处漏一处必然分叉）。
+    ``std <= 0``（退化数据）返回 None，调用方静默跳过曲线。
+    """
+    if std <= 0:
+        return None
+    x = np.linspace(x_min, x_max, n_points)
+    scale = 1.0 / (std * np.sqrt(2.0 * np.pi))
+    y = scale * np.exp(-0.5 * ((x - mean) / std) ** 2)
+    return [[round(float(xi), 6), round(float(yi), 6)] for xi, yi in zip(x, y)]
+
+
 def filter_finite(series: pd.Series) -> pd.Series:
     """移除 NaN 与 ±inf（向量化）。
 
