@@ -50,7 +50,8 @@ def parse_limit_string(limit_str: str, data_series: pd.Series, default_min: floa
         return default_min
 
 
-def detect_fail_data(df: pd.DataFrame, metadata: Dict, ignore_no_limit: bool = True) -> Tuple[List[int], List[str], Dict[int, List[str]]]:
+def detect_fail_data(df: pd.DataFrame, metadata: Dict, ignore_no_limit: bool = True,
+                     columns: Optional[List[str]] = None) -> Tuple[List[int], List[str], Dict[int, List[str]]]:
     fail_indices = []
     fail_columns = []
     fail_cells = {}
@@ -62,7 +63,10 @@ def detect_fail_data(df: pd.DataFrame, metadata: Dict, ignore_no_limit: bool = T
     if target_bin_col in df.columns:
         fail_row_mask = ensure_numeric(df, target_bin_col) != 1
 
-    cols_with_limits = get_columns_with_limits(df, metadata)
+    # ``columns`` narrows the over-limit scan (used by the analysis compute
+    # path, which only needs the requested test items) — the bin column
+    # bookkeeping below always runs.
+    cols_with_limits = columns if columns is not None else get_columns_with_limits(df, metadata)
 
     for col in cols_with_limits:
         min_val = float(str(metadata['mins'][col]).strip())
@@ -190,8 +194,9 @@ def build_col_meta(df: pd.DataFrame, metadata: Dict) -> Dict[str, Dict[str, str]
     }
 
 
-def calculate_fail_test_item_statistics(df: pd.DataFrame, metadata: Dict, ignore_no_limit: bool = True) -> Dict:
-    fail_indices, fail_columns, fail_cells = detect_fail_data(df, metadata, ignore_no_limit)
+def calculate_fail_test_item_statistics(df: pd.DataFrame, metadata: Dict, ignore_no_limit: bool = True,
+                                        columns: Optional[List[str]] = None) -> Dict:
+    fail_indices, fail_columns, fail_cells = detect_fail_data(df, metadata, ignore_no_limit, columns)
 
     if not fail_cells:
         return {}

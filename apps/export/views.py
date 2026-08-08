@@ -12,6 +12,7 @@ from apps.common.export_naming import base_export_context, render_export_filenam
 from apps.analysis.services.statistics import (
     detect_fail_data, get_site_column,
     calculate_fail_bin_statistics, compute_pass_yield,
+    filter_bin1_rows,
 )
 from .excelize_helpers import save_excelize
 from .excel_builders import (
@@ -114,6 +115,10 @@ class ExportViewSet(viewsets.GenericViewSet):
         except FileLoadError as e:
             return Response({'error': e.error_code}, status=400)
 
+        # data_only_bin1: export only pass-bin rows (chart-config switch)
+        if request.data.get('data_only_bin1', False):
+            df = filter_bin1_rows(df, metadata)
+
         f = excelize.new_file()
         build_sigma_limit_sheet(f, df, metadata, sigma_level, only_valid)
         buffer = save_excelize(f)
@@ -175,11 +180,18 @@ class ExportViewSet(viewsets.GenericViewSet):
         show_4sigma = request.data.get('show_4sigma', False)
         show_6sigma = request.data.get('show_6sigma', True)
         show_normal = request.data.get('show_normal', False)
+        show_kde = request.data.get('show_kde', False)
 
         try:
             df, datafile, metadata = load_user_file(request, file_id)
         except FileLoadError as e:
             return Response({'error': e.error_code}, status=400)
+
+        # data_only_bin1: export charts for pass-bin rows only. Applied
+        # BEFORE the default params branch so the default column list is
+        # also derived from the filtered frame.
+        if request.data.get('data_only_bin1', False):
+            df = filter_bin1_rows(df, metadata)
 
         if not params:
             params = [c for c in df.columns if df[c].dtype in ('int64', 'float64')][:10]
@@ -201,7 +213,7 @@ class ExportViewSet(viewsets.GenericViewSet):
                 df, metadata, params, site_col=site_col,
                 show_limit=show_limit, show_3sigma=show_3sigma,
                 show_4sigma=show_4sigma, show_6sigma=show_6sigma,
-                show_normal=show_normal,
+                show_normal=show_normal, show_kde=show_kde,
             )
             fname = render_export_filename(request.user, 'batch_charts', 'xlsx', base_ctx)
             return FileResponse(io.BytesIO(xlsx_bytes), as_attachment=True,

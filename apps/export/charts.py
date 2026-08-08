@@ -15,6 +15,7 @@ COLOR_SIGMA_3 = '#1565C0'
 COLOR_SIGMA_4 = '#00838F'
 COLOR_SIGMA_6 = '#E65100'
 COLOR_NORMAL = '#F57F17'
+COLOR_KDE = '#7B1FA2'
 
 
 def _get_export_dpi():
@@ -27,7 +28,7 @@ def _render_histogram_payload(
     param, data_series, site_values, site_series,
     mean_val, std_val, rdl_min, rdl_max,
     show_limit=True, show_3sigma=False, show_4sigma=False,
-    show_6sigma=False, show_normal=False,
+    show_6sigma=False, show_normal=False, show_kde=False,
 ):
     """渲染单个参数直方图 PNG，返回 io.BytesIO。
 
@@ -114,6 +115,24 @@ def _render_histogram_payload(
             normal_scaled = pdf_values / max_pdf * y_max_plot
             ax.plot(x_pdf, normal_scaled, color=COLOR_NORMAL, linewidth=3, label='正态分布')
 
+    if show_kde:
+        # Non-parametric density overlay: adapts to bimodal / skewed shapes
+        # that the normal curve cannot represent.  Best-effort — a failed fit
+        # (degenerate data) just omits the curve instead of failing the export.
+        try:
+            from scipy.stats import gaussian_kde
+            kde_vals = np.asarray(data_series, dtype=float)
+            if len(kde_vals) >= 3 and np.ptp(kde_vals) > 0:
+                kde = gaussian_kde(kde_vals, bw_method='silverman')
+                x_kde = np.linspace(x_labels[0], x_labels[-1], 200)
+                kde_values = kde(x_kde)
+                max_kde = np.max(kde_values)
+                if max_kde > 0:
+                    kde_scaled = kde_values / max_kde * y_max_plot
+                    ax.plot(x_kde, kde_scaled, color=COLOR_KDE, linewidth=3, label='KDE曲线')
+        except Exception:
+            pass
+
     ax.set_ylabel('百分比 (%)', fontsize=12)
     ax.set_ylim(0, y_max_plot)
     ax.set_xlim(float(x_labels[0]), float(x_labels[-1]))
@@ -151,7 +170,8 @@ def _render_histogram_payload(
 def _create_histogram_chart(
     df, metadata, selected_param, data_series, mean_val, std_val,
     rdl_min, rdl_max, show_limit=True, show_3sigma=False,
-    show_4sigma=False, show_6sigma=False, show_normal=False, site_col=None
+    show_4sigma=False, show_6sigma=False, show_normal=False,
+    show_kde=False, site_col=None
 ):
     """薄包装：从 DataFrame 提取 site 数据后委托 _render_histogram_payload。
 
@@ -170,5 +190,5 @@ def _create_histogram_chart(
         mean_val, std_val, rdl_min, rdl_max,
         show_limit=show_limit, show_3sigma=show_3sigma,
         show_4sigma=show_4sigma, show_6sigma=show_6sigma,
-        show_normal=show_normal,
+        show_normal=show_normal, show_kde=show_kde,
     )

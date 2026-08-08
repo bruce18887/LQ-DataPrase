@@ -101,6 +101,7 @@ import DataQualityBar from './components/browser/DataQualityBar.vue'
 import BinCellContextMenu from './components/browser/BinCellContextMenu.vue'
 import { useBinCellMenu } from './composables/useBinCellMenu'
 import { downloadBlob, sanitizeFilename, extractFilenameFromContentDisposition } from '../../utils/download'
+import { getExportTimeoutMs } from '../../utils/exportTimeout'
 
 // Register ag-grid modules (required since v33+)
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community'
@@ -419,8 +420,9 @@ async function exportExcel() {
     const resp = await api.post(
       '/export/to_excel/',
       { file_id: props.fileId, passfail: passfail.value, site_filter: siteFilter.value },
-      // 大文件（万行×百列）excelize 导出可达数十秒，必须单独放宽超时（全局 30s 会 abort → Broken pipe）
-      { responseType: 'blob', timeout: 600000 }
+      // 大文件（万行×百列）excelize 导出可达数十秒，必须放宽超时（全局 30s 会 abort → Broken pipe）；
+      // 超时秒数由系统设置「导出超时」控制（默认 600s）
+      { responseType: 'blob', timeout: await getExportTimeoutMs() }
     )
     downloadBlob(resp.data as Blob, resolveExportName(resp.headers as Record<string, string>, 'export.xlsx', '_analysis.xlsx'))
     ElMessage.success('下载完成')
@@ -437,7 +439,7 @@ async function exportCsv() {
     const resp = await api.post(
       '/export/to_csv/',
       { file_id: props.fileId, passfail: passfail.value, site_filter: siteFilter.value },
-      { responseType: 'blob', timeout: 600000 }
+      { responseType: 'blob', timeout: await getExportTimeoutMs() }
     )
     downloadBlob(resp.data as Blob, resolveExportName(resp.headers as Record<string, string>, 'export.csv', '_data.csv'))
     ElMessage.success('下载完成')

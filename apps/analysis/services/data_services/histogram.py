@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+from scipy.stats import gaussian_kde
 
 from apps.analysis.services.statistics import (
     compute_cpk,
@@ -15,6 +16,28 @@ from apps.analysis.services.statistics.outliers import detect_outliers_iqr
 from apps.analysis.services.limits import resolve_limits
 
 
+def compute_kde_curve(data_series, bin_min, bin_max, n_points=200):
+    """Gaussian KDE curve sampled over ``[bin_min, bin_max]``.
+
+    Non-parametric density estimate: unlike the normal curve it adapts to
+    bimodal / multimodal / skewed shapes (common when sites or process
+    populations mix).  Returns ``None`` for degenerate input (< 3 samples,
+    zero variance, failed fit) so the front-end simply skips the overlay.
+    """
+    vals = data_series.astype(float)
+    if len(vals) < 3 or np.ptp(vals) == 0:
+        return None
+    try:
+        kde = gaussian_kde(vals, bw_method='silverman')
+    except Exception:
+        return None
+    x = np.linspace(bin_min, bin_max, n_points)
+    y = kde(x)
+    if np.max(y) <= 0:
+        return None
+    return [[round(float(xi), 6), round(float(yi), 6)] for xi, yi in zip(x, y)]
+
+
 def compute_histogram_stats(df, metadata, param, site_col,
                             range_type='RDL', custom_low=None, custom_high=None,
                             iqr_multiplier=1.5):
@@ -26,7 +49,11 @@ def compute_histogram_stats(df, metadata, param, site_col,
     ``range_type`` selects which range drives the histogram binning (and thus
     the X-axis span): ``'RDL'`` (spec limits), ``'DR'``/``'CL'`` (data range),
     ``'S3'``/``'S4'``/``'S6'`` (±3/4/6 sigma).  CPK and per-site yield always
-    stay anchored to the spec limits (RDL) regardless of ``range_type``.
+    stay anchored to the spec limits (RDL) regardless of ``range_type``,
+    except in ``'CL'`` mode: when ``custom_low``/``custom_high`` are both
+    provided they are treated as user-supplied spec limits, so an extra
+    ``custom_cpk`` (with level/color) is computed against them while the
+    RDL-anchored ``cpk`` is kept so the UI can show before/after values.
     ``custom_low``/``custom_high`` override the binning range when
     ``range_type == 'CL'`` and both are provided.
     ``iqr_multiplier`` controls outlier detection sensitivity (default 1.5).
@@ -48,12 +75,28 @@ def compute_histogram_stats(df, metadata, param, site_col,
         stats['mean'], stats['std'], stats['rdl'][0], stats['rdl'][1]
     )
 
+    # Custom-limit CPK: in 'CL' mode the user-supplied bounds act as spec
+    # limits, so recompute capability against them.  The RDL-anchored cpk
+    # above is kept unchanged so the front-end can show both when they differ.
+    custom_cpk = None
+    custom_cpk_level = None
+    custom_cpk_color = None
+    if range_type == 'CL' and custom_low is not None and custom_high is not None:
+        custom_cpk_result = compute_cpk(
+            stats['mean'], stats['std'],
+            float(custom_low), float(custom_high),
+        )
+        custom_cpk = round(custom_cpk_result['cpk'], 4)
+        custom_cpk_level = custom_cpk_result['cpk_level']
+        custom_cpk_color = custom_cpk_result['cpk_color']
+
     # Compute filtered statistics (excluding outliers)
     filtered_cpk = None
     filtered_mean = None
     filtered_std = None
     filtered_data_min = None
     filtered_data_max = None
+    normal_data = None
     if outlier_info['has_outliers'] and outlier_info['normal_count'] > 1:
         normal_data = data_series[
             (data_series >= outlier_info['lower_bound']) &
@@ -101,6 +144,12 @@ def compute_histogram_stats(df, metadata, param, site_col,
         bin_min -= 0.5
         bin_max += 0.5
     data_gap = safe_gap(bin_min, bin_max)
+
+    # KDE curve: non-parametric density overlay.  Data source follows the
+    # outlier semantics of the normal curve — when outliers are clipped the
+    # curve is built from the non-outlier values so both curves line up.
+    kde_source = normal_data if (normal_data is not None and len(normal_data) > 1) else data_series
+    kde_curve = compute_kde_curve(kde_source, bin_min, bin_max)
 
     # Build bin edges with underflow (-inf) and overflow (+inf) bins.
     # 25 inner edges create 24 normal bins that exactly cover
@@ -184,6 +233,7 @@ def compute_histogram_stats(df, metadata, param, site_col,
         'site_histograms': site_histograms,
         'bin_centers': [round(c, 6) for c in bin_centers],
         'bin_percentages': bin_percentages,
+        'kde_curve': kde_curve,
         'total_count': len(data_series),
         'outlier_info': outlier_info,
         'filtered_cpk': filtered_cpk,
@@ -191,4 +241,9 @@ def compute_histogram_stats(df, metadata, param, site_col,
         'filtered_std': filtered_std,
         'filtered_data_min': filtered_data_min,
         'filtered_data_max': filtered_data_max,
+        'custom_cpk': custom_cpk,
+        'custom_cpk_level': custom_cpk_level,
+        'custom_cpk_color': custom_cpk_color,
+        'custom_low': float(custom_low) if range_type == 'CL' and custom_low is not None else None,
+        'custom_high': float(custom_high) if range_type == 'CL' and custom_high is not None else None,
     }

@@ -1,11 +1,13 @@
-import { ref, type Ref } from 'vue'
+import { ref, watch, type Ref } from 'vue'
 import api from '../../../api'
 import { useAsyncData } from '../../../composables/useAsyncData'
 
 export function useSiteStats(
   getSelectedFileId: () => number | null,
   localSelectedParam: Ref<string>,
-  rangeType: Ref<string>
+  rangeType: Ref<string>,
+  /** 仅用 Pass 数据(Bin1)：站点统计与直方图口径保持一致 */
+  dataOnlyBin1?: Ref<boolean>,
 ) {
   const siteStats = ref<any[]>([])
   const siteStatsError = ref('')
@@ -19,6 +21,7 @@ export function useSiteStats(
       file_id: fileId,
       param: localSelectedParam.value,
       range_type: rangeType.value,
+      data_only_bin1: dataOnlyBin1?.value ?? false,
     }, { silent: true }))
     if (result?.error) {
       siteStatsError.value = result.error
@@ -27,6 +30,8 @@ export function useSiteStats(
       siteStats.value = result?.site_data || []
     }
   }
+
+  if (dataOnlyBin1) watch(dataOnlyBin1, () => loadSiteStats())
 
   return { siteStats, siteStatsError, loadSiteStats }
 }

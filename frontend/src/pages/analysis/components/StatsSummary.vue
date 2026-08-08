@@ -29,7 +29,7 @@ const props = defineProps<{
 }>()
 
 const displayCards = computed(() => {
-  const order = ['N', 'Mean', 'Median', 'STD', 'Min', 'Max', 'Range', 'CPK', '3σ', '6σ']
+  const order = ['N', 'Mean', 'Median', 'STD', 'Min', 'Max', 'Range', 'CPK', 'CPK(RDL)', 'CPK(Custom)', '3σ', '6σ']
   const map = new Map<string, StatCard>()
   for (const card of props.statCards) {
     map.set(card.label, card)

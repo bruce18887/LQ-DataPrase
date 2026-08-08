@@ -95,7 +95,10 @@ const isDev = process.env.ELECTRON_DEV === 'true'
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   console.warn('[electron] Another instance is already running. Quitting.')
-  app.quit()
+  // 立即退出：app.quit() 是异步的，后面的模块级初始化（whenReady →
+  // createWindow → spawnBackend）会继续执行，导致第二个实例再起一个
+  // 后端进程并短暂弹出窗口。
+  app.exit(0)
 }
 
 // ---------------------------------------------------------------------------

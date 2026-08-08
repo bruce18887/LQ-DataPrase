@@ -164,6 +164,52 @@ npm run pyinstaller
 npx electron-builder --config electron-builder.yml --win
 ```
 
+### 打包架构说明
+
+LQ-DataPrase 的桌面包是 **Electron 壳 + PyInstaller 后端** 的组合：
+
+| 层级 | 技术 | 说明 |
+|------|------|------|
+| 前端 UI | Vue 3 SPA | 由 Vite 构建为静态资源 |
+| 桌面宿主 | Electron 33 | 负责窗口、菜单、生命周期 |
+| 业务后端 | Django 4.2 | 由 PyInstaller 打包为独立可执行文件 |
+| 进程通信 | HTTP | Electron 启动后端并本地 HTTP 轮询 |
+
+构建流程的输入输出：
+
+```
+frontend/          ──build──>  frontend/dist/          ──┐
+electron/          ──tsc───>  frontend/electron-dist/  ├──> electron-builder ──> out/*.exe / out/*.zip
+Django + apps/     ──PyInstaller──>  dist/LQ-DataPrase/ ──┘
+```
+
+关键配置文件：
+
+- `lq_dataprase.spec` — PyInstaller 配置，声明隐藏导入、数据文件、前端产物等。
+- `electron-builder.yml` — Electron 安装包配置，定义产物、NSIS 安装选项、资源拷贝规则。
+- `standalone.py` — 独立运行入口，负责启动 Django、自动迁移、创建默认管理员、收集静态文件。
+
+安装后的目录结构：
+
+```
+<安装目录>/
+├─ app.asar（或 unpacked 文件，asar 已禁用）
+│    └─ Vue 前端 + Electron 主进程
+└─ resources/
+     ├─ LQ-DataPrase.exe      ← PyInstaller 打包的后端
+     └─ _internal/             ← Python 运行依赖
+```
+
+运行时用户数据目录（数据库、上传/下载文件、日志、密钥）统一写入：
+
+```
+%APPDATA%\lq-dataprase\
+```
+
+这是通过 `LQDP_BASE_DIR` 环境变量在 Electron 启动 Python 后端时传入的，避免写入只读的安装目录。
+
+开发模式下，Electron 不会自己启动后端，而是检测并复用 `localhost:8000` 的 Django 开发服务器，保证浏览器与 Electron 使用同一个 SQLite 数据库。
+
 ### 后端调试窗口
 
 打包后的 Electron 应用默认隐藏后端控制台。如需显示，可使用命令行参数：

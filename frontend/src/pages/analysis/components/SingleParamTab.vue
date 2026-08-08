@@ -53,6 +53,10 @@
         v-model:ignore-no-limit="ignoreNoLimit"
         v-model:custom-low="customLow"
         v-model:custom-high="customHigh"
+        v-model:ignore-no-test-value="ignoreNoTestValue"
+        v-model:data-only-bin1="dataOnlyBin1"
+        v-model:only-fail-test-item="onlyFailTestItem"
+        v-model:only-low-cpk="onlyLowCpk"
       />
       <RangeComparisonTable :range-table-data="rangeTableData" :range-type="rangeType" />
       <SiteStatsTable :site-stats="siteStats" :site-stats-error="siteStatsError" />
@@ -181,6 +185,10 @@ const rangeType = ref(analysisStore.rangeType)
 const chartConfig = ref<string[]>(analysisStore.chartConfig)
 const barWidthPercent = ref(analysisStore.barWidthPercent)
 const ignoreNoLimit = ref(analysisStore.ignoreNoLimit)
+const ignoreNoTestValue = ref(analysisStore.ignoreNoTestValue)
+const dataOnlyBin1 = ref(analysisStore.dataOnlyBin1)
+const onlyFailTestItem = ref(analysisStore.onlyFailTestItem)
+const onlyLowCpk = ref(analysisStore.onlyLowCpk)
 const customLow = ref<number | null>(analysisStore.customLow)
 const customHigh = ref<number | null>(analysisStore.customHigh)
 const outlierHandling = ref(analysisStore.outlierHandling)
@@ -200,7 +208,11 @@ const {
   customLow,
   customHigh,
   iqrMultiplier,
-  outlierHandling
+  outlierHandling,
+  ignoreNoTestValue,
+  dataOnlyBin1,
+  onlyFailTestItem,
+  onlyLowCpk
 )
 
 // Composable: Serial Distribution
@@ -214,6 +226,7 @@ const {
   chartConfig,
   rangeType,
   computed(() => props.params),
+  dataOnlyBin1,
 )
 
 // Composable: Site Stats
@@ -224,7 +237,8 @@ const {
 } = useSiteStats(
   () => props.fileId,
   localSelectedParam,
-  rangeType
+  rangeType,
+  dataOnlyBin1,
 )
 
 // Composable: BoxPlot
@@ -271,6 +285,10 @@ watch(chartConfig, (val) => { analysisStore.chartConfig = val }, { deep: true })
 watch(rangeType, (val) => { analysisStore.rangeType = val })
 watch(barWidthPercent, (val) => { analysisStore.barWidthPercent = val })
 watch(ignoreNoLimit, (val) => { analysisStore.ignoreNoLimit = val })
+watch(ignoreNoTestValue, (val) => { analysisStore.ignoreNoTestValue = val })
+watch(dataOnlyBin1, (val) => { analysisStore.dataOnlyBin1 = val })
+watch(onlyFailTestItem, (val) => { analysisStore.onlyFailTestItem = val })
+watch(onlyLowCpk, (val) => { analysisStore.onlyLowCpk = val })
 watch(customLow, (val) => { analysisStore.customLow = val })
 watch(customHigh, (val) => { analysisStore.customHigh = val })
 watch(outlierHandling, (val) => { analysisStore.outlierHandling = val })

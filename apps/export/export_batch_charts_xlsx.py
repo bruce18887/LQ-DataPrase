@@ -28,7 +28,7 @@ HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center")
 def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
                                          show_limit=True, show_3sigma=False,
                                          show_4sigma=False, show_6sigma=True,
-                                         show_normal=False):
+                                         show_normal=False, show_kde=False):
     """Build batch charts Excel with embedded histogram images.
 
     Ported from old project's export_batch_distribution_chart_excel + _export_charts_to_xlsx.
@@ -216,6 +216,7 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
                         'show_4sigma': show_4sigma,
                         'show_6sigma': show_6sigma,
                         'show_normal': show_normal,
+                        'show_kde': show_kde,
                     },
                 )
             for title in processed_params:
@@ -240,7 +241,7 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
                 chart_data['rdl_min'], chart_data['rdl_max'],
                 show_limit=show_limit, show_3sigma=show_3sigma,
                 show_4sigma=show_4sigma, show_6sigma=show_6sigma,
-                show_normal=show_normal, site_col=site_col
+                show_normal=show_normal, show_kde=show_kde, site_col=site_col
             )
         else:
             img_buffer = io.BytesIO(png)

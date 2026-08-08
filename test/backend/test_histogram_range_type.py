@@ -6,12 +6,13 @@ histogram always binned over the RowDataLimit range, collapsing all data into
 a single bin and bunching the 3-sigma / limit lines together.  After the fix,
 selecting ``S3`` re-bins over the ±3σ window so the data spreads across bins.
 
-Run directly:  python test/test_histogram_range_type.py
+Run directly:  python test/backend/test_histogram_range_type.py
 """
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# test/backend/ → project root (for `import config` / `from apps...`)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.development')
 
 import django  # noqa: E402
@@ -101,6 +102,52 @@ def test_outlier_values_are_included():
     assert 20.0 in info['outlier_values']
     assert -5.0 in info['outlier_values']
     print('outlier_values included: %s' % info['outlier_values'])
+
+
+def test_custom_limit_recomputes_cpk():
+    """CL mode recomputes CPK against the user-supplied spec limits."""
+    r = compute_histogram_stats(
+        _df(), METADATA, PARAM, None,
+        range_type='CL', custom_low=10.40, custom_high=10.50)
+    # Custom narrow window [10.40, 10.50] → CPK far smaller than the wide
+    # RDL window [8.0, 14.3]; only relative ordering is asserted (std is
+    # ddof-computed, exact values would be brittle).
+    assert r['cpk'] is not None and r['custom_cpk'] is not None
+    assert r['custom_cpk'] != r['cpk']
+    assert r['custom_cpk'] < r['cpk'], (r['custom_cpk'], r['cpk'])
+    assert r['custom_cpk_level'] is not None
+    assert r['custom_cpk_color'] in ('green', 'orange', 'darkorange', 'red', 'gray')
+    # Custom bounds echoed back so the chart can draw the CL markLines.
+    assert r['custom_low'] == 10.40 and r['custom_high'] == 10.50
+    print('CL custom CPK=%.4f (RDL %.4f) OK' % (r['custom_cpk'], r['cpk']))
+
+
+def test_custom_limit_equal_to_rdl_gives_same_cpk():
+    """Custom bounds identical to RDL spec limits must yield the same CPK
+    (the front-end uses equality to decide between single/dual cards)."""
+    r = compute_histogram_stats(
+        _df(), METADATA, PARAM, None,
+        range_type='CL', custom_low=8.0, custom_high=14.3)
+    assert r['custom_cpk'] == r['cpk'], (r['custom_cpk'], r['cpk'])
+    print('CL custom==RDL CPK %.4f OK' % r['custom_cpk'])
+
+
+def test_non_cl_returns_none_custom_cpk():
+    """custom_cpk stays None outside CL-with-both-bounds, incl. one-sided."""
+    for rt in ('RDL', 'DR', 'S3', 'S4', 'S6'):
+        r = compute_histogram_stats(_df(), METADATA, PARAM, None, range_type=rt)
+        assert r['custom_cpk'] is None
+        assert r['custom_cpk_level'] is None
+        assert r['custom_cpk_color'] is None
+        assert r['custom_low'] is None and r['custom_high'] is None
+    r = compute_histogram_stats(
+        _df(), METADATA, PARAM, None,
+        range_type='CL', custom_low=10.40, custom_high=None)
+    assert r['custom_cpk'] is None
+    # Bounds are echoed independently; the chart only draws CL lines when
+    # both are present, so a one-sided value is inert for rendering.
+    assert r['custom_low'] == 10.40 and r['custom_high'] is None
+    print('non-CL / partial-CL custom_cpk=None OK')
 
 
 if __name__ == '__main__':

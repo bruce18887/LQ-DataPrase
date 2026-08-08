@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { gotoApp, collectConsoleErrors } from '../helpers/nav'
 import { expectChartRendered, waitForCharts, waitLoadingGone } from '../helpers/charts'
+import { captureDownload } from '../helpers/download'
 
 /**
  * 等待批次良率 tab 中复用单文件分析组件的图表集渲染。
@@ -66,6 +67,24 @@ test.describe('仪表板', { tag: ['@p0', '@p1', '@p2', '@dashboard'] }, () => {
     await waitLoadingGone(page)
     await page.waitForTimeout(1200)
     expect(errors, `控制台错误:\n${errors.join('\n')}`).toEqual([])
+  })
+
+  test('@p1 保存 HTML 报表：导出按钮可下载 html 文件', async ({ page }) => {
+    // 回归：ExportFooter 此前调用不存在的 /export/dashboard_html/（一直 404），
+    // 已改为 /export/html_report/（ExportFooter.vue）。
+    await gotoApp(page, '/dashboard')
+    await waitLoadingGone(page)
+    // summary 加载成功（file_id 就绪）后导出按钮才有效
+    await expect(page.getByText('总记录数')).toBeVisible()
+    const download = await captureDownload(
+      page,
+      async () => {
+        await page.getByRole('button', { name: /保存 HTML 报表/ }).click()
+      },
+      'dashboard',
+      120_000,
+    )
+    expect(download.suggestedName).toMatch(/\.html$/)
   })
 
   test('@p1 KPI 指标卡片可见', async ({ page }) => {

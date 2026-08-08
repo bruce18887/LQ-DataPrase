@@ -200,6 +200,39 @@ class ExportApiTests(APITestCase):
         wb = openpyxl.load_workbook(io.BytesIO(buf))
         self.assertEqual(wb['总览'].max_row, 1 + len(numeric_cols), '总览表头 + 每参数一行')
 
+    def test_batch_charts_data_only_bin1(self):
+        """POST /export/batch_charts/ + data_only_bin1：200，图表仍按过滤后数据生成。"""
+        df_parsed, _ = get_parser('CTA8290D').parse(GAGE_S1_PATH)
+        numeric_cols = [c for c in df_parsed.columns if df_parsed[c].dtype in ('int64', 'float64')][:2]
+        resp = self.client.post('/api/v1/export/batch_charts/', {
+            'file_id': self.datafile.id,
+            'params': numeric_cols,
+            'data_only_bin1': True,
+        }, format='json')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            resp['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        buf = b''.join(resp.streaming_content)
+        wb = openpyxl.load_workbook(io.BytesIO(buf))
+        self.assertEqual(wb['总览'].max_row, 1 + len(numeric_cols), '总览表头 + 每参数一行')
+
+    def test_sigma_limit_data_only_bin1(self):
+        """POST /export/sigma_limit/ + data_only_bin1：200 xlsx，不因行过滤崩溃。"""
+        resp = self.client.post('/api/v1/export/sigma_limit/', {
+            'file_id': self.datafile.id,
+            'sigma': 3,
+            'data_only_bin1': True,
+        }, format='json')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            resp['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        buf = b''.join(resp.streaming_content)
+        self.assertGreater(len(buf), 0)
+
 
 def _parse_content_disposition(cd: str) -> str:
     """从 Content-Disposition 提取 RFC 5987 filename*= 或 filename= 的文件名。"""

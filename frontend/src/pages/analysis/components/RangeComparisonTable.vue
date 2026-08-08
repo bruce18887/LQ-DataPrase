@@ -50,7 +50,9 @@ function rangeRowClass({ row }: { row: RangeRow }) {
             : props.rangeType === 'S4'
               ? '4 Sigma'
               : '6 Sigma'
-  return row.label === active ? 'range-active-row' : ''
+  // 异常值裁剪时行 label 带 " (cut)" 后缀，剥离后再比较否则高亮永远失效
+  const label = row.label.replace(/\s*\(cut\)$/, '')
+  return label === active ? 'range-active-row' : ''
 }
 </script>
 

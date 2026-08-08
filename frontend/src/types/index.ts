@@ -21,6 +21,7 @@ export interface UserSettings {
   chart_engine: string
   chart_renderer: 'svg' | 'canvas'
   export_filename_templates: Record<ExportTypeKey, string>
+  export_timeout: number
 }
 
 /** 系统设置页完整设置项（GET/PUT /auth/settings/ 的载荷）。 */
@@ -39,6 +40,7 @@ export interface SettingsData {
   max_recent_files: number
   histogram_label_offset: number
   export_filename_templates: Record<ExportTypeKey, string>
+  export_timeout: number
 }
 
 export interface DataFile {

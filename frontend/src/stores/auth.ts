@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authApi } from '../api/auth'
+import { resetExportTimeoutCache } from '../utils/exportTimeout'
 import type { User } from '../types'
 
 export const useAuthStore = defineStore('auth', () => {
@@ -12,6 +13,7 @@ export const useAuthStore = defineStore('auth', () => {
   const isAdmin = computed(() => user.value?.role === 'administrator')
 
   async function login(username: string, password: string) {
+    resetExportTimeoutCache()
     const { data } = await authApi.login(username, password)
     token.value = data.token
     refreshToken.value = data.refresh
@@ -48,18 +50,29 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  /**
+   * 仅清空会话（内存态 + localStorage），不发起 /auth/logout/ 请求。
+   * 供 axios 401 拦截器的 forceLogout 使用：此前只清 localStorage 不清
+   * store，导致 isLoggedIn 仍为 true，路由守卫把 /login 弹回 dashboard，
+   * dashboard 的请求再次 401 → 无限跳转循环。
+   */
+  function clearSession() {
+    token.value = null
+    refreshToken.value = null
+    user.value = null
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
+    resetExportTimeoutCache()
+  }
+
   function logout() {
     if (refreshToken.value) {
       authApi.logout(refreshToken.value).catch(() => {
         // silently ignore logout errors
       })
     }
-    token.value = null
-    refreshToken.value = null
-    user.value = null
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('refresh_token')
+    clearSession()
   }
 
-  return { token, refreshToken, user, isLoggedIn, isAdmin, login, logout, fetchProfile, setTokens }
+  return { token, refreshToken, user, isLoggedIn, isAdmin, login, logout, clearSession, fetchProfile, setTokens }
 })

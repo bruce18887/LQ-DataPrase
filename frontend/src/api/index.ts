@@ -143,9 +143,10 @@ function shouldToastError(url: string): boolean {
 function forceLogout() {
   // The store's logout() posts /auth/logout/, which would itself be
   // intercepted and (because we have no valid refresh token) bounce
-  // through this same path. Drop tokens directly + redirect instead.
-  localStorage.removeItem('access_token')
-  localStorage.removeItem('refresh_token')
+  // through this same path. Drop tokens directly (memory + localStorage)
+  // instead — 必须清 Pinia store，否则 isLoggedIn 仍为 true，路由守卫
+  // 会把 /login 弹回 dashboard 造成无限跳转循环。
+  useAuthStore().clearSession()
   // In Electron the router uses hash history (#/login) because file://
   // protocol does not support pushState.  In a browser, we use the
   // standard path-based redirect.

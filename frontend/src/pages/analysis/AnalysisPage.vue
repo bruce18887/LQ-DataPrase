@@ -178,7 +178,15 @@ async function loadFiles() {
 watch(selectedFileId, (val) => { analysisStore.selectedFileId = val })
 watch(selectedParam, (val) => { analysisStore.selectedParam = val })
 watch(activeTab, (val) => { analysisStore.activeTab = val })
-watch(() => analysisStore.ignoreNoLimit, () => { onFileChange() })
+watch([
+  () => analysisStore.ignoreNoLimit,
+  () => analysisStore.ignoreNoTestValue,
+  () => analysisStore.dataOnlyBin1,
+  () => analysisStore.onlyFailTestItem,
+  () => analysisStore.onlyLowCpk,
+  // 异常值检测敏感度影响低 CPK 判定（filtered CPK 口径），变化时刷新列表
+  () => analysisStore.iqrMultiplier,
+], () => { onFileChange() })
 
 // ========== File change ==========
 async function onFileChange() {
@@ -201,6 +209,11 @@ async function onFileChange() {
     const { data } = await api.post('/analysis/histogram/', {
       file_id: selectedFileId.value,
       ignore_no_limit: analysisStore.ignoreNoLimit,
+      ignore_no_test_value: analysisStore.ignoreNoTestValue,
+      data_only_bin1: analysisStore.dataOnlyBin1,
+      only_fail_test_item: analysisStore.onlyFailTestItem,
+      only_low_cpk: analysisStore.onlyLowCpk,
+      iqr_multiplier: analysisStore.iqrMultiplier,
     })
     const results = data.results as Record<string, any>
     // Some parsers (e.g. CTA8280F trailing comma) yield an unnamed column whose
