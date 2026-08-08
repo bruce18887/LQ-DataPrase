@@ -7,6 +7,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+from apps.analysis.services.statistics.helpers import normal_pdf_curve
 
 COLORS_SITE_8 = ['#E53935', '#1E88E5', '#43A047', '#F9A825', '#8E24AA', '#00ACC1', '#F57C00', '#D81B60']
 COLOR_LSL = '#C62828'
@@ -120,12 +121,16 @@ def _render_histogram_payload(
             ax.axvline(x=upper, color=color, linewidth=2, linestyle=':')
 
     if show_normal and std_val > 0:
-        x_pdf = np.linspace(x_labels[0], x_labels[-1], 200)
-        pdf_values = (1 / (std_val * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((x_pdf - mean_val) / std_val) ** 2)
-        max_pdf = np.max(pdf_values)
-        if max_pdf > 0:
-            normal_scaled = pdf_values / max_pdf * y_max_plot
-            ax.plot(x_pdf, normal_scaled, color=COLOR_NORMAL, linewidth=3, label='正态分布')
+        # 公式单一来源 normal_pdf_curve（与屏幕 ECharts / histogram 响应同源），
+        # 此处仅做导出图的 max-normalize 缩放
+        curve = normal_pdf_curve(mean_val, std_val, x_labels[0], x_labels[-1])
+        if curve:
+            x_pdf = np.array([x for x, _ in curve])
+            pdf_values = np.array([y for _, y in curve])
+            max_pdf = np.max(pdf_values)
+            if max_pdf > 0:
+                normal_scaled = pdf_values / max_pdf * y_max_plot
+                ax.plot(x_pdf, normal_scaled, color=COLOR_NORMAL, linewidth=3, label='正态分布')
 
     if show_kde:
         # Non-parametric density overlay: adapts to bimodal / skewed shapes

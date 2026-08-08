@@ -933,6 +933,32 @@ class HistogramSigmaFieldTests(ChartConfigFilterTests):
         self.assertAlmostEqual(r['filtered_sigma6_max'],
                                r['filtered_mean'] + 6 * r['filtered_std'], places=6)
 
+    def test_normal_curves_returned_raw_and_filtered(self):
+        from apps.analysis.views import AnalysisViewSet
+        request = self._post({'file_id': 1, 'params': ['ParamOutlierLow']})
+        resp = AnalysisViewSet.as_view({'post': 'histogram'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        r = resp.data['results']['ParamOutlierLow']
+
+        # 全量曲线存在（raw mean/std）
+        self.assertIsNotNone(r['normal_curve'])
+        self.assertGreater(len(r['normal_curve']), 1)
+        # 有异常值 → 裁剪口径曲线存在
+        self.assertIsNotNone(r['filtered_normal_curve'])
+        self.assertGreater(len(r['filtered_normal_curve']), 1)
+        # 裁剪曲线峰值在 filtered_mean 附近（用 filtered mean/std 计算）
+        peak = max(r['filtered_normal_curve'], key=lambda p: p[1])
+        self.assertAlmostEqual(peak[0], r['filtered_mean'], delta=0.05)
+        # 无异常值参数：filtered 曲线为 None
+        request2 = self._post({'file_id': 1, 'params': ['Param0']})
+        resp2 = AnalysisViewSet.as_view({'post': 'histogram'})(request2)
+        resp2.render()
+        r2 = resp2.data['results']['Param0']
+        self.assertIsNotNone(r2['normal_curve'])
+        self.assertIsNone(r2['filtered_normal_curve'])
+
+
     def test_filtered_cpk_level_and_color_returned_with_filtered_cpk(self):
         from apps.analysis.views import AnalysisViewSet
         request = self._post({'file_id': 1, 'params': ['ParamOutlierLow']})
@@ -1011,6 +1037,36 @@ class ParamTrendPerFileLimitsTests(SimpleTestCase):
         self.assertGreater(out['trend_data'][1]['cpk'], 0.0)
         # 首个完整对来自文件 2
         self.assertEqual(out['limits']['lsl'], 9.0)
+
+
+class NormalPdfCurveTests(SimpleTestCase):
+    """normal_pdf_curve：高斯 PDF 公式单一来源（前端/导出/响应共用）。"""
+
+    def test_formula_values(self):
+        import math
+        from apps.analysis.services.statistics import normal_pdf_curve
+        # 奇数采样点 → 中心点恰为均值 0，可直接断言公式值
+        curve = normal_pdf_curve(0.0, 1.0, -3.0, 3.0, n_points=201)
+        self.assertEqual(len(curve), 201)
+        center = curve[100]
+        self.assertAlmostEqual(center[0], 0.0, places=5)
+        self.assertAlmostEqual(center[1], 1 / math.sqrt(2 * math.pi), places=5)
+        # 对称性
+        self.assertAlmostEqual(curve[99][1], curve[101][1], places=6)
+
+    def test_zero_std_returns_none(self):
+        from apps.analysis.services.statistics import normal_pdf_curve
+        self.assertIsNone(normal_pdf_curve(1.0, 0.0, 0.0, 2.0))
+        self.assertIsNone(normal_pdf_curve(1.0, -1.0, 0.0, 2.0))
+
+    def test_sampling_range(self):
+        from apps.analysis.services.statistics import normal_pdf_curve
+        curve = normal_pdf_curve(5.0, 2.0, 1.0, 9.0, n_points=100)
+        self.assertEqual(curve[0][0], 1.0)
+        self.assertEqual(curve[-1][0], 9.0)
+        # 采样点单调
+        xs = [c[0] for c in curve]
+        self.assertEqual(xs, sorted(xs))
 
 
 class ComputeCpkSingleSidedTests(SimpleTestCase):

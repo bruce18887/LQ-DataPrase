@@ -13,6 +13,7 @@ from apps.analysis.services.statistics import (
     safe_gap,
     filter_finite,
     site_sort_key,
+    normal_pdf_curve,
 )
 from apps.analysis.services.statistics.outliers import detect_outliers_iqr
 from apps.analysis.services.limits import resolve_limits
@@ -102,6 +103,7 @@ def compute_histogram_stats(df, metadata, param, site_col,
     filtered_sigma3_min = filtered_sigma3_max = None
     filtered_sigma4_min = filtered_sigma4_max = None
     filtered_sigma6_min = filtered_sigma6_max = None
+    filtered_normal_curve = None
     normal_data = None
     if outlier_info['has_outliers'] and outlier_info['normal_count'] > 1:
         normal_data = data_series[
@@ -123,6 +125,7 @@ def compute_histogram_stats(df, metadata, param, site_col,
                 filtered_sigma4_max = round(filtered_mean + 4 * filtered_std, 6)
                 filtered_sigma6_min = round(filtered_mean - 6 * filtered_std, 6)
                 filtered_sigma6_max = round(filtered_mean + 6 * filtered_std, 6)
+                filtered_normal_curve = None  # 需 bin_min/bin_max，响应前计算
                 filtered_cpk_result = compute_cpk(
                     filtered_mean, filtered_std,
                     stats['rdl'][0], stats['rdl'][1]
@@ -167,6 +170,12 @@ def compute_histogram_stats(df, metadata, param, site_col,
     # curve is built from the non-outlier values so both curves line up.
     kde_source = normal_data if (normal_data is not None and len(normal_data) > 1) else data_series
     kde_curve = compute_kde_curve(kde_source, bin_min, bin_max)
+
+    # 正态 PDF 曲线（与 KDE 同采样区间 [bin_min, bin_max]）：raw 与裁剪口径
+    # 各一份，前端按异常值处理开关选择——公式单一来源 normal_pdf_curve
+    normal_curve = normal_pdf_curve(stats['mean'], stats['std'], bin_min, bin_max)
+    if filtered_std is not None and filtered_std > 0:
+        filtered_normal_curve = normal_pdf_curve(filtered_mean, filtered_std, bin_min, bin_max)
 
     # Build bin edges with underflow (-inf) and overflow (+inf) bins.
     # 25 inner edges create 24 normal bins that exactly cover
@@ -247,6 +256,8 @@ def compute_histogram_stats(df, metadata, param, site_col,
         'bin_centers': [round(c, 6) for c in bin_centers],
         'bin_percentages': bin_percentages,
         'kde_curve': kde_curve,
+        'normal_curve': normal_curve,
+        'filtered_normal_curve': filtered_normal_curve,
         'total_count': len(data_series),
         'outlier_info': outlier_info,
         'filtered_cpk': filtered_cpk,

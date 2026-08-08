@@ -25,6 +25,7 @@ from .helpers import (
     safe_gap,
     filter_finite,
     site_sort_key,
+    normal_pdf_curve,
 )
 
 # ── limits ───────────────────────────────────────────────────────────
@@ -93,6 +94,7 @@ __all__ = [
     'safe_gap',
     'filter_finite',
     'site_sort_key',
+    'normal_pdf_curve',
     # limits
     'get_columns_with_limits',
     'parse_limit_string',

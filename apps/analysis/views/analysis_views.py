@@ -76,6 +76,9 @@ def _cached_low_cpk_items(datafile, user_id: int, df, metadata,
     work_df = filter_bin1_rows(df, metadata) if data_only_bin1 else df
     result = set(compute_low_cpk_test_items(
         work_df, metadata, threshold, iqr_multiplier=iqr_multiplier))
+    if len(_low_cpk_cache) > 500:
+        # 简单上限：key 含 mtime+size 天然随文件重解析失效，全清成本低
+        _low_cpk_cache.clear()
     _low_cpk_cache[key] = result
     return result
 
