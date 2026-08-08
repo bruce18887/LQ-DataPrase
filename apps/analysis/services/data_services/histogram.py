@@ -165,11 +165,15 @@ def compute_histogram_stats(df, metadata, param, site_col,
         bin_max += 0.5
     data_gap = safe_gap(bin_min, bin_max)
 
-    # KDE curve: non-parametric density overlay.  Data source follows the
-    # outlier semantics of the normal curve — when outliers are clipped the
-    # curve is built from the non-outlier values so both curves line up.
-    kde_source = normal_data if (normal_data is not None and len(normal_data) > 1) else data_series
-    kde_curve = compute_kde_curve(kde_source, bin_min, bin_max)
+    # KDE 曲线：全量口径（kde_curve）与 IQR 裁剪口径（filtered_kde_curve）
+    # 各一份，前端按异常值处理开关选择——与 normal_curve/filtered_normal_curve
+    # 同构，曲线永远与柱形同源（off 模式柱是全量、clip 模式柱是 IQR 界内）。
+    # 裁剪口径与 filtered_mean/std 同源（同一个 normal_data，IQR fence 已扩展
+    # 至规格限，故规格限内数据任何模式下都进曲线）。
+    kde_curve = compute_kde_curve(data_series, bin_min, bin_max)
+    filtered_kde_curve = None
+    if normal_data is not None and len(normal_data) > 1:
+        filtered_kde_curve = compute_kde_curve(normal_data, bin_min, bin_max)
 
     # 正态 PDF 曲线（与 KDE 同采样区间 [bin_min, bin_max]）：raw 与裁剪口径
     # 各一份，前端按异常值处理开关选择——公式单一来源 normal_pdf_curve
@@ -256,6 +260,7 @@ def compute_histogram_stats(df, metadata, param, site_col,
         'bin_centers': [round(c, 6) for c in bin_centers],
         'bin_percentages': bin_percentages,
         'kde_curve': kde_curve,
+        'filtered_kde_curve': filtered_kde_curve,
         'normal_curve': normal_curve,
         'filtered_normal_curve': filtered_normal_curve,
         'total_count': len(data_series),

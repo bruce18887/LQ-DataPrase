@@ -598,6 +598,52 @@ class KdeCurveApiTests(SimpleTestCase):
         self.assertIsNotNone(curve)
         self.assertEqual(len(curve), 200)
         self.assertGreater(max(p[1] for p in curve), 0)
+        # 干净数据无离群值：裁剪口径曲线应缺席（前端回退到全量曲线）
+        self.assertIsNone(r['filtered_kde_curve'])
+
+    def test_histogram_api_kde_curve_split_all_vs_filtered(self):
+        """离群数据下 KDE 曲线双口径：全量与 IQR 裁剪各一份且不同。
+
+        全量曲线（kde_curve）如实包含离群点（fail 信息），裁剪曲线
+        （filtered_kde_curve）与 filtered_mean/std 同源——前端在裁剪
+        模式下切换后者，曲线永远与柱形同源。注意：KDE 峰值是众数而非
+        均值，样本微偏态时天然偏离（≈带宽量级），因此用定性断言——
+        离群点膨胀全量曲线带宽 → 全量峰值显著低于裁剪峰值（实测 ~2x），
+        且裁剪峰值落在 filtered_mean ± 1σ 内（同源）。
+        """
+        from apps.analysis.views import AnalysisViewSet
+
+        rng = np.random.default_rng(42)
+        vals = rng.normal(11.0, 0.8, 500).tolist() + [22.0] * 100
+        df, metadata = self._df_meta(vals)
+        factory, force_authenticate, restore = StaleParamAcrossFileSwitchTests._patched_view(df, metadata=metadata)
+        self.addCleanup(restore)
+
+        request = StaleParamAcrossFileSwitchTests._authed_post(
+            factory, force_authenticate, '/api/v1/analysis/histogram/', {
+                'file_id': 1, 'params': ['Param0'], 'range_type': 'RDL',
+            })
+        view = AnalysisViewSet.as_view({'post': 'histogram'})
+        response = view(request)
+        response.render()
+
+        self.assertEqual(response.status_code, 200, response.content)
+        r = response.data['results']['Param0']
+        self.assertTrue(r['outlier_info']['has_outliers'])
+        self.assertIsNotNone(r['filtered_mean'])
+        full = r['kde_curve']
+        filtered = r['filtered_kde_curve']
+        self.assertIsNotNone(full)
+        self.assertIsNotNone(filtered)
+        # 数据源不同（全量含 100 个离群点）→ 采样曲线必须不同
+        self.assertNotEqual(full, filtered)
+        # 离群点膨胀带宽：全量曲线峰值应显著低于裁剪曲线
+        full_peak_y = max(p[1] for p in full)
+        filtered_peak_y = max(p[1] for p in filtered)
+        self.assertGreater(filtered_peak_y, full_peak_y)
+        # 裁剪曲线峰值（众数）与 filtered_mean 同源：落在 ±1σ 内
+        peak_x = max(filtered, key=lambda p: p[1])[0]
+        self.assertLessEqual(abs(peak_x - r['filtered_mean']), r['filtered_std'])
 
     def test_histogram_api_kde_curve_shows_two_peaks_for_bimodal(self):
         from apps.analysis.views import AnalysisViewSet
