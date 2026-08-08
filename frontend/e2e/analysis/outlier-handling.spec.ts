@@ -212,4 +212,88 @@ test.describe('@p1 异常值处理', { tag: ['@p1', '@analysis'] }, () => {
     const clippedNonEmpty = countNonEmptyBins(clippedOption, lower!, upper!)
     expect(clippedNonEmpty, 'RDL 裁剪后 Limit 线内非空 bin 不应减少').toBeGreaterThanOrEqual(baselineNonEmpty)
   })
+
+  test('裁剪模式下 3σ 卡片与图表标记线使用后端 filtered_sigma 值（回归 σ 口径）', async ({ page }) => {
+    const found = await findParamWithOutliers(page)
+    test.skip(!found, '当前数据文件未找到含异常值的参数')
+
+    // 切到裁剪模式（此操作不重发请求，histogramUpdateView 复用 lastResults）
+    const outlierSelect = page.locator('.el-form-item').filter({ hasText: '异常值处理' }).locator('.el-select').first()
+    await outlierSelect.click()
+    await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '裁剪范围' }).first().click()
+    await waitLoadingGone(page.locator(SINGLE))
+
+    // 开启 3σ 线（默认 chartConfig 只有 limit/s6/kde；点击容器而非隐藏 input）
+    await page.locator('.el-checkbox', { hasText: '3σ线' }).first().click()
+
+    // 捕获后端 histogram 响应（改范围类型触发重请求）
+    let captured: any = null
+    const handler = async (response: import('@playwright/test').Response) => {
+      const url = response.url()
+      if (!url.includes('/analysis/histogram/') || response.request().method() !== 'POST') return
+      if (response.status() !== 200) return
+      try {
+        const body = await response.json()
+        const r = body.results?.[found!.param]
+        if (r?.filtered_sigma3_min != null) captured = r
+      } catch {}
+    }
+    page.on('response', handler)
+
+    const rangeSelect = page.locator(`${SINGLE} .config-section`).filter({ hasText: '范围类型' }).locator('.el-select').first()
+    await rangeSelect.click()
+    await page.locator('.el-select-dropdown__item:visible').filter({ hasText: 'Data Range' }).first().click()
+    await waitLoadingGone(page.locator(SINGLE))
+    page.off('response', handler)
+    expect(captured, '应捕获到带 filtered_sigma 的 histogram 响应').not.toBeNull()
+    if (!captured) return
+
+    // 卡片 3σ 显示后端裁剪口径值（修复前前端用本地重算值，与标记线矛盾）
+    const sigmaCard = page.locator(`${SINGLE} .stats-summary .stat-item`).filter({ hasText: '3σ' }).first()
+    await expect(sigmaCard).toBeVisible()
+    await expect(sigmaCard.locator('.stat-value')).toHaveText(
+      `[${captured.filtered_sigma3_min.toFixed(4)}, ${captured.filtered_sigma3_max.toFixed(4)}]`,
+    )
+
+    // 图表标记线 3σ下限 与卡片同一组值（后端 filtered_sigma3_min）
+    const option = await getHistogramChartOption(page)
+    expect(option).not.toBeNull()
+    const lines = option?.series?.flatMap((s: any) => s.markLine?.data || []) || []
+    const s3Line = lines.find((m: any) => m.label?.formatter === '3σ下限')
+    expect(s3Line, '应存在 3σ下限 标记线').toBeTruthy()
+    expect(Number(s3Line.xAxis)).toBeCloseTo(captured.filtered_sigma3_min, 4)
+  })
+
+  test('切换范围类型只触发一次站点统计请求（回归 #8 重复请求）', async ({ page }) => {
+    await gotoApp(page, '/analysis')
+    await selectAnalysisFile(page, RECOMMENDED.analysis)
+    await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
+    await waitLoadingGone(page.locator(SINGLE))
+
+    // 选中一个参数（site_stats 需要 param 才发请求）
+    const params = await listParams(page)
+    expect(params.length).toBeGreaterThan(0)
+    await selectParam(page, params[0])
+    await waitLoadingGone(page.locator(SINGLE))
+
+    // 只统计携带新 range_type 的请求：初始加载可能在途的旧 range_type
+    // 请求即使晚到也不会被计入（精确匹配请求体，避免误计）
+    let siteStatsRequests = 0
+    page.on('request', (req) => {
+      if (req.url().includes('/statistics/site_stats/') && req.method() === 'POST') {
+        const body = req.postData() || ''
+        if (body.includes('"range_type":"S3"')) siteStatsRequests++
+      }
+    })
+
+    const rangeSelect = page.locator(`${SINGLE} .config-section`).filter({ hasText: '范围类型' }).locator('.el-select').first()
+    await expect(rangeSelect).toBeVisible()
+    await rangeSelect.click()
+    await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '3 Sigma' }).first().click()
+    await waitLoadingGone(page.locator(SINGLE))
+    // 给修复前 histResult watch 会带来的第二次请求留出窗口
+    await page.waitForTimeout(500)
+
+    expect(siteStatsRequests, '改范围类型应只触发一次 site_stats 请求').toBe(1)
+  })
 })

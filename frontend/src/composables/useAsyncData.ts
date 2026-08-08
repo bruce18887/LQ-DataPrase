@@ -38,12 +38,19 @@ export function useAsyncData<T = any>(opts?: UseAsyncDataOptions): UseAsyncDataR
   const loading = ref(false) as Ref<boolean>
   const data = ref<T | null>(null) as Ref<T | null>
   const error = ref<string | null>(null) as Ref<string | null>
+  // 请求序号守卫：快速连续触发（切换参数/修改配置）时旧响应可能后到，
+  // 只应用最后一次请求 —— 过期响应不写 data/error/successMsg，finally 中
+  // 也不清空仍在途的最新请求的 loading。run() 对过期请求返回 null，
+  // 调用方按"无结果"处理（与请求失败同语义，都不会污染 UI）。
+  let seq = 0
 
   async function run(fetcher: () => Promise<any>, transform?: (raw: any) => T): Promise<T | null> {
+    const mySeq = ++seq
     loading.value = true
     error.value = null
     try {
       const result = await fetcher()
+      if (mySeq !== seq) return null // 过期响应：丢弃
       // Auto-extract .data from axios responses, then apply optional transform
       const raw = (result && typeof result === 'object' && 'data' in result && !Array.isArray(result) && typeof result.data !== 'undefined')
         ? result.data
@@ -53,12 +60,13 @@ export function useAsyncData<T = any>(opts?: UseAsyncDataOptions): UseAsyncDataR
       if (!opts?.silent && opts?.successMsg) ElMessage.success(opts.successMsg)
       return value
     } catch (e: any) {
+      if (mySeq !== seq) return null // 过期请求的错误同样丢弃
       // 错误 toast 由 axios 拦截器统一弹出（api/index.ts），这里只记录
       // 内联展示用的 error.value。
       error.value = formatError(e)
       return null
     } finally {
-      loading.value = false
+      if (mySeq === seq) loading.value = false
     }
   }
 

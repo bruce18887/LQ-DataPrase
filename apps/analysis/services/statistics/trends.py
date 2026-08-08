@@ -11,9 +11,27 @@ from .limits import (
     compute_pass_yield,
 )
 from .computations import compute_cpk
-from .helpers import get_1d_from
+from .helpers import NON_NUMERIC_KEYWORDS, get_1d_from
 
 logger = logging.getLogger(__name__)
+
+# parse_limit_string 对 'min'/'max' 等关键字按数据边界解析（真实限值），
+# 其余 NON_NUMERIC_KEYWORDS 与空串一律回退 default（0.0）——区分两者
+_REAL_LIMIT_KEYWORDS = {'min', 'lower limit', 'max', 'upper limit'}
+
+
+def _has_real_limit(raw: str) -> bool:
+    """限值字符串是否为真实规格限（空串/na/- 等占位不是）。"""
+    cleaned = raw.strip().lower()
+    if cleaned in _REAL_LIMIT_KEYWORDS:
+        return True
+    if not cleaned or cleaned in NON_NUMERIC_KEYWORDS:
+        return False
+    try:
+        float(cleaned)
+        return True
+    except (ValueError, TypeError):
+        return False
 
 
 def compute_bin_trend(file_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -212,8 +230,8 @@ def compute_param_trend(file_data_list: List[Dict[str, Any]], param: str) -> Dic
 
     files_info = []
     trend_data = []
-    lsl = None
-    usl = None
+    response_lsl = None
+    response_usl = None
 
     for file_data in file_data_list:
         df = file_data['df']
@@ -239,18 +257,28 @@ def compute_param_trend(file_data_list: List[Dict[str, Any]], param: str) -> Dic
         min_val = float(data_series.min())
         max_val = float(data_series.max())
 
-        # Get limits from metadata (use first file's limits)
-        if lsl is None or usl is None:
-            mins_dict = metadata.get('mins', {})
-            maxs_dict = metadata.get('maxs', {})
-            lsl = parse_limit_string(str(mins_dict.get(param, '')), data_series, 0.0, 0.0)
-            usl = parse_limit_string(str(maxs_dict.get(param, '')), data_series, 0.0, 0.0)
+        # 每文件独立解析规格限并计算 CPK —— 不同批次/程序版本的规格可能不同，
+        # 沿用第一个文件的限值会让后续文件的 CPK 数学上错误
+        mins_dict = metadata.get('mins', {})
+        maxs_dict = metadata.get('maxs', {})
+        min_raw = str(mins_dict.get(param, ''))
+        max_raw = str(maxs_dict.get(param, ''))
+        file_lsl = parse_limit_string(min_raw, data_series, 0.0, 0.0)
+        file_usl = parse_limit_string(max_raw, data_series, 0.0, 0.0)
+        # parse_limit_string 对缺失/占位限值回退 0.0，与真实 [0,0] 规格无法
+        # 区分——用原始字符串判断是否真有限值，缺失文件不算 CPK（避免负值）
+        has_lsl = _has_real_limit(min_raw)
+        has_usl = _has_real_limit(max_raw)
 
         # Compute CPK if limits available
         cpk_val = 0.0
-        if lsl is not None and usl is not None and std_val > 0:
-            cpk_result = compute_cpk(mean_val, std_val, lsl, usl)
+        if has_lsl and has_usl and std_val > 0:
+            cpk_result = compute_cpk(mean_val, std_val, file_lsl, file_usl)
             cpk_val = cpk_result['cpk']
+
+        # 响应级 limits 字段取首个完整（双限齐全）对，向后兼容
+        if response_lsl is None and response_usl is None and has_lsl and has_usl:
+            response_lsl, response_usl = file_lsl, file_usl
 
         files_info.append({
             'file_id': file_id,
@@ -265,6 +293,8 @@ def compute_param_trend(file_data_list: List[Dict[str, Any]], param: str) -> Dic
             'min': round(min_val, 6),
             'max': round(max_val, 6),
             'cpk': round(cpk_val, 4),
+            'lsl': round(file_lsl, 6) if has_lsl else None,
+            'usl': round(file_usl, 6) if has_usl else None,
             'count': len(data_series)
         })
 
@@ -273,7 +303,7 @@ def compute_param_trend(file_data_list: List[Dict[str, Any]], param: str) -> Dic
         'files': files_info,
         'trend_data': trend_data,
         'limits': {
-            'lsl': round(lsl, 6) if lsl is not None else None,
-            'usl': round(usl, 6) if usl is not None else None
+            'lsl': round(response_lsl, 6) if response_lsl is not None else None,
+            'usl': round(response_usl, 6) if response_usl is not None else None
         }
     }

@@ -15,6 +15,7 @@ from pptx.util import Inches
 from apps.analysis.services.statistics import (
     compute_cpk, compute_range_statistics, get_1d_from,
 )
+from apps.export.charts import build_histogram_bins
 
 
 def build_batch_charts_pptx(datafile, df, metadata, params):
@@ -64,9 +65,8 @@ def build_batch_charts_pptx(datafile, df, metadata, params):
         # Create matplotlib chart
         fig, ax = plt.subplots(figsize=(8, 4.5))
         rdl_min, rdl_max, _ = stats['rdl']
-        gap = (rdl_max - rdl_min) / 25 if rdl_max != rdl_min else 0.01
-        bin_start = rdl_min - 2.5 * gap
-        bins = np.array([bin_start + j * gap for j in range(26)])
+        # 分箱与屏幕/Excel 导出保持一致（/20），避免 PPT 图与审阅画面形状不一致
+        bins, _ = build_histogram_bins(rdl_min, rdl_max)
         ax.hist(data_series.dropna(), bins=bins, color='#1E88E5', edgecolor='white', alpha=0.85)
 
         if rdl_min is not None:

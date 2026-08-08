@@ -891,3 +891,107 @@ class FileCorrelationCacheIsolationTests(SimpleTestCase):
         # 数值列，与 ParamA/ParamB 一起计入公共参数）
         self.assertEqual(response.data['common_serials'], 3)
         self.assertEqual(response.data['common_params'], 3)
+
+
+class HistogramSigmaFieldTests(ChartConfigFilterTests):
+    """histogram 响应必须同时提供全量与裁剪口径的 σ 字段。
+
+    回归：前端曾在本地用 displayMean/displayStd 重算 σ（与图表标记线的
+    全量 σ 矛盾）；后端现统一返回 sigma4 + filtered_sigma3/4/6，前端
+    卡片与标记线消费同一组值。
+    """
+
+    def test_compute_path_returns_raw_and_filtered_sigma_fields(self):
+        from apps.analysis.views import AnalysisViewSet
+        request = self._post({'file_id': 1, 'params': ['ParamOutlierLow']})
+        resp = AnalysisViewSet.as_view({'post': 'histogram'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        r = resp.data['results']['ParamOutlierLow']
+
+        # 全量 σ 字段齐全（含新增的 4σ）
+        self.assertIn('sigma3_min', r)
+        self.assertIn('sigma4_min', r)
+        self.assertIn('sigma6_min', r)
+        # mean/std 先各自 round(6) 再组合，与响应值有 ~1e-6 舍入差，用 places=4
+        self.assertAlmostEqual(r['sigma4_min'], r['mean'] - 4 * r['std'], places=4)
+        self.assertAlmostEqual(r['sigma4_max'], r['mean'] + 4 * r['std'], places=4)
+
+        # ParamOutlierLow 含异常值 → filtered 统计存在
+        self.assertTrue(r['outlier_info']['has_outliers'])
+        self.assertIsNotNone(r['filtered_mean'])
+        self.assertIsNotNone(r['filtered_std'])
+        self.assertGreater(r['filtered_std'], 0)
+
+        # 裁剪口径 σ = filtered_mean ± k*filtered_std（与 filtered_mean/std 同源）
+        self.assertAlmostEqual(r['filtered_sigma3_min'],
+                               r['filtered_mean'] - 3 * r['filtered_std'], places=6)
+        self.assertAlmostEqual(r['filtered_sigma3_max'],
+                               r['filtered_mean'] + 3 * r['filtered_std'], places=6)
+        self.assertAlmostEqual(r['filtered_sigma4_min'],
+                               r['filtered_mean'] - 4 * r['filtered_std'], places=6)
+        self.assertAlmostEqual(r['filtered_sigma6_max'],
+                               r['filtered_mean'] + 6 * r['filtered_std'], places=6)
+
+    def test_no_outlier_param_returns_null_filtered_sigma(self):
+        from apps.analysis.views import AnalysisViewSet
+        request = self._post({'file_id': 1, 'params': ['Param0']})
+        resp = AnalysisViewSet.as_view({'post': 'histogram'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        r = resp.data['results']['Param0']
+        self.assertFalse(r['outlier_info']['has_outliers'])
+        self.assertIsNone(r['filtered_sigma3_min'])
+        self.assertIsNone(r['filtered_sigma6_max'])
+
+
+class ParamTrendPerFileLimitsTests(SimpleTestCase):
+    """compute_param_trend 必须按文件独立解析规格限。
+
+    回归：旧实现把第一个文件的 lsl/usl 复用到所有文件——不同批次/
+    程序版本的规格不同时，后续文件的 CPK 数学上错误。
+    """
+
+    @staticmethod
+    def _file(df, fid, mins, maxs):
+        return {
+            'df': df,
+            'metadata': {'mins': mins, 'maxs': maxs, 'units': {}},
+            'file_id': fid,
+            'filename': f'f{fid}.csv',
+            'timestamp': '',
+        }
+
+    def test_per_file_limits_drive_per_file_cpk(self):
+        from apps.analysis.services.statistics.trends import compute_param_trend
+        df = pd.DataFrame({'Param': [10.0, 10.2, 10.4]})
+        files = [
+            self._file(df.copy(), 1, {'Param': '9.0'}, {'Param': '11.0'}),
+            self._file(df.copy(), 2, {'Param': '5.0'}, {'Param': '15.0'}),
+        ]
+        out = compute_param_trend(files, 'Param')
+
+        self.assertEqual(out['trend_data'][0]['lsl'], 9.0)
+        self.assertEqual(out['trend_data'][1]['lsl'], 5.0)
+        # 同分布数据：限值越宽 → CPK 越大（文件 2 用自身限值而非文件 1 的）
+        self.assertGreater(out['trend_data'][1]['cpk'], out['trend_data'][0]['cpk'])
+        self.assertGreater(out['trend_data'][0]['cpk'], 0.0)
+        # 响应级 limits 取首个完整对
+        self.assertEqual(out['limits']['lsl'], 9.0)
+
+    def test_file_without_limits_zero_cpk_and_later_file_keeps_own(self):
+        from apps.analysis.services.statistics.trends import compute_param_trend
+        df = pd.DataFrame({'Param': [10.0, 10.2, 10.4]})
+        files = [
+            self._file(df.copy(), 1, {}, {}),
+            self._file(df.copy(), 2, {'Param': '9.0'}, {'Param': '11.0'}),
+        ]
+        out = compute_param_trend(files, 'Param')
+
+        # 缺失限值（parse 回退 0.0 会算出负 CPK）→ lsl=None、cpk=0
+        self.assertIsNone(out['trend_data'][0]['lsl'])
+        self.assertEqual(out['trend_data'][0]['cpk'], 0.0)
+        self.assertEqual(out['trend_data'][1]['lsl'], 9.0)
+        self.assertGreater(out['trend_data'][1]['cpk'], 0.0)
+        # 首个完整对来自文件 2
+        self.assertEqual(out['limits']['lsl'], 9.0)

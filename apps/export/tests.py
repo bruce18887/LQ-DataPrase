@@ -17,7 +17,7 @@ import unittest
 import pandas as pd
 import openpyxl
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APITestCase
 
 from apps.datafiles.models import DataFile
@@ -321,3 +321,26 @@ class ExportFilenameTemplateApiTests(APITestCase):
         self.assertEqual(resp.status_code, 200)
         name = _parse_content_disposition(resp['Content-Disposition'])
         self.assertEqual(name, 'gage_m_S1_bad_.xlsx')
+
+
+class BuildHistogramBinsTests(SimpleTestCase):
+    """build_histogram_bins：导出图分箱必须与屏幕直方图一致（/20）。
+
+    回归：export_ppt 曾用 /25 分箱，PPT 直方图与用户审阅的画面 bin 宽度
+    不一致；统一收敛到 charts.build_histogram_bins（与 safe_gap /20 同）。
+    """
+
+    def test_26_edges_with_gap_of_range_over_20(self):
+        from apps.export.charts import build_histogram_bins
+        bins, gap = build_histogram_bins(10.0, 30.0)
+        self.assertEqual(len(bins), 26)
+        self.assertAlmostEqual(gap, 1.0)              # (30-10)/20
+        self.assertAlmostEqual(bins[0], 10.0 - 2.5)   # 10 - 2.5*gap
+        self.assertAlmostEqual(bins[-1], 10.0 + 22.5)  # 10 - 2.5*gap + 25*gap
+
+    def test_zero_width_range_falls_back_to_gap_1(self):
+        from apps.export.charts import build_histogram_bins
+        bins, gap = build_histogram_bins(10.0, 10.0)
+        self.assertEqual(gap, 1.0)
+        self.assertEqual(len(bins), 26)
+        self.assertEqual(bins[-1], bins[0] + 25.0)

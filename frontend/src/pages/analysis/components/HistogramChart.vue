@@ -129,22 +129,30 @@ function buildOption() {
       { xAxis: r.custom_high, lineStyle: { color: '#43A047', width: 2, type: 'dashed' }, label: { show: true, formatter: 'CL High', position: 'insideEndTop' } },
     )
   }
-  if (props.chartConfig.includes('s3') && r.sigma3_min != null && r.sigma3_max != null) {
+  // σ 标记线与统计卡同一口径：裁剪时用后端 filtered_sigma*（与 filtered_mean/
+  // std 同源），否则用全量 sigma*。此前卡片用裁剪值、线用全量值，界面矛盾
+  const s3Min = shouldClip && r.filtered_sigma3_min != null ? r.filtered_sigma3_min : r.sigma3_min
+  const s3Max = shouldClip && r.filtered_sigma3_max != null ? r.filtered_sigma3_max : r.sigma3_max
+  const s4Min = shouldClip && r.filtered_sigma4_min != null ? r.filtered_sigma4_min : r.sigma4_min
+  const s4Max = shouldClip && r.filtered_sigma4_max != null ? r.filtered_sigma4_max : r.sigma4_max
+  const s6Min = shouldClip && r.filtered_sigma6_min != null ? r.filtered_sigma6_min : r.sigma6_min
+  const s6Max = shouldClip && r.filtered_sigma6_max != null ? r.filtered_sigma6_max : r.sigma6_max
+  if (props.chartConfig.includes('s3') && s3Min != null && s3Max != null) {
     mk.push(
-      { xAxis: r.sigma3_min, lineStyle: { color: '#1565C0', width: 3, type: 'dotted' }, label: { show: true, formatter: '3σ下限', position: 'insideEndTop' } },
-      { xAxis: r.sigma3_max, lineStyle: { color: '#1565C0', width: 3, type: 'dotted' }, label: { show: true, formatter: '3σ上限', position: 'insideEndTop' } },
+      { xAxis: s3Min, lineStyle: { color: '#1565C0', width: 3, type: 'dotted' }, label: { show: true, formatter: '3σ下限', position: 'insideEndTop' } },
+      { xAxis: s3Max, lineStyle: { color: '#1565C0', width: 3, type: 'dotted' }, label: { show: true, formatter: '3σ上限', position: 'insideEndTop' } },
     )
   }
-  if (props.chartConfig.includes('s4') && r.std > 0) {
+  if (props.chartConfig.includes('s4') && s4Min != null && s4Max != null) {
     mk.push(
-      { xAxis: r.mean - 4 * r.std, lineStyle: { color: '#00838F', width: 3, type: 'dotted' }, label: { show: true, formatter: '4σ下限', position: 'insideEndTop' } },
-      { xAxis: r.mean + 4 * r.std, lineStyle: { color: '#00838F', width: 3, type: 'dotted' }, label: { show: true, formatter: '4σ上限', position: 'insideEndTop' } },
+      { xAxis: s4Min, lineStyle: { color: '#00838F', width: 3, type: 'dotted' }, label: { show: true, formatter: '4σ下限', position: 'insideEndTop' } },
+      { xAxis: s4Max, lineStyle: { color: '#00838F', width: 3, type: 'dotted' }, label: { show: true, formatter: '4σ上限', position: 'insideEndTop' } },
     )
   }
-  if (props.chartConfig.includes('s6') && r.sigma6_min != null && r.sigma6_max != null) {
+  if (props.chartConfig.includes('s6') && s6Min != null && s6Max != null) {
     mk.push(
-      { xAxis: r.sigma6_min, lineStyle: { color: '#E65100', width: 3, type: 'dotted' }, label: { show: true, formatter: '6σ下限', position: 'insideEndTop' } },
-      { xAxis: r.sigma6_max, lineStyle: { color: '#E65100', width: 3, type: 'dotted' }, label: { show: true, formatter: '6σ上限', position: 'insideEndTop' } },
+      { xAxis: s6Min, lineStyle: { color: '#E65100', width: 3, type: 'dotted' }, label: { show: true, formatter: '6σ下限', position: 'insideEndTop' } },
+      { xAxis: s6Max, lineStyle: { color: '#E65100', width: 3, type: 'dotted' }, label: { show: true, formatter: '6σ上限', position: 'insideEndTop' } },
     )
   }
   if (mk.length) series.push({ name: '规格限', type: 'line', data: [], markLine: { symbol: 'none', precision: 4, data: mk } })

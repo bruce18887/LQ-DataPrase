@@ -6,6 +6,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from django.db.models import Count
 import excelize
 from django.http import FileResponse
 
@@ -61,20 +62,18 @@ class BatchReportViewSet(viewsets.GenericViewSet):
 
     @action(detail=False, methods=['get'])
     def list_batches(self, request):
+        # 单条聚合查询代替逐 batch 循环 count()（N+1 → 1）
         batches = (
             DataFile.objects.filter(owner=request.user, file_type='batch')
             .exclude(batch_name='')
             .values('batch_name')
-            .distinct()
+            .annotate(count=Count('id'))
             .order_by('-batch_name')
         )
-        result = []
-        for b in batches:
-            name = b['batch_name']
-            count = DataFile.objects.filter(
-                owner=request.user, file_type='batch', batch_name=name
-            ).count()
-            result.append({'batch_name': name, 'count': count})
+        result = [
+            {'batch_name': b['batch_name'], 'count': b['count']}
+            for b in batches
+        ]
         return Response({'batches': result})
 
     @action(detail=False, methods=['get'])

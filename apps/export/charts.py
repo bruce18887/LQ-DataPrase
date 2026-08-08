@@ -24,6 +24,20 @@ def _get_export_dpi():
     return 100
 
 
+def build_histogram_bins(low: float, high: float):
+    """直方图 bin 边界（导出用）：gap = (high-low)/20，两端各外扩 2.5 gap，
+    共 26 个边界。
+
+    bin 宽度必须与屏幕 ECharts / 直方图服务的 ``safe_gap``（/20）一致，
+    否则导出图与用户审阅的画面分箱形状不一致（export_ppt 曾误用 /25）。
+    返回 ``(bins, data_gap)`` —— data_gap 供 x 轴标签等调用方复用。
+    """
+    data_gap = (high - low) / 20 if (high - low) > 0 else 1.0
+    bin_start = low - 2.5 * data_gap
+    bins = np.array([bin_start + j * data_gap for j in range(26)])
+    return bins, data_gap
+
+
 def _render_histogram_payload(
     param, data_series, site_values, site_series,
     mean_val, std_val, rdl_min, rdl_max,
@@ -45,10 +59,8 @@ def _render_histogram_payload(
     param_low_limit = rdl_min if rdl_min is not None else float(data_series.min())
     param_high_limit = rdl_max if rdl_max is not None else float(data_series.max())
 
-    data_gap = (param_high_limit - param_low_limit) / 20 if (param_high_limit - param_low_limit) > 0 else 1.0
+    all_bins, data_gap = build_histogram_bins(param_low_limit, param_high_limit)
     x_labels = [param_low_limit + (i - 2) * data_gap for i in range(25)]
-    bin_start = param_low_limit - 2.5 * data_gap
-    all_bins = np.array([bin_start + j * data_gap for j in range(26)])
 
     fig, ax = plt.subplots(figsize=(10, 5.5))
     fig.patch.set_facecolor('white')

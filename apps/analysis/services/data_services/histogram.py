@@ -96,6 +96,9 @@ def compute_histogram_stats(df, metadata, param, site_col,
     filtered_std = None
     filtered_data_min = None
     filtered_data_max = None
+    filtered_sigma3_min = filtered_sigma3_max = None
+    filtered_sigma4_min = filtered_sigma4_max = None
+    filtered_sigma6_min = filtered_sigma6_max = None
     normal_data = None
     if outlier_info['has_outliers'] and outlier_info['normal_count'] > 1:
         normal_data = data_series[
@@ -108,6 +111,15 @@ def compute_histogram_stats(df, metadata, param, site_col,
             filtered_data_min = round(float(normal_data.min()), 6)
             filtered_data_max = round(float(normal_data.max()), 6)
             if filtered_std > 0:
+                # 裁剪口径 σ 区间：与 filtered_mean/std 同源。前端开启异常值
+                # 裁剪时卡片与图表标记线必须用这组值，而不是全量数据的
+                # sigma3/4/6（否则同一界面出现两套 σ 区间）
+                filtered_sigma3_min = round(filtered_mean - 3 * filtered_std, 6)
+                filtered_sigma3_max = round(filtered_mean + 3 * filtered_std, 6)
+                filtered_sigma4_min = round(filtered_mean - 4 * filtered_std, 6)
+                filtered_sigma4_max = round(filtered_mean + 4 * filtered_std, 6)
+                filtered_sigma6_min = round(filtered_mean - 6 * filtered_std, 6)
+                filtered_sigma6_max = round(filtered_mean + 6 * filtered_std, 6)
                 filtered_cpk_result = compute_cpk(
                     filtered_mean, filtered_std,
                     stats['rdl'][0], stats['rdl'][1]
@@ -227,6 +239,8 @@ def compute_histogram_stats(df, metadata, param, site_col,
         'data_max': round(stats['dr'][1], 6),
         'sigma3_min': round(stats['s3'][0], 6),
         'sigma3_max': round(stats['s3'][1], 6),
+        'sigma4_min': round(stats['s4'][0], 6),
+        'sigma4_max': round(stats['s4'][1], 6),
         'sigma6_min': round(stats['s6'][0], 6),
         'sigma6_max': round(stats['s6'][1], 6),
         'site_stats': site_data,
@@ -241,6 +255,12 @@ def compute_histogram_stats(df, metadata, param, site_col,
         'filtered_std': filtered_std,
         'filtered_data_min': filtered_data_min,
         'filtered_data_max': filtered_data_max,
+        'filtered_sigma3_min': filtered_sigma3_min,
+        'filtered_sigma3_max': filtered_sigma3_max,
+        'filtered_sigma4_min': filtered_sigma4_min,
+        'filtered_sigma4_max': filtered_sigma4_max,
+        'filtered_sigma6_min': filtered_sigma6_min,
+        'filtered_sigma6_max': filtered_sigma6_max,
         'custom_cpk': custom_cpk,
         'custom_cpk_level': custom_cpk_level,
         'custom_cpk_color': custom_cpk_color,
