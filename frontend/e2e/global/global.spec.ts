@@ -119,6 +119,38 @@ test.describe('@p2 Ctrl+滚轮页面缩放', { tag: ['@p2', '@global'] }, () => 
     await page.keyboard.up('Control')
     await expect(indicator).toHaveText('缩放 100%')
   })
+
+  test('指示器消失（组件卸载）后 Ctrl+滚轮缩放仍有效（回归：useZoom 引用计数）', async ({ page }) => {
+    await gotoApp(page, '/dashboard')
+
+    const getZoom = () => page.evaluate(() => document.documentElement.style.zoom || '1')
+    const indicator = page.locator('.zoom-indicator')
+
+    // 第一次缩放：指示器挂载 → 防抖 800ms 后 v-if 移除（组件真正卸载）
+    await page.evaluate(() => {
+      const event = new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, bubbles: true })
+      window.dispatchEvent(event)
+    })
+    await expect(indicator).toBeVisible()
+    await expect(indicator).not.toBeVisible({ timeout: 5_000 })
+    // toHaveCount(0) = 元素已从 DOM 移除 = onUnmounted 已执行（旧实现此时误删全局监听）
+    await expect(indicator).toHaveCount(0)
+    const afterFirst = parseFloat(await getZoom())
+    expect(afterFirst).toBeGreaterThan(1)
+
+    // 指示器卸载后再次缩放：引用计数修复前全局监听已被移除，此步缩放失效
+    await page.evaluate(() => {
+      const event = new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, bubbles: true })
+      window.dispatchEvent(event)
+    })
+    await expect.poll(getZoom).not.toBe(String(afterFirst))
+
+    // 恢复 100%，避免污染其他用例的缩放预期
+    await page.keyboard.down('Control')
+    await page.keyboard.press('0')
+    await page.keyboard.up('Control')
+    await expect.poll(getZoom).toBe('1')
+  })
 })
 
 test.describe('@p2 版本显示', { tag: ['@p2', '@global'] }, () => {
