@@ -295,12 +295,18 @@ watch(outlierHandling, (val) => { analysisStore.outlierHandling = val })
 watch(() => analysisStore.outlierHandling, (val) => { outlierHandling.value = val })
 
 // ========== Cross-composable orchestration ==========
-watch([chartConfig, rangeType], () => {
+// site_stats 只依赖 range_type（与图表配置无关）：改 rangeType 触发一次，
+// 切参数由下方 watch(localSelectedParam) 触发 —— 之前 chartConfig 变动和
+// histResult 变化也会连带触发，一次修改产生两次重复请求
+watch([rangeType], () => {
   loadSiteStats()
-}, { deep: true })
+})
+
+watch(localSelectedParam, () => {
+  loadSiteStats()
+})
 
 watch(histResult, () => {
-  loadSiteStats()
   if (chartMode.value === 'serial') {
     loadSerialDistribution()
   }

@@ -31,15 +31,10 @@ export function useHistogram(
     return { green: '#4CAF50', orange: '#FF9800', darkorange: '#FF5722', red: '#F44336', gray: '#9E9E9E' }
   })
 
-  // 请求序号守卫：快速连续修改（如 CL 下连改上下限）时旧响应可能后到，
-  // useAsyncData 无保序机制，若把过期结果应用进视图会让 UI 停在旧值
-  // （观感为"修改没生效"）。只应用最后一次请求的结果。
-  let loadSeq = 0
-
+  // 请求保序由 useAsyncData 内建守卫保证（过期 run() 返回 null 且不落地）
   async function loadHistogram() {
     const fileId = getSelectedFileId()
     if (!fileId || !localSelectedParam.value) return
-    const seq = ++loadSeq
     const result = await run(() => api.post('/analysis/histogram/', {
       file_id: fileId,
       params: [localSelectedParam.value],
@@ -53,7 +48,6 @@ export function useHistogram(
       only_fail_test_item: onlyFailTestItem.value,
       only_low_cpk: onlyLowCpk.value,
     }, { silent: true }))
-    if (seq !== loadSeq) return  // 过期响应，丢弃
     if (result?.results) histogramUpdateView(result.results as Record<string, any>)
   }
 
@@ -73,11 +67,13 @@ export function useHistogram(
     const displayMax = useFiltered && r.filtered_data_max != null ? r.filtered_data_max : r.data_max
 
     const rangeVal = displayMax != null && displayMin != null ? displayMax - displayMin : null
-    // Always use displayMean/displayStd for sigma calculations (filtered when outliers present)
-    const s3min = displayMean != null && displayStd != null ? displayMean - 3 * displayStd : null
-    const s3max = displayMean != null && displayStd != null ? displayMean + 3 * displayStd : null
-    const s6min = displayMean != null && displayStd != null ? displayMean - 6 * displayStd : null
-    const s6max = displayMean != null && displayStd != null ? displayMean + 6 * displayStd : null
+    // σ 区间统一来自后端：开异常值处理（useFiltered）时用 filtered_sigma*（与
+    // filtered_mean/std 同源），否则用全量 sigma* —— 与图表标记线同一组值，
+    // 不再在前端重算（此前卡片用裁剪值、图表线用全量值，同界面互相矛盾）
+    const s3min = useFiltered && r.filtered_sigma3_min != null ? r.filtered_sigma3_min : r.sigma3_min
+    const s3max = useFiltered && r.filtered_sigma3_max != null ? r.filtered_sigma3_max : r.sigma3_max
+    const s6min = useFiltered && r.filtered_sigma6_min != null ? r.filtered_sigma6_min : r.sigma6_min
+    const s6max = useFiltered && r.filtered_sigma6_max != null ? r.filtered_sigma6_max : r.sigma6_max
     // CL 模式下后端用 custom 限值重算了 CPK：与 RDL CPK 不同时并排显示
     // 修改前（CPK(RDL)）与修改后（CPK(Custom)）两张卡，否则维持单卡。
     const showCustomCpk =
@@ -106,7 +102,8 @@ export function useHistogram(
       { label: '3σ', value: s3min != null && s3max != null ? `[${s3min.toFixed(4)}, ${s3max.toFixed(4)}]` : '-' },
       { label: '6σ', value: s6min != null && s6max != null ? `[${s6min.toFixed(4)}, ${s6max.toFixed(4)}]` : '-' },
     ]
-    const s4min = (displayMean || 0) - 4 * (displayStd || 0); const s4max = (displayMean || 0) + 4 * (displayStd || 0)
+    const s4min = useFiltered && r.filtered_sigma4_min != null ? r.filtered_sigma4_min : r.sigma4_min
+    const s4max = useFiltered && r.filtered_sigma4_max != null ? r.filtered_sigma4_max : r.sigma4_max
     const unit = r.unit || ''
     const cutSuffix = useFiltered ? ' (cut)' : ''
     const rdlGap = r.upper_limit != null && r.lower_limit != null ? ((r.upper_limit - r.lower_limit) / 25).toFixed(5) : '-'
