@@ -78,7 +78,10 @@ function buildOption() {
   // 公式单一来源在后端），与 KDE/标记线同源原则一致——前端不再本地实现高斯公式
   const normalCurve = shouldClip && r.filtered_normal_curve != null ? r.filtered_normal_curve : r.normal_curve
   const hasNormal = showNormal && Array.isArray(normalCurve) && normalCurve.length > 1
-  const hasKde = props.chartConfig.includes('kde') && Array.isArray(r.kde_curve) && r.kde_curve.length > 1
+  // KDE 曲线与正态曲线同款双口径：裁剪时用 filtered_kde_curve（IQR 口径，
+  // 与柱形隐藏边界同源），否则用全量 kde_curve——曲线永远描述柱子的形状
+  const kdeCurve = shouldClip && r.filtered_kde_curve != null ? r.filtered_kde_curve : r.kde_curve
+  const hasKde = props.chartConfig.includes('kde') && Array.isArray(kdeCurve) && kdeCurve.length > 1
   // Density axes are independent: KDE gets its own purple axis on the far
   // left, the normal curve keeps the original orange axis on the right.
   // Base axes are the percent axis plus the optional All Site axis; axis
@@ -162,7 +165,7 @@ function buildOption() {
   }
 
   if (hasKde) {
-    series.push({ name: 'KDE曲线', type: 'line', data: r.kde_curve, smooth: true, lineStyle: { color: '#7B1FA2', width: 3 }, symbol: 'none', yAxisIndex: kdeAxisIdx, z: 10 })
+    series.push({ name: 'KDE曲线', type: 'line', data: kdeCurve, smooth: true, lineStyle: { color: '#7B1FA2', width: 3 }, symbol: 'none', yAxisIndex: kdeAxisIdx, z: 10 })
   }
 
   const AXIS_COLOR_LEFT = '#1E88E5'; const AXIS_COLOR_ALLSITE = '#42A5F5'; const AXIS_COLOR_NORMAL = '#F57F17'; const AXIS_COLOR_KDE = '#7B1FA2'
