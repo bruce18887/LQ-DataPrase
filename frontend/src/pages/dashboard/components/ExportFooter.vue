@@ -10,6 +10,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import api from '../../../api'
+import { downloadBlob, extractFilenameFromContentDisposition } from '../../../utils/download'
+import { getExportTimeoutMs } from '../../../utils/exportTimeout'
 
 const props = defineProps<{
   fileId: number | null
@@ -22,18 +24,18 @@ const exporting = ref(false)
 async function exportHtml() {
   exporting.value = true
   try {
-    const resp = await api.post('/export/dashboard_html/', {
+    const resp = await api.post('/export/html_report/', {
       file_id: props.fileId,
-    }, { responseType: 'blob' })
-    const url = window.URL.createObjectURL(new Blob([resp.data]))
-    const link = document.createElement('a')
-    link.href = url
-    const now = new Date()
-    const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
-    const fileLabel = (props.filename || 'report').replace('.csv', '')
-    link.download = `Dashboard_${fileLabel}_${ts}.html`
-    link.click()
-    window.URL.revokeObjectURL(url)
+    }, { responseType: 'blob', timeout: await getExportTimeoutMs() })
+    // 文件名优先解析后端模板渲染的 Content-Disposition，缺失时用时间戳兜底
+    const fname = extractFilenameFromContentDisposition(resp.headers?.['content-disposition'])
+      ?? (() => {
+        const now = new Date()
+        const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
+        const fileLabel = (props.filename || 'report').replace('.csv', '')
+        return `Dashboard_${fileLabel}_${ts}.html`
+      })()
+    downloadBlob(resp.data as Blob, fname)
   } catch (error) {
     console.error('导出失败:', error)
     // 错误 toast 由 axios 拦截器统一弹出

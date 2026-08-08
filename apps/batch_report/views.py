@@ -275,7 +275,7 @@ class BatchReportViewSet(viewsets.GenericViewSet):
 
         # QA validation
         qa_checks = []
-        qa1 = next((p for p in phases if re.match(r'^QA1(_|$)', p['phase'], re.IGNORECASE)), None)
+        qa1 = next((p for p in phases if re.match(r'^QA1(?:[_-]|$)', p['phase'], re.IGNORECASE)), None)
         qa_phases = [p for p in phases if p['phase'].startswith('QA')]
         if qa1 and len(qa_phases) >= 1:
             all_qa_pass = sum(p['pass_count'] for p in qa_phases)

@@ -10,6 +10,8 @@ export function useSerialDistribution(
   rangeType: Ref<string>,
   /** Available numeric param names — skip API call if current param is not numeric */
   availableParams?: Ref<string[]>,
+  /** 仅用 Pass 数据(Bin1)：序列点只保留 pass-bin 行 */
+  dataOnlyBin1?: Ref<boolean>,
 ) {
   const { data: serialDistData, run } = useAsyncData<any>({ silent: true })
 
@@ -23,12 +25,14 @@ export function useSerialDistribution(
       param: localSelectedParam.value,
       chart_config: chartConfig.value,
       range_type: rangeType.value,
+      data_only_bin1: dataOnlyBin1?.value ?? false,
     }))
   }
 
   watch(chartMode, (val) => { if (val === 'serial') loadSerialDistribution() })
   watch([chartConfig, rangeType], () => { if (chartMode.value === 'serial') loadSerialDistribution() }, { deep: true })
   watch(localSelectedParam, () => { if (chartMode.value === 'serial') loadSerialDistribution() })
+  if (dataOnlyBin1) watch(dataOnlyBin1, () => { if (chartMode.value === 'serial') loadSerialDistribution() })
 
   return { serialDistData, loadSerialDistribution }
 }

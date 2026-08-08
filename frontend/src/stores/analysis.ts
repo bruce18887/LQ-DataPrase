@@ -11,10 +11,15 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const selectedParam = ref('')
   const activeTab = ref('single-param')
   const chartMode = ref('distribution')
-  const chartConfig = ref<string[]>(['limit', 's6'])
+  const chartConfig = ref<string[]>(['limit', 's6', 'kde'])
   const rangeType = ref('RDL')
   const barWidthPercent = ref(20)
   const ignoreNoLimit = ref(false)
+  // 图表配置筛选开关：两个筛选测试项（参数列表），一个筛选数据行（仅 Bin1）
+  const ignoreNoTestValue = ref(false)
+  const dataOnlyBin1 = ref(false)
+  const onlyFailTestItem = ref(false)
+  const onlyLowCpk = ref(false)
   const customLow = ref<number | null>(null)
   const customHigh = ref<number | null>(null)
   const outlierHandling = ref<'clip' | 'exclude' | 'off'>('off')
@@ -60,10 +65,14 @@ export const useAnalysisStore = defineStore('analysis', () => {
     selectedParam.value = ''
     activeTab.value = 'single-param'
     chartMode.value = 'distribution'
-    chartConfig.value = ['limit', 's6']
+    chartConfig.value = ['limit', 's6', 'kde']
     rangeType.value = 'RDL'
     barWidthPercent.value = 20
     ignoreNoLimit.value = false
+    ignoreNoTestValue.value = false
+    dataOnlyBin1.value = false
+    onlyFailTestItem.value = false
+    onlyLowCpk.value = false
     customLow.value = null
     customHigh.value = null
     outlierHandling.value = 'off'
@@ -86,6 +95,10 @@ export const useAnalysisStore = defineStore('analysis', () => {
     rangeType,
     barWidthPercent,
     ignoreNoLimit,
+    ignoreNoTestValue,
+    dataOnlyBin1,
+    onlyFailTestItem,
+    onlyLowCpk,
     customLow,
     customHigh,
     outlierHandling,

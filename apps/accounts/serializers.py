@@ -56,6 +56,7 @@ class UserSettingSerializer(serializers.ModelSerializer):
             'chart_engine', 'aggrid_header_font_size',
             'recent_files', 'max_recent_files', 'histogram_label_offset',
             'export_filename_templates',
+            'export_timeout',
         ]
 
     def to_representation(self, instance):
@@ -76,6 +77,11 @@ class UserSettingSerializer(serializers.ModelSerializer):
             if len(tpl) > MAX_TEMPLATE_LENGTH:
                 raise serializers.ValidationError(
                     f'{key} 的模板不能超过 {MAX_TEMPLATE_LENGTH} 字符')
+        return value
+
+    def validate_export_timeout(self, value):
+        if not isinstance(value, int) or not 30 <= value <= 3600:
+            raise serializers.ValidationError('导出超时必须在 30-3600 秒之间')
         return value
 
 

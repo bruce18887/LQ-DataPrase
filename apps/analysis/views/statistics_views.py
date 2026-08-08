@@ -26,6 +26,7 @@ from apps.analysis.services.statistics import (
     build_fail_mask,
     build_col_meta,
     ensure_numeric,
+    filter_bin1_rows,
 )
 from apps.datafiles.services import get_cached_parsed_file
 from apps.common.params import get_param, get_param_float, get_param_list
@@ -36,6 +37,7 @@ from ._helpers import (
     _sanitize_numeric_params,
     _load_df_from_request,
     _load_files_from_request,
+    get_bool_param,
 )
 
 
@@ -89,6 +91,10 @@ class StatisticsViewSet(viewsets.GenericViewSet):
             return Response({'error': 'param_required'}, status=400)
 
         range_type = get_param(request, 'range_type', 'RDL')
+        # data_only_bin1 narrows the rows before series/site extraction so
+        # the site table matches the histogram's Bin1-filtered stats.
+        if get_bool_param(request, 'data_only_bin1'):
+            df = filter_bin1_rows(df, metadata)
 
         data_series = get_1d_from(df, param).dropna()
         data_series = data_series[data_series.apply(lambda x: abs(x) < float('inf'))]

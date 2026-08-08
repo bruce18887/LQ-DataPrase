@@ -28,6 +28,10 @@ directories:
 files:
   - "dist/**/*"
   - "electron-dist/**/*"
+  # Vite 已把全部前端依赖打进 dist/ 的 bundle，运行时不再需要 node_modules。
+  # electron-builder 的 node_modules matcher 只收集 files 中的 "!" 排除模式，
+  # 不加这行会把 9299 个依赖文件（echarts/element-plus 等）整个打进安装包。
+  - "!node_modules/**"
 
 extraResources:
   - from: "dist/LQ-DataPrase/"
@@ -53,23 +57,31 @@ nsis:
   shortcutName: LQ-DataPrase
   uninstallDisplayName: LQ-DataPrase
   artifactName: "${productName}-${version}-Setup.${ext}"
+  # zip payload + nsisunz::Unzip 直接解压到安装目录（单步，无 7z-out 临时解压 +
+  # CopyFiles 复制两步 I/O，无 ~500MB 临时磁盘占用，安装快约一倍）。
+  useZip: true
+  # 本项目无 electron-updater（autoUpdater），blockmap/差分更新是纯摆设，
+  # 且差分模式会强制覆盖 compression 为 normal、把 payload 强制为 7z，
+  # 使 useZip 失效——必须显式关闭才能让 zip 直解压生效。
+  differentialPackage: false
   # Custom hooks: ask during uninstall whether to delete user data
   # (db.sqlite3, uploaded data files, logs) stored in %APPDATA%\LQ-DataPrase.
   include: build/installer.nsh
 
-# Disable ASAR packaging. On Windows the ASAR file is frequently locked by
-# the IDE/indexer after a build, preventing subsequent rebuilds from overwriting
-# it. Keeping files unpacked avoids this lock and makes debugging easier.
-asar: false
+# ASAR packaging. 安装耗时瓶颈是散文件数量（此前 16,609 个文件逐一解压+复制，
+# 且 Nsis7z/CopyFiles 阶段进度条不更新，表现为"安装卡死"）。asar 把 app 部分
+# 44 个文件合成 1 个，安装解包量减半。electron 主进程按 asar 路径编写
+# （main.ts 用 __dirname 相对路径 + loadFile，Electron 的 asar fs 层透明处理）。
+#
+# 历史：曾因 IDE/索引器锁定 asar 导致重建失败而关闭——正确解法是把 out/
+# 加入 IDE 的搜索/索引排除（.gitignore 已排除 out/），而非关闭 asar。
+asar: true
 
-# Compression: 'store' skips the NSIS 7z solid-compression pass entirely,
-# saving ~30s per build. The resulting Setup.exe is larger (~450 MB vs ~218 MB)
-# but installs just as fast — the 'install time' bottleneck is file I/O, not
-# decompression CPU. Use 'normal' for release builds.
-
-# During development, use 'store' to skip compression and save ~30s per build.
-# For release builds, switch to 'normal'.
-compression: "store"
+# Compression: 'normal' 时 payload 为 zip（deflate，-mx=7，Setup.exe ~220-250MB），
+# 安装时 nsisunz::Unzip 直接解压到安装目录（配合 useZip: true + differentialPackage: false）。
+# 'store' 时 zip 内不压缩（Setup.exe ~610MB），安装为纯写盘零 CPU 解压，最快；
+# 适合本地/共享盘分发，不适合网络下载。
+compression: "normal"
 
 # Skip @electron/rebuild. This project has no native Node.js addons — all C++
 # code lives in the PyInstaller-packaged Python backend. Disabling it saves

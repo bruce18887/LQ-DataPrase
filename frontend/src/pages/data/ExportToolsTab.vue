@@ -95,6 +95,7 @@ function onExportBatch(format: string) {
     show_4sigma: chartConfig.value.includes('s4'),
     show_6sigma: chartConfig.value.includes('s6'),
     show_normal: chartConfig.value.includes('normal'),
+    show_kde: chartConfig.value.includes('kde'),
   }
   exportBatchCharts(localParams.value, format, options, { silent: true }).catch((err: any) => {
     const msg = err?.code === 'ECONNABORTED' || err?.message?.includes('timeout')

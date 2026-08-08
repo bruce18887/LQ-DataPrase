@@ -3,6 +3,7 @@ import type { AxiosRequestConfig } from 'axios'
 
 import api from '../../../api'
 import { downloadBlob, extractFilenameFromContentDisposition } from '../../../utils/download'
+import { getExportTimeoutMs } from '../../../utils/exportTimeout'
 
 export function useExport(
   getSelectedFileId: () => number | null
@@ -11,7 +12,7 @@ export function useExport(
 
   async function exportSigmaLimit(
     sigma: number,
-    options?: { onlyValidLimits?: boolean },
+    options?: { onlyValidLimits?: boolean; data_only_bin1?: boolean },
     requestConfig?: AxiosRequestConfig,
   ) {
     const fileId = getSelectedFileId()
@@ -22,7 +23,8 @@ export function useExport(
         file_id: fileId,
         sigma,
         only_valid_limits: options?.onlyValidLimits ?? true,
-      }, { responseType: 'blob', ...requestConfig })
+        data_only_bin1: options?.data_only_bin1 ?? false,
+      }, { responseType: 'blob', timeout: await getExportTimeoutMs(), ...requestConfig })
       const fname = extractFilenameFromContentDisposition(resp.headers?.['content-disposition']) || `sigma_limit_${sigma}sigma.xlsx`
       downloadBlob(resp.data as Blob, fname)
     } catch (err) {
@@ -50,7 +52,9 @@ export function useExport(
         ...(options || {}),
       }, {
         responseType: 'blob',
-        timeout: 300000, // 5 min for large batch exports
+        // 超时秒数由系统设置「导出超时」控制；...requestConfig 保持在后，
+        // 调用方可按需覆盖（如 silent 标记）
+        timeout: await getExportTimeoutMs(),
         ...requestConfig,
       })
       const fname = extractFilenameFromContentDisposition(resp.headers?.['content-disposition']) || `batch_charts.${format === 'pptx' ? 'pptx' : 'xlsx'}`

@@ -12,6 +12,10 @@ export function useHistogram(
   customHigh: Ref<number | null>,
   iqrMultiplier: Ref<number> = ref(1.5),
   outlierHandling: Ref<'clip' | 'exclude' | 'off'> = ref('off'),
+  ignoreNoTestValue: Ref<boolean> = ref(false),
+  dataOnlyBin1: Ref<boolean> = ref(false),
+  onlyFailTestItem: Ref<boolean> = ref(false),
+  onlyLowCpk: Ref<boolean> = ref(false),
 ) {
   const histResult = ref<any>(null)
   const statCards = ref<{ label: string; value: string; color?: string }[]>([])
@@ -27,9 +31,15 @@ export function useHistogram(
     return { green: '#4CAF50', orange: '#FF9800', darkorange: '#FF5722', red: '#F44336', gray: '#9E9E9E' }
   })
 
+  // 请求序号守卫：快速连续修改（如 CL 下连改上下限）时旧响应可能后到，
+  // useAsyncData 无保序机制，若把过期结果应用进视图会让 UI 停在旧值
+  // （观感为"修改没生效"）。只应用最后一次请求的结果。
+  let loadSeq = 0
+
   async function loadHistogram() {
     const fileId = getSelectedFileId()
     if (!fileId || !localSelectedParam.value) return
+    const seq = ++loadSeq
     const result = await run(() => api.post('/analysis/histogram/', {
       file_id: fileId,
       params: [localSelectedParam.value],
@@ -38,7 +48,12 @@ export function useHistogram(
       custom_low: rangeType.value === 'CL' ? customLow.value : null,
       custom_high: rangeType.value === 'CL' ? customHigh.value : null,
       iqr_multiplier: iqrMultiplier.value,
+      ignore_no_test_value: ignoreNoTestValue.value,
+      data_only_bin1: dataOnlyBin1.value,
+      only_fail_test_item: onlyFailTestItem.value,
+      only_low_cpk: onlyLowCpk.value,
     }, { silent: true }))
+    if (seq !== loadSeq) return  // 过期响应，丢弃
     if (result?.results) histogramUpdateView(result.results as Record<string, any>)
   }
 
@@ -63,6 +78,22 @@ export function useHistogram(
     const s3max = displayMean != null && displayStd != null ? displayMean + 3 * displayStd : null
     const s6min = displayMean != null && displayStd != null ? displayMean - 6 * displayStd : null
     const s6max = displayMean != null && displayStd != null ? displayMean + 6 * displayStd : null
+    // CL 模式下后端用 custom 限值重算了 CPK：与 RDL CPK 不同时并排显示
+    // 修改前（CPK(RDL)）与修改后（CPK(Custom)）两张卡，否则维持单卡。
+    const showCustomCpk =
+      rangeType.value === 'CL' &&
+      r.custom_cpk != null &&
+      r.cpk != null &&
+      r.custom_cpk !== r.cpk
+    const cpkCards: { label: string; value: string; color?: string }[] = []
+    if (showCustomCpk) {
+      cpkCards.push(
+        { label: 'CPK(RDL)', value: `${r.cpk.toFixed(4)} (${r.cpk_level})`, color: clrs.value[r.cpk_color] ?? undefined },
+        { label: 'CPK(Custom)', value: `${r.custom_cpk.toFixed(4)} (${r.custom_cpk_level})`, color: clrs.value[r.custom_cpk_color] ?? undefined },
+      )
+    } else {
+      cpkCards.push({ label: 'CPK', value: r.filtered_cpk != null ? `${r.filtered_cpk.toFixed(4)} (filtered)` : (r.cpk != null ? `${r.cpk.toFixed(4)} (${r.cpk_level})` : '-'), color: clrs.value[r.cpk_color] ?? undefined })
+    }
     statCards.value = [
       { label: 'N', value: r.total_count?.toLocaleString() ?? '-' },
       { label: 'Mean', value: displayMean?.toFixed(4) ?? '-' },
@@ -71,7 +102,7 @@ export function useHistogram(
       { label: 'Min', value: displayMin?.toFixed(4) ?? '-' },
       { label: 'Max', value: displayMax?.toFixed(4) ?? '-' },
       { label: 'Range', value: rangeVal != null ? rangeVal.toFixed(4) : '-' },
-      { label: 'CPK', value: r.filtered_cpk != null ? `${r.filtered_cpk.toFixed(4)} (filtered)` : (r.cpk != null ? `${r.cpk.toFixed(4)} (${r.cpk_level})` : '-'), color: clrs.value[r.cpk_color] ?? undefined },
+      ...cpkCards,
       { label: '3σ', value: s3min != null && s3max != null ? `[${s3min.toFixed(4)}, ${s3max.toFixed(4)}]` : '-' },
       { label: '6σ', value: s6min != null && s6max != null ? `[${s6min.toFixed(4)}, ${s6max.toFixed(4)}]` : '-' },
     ]
@@ -83,10 +114,11 @@ export function useHistogram(
     const s3Gap = s3min != null && s3max != null ? ((s3max - s3min) / 25).toFixed(5) : '-'
     const s4Gap = s4max != null && s4min != null ? ((s4max - s4min) / 25).toFixed(5) : '-'
     const s6Gap = s6min != null && s6max != null ? ((s6max - s6min) / 25).toFixed(5) : '-'
+    const customGap = customLow.value != null && customHigh.value != null ? ((customHigh.value - customLow.value) / 25).toFixed(5) : '-'
     rangeTableData.value = [
       { label: 'RowDataLimit', low: r.lower_limit?.toFixed(5) ?? '-', high: r.upper_limit?.toFixed(5) ?? '-', gap: rdlGap, unit },
       { label: `Data Range${cutSuffix}`, low: displayMin?.toFixed(5) ?? '-', high: displayMax?.toFixed(5) ?? '-', gap: drGap, unit },
-      { label: 'CustomLimit', low: displayMin?.toFixed(5) ?? '-', high: displayMax?.toFixed(5) ?? '-', gap: drGap, unit },
+      { label: 'CustomLimit', low: customLow.value?.toFixed(5) ?? '-', high: customHigh.value?.toFixed(5) ?? '-', gap: customGap, unit },
       { label: `3 Sigma${cutSuffix}`, low: s3min?.toFixed(5) ?? '-', high: s3max?.toFixed(5) ?? '-', gap: s3Gap, unit },
       { label: `4 Sigma${cutSuffix}`, low: s4min?.toFixed(5) ?? '-', high: s4max?.toFixed(5) ?? '-', gap: s4Gap, unit },
       { label: `6 Sigma${cutSuffix}`, low: s6min?.toFixed(5) ?? '-', high: s6max?.toFixed(5) ?? '-', gap: s6Gap, unit },
@@ -99,6 +131,10 @@ export function useHistogram(
 
   watch(localSelectedParam, () => loadHistogram())
   watch(ignoreNoLimit, () => loadHistogram())
+  watch(ignoreNoTestValue, () => loadHistogram())
+  watch(dataOnlyBin1, () => loadHistogram())
+  watch(onlyFailTestItem, () => loadHistogram())
+  watch(onlyLowCpk, () => loadHistogram())
   watch(rangeType, () => loadHistogram())
   watch([customLow, customHigh], () => { if (rangeType.value === 'CL') loadHistogram() })
   watch(iqrMultiplier, () => loadHistogram())

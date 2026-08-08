@@ -377,3 +377,26 @@ class UserSettingsApiTests(APITestCase):
             format='json',
         )
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_get_settings_returns_default_export_timeout(self):
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['export_timeout'], 600)
+
+    def test_put_updates_export_timeout_and_round_trips(self):
+        resp = self.client.put(self.url, {'export_timeout': 900}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.data['export_timeout'], 900)
+
+    def test_put_export_timeout_below_min_returns_400(self):
+        resp = self.client.put(self.url, {'export_timeout': 29}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_put_export_timeout_above_max_returns_400(self):
+        resp = self.client.put(self.url, {'export_timeout': 3601}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_put_export_timeout_non_integer_returns_400(self):
+        resp = self.client.put(self.url, {'export_timeout': 'abc'}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)

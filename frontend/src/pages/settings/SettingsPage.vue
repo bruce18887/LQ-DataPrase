@@ -13,6 +13,7 @@
         <CpkSettingsForm :settings="settings" />
       </el-tab-pane>
       <el-tab-pane name="export" label="📄 导出模板">
+        <ExportTimeoutSettings v-model:timeout="settings.export_timeout" />
         <ExportTemplateSettings v-model:templates="settings.export_filename_templates" />
       </el-tab-pane>
       <el-tab-pane name="paths" label="📁 存储路径">
@@ -51,6 +52,8 @@ import CpkSettingsForm from './components/CpkSettingsForm.vue'
 import SystemPathsSettings from './components/SystemPathsSettings.vue'
 import RecentFilesSettings from './components/RecentFilesSettings.vue'
 import ExportTemplateSettings from './components/ExportTemplateSettings.vue'
+import ExportTimeoutSettings from './components/ExportTimeoutSettings.vue'
+import { setExportTimeoutSec } from '../../utils/exportTimeout'
 
 function defaultTemplates(): Record<ExportTypeKey, string> {
   const result = {} as Record<ExportTypeKey, string>
@@ -75,6 +78,7 @@ const defaults: SettingsData = {
   max_recent_files: 10,
   histogram_label_offset: 4,
   export_filename_templates: defaultTemplates(),
+  export_timeout: 600,
 }
 
 const activeTab = ref('display')
@@ -106,6 +110,8 @@ async function loadSettings() {
     settings.value = merged as SettingsData
     setChartRenderer(merged.chart_renderer as 'svg' | 'canvas')
     recentFiles.value = Array.isArray(data?.recent_files) ? data.recent_files : []
+    // 导出超时同步到模块缓存，使导出调用点无需访问本页即可使用最新值
+    setExportTimeoutSec(merged.export_timeout)
   } catch {
     // silently fall back to defaults
   }
@@ -119,6 +125,7 @@ async function saveSettings() {
     }
     await authApi.updateSettings(payload)
     setChartRenderer(settings.value.chart_renderer)
+    setExportTimeoutSec(settings.value.export_timeout)
     ElMessage.success('设置已保存')
   } catch {
     // 错误 toast 由 axios 拦截器统一弹出

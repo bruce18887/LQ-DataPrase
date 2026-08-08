@@ -1,6 +1,8 @@
 """Single-file analysis views."""
 
 import json
+import os
+from typing import Dict, Optional, Set
 
 import pandas as pd
 from django.shortcuts import get_object_or_404
@@ -24,6 +26,10 @@ from apps.analysis.services.statistics import (
     compute_qqplot,
     compute_uph,
     ensure_numeric,
+    calculate_fail_test_item_statistics,
+    filter_bin1_rows,
+    filter_test_items,
+    compute_low_cpk_test_items,
 )
 from apps.analysis.services.data_services import (
     compute_histogram_stats,
@@ -43,7 +49,35 @@ from ._helpers import (
     _filter_blank_params,
     _sanitize_numeric_params,
     _load_df_from_request,
+    get_bool_param,
+    get_cpk_b_threshold,
 )
+
+# Low-CPK set cache for the fast path: evaluating every column (IQR + CPK)
+# is the dominant cost of the filter chain (~100-200 ms on a 10k-row file),
+# and the fast path runs on every config toggle / file switch.  The key
+# carries the file's mtime+size so a re-parsed file invalidates the entry.
+_low_cpk_cache: Dict[tuple, Set[str]] = {}
+
+
+def _cached_low_cpk_items(datafile, user_id: int, df, metadata,
+                          threshold: float, iqr_multiplier: float,
+                          data_only_bin1: bool) -> Set[str]:
+    key = (user_id, datafile.id, threshold, iqr_multiplier, data_only_bin1)
+    try:
+        st = os.stat(datafile.file_path)
+        key += (st.st_mtime_ns, st.st_size)
+    except (OSError, AttributeError):
+        # file missing / test fakes without file_path → no mtime guard
+        key += (0, 0)
+    cached = _low_cpk_cache.get(key)
+    if cached is not None:
+        return cached
+    work_df = filter_bin1_rows(df, metadata) if data_only_bin1 else df
+    result = set(compute_low_cpk_test_items(
+        work_df, metadata, threshold, iqr_multiplier=iqr_multiplier))
+    _low_cpk_cache[key] = result
+    return result
 
 
 class AnalysisViewSet(viewsets.GenericViewSet):
@@ -56,9 +90,37 @@ class AnalysisViewSet(viewsets.GenericViewSet):
             return Response({'error': err}, status=400)
 
         params = get_param_list(request,'params')
-        ignore_no_limit = str(get_param(request, 'ignore_no_limit', '')).lower() in ('true', '1', 'yes')
+        ignore_no_limit = get_bool_param(request, 'ignore_no_limit')
+        # Chart-config switches: two filter test items (param list level),
+        # one filters data rows (Bin1 only). Fail detection must run on the
+        # FULL frame — fail rows are never Bin1 — so it is precomputed
+        # before filter_bin1_rows narrows the frame.
+        ignore_no_test_value = get_bool_param(request, 'ignore_no_test_value')
+        data_only_bin1 = get_bool_param(request, 'data_only_bin1')
+        only_fail_test_item = get_bool_param(request, 'only_fail_test_item')
+        only_low_cpk = get_bool_param(request, 'only_low_cpk')
+        cpk_threshold = get_cpk_b_threshold(request.user)
+        # 低 CPK 判定跟随前端统计卡显示口径（有异常值即用 filtered CPK），
+        # iqr_multiplier 影响异常值集合，须与直方图计算一致。
+        iqr_multiplier = get_param_float(request, 'iqr_multiplier', 1.5)
+        df_full = df
 
         if not params:
+            # Fast path: fail set covers the full candidate list; the
+            # low-CPK set is cached per file (re-evaluating every column on
+            # each config toggle is the dominant filter-chain cost).
+            fail_items = None
+            if only_fail_test_item:
+                fail_items = set(calculate_fail_test_item_statistics(df_full, metadata).keys())
+            low_cpk_items = None
+            if only_low_cpk:
+                low_cpk_items = _cached_low_cpk_items(
+                    datafile, request.user.pk, df, metadata,
+                    cpk_threshold, iqr_multiplier, data_only_bin1)
+            # data_only_bin1 narrows the frame before the base param list is
+            # derived, so the list is consistent with the histogram stats.
+            if data_only_bin1:
+                df = filter_bin1_rows(df, metadata)
             # Exclude serial/site columns — they are metadata, not data params
             _meta_cols = set()
             _sc = get_serial_column(df)
@@ -73,6 +135,16 @@ class AnalysisViewSet(viewsets.GenericViewSet):
                 params = get_columns_with_limits(df, metadata)
             else:
                 params = numeric_cols
+            params = filter_test_items(
+                df, metadata, params,
+                ignore_no_test_value=ignore_no_test_value,
+                only_fail_test_item=only_fail_test_item,
+                only_low_cpk=only_low_cpk,
+                cpk_threshold=cpk_threshold,
+                fail_items=fail_items,
+                iqr_multiplier=iqr_multiplier,
+                low_cpk_items=low_cpk_items,
+            )
             # Some parsers (CTA8280F trailing comma) yield an unnamed column
             # whose empty string name passes the dtype check (all-NaN is float64)
             # but cannot be selected by users and would 400 the analysis endpoints.
@@ -89,11 +161,31 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         if ignore_no_limit:
             cols_with_limits = set(get_columns_with_limits(df, metadata))
             params = [p for p in params if p in cols_with_limits]
+        # Compute path: the fail set only needs the requested params (a
+        # param switch must not re-scan every column of the file).
+        fail_items = None
+        if only_fail_test_item:
+            fail_items = set(calculate_fail_test_item_statistics(
+                df_full, metadata, columns=params).keys())
+        # data_only_bin1 narrows the rows before any statistic is computed.
+        if data_only_bin1:
+            df = filter_bin1_rows(df, metadata)
+        # Defensive replay of the test-item switches so stale params the
+        # front end may still be holding (before the list refresh lands)
+        # cannot produce charts outside the configured scope.
+        params = filter_test_items(
+            df, metadata, params,
+            ignore_no_test_value=ignore_no_test_value,
+            only_fail_test_item=only_fail_test_item,
+            only_low_cpk=only_low_cpk,
+            cpk_threshold=cpk_threshold,
+            fail_items=fail_items,
+            iqr_multiplier=iqr_multiplier,
+        )
 
         range_type = get_param(request, 'range_type', 'RDL')
         custom_low = get_param_float(request, 'custom_low')
         custom_high = get_param_float(request, 'custom_high')
-        iqr_multiplier = get_param_float(request, 'iqr_multiplier', 1.5)
 
         results = {}
         site_col = get_site_column(df)
@@ -279,6 +371,10 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         chart_config_raw = get_param(request, 'chart_config', '[]')
         chart_config = chart_config_raw if isinstance(chart_config_raw, list) else json.loads(chart_config_raw)
         range_type = get_param(request, 'range_type', 'RDL')
+        # data_only_bin1 narrows the rows after param validation, so the
+        # per-unit serial series only contains pass-bin units.
+        if get_bool_param(request, 'data_only_bin1'):
+            df = filter_bin1_rows(df, metadata)
 
         try:
             result = compute_serial_distribution_data(

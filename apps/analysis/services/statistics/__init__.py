@@ -38,6 +38,16 @@ from .limits import (
     build_col_meta,
 )
 
+# ── filters ──────────────────────────────────────────────────────────
+from .filters import (
+    NO_TEST_VALUE_MIN_RATIO,
+    get_bin1_mask,
+    filter_bin1_rows,
+    has_enough_test_values,
+    compute_low_cpk_test_items,
+    filter_test_items,
+)
+
 # ── computations ─────────────────────────────────────────────────────
 from .computations import (
     compute_cpk,
@@ -89,6 +99,13 @@ __all__ = [
     'compute_pass_yield',
     'build_fail_mask',
     'build_col_meta',
+    # filters
+    'NO_TEST_VALUE_MIN_RATIO',
+    'get_bin1_mask',
+    'filter_bin1_rows',
+    'has_enough_test_values',
+    'compute_low_cpk_test_items',
+    'filter_test_items',
     # computations
     'compute_cpk',
     'compute_correlation_matrix',

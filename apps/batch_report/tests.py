@@ -375,3 +375,78 @@ class BatchYieldPhaseParsingTests(APITestCase):
             '阶段明细仍按 FT → RT → QA 排序',
         )
         self.assertEqual([p['stage'] for p in resp.data['phases']], ['FT', 'FT', 'FT'])
+
+
+class QaChecksApiTests(APITestCase):
+    """GET /api/v1/batch-report/batch_yield_data/ 的 QA 数量校验区块。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='qauser', password='pw')
+        self.client.force_authenticate(self.user)
+        self.batch = 'QABATCH'
+
+    def _fetch(self, batch_name=None):
+        return self.client.get(
+            f'/api/v1/batch-report/batch_yield_data/?batch_name={batch_name or self.batch}'
+        )
+
+    def test_qa_checks_with_seq_suffix_filenames(self):
+        """回归：EQC1-QA1-1/EQC1-QA2-1 序号格式（真实批次 R2607300057）应生成 QA 校验。
+
+        修复前 qa1 用 `re.match(r'^QA1(_|$)', ...)` 匹配不到 'QA1-1'，
+        qa_checks 恒为空 → 前端 QA 校验卡片不显示。
+        """
+        for fname in (
+            'C01Q_BE01-2607290004_BPD96128_H17G89_01#AAA3A12607290004_'
+            'EQC1-QA1-1_R2607300057_ETS001941_08052026.csv',
+            'C01Q_BE01-2607290004_BPD96128_H17G89_01#AAA3A12607290004_'
+            'EQC1-QA2-1_R2607300057_ETS011703_08052026.csv',
+        ):
+            DataFile.objects.create(
+                owner=self.user, filename=fname, file_path=SAMPLE_GAGE,
+                file_size=os.path.getsize(SAMPLE_GAGE), format_type='CTA8290D',
+                file_type='batch', batch_name=self.batch, status='ready',
+            )
+        resp = self._fetch()
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual([p['phase'] for p in resp.data['phases']], ['QA1-1', 'QA2-1'])
+        checks = resp.data['qa_checks']
+        self.assertEqual(len(checks), 1, 'QA1-1 + QA2-1 应生成一条 QA 校验')
+        check = checks[0]
+        self.assertEqual(check['check'], 'QA系列Pass总数 (QA1-1, QA2-1) ↔ QA1 Total')
+        qa1_total = next(p['total'] for p in resp.data['phases'] if p['phase'] == 'QA1-1')
+        qa_pass = sum(p['pass_count'] for p in resp.data['phases'])
+        self.assertEqual(check['expected'], str(qa1_total))
+        self.assertEqual(check['actual'], str(qa_pass))
+        self.assertIn(check['status'], ('✅ 一致', f'⚠️ 差异 {qa_pass - qa1_total} 颗'))
+
+    def test_qa_checks_with_plain_qa1(self):
+        """`_QA1_` 标准格式不受影响，仍生成 QA 校验。"""
+        for fname in (
+            'LOT_QAGROUP_QA1_20260726.csv',
+            'LOT_QAGROUP_QA2_20260726.csv',
+        ):
+            DataFile.objects.create(
+                owner=self.user, filename=fname, file_path=SAMPLE_GAGE,
+                file_size=os.path.getsize(SAMPLE_GAGE), format_type='CTA8290D',
+                file_type='batch', batch_name=self.batch, status='ready',
+            )
+        resp = self._fetch()
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.data['qa_checks']), 1)
+        self.assertEqual(
+            resp.data['qa_checks'][0]['check'],
+            'QA系列Pass总数 (QA1, QA2) ↔ QA1 Total',
+        )
+
+    def test_no_qa_checks_without_qa1(self):
+        """无 QA1 阶段文件（仅 QA2）→ 不生成 QA 校验。"""
+        DataFile.objects.create(
+            owner=self.user, filename='LOT_QAGROUP_QA2_20260726.csv',
+            file_path=SAMPLE_GAGE,
+            file_size=os.path.getsize(SAMPLE_GAGE), format_type='CTA8290D',
+            file_type='batch', batch_name=self.batch, status='ready',
+        )
+        resp = self._fetch()
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['qa_checks'], [])

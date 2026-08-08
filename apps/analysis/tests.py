@@ -449,3 +449,382 @@ class StaleParamAcrossFileSwitchTests(SimpleTestCase):
         self.assertEqual(body.get('error'), 'no_valid_params')
         self.assertEqual(body.get('missing'), ['__bogus__'])
 
+
+class CustomLimitCpkApiTests(SimpleTestCase):
+    """``POST /analysis/histogram/`` returns ``custom_cpk`` in CL mode.
+
+    CustomLimit acts as a user-supplied spec-limit override: with
+    ``range_type='CL'`` and both bounds provided, the response carries an
+    extra ``custom_cpk`` (computed against the custom bounds) alongside the
+    RDL-anchored ``cpk`` so the front-end can show before/after values.
+    Outside CL the three fields stay ``null``.
+    """
+
+    @staticmethod
+    def _patched_view(df, metadata):
+        """Monkey-patch ``_load_df_from_request`` so no DB/DataFile is needed."""
+        import types
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from apps.analysis.views import analysis_views
+
+        datafile = types.SimpleNamespace(
+            id=1, filename='fake.csv', format_type=metadata.get('format'),
+        )
+
+        def fake_load(request):
+            return df, datafile, metadata, None
+
+        original = getattr(analysis_views, '_load_df_from_request', None)
+        analysis_views._load_df_from_request = fake_load
+
+        def restore():
+            if original is not None:
+                analysis_views._load_df_from_request = original
+
+        return APIRequestFactory(), force_authenticate, restore
+
+    @staticmethod
+    def _authed_post(factory, force_authenticate, url, payload):
+        import types
+        request = factory.post(url, payload, format='json')
+        force_authenticate(request, user=types.SimpleNamespace(
+            pk=1, is_authenticated=True, is_active=True, is_anonymous=False,
+            is_staff=False, is_superuser=False,
+        ))
+        return request
+
+    @classmethod
+    def _df_meta(cls):
+        df = pd.DataFrame({'Param0': [10.4480, 10.4495, 10.4510, 10.4519,
+                                      10.4530, 10.4545, 10.4553]})
+        metadata = {'format': 'CTA8280F', 'mins': {'Param0': '8.0'},
+                    'maxs': {'Param0': '14.3'}, 'units': {'Param0': 'uA'}}
+        return df, metadata
+
+    def test_cl_mode_returns_custom_cpk(self):
+        """CL with custom bounds → custom_cpk present, differs from RDL cpk."""
+        from apps.analysis.views import AnalysisViewSet
+
+        df, metadata = self._df_meta()
+        factory, force_authenticate, restore = self._patched_view(df, metadata)
+        self.addCleanup(restore)
+
+        request = self._authed_post(factory, force_authenticate,
+                                    '/api/v1/analysis/histogram/', {
+            'file_id': 1, 'params': ['Param0'],
+            'range_type': 'CL', 'custom_low': 10.40, 'custom_high': 10.50,
+        })
+        view = AnalysisViewSet.as_view({'post': 'histogram'})
+        response = view(request)
+        response.render()
+
+        self.assertEqual(response.status_code, 200, response.content)
+        r = response.data['results']['Param0']
+        self.assertIsNotNone(r['custom_cpk'], 'custom_cpk must be computed in CL mode')
+        self.assertNotEqual(r['custom_cpk'], r['cpk'])
+        self.assertLess(r['custom_cpk'], r['cpk'])
+        self.assertIsNotNone(r['custom_cpk_level'])
+        self.assertIn(r['custom_cpk_color'],
+                      ('green', 'orange', 'darkorange', 'red', 'gray'))
+        # Custom bounds echoed back so the chart can draw the CL markLines.
+        self.assertEqual(r['custom_low'], 10.40)
+        self.assertEqual(r['custom_high'], 10.50)
+
+    def test_non_cl_mode_returns_null_custom_cpk(self):
+        """Outside CL the custom_cpk fields stay null."""
+        from apps.analysis.views import AnalysisViewSet
+
+        df, metadata = self._df_meta()
+        factory, force_authenticate, restore = self._patched_view(df, metadata)
+        self.addCleanup(restore)
+
+        request = self._authed_post(factory, force_authenticate,
+                                    '/api/v1/analysis/histogram/', {
+            'file_id': 1, 'params': ['Param0'],
+            'range_type': 'RDL',
+        })
+        view = AnalysisViewSet.as_view({'post': 'histogram'})
+        response = view(request)
+        response.render()
+
+        self.assertEqual(response.status_code, 200, response.content)
+        r = response.data['results']['Param0']
+        self.assertIsNone(r['custom_cpk'])
+        self.assertIsNone(r['custom_cpk_level'])
+        self.assertIsNone(r['custom_cpk_color'])
+        self.assertIsNone(r['custom_low'])
+        self.assertIsNone(r['custom_high'])
+
+
+def _num_peaks(y):
+    """Count strict local maxima (y[i] greater than both neighbours)."""
+    return sum(1 for i in range(1, len(y) - 1) if y[i] > y[i - 1] and y[i] > y[i + 1])
+
+
+class KdeCurveApiTests(SimpleTestCase):
+    """POST /analysis/histogram/ must return the non-parametric KDE curve.
+
+    The normal overlay cannot represent bimodal data; ``kde_curve`` (200
+    sampled points) lets the front-end draw a density curve that follows the
+    actual shape.  Pin both the presence and the bimodal shape semantics.
+    """
+
+    @classmethod
+    def _df_meta(cls, vals):
+        df = pd.DataFrame({'Param0': vals})
+        metadata = {'format': 'CTA8280F', 'mins': {'Param0': '8.0'},
+                    'maxs': {'Param0': '14.3'}, 'units': {'Param0': 'uA'}}
+        return df, metadata
+
+    def test_histogram_api_returns_kde_curve(self):
+        from apps.analysis.views import AnalysisViewSet
+
+        rng = np.random.default_rng(42)
+        df, metadata = self._df_meta(rng.normal(11.0, 0.8, 500).tolist())
+        factory, force_authenticate, restore = StaleParamAcrossFileSwitchTests._patched_view(df, metadata=metadata)
+        self.addCleanup(restore)
+
+        request = StaleParamAcrossFileSwitchTests._authed_post(
+            factory, force_authenticate, '/api/v1/analysis/histogram/', {
+                'file_id': 1, 'params': ['Param0'], 'range_type': 'RDL',
+            })
+        view = AnalysisViewSet.as_view({'post': 'histogram'})
+        response = view(request)
+        response.render()
+
+        self.assertEqual(response.status_code, 200, response.content)
+        r = response.data['results']['Param0']
+        curve = r['kde_curve']
+        self.assertIsNotNone(curve)
+        self.assertEqual(len(curve), 200)
+        self.assertGreater(max(p[1] for p in curve), 0)
+
+    def test_histogram_api_kde_curve_shows_two_peaks_for_bimodal(self):
+        from apps.analysis.views import AnalysisViewSet
+
+        rng = np.random.default_rng(42)
+        vals = np.concatenate([
+            rng.normal(9.5, 0.35, 300),
+            rng.normal(12.0, 0.35, 300),
+        ]).tolist()
+        df, metadata = self._df_meta(vals)
+        factory, force_authenticate, restore = StaleParamAcrossFileSwitchTests._patched_view(df, metadata=metadata)
+        self.addCleanup(restore)
+
+        request = StaleParamAcrossFileSwitchTests._authed_post(
+            factory, force_authenticate, '/api/v1/analysis/histogram/', {
+                'file_id': 1, 'params': ['Param0'], 'range_type': 'RDL',
+            })
+        view = AnalysisViewSet.as_view({'post': 'histogram'})
+        response = view(request)
+        response.render()
+
+        self.assertEqual(response.status_code, 200, response.content)
+        curve = response.data['results']['Param0']['kde_curve']
+        self.assertIsNotNone(curve)
+        self.assertEqual(_num_peaks([p[1] for p in curve]), 2)
+
+
+class ChartConfigFilterTests(SimpleTestCase):
+    """Chart-config switches on the analysis endpoints.
+
+    Locks down the four new switches — ignore_no_test_value /
+    data_only_bin1 / only_fail_test_item / only_low_cpk — on the
+    histogram fast path (param list), the histogram compute path,
+    site_stats and serial_distribution. Reuses the fake
+    ``_load_df_from_request`` harness from StaleParamAcrossFileSwitchTests
+    (no DB); the fake user has no ``settings`` attribute, which also pins
+    the ``get_cpk_b_threshold`` fallback path.
+    """
+
+    METADATA = {
+        'format': 'CTA8290D',
+        'mins': {'Param0': '8.0', 'Param1': '0.5', 'FailOnly': '8.0',
+                 'ParamBin1Empty': '8.0', 'ParamLowCpk': '8.0',
+                 'ParamHighCpk': '8.0', 'ParamMidCpk': '8.0',
+                 'ParamOutlierLow': '8.0'},
+        'maxs': {'Param0': '14.3', 'Param1': '3.5', 'FailOnly': '14.3',
+                 'ParamBin1Empty': '14.3', 'ParamLowCpk': '14.3',
+                 'ParamHighCpk': '14.3', 'ParamMidCpk': '14.3',
+                 'ParamOutlierLow': '14.3'},
+        'units': {'Param0': 'V', 'Param1': 'uA', 'FailOnly': 'V',
+                  'ParamBin1Empty': 'V', 'ParamLowCpk': 'V',
+                  'ParamHighCpk': 'V', 'ParamMidCpk': 'V',
+                  'ParamOutlierLow': 'V'},
+    }
+
+    def _frame(self):
+        """10 rows: pass-bin rows are 0,2,3,4,6,7,8,9; fail rows 1,5."""
+        return pd.DataFrame({
+            'serial': list(range(101, 111)),
+            'SW_Bin': [1, 2, 1, 1, 1, 2, 1, 1, 1, 1],
+            'Site': [1, 2, 1, 2, 1, 2, 1, 2, 1, 2],
+            'Param0': [10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9, 11.0],
+            'Param1': [1.9, 2.0, 2.05, 1.95, 2.1, 1.98, 2.02, 1.96, 2.04, 2.0],
+            # fail rows (1,5) exceed USL 14.3 → the only fail test item
+            'FailOnly': [10.1, 15.0, 10.3, 10.4, 10.5, 15.0, 10.7, 10.8, 10.9, 11.0],
+            'ParamAllNan': [np.nan] * 10,
+            # values exist only on fail rows → empty inside Bin1
+            'ParamBin1Empty': [np.nan, 10.1, np.nan, np.nan, np.nan,
+                               10.2, np.nan, np.nan, np.nan, np.nan],
+            # cpk ≈ 0.9 → low
+            'ParamLowCpk': [8.5, 8.6, 8.7, 8.8, 8.9, 8.4, 8.6, 8.8, 9.0, 9.2],
+            # cpk ≫ 1.33 → not low
+            'ParamHighCpk': [10.9, 11.0, 11.05, 11.0, 11.02, 11.03, 10.98, 11.01, 10.99, 11.0],
+            # cpk ≈ 1.43 → between 1.33 and 2.0, used for the settings test
+            'ParamMidCpk': [8.6, 8.66, 8.72, 8.78, 8.84, 8.96, 9.02, 9.08, 9.14, 9.2],
+            # 行 0（bin1）有 14.4 超 usl 14.3 的异常值：全量 CPK 低、filtered CPK 健康
+            'ParamOutlierLow': [14.4, 11.0, 11.05, 11.0, 11.02,
+                                11.0, 10.98, 11.01, 10.99, 11.0],
+            'ParamNoLimit': [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+        })
+
+    def _post(self, payload, user=None):
+        factory, force_authenticate, restore = \
+            StaleParamAcrossFileSwitchTests._patched_view(self._frame(), metadata=self.METADATA)
+        self.addCleanup(restore)
+        if user is None:
+            user = types.SimpleNamespace(
+                pk=1, is_authenticated=True, is_active=True, is_anonymous=False,
+                is_staff=False, is_superuser=False,
+            )
+        request = factory.post('/api/v1/analysis/histogram/', payload, format='json')
+        force_authenticate(request, user=user)
+        return request
+
+    # ── fast path (param list) ──────────────────────────────────────
+
+    def test_fast_path_default_list_keeps_sparse_but_skips_empty(self):
+        from apps.analysis.views import AnalysisViewSet
+        request = self._post({'file_id': 1})
+        resp = AnalysisViewSet.as_view({'post': 'histogram'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        keys = set(resp.data['results'].keys())
+        self.assertIn('ParamBin1Empty', keys)   # has values on fail rows
+        self.assertNotIn('ParamAllNan', keys)   # fully empty, always excluded
+
+    def test_fast_path_data_only_bin1_and_ignore_no_test_value(self):
+        from apps.analysis.views import AnalysisViewSet
+        request = self._post({'file_id': 1, 'data_only_bin1': True,
+                              'ignore_no_test_value': True})
+        resp = AnalysisViewSet.as_view({'post': 'histogram'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        keys = set(resp.data['results'].keys())
+        self.assertNotIn('ParamBin1Empty', keys)  # empty inside Bin1 → hidden
+        self.assertIn('Param0', keys)
+
+    def test_fast_path_only_fail_test_item(self):
+        from apps.analysis.views import AnalysisViewSet
+        request = self._post({'file_id': 1, 'only_fail_test_item': True})
+        resp = AnalysisViewSet.as_view({'post': 'histogram'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(set(resp.data['results'].keys()), {'FailOnly'})
+
+    def test_fast_path_only_low_cpk_default_threshold(self):
+        """Fake user has no settings row → fallback 1.33, no crash."""
+        from apps.analysis.views import AnalysisViewSet
+        request = self._post({'file_id': 1, 'only_low_cpk': True})
+        resp = AnalysisViewSet.as_view({'post': 'histogram'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(set(resp.data['results'].keys()), {'ParamLowCpk'})
+        self.assertNotIn('ParamMidCpk', resp.data['results'])  # 1.43 > 1.33
+        # FailOnly 含超限异常值（15.0）→ filtered CPK 健康 → 不列入（显示口径）
+
+    def test_fast_path_only_low_cpk_uses_filtered_cpk(self):
+        """低 CPK 判定无条件跟随 CPK 卡显示口径：异常值拉低的参数不列入。
+
+        Regression: 用户反馈「3.1897 (filtered)」这种剔除异常值后 CPK 健康
+        的参数也被列入了低 CPK 列表。前端 CPK 卡总是优先显示 filtered_cpk
+        （与异常值处理开关无关），因此默认（无 outlier_handling 参数）时
+        也不能把 ParamOutlierLow（含 14.4 异常值、filtered 健康）列入。
+        """
+        from apps.analysis.views import AnalysisViewSet
+        request = self._post({'file_id': 1, 'only_low_cpk': True})
+        resp = AnalysisViewSet.as_view({'post': 'histogram'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertNotIn('ParamOutlierLow', resp.data['results'])
+        self.assertIn('ParamLowCpk', resp.data['results'])
+
+    def test_fast_path_only_low_cpk_reads_user_setting(self):
+        user = types.SimpleNamespace(
+            pk=1, is_authenticated=True, is_active=True, is_anonymous=False,
+            is_staff=False, is_superuser=False,
+            settings=types.SimpleNamespace(cpk_b_threshold=2.0),
+        )
+        from apps.analysis.views import AnalysisViewSet
+        request = self._post({'file_id': 1, 'only_low_cpk': True}, user=user)
+        resp = AnalysisViewSet.as_view({'post': 'histogram'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertIn('ParamMidCpk', resp.data['results'])  # 1.43 < 2.0
+
+    # ── compute path ────────────────────────────────────────────────
+
+    def test_compute_path_data_only_bin1_total_count(self):
+        from apps.analysis.views import AnalysisViewSet
+        request = self._post({'file_id': 1, 'params': ['Param0'],
+                              'data_only_bin1': True})
+        resp = AnalysisViewSet.as_view({'post': 'histogram'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.data['results']['Param0']['total_count'], 8)
+
+    def test_compute_path_only_fail_test_item_drops_non_fail(self):
+        from apps.analysis.views import AnalysisViewSet
+        request = self._post({'file_id': 1, 'params': ['FailOnly', 'Param1'],
+                              'only_fail_test_item': True})
+        resp = AnalysisViewSet.as_view({'post': 'histogram'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(set(resp.data['results'].keys()), {'FailOnly'})
+
+    # ── site_stats / serial_distribution ────────────────────────────
+
+    def test_site_stats_data_only_bin1_drops_bin2_site(self):
+        from apps.analysis.views import statistics_views, StatisticsViewSet
+        df = pd.DataFrame({
+            'serial': list(range(101, 111)),
+            'SW_Bin': [1, 1, 1, 1, 1, 2, 2, 2, 2, 2],
+            'Site': [1, 1, 1, 1, 1, 2, 2, 2, 2, 2],
+            'Param0': [10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9, 11.0],
+        })
+        factory, force_authenticate, restore = \
+            StaleParamAcrossFileSwitchTests._patched_view(df, metadata=self.METADATA)
+        self.addCleanup(restore)
+
+        request = factory.post('/api/v1/statistics/site_stats/', {
+            'file_id': 1, 'param': 'Param0', 'data_only_bin1': True,
+        }, format='json')
+        force_authenticate(request, user=types.SimpleNamespace(
+            pk=1, is_authenticated=True, is_active=True, is_anonymous=False,
+            is_staff=False, is_superuser=False))
+        resp = StatisticsViewSet.as_view({'post': 'site_stats'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        site_names = [s['Site'] for s in resp.data['site_data']]
+        self.assertEqual(site_names, ['Site1', 'ALL Site'])  # Site2 gone
+
+    def test_serial_distribution_data_only_bin1(self):
+        from apps.analysis.views import AnalysisViewSet
+        request = self._post({'file_id': 1, 'param': 'Param0',
+                              'data_only_bin1': True})
+        resp = AnalysisViewSet.as_view({'post': 'serial_distribution'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        total = sum(len(s['data']) for s in resp.data['series_data'])
+        self.assertEqual(total, 8)  # 10 rows − 2 fail rows
+
+    def test_serial_distribution_full_frame_keeps_all_points(self):
+        from apps.analysis.views import AnalysisViewSet
+        request = self._post({'file_id': 1, 'param': 'Param0'})
+        resp = AnalysisViewSet.as_view({'post': 'serial_distribution'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        total = sum(len(s['data']) for s in resp.data['series_data'])
+        self.assertEqual(total, 10)
+

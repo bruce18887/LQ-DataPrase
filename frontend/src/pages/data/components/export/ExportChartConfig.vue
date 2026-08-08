@@ -11,6 +11,7 @@
         <el-checkbox value="s4">4σ</el-checkbox>
         <el-checkbox value="s6">6σ</el-checkbox>
         <el-checkbox value="normal">正态分布</el-checkbox>
+        <el-checkbox value="kde">KDE曲线</el-checkbox>
       </el-checkbox-group>
 
       <div class="bar-width-group">

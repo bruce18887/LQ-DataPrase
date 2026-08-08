@@ -48,6 +48,9 @@ class UserSetting(models.Model):
     # Per-export-type filename templates: {export_type: template}
     # (keys/defaults in apps.common.export_naming.EXPORT_TEMPLATE_DEFAULTS)
     export_filename_templates = models.JSONField(default=dict, blank=True)
+    # 导出请求超时（秒）。前端所有 /export/ 调用统一读取此值设置 axios
+    # timeout（默认 600 与 DataBrowser 此前硬编码的 600000ms 一致）。
+    export_timeout = models.IntegerField(default=600)
 
     class Meta:
         db_table = 'accounts_user_setting'

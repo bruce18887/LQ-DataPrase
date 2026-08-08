@@ -78,6 +78,15 @@ function buildOption() {
   const normalMean = shouldClip && r.filtered_mean != null ? r.filtered_mean : r.mean
   const normalStd = shouldClip && r.filtered_std != null ? r.filtered_std : r.std
   const hasNormal = showNormal && normalStd > 0
+  const hasKde = props.chartConfig.includes('kde') && Array.isArray(r.kde_curve) && r.kde_curve.length > 1
+  // Density axes are independent: KDE gets its own purple axis on the far
+  // left, the normal curve keeps the original orange axis on the right.
+  // Base axes are the percent axis plus the optional All Site axis; axis
+  // indexes are assigned in build order (KDE first) so each series binds
+  // to its own axis and each axis only exists while its toggle is on.
+  const baseAxisCount = 1 + (hasSiteData ? 1 : 0)
+  const kdeAxisIdx = hasKde ? baseAxisCount : -1
+  const normalAxisIdx = hasNormal ? baseAxisCount + (hasKde ? 1 : 0) : -1
 
   if (hasSiteData) {
     const sites = siteKeys.sort((a, b) => Number(a) - Number(b))
@@ -113,6 +122,13 @@ function buildOption() {
       { xAxis: r.upper_limit, lineStyle: { color: '#C62828', width: 3, type: 'dashed' }, label: { show: true, formatter: 'USL', position: 'end' } },
     )
   }
+  // CL 模式：画出用户自定义规格限线（数据来自后端 result，与 LSL/USL 一致）
+  if (props.rangeType === 'CL' && r.custom_low != null && r.custom_high != null) {
+    mk.push(
+      { xAxis: r.custom_low, lineStyle: { color: '#43A047', width: 2, type: 'dashed' }, label: { show: true, formatter: 'CL Low', position: 'insideEndTop' } },
+      { xAxis: r.custom_high, lineStyle: { color: '#43A047', width: 2, type: 'dashed' }, label: { show: true, formatter: 'CL High', position: 'insideEndTop' } },
+    )
+  }
   if (props.chartConfig.includes('s3') && r.sigma3_min != null && r.sigma3_max != null) {
     mk.push(
       { xAxis: r.sigma3_min, lineStyle: { color: '#1565C0', width: 3, type: 'dotted' }, label: { show: true, formatter: '3σ下限', position: 'insideEndTop' } },
@@ -142,10 +158,14 @@ function buildOption() {
       for (let k = 1; k <= 6; k++) extra.push(normalMean - k * normalStd, normalMean + k * normalStd)
       xVals = [...filteredBinCenters, ...extra].sort((a, b) => a - b)
     } else { xVals = filteredBinCenters }
-    series.push({ name: '正态分布', type: 'line', data: xVals.map((x: number) => [x, pdfFn(x)]), smooth: true, lineStyle: { color: '#F57F17', width: 3 }, symbol: 'none', yAxisIndex: hasSiteData ? 2 : 1, z: 10 })
+    series.push({ name: '正态分布', type: 'line', data: xVals.map((x: number) => [x, pdfFn(x)]), smooth: true, lineStyle: { color: '#F57F17', width: 3 }, symbol: 'none', yAxisIndex: normalAxisIdx, z: 10 })
   }
 
-  const AXIS_COLOR_LEFT = '#1E88E5'; const AXIS_COLOR_ALLSITE = '#42A5F5'; const AXIS_COLOR_NORMAL = '#F57F17'
+  if (hasKde) {
+    series.push({ name: 'KDE曲线', type: 'line', data: r.kde_curve, smooth: true, lineStyle: { color: '#7B1FA2', width: 3 }, symbol: 'none', yAxisIndex: kdeAxisIdx, z: 10 })
+  }
+
+  const AXIS_COLOR_LEFT = '#1E88E5'; const AXIS_COLOR_ALLSITE = '#42A5F5'; const AXIS_COLOR_NORMAL = '#F57F17'; const AXIS_COLOR_KDE = '#7B1FA2'
   let leftYMax = 100
   if (hasSiteData) {
     let maxVal = 0
@@ -154,6 +174,7 @@ function buildOption() {
   }
   const yAxes: any[] = [{ type: 'value', name: '百分比 (%)', nameTextStyle: { color: AXIS_COLOR_LEFT, fontWeight: 'bold' }, position: 'left', min: 0, max: leftYMax, axisLabel: { formatter: '{value}%', color: AXIS_COLOR_LEFT }, axisLine: { show: true, lineStyle: { color: AXIS_COLOR_LEFT } } }]
   if (hasSiteData) yAxes.push({ type: 'value', name: 'All Site (%)', nameTextStyle: { color: AXIS_COLOR_ALLSITE, fontWeight: 'bold' }, position: 'right', min: 0, axisLabel: { formatter: '{value}%', color: AXIS_COLOR_ALLSITE }, axisLine: { show: true, lineStyle: { color: AXIS_COLOR_ALLSITE } }, splitLine: { show: false } })
+  if (hasKde) yAxes.push({ type: 'value', name: 'KDE密度', nameTextStyle: { color: AXIS_COLOR_KDE, fontWeight: 'bold' }, position: 'left', offset: 55, min: 0, axisLabel: { formatter: (v: number) => v.toExponential(2), color: AXIS_COLOR_KDE }, axisLine: { show: true, lineStyle: { color: AXIS_COLOR_KDE } }, splitLine: { show: false } })
   if (hasNormal) yAxes.push({ type: 'value', name: '概率密度', nameTextStyle: { color: AXIS_COLOR_NORMAL, fontWeight: 'bold' }, position: 'right', offset: hasSiteData ? 50 : 0, min: 0, axisLabel: { formatter: (v: number) => v.toExponential(2), color: AXIS_COLOR_NORMAL }, axisLine: { show: true, lineStyle: { color: AXIS_COLOR_NORMAL } }, splitLine: { show: false } })
 
   const unitStr = r.unit || ''
@@ -171,7 +192,7 @@ function buildOption() {
         const firstX = Array.isArray(first.data) ? first.data[0] : first.data.value?.[0]
         let html = `值: ${Number(firstX).toFixed(4)}<br/>`
         for (const p of items) {
-          if (p.seriesName === '规格限' || p.seriesName === '正态分布') continue
+          if (p.seriesName === '规格限' || p.seriesName === '正态分布' || p.seriesName === 'KDE曲线') continue
           const y = Array.isArray(p.data) ? p.data[1] : p.data.value?.[1]
           if (y != null) html += `${p.seriesName}: ${Number(y).toFixed(2)}%<br/>`
         }
@@ -180,7 +201,7 @@ function buildOption() {
     },
     legend: { data: series.map((s: any) => s.name), top: 'bottom', type: 'scroll', textStyle: { color: tc } },
     toolbox: { feature: { saveAsImage: { name: `${props.selectedParam}_分析` } } },
-    grid: { top: 55, bottom: 70, left: 55, right: (hasSiteData && hasNormal) ? 120 : (hasSiteData || hasNormal) ? 80 : 55 },
+    grid: { top: 55, bottom: 70, left: hasKde ? 110 : 55, right: (hasSiteData && hasNormal) ? 120 : (hasSiteData || hasNormal) ? 80 : 55 },
     xAxis: { type: 'value', name: '', nameLocation: 'middle', nameGap: 28, min: xAxisMin, max: xAxisMax, axisLabel: { rotate: 45, show: true, interval: 0, fontSize: 9, formatter: (v: number) => v.toFixed(4), color: tc }, splitNumber: 24 },
     yAxis: yAxes,
     series,

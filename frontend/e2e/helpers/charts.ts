@@ -15,6 +15,18 @@ export async function expectChartRendered(
 ) {
   const root = 'locator' in scope ? scope : scope
 
+  // 先轮询等待任一图表元素（svg/canvas）出现，再按实际渲染器断言。
+  // 一次性 count() 在图表尚未渲染完成时返回 0，会把 SVG 渲染器误判成
+  // canvas 分支并等满超时（时序竞态，flaky 根因）。
+  await expect
+    .poll(
+      async () =>
+        (await root.locator('svg').count()) +
+        (await root.locator('canvas').count()),
+      { timeout },
+    )
+    .toBeGreaterThanOrEqual(index + 1)
+
   // SVG 渲染：检测 svg 元素存在且有可见尺寸
   const svg = root.locator('svg').nth(index)
   const svgCount = await svg.count()

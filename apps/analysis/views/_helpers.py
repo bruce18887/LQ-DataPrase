@@ -6,6 +6,23 @@ import pandas as pd
 
 from apps.datafiles.models import DataFile
 from apps.datafiles.services import get_cached_parsed_file
+from apps.common.params import get_param
+
+
+def get_bool_param(request, key, default=False):
+    """Parse a boolean request param (JSON body or query string) with the
+    same 'true'/'1'/'yes' tolerance used across the analysis views."""
+    return str(get_param(request, key, '')).lower() in ('true', '1', 'yes')
+
+
+def get_cpk_b_threshold(user):
+    """Read the user's B-level CPK threshold (UserSetting.cpk_b_threshold),
+    falling back to 1.33 when the OneToOne settings row is missing or the
+    user object has no ``settings`` attribute (e.g. test fakes)."""
+    try:
+        return float(user.settings.cpk_b_threshold)
+    except Exception:
+        return 1.33
 
 
 def clean_data(data):
@@ -72,8 +89,12 @@ def _load_df_from_request(request):
         return None, None, None, 'file_not_found_or_parse_failed'
     if df is None:
         return None, None, None, 'file_not_found'
-    # Deduplicate columns to prevent DataFrame-vs-Series issues downstream
-    df = df.loc[:, ~df.columns.duplicated()]
+    # Deduplicate columns to prevent DataFrame-vs-Series issues downstream.
+    # Skip the full-table copy when there are no duplicates (the common
+    # case): a .loc copy of a 10k×188 frame costs ~100ms per request, and
+    # the analysis views never mutate the returned frame in place.
+    if df.columns.duplicated().any():
+        df = df.loc[:, ~df.columns.duplicated()]
     # Reconstruct datafile for the return contract (callers access .id etc.)
     datafile = DataFile.objects.filter(pk=file_id, owner=request.user).first()
     if datafile is None:
