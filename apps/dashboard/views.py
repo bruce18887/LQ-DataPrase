@@ -237,7 +237,7 @@ class DashboardSummaryView(APIView):
             if not os.path.exists(file_path):
                 return Response({'error': 'file_not_found'})
 
-            df, metadata, fmt = get_cached_parsed_file(datafile.id, request.user.pk)
+            df, metadata, fmt = get_cached_parsed_file(datafile.id, request.user.pk, datafile)
             if df is None:
                 return Response({'error': 'parse_failed'})
 

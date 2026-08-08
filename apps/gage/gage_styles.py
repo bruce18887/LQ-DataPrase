@@ -5,7 +5,7 @@ import excelize
 from apps.export.excelize_helpers import COLOR_BORDER, COLOR_FONT_DARK, COLOR_DATA_BG, COLOR_RED_BG
 
 # ── Constants ──
-NON_NUMERIC_KEYWORDS = ['min', 'max', 'lower limit', 'upper limit', 'n/a', 'na', '-', 'none']
+from apps.common.constants import NON_NUMERIC_KEYWORDS
 FILL_GRAY_HEX = "E0E0E0"
 FILL_LIGHT_BLUE_HEX = "D6EAF8"
 

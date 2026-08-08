@@ -132,8 +132,12 @@ onMounted(async () => {
 onActivated(async () => {
   await loadFiles()
   if (firstActivated) {
+    // 首次挂载由 onMounted 处理，避免双 onFileChange 覆盖跳转参数。
+    // 但 onMounted 时 loadFiles 可能静默失败（files 为空，选择流程未执行）：
+    // 保留标志，下次恢复落入正常分支重跑完整选择流程（loadedFileId 为空 → onFileChange）
+    if (files.value.length === 0) return
     firstActivated = false
-    return  // 首次挂载由 onMounted 处理，避免双 onFileChange 覆盖跳转参数
+    return
   }
 
   // 仪表板「测试项总览」跳转可能在本页 keep-alive 缓存期间改过 store，
@@ -167,7 +171,8 @@ onActivated(async () => {
 
 async function loadFiles() {
   try {
-    const { data } = await api.get('/files/')
+    // 分页会静默截断文件列表（默认 PAGE_SIZE=20），下拉将选不到旧文件
+    const { data } = await api.get('/files/', { params: { page_size: 9999 } })
     files.value = Array.isArray(data) ? data : data.results || []
   } catch {
     // silently fail

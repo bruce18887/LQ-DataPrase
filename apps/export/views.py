@@ -16,10 +16,11 @@ from apps.analysis.services.statistics import (
 )
 from .excelize_helpers import save_excelize
 from .excel_builders import (
-    build_to_excel_sheet, build_sigma_limit_sheet, build_batch_charts_xlsx,
+    build_sigma_limit_sheet,
 )
 from .export_ppt import build_batch_charts_pptx
-from .export_complete import export_to_xlsx_optimized, export_to_csv
+from .export_complete import export_to_xlsx_optimized
+from .export_csv import export_to_csv
 
 
 class ExportViewSet(viewsets.GenericViewSet):
@@ -84,14 +85,10 @@ class ExportViewSet(viewsets.GenericViewSet):
         except FileLoadError as e:
             return Response({'error': e.error_code}, status=400)
 
-        # Use old version's complete CSV export (simplified - no raw_lines support for now)
         csv_content = export_to_csv(
             df, metadata,
             site_filter=site_filter if site_filter != '全部' else None,
             passfail_filter=passfail if passfail != '全部' else None,
-            keep_header=False,  # Simplified for now
-            match_original_format=False,
-            raw_lines=None
         )
 
         fname = render_export_filename(

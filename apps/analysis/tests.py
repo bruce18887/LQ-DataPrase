@@ -859,7 +859,7 @@ class FileCorrelationCacheIsolationTests(SimpleTestCase):
             return types.SimpleNamespace(id=1, filename='fake.csv',
                                          format_type='CTA8290D')
 
-        def fake_load(fid, owner_id):
+        def fake_load(fid, owner_id, datafile=None):
             # 两个文件返回同一个缓存对象 —— 模拟 LRU 缓存真实行为
             return shared_df, metadata, 'CTA8290D'
 
@@ -933,6 +933,22 @@ class HistogramSigmaFieldTests(ChartConfigFilterTests):
         self.assertAlmostEqual(r['filtered_sigma6_max'],
                                r['filtered_mean'] + 6 * r['filtered_std'], places=6)
 
+    def test_filtered_cpk_level_and_color_returned_with_filtered_cpk(self):
+        from apps.analysis.views import AnalysisViewSet
+        request = self._post({'file_id': 1, 'params': ['ParamOutlierLow']})
+        resp = AnalysisViewSet.as_view({'post': 'histogram'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        r = resp.data['results']['ParamOutlierLow']
+        self.assertIsNotNone(r['filtered_cpk'])
+        # 评级标签与颜色与 CPK 卡显示格式一致（此前前端显示 '(filtered)' 丢评级）。
+        # ParamOutlierLow：含 14.4 异常值 → 全量 CPK 低（D级/red）；剔除后 ≈34 → A级/green
+        self.assertIsNotNone(r['filtered_cpk_level'])
+        self.assertIsNotNone(r['filtered_cpk_color'])
+        self.assertEqual(r['cpk_color'], 'red')
+        self.assertEqual(r['filtered_cpk_color'], 'green')
+        self.assertNotEqual(r['filtered_cpk_level'], r['cpk_level'])
+
     def test_no_outlier_param_returns_null_filtered_sigma(self):
         from apps.analysis.views import AnalysisViewSet
         request = self._post({'file_id': 1, 'params': ['Param0']})
@@ -995,3 +1011,55 @@ class ParamTrendPerFileLimitsTests(SimpleTestCase):
         self.assertGreater(out['trend_data'][1]['cpk'], 0.0)
         # 首个完整对来自文件 2
         self.assertEqual(out['limits']['lsl'], 9.0)
+
+
+class ComputeCpkSingleSidedTests(SimpleTestCase):
+    """compute_cpk 单边规格限：cp/pp 必须为 None（双侧才可定义），cpk/ppk 单侧可算。
+
+    回归：缺失侧以 -inf/+inf 传入时 cp = inf，破坏 JSON 序列化且语义错误。
+    """
+
+    def test_lower_only_limit(self):
+        from apps.analysis.services.statistics import compute_cpk
+        result = compute_cpk(10.0, 1.0, float('-inf'), 12.0)
+        self.assertIsNone(result['cp'])
+        self.assertIsNone(result['pp'])
+        self.assertEqual(result['cp_level'], 'N/A')
+        self.assertEqual(result['cp_color'], 'gray')
+        # 单侧能力 = (12-10)/(3*1) = 0.667
+        self.assertAlmostEqual(result['cpk'], 0.6667, places=3)
+        self.assertEqual(result['ppk'], result['cpk'])
+
+    def test_upper_only_limit(self):
+        from apps.analysis.services.statistics import compute_cpk
+        result = compute_cpk(10.0, 1.0, 8.0, float('inf'))
+        self.assertIsNone(result['cp'])
+        self.assertAlmostEqual(result['cpk'], 0.6667, places=3)
+
+    def test_both_limits_still_return_cp(self):
+        from apps.analysis.services.statistics import compute_cpk
+        result = compute_cpk(10.0, 1.0, 8.0, 12.0)
+        self.assertAlmostEqual(result['cp'], 0.6667, places=3)
+        self.assertIsNotNone(result['pp'])
+
+
+class FilterFiniteTests(SimpleTestCase):
+    """filter_finite：NaN/±inf 一步移除，等价于 dropna + inf 过滤。"""
+
+    def test_removes_nan_and_inf(self):
+        from apps.analysis.services.statistics import filter_finite
+        series = pd.Series([1.0, float('nan'), 2.0, float('inf'), 3.0, float('-inf')])
+        out = filter_finite(series)
+        self.assertEqual(out.tolist(), [1.0, 2.0, 3.0])
+
+    def test_index_preserved(self):
+        from apps.analysis.services.statistics import filter_finite
+        series = pd.Series([1.0, float('nan'), 2.0], index=['a', 'b', 'c'])
+        out = filter_finite(series)
+        self.assertEqual(out.index.tolist(), ['a', 'c'])
+
+    def test_non_numeric_coerced_to_nan(self):
+        from apps.analysis.services.statistics import filter_finite
+        series = pd.Series([1.0, 'x', 2.0])
+        out = filter_finite(series)
+        self.assertEqual(out.tolist(), [1.0, 2.0])

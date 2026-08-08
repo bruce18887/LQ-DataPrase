@@ -97,7 +97,7 @@ class BatchReportViewSet(viewsets.GenericViewSet):
         all_sites = set()
 
         for idx, df_obj in enumerate(files):
-            df, metadata, fmt = get_cached_parsed_file(df_obj.id, request.user.pk)
+            df, metadata, fmt = get_cached_parsed_file(df_obj.id, request.user.pk, df_obj)
             if df is None:
                 continue
 
@@ -326,7 +326,7 @@ class BatchReportViewSet(viewsets.GenericViewSet):
         phases = []
         for fid in file_ids:
             df_obj = DataFile.objects.get(pk=fid, owner=request.user)
-            df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk)
+            df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk, df_obj)
             if df is None:
                 continue
 

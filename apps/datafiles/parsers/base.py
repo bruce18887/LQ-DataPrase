@@ -8,7 +8,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-NON_NUMERIC_KEYWORDS = ['min', 'max', 'lower limit', 'upper limit', 'n/a', 'na', '-', 'none']
+from apps.common.constants import NON_NUMERIC_KEYWORDS
 
 class BaseATEParser(ABC):
     format_type: str = ''

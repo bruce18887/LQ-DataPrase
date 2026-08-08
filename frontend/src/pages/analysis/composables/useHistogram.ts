@@ -88,7 +88,8 @@ export function useHistogram(
         { label: 'CPK(Custom)', value: `${r.custom_cpk.toFixed(4)} (${r.custom_cpk_level})`, color: clrs.value[r.custom_cpk_color] ?? undefined },
       )
     } else {
-      cpkCards.push({ label: 'CPK', value: r.filtered_cpk != null ? `${r.filtered_cpk.toFixed(4)} (filtered)` : (r.cpk != null ? `${r.cpk.toFixed(4)} (${r.cpk_level})` : '-'), color: clrs.value[r.cpk_color] ?? undefined })
+      // filtered CPK 也带评级标签（后端 filtered_cpk_level/color），与其他卡片格式一致
+      cpkCards.push({ label: 'CPK', value: r.filtered_cpk != null ? `${r.filtered_cpk.toFixed(4)} (${r.filtered_cpk_level ?? 'filtered'})` : (r.cpk != null ? `${r.cpk.toFixed(4)} (${r.cpk_level})` : '-'), color: clrs.value[r.filtered_cpk_color ?? r.cpk_color] ?? undefined })
     }
     statCards.value = [
       { label: 'N', value: r.total_count?.toLocaleString() ?? '-' },

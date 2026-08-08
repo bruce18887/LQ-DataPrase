@@ -40,7 +40,7 @@ def load_user_file(request, file_id=None, *, check_exists=False):
         if not os.path.exists(datafile.file_path):
             raise FileLoadError('file_not_found')
 
-    df, metadata, fmt = get_cached_parsed_file(file_id, request.user.pk)
+    df, metadata, fmt = get_cached_parsed_file(file_id, request.user.pk, datafile)
     if df is None:
         raise FileLoadError('parse_failed')
 

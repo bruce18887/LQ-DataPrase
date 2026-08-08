@@ -59,24 +59,33 @@ def compute_cpk(mean_val: float, std_val: float, cpk_lower: Optional[float], cpk
             'ppk_color': "gray"
         }
 
-    # Cp: Process Capability (potential capability, ignores centering)
-    cp = (cpk_upper - cpk_lower) / (6 * std_val)
+    # 单边规格（缺失侧以 -inf/+inf 传入）：Cp 需要双侧规格才可定义 → None；
+    # Cpk/Ppk 单侧可算（缺失侧能力为 +inf，min 取有限侧）
+    one_sided = not math.isfinite(cpk_lower) or not math.isfinite(cpk_upper)
+
+    if one_sided:
+        cp = None
+        pp = None
+        cp_level = "N/A"
+        cp_color = "gray"
+        pp_level = "N/A"
+        pp_color = "gray"
+    else:
+        # Cp: Process Capability (potential capability, ignores centering)
+        cp = (cpk_upper - cpk_lower) / (6 * std_val)
+        pp = cp  # In this implementation, we use the same std for both
+        cp_level, cp_color = get_quality_level(cp)
+        pp_level, pp_color = get_quality_level(pp)
 
     # Cpk: Process Capability Index (actual capability, considers centering)
-    upper_cap = (cpk_upper - mean_val) / (3 * std_val)
-    lower_cap = (mean_val - cpk_lower) / (3 * std_val)
+    upper_cap = (cpk_upper - mean_val) / (3 * std_val) if math.isfinite(cpk_upper) else float('inf')
+    lower_cap = (mean_val - cpk_lower) / (3 * std_val) if math.isfinite(cpk_lower) else float('inf')
     cpk = min(upper_cap, lower_cap)
-
-    # Pp: Process Performance (same as Cp, but uses overall std in practice)
-    # For single dataset without subgroups, Pp ≈ Cp
-    pp = cp  # In this implementation, we use the same std for both
 
     # Ppk: Process Performance Index (same as Cpk, but uses overall std)
     ppk = cpk  # In this implementation, we use the same std for both
 
-    cp_level, cp_color = get_quality_level(cp)
     cpk_level, cpk_color = get_quality_level(cpk)
-    pp_level, pp_color = get_quality_level(pp)
     ppk_level, ppk_color = get_quality_level(ppk)
 
     return {

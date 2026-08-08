@@ -4,7 +4,7 @@ from typing import Optional, Dict, List, Tuple, Any
 
 import pandas as pd
 
-from .helpers import get_1d_from
+from .helpers import get_1d_from, site_sort_key
 from .limits import parse_limit_string
 
 
@@ -32,11 +32,6 @@ def compute_site_stats(site_series: pd.Series, site_index, lower_limit: float, u
 
     site_data_list = []
     # Sort site values: numeric first (sorted numerically), then string (sorted alphabetically)
-    def site_sort_key(s):
-        try:
-            return (0, float(s), '')
-        except (ValueError, TypeError):
-            return (1, 0, str(s))
 
     for site in sorted(totals.index, key=site_sort_key):
         total = int(totals.get(site, 0))

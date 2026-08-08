@@ -23,6 +23,8 @@ from .helpers import (
     get_1d_from,
     ensure_numeric,
     safe_gap,
+    filter_finite,
+    site_sort_key,
 )
 
 # ── limits ───────────────────────────────────────────────────────────
@@ -89,6 +91,8 @@ __all__ = [
     'get_1d_from',
     'ensure_numeric',
     'safe_gap',
+    'filter_finite',
+    'site_sort_key',
     # limits
     'get_columns_with_limits',
     'parse_limit_string',

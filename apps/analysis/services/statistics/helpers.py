@@ -5,9 +5,10 @@ Provides column lookup functions, data accessors, and basic numeric helpers
 used across the statistics sub-modules.
 """
 from typing import Optional, Dict, List, Tuple
+import numpy as np
 import pandas as pd
 
-NON_NUMERIC_KEYWORDS = ['min', 'max', 'lower limit', 'upper limit', 'n/a', 'na', '-', 'none']
+from apps.common.constants import NON_NUMERIC_KEYWORDS
 
 BIN_COLUMN_MAPPING = {
     'CTA8290D': 'SW_Bin',
@@ -70,6 +71,25 @@ def get_1d_from(df: pd.DataFrame, col: str) -> pd.Series:
     if isinstance(s, pd.DataFrame):
         s = s.iloc[:, 0]
     return s
+
+
+def filter_finite(series: pd.Series) -> pd.Series:
+    """移除 NaN 与 ±inf（向量化）。
+
+    等价于 ``pd.to_numeric(errors='coerce').dropna()`` 后再滤 inf，一步完成；
+    替代历史 ``series.apply(lambda x: abs(x) < float('inf'))`` 逐行模式
+    （依赖 NaN 比较语义且慢）。返回 Series（索引为原索引子集）。
+    """
+    clean = pd.to_numeric(series, errors='coerce')
+    return clean[np.isfinite(clean.values)]
+
+
+def site_sort_key(site_name):
+    """站点名排序：纯数字站点排前面（按数值），非数字按字符串。"""
+    try:
+        return (0, float(site_name), '')
+    except (ValueError, TypeError):
+        return (1, 0, str(site_name))
 
 
 def ensure_numeric(df: pd.DataFrame, col: str) -> pd.Series:

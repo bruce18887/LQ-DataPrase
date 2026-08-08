@@ -73,7 +73,7 @@ class DataBrowserView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        df, metadata, fmt = get_cached_parsed_file(datafile.id, request.user.pk)
+        df, metadata, fmt = get_cached_parsed_file(datafile.id, request.user.pk, datafile)
         if df is None:
             return Response({'error': 'parse_failed'}, status=400)
 

@@ -29,7 +29,7 @@ class BuyoffViewSet(viewsets.GenericViewSet):
         all_cols = []
         for fid in file_ids:
             df_obj = get_object_or_404(DataFile, pk=fid, owner=request.user)
-            df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk)
+            df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk, df_obj)
             if df is None:
                 continue
             numeric_cols = [c for c in df.columns if df[c].dtype in ('int64', 'float64')]
@@ -68,7 +68,7 @@ class BuyoffViewSet(viewsets.GenericViewSet):
         datasets = {}
         for fid in file_ids:
             df_obj = get_object_or_404(DataFile, pk=fid, owner=request.user)
-            df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk)
+            df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk, df_obj)
             if df is None:
                 continue
             if only_bin1:

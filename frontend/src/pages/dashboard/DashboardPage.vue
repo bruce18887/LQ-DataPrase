@@ -169,7 +169,7 @@ const topFailCount = computed(() => failTestItems.value[0]?.fail_count ?? 0)
 async function loadFiles() {
   filesLoading.value = true
   try {
-    const { data } = await api.get('/files/')
+    const { data } = await api.get('/files/', { params: { page_size: 9999 } })
     files.value = Array.isArray(data) ? data : data.results || []
   } catch {
     files.value = []

@@ -7,8 +7,10 @@
   届时须将渲染逻辑移入本模块。
 """
 
+import atexit
 import io
 import os
+import shutil
 import tempfile
 
 import numpy as np
@@ -16,8 +18,11 @@ import pandas as pd
 import matplotlib
 
 matplotlib.use('Agg')
-# 每个 worker 独立 matplotlib 配置目录，避免并发写 font cache 竞争
-os.environ['MPLCONFIGDIR'] = tempfile.mkdtemp(prefix='mpl_')
+# 每个 worker 独立 matplotlib 配置目录，避免并发写 font cache 竞争。
+# 进程退出时清理（Windows spawn 每次导出新建子进程，不清理会累积 mpl_* 目录）
+_MPL_CONFIG_DIR = tempfile.mkdtemp(prefix='mpl_')
+os.environ['MPLCONFIGDIR'] = _MPL_CONFIG_DIR
+atexit.register(shutil.rmtree, _MPL_CONFIG_DIR, ignore_errors=True)
 
 from apps.export.charts import _render_histogram_payload  # noqa: E402
 

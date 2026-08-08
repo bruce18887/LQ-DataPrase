@@ -11,6 +11,8 @@ from apps.analysis.services.statistics import (
     get_1d_from,
     get_site_column,
     safe_gap,
+    filter_finite,
+    site_sort_key,
 )
 from apps.analysis.services.statistics.outliers import detect_outliers_iqr
 from apps.analysis.services.limits import resolve_limits
@@ -58,8 +60,7 @@ def compute_histogram_stats(df, metadata, param, site_col,
     ``range_type == 'CL'`` and both are provided.
     ``iqr_multiplier`` controls outlier detection sensitivity (default 1.5).
     """
-    data_series = get_1d_from(df, param).dropna()
-    data_series = data_series[data_series.apply(lambda x: abs(x) < float('inf'))]
+    data_series = filter_finite(get_1d_from(df, param))
     if len(data_series) == 0:
         return None
 
@@ -92,6 +93,8 @@ def compute_histogram_stats(df, metadata, param, site_col,
 
     # Compute filtered statistics (excluding outliers)
     filtered_cpk = None
+    filtered_cpk_level = None
+    filtered_cpk_color = None
     filtered_mean = None
     filtered_std = None
     filtered_data_min = None
@@ -125,6 +128,8 @@ def compute_histogram_stats(df, metadata, param, site_col,
                     stats['rdl'][0], stats['rdl'][1]
                 )
                 filtered_cpk = round(filtered_cpk_result['cpk'], 4)
+                filtered_cpk_level = filtered_cpk_result['cpk_level']
+                filtered_cpk_color = filtered_cpk_result['cpk_color']
 
     site_data = None
     site_idx = None
@@ -196,12 +201,6 @@ def compute_histogram_stats(df, metadata, param, site_col,
         site_histograms = {}
         site_idx_aligned = site_idx[data_series.index]
 
-        def site_sort_key(s):
-            try:
-                return (0, float(s), '')
-            except (ValueError, TypeError):
-                return (1, 0, str(s))
-
         for site in sorted(site_idx_aligned.unique(), key=site_sort_key):
             mask = (site_idx_aligned == site).values \
                 if hasattr(site_idx_aligned, 'values') \
@@ -223,9 +222,9 @@ def compute_histogram_stats(df, metadata, param, site_col,
         'unit': stats['unit'],
         'lower_limit': round(stats['rdl'][0], 6),
         'upper_limit': round(stats['rdl'][1], 6),
-        'cp': round(cpk_result['cp'], 4),
+        'cp': round(cpk_result['cp'], 4) if cpk_result['cp'] is not None else None,
         'cpk': round(cpk_result['cpk'], 4),
-        'pp': round(cpk_result['pp'], 4),
+        'pp': round(cpk_result['pp'], 4) if cpk_result['pp'] is not None else None,
         'ppk': round(cpk_result['ppk'], 4),
         'cp_level': cpk_result['cp_level'],
         'cpk_level': cpk_result['cpk_level'],
@@ -251,6 +250,8 @@ def compute_histogram_stats(df, metadata, param, site_col,
         'total_count': len(data_series),
         'outlier_info': outlier_info,
         'filtered_cpk': filtered_cpk,
+        'filtered_cpk_level': filtered_cpk_level,
+        'filtered_cpk_color': filtered_cpk_color,
         'filtered_mean': filtered_mean,
         'filtered_std': filtered_std,
         'filtered_data_min': filtered_data_min,

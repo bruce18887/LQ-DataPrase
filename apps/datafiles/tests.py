@@ -521,7 +521,9 @@ class ParseCacheInvalidationTests(TestCase):
         self.tmp = tempfile.mkdtemp(prefix='parse_cache_test_')
         self.good_path = os.path.join(self.tmp, 'good.csv')
         with open(self.good_path, 'w') as f:
-            f.write('col1,col2\n1,2\n3,4\n')
+            # 合法的 CTA8290D 格式：marker + 表头/单位/下限/上限 4 行 + 数据行
+            # （此前 fixture 缺 [Data] 标记，解析器返回 None，测试恒失败）
+            f.write('[Data]\ncol1,col2\nu1,u2\n1,2\n2,1\n1,2\n3,4\n')
         self.bad_path = os.path.join(self.tmp, 'bad.csv')
         with open(self.bad_path, 'w') as f:
             f.write('not a real data file')
@@ -573,7 +575,7 @@ class ParseCacheInvalidationTests(TestCase):
         # Replace the on-disk file contents in place -- mtime_ns changes,
         # which changes the cache key, which forces a re-parse.
         with open(self.good_path, 'w') as f:
-            f.write('col1,col2\n99,98\n')
+            f.write('[Data]\ncol1,col2\nu1,u2\n1,2\n2,1\n99,98\n')
         # Also bump mtime explicitly to defeat coarse-grained FS mtime
         # resolution (Windows defaults to 100-ns FAT granularity, but
         # two writes within the same tick would still differ at ns).
