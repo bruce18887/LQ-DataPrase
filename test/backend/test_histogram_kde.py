@@ -5,11 +5,14 @@ The normal distribution overlay is a poor fit for non-normal / bimodal data
 returns a non-parametric Gaussian KDE curve sampled over the binning range;
 these tests pin its shape semantics:
 
-  - unimodal data → single peak, 200 points inside the bin range;
+  - unimodal data → single peak, 200 points spanning the full visible
+    axis (underflow bin center to overflow bin center — i.e. one gap
+    beyond the binning range, so the overlay also covers fail-region
+    bars outside the spec limits);
   - bimodal data (two overlapping gaussians) → two distinct local maxima;
   - degenerate input (< 3 samples, zero variance) → ``kde_curve`` is None,
     never a crash;
-  - CL mode → curve spans the user-supplied custom range.
+  - CL mode → curve spans the user-supplied custom range ± one gap.
 
 Run directly:  python test/backend/test_histogram_kde.py
 """
@@ -58,10 +61,14 @@ def test_unimodal_data_single_peak():
     curve = r['kde_curve']
     assert curve is not None
     assert len(curve) == 200, len(curve)
-    # Curve spans the RDL binning range; density is non-negative and the
-    # tails (far from the data) may legitimately round to 0.0 at 6 decimals.
+    # Curve spans the full visible axis: underflow bin center (bin_min - gap)
+    # to overflow bin center (bin_max + gap) — it must extend past the spec
+    # limits so the fail-region bars outside them are covered too. Density is
+    # non-negative and the tails (far from the data) may legitimately round
+    # to 0.0 at 6 decimals.
+    gap = (14.3 - 8.0) / 20
     xs = _xs(curve)
-    assert min(xs) >= 8.0 and max(xs) <= 14.3, (min(xs), max(xs))
+    assert min(xs) == round(8.0 - gap, 6) and max(xs) == round(14.3 + gap, 6), (min(xs), max(xs))
     assert all(p[1] >= 0 for p in curve)
     assert max(p[1] for p in curve) > 0
     # A single gaussian → exactly one local maximum.
@@ -86,9 +93,15 @@ def test_bimodal_data_two_peaks():
 
 
 def test_tight_data_still_yields_curve():
-    """Small-but-valid samples (7 points, span ~0.007) still produce a curve."""
+    """Small-but-valid samples (7 points, span ~0.007) still produce a curve.
+
+    Uses the DR (data range) range: with RDL the grid spacing (~0.035) is
+    ~5x the data span, so no sampled point lands inside the cluster and the
+    density underflows to 0.0 at 6 decimals regardless of the code being
+    correct — asserting ``max > 0`` there only pins grid-alignment luck.
+    """
     vals = [10.4480, 10.4495, 10.4510, 10.4519, 10.4530, 10.4545, 10.4553]
-    r = compute_histogram_stats(_df(vals), METADATA, PARAM, None, range_type='RDL')
+    r = compute_histogram_stats(_df(vals), METADATA, PARAM, None, range_type='DR')
     curve = r['kde_curve']
     assert curve is not None
     assert len(curve) == 200
@@ -115,8 +128,9 @@ def test_cl_mode_curve_spans_custom_range():
     curve = r['kde_curve']
     assert curve is not None
     xs = _xs(curve)
-    assert min(xs) == 9.0 and max(xs) == 13.0, (min(xs), max(xs))
-    print('CL: curve spans [9.0, 13.0] OK')
+    gap = (13.0 - 9.0) / 20
+    assert min(xs) == round(9.0 - gap, 6) and max(xs) == round(13.0 + gap, 6), (min(xs), max(xs))
+    print('CL: curve spans [8.8, 13.2] OK')
 
 
 if __name__ == '__main__':

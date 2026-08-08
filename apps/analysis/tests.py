@@ -600,6 +600,12 @@ class KdeCurveApiTests(SimpleTestCase):
         self.assertGreater(max(p[1] for p in curve), 0)
         # 干净数据无离群值：裁剪口径曲线应缺席（前端回退到全量曲线）
         self.assertIsNone(r['filtered_kde_curve'])
+        # 曲线覆盖整个可见轴（下溢/上溢 bin 中心）——RDL 模式下越过规格限线，
+        # 限外 fail 数据在溢出 bin 有柱子，曲线必须覆盖同一区域（回归：曲线
+        # 曾止步于 [bin_min, bin_max]，在 LSL/USL 线处截断）
+        gap = (14.3 - 8.0) / 20
+        self.assertAlmostEqual(curve[0][0], 8.0 - gap, places=4)
+        self.assertAlmostEqual(curve[-1][0], 14.3 + gap, places=4)
 
     def test_histogram_api_kde_curve_split_all_vs_filtered(self):
         """离群数据下 KDE 曲线双口径：全量与 IQR 裁剪各一份且不同。
