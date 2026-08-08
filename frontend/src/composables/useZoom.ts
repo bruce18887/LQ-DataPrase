@@ -25,7 +25,10 @@ const INDICATOR_HIDE_DELAY = 800
 const zoom = ref(1)
 const showIndicator = ref(false)
 let indicatorTimer: ReturnType<typeof setTimeout> | null = null
-let initialized = false
+// 调用方引用计数：首个挂载者负责初始化/绑定全局监听，最后一个卸载者才解绑。
+// 不能用布尔 initialized —— ZoomIndicator（v-if 随气泡显示短暂挂载）卸载时
+// 会把仍挂载的 App.vue 的全局监听误删，导致缩放功能永久失效。
+let refCount = 0
 
 function clampZoom(value: number): number {
   return Math.min(Math.max(value, MIN_ZOOM), MAX_ZOOM)
@@ -116,18 +119,19 @@ export function useZoom() {
   }
 
   onMounted(() => {
-    // 仅首个调用者（App.vue）负责初始化与事件绑定，ZoomIndicator 等后续
-    // 调用者只消费单例状态，避免 wheel 监听重复导致一次滚动缩放两次
-    if (initialized) return
-    initialized = true
+    // 仅首个挂载的调用者（App.vue）负责初始化与事件绑定，后续调用者
+    // （ZoomIndicator 等）只消费单例状态，避免 wheel 监听重复导致一次
+    // 滚动缩放两次
+    if (refCount++ > 0) return
     initZoom()
     window.addEventListener('wheel', onWheel, { passive: false })
     window.addEventListener('keydown', onKeyDown)
   })
 
   onUnmounted(() => {
-    if (!initialized) return
-    initialized = false
+    // 引用计数归零（所有调用者都卸载）才解绑；App.vue 常驻，全局监听
+    // 在其生命周期内始终有效
+    if (--refCount > 0) return
     window.removeEventListener('wheel', onWheel)
     window.removeEventListener('keydown', onKeyDown)
   })

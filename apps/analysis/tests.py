@@ -828,3 +828,66 @@ class ChartConfigFilterTests(SimpleTestCase):
         total = sum(len(s['data']) for s in resp.data['series_data'])
         self.assertEqual(total, 10)
 
+
+
+class FileCorrelationCacheIsolationTests(SimpleTestCase):
+    """file_correlation 端点不得污染 LRU 解析缓存。
+
+    回归：file_correlation 曾对 ``get_cached_parsed_file`` 返回的缓存
+    DataFrame 原地添加 ``__serial__`` 辅助列，违反缓存"只读"不变量，
+    导致后续 browse/histogram/export 请求同一文件时出现幽灵列。
+    修复：写列前 ``df = df.copy()``。
+    """
+
+    def test_shared_cache_df_not_mutated_by_file_correlation(self):
+        import types
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from apps.analysis.views import analysis_views
+
+        shared_df = pd.DataFrame({
+            'Serial_No': [1, 2, 3],
+            'ParamA': [1.0, 2.0, 3.0],
+            'ParamB': [4.0, 5.0, 6.0],
+        })
+        metadata = {'format': 'CTA8290D', 'mins': {}, 'maxs': {}, 'units': {}}
+
+        orig_404 = analysis_views.get_object_or_404
+        orig_load = analysis_views.get_cached_parsed_file
+        orig_serial = analysis_views.get_serial_column
+
+        def fake_404(model, *args, **kwargs):
+            return types.SimpleNamespace(id=1, filename='fake.csv',
+                                         format_type='CTA8290D')
+
+        def fake_load(fid, owner_id):
+            # 两个文件返回同一个缓存对象 —— 模拟 LRU 缓存真实行为
+            return shared_df, metadata, 'CTA8290D'
+
+        analysis_views.get_object_or_404 = fake_404
+        analysis_views.get_cached_parsed_file = fake_load
+        analysis_views.get_serial_column = lambda df: 'Serial_No'
+        self.addCleanup(lambda: setattr(analysis_views, 'get_object_or_404', orig_404))
+        self.addCleanup(lambda: setattr(analysis_views, 'get_cached_parsed_file', orig_load))
+        self.addCleanup(lambda: setattr(analysis_views, 'get_serial_column', orig_serial))
+
+        factory = APIRequestFactory()
+        request = factory.post('/api/v1/analysis/file_correlation/', {
+            'file1_id': 1, 'file2_id': 2,
+        }, format='json')
+        force_authenticate(request, user=types.SimpleNamespace(
+            pk=1, is_authenticated=True, is_active=True, is_anonymous=False,
+            is_staff=False, is_superuser=False,
+        ))
+
+        from apps.analysis.views import AnalysisViewSet
+        view = AnalysisViewSet.as_view({'post': 'file_correlation'})
+        response = view(request)
+        response.render()
+
+        self.assertEqual(response.status_code, 200, response.content)
+        # 缓存对象不允许被端点改写
+        self.assertNotIn('__serial__', shared_df.columns)
+        # 端点自身逻辑仍可用（3 个共同序列号被匹配；Serial_No 为 int64
+        # 数值列，与 ParamA/ParamB 一起计入公共参数）
+        self.assertEqual(response.data['common_serials'], 3)
+        self.assertEqual(response.data['common_params'], 3)

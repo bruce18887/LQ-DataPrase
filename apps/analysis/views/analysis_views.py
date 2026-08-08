@@ -492,6 +492,9 @@ class AnalysisViewSet(viewsets.GenericViewSet):
                 continue
             serial_col = get_serial_column(df)
             if serial_col:
+                # get_cached_parsed_file 返回 LRU 缓存对象（文档明示只读），
+                # 必须 copy 后再加辅助列，否则污染缓存影响后续所有消费者
+                df = df.copy()
                 df['__serial__'] = pd.to_numeric(df[serial_col], errors='coerce')
             dfs[label] = {'df': df, 'metadata': metadata, 'serial': serial_col}
 
