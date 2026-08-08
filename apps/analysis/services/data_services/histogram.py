@@ -26,6 +26,9 @@ def compute_kde_curve(data_series, bin_min, bin_max, n_points=200):
     bimodal / multimodal / skewed shapes (common when sites or process
     populations mix).  Returns ``None`` for degenerate input (< 3 samples,
     zero variance, failed fit) so the front-end simply skips the overlay.
+    Caller passes the full visible axis range (underflow/overflow bin
+    centers included), so the overlay also covers the fail-region bars
+    outside the spec limits.
     """
     vals = data_series.astype(float)
     if len(vals) < 3 or np.ptp(vals) == 0:
@@ -165,21 +168,28 @@ def compute_histogram_stats(df, metadata, param, site_col,
         bin_max += 0.5
     data_gap = safe_gap(bin_min, bin_max)
 
+    # 曲线采样范围与柱子/坐标轴一致：下溢 bin 中心（bin_min - gap）到上溢
+    # bin 中心（bin_max + gap）。此前只采 [bin_min, bin_max]——RDL 模式下恰为
+    # 规格限区间，曲线止步于 LSL/USL 线，而限外 fail 数据在溢出 bin 有柱子
+    # （fail bin 着色），同一张图曲线与柱子覆盖区域不一致。
+    curve_min = bin_min - data_gap
+    curve_max = bin_max + data_gap
+
     # KDE 曲线：全量口径（kde_curve）与 IQR 裁剪口径（filtered_kde_curve）
     # 各一份，前端按异常值处理开关选择——与 normal_curve/filtered_normal_curve
     # 同构，曲线永远与柱形同源（off 模式柱是全量、clip 模式柱是 IQR 界内）。
     # 裁剪口径与 filtered_mean/std 同源（同一个 normal_data，IQR fence 已扩展
     # 至规格限，故规格限内数据任何模式下都进曲线）。
-    kde_curve = compute_kde_curve(data_series, bin_min, bin_max)
+    kde_curve = compute_kde_curve(data_series, curve_min, curve_max)
     filtered_kde_curve = None
     if normal_data is not None and len(normal_data) > 1:
-        filtered_kde_curve = compute_kde_curve(normal_data, bin_min, bin_max)
+        filtered_kde_curve = compute_kde_curve(normal_data, curve_min, curve_max)
 
-    # 正态 PDF 曲线（与 KDE 同采样区间 [bin_min, bin_max]）：raw 与裁剪口径
-    # 各一份，前端按异常值处理开关选择——公式单一来源 normal_pdf_curve
-    normal_curve = normal_pdf_curve(stats['mean'], stats['std'], bin_min, bin_max)
+    # 正态 PDF 曲线（与 KDE 同采样区间 [curve_min, curve_max]）：raw 与裁剪
+    # 口径各一份，前端按异常值处理开关选择——公式单一来源 normal_pdf_curve
+    normal_curve = normal_pdf_curve(stats['mean'], stats['std'], curve_min, curve_max)
     if filtered_std is not None and filtered_std > 0:
-        filtered_normal_curve = normal_pdf_curve(filtered_mean, filtered_std, bin_min, bin_max)
+        filtered_normal_curve = normal_pdf_curve(filtered_mean, filtered_std, curve_min, curve_max)
 
     # Build bin edges with underflow (-inf) and overflow (+inf) bins.
     # 25 inner edges create 24 normal bins that exactly cover
