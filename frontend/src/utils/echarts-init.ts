@@ -64,7 +64,9 @@ export function initEchartsWhenReady(
     if (disposed) return true
     if (!hasSize(container)) return false
     if (chart) {
-      chart.setOption(option, { notMerge: true, lazyUpdate: true })
+      // 同步 setOption：lazyUpdate 会让旧元素多存活一帧，鼠标命中陈旧元素会触发
+      // "[ECharts] model or view can not be found by params"（与 useChart 保持一致）
+      chart.setOption(option, { notMerge: true })
       return true
     }
     if (reuse) {
@@ -78,7 +80,7 @@ export function initEchartsWhenReady(
         return false
       }
     }
-    chart.setOption(option, { notMerge: true, lazyUpdate: true })
+    chart.setOption(option, { notMerge: true })
     return true
   }
 

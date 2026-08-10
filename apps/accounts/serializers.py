@@ -53,7 +53,7 @@ class UserSettingSerializer(serializers.ModelSerializer):
         fields = [
             'page_size', 'chart_height', 'table_height', 'chart_dpi',
             'cpk_a_threshold', 'cpk_b_threshold', 'cpk_c_threshold',
-            'chart_engine', 'aggrid_header_font_size',
+            'chart_engine', 'chart_renderer', 'aggrid_header_font_size',
             'recent_files', 'max_recent_files', 'histogram_label_offset',
             'export_filename_templates',
             'export_timeout',
@@ -82,6 +82,11 @@ class UserSettingSerializer(serializers.ModelSerializer):
     def validate_export_timeout(self, value):
         if not isinstance(value, int) or not 30 <= value <= 3600:
             raise serializers.ValidationError('导出超时必须在 30-3600 秒之间')
+        return value
+
+    def validate_chart_renderer(self, value):
+        if value not in ('svg', 'canvas'):
+            raise serializers.ValidationError('图表渲染器必须为 svg 或 canvas')
         return value
 
 

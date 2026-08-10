@@ -70,6 +70,9 @@ class UserSetting(models.Model):
     # 导出请求超时（秒）。前端所有 /export/ 调用统一读取此值设置 axios
     # timeout（默认 600 与 DataBrowser 此前硬编码的 600000ms 一致）。
     export_timeout = models.IntegerField(default=600)
+    # ECharts 渲染器：'svg' | 'canvas'（前端 echarts-theme.ts 启动时读取）。
+    # 曾缺失该字段——保存时 DRF 静默丢弃未知键，刷新后回退默认值。
+    chart_renderer = models.CharField(max_length=20, default='svg')
 
     class Meta:
         db_table = 'accounts_user_setting'

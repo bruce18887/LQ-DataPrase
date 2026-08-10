@@ -203,10 +203,14 @@ def compute_histogram_stats(df, metadata, param, site_col,
 
     total_count = len(data_series)
     hist_counts, _ = np.histogram(data_series.dropna(), bins=all_bins)
+    # 6 位小数保精度：1/50000 = 0.002% 若 round 到 2 位会归零，前端柱高为 0
+    # 看不到 fail bin（回归：tiny-fail-bar）。count==0 时保持 0.0。
     bin_percentages = [
-        round(c / total_count * 100, 2) if total_count > 0 else 0
+        round(c / total_count * 100, 6) if total_count > 0 else 0.0
         for c in hist_counts
     ]
+    # 原始计数随响应下发（与 bin_centers 对齐），tooltip 显示数量
+    bin_counts = [int(c) for c in hist_counts]
 
     site_histograms = None
     if site_col and site_idx is not None and len(site_idx.unique()) >= 1:
@@ -229,8 +233,9 @@ def compute_histogram_stats(df, metadata, param, site_col,
             if len(vals) > 0:
                 site_hist, _ = np.histogram(vals, bins=all_bins)
                 # Use total_count (all sites) as denominator, matching Excel
+                # 6 位小数保精度，与 bin_percentages 同口径（小百分比不归零）
                 site_histograms[str(site)] = [
-                    round(c / total_count * 100, 2) if total_count > 0 else 0
+                    round(c / total_count * 100, 6) if total_count > 0 else 0.0
                     for c in site_hist
                 ]
 
@@ -264,6 +269,7 @@ def compute_histogram_stats(df, metadata, param, site_col,
         'site_histograms': site_histograms,
         'bin_centers': [round(c, 6) for c in bin_centers],
         'bin_percentages': bin_percentages,
+        'bin_counts': bin_counts,
         'kde_curve': kde_curve,
         'filtered_kde_curve': filtered_kde_curve,
         'normal_curve': normal_curve,

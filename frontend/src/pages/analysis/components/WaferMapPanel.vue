@@ -28,6 +28,17 @@
       </el-col>
     </el-row>
 
+    <!-- 缺坐标列等错误：展示提示而非静默空白 -->
+    <el-alert
+      v-if="waferError"
+      :title="waferError"
+      type="error"
+      show-icon
+      :closable="false"
+      class="wafer-error-alert"
+      style="margin-bottom: 12px"
+    />
+
     <!-- 良率统计卡片 -->
     <el-row v-if="waferData" :gutter="12" style="margin-bottom: 12px">
       <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-secondary)">Total Dies</div><div style="font-size: 18px; font-weight: bold">{{ waferData.stats?.total ?? '-' }}</div></el-card></el-col>
@@ -55,7 +66,7 @@ import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
 import { analysisApi } from '../../../api/analysis'
 
-const props = defineProps<{ params: string[]; loading: boolean; waferData: any; fileId?: number }>()
+const props = defineProps<{ params: string[]; loading: boolean; waferData: any; waferError?: string | null; fileId?: number }>()
 const emit = defineEmits<{ load: [param: string, colorBy: string]; loadGlobal: [colorBy: string] }>()
 const { colors } = useEChartsTheme()
 

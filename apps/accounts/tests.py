@@ -400,3 +400,22 @@ class UserSettingsApiTests(APITestCase):
     def test_put_export_timeout_non_integer_returns_400(self):
         resp = self.client.put(self.url, {'export_timeout': 'abc'}, format='json')
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_get_settings_returns_default_chart_renderer(self):
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['chart_renderer'], 'svg')
+
+    def test_put_updates_chart_renderer_and_round_trips(self):
+        resp = self.client.put(
+            self.url, {'chart_renderer': 'canvas'}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.data['chart_renderer'], 'canvas')
+        # 恢复默认，避免污染其它测试
+        self.client.put(self.url, {'chart_renderer': 'svg'}, format='json')
+
+    def test_put_invalid_chart_renderer_returns_400(self):
+        resp = self.client.put(
+            self.url, {'chart_renderer': 'webgl'}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)

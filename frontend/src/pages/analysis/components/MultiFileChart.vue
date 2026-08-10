@@ -5,6 +5,7 @@
 <script setup lang="ts">
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
+import { clampBarValue, formatPercent } from '../../../utils/chart-bar'
 
 const props = defineProps<{
   /** /analysis/multi_lot/ 带 param 的响应 */
@@ -54,7 +55,8 @@ function buildOption() {
     series.push({
       name: dn,
       type: 'bar',
-      data: lot.bar_data,
+      // 小百分比（如 0.002%）钳制到最小可见柱高，真实值存 data[2] 供 tooltip/标签
+      data: lot.bar_data.map((d: number[]) => [d[0], clampBarValue(d[1]), d[1]]),
       itemStyle: { color: lot.color },
       barWidth: `${props.barWidthPercent}%`,
       barGap: '10%',
@@ -62,8 +64,8 @@ function buildOption() {
         show: true,
         position: 'top',
         formatter: (params: any) => {
-          const value = params.data?.[1]
-          return value > 0 ? `${value.toFixed(2)}%` : ''
+          const real = params.data?.[2] ?? params.data?.[1]
+          return real > 0 ? `${formatPercent(real)}%` : ''
         },
         fontSize: 10,
         color: lot.color,
@@ -197,7 +199,9 @@ function buildOption() {
         let html = `值: ${Number(items[0].data?.[0]).toFixed(4)}<br/>`
         for (const p of items) {
           if (p.data && p.data[1] != null && p.seriesType === 'bar') {
-            html += `${p.seriesName}: ${Number(p.data[1]).toFixed(2)}%<br/>`
+            // data[1] 是钳制后的渲染值，data[2] 才是真实百分比
+            const real = p.data[2] ?? p.data[1]
+            html += `${p.seriesName}: ${formatPercent(Number(real))}%<br/>`
           }
         }
         return html

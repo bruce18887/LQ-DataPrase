@@ -237,8 +237,9 @@ def compute_multi_lot_distribution(datasets, all_series, param,
         series = pre['series']  # Use cleaned series
         idx = pre['idx']
         hist, _ = np.histogram(series, bins=all_bins)
+        # 6 位小数保精度：小占比 bin 不归零（回归：tiny-fail-bar）
         pcts = [
-            round(c / len(series) * 100, 2) if len(series) > 0 else 0
+            round(c / len(series) * 100, 6) if len(series) > 0 else 0.0
             for c in hist
         ]
         bar_data = [[bin_centers[i], pcts[i]] for i in range(bin_count)]

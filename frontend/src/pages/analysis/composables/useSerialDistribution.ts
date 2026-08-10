@@ -13,7 +13,7 @@ export function useSerialDistribution(
   /** 仅用 Pass 数据(Bin1)：序列点只保留 pass-bin 行 */
   dataOnlyBin1?: Ref<boolean>,
 ) {
-  const { data: serialDistData, run } = useAsyncData<any>({ silent: true })
+  const { data: serialDistData, error: serialError, run } = useAsyncData<any>({ silent: true })
 
   async function loadSerialDistribution() {
     const fileId = getSelectedFileId()
@@ -34,5 +34,5 @@ export function useSerialDistribution(
   watch(localSelectedParam, () => { if (chartMode.value === 'serial') loadSerialDistribution() })
   if (dataOnlyBin1) watch(dataOnlyBin1, () => { if (chartMode.value === 'serial') loadSerialDistribution() })
 
-  return { serialDistData, loadSerialDistribution }
+  return { serialDistData, serialError, loadSerialDistribution }
 }

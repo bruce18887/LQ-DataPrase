@@ -5,6 +5,10 @@ import { gotoApp } from '../helpers/nav'
  * 系统设置页（/settings）— 左侧竖排标签页布局（SettingsPage.vue）。
  * 仅需登录态（项目级注入 admin storageState，不清空）。
  * 关键交互：加载设置（GET /auth/settings/）、保存（PUT /auth/settings/）、恢复默认（ElMessageBox 确认）。
+ *
+ * 注意：admin storageState 共享 + 设置持久化，修改渲染器设置的用例必须在
+ * finally 中恢复默认 svg（restoreChartRenderer 只 PUT 单字段）——否则
+ * canvas 会泄漏到依赖 SVG 断言的 analysis 用例（multi-file/kde-curve 等）。
  */
 
 const TABS = [
@@ -18,6 +22,20 @@ const TABS = [
 
 async function clickTab(page: import('@playwright/test').Page, label: string) {
   await page.getByRole('tab', { name: label }).click()
+}
+
+/** 恢复渲染器为默认 svg（只 PUT 单字段，不触碰其它设置） */
+async function restoreChartRenderer(page: import('@playwright/test').Page) {
+  await page.evaluate(async () => {
+    await fetch('/api/v1/auth/settings/', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+      },
+      body: JSON.stringify({ chart_renderer: 'svg' }),
+    })
+  })
 }
 
 test.describe('@p1 系统设置页', { tag: ['@p1', '@settings'] }, () => {
@@ -71,6 +89,42 @@ test.describe('@p1 系统设置页', { tag: ['@p1', '@settings'] }, () => {
 
     // 成功 ElMessage — 限定 .el-message 避免命中标题/按钮文本
     await expect(page.locator('.el-message').filter({ hasText: /保存|成功/ })).toBeVisible()
+  })
+
+  test('渲染器保存持久化：改为 Canvas → 保存 → 后端回显 canvas；结束后恢复 SVG', async ({ page }) => {
+    try {
+      // 先注册 GET 等待再导航，确保 loadSettings 完成后才交互（避免慢响应覆盖点击）
+      const getResp = page.waitForResponse(
+        (resp) => /\/auth\/settings\//.test(resp.url()) && resp.request().method() === 'GET',
+      )
+      await gotoApp(page, '/settings')
+      await getResp
+
+      // 显示设置 tab 为默认激活；el-radio 的 input 视觉隐藏，
+      // 点击 label 文本触发选中，用 toBeChecked 断言状态（属性级，不要求可见）
+      await page.getByText(/Canvas（大数据量时性能更好）/).click()
+      await expect(page.getByRole('radio', { name: /Canvas/ })).toBeChecked()
+
+      // 保存并断言后端回显 canvas —— 回归断言：旧后端缺少该字段，
+      // PUT 静默丢弃未知键、响应无 chart_renderer，刷新后回退 SVG。
+      // predicate 用 postData 过滤请求体，避免并行 project（Edge/P1）捕获
+      // 对方实例的 PUT（含 finally 里的 svg 恢复）。
+      const [response] = await Promise.all([
+        page.waitForResponse((resp) => {
+          const isPut = /\/auth\/settings\//.test(resp.url()) && resp.request().method() === 'PUT'
+          return isPut && resp.request().postData()?.includes('"chart_renderer":"canvas"')
+        }),
+        page.getByRole('button', { name: '💾 保存设置' }).click(),
+      ])
+      expect(response.status()).toBe(200)
+      const body = (await response.json()) as Record<string, unknown>
+      expect(body.chart_renderer).toBe('canvas')
+      await expect(page.locator('.el-message').filter({ hasText: /保存|成功/ })).toBeVisible()
+      // 同一页面内 UI 仍为选中态
+      await expect(page.getByRole('radio', { name: /Canvas/ })).toBeChecked()
+    } finally {
+      await restoreChartRenderer(page)
+    }
   })
 })
 
