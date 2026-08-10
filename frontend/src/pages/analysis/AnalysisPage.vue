@@ -60,6 +60,7 @@
           :params="params"
           :loading="loading"
           :wafer-data="waferData"
+          :wafer-error="waferError"
           :file-id="selectedFileId ?? undefined"
           @load="loadWafer"
           @load-global="loadWaferGlobal"
@@ -85,6 +86,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onActivated, watch } from 'vue'
 import api from '../../api'
+import { formatError } from '../../utils/error'
 import { useAnalysisStore } from '../../stores/analysis'
 import SingleParamTab from './components/SingleParamTab.vue'
 import CircularProgress from '../../components/common/CircularProgress.vue'
@@ -107,6 +109,7 @@ watch(iqrMultiplier, (val) => { analysisStore.iqrMultiplier = val })
 
 // Wafer state
 const waferData = ref<any>(null)
+const waferError = ref<string | null>(null)
 
 // Track whether we've loaded params for the current file
 const loadedFileId = ref<number | null>(null)
@@ -207,6 +210,8 @@ async function onFileChange() {
   // / no_valid_params) and 500 (histogram: KeyError) responses.
   params.value = []
   selectedParam.value = ''
+  waferError.value = null
+  waferData.value = null
   // Also clear the persisted store value so a remount of the page
   // (e.g. navigating away and back) does not restore the stale param.
   analysisStore.selectedParam = ''
@@ -242,6 +247,7 @@ async function onFileChange() {
 }
 
 // ========== Wafer ==========
+// 晶圆图错误提示：缺坐标列等 400 由 axios 抛错进入 catch，不再静默空白
 async function loadWafer(param: string, colorBy: string) {
   if (!selectedFileId.value) return
   loading.value = true
@@ -249,9 +255,15 @@ async function loadWafer(param: string, colorBy: string) {
     const payload: any = { file_id: selectedFileId.value, color_by: colorBy }
     if (param) payload.param = param
     const { data } = await api.post('/analysis/wafer_map/', payload)
-    if (!data.error) waferData.value = data
-  } catch {
-    // silently fail
+    if (data.error) {
+      // 防御旧后端 200 错误载荷
+      waferError.value = formatError({ response: { data } })
+    } else {
+      waferData.value = data
+      waferError.value = null
+    }
+  } catch (e) {
+    waferError.value = formatError(e)
   } finally {
     loading.value = false
   }
@@ -266,9 +278,15 @@ async function loadWaferGlobal(colorBy: string) {
       global_judgment: true,
       color_by: colorBy,
     })
-    if (!data.error) waferData.value = data
-  } catch {
-    // silently fail
+    if (data.error) {
+      // 防御旧后端 200 错误载荷
+      waferError.value = formatError({ response: { data } })
+    } else {
+      waferData.value = data
+      waferError.value = null
+    }
+  } catch (e) {
+    waferError.value = formatError(e)
   } finally {
     loading.value = false
   }

@@ -108,7 +108,8 @@ def compute_test_item_overview(df, metadata, fail_stats):
             'cpk': None, 'cpk_level': None, 'cpk_color': None,
             'unit': metadata.get('units', {}).get(param, ''),
             'fail_count': int(fail_stats.get(param, {}).get('fail_count', 0)),
-            'percentage': round(float(fail_stats.get(param, {}).get('percentage', 0.0)), 2),
+            # 透传 limits 已保 6 位小数的值，不再二次 round(…, 2)（0.002% 会被再吞一次）
+            'percentage': float(fail_stats.get(param, {}).get('percentage', 0.0)),
         }
 
         if is_limit_param:

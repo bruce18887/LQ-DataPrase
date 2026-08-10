@@ -236,7 +236,11 @@ class AnalysisViewSet(viewsets.GenericViewSet):
 
         x_col, y_col = get_coord_columns(df)
         if not x_col or not y_col:
-            return Response({'error': 'no_coord_columns'})
+            # 400 而非 200：让前端 axios 错误路径弹出提示，避免晶圆图静默空白
+            return Response({
+                'error': 'no_coord_columns',
+                'detail': '该文件没有坐标列（X_COORD/Y_COORD），无法绘制晶圆图',
+            }, status=400)
 
         param = get_param(request, 'param')
         color_by = get_param(request, 'color_by', 'result')
@@ -382,7 +386,11 @@ class AnalysisViewSet(viewsets.GenericViewSet):
             return Response({'error': 'serial_distribution_failed',
                              'detail': '数据列存在重复或格式异常'}, status=400)
         if result is None:
-            return Response({'error': 'no_serial_column'})
+            # 400 而非 200：让前端 axios 错误路径弹出提示，避免序列图静默空白
+            return Response({
+                'error': 'no_serial_column',
+                'detail': '该文件没有序列号列（Serial_No），无法绘制序列分布图',
+            }, status=400)
 
         return Response(clean_data(result))
 

@@ -83,12 +83,16 @@ def detect_fail_data(df: pd.DataFrame, metadata: Dict, ignore_no_limit: bool = T
 
     if target_bin_col in df.columns:
         fail_bin_indices = df.index[fail_row_mask].tolist()
+        # 用集合做去重：每行都重建 set(fail_indices) 是 O(n²)，
+        # 10 万行全 fail 时把整次分析拖到数分钟（回归：tiny-fail-bar）
+        seen_fail_indices = set(fail_indices)
         for idx in fail_bin_indices:
             if idx not in fail_cells:
                 fail_cells[idx] = []
             if target_bin_col not in fail_cells[idx]:
                 fail_cells[idx].append(target_bin_col)
-            if idx not in set(fail_indices):
+            if idx not in seen_fail_indices:
+                seen_fail_indices.add(idx)
                 fail_indices.append(idx)
 
     return fail_indices, fail_columns, fail_cells
@@ -107,7 +111,8 @@ def calculate_fail_bin_statistics(df: pd.DataFrame, metadata: Dict) -> Dict:
     result = {}
     for bin_value, count in bin_counts.items():
         percentage = (count / total_count * 100) if total_count > 0 else 0.0
-        result[bin_value] = {'count': int(count), 'percentage': round(percentage, 2)}
+        # 6 位小数：1/50000 = 0.002% 不因 round(…, 2) 归零（回归：tiny-fail-bar）
+        result[bin_value] = {'count': int(count), 'percentage': round(percentage, 6)}
 
     return result
 
@@ -149,7 +154,8 @@ def compute_pass_yield(bin_stats: dict, total_rows: int) -> dict:
         if is_pass_bin(bin_value):
             pass_count += info.get('count', 0)
     fail_count = total_rows - pass_count
-    yield_pct = round((pass_count / total_rows * 100), 2) if total_rows > 0 else 0.0
+    # 6 位小数：49999/50000 = 99.998 不显示成误导性的 100.0（0.002% fail 被吞）
+    yield_pct = round((pass_count / total_rows * 100), 6) if total_rows > 0 else 0.0
     return {'pass_count': pass_count, 'fail_count': fail_count, 'yield_pct': yield_pct}
 
 
@@ -219,6 +225,7 @@ def calculate_fail_test_item_statistics(df: pd.DataFrame, metadata: Dict, ignore
     result = {}
     for test_item, fail_count in test_item_fail_count.items():
         percentage = (fail_count / total_fail_count * 100) if total_fail_count > 0 else 0.0
-        result[test_item] = {'fail_count': int(fail_count), 'percentage': round(percentage, 2)}
+        # 6 位小数：占 fail 总数极小份额的测试项不归零（回归：tiny-fail-bar）
+        result[test_item] = {'fail_count': int(fail_count), 'percentage': round(percentage, 6)}
 
     return dict(sorted(result.items(), key=lambda x: x[1]['fail_count'], reverse=True))

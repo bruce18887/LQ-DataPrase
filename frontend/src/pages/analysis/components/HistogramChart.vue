@@ -11,6 +11,7 @@
 <script setup lang="ts">
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
+import { clampBarValue, formatPercent } from '../../../utils/chart-bar'
 import OutlierHintBar from './OutlierHintBar.vue'
 
 const props = defineProps<{
@@ -25,12 +26,21 @@ const props = defineProps<{
 const { colors } = useEChartsTheme()
 const COLORS_SITE_8 = ['#E53935', '#1E88E5', '#43A047', '#F9A825', '#8E24AA', '#00ACC1', '#F57C00', '#D81B60']
 
+/**
+ * 柱数据 [x, 渲染值, 真实值, 计数]：非零小百分比（如 0.002%）钳制到最小
+ * 可见柱高（clampBarValue），真实值存 data[2] 供 tooltip/标签显示，data[3]
+ * 为可选计数（bin_counts，仅 数据分布/All Site 系列传入，与百分比同源）。
+ */
 function buildBarData(
   activeIndices: number[],
   binCenters: number[],
   values: number[],
+  counts?: number[],
 ): number[][] {
-  return activeIndices.map((i: number) => [binCenters[i], values[i] ?? 0])
+  return activeIndices.map((i: number) => {
+    const v = values[i] ?? 0
+    return [binCenters[i], clampBarValue(v), v, counts?.[i] ?? 0]
+  })
 }
 
 function buildOption() {
@@ -112,14 +122,14 @@ function buildOption() {
     }
     series.push({
       name: 'All Site', type: 'bar', yAxisIndex: 1,
-      data: buildBarData(activeIndices, binCenters, r.bin_percentages || []),
+      data: buildBarData(activeIndices, binCenters, r.bin_percentages || [], r.bin_counts),
       itemStyle: { color: '#90CAF9', opacity: 0.5 }, barWidth: `${props.barWidthPercent}%`,
-      label: { show: true, position: 'top', formatter: (p: any) => p.data[1] > 0 ? `${p.data[1].toFixed(2)}%` : '', fontSize: 10, color: '#1565C0', fontWeight: 'bold' },
+      label: { show: true, position: 'top', formatter: (p: any) => { const real = p.data[2] ?? p.data[1]; return real > 0 ? `${formatPercent(real)}%` : '' }, fontSize: 10, color: '#1565C0', fontWeight: 'bold' },
     })
   } else {
     series.push({
       name: '数据分布', type: 'bar',
-      data: buildBarData(activeIndices, binCenters, r.bin_percentages || []),
+      data: buildBarData(activeIndices, binCenters, r.bin_percentages || [], r.bin_counts),
       itemStyle: { color: '#1E88E5' }, barWidth: `${props.barWidthPercent}%`,
     })
   }
@@ -203,8 +213,14 @@ function buildOption() {
         let html = `值: ${Number(firstX).toFixed(4)}<br/>`
         for (const p of items) {
           if (p.seriesName === '规格限' || p.seriesName === '正态分布' || p.seriesName === 'KDE曲线') continue
-          const y = Array.isArray(p.data) ? p.data[1] : p.data.value?.[1]
-          if (y != null) html += `${p.seriesName}: ${Number(y).toFixed(2)}%<br/>`
+          // 柱系列 data[1] 是钳制后的渲染值，data[2] 才是真实百分比；
+          // data[3] 为该 bin 计数（0 表示无计数数据）
+          const raw = Array.isArray(p.data) ? p.data : p.data.value
+          const y = raw?.[2] ?? raw?.[1]
+          if (y != null) {
+            const count = raw?.[3] ? `（n=${raw[3]}）` : ''
+            html += `${p.seriesName}: ${formatPercent(Number(y))}%${count}<br/>`
+          }
         }
         return html
       },

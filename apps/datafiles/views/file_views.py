@@ -6,6 +6,7 @@ import time
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -29,9 +30,25 @@ from ._helpers import (
 )
 
 
+class DataFilePagination(PageNumberPagination):
+    """PageNumberPagination that honors the ``page_size`` query param.
+
+    The DRF default pagination class ignores ``page_size`` (its
+    ``page_size_query_param`` is None), so front-end "load all" calls
+    (``?page_size=9999`` for file dropdowns / dashboards) were silently
+    truncated to PAGE_SIZE=20 — the analysis dropdown showed 20 files while
+    the data-management table counted all of them.  ``max_page_size`` keeps
+    the param bounded so a huge value cannot balloon the response.
+    """
+
+    page_size_query_param = 'page_size'
+    max_page_size = 10000
+
+
 class DataFileViewSet(viewsets.ModelViewSet):
     serializer_class = DataFileSerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = DataFilePagination
     search_fields = ['filename', 'batch_name', 'program_name']
     filterset_fields = ['product_code', 'format_type', 'file_type']
     ordering_fields = ['created_at', 'source_mtime', 'filename', 'file_size']

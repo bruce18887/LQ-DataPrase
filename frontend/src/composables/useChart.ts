@@ -54,7 +54,27 @@ export function useChart<T = echarts.EChartsOption>(
     if (disposed || !chartInstance.value) return
     try {
       const option = buildOption() as unknown as echarts.EChartsOption
-      chartInstance.value.setOption(option, { notMerge: true, lazyUpdate: true })
+      // notMerge 全量替换会清掉用户点击图例的交互状态（legend.selected）——
+      // 从旧 option 读「用户隐藏的 series 名」，按仍存在于新 legend.data 的名字回填
+      // selected（只注入 false 项，缺省即显示；名字消失/新增自动按名字匹配，语义与
+      // ECharts merge 一致）。无图例或用户未交互时 prevSelected 为空，行为零变化。
+      const prevLegend = chartInstance.value.getOption()?.legend
+      const prevSelected = (Array.isArray(prevLegend) ? prevLegend[0] : prevLegend)?.selected
+      const legend = option.legend as { data?: unknown[]; selected?: Record<string, boolean> } | undefined
+      if (prevSelected && legend && Array.isArray(legend.data)) {
+        const names = new Set(
+          legend.data.map((d: any) => (typeof d === 'string' ? d : d?.name)).filter(Boolean),
+        )
+        const hidden = Object.entries(prevSelected as Record<string, boolean>)
+          .filter(([name, v]) => v === false && names.has(name))
+          .map(([name]) => name)
+        if (hidden.length) legend.selected = Object.fromEntries(hidden.map((n) => [n, false]))
+      }
+      // 同步 setOption（不用 lazyUpdate）：lazyUpdate 会把旧 series 元素的移除推迟到下一帧，
+      // 该窗口内鼠标事件命中陈旧散点（其 seriesIndex 已不在新模型，如晶圆图站点模式→按结果
+      // 切换）会触发 ECharts "[ECharts] model or view can not be found by params" 警告。
+      // 批量语义不受影响：ResizeObserver 回调已按帧 coalesce（resizeRaf），Vue watcher 按 tick 批处理。
+      chartInstance.value.setOption(option, { notMerge: true })
     } catch (err) {
       // Swallow ECharts errors that originate from empty/invalid options during
       // mount/unmount cycles — they can otherwise bubble up through Vue's

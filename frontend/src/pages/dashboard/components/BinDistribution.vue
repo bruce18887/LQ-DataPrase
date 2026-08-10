@@ -14,9 +14,16 @@
             </template>
           </el-table-column>
           <el-table-column prop="value" label="数量" width="80" align="right" sortable />
-          <el-table-column prop="pct" label="占比" width="120" align="center">
+          <el-table-column prop="pct" label="占比" width="130" align="center">
             <template #default="{ row }">
-              <el-progress :percentage="Number(row.pct)" :color="row.name.includes('1') ? '#059669' : '#dc2626'" :stroke-width="12" />
+              <!-- 进度条宽度 = 百分比值，0.001% 是亚像素不可见 → 保底最小宽度
+                   (MIN_BAR_HEIGHT_PCT)，文字用 format 显示真实占比 -->
+              <el-progress
+                :percentage="Math.max(Number(row.pct), MIN_BAR_HEIGHT_PCT)"
+                :format="() => `${formatPercent(Number(row.pct))}%`"
+                :color="row.name.includes('1') ? '#059669' : '#dc2626'"
+                :stroke-width="12"
+              />
             </template>
           </el-table-column>
         </el-table>
@@ -29,6 +36,7 @@
 import { ref, computed, watch, nextTick, onMounted, onActivated, onBeforeUnmount } from 'vue'
 import { initEchartsWhenReady, type EchartsHandle } from '../../../utils/echarts-init'
 import { useThemeStore } from '../../../stores/theme'
+import { formatPercent, MIN_BAR_HEIGHT_PCT } from '../../../utils/chart-bar'
 
 const themeStore = useThemeStore()
 
@@ -45,7 +53,8 @@ const binPieTableData = computed(() => {
   return pieData.map(item => ({
     name: item.name,
     value: item.value,
-    pct: total > 0 ? ((item.value / total) * 100).toFixed(1) : '0.0',
+    // 保留全精度数值（不再 toFixed(1)：0.001% 会被截成 "0.0"），显示交给 formatPercent
+    pct: total > 0 ? (item.value / total) * 100 : 0,
   }))
 })
 

@@ -81,12 +81,13 @@ def compute_bin_trend(file_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
         # Calculate percentages
         for bin_name, bin_info in bin_stats.items():
             count = bin_info.get('count', 0)
-            percentage = round((count / total_count * 100), 2) if total_count > 0 else 0.0
+            # 6 位小数保精度：小占比 bin 不归零（回归：tiny-fail-bar）
+            percentage = round((count / total_count * 100), 6) if total_count > 0 else 0.0
             bin_percentages[bin_name] = percentage
             all_bins.add(bin_name)
 
         # Calculate yield
-        yield_val = round((pass_count / total_count * 100), 2) if total_count > 0 else 0.0
+        yield_val = round((pass_count / total_count * 100), 6) if total_count > 0 else 0.0
 
         files_info.append({
             'file_id': file_id,
