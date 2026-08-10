@@ -5,13 +5,15 @@ import { uiLogin, loginAs, logout } from '../helpers/auth'
 // 认证用例从“未登录”开始，覆盖掉项目级注入的 admin storageState
 test.use({ storageState: { cookies: [], origins: [] } })
 
-test.describe('@p0 认证与路由守卫', { tag: ['@p0', '@p1', '@p2', '@auth'] }, () => {
-  test('未登录访问受保护路由 → 跳转 /login', async ({ page }) => {
+// describe 只挂模块 tag，优先级由各用例标题的 @pN 前缀承担
+// （Playwright grep 匹配完整标题，describe 级多挂 @pN 会让用例在多个 P 项目重复执行）
+test.describe('认证与路由守卫', { tag: ['@auth'] }, () => {
+  test('@p0 未登录访问受保护路由 → 跳转 /login', async ({ page }) => {
     await page.goto('/dashboard')
     await expect(page).toHaveURL(/\/login/)
   })
 
-  test('登录页正常加载', async ({ page }) => {
+  test('@p0 登录页正常加载', async ({ page }) => {
     await page.goto('/login')
     await expect(page.getByRole('heading', { level: 1, name: 'LQ-DataPrase' })).toBeVisible()
     await expect(page.getByPlaceholder('用户名')).toBeVisible()
@@ -19,7 +21,7 @@ test.describe('@p0 认证与路由守卫', { tag: ['@p0', '@p1', '@p2', '@auth']
     await expect(page.locator('button.neon-button')).toBeVisible()
   })
 
-  test('空输入触发表单校验', async ({ page }) => {
+  test('@p0 空输入触发表单校验', async ({ page }) => {
     await page.goto('/login')
     await page.getByPlaceholder('用户名').fill('')
     await page.getByPlaceholder('密码').fill('')
@@ -29,7 +31,7 @@ test.describe('@p0 认证与路由守卫', { tag: ['@p0', '@p1', '@p2', '@auth']
     await expect(page.locator('.el-form-item__error').first()).toBeVisible()
   })
 
-  test('正确账号登录成功跳转看板', async ({ page }) => {
+  test('@p0 正确账号登录成功跳转看板', async ({ page }) => {
     await uiLogin(page, ACCOUNTS.admin.username, ACCOUNTS.admin.password)
     await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 })
     await expect(page.locator('.main-layout')).toBeVisible()

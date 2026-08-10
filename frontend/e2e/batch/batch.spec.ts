@@ -32,7 +32,7 @@ import { gotoApp } from '../helpers/nav'
 // 真实存在于本机的样例子目录（随仓库提供，含 CSV 样例）
 const SCAN_DIR = path.join(SAMPLE_DATA_DIR, 'CTA8290D')
 
-test.describe('批次报表 /batch', { tag: ['@p1', '@p2', '@batch'] }, () => {
+test.describe('批次报表 /batch', { tag: ['@batch'] }, () => {
   test('@p1 页面渲染：标题/tabs/目录输入/扫描按钮可见', async ({ page }) => {
     await gotoApp(page, '/batch')
 

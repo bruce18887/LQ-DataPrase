@@ -18,14 +18,8 @@ def compute_wafer_map_data(df, metadata, param, color_by, x_col, y_col):
     """
     fail_mask, wafer_stats = compute_wafer_fail_data(df, metadata, param)
     site_col = get_site_column(df)
+    # get_serial_column 已内置 PART_ID 回退（STS8200 无 Serial 列）
     serial_col = get_serial_column(df)
-    # STS8200 fallback: look for columns with 'part' and 'id' in name
-    if not serial_col:
-        for col in df.columns:
-            col_lower = col.lower()
-            if 'part' in col_lower and 'id' in col_lower:
-                serial_col = col
-                break
     bin_col = get_bin_column(df, metadata)
 
     points = []

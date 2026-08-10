@@ -23,7 +23,9 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   // 本地也保留 1 次重试：dev 环境 Vite/Django 长时间运行后可能劣化（Vite 进程偶发退出）
   retries: process.env.CI ? 2 : 1,
-  workers: process.env.CI ? 1 : undefined,
+  // workers 上限 6：webServer 只起一个单进程 Django dev server，默认（核数/2=14）
+  // 个并行浏览器打同一后端会触发崩溃/锁库/flaky（见 lessons R1/R6），反而更慢
+  workers: process.env.CI ? 1 : Math.min(6, Math.floor(os.cpus().length / 2)),
   timeout: 60_000,
   expect: { timeout: 10_000 },
 
@@ -60,6 +62,8 @@ export default defineConfig({
       testMatch: /fixtures[\\/]auth\.setup\.ts/,
     },
     // 2) 业务用例：默认使用 admin 登录态（仅含 localStorage token）
+    //    带 @pN 标签的用例由 P0/P1/P2 项目承接——若不排除，全量运行时
+    //    每个带标签用例会在 Edge + 优先级项目里各跑一遍（实测多跑 357 次）
     {
       name: 'Edge',
       use: {
@@ -68,6 +72,7 @@ export default defineConfig({
         storageState: path.join(__dirname, 'e2e', '.auth', 'admin.json'),
       },
       dependencies: ['setup'],
+      grepInvert: /@p[012]/,
       testIgnore: /fixtures[\\/]auth\.setup\.ts/,
     },
     // 3) 按优先级选择性运行（在 UI 中用 filter 切，或 CLI: --grep @p0）

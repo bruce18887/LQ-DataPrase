@@ -6,20 +6,18 @@
         <!-- 文件多选 -->
         <el-card shadow="hover" :body-style="{ padding: '12px' }">
           <label class="section-label" for="multi-file-select">数据文件 (最少 2 个)</label>
-          <el-select
+          <FileSelect
             id="multi-file-select"
             v-model="fileIds"
+            :files="files"
             multiple
-            filterable
             collapse-tags
             collapse-tags-tooltip
             placeholder="选择数据文件"
             size="small"
             style="width: 100%"
-            :virtual="files.length > 50"
-          >
-            <el-option v-for="f in files" :key="f.id" :label="f.filename" :value="f.id" />
-          </el-select>
+            show-meta
+          />
 
           <!-- 自定义图例名 -->
           <div v-if="selectedFileObjs.length" class="custom-names">
@@ -122,6 +120,7 @@ import ChartConfigPanel from './ChartConfigPanel.vue'
 import ParamSelector from './ParamSelector.vue'
 import MultiFileChart from './MultiFileChart.vue'
 import CircularProgress from '../../../components/common/CircularProgress.vue'
+import FileSelect from '../../../components/common/FileSelect.vue'
 
 const props = defineProps<{ files: any[] }>()
 

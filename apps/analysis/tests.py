@@ -867,6 +867,75 @@ class ChartConfigFilterTests(SimpleTestCase):
         self.assertEqual(total, 10)
 
 
+class SerialColumnPartIdFallbackTests(SimpleTestCase):
+    """STS8200 文件（无 Serial 列）的序列分布回退到 PART_ID。
+
+    回归：STS8200 数据列头是 SITE_NUM/PART_ID/...，没有 Serial_No，
+    ``get_serial_column`` 只匹配 "serial" 导致 serial_distribution 返回
+    400 no_serial_column，序列分布图无法绘制。修复：helpers 层增加
+    'part'+'id' 列回退（与 wafer_map 既有逻辑一致），本测试钉住
+    PART_ID 作为序列列 + 按 site 分组 + bin 失败判定的完整行为。
+    """
+
+    METADATA = {
+        'format': 'STS8200',
+        'mins': {'CONT_GATE': '-0.65'},
+        'maxs': {'CONT_GATE': '-0.47'},
+        'units': {'CONT_GATE': 'V'},
+    }
+
+    def _frame(self):
+        # 8 行：PART_ID 是每 site 内的部件序号（1..4），无任何 serial 列
+        return pd.DataFrame({
+            'SITE_NUM': [8, 8, 7, 8, 7, 8, 7, 6],
+            'PART_ID': [1, 2, 1, 3, 2, 4, 3, 1],
+            'PASSFG': ['True', 'False', 'True', 'True', 'True',
+                       'False', 'True', 'True'],
+            'SOFT_BIN': [1, 5, 1, 1, 1, 2, 1, 1],
+            'CONT_GATE': [-0.54, -0.54, -0.55, -0.53, -0.54, -0.52, -0.55, -0.54],
+        })
+
+    def _post(self, payload):
+        factory, force_authenticate, restore = \
+            StaleParamAcrossFileSwitchTests._patched_view(
+                self._frame(), metadata=self.METADATA)
+        self.addCleanup(restore)
+        import types
+        request = factory.post('/api/v1/analysis/serial_distribution/',
+                               payload, format='json')
+        force_authenticate(request, user=types.SimpleNamespace(
+            pk=1, is_authenticated=True, is_active=True, is_anonymous=False,
+            is_staff=False, is_superuser=False))
+        return request
+
+    def test_serial_distribution_falls_back_to_part_id(self):
+        from apps.analysis.views import AnalysisViewSet
+        request = self._post({'file_id': 1, 'param': 'CONT_GATE'})
+        resp = AnalysisViewSet.as_view({'post': 'serial_distribution'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.data['serial_col'], 'PART_ID')
+        # 按 site 分组：Site 6/7/8 各一个 series，共 8 个点
+        names = [s['name'] for s in resp.data['series_data']]
+        self.assertEqual(names, ['Site 6', 'Site 7', 'Site 8'])
+        total = sum(len(s['data']) for s in resp.data['series_data'])
+        self.assertEqual(total, 8)
+        # 连续序列 x 轴 = PART_ID 1..4
+        self.assertEqual(resp.data['continuous_serials'], [1, 2, 3, 4])
+        # bin 判定：SOFT_BIN 5（行1）与 2（行5）为失败
+        self.assertEqual(resp.data['pass_count'], 6)
+        self.assertEqual(resp.data['fail_count'], 2)
+
+    def test_part_id_rejected_as_data_param(self):
+        """PART_ID 是分组键：作为数据参数必须 400（与 Serial_No 同规则）。"""
+        from apps.analysis.views import AnalysisViewSet
+        request = self._post({'file_id': 1, 'param': 'PART_ID'})
+        resp = AnalysisViewSet.as_view({'post': 'serial_distribution'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertEqual(resp.data['error'], 'param_is_metadata')
+
+
 
 class FileCorrelationCacheIsolationTests(SimpleTestCase):
     """file_correlation 端点不得污染 LRU 解析缓存。

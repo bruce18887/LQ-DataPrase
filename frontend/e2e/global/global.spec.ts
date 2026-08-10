@@ -180,16 +180,16 @@ test.describe('@p2 版本显示', { tag: ['@p2', '@global'] }, () => {
 })
 
 // 角色相关用例：清空 storageState，实时 UI 登录使 user/isAdmin 生效
-test.describe('@p1 Topbar 与角色', { tag: ['@p1', '@p2', '@global'] }, () => {
+test.describe('Topbar 与角色', { tag: ['@global'] }, () => {
   test.use({ storageState: { cookies: [], origins: [] } })
 
-  test('管理员登录后 Topbar 显示管理员、可见“用户管理”菜单', async ({ page }) => {
+  test('@p1 管理员登录后 Topbar 显示管理员、可见“用户管理”菜单', async ({ page }) => {
     await loginAs(page, 'admin')
     await expect(page.locator('.user-role')).toHaveText('管理员')
     await expect(sidebarLink(page, '用户管理')).toBeVisible()
   })
 
-  test('普通用户登录后 Topbar 显示用户、隐藏“用户管理”菜单', async ({ page }) => {
+  test('@p1 普通用户登录后 Topbar 显示用户、隐藏“用户管理”菜单', async ({ page }) => {
     await loginAs(page, 'user')
     await expect(page.locator('.user-role')).toHaveText('用户')
     await expect(sidebarLink(page, '用户管理')).toBeHidden()
