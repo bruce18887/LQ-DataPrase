@@ -21,6 +21,7 @@ from apps.datafiles.services import clear_parse_cache
 
 from ._helpers import (
     _register_file,
+    _register_zip_batch,
     _user_upload_dir,
     _disk_mtime,
     _parse_last_modified,
@@ -177,13 +178,13 @@ class FileUploadView(APIView):
         if not files:
             return Response({'error': '未选择文件'}, status=400)
 
-        # Only plain CSV files are supported for upload.
-        allowed_exts = {'.csv'}
+        # CSV files and ZIP archives (containing CSVs) are supported.
+        allowed_exts = {'.csv', '.zip'}
         for uploaded_file in files:
             ext = os.path.splitext(uploaded_file.name)[1].lower()
             if ext not in allowed_exts:
                 return Response(
-                    {'error': f'仅支持 CSV 文件，无法上传 {uploaded_file.name}'},
+                    {'error': f'仅支持 CSV 或 ZIP 文件，无法上传 {uploaded_file.name}'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -195,16 +196,26 @@ class FileUploadView(APIView):
 
         for idx, uploaded_file in enumerate(files):
             base_name = uploaded_file.name
-            file_path = os.path.join(upload_dir, base_name)
+            ext = os.path.splitext(base_name)[1].lower()
 
             lm_value = last_modified_list[idx] if idx < len(last_modified_list) else None
             browser_mtime = _parse_last_modified(lm_value)
 
+            # ZIP: extract CSVs and register them as batch data.
+            if ext == '.zip':
+                zip_created, zip_error = _register_zip_batch(request.user, uploaded_file, base_name)
+                if zip_error:
+                    return Response({'error': zip_error}, status=status.HTTP_400_BAD_REQUEST)
+                created.extend(zip_created)
+                continue
+
+            file_path = os.path.join(upload_dir, base_name)
+
             # Handle filename collision
             if os.path.exists(file_path):
                 ts = int(time.time())
-                name, ext = os.path.splitext(base_name)
-                file_path = os.path.join(upload_dir, f"{name}_{ts}{ext}")
+                name, _ext = os.path.splitext(base_name)
+                file_path = os.path.join(upload_dir, f"{name}_{ts}{_ext}")
 
             # Save uploaded file
             with open(file_path, 'wb+') as dest:

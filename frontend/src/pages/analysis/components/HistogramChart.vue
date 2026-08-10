@@ -49,6 +49,10 @@ function buildOption() {
   const xAxisMax = binCenters[binCenters.length - 1]
 
   const shouldClip = handlingMode === 'clip' && outlierInfo?.has_outliers
+  // 统计口径启用：clip 与 exclude 都切到后端 filtered 统计（与统计卡 useHistogram
+  // 的 useFiltered 同判断）——此前只认 clip，exclude 下卡片用 filtered 而 σ 线/
+  // 正态曲线用全量，同界面口径矛盾
+  const useFilteredStats = handlingMode !== 'off' && outlierInfo?.has_outliers
   let clipMin = shouldClip ? outlierInfo.lower_bound : -Infinity
   let clipMax = shouldClip ? outlierInfo.upper_bound : Infinity
 
@@ -76,11 +80,14 @@ function buildOption() {
   const showNormal = props.chartConfig.includes('normal')
   // 正态曲线数据统一来自后端 result（normal_curve / filtered_normal_curve，
   // 公式单一来源在后端），与 KDE/标记线同源原则一致——前端不再本地实现高斯公式
-  const normalCurve = shouldClip && r.filtered_normal_curve != null ? r.filtered_normal_curve : r.normal_curve
+  const normalCurve = useFilteredStats && r.filtered_normal_curve != null ? r.filtered_normal_curve : r.normal_curve
   const hasNormal = showNormal && Array.isArray(normalCurve) && normalCurve.length > 1
-  // KDE 曲线与正态曲线同款双口径：裁剪时用 filtered_kde_curve（IQR 口径，
-  // 与柱形隐藏边界同源），否则用全量 kde_curve——曲线永远描述柱子的形状
-  const kdeCurve = shouldClip && r.filtered_kde_curve != null ? r.filtered_kde_curve : r.kde_curve
+  // KDE curve data source: 「KDE含超限」开关全局生效、与异常值模式解耦——
+  // on → full-data curve (out-of-spec values surface as their own bump);
+  // off → IQR-filtered curve (main peak faithful); 无异常值时
+  // filtered_kde_curve 为 None → 回退全量曲线。
+  const includeFailKde = props.chartConfig.includes('kde_full')
+  const kdeCurve = includeFailKde || r.filtered_kde_curve == null ? r.kde_curve : r.filtered_kde_curve
   const hasKde = props.chartConfig.includes('kde') && Array.isArray(kdeCurve) && kdeCurve.length > 1
   // Density axes are independent: KDE gets its own purple axis on the far
   // left, the normal curve keeps the original orange axis on the right.
@@ -134,12 +141,12 @@ function buildOption() {
   }
   // σ 标记线与统计卡同一口径：裁剪时用后端 filtered_sigma*（与 filtered_mean/
   // std 同源），否则用全量 sigma*。此前卡片用裁剪值、线用全量值，界面矛盾
-  const s3Min = shouldClip && r.filtered_sigma3_min != null ? r.filtered_sigma3_min : r.sigma3_min
-  const s3Max = shouldClip && r.filtered_sigma3_max != null ? r.filtered_sigma3_max : r.sigma3_max
-  const s4Min = shouldClip && r.filtered_sigma4_min != null ? r.filtered_sigma4_min : r.sigma4_min
-  const s4Max = shouldClip && r.filtered_sigma4_max != null ? r.filtered_sigma4_max : r.sigma4_max
-  const s6Min = shouldClip && r.filtered_sigma6_min != null ? r.filtered_sigma6_min : r.sigma6_min
-  const s6Max = shouldClip && r.filtered_sigma6_max != null ? r.filtered_sigma6_max : r.sigma6_max
+  const s3Min = useFilteredStats && r.filtered_sigma3_min != null ? r.filtered_sigma3_min : r.sigma3_min
+  const s3Max = useFilteredStats && r.filtered_sigma3_max != null ? r.filtered_sigma3_max : r.sigma3_max
+  const s4Min = useFilteredStats && r.filtered_sigma4_min != null ? r.filtered_sigma4_min : r.sigma4_min
+  const s4Max = useFilteredStats && r.filtered_sigma4_max != null ? r.filtered_sigma4_max : r.sigma4_max
+  const s6Min = useFilteredStats && r.filtered_sigma6_min != null ? r.filtered_sigma6_min : r.sigma6_min
+  const s6Max = useFilteredStats && r.filtered_sigma6_max != null ? r.filtered_sigma6_max : r.sigma6_max
   if (props.chartConfig.includes('s3') && s3Min != null && s3Max != null) {
     mk.push(
       { xAxis: s3Min, lineStyle: { color: '#1565C0', width: 3, type: 'dotted' }, label: { show: true, formatter: '3σ下限', position: 'insideEndTop' } },

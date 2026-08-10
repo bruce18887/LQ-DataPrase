@@ -31,10 +31,11 @@ if os.path.isdir(_frontend_dist):
 
 # excelize ships Go shared libraries (.dll) at the site-packages root.
 # collect_all may miss them because they are standalone files, not in a subdir.
+# Only the amd64 DLL is needed: excelize.py selects it via platform.machine()
+# at runtime and the build target is x64 Windows only (386/arm64 were ~18 MB
+# of dead weight in the bundle).
 for lib_name in [
     'libexcelize.amd64.windows.dll',
-    'libexcelize.386.windows.dll',
-    'libexcelize.arm64.windows.dll',
 ]:
     lib_path = os.path.join(VENV_SITE, lib_name)
     if os.path.isfile(lib_path):
@@ -186,14 +187,10 @@ _hiddenimports += [
     'whitenoise.middleware',
     'whitenoise.storage',
 
-    # Data processing
+    # Data processing (no scipy — gaussian_kde / probplot / t.cdf are
+    # replaced by numpy implementations in statistics/kde.py + distributions.py)
     'pandas',
     'numpy',
-    'scipy',
-    'scipy.stats',
-    'scipy.special',
-    'scipy.interpolate',
-    'scipy.optimize',
     'openpyxl',
     'matplotlib',
     'matplotlib.pyplot',
@@ -312,13 +309,6 @@ _science_subpackages = [
     'numpy.ma',
     'numpy.polynomial',
     'numpy.ctypeslib',
-    'scipy.stats',
-    'scipy.special',
-    'scipy.interpolate',
-    'scipy.optimize',
-    'scipy._lib',
-    'scipy.linalg',
-    'scipy.fft',
     'matplotlib',
     'matplotlib.backends',
     'PIL',
@@ -355,6 +345,10 @@ _hiddenimports = [m for m in _hiddenimports if not _is_test_module(m)]
 # Exclusions — save space by removing things we don't need
 # ---------------------------------------------------------------------------
 _excludes = [
+    # scipy is replaced by numpy implementations (statistics/kde.py +
+    # distributions.py); exclude it explicitly so any transitive import
+    # cannot drag the ~91 MB tree back in.
+    'scipy',
     # Celery (not used in standalone)
     'celery',
     'kombu',
@@ -408,24 +402,6 @@ _excludes = [
     'numpy.typing.tests',
     'numpy.core.tests',
     'numpy.distutils.tests',
-    'scipy._lib.tests',
-    'scipy.cluster.tests',
-    'scipy.constants.tests',
-    'scipy.datasets.tests',
-    'scipy.differentiate.tests',
-    'scipy.fft.tests',
-    'scipy.fftpack.tests',
-    'scipy.integrate.tests',
-    'scipy.interpolate.tests',
-    'scipy.io.tests',
-    'scipy.linalg.tests',
-    'scipy.ndimage.tests',
-    'scipy.optimize.tests',
-    'scipy.signal.tests',
-    'scipy.sparse.tests',
-    'scipy.spatial.tests',
-    'scipy.special.tests',
-    'scipy.stats.tests',
     'matplotlib.tests',
 ]
 

@@ -42,6 +42,49 @@ async function pickFiles(page: Page, names: string[]) {
   await page.keyboard.press('Escape')
 }
 
+/** 多文件默认参数是 commonParams[0]（可能无规格限，如 Serial_No 序列号列）——
+ * 遍历参数直到图例出现 USL/LSL，返回命中参数；找不到返回 null。
+ * 注意：el-tabs 非懒渲染，单文件 tab 的 ParamSelector 也在 DOM 里，
+ * 定位必须作用域到 multi-file tab（helpers 的 listParams/selectParam 无作用域参数）。 */
+async function selectLimitsParam(page: Page): Promise<string | null> {
+  const select = page.locator(`${TAB} .param-selector .el-select`).first()
+  await expect(select).toBeVisible({ timeout: 15_000 })
+
+  // 读取参数列表（filterable：输入过滤后点击）
+  await select.click()
+  const dropdown = page.locator('.param-select-dropdown .el-select-dropdown__item:visible')
+  await expect(dropdown.first()).toBeVisible({ timeout: 15_000 })
+  const params = (await dropdown.allInnerTexts()).map((t) => t.trim()).filter(Boolean)
+  await page.keyboard.press('Escape')
+
+  for (const name of params) {
+    const distResp = page.waitForResponse(
+      (r) =>
+        r.url().includes('/analysis/multi_lot/') &&
+        r.request().method() === 'POST' &&
+        (r.request().postData() || '').includes('"param"') &&
+        r.status() < 500,
+      { timeout: 20_000 },
+    )
+    await select.click()
+    const input = select.locator('input').first()
+    await input.fill(name)
+    const option = page.locator('.param-select-dropdown .el-select-dropdown__item:visible')
+      .filter({ hasText: name }).first()
+    await expect(option).toBeVisible({ timeout: 10_000 })
+    await option.click()
+    try {
+      await distResp
+    } catch {
+      continue // 该参数无分布响应（非数值/空数据），试下一个
+    }
+    await page.waitForTimeout(300)
+    const allTexts = await page.locator(`${TAB} text`).allTextContents()
+    if (allTexts.some((t) => /USL|LSL/.test(t))) return name
+  }
+  return null
+}
+
 test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
   test('选 2+ 文件 → 共有测试项非空 → 柱状图渲染（含 per-file limit 图例）', async ({ page }) => {
     test.slow()
@@ -71,6 +114,10 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
     const box = await chart.boundingBox()
     expect(box!.width).toBeGreaterThan(0)
     expect(box!.height).toBeGreaterThan(0)
+
+    // 默认参数可能是无规格限的列（Serial_No），显式选中一个含规格限的参数
+    const limitsParam = await selectLimitsParam(page)
+    expect(limitsParam, 'BUYOFF 共有参数中应存在含规格限的参数').not.toBeNull()
 
     // 图例：每文件一项 + per-file limit 线（新实现：每个文件独立显示）
     const legend = (await page.locator(`${TAB} text`).allTextContents()).join(' | ')
@@ -179,6 +226,10 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
     )
     await expect(page.locator(`${TAB} .chart-wrapper svg`)).toBeVisible({ timeout: 15_000 })
 
+    // 默认参数可能是无规格限的列（Serial_No），显式选中一个含规格限的参数
+    const limitsParam = await selectLimitsParam(page)
+    expect(limitsParam, 'BUYOFF 共有参数中应存在含规格限的参数').not.toBeNull()
+
     // Limit 标注应包含文件名和规格限类型
     const allTexts = await page.locator(`${TAB} text`).allTextContents()
     const limitLabels = allTexts.filter(t => /USL|LSL/.test(t))
@@ -201,6 +252,10 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
       { timeout: 25_000 },
     )
     await expect(page.locator(`${TAB} .chart-wrapper svg`)).toBeVisible({ timeout: 15_000 })
+
+    // 默认参数可能是无规格限的列（Serial_No），显式选中一个含规格限的参数
+    const limitsParam = await selectLimitsParam(page)
+    expect(limitsParam, 'BUYOFF 共有参数中应存在含规格限的参数').not.toBeNull()
 
     // Limit 标注应包含文件名和规格限类型
     const allTexts = await page.locator(`${TAB} text`).allTextContents()
@@ -270,7 +325,7 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
     expect(text, '应出现概率密度Y轴标签').toMatch(/概率密度/)
   })
 
-  test('X 轴固定 24 个坐标', async ({ page }) => {
+  test('X 轴固定 26 个坐标（1 underflow + 24 normal + 1 overflow，与单文件直方图同构）', async ({ page }) => {
     test.slow()
     await enterMultiFile(page)
 
@@ -301,7 +356,7 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
     expect(distResponses.length, '应收到 distribution 响应').toBeGreaterThan(0)
     const distJson = distResponses[distResponses.length - 1] // 获取最新的响应
 
-    // 验证 bin_centers 数量固定为 24
-    expect(distJson.bin_centers.length, 'X 轴应固定为 24 个坐标').toBe(24)
+    // 验证 bin_centers 数量固定为 26（eedeceb 重构误写 range(26) 曾产生 27 个，回归修复）
+    expect(distJson.bin_centers.length, 'X 轴应固定为 26 个坐标').toBe(26)
   })
 })

@@ -47,6 +47,27 @@ def _setup_django():
     django.setup()
 
 
+def _promote_superusers():
+    """Upgrade every superuser to the ``administrator`` role.
+
+    The app's permissions check the custom ``role`` field only — never
+    ``is_superuser`` — so a legacy superuser with role='user' (created by
+    the stock ``create_superuser`` before the UserManager fix) is treated
+    as a regular user. Returns the list of promoted usernames (for tests).
+    """
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    promoted = []
+    for user in User.objects.filter(is_superuser=True).exclude(role='administrator'):
+        user.role = 'administrator'
+        user.is_staff = True
+        user.save(update_fields=['role', 'is_staff'])
+        promoted.append(user.username)
+    if promoted:
+        print(f'[bootstrap] Promoted superuser(s) to administrator role: {", ".join(promoted)}', flush=True)
+    return promoted
+
+
 def _bootstrap():
     """Run migrations, create superuser, collect static files."""
     from django.conf import settings
@@ -74,6 +95,13 @@ def _bootstrap():
             email='admin@localhost',
         )
         print('[bootstrap] IMPORTANT: Change the default password after first login!', flush=True)
+
+    # Repair legacy installs: older bootstraps used Django's stock
+    # create_superuser, which never set the custom ``role`` field — those
+    # admin accounts fell back to role='user' and the app's role-based
+    # permission system treated them as regular users. Upgrade them so an
+    # affected machine recovers on next start without any manual DB work.
+    _promote_superusers()
 
     # Collect static files (only when the frontend dist is present)
     # In the standalone build we use WhiteNoise's finders to serve static files

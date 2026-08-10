@@ -1,8 +1,27 @@
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractUser, UserManager as DjangoUserManager
 from django.db import models
 
 
+class UserManager(DjangoUserManager):
+    """Keep the custom ``role`` field in sync with superuser status.
+
+    Django's default ``create_superuser`` only sets is_superuser/is_staff;
+    the app's permission system (FeaturePermission, JWT ``role`` claim,
+    frontend admin checks) reads ``role`` exclusively, so a superuser left
+    at the model default 'user' silently loses administrator privileges —
+    exactly what the packaged-app bootstrap hit on fresh installs.
+    """
+
+    def create_superuser(self, username, email=None, password=None, **extra_fields):
+        # A superuser is an administrator by definition; force the role so a
+        # caller-supplied value can't create a superuser that the app's
+        # role-based checks treat as a regular user.
+        extra_fields['role'] = 'administrator'
+        return super().create_superuser(username, email, password, **extra_fields)
+
+
 class User(AbstractUser):
+    objects = UserManager()
     ROLE_CHOICES = [
         ('administrator', 'Administrator'),
         ('user', 'User'),

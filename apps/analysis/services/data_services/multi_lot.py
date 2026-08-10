@@ -217,13 +217,15 @@ def compute_multi_lot_distribution(datasets, all_series, param,
 
     # Build bin edges with underflow (-inf) and overflow (+inf) bins
     # Same pattern as single-file: [underflow] [bin1]..[bin24] [overflow]
-    inner_edges = [bin_start + j * data_gap for j in range(26)]
+    # 25 inner edges → 24 normal bins（eedeceb 重构时误写 range(26) 多出 1 个
+    # normal bin，X 轴 27 个坐标与单文件直方图 26 个不一致——回归修复）
+    inner_edges = [bin_start + j * data_gap for j in range(25)]
     all_bins = np.array([-np.inf] + inner_edges + [np.inf])
     # 27 edges → 26 bins: 1 underflow + 24 normal + 1 overflow
 
     # Bin centers: underflow/overflow use edge values, normal bins use midpoint
     bin_centers = [inner_edges[0] - data_gap]  # underflow center
-    bin_centers += [(inner_edges[i] + inner_edges[i + 1]) / 2 for i in range(25)]
+    bin_centers += [(inner_edges[i] + inner_edges[i + 1]) / 2 for i in range(24)]
     bin_centers.append(inner_edges[-1] + data_gap)  # overflow center
     bin_count = len(bin_centers)
 

@@ -4,9 +4,9 @@
   "_versionNote": "应用版本单一事实源为 frontend/package.json（electron-builder 与 UI 均从它读取）。本字段仅为 npm 元数据，发版时不要修改。",
   "private": true,
   "scripts": {
-    "pyinstaller": ".venv\\Scripts\\python.exe -m PyInstaller lq_dataprase.spec --noconfirm",
-    "dist:win:dir": "cross-env VITE_ELECTRON=true ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ npm run build --prefix frontend && npm run electron:build:ts --prefix frontend && npm run pyinstaller && npx electron-builder --config electron-builder.yml --win --dir",
-    "dist:win": "node scripts/patch-nsis-template.js && cross-env VITE_ELECTRON=true ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ npm run build --prefix frontend && npm run electron:build:ts --prefix frontend && npm run pyinstaller && npx electron-builder --config electron-builder.yml --win"
+    "pyinstaller": ".venv\\Scripts\\python.exe -m PyInstaller lq_dataprase.spec --noconfirm && .venv\\Scripts\\python.exe scripts/prune_bundle.py",
+    "dist:win:dir": "cross-env VITE_ELECTRON=true ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ npm run build --prefix frontend && npm run electron:build:ts --prefix frontend && npm run pyinstaller && scripts\\electron-builder.cmd --win --dir",
+    "dist:win": "node scripts/patch-nsis-template.js && cross-env VITE_ELECTRON=true ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ npm run build --prefix frontend && npm run electron:build:ts --prefix frontend && npm run pyinstaller && scripts\\electron-builder.cmd --win"
   },
   "devDependencies": {
     "cross-env": "^7.0.3",

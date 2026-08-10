@@ -288,6 +288,8 @@ function onFilterChange(code: string) {
 
 function onUploadSuccess() {
   loadFiles()
+  // ZIP 上传会注册新批次，刷新批次区使其立即可见
+  batchRef.value?.loadBatchDirs()
   filesStore.notifyFilesChanged()
 }
 

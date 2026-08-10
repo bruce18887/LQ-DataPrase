@@ -2,7 +2,7 @@
   <el-dialog
     :model-value="visible"
     :title="dialogTitle"
-    width="720px"
+    width="min(960px, 92vw)"
     append-to-body
     @close="emit('close')"
   >
@@ -116,6 +116,6 @@ watch(() => [props.visible, props.fileId, props.param], load)
 .hist-body {
   display: flex;
   flex-direction: column;
-  height: 380px;
+  height: min(520px, 70vh);
 }
 </style>

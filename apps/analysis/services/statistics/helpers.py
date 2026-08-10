@@ -73,6 +73,22 @@ def get_1d_from(df: pd.DataFrame, col: str) -> pd.Series:
     return s
 
 
+def _dense_x_grid(x_min: float, x_max: float, n_points: int,
+                  center: float, spread: float) -> np.ndarray:
+    """等距网格；分布宽度远小于网格间距时在 ``[center±6*spread]`` 加密。
+
+    窄分布（σ 或数据范围 << bin 宽度）下，等距采样点会全部落在数据密集
+    区之外，曲线取整后整条消失（此前前端用 ``std < binGap`` 补 ±6σ 点，
+    #17 后端化后此逻辑下沉到这里，屏幕/导出统一）。返回排序去重网格。
+    """
+    x = np.linspace(x_min, x_max, n_points)
+    step = (x_max - x_min) / (n_points - 1)
+    if spread < step:
+        extra = np.linspace(center - 6 * spread, center + 6 * spread, 60)
+        x = np.union1d(x, extra)
+    return x
+
+
 def normal_pdf_curve(mean: float, std: float, x_min: float, x_max: float,
                      n_points: int = 200) -> Optional[List[List[float]]]:
     """正态 PDF 曲线采样，与 ``kde_curve`` 同格式 ``[[x, y], ...]``。
@@ -83,7 +99,7 @@ def normal_pdf_curve(mean: float, std: float, x_min: float, x_max: float,
     """
     if std <= 0:
         return None
-    x = np.linspace(x_min, x_max, n_points)
+    x = _dense_x_grid(x_min, x_max, n_points, mean, std)
     scale = 1.0 / (std * np.sqrt(2.0 * np.pi))
     y = scale * np.exp(-0.5 * ((x - mean) / std) ** 2)
     return [[round(float(xi), 6), round(float(yi), 6)] for xi, yi in zip(x, y)]

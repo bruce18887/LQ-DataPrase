@@ -165,9 +165,14 @@ function onGridContextMenu(e: MouseEvent) {
     e.preventDefault()
     const col = header.getAttribute('col-id')
     if (!col || !allCols.value.includes(col)) return
-    // 非数值列（Serial 等）不弹
-    const v = rowData.value[0]?.[col]
-    if (v === null || v === undefined || v === '' || Number.isNaN(Number(v))) return
+    // 非数值列（Serial 等）不弹。整列扫描而非只看第一行——首行若为 fail（空数据）
+    // 仍可能弹窗；判定与后端 filter_finite 语义一致（排除 null/''/NaN/±Infinity）
+    const hasNumeric = rowData.value.some((r) => {
+      const v = r[col]
+      if (v === null || v === undefined || v === '') return false
+      return Number.isFinite(Number(String(v).trim()))
+    })
+    if (!hasNumeric) return
     analyzeParam.value = col
     histDialogVisible.value = true
     return
