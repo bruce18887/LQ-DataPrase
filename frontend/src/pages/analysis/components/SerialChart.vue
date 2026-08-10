@@ -55,7 +55,7 @@ function buildOption() {
   let yAxisMin = d.y_min
   let yAxisMax = d.y_max
 
-  if (handlingMode === 'clip' && outlierInfo?.has_outliers) {
+  if (handlingMode !== 'off' && outlierInfo?.has_outliers) {
     yAxisMin = outlierInfo.lower_bound
     yAxisMax = outlierInfo.upper_bound
     const pad = (yAxisMax - yAxisMin) * 0.1

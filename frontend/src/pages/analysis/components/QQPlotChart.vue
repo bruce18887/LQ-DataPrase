@@ -61,7 +61,7 @@ function buildOption() {
   let filteredTheoretical = theoretical
   let filteredObserved = observed
 
-  if (handlingMode === 'clip' && outlierInfo?.has_outliers) {
+  if (handlingMode !== 'off' && outlierInfo?.has_outliers) {
     const lb = outlierInfo.lower_bound
     const ub = outlierInfo.upper_bound
     const indices = observed

@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APITestCase
 
@@ -6,10 +7,12 @@ from apps.datafiles.models import DataFile
 from apps.datafiles.utils import extract_product_code
 from apps.datafiles.views import _user_upload_dir
 
+import io
 import os
 import shutil
 import tempfile
 import time
+import zipfile
 
 User = get_user_model()
 
@@ -1016,3 +1019,233 @@ class ConsistencyCheckTests(APITestCase):
     def test_post_invalid_action(self):
         resp = self._post('nonsense')
         self.assertEqual(resp.status_code, 400)
+
+
+# ── zip 压缩包上传 → 批次数据 ─────────────────────────────────
+
+_MIN_CSV = (
+    '[GENERAL],\n'
+    'Tester_Type,CTA8290DPlus,\n'
+    '[Data]\n'
+    'col1,col2\n'
+    'u1,u2\n'
+    'min1,min2\n'
+    'max1,max2\n'
+    '1,2\n'
+    '3,4\n'
+)
+
+
+def _zip_bytes(entries):
+    """Build an in-memory zip archive from {member_name: content}."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for name, content in entries.items():
+            zf.writestr(name, content)
+    return buf.getvalue()
+
+
+class SafeExtractZipTests(TestCase):
+    """Pure-function checks for _safe_extract_zip's Zip-Slip protection."""
+
+    def test_safe_extract_blocks_traversal(self):
+        from apps.datafiles.views import _safe_extract_zip
+        tmp = tempfile.mkdtemp(prefix='safe_zip_')
+        try:
+            archive = _zip_bytes({
+                'good.csv': 'a\n1\n',
+                '../evil.csv': 'x\n',
+                'a/../../evil2.csv': 'x\n',
+                'C:/evil3.csv': 'x\n',
+                'sub/../loop.csv': 'x\n',  # contains '..' segment → refused
+                '/abs_evil.csv': 'x\n',    # absolute-style → lands inside dest
+            })
+            extracted = _safe_extract_zip(io.BytesIO(archive), tmp)
+            basenames = sorted(os.path.basename(p) for p in extracted)
+            # Escape attempts are dropped; absolute-style names are contained.
+            self.assertEqual(basenames, ['abs_evil.csv', 'good.csv'])
+            self.assertEqual(sorted(os.listdir(tmp)), ['abs_evil.csv', 'good.csv'])
+            # Nothing was written next to tmp (i.e. outside dest_dir).
+            self.assertFalse(os.path.exists(os.path.join(os.path.dirname(tmp), 'evil.csv')))
+            self.assertFalse(os.path.exists(os.path.join(os.path.dirname(tmp), 'evil2.csv')))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_safe_extract_skips_directory_entries(self):
+        from apps.datafiles.views import _safe_extract_zip
+        tmp = tempfile.mkdtemp(prefix='safe_zip_')
+        try:
+            archive = _zip_bytes({'dir/': '', 'dir/a.csv': 'a\n1\n'})
+            extracted = _safe_extract_zip(io.BytesIO(archive), tmp)
+            self.assertEqual(
+                [os.path.relpath(p, tmp) for p in extracted],
+                [os.path.join('dir', 'a.csv')],
+            )
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+class ZipUploadTests(APITestCase):
+    """Uploading a .zip extracts its CSVs and registers them as batch data."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='zip_user', password='pw')
+        self.client.force_authenticate(self.user)
+        self.batch_base = _user_upload_dir(self.user, 'batch')
+        self.single_dir = _user_upload_dir(self.user, 'single')
+
+    def tearDown(self):
+        for d in (self.batch_base, self.single_dir):
+            if os.path.isdir(d):
+                shutil.rmtree(d, ignore_errors=True)
+
+    def _upload_zip(self, name, entries):
+        uploaded = SimpleUploadedFile(name, _zip_bytes(entries), content_type='application/zip')
+        return self.client.post('/api/v1/upload/', {'files': uploaded}, format='multipart')
+
+    def _upload_raw(self, name, content):
+        uploaded = SimpleUploadedFile(name, content)
+        return self.client.post('/api/v1/upload/', {'files': uploaded}, format='multipart')
+
+    def test_zip_upload_creates_batch_files_with_subbatch(self):
+        resp = self._upload_zip('LOT-A.zip', {
+            'root.csv': _MIN_CSV,
+            'sub/below.csv': _MIN_CSV,
+            'readme.txt': 'ignored',
+        })
+        self.assertEqual(resp.status_code, 201, resp.data)
+        rows = DataFile.objects.filter(owner=self.user, file_type='batch')
+        self.assertEqual(rows.count(), 2)
+        root = rows.get(filename='root.csv')
+        sub = rows.get(filename='below.csv')
+        self.assertEqual(root.batch_name, 'LOT-A')
+        self.assertEqual(root.sub_batch, '')
+        self.assertEqual(sub.batch_name, 'LOT-A')
+        self.assertEqual(sub.sub_batch, 'sub')
+        for df in rows:
+            self.assertTrue(os.path.exists(df.file_path))
+
+    def test_zip_upload_skips_summary_and_non_csv(self):
+        resp = self._upload_zip('LOT-SUM.zip', {
+            'BPD60320_FT.csv': _MIN_CSV,
+            'Sum_093518.csv': _MIN_CSV,
+            'readme.txt': 'ignored',
+        })
+        self.assertEqual(resp.status_code, 201, resp.data)
+        names = set(DataFile.objects.filter(owner=self.user, file_type='batch')
+                    .values_list('filename', flat=True))
+        self.assertEqual(names, {'BPD60320_FT.csv'})
+
+    def test_zip_upload_no_csv_returns_400_and_cleans_new_dir(self):
+        resp = self._upload_zip('EMPTY.zip', {'readme.txt': 'no csv here'})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('未找到 CSV', resp.data['error'])
+        # Freshly created destination directory is cleaned up.
+        self.assertFalse(os.path.isdir(os.path.join(self.batch_base, 'EMPTY')))
+        self.assertEqual(DataFile.objects.filter(owner=self.user, file_type='batch').count(), 0)
+
+    def test_zip_upload_no_csv_keeps_existing_dir(self):
+        first = self._upload_zip('LOT-X.zip', {'data.csv': _MIN_CSV})
+        self.assertEqual(first.status_code, 201, first.data)
+        before = DataFile.objects.filter(owner=self.user, file_type='batch').count()
+
+        resp = self._upload_zip('LOT-X.zip', {'readme.txt': 'no csv now'})
+        self.assertEqual(resp.status_code, 400)
+        # Existing batch directory and its records survive.
+        self.assertTrue(os.path.exists(os.path.join(self.batch_base, 'LOT-X', 'data.csv')))
+        self.assertEqual(DataFile.objects.filter(owner=self.user, file_type='batch').count(), before)
+
+    def test_zip_upload_corrupt_zip_returns_400(self):
+        resp = self._upload_raw('broken.zip', b'this is not a zip archive at all')
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('已损坏', resp.data['error'])
+        self.assertEqual(DataFile.objects.filter(owner=self.user).count(), 0)
+
+    def test_zip_upload_unsupported_ext_400(self):
+        for name, content in [('note.txt', b'x'), ('arc.7z', b'PK\x03\x04x'), ('arc.rar', b'x')]:
+            resp = self._upload_raw(name, content)
+            self.assertEqual(resp.status_code, 400, name)
+            self.assertIn('仅支持 CSV 或 ZIP', resp.data['error'])
+
+    def test_zip_upload_zip_slip_members_skipped(self):
+        resp = self._upload_zip('SLIP.zip', {
+            'good.csv': _MIN_CSV,
+            '../evil.csv': 'x\n',
+            'a/../../evil2.csv': 'x\n',
+            'C:/evil3.csv': 'x\n',
+        })
+        self.assertEqual(resp.status_code, 201, resp.data)
+        names = set(DataFile.objects.filter(owner=self.user, file_type='batch')
+                    .values_list('filename', flat=True))
+        self.assertEqual(names, {'good.csv'})
+        # No files were written outside the batch base dir.
+        for root, _dirs, files in os.walk(os.path.dirname(self.batch_base)):
+            for f in files:
+                fp = os.path.normpath(os.path.join(root, f))
+                self.assertTrue(fp.startswith(os.path.normpath(self.batch_base)), f)
+
+    def test_zip_upload_reupload_same_name_dedups(self):
+        first = self._upload_zip('LOT-R.zip', {'a.csv': _MIN_CSV})
+        self.assertEqual(first.status_code, 201, first.data)
+        second = self._upload_zip('LOT-R.zip', {'a.csv': _MIN_CSV})
+        self.assertEqual(second.status_code, 201, second.data)
+        rows = DataFile.objects.filter(owner=self.user, file_type='batch', batch_name='LOT-R')
+        self.assertEqual(rows.count(), 1)  # no duplicate registration
+        self.assertEqual(len(second.data), 0)
+
+    def test_zip_upload_reupload_refreshes_disk_content(self):
+        from apps.datafiles.services import clear_parse_cache, get_cached_parsed_file
+        first = self._upload_zip('LOT-C.zip', {'a.csv': _MIN_CSV})
+        self.assertEqual(first.status_code, 201, first.data)
+        df_row = DataFile.objects.get(owner=self.user, batch_name='LOT-C')
+        clear_parse_cache()
+        df0, _meta0, _ = get_cached_parsed_file(df_row.id, self.user.id)
+        original = df0['col2'].iloc[0]
+
+        replaced = (
+            '[GENERAL],\n'
+            'Tester_Type,CTA8290DPlus,\n'
+            '[Data]\n'
+            'col1,col2\n'
+            'u1,u2\n'
+            'min1,min2\n'
+            'max1,max2\n'
+            '5,6\n'
+            '7,4\n'
+        )
+        second = self._upload_zip('LOT-C.zip', {'a.csv': replaced})
+        self.assertEqual(second.status_code, 201, second.data)
+        # mtime_ns cache key invalidates → re-parse serves the new content.
+        df1, _meta1, _ = get_cached_parsed_file(df_row.id, self.user.id)
+        self.assertEqual(df1['col2'].iloc[0], 6)
+        self.assertNotEqual(df1['col2'].iloc[0], original)
+
+    def test_zip_upload_mixed_csv_and_zip_one_request(self):
+        csv_file = SimpleUploadedFile('single.csv', _MIN_CSV.encode())
+        zip_file = SimpleUploadedFile('MIXED.zip', _zip_bytes({'a.csv': _MIN_CSV}),
+                                      content_type='application/zip')
+        resp = self.client.post('/api/v1/upload/',
+                                {'files': [csv_file, zip_file]}, format='multipart')
+        self.assertEqual(resp.status_code, 201, resp.data)
+        single = DataFile.objects.get(owner=self.user, filename='single.csv')
+        self.assertEqual(single.file_type, 'single')
+        batch = DataFile.objects.get(owner=self.user, filename='a.csv')
+        self.assertEqual(batch.file_type, 'batch')
+        self.assertEqual(batch.batch_name, 'MIXED')
+
+    def test_zip_upload_owner_scoped(self):
+        resp = self._upload_zip('SHARED.zip', {'a.csv': _MIN_CSV})
+        self.assertEqual(resp.status_code, 201, resp.data)
+
+        other = User.objects.create_user(username='zip_user2', password='pw')
+        self.client.force_authenticate(other)
+        resp2 = self._upload_zip('SHARED.zip', {'b.csv': _MIN_CSV})
+        self.assertEqual(resp2.status_code, 201, resp2.data)
+
+        # Same zip name, isolated per-user batch directories.
+        dir_a = os.path.join(self.batch_base, 'SHARED')
+        dir_b = os.path.join(_user_upload_dir(other, 'batch'), 'SHARED')
+        self.assertTrue(os.path.exists(os.path.join(dir_a, 'a.csv')))
+        self.assertFalse(os.path.exists(os.path.join(dir_a, 'b.csv')))
+        self.assertTrue(os.path.exists(os.path.join(dir_b, 'b.csv')))
+        self.assertFalse(os.path.exists(os.path.join(dir_b, 'a.csv')))

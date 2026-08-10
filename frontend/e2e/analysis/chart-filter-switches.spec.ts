@@ -5,7 +5,7 @@ import { selectAnalysisFile, listParams } from '../helpers/params'
 import { RECOMMENDED } from '../fixtures/test-data'
 
 /**
- * 图表配置「数据筛选」开关（仅用Pass数据 / 仅显示Fail测试项 / 仅显示低CPK项 / 忽略无测试值）。
+ * 图表配置「数据筛选」开关（忽略无Limit / 仅用Pass数据 / 仅显示Fail测试项 / 仅显示低CPK项 / 忽略无测试值）。
  *
  * 需求：
  *   - 开关切换后，参数列表（快路径）与直方图/序列分布请求都携带对应字段；
@@ -151,6 +151,37 @@ test.describe('@p1 图表配置数据筛选开关', { tag: ['@p1', '@analysis'] 
     await waitLoadingGone(page.locator(SINGLE))
     const after = await listParams(page)
     expect(after, '全 Pass 文件过滤后列表应保持不变').toEqual(before)
+    await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
+  })
+
+  test('忽略无Limit：位于数据筛选区首位，切换后快路径请求携带 ignore_no_limit', async ({ page }) => {
+    await gotoApp(page, '/analysis')
+    await selectAnalysisFile(page, RECOMMENDED.analysis)
+    await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
+    await waitLoadingGone(page.locator(SINGLE))
+    await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
+
+    // 首位断言：数据筛选区第一个 el-checkbox 即「忽略无Limit」
+    await expect(page.locator('.filter-section .el-checkbox').first()).toContainText('忽略无Limit')
+
+    // 快路径请求（body 无 params 字段，AnalysisPage onFileChange）必须携带 ignore_no_limit:true；
+    // 谓词用「无 params」排除 useHistogram watch 发的计算路径请求
+    const fastResp = page.waitForResponse(
+      (r) =>
+        r.url().includes('/analysis/histogram/') &&
+        r.request().method() === 'POST' &&
+        r.request().postData()?.includes('"ignore_no_limit":true') === true &&
+        r.request().postData()?.includes('"params":') === false &&
+        r.status() < 500,
+      { timeout: 20_000 },
+    )
+    // 先勾再取消再勾，确保注册后有请求到达（沿用 data_only_bin1 的防竞态模式）
+    await toggleFilter(page, '忽略无Limit')
+    await toggleFilter(page, '忽略无Limit')
+    await toggleFilter(page, '忽略无Limit')
+    const fast = await fastResp
+    expect(fast.request().postData() || '', '快路径请求应携带 ignore_no_limit').toContain('"ignore_no_limit":true')
+    await waitLoadingGone(page.locator(SINGLE))
     await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
   })
 })

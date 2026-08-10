@@ -331,6 +331,13 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@p0', '@p1', '@
     await expect(dialog).toContainText('CPK', { timeout: 20_000 })
     // 图表容器已渲染（echarts）
     await expect(dialog.locator('.chart-container')).toBeVisible({ timeout: 10_000 })
+    // 弹窗尺寸已加大（原 720px 宽 / 380px 高）：默认视口 1280×720 下应为 960×504
+    const dialogBox = await dialog.boundingBox()
+    expect(dialogBox).not.toBeNull()
+    expect(dialogBox!.width).toBeGreaterThan(900)
+    const bodyBox = await dialog.locator('.hist-body').boundingBox()
+    expect(bodyBox).not.toBeNull()
+    expect(bodyBox!.height).toBeGreaterThanOrEqual(480)
 
     // 关闭
     await dialog.locator('.el-dialog__headerbtn').click()

@@ -2,8 +2,8 @@
 
 import numpy as np
 import pandas as pd
-from scipy.stats import gaussian_kde
 
+from apps.analysis.services.statistics.kde import GaussianKDE
 from apps.analysis.services.statistics import (
     compute_cpk,
     compute_range_statistics,
@@ -15,6 +15,7 @@ from apps.analysis.services.statistics import (
     site_sort_key,
     normal_pdf_curve,
 )
+from apps.analysis.services.statistics.helpers import _dense_x_grid
 from apps.analysis.services.statistics.outliers import detect_outliers_iqr
 from apps.analysis.services.limits import resolve_limits
 
@@ -26,18 +27,18 @@ def compute_kde_curve(data_series, bin_min, bin_max, n_points=200):
     bimodal / multimodal / skewed shapes (common when sites or process
     populations mix).  Returns ``None`` for degenerate input (< 3 samples,
     zero variance, failed fit) so the front-end simply skips the overlay.
-    Caller passes the full visible axis range (underflow/overflow bin
-    centers included), so the overlay also covers the fail-region bars
-    outside the spec limits.
+    ``_dense_x_grid`` keeps tight distributions (σ << grid step) from
+    slipping between the evenly spaced sample points.
     """
     vals = data_series.astype(float)
     if len(vals) < 3 or np.ptp(vals) == 0:
         return None
     try:
-        kde = gaussian_kde(vals, bw_method='silverman')
+        kde = GaussianKDE(vals, bw_method='silverman')
     except Exception:
         return None
-    x = np.linspace(bin_min, bin_max, n_points)
+    x = _dense_x_grid(bin_min, bin_max, n_points,
+                      float(vals.mean()), float(vals.std(ddof=0)))
     y = kde(x)
     if np.max(y) <= 0:
         return None
@@ -168,34 +169,35 @@ def compute_histogram_stats(df, metadata, param, site_col,
         bin_max += 0.5
     data_gap = safe_gap(bin_min, bin_max)
 
-    # 曲线采样范围与柱子/坐标轴一致：下溢 bin 中心（bin_min - gap）到上溢
-    # bin 中心（bin_max + gap）。此前只采 [bin_min, bin_max]——RDL 模式下恰为
-    # 规格限区间，曲线止步于 LSL/USL 线，而限外 fail 数据在溢出 bin 有柱子
-    # （fail bin 着色），同一张图曲线与柱子覆盖区域不一致。
-    curve_min = bin_min - data_gap
-    curve_max = bin_max + data_gap
+    # Bin edges & centers must exist before the density curves: the curves
+    # sample over the full visible X-axis — bin_centers[0..-1], which extend
+    # one gap past the underflow/overflow bin centres — so they fill the
+    # axis edge to edge instead of stopping at the binning bounds.
+    inner_edges = [bin_min + j * data_gap for j in range(25)]
+    bin_centers = [inner_edges[0] - data_gap]  # underflow center
+    bin_centers += [(inner_edges[i] + inner_edges[i + 1]) / 2 for i in range(24)]
+    bin_centers.append(inner_edges[-1] + data_gap)  # overflow center
 
-    # KDE 曲线：全量口径（kde_curve）与 IQR 裁剪口径（filtered_kde_curve）
-    # 各一份，前端按异常值处理开关选择——与 normal_curve/filtered_normal_curve
-    # 同构，曲线永远与柱形同源（off 模式柱是全量、clip 模式柱是 IQR 界内）。
-    # 裁剪口径与 filtered_mean/std 同源（同一个 normal_data，IQR fence 已扩展
-    # 至规格限，故规格限内数据任何模式下都进曲线）。
-    kde_curve = compute_kde_curve(data_series, curve_min, curve_max)
+    # KDE curve: non-parametric density overlay.  Two variants mirroring the
+    # normal curve pair: ``kde_curve`` covers ALL data (so out-of-spec / fail
+    # values surface as their own bump, and off-mode bars stay consistent),
+    # ``filtered_kde_curve`` drops IQR outliers (main peak stays faithful).
+    # The front-end picks by its「KDE含超限」toggle — no extra request.
+    kde_curve = compute_kde_curve(data_series, bin_centers[0], bin_centers[-1])
     filtered_kde_curve = None
     if normal_data is not None and len(normal_data) > 1:
-        filtered_kde_curve = compute_kde_curve(normal_data, curve_min, curve_max)
+        filtered_kde_curve = compute_kde_curve(normal_data, bin_centers[0], bin_centers[-1])
 
-    # 正态 PDF 曲线（与 KDE 同采样区间 [curve_min, curve_max]）：raw 与裁剪
-    # 口径各一份，前端按异常值处理开关选择——公式单一来源 normal_pdf_curve
-    normal_curve = normal_pdf_curve(stats['mean'], stats['std'], curve_min, curve_max)
+    # 正态 PDF 曲线（与 KDE 同采样区间，覆盖整个可见 X 轴）：raw 与裁剪口径
+    # 各一份，前端按异常值处理开关选择——公式单一来源 normal_pdf_curve
+    normal_curve = normal_pdf_curve(stats['mean'], stats['std'], bin_centers[0], bin_centers[-1])
     if filtered_std is not None and filtered_std > 0:
-        filtered_normal_curve = normal_pdf_curve(filtered_mean, filtered_std, curve_min, curve_max)
+        filtered_normal_curve = normal_pdf_curve(filtered_mean, filtered_std, bin_centers[0], bin_centers[-1])
 
     # Build bin edges with underflow (-inf) and overflow (+inf) bins.
-    # 25 inner edges create 24 normal bins that exactly cover
-    # [bin_min, bin_max]; the two catch-all bins keep values outside the
-    # selected range visible (and colourable as fail bins).
-    inner_edges = [bin_min + j * data_gap for j in range(25)]
+    # 25 inner edges step from bin_min by data_gap (range/20) → 24 normal
+    # bins (first 20 cover [bin_min, bin_max]); the two catch-all bins keep
+    # values outside the selected range visible (and colourable as fail bins).
     all_bins = np.array([-np.inf] + inner_edges + [np.inf])
     # 27 edges → 26 bins: 1 underflow + 24 normal + 1 overflow
 
@@ -205,13 +207,6 @@ def compute_histogram_stats(df, metadata, param, site_col,
         round(c / total_count * 100, 2) if total_count > 0 else 0
         for c in hist_counts
     ]
-
-    # Bin centers: underflow/overflow sit one gap outside the selected range,
-    # normal bins use midpoint so the 24 normal centers land inside
-    # [bin_min, bin_max].
-    bin_centers = [inner_edges[0] - data_gap]  # underflow center
-    bin_centers += [(inner_edges[i] + inner_edges[i + 1]) / 2 for i in range(24)]
-    bin_centers.append(inner_edges[-1] + data_gap)  # overflow center
 
     site_histograms = None
     if site_col and site_idx is not None and len(site_idx.unique()) >= 1:

@@ -5,14 +5,11 @@ The normal distribution overlay is a poor fit for non-normal / bimodal data
 returns a non-parametric Gaussian KDE curve sampled over the binning range;
 these tests pin its shape semantics:
 
-  - unimodal data → single peak, 200 points spanning the full visible
-    axis (underflow bin center to overflow bin center — i.e. one gap
-    beyond the binning range, so the overlay also covers fail-region
-    bars outside the spec limits);
+  - unimodal data → single peak, 200 points inside the bin range;
   - bimodal data (two overlapping gaussians) → two distinct local maxima;
   - degenerate input (< 3 samples, zero variance) → ``kde_curve`` is None,
     never a crash;
-  - CL mode → curve spans the user-supplied custom range ± one gap.
+  - CL mode → curve spans the user-supplied custom range.
 
 Run directly:  python test/backend/test_histogram_kde.py
 """
@@ -61,14 +58,13 @@ def test_unimodal_data_single_peak():
     curve = r['kde_curve']
     assert curve is not None
     assert len(curve) == 200, len(curve)
-    # Curve spans the full visible axis: underflow bin center (bin_min - gap)
-    # to overflow bin center (bin_max + gap) — it must extend past the spec
-    # limits so the fail-region bars outside them are covered too. Density is
-    # non-negative and the tails (far from the data) may legitimately round
-    # to 0.0 at 6 decimals.
-    gap = (14.3 - 8.0) / 20
+    # Curve spans the full visible X-axis: bin_centers extend one gap past
+    # the binning range to the underflow/overflow bin centres, and the curve
+    # must fill the axis edge to edge.  Density stays non-negative; the tails
+    # (far from the data) may legitimately round to 0.0 at 6 decimals.
     xs = _xs(curve)
-    assert min(xs) == round(8.0 - gap, 6) and max(xs) == round(14.3 + gap, 6), (min(xs), max(xs))
+    assert min(xs) == r['bin_centers'][0], (min(xs), r['bin_centers'][0])
+    assert max(xs) == r['bin_centers'][-1], (max(xs), r['bin_centers'][-1])
     assert all(p[1] >= 0 for p in curve)
     assert max(p[1] for p in curve) > 0
     # A single gaussian → exactly one local maximum.
@@ -93,21 +89,21 @@ def test_bimodal_data_two_peaks():
 
 
 def test_tight_data_still_yields_curve():
-    """Small-but-valid samples (7 points, span ~0.007) still produce a curve.
-
-    Uses the DR (data range) range: with RDL the grid spacing (~0.035) is
-    ~5x the data span, so no sampled point lands inside the cluster and the
-    density underflows to 0.0 at 6 decimals regardless of the code being
-    correct — asserting ``max > 0`` there only pins grid-alignment luck.
-    """
+    """Tiny-span data (7 points, span ~0.007 << RDL bin width) still produce
+    a curve: the evenly spaced grid would miss the data entirely, so the
+    dense-grid fallback must kick in (regression: curve was all zeros after
+    the backend merge dropped the front-end's std < binGap extra points)."""
     vals = [10.4480, 10.4495, 10.4510, 10.4519, 10.4530, 10.4545, 10.4553]
-    r = compute_histogram_stats(_df(vals), METADATA, PARAM, None, range_type='DR')
+    r = compute_histogram_stats(_df(vals), METADATA, PARAM, None, range_type='RDL')
     curve = r['kde_curve']
     assert curve is not None
-    assert len(curve) == 200
+    # Dense grid adds ~60 extra points inside the data region.
+    assert len(curve) >= 200, len(curve)
     assert all(p[1] >= 0 for p in curve)
-    assert max(p[1] for p in curve) > 0
-    print('tight data: curve produced OK')
+    # Peak must sit inside the data span (dense sampling actually hit it).
+    peak_x = max(curve, key=lambda p: p[1])[0]
+    assert 10.44 < peak_x < 10.47, peak_x
+    print('tight data: curve produced OK (peak at %.6f)' % peak_x)
 
 
 def test_degenerate_inputs_return_none():
@@ -120,6 +116,44 @@ def test_degenerate_inputs_return_none():
     print('degenerate: kde_curve=None OK')
 
 
+def test_kde_curves_split_by_outlier_inclusion():
+    """「KDE含超限」数据源：``kde_curve`` 含超限 fail 峰（全量），
+    ``filtered_kde_curve`` 剔除 IQR 异常值（主峰保真）。"""
+    vals = np.concatenate([RNG.normal(11.0, 0.8, 500), [30.0] * 20])
+    # DR 模式：X 轴覆盖数据范围，fail=30 落在可见轴内
+    r = compute_histogram_stats(_df(vals), METADATA, PARAM, None, range_type='DR')
+    assert r['outlier_info']['has_outliers'] is True
+
+    full = r['kde_curve']
+    filtered = r['filtered_kde_curve']
+    assert full is not None and filtered is not None
+
+    # 全量曲线在 fail=30 附近有密度峰
+    tail_y = [y for x, y in full if 29.0 <= x <= 31.0]
+    assert tail_y, 'full curve should sample the fail region'
+    assert max(tail_y) > 0.001, max(tail_y)
+
+    # 剔除曲线在 fail 区域为 0（超限数据被 IQR 判为异常值剔除）
+    filt_tail = [y for x, y in filtered if 29.0 <= x <= 31.0]
+    assert all(y == 0 for y in filt_tail)
+
+    # 剔除曲线主峰高于全量：fail 归一化压低主峰（scipy silverman 非 IQR 鲁棒）
+    assert max(p[1] for p in filtered) > max(p[1] for p in full), (
+        max(p[1] for p in filtered), max(p[1] for p in full))
+    print('kde/filtered split: fail peak %.4f, filtered main %.4f > full main %.4f OK'
+          % (max(tail_y), max(p[1] for p in filtered), max(p[1] for p in full)))
+
+
+def test_no_outliers_filtered_kde_none():
+    """无异常值时 filtered_kde_curve 为 None（与 filtered_normal_curve 对称）。"""
+    vals = [10.4480, 10.4495, 10.4510, 10.4519, 10.4530, 10.4545, 10.4553]
+    r = compute_histogram_stats(_df(vals), METADATA, PARAM, None, range_type='RDL')
+    assert r['outlier_info']['has_outliers'] is False
+    assert r['kde_curve'] is not None
+    assert r['filtered_kde_curve'] is None
+    print('no outliers: filtered_kde_curve=None OK')
+
+
 def test_cl_mode_curve_spans_custom_range():
     vals = RNG.normal(11.0, 0.8, 500)
     r = compute_histogram_stats(
@@ -128,9 +162,11 @@ def test_cl_mode_curve_spans_custom_range():
     curve = r['kde_curve']
     assert curve is not None
     xs = _xs(curve)
-    gap = (13.0 - 9.0) / 20
-    assert min(xs) == round(9.0 - gap, 6) and max(xs) == round(13.0 + gap, 6), (min(xs), max(xs))
-    print('CL: curve spans [8.8, 13.2] OK')
+    # CL binning range [9.0, 13.0] plus one gap on each side (underflow /
+    # overflow bin centres) — the curve must cover the full visible X-axis.
+    assert min(xs) == r['bin_centers'][0], (min(xs), r['bin_centers'][0])
+    assert max(xs) == r['bin_centers'][-1], (max(xs), r['bin_centers'][-1])
+    print('CL: curve spans [%.4f, %.4f] OK' % (min(xs), max(xs)))
 
 
 if __name__ == '__main__':

@@ -8,8 +8,8 @@ import math
 from typing import Optional, Dict, List, Tuple, Any
 import pandas as pd
 import numpy as np
-from scipy import stats as sp_stats
 
+from .distributions import norm_probplot, t_cdf
 from .helpers import safe_gap, get_1d_from, get_coord_columns
 from .limits import parse_limit_string
 from .outliers import detect_outliers_iqr
@@ -169,7 +169,7 @@ def compute_correlation_matrix(df: pd.DataFrame, params: List[str], method: str 
     if n_obs > 2:
         with np.errstate(divide='ignore', invalid='ignore'):
             t_values = r_values * np.sqrt((n_obs - 2) / (1 - r_values ** 2))
-        p_values = 2 * (1 - sp_stats.t.cdf(np.abs(t_values), df=n_obs - 2))
+        p_values = 2 * (1 - t_cdf(np.abs(t_values), df=n_obs - 2))
         np.fill_diagonal(p_values, 1.0)
         p_values = np.nan_to_num(p_values, nan=1.0, posinf=1.0, neginf=1.0)
     else:
@@ -320,7 +320,7 @@ def compute_range_statistics(data_series: pd.Series, metadata: Dict, selected_pa
 
 def compute_qqplot(data_series: pd.Series, metadata: dict = None, param: str = None) -> Dict[str, Any]:
     """
-    Compute QQ plot data for normality testing using scipy.stats.probplot.
+    Compute QQ plot data for normality testing (norm_probplot — numpy).
 
     Args:
         data_series: Numeric data series to test for normality.
@@ -351,9 +351,8 @@ def compute_qqplot(data_series: pd.Series, metadata: dict = None, param: str = N
         }
 
     try:
-        from scipy import stats as scipy_stats
         # probplot returns ((osm, osr), (slope, intercept, r)) when fit=True
-        pp_result = scipy_stats.probplot(clean, dist='norm', fit=True)
+        pp_result = norm_probplot(clean)
         (osm, osr) = pp_result[0]  # theoretical quantiles and sorted observed values
         r = pp_result[1][2]         # correlation coefficient (R)
         theoretical = [round(float(v), 6) for v in osm]

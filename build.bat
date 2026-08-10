@@ -25,6 +25,17 @@ echo [pre] Waiting for file handles to release...
 timeout /t 3 /nobreak >nul
 
 REM ------------------------------------------------------------
+REM  Mark build output dirs as "not content indexed" so Windows
+REM  Search (WSearch) never opens freshly written exe files — that
+REM  lock made electron-builder's rcedit fail with "Unable to commit
+REM  changes" (WinError 5) on the ~188 MB main exe. Attribute is
+REM  persistent; harmless if already set.
+REM ------------------------------------------------------------
+attrib +I out >nul 2>&1
+attrib +I dist >nul 2>&1
+attrib +I build >nul 2>&1
+
+REM ------------------------------------------------------------
 REM  Clean previous build output so electron-builder never hits
 REM  "The process cannot access the file because it is being used
 REM  by another process" on stale out/ folders.

@@ -93,6 +93,11 @@ function extractLimitLines(option: any): { lower: number | null; upper: number |
   return { lower, upper }
 }
 
+function findSeriesData(option: any, name: string): any {
+  const series = option?.series || []
+  return series.find((s: any) => s.name === name)?.data ?? null
+}
+
 function countNonEmptyBins(option: any, lower: number, upper: number) {
   const barSeries = (option?.series || []).filter((s: any) => s.type === 'bar')
   let total = 0
@@ -139,6 +144,58 @@ test.describe('@p1 异常值处理', { tag: ['@p1', '@analysis'] }, () => {
     if (info.outlier_values && info.outlier_values.length > 0) {
       expect(tooltipText).toContain(info.outlier_values[0].toFixed(4))
     }
+  })
+
+  test('KDE 曲线口径与异常值模式解耦（开关全局生效：勾选=全量 / 不勾选=剔除）', async ({ page }) => {
+    const found = await findParamWithOutliers(page)
+    test.skip(!found, '当前数据文件未找到含异常值的参数')
+
+    const outlierSelect = page.locator('.el-form-item').filter({ hasText: '异常值处理' }).locator('.el-select').first()
+    const kdeFullCheckbox = page.locator(`${SINGLE} .config-checkboxes .el-checkbox`).filter({ hasText: 'KDE含超限' })
+
+    // 确保 RDL + 不处理（默认状态，KDE 默认勾选、含超限默认不勾选）
+    const rangeSelect = page.locator(`${SINGLE} .config-section`).filter({ hasText: '范围类型' }).locator('.el-select').first()
+    await rangeSelect.click()
+    await page.locator('.el-select-dropdown__item:visible').filter({ hasText: 'RowDataLimit' }).first().click()
+    await waitLoadingGone(page.locator(SINGLE))
+    await outlierSelect.click()
+    await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '不处理' }).first().click()
+    await waitLoadingGone(page.locator(SINGLE))
+    await page.waitForTimeout(500)
+
+    // off + 开关关（默认）：KDE = 剔除曲线（不含超限数据，主峰忠实）
+    const kdeOffFiltered = findSeriesData(await getHistogramChartOption(page), 'KDE曲线')
+    expect(kdeOffFiltered, 'off 模式应渲染 KDE 曲线').toBeTruthy()
+
+    // off + 勾选「KDE含超限」→ 全量曲线（含超限数据）——开关全局生效的关键断言
+    await kdeFullCheckbox.click()
+    await expect(kdeFullCheckbox, '勾选后应为选中态').toHaveClass(/is-checked/)
+    await page.waitForTimeout(500)
+    const kdeOffFull = findSeriesData(await getHistogramChartOption(page), 'KDE曲线')
+    expect(kdeOffFull, 'off 下勾选含超限应为全量曲线（≠ 剔除曲线）').not.toEqual(kdeOffFiltered)
+    await kdeFullCheckbox.click()
+
+    // 裁剪范围 + 开关关 → 剔除曲线，与 off 不勾选逐字节一致（与模式解耦）
+    await outlierSelect.click()
+    await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '裁剪范围' }).first().click()
+    await waitLoadingGone(page.locator(SINGLE))
+    await page.waitForTimeout(500)
+    const kdeClipFiltered = findSeriesData(await getHistogramChartOption(page), 'KDE曲线')
+    expect(kdeClipFiltered, 'clip 模式应渲染 KDE 曲线').toBeTruthy()
+    expect(kdeClipFiltered, 'clip 不勾选应为剔除曲线（= off 不勾选，与模式解耦）').toEqual(kdeOffFiltered)
+
+    // 裁剪范围 + 开关开 → 全量曲线（= off 勾选）
+    await kdeFullCheckbox.click()
+    await expect(kdeFullCheckbox, '勾选后应为选中态').toHaveClass(/is-checked/)
+    await page.waitForTimeout(500)
+    const kdeClipFull = findSeriesData(await getHistogramChartOption(page), 'KDE曲线')
+    expect(kdeClipFull, 'clip 下勾选含超限应为全量曲线（= off 勾选）').toEqual(kdeOffFull)
+
+    // 清理：取消开关、恢复不处理
+    await kdeFullCheckbox.click()
+    await outlierSelect.click()
+    await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '不处理' }).first().click()
+    await waitLoadingGone(page.locator(SINGLE))
   })
 
   test('切换异常值处理模式控制提示条显隐', async ({ page }) => {

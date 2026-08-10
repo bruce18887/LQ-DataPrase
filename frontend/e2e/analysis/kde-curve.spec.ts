@@ -33,6 +33,10 @@ function kdeCheckbox(page: import('@playwright/test').Page) {
   return page.locator(`${SINGLE} .config-checkboxes .el-checkbox`).filter({ hasText: 'KDE曲线' })
 }
 
+function kdeFullCheckbox(page: import('@playwright/test').Page) {
+  return page.locator(`${SINGLE} .config-checkboxes .el-checkbox`).filter({ hasText: 'KDE含超限' })
+}
+
 function normalCheckbox(page: import('@playwright/test').Page) {
   return page.locator(`${SINGLE} .config-checkboxes .el-checkbox`).filter({ hasText: '正态分布' })
 }
@@ -77,6 +81,31 @@ test.describe('@p1 KDE曲线显示开关', { tag: ['@p1', '@analysis'] }, () => 
     await expect
       .poll(async () => legendText(page), { timeout: 8_000 })
       .toContain('KDE密度')
+  })
+
+  test('「KDE含超限」开关默认关闭，可勾选切换且不影响 KDE 曲线显示', async ({ page }) => {
+    await gotoApp(page, '/analysis')
+    await selectAnalysisFile(page, RECOMMENDED.analysis)
+    await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
+    await waitLoadingGone(page.locator(SINGLE))
+    await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
+
+    // 默认状态：未勾选（保持剔除口径主峰保真）
+    await expect(kdeFullCheckbox(page), 'KDE含超限应默认未勾选').not.toHaveClass(/is-checked/)
+
+    // 勾选 → 选中态，图例 KDE曲线 仍在（曲线数据源切换，形状变化由后端单测覆盖）
+    await kdeFullCheckbox(page).click()
+    await expect(kdeFullCheckbox(page), '勾选后应为选中态').toHaveClass(/is-checked/)
+    await expect
+      .poll(async () => legendText(page), { timeout: 8_000 })
+      .toContain('KDE曲线')
+
+    // 取消 → 恢复未选中
+    await kdeFullCheckbox(page).click()
+    await expect(kdeFullCheckbox(page), '取消后应为未选中态').not.toHaveClass(/is-checked/)
+    await expect
+      .poll(async () => legendText(page), { timeout: 8_000 })
+      .toContain('KDE曲线')
   })
 
   test('回归：正态分布开关仍可独立控制', async ({ page }) => {

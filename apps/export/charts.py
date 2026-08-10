@@ -8,6 +8,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from apps.analysis.services.statistics.helpers import normal_pdf_curve
+from apps.analysis.services.statistics.kde import GaussianKDE
 
 COLORS_SITE_8 = ['#E53935', '#1E88E5', '#43A047', '#F9A825', '#8E24AA', '#00ACC1', '#F57C00', '#D81B60']
 COLOR_LSL = '#C62828'
@@ -137,10 +138,9 @@ def _render_histogram_payload(
         # that the normal curve cannot represent.  Best-effort — a failed fit
         # (degenerate data) just omits the curve instead of failing the export.
         try:
-            from scipy.stats import gaussian_kde
             kde_vals = np.asarray(data_series, dtype=float)
             if len(kde_vals) >= 3 and np.ptp(kde_vals) > 0:
-                kde = gaussian_kde(kde_vals, bw_method='silverman')
+                kde = GaussianKDE(kde_vals, bw_method='silverman')
                 x_kde = np.linspace(x_labels[0], x_labels[-1], 200)
                 kde_values = kde(x_kde)
                 max_kde = np.max(kde_values)

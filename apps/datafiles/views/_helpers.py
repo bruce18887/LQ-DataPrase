@@ -1,9 +1,12 @@
 """Private helper functions for datafiles views."""
 
 import os
+import re
 import shutil
+import zipfile
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 from apps.datafiles.models import DataFile, ParseHistory
@@ -164,6 +167,103 @@ def _batch_ctx(file_path, batch_base):
     batch_name = parts[0] if len(parts) >= 2 else ''
     sub_batch = os.sep.join(parts[1:-1]) if len(parts) >= 3 else ''
     return batch_name, sub_batch
+
+
+def _zip_base_name(filename):
+    """Strip a trailing ``.zip`` (case-insensitive) and clean Windows-illegal
+    filename characters so the name is safe as a batch directory name.
+    """
+    base = re.sub(r'\.zip$', '', filename, flags=re.IGNORECASE)
+    base = re.sub(r'[<>:"/\\|?*]', '_', base).strip()
+    return base or 'archive'
+
+
+def _safe_extract_zip(zip_file, dest_dir):
+    """Extract a zip archive into ``dest_dir`` with Zip-Slip protection.
+
+    Returns the list of successfully extracted file paths. Archive members
+    that would escape ``dest_dir`` (absolute paths, ``..`` segments, drive
+    letters) and members that fail to write (bad encoding, IO errors) are
+    skipped individually rather than failing the whole archive.
+
+    ``zip_file`` may be a file-like object (e.g. Django's UploadedFile)
+    or a path; the archive is streamed, never written to disk first.
+    """
+    extracted = []
+    with zipfile.ZipFile(zip_file) as zf:
+        for member in zf.infolist():
+            if member.is_dir() or not member.filename:
+                continue
+            # Normalize separators, strip leading slashes, reject drive letters
+            # and any ``..`` path segment (Zip-Slip).
+            name = member.filename.replace('\\', '/')
+            name = name.lstrip('/')
+            if re.match(r'^[a-zA-Z]:', name) or any(seg == '..' for seg in name.split('/')):
+                continue
+            target = os.path.join(dest_dir, name)
+            real_dest = os.path.realpath(dest_dir)
+            try:
+                if os.path.commonpath([real_dest, os.path.realpath(target)]) != real_dest:
+                    continue
+            except ValueError:
+                continue  # different drive → outside dest_dir
+            try:
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                with zf.open(member) as src, open(target, 'wb') as dst:
+                    shutil.copyfileobj(src, dst)
+                extracted.append(target)
+            except (OSError, ValueError, RuntimeError):
+                continue
+    return extracted
+
+
+def _register_zip_batch(user, zip_file, filename):
+    """Extract ``filename``'s zip and register every CSV inside as batch data.
+
+    Returns ``(created, error_message)``:
+    - success: ``(list[DataFile], None)`` — CSVs registered under the batch
+      named after the zip (minus ``.zip``), sub-batches from zip sub-directories;
+    - corrupt archive: ``([], '压缩包 {filename} 已损坏，无法解压')``;
+    - no CSV found: ``([], '压缩包 {filename} 内未找到 CSV 数据文件')`` —
+      only a freshly-created destination directory is removed, never an
+      existing batch directory.
+
+    Mirrors ``BatchDirImportView.post`` registration semantics: already
+    registered paths are skipped, ``Sum_*`` summary dumps are ignored.
+    """
+    batch_name = _zip_base_name(filename)
+    dest_dir = os.path.join(_user_upload_dir(user, 'batch'), batch_name)
+    dir_existed = os.path.isdir(dest_dir)
+    os.makedirs(dest_dir, exist_ok=True)
+
+    try:
+        extracted = _safe_extract_zip(zip_file, dest_dir)
+    except zipfile.BadZipFile:
+        return [], f'压缩包 {filename} 已损坏，无法解压'
+
+    csv_paths = [p for p in extracted if _is_data_csv(os.path.basename(p))]
+    if not csv_paths:
+        if not dir_existed:
+            shutil.rmtree(dest_dir, ignore_errors=True)
+        return [], f'压缩包 {filename} 内未找到 CSV 数据文件'
+
+    existing_paths = set(
+        os.path.normpath(p) for p in
+        DataFile.objects.filter(owner=user, file_type='batch', batch_name=batch_name)
+        .values_list('file_path', flat=True)
+    )
+    batch_base = _user_upload_dir(user, 'batch')
+    created = []
+    with transaction.atomic():
+        for fp in csv_paths:
+            if os.path.normpath(fp) in existing_paths:
+                continue  # already registered (re-upload of the same zip)
+            _, sub_batch = _batch_ctx(fp, batch_base)
+            try:
+                created.append(_register_file(user, fp, 'batch', batch_name, sub_batch))
+            except Exception:
+                continue
+    return created, None
 
 
 def _resolve_product_code(filename, file_path, program_name):

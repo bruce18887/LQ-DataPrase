@@ -35,6 +35,14 @@ test.describe('@p0 认证与路由守卫', { tag: ['@p0', '@p1', '@p2', '@auth']
     await expect(page.locator('.main-layout')).toBeVisible()
   })
 
+  test('@p1 admin 登录后顶栏显示「管理员」角色徽标', async ({ page }) => {
+    // 回归：打包版首启若把 admin 建成 role='user'，登录响应角色即普通用户，
+    // 顶栏/侧边栏按 role 判断会丢失管理员入口（Topbar.vue roleLabel）。
+    // 断言顶栏徽标锁定「登录响应 role → authStore user → UI 展示」整条链路。
+    await loginAs(page, 'admin')
+    await expect(page.locator('.user-role')).toHaveText('管理员')
+  })
+
   test('@p1 错误密码登录失败、停留登录页且未获得登录态', async ({ page }) => {
     // 注意：登录接口 401 会被 api/index.ts 的全局响应拦截器捕获并
     // window.location.href='/login'，导致 LoginPage 的内联 error-msg 来不及展示

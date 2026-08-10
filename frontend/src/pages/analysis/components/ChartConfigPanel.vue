@@ -24,6 +24,7 @@
           <el-checkbox value="s4">4σ线</el-checkbox>
           <el-checkbox value="s6">6σ线</el-checkbox>
           <el-checkbox value="kde">KDE曲线</el-checkbox>
+          <el-checkbox value="kde_full">KDE含超限</el-checkbox>
         </template>
         <el-checkbox value="normal">正态分布</el-checkbox>
       </el-checkbox-group>
@@ -81,29 +82,27 @@
       </div>
     </el-collapse-transition>
 
-    <!-- 过滤选项 -->
-    <div class="config-section">
-      <el-checkbox :model-value="ignoreNoLimit" size="small" @change="onIgnoreNoLimitChange">
-        忽略无Limit
-      </el-checkbox>
-    </div>
-
-    <!-- 数据筛选（仅单参数完整版） -->
-    <div v-if="variant === 'full'" class="config-section filter-section">
+    <!-- 数据筛选：忽略无Limit 两种变体都显示，其余四项仅单参数完整版 -->
+    <div class="config-section filter-section">
       <div class="section-label">数据筛选</div>
       <div class="filter-checkboxes">
-        <el-checkbox :model-value="ignoreNoTestValue" size="small" @change="onIgnoreNoTestValueChange">
-          忽略无测试值
+        <el-checkbox :model-value="ignoreNoLimit" size="small" @change="onIgnoreNoLimitChange">
+          忽略无Limit
         </el-checkbox>
-        <el-checkbox :model-value="dataOnlyBin1" size="small" @change="onDataOnlyBin1Change">
-          仅用Pass数据(Bin1)
-        </el-checkbox>
-        <el-checkbox :model-value="onlyFailTestItem" size="small" @change="onOnlyFailTestItemChange">
-          仅显示Fail测试项
-        </el-checkbox>
-        <el-checkbox :model-value="onlyLowCpk" size="small" @change="onOnlyLowCpkChange">
-          仅显示低CPK项
-        </el-checkbox>
+        <template v-if="variant === 'full'">
+          <el-checkbox :model-value="ignoreNoTestValue" size="small" @change="onIgnoreNoTestValueChange">
+            忽略无测试值
+          </el-checkbox>
+          <el-checkbox :model-value="dataOnlyBin1" size="small" @change="onDataOnlyBin1Change">
+            仅用Pass数据(Bin1)
+          </el-checkbox>
+          <el-checkbox :model-value="onlyFailTestItem" size="small" @change="onOnlyFailTestItemChange">
+            仅显示Fail测试项
+          </el-checkbox>
+          <el-checkbox :model-value="onlyLowCpk" size="small" @change="onOnlyLowCpkChange">
+            仅显示低CPK项
+          </el-checkbox>
+        </template>
       </div>
     </div>
   </el-card>

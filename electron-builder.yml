@@ -20,6 +20,12 @@ appId: com.lq-dataprase.app
 productName: LQ-DataPrase
 copyright: "Copyright © 2024 LQ-DataPrase"
 
+# 只保留中/英语言包：Chromium 默认 55 个 locale 的 .pak 合计 ~41MB，
+# 仅 zh-CN + en-US（en-US 作为 Chromium 兜底语言）即可。
+electronLanguages:
+  - zh-CN
+  - en-US
+
 directories:
   app: frontend
   output: out
