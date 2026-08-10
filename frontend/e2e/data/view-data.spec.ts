@@ -114,7 +114,7 @@ async function ensureRowRendered(page: Page, rowIndex: number) {
   return row
 }
 
-test.describe('数据管理 → 查看数据页优化', { tag: ['@p0', '@p1', '@p2', '@data'] }, () => {
+test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () => {
   test('@p0 未选文件：空态引导 + 去文件列表按钮', async ({ page }) => {
     await gotoApp(page, '/data')
     await page.locator('.tab-btn').filter({ hasText: '查看数据' }).click()

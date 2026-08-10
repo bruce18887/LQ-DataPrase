@@ -60,7 +60,8 @@ async function expandCollapsedSection(page: import('@playwright/test').Page, tit
  *  - UPH 卡片：components/UphCard.vue 头部「⚡ UPH 效率分析」、单位「Units/Hour」
  */
 
-test.describe('仪表板', { tag: ['@p0', '@p1', '@p2', '@dashboard'] }, () => {
+// describe 只挂模块 tag，优先级由各用例标题的 @pN 前缀承担（避免用例在多个 P 项目重复执行）
+test.describe('仪表板', { tag: ['@dashboard'] }, () => {
   test('@p0 页面渲染无报错', async ({ page }) => {
     const errors = collectConsoleErrors(page)
     await gotoApp(page, '/dashboard')

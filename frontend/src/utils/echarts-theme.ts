@@ -14,9 +14,9 @@ import { computed } from 'vue'
 // ============================================================
 let _chartRenderer: 'svg' | 'canvas' = 'svg'
 
-/** 获取 echarts.init 的第三个参数（渲染器配置） */
-export function getChartInitOpts(): { renderer: 'svg' | 'canvas' } {
-  return { renderer: _chartRenderer }
+/** 获取 echarts.init 的第三个参数（渲染器配置）；单图可覆盖（如大数据量强制 canvas） */
+export function getChartInitOpts(rendererOverride?: 'svg' | 'canvas'): { renderer: 'svg' | 'canvas' } {
+  return { renderer: rendererOverride ?? _chartRenderer }
 }
 
 /** 运行时动态设置渲染器 */

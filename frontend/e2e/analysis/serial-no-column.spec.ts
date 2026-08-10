@@ -46,11 +46,45 @@ const NO_COORD_CSV = [
   '',
 ].join('\n')
 
+/** STS8200 最小文件：无 Serial 列，唯一标识是 PART_ID（每 site 内的部件序号）。
+ * 8 行：Site 8×4 / Site 7×3 / Site 6×1，SOFT_BIN 5 的 1 行失败。 */
+const STS8200_NO_SERIAL_CSV = [
+  'STS8200-43 StationA',
+  'Date:2026-04-18',
+  'Tester ID:STS8200-43',
+  'User:admin',
+  'Program:Z:\\JAVBN281R3CYCAAV1.6\\JAVBN281R3CYCAAV1.6.pgs',
+  'Handler: UF200.dll',
+  'Site: All Sites',
+  'LOT_ID:TTTA803100.03',
+  '',
+  'Total: 8',
+  'Pass: 7   87.50%',
+  'Fail: 1   12.50%',
+  '',
+  'SITE_NUM,PART_ID,PASSFG,SOFT_BIN,T_TIME,X_COORD,Y_COORD,TEST_NUM,CONT_GATE,',
+  'Unit,,,,ms,,,,V,',
+  'LimitL,,,,,,,,-0.6500,',
+  'LimitU,,,,,,,,-0.4700,',
+  '',
+  '8,1,True,1,1097,165,128,36,-0.5445,',
+  '8,2,False,5,1096,165,127,36,-0.5448,',
+  '7,1,True,1,1100,166,126,36,-0.5449,',
+  '8,3,True,1,1100,165,126,36,-0.5452,',
+  '7,2,True,1,1095,166,125,36,-0.5446,',
+  '8,4,True,1,1095,165,125,36,-0.5450,',
+  '7,3,True,1,1095,165,125,36,-0.5444,',
+  '6,1,True,1,1095,166,124,36,-0.5443,',
+  '',
+].join('\n')
+
 test.describe('序列分布：无序列号列错误提示 + Site12358 修复验证', { tag: ['@p1', '@analysis'] }, () => {
   let filename = ''
   let csvPath = ''
   let noCoordFilename = ''
   let noCoordPath = ''
+  let sts8200Filename = ''
+  let sts8200Path = ''
 
   test.beforeAll(() => {
     filename = `e2e_no_serial_${Date.now()}.csv`
@@ -59,11 +93,15 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
     noCoordFilename = `e2e_no_coord_${Date.now()}.csv`
     noCoordPath = path.join(os.tmpdir(), noCoordFilename)
     fs.writeFileSync(noCoordPath, NO_COORD_CSV, 'utf-8')
+    sts8200Filename = `e2e_sts8200_part_id_${Date.now()}.csv`
+    sts8200Path = path.join(os.tmpdir(), sts8200Filename)
+    fs.writeFileSync(sts8200Path, STS8200_NO_SERIAL_CSV, 'utf-8')
   })
 
   test.afterAll(() => {
     cleanupQuiet(csvPath)
     cleanupQuiet(noCoordPath)
+    cleanupQuiet(sts8200Path)
   })
 
   test('无 Serial_No 列文件：序列分布显示错误提示而非空白图', async ({ page }) => {
@@ -97,6 +135,102 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
     await expect(alert).toBeVisible({ timeout: 15_000 })
     await expect(alert).toContainText('序列号')
     await expect(page.locator(`${SINGLE} .serial-chart-wrapper`)).toHaveCount(0)
+  })
+
+  test('STS8200 无 Serial_No 列文件：序列分布回退到 PART_ID 并正常渲染', async ({ page }) => {
+    // 上传 STS8200 最小文件（唯一标识列是 PART_ID，无 Serial_No）
+    await gotoApp(page, '/data')
+    await page.locator('button').filter({ hasText: '上传文件' }).click()
+    await uploadFile(page, sts8200Path)
+    await expect(page.getByText(/上传成功/).first()).toBeVisible({ timeout: 60_000 })
+
+    await gotoApp(page, '/analysis')
+    await selectAnalysisFile(page, sts8200Filename)
+    await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
+    await waitLoadingGone(page.locator(SINGLE))
+
+    await selectParam(page, 'CONT_GATE')
+    await waitLoadingGone(page.locator(SINGLE))
+
+    const respPromise = page.waitForResponse(
+      (r) =>
+        r.url().includes('/analysis/serial_distribution/') &&
+        r.request().method() === 'POST' &&
+        r.request().postData()?.includes('"param":"CONT_GATE"') === true,
+      { timeout: 20_000 },
+    )
+    await page.locator('.el-radio-button').filter({ hasText: '序列分布' }).first().click()
+    const resp = await respPromise
+    expect(resp.status(), 'STS8200 文件必须回退到 PART_ID 并返回 200').toBe(200)
+
+    // 响应体：serial_col=PART_ID、每行一个点（8 行）、bin 判定 7 pass / 1 fail
+    const body = await resp.json()
+    expect(body.serial_col).toBe('PART_ID')
+    const totalPoints = (body.series_data || []).reduce(
+      (sum: number, s: { data: unknown[] }) => sum + s.data.length, 0,
+    )
+    expect(totalPoints).toBe(8)
+    expect(body.pass_count).toBe(7)
+    expect(body.fail_count).toBe(1)
+
+    // UI：无错误提示，序列图正常渲染
+    await expect(page.locator(`${SINGLE} .serial-error-alert`)).toHaveCount(0, { timeout: 15_000 })
+    await expect(page.locator(`${SINGLE} .serial-chart-wrapper`)).toBeVisible({ timeout: 15_000 })
+    await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
+  })
+
+  test('STS8200 大文件（1.4 万点）：large 模式 + canvas + tooltip 自定义字段正常', async ({ page }) => {
+    // 用 e2e 环境已 seed 的真实 STS8200 样本（14174 行 × PART_ID）
+    await gotoApp(page, '/analysis')
+    await selectAnalysisFile(page, 'BN281R3CYCAA_2604160006_TTTA803100.03_06_CP1_20260418161733.csv')
+    await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
+    await waitLoadingGone(page.locator(SINGLE))
+    await selectParam(page, 'CONT_GATE')
+    await waitLoadingGone(page.locator(SINGLE))
+
+    const respPromise = page.waitForResponse(
+      (r) =>
+        r.url().includes('/analysis/serial_distribution/') &&
+        r.request().method() === 'POST' &&
+        r.request().postData()?.includes('"param":"CONT_GATE"') === true,
+      { timeout: 20_000 },
+    )
+    await page.locator('.el-radio-button').filter({ hasText: '序列分布' }).first().click()
+    const resp = await respPromise
+    expect(resp.status()).toBe(200)
+    const body = await resp.json()
+    expect(body.serial_col).toBe('PART_ID')
+
+    const wrapper = page.locator(`${SINGLE} .serial-chart-wrapper`)
+    await expect(wrapper).toBeVisible({ timeout: 15_000 })
+    await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
+
+    // 大数据量性能优化钉住：1.4 万点必须启用 ECharts large 模式（每个系列
+    // 渲染为单个 path/单次绘制，否则产生上万 SVG DOM 节点拖垮交互）
+    const chartInst = wrapper.locator('div[_echarts_instance_]')
+    const chartState = await chartInst.evaluate((el: any) => {
+      const inst = el.__echartsInstance__
+      const opt = inst?.getOption?.()
+      return {
+        large: opt?.series?.[0]?.large === true,
+        // canvas 渲染器：large 数据强制 canvas，DOM 中不应有逐点 svg path
+        renderer: !!el.querySelector('canvas') ? 'canvas' : (el.querySelector('svg') ? 'svg' : 'none'),
+      }
+    })
+    expect(chartState.large, '1.4 万点序列分布应启用 ECharts large 模式').toBe(true)
+    expect(chartState.renderer, '1.4 万点序列分布应强制 canvas 渲染器').toBe('canvas')
+
+    // large+canvas 模式下 tooltip 自定义字段（realY/isFail/anchor）仍可用：
+    // dispatchAction showTip 触发，断言 tooltip 内容包含 PART_ID 与 PASS/FAIL 结果
+    await chartInst.evaluate((el: any) => {
+      el.__echartsInstance__?.dispatchAction({
+        type: 'showTip', seriesIndex: 0, dataIndex: 5,
+      })
+    })
+    await expect(wrapper)
+      .toContainText(/结果: (PASS|FAIL)/, { timeout: 5_000 })
+    await expect(wrapper)
+      .toContainText('PART_ID')
   })
 
   test('修复后的 Site12358 样本文件：序列分布正常渲染散点图', async ({ page }) => {

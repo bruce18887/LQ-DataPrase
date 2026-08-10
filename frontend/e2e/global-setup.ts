@@ -29,8 +29,9 @@ function runDjango(cmd: string) {
 
 async function globalSetup() {
   runDjango('seed_users')
-  // --clear 确保每次运行都是干净的最新 SampleData 状态
-  runDjango('seed_test_data --clear')
+  // --refresh 增量刷新：清理 e2e_* 测试残留 + 仅重灌变化的 SampleData 文件，
+  // 避免每次运行都全量复制/解析 714MB 数据（未变化时秒级完成）
+  runDjango('seed_test_data --refresh')
 }
 
 export default globalSetup

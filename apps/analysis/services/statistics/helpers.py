@@ -36,7 +36,15 @@ def get_site_column(df: pd.DataFrame) -> Optional[str]:
 
 
 def get_serial_column(df: pd.DataFrame) -> Optional[str]:
-    return find_column_by_pattern(df, ['serial'])
+    col = find_column_by_pattern(df, ['serial'])
+    if col:
+        return col
+    # STS8200 等格式无 Serial 列：回退到 PART_ID（每 site 内的部件序号）
+    for c in df.columns:
+        cl = str(c).lower()
+        if 'part' in cl and 'id' in cl:
+            return c
+    return None
 
 
 def get_coord_columns(df: pd.DataFrame) -> Tuple[Optional[str], Optional[str]]:

@@ -389,7 +389,7 @@ class AnalysisViewSet(viewsets.GenericViewSet):
             # 400 而非 200：让前端 axios 错误路径弹出提示，避免序列图静默空白
             return Response({
                 'error': 'no_serial_column',
-                'detail': '该文件没有序列号列（Serial_No），无法绘制序列分布图',
+                'detail': '该文件没有序列号列（Serial_No）或部件列（PART_ID），无法绘制序列分布图',
             }, status=400)
 
         return Response(clean_data(result))

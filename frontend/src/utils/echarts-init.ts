@@ -18,6 +18,8 @@ export interface InitWhenReadyOptions {
   option: echarts.EChartsOption
   /** 已存在的实例则直接 setOption（notMerge: true），避免重复 init */
   reuse?: boolean
+  /** 渲染器覆盖（默认跟随全局设置；大数据量图表可强制 canvas） */
+  renderer?: 'svg' | 'canvas'
   /** ResizeObserver/轮询最长等待时间（毫秒） */
   timeout?: number
   /** 轮询检测尺寸间隔（毫秒） */
@@ -75,7 +77,7 @@ export function initEchartsWhenReady(
     }
     if (!chart) {
       try {
-        chart = echarts.init(container as HTMLElement, undefined, getChartInitOpts())
+        chart = echarts.init(container as HTMLElement, undefined, getChartInitOpts(opts.renderer))
       } catch {
         return false
       }

@@ -14,7 +14,7 @@ function fileCard(page: import('@playwright/test').Page, filename: string) {
   return page.locator('.el-card').filter({ hasText: filename })
 }
 
-test.describe('数据管理 /data', { tag: ['@p0', '@p1', '@p2', '@data'] }, () => {
+test.describe('数据管理 /data', { tag: ['@data'] }, () => {
   test('@p0 页面渲染：已植入文件列表可见，/files/ 返回 200', async ({ page }) => {
     const filesResp = page.waitForResponse(
       (r) => /\/files\/?(\?|$)/.test(r.url()) && r.request().method() === 'GET',
@@ -198,7 +198,7 @@ test.describe('数据管理 /data', { tag: ['@p0', '@p1', '@p2', '@data'] }, () 
   })
 })
 
-test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删除/新列）', { tag: ['@p1', '@p2', '@data'] }, () => {
+test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删除/新列）', { tag: ['@data'] }, () => {
   test('@p1 新列渲染：表头出现“产品”与“原始修改时间”', async ({ page }) => {
     await gotoApp(page, '/data')
     await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
@@ -387,7 +387,7 @@ test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删�
   })
 })
 
-test.describe('数据管理 /data 文件列表增强（标签/上传/批次管理）', { tag: ['@p1', '@p2', '@data'] }, () => {
+test.describe('数据管理 /data 文件列表增强（标签/上传/批次管理）', { tag: ['@data'] }, () => {
   test('@p1 标签列渲染：文件列表表格显示标签列', async ({ page }) => {
     await gotoApp(page, '/data')
     await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
@@ -628,7 +628,7 @@ test.describe('数据管理 /data 文件列表增强（标签/上传/批次管�
   })
 })
 
-test.describe('数据管理 /data 文件列表展开行（方案A）', { tag: ['@p1', '@p2', '@data'] }, () => {
+test.describe('数据管理 /data 文件列表展开行（方案A）', { tag: ['@data'] }, () => {
   test('@p1 展开行：点击展开按钮后展示完整文件名/测试程序/所有标签', async ({ page }) => {
     await gotoApp(page, '/data')
     await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
@@ -702,7 +702,7 @@ test.describe('数据管理 /data 文件列表展开行（方案A）', { tag: ['
  * 课题3：查看数据 / 导出工具 tab 的「当前文件」从只读横幅改为下拉框，
  * 选择即切换 activeFileId。
  */
-test.describe('数据管理 /data 当前文件下拉切换', { tag: ['@p1', '@p2', '@data'] }, () => {
+test.describe('数据管理 /data 当前文件下拉切换', { tag: ['@data'] }, () => {
   test('@p1 查看数据：当前文件下拉框存在且可切换文件', async ({ page }) => {
     await gotoApp(page, '/data')
     // 先在文件列表点「查看」进入查看数据 tab
@@ -753,7 +753,7 @@ test.describe('数据管理 /data 当前文件下拉切换', { tag: ['@p1', '@p2
  * 课题：100+ 文件的批次在「已导入批次」区域一次性渲染会撑高页面 + 视觉杂乱。
  * 改为默认折叠，点击 header 或"全部展开"后才显示文件。
  */
-test.describe('数据管理 /data 已导入批次展开/折叠', { tag: ['@p1', '@p2', '@data'] }, () => {
+test.describe('数据管理 /data 已导入批次展开/折叠', { tag: ['@data'] }, () => {
   /** 当前环境的已注册批次列表（无则各用例 skip） */
   async function getRegisteredBatches(page: import('@playwright/test').Page) {
     // 用 page.request 走 storageState 自动带 token；先 goto 让 baseURL 生效。

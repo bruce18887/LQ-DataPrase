@@ -10,13 +10,9 @@
 
       <div class="card-body">
         <div class="corr-controls">
-          <el-select v-model="localFile1" placeholder="文件1 (ATE)" filterable style="flex: 1">
-            <el-option v-for="f in files" :key="f.id" :label="f.filename" :value="f.id" />
-          </el-select>
+          <FileSelect v-model="localFile1" :files="files" placeholder="文件1 (ATE)" style="flex: 1" />
           <span class="vs-badge">VS</span>
-          <el-select v-model="localFile2" placeholder="文件2 (Bench)" filterable style="flex: 1">
-            <el-option v-for="f in files" :key="f.id" :label="f.filename" :value="f.id" />
-          </el-select>
+          <FileSelect v-model="localFile2" :files="files" placeholder="文件2 (Bench)" style="flex: 1" />
           <el-input-number v-model="localThreshold" :min="0" :max="20" :step="0.5" style="width: 130px" placeholder="阈值%" />
           <el-button type="primary" @click="onAnalyze" :loading="loading">分析</el-button>
         </div>
@@ -50,6 +46,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useFileCorrelation } from '../../composables/useFileCorrelation'
+import FileSelect from '../../../../components/common/FileSelect.vue'
 
 defineProps<{
   files: any[]

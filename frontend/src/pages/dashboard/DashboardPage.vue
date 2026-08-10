@@ -19,16 +19,15 @@
       <el-tab-pane label="📊 单文件分析" name="single">
     <!-- 文件选择器 -->
     <div class="dash-toolbar">
-      <el-select
+      <FileSelect
         v-model="selectedFileId"
+        :files="files"
         placeholder="请选择数据文件"
         @change="onFileChange"
         :loading="filesLoading"
         clearable
         class="dash-file-select"
-      >
-        <el-option v-for="f in files" :key="f.id" :label="f.filename" :value="f.id" />
-      </el-select>
+      />
     </div>
 
     <!-- 空态 / 加载态 / 错误态 -->
@@ -117,6 +116,7 @@ import TestItemOverviewSection from './components/TestItemOverviewSection.vue'
 import DataQualityOverview from './components/DataQualityOverview.vue'
 import type { TestItemOverview } from '../../types'
 import ExportFooter from './components/ExportFooter.vue'
+import FileSelect from '../../components/common/FileSelect.vue'
 
 const filesStore = useFilesStore()
 

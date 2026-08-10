@@ -30,7 +30,7 @@ function addUserField(page: Page, label: string): Locator {
  *   仅靠侧边栏菜单项的 `.hidden`(display:none) CSS 隐藏入口（Sidebar.vue 第 23/79/179 行）。
  *   本测试按此“实情”断言：菜单入口隐藏 + 直达不被拦截（并 log 说明）。
  */
-test.describe('用户管理 / 权限', { tag: ['@p1', '@p2', '@admin'] }, () => {
+test.describe('用户管理 / 权限', { tag: ['@admin'] }, () => {
   // 清空注入的 storageState，强制走实时 UI 登录使 user/isAdmin 生效
   test.use({ storageState: { cookies: [], origins: [] } })
 

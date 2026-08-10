@@ -4,14 +4,13 @@
 
     <el-form label-position="left" label-width="auto" class="analysis-file-selector" style="margin-bottom: 16px">
       <el-form-item label="选择数据文件">
-        <el-select
+        <FileSelect
           v-model="selectedFileId"
+          :files="files"
           placeholder="选择数据文件"
           @change="onFileChange"
           class="analysis-file-selector__select"
-        >
-          <el-option v-for="f in files" :key="f.id" :label="f.filename" :value="f.id" />
-        </el-select>
+        />
         <CircularProgress :loading="loading" />
       </el-form-item>
       <el-form-item label="异常值处理">
@@ -90,6 +89,7 @@ import { formatError } from '../../utils/error'
 import { useAnalysisStore } from '../../stores/analysis'
 import SingleParamTab from './components/SingleParamTab.vue'
 import CircularProgress from '../../components/common/CircularProgress.vue'
+import FileSelect from '../../components/common/FileSelect.vue'
 import WaferMapPanel from './components/WaferMapPanel.vue'
 import MultiFileTab from './components/MultiFileTab.vue'
 import CorrelationToolsTab from './components/CorrelationToolsTab.vue'

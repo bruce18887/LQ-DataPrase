@@ -23,11 +23,15 @@ import { ref, watch, onMounted, onUnmounted, onActivated, nextTick, useTemplateR
 import type * as echarts from 'echarts'
 import { useThemeStore } from '../stores/theme'
 import { initEchartsWhenReady, type EchartsHandle } from '../utils/echarts-init'
+import { getChartInitOpts } from '../utils/echarts-theme'
 
 export function useChart<T = echarts.EChartsOption>(
   buildOption: () => T,
   sources?: WatchSource[],
   refKey = 'chartRef',
+  /** 渲染器 getter：返回当前期望的渲染器（跟随数据量/用户设置变化）；
+   * 缺省跟随全局设置。实例渲染器与期望不一致时自动 dispose 重建。 */
+  renderer?: () => 'svg' | 'canvas',
 ) {
   const chartRef = useTemplateRef<HTMLElement>(refKey)
   const chartInstance: Ref<echarts.ECharts | null> = ref(null)
@@ -50,8 +54,37 @@ export function useChart<T = echarts.EChartsOption>(
     }
   })
 
+  function desiredRenderer(): 'svg' | 'canvas' {
+    return renderer ? renderer() : getChartInitOpts().renderer
+  }
+
+  /**
+   * 期望渲染器与实际不一致（如大数据量数据到达后要求 canvas）时，dispose 旧实例
+   * 并在相同 DOM 重建。echarts.init 对已绑定实例的 DOM 会返回旧实例，必须先 dispose。
+   * 返回 true 表示无需重建/已重建完毕可直接 setOption。
+   */
+  function ensureRenderer(): boolean {
+    const chart = chartInstance.value
+    if (!chart) return true
+    const painter = (chart.getZr?.() as { painter?: { type?: string } } | undefined)?.painter
+    if (painter?.type && painter.type !== desiredRenderer()) {
+      // 走 handle.dispose() 而非 chart.dispose()：完整清理实例 + ResizeObserver +
+      // 轮询定时器，避免旧 handle 残留 observer 对同一容器继续 tryInit
+      try { handle?.dispose() } catch { /* ignore */ }
+      chartInstance.value = null
+      handle = null
+      return false
+    }
+    return true
+  }
+
   function renderOption() {
     if (disposed || !chartInstance.value) return
+    if (!ensureRenderer()) {
+      // 渲染器切换：init 内部会 setOption（同步就绪时），异步路径由轮询补渲染
+      ensureInit()
+      return
+    }
     try {
       const option = buildOption() as unknown as echarts.EChartsOption
       // notMerge 全量替换会清掉用户点击图例的交互状态（legend.selected）——
@@ -109,10 +142,22 @@ export function useChart<T = echarts.EChartsOption>(
     }
     if (!chartRef.value) return false
     // 避免 initEchartsWhenReady 的异步等待期间被重复调用，产生多余的 observer/轮询。
-    if (handle) return true
+    if (handle) {
+      if (handle.chart) return true
+      // 僵尸 handle：上一次 init 在容器隐藏期间（如 el-tabs 未激活的
+      // tab-pane）等待超时——initEchartsWhenReady 5s 后永久断开内部
+      // ResizeObserver/轮询，handle.chart 永远为 null。若放任不管，
+      // 容器稍后可见时 ensureInit 被此 handle 短路、renderOption 因
+      // chartInstance 为空静默空转，图表永久空白。dispose 后走下方
+      // 全新 init，容器已可见时同步初始化并渲染最新数据。
+      try { handle.dispose() } catch { /* ignore */ }
+      handle = null
+    }
     try {
       const option = buildOption() as unknown as echarts.EChartsOption
-      handle = initEchartsWhenReady(chartRef.value, { option, reuse: true, timeout: 5_000 })
+      handle = initEchartsWhenReady(chartRef.value, {
+        option, reuse: true, timeout: 5_000, renderer: desiredRenderer(),
+      })
       chartInstance.value = handle.chart
     } catch (err) {
       if (import.meta.env.DEV) {
