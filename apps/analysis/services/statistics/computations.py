@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 
 from .distributions import norm_probplot, t_cdf
+from .downsample import uniform_indices, DOWN_SAMPLE_THRESHOLD
 from .helpers import safe_gap, get_1d_from, get_coord_columns
 from .limits import parse_limit_string
 from .outliers import detect_outliers_iqr
@@ -355,8 +356,14 @@ def compute_qqplot(data_series: pd.Series, metadata: dict = None, param: str = N
         pp_result = norm_probplot(clean)
         (osm, osr) = pp_result[0]  # theoretical quantiles and sorted observed values
         r = pp_result[1][2]         # correlation coefficient (R)
-        theoretical = [round(float(v), 6) for v in osm]
-        observed = [round(float(v), 6) for v in osr]
+        # 大数据量保形降采样：分位数对单调，均匀取 MAX_POINTS 点视觉等价
+        # （68k 行文件响应 1.3MB → 0.04MB）；r²/is_normal 仍基于全量数据；
+        # 小数据（≤ 阈值）行为零变更
+        keep = (uniform_indices(len(osm))
+                if len(osm) > DOWN_SAMPLE_THRESHOLD
+                else np.arange(len(osm)))
+        theoretical = [round(float(v), 6) for v in osm[keep]]
+        observed = [round(float(v), 6) for v in osr[keep]]
 
         r_squared = round(r * r, 4)
         is_normal = r_squared > 0.95

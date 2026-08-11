@@ -85,7 +85,8 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useChart } from '../../../composables/useChart'
-import { useEChartsTheme } from '../../../utils/echarts-theme'
+import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
+import { minMax } from '../../../utils/minmax'
 
 const props = defineProps<{ params: string[]; loading: boolean; chartData: any }>()
 const emit = defineEmits<{ analyze: [x: string, y: string] }>()
@@ -109,13 +110,21 @@ const rColorClass = computed(() => {
   return 'r-weak'
 })
 
+// 大数据量（≥5000 点）启用 large 模式 + canvas：上万散点不再产生上万
+// DOM 节点（与 SerialChart/QQPlotChart 一致）
+const isLarge = computed(() => {
+  const series = props.chartData?.series_data || []
+  return series.reduce((sum: number, sd: { data?: unknown[] }) =>
+    sum + (sd.data?.length ?? 0), 0) >= 5000
+})
+
 watch(() => props.chartData, (data) => {
   if (!data) return
   const allX: number[] = [], allY: number[] = []
   for (const sd of data.series_data || []) for (const pt of sd.data || []) { allX.push(pt[0]); allY.push(pt[1]) }
   const r4 = (v: number) => Math.round(v * 1e4) / 1e4
-  if (allX.length > 0) { customMinX.value = r4(Math.min(...allX)); customMaxX.value = r4(Math.max(...allX)) }
-  if (allY.length > 0) { customMinY.value = r4(Math.min(...allY)); customMaxY.value = r4(Math.max(...allY)) }
+  if (allX.length > 0) { const [mn, mx] = minMax(allX); customMinX.value = r4(mn); customMaxX.value = r4(mx) }
+  if (allY.length > 0) { const [mn, mx] = minMax(allY); customMinY.value = r4(mn); customMaxY.value = r4(mx) }
 })
 
 function onAnalyze() { if (localX.value && localY.value) emit('analyze', localX.value, localY.value) }
@@ -127,7 +136,7 @@ function computeRange(mode: string, sigma: number, cMin: number, cMax: number, v
     const s = Math.sqrt(vals.reduce((sum, v) => sum + (v - m) ** 2, 0) / vals.length)
     return { min: m - sigma * s, max: m + sigma * s }
   }
-  const dMin = Math.min(...vals), dMax = Math.max(...vals)
+  const [dMin, dMax] = minMax(vals)
   const rng = dMax > dMin ? dMax - dMin : 1
   return { min: dMin - rng / 2, max: dMax + rng / 2 }
 }
@@ -140,6 +149,7 @@ function buildOption() {
     (sd: { name: string; data: number[][] }, idx: number) => ({
       name: sd.name, type: 'scatter', data: sd.data, symbolSize: 6,
       itemStyle: { color: SITE_COLORS[idx % SITE_COLORS.length], opacity: 0.6 },
+      ...(isLarge.value ? { large: true } : {}),
     }),
   )
   const allX: number[] = [], allY: number[] = []
@@ -148,6 +158,8 @@ function buildOption() {
   const yR = allY.length > 0 ? computeRange(axisModeY.value, sigmaY.value, customMinY.value, customMaxY.value, allY) : { min: undefined, max: undefined }
 
   return {
+    // large 模式下上万 symbol 的入场/更新动画是纯开销，直接关闭
+    animation: !isLarge.value,
     title: { text: `${d.param_x} vs ${d.param_y}`, subtext: `Pearson r = ${d.pearson_r?.toFixed(4) ?? '-'}`, left: 'center', textStyle: { color: tc, fontSize: 14 }, subtextStyle: { color: tc, fontSize: 12 } },
     toolbox: { feature: { saveAsImage: { title: '保存图片' }, restore: { title: '还原' } }, right: 10 },
     tooltip: { trigger: 'item', formatter: (p: any) => `${p.seriesName}<br/>${d.param_x}: ${Number(p.value[0]).toFixed(4)}<br/>${d.param_y}: ${Number(p.value[1]).toFixed(4)}` },
@@ -164,13 +176,15 @@ function buildOption() {
   }
 }
 
+// 大数据量强制 canvas（SVG 渲染器对 large 符号仍会为每点发射 DOM 元素）；
+// 小数据量跟随用户全局设置
 const { chartRef } = useChart(buildOption, [
   () => props.chartData,
   () => axisModeX.value, () => axisModeY.value,
   () => sigmaX.value, () => sigmaY.value,
   () => customMinX.value, () => customMaxX.value,
   () => customMinY.value, () => customMaxY.value,
-])
+], 'chartRef', () => (isLarge.value ? 'canvas' : getChartRenderer()))
 void chartRef // bound to <div ref="chartRef"> in template
 </script>
 

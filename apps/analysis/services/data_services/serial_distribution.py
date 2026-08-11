@@ -9,16 +9,24 @@ from apps.analysis.services.statistics import (
     get_bin_column,
     get_site_column,
     get_serial_column,
+    get_serial_candidates,
 )
 from apps.analysis.services.statistics.limits import is_pass_bin
 from apps.analysis.services.limits import resolve_limits
 from apps.analysis.services.statistics.outliers import detect_outliers_iqr
+from apps.analysis.services.statistics.downsample import (
+    bucket_minmax_indices,
+    DOWN_SAMPLE_THRESHOLD,
+)
 
 
 def compute_serial_distribution_data(df, metadata, param, range_type,
-                                     chart_config):
+                                     chart_config, serial_col=None):
     """Build serial-distribution scatter data, continuous serials, and mark
     lines.
+
+    ``serial_col`` 显式指定序列列（前端选择器覆盖）；缺省自动检测
+    （优先级：Serial_No > Dut_No > PART_ID）。
 
     Returns the full response dict (*except* ``param`` and ``unit`` which
     the caller adds), or ``None`` if no serial column exists.
@@ -35,7 +43,8 @@ def compute_serial_distribution_data(df, metadata, param, range_type,
       ``y_max`` (huge fail values would otherwise be clipped off the
       explicit spec-based axis), ``3`` value below ``y_min``.
     """
-    serial_col = get_serial_column(df)
+    if serial_col is None:
+        serial_col = get_serial_column(df)
     if not serial_col:
         return None
 
@@ -188,6 +197,28 @@ def compute_serial_distribution_data(df, metadata, param, range_type,
                                 fail_d[s], _anchor(v)])
         return pts
 
+    def _downsample_points(pts):
+        """大数据量保形降采样（仅影响传输/绘制点集）：
+
+        - 按 serial 分桶 M4/MinMax 保 value 极值轮廓（value 为 y 轴）；
+        - **anchor ≠ 0 的点强制保留**（超界值被锚定到轴边，视觉信息
+          不能丢）；无测量值点（value 为 None/NaN）不参与极值选择；
+        - pass/fail_count、均值/限值等统计字段由调用方在全量数据上
+          计算，不受采样影响。
+        """
+        if len(pts) <= DOWN_SAMPLE_THRESHOLD:
+            return pts
+        serials = np.array([p[0] for p in pts], dtype=float)
+        values = np.array(
+            [np.nan if p[1] is None else float(p[1]) for p in pts],
+            dtype=float)
+        keep = bucket_minmax_indices(serials, values)
+        anchors = [i for i, p in enumerate(pts)
+                   if len(p) > 3 and p[3] != 0]
+        if anchors:
+            keep = np.union1d(keep, np.array(anchors, dtype=int))
+        return [pts[i] for i in keep]
+
     series_data = []
     if site_col:
         for si, site in enumerate(
@@ -196,14 +227,14 @@ def compute_serial_distribution_data(df, metadata, param, range_type,
             series_data.append({
                 'name': f'Site {site}',
                 'type': 'scatter',
-                'data': _build_points(sdf),
+                'data': _downsample_points(_build_points(sdf)),
                 'symbolSize': 6,
             })
     else:
         series_data.append({
             'name': param,
             'type': 'scatter',
-            'data': _build_points(serial_grouped),
+            'data': _downsample_points(_build_points(serial_grouped)),
             'symbolSize': 6,
         })
 
@@ -271,6 +302,7 @@ def compute_serial_distribution_data(df, metadata, param, range_type,
         'param': param,
         'unit': metadata.get('units', {}).get(param, ''),
         'serial_col': serial_col,
+        'serial_candidates': get_serial_candidates(df),
         'lower_limit': spec_lower,
         'upper_limit': spec_upper,
         'mean': mean_val,

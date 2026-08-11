@@ -41,7 +41,21 @@ def _write_csv(dirpath, name, content):
 
 
 def _no_serial_csv():
-    """CTA8280F 最小文件：无 Index_No / Serial_No 列（用户报告的缺陷形态）。"""
+    """CTA8280F 最小文件：serial/dut/part 候选列全无（连 Dut_No 都没有）。"""
+    return (
+        META_HEADER
+        + '[Data]\n'
+        + 'Site_No,SW_Bin,KELVIN_VIN,\n'
+        + 'Unit,Unit,ohm,\n'
+        + 'Min,Min,0,\n'
+        + 'Max,Max,2,\n'
+        + '1,1,0.5,\n'
+        + '1,1,0.7,\n'
+    )
+
+
+def _dut_only_csv():
+    """真实机台导出形态：无 Serial_No，唯一标识是 Dut_No（每 site 内序号）。"""
     return (
         META_HEADER
         + '[Data]\n'
@@ -117,12 +131,28 @@ class SerialDistributionApiTests(TestCase):
         )
 
     def test_no_serial_column_returns_400_with_detail(self):
-        """回归钉：缺 Serial_No 列必须 400 + 中文 detail（此前 200 静默空白）。"""
+        """回归钉：serial/dut/part 候选全无必须 400 + 中文 detail（此前 200 静默空白）。"""
         df_row = self._register_file('no_serial.csv', _no_serial_csv())
         resp = self._post(df_row)
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data['error'], 'no_serial_column')
         self.assertTrue(resp.data.get('detail'))
+
+    def test_dut_only_column_falls_back_to_dut_no(self):
+        """回归钉：无 Serial_No 但有 Dut_No（真实机台导出）→ 200 回退 Dut_No。
+
+        Dut_No 是每 site 内序号（与 STS8200 的 PART_ID 同语义），此前
+        ``get_serial_column`` 只匹配 serial / part+id → 400 序列图不可用。
+        """
+        df_row = self._register_file('dut_only.csv', _dut_only_csv())
+        resp = self._post(df_row)
+        self.assertEqual(resp.status_code, 200, resp.content)
+        body = resp.data
+        self.assertEqual(body['serial_col'], 'Dut_No')
+        self.assertEqual(body['serial_candidates'], ['Dut_No'])
+        self.assertEqual(body['continuous_serials'], [1, 2])
+        total = sum(len(s['data']) for s in body['series_data'])
+        self.assertEqual(total, 2, '每行一个序列点')
 
     def test_with_serial_column_returns_points(self):
         df_row = self._register_file('with_serial.csv', _with_serial_csv())
