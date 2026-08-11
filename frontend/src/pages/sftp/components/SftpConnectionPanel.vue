@@ -8,23 +8,33 @@
     </template>
 
     <el-form :model="conn" label-width="90px" @submit.prevent="doConnect" class="connect-form">
+      <el-alert
+        v-if="lastPathHint"
+        type="info"
+        :closable="false"
+        show-icon
+        class="path-hint"
+        :title="`上次访问路径：${lastPathHint}，连接后将自动跳转`"
+      />
       <el-row :gutter="20">
-        <el-col :span="8">
+        <el-col :span="12">
           <el-form-item label="主机" required>
             <el-input v-model="conn.host" placeholder="例如: 192.168.1.1" :prefix-icon="Monitor" clearable />
           </el-form-item>
         </el-col>
-        <el-col :span="4">
+        <el-col :span="12">
           <el-form-item label="端口">
             <el-input-number v-model="conn.port" :min="1" :max="65535" style="width: 100%" />
           </el-form-item>
         </el-col>
-        <el-col :span="6">
+      </el-row>
+      <el-row :gutter="20">
+        <el-col :span="12">
           <el-form-item label="用户名" required>
             <el-input v-model="conn.username" :prefix-icon="User" clearable />
           </el-form-item>
         </el-col>
-        <el-col :span="6">
+        <el-col :span="12">
           <el-form-item label="密码">
             <el-input
               v-model="conn.password"
@@ -111,7 +121,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import {
   Connection, Monitor, User, Lock, Link, Star, Collection,
   OfficeBuilding, Switch, Delete,
@@ -120,11 +130,39 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
 import { sftpApi, type SftpConfigItem } from '../../../api/sftp'
 
+// 断线续连预填：父组件（SftpBrowser）拉取 last_visit 后注入 host/port/username。
+// 密码永不由后端回传，必须用户输入。
+interface InitialValues {
+  host?: string
+  port?: number
+  username?: string
+}
+
+const props = withDefaults(defineProps<{
+  initial?: InitialValues | null
+  lastPathHint?: string
+}>(), {
+  initial: null,
+  lastPathHint: '',
+})
+
 const emit = defineEmits<{
   connected: []
 }>()
 
 const conn = ref({ host: '', port: 22, username: '', password: '' })
+
+function applyInitial() {
+  if (!props.initial) return
+  conn.value = {
+    host: props.initial.host ?? conn.value.host,
+    port: props.initial.port ?? conn.value.port,
+    username: props.initial.username ?? conn.value.username,
+    password: conn.value.password, // 保留用户已输入内容
+  }
+}
+
+watch(() => props.initial, applyInitial)
 const connecting = ref(false)
 const savedConfigs = ref<SftpConfigItem[]>([])
 // The saved config currently loaded into the form (if any). When set and the
@@ -139,6 +177,7 @@ const saving = ref(false)
 
 onMounted(() => {
   refreshConfigs()
+  applyInitial()
 })
 
 async function refreshConfigs() {
@@ -245,6 +284,7 @@ async function doConnect() {
 .connect-card { border-radius: 8px; margin-bottom: 20px; }
 .card-header { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; color: var(--text-primary); }
 .connect-form { padding-top: 8px; }
+.path-hint { margin-bottom: 12px; }
 .form-actions { margin-top: 8px; margin-bottom: 0; }
 .form-actions :deep(.el-form-item__content) { gap: 12px; }
 

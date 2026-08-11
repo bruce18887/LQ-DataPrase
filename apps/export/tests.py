@@ -13,6 +13,7 @@ import io
 import os
 import time
 import unittest
+import zipfile
 
 import pandas as pd
 import openpyxl
@@ -232,6 +233,71 @@ class ExportApiTests(APITestCase):
         )
         buf = b''.join(resp.streaming_content)
         self.assertGreater(len(buf), 0)
+
+    def _pick_test_params(self):
+        """挑选两个真正的测试参数（排除 ID/坐标/时间类列）。"""
+        df_parsed, _ = get_parser('CTA8290D').parse(GAGE_S1_PATH)
+        id_like = {
+            'Serial_No', 'Part_No', 'Dut_No', 'Site_No', 'SW_Bin',
+            'X_COORD', 'Y_COORD', 'QR_Code', 'Data_Cnt', 'Test_Time', 'Alarm',
+        }
+        numeric_cols = [
+            c for c in df_parsed.columns
+            if c not in id_like and df_parsed[c].dtype in ('int64', 'float64')
+        ][:2]
+        self.assertGreaterEqual(len(numeric_cols), 2, 'GAGE 数据应至少 2 个真正数值列')
+        return numeric_cols
+
+    def test_batch_charts_native_api(self):
+        """POST /export/batch_charts/ + native_chart=true：200，含原生图表。"""
+        numeric_cols = self._pick_test_params()
+        resp = self.client.post('/api/v1/export/batch_charts/', {
+            'file_id': self.datafile.id,
+            'params': numeric_cols,
+            'native_chart': True,
+            'show_limit': True,
+            'show_6sigma': True,
+        }, format='json')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            resp['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        buf = b''.join(resp.streaming_content)
+        wb = openpyxl.load_workbook(io.BytesIO(buf))
+        self.assertEqual(wb['总览'].max_row, 1 + len(numeric_cols), '总览表头 + 每参数一行')
+
+        # 每个参数 sheet 应至少包含一个原生图表
+        chart_files = {n for n in zipfile.ZipFile(io.BytesIO(buf)).namelist() if n.startswith('xl/charts/chart')}
+        self.assertGreaterEqual(len(chart_files), len(numeric_cols), '每个参数应写入独立 chart xml')
+        for col in numeric_cols:
+            ws = wb[_safe_sheet_name_for_test(col)]
+            self.assertGreater(len(ws._charts), 0, f'参数 {col} 应包含原生图表')
+
+    def test_batch_charts_native_smaller_than_png(self):
+        """原生图表 xlsx 体积应显著小于 PNG 嵌入版本。"""
+        numeric_cols = self._pick_test_params()
+        base_payload = {
+            'file_id': self.datafile.id,
+            'params': numeric_cols,
+            'show_limit': True,
+            'show_6sigma': True,
+        }
+
+        resp_png = self.client.post('/api/v1/export/batch_charts/', {**base_payload, 'native_chart': False}, format='json')
+        self.assertEqual(resp_png.status_code, 200)
+        png_size = len(b''.join(resp_png.streaming_content))
+
+        resp_native = self.client.post('/api/v1/export/batch_charts/', {**base_payload, 'native_chart': True}, format='json')
+        self.assertEqual(resp_native.status_code, 200)
+        native_size = len(b''.join(resp_native.streaming_content))
+
+        self.assertLess(native_size, png_size * 0.5, f'原生图表 {native_size} 应远小于 PNG {png_size}')
+
+
+def _safe_sheet_name_for_test(name: str) -> str:
+    """与 native_chart_builders._safe_sheet_name 保持一致。"""
+    return name.replace('/', '_').replace('\\', '_').replace(' ', '_').replace('-', '_')[:31]
 
 
 def _parse_content_disposition(cd: str) -> str:

@@ -84,10 +84,9 @@
         <span class="overview-total">共 {{ items.length }} 项 · 点击参数行跳转数据分析页</span>
         <el-pagination
           v-model:current-page="page"
-          v-model:page-size="pageSize"
+          :page-size="pageSize"
           :total="items.length"
-          :page-sizes="[10, 20, 50, 100]"
-          layout="total, sizes, prev, pager, next"
+          layout="total, prev, pager, next"
           background
           small
         />
@@ -99,7 +98,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAnalysisStore } from '../../../stores/analysis'
 import type { TestItemOverview } from '../../../types'
@@ -116,7 +115,7 @@ const analysisStore = useAnalysisStore()
 const sortKey = ref<string | null>(null)
 const sortOrder = ref<'ascending' | 'descending' | null>(null)
 const page = ref(1)
-const pageSize = ref(20)
+const pageSize = 100  // 固定 100 条/页，不提供切换
 
 const sortedRows = computed(() => {
   const list = [...props.items]  // 默认保持后端原始测试项顺序
@@ -134,8 +133,8 @@ const sortedRows = computed(() => {
 })
 
 const pagedRows = computed(() => {
-  const start = (page.value - 1) * pageSize.value
-  return sortedRows.value.slice(start, start + pageSize.value)
+  const start = (page.value - 1) * pageSize
+  return sortedRows.value.slice(start, start + pageSize)
 })
 
 function handleSortChange({ prop, order }: { prop: string; order: 'ascending' | 'descending' | null }) {
@@ -143,8 +142,6 @@ function handleSortChange({ prop, order }: { prop: string; order: 'ascending' | 
   sortOrder.value = order
   page.value = 1  // 排序变更重置到第一页
 }
-
-watch(pageSize, () => { page.value = 1 })
 
 function goToAnalysis(row: TestItemOverview) {
   if (!props.fileId) return

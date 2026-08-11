@@ -38,6 +38,15 @@ export interface SftpConfigItem {
   updated_at?: string
 }
 
+export interface SftpLastVisit {
+  can_auto_connect: boolean
+  config_name: string
+  host: string
+  port: number
+  username: string
+  last_path: string
+}
+
 export interface SftpConnectPayload {
   host?: string
   port?: number
@@ -60,6 +69,14 @@ export const sftpApi = {
   },
   disconnect(config?: AxiosRequestConfig) {
     return api.post('/sftp/disconnect/', undefined, config)
+  },
+  /** 断线续连信息：上次访问路径 + 上次连接凭据（can_auto_connect 表示可服务端自动重连） */
+  getLastVisit() {
+    return api.get('/sftp/last_visit/')
+  },
+  /** 用上次保存的配置自动重连（密码服务端解密，不进浏览器）；可选 config_name 覆盖记录 */
+  autoConnect(configName?: string) {
+    return api.post('/sftp/auto_connect/', configName ? { config_name: configName } : {})
   },
   listFiles(path: string, sortBy = 'name', sortOrder = 'asc') {
     return api.get('/sftp/list_files/', { params: { path, sort_by: sortBy, sort_order: sortOrder } })

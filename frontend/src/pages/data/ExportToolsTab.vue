@@ -18,6 +18,7 @@
             v-model:chart-config="chartConfig"
             v-model:bar-width-percent="barWidthPercent"
             v-model:ignore-no-limit="ignoreNoLimit"
+            v-model:native-chart="nativeChart"
           />
           <ExportActions
             v-model:sigma="localSigma"
@@ -56,6 +57,7 @@ const localSigma = ref(3)
 const chartConfig = ref<string[]>(analysisStore.chartConfig)
 const barWidthPercent = ref(analysisStore.barWidthPercent)
 const ignoreNoLimit = ref(analysisStore.ignoreNoLimit)
+const nativeChart = ref(analysisStore.batchNativeChart)
 
 const currentFileName = computed(() => {
   const f = props.files.find((item) => item.id === props.fileId)
@@ -80,6 +82,7 @@ watch(() => props.fileId, async (fileId) => {
 watch(chartConfig, (val) => { analysisStore.chartConfig = val }, { deep: true })
 watch(barWidthPercent, (val) => { analysisStore.barWidthPercent = val })
 watch(ignoreNoLimit, (val) => { analysisStore.ignoreNoLimit = val })
+watch(nativeChart, (val) => { analysisStore.batchNativeChart = val })
 
 function onExportSigma() {
   // silent + 页面提示：保留超时/失败的定制文案，避免与拦截器全局提示重复
@@ -96,6 +99,7 @@ function onExportBatch(format: string) {
     show_6sigma: chartConfig.value.includes('s6'),
     show_normal: chartConfig.value.includes('normal'),
     show_kde: chartConfig.value.includes('kde'),
+    native_chart: nativeChart.value,
   }
   exportBatchCharts(localParams.value, format, options, { silent: true }).catch((err: any) => {
     const msg = err?.code === 'ECONNABORTED' || err?.message?.includes('timeout')

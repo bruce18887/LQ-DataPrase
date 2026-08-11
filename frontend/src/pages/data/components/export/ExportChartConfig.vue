@@ -14,7 +14,7 @@
         <el-checkbox value="kde">KDE曲线</el-checkbox>
       </el-checkbox-group>
 
-      <div class="bar-width-group">
+      <div v-if="!nativeChart" class="bar-width-group">
         <span class="bw-label">柱宽</span>
         <el-slider
           :model-value="barWidthPercent"
@@ -28,6 +28,23 @@
         <span class="bw-value">{{ barWidthPercent }}%</span>
       </div>
 
+      <div class="native-chart-group">
+        <el-checkbox :model-value="nativeChart" class="native-chart" @update:model-value="$emit('update:nativeChart', $event)">
+          Excel 原生图表
+        </el-checkbox>
+        <el-tooltip placement="top" :width="300">
+          <template #content>
+            <div class="native-help-content">
+              <div class="native-help-title">Excel 原生图表（demo）</div>
+              <div class="native-help-line">1. 生成 Excel 内置图表（非图片），文件体积更小；</div>
+              <div class="native-help-line">2. 导出后可在 Excel 中直接编辑图表样式；</div>
+              <div class="native-help-line">3. 柱宽由 Excel 自动控制，柱宽滑块将隐藏。</div>
+            </div>
+          </template>
+          <el-icon class="native-help-icon"><QuestionFilled /></el-icon>
+        </el-tooltip>
+      </div>
+
       <el-checkbox :model-value="ignoreNoLimit" class="ignore-no-limit" @update:model-value="$emit('update:ignoreNoLimit', $event)">
         忽略无Limit
       </el-checkbox>
@@ -36,10 +53,13 @@
 </template>
 
 <script setup lang="ts">
+import { QuestionFilled } from '@element-plus/icons-vue'
+
 interface Props {
   chartConfig: string[]
   barWidthPercent: number
   ignoreNoLimit: boolean
+  nativeChart: boolean
 }
 
 defineProps<Props>()
@@ -47,6 +67,7 @@ defineEmits<{
   (e: 'update:chartConfig', value: string[]): void
   (e: 'update:barWidthPercent', value: number): void
   (e: 'update:ignoreNoLimit', value: boolean): void
+  (e: 'update:nativeChart', value: boolean): void
 }>()
 </script>
 
@@ -110,11 +131,44 @@ defineEmits<{
   padding-left: 3px;
 }
 
-.ignore-no-limit {
+.ignore-no-limit,
+.native-chart {
   height: 28px;
 }
 
-.ignore-no-limit :deep(.el-checkbox__label) {
+.native-chart-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.native-help-icon {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  cursor: help;
+  transition: color 0.2s;
+}
+
+.native-help-icon:hover {
+  color: var(--brand-primary);
+}
+
+.native-help-content {
+  max-width: 280px;
+}
+
+.native-help-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.native-help-line {
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.ignore-no-limit :deep(.el-checkbox__label),
+.native-chart :deep(.el-checkbox__label) {
   font-size: 12px;
   padding-left: 3px;
 }

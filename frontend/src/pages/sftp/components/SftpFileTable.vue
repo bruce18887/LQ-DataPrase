@@ -4,7 +4,7 @@
       v-loading="loading"
       :data="items"
       :default-sort="{ prop: sortBy, order: sortOrder === 'desc' ? 'descending' : 'ascending' }"
-      @row-click="(row: any) => { if (row.is_dir) emit('navigate', currentPath + '/' + row.name) }"
+      @row-click="(row: any) => { if (row.is_dir) emit('navigate', joinPath(currentPath, row.name)) }"
       @sort-change="(sort: any) => emit('sort-change', sort)"
       class="file-table"
     >
@@ -75,7 +75,7 @@
               >
                 <el-icon><Download /></el-icon> 下载
               </el-button>
-              <el-button size="small" type="info" plain @click.stop="emit('navigate', currentPath + '/' + row.name)">
+              <el-button size="small" type="info" plain @click.stop="emit('navigate', joinPath(currentPath, row.name))">
                 <el-icon><FolderOpened /></el-icon> 打开
               </el-button>
             </el-button-group>
@@ -138,6 +138,12 @@ function isCsv(name: string): boolean {
 
 function isDownloading(key: string): boolean {
   return props.downloadingRows.has(key)
+}
+
+/** 拼接远程路径，避免 currentPath='/' 时产生 '//sub1' 双斜杠 */
+function joinPath(dir: string, name: string): string {
+  const base = dir === '/' ? '' : dir.replace(/\/+$/, '')
+  return `${base}/${name}`
 }
 </script>
 

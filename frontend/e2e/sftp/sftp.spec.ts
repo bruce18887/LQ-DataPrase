@@ -74,8 +74,17 @@ test.describe('@p1 SFTP 页面渲染', { tag: ['@p1', '@sftp'] }, () => {
     await expect(page.getByRole('button', { name: '连接' })).toBeVisible()
 
     // 保存配置按钮（即“保存配置区”的入口，始终存在；未填 host 时 disabled）
+    // 断线续连可能预填表单（上次连接记录）→ 先等预填稳定（两次读取一致）再清空，
+    // 保持「空表单禁用保存」的原断言语义
     const saveBtn = page.getByRole('button', { name: '保存配置' })
     await expect(saveBtn).toBeVisible()
+    await expect.poll(async () => {
+      const v1 = await host.inputValue()
+      await page.waitForTimeout(300)
+      const v2 = await host.inputValue()
+      return v1 === v2
+    }, { timeout: 10_000 }).toBe(true)
+    await host.fill('')
     await expect(saveBtn).toBeDisabled()
   })
 })
