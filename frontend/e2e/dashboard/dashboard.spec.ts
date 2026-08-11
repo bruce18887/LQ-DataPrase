@@ -423,7 +423,7 @@ test.describe('仪表板', { tag: ['@dashboard'] }, () => {
     expect(first, `降序首行 cpk ${first} >= 次行 ${second}`).toBeGreaterThanOrEqual(second)
   })
 
-  test('@p2 测试项总览分页切换', async ({ page }) => {
+  test('@p2 测试项总览分页切换（固定 100 条/页）', async ({ page }) => {
     await gotoApp(page, '/dashboard')
     await waitLoadingGone(page)
 
@@ -432,7 +432,38 @@ test.describe('仪表板', { tag: ['@dashboard'] }, () => {
     const pagination = page.locator('.overview-footer .el-pagination')
     await expect(pagination).toBeVisible()
 
-    const pageCount = await pagination.locator('.el-pager li').count()
+    // 固定 100 条/页：不渲染 page-size 切换器（.el-pagination__sizes）
+    await expect(pagination.locator('.el-pagination__sizes')).toHaveCount(0)
+
+    // 首页行数 = min(总项数, 100)，精确验证固定分页大小
+    const totalText = await page.locator('.overview-total').innerText()
+    const m = totalText.match(/共 (\d+) 项/)
+    expect(m, '页脚应显示总项数').not.toBeNull()
+    const total = parseInt(m![1], 10)
+    const firstPageRows = await table.locator('.el-table__body-wrapper tr.el-table__row').count()
+    expect(firstPageRows, `首页行数应 = min(${total}, 100)`).toBe(Math.min(total, 100))
+
+    // 默认文件不足两页时，切换到高列数文件（1728 列 → 总览 >100 项）制造多页数据
+    let pageCount = await pagination.locator('.el-pager li').count()
+    if (pageCount <= 1) {
+      const fileSelect = page.locator('.dash-file-select')
+      await fileSelect.click()
+      await fileSelect.locator('input').fill('BPD93204_FT1')
+      await page
+        .locator('.dp-file-select-dropdown .el-select-dropdown__item', { hasText: 'BPD93204_FT1' })
+        .first()
+        .click()
+      // 等待总览刷新：总项数 > 100（1728 列文件的 CPK 参数表 + Fail 明细）
+      await expect(async () => {
+        const t = await page.locator('.overview-total').innerText()
+        const n = parseInt((t.match(/共 (\d+) 项/) || [])[1] || '0', 10)
+        expect(n, '切换高列数文件后总项数应 > 100').toBeGreaterThan(100)
+      }).toPass({ timeout: 30_000 })
+      // 多页数据下首页仍固定 100 行
+      const rows = await table.locator('.el-table__body-wrapper tr.el-table__row').count()
+      expect(rows, '多页数据下首页应恰好 100 行').toBe(100)
+      pageCount = await pagination.locator('.el-pager li').count()
+    }
     if (pageCount <= 1) {
       test.skip(true, '总览表不足两页，跳过翻页断言')
       return

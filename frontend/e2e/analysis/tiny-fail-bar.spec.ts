@@ -9,17 +9,21 @@ import { expectChartRendered, waitLoadingGone } from '../helpers/charts'
 import { selectAnalysisFile } from '../helpers/params'
 
 /**
- * 极小 fail 百分比柱状图可见性（1/50000 = 0.002%、1/100000 = 0.001%）。
+ * 极小 fail 百分比柱状图可见性（1/50000 = 0.002%、1/100000 = 0.001%、
+ * 1/810 = 0.1233%）。
  *
  * 回归：后端 `round(pct, 2)` 把 0.002 四舍五入成 0.0 → bin 柱高 0 不渲染；
  * 修复后保留 6 位小数 + 前端最小柱高（非零柱 ≥ 0.5% ≈ 2px），
  * tooltip/标签显示真实精度与数量（bin_counts）。
  *
  * 断言链：
- *  - API：bin_percentages 最小非零 ≈ 0.002 / 0.001（旧代码为 0.0，必失败）；
+ *  - API：bin_percentages 最小非零 ≈ 0.002 / 0.001 / 0.1233（旧代码为 0.0，必失败）；
  *    bin_counts 含 1 且总和 == 行数
  *  - DOM：ECharts 实例中「渲染值 > 0 的柱数」==「非零 bin 数」（无 bin 消失），
  *    且最小可见柱高度 ≥ 1.5px（钳制后肉眼可见）
+ *  - 显示位数（formatPercent）：tooltip 对最小非零柱显示「最少必要位数」——
+ *    0.002 → "0.002"、0.001 → "0.001"（0.00x 格式）；0.123305 → "0.12"
+ *    （默认 2 位，不得显示成 6 位 "0.123305"）
  */
 
 const SINGLE = '.single-param-tab'
@@ -51,6 +55,8 @@ function buildCsv(n: number): string {
 const CASES = [
   { n: 50000, pct: 0.002, label: '1/50000' },
   { n: 100000, pct: 0.001, label: '1/100000' },
+  // 1/810 = 0.1233%：普通数量级，用于断言默认 2 位小数（旧代码显示 6 位 "0.123305"）
+  { n: 810, pct: 100 / 811, label: '1/810' },
 ]
 
 test.describe('极小 fail 百分比柱状图可见', { tag: ['@p1', '@analysis'] }, () => {
@@ -155,6 +161,25 @@ test.describe('极小 fail 百分比柱状图可见', { tag: ['@p1', '@analysis'
       // 主分布柱显著更高：fail 柱应明显矮于峰值柱（钳制保底但不夸张）
       const maxHeight = Math.max(...visibleBars.map((b) => b.height))
       expect(maxHeight, '主分布柱应显著高于 fail 柱').toBeGreaterThan(minHeight * 3)
+
+      // 显示位数断言（formatPercent）：dispatchAction showTip 到最小非零柱，
+      // tooltip 应显示「最少必要位数」——0.002/0.001 → 0.00x 格式；
+      // 0.1233 → "0.12"（默认 2 位，旧代码显示 6 位 "0.123305"）
+      const expectedText = c.pct < 0.01 ? String(c.pct) : c.pct.toFixed(2)
+      const tipIdx = await chartDiv.evaluate((el: any, minReal: number) => {
+        const chart = el.__echartsInstance__
+        if (!chart) return -1
+        const opt = chart.getOption() as any
+        const barSeries = (opt.series || []).find((s: any) => s.type === 'bar')
+        const data: any[] = Array.isArray(barSeries?.data) ? barSeries.data : []
+        const idx = data.findIndex((d: any) => d && Math.abs(Number(d[2]) - minReal) < 1e-9)
+        if (idx >= 0) chart.dispatchAction({ type: 'showTip', seriesIndex: 0, dataIndex: idx })
+        return idx
+      }, minNonZero)
+      expect(tipIdx, '应能找到最小非零柱的 dataIndex').toBeGreaterThanOrEqual(0)
+      await expect(chartDiv, `tooltip 应显示 ${expectedText}%（最少必要位数）`).toContainText(
+        `${expectedText}%`
+      )
     })
   }
 })

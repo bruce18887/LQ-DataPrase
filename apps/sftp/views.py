@@ -10,6 +10,7 @@ from apps.datafiles.views import _register_file, _is_summary_csv
 logger = logging.getLogger(__name__)
 
 from apps.datafiles.views import _user_upload_dir
+from apps.accounts.models import UserSetting
 from .cache import set_session, delete_session, SftpSessionCacheError
 from .config_views import SftpConfigMixin
 from .models import SftpConfig
@@ -48,33 +49,34 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
     # Connect / Disconnect
     # ------------------------------------------------------------------
 
-    @action(detail=False, methods=['post'])
-    def connect(self, request):
-        # When a saved config is referenced, load host/port/username and the
-        # decrypted password SERVER-SIDE so the stored password never travels
-        # to the browser. Direct host/username/password connect still works.
-        config_id = request.data.get('config_id')
-        config_name = request.data.get('config_name')
+    def _record_last_visit(self, user, *, path=None, config_name=None, host=None, port=None, username=None):
+        """Persist last SFTP visit metadata for 断线续连 (per-user).
 
-        if config_id is not None or config_name:
-            cfg_qs = SftpConfig.objects.filter(owner=request.user)
-            if config_id is not None:
-                cfg_qs = cfg_qs.filter(id=config_id)
-            else:
-                cfg_qs = cfg_qs.filter(name=config_name)
-            cfg = cfg_qs.first()
-            if not cfg:
-                return Response({'status': 'error', 'message': '未找到配置'}, status=400)
-            host = cfg.host
-            port = cfg.port
-            username = cfg.username
-            password = cfg.get_password()
-        else:
-            host = request.data.get('host')
-            port = int(request.data.get('port', 22))
-            username = request.data.get('username')
-            password = request.data.get('password')
+        只更新传入的字段（update_fields），避免无谓写库。调用方必须 try/except
+        静默包裹——记录失败（如路径超长）绝不能影响浏览/连接主流程。
+        """
+        setting, _ = UserSetting.objects.get_or_create(user=user)
+        updates = []
+        if path is not None:
+            setting.sftp_last_path = path
+            updates.append('sftp_last_path')
+        if config_name is not None:
+            setting.sftp_last_config = config_name
+            updates.append('sftp_last_config')
+        if host is not None:
+            setting.sftp_last_host = host
+            updates.append('sftp_last_host')
+        if port is not None:
+            setting.sftp_last_port = port
+            updates.append('sftp_last_port')
+        if username is not None:
+            setting.sftp_last_username = username
+            updates.append('sftp_last_username')
+        if updates:
+            setting.save(update_fields=updates)
 
+    def _connect_impl(self, request, *, host, port, username, password, config_name=''):
+        """Shared connect logic: handshake → persist session → record last visit."""
         try:
             transport = paramiko.Transport((host, port))
             transport.connect(username=username, password=password)
@@ -93,7 +95,100 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
                 {'status': 'error', 'message': '连接成功但会话缓存写入失败，请检查服务配置'},
                 status=500,
             )
+
+        # Record last-connect metadata for 断线续连 (failure must not block).
+        try:
+            self._record_last_visit(
+                request.user,
+                config_name=config_name,
+                host=host,
+                port=port,
+                username=username,
+            )
+        except Exception as e:
+            logger.warning('Failed to record last SFTP visit: %s', e)
         return Response({'status': 'connected', 'host': host})
+
+    @action(detail=False, methods=['post'])
+    def connect(self, request):
+        # When a saved config is referenced, load host/port/username and the
+        # decrypted password SERVER-SIDE so the stored password never travels
+        # to the browser. Direct host/username/password connect still works.
+        config_id = request.data.get('config_id')
+        config_name = request.data.get('config_name')
+
+        if config_id is not None or config_name:
+            cfg_qs = SftpConfig.objects.filter(owner=request.user)
+            if config_id is not None:
+                cfg_qs = cfg_qs.filter(id=config_id)
+            else:
+                cfg_qs = cfg_qs.filter(name=config_name)
+            cfg = cfg_qs.first()
+            if not cfg:
+                return Response({'status': 'error', 'message': '未找到配置'}, status=400)
+            return self._connect_impl(
+                request,
+                host=cfg.host, port=cfg.port,
+                username=cfg.username, password=cfg.get_password(),
+                config_name=cfg.name,
+            )
+
+        return self._connect_impl(
+            request,
+            host=request.data.get('host'),
+            port=int(request.data.get('port', 22)),
+            username=request.data.get('username'),
+            password=request.data.get('password'),
+            # 手动连接：清空上次的 config_name，下次走「预填表单」分支
+            config_name='',
+        )
+
+    @action(detail=False, methods=['post'])
+    def auto_connect(self, request):
+        """POST /sftp/auto_connect/ — 用上次保存的配置自动重连（密码服务端解密，不回传）。
+
+        Body 可选 ``{config_name}`` 覆盖存储的记录；缺省用上次记录。
+        无记录 / 配置被删 / 缺少密码 → 400，前端降级为手动预填。
+        """
+        setting, _ = UserSetting.objects.get_or_create(user=request.user)
+        config_name = request.data.get('config_name') or setting.sftp_last_config
+        if not config_name:
+            return Response({'status': 'error', 'message': '上次连接未保存配置，无法自动重连'}, status=400)
+        cfg = SftpConfig.objects.filter(owner=request.user, name=config_name).first()
+        if not cfg or not cfg.password_encrypted:
+            return Response({'status': 'error', 'message': '上次使用的配置已不存在或缺少密码，请手动连接'}, status=400)
+        return self._connect_impl(
+            request,
+            host=cfg.host, port=cfg.port,
+            username=cfg.username, password=cfg.get_password(),
+            config_name=cfg.name,
+        )
+
+    @action(detail=False, methods=['get'])
+    def last_visit(self, request):
+        """GET /sftp/last_visit/ — 断线续连信息（无记录也 200，返回默认值）。
+
+        ``can_auto_connect`` 需要同时满足：上次用保存配置连接 + 配置仍存在 + 有加密密码。
+        host/port/username 始终返回（供手动预填）；密码永不回传。
+        """
+        setting, _ = UserSetting.objects.get_or_create(user=request.user)
+        cfg = None
+        if setting.sftp_last_config:
+            cfg = SftpConfig.objects.filter(owner=request.user, name=setting.sftp_last_config).first()
+        return Response({
+            'can_auto_connect': bool(cfg and cfg.password_encrypted),
+            'config_name': setting.sftp_last_config,
+            'host': setting.sftp_last_host,
+            'port': setting.sftp_last_port,
+            'username': setting.sftp_last_username,
+            'last_path': setting.sftp_last_path,
+        })
+
+    @action(detail=False, methods=['post'])
+    def disconnect(self, request):
+        delete_session(request.user.id)
+        pool.close(request.user.id)
+        return Response({'status': 'disconnected'})
 
     @action(detail=False, methods=['post'])
     def disconnect(self, request):
@@ -133,6 +228,13 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
                 items.sort(key=key_fn, reverse=reverse)
             else:
                 items.sort(key=lambda x: (not x['is_dir'], key_fn(x)), reverse=reverse)
+
+            # 断线续连：每次成功浏览都更新上次路径（即使不点断开、直接刷新也记录）。
+            # 记录失败绝不影响浏览。
+            try:
+                self._record_last_visit(request.user, path=path)
+            except Exception:
+                pass
 
             return Response({'path': path, 'items': items})
         except Exception as e:

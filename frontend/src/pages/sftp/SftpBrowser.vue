@@ -18,7 +18,12 @@
     </div>
 
     <!-- Connection Panel -->
-    <SftpConnectionPanel v-if="!connected" @connected="onConnected" />
+    <SftpConnectionPanel
+      v-if="!connected"
+      :initial="prefill"
+      :last-path-hint="pendingPath"
+      @connected="onConnected"
+    />
 
     <!-- File Browser -->
     <div v-else class="file-browser">
@@ -74,10 +79,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onActivated } from 'vue'
 import { FolderOpened, CircleCheck, CircleClose } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { sftpApi } from '../../api/sftp'
+import { sftpApi, type SftpLastVisit } from '../../api/sftp'
 import { useFilesStore } from '../../stores/files'
 import SftpConnectionPanel from './components/SftpConnectionPanel.vue'
 import SftpToolbar from './components/SftpToolbar.vue'
@@ -94,6 +99,10 @@ const items = ref<any[]>([])
 const searchQuery = ref('')
 const sortBy = ref('mtime')
 const sortOrder = ref<'asc' | 'desc'>('desc')
+// 断线续连：上次访问信息（last_visit 接口），预填连接面板并恢复路径
+const prefill = ref<{ host: string; port: number; username: string } | null>(null)
+const pendingPath = ref('')
+const restoring = ref(false)
 const batchDownloading = ref(false)
 const batchParsing = ref(false)
 const downloadingRows = ref<Set<string>>(new Set())
@@ -122,7 +131,7 @@ const totalSize = computed(() => items.value.filter(i => !i.is_dir).reduce((sum,
 const selectedPaths = computed(() => {
   return items.value
     .filter(i => !i.is_dir && i._selected)
-    .map(i => currentPath.value + '/' + i.name)
+    .map(i => joinPath(currentPath.value, i.name))
 })
 
 const allSelected = computed({
@@ -147,9 +156,54 @@ function isCsv(name: string): boolean {
   return name.toLowerCase().endsWith('.csv')
 }
 
+/** 拼接远程路径，避免 currentPath='/' 时产生 '//sub1' 双斜杠 */
+function joinPath(dir: string, name: string): string {
+  const base = dir === '/' ? '' : dir.replace(/\/+$/, '')
+  return `${base}/${name}`
+}
+
+/**
+ * 断线续连：进入页面时检查上次访问信息。
+ * - 上次用保存配置连接（can_auto_connect）→ 服务端自动重连，直接恢复路径；
+ * - 否则（手动连接/配置被删）→ 预填表单 + 路径提示，用户输密码后跳回。
+ * keep-alive 缓存页面：onMounted 只在 SPA 会话首次触发，须配合 onActivated。
+ * allowAuto=false（用户主动断开后）：只刷新预填信息，绝不立即自动重连。
+ */
+async function checkLastVisit(allowAuto = true) {
+  if (connected.value || restoring.value) return
+  restoring.value = true
+  try {
+    const { data } = await sftpApi.getLastVisit()
+    const last = data as SftpLastVisit
+    if (allowAuto && last.can_auto_connect) {
+      try {
+        await sftpApi.autoConnect()
+        connected.value = true
+        ElMessage.success(`已自动重连，恢复路径：${last.last_path}`)
+        listFiles(last.last_path)
+      } catch {
+        // 配置被删/握手失败 → 降级为手动预填
+        prefill.value = { host: last.host, port: last.port, username: last.username }
+        pendingPath.value = last.last_path
+        ElMessage.info('自动重连失败，请手动输入密码连接')
+      }
+    } else if (last.host) {
+      prefill.value = { host: last.host, port: last.port, username: last.username }
+      pendingPath.value = last.last_path
+    }
+  } catch {
+    // 接口异常静默：不打扰首屏
+  } finally {
+    restoring.value = false
+  }
+}
+
+onMounted(checkLastVisit)
+onActivated(checkLastVisit)
+
 function onConnected() {
   connected.value = true
-  listFiles('/')
+  listFiles(pendingPath.value || '/')
 }
 
 async function disconnect() {
@@ -158,6 +212,9 @@ async function disconnect() {
   connected.value = false
   items.value = []
   currentPath.value = '/'
+  // 断开后刷新预填（后端 list_files 已记录最后浏览路径）；不允许自动重连，
+  // 否则用户刚点「断开」就立刻被重连回来。
+  checkLastVisit(false)
 }
 
 async function listFiles(path: string) {
@@ -187,7 +244,7 @@ async function downloadFile(row: any) {
   const key = `file_${row.name}`
   downloadingRows.value.add(key)
   try {
-    const { data } = await sftpApi.download(currentPath.value + '/' + row.name)
+    const { data } = await sftpApi.download(joinPath(currentPath.value, row.name))
     ElMessage.success(`已保存: ${data.filename} (${formatSize(data.size)})`)
   } catch { /* 错误 toast 由 axios 拦截器统一弹出 */ }
   finally { downloadingRows.value.delete(key) }
@@ -197,7 +254,7 @@ async function downloadAndParse(row: any) {
   const key = `parse_${row.name}`
   downloadingRows.value.add(key)
   try {
-    await sftpApi.downloadAndParse(currentPath.value + '/' + row.name)
+    await sftpApi.downloadAndParse(joinPath(currentPath.value, row.name))
     ElMessage.success(`已导入: ${row.name}`)
     filesStore.notifyFilesChanged()
   } catch { /* 错误 toast 由 axios 拦截器统一弹出 */ }
@@ -205,7 +262,7 @@ async function downloadAndParse(row: any) {
 }
 
 async function downloadDirectory(dirName?: string) {
-  const path = dirName ? currentPath.value + '/' + dirName : currentPath.value
+  const path = dirName ? joinPath(currentPath.value, dirName) : currentPath.value
   downloading.value = true
   dlProgress.value = { percent: 0, speed: 0, eta: 0, currentFile: '', current: 0, total: 0 }
   try {
@@ -256,7 +313,7 @@ async function batchDownloadAndParse() {
 
   batchParsing.value = true
   try {
-    const paths = selected.map(i => currentPath.value + '/' + i.name)
+    const paths = selected.map(i => joinPath(currentPath.value, i.name))
     const { data } = await sftpApi.downloadAndParseBatch(paths)
     ElMessage.success(`已成功导入 ${data.files?.length || 0}/${selected.length} 个文件（批次: ${data.batch_name}）`)
     filesStore.notifyFilesChanged()

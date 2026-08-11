@@ -73,6 +73,14 @@ class UserSetting(models.Model):
     # ECharts 渲染器：'svg' | 'canvas'（前端 echarts-theme.ts 启动时读取）。
     # 曾缺失该字段——保存时 DRF 静默丢弃未知键，刷新后回退默认值。
     chart_renderer = models.CharField(max_length=20, default='svg')
+    # SFTP 浏览器断线续连：上次访问路径 + 上次连接凭据（手动连接记录 host/port/username，
+    # 保存配置连接记录 config_name 用于服务端自动重连）。不在 UserSettingSerializer 白名单内，
+    # 由 apps.sftp 直接 ORM 读写，settings 页 GET/PUT 不受影响。
+    sftp_last_path = models.CharField(max_length=1024, default='/')
+    sftp_last_config = models.CharField(max_length=100, blank=True, default='')
+    sftp_last_host = models.CharField(max_length=255, blank=True, default='')
+    sftp_last_port = models.IntegerField(default=22)
+    sftp_last_username = models.CharField(max_length=100, blank=True, default='')
 
     class Meta:
         db_table = 'accounts_user_setting'
