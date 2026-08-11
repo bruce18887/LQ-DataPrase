@@ -77,7 +77,10 @@
             <span>柱宽</span>
             <span class="value-hint">{{ barWidthPercent }}%</span>
           </div>
-          <el-slider :model-value="barWidthPercent" :min="10" :max="100" :step="5" size="small" @change="onBarWidthChange" />
+          <!-- 必须监听 update:modelValue：EP slider 的值更新走 update:modelValue，
+               change 事件发出的是 props.modelValue（单向绑定下永远是旧值）——
+               此前只绑 @change 导致柱宽设置永远无效 -->
+          <el-slider :model-value="barWidthPercent" :min="10" :max="100" :step="5" size="small" @update:model-value="onBarWidthChange" />
         </div>
       </div>
     </el-collapse-transition>

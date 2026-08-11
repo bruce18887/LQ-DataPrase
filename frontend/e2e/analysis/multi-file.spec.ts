@@ -90,12 +90,12 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
     test.slow()
     await enterMultiFile(page)
 
-    // 选两个同产品文件 → 触发 common params + distribution
+    // 选两个同产品文件 → 触发**合并请求**：common params + 首个参数分布
+    // 一次返回（优化：不再串行第二个带 param 的请求）
     const distResp = page.waitForResponse(
       (r) =>
         r.url().includes('/analysis/multi_lot/') &&
         r.request().method() === 'POST' &&
-        (r.request().postData() || '').includes('"param"') &&
         r.status() < 500,
       { timeout: 25_000 },
     )

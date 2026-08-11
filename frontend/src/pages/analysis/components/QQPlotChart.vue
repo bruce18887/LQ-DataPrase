@@ -25,7 +25,7 @@
 import { computed } from 'vue'
 import { Loading, InfoFilled } from '@element-plus/icons-vue'
 import { useChart } from '../../../composables/useChart'
-import { useEChartsTheme } from '../../../utils/echarts-theme'
+import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
 import OutlierHintBar from './OutlierHintBar.vue'
 
 const props = defineProps<{
@@ -44,6 +44,11 @@ const isEmptyResult = computed(() => {
   const t = props.result.theoretical_quantiles
   return !t || t.length === 0
 })
+
+// 大数据量（≥5000 点，如数万行文件逐行返回分位数）启用 large 模式 + canvas：
+// 上万散点不再产生上万 DOM 节点，避免拖垮渲染与交互（与 SerialChart 一致）
+const pointCount = computed(() => props.result?.theoretical_quantiles?.length ?? 0)
+const isLarge = computed(() => pointCount.value >= 5000)
 
 function buildOption() {
   const r = props.result
@@ -73,10 +78,21 @@ function buildOption() {
     }
   }
 
-  const scatterData = filteredTheoretical.map((t: number, i: number) => [t, filteredObserved[i]])
-  const allValues = [...filteredTheoretical, ...filteredObserved]
-  const dataMin = Math.min(...allValues)
-  const dataMax = Math.max(...allValues)
+  // 单趟循环构建散点并同时求 min/max —— 不能用 Math.min(...allValues) 展开：
+  // 数万行文件展开 ~13 万个参数会超出引擎调用栈上限（RangeError: Maximum
+  // call stack size exceeded）
+  const scatterData: number[][] = []
+  let dataMin = Infinity
+  let dataMax = -Infinity
+  for (let i = 0; i < filteredTheoretical.length; i++) {
+    const t = filteredTheoretical[i]
+    const o = filteredObserved[i]
+    scatterData.push([t, o])
+    if (t < dataMin) dataMin = t
+    if (o < dataMin) dataMin = o
+    if (t > dataMax) dataMax = t
+    if (o > dataMax) dataMax = o
+  }
   const diagonal = [[dataMin, dataMin], [dataMax, dataMax]]
 
   const rSquared = r.r_squared
@@ -101,6 +117,8 @@ function buildOption() {
   })
 
   return {
+    // large 模式下上万 symbol 的入场/更新动画是纯开销，直接关闭
+    animation: !isLarge.value,
     title: {
       text: `${props.param} QQ图`, left: 'center', top: 6,
       textStyle: { fontSize: 14, fontWeight: 'bold', color: tc },
@@ -122,13 +140,24 @@ function buildOption() {
     },
     graphic,
     series: [
-      { name: '数据点', type: 'scatter', data: scatterData, symbolSize: 5, itemStyle: { color: '#1E88E5' } },
+      {
+        name: '数据点', type: 'scatter', data: scatterData, symbolSize: 5,
+        itemStyle: { color: '#1E88E5' },
+        ...(isLarge.value ? { large: true } : {}),
+      },
       { name: 'y=x参考线', type: 'line', data: diagonal, lineStyle: { color: '#9E9E9E', type: 'dashed', width: 2 }, symbol: 'none', silent: true },
     ],
   }
 }
 
-const { chartRef } = useChart(buildOption, [() => props.result, () => props.visible, () => props.outlierHandling])
+// 大数据量强制 canvas（SVG 渲染器对 large 符号仍会为每点发射 DOM 元素；
+// canvas 无 DOM 节点，官方推荐大数据散点必用 canvas）；小数据量跟随用户全局设置
+const { chartRef } = useChart(
+  buildOption,
+  [() => props.result, () => props.visible, () => props.outlierHandling],
+  'chartRef',
+  () => (isLarge.value ? 'canvas' : getChartRenderer()),
+)
 void chartRef // bound to <div ref="chartRef"> in template
 </script>
 

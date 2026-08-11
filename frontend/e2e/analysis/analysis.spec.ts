@@ -348,44 +348,42 @@ test.describe('@p1 箱线图', { tag: ['@p1', '@analysis'] }, () => {
 })
 
 test.describe('@p1 测试项相关性分析', { tag: ['@p1', '@analysis'] }, () => {
-  test('相关性散点图完整流程：选择参数 → 渲染图表 → 显示指标', async ({ page }) => {
+  test('相关性散点图完整流程：选择参数 → 自动加载 → 渲染图表 → 显示指标', async ({ page }) => {
     await enterAnalysis(page, RECOMMENDED.analysis)
     await page.getByRole('tab', { name: /相关性对比/ }).click()
 
-    // 等待相关性面板出现
-    const panel = page.locator('.correlation-panel')
-    await expect(panel).toBeVisible({ timeout: 10_000 })
+    // 相关性工具面板（AnalysisTabLayout 三层布局；旧 .correlation-panel 已随
+    // 2026-06-13 重构移除，选择器须匹配当前 DOM）
+    const layout = page.locator('.analysis-tab-layout:visible')
+    await expect(layout).toBeVisible({ timeout: 10_000 })
 
-    // X 参数选择
-    await pickOption(page, 'X轴测试项', 'ICCS_FT', panel)
-    // Y 参数选择
-    await pickOption(page, 'Y轴测试项', 'ICCSTDBY_II', panel)
-
-    // 点击分析
-    const btn = panel.getByRole('button', { name: '分析相关性' })
-    const resp = page.waitForResponse(
-      (r) => r.url().includes('/analysis/correlation/') && r.status() < 500,
+    // 选 X/Y 参数——选好后自动触发 correlation 请求（无「分析相关性」按钮）
+    const respPromise = page.waitForResponse(
+      (r) => r.url().includes('/analysis/correlation/') && r.request().method() === 'POST' && r.status() < 500,
       { timeout: 25_000 },
     )
-    await btn.click()
-    const r = await resp
+    await pickOption(page, '选择 X 轴参数', 'KELVIN_VIN', layout)
+    // X 下拉关闭动画与 Y 下拉打开重叠会导致选项瞬时不稳定，间隔后再选 Y
+    await page.waitForTimeout(600)
+    await pickOption(page, '选择 Y 轴参数', 'KELVIN_SW', layout)
+    const r = await respPromise
     expect(r.status(), 'correlation API 应返回 200').toBe(200)
 
-    // 散点图 SVG 渲染
-    const chart = panel.locator('.chart-container svg')
-    await expect(chart, '散点图应渲染 SVG').toBeVisible({ timeout: 15_000 })
+    // 散点图渲染（SVG 或 canvas——大文件 large 模式为 canvas）
+    const chart = layout.locator('.chart-inner svg, .chart-inner canvas').first()
+    await expect(chart, '散点图应渲染').toBeVisible({ timeout: 15_000 })
     const box = await chart.boundingBox()
-    expect(box, 'SVG 应有有效尺寸').not.toBeNull()
-    expect(box!.width, 'SVG 宽 > 0').toBeGreaterThan(0)
-    expect(box!.height, 'SVG 高 > 0').toBeGreaterThan(0)
+    expect(box, '图表应有有效尺寸').not.toBeNull()
+    expect(box!.width, '宽 > 0').toBeGreaterThan(0)
+    expect(box!.height, '高 > 0').toBeGreaterThan(0)
 
     // Pearson r 指标卡片
-    const rCard = panel.locator('.metric-card').first()
+    const rCard = layout.locator('.metric-card').first()
     await expect(rCard).toBeVisible()
     await expect(rCard.locator('.metric-value')).not.toBeEmpty()
 
-    // 数据点数指标卡片
-    const nCard = panel.locator('.metric-card').nth(1)
+    // 数据点数指标卡片（Pearson r / R² / 数据点数 / 回归方程 的第 3 张）
+    const nCard = layout.locator('.metric-card').nth(2)
     await expect(nCard).toBeVisible()
     const nText = await nCard.locator('.metric-value').innerText()
     expect(Number(nText.replace(/,/g, ''))).toBeGreaterThan(0)
@@ -395,25 +393,26 @@ test.describe('@p1 测试项相关性分析', { tag: ['@p1', '@analysis'] }, () 
     await enterAnalysis(page, RECOMMENDED.analysis)
     await page.getByRole('tab', { name: /相关性对比/ }).click()
 
-    const panel = page.locator('.correlation-panel')
-    await expect(panel).toBeVisible({ timeout: 10_000 })
+    const layout = page.locator('.analysis-tab-layout:visible')
+    await expect(layout).toBeVisible({ timeout: 10_000 })
 
-    // 快速触发一次分析以使轴范围设置出现
-    await pickOption(page, 'X轴测试项', 'ICCS_FT', panel)
-    await pickOption(page, 'Y轴测试项', 'ICCSTDBY_II', panel)
-    const resp = page.waitForResponse(
-      (r) => r.url().includes('/analysis/correlation/') && r.status() < 500,
+    // 选 X/Y 触发自动分析，使坐标轴范围设置卡片出现
+    const respPromise = page.waitForResponse(
+      (r) => r.url().includes('/analysis/correlation/') && r.request().method() === 'POST' && r.status() < 500,
       { timeout: 25_000 },
     )
-    await panel.getByRole('button', { name: '分析相关性' }).click()
-    await resp
+    await pickOption(page, '选择 X 轴参数', 'KELVIN_VIN', layout)
+    // X 下拉关闭动画与 Y 下拉打开重叠会导致选项瞬时不稳定，间隔后再选 Y
+    await page.waitForTimeout(600)
+    await pickOption(page, '选择 Y 轴参数', 'KELVIN_SW', layout)
+    await respPromise
 
     // 展开坐标轴范围设置
-    const collapse = panel.getByText('坐标轴范围设置')
+    const collapse = layout.getByText('坐标轴范围设置')
     await collapse.click()
 
     // 西格玛模式 → 出现 sigma 倍数选择器
-    const axisBody = panel.locator('.axis-body')
+    const axisBody = layout.locator('.axis-body')
     await expect(axisBody).toBeVisible()
 
     // X 轴切到西格玛
@@ -424,7 +423,8 @@ test.describe('@p1 测试项相关性分析', { tag: ['@p1', '@analysis'] }, () 
     const sigmaSel = axisBody.locator('.axis-item').first().locator('.el-select').filter({ hasText: 'σ' })
     await expect(sigmaSel, '西格玛模式下应出现 σ 倍数选择器').toBeVisible({ timeout: 5000 })
 
-    // Y 轴切到自定义 → 出现 min/max 输入
+    // Y 轴切到自定义 → 出现 min/max 输入（X 轴下拉关闭动画后再操作 Y，避免重叠）
+    await page.waitForTimeout(600)
     const ySelects = axisBody.locator('.axis-item').nth(1).locator('.el-select').first()
     await ySelects.click()
     await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '自定义' }).first().click()
@@ -441,13 +441,25 @@ test.describe('@p2 文件相关性', { tag: ['@p2', '@analysis'] }, () => {
     const fileSection = page.locator('.file-correlation-section')
     await expect(fileSection).toBeVisible({ timeout: 10_000 })
 
-    // 文件选择器应可点击
-    const file1 = fileSection.locator('.el-select').first()
+    // 文件选择器（等待文件列表加载后选项非空）
+    const file1 = fileSection.locator('.el-select').nth(0)
     await expect(file1).toBeVisible()
     const file2 = fileSection.locator('.el-select').nth(1)
     await expect(file2).toBeVisible()
     // 阈值输入框
     await expect(fileSection.locator('.el-input-number')).toBeVisible()
+    // 分析按钮
+    await expect(fileSection.getByRole('button', { name: '分析相关性' })).toBeVisible()
+
+    // 文件列表加载完成：打开文件 1 下拉应有选项
+    await file1.click()
+    await expect
+      .poll(
+        async () => page.locator('.el-select-dropdown__item:visible').count(),
+        { timeout: 15_000, message: '文件列表应加载出选项' },
+      )
+      .toBeGreaterThan(0)
+    await page.keyboard.press('Escape')
   })
 })
 

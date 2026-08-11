@@ -104,6 +104,48 @@
           计算相关性矩阵（{{ selectedMatrixParams.length }} 项）
         </el-button>
       </template>
+
+      <!-- 文件相关性：按序列号对齐两个文件，逐参数对比 ATE/Bench 差异 -->
+      <el-card class="file-correlation-section" shadow="hover" :body-style="{ padding: '12px' }">
+        <label class="section-label">文件相关性</label>
+        <el-select
+          v-model="fcFile1"
+          :placeholder="fcFilesLoading ? '加载文件中...' : '选择文件 1'"
+          filterable
+          style="width: 100%"
+        >
+          <el-option v-for="f in fcFiles" :key="f.id" :label="f.filename" :value="f.id" />
+        </el-select>
+        <el-select
+          v-model="fcFile2"
+          :placeholder="fcFilesLoading ? '加载文件中...' : '选择文件 2'"
+          filterable
+          style="width: 100%; margin-top: 8px"
+        >
+          <el-option v-for="f in fcFiles" :key="f.id" :label="f.filename" :value="f.id" />
+        </el-select>
+        <div class="fc-threshold-row">
+          <label class="axis-label">差异阈值 (%)</label>
+          <el-input-number
+            v-model="fcThreshold"
+            :min="0"
+            :max="100"
+            :precision="1"
+            :controls="false"
+            size="small"
+            style="width: 90px"
+          />
+        </div>
+        <el-button
+          type="primary"
+          size="small"
+          :loading="fcLoading"
+          style="width: 100%; margin-top: 8px"
+          @click="onFileCorrelate"
+        >
+          分析相关性
+        </el-button>
+      </el-card>
     </template>
 
     <!-- 右侧面板 -->
@@ -151,17 +193,39 @@
           <el-empty v-else description="选择参数后点击「计算相关性矩阵」按钮" />
         </div>
       </template>
+
+      <!-- 文件相关性结果 -->
+      <template v-if="fcResult">
+        <div class="fc-summary">
+          公共序列号 {{ fcResult.common_serials }} 个 · 公共参数 {{ fcResult.common_params }} 个
+        </div>
+        <el-table
+          :data="fcResult.summary || []"
+          size="small"
+          max-height="320"
+          class="fc-table"
+        >
+          <el-table-column prop="param" label="参数" min-width="120" show-overflow-tooltip />
+          <el-table-column prop="compared" label="对比数" width="80" />
+          <el-table-column prop="fail_count" label="超差数" width="80" />
+          <el-table-column prop="pass_rate" label="通过率%" width="90" />
+          <el-table-column prop="max_diff" label="最大差异%" width="90" />
+        </el-table>
+      </template>
     </template>
   </AnalysisTabLayout>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import AnalysisTabLayout from './AnalysisTabLayout.vue'
 import { useCorrelation } from '../composables/useCorrelation'
 import { useCorrelationMatrix } from '../composables/useCorrelationMatrix'
+import { useFileCorrelation } from '../composables/useFileCorrelation'
 import { useChart } from '../../../composables/useChart'
-import { useEChartsTheme } from '../../../utils/echarts-theme'
+import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
+import { minMax } from '../../../utils/minmax'
 import { useAnalysisStore } from '../../../stores/analysis'
 import OutlierHintBar from './OutlierHintBar.vue'
 
@@ -195,6 +259,26 @@ const customMinY = ref(0); const customMaxY = ref(0)
 
 const { corrLoading, corrResult, loadCorrelation } = useCorrelation(() => props.fileId)
 
+// ===== 文件相关性（按序列号对齐两文件，逐参数对比 ATE/Bench 差异） =====
+const {
+  loading: fcLoading, result: fcResult,
+  files: fcFiles, filesLoading: fcFilesLoading,
+  loadFiles, loadFileCorrelation,
+} = useFileCorrelation()
+const fcFile1 = ref<number | null>(null)
+const fcFile2 = ref<number | null>(null)
+const fcThreshold = ref(3.0)
+
+loadFiles()  // setup 同步发起文件列表加载
+
+function onFileCorrelate() {
+  if (!fcFile1.value || !fcFile2.value) {
+    ElMessage.warning('请选择两个文件')
+    return
+  }
+  loadFileCorrelation(fcFile1.value, fcFile2.value, fcThreshold.value)
+}
+
 const SITE_COLORS = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc', '#5383e0']
 
 const rColorClass = computed(() => {
@@ -202,6 +286,14 @@ const rColorClass = computed(() => {
   if (r > 0.7) return 'r-strong'
   if (r > 0.4) return 'r-medium'
   return 'r-weak'
+})
+
+// 大数据量（≥5000 点）启用 large 模式 + canvas：上万散点不再产生上万
+// DOM 节点（与 SerialChart/QQPlotChart 一致）
+const isLarge = computed(() => {
+  const series = corrResult.value?.series_data || []
+  return series.reduce((sum: number, sd: { data?: unknown[] }) =>
+    sum + (sd.data?.length ?? 0), 0) >= 5000
 })
 
 /** 线性回归计算 */
@@ -247,7 +339,7 @@ function computeRange(mode: string, sigma: number, cMin: number, cMax: number, v
     const s = Math.sqrt(vals.reduce((sum, v) => sum + (v - m) ** 2, 0) / vals.length)
     return { min: m - sigma * s, max: m + sigma * s }
   }
-  const dMin = Math.min(...vals), dMax = Math.max(...vals)
+  const [dMin, dMax] = minMax(vals)
   const rng = dMax > dMin ? dMax - dMin : 1
   return { min: dMin - rng / 2, max: dMax + rng / 2 }
 }
@@ -260,6 +352,7 @@ function buildScatterOption() {
     (sd: { name: string; data: number[][] }, idx: number) => ({
       name: sd.name, type: 'scatter', data: sd.data, symbolSize: 6,
       itemStyle: { color: SITE_COLORS[idx % SITE_COLORS.length], opacity: 0.6 },
+      ...(isLarge.value ? { large: true } : {}),
     }),
   )
   const allX: number[] = [], allY: number[] = []
@@ -286,8 +379,9 @@ function buildScatterOption() {
   // Regression line
   if (showRegression.value && allX.length >= 2) {
     const { slope, intercept } = linearRegression(allX.map((x, i) => [x, allY[i]]))
-    const xMin = xR.min ?? Math.min(...allX)
-    const xMax = xR.max ?? Math.max(...allX)
+    const [xAllMin, xAllMax] = minMax(allX)
+    const xMin = xR.min ?? xAllMin
+    const xMax = xR.max ?? xAllMax
     const r2 = (d.pearson_r ?? 0) ** 2
     series.push({
       name: '回归线',
@@ -302,6 +396,8 @@ function buildScatterOption() {
   }
 
   return {
+    // large 模式下上万 symbol 的入场/更新动画是纯开销，直接关闭
+    animation: !isLarge.value,
     title: { text: `${d.param_x} vs ${d.param_y}`, subtext: `Pearson r = ${d.pearson_r?.toFixed(4) ?? '-'}`, left: 'center', textStyle: { color: tc, fontSize: 14 }, subtextStyle: { color: tc, fontSize: 12 } },
     toolbox: { feature: { saveAsImage: { title: '保存图片' }, restore: { title: '还原' } }, right: 10 },
     tooltip: { trigger: 'item', formatter: (p: any) => `${p.seriesName}<br/>${d.param_x}: ${Number(p.value[0]).toFixed(4)}<br/>${d.param_y}: ${Number(p.value[1]).toFixed(4)}` },
@@ -318,6 +414,8 @@ function buildScatterOption() {
   }
 }
 
+// 大数据量强制 canvas（SVG 渲染器对 large 符号仍会为每点发射 DOM 元素）；
+// 小数据量跟随用户全局设置
 const { chartRef: scatterChartRef } = useChart(buildScatterOption, [
   () => corrResult.value,
   () => showRegression.value,
@@ -326,7 +424,7 @@ const { chartRef: scatterChartRef } = useChart(buildScatterOption, [
   () => customMinX.value, () => customMaxX.value,
   () => customMinY.value, () => customMaxY.value,
   () => outlierHandling.value,
-], 'scatterChartRef')
+], 'scatterChartRef', () => (isLarge.value ? 'canvas' : getChartRenderer()))
 void scatterChartRef
 
 watch(() => corrResult.value, (data) => {
@@ -334,8 +432,8 @@ watch(() => corrResult.value, (data) => {
   const allX: number[] = [], allY: number[] = []
   for (const sd of data.series_data || []) for (const pt of sd.data || []) { allX.push(pt[0]); allY.push(pt[1]) }
   const r4 = (v: number) => Math.round(v * 1e4) / 1e4
-  if (allX.length > 0) { customMinX.value = r4(Math.min(...allX)); customMaxX.value = r4(Math.max(...allX)) }
-  if (allY.length > 0) { customMinY.value = r4(Math.min(...allY)); customMaxY.value = r4(Math.max(...allY)) }
+  if (allX.length > 0) { const [mn, mx] = minMax(allX); customMinX.value = r4(mn); customMaxX.value = r4(mx) }
+  if (allY.length > 0) { const [mn, mx] = minMax(allY); customMinY.value = r4(mn); customMaxY.value = r4(mx) }
 })
 
 // ===== Matrix mode =====
@@ -507,6 +605,23 @@ void matrixChartRef
   color: var(--text-secondary, #909399);
   white-space: nowrap;
   min-width: 30px;
+}
+
+.fc-threshold-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.fc-summary {
+  font-size: 13px;
+  color: var(--text-secondary, #909399);
+  margin-bottom: 8px;
+}
+
+.fc-table {
+  width: 100%;
 }
 
 :deep(.el-collapse-item__header) {

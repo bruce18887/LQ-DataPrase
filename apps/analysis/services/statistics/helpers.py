@@ -5,6 +5,7 @@ Provides column lookup functions, data accessors, and basic numeric helpers
 used across the statistics sub-modules.
 """
 from typing import Optional, Dict, List, Tuple
+import re
 import numpy as np
 import pandas as pd
 
@@ -35,16 +36,48 @@ def get_site_column(df: pd.DataFrame) -> Optional[str]:
     return find_column_by_pattern(df, ['site'])
 
 
-def get_serial_column(df: pd.DataFrame) -> Optional[str]:
-    col = find_column_by_pattern(df, ['serial'])
-    if col:
-        return col
-    # STS8200 等格式无 Serial 列：回退到 PART_ID（每 site 内的部件序号）
-    for c in df.columns:
-        cl = str(c).lower()
-        if 'part' in cl and 'id' in cl:
-            return c
-    return None
+def _dut_column_match(cl: str) -> bool:
+    """Dut_No 分词精确匹配；排除 Dut_Pass / Dut_Fail 等布尔列。"""
+    words = set(re.split(r'[^a-z0-9]+', cl))
+    return 'dut' in words and 'no' in words and not (words & {'pass', 'fail'})
+
+
+# 序列列候选优先级（集中式：serial_distribution / wafer_map / file_correlation /
+# 参数列表排除等所有消费者共用，禁止在各处复制回退逻辑）。
+# 匹配语义：serial 子串（Serial_No / Serial #）；dut 分词精确匹配（Dut_No）；
+# part+id 双子串（PART_ID，STS8200 回退）。
+SERIAL_COLUMN_PRIORITY = (
+    ('serial', lambda cl: 'serial' in cl),
+    ('dut', _dut_column_match),
+    ('part_id', lambda cl: 'part' in cl and 'id' in cl),
+)
+
+
+def get_serial_candidates(df: pd.DataFrame) -> List[str]:
+    """按优先级返回所有可作 serial 的列名（保序、去重）。
+
+    先按模式优先级分组，组内按列序排列——即使 Dut_No 列序在 Serial_No
+    之前，Serial_No 仍优先。调用方可用第一个（自动）或让用户显式选择其一。
+    """
+    seen = set()
+    result = []
+    for _name, match in SERIAL_COLUMN_PRIORITY:
+        for col in df.columns:
+            if col in seen:
+                continue
+            if match(str(col).lower()):
+                seen.add(col)
+                result.append(col)
+    return result
+
+
+def get_serial_column(df: pd.DataFrame,
+                      preferred: Optional[str] = None) -> Optional[str]:
+    """返回 serial 列：显式 ``preferred`` 优先，否则按优先级取第一个候选。"""
+    if preferred and preferred in df.columns:
+        return preferred
+    candidates = get_serial_candidates(df)
+    return candidates[0] if candidates else None
 
 
 def get_coord_columns(df: pd.DataFrame) -> Tuple[Optional[str], Optional[str]]:

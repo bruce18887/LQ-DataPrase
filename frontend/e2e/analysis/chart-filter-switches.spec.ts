@@ -185,3 +185,47 @@ test.describe('@p1 图表配置数据筛选开关', { tag: ['@p1', '@analysis'] 
     await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
   })
 })
+
+test.describe('@p1 柱宽设置生效', { tag: ['@p1', '@analysis'] }, () => {
+  test('拖动柱宽 slider：ECharts barWidth 与实际柱宽像素同步变化', async ({ page }) => {
+    // 回归：ChartConfigPanel 曾只监听 @change，而 EP slider 的值更新走
+    // update:modelValue、change 发出的是 props.modelValue（单向绑定下永远
+    // 是旧值 20）→ 柱宽设置永远无效。修复后点轨道/拖动实时生效。
+    await gotoApp(page, '/analysis')
+    await selectAnalysisFile(page, RECOMMENDED.analysis)
+    await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
+    await waitLoadingGone(page.locator(SINGLE))
+
+    const chartEl = page.locator(`${SINGLE} .chart-wrapper div[_echarts_instance_]`)
+    await expect(chartEl).toBeVisible({ timeout: 15_000 })
+
+    const readBar = () => chartEl.evaluate((el: any) => {
+      const inst = el.__echartsInstance__
+      const opt = inst?.getOption?.()
+      let px: number | null = null
+      try {
+        px = inst?.getModel?.()?.getSeriesByIndex?.(0)?.getData?.()?.getItemLayout?.(0)?.width ?? null
+      } catch { /* ignore */ }
+      return { opt: opt?.series?.[0]?.barWidth ?? null, px }
+    })
+
+    const before = await readBar()
+    expect(before.opt).toBe('20%')
+
+    // 展开「更多」露出柱宽 slider，点击轨道 90% 处
+    await page.locator(`${SINGLE} .more-btn`).click()
+    const slider = page.locator(`${SINGLE} .el-slider`)
+    await expect(slider).toBeVisible({ timeout: 10_000 })
+    const hint = page.locator(`${SINGLE} .config-section .value-hint`).first()
+    await expect(hint).toContainText('20%')
+
+    const runway = slider.locator('.el-slider__runway')
+    const rbox = (await runway.boundingBox())!
+    await runway.click({ position: { x: rbox.width * 0.9, y: rbox.height / 2 } })
+
+    // 值标签更新 + ECharts option barWidth 更新 + 实际柱宽像素变宽
+    await expect(hint).toContainText('90%', { timeout: 5_000 })
+    await expect.poll(() => readBar().then((s) => s.opt)).toBe('90%')
+    await expect.poll(() => readBar().then((s) => s.px)).toBeGreaterThan((before.px ?? 0) * 2)
+  })
+})

@@ -20,7 +20,9 @@ django.setup()
 
 import numpy as np  # noqa: E402
 
-from apps.analysis.services.statistics.kde import GaussianKDE  # noqa: E402
+from apps.analysis.services.statistics.kde import (  # noqa: E402
+    GaussianKDE, MAX_KDE_SAMPLES,
+)
 
 # ---------------------------------------------------------------------------
 # Golden fixtures (scipy 1.17.1, seed 1234)
@@ -91,6 +93,54 @@ def test_kde_raises_on_degenerate():
             pass
         else:
             raise AssertionError('expected ValueError for degenerate input')
+
+
+def _full_kde_pdf(dataset, grid):
+    """与 GaussianKDE 同公式的全量计算（带宽用全量 n/variance 口径）。"""
+    data = np.asarray(dataset, dtype=float)
+    n = data.size
+    variance = float(np.var(data, ddof=1))
+    factor = (n * (1 + 2.0) / 4.0) ** (-1.0 / (1 + 4.0))
+    stdev = np.sqrt(variance) * factor
+    diff = (grid[:, None] - data[None, :]) / stdev
+    return np.exp(-0.5 * diff * diff).mean(axis=1) / (stdev * np.sqrt(2.0 * np.pi))
+
+
+def test_kde_large_sample_fidelity():
+    """68k 点：内部采样后的输出与全量计算相对误差 < 5%（保形钉）。
+
+    大样本优化只对核求和使用均匀采样数据子集；带宽（neff/variance）
+    保持全量口径，曲线形状必须几乎逐点一致。窄分布（σ=0.02）是最严苛
+    场景，实测 16384 点采样相对误差 ~2.5%——叠加在直方图上的密度曲线
+    纵轴 2.5% 偏差肉眼不可辨；真实数据（σ≈0.05）实测 <0.6%。
+    """
+    vals = np.random.default_rng(123).normal(-0.48, 0.02, 68_000)
+    grid = np.linspace(-0.7, -0.3, 200)
+    sampled = GaussianKDE(vals, bw_method='silverman')(grid)
+    full = _full_kde_pdf(vals, grid)
+    rel_err = float(np.max(np.abs(sampled - full)) / np.max(full))
+    assert rel_err < 0.05, f'relative error {rel_err:.4%} >= 5%'
+
+
+def test_kde_at_threshold_unchanged():
+    """n == MAX_KDE_SAMPLES（不触发采样）→ 与全量逐点一致（零变更钉）。"""
+    vals = np.random.default_rng(321).normal(10, 2, MAX_KDE_SAMPLES)
+    grid = np.linspace(2, 18, 100)
+    got = GaussianKDE(vals, bw_method='silverman')(grid)
+    expected = _full_kde_pdf(vals, grid)
+    assert np.allclose(got, expected, atol=1e-12)
+
+
+def test_kde_large_bimodal_peaks_preserved():
+    """6 万点双峰：采样后仍 2 峰且峰位不变（轮廓保留钉）。"""
+    rng = np.random.default_rng(7)
+    data = np.concatenate([rng.normal(-3, 0.5, 30_000), rng.normal(3, 0.5, 30_000)])
+    x = np.linspace(-6, 6, 401)
+    pdf = GaussianKDE(data, bw_method='silverman')(x)
+    peaks = [i for i in range(1, len(pdf) - 1)
+             if pdf[i] > pdf[i - 1] and pdf[i] > pdf[i + 1]]
+    assert len(peaks) == 2
+    assert abs(x[peaks[0]] + 3) < 0.3 and abs(x[peaks[1]] - 3) < 0.3
 
 
 def test_kde_live_comparison_with_scipy():

@@ -1,5 +1,23 @@
 <template>
   <div class="serial-chart-wrapper">
+    <!-- 多候选序列列（Serial_No 与 Dut_No 并存等）：显示选择器供用户手动切换，
+         单选 = 自动检测（优先级 Serial_No > Dut_No > PART_ID） -->
+    <div v-if="showSelector" class="serial-col-selector">
+      <span class="serial-col-selector__label">序列列</span>
+      <el-select
+        :model-value="activeSerialCol"
+        size="small"
+        style="width: 200px"
+        @update:model-value="(v: string) => emit('update:serialCol', v)"
+      >
+        <el-option
+          v-for="c in serialCandidates"
+          :key="c"
+          :label="c"
+          :value="c"
+        />
+      </el-select>
+    </div>
     <!-- 底部需容纳 轴名+图例+滑块 三层（≈135px），450px 会把绘图区挤到 ~240px；600px 时绘图区 ≈390px -->
     <div ref="chartRef" style="height: 600px" />
     <OutlierHintBar
@@ -15,11 +33,20 @@ import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
 import OutlierHintBar from './OutlierHintBar.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   data: any
   outlierHandling?: 'clip' | 'exclude' | 'off'
-}>()
+  /** 用户显式选择的序列列（空串 = 自动检测） */
+  serialCol?: string
+  /** 后端返回的候选列（>1 时显示选择器） */
+  serialCandidates?: string[]
+}>(), { serialCol: '', serialCandidates: () => [] })
+const emit = defineEmits<{ (e: 'update:serialCol', value: string): void }>()
 const { colors } = useEChartsTheme()
+
+// 选择器显示当前生效的列：显式选择优先，否则回退到后端自动检测结果
+const activeSerialCol = computed(() => props.serialCol || props.data?.serial_col || '')
+const showSelector = computed(() => (props.serialCandidates?.length ?? 0) > 1)
 
 const SITE_COLORS = [
   '#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de',
@@ -154,3 +181,17 @@ const { chartRef } = useChart(
 )
 void chartRef // bound to <div ref="chartRef"> in template
 </script>
+
+<style scoped>
+.serial-col-selector {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.serial-col-selector__label {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+</style>

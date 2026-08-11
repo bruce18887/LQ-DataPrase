@@ -135,7 +135,7 @@ const {
   multiRangeType: rangeType,
 } = storeToRefs(analysisStore)
 
-const { loading, paramsLoading, commonParams, lotData, loadCommonParams, loadDistribution } = useMultiFile()
+const { loading, paramsLoading, commonParams, lotData, lotParam, loadCommonParams, loadDistribution } = useMultiFile()
 
 // 当前选中文件对象（保持下拉顺序）
 const selectedFileObjs = computed(() =>
@@ -234,26 +234,35 @@ const lotStats = computed(() => {
 })
 
 async function reloadParams() {
+  // 合并请求：loadCommonParams 的响应已含首个公共参数的分布（lotParam 标记）
   await loadCommonParams(fileIds.value, ignoreNoLimit.value)
   // 选中项失效时回退到第一项
   if (commonParams.value.length === 0) {
     selectedParam.value = ''
   } else if (!commonParams.value.includes(selectedParam.value)) {
     selectedParam.value = commonParams.value[0]
-  } else {
-    // 列表变了但当前项仍有效，主动刷新一次分布
+    // watch(selectedParam) 触发时若 lotParam === 该参数则跳过（分布已随合并响应到达）
+  } else if (lotParam.value !== selectedParam.value) {
+    // 列表变了但当前项仍有效且分布未随合并响应到达，主动刷新一次
     await loadDistribution(fileIds.value, selectedParam.value, rangeType.value)
   }
 }
 
-watch(fileIds, () => { reloadParams() }, { deep: true })
+// fileIds 多选过程中逐个勾选会触发多次 reload —— 150ms 防抖合并为一次
+let fileDebounce: ReturnType<typeof setTimeout> | null = null
+watch(fileIds, () => {
+  if (fileDebounce) clearTimeout(fileDebounce)
+  fileDebounce = setTimeout(() => { reloadParams() }, 150)
+}, { deep: true })
 watch(ignoreNoLimit, () => { reloadParams() })
 watch(rangeType, () => {
+  // 范围类型变化总是需要按新 range_type 重算分布（合并请求用的是默认类型）
   if (selectedParam.value) loadDistribution(fileIds.value, selectedParam.value, rangeType.value)
 })
 watch(selectedParam, (p) => {
-  if (p) loadDistribution(fileIds.value, p, rangeType.value)
-  else lotData.value = null
+  if (p) {
+    if (lotParam.value !== p) loadDistribution(fileIds.value, p, rangeType.value)
+  } else lotData.value = null
 })
 
 onMounted(() => {

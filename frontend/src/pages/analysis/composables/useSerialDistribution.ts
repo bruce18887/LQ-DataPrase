@@ -12,6 +12,8 @@ export function useSerialDistribution(
   availableParams?: Ref<string[]>,
   /** 仅用 Pass 数据(Bin1)：序列点只保留 pass-bin 行 */
   dataOnlyBin1?: Ref<boolean>,
+  /** 显式指定序列列（空串 = 自动检测：Serial_No > Dut_No > PART_ID） */
+  serialCol?: Ref<string>,
 ) {
   const { data: serialDistData, error: serialError, run } = useAsyncData<any>({ silent: true })
 
@@ -26,6 +28,7 @@ export function useSerialDistribution(
       chart_config: chartConfig.value,
       range_type: rangeType.value,
       data_only_bin1: dataOnlyBin1?.value ?? false,
+      serial_col: serialCol?.value || undefined,
     }))
   }
 
@@ -33,6 +36,7 @@ export function useSerialDistribution(
   watch([chartConfig, rangeType], () => { if (chartMode.value === 'serial') loadSerialDistribution() }, { deep: true })
   watch(localSelectedParam, () => { if (chartMode.value === 'serial') loadSerialDistribution() })
   if (dataOnlyBin1) watch(dataOnlyBin1, () => { if (chartMode.value === 'serial') loadSerialDistribution() })
+  if (serialCol) watch(serialCol, () => { if (chartMode.value === 'serial') loadSerialDistribution() })
 
   return { serialDistData, serialError, loadSerialDistribution }
 }

@@ -150,7 +150,14 @@
           :closable="false"
           class="serial-error-alert"
         />
-        <SerialChart v-else-if="serialDistData" :data="serialDistData" :outlier-handling="outlierHandling" />
+        <SerialChart
+          v-else-if="serialDistData"
+          :data="serialDistData"
+          :outlier-handling="outlierHandling"
+          :serial-col="serialCol"
+          :serial-candidates="serialDistData.serial_candidates || []"
+          @update:serial-col="(v: string) => { serialCol = v }"
+        />
         <el-empty v-else description="当前参数无序列分布数据，请选择其他参数" />
       </div>
     </template>
@@ -202,6 +209,9 @@ const customLow = ref<number | null>(analysisStore.customLow)
 const customHigh = ref<number | null>(analysisStore.customHigh)
 const outlierHandling = ref(analysisStore.outlierHandling)
 const iqrMultiplier = ref(analysisStore.iqrMultiplier)
+// 序列列手动选择（空串 = 自动检测）；多候选文件（Serial_No + Dut_No）由
+// SerialChart 选择器写入，文件切换时重置回自动检测
+const serialCol = ref('')
 
 // Composable: Histogram
 const {
@@ -237,6 +247,7 @@ const {
   rangeType,
   computed(() => props.params),
   dataOnlyBin1,
+  serialCol,
 )
 
 // Composable: Site Stats
@@ -331,6 +342,7 @@ watch(histResult, () => {
 // don't carry the stale value into the new file's chart APIs.
 watch(() => props.fileId, () => {
   localSelectedParam.value = ''
+  serialCol.value = ''
 })
 
 // ========== Param navigation ==========

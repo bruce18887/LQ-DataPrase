@@ -20,6 +20,7 @@ from apps.analysis.services.statistics import (
     compute_site_stats,
     get_site_column,
     get_serial_column,
+    get_serial_candidates,
     get_coord_columns,
     get_columns_with_limits,
     get_1d_from,
@@ -124,10 +125,9 @@ class AnalysisViewSet(viewsets.GenericViewSet):
             # derived, so the list is consistent with the histogram stats.
             if data_only_bin1:
                 df = filter_bin1_rows(df, metadata)
-            # Exclude serial/site columns — they are metadata, not data params
-            _meta_cols = set()
-            _sc = get_serial_column(df)
-            if _sc: _meta_cols.add(_sc)
+            # Exclude serial/site columns — they are metadata, not data params.
+            # 排除全部候选列：Serial_No 与 Dut_No 并存时两者都不能当参数
+            _meta_cols = set(get_serial_candidates(df))
             _stc = get_site_column(df)
             if _stc: _meta_cols.add(_stc)
             numeric_cols = [c for c in df.columns
@@ -279,16 +279,45 @@ class AnalysisViewSet(viewsets.GenericViewSet):
 
         # No param → lightweight call: return the common test items + file names
         # so the front-end can populate the param selector before drawing.
+        # 合并请求优化：文件已在本请求内加载（冷缓存 0.46s/个），顺带返回
+        # 首个公共参数的分布——前端免去串行第二次请求再遍历一轮文件加载
+        # （冷缓存 ~3.6s → ~2.2s）。
         if not param:
             ignore_no_limit = str(
                 get_param(request, 'ignore_no_limit', '')
             ).lower() in ('true', '1', 'yes')
-            return Response({
-                'common_params': compute_common_params(loaded, ignore_no_limit),
+            common_params = compute_common_params(loaded, ignore_no_limit)
+            response = {
+                'common_params': common_params,
                 'file_names': [
                     {'file_id': fid, 'filename': fn} for fid, _, _, fn in loaded
                 ],
-            })
+            }
+            first = common_params[0] if common_params else None
+            if first:
+                range_type = get_param(request, 'range_type', 'S4')
+                custom_low = get_param_float(request, 'custom_low')
+                custom_high = get_param_float(request, 'custom_high')
+                datasets = {}
+                all_series = []
+                for fid, df, metadata, filename in loaded:
+                    if first in df.columns:
+                        s = get_1d_from(df, first).dropna()
+                        s = s[abs(s) < float('inf')]
+                        if len(s) > 0:
+                            datasets[str(fid)] = {
+                                'df': df, 'metadata': metadata, 'series': s,
+                                'name': filename[:20], 'file_id': fid,
+                            }
+                            all_series.append(s)
+                if all_series:
+                    dist = compute_multi_lot_distribution(
+                        datasets, all_series, first, range_type,
+                        custom_low, custom_high)
+                    if dist:
+                        response['range_type'] = range_type
+                        response.update(dist)  # param/global stats/bin/lot_data
+            return Response(response)
 
         # With param → per-file distribution (no SITE split; one series/file).
         range_type = get_param(request, 'range_type', 'S4')
@@ -359,7 +388,12 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         if param not in df.columns:
             return Response({'error': 'param_not_found'}, status=400)
         # Reject serial/site columns as data param — they are grouping keys, not values
-        serial_col = get_serial_column(df)
+        # serial_col 可选：前端选择器覆盖自动检测（Serial_No > Dut_No > PART_ID）
+        serial_col_req = get_param(request, 'serial_col') or None
+        if serial_col_req and serial_col_req not in df.columns:
+            return Response({'error': 'serial_col_not_found',
+                             'detail': f'指定的序列列 {serial_col_req} 不存在'}, status=400)
+        serial_col = get_serial_column(df, preferred=serial_col_req)
         site_col = get_site_column(df)
         if param == serial_col or param == site_col:
             return Response({'error': 'param_is_metadata',
@@ -381,7 +415,8 @@ class AnalysisViewSet(viewsets.GenericViewSet):
 
         try:
             result = compute_serial_distribution_data(
-                df, metadata, param, range_type, chart_config)
+                df, metadata, param, range_type, chart_config,
+                serial_col=serial_col)
         except TypeError:
             return Response({'error': 'serial_distribution_failed',
                              'detail': '数据列存在重复或格式异常'}, status=400)
@@ -389,7 +424,7 @@ class AnalysisViewSet(viewsets.GenericViewSet):
             # 400 而非 200：让前端 axios 错误路径弹出提示，避免序列图静默空白
             return Response({
                 'error': 'no_serial_column',
-                'detail': '该文件没有序列号列（Serial_No）或部件列（PART_ID），无法绘制序列分布图',
+                'detail': '该文件没有序列列（Serial_No / Dut_No / PART_ID），无法绘制序列分布图；可用 serial_col 参数显式指定',
             }, status=400)
 
         return Response(clean_data(result))

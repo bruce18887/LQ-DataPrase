@@ -9,26 +9,31 @@ import { expectChartRendered, waitLoadingGone } from '../helpers/charts'
 import { selectAnalysisFile, selectParam } from '../helpers/params'
 
 /**
- * 序列分布：无 Serial_No 列文件的错误提示 + 修复后 Site12358 样本文件的端到端验证。
+ * 序列分布：无 Serial_No 列文件的错误提示 + Dut_No 回退 + Site12358 样本文件
+ * 端到端验证。
  *
- * 回归：CTA8280F 文件缺 Serial_No 列时，后端曾以 HTTP 200 返回
+ * 回归 1：CTA8280F 文件缺 Serial_No 列时，后端曾以 HTTP 200 返回
  * ``{'error': 'no_serial_column'}``，前端把它当正常数据渲染出空白序列图
  * （无任何报错）。修复后后端 400 + detail，前端 el-alert 展示提示。
+ * 回归 2：真实机台导出（Site12358-Chip12345_c）连 Dut_No 之外的列都没有，
+ * 唯一标识是 Dut_No（每 site 内 1..100）——get_serial_column 回退 Dut_No，
+ * 序列分布 200 正常渲染；多候选（_n 同时有 Serial_No + Dut_No）按优先级
+ * 选 Serial_No，且前端选择器可手动切换。
  */
 
 const SINGLE = '.single-param-tab'
 
-/** 无 Serial_No 列的 CTA8280F 最小文件（用户报告的缺陷形态） */
+/** 无任何序列候选列（serial/dut/part 都没有）的 CTA8280F 最小文件 */
 const NO_SERIAL_CSV = [
   'CTA8280F,',
   'Device Name,TEST_DEVICE,',
   '[Data]',
-  'Dut_No,Site_No,Dut_Pass,SW_Bin,X_COORD,Y_COORD,QR_CODE,Test_Time,Data_Num,KELVIN_VIN,',
-  'Unit,Unit,Unit,Unit,Unit,Unit,Unit,Unit,Unit,Unit,ohm,',
-  'Min,Min,Min,Min,Min,Min,Min,Min,Min,Min,0,',
-  'Max,Max,Max,Max,Max,Max,Max,Max,Max,Max,2,',
-  ' 1,1,TRUE,1,0,0,None,4.1,10,0.5,',
-  ' 2,1,TRUE,1,0,0,None,4.2,10,0.7,',
+  'Site_No,SW_Bin,KELVIN_VIN,',
+  'Unit,Unit,ohm,',
+  'Min,Min,0,',
+  'Max,Max,2,',
+  '1,1,0.5,',
+  '1,1,0.7,',
   '',
 ].join('\n')
 
@@ -133,7 +138,7 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
     // 前端展示错误提示，且不渲染序列图容器（SerialChart 未挂载）
     const alert = page.locator(`${SINGLE} .serial-error-alert`)
     await expect(alert).toBeVisible({ timeout: 15_000 })
-    await expect(alert).toContainText('序列号')
+    await expect(alert).toContainText('序列列')
     await expect(page.locator(`${SINGLE} .serial-chart-wrapper`)).toHaveCount(0)
   })
 
@@ -233,9 +238,9 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
       .toContainText('PART_ID')
   })
 
-  test('修复后的 Site12358 样本文件：序列分布正常渲染散点图', async ({ page }) => {
+  test('Site12358-Chip12345_c（真实导出，仅 Dut_No）：序列分布回退 Dut_No 正常渲染', async ({ page }) => {
     await gotoApp(page, '/analysis')
-    await selectAnalysisFile(page, 'Site12358')
+    await selectAnalysisFile(page, 'Site12358-Chip12345_c')
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
     await waitLoadingGone(page.locator(SINGLE))
 
@@ -253,9 +258,9 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
     const resp = await respPromise
     expect(resp.status()).toBe(200)
 
-    // 响应体钉住 CSV 修复：修复后每行一个序列点 → 共 500 点（5 Site × 100）
+    // 响应体：Dut_No 回退，每行一个序列点 → 共 500 点（5 Site × 100 Dut_No）
     const body = await resp.json()
-    expect(body.serial_col).toBe('Serial_No')
+    expect(body.serial_col).toBe('Dut_No')
     const totalPoints = (body.series_data || []).reduce(
       (sum: number, s: { data: unknown[] }) => sum + s.data.length, 0,
     )
@@ -267,9 +272,81 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
     await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
   })
 
+  test('Site12358-Chip12345_n（Serial_No + Dut_No 并存）：优先级自动选 Serial_No', async ({ page }) => {
+    await gotoApp(page, '/analysis')
+    await selectAnalysisFile(page, 'Site12358-Chip12345_n')
+    await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
+    await waitLoadingGone(page.locator(SINGLE))
+
+    await selectParam(page, 'KELVIN_VIN')
+    await waitLoadingGone(page.locator(SINGLE))
+    const respPromise = page.waitForResponse(
+      (r) =>
+        r.url().includes('/analysis/serial_distribution/') &&
+        r.request().method() === 'POST' &&
+        r.request().postData()?.includes('"param":"KELVIN_VIN"') === true,
+      { timeout: 20_000 },
+    )
+    await page.locator('.el-radio-button').filter({ hasText: '序列分布' }).first().click()
+    const resp = await respPromise
+    expect(resp.status()).toBe(200)
+
+    // 多候选：优先级 serial > dut，自动选 Serial_No；响应携带完整候选供选择器使用
+    const body = await resp.json()
+    expect(body.serial_col).toBe('Serial_No')
+    expect(body.serial_candidates).toEqual(['Serial_No', 'Dut_No'])
+    await expect(page.locator(`${SINGLE} .serial-chart-wrapper`)).toBeVisible({ timeout: 15_000 })
+  })
+
+  test('多候选序列列选择器：Serial_No 切到 Dut_No 后图表按新序列列重渲染', async ({ page }) => {
+    await gotoApp(page, '/analysis')
+    await selectAnalysisFile(page, 'Site12358-Chip12345_n')
+    await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
+    await waitLoadingGone(page.locator(SINGLE))
+
+    await selectParam(page, 'KELVIN_VIN')
+    await waitLoadingGone(page.locator(SINGLE))
+    const firstResp = page.waitForResponse(
+      (r) =>
+        r.url().includes('/analysis/serial_distribution/') &&
+        r.request().method() === 'POST' &&
+        r.request().postData()?.includes('"param":"KELVIN_VIN"') === true &&
+        !r.request().postData()?.includes('serial_col'),
+      { timeout: 20_000 },
+    )
+    await page.locator('.el-radio-button').filter({ hasText: '序列分布' }).first().click()
+    await firstResp
+
+    // 候选 >1 → 选择器可见，当前值为自动检测的 Serial_No
+    const selector = page.locator(`${SINGLE} .serial-col-selector`)
+    await expect(selector).toBeVisible({ timeout: 15_000 })
+    await expect(selector).toContainText('Serial_No')
+
+    // 切换到 Dut_No → 重新请求，响应 serial_col=Dut_No。
+    // 用键盘交互绕开 popper 可见性判定（页面存在多个含 Dut_No 文本的下拉项，
+    // 全局 locator 可能命中隐藏的残留项；键盘作用于当前打开的 dropdown）
+    const switchResp = page.waitForResponse(
+      (r) =>
+        r.url().includes('/analysis/serial_distribution/') &&
+        r.request().method() === 'POST' &&
+        r.request().postData()?.includes('"serial_col":"Dut_No"') === true,
+      { timeout: 20_000 },
+    )
+    const sel = selector.locator('.el-select')
+    await sel.click()
+    // dropdown 已打开（aria-expanded）；打开时高亮 Serial_No → ArrowDown 移到 Dut_No
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Enter')
+    const resp = await switchResp
+    expect(resp.status()).toBe(200)
+    const body = await resp.json()
+    expect(body.serial_col).toBe('Dut_No')
+    await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
+  })
+
   test('序列分布：图例与 dataZoom 滑块互不重叠（不被遮挡回归）', async ({ page }) => {
     await gotoApp(page, '/analysis')
-    await selectAnalysisFile(page, 'Site12358')
+    await selectAnalysisFile(page, 'Site12358-Chip12345_c')
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
     await waitLoadingGone(page.locator(SINGLE))
 
@@ -331,7 +408,7 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
 
   test('序列分布：切换参数后图例隐藏状态保持（notMerge 重置回归）', async ({ page }) => {
     await gotoApp(page, '/analysis')
-    await selectAnalysisFile(page, 'Site12358')
+    await selectAnalysisFile(page, 'Site12358-Chip12345_c')
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
     await waitLoadingGone(page.locator(SINGLE))
     await selectParam(page, 'KELVIN_VIN')
