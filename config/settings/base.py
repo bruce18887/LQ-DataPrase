@@ -61,7 +61,9 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'django.middleware.gzip.GZipMiddleware',
+    # GZipMiddleware 已于 2026-08-11 移除：大 JSON（browse 68MB）压缩 CPU
+    # 实测 3.6s，而打包版/开发版 Django 直连 localhost 传输仅 ~0.2s，净损失。
+    # 若未来部署到 LAN/WAN，改用 nginx gzip 或定向压缩（勿全局恢复）。
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',

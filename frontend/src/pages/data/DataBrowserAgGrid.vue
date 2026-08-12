@@ -22,7 +22,7 @@
       @update:autosize-mode="autosizeMode = $event"
       @update:pinned-col="pinnedCol = $event"
       @update:hidden-cols="hiddenCols = $event"
-      @load="loadData"
+      @load="reload"
       @export-excel="exportExcel"
       @export-csv="exportCsv"
     />
@@ -42,12 +42,19 @@
         <el-empty v-if="!fileId" description="请先在上方选择文件" :image-size="80">
           <el-button type="primary" @click="emit('goto-files')">去文件列表选择</el-button>
         </el-empty>
+        <!-- 服务端分页（Infinite Row Model）：fileId 存在即挂载（不能门控 dataLoaded——否则 datasource 鸡生蛋）；
+             空态由 overlayNoRowsTemplate 呈现（筛选后 0 行 / 加载完成无匹配） -->
         <ag-grid-vue
-          v-else-if="dataLoaded && rowCount > 0"
+          v-else
           :class="['ag-theme-quartz', isDark ? 'ag-theme-quartz-dark' : '', 'ag-custom-theme']"
           :style="{ height: `${tableHeight}px`, width: '100%', contain: 'layout style' }"
           :columnDefs="columnDefs"
-          :rowData="filteredRowData"
+          :rowModelType="'infinite'"
+          :datasource="datasource"
+          :infiniteInitialRowCount="BLOCK_SIZE"
+          :cacheBlockSize="BLOCK_SIZE"
+          :maxBlocksInCache="20"
+          :overlayNoRowsTemplate="'没有匹配的数据'"
           :defaultColDef="defaultColDef"
           :autoSizeStrategy="autoSizeStrategy"
           :rowHeight="30"
@@ -60,7 +67,6 @@
           :rowClassRules="rowClassRules"
           @grid-ready="onGridReady"
         />
-        <el-empty v-else-if="dataLoaded" description="没有匹配的数据" :image-size="80" />
       </div>
     </div>
 
@@ -88,7 +94,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, markRaw } from 'vue'
 import { AgGridVue } from 'ag-grid-vue3'
 import { ElMessage } from 'element-plus'
 import api from '../../api'
@@ -104,7 +110,7 @@ import { downloadBlob, sanitizeFilename, extractFilenameFromContentDisposition }
 import { getExportTimeoutMs } from '../../utils/exportTimeout'
 
 // Register ag-grid modules (required since v33+)
-import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community'
+import { ModuleRegistry, AllCommunityModule, type IDatasource } from 'ag-grid-community'
 ModuleRegistry.registerModules([AllCommunityModule])
 
 const props = defineProps<{ fileId: number | null; fileName?: string }>()
@@ -142,11 +148,17 @@ const gridWrapperStyle = computed(() => ({
 }))
 
 const allCols = ref<string[]>([])
-const rowData = ref<Record<string, any>[]>([])
 const colMeta = ref<Record<string, { unit: string; min: string; max: string }>>({})
+const numericColumns = ref<string[]>([])
+const siteOptions = ref<string[]>([])
+const rowCount = ref(0)
+const failRowCount = ref(0)
 
-// 请求竞态防护：快速切换筛选时丢弃过期响应
+// 请求竞态防护：快速切换筛选时丢弃过期响应（只丢弃 refs 更新，grid 本身有块版本号守卫）
 let loadSeq = 0
+
+// 服务端分页块大小（IRM cacheBlockSize）
+const BLOCK_SIZE = 100
 
 // ── 列直方图（右键列名打开） ──
 const histDialogVisible = ref(false)
@@ -165,14 +177,9 @@ function onGridContextMenu(e: MouseEvent) {
     e.preventDefault()
     const col = header.getAttribute('col-id')
     if (!col || !allCols.value.includes(col)) return
-    // 非数值列（Serial 等）不弹。整列扫描而非只看第一行——首行若为 fail（空数据）
-    // 仍可能弹窗；判定与后端 filter_finite 语义一致（排除 null/''/NaN/±Infinity）
-    const hasNumeric = rowData.value.some((r) => {
-      const v = r[col]
-      if (v === null || v === undefined || v === '') return false
-      return Number.isFinite(Number(String(v).trim()))
-    })
-    if (!hasNumeric) return
+    // 非数值列不弹。IRM 下无法全行扫描——后端 page==1 返回 numeric_columns
+    // （dtype + object 列值级判定，镜像旧前端 Number.isFinite 语义）
+    if (!numericColumns.value.includes(col)) return
     analyzeParam.value = col
     histDialogVisible.value = true
     return
@@ -228,6 +235,7 @@ const displayCols = computed(() => {
 
 // ── 固定 Bin 列 fail 单元格右键菜单（判定链 + 定位逻辑见 composable） ──
 const {
+  gridApi,
   visible: binMenuVisible,
   x: binMenuX,
   y: binMenuY,
@@ -240,34 +248,11 @@ const {
   goToFailCell,
 } = useBinCellMenu({ pinnedCol, displayCols })
 
-// ── Site 本地过滤 ──
-const siteCol = computed(() => {
-  if (!allCols.value.length) return ''
-  return allCols.value.find((c) => /site/i.test(c) && isSystemCol(c)) ?? ''
+// ── Site 筛选（服务端）：选项来自 page==1 响应的 site_options，过滤走 reload ──
+const siteColDisabled = computed(() => {
+  if (!allCols.value.length) return true
+  return !allCols.value.some((c) => /site/i.test(c) && isSystemCol(c))
 })
-const siteColDisabled = computed(() => !siteCol.value)
-const siteOptions = computed(() => {
-  if (!siteCol.value) return []
-  const seen = new Set<string>()
-  for (const r of rowData.value) {
-    const v = r[siteCol.value]
-    if (v !== null && v !== undefined && v !== '') seen.add(String(v))
-  }
-  return [...seen].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-})
-
-/** 表格实际显示的行（Site 本地过滤，与导出 site_filter 语义一致） */
-const filteredRowData = computed(() => {
-  if (!siteFilter.value || !siteCol.value) return rowData.value
-  return rowData.value.filter((r) => String(r[siteCol.value]) === siteFilter.value)
-})
-
-const rowCount = computed(() => filteredRowData.value.length)
-
-/** Fail 行数：基于过滤后行本地计算（后端 fail_row_count 是文件级全量，与筛选语义不一致） */
-const failRowCount = computed(() =>
-  filteredRowData.value.filter((r) => (JSON.parse(r.__fail_cells__ ?? '[]') as string[]).length > 0).length
-)
 
 const columnDefs = computed<any[]>(() => {
   const defs: any[] = []
@@ -288,6 +273,9 @@ const columnDefs = computed<any[]>(() => {
     const colDef: any = {
       field: col,
       headerName: header,
+      // 服务端列过滤（方案 A）：数值列挂 number filter（等/不等/大于/小于/区间），
+      // 其余挂 text filter（包含/开头/结尾）——IRM 下 filter 类型必须显式指定
+      filter: numericColumns.value.includes(col) ? 'agNumberColumnFilter' : 'agTextColumnFilter',
     }
 
     if (pinnedCol.value && col === pinnedCol.value) {
@@ -310,12 +298,14 @@ const defaultColDef = {
   editable: false,
   sortable: true,
   resizable: true,
-  filter: true,
+  // 服务端列过滤（方案 A）：apply/reset 按钮——避免每敲一键就触发整页重载（官方推荐服务端场景）
+  filterParams: { buttons: ['apply', 'reset'] },
   wrapHeaderText: true,
   autoHeaderHeight: true,
+  // __fail_cells__ 是原生数组（不再逐格 JSON.parse——ag-grid 每渲染一个可见单元格都会调用 cellStyle）
   cellStyle: (params: any) => {
     if (params.data && params.data.__fail_cells__) {
-      const failCols: string[] = JSON.parse(params.data.__fail_cells__)
+      const failCols: string[] = params.data.__fail_cells__
       if (failCols.includes(params.colDef.field)) {
         if (isDark.value) {
           return { backgroundColor: '#b91c1c', color: '#fecaca', fontWeight: 'bold' }
@@ -345,87 +335,154 @@ const rowClassRules = {
 watch(
   () => props.fileId,
   () => {
-    // 切换文件后 Site/隐藏列选项属于旧文件，重置避免误导
+    // 切换文件后 Site/隐藏列/元信息属于旧文件，重置避免误导
     siteFilter.value = ''
     hiddenCols.value = []
-    if (props.fileId) loadData()
-    else clearGrid()
+    siteOptions.value = []
+    numericColumns.value = []
+    allCols.value = []
+    colMeta.value = {}
+    rowCount.value = 0
+    failRowCount.value = 0
+    dataLoaded.value = false
+    if (props.fileId) {
+      loadSeq++ // 递增代次：旧文件在途响应全部丢弃
+      reload()
+    } else {
+      clearGrid()
+    }
   }
 )
 
-// Pass/Fail 切换即重新加载（含未加载数据时预先选择，选文件后按当前筛选生效）。
-// 300ms 防抖：快速连点 Pass/Fail/All 只发最后一次全量请求（page_size 99999）
+// Pass/Fail 切换 → 服务端重新分页（IRM purge 全量重载）。
+// 300ms 防抖：快速连点 Pass/Fail/All 只发最后一次。
 let passfailTimer: ReturnType<typeof setTimeout> | null = null
 watch(passfail, () => {
   if (passfailTimer) clearTimeout(passfailTimer)
   passfailTimer = setTimeout(() => {
     passfailTimer = null
-    if (props.fileId) loadData()
+    if (props.fileId) reload()
+  }, 300)
+})
+
+// Site 筛选改服务端（原本地即时过滤）→ 同样 300ms 防抖
+let siteFilterTimer: ReturnType<typeof setTimeout> | null = null
+watch(siteFilter, () => {
+  if (siteFilterTimer) clearTimeout(siteFilterTimer)
+  siteFilterTimer = setTimeout(() => {
+    siteFilterTimer = null
+    if (props.fileId) reload()
   }, 300)
 })
 
 // 文件变更（删除等）后重新校验当前文件；若已被删除，后端 404 → 清空表格。
 watch(() => filesStore.filesVersion, () => {
-  if (props.fileId) loadData()
+  if (props.fileId) reload()
 })
 
-// Site 本地筛选触发行重排 → 右键菜单索引失效，关闭
-watch(filteredRowData, () => closeBinMenu())
+// 筛选/行数变化触发行重排 → 右键菜单索引失效，关闭
+watch([rowCount, siteFilter], () => closeBinMenu())
 
 function clearGrid() {
   closeBinMenu()
-  rowData.value = []
   allCols.value = []
   colMeta.value = {}
+  numericColumns.value = []
+  siteOptions.value = []
+  rowCount.value = 0
+  failRowCount.value = 0
   dataLoaded.value = false
 }
 
-async function loadData() {
-  if (!props.fileId) {
-    clearGrid()
-    return
-  }
-  closeBinMenu()
-  const seq = ++loadSeq
-  loading.value = true
-  try {
-    const resp = await datafilesApi.browse({
-      datafile_id: props.fileId,
-      page_size: 99999,
-      pass_filter: passfail.value,
-    })
-    if (seq !== loadSeq) return // 已有更新的请求，丢弃本次响应
-    const data = resp.data
-
-    allCols.value = data.headers ?? []
-
-    const rawColMeta = (data.col_meta ?? {}) as Record<string, { unit: string; min: string; max: string }>
-    colMeta.value = rawColMeta
-
-    const binCol = data.bin_column as string
-    if (!pinnedCol.value) {
-      // 首次加载：自动固定 Bin 列
-      if (binCol && allCols.value.includes(binCol)) {
-        pinnedCol.value = binCol
+/**
+ * IRM datasource（单例）：闭包读当前 ref 值（不快照）——purge 复用同一 datasource
+ * 与 sortModel 快照，pass_filter/site_filter/sort 变化都必须取最新值。
+ * 排序变更由 ag-grid 自动触发（sortChanged → reset → getRows 带新 sortModel）。
+ */
+const datasource: IDatasource = {
+  getRows: async (params) => {
+    if (!props.fileId) {
+      params.failCallback()
+      return
+    }
+    const seq = ++loadSeq
+    try {
+      const resp = await datafilesApi.browse({
+        datafile_id: props.fileId,
+        page: Math.floor(params.startRow / BLOCK_SIZE) + 1,
+        page_size: BLOCK_SIZE,
+        pass_filter: passfail.value,
+        site_filter: siteFilter.value,
+        sort_model: JSON.stringify(params.sortModel),
+        filter_model: JSON.stringify(params.filterModel),
+      })
+      const d = resp.data
+      // 新旧响应都喂 grid（IRM 有块版本号守卫丢弃过期块数据）；块数据 zip 成行对象
+      params.successCallback(zipRows(d), d.total)
+      if (seq !== loadSeq) return // 旧代响应只喂 grid，不更新 refs
+      applyMeta(d)
+    } catch (e: any) {
+      params.failCallback() // 失败块不自动重试
+      if (e?.response?.status === 404) {
+        clearGrid()
+        emit('file-missing')
       }
-    } else if (!allCols.value.includes(pinnedCol.value)) {
-      // 切换文件后旧固定列失效：回退到 Bin 列
-      pinnedCol.value = binCol && allCols.value.includes(binCol) ? binCol : ''
+      if (seq === loadSeq) loading.value = false
     }
+  },
+}
 
-    rowData.value = (data.rows as Record<string, any>[]) ?? []
-
-    dataLoaded.value = true
-  } catch (e: any) {
-    if (e?.response?.status === 404) {
-      // 文件已被删除：清空残留表格并通知父级重置 activeFileId。
-      // （错误 toast 由 axios 拦截器统一弹出）
-      clearGrid()
-      emit('file-missing')
-    }
-  } finally {
-    loading.value = false
+/** 传输格式 zip：headers + data（行值数组）+ fail_cells（并行数组）→ markRaw 行对象。
+ *  markRaw 跳过 Vue 深响应式（68k×142 依赖追踪实测 +1.3GB 堆 + 5s 阻塞；块 ≤100 行成本已低）。 */
+function zipRows(d: { headers?: string[]; data?: unknown[][]; fail_cells?: string[][] }): Record<string, any>[] {
+  const cols = d.headers ?? []
+  const vals = d.data ?? []
+  const fails = d.fail_cells ?? []
+  const rows = new Array<Record<string, any>>(vals.length)
+  for (let i = 0; i < vals.length; i++) {
+    const v = vals[i]
+    const o: Record<string, any> = { __fail_cells__: fails[i] ?? [] }
+    for (let j = 0; j < cols.length; j++) o[cols[j]] = v[j]
+    rows[i] = markRaw(o)
   }
+  return rows
+}
+
+/** 首块（或代次最新块）响应的元信息落地；每块响应都带 headers/col_meta/bin_column */
+function applyMeta(d: any) {
+  allCols.value = d.headers ?? []
+  colMeta.value = (d.col_meta ?? {}) as Record<string, { unit: string; min: string; max: string }>
+  rowCount.value = d.total ?? 0
+  failRowCount.value = d.fail_row_count ?? 0
+  dataLoaded.value = true
+  loading.value = false
+
+  // 站点选项与数值列仅 page==1 响应携带
+  if (d.site_options) {
+    siteOptions.value = [...d.site_options].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+  }
+  if (d.numeric_columns) numericColumns.value = d.numeric_columns
+
+  const binCol = d.bin_column as string
+  if (!pinnedCol.value) {
+    // 首次加载：自动固定 Bin 列
+    if (binCol && allCols.value.includes(binCol)) {
+      pinnedCol.value = binCol
+    }
+  } else if (!allCols.value.includes(pinnedCol.value)) {
+    // 切换文件后旧固定列失效：回退到 Bin 列
+    pinnedCol.value = binCol && allCols.value.includes(binCol) ? binCol : ''
+  }
+}
+
+/** 重新加载：清空 IRM 缓存全部块 + 回顶部（purge 不重置滚动位置） */
+function reload() {
+  if (!props.fileId) return
+  closeBinMenu()
+  loading.value = true
+  loadSeq++ // 新代次：旧在途响应不再更新 refs
+  gridApi.value?.purgeInfiniteCache()
+  gridApi.value?.ensureIndexVisible(0)
 }
 
 async function exportExcel() {

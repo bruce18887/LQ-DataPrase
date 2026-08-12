@@ -4,9 +4,10 @@
  */
 
 // 字体家族
+// 必须与 styles/variables.css 中 --font-sans / --font-mono 完全一致（单一事实来源在 variables.css）
 export const fontFamily = {
-  sans: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-  mono: '"SF Mono", "Consolas", "Liberation Mono", "Menlo", "Courier New", monospace',
+  sans: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Helvetica Neue', Arial, sans-serif",
+  mono: "'SF Mono', 'Cascadia Mono', 'Consolas', 'Liberation Mono', 'Menlo', 'Courier New', monospace",
 } as const;
 
 // 字体大小

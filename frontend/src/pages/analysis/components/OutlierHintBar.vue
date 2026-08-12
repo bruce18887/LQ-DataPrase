@@ -152,7 +152,7 @@ const hintText = computed(() => {
 
 .outlier-hint-bar__tooltip-values {
   word-break: break-all;
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
 }
 

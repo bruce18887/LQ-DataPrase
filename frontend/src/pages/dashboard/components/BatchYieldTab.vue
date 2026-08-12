@@ -639,7 +639,7 @@ defineExpose({ handleResize })
 }
 
 .detail-value.mono {
-  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 </style>
