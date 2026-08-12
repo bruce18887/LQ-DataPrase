@@ -100,9 +100,10 @@
 
 /* ========== 通用变量（不随主题变化）========== */
 :root {
-  /* ========== 字体家族 ========== */
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --font-mono: 'SF Mono', 'Consolas', 'Liberation Mono', 'Menlo', 'Courier New', monospace;
+  /* ========== 字体家族（唯一事实来源：TS 侧 typography.ts / echarts-theme.ts 必须与此保持一致）========== */
+  /* 拉丁字体在前（不含 CJK 字形），中文按平台顺序下落：PingFang SC(Mac) → Hiragino Sans GB(Mac 备选) → Microsoft YaHei(Win) → Noto Sans CJK SC(Linux) */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'SF Mono', 'Cascadia Mono', 'Consolas', 'Liberation Mono', 'Menlo', 'Courier New', monospace;
 
   /* ========== 字体大小 ========== */
   --text-xs: 0.75rem;

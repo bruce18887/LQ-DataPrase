@@ -15,7 +15,6 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const rangeType = ref('RDL')
   const barWidthPercent = ref(20)
   const ignoreNoLimit = ref(false)
-  const batchNativeChart = ref(false)
   // 图表配置筛选开关：两个筛选测试项（参数列表），一个筛选数据行（仅 Bin1）
   const ignoreNoTestValue = ref(false)
   const dataOnlyBin1 = ref(false)
@@ -70,7 +69,6 @@ export const useAnalysisStore = defineStore('analysis', () => {
     rangeType.value = 'RDL'
     barWidthPercent.value = 20
     ignoreNoLimit.value = false
-    batchNativeChart.value = false
     ignoreNoTestValue.value = false
     dataOnlyBin1.value = false
     onlyFailTestItem.value = false
@@ -97,7 +95,6 @@ export const useAnalysisStore = defineStore('analysis', () => {
     rangeType,
     barWidthPercent,
     ignoreNoLimit,
-    batchNativeChart,
     ignoreNoTestValue,
     dataOnlyBin1,
     onlyFailTestItem,

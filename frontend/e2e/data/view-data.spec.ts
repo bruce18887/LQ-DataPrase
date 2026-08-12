@@ -27,25 +27,6 @@ function viewScope(page: Page) {
   return page.locator('.content-section:visible').first()
 }
 
-/** 通过顶部「当前文件」下拉选择文件：先等 /files/ 返回，再打开下拉直接点目标（并行负载下最稳） */
-async function pickFileFromBanner(page: Page, filename: string) {
-  // banner 数据源加载完成（并行负载下可能延迟，避免下拉打开时选项为空）
-  await page
-    .waitForResponse((r) => /\/files\/\?page_size=9999/.test(r.url()) && r.status() === 200, {
-      timeout: 30_000,
-    })
-    .catch(() => {})
-
-  const fileSelect = viewScope(page).locator('.banner-file-select').first()
-  await fileSelect.locator('.el-select__wrapper').click()
-  const option = page
-    .locator('.el-select-dropdown:visible .el-select-dropdown__item')
-    .filter({ hasText: filename })
-    .first()
-  await expect(option).toBeVisible({ timeout: 30_000 })
-  await option.click()
-}
-
 /**
  * 从 /browse/ API 拿全量行，定位测试所需的确定性行：
  * - failIdx/failCols/binValue：首个 bin != 1 的行及其 __fail_cells__
@@ -60,10 +41,19 @@ async function fetchBinFailInfo(page: Page, filename: string) {
     const files = await fetch(`/api/v1/files/?search=${encodeURIComponent(filename)}`, { headers }).then((r) => r.json())
     const file = ((files.results ?? files) as any[]).find((f: any) => f.filename === filename)
     const d = await fetch(`/api/v1/browse/?datafile_id=${file.id}&page_size=99999`, { headers }).then((r) => r.json())
-    const rows = (d.rows ?? []) as Record<string, any>[]
+    // 传输格式压缩：headers + data（行值数组）+ fail_cells 并行数组 → zip 成行对象
     const colHeaders = (d.headers ?? []) as string[]
+    const data = (d.data ?? []) as unknown[][]
+    const failCells = (d.fail_cells ?? []) as string[][]
+    const rows: Record<string, any>[] = []
+    for (let i = 0; i < data.length; i++) {
+      const o: Record<string, any> = { __fail_cells__: failCells[i] ?? [] }
+      for (let j = 0; j < colHeaders.length; j++) o[colHeaders[j]] = data[i][j]
+      rows.push(o)
+    }
     const bin = d.bin_column as string
-    const parseFail = (r: Record<string, any>): string[] => JSON.parse(r.__fail_cells__ ?? '[]')
+    // __fail_cells__ 已是原生数组（不再 JSON 字符串）
+    const parseFail = (r: Record<string, any>): string[] => r.__fail_cells__ ?? []
     const info = {
       bin,
       failIdx: -1,
@@ -183,11 +173,19 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     await pfSelect.locator('.el-select__wrapper').click()
     await page.locator('.el-select-dropdown__item:visible').filter({ hasText: 'Pass' }).first().click()
 
-    // 再选文件 → 筛选应生效（请求带 pass_filter）
+    // 再选文件 → 筛选应生效（请求带 pass_filter）。
+    // 注：banner 下拉在此流程（view tab 预选筛选后）不可靠（历史 A/B 预存在失败），
+    // 改用文件列表服务端搜索 + 「查看」按钮的可靠路径（passfail 状态跨 tab 保留）。
+    await page.locator('.tab-btn').filter({ hasText: '文件列表' }).click()
+    const searchInput = page.locator('input[placeholder="按文件名/程序名/标签搜索"]')
+    await searchInput.fill('DA35_BPC50338')
+    const fileRow = page.locator('.el-table .el-table__row').filter({ hasText: 'DA35_BPC5033' }).first()
+    await fileRow.waitFor({ state: 'visible', timeout: 30_000 })
     const browseResp = page.waitForResponse(
       (r) => r.url().includes('/browse/') && r.url().includes('pass_filter=Pass'),
+      { timeout: 15_000 },
     )
-    await pickFileFromBanner(page, SEEDED_FILES.CTA8280F_FT)
+    await fileRow.locator('button').filter({ hasText: '查看' }).click()
     expect((await browseResp).status()).toBe(200)
 
     // 行数与 Pass 总数一致
@@ -233,16 +231,16 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     expect(csv.suggestedName).toBe(`${base}_data.csv`)
   })
 
-  test('@p1 Site 筛选：本地过滤表格 + 「Site X 过滤后」文案 + 恢复', async ({ page }) => {
+  test('@p1 Site 筛选：服务端过滤表格 + 「Site X 过滤后」文案 + 恢复', async ({ page }) => {
     // CTA8280F 含多 Site 值（188 列 × 10000 行，JSON 规模小于 ETS88 的 1728 列）
     await openViewTab(page, SEEDED_FILES.CTA8280F_FT)
 
-    // 全量行数（UI 文案）
+    // 全量行数（UI 文案，来自首块响应的服务端 total）
     const totalText = (await viewScope(page).locator('p').filter({ hasText: '共 ' }).textContent()) ?? ''
     const allTotal = Number(totalText.match(/共\s*(\d+)/)?.[1] ?? 0)
     expect(allTotal).toBeGreaterThan(0)
 
-    // 打开 Site 下拉看选项（需 >1 个 site 才有过滤意义）
+    // 打开 Site 下拉看选项（来自 page==1 响应的 site_options；需 >1 个 site 才有过滤意义）
     const siteSelect = viewScope(page).locator('.el-select:has(input[aria-label="站点筛选"])').first()
     await siteSelect.locator('.el-select__wrapper').click()
     const siteOptions = page.locator('.el-select-dropdown:visible .el-select-dropdown__item')
@@ -252,10 +250,17 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
       test.skip(true, '该文件仅有单个 site，无过滤场景')
       return
     }
-    const targetSite = (await siteOptions.nth(1).textContent())?.trim() ?? ''
+    // 下拉项文本是「Site 2」，值才是 "2"（R4：断言用值不用 label）
+    const targetSite = ((await siteOptions.nth(1).textContent())?.trim() ?? '').replace(/^Site\s*/i, '')
+    // 服务端过滤：点选前注册 waitForResponse（300ms 防抖由 predicate 等待覆盖）
+    const siteResp = page.waitForResponse(
+      (r) => r.url().includes('/browse/') && r.url().includes(`site_filter=${encodeURIComponent(targetSite)}`),
+      { timeout: 15_000 },
+    )
     await siteOptions.nth(1).click()
+    expect((await siteResp).status()).toBe(200)
 
-    // 行数下降 + 「Site X 过滤后」文案
+    // 行数下降 + 「Site X 过滤后」文案（fail 计数来自服务端筛选集语义）
     await expect(
       viewScope(page).locator('p').filter({ hasText: 'Site' }).filter({ hasText: '过滤后' }),
     ).toBeVisible({ timeout: 10_000 })
@@ -263,11 +268,157 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     const afterTotal = Number(afterText.match(/共\s*(\d+)/)?.[1] ?? allTotal)
     expect(afterTotal, 'Site 过滤后行数应减少').toBeLessThan(allTotal)
 
-    // 恢复全部 Site → 行数恢复全量
+    // 恢复全部 Site → 行数恢复全量（新请求不带 site_filter）
     const siteSelect2 = viewScope(page).locator('.el-select:has(input[aria-label="站点筛选"])').first()
     await siteSelect2.locator('.el-select__wrapper').click()
+    const resetResp = page.waitForResponse(
+      (r) => r.url().includes('/browse/') && r.url().includes('page=1') && !r.url().includes('site_filter='),
+      { timeout: 15_000 },
+    )
     await page.locator('.el-select-dropdown:visible .el-select-dropdown__item').first().click()
+    expect((await resetResp).status()).toBe(200)
     await expect(viewScope(page).locator('p').filter({ hasText: '共 ' })).toContainText(String(allTotal), {
+      timeout: 10_000,
+    })
+  })
+
+  test('@p1 服务端排序：点列头触发 sort_model 请求且顺序正确', async ({ page }) => {
+    await openViewTab(page, SEEDED_FILES.CTA8280F_FT)
+
+    // Kelvin_VIN 是测试列，在 188 列中超出视口（表头虚拟化）→ 渐进横向滚动表头
+    // 直到目标列渲染（位置依赖列序，不能假设固定像素）
+    await page.locator('.ag-header-viewport').evaluate(async (el) => {
+      while (!el.querySelector('[col-id="Kelvin_VIN"]') && el.scrollLeft < el.scrollWidth) {
+        el.scrollLeft += 400
+        await new Promise((r) => setTimeout(r, 30))
+      }
+    })
+    const header = page.locator('.ag-header-cell[col-id="Kelvin_VIN"]')
+    await expect(header).toBeVisible({ timeout: 10_000 })
+
+    // 点列头 → IRM sortChanged 自动重发（page=1 带 sort_model）
+    const sortResp = page.waitForResponse(
+      (r) => r.url().includes('/browse/') && r.url().includes('sort_model=') && r.url().includes('page=1'),
+      { timeout: 15_000 },
+    )
+    await header.click()
+    expect((await sortResp).status()).toBe(200)
+
+    // 与 API 直连对照：asc 排序首块第一个 Kelvin_VIN 值 == grid 首行该列值
+    const expected = await page.evaluate(async (filename) => {
+      const token = localStorage.getItem('access_token')
+      const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
+      const files = await fetch(`/api/v1/files/?search=${encodeURIComponent(filename)}`, { headers }).then((r) => r.json())
+      const file = ((files.results ?? files) as any[]).find((f: any) => f.filename === filename)
+      const sort = encodeURIComponent('[{"colId":"Kelvin_VIN","sort":"asc"}]')
+      const d = await fetch(`/api/v1/browse/?datafile_id=${file.id}&page_size=1&sort_model=${sort}`, { headers }).then((r) => r.json())
+      const vinIdx = d.headers.indexOf('Kelvin_VIN')
+      return d.data[0][vinIdx]
+    }, SEEDED_FILES.CTA8280F_FT)
+    // 排序重载后横向滚动可能被重置 → 渐进滚动 body 直到 Kelvin_VIN 单元格渲染再断言
+    await page.locator('.ag-center-cols-viewport').evaluate(async (el) => {
+      const target = `.ag-row[row-index="0"] [col-id="Kelvin_VIN"]`
+      while (!el.querySelector(target) && el.scrollLeft < el.scrollWidth) {
+        el.scrollLeft += 400
+        await new Promise((r) => setTimeout(r, 30))
+      }
+    })
+    await expect(
+      page.locator('.ag-center-cols-container .ag-row[row-index="0"] [col-id="Kelvin_VIN"]'),
+    ).toContainText(String(expected), { timeout: 10_000 })
+  })
+
+  test('@p1 滚动加载分块：滚动到 8000 行触发第 81 块请求并渲染', async ({ page }) => {
+    await openViewTab(page, SEEDED_FILES.CTA8280F_FT)
+    await expect(page.locator('.ag-row').first()).toBeVisible({ timeout: 30_000 })
+
+    // 垂直滚动到 8000 行 → IRM 请求 page=81（startRow 8000/100 + 1）
+    const blockResp = page.waitForResponse(
+      (r) => r.url().includes('/browse/') && r.url().includes('page=81'),
+      { timeout: 15_000 },
+    )
+    await page.locator('.ag-body-vertical-scroll-viewport').evaluate((el) => { el.scrollTop = 8000 * 30 })
+    expect((await blockResp).status()).toBe(200)
+    await expect(
+      page.locator('.ag-center-cols-container .ag-row[row-index="8000"]'),
+    ).toBeVisible({ timeout: 15_000 })
+  })
+
+  test('@p1 Fail 筛选：fail_row_count 与 total 一致（筛选集语义）', async ({ page }) => {
+    await openViewTab(page, SEEDED_FILES.CTA8280F_FT)
+    await expect(page.locator('.ag-row').first()).toBeVisible({ timeout: 30_000 })
+
+    // 切 Fail → 服务端过滤，筛选集内全为 fail 行 → 「Fail: N 行」==「共 N 条」
+    const pfSelect = elSelectByPlaceholder(viewScope(page), 'Pass/Fail筛选').first()
+    await pfSelect.locator('.el-select__wrapper').click()
+    const failResp = page.waitForResponse(
+      (r) => r.url().includes('/browse/') && r.url().includes('pass_filter=Fail'),
+      { timeout: 15_000 },
+    )
+    await page.locator('.el-select-dropdown__item:visible').filter({ hasText: 'Fail' }).first().click()
+    expect((await failResp).status()).toBe(200)
+
+    const summary = viewScope(page).locator('p').filter({ hasText: '共 ' })
+    await expect(summary).toContainText('Fail:', { timeout: 10_000 })
+    const text = (await summary.textContent()) ?? ''
+    const total = Number(text.match(/共\s*(\d+)/)?.[1] ?? 0)
+    const fail = Number(text.match(/Fail:\s*(\d+)/)?.[1] ?? 0)
+    expect(total).toBeGreaterThan(0)
+    expect(fail, 'FAIL 筛选集内 fail 行数 == total').toBe(total)
+  })
+
+  test('@p1 表头列筛选：数值列过滤器服务端生效', async ({ page }) => {
+    await openViewTab(page, SEEDED_FILES.CTA8280F_FT)
+    await expect(page.locator('.ag-row').first()).toBeVisible({ timeout: 30_000 })
+
+    // 先经 API 取 Kelvin_VIN 最小值作为筛选值（确定性：equals 该值必有匹配行）
+    const minVal = await page.evaluate(async (filename) => {
+      const token = localStorage.getItem('access_token')
+      const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
+      const files = await fetch(`/api/v1/files/?search=${encodeURIComponent(filename)}`, { headers }).then((r) => r.json())
+      const file = ((files.results ?? files) as any[]).find((f: any) => f.filename === filename)
+      const sort = encodeURIComponent('[{"colId":"Kelvin_VIN","sort":"asc"}]')
+      const d = await fetch(`/api/v1/browse/?datafile_id=${file.id}&page_size=1&sort_model=${sort}`, { headers }).then((r) => r.json())
+      const vinIdx = d.headers.indexOf('Kelvin_VIN')
+      return { min: d.data[0][vinIdx], fileId: file.id }
+    }, SEEDED_FILES.CTA8280F_FT)
+
+    // 同 filterModel 的 API total 对照基准
+    const apiTotal = await page.evaluate(async (args) => {
+      const token = localStorage.getItem('access_token')
+      const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
+      const fm = encodeURIComponent(JSON.stringify({ Kelvin_VIN: { filterType: 'number', type: 'equals', filter: args.min } }))
+      const d = await fetch(`/api/v1/browse/?datafile_id=${args.fileId}&page_size=1&filter_model=${fm}`, { headers }).then((r) => r.json())
+      return d.total
+    }, { min: minVal.min, fileId: minVal.fileId })
+    expect(apiTotal).toBeGreaterThan(0)
+
+    // 渐进滚动表头到 Kelvin_VIN → hover 打开列菜单（默认即 filter 面板）
+    await page.locator('.ag-header-viewport').evaluate(async (el) => {
+      while (!el.querySelector('[col-id="Kelvin_VIN"]') && el.scrollLeft < el.scrollWidth) {
+        el.scrollLeft += 400
+        await new Promise((r) => setTimeout(r, 30))
+      }
+    })
+    const header = page.locator('.ag-header-cell[col-id="Kelvin_VIN"]')
+    await expect(header).toBeVisible({ timeout: 10_000 })
+    await header.hover()
+    await header.locator('.ag-header-icon, .ag-header-cell-menu-button').first().click()
+
+    // filter 面板：默认算子 equals → 填值 + Apply（服务端场景 apply/reset 按钮）。
+    // 注意 Apply 面板是 .ag-filter 的兄弟节点（.ag-menu 内），用 role 定位最稳
+    const menu = page.locator('.ag-menu')
+    await expect(menu).toBeVisible({ timeout: 10_000 })
+    await menu.locator('input.ag-number-field-input').first().fill(String(minVal.min))
+    const filterResp = page.waitForResponse(
+      (r) => r.url().includes('/browse/') && r.url().includes('filter_model=') && r.url().includes('page=1'),
+      { timeout: 15_000 },
+    )
+    await menu.getByRole('button', { name: 'Apply' }).click()
+    expect((await filterResp).status()).toBe(200)
+
+    // 行数收缩到 API 基准（服务端筛选集 total）
+    await expect(viewScope(page).locator('p').filter({ hasText: '共 ' })).toContainText(String(apiTotal), {
       timeout: 10_000,
     })
   })

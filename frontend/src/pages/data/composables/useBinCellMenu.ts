@@ -58,7 +58,7 @@ export function useBinCellMenu(opts: {
     y.value = e.clientY
     rowIndex.value = idx
     binValue.value = value ?? null
-    failCols.value = JSON.parse(node.data.__fail_cells__ ?? '[]') as string[]
+    failCols.value = (node.data.__fail_cells__ ?? []) as string[]
     visible.value = true
     return true
   }
@@ -74,7 +74,7 @@ export function useBinCellMenu(opts: {
     const node = api.getDisplayedRowAtIndex(rowIdx)
     if (!node) return
     close()
-    const all = JSON.parse(node.data.__fail_cells__ ?? '[]') as string[]
+    const all = (node.data.__fail_cells__ ?? []) as string[]
     // __fail_cells__ 顺序：测试列在前、bin 列最后 → 第一个可见项即「第一个 fail 测试列」
     const visibleFailCols = all.filter((c) => displayCols.value.includes(c))
     const failCol = visibleFailCols[0] ?? pinnedCol.value

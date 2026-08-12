@@ -8,6 +8,7 @@
 
 import { useThemeStore } from '../stores/theme'
 import { computed } from 'vue'
+import { fontFamily } from '../theme/typography'
 
 // ============================================================
 //  渲染器模式 — 全局单一切换点，改为 'canvas' 即可切回
@@ -115,7 +116,8 @@ export function useEChartsTheme() {
 
     textStyle: {
       color: colors.value.textColor,
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+      // 与全局字体栈保持一致（typography.ts ↔ variables.css 单一事实来源）
+      fontFamily: fontFamily.sans
     },
 
     title: {

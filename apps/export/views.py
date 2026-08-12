@@ -178,7 +178,6 @@ class ExportViewSet(viewsets.GenericViewSet):
         show_6sigma = request.data.get('show_6sigma', True)
         show_normal = request.data.get('show_normal', False)
         show_kde = request.data.get('show_kde', False)
-        native_chart = request.data.get('native_chart', False)
 
         try:
             df, datafile, metadata = load_user_file(request, file_id)
@@ -206,22 +205,13 @@ class ExportViewSet(viewsets.GenericViewSet):
                                 filename=fname,
                                 content_type='application/vnd.openxmlformats-officedocument.presentationml.presentation')
         else:
-            if native_chart:
-                from .export_batch_charts_native import build_batch_charts_xlsx_native
-                xlsx_bytes = build_batch_charts_xlsx_native(
-                    df, metadata, params, site_col=site_col,
-                    show_limit=show_limit, show_3sigma=show_3sigma,
-                    show_4sigma=show_4sigma, show_6sigma=show_6sigma,
-                    show_normal=show_normal, show_kde=show_kde,
-                )
-            else:
-                from .export_complete import build_batch_charts_xlsx_with_charts
-                xlsx_bytes = build_batch_charts_xlsx_with_charts(
-                    df, metadata, params, site_col=site_col,
-                    show_limit=show_limit, show_3sigma=show_3sigma,
-                    show_4sigma=show_4sigma, show_6sigma=show_6sigma,
-                    show_normal=show_normal, show_kde=show_kde,
-                )
+            from .export_complete import build_batch_charts_xlsx_with_charts
+            xlsx_bytes = build_batch_charts_xlsx_with_charts(
+                df, metadata, params, site_col=site_col,
+                show_limit=show_limit, show_3sigma=show_3sigma,
+                show_4sigma=show_4sigma, show_6sigma=show_6sigma,
+                show_normal=show_normal, show_kde=show_kde,
+            )
             fname = render_export_filename(request.user, 'batch_charts', 'xlsx', base_ctx)
             return FileResponse(io.BytesIO(xlsx_bytes), as_attachment=True,
                                 filename=fname,

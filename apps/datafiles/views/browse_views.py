@@ -3,8 +3,9 @@
 import json
 import os
 
-import numpy as np
+import pandas as pd
 from django.db import transaction
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.generics import GenericAPIView, ListAPIView
@@ -15,9 +16,14 @@ from rest_framework.views import APIView
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import get_parser
 from apps.datafiles.serializers import DataFileSerializer, ParseHistorySerializer
-from apps.datafiles.services import get_cached_parsed_file, clear_parse_cache
+from apps.datafiles.services import (
+    get_cached_parsed_file,
+    get_cached_fail_data,
+    clear_parse_cache,
+)
 from apps.datafiles.utils import extract_product_code
-from apps.analysis.services.statistics import detect_fail_data, build_fail_mask, build_col_meta
+from apps.analysis.services.statistics import build_col_meta
+from apps.analysis.services.statistics.helpers import get_site_column
 
 from ._helpers import (
     _register_file,
@@ -47,6 +53,94 @@ class ParseHistoryListView(ListAPIView):
         return ParseHistory.objects.filter(user=self.request.user)[:20]
 
 
+_NUMBER_FILTER_OPS = {
+    'equals': lambda s, v: s == v,
+    'notEqual': lambda s, v: s != v,
+    'lessThan': lambda s, v: s < v,
+    'lessThanOrEqual': lambda s, v: s <= v,
+    'greaterThan': lambda s, v: s > v,
+    'greaterThanOrEqual': lambda s, v: s >= v,
+}
+_TEXT_FILTER_OPS = {
+    'equals': lambda s, v: s.str.lower() == v.lower(),
+    'notEqual': lambda s, v: s.str.lower() != v.lower(),
+    'contains': lambda s, v: s.str.lower().str.contains(v.lower(), na=False, regex=False),
+    'notContains': lambda s, v: ~s.str.lower().str.contains(v.lower(), na=False, regex=False),
+    'startsWith': lambda s, v: s.str.lower().str.startswith(v.lower()),
+    'endsWith': lambda s, v: s.str.lower().str.endswith(v.lower()),
+}
+
+
+def _apply_filter_model(df: 'pd.DataFrame', filter_model) -> 'pd.DataFrame':
+    """应用 ag-grid IRM filterModel（服务端列过滤，方案 A）。
+
+    逐列 AND 组合；白名单算子，未知列/未知 type/非法值一律宽容跳过（不 400——
+    前端只发合法列，防御未知字段）。语义对齐 ag-grid 默认行为：
+    * 数值比较前 ``to_numeric(errors='coerce')``——非数值转 NaN，参与比较恒 False，
+      即列过滤激活时空值/非数值行被排除（ag-grid blank 默认语义）；
+    * 文本过滤大小写不敏感（lower 比较），contains 用 ``regex=False`` 防正则字符；
+    * ``empty``/``notEmpty`` 匹配空值（NaN 或空串）。
+    """
+    for col, cond in filter_model.items():
+        if col not in df.columns or not isinstance(cond, dict):
+            continue
+        ftype = cond.get('filterType')
+        op = cond.get('type')
+        if ftype == 'number':
+            s = pd.to_numeric(df[col], errors='coerce')
+            if op == 'inRange':
+                lo, hi = cond.get('filter'), cond.get('filterTo')
+                try:
+                    df = df[(s >= float(lo)) & (s <= float(hi))]
+                except (TypeError, ValueError):
+                    continue
+            elif op in _NUMBER_FILTER_OPS and cond.get('filter') is not None:
+                try:
+                    df = df[_NUMBER_FILTER_OPS[op](s, float(cond['filter']))]
+                except (TypeError, ValueError):
+                    continue
+            elif op == 'empty':
+                df = df[s.isna()]
+            elif op == 'notEmpty':
+                df = df[s.notna()]
+        elif ftype == 'text':
+            s = df[col].fillna('').astype(str)
+            if op in _TEXT_FILTER_OPS and cond.get('filter'):
+                df = df[_TEXT_FILTER_OPS[op](s, str(cond['filter']))]
+            elif op == 'empty':
+                df = df[df[col].isna() | (s == '')]
+            elif op == 'notEmpty':
+                df = df[~(df[col].isna() | (s == ''))]
+        elif ftype == 'set':
+            values = cond.get('values') or []
+            if values:
+                df = df[df[col].astype(str).isin([str(v) for v in values])]
+    return df
+
+
+def _apply_sort(df: 'pd.DataFrame', sort_model) -> 'pd.DataFrame':
+    """稳定排序（IRM 块间顺序一致性的硬要求）+ NaN 恒排最后。
+
+    每次 getRows 都全量重算排序，若排序不稳定/不确定，不同块请求会对
+    并列行产生不同顺序 → 页面行重复/跳行。``kind='mergesort'`` 保证
+    同一输入下块间顺序确定。混合类型 object 列（QR_Code 的 "None"+数字）
+    sort_values 抛 TypeError → 逐列丢弃重试，该列退化为不排序。
+    """
+    valid = [
+        (m['colId'], m['sort'])
+        for m in sort_model
+        if isinstance(m, dict) and m.get('colId') in df.columns and m.get('sort') in ('asc', 'desc')
+    ]
+    while valid:
+        cols = [c for c, _ in valid]
+        ascending = [s == 'asc' for _, s in valid]
+        try:
+            return df.sort_values(by=cols, ascending=ascending, kind='mergesort', na_position='last')
+        except TypeError:
+            valid = valid[:-1]  # 混类型列无法排序 → 丢弃最后一列重试
+    return df
+
+
 class DataBrowserView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -56,6 +150,35 @@ class DataBrowserView(APIView):
         page_size = int(request.query_params.get('page_size', 50))
         search = request.query_params.get('search', '')
         pass_filter = request.query_params.get('pass_filter', '')
+        site_filter = request.query_params.get('site_filter', '')
+
+        # 排序（服务端分页：ag-grid IRM sortModel → JSON 数组字符串）
+        sort_model_raw = request.query_params.get('sort_model', '')
+        sort_model = []
+        if sort_model_raw:
+            try:
+                parsed = json.loads(sort_model_raw)
+                if isinstance(parsed, list):
+                    sort_model = parsed
+            except ValueError:
+                return Response(
+                    {'error': 'sort_model must be a JSON array'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # 列过滤（ag-grid IRM filterModel → JSON 对象；白名单算子见 _apply_filter_model）
+        filter_model_raw = request.query_params.get('filter_model', '')
+        filter_model = {}
+        if filter_model_raw:
+            try:
+                parsed = json.loads(filter_model_raw)
+                if isinstance(parsed, dict):
+                    filter_model = parsed
+            except ValueError:
+                return Response(
+                    {'error': 'filter_model must be a JSON object'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         if not datafile_id:
             return Response(
@@ -77,11 +200,35 @@ class DataBrowserView(APIView):
         if df is None:
             return Response({'error': 'parse_failed'}, status=400)
 
-        fail_indices, fail_columns, fail_cells = detect_fail_data(df, metadata)
-        fail_mask = build_fail_mask(fail_cells)
+        # fail 检测按 (file, mtime) 缓存——文件内容未变时零重算（生产大文件收益明显）
+        fail_indices, fail_columns, fail_cells = get_cached_fail_data(datafile.id, request.user.pk, datafile)
+        if fail_cells is None:
+            return Response({'error': 'parse_failed'}, status=400)
         col_meta = build_col_meta(df, metadata)
 
         fail_set = set(fail_indices)
+
+        # page==1 时预计算前端所需的全文件元信息（基于过滤前全量 df）
+        site_options: list = []
+        numeric_columns: list = []
+        if page == 1:
+            site_col_full = get_site_column(df)
+            if site_col_full:
+                site_options = [
+                    str(v) for v in df[site_col_full].dropna().astype(str).unique()
+                    if str(v) not in ('', 'nan')
+                ]
+            for col in df.columns:
+                if df[col].dtype == object:
+                    # 值级判定（镜像旧前端 Number.isFinite 语义）：SW_Bin/X_COORD 等
+                    # 数字字符串列保持 object dtype（NON_NUMERIC_COLUMNS），纯 dtype 判定会漏
+                    if pd.to_numeric(df[col], errors='coerce').notna().any():
+                        numeric_columns.append(col)
+                elif (pd.api.types.is_numeric_dtype(df[col])
+                      and not pd.api.types.is_bool_dtype(df[col])
+                      and df[col].notna().any()):
+                    # 排除 bool（Dut_Pass，TRUE/FALSE 非数值）与全 NaN 列（QR_Code 解析后）
+                    numeric_columns.append(col)
 
         # Apply filters at DataFrame level (fast pandas ops) before paginating
         if search:
@@ -92,9 +239,16 @@ class DataBrowserView(APIView):
                 lambda col: col.str.lower().str.contains(search_lower, na=False, regex=False)
             ).any(axis=1)
             df = df[mask]
-            # Re-index after filter so fail_indices still map correctly
-            # Use original index values for fail_cells lookup
-            filtered_indices = df.index.tolist()
+
+        if site_filter:
+            site_col = get_site_column(df)
+            if site_col:
+                # 字符串比较（与 export_csv site_filter 语义一致；Site_No 是数字字符串 object 列）
+                df = df[df[site_col].astype(str) == str(site_filter)]
+
+        # 列过滤（白名单算子，逐列 AND；与 search/site/pass 组合）
+        if filter_model:
+            df = _apply_filter_model(df, filter_model)
 
         if pass_filter:
             if pass_filter.upper() == 'PASS':
@@ -102,34 +256,49 @@ class DataBrowserView(APIView):
             elif pass_filter.upper() == 'FAIL':
                 df = df[df.index.isin(fail_set)]
 
+        # 排序在切片前（稳定排序保证块间顺序一致）；fail_cells 按原 index 查表，
+        # 过滤/排序只改变行序不改变 index 标签 → 与 data 行并行天然对齐
+        if sort_model:
+            df = _apply_sort(df, sort_model)
+
+        # fail_row_count 为「当前筛选集内」的 fail 行数（IRM 下前端无法本地计算，
+        # 原文件级全量语义改为筛选集语义；pass_filter=FAIL 时 == total、PASS 时 0）
+        fail_row_count = int(df.index.to_series().isin(fail_set).sum())
+
         total = len(df)
         start = (page - 1) * page_size
         end = start + page_size
 
-        # Slice first, then convert only the paged rows to dicts
-        paged_df = df.iloc[start:end]
-        paged_df_clean = paged_df.replace({np.nan: None, np.inf: None, -np.inf: None})
-        paged_rows = paged_df_clean.to_dict(orient='records')
-
-        # Attach fail_cells metadata using original DataFrame index
-        for i, (orig_idx, row) in enumerate(zip(paged_df.index, paged_rows)):
-            row['__fail_cells__'] = json.dumps(fail_cells.get(orig_idx, []))
+        # 预序列化：pandas to_json（C 引擎）直出 data JSON 字符串，零 Python 级
+        # 逐格对象构建。orient='values'（行值数组）：208.9MB records 格式 → 68MB，
+        # 前端 parse 提速 4.6x（V8 解析纯数组远快于字符串键对象，Node 实测 1299ms→281ms）。
+        # pandas C 引擎对 NaN/+inf/-inf/None 一律输出 null，与旧 replace 语义逐值相等。
+        # 切片必须 .copy()：缓存中的 df 只读，不得变异。
+        paged_df = df.iloc[start:end].copy()
+        data_json = paged_df.to_json(orient='values', date_format='iso')
+        # __fail_cells__ 原生数组（不再逐行 json.dumps / 前端逐格 JSON.parse）；
+        # 与 data 行并行（恒存在，pass 行为 []），不混入 df 列（headers 不被污染）
+        fail_cells_json = json.dumps(
+            [fail_cells.get(i, []) for i in paged_df.index], ensure_ascii=False
+        )
 
         parser = get_parser(datafile.format_type)
-        bin_column = parser.get_bin_column_name()
 
-        return Response({
-            'headers': list(df.columns),
-            'rows': paged_rows,
-            'total': total,
-            'page': page,
-            'page_size': page_size,
-            'total_pages': (total + page_size - 1) // page_size,
-            'fail_row_count': len(set(fail_indices)),
-            'fail_mask': fail_mask,
-            'col_meta': col_meta,
-            'bin_column': bin_column,
-        })
+        payload = (
+            '{"headers":' + json.dumps(list(df.columns), ensure_ascii=False)
+            + ',"data":' + data_json
+            + ',"fail_cells":' + fail_cells_json
+            + ',"total":' + str(total)
+            + ',"page":' + str(page)
+            + ',"page_size":' + str(page_size)
+            + ',"total_pages":' + str((total + page_size - 1) // page_size)
+            + ',"fail_row_count":' + str(fail_row_count)
+            + ',"col_meta":' + json.dumps(build_col_meta(df, metadata), ensure_ascii=False)
+            + ',"bin_column":' + json.dumps(parser.get_bin_column_name(), ensure_ascii=False)
+            + ((',"site_options":' + json.dumps(site_options, ensure_ascii=False) + ',"numeric_columns":' + json.dumps(numeric_columns, ensure_ascii=False)) if page == 1 else '')
+            + '}'
+        )
+        return HttpResponse(payload, content_type='application/json; charset=utf-8')
 
 
 # Consistency-check write actions and the roles allowed to run them. Delete is

@@ -25,6 +25,11 @@ export interface BrowseParams {
   page_size?: number
   search?: string
   pass_filter?: string
+  site_filter?: string
+  /** ag-grid sortModel JSON 字符串（IRM 服务端排序） */
+  sort_model?: string
+  /** ag-grid filterModel JSON 字符串（IRM 服务端列过滤） */
+  filter_model?: string
 }
 
 export interface BrowseColMeta {
@@ -35,15 +40,22 @@ export interface BrowseColMeta {
 
 export interface BrowseResponse {
   headers: string[]
-  rows: Record<string, any>[]
+  /** 行值数组（与 headers 对齐；性能优化：records 对象数组 → values 行值数组） */
+  data: unknown[][]
+  /** 与 data 行并行：每行的 fail 列名列表（原生数组，pass 行为 []） */
+  fail_cells: string[][]
   total: number
   page: number
   page_size: number
   total_pages: number
+  /** 当前筛选集（search/pass/site）内的 fail 行数（IRM 下前端无法本地计算） */
   fail_row_count: number
-  fail_mask: Record<string, unknown>
   col_meta: Record<string, BrowseColMeta>
   bin_column: string
+  /** 仅 page==1：全文件站点唯一值（未排序，前端排序） */
+  site_options?: string[]
+  /** 仅 page==1：可作数值分析的列名（右键直方图可用性判定） */
+  numeric_columns?: string[]
 }
 
 /** 仅保留有值的查询参数 */
