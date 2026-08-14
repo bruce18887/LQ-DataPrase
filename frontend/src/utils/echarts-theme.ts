@@ -51,9 +51,9 @@ export function useEChartsTheme() {
         subtextColor: 'rgba(255, 255, 255, 0.6)',
 
         // 轴线颜色
-        axisLineColor: 'rgba(255, 255, 255, 0.2)',
+        axisLineColor: 'rgba(255, 255, 255, 0.28)',
         axisLabelColor: 'rgba(255, 255, 255, 0.7)',
-        splitLineColor: 'rgba(255, 255, 255, 0.1)',
+        splitLineColor: 'rgba(255, 255, 255, 0.16)',
 
         // 边框颜色
         borderColor: 'rgba(255, 255, 255, 0.1)',
@@ -66,16 +66,17 @@ export function useEChartsTheme() {
         tooltipBorder: 'rgba(255, 255, 255, 0.2)',
         tooltipText: '#ffffff',
 
-        // 系列颜色（图表数据颜色）
+        // 系列颜色（图表数据颜色；经 CVD 色盲模拟验证 protan/deutan ΔE≥15，
+        // 唯 青绿/粉红 protan 12.2 为语义锚点对（success/error），使用处均有文字标签）
         seriesColors: [
           '#fdd835', // 金色
           '#14b8a6', // 青绿
           '#4facfe', // 蓝色
           '#fb7185', // 粉红
           '#38ef7d', // 绿色
-          '#ffd54f', // 浅金
+          '#b45309', // 棕色（替代原浅金：与金色在色盲视角下不可分）
           '#00f2fe', // 浅蓝
-          '#fda4af', // 浅粉
+          '#ff9f43', // 橙色（替代原浅粉：与青绿在 protan 视角下不可分）
         ]
       }
     } else {
@@ -96,12 +97,12 @@ export function useEChartsTheme() {
         seriesColors: [
           '#2563eb', // 专业蓝
           '#047857', // 绿色
-          '#b45309', // 橙色
+          '#d97706', // 琥珀（替代橙：橙与红在 deutan 下不可分）
           '#b91c1c', // 红色
           '#0284c7', // 蓝色
-          '#7c3aed', // 紫色
-          '#ea580c', // 深橙
-          '#047857', // 深绿
+          '#86198f', // 李子（替代紫：紫与蓝在 deutan 下不可分）
+          '#475569', // 深灰（替代深橙）
+          '#0d9488', // 青色
         ]
       }
     }

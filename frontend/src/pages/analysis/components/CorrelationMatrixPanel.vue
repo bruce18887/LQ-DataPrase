@@ -47,8 +47,10 @@ function buildOption() {
     visualMap: {
       min: -1, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: '0%',
       inRange: { color: isDark.value
-        ? ['#ef5350', '#ff7043', '#ffa726', '#ffee58', '#9ccc65', '#4db6ac', '#26a69a', '#42a5f5']
-        : ['#d73027', '#f46d43', '#fdae61', '#fee08b', '#e6f598', '#abdda4', '#66c2a5', '#3288bd'] },
+        // RdYlBu 化：原 红→绿 发散带在红绿色盲下正负相关不可分（deutan ΔE 14.6），
+        // 红→黄→白→蓝 两极（红/蓝）全视觉 ΔE≥70
+        ? ['#ef5350', '#ff7043', '#ffa726', '#ffee58', '#f8fafc', '#93c5fd', '#3b82f6', '#1d4ed8']
+        : ['#d73027', '#f46d43', '#fdae61', '#fee08b', '#e0f3f8', '#abd9e9', '#74add1', '#4575b4'] },
     },
     series: [{
       name: 'Pearson r', type: 'heatmap', data: heatmapData,

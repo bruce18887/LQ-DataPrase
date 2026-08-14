@@ -170,3 +170,4 @@ frontend/build-out.txt
 *.tmp
 *.orig
 *.rej
+frontend/tasks/

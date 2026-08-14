@@ -5,7 +5,7 @@
 <script setup lang="ts">
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
-import { clampBarValue, formatPercent } from '../../../utils/chart-bar'
+import { clampBarValue, formatPercent, formatAxisValue, getBarGroupPad, getMaxBarWidthPercent } from '../../../utils/chart-bar'
 
 const props = defineProps<{
   /** /analysis/multi_lot/ 带 param 的响应 */
@@ -21,13 +21,6 @@ const { colors } = useEChartsTheme()
 
 function displayName(lot: any): string {
   return props.fileNames[lot.file_id] || lot.name || `File ${lot.file_id}`
-}
-
-/** 智能格式化 X 轴刻度：整数不显示小数，非整数最多 4 位 */
-function formatAxisValue(v: number): string {
-  if (Number.isInteger(v)) return v.toString()
-  const s = v.toFixed(4)
-  return s.replace(/\.?0+$/, '')
 }
 
 /** 计算正态分布概率密度函数 */
@@ -47,6 +40,9 @@ function buildOption() {
 
   const series: any[] = []
   const legendData: string[] = []
+  // 柱宽上限：N 系列并排柱组总宽必须 ≤ bin 宽，否则柱组横跨 bin 边界、
+  // 贴限 bin（右边界=USL）的 pass 柱会被画到 USL 右侧（回归：limit-line-cross）
+  const effectiveBarWidth = Math.min(props.barWidthPercent, getMaxBarWidthPercent(lots.length))
 
   // 添加柱状图系列（每个文件独立颜色，显示百分比标签）
   for (const lot of lots) {
@@ -58,7 +54,7 @@ function buildOption() {
       // 小百分比（如 0.002%）钳制到最小可见柱高，真实值存 data[2] 供 tooltip/标签
       data: lot.bar_data.map((d: number[]) => [d[0], clampBarValue(d[1]), d[1]]),
       itemStyle: { color: lot.color },
-      barWidth: `${props.barWidthPercent}%`,
+      barWidth: `${effectiveBarWidth}%`,
       barGap: '10%',
       label: {
         show: true,
@@ -156,16 +152,25 @@ function buildOption() {
 
   const titleText = `${props.selectedParam}  ${r.global_mean != null ? `(μ=${r.global_mean})` : ''}`
 
+  // 多系列 bar 分组偏移的边缘 pad（见下方 xAxis 注释）：N = 文件数；无 bin_centers
+  // 的 fallback 场景从 bar_data 相邻 x 推导 binGap，推导失败则 pad=0。
+  const binGap = binCenters.length >= 2
+    ? binCenters[1] - binCenters[0]
+    : (lots[0]?.bar_data?.[1]?.[0] != null ? lots[0].bar_data[1][0] - lots[0].bar_data[0][0] : 0)
+  const axisPad = getBarGroupPad(lots.length, binGap, effectiveBarWidth)
+
   // 构建Y轴配置
+  // 左/右轴色固定十六进制常量（与直方图一致；variables.css 未定义 --color-primary，
+  // 原 CSS 变量写法恒取回退值，直方图基准下统一为常量）
   const yAxisConfig: any[] = [
     {
       type: 'value',
       name: '百分比 (%)',
-      nameTextStyle: { color: 'var(--color-primary, #1E88E5)', fontWeight: 'bold' },
+      nameTextStyle: { color: '#1E88E5', fontWeight: 'bold' },
       position: 'left',
       min: 0,
-      axisLabel: { formatter: '{value}%', color: 'var(--color-primary, #1E88E5)' },
-      axisLine: { show: true, lineStyle: { color: 'var(--color-primary, #1E88E5)' } },
+      axisLabel: { formatter: '{value}%', color: '#1E88E5' },
+      axisLine: { show: true, lineStyle: { color: '#1E88E5' } },
     },
   ]
 
@@ -174,11 +179,11 @@ function buildOption() {
     yAxisConfig.push({
       type: 'value',
       name: '概率密度',
-      nameTextStyle: { color: 'var(--color-warning, #F57F17)', fontWeight: 'bold' },
+      nameTextStyle: { color: '#F57F17', fontWeight: 'bold' },
       position: 'right',
       min: 0,
-      axisLabel: { formatter: (v: number) => v.toExponential(2), color: 'var(--color-warning, #F57F17)' },
-      axisLine: { show: true, lineStyle: { color: 'var(--color-warning, #F57F17)' } },
+      axisLabel: { formatter: (v: number) => v.toExponential(2), color: '#F57F17' },
+      axisLine: { show: true, lineStyle: { color: '#F57F17' } },
       splitLine: { show: false },
     })
   }
@@ -193,6 +198,9 @@ function buildOption() {
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
+      backgroundColor: colors.value.tooltipBg,
+      borderColor: colors.value.tooltipBorder,
+      textStyle: { color: colors.value.tooltipText },
       formatter: (params: any) => {
         const items = Array.isArray(params) ? params : [params]
         if (!items.length) return ''
@@ -210,10 +218,15 @@ function buildOption() {
     legend: { data: legendData, top: 'bottom', type: 'scroll', textStyle: { color: tc } },
     toolbox: { feature: { saveAsImage: { name: `${props.selectedParam}_多文件对比` } } },
     grid: { top: 55, bottom: 70, left: 55, right: showNormal ? 80 : 55 },
+    // 轴 min/max 向两端扩展多系列 bar 分组偏移量（getBarGroupPad）：N 个文件系列
+    // 在同一 value 轴上分组错位，最左系列第 0 点柱体（x=bin_centers[0]）与最右系列
+    // 最后点柱体（x=bin_centers[-1]）会被挤出绘图区整根裁剪（回归：edge-clip，
+    // 与 HistogramChart 同构）。扩展仅两端多出空边距；正态曲线仍按未扩展 span 生成
     xAxis: {
       type: 'value',
-      min: binCenters.length > 0 ? binCenters[0] : r.chart_min,
-      max: binCenters.length > 0 ? binCenters[binCenters.length - 1] : r.chart_max,
+      min: binCenters.length > 0 ? binCenters[0] - axisPad : r.chart_min,
+      max: binCenters.length > 0 ? binCenters[binCenters.length - 1] + axisPad : r.chart_max,
+      axisLine: { lineStyle: { color: colors.value.axisLineColor } },
       axisLabel: {
         rotate: 45,
         show: true,

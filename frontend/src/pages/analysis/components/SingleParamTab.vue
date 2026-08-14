@@ -50,6 +50,8 @@
         v-model:chart-config="chartConfig"
         v-model:range-type="rangeType"
         v-model:bar-width-percent="barWidthPercent"
+        :bar-width-max="barWidthMax"
+        v-model:bar-overlap-percent="barOverlapPercent"
         v-model:ignore-no-limit="ignoreNoLimit"
         v-model:custom-low="customLow"
         v-model:custom-high="customHigh"
@@ -106,6 +108,7 @@
             :chart-config="chartConfig"
             :range-type="rangeType"
             :bar-width-percent="barWidthPercent"
+            :bar-overlap-percent="barOverlapPercent"
             :selected-param="localSelectedParam"
             :outlier-handling="outlierHandling"
           />
@@ -167,6 +170,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useAnalysisStore } from '../../../stores/analysis'
+import { getMaxBarWidthPercent } from '../../../utils/chart-bar'
 import ChartConfigPanel from './ChartConfigPanel.vue'
 import RangeComparisonTable from './RangeComparisonTable.vue'
 import SiteStatsTable from './SiteStatsTable.vue'
@@ -200,6 +204,7 @@ const chartMode = ref(analysisStore.chartMode)
 const rangeType = ref(analysisStore.rangeType)
 const chartConfig = ref<string[]>(analysisStore.chartConfig)
 const barWidthPercent = ref(analysisStore.barWidthPercent)
+const barOverlapPercent = ref(analysisStore.barOverlapPercent)
 const ignoreNoLimit = ref(analysisStore.ignoreNoLimit)
 const ignoreNoTestValue = ref(analysisStore.ignoreNoTestValue)
 const dataOnlyBin1 = ref(analysisStore.dataOnlyBin1)
@@ -233,6 +238,21 @@ const {
   onlyFailTestItem,
   onlyLowCpk
 )
+
+// 柱宽 slider 上限：随系列数 + 重合度联动（N 系列柱组必须 ≤ bin 宽，否则贴限
+// 柱体越过 USL 线——回归 limit-line-cross；重合越高柱组越窄、上限越高）
+const barWidthMax = computed(() => {
+  const sh = histResult.value?.site_histograms
+  const keys = sh ? Object.keys(sh) : []
+  return getMaxBarWidthPercent(keys.length >= 1 ? keys.length + 1 : 1, barOverlapPercent.value)
+})
+// 系列数变化时把已超上限的柱宽 clamp 并回写 store（避免 slider 显示 20% 实际 9%）
+watch(barWidthMax, (max) => {
+  if (barWidthPercent.value > max) {
+    barWidthPercent.value = max
+    analysisStore.barWidthPercent = max
+  }
+})
 
 // Composable: Serial Distribution
 const {
@@ -279,6 +299,7 @@ const {
   localSelectedParam,
   groupBy,
   showBoxPlot,
+  dataOnlyBin1,
 )
 const currentBoxPlotData = computed(() => {
   if (!boxPlotData.value || !localSelectedParam.value) return null
@@ -298,6 +319,7 @@ const {
   () => props.fileId,
   localSelectedParam,
   showQQPlot,
+  dataOnlyBin1,
 )
 
 // ========== Store sync ==========
@@ -305,6 +327,7 @@ watch(chartMode, (val) => { analysisStore.chartMode = val })
 watch(chartConfig, (val) => { analysisStore.chartConfig = val }, { deep: true })
 watch(rangeType, (val) => { analysisStore.rangeType = val })
 watch(barWidthPercent, (val) => { analysisStore.barWidthPercent = val })
+watch(barOverlapPercent, (val) => { analysisStore.barOverlapPercent = val })
 watch(ignoreNoLimit, (val) => { analysisStore.ignoreNoLimit = val })
 watch(ignoreNoTestValue, (val) => { analysisStore.ignoreNoTestValue = val })
 watch(dataOnlyBin1, (val) => { analysisStore.dataOnlyBin1 = val })

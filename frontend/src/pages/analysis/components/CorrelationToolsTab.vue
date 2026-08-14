@@ -226,6 +226,7 @@ import { useFileCorrelation } from '../composables/useFileCorrelation'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
 import { minMax } from '../../../utils/minmax'
+import { formatAxisValue, getSiteColors8 } from '../../../utils/chart-bar'
 import { useAnalysisStore } from '../../../stores/analysis'
 import OutlierHintBar from './OutlierHintBar.vue'
 
@@ -279,7 +280,6 @@ function onFileCorrelate() {
   loadFileCorrelation(fcFile1.value, fcFile2.value, fcThreshold.value)
 }
 
-const SITE_COLORS = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc', '#5383e0']
 
 const rColorClass = computed(() => {
   const r = Math.abs(corrResult.value?.pearson_r ?? 0)
@@ -351,7 +351,7 @@ function buildScatterOption() {
   const series: any[] = (d.series_data || []).map(
     (sd: { name: string; data: number[][] }, idx: number) => ({
       name: sd.name, type: 'scatter', data: sd.data, symbolSize: 6,
-      itemStyle: { color: SITE_COLORS[idx % SITE_COLORS.length], opacity: 0.6 },
+      itemStyle: { color: getSiteColors8(isDark.value)[idx % 8], opacity: 0.6 },
       ...(isLarge.value ? { large: true } : {}),
     }),
   )
@@ -398,12 +398,12 @@ function buildScatterOption() {
   return {
     // large 模式下上万 symbol 的入场/更新动画是纯开销，直接关闭
     animation: !isLarge.value,
-    title: { text: `${d.param_x} vs ${d.param_y}`, subtext: `Pearson r = ${d.pearson_r?.toFixed(4) ?? '-'}`, left: 'center', textStyle: { color: tc, fontSize: 14 }, subtextStyle: { color: tc, fontSize: 12 } },
+    title: { text: `${d.param_x} vs ${d.param_y}`, subtext: `Pearson r = ${d.pearson_r?.toFixed(4) ?? '-'}`, left: 'center', textStyle: { color: tc, fontSize: 15 }, subtextStyle: { color: tc, fontSize: 12 } },
     toolbox: { feature: { saveAsImage: { title: '保存图片' }, restore: { title: '还原' } }, right: 10 },
-    tooltip: { trigger: 'item', formatter: (p: any) => `${p.seriesName}<br/>${d.param_x}: ${Number(p.value[0]).toFixed(4)}<br/>${d.param_y}: ${Number(p.value[1]).toFixed(4)}` },
+    tooltip: { trigger: 'item', backgroundColor: colors.value.tooltipBg, borderColor: colors.value.tooltipBorder, textStyle: { color: colors.value.tooltipText }, formatter: (p: any) => `${p.seriesName}<br/>${d.param_x}: ${Number(p.value[0]).toFixed(4)}<br/>${d.param_y}: ${Number(p.value[1]).toFixed(4)}` },
     legend: { data: series.map((s: any) => s.name), bottom: 5, type: 'scroll', textStyle: { color: tc } },
-    xAxis: { type: 'value', name: d.param_x, nameLocation: 'center', nameGap: 30, min: xR.min, max: xR.max, axisLabel: { color: tc }, nameTextStyle: { color: tc } },
-    yAxis: { type: 'value', name: d.param_y, nameLocation: 'center', nameGap: 40, min: yR.min, max: yR.max, axisLabel: { color: tc }, nameTextStyle: { color: tc } },
+    xAxis: { type: 'value', name: d.param_x, nameLocation: 'center', nameGap: 30, min: xR.min, max: xR.max, axisLine: { lineStyle: { color: colors.value.axisLineColor } }, axisLabel: { fontSize: 9, formatter: formatAxisValue, color: tc }, nameTextStyle: { color: tc } },
+    yAxis: { type: 'value', name: d.param_y, nameLocation: 'center', nameGap: 40, min: yR.min, max: yR.max, axisLine: { lineStyle: { color: colors.value.axisLineColor } }, axisLabel: { fontSize: 9, formatter: formatAxisValue, color: tc }, nameTextStyle: { color: tc } },
     dataZoom: [
       { type: 'slider', xAxisIndex: 0, start: 0, end: 100 },
       { type: 'slider', yAxisIndex: 0, start: 0, end: 100 },
@@ -492,8 +492,9 @@ function buildMatrixOption() {
     visualMap: {
       min: -1, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: '0%',
       inRange: { color: isDark.value
-        ? ['#ef5350', '#ff7043', '#ffa726', '#ffee58', '#9ccc65', '#4db6ac', '#26a69a', '#42a5f5']
-        : ['#d73027', '#f46d43', '#fdae61', '#fee08b', '#e6f598', '#abdda4', '#66c2a5', '#3288bd'] },
+        // RdYlBu 化：原 红→绿 发散带在红绿色盲下正负相关不可分（deutan ΔE 14.6）
+        ? ['#ef5350', '#ff7043', '#ffa726', '#ffee58', '#f8fafc', '#93c5fd', '#3b82f6', '#1d4ed8']
+        : ['#d73027', '#f46d43', '#fdae61', '#fee08b', '#e0f3f8', '#abd9e9', '#74add1', '#4575b4'] },
     },
     series: [{
       name: 'Pearson r', type: 'heatmap', data: heatmapData,

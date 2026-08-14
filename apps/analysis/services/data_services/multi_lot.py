@@ -195,16 +195,17 @@ def compute_multi_lot_distribution(datasets, all_series, param,
             'display_upper': display_upper,
         })
 
-    # Resolve bin range: use range_type-based resolution, ensure all limit lines are visible
+    # Resolve bin range strictly by range_type（与单文件 histogram 的
+    # resolve_limits 语义一致）——不做规格限扩展：带规格限窄分布参数下
+    # S3/S4/S6/DR 范围各不相同，切换范围类型 X 轴随之变化（回归
+    # 2026-08-13：曾无条件扩展到 global_lsl/global_usl，5 种 range_type
+    # 全部被吞成规格限范围，切换看起来不生效）。limit 线（markLine 用
+    # display_lower/display_upper，已按 range_type 计算）超出轴范围时由
+    # ECharts 裁剪，与单文件直方图行为一致。
     bin_min, bin_max = _resolve_multi_range(
         range_type, combined, global_mean, global_std,
         all_dsets, param, custom_low, custom_high,
     )
-    # Expand range to include all limit lines (ensure each file's limits are fully visible)
-    if global_lsl is not None:
-        bin_min = min(bin_min, global_lsl)
-    if global_usl is not None:
-        bin_max = max(bin_max, global_usl)
     # Degenerate range fallback
     if bin_min == bin_max:
         bin_min = float(combined.min())

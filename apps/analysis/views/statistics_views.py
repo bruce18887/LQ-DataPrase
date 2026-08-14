@@ -228,6 +228,14 @@ class StatisticsViewSet(viewsets.GenericViewSet):
                 'missing': missing,
             }, status=400)
 
+        # data_only_bin1 narrows the rows before the per-param series
+        # extraction so overall / by_site / by_bin stats only cover
+        # pass-bin rows. Params that are all-NaN inside Bin1 are silently
+        # skipped by the dropna().empty check in the loop (same semantics
+        # as the histogram Bin1 mode hiding such params).
+        if get_bool_param(request, 'data_only_bin1'):
+            df = filter_bin1_rows(df, metadata)
+
         results = {}
 
         for param in params:

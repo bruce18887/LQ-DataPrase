@@ -26,9 +26,10 @@ export function useHistogram(
   const isDark = computed(() => themeStore.currentTheme === 'night')
   const clrs = computed<Record<string, string>>(() => {
     if (isDark.value) {
-      return { green: '#14b8a6', orange: '#fcd34d', darkorange: '#fb923c', red: '#fb7185', gray: '#9CA3AF' }
+      // night：darkorange→紫（原红/橙近邻对在 deutan 下 ΔE 14.9 不可分）；gray 提亮以匹配深底
+      return { green: '#14b8a6', orange: '#fcd34d', darkorange: '#a78bfa', red: '#fb7185', gray: '#e2e8f0' }
     }
-    return { green: '#4CAF50', orange: '#FF9800', darkorange: '#FF5722', red: '#F44336', gray: '#9E9E9E' }
+    return { green: '#047857', orange: '#7c3aed', darkorange: '#a21caf', red: '#b91c1c', gray: '#475569' }
   })
 
   // 请求保序由 useAsyncData 内建守卫保证（过期 run() 返回 null 且不落地）

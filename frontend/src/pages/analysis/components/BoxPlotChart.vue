@@ -14,6 +14,7 @@ import { computed } from 'vue'
 import { InfoFilled } from '@element-plus/icons-vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
+import { formatAxisValue } from '../../../utils/chart-bar'
 
 interface BoxPlotStats {
   min: number; q1: number; median: number; q3: number; max: number; outliers: number[]; count: number; raw_values?: number[]
@@ -28,9 +29,11 @@ const props = withDefaults(defineProps<{ data: BoxPlotData | null; title?: strin
 })
 const { colors } = useEChartsTheme()
 
-const boxColor = computed(() => colors.value.seriesColors[0])
+// 箱体/异常点固定直方图基准色（风格统一 2026-08-13，双主题恒定）；
+// jitter 散点覆盖层保留主题系列色自适应
+const boxColor = '#1E88E5'
 const jitterColor = computed(() => colors.value.seriesColors[4])
-const outlierColor = computed(() => colors.value.seriesColors[3])
+const outlierColor = '#E53935'
 
 const hasValidData = computed(() => {
   if (!props.data) return false
@@ -131,9 +134,15 @@ function buildOption() {
     title: {
       text: props.title || `Box Plot - ${props.data.param}`,
       left: 'center',
-      textStyle: { fontSize: 15, fontWeight: '600', color: tc },
+      textStyle: { fontSize: 15, fontWeight: 'bold', color: tc },
     },
-    tooltip: { trigger: 'item', axisPointer: { type: 'shadow' } },
+    tooltip: {
+      trigger: 'item',
+      axisPointer: { type: 'shadow' },
+      backgroundColor: colors.value.tooltipBg,
+      borderColor: colors.value.tooltipBorder,
+      textStyle: { color: colors.value.tooltipText },
+    },
     grid: { left: '8%', right: '8%', bottom: '12%', top: '12%', containLabel: true },
     xAxis: {
       type: 'category',
@@ -143,7 +152,7 @@ function buildOption() {
       nameLocation: 'center',
       nameGap: 35,
       nameTextStyle: { color: tc, fontSize: 13, fontWeight: 500 },
-      axisLine: { lineStyle: { color: tc } },
+      axisLine: { lineStyle: { color: colors.value.axisLineColor } },
       axisLabel: {
         rotate: categories.length > 10 ? 45 : 0,
         interval: 0,
@@ -164,8 +173,8 @@ function buildOption() {
       min: yMin - yPad,
       max: yMax + yPad,
       nameTextStyle: { color: tc, fontSize: 12, fontWeight: 500 },
-      axisLabel: { color: tc, fontSize: 11 },
-      splitLine: { lineStyle: { type: 'dashed', color: tc + '20' } },
+      axisLabel: { color: tc, fontSize: 9, formatter: formatAxisValue },
+      splitLine: { lineStyle: { type: 'dashed', color: colors.value.splitLineColor } },
       splitArea: { show: false },
     },
     series: [
@@ -174,14 +183,14 @@ function buildOption() {
         type: 'boxplot',
         data: boxData,
         itemStyle: {
-          color: boxColor.value + '30',
-          borderColor: boxColor.value,
+          color: boxColor + '30',
+          borderColor: boxColor,
           borderWidth: 2,
         },
         emphasis: {
           itemStyle: {
-            color: boxColor.value + '50',
-            borderColor: boxColor.value,
+            color: boxColor + '50',
+            borderColor: boxColor,
             borderWidth: 3,
           },
         },
@@ -205,7 +214,7 @@ function buildOption() {
         name: 'Outliers',
         type: 'scatter',
         data: outlierData,
-        itemStyle: { color: outlierColor.value, opacity: 0.8 },
+        itemStyle: { color: outlierColor, opacity: 0.8 },
         symbolSize: 7,
         symbol: 'circle',
         tooltip: { formatter: (p: any) => {

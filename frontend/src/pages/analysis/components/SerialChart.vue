@@ -31,6 +31,7 @@
 import { computed } from 'vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
+import { formatAxisValue, getSiteColors8 } from '../../../utils/chart-bar'
 import OutlierHintBar from './OutlierHintBar.vue'
 
 const props = withDefaults(defineProps<{
@@ -42,16 +43,11 @@ const props = withDefaults(defineProps<{
   serialCandidates?: string[]
 }>(), { serialCol: '', serialCandidates: () => [] })
 const emit = defineEmits<{ (e: 'update:serialCol', value: string): void }>()
-const { colors } = useEChartsTheme()
+const { colors, isDark } = useEChartsTheme()
 
 // 选择器显示当前生效的列：显式选择优先，否则回退到后端自动检测结果
 const activeSerialCol = computed(() => props.serialCol || props.data?.serial_col || '')
 const showSelector = computed(() => (props.serialCandidates?.length ?? 0) > 1)
-
-const SITE_COLORS = [
-  '#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de',
-  '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc', '#5383e0',
-]
 
 // 大数据量（≥5000 点）启用 ECharts 官方 large 模式：每个系列只渲染 1 个
 // path 元素（类型化数组 + 单次绘制），SVG/canvas 渲染器下均生效，避免
@@ -111,7 +107,7 @@ function buildOption() {
       name: sd.name, type: sd.type || 'scatter',
       data: (sd.data || []).map((p: number[]) => toPoint(p, idx)).filter((pt: any) => pt !== null),
       symbolSize: sd.symbolSize || 6,
-      itemStyle: { color: SITE_COLORS[idx % SITE_COLORS.length] },
+      itemStyle: { color: getSiteColors8(isDark.value)[idx % 8] },
       ...(isLarge.value ? { large: true } : {}),
     }),
   )
@@ -132,9 +128,12 @@ function buildOption() {
   return {
     // large 模式下上万 symbol 的入场/更新动画是纯开销，直接关闭
     animation: !isLarge.value,
-    title: { text: `${param} Serial分布`, subtext, left: 'center', subtextStyle: { fontSize: 12 } },
+    title: { text: `${param} Serial分布`, subtext, left: 'center', textStyle: { fontSize: 15, fontWeight: 'bold', color: tc }, subtextStyle: { fontSize: 12 } },
     tooltip: {
       trigger: 'item',
+      backgroundColor: colors.value.tooltipBg,
+      borderColor: colors.value.tooltipBorder,
+      textStyle: { color: colors.value.tooltipText },
       formatter: (p: any) => {
         const pt = p.data || {}
         const anchor = pt.anchor ?? 0
@@ -152,12 +151,15 @@ function buildOption() {
     xAxis: {
       type: 'category', data: continuousSerials, name: serialCol,
       nameTextStyle: { color: tc }, nameLocation: 'middle', nameGap: 30,
-      axisLabel: { rotate: 45, interval: 'auto', color: tc },
+      axisLine: { lineStyle: { color: colors.value.axisLineColor } },
+      axisLabel: { rotate: 45, interval: 'auto', fontSize: 9, color: tc },
     },
     yAxis: {
       type: 'value', name: unit ? `${param} (${unit})` : param,
       nameTextStyle: { color: tc }, nameLocation: 'middle', nameGap: 40,
-      min: yAxisMin, max: yAxisMax, axisLabel: { formatter: (v: number) => v.toFixed(4), color: tc },
+      min: yAxisMin, max: yAxisMax,
+      axisLine: { lineStyle: { color: colors.value.axisLineColor } },
+      axisLabel: { formatter: formatAxisValue, fontSize: 9, color: tc },
     },
     dataZoom: [
       // slider 提到图例上方：bottom:45（滑块高 30，图例高 25 在最底层 bottom:5）

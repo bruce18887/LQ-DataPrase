@@ -42,16 +42,16 @@
     <!-- 良率统计卡片 -->
     <el-row v-if="waferData" :gutter="12" style="margin-bottom: 12px">
       <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-secondary)">Total Dies</div><div style="font-size: 18px; font-weight: bold">{{ waferData.stats?.total ?? '-' }}</div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-secondary)">Pass Dies</div><div style="font-size: 18px; font-weight: bold; color: #2ECC71">{{ waferData.stats?.pass_count ?? '-' }}</div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-secondary)">Fail Dies</div><div style="font-size: 18px; font-weight: bold; color: #E74C3C">{{ waferData.stats?.fail_count ?? '-' }}</div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-secondary)">Yield</div><div :style="{ fontSize: '18px', fontWeight: 'bold', color: (waferData.stats?.yield_pct ?? 0) >= 95 ? '#2ECC71' : (waferData.stats?.yield_pct ?? 0) >= 85 ? '#F39C12' : '#E74C3C' }">{{ waferData.stats?.yield_pct?.toFixed(1) ?? '-' }}%</div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-secondary)">Pass Dies</div><div style="font-size: 18px; font-weight: bold; color: waferColors.pass">{{ waferData.stats?.pass_count ?? '-' }}</div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-secondary)">Fail Dies</div><div style="font-size: 18px; font-weight: bold; color: waferColors.fail">{{ waferData.stats?.fail_count ?? '-' }}</div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-secondary)">Yield</div><div :style="{ fontSize: '18px', fontWeight: 'bold', color: (waferData.stats?.yield_pct ?? 0) >= 95 ? waferColors.pass : (waferData.stats?.yield_pct ?? 0) >= 85 ? waferColors.zoneMid : waferColors.zoneEdge }">{{ waferData.stats?.yield_pct?.toFixed(1) ?? '-' }}%</div></el-card></el-col>
     </el-row>
 
     <!-- 分区良率统计 -->
     <el-row v-if="localColorBy === 'zone' && zonalData?.zones?.length" :gutter="12" style="margin-bottom: 12px">
-      <el-col :span="8"><el-card shadow="hover" :style="{ borderLeft: '3px solid #2ECC71' }"><div style="font-size: 11px; color: var(--text-secondary)">中心区 Center Zone</div><div style="font-size: 16px; font-weight: bold; color: #2ECC71">{{ getZoneYield('中心区') }}%</div><div style="font-size: 11px; color: var(--text-secondary)">{{ getZoneStat('中心区', 'pass') }} / {{ getZoneStat('中心区', 'total') }}</div></el-card></el-col>
-      <el-col :span="8"><el-card shadow="hover" :style="{ borderLeft: '3px solid #F39C12' }"><div style="font-size: 11px; color: var(--text-secondary)">中间区 Middle Zone</div><div style="font-size: 16px; font-weight: bold; color: #F39C12">{{ getZoneYield('中间区') }}%</div><div style="font-size: 11px; color: var(--text-secondary)">{{ getZoneStat('中间区', 'pass') }} / {{ getZoneStat('中间区', 'total') }}</div></el-card></el-col>
-      <el-col :span="8"><el-card shadow="hover" :style="{ borderLeft: '3px solid #E74C3C' }"><div style="font-size: 11px; color: var(--text-secondary)">边缘区 Edge Zone</div><div style="font-size: 16px; font-weight: bold; color: #E74C3C">{{ getZoneYield('边缘区') }}%</div><div style="font-size: 11px; color: var(--text-secondary)">{{ getZoneStat('边缘区', 'pass') }} / {{ getZoneStat('边缘区', 'total') }}</div></el-card></el-col>
+      <el-col :span="8"><el-card shadow="hover" :style="{ borderLeft: '3px solid ' + waferColors.zoneCenter }"><div style="font-size: 11px; color: var(--text-secondary)">中心区 Center Zone</div><div style="font-size: 16px; font-weight: bold; color: waferColors.zoneCenter">{{ getZoneYield('中心区') }}%</div><div style="font-size: 11px; color: var(--text-secondary)">{{ getZoneStat('中心区', 'pass') }} / {{ getZoneStat('中心区', 'total') }}</div></el-card></el-col>
+      <el-col :span="8"><el-card shadow="hover" :style="{ borderLeft: '3px solid ' + waferColors.zoneMid }"><div style="font-size: 11px; color: var(--text-secondary)">中间区 Middle Zone</div><div style="font-size: 16px; font-weight: bold; color: waferColors.zoneMid">{{ getZoneYield('中间区') }}%</div><div style="font-size: 11px; color: var(--text-secondary)">{{ getZoneStat('中间区', 'pass') }} / {{ getZoneStat('中间区', 'total') }}</div></el-card></el-col>
+      <el-col :span="8"><el-card shadow="hover" :style="{ borderLeft: '3px solid ' + waferColors.zoneEdge }"><div style="font-size: 11px; color: var(--text-secondary)">边缘区 Edge Zone</div><div style="font-size: 16px; font-weight: bold; color: waferColors.zoneEdge">{{ getZoneYield('边缘区') }}%</div><div style="font-size: 11px; color: var(--text-secondary)">{{ getZoneStat('边缘区', 'pass') }} / {{ getZoneStat('边缘区', 'total') }}</div></el-card></el-col>
     </el-row>
 
     <el-card style="margin-top: 12px">
@@ -61,21 +61,30 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
+import { getSiteColors8 } from '../../../utils/chart-bar'
 import { analysisApi } from '../../../api/analysis'
 
 const props = defineProps<{ params: string[]; loading: boolean; waferData: any; waferError?: string | null; fileId?: number }>()
 const emit = defineEmits<{ load: [param: string, colorBy: string]; loadGlobal: [colorBy: string] }>()
-const { colors } = useEChartsTheme()
+const { colors, isDark } = useEChartsTheme()
 
 const localParam = ref('')
 const localColorBy = ref('result')
 const localHeight = ref(550)
 const localShowEdge = ref(true)
 const zonalData = ref<any>(null)
-const COLORS_WAFER_SITE_8 = ['#2ECC71', '#3498DB', '#9B59B6', '#E67E22', '#1ABC9C', '#F39C12', '#E74C3C', '#34495E']
+
+/**
+ * Pass/Fail/分区色（双主题）。night 经 CVD 色盲模拟验证：
+ * Pass 蓝 #4facfe / Fail 橙 #ff9f43 为主色对（protan+deutan ΔE≥18），
+ * 分区 绿/金/粉 与主色对全部 ΔE≥15；light 保持原值。
+ */
+const waferColors = computed(() => isDark.value
+  ? { pass: '#4facfe', fail: '#ff9f43', zoneCenter: '#38ef7d', zoneMid: '#fdd835', zoneEdge: '#fb7185' }
+  : { pass: '#2ECC71', fail: '#E74C3C', zoneCenter: '#2ECC71', zoneMid: '#F39C12', zoneEdge: '#E74C3C' })
 
 function getZoneYield(name: string): string { const zone = zonalData.value?.zones?.find((z: any) => z.name === name); return zone ? zone.yield.toFixed(1) : '-' }
 function getZoneStat(name: string, key: string): string | number { const zone = zonalData.value?.zones?.find((z: any) => z.name === name); return zone ? (zone[key] ?? '-') : '-' }
@@ -102,12 +111,12 @@ function buildOption() {
     const siteMap = new Map<string, any[]>()
     for (const p of pts) { const g = p.color_group || 'Unknown'; if (!siteMap.has(g)) siteMap.set(g, []); siteMap.get(g)!.push(p) }
     Array.from(siteMap.keys()).sort().forEach((siteName, idx) => {
-      series.push({ name: siteName, type: 'scatter', symbol: 'rect', symbolSize: [8, 8], data: siteMap.get(siteName)!.map((p: any) => ({ value: [p.x, p.y], serial: p.serial, bin: p.bin, site: p.site, status: p.status })), itemStyle: { color: COLORS_WAFER_SITE_8[idx % COLORS_WAFER_SITE_8.length], opacity: 0.9 } })
+      series.push({ name: siteName, type: 'scatter', symbol: 'rect', symbolSize: [8, 8], data: siteMap.get(siteName)!.map((p: any) => ({ value: [p.x, p.y], serial: p.serial, bin: p.bin, site: p.site, status: p.status })), itemStyle: { color: getSiteColors8(isDark.value)[idx % 8], opacity: 0.9 } })
     })
   } else {
     const toPt = (p: any) => ({ value: [p.x, p.y], serial: p.serial, bin: p.bin, site: p.site, status: p.status })
-    series.push({ name: 'Pass', type: 'scatter', symbol: 'rect', symbolSize: [8, 8], data: pts.filter((p: any) => p.status === 'Pass').map(toPt), itemStyle: { color: '#2ECC71', opacity: 0.9 } })
-    series.push({ name: 'Fail', type: 'scatter', symbol: 'rect', symbolSize: [8, 8], data: pts.filter((p: any) => p.status === 'Fail').map(toPt), itemStyle: { color: '#E74C3C', opacity: 0.95 } })
+    series.push({ name: 'Pass', type: 'scatter', symbol: 'rect', symbolSize: [8, 8], data: pts.filter((p: any) => p.status === 'Pass').map(toPt), itemStyle: { color: waferColors.value.pass, opacity: 0.9 } })
+    series.push({ name: 'Fail', type: 'scatter', symbol: 'rect', symbolSize: [8, 8], data: pts.filter((p: any) => p.status === 'Fail').map(toPt), itemStyle: { color: waferColors.value.fail, opacity: 0.95 } })
   }
 
   if (wafer && localShowEdge.value) {
@@ -121,7 +130,7 @@ function buildOption() {
   if (colorBy === 'zone' && wafer && zonalData.value?.zones?.length) {
     const cx = wafer.center_x, cy = wafer.center_y, r = wafer.radius
     if (cx != null && cy != null && r > 0) {
-      for (const zd of [{ name: '中心区', ratio: 1.0 / 3.0, color: '#2ECC71' }, { name: '中间区', ratio: 2.0 / 3.0, color: '#F39C12' }, { name: '边缘区', ratio: 1.0, color: '#E74C3C' }]) {
+      for (const zd of [{ name: '中心区', ratio: 1.0 / 3.0, color: waferColors.value.zoneCenter }, { name: '中间区', ratio: 2.0 / 3.0, color: waferColors.value.zoneMid }, { name: '边缘区', ratio: 1.0, color: waferColors.value.zoneEdge }]) {
         const pts2: number[][] = []; const actualR = r * zd.ratio; for (let i = 0; i < 120; i++) { const a = (2 * Math.PI * i) / 120; pts2.push([cx + actualR * Math.cos(a), cy + actualR * Math.sin(a)]) }
         series.push({ name: zd.name, type: 'scatter', symbol: 'circle', symbolSize: 2, data: pts2.map(pt => ({ value: pt })), itemStyle: { color: zd.color, opacity: 0.6 }, silent: true, z: 1 })
       }
@@ -131,7 +140,7 @@ function buildOption() {
   const stats = data.stats || {}; const yieldRate = pts.length > 0 ? ((100 * (stats.pass_count || 0)) / pts.length).toFixed(1) : '0.0'
   return {
     title: { text: 'Wafer Map', subtext: `Total: ${pts.length} | Yield: ${yieldRate}%`, left: 'center' },
-    tooltip: { trigger: 'item', formatter: (p: any) => { if (!p.value || !Array.isArray(p.value)) return p.name; const d = p.data; let h = `<b>${d.status || p.seriesName}</b><br/>X: ${p.value[0]} | Y: ${p.value[1]}<br/>`; if (d.serial != null) h += `Serial: ${d.serial}<br/>`; if (d.bin != null) h += `Bin: ${d.bin}<br/>`; if (d.site != null) h += `Site: ${d.site}<br/>`; return h }, backgroundColor: 'rgba(255,255,255,0.95)', borderColor: '#ccc', textStyle: { color: '#333' }, extraCssText: 'box-shadow:0 2px 8px rgba(0,0,0,0.15);border-radius:4px;padding:8px 12px;' },
+    tooltip: { trigger: 'item', formatter: (p: any) => { if (!p.value || !Array.isArray(p.value)) return p.name; const d = p.data; let h = `<b>${d.status || p.seriesName}</b><br/>X: ${p.value[0]} | Y: ${p.value[1]}<br/>`; if (d.serial != null) h += `Serial: ${d.serial}<br/>`; if (d.bin != null) h += `Bin: ${d.bin}<br/>`; if (d.site != null) h += `Site: ${d.site}<br/>`; return h }, backgroundColor: colors.value.tooltipBg, borderColor: colors.value.tooltipBorder, textStyle: { color: colors.value.tooltipText }, extraCssText: 'box-shadow:0 2px 8px rgba(0,0,0,0.15);border-radius:4px;padding:8px 12px;' },
     legend: { data: series.map((s: any) => s.name), bottom: 10, type: 'scroll', textStyle: { color: tc } },
     toolbox: { feature: { saveAsImage: { title: '保存', pixelRatio: 2 }, dataZoom: { title: { zoom: '缩放', back: '还原' } }, restore: { title: '还原' } }, right: 20, top: 20 },
     grid: { left: 50, right: 60, top: 60, bottom: 50 },

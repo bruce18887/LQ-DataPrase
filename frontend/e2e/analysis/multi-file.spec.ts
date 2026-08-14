@@ -128,6 +128,94 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
     expect(legend).not.toMatch(/良率对比/)
   })
 
+  test('切换范围类型 → 图表 X 轴范围随之变化（带规格限参数，回归 2026-08-13）', async ({ page }) => {
+    test.slow()
+    await enterMultiFile(page)
+    await pickFiles(page, [RECOMMENDED.buyoff[0], RECOMMENDED.buyoff[1]])
+    await page.waitForResponse(
+      (r) => r.url().includes('/analysis/multi_lot/') && r.status() < 500,
+      { timeout: 25_000 },
+    )
+    await expect(page.locator(`${TAB} .chart-wrapper svg`)).toBeVisible({ timeout: 15_000 })
+
+    // 选带规格限参数——无规格限参数下各 range_type 范围本就不同；
+    // 带规格限窄分布参数才是旧 bug 场景（后端曾把范围扩展到规格限，
+    // 5 种类型 X 轴完全相同）
+    const limitsParam = await selectLimitsParam(page)
+    expect(limitsParam, 'BUYOFF 共有参数中应存在含规格限的参数').not.toBeNull()
+
+    const readAxisSpan = async (): Promise<number | null> => {
+      const x = await page.evaluate(() => {
+        const el = document.querySelector('.multi-file-tab .chart-wrapper .chart-container') as any
+        const xAxis = el?.__echartsInstance__?.getOption?.()?.xAxis?.[0]
+        if (xAxis == null || xAxis.min == null || xAxis.max == null) return null
+        return Number(xAxis.max) - Number(xAxis.min)
+      })
+      return x
+    }
+
+    const switchRange = async (label: string): Promise<number | null> => {
+      const rtText = page.locator('#multi-range-type')
+        .locator('xpath=ancestor::*[contains(@class,"el-select__wrapper")][1]')
+      await rtText.click()
+      await page.locator('.el-select-dropdown__item:visible').filter({ hasText: label }).first().click()
+      // 切换后等待带 range_type 的请求落地（R2：predicate 精确匹配请求体）
+      await page.waitForResponse(
+        (r) =>
+          r.url().includes('/analysis/multi_lot/') &&
+          r.request().method() === 'POST' &&
+          (r.request().postData() || '').includes('"param"') &&
+          r.status() < 500,
+        { timeout: 25_000 },
+      )
+      await page.waitForTimeout(300)
+      return readAxisSpan()
+    }
+
+    const s3 = await switchRange('3 Sigma (S3)')
+    const s6 = await switchRange('6 Sigma (S6)')
+    const rdl = await switchRange('Spec Limits (RDL)')
+    expect(s3, 'S3 X 轴范围应可读').not.toBeNull()
+    expect(s6, 'S6 X 轴范围应可读').not.toBeNull()
+    expect(rdl, 'RDL X 轴范围应可读').not.toBeNull()
+    // 修复前：范围被规格限扩展吞成同一值 → 三者相等必失败
+    expect(s6!, 'S3 与 S6 的 X 轴跨度应不同').not.toBeCloseTo(s3!, 6)
+    expect(rdl!, 'S6 与 RDL 的 X 轴跨度应不同').not.toBeCloseTo(s6!, 6)
+  })
+
+  test('先切范围类型再选文件：合并请求携带所选 range_type，图表按该类型渲染（回归 2026-08-13）', async ({ page }) => {
+    test.slow()
+    await enterMultiFile(page)
+
+    // 先切范围类型到 S6（此时未选文件，不触发请求，只更新 store）
+    const rtText = page.locator('#multi-range-type')
+      .locator('xpath=ancestor::*[contains(@class,"el-select__wrapper")][1]')
+    await rtText.click()
+    await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '6 Sigma (S6)' }).first().click()
+    await expect(rtText).toContainText('6 Sigma')
+
+    // 合并请求必须携带 range_type=S6（修复前缺该字段 → 后端默认 S4，
+    // 下拉显示 S6 但图表按 S4 画，切换看起来不生效）
+    const distResp = page.waitForResponse(
+      (r) =>
+        r.url().includes('/analysis/multi_lot/') &&
+        r.request().method() === 'POST' &&
+        (r.request().postData() || '').includes('"range_type":"S6"') &&
+        r.status() < 500,
+      { timeout: 25_000 },
+    )
+    await pickFiles(page, [RECOMMENDED.buyoff[0], RECOMMENDED.buyoff[1]])
+    await distResp
+
+    // 图表 X 轴下界应为 S6 范围（Serial_No: mean−6σ ≈ −4239），而非 S4（≈ −2438）
+    await expect(page.locator(`${TAB} .chart-wrapper svg`)).toBeVisible({ timeout: 15_000 })
+    const axisMin = await page.evaluate(() => {
+      const el = document.querySelector('.multi-file-tab .chart-wrapper .chart-container') as any
+      return el?.__echartsInstance__?.getOption?.()?.xAxis?.[0]?.min ?? null
+    })
+    expect(axisMin, 'X 轴下界应为 S6 范围（≈-4239），回退 S4 时为 ≈-2438').toBeLessThan(-3000)
+  })
+
   test('自定义图例名 → 图表图例随之更新', async ({ page }) => {
     test.slow()
     await enterMultiFile(page)

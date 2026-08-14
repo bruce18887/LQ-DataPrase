@@ -17,7 +17,24 @@
         <el-row :gutter="16">
           <el-col :span="8">
             <div class="uph-metric uph-metric-primary">
-              <div class="uph-metric-label">UPH</div>
+              <div class="uph-metric-label">
+                UPH
+                <el-tooltip placement="top" :width="340">
+                  <template #content>
+                    <div class="uph-helper">
+                      <div class="uph-helper__title">UPH ＝ 每小时产出单元数</div>
+                      <div class="uph-helper__formula">UPH ＝ 测试总数量 ÷ 总耗时 × 3600</div>
+                      <div v-if="data?.site_count" class="uph-helper__formula">
+                        总耗时 ＝ 各单元测试时间之和 ÷ {{ data.site_count }}（并行站点模型）
+                      </div>
+                      <div v-if="helperSourceText" class="uph-helper__source">
+                        {{ helperSourceText }}
+                      </div>
+                    </div>
+                  </template>
+                  <el-icon class="uph-metric-label__help"><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </div>
               <div class="uph-metric-value">{{ data.uph.toLocaleString() }}</div>
               <div class="uph-metric-unit">Units/Hour</div>
             </div>
@@ -85,6 +102,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { QuestionFilled } from '@element-plus/icons-vue'
 import { analysisApi } from '../../../api/analysis'
 
 interface UphSiteData {
@@ -117,12 +135,29 @@ const loading = ref(false)
 const error = ref(false)
 const data = ref<UphData | null>(null)
 
-// Source-aware tag: column=自动检测, batch=批次汇总, otherwise 手动输入
+// Source-aware tag: batch=批次汇总, manual*=手动输入, 其余非空=自动检测列
+// （后端实际取值 'Test_Time (ms→s)' / 'Test_Time' / 'manual (1.2s)' / 'unavailable' / 'batch'，
+//   此前只认 'column' 导致单文件自动检测被误标成「手动输入」）
 const sourceTag = computed<{ type: 'success' | 'primary' | 'warning'; label: string }>(() => {
   const source = data.value?.source
-  if (source === 'column') return { type: 'success', label: '自动检测' }
   if (source === 'batch') return { type: 'primary', label: '批次汇总' }
-  return { type: 'warning', label: '手动输入' }
+  if (source && source.startsWith('manual')) return { type: 'warning', label: '手动输入' }
+  if (source && source !== 'unavailable') return { type: 'success', label: '自动检测' }
+  return { type: 'warning', label: '无测试时间' }
+})
+
+/** helper 里「测试时间来源」说明行：按后端 source 字段区分手动/自动/批次 */
+const helperSourceText = computed(() => {
+  const source = data.value?.source ?? ''
+  if (source === 'batch') return '测试时间来源：批次汇总数据'
+  if (source.startsWith('manual')) {
+    const sec = source.replace(/^manual\s*\(?/, '').replace(/s?\)?$/, '')
+    return `测试时间来源：手动输入每单元测试时间 ${sec}s`
+  }
+  if (source && source !== 'unavailable') {
+    return `测试时间来源：自动检测 ${source} 列（元数据单位 ms 时已换算为秒）`
+  }
+  return '测试时间可自动检测（Test_Time 等列）或手动输入'
 })
 
 function formatTime(seconds: number): string {
@@ -207,6 +242,28 @@ watch(() => props.fileId, () => {
   font-size: 12px;
   opacity: 0.85;
   margin-bottom: 4px;
+}
+
+.uph-metric-label__help {
+  margin-left: 2px;
+  vertical-align: -2px;
+  cursor: help;
+  opacity: 0.85;
+}
+
+.uph-helper__title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.uph-helper__formula {
+  line-height: 1.7;
+}
+
+.uph-helper__source {
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.85;
 }
 
 .uph-metric-value {

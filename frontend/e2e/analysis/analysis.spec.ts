@@ -151,15 +151,16 @@ test.describe('@p1 单参数分析', { tag: ['@p1', '@analysis'] }, () => {
         fatalErrors.push(err.message)
       }
     })
-    // 触发一次 histogram 重请求, 让 ECharts 重新 setOption 验证 axisPointer fix
-    const histResp = page.waitForResponse(
-      (r) => r.url().includes('/analysis/histogram/') && r.status() < 500,
+    // 关闭→重开 QQ 图触发的是 qqplot 重载（histogram 只在参数/配置变化时
+    // 重发），等 qqplot 响应落地后 ECharts 重新 setOption 验证 axisPointer fix
+    const qqResp = page.waitForResponse(
+      (r) => r.url().includes('/analysis/qqplot/') && r.status() < 500,
       { timeout: 20_000 },
     )
     await page.getByText('显示QQ图').click() // 关闭
     await page.waitForTimeout(300)
     await page.getByText('显示QQ图').click() // 重新开启
-    await histResp
+    await qqResp
     await page.waitForTimeout(500)
     expect(fatalErrors, '页面运行时不应出现 axisPointer TypeError').toEqual([])
   })
