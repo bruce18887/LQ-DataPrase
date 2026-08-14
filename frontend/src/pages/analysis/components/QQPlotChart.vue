@@ -26,6 +26,7 @@ import { computed } from 'vue'
 import { Loading, InfoFilled } from '@element-plus/icons-vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
+import { formatAxisValue } from '../../../utils/chart-bar'
 import OutlierHintBar from './OutlierHintBar.vue'
 
 const props = defineProps<{
@@ -37,7 +38,7 @@ const props = defineProps<{
   outlierHandling?: 'clip' | 'exclude' | 'off'
 }>()
 
-const { colors } = useEChartsTheme()
+const { colors, isDark } = useEChartsTheme()
 
 const isEmptyResult = computed(() => {
   if (!props.result) return false
@@ -49,6 +50,13 @@ const isEmptyResult = computed(() => {
 // 上万散点不再产生上万 DOM 节点，避免拖垮渲染与交互（与 SerialChart 一致）
 const pointCount = computed(() => props.result?.theoretical_quantiles?.length ?? 0)
 const isLarge = computed(() => pointCount.value >= 5000)
+
+// 图表布局常量（与下方 CSS .qqplot-container 的 height: 400px 同步）：
+// Y 轴滑动块必须与 grid 同源定位——top 对齐 grid 顶，高度 = 容器高 − top − bottom，
+// 否则滑块与 Y 轴长度不一致
+const GRID_TOP = 50
+const GRID_BOTTOM = 40
+const CHART_HEIGHT = 400
 
 function buildOption() {
   const r = props.result
@@ -93,7 +101,17 @@ function buildOption() {
     if (t > dataMax) dataMax = t
     if (o > dataMax) dataMax = o
   }
-  const diagonal = [[dataMin, dataMin], [dataMax, dataMax]]
+  // 参考线 = 正态拟合线 y = intercept + slope·x（probplot 最小二乘拟合），
+  // 而非 y=x——理论分位数是标准正态，只有均值 0/方差 1 的数据才贴合 y=x；
+  // 真实数据须随均值/方差平移旋转（常量数据 slope/intercept 为 null → 回退 y=x）
+  let diagonal: number[][] = [[dataMin, dataMin], [dataMax, dataMax]]
+  const fitSlope = r.slope
+  const fitIntercept = r.intercept
+  if (typeof fitSlope === 'number' && typeof fitIntercept === 'number') {
+    const x0 = filteredTheoretical[0]
+    const x1 = filteredTheoretical[filteredTheoretical.length - 1]
+    diagonal = [[x0, fitIntercept + fitSlope * x0], [x1, fitIntercept + fitSlope * x1]]
+  }
 
   const rSquared = r.r_squared
   const isNormal = r.is_normal === true
@@ -103,16 +121,18 @@ function buildOption() {
     graphic.push({
       type: 'text', left: 10, top: 32, z: 100,
       style: {
-        text: `R² = ${rSquared.toFixed(4)}`, fill: tc, fontSize: 13, fontWeight: 'bold',
-        backgroundColor: 'rgba(255,255,255,0.75)', padding: [4, 8], borderRadius: 4,
+        text: `R² = ${rSquared.toFixed(4)}`, fill: colors.value.tooltipText, fontSize: 13, fontWeight: 'bold',
+        backgroundColor: colors.value.tooltipBg, padding: [4, 8], borderRadius: 4,
       },
     })
   }
   graphic.push({
     type: 'text', right: 10, top: 32, z: 100,
     style: {
-      text: isNormal ? '正态' : '非正态', fill: '#ffffff', fontSize: 12, fontWeight: 'bold',
-      backgroundColor: isNormal ? '#4CAF50' : '#F44336', padding: [4, 10], borderRadius: 4,
+      // 正态徽章：红-绿对在红绿色盲下不可分（deutan ΔE 17.5），改用语义 success/error 色；
+      // night 深底用深色文字（白字对比度仅 2.5-2.7 不达标）
+      text: isNormal ? '正态' : '非正态', fill: isDark.value ? '#1a1a2e' : '#ffffff', fontSize: 12, fontWeight: 'bold',
+      backgroundColor: isNormal ? (isDark.value ? '#14b8a6' : '#047857') : (isDark.value ? '#fb7185' : '#b91c1c'), padding: [4, 10], borderRadius: 4,
     },
   })
 
@@ -121,22 +141,49 @@ function buildOption() {
     animation: !isLarge.value,
     title: {
       text: `${props.param} QQ图`, left: 'center', top: 6,
-      textStyle: { fontSize: 14, fontWeight: 'bold', color: tc },
+      textStyle: { fontSize: 15, fontWeight: 'bold', color: tc },
     },
     tooltip: {
       trigger: 'item',
+      backgroundColor: colors.value.tooltipBg,
+      borderColor: colors.value.tooltipBorder,
+      textStyle: { color: colors.value.tooltipText },
       formatter: (p: any) =>
         `理论分位数: ${Number(p.value[0]).toFixed(4)}<br/>观测值: ${Number(p.value[1]).toFixed(4)}`,
     },
     toolbox: { feature: { saveAsImage: { name: `${props.param}_QQ图` } } },
-    grid: { top: 50, bottom: 40, left: 55, right: 20 },
+    // grid.right 预留右侧 Y 轴滑动块空间（宽 30 + 边距）
+    grid: { top: GRID_TOP, bottom: GRID_BOTTOM, left: 55, right: 40 },
+    // Y 轴数据缩放（滑块 + 滚轮）：观测值区间局部放大，定位离群点/区间
+    // 形态；双主题：filler/手柄跟随主题主色（亮=蓝 #2563eb、暗=金 #fdd835）；
+    // 滑块与 grid 同源定位——top 对齐、高度 = 容器高 − top − bottom
+    dataZoom: [
+      {
+        type: 'slider',
+        yAxisIndex: 0,
+        right: 4,
+        top: GRID_TOP,
+        height: CHART_HEIGHT - GRID_TOP - GRID_BOTTOM,
+        backgroundColor: 'transparent',
+        borderColor: colors.value.axisLineColor,
+        fillerColor: `${colors.value.seriesColors[0]}26`,
+        handleStyle: { color: colors.value.seriesColors[0], borderColor: 'transparent' },
+        moveHandleStyle: { color: colors.value.seriesColors[0] },
+        textStyle: { color: colors.value.subtextColor, fontSize: 10 },
+      },
+      { type: 'inside', yAxisIndex: 0 },
+    ],
     xAxis: {
       type: 'value', name: '理论分位数', nameLocation: 'middle', nameGap: 30,
-      nameTextStyle: { color: tc }, axisLabel: { color: tc },
+      nameTextStyle: { color: tc },
+      axisLine: { lineStyle: { color: colors.value.axisLineColor } },
+      axisLabel: { fontSize: 9, formatter: formatAxisValue, color: tc },
     },
     yAxis: {
       type: 'value', name: '观测值', nameLocation: 'middle', nameGap: 45,
-      nameTextStyle: { color: tc }, axisLabel: { color: tc },
+      nameTextStyle: { color: tc },
+      axisLine: { lineStyle: { color: colors.value.axisLineColor } },
+      axisLabel: { fontSize: 9, formatter: formatAxisValue, color: tc },
     },
     graphic,
     series: [

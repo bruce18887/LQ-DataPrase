@@ -1,4 +1,4 @@
-import { type Ref, watch, computed } from 'vue'
+import { type Ref, ref, watch, computed } from 'vue'
 import { analysisApi } from '../../../api/analysis'
 import { useAsyncData } from '../../../composables/useAsyncData'
 
@@ -7,6 +7,7 @@ export function useBoxPlot(
   selectedParam: Ref<string>,
   groupBy: Ref<string>,
   enabled?: Ref<boolean>,
+  dataOnlyBin1: Ref<boolean> = ref(false),
 ) {
   const { loading, data: boxPlotData, run } = useAsyncData<any>({
     silent: true,
@@ -17,7 +18,7 @@ export function useBoxPlot(
     if (!fileId || !selectedParam.value) return
     if (enabled && !enabled.value) return
     await run(
-      () => analysisApi.getBoxPlot(fileId, [selectedParam.value], groupBy.value || undefined),
+      () => analysisApi.getBoxPlot(fileId, [selectedParam.value], groupBy.value || undefined, dataOnlyBin1.value),
       (d: any) => d.results ?? d,
     )
   }
@@ -32,6 +33,7 @@ export function useBoxPlot(
   // Auto-load on dependency change (same pattern as useHistogram)
   watch(selectedParam, () => loadBoxPlot())
   watch(groupBy, () => { if (selectedParam.value) loadBoxPlot() })
+  watch(dataOnlyBin1, () => { if (selectedParam.value) loadBoxPlot() })
   watch(getFileId, () => { if (getFileId() && selectedParam.value) loadBoxPlot() })
   if (enabled) {
     watch(enabled, (val) => { if (val && selectedParam.value) loadBoxPlot() })

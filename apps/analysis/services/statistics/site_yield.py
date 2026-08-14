@@ -33,6 +33,11 @@ def compute_site_stats(site_series: pd.Series, site_index, lower_limit: float, u
     site_data_list = []
     # Sort site values: numeric first (sorted numerically), then string (sorted alphabetically)
 
+    def _fmt_count(count: int, total: int) -> str:
+        """数量(百分比)格式，百分比 3 位小数：3(0.181%)"""
+        pct = (count / total * 100) if total > 0 else 0.0
+        return f'{count}({pct:.3f}%)'
+
     for site in sorted(totals.index, key=site_sort_key):
         total = int(totals.get(site, 0))
         fail_count = int(fail_counts.get(site, 0))
@@ -41,17 +46,24 @@ def compute_site_stats(site_series: pd.Series, site_index, lower_limit: float, u
         yield_rate = ((total - fail_count) / total * 100) if total > 0 else 100
         site_data_list.append({
             'Site': f'Site{site}',
-            'Yield': f'{yield_rate:.2f}%',
-            'FailCount': fail_count,
-            'ExceedMin': exceed_min,
-            'ExceedMax': exceed_max,
+            # Yield: 百分比 3 位小数 + 括号内总数量：99.508%(1626)
+            'Yield': f'{yield_rate:.3f}%({total})',
+            # Fail/<Min/>Max: 数量(百分比)格式：8(0.493%)
+            'FailCount': _fmt_count(fail_count, total),
+            'ExceedMin': _fmt_count(exceed_min, total),
+            'ExceedMax': _fmt_count(exceed_max, total),
+            # 数字字段供前端行样式等逻辑使用（展示用字符串在上面）
+            'FailCountNum': fail_count,
+            'TotalNum': total,
         })
     site_data_list.append({
         'Site': 'ALL Site',
-        'Yield': f'{yield_all:.2f}%',
-        'FailCount': fail_all,
-        'ExceedMin': int(exceed_mins.sum()),
-        'ExceedMax': int(exceed_maxs.sum()),
+        'Yield': f'{yield_all:.3f}%({total_all})',
+        'FailCount': _fmt_count(fail_all, total_all),
+        'ExceedMin': _fmt_count(int(exceed_mins.sum()), total_all),
+        'ExceedMax': _fmt_count(int(exceed_maxs.sum()), total_all),
+        'FailCountNum': fail_all,
+        'TotalNum': total_all,
     })
     return site_data_list
 

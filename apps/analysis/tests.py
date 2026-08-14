@@ -201,6 +201,43 @@ class MultiFileAnalysisTests(SimpleTestCase):
         # bin，multi-file.spec.ts「X 轴固定 24 个坐标」据此失配
         self.assertEqual(len(out['bin_centers']), 26)
 
+    def test_range_type_not_expanded_to_spec_limits(self):
+        """回归 2026-08-13：multi_lot 曾无条件把 bin 范围扩展到全局规格限
+        （global_lsl/global_usl），带规格限窄分布参数下 5 种 range_type 的
+        X 轴完全相同——与单文件 histogram 的 resolve_limits 语义不一致，
+        切换范围类型看起来不生效。修复后各 range_type 范围应各不相同。"""
+        import numpy as np
+        from apps.analysis.services.data_services import (
+            compute_multi_lot_distribution,
+        )
+
+        rng = np.random.default_rng(42)
+        # 窄分布、规格限 0~2 包住数据（σ≈0.05 → ±6σ 仍在规格限内）
+        s1 = pd.Series(rng.normal(1.0, 0.05, 200))
+        s2 = pd.Series(rng.normal(1.02, 0.05, 200))
+        df1 = pd.DataFrame({'A': s1})
+        df2 = pd.DataFrame({'A': s2})
+        datasets = {
+            '1': {'df': df1, 'metadata': {'mins': {'A': '0'}, 'maxs': {'A': '2'}},
+                  'series': s1, 'name': 'f1', 'file_id': 1},
+            '2': {'df': df2, 'metadata': {'mins': {'A': '0'}, 'maxs': {'A': '2'}},
+                  'series': s2, 'name': 'f2', 'file_id': 2},
+        }
+        spans = {}
+        for rt in ('RDL', 'DR', 'S3', 'S4', 'S6'):
+            out = compute_multi_lot_distribution(
+                datasets, [s1, s2], 'A', range_type=rt)
+            bc = out['bin_centers']
+            spans[rt] = max(bc) - min(bc)
+        # 修复前：全部被规格限扩展吞成同一范围 → 三个断言必失败
+        self.assertNotEqual(spans['S3'], spans['S4'])
+        self.assertNotEqual(spans['S4'], spans['S6'])
+        self.assertNotEqual(spans['S3'], spans['RDL'])
+        # S3 是窄分布（±3σ ≈ 0.3 跨度），RDL 是规格限（0~2）——S3 明显更窄
+        self.assertLess(spans['S3'], spans['RDL'])
+        # DR 是纯数据范围（窄），不应被扩展到规格限
+        self.assertLess(spans['DR'], 0.5)
+
 
 class BoxPlotStatsDtypeToleranceTests(SimpleTestCase):
     """Lock down ``compute_boxplot_stats`` behaviour on non-float dtypes.
@@ -847,6 +884,43 @@ class ChartConfigFilterTests(SimpleTestCase):
         site_names = [s['Site'] for s in resp.data['site_data']]
         self.assertEqual(site_names, ['Site1', 'ALL Site'])  # Site2 gone
 
+    def test_site_stats_display_format(self):
+        """site_stats 展示格式：Yield=百分比3位小数(总数)、Fail/<Min/>Max=数量(百分比3位)。
+
+        回归：用户指定格式（2026-08-13）——Yield 改为 `100.000%(5865)`，
+        Fail/<Min/>Max 改为 `3(0.181%)`；数字字段 FailCountNum/TotalNum 保留供
+        前端行样式等逻辑使用。
+        """
+        from apps.analysis.views import StatisticsViewSet
+        df = pd.DataFrame({
+            'serial': list(range(101, 111)),
+            'SW_Bin': [1] * 10,
+            'Site': [1, 1, 1, 1, 1, 2, 2, 2, 2, 2],
+            'Param0': [10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8, 10.9, 11.0],
+        })
+        factory, force_authenticate, restore = \
+            StaleParamAcrossFileSwitchTests._patched_view(df, metadata=self.METADATA)
+        self.addCleanup(restore)
+        request = factory.post('/api/v1/statistics/site_stats/', {
+            'file_id': 1, 'param': 'Param0',
+        }, format='json')
+        force_authenticate(request, user=types.SimpleNamespace(
+            pk=1, is_authenticated=True, is_active=True, is_anonymous=False,
+            is_staff=False, is_superuser=False))
+        resp = StatisticsViewSet.as_view({'post': 'site_stats'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        import re
+        for row in resp.data['site_data']:
+            self.assertRegex(row['Yield'], r'^\d+\.\d{3}%\(\d+\)$', row)
+            self.assertRegex(row['FailCount'], r'^\d+\(\d+\.\d{3}%\)$', row)
+            self.assertRegex(row['ExceedMin'], r'^\d+\(\d+\.\d{3}%\)$', row)
+            self.assertRegex(row['ExceedMax'], r'^\d+\(\d+\.\d{3}%\)$', row)
+            self.assertIsInstance(row['FailCountNum'], int)
+            self.assertIsInstance(row['TotalNum'], int)
+        # Param0 范围 [8.0, 14.3]：10 行全部在限内 → yield 100.000%(10)
+        self.assertEqual(resp.data['site_data'][0]['Yield'], '100.000%(5)')
+
     def test_serial_distribution_data_only_bin1(self):
         from apps.analysis.views import AnalysisViewSet
         request = self._post({'file_id': 1, 'param': 'Param0',
@@ -865,6 +939,93 @@ class ChartConfigFilterTests(SimpleTestCase):
         self.assertEqual(resp.status_code, 200, resp.content)
         total = sum(len(s['data']) for s in resp.data['series_data'])
         self.assertEqual(total, 10)
+
+    # ── qqplot / boxplot row filter ─────────────────────────────────
+
+    def test_qqplot_data_only_bin1(self):
+        """data_only_bin1 narrows the QQ plot to pass-bin rows (n = 8)."""
+        from apps.analysis.views import AnalysisViewSet
+        request = self._post({'file_id': 1, 'param': 'Param0',
+                              'data_only_bin1': True})
+        resp = AnalysisViewSet.as_view({'post': 'qqplot'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.data['n'], 8)  # 10 rows − 2 fail rows
+
+    def test_qqplot_full_frame_keeps_all_points(self):
+        """Without the switch the QQ plot still covers the whole frame."""
+        from apps.analysis.views import AnalysisViewSet
+        request = self._post({'file_id': 1, 'param': 'Param0'})
+        resp = AnalysisViewSet.as_view({'post': 'qqplot'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.data['n'], 10)
+
+    def test_qqplot_returns_fit_params(self):
+        """QQ plot response carries the probplot fit line parameters:
+        intercept≈data mean, slope≈data std (the front end draws the
+        reference line as y = intercept + slope·x instead of y=x, which
+        only fits zero-mean/unit-variance data)."""
+        from apps.analysis.views import AnalysisViewSet
+        request = self._post({'file_id': 1, 'param': 'Param0'})
+        resp = AnalysisViewSet.as_view({'post': 'qqplot'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        slope, intercept = resp.data['slope'], resp.data['intercept']
+        self.assertIsNotNone(slope)
+        self.assertIsNotNone(intercept)
+        # Param0 = 10.1..11.0 → mean ≈ 10.5, std ≈ 0.3
+        self.assertLess(abs(intercept - 10.5), 1)
+        self.assertLess(abs(slope - 0.3), 0.3)
+
+    def test_qqplot_constant_data_horizontal_fit_line(self):
+        """Constant data yields the horizontal fit line slope=0 /
+        intercept=const (the front end draws y = intercept + slope·x,
+        which degenerates to y = const — all points sit on it)."""
+        from apps.analysis.services.statistics.computations import compute_qqplot
+        result = compute_qqplot(pd.Series([5.0, 5.0, 5.0]))
+        self.assertEqual(result['slope'], 0.0)
+        self.assertEqual(result['intercept'], 5.0)
+        self.assertFalse(result['is_normal'])
+        # Short data path carries the fields (None — no fit computed)
+        short = compute_qqplot(pd.Series([1.0, 2.0]))
+        self.assertIsNone(short['slope'])
+        self.assertIsNone(short['intercept'])
+
+    def test_qqplot_data_only_bin1_empty_in_bin1_400(self):
+        """Param all-NaN inside Bin1 → existing param_no_valid_data 400,
+        never a 500 (filtering must happen before series extraction)."""
+        from apps.analysis.views import AnalysisViewSet
+        request = self._post({'file_id': 1, 'param': 'ParamBin1Empty',
+                              'data_only_bin1': True})
+        resp = AnalysisViewSet.as_view({'post': 'qqplot'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertEqual(resp.data.get('error'), 'param_no_valid_data')
+
+    def test_boxplot_data_only_bin1_overall_count(self):
+        """data_only_bin1 narrows the box plot overall stats (count = 8)."""
+        from apps.analysis.views import StatisticsViewSet
+        request = self._post({'file_id': 1, 'params': ['Param0'],
+                              'data_only_bin1': True})
+        resp = StatisticsViewSet.as_view({'post': 'boxplot'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.data['results']['Param0']['overall']['count'], 8)
+
+    def test_boxplot_data_only_bin1_by_bin_only_bin1(self):
+        """Grouped by bin, the filtered frame leaves only pass bin "1"
+        (fail rows are removed before grouping — consistent with the
+        histogram Bin1 mode)."""
+        from apps.analysis.views import StatisticsViewSet
+        request = self._post({'file_id': 1, 'params': ['Param0'],
+                              'data_only_bin1': True, 'group_by': 'bin'})
+        resp = StatisticsViewSet.as_view({'post': 'boxplot'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        by_bin = resp.data['results']['Param0']['by_bin']
+        self.assertEqual(set(by_bin.keys()), {'1'})
+        self.assertEqual(by_bin['1']['count'], 8)
 
 
 class SerialColumnPartIdFallbackTests(SimpleTestCase):

@@ -225,6 +225,11 @@ async function onFileChange() {
       only_low_cpk: analysisStore.onlyLowCpk,
       iqr_multiplier: analysisStore.iqrMultiplier,
     })
+    // 过期文件响应守卫：挂载时自动加载的第一个文件与用户手动选择并发时，
+    // 旧文件的慢响应（后到）不得用它自己的参数列表覆盖新文件的列表——
+    // 否则 selectedParam 会指向旧文件参数（如 BZJ 的 Part_No），后续
+    // boxplot/site_stats 等请求对该参数 400/500（参数不在新文件里）。
+    if (data.file_id !== selectedFileId.value) return
     const results = data.results as Record<string, any>
     // Some parsers (e.g. CTA8280F trailing comma) yield an unnamed column whose
     // empty string name flows through numeric_cols. Drop blanks so the param

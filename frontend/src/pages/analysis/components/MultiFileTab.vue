@@ -40,6 +40,7 @@
           variant="multi-file"
           v-model:chart-config="chartConfig"
           v-model:bar-width-percent="barWidthPercent"
+          :bar-width-max="barWidthMax"
           v-model:ignore-no-limit="ignoreNoLimit"
           :range-type="'RDL'"
         />
@@ -116,6 +117,7 @@ import { computed, watch, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useAnalysisStore } from '../../../stores/analysis'
 import { useMultiFile } from '../composables/useMultiFile'
+import { getMaxBarWidthPercent } from '../../../utils/chart-bar'
 import ChartConfigPanel from './ChartConfigPanel.vue'
 import ParamSelector from './ParamSelector.vue'
 import MultiFileChart from './MultiFileChart.vue'
@@ -136,6 +138,20 @@ const {
 } = storeToRefs(analysisStore)
 
 const { loading, paramsLoading, commonParams, lotData, lotParam, loadCommonParams, loadDistribution } = useMultiFile()
+
+// 柱宽 slider 上限：随文件数联动（N 系列并排柱组必须 ≤ bin 宽，否则贴限柱体
+// 越过 USL 线——回归 limit-line-cross）
+const barWidthMax = computed(() => {
+  const n = lotData.value?.lot_data?.length ?? 0
+  return getMaxBarWidthPercent(n > 1 ? n : 1)
+})
+// 文件数变化时把已超上限的柱宽 clamp 并回写 store
+watch(barWidthMax, (max) => {
+  if (barWidthPercent.value > max) {
+    barWidthPercent.value = max
+    analysisStore.multiBarWidthPercent = max
+  }
+})
 
 // 当前选中文件对象（保持下拉顺序）
 const selectedFileObjs = computed(() =>
@@ -234,8 +250,10 @@ const lotStats = computed(() => {
 })
 
 async function reloadParams() {
-  // 合并请求：loadCommonParams 的响应已含首个公共参数的分布（lotParam 标记）
-  await loadCommonParams(fileIds.value, ignoreNoLimit.value)
+  // 合并请求：loadCommonParams 的响应已含首个公共参数的分布（lotParam 标记）。
+  // 必须传当前 rangeType——后端合并分支无该参数时默认 S4，先切类型再选文件/
+  // URL 恢复场景下初始图表会与下拉不一致（2026-08-13 回归）
+  await loadCommonParams(fileIds.value, ignoreNoLimit.value, rangeType.value)
   // 选中项失效时回退到第一项
   if (commonParams.value.length === 0) {
     selectedParam.value = ''

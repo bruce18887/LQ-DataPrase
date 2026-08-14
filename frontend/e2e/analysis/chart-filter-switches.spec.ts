@@ -138,6 +138,105 @@ test.describe('@p1 图表配置数据筛选开关', { tag: ['@p1', '@analysis'] 
     await waitLoadingGone(page.locator(SINGLE))
   })
 
+  test('数值分布：勾选仅用Pass数据后 QQ 图请求携带开关且图表正常渲染', async ({ page }) => {
+    await gotoApp(page, '/analysis')
+    await selectAnalysisFile(page, RECOMMENDED.analysis)
+    await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
+    await waitLoadingGone(page.locator(SINGLE))
+
+    // 开启 QQ 图（首次请求无开关，为后续带开关的谓词铺垫）
+    await page.getByText('显示QQ图').click()
+    await expect
+      .poll(() => page.locator(`${SINGLE} svg`).count(), { timeout: 15_000 })
+      .toBeGreaterThanOrEqual(2)
+
+    const respPromise = page.waitForResponse(
+      (r) =>
+        r.url().includes('/analysis/qqplot/') &&
+        r.request().method() === 'POST' &&
+        r.request().postData()?.includes('"data_only_bin1":true') === true &&
+        r.status() < 500,
+      { timeout: 20_000 },
+    )
+    await toggleFilter(page, '仅用Pass数据(Bin1)')
+    const resp = await respPromise
+    expect(resp.request().postData() || '', 'QQ 图请求应携带 data_only_bin1').toContain('"data_only_bin1":true')
+    // 响应携带 probplot 拟合参数（前端画参考线 y = intercept + slope·x 用）
+    const qqBody = await resp.json()
+    expect(typeof qqBody.slope, 'qqplot 响应应携带 slope').toBe('number')
+    expect(typeof qqBody.intercept, 'qqplot 响应应携带 intercept').toBe('number')
+    await waitLoadingGone(page.locator(SINGLE))
+    await expect
+      .poll(() => page.locator(`${SINGLE} svg`).count(), { timeout: 15_000 })
+      .toBeGreaterThanOrEqual(2)
+
+    // 参考线是拟合线而非 y=x：DA35 首参数 Index_No 均值≈5000 → 参考线端点 y 必然 ≠ x
+    // （useChart 把 ECharts 实例挂载在容器 div 本身，属性即在其上）
+    const lineData = await page.locator('.qqplot-container[_echarts_instance_]').evaluate((el: any) =>
+      el.__echartsInstance__?.getOption?.()?.series?.[1]?.data ?? null,
+    )
+    expect(lineData, '参考线（series[1]）应存在').toBeTruthy()
+    expect(lineData[0][1], '参考线端点 y ≠ x（数据均值非 0，拟合线被抬升）').not.toBe(lineData[0][0])
+
+    // Y 轴 dataZoom：右侧滑块（slider）+ 滚轮（inside）作用于 yAxis 0，
+    // dispatch 缩放后 start/end 更新（注意：getOption() 每次返回新快照，
+    // 必须 dispatch 后再取，不能复用旧数组引用）
+    const zoomState = await page.locator('.qqplot-container[_echarts_instance_]').evaluate((el: any) => {
+      const inst = el.__echartsInstance__
+      const dz = inst?.getOption?.()?.dataZoom ?? []
+      inst?.dispatchAction?.({ type: 'dataZoom', dataZoomIndex: 0, start: 20, end: 60 })
+      const dz2 = inst?.getOption?.()?.dataZoom ?? []
+      const grid = (inst?.getOption?.()?.grid ?? [])[0] ?? {}
+      return {
+        count: dz.length,
+        firstType: dz[0]?.type ?? null,
+        yAxis: dz[0]?.yAxisIndex ?? null,
+        after: dz2[0]?.start ?? null,
+        // 滑块与 Y 轴同源定位：top 对齐 grid 顶，高度 = 容器高 − top − bottom
+        sliderTop: dz[0]?.top ?? null,
+        sliderHeight: dz[0]?.height ?? null,
+        gridTop: grid.top ?? null,
+        gridBottom: grid.bottom ?? null,
+        containerHeight: el.clientHeight,
+      }
+    })
+    expect(zoomState.count, '应配置 slider + inside 两个 dataZoom').toBeGreaterThanOrEqual(2)
+    expect(zoomState.firstType, '首个 dataZoom 应为 slider 滑块').toBe('slider')
+    expect(zoomState.yAxis, 'dataZoom 应作用于 Y 轴').toBe(0)
+    expect(zoomState.after, '拖动滑块后 dataZoom.start 应更新').toBe(20)
+    expect(zoomState.sliderTop, '滑块顶部应与 Y 轴（grid）顶部对齐').toBe(zoomState.gridTop)
+    expect(zoomState.sliderHeight, '滑块高度应与 Y 轴等长（容器高 − top − bottom）')
+      .toBe(zoomState.containerHeight - zoomState.gridTop - zoomState.gridBottom)
+  })
+
+  test('数值分布：勾选仅用Pass数据后箱线图请求携带开关且图表正常渲染', async ({ page }) => {
+    await gotoApp(page, '/analysis')
+    await selectAnalysisFile(page, RECOMMENDED.analysis)
+    await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
+    await waitLoadingGone(page.locator(SINGLE))
+
+    // 开启箱线图（首次请求无开关，GET query 断言 data_only_bin1=true）
+    await page.getByText('显示箱线图').click()
+    await expect
+      .poll(() => page.locator(`${SINGLE} .chart-wrapper--bottom svg`).count(), { timeout: 15_000 })
+      .toBeGreaterThanOrEqual(1)
+
+    const respPromise = page.waitForResponse(
+      (r) =>
+        r.url().includes('/statistics/boxplot/') &&
+        r.url().includes('data_only_bin1=true') &&
+        r.status() < 500,
+      { timeout: 20_000 },
+    )
+    await toggleFilter(page, '仅用Pass数据(Bin1)')
+    const resp = await respPromise
+    expect(resp.url(), '箱线图请求应携带 data_only_bin1').toContain('data_only_bin1=true')
+    await waitLoadingGone(page.locator(SINGLE))
+    await expect
+      .poll(() => page.locator(`${SINGLE} .chart-wrapper--bottom svg`).count(), { timeout: 15_000 })
+      .toBeGreaterThanOrEqual(1)
+  })
+
   test('全 Pass 文件（Gage）：勾选仅用Pass数据后参数列表不变', async ({ page }) => {
     await gotoApp(page, '/analysis')
     await selectAnalysisFile(page, RECOMMENDED.gage[0])
@@ -210,22 +309,31 @@ test.describe('@p1 柱宽设置生效', { tag: ['@p1', '@analysis'] }, () => {
     })
 
     const before = await readBar()
-    expect(before.opt).toBe('20%')
+    // 默认生效值 = min(20, 上限)——多系列文件上限 <20（CTA8280F 4 site → 18%）
+    expect(before.opt).toMatch(/^\d+%$/)
 
-    // 展开「更多」露出柱宽 slider，点击轨道 90% 处
+    // 展开「更多」露出柱宽 slider（第一个），End 键拖到上限
     await page.locator(`${SINGLE} .more-btn`).click()
-    const slider = page.locator(`${SINGLE} .el-slider`)
+    const slider = page.locator(`${SINGLE} .el-slider`).first()
     await expect(slider).toBeVisible({ timeout: 10_000 })
     const hint = page.locator(`${SINGLE} .config-section .value-hint`).first()
-    await expect(hint).toContainText('20%')
+    await expect(hint).toContainText(before.opt)
 
-    const runway = slider.locator('.el-slider__runway')
-    const rbox = (await runway.boundingBox())!
-    await runway.click({ position: { x: rbox.width * 0.9, y: rbox.height / 2 } })
+    const btn = slider.locator('.el-slider__button-wrapper')
+    await btn.click()
+    await page.keyboard.press('End')
 
-    // 值标签更新 + ECharts option barWidth 更新 + 实际柱宽像素变宽
-    await expect(hint).toContainText('90%', { timeout: 5_000 })
-    await expect.poll(() => readBar().then((s) => s.opt)).toBe('90%')
-    await expect.poll(() => readBar().then((s) => s.px)).toBeGreaterThan((before.px ?? 0) * 2)
+    // 值标签更新 + ECharts option barWidth 与 slider 值同步（上限随系列数/重合度
+    // 联动，读实际上限而非硬编码；多系列场景上限可能 <20，故不断言像素变大方向）
+    await expect
+      .poll(async () => await btn.getAttribute('aria-valuemax'), { timeout: 5_000 })
+      .not.toBeNull()
+    const sliderMax = await btn.getAttribute('aria-valuemax')
+    await expect
+      .poll(async () => await btn.getAttribute('aria-valuenow'), { timeout: 5_000 })
+      .toBe(sliderMax)
+    await expect.poll(() => readBar().then((s) => s.opt)).toBe(`${sliderMax}%`)
+    const after = await readBar()
+    expect(after.px, '柱宽像素应有效').toBeGreaterThan(0)
   })
 })

@@ -14,6 +14,9 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const chartConfig = ref<string[]>(['limit', 's6', 'kde'])
   const rangeType = ref('RDL')
   const barWidthPercent = ref(20)
+  // 柱体重合度 0-100（barGap 负值）：重合越高柱组越窄、柱宽上限越高。
+  // 默认 5%（接近完全并排，柱宽上限约 10%）；0 = 完全并排，柱宽受限于 ~9%
+  const barOverlapPercent = ref(5)
   const ignoreNoLimit = ref(false)
   // 图表配置筛选开关：两个筛选测试项（参数列表），一个筛选数据行（仅 Bin1）
   const ignoreNoTestValue = ref(false)
@@ -68,6 +71,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     chartConfig.value = ['limit', 's6', 'kde']
     rangeType.value = 'RDL'
     barWidthPercent.value = 20
+    barOverlapPercent.value = 5
     ignoreNoLimit.value = false
     ignoreNoTestValue.value = false
     dataOnlyBin1.value = false
@@ -94,6 +98,7 @@ export const useAnalysisStore = defineStore('analysis', () => {
     chartConfig,
     rangeType,
     barWidthPercent,
+    barOverlapPercent,
     ignoreNoLimit,
     ignoreNoTestValue,
     dataOnlyBin1,

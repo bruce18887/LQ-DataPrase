@@ -11,20 +11,23 @@
 <script setup lang="ts">
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
-import { clampBarValue, formatPercent } from '../../../utils/chart-bar'
+import { clampBarValue, formatPercent, formatAxisValue, getBarGroupPad, getMaxBarWidthPercent, getSiteColors8 } from '../../../utils/chart-bar'
 import OutlierHintBar from './OutlierHintBar.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   result: any
   chartConfig: string[]
   rangeType: string
   barWidthPercent: number
+  /** 柱体重合度 0-100（barGap 负值）：重合越高柱组越窄、柱宽上限越高 */
+  barOverlapPercent?: number
   selectedParam: string
   outlierHandling?: 'clip' | 'exclude' | 'off'
-}>()
+}>(), {
+  barOverlapPercent: 5,
+})
 
-const { colors } = useEChartsTheme()
-const COLORS_SITE_8 = ['#E53935', '#1E88E5', '#43A047', '#F9A825', '#8E24AA', '#00ACC1', '#F57C00', '#D81B60']
+const { colors, isDark } = useEChartsTheme()
 
 /**
  * 柱数据 [x, 渲染值, 真实值, 计数]：非零小百分比（如 0.002%）钳制到最小
@@ -50,13 +53,28 @@ function buildOption() {
   const binCenters: number[] = r.bin_centers || []
   if (binCenters.length === 0) return {}
 
+  const siteHists = r.site_histograms
+  const siteKeys = siteHists ? Object.keys(siteHists) : []
+  const hasSiteData = siteKeys.length >= 1
   // Outlier clipping: keep the X-axis range locked to the original bin_centers
   // span (driven by range_type) so bar widths and Limit lines stay stable.
   // Hide bins whose center falls outside the IQR bounds instead of zooming.
   const outlierInfo = r.outlier_info
   const handlingMode = props.outlierHandling || 'off'
-  const xAxisMin = binCenters[0]
-  const xAxisMax = binCenters[binCenters.length - 1]
+  // 轴 min/max 向两端扩展多系列 bar 分组偏移量（getBarGroupPad）：8 个 Site 系列 +
+  // All Site 在同一 value 轴上分组错位，最右系列（AllSite）最右 bin 柱体（x=
+  // bin_centers[-1]）与最左系列（SITE1）underflow 柱体（x=bin_centers[0]）会被挤出
+  // 绘图区整根裁剪（回归：edge-clip，tooltip 有值但柱体/label 消失）。扩展仅两端
+  // 多出空边距，bar 宽度语义、markLine 与 outlier clip 过滤均不受影响。
+  const binGap = binCenters.length >= 2 ? binCenters[1] - binCenters[0] : 0
+  const seriesCount = hasSiteData ? siteKeys.length + 1 : 1
+  // 柱宽上限：N 系列柱组总宽必须 ≤ bin 宽，否则柱组横跨 bin 边界、
+  // 贴限 bin（右边界=USL）的 pass 柱会被画到 USL 右侧（回归：limit-line-cross）。
+  // 重合度越高（barGap 负值）柱组越窄，柱宽上限越高。
+  const effectiveBarWidth = Math.min(props.barWidthPercent, getMaxBarWidthPercent(seriesCount, props.barOverlapPercent))
+  const axisPad = getBarGroupPad(seriesCount, binGap, effectiveBarWidth)
+  const xAxisMin = binCenters[0] - axisPad
+  const xAxisMax = binCenters[binCenters.length - 1] + axisPad
 
   const shouldClip = handlingMode === 'clip' && outlierInfo?.has_outliers
   // 统计口径启用：clip 与 exclude 都切到后端 filtered 统计（与统计卡 useHistogram
@@ -84,9 +102,6 @@ function buildOption() {
   }
 
   const series: any[] = []
-  const siteHists = r.site_histograms
-  const siteKeys = siteHists ? Object.keys(siteHists) : []
-  const hasSiteData = siteKeys.length >= 1
   const showNormal = props.chartConfig.includes('normal')
   // 正态曲线数据统一来自后端 result（normal_curve / filtered_normal_curve，
   // 公式单一来源在后端），与 KDE/标记线同源原则一致——前端不再本地实现高斯公式
@@ -116,37 +131,42 @@ function buildOption() {
       series.push({
         name: `Site${site}`, type: 'bar',
         data: buildBarData(activeIndices, binCenters, hists),
-        itemStyle: { color: COLORS_SITE_8[idx % COLORS_SITE_8.length] },
-        barWidth: `${props.barWidthPercent}%`,
+        itemStyle: { color: getSiteColors8(isDark.value)[idx % 8] },
+        barWidth: `${effectiveBarWidth}%`,
+        barGap: `${-props.barOverlapPercent}%`,
       })
     }
     series.push({
       name: 'All Site', type: 'bar', yAxisIndex: 1,
       data: buildBarData(activeIndices, binCenters, r.bin_percentages || [], r.bin_counts),
-      itemStyle: { color: '#90CAF9', opacity: 0.5 }, barWidth: `${props.barWidthPercent}%`,
+      itemStyle: { color: '#90CAF9', opacity: 0.5 }, barWidth: `${effectiveBarWidth}%`, barGap: `${-props.barOverlapPercent}%`,
       label: { show: true, position: 'top', formatter: (p: any) => { const real = p.data[2] ?? p.data[1]; return real > 0 ? `${formatPercent(real)}%` : '' }, fontSize: 10, color: '#1565C0', fontWeight: 'bold' },
     })
   } else {
     series.push({
       name: '数据分布', type: 'bar',
       data: buildBarData(activeIndices, binCenters, r.bin_percentages || [], r.bin_counts),
-      itemStyle: { color: '#1E88E5' }, barWidth: `${props.barWidthPercent}%`,
+      itemStyle: { color: '#1E88E5' }, barWidth: `${effectiveBarWidth}%`,
     })
   }
 
   const mk: any[] = []
+  // 规格限/自定义限线色：红-绿对在红绿色盲下不可分（deutan ΔE 14.6），
+  // 改为 红-灰（LSL/USL=红 语义不变，CL=灰 表示"次级/自定义"）
+  const limitColor = isDark.value ? '#ef5350' : '#C62828'
+  const clColor = isDark.value ? '#9ca3af' : '#757575'
   const showLimit = props.chartConfig.includes('limit')
   if (showLimit && r.lower_limit != null && r.upper_limit != null) {
     mk.push(
-      { xAxis: r.lower_limit, lineStyle: { color: '#C62828', width: 3, type: 'dashed' }, label: { show: true, formatter: 'LSL', position: 'end' } },
-      { xAxis: r.upper_limit, lineStyle: { color: '#C62828', width: 3, type: 'dashed' }, label: { show: true, formatter: 'USL', position: 'end' } },
+      { xAxis: r.lower_limit, lineStyle: { color: limitColor, width: 3, type: 'dashed' }, label: { show: true, formatter: 'LSL', position: 'end' } },
+      { xAxis: r.upper_limit, lineStyle: { color: limitColor, width: 3, type: 'dashed' }, label: { show: true, formatter: 'USL', position: 'end' } },
     )
   }
   // CL 模式：画出用户自定义规格限线（数据来自后端 result，与 LSL/USL 一致）
   if (props.rangeType === 'CL' && r.custom_low != null && r.custom_high != null) {
     mk.push(
-      { xAxis: r.custom_low, lineStyle: { color: '#43A047', width: 2, type: 'dashed' }, label: { show: true, formatter: 'CL Low', position: 'insideEndTop' } },
-      { xAxis: r.custom_high, lineStyle: { color: '#43A047', width: 2, type: 'dashed' }, label: { show: true, formatter: 'CL High', position: 'insideEndTop' } },
+      { xAxis: r.custom_low, lineStyle: { color: clColor, width: 2, type: 'dashed' }, label: { show: true, formatter: 'CL Low', position: 'insideEndTop' } },
+      { xAxis: r.custom_high, lineStyle: { color: clColor, width: 2, type: 'dashed' }, label: { show: true, formatter: 'CL High', position: 'insideEndTop' } },
     )
   }
   // σ 标记线与统计卡同一口径：裁剪时用后端 filtered_sigma*（与 filtered_mean/
@@ -206,6 +226,9 @@ function buildOption() {
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
+      backgroundColor: colors.value.tooltipBg,
+      borderColor: colors.value.tooltipBorder,
+      textStyle: { color: colors.value.tooltipText },
       formatter: (params: any) => {
         const items = Array.isArray(params) ? params : [params]
         const first = items[0]
@@ -228,13 +251,13 @@ function buildOption() {
     legend: { data: series.map((s: any) => s.name), top: 'bottom', type: 'scroll', textStyle: { color: tc } },
     toolbox: { feature: { saveAsImage: { name: `${props.selectedParam}_分析` } } },
     grid: { top: 55, bottom: 70, left: hasKde ? 110 : 55, right: (hasSiteData && hasNormal) ? 120 : (hasSiteData || hasNormal) ? 80 : 55 },
-    xAxis: { type: 'value', name: '', nameLocation: 'middle', nameGap: 28, min: xAxisMin, max: xAxisMax, axisLabel: { rotate: 45, show: true, interval: 0, fontSize: 9, formatter: (v: number) => v.toFixed(4), color: tc }, splitNumber: 24 },
+    xAxis: { type: 'value', name: '', nameLocation: 'middle', nameGap: 28, min: xAxisMin, max: xAxisMax, axisLabel: { rotate: 45, show: true, interval: 0, fontSize: 9, formatter: formatAxisValue, color: tc }, splitNumber: 24 },
     yAxis: yAxes,
     series,
   }
 }
 
-const { chartRef } = useChart(buildOption, [() => props.result, () => props.chartConfig, () => props.rangeType, () => props.barWidthPercent, () => props.selectedParam, () => props.outlierHandling])
+const { chartRef } = useChart(buildOption, [() => props.result, () => props.chartConfig, () => props.rangeType, () => props.barWidthPercent, () => props.barOverlapPercent, () => props.selectedParam, () => props.outlierHandling])
 void chartRef // bound to <div ref="chartRef"> in template
 </script>
 

@@ -29,9 +29,11 @@
 interface SiteStatRow {
   Site: string | number
   Yield: string | number
-  FailCount: number
-  ExceedMin: number
-  ExceedMax: number
+  FailCount: string | number
+  ExceedMin: string | number
+  ExceedMax: string | number
+  /** 数字字段（后端下发，供行样式等逻辑使用；展示用字符串在上面） */
+  FailCountNum?: number
 }
 
 interface Props {
@@ -42,7 +44,7 @@ interface Props {
 defineProps<Props>()
 
 function siteRowClass({ row }: { row: SiteStatRow }) {
-  return row.FailCount > 0 ? 'site-fail-row' : ''
+  return (row.FailCountNum ?? 0) > 0 ? 'site-fail-row' : ''
 }
 </script>
 

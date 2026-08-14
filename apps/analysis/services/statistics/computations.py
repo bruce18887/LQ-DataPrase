@@ -349,6 +349,8 @@ def compute_qqplot(data_series: pd.Series, metadata: dict = None, param: str = N
             'is_normal': False,
             'n': len(clean),
             'outlier_info': outlier_info,
+            'slope': None,
+            'intercept': None,
         }
 
     try:
@@ -367,6 +369,11 @@ def compute_qqplot(data_series: pd.Series, metadata: dict = None, param: str = N
 
         r_squared = round(r * r, 4)
         is_normal = r_squared > 0.95
+        # 拟合线参数（probplot 最小二乘：slope≈数据 std、intercept≈数据 mean），
+        # 前端画参考线 y = intercept + slope·x 用——QQ 图理论分位数是标准正态，
+        # 只有均值 0/方差 1 的数据才贴合 y=x；常量数据（sxx=0）为 None → 前端回退
+        slope = float(pp_result[1][0]) if np.isfinite(pp_result[1][0]) else None
+        intercept = float(pp_result[1][1]) if np.isfinite(pp_result[1][1]) else None
 
         return {
             'theoretical_quantiles': theoretical,
@@ -375,6 +382,8 @@ def compute_qqplot(data_series: pd.Series, metadata: dict = None, param: str = N
             'is_normal': is_normal,
             'n': len(clean),
             'outlier_info': outlier_info,
+            'slope': slope,
+            'intercept': intercept,
         }
     except Exception:
         return {
@@ -384,4 +393,6 @@ def compute_qqplot(data_series: pd.Series, metadata: dict = None, param: str = N
             'is_normal': False,
             'n': len(clean),
             'outlier_info': outlier_info,
+            'slope': None,
+            'intercept': None,
         }

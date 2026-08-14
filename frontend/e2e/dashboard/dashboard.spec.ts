@@ -148,6 +148,16 @@ test.describe('仪表板', { tag: ['@dashboard'] }, () => {
     await expect(page.getByText('UPH 效率分析').first()).toBeVisible()
     // 数据态下展示 UPH 指标与单位（UphCard.vue 行 21/23）
     await expect(page.getByText('Units/Hour')).toBeVisible()
+
+    // UPH helper（2026-08-13）：hover 问号图标 → tooltip 展示计算公式
+    // （el-tooltip popper teleport 到 body，须 :visible + .last()）
+    const helpIcon = page.locator('.uph-card .uph-metric-label__help').first()
+    await expect(helpIcon).toBeVisible()
+    await helpIcon.hover()
+    const popper = page.locator('.el-popper:visible').last()
+    await expect(popper).toContainText('× 3600', { timeout: 5_000 })
+    await expect(popper).toContainText('并行站点模型')
+    await expect(popper).toContainText('测试时间')
   })
 
   test('@p1 良率趋势可视化渲染', async ({ page }) => {
@@ -248,6 +258,13 @@ test.describe('仪表板', { tag: ['@dashboard'] }, () => {
     // UPH 数据态（批次汇总）应展示单位与「批次汇总」标签
     await expect(page.getByText('Units/Hour')).toBeVisible()
     await expect(page.getByText('批次汇总')).toBeVisible()
+    // UPH helper 在批次态下展示「批次汇总」来源文案（2026-08-13）
+    const batchHelp = page.locator('.uph-card:visible .uph-metric-label__help').first()
+    if (await batchHelp.isVisible().catch(() => false)) {
+      await batchHelp.hover()
+      const bPopper = page.locator('.el-popper:visible').last()
+      await expect(bPopper).toContainText('批次汇总', { timeout: 5_000 })
+    }
     const yieldChart = yieldContainer.locator('svg, canvas').first()
     await expect(yieldChart).toBeVisible({ timeout: 15_000 })
     await expectChartRendered(yieldContainer, 0)

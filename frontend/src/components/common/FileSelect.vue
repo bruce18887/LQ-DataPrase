@@ -327,6 +327,11 @@ function groupFiles(
 .dp-file-select-dropdown .el-select-dropdown__item {
   line-height: normal;
   padding: 6px 20px;
+  /* 覆盖 EP 默认 height:34px + overflow:hidden——富信息行（文件名 + meta）约
+     40px 会被纵向裁剪，第二行显示不全；min-height 保证非 show-meta 场景
+     下拉项保持紧凑观感 */
+  height: auto;
+  min-height: 34px;
 }
 
 .dp-file-select-dropdown .el-select-group__title {

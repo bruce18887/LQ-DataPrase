@@ -75,12 +75,23 @@
         <div class="config-section">
           <div class="section-label flex-between">
             <span>柱宽</span>
-            <span class="value-hint">{{ barWidthPercent }}%</span>
+            <span class="value-hint">{{ displayBarWidth }}%</span>
           </div>
           <!-- 必须监听 update:modelValue：EP slider 的值更新走 update:modelValue，
                change 事件发出的是 props.modelValue（单向绑定下永远是旧值）——
                此前只绑 @change 导致柱宽设置永远无效 -->
-          <el-slider :model-value="barWidthPercent" :min="10" :max="100" :step="5" size="small" @update:model-value="onBarWidthChange" />
+          <!-- max 随系列数联动（barWidthMax）：多系列并排柱组必须 ≤ bin 宽，
+               否则贴限柱体越过 USL 线（回归 limit-line-cross）；min/step 从 10/5
+               收窄到 1/1 以适配 8-site 时上限 ≈9% -->
+          <el-slider :model-value="displayBarWidth" :min="1" :max="barWidthMax" :step="1" size="small" @update:model-value="onBarWidthChange" />
+        </div>
+        <!-- 柱体重合：重合越高柱组越窄、柱宽上限越高（仅单参数完整版） -->
+        <div v-if="variant === 'full'" class="config-section">
+          <div class="section-label flex-between">
+            <span>柱体重合</span>
+            <span class="value-hint">{{ barOverlapPercent }}%</span>
+          </div>
+          <el-slider :model-value="barOverlapPercent" :min="0" :max="100" :step="5" size="small" @update:model-value="onBarOverlapChange" />
         </div>
       </div>
     </el-collapse-transition>
@@ -112,13 +123,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { Setting } from '@element-plus/icons-vue'
 
 interface Props {
   chartConfig: string[]
   rangeType: string
   barWidthPercent: number
+  /** 柱宽 slider 上限（%）：随系列数联动（多系列并排柱组 ≤ bin 宽） */
+  barWidthMax?: number
+  /** 柱体重合度 0-100（barGap 负值）：重合越高柱组越窄、柱宽上限越高 */
+  barOverlapPercent?: number
   ignoreNoLimit: boolean
   customLow?: number | null
   customHigh?: number | null
@@ -137,12 +152,15 @@ const props = withDefaults(defineProps<Props>(), {
   dataOnlyBin1: false,
   onlyFailTestItem: false,
   onlyLowCpk: false,
+  barWidthMax: 100,
+  barOverlapPercent: 5,
 })
 
 const emit = defineEmits<{
   (e: 'update:chartConfig', val: string[]): void
   (e: 'update:rangeType', val: string): void
   (e: 'update:barWidthPercent', val: number): void
+  (e: 'update:barOverlapPercent', val: number): void
   (e: 'update:ignoreNoLimit', val: boolean): void
   (e: 'update:customLow', val: number | null): void
   (e: 'update:customHigh', val: number | null): void
@@ -154,6 +172,9 @@ const emit = defineEmits<{
 
 const showMore = ref(false)
 
+/** slider 显示值：柱宽被系列数上限 clamp（多系列并排柱组 ≤ bin 宽） */
+const displayBarWidth = computed(() => Math.min(props.barWidthPercent, props.barWidthMax))
+
 function onChartConfigChange(val: string[]) {
   emit('update:chartConfig', val)
 }
@@ -164,6 +185,10 @@ function onRangeTypeChange(val: string) {
 
 function onBarWidthChange(val: number) {
   emit('update:barWidthPercent', val)
+}
+
+function onBarOverlapChange(val: number) {
+  emit('update:barOverlapPercent', val)
 }
 
 function onIgnoreNoLimitChange(val: boolean) {

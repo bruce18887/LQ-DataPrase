@@ -468,6 +468,13 @@ class AnalysisViewSet(viewsets.GenericViewSet):
                 'detail': f'参数 {param!r} 不在该文件中',
             }, status=400)
 
+        # data_only_bin1 narrows the rows before series extraction so the
+        # QQ plot (n / outlier stats) only covers pass-bin rows; the
+        # param_no_valid_data check below then covers the "all-NaN inside
+        # Bin1" case with the existing 400 path.
+        if get_bool_param(request, 'data_only_bin1'):
+            df = filter_bin1_rows(df, metadata)
+
         data_series = get_1d_from(df, param)
         if isinstance(data_series, pd.DataFrame):
             data_series = data_series.iloc[:, 0]

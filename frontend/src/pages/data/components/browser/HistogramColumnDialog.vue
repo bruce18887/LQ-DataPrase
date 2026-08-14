@@ -85,8 +85,8 @@ async function load() {
     }
     result.value = r
     const clr: Record<string, string> = isDark.value
-      ? { green: '#14b8a6', orange: '#fcd34d', red: '#fb7185', gray: '#9CA3AF' }
-      : { green: '#4CAF50', orange: '#FF9800', red: '#F44336', gray: '#9E9E9E' }
+      ? { green: '#14b8a6', orange: '#fcd34d', red: '#fb7185', gray: '#e2e8f0' }
+      : { green: '#047857', orange: '#7c3aed', red: '#b91c1c', gray: '#475569' }
     statCards.value = [
       { label: 'N', value: r.total_count?.toLocaleString() ?? '-' },
       { label: 'Mean', value: r.mean != null ? r.mean.toFixed(4) : '-' },

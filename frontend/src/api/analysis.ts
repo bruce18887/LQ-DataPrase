@@ -30,9 +30,10 @@ export const analysisApi = {
   getBinTrend(fileIds: number[]) {
     return api.get('/statistics/bin_trend/', { params: { file_ids: fileIds } })
   },
-  getBoxPlot(fileId: number, params: string[], groupBy?: string) {
+  getBoxPlot(fileId: number, params: string[], groupBy?: string, dataOnlyBin1?: boolean) {
     const query: Record<string, any> = { file_id: fileId, params }
     if (groupBy) query.group_by = groupBy
+    if (dataOnlyBin1) query.data_only_bin1 = dataOnlyBin1
     return api.get('/statistics/boxplot/', { params: query })
   },
   getParamTrend(fileIds: number[], param: string) {

@@ -226,14 +226,24 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
       { timeout: 15_000 },
     ).catch(() => {})
 
-    // 在父级 banner 中选择第一个文件 (DataManagement.vue 当前文件选择器)
+    // 在父级 banner 中选择第一个文件 (DataManagement.vue 当前文件选择器)，重试一次防并行负载竞态
     const fileSelect = page.locator('.active-file-banner:visible .el-select').first()
     await fileSelect.click()
     const dropdown = page.locator('.el-select-dropdown:visible')
     await dropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
     await page.waitForTimeout(200)
-    const options = dropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
-    const count = await options.count()
+    let options = dropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
+    let count = await options.count()
+    if (count === 0) {
+      console.log('[export-tools] 文件下拉为空，重试一次')
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(500)
+      await fileSelect.click()
+      await dropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
+      await page.waitForTimeout(200)
+      options = dropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
+      count = await options.count()
+    }
     if (count === 0) {
       console.log('[export-tools] 可选文件为空，跳过点击断言')
       await page.keyboard.press('Escape')
@@ -307,13 +317,21 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
       { timeout: 15_000 },
     ).catch(() => {})
 
-    // 选择第一个文件
+    // 选择第一个文件（重试一次：并行负载下 /files/ API 可能未返回、选项为 0）
     const fileSelect = page.locator('.active-file-banner:visible .el-select').first()
     await fileSelect.click()
     const dropdown = page.locator('.el-select-dropdown:visible')
     await dropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
     await page.waitForTimeout(200)
-    const options = dropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
+    let options = dropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
+    if (await options.count() === 0) {
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(500)
+      await fileSelect.click()
+      await dropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
+      await page.waitForTimeout(200)
+      options = dropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
+    }
     if (await options.count() === 0) {
       await page.keyboard.press('Escape')
       test.skip(true, '无可用上传文件')
@@ -378,5 +396,100 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
       /exportSigma is not a function|exportBatch is not a function/.test(e),
     )
     expect(offendingErrors, '不应出现 exportSigma/exportBatch 解析错误').toEqual([])
+  })
+
+  test('输入关键字按 Enter 可全选匹配参数（过滤 + 清空 + 增量累计）', async ({ page }) => {
+    await gotoApp(page, '/data')
+    await page.locator('.tab-btn').filter({ hasText: '导出工具' }).click()
+
+    await page.waitForResponse(
+      (r) => /\/files\/?(\?|$)/.test(r.url()) && r.status() === 200,
+      { timeout: 15_000 },
+    ).catch(() => {})
+
+    // 选择第一个文件（重试一次：并行负载下 /files/ API 可能未返回、选项为 0）
+    const fileSelect = page.locator('.active-file-banner:visible .el-select').first()
+    await fileSelect.click()
+    const dropdown = page.locator('.el-select-dropdown:visible')
+    await dropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
+    await page.waitForTimeout(200)
+    let options = dropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
+    if (await options.count() === 0) {
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(500)
+      await fileSelect.click()
+      await dropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
+      await page.waitForTimeout(200)
+      options = dropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
+    }
+    if (await options.count() === 0) {
+      await page.keyboard.press('Escape')
+      test.skip(true, '无可用上传文件')
+      return
+    }
+    await options.first().click()
+    await dropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
+    await page.waitForTimeout(200)
+
+    // 等待参数列表加载
+    await page.waitForResponse(
+      (r) => /\/analysis\/histogram\/?/.test(new URL(r.url()).pathname) && r.status() === 200,
+      { timeout: 15_000 },
+    ).catch(() => {})
+
+    const panel = page.locator('.export-tools')
+
+    // 打开参数下拉：读取全部参数名，并点选第 2 个（合并语义基线：已选 1，下拉保持打开）
+    const paramSelect = panel.locator('.el-select').filter({ hasText: '点击选择要导出的参数' }).first()
+    await paramSelect.click()
+    let paramDropdown = page.locator('.el-select-dropdown:visible')
+    await paramDropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
+    await page.waitForTimeout(200)
+    let paramOptions = paramDropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
+    let P = (await paramOptions.allTextContents()).map((n) => n.trim()).filter(Boolean)
+    if (P.length < 2) {
+      // 重试一次：参数列表请求可能未完成
+      await page.keyboard.press('Escape')
+      await paramDropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
+      await page.waitForTimeout(500)
+      await paramSelect.click()
+      paramDropdown = page.locator('.el-select-dropdown:visible')
+      await paramDropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
+      await page.waitForTimeout(200)
+      paramOptions = paramDropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
+      P = (await paramOptions.allTextContents()).map((n) => n.trim()).filter(Boolean)
+    }
+    if (P.length < 2) {
+      await page.keyboard.press('Escape')
+      test.skip(true, '该文件参数不足 2 个')
+      return
+    }
+    await paramOptions.nth(1).click()
+    await expect(panel.locator('.step-count')).toContainText('已选 1 /')
+
+    // 关键字 = 第一个参数名的前 6 字符（保证 ≥1 匹配），N 从页面参数列表自算
+    const kw = P[0].slice(0, 6)
+    const matchesArr = P.filter((p) => p.toLowerCase().includes(kw.toLowerCase()))
+    const N = matchesArr.length
+    expect(N, '关键字应至少匹配 1 个参数').toBeGreaterThanOrEqual(1)
+
+    // filterable 输入框（EP 将 aria-label 绑在 input 本身，见 select2.mjs:217）：填入关键字 → 下拉过滤 + footer 提示匹配数
+    const input = panel.locator('.el-select__input').first()
+    await input.fill(kw)
+    await expect(paramDropdown.locator('.match-hint')).toContainText(`匹配 ${N} 项，按 Enter 全选`)
+
+    // Enter 全选：已选 = {P[1]} ∪ 匹配集（P[1] 可能在匹配集中，用 Set 算实际值）
+    const expected = new Set([P[1], ...matchesArr]).size
+    await input.press('Enter')
+    await expect(panel.locator('.step-count')).toContainText(`已选 ${expected} / 共 ${P.length} 个`)
+
+    // 全选后输入框自动清空 → 可继续输入其它关键字（增量累计）
+    await expect(input).toHaveValue('')
+    const kw2 = P[0].slice(0, 5)
+    const matchesArr2 = P.filter((p) => p.toLowerCase().includes(kw2.toLowerCase()))
+    const expected2 = new Set([P[1], ...matchesArr, ...matchesArr2]).size
+    await input.fill(kw2)
+    await input.press('Enter')
+    await expect(panel.locator('.step-count')).toContainText(`已选 ${expected2} / 共 ${P.length} 个`)
   })
 })

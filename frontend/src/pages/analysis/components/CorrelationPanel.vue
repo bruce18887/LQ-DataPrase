@@ -87,10 +87,11 @@ import { ref, computed, watch } from 'vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
 import { minMax } from '../../../utils/minmax'
+import { formatAxisValue, getSiteColors8 } from '../../../utils/chart-bar'
 
 const props = defineProps<{ params: string[]; loading: boolean; chartData: any }>()
 const emit = defineEmits<{ analyze: [x: string, y: string] }>()
-const { colors } = useEChartsTheme()
+const { colors, isDark } = useEChartsTheme()
 
 const localX = ref('')
 const localY = ref('')
@@ -101,7 +102,6 @@ const sigmaX = ref(3); const sigmaY = ref(3)
 const customMinX = ref(0); const customMaxX = ref(0)
 const customMinY = ref(0); const customMaxY = ref(0)
 
-const SITE_COLORS = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc', '#5383e0']
 
 const rColorClass = computed(() => {
   const r = Math.abs(props.chartData?.pearson_r ?? 0)
@@ -148,7 +148,7 @@ function buildOption() {
   const series: any[] = (d.series_data || []).map(
     (sd: { name: string; data: number[][] }, idx: number) => ({
       name: sd.name, type: 'scatter', data: sd.data, symbolSize: 6,
-      itemStyle: { color: SITE_COLORS[idx % SITE_COLORS.length], opacity: 0.6 },
+      itemStyle: { color: getSiteColors8(isDark.value)[idx % 8], opacity: 0.6 },
       ...(isLarge.value ? { large: true } : {}),
     }),
   )
@@ -160,12 +160,12 @@ function buildOption() {
   return {
     // large 模式下上万 symbol 的入场/更新动画是纯开销，直接关闭
     animation: !isLarge.value,
-    title: { text: `${d.param_x} vs ${d.param_y}`, subtext: `Pearson r = ${d.pearson_r?.toFixed(4) ?? '-'}`, left: 'center', textStyle: { color: tc, fontSize: 14 }, subtextStyle: { color: tc, fontSize: 12 } },
+    title: { text: `${d.param_x} vs ${d.param_y}`, subtext: `Pearson r = ${d.pearson_r?.toFixed(4) ?? '-'}`, left: 'center', textStyle: { color: tc, fontSize: 15 }, subtextStyle: { color: tc, fontSize: 12 } },
     toolbox: { feature: { saveAsImage: { title: '保存图片' }, restore: { title: '还原' } }, right: 10 },
-    tooltip: { trigger: 'item', formatter: (p: any) => `${p.seriesName}<br/>${d.param_x}: ${Number(p.value[0]).toFixed(4)}<br/>${d.param_y}: ${Number(p.value[1]).toFixed(4)}` },
+    tooltip: { trigger: 'item', backgroundColor: colors.value.tooltipBg, borderColor: colors.value.tooltipBorder, textStyle: { color: colors.value.tooltipText }, formatter: (p: any) => `${p.seriesName}<br/>${d.param_x}: ${Number(p.value[0]).toFixed(4)}<br/>${d.param_y}: ${Number(p.value[1]).toFixed(4)}` },
     legend: { data: series.map((s: any) => s.name), bottom: 5, type: 'scroll', textStyle: { color: tc } },
-    xAxis: { type: 'value', name: d.param_x, nameLocation: 'center', nameGap: 30, min: xR.min, max: xR.max, axisLabel: { color: tc }, nameTextStyle: { color: tc } },
-    yAxis: { type: 'value', name: d.param_y, nameLocation: 'center', nameGap: 40, min: yR.min, max: yR.max, axisLabel: { color: tc }, nameTextStyle: { color: tc } },
+    xAxis: { type: 'value', name: d.param_x, nameLocation: 'center', nameGap: 30, min: xR.min, max: xR.max, axisLine: { lineStyle: { color: colors.value.axisLineColor } }, axisLabel: { fontSize: 9, formatter: formatAxisValue, color: tc }, nameTextStyle: { color: tc } },
+    yAxis: { type: 'value', name: d.param_y, nameLocation: 'center', nameGap: 40, min: yR.min, max: yR.max, axisLine: { lineStyle: { color: colors.value.axisLineColor } }, axisLabel: { fontSize: 9, formatter: formatAxisValue, color: tc }, nameTextStyle: { color: tc } },
     dataZoom: [
       { type: 'slider', xAxisIndex: 0, start: 0, end: 100 },
       { type: 'slider', yAxisIndex: 0, start: 0, end: 100 },

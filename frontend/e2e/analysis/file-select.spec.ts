@@ -140,6 +140,27 @@ test.describe('FileSelect 通用文件选择组件', { tag: ['@p1', '@analysis']
     await expect(meta.first()).toBeVisible({ timeout: 10_000 })
     const text = (await meta.first().textContent()) ?? ''
     expect(text).toMatch(/\S+ · \S+ · \d+ 行/)
+
+    // 无裁剪回归（2026-08-13）：EP 默认 .el-select-dropdown__item height:34px
+    // + overflow:hidden 会纵向裁掉第二行 meta——修复后 height:auto，
+    // meta 行底边必须完整落在 item 内，且双行 item 高度 ≥ 36px（旧代码 34px 必失败）。
+    // 结构：item > .dp-file-option > .dp-file-option__meta，锚定 meta 自己的祖先 item
+    //（下拉含置顶/分组时首个 item 未必带 meta）
+    const metaEl = meta.first()
+    await expect(metaEl).toBeVisible({ timeout: 10_000 })
+    const item = metaEl.locator('..').locator('..')
+    // 下拉开启动画期间高度未稳定（过渡态会短暂坍缩成单行），轮询等双行高度稳定
+    await expect
+      .poll(async () => (await item.boundingBox())?.height ?? 0, { timeout: 5_000 })
+      .toBeGreaterThanOrEqual(36)
+    const itemBox = await item.boundingBox()
+    const metaBox = await metaEl.boundingBox()
+    expect(itemBox, '下拉项应有尺寸').not.toBeNull()
+    expect(metaBox, 'meta 行应有尺寸').not.toBeNull()
+    // 容差 1px：getBoundingClientRect 为亚像素小数值，双行 item 有 padding/行高
+    // 四舍五入差（实测最大偏差 ~0.55px）；被 34px 固定高度裁剪时偏差 >5px 必失败
+    expect(metaBox!.y + metaBox!.height, 'meta 行底边不应超出下拉项（被 height:34px 裁剪）')
+      .toBeLessThanOrEqual(itemBox!.y + itemBox!.height + 1)
     await page.keyboard.press('Escape')
   })
 })
