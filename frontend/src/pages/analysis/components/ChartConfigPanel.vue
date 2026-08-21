@@ -103,7 +103,7 @@
         <el-checkbox :model-value="ignoreNoLimit" size="small" @change="onIgnoreNoLimitChange">
           忽略无Limit
         </el-checkbox>
-        <template v-if="variant === 'full'">
+        <template v-if="variant === 'full' || fullFilters">
           <el-checkbox :model-value="ignoreNoTestValue" size="small" @change="onIgnoreNoTestValueChange">
             忽略无测试值
           </el-checkbox>
@@ -137,11 +137,13 @@ interface Props {
   ignoreNoLimit: boolean
   customLow?: number | null
   customHigh?: number | null
-  /** 数据筛选开关（仅单参数完整版） */
+  /** 数据筛选开关（默认仅单参数完整版显示；multi-file 变体传 full-filters 开启全部 5 个） */
   ignoreNoTestValue?: boolean
   dataOnlyBin1?: boolean
   onlyFailTestItem?: boolean
   onlyLowCpk?: boolean
+  /** 多文件/其它变体强制显示完整数据筛选区（2026-08-20） */
+  fullFilters?: boolean
   /** 'full' = 单参数分析完整配置；'multi-file' = 多文件分析阉割版（仅 Limit + 柱宽 + 忽略无Limit） */
   variant?: 'full' | 'multi-file'
 }
@@ -152,6 +154,7 @@ const props = withDefaults(defineProps<Props>(), {
   dataOnlyBin1: false,
   onlyFailTestItem: false,
   onlyLowCpk: false,
+  fullFilters: false,
   barWidthMax: 100,
   barOverlapPercent: 5,
 })

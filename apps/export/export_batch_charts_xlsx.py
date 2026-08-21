@@ -25,6 +25,20 @@ HEADER_FONT = Font(color="FFFFFF", bold=True, size=11)
 HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center")
 
 
+def _site_fail_count(si: dict) -> int:
+    """站点失败数（数字）：优先 FailCountNum——2026-08-13 站点统计改版后
+    FailCount 是展示字符串（`3(0.181%)`），与 int 比较会 TypeError；旧格式/
+    缺字段时从 FailCount 前缀解析兜底。"""
+    v = si.get('FailCountNum')
+    if isinstance(v, int):
+        return v
+    raw = si.get('FailCount', 0)
+    try:
+        return int(str(raw).split('(')[0])
+    except (TypeError, ValueError):
+        return 0
+
+
 def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
                                          show_limit=True, show_3sigma=False,
                                          show_4sigma=False, show_6sigma=True,
@@ -156,7 +170,7 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
         cell_yield.alignment = Alignment(horizontal="center")
         for si in site_stats_list:
             if si.get('Site') == 'ALL Site':
-                if si.get('FailCount', 0) > 0:
+                if _site_fail_count(si) > 0:
                     cell_yield.fill = fail_fill
                     cell_yield.font = fail_font
                 else:
@@ -297,7 +311,7 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
                 cell.alignment = HEADER_ALIGNMENT
 
             for row_offset, site_info in enumerate(site_stats_list):
-                is_fail = site_info.get('FailCount', 0) > 0
+                is_fail = _site_fail_count(site_info) > 0
                 is_all = site_info.get('Site') == 'ALL Site'
                 for col_idx, key in enumerate(['Site', 'Yield', 'FailCount', 'ExceedMin', 'ExceedMax'], 1):
                     cell = ws.cell(row=row_offset + 3, column=col_idx + 5, value=site_info.get(key, ''))

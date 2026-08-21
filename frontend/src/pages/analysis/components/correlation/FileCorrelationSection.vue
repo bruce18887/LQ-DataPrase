@@ -10,9 +10,9 @@
 
       <div class="card-body">
         <div class="corr-controls">
-          <FileSelect v-model="localFile1" :files="files" placeholder="文件1 (ATE)" style="flex: 1" />
+          <FileSelect v-model="localFile1" :files="files" placeholder="文件1 (ATE)" show-meta style="flex: 1" />
           <span class="vs-badge">VS</span>
-          <FileSelect v-model="localFile2" :files="files" placeholder="文件2 (Bench)" style="flex: 1" />
+          <FileSelect v-model="localFile2" :files="files" placeholder="文件2 (Bench)" show-meta style="flex: 1" />
           <el-input-number v-model="localThreshold" :min="0" :max="20" :step="0.5" style="width: 130px" placeholder="阈值%" />
           <el-button type="primary" @click="onAnalyze" :loading="loading">分析</el-button>
         </div>

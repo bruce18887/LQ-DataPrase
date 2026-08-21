@@ -17,6 +17,12 @@ export interface ListFilesParams {
   format_type?: string
   file_type?: string
   ordering?: string
+  /** 上传时间范围筛选（YYYY-MM-DD，服务端按当天边界展开） */
+  created_at__gte?: string
+  created_at__lte?: string
+  /** 文件大小范围筛选（字节） */
+  file_size__gte?: number
+  file_size__lte?: number
 }
 
 export interface BrowseParams {

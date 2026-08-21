@@ -214,7 +214,10 @@ def compute_multi_lot_distribution(datasets, all_series, param,
         bin_min -= 0.5
         bin_max += 0.5
     data_gap = safe_gap(bin_min, bin_max)
-    bin_start = bin_min - 2.5 * data_gap
+    # bin 网格以 [bin_min, bin_max] 为中心对称（两侧各 2 个细分 bin），与
+    # 单文件 histogram 同构（回归：bin-grid-asymmetry，2.5 使左 3.5gap/右
+    # 2.5gap 不对称且与单文件不一致，X 轴对齐断言依赖此统一）
+    bin_start = bin_min - 2 * data_gap
 
     # Build bin edges with underflow (-inf) and overflow (+inf) bins
     # Same pattern as single-file: [underflow] [bin1]..[bin24] [overflow]

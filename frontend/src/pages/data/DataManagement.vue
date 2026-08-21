@@ -56,17 +56,16 @@
         <div class="active-file-banner">
           <span class="banner-icon">📄</span>
           <span class="banner-label">当前文件</span>
-          <el-select
-            :model-value="activeFileId ?? undefined"
+          <FileSelect
+            v-model="activeFileId"
+            :files="files"
             placeholder="请选择一个文件"
-            filterable
             clearable
+            show-meta
             aria-label="当前文件"
             class="banner-file-select"
             @update:model-value="onActiveFileSelect"
-          >
-            <el-option v-for="f in files" :key="f.id" :label="f.filename" :value="f.id" />
-          </el-select>
+          />
         </div>
         <DataBrowserAgGrid
           :file-id="activeFileId"
@@ -81,17 +80,16 @@
         <div class="active-file-banner">
           <span class="banner-icon">📄</span>
           <span class="banner-label">当前文件</span>
-          <el-select
-            :model-value="activeFileId ?? undefined"
+          <FileSelect
+            v-model="activeFileId"
+            :files="files"
             placeholder="请选择一个文件"
-            filterable
             clearable
+            show-meta
             aria-label="当前文件"
             class="banner-file-select"
             @update:model-value="onActiveFileSelect"
-          >
-            <el-option v-for="f in files" :key="f.id" :label="f.filename" :value="f.id" />
-          </el-select>
+          />
         </div>
         <ExportToolsTab :files="files" :file-id="activeFileId" />
       </div>
@@ -118,6 +116,7 @@
 import { ref, computed, onMounted, onActivated, watch } from 'vue'
 import api from '../../api'
 import { useFilesStore } from '../../stores/files'
+import FileSelect from '../../components/common/FileSelect.vue'
 import FileListTab from './components/FileListTab.vue'
 import DataBrowserAgGrid from './DataBrowserAgGrid.vue'
 import ExportToolsTab from './ExportToolsTab.vue'
@@ -166,9 +165,10 @@ function onRowClick(id: number, _filename?: string) {
   activeFileId.value = id
 }
 
-// 查看数据 / 导出工具 顶部下拉框选择文件
-function onActiveFileSelect(id: number | null | undefined) {
-  activeFileId.value = id ?? null
+// 查看数据 / 导出工具 顶部下拉框选择文件（FileSelect 单选 emit 类型为
+// number | number[] | null，实际单选只会是 number|null）
+function onActiveFileSelect(id: number | number[] | null | undefined) {
+  activeFileId.value = typeof id === 'number' ? id : null
 }
 
 function onFileManagerSelect(fileId: number) {

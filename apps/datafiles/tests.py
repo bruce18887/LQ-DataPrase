@@ -213,6 +213,58 @@ class ListFilterTests(APITestCase):
         resp = self.client.get('/api/v1/files/product_codes/')
         self.assertNotIn('BN281', resp.data['product_codes'])
 
+    def test_ordering_by_file_size_desc(self):
+        """文件列表表头排序：?ordering=-file_size 首条为最大文件。"""
+        _make_datafile(self.user, 'big.csv', file_size=5000)
+        _make_datafile(self.user, 'small.csv', file_size=10)
+        resp = self.client.get('/api/v1/files/', {'ordering': '-file_size'})
+        self.assertEqual(resp.status_code, 200)
+        results = resp.data['results'] if 'results' in resp.data else resp.data
+        self.assertEqual(results[0]['filename'], 'big.csv')
+        self.assertEqual(results[0]['file_size'], 5000)
+        # 升序
+        resp2 = self.client.get('/api/v1/files/', {'ordering': 'file_size'})
+        results2 = resp2.data['results'] if 'results' in resp2.data else resp2.data
+        self.assertEqual(results2[0]['filename'], 'small.csv')
+
+    def test_created_at_range_filter(self):
+        """上传时间范围筛选：lte 为纯日期时含当天全部时刻（否则当天文件被漏）。"""
+        from django.utils import timezone
+        from datetime import timedelta
+        _make_datafile(self.user, 'today.csv')
+        old = _make_datafile(self.user, 'old.csv')
+        # auto_now_add 会覆盖 create 传入的 created_at，须用 update 造 10 天前
+        DataFile.objects.filter(id=old.id).update(created_at=timezone.now() - timedelta(days=10))
+        today = timezone.localtime(timezone.now()).strftime('%Y-%m-%d')
+        resp = self.client.get('/api/v1/files/', {'created_at__gte': today, 'created_at__lte': today})
+        self.assertEqual(resp.status_code, 200)
+        results = resp.data['results'] if 'results' in resp.data else resp.data
+        self.assertIn('today.csv', [r['filename'] for r in results])
+        self.assertNotIn('old.csv', [r['filename'] for r in results])
+
+    def test_file_size_range_filter(self):
+        """文件大小范围筛选：file_size__gte/__lte 组合生效。"""
+        _make_datafile(self.user, 'mid.csv', file_size=500)
+        _make_datafile(self.user, 'small.csv', file_size=10)
+        resp = self.client.get('/api/v1/files/', {'file_size__gte': 100, 'file_size__lte': 1000})
+        self.assertEqual(resp.status_code, 200)
+        results = resp.data['results'] if 'results' in resp.data else resp.data
+        self.assertIn('mid.csv', [r['filename'] for r in results])
+        self.assertNotIn('small.csv', [r['filename'] for r in results])
+
+    def test_invalid_filter_params_ignored(self):
+        """非法日期/数值筛选参数静默忽略不 400（宽容跳过惯例）。"""
+        _make_datafile(self.user, 'ok.csv')
+        resp = self.client.get('/api/v1/files/', {
+            'created_at__gte': 'not-a-date',
+            'created_at__lte': '2026-99-99',
+            'file_size__gte': 'abc',
+            'file_size__lte': '12x',
+        })
+        self.assertEqual(resp.status_code, 200)
+        results = resp.data['results'] if 'results' in resp.data else resp.data
+        self.assertIn('ok.csv', [r['filename'] for r in results])
+
 
 class UserUploadDirTests(TestCase):
     """Verify _user_upload_dir uses the user's username (not numeric id).

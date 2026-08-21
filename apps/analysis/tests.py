@@ -67,6 +67,26 @@ class SiteHistogramsTests(SimpleTestCase):
         out = compute_histogram_stats(df, _meta(), 'Param1', site_col=None)
         self.assertIsNone(out['site_histograms'])
 
+    def test_bin_grid_symmetric(self):
+        """回归 2026-08-14：bin 网格曾锚定 bin_min（LSL），USL 右侧多出 4 个
+        细分 bin（LSL 左 1 中心 vs USL 右 5 中心，X 轴视觉偏左）。修复后网格
+        以 [bin_min, bin_max] 为中心对称：两侧各 2 细分 bin + catch-all，
+        规格限内保持 20 个 bin。"""
+        df = _make_df(200, [1, 2, 3, 4])
+        meta = {**_meta(), 'mins': {'Param1': '-3'}, 'maxs': {'Param1': '3'}}
+        out = compute_histogram_stats(df, meta, 'Param1', 'Site')
+        bc = out['bin_centers']
+        lo, hi = out['lower_limit'], out['upper_limit']
+        left = [c for c in bc if c < lo]
+        right = [c for c in bc if c > hi]
+        self.assertEqual(
+            len(left), len(right),
+            f'bin 网格应两侧对称：LSL 左 {len(left)} 个 vs USL 右 {len(right)} 个',
+        )
+        self.assertEqual(len(left), 3)  # underflow + 2 细分
+        inner = [c for c in bc if lo <= c <= hi]
+        self.assertEqual(len(inner), 20)  # 规格限内 20 个 bin（gap = range/20）
+
     def test_single_site_percentages_sum_to_about_100(self):
         # Same denominator (total_count = all sites) as multi-site case.
         df = _make_df(300, [1])
@@ -1026,6 +1046,188 @@ class ChartConfigFilterTests(SimpleTestCase):
         by_bin = resp.data['results']['Param0']['by_bin']
         self.assertEqual(set(by_bin.keys()), {'1'})
         self.assertEqual(by_bin['1']['count'], 8)
+
+
+class MultiFileCorrelationFilterApiTests(SimpleTestCase):
+    """数据筛选开关（忽略无Limit/无测试值/仅Pass/仅Fail/低CPK）在
+    multi_lot / correlation / correlation_matrix 端点的口径（2026-08-20）。
+
+    与 histogram 同口径的关键不变量：fail 集合必须基于全量 df 预计算
+    （bin1 过滤前）——fail 行永远不是 Bin1，先过滤再算 fail 集会清空
+    fail 集合。fixture 复用 ChartConfigFilterTests 的帧结构
+    （SW_Bin 行 1/5 为 fail；FailOnly 是唯一 fail 测试项）。
+    """
+
+    METADATA = ChartConfigFilterTests.METADATA
+
+    def _frame(self):
+        return ChartConfigFilterTests._frame(self)
+
+    @staticmethod
+    def _fake_objects(by_id):
+        """DataFile 查询桩：filter(pk=...) → first() 返回对应 fake 对象。"""
+        class _FakeQS:
+            def __init__(self, obj):
+                self._obj = obj
+            def first(self):
+                return self._obj
+
+        class _FakeManager:
+            def filter(self, **kw):
+                return _FakeQS(by_id.get(kw.get('pk')))
+
+        return _FakeManager()
+
+    def _multi_lot(self, payload, frames):
+        """打桩 multi_lot 的 DataFile 查询与文件加载，在 patch 作用域内调用视图。
+
+        注意：patch 必须覆盖「构建请求 → 视图执行」全程，不能在请求构建完
+        就退出（视图内会再查 DataFile.objects）。
+        """
+        import types
+        from unittest.mock import patch
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from apps.analysis.views import analysis_views, AnalysisViewSet
+
+        objs = {}
+        for fid in frames:
+            objs[fid] = types.SimpleNamespace(
+                id=fid, filename=f'f{fid}.csv', format_type='CTA8290D',
+                file_path='/tmp/__nonexistent__',  # os.stat 失败 → 缓存 key 无 mtime 守卫
+            )
+
+        def fake_load(fid, user_id, obj=None):
+            df, meta = frames[fid]
+            return df, meta, 'CTA8290D'
+
+        with patch.object(analysis_views.DataFile, 'objects', self._fake_objects(objs)), \
+             patch.object(analysis_views, 'get_cached_parsed_file', fake_load):
+            factory = APIRequestFactory()
+            request = factory.post('/api/v1/analysis/multi_lot/', payload, format='json')
+            force_authenticate(request, user=types.SimpleNamespace(
+                pk=1, is_authenticated=True, is_active=True, is_anonymous=False,
+                is_staff=False, is_superuser=False,
+            ))
+            resp = AnalysisViewSet.as_view({'post': 'multi_lot'})(request)
+            resp.render()
+            return resp
+
+    def _correlation_request(self, payload, df=None):
+        """打桩 correlation/correlation_matrix 的 _load_df_from_request。"""
+        import types
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        factory, force_auth, restore = StaleParamAcrossFileSwitchTests._patched_view(
+            df if df is not None else self._frame(), metadata=self.METADATA)
+        self.addCleanup(restore)
+        request = factory.post('/api/v1/analysis/correlation/', payload, format='json')
+        force_auth(request, user=types.SimpleNamespace(
+            pk=1, is_authenticated=True, is_active=True, is_anonymous=False,
+            is_staff=False, is_superuser=False,
+        ))
+        return request
+
+    # ── multi_lot ───────────────────────────────────────────────────
+
+    def test_multi_lot_data_only_bin1_reduces_distribution_count(self):
+        """data_only_bin1：首个公共参数分布的 lot count 从 10 收缩到 8。"""
+        f1 = self._frame()
+        f2 = self._frame()
+        resp = self._multi_lot(
+            {'file_ids': [1, 2], 'data_only_bin1': True},
+            {1: (f1, self.METADATA), 2: (f2, self.METADATA)})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        lots = {lot['file_id']: lot for lot in resp.data['lot_data']}
+        self.assertEqual(lots[1]['count'], 8, 'bin1 过滤后应只剩 8 行')
+        self.assertEqual(lots[2]['count'], 8)
+
+    def test_multi_lot_only_fail_test_item_keeps_fail_items_from_full_df(self):
+        """仅显示Fail测试项：common_params 只含 FailOnly。
+
+        回归不变量：fail 集合基于全量 df 预计算（bin1 过滤前）——FailOnly 的
+        fail 行（1/5）不是 Bin1，若先过滤行再算 fail 集则 fail 恒空 →
+        common_params 空（旧实现路径必失败）。
+        """
+        f1 = self._frame()
+        f2 = self._frame()
+        resp = self._multi_lot(
+            {'file_ids': [1, 2], 'only_fail_test_item': True},
+            {1: (f1, self.METADATA), 2: (f2, self.METADATA)})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.data['common_params'], ['FailOnly'])
+
+    def test_multi_lot_only_fail_test_item_with_bin1_keeps_fail_items(self):
+        """仅Fail + 仅Pass 同时开：fail 集仍来自全量 df（组合开关不互相破坏）。"""
+        f1 = self._frame()
+        f2 = self._frame()
+        resp = self._multi_lot(
+            {'file_ids': [1, 2], 'only_fail_test_item': True, 'data_only_bin1': True},
+            {1: (f1, self.METADATA), 2: (f2, self.METADATA)})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.data['common_params'], ['FailOnly'])
+
+    def test_multi_lot_ignore_no_test_value_filters_sparse_params(self):
+        """忽略无测试值 + 仅Pass：ParamBin1Empty（值只在 fail 行）从 common 中移除。
+
+        单独开 ignore_no_test_value 时 ParamBin1Empty 有 20% 有效值（2/10）
+        ≥ 5% 阈值会被保留——与单文件口径一致；组合 data_only_bin1 后
+        bin1 行内全空 → 剔除。
+        """
+        f1 = self._frame()
+        f2 = self._frame()
+        resp = self._multi_lot(
+            {'file_ids': [1, 2], 'ignore_no_test_value': True,
+             'data_only_bin1': True},
+            {1: (f1, self.METADATA), 2: (f2, self.METADATA)})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertNotIn('ParamBin1Empty', resp.data['common_params'])
+        self.assertIn('Param0', resp.data['common_params'])
+
+    # ── correlation ─────────────────────────────────────────────────
+
+    def test_correlation_data_only_bin1_changes_n(self):
+        """correlation：bin1 过滤行后 n 从 10 → 8。"""
+        from apps.analysis.views import AnalysisViewSet
+        request = self._correlation_request(
+            {'file_id': 1, 'param_x': 'Param0', 'param_y': 'Param1',
+             'data_only_bin1': True})
+        resp = AnalysisViewSet.as_view({'post': 'correlation'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.data['n'], 8)
+
+    def test_correlation_only_fail_test_item_400_when_param_filtered(self):
+        """correlation + 仅Fail：param_x=Param0（非 fail 项）→ 400 no_valid_params。"""
+        from apps.analysis.views import AnalysisViewSet
+        request = self._correlation_request(
+            {'file_id': 1, 'param_x': 'Param0', 'param_y': 'FailOnly',
+             'only_fail_test_item': True})
+        resp = AnalysisViewSet.as_view({'post': 'correlation'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertEqual(resp.data.get('error'), 'no_valid_params')
+
+    # ── correlation_matrix ──────────────────────────────────────────
+
+    def test_correlation_matrix_data_only_bin1_ok(self):
+        """correlation_matrix：bin1 过滤行后正常 200（参数列表仍 ≥2）。"""
+        from apps.analysis.views import StatisticsViewSet
+        request = self._correlation_request(
+            {'file_id': 1, 'params': ['Param0', 'Param1', 'FailOnly'],
+             'data_only_bin1': True})
+        resp = StatisticsViewSet.as_view({'post': 'correlation_matrix'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+    def test_correlation_matrix_only_fail_test_item_400_when_below_two(self):
+        """correlation_matrix + 仅Fail：重放后只剩 FailOnly 一个参数 → 400。"""
+        from apps.analysis.views import StatisticsViewSet
+        request = self._correlation_request(
+            {'file_id': 1, 'params': ['Param0', 'Param1', 'FailOnly'],
+             'only_fail_test_item': True})
+        resp = StatisticsViewSet.as_view({'post': 'correlation_matrix'})(request)
+        resp.render()
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertEqual(resp.data.get('error'), 'need_at_least_2_params')
 
 
 class SerialColumnPartIdFallbackTests(SimpleTestCase):

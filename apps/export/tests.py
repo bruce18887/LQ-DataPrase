@@ -200,6 +200,31 @@ class ExportApiTests(APITestCase):
         wb = openpyxl.load_workbook(io.BytesIO(buf))
         self.assertEqual(wb['总览'].max_row, 1 + len(numeric_cols), '总览表头 + 每参数一行')
 
+    def test_batch_charts_site_stats_string_failcount(self):
+        """站点统计 FailCount 是展示字符串（`3(0.181%)`）时 batch_charts 不抛 TypeError。
+
+        2026-08-13 站点统计改版后 FailCount 为格式化字符串 + 数字字段 FailCountNum；
+        总览 Yield 单元格的 fail 判定必须用 FailCountNum（旧代码 `FailCount > 0` 字符串
+        与 int 比较 → 500）。断言 ALL Site 行 Yield 单元格应用 fail 红底（F54927）。
+        """
+        from apps.export.export_batch_charts_xlsx import build_batch_charts_xlsx_with_charts
+
+        df = pd.DataFrame({
+            'Site_No': [1, 1, 2, 2],
+            # 限 1.4~1.6：Site1 两行全部越限 → ALL Site FailCountNum = 2 > 0
+            'Vth': [1.0, 1.1, 2.0, 2.5],
+        })
+        metadata = {'limits': {'Vth': (1.4, 1.6)}, 'unit': {'Vth': ''}}
+        buf = build_batch_charts_xlsx_with_charts(
+            df, metadata, ['Vth'], site_col='Site_No',
+            show_limit=True, show_3sigma=False, show_4sigma=False,
+            show_6sigma=False, show_normal=False,
+        )
+        wb = openpyxl.load_workbook(io.BytesIO(buf))
+        # 总览第 2 行（参数 Vth）第 10 列（ALL Site Yield）应为 fail 红底
+        cell = wb['总览'].cell(row=2, column=10)
+        self.assertEqual(cell.fill.start_color.rgb, '00F54927', '有 fail 的 ALL Site 行应为红色填充')
+
     def test_batch_charts_data_only_bin1(self):
         """POST /export/batch_charts/ + data_only_bin1：200，图表仍按过滤后数据生成。"""
         df_parsed, _ = get_parser('CTA8290D').parse(GAGE_S1_PATH)

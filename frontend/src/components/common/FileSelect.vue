@@ -57,6 +57,7 @@
 <script setup lang="ts">
 import { computed, ref, useAttrs } from 'vue'
 import type { DataFile } from '../../types'
+import { formatSize, formatTime } from '../../utils/format'
 
 type FileSelectSize = 'large' | 'default' | 'small' | ''
 type GroupKey = 'program_name' | 'format_type' | ''
@@ -80,7 +81,7 @@ interface Props {
   id?: string
   /** 追加到下拉 popper 根节点的类（内部自带 dp-file-select-dropdown） */
   popperClass?: string
-  /** 富信息行：文件名 + program · format · 行数 */
+  /** 富信息行：文件名 + program · format · 行数 · 大小 · 上传时间 */
   showMeta?: boolean
   /** 按字段分组（空值归「未分组」；'' 不分组） */
   groupBy?: GroupKey
@@ -241,9 +242,17 @@ function toDisplay(list: DataFile[], query: string): DisplayFile[] {
   return list.map((f) => ({ ...f, filenameHtml: highlightMatch(f.filename ?? '', query) }))
 }
 
-/** 富信息行文本：program · format · N 行 */
+/** 富信息行文本：program · format · N 行 · 大小 · 上传时间 */
 function metaText(f: DataFile): string {
-  return [f.program_name, f.format_type, `${f.row_count ?? 0} 行`].filter(Boolean).join(' · ')
+  return [
+    f.program_name,
+    f.format_type,
+    `${f.row_count ?? 0} 行`,
+    f.file_size ? formatSize(f.file_size) : '',
+    f.created_at ? formatTime(f.created_at) : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 interface FileGroup {

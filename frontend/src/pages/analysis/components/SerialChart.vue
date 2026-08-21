@@ -112,8 +112,15 @@ function buildOption() {
     }),
   )
 
+  // marks（LSL/USL/σ 参考线）图例 marker 与线色严格对应：itemStyle.color 取
+  // 线色（后端 serial_distribution 每条线颜色一致），缺省时回退主题色板
   for (const mark of d.marks || []) {
-    series.push({ name: mark.name, type: mark.type || 'scatter', data: mark.data || [], markLine: mark.markLine, silent: true })
+    const lineColor = mark.markLine?.data?.[0]?.lineStyle?.color
+    series.push({
+      name: mark.name, type: mark.type || 'scatter', data: mark.data || [],
+      markLine: mark.markLine, silent: true,
+      ...(lineColor ? { itemStyle: { color: lineColor } } : {}),
+    })
   }
 
   let subtext = unit ? `Unit: ${unit}` : ''

@@ -173,7 +173,11 @@ def compute_histogram_stats(df, metadata, param, site_col,
     # sample over the full visible X-axis — bin_centers[0..-1], which extend
     # one gap past the underflow/overflow bin centres — so they fill the
     # axis edge to edge instead of stopping at the binning bounds.
-    inner_edges = [bin_min + j * data_gap for j in range(25)]
+    # 25 inner edges step from bin_min - 2*data_gap by data_gap → bin 网格以
+    # [bin_min, bin_max] 为中心对称：两侧各 2 个细分 bin + underflow/overflow
+    #（回归：bin-grid-asymmetry，此前网格锚定 bin_min 使 USL 右侧多出 4 个
+    # 细分 bin，X 轴视觉偏左；multi_lot 同构统一）
+    inner_edges = [bin_min - 2 * data_gap + j * data_gap for j in range(25)]
     bin_centers = [inner_edges[0] - data_gap]  # underflow center
     bin_centers += [(inner_edges[i] + inner_edges[i + 1]) / 2 for i in range(24)]
     bin_centers.append(inner_edges[-1] + data_gap)  # overflow center

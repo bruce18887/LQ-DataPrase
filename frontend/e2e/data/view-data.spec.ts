@@ -92,6 +92,29 @@ async function fetchBinFailInfo(page: Page, filename: string) {
   }, filename)
 }
 
+/**
+ * 从 /browse/ API 取「显示测试列」测试素材：左起前两个非系统测试列
+ * （渲染窗口内必可见）+ bin 系统列。系统列判定与 DataBrowserAgGrid.vue 的
+ * isSystemCol 保持一致（token 前缀匹配，不做单字母子串扫描）。
+ */
+async function fetchFirstTestCols(page: Page, filename: string) {
+  return page.evaluate(async (filename) => {
+    const token = localStorage.getItem('access_token')
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
+    const files = await fetch(`/api/v1/files/?search=${encodeURIComponent(filename)}`, { headers }).then((r) => r.json())
+    const file = ((files.results ?? files) as any[]).find((f: any) => f.filename === filename)
+    const d = await fetch(`/api/v1/browse/?datafile_id=${file.id}&page_size=1`, { headers }).then((r) => r.json())
+    const PREFIXES = ['soft_bin', 'sw_bin', 'hard_bin', 'site', 'serial', 'wafer', 'device']
+    const EXACT = ['x', 'y', 'x_coord', 'y_coord']
+    const isSystem = (c: string) => {
+      const lower = c.split(' ')[0].split('(')[0].trim().toLowerCase()
+      return EXACT.includes(lower) || PREFIXES.some((p) => lower === p || lower.startsWith(`${p}_`) || lower.startsWith(`${p} `))
+    }
+    const testCols = (d.headers ?? []).filter((c: string) => !isSystem(c))
+    return { testCol: testCols[0] ?? '', absentCol: testCols[1] ?? '', bin: d.bin_column as string }
+  }, filename)
+}
+
 /** 目标行若未渲染（rowBuffer=10 外的行），滚动垂直视口使其渲染（v33+ 垂直滚动在 ag-body-vertical-scroll-viewport） */
 async function ensureRowRendered(page: Page, rowIndex: number) {
   const row = page.locator(`.ag-pinned-left-cols-container .ag-row[row-index="${rowIndex}"]`)
@@ -423,48 +446,139 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     })
   })
 
-  test('@p2 列显隐：隐藏列多选下拉可隐藏列、取消后恢复', async ({ page }) => {
+  test('@p1 显示测试列：选中后仅显示该测试列、系统列始终显示，清空恢复全部', async ({ page }) => {
     await openViewTab(page, SEEDED_FILES.GAGE_S1)
 
-    // 取第一个可见系统列名（如 Bin 列）作为操作目标
-    const firstHeader = page.locator('.ag-header-cell').first()
-    const colName = (await firstHeader.textContent())?.trim().split(' ')[0] ?? ''
-    expect(colName).toBeTruthy()
-    await expect(page.locator('.ag-header-cell').filter({ hasText: colName }).first()).toBeVisible()
+    // 左起前两个非系统测试列；bin 列（系统列）恒显示
+    const { testCol, absentCol, bin } = await fetchFirstTestCols(page, SEEDED_FILES.GAGE_S1)
+    expect(testCol).toBeTruthy()
+    expect(absentCol).toBeTruthy()
+    expect(bin).toBeTruthy()
 
-    // 打开「隐藏列」多选下拉，勾选目标列
-    const hideSelect = viewScope(page).locator('.el-select:has(input[aria-label="隐藏列"])').first()
-    // 首次无选中 tag：点 wrapper 打开（placeholder 会遮挡 input）；有 tag 后改点 input（避免点到 tag 触发移除）
-    const hideInput = hideSelect.locator('input[aria-label="隐藏列"]')
-    await hideSelect.locator('.el-select__wrapper').click()
+    // 打开「显示测试列」多选下拉，勾选 testCol
+    const selector = viewScope(page).locator('.test-col-selector:has(input[aria-label="显示测试列"])').first()
+    await selector.locator('.el-select__wrapper').click()
     const options = page.locator('.el-select-dropdown:visible .el-select-dropdown__item')
     await expect(options.first()).toBeVisible({ timeout: 5_000 })
     await page.waitForTimeout(300)
-    const target = options.filter({ hasText: colName }).first()
-    await target.click({ force: true })
+    await options.filter({ hasText: testCol }).first().click()
     await page.keyboard.press('Escape')
     await page.waitForTimeout(300)
 
-    // 该列 header 消失（隐藏）
-    await expect
-      .poll(
-        async () => page.locator('.ag-header-cell').filter({ hasText: colName }).count(),
-        { timeout: 10_000 },
-      )
-      .toBe(0)
-
-    // 再次打开取消勾选 → 列恢复
-    await hideInput.click()
-    await page.waitForTimeout(300)
-    await page
-      .locator('.el-select-dropdown:visible .el-select-dropdown__item')
-      .filter({ hasText: colName })
-      .first()
-      .click({ force: true })
-    await page.keyboard.press('Escape')
-    await expect(page.locator('.ag-header-cell').filter({ hasText: colName }).first()).toBeVisible({
+    // 选中列可见；未选中的另一个测试列被过滤（恒不渲染）；系统列（bin）仍显示
+    await expect(page.locator('.ag-header-cell').filter({ hasText: testCol }).first()).toBeVisible({
       timeout: 10_000,
     })
+    await expect(page.locator('.ag-header-cell').filter({ hasText: absentCol })).toHaveCount(0)
+    await expect(page.locator('.ag-header-cell').filter({ hasText: bin }).first()).toBeVisible({
+      timeout: 10_000,
+    })
+
+    // 清空 → 恢复全部测试列（列数回到 346，水平滚动容器可滚动）
+    await selector.locator('button').filter({ hasText: '清空' }).click()
+    await expect
+      .poll(
+        () => page.evaluate(() => {
+          const vp = document.querySelector('.ag-body-horizontal-scroll-viewport')
+          return vp ? vp.scrollWidth > vp.clientWidth : false
+        }),
+        { timeout: 10_000 },
+      )
+      .toBe(true)
+  })
+
+  test('@p2 显示测试列：输入关键词 + Enter 全选匹配项', async ({ page }) => {
+    await openViewTab(page, SEEDED_FILES.GAGE_S1)
+
+    // 找出现频次最高的 3 字符前缀作为关键词（保证 ≥2 匹配）
+    const { kw, matchCount, firstMatch } = await page.evaluate(async (filename) => {
+      const token = localStorage.getItem('access_token')
+      const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
+      const files = await fetch(`/api/v1/files/?search=${encodeURIComponent(filename)}`, { headers }).then((r) => r.json())
+      const file = ((files.results ?? files) as any[]).find((f: any) => f.filename === filename)
+      const d = await fetch(`/api/v1/browse/?datafile_id=${file.id}&page_size=1`, { headers }).then((r) => r.json())
+      const PREFIXES = ['soft_bin', 'sw_bin', 'hard_bin', 'site', 'serial', 'wafer', 'device']
+      const EXACT = ['x', 'y', 'x_coord', 'y_coord']
+      const isSystem = (c: string) => {
+        const lower = c.split(' ')[0].split('(')[0].trim().toLowerCase()
+        return EXACT.includes(lower) || PREFIXES.some((p) => lower === p || lower.startsWith(`${p}_`) || lower.startsWith(`${p} `))
+      }
+      const testCols = (d.headers ?? []).filter((c: string) => !isSystem(c))
+      const freq = new Map<string, number>()
+      for (const c of testCols) {
+        const p = c.slice(0, 3).toLowerCase()
+        freq.set(p, (freq.get(p) ?? 0) + 1)
+      }
+      let best = ''
+      let bestCount = 0
+      for (const [p, n] of freq) {
+        if (n > bestCount) { best = p; bestCount = n }
+      }
+      const matched = best ? testCols.filter((c: string) => c.toLowerCase().includes(best)) : []
+      return { kw: best, matchCount: matched.length, firstMatch: matched[0] ?? '' }
+    }, SEEDED_FILES.GAGE_S1)
+    expect(kw).toBeTruthy()
+    expect(matchCount).toBeGreaterThanOrEqual(2)
+
+    const selector = viewScope(page).locator('.test-col-selector:has(input[aria-label="显示测试列"])').first()
+    await selector.locator('.el-select__wrapper').click()
+    const input = selector.locator('input[aria-label="显示测试列"]')
+    // filterable 下拉：fill 不触发过滤，必须逐键输入
+    await input.pressSequentially(kw)
+
+    // footer 提示「匹配 N 项，按 Enter 全选」
+    const hint = page.locator('.el-select-dropdown:visible .match-hint')
+    await expect(hint).toContainText(`匹配 ${matchCount} 项`, { timeout: 5_000 })
+    await input.press('Enter')
+
+    // 全选后输入框自动清空；下拉保持打开，匹配列全部呈选中态（is-selected）
+    await expect(input).toHaveValue('')
+    await expect
+      .poll(async () => {
+        const opt = page
+          .locator('.el-select-dropdown:visible .el-select-dropdown__item')
+          .filter({ hasText: new RegExp(`^${firstMatch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) })
+          .first()
+        return (await opt.getAttribute('class'))?.includes('is-selected') ?? false
+      }, { timeout: 5_000 })
+      .toBe(true)
+  })
+
+  test('@p2 显示测试列：切换文件后选中集重置为全部显示', async ({ page }) => {
+    await openViewTab(page, SEEDED_FILES.GAGE_S1)
+
+    const { testCol, absentCol } = await fetchFirstTestCols(page, SEEDED_FILES.GAGE_S1)
+    const selector = viewScope(page).locator('.test-col-selector:has(input[aria-label="显示测试列"])').first()
+    await selector.locator('.el-select__wrapper').click()
+    const options = page.locator('.el-select-dropdown:visible .el-select-dropdown__item')
+    await expect(options.first()).toBeVisible({ timeout: 5_000 })
+    await page.waitForTimeout(300)
+    await options.filter({ hasText: testCol }).first().click()
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.ag-header-cell').filter({ hasText: absentCol })).toHaveCount(0)
+
+    // banner 下拉切换文件 → 选中集重置，全部测试列恢复（水平滚动容器可滚动）
+    const banner = page.locator('.active-file-banner:visible .banner-file-select').first()
+    await banner.click()
+    const bannerOptions = page.locator('.el-select-dropdown:visible .el-select-dropdown__item')
+    await bannerOptions.filter({ hasText: SEEDED_FILES.GAGE_S2.slice(0, 12) }).first().click()
+    await expect
+      .poll(
+        () => page.evaluate(() => {
+          const vp = document.querySelector('.ag-body-horizontal-scroll-viewport')
+          return vp ? vp.scrollWidth > vp.clientWidth : false
+        }),
+        { timeout: 15_000 },
+      )
+      .toBe(true)
+  })
+
+  test('@p2 工具栏控件标签可见', async ({ page }) => {
+    await openViewTab(page, SEEDED_FILES.GAGE_S1)
+    const scope = viewScope(page)
+    for (const label of ['显示测试列', 'Pass/Fail', 'Site', '列宽', '固定列']) {
+      await expect(scope.locator('.ctl-label').filter({ hasText: label })).toBeVisible()
+    }
   })
 
   test('@p2 列直方图：右键列头打开分布对话框（直方图 + CPK），右键数据区不弹', async ({ page }) => {

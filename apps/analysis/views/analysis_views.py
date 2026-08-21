@@ -52,36 +52,12 @@ from ._helpers import (
     _load_df_from_request,
     get_bool_param,
     get_cpk_b_threshold,
+    parse_filter_flags,
+    cached_low_cpk_items,
 )
 
-# Low-CPK set cache for the fast path: evaluating every column (IQR + CPK)
-# is the dominant cost of the filter chain (~100-200 ms on a 10k-row file),
-# and the fast path runs on every config toggle / file switch.  The key
-# carries the file's mtime+size so a re-parsed file invalidates the entry.
-_low_cpk_cache: Dict[tuple, Set[str]] = {}
-
-
-def _cached_low_cpk_items(datafile, user_id: int, df, metadata,
-                          threshold: float, iqr_multiplier: float,
-                          data_only_bin1: bool) -> Set[str]:
-    key = (user_id, datafile.id, threshold, iqr_multiplier, data_only_bin1)
-    try:
-        st = os.stat(datafile.file_path)
-        key += (st.st_mtime_ns, st.st_size)
-    except (OSError, AttributeError):
-        # file missing / test fakes without file_path → no mtime guard
-        key += (0, 0)
-    cached = _low_cpk_cache.get(key)
-    if cached is not None:
-        return cached
-    work_df = filter_bin1_rows(df, metadata) if data_only_bin1 else df
-    result = set(compute_low_cpk_test_items(
-        work_df, metadata, threshold, iqr_multiplier=iqr_multiplier))
-    if len(_low_cpk_cache) > 500:
-        # 简单上限：key 含 mtime+size 天然随文件重解析失效，全清成本低
-        _low_cpk_cache.clear()
-    _low_cpk_cache[key] = result
-    return result
+# 兼容既有调用名（低 CPK 缓存已上移 _helpers，多视图共享）
+_cached_low_cpk_items = cached_low_cpk_items
 
 
 class AnalysisViewSet(viewsets.GenericViewSet):
@@ -283,10 +259,43 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         # 首个公共参数的分布——前端免去串行第二次请求再遍历一轮文件加载
         # （冷缓存 ~3.6s → ~2.2s）。
         if not param:
-            ignore_no_limit = str(
-                get_param(request, 'ignore_no_limit', '')
-            ).lower() in ('true', '1', 'yes')
-            common_params = compute_common_params(loaded, ignore_no_limit)
+            flags = parse_filter_flags(request)
+            cpk_threshold = get_cpk_b_threshold(request.user)
+            iqr_multiplier = flags['iqr_multiplier']
+            # data_only_bin1 先收窄行再派生基础候选列表（与单文件 fast-path 口径一致）
+            loaded_work = loaded
+            if flags['data_only_bin1']:
+                loaded_work = [
+                    (fid, filter_bin1_rows(df, metadata), metadata, fn)
+                    for fid, df, metadata, fn in loaded
+                ]
+            common_params = compute_common_params(loaded_work, flags['ignore_no_limit'])
+            # 其余筛选（忽略无测试值/仅Fail项/仅低CPK）：对交集按每个文件过滤后
+            # 再取交集——fail 集合必须基于全量 df 预计算（bin1 过滤前，否则
+            # fail 恒空）；低 CPK 走共享缓存（key 含 mtime+size 自动失效）。
+            if flags['ignore_no_test_value'] or flags['only_fail_test_item'] or flags['only_low_cpk']:
+                per_file = []
+                for (fid, df, metadata, _fn), (_fid2, full_df, _, _) in zip(loaded_work, loaded):
+                    fail_items = None
+                    if flags['only_fail_test_item']:
+                        fail_items = set(calculate_fail_test_item_statistics(full_df, metadata).keys())
+                    low_cpk_items = None
+                    if flags['only_low_cpk']:
+                        df_obj = DataFile.objects.filter(pk=fid, owner=request.user).first()
+                        low_cpk_items = _cached_low_cpk_items(
+                            df_obj, request.user.pk, full_df, metadata,
+                            cpk_threshold, iqr_multiplier, flags['data_only_bin1'])
+                    per_file.append(set(filter_test_items(
+                        df, metadata, common_params,
+                        ignore_no_test_value=flags['ignore_no_test_value'],
+                        only_fail_test_item=flags['only_fail_test_item'],
+                        only_low_cpk=flags['only_low_cpk'],
+                        cpk_threshold=cpk_threshold,
+                        fail_items=fail_items,
+                        iqr_multiplier=iqr_multiplier,
+                        low_cpk_items=low_cpk_items,
+                    )))
+                common_params = [c for c in common_params if all(c in s for s in per_file)]
             response = {
                 'common_params': common_params,
                 'file_names': [
@@ -300,7 +309,8 @@ class AnalysisViewSet(viewsets.GenericViewSet):
                 custom_high = get_param_float(request, 'custom_high')
                 datasets = {}
                 all_series = []
-                for fid, df, metadata, filename in loaded:
+                # 分布用 loaded_work（bin1 已收窄）——与筛选后的 common_params 口径一致
+                for fid, df, metadata, filename in loaded_work:
                     if first in df.columns:
                         s = get_1d_from(df, first).dropna()
                         s = s[abs(s) < float('inf')]
@@ -320,6 +330,9 @@ class AnalysisViewSet(viewsets.GenericViewSet):
             return Response(response)
 
         # With param → per-file distribution (no SITE split; one series/file).
+        flags = parse_filter_flags(request)
+        cpk_threshold = get_cpk_b_threshold(request.user)
+        iqr_multiplier = flags['iqr_multiplier']
         range_type = get_param(request, 'range_type', 'S4')
         custom_low = get_param_float(request, 'custom_low')
         custom_high = get_param_float(request, 'custom_high')
@@ -327,15 +340,42 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         datasets = {}
         all_series = []
         for fid, df, metadata, filename in loaded:
-            if param in df.columns:
-                s = get_1d_from(df, param).dropna()
-                s = s[abs(s) < float('inf')]
-                if len(s) > 0:
-                    datasets[str(fid)] = {
-                        'df': df, 'metadata': metadata, 'series': s,
-                        'name': filename[:20], 'file_id': fid,
-                    }
-                    all_series.append(s)
+            if param not in df.columns:
+                continue
+            fail_items = None
+            if flags['only_fail_test_item']:
+                # fail 集合基于全量 df（bin1 过滤前）
+                fail_items = set(calculate_fail_test_item_statistics(
+                    df, metadata, columns=[param]).keys())
+            low_cpk_items = None
+            if flags['only_low_cpk']:
+                df_obj = DataFile.objects.filter(pk=fid, owner=request.user).first()
+                low_cpk_items = _cached_low_cpk_items(
+                    df_obj, request.user.pk, df, metadata,
+                    cpk_threshold, iqr_multiplier, flags['data_only_bin1'])
+            work_df = filter_bin1_rows(df, metadata) if flags['data_only_bin1'] else df
+            # 防御性重放：参数在该文件被筛掉（非 fail 项/非低 CPK/无测试值）→
+            # 跳过该文件（与 histogram compute-path 的 no_valid_params 同口径）
+            keep = filter_test_items(
+                work_df, metadata, [param],
+                ignore_no_test_value=flags['ignore_no_test_value'],
+                only_fail_test_item=flags['only_fail_test_item'],
+                only_low_cpk=flags['only_low_cpk'],
+                cpk_threshold=cpk_threshold,
+                fail_items=fail_items,
+                iqr_multiplier=iqr_multiplier,
+                low_cpk_items=low_cpk_items,
+            )
+            if not keep:
+                continue
+            s = get_1d_from(work_df, param).dropna()
+            s = s[abs(s) < float('inf')]
+            if len(s) > 0:
+                datasets[str(fid)] = {
+                    'df': work_df, 'metadata': metadata, 'series': s,
+                    'name': filename[:20], 'file_id': fid,
+                }
+                all_series.append(s)
 
         if not all_series:
             return Response({
@@ -371,6 +411,39 @@ class AnalysisViewSet(viewsets.GenericViewSet):
 
         if param_x not in df.columns or param_y not in df.columns:
             return Response({'error': 'param_not_found'}, status=400)
+
+        # 数据筛选（单文件口径，2026-08-20）：bin1 收窄行；其余开关对
+        # param_x/param_y 防御性重放——任一被筛掉（非 fail 项等）→ 400，
+        # 前端参数列表刷新后自愈。
+        flags = parse_filter_flags(request)
+        cpk_threshold = get_cpk_b_threshold(request.user)
+        iqr_multiplier = flags['iqr_multiplier']
+        fail_items = None
+        if flags['only_fail_test_item']:
+            fail_items = set(calculate_fail_test_item_statistics(
+                df, metadata, columns=[param_x, param_y]).keys())
+        low_cpk_items = None
+        if flags['only_low_cpk']:
+            low_cpk_items = _cached_low_cpk_items(
+                datafile, request.user.pk, df, metadata,
+                cpk_threshold, iqr_multiplier, flags['data_only_bin1'])
+        if flags['data_only_bin1']:
+            df = filter_bin1_rows(df, metadata)
+        keep = filter_test_items(
+            df, metadata, [param_x, param_y],
+            ignore_no_test_value=flags['ignore_no_test_value'],
+            only_fail_test_item=flags['only_fail_test_item'],
+            only_low_cpk=flags['only_low_cpk'],
+            cpk_threshold=cpk_threshold,
+            fail_items=fail_items,
+            iqr_multiplier=iqr_multiplier,
+            low_cpk_items=low_cpk_items,
+        )
+        if len(keep) < 2:
+            return Response({
+                'error': 'no_valid_params',
+                'detail': '参数在当前数据筛选下无效（如非 Fail 测试项），请调整筛选或参数',
+            }, status=400)
 
         result = compute_correlation_scatter(df, param_x, param_y, metadata)
 

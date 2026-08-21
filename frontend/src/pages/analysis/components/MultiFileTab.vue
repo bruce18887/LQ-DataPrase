@@ -38,10 +38,15 @@
 
         <ChartConfigPanel
           variant="multi-file"
+          full-filters
           v-model:chart-config="chartConfig"
           v-model:bar-width-percent="barWidthPercent"
           :bar-width-max="barWidthMax"
           v-model:ignore-no-limit="ignoreNoLimit"
+          v-model:ignore-no-test-value="ignoreNoTestValue"
+          v-model:data-only-bin1="dataOnlyBin1"
+          v-model:only-fail-test-item="onlyFailTestItem"
+          v-model:only-low-cpk="onlyLowCpk"
           :range-type="'RDL'"
         />
 
@@ -117,7 +122,8 @@ import { computed, watch, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useAnalysisStore } from '../../../stores/analysis'
 import { useMultiFile } from '../composables/useMultiFile'
-import { getMaxBarWidthPercent } from '../../../utils/chart-bar'
+import { getMaxBarWidthPercent, mapLotColorToTheme, SITE_COLORS_8_LIGHT } from '../../../utils/chart-bar'
+import { useEChartsTheme } from '../../../utils/echarts-theme'
 import ChartConfigPanel from './ChartConfigPanel.vue'
 import ParamSelector from './ParamSelector.vue'
 import MultiFileChart from './MultiFileChart.vue'
@@ -135,7 +141,19 @@ const {
   multiBarWidthPercent: barWidthPercent,
   multiIgnoreNoLimit: ignoreNoLimit,
   multiRangeType: rangeType,
+  multiIgnoreNoTestValue: ignoreNoTestValue,
+  multiDataOnlyBin1: dataOnlyBin1,
+  multiOnlyFailTestItem: onlyFailTestItem,
+  multiOnlyLowCpk: onlyLowCpk,
 } = storeToRefs(analysisStore)
+
+// 数据筛选开关载荷（与单文件 5 开关同口径，2026-08-20）
+const multiFilters = computed(() => ({
+  ignore_no_test_value: ignoreNoTestValue.value,
+  data_only_bin1: dataOnlyBin1.value,
+  only_fail_test_item: onlyFailTestItem.value,
+  only_low_cpk: onlyLowCpk.value,
+}))
 
 const { loading, paramsLoading, commonParams, lotData, lotParam, loadCommonParams, loadDistribution } = useMultiFile()
 
@@ -160,11 +178,22 @@ const selectedFileObjs = computed(() =>
     .filter(Boolean) as any[]
 )
 
-// file_id → 调色板颜色（与后端 colors 顺序一致）
-const PALETTE = ['#0077BB', '#EE7733', '#009988', '#CC3311', '#33BBEE', '#EE3377', '#BBBBBB', '#648FFF']
+const { isDark } = useEChartsTheme()
+
+/**
+ * 图例名色点 = 后端 lot.color（事实来源）经主题映射——与 MultiFileChart 的
+ * 柱/线颜色严格一致（此前本地 PALETTE 按选择顺序取色，与后端按 datasets
+ * 字典序分配错位时色点≠柱色，2026-08-20 修复）；lotData 未含该文件时按
+ * 选择顺序回退浅色板。
+ */
 function colorOf(fid: number): string {
+  const lot = lotData.value?.lot_data?.find((l: any) => l.file_id === fid)
+  if (lot?.color) return mapLotColorToTheme(lot.color, isDark.value)
   const idx = fileIds.value.indexOf(fid)
-  return PALETTE[(idx < 0 ? 0 : idx) % PALETTE.length]
+  return mapLotColorToTheme(
+    SITE_COLORS_8_LIGHT[(idx < 0 ? 0 : idx) % SITE_COLORS_8_LIGHT.length],
+    isDark.value,
+  )
 }
 
 /**
@@ -253,7 +282,7 @@ async function reloadParams() {
   // 合并请求：loadCommonParams 的响应已含首个公共参数的分布（lotParam 标记）。
   // 必须传当前 rangeType——后端合并分支无该参数时默认 S4，先切类型再选文件/
   // URL 恢复场景下初始图表会与下拉不一致（2026-08-13 回归）
-  await loadCommonParams(fileIds.value, ignoreNoLimit.value, rangeType.value)
+  await loadCommonParams(fileIds.value, ignoreNoLimit.value, rangeType.value, multiFilters.value)
   // 选中项失效时回退到第一项
   if (commonParams.value.length === 0) {
     selectedParam.value = ''
@@ -262,7 +291,7 @@ async function reloadParams() {
     // watch(selectedParam) 触发时若 lotParam === 该参数则跳过（分布已随合并响应到达）
   } else if (lotParam.value !== selectedParam.value) {
     // 列表变了但当前项仍有效且分布未随合并响应到达，主动刷新一次
-    await loadDistribution(fileIds.value, selectedParam.value, rangeType.value)
+    await loadDistribution(fileIds.value, selectedParam.value, rangeType.value, multiFilters.value)
   }
 }
 
@@ -273,13 +302,15 @@ watch(fileIds, () => {
   fileDebounce = setTimeout(() => { reloadParams() }, 150)
 }, { deep: true })
 watch(ignoreNoLimit, () => { reloadParams() })
+// 数据筛选开关变化 → 重载公共参数列表（合并请求携带全部开关）
+watch([ignoreNoTestValue, dataOnlyBin1, onlyFailTestItem, onlyLowCpk], () => { reloadParams() })
 watch(rangeType, () => {
   // 范围类型变化总是需要按新 range_type 重算分布（合并请求用的是默认类型）
-  if (selectedParam.value) loadDistribution(fileIds.value, selectedParam.value, rangeType.value)
+  if (selectedParam.value) loadDistribution(fileIds.value, selectedParam.value, rangeType.value, multiFilters.value)
 })
 watch(selectedParam, (p) => {
   if (p) {
-    if (lotParam.value !== p) loadDistribution(fileIds.value, p, rangeType.value)
+    if (lotParam.value !== p) loadDistribution(fileIds.value, p, rangeType.value, multiFilters.value)
   } else lotData.value = null
 })
 

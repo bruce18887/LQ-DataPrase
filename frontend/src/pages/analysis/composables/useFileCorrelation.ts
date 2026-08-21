@@ -3,6 +3,7 @@ import api from '../../../api'
 import { datafilesApi } from '../../../api/datafiles'
 import { useAsyncData } from '../../../composables/useAsyncData'
 import { ElMessage } from 'element-plus'
+import type { DataFile } from '../../../types'
 
 /**
  * useFileCorrelation — 文件相关性：按序列号对齐两个文件，逐参数对比
@@ -13,16 +14,15 @@ export function useFileCorrelation() {
     successMsg: '文件相关性分析完成',
   })
 
-  /** 文件选择器选项（全部 DataFile 列表） */
-  const files = ref<{ id: number; filename: string }[]>([])
+  /** 文件选择器选项（完整 DataFile 对象，FileSelect 富信息行需要 file_size/created_at 等） */
+  const files = ref<DataFile[]>([])
   const filesLoading = ref(false)
 
   async function loadFiles() {
     filesLoading.value = true
     try {
       const { data } = await datafilesApi.list()
-      const list: any[] = Array.isArray(data) ? data : (data?.results ?? [])
-      files.value = list.map((f: any) => ({ id: f.id, filename: f.filename }))
+      files.value = Array.isArray(data) ? data : (data?.results ?? [])
     } catch {
       files.value = []
     } finally {

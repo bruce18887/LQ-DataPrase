@@ -1,27 +1,24 @@
 <template>
   <div>
-    <!-- 控制栏（DataBrowserToolbar：筛选控件 + 全文搜索 + 操作按钮） -->
+    <!-- 控制栏（DataBrowserToolbar：筛选控件 + 操作按钮） -->
     <DataBrowserToolbar
-      :search-col="searchCol"
-      :search-test-col="searchTestCol"
+      :test-cols="testCols"
+      :selected-test-cols="selectedTestCols"
       :passfail="passfail"
       :site-filter="siteFilter"
       :site-options="siteOptions"
       :site-col-disabled="siteColDisabled"
       :autosize-mode="autosizeMode"
       :pinned-col="pinnedCol"
-      :hidden-cols="hiddenCols"
       :all-cols="allCols"
       :loading="loading"
       :exporting-excel="exportingExcel"
       :exporting-csv="exportingCsv"
-      @update:search-col="searchCol = $event"
-      @update:search-test-col="searchTestCol = $event"
+      @update:selected-test-cols="selectedTestCols = $event"
       @update:passfail="passfail = $event"
       @update:site-filter="siteFilter = $event"
       @update:autosize-mode="autosizeMode = $event"
       @update:pinned-col="pinnedCol = $event"
-      @update:hidden-cols="hiddenCols = $event"
       @load="reload"
       @export-excel="exportExcel"
       @export-csv="exportCsv"
@@ -119,13 +116,12 @@ const themeStore = useThemeStore()
 const filesStore = useFilesStore()
 const isDark = computed(() => themeStore.currentTheme === 'night')
 
-const searchCol = ref('')
-const searchTestCol = ref('')
 const passfail = ref('')
 const siteFilter = ref('')
 const autosizeMode = ref('none')
 const pinnedCol = ref('')
-const hiddenCols = ref<string[]>([])
+// 显示测试列：选中集非空 = 表格仅显示这些测试列（系统列恒显）；空集 = 显示全部
+const selectedTestCols = ref<string[]>([])
 const loading = ref(false)
 const exportingExcel = ref(false)
 const exportingCsv = ref(false)
@@ -187,50 +183,41 @@ function onGridContextMenu(e: MouseEvent) {
   handleBodyContextMenu(e)
 }
 
-// System columns that should appear first
-const SYSTEM_COLS = ['SOFT_BIN', 'SW_Bin', 'HARD_BIN', 'Site', 'SITE', 'site', 'X', 'Y', 'x', 'y', 'Serial', 'SERIAL', 'serial', 'Wafer', 'WAFER', 'wafer', 'Device', 'DEVICE', 'device']
+// System columns that should appear first。
+// 注意：X/Y 坐标用「精确 token + 前缀」匹配——旧实现对单字母做子串扫描，
+// 导致任何列名含 x/y 的测试列（如 OC_Trim_hys_Sim、*_HYS）被误判为系统列
+// 永远前置且不可由「显示测试列」隐藏（2026-08-20 修复）。
+const SYSTEM_PREFIXES = ['soft_bin', 'sw_bin', 'hard_bin', 'site', 'serial', 'wafer', 'device']
+const SYSTEM_EXACT = ['x', 'y', 'x_coord', 'y_coord']
 
 function isSystemCol(name: string): boolean {
   const baseName = name.split(' ')[0].split('(')[0].trim()
-  return SYSTEM_COLS.includes(baseName) || SYSTEM_COLS.some(sc => name.toLowerCase().includes(sc.toLowerCase()))
+  const lower = baseName.toLowerCase()
+  return (
+    SYSTEM_EXACT.includes(lower) ||
+    SYSTEM_PREFIXES.some((p) => lower === p || lower.startsWith(`${p}_`) || lower.startsWith(`${p} `))
+  )
 }
 
-// Filtered columns
+// 全部测试列（系统列排除，供「显示测试列」选择器使用）
+const testCols = computed(() => allCols.value.filter((c) => !isSystemCol(c)))
+
+// 显示列：系统列始终显示；选中测试列非空时仅显示选中测试列（空集 = 全部显示）
 const displayCols = computed(() => {
-  let cols = [...allCols.value]
-
-  if (searchCol.value) {
-    const q = searchCol.value.toLowerCase()
-    cols = cols.filter(c => c.toLowerCase().includes(q))
-  }
-
-  // 用户主动隐藏的列
-  if (hiddenCols.value.length) {
-    cols = cols.filter((c) => !hiddenCols.value.includes(c))
-  }
-
-  // Sort: system first
   const sysCols: string[] = []
   const testCols: string[] = []
-  for (const c of cols) {
+  for (const c of allCols.value) {
     if (isSystemCol(c)) {
       sysCols.push(c)
     } else {
       testCols.push(c)
     }
   }
-  cols = [...sysCols, ...testCols]
-
-  // Move selected test col to front (after system cols)
-  if (searchTestCol.value && searchTestCol.value !== '' && cols.includes(searchTestCol.value)) {
-    const idx = cols.indexOf(searchTestCol.value)
-    if (idx >= 0) {
-      cols.splice(idx, 1)
-      cols.splice(sysCols.length, 0, searchTestCol.value)
-    }
+  let shown = testCols
+  if (selectedTestCols.value.length) {
+    shown = testCols.filter((c) => selectedTestCols.value.includes(c))
   }
-
-  return cols
+  return [...sysCols, ...shown]
 })
 
 // ── 固定 Bin 列 fail 单元格右键菜单（判定链 + 定位逻辑见 composable） ──
@@ -335,9 +322,9 @@ const rowClassRules = {
 watch(
   () => props.fileId,
   () => {
-    // 切换文件后 Site/隐藏列/元信息属于旧文件，重置避免误导
+    // 切换文件后 Site/显示测试列/元信息属于旧文件，重置避免误导
     siteFilter.value = ''
-    hiddenCols.value = []
+    selectedTestCols.value = []
     siteOptions.value = []
     numericColumns.value = []
     allCols.value = []

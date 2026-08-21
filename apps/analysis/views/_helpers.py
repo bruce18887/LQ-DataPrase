@@ -1,6 +1,8 @@
 """Shared helper functions for analysis views."""
 
 import math
+import os
+from typing import Dict, Set
 
 import pandas as pd
 
@@ -8,11 +10,63 @@ from apps.datafiles.models import DataFile
 from apps.datafiles.services import get_cached_parsed_file
 from apps.common.params import get_param
 
+# Low-CPK set cache for the fast path: evaluating every column (IQR + CPK)
+# is the dominant cost of the filter chain (~100-200 ms on a 10k-row file),
+# and the fast path runs on every config toggle / file switch.  The key
+# carries the file's mtime+size so a re-parsed file invalidates the entry.
+_low_cpk_cache: Dict[tuple, Set[str]] = {}
+
+
+def cached_low_cpk_items(datafile, user_id: int, df, metadata,
+                         threshold: float, iqr_multiplier: float,
+                         data_only_bin1: bool) -> Set[str]:
+    """低 CPK 参数集合（跨 histogram/multi_lot/correlation 端点共享缓存）。
+
+    key 含 (user, file, threshold, iqr, bin1) + mtime+size，文件重解析自动失效。
+    """
+    key = (user_id, datafile.id, threshold, iqr_multiplier, data_only_bin1)
+    try:
+        st = os.stat(datafile.file_path)
+        key += (st.st_mtime_ns, st.st_size)
+    except (OSError, AttributeError):
+        # file missing / test fakes without file_path → no mtime guard
+        key += (0, 0)
+    cached = _low_cpk_cache.get(key)
+    if cached is not None:
+        return cached
+    from apps.analysis.services.statistics import filter_bin1_rows, compute_low_cpk_test_items
+    work_df = filter_bin1_rows(df, metadata) if data_only_bin1 else df
+    result = set(compute_low_cpk_test_items(
+        work_df, metadata, threshold, iqr_multiplier=iqr_multiplier))
+    if len(_low_cpk_cache) > 500:
+        # 简单上限：key 含 mtime+size 天然随文件重解析失效，全清成本低
+        _low_cpk_cache.clear()
+    _low_cpk_cache[key] = result
+    return result
+
 
 def get_bool_param(request, key, default=False):
     """Parse a boolean request param (JSON body or query string) with the
     same 'true'/'1'/'yes' tolerance used across the analysis views."""
     return str(get_param(request, key, '')).lower() in ('true', '1', 'yes')
+
+
+def parse_filter_flags(request):
+    """解析单文件数据筛选的 5 个开关（忽略无Limit/忽略无测试值/仅用Pass(Bin1)/
+    仅显示Fail测试项/仅低CPK项）+ iqr_multiplier。
+
+    多文件分析与相关性端点与 histogram 共用同一口径（2026-08-20）：
+    消费方须保证 fail 集合基于全量 df 预计算（bin1 过滤前）。
+    """
+    from apps.common.params import get_param_float
+    return {
+        'ignore_no_limit': get_bool_param(request, 'ignore_no_limit'),
+        'ignore_no_test_value': get_bool_param(request, 'ignore_no_test_value'),
+        'data_only_bin1': get_bool_param(request, 'data_only_bin1'),
+        'only_fail_test_item': get_bool_param(request, 'only_fail_test_item'),
+        'only_low_cpk': get_bool_param(request, 'only_low_cpk'),
+        'iqr_multiplier': get_param_float(request, 'iqr_multiplier', 1.5),
+    }
 
 
 def get_cpk_b_threshold(user):

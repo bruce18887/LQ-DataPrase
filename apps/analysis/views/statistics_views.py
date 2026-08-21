@@ -14,6 +14,7 @@ from apps.datafiles.models import DataFile
 from apps.analysis.services.statistics import (
     detect_fail_data,
     calculate_fail_bin_statistics,
+    calculate_fail_test_item_statistics,
     compute_correlation_matrix,
     compute_bin_trend,
     compute_boxplot_stats,
@@ -28,6 +29,7 @@ from apps.analysis.services.statistics import (
     build_col_meta,
     ensure_numeric,
     filter_bin1_rows,
+    filter_test_items,
 )
 from apps.datafiles.services import get_cached_parsed_file
 from apps.common.params import get_param, get_param_float, get_param_list
@@ -39,6 +41,9 @@ from ._helpers import (
     _load_df_from_request,
     _load_files_from_request,
     get_bool_param,
+    get_cpk_b_threshold,
+    parse_filter_flags,
+    cached_low_cpk_items,
 )
 
 
@@ -148,8 +153,35 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         if not params:
             params = get_columns_with_limits(df, metadata)
 
+        # 数据筛选（单文件口径，2026-08-20）：fail 集合基于全量 df 预计算
+        #（bin1 过滤前），bin1 收窄行，其余开关对 params 列表防御性重放。
+        flags = parse_filter_flags(request)
+        cpk_threshold = get_cpk_b_threshold(request.user)
+        iqr_multiplier = flags['iqr_multiplier']
+        fail_items = None
+        if flags['only_fail_test_item']:
+            fail_items = set(calculate_fail_test_item_statistics(df, metadata).keys())
+        low_cpk_items = None
+        if flags['only_low_cpk']:
+            low_cpk_items = cached_low_cpk_items(
+                datafile, request.user.pk, df, metadata,
+                cpk_threshold, iqr_multiplier, flags['data_only_bin1'])
+        if flags['data_only_bin1']:
+            df = filter_bin1_rows(df, metadata)
+
         # Filter to valid numeric params
         params = _sanitize_numeric_params(df, params)
+        if flags['ignore_no_test_value'] or flags['only_fail_test_item'] or flags['only_low_cpk']:
+            params = filter_test_items(
+                df, metadata, params,
+                ignore_no_test_value=flags['ignore_no_test_value'],
+                only_fail_test_item=flags['only_fail_test_item'],
+                only_low_cpk=flags['only_low_cpk'],
+                cpk_threshold=cpk_threshold,
+                fail_items=fail_items,
+                iqr_multiplier=iqr_multiplier,
+                low_cpk_items=low_cpk_items,
+            )
 
         if not params or len(params) < 2:
             return Response({'error': 'need_at_least_2_params', 'available_params': get_columns_with_limits(df, metadata)}, status=400)

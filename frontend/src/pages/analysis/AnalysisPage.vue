@@ -8,6 +8,7 @@
           v-model="selectedFileId"
           :files="files"
           placeholder="选择数据文件"
+          show-meta
           @change="onFileChange"
           class="analysis-file-selector__select"
         />

@@ -55,6 +55,12 @@ export interface DataFile {
   program_name: string
   product_code?: string
   status: string
+  /** 文件字节数（DataFileListSerializer 已返回，FileSelect 富信息行展示用） */
+  file_size?: number
+  /** 源文件磁盘修改时间 */
+  source_mtime?: string | null
+  format_type_display?: string
+  status_display?: string
   created_at: string
   tags?: string[]
 }

@@ -23,6 +23,7 @@
         v-model="selectedFileId"
         :files="files"
         placeholder="请选择数据文件"
+        show-meta
         @change="onFileChange"
         :loading="filesLoading"
         clearable
