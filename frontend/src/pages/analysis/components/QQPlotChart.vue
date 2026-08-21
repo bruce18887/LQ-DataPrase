@@ -73,6 +73,8 @@ function buildOption() {
   const handlingMode = props.outlierHandling || 'off'
   let filteredTheoretical = theoretical
   let filteredObserved = observed
+  // 实际发生了过滤（排除/裁剪移除过点）→ Y 轴需锚定可见区间，见下方注释
+  let didFilter = false
 
   if (handlingMode !== 'off' && outlierInfo?.has_outliers) {
     const lb = outlierInfo.lower_bound
@@ -83,6 +85,7 @@ function buildOption() {
     if (indices.length > 2) {
       filteredTheoretical = indices.map((i: number) => theoretical[i])
       filteredObserved = indices.map((i: number) => observed[i])
+      didFilter = true
     }
   }
 
@@ -92,6 +95,10 @@ function buildOption() {
   const scatterData: number[][] = []
   let dataMin = Infinity
   let dataMax = -Infinity
+  // 观测值专属 min/max：dataMin/dataMax 混入理论分位数（标准正态 ±4.5），
+  // 不能直接作为观测值 Y 轴范围
+  let oMin = Infinity
+  let oMax = -Infinity
   for (let i = 0; i < filteredTheoretical.length; i++) {
     const t = filteredTheoretical[i]
     const o = filteredObserved[i]
@@ -100,6 +107,19 @@ function buildOption() {
     if (o < dataMin) dataMin = o
     if (t > dataMax) dataMax = t
     if (o > dataMax) dataMax = o
+    if (o < oMin) oMin = o
+    if (o > oMax) oMax = o
+  }
+
+  // 异常值排除/裁剪后，Y 轴锚定可见观测值区间：参考线端点按全量数据最小二乘
+  // 拟合（y = intercept + slope·x，x 取理论分位数极值），其纵坐标远超过滤后的
+  // 区间——若不 pin，轴会被参考线撑回含离群点的全范围，可见散点只占中间一条
+  // 带（回归：qq-yaxis-outlier-range）。线超出轴的部分由 ECharts 裁剪，斜率/
+  // 截距语义不变（与 R²/正态性徽章同属全量口径，保持一致）
+  let yAxisMinMax: { min: number; max: number } | null = null
+  if (didFilter) {
+    const pad = (oMax - oMin) * 0.05 || 0.5 // 常量区间兜底 ±0.5
+    yAxisMinMax = { min: oMin - pad, max: oMax + pad }
   }
   // 参考线 = 正态拟合线 y = intercept + slope·x（probplot 最小二乘拟合），
   // 而非 y=x——理论分位数是标准正态，只有均值 0/方差 1 的数据才贴合 y=x；
@@ -184,6 +204,7 @@ function buildOption() {
       nameTextStyle: { color: tc },
       axisLine: { lineStyle: { color: colors.value.axisLineColor } },
       axisLabel: { fontSize: 9, formatter: formatAxisValue, color: tc },
+      ...(yAxisMinMax ?? {}),
     },
     graphic,
     series: [

@@ -139,7 +139,9 @@ test.describe('FileSelect 通用文件选择组件', { tag: ['@p1', '@analysis']
     const meta = dropdown.locator('.dp-file-option__meta')
     await expect(meta.first()).toBeVisible({ timeout: 10_000 })
     const text = (await meta.first().textContent()) ?? ''
-    expect(text).toMatch(/\S+ · \S+ · \d+ 行/)
+    // 完整信息行：program · format · N行 · 大小 · 上传时间（2026-08-20 扩展；
+    // formatTime 输出 zh-CN 的 MM/DD HH:mm，如 08/20 14:26）
+    expect(text).toMatch(/\S+ · \S+ · \d+ 行 · \d+(\.\d+)? (B|KB|MB) · \d{2}\/\d{2} \d{2}:\d{2}/)
 
     // 无裁剪回归（2026-08-13）：EP 默认 .el-select-dropdown__item height:34px
     // + overflow:hidden 会纵向裁掉第二行 meta——修复后 height:auto，

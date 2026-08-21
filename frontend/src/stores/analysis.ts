@@ -36,6 +36,11 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const multiBarWidthPercent = ref(20)
   const multiIgnoreNoLimit = ref(false)
   const multiRangeType = ref('RDL')
+  // 多文件分析数据筛选（与单文件 5 开关同口径，2026-08-20）
+  const multiIgnoreNoTestValue = ref(false)
+  const multiDataOnlyBin1 = ref(false)
+  const multiOnlyFailTestItem = ref(false)
+  const multiOnlyLowCpk = ref(false)
 
   // Initialize from URL query params
   function initFromQuery() {
@@ -88,6 +93,10 @@ export const useAnalysisStore = defineStore('analysis', () => {
     multiBarWidthPercent.value = 20
     multiIgnoreNoLimit.value = false
     multiRangeType.value = 'RDL'
+    multiIgnoreNoTestValue.value = false
+    multiDataOnlyBin1.value = false
+    multiOnlyFailTestItem.value = false
+    multiOnlyLowCpk.value = false
   }
 
   return {
@@ -115,6 +124,10 @@ export const useAnalysisStore = defineStore('analysis', () => {
     multiBarWidthPercent,
     multiIgnoreNoLimit,
     multiRangeType,
+    multiIgnoreNoTestValue,
+    multiDataOnlyBin1,
+    multiOnlyFailTestItem,
+    multiOnlyLowCpk,
     initFromQuery,
     reset,
   }

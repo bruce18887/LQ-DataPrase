@@ -22,20 +22,15 @@
           <el-col :span="8" v-for="role in roles" :key="role.key" class="role-col">
             <div class="role-item">
               <div class="role-label">{{ role.label }}</div>
-              <el-select
+              <FileSelect
                 v-model="roleAssignments[role.key]"
+                :files="availableFiles(role.key)"
                 placeholder="选择文件"
                 clearable
+                show-meta
                 aria-label="选择角色用户"
                 class="role-select"
-              >
-                <el-option
-                  v-for="f in availableFiles(role.key)"
-                  :key="f.id"
-                  :label="f.filename"
-                  :value="f.id"
-                />
-              </el-select>
+              />
             </div>
           </el-col>
         </el-row>
@@ -140,6 +135,8 @@ import { ElMessage } from 'element-plus'
 import { datafilesApi } from '../../api/datafiles'
 import { buyoffApi } from '../../api/buyoff'
 import { downloadBlob, extractFilenameFromContentDisposition } from '../../utils/download'
+import type { DataFile } from '../../types'
+import FileSelect from '../../components/common/FileSelect.vue'
 
 interface AnalysisResult {
   common_items: string[]
@@ -148,7 +145,7 @@ interface AnalysisResult {
   file_count: number
 }
 
-const files = ref<{ id: number; filename: string }[]>([])
+const files = ref<DataFile[]>([])
 const roleAssignments = ref<Record<string, number | null>>({
   FT: null,
   QA1: null,
@@ -185,6 +182,10 @@ const fileSpecificItems = computed(() => {
   }))
 })
 
+/**
+ * 当前角色可选文件：排除其它角色已占用；当前角色已选文件即使被其它角色
+ * 占用也并回 options（否则 el-select 对不在 options 中的值显示裸 id 数字）。
+ */
 function availableFiles(currentRole: string) {
   const usedIds = new Set<number>()
   for (const [role, id] of Object.entries(roleAssignments.value)) {
@@ -192,6 +193,8 @@ function availableFiles(currentRole: string) {
       usedIds.add(id)
     }
   }
+  const own = roleAssignments.value[currentRole]
+  if (own != null) usedIds.delete(own)
   return files.value.filter(f => !usedIds.has(f.id))
 }
 

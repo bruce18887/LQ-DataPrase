@@ -1,29 +1,17 @@
 <template>
   <div>
-    <!-- 筛选控制栏（6 控件 × span4 = 24，修复原 spans 26>24 换行 bug） -->
+    <!-- 筛选控制栏（5 控件 × span4 = 20） -->
     <el-row :gutter="12" style="margin-bottom: 12px">
       <el-col :span="4">
-        <el-input
-          :model-value="searchCol"
-          placeholder="搜索列名…"
-          clearable
-          aria-label="搜索"
-          @update:model-value="emit('update:searchCol', $event)"
+        <span class="ctl-label">显示测试列</span>
+        <TestColumnSelector
+          :cols="testCols"
+          :model-value="selectedTestCols"
+          @update:model-value="emit('update:selectedTestCols', $event)"
         />
       </el-col>
       <el-col :span="4">
-        <el-select
-          :model-value="searchTestCol"
-          placeholder="搜索测试项"
-          clearable
-          aria-label="搜索列"
-          @update:model-value="emit('update:searchTestCol', $event)"
-        >
-          <el-option label="全部显示" value="" />
-          <el-option v-for="c in allCols" :key="c" :label="c" :value="c" />
-        </el-select>
-      </el-col>
-      <el-col :span="4">
+        <span class="ctl-label">Pass/Fail</span>
         <el-select
           :model-value="passfail"
           placeholder="Pass/Fail筛选"
@@ -36,9 +24,10 @@
         </el-select>
       </el-col>
       <el-col :span="4">
+        <span class="ctl-label">Site</span>
         <el-select
           :model-value="siteFilter"
-          placeholder="Site筛选"
+          placeholder="全部 Site"
           aria-label="站点筛选"
           :disabled="siteColDisabled"
           @update:model-value="emit('update:siteFilter', $event)"
@@ -48,9 +37,10 @@
         </el-select>
       </el-col>
       <el-col :span="4">
+        <span class="ctl-label">列宽</span>
         <el-select
           :model-value="autosizeMode"
-          placeholder="列宽自适应"
+          placeholder="手动调整"
           aria-label="列宽模式"
           @update:model-value="emit('update:autosizeMode', $event)"
         >
@@ -60,30 +50,15 @@
         </el-select>
       </el-col>
       <el-col :span="4">
+        <span class="ctl-label">固定列</span>
         <el-select
           :model-value="pinnedCol"
-          placeholder="固定列（搜索选择）"
+          placeholder="搜索选择"
           clearable
           filterable
           aria-label="固定列"
-          :disabled="!allCols.length"
+          :disabled="!testCols.length"
           @update:model-value="emit('update:pinnedCol', $event)"
-        >
-          <el-option v-for="c in allCols" :key="c" :label="c" :value="c" />
-        </el-select>
-      </el-col>
-      <el-col :span="4">
-        <el-select
-          :model-value="hiddenCols"
-          placeholder="隐藏列（默认全部显示）"
-          multiple
-          filterable
-          collapse-tags
-          collapse-tags-tooltip
-          clearable
-          aria-label="隐藏列"
-          :disabled="!allCols.length"
-          @update:model-value="emit('update:hiddenCols', $event)"
         >
           <el-option v-for="c in allCols" :key="c" :label="c" :value="c" />
         </el-select>
@@ -109,17 +84,17 @@
 
 <script setup lang="ts">
 import { Refresh, Download, Document } from '@element-plus/icons-vue'
+import TestColumnSelector from './TestColumnSelector.vue'
 
 interface Props {
-  searchCol: string
-  searchTestCol: string
+  testCols: string[]
+  selectedTestCols: string[]
   passfail: string
   siteFilter: string
   siteOptions: string[]
   siteColDisabled: boolean
   autosizeMode: string
   pinnedCol: string
-  hiddenCols: string[]
   allCols: string[]
   loading: boolean
   exportingExcel: boolean
@@ -127,13 +102,11 @@ interface Props {
 }
 
 interface Emits {
-  (e: 'update:searchCol', v: string): void
-  (e: 'update:searchTestCol', v: string): void
+  (e: 'update:selectedTestCols', v: string[]): void
   (e: 'update:passfail', v: string): void
   (e: 'update:siteFilter', v: string): void
   (e: 'update:autosizeMode', v: string): void
   (e: 'update:pinnedCol', v: string): void
-  (e: 'update:hiddenCols', v: string[]): void
   (e: 'load'): void
   (e: 'export-excel'): void
   (e: 'export-csv'): void
@@ -144,6 +117,15 @@ const emit = defineEmits<Emits>()
 </script>
 
 <style scoped>
+/* 控件上方小字 label（双主题：CSS 变量自动适配） */
+.ctl-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
 /* Element Plus 控件双主题适配 */
 :deep(.el-input) {
   --el-input-bg-color: var(--bg-primary);

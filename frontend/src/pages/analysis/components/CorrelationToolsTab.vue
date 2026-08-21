@@ -12,6 +12,19 @@
 
     <!-- 左侧面板 -->
     <template #left-panel>
+      <!-- 数据筛选（与单文件 5 开关同口径，2026-08-20）：散点/矩阵两种模式共享。
+           切换后参数列表由 AnalysisPage 的 store watch 自动刷新，请求携带全部开关 -->
+      <el-card shadow="hover" :body-style="{ padding: '12px' }">
+        <label class="section-label">数据筛选</label>
+        <div class="corr-filter-box">
+          <el-checkbox v-model="ignoreNoLimit" size="small">忽略无Limit</el-checkbox>
+          <el-checkbox v-model="ignoreNoTestValue" size="small">忽略无测试值</el-checkbox>
+          <el-checkbox v-model="dataOnlyBin1" size="small">仅用Pass数据(Bin1)</el-checkbox>
+          <el-checkbox v-model="onlyFailTestItem" size="small">仅显示Fail测试项</el-checkbox>
+          <el-checkbox v-model="onlyLowCpk" size="small">仅显示低CPK项</el-checkbox>
+        </div>
+      </el-card>
+
       <!-- 散点图模式 -->
       <template v-if="viewMode === 'scatter'">
         <el-card shadow="hover" :body-style="{ padding: '12px' }">
@@ -108,22 +121,20 @@
       <!-- 文件相关性：按序列号对齐两个文件，逐参数对比 ATE/Bench 差异 -->
       <el-card class="file-correlation-section" shadow="hover" :body-style="{ padding: '12px' }">
         <label class="section-label">文件相关性</label>
-        <el-select
+        <FileSelect
           v-model="fcFile1"
+          :files="fcFiles"
           :placeholder="fcFilesLoading ? '加载文件中...' : '选择文件 1'"
-          filterable
+          show-meta
           style="width: 100%"
-        >
-          <el-option v-for="f in fcFiles" :key="f.id" :label="f.filename" :value="f.id" />
-        </el-select>
-        <el-select
+        />
+        <FileSelect
           v-model="fcFile2"
+          :files="fcFiles"
           :placeholder="fcFilesLoading ? '加载文件中...' : '选择文件 2'"
-          filterable
+          show-meta
           style="width: 100%; margin-top: 8px"
-        >
-          <el-option v-for="f in fcFiles" :key="f.id" :label="f.filename" :value="f.id" />
-        </el-select>
+        />
         <div class="fc-threshold-row">
           <label class="axis-label">差异阈值 (%)</label>
           <el-input-number
@@ -220,6 +231,7 @@
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import AnalysisTabLayout from './AnalysisTabLayout.vue'
+import FileSelect from '../../../components/common/FileSelect.vue'
 import { useCorrelation } from '../composables/useCorrelation'
 import { useCorrelationMatrix } from '../composables/useCorrelationMatrix'
 import { useFileCorrelation } from '../composables/useFileCorrelation'
@@ -242,6 +254,31 @@ const { colors, isDark } = useEChartsTheme()
 const viewMode = ref<'scatter' | 'matrix'>('scatter')
 const ignoreNoLimit = ref(analysisStore.ignoreNoLimit)
 watch(ignoreNoLimit, (val) => { analysisStore.ignoreNoLimit = val })
+// 数据筛选开关（与单文件 store 5 开关同源：AnalysisPage 的 watch 会联动
+// 刷新参数列表；本页 watch 只负责重发散点/矩阵请求）
+const ignoreNoTestValue = ref(analysisStore.ignoreNoTestValue)
+const dataOnlyBin1 = ref(analysisStore.dataOnlyBin1)
+const onlyFailTestItem = ref(analysisStore.onlyFailTestItem)
+const onlyLowCpk = ref(analysisStore.onlyLowCpk)
+for (const [local, key] of [
+  [ignoreNoTestValue, 'ignoreNoTestValue'],
+  [dataOnlyBin1, 'dataOnlyBin1'],
+  [onlyFailTestItem, 'onlyFailTestItem'],
+  [onlyLowCpk, 'onlyLowCpk'],
+] as const) {
+  watch(local, (val) => { (analysisStore as any)[key] = val })
+  watch(() => (analysisStore as any)[key], (val) => { local.value = val })
+}
+
+/** 散点/矩阵请求携带的筛选载荷 */
+const corrFlags = computed(() => ({
+  ignore_no_limit: ignoreNoLimit.value,
+  ignore_no_test_value: ignoreNoTestValue.value,
+  data_only_bin1: dataOnlyBin1.value,
+  only_fail_test_item: onlyFailTestItem.value,
+  only_low_cpk: onlyLowCpk.value,
+  iqr_multiplier: analysisStore.iqrMultiplier,
+}))
 
 const outlierHandling = ref(analysisStore.outlierHandling)
 watch(outlierHandling, (val) => { analysisStore.outlierHandling = val })
@@ -329,7 +366,14 @@ const regressionInfo = computed(() => {
 
 // Auto-load scatter when both X and Y are selected
 watch([localX, localY], ([x, y]) => {
-  if (x && y) loadCorrelation(x, y)
+  if (x && y) loadCorrelation(x, y, corrFlags.value)
+})
+
+// 筛选开关变化 → 重发散点（X/Y 已选时）+ 矩阵参数与过滤后列表求交集修剪
+watch([ignoreNoTestValue, dataOnlyBin1, onlyFailTestItem, onlyLowCpk, ignoreNoLimit], () => {
+  if (localX.value && localY.value) loadCorrelation(localX.value, localY.value, corrFlags.value)
+  // props.params 由 AnalysisPage 联动刷新；本页修剪过期选中项防 400
+  trimMatrixParams()
 })
 
 function computeRange(mode: string, sigma: number, cMin: number, cMax: number, vals: number[]) {
@@ -387,6 +431,8 @@ function buildScatterOption() {
       name: '回归线',
       type: 'line',
       data: [[xMin, slope * xMin + intercept], [xMax, slope * xMax + intercept]],
+      // itemStyle.color 与 lineStyle 同源——图例 marker 只取 itemStyle（2026-08-20）
+      itemStyle: { color: colors.value.seriesColors[3] },
       lineStyle: { type: 'dashed', color: colors.value.seriesColors[3], width: 2 },
       symbol: 'none',
       tooltip: {
@@ -440,16 +486,31 @@ watch(() => corrResult.value, (data) => {
 const selectedMatrixParams = ref<string[]>([])
 const { loading: matrixLoading, matrixData, loadCorrelationMatrix } = useCorrelationMatrix(() => props.fileId)
 
-// Initialize matrix params when props.params changes
+/** 矩阵参数与当前（可能已筛选收缩的）参数列表求交集——防过期项 400 */
+function trimMatrixParams() {
+  if (selectedMatrixParams.value.length === 0) return
+  const valid = new Set(props.params)
+  const kept = selectedMatrixParams.value.filter((p) => valid.has(p))
+  if (kept.length !== selectedMatrixParams.value.length) {
+    selectedMatrixParams.value = kept
+  }
+}
+
+// Initialize matrix params when props.params changes（含筛选开关导致的列表收缩）
 watch(() => props.params, (newParams) => {
   if (newParams.length > 0 && selectedMatrixParams.value.length === 0) {
     selectedMatrixParams.value = [...newParams]
+  } else {
+    trimMatrixParams()
   }
 }, { immediate: true })
 
 function onCalculateMatrix() {
   if (!props.fileId) return
-  loadCorrelationMatrix(selectedMatrixParams.value.length > 0 ? selectedMatrixParams.value : undefined)
+  loadCorrelationMatrix(
+    selectedMatrixParams.value.length > 0 ? selectedMatrixParams.value : undefined,
+    corrFlags.value,
+  )
 }
 
 /** 显著性星号 */
@@ -649,6 +710,22 @@ void matrixChartRef
 
 .matrix-param-header .section-label {
   margin-bottom: 0;
+}
+
+.corr-filter-box {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
+}
+
+.corr-filter-box :deep(.el-checkbox) {
+  margin-right: 0;
+  height: 24px;
+}
+
+.corr-filter-box :deep(.el-checkbox__label) {
+  font-size: 12px;
+  padding-left: 4px;
 }
 
 .matrix-param-actions {

@@ -353,4 +353,76 @@ test.describe('@p1 异常值处理', { tag: ['@p1', '@analysis'] }, () => {
 
     expect(siteStatsRequests, '改范围类型应只触发一次 site_stats 请求').toBe(1)
   })
+
+  test('QQ 图裁剪后 Y 轴锚定可见观测值区间（回归 qq-yaxis-outlier-range）', async ({ page }) => {
+    const found = await findParamWithOutliers(page)
+    test.skip(!found, '当前数据文件未找到含异常值的参数')
+
+    await selectParam(page, found.param)
+    await waitLoadingGone(page.locator(SINGLE))
+
+    // 开启 QQ 图并捕获 qqplot 响应：outlier_info 与 observed_quantiles 都在响应里。
+    // 切换异常值模式不重发请求（useQQPlot 只 watch 参数/过滤开关），前端用同一份
+    // result 重渲染，期望值必须从开启时捕获的响应计算。
+    const qqResp = page.waitForResponse(
+      (r) => r.url().includes('/analysis/qqplot/') && r.request().method() === 'POST' && r.status() < 500,
+      { timeout: 25_000 },
+    )
+    await page.getByText('显示QQ图').click()
+    const body = await (await qqResp).json()
+    const info = body.outlier_info
+    expect(info?.has_outliers, 'qqplot 响应应携带 has_outliers').toBe(true)
+    const obs: number[] = body.observed_quantiles
+    const filtered = obs.filter((v: number) => v >= info.lower_bound && v <= info.upper_bound)
+    expect(filtered.length, '过滤后应保留 >2 个点（否则前端不过滤、轴不 pin）').toBeGreaterThan(2)
+    const fMin = Math.min(...filtered)
+    const fMax = Math.max(...filtered)
+    const pad = (fMax - fMin) * 0.05 || 0.5
+    const fullMax = obs[obs.length - 1]
+    expect(fullMax, '全量最大值应为离群点（超出上界）').toBeGreaterThan(info.upper_bound)
+
+    // 读取 QQ 容器上 ECharts 实例的 yAxis（useChart 把实例挂在容器 DOM）
+    const readYAxis = async () => {
+      for (let i = 0; i < 150; i++) {
+        const v = await page
+          .locator(`${SINGLE} .qqplot-container`)
+          .evaluate((el: any) => {
+            const chart = el.__echartsInstance__
+            if (!chart) return null
+            const y = chart.getOption()?.yAxis?.[0]
+            return { min: y?.min, max: y?.max }
+          })
+          .catch(() => null)
+        if (v) return v
+        await page.waitForTimeout(100)
+      }
+      return null
+    }
+
+    const outlierSelect = page.locator('.el-form-item').filter({ hasText: '异常值处理' }).locator('.el-select').first()
+
+    // 裁剪范围：Y 轴应 pin 到过滤后观测值区间（±5% 边距），不再被全量拟合
+    // 参考线撑到含离群点的范围
+    await outlierSelect.click()
+    await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '裁剪范围' }).first().click()
+    await waitLoadingGone(page.locator(SINGLE))
+    await expect
+      .poll(async () => (await readYAxis())?.min, { timeout: 15_000 })
+      .not.toBeNull()
+    const clipped = (await readYAxis())!
+    expect(clipped.min).toBeCloseTo(fMin - pad, 4)
+    expect(clipped.max).toBeCloseTo(fMax + pad, 4)
+    expect(clipped.max, '裁剪后轴不应再覆盖离群点').toBeLessThan(fullMax)
+
+    // 不处理：不 pin，轴恢复自动缩放（覆盖全量数据）
+    await outlierSelect.click()
+    await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '不处理' }).first().click()
+    await waitLoadingGone(page.locator(SINGLE))
+    await expect
+      .poll(async () => {
+        const v = await readYAxis()
+        return v ? typeof v.min : 'no-chart'
+      }, { timeout: 15_000 })
+      .toBe('undefined')
+  })
 })

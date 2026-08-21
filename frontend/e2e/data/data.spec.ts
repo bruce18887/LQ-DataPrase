@@ -92,7 +92,7 @@ test.describe('数据管理 /data', { tag: ['@data'] }, () => {
       await row.locator('button').filter({ hasText: /删除/ }).click()
 
       // Confirm deletion in the MessageBox
-      const confirmBtn = page.getByRole('button', { name: '删除', exact: true })
+      const confirmBtn = page.locator('.el-message-box').getByRole('button', { name: '删除', exact: true })
       await expect(confirmBtn).toBeVisible({ timeout: 10_000 })
       await confirmBtn.click()
 
@@ -199,11 +199,11 @@ test.describe('数据管理 /data', { tag: ['@data'] }, () => {
 })
 
 test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删除/新列）', { tag: ['@data'] }, () => {
-  test('@p1 新列渲染：表头出现“产品”与“原始修改时间”', async ({ page }) => {
+  test('@p1 新列渲染：表头出现“产品”与“上传时间”', async ({ page }) => {
     await gotoApp(page, '/data')
     await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
     await expect(page.locator('.el-table th').filter({ hasText: '产品' })).toBeVisible()
-    await expect(page.locator('.el-table th').filter({ hasText: '原始修改时间' })).toBeVisible()
+    await expect(page.locator('.el-table th').filter({ hasText: '上传时间' })).toBeVisible()
   })
 
   test('@p1 搜索：按文件名过滤列表', async ({ page }) => {
@@ -215,8 +215,12 @@ test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删�
     const search = page.locator('.file-list-tab input[placeholder*="搜索"]')
     await search.fill(fragment)
 
-    // 等待匹配结果，确认目标文件可见
-    await expect(page.locator('.el-table').getByText(SEEDED_FILES.ETS88_FT)).toBeVisible({ timeout: 15_000 })
+    // 等待匹配结果，确认目标文件可见。
+    // 注意：文件名单元格被 truncateMiddle(32) 中间截断，完整文件名永不在 DOM——
+    // 用前缀匹配（2026-08-03 教训）。
+    await expect(
+      page.locator('.el-table .el-table__row').filter({ hasText: SEEDED_FILES.ETS88_FT.slice(0, 12) }),
+    ).toBeVisible({ timeout: 15_000 })
 
     // 清空后行数恢复
     await search.fill('')
@@ -268,11 +272,14 @@ test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删�
       await uploadMultipleFiles(page, [tmp1, tmp2])
       await expect(page.getByText(/上传成功/).first()).toBeVisible({ timeout: 30_000 })
 
-      // 用搜索缩小到本次上传的两个文件
+      // 用搜索缩小到本次上传的两个文件。
+      // 注意：行可见 ≠ 搜索请求已落地——搜索响应替换表格数据后勾选态会被清空
+      //（selectedIds=[] → bulk_delete 400）。必须等行数收敛到 2（只剩搜索命中项）。
       const search = page.locator('.file-list-tab input[placeholder*="搜索"]')
       await search.fill(`e2e_bulk_${ts}_`)
-      await expect(page.locator('.el-table').getByText(name1)).toBeVisible({ timeout: 15_000 })
-      await expect(page.locator('.el-table').getByText(name2)).toBeVisible({ timeout: 15_000 })
+      await expect(page.locator('.el-table .el-table__row')).toHaveCount(2, { timeout: 15_000 })
+      await expect(page.locator('.el-table').getByText(name1)).toBeVisible()
+      await expect(page.locator('.el-table').getByText(name2)).toBeVisible()
 
       // 勾选两行的 selection checkbox
       const row1 = page.locator('.el-table__row').filter({ hasText: name1 })
@@ -286,7 +293,7 @@ test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删�
       await bulkBtn.click()
 
       // 二次确认
-      const confirmBtn = page.getByRole('button', { name: '删除', exact: true })
+      const confirmBtn = page.locator('.el-message-box').getByRole('button', { name: '删除', exact: true })
       await expect(confirmBtn).toBeVisible({ timeout: 10_000 })
       await confirmBtn.click()
 
@@ -370,7 +377,7 @@ test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删�
       await page.locator('.tab-btn').filter({ hasText: '文件列表' }).click()
       const row2 = page.locator('.el-table__row').filter({ hasText: uniqueName })
       await row2.locator('button').filter({ hasText: /删除/ }).click()
-      const confirmBtn = page.getByRole('button', { name: '删除', exact: true })
+      const confirmBtn = page.locator('.el-message-box').getByRole('button', { name: '删除', exact: true })
       await expect(confirmBtn).toBeVisible({ timeout: 10_000 })
       await confirmBtn.click()
       await expect(page.getByText('文件已删除').first()).toBeVisible({ timeout: 15_000 })
@@ -727,6 +734,25 @@ test.describe('数据管理 /data 当前文件下拉切换', { tag: ['@data'] },
     await expect(page.locator('.ag-root').first()).toBeVisible({ timeout: 30_000 })
   })
 
+  test('@p2 查看数据：当前文件下拉显示文件富信息行（program · format · N行 · 大小 · 时间）', async ({ page }) => {
+    await gotoApp(page, '/data')
+    const firstRow = page.locator('.el-table .el-table__row').first()
+    await expect(firstRow).toBeVisible({ timeout: 15_000 })
+    await firstRow.locator('button').filter({ hasText: '查看' }).click()
+    await expect(page.locator('.tab-btn.active')).toContainText('查看数据')
+
+    const fileSelect = page.locator('.content-section:visible .banner-file-select').first()
+    await fileSelect.locator('.el-select__wrapper').click()
+    const dropdown = page.locator('.el-select-dropdown:visible').last()
+    await expect(dropdown).toBeVisible({ timeout: 10_000 })
+    const meta = dropdown.locator('.dp-file-option__meta')
+    await expect(meta.first()).toBeVisible({ timeout: 10_000 })
+    const text = (await meta.first().textContent()) ?? ''
+    // 完整信息行：program · format · N行 · 大小 · 上传时间（formatTime 输出 MM/DD HH:mm）
+    expect(text).toMatch(/\S+ · \S+ · \d+ 行 · \d+(\.\d+)? (B|KB|MB) · \d{2}\/\d{2} \d{2}:\d{2}/)
+    await page.keyboard.press('Escape')
+  })
+
   test('@p2 导出工具：当前文件下拉框存在并可选择', async ({ page }) => {
     await gotoApp(page, '/data')
     await page.locator('.tab-btn').filter({ hasText: '导出工具' }).click()
@@ -741,7 +767,9 @@ test.describe('数据管理 /data 当前文件下拉切换', { tag: ['@data'] },
     // 选择第一个文件，下拉可正常工作
     await wrapper.click()
     const firstOption = page.locator('.el-select-dropdown__item:visible').first()
-    const optionText = (await firstOption.textContent())?.trim() || ''
+    // 下拉项含富信息第二行（program · format · N行 · 大小 · 时间）——选中值只显示
+    // 文件名，取 .dp-file-option__name 节点（textContent 在 flex 布局下无换行）
+    const optionText = ((await firstOption.locator('.dp-file-option__name').first().textContent())?.trim()) || ''
     await expect(firstOption).toBeVisible({ timeout: 10_000 })
     await firstOption.click()
     // 选中后下拉显示该文件名（el-select__placeholder 复用为选中值展示）

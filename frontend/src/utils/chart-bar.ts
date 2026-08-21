@@ -103,3 +103,17 @@ export function getSiteColors8(isDark: boolean): readonly string[] {
 }
 // 兼容旧引用（浅色主题值）；新代码请使用 getSiteColors8
 export const SITE_COLORS_8: readonly string[] = SITE_COLORS_8_LIGHT
+
+/**
+ * 多文件后端色 → 当前主题色映射（2026-08-20）。
+ *
+ * 后端 multi_lot 返回的 lot.color 固定为浅色板（导出/文档需稳定色值），
+ * 前端渲染层按主题映射：浅色板中的色值索引 → getSiteColors8 同索引色；
+ * 非浅色板色值（自定义/历史）原样返回。MultiFileTab 的图例名色点与
+ * MultiFileChart 的柱/线共用本函数，保证两者颜色与图例严格一致。
+ */
+export function mapLotColorToTheme(color: string, isDark: boolean): string {
+  const idx = SITE_COLORS_8_LIGHT.indexOf(color)
+  if (idx < 0) return color
+  return getSiteColors8(isDark)[idx]
+}

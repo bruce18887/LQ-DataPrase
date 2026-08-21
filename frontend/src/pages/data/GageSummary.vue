@@ -25,20 +25,15 @@
                 <span class="slot-label">{{ slot.label }}</span>
                 <el-tag v-if="slot.fileId" size="small" type="success" class="slot-tag">已分配</el-tag>
               </div>
-              <el-select
+              <FileSelect
                 v-model="slot.fileId"
+                :files="availableFiles(slot.key)"
                 placeholder="选择文件"
                 clearable
+                show-meta
                 aria-label="选择Gage文件"
                 class="slot-select"
-              >
-                <el-option
-                  v-for="f in availableFiles(slot.key)"
-                  :key="f.id"
-                  :label="f.filename"
-                  :value="f.id"
-                />
-              </el-select>
+              />
             </div>
           </el-col>
         </el-row>
@@ -101,6 +96,8 @@ import { ElMessage } from 'element-plus'
 import { datafilesApi } from '../../api/datafiles'
 import { gageApi } from '../../api/gage'
 import { downloadBlob, extractFilenameFromContentDisposition } from '../../utils/download'
+import type { DataFile } from '../../types'
+import FileSelect from '../../components/common/FileSelect.vue'
 
 interface SiteSlot {
   key: string
@@ -108,7 +105,7 @@ interface SiteSlot {
   fileId: number | null
 }
 
-const files = ref<{ id: number; filename: string }[]>([])
+const files = ref<DataFile[]>([])
 const onlyBin1 = ref(false)
 const ignoreNoLimit = ref(false)
 const loading = ref(false)
@@ -140,6 +137,10 @@ const assignedFileIds = computed(() => {
     .filter((id): id is number => id !== null)
 })
 
+/**
+ * 当前槽位可选文件：排除其它槽位已占用；当前槽位已选文件即使被其它槽位
+ * 占用也并回 options（否则 el-select 对不在 options 中的值显示裸 id 数字）。
+ */
 function availableFiles(currentKey: string) {
   const usedIds = new Set<number>()
   for (const slot of siteSlots.value) {
@@ -147,6 +148,8 @@ function availableFiles(currentKey: string) {
       usedIds.add(slot.fileId)
     }
   }
+  const own = siteSlots.value.find((s) => s.key === currentKey)?.fileId
+  if (own != null) usedIds.delete(own)
   return files.value.filter(f => !usedIds.has(f.id))
 }
 

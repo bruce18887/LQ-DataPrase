@@ -2,6 +2,7 @@
 
 import os
 import time
+from datetime import datetime, time as dtime
 
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
@@ -28,6 +29,36 @@ from ._helpers import (
     _parse_last_modified,
     _delete_datafile_on_disk,
 )
+
+
+def _parse_date_bound(raw: str):
+    """容错解析日期边界参数：纯日期 → date；带时间 → datetime；非法 → None。
+
+    注意：strptime 对纯日期格式也返回 datetime（零点）——必须按「输入是否含
+    时间分量」显式转 date，否则 _date_bound 的 isinstance(datetime) 分支恒真，
+    纯日期 lte 补不到当天末尾（当天文件被漏）。
+    """
+    if not raw:
+        return None
+    has_time = ':' in raw
+    for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d', '%Y/%m/%d'):
+        try:
+            parsed = datetime.strptime(raw, fmt)
+        except ValueError:
+            continue
+        return parsed if has_time else parsed.date()
+    return None
+
+
+def _date_bound(raw: str, end_of_day: bool):
+    """把日期边界参数转成可用 filter 值：纯日期补全时刻（gte=00:00:00 /
+    lte=23:59:59.999999，否则「当天上传」被 lte 漏掉），带时间原样使用。"""
+    parsed = _parse_date_bound(raw)
+    if parsed is None:
+        return None
+    if isinstance(parsed, datetime):
+        return parsed
+    return datetime.combine(parsed, dtime.max if end_of_day else dtime.min)
 
 
 class DataFilePagination(PageNumberPagination):
@@ -83,6 +114,32 @@ class DataFileViewSet(viewsets.ModelViewSet):
                 if any(t.lower() == tag_lower for t in tags if isinstance(t, str)):
                     matching_ids.append(df['id'])
             queryset = queryset.filter(id__in=matching_ids)
+
+        # 上传时间范围筛选（文件列表表头筛选，2026-08-20）：created_at__gte/__lte
+        # 容错解析——非法日期静默跳过（对齐 ag-grid 列过滤的宽容跳过惯例，不 400）。
+        # 前端传纯日期（YYYY-MM-DD）：gte 取当天 00:00:00，lte 取当天 23:59:59.999999
+        #（否则「今天上传」的文件会被 lte 漏掉）。
+        created_gte = self.request.query_params.get('created_at__gte', '').strip()
+        created_lte = self.request.query_params.get('created_at__lte', '').strip()
+        if created_gte:
+            bound = _date_bound(created_gte, end_of_day=False)
+            if bound is not None:
+                queryset = queryset.filter(created_at__gte=bound)
+        if created_lte:
+            bound = _date_bound(created_lte, end_of_day=True)
+            if bound is not None:
+                queryset = queryset.filter(created_at__lte=bound)
+
+        # 文件大小范围筛选：file_size__gte/__lte（浮点容错，非法值跳过）
+        size_gte = self.request.query_params.get('file_size__gte', '').strip()
+        size_lte = self.request.query_params.get('file_size__lte', '').strip()
+        try:
+            if size_gte:
+                queryset = queryset.filter(file_size__gte=float(size_gte))
+            if size_lte:
+                queryset = queryset.filter(file_size__lte=float(size_lte))
+        except ValueError:
+            pass  # 非法数值静默跳过
 
         return queryset
 

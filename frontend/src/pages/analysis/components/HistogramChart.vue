@@ -150,24 +150,31 @@ function buildOption() {
     })
   }
 
-  const mk: any[] = []
+  // 规格限/自定义限/σ 线按颜色组拆成独立系列——图例 marker 取 itemStyle.color
+  //（不取 lineStyle.color），旧实现单系列无 itemStyle 时图例落主题色板，与
+  // 实际线色（红/灰/蓝/青/橙）不对应（2026-08-20 修复）
+  const mkGroups: { name: string; color: string; items: any[] }[] = []
   // 规格限/自定义限线色：红-绿对在红绿色盲下不可分（deutan ΔE 14.6），
   // 改为 红-灰（LSL/USL=红 语义不变，CL=灰 表示"次级/自定义"）
   const limitColor = isDark.value ? '#ef5350' : '#C62828'
   const clColor = isDark.value ? '#9ca3af' : '#757575'
   const showLimit = props.chartConfig.includes('limit')
   if (showLimit && r.lower_limit != null && r.upper_limit != null) {
-    mk.push(
-      { xAxis: r.lower_limit, lineStyle: { color: limitColor, width: 3, type: 'dashed' }, label: { show: true, formatter: 'LSL', position: 'end' } },
-      { xAxis: r.upper_limit, lineStyle: { color: limitColor, width: 3, type: 'dashed' }, label: { show: true, formatter: 'USL', position: 'end' } },
-    )
+    mkGroups.push({
+      name: '规格限', color: limitColor, items: [
+        { xAxis: r.lower_limit, lineStyle: { color: limitColor, width: 3, type: 'dashed' }, label: { show: true, formatter: 'LSL', position: 'end' } },
+        { xAxis: r.upper_limit, lineStyle: { color: limitColor, width: 3, type: 'dashed' }, label: { show: true, formatter: 'USL', position: 'end' } },
+      ],
+    })
   }
   // CL 模式：画出用户自定义规格限线（数据来自后端 result，与 LSL/USL 一致）
   if (props.rangeType === 'CL' && r.custom_low != null && r.custom_high != null) {
-    mk.push(
-      { xAxis: r.custom_low, lineStyle: { color: clColor, width: 2, type: 'dashed' }, label: { show: true, formatter: 'CL Low', position: 'insideEndTop' } },
-      { xAxis: r.custom_high, lineStyle: { color: clColor, width: 2, type: 'dashed' }, label: { show: true, formatter: 'CL High', position: 'insideEndTop' } },
-    )
+    mkGroups.push({
+      name: '自定义限', color: clColor, items: [
+        { xAxis: r.custom_low, lineStyle: { color: clColor, width: 2, type: 'dashed' }, label: { show: true, formatter: 'CL Low', position: 'insideEndTop' } },
+        { xAxis: r.custom_high, lineStyle: { color: clColor, width: 2, type: 'dashed' }, label: { show: true, formatter: 'CL High', position: 'insideEndTop' } },
+      ],
+    })
   }
   // σ 标记线与统计卡同一口径：裁剪时用后端 filtered_sigma*（与 filtered_mean/
   // std 同源），否则用全量 sigma*。此前卡片用裁剪值、线用全量值，界面矛盾
@@ -178,31 +185,47 @@ function buildOption() {
   const s6Min = useFilteredStats && r.filtered_sigma6_min != null ? r.filtered_sigma6_min : r.sigma6_min
   const s6Max = useFilteredStats && r.filtered_sigma6_max != null ? r.filtered_sigma6_max : r.sigma6_max
   if (props.chartConfig.includes('s3') && s3Min != null && s3Max != null) {
-    mk.push(
-      { xAxis: s3Min, lineStyle: { color: '#1565C0', width: 3, type: 'dotted' }, label: { show: true, formatter: '3σ下限', position: 'insideEndTop' } },
-      { xAxis: s3Max, lineStyle: { color: '#1565C0', width: 3, type: 'dotted' }, label: { show: true, formatter: '3σ上限', position: 'insideEndTop' } },
-    )
+    mkGroups.push({
+      name: '3σ线', color: '#1565C0', items: [
+        { xAxis: s3Min, lineStyle: { color: '#1565C0', width: 3, type: 'dotted' }, label: { show: true, formatter: '3σ下限', position: 'insideEndTop' } },
+        { xAxis: s3Max, lineStyle: { color: '#1565C0', width: 3, type: 'dotted' }, label: { show: true, formatter: '3σ上限', position: 'insideEndTop' } },
+      ],
+    })
   }
   if (props.chartConfig.includes('s4') && s4Min != null && s4Max != null) {
-    mk.push(
-      { xAxis: s4Min, lineStyle: { color: '#00838F', width: 3, type: 'dotted' }, label: { show: true, formatter: '4σ下限', position: 'insideEndTop' } },
-      { xAxis: s4Max, lineStyle: { color: '#00838F', width: 3, type: 'dotted' }, label: { show: true, formatter: '4σ上限', position: 'insideEndTop' } },
-    )
+    mkGroups.push({
+      name: '4σ线', color: '#00838F', items: [
+        { xAxis: s4Min, lineStyle: { color: '#00838F', width: 3, type: 'dotted' }, label: { show: true, formatter: '4σ下限', position: 'insideEndTop' } },
+        { xAxis: s4Max, lineStyle: { color: '#00838F', width: 3, type: 'dotted' }, label: { show: true, formatter: '4σ上限', position: 'insideEndTop' } },
+      ],
+    })
   }
   if (props.chartConfig.includes('s6') && s6Min != null && s6Max != null) {
-    mk.push(
-      { xAxis: s6Min, lineStyle: { color: '#E65100', width: 3, type: 'dotted' }, label: { show: true, formatter: '6σ下限', position: 'insideEndTop' } },
-      { xAxis: s6Max, lineStyle: { color: '#E65100', width: 3, type: 'dotted' }, label: { show: true, formatter: '6σ上限', position: 'insideEndTop' } },
-    )
+    mkGroups.push({
+      name: '6σ线', color: '#E65100', items: [
+        { xAxis: s6Min, lineStyle: { color: '#E65100', width: 3, type: 'dotted' }, label: { show: true, formatter: '6σ下限', position: 'insideEndTop' } },
+        { xAxis: s6Max, lineStyle: { color: '#E65100', width: 3, type: 'dotted' }, label: { show: true, formatter: '6σ上限', position: 'insideEndTop' } },
+      ],
+    })
   }
-  if (mk.length) series.push({ name: '规格限', type: 'line', data: [], markLine: { symbol: 'none', precision: 4, data: mk } })
+  // markLine 系列显式 itemStyle.color（图例 marker 与线色严格对应）
+  const markLineNames = new Set(mkGroups.map((g) => g.name))
+  for (const g of mkGroups) {
+    if (g.items.length) {
+      series.push({
+        name: g.name, type: 'line', data: [],
+        itemStyle: { color: g.color },
+        markLine: { symbol: 'none', precision: 4, data: g.items },
+      })
+    }
+  }
 
   if (hasNormal) {
-    series.push({ name: '正态分布', type: 'line', data: normalCurve as any[], smooth: true, lineStyle: { color: '#F57F17', width: 3 }, symbol: 'none', yAxisIndex: normalAxisIdx, z: 10 })
+    series.push({ name: '正态分布', type: 'line', data: normalCurve as any[], smooth: true, itemStyle: { color: '#F57F17' }, lineStyle: { color: '#F57F17', width: 3 }, symbol: 'none', yAxisIndex: normalAxisIdx, z: 10 })
   }
 
   if (hasKde) {
-    series.push({ name: 'KDE曲线', type: 'line', data: kdeCurve, smooth: true, lineStyle: { color: '#7B1FA2', width: 3 }, symbol: 'none', yAxisIndex: kdeAxisIdx, z: 10 })
+    series.push({ name: 'KDE曲线', type: 'line', data: kdeCurve, smooth: true, itemStyle: { color: '#7B1FA2' }, lineStyle: { color: '#7B1FA2', width: 3 }, symbol: 'none', yAxisIndex: kdeAxisIdx, z: 10 })
   }
 
   const AXIS_COLOR_LEFT = '#1E88E5'; const AXIS_COLOR_ALLSITE = '#42A5F5'; const AXIS_COLOR_NORMAL = '#F57F17'; const AXIS_COLOR_KDE = '#7B1FA2'
@@ -235,7 +258,7 @@ function buildOption() {
         const firstX = Array.isArray(first.data) ? first.data[0] : first.data.value?.[0]
         let html = `值: ${Number(firstX).toFixed(4)}<br/>`
         for (const p of items) {
-          if (p.seriesName === '规格限' || p.seriesName === '正态分布' || p.seriesName === 'KDE曲线') continue
+          if (markLineNames.has(p.seriesName) || p.seriesName === '正态分布' || p.seriesName === 'KDE曲线') continue
           // 柱系列 data[1] 是钳制后的渲染值，data[2] 才是真实百分比；
           // data[3] 为该 bin 计数（0 表示无计数数据）
           const raw = Array.isArray(p.data) ? p.data : p.data.value

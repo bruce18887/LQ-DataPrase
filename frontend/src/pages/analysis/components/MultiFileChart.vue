@@ -5,7 +5,7 @@
 <script setup lang="ts">
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
-import { clampBarValue, formatPercent, formatAxisValue, getBarGroupPad, getMaxBarWidthPercent } from '../../../utils/chart-bar'
+import { clampBarValue, formatPercent, formatAxisValue, getBarGroupPad, getMaxBarWidthPercent, mapLotColorToTheme } from '../../../utils/chart-bar'
 
 const props = defineProps<{
   /** /analysis/multi_lot/ 带 param 的响应 */
@@ -17,7 +17,12 @@ const props = defineProps<{
   selectedParam: string
 }>()
 
-const { colors } = useEChartsTheme()
+const { colors, isDark } = useEChartsTheme()
+
+/** 后端 lot.color（浅色板固定）→ 当前主题色（图例/柱/线同一来源） */
+function lotThemeColor(lot: any): string {
+  return mapLotColorToTheme(lot.color, isDark.value)
+}
 
 function displayName(lot: any): string {
   return props.fileNames[lot.file_id] || lot.name || `File ${lot.file_id}`
@@ -47,13 +52,14 @@ function buildOption() {
   // 添加柱状图系列（每个文件独立颜色，显示百分比标签）
   for (const lot of lots) {
     const dn = displayName(lot)
+    const lc = lotThemeColor(lot)
     legendData.push(dn)
     series.push({
       name: dn,
       type: 'bar',
       // 小百分比（如 0.002%）钳制到最小可见柱高，真实值存 data[2] 供 tooltip/标签
       data: lot.bar_data.map((d: number[]) => [d[0], clampBarValue(d[1]), d[1]]),
-      itemStyle: { color: lot.color },
+      itemStyle: { color: lc },
       barWidth: `${effectiveBarWidth}%`,
       barGap: '10%',
       label: {
@@ -64,7 +70,7 @@ function buildOption() {
           return real > 0 ? `${formatPercent(real)}%` : ''
         },
         fontSize: 10,
-        color: lot.color,
+        color: lc,
         fontWeight: 'bold',
       },
     })
@@ -74,18 +80,19 @@ function buildOption() {
   if (showLimit) {
     for (const lot of lots) {
       const dn = displayName(lot)
+      const lc = lotThemeColor(lot)
       const mk: any[] = []
       const upperLimit = lot.display_upper ?? lot.upper_limit
       const lowerLimit = lot.display_lower ?? lot.lower_limit
       if (upperLimit != null) {
         mk.push({
           xAxis: upperLimit,
-          lineStyle: { color: lot.color, width: 3, type: 'dashed' },
+          lineStyle: { color: lc, width: 3, type: 'dashed' },
           label: {
             show: true,
             formatter: `${dn} USL`,
             position: 'end',
-            color: lot.color,
+            color: lc,
             fontSize: 10,
             fontWeight: 'bold',
           },
@@ -94,12 +101,12 @@ function buildOption() {
       if (lowerLimit != null) {
         mk.push({
           xAxis: lowerLimit,
-          lineStyle: { color: lot.color, width: 3, type: 'dashed' },
+          lineStyle: { color: lc, width: 3, type: 'dashed' },
           label: {
             show: true,
             formatter: `${dn} LSL`,
             position: 'end',
-            color: lot.color,
+            color: lc,
             fontSize: 10,
             fontWeight: 'bold',
           },
@@ -113,7 +120,7 @@ function buildOption() {
           data: [[limitX, 0]],
           symbol: 'circle',
           symbolSize: 0,
-          itemStyle: { color: lot.color },
+          itemStyle: { color: lc },
           markLine: { symbol: 'none', precision: 4, data: mk },
         })
         legendData.push(`${dn} 规格限`)
@@ -125,6 +132,7 @@ function buildOption() {
   if (showNormal) {
     for (const lot of lots) {
       const dn = displayName(lot)
+      const lc = lotThemeColor(lot)
       if (lot.std > 0 && binCenters.length > 0) {
         // 生成平滑的正态分布曲线
         const xMin = binCenters[0]
@@ -139,8 +147,8 @@ function buildOption() {
           type: 'line',
           data: normalData,
           smooth: true,
-          lineStyle: { color: lot.color, width: 3, type: 'dotted' },
-          itemStyle: { color: lot.color },
+          lineStyle: { color: lc, width: 3, type: 'dotted' },
+          itemStyle: { color: lc },
           symbol: 'none',
           yAxisIndex: 1, // 使用独立的概率密度Y轴
           z: 10,

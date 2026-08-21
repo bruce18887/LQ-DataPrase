@@ -18,6 +18,48 @@
       @upload-success="onUploadSuccess"
     />
 
+    <!-- 表头排序 + 筛选行（服务端生效：上传时间范围 / 大小 min~max） -->
+    <div class="sort-filter-row">
+      <div class="filter-item">
+        <span class="filter-label">上传时间</span>
+        <el-date-picker
+          v-model="dateRange"
+          type="daterange"
+          range-separator="~"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          value-format="YYYY-MM-DD"
+          size="small"
+          style="width: 230px"
+          @change="onDateRangeChange"
+        />
+      </div>
+      <div class="filter-item">
+        <span class="filter-label">大小 (B)</span>
+        <el-input-number
+          v-model="sizeMin"
+          :min="0"
+          :controls="false"
+          placeholder="最小"
+          size="small"
+          style="width: 100px"
+          @change="onSizeFilterChange"
+        />
+        <span class="filter-sep">~</span>
+        <el-input-number
+          v-model="sizeMax"
+          :min="0"
+          :controls="false"
+          placeholder="最大"
+          size="small"
+          style="width: 100px"
+          @change="onSizeFilterChange"
+        />
+      </div>
+      <el-button size="small" :disabled="!hasActiveFilters" @click="clearFilters">清除筛选</el-button>
+      <span class="filter-hint">点击表头可排序（默认最新上传在前）</span>
+    </div>
+
     <!-- Batch Management -->
     <BatchManagement
       ref="batchRef"
@@ -36,6 +78,8 @@
       v-loading="loading"
       :header-cell-style="{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontWeight: '600' }"
       :row-class-name="tableRowClassName"
+      :default-sort="{ prop: 'created_at', order: 'descending' }"
+      @sort-change="onSortChange"
       @row-click="onRowClick"
       @selection-change="onSelectionChange"
       @expand-change="onExpandChange"
@@ -53,7 +97,7 @@
           <span class="id-badge">#{{ row.id }}</span>
         </template>
       </el-table-column>
-      <el-table-column prop="filename" label="文件名" min-width="200">
+      <el-table-column prop="filename" label="文件名" min-width="200" sortable="custom">
         <template #default="{ row }">
           <div class="filename-cell">
             <span class="file-icon">📄</span>
@@ -130,12 +174,12 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column prop="created_at" label="上传时间" width="140">
+      <el-table-column prop="created_at" label="上传时间" width="140" sortable="custom">
         <template #default="{ row }">
           <span class="time-text">{{ formatTime(row.created_at) }}</span>
         </template>
       </el-table-column>
-      <el-table-column prop="file_size" label="大小" width="90" align="right">
+      <el-table-column prop="file_size" label="大小" width="90" align="right" sortable="custom">
         <template #default="{ row }">
           <span class="size-badge">{{ formatSize(row.file_size) }}</span>
         </template>
@@ -144,7 +188,7 @@
         <template #default="{ row }">
           <el-button size="small" type="primary" plain @click.stop="viewFile(row)">查看</el-button>
           <el-button size="small" type="danger" plain @click.stop="deleteFile(row)">
-            <el-icon><Delete /></el-icon>
+            <el-icon><Delete /></el-icon> 删除
           </el-button>
         </template>
       </el-table-column>
@@ -172,7 +216,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { Plus, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox, type ElTable } from 'element-plus'
 import { datafilesApi } from '../../../api/datafiles'
@@ -222,6 +266,47 @@ const selectedIds = ref<number[]>([])
 const currentSearch = ref('')
 const currentProductCode = ref('')
 
+// 表头排序：默认最新上传在前（与服务端 ordering 一致，default-sort 显示箭头）
+const ordering = ref('-created_at')
+// 上传时间范围（YYYY-MM-DD 数组）/ 大小 min~max（服务端筛选）
+const dateRange = ref<[string, string] | null>(null)
+const sizeMin = ref<number | null>(null)
+const sizeMax = ref<number | null>(null)
+
+const hasActiveFilters = computed(
+  () => !!dateRange.value || sizeMin.value != null || sizeMax.value != null,
+)
+
+/** 表头排序变化（服务端排序：20 条/页必须后端排，不能本地 sort） */
+function onSortChange({ prop, order }: { prop: string; order: 'ascending' | 'descending' | null }) {
+  if (!prop || !order) {
+    ordering.value = '-created_at' // 取消排序 → 回默认最新在前
+  } else {
+    const sign = order === 'descending' ? '-' : ''
+    ordering.value = `${sign}${prop}`
+  }
+  currentPage.value = 1
+  loadFiles()
+}
+
+function onDateRangeChange() {
+  currentPage.value = 1
+  loadFiles()
+}
+
+function onSizeFilterChange() {
+  currentPage.value = 1
+  loadFiles()
+}
+
+function clearFilters() {
+  dateRange.value = null
+  sizeMin.value = null
+  sizeMax.value = null
+  currentPage.value = 1
+  loadFiles()
+}
+
 // Upload toggle
 const showUpload = ref(false)
 
@@ -245,7 +330,11 @@ async function loadFiles() {
       page: currentPage.value,
       search: currentSearch.value,
       product_code: currentProductCode.value,
-      ordering: '-created_at',
+      ordering: ordering.value,
+      created_at__gte: dateRange.value?.[0] ?? undefined,
+      created_at__lte: dateRange.value?.[1] ?? undefined,
+      file_size__gte: sizeMin.value ?? undefined,
+      file_size__lte: sizeMax.value ?? undefined,
     })
     if (Array.isArray(data)) {
       files.value = data
@@ -394,6 +483,44 @@ defineExpose({ reload: loadFiles })
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
+}
+
+/* ============================
+   Sort / Filter Row
+   ============================ */
+.sort-filter-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-muted);
+  border-radius: 8px;
+}
+
+.filter-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filter-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.filter-sep {
+  color: var(--text-tertiary);
+}
+
+.filter-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-tertiary);
 }
 
 /* ============================
