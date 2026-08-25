@@ -23,6 +23,7 @@
           </div>
         </template>
         <span v-else class="path-value">{{ paths.data_dir }}</span>
+        <el-tag v-if="paths.configured.data_dir === null" size="small" type="info" effect="plain" class="path-default-tag">默认值</el-tag>
       </el-descriptions-item>
 
       <el-descriptions-item label="临时文件目录">
@@ -37,6 +38,7 @@
           </div>
         </template>
         <span v-else class="path-value">{{ paths.temp_dir }}</span>
+        <el-tag v-if="paths.configured.temp_dir === null" size="small" type="info" effect="plain" class="path-default-tag">默认值</el-tag>
       </el-descriptions-item>
 
       <el-descriptions-item label="数据库文件">
@@ -165,6 +167,11 @@ onMounted(loadPaths)
 
 .path-input {
   flex: 1;
+}
+
+.path-default-tag {
+  margin-left: 8px;
+  vertical-align: middle;
 }
 
 .paths-actions {

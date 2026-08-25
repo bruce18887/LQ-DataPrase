@@ -200,13 +200,19 @@ Django + apps/     ──PyInstaller──>  dist/LQ-DataPrase/ ──┘
      └─ _internal/             ← Python 运行依赖
 ```
 
-运行时用户数据目录（数据库、上传/下载文件、日志、密钥）统一写入：
+### 存储路径（Storage Layout v2，2026-08-21 起）
+
+所有运行期文件按用户维度收敛，不再散落于项目目录 / 系统临时目录：
 
 ```
-%APPDATA%\lq-dataprase\
+%USERPROFILE%\LQ-DataPrase\              ← 数据目录（数据库 + 上传数据，内置默认）
+└─ media\data\<用户名>\<single|batch>\   ← 上传/下载的数据文件
+%TEMP%\LQ-DataPrase-Temp\                ← 临时目录（导出中间文件、图表缓存，内置默认）
 ```
 
-这是通过 `LQDP_BASE_DIR` 环境变量在 Electron 启动 Python 后端时传入的，避免写入只读的安装目录。
+- 数据目录与临时目录均为**内置默认值**：无需配置即生效；管理员可在 设置 → 存储路径 中修改，修改后重启生效（数据库与上传数据会自动迁移）。
+- `system_config.json` 与 `secret.key` 固定在锚点目录（打包版 = `%APPDATA%\lq-dataprase\`，开发版 = 项目根），不随数据目录迁移——密钥迁移风险大于目录整洁收益。
+- 打包版通过 `LQDP_BASE_DIR` 环境变量在 Electron 启动 Python 后端时传入锚点目录；`DataFile.file_path` 以相对 `media/` 的路径存储，数据目录整体迁移时无需重写数据库记录。
 
 开发模式下，Electron 不会自己启动后端，而是检测并复用 `localhost:8000` 的 Django 开发服务器，保证浏览器与 Electron 使用同一个 SQLite 数据库。
 

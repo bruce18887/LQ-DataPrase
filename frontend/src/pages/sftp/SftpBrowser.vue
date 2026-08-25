@@ -245,7 +245,8 @@ async function downloadFile(row: any) {
   downloadingRows.value.add(key)
   try {
     const { data } = await sftpApi.download(joinPath(currentPath.value, row.name))
-    ElMessage.success(`已保存: ${data.filename} (${formatSize(data.size)})`)
+    ElMessage.success(`已导入: ${data.filename} (${formatSize(data.size)})`)
+    filesStore.notifyFilesChanged()
   } catch { /* 错误 toast 由 axios 拦截器统一弹出 */ }
   finally { downloadingRows.value.delete(key) }
 }
@@ -302,7 +303,8 @@ async function batchDownload() {
   batchDownloading.value = true
   try {
     const { data } = await sftpApi.downloadBatch(selectedPaths.value)
-    ElMessage.success(`已保存 ${data.count} 个文件到 media 目录`)
+    ElMessage.success(`已导入 ${data.count} 个文件`)
+    filesStore.notifyFilesChanged()
   } catch { /* 错误 toast 由 axios 拦截器统一弹出 */ }
   finally { batchDownloading.value = false }
 }

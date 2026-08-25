@@ -8,6 +8,7 @@ import pandas as pd
 
 from apps.datafiles.models import DataFile
 from apps.datafiles.services import get_cached_parsed_file
+from apps.datafiles.utils import resolve_file_path
 from apps.common.params import get_param
 
 # Low-CPK set cache for the fast path: evaluating every column (IQR + CPK)
@@ -26,7 +27,7 @@ def cached_low_cpk_items(datafile, user_id: int, df, metadata,
     """
     key = (user_id, datafile.id, threshold, iqr_multiplier, data_only_bin1)
     try:
-        st = os.stat(datafile.file_path)
+        st = os.stat(resolve_file_path(datafile.file_path))
         key += (st.st_mtime_ns, st.st_size)
     except (OSError, AttributeError):
         # file missing / test fakes without file_path → no mtime guard
@@ -165,9 +166,8 @@ def _load_files_from_request(request, file_ids):
     for file_id in file_ids:
         try:
             from django.shortcuts import get_object_or_404
-            import os
             datafile = get_object_or_404(DataFile, pk=file_id, owner=request.user)
-            if not os.path.exists(datafile.file_path):
+            if not os.path.exists(resolve_file_path(datafile.file_path)):
                 continue
 
             df, metadata, fmt = get_cached_parsed_file(int(file_id), request.user.pk, datafile)

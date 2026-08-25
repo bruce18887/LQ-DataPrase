@@ -1,10 +1,11 @@
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APITestCase
 
 from apps.datafiles.models import DataFile
-from apps.datafiles.utils import extract_product_code
+from apps.datafiles.utils import extract_product_code, resolve_file_path, store_file_path
 from apps.datafiles.views import _user_upload_dir
 
 import io
@@ -1175,7 +1176,7 @@ class ZipUploadTests(APITestCase):
         self.assertEqual(sub.batch_name, 'LOT-A')
         self.assertEqual(sub.sub_batch, 'sub')
         for df in rows:
-            self.assertTrue(os.path.exists(df.file_path))
+            self.assertTrue(os.path.exists(resolve_file_path(df.file_path)))
 
     def test_zip_upload_skips_summary_and_non_csv(self):
         resp = self._upload_zip('LOT-SUM.zip', {
@@ -1301,3 +1302,156 @@ class ZipUploadTests(APITestCase):
         self.assertFalse(os.path.exists(os.path.join(dir_a, 'b.csv')))
         self.assertTrue(os.path.exists(os.path.join(dir_b, 'b.csv')))
         self.assertFalse(os.path.exists(os.path.join(dir_b, 'a.csv')))
+
+
+class PathFormatUtilsTests(TestCase):
+    """resolve_file_path / store_file_path 双格式工具单元测试."""
+
+    def test_resolve_passthrough_absolute(self):
+        raw = r'C:\legacy\media\data\admin\single\a.csv'
+        self.assertEqual(resolve_file_path(raw), raw)
+
+    def test_resolve_joins_relative_under_media_root(self):
+        expected = os.path.normpath(
+            os.path.join(str(settings.MEDIA_ROOT), 'data/admin/single/a.csv')
+        )
+        self.assertEqual(resolve_file_path('data/admin/single/a.csv'), expected)
+
+    def test_resolve_empty(self):
+        self.assertEqual(resolve_file_path(''), '')
+        self.assertEqual(resolve_file_path(None), None)
+
+    def test_store_relative_under_media_root(self):
+        abs_path = os.path.join(str(settings.MEDIA_ROOT), 'data', 'u1', 'single', 'a.csv')
+        self.assertEqual(store_file_path(abs_path), os.path.join('data', 'u1', 'single', 'a.csv'))
+
+    def test_store_keeps_absolute_outside_media_root(self):
+        outside = os.path.join(os.path.dirname(str(settings.MEDIA_ROOT)), 'elsewhere', 'a.csv')
+        self.assertEqual(store_file_path(outside), os.path.normpath(outside))
+
+    def test_store_keeps_absolute_on_cross_drive(self):
+        fake = r'D:\anything\a.csv'
+        self.assertEqual(store_file_path(fake), fake)
+
+
+class ConsolidateUploadsCommandTests(TestCase):
+    """``consolidate_uploads`` 管理命令：media/uploads/ → media/data/<user>/。
+
+    磁盘与 DB 均在临时 MEDIA_ROOT 下模拟（override_settings），不触碰真实
+    media/ 目录。
+    """
+
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(username='consol_user', password='pw')
+        self.tmp = tempfile.mkdtemp(prefix='consol_test_')
+        self.addCleanup(lambda: shutil.rmtree(self.tmp, ignore_errors=True))
+        self.override = override_settings(MEDIA_ROOT=os.path.join(self.tmp, 'media'))
+        self.override.enable()
+        self.addCleanup(self.override.disable)
+        self.uploads = os.path.join(self.tmp, 'media', 'uploads')
+        os.makedirs(self.uploads, exist_ok=True)
+
+    def _make_file(self, path, content='a,b\n1,2\n'):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            f.write(content)
+        return path
+
+    def _row(self, filename, file_path, file_type='single', batch_name=''):
+        return DataFile.objects.create(
+            owner=self.user, filename=filename, file_path=file_path,
+            file_size=8, format_type='CTA8290D', status='ready',
+            file_type=file_type, batch_name=batch_name,
+        )
+
+    def _run(self, *extra):
+        from io import StringIO
+        from django.core.management import call_command
+        out = StringIO()
+        call_command('consolidate_uploads', *extra, stdout=out)
+        return out.getvalue()
+
+    def test_moves_single_and_batch_rows_and_rewrites_db(self):
+        single_src = self._make_file(os.path.join(self.uploads, 's1.csv'))
+        batch_src = self._make_file(os.path.join(self.uploads, 'b1.csv'))
+        df_single = self._row('s1.csv', single_src, 'single')
+        df_batch = self._row('b1.csv', batch_src, 'batch', 'LOT-A')
+        from apps.datafiles.models import ParseHistory
+        ParseHistory.objects.create(
+            user=self.user, datafile=df_single, filename='s1.csv',
+            filepath=single_src, format_type='CTA8290D', rows=1, cols=2,
+        )
+
+        output = self._run()
+        self.assertIn('迁移完成', output)
+
+        df_single.refresh_from_db()
+        df_batch.refresh_from_db()
+        # 相对化 + 落到 per-user 目录
+        self.assertEqual(
+            df_single.file_path,
+            os.path.join('data', 'consol_user', 'single', 's1.csv'),
+        )
+        self.assertEqual(
+            df_batch.file_path,
+            os.path.join('data', 'consol_user', 'batch', 'LOT-A', 'b1.csv'),
+        )
+        # 磁盘：源删除、目标存在
+        self.assertFalse(os.path.exists(single_src))
+        self.assertTrue(os.path.exists(resolve_file_path(df_single.file_path)))
+        self.assertTrue(os.path.exists(resolve_file_path(df_batch.file_path)))
+        # ParseHistory.filepath 同步
+        from apps.datafiles.models import ParseHistory
+        hist = ParseHistory.objects.get(datafile=df_single)
+        self.assertEqual(hist.filepath, df_single.file_path)
+        # uploads/ 空 → 目录被删
+        self.assertFalse(os.path.exists(self.uploads))
+
+    def test_dry_run_touches_nothing(self):
+        src = self._make_file(os.path.join(self.uploads, 's1.csv'))
+        df = self._row('s1.csv', src, 'single')
+        output = self._run('--dry-run')
+        self.assertIn('[dry-run]', output)
+        df.refresh_from_db()
+        self.assertEqual(df.file_path, src)
+        self.assertTrue(os.path.exists(src))
+
+    def test_rerun_is_noop_when_uploads_gone(self):
+        src = self._make_file(os.path.join(self.uploads, 's1.csv'))
+        self._row('s1.csv', src, 'single')
+        self._run()
+        output2 = self._run()
+        self.assertIn('不存在', output2)  # 幂等：uploads/ 已删除
+
+    def test_conflict_same_size_means_already_migrated(self):
+        src = self._make_file(os.path.join(self.uploads, 's1.csv'), 'same')
+        # 目标已存在且 size 相同 → 视为已迁移，只改 DB 不复制
+        target_dir = os.path.join(self.tmp, 'media', 'data', 'consol_user', 'single')
+        os.makedirs(target_dir, exist_ok=True)
+        self._make_file(os.path.join(target_dir, 's1.csv'), 'same')
+        df = self._row('s1.csv', src, 'single')
+        self._run()
+        df.refresh_from_db()
+        self.assertEqual(df.file_path, os.path.join('data', 'consol_user', 'single', 's1.csv'))
+        self.assertTrue(os.path.exists(src))  # 源保留（未复制新副本）
+
+    def test_conflict_different_size_keeps_source(self):
+        src = self._make_file(os.path.join(self.uploads, 's1.csv'), 'content-a')
+        target_dir = os.path.join(self.tmp, 'media', 'data', 'consol_user', 'single')
+        os.makedirs(target_dir, exist_ok=True)
+        self._make_file(os.path.join(target_dir, 's1.csv'), 'content-b-longer')
+        df = self._row('s1.csv', src, 'single')
+        output = self._run()
+        self.assertIn('跳过', output)
+        df.refresh_from_db()
+        self.assertEqual(df.file_path, src)  # 冲突 → 保持源路径
+        self.assertTrue(os.path.exists(src))
+
+    def test_orphaned_files_warned_not_deleted(self):
+        orphan = self._make_file(os.path.join(self.uploads, 'orphan.csv'))
+        self._row('registered.csv', self._make_file(os.path.join(self.uploads, 'registered.csv')), 'single')
+        output = self._run()
+        self.assertIn('孤儿', output)
+        self.assertIn('orphan.csv', output)
+        self.assertTrue(os.path.exists(orphan))

@@ -3,7 +3,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { gotoApp } from '../helpers/nav'
 import { uiLogin } from '../helpers/auth'
-import { ACCOUNTS } from '../fixtures/test-data'
+import { ACCOUNTS, PROJECT_ROOT } from '../fixtures/test-data'
 
 /**
  * 系统存储路径（系统设置 → 📁 存储路径，GET/PUT /api/v1/system/paths/）。
@@ -88,6 +88,33 @@ test.describe('@p2 系统存储路径', { tag: ['@p2', '@settings'] }, () => {
     } finally {
       await restorePaths(page, snapshot)
     }
+  })
+
+  test('管理员：默认值展示（数据目录=项目根、临时目录=LQ-DataPrase-Temp）', async ({ page }) => {
+    await gotoApp(page, '/settings')
+    await page.getByRole('tab', { name: '📁 存储路径' }).click()
+
+    // e2e 配置钉死 data_dir=PROJECT_ROOT（playwright.config.ts 顶层写入），
+    // temp_dir 未配置 → 内置默认 %TEMP%\LQ-DataPrase-Temp
+    const resp = await page.request.get(PATHS_API, {
+      headers: { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('access_token'))}` },
+    })
+    expect(resp.ok()).toBeTruthy()
+    const data = (await resp.json()) as {
+      data_dir: string
+      temp_dir: string
+      configured: { data_dir: string | null; temp_dir: string | null }
+    }
+
+    // Windows 路径大小写防御（TEMP 可能展开为短名/大小写差异）
+    expect(data.data_dir.toLowerCase()).toBe(PROJECT_ROOT.toLowerCase())
+    expect(
+      data.temp_dir.toLowerCase().endsWith(path.join('LQ-DataPrase-Temp').toLowerCase()),
+    ).toBeTruthy()
+    expect(data.configured).toEqual({ data_dir: PROJECT_ROOT, temp_dir: null })
+
+    // UI 展示「默认值」标识（未显式配置）
+    await expect(page.getByText('默认值')).toHaveCount(2)
   })
 
   test('管理员：非法路径保存 → 400 错误提示且无重启框', async ({ page }) => {

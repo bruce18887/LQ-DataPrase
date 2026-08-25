@@ -5,9 +5,12 @@ pattern repeated in export, dashboard, analysis, buyoff, gage, batch_report,
 data_correlation, and datafiles views.
 """
 
+import os
+
 from django.shortcuts import get_object_or_404
 from apps.datafiles.models import DataFile
 from apps.datafiles.services import get_cached_parsed_file
+from apps.datafiles.utils import resolve_file_path
 
 
 def load_user_file(request, file_id=None, *, check_exists=False):
@@ -36,8 +39,7 @@ def load_user_file(request, file_id=None, *, check_exists=False):
     datafile = get_object_or_404(DataFile, pk=file_id, owner=request.user)
 
     if check_exists:
-        import os
-        if not os.path.exists(datafile.file_path):
+        if not os.path.exists(resolve_file_path(datafile.file_path)):
             raise FileLoadError('file_not_found')
 
     df, metadata, fmt = get_cached_parsed_file(file_id, request.user.pk, datafile)

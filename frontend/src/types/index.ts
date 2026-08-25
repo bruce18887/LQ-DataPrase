@@ -8,7 +8,7 @@ export interface User {
 
 export type ExportTypeKey =
   | 'to_excel' | 'to_csv' | 'sigma_limit' | 'html_report'
-  | 'batch_charts' | 'batch_report' | 'buyoff' | 'gage'
+  | 'batch_charts' | 'batch_report' | 'buyoff' | 'gage' | 'file_correlation'
 
 export interface UserSettings {
   page_size: number
@@ -126,4 +126,66 @@ export interface TestItemOverview {
   unit: string
   fail_count: number
   percentage: number
+}
+
+/** 文件相关性对比：LSL/USL Diff 标红规则（A: 差值全为0才pass 默认 / B: B的limit不更紧才pass） */
+export type DiffRule = 'zero' | 'wider'
+
+/** 文件相关性对比：单个序列的 ATE/Bench/Delta/%Diff 单元格 */
+export interface FileCorrelationCell {
+  serial: number
+  ate: number | null
+  bench: number | null
+  delta: number | null
+  diff_pct: number | null
+  fail: boolean
+}
+
+/** 文件相关性对比：单个测试项行（模板风格：limit 列 + 每序列数据块） */
+export interface FileCorrelationRow {
+  param: string
+  unit: string
+  lsl_a: number | null
+  usl_a: number | null
+  lsl_b: number | null
+  usl_b: number | null
+  lsl_diff: number | null
+  usl_diff: number | null
+  lsl_fail: boolean
+  usl_fail: boolean
+  compared: number
+  fail_count: number
+  pass_rate: number
+  max_diff: number
+  cells: FileCorrelationCell[]
+}
+
+/** 文件相关性对比：汇总统计 */
+export interface FileCorrelationTotals {
+  params: number
+  serials: number
+  paired_cells: number
+  fail_cells: number
+  overall_pass_rate: number
+}
+
+/** 文件相关性对比：后端 /analysis/file_correlation/ 完整响应 */
+export interface FileCorrelationResult {
+  file1_name: string
+  file2_name: string
+  serials: number[]
+  limits_only: boolean
+  truncated: boolean
+  params: string[]
+  rows: FileCorrelationRow[]
+  totals: FileCorrelationTotals
+}
+
+/** 文件相关性对比请求选项（与后端 FileCorrelationConfig 一一对应） */
+export interface FileCorrelationOptions {
+  threshold: number
+  diffRule: DiffRule
+  maxSerials: number
+  ignoreNoLimit: boolean
+  ignoreNoData: boolean
 }

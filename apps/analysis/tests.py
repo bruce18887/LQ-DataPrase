@@ -11,6 +11,7 @@ behaviour so a future refactor cannot silently regress it.
 import numpy as np
 import pandas as pd
 import types
+import math
 from django.test import SimpleTestCase, TestCase
 
 from apps.analysis.services.data_services import compute_histogram_stats
@@ -1490,6 +1491,8 @@ class FileCorrelationCacheIsolationTests(SimpleTestCase):
         factory = APIRequestFactory()
         request = factory.post('/api/v1/analysis/file_correlation/', {
             'file1_id': 1, 'file2_id': 2,
+            # mock 的 metadata 无 limits —— 关掉 ignore_no_limit 让参数参与对比
+            'ignore_no_limit': False,
         }, format='json')
         force_authenticate(request, user=types.SimpleNamespace(
             pk=1, is_authenticated=True, is_active=True, is_anonymous=False,
@@ -1504,10 +1507,593 @@ class FileCorrelationCacheIsolationTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200, response.content)
         # 缓存对象不允许被端点改写
         self.assertNotIn('__serial__', shared_df.columns)
-        # 端点自身逻辑仍可用（3 个共同序列号被匹配；Serial_No 为 int64
-        # 数值列，与 ParamA/ParamB 一起计入公共参数）
-        self.assertEqual(response.data['common_serials'], 3)
-        self.assertEqual(response.data['common_params'], 3)
+        # 端点自身逻辑仍可用（3 个共同序列号被匹配；序列列不参与参数对比，
+        # 只比较 ParamA/ParamB）
+        self.assertEqual(response.data['serials'], [1, 2, 3])
+        self.assertEqual(response.data['params'], ['ParamA', 'ParamB'])
+
+
+class FileCorrelationNanJsonTests(SimpleTestCase):
+    """file_correlation 对含 NaN 的参数列必须返回合法 JSON（回归 500）。
+
+    回归：偏差计算把 NaN 单元格直接算进 diff_pct，nan 进入 summary 后
+    DRF JSON 序列化抛 ``ValueError: Out of range float values are not
+    JSON compliant: nan`` → 整个端点 500。修复：任一侧非有限值即跳过
+    该序列号；响应再经 clean_data 兜底。
+    """
+
+    def _call_endpoint(self, shared_df, serial='Serial_No', extra=None):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from apps.analysis.views import analysis_views, AnalysisViewSet
+
+        metadata = {'format': 'CTA8290D', 'mins': {}, 'maxs': {}, 'units': {}}
+
+        orig_404 = analysis_views.get_object_or_404
+        orig_load = analysis_views.get_cached_parsed_file
+        orig_serial = analysis_views.get_serial_column
+
+        analysis_views.get_object_or_404 = (
+            lambda model, *a, **k: types.SimpleNamespace(
+                id=1, filename='fake.csv', format_type='CTA8290D'))
+        analysis_views.get_cached_parsed_file = (
+            lambda fid, owner_id, datafile=None: (shared_df, metadata, 'CTA8290D'))
+        analysis_views.get_serial_column = lambda df: serial
+        self.addCleanup(lambda: setattr(analysis_views, 'get_object_or_404', orig_404))
+        self.addCleanup(lambda: setattr(analysis_views, 'get_cached_parsed_file', orig_load))
+        self.addCleanup(lambda: setattr(analysis_views, 'get_serial_column', orig_serial))
+
+        factory = APIRequestFactory()
+        request = factory.post('/api/v1/analysis/file_correlation/', {
+            'file1_id': 1, 'file2_id': 2, 'threshold': 3.0,
+            # mock 的 metadata 无 limits —— 关掉 ignore_no_limit 让参数参与对比
+            'ignore_no_limit': False,
+            **(extra or {}),
+        }, format='json')
+        force_authenticate(request, user=types.SimpleNamespace(
+            pk=1, is_authenticated=True, is_active=True, is_anonymous=False,
+            is_staff=False, is_superuser=False,
+        ))
+
+        view = AnalysisViewSet.as_view({'post': 'file_correlation'})
+        response = view(request)
+        response.render()  # 触发 JSON 序列化——无异常即证明无 nan/inf 泄漏
+        return response
+
+    def test_nan_param_values_do_not_break_json_serialization(self):
+        shared_df = pd.DataFrame({
+            'Serial_No': [1, 2, 3],
+            'ParamA': [1.0, float('nan'), 3.0],
+            'ParamB': [4.0, 5.0, 6.0],
+        })
+        response = self._call_endpoint(shared_df)
+        self.assertEqual(response.status_code, 200, response.content)
+
+        by_param = {r['param']: r for r in response.data['rows']}
+        # 序列号 2 的 ParamA 为 NaN → 该对不参与对比；ParamB 全部有效
+        self.assertEqual(by_param['ParamA']['compared'], 2)
+        self.assertEqual(by_param['ParamB']['compared'], 3)
+        for r in response.data['rows']:
+            self.assertTrue(math.isfinite(r['max_diff']), r)
+            self.assertTrue(math.isfinite(r['pass_rate']), r)
+        self.assertEqual(response.data['serials'], [1, 2, 3])
+
+    def test_all_nan_param_values_returns_empty_comparison(self):
+        shared_df = pd.DataFrame({
+            'Serial_No': [1, 2, 3],
+            'ParamA': [float('nan'), float('nan'), float('nan')],
+        })
+        # ignore_no_data=False：全 NaN 参数保留在结果中（compared=0），
+        # 而不是被「忽略无数据」过滤掉
+        response = self._call_endpoint(shared_df, extra={'ignore_no_data': False})
+        self.assertEqual(response.status_code, 200, response.content)
+        by_param = {r['param']: r for r in response.data['rows']}
+        self.assertEqual(by_param['ParamA']['compared'], 0)
+        self.assertEqual(by_param['ParamA']['fail_count'], 0)
+        self.assertEqual(by_param['ParamA']['max_diff'], 0)
+        self.assertEqual(by_param['ParamA']['pass_rate'], 0)
+
+
+class FileCorrelationExportTests(TestCase):
+    """file_correlation_export 输出模板布局 xlsx。
+
+    规格（对齐 Data/TemplateExport/Correlation_Excel/Correlation.xlsx）：
+    - 标题行 A1 'Data A VS Data B'（跨全表合并）。
+    - 两行表头：A2 'Corr Result'（A2:A3 合并）| B2 'Test Name'（B2:I2 合并）
+      | 每序列组标题（J2:M2='1'、N2:Q2='2'…）| 末列 'Comment'。
+    - 第 3 行：Parameters | LSL A | USL A | LSL B | USL B | LSL Diff
+      | USL Diff | Unit | 每序列 ATE/Bench/Delta/% Diff | Comment。
+    - 数据行按文件1列顺序（序列列不参与参数对比）；Delta/%Diff 写公式
+      （=K-J / =L/J，Δ/ATE 口径），%Diff 数字格式 0.00%；单侧有值只写该侧。
+    - |%Diff| > threshold → Delta/%Diff 标红；LSL/USL Diff 按 diff_rule 标红
+      （zero：差值≠0 标红；wider：B 更紧标红）。
+    - 无公共序列 → limits_only：无序列列，只导 limits + Comment。
+    - 无公共测试项 → 400 no_common_params。
+    """
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        self.user = get_user_model().objects.create_user(
+            username='fc_export_test', password='x')
+
+    def _call_export(self, frames, body=None, metas=None):
+        from rest_framework.test import APIClient
+        from apps.analysis.views import analysis_views
+
+        body = body or {}
+        base_meta = {'format': 'CTA8290D',
+                     'mins': {'ParamA': '0.5', 'ParamB': '10'},
+                     'maxs': {'ParamA': '2.0', 'ParamB': '40'},
+                     'units': {'ParamA': 'V', 'ParamB': 'nA'}}
+        metas = metas or {}
+        orig_404 = analysis_views.get_object_or_404
+        orig_load = analysis_views.get_cached_parsed_file
+        orig_serial = analysis_views.get_serial_column
+
+        analysis_views.get_object_or_404 = (
+            lambda model, *a, **k: types.SimpleNamespace(
+                id=k['pk'], filename=f'FILE{k["pk"]}.csv',
+                format_type='CTA8290D'))
+        analysis_views.get_cached_parsed_file = (
+            lambda fid, owner_id, datafile=None: (
+                frames[int(fid)], metas.get(int(fid), base_meta), 'CTA8290D'))
+        analysis_views.get_serial_column = lambda df: 'Serial_No'
+        self.addCleanup(lambda: setattr(analysis_views, 'get_object_or_404', orig_404))
+        self.addCleanup(lambda: setattr(analysis_views, 'get_cached_parsed_file', orig_load))
+        self.addCleanup(lambda: setattr(analysis_views, 'get_serial_column', orig_serial))
+
+        client = APIClient()
+        client.force_authenticate(user=self.user)
+        return client.post('/api/v1/analysis/file_correlation_export/', {
+            'file1_id': 1, 'file2_id': 2, **body,
+        }, format='json')
+
+    @staticmethod
+    def _body(resp):
+        """FileResponse is streaming — collect bytes for openpyxl / asserts."""
+        return b''.join(resp.streaming_content)
+
+    def test_export_template_layout_formulas_and_red_highlight(self):
+        import io
+        from openpyxl import load_workbook
+
+        df1 = pd.DataFrame({
+            'Serial_No': [1, 2, 3],
+            'ParamA': [1.0, 2.0, 3.0],
+            'ParamB': [10.0, 20.0, 30.0],
+        })
+        df2 = pd.DataFrame({
+            'Serial_No': [1, 2, 3],
+            'ParamA': [1.1, 2.1, 3.1],
+            'ParamB': [10.0, 21.0, 29.0],
+        })
+        resp = self._call_export({1: df1, 2: df2})
+        body = self._body(resp)
+        self.assertEqual(resp.status_code, 200, body[:500])
+        self.assertIn('spreadsheetml', resp['Content-Type'])
+        self.assertIn('FILE1_vs_FILE2_correlation.xlsx', resp['Content-Disposition'])
+
+        wb = load_workbook(io.BytesIO(body))
+        ws = wb['文件相关性对比']
+
+        # 标题行 + 合并单元格（模板布局；3 序列 → 末列 V）
+        self.assertEqual(ws['A1'].value, 'Data A VS Data B')
+        merged = {str(r) for r in ws.merged_cells.ranges}
+        self.assertIn('A1:V1', merged)
+        self.assertIn('A2:A3', merged)
+        self.assertIn('B2:I2', merged)
+        self.assertIn('J2:M2', merged)   # 序列 1 组标题
+        self.assertIn('N2:Q2', merged)   # 序列 2 组标题
+        self.assertIn('R2:U2', merged)   # 序列 3 组标题
+
+        # 两行表头
+        self.assertEqual(ws['A2'].value, 'Corr Result')
+        self.assertEqual(ws['B2'].value, 'Test Name')
+        self.assertEqual(ws['J2'].value, 1)
+        self.assertEqual(ws['N2'].value, 2)
+        self.assertEqual(ws['R2'].value, 3)
+        self.assertEqual(ws['V2'].value, 'Comment')
+        self.assertEqual(ws['B3'].value, 'Parameters')
+        self.assertEqual(ws['C3'].value, 'LSL A')
+        self.assertEqual(ws['D3'].value, 'USL A')
+        self.assertEqual(ws['E3'].value, 'LSL B')
+        self.assertEqual(ws['F3'].value, 'USL B')
+        self.assertEqual(ws['G3'].value, 'LSL Diff')
+        self.assertEqual(ws['H3'].value, 'USL Diff')
+        self.assertEqual(ws['I3'].value, 'Unit')
+        for cell, h in [('J3', 'ATE'), ('K3', 'Bench'), ('L3', 'Delta'), ('M3', '% Diff'),
+                        ('N3', 'ATE'), ('O3', 'Bench'), ('P3', 'Delta'), ('Q3', '% Diff'),
+                        ('R3', 'ATE'), ('S3', 'Bench'), ('T3', 'Delta'), ('U3', '% Diff')]:
+            self.assertEqual(ws[cell].value, h)
+        self.assertEqual(ws['V3'].value, 'Comment')
+
+        # 数据行按文件1列顺序（ignore_no_limit 默认过滤无 limit 的序列列）
+        self.assertEqual(ws['B4'].value, 'ParamA')
+        self.assertEqual(ws['B5'].value, 'ParamB')
+        self.assertEqual(ws.max_row, 5)
+        self.assertEqual(ws.max_column, 22)   # V
+
+        # Limits 列（模板 C-F；LSL/USL Diff 有符号 B−A）
+        self.assertEqual(ws['C4'].value, 0.5)
+        self.assertEqual(ws['D4'].value, 2.0)
+        self.assertEqual(ws['E4'].value, 0.5)
+        self.assertEqual(ws['F4'].value, 2.0)
+        self.assertEqual(ws['G4'].value, 0.0)
+        self.assertEqual(ws['H4'].value, 0.0)
+        self.assertEqual(ws['I4'].value, 'V')
+
+        # 公式（Δ/ATE 口径）+ 0.00% 数字格式；单侧有值只写该侧
+        self.assertEqual(ws['J4'].value, 1.0)
+        self.assertEqual(ws['K4'].value, 1.1)
+        self.assertEqual(ws['L4'].value, '=K4-J4')
+        self.assertEqual(ws['M4'].value, '=L4/J4')
+        self.assertEqual(ws['M4'].number_format, '0.00%')
+
+        # ParamA 序列1: |10%| > 3 → Delta/%Diff 标红；ParamB 序列1: 0% 不标红
+        self.assertEqual(
+            ws['L4'].fill.start_color.rgb, ws['M4'].fill.start_color.rgb)
+        self.assertNotEqual(
+            ws['L4'].fill.start_color.rgb, ws['J4'].fill.start_color.rgb)
+        self.assertEqual(
+            ws['L5'].fill.start_color.rgb, ws['J5'].fill.start_color.rgb)
+
+        # Comment 判定摘要
+        self.assertEqual(ws['V4'].value, '3 超差')   # ParamA: 10/5/3.33% 全超
+        self.assertEqual(ws['V5'].value, '2 超差')   # ParamB: 5/-3.33% 超
+
+    def test_export_threshold_controls_red_highlight(self):
+        import io
+        from openpyxl import load_workbook
+
+        df1 = pd.DataFrame({
+            'Serial_No': [1, 2],
+            'ParamA': [1.0, 3.0],
+        })
+        df2 = pd.DataFrame({
+            'Serial_No': [1, 2],
+            'ParamA': [1.1, 3.1],
+        })
+        # 阈值放大到 100：ParamA 10%/3.33% 偏差不再标红
+        resp = self._call_export({1: df1, 2: df2}, body={'threshold': 100.0})
+        body = self._body(resp)
+        self.assertEqual(resp.status_code, 200, body[:500])
+        ws = load_workbook(io.BytesIO(body))['文件相关性对比']
+        self.assertEqual(ws['B4'].value, 'ParamA')
+        self.assertEqual(
+            ws['L4'].fill.start_color.rgb, ws['J4'].fill.start_color.rgb)
+
+    def test_export_single_side_value_writes_ate_only(self):
+        import io
+        from openpyxl import load_workbook
+
+        df1 = pd.DataFrame({'Serial_No': [1, 2], 'ParamA': [1.0, 2.0]})
+        df2 = pd.DataFrame({'Serial_No': [1, 2], 'ParamA': [1.1, float('nan')]})
+        resp = self._call_export({1: df1, 2: df2})
+        body = self._body(resp)
+        self.assertEqual(resp.status_code, 200, body[:500])
+        ws = load_workbook(io.BytesIO(body))['文件相关性对比']
+        # 序列2（N..Q 块）：bench NaN → 只写 ATE，无公式（同模板单侧行）
+        self.assertEqual(ws['N4'].value, 2.0)
+        self.assertIsNone(ws['O4'].value)
+        self.assertIsNone(ws['P4'].value)
+        self.assertIsNone(ws['Q4'].value)
+        # 序列1（J..M 块）：两侧都有 → 公式
+        self.assertEqual(ws['L4'].value, '=K4-J4')
+
+    def test_export_diff_rule_zero_marks_different_limits_red(self):
+        import io
+        from openpyxl import load_workbook
+
+        df1 = pd.DataFrame({'Serial_No': [1], 'ParamA': [1.0]})
+        df2 = pd.DataFrame({'Serial_No': [1], 'ParamA': [1.0]})
+        # 文件 B 的 LSL 更宽（0.4 < 0.5）→ zero 规则下 Diff≠0 标红
+        meta_b = {'format': 'CTA8290D',
+                  'mins': {'ParamA': '0.4'}, 'maxs': {'ParamA': '2.0'},
+                  'units': {'ParamA': 'V'}}
+        resp = self._call_export({1: df1, 2: df2}, metas={2: meta_b})
+        body = self._body(resp)
+        self.assertEqual(resp.status_code, 200, body[:500])
+        ws = load_workbook(io.BytesIO(body))['文件相关性对比']
+        self.assertEqual(ws['G4'].value, -0.1)
+        # LSL Diff 标红；USL Diff 相等不标红
+        self.assertNotEqual(
+            ws['G4'].fill.start_color.rgb, ws['I4'].fill.start_color.rgb)
+        self.assertEqual(
+            ws['H4'].fill.start_color.rgb, ws['I4'].fill.start_color.rgb)
+
+    def test_export_diff_rule_wider_only_marks_tighter_limits_red(self):
+        import io
+        from openpyxl import load_workbook
+
+        df1 = pd.DataFrame({'Serial_No': [1], 'ParamA': [1.0]})
+        df2 = pd.DataFrame({'Serial_No': [1], 'ParamA': [1.0]})
+        # B 更宽（0.4/2.5）→ wider 规则 pass（不标红）
+        meta_wider = {'format': 'CTA8290D',
+                      'mins': {'ParamA': '0.4'}, 'maxs': {'ParamA': '2.5'},
+                      'units': {'ParamA': 'V'}}
+        resp = self._call_export({1: df1, 2: df2}, metas={2: meta_wider},
+                                 body={'diff_rule': 'wider'})
+        body = self._body(resp)
+        self.assertEqual(resp.status_code, 200, body[:500])
+        ws = load_workbook(io.BytesIO(body))['文件相关性对比']
+        self.assertEqual(ws['G4'].value, -0.1)
+        self.assertEqual(ws['H4'].value, 0.5)
+        self.assertEqual(
+            ws['G4'].fill.start_color.rgb, ws['I4'].fill.start_color.rgb)
+        self.assertEqual(
+            ws['H4'].fill.start_color.rgb, ws['I4'].fill.start_color.rgb)
+
+        # B 更紧（LSL 0.6 > 0.5）→ wider 规则标红
+        meta_tight = {'format': 'CTA8290D',
+                      'mins': {'ParamA': '0.6'}, 'maxs': {'ParamA': '2.0'},
+                      'units': {'ParamA': 'V'}}
+        resp2 = self._call_export({1: df1, 2: df2}, metas={2: meta_tight},
+                                  body={'diff_rule': 'wider'})
+        body2 = self._body(resp2)
+        self.assertEqual(resp2.status_code, 200, body2[:500])
+        ws2 = load_workbook(io.BytesIO(body2))['文件相关性对比']
+        self.assertNotEqual(
+            ws2['G4'].fill.start_color.rgb, ws2['I4'].fill.start_color.rgb)
+
+    def test_export_max_serials_truncates_sequence_blocks(self):
+        import io
+        from openpyxl import load_workbook
+
+        df1 = pd.DataFrame({'Serial_No': [1, 2, 3, 4], 'ParamA': [1.0, 2.0, 3.0, 4.0]})
+        df2 = pd.DataFrame({'Serial_No': [1, 2, 3, 4], 'ParamA': [1.0, 2.0, 3.0, 4.0]})
+        resp = self._call_export({1: df1, 2: df2}, body={'max_serials': 2})
+        body = self._body(resp)
+        self.assertEqual(resp.status_code, 200, body[:500])
+        ws = load_workbook(io.BytesIO(body))['文件相关性对比']
+        # 4 个公共序列只对比前 2 个 → 只有 2 组序列块；末列 R 为 Comment
+        self.assertEqual(ws['J2'].value, 1)
+        self.assertEqual(ws['N2'].value, 2)
+        self.assertEqual(ws['R2'].value, 'Comment')
+        self.assertEqual(ws.max_column, 18)   # R
+
+    def test_export_ignore_no_data_filters_params(self):
+        import io
+        from openpyxl import load_workbook
+
+        df1 = pd.DataFrame({'Serial_No': [1, 2],
+                            'ParamA': [1.0, 2.0],
+                            'ParamB': [float('nan'), float('nan')]})
+        df2 = pd.DataFrame({'Serial_No': [1, 2],
+                            'ParamA': [1.1, 2.1],
+                            'ParamB': [float('nan'), float('nan')]})
+        # 默认 ignore_no_data=True → ParamB（无配对数据）被过滤
+        resp = self._call_export({1: df1, 2: df2})
+        ws = load_workbook(io.BytesIO(self._body(resp)))['文件相关性对比']
+        self.assertEqual(ws.max_row, 4)
+        self.assertEqual(ws['B4'].value, 'ParamA')
+        # ignore_no_data=False → ParamB 保留（compared=0）
+        resp2 = self._call_export({1: df1, 2: df2}, body={'ignore_no_data': False})
+        ws2 = load_workbook(io.BytesIO(self._body(resp2)))['文件相关性对比']
+        self.assertEqual(ws2['B5'].value, 'ParamB')
+        self.assertEqual(ws2['R5'].value, 'PASS')
+
+    def test_export_limits_only_when_no_common_serials(self):
+        import io
+        from openpyxl import load_workbook
+
+        df1 = pd.DataFrame({'Serial_No': [1, 2], 'ParamA': [1.0, 2.0]})
+        df2 = pd.DataFrame({'Serial_No': [99], 'ParamA': [5.0]})
+        resp = self._call_export({1: df1, 2: df2})
+        body = self._body(resp)
+        self.assertEqual(resp.status_code, 200, body[:500])
+        ws = load_workbook(io.BytesIO(body))['文件相关性对比']
+        # 无公共序列 → 无序列列：Comment 落到 J 列
+        self.assertEqual(ws['J2'].value, 'Comment')
+        self.assertEqual(ws['J3'].value, 'Comment')
+        self.assertEqual(ws.max_column, 10)   # J
+        self.assertEqual(ws['C4'].value, 0.5)
+        self.assertEqual(ws['J4'].value, 'PASS')
+
+    def test_export_no_common_params_returns_400(self):
+        df1 = pd.DataFrame({'Serial_No': [1, 2], 'ParamA': [1.0, 2.0]})
+        df2 = pd.DataFrame({'Serial_No': [1, 2], 'Other': [1.0, 2.0]})
+        resp = self._call_export({1: df1, 2: df2})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['error'], 'no_common_params')
+
+
+class FileCorrelationServiceTests(SimpleTestCase):
+    """compute_file_correlation 纯计算单测（无 mock，直接调服务）。"""
+
+    @staticmethod
+    def _frames():
+        df1 = pd.DataFrame({
+            'Serial_No': [1, 2, 3],
+            'ParamA': [1.0, 2.0, 3.0],
+            'ParamB': [10.0, 20.0, 30.0],
+        })
+        df2 = pd.DataFrame({
+            'Serial_No': [1, 2, 3],
+            'ParamA': [1.1, 2.1, 3.1],
+            'ParamB': [10.0, 21.0, 29.0],
+        })
+        for d in (df1, df2):
+            d['__serial__'] = pd.to_numeric(d['Serial_No'], errors='coerce')
+        meta = {'mins': {'ParamA': '0.5', 'ParamB': '-'},
+                'maxs': {'ParamA': '2.0', 'ParamB': '40'},
+                'units': {'ParamA': 'V', 'ParamB': 'nA'}}
+        return df1, df2, meta
+
+    def test_vectorized_matches_hand_computation(self):
+        from apps.analysis.services.file_correlation import (
+            compute_file_correlation, FileCorrelationConfig)
+
+        df1, df2, meta = self._frames()
+        r = compute_file_correlation(df1, meta, df2, meta, FileCorrelationConfig())
+        self.assertEqual(r['serials'], [1, 2, 3])
+        self.assertFalse(r['limits_only'])
+        self.assertFalse(r['truncated'])
+        # 参数按文件A列顺序（序列列不参与）
+        self.assertEqual(r['params'], ['ParamA', 'ParamB'])
+
+        by_param = {row['param']: row for row in r['rows']}
+        pa = by_param['ParamA']
+        # 有符号 Δ/ATE：10% / 5% / 3.33%
+        self.assertEqual([c['delta'] for c in pa['cells']], [0.1, 0.1, 0.1])
+        self.assertEqual([round(c['diff_pct'], 2) for c in pa['cells']],
+                         [10.0, 5.0, 3.33])
+        self.assertEqual([c['fail'] for c in pa['cells']], [True, True, True])
+        self.assertEqual(pa['compared'], 3)
+        self.assertEqual(pa['fail_count'], 3)
+        self.assertEqual(pa['max_diff'], 10.0)
+
+        pb = by_param['ParamB']
+        self.assertEqual([round(c['diff_pct'], 2) for c in pb['cells']],
+                         [0.0, 5.0, -3.33])
+        self.assertEqual([c['fail'] for c in pb['cells']], [False, True, True])
+        self.assertEqual(pb['pass_rate'], 33.33)
+
+        # totals 汇总
+        self.assertEqual(r['totals']['paired_cells'], 6)
+        self.assertEqual(r['totals']['fail_cells'], 5)
+        self.assertEqual(r['totals']['overall_pass_rate'], 16.67)
+
+    def test_serial_cap_takes_first_n_ascending(self):
+        from apps.analysis.services.file_correlation import (
+            compute_file_correlation, FileCorrelationConfig)
+
+        df1 = pd.DataFrame({'Serial_No': [5, 3, 1, 4, 2], 'ParamA': [1.0] * 5})
+        df2 = pd.DataFrame({'Serial_No': [1, 2, 3, 4, 5], 'ParamA': [1.0] * 5})
+        for d in (df1, df2):
+            d['__serial__'] = pd.to_numeric(d['Serial_No'], errors='coerce')
+        meta = {'mins': {'ParamA': '0'}, 'maxs': {'ParamA': '5'}, 'units': {}}
+        r = compute_file_correlation(df1, meta, df2, meta,
+                                     FileCorrelationConfig(max_serials=2))
+        self.assertTrue(r['truncated'])
+        self.assertEqual(r['serials'], [1, 2])
+        self.assertEqual(len(r['rows'][0]['cells']), 2)
+
+    def test_limit_parsing_sentinels(self):
+        from apps.analysis.services.file_correlation import _parse_limit
+
+        for raw in ('·', '-', '—', '', '  ', 'n/a', 'N/A', 'min', 'max', None):
+            self.assertIsNone(_parse_limit(raw), raw)
+        self.assertEqual(_parse_limit('0.5'), 0.5)
+        self.assertEqual(_parse_limit('"1.2"'), 1.2)
+        self.assertEqual(_parse_limit('abc'), None)
+
+    def test_ignore_no_limit_filters_params_without_limits(self):
+        from apps.analysis.services.file_correlation import (
+            compute_file_correlation, FileCorrelationConfig)
+
+        df1, df2, meta = self._frames()
+        # 加入两侧都无 limit 的 ParamC（'-'/'-'）→ 默认被 ignore_no_limit 过滤
+        df1['ParamC'] = [0.1, 0.2, 0.3]
+        df2['ParamC'] = [0.1, 0.2, 0.3]
+        meta['mins']['ParamC'] = '-'
+        meta['maxs']['ParamC'] = '-'
+        r = compute_file_correlation(df1, meta, df2, meta, FileCorrelationConfig())
+        self.assertEqual(r['params'], ['ParamA', 'ParamB'])
+        # 关闭后 ParamC 参与（数据相同 → 无超差）
+        r2 = compute_file_correlation(df1, meta, df2, meta,
+                                      FileCorrelationConfig(ignore_no_limit=False))
+        self.assertEqual(r2['params'], ['ParamA', 'ParamB', 'ParamC'])
+
+    def test_missing_limit_on_one_side_fails_both_rules(self):
+        from apps.analysis.services.file_correlation import (
+            compute_file_correlation, FileCorrelationConfig)
+
+        df1, df2, _ = self._frames()
+        meta_a = {'mins': {'ParamA': '0.5'}, 'maxs': {'ParamA': '2.0'}, 'units': {}}
+        meta_b = {'mins': {}, 'maxs': {'ParamA': '2.0'}, 'units': {}}
+        for rule in ('zero', 'wider'):
+            r = compute_file_correlation(df1, meta_a, df2, meta_b,
+                                         FileCorrelationConfig(diff_rule=rule,
+                                                              ignore_no_limit=False))
+            row = r['rows'][0]
+            self.assertTrue(row['lsl_fail'], rule)
+            self.assertFalse(row['usl_fail'], rule)
+            self.assertIsNone(row['lsl_diff'], rule)
+
+    def test_diff_rule_zero_and_wider(self):
+        from apps.analysis.services.file_correlation import (
+            compute_file_correlation, FileCorrelationConfig)
+
+        df1, df2, _ = self._frames()
+        meta_a = {'mins': {'ParamA': '0.5'}, 'maxs': {'ParamA': '2.0'}, 'units': {}}
+        # B 更宽（0.4/2.5）
+        meta_wide = {'mins': {'ParamA': '0.4'}, 'maxs': {'ParamA': '2.5'}, 'units': {}}
+        # B 更紧（0.6/1.9）
+        meta_tight = {'mins': {'ParamA': '0.6'}, 'maxs': {'ParamA': '1.9'}, 'units': {}}
+
+        r_zero = compute_file_correlation(df1, meta_a, df2, meta_wide,
+                                          FileCorrelationConfig(diff_rule='zero'))
+        self.assertEqual(r_zero['rows'][0]['lsl_diff'], -0.1)
+        self.assertTrue(r_zero['rows'][0]['lsl_fail'])   # diff ≠ 0 → fail
+        self.assertTrue(r_zero['rows'][0]['usl_fail'])   # 0.5 ≠ 0 → fail
+
+        r_wider = compute_file_correlation(df1, meta_a, df2, meta_wide,
+                                           FileCorrelationConfig(diff_rule='wider'))
+        self.assertFalse(r_wider['rows'][0]['lsl_fail'])  # B 更宽 → pass
+        self.assertFalse(r_wider['rows'][0]['usl_fail'])
+
+        r_tight = compute_file_correlation(df1, meta_a, df2, meta_tight,
+                                           FileCorrelationConfig(diff_rule='wider'))
+        self.assertTrue(r_tight['rows'][0]['lsl_fail'])
+        self.assertTrue(r_tight['rows'][0]['usl_fail'])
+
+    def test_zero_ate_pair_is_uncomputable(self):
+        from apps.analysis.services.file_correlation import (
+            compute_file_correlation, FileCorrelationConfig)
+
+        df1 = pd.DataFrame({'Serial_No': [1, 2], 'ParamA': [0.0, 2.0]})
+        df2 = pd.DataFrame({'Serial_No': [1, 2], 'ParamA': [1.0, 2.05]})
+        for d in (df1, df2):
+            d['__serial__'] = pd.to_numeric(d['Serial_No'], errors='coerce')
+        meta = {'mins': {'ParamA': '0'}, 'maxs': {'ParamA': '5'}, 'units': {}}
+        r = compute_file_correlation(df1, meta, df2, meta, FileCorrelationConfig())
+        cells = r['rows'][0]['cells']
+        # ATE=0 的对无法计算 %Diff → 不计入对比、不 fail
+        self.assertIsNone(cells[0]['diff_pct'])
+        self.assertFalse(cells[0]['fail'])
+        self.assertEqual(r['rows'][0]['compared'], 1)
+
+    def test_limits_only_mode_when_no_common_serials(self):
+        from apps.analysis.services.file_correlation import (
+            compute_file_correlation, FileCorrelationConfig)
+
+        df1 = pd.DataFrame({'Serial_No': [1, 2], 'ParamA': [1.0, 2.0]})
+        df2 = pd.DataFrame({'Serial_No': [99], 'ParamA': [5.0]})
+        for d in (df1, df2):
+            d['__serial__'] = pd.to_numeric(d['Serial_No'], errors='coerce')
+        meta = {'mins': {'ParamA': '0.5'}, 'maxs': {'ParamA': '2.0'}, 'units': {}}
+        r = compute_file_correlation(df1, meta, df2, meta, FileCorrelationConfig())
+        self.assertTrue(r['limits_only'])
+        self.assertEqual(r['serials'], [])
+        self.assertEqual(r['rows'][0]['cells'], [])
+        self.assertEqual(r['rows'][0]['compared'], 0)
+        # limit 列仍完整可对比
+        self.assertEqual(r['rows'][0]['lsl_a'], 0.5)
+        self.assertFalse(r['rows'][0]['lsl_fail'])
+
+    def test_no_common_params_raises(self):
+        from apps.analysis.services.file_correlation import (
+            compute_file_correlation, FileCorrelationConfig, NoCommonParamsError)
+
+        df1 = pd.DataFrame({'Serial_No': [1, 2], 'ParamA': [1.0, 2.0]})
+        df2 = pd.DataFrame({'Serial_No': [1, 2], 'Other': [1.0, 2.0]})
+        for d in (df1, df2):
+            d['__serial__'] = pd.to_numeric(d['Serial_No'], errors='coerce')
+        with self.assertRaises(NoCommonParamsError):
+            compute_file_correlation(df1, {}, df2, {}, FileCorrelationConfig())
+
+    def test_duplicate_serial_rows_take_first_occurrence(self):
+        from apps.analysis.services.file_correlation import (
+            compute_file_correlation, FileCorrelationConfig)
+
+        df1 = pd.DataFrame({'Serial_No': [1, 1, 2], 'ParamA': [1.0, 99.0, 3.0]})
+        df2 = pd.DataFrame({'Serial_No': [1, 2], 'ParamA': [1.05, 3.0]})
+        for d in (df1, df2):
+            d['__serial__'] = pd.to_numeric(d['Serial_No'], errors='coerce')
+        meta = {'mins': {'ParamA': '0'}, 'maxs': {'ParamA': '5'}, 'units': {}}
+        r = compute_file_correlation(df1, meta, df2, meta, FileCorrelationConfig())
+        # 序列 1 在文件A 出现两次 → 取 first（1.0），diff_pct = 5%
+        self.assertEqual(r['rows'][0]['cells'][0]['ate'], 1.0)
+        self.assertAlmostEqual(r['rows'][0]['cells'][0]['diff_pct'], 5.0)
 
 
 class HistogramSigmaFieldTests(ChartConfigFilterTests):

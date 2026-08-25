@@ -11,7 +11,7 @@ from django.utils import timezone
 
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import BaseATEParser, get_parser
-from apps.datafiles.utils import extract_product_code
+from apps.datafiles.utils import extract_product_code, resolve_file_path, store_file_path
 
 
 def _is_summary_csv(filename):
@@ -60,10 +60,13 @@ def _register_file(user, file_path, file_type='single', batch_name='', sub_batch
     except Exception:
         pass
 
+    # 相对化存储：MEDIA_ROOT 之下存相对路径，数据目录迁移时无需重写 DB。
+    stored_path = store_file_path(file_path)
+
     datafile = DataFile.objects.create(
         owner=user,
         filename=filename,
-        file_path=file_path,
+        file_path=stored_path,
         file_size=file_size,
         format_type=format_type if format_type != 'Unknown' else 'CTA8290D',
         file_type=file_type,
@@ -84,7 +87,7 @@ def _register_file(user, file_path, file_type='single', batch_name='', sub_batch
         user=user,
         datafile=datafile,
         filename=filename,
-        filepath=file_path,
+        filepath=stored_path,
         format_type=datafile.format_type,
         rows=row_count,
         cols=col_count,
@@ -139,7 +142,7 @@ def _parse_last_modified(value):
 
 def _delete_datafile_on_disk(datafile):
     """Remove the on-disk file(s) backing a DataFile (best-effort)."""
-    file_path = datafile.file_path
+    file_path = resolve_file_path(datafile.file_path)
     try:
         if datafile.file_type == 'batch' and datafile.batch_name:
             # Batch: delete the entire batch directory
@@ -248,7 +251,7 @@ def _register_zip_batch(user, zip_file, filename):
         return [], f'压缩包 {filename} 内未找到 CSV 数据文件'
 
     existing_paths = set(
-        os.path.normpath(p) for p in
+        os.path.normpath(resolve_file_path(p)) for p in
         DataFile.objects.filter(owner=user, file_type='batch', batch_name=batch_name)
         .values_list('file_path', flat=True)
     )
@@ -304,7 +307,7 @@ def _scan_orphaned_disk(user):
     """
     batch_base = _user_upload_dir(user, 'batch')
     registered_paths = set(
-        os.path.normpath(p) for p in
+        os.path.normpath(resolve_file_path(p)) for p in
         DataFile.objects.filter(
             owner=user, file_type='batch'
         ).values_list('file_path', flat=True)

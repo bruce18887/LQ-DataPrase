@@ -266,11 +266,14 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
 
             sftp.get(remote_path, file_path)
             file_size = os.path.getsize(file_path)
+            # 下载到应用数据区即注册：数据管理列表可见，避免修复中心误报孤儿
+            datafile = _register_file(request.user, file_path, 'single')
             return Response({
                 'status': 'ok',
                 'filename': os.path.basename(file_path),
                 'size': file_size,
                 'path': file_path,
+                'datafile_id': datafile.id,
             })
         except Exception as e:
             pool.invalidate(request.user.id)
@@ -378,6 +381,8 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
                         name, ext = os.path.splitext(filename)
                         file_path = os.path.join(upload_dir, f"{name}_{ts}{ext}")
                     sftp.get(remote_path, file_path)
+                    # 与单文件下载同语义：下载即注册（single）
+                    _register_file(request.user, file_path, 'single')
                     saved.append({
                         'filename': os.path.basename(file_path),
                         'size': os.path.getsize(file_path),
@@ -423,7 +428,9 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
 
         try:
             filename = os.path.basename(remote_path)
-            upload_dir = _user_upload_dir(request.user, 'batch')
+            # 单文件解析 → single 目录（旧实现下载到 batch 目录却注册 single，
+            # 造成目录错位 + 修复中心误报孤儿）
+            upload_dir = _user_upload_dir(request.user, 'single')
 
             # Handle collision
             file_path = os.path.join(upload_dir, filename)

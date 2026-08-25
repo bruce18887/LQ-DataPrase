@@ -150,6 +150,7 @@ import os
 import sqlite3
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 from django.test import SimpleTestCase
 from rest_framework.test import APIClient, APITestCase
@@ -167,6 +168,31 @@ def _make_sqlite_db(path: Path, marker: str = 'x') -> None:
         conn.close()
 
 
+def _make_datafiles_sqlite_db(path: Path, rows: list[tuple[str, str, str]]) -> None:
+    """Create a DB with apps.datafiles-shaped tables for path-rewrite tests.
+
+    ``rows``: ``(table, column, stored_value)`` triples seeded into
+    ``datafiles_datafile.file_path`` / ``datafiles_parsehistory.filepath``.
+    """
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute(
+            'CREATE TABLE datafiles_datafile '
+            '(id INTEGER PRIMARY KEY, file_path TEXT, filename TEXT)'
+        )
+        conn.execute(
+            'CREATE TABLE datafiles_parsehistory '
+            '(id INTEGER PRIMARY KEY, filepath TEXT)'
+        )
+        for i, (table, column, value) in enumerate(rows):
+            conn.execute(
+                f'INSERT INTO {table} (id, {column}) VALUES (?, ?)', (i + 1, value)
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 class SystemConfigApplyTests(SimpleTestCase):
     """Pure path/migration logic — no DB, no request context."""
 
@@ -176,6 +202,19 @@ class SystemConfigApplyTests(SimpleTestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self._base = Path(self._tmp.name)
         self.addCleanup(self._tmp.cleanup)
+        # 默认值指向临时目录，绝不触真实用户主目录 / 系统临时目录
+        self._default_patch = mock.patch(
+            'apps.common.system_config._default_data_dir',
+            return_value=Path(self._tmp.name) / 'default-home',
+        )
+        self._default_patch.start()
+        self.addCleanup(self._default_patch.stop)
+        self._temp_patch = mock.patch(
+            'apps.common.system_config._default_temp_dir',
+            return_value=Path(self._tmp.name) / 'default-temp',
+        )
+        self._temp_patch.start()
+        self.addCleanup(self._temp_patch.stop)
 
     def tearDown(self):
         tempfile.tempdir = self._orig_tempdir
@@ -184,11 +223,71 @@ class SystemConfigApplyTests(SimpleTestCase):
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+        os.environ.pop('LQDP_SKIP_STORAGE_MIGRATION', None)
 
     def test_no_config_returns_original_and_keeps_tempfile(self):
+        # 默认 data_dir 与 anchor 相同 → 无迁移；默认 temp 仍会重定向
+        with mock.patch(
+            'apps.common.system_config._default_data_dir', return_value=self._base
+        ):
+            result = system_config.apply_system_config(self._base)
+        self.assertEqual(result, self._base)
+        self.assertEqual(
+            tempfile.tempdir, str(Path(self._tmp.name) / 'default-temp')
+        )
+
+    def test_no_config_applies_default_data_dir_and_temp_dir(self):
+        # 无配置 → 默认 data_dir 迁移 + 默认 temp_dir 重定向（内置默认值）
+        db_src = self._base / 'db.sqlite3'
+        _make_sqlite_db(db_src)
+        (self._base / 'media').mkdir()
+        result = system_config.apply_system_config(self._base)
+        default_home = Path(self._tmp.name) / 'default-home'
+        self.assertEqual(result, default_home)
+        self.assertTrue((default_home / 'db.sqlite3').is_file())
+        self.assertFalse(db_src.exists())  # migrated, source deleted
+        self.assertEqual(
+            tempfile.tempdir, str(Path(self._tmp.name) / 'default-temp')
+        )
+        self.assertEqual(os.environ['TMP'], tempfile.tempdir)
+        self.assertEqual(os.environ['TEMP'], tempfile.tempdir)
+        self.assertEqual(os.environ['TMPDIR'], tempfile.tempdir)
+
+    def test_configured_overrides_defaults(self):
+        with tempfile.TemporaryDirectory() as cfg_data, \
+                tempfile.TemporaryDirectory() as cfg_tmp:
+            (self._base / system_config.CONFIG_FILENAME).write_text(
+                json.dumps({'data_dir': cfg_data, 'temp_dir': cfg_tmp}),
+                encoding='utf-8',
+            )
+            result = system_config.apply_system_config(self._base)
+        self.assertEqual(result, Path(cfg_data))
+        self.assertEqual(tempfile.tempdir, cfg_tmp)
+
+    def test_data_dir_and_temp_dir_both_configured(self):
+        # 回归：data_dir 迁移后不再提前 return，temp_dir 必须同样生效
+        db_src = self._base / 'db.sqlite3'
+        _make_sqlite_db(db_src)
+        with tempfile.TemporaryDirectory() as cfg_data, \
+                tempfile.TemporaryDirectory() as cfg_tmp:
+            (self._base / system_config.CONFIG_FILENAME).write_text(
+                json.dumps({'data_dir': cfg_data, 'temp_dir': cfg_tmp}),
+                encoding='utf-8',
+            )
+            result = system_config.apply_system_config(self._base)
+        self.assertEqual(result, Path(cfg_data))
+        self.assertEqual(tempfile.tempdir, cfg_tmp)
+        self.assertEqual(os.environ['TEMP'], cfg_tmp)
+
+    def test_migration_disabled_keeps_anchor(self):
+        # LQDP_SKIP_STORAGE_MIGRATION=1（manage.py test 自动设置）→
+        # 默认 data_dir 回退 anchor，绝不迁移
+        os.environ['LQDP_SKIP_STORAGE_MIGRATION'] = '1'
+        db_src = self._base / 'db.sqlite3'
+        _make_sqlite_db(db_src)
         result = system_config.apply_system_config(self._base)
         self.assertEqual(result, self._base)
-        self.assertEqual(tempfile.tempdir, self._orig_tempdir)
+        self.assertTrue(db_src.exists())  # 项目根数据未被搬走
 
     def test_data_dir_migrates_db_and_media_then_deletes_originals(self):
         db_src = self._base / 'db.sqlite3'
@@ -242,7 +341,11 @@ class SystemConfigApplyTests(SimpleTestCase):
 
     def test_corrupt_config_backed_up_to_bak(self):
         (self._base / system_config.CONFIG_FILENAME).write_text('{not json', encoding='utf-8')
-        result = system_config.apply_system_config(self._base)
+        # 默认 data_dir 钉回 anchor，隔离 corrupt 分支的默认迁移副作用
+        with mock.patch(
+            'apps.common.system_config._default_data_dir', return_value=self._base
+        ):
+            result = system_config.apply_system_config(self._base)
         self.assertEqual(result, self._base)
         self.assertTrue((self._base / 'system_config.json.bak').is_file())
 
@@ -252,12 +355,107 @@ class SystemConfigApplyTests(SimpleTestCase):
             (self._base / system_config.CONFIG_FILENAME).write_text(
                 json.dumps({'temp_dir': str(new_tmp_path)}), encoding='utf-8'
             )
-            result = system_config.apply_system_config(self._base)
+            # 默认 data_dir 钉回 anchor：本测试只关心 temp_dir 分支
+            with mock.patch(
+                'apps.common.system_config._default_data_dir', return_value=self._base
+            ):
+                result = system_config.apply_system_config(self._base)
         self.assertEqual(result, self._base)
         self.assertEqual(tempfile.tempdir, str(new_tmp_path))
         self.assertEqual(os.environ['TMP'], str(new_tmp_path))
         self.assertEqual(os.environ['TEMP'], str(new_tmp_path))
         self.assertEqual(os.environ['TMPDIR'], str(new_tmp_path))
+
+    def test_default_temp_mkdir_failure_falls_back(self):
+        # 默认 temp 目录创建失败 → 降级系统临时目录，不阻塞启动
+        with mock.patch(
+            'apps.common.system_config._default_data_dir', return_value=self._base
+        ), mock.patch('pathlib.Path.mkdir', side_effect=OSError('denied')):
+            result = system_config.apply_system_config(self._base)
+        self.assertEqual(result, self._base)
+        self.assertEqual(tempfile.tempdir, self._orig_tempdir)
+
+    def test_configured_temp_mkdir_failure_raises(self):
+        # 显式配置的 temp 目录创建失败 → ImproperlyConfigured（硬依赖）
+        from django.core.exceptions import ImproperlyConfigured
+        bad_tmp = str(self._base / 'not-creatable')
+        (self._base / system_config.CONFIG_FILENAME).write_text(
+            json.dumps({'temp_dir': bad_tmp}), encoding='utf-8'
+        )
+        with mock.patch(
+            'apps.common.system_config._default_data_dir', return_value=self._base
+        ), mock.patch('pathlib.Path.mkdir', side_effect=OSError('denied')), \
+                self.assertRaises(ImproperlyConfigured):
+            system_config.apply_system_config(self._base)
+
+    def test_default_migration_rewrites_absolute_file_paths(self):
+        # 迁移后 datafiles 表绝对路径行相对化；uploads 前缀行也相对化；旧
+        # media 之外（样例目录/跨盘形态）保持绝对
+        old_media = str(self._base / 'media')
+        legacy = [
+            ('datafiles_datafile', 'file_path',
+             os.path.join(old_media, 'data', 'admin', 'single', 'a.csv')),
+            ('datafiles_datafile', 'file_path',
+             os.path.join(old_media, 'uploads', 'legacy.csv')),
+            ('datafiles_datafile', 'file_path',
+             r'D:\somewhere\outside\media\b.csv'),
+            ('datafiles_parsehistory', 'filepath',
+             os.path.join(old_media, 'data', 'admin', 'batch', 'b1', 'c.csv')),
+        ]
+        db_src = self._base / 'db.sqlite3'
+        _make_datafiles_sqlite_db(db_src, legacy)
+        with tempfile.TemporaryDirectory() as new_dir:
+            new_base = Path(new_dir)
+            (self._base / system_config.CONFIG_FILENAME).write_text(
+                json.dumps({'data_dir': str(new_base)}), encoding='utf-8'
+            )
+            result = system_config.apply_system_config(self._base)
+            self.assertEqual(result, new_base)
+
+            conn = sqlite3.connect(str(new_base / 'db.sqlite3'))
+            try:
+                rows = dict(conn.execute(
+                    'SELECT id, file_path FROM datafiles_datafile'
+                ).fetchall())
+                hist = dict(conn.execute(
+                    'SELECT id, filepath FROM datafiles_parsehistory'
+                ).fetchall())
+            finally:
+                conn.close()
+        # 相对化（分隔符统一为 /），相对新 MEDIA_ROOT
+        self.assertEqual(rows[1], 'data/admin/single/a.csv')
+        self.assertEqual(rows[2], 'uploads/legacy.csv')
+        self.assertEqual(rows[3], r'D:\somewhere\outside\media\b.csv')  # 外部保持
+        self.assertEqual(list(hist.values())[0], 'data/admin/batch/b1/c.csv')
+
+    def test_rewrite_converges_on_existing_target_db(self):
+        # 目标 DB 已存在（上次崩溃残留：复制完成但行重写未跑完，源仍在）
+        # → 无条件重写收敛，幂等
+        old_media = str(self._base / 'media')
+        with tempfile.TemporaryDirectory() as new_dir:
+            new_base = Path(new_dir)
+            _make_datafiles_sqlite_db(self._base / 'db.sqlite3', [
+                ('datafiles_datafile', 'file_path',
+                 os.path.join(old_media, 'data', 'admin', 'single', 'src.csv')),
+            ])
+            target_db = new_base / 'db.sqlite3'
+            _make_datafiles_sqlite_db(target_db, [
+                ('datafiles_datafile', 'file_path',
+                 os.path.join(old_media, 'data', 'admin', 'single', 'stale.csv')),
+            ])
+            (self._base / system_config.CONFIG_FILENAME).write_text(
+                json.dumps({'data_dir': str(new_base)}), encoding='utf-8'
+            )
+            result = system_config.apply_system_config(self._base)
+            self.assertEqual(result, new_base)
+            conn = sqlite3.connect(str(target_db))
+            try:
+                stored = conn.execute(
+                    'SELECT file_path FROM datafiles_datafile'
+                ).fetchone()[0]
+            finally:
+                conn.close()
+        self.assertEqual(stored, 'data/admin/single/stale.csv')
 
     def test_config_file_env_override(self):
         with tempfile.TemporaryDirectory() as cfg_dir:

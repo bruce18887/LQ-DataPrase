@@ -1,5 +1,10 @@
 import { test, expect, type Page, type Locator } from '@playwright/test'
+import path from 'node:path'
+import os from 'node:os'
+import fs from 'node:fs'
+import { PRIMARY_SAMPLE_FILE } from '../fixtures/test-data'
 import { gotoApp } from '../helpers/nav'
+import { uploadFile, expectUploadSuccess } from '../helpers/upload'
 import { elSelectByPlaceholder } from '../helpers/elplus'
 
 /**
@@ -38,7 +43,7 @@ async function openTab(page: Page, tabLabel: string, panelHeading: string) {
   await gotoApp(page, '/data')
   await page.getByRole('tab', { name: tabLabel }).click()
   await expect(page.getByRole('heading', { name: panelHeading })).toBeVisible({ timeout: 15_000 })
-  // GageSummary/BuyoffForm 的 onMounted 异步调用 datafilesApi.list()，
+  // 文件列表由 DataManagement 的 loadFiles()（onMounted）拉取后作为 prop 传入，
   // 必须等 /files/ 返回才能保证 el-select 下拉有可选项，否则下拉为空。
   await page.waitForResponse(
     (r) => /\/files\/?(\?|$)/.test(r.url()) && r.status() === 200,
@@ -196,6 +201,58 @@ test.describe('@p2 导出 - Buyoff Form', { tag: ['@p2', '@exports'] }, () => {
       expect(name.toLowerCase()).toMatch(/\.xlsx$/)
     } else {
       console.log(`[buyoff] 未捕获下载（后端可能返回非文件响应），响应状态=${resp.status()}`)
+    }
+  })
+})
+
+/**
+ * 回归用例：GageSummary / BuyoffForm 的文件下拉必须与数据库实时同步。
+ *
+ * 两个组件曾各自在 onMounted 拉一次 /files/（无 page_size、无 filesVersion/
+ * onActivated 刷新），而 DataManagement 的 tab 用 v-show + keep-alive 常驻，
+ * 导致上传新文件后切换到 Gage/Buyoff tab 时下拉仍是旧列表，必须整页 reload
+ * 才可见新文件。修复后文件列表由 DataManagement 统一刷新并作为 prop 传入，
+ * 本测试验证：上传 → 切 tab（不 reload）→ 下拉立即出现新文件。
+ */
+test.describe('@p2 导出 - 文件列表与数据库同步', { tag: ['@p2', '@exports'] }, () => {
+  test('上传新文件后 Gage / Buyoff 下拉无需 reload 即可见新文件', async ({ page }) => {
+    const uniqueName = `e2e_sync_${Date.now()}_${Math.floor(Math.random() * 1e6)}.csv`
+    const tmpPath = path.join(os.tmpdir(), uniqueName)
+    fs.copyFileSync(PRIMARY_SAMPLE_FILE, tmpPath)
+
+    try {
+      await gotoApp(page, '/data')
+
+      // 文件列表 tab：展开上传区并上传新文件（参照 data.spec.ts 上传流程）
+      await page.locator('button').filter({ hasText: '上传文件' }).click()
+      await uploadFile(page, tmpPath)
+      await expectUploadSuccess(page)
+
+      // 上传会 bump filesVersion → DataManagement 重新拉取 /files/（page_size 9999）
+      await page.waitForResponse(
+        (r) => /\/files\/?(\?|$)/.test(r.url()) && r.request().method() === 'GET' && r.status() === 200,
+        { timeout: 15_000 },
+      ).catch(() => {})
+
+      // 切到 Gage Summary tab（不 reload），打开第一个 Site 槽位下拉，新文件必须出现
+      await page.getByRole('tab', { name: 'Gage Summary' }).click()
+      const gagePanel = page.locator('[role="tabpanel"]:visible')
+      await expect(gagePanel.getByRole('heading', { name: 'Gage Summary 生成' })).toBeVisible()
+      await gagePanel.locator('.el-select').first().click()
+      const gageDropdown = page.locator('.el-select-dropdown:visible')
+      await expect(gageDropdown.getByText(uniqueName)).toBeVisible({ timeout: 15_000 })
+      await page.keyboard.press('Escape')
+
+      // 切到 Buyoff Form tab，第一个角色下拉同样必须出现新文件
+      await page.getByRole('tab', { name: 'Buyoff Form' }).click()
+      const buyoffPanel = page.locator('[role="tabpanel"]:visible')
+      await expect(buyoffPanel.getByRole('heading', { name: 'Buyoff Form 生成' })).toBeVisible()
+      await buyoffPanel.locator('.el-select').first().click()
+      const buyoffDropdown = page.locator('.el-select-dropdown:visible')
+      await expect(buyoffDropdown.getByText(uniqueName)).toBeVisible({ timeout: 15_000 })
+      await page.keyboard.press('Escape')
+    } finally {
+      fs.rmSync(tmpPath, { force: true })
     }
   })
 })

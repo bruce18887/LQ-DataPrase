@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from apps.datafiles.models import DataFile, ParseHistory
+from apps.datafiles.utils import resolve_file_path
 
 
 # Tag normalisation policy applied both to inbound payloads (set_tags) and
@@ -56,6 +57,8 @@ class DataFileSerializer(serializers.ModelSerializer):
     file_type_display = serializers.CharField(
         source='get_file_type_display', read_only=True
     )
+    # DB 存相对路径（Storage Layout v2），API 契约保持绝对路径不变
+    file_path = serializers.SerializerMethodField()
 
     class Meta:
         model = DataFile
@@ -69,6 +72,9 @@ class DataFileSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'owner', 'created_at', 'updated_at']
+
+    def get_file_path(self, obj) -> str:
+        return resolve_file_path(obj.file_path)
 
     def validate_tags(self, value):
         return normalize_tags(value)
@@ -104,6 +110,8 @@ class DataFileListSerializer(serializers.ModelSerializer):
 class ParseHistorySerializer(serializers.ModelSerializer):
     user = serializers.ReadOnlyField(source='user.username')
     datafile_name = serializers.ReadOnlyField(source='datafile.filename')
+    # DB 存相对路径，API 契约保持绝对路径不变
+    filepath = serializers.SerializerMethodField()
 
     class Meta:
         model = ParseHistory
@@ -111,6 +119,9 @@ class ParseHistorySerializer(serializers.ModelSerializer):
             'id', 'user', 'datafile', 'datafile_name', 'filename',
             'filepath', 'format_type', 'rows', 'cols', 'parsed_at',
         ]
+
+    def get_filepath(self, obj) -> str:
+        return resolve_file_path(obj.filepath)
 
 
 class FileUploadSerializer(serializers.Serializer):

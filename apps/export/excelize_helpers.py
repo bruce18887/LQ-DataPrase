@@ -94,6 +94,47 @@ def make_title_style(f):
     ))
 
 
+# ── Correlation 模板样式（对齐 Data/TemplateExport/Correlation_Excel/Correlation.xlsx）──
+
+def make_template_title_style(f):
+    """模板标题：等线 14、居中、thin 边框（无填充）。"""
+    return f.new_style(excelize.Style(
+        font=excelize.Font(size=14, family="等线"),
+        border=thin_border(),
+        alignment=excelize.Alignment(horizontal="center", vertical="center"),
+    ))
+
+
+def make_template_header_style(f):
+    """模板表头：Arial 10、居中、thin 边框（无深色底）。"""
+    return f.new_style(excelize.Style(
+        font=excelize.Font(size=10, family="Arial"),
+        border=thin_border(),
+        alignment=excelize.Alignment(horizontal="center", vertical="center"),
+    ))
+
+
+def make_template_data_style(f, num_fmt=None):
+    """模板数据格：等线 10、居中、thin 边框（无填充）；可选数字格式。"""
+    return f.new_style(excelize.Style(
+        font=excelize.Font(size=10, family="等线"),
+        border=thin_border(),
+        alignment=excelize.Alignment(horizontal="center", vertical="center"),
+        custom_num_fmt=num_fmt,
+    ))
+
+
+def make_template_red_style(f, num_fmt=None):
+    """模板 Fail 格：等线 10、浅红底（F5B7B1）、thin 边框；可选数字格式。"""
+    return f.new_style(excelize.Style(
+        font=excelize.Font(size=10, family="等线"),
+        fill=excelize.Fill(type="pattern", color=[COLOR_RED_BG], pattern=1),
+        border=thin_border(),
+        alignment=excelize.Alignment(horizontal="center", vertical="center"),
+        custom_num_fmt=num_fmt,
+    ))
+
+
 # ── Border Factories ──
 
 def thin_border(color=COLOR_BORDER):

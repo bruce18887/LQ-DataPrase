@@ -1,6 +1,8 @@
 import os
 import re
 
+from django.conf import settings
+
 # Matches a product-code token: 'B' + 1-2 uppercase letters + a run of digits,
 # optionally followed by an alphanumeric suffix that continues the product
 # code (e.g. the 'R3CYCAA' in 'BN281R3CYCAA'). The whole token is captured
@@ -73,6 +75,45 @@ def _program_basename(program_name: str) -> str:
         if lower.endswith(ext):
             return os.path.splitext(base)[0]
     return ''
+
+
+def resolve_file_path(raw: str) -> str:
+    """``DataFile.file_path`` / ``ParseHistory.filepath`` → 绝对磁盘路径。
+
+    双格式容忍：绝对路径（2026-08-21 前的遗留格式）原样透传；相对路径
+    （新格式，相对 MEDIA_ROOT，如 ``data/<user>/<type>/x.csv``）按
+    ``settings.MEDIA_ROOT`` 解析为绝对路径。空值原样返回。
+
+    所有读侧消费方（存在性检查、解析、删除、mtime 缓存 key）必须先经过
+    本函数，DB 中相对/绝对混存时行为一致。
+    """
+    if not raw:
+        return raw
+    if os.path.isabs(raw):
+        return raw
+    return os.path.normpath(os.path.join(str(settings.MEDIA_ROOT), raw))
+
+
+def store_file_path(abs_path: str) -> str:
+    """写库前的路径规范化：MEDIA_ROOT 之下存相对路径，之外保持绝对路径。
+
+    相对格式为 ``data/<user>/<file_type>/...``（不带 ``media/`` 前缀），
+    使数据目录（data_dir）可整体迁移而 DB 记录无需重写——2026-08-21
+    起新记录一律相对化，迁移时由 system_config 自动把存量绝对路径
+    重写为相对。
+
+    边界：跨盘（``os.path.relpath`` 抛 ValueError）或位于 MEDIA_ROOT
+    之外（如样例目录）的路径无法用相对路径表达，保持绝对路径原样。
+    """
+    norm = os.path.normpath(abs_path)
+    media = os.path.normpath(str(settings.MEDIA_ROOT))
+    try:
+        rel = os.path.relpath(norm, media)
+    except ValueError:
+        return norm  # 跨盘（如 C: 与 D: 之间）
+    if rel == '..' or rel.startswith('..' + os.sep):
+        return norm  # 在 MEDIA_ROOT 之外
+    return rel
 
 
 def extract_product_code(filename: str, program_name: str = '') -> str:

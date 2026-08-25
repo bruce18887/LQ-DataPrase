@@ -255,7 +255,7 @@ test.describe('@p1 SFTP 真实连接（env-gated）', { tag: ['@p1', '@sftp'] },
 })
 
 test.describe('@p2 SFTP 真实下载（env-gated）', { tag: ['@p2', '@sftp'] }, () => {
-  test('连接成功后下载首个文件', async ({ page }) => {
+  test('连接成功后下载首个文件，/files/ 中出现该文件', async ({ page }) => {
     test.skip(
       !SFTP_HOST,
       'set SFTP_HOST/PORT/USERNAME/PASSWORD to run real SFTP download',
@@ -297,13 +297,34 @@ test.describe('@p2 SFTP 真实下载（env-gated）', { tag: ['@p2', '@sftp'] },
     }
     await expect(firstDownloadBtn).toBeVisible({ timeout: 30_000 })
 
-    const { suggestedName, size } = await captureDownload(
-      page,
-      () => firstDownloadBtn.click(),
-      'sftp',
-    )
-    console.log(`[sftp] 已下载文件 ${suggestedName}（${size} bytes）`)
-    expect(size).toBeGreaterThan(0)
+    // 取行内文件名，下载后断言 /files/（数据管理列表）出现该文件
+    const row = firstDownloadBtn.locator('xpath=ancestor::tr')
+    const fileName = await row.locator('.file-name').textContent()
+
+    const [dlResp] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes('/sftp/download/') && r.request().method() === 'POST',
+        { timeout: 60_000 },
+      ),
+      firstDownloadBtn.click(),
+    ])
+    expect(dlResp.ok()).toBeTruthy()
+    console.log(`[sftp] 已下载并导入文件 ${fileName}`)
+
+    // 下载即注册：/files/ 列表（数据管理）出现该文件
+    const token = await page.evaluate(() => localStorage.getItem('access_token'))
+    await expect
+      .poll(
+        async () => {
+          const resp = await page.request.get('/api/v1/files/?search=' + encodeURIComponent(fileName ?? ''),
+            { headers: { Authorization: `Bearer ${token}` } })
+          if (!resp.ok()) return 0
+          const data = (await resp.json()) as { count: number }
+          return data.count
+        },
+        { timeout: 15_000 },
+      )
+      .toBeGreaterThan(0)
   })
 })
 
