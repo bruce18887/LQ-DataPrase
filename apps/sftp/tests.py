@@ -1,3 +1,6 @@
+import os
+import shutil
+import tempfile
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -5,6 +8,8 @@ from django.core.cache import cache as django_cache
 from django.test import TestCase, override_settings
 from rest_framework.test import APITestCase
 
+from apps.datafiles.models import DataFile
+from apps.datafiles.utils import resolve_file_path
 from apps.sftp import crypto
 from apps.sftp import cache as sftp_cache
 from apps.sftp.cache import (
@@ -441,3 +446,91 @@ class SftpConnectionReuseTests(APITestCase):
             self.client.post('/api/v1/sftp/disconnect/')
 
         self.assertNotIn(self.user.id, pool._pool)
+
+
+class SftpDownloadRegistersTests(APITestCase):
+    """下载即注册（2026-08-25 修复）：download / download_batch 保存文件到
+    media/data/<user>/single/ 并创建 DataFile 记录，数据管理列表可见。"""
+
+    def setUp(self):
+        from apps.sftp.views import SftpViewSet
+        self.view_class = SftpViewSet
+        self.user = User.objects.create_user(username='dl_user', password='pw')
+        self.client.force_authenticate(self.user)
+        # MEDIA_ROOT 隔离到临时目录，避免测试写入项目根 media/ 且重复运行污染
+        self._tmp = tempfile.mkdtemp(prefix='sftp_dl_test_')
+        self.addCleanup(lambda: shutil.rmtree(self._tmp, ignore_errors=True))
+        self._media_override = override_settings(
+            MEDIA_ROOT=os.path.join(self._tmp, 'media')
+        )
+        self._media_override.enable()
+        self.addCleanup(self._media_override.disable)
+
+    def _fake_sftp(self, remote_name, content='a,b\n1,2\n'):
+        def fake_get(remote_path, local_path):
+            with open(local_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+
+        sftp = mock.MagicMock(name='SFTPClient')
+        sftp.get.side_effect = fake_get
+        return sftp
+
+    def test_download_creates_datafile_record(self):
+        with mock.patch.object(
+            self.view_class, '_get_connection',
+            return_value=self._fake_sftp('prod_123.csv'),
+        ):
+            resp = self.client.post(
+                '/api/v1/sftp/download/', {'path': '/data/prod_123.csv'},
+                format='json',
+            )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        data = resp.json()
+        self.assertEqual(data['filename'], 'prod_123.csv')
+        self.assertTrue(data.get('datafile_id'))
+
+        df = DataFile.objects.get(pk=data['datafile_id'])
+        self.assertEqual(df.owner, self.user)
+        self.assertEqual(df.file_type, 'single')
+        self.assertEqual(df.filename, 'prod_123.csv')
+        # 相对化：media/data/<user>/single/prod_123.csv
+        self.assertEqual(
+            df.file_path,
+            os.path.join('data', 'dl_user', 'single', 'prod_123.csv'),
+        )
+        self.assertTrue(os.path.exists(resolve_file_path(df.file_path)))
+
+    def test_download_collision_registers_new_record_with_ts(self):
+        # 同目录已存在同名文件 → 加时间戳后缀并注册新记录
+        with mock.patch.object(
+            self.view_class, '_get_connection',
+            return_value=self._fake_sftp('dup.csv'),
+        ):
+            r1 = self.client.post(
+                '/api/v1/sftp/download/', {'path': '/d/dup.csv'}, format='json')
+            r2 = self.client.post(
+                '/api/v1/sftp/download/', {'path': '/d/dup.csv'}, format='json')
+        self.assertEqual(r1.status_code, 200, r1.data)
+        self.assertEqual(r2.status_code, 200, r2.data)
+        names = set(DataFile.objects.filter(owner=self.user, filename__startswith='dup')
+                    .values_list('filename', flat=True))
+        self.assertNotEqual(r1.json()['filename'], r2.json()['filename'])
+        self.assertEqual(len(names), 2)  # dup.csv + dup_<ts>.csv 两条独立记录
+
+    def test_download_batch_registers_each_file(self):
+        with mock.patch.object(
+            self.view_class, '_get_connection',
+            return_value=self._fake_sftp('x.csv'),
+        ):
+            resp = self.client.post(
+                '/api/v1/sftp/download_batch/',
+                {'paths': ['/a/one.csv', '/b/two.csv', '/c/note.txt']},
+                format='json',
+            )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.json()['count'], 2)  # 非 CSV 过滤
+        files = DataFile.objects.filter(owner=self.user).order_by('filename')
+        self.assertEqual(list(files.values_list('filename', flat=True)),
+                         ['one.csv', 'two.csv'])
+        for df in files:
+            self.assertTrue(os.path.exists(resolve_file_path(df.file_path)))

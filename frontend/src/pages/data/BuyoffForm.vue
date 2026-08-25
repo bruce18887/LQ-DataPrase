@@ -130,9 +130,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { datafilesApi } from '../../api/datafiles'
 import { buyoffApi } from '../../api/buyoff'
 import { downloadBlob, extractFilenameFromContentDisposition } from '../../utils/download'
 import type { DataFile } from '../../types'
@@ -145,7 +144,13 @@ interface AnalysisResult {
   file_count: number
 }
 
-const files = ref<DataFile[]>([])
+interface Props {
+  /** 文件列表（由 DataManagement 维护刷新后传入，组件不自行拉取） */
+  files: DataFile[]
+}
+
+const props = withDefaults(defineProps<Props>(), { files: () => [] })
+
 const roleAssignments = ref<Record<string, number | null>>({
   FT: null,
   QA1: null,
@@ -160,6 +165,18 @@ const roles = [
   { key: 'QA1', label: 'QA1 (质量检测1)' },
   { key: 'QA2', label: 'QA2 (质量检测2)' },
 ]
+
+// 数据库文件被删除后自动清理已失效的角色分配（keep-alive 下组件常驻，
+// 文件列表由父级刷新，这里负责把已不在列表中的 id 置空）
+watch(() => props.files, (list) => {
+  const ids = new Set(list.map(f => f.id))
+  for (const key of Object.keys(roleAssignments.value)) {
+    const id = roleAssignments.value[key]
+    if (id !== null && !ids.has(id)) {
+      roleAssignments.value[key] = null
+    }
+  }
+})
 
 const assignedFileIds = computed(() => {
   return Object.values(roleAssignments.value).filter((id): id is number => id !== null)
@@ -195,17 +212,8 @@ function availableFiles(currentRole: string) {
   }
   const own = roleAssignments.value[currentRole]
   if (own != null) usedIds.delete(own)
-  return files.value.filter(f => !usedIds.has(f.id))
+  return props.files.filter(f => !usedIds.has(f.id))
 }
-
-onMounted(async () => {
-  try {
-    const { data } = await datafilesApi.list()
-    files.value = Array.isArray(data) ? data : (data.results ?? [])
-  } catch {
-    // silently ignore fetch errors
-  }
-})
 
 async function analyze() {
   if (assignedFileIds.value.length < 2) {

@@ -44,46 +44,17 @@
         </el-card>
 
         <!-- 坐标轴范围设置 -->
-        <el-card v-if="corrResult" shadow="hover" :body-style="{ padding: '12px' }">
-          <el-collapse v-model="axisCollapse" style="border: none">
-            <el-collapse-item title="坐标轴范围设置" name="axis">
-              <div class="axis-body">
-                <div class="axis-item">
-                  <label class="axis-label">X轴</label>
-                  <el-select v-model="axisModeX" size="small" style="width: 95px">
-                    <el-option label="数据分布" value="data" />
-                    <el-option label="西格玛" value="sigma" />
-                    <el-option label="自定义" value="custom" />
-                  </el-select>
-                  <el-select v-if="axisModeX === 'sigma'" v-model="sigmaX" size="small" style="width: 65px; margin-left: 6px">
-                    <el-option :value="3" label="3σ" /><el-option :value="4" label="4σ" /><el-option :value="6" label="6σ" />
-                  </el-select>
-                  <template v-if="axisModeX === 'custom'">
-                    <el-input-number v-model="customMinX" size="small" :precision="4" :controls="false" style="width: 100px; margin-left: 6px" placeholder="最小值" />
-                    <span style="margin: 0 3px">~</span>
-                    <el-input-number v-model="customMaxX" size="small" :precision="4" :controls="false" style="width: 100px" placeholder="最大值" />
-                  </template>
-                </div>
-                <div class="axis-item">
-                  <label class="axis-label">Y轴</label>
-                  <el-select v-model="axisModeY" size="small" style="width: 95px">
-                    <el-option label="数据分布" value="data" />
-                    <el-option label="西格玛" value="sigma" />
-                    <el-option label="自定义" value="custom" />
-                  </el-select>
-                  <el-select v-if="axisModeY === 'sigma'" v-model="sigmaY" size="small" style="width: 65px; margin-left: 6px">
-                    <el-option :value="3" label="3σ" /><el-option :value="4" label="4σ" /><el-option :value="6" label="6σ" />
-                  </el-select>
-                  <template v-if="axisModeY === 'custom'">
-                    <el-input-number v-model="customMinY" size="small" :precision="4" :controls="false" style="width: 100px; margin-left: 6px" placeholder="最小值" />
-                    <span style="margin: 0 3px">~</span>
-                    <el-input-number v-model="customMaxY" size="small" :precision="4" :controls="false" style="width: 100px" placeholder="最大值" />
-                  </template>
-                </div>
-              </div>
-            </el-collapse-item>
-          </el-collapse>
-        </el-card>
+        <CorrelationScatterAxisCard
+          :show="!!corrResult"
+          v-model:axis-mode-x="axisModeX"
+          v-model:axis-mode-y="axisModeY"
+          v-model:sigma-x="sigmaX"
+          v-model:sigma-y="sigmaY"
+          v-model:custom-min-x="customMinX"
+          v-model:custom-min-y="customMinY"
+          v-model:custom-max-x="customMaxX"
+          v-model:custom-max-y="customMaxY"
+        />
       </template>
 
       <!-- 矩阵模式 -->
@@ -118,45 +89,6 @@
         </el-button>
       </template>
 
-      <!-- 文件相关性：按序列号对齐两个文件，逐参数对比 ATE/Bench 差异 -->
-      <el-card class="file-correlation-section" shadow="hover" :body-style="{ padding: '12px' }">
-        <label class="section-label">文件相关性</label>
-        <FileSelect
-          v-model="fcFile1"
-          :files="fcFiles"
-          :placeholder="fcFilesLoading ? '加载文件中...' : '选择文件 1'"
-          show-meta
-          style="width: 100%"
-        />
-        <FileSelect
-          v-model="fcFile2"
-          :files="fcFiles"
-          :placeholder="fcFilesLoading ? '加载文件中...' : '选择文件 2'"
-          show-meta
-          style="width: 100%; margin-top: 8px"
-        />
-        <div class="fc-threshold-row">
-          <label class="axis-label">差异阈值 (%)</label>
-          <el-input-number
-            v-model="fcThreshold"
-            :min="0"
-            :max="100"
-            :precision="1"
-            :controls="false"
-            size="small"
-            style="width: 90px"
-          />
-        </div>
-        <el-button
-          type="primary"
-          size="small"
-          :loading="fcLoading"
-          style="width: 100%; margin-top: 8px"
-          @click="onFileCorrelate"
-        >
-          分析相关性
-        </el-button>
-      </el-card>
     </template>
 
     <!-- 右侧面板 -->
@@ -205,36 +137,16 @@
         </div>
       </template>
 
-      <!-- 文件相关性结果 -->
-      <template v-if="fcResult">
-        <div class="fc-summary">
-          公共序列号 {{ fcResult.common_serials }} 个 · 公共参数 {{ fcResult.common_params }} 个
-        </div>
-        <el-table
-          :data="fcResult.summary || []"
-          size="small"
-          max-height="320"
-          class="fc-table"
-        >
-          <el-table-column prop="param" label="参数" min-width="120" show-overflow-tooltip />
-          <el-table-column prop="compared" label="对比数" width="80" />
-          <el-table-column prop="fail_count" label="超差数" width="80" />
-          <el-table-column prop="pass_rate" label="通过率%" width="90" />
-          <el-table-column prop="max_diff" label="最大差异%" width="90" />
-        </el-table>
-      </template>
     </template>
   </AnalysisTabLayout>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { ElMessage } from 'element-plus'
 import AnalysisTabLayout from './AnalysisTabLayout.vue'
-import FileSelect from '../../../components/common/FileSelect.vue'
 import { useCorrelation } from '../composables/useCorrelation'
 import { useCorrelationMatrix } from '../composables/useCorrelationMatrix'
-import { useFileCorrelation } from '../composables/useFileCorrelation'
+import CorrelationScatterAxisCard from './CorrelationScatterAxisCard.vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
 import { minMax } from '../../../utils/minmax'
@@ -288,7 +200,6 @@ watch(() => analysisStore.outlierHandling, (val) => { outlierHandling.value = va
 const localX = ref('')
 const localY = ref('')
 const showRegression = ref(true)
-const axisCollapse = ref<string[]>([])
 const axisModeX = ref<'data' | 'sigma' | 'custom'>('data')
 const axisModeY = ref<'data' | 'sigma' | 'custom'>('data')
 const sigmaX = ref(3); const sigmaY = ref(3)
@@ -296,27 +207,6 @@ const customMinX = ref(0); const customMaxX = ref(0)
 const customMinY = ref(0); const customMaxY = ref(0)
 
 const { corrLoading, corrResult, loadCorrelation } = useCorrelation(() => props.fileId)
-
-// ===== 文件相关性（按序列号对齐两文件，逐参数对比 ATE/Bench 差异） =====
-const {
-  loading: fcLoading, result: fcResult,
-  files: fcFiles, filesLoading: fcFilesLoading,
-  loadFiles, loadFileCorrelation,
-} = useFileCorrelation()
-const fcFile1 = ref<number | null>(null)
-const fcFile2 = ref<number | null>(null)
-const fcThreshold = ref(3.0)
-
-loadFiles()  // setup 同步发起文件列表加载
-
-function onFileCorrelate() {
-  if (!fcFile1.value || !fcFile2.value) {
-    ElMessage.warning('请选择两个文件')
-    return
-  }
-  loadFileCorrelation(fcFile1.value, fcFile2.value, fcThreshold.value)
-}
-
 
 const rColorClass = computed(() => {
   const r = Math.abs(corrResult.value?.pearson_r ?? 0)
@@ -647,58 +537,6 @@ void matrixChartRef
   width: 100%;
   height: 100%;
   min-height: 480px;
-}
-
-.axis-body {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.axis-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.axis-label {
-  font-size: 13px;
-  color: var(--text-secondary, #909399);
-  white-space: nowrap;
-  min-width: 30px;
-}
-
-.fc-threshold-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 8px;
-}
-
-.fc-summary {
-  font-size: 13px;
-  color: var(--text-secondary, #909399);
-  margin-bottom: 8px;
-}
-
-.fc-table {
-  width: 100%;
-}
-
-:deep(.el-collapse-item__header) {
-  font-size: 13px;
-  color: var(--text-secondary, #909399);
-  border: none;
-  padding: 4px 0;
-}
-
-:deep(.el-collapse-item__wrap) {
-  border: none;
-}
-
-:deep(.el-collapse-item__content) {
-  padding: 8px 0 0 0;
 }
 
 .matrix-param-header {

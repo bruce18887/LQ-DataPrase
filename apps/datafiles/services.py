@@ -9,6 +9,7 @@ import pandas as pd
 from apps.analysis.services.statistics import detect_fail_data
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import get_parser, BaseATEParser
+from apps.datafiles.utils import resolve_file_path
 
 logger = logging.getLogger(__name__)
 
@@ -82,8 +83,10 @@ def get_cached_parsed_file(file_id: int, owner_id: int, datafile=None) -> Tuple[
         datafile = DataFile.objects.filter(pk=file_id, owner_id=owner_id).first()
     if datafile is None:
         return None, None, None
-    path_key = _disk_mtime_ns(datafile.file_path)
-    return _cached_parse(file_id, owner_id, path_key, datafile.file_path, datafile.format_type)
+    # 缓存 key 基于解析后的绝对路径 mtime，相对/绝对混存天然兼容
+    abs_path = resolve_file_path(datafile.file_path)
+    path_key = _disk_mtime_ns(abs_path)
+    return _cached_parse(file_id, owner_id, path_key, abs_path, datafile.format_type)
 
 
 @lru_cache(maxsize=32)
@@ -125,8 +128,9 @@ def get_cached_fail_data(file_id: int, owner_id: int, datafile=None) -> Tuple[Op
         datafile = DataFile.objects.filter(pk=file_id, owner_id=owner_id).first()
     if datafile is None:
         return None, None, None
-    path_key = _disk_mtime_ns(datafile.file_path)
-    return _cached_fail_data(file_id, owner_id, path_key, datafile.file_path, datafile.format_type)
+    abs_path = resolve_file_path(datafile.file_path)
+    path_key = _disk_mtime_ns(abs_path)
+    return _cached_fail_data(file_id, owner_id, path_key, abs_path, datafile.format_type)
 
 
 def clear_parse_cache() -> None:

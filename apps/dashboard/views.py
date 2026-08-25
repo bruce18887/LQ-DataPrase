@@ -20,6 +20,7 @@ from apps.analysis.services.statistics import (
     compute_pass_yield,
 )
 from apps.datafiles.services import get_cached_parsed_file
+from apps.datafiles.utils import resolve_file_path
 
 logger = logging.getLogger(__name__)
 
@@ -234,7 +235,7 @@ class DashboardSummaryView(APIView):
             if not datafile:
                 return Response({'error': 'no_data'})
 
-            file_path = datafile.file_path
+            file_path = resolve_file_path(datafile.file_path)
             if not os.path.exists(file_path):
                 return Response({'error': 'file_not_found'})
 

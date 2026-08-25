@@ -101,12 +101,12 @@
 
       <!-- Gage Summary -->
       <div v-show="activeTab === 'gage'" role="tabpanel" class="content-section fade-in">
-        <GageSummary />
+        <GageSummary :files="files" />
       </div>
 
       <!-- Buyoff Form -->
       <div v-show="activeTab === 'buyoff'" role="tabpanel" class="content-section fade-in">
-        <BuyoffForm />
+        <BuyoffForm :files="files" />
       </div>
     </div>
   </div>
@@ -122,7 +122,7 @@ import DataBrowserAgGrid from './DataBrowserAgGrid.vue'
 import ExportToolsTab from './ExportToolsTab.vue'
 import GageSummary from './GageSummary.vue'
 import BuyoffForm from './BuyoffForm.vue'
-import FileCorrelationSection from '../analysis/components/correlation/FileCorrelationSection.vue'
+import FileCorrelationSection from './components/correlation/FileCorrelationSection.vue'
 
 // 用于导出下拉与当前文件名解析的轻量全量列表（FileListTab 自管分页列表）
 const files = ref<any[]>([])

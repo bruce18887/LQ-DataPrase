@@ -28,6 +28,8 @@ export const EXPORT_TEMPLATE_VARIABLE_LABELS: Record<string, string> = {
   sigma: 'Sigma 级别',
   batch_name: '批次名',
   file_count: '文件数量',
+  file1: '文件1名（去扩展名）',
+  file2: '文件2名（去扩展名）',
 }
 
 export const EXPORT_TEMPLATE_META: Record<ExportTypeKey, ExportTemplateMeta> = {
@@ -79,6 +81,12 @@ export const EXPORT_TEMPLATE_META: Record<ExportTypeKey, ExportTemplateMeta> = {
     extension: 'xlsx',
     variables: ['file_count', 'date', 'time', 'datetime', 'user'],
   },
+  file_correlation: {
+    label: '文件相关性对比',
+    default: '{file1}_vs_{file2}_correlation',
+    extension: 'xlsx',
+    variables: ['file1', 'file2', 'date', 'time', 'datetime', 'user'],
+  },
 }
 
 export const EXPORT_TEMPLATE_KEYS = Object.keys(EXPORT_TEMPLATE_META) as ExportTypeKey[]
@@ -93,4 +101,6 @@ export const PREVIEW_SAMPLE_VALUES: Record<string, string> = {
   sigma: '3',
   batch_name: 'BATCH_001',
   file_count: '5',
+  file1: 'DA35_ATE',
+  file2: 'DA35_Bench',
 }

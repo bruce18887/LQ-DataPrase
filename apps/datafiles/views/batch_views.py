@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 from apps.datafiles.models import DataFile
 from apps.datafiles.serializers import DataFileSerializer
 from apps.datafiles.services import clear_parse_cache
+from apps.datafiles.utils import resolve_file_path
 
 from ._helpers import (
     _is_data_csv,
@@ -51,7 +52,7 @@ class BatchDirListView(APIView):
             'status', 'created_at',
         ):
             registered_files.setdefault(df['batch_name'], set()).add(
-                os.path.normpath(df['file_path'])
+                os.path.normpath(resolve_file_path(df['file_path']))
             )
             batch_file_rows.setdefault(df['batch_name'], []).append({
                 'id': df['id'],

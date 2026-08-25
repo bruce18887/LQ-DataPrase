@@ -44,6 +44,10 @@
   --color-info: #0369a1;
   --color-info-emphasis: #075985;
 
+  /* 文件相关性对比：超差 / Limit Diff 标红单元格（模板 F5B7B1 的浅色适配） */
+  --color-fail-bg: rgba(245, 183, 177, 0.55);
+  --color-fail-text: #b91c1c;
+
   /* ========== 阴影 ========== */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06);
@@ -90,6 +94,10 @@
   --color-error-emphasis: #fda4af;
   --color-info: #4facfe;
   --color-info-emphasis: #00f2fe;
+
+  /* 文件相关性对比：超差 / Limit Diff 标红单元格（深色适配） */
+  --color-fail-bg: rgba(255, 113, 130, 0.22);
+  --color-fail-text: #fb7185;
 
   /* ========== 阴影 ========== */
   --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.2);

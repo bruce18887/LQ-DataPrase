@@ -21,7 +21,7 @@ from apps.datafiles.services import (
     get_cached_fail_data,
     clear_parse_cache,
 )
-from apps.datafiles.utils import extract_product_code
+from apps.datafiles.utils import extract_product_code, resolve_file_path
 from apps.analysis.services.statistics import build_col_meta
 from apps.analysis.services.statistics.helpers import get_site_column
 
@@ -190,7 +190,7 @@ class DataBrowserView(APIView):
             DataFile, pk=datafile_id, owner=request.user
         )
 
-        if not os.path.exists(datafile.file_path):
+        if not os.path.exists(resolve_file_path(datafile.file_path)):
             return Response(
                 {'error': 'File not found on disk'},
                 status=status.HTTP_404_NOT_FOUND,
@@ -357,7 +357,7 @@ class DataConsistencyCheckView(APIView):
                     'batch_name', 'sub_batch', 'file_type')
         ):
             preview_code = extract_product_code(df['filename'], df['program_name'])
-            file_missing = not os.path.exists(df['file_path'])
+            file_missing = not os.path.exists(resolve_file_path(df['file_path']))
             missing.append({
                 'id': df['id'],
                 'filename': df['filename'],
@@ -495,7 +495,7 @@ class DataConsistencyCheckView(APIView):
         missing_qs = DataFile.objects.filter(owner=user, product_code='')
         for df in missing_qs.iterator():
             code, refreshed = _resolve_product_code(
-                df.filename, df.file_path, df.program_name
+                df.filename, resolve_file_path(df.file_path), df.program_name
             )
             if code:
                 with transaction.atomic():
@@ -514,7 +514,7 @@ class DataConsistencyCheckView(APIView):
                     'reason': '',
                 })
             else:
-                    reason = 'file_missing' if not os.path.exists(df.file_path) else 'no_match'
+                    reason = 'file_missing' if not os.path.exists(resolve_file_path(df.file_path)) else 'no_match'
                     results.append({
                         'id': df.id,
                         'filename': df.filename,

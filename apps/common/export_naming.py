@@ -25,6 +25,7 @@ EXPORT_TEMPLATE_DEFAULTS: dict[str, str] = {
     'batch_report': 'Batch_Report_{datetime}',
     'buyoff': 'Buyoff_Form_{datetime}',
     'gage': 'Gage_Summary_{datetime}',
+    'file_correlation': '{file1}_vs_{file2}_correlation',
 }
 
 # Variables available per export type (mirrored in frontend/src/constants/export-templates.ts)
@@ -37,6 +38,7 @@ EXPORT_TEMPLATE_VARIABLES: dict[str, tuple[str, ...]] = {
     'batch_report': ('batch_name', 'file_count', 'date', 'time', 'datetime', 'user'),
     'buyoff': ('file_count', 'date', 'time', 'datetime', 'user'),
     'gage': ('file_count', 'date', 'time', 'datetime', 'user'),
+    'file_correlation': ('file1', 'file2', 'date', 'time', 'datetime', 'user'),
 }
 
 MAX_TEMPLATE_LENGTH = 200

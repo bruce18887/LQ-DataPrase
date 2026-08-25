@@ -4,16 +4,21 @@
 """
 import os
 import shutil
+from pathlib import Path
 
-from django.conf import settings
 from django.core.management.base import BaseCommand
 
 from apps.accounts.models import User
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers.base import BaseATEParser
 from apps.datafiles.parsers import get_parser
+from apps.datafiles.utils import resolve_file_path, store_file_path
+from apps.datafiles.views._helpers import _user_upload_dir
 
-SAMPLE_DATA_DIR = os.path.join(settings.BASE_DIR, 'Data', 'SampleData')
+# 样例数据源固定锚定在代码所在的项目根（apps/accounts/management/commands/
+# 上溯 4 层 = 项目根），不依赖 settings.BASE_DIR —— 数据目录可迁移到
+# 用户主目录后样例源仍留在项目根（Storage Layout v2）。
+SAMPLE_DATA_DIR = str(Path(__file__).resolve().parents[4] / 'Data' / 'SampleData')
 
 
 def iter_csv_files(root: str):
@@ -34,7 +39,7 @@ class Command(BaseCommand):
 
     @staticmethod
     def _media_file_unchanged(src_path: str, dest_path: str) -> bool:
-        """media/uploads 目标与 SampleData 源文件一致（size + mtime 都相同）"""
+        """用户上传目录目标与 SampleData 源文件一致（size + mtime 都相同）"""
         try:
             return (
                 os.path.exists(dest_path)
@@ -46,7 +51,7 @@ class Command(BaseCommand):
 
     def _register_file(self, user, src_path: str, dest_path: str, datafile: DataFile | None) -> bool:
         """复制 + 解析 + 建/更新 DataFile 记录。返回 True 表示数据有变化。"""
-        # 复制到 media/uploads（不依赖 SampleData 的绝对路径语义）
+        # 复制到用户上传目录（media/data/<username>/single/，与上传逻辑统一）
         shutil.copy2(src_path, dest_path)
         file_size = os.path.getsize(dest_path)
 
@@ -76,7 +81,7 @@ class Command(BaseCommand):
             datafile = DataFile.objects.create(
                 owner=user,
                 filename=os.path.basename(src_path),
-                file_path=dest_path,
+                file_path=store_file_path(dest_path),
                 file_size=file_size,
                 format_type=format_type if format_type != 'Unknown' else 'CTA8290D',
                 row_count=row_count,
@@ -100,7 +105,7 @@ class Command(BaseCommand):
             user=user,
             datafile=datafile,
             filename=datafile.filename,
-            filepath=dest_path,
+            filepath=store_file_path(dest_path),
             format_type=datafile.format_type,
             rows=row_count,
             cols=col_count,
@@ -123,7 +128,8 @@ class Command(BaseCommand):
             deleted, _ = DataFile.objects.filter(owner=user).delete()
             self.stdout.write(self.style.WARNING(f'已清空 {deleted} 条 DataFile 记录'))
 
-        upload_dir = os.path.join(settings.BASE_DIR, 'media', 'uploads')
+        # 与上传逻辑同构：media/data/<username>/single/
+        upload_dir = _user_upload_dir(user, 'single')
         os.makedirs(upload_dir, exist_ok=True)
 
         if options['refresh']:
@@ -131,13 +137,24 @@ class Command(BaseCommand):
             stale = DataFile.objects.filter(owner=user, filename__startswith='e2e_')
             for df in stale:
                 try:
-                    if os.path.exists(df.file_path):
-                        os.unlink(df.file_path)
+                    disk_path = resolve_file_path(df.file_path)
+                    if os.path.exists(disk_path):
+                        os.unlink(disk_path)
                 except OSError:
                     pass
             deleted, _ = stale.delete()
             if deleted:
                 self.stdout.write(self.style.WARNING(f'已清理 {deleted} 条 e2e 测试残留记录'))
+            # 无 DB 记录的 e2e_* 孤儿文件（上传测试残留但记录已删）同样清掉，
+            # 否则单文件目录会无限堆积测试垃圾
+            stale_dir = os.path.join(upload_dir)
+            if os.path.isdir(stale_dir):
+                for f in os.listdir(stale_dir):
+                    if f.lower().startswith('e2e_'):
+                        try:
+                            os.unlink(os.path.join(stale_dir, f))
+                        except OSError:
+                            pass
 
         created = 0
         skipped = 0
@@ -145,11 +162,13 @@ class Command(BaseCommand):
         for src_path in iter_csv_files(SAMPLE_DATA_DIR):
             filename = os.path.basename(src_path)
 
-            # 目标路径：media/uploads/<filename>，避免复制整棵 SampleData 树
+            # 目标路径：media/data/<username>/single/<filename>，避免复制整棵 SampleData 树
             dest_path = os.path.join(upload_dir, filename)
+            stored_dest = store_file_path(dest_path)
 
+            # 幂等 filter 与存储格式一致（相对化后旧绝对路径记录仍可命中）
             datafile = DataFile.objects.filter(
-                owner=user, filename=filename, file_path=dest_path
+                owner=user, filename=filename, file_path=stored_dest
             ).first()
 
             # 幂等快路径：记录存在且 media 文件与 SampleData 一致 → 跳过

@@ -91,9 +91,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { datafilesApi } from '../../api/datafiles'
 import { gageApi } from '../../api/gage'
 import { downloadBlob, extractFilenameFromContentDisposition } from '../../utils/download'
 import type { DataFile } from '../../types'
@@ -105,7 +104,13 @@ interface SiteSlot {
   fileId: number | null
 }
 
-const files = ref<DataFile[]>([])
+interface Props {
+  /** 文件列表（由 DataManagement 维护刷新后传入，组件不自行拉取） */
+  files: DataFile[]
+}
+
+const props = withDefaults(defineProps<Props>(), { files: () => [] })
+
 const onlyBin1 = ref(false)
 const ignoreNoLimit = ref(false)
 const loading = ref(false)
@@ -122,12 +127,23 @@ const siteSlots = ref<SiteSlot[]>([
   { key: 'S8', label: 'Site 8 (_S8)', fileId: null },
 ])
 
+// 数据库文件被删除后自动清理已失效的槽位分配（keep-alive 下组件常驻，
+// 文件列表由父级刷新，这里负责把已不在列表中的 fileId 置空）
+watch(() => props.files, (list) => {
+  const ids = new Set(list.map(f => f.id))
+  for (const slot of siteSlots.value) {
+    if (slot.fileId !== null && !ids.has(slot.fileId)) {
+      slot.fileId = null
+    }
+  }
+})
+
 const assignedSlots = computed(() => {
   return siteSlots.value
     .filter(slot => slot.fileId !== null)
     .map(slot => ({
       ...slot,
-      fileName: files.value.find(f => f.id === slot.fileId)?.filename || '-',
+      fileName: props.files.find(f => f.id === slot.fileId)?.filename || '-',
     }))
 })
 
@@ -150,17 +166,8 @@ function availableFiles(currentKey: string) {
   }
   const own = siteSlots.value.find((s) => s.key === currentKey)?.fileId
   if (own != null) usedIds.delete(own)
-  return files.value.filter(f => !usedIds.has(f.id))
+  return props.files.filter(f => !usedIds.has(f.id))
 }
-
-onMounted(async () => {
-  try {
-    const { data } = await datafilesApi.list()
-    files.value = Array.isArray(data) ? data : (data.results ?? [])
-  } catch {
-    // silently ignore fetch errors
-  }
-})
 
 async function generate() {
   if (assignedFileIds.value.length < 2) {

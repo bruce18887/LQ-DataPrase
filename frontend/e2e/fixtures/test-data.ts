@@ -1,10 +1,23 @@
 import path from 'node:path'
+import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 /** 项目根目录（frontend 的上一级） */
 export const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..')
+
+/**
+ * e2e 专用的 system_config.json 位置（与 playwright.config.ts / global-setup.ts 共享）。
+ * 内容固定为 `{"data_dir": PROJECT_ROOT}`：让 Django 后端（webServer）与
+ * seed 子进程（globalSetup 的 execSync）读同一份配置，把数据目录钉死在
+ * 项目根 → apply_system_config 判定 target == original → 零副作用跳过迁移，
+ * 防止 Storage Layout v2 的默认迁移把测试数据搬到用户主目录。
+ */
+export const E2E_SYSTEM_CONFIG_FILE = path.join(
+  os.tmpdir(),
+  'lqdp-e2e-system-config.json',
+)
 
 /** 样例数据根目录 */
 export const SAMPLE_DATA_DIR = path.join(PROJECT_ROOT, 'Data', 'SampleData')
@@ -84,7 +97,8 @@ export const RECOMMENDED = {
 
 /**
  * 原始磁盘文件路径（仅用于唯一命名上传测试的副本来源，不再用于批量上传）。
- * seed_test_data 已预先将 SampleData 所有 CSV 复制到 media/uploads/ 并注册为 DataFile。
+ * seed_test_data 已预先将 SampleData 所有 CSV 复制到 media/data/<username>/single/
+ * 并注册为 DataFile（Storage Layout v2，2026-08-21 起不再使用 media/uploads/）。
  */
 export const PRIMARY_SAMPLE_FILE = path.join(
   SAMPLE_DATA_DIR,

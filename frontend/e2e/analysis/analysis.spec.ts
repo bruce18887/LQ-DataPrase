@@ -434,36 +434,6 @@ test.describe('@p1 测试项相关性分析', { tag: ['@p1', '@analysis'] }, () 
   })
 })
 
-test.describe('@p2 文件相关性', { tag: ['@p2', '@analysis'] }, () => {
-  test('文件相关性面板存在且可选文件', async ({ page }) => {
-    await enterAnalysis(page, RECOMMENDED.analysis)
-    await page.getByRole('tab', { name: /相关性对比/ }).click()
-
-    const fileSection = page.locator('.file-correlation-section')
-    await expect(fileSection).toBeVisible({ timeout: 10_000 })
-
-    // 文件选择器（等待文件列表加载后选项非空）
-    const file1 = fileSection.locator('.el-select').nth(0)
-    await expect(file1).toBeVisible()
-    const file2 = fileSection.locator('.el-select').nth(1)
-    await expect(file2).toBeVisible()
-    // 阈值输入框
-    await expect(fileSection.locator('.el-input-number')).toBeVisible()
-    // 分析按钮
-    await expect(fileSection.getByRole('button', { name: '分析相关性' })).toBeVisible()
-
-    // 文件列表加载完成：打开文件 1 下拉应有选项
-    await file1.click()
-    await expect
-      .poll(
-        async () => page.locator('.el-select-dropdown__item:visible').count(),
-        { timeout: 15_000, message: '文件列表应加载出选项' },
-      )
-      .toBeGreaterThan(0)
-    await page.keyboard.press('Escape')
-  })
-})
-
 test.describe('@p2 单 SITE 直方图图例（§2 回归）', { tag: ['@p2', '@analysis'] }, () => {
   /**
    * 当文件 Site_No 列只含 1 个值时（典型如 QA2 阶段只跑 Site 4），

@@ -1,10 +1,25 @@
 import { defineConfig, devices } from '@playwright/test'
 import { fileURLToPath } from 'node:url'
-import path from 'node:path'
+import fs from 'node:fs'
 import os from 'node:os'
+import path from 'node:path'
+import { E2E_SYSTEM_CONFIG_FILE } from './e2e/fixtures/test-data'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PROJECT_ROOT = path.resolve(__dirname, '..')
+
+// Storage Layout v2：数据目录默认迁移到用户主目录。e2e 必须把配置钉死在
+// 项目根（data_dir == PROJECT_ROOT → apply_system_config 零副作用跳过迁移），
+// 否则 Django 首次启动会把项目根 db/media 搬到 ~/LQ-DataPrase，测试数据全丢。
+// 同步写在 webServer spawn 之前；同时写入 process.env 让 globalSetup 的
+// execSync 子进程（seed_users / seed_test_data）读同一份配置，避免种子进程
+// 与后端各用一套 DB。
+fs.writeFileSync(
+  E2E_SYSTEM_CONFIG_FILE,
+  JSON.stringify({ data_dir: PROJECT_ROOT }),
+  'utf-8',
+)
+process.env.LQDP_SYSTEM_CONFIG_FILE = E2E_SYSTEM_CONFIG_FILE
 
 // venv Python（Windows 路径；其它平台用 PYTHON_BIN 覆盖）
 const PYTHON_BIN =
@@ -111,11 +126,12 @@ export default defineConfig({
           timeout: 120_000,
           stdout: 'pipe',
           stderr: 'pipe',
-          // 系统存储路径配置（system_config.json）隔离到临时文件，
-          // 避免 e2e 修改路径时污染项目根目录
+          // 系统存储路径配置（system_config.json）隔离到临时文件：
+          // 内容在模块顶层写入（data_dir=PROJECT_ROOT），避免 e2e 修改路径
+          // 时污染项目根目录、也防止默认 data_dir 迁移触发
           env: {
             ...process.env,
-            LQDP_SYSTEM_CONFIG_FILE: path.join(os.tmpdir(), 'lqdp-e2e-system-config.json'),
+            LQDP_SYSTEM_CONFIG_FILE: E2E_SYSTEM_CONFIG_FILE,
           },
         },
         {
