@@ -62,6 +62,8 @@ export interface BrowseResponse {
   site_options?: string[]
   /** 仅 page==1：可作数值分析的列名（右键直方图可用性判定） */
   numeric_columns?: string[]
+  /** 仅 page==1：记录级列（系统列）——后端按格式权威下发，前端据此恒显示+前置 */
+  system_columns?: string[]
 }
 
 /** 仅保留有值的查询参数 */

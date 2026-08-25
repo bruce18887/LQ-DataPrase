@@ -268,10 +268,54 @@ class BrowseApiTests(TestCase):
         self.assertNotIn('QR_Code', num, '全 NaN 列（解析后 float64）无实际数值')
         self.assertNotIn('Dut_Pass', num, 'bool 列非数值（TRUE/FALSE 旧前端判定非数值）')
 
+    def test_page1_carries_system_columns(self):
+        """记录级列（系统列）按格式权威列表下发：完整记录块 + 测试列排除。
+        CTA8280F 的 SYSTEM_COLUMNS 中 Start_Time/Handler_Time/Alarm 不在本
+        fixture 头部 → 相交后按文件列序输出；KELVIN_VIN 是测试列，不得混入。
+        """
+        body = self._browse(page_size=100).json()
+        self.assertEqual(
+            body['system_columns'],
+            ['Index_No', 'Dut_No', 'Serial_No', 'Site_No', 'Dut_Pass', 'SW_Bin',
+             'X_COORD', 'Y_COORD', 'QR_Code', 'Test_Time', 'Data_Num'],
+        )
+        self.assertNotIn('KELVIN_VIN', body['system_columns'])
+
+    def test_system_columns_not_name_based(self):
+        """回归（2026-08-25 用户 BPD87500 报告）：以 device_/site_ 等前缀命名的
+        测试项（Device_Fused_Flag1/2、SITE_CHECK）不得被误判为系统列——
+        系统列判定必须来自按格式权威列表，不能是列名前缀启发式。"""
+        path = os.path.join(self.tmpdir, f'browse_{self._testMethodName}.csv')
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(
+                'CTA8290D\n'
+                + '[Data]\n'
+                + 'Serial_No,Part_No,Dut_No,Site_No,Dut_Pass,SW_Bin,X_COORD,Y_COORD,'
+                + 'QR_Code,Start_T,Test_Time,Alarm,Data_Cnt,TRIM_Read,Device_Fused_Flag1\n'
+                + 'Unit,Unit,Unit,Unit,Unit,Unit,Unit,Unit,Unit,Unit,Unit,Unit,Unit,bit,bit\n'
+                + 'Min,Min,Min,Min,Min,Min,Min,Min,Min,Min,Min,Min,Min,0,0\n'
+                + 'Max,Max,Max,Max,Max,Max,Max,Max,Max,Max,Max,Max,Max,1,1\n'
+                + '1,1,1,1,TRUE,1,0,0,None,1.0,1.0,None,1,0.5,1\n'
+            )
+        df = self.datafile
+        df.file_path = path
+        df.format_type = 'CTA8290D'
+        df.save(update_fields=['file_path', 'format_type'])
+        body = self._browse(page_size=100).json()
+        self.assertEqual(
+            body['system_columns'],
+            ['Serial_No', 'Part_No', 'Dut_No', 'Site_No', 'Dut_Pass', 'SW_Bin',
+             'X_COORD', 'Y_COORD', 'QR_Code', 'Start_T', 'Test_Time', 'Alarm', 'Data_Cnt'],
+        )
+        self.assertNotIn('Device_Fused_Flag1', body['system_columns'])
+        # Device_Fused_Flag1 与 TRIM_Read 一样是测试列（显示测试列可选择集）
+        self.assertIn('Device_Fused_Flag1', [c for c in body['headers'] if c not in body['system_columns']])
+
     def test_page_gt1_omits_meta_only_fields(self):
         body = self._browse(page=2, page_size=3).json()
         self.assertNotIn('site_options', body)
         self.assertNotIn('numeric_columns', body)
+        self.assertNotIn('system_columns', body)
         self.assertEqual([vals[0] for vals in body['data']], [4, 5, 6])
 
     # ── 服务端列过滤（2026-08-12，方案 A：filter_model 白名单算子） ──
