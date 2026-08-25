@@ -1,4 +1,4 @@
-from .base import BaseATEParser
+from .base import BaseATEParser, SYSTEM_COLUMNS
 from .cta8290d import CTA8290DParser
 from .cta8280f import CTA8280FParser
 from .ets88 import ETS88Parser

@@ -183,20 +183,14 @@ function onGridContextMenu(e: MouseEvent) {
   handleBodyContextMenu(e)
 }
 
-// System columns that should appear first。
-// 注意：X/Y 坐标用「精确 token + 前缀」匹配——旧实现对单字母做子串扫描，
-// 导致任何列名含 x/y 的测试列（如 OC_Trim_hys_Sim、*_HYS）被误判为系统列
-// 永远前置且不可由「显示测试列」隐藏（2026-08-20 修复）。
-const SYSTEM_PREFIXES = ['soft_bin', 'sw_bin', 'hard_bin', 'site', 'serial', 'wafer', 'device']
-const SYSTEM_EXACT = ['x', 'y', 'x_coord', 'y_coord']
+// 系统列（记录级列）：恒显示且排在测试列之前，由后端按文件格式权威下发
+// （/browse/ page==1 的 system_columns，来源 apps.datafiles.parsers.SYSTEM_COLUMNS）。
+// 不用列名前缀启发式：测试项名可能与记录列同名前缀（Device_Fused_Flag1/2、
+// SITE_CHECK 是测试项，却以 device_/site_ 开头，2026-08-25 曾被误判前置）。
+const systemCols = ref<string[]>([])
 
 function isSystemCol(name: string): boolean {
-  const baseName = name.split(' ')[0].split('(')[0].trim()
-  const lower = baseName.toLowerCase()
-  return (
-    SYSTEM_EXACT.includes(lower) ||
-    SYSTEM_PREFIXES.some((p) => lower === p || lower.startsWith(`${p}_`) || lower.startsWith(`${p} `))
-  )
+  return systemCols.value.includes(name)
 }
 
 // 全部测试列（系统列排除，供「显示测试列」选择器使用）
@@ -327,6 +321,7 @@ watch(
     selectedTestCols.value = []
     siteOptions.value = []
     numericColumns.value = []
+    systemCols.value = []
     allCols.value = []
     colMeta.value = {}
     rowCount.value = 0
@@ -376,6 +371,7 @@ function clearGrid() {
   colMeta.value = {}
   numericColumns.value = []
   siteOptions.value = []
+  systemCols.value = []
   rowCount.value = 0
   failRowCount.value = 0
   dataLoaded.value = false
@@ -449,6 +445,8 @@ function applyMeta(d: any) {
     siteOptions.value = [...d.site_options].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
   }
   if (d.numeric_columns) numericColumns.value = d.numeric_columns
+  // 系统列（记录级列）仅 page==1 响应携带（page>1 不覆盖、不置空）
+  if (d.system_columns) systemCols.value = d.system_columns
 
   const binCol = d.bin_column as string
   if (!pinnedCol.value) {

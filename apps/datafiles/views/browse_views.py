@@ -14,7 +14,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.datafiles.models import DataFile, ParseHistory
-from apps.datafiles.parsers import get_parser
+from apps.datafiles.parsers import get_parser, SYSTEM_COLUMNS
 from apps.datafiles.serializers import DataFileSerializer, ParseHistorySerializer
 from apps.datafiles.services import (
     get_cached_parsed_file,
@@ -211,6 +211,7 @@ class DataBrowserView(APIView):
         # page==1 时预计算前端所需的全文件元信息（基于过滤前全量 df）
         site_options: list = []
         numeric_columns: list = []
+        system_columns: list = []
         if page == 1:
             site_col_full = get_site_column(df)
             if site_col_full:
@@ -229,6 +230,11 @@ class DataBrowserView(APIView):
                       and df[col].notna().any()):
                     # 排除 bool（Dut_Pass，TRUE/FALSE 非数值）与全 NaN 列（QR_Code 解析后）
                     numeric_columns.append(col)
+            # 记录级列（系统列）：按格式权威列表（SYSTEM_COLUMNS）∩ 文件列，
+            # 保持文件列序——前端据此恒显+前置，不再用名称前缀启发式
+            # （Device_Fused_Flag1/2、SITE_CHECK 等测试项与记录列同名前缀，2026-08-25）。
+            sys_set = set(SYSTEM_COLUMNS.get(datafile.format_type, []))
+            system_columns = [c for c in df.columns if c in sys_set]
 
         # Apply filters at DataFrame level (fast pandas ops) before paginating
         if search:
@@ -295,7 +301,8 @@ class DataBrowserView(APIView):
             + ',"fail_row_count":' + str(fail_row_count)
             + ',"col_meta":' + json.dumps(build_col_meta(df, metadata), ensure_ascii=False)
             + ',"bin_column":' + json.dumps(parser.get_bin_column_name(), ensure_ascii=False)
-            + ((',"site_options":' + json.dumps(site_options, ensure_ascii=False) + ',"numeric_columns":' + json.dumps(numeric_columns, ensure_ascii=False)) if page == 1 else '')
+            + ((',"site_options":' + json.dumps(site_options, ensure_ascii=False) + ',"numeric_columns":' + json.dumps(numeric_columns, ensure_ascii=False)
+                + ',"system_columns":' + json.dumps(system_columns, ensure_ascii=False)) if page == 1 else '')
             + '}'
         )
         return HttpResponse(payload, content_type='application/json; charset=utf-8')

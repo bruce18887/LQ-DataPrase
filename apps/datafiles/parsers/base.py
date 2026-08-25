@@ -163,6 +163,30 @@ NON_NUMERIC_COLUMNS = {
     'STS8200': ['SITE_NUM', 'PART_ID', 'PASSFG', 'SOFT_BIN', 'X_COORD', 'Y_COORD'],
 }
 
+# 各格式数据表的「记录级列」（系统列）：数据表头部固定的一组记录身份/协议列
+# （序列号/料号/槽位/过点/Bin/坐标/时间戳等）。查看数据页把它们恒显示并排在
+# 测试列之前，且不参与「显示测试列」隐藏。
+#
+# ⚠️ 不能用列名前缀启发式判定：测试项名可能与记录级列同名前缀——
+# CTA8290D/CTA8280F 的 Device_Fused_Flag、Device_Fused_Flag1/2、SITE_CHECK、
+# site_check 都是**测试项**（分别位于 CSV 第 ~93/117/607/14 列），名称却以
+# device_/site_ 开头（2026-08-25 用户 BPD87500 报告：Device_Fused_Flag1/2
+# 被误判为系统列而跑到数据最前面）。因此按格式给出权威列表，由后端随
+# /browse/ page==1 下发（system_columns），前端不再用名称猜测。
+#
+# 取值来源：四种格式真实样本文件 [Data] 表的开头记录块（已验证）——
+# CTA8290D 0-12、CTA8280F 0-13、ETS88 解析器强制前 5 列、STS8200 0-7。
+SYSTEM_COLUMNS = {
+    'CTA8290D': ['Serial_No', 'Part_No', 'Dut_No', 'Site_No', 'Dut_Pass', 'SW_Bin',
+                 'X_COORD', 'Y_COORD', 'QR_Code', 'Start_T', 'Test_Time', 'Alarm', 'Data_Cnt'],
+    'CTA8280F': ['Index_No', 'Dut_No', 'Serial_No', 'Site_No', 'Dut_Pass', 'SW_Bin',
+                 'X_COORD', 'Y_COORD', 'QR_Code', 'Start_Time', 'Test_Time',
+                 'Handler_Time', 'Alarm', 'Data_Num'],
+    'ETS88': ['Site #', 'Serial #', 'Bin', 'XCoord', 'YCoord'],
+    'STS8200': ['SITE_NUM', 'PART_ID', 'PASSFG', 'SOFT_BIN', 'T_TIME', 'X_COORD',
+                'Y_COORD', 'TEST_NUM'],
+}
+
 DATA_FORMAT_CONFIG = {
     'CTA8290D': {'marker': '[Data]', 'header_offset': 1, 'unit_offset': 2, 'min_offset': 3, 'max_offset': 4, 'data_offset': 5},
     'CTA8280F': {'marker': '[Data]', 'header_offset': 1, 'unit_offset': 2, 'min_offset': 3, 'max_offset': 4, 'data_offset': 5},

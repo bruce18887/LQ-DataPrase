@@ -93,9 +93,11 @@ async function fetchBinFailInfo(page: Page, filename: string) {
 }
 
 /**
- * 从 /browse/ API 取「显示测试列」测试素材：左起前两个非系统测试列
- * （渲染窗口内必可见）+ bin 系统列。系统列判定与 DataBrowserAgGrid.vue 的
- * isSystemCol 保持一致（token 前缀匹配，不做单字母子串扫描）。
+ * 从 /browse/ API 取「显示测试列」测试素材：左起前两个非系统列 + bin 系统列。
+ * 系统列 = 后端 page==1 权威下发的 system_columns（按格式记录级列；名称前缀
+ * 启发式已废弃——测试项可能与记录列同名前缀，2026-08-25 BPD87500
+ * Device_Fused_Flag1/2 误判）。注意：系统列块（13 列）会把目标测试列推到
+ * 横向视口外，断言其可见前须先渐进横向滚动（表头虚拟化）。
  */
 async function fetchFirstTestCols(page: Page, filename: string) {
   return page.evaluate(async (filename) => {
@@ -104,13 +106,8 @@ async function fetchFirstTestCols(page: Page, filename: string) {
     const files = await fetch(`/api/v1/files/?search=${encodeURIComponent(filename)}`, { headers }).then((r) => r.json())
     const file = ((files.results ?? files) as any[]).find((f: any) => f.filename === filename)
     const d = await fetch(`/api/v1/browse/?datafile_id=${file.id}&page_size=1`, { headers }).then((r) => r.json())
-    const PREFIXES = ['soft_bin', 'sw_bin', 'hard_bin', 'site', 'serial', 'wafer', 'device']
-    const EXACT = ['x', 'y', 'x_coord', 'y_coord']
-    const isSystem = (c: string) => {
-      const lower = c.split(' ')[0].split('(')[0].trim().toLowerCase()
-      return EXACT.includes(lower) || PREFIXES.some((p) => lower === p || lower.startsWith(`${p}_`) || lower.startsWith(`${p} `))
-    }
-    const testCols = (d.headers ?? []).filter((c: string) => !isSystem(c))
+    const sys = new Set((d.system_columns ?? []) as string[])
+    const testCols = (d.headers ?? []).filter((c: string) => !sys.has(c))
     return { testCol: testCols[0] ?? '', absentCol: testCols[1] ?? '', bin: d.bin_column as string }
   }, filename)
 }
@@ -465,7 +462,15 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     await page.keyboard.press('Escape')
     await page.waitForTimeout(300)
 
-    // 选中列可见；未选中的另一个测试列被过滤（恒不渲染）；系统列（bin）仍显示
+    // 选中列可见；未选中的另一个测试列被过滤（恒不渲染）；系统列（bin）仍显示。
+    // 系统列块（记录级 13 列）把目标测试列推到横向视口外（表头虚拟化不挂载屏外
+    // 表头单元格）→ 先渐进横向滚动到目标列渲染（位置依赖列序，不能假设像素）。
+    await page.locator('.ag-header-viewport').evaluate(async (el, col) => {
+      while (!el.querySelector(`[col-id="${col}"]`) && el.scrollLeft < el.scrollWidth) {
+        el.scrollLeft += 400
+        await new Promise((r) => setTimeout(r, 30))
+      }
+    }, testCol)
     await expect(page.locator('.ag-header-cell').filter({ hasText: testCol }).first()).toBeVisible({
       timeout: 10_000,
     })
@@ -497,13 +502,8 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
       const files = await fetch(`/api/v1/files/?search=${encodeURIComponent(filename)}`, { headers }).then((r) => r.json())
       const file = ((files.results ?? files) as any[]).find((f: any) => f.filename === filename)
       const d = await fetch(`/api/v1/browse/?datafile_id=${file.id}&page_size=1`, { headers }).then((r) => r.json())
-      const PREFIXES = ['soft_bin', 'sw_bin', 'hard_bin', 'site', 'serial', 'wafer', 'device']
-      const EXACT = ['x', 'y', 'x_coord', 'y_coord']
-      const isSystem = (c: string) => {
-        const lower = c.split(' ')[0].split('(')[0].trim().toLowerCase()
-        return EXACT.includes(lower) || PREFIXES.some((p) => lower === p || lower.startsWith(`${p}_`) || lower.startsWith(`${p} `))
-      }
-      const testCols = (d.headers ?? []).filter((c: string) => !isSystem(c))
+      const sys = new Set((d.system_columns ?? []) as string[])
+      const testCols = (d.headers ?? []).filter((c: string) => !sys.has(c))
       const freq = new Map<string, number>()
       for (const c of testCols) {
         const p = c.slice(0, 3).toLowerCase()
@@ -571,6 +571,35 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
         { timeout: 15_000 },
       )
       .toBe(true)
+  })
+
+  test('@p2 系统列按格式权威下发：前缀同名测试项（SITE_CHECK）不误判', async ({ page }) => {
+    // 回归（2026-08-25 BPD87500 Device_Fused_Flag1/2 报告）：CTA8280F 种子文件的
+    // SITE_CHECK 是测试项（[Data] 表第 14 列），旧实现因 site_ 前缀把它们误判为
+    // 系统列 → 顶到最前且不可经「显示测试列」隐藏。新实现按后端 system_columns
+    // 分类：SITE_CHECK 必须出现在「显示测试列」下拉中。
+    await openViewTab(page, SEEDED_FILES.CTA8280F_FT)
+    const { sysHas, testHas } = await page.evaluate(async (filename) => {
+      const token = localStorage.getItem('access_token')
+      const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
+      const files = await fetch(`/api/v1/files/?search=${encodeURIComponent(filename)}`, { headers }).then((r) => r.json())
+      const file = ((files.results ?? files) as any[]).find((f: any) => f.filename === filename)
+      const d = await fetch(`/api/v1/browse/?datafile_id=${file.id}&page_size=1`, { headers }).then((r) => r.json())
+      const sys = new Set((d.system_columns ?? []) as string[])
+      return {
+        sysHas: sys.has('SITE_CHECK'),
+        testHas: (d.headers ?? []).includes('SITE_CHECK') && !sys.has('SITE_CHECK'),
+      }
+    }, SEEDED_FILES.CTA8280F_FT)
+    expect(sysHas).toBe(false)
+    expect(testHas).toBe(true)
+
+    // 「显示测试列」下拉必须包含 SITE_CHECK（旧实现误判系统列 → 不可选）
+    const selector = viewScope(page).locator('.test-col-selector:has(input[aria-label="显示测试列"])').first()
+    await selector.locator('.el-select__wrapper').click()
+    const options = page.locator('.el-select-dropdown:visible .el-select-dropdown__item')
+    await expect(options.first()).toBeVisible({ timeout: 5_000 })
+    await expect(options.filter({ hasText: 'SITE_CHECK' }).first()).toBeVisible({ timeout: 5_000 })
   })
 
   test('@p2 工具栏控件标签可见', async ({ page }) => {
