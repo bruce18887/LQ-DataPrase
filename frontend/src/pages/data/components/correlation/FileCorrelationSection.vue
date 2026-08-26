@@ -15,10 +15,12 @@
           v-model:file2="file2"
           v-model:threshold="options.threshold"
           v-model:diff-rule="options.diffRule"
-          v-model:max-serials="options.maxSerials"
+          v-model:serials="options.serials"
           v-model:ignore-no-limit="options.ignoreNoLimit"
           v-model:ignore-no-data="options.ignoreNoData"
           :files="files"
+          :common-serials="commonSerials"
+          :serials-loading="serialsLoading"
           :loading="loading"
           :exporting="exporting"
           @analyze="onAnalyze"
@@ -43,12 +45,33 @@
           :closable="false"
           class="fc-alert"
         >
-          两个文件没有相同的序列号，仅对比 Limit（LSL/USL Diff 与标红规则仍生效）。
+          没有可对比的序列，仅对比 Limit（LSL/USL Diff 与标红规则仍生效）。
         </el-alert>
 
         <template v-if="result">
+          <!-- 视图切换：测试值对比 / Limit 对比 分离（Limit 列不再占固定列宽） -->
+          <div class="fc-view-switch">
+            <span class="fc-view-label">对比视图</span>
+            <el-radio-group v-model="viewMode" size="small">
+              <el-radio-button value="data">测试值对比</el-radio-button>
+              <el-radio-button value="limit">Limit 对比</el-radio-button>
+            </el-radio-group>
+          </div>
+
           <FileCorrelationSummary :result="result" :diff-rule="options.diffRule" />
+
+          <!-- 重型表格：ag-grid 行列双虚拟化后 DOM 很小，tab 不活跃时仅
+               v-show 隐藏（display:none 切换毫秒级），切回无需重渲染 -->
           <FileCorrelationTable
+            v-if="viewMode === 'data'"
+            v-show="active"
+            :result="result"
+            :threshold="options.threshold"
+            :diff-rule="options.diffRule"
+          />
+          <FileCorrelationLimitTable
+            v-if="viewMode === 'limit'"
+            v-show="active"
             :result="result"
             :threshold="options.threshold"
             :diff-rule="options.diffRule"
@@ -66,21 +89,25 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import FileCorrelationControls from './FileCorrelationControls.vue'
 import FileCorrelationSummary from './FileCorrelationSummary.vue'
 import FileCorrelationTable from './FileCorrelationTable.vue'
+import FileCorrelationLimitTable from './FileCorrelationLimitTable.vue'
 import { useFileCorrelation } from '../../composables/useFileCorrelation'
 import type { FileCorrelationOptions } from '../../../../types'
 
-defineProps<{
+withDefaults(defineProps<{
   files: any[]
-}>()
+  /** 当前 tab 是否活跃（不活跃时卸载重型结果表格 DOM） */
+  active?: boolean
+}>(), { active: true })
 
 const {
   loading, result, error: fcError, exporting,
-  loadFileCorrelation, exportFileCorrelation,
+  commonSerials, commonSerialsLoading: serialsLoading,
+  loadCommonSerials, loadFileCorrelation, exportFileCorrelation,
 } = useFileCorrelation()
 
 const file1 = ref<number | null>(null)
@@ -88,9 +115,22 @@ const file2 = ref<number | null>(null)
 const options = ref<FileCorrelationOptions>({
   threshold: 3,
   diffRule: 'zero',
-  maxSerials: 30,
+  serials: [],
   ignoreNoLimit: true,
   ignoreNoData: true,
+})
+/** 对比视图：data=测试值对比（默认）/ limit=Limit 对比 */
+const viewMode = ref<'data' | 'limit'>('data')
+
+// 文件对变化 → 拉取公共序列并默认选中前 10 颗（升序）
+watch([file1, file2], async ([a, b]) => {
+  if (!a || !b) {
+    commonSerials.value = []
+    options.value.serials = []
+    return
+  }
+  const list = await loadCommonSerials(a, b)
+  options.value.serials = list.slice(0, 10)
 })
 
 function onAnalyze() {
@@ -158,6 +198,19 @@ function onExport() {
 
 .fc-alert {
   border-radius: 8px;
+}
+
+.fc-view-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fc-view-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .fc-empty {

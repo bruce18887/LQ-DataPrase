@@ -188,7 +188,14 @@ export interface FileCorrelationResult {
 export interface FileCorrelationOptions {
   threshold: number
   diffRule: DiffRule
-  maxSerials: number
+  /** 用户勾选的对比序列（默认前 10 颗；空数组 = 仅对比 Limit） */
+  serials: number[]
   ignoreNoLimit: boolean
   ignoreNoData: boolean
+}
+
+/** 文件相关性对比：公共序列列表响应（序列勾选器数据源） */
+export interface FileCorrelationSerialsResponse {
+  serials: number[]
+  total: number
 }

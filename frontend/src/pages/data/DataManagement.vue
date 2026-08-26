@@ -96,7 +96,8 @@
 
       <!-- 文件对比 -->
       <div v-show="activeTab === 'compare'" role="tabpanel" class="content-section fade-in">
-        <FileCorrelationSection :files="files" />
+        <!-- active 控制重型结果表格的挂载：切走即卸载 DOM，避免切 tab 卡顿 -->
+        <FileCorrelationSection :files="files" :active="activeTab === 'compare'" />
       </div>
 
       <!-- Gage Summary -->

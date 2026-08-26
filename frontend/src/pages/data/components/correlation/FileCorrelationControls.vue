@@ -44,16 +44,17 @@
       </el-radio-group>
     </div>
 
-    <div class="fc-opt">
-      <label class="fc-opt-label">序列上限</label>
-      <el-input-number
-        :model-value="maxSerials"
-        :min="1"
-        :max="200"
-        size="small"
-        style="width: 92px"
-        @update:model-value="(v: number | undefined) => emit('update:maxSerials', v ?? 30)"
+    <div class="fc-opt fc-serial-sel">
+      <label class="fc-opt-label">对比序列（默认前 10 颗）</label>
+      <SerialSelector
+        :model-value="serials"
+        :options="commonSerials"
+        :loading="serialsLoading"
+        @update:model-value="(v: number[]) => emit('update:serials', v)"
       />
+      <span class="fc-serial-hint" :class="{ 'hint-warn': commonSerials.length > 0 && serials.length === 0 }">
+        {{ serialsHint }}
+      </span>
     </div>
 
     <div class="fc-checks">
@@ -83,7 +84,9 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import FileSelect from '../../../../components/common/FileSelect.vue'
+import SerialSelector from './SerialSelector.vue'
 import type { DiffRule } from '../../../../types'
 
 interface Props {
@@ -92,26 +95,35 @@ interface Props {
   file2: number | null
   threshold: number
   diffRule: DiffRule
-  maxSerials: number
+  serials: number[]
+  commonSerials: number[]
+  serialsLoading?: boolean
   ignoreNoLimit: boolean
   ignoreNoData: boolean
   loading?: boolean
   exporting?: boolean
 }
 
-withDefaults(defineProps<Props>(), { loading: false, exporting: false })
+const props = withDefaults(defineProps<Props>(), { loading: false, exporting: false, serialsLoading: false })
 
 const emit = defineEmits<{
   (e: 'update:file1', v: number | null): void
   (e: 'update:file2', v: number | null): void
   (e: 'update:threshold', v: number): void
   (e: 'update:diffRule', v: DiffRule): void
-  (e: 'update:maxSerials', v: number): void
+  (e: 'update:serials', v: number[]): void
   (e: 'update:ignoreNoLimit', v: boolean): void
   (e: 'update:ignoreNoData', v: boolean): void
   (e: 'analyze'): void
   (e: 'export'): void
 }>()
+
+/** 序列选择提示：已选 N / 共 M 颗（最多 200）；无公共序列 → 仅对比 Limit */
+const serialsHint = computed(() => {
+  if (!props.commonSerials.length) return '无公共序列，仅对比 Limit'
+  if (!props.serials.length) return `共 ${props.commonSerials.length} 颗，未选择（仅对比 Limit）`
+  return `已选 ${props.serials.length} / 共 ${props.commonSerials.length} 颗（最多 200）`
+})
 </script>
 
 <style scoped>
@@ -145,6 +157,20 @@ const emit = defineEmits<{
   color: var(--text-secondary);
   font-weight: 500;
   white-space: nowrap;
+}
+
+.fc-serial-sel {
+  min-width: 0;
+}
+
+.fc-serial-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.fc-serial-hint.hint-warn {
+  color: var(--color-warning);
 }
 
 .fc-checks {
