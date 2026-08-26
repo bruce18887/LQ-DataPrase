@@ -32,10 +32,16 @@ export async function startSftpServer(): Promise<SftpTestServer> {
   const script = path.resolve(__dirname, 'sftp_server.py')
   const proc = spawn(PYTHON_BIN, [script, '--root', root], { stdio: ['ignore', 'pipe', 'pipe'] })
 
+  // 启动失败/超时路径同样需要回收临时目录（stop() 只覆盖成功路径）
+  function cleanupRoot(): void {
+    try { fs.rmSync(root, { recursive: true, force: true }) } catch { /* 已删除或占锁 */ }
+  }
+
   const port = await new Promise<number>((resolve, reject) => {
     let buf = ''
     const timer = setTimeout(() => {
       proc.kill()
+      cleanupRoot()
       reject(new Error(`SFTP 服务器启动超时：${buf || '无输出'}`))
     }, 10_000)
     proc.stdout.on('data', (chunk: Buffer) => {
@@ -52,6 +58,7 @@ export async function startSftpServer(): Promise<SftpTestServer> {
     })
     proc.on('error', (err) => {
       clearTimeout(timer)
+      cleanupRoot()
       reject(err)
     })
   })
@@ -63,6 +70,8 @@ export async function startSftpServer(): Promise<SftpTestServer> {
     stop: () => {
       // Windows 下直接 spawn 的 python.exe 可用 kill() 终止
       try { proc.kill() } catch { /* 已退出 */ }
+      // mkdtempSync 创建的 root 必须成对清理，否则每次运行都在 %TEMP% 泄漏目录
+      try { fs.rmSync(root, { recursive: true, force: true }) } catch { /* 已删除或占锁 */ }
     },
   }
 }

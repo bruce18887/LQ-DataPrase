@@ -3,9 +3,15 @@
 策略（实测 CTA8280F 10000×188：35s → 2.1s，POC 见 tasks/poc_handwritten_xml.py）：
 - excelize 绑定层每值 17μs Python→C 转换是硬瓶颈（188 万值 ≈ 30s），
   StreamWriter 与普通 API 同样受限于此（绑定逐值 py_value_to_c_interface）。
-- 表头/统计区（行 1-11，调用量小）+ 样式/冻结/筛选由 excelize 生成（毫秒级）；
+- 表头/统计区（行 1-11，调用量小）+ 样式/冻结/筛选/列宽/隐藏列由 excelize 生成（毫秒级）；
 - 数据区（行 12+，万行 × 百列）绕开绑定层：手写 sheet XML（数值 <v>、
   字符串 inlineStr、样式直接带 ID）+ zip 重打包，字符串拼接无逐值 ctypes。
+
+样式（对齐用户截图默认风格，2026-08-26）：
+- 表头/统计区：白底黑字细灰边框；数据区同款白底；
+- fail 单元格（SoftBin 列 + 失败测试项）：纯红底 #FF0000 + 黑加粗；
+- 数据恰好等于上下限（未超限但贴限值）：橙底 #FFC000；
+- 每列宽度按内容自适应；hidden_columns 中的列保留数据但设为 Excel 隐藏列。
 """
 
 import io
@@ -13,7 +19,7 @@ import os
 import tempfile
 import zipfile
 from datetime import date, datetime
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Sequence, Set
 from xml.etree import ElementTree
 from xml.sax.saxutils import escape
 
@@ -22,14 +28,25 @@ import excelize
 
 from apps.analysis.services.statistics import (
     ensure_numeric, get_bin_column_name, detect_fail_data,
-    compute_cpk,
+    get_columns_with_limits, compute_cpk,
 )
+from apps.datafiles.parsers.base import SYSTEM_COLUMNS
 from .excelize_helpers import (
-    make_header_style, make_data_style, make_red_style,
+    make_plain_header_style, make_plain_data_style,
+    make_plain_red_style, make_plain_orange_style,
     to_native, save_excelize,
 )
 
 _EPOCH = datetime(1899, 12, 30)
+
+# 自适应列宽参数（Excel 默认字体 11pt Calibri 下「字符数 → 宽度单位」的近似换算）
+_WIDTH_FACTOR = 1.12
+_WIDTH_PADDING = 2.0
+_WIDTH_MIN = 8.0
+_WIDTH_MAX = 64.0
+# 数据值长度测量采样上限（超大型文件 40M+ 单元格 astype(str) 会拖慢导出；
+# 列宽取 5k 行样本已足够贴近真实内容宽度）
+_WIDTH_SAMPLE_ROWS = 5000
 
 
 def _vectorized_native_rows(df: pd.DataFrame) -> List[List]:
@@ -53,23 +70,6 @@ def _datetime_serial(v) -> float:
     return None
 
 
-def _data_rows_xml(rows: List[List], col_letters: List[str], data_start_row: int,
-                   data_style_id: int, red_style_id: int,
-                   fail_rows: Set[int]) -> str:
-    """生成数据区 <row> 元素串。fail 行整行用红样式，其余用数据样式。"""
-    out = []
-    append = out.append
-    for i, row in enumerate(rows):
-        row_num = data_start_row + i
-        sid = red_style_id if i in fail_rows else data_style_id
-        cells = [''.join((
-            f'<c r="{col_letters[col_idx]}{row_num}" s="{sid}"',
-            _cell_body(v),
-        )) for col_idx, v in enumerate(row)]
-        append(f'<row r="{row_num}">{"".join(cells)}</row>')
-    return ''.join(out)
-
-
 def _cell_body(value) -> str:
     """单元格 <c> 元素的属性与内容部分（<c r=.. s=..> 之后的剩余）。"""
     if value == '' or value is None:
@@ -85,6 +85,91 @@ def _cell_body(value) -> str:
     if isinstance(value, (datetime, date)):
         return f'><v>{_datetime_serial(value)!r}</v></c>'
     return f' t="inlineStr"><is><t>{escape(str(value))}</t></is></c>'
+
+
+def _data_rows_xml(rows: List[List], col_names: List[str], col_letters: List[str],
+                   data_start_row: int, data_style_id: int, red_style_id: int,
+                   orange_style_id: int, fail_by_pos: Dict[int, Set[str]],
+                   orange_by_pos: Dict[int, Set[str]]) -> str:
+    """生成数据区 <row> 元素串（逐格样式）。
+
+    fail 单元格（SoftBin + 失败测试项）→ 红样式；与上下限重叠的单元格 → 橙样式；
+    其余 → 数据样式。仅标 red/orange 命中格，绝不给整行染色。
+    """
+    out = []
+    append = out.append
+    for i, row in enumerate(rows):
+        row_num = data_start_row + i
+        fails = fail_by_pos.get(i)
+        oranges = orange_by_pos.get(i)
+        cells = []
+        for col_idx, v in enumerate(row):
+            if fails is not None and col_names[col_idx] in fails:
+                sid = red_style_id
+            elif oranges is not None and col_names[col_idx] in oranges:
+                sid = orange_style_id
+            else:
+                sid = data_style_id
+            cells.append(f'<c r="{col_letters[col_idx]}{row_num}" s="{sid}"' + _cell_body(v))
+        append(f'<row r="{row_num}">{"".join(cells)}</row>')
+    return ''.join(out)
+
+
+def _limit_overlap_cells(df: pd.DataFrame, metadata: Dict) -> Dict[int, Set[str]]:
+    """「数据恰好等于上下限」的单元格集合 {行位置: {列名}}（橙标目标）。
+
+    仅对带数值上下限的列比较（与 detect_fail_data 同一限值口径）；超限单元格
+    由 fail_cells 承担红标，此处只收集 =min 或 =max（与限值重叠）的单元格。
+    """
+    orange_by_pos: Dict[int, Set[str]] = {}
+    for col in get_columns_with_limits(df, metadata):
+        min_val = float(str(metadata['mins'][col]).strip())
+        max_val = float(str(metadata['maxs'][col]).strip())
+        col_data = ensure_numeric(df, col)
+        mask = (col_data == min_val) | (col_data == max_val)
+        for pos in mask.to_numpy().nonzero()[0]:
+            orange_by_pos.setdefault(int(pos), set()).add(col)
+    return orange_by_pos
+
+
+def _fail_cells_by_position(df: pd.DataFrame, fail_cells: Dict[int, List[str]]) -> Dict[int, Set[str]]:
+    """detect_fail_data 的 fail_cells（键=df.index 值）→ 键=行位置（0 起）。"""
+    return {
+        int(df.index.get_loc(idx)): set(cols)
+        for idx, cols in fail_cells.items()
+    }
+
+
+def _auto_fit_widths(df: pd.DataFrame, header_rows: Sequence[Sequence]) -> List[float]:
+    """每列自适应列宽：表头区（行 1-11 文本）与数据值的最大字符数 → 宽度。
+
+    数据值用向量化 astype(str).str.len() 测量（NaN→"nan" 为 3 字符，影响
+    上限 +3，可忽略）；头部行文本按原字符串长度。
+    """
+    n_cols = len(df.columns)
+    max_chars = [0] * n_cols
+    for row in header_rows:
+        for i in range(min(n_cols, len(row))):
+            v = row[i]
+            if v is None:
+                continue
+            s = '' if isinstance(v, float) and v != v else str(v)
+            if len(s) > max_chars[i]:
+                max_chars[i] = len(s)
+    if len(df):
+        sample = df.head(_WIDTH_SAMPLE_ROWS)
+        for i, col in enumerate(df.columns):
+            try:
+                length = sample[col].astype(str).str.len()
+                m = int(length.max()) if len(length) else 0
+                if m > max_chars[i]:
+                    max_chars[i] = m
+            except (ValueError, TypeError):
+                pass  # 列损坏时跳过该列测量，仅以表头宽度为准
+    return [
+        min(_WIDTH_MAX, max(_WIDTH_MIN, round(c * _WIDTH_FACTOR + _WIDTH_PADDING, 1)))
+        for c in max_chars
+    ]
 
 
 def _find_sheet_path(z: zipfile.ZipFile, sheet_name: str) -> str:
@@ -120,45 +205,63 @@ def _repack_xlsx(template: bytes, sheet_path: str, new_sheet_xml: str) -> bytes:
     return out.getvalue()
 
 
-def export_to_xlsx_optimized(df: pd.DataFrame, metadata: Dict) -> bytes:
+def export_to_xlsx_optimized(df: pd.DataFrame, metadata: Dict,
+                             hidden_columns: Optional[Sequence[str]] = None) -> bytes:
     f = excelize.new_file()
     try:
         sheet_name = "Data"
         sheet_index = f.new_sheet(sheet_name)
         f.set_active_sheet(sheet_index)
+        # 删除 excelize 默认 Sheet1：导出文件只保留 Data 一个 sheet
+        try:
+            f.delete_sheet("Sheet1")
+        except Exception:  # noqa: BLE001 — 无 Sheet1（异常情况）时忽略
+            pass
 
         cols = df.columns.tolist()
         num_cols = len(cols)
         last_col_name = excelize.column_number_to_name(num_cols)
 
-        # Shared styles from excelize_helpers
-        header_style_id = make_header_style(f, 12)
-        data_style_id = make_data_style(f)
-        red_style_id = make_red_style(f)
+        # Shared styles（默认风格：白底黑字细边框 + 红/橙标色）
+        header_style_id = make_plain_header_style(f)
+        data_style_id = make_plain_data_style(f)
+        red_style_id = make_plain_red_style(f)
+        orange_style_id = make_plain_orange_style(f)
 
         # ── 表头与统计区（行 1-11）：excelize 普通 API（调用量小，毫秒级）──
         f.set_sheet_row(sheet_name, "A1", cols)
+        header_rows = [cols]
         for row_idx, key in enumerate(("units", "mins", "maxs"), start=2):
             row_vals = [to_native(metadata[key].get(col, "")) for col in cols]
+            header_rows.append(row_vals)
             f.set_sheet_row(sheet_name, f"A{row_idx}", row_vals)
 
         numeric_cols = [col for col in cols if df[col].dtype in ['int64', 'float64']]
         col_positions = {col: i for i, col in enumerate(cols)}
 
+        format_type = metadata.get('format', 'CTA8290D')
+
+        # 统计行（Min/Avg/Max/Range/STD/CPK）只针对「测试项」数值列：截图语义——
+        # 记录级列（Serial_No/Part_No/SW_Bin 等 SYSTEM_COLUMNS）不参与统计，
+        # 第一列（列名标签）不被记录列统计值覆盖。
+        system_cols = SYSTEM_COLUMNS.get(format_type, [])
+        stats_cols = [c for c in numeric_cols if c not in system_cols]
+
         stats_values = {}
-        for col_name in numeric_cols:
+        for col_name in stats_cols:
             col_data = ensure_numeric(df, col_name).dropna()
             if len(col_data) > 0:
-                col_min = round(float(col_data.min()), 6)
-                col_avg = round(float(col_data.mean()), 6)
-                col_max = round(float(col_data.max()), 6)
-                col_range = round(float(col_data.max() - col_data.min()), 6)
-                col_std = round(float(col_data.std()), 6)
+                # 统计值统一保留 4 位小数（对齐截图 Min/Avg/Max/Range/STD/CPK 行）
+                col_min = round(float(col_data.min()), 4)
+                col_avg = round(float(col_data.mean()), 4)
+                col_max = round(float(col_data.max()), 4)
+                col_range = round(float(col_data.max() - col_data.min()), 4)
+                col_std = round(float(col_data.std()), 4)
 
                 try:
                     min_val = float(metadata['mins'][col_name])
                     max_val = float(metadata['maxs'][col_name])
-                    col_cpk = round(compute_cpk(col_avg, col_std, min_val, max_val)['cpk'], 6)
+                    col_cpk = round(compute_cpk(col_avg, col_std, min_val, max_val)['cpk'], 4)
                 except (ValueError, TypeError, KeyError):
                     col_cpk = 0
 
@@ -171,20 +274,32 @@ def export_to_xlsx_optimized(df: pd.DataFrame, metadata: Dict) -> bytes:
 
         for i, label in enumerate(["Min", "Avg", "Max", "Range", "STD", "CPK"]):
             row_vals = [""] * num_cols
-            row_vals[0] = label
             for pos, val in stats_values.get(label, {}).items():
                 row_vals[pos] = val
+            # 第一列恒为统计行名（截图语义），不会被任何列统计值覆盖
+            row_vals[0] = label
+            header_rows.append(row_vals)
             f.set_sheet_row(sheet_name, f"A{5 + i}", row_vals)
 
         # 样式（范围调用）：表头行 + 统计区
         f.set_cell_style(sheet_name, f"A1", f"{last_col_name}1", header_style_id)
         f.set_cell_style(sheet_name, f"A2", f"{last_col_name}11", data_style_id)
 
-        format_type = metadata.get('format', 'CTA8290D')
         target_bin_col = get_bin_column_name(format_type)
         target_bin_col_idx = cols.index(target_bin_col) + 1 if target_bin_col in cols else 1
 
-        fail_indices, fail_columns, fail_cells = detect_fail_data(df, metadata)
+        # 自适应列宽（逐列 set_col_width，毫秒级）
+        widths = _auto_fit_widths(df, header_rows)
+        for i, w in enumerate(widths):
+            letter = excelize.column_number_to_name(i + 1)
+            f.set_col_width(sheet_name, letter, letter, w)
+
+        # 默认隐藏列：列保留在文件中，仅设 Excel 隐藏属性
+        if hidden_columns:
+            for col in hidden_columns:
+                if col in cols:
+                    letter = excelize.column_number_to_name(cols.index(col) + 1)
+                    f.set_col_visible(sheet_name, letter, False)
 
         bin_col_letter = excelize.column_number_to_name(target_bin_col_idx + 1)
         f.set_panes(sheet_name, excelize.Panes(
@@ -203,10 +318,16 @@ def export_to_xlsx_optimized(df: pd.DataFrame, metadata: Dict) -> bytes:
         df_values = _vectorized_native_rows(df)
         data_start_row = 12
         col_letters = [excelize.column_number_to_name(c) for c in range(1, num_cols + 1)]
-        fail_row_indices = set(fail_cells.keys())
+
+        # fail 单元格（SoftBin + 失败测试项）→ 红；恰好等于限值 → 橙；其余白底
+        _, _, fail_cells = detect_fail_data(df, metadata)
+        fail_by_pos = _fail_cells_by_position(df, fail_cells)
+        orange_by_pos = _limit_overlap_cells(df, metadata)
+
         data_xml = _data_rows_xml(
-            df_values, col_letters, data_start_row,
-            data_style_id, red_style_id, fail_row_indices,
+            df_values, cols, col_letters, data_start_row,
+            data_style_id, red_style_id, orange_style_id,
+            fail_by_pos, orange_by_pos,
         )
 
         with zipfile.ZipFile(io.BytesIO(template)) as z:

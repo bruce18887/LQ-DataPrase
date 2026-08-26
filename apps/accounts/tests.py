@@ -419,3 +419,35 @@ class UserSettingsApiTests(APITestCase):
         resp = self.client.put(
             self.url, {'chart_renderer': 'webgl'}, format='json')
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_get_settings_returns_default_hidden_columns(self):
+        """未设置时 GET 返回默认 8 列（导出/查看数据共用的默认隐藏列）。"""
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            resp.data['default_hidden_columns'],
+            ['Part_No', 'Dut_Pass', 'X_COORD', 'Y_COORD', 'QR_Code',
+             'Start_T', 'Alarm', 'Data_Cnt'],
+        )
+
+    def test_put_updates_default_hidden_columns_and_round_trips(self):
+        resp = self.client.put(
+            self.url,
+            {'default_hidden_columns': ['X_COORD', 'Y_COORD']},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.data['default_hidden_columns'], ['X_COORD', 'Y_COORD'])
+        # 恢复默认，避免污染其它测试
+        self.client.put(self.url, {'default_hidden_columns': []}, format='json')
+
+    def test_put_default_hidden_columns_nested_elements_returns_400(self):
+        resp = self.client.put(
+            self.url, {'default_hidden_columns': ['X_COORD', 42]}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_put_default_hidden_columns_non_list_returns_400(self):
+        resp = self.client.put(
+            self.url, {'default_hidden_columns': 'X_COORD'}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)

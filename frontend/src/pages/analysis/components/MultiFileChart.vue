@@ -38,6 +38,11 @@ function buildOption() {
   const r = props.lotData
   if (!r || !Array.isArray(r.lot_data) || r.lot_data.length === 0) return {}
   const tc = colors.value.textColor
+  // 轴辅助色（2026-08-26 夜晚可视度修复）：light 保持直方图基准常量，
+  // night 提亮——#1E88E5 在深底对比度不足
+  const AXIS = isDark.value
+    ? { left: '#64B5F6', normal: '#FFA726' }
+    : { left: '#1E88E5', normal: '#F57F17' }
   const lots: any[] = r.lot_data
   const showLimit = props.chartConfig.includes('limit')
   const showNormal = props.chartConfig.includes('normal')
@@ -167,18 +172,16 @@ function buildOption() {
     : (lots[0]?.bar_data?.[1]?.[0] != null ? lots[0].bar_data[1][0] - lots[0].bar_data[0][0] : 0)
   const axisPad = getBarGroupPad(lots.length, binGap, effectiveBarWidth)
 
-  // 构建Y轴配置
-  // 左/右轴色固定十六进制常量（与直方图一致；variables.css 未定义 --color-primary，
-  // 原 CSS 变量写法恒取回退值，直方图基准下统一为常量）
+  // 构建Y轴配置（左/右轴色与直方图同源：light 常量 / night 提亮，2026-08-26）
   const yAxisConfig: any[] = [
     {
       type: 'value',
       name: '百分比 (%)',
-      nameTextStyle: { color: '#1E88E5', fontWeight: 'bold' },
+      nameTextStyle: { color: AXIS.left, fontWeight: 'bold' },
       position: 'left',
       min: 0,
-      axisLabel: { formatter: '{value}%', color: '#1E88E5' },
-      axisLine: { show: true, lineStyle: { color: '#1E88E5' } },
+      axisLabel: { formatter: '{value}%', color: AXIS.left },
+      axisLine: { show: true, lineStyle: { color: AXIS.left } },
     },
   ]
 
@@ -187,11 +190,11 @@ function buildOption() {
     yAxisConfig.push({
       type: 'value',
       name: '概率密度',
-      nameTextStyle: { color: '#F57F17', fontWeight: 'bold' },
+      nameTextStyle: { color: AXIS.normal, fontWeight: 'bold' },
       position: 'right',
       min: 0,
-      axisLabel: { formatter: (v: number) => v.toExponential(2), color: '#F57F17' },
-      axisLine: { show: true, lineStyle: { color: '#F57F17' } },
+      axisLabel: { formatter: (v: number) => v.toExponential(2), color: AXIS.normal },
+      axisLine: { show: true, lineStyle: { color: AXIS.normal } },
       splitLine: { show: false },
     })
   }

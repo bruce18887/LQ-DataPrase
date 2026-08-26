@@ -160,8 +160,9 @@ npm run electron:build:ts --prefix frontend
 # 3. PyInstaller 打包后端
 npm run pyinstaller
 
-# 4. Electron Builder 打包桌面应用
-npx electron-builder --config electron-builder.yml --win
+# 4. Electron Builder 打包桌面应用（electron/electron-builder 依赖在
+#    frontend/node_modules 中，由 scripts\electron-builder.cmd 统一解析）
+scripts\electron-builder.cmd --win
 ```
 
 ### 打包架构说明

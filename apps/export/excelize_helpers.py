@@ -17,6 +17,12 @@ COLOR_ORIGINAL_LIMIT = "D6EAF8"
 COLOR_SIGMA_TIGHT = "F5B7B1"
 COLOR_SIGMA_NOT_TIGHT = "FCF3CF"
 
+# ── 「导出数据」默认风格调色板（截图对齐：白底黑字、纯红/亮橙底）──
+COLOR_PLAIN_BORDER = "D4D4D4"   # 细灰边框（Excel 默认网格线观感）
+COLOR_PLAIN_FONT = "000000"     # 数据/表头黑字
+COLOR_PLAIN_RED_FILL = "FF0000" # fail 单元格红底（截图纯红）
+COLOR_PLAIN_ORANGE_FILL = "FFC000"  # 数据与上下限重叠 → 橙底
+
 # CPK color fills
 CPK_A_FILL = ["4CAF50"]   # green — CPK >= 1.67
 CPK_B_FILL = ["8BC34A"]   # light green — CPK >= 1.33
@@ -135,10 +141,55 @@ def make_template_red_style(f, num_fmt=None):
     ))
 
 
+# ── 数据导出（to_excel）默认风格：白底黑字 + 细灰边框，对齐用户截图 ──
+
+def make_plain_header_style(f, font_size=11):
+    """默认风格表头：白底、黑加粗、细灰边框、居中。"""
+    return f.new_style(excelize.Style(
+        font=excelize.Font(bold=True, size=float(font_size), color=COLOR_PLAIN_FONT, family="Calibri"),
+        border=plain_thin_border(),
+        alignment=excelize.Alignment(horizontal="center", vertical="center"),
+    ))
+
+
+def make_plain_data_style(f, font_size=11):
+    """默认风格数据格：白底、黑字、细灰边框、居中。"""
+    return f.new_style(excelize.Style(
+        font=excelize.Font(size=float(font_size), color=COLOR_PLAIN_FONT, family="Calibri"),
+        border=plain_thin_border(),
+        alignment=excelize.Alignment(horizontal="center", vertical="center"),
+    ))
+
+
+def make_plain_red_style(f, font_size=11):
+    """默认风格 Fail 格：纯红底（FF0000）、黑加粗字、细灰边框（截图样式）。"""
+    return f.new_style(excelize.Style(
+        font=excelize.Font(bold=True, size=float(font_size), color=COLOR_PLAIN_FONT, family="Calibri"),
+        fill=excelize.Fill(type="pattern", color=[COLOR_PLAIN_RED_FILL], pattern=1),
+        border=plain_thin_border(),
+        alignment=excelize.Alignment(horizontal="center", vertical="center"),
+    ))
+
+
+def make_plain_orange_style(f, font_size=11):
+    """默认风格「与上下限重叠」格：橙底（FFC000）、黑字、细灰边框。"""
+    return f.new_style(excelize.Style(
+        font=excelize.Font(size=float(font_size), color=COLOR_PLAIN_FONT, family="Calibri"),
+        fill=excelize.Fill(type="pattern", color=[COLOR_PLAIN_ORANGE_FILL], pattern=1),
+        border=plain_thin_border(),
+        alignment=excelize.Alignment(horizontal="center", vertical="center"),
+    ))
+
+
 # ── Border Factories ──
 
 def thin_border(color=COLOR_BORDER):
     """Return a list of 4 thin borders (left/top/bottom/right) for reuse."""
+    return [excelize.Border(type=t, color=color, style=1) for t in ("left", "top", "bottom", "right")]
+
+
+def plain_thin_border(color=COLOR_PLAIN_BORDER):
+    """默认风格细边框（浅灰，Excel 默认网格线观感）。"""
     return [excelize.Border(type=t, color=color, style=1) for t in ("left", "top", "bottom", "right")]
 
 

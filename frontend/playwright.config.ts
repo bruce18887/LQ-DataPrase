@@ -122,7 +122,9 @@ export default defineConfig({
           command: `"${PYTHON_BIN}" manage.py runserver ${BACKEND_PORT} --noreload`,
           cwd: PROJECT_ROOT,
           url: `${BACKEND_URL}/api/schema/`,
-          reuseExistingServer: true,
+          // 本地允许复用（UI 模式/手动 dev 场景），CI 必须强制自起自收
+          // （lessons R3：复用旧代码进程 → e2e 结果无效）
+          reuseExistingServer: !process.env.CI,
           timeout: 120_000,
           stdout: 'pipe',
           stderr: 'pipe',
@@ -139,7 +141,7 @@ export default defineConfig({
           command: 'npm run dev',
           cwd: __dirname,
           url: FRONTEND_URL,
-          reuseExistingServer: true,
+          reuseExistingServer: !process.env.CI,
           timeout: 120_000,
           stdout: 'pipe',
           stderr: 'pipe',

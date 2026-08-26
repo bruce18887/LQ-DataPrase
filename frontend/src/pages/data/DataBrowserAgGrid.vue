@@ -44,6 +44,7 @@
         <ag-grid-vue
           v-else
           :class="['ag-theme-quartz', isDark ? 'ag-theme-quartz-dark' : '', 'ag-custom-theme']"
+          :theme="'legacy'"
           :style="{ height: `${tableHeight}px`, width: '100%', contain: 'layout style' }"
           :columnDefs="columnDefs"
           :rowModelType="'infinite'"
@@ -96,6 +97,7 @@ import { AgGridVue } from 'ag-grid-vue3'
 import { ElMessage } from 'element-plus'
 import api from '../../api'
 import { datafilesApi } from '../../api/datafiles'
+import { authApi } from '../../api/auth'
 import { useThemeStore } from '../../stores/theme'
 import { useFilesStore } from '../../stores/files'
 import DataBrowserToolbar from './components/browser/DataBrowserToolbar.vue'
@@ -189,6 +191,20 @@ function onGridContextMenu(e: MouseEvent) {
 // SITE_CHECK 是测试项，却以 device_/site_ 开头，2026-08-25 曾被误判前置）。
 const systemCols = ref<string[]>([])
 
+// 默认隐藏列（系统设置 → 表格设置）：命中列 hide=true，列仍存在，用户可通过
+// ag-grid 表头列菜单重新显示；与导出 Excel 的隐藏列共用同一份设置。
+const defaultHiddenCols = ref<string[]>([])
+onMounted(async () => {
+  try {
+    const { data } = await authApi.getSettings()
+    defaultHiddenCols.value = Array.isArray(data?.default_hidden_columns)
+      ? data.default_hidden_columns
+      : []
+  } catch {
+    // 设置加载失败：保持全部可见（静默降级）
+  }
+})
+
 function isSystemCol(name: string): boolean {
   return systemCols.value.includes(name)
 }
@@ -257,6 +273,11 @@ const columnDefs = computed<any[]>(() => {
       // 服务端列过滤（方案 A）：数值列挂 number filter（等/不等/大于/小于/区间），
       // 其余挂 text filter（包含/开头/结尾）——IRM 下 filter 类型必须显式指定
       filter: numericColumns.value.includes(col) ? 'agNumberColumnFilter' : 'agTextColumnFilter',
+    }
+
+    // 默认隐藏列（系统设置）：列仍解析/保留，仅默认不可见（列菜单可重新显示）
+    if (defaultHiddenCols.value.includes(col)) {
+      colDef.hide = true
     }
 
     if (pinnedCol.value && col === pinnedCol.value) {

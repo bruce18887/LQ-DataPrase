@@ -9,8 +9,6 @@
     "dist:win": "node scripts/patch-nsis-template.js && cross-env VITE_ELECTRON=true ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ npm run build --prefix frontend && npm run electron:build:ts --prefix frontend && npm run pyinstaller && scripts\\electron-builder.cmd --win"
   },
   "devDependencies": {
-    "cross-env": "^7.0.3",
-    "electron": "^33.4.11",
-    "electron-builder": "^25.1.8"
+    "cross-env": "^7.0.3"
   }
 }

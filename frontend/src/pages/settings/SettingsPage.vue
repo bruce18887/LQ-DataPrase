@@ -54,6 +54,7 @@ import RecentFilesSettings from './components/RecentFilesSettings.vue'
 import ExportTemplateSettings from './components/ExportTemplateSettings.vue'
 import ExportTimeoutSettings from './components/ExportTimeoutSettings.vue'
 import { setExportTimeoutSec } from '../../utils/exportTimeout'
+import { DEFAULT_HIDDEN_COLUMNS } from '../../constants/hidden-columns'
 
 function defaultTemplates(): Record<ExportTypeKey, string> {
   const result = {} as Record<ExportTypeKey, string>
@@ -79,6 +80,7 @@ const defaults: SettingsData = {
   histogram_label_offset: 4,
   export_filename_templates: defaultTemplates(),
   export_timeout: 600,
+  default_hidden_columns: [...DEFAULT_HIDDEN_COLUMNS],
 }
 
 const activeTab = ref('display')

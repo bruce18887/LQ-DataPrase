@@ -6,6 +6,7 @@
 import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { initEchartsWhenReady, type EchartsHandle } from '../../../../utils/echarts-init'
 import { useThemeStore } from '../../../../stores/theme'
+import { useEChartsTheme } from '../../../../utils/echarts-theme'
 
 const props = defineProps<{
   binDistribution: any[]
@@ -15,17 +16,21 @@ const chartRef = ref<HTMLElement>()
 let handle: EchartsHandle | null = null
 
 const themeStore = useThemeStore()
+const { colors } = useEChartsTheme()
 
 function buildOption() {
+  // 注意：ECharts/zrender 不解析 CSS 变量，'var(--text-primary)' 会回退默认深色
+  //（夜晚不可读）——必须用 useEChartsTheme 的实时色值（2026-08-26 修复）
+  const tc = colors.value.textColor
   return {
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { orient: 'vertical', left: 'left', type: 'scroll', textStyle: { color: 'var(--text-primary)' } },
+    legend: { orient: 'vertical', left: 'left', type: 'scroll', textStyle: { color: tc } },
     series: [{
       type: 'pie',
       radius: ['35%', '70%'],
       center: ['60%', '50%'],
       data: props.binDistribution,
-      label: { formatter: '{b}\n{d}%', color: 'var(--text-primary)' },
+      label: { formatter: '{b}\n{d}%', color: tc },
     }],
   }
 }

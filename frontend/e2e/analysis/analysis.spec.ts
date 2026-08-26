@@ -184,7 +184,9 @@ test.describe('@p1 默认配置', { tag: ['@p1', '@analysis'] }, () => {
 })
 
 test.describe('@p1 各分析 Tab 可达', { tag: ['@p1', '@analysis'] }, () => {
-  const TABS = ['晶圆图', '箱线图', '多文件分析', '相关性对比']
+  // 注意：UI 已改版——箱线图不再是独立 tab，而是「单文件分析」tab 内的
+  // 复选框（显示箱线图），2026-08-26 从 TABS 移除（此前该用例稳定失败）
+  const TABS = ['晶圆图', '多文件分析', '相关性对比']
 
   for (const name of TABS) {
     test(`切换到「${name}」Tab 内容正常渲染`, async ({ page }) => {
@@ -455,9 +457,9 @@ test.describe('@p2 单 SITE 直方图图例（§2 回归）', { tag: ['@p2', '@a
     await waitLoadingGone(page.locator(SINGLE))
     await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
 
-    // ECharts 会在内部把 legend 渲染成 <text> 元素（可能挂在外层容器或
-    // 自身的 svg 节点上）。整体查询 `${SINGLE} text` 拿全部文本。
-    const legendTexts = await page.locator(`${SINGLE} text`).allInnerTexts()
+    // ECharts 会把 legend 渲染成 SVG <text> 元素。⚠️ 必须用 allTextContents()
+    // 而非 allInnerTexts()：SVG 元素的 innerText 恒为空字符串（8/26 教训）。
+    const legendTexts = await page.locator(`${SINGLE} text`).allTextContents()
     const flat = legendTexts.join(' | ')
 
     // 必须出现「Site4」（fixture 是 QA2 阶段只跑 Site 4）
@@ -477,7 +479,7 @@ test.describe('@p2 单 SITE 直方图图例（§2 回归）', { tag: ['@p2', '@a
     await waitLoadingGone(page.locator(SINGLE))
     await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
 
-    const legendTexts = await page.locator(`${SINGLE} text`).allInnerTexts()
+    const legendTexts = await page.locator(`${SINGLE} text`).allTextContents()
     const flat = legendTexts.join(' | ')
     expect(flat).toMatch(/Site1/)
     expect(flat).not.toMatch(/数据分布/)

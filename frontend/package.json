@@ -12,7 +12,7 @@
     "preview": "vite preview",
     "electron:build:ts": "tsc -p ../electron/tsconfig.json && node -e \"require('fs').writeFileSync('electron-dist/package.json', JSON.stringify({type:'commonjs'}, null, 2))\"",
     "electron:dev": "npm run electron:build:ts && concurrently -k -n vite,electron -c blue,yellow \"vite\" \"wait-on http://localhost:3000 && cross-env ELECTRON_DEV=true electron .\"",
-    "electron:build": "cross-env VITE_ELECTRON=true npm run build && npm run electron:build:ts && cd .. && build.bat && electron-builder --config electron-builder.yml",
+    "electron:build": "cross-env VITE_ELECTRON=true npm run build && npm run electron:build:ts && cd .. && build.bat && scripts\\electron-builder.cmd --win",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",

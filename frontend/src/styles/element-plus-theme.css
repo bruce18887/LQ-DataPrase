@@ -31,7 +31,9 @@
   --el-color-primary-light-5: #fcc673;
   --el-color-primary-light-7: #fdd594;
   --el-color-primary-light-8: #fee4a5;
-  --el-color-primary-light-9: #fef2d2;
+  /* light-9 在 night 下改为深色微透明底：EP 的 el-alert/el-tag 等组件背景取
+     light-9，浅粉/浅黄块在深底上像"穿帮"（2026-08-26 主题体检修复） */
+  --el-color-primary-light-9: rgba(249, 168, 37, 0.12);
   --el-color-primary-dark-2: #c78620;
 
   /* ========== 语义色 ========== */
@@ -40,35 +42,35 @@
   --el-color-success-light-5: #5fbdb5;
   --el-color-success-light-7: #81cbc4;
   --el-color-success-light-8: #92d5cf;
-  --el-color-success-light-9: #c9eae7;
+  --el-color-success-light-9: rgba(17, 153, 142, 0.15);
 
   --el-color-warning: #f9a825;
   --el-color-warning-light-3: #fbb752;
   --el-color-warning-light-5: #fcc673;
   --el-color-warning-light-7: #fdd594;
   --el-color-warning-light-8: #fee4a5;
-  --el-color-warning-light-9: #fef2d2;
+  --el-color-warning-light-9: rgba(249, 168, 37, 0.12);
 
   --el-color-danger: #f5576c;
   --el-color-danger-light-3: #f77889;
   --el-color-danger-light-5: #f999a6;
   --el-color-danger-light-7: #fbbac3;
   --el-color-danger-light-8: #fdcbd1;
-  --el-color-danger-light-9: #fee5e8;
+  --el-color-danger-light-9: rgba(245, 87, 108, 0.15);
 
   --el-color-error: #f5576c;
   --el-color-error-light-3: #f77889;
   --el-color-error-light-5: #f999a6;
   --el-color-error-light-7: #fbbac3;
   --el-color-error-light-8: #fdcbd1;
-  --el-color-error-light-9: #fee5e8;
+  --el-color-error-light-9: rgba(245, 87, 108, 0.15);
 
   --el-color-info: #4facfe;
   --el-color-info-light-3: #72bdfe;
   --el-color-info-light-5: #8ccbfe;
   --el-color-info-light-7: #a5d9fe;
   --el-color-info-light-8: #b4e1ff;
-  --el-color-info-light-9: #d9f0ff;
+  --el-color-info-light-9: rgba(79, 172, 254, 0.15);
 
   /* ========== 背景色 ========== */
   --el-bg-color: #16213e;

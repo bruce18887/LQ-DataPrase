@@ -18,12 +18,12 @@
  *  2. extractAppPackage.nsh: `CopyFiles /SILENT` -> `CopyFiles`
  *     (drop the /SILENT flag so each copied file produces a "Copy: ..." line)
  *
- * The templates live in node_modules and are wiped by `npm install`, so this
- * patch is re-applied at the start of every packaging run (see package.json
- * `dist:win`). Idempotent: skips if the new patch is already present;
- * upgrades the v1 patch (lastused) if found. Fails loudly if the expected
- * template text is not found, so an electron-builder upgrade that changes the
- * template cannot silently disable the patch.
+ * The templates live in frontend/node_modules and are wiped by `npm install`,
+ * so this patch is re-applied at the start of every packaging run (see
+ * package.json `dist:win`). Idempotent: skips if the new patch is already
+ * present; upgrades the v1 patch (lastused) if found. Fails loudly if the
+ * expected template text is not found, so an electron-builder upgrade that
+ * changes the template cannot silently disable the patch.
  */
 const fs = require('fs')
 const path = require('path')
@@ -31,9 +31,12 @@ const path = require('path')
 const MARKER = '; [LQ-DataPrase patch]'
 const V1_MARKER = 'SetDetailsPrint lastused ; [LQ-DataPrase patch]'
 
+// electron-builder 只安装在 frontend/node_modules（仓库根无独立依赖），
+// 模板路径随之指向 frontend。
 const INSTALL_SECTION = path.join(
   __dirname,
   '..',
+  'frontend',
   'node_modules',
   'app-builder-lib',
   'templates',
@@ -44,6 +47,7 @@ const INSTALL_SECTION = path.join(
 const EXTRACT_PACKAGE = path.join(
   __dirname,
   '..',
+  'frontend',
   'node_modules',
   'app-builder-lib',
   'templates',

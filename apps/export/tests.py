@@ -22,7 +22,7 @@ from rest_framework.test import APITestCase
 
 from apps.datafiles.models import DataFile
 from apps.datafiles.parsers import get_parser
-from apps.analysis.services.statistics import detect_fail_data
+from apps.analysis.services.statistics import detect_fail_data, get_bin_column_name
 from apps.export.export_xlsx_optimized import (
     export_to_xlsx_optimized, _vectorized_native_rows,
 )
@@ -40,6 +40,11 @@ GAGE_S1_PATH = os.path.join(SAMPLE_DATA_DIR, 'Gage', 'gage_m_S1.csv')
 
 def _empty_metadata():
     return {'units': {}, 'mins': {}, 'maxs': {}, 'format': 'CTA8290D'}
+
+
+def _assert_plain_cell(cell, msg=''):
+    """默认风格单元格 = 无实底填充（excelize 白底=不写 fill，openpyxl 读为 patternType None）。"""
+    assert cell.fill.patternType is None, f'{msg} 应为无填充（白底），实际 {cell.fill.patternType}'
 
 
 @unittest.skipUnless(
@@ -68,13 +73,27 @@ class ToExcelLargeFileTests(TestCase):
         self.assertLess(self.export_time, 30, f'大文件导出耗时 {self.export_time:.1f}s，超过 30s 预算')
 
     def test_export_fail_rows_highlighted(self):
-        """fail 行整行标红、非 fail 行保持默认背景。"""
+        """fail 行仅 SoftBin 列 + 失败测试项标红；其余单元格（含 Dut_Pass）不红。"""
         ws = self._load_ws()
         data_start_row = 12
-        for data_idx in list(self.fail_indices)[:5]:
-            fill = ws.cell(data_start_row + data_idx, 2).fill
-            self.assertEqual(fill.patternType, 'solid', 'fail 行应有实底填充')
-            self.assertEqual(fill.start_color.rgb.upper(), 'FFF5B7B1', 'fail 行应为红底')
+        _, _, fail_cells = detect_fail_data(self.df, self.metadata)
+        bin_col = get_bin_column_name(self.metadata.get('format', 'CTA8290D'))
+        col_letters = {}
+        for i, c in enumerate(self.df.columns):
+            col_letters[c] = openpyxl.utils.get_column_letter(i + 1)
+        for data_idx in list(fail_cells.keys())[:5]:
+            row = data_start_row + data_idx
+            for col in fail_cells[data_idx]:
+                cell = ws[f"{col_letters[col]}{row}"]
+                self.assertEqual(cell.fill.patternType, 'solid', f'{col} fail 格应有实底填充')
+                self.assertEqual(cell.fill.start_color.rgb.upper(), 'FFFF0000', f'{col} fail 格应为纯红底')
+            # 非失败测试项 / 记录列不红：Serial_No（第 1 列）与 Dut_Pass 恒不红
+            _assert_plain_cell(ws.cell(row, 1), '记录列 Serial_No 不应标红')
+            pass_col = next((c for c in self.df.columns if 'pass' in c.lower()), None)
+            if pass_col:
+                _assert_plain_cell(
+                    ws[f"{col_letters[pass_col]}{row}"], 'Dut_Pass 列不应标红',
+                )
 
     def test_export_data_integrity(self):
         """导出行数与列数、表头正确。"""
@@ -84,19 +103,78 @@ class ToExcelLargeFileTests(TestCase):
         self.assertEqual(ws.cell(1, 1).value, self.df.columns[0], '表头应为第一列名')
 
     def test_export_style_completeness(self):
-        """样式完整性：header 深色、统计区/数据区浅灰、冻结与筛选。"""
+        """样式完整性（默认风格）：表头/统计区/数据区白底黑字、冻结与筛选。"""
         ws = self._load_ws()
-        self.assertEqual(ws.cell(1, 1).fill.start_color.rgb.upper(), 'FF2C3E50', '表头深色底')
-        self.assertEqual(ws.cell(5, 1).fill.start_color.rgb.upper(), 'FFF8F9FA', '统计区浅灰底')
+        _assert_plain_cell(ws.cell(1, 1), '表头白底')
+        self.assertTrue(ws.cell(1, 1).font.bold, '表头加粗')
+        self.assertEqual(ws.cell(1, 1).font.color.rgb.upper(), 'FF000000', '表头黑字')
+        _assert_plain_cell(ws.cell(5, 1), '统计区白底')
         # 数据区取第一个非 fail 行（fail 行会被红样式覆盖）
         fail_set = set(self.fail_indices)
         non_fail = next(r for r in range(100) if r not in fail_set)
-        self.assertEqual(
-            ws.cell(12 + non_fail, 1).fill.start_color.rgb.upper(), 'FFF8F9FA',
-            '非 fail 数据行应为浅灰底',
-        )
+        _assert_plain_cell(ws.cell(12 + non_fail, 1), '非 fail 数据行应为白底')
         self.assertIsNotNone(ws.freeze_panes, '应存在冻结窗格')
         self.assertIsNotNone(ws.auto_filter.ref, '应存在自动筛选')
+
+    def test_export_column_widths_autofit(self):
+        """每列宽度按内容自适应（表头 9 字符的列宽应 > 默认 8.43）。"""
+        ws = self._load_ws()
+        first_col = self.df.columns[0]
+        width = ws.column_dimensions['A'].width
+        self.assertIsNotNone(width, '第一列应设置自适应宽度')
+        self.assertGreater(width, len(first_col) + 1, '列宽应超过表头文本字符数')
+        # 最宽的数据列（数值列宽于表头）也应被撑开
+        numeric = [c for c in self.df.columns if self.df[c].dtype in ('int64', 'float64')]
+        if numeric:
+            idx = list(self.df.columns).index(numeric[0]) + 1
+            letter = openpyxl.utils.get_column_letter(idx)
+            self.assertGreater(ws.column_dimensions[letter].width or 0, 6)
+
+    def test_export_hidden_columns_preserved(self):
+        """hidden_columns 参数：列保留在文件中但设为 Excel 隐藏列。"""
+        hidden = [self.df.columns[1]]
+        buf = export_to_xlsx_optimized(self.df, self.metadata, hidden_columns=hidden)
+        ws = openpyxl.load_workbook(io.BytesIO(buf))['Data']
+        letter = openpyxl.utils.get_column_letter(2)
+        self.assertTrue(ws.column_dimensions[letter].hidden, '指定列应为 Excel 隐藏列')
+        self.assertEqual(ws.max_column, len(self.df.columns), '隐藏列数据仍应保留')
+        self.assertIsNotNone(ws.cell(12, 2).value, '隐藏列数据仍应存在')
+
+    def test_export_single_sheet_no_default_sheet1(self):
+        """导出工作簿只含 Data 一个 sheet（excelize 默认 Sheet1 必须删除）。"""
+        wb = openpyxl.load_workbook(io.BytesIO(self.buf))
+        self.assertEqual(wb.sheetnames, ['Data'], f'仅应有一个 Data sheet，实际 {wb.sheetnames}')
+
+    def test_export_stats_rows_labels_and_rounding(self):
+        """统计行第一列显示 Min/Avg/... 标签；记录列无统计；统计值保留 4 位小数。"""
+        from apps.datafiles.parsers.base import SYSTEM_COLUMNS
+        ws = self._load_ws()
+        labels = [ws.cell(5 + i, 1).value for i in range(6)]
+        self.assertEqual(labels, ['Min', 'Avg', 'Max', 'Range', 'STD', 'CPK'],
+                         '统计行第一列应为 Min/Avg/Max/Range/STD/CPK 标签')
+        # 记录级列（第 1 列 Index_No 等）不参与统计 → 统计区单元格为空
+        # （第 1 列为统计行标签 Min/Avg/...，为设计内内容，跳过）
+        sys_cols = SYSTEM_COLUMNS.get(self.metadata.get('format', 'CTA8290D'), [])
+        for i, col in enumerate(self.df.columns):
+            if col in sys_cols and self.df[col].dtype in ('int64', 'float64'):
+                if i == 0:
+                    continue
+                for r in range(5, 11):
+                    v = ws.cell(r, i + 1).value
+                    self.assertIn(v, (None, ''), f'记录列 {col} 不应有统计值')
+        # 测试项统计值保留 4 位小数
+        test_numeric = next(
+            c for c in self.df.columns
+            if self.df[c].dtype in ('int64', 'float64') and c not in sys_cols
+        )
+        pos = list(self.df.columns).index(test_numeric) + 1
+        for r in range(5, 11):
+            v = ws.cell(r, pos).value
+            if isinstance(v, (int, float)):
+                self.assertEqual(
+                    round(float(v), 4), float(v),
+                    f'{test_numeric} {ws.cell(r, 1).value} 统计值应保留 4 位小数，实际 {v}',
+                )
 
 
 @unittest.skipUnless(
@@ -124,12 +202,50 @@ class ToExcelEdgeCaseTests(TestCase):
         self.assertIsNone(ws.cell(14, 1).value, '空字符串应导出为空单元格')
 
     def test_all_fail_rows_red(self):
-        """全 fail 小 df：所有数据行标红。"""
+        """全 fail 小 df：SW_Bin 格标红（无限值测试列 → 仅 bin 格红），数据格白底。"""
         df = pd.DataFrame({'V1': [1.0, 2.0, 3.0], 'SW_Bin': [5, 6, 7]})
         buf = export_to_xlsx_optimized(df, _empty_metadata())
         ws = openpyxl.load_workbook(io.BytesIO(buf))['Data']
         for r in (12, 13, 14):
-            self.assertEqual(ws.cell(r, 1).fill.start_color.rgb.upper(), 'FFF5B7B1')
+            self.assertEqual(ws.cell(r, 2).fill.start_color.rgb.upper(), 'FFFF0000', 'bin 格应纯红底')
+            _assert_plain_cell(ws.cell(r, 1), '无 fail 的数据格保持白底')
+
+    def test_fail_cells_scoped_to_bin_and_test_items(self):
+        """标红仅限 SoftBin + 失败测试项；Dut_Pass/其它列不标红（用户截图语义）。"""
+        df = pd.DataFrame({
+            'Serial_No': [1, 2],
+            'Dut_Pass': [True, False],
+            'V1': [1.0, 5.0],   # 限 0-2 → 第 2 行越限
+            'V2': [1.5, 1.5],   # 正常
+            'SW_Bin': [1, 9],
+        })
+        metadata = {
+            'units': {},
+            'mins': {'V1': '0', 'V2': '0'},
+            'maxs': {'V1': '2', 'V2': '2'},
+            'format': 'CTA8290D',
+        }
+        buf = export_to_xlsx_optimized(df, metadata)
+        ws = openpyxl.load_workbook(io.BytesIO(buf))['Data']
+        # 第 13 行（fail）：SW_Bin(5) 与 V1(3) 红；Serial_No(1)/Dut_Pass(2)/V2(4) 不红
+        self.assertEqual(ws.cell(13, 5).fill.start_color.rgb.upper(), 'FFFF0000')
+        self.assertEqual(ws.cell(13, 3).fill.start_color.rgb.upper(), 'FFFF0000')
+        _assert_plain_cell(ws.cell(13, 1), 'Serial_No 不标红')
+        _assert_plain_cell(ws.cell(13, 2), 'Dut_Pass 不标红')
+        _assert_plain_cell(ws.cell(13, 4), '未失败测试项不标红')
+        # 第 12 行（pass）：无红
+        _assert_plain_cell(ws.cell(12, 5))
+
+    def test_orange_on_limit_overlap(self):
+        """数据恰好等于上/下限 → 橙底；超限 → 红；其余白底。"""
+        df = pd.DataFrame({'V': [1.0, 1.5, 2.0, 2.5], 'SW_Bin': [1, 1, 1, 3]})
+        metadata = {'units': {}, 'mins': {'V': '1'}, 'maxs': {'V': '2'}, 'format': 'CTA8290D'}
+        buf = export_to_xlsx_optimized(df, metadata)
+        ws = openpyxl.load_workbook(io.BytesIO(buf))['Data']
+        self.assertEqual(ws.cell(12, 1).fill.start_color.rgb.upper(), 'FFFFC000', '== Min → 橙底')
+        _assert_plain_cell(ws.cell(13, 1), '区间内 → 白底')
+        self.assertEqual(ws.cell(14, 1).fill.start_color.rgb.upper(), 'FFFFC000', '== Max → 橙底')
+        self.assertEqual(ws.cell(15, 1).fill.start_color.rgb.upper(), 'FFFF0000', '> Max → 红底')
 
     def test_vectorized_native_equiv(self):
         """_vectorized_native_rows 与逐值 _convert_to_native_type 逐格等价。"""
