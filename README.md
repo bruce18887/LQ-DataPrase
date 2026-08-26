@@ -161,7 +161,9 @@ npm run electron:build:ts --prefix frontend
 npm run pyinstaller
 
 # 4. Electron Builder 打包桌面应用（electron/electron-builder 依赖在
-#    frontend/node_modules 中，由 scripts\electron-builder.cmd 统一解析）
+#    frontend/node_modules 中，由 scripts\electron-builder.cmd 统一解析；
+#    打包资源 build/icon.ico 由 scripts/gen-icon.ico.js 自动生成，
+#    卸载询问脚本为 scripts/installer.nsh）
 scripts\electron-builder.cmd --win
 ```
 

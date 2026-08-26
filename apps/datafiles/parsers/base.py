@@ -106,6 +106,28 @@ class BaseATEParser(ABC):
             series = series.astype(str).apply(self.fix_negative_decimal)
         return pd.to_numeric(series, errors='coerce')
 
+    # ETS88 等格式在数据区块之后还会跟几行尾部元数据（如
+    # ``Data Collection Start Date,<时间戳>`` / ``Data Collection Stop  Date,<时间戳>``）。
+    # 这些行只有少量字段，会被 pd.read_csv(skiprows=...) 读成一行全 NaN 的假数据行；
+    # 在 ag-grid 里显示在表格末尾，且 Bin=NaN != 1 被误计为 FAIL → 读取后立即丢弃。
+    TAIL_META_PATTERN = re.compile(
+        r'^\s*Data Collection (Start|Stop)\s+Date\s*$', re.IGNORECASE | re.UNICODE
+    )
+
+    def drop_tail_metadata_rows(self, df: 'pd.DataFrame') -> 'pd.DataFrame':
+        """剔除文件尾部非数据的元数据行（如 Data Collection Start/Stop Date）。
+
+        检测：元数据行只有 1-2 个字段（标签 + 值），被读进 DataFrame 时落在
+        最靠前的列（第 0/1 列）；数据行的第 0 列是 Site #/Serial 等数值或
+        数字串 → 只用最前 4 列做正则匹配即可，全列匹配对 1700 列大文件
+        是浪费（1438×1728 约 250 万次字符串转换）。保序、保留原始 index
+        （行被删后 index 与 fail_cells/filter 的对齐由调用方处理）。
+        """
+        mask = pd.Series(False, index=df.index)
+        for j in range(min(4, len(df.columns))):
+            mask |= df.iloc[:, j].astype(str).str.match(self.TAIL_META_PATTERN)
+        return df[~mask]
+
     @staticmethod
     def identify_format(file_content: str) -> str:
         content = file_content.lower()

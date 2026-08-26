@@ -5,8 +5,8 @@
   "private": true,
   "scripts": {
     "pyinstaller": ".venv\\Scripts\\python.exe -m PyInstaller lq_dataprase.spec --noconfirm && .venv\\Scripts\\python.exe scripts/prune_bundle.py",
-    "dist:win:dir": "cross-env VITE_ELECTRON=true ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ npm run build --prefix frontend && npm run electron:build:ts --prefix frontend && npm run pyinstaller && scripts\\electron-builder.cmd --win --dir",
-    "dist:win": "node scripts/patch-nsis-template.js && cross-env VITE_ELECTRON=true ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ npm run build --prefix frontend && npm run electron:build:ts --prefix frontend && npm run pyinstaller && scripts\\electron-builder.cmd --win"
+    "dist:win:dir": "node scripts/patch-nsis-template.js && node scripts/gen-icon.ico.js && cross-env VITE_ELECTRON=true ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ npm run build --prefix frontend && npm run electron:build:ts --prefix frontend && npm run pyinstaller && scripts\\electron-builder.cmd --win --dir",
+    "dist:win": "node scripts/patch-nsis-template.js && node scripts/gen-icon.ico.js && cross-env VITE_ELECTRON=true ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ npm run build --prefix frontend && npm run electron:build:ts --prefix frontend && npm run pyinstaller && scripts\\electron-builder.cmd --win"
   },
   "devDependencies": {
     "cross-env": "^7.0.3"

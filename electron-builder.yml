@@ -53,6 +53,11 @@ win:
     - target: zip
       arch: [x64]
   icon: build/icon.ico
+  # 本地实时防护（腾讯电脑管家/Defender）会在 rcedit 提交写入时锁住 exe
+  # （"Fatal error: Unable to commit changes"）。由 scripts/afterPack.js 在
+  # afterPack 阶段自行执行 rcedit（指数退避直到扫描结束），此处关闭
+  # electron-builder 的内建 rcedit（见 afterPack.js 头部注释）。
+  signAndEditExecutable: false
 
 nsis:
   oneClick: false
@@ -72,7 +77,8 @@ nsis:
   differentialPackage: false
   # Custom hooks: ask during uninstall whether to delete user data
   # (db.sqlite3, uploaded data files, logs) stored in %APPDATA%\LQ-DataPrase.
-  include: build/installer.nsh
+  # Source lives in scripts/installer.nsh (build/ is gitignored).
+  include: scripts/installer.nsh
 
 # ASAR packaging. 安装耗时瓶颈是散文件数量（此前 16,609 个文件逐一解压+复制，
 # 且 Nsis7z/CopyFiles 阶段进度条不更新，表现为"安装卡死"）。asar 把 app 部分
@@ -93,6 +99,11 @@ compression: "normal"
 # code lives in the PyInstaller-packaged Python backend. Disabling it saves
 # ~5s on every build and avoids an unnecessary node-gyp dependency chain.
 npmRebuild: false
+
+# Wait for transient file locks (antivirus scan window) on the freshly written
+# app exe to clear before rcedit edits it — see scripts/afterPack.js.
+# Resolved relative to cwd, which is the repo root in all supported flows.
+afterPack: "./scripts/afterPack.js"
 
 # Use the npmmirror Electron mirror so that packaging does not need to reach
 # GitHub from mainland networks. The mirror must serve the same .zip layout as
