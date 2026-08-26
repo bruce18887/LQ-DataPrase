@@ -100,9 +100,16 @@ class ETS88Parser(BaseATEParser):
         
         columns = self.make_column_names_unique(header_columns)
         data_start_row = marker_idx + 1
-        
+
+        # ETS88 文件的**数据区块之后**还跟着两行尾部元数据（无数据语义）：
+        #   Data Collection Start Date,12/25/2024 12:30:39
+        #   Data Collection Stop  Date,12/25/2024 16:33:01
+        # 这些行只有少量字段（8 列），会被 pd.read_csv 当作数据行读进 DataFrame
+        # （其余列 NaN）→ 显示在查看数据 ag-grid 末尾、SampleData 列值被算进
+        # Bin 统计（Bin=NaN != 1 被误判为 FAIL 行）→ 在读取时就丢弃。
         df = pd.read_csv(file_path, skiprows=data_start_row, header=None,
                         on_bad_lines='skip', encoding='utf-8')
+        df = self.drop_tail_metadata_rows(df)
         if len(df.columns) == len(columns):
             df.columns = columns
         elif len(df.columns) > len(columns):

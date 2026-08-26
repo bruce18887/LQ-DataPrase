@@ -889,4 +889,52 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
       await putHidden([])
     }
   })
+
+  test('@p2 ETS88 文件末尾不渲染 Data Collection 尾部元数据行', async ({ page }) => {
+    await openViewTab(page, SEEDED_FILES.ETS88_FT)
+
+    // API 基准：total 只含真实数据行（文件末尾 2 行 Data Collection Start/Stop Date
+    // 元数据由解析器剔除 —— 用户报告：它们显示在 ag-grid 末尾 + Bin=NaN 被误计 FAIL）
+    const ref = await page.evaluate(async (filename) => {
+      const token = localStorage.getItem('access_token')
+      const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
+      const files = await fetch(`/api/v1/files/?search=${encodeURIComponent(filename)}`, { headers }).then((r) => r.json())
+      const file = ((files.results ?? files) as any[]).find((f: any) => f.filename === filename)
+      const base = `/api/v1/browse/?datafile_id=${file.id}&page_size=100`
+      const first = await fetch(`${base}&page=1`, { headers }).then((r) => r.json())
+      const total: number = first.total
+      const lastPage: number = Math.max(1, Math.ceil(total / 100))
+      const last = await fetch(`${base}&page=${lastPage}`, { headers }).then((r) => r.json())
+      const rows = (last.data ?? []) as unknown[][]
+      const lastRow = rows[rows.length - 1] ?? []
+      return {
+        total,
+        // 末行真实数据的 Serial #（第 2 列）；元数据行此处是 NaN
+        lastSerial: String(lastRow[1] ?? ''),
+        // 末块不应含 Data Collection 元数据行（列 0 是标签）
+        containsMeta: rows.some((r) => String(r[0]).includes('Data Collection')),
+      }
+    }, SEEDED_FILES.ETS88_FT)
+
+    expect(ref.containsMeta, 'API 末块不应含 Data Collection 元数据行').toBe(false)
+    expect(ref.lastSerial, '末行应是真实数据行（Serial # 非空）').not.toBe('')
+    expect(ref.total).toBeGreaterThan(0)
+
+    // 表格行数文案与 API total 一致（含元数据行的旧实现 total=数据行+2）
+    await expect(viewScope(page).locator('p').filter({ hasText: '共 ' })).toContainText(
+      String(ref.total),
+      { timeout: 15_000 },
+    )
+
+    // 垂直滚动到最后一行 → 渲染的是真实数据（Serial #），而不是 Data Collection
+    const lastRow = page.locator(`.ag-center-cols-container .ag-row[row-index="${ref.total - 1}"]`)
+    if ((await lastRow.count()) === 0) {
+      await page
+        .locator('.ag-body-vertical-scroll-viewport')
+        .evaluate((el, top) => { (el as HTMLElement).scrollTop = top }, (ref.total - 1) * 30)
+    }
+    await expect(lastRow).toBeVisible({ timeout: 15_000 })
+    await expect(lastRow).toContainText(ref.lastSerial)
+    await expect(lastRow).not.toContainText('Data Collection')
+  })
 })
