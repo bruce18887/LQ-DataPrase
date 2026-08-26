@@ -185,9 +185,9 @@ function onNext() {
 }
 
 .param-name :deep(mark) {
-  color: var(--color-primary);
+  color: var(--brand-primary);
   font-weight: 600;
-  background-color: rgba(var(--color-primary-rgb), 0.15);
+  background-color: rgba(var(--brand-primary-rgb), 0.15);
   padding: 0 2px;
   border-radius: 2px;
 }

@@ -1,6 +1,13 @@
 from django.contrib.auth.models import AbstractUser, UserManager as DjangoUserManager
 from django.db import models
 
+# 默认隐藏的记录级列（来自 CTA8290D/CTA8280F 等格式 [Data] 表头记录块）。
+# 导出 Excel 与查看数据 ag-grid 共用；仅为默认值，用户可在系统设置中调整。
+DEFAULT_HIDDEN_COLUMNS = [
+    'Part_No', 'Dut_Pass', 'X_COORD', 'Y_COORD', 'QR_Code',
+    'Start_T', 'Alarm', 'Data_Cnt',
+]
+
 
 class UserManager(DjangoUserManager):
     """Keep the custom ``role`` field in sync with superuser status.
@@ -70,6 +77,11 @@ class UserSetting(models.Model):
     # 导出请求超时（秒）。前端所有 /export/ 调用统一读取此值设置 axios
     # timeout（默认 600 与 DataBrowser 此前硬编码的 600000ms 一致）。
     export_timeout = models.IntegerField(default=600)
+    # 默认隐藏列（记录级列名单）：同时作用于「查看数据」ag-grid 与「导出 Excel」
+    # （导出中保留列但标记为 Excel 隐藏列）。空列表 = 未设置，由序列化层回退
+    # 到 DEFAULT_HIDDEN_COLUMNS（用户主动清空全部选项时同样回退，语义：这些
+    # 列始终保持默认隐藏）。
+    default_hidden_columns = models.JSONField(default=list, blank=True)
     # ECharts 渲染器：'svg' | 'canvas'（前端 echarts-theme.ts 启动时读取）。
     # 曾缺失该字段——保存时 DRF 静默丢弃未知键，刷新后回退默认值。
     chart_renderer = models.CharField(max_length=20, default='svg')

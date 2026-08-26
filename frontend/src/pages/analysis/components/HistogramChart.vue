@@ -50,6 +50,15 @@ function buildOption() {
   const r = props.result
   if (!r) return {}
   const tc = colors.value.textColor
+  // 轴/曲线辅助色（2026-08-26 夜晚可视度修复）：light 保持直方图基准常量，
+  // night 用 Material 300 级提亮——#1E88E5/#7B1FA2 等 500/700 级在深底对比度不足
+  const AXIS = isDark.value
+    ? { left: '#64B5F6', allsite: '#90CAF9', normal: '#FFA726', kde: '#BA68C8' }
+    : { left: '#1E88E5', allsite: '#42A5F5', normal: '#F57F17', kde: '#7B1FA2' }
+  // σ 标记线：light 原常量；night 提亮（标签跟随线色，深蓝/深青在深底不可读）
+  const s3c = isDark.value ? '#64B5F6' : '#1565C0'
+  const s4c = isDark.value ? '#4DD0E1' : '#00838F'
+  const s6c = isDark.value ? '#FFB74D' : '#E65100'
   const binCenters: number[] = r.bin_centers || []
   if (binCenters.length === 0) return {}
 
@@ -140,13 +149,15 @@ function buildOption() {
       name: 'All Site', type: 'bar', yAxisIndex: 1,
       data: buildBarData(activeIndices, binCenters, r.bin_percentages || [], r.bin_counts),
       itemStyle: { color: '#90CAF9', opacity: 0.5 }, barWidth: `${effectiveBarWidth}%`, barGap: `${-props.barOverlapPercent}%`,
-      label: { show: true, position: 'top', formatter: (p: any) => { const real = p.data[2] ?? p.data[1]; return real > 0 ? `${formatPercent(real)}%` : '' }, fontSize: 10, color: '#1565C0', fontWeight: 'bold' },
+      // 柱顶百分比标签：night 必须白字——柱面是 50% 半透明 #90CAF9 叠在深底
+      // ≈ 中蓝 rgb(83,117,155)，深蓝 #1565C0 贴中蓝面对比度≈1.3:1（8/26 用户反馈）
+      label: { show: true, position: 'top', formatter: (p: any) => { const real = p.data[2] ?? p.data[1]; return real > 0 ? `${formatPercent(real)}%` : '' }, fontSize: 10, color: isDark.value ? '#ffffff' : '#1565C0', fontWeight: 'bold' },
     })
   } else {
     series.push({
       name: '数据分布', type: 'bar',
       data: buildBarData(activeIndices, binCenters, r.bin_percentages || [], r.bin_counts),
-      itemStyle: { color: '#1E88E5' }, barWidth: `${effectiveBarWidth}%`,
+      itemStyle: { color: isDark.value ? '#42A5F5' : '#1E88E5' }, barWidth: `${effectiveBarWidth}%`,
     })
   }
 
@@ -186,25 +197,25 @@ function buildOption() {
   const s6Max = useFilteredStats && r.filtered_sigma6_max != null ? r.filtered_sigma6_max : r.sigma6_max
   if (props.chartConfig.includes('s3') && s3Min != null && s3Max != null) {
     mkGroups.push({
-      name: '3σ线', color: '#1565C0', items: [
-        { xAxis: s3Min, lineStyle: { color: '#1565C0', width: 3, type: 'dotted' }, label: { show: true, formatter: '3σ下限', position: 'insideEndTop' } },
-        { xAxis: s3Max, lineStyle: { color: '#1565C0', width: 3, type: 'dotted' }, label: { show: true, formatter: '3σ上限', position: 'insideEndTop' } },
+      name: '3σ线', color: s3c, items: [
+        { xAxis: s3Min, lineStyle: { color: s3c, width: 3, type: 'dotted' }, label: { show: true, formatter: '3σ下限', position: 'insideEndTop' } },
+        { xAxis: s3Max, lineStyle: { color: s3c, width: 3, type: 'dotted' }, label: { show: true, formatter: '3σ上限', position: 'insideEndTop' } },
       ],
     })
   }
   if (props.chartConfig.includes('s4') && s4Min != null && s4Max != null) {
     mkGroups.push({
-      name: '4σ线', color: '#00838F', items: [
-        { xAxis: s4Min, lineStyle: { color: '#00838F', width: 3, type: 'dotted' }, label: { show: true, formatter: '4σ下限', position: 'insideEndTop' } },
-        { xAxis: s4Max, lineStyle: { color: '#00838F', width: 3, type: 'dotted' }, label: { show: true, formatter: '4σ上限', position: 'insideEndTop' } },
+      name: '4σ线', color: s4c, items: [
+        { xAxis: s4Min, lineStyle: { color: s4c, width: 3, type: 'dotted' }, label: { show: true, formatter: '4σ下限', position: 'insideEndTop' } },
+        { xAxis: s4Max, lineStyle: { color: s4c, width: 3, type: 'dotted' }, label: { show: true, formatter: '4σ上限', position: 'insideEndTop' } },
       ],
     })
   }
   if (props.chartConfig.includes('s6') && s6Min != null && s6Max != null) {
     mkGroups.push({
-      name: '6σ线', color: '#E65100', items: [
-        { xAxis: s6Min, lineStyle: { color: '#E65100', width: 3, type: 'dotted' }, label: { show: true, formatter: '6σ下限', position: 'insideEndTop' } },
-        { xAxis: s6Max, lineStyle: { color: '#E65100', width: 3, type: 'dotted' }, label: { show: true, formatter: '6σ上限', position: 'insideEndTop' } },
+      name: '6σ线', color: s6c, items: [
+        { xAxis: s6Min, lineStyle: { color: s6c, width: 3, type: 'dotted' }, label: { show: true, formatter: '6σ下限', position: 'insideEndTop' } },
+        { xAxis: s6Max, lineStyle: { color: s6c, width: 3, type: 'dotted' }, label: { show: true, formatter: '6σ上限', position: 'insideEndTop' } },
       ],
     })
   }
@@ -221,31 +232,35 @@ function buildOption() {
   }
 
   if (hasNormal) {
-    series.push({ name: '正态分布', type: 'line', data: normalCurve as any[], smooth: true, itemStyle: { color: '#F57F17' }, lineStyle: { color: '#F57F17', width: 3 }, symbol: 'none', yAxisIndex: normalAxisIdx, z: 10 })
+    series.push({ name: '正态分布', type: 'line', data: normalCurve as any[], smooth: true, itemStyle: { color: AXIS.normal }, lineStyle: { color: AXIS.normal, width: 3 }, symbol: 'none', yAxisIndex: normalAxisIdx, z: 10 })
   }
 
   if (hasKde) {
-    series.push({ name: 'KDE曲线', type: 'line', data: kdeCurve, smooth: true, itemStyle: { color: '#7B1FA2' }, lineStyle: { color: '#7B1FA2', width: 3 }, symbol: 'none', yAxisIndex: kdeAxisIdx, z: 10 })
+    series.push({ name: 'KDE曲线', type: 'line', data: kdeCurve, smooth: true, itemStyle: { color: AXIS.kde }, lineStyle: { color: AXIS.kde, width: 3 }, symbol: 'none', yAxisIndex: kdeAxisIdx, z: 10 })
   }
 
-  const AXIS_COLOR_LEFT = '#1E88E5'; const AXIS_COLOR_ALLSITE = '#42A5F5'; const AXIS_COLOR_NORMAL = '#F57F17'; const AXIS_COLOR_KDE = '#7B1FA2'
+  // 左轴上限：有站点数据时按站点直方图最大百分比向上取整（留顶部空间）
   let leftYMax = 100
   if (hasSiteData) {
     let maxVal = 0
     for (const s of Object.keys(siteHists)) for (const v of siteHists[s]) if (v > maxVal) maxVal = v
     leftYMax = Math.ceil(maxVal / 5) * 5 + 5
   }
-  const yAxes: any[] = [{ type: 'value', name: '百分比 (%)', nameTextStyle: { color: AXIS_COLOR_LEFT, fontWeight: 'bold' }, position: 'left', min: 0, max: leftYMax, axisLabel: { formatter: '{value}%', color: AXIS_COLOR_LEFT }, axisLine: { show: true, lineStyle: { color: AXIS_COLOR_LEFT } } }]
-  if (hasSiteData) yAxes.push({ type: 'value', name: 'All Site (%)', nameTextStyle: { color: AXIS_COLOR_ALLSITE, fontWeight: 'bold' }, position: 'right', min: 0, axisLabel: { formatter: '{value}%', color: AXIS_COLOR_ALLSITE }, axisLine: { show: true, lineStyle: { color: AXIS_COLOR_ALLSITE } }, splitLine: { show: false } })
-  if (hasKde) yAxes.push({ type: 'value', name: 'KDE密度', nameTextStyle: { color: AXIS_COLOR_KDE, fontWeight: 'bold' }, position: 'left', offset: 55, min: 0, axisLabel: { formatter: (v: number) => v.toExponential(2), color: AXIS_COLOR_KDE }, axisLine: { show: true, lineStyle: { color: AXIS_COLOR_KDE } }, splitLine: { show: false } })
-  if (hasNormal) yAxes.push({ type: 'value', name: '概率密度', nameTextStyle: { color: AXIS_COLOR_NORMAL, fontWeight: 'bold' }, position: 'right', offset: hasSiteData ? 50 : 0, min: 0, axisLabel: { formatter: (v: number) => v.toExponential(2), color: AXIS_COLOR_NORMAL }, axisLine: { show: true, lineStyle: { color: AXIS_COLOR_NORMAL } }, splitLine: { show: false } })
+  const yAxes: any[] = [{ type: 'value', name: '百分比 (%)', nameTextStyle: { color: AXIS.left, fontWeight: 'bold' }, position: 'left', min: 0, max: leftYMax, axisLabel: { formatter: '{value}%', color: AXIS.left }, axisLine: { show: true, lineStyle: { color: AXIS.left } } }]
+  if (hasSiteData) yAxes.push({ type: 'value', name: 'All Site (%)', nameTextStyle: { color: AXIS.allsite, fontWeight: 'bold' }, position: 'right', min: 0, axisLabel: { formatter: '{value}%', color: AXIS.allsite }, axisLine: { show: true, lineStyle: { color: AXIS.allsite } }, splitLine: { show: false } })
+  if (hasKde) yAxes.push({ type: 'value', name: 'KDE密度', nameTextStyle: { color: AXIS.kde, fontWeight: 'bold' }, position: 'left', offset: 55, min: 0, axisLabel: { formatter: (v: number) => v.toExponential(2), color: AXIS.kde }, axisLine: { show: true, lineStyle: { color: AXIS.kde } }, splitLine: { show: false } })
+  if (hasNormal) yAxes.push({ type: 'value', name: '概率密度', nameTextStyle: { color: AXIS.normal, fontWeight: 'bold' }, position: 'right', offset: hasSiteData ? 50 : 0, min: 0, axisLabel: { formatter: (v: number) => v.toExponential(2), color: AXIS.normal }, axisLine: { show: true, lineStyle: { color: AXIS.normal } }, splitLine: { show: false } })
 
   const unitStr = r.unit || ''
   const limitStr = (r.lower_limit != null && r.upper_limit != null) ? `Limit [${r.lower_limit.toFixed(4)}, ${r.upper_limit.toFixed(4)}]` : ''
   const titleText = `{name|${props.selectedParam}}  {unit|${unitStr ? `(${unitStr})` : ''}}  {limit|${limitStr || ''}}`
 
   return {
-    title: { text: titleText, left: 'center', top: 6, textStyle: { rich: { name: { fontSize: 15, fontWeight: 'bold', color: tc }, unit: { fontSize: 12, color: tc, fontWeight: 500 }, limit: { fontSize: 12, color: '#E65100', fontWeight: 600, backgroundColor: '#FFF3E0', padding: [2, 6], borderRadius: 3 } } } },
+    title: { text: titleText, left: 'center', top: 6, textStyle: { rich: {
+      name: { fontSize: 15, fontWeight: 'bold', color: tc },
+      unit: { fontSize: 12, color: tc, fontWeight: 500 },
+      limit: { fontSize: 12, color: isDark.value ? '#FFB74D' : '#E65100', fontWeight: 600, backgroundColor: isDark.value ? 'rgba(255, 183, 77, 0.15)' : '#FFF3E0', padding: [2, 6], borderRadius: 3 },
+    } } },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },

@@ -243,7 +243,7 @@ function onCustomHighChange(val: number | null) {
 }
 
 .more-btn:hover {
-  color: var(--color-primary, #409eff);
+  color: var(--brand-primary);
 }
 
 .config-section {

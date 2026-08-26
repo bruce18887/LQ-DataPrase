@@ -1,6 +1,6 @@
 <!-- frontend/src/pages/analysis/components/distribution/BoxPlotStatsTable.vue -->
 <template>
-  <el-card v-if="stats" shadow="hover" :body-style="{ padding: '8px' }">
+  <el-card v-if="stats" shadow="hover" class="boxplot-stats-table" :body-style="{ padding: '8px' }">
     <div class="table-header">📊 箱线图统计</div>
     <el-table
       :data="tableData"

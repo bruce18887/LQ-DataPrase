@@ -76,28 +76,30 @@
   --text-inverse: #1a1a2e;
 
   /* ========== 品牌色 ========== */
-  --brand-primary: #fdd835;
+  /* 与 element-plus-theme.css 的 --el-color-primary(#f9a825) 同源（2026-08-26 统一：
+     此前 --brand-primary:#fdd835 / --el-color-primary:#f9a825 双套金色肉眼色差） */
+  --brand-primary: #f9a825;
   --brand-secondary: #11998e;
-  --brand-primary-hover: #ffeb3b;
+  --brand-primary-hover: #c78620;
   --brand-secondary-hover: #38ef7d;
 
   /* ========== 品牌色 RGB 分量（用于 rgba()/box-shadow 透明度）========== */
-  --brand-primary-rgb: 253, 216, 53;
-  --brand-primary-hover-rgb: 255, 235, 59;
+  --brand-primary-rgb: 249, 168, 37;
+  --brand-primary-hover-rgb: 199, 134, 32;
 
-  /* ========== 语义色 ========== */
-  --color-success: #14b8a6;
-  --color-success-emphasis: #2dd4bf;
-  --color-warning: #fcd34d;
-  --color-warning-emphasis: #fde68a;
-  --color-error: #fb7185;
-  --color-error-emphasis: #fda4af;
+  /* ========== 语义色（与 EP --el-color-{type} 同源，2026-08-26 统一）========== */
+  --color-success: #11998e;
+  --color-success-emphasis: #3dafa5;
+  --color-warning: #f9a825;
+  --color-warning-emphasis: #fbb752;
+  --color-error: #f5576c;
+  --color-error-emphasis: #f77889;
   --color-info: #4facfe;
-  --color-info-emphasis: #00f2fe;
+  --color-info-emphasis: #72bdfe;
 
   /* 文件相关性对比：超差 / Limit Diff 标红单元格（深色适配） */
-  --color-fail-bg: rgba(255, 113, 130, 0.22);
-  --color-fail-text: #fb7185;
+  --color-fail-bg: rgba(245, 87, 108, 0.22);
+  --color-fail-text: #f5576c;
 
   /* ========== 阴影 ========== */
   --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.2);

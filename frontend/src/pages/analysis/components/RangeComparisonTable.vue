@@ -71,4 +71,11 @@ function rangeRowClass({ row }: { row: RangeRow }) {
   font-weight: bold;
   color: #e53935;
 }
+
+/* night：避免亮浅蓝块穿透深色表格（统一用红色微透明底） */
+:root[data-theme="night"] .range-active-row,
+:root.theme-night .range-active-row {
+  background-color: rgba(245, 87, 108, 0.15) !important;
+  color: #f5576c;
+}
 </style>

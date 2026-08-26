@@ -51,44 +51,10 @@
 }
 
 /* ========================================
-   通用白色背景覆盖
+   注（2026-08-26 移除）：原「通用白色/浅色背景覆盖」「深色文本覆盖」三组
+   [style*="..."] 字符串属性选择器是「猜内联色值」的假兜底——只匹配特定前缀
+   （background: #fff / color: #3|#6|#9 等），真实内联色（#d0e8ff、#059669…）
+   全部漏网，且全局副作用不可控。内联色已逐个改为 class + 双主题覆盖
+   （SiteYieldAnalysis 等）；新写组件一律用 var(--bg-*)/var(--text-*)。
    ======================================== */
 
-:root[data-theme="night"] [style*="background: #fff"],
-:root[data-theme="night"] [style*="background:#fff"],
-:root[data-theme="night"] [style*="background: white"],
-:root[data-theme="night"] [style*="background-color: #fff"],
-:root[data-theme="night"] [style*="background-color:#fff"],
-:root[data-theme="night"] [style*="background-color: white"],
-:root.theme-night [style*="background: #fff"],
-:root.theme-night [style*="background:#fff"],
-:root.theme-night [style*="background: white"],
-:root.theme-night [style*="background-color: #fff"],
-:root.theme-night [style*="background-color:#fff"],
-:root.theme-night [style*="background-color: white"] {
-  background-color: var(--bg-secondary) !important;
-}
-
-/* ========================================
-   通用浅色背景覆盖
-   ======================================== */
-
-:root[data-theme="night"] [style*="background: #f"],
-:root[data-theme="night"] [style*="background-color: #f"],
-:root.theme-night [style*="background: #f"],
-:root.theme-night [style*="background-color: #f"] {
-  background-color: var(--bg-tertiary) !important;
-}
-
-/* ========================================
-   通用深色文本覆盖
-   ======================================== */
-
-:root[data-theme="night"] [style*="color: #3"],
-:root[data-theme="night"] [style*="color: #6"],
-:root[data-theme="night"] [style*="color: #9"],
-:root.theme-night [style*="color: #3"],
-:root.theme-night [style*="color: #6"],
-:root.theme-night [style*="color: #9"] {
-  color: var(--text-primary) !important;
-}

@@ -820,4 +820,73 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
       .toContain('ag-cell-data-changed')
     expect(await hScroll.evaluate((el) => el.scrollLeft)).toBe(before)
   })
+
+  test('@p2 默认隐藏列：记录列默认隐藏，列菜单可重新显示', async ({ page }) => {
+    // 设置默认隐藏列（系统设置同源）；finally 恢复默认（[] → 后端回退默认 8 列）
+    const putHidden = (cols: string[]) =>
+      page.evaluate(async (cols) => {
+        await fetch('/api/v1/auth/settings/', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+          },
+          body: JSON.stringify({ default_hidden_columns: cols }),
+        })
+      }, cols)
+
+    const HIDDEN = ['Part_No', 'Dut_Pass', 'X_COORD', 'Y_COORD', 'QR_Code', 'Start_T', 'Alarm', 'Data_Cnt']
+    // 先进入应用任意页（localStorage 可用），再写入设置；finally 恢复默认
+    await gotoApp(page, '/settings')
+    await putHidden(HIDDEN)
+    try {
+      await openViewTab(page, SEEDED_FILES.GAGE_S1)
+
+      // 未隐藏的记录列（Serial_No/Site_No/SW_Bin/Test_Time）渲染；隐藏列不渲染
+      await expect(page.locator('.ag-header-cell[col-id="Serial_No"]').first()).toBeVisible({
+        timeout: 30_000,
+      })
+      await expect(page.locator('.ag-header-cell[col-id="SW_Bin"]').first()).toBeVisible({
+        timeout: 10_000,
+      })
+      for (const col of HIDDEN) {
+        await expect(page.locator(`.ag-header-cell[col-id="${col}"]`)).toHaveCount(0)
+      }
+
+      // 列定义层面：hide 标记生效（ag-grid-vue3 向模板 ref expose api，见其源码
+      // expose({ api })，可从组件根元素 __vueParentComponent.exposed 读取）
+      const colHideState = await page.evaluate(() => {
+        let api: any = null
+        for (const el of document.querySelectorAll('div')) {
+          const ex = el.__vueParentComponent?.exposed
+          if (ex?.api?.value?.getColumnDef) {
+            api = ex.api.value
+            break
+          }
+        }
+        if (!api) return null
+        return {
+          partNo: !!api.getColumnDef('Part_No')?.hide,
+          serialNo: !!api.getColumnDef('Serial_No')?.hide,
+        }
+      })
+      expect(colHideState).toEqual({ partNo: true, serialNo: false })
+
+      // 通过 grid API 重新显示 Part_No（等价于列菜单勾选）→ 表头渲染
+      await page.evaluate(() => {
+        for (const el of document.querySelectorAll('div')) {
+          const ex = el.__vueParentComponent?.exposed
+          if (ex?.api?.value?.getColumnDef) {
+            ex.api.value.setColumnsVisible(['Part_No'], true)
+            break
+          }
+        }
+      })
+      await expect(page.locator('.ag-header-cell[col-id="Part_No"]').first()).toBeVisible({
+        timeout: 10_000,
+      })
+    } finally {
+      await putHidden([])
+    }
+  })
 })

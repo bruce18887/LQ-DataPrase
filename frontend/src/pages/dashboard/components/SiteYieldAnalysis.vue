@@ -9,17 +9,17 @@
         <div ref="yieldGaugeChart" style="height:130px" role="img" aria-label="整体Yield仪表盘" />
         <div class="yield-stats">
           <div class="yield-stat">
-            <span class="yield-stat-tag" style="background:#05966920;color:#059669">{{ siteYieldStats.maxSite }}</span>
+            <span class="yield-stat-tag yield-stat-tag--max">{{ siteYieldStats.maxSite }}</span>
             <span class="yield-stat-label">最高</span>
             <span class="yield-stat-value">{{ siteYieldStats.max }}%</span>
           </div>
           <div class="yield-stat">
-            <span class="yield-stat-tag" style="background:#dc262620;color:#dc2626">{{ siteYieldStats.minSite }}</span>
+            <span class="yield-stat-tag yield-stat-tag--min">{{ siteYieldStats.minSite }}</span>
             <span class="yield-stat-label">最低</span>
             <span class="yield-stat-value">{{ siteYieldStats.min }}%</span>
           </div>
           <div class="yield-stat">
-            <span class="yield-stat-tag" style="background:#6b728020;color:#6b7280">Δ</span>
+            <span class="yield-stat-tag yield-stat-tag--diff">Δ</span>
             <span class="yield-stat-label">差异</span>
             <span class="yield-stat-value">{{ siteYieldStats.diff }}%</span>
           </div>
@@ -261,6 +261,34 @@ defineExpose({ handleResize })
   padding: 2px 8px;
   border-radius: 4px;
   font-weight: 600;
+}
+.yield-stat-tag--max {
+  background: rgba(5, 150, 105, 0.1);
+  color: #059669;
+}
+.yield-stat-tag--min {
+  background: rgba(220, 38, 38, 0.1);
+  color: #dc2626;
+}
+.yield-stat-tag--diff {
+  background: rgba(107, 114, 128, 0.12);
+  color: #6b7280;
+}
+/* night：深底提亮，保证可读性（原内联 #059669/#dc2626 在深底对比度不足） */
+:root[data-theme="night"] .yield-stat-tag--max,
+:root.theme-night .yield-stat-tag--max {
+  background: rgba(56, 239, 125, 0.15);
+  color: #38ef7d;
+}
+:root[data-theme="night"] .yield-stat-tag--min,
+:root.theme-night .yield-stat-tag--min {
+  background: rgba(245, 87, 108, 0.18);
+  color: #f5576c;
+}
+:root[data-theme="night"] .yield-stat-tag--diff,
+:root.theme-night .yield-stat-tag--diff {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
 }
 .yield-stat-label {
   font-size: 11px;

@@ -120,6 +120,8 @@ P0_*.py
 debug-*.md
 DEBUG_*.md
 .dbg/
+# 启动迁移应用的临时锁文件（system_config._startup_lock 加锁后不删除）
+/.lqdp_startup.lock
 # 项目约定不入库目录
 /Data/
 /test/*

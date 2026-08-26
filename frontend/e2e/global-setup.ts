@@ -5,9 +5,10 @@
  * 3. 后续业务用例可直接使用数据库中的已解析文件，无需通过 UI 上传
  */
 import { execSync } from 'node:child_process'
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { E2E_SYSTEM_CONFIG_FILE, PROJECT_ROOT } from './fixtures/test-data'
+import { E2E_SYSTEM_CONFIG_FILE, PROJECT_ROOT, DOWNLOAD_DIR } from './fixtures/test-data'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -16,21 +17,22 @@ const PYTHON = process.env.PYTHON_BIN || path.join(PROJECT_ROOT, '.venv', 'Scrip
 function runDjango(cmd: string) {
   const full = `"${PYTHON}" manage.py ${cmd}`
   console.log(`[globalSetup] ${full}`)
+  // 显式注入 LQDP_SYSTEM_CONFIG_FILE（playwright.config.ts 顶层已写入
+  // data_dir=PROJECT_ROOT）：execSync 只继承 process.env，不继承 webServer
+  // 的 env；不加则种子进程读项目根锚点配置，触发默认 data_dir 迁移并操作
+  // 用户主目录 DB，与后端各用一套数据库。
   try {
-    // 显式注入 LQDP_SYSTEM_CONFIG_FILE（playwright.config.ts 顶层已写入
-    // data_dir=PROJECT_ROOT）：execSync 只继承 process.env，不继承 webServer
-    // 的 env；不加则种子进程读项目根锚点配置，触发默认 data_dir 迁移并操作
-    // 用户主目录 DB，与后端各用一套数据库。
     const out = execSync(full, {
       cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 120_000,
       env: { ...process.env, PYTHONIOENCODING: 'utf-8', LQDP_SYSTEM_CONFIG_FILE: E2E_SYSTEM_CONFIG_FILE },
     })
     console.log(out.trim())
   } catch (e: any) {
-    console.error(`[globalSetup] 失败: ${e.message}`)
-    // seed 失败不阻塞（可能数据已存在），继续
+    // 失败必须失败：migrate/seed 任一步失败都意味着后续用例跑在
+    // 未播种/半播种的库上，报错难归因（历史教训：静默继续 → 残库假绿）。
     if (e.stdout) console.log(e.stdout.toString())
     if (e.stderr) console.error(e.stderr.toString())
+    throw new Error(`[globalSetup] 失败: ${full}\n${e.message}`)
   }
 }
 
@@ -43,6 +45,14 @@ async function globalSetup() {
   // --refresh 增量刷新：清理 e2e_* 测试残留 + 仅重灌变化的 SampleData 文件，
   // 避免每次运行都全量复制/解析 714MB 数据（未变化时秒级完成）
   runDjango('seed_test_data --refresh')
+  // 清空上一轮下载产物：.downloads 不在 Playwright outputDir 内，不自动清，
+  // 且文件名带时间戳 → 跨运行累积（实测 28.5MB / 59 个文件）。
+  try {
+    fs.rmSync(DOWNLOAD_DIR, { recursive: true, force: true })
+    fs.mkdirSync(DOWNLOAD_DIR, { recursive: true })
+  } catch (e: any) {
+    console.warn(`[globalSetup] 清理 .downloads 失败（忽略）: ${e.message}`)
+  }
 }
 
 export default globalSetup

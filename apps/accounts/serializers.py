@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from apps.common.export_naming import EXPORT_TEMPLATE_DEFAULTS, MAX_TEMPLATE_LENGTH
-from .models import User, UserSetting
+from .models import User, UserSetting, DEFAULT_HIDDEN_COLUMNS
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -57,6 +57,7 @@ class UserSettingSerializer(serializers.ModelSerializer):
             'recent_files', 'max_recent_files', 'histogram_label_offset',
             'export_filename_templates',
             'export_timeout',
+            'default_hidden_columns',
         ]
 
     def to_representation(self, instance):
@@ -64,6 +65,11 @@ class UserSettingSerializer(serializers.ModelSerializer):
         # Always expose the full 8-key table (defaults merged with overrides)
         templates = data.get('export_filename_templates') or {}
         data['export_filename_templates'] = {**EXPORT_TEMPLATE_DEFAULTS, **templates}
+        # 默认隐藏列：空列表（未设置/用户清空）回退到默认 8 列
+        hidden = instance.default_hidden_columns
+        data['default_hidden_columns'] = (
+            hidden if isinstance(hidden, list) and hidden else list(DEFAULT_HIDDEN_COLUMNS)
+        )
         return data
 
     def validate_export_filename_templates(self, value):
@@ -83,6 +89,15 @@ class UserSettingSerializer(serializers.ModelSerializer):
         if not isinstance(value, int) or not 30 <= value <= 3600:
             raise serializers.ValidationError('导出超时必须在 30-3600 秒之间')
         return value
+
+    def validate_default_hidden_columns(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError('default_hidden_columns 必须是数组')
+        if any(not isinstance(v, str) or not v.strip() for v in value):
+            raise serializers.ValidationError('default_hidden_columns 的元素必须是字符串')
+        if len(value) > 100:
+            raise serializers.ValidationError('默认隐藏列数量不能超过 100')
+        return [v.strip() for v in value]
 
     def validate_chart_renderer(self, value):
         if value not in ('svg', 'canvas'):

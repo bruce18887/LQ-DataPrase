@@ -45,7 +45,7 @@
     </el-table>
     <div class="card-footer">
       <el-checkbox v-model="confirmed">
-        <span style="color: var(--color-primary, var(--brand-primary)); font-weight: 600">
+        <span style="color: var(--brand-primary); font-weight: 600">
           我已确认要修复这 {{ count }} 个文件的产品名
         </span>
       </el-checkbox>

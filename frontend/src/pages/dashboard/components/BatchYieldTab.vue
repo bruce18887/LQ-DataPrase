@@ -231,10 +231,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onActivated, nextTick, onBeforeUnmount, watch } from 'vue'
 import * as echarts from 'echarts'
-import { getChartInitOpts } from '../../../utils/echarts-theme'
+import { getChartInitOpts, useEChartsTheme } from '../../../utils/echarts-theme'
 import { ElMessage } from 'element-plus'
 import { batchApi } from '../../../api/batch'
 import { useFilesStore } from '../../../stores/files'
+import { useThemeStore } from '../../../stores/theme'
 import BatchSelectorBar from './batch/BatchSelectorBar.vue'
 import KpiCards from './batch/KpiCards.vue'
 import StageFilterBar from './batch/StageFilterBar.vue'
@@ -255,6 +256,7 @@ const stageFilter = ref('')
 const binSectionOpen = ref(true)  // Bin 分布卡默认展开，展开态用于过滤后重建内联图表
 
 const filesStore = useFilesStore()
+const themeStore = useThemeStore()
 
 // Ref to child chart components
 const yieldTrendChartRef = ref<InstanceType<typeof YieldTrendChart>>()
@@ -433,17 +435,19 @@ function renderBinPieChart() {
   )
   if (failBins.length === 0) return
 
-  const colors = ['#f5576c', '#f9a825', '#4facfe', '#ff6b6b', '#74b9ff', '#fd79a8', '#e17055', '#00b894']
+  const palette = ['#f5576c', '#f9a825', '#4facfe', '#ff6b6b', '#74b9ff', '#fd79a8', '#e17055', '#00b894']
+  // 注意：ECharts/zrender 不解析 CSS 变量，此处必须用主题实时色值（2026-08-26 修复）
+  const tc = useEChartsTheme().colors.value.textColor
   binPieChart.setOption({
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { orient: 'vertical', left: 'left', top: 'center', type: 'scroll', textStyle: { color: 'var(--text-primary)' } },
+    legend: { orient: 'vertical', left: 'left', top: 'center', type: 'scroll', textStyle: { color: tc } },
     series: [{
       type: 'pie',
       radius: ['35%', '65%'],
       center: ['60%', '50%'],
       data: failBins,
-      color: colors,
-      label: { formatter: '{b}\n{d}%', color: 'var(--text-primary)' },
+      color: palette,
+      label: { formatter: '{b}\n{d}%', color: tc },
       itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
     }],
   })
@@ -462,6 +466,7 @@ function renderBinBarChart() {
 
   if (failBins.length === 0) return
 
+  const tc = useEChartsTheme().colors.value.textColor
   binBarChart.setOption({
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     grid: { left: '3%', right: '8%', bottom: '3%', top: '3%', containLabel: true },
@@ -469,7 +474,7 @@ function renderBinBarChart() {
     yAxis: {
       type: 'category',
       data: failBins.map((b: any) => b.name).reverse(),
-      axisLabel: { color: 'var(--text-primary)', fontSize: 11 },
+      axisLabel: { color: tc, fontSize: 11 },
     },
     series: [{
       type: 'bar',
@@ -480,7 +485,7 @@ function renderBinBarChart() {
           colorStops: [{ offset: 0, color: '#f093fb' }, { offset: 1, color: '#f5576c' }],
         },
       },
-      label: { show: true, position: 'right', fontSize: 10, color: 'var(--text-primary)' },
+      label: { show: true, position: 'right', fontSize: 10, color: tc },
     }],
   })
 }
@@ -522,6 +527,14 @@ onActivated(() => {
 })
 watch(() => filesStore.filesVersion, () => {
   loadBatches()
+})
+// 主题切换重建内联图表（Bin 饼图/柱图直接 echarts.init，不会自动跟随主题，
+// 而颜色来自 useEChartsTheme 实时色值——不重建就保留旧主题颜色）
+watch(() => themeStore.currentTheme, () => {
+  nextTick(() => {
+    disposeBinCharts()
+    renderInlineCharts()
+  })
 })
 
 onBeforeUnmount(() => {

@@ -60,7 +60,12 @@ class ExportViewSet(viewsets.GenericViewSet):
             export_df = export_df.reset_index(drop=True)
 
         # Use old version's complete implementation
-        buffer = export_to_xlsx_optimized(export_df, metadata)
+        # 默认隐藏列（系统设置 → 表格设置）：列保留在导出文件中但设为 Excel 隐藏列
+        user_settings = getattr(request.user, 'settings', None)
+        hidden_columns = []
+        if user_settings is not None:
+            hidden_columns = user_settings.default_hidden_columns or []
+        buffer = export_to_xlsx_optimized(export_df, metadata, hidden_columns=hidden_columns)
 
         fname = render_export_filename(
             request.user, 'to_excel', 'xlsx',

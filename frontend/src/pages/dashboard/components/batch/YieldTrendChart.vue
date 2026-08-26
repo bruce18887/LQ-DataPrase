@@ -6,6 +6,7 @@
 import { ref, watch, nextTick, onMounted, onActivated, onBeforeUnmount } from 'vue'
 import { initEchartsWhenReady, type EchartsHandle } from '../../../../utils/echarts-init'
 import { useThemeStore } from '../../../../stores/theme'
+import { useEChartsTheme } from '../../../../utils/echarts-theme'
 
 const props = defineProps<{
   phases: any[]
@@ -15,20 +16,26 @@ const chartRef = ref<HTMLElement>()
 let handle: EchartsHandle | null = null
 
 const themeStore = useThemeStore()
+const { colors } = useEChartsTheme()
 
 function buildOption() {
   const phases = props.phases || []
+  // 注意：ECharts/zrender 不解析 CSS 变量，'var(--text-primary)' 会回退默认深色
+  //（夜晚不可读）——必须用 useEChartsTheme 的实时色值（2026-08-26 修复）
+  const tc = colors.value.textColor
+  const lineC = colors.value.axisLineColor
+  const splitC = colors.value.splitLineColor
 
   return {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    legend: { data: ['测试总数', 'Pass数量', '良率'], top: 5, textStyle: { color: 'var(--text-primary)' } },
+    legend: { data: ['测试总数', 'Pass数量', '良率'], top: 5, textStyle: { color: tc } },
     grid: { left: '3%', right: '4%', bottom: '3%', top: '18%', containLabel: true },
     xAxis: {
       type: 'category',
       data: phases.map((p: any) => p.phase),
-      axisLine: { lineStyle: { color: 'var(--border-default)' } },
+      axisLine: { lineStyle: { color: lineC } },
       axisLabel: {
-        color: 'var(--text-primary)',
+        color: tc,
         // 回退短文件名较长，截断防标签重叠；tooltip 显示完整阶段名
         formatter: (val: string) => (val.length > 12 ? val.slice(0, 12) + '…' : val),
       },
@@ -38,9 +45,9 @@ function buildOption() {
         type: 'value',
         name: '数量',
         position: 'left',
-        axisLine: { lineStyle: { color: 'var(--border-default)' } },
-        axisLabel: { color: 'var(--text-primary)' },
-        splitLine: { lineStyle: { color: 'var(--border-muted)' } },
+        axisLine: { lineStyle: { color: lineC } },
+        axisLabel: { color: tc },
+        splitLine: { lineStyle: { color: splitC } },
       },
       {
         type: 'value',
@@ -48,9 +55,9 @@ function buildOption() {
         min: 0,
         max: 100,
         position: 'right',
-        axisLabel: { formatter: '{value}%', color: 'var(--text-primary)' },
-        nameTextStyle: { color: 'var(--text-primary)' },
-        axisLine: { lineStyle: { color: 'var(--border-default)' } },
+        axisLabel: { formatter: '{value}%', color: tc },
+        nameTextStyle: { color: tc },
+        axisLine: { lineStyle: { color: lineC } },
         splitLine: { show: false },
       },
     ],
@@ -68,7 +75,7 @@ function buildOption() {
         data: phases.map((p: any) => p.yield_pct),
         itemStyle: { color: '#f5576c' }, lineStyle: { width: 3 },
         symbol: 'circle', symbolSize: 8,
-        label: { show: true, formatter: '{c}%', fontSize: 11, color: 'var(--text-primary)' },
+        label: { show: true, formatter: '{c}%', fontSize: 11, color: tc },
       },
     ],
   }
