@@ -10,7 +10,9 @@ Comparison rules (mirrored by the frontend panel one-to-one):
     'zero'  : pass iff both diffs are exactly 0.
     'wider' : pass iff file B's limit is no tighter than file A's
               (LSL_B ≤ LSL_A and USL_B ≥ USL_A).
-- Serial cap: only the first ``max_serials`` common serials (ascending).
+- Serial selection: explicit ``serials`` list (user-chosen, request order)
+  takes precedence; otherwise the first ``max_serials`` common serials
+  (ascending) are used as a fallback cap.
 - No common serials → limits-only mode (no per-serial data columns).
 - No common params → NoCommonParamsError (surfaced as 400 by the views).
 """
@@ -40,7 +42,8 @@ class FileCorrelationConfig:
     """Comparison options; the frontend panel mirrors these one-to-one."""
     threshold: float = 3.0
     diff_rule: str = 'zero'          # 'zero' | 'wider'
-    max_serials: int = 30
+    max_serials: int = 30            # fallback cap when ``serials`` is None
+    serials: Optional[List[int]] = None  # explicit user selection (优先)
     ignore_no_limit: bool = True
     ignore_no_data: bool = True
 
@@ -94,6 +97,19 @@ def _serial_frame(df: pd.DataFrame, serials: List[int],
     for p in params:
         agg[p] = pd.to_numeric(agg[p], errors='coerce')
     return agg.reindex(serials)
+
+
+def list_common_serials(ate_df: pd.DataFrame, bench_df: pd.DataFrame) -> List[int]:
+    """Sorted common serial numbers of the two files (same ``__serial__``
+    semantics as :func:`compute_file_correlation`).
+
+    The frontend serial picker calls this via ``file_correlation_serials``;
+    it is pure and cheap (no per-param computation).
+    """
+    ate_ser = pd.to_numeric(ate_df['__serial__'], errors='coerce')
+    bench_ser = pd.to_numeric(bench_df['__serial__'], errors='coerce')
+    return sorted(
+        set(ate_ser.dropna().astype(int)) & set(bench_ser.dropna().astype(int)))
 
 
 def _evaluate_diff_rule(lsl_a: Optional[float], usl_a: Optional[float],
@@ -160,9 +176,20 @@ def compute_file_correlation(ate_df: pd.DataFrame, meta_a: dict,
         params = [p for p in params
                   if _has_any_limit(p, meta_a) and _has_any_limit(p, meta_b)]
 
-    # 需求5：公共序列数超限时只对比前 N 个（序列号升序）
-    serials = common_serials[:cfg.max_serials]
-    truncated = len(common_serials) > len(serials)
+    # 序列选择：显式 serials（用户勾选，保持请求顺序、过滤非法/重复值）优先；
+    # 否则回退公共序列升序前 max_serials 个（旧行为兜底）。
+    if cfg.serials is not None:
+        common_set = set(common_serials)
+        seen = set()
+        serials = []
+        for s in cfg.serials:
+            if s in common_set and s not in seen:
+                seen.add(s)
+                serials.append(s)
+        truncated = False   # 用户显式选择，无「截断」语义
+    else:
+        serials = common_serials[:cfg.max_serials]
+        truncated = len(common_serials) > len(serials)
     limits_only = not serials
 
     # 每文件一次 groupby 聚合 → 后续全部按参数向量化（需求9：导出高速）

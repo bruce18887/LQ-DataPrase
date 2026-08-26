@@ -46,6 +46,7 @@ from apps.analysis.services.data_services import (
 from apps.analysis.services.file_correlation import (
     FileCorrelationConfig,
     compute_file_correlation,
+    list_common_serials,
     NoCommonParamsError,
 )
 from apps.analysis.services.limits import resolve_limits
@@ -594,6 +595,22 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         return Response(clean_data(result))
 
     @action(detail=False, methods=['post'])
+    def file_correlation_serials(self, request):
+        """List the common serial numbers of two files (serial picker data).
+
+        Request body: ``{file1_id, file2_id}``.
+        Response: ``{serials: [int, ...], total: int}`` — ascending,
+        same ``__serial__`` semantics as the full ``file_correlation``
+        computation (交集、数值化), so the picker and the analysis agree.
+        """
+        payload, err = _load_file_correlation_pair(request)
+        if err is not None:
+            return Response(err[0], status=err[1])
+
+        serials = list_common_serials(payload['ate_df'], payload['bench_df'])
+        return Response({'serials': serials, 'total': len(serials)})
+
+    @action(detail=False, methods=['post'])
     def file_correlation(self, request):
         """Compare two files by serial number and compute per-parameter correlation.
 
@@ -601,7 +618,8 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         {
             "file1_id": 123, "file2_id": 456,
             "threshold": 3.0, "diff_rule": "zero",
-            "max_serials": 30,
+            "serials": [1, 2, 3],       # 可选：用户勾选的序列（优先）
+            "max_serials": 30,          # 兜底：未传 serials 时取前 N
             "ignore_no_limit": true, "ignore_no_data": true
         }
 
@@ -639,7 +657,7 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         outputs always agree.
 
         Request body: 同 file_correlation（threshold / diff_rule /
-        max_serials / ignore_no_limit / ignore_no_data）。
+        serials 或 max_serials / ignore_no_limit / ignore_no_data）。
         防呆：无相同测试项 → 400 no_common_params；无相同序列 → limits-only
         （只导 limit 列，无序列数据列）。
         """
@@ -661,14 +679,14 @@ class AnalysisViewSet(viewsets.GenericViewSet):
         # 延迟导入：避免 analysis → export 顶层耦合（export 会 import
         # analysis.services.statistics，已加载无循环风险；但保持轻量）。
         import excelize
-        from apps.export.excel_builders import build_file_correlation_sheet
+        from apps.export.excel_builders import build_file_correlation_workbook
         from apps.export.excelize_helpers import save_excelize
         from apps.common.export_naming import (
             base_export_context, render_export_filename,
         )
 
         f = excelize.new_file()
-        build_file_correlation_sheet(f, result)
+        build_file_correlation_workbook(f, result)
         buffer = save_excelize(f)
 
         fname = render_export_filename(
@@ -736,8 +754,9 @@ def _parse_fc_config(request) -> FileCorrelationConfig:
     """Parse the file-correlation options from a request body.
 
     All options default to the panel defaults (threshold 3.0, rule 'zero',
-    max_serials 30, ignore_no_limit / ignore_no_data checked) so a minimal
-    body keeps behaving like the old ``{file1_id, file2_id}`` request.
+    serials 未指定 → max_serials 30 兜底, ignore_no_limit / ignore_no_data
+    checked) so a minimal body keeps behaving like the old
+    ``{file1_id, file2_id}`` request.
     """
     threshold = get_param_float(request, 'threshold', 3.0)
     if threshold is None or threshold < 0:
@@ -751,6 +770,18 @@ def _parse_fc_config(request) -> FileCorrelationConfig:
     except (TypeError, ValueError):
         max_serials = 30
 
+    # 显式序列选择（用户勾选）：优先于 max_serials 兜底；非法值过滤。
+    serials = None
+    raw_serials = request.data.get('serials')
+    if raw_serials is not None:
+        valid = []
+        for v in raw_serials if isinstance(raw_serials, (list, tuple)) else [raw_serials]:
+            try:
+                valid.append(int(v))
+            except (TypeError, ValueError):
+                continue
+        serials = valid
+
     def _bool_param(key: str, default: bool) -> bool:
         raw = get_param(request, key, None)
         if raw is None:
@@ -761,6 +792,7 @@ def _parse_fc_config(request) -> FileCorrelationConfig:
         threshold=float(threshold),
         diff_rule=diff_rule,
         max_serials=max_serials,
+        serials=serials,
         ignore_no_limit=_bool_param('ignore_no_limit', True),
         ignore_no_data=_bool_param('ignore_no_data', True),
     )

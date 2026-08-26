@@ -26,6 +26,9 @@ export function useFileCorrelation() {
   const filesLoading = ref(false)
   /** Excel 导出请求进行中 */
   const exporting = ref(false)
+  /** 两文件公共序列（升序；序列勾选器选项） */
+  const commonSerials = ref<number[]>([])
+  const commonSerialsLoading = ref(false)
 
   async function loadFiles() {
     filesLoading.value = true
@@ -39,6 +42,29 @@ export function useFileCorrelation() {
     }
   }
 
+  /**
+   * 拉取两文件公共序列（序列勾选器数据源，与计算口径一致）。
+   * 返回列表供调用方决定默认选中（前 10 颗）。
+   */
+  async function loadCommonSerials(file1: number, file2: number): Promise<number[]> {
+    commonSerialsLoading.value = true
+    try {
+      const { data } = await api.post('/analysis/file_correlation_serials/', {
+        file1_id: file1,
+        file2_id: file2,
+      })
+      const list = Array.isArray(data?.serials) ? data.serials as number[] : []
+      commonSerials.value = list
+      return list
+    } catch (err) {
+      console.error('[useFileCorrelation] load common serials failed:', err)
+      commonSerials.value = []
+      return []
+    } finally {
+      commonSerialsLoading.value = false
+    }
+  }
+
   /** 与后端 FileCorrelationConfig 一一对应的请求体 */
   function buildPayload(file1: number, file2: number, opts: FileCorrelationOptions) {
     return {
@@ -46,7 +72,7 @@ export function useFileCorrelation() {
       file2_id: file2,
       threshold: opts.threshold,
       diff_rule: opts.diffRule,
-      max_serials: opts.maxSerials,
+      serials: opts.serials,
       ignore_no_limit: opts.ignoreNoLimit,
       ignore_no_data: opts.ignoreNoData,
     }
@@ -82,6 +108,7 @@ export function useFileCorrelation() {
 
   return {
     loading, result, error, files, filesLoading,
+    commonSerials, commonSerialsLoading, loadCommonSerials,
     loadFiles, loadFileCorrelation, exporting, exportFileCorrelation,
   }
 }
