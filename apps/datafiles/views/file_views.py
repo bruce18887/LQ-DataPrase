@@ -1,9 +1,12 @@
 """File CRUD and upload views."""
 
 import os
+import re
+import shutil
 import time
 from datetime import datetime, time as dtime
 
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -20,6 +23,7 @@ from apps.datafiles.serializers import (
     normalize_tags,
 )
 from apps.datafiles.services import clear_parse_cache
+from apps.datafiles.utils import resolve_file_path, store_file_path
 
 from ._helpers import (
     _register_file,
@@ -80,7 +84,10 @@ class DataFileViewSet(viewsets.ModelViewSet):
     serializer_class = DataFileSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = DataFilePagination
-    search_fields = ['filename', 'batch_name', 'program_name']
+    # 搜索完全自管（get_queryset）：DRF SearchFilter 只查 search_fields 列，
+    # 会把「仅标签命中」的行过滤掉——标签搜索必须 OR 进查询集后再整集过滤。
+    # search_fields 刻意留空，让 SearchFilter 对该视图变为 no-op。
+    search_fields = []
     filterset_fields = ['product_code', 'format_type', 'file_type']
     ordering_fields = ['created_at', 'source_mtime', 'filename', 'file_size']
 
@@ -90,15 +97,37 @@ class DataFileViewSet(viewsets.ModelViewSet):
         # Custom search for tags (JSONField)
         search = self.request.query_params.get('search', '').strip()
         if search:
-            # Search in filename, program_name, and tags
+            # Search in filename, program_name, batch_name, and tags
             from django.db.models import Q
-            q = Q(filename__icontains=search) | Q(program_name__icontains=search)
-            # For tags, we need to search within the JSON array
-            # SQLite doesn't support JSON array search natively, so we'll filter in Python
-            # For PostgreSQL, we could use __contains with a JSONB array
-            # For now, we'll do a simple approach: filter by filename/program_name first,
-            # then filter tags in Python if needed
+            q = (
+                Q(filename__icontains=search)
+                | Q(program_name__icontains=search)
+                | Q(batch_name__icontains=search)
+            )
             queryset = queryset.filter(q)
+            # 全文搜索承诺包含标签：JSONField 无法跨库 SQL 搜索，
+            # 与既有 tag 精确参数同款 Python 预过滤——命中标签的行 OR 回来。
+            search_lower = search.lower()
+            tag_ids = [
+                row['id']
+                for row in DataFile.objects.filter(owner=self.request.user).values('id', 'tags')
+                if any(
+                    search_lower in str(t).lower()
+                    for t in (row.get('tags') or []) if isinstance(t, str)
+                )
+            ]
+            if tag_ids:
+                queryset = queryset | DataFile.objects.filter(
+                    owner=self.request.user, id__in=tag_ids,
+                )
+
+        # 表头列筛选：文件名 / 测试程序 contains（服务端生效，20 条/页必须后端过滤）
+        filename_ic = self.request.query_params.get('filename__icontains', '').strip()
+        if filename_ic:
+            queryset = queryset.filter(filename__icontains=filename_ic)
+        program_ic = self.request.query_params.get('program_name__icontains', '').strip()
+        if program_ic:
+            queryset = queryset.filter(program_name__icontains=program_ic)
 
         # Filter by specific tag
         tag = self.request.query_params.get('tag', '').strip()
@@ -187,6 +216,99 @@ class DataFileViewSet(viewsets.ModelViewSet):
             .order_by('product_code')
         )
         return Response({'product_codes': list(codes)})
+
+    @action(detail=False, methods=['get'])
+    def format_types(self, request):
+        """Distinct non-empty format types for the current user's files."""
+        formats = (
+            DataFile.objects.filter(owner=request.user)
+            .exclude(format_type='')
+            .values_list('format_type', flat=True)
+            .distinct()
+            .order_by('format_type')
+        )
+        return Response({'format_types': list(formats)})
+
+    @action(detail=False, methods=['post'])
+    def combine(self, request):
+        """Combine multiple owned single files into one batch.
+
+        Body: ``{"ids": [1, 2], "batch_name": "LOT-2026"}``.
+
+        The files are physically moved into ``media/data/<user>/batch/<name>/``
+        (the batch model is directory-based) and their rows updated (file_type=
+        'batch', batch_name set, sub_batch cleared). The batch name must be new
+        (an existing batch directory is rejected). ParseHistory rows are audit
+        history and are left untouched. The parse cache is cleared so browse
+        uses new paths.
+        """
+        ids = request.data.get('ids') or []
+        batch_name = (request.data.get('batch_name') or '').strip()
+        if not isinstance(ids, list) or not ids or not all(
+            isinstance(i, int) and not isinstance(i, bool) for i in ids
+        ):
+            return Response(
+                {'error': 'ids must be a non-empty list of integers'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not batch_name:
+            return Response(
+                {'error': 'batch_name is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if re.search(r'[<>:"/\\|?*]', batch_name):
+            return Response(
+                {'error': 'batch_name 包含非法字符'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Owner-scoped and single-only: batch rows moving into another batch
+        # would leave their original directory behind, breaking batch-dirs.
+        qs = DataFile.objects.filter(
+            owner=request.user, id__in=ids, file_type='single',
+        )
+        if qs.count() != len(ids):
+            return Response(
+                {'error': '部分文件不存在、不属于当前用户或不是单文件（仅支持组合单文件）'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        batch_base = _user_upload_dir(request.user, 'batch')
+        batch_dir = os.path.join(batch_base, batch_name)
+        if os.path.exists(batch_dir):
+            return Response(
+                {'error': f'批次 "{batch_name}" 已存在'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        os.makedirs(batch_dir, exist_ok=True)
+
+        updated = []
+        with transaction.atomic():
+            for df in qs.order_by('id'):
+                src = resolve_file_path(df.file_path)
+                if not os.path.exists(src):
+                    continue  # cannot move a missing file; skip it
+                # 新批次目录保证目标名不冲突（单文件目录内文件名唯一）
+                target = os.path.join(batch_dir, df.filename)
+                shutil.move(src, target)
+                df.file_path = store_file_path(target)
+                df.file_type = 'batch'
+                df.batch_name = batch_name
+                df.sub_batch = ''
+                df.save(update_fields=[
+                    'file_path', 'file_type', 'batch_name',
+                    'sub_batch', 'updated_at',
+                ])
+                updated.append(df)
+
+        if updated:
+            clear_parse_cache()
+
+        return Response({
+            'combined': len(updated),
+            'batch_name': batch_name,
+            'files': DataFileSerializer(updated, many=True).data,
+        })
 
     @action(detail=True, methods=['post'])
     def set_tags(self, request, pk=None):

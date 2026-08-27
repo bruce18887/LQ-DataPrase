@@ -30,6 +30,8 @@ from ._helpers import (
     _resolve_product_code,
     _scan_orphaned_disk,
     _user_upload_dir,
+    _find_duplicate_groups,
+    _delete_duplicate_files,
 )
 
 
@@ -312,7 +314,7 @@ class DataBrowserView(APIView):
 # destructive, so it is restricted to administrators; import/fix are additive
 # and mirror upload privileges (administrator + user). Viewers may read the
 # check results (GET stays IsAuthenticated) but cannot mutate anything.
-_DELETE_ACTIONS = ('delete_orphaned_db', 'delete_orphaned_disk')
+_DELETE_ACTIONS = ('delete_orphaned_db', 'delete_orphaned_disk', 'delete_duplicates')
 _MUTATE_ACTIONS = ('import_orphaned_disk', 'fix_product_codes')
 _ALL_ACTIONS = _DELETE_ACTIONS + _MUTATE_ACTIONS
 
@@ -323,7 +325,8 @@ class DataConsistencyCheckView(APIView):
 
     def get(self, request):
         """Check consistency: orphaned DB records, orphaned disk files,
-        and files whose product_code could not be extracted at registration."""
+        files whose product_code could not be extracted at registration,
+        and duplicate files (same filename + size)."""
         user = request.user
 
         # Orphaned DB records: batch rows whose disk file no longer exists.
@@ -376,13 +379,18 @@ class DataConsistencyCheckView(APIView):
                 'file_missing': file_missing,
             })
 
+        # Duplicate files: same filename + size (all file_types).
+        duplicate_groups, duplicate_group_count = _find_duplicate_groups(user)
+
         return Response({
             'orphaned_db_count': len(orphaned_db),
             'orphaned_disk_count': len(orphaned_disk),
             'missing_product_code_count': len(missing),
+            'duplicate_group_count': duplicate_group_count,
             'orphaned_db': orphaned_db[:50],  # Limit to 50 for display
             'orphaned_disk': orphaned_disk[:50],
             'missing_product_code': missing[:50],
+            'duplicate_groups': duplicate_groups,
         })
 
     def post(self, request):
@@ -412,6 +420,12 @@ class DataConsistencyCheckView(APIView):
             return self._delete_orphaned_db(user, action)
         elif action == 'delete_orphaned_disk':
             return self._delete_orphaned_disk(user, action)
+        elif action == 'delete_duplicates':
+            return Response({
+                'status': 'ok',
+                'action': action,
+                'deleted_count': _delete_duplicate_files(user),
+            })
         elif action == 'import_orphaned_disk':
             return self._import_orphaned_disk(user, action)
         return self._fix_product_codes(user, action)

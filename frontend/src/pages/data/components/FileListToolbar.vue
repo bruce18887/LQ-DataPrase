@@ -17,20 +17,16 @@
           <el-icon><Search /></el-icon>
         </template>
       </el-input>
-      <el-select
-        v-model="productCode"
-        placeholder="全部产品"
-        clearable
-        class="product-filter"
-        @change="emit('filter-change', $event)"
+      <el-button
+        type="primary"
+        plain
+        :disabled="selectedCount < 2"
+        :title="selectedCount < 2 ? '勾选至少 2 个文件后组合' : '组合为批次'"
+        @click="emit('combine-click')"
       >
-        <el-option
-          v-for="code in productCodes"
-          :key="code"
-          :label="code"
-          :value="code"
-        />
-      </el-select>
+        <el-icon><Collection /></el-icon>
+        组合为批次
+      </el-button>
       <el-button
         type="primary"
         @click="emit('upload-click')"
@@ -61,24 +57,22 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { Search, Delete, Upload, Tools } from '@element-plus/icons-vue'
+import { Search, Delete, Upload, Tools, Collection } from '@element-plus/icons-vue'
 
 defineProps<{
   total: number
-  productCodes: string[]
   selectedCount: number
 }>()
 
 const emit = defineEmits<{
   search: [text: string]
-  'filter-change': [code: string]
   'upload-click': []
   'fix-click': []
   'bulk-delete': []
+  'combine-click': []
 }>()
 
 const searchText = ref('')
-const productCode = ref('')
 
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -110,6 +104,7 @@ function onSearchInput() {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .section-title {
@@ -128,10 +123,6 @@ function onSearchInput() {
 
 .search-input {
   width: 220px;
-}
-
-.product-filter {
-  width: 160px;
 }
 
 :root[data-theme="night"] .section-count {

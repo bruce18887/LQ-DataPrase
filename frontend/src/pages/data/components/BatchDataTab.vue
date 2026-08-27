@@ -1,6 +1,6 @@
 <template>
-  <div v-if="unregisteredDirs.length > 0 || batchGroups.length > 0" class="batch-section">
-    <!-- Unregistered batch directories -->
+  <div class="batch-data-tab">
+    <!-- Unregistered batch directories (from SFTP downloads) -->
     <template v-if="unregisteredDirs.length > 0">
       <div class="section-label">📂 SFTP 下载目录（未导入）</div>
       <div v-for="dir in unregisteredDirs" :key="dir.name" class="batch-group unregistered">
@@ -109,11 +109,16 @@
         </el-collapse-transition>
       </div>
     </template>
+
+    <el-empty
+      v-if="batchDirs.length === 0"
+      description="暂无批次数据 — 上传 ZIP 压缩包或勾选单文件「组合为批次」会生成批次"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { Upload, Delete, ArrowRight, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { datafilesApi, type BatchDirInfo } from '../../../api/datafiles'
@@ -126,7 +131,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'file-selected': [id: number]
-  'data-changed': []
+  'total-change': [total: number]
 }>()
 
 const filesStore = useFilesStore()
@@ -198,6 +203,7 @@ async function loadBatchDirs() {
   try {
     const { data } = await datafilesApi.listBatchDirs()
     batchDirs.value = Array.isArray(data) ? data : []
+    emit('total-change', batchDirs.value.length)
     // 清理已不存在的批次（用户可能在别的 tab 删了批次）
     const valid = new Set(batchGroups.value.map((g) => g.name))
     const filtered = new Set([...expandedBatches.value].filter((n) => valid.has(n)))
@@ -206,6 +212,7 @@ async function loadBatchDirs() {
     }
   } catch {
     batchDirs.value = []
+    emit('total-change', 0)
   }
 }
 
@@ -216,7 +223,6 @@ async function importDir(dir: BatchDirInfo) {
     ElMessage.success(`批次 "${dir.name}" 已导入`)
     await loadBatchDirs()
     filesStore.notifyFilesChanged()
-    emit('data-changed')
   } catch {
     // 错误 toast 由 axios 拦截器统一弹出
   } finally {
@@ -235,7 +241,6 @@ async function deleteDir(dir: BatchDirInfo) {
     ElMessage.success(`目录 "${dir.name}" 已删除`)
     await loadBatchDirs()
     filesStore.notifyFilesChanged()
-    emit('data-changed')
   } catch {
     // ElMessageBox 取消 reject "cancel"；真实错误 toast 由拦截器弹出
   }
@@ -252,7 +257,6 @@ async function deleteBatch(group: { name: string; files: any[] }) {
     ElMessage.success(`批次 "${group.name}" 已删除`)
     await loadBatchDirs()
     filesStore.notifyFilesChanged()
-    emit('data-changed')
   } catch {
     // ElMessageBox 取消 reject "cancel"；真实错误 toast 由拦截器弹出
   }
@@ -269,11 +273,15 @@ async function deleteSubBatch(batchName: string, subBatchName: string, files: an
     ElMessage.success(`子批次 "${subBatchName}" 已删除`)
     await loadBatchDirs()
     filesStore.notifyFilesChanged()
-    emit('data-changed')
   } catch {
     // ElMessageBox 取消 reject "cancel"；真实错误 toast 由拦截器弹出
   }
 }
+
+// SFTP 导入 / 组合 / 其它 Tab 删除后自动刷新
+watch(() => filesStore.filesVersion, () => {
+  loadBatchDirs()
+})
 
 onMounted(() => {
   loadBatchDirs()
@@ -283,7 +291,7 @@ defineExpose({ loadBatchDirs })
 </script>
 
 <style scoped>
-.batch-section {
+.batch-data-tab {
   margin-bottom: 16px;
 }
 

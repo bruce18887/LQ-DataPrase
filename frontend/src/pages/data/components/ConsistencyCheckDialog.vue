@@ -19,7 +19,7 @@
       </el-button>
     </div>
     <div v-else>
-      <el-descriptions :column="3" border style="margin-bottom: 16px">
+      <el-descriptions :column="4" border style="margin-bottom: 16px">
         <el-descriptions-item label="孤立数据库记录">
           <el-tag :type="result.orphaned_db_count > 0 ? 'danger' : 'success'">
             {{ result.orphaned_db_count }} 条
@@ -33,6 +33,11 @@
         <el-descriptions-item label="产品名缺失">
           <el-tag :type="result.missing_product_code_count > 0 ? 'warning' : 'success'">
             {{ result.missing_product_code_count }} 条
+          </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="重复文件">
+          <el-tag :type="result.duplicate_group_count > 0 ? 'danger' : 'success'">
+            {{ result.duplicate_group_count }} 组
           </el-tag>
         </el-descriptions-item>
       </el-descriptions>
@@ -62,9 +67,18 @@
         @fix="handleFix"
       />
 
+      <!-- 重复文件（文件名+大小相同；仅管理员可删除） -->
+      <DuplicateFilesCard
+        :groups="result.duplicate_groups"
+        :total-count="result.duplicate_group_count"
+        :fixing="fixingAction === 'delete_duplicates'"
+        :can-delete="isAdmin"
+        @fix="handleFixDeleteDuplicates"
+      />
+
       <!-- 无问题 -->
       <div
-        v-if="result.orphaned_db_count === 0 && result.orphaned_disk_count === 0 && result.missing_product_code_count === 0"
+        v-if="result.orphaned_db_count === 0 && result.orphaned_disk_count === 0 && result.missing_product_code_count === 0 && result.duplicate_group_count === 0"
         style="text-align: center; padding: 30px"
       >
         <el-icon :size="64" style="color: var(--color-success)"><CircleCheck /></el-icon>
@@ -87,9 +101,11 @@ import { ref, computed } from 'vue'
 import { CircleCheck } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { datafilesApi, type ConsistencyCheckResult, type ConsistencyFixAction, type FixConsistencyResponse } from '../../../api/datafiles'
+import { useAuthStore } from '../../../stores/auth'
 import OrphanedDbCard from './OrphanedDbCard.vue'
 import OrphanedDiskCard from './OrphanedDiskCard.vue'
 import MissingProductCodeCard from './MissingProductCodeCard.vue'
+import DuplicateFilesCard from './DuplicateFilesCard.vue'
 
 const props = defineProps<{
   visible: boolean
@@ -99,6 +115,8 @@ const emit = defineEmits<{
   'update:visible': [value: boolean]
   done: []
 }>()
+
+const isAdmin = useAuthStore().isAdmin
 
 const visible = computed({
   get: () => props.visible,
@@ -127,6 +145,8 @@ function summarize(action: ConsistencyFixAction, data: FixConsistencyResponse): 
       return `已删除 ${data.deleted_count} 条孤立数据库记录`
     case 'delete_orphaned_disk':
       return `已删除 ${data.deleted_count} 个孤立磁盘文件`
+    case 'delete_duplicates':
+      return `已删除 ${data.deleted_count} 个重复文件`
     case 'import_orphaned_disk': {
       const skipped = data.skipped_count ? `，${data.skipped_count} 个跳过` : ''
       return `已导入 ${data.imported_count} 个孤立文件${skipped}`
@@ -150,5 +170,9 @@ async function handleFix(action: ConsistencyFixAction) {
   } finally {
     fixingAction.value = null
   }
+}
+
+async function handleFixDeleteDuplicates() {
+  await handleFix('delete_duplicates')
 }
 </script>

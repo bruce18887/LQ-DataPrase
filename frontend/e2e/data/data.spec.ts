@@ -6,6 +6,7 @@ import { SEEDED_FILE_COUNT, PRIMARY_SAMPLE_FILE, SEEDED_FILES } from '../fixture
 import { gotoApp } from '../helpers/nav'
 import { uploadFile, uploadMultipleFiles, expectUploadSuccess } from '../helpers/upload'
 import { elSelectByPlaceholder, visibleSelectOptions } from '../helpers/elplus'
+import { openHeaderFilter, selectHeaderFilterOption } from '../helpers/colfilter'
 
 const SEEDED_MIN = SEEDED_FILE_COUNT
 
@@ -230,7 +231,7 @@ test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删�
     ).toBeGreaterThan(0)
   })
 
-  test('@p2 产品筛选：下拉存在并可选择产品过滤', async ({ page }) => {
+  test('@p2 产品筛选：表头下拉存在并可选择产品过滤', async ({ page }) => {
     await gotoApp(page, '/data')
     await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
 
@@ -247,9 +248,9 @@ test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删�
     expect(Array.isArray(codes.codes)).toBe(true)
 
     if (codes.codes.length > 0) {
-      // 打开“全部产品”下拉并选第一个产品
-      await elSelectByPlaceholder(page.locator('.file-list-tab'), '全部产品').first().click()
-      await visibleSelectOptions(page).first().click()
+      // 打开表头「产品」筛选下拉并选第一个产品
+      await openHeaderFilter(page, 'product')
+      await selectHeaderFilterOption(page, 'product', codes.codes[0])
       // 列表至少应有一行（选中产品存在文件）
       await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
     }
@@ -344,11 +345,15 @@ test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删�
       await expectUploadSuccess(page)
       await expect(page.locator('.el-table').getByText(uniqueName)).toBeVisible({ timeout: 15_000 })
 
-      // 不刷新页面，直接打开“全部产品”下拉——修复前下拉只在 onMounted 拉取，
+      // 不刷新页面，直接打开表头「产品」筛选下拉——修复前下拉只在 onMounted 拉取，
       // 新上传文件的产品码不会出现（甚至 no data）。修复后应立即包含该码。
-      await elSelectByPlaceholder(page.locator('.file-list-tab'), '全部产品').first().click()
+      await openHeaderFilter(page, 'product')
+      // 点开下拉选项面板（teleport 到 body）；选项含新上传文件的产品码
+      await page
+        .locator('.col-filter-popper:visible [data-testid="col-filter-select-product"] .el-select__wrapper')
+        .click()
       await expect(
-        visibleSelectOptions(page).filter({ hasText: code }),
+        page.locator('.el-select-dropdown__item:visible').filter({ hasText: code }),
       ).toHaveCount(1, { timeout: 10_000 })
     } finally {
       fs.rmSync(tmpPath, { force: true })
@@ -672,8 +677,8 @@ test.describe('数据管理 /data 文件列表展开行（方案A）', { tag: ['
     // 4) 完整文件名在展开行内可见（不依赖 middle-ellipsis 截断）
     await expect(detail).toContainText(fileInfo.filename)
 
-    // 5) 展开行内显示"完整文件名/测试程序/所有标签"三行
-    await expect(detail.locator('.detail-label')).toHaveText(['完整文件名', '测试程序', '所有标签'])
+    // 5) 展开行内显示"完整文件名/行列/测试程序/所有标签"四行
+    await expect(detail.locator('.detail-label')).toHaveText(['完整文件名', '行列', '测试程序', '所有标签'])
   })
 
   test('@p2 无 popover 弹框：hover 文件名/测试程序 不出现 el-popper', async ({ page }) => {
@@ -791,11 +796,19 @@ test.describe('数据管理 /data 已导入批次展开/折叠', { tag: ['@data'
     return (Array.isArray(data) ? data : []).filter((d) => d.registered)
   }
 
+  /** 进入 /data 并切换到「批次数据」Tab（批次区已从文件列表 Tab 独立出来） */
+  async function gotoBatchTab(page: import('@playwright/test').Page) {
+    await gotoApp(page, '/data')
+    const batchTab = page.locator('.tabs-nav .tab-btn').filter({ hasText: '批次数据' })
+    await batchTab.click()
+    await expect(page.locator('.tab-btn.active')).toContainText('批次数据')
+  }
+
   test('@p1 默认折叠：进入页面后所有已导入批次不展示文件 tag', async ({ page }) => {
     const registered = await getRegisteredBatches(page)
     test.skip(registered.length === 0, '当前环境无已注册批次，跳过默认折叠断言')
 
-    await gotoApp(page, '/data')
+    await gotoBatchTab(page)
 
     await expect(page.locator('[data-testid^="batch-group-"]').first()).toBeVisible({ timeout: 15_000 })
 
@@ -812,7 +825,7 @@ test.describe('数据管理 /data 已导入批次展开/折叠', { tag: ['@data'
     const registered = await getRegisteredBatches(page)
     test.skip(registered.length === 0, '当前环境无已注册批次，跳过点击展开断言')
 
-    await gotoApp(page, '/data')
+    await gotoBatchTab(page)
 
     const first = registered[0]
     const header = page.locator(`[data-testid="batch-header-${first.name}"]`)
@@ -834,7 +847,7 @@ test.describe('数据管理 /data 已导入批次展开/折叠', { tag: ['@data'
     const registered = await getRegisteredBatches(page)
     test.skip(registered.length === 0, '当前环境无已注册批次，跳过 toggle-all 断言')
 
-    await gotoApp(page, '/data')
+    await gotoBatchTab(page)
 
     const toggleAll = page.locator('[data-testid="batch-toggle-all"]')
     await expect(toggleAll).toBeVisible({ timeout: 15_000 })
@@ -857,7 +870,7 @@ test.describe('数据管理 /data 已导入批次展开/折叠', { tag: ['@data'
     const registered = await getRegisteredBatches(page)
     test.skip(registered.length === 0, '当前环境无已注册批次，跳过键盘可达性断言')
 
-    await gotoApp(page, '/data')
+    await gotoBatchTab(page)
 
     const first = registered[0]
     const header = page.locator(`[data-testid="batch-header-${first.name}"]`)

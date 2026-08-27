@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import BaseATEParser, get_parser
+from apps.datafiles.services import clear_parse_cache
 from apps.datafiles.utils import extract_product_code, resolve_file_path, store_file_path
 
 
@@ -155,6 +156,99 @@ def _delete_datafile_on_disk(datafile):
                 os.remove(file_path)
     except OSError:
         pass
+
+
+def _delete_datafile_file_only(datafile):
+    """Remove only the file backing a DataFile — never the batch directory.
+
+    Used by duplicate cleanup, where batch siblings must survive (the generic
+    ``_delete_datafile_on_disk`` rmtrees the whole batch dir for batch rows,
+    which would mistakenly wipe non-duplicate files sharing the same batch).
+    Empty parent directories are cleaned upward, stopping at MEDIA_ROOT;
+    ``_user_upload_dir`` recreates its own dirs on demand, so this is safe.
+    """
+    file_path = resolve_file_path(datafile.file_path)
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        parent = os.path.dirname(file_path)
+        root = os.path.normpath(settings.MEDIA_ROOT)
+        while parent and os.path.normpath(parent) != root:
+            try:
+                if os.path.isdir(parent) and not os.listdir(parent):
+                    os.rmdir(parent)
+                else:
+                    break
+            except OSError:
+                break
+            parent = os.path.dirname(parent)
+    except OSError:
+        pass
+
+
+def _group_duplicates(user):
+    """Group the user's files by exact (filename, file_size) match.
+
+    Returns a list of groups, each ``{'filename', 'file_size', 'files': [...]}``
+    where ``files`` is ordered by id ascending (the first entry is the
+    canonical file kept when duplicates are cleaned). Groups with fewer than
+    two files are dropped. Works across single and batch files.
+    """
+    grouped = {}
+    rows = DataFile.objects.filter(owner=user).order_by('id').values(
+        'id', 'filename', 'file_size', 'file_type', 'batch_name', 'sub_batch',
+        'created_at',
+    )
+    for r in rows:
+        key = (r['filename'], r['file_size'])
+        group = grouped.setdefault(key, {
+            'filename': r['filename'],
+            'file_size': r['file_size'],
+            'files': [],
+        })
+        group['files'].append({
+            'id': r['id'],
+            'filename': r['filename'],
+            'file_size': r['file_size'],
+            'file_type': r['file_type'],
+            'batch_name': r['batch_name'] or '',
+            'sub_batch': r['sub_batch'] or '',
+            'created_at': r['created_at'].isoformat() if r['created_at'] else '',
+        })
+    groups = [g for g in grouped.values() if len(g['files']) >= 2]
+    groups.sort(key=lambda g: (g['filename'].lower(), g['file_size']))
+    return groups
+
+
+def _find_duplicate_groups(user, limit=50):
+    """Duplicate groups for the repair center: ``(groups, total_group_count)``.
+
+    ``groups`` is capped at ``limit`` for display; the count reflects all.
+    """
+    groups = _group_duplicates(user)
+    return groups[:limit], len(groups)
+
+
+def _delete_duplicate_files(user):
+    """Delete duplicate files (same filename+size), keeping the lowest id per
+    group (the earliest registered). Returns the number of deleted rows.
+
+    Per-file transaction so a mid-way failure never rolls back completed
+    deletions; the action is idempotent. Only the duplicate file is removed —
+    an existing batch directory and its remaining files are untouched.
+    """
+    deleted_count = 0
+    for group in _group_duplicates(user):
+        for item in group['files'][1:]:
+            df = DataFile.objects.filter(owner=user, pk=item['id']).first()
+            if df is None:
+                continue
+            with transaction.atomic():
+                _delete_datafile_file_only(df)
+                df.delete()
+            deleted_count += 1
+    clear_parse_cache()
+    return deleted_count
 
 
 def _batch_ctx(file_path, batch_base):
