@@ -28,6 +28,11 @@ export async function startSftpServer(): Promise<SftpTestServer> {
   fs.mkdirSync(path.join(root, 'sub1'))
   fs.writeFileSync(path.join(root, 'sub1', 'sample.csv'), 'a,b\n1,2\n')
   fs.writeFileSync(path.join(root, 'root.csv'), 'x,y\n1,2\n')
+  // 非 CSV 文件：验证「仅 CSV」过滤默认隐藏、切换「全部文件」后可见
+  fs.writeFileSync(path.join(root, 'notes.txt'), 'not a csv\n')
+  // 大文件：验证单文件下载 SSE 进度（百分比/速率）
+  const bigRows = Array.from({ length: 200_000 }, (_, i) => `${i},${i * 2}\n`).join('')
+  fs.writeFileSync(path.join(root, 'big.csv'), 'n,double\n' + bigRows)
 
   const script = path.resolve(__dirname, 'sftp_server.py')
   const proc = spawn(PYTHON_BIN, [script, '--root', root], { stdio: ['ignore', 'pipe', 'pipe'] })

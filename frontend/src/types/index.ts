@@ -22,6 +22,7 @@ export interface UserSettings {
   chart_renderer: 'svg' | 'canvas'
   export_filename_templates: Record<ExportTypeKey, string>
   export_timeout: number
+  sftp_download_timeout: number
   default_hidden_columns: string[]
 }
 
@@ -42,6 +43,8 @@ export interface SettingsData {
   histogram_label_offset: number
   export_filename_templates: Record<ExportTypeKey, string>
   export_timeout: number
+  /** SFTP 浏览器单文件下载超时（秒）：SSE 流服务端 deadline + axios timeout */
+  sftp_download_timeout: number
   /** 默认隐藏列（记录级列名）：导出 Excel 与查看数据 ag-grid 共用 */
   default_hidden_columns: string[]
 }

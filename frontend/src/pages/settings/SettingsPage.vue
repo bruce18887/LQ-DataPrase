@@ -80,6 +80,7 @@ const defaults: SettingsData = {
   histogram_label_offset: 4,
   export_filename_templates: defaultTemplates(),
   export_timeout: 600,
+  sftp_download_timeout: 600,
   default_hidden_columns: [...DEFAULT_HIDDEN_COLUMNS],
 }
 

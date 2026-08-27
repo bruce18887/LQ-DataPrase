@@ -2,13 +2,15 @@
   <el-card class="download-progress-card" shadow="never">
     <div class="progress-info">
       <span class="progress-title">
-        <el-icon><Download /></el-icon> 正在下载目录...
+        <el-icon><Download /></el-icon>
+        {{ mode === 'file' ? `正在下载 ${progress.currentFile}` : '正在下载目录...' }}
       </span>
-      <span class="progress-stats">{{ progress.current }}/{{ progress.total }} 文件</span>
+      <span class="progress-stats" v-if="mode === 'dir'">{{ progress.current }}/{{ progress.total }} 文件</span>
+      <span class="progress-stats" v-else>{{ formatBytes(progress.bytes_done) }} / {{ formatBytes(progress.total_bytes) }}</span>
     </div>
     <el-progress :percentage="progress.percent" :stroke-width="12" :format="(p: number) => `${p}%`" />
     <div class="progress-detail">
-      <span>{{ progress.currentFile }}</span>
+      <span v-if="mode === 'dir'">{{ progress.currentFile }}</span>
       <span>{{ progress.speed > 0 ? `${progress.speed} MB/s` : '' }}{{ progress.eta > 0 ? ` · 预计剩余 ${progress.eta}s` : '' }}</span>
     </div>
   </el-card>
@@ -17,7 +19,13 @@
 <script setup lang="ts">
 import { Download } from '@element-plus/icons-vue'
 
+/**
+ * 下载进度卡片：
+ * - mode='dir'：目录批量下载（文件名 + N/M 个文件 + 百分比/速率/ETA）
+ * - mode='file'：单文件下载（文件名 + 已完成字节/总字节 + 百分比/速率/ETA）
+ */
 defineProps<{
+  mode: 'file' | 'dir'
   progress: {
     percent: number
     speed: number
@@ -25,8 +33,18 @@ defineProps<{
     currentFile: string
     current: number
     total: number
+    bytes_done: number
+    total_bytes: number
   }
 }>()
+
+function formatBytes(bytes: number): string {
+  if (!bytes) return '0 B'
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+  return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB'
+}
 </script>
 
 <style scoped>

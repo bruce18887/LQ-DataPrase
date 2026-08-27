@@ -303,7 +303,7 @@ test.describe('@p2 SFTP 真实下载（env-gated）', { tag: ['@p2', '@sftp'] },
 
     const [dlResp] = await Promise.all([
       page.waitForResponse(
-        (r) => r.url().includes('/sftp/download/') && r.request().method() === 'POST',
+        (r) => r.url().includes('/sftp/download_file_stream/') && r.request().method() === 'POST',
         { timeout: 60_000 },
       ),
       firstDownloadBtn.click(),

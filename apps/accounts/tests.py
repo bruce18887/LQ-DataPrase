@@ -330,7 +330,8 @@ class UserSettingsApiTests(APITestCase):
         self.assertEqual(
             set(templates.keys()),
             {'to_excel', 'to_csv', 'sigma_limit', 'html_report',
-             'batch_charts', 'batch_report', 'buyoff', 'gage'},
+             'batch_charts', 'batch_report', 'buyoff', 'gage',
+             'file_correlation'},
         )
         # Defaults match the built-in templates
         self.assertEqual(templates['to_excel'], '{filename}_analysis')
@@ -399,6 +400,29 @@ class UserSettingsApiTests(APITestCase):
 
     def test_put_export_timeout_non_integer_returns_400(self):
         resp = self.client.put(self.url, {'export_timeout': 'abc'}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_get_settings_returns_default_sftp_download_timeout(self):
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['sftp_download_timeout'], 600)
+
+    def test_put_updates_sftp_download_timeout_and_round_trips(self):
+        resp = self.client.put(self.url, {'sftp_download_timeout': 900}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.data['sftp_download_timeout'], 900)
+
+    def test_put_sftp_download_timeout_below_min_returns_400(self):
+        resp = self.client.put(self.url, {'sftp_download_timeout': 29}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_put_sftp_download_timeout_above_max_returns_400(self):
+        resp = self.client.put(self.url, {'sftp_download_timeout': 3601}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_put_sftp_download_timeout_non_integer_returns_400(self):
+        resp = self.client.put(self.url, {'sftp_download_timeout': 'abc'}, format='json')
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_get_settings_returns_default_chart_renderer(self):
