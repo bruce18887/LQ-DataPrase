@@ -128,9 +128,12 @@ async function refreshAccessToken(): Promise<string | null> {
   return refreshPromise
 }
 
-function isAuthEndpoint(url?: string): boolean {
-  return !!url && url.includes('/auth/')
-}
+/** 401 时**不做刷新重试、直接 forceLogout** 的端点（仅限登录/注销/刷新本身）：
+ *  login 的 401 是凭据错误（页面内联处理）；logout/refresh 的 401 意味着
+ * 会话已死。注意：/auth/profile/ 等受保护端点必须走刷新管线——否则过期后
+ * 整页刷新时 Topbar 的 profile 401 会先于任何业务请求到达而强制登出，
+ * 刷新续签功能形同虚设（2026-08-29 e2e 复现修正）。 */
+const NON_RETRY_AUTH_ENDPOINTS = ['/auth/login/', '/auth/logout/', '/auth/refresh/']
 
 // 这几个端点的错误由页面/管线自行处理，拦截器不弹全局 toast：
 // 登录页有内联错误 UI，refresh 在 401 刷新管线中静默处理。
@@ -196,7 +199,7 @@ api.interceptors.response.use(
     if (
       !originalRequest
       || originalRequest._retry
-      || isAuthEndpoint(originalRequest.url)
+      || NON_RETRY_AUTH_ENDPOINTS.some((endpoint) => (originalRequest.url ?? '').includes(endpoint))
       || !localStorage.getItem('refresh_token')
     ) {
       forceLogout()

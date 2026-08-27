@@ -34,20 +34,28 @@
           <span class="tab-icon">{{ tab.icon }}</span>
           <span class="tab-label">{{ tab.label }}</span>
           <span v-if="tab.key === 'files' && fileTotal" class="tab-badge">{{ fileTotal }}</span>
+          <span v-if="tab.key === 'batch' && batchTotal" class="tab-badge">{{ batchTotal }}</span>
         </button>
       </div>
     </div>
 
     <!-- Content -->
     <div class="tab-content">
-      <!-- 文件列表（整合上传、标签、批次管理） -->
+      <!-- 文件列表（单文件：上传、表头筛选、组合批次） -->
       <div v-show="activeTab === 'files'" role="tabpanel" class="content-section fade-in">
         <FileListTab
-          :active-file-id="activeFileId ?? undefined"
           @view-file="viewFile"
           @row-click="onRowClick"
           @total-change="fileTotal = $event"
+        />
+      </div>
+
+      <!-- 批次数据（ZIP/SFTP 导入 + 组合生成的批次） -->
+      <div v-show="activeTab === 'batch'" role="tabpanel" class="content-section fade-in">
+        <BatchDataTab
+          :active-file-id="activeFileId ?? undefined"
           @file-selected="onFileManagerSelect"
+          @total-change="batchTotal = $event"
         />
       </div>
 
@@ -119,6 +127,7 @@ import api from '../../api'
 import { useFilesStore } from '../../stores/files'
 import FileSelect from '../../components/common/FileSelect.vue'
 import FileListTab from './components/FileListTab.vue'
+import BatchDataTab from './components/BatchDataTab.vue'
 import DataBrowserAgGrid from './DataBrowserAgGrid.vue'
 import ExportToolsTab from './ExportToolsTab.vue'
 import GageSummary from './GageSummary.vue'
@@ -128,12 +137,14 @@ import FileCorrelationSection from './components/correlation/FileCorrelationSect
 // 用于导出下拉与当前文件名解析的轻量全量列表（FileListTab 自管分页列表）
 const files = ref<any[]>([])
 const fileTotal = ref(0)
+const batchTotal = ref(0)
 const activeTab = ref('files')
 const activeFileId = ref<number | null>(null)
 const filesStore = useFilesStore()
 
 const tabs = [
   { key: 'files', label: '文件列表', icon: '📋' },
+  { key: 'batch', label: '批次数据', icon: '📦' },
   { key: 'view', label: '查看数据', icon: '🔍' },
   { key: 'export', label: '导出工具', icon: '📥' },
   { key: 'compare', label: '文件对比', icon: '📁' },

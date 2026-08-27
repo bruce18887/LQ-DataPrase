@@ -1,11 +1,13 @@
 import { test, expect, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
+import { openHeaderFilter, selectHeaderFilterOption } from '../helpers/colfilter'
 
 /**
- * 文件列表表头排序 + 筛选（需求5，2026-08-20）：
- * - 文件名/上传时间/大小三列可点表头排序（服务端 ordering，默认最新上传在前）
- * - 上传时间范围（daterange）与大小 min~max 筛选（服务端生效）
- * - 筛选行「清除筛选」恢复默认
+ * 数据管理 → 文件列表：表头筛选 + 排序 + 列宽可达性（2026-08-29 需求 4/5/6）。
+ * - 产品/格式/标签：表头下拉筛选（服务端参数 product_code/format_type/tag）
+ * - 文件名/测试程序：表头 contains 输入（filename__icontains/program_name__icontains）
+ * - 排序保留：文件名/上传时间/大小 表头排序（服务端 ordering，默认最新上传在前）
+ * - 列宽：窄视口下列保持 min-width + 横向滚动条常显，所有列可达
  *
  * 注意：20 条/页服务端分页——排序/筛选都必须断言请求参数与响应，而非本地行序。
  */
@@ -34,13 +36,17 @@ async function fetchAllFiles(page: Page) {
 test.describe('数据管理 → 文件列表排序/筛选', { tag: ['@data'] }, () => {
   test('@p1 默认排序：上传时间倒序（最新在前）且表头显示降序箭头', async ({ page }) => {
     await gotoApp(page, '/data')
-    const { createdDesc, newest } = await fetchAllFiles(page)
+    const { createdDesc } = await fetchAllFiles(page)
     expect(createdDesc, '服务端默认应按上传时间倒序').toBe(true)
 
-    // 表格首行 = 最新文件（服务端分页首页）
-    await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
-    const firstRow = page.locator('.el-table .el-table__row').first()
-    await expect(firstRow).toContainText(newest.slice(0, 12))
+    // 表格首行 = 最新上传的单文件。并行 worker 同时上传会让「最新」在断言窗口内变化——
+    // 收敛轮询：不一致就重取 API 最新值再对（新上传者只会把首行换成更新文件，最终必然匹配）。
+    await expect.poll(async () => {
+      const { newest } = await fetchAllFiles(page)
+      const firstRow = page.locator('.el-table .el-table__row').first()
+      const text = await firstRow.textContent()
+      return text?.includes(newest.slice(0, 12)) ?? false
+    }, { timeout: 15_000 }).toBe(true)
 
     // 上传时间列表头显示降序箭头（default-sort prop=created_at descending）
     const timeHeader = page.locator('.el-table__header th').filter({ hasText: '上传时间' }).first()
@@ -71,71 +77,180 @@ test.describe('数据管理 → 文件列表排序/筛选', { tag: ['@data'] }, 
     expect([...sizesDesc].sort((a, b) => b - a).join(','), '第二次点击应为降序').toBe(sizesDesc.join(','))
   })
 
-  test('@p2 上传时间范围筛选：区间内文件保留，区间外排除', async ({ page }) => {
+  test('@p2 表头筛选-产品下拉：请求带 product_code，列表只剩该产品', async ({ page }) => {
     await gotoApp(page, '/data')
     await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
 
-    // 取最近一个文件的创建日期作为区间
-    const { newestDate } = await page.evaluate(async () => {
+    // 取任一产品的编码作为筛选值
+    const { codes } = await page.evaluate(async () => {
       const token = localStorage.getItem('access_token')
-      const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
-      const d = await fetch('/api/v1/files/?page_size=10000', { headers }).then((r) => r.json())
-      const list: any[] = Array.isArray(d) ? d : (d.results ?? [])
-      return { newestDate: list[0]?.created_at?.slice(0, 10) ?? '' }
+      const res = await fetch('/api/v1/files/product_codes/', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      }).then((r) => r.json())
+      return { codes: res.product_codes ?? [] }
     })
-    expect(newestDate).toBeTruthy()
+    test.skip(codes.length === 0, '环境无产品编码，跳过')
+    const pick = codes[0]
 
-    const [start, end] = [newestDate, newestDate]
-    const respPromise = waitFilesRequest(page, (url) =>
-      url.includes(`created_at__gte=${start}`) && url.includes(`created_at__lte=${end}`))
-    // 直接填触发器内嵌的两个日期输入框（daterange 触发器含 开始/结束 两个 input）
-    const datePicker = page.locator('.sort-filter-row .el-date-editor').first()
-    await datePicker.locator('input').first().click()
-    await datePicker.locator('input').first().fill(start)
-    await datePicker.locator('input').nth(1).click()
-    await datePicker.locator('input').nth(1).fill(end)
-    await page.keyboard.press('Enter')
+    await openHeaderFilter(page, 'product')
+    const respPromise = waitFilesRequest(page, (url) => url.includes(`product_code=${encodeURIComponent(pick)}`))
+    await selectHeaderFilterOption(page, 'product', pick)
     const resp = await respPromise
     const body = await resp.json()
-    const names = (body.results ?? []).map((f: any) => f.filename)
-    // 区间内应包含最新文件；总数为该日上传文件数（>0）
-    expect(names.length).toBeGreaterThan(0)
-    for (const n of names) {
-      expect(n).toBeTruthy()
+    const files: any[] = body.results ?? []
+    expect(files.length).toBeGreaterThan(0)
+    for (const f of files) {
+      expect(f.product_code).toBe(pick)
+    }
+
+    // 清除筛选 → 恢复全量（请求不带 product_code）
+    const clearBtn = page.locator('[data-testid="col-filter-clear-product"]')
+    await expect(clearBtn).toBeVisible()
+    const respAllPromise = waitFilesRequest(page, (url) => !url.includes('product_code='))
+    await clearBtn.click()
+    await respAllPromise
+  })
+
+  test('@p2 表头筛选-格式下拉：请求带 format_type', async ({ page }) => {
+    await gotoApp(page, '/data')
+    await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
+
+    const { formats } = await page.evaluate(async () => {
+      const token = localStorage.getItem('access_token')
+      const res = await fetch('/api/v1/files/format_types/', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      }).then((r) => r.json())
+      return { formats: res.format_types ?? [] }
+    })
+    test.skip(formats.length === 0, '环境无格式数据，跳过')
+    const pick = formats[0]
+
+    await openHeaderFilter(page, 'format')
+    const respPromise = waitFilesRequest(page, (url) => url.includes(`format_type=${encodeURIComponent(pick)}`))
+    await selectHeaderFilterOption(page, 'format', pick)
+    const resp = await respPromise
+    const body = await resp.json()
+    const files: any[] = body.results ?? []
+    expect(files.length).toBeGreaterThan(0)
+    for (const f of files) {
+      expect(f.format_type).toBe(pick)
     }
   })
 
-  test('@p2 大小范围筛选 + 清除筛选恢复', async ({ page }) => {
+  test('@p2 表头筛选-文件名输入：请求带 filename__icontains', async ({ page }) => {
     await gotoApp(page, '/data')
     await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
 
-    // 只保留 ≤1KB 的文件
-    const respPromise = waitFilesRequest(page, (url) => url.includes('file_size__lte=1024'))
-    const minInput = page.locator('.sort-filter-row .el-input-number input').first()
-    await minInput.click()
-    await minInput.fill('0')
-    await minInput.press('Tab')
-    await minInput.click()
-    const maxInput = page.locator('.sort-filter-row .el-input-number input').nth(1)
-    await maxInput.click()
-    await maxInput.fill('1024')
-    await maxInput.press('Tab')
+    const { sample } = await page.evaluate(async () => {
+      const token = localStorage.getItem('access_token')
+      const d = await fetch('/api/v1/files/?page_size=10000', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      }).then((r) => r.json())
+      const list: any[] = Array.isArray(d) ? d : (d.results ?? [])
+      return { sample: list[0]?.filename?.slice(0, 6) ?? '' }
+    })
+    test.skip(!sample, '环境无文件，跳过')
+
+    await openHeaderFilter(page, 'filename')
+    const respPromise = waitFilesRequest(page, (url) => url.includes(`filename__icontains=${encodeURIComponent(sample)}`))
+    // el-input 的 attrs 落在原生 input 上（inheritAttrs:false），testid 即 input 本身
+    await page.locator('[data-testid="col-filter-input-filename"]').fill(sample)
     const resp = await respPromise
     const body = await resp.json()
-    const sizes = (body.results ?? []).map((f: any) => f.file_size ?? 0)
-    for (const s of sizes) {
-      expect(s).toBeLessThanOrEqual(1024)
+    const files: any[] = body.results ?? []
+    expect(files.length).toBeGreaterThan(0)
+    for (const f of files) {
+      expect(f.filename.toLowerCase()).toContain(sample.toLowerCase())
     }
+  })
 
-    // 清除筛选 → 恢复全量（清除按钮出现且可点）
-    const clearBtn = page.locator('.sort-filter-row button').filter({ hasText: '清除筛选' })
-    await expect(clearBtn).toBeEnabled()
-    const respAllPromise = waitFilesRequest(page, (url) =>
-      !url.includes('file_size__') && url.includes('ordering=-created_at'))
-    await clearBtn.click()
-    await respAllPromise
-    // 筛选输入已清空
-    await expect(page.locator('.sort-filter-row .el-input-number input').first()).toHaveValue('')
-    await expect(page.locator('.sort-filter-row .el-input-number input').nth(1)).toHaveValue('')
+  test('@p2 表头筛选-测试程序输入：请求带 program_name__icontains', async ({ page }) => {
+    await gotoApp(page, '/data')
+    await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
+
+    const { sample } = await page.evaluate(async () => {
+      const token = localStorage.getItem('access_token')
+      const d = await fetch('/api/v1/files/?page_size=10000', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      }).then((r) => r.json())
+      const list: any[] = Array.isArray(d) ? d : (d.results ?? [])
+      const withProgram = list.find((f: any) => f.program_name)
+      return { sample: withProgram?.program_name?.slice(0, 4) ?? '' }
+    })
+    test.skip(!sample, '环境无程序名，跳过')
+
+    await openHeaderFilter(page, 'program')
+    const respPromise = waitFilesRequest(page, (url) => url.includes(`program_name__icontains=${encodeURIComponent(sample)}`))
+    await page.locator('[data-testid="col-filter-input-program"]').fill(sample)
+    const resp = await respPromise
+    const body = await resp.json()
+    const files: any[] = body.results ?? []
+    expect(files.length).toBeGreaterThan(0)
+    for (const f of files) {
+      expect((f.program_name || '').toLowerCase()).toContain(sample.toLowerCase())
+    }
+  })
+
+  test('@p2 表头筛选-标签下拉：请求带 tag，仅含该标签', async ({ page }) => {
+    await gotoApp(page, '/data')
+    await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
+
+    // 给最新一个文件挂唯一标签（API 造数），再按标签筛选
+    const tagValue = `e2e_hdr_${Date.now()}`
+    const { fileId } = await page.evaluate(async (tv) => {
+      const token = localStorage.getItem('access_token')
+      const d = await fetch('/api/v1/files/?page_size=10000', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      }).then((r) => r.json())
+      const list: any[] = Array.isArray(d) ? d : (d.results ?? [])
+      const target = list.find((f: any) => f.file_type === 'single')
+      if (!target) return { fileId: 0 }
+      await fetch(`/api/v1/files/${target.id}/set_tags/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ tags: [...(target.tags ?? []), tv] }),
+      })
+      return { fileId: target.id }
+    }, tagValue)
+    test.skip(!fileId, '环境无单文件，跳过')
+
+    // 刷新页面：标签下拉数据源（listTags）在 onMounted 加载，新标签需重建
+    await page.reload()
+    await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
+
+    await openHeaderFilter(page, 'tag')
+    const respPromise = waitFilesRequest(page, (url) => url.includes(`tag=${encodeURIComponent(tagValue)}`))
+    await selectHeaderFilterOption(page, 'tag', tagValue)
+    const resp = await respPromise
+    const body = await resp.json()
+    const files: any[] = body.results ?? []
+    expect(files.length).toBeGreaterThan(0)
+    for (const f of files) {
+      expect(Array.isArray(f.tags) ? f.tags : []).toContain(tagValue)
+    }
+  })
+
+  test('@p2 列宽优化：窄视口下列保持 min-width，横向滚动后所有列可达', async ({ page }) => {
+    await page.setViewportSize({ width: 1180, height: 800 })
+    await gotoApp(page, '/data')
+    await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
+
+    // ① 横向滚动条常显（CSS 覆盖 opacity=1，thumb 始终可见）
+    await expect(page.locator('.el-table .el-scrollbar__bar.is-horizontal').first())
+      .toHaveCSS('opacity', '1')
+
+    // ② 窄视口下表格内容超出容器（min-width 生效，未被压缩吞掉）
+    const bodyWrap = page.locator('.el-table__body-wrapper .el-scrollbar__wrap').first()
+    await expect.poll(async () => {
+      return bodyWrap.evaluate((el) => (el as HTMLElement).scrollWidth - (el as HTMLElement).clientWidth)
+    }).toBeGreaterThan(0)
+
+    // ③ 横向滚动到最右后，「大小」列表头完整进入可视区域（所有列可达）
+    await bodyWrap.evaluate((el) => { (el as HTMLElement).scrollLeft = (el as HTMLElement).scrollWidth })
+    const sizeHeader = page.locator('.el-table__header th').filter({ hasText: '大小' }).first()
+    await expect(sizeHeader).toBeInViewport({ timeout: 5_000 })
   })
 })

@@ -134,10 +134,15 @@ test.describe('认证与路由守卫', { tag: ['@auth'] }, () => {
     await page.goto('/data')
     await expect(page).toHaveURL(/\/data/, { timeout: 15_000 })
 
+    // 刷新在请求管线内异步完成（URL 到位 ≠ 续签已落盘）：轮询等新 access 写入
+    await expect.poll(
+      () => page.evaluate(() => localStorage.getItem('access_token')),
+      { timeout: 15_000 },
+    ).not.toBe('invalid.token.value')
+
     const newAccess = await page.evaluate(() => localStorage.getItem('access_token'))
     const newRefresh = await page.evaluate(() => localStorage.getItem('refresh_token'))
     expect(newAccess).toBeTruthy()
-    expect(newAccess).not.toBe('invalid.token.value')
     // access token 续签过，必须不等于原值
     expect(newAccess).not.toBe(originalAccess)
     // refresh token 因为 ROTATE_REFRESH_TOKENS=True 也被换掉

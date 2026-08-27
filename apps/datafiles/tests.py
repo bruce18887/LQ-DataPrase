@@ -196,6 +196,40 @@ class ListFilterTests(APITestCase):
         self.assertEqual(codes, {'BPD60320'})
         self.assertEqual(len(results), 2)
 
+    def test_filter_by_format_type(self):
+        """格式列下拉筛选：?format_type= 仅返回该格式。"""
+        _make_datafile(self.user, 'ets.csv', format_type='ETS88')
+        resp = self.client.get('/api/v1/files/', {'format_type': 'ETS88'})
+        self.assertEqual(resp.status_code, 200)
+        results = resp.data['results'] if 'results' in resp.data else resp.data
+        self.assertEqual([r['filename'] for r in results], ['ets.csv'])
+
+    def test_filter_by_filename_icontains(self):
+        """文件名表头筛选：?filename__icontains=（不分大小写）。"""
+        _make_datafile(self.user, 'MyFile_001.csv')
+        resp = self.client.get('/api/v1/files/', {'filename__icontains': 'myfile'})
+        self.assertEqual(resp.status_code, 200)
+        results = resp.data['results'] if 'results' in resp.data else resp.data
+        self.assertEqual([r['filename'] for r in results], ['MyFile_001.csv'])
+
+    def test_filter_by_program_name_icontains(self):
+        """测试程序表头筛选：?program_name__icontains=。"""
+        _make_datafile(self.user, 'a.csv', program_name='PTS_BPD60320.pts')
+        _make_datafile(self.user, 'b.csv', program_name='PGS_BN281.pgs')
+        resp = self.client.get('/api/v1/files/', {'program_name__icontains': 'bpd60320'})
+        self.assertEqual(resp.status_code, 200)
+        results = resp.data['results'] if 'results' in resp.data else resp.data
+        self.assertEqual([r['filename'] for r in results], ['a.csv'])
+
+    def test_search_matches_tags(self):
+        """全局搜索补齐标签：文件名/程序名不命中但标签命中也应返回。"""
+        _make_datafile(self.user, 'ZZZ_123.csv', tags=['HotLoop', 'PR_Phase1'])
+        _make_datafile(self.user, 'BPD60320_FT.csv', tags=['Cold'])
+        resp = self.client.get('/api/v1/files/', {'search': 'hotloop'})
+        self.assertEqual(resp.status_code, 200)
+        results = resp.data['results'] if 'results' in resp.data else resp.data
+        self.assertEqual([r['filename'] for r in results], ['ZZZ_123.csv'])
+
     def test_search_by_filename(self):
         resp = self.client.get('/api/v1/files/', {'search': 'BPD93204'})
         self.assertEqual(resp.status_code, 200)
@@ -748,9 +782,9 @@ class FixMovedProjectPathsCommandTests(TestCase):
 
 
 class ConsistencyCheckTests(APITestCase):
-    """数据修复中心：GET 三区块扫描（孤立 DB 记录 / 孤立磁盘文件 / 产品名缺失）
-    与 POST 修复动作（import_orphaned_disk / fix_product_codes），含角色权限与
-    既有 delete 动作回归。
+    """数据修复中心：GET 四区块扫描（孤立 DB 记录 / 孤立磁盘文件 / 产品名缺失 /
+    重复文件）与 POST 修复动作（import_orphaned_disk / fix_product_codes /
+    delete_duplicates），含角色权限与既有 delete 动作回归。
     """
 
     def setUp(self):
@@ -1057,7 +1091,8 @@ class ConsistencyCheckTests(APITestCase):
         self.client.force_authenticate(viewer)
         self.assertEqual(self._get().status_code, 200)  # viewer may check
         for action in ('delete_orphaned_db', 'delete_orphaned_disk',
-                       'import_orphaned_disk', 'fix_product_codes'):
+                       'delete_duplicates', 'import_orphaned_disk',
+                       'fix_product_codes'):
             self.assertEqual(self._post(action).status_code, 403, action)
 
         regular = User.objects.create_user(username='cc_user', password='pw')
@@ -1066,12 +1101,221 @@ class ConsistencyCheckTests(APITestCase):
         self.client.force_authenticate(regular)
         self.assertEqual(self._post('delete_orphaned_db').status_code, 403)
         self.assertEqual(self._post('delete_orphaned_disk').status_code, 403)
+        self.assertEqual(self._post('delete_duplicates').status_code, 403)
         self.assertEqual(self._post('import_orphaned_disk').status_code, 200)
         self.assertEqual(self._post('fix_product_codes').status_code, 200)
 
     def test_post_invalid_action(self):
         resp = self._post('nonsense')
         self.assertEqual(resp.status_code, 400)
+
+    # ── 重复文件检查（第 4 区块）：同名同大小 ─────────────────────────
+
+    def test_get_duplicate_groups(self):
+        _make_datafile(self.user, 'dup.csv', file_size=500)
+        _make_datafile(self.user, 'dup.csv', file_size=500)
+        _make_datafile(self.user, 'dup.csv', file_size=500, file_type='batch',
+                       batch_name='LOT-A')
+        resp = self._get()
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['duplicate_group_count'], 1)
+        group = resp.data['duplicate_groups'][0]
+        self.assertEqual(group['filename'], 'dup.csv')
+        self.assertEqual(group['file_size'], 500)
+        self.assertEqual(len(group['files']), 3)
+
+    def test_get_duplicates_ignores_mismatch(self):
+        # 同名不同大小 / 不同名同大小都不算重复
+        _make_datafile(self.user, 'dup.csv', file_size=500)
+        _make_datafile(self.user, 'dup.csv', file_size=600)
+        _make_datafile(self.user, 'other.csv', file_size=500)
+        resp = self._get()
+        self.assertEqual(resp.data['duplicate_group_count'], 0)
+
+    def test_get_duplicates_owner_scoped(self):
+        _make_datafile(self.user, 'dup.csv', file_size=500)
+        _make_datafile(self.other, 'dup.csv', file_size=500)
+        resp = self._get()
+        self.assertEqual(resp.data['duplicate_group_count'], 0)
+
+    def test_delete_duplicates_keeps_earliest(self):
+        single_dir = _user_upload_dir(self.user, 'single')
+        os.makedirs(single_dir, exist_ok=True)
+        p1 = os.path.join(single_dir, 'dup.csv')
+        p2 = os.path.join(single_dir, 'dup_copy.csv')
+        with open(p1, 'w') as f:
+            f.write('a,b\n1,2\n')
+        with open(p2, 'w') as f:
+            f.write('a,b\n1,2\n')
+        # 同名同大小：注册顺序不同（第二个 id 更大 = 后注册）
+        _make_datafile(self.user, 'dup.csv', file_size=100, file_path=p1)
+        _make_datafile(self.user, 'dup.csv', file_size=100, file_path=p2)
+        resp = self._post('delete_duplicates')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['deleted_count'], 1)
+        remaining = DataFile.objects.filter(owner=self.user, filename='dup.csv')
+        self.assertEqual(remaining.count(), 1)
+        # 保留最早一条（id 最小 = 第一个注册）
+        self.assertEqual(remaining.first().file_path, p1)
+        self.assertTrue(os.path.exists(p1))
+        self.assertFalse(os.path.exists(p2))
+
+    def test_delete_duplicates_batch_file_only(self):
+        """批次的重复文件只删除该文件，绝不 rmtree 整个批次目录。"""
+        batch_dir = os.path.join(self.batch_base, 'LOT-A')
+        os.makedirs(batch_dir, exist_ok=True)
+        keep = os.path.join(batch_dir, 'keep.csv')
+        dup1 = os.path.join(batch_dir, 'dup.csv')
+        dup2 = os.path.join(batch_dir, 'dup2.csv')
+        for p in (keep, dup1, dup2):
+            with open(p, 'w') as f:
+                f.write('a,b\n1,2\n')
+        DataFile.objects.create(
+            owner=self.user, filename='keep.csv', file_path=keep, file_size=77,
+            format_type='CTA8290D', file_type='batch', batch_name='LOT-A',
+        )
+        DataFile.objects.create(
+            owner=self.user, filename='dup.csv', file_path=dup1, file_size=88,
+            format_type='CTA8290D', file_type='batch', batch_name='LOT-A',
+        )
+        DataFile.objects.create(
+            owner=self.user, filename='dup.csv', file_path=dup2, file_size=88,
+            format_type='CTA8290D', file_type='batch', batch_name='LOT-A',
+        )
+        resp = self._post('delete_duplicates')
+        self.assertEqual(resp.data['deleted_count'], 1)
+        self.assertTrue(os.path.exists(keep), '同批次非重复文件必须保留')
+        self.assertEqual(DataFile.objects.filter(owner=self.user).count(), 2)
+        # 保留最早一条（dup.csv），dup2.csv 删除
+        self.assertFalse(os.path.exists(dup2))
+        self.assertTrue(os.path.exists(dup1))
+
+
+class CombineFilesTests(APITestCase):
+    """组合功能：多文件物理移动到 batch/<名称>/ 并更新 DB 记录。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='cmb', password='pw')
+        self.user.role = 'administrator'
+        self.user.save()
+        self.other = User.objects.create_user(username='cmb2', password='pw')
+        self.client.force_authenticate(self.user)
+        self.single_dir = _user_upload_dir(self.user, 'single')
+        self.batch_base = _user_upload_dir(self.user, 'batch')
+
+    def tearDown(self):
+        shutil.rmtree(self.single_dir, ignore_errors=True)
+        shutil.rmtree(self.batch_base, ignore_errors=True)
+
+    def _write_single(self, filename, content='a,b\n1,2\n'):
+        path = os.path.join(self.single_dir, filename)
+        with open(path, 'w') as f:
+            f.write(content)
+        return path
+
+    def _make_single(self, filename, **kwargs):
+        path = kwargs.pop('file_path', None) or self._write_single(filename)
+        defaults = dict(file_path=path, file_size=100, format_type='CTA8290D')
+        defaults.update(kwargs)
+        return DataFile.objects.create(
+            owner=self.user, filename=filename, **defaults,
+        )
+
+    def _post(self, ids, batch_name):
+        return self.client.post(
+            '/api/v1/files/combine/', {'ids': ids, 'batch_name': batch_name},
+            format='json',
+        )
+
+    def test_combine_moves_and_updates(self):
+        f1 = self._make_single('BPD60320_FT.csv')
+        f2 = self._make_single('BPD60320_QA1.csv')
+        src1, src2 = resolve_file_path(f1.file_path), resolve_file_path(f2.file_path)
+        resp = self._post([f1.id, f2.id], 'LOT-C')
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data['combined'], 2)
+        self.assertEqual(resp.data['batch_name'], 'LOT-C')
+        for df in (f1, f2):
+            df.refresh_from_db()
+            self.assertEqual(df.file_type, 'batch')
+            self.assertEqual(df.batch_name, 'LOT-C')
+            self.assertEqual(df.sub_batch, '')
+            self.assertTrue(os.path.exists(resolve_file_path(df.file_path)))
+        # 源位置文件已移动走
+        self.assertFalse(os.path.exists(src1))
+        self.assertFalse(os.path.exists(src2))
+        # 磁盘移动到 batch/<name>/
+        self.assertTrue(os.path.isdir(os.path.join(self.batch_base, 'LOT-C')))
+
+    def test_combine_existing_batch_rejected(self):
+        f = self._make_single('a.csv')
+        os.makedirs(os.path.join(self.batch_base, 'LOT-C'), exist_ok=True)
+        resp = self._post([f.id], 'LOT-C')
+        self.assertEqual(resp.status_code, 400)
+        f.refresh_from_db()
+        self.assertEqual(f.file_type, 'single')  # 拒绝后不产生任何变更
+
+    def test_combine_validation(self):
+        f = self._make_single('a.csv')
+        self.assertEqual(self._post([], 'LOT').status_code, 400)
+        self.assertEqual(self._post([f.id], '   ').status_code, 400)
+        self.assertEqual(self._post([f.id], 'bad/name').status_code, 400)
+        self.assertEqual(self._post([f.id], 'bad:name').status_code, 400)
+        self.assertEqual(self._post([99999], 'LOT').status_code, 404)
+        self.assertEqual(self._post(['x'], 'LOT').status_code, 400)
+
+    def test_combine_rejects_batch_file_and_other_owner(self):
+        # 批次文件不可再组合（只支持单文件）
+        batch_file = self._make_single('b.csv', file_type='batch',
+                                       batch_name='EXIST')
+        resp = self._post([batch_file.id], 'LOT-Y')
+        self.assertEqual(resp.status_code, 404)
+        # 他人文件不可组合
+        other_path = self._write_single_in(self.other, 'o.csv')
+        other_df = DataFile.objects.create(
+            owner=self.other, filename='o.csv', file_path=other_path,
+            file_size=100, format_type='CTA8290D',
+        )
+        resp = self._post([other_df.id], 'LOT-Y')
+        self.assertEqual(resp.status_code, 404)
+
+    def _write_single_in(self, user, filename):
+        d = _user_upload_dir(user, 'single')
+        path = os.path.join(d, filename)
+        with open(path, 'w') as f:
+            f.write('a,b\n1,2\n')
+        return path
+
+    def test_combine_skips_missing_file(self):
+        f1 = self._make_single('exist.csv')
+        f2 = self._make_single('gone.csv',
+                               file_path='C:\\nope\\gone.csv')
+        resp = self._post([f1.id, f2.id], 'LOT-Z')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['combined'], 1)
+        self.assertTrue(DataFile.objects.filter(pk=f2.id).exists())
+        f2.refresh_from_db()
+        self.assertEqual(f2.file_type, 'single')  # untouched
+
+
+class FormatTypesTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='fmt', password='pw')
+        self.client.force_authenticate(self.user)
+
+    def test_format_types_endpoint(self):
+        _make_datafile(self.user, 'a.csv', format_type='CTA8290D')
+        _make_datafile(self.user, 'b.csv', format_type='ETS88')
+        _make_datafile(self.user, 'c.csv', format_type='CTA8290D')
+        resp = self.client.get('/api/v1/files/format_types/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['format_types'], ['CTA8290D', 'ETS88'])
+
+    def test_format_types_owner_scoped(self):
+        other = User.objects.create_user(username='fmt2', password='pw')
+        _make_datafile(other, 'x.csv', format_type='STS8200')
+        resp = self.client.get('/api/v1/files/format_types/')
+        self.assertNotIn('STS8200', resp.data['format_types'])
 
 
 # ── zip 压缩包上传 → 批次数据 ─────────────────────────────────

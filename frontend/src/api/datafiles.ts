@@ -17,6 +17,12 @@ export interface ListFilesParams {
   format_type?: string
   file_type?: string
   ordering?: string
+  /** 表头列筛选：文件名 contains（服务端生效，大小写不敏感） */
+  filename__icontains?: string
+  /** 表头列筛选：测试程序 contains（服务端生效，大小写不敏感） */
+  program_name__icontains?: string
+  /** 表头列筛选：标签精确匹配（服务端 Python 过滤，大小写不敏感） */
+  tag?: string
   /** 上传时间范围筛选（YYYY-MM-DD，服务端按当天边界展开） */
   created_at__gte?: string
   created_at__lte?: string
@@ -113,6 +119,15 @@ export const datafilesApi = {
   getProductCodes() {
     return api.get<{ product_codes: string[] }>('/files/product_codes/')
   },
+  getFormatTypes() {
+    return api.get<{ format_types: string[] }>('/files/format_types/')
+  },
+  /** 组合多个单文件为批次（服务端物理移动到 batch/<name>/ 并更新记录） */
+  combineFiles(ids: number[], batchName: string) {
+    return api.post<{ combined: number; batch_name: string; files: DataFile[] }>(
+      '/files/combine/', { ids, batch_name: batchName },
+    )
+  },
   activate(id: number) {
     return api.put(`/activate/${id}/`)
   },
@@ -155,7 +170,7 @@ export const datafilesApi = {
   fixConsistency(action: ConsistencyFixAction) {
     // import/fix may reparse many files — the axios default 30s timeout is
     // too tight for large orphan sets, so those calls get a 120s budget.
-    const config = action === 'delete_orphaned_db' || action === 'delete_orphaned_disk'
+    const config = ['delete_orphaned_db', 'delete_orphaned_disk', 'delete_duplicates'].includes(action)
       ? {}
       : { timeout: 120_000 }
     return api.post<FixConsistencyResponse>('/consistency-check/', { action }, config)
@@ -190,6 +205,23 @@ export interface MissingProductCodeFile {
   file_missing: boolean
 }
 
+export interface DuplicateGroupFile {
+  id: number
+  filename: string
+  file_size: number
+  file_type: 'single' | 'batch'
+  batch_name: string
+  sub_batch: string
+  created_at: string
+}
+
+/** 重复文件组：文件名+大小完全相同的文件集合（files 按 id 升序，首条为保留项） */
+export interface DuplicateGroup {
+  filename: string
+  file_size: number
+  files: DuplicateGroupFile[]
+}
+
 export interface ConsistencyCheckResult {
   orphaned_db_count: number
   orphaned_db: OrphanedDbRecord[]
@@ -197,6 +229,8 @@ export interface ConsistencyCheckResult {
   orphaned_disk: OrphanedDiskFile[]
   missing_product_code_count: number
   missing_product_code: MissingProductCodeFile[]
+  duplicate_group_count: number
+  duplicate_groups: DuplicateGroup[]
 }
 
 export type ConsistencyFixAction =
@@ -204,6 +238,7 @@ export type ConsistencyFixAction =
   | 'delete_orphaned_disk'
   | 'import_orphaned_disk'
   | 'fix_product_codes'
+  | 'delete_duplicates'
 
 export interface FixConsistencyResponse {
   status: string

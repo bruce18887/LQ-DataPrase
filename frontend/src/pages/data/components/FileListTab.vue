@@ -3,13 +3,12 @@
     <!-- Toolbar -->
     <FileListToolbar
       :total="total"
-      :product-codes="productCodes"
       :selected-count="selectedIds.length"
       @search="onSearch"
-      @filter-change="onFilterChange"
       @upload-click="showUpload = !showUpload"
       @fix-click="showConsistencyCheck = true"
       @bulk-delete="onBulkDelete"
+      @combine-click="onCombine"
     />
 
     <!-- Upload Area -->
@@ -18,181 +17,30 @@
       @upload-success="onUploadSuccess"
     />
 
-    <!-- 表头排序 + 筛选行（服务端生效：上传时间范围 / 大小 min~max） -->
-    <div class="sort-filter-row">
-      <div class="filter-item">
-        <span class="filter-label">上传时间</span>
-        <el-date-picker
-          v-model="dateRange"
-          type="daterange"
-          range-separator="~"
-          start-placeholder="开始日期"
-          end-placeholder="结束日期"
-          value-format="YYYY-MM-DD"
-          size="small"
-          style="width: 230px"
-          @change="onDateRangeChange"
-        />
-      </div>
-      <div class="filter-item">
-        <span class="filter-label">大小 (B)</span>
-        <el-input-number
-          v-model="sizeMin"
-          :min="0"
-          :controls="false"
-          placeholder="最小"
-          size="small"
-          style="width: 100px"
-          @change="onSizeFilterChange"
-        />
-        <span class="filter-sep">~</span>
-        <el-input-number
-          v-model="sizeMax"
-          :min="0"
-          :controls="false"
-          placeholder="最大"
-          size="small"
-          style="width: 100px"
-          @change="onSizeFilterChange"
-        />
-      </div>
-      <el-button size="small" :disabled="!hasActiveFilters" @click="clearFilters">清除筛选</el-button>
-      <span class="filter-hint">点击表头可排序（默认最新上传在前）</span>
-    </div>
-
-    <!-- Batch Management -->
-    <BatchManagement
-      ref="batchRef"
-      :active-file-id="activeFileId"
-      @file-selected="emit('file-selected', $event)"
-      @data-changed="onBatchDataChanged"
+    <!-- File Table（表头内嵌筛选：产品/格式/文件名/程序/标签；服务端分页筛选） -->
+    <FileListTable
+      ref="tableRef"
+      :files="files"
+      :loading="loading"
+      :filters="filters"
+      :product-codes="productCodes"
+      :format-types="formatTypes"
+      :all-tags="allTags"
+      @view-file="viewFile"
+      @row-click="onRowClick"
+      @delete-file="deleteFile"
+      @sort-change="onSortChange"
+      @selection-change="onSelectionChange"
+      @tags-changed="loadAllTags"
     />
 
-    <!-- File Table -->
-    <el-table
-      ref="tableRef"
-      :data="files"
-      :row-key="(row: any) => row.id"
-      stripe
-      style="width: 100%"
-      v-loading="loading"
-      :header-cell-style="{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontWeight: '600' }"
-      :row-class-name="tableRowClassName"
-      :default-sort="{ prop: 'created_at', order: 'descending' }"
-      @sort-change="onSortChange"
-      @row-click="onRowClick"
-      @selection-change="onSelectionChange"
-      @expand-change="onExpandChange"
-      :expand-row-keys="expandedRowIds"
-      highlight-current-row
-    >
-      <el-table-column type="expand">
-        <template #default="{ row }">
-          <FileRowDetail :row="row" @remove-tag="removeTag" />
-        </template>
-      </el-table-column>
-      <el-table-column type="selection" width="44" align="center" />
-      <el-table-column prop="id" label="ID" width="70" align="center">
-        <template #default="{ row }">
-          <span class="id-badge">#{{ row.id }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column prop="filename" label="文件名" min-width="200" sortable="custom">
-        <template #default="{ row }">
-          <div class="filename-cell">
-            <span class="file-icon">📄</span>
-            <span class="file-name" :title="row.filename">{{ truncateMiddle(row.filename, 32) }}</span>
-          </div>
-        </template>
-      </el-table-column>
-      <el-table-column prop="product_code" label="产品" width="100">
-        <template #default="{ row }">
-          <el-tag v-if="row.product_code" size="small" type="info" effect="plain">
-            {{ row.product_code }}
-          </el-tag>
-          <span v-else class="empty-text">—</span>
-        </template>
-      </el-table-column>
-      <el-table-column prop="format_type" label="格式" width="80" />
-      <el-table-column label="行列" width="100" align="center">
-        <template #default="{ row }">
-          <span class="mono">{{ row.row_count }}×{{ row.col_count }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column prop="program_name" label="测试程序" min-width="120">
-        <template #default="{ row }">
-          <span class="program-name-cell" :title="row.program_name">{{ row.program_name || '—' }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="标签" min-width="180" class-name="tag-cell">
-        <template #default="{ row }">
-          <div class="tag-cell-inner">
-            <el-tag
-              v-for="t in (row.tags || [])"
-              :key="t"
-              closable
-              size="small"
-              type="info"
-              effect="light"
-              class="file-tag"
-              @close="removeTag(row, t)"
-            >{{ t }}</el-tag>
-            <div v-if="editingId === row.id" class="tag-input-wrapper">
-              <input
-                :ref="tagInputRef"
-                :value="newTagValue"
-                type="text"
-                class="tag-native-input"
-                placeholder="新标签+回车"
-                maxlength="50"
-                @input="onTagInput"
-                @keydown="onTagKeydown($event, row)"
-                @blur="scheduleBlurCommit(row)"
-              />
-              <div v-if="showTagSuggestions && tagSuggestions.length > 0" class="tag-suggestions">
-                <div
-                  v-for="(s, i) in tagSuggestions"
-                  :key="s"
-                  class="tag-suggestion-item"
-                  :class="{ 'is-active': i === selectedSuggestionIdx }"
-                  @mousedown.prevent="selectSuggestion(s)"
-                >
-                  {{ s }}
-                </div>
-              </div>
-            </div>
-            <el-button
-              v-else
-              size="small"
-              type="primary"
-              plain
-              class="add-tag-btn"
-              @click.stop="startAddTag(row)"
-            >
-              <el-icon><Plus /></el-icon>
-            </el-button>
-          </div>
-        </template>
-      </el-table-column>
-      <el-table-column prop="created_at" label="上传时间" width="140" sortable="custom">
-        <template #default="{ row }">
-          <span class="time-text">{{ formatTime(row.created_at) }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column prop="file_size" label="大小" width="90" align="right" sortable="custom">
-        <template #default="{ row }">
-          <span class="size-badge">{{ formatSize(row.file_size) }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="140" align="center" fixed="right">
-        <template #default="{ row }">
-          <el-button size="small" type="primary" plain @click.stop="viewFile(row)">查看</el-button>
-          <el-button size="small" type="danger" plain @click.stop="deleteFile(row)">
-            <el-icon><Delete /></el-icon> 删除
-          </el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+    <!-- Active filter chips -->
+    <div v-if="hasActiveFilters" class="active-filters">
+      <span class="filter-hint">
+        已启用 {{ activeFilterCount }} 项表头筛选
+        <el-button size="small" text type="primary" @click="clearFilters">清除全部</el-button>
+      </span>
+    </div>
 
     <!-- Pagination -->
     <div class="list-pagination">
@@ -216,28 +64,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
-import { Plus, Delete } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox, type ElTable } from 'element-plus'
+import { ref, computed, reactive, watch, onMounted } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { datafilesApi } from '../../../api/datafiles'
 import { useFilesStore } from '../../../stores/files'
-import { truncateMiddle, formatSize, formatTime } from '../../../utils/format'
-import { useTagEditing } from '../composables/useTagEditing'
 import FileListToolbar from './FileListToolbar.vue'
 import FileUploadArea from './FileUploadArea.vue'
-import BatchManagement from './BatchManagement.vue'
 import ConsistencyCheckDialog from './ConsistencyCheckDialog.vue'
-import FileRowDetail from './FileRowDetail.vue'
+import FileListTable, { type FileFilters } from './FileListTable.vue'
 
 const emit = defineEmits<{
   'view-file': [id: number, filename: string]
   'row-click': [id: number, filename: string]
   'total-change': [total: number]
-  'file-selected': [id: number]
-}>()
-
-const props = defineProps<{
-  activeFileId?: number
 }>()
 
 const filesStore = useFilesStore()
@@ -245,37 +84,39 @@ const filesStore = useFilesStore()
 // ── Core state ──────────────────────────────────────────────────────
 const files = ref<any[]>([])
 const loading = ref(false)
-
-// ── Tag editing composable ──────────────────────────────────────────
-const {
-  editingId, newTagValue, tagInputRef,
-  tagSuggestions, showTagSuggestions, selectedSuggestionIdx,
-  startAddTag, scheduleBlurCommit, removeTag,
-  onTagInput, selectSuggestion, onTagKeydown,
-} = useTagEditing(files)
 const total = ref(0)
 const currentPage = ref(1)
 const pageSize = 20
 
 const productCodes = ref<string[]>([])
-const selectedRows = ref<any[]>([])
-const tableRef = ref<InstanceType<typeof ElTable>>()
+const formatTypes = ref<string[]>([])
+const allTags = ref<string[]>([])
 const selectedIds = ref<number[]>([])
+const tableRef = ref<InstanceType<typeof FileListTable>>()
 
-// Current search/filter values (received from toolbar)
+// Current global keyword search (toolbar)
 const currentSearch = ref('')
-const currentProductCode = ref('')
+
+// ── 表头筛选（服务端生效：20 条/页必须后端过滤；状态由 FileListTable 读写） ──
+const filters = reactive<FileFilters>({
+  filename: '',
+  productCode: '',
+  formatType: '',
+  program: '',
+  tag: '',
+})
+
+const activeFilterCount = computed(
+  () => Object.values(filters).filter((v) => v !== '').length,
+)
+const hasActiveFilters = computed(() => activeFilterCount.value > 0)
 
 // 表头排序：默认最新上传在前（与服务端 ordering 一致，default-sort 显示箭头）
 const ordering = ref('-created_at')
-// 上传时间范围（YYYY-MM-DD 数组）/ 大小 min~max（服务端筛选）
-const dateRange = ref<[string, string] | null>(null)
-const sizeMin = ref<number | null>(null)
-const sizeMax = ref<number | null>(null)
 
-const hasActiveFilters = computed(
-  () => !!dateRange.value || sizeMin.value != null || sizeMax.value != null,
-)
+// Upload / dialog toggles
+const showUpload = ref(false)
+const showConsistencyCheck = ref(false)
 
 /** 表头排序变化（服务端排序：20 条/页必须后端排，不能本地 sort） */
 function onSortChange({ prop, order }: { prop: string; order: 'ascending' | 'descending' | null }) {
@@ -289,37 +130,14 @@ function onSortChange({ prop, order }: { prop: string; order: 'ascending' | 'des
   loadFiles()
 }
 
-function onDateRangeChange() {
-  currentPage.value = 1
-  loadFiles()
-}
-
-function onSizeFilterChange() {
-  currentPage.value = 1
-  loadFiles()
-}
-
 function clearFilters() {
-  dateRange.value = null
-  sizeMin.value = null
-  sizeMax.value = null
+  filters.filename = ''
+  filters.productCode = ''
+  filters.formatType = ''
+  filters.program = ''
+  filters.tag = ''
   currentPage.value = 1
   loadFiles()
-}
-
-// Upload toggle
-const showUpload = ref(false)
-
-// Consistency dialog toggle
-const showConsistencyCheck = ref(false)
-
-// BatchManagement ref (for calling loadBatchDirs externally)
-const batchRef = ref<InstanceType<typeof BatchManagement>>()
-
-// Expand row state
-const expandedRowIds = ref<number[]>([])
-function onExpandChange(_row: any, expanded: any[]) {
-  expandedRowIds.value = expanded.map((r: any) => r.id)
 }
 
 // ── Data loading ────────────────────────────────────────────────────
@@ -329,12 +147,13 @@ async function loadFiles() {
     const { data } = await datafilesApi.listFiles({
       page: currentPage.value,
       search: currentSearch.value,
-      product_code: currentProductCode.value,
+      file_type: 'single',
+      product_code: filters.productCode,
+      format_type: filters.formatType,
+      filename__icontains: filters.filename,
+      program_name__icontains: filters.program,
+      tag: filters.tag,
       ordering: ordering.value,
-      created_at__gte: dateRange.value?.[0] ?? undefined,
-      created_at__lte: dateRange.value?.[1] ?? undefined,
-      file_size__gte: sizeMin.value ?? undefined,
-      file_size__lte: sizeMax.value ?? undefined,
     })
     if (Array.isArray(data)) {
       files.value = data
@@ -362,6 +181,24 @@ async function loadProductCodes() {
   }
 }
 
+async function loadFormatTypes() {
+  try {
+    const { data } = await datafilesApi.getFormatTypes()
+    formatTypes.value = data.format_types ?? []
+  } catch {
+    formatTypes.value = []
+  }
+}
+
+async function loadAllTags() {
+  try {
+    const { data } = await datafilesApi.listTags()
+    allTags.value = Array.isArray(data?.tags) ? data.tags : []
+  } catch {
+    allTags.value = []
+  }
+}
+
 // ── Toolbar event handlers ──────────────────────────────────────────
 function onSearch(text: string) {
   currentSearch.value = text
@@ -369,28 +206,45 @@ function onSearch(text: string) {
   loadFiles()
 }
 
-function onFilterChange(code: string) {
-  currentProductCode.value = code
-  currentPage.value = 1
-  loadFiles()
-}
-
 function onUploadSuccess() {
   loadFiles()
-  // ZIP 上传会注册新批次，刷新批次区使其立即可见
-  batchRef.value?.loadBatchDirs()
   filesStore.notifyFilesChanged()
-}
-
-function onBatchDataChanged() {
-  loadFiles()
-  loadProductCodes()
 }
 
 function onConsistencyDone() {
   loadFiles()
-  batchRef.value?.loadBatchDirs()
   filesStore.notifyFilesChanged()
+}
+
+// ── 组合为批次 ──────────────────────────────────────────────────────
+async function onCombine() {
+  if (selectedIds.value.length < 2) {
+    ElMessage.warning('请至少选择 2 个文件进行组合')
+    return
+  }
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `将选中的 ${selectedIds.value.length} 个文件组合为批次（文件将移动到批次目录）：`,
+      '组合为批次',
+      {
+        confirmButtonText: '组合',
+        cancelButtonText: '取消',
+        inputPattern: /\S+/,
+        inputErrorMessage: '批次名称不能为空',
+        inputPlaceholder: '请输入批次名称',
+      },
+    )
+    const name = (value || '').trim()
+    if (!name) return
+    const { data } = await datafilesApi.combineFiles([...selectedIds.value], name)
+    ElMessage.success(`已组合 ${data.combined} 个文件为批次 "${data.batch_name}"`)
+    tableRef.value?.clearSelection()
+    selectedIds.value = []
+    await loadFiles()
+    filesStore.notifyFilesChanged()
+  } catch {
+    // ElMessageBox 取消 reject "cancel"；真实错误 toast 由拦截器弹出
+  }
 }
 
 // ── Pagination ──────────────────────────────────────────────────────
@@ -399,9 +253,8 @@ function onPageChange(page: number) {
   loadFiles()
 }
 
-function onSelectionChange(rows: any[]) {
-  selectedRows.value = rows
-  selectedIds.value = rows.map((r) => r.id)
+function onSelectionChange(ids: number[]) {
+  selectedIds.value = ids
 }
 
 // ── Delete operations ───────────────────────────────────────────────
@@ -433,7 +286,6 @@ async function onBulkDelete() {
     const { data } = await datafilesApi.bulkDelete(ids)
     ElMessage.success(`已删除 ${data?.deleted ?? ids.length} 个文件`)
     tableRef.value?.clearSelection()
-    selectedRows.value = []
     selectedIds.value = []
     if (files.value.length === ids.length && currentPage.value > 1) {
       currentPage.value -= 1
@@ -446,254 +298,63 @@ async function onBulkDelete() {
 }
 
 // ── Row interactions ────────────────────────────────────────────────
-function viewFile(row: any) {
-  emit('view-file', row.id, row.filename)
+function viewFile(id: number, filename: string) {
+  emit('view-file', id, filename)
 }
 
-function onRowClick(row: any) {
-  emit('row-click', row.id, row.filename)
-}
-
-function tableRowClassName({ rowIndex }: { rowIndex: number }) {
-  return rowIndex % 2 === 0 ? 'row-even' : 'row-odd'
+function onRowClick(id: number, filename: string) {
+  emit('row-click', id, filename)
 }
 
 // ── External refresh watcher ────────────────────────────────────────
 watch(() => filesStore.filesVersion, () => {
   loadFiles()
-  batchRef.value?.loadBatchDirs()
   loadProductCodes()
+  loadFormatTypes()
+  loadAllTags()
 })
+
+// 表头筛选值变化 → 刷新（FileListTable 内 ColumnHeaderFilter 写入 filters）
+watch(filters, () => {
+  currentPage.value = 1
+  loadFiles()
+}, { deep: true })
 
 onMounted(() => {
   loadFiles()
   loadProductCodes()
-  // BatchManagement loads its own dirs in its onMounted
+  loadFormatTypes()
+  loadAllTags()
 })
 
 defineExpose({ reload: loadFiles })
 </script>
 
 <style scoped>
-.empty-text {
-  color: var(--text-tertiary);
-}
-
 .list-pagination {
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
 }
 
-/* ============================
-   Sort / Filter Row
-   ============================ */
-.sort-filter-row {
+.active-filters {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 16px;
-  padding: 10px 12px;
-  margin-bottom: 12px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-muted);
-  border-radius: 8px;
-}
-
-.filter-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.filter-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-
-.filter-sep {
-  color: var(--text-tertiary);
+  margin-top: 8px;
 }
 
 .filter-hint {
-  margin-left: auto;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-tertiary);
-}
-
-/* ============================
-   Tag Cell
-   ============================ */
-.tag-cell-inner {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  min-height: 28px;
-  max-height: 80px;
-  overflow-y: auto;
-}
-
-.file-tag {
-  margin: 0;
-}
-
-.add-tag-btn {
-  font-size: 12px;
-  padding: 2px 8px;
-  height: 24px;
-}
-
-.tag-native-input {
-  width: 140px;
-  height: 24px;
-  padding: 0 8px;
-  font-size: 12px;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  border: 1px solid var(--brand-primary);
-  border-radius: 4px;
-  outline: none;
-  box-sizing: border-box;
-}
-
-.tag-native-input::placeholder {
-  color: var(--text-tertiary);
-}
-
-.tag-input-wrapper {
-  position: relative;
-  display: inline-block;
-}
-
-.tag-suggestions {
-  position: absolute;
-  bottom: 100%;
-  left: 0;
-  min-width: 180px;
-  max-height: 200px;
-  overflow-y: auto;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-default);
-  border-radius: 6px;
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
-  z-index: 100;
-  margin-bottom: 4px;
-}
-
-.tag-suggestion-item {
-  padding: 6px 12px;
-  font-size: 12px;
-  color: var(--text-primary);
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.tag-suggestion-item:hover,
-.tag-suggestion-item.is-active {
-  background: var(--bg-secondary);
-  color: var(--brand-primary);
-}
-
-:root[data-theme="night"] .tag-suggestions {
-  background: var(--bg-secondary);
-  border-color: rgba(255, 255, 255, 0.1);
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.4);
-}
-
-/* ============================
-   Table Styling
-   ============================ */
-:deep(.el-table) {
-  --el-table-border-color: var(--border-muted);
-  --el-table-bg-color: transparent;
-  --el-table-tr-bg-color: transparent;
-  --el-table-header-bg-color: var(--bg-secondary);
-  border-radius: 10px;
-  overflow: hidden;
-  border: 1px solid var(--border-muted);
-}
-
-:deep(.el-table th.el-table__cell) {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-:deep(.el-table .row-even) {
-  --el-table-tr-bg-color: transparent;
-}
-
-:deep(.el-table .row-odd) {
-  --el-table-tr-bg-color: var(--bg-secondary);
-}
-
-:deep(.el-table .el-table__row) {
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-:deep(.el-table .el-table__row:hover > td) {
-  background: var(--bg-secondary) !important;
-}
-
-.id-badge {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
-}
-
-.filename-cell {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.file-icon {
-  font-size: 16px;
-  flex-shrink: 0;
-}
-
-.file-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mono {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.program-name-cell {
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.time-text {
-  font-size: 12px;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-}
-
-.size-badge {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-info);
-  font-family: var(--font-mono);
+  gap: 4px;
 }
 
 /* ============================
    Night Theme Overrides
    ============================ */
-:root[data-theme="night"] .size-badge {
-  color: var(--color-info);
+:root[data-theme="night"] .filter-hint {
+  color: rgba(255, 255, 255, 0.5);
 }
 </style>

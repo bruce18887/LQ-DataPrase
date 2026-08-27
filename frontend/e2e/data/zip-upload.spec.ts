@@ -21,6 +21,13 @@ const MIN_CSV = [
   '',
 ].join('\n')
 
+/** 批次区已从文件列表 Tab 独立为「批次数据」Tab */
+async function gotoBatchTab(page: import('@playwright/test').Page) {
+  const batchTab = page.locator('.tabs-nav .tab-btn').filter({ hasText: '批次数据' })
+  await batchTab.click()
+  await expect(page.locator('.tab-btn.active')).toContainText('批次数据')
+}
+
 test.describe('ZIP 压缩包上传：自动解析为批次数据', { tag: ['@p2', '@data'] }, () => {
   test('ZIP 上传成功 → 提示导入数量 → 批次区出现对应批次', async ({ page }) => {
     await gotoApp(page, '/data')
@@ -39,6 +46,8 @@ test.describe('ZIP 压缩包上传：自动解析为批次数据', { tag: ['@p2'
 
       // 成功 toast 显示 zip 导入的文件数（2 个 csv，txt 被忽略）
       await expect(page.getByText(/导入 2 个文件/)).toBeVisible({ timeout: 60_000 })
+
+      await gotoBatchTab(page)
 
       // 批次区出现该批次，header 显示文件数
       const header = page.locator(`[data-testid="batch-header-${zipBase}"]`)
@@ -89,6 +98,8 @@ test.describe('ZIP 压缩包上传：自动解析为批次数据', { tag: ['@p2'
       // 再次上传同名 zip：不新增注册（toast 不带导入数）
       await uploadFile(page, zipPath)
       await expect(page.getByText(/e2e_zip_dup.*上传成功$/).last()).toBeVisible({ timeout: 60_000 })
+
+      await gotoBatchTab(page)
 
       const header = page.locator(`[data-testid="batch-header-${zipBase}"]`)
       await expect(header).toBeVisible({ timeout: 15_000 })

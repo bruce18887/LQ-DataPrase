@@ -5,6 +5,10 @@
       <span class="detail-value mono">{{ row.filename }}</span>
     </div>
     <div class="detail-row">
+      <span class="detail-label">行列</span>
+      <span class="detail-value mono">{{ row.row_count }} × {{ row.col_count }}</span>
+    </div>
+    <div class="detail-row">
       <span class="detail-label">测试程序</span>
       <span class="detail-value">{{ row.program_name || '—' }}</span>
     </div>

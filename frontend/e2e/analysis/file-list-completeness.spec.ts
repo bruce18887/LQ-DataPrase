@@ -88,7 +88,22 @@ test.describe('文件列表完整性：分析页下拉与数据管理页数量�
     expect(dropdownCount, '分析页下拉必须显示全部文件（修复前被截断为 20）').toBeGreaterThanOrEqual(FILE_COUNT)
     await page.keyboard.press('Escape')
 
-    // 数量一致：数据管理页分页 total == 分析页下拉选项数（同一 /files/ 全量口径）
-    expect(totalCount, `数据管理页 total=${totalCount} 应与分析页下拉=${dropdownCount} 一致`).toBe(dropdownCount)
+    // 口径（2026-08-29 起）：数据管理「文件列表」Tab 只显示单文件（file_type=single），
+    // 批次文件移到「批次数据」Tab；分析页下拉仍是全量（single+batch）。
+    // 故改为三方对照：UI 总数 == API 单文件数；分析下拉 == API 全量数。
+    const api = await page.evaluate(async () => {
+      const token = localStorage.getItem('access_token')
+      const d = await fetch('/api/v1/files/?page_size=10000', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      }).then((r) => r.json())
+      const list: any[] = Array.isArray(d) ? d : (d.results ?? [])
+      return {
+        total: list.length,
+        singles: list.filter((f) => f.file_type === 'single').length,
+      }
+    })
+    expect(totalCount, `数据管理页 total=${totalCount} 应与单文件 API 数=${api.singles} 一致`).toBe(api.singles)
+    expect(dropdownCount, `分析页下拉=${dropdownCount} 应与全量 API 数=${api.total} 一致`).toBe(api.total)
+    expect(api.total, '全量应不小于单文件数').toBeGreaterThanOrEqual(api.singles)
   })
 })

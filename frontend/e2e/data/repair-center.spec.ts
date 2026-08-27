@@ -179,6 +179,63 @@ test.describe.serial('数据修复中心', { tag: ['@p2', '@data'] }, () => {
     expect(fixed?.product_code, '修复后应从文件头重读出产品名').toBe('BPD60320')
   })
 
+  test('重复文件（同名同大小）可检测并删除', async ({ page }) => {
+    const dupBase = `DUP-E2E-${ts}`
+    const dirA = path.join(ADMIN_BATCH_DIR, `${dupBase}-A`)
+    const dirB = path.join(ADMIN_BATCH_DIR, `${dupBase}-B`)
+    const dupName = `dup_${ts}.csv`
+    const content = [
+      '[CTA8280F]',
+      'TestFileName,BPD60320.pts',
+      '[Data]',
+      'col1,col2',
+      'mm,mm',
+      '0,0',
+      '1,1',
+      '1,1',
+      '1,1',
+    ].join('\n')
+    for (const dir of [dirA, dirB]) {
+      fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(path.join(dir, dupName), content)
+    }
+    // 导入两个批次 → 两条同名同大小记录
+    const impA = await apiPost(page, '/batch-dirs/import/', { dir_name: `${dupBase}-A` })
+    expect(impA.status).toBe(201)
+    const impB = await apiPost(page, '/batch-dirs/import/', { dir_name: `${dupBase}-B` })
+    expect(impB.status).toBe(201)
+
+    try {
+      await openRepairCenter(page)
+      const card = page.locator('[data-testid="duplicate-files-card"]')
+      await expect(card).toBeVisible({ timeout: 15_000 })
+      await expect(card).toContainText(dupName)
+      await expect(card).toContainText('2 个')
+
+      // 管理员勾选确认后删除重复项（保留最早一条）
+      await card.locator('.el-checkbox').click()
+      await card.locator('button').filter({ hasText: '删除重复文件' }).click()
+      await expect(page.getByText(/已删除 \d+ 个重复文件/).first()).toBeVisible({ timeout: 20_000 })
+
+      // 终态：该文件名只剩 1 条记录
+      await expect.poll(async () => {
+        const { body } = await apiGet(page, '/files/?page_size=9999')
+        const list: any[] = Array.isArray(body) ? body : (body.results ?? [])
+        return list.filter((f: any) => f.filename === dupName).length
+      }, { timeout: 15_000 }).toBe(1)
+    } finally {
+      fs.rmSync(dirA, { recursive: true, force: true })
+      fs.rmSync(dirB, { recursive: true, force: true })
+      try {
+        shellDjango(
+          `DataFile.objects.filter(owner__username='admin', filename='${dupName}').delete()`,
+        )
+      } catch {
+        // 环境清理失败不阻塞用例
+      }
+    }
+  })
+
   test('修复后本批次问题全部消失', async ({ page }) => {
     // serial 保证前 3 个用例已执行且 afterEach 已清理本批次数据
     await openRepairCenter(page)
