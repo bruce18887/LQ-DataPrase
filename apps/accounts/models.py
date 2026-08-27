@@ -77,6 +77,10 @@ class UserSetting(models.Model):
     # 导出请求超时（秒）。前端所有 /export/ 调用统一读取此值设置 axios
     # timeout（默认 600 与 DataBrowser 此前硬编码的 600000ms 一致）。
     export_timeout = models.IntegerField(default=600)
+    # SFTP 浏览器单文件下载超时（秒）。SSE 下载流服务端按此值设 channel
+    # socket 超时并作为整体 deadline；前端下载请求也读取此值设置 axios
+    # timeout（批量下载）。(默认 600，用户可在 SFTP 工具栏自由调整)
+    sftp_download_timeout = models.IntegerField(default=600)
     # 默认隐藏列（记录级列名单）：同时作用于「查看数据」ag-grid 与「导出 Excel」
     # （导出中保留列但标记为 Excel 隐藏列）。空列表 = 未设置，由序列化层回退
     # 到 DEFAULT_HIDDEN_COLUMNS（用户主动清空全部选项时同样回退，语义：这些

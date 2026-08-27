@@ -31,6 +31,9 @@
       <SftpToolbar
         :current-path="currentPath"
         v-model:search-query="searchQuery"
+        v-model:file-type="fileType"
+        :timeout-sec="downloadTimeout"
+        @update:timeoutSec="onTimeoutChange"
         @navigate="navigateTo"
         @disconnect="disconnect"
       />
@@ -49,8 +52,13 @@
         @batch-download-and-parse="batchDownloadAndParse"
       />
 
-      <!-- Download Progress (SSE) -->
-      <SftpDownloadProgress v-if="downloading" :progress="dlProgress" />
+      <!-- Download Progress (SSE): 单文件 / 目录下载共用 -->
+      <SftpDownloadProgress
+        v-if="fileDownloading"
+        mode="file"
+        :progress="fileProgress"
+      />
+      <SftpDownloadProgress v-if="dirDownloading" mode="dir" :progress="dlProgress" />
 
       <!-- File List -->
       <SftpFileTable
@@ -67,12 +75,12 @@
         @download-directory="downloadDirectory"
       />
 
-      <!-- Stats -->
+      <!-- Stats：按当前类型过滤视图统计（隐藏的文件不计入） -->
       <SftpStatsBar
         :dir-count="dirCount"
         :file-count="fileCount"
         :total-size="totalSize"
-        :total-count="items.length"
+        :total-count="typeFilteredItems.length"
       />
     </div>
   </div>
@@ -83,7 +91,13 @@ import { ref, computed, onMounted, onActivated } from 'vue'
 import { FolderOpened, CircleCheck, CircleClose } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { sftpApi, type SftpLastVisit } from '../../api/sftp'
+import { authApi } from '../../api/auth'
 import { useFilesStore } from '../../stores/files'
+import {
+  clampSftpTimeoutSec,
+  getSftpTimeoutSec,
+  setSftpTimeoutSec,
+} from '../../utils/sftpTimeout'
 import SftpConnectionPanel from './components/SftpConnectionPanel.vue'
 import SftpToolbar from './components/SftpToolbar.vue'
 import SftpBatchActions from './components/SftpBatchActions.vue'
@@ -97,6 +111,10 @@ const connected = ref(false)
 const currentPath = ref('/')
 const items = ref<any[]>([])
 const searchQuery = ref('')
+/** 文件名浏览过滤：默认仅 CSV，其它文件隐藏 */
+const fileType = ref<'csv' | 'all'>('csv')
+/** 下载超时（秒）：用户自由设定，持久化到 UserSetting.sftp_download_timeout */
+const downloadTimeout = ref(600)
 const sortBy = ref('mtime')
 const sortOrder = ref<'asc' | 'desc'>('desc')
 // 断线续连：上次访问信息（last_visit 接口），预填连接面板并恢复路径
@@ -112,21 +130,39 @@ const downloadingRows = ref<Set<string>>(new Set())
 // 避免连点叠加多次握手把卡顿放大。
 const listLoading = ref(false)
 
-// SSE directory download progress
-const downloading = ref(false)
-const dlProgress = ref({ percent: 0, speed: 0, eta: 0, currentFile: '', current: 0, total: 0 })
+// SSE 单文件下载进度（download_file_stream）
+const fileDownloading = ref(false)
+const fileProgress = ref({
+  percent: 0, speed: 0, eta: 0, currentFile: '',
+  current: 0, total: 0, bytes_done: 0, total_bytes: 0,
+})
+
+// SSE 目录下载进度（download_dir）
+const dirDownloading = ref(false)
+const dlProgress = ref({
+  percent: 0, speed: 0, eta: 0, currentFile: '',
+  current: 0, total: 0, bytes_done: 0, total_bytes: 0,
+})
 
 const fileItems = computed(() => items.value.filter(i => !i.is_dir && isCsv(i.name)))
 
-const filteredItems = computed(() => {
-  if (!searchQuery.value) return items.value
-  const q = searchQuery.value.toLowerCase()
-  return items.value.filter(item => item.name.toLowerCase().includes(q))
+/** 按文件类型过滤（目录始终显示）；搜索在类型视图基础上叠加 */
+const typeFilteredItems = computed(() => {
+  if (fileType.value === 'all') return items.value
+  return items.value.filter(i => i.is_dir || isCsv(i.name))
 })
 
-const dirCount = computed(() => items.value.filter(i => i.is_dir).length)
-const fileCount = computed(() => items.value.filter(i => !i.is_dir).length)
-const totalSize = computed(() => items.value.filter(i => !i.is_dir).reduce((sum, i) => sum + (i.size || 0), 0))
+const filteredItems = computed(() => {
+  if (!searchQuery.value) return typeFilteredItems.value
+  const q = searchQuery.value.toLowerCase()
+  return typeFilteredItems.value.filter(item => item.name.toLowerCase().includes(q))
+})
+
+const dirCount = computed(() => typeFilteredItems.value.filter(i => i.is_dir).length)
+const fileCount = computed(() => typeFilteredItems.value.filter(i => !i.is_dir).length)
+const totalSize = computed(
+  () => typeFilteredItems.value.filter(i => !i.is_dir).reduce((sum, i) => sum + (i.size || 0), 0),
+)
 
 const selectedPaths = computed(() => {
   return items.value
@@ -198,8 +234,43 @@ async function checkLastVisit(allowAuto = true) {
   }
 }
 
-onMounted(checkLastVisit)
-onActivated(checkLastVisit)
+onMounted(() => {
+  checkLastVisit()
+  loadTimeout()
+})
+onActivated(() => {
+  checkLastVisit()
+  loadTimeout()
+})
+
+/** 读取用户设置的下载超时（30-3600s），回退默认 600s */
+async function loadTimeout() {
+  try {
+    downloadTimeout.value = await getSftpTimeoutSec()
+  } catch {
+    downloadTimeout.value = 600
+  }
+}
+
+/** 最近一次已保存/已提示的超时值：el-input-number 会在输入与 blur 各发一次
+ *  update:model-value，同一值去重，避免重复 PUT 与重复成功提示。 */
+const lastSavedTimeout = ref<number | null>(null)
+
+/** 用户修改超时：钳位 + 写入模块缓存 + 持久化到用户设置 */
+async function onTimeoutChange(sec: number | undefined) {
+  if (sec == null) return
+  const clamped = clampSftpTimeoutSec(sec)
+  if (clamped === lastSavedTimeout.value) return
+  lastSavedTimeout.value = clamped
+  downloadTimeout.value = clamped
+  setSftpTimeoutSec(clamped)
+  try {
+    await authApi.updateSettings({ sftp_download_timeout: clamped })
+    ElMessage.success(`下载超时已设为 ${clamped} 秒`)
+  } catch {
+    // 错误 toast 由 axios 拦截器统一弹出
+  }
+}
 
 function onConnected() {
   connected.value = true
@@ -241,31 +312,59 @@ function handleSortChange({ prop, order }: { prop: string; order: string | null 
 // ------------------------------------------------------------------
 
 async function downloadFile(row: any) {
-  const key = `file_${row.name}`
-  downloadingRows.value.add(key)
-  try {
-    const { data } = await sftpApi.download(joinPath(currentPath.value, row.name))
-    ElMessage.success(`已导入: ${data.filename} (${formatSize(data.size)})`)
-    filesStore.notifyFilesChanged()
-  } catch { /* 错误 toast 由 axios 拦截器统一弹出 */ }
-  finally { downloadingRows.value.delete(key) }
+  await singleFileDownload(row, `file_${row.name}`)
 }
 
+/** 「解析」按钮 = 下载 + 注册（后端语义同上，与下载按钮等价），复用同一 SSE 流 */
 async function downloadAndParse(row: any) {
-  const key = `parse_${row.name}`
+  await singleFileDownload(row, `parse_${row.name}`)
+}
+
+async function singleFileDownload(row: any, key: string) {
   downloadingRows.value.add(key)
+  startFileProgress(row.name)
   try {
-    await sftpApi.downloadAndParse(joinPath(currentPath.value, row.name))
-    ElMessage.success(`已导入: ${row.name}`)
-    filesStore.notifyFilesChanged()
-  } catch { /* 错误 toast 由 axios 拦截器统一弹出 */ }
-  finally { downloadingRows.value.delete(key) }
+    await sftpApi.downloadFileStream(
+      joinPath(currentPath.value, row.name),
+      downloadTimeout.value,
+      (d) => {
+        fileProgress.value = {
+          percent: d.percent, speed: d.speed, eta: d.eta,
+          currentFile: d.filename, bytes_done: d.bytes_done, total_bytes: d.total_bytes,
+          current: 0, total: 1,
+        }
+      },
+      (d) => {
+        fileProgress.value.percent = 100
+        fileProgress.value.bytes_done = fileProgress.value.total_bytes
+        ElMessage.success(`已导入: ${d.filename} (${formatSize(d.size)})`)
+        filesStore.notifyFilesChanged()
+        setTimeout(() => { fileDownloading.value = false }, 1000)
+      },
+      (msg) => {
+        fileDownloading.value = false
+        ElMessage.error(msg || '下载失败')
+      },
+    )
+  } catch {
+    fileDownloading.value = false
+  } finally {
+    downloadingRows.value.delete(key)
+  }
+}
+
+function startFileProgress(filename: string) {
+  fileDownloading.value = true
+  fileProgress.value = {
+    percent: 0, speed: 0, eta: 0, currentFile: filename,
+    current: 0, total: 1, bytes_done: 0, total_bytes: 0,
+  }
 }
 
 async function downloadDirectory(dirName?: string) {
   const path = dirName ? joinPath(currentPath.value, dirName) : currentPath.value
-  downloading.value = true
-  dlProgress.value = { percent: 0, speed: 0, eta: 0, currentFile: '', current: 0, total: 0 }
+  dirDownloading.value = true
+  dlProgress.value = { percent: 0, speed: 0, eta: 0, currentFile: '', current: 0, total: 0, bytes_done: 0, total_bytes: 0 }
   try {
     await sftpApi.downloadDirStream(
       path,
@@ -278,23 +377,25 @@ async function downloadDirectory(dirName?: string) {
           currentFile: data.filename,
           current: data.current,
           total: data.total,
+          bytes_done: 0,
+          total_bytes: 0,
         }
       },
       (data) => {
         dlProgress.value.percent = 100
         ElMessage.success(`目录 "${data.dir_name}" 已保存 (${data.file_count} 个文件)`)
         filesStore.notifyFilesChanged()
-        setTimeout(() => { downloading.value = false }, 1000)
+        setTimeout(() => { dirDownloading.value = false }, 1000)
       },
       (msg) => {
         ElMessage.error(msg || '目录下载失败')
-        downloading.value = false
+        dirDownloading.value = false
       },
     )
   } catch {
     // downloadDirStream 走原生 fetch，其失败经 onError 回调提示（见上），
     // 此处仅兜底重置下载状态。
-    downloading.value = false
+    dirDownloading.value = false
   }
 }
 
@@ -302,7 +403,10 @@ async function batchDownload() {
   if (selectedPaths.value.length === 0) return
   batchDownloading.value = true
   try {
-    const { data } = await sftpApi.downloadBatch(selectedPaths.value)
+    const { data } = await sftpApi.downloadBatch(
+      selectedPaths.value,
+      { timeout: downloadTimeout.value * 1000 },
+    )
     ElMessage.success(`已导入 ${data.count} 个文件`)
     filesStore.notifyFilesChanged()
   } catch { /* 错误 toast 由 axios 拦截器统一弹出 */ }
@@ -316,7 +420,10 @@ async function batchDownloadAndParse() {
   batchParsing.value = true
   try {
     const paths = selected.map(i => joinPath(currentPath.value, i.name))
-    const { data } = await sftpApi.downloadAndParseBatch(paths)
+    const { data } = await sftpApi.downloadAndParseBatch(
+      paths,
+      { timeout: downloadTimeout.value * 1000 },
+    )
     ElMessage.success(`已成功导入 ${data.files?.length || 0}/${selected.length} 个文件（批次: ${data.batch_name}）`)
     filesStore.notifyFilesChanged()
   } catch {

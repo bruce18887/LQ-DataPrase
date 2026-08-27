@@ -1,6 +1,7 @@
 import type { AxiosRequestConfig } from 'axios'
 
 import api from './index'
+import { getSftpTimeoutSec } from '../utils/sftpTimeout'
 
 export interface SseProgressData {
   event: 'progress'
@@ -25,6 +26,23 @@ export interface SseErrorData {
   event: 'error'
   filename: string
   message: string
+}
+
+export interface SseFileProgressData {
+  event: 'progress'
+  percent: number
+  speed: number
+  eta: number
+  filename: string
+  bytes_done: number
+  total_bytes: number
+}
+
+export interface SseFileDoneData {
+  event: 'done'
+  filename: string
+  size: number
+  datafile_id: number
 }
 
 export interface SftpConfigItem {
@@ -87,14 +105,14 @@ export const sftpApi = {
   downloadDir(path: string, onlyData = false) {
     return api.post('/sftp/download_dir/', { path, only_data: onlyData })
   },
-  downloadBatch(paths: string[]) {
-    return api.post('/sftp/download_batch/', { paths })
+  downloadBatch(paths: string[], config?: AxiosRequestConfig) {
+    return api.post('/sftp/download_batch/', { paths }, config)
   },
   downloadAndParse(path: string) {
     return api.post('/sftp/download_and_parse/', { path })
   },
-  downloadAndParseBatch(paths: string[]) {
-    return api.post('/sftp/download_and_parse/', { paths })
+  downloadAndParseBatch(paths: string[], config?: AxiosRequestConfig) {
+    return api.post('/sftp/download_and_parse/', { paths }, config)
   },
   getConfigs() {
     return api.get('/sftp/configs/')
@@ -104,6 +122,41 @@ export const sftpApi = {
   },
   deleteConfig(payload: { name?: string; id?: number }) {
     return api.post('/sftp/delete_config/', payload)
+  },
+
+  // ------------------------------------------------------------------
+  // SSE download streams
+  // ------------------------------------------------------------------
+
+  /**
+   * 单文件下载（SSE，带百分比/速率/ETA 进度）。
+   *
+   * 与 downloadDirStream 同构：fetch + ReadableStream（EventSource 不能带
+   * Authorization 头）。timeout 为该次下载允许的最长秒数（后端以此设
+   * channel socket 超时 + 整体 deadline；用户可在工具栏自由设定）。
+   * 事件：progress(percent/speed/eta) → done(filename/size/datafile_id)
+   * 或 error(message)。连接层错误由 onError 回调提示。
+   */
+  async downloadFileStream(
+    path: string,
+    timeoutSec: number,
+    onProgress: (data: SseFileProgressData) => void,
+    onDone: (data: SseFileDoneData) => void,
+    onError: (msg: string) => void,
+  ) {
+    try {
+      await postSse(
+        '/sftp/download_file_stream/',
+        { path, timeout: timeoutSec },
+        (data) => {
+          if (data.event === 'progress') onProgress(data as SseFileProgressData)
+          else if (data.event === 'done') onDone(data as SseFileDoneData)
+          else if (data.event === 'error') onError(data.message || '下载失败')
+        },
+      )
+    } catch (e: any) {
+      onError(e?.message || '网络错误')
+    }
   },
 
   /**
@@ -117,45 +170,62 @@ export const sftpApi = {
     onDone: (data: SseDoneData) => void,
     onError: (msg: string) => void,
   ) {
-    const token = localStorage.getItem('access_token')
-    // Re-use the axios base URL so this works in Electron (file://) as well as
-    // the browser dev/prod builds, where absolute paths resolve incorrectly.
-    const baseUrl = (api.defaults.baseURL || '/api/v1').replace(/\/$/, '')
+    const timeoutSec = await getSftpTimeoutSec()
     try {
-      const response = await fetch(`${baseUrl}/sftp/download_dir/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
+      await postSse(
+        '/sftp/download_dir/',
+        { path, only_data: onlyData, timeout: timeoutSec },
+        (data) => {
+          if (data.event === 'progress') onProgress(data as SseProgressData)
+          else if (data.event === 'done') onDone(data as SseDoneData)
+          else if (data.event === 'error') onError(data.message || '下载失败')
         },
-        body: JSON.stringify({ path, only_data: onlyData }),
-      })
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({ error: '请求失败' }))
-        onError(err.error || `HTTP ${response.status}`)
-        return
-      }
-      const reader = response.body!.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const events = buffer.split('\n\n')
-        buffer = events.pop()!
-        for (const evt of events) {
-          if (!evt.startsWith('data: ')) continue
-          try {
-            const data = JSON.parse(evt.slice(6))
-            if (data.event === 'progress') onProgress(data as SseProgressData)
-            else if (data.event === 'done') onDone(data as SseDoneData)
-            else if (data.event === 'error') onError(data.message || '下载失败')
-          } catch { /* skip malformed events */ }
-        }
-      }
+      )
     } catch (e: any) {
-      onError(e.message || '网络错误')
+      onError(e?.message || '网络错误')
     }
   },
+}
+
+/**
+ * POST 一个 SSE 端点并逐事件回调。非 2xx：解析错误体后抛出（调用方负责
+ * 提示）；流式解析与事件分发与旧 downloadDirStream 实现一致。
+ */
+async function postSse(
+  url: string,
+  body: Record<string, unknown>,
+  onData: (data: any) => void,
+): Promise<void> {
+  const token = localStorage.getItem('access_token')
+  // Re-use the axios base URL so this works in Electron (file://) as well as
+  // the browser dev/prod builds, where absolute paths resolve incorrectly.
+  const baseUrl = (api.defaults.baseURL || '/api/v1').replace(/\/$/, '')
+  const response = await fetch(`${baseUrl}${url}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: '请求失败' }))
+    throw new Error(err.error || `HTTP ${response.status}`)
+  }
+  const reader = response.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const events = buffer.split('\n\n')
+    buffer = events.pop()!
+    for (const evt of events) {
+      if (!evt.startsWith('data: ')) continue
+      try {
+        onData(JSON.parse(evt.slice(6)))
+      } catch { /* skip malformed events */ }
+    }
+  }
 }

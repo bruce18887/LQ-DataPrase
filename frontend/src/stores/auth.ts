@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authApi } from '../api/auth'
 import { resetExportTimeoutCache } from '../utils/exportTimeout'
+import { resetSftpTimeoutCache } from '../utils/sftpTimeout'
 import type { User } from '../types'
 
 export const useAuthStore = defineStore('auth', () => {
@@ -14,6 +15,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function login(username: string, password: string) {
     resetExportTimeoutCache()
+    resetSftpTimeoutCache()
     const { data } = await authApi.login(username, password)
     token.value = data.token
     refreshToken.value = data.refresh
@@ -63,6 +65,7 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('access_token')
     localStorage.removeItem('refresh_token')
     resetExportTimeoutCache()
+    resetSftpTimeoutCache()
   }
 
   function logout() {

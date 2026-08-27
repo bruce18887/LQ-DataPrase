@@ -57,6 +57,7 @@ class UserSettingSerializer(serializers.ModelSerializer):
             'recent_files', 'max_recent_files', 'histogram_label_offset',
             'export_filename_templates',
             'export_timeout',
+            'sftp_download_timeout',
             'default_hidden_columns',
         ]
 
@@ -88,6 +89,11 @@ class UserSettingSerializer(serializers.ModelSerializer):
     def validate_export_timeout(self, value):
         if not isinstance(value, int) or not 30 <= value <= 3600:
             raise serializers.ValidationError('导出超时必须在 30-3600 秒之间')
+        return value
+
+    def validate_sftp_download_timeout(self, value):
+        if not isinstance(value, int) or not 30 <= value <= 3600:
+            raise serializers.ValidationError('SFTP 下载超时必须在 30-3600 秒之间')
         return value
 
     def validate_default_hidden_columns(self, value):

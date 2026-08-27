@@ -24,7 +24,18 @@ function fieldByLabel(page: Parameters<typeof gotoApp>[0], label: string): Locat
 }
 
 async function manualConnect(page: Parameters<typeof gotoApp>[0], srv: SftpTestServer) {
-  await page.getByPlaceholder('例如: 192.168.1.1').fill(srv.host)
+  // 断线续连的 initial 是异步到达的：等待表单预填稳定后再 fill，
+  // 否则 fill 与 applyInitial 竞争会把 host 写入两次（host 变
+  // 127.0.0.1127.0.0.1，连接失败）。同款竞争是 sftp.spec.ts 已有的
+  // 「等两次读取一致」模式（R4）。
+  const host = page.getByPlaceholder('例如: 192.168.1.1')
+  await expect.poll(async () => {
+    const v1 = await host.inputValue()
+    await page.waitForTimeout(300)
+    const v2 = await host.inputValue()
+    return v1 === v2
+  }, { timeout: 10_000 }).toBe(true)
+  await host.fill(srv.host)
   await fieldByLabel(page, '端口').fill(String(srv.port))
   // el-input-number 需 blur 才发射 update:model-value（R4）
   await fieldByLabel(page, '端口').blur()
@@ -139,5 +150,131 @@ test.describe('@sftp SFTP 断线续连', { tag: ['@sftp'] }, () => {
 
     // 收尾：断开（此刻未连接，仅清状态）
     await expect(page.getByRole('button', { name: '断开' })).toHaveCount(0)
+  })
+})
+
+test.describe('@sftp SFTP 浏览器增强：类型过滤 / 文件进度 / 下载超时', { tag: ['@sftp'] }, () => {
+  /** 回根目录：点面包屑 Home（子目录内可能残留上次运行路径），等到 sub1 目录行可见 */
+  async function goRoot(page: Parameters<typeof gotoApp>[0]) {
+    await page.locator('.toolbar-card .el-breadcrumb__item').first().click()
+    await expect(page.locator('.file-name', { hasText: 'sub1' })).toBeVisible({ timeout: 15_000 })
+  }
+
+  test('@p1 类型过滤：默认仅 CSV 隐藏非 CSV，切换全部文件后可见', async ({ page }) => {
+    await gotoApp(page, '/sftp')
+    await manualConnect(page, server)
+    await goRoot(page)
+
+    // 默认「仅 CSV」：CSV 可见、非 CSV（notes.txt）隐藏
+    await expect(page.locator('.file-name', { hasText: 'root.csv' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.file-name', { hasText: 'notes.txt' })).toHaveCount(0)
+
+    // 切到「全部文件」→ notes.txt 出现（带「仅支持 CSV」标签）
+    await page.getByTestId('sftp-type-filter').click()
+    await page.locator('.el-select-dropdown:visible .el-select-dropdown__item', { hasText: '全部文件' }).click()
+    await expect(page.locator('.file-name', { hasText: 'notes.txt' })).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('.file-table tr', { hasText: 'notes.txt' })).toContainText('仅支持 CSV')
+
+    // 切回「仅 CSV」→ notes.txt 重新隐藏；目录/CSV 仍在
+    await page.getByTestId('sftp-type-filter').click()
+    await page.locator('.el-select-dropdown:visible .el-select-dropdown__item', { hasText: '仅 CSV' }).click()
+    await expect(page.locator('.file-name', { hasText: 'notes.txt' })).toHaveCount(0)
+    await expect(page.locator('.file-name', { hasText: 'root.csv' })).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('.file-name', { hasText: 'sub1' })).toBeVisible({ timeout: 10_000 })
+
+    await disconnect(page)
+  })
+
+  test('@p1 单文件下载：SSE 进度卡片（百分比+速率）出现并完成导入', async ({ page }) => {
+    await gotoApp(page, '/sftp')
+    await manualConnect(page, server)
+    await goRoot(page)
+
+    // 定位 big.csv 行的「下载」按钮
+    const bigRow = page.locator('.file-table .el-table__row').filter({
+      has: page.locator('.file-name', { hasText: 'big.csv' }),
+    })
+    await expect(bigRow).toBeVisible({ timeout: 15_000 })
+
+    // SSE 进度卡片出现（下载开始即渲染），包含百分比与速率文案
+    await bigRow.getByRole('button', { name: '下载' }).click()
+    await expect(page.locator('.download-progress-card')).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('.download-progress-card')).toContainText(/%|正在下载 big\.csv/)
+    await expect(page.locator('.download-progress-card')).toContainText(/MB\/s/)
+
+    // 完成：成功提示 + 文件注册出现（重名会带时间戳后缀，如 big_xxx.csv）
+    await expect(page.getByText(/已导入: big/)).toBeVisible({ timeout: 60_000 })
+    const token = await page.evaluate(() => localStorage.getItem('access_token'))
+    await expect
+      .poll(
+        async () => {
+          const resp = await page.request.get('/api/v1/files/?search=big.csv',
+            { headers: { Authorization: `Bearer ${token}` } })
+          if (!resp.ok()) return 0
+          const data = (await resp.json()) as { count: number }
+          return data.count
+        },
+        { timeout: 15_000 },
+      )
+      .toBeGreaterThan(0)
+
+    await disconnect(page)
+  })
+
+  test('@p1 下载超时：工具栏自由设定并持久化到用户设置', async ({ page }) => {
+    const restoreTimeout = () => page.evaluate(async () => {
+      await fetch('/api/v1/auth/settings/', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+        },
+        body: JSON.stringify({ sftp_download_timeout: 600 }),
+      })
+    })
+    try {
+      // 起点：恢复默认 600 再 reload（刷新后重新读取用户设置；同时保证上次
+      // 运行残留的 900 不把断言污染）。reload 后必须先等预填稳定再手动连接
+      // （断线续连的 initial 是异步到达的，与 manualConnect 的 fill 竞争会
+      // 导致 host 被写入两次——见截图失败特征 host=127.0.0.1127.0.0.1）。
+      await gotoApp(page, '/sftp')
+      await restoreTimeout()
+      await page.reload()
+      const host = page.getByPlaceholder('例如: 192.168.1.1')
+      await expect.poll(async () => {
+        const v1 = await host.inputValue()
+        await page.waitForTimeout(300)
+        const v2 = await host.inputValue()
+        return v1 === v2
+      }, { timeout: 10_000 }).toBe(true)
+      await manualConnect(page, server)
+
+      const timeoutInput = page.getByTestId('sftp-timeout-input').locator('input')
+      await expect(timeoutInput).toHaveValue('600', { timeout: 15_000 })
+
+      // 修改为 900 → blur 触发保存 → 成功提示（el-input-number 输入+blur 可能
+      // 各发一次，用 .first() 避免 strict mode 双元素冲突）
+      await timeoutInput.fill('900')
+      await timeoutInput.blur()
+      await expect(page.getByText(/下载超时已设为 900 秒/).first()).toBeVisible({ timeout: 10_000 })
+
+      // 持久化校验：GET /auth/settings/ 返回 900
+      await expect
+        .poll(async () => {
+          const value = await page.evaluate(async () => {
+            const resp = await fetch('/api/v1/auth/settings/', {
+              headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
+            })
+            if (!resp.ok) return null
+            return (await resp.json()).sftp_download_timeout
+          })
+          return value
+        }, { timeout: 10_000 })
+        .toBe(900)
+
+      await disconnect(page)
+    } finally {
+      await restoreTimeout()
+    }
   })
 })
