@@ -12,6 +12,9 @@ export interface SseProgressData {
   percent: number
   speed: number
   eta: number
+  /** 目录下载：实际累计下载字节 / 远端总字节（按总大小计算进度） */
+  bytes_done?: number
+  total_bytes?: number
 }
 
 export interface SseDoneData {

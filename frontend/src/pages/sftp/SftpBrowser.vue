@@ -350,8 +350,10 @@ async function downloadDirectory(dirName?: string) {
           currentFile: data.filename,
           current: data.current,
           total: data.total,
-          bytes_done: 0,
-          total_bytes: 0,
+          // 目录下载进度同样按总下载字节数（bytes_done/total_bytes）计算，
+          // 与单文件下载一致：百分比随分块实时更新，不再卡在低百分比
+          bytes_done: data.bytes_done ?? 0,
+          total_bytes: data.total_bytes ?? 0,
         }
       },
       (data) => {

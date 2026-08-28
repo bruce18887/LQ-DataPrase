@@ -1,4 +1,4 @@
-import os, time, logging, json
+import os, time, logging
 import paramiko
 from stat import S_ISDIR
 from rest_framework import viewsets, status
@@ -16,9 +16,8 @@ from .config_views import SftpConfigMixin
 from .models import SftpConfig
 from . import pool
 from .downloads import (
-    DirDownloadTimeout,
-    channel_timeout,
     clamp_timeout,
+    download_dir_events,
     download_events_to_sse,
     download_file_events,
 )
@@ -330,6 +329,11 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
 
     @action(detail=False, methods=['post'])
     def download_dir(self, request):
+        """SSE 下载目录（递归收集 CSV，逐文件下载即注册）。
+
+        进度事件按**总下载字节数**计算并随分块实时更新
+        （见 ``downloads.download_dir_events``），大文件下载期间不会卡在低百分比。
+        """
         remote_path = request.data.get('path')
         timeout_sec = request.data.get('timeout')
         if timeout_sec is None:
@@ -353,60 +357,11 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
         local_dir = os.path.join(upload_dir, dir_name)
         os.makedirs(local_dir, exist_ok=True)
 
-        total_bytes = sum(size for _, _, size, _ in file_list)
-        total_files = len(file_list)
+        events = download_dir_events(
+            sftp, request.user, file_list, local_dir, dir_name, timeout_sec)
 
-        def sse_generator():
-            bytes_done = 0
-            success_count = 0
-            start_time = time.time()
-            deadline = start_time + timeout_sec
-            try:
-                with channel_timeout(sftp, timeout_sec):
-                    for i, (remote_fp, rel_path, size, _mtime) in enumerate(file_list):
-                        # rel_path uses '/' separators (built in _collect_files);
-                        # normalize to the OS separator so the stored DataFile
-                        # path matches os.walk output later (registered detection
-                        # in BatchDirListView relies on consistent separators).
-                        rel_path_os = rel_path.replace('/', os.sep)
-                        local_file_path = os.path.join(local_dir, rel_path_os)
-                        os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
-                        try:
-                            if time.time() > deadline:
-                                raise DirDownloadTimeout(f'目录下载超时（超过 {timeout_sec} 秒）')
-                            sftp.get(remote_fp, local_file_path)
-                            bytes_done += size
-                            success_count += 1
-                            # Auto-register into database
-                            try:
-                                _register_file(request.user, local_file_path, 'batch', dir_name)
-                            except Exception as re:
-                                logger.warning(f"Auto-register failed for {local_file_path}: {re}")
-                            elapsed = time.time() - start_time
-                            speed = bytes_done / elapsed if elapsed > 0 else 0
-                            eta = (total_bytes - bytes_done) / speed if speed > 0 else 0
-                            yield f"data: {json.dumps({'event': 'progress', 'current': i + 1, 'total': total_files, 'filename': os.path.basename(rel_path), 'rel_path': rel_path, 'percent': round(bytes_done * 100 / total_bytes) if total_bytes else 100, 'speed': round(speed / 1048576, 2), 'eta': round(eta)})}\n\n"
-                        except DirDownloadTimeout as e:
-                            # 超时是全局性的：中止整个目录下载（逐文件重试无意义），
-                            # 由外层 except 统一收尾并输出单个 error 事件
-                            raise
-                        except Exception as e:
-                            logger.warning(f"SFTP download failed for {remote_fp}: {e}")
-                            yield f"data: {json.dumps({'event': 'error', 'filename': os.path.basename(rel_path), 'message': str(e)})}\n\n"
-            except DirDownloadTimeout as e:
-                pool.invalidate(request.user.id)
-                yield f"data: {json.dumps({'event': 'error', 'filename': '', 'message': str(e)})}\n\n"
-            except GeneratorExit:
-                # Client disconnected mid-stream: connection state is unreliable.
-                pool.invalidate(request.user.id)
-                raise
-            except Exception:
-                pool.invalidate(request.user.id)
-                raise
-
-            yield f"data: {json.dumps({'event': 'done', 'dir_name': dir_name, 'file_count': success_count, 'total': total_files, 'saved_dir': local_dir})}\n\n"
-
-        response = StreamingHttpResponse(sse_generator(), content_type='text/event-stream')
+        response = StreamingHttpResponse(
+            download_events_to_sse(events), content_type='text/event-stream')
         response['Cache-Control'] = 'no-cache'
         response['X-Accel-Buffering'] = 'no'
         return response
