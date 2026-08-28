@@ -15,6 +15,12 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-08-29 e2e 端口被残留 runserver 进程树劫持（同一会话复现两次）
+
+- **现象**：batch-phase e2e 报 `/api/v1/batch-dirs/import/` 404，但该端点在当前代码明确存在（直连探测命中路由返回 401）。
+- **根因**：8000 端口被**非 Playwright 起的**残留 `manage.py runserver` 占着，`reuseExistingServer: !CI` 静默复用它（R3「复用旧代码进程 → e2e 结果无效」家族）；且 runserver 是 autoreload 父监视 + 子服务结构——只杀占端口的子进程，父进程立刻 respawn，端口「释放」后马上被占回。
+- **修复/规则**：杀 runserver 必须**杀整棵进程树**——用 Win32_Process 沿 ParentProcessId 向上走到最顶层 runserver 祖先，整链一起杀，杀后验证无 `CommandLine like '%runserver%'` 的 python 残留再跑 e2e。识别信号：e2e 报「已知存在端点 404」→ 先查端口占用进程，勿先怀疑代码。PS 5.1 探测非 2xx 用 try/catch 读 `$_.Exception.Response`（无 `-SkipHttpErrorCheck`）。
+
 ## 2026-08-30 SFTP 目录下载进度卡 1%：SSE 事件粒度与字节基准
 
 - **批量/目录下载进度不能按「整文件完成」发事件**：旧 `download_dir` 用阻塞式 `sftp.get()`，事件只在每个文件下完后发一次——大文件期间进度停在 0%/1%（观感卡死）。修法（与单文件 SSE 同构）：抽 `iter_remote_chunks`（256KB 分块，单文件/目录共用）+ 按「实际累计字节/远端总字节」发进度（0.1s 节流）+ **每文件至少一次补偿事件**（小文件 <0.1s 读完时补发最终值，保证文件计数与百分比前进）。
