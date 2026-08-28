@@ -8,6 +8,8 @@ export interface BatchDirInfo {
   total_size: number
   registered: boolean
   files: DataFile[]
+  /** 未注册目录的文件预览（文件名+大小，服务端最多 200 条） */
+  preview_files?: Array<{ name: string; size: number }>
 }
 
 export interface ListFilesParams {
@@ -122,10 +124,16 @@ export const datafilesApi = {
   getFormatTypes() {
     return api.get<{ format_types: string[] }>('/files/format_types/')
   },
-  /** 组合多个单文件为批次（服务端物理移动到 batch/<name>/ 并更新记录） */
+  /** 组合/追加多个单文件到批次（服务端物理移动到 batch/<name>/ 并更新记录；批次可已存在） */
   combineFiles(ids: number[], batchName: string) {
     return api.post<{ combined: number; batch_name: string; files: DataFile[] }>(
       '/files/combine/', { ids, batch_name: batchName },
+    )
+  },
+  /** 移出批次：批次文件物理移回 single/ 并恢复 file_type='single' */
+  uncombineFiles(ids: number[]) {
+    return api.post<{ moved: number; files: DataFile[] }>(
+      '/files/uncombine/', { ids },
     )
   },
   activate(id: number) {

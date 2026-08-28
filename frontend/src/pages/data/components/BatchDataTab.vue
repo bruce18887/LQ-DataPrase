@@ -1,26 +1,49 @@
 <template>
   <div class="batch-data-tab">
+    <!-- 汇总条 -->
+    <BatchSummaryBar
+      v-if="batchDirs.length > 0"
+      :batch-count="batchGroups.length"
+      :file-count="totalFileCount"
+      :total-size="totalByteSize"
+      :pending-dirs="unregisteredDirs.length"
+      @refresh="loadBatchDirs"
+    />
+
+    <!-- 批次搜索 -->
+    <div v-if="batchDirs.length > 0" class="batch-search-bar">
+      <el-input
+        v-model="batchSearch"
+        placeholder="按批次名称过滤…"
+        clearable
+        size="small"
+        :data-testid="'batch-search'"
+        style="width: 240px"
+      >
+        <template #prefix>
+          <el-icon><Search /></el-icon>
+        </template>
+      </el-input>
+      <span v-if="batchSearch" class="batch-search-hint">
+        匹配 {{ filteredUnregisteredDirs.length + filteredBatchGroups.length }} 条
+      </span>
+    </div>
+
     <!-- Unregistered batch directories (from SFTP downloads) -->
-    <template v-if="unregisteredDirs.length > 0">
+    <template v-if="filteredUnregisteredDirs.length > 0">
       <div class="section-label">📂 SFTP 下载目录（未导入）</div>
-      <div v-for="dir in unregisteredDirs" :key="dir.name" class="batch-group unregistered">
-        <div class="batch-header">
-          <span class="batch-name">📁 {{ dir.name }}</span>
-          <span class="batch-count">{{ dir.file_count }} 个文件</span>
-          <span class="batch-size">{{ formatSize(dir.total_size) }}</span>
-          <div style="flex:1" />
-          <el-button size="small" type="success" @click="importDir(dir)" :loading="importingDir === dir.name">
-            <el-icon><Upload /></el-icon> 导入
-          </el-button>
-          <el-button size="small" type="danger" plain @click="deleteDir(dir)">
-            <el-icon><Delete /></el-icon> 删除
-          </el-button>
-        </div>
-      </div>
+      <UnregisteredDirCard
+        v-for="dir in filteredUnregisteredDirs"
+        :key="dir.name"
+        :dir="dir"
+        :importing="importingDir === dir.name"
+        @import="importDir"
+        @delete="deleteDir"
+      />
     </template>
 
     <!-- Batch files grouped (registered) -->
-    <template v-if="batchGroups.length > 0">
+    <template v-if="filteredBatchGroups.length > 0">
       <div class="section-label-row">
         <span class="section-label">📦 已导入批次</span>
         <el-button
@@ -34,7 +57,7 @@
           {{ allBatchesExpanded ? '全部折叠' : '全部展开' }}
         </el-button>
       </div>
-      <div v-for="group in batchGroups" :key="group.name" class="batch-group" :data-testid="`batch-group-${group.name}`">
+      <div v-for="group in filteredBatchGroups" :key="group.name" class="batch-group" :data-testid="`batch-group-${group.name}`">
         <div
           class="batch-header batch-header-clickable"
           role="button"
@@ -50,61 +73,64 @@
           </el-icon>
           <span class="batch-name">📦 {{ group.name }}</span>
           <span class="batch-count">{{ group.files.length }} 个文件</span>
+          <span class="batch-size" :title="`总大小 ${formatSize(groupStats(group).totalSize)}`">
+            {{ formatSize(groupStats(group).totalSize) }}
+          </span>
+          <span class="batch-size" :title="`总行数 ${groupStats(group).totalRows}`">
+            {{ groupStats(group).totalRows }} 行
+          </span>
+          <span
+            v-for="fmt in groupStats(group).formats"
+            :key="fmt"
+            class="batch-flag batch-flag-format"
+          >{{ fmt }}</span>
+          <span
+            v-for="code in groupStats(group).products"
+            :key="code"
+            class="batch-flag batch-flag-product"
+          >{{ code }}</span>
+          <span
+            v-for="stg in groupStats(group).stages"
+            :key="stg"
+            class="batch-flag batch-flag-stage"
+          >{{ stg }}</span>
+          <span v-if="group.subBatchNames.length > 0" class="batch-flag">{{ group.subBatchNames.length }} 个子批次</span>
           <div style="flex:1" />
-          <el-button
-            size="small"
-            type="danger"
-            plain
-            @click.stop="deleteBatch(group)"
+          <el-dropdown
+            v-if="group.subBatchNames.length > 0"
+            trigger="click"
+            @command="(sub: string) => deleteSubBatch(group.name, sub)"
           >
+            <el-button size="small" type="danger" plain link @click.stop>
+              删子批次<el-icon><ArrowDown /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item v-for="sub in group.subBatchNames" :key="sub" :command="sub">
+                  {{ sub }}（{{ groupFilesBySub(group, sub).length }} 个文件）
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-button size="small" type="danger" plain @click.stop="deleteBatch(group)">
             <el-icon><Delete /></el-icon> 删除批次
           </el-button>
         </div>
         <el-collapse-transition>
           <div v-show="isBatchExpanded(group.name)" class="batch-files" :data-testid="`batch-files-${group.name}`">
-            <!-- 有子批次时按子批次分组显示 -->
-            <template v-if="group.subBatches && group.subBatches.length > 0">
-              <div v-for="sub in group.subBatches" :key="sub.name" class="sub-batch-group">
-                <div class="sub-batch-header">
-                  <span class="sub-batch-name">📁 {{ sub.name }}</span>
-                  <span class="sub-batch-count">{{ sub.files.length }} 个文件</span>
-                  <div style="flex:1" />
-                  <el-button
-                    size="small"
-                    type="danger"
-                    plain
-                    @click.stop="deleteSubBatch(group.name, sub.name, sub.files)"
-                  >
-                    <el-icon><Delete /></el-icon> 删除子批次
-                  </el-button>
-                </div>
-                <div class="sub-batch-files">
-                  <el-tag
-                    v-for="f in sub.files"
-                    :key="f.id"
-                    :type="f.id === activeFileId ? 'primary' : 'info'"
-                    :effect="f.id === activeFileId ? 'dark' : 'plain'"
-                    class="batch-file-tag"
-                    @click="emit('file-selected', f.id)"
-                  >
-                    {{ f.filename }}
-                  </el-tag>
-                </div>
-              </div>
-            </template>
-            <!-- 无子批次时直接显示文件列表 -->
-            <template v-else>
-              <el-tag
-                v-for="f in group.files"
-                :key="f.id"
-                :type="f.id === activeFileId ? 'primary' : 'info'"
-                :effect="f.id === activeFileId ? 'dark' : 'plain'"
-                class="batch-file-tag"
-                @click="emit('file-selected', f.id)"
-              >
-                {{ f.filename }}
-              </el-tag>
-            </template>
+            <div v-if="selectedIds[group.name]?.length" class="batch-selection-bar">
+              <span>已选 {{ selectedIds[group.name].length }} 个文件</span>
+              <el-button size="small" type="warning" plain @click="uncombineSelected(group)">
+                <el-icon><Upload /></el-icon> 移出选中的 {{ selectedIds[group.name].length }} 个
+              </el-button>
+            </div>
+            <BatchFilesTable
+              :files="group.files"
+              :active-file-id="activeFileId"
+              @file-selected="emit('file-selected', $event)"
+              @selection-change="(ids: number[]) => onBatchSelection(group.name, ids)"
+              @remove-one="(row: any) => uncombineOne(group, row)"
+            />
           </div>
         </el-collapse-transition>
       </div>
@@ -112,18 +138,22 @@
 
     <el-empty
       v-if="batchDirs.length === 0"
-      description="暂无批次数据 — 上传 ZIP 压缩包或勾选单文件「组合为批次」会生成批次"
+      description="暂无批次数据 — 上传 ZIP 压缩包或在文件列表勾选单文件「组合为批次」会生成批次"
     />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { Upload, Delete, ArrowRight, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
+import { Upload, Delete, Search, ArrowRight, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { datafilesApi, type BatchDirInfo } from '../../../api/datafiles'
 import { useFilesStore } from '../../../stores/files'
 import { formatSize } from '../../../utils/format'
+import { groupStats, groupFilesBySub, filterBatchGroups, type BatchGroup } from '../composables/useBatchGroupStats'
+import BatchFilesTable from './BatchFilesTable.vue'
+import BatchSummaryBar from './BatchSummaryBar.vue'
+import UnregisteredDirCard from './UnregisteredDirCard.vue'
 
 const props = defineProps<{
   activeFileId?: number
@@ -138,9 +168,43 @@ const filesStore = useFilesStore()
 
 const batchDirs = ref<BatchDirInfo[]>([])
 const importingDir = ref('')
+// 批次搜索（按名称过滤，注册/未注册一起过滤）
+const batchSearch = ref('')
+// 每个批次的勾选集合：{ batchName: [fileId...] }
+const selectedIds = ref<Record<string, number[]>>({})
 // 已导入批次默认折叠：单批次可能含 100+ 文件，全部展开会撑高页面。
-// 用户点击 header 单独展开需要的批次。
 const expandedBatches = ref<Set<string>>(new Set())
+
+// ── 派生数据 ────────────────────────────────────────────────────────
+
+const unregisteredDirs = computed(() => batchDirs.value.filter((d) => !d.registered))
+
+const batchGroups = computed<BatchGroup[]>(() =>
+  batchDirs.value.filter((d) => d.registered).map((d) => {
+    const subs = new Set<string>()
+    for (const f of d.files) {
+      if (f.sub_batch) subs.add(f.sub_batch)
+    }
+    return { name: d.name, files: d.files, subBatchNames: [...subs].sort() }
+  }),
+)
+
+const filteredBatchGroups = computed<BatchGroup[]>(() => filterBatchGroups(batchGroups, batchSearch.value))
+
+const filteredUnregisteredDirs = computed(() => {
+  const kw = batchSearch.value.trim().toLowerCase()
+  if (!kw) return unregisteredDirs.value
+  return unregisteredDirs.value.filter((d) => d.name.toLowerCase().includes(kw))
+})
+
+const totalFileCount = computed(() =>
+  batchGroups.value.reduce((acc, g) => acc + g.files.length, 0),
+)
+const totalByteSize = computed(() =>
+  batchDirs.value.reduce((acc, d) => acc + (d.total_size || 0), 0),
+)
+
+// ── 展开/折叠 ───────────────────────────────────────────────────────
 
 function isBatchExpanded(name: string) {
   return expandedBatches.value.has(name)
@@ -169,35 +233,7 @@ function toggleAllBatches() {
   }
 }
 
-const unregisteredDirs = computed(() => batchDirs.value.filter((d) => !d.registered))
-
-// 已导入批次直接来自 batch-dirs（磁盘走查，返回全部批次），不再依赖分页 files —
-// 否则新下载文件占满第 1 页后，旧批次被挤出列表而"消失"。
-// 支持子批次：按 sub_batch 字段分组显示
-const batchGroups = computed(() => {
-  const registered = batchDirs.value.filter((d) => d.registered)
-  return registered.map((d) => {
-    // 按 sub_batch 分组
-    const subBatchMap = new Map<string, any[]>()
-    for (const f of d.files) {
-      const sub = f.sub_batch || ''
-      if (!subBatchMap.has(sub)) {
-        subBatchMap.set(sub, [])
-      }
-      subBatchMap.get(sub)!.push(f)
-    }
-    // 如果只有一个子批次（或无子批次），保持原有结构
-    if (subBatchMap.size <= 1) {
-      return { name: d.name, files: d.files, subBatches: [] }
-    }
-    // 多个子批次时，返回子批次分组
-    const subBatches = Array.from(subBatchMap.entries()).map(([sub, files]) => ({
-      name: sub,
-      files,
-    }))
-    return { name: d.name, files: d.files, subBatches }
-  })
-})
+// ── 数据加载 ────────────────────────────────────────────────────────
 
 async function loadBatchDirs() {
   try {
@@ -210,11 +246,19 @@ async function loadBatchDirs() {
     if (filtered.size !== expandedBatches.value.size) {
       expandedBatches.value = filtered
     }
+    // 勾选集合同步清理
+    const nextSel: Record<string, number[]> = {}
+    for (const [name, ids] of Object.entries(selectedIds.value)) {
+      if (valid.has(name)) nextSel[name] = ids
+    }
+    selectedIds.value = nextSel
   } catch {
     batchDirs.value = []
     emit('total-change', 0)
   }
 }
+
+// ── 导入/删除目录 ───────────────────────────────────────────────────
 
 async function importDir(dir: BatchDirInfo) {
   importingDir.value = dir.name
@@ -262,10 +306,10 @@ async function deleteBatch(group: { name: string; files: any[] }) {
   }
 }
 
-async function deleteSubBatch(batchName: string, subBatchName: string, files: any[]) {
+async function deleteSubBatch(batchName: string, subBatchName: string) {
   try {
     await ElMessageBox.confirm(
-      `确定删除子批次 "${subBatchName}" 及其 ${files.length} 个文件吗？此操作不可恢复。`,
+      `确定删除子批次 "${subBatchName}" 及其文件吗？此操作不可恢复。`,
       '确认删除子批次',
       { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
     )
@@ -278,7 +322,39 @@ async function deleteSubBatch(batchName: string, subBatchName: string, files: an
   }
 }
 
-// SFTP 导入 / 组合 / 其它 Tab 删除后自动刷新
+// ── 移出批次（还原为单文件） ────────────────────────────────────────
+
+function onBatchSelection(batchName: string, ids: number[]) {
+  selectedIds.value = { ...selectedIds.value, [batchName]: ids }
+}
+
+async function uncombine(paths: number[], batchName: string, count: number) {
+  try {
+    await ElMessageBox.confirm(
+      `确定将 ${count} 个文件从批次 "${batchName}" 移出吗？文件将恢复为单文件。`,
+      '移出批次',
+      { confirmButtonText: '移出', cancelButtonText: '取消', type: 'warning' },
+    )
+    const { data } = await datafilesApi.uncombineFiles(paths)
+    ElMessage.success(`已将 ${data.moved} 个文件移出批次 "${batchName}"`)
+    selectedIds.value = { ...selectedIds.value, [batchName]: [] }
+    await loadBatchDirs()
+    filesStore.notifyFilesChanged()
+  } catch {
+    // ElMessageBox 取消 reject "cancel"；真实错误 toast 由拦截器弹出
+  }
+}
+
+async function uncombineSelected(group: { name: string }) {
+  await uncombine(selectedIds.value[group.name] ?? [], group.name, selectedIds.value[group.name]?.length ?? 0)
+}
+
+async function uncombineOne(group: { name: string }, row: any) {
+  await uncombine([row.id], group.name, 1)
+}
+
+// ── 外部刷新 ────────────────────────────────────────────────────────
+
 watch(() => filesStore.filesVersion, () => {
   loadBatchDirs()
 })
@@ -310,8 +386,16 @@ defineExpose({ loadBatchDirs })
   border-radius: 10px;
 }
 
-.batch-group.unregistered {
-  border-left: 3px solid var(--color-warning);
+.batch-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.batch-search-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
 }
 
 .batch-header {
@@ -319,6 +403,7 @@ defineExpose({ loadBatchDirs })
   align-items: center;
   gap: 10px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 
 .batch-header-clickable {
@@ -388,66 +473,51 @@ defineExpose({ loadBatchDirs })
   font-family: var(--font-mono);
 }
 
+.batch-flag {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: var(--bg-primary);
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-muted);
+  white-space: nowrap;
+}
+
+.batch-flag.product {
+  color: var(--color-info);
+}
+
+.batch-flag.format {
+  color: var(--brand-secondary);
+}
+
+.batch-flag.stage {
+  color: var(--brand-primary);
+  background: color-mix(in srgb, var(--brand-primary) 10%, var(--bg-primary));
+}
+
 .batch-files {
+  /* 折叠/展开动画期间让内容不溢出 */
+  overflow: hidden;
+}
+
+.batch-selection-bar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.batch-file-tag {
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.batch-file-tag:hover {
-  transform: translateY(-1px);
-}
-
-/* 子批次样式 */
-.sub-batch-group {
-  margin-bottom: 12px;
-  padding: 10px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
   background: var(--bg-primary);
   border: 1px solid var(--border-muted);
   border-radius: 8px;
-}
-
-.sub-batch-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  padding: 4px 0;
-}
-
-.sub-batch-name {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12px;
   color: var(--text-secondary);
-}
-
-.sub-batch-count {
-  font-size: 11px;
-  color: var(--text-tertiary);
-  padding: 2px 6px;
-  background: var(--bg-secondary);
-  border-radius: 8px;
-}
-
-.sub-batch-files {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
 }
 
 /* Night theme overrides */
 :root[data-theme="night"] .batch-group {
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.08);
-}
-
-:root[data-theme="night"] .batch-group.unregistered {
-  border-left-color: var(--color-warning);
 }
 
 :root[data-theme="night"] .batch-header-clickable:hover {
@@ -460,5 +530,10 @@ defineExpose({ loadBatchDirs })
 
 :root[data-theme="night"] .batch-chevron-open {
   color: var(--brand-primary);
+}
+
+:root[data-theme="night"] .batch-flag {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
 }
 </style>

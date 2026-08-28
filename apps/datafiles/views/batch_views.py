@@ -12,7 +12,7 @@ from rest_framework.views import APIView
 from apps.datafiles.models import DataFile
 from apps.datafiles.serializers import DataFileSerializer
 from apps.datafiles.services import clear_parse_cache
-from apps.datafiles.utils import resolve_file_path
+from apps.datafiles.utils import extract_data_date, extract_stage, resolve_file_path
 
 from ._helpers import (
     _is_data_csv,
@@ -49,7 +49,7 @@ class BatchDirListView(APIView):
         for df in DataFile.objects.filter(owner=request.user, file_type='batch').values(
             'id', 'filename', 'tags', 'batch_name', 'sub_batch', 'file_path',
             'format_type', 'row_count', 'col_count', 'program_name',
-            'status', 'created_at',
+            'file_size', 'product_code', 'status', 'created_at',
         ):
             registered_files.setdefault(df['batch_name'], set()).add(
                 os.path.normpath(resolve_file_path(df['file_path']))
@@ -62,10 +62,14 @@ class BatchDirListView(APIView):
                 'row_count': df['row_count'],
                 'col_count': df['col_count'],
                 'program_name': df['program_name'],
+                'file_size': df['file_size'],
+                'product_code': df['product_code'],
                 'file_type': 'batch',
                 'batch_name': df['batch_name'],
                 'sub_batch': df['sub_batch'] or '',
                 'status': df['status'],
+                'stage': extract_stage(df['filename'], df['program_name']),
+                'data_date': extract_data_date(df['filename']),
                 'created_at': df['created_at'].isoformat() if df['created_at'] else '',
             })
 
@@ -78,6 +82,7 @@ class BatchDirListView(APIView):
             file_count = 0
             total_size = 0
             disk_paths = set()
+            preview = []  # (filename, size) 预览，未导入目录导入前确认用
             for root, _dirs, files in os.walk(entry.path):
                 for f in files:
                     if not _is_data_csv(f):
@@ -86,12 +91,19 @@ class BatchDirListView(APIView):
                     disk_paths.add(os.path.normpath(fp))
                     file_count += 1
                     try:
-                        total_size += os.path.getsize(fp)
+                        size = os.path.getsize(fp)
+                        total_size += size
                     except OSError:
-                        pass
+                        size = 0
+                    preview.append((f, size))
             # Skip directories with no CSV files
             if file_count == 0:
                 continue
+            # 预览列表最多 200 条（防止超大目录挤爆响应），数量以 file_count 为准
+            preview.sort(key=lambda item: (item[0].lower(), item[1]))
+            preview_files = [
+                {'name': name, 'size': size} for name, size in preview[:200]
+            ]
             # Check registration: fully registered when all disk files are in DB
             batch_registered_paths = registered_files.get(dir_name, set())
             unregistered_count = len(disk_paths - batch_registered_paths)
@@ -103,6 +115,7 @@ class BatchDirListView(APIView):
                 'total_size': total_size,
                 'registered': is_fully_registered,
                 'files': batch_file_rows.get(dir_name, []),
+                'preview_files': preview_files,
             })
 
         # Sort: unregistered first, then by name

@@ -60,6 +60,14 @@
       v-model:visible="showConsistencyCheck"
       @done="onConsistencyDone"
     />
+
+    <!-- 组合为批次（新建 / 追加到已有批次） -->
+    <CombineBatchDialog
+      v-model:visible="showCombineDialog"
+      :selected-count="selectedIds.length"
+      :batch-options="combineBatchNames"
+      @submit="onCombineSubmit"
+    />
   </div>
 </template>
 
@@ -71,6 +79,7 @@ import { useFilesStore } from '../../../stores/files'
 import FileListToolbar from './FileListToolbar.vue'
 import FileUploadArea from './FileUploadArea.vue'
 import ConsistencyCheckDialog from './ConsistencyCheckDialog.vue'
+import CombineBatchDialog from './CombineBatchDialog.vue'
 import FileListTable, { type FileFilters } from './FileListTable.vue'
 
 const emit = defineEmits<{
@@ -216,34 +225,37 @@ function onConsistencyDone() {
   filesStore.notifyFilesChanged()
 }
 
-// ── 组合为批次 ──────────────────────────────────────────────────────
+// ── 组合为批次（新建 / 追加到已有批次） ─────────────────────────────
+const showCombineDialog = ref(false)
+const combineBatchNames = ref<string[]>([])
+
 async function onCombine() {
-  if (selectedIds.value.length < 2) {
-    ElMessage.warning('请至少选择 2 个文件进行组合')
+  if (selectedIds.value.length === 0) {
+    ElMessage.warning('请先勾选要组合的文件')
     return
   }
+  // 追加模式的候选批次（已注册批次名）
   try {
-    const { value } = await ElMessageBox.prompt(
-      `将选中的 ${selectedIds.value.length} 个文件组合为批次（文件将移动到批次目录）：`,
-      '组合为批次',
-      {
-        confirmButtonText: '组合',
-        cancelButtonText: '取消',
-        inputPattern: /\S+/,
-        inputErrorMessage: '批次名称不能为空',
-        inputPlaceholder: '请输入批次名称',
-      },
-    )
-    const name = (value || '').trim()
-    if (!name) return
-    const { data } = await datafilesApi.combineFiles([...selectedIds.value], name)
+    const { data } = await datafilesApi.listBatchDirs()
+    const dirs = Array.isArray(data) ? data : []
+    combineBatchNames.value = dirs.filter((d) => d.registered).map((d) => d.name)
+  } catch {
+    combineBatchNames.value = []
+  }
+  showCombineDialog.value = true
+}
+
+async function onCombineSubmit(batchName: string) {
+  try {
+    const { data } = await datafilesApi.combineFiles([...selectedIds.value], batchName)
     ElMessage.success(`已组合 ${data.combined} 个文件为批次 "${data.batch_name}"`)
     tableRef.value?.clearSelection()
     selectedIds.value = []
+    showCombineDialog.value = false
     await loadFiles()
     filesStore.notifyFilesChanged()
   } catch {
-    // ElMessageBox 取消 reject "cancel"；真实错误 toast 由拦截器弹出
+    // 失败时保留弹窗（错误 toast 由拦截器弹出），用户可改批次名重试
   }
 }
 

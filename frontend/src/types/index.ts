@@ -24,6 +24,8 @@ export interface UserSettings {
   export_timeout: number
   sftp_download_timeout: number
   default_hidden_columns: string[]
+  /** 文件名自动换行（文件列表 + 批次列表共同生效，默认开启） */
+  filename_wrap: boolean
 }
 
 /** 系统设置页完整设置项（GET/PUT /auth/settings/ 的载荷）。 */
@@ -47,6 +49,8 @@ export interface SettingsData {
   sftp_download_timeout: number
   /** 默认隐藏列（记录级列名）：导出 Excel 与查看数据 ag-grid 共用 */
   default_hidden_columns: string[]
+  /** 文件名自动换行（文件列表 + 批次列表共同生效，默认开启） */
+  filename_wrap: boolean
 }
 
 export interface DataFile {

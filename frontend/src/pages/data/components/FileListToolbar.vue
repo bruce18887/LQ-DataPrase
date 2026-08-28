@@ -20,8 +20,8 @@
       <el-button
         type="primary"
         plain
-        :disabled="selectedCount < 2"
-        :title="selectedCount < 2 ? '勾选至少 2 个文件后组合' : '组合为批次'"
+        :disabled="selectedCount < 1"
+        :title="selectedCount < 1 ? '请先勾选文件' : '组合/追加为批次'"
         @click="emit('combine-click')"
       >
         <el-icon><Collection /></el-icon>

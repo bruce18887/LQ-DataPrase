@@ -1,5 +1,15 @@
 <template>
   <el-form :model="settings" label-width="160px">
+    <el-form-item label="文件名自动换行">
+      <el-switch
+        v-model="settings.filename_wrap"
+        :data-testid="'filename-wrap-switch'"
+      />
+      <div class="form-hint">
+        开启时文件名（文件列表与批次数据列表）自动换行显示完整名称，最多 3 行；关闭时单行截断（hover 查看全名）。
+      </div>
+    </el-form-item>
+
     <el-form-item label="默认每页行数">
       <el-select v-model="settings.page_size">
         <el-option :value="50" label="50" />
@@ -120,6 +130,13 @@ function toggleGroup(cols: string[], checked: boolean) {
 <style scoped>
 .hidden-cols {
   width: 100%;
+}
+
+.form-hint {
+  margin-left: 10px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.6;
 }
 
 .hidden-cols-hint {

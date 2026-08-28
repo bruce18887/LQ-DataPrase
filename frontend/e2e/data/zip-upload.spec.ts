@@ -54,11 +54,12 @@ test.describe('ZIP 压缩包上传：自动解析为批次数据', { tag: ['@p2'
       await expect(header).toBeVisible({ timeout: 15_000 })
       await expect(header.locator('.batch-count')).toHaveText('2 个文件')
 
-      // 展开批次 → 2 个文件 tag
+      // 展开批次 → 2 个文件（表格行；含子批次列）
       await header.click()
-      const files = page.locator(`[data-testid="batch-files-${zipBase}"] .batch-file-tag`)
+      const files = page.locator(`[data-testid="batch-files-${zipBase}"] .batch-file-row`)
       await expect(files).toHaveCount(2, { timeout: 10_000 })
       await expect(files.filter({ hasText: 'below.csv' })).toBeVisible()
+      await expect(files.filter({ hasText: 'root.csv' })).toBeVisible()
     } finally {
       cleanupQuiet(zipPath)
     }

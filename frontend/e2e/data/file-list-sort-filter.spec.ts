@@ -253,4 +253,45 @@ test.describe('数据管理 → 文件列表排序/筛选', { tag: ['@data'] }, 
     const sizeHeader = page.locator('.el-table__header th').filter({ hasText: '大小' }).first()
     await expect(sizeHeader).toBeInViewport({ timeout: 5_000 })
   })
+
+  test('@p2 文件名换行：默认开启（设置 filename_wrap 控制，切换后生效）', async ({ page }) => {
+    await gotoApp(page, '/data')
+    await expect(page.locator('.content-section:visible .el-table .el-table__row').first())
+      .toBeVisible({ timeout: 15_000 })
+
+    // ① 默认开启：文件名 cell 打换行 class（最多 3 行显示完整名）
+    const wrapCells = page.locator('.content-section:visible .file-name-wrap')
+    await expect(wrapCells.first()).toBeVisible({ timeout: 10_000 })
+    expect(await wrapCells.count()).toBeGreaterThan(0)
+
+    // ② 设置关闭 → 刷新 → 单行截断（换行 class 消失）
+    await page.evaluate(async () => {
+      const token = localStorage.getItem('access_token')
+      await fetch('/api/v1/auth/settings/', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ filename_wrap: false }),
+      })
+    })
+    await page.reload()
+    await expect(page.locator('.content-section:visible .el-table .el-table__row').first())
+      .toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.content-section:visible .file-name-wrap')).toHaveCount(0)
+
+    // ③ 恢复默认开启（避免污染其它用例/用户偏好）
+    await page.evaluate(async () => {
+      const token = localStorage.getItem('access_token')
+      await fetch('/api/v1/auth/settings/', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ filename_wrap: true }),
+      })
+    })
+  })
 })

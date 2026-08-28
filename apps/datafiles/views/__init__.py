@@ -13,7 +13,8 @@ from ._helpers import (  # noqa: F401
     _user_upload_dir,
     _disk_mtime,
     _parse_last_modified,
-    _delete_datafile_on_disk,
+    _delete_datafile_file_only,
+    _remove_empty_dirs_up_to,
 )
 
 from .file_views import (  # noqa: F401

@@ -16,6 +16,9 @@
         <ExportTimeoutSettings v-model:timeout="settings.export_timeout" />
         <ExportTemplateSettings v-model:templates="settings.export_filename_templates" />
       </el-tab-pane>
+      <el-tab-pane name="sftp" label="🔌 SFTP 设置">
+        <SftpTimeoutSettings v-model:timeout="settings.sftp_download_timeout" />
+      </el-tab-pane>
       <el-tab-pane name="paths" label="📁 存储路径">
         <SystemPathsSettings />
       </el-tab-pane>
@@ -53,7 +56,10 @@ import SystemPathsSettings from './components/SystemPathsSettings.vue'
 import RecentFilesSettings from './components/RecentFilesSettings.vue'
 import ExportTemplateSettings from './components/ExportTemplateSettings.vue'
 import ExportTimeoutSettings from './components/ExportTimeoutSettings.vue'
+import SftpTimeoutSettings from './components/SftpTimeoutSettings.vue'
 import { setExportTimeoutSec } from '../../utils/exportTimeout'
+import { setSftpTimeoutSec } from '../../utils/sftpTimeout'
+import { setFilenameWrapCache } from '../../utils/filenameWrap'
 import { DEFAULT_HIDDEN_COLUMNS } from '../../constants/hidden-columns'
 
 function defaultTemplates(): Record<ExportTypeKey, string> {
@@ -82,6 +88,7 @@ const defaults: SettingsData = {
   export_timeout: 600,
   sftp_download_timeout: 600,
   default_hidden_columns: [...DEFAULT_HIDDEN_COLUMNS],
+  filename_wrap: true,
 }
 
 const activeTab = ref('display')
@@ -115,6 +122,8 @@ async function loadSettings() {
     recentFiles.value = Array.isArray(data?.recent_files) ? data.recent_files : []
     // 导出超时同步到模块缓存，使导出调用点无需访问本页即可使用最新值
     setExportTimeoutSec(merged.export_timeout)
+    // SFTP 下载超时同步到模块缓存（SFTP 浏览器读取此值）
+    setSftpTimeoutSec(merged.sftp_download_timeout)
   } catch {
     // silently fall back to defaults
   }
@@ -129,6 +138,8 @@ async function saveSettings() {
     await authApi.updateSettings(payload)
     setChartRenderer(settings.value.chart_renderer)
     setExportTimeoutSec(settings.value.export_timeout)
+    setSftpTimeoutSec(settings.value.sftp_download_timeout)
+    setFilenameWrapCache(settings.value.filename_wrap)
     ElMessage.success('设置已保存')
   } catch {
     // 错误 toast 由 axios 拦截器统一弹出
