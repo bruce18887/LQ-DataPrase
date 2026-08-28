@@ -18,7 +18,7 @@ frontend/.vscode/
 *~
 Session.vim
 .netrwhist
-
+.qoder/
 # ================== Secrets ==================
 .env
 .env.*
@@ -127,10 +127,11 @@ DEBUG_*.md
 /test/*
 !/test/backend/
 /tasks/
-# 过程/设计文档（内部使用，不入仓库）
+# 过程/设计文档（内部使用，不入仓库）；
+# docs/tasks/ 保留入库（lessons.md/todo.md 需版本保护，可经 git 回退误覆盖），仅排除临时产物
 /docs/plans/
 /docs/specs/
-/docs/tasks/
+/docs/tasks/*.bak-*.md
 /docs/user-guide/
 # AI 助手与样式指南文档
 apps/CLAUDE.md
