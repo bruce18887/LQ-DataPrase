@@ -97,6 +97,9 @@ class UserSetting(models.Model):
     sftp_last_host = models.CharField(max_length=255, blank=True, default='')
     sftp_last_port = models.IntegerField(default=22)
     sftp_last_username = models.CharField(max_length=100, blank=True, default='')
+    # 文件名显示：自动换行（文件列表 + 批次数据列表共同生效）。默认开启——长文件名
+    # 不换行只能 hover 看全名，体验差；关闭 = 单行截断（hover 看全名）。
+    filename_wrap = models.BooleanField(default=True)
 
     class Meta:
         db_table = 'accounts_user_setting'

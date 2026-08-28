@@ -173,3 +173,67 @@ def extract_product_code(filename: str, program_name: str = '') -> str:
     if base:
         return _match_product_code(base)
     return ''
+
+
+# 测试阶段 token：FT/QA/UIS/CP/PCS，可带数字后缀（FT1/FT2/QA1…）。
+# 大小写不敏感；token 内不含下划线外的其它非字母数字（文件名按非字母数字切分）。
+_STAGE_TOKEN = re.compile(r'^(FT|FT\d+|QA|QA\d+|UIS|CP|CP\d+|PCS)$', re.IGNORECASE)
+
+
+def _find_stage(text: str) -> str:
+    """返回 ``text`` 中第一个完整匹配的阶段 token（原样式，如 ``FT1``），无则 ''。"""
+    if not text:
+        return ''
+    for token in re.split(r'[^A-Za-z0-9]+', text):
+        if _STAGE_TOKEN.match(token):
+            return token.upper()
+    return ''
+
+
+def extract_stage(filename: str, program_name: str = '') -> str:
+    """Extract the test-stage token (FT/QA/UIS/CP + numeric suffix) from a
+    data filename, falling back to the test-program name.
+
+    Real-filename examples:
+        ``BPD60320_FT.csv``                       -> ``FT``
+        ``BPD60320_QA1.csv``                      -> ``QA1``
+        ``BPD93204_FT1_ETS163550_12252024.csv``   -> ``FT1``
+        ``DA35_BPC50338_..._FT_20260420_164504.csv`` -> ``FT``
+        ``BPD60320_FT.csv`` + ``BPD60320.pgs``    -> ``FT`` (filename wins)
+        ``2604160006_x.csv`` + ``BPD60320_QA1.pgs`` -> ``QA1`` (program fallback)
+        ``random.csv``, ``random.csv`` + ``x.cpts`` -> '' (no stage token)
+    """
+    stage = _find_stage(filename)
+    if stage:
+        return stage
+    # 程序名回退：basename 后缀可能携带 *_FT_SAB_* 之类的组合，只认完整 token
+    return _find_stage(os.path.basename(program_name or ''))
+
+
+_DATA_DATE_YYYYMMDD = re.compile(r'(?<!\d)((?:19|20)\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?!\d)')
+_DATA_DATE_MMDDYYYY = re.compile(r'(?<!\d)(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])((?:19|20)\d{2})(?!\d)')
+
+
+def extract_data_date(filename: str) -> str:
+    """Extract a test date (``YYYY-MM-DD``) from an 8-digit run in a filename.
+
+    Ambiguity between YYYYMMDD and MMDDYYYY is resolved by validity: the
+    first pattern (20xxxxxxxx) is preferred since ATE filenames commonly use
+    ``_20260305_204439.csv``; US-style ``12252024`` (MMDDYYYY) is tolerated
+    when the leading four digits are not a plausible year. Month/day ranges
+    are validated so lot/serial numbers (``2604140567``) do not match.
+
+    Examples:
+        ``BPD93204_FT1_ETS163550_12252024.csv`` -> ``2024-12-25``
+        ``DA35_..._FT_20260420_164504.csv``     -> ``2026-04-20``
+        ``2604160006_x.csv``                    -> ``''`` (10-digit lot, not a date)
+    """
+    if not filename:
+        return ''
+    m = _DATA_DATE_YYYYMMDD.search(filename)
+    if m:
+        return f'{m.group(1)}-{m.group(2)}-{m.group(3)}'
+    m = _DATA_DATE_MMDDYYYY.search(filename)
+    if m:
+        return f'{m.group(3)}-{m.group(1)}-{m.group(2)}'
+    return ''

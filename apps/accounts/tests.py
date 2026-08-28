@@ -425,6 +425,23 @@ class UserSettingsApiTests(APITestCase):
         resp = self.client.put(self.url, {'sftp_download_timeout': 'abc'}, format='json')
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_get_settings_returns_default_filename_wrap(self):
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['filename_wrap'], True)
+
+    def test_put_filename_wrap_round_trips_and_boolean_coercion(self):
+        resp = self.client.put(self.url, {'filename_wrap': False}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['filename_wrap'], False)
+        resp2 = self.client.put(self.url, {'filename_wrap': True}, format='json')
+        self.assertEqual(resp2.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp2.data['filename_wrap'], True)
+        # DRF BooleanField 标准宽容转换（HTML 表单惯例）：'yes' → True
+        resp3 = self.client.put(self.url, {'filename_wrap': 'yes'}, format='json')
+        self.assertEqual(resp3.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp3.data['filename_wrap'], True)
+
     def test_get_settings_returns_default_chart_renderer(self):
         resp = self.client.get(self.url)
         self.assertEqual(resp.status_code, status.HTTP_200_OK)

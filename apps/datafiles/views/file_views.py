@@ -31,7 +31,8 @@ from ._helpers import (
     _user_upload_dir,
     _disk_mtime,
     _parse_last_modified,
-    _delete_datafile_on_disk,
+    _delete_datafile_file_only,
+    _remove_empty_dirs_up_to,
 )
 
 
@@ -182,7 +183,10 @@ class DataFileViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         datafile = self.get_object()
-        _delete_datafile_on_disk(datafile)
+        # 只删该文件（批次行也一样）——整批删除由 /batch-dirs/<name>/ 语义承担，
+        # 历史实现（_delete_datafile_on_disk）对批次行 rmtree 整个批次目录，
+        # 任何"删单个文件"的操作都可能误删整批。
+        _delete_datafile_file_only(datafile)
         datafile.delete()
         clear_parse_cache()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -199,7 +203,7 @@ class DataFileViewSet(viewsets.ModelViewSet):
         # Owner-scoped: only the requesting user's files are ever touched.
         qs = DataFile.objects.filter(owner=request.user, id__in=ids)
         for datafile in qs:
-            _delete_datafile_on_disk(datafile)
+            _delete_datafile_file_only(datafile)
         deleted_count = qs.count()
         qs.delete()
         clear_parse_cache()
@@ -231,16 +235,17 @@ class DataFileViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def combine(self, request):
-        """Combine multiple owned single files into one batch.
+        """Combine multiple owned single files into a batch.
 
         Body: ``{"ids": [1, 2], "batch_name": "LOT-2026"}``.
 
         The files are physically moved into ``media/data/<user>/batch/<name>/``
         (the batch model is directory-based) and their rows updated (file_type=
-        'batch', batch_name set, sub_batch cleared). The batch name must be new
-        (an existing batch directory is rejected). ParseHistory rows are audit
-        history and are left untouched. The parse cache is cleared so browse
-        uses new paths.
+        'batch', batch_name set, sub_batch cleared). The batch may be new or
+        already exist (append): a target-name collision gets a ``_<ts>`` suffix
+        and the row's filename is updated. ParseHistory rows are audit history
+        and are left untouched. The parse cache is cleared so browse uses new
+        paths.
         """
         ids = request.data.get('ids') or []
         batch_name = (request.data.get('batch_name') or '').strip()
@@ -275,11 +280,6 @@ class DataFileViewSet(viewsets.ModelViewSet):
 
         batch_base = _user_upload_dir(request.user, 'batch')
         batch_dir = os.path.join(batch_base, batch_name)
-        if os.path.exists(batch_dir):
-            return Response(
-                {'error': f'批次 "{batch_name}" 已存在'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
         os.makedirs(batch_dir, exist_ok=True)
 
         updated = []
@@ -288,15 +288,19 @@ class DataFileViewSet(viewsets.ModelViewSet):
                 src = resolve_file_path(df.file_path)
                 if not os.path.exists(src):
                     continue  # cannot move a missing file; skip it
-                # 新批次目录保证目标名不冲突（单文件目录内文件名唯一）
                 target = os.path.join(batch_dir, df.filename)
+                if os.path.exists(target):
+                    ts = int(time.time())
+                    name, ext = os.path.splitext(df.filename)
+                    target = os.path.join(batch_dir, f'{name}_{ts}{ext}')
+                    df.filename = os.path.basename(target)
                 shutil.move(src, target)
                 df.file_path = store_file_path(target)
                 df.file_type = 'batch'
                 df.batch_name = batch_name
                 df.sub_batch = ''
                 df.save(update_fields=[
-                    'file_path', 'file_type', 'batch_name',
+                    'filename', 'file_path', 'file_type', 'batch_name',
                     'sub_batch', 'updated_at',
                 ])
                 updated.append(df)
@@ -308,6 +312,71 @@ class DataFileViewSet(viewsets.ModelViewSet):
             'combined': len(updated),
             'batch_name': batch_name,
             'files': DataFileSerializer(updated, many=True).data,
+        })
+
+    @action(detail=False, methods=['post'])
+    def uncombine(self, request):
+        """Move batch files back to the single-file pool (reverse of combine).
+
+        Body: ``{"ids": [1, 2]}``. Each owned batch file is physically moved to
+        ``media/data/<user>/single/`` and its row becomes ``file_type='single'``
+        with batch_name/sub_batch cleared. A target-name collision gets a
+        ``_<ts>`` suffix. Once-empty sub-batch / batch directories are removed
+        (an emptied batch disappears from the batch listing). ParseHistory rows
+        are audit history and are left untouched. Parse cache is cleared.
+        """
+        ids = request.data.get('ids') or []
+        if not isinstance(ids, list) or not ids or not all(
+            isinstance(i, int) and not isinstance(i, bool) for i in ids
+        ):
+            return Response(
+                {'error': 'ids must be a non-empty list of integers'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Owner-scoped and batch-only: singles are already outside any batch.
+        qs = DataFile.objects.filter(
+            owner=request.user, id__in=ids, file_type='batch',
+        )
+        if qs.count() != len(ids):
+            return Response(
+                {'error': '部分文件不存在、不属于当前用户或不是批次文件（仅支持批次文件）'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        single_dir = _user_upload_dir(request.user, 'single')
+        batch_base = _user_upload_dir(request.user, 'batch')
+        moved = []
+        with transaction.atomic():
+            for df in qs.order_by('id'):
+                src = resolve_file_path(df.file_path)
+                if not os.path.exists(src):
+                    continue  # missing on disk: cannot move; skip it
+                target = os.path.join(single_dir, df.filename)
+                if os.path.exists(target):
+                    ts = int(time.time())
+                    name, ext = os.path.splitext(df.filename)
+                    target = os.path.join(single_dir, f'{name}_{ts}{ext}')
+                    df.filename = os.path.basename(target)
+                shutil.move(src, target)
+                # 源位置空目录清理（子批次/批次目录，至 batch_base 含其自身）
+                _remove_empty_dirs_up_to(os.path.dirname(src), batch_base)
+                df.file_path = store_file_path(target)
+                df.file_type = 'single'
+                df.batch_name = ''
+                df.sub_batch = ''
+                df.save(update_fields=[
+                    'filename', 'file_path', 'file_type', 'batch_name',
+                    'sub_batch', 'updated_at',
+                ])
+                moved.append(df)
+
+        if moved:
+            clear_parse_cache()
+
+        return Response({
+            'moved': len(moved),
+            'files': DataFileSerializer(moved, many=True).data,
         })
 
     @action(detail=True, methods=['post'])

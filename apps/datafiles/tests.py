@@ -5,7 +5,10 @@ from django.test import TestCase, override_settings
 from rest_framework.test import APITestCase
 
 from apps.datafiles.models import DataFile
-from apps.datafiles.utils import extract_product_code, resolve_file_path, store_file_path
+from apps.datafiles.utils import (
+    extract_data_date, extract_product_code, extract_stage,
+    resolve_file_path, store_file_path,
+)
 from apps.datafiles.views import _user_upload_dir
 
 import io
@@ -154,6 +157,74 @@ def _make_datafile(owner, filename, **kwargs):
     )
     defaults.update(kwargs)
     return DataFile.objects.create(owner=owner, filename=filename, **defaults)
+
+
+class ExtractStageDateTests(APITestCase):
+    """extract_stage / extract_data_date：测试阶段与测试日期解析。"""
+
+    def test_stage_from_filename(self):
+        cases = {
+            'BPD60320_FT.csv': 'FT',
+            'BPD60320_QA1.csv': 'QA1',
+            'BPD93204_FT1_ETS163550_12252024.csv': 'FT1',
+            'C01Q_BP01-2605220057_BPD93204__H0GG80#AAA12605220057__R2605230015_ETS165943_05242026.csv': '',
+            'BPD93204_UIS.csv': 'UIS',
+            'BPD60320_CP1.csv': 'CP1',
+            'e2e_cmb_FT1_178788_0.csv': 'FT1',
+        }
+        for filename, expected in cases.items():
+            with self.subTest(filename=filename):
+                self.assertEqual(extract_stage(filename), expected)
+
+    def test_stage_program_fallback(self):
+        # 文件名无阶段 token 时回退程序名（basename 全 token 匹配）
+        self.assertEqual(extract_stage('2604160006_x.csv', 'BPD60320_QA1.pgs'), 'QA1')
+        self.assertEqual(extract_stage('random.csv', 'BPC61320A_FT_AAA_BPD60320XBAF_PD.cpts'), 'FT')
+        # 两者都没有 → ''
+        self.assertEqual(extract_stage('random.csv', 'BPS123.pts'), '')
+        self.assertEqual(extract_stage('', ''), '')
+
+    def test_stage_prefers_filename(self):
+        self.assertEqual(extract_stage('BPD60320_FT.csv', 'BPD60320_QA1.pgs'), 'FT')
+
+    def test_data_date_yyyymmdd(self):
+        self.assertEqual(
+            extract_data_date('DA35_..._FT_20260420_164504.csv'),
+            '2026-04-20',
+        )
+        self.assertEqual(extract_data_date('BPD93204_FT1_ETS163550_12252024.csv'), '2024-12-25')
+
+    def test_data_date_rejects_lot_numbers(self):
+        # 10 位流水号 / 无合法月日的 8 位段不匹配
+        self.assertEqual(extract_data_date('2604160006_x.csv'), '')
+        self.assertEqual(extract_data_date('BN281R3CYCAA_2604160006_x.csv'), '')
+
+    def test_fields_in_serializer_and_batch_dirs(self):
+        """/files/ 与 /batch-dirs/ 响应都应带 stage / data_date。"""
+        user = User.objects.create_user(username='sdf', password='pw')
+        self.client.force_authenticate(user)
+        _make_datafile(user, 'BPD60320_FT_20260305_204439.csv', program_name='BPD60320.pts')
+        resp = self.client.get('/api/v1/files/')
+        self.assertEqual(resp.status_code, 200)
+        row = [r for r in resp.data['results'] if r['filename'].startswith('BPD60320_FT_')][0]
+        self.assertEqual(row['stage'], 'FT')
+        self.assertEqual(row['data_date'], '2026-03-05')
+        # batch-dirs 行
+        batch_base = _user_upload_dir(user, 'batch')
+        d = os.path.join(batch_base, 'LOT-SDF')
+        os.makedirs(d, exist_ok=True)
+        path = os.path.join(d, 'BPD60320_QA1.csv')
+        with open(path, 'w') as f:
+            f.write('a,b\n1,2\n')
+        DataFile.objects.create(
+            owner=user, filename='BPD60320_QA1.csv', file_path=path, file_size=10,
+            format_type='CTA8290D', file_type='batch', batch_name='LOT-SDF',
+            program_name='BPD60320.pgs',
+        )
+        bresp = self.client.get('/api/v1/batch-dirs/')
+        entry = next(e for e in bresp.data if e['name'] == 'LOT-SDF')
+        self.assertEqual(entry['files'][0]['stage'], 'QA1')
+        self.assertEqual(entry['files'][0]['data_date'], '')
 
 
 class BulkDeleteTests(APITestCase):
@@ -539,6 +610,58 @@ class BatchDirNormpathTests(APITestCase):
         ).count()
         # No duplicate row created for the already-registered file.
         self.assertEqual(after, before)
+
+
+class BatchDirInfoTests(APITestCase):
+    """批次列表信息增强：注册行带 file_size/product_code；未注册目录带预览。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='bdi', password='pw')
+        self.client.force_authenticate(self.user)
+        self.batch_base = _user_upload_dir(self.user, 'batch')
+
+    def tearDown(self):
+        shutil.rmtree(self.batch_base, ignore_errors=True)
+
+    def _write(self, rel, content='a,b\n1,2\n'):
+        path = os.path.join(self.batch_base, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            f.write(content)
+        return path
+
+    def test_registered_rows_include_size_and_product_code(self):
+        path = self._write('LOT-X/a.csv')
+        DataFile.objects.create(
+            owner=self.user, filename='a.csv', file_path=path, file_size=123,
+            format_type='CTA8290D', file_type='batch', batch_name='LOT-X',
+            product_code='BPD60320',
+        )
+        resp = self.client.get('/api/v1/batch-dirs/')
+        self.assertEqual(resp.status_code, 200)
+        entry = next(e for e in resp.data if e['name'] == 'LOT-X')
+        self.assertTrue(entry['registered'])
+        self.assertEqual(entry['files'][0]['file_size'], 123)
+        self.assertEqual(entry['files'][0]['product_code'], 'BPD60320')
+
+    def test_unregistered_preview_files(self):
+        self._write('LOT-Y/aaa.csv', content='x')
+        self._write('LOT-Y/sub/bbb.csv', content='yy')
+        resp = self.client.get('/api/v1/batch-dirs/')
+        entry = next(e for e in resp.data if e['name'] == 'LOT-Y')
+        self.assertFalse(entry['registered'])
+        names = [p['name'] for p in entry['preview_files']]
+        self.assertEqual(names, ['aaa.csv', 'bbb.csv'])
+        for p in entry['preview_files']:
+            self.assertGreater(p['size'], 0)
+
+    def test_preview_files_capped_at_200(self):
+        for i in range(205):
+            self._write(f'LOT-BIG/f{i:03d}.csv', content='x')
+        resp = self.client.get('/api/v1/batch-dirs/')
+        entry = next(e for e in resp.data if e['name'] == 'LOT-BIG')
+        self.assertEqual(entry['file_count'], 205)
+        self.assertEqual(len(entry['preview_files']), 200)
 
 
 class SummaryFileSkipTests(APITestCase):
@@ -1247,13 +1370,27 @@ class CombineFilesTests(APITestCase):
         # 磁盘移动到 batch/<name>/
         self.assertTrue(os.path.isdir(os.path.join(self.batch_base, 'LOT-C')))
 
-    def test_combine_existing_batch_rejected(self):
-        f = self._make_single('a.csv')
-        os.makedirs(os.path.join(self.batch_base, 'LOT-C'), exist_ok=True)
-        resp = self._post([f.id], 'LOT-C')
-        self.assertEqual(resp.status_code, 400)
-        f.refresh_from_db()
-        self.assertEqual(f.file_type, 'single')  # 拒绝后不产生任何变更
+    def test_combine_appends_to_existing_batch(self):
+        """追加语义：批次目录已存在时文件并入，重名加时间戳后缀。"""
+        f1 = self._make_single('a.csv')
+        batch_dir = os.path.join(self.batch_base, 'LOT-C')
+        os.makedirs(batch_dir, exist_ok=True)
+        with open(os.path.join(batch_dir, 'a.csv'), 'w') as fh:
+            fh.write('x\n')  # 目标已存在同名文件 → 触发重名后缀
+        f2 = self._make_single('b.csv')
+        resp = self._post([f1.id, f2.id], 'LOT-C')
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data['combined'], 2)
+        f1.refresh_from_db()
+        self.assertEqual(f1.file_type, 'batch')
+        self.assertEqual(f1.batch_name, 'LOT-C')
+        self.assertNotEqual(f1.filename, 'a.csv')
+        self.assertTrue(f1.filename.startswith('a_'))
+        self.assertTrue(os.path.exists(resolve_file_path(f1.file_path)))
+        # 原同名文件仍然在
+        self.assertTrue(os.path.exists(os.path.join(batch_dir, 'a.csv')))
+        f2.refresh_from_db()
+        self.assertEqual(f2.batch_name, 'LOT-C')
 
     def test_combine_validation(self):
         f = self._make_single('a.csv')
@@ -1296,6 +1433,133 @@ class CombineFilesTests(APITestCase):
         self.assertTrue(DataFile.objects.filter(pk=f2.id).exists())
         f2.refresh_from_db()
         self.assertEqual(f2.file_type, 'single')  # untouched
+
+
+class UncombineTests(APITestCase):
+    """移出批次：批次文件物理移回 single/ 并恢复 file_type='single'。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='unc', password='pw')
+        self.user.role = 'administrator'
+        self.user.save()
+        self.other = User.objects.create_user(username='unc2', password='pw')
+        self.client.force_authenticate(self.user)
+        self.single_dir = _user_upload_dir(self.user, 'single')
+        self.batch_base = _user_upload_dir(self.user, 'batch')
+
+    def tearDown(self):
+        shutil.rmtree(self.single_dir, ignore_errors=True)
+        shutil.rmtree(self.batch_base, ignore_errors=True)
+
+    def _make_batch(self, filename, batch_name='LOT-U', sub_batch='', content='a,b\n1,2\n'):
+        d = os.path.join(self.batch_base, batch_name, sub_batch) if sub_batch \
+            else os.path.join(self.batch_base, batch_name)
+        os.makedirs(d, exist_ok=True)
+        path = os.path.join(d, filename)
+        with open(path, 'w') as f:
+            f.write(content)
+        return DataFile.objects.create(
+            owner=self.user, filename=filename, file_path=path, file_size=100,
+            format_type='CTA8290D', file_type='batch', batch_name=batch_name,
+            sub_batch=sub_batch,
+        )
+
+    def _post(self, ids):
+        return self.client.post('/api/v1/files/uncombine/', {'ids': ids}, format='json')
+
+    def test_uncombine_restores_single(self):
+        df = self._make_batch('BPD60320_FT.csv')
+        src = resolve_file_path(df.file_path)
+        resp = self._post([df.id])
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data['moved'], 1)
+        df.refresh_from_db()
+        self.assertEqual(df.file_type, 'single')
+        self.assertEqual(df.batch_name, '')
+        self.assertEqual(df.sub_batch, '')
+        self.assertTrue(os.path.exists(resolve_file_path(df.file_path)))
+        self.assertFalse(os.path.exists(src))
+        # 批次目录已空 → 被清理（批次从列表消失）
+        self.assertFalse(os.path.exists(os.path.join(self.batch_base, 'LOT-U')))
+
+    def test_uncombine_only_empties_removed_dirs(self):
+        """移出最后一个文件后空批次目录被清；仍有其它文件的批次目录保留。"""
+        keep = self._make_batch('keep.csv')
+        move = self._make_batch('move.csv')
+        resp = self._post([move.id])
+        self.assertEqual(resp.data['moved'], 1)
+        self.assertTrue(os.path.exists(resolve_file_path(keep.file_path)))
+        self.assertTrue(os.path.exists(os.path.join(self.batch_base, 'LOT-U')))
+
+    def test_uncombine_collision_renames(self):
+        df = self._make_batch('same.csv')
+        with open(os.path.join(self.single_dir, 'same.csv'), 'w') as fh:
+            fh.write('x\n')  # 单文件目录已存在同名
+        resp = self._post([df.id])
+        self.assertEqual(resp.status_code, 200)
+        df.refresh_from_db()
+        self.assertNotEqual(df.filename, 'same.csv')
+        self.assertTrue(df.filename.startswith('same_'))
+        self.assertTrue(os.path.exists(resolve_file_path(df.file_path)))
+
+    def test_uncombine_validation(self):
+        self.assertEqual(self._post([]).status_code, 400)
+        self.assertEqual(self._post(['x']).status_code, 400)
+        self.assertEqual(self._post([99999]).status_code, 404)
+        # 单文件不可移出（它本来就不在批次里）
+        single = DataFile.objects.create(
+            owner=self.user, filename='s.csv',
+            file_path=os.path.join(self.single_dir, 's.csv'),
+            file_size=10, format_type='CTA8290D', file_type='single',
+        )
+        self.assertEqual(self._post([single.id]).status_code, 404)
+
+    def test_uncombine_owner_scoped(self):
+        other_single = _user_upload_dir(self.other, 'single')
+        d = os.path.join(self.batch_base, 'LOT-O')
+        os.makedirs(d, exist_ok=True)
+        path = os.path.join(d, 'o.csv')
+        with open(path, 'w') as f:
+            f.write('a,b\n1,2\n')
+        other_df = DataFile.objects.create(
+            owner=self.other, filename='o.csv', file_path=path, file_size=10,
+            format_type='CTA8290D', file_type='batch', batch_name='LOT-O',
+        )
+        self.assertEqual(self._post([other_df.id]).status_code, 404)
+
+
+class DestroyBatchFileSafetyTests(APITestCase):
+    """回归：DELETE /files/{id}/ 对批次行只删该文件，绝不 rmtree 整批次。"""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username='dst', password='pw')
+        self.client.force_authenticate(self.user)
+        self.batch_base = _user_upload_dir(self.user, 'batch')
+
+    def tearDown(self):
+        shutil.rmtree(self.batch_base, ignore_errors=True)
+
+    def test_destroy_batch_row_keeps_siblings(self):
+        d = os.path.join(self.batch_base, 'LOT-D')
+        os.makedirs(d, exist_ok=True)
+        ded = os.path.join(d, 'ded.csv')
+        keep = os.path.join(d, 'keep.csv')
+        for p in (ded, keep):
+            with open(p, 'w') as f:
+                f.write('a,b\n1,2\n')
+        df_ded = DataFile.objects.create(
+            owner=self.user, filename='ded.csv', file_path=ded, file_size=10,
+            format_type='CTA8290D', file_type='batch', batch_name='LOT-D',
+        )
+        DataFile.objects.create(
+            owner=self.user, filename='keep.csv', file_path=keep, file_size=10,
+            format_type='CTA8290D', file_type='batch', batch_name='LOT-D',
+        )
+        resp = self.client.delete(f'/api/v1/files/{df_ded.id}/')
+        self.assertEqual(resp.status_code, 204)
+        self.assertTrue(os.path.exists(keep), '同批兄弟文件必须保留')
+        self.assertFalse(os.path.exists(ded))
+        self.assertTrue(DataFile.objects.filter(filename='keep.csv').exists())
 
 
 class FormatTypesTests(APITestCase):

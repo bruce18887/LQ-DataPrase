@@ -141,31 +141,16 @@ def _parse_last_modified(value):
         return None
 
 
-def _delete_datafile_on_disk(datafile):
-    """Remove the on-disk file(s) backing a DataFile (best-effort)."""
-    file_path = resolve_file_path(datafile.file_path)
-    try:
-        if datafile.file_type == 'batch' and datafile.batch_name:
-            # Batch: delete the entire batch directory
-            batch_dir = os.path.dirname(file_path)
-            if os.path.isdir(batch_dir):
-                shutil.rmtree(batch_dir, ignore_errors=True)
-        else:
-            # Single: delete just the file
-            if os.path.exists(file_path):
-                os.remove(file_path)
-    except OSError:
-        pass
-
-
 def _delete_datafile_file_only(datafile):
     """Remove only the file backing a DataFile — never the batch directory.
 
-    Used by duplicate cleanup, where batch siblings must survive (the generic
-    ``_delete_datafile_on_disk`` rmtrees the whole batch dir for batch rows,
-    which would mistakenly wipe non-duplicate files sharing the same batch).
-    Empty parent directories are cleaned upward, stopping at MEDIA_ROOT;
-    ``_user_upload_dir`` recreates its own dirs on demand, so this is safe.
+    This is the single-file delete path for BOTH single and batch rows (the
+    historical ``_delete_datafile_on_disk`` rmtree'd the whole batch dir for
+    batch rows, which would mistakenly wipe non-duplicate files sharing the
+    same batch). Whole-batch deletion goes through ``BatchDirDeleteView``
+    (``/batch-dirs/<name>/``) which owns the rmtree semantics. Empty parent
+    directories are cleaned upward, stopping at MEDIA_ROOT; ``_user_upload_dir``
+    recreates its own dirs on demand, so this is safe.
     """
     file_path = resolve_file_path(datafile.file_path)
     try:
@@ -184,6 +169,26 @@ def _delete_datafile_file_only(datafile):
             parent = os.path.dirname(parent)
     except OSError:
         pass
+
+
+def _remove_empty_dirs_up_to(start_dir, root):
+    """Best-effort remove empty dirs from ``start_dir`` upward (root exclusive).
+
+    Used after moving files out of a batch (uncombine): the sub-batch dir, and
+    the batch dir itself when emptied, are removed so an emptied batch
+    disappears from the batch listing instead of lingering as a husk.
+    """
+    parent = os.path.normpath(start_dir)
+    root_n = os.path.normpath(root)
+    while parent and parent != root_n:
+        try:
+            if os.path.isdir(parent) and not os.listdir(parent):
+                os.rmdir(parent)
+            else:
+                break
+        except OSError:
+            break
+        parent = os.path.dirname(parent)
 
 
 def _group_duplicates(user):

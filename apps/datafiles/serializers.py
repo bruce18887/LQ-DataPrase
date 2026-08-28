@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from apps.datafiles.models import DataFile, ParseHistory
+from apps.datafiles.utils import extract_data_date, extract_stage
 from apps.datafiles.utils import resolve_file_path
 
 
@@ -60,6 +61,10 @@ class DataFileSerializer(serializers.ModelSerializer):
     # DB 存相对路径（Storage Layout v2），API 契约保持绝对路径不变
     file_path = serializers.SerializerMethodField()
 
+    # 从文件名/程序名轻量解析（不落库）：测试阶段（FT/QA/UIS/CP）与测试日期
+    stage = serializers.SerializerMethodField()
+    data_date = serializers.SerializerMethodField()
+
     class Meta:
         model = DataFile
         fields = [
@@ -67,7 +72,7 @@ class DataFileSerializer(serializers.ModelSerializer):
             'format_type', 'format_type_display', 'file_type', 'file_type_display',
             'batch_name', 'sub_batch', 'row_count', 'col_count',
             'program_name', 'product_code', 'source_mtime',
-            'metadata', 'tags',
+            'metadata', 'tags', 'stage', 'data_date',
             'status', 'status_display',
             'created_at', 'updated_at',
         ]
@@ -75,6 +80,12 @@ class DataFileSerializer(serializers.ModelSerializer):
 
     def get_file_path(self, obj) -> str:
         return resolve_file_path(obj.file_path)
+
+    def get_stage(self, obj) -> str:
+        return extract_stage(obj.filename, obj.program_name)
+
+    def get_data_date(self, obj) -> str:
+        return extract_data_date(obj.filename)
 
     def validate_tags(self, value):
         return normalize_tags(value)
@@ -91,6 +102,9 @@ class DataFileListSerializer(serializers.ModelSerializer):
     file_type_display = serializers.CharField(
         source='get_file_type_display', read_only=True
     )
+    # 轻量解析字段（同 DataFileSerializer）
+    stage = serializers.SerializerMethodField()
+    data_date = serializers.SerializerMethodField()
 
     class Meta:
         model = DataFile
@@ -99,9 +113,15 @@ class DataFileListSerializer(serializers.ModelSerializer):
             'format_type_display', 'file_type', 'file_type_display',
             'batch_name', 'sub_batch', 'row_count', 'col_count', 'program_name',
             'product_code', 'source_mtime',
-            'tags',
+            'tags', 'stage', 'data_date',
             'status', 'status_display', 'created_at', 'updated_at',
         ]
+
+    def get_stage(self, obj) -> str:
+        return extract_stage(obj.filename, obj.program_name)
+
+    def get_data_date(self, obj) -> str:
+        return extract_data_date(obj.filename)
 
     def validate_tags(self, value):
         return normalize_tags(value)

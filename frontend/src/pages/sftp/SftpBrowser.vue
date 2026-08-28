@@ -32,8 +32,6 @@
         :current-path="currentPath"
         v-model:search-query="searchQuery"
         v-model:file-type="fileType"
-        :timeout-sec="downloadTimeout"
-        @update:timeoutSec="onTimeoutChange"
         @navigate="navigateTo"
         @disconnect="disconnect"
       />
@@ -91,13 +89,8 @@ import { ref, computed, onMounted, onActivated } from 'vue'
 import { FolderOpened, CircleCheck, CircleClose } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { sftpApi, type SftpLastVisit } from '../../api/sftp'
-import { authApi } from '../../api/auth'
 import { useFilesStore } from '../../stores/files'
-import {
-  clampSftpTimeoutSec,
-  getSftpTimeoutSec,
-  setSftpTimeoutSec,
-} from '../../utils/sftpTimeout'
+import { getSftpTimeoutSec } from '../../utils/sftpTimeout'
 import SftpConnectionPanel from './components/SftpConnectionPanel.vue'
 import SftpToolbar from './components/SftpToolbar.vue'
 import SftpBatchActions from './components/SftpBatchActions.vue'
@@ -243,32 +236,12 @@ onActivated(() => {
   loadTimeout()
 })
 
-/** 读取用户设置的下载超时（30-3600s），回退默认 600s */
+/** 读取用户设置的下载超时（30-3600s，系统设置页维护），回退默认 600s */
 async function loadTimeout() {
   try {
     downloadTimeout.value = await getSftpTimeoutSec()
   } catch {
     downloadTimeout.value = 600
-  }
-}
-
-/** 最近一次已保存/已提示的超时值：el-input-number 会在输入与 blur 各发一次
- *  update:model-value，同一值去重，避免重复 PUT 与重复成功提示。 */
-const lastSavedTimeout = ref<number | null>(null)
-
-/** 用户修改超时：钳位 + 写入模块缓存 + 持久化到用户设置 */
-async function onTimeoutChange(sec: number | undefined) {
-  if (sec == null) return
-  const clamped = clampSftpTimeoutSec(sec)
-  if (clamped === lastSavedTimeout.value) return
-  lastSavedTimeout.value = clamped
-  downloadTimeout.value = clamped
-  setSftpTimeoutSec(clamped)
-  try {
-    await authApi.updateSettings({ sftp_download_timeout: clamped })
-    ElMessage.success(`下载超时已设为 ${clamped} 秒`)
-  } catch {
-    // 错误 toast 由 axios 拦截器统一弹出
   }
 }
 

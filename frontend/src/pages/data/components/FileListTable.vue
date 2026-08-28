@@ -1,161 +1,184 @@
 <template>
-  <el-table
-    ref="tableRef"
-    :data="files"
-    :row-key="(row: any) => row.id"
-    stripe
-    style="width: 100%"
-    v-loading="loading"
-    :header-cell-style="{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontWeight: '600' }"
-    :row-class-name="tableRowClassName"
-    :default-sort="{ prop: 'created_at', order: 'descending' }"
-    @sort-change="onSortChange"
-    @row-click="emit('row-click', $event.id, $event.filename)"
-    @selection-change="onSelectionChange"
-    @expand-change="onExpandChange"
-    :expand-row-keys="expandedRowIds"
-    highlight-current-row
-  >
-    <el-table-column type="expand">
-      <template #default="{ row }">
-        <FileRowDetail :row="row" @remove-tag="removeTag" />
-      </template>
-    </el-table-column>
-    <el-table-column type="selection" width="44" align="center" />
-    <el-table-column prop="id" label="ID" min-width="64" align="center" sortable="custom">
-      <template #default="{ row }">
-        <span class="id-badge">#{{ row.id }}</span>
-      </template>
-    </el-table-column>
-    <el-table-column prop="filename" label="文件名" min-width="230" sortable="custom">
-      <template #header>
-        <span class="header-with-filter">
-          文件名
-          <ColumnHeaderFilter v-model="filters.filename" mode="input" label="文件名" testid="filename" />
-        </span>
-      </template>
-      <template #default="{ row }">
-        <div class="filename-cell">
-          <span class="file-icon">📄</span>
-          <span class="file-name" :title="row.filename">{{ truncateMiddle(row.filename, 32) }}</span>
-        </div>
-      </template>
-    </el-table-column>
-    <el-table-column prop="product_code" label="产品" min-width="120">
-      <template #header>
-        <span class="header-with-filter">
-          产品
-          <ColumnHeaderFilter v-model="filters.productCode" mode="select" :options="productCodes" label="产品" testid="product" />
-        </span>
-      </template>
-      <template #default="{ row }">
-        <el-tag v-if="row.product_code" size="small" type="info" effect="plain">
-          {{ row.product_code }}
-        </el-tag>
-        <span v-else class="empty-text">—</span>
-      </template>
-    </el-table-column>
-    <el-table-column prop="format_type" label="格式" min-width="96">
-      <template #header>
-        <span class="header-with-filter">
-          格式
-          <ColumnHeaderFilter v-model="filters.formatType" mode="select" :options="formatTypes" label="格式" testid="format" />
-        </span>
-      </template>
-    </el-table-column>
-    <el-table-column prop="program_name" label="测试程序" min-width="150">
-      <template #header>
-        <span class="header-with-filter">
-          测试程序
-          <ColumnHeaderFilter v-model="filters.program" mode="input" label="测试程序" testid="program" />
-        </span>
-      </template>
-      <template #default="{ row }">
-        <span class="program-name-cell" :title="row.program_name">{{ row.program_name || '—' }}</span>
-      </template>
-    </el-table-column>
-    <el-table-column label="标签" min-width="200" class-name="tag-cell">
-      <template #header>
-        <span class="header-with-filter">
-          标签
-          <ColumnHeaderFilter v-model="filters.tag" mode="select" :options="allTags" label="标签" testid="tag" />
-        </span>
-      </template>
-      <template #default="{ row }">
-        <div class="tag-cell-inner">
-          <el-tag
-            v-for="t in (row.tags || [])"
-            :key="t"
-            closable
-            size="small"
-            type="info"
-            effect="light"
-            class="file-tag"
-            @close="removeTag(row, t)"
-          >{{ t }}</el-tag>
-          <div v-if="editingId === row.id" class="tag-input-wrapper">
-            <input
-              :ref="tagInputRef"
-              :value="newTagValue"
-              type="text"
-              class="tag-native-input"
-              placeholder="新标签+回车"
-              maxlength="50"
-              @input="onTagInput"
-              @keydown="onTagKeydown($event, row)"
-              @blur="scheduleBlurCommit(row)"
-            />
-            <div v-if="showTagSuggestions && tagSuggestions.length > 0" class="tag-suggestions">
-              <div
-                v-for="(s, i) in tagSuggestions"
-                :key="s"
-                class="tag-suggestion-item"
-                :class="{ 'is-active': i === selectedSuggestionIdx }"
-                @mousedown.prevent="selectSuggestion(s)"
-              >
-                {{ s }}
+  <div class="file-list-table">
+    <el-table
+      ref="tableRef"
+      :data="files"
+      :row-key="(row: any) => row.id"
+      stripe
+      style="width: 100%"
+      v-loading="loading"
+      :header-cell-style="{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontWeight: '600' }"
+      :row-class-name="tableRowClassName"
+      :default-sort="{ prop: 'created_at', order: 'descending' }"
+      @sort-change="onSortChange"
+      @row-click="emit('row-click', $event.id, $event.filename)"
+      @selection-change="onSelectionChange"
+      @expand-change="onExpandChange"
+      :expand-row-keys="expandedRowIds"
+      highlight-current-row
+    >
+      <el-table-column type="expand">
+        <template #default="{ row }">
+          <FileRowDetail :row="row" @remove-tag="removeTag" />
+        </template>
+      </el-table-column>
+      <el-table-column type="selection" width="44" align="center" />
+      <el-table-column prop="id" label="ID" min-width="64" align="center" sortable="custom">
+        <template #default="{ row }">
+          <span class="id-badge">#{{ row.id }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="filename" label="文件名" min-width="230" sortable="custom">
+        <template #header>
+          <span class="header-with-filter">
+            文件名
+            <ColumnHeaderFilter v-model="filters.filename" mode="input" label="文件名" testid="filename" />
+          </span>
+        </template>
+        <template #default="{ row }">
+          <div class="filename-cell">
+            <span v-if="row.status !== 'ready'" class="file-error" title="解析失败或未就绪">
+              <el-icon :size="13"><WarningFilled /></el-icon>
+            </span>
+            <span class="file-icon">📄</span>
+            <span
+              class="file-name"
+              :class="{ 'file-name-wrap': wrapFilename }"
+              :title="row.filename"
+            >{{ wrapFilename ? row.filename : truncateMiddle(row.filename, 40) }}</span>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column prop="product_code" label="产品" min-width="110">
+        <template #header>
+          <span class="header-with-filter">
+            产品
+            <ColumnHeaderFilter v-model="filters.productCode" mode="select" :options="productCodes" label="产品" testid="product" />
+          </span>
+        </template>
+        <template #default="{ row }">
+          <el-tag v-if="row.product_code" size="small" type="info" effect="plain">
+            {{ row.product_code }}
+          </el-tag>
+          <span v-else class="empty-text">—</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="format_type" label="格式" min-width="92">
+        <template #header>
+          <span class="header-with-filter">
+            格式
+            <ColumnHeaderFilter v-model="filters.formatType" mode="select" :options="formatTypes" label="格式" testid="format" />
+          </span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="stage" label="阶段" min-width="80">
+        <template #default="{ row }">
+          <el-tag v-if="row.stage" size="small" type="primary" effect="plain">{{ row.stage }}</el-tag>
+          <span v-else class="empty-text">—</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="program_name" label="测试程序" min-width="150">
+        <template #header>
+          <span class="header-with-filter">
+            测试程序
+            <ColumnHeaderFilter v-model="filters.program" mode="input" label="测试程序" testid="program" />
+          </span>
+        </template>
+        <template #default="{ row }">
+          <span class="program-name-cell" :title="row.program_name">{{ row.program_name || '—' }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="标签" min-width="200" class-name="tag-cell">
+        <template #header>
+          <span class="header-with-filter">
+            标签
+            <ColumnHeaderFilter v-model="filters.tag" mode="select" :options="allTags" label="标签" testid="tag" />
+          </span>
+        </template>
+        <template #default="{ row }">
+          <div class="tag-cell-inner">
+            <el-tag
+              v-for="t in (row.tags || [])"
+              :key="t"
+              closable
+              size="small"
+              type="info"
+              effect="light"
+              class="file-tag"
+              @close="removeTag(row, t)"
+            >{{ t }}</el-tag>
+            <div v-if="editingId === row.id" class="tag-input-wrapper">
+              <input
+                :ref="tagInputRef"
+                :value="newTagValue"
+                type="text"
+                class="tag-native-input"
+                placeholder="新标签+回车"
+                maxlength="50"
+                @input="onTagInput"
+                @keydown="onTagKeydown($event, row)"
+                @blur="scheduleBlurCommit(row)"
+              />
+              <div v-if="showTagSuggestions && tagSuggestions.length > 0" class="tag-suggestions">
+                <div
+                  v-for="(s, i) in tagSuggestions"
+                  :key="s"
+                  class="tag-suggestion-item"
+                  :class="{ 'is-active': i === selectedSuggestionIdx }"
+                  @mousedown.prevent="selectSuggestion(s)"
+                >
+                  {{ s }}
+                </div>
               </div>
             </div>
+            <el-button
+              v-else
+              size="small"
+              type="primary"
+              plain
+              class="add-tag-btn"
+              @click.stop="startAddTag(row)"
+            >
+              <el-icon><Plus /></el-icon>
+            </el-button>
           </div>
-          <el-button
-            v-else
-            size="small"
-            type="primary"
-            plain
-            class="add-tag-btn"
-            @click.stop="startAddTag(row)"
-          >
-            <el-icon><Plus /></el-icon>
+        </template>
+      </el-table-column>
+      <el-table-column prop="created_at" label="上传时间" min-width="150" sortable="custom">
+        <template #default="{ row }">
+          <span class="time-text">{{ formatTime(row.created_at) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="data_date" label="测试日期" min-width="110">
+        <template #default="{ row }">
+          <span class="time-text" :title="row.data_date ? `从文件名解析：${row.filename}` : ''">
+            {{ row.data_date || '—' }}
+          </span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="file_size" label="大小" min-width="90" align="right" sortable="custom">
+        <template #default="{ row }">
+          <span class="size-badge">{{ formatSize(row.file_size) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="140" align="center" fixed="right">
+        <template #default="{ row }">
+          <el-button size="small" type="primary" plain @click.stop="emit('view-file', row.id, row.filename)">查看</el-button>
+          <el-button size="small" type="danger" plain @click.stop="emit('delete-file', row)">
+            <el-icon><Delete /></el-icon> 删除
           </el-button>
-        </div>
-      </template>
-    </el-table-column>
-    <el-table-column prop="created_at" label="上传时间" min-width="150" sortable="custom">
-      <template #default="{ row }">
-        <span class="time-text">{{ formatTime(row.created_at) }}</span>
-      </template>
-    </el-table-column>
-    <el-table-column prop="file_size" label="大小" min-width="90" align="right" sortable="custom">
-      <template #default="{ row }">
-        <span class="size-badge">{{ formatSize(row.file_size) }}</span>
-      </template>
-    </el-table-column>
-    <el-table-column label="操作" width="140" align="center" fixed="right">
-      <template #default="{ row }">
-        <el-button size="small" type="primary" plain @click.stop="emit('view-file', row.id, row.filename)">查看</el-button>
-        <el-button size="small" type="danger" plain @click.stop="emit('delete-file', row)">
-          <el-icon><Delete /></el-icon> 删除
-        </el-button>
-      </template>
-    </el-table-column>
-  </el-table>
+        </template>
+      </el-table-column>
+    </el-table>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ref, toRef } from 'vue'
-import { Plus, Delete } from '@element-plus/icons-vue'
+import { ref, toRef, onMounted } from 'vue'
+import { Plus, Delete, WarningFilled } from '@element-plus/icons-vue'
 import type { ElTable } from 'element-plus'
 import { truncateMiddle, formatSize, formatTime } from '../../../utils/format'
+import { getFilenameWrap } from '../../../utils/filenameWrap'
 import { useTagEditing } from '../composables/useTagEditing'
 import FileRowDetail from './FileRowDetail.vue'
 import ColumnHeaderFilter from './ColumnHeaderFilter.vue'
@@ -199,6 +222,12 @@ const {
 
 const tableRef = ref<InstanceType<typeof ElTable>>()
 
+// ── 文件名显示（系统设置 filename_wrap，默认开启；设置页开关，本地无持久化） ──
+const wrapFilename = ref(true)
+onMounted(async () => {
+  wrapFilename.value = await getFilenameWrap()
+})
+
 // Expand row state
 const expandedRowIds = ref<number[]>([])
 function onExpandChange(_row: any, expanded: any[]) {
@@ -233,6 +262,46 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
   align-items: center;
   gap: 2px;
   white-space: nowrap;
+}
+
+/* ============================
+   文件名（换行/截断 + 错误标记）
+   ============================ */
+.filename-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.file-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.file-error {
+  color: var(--color-danger);
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.file-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-name-wrap {
+  white-space: normal;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ============================
@@ -360,26 +429,6 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
   font-weight: 600;
   color: var(--text-tertiary);
   font-family: var(--font-mono);
-}
-
-.filename-cell {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.file-icon {
-  font-size: 16px;
-  flex-shrink: 0;
-}
-
-.file-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .program-name-cell {

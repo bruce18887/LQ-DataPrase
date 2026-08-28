@@ -60,6 +60,21 @@ async function disconnect(page: Parameters<typeof gotoApp>[0]) {
   await expect(page.locator('.connect-card')).toBeVisible({ timeout: 15_000 })
 }
 
+/**
+ * 断线续连是应用设计行为：上一会话存在「已保存配置 + 连接记录」时进入页面
+ * 会自动重连（甚至连上真实服务器，如 220.184.158.242 的 te/Test_Data 目录）。
+ * 用例统一从「断开态」起跑：若已连接先断开，再等连接表单出现。否则
+ * manualConnect 的预填等待会因表单根本不渲染而超时。
+ */
+async function ensureDisconnected(page: Parameters<typeof gotoApp>[0]) {
+  const toolbar = page.locator('.toolbar-card')
+  await toolbar.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
+  if (await toolbar.isVisible()) {
+    await disconnect(page)
+  }
+  await expect(page.locator('.connect-card')).toBeVisible({ timeout: 15_000 })
+}
+
 test.beforeAll(async () => {
   server = await startSftpServer()
 })
@@ -76,6 +91,7 @@ test.describe.configure({ mode: 'serial' })
 test.describe('@sftp SFTP 断线续连', { tag: ['@sftp'] }, () => {
   test('@p1 手动连接：断开后表单预填，重连自动跳回上次路径', async ({ page }) => {
     await gotoApp(page, '/sftp')
+    await ensureDisconnected(page)
 
     // 手动连接 → 进入 sub1
     await manualConnect(page, server)
@@ -100,6 +116,7 @@ test.describe('@sftp SFTP 断线续连', { tag: ['@sftp'] }, () => {
   test('@p1 保存配置：重新登录后自动重连并恢复路径', async ({ page }) => {
     const configName = `e2e_reconnect_${Date.now()}`
     await gotoApp(page, '/sftp')
+    await ensureDisconnected(page)
 
     // 手动连接 → 进 sub1（记录 last_path）
     await manualConnect(page, server)
@@ -135,6 +152,7 @@ test.describe('@sftp SFTP 断线续连', { tag: ['@sftp'] }, () => {
 
   test('@p1 手动连接：重新登录后预填表单并提示上次路径', async ({ page }) => {
     await gotoApp(page, '/sftp')
+    await ensureDisconnected(page)
 
     await manualConnect(page, server)
     await enterSub1(page)
@@ -162,6 +180,7 @@ test.describe('@sftp SFTP 浏览器增强：类型过滤 / 文件进度 / 下载
 
   test('@p1 类型过滤：默认仅 CSV 隐藏非 CSV，切换全部文件后可见', async ({ page }) => {
     await gotoApp(page, '/sftp')
+    await ensureDisconnected(page)
     await manualConnect(page, server)
     await goRoot(page)
 
@@ -185,8 +204,30 @@ test.describe('@sftp SFTP 浏览器增强：类型过滤 / 文件进度 / 下载
     await disconnect(page)
   })
 
-  test('@p1 单文件下载：SSE 进度卡片（百分比+速率）出现并完成导入', async ({ page }) => {
+  test('@p1 单文件下载：SSE 进度卡片（百分比+速率）出现、携带用户超时参数并完成导入', async ({ page }) => {
     await gotoApp(page, '/sftp')
+    // 端点前置：把下载超时设为 900（等价用户在系统设置页保存），并触达
+    // SFTP 页面的模块缓存——刷新页面使 getSftpTimeoutSec 重新单飞拉取。
+    await page.evaluate(async () => {
+      await fetch('/api/v1/auth/settings/', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+        },
+        body: JSON.stringify({ sftp_download_timeout: 900 }),
+      })
+    })
+    await page.reload()
+    await ensureDisconnected(page)
+    // 等预填稳定再连接（异步预填与 fill 竞争会把 host 写成 127.0.0.1127.0.0.1）
+    const host = page.getByPlaceholder('例如: 192.168.1.1')
+    await expect.poll(async () => {
+      const v1 = await host.inputValue()
+      await page.waitForTimeout(300)
+      const v2 = await host.inputValue()
+      return v1 === v2
+    }, { timeout: 10_000 }).toBe(true)
     await manualConnect(page, server)
     await goRoot(page)
 
@@ -196,6 +237,11 @@ test.describe('@sftp SFTP 浏览器增强：类型过滤 / 文件进度 / 下载
     })
     await expect(bigRow).toBeVisible({ timeout: 15_000 })
 
+    // SSE 请求应携带用户设置的下载超时（/sftp/download_file_stream/ body.timeout）
+    const sseReqPromise = page.waitForRequest(
+      (r) => r.url().includes('/sftp/download_file_stream/'),
+    )
+
     // SSE 进度卡片出现（下载开始即渲染），包含百分比与速率文案
     await bigRow.getByRole('button', { name: '下载' }).click()
     await expect(page.locator('.download-progress-card')).toBeVisible({ timeout: 10_000 })
@@ -204,6 +250,12 @@ test.describe('@sftp SFTP 浏览器增强：类型过滤 / 文件进度 / 下载
 
     // 完成：成功提示 + 文件注册出现（重名会带时间戳后缀，如 big_xxx.csv）
     await expect(page.getByText(/已导入: big/)).toBeVisible({ timeout: 60_000 })
+
+    // 超时参数审计：下载请求 body.timeout == 用户设置值（900，系统设置页维护）
+    const sseReq = await sseReqPromise
+    const postData = sseReq.postDataJSON() as { timeout?: number }
+    expect(postData.timeout).toBe(900)
+
     const token = await page.evaluate(() => localStorage.getItem('access_token'))
     await expect
       .poll(
@@ -219,10 +271,8 @@ test.describe('@sftp SFTP 浏览器增强：类型过滤 / 文件进度 / 下载
       .toBeGreaterThan(0)
 
     await disconnect(page)
-  })
-
-  test('@p1 下载超时：工具栏自由设定并持久化到用户设置', async ({ page }) => {
-    const restoreTimeout = () => page.evaluate(async () => {
+    // 收尾恢复默认 600（用户设置持久化，不恢复会污染后续用例）
+    await page.evaluate(async () => {
       await fetch('/api/v1/auth/settings/', {
         method: 'PUT',
         headers: {
@@ -232,49 +282,5 @@ test.describe('@sftp SFTP 浏览器增强：类型过滤 / 文件进度 / 下载
         body: JSON.stringify({ sftp_download_timeout: 600 }),
       })
     })
-    try {
-      // 起点：恢复默认 600 再 reload（刷新后重新读取用户设置；同时保证上次
-      // 运行残留的 900 不把断言污染）。reload 后必须先等预填稳定再手动连接
-      // （断线续连的 initial 是异步到达的，与 manualConnect 的 fill 竞争会
-      // 导致 host 被写入两次——见截图失败特征 host=127.0.0.1127.0.0.1）。
-      await gotoApp(page, '/sftp')
-      await restoreTimeout()
-      await page.reload()
-      const host = page.getByPlaceholder('例如: 192.168.1.1')
-      await expect.poll(async () => {
-        const v1 = await host.inputValue()
-        await page.waitForTimeout(300)
-        const v2 = await host.inputValue()
-        return v1 === v2
-      }, { timeout: 10_000 }).toBe(true)
-      await manualConnect(page, server)
-
-      const timeoutInput = page.getByTestId('sftp-timeout-input').locator('input')
-      await expect(timeoutInput).toHaveValue('600', { timeout: 15_000 })
-
-      // 修改为 900 → blur 触发保存 → 成功提示（el-input-number 输入+blur 可能
-      // 各发一次，用 .first() 避免 strict mode 双元素冲突）
-      await timeoutInput.fill('900')
-      await timeoutInput.blur()
-      await expect(page.getByText(/下载超时已设为 900 秒/).first()).toBeVisible({ timeout: 10_000 })
-
-      // 持久化校验：GET /auth/settings/ 返回 900
-      await expect
-        .poll(async () => {
-          const value = await page.evaluate(async () => {
-            const resp = await fetch('/api/v1/auth/settings/', {
-              headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
-            })
-            if (!resp.ok) return null
-            return (await resp.json()).sftp_download_timeout
-          })
-          return value
-        }, { timeout: 10_000 })
-        .toBe(900)
-
-      await disconnect(page)
-    } finally {
-      await restoreTimeout()
-    }
   })
 })

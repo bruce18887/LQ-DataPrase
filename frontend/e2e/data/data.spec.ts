@@ -32,7 +32,7 @@ test.describe('数据管理 /data', { tag: ['@data'] }, () => {
 
     // 预植入文件已出现
     await expect.poll(
-      () => page.locator('.el-table .el-table__row').count(),
+      () => page.locator('.content-section:visible .el-table .el-table__row').count(),
       { timeout: 15_000 },
     ).toBeGreaterThanOrEqual(SEEDED_MIN)
   })
@@ -41,7 +41,7 @@ test.describe('数据管理 /data', { tag: ['@data'] }, () => {
     await gotoApp(page, '/data')
 
     // Click the first file row's "查看" button
-    const firstRow = page.locator('.el-table .el-table__row').first()
+    const firstRow = page.locator('.content-section:visible .el-table .el-table__row').first()
     await expect(firstRow).toBeVisible({ timeout: 10_000 })
     await firstRow.locator('button').filter({ hasText: '查看' }).click()
 
@@ -66,7 +66,7 @@ test.describe('数据管理 /data', { tag: ['@data'] }, () => {
       await expectUploadSuccess(page)
 
       // Verify the file appears in the table
-      await expect(page.locator('.el-table').getByText(uniqueName)).toBeVisible({ timeout: 15_000 })
+      await expect(page.locator('.content-section:visible .el-table').getByText(uniqueName)).toBeVisible({ timeout: 15_000 })
     } finally {
       fs.rmSync(tmpPath, { force: true })
     }
@@ -86,10 +86,10 @@ test.describe('数据管理 /data', { tag: ['@data'] }, () => {
       await expectUploadSuccess(page)
 
       // Wait for the file to appear
-      await expect(page.locator('.el-table').getByText(uniqueName)).toBeVisible({ timeout: 15_000 })
+      await expect(page.locator('.content-section:visible .el-table').getByText(uniqueName)).toBeVisible({ timeout: 15_000 })
 
       // Click the row's delete button (操作 column)
-      const row = page.locator('.el-table__row').filter({ hasText: uniqueName })
+      const row = page.locator('.content-section:visible .el-table__row').filter({ hasText: uniqueName })
       await row.locator('button').filter({ hasText: /删除/ }).click()
 
       // Confirm deletion in the MessageBox
@@ -98,7 +98,7 @@ test.describe('数据管理 /data', { tag: ['@data'] }, () => {
       await confirmBtn.click()
 
       await expect(page.getByText('文件已删除').first()).toBeVisible({ timeout: 15_000 })
-      await expect(page.locator('.el-table').getByText(uniqueName)).toHaveCount(0, { timeout: 15_000 })
+      await expect(page.locator('.content-section:visible .el-table').getByText(uniqueName)).toHaveCount(0, { timeout: 15_000 })
     } finally {
       fs.rmSync(tmpPath, { force: true })
     }
@@ -146,8 +146,8 @@ test.describe('数据管理 /data', { tag: ['@data'] }, () => {
       await expect(page.getByText(/上传成功/).first()).toBeVisible({ timeout: 30_000 })
 
       // Both files should appear
-      await expect(page.locator('.el-table').getByText(name1)).toBeVisible({ timeout: 15_000 })
-      await expect(page.locator('.el-table').getByText(name2)).toBeVisible({ timeout: 15_000 })
+      await expect(page.locator('.content-section:visible .el-table').getByText(name1)).toBeVisible({ timeout: 15_000 })
+      await expect(page.locator('.content-section:visible .el-table').getByText(name2)).toBeVisible({ timeout: 15_000 })
     } finally {
       fs.rmSync(tmp1, { force: true })
       fs.rmSync(tmp2, { force: true })
@@ -202,14 +202,14 @@ test.describe('数据管理 /data', { tag: ['@data'] }, () => {
 test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删除/新列）', { tag: ['@data'] }, () => {
   test('@p1 新列渲染：表头出现“产品”与“上传时间”', async ({ page }) => {
     await gotoApp(page, '/data')
-    await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
-    await expect(page.locator('.el-table th').filter({ hasText: '产品' })).toBeVisible()
-    await expect(page.locator('.el-table th').filter({ hasText: '上传时间' })).toBeVisible()
+    await expect(page.locator('.content-section:visible .el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.content-section:visible .el-table th').filter({ hasText: '产品' })).toBeVisible()
+    await expect(page.locator('.content-section:visible .el-table th').filter({ hasText: '上传时间' })).toBeVisible()
   })
 
   test('@p1 搜索：按文件名过滤列表', async ({ page }) => {
     await gotoApp(page, '/data')
-    await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.content-section:visible .el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
 
     // 用某个已植入文件名的片段搜索
     const fragment = SEEDED_FILES.ETS88_FT.slice(0, 8)
@@ -220,20 +220,20 @@ test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删�
     // 注意：文件名单元格被 truncateMiddle(32) 中间截断，完整文件名永不在 DOM——
     // 用前缀匹配（2026-08-03 教训）。
     await expect(
-      page.locator('.el-table .el-table__row').filter({ hasText: SEEDED_FILES.ETS88_FT.slice(0, 12) }),
+      page.locator('.content-section:visible .el-table .el-table__row').filter({ hasText: SEEDED_FILES.ETS88_FT.slice(0, 12) }),
     ).toBeVisible({ timeout: 15_000 })
 
     // 清空后行数恢复
     await search.fill('')
     await expect.poll(
-      () => page.locator('.el-table .el-table__row').count(),
+      () => page.locator('.content-section:visible .el-table .el-table__row').count(),
       { timeout: 15_000 },
     ).toBeGreaterThan(0)
   })
 
   test('@p2 产品筛选：表头下拉存在并可选择产品过滤', async ({ page }) => {
     await gotoApp(page, '/data')
-    await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.content-section:visible .el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
 
     // product_codes API 返回 200 且含数据
     const codes = await page.evaluate(async () => {
@@ -252,7 +252,7 @@ test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删�
       await openHeaderFilter(page, 'product')
       await selectHeaderFilterOption(page, 'product', codes.codes[0])
       // 列表至少应有一行（选中产品存在文件）
-      await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
+      await expect(page.locator('.content-section:visible .el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
     }
   })
 
@@ -278,13 +278,13 @@ test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删�
       //（selectedIds=[] → bulk_delete 400）。必须等行数收敛到 2（只剩搜索命中项）。
       const search = page.locator('.file-list-tab input[placeholder*="搜索"]')
       await search.fill(`e2e_bulk_${ts}_`)
-      await expect(page.locator('.el-table .el-table__row')).toHaveCount(2, { timeout: 15_000 })
-      await expect(page.locator('.el-table').getByText(name1)).toBeVisible()
-      await expect(page.locator('.el-table').getByText(name2)).toBeVisible()
+      await expect(page.locator('.content-section:visible .el-table .el-table__row')).toHaveCount(2, { timeout: 15_000 })
+      await expect(page.locator('.content-section:visible .el-table').getByText(name1)).toBeVisible()
+      await expect(page.locator('.content-section:visible .el-table').getByText(name2)).toBeVisible()
 
       // 勾选两行的 selection checkbox
-      const row1 = page.locator('.el-table__row').filter({ hasText: name1 })
-      const row2 = page.locator('.el-table__row').filter({ hasText: name2 })
+      const row1 = page.locator('.content-section:visible .el-table__row').filter({ hasText: name1 })
+      const row2 = page.locator('.content-section:visible .el-table__row').filter({ hasText: name2 })
       await row1.locator('.el-checkbox').click()
       await row2.locator('.el-checkbox').click()
 
@@ -299,8 +299,8 @@ test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删�
       await confirmBtn.click()
 
       await expect(page.getByText(/已删除 \d+ 个文件/).first()).toBeVisible({ timeout: 15_000 })
-      await expect(page.locator('.el-table').getByText(name1)).toHaveCount(0, { timeout: 15_000 })
-      await expect(page.locator('.el-table').getByText(name2)).toHaveCount(0, { timeout: 15_000 })
+      await expect(page.locator('.content-section:visible .el-table').getByText(name1)).toHaveCount(0, { timeout: 15_000 })
+      await expect(page.locator('.content-section:visible .el-table').getByText(name2)).toHaveCount(0, { timeout: 15_000 })
     } finally {
       fs.rmSync(tmp1, { force: true })
       fs.rmSync(tmp2, { force: true })
@@ -309,7 +309,7 @@ test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删�
 
   test('@p2 分页：文件数超过页大小时分页控件出现', async ({ page }) => {
     await gotoApp(page, '/data')
-    await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.content-section:visible .el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
 
     // 读取总数判断是否应出现分页（后端 PAGE_SIZE=20）
     const count = await page.evaluate(async () => {
@@ -331,7 +331,7 @@ test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删�
 
   test('@p2 产品筛选刷新(#6)：上传带产品码文件后下拉立即包含该产品码', async ({ page }) => {
     await gotoApp(page, '/data')
-    await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.content-section:visible .el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
 
     // 构造一个文件名即可解析出唯一产品码（B + 1~2 字母 + 数字）的临时文件。
     const code = `BZJ${Date.now()}`
@@ -343,7 +343,7 @@ test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删�
       await page.locator('button').filter({ hasText: '上传文件' }).click()
       await uploadFile(page, tmpPath)
       await expectUploadSuccess(page)
-      await expect(page.locator('.el-table').getByText(uniqueName)).toBeVisible({ timeout: 15_000 })
+      await expect(page.locator('.content-section:visible .el-table').getByText(uniqueName)).toBeVisible({ timeout: 15_000 })
 
       // 不刷新页面，直接打开表头「产品」筛选下拉——修复前下拉只在 onMounted 拉取，
       // 新上传文件的产品码不会出现（甚至 no data）。修复后应立即包含该码。
@@ -372,7 +372,7 @@ test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删�
       await page.locator('button').filter({ hasText: '上传文件' }).click()
       await uploadFile(page, tmpPath)
       await expectUploadSuccess(page)
-      const row = page.locator('.el-table__row').filter({ hasText: uniqueName })
+      const row = page.locator('.content-section:visible .el-table__row').filter({ hasText: uniqueName })
       await expect(row).toBeVisible({ timeout: 15_000 })
       await row.locator('button').filter({ hasText: '查看' }).click()
       await expect(page.locator('.tab-btn.active')).toContainText('查看数据')
@@ -380,7 +380,7 @@ test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删�
 
       // 回到文件列表删除该文件
       await page.locator('.tab-btn').filter({ hasText: '文件列表' }).click()
-      const row2 = page.locator('.el-table__row').filter({ hasText: uniqueName })
+      const row2 = page.locator('.content-section:visible .el-table__row').filter({ hasText: uniqueName })
       await row2.locator('button').filter({ hasText: /删除/ }).click()
       const confirmBtn = page.locator('.el-message-box').getByRole('button', { name: '删除', exact: true })
       await expect(confirmBtn).toBeVisible({ timeout: 10_000 })
@@ -402,9 +402,9 @@ test.describe('数据管理 /data 列表增强（搜索/筛选/分页/批量删�
 test.describe('数据管理 /data 文件列表增强（标签/上传/批次管理）', { tag: ['@data'] }, () => {
   test('@p1 标签列渲染：文件列表表格显示标签列', async ({ page }) => {
     await gotoApp(page, '/data')
-    await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.content-section:visible .el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
     // 标签列表头应该存在
-    await expect(page.locator('.el-table th').filter({ hasText: '标签' })).toBeVisible()
+    await expect(page.locator('.content-section:visible .el-table th').filter({ hasText: '标签' })).toBeVisible()
   })
 
   test('@p1 上传按钮：点击上传按钮展开上传区域', async ({ page }) => {
@@ -521,10 +521,10 @@ test.describe('数据管理 /data 文件列表增强（标签/上传/批次管�
 
   test('@p2 UI：标签编辑 - 添加/删除标签', async ({ page }) => {
     await gotoApp(page, '/data')
-    await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.content-section:visible .el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
 
     // 找到第一行的添加标签按钮
-    const firstRow = page.locator('.el-table .el-table__row').first()
+    const firstRow = page.locator('.content-section:visible .el-table .el-table__row').first()
     const addBtn = firstRow.locator('button').filter({ hasText: /添加/ }).first()
 
     // 如果有添加按钮，测试标签编辑
@@ -560,7 +560,7 @@ test.describe('数据管理 /data 文件列表增强（标签/上传/批次管�
 
   test('@p2 标签联想输入：输入时显示匹配的已有标签建议', async ({ page }) => {
     await gotoApp(page, '/data')
-    await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.content-section:visible .el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
 
     // 先通过 API 创建一个带标签的文件，确保有标签可联想
     const tagPrefix = `E2E_AC_${Date.now()}`
@@ -597,10 +597,10 @@ test.describe('数据管理 /data 文件列表增强（标签/上传/批次管�
 
     // 刷新加载新标签
     await page.reload()
-    await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.content-section:visible .el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
 
     // 找到第一行的添加标签按钮并点击
-    const firstRow = page.locator('.el-table .el-table__row').first()
+    const firstRow = page.locator('.content-section:visible .el-table .el-table__row').first()
     const addBtn = firstRow.locator('button').filter({ hasText: /添加/ }).first()
 
     if (await addBtn.isVisible()) {
@@ -643,9 +643,9 @@ test.describe('数据管理 /data 文件列表增强（标签/上传/批次管�
 test.describe('数据管理 /data 文件列表展开行（方案A）', { tag: ['@data'] }, () => {
   test('@p1 展开行：点击展开按钮后展示完整文件名/测试程序/所有标签', async ({ page }) => {
     await gotoApp(page, '/data')
-    await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.content-section:visible .el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
 
-    const firstRow = page.locator('.el-table .el-table__row').first()
+    const firstRow = page.locator('.content-section:visible .el-table .el-table__row').first()
 
     // 拿到首行的文件名/程序名原值（从 API 读）
     const fileInfo = await page.evaluate(async () => {
@@ -664,14 +664,14 @@ test.describe('数据管理 /data 文件列表展开行（方案A）', { tag: ['
     }
 
     // 1) 默认未展开：行内不应有 .row-detail
-    await expect(page.locator('.el-table__expanded-cell .row-detail')).toHaveCount(0)
+    await expect(page.locator('.content-section:visible .el-table__expanded-cell .row-detail')).toHaveCount(0)
 
     // 2) 点击展开按钮
     const expandTrigger = firstRow.locator('.el-table__expand-icon').first()
     await expandTrigger.click()
 
     // 3) 展开后 .row-detail 出现
-    const detail = page.locator('.el-table__expanded-cell .row-detail').first()
+    const detail = page.locator('.content-section:visible .el-table__expanded-cell .row-detail').first()
     await expect(detail).toBeVisible({ timeout: 5_000 })
 
     // 4) 完整文件名在展开行内可见（不依赖 middle-ellipsis 截断）
@@ -683,9 +683,9 @@ test.describe('数据管理 /data 文件列表展开行（方案A）', { tag: ['
 
   test('@p2 无 popover 弹框：hover 文件名/测试程序 不出现 el-popper', async ({ page }) => {
     await gotoApp(page, '/data')
-    await expect(page.locator('.el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.content-section:visible .el-table .el-table__row').first()).toBeVisible({ timeout: 15_000 })
 
-    const firstRow = page.locator('.el-table .el-table__row').first()
+    const firstRow = page.locator('.content-section:visible .el-table .el-table__row').first()
     const filenameCell = firstRow.locator('.filename-cell .file-name').first()
     const programCell = firstRow.locator('.program-name-cell').first()
 
@@ -718,7 +718,7 @@ test.describe('数据管理 /data 当前文件下拉切换', { tag: ['@data'] },
   test('@p1 查看数据：当前文件下拉框存在且可切换文件', async ({ page }) => {
     await gotoApp(page, '/data')
     // 先在文件列表点「查看」进入查看数据 tab
-    const firstRow = page.locator('.el-table .el-table__row').first()
+    const firstRow = page.locator('.content-section:visible .el-table .el-table__row').first()
     await expect(firstRow).toBeVisible({ timeout: 15_000 })
     await firstRow.locator('button').filter({ hasText: '查看' }).click()
     await expect(page.locator('.tab-btn.active')).toContainText('查看数据')
@@ -741,7 +741,7 @@ test.describe('数据管理 /data 当前文件下拉切换', { tag: ['@data'] },
 
   test('@p2 查看数据：当前文件下拉显示文件富信息行（program · format · N行 · 大小 · 时间）', async ({ page }) => {
     await gotoApp(page, '/data')
-    const firstRow = page.locator('.el-table .el-table__row').first()
+    const firstRow = page.locator('.content-section:visible .el-table .el-table__row').first()
     await expect(firstRow).toBeVisible({ timeout: 15_000 })
     await firstRow.locator('button').filter({ hasText: '查看' }).click()
     await expect(page.locator('.tab-btn.active')).toContainText('查看数据')

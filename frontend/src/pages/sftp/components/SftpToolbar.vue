@@ -33,22 +33,6 @@
           <el-option label="仅 CSV" value="csv" />
           <el-option label="全部文件" value="all" />
         </el-select>
-        <!-- 下载超时（秒）：自由设定，持久化到用户设置 -->
-        <div class="timeout-control" title="单文件/批量下载超时时间（秒），30-3600">
-          <span class="timeout-label">超时</span>
-          <el-input-number
-            :model-value="timeoutSec"
-            @update:model-value="emit('update:timeoutSec', $event as number)"
-            :min="30"
-            :max="3600"
-            :step="30"
-            size="small"
-            controls-position="right"
-            class="timeout-input"
-            :data-testid="'sftp-timeout-input'"
-          />
-          <span class="timeout-unit">秒</span>
-        </div>
         <el-input
           :model-value="searchQuery"
           @update:model-value="emit('update:searchQuery', $event)"
@@ -75,14 +59,11 @@ const props = defineProps<{
   searchQuery: string
   /** 文件名浏览过滤：'csv' = 仅显示 CSV（默认），'all' = 显示所有类型 */
   fileType: 'csv' | 'all'
-  /** 下载超时（秒），30-3600 */
-  timeoutSec: number
 }>()
 
 const emit = defineEmits<{
   'update:searchQuery': [value: string]
   'update:fileType': [value: 'csv' | 'all']
-  'update:timeoutSec': [value: number]
   navigate: [path: string]
   disconnect: []
 }>()
@@ -113,13 +94,4 @@ const parentPath = computed(() => {
   flex-wrap: wrap;
 }
 .type-filter { width: 110px; }
-.timeout-control {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-.timeout-input { width: 100px; }
-.timeout-unit { font-size: 12px; color: var(--text-secondary); }
 </style>
