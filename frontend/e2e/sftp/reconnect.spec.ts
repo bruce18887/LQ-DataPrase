@@ -257,14 +257,16 @@ test.describe('@sftp SFTP 浏览器增强：类型过滤 / 文件进度 / 下载
     expect(postData.timeout).toBe(900)
 
     const token = await page.evaluate(() => localStorage.getItem('access_token'))
+    // 重名会带时间戳后缀（big_<ts>.csv）：搜索词含 'big' 即可（icontains），
+    // 并校验返回文件中确实出现 big 前缀（2026-08-28 教训：杜绝按全名断言）
     await expect
       .poll(
         async () => {
-          const resp = await page.request.get('/api/v1/files/?search=big.csv',
+          const resp = await page.request.get('/api/v1/files/?search=big',
             { headers: { Authorization: `Bearer ${token}` } })
           if (!resp.ok()) return 0
-          const data = (await resp.json()) as { count: number }
-          return data.count
+          const data = (await resp.json()) as { results?: { filename: string }[] }
+          return (data.results || []).filter((f) => /^big/.test(f.filename)).length
         },
         { timeout: 15_000 },
       )
@@ -282,5 +284,41 @@ test.describe('@sftp SFTP 浏览器增强：类型过滤 / 文件进度 / 下载
         body: JSON.stringify({ sftp_download_timeout: 600 }),
       })
     })
+  })
+
+  test('@p1 目录下载：进度卡片按总字节显示并完成导入', async ({ page }) => {
+    await gotoApp(page, '/sftp')
+    await ensureDisconnected(page)
+    await manualConnect(page, server)
+    await goRoot(page)
+
+    // sub1 目录行「下载」按钮 → 目录下载 SSE（与单文件下载共用进度卡片）
+    const sub1Row = page.locator('.file-table .el-table__row').filter({
+      has: page.locator('.file-name', { hasText: 'sub1' }),
+    })
+    await sub1Row.getByRole('button', { name: '下载' }).click()
+
+    // 进度卡片出现（下载开始即渲染），包含文件计数与字节统计（按总大小计算）
+    await expect(page.locator('.download-progress-card')).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('.download-progress-card')).toContainText(/1\/1 文件/)
+    await expect(page.locator('.download-progress-card')).toContainText(/%/)
+
+    // 完成：成功提示 + 文件注册（下载即注册语义）
+    await expect(page.getByText(/已保存/).first()).toBeVisible({ timeout: 30_000 })
+    const token = await page.evaluate(() => localStorage.getItem('access_token'))
+    await expect
+      .poll(
+        async () => {
+          const resp = await page.request.get('/api/v1/files/?search=sample.csv',
+            { headers: { Authorization: `Bearer ${token}` } })
+          if (!resp.ok()) return 0
+          const data = (await resp.json()) as { count: number }
+          return data.count
+        },
+        { timeout: 15_000 },
+      )
+      .toBeGreaterThan(0)
+
+    await disconnect(page)
   })
 })

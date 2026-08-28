@@ -5,7 +5,10 @@
         <el-icon><Download /></el-icon>
         {{ mode === 'file' ? `正在下载 ${progress.currentFile}` : '正在下载目录...' }}
       </span>
-      <span class="progress-stats" v-if="mode === 'dir'">{{ progress.current }}/{{ progress.total }} 文件</span>
+      <span class="progress-stats" v-if="mode === 'dir'">
+        {{ progress.current }}/{{ progress.total }} 文件 ·
+        {{ formatBytes(progress.bytes_done) }} / {{ formatBytes(progress.total_bytes) }}
+      </span>
       <span class="progress-stats" v-else>{{ formatBytes(progress.bytes_done) }} / {{ formatBytes(progress.total_bytes) }}</span>
     </div>
     <el-progress :percentage="progress.percent" :stroke-width="12" :format="(p: number) => `${p}%`" />
@@ -21,8 +24,11 @@ import { Download } from '@element-plus/icons-vue'
 
 /**
  * 下载进度卡片：
- * - mode='dir'：目录批量下载（文件名 + N/M 个文件 + 百分比/速率/ETA）
+ * - mode='dir'：目录批量下载（文件名 + N/M 个文件 + 已完成字节/总字节 + 百分比/速率/ETA）
  * - mode='file'：单文件下载（文件名 + 已完成字节/总字节 + 百分比/速率/ETA）
+ *
+ * 两种模式的 percent 均由后端按「实际累计下载字节 / 总下载字节」计算，
+ * 目录下载百分比随分块实时更新（不会卡在低百分比）。
  */
 defineProps<{
   mode: 'file' | 'dir'

@@ -1,15 +1,17 @@
-"""SFTP 单文件下载 SSE 生成器。
+"""SFTP 下载 SSE 生成器（单文件 / 目录批量共用）。
 
 背景：旧实现 ``download`` 用 ``sftp.get()`` 一次性下载完整个文件后才返回 JSON。
 大文件（GB 级）在前端 30s 的 axios timeout 下必然超时报错；即使放宽 timeout，
 前端也看不到任何进度。
 
-本模块把单文件下载改为「分块读取 + SSE 进度事件」：
-- 客户端通过 fetch 读流（与 download_dir 同构，无 axios 超时）；
+本模块把下载改为「分块读取 + SSE 进度事件」：
+- 客户端通过 fetch 读流（无 axios 超时）；
 - 服务端设置 SFTP channel 的 socket 超时（可配置，默认 600s），传输停滞即抛
   socket.timeout；同时用整体 deadline 兜底（channel 超时对传输期间有数据流动
   的慢速下载不生效，deadline 才能覆盖「永远差一点下完」的场景）；
-- 进度事件携带 percent / speed(MB/s) / eta(s) / bytes，前端渲染百分比 + 速率进度条。
+- 单文件（``download_file_events``）与目录批量（``download_dir_events``）
+  进度都基于**实际累计下载字节 / 远端总字节**，分块到达即实时更新
+  （0.1s 节流），大文件下载期间进度条不再卡在低百分比。
 """
 
 import json
@@ -83,6 +85,30 @@ def _remove_partial(file_path):
         pass
 
 
+def iter_remote_chunks(sftp, remote_path, chunk_size=DOWNLOAD_CHUNK_SIZE):
+    """逐块读取单个远端文件（256KB），单文件与目录下载共用。
+
+    ``SFTPFile.read`` 内部会按 paramiko 的请求上限拆小请求，返回恰好
+    ``chunk_size`` 的首个缓冲区（不足时返回剩余字节），耗尽后返回 b''。
+    """
+    remote = sftp.open(remote_path, 'rb')
+    try:
+        while True:
+            chunk = remote.read(chunk_size)
+            if not chunk:
+                return
+            yield chunk
+    finally:
+        remote.close()
+
+
+def _progress_ratio(done, total):
+    """进度百分比（0–100）：total 为 0（远端未报大小）时视为已完成。"""
+    if not total:
+        return 100
+    return min(100, round(done * 100 / total))
+
+
 def download_file_events(sftp, user, remote_path, file_path, timeout_sec):
     """生成单文件下载的 SSE 事件（dict 序列，由调用方 json.dumps 组装）。
 
@@ -112,38 +138,38 @@ def download_file_events(sftp, user, remote_path, file_path, timeout_sec):
         total_bytes = sftp.stat(remote_path).st_size or 0
 
         with channel_timeout(sftp, timeout_sec):
-            remote = sftp.open(remote_path, 'rb')
-            try:
-                with open(file_path, 'wb') as local:
-                    while True:
-                        now = time.time()
-                        if now > deadline:
-                            raise TimeoutError(
-                                f'下载超时（超过 {timeout_sec} 秒）')
-                        chunk = remote.read(DOWNLOAD_CHUNK_SIZE)
-                        if not chunk:
-                            break
-                        local.write(chunk)
-                        bytes_done += len(chunk)
-                        now = time.time()
-                        elapsed = now - start
-                        # 节流：0.1s 内不重复发 progress；最后一块强制发（100%）
-                        if now - last_event < PROGRESS_EVENT_INTERVAL and bytes_done < total_bytes:
-                            continue
-                        last_event = now
-                        speed = bytes_done / elapsed if elapsed > 0 else 0
-                        eta = (total_bytes - bytes_done) / speed if speed > 0 else 0
-                        yield {
-                            'event': 'progress',
-                            'percent': min(100, round(bytes_done * 100 / total_bytes)) if total_bytes else 100,
-                            'speed': round(speed / 1048576, 2),
-                            'eta': round(eta),
-                            'filename': filename,
-                            'bytes_done': bytes_done,
-                            'total_bytes': total_bytes,
-                        }
-            finally:
-                remote.close()
+            with open(file_path, 'wb') as local:
+                chunk_iter = iter_remote_chunks(sftp, remote_path)
+                while True:
+                    # 先查 deadline 再读：传输停滞（一次 read 即超时）也要先
+                    # 发出进度事件（最后一次 read 后发的进度不会被吞掉）
+                    now = time.time()
+                    if now > deadline:
+                        raise TimeoutError(
+                            f'下载超时（超过 {timeout_sec} 秒）')
+                    try:
+                        chunk = next(chunk_iter)
+                    except StopIteration:
+                        break
+                    local.write(chunk)
+                    bytes_done += len(chunk)
+                    now = time.time()
+                    elapsed = now - start
+                    # 节流：0.1s 内不重复发 progress；最后一块强制发（100%）
+                    if now - last_event < PROGRESS_EVENT_INTERVAL and bytes_done < total_bytes:
+                        continue
+                    last_event = now
+                    speed = bytes_done / elapsed if elapsed > 0 else 0
+                    eta = (total_bytes - bytes_done) / speed if speed > 0 else 0
+                    yield {
+                        'event': 'progress',
+                        'percent': _progress_ratio(bytes_done, total_bytes),
+                        'speed': round(speed / 1048576, 2),
+                        'eta': round(eta),
+                        'filename': filename,
+                        'bytes_done': bytes_done,
+                        'total_bytes': total_bytes,
+                    }
     except GeneratorExit:
         # 客户端中途断开：连接状态不可靠，重建连接
         pool.invalidate(user.id)
@@ -172,6 +198,137 @@ def download_file_events(sftp, user, remote_path, file_path, timeout_sec):
         'filename': os.path.basename(file_path),
         'size': datafile.file_size,
         'datafile_id': datafile.id,
+    }
+
+
+def download_dir_events(sftp, user, file_list, local_dir, dir_name, timeout_sec):
+    """目录批量下载的 SSE 事件生成器（进度按**总下载字节数**计算）。
+
+    ``file_list`` 由视图层 ``_collect_files`` 预收集：
+    ``(remote_path, rel_path, remote_size, mtime)``（与旧实现同构）。
+
+    Events：
+    - ``{'event': 'progress', 'current', 'total', 'filename', 'rel_path',
+        'percent', 'speed', 'eta', 'bytes_done', 'total_bytes'}``
+      —— percent = 实际累计下载字节 / 远端文件大小总和；**分块到达即更新**
+      （0.1s 节流 + 每文件至少一次补偿事件），大文件下载期间进度条实时前进，
+      不会再卡在低百分比。
+    - ``{'event': 'error', 'filename', 'message'}`` —— 单文件失败：清理半截
+      文件后继续下一个文件（与旧行为一致）。
+    - ``{'event': 'done', 'dir_name', 'file_count', 'total', 'saved_dir'}``
+
+    超时（``DirDownloadTimeout``）是全局性的：中止整个目录下载并清理当前
+    半截文件；客户端断开（GeneratorExit）时同样清理并 invalidate 连接。
+    """
+    total_bytes = sum(size for _, _, size, _ in file_list)
+    total_files = len(file_list)
+    bytes_done = 0
+    success_count = 0
+    start_time = time.time()
+    deadline = start_time + timeout_sec
+    last_event = 0.0
+    current_partial = None
+
+    def progress_event(index, rel_path):
+        elapsed = time.time() - start_time
+        speed = bytes_done / elapsed if elapsed > 0 else 0
+        eta = (total_bytes - bytes_done) / speed if speed > 0 else 0
+        return {
+            'event': 'progress',
+            'current': index + 1,
+            'total': total_files,
+            'filename': os.path.basename(rel_path),
+            'rel_path': rel_path,
+            'percent': _progress_ratio(bytes_done, total_bytes),
+            'speed': round(speed / 1048576, 2),
+            'eta': round(eta),
+            'bytes_done': bytes_done,
+            'total_bytes': total_bytes,
+        }
+
+    try:
+        with channel_timeout(sftp, timeout_sec):
+            for index, (remote_fp, rel_path, _size, _mtime) in enumerate(file_list):
+                rel_path_os = rel_path.replace('/', os.sep)
+                local_file_path = os.path.join(local_dir, rel_path_os)
+                os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
+                current_partial = local_file_path
+                pending = False
+                try:
+                    if time.time() > deadline:
+                        raise DirDownloadTimeout(
+                            f'目录下载超时（超过 {timeout_sec} 秒）')
+                    with open(local_file_path, 'wb') as local:
+                        chunk_iter = iter_remote_chunks(sftp, remote_fp)
+                        while True:
+                            # 先查 deadline 再读（与单文件下载一致）
+                            if time.time() > deadline:
+                                raise DirDownloadTimeout(
+                                    f'目录下载超时（超过 {timeout_sec} 秒）')
+                            try:
+                                chunk = next(chunk_iter)
+                            except StopIteration:
+                                break
+                            local.write(chunk)
+                            bytes_done += len(chunk)
+                            pending = True
+                            now = time.time()
+                            if now - last_event >= PROGRESS_EVENT_INTERVAL:
+                                yield progress_event(index, rel_path)
+                                pending = False
+                                last_event = now
+                    # 文件已完整写入并关闭：此后的 yield（补偿事件）若客户端
+                    # 断开，不应再清理该已完成文件（外层 handler 依赖
+                    # current_partial 判断待清理的半截文件）
+                    current_partial = None
+                    # 小文件整体读完可能不足 0.1s：补偿发最后一个事件，
+                    # 保证「每文件至少一次」更新（文件计数/百分比的最终值）
+                    if pending:
+                        yield progress_event(index, rel_path)
+                    success_count += 1
+                    # 下载即注册（与单文件/旧目录下载同语义）
+                    try:
+                        _register_file(user, local_file_path, 'batch', dir_name)
+                    except Exception as re:
+                        logger.warning(
+                            f"Auto-register failed for {local_file_path}: {re}")
+                except DirDownloadTimeout:
+                    raise
+                except Exception as e:
+                    # 单文件失败：清理半截文件 + 报错，继续下一文件
+                    logger.warning(f"SFTP download failed for {remote_fp}: {e}")
+                    _remove_partial(local_file_path)
+                    yield {
+                        'event': 'error',
+                        'filename': os.path.basename(rel_path),
+                        'message': str(e),
+                    }
+                # 本文件已收尾（成功或单文件错误已处理）：清除残留引用
+                current_partial = None
+    except DirDownloadTimeout as e:
+        if current_partial is not None:
+            _remove_partial(current_partial)
+        pool.invalidate(user.id)
+        yield {'event': 'error', 'filename': '', 'message': str(e)}
+        return
+    except GeneratorExit:
+        # 客户端中途断开：连接状态不可靠，重建连接并清理半截文件
+        if current_partial is not None:
+            _remove_partial(current_partial)
+        pool.invalidate(user.id)
+        raise
+    except Exception:
+        if current_partial is not None:
+            _remove_partial(current_partial)
+        pool.invalidate(user.id)
+        raise
+
+    yield {
+        'event': 'done',
+        'dir_name': dir_name,
+        'file_count': success_count,
+        'total': total_files,
+        'saved_dir': local_dir,
     }
 
 
