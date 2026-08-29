@@ -63,7 +63,7 @@
         </el-table-column>
         <el-table-column prop="cpk_level" label="CPK Level" width="110" align="center" sortable="custom">
           <template #default="{ row }">
-            <span v-if="row.cpk_level" :style="{ color: row.cpk_color, fontWeight: 'bold' }">{{ row.cpk_level }}</span>
+            <CpkBadge v-if="row.cpk_level" :level="row.cpk_level" />
             <span v-else class="cell-na">N/A</span>
           </template>
         </el-table-column>
@@ -103,6 +103,7 @@ import { useRouter } from 'vue-router'
 import { useAnalysisStore } from '../../../stores/analysis'
 import type { TestItemOverview } from '../../../types'
 import OverviewCharts from './OverviewCharts.vue'
+import CpkBadge from '../../../components/common/CpkBadge.vue'
 
 const props = defineProps<{
   items: TestItemOverview[]
@@ -197,8 +198,8 @@ function getCpkTagType(cpk: number): string {
   font-weight: 650;
   color: var(--text);
   padding: 10px 16px;
-  border-bottom: 1px solid #f3f4f6;
-  background: #fafbfc;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-2) 60%, var(--card));
   flex-shrink: 0;
 }
 .panel-table {
@@ -242,8 +243,8 @@ function getCpkTagType(cpk: number): string {
   justify-content: space-between;
   gap: 12px;
   padding: 8px 12px;
-  border-top: 1px solid #f3f4f6;
-  background: #fafbfc;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-2) 60%, var(--card));
 }
 .overview-total {
   font-size: 12px;

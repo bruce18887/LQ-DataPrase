@@ -18,7 +18,7 @@
       @click="$emit('update:modelValue', modelValue === s.stage ? '' : s.stage)"
     >
       <span class="chip-name">{{ s.stage }}</span>
-      <span class="chip-yield" :class="yieldClass(s.yield_pct)">{{ s.yield_pct }}%</span>
+      <YieldBadge :value="s.yield_pct" compact />
       <span class="chip-total">{{ s.total.toLocaleString() }}</span>
     </button>
   </div>
@@ -26,6 +26,7 @@
 
 <script setup lang="ts">
 import type { StageYield } from '../../../../types'
+import YieldBadge from '../../../../components/common/YieldBadge.vue'
 
 defineProps<{
   stages: StageYield[]
@@ -35,13 +36,6 @@ defineProps<{
 defineEmits<{
   'update:modelValue': [value: string]
 }>()
-
-// 与各表格良率 el-tag 阈值一致：≥95 绿 / ≥90 黄 / 其余红
-function yieldClass(pct: number): string {
-  if (pct >= 95) return 'yield-good'
-  if (pct >= 90) return 'yield-warn'
-  return 'yield-bad'
-}
 </script>
 
 <style scoped>
@@ -88,26 +82,9 @@ function yieldClass(pct: number): string {
   font-weight: 600;
 }
 
-.chip-yield {
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
 .chip-total {
   font-size: 12px;
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
-}
-
-.chip-yield.yield-good {
-  color: var(--success);
-}
-
-.chip-yield.yield-warn {
-  color: var(--warn);
-}
-
-.chip-yield.yield-bad {
-  color: var(--error);
 }
 </style>
