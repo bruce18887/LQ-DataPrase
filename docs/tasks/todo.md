@@ -274,4 +274,15 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
 
 - [x] 两张审阅页浏览器实测（双主题/交互/窄视口/控制台 0 报错）；截图存档 test/screenshots_night/dashboard_redesign_*、batch_redesign_*
 - [x] 定稿回写 ui-design-guide.md §11 页面篇（参考顺延 §12，状态行更新）
-- [ ] 落地改造（另行排期）：单文件组件删改 + 批次组件改造 + e2e 同步，分批执行每批全量回归
+- [x] 落地改造（2026-08-30 完成，两批）：
+      - 批 1（e2aba14）单文件 Tab：页头一行 / OverviewStrip 总览条（data-testid=overview-strip，
+        测试开始走 /files/:id/ 详情取 metadata.start_time）/ AlertBanner 单横幅 / Bin Pareto（纯 CSS）/
+        Site 柱线组合（删 gauge）/ Bin×Site 表格-热力图页签（热力格等宽 `数量(行内占比%)`、合计列占总记录%）/
+        测试项总览 11 列 + 双复选框 + CPK 比例条 + Top10 chip / UPH 紧凑明细行；
+        删 KpiCards/DataQualityOverview/QualityAlerts/OverviewCharts 四组件
+      - 批 2（fec0ff9）批次 Tab：页头一行（批次下拉+元信息+加载/导出）/ QA 四色横幅 /
+        阶段汇总卡合并趋势图 / Site 矩阵合并单列 / Bin 卡全套对齐单文件（Pareto+柱线+页签+UPH）/
+        胶囊激活渐变实底；删 BatchSelectorBar；CollapsibleSection 增 header-extra 槽
+      - e2e 同步：dashboard.spec（总览条/柱线/页签/11 列/批次区块断言）、batch-phase.spec、
+        night-visibility（ready 选择器）；build ×4 绿；定向回归全绿（batch 条件 skip 为基线）；
+        双主题截图留档 dash_batch1_*（4 张）/ dash_batch2_*（2 张）
