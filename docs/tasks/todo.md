@@ -109,3 +109,53 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
 - 重复消除：Yield/Fail/CPK/Bin/Site/UPH 各保留"一个主呈现+视角切换"；批次页与单文件页重复三小节删除并改为阶段下钻抽屉；分析页统计卡统一 StatGrid。
 - 信息架构：两看板均为 ContextBar→KPI(6)→主网格(8/4)→明细表→下钻抽屉 五层。
 - 遗留（建议后续）：batch.spec.ts 陈旧用例清理；DataBrowserAgGrid/UserManagement 等页面的浅蓝残留（本轮范围外）；MultiFileChart 正态曲线按 lot 色（有意保留）。
+
+---
+
+# 任务：项目 UI 设计指南（三层 Design Tokens）静态 Demo（2026-08-29）✅
+
+> 设计文档：docs/specs/2026-08-29-design-system-tokens-demo-design.md；用户已确认
+> （展示页 + 仪表板/分析页代表页 · 三层 token · 先只交 demo · light 蓝/night 金）。
+
+## 实施清单
+
+- [x] `docs/plans/design-system-preview.html`（新，单文件自包含，约 1300 行）：
+  Primitive(--p-*) / Semantic(双主题) / Component 三层 token + 色板/排版/间距/组件画廊/图表色板双主题对照 + 仪表板 + 分析页代表页（纯 SVG 静态图表）
+- [x] 浏览器验证：双主题切换 / 3 视图渲染 / 无控制台报错 / 截图留档（6 张）
+- [ ] 用户确认风格后：产出 Markdown 指南 + 可落地 tokens.css（下一轮）
+
+### Review（2026-08-29）
+
+- 交付物：`docs/plans/design-system-preview.html`（零依赖，双击即开）。三层 token：
+  Primitive 6 色族（--p-*，从现有 light/night 配色提炼）→ Semantic（--bg/--text/--brand/--chart-1..8/--spc-* 等，
+  :root[data-theme] + .force-light/.force-night 双选择器）→ Component（表格/徽标/KPI accent 等 color-mix 派生）。
+- 验收：Browser 子代理两轮实测（首轮发现脚本初始化顺序缺陷：applyTheme 早于 semTokens 赋值
+  导致整段脚本中断，修复后复验全绿）：双主题切换实时生效、三视图全部渲染、
+  对话框/抽屉/Toast 交互正常、控制台 0 报错；除 token 定义块外无字面 hex（新增 --on-brand 收敛品牌底上的前景色）。
+- 截图：test/screenshots_night/ds_step*.png（light token 页 / night token 页 / 单文件仪表板 /
+  批次看板 / 分析页直方图 / 序列图）。
+- 后续：用户确认风格 → 出 Markdown 指南 + tokens.css 落地方案（含 variables.css 迁移映射）。
+
+---
+
+# 任务：UI 设计指南 + tokens.css 落地（除组件层）（2026-08-29）✅
+
+> 用户确认 demo 后指示：除组件画廊外其它先给出，组件维持现状。
+
+## 实施清单
+
+- [x] `docs/reference/ui-design-guide.md`（新）：三层架构总览 + Primitive 全清单 +
+  Semantic 双主题对照表（表面/文本/边框/品牌/状态/图表/阴影/chrome）+ 排版/间距/圆角规范 +
+  图表规范（SPC/Bin/ECharts JS 映射 + CVD 复验警告）+ 主题机制 + DO/DON'T +
+  variables.css/EP 迁移映射表；组件层标注暂缓（§10）
+- [x] `frontend/src/styles/design-tokens.css`（新，未 import）：Primitive + Semantic 两层落地版，
+  与 variables.css 并存；接入顺序见指南 §9.2（新代码先行 → 按 app 分批替换 → EP 对齐后删旧）
+
+### Review（2026-08-29）
+
+- 关键风险已在指南中显式标注：现有 echarts-theme.ts seriesColors 是 CVD 色盲验证过的
+  替换色（#d97706/#86198f 等），新 --chart-1..8 正式切换前必须重跑同样验证；验证前
+  ECharts 序列色维持现状，仅轴系/tooltip 对齐。
+- 值差异点已在映射表备注：--text-tertiary #717880→#9ca3af（preview 基准）、
+  --color-warning #b45309→#92400e（与 EP 统一时一并对齐）、--brand-secondary 退场。
+- design-tokens.css 未被任何入口 import，对现有构建零影响。

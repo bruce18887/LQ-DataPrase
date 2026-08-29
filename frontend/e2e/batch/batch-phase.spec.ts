@@ -26,6 +26,22 @@ import { gotoApp } from '../helpers/nav'
  */
 const BATCH_BASE_DIR = path.join(PROJECT_ROOT, 'media', 'data', 'admin', 'batch')
 
+/**
+ * 读取 Bin × Site 交叉表「Total」行的 All Site 总数（fixed-right 克隆列）。
+ * Total 行的 all_site 为原始数字（非 "n (pct%)" 格式化），取该行最后一个数字。
+ */
+async function readBinSiteTotalAll(page: import('@playwright/test').Page): Promise<number> {
+  const fixedCols = page.locator('.bin-site-cross .el-table__fixed-right tbody tr').last()
+  const row = (await fixedCols.count()) > 0
+    ? fixedCols
+    : page.locator('.bin-site-cross .el-table tbody tr').last()
+  await expect(row).toBeVisible()
+  const text = (await row.textContent()) || ''
+  const nums = text.match(/\d+/g) || []
+  expect(nums.length).toBeGreaterThan(0)
+  return Number(nums[nums.length - 1])
+}
+
 test.describe('批次阶段解析 UI（胶囊过滤/树形汇总/回退）', { tag: ['@p2', '@batch'] }, () => {
   test('@p2 阶段胶囊过滤 + 树形汇总 + 短文件名回退', async ({ page }) => {
     const ts = Date.now()
@@ -149,12 +165,66 @@ test.describe('批次阶段解析 UI（胶囊过滤/树形汇总/回退）', { t
       await expect(summaryTable.getByText('FT', { exact: true }).first()).not.toBeVisible()
       await expect(page.locator('.stage-chip.is-active').filter({ hasText: 'UIS' })).toHaveCount(1)
 
+      // ── 7.5 总览条（阶段汇总卡内紧凑 KPI）：随阶段过滤联动 ──
+      const summaryCard = page.locator('.el-card').filter({ hasText: '📋 阶段汇总' }).first()
+      const strip = summaryCard.locator('.summary-strip')
+      await expect(strip).toBeVisible()
+      // 阶段过滤态：标签切换为「良率」，值 = UIS 阶段良率（与胶囊 91.13% 一致）
+      await expect(strip).toContainText('良率')
+      await expect(strip).toContainText('91.13')
+      // 4 个关键指标齐全：投入/Pass/Fail/良率
+      await expect(strip.locator('.strip-item')).toHaveCount(4)
+
+      // ── 7.6 QA 数量校验条：本批次无 QA 文件 → 紧凑条不渲染（v-if 门控）──
+      await expect(page.locator('.qa-bar')).toHaveCount(0)
+
+      // ── 7.7 Bin 分布卡：Site 良率 GAP pills / Bin×Site / UPH 均按「所选单阶段」显示 ──
+      const binHeader = page.locator('.el-card__header', { hasText: '📋 Bin 分布' }).first()
+      const binToggle = binHeader.locator('button')
+      if ((await binToggle.textContent())?.includes('展开')) {
+        await binToggle.click()
+      }
+      // 阶段过滤为 UIS（1 个文件，选择器必选 UIS1.0）：记录 Bin×Site 单文件 Total
+      const uisTotal = await readBinSiteTotalAll(page)
+      // compact 后 GAP 以 3 个 pills 展示（最高/最低/差异）
+      // 注意：单文件 pane 也有 .uph-card（v-show 隐藏），必须限定 .batch-yield-tab 作用域
+      const batchRoot = page.locator('.batch-yield-tab')
+      await expect(batchRoot.locator('.yield-pill')).toHaveCount(3)
+      await expect(batchRoot.locator('.yield-pill').first()).toContainText('%')
+      // UPH 卡片（当前所选单阶段口径）
+      await expect(batchRoot.locator('.uph-card').first()).toBeVisible()
+      // 分区标题带当前所选阶段标识
+      await expect(
+        batchRoot.locator('.bin-card-section-title').filter({ hasText: 'Bin × Site' }).first(),
+      ).toContainText('UIS1.0')
+
       // ── 8) 再次点击 UIS 胶囊取消过滤 → 恢复全部 ──
       await page.locator('.stage-chip').filter({ hasText: 'UIS' }).first().click()
       await expect(phaseRows).toHaveCount(4)
       await expect(
         phaseTable.locator('td.el-table-fixed-column--left').filter({ hasText: hwShortName }),
       ).toBeVisible()
+      // 单阶段口径：UIS1.0 仍在可选列表中 → 选择器保持所选，Bin×Site 仍是该单文件合计
+      const allTotal = await readBinSiteTotalAll(page)
+      expect(allTotal, 'Bin×Site 为单阶段口径：恢复全部后仍显示 UIS1.0 单文件合计').toBe(uisTotal)
+
+      // 切换阶段选择器到另一单阶段（CP1）：分区标题随之更新，Bin×Site 按 CP1 单文件重绘
+      const phaseSelect = page.locator('.bin-selector .el-select')
+      await phaseSelect.click()
+      await page
+        .locator('.el-select-dropdown:visible').last()
+        .locator('.el-select-dropdown__item')
+        .filter({ hasText: 'CP1' })
+        .first()
+        .click()
+      await expect(
+        batchRoot.locator('.bin-card-section-title').filter({ hasText: 'Bin × Site' }).first(),
+      ).toContainText('CP1')
+      const cpTotal = await readBinSiteTotalAll(page)
+      // 4 个文件是同一份样例的复制 → 任意单阶段合计都等于 UIS 单文件合计
+      expect(cpTotal, '切换到 CP1 后 Bin×Site 仍为单文件口径（4 文件为同一份样例复制）').toBe(uisTotal)
+      // 总览条回到批次整体值
+      await expect(strip).toContainText('整体良率')
 
       console.log(`[batch-phase] ${batchName} 胶囊过滤/树形汇总/回退断言通过`)
     } finally {

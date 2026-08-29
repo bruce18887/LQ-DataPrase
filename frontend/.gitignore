@@ -1,6 +1,6 @@
 # Frontend 专属规则
 # 通用规则（node_modules、dist、.vscode、.DS_Store 等）见根目录 .gitignore
-
+./qoder
 # Vite 缓存
 .vite/
 
