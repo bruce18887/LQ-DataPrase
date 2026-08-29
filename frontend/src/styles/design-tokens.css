@@ -4,8 +4,7 @@
  * 架构：① Primitive（--p-*，主题无关）→ ② Semantic（双主题唯一取色入口）
  * 组件层 token 暂缓（见 docs/reference/ui-design-guide.md §10），组件直接用语义层。
  *
- * 状态：与 variables.css 并存（新代码用本文件；迁移映射见指南 §9）。
- *       本文件尚未在 main.ts 引入；接入前请先阅读指南迁移顺序（§9.2）。
+ * 状态：已接入（main.ts，层叠在 variables.css 之后）；旧变量迁移映射见指南 §9。
  * 依据：docs/reference/ui-design-guide.md · docs/plans/design-system-preview.html
  */
 
@@ -136,4 +135,39 @@
   /* chrome */
   --sidebar-bg: var(--p-slate-950); --topbar-bg: rgba(19, 19, 39, 0.92);
   --row-stripe: rgba(255, 255, 255, 0.025);
+}
+
+/* ============ 兼容层 · 旧非颜色变量（自 variables.css 搬入，保名；渐进替换为 --p-* 属低优先） ============ */
+:root {
+  /* 字体大小（rem 档位；新代码请用 --p-fs-*） */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+  --text-4xl: 2.25rem;
+  /* 字体粗细（新代码请用 --p-fw-*） */
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+  /* 行高 */
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.75;
+  /* 间距（rem 档位；新代码请用 --p-space-*） */
+  --spacing-0: 0;
+  --spacing-1: 0.25rem;
+  --spacing-2: 0.5rem;
+  --spacing-3: 0.75rem;
+  --spacing-4: 1rem;
+  --spacing-5: 1.25rem;
+  --spacing-6: 1.5rem;
+  --spacing-8: 2rem;
+  --spacing-10: 2.5rem;
+  --spacing-12: 3rem;
+  --spacing-16: 4rem;
+  --spacing-20: 5rem;
 }
