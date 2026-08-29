@@ -8,12 +8,12 @@
 import { computed } from 'vue'
 
 /**
- * Loading 加载动画组件
+ * Loading 加载动画组件（指南 §10.8：简洁品牌色环，旧霓虹脉冲已移除）
  *
  * @example
  * <Loading />
- * <Loading size="60px" color="#58a6ff" />
- * <Loading size="40px" color="#3fb950" />
+ * <Loading size="60px" />
+ * <Loading size="40px" color="var(--success)" />
  */
 
 interface Props {
@@ -42,22 +42,15 @@ const spinnerStyle = computed(() => ({
 .dp-loading__spinner {
   width: 100%;
   height: 100%;
-  position: relative;
   border: 3px solid color-mix(in srgb, var(--brand) 15%, transparent);
   border-top-color: var(--brand);
   border-right-color: var(--brand);
   border-radius: 50%;
   animation: dp-spin 0.8s linear infinite;
-  box-shadow:
-    0 0 15px color-mix(in srgb, var(--brand) 25%, transparent),
-    inset 0 0 15px color-mix(in srgb, var(--brand) 10%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .dp-loading__spinner {
-    animation: none;
-  }
-  .dp-loading__spinner::before {
     animation: none;
   }
 }
@@ -68,27 +61,6 @@ const spinnerStyle = computed(() => ({
   }
   100% {
     transform: rotate(360deg);
-  }
-}
-
-/* 霓虹脉冲效果 */
-.dp-loading__spinner::before {
-  content: '';
-  position: absolute;
-  inset: -3px;
-  border-radius: 50%;
-  opacity: 0;
-  animation: dp-pulse 1.5s ease-out infinite;
-}
-
-@keyframes dp-pulse {
-  0% {
-    opacity: 0.8;
-    transform: scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: scale(1.3);
   }
 }
 </style>

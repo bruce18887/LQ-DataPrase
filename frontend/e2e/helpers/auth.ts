@@ -5,7 +5,7 @@ import { ACCOUNTS, type Role } from '../fixtures/test-data'
  * 通过登录页 UI 完成登录。
  *
  * 选择器依据 LoginPage.vue 实测：输入框无 label，用 placeholder；
- * 登录按钮文本为「登 录」（中间含空格），用 .neon-button 更稳。
+ * 登录按钮文本为「登 录」（中间含空格），用 .login-button 更稳。
  */
 export async function uiLogin(page: Page, username: string, password: string) {
   await page.goto('/login')
@@ -14,7 +14,7 @@ export async function uiLogin(page: Page, username: string, password: string) {
   await expect(user).toBeVisible()
   await user.fill(username)
   await pass.fill(password)
-  await page.locator('button.neon-button').click()
+  await page.locator('button.login-button').click()
 }
 
 /**

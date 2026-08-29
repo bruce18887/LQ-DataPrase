@@ -80,7 +80,7 @@ function buildBinBarOption() {
   const bins = chartRows.map(r => r.bin)
   const sites = props.binSiteColumns
 
-  const sitePalette = ['#11998e', '#f5576c', '#f9a825', '#4facfe', '#a8edea', '#ff6b6b', '#74b9ff', '#fd79a8']
+  const sitePalette = ['var(--success)', 'var(--error-2)', 'var(--warn-2)', 'var(--info-2)', '#a8edea', '#ff6b6b', '#74b9ff', '#fd79a8']
 
   const series = sites.map((site, idx) => ({
     name: `Site ${site}`,

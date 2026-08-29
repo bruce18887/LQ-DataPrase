@@ -312,7 +312,7 @@ const defaultColDef = {
         if (isDark.value) {
           return { backgroundColor: '#b91c1c', color: '#fecaca', fontWeight: 'bold' }
         }
-        return { backgroundColor: '#dc2626', color: '#ffffff', fontWeight: 'bold' }
+        return { backgroundColor: 'var(--error-2)', color: '#ffffff', fontWeight: 'bold' }
       }
     }
     return null
@@ -621,28 +621,5 @@ function resolveExportName(headers: Record<string, string>, fallback: string, su
 :deep(.ag-custom-theme.ag-theme-quartz .ag-header-cell-sorted-asc .ag-header-cell-label,
       .ag-custom-theme.ag-theme-quartz .ag-header-cell-sorted-desc .ag-header-cell-label) {
   color: var(--text);
-}
-</style>
-
-<!-- ================================================================
-     AG Grid Dark Theme — relies on ag-theme-quartz-dark built-in
-     palette with minimal custom overrides for brand alignment.
-     Using ag-theme-quartz-dark class toggle (not CSS var storm)
-     avoids expensive :root.theme-night re-evaluation on every cell.
-     ================================================================ -->
-<style>
-/* Pin column shadow: stronger in dark */
-:root.theme-night .ag-custom-theme.ag-theme-quartz .ag-pinned-left-cols-container {
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.4) !important;
-}
-
-/* Brand-accent selection row */
-:root.theme-night .ag-custom-theme.ag-theme-quartz .ag-row-selected {
-  background-color: rgba(79, 172, 254, 0.18) !important;
-}
-
-/* flashCells 定位反馈色（dark：琥珀黄，与暗色系对比明显） */
-:root.theme-night .ag-custom-theme.ag-theme-quartz {
-  --ag-value-change-value-highlight-background-color: rgba(253, 216, 53, 0.4);
 }
 </style>

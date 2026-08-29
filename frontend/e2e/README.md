@@ -141,7 +141,7 @@ python manage.py seed_test_data --clear
   这类用例须在文件顶部 `test.use({ storageState: { cookies: [], origins: [] } })` 清空登录态，再用 `loginAs(page, role)` **实时 UI 登录**（同会话内不要刷新页面，否则角色丢失）。
 
 ### 已验证选择器（实测）
-- 登录：输入 `getByPlaceholder('用户名'|'密码')`；按钮 `button.neon-button`（文本是「登 录」含空格）。
+- 登录：输入 `getByPlaceholder('用户名'|'密码')`；按钮 `button.login-button`（文本是「登 录」含空格）。
 - 主布局容器：`.main-layout`；侧边栏：`aside.sidebar`；侧边栏菜单项：`sidebarLink(page, '菜单名')`，激活态含 class `active`。
   - 菜单名（exact）：仪表板 / 数据管理 / 数据分析 / 批次报表 / SFTP浏览器 / 系统设置 / 功能路线图 / 用户管理。
   - ⚠️ Topbar 面包屑里有同名 link，断言菜单务必限定 `aside.sidebar`。

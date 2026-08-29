@@ -173,10 +173,10 @@ function getCpkTagType(cpk: number): string {
   gap: 8px;
   font-size: 17px;
   font-weight: 700;
-  color: #1f2937;
+  color: var(--text);
   margin: 24px 0 12px 0;
   padding-left: 10px;
-  border-left: 3px solid #2563eb;
+  border-left: 3px solid var(--brand);
   line-height: 1;
 }
 
@@ -184,10 +184,10 @@ function getCpkTagType(cpk: number): string {
    Panel Card（复用类名，夜间主题由 DashboardPage 全局覆盖）
    ================================================================ */
 .panel-card {
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 10px;
-  box-shadow: 0 1px 3px rgba(0,0,0,.04);
+  box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -195,7 +195,7 @@ function getCpkTagType(cpk: number): string {
 .panel-head {
   font-size: 14px;
   font-weight: 650;
-  color: #374151;
+  color: var(--text);
   padding: 10px 16px;
   border-bottom: 1px solid #f3f4f6;
   background: #fafbfc;
@@ -216,24 +216,24 @@ function getCpkTagType(cpk: number): string {
   cursor: pointer;
 }
 .cell-param {
-  color: #2563eb;
+  color: var(--brand);
   font-weight: 600;
 }
 .cell-param:hover {
   text-decoration: underline;
 }
 .cell-fail {
-  color: #dc2626;
+  color: var(--error-2);
   font-weight: 700;
 }
 .cell-inactive {
-  color: #9ca3af;
+  color: var(--text-3);
 }
 .cell-na {
-  color: #9ca3af;
+  color: var(--text-3);
 }
 .cell-unit {
-  color: #9ca3af;
+  color: var(--text-3);
   font-size: 11px;
 }
 .overview-footer {
@@ -247,6 +247,6 @@ function getCpkTagType(cpk: number): string {
 }
 .overview-total {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--text-2);
 }
 </style>

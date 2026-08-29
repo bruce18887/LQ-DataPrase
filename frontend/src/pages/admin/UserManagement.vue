@@ -260,54 +260,42 @@ onMounted(loadUsers)
 }
 
 .kpi-card {
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 20px;
-  color: var(--text-inverse);
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
   display: flex;
   align-items: center;
   gap: 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06);
-  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.25s ease, border-color 0.25s ease;
 }
 
 .kpi-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.08);
-  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
 }
 
+/* 语义色柔和底（指南 §10.1 V1 语言），双主题自动适配，无页面级覆盖 */
 .kpi-card--blue {
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  background: color-mix(in srgb, var(--brand) 10%, var(--card));
 }
+.kpi-card--blue .kpi-card__icon { color: var(--brand); }
 
 .kpi-card--green {
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  background: color-mix(in srgb, var(--success) 10%, var(--card));
 }
+.kpi-card--green .kpi-card__icon { color: var(--success); }
 
 .kpi-card--orange {
-  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  background: color-mix(in srgb, var(--warn) 10%, var(--card));
 }
+.kpi-card--orange .kpi-card__icon { color: var(--warn); }
 
 .kpi-card--purple {
-  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  background: color-mix(in srgb, var(--info) 10%, var(--card));
 }
-
-/* Night theme KPI card overrides */
-:root.theme-night .kpi-card {
-  color: var(--text);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
-}
-:root.theme-night .kpi-card--blue {
-  background: linear-gradient(135deg, #1e3a5f 0%, #162d4a 100%);
-}
-:root.theme-night .kpi-card--green {
-  background: linear-gradient(135deg, #0d4733 0%, #0a3325 100%);
-}
-:root.theme-night .kpi-card--orange {
-  background: linear-gradient(135deg, #5c3d0e 0%, #4a2e08 100%);
-}
-:root.theme-night .kpi-card--purple {
-  background: linear-gradient(135deg, #3d2370 0%, #2d1a5e 100%);
-}
+.kpi-card--purple .kpi-card__icon { color: var(--info); }
 
 .kpi-card__icon {
   font-size: 36px;
@@ -315,14 +303,16 @@ onMounted(loadUsers)
 }
 
 .kpi-card__label {
-  font-size: 14px;
-  opacity: 0.9;
+  font-size: 13px;
+  color: var(--text-2);
   margin-bottom: 4px;
 }
 
 .kpi-card__value {
-  font-size: 32px;
-  font-weight: 700;
+  font-size: 22px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
 }
 
 .table-card {

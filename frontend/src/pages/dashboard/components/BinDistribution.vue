@@ -21,7 +21,7 @@
               <el-progress
                 :percentage="Math.max(Number(row.pct), MIN_BAR_HEIGHT_PCT)"
                 :format="() => `${formatPercent(Number(row.pct))}%`"
-                :color="row.name.includes('1') ? '#059669' : '#dc2626'"
+                :color="row.name.includes('1') ? 'var(--success)' : 'var(--error-2)'"
                 :stroke-width="12"
               />
             </template>
@@ -65,7 +65,7 @@ function _tc() {
 function buildBinOption() {
   // CVD 色盲安全 10 色（组合搜索验证 protan/deutan ΔE≥15；原板存在 绿/粉、
   // 蓝/紫、琥珀/橙、绿/绿 等不可分对；b1 保持 pass 绿语义）
-  const allBinColors = ['#059669', '#dc2626', '#d97706', '#2563eb', '#1F3864', '#475569', '#0284c7', '#56B4E9', '#0d9488', '#F0E442']
+  const allBinColors = ['var(--success)', 'var(--error-2)', 'var(--warn-2)', 'var(--brand)', '#1F3864', '#475569', '#0284c7', '#56B4E9', '#0d9488', '#F0E442']
 
   return {
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },

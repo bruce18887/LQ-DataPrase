@@ -264,7 +264,7 @@ onActivated(async () => {
 /* ----- Root & Containers ----- */
 .dashboard-page {
   padding: 28px 32px;
-  background: linear-gradient(165deg, #f8f9fb 0%, #edeff2 100%);
+  background: linear-gradient(165deg, var(--bg) 0%, var(--bg-2) 100%);
   min-height: 100%;
 }
 
@@ -291,7 +291,7 @@ onActivated(async () => {
   text-align: center;
   margin-bottom: 24px;
   padding-bottom: 20px;
-  border-bottom: 1px solid #e0e3e7;
+  border-bottom: 1px solid var(--border);
 }
 .dash-title {
   display: flex;
@@ -301,12 +301,12 @@ onActivated(async () => {
   margin: 0 0 6px 0;
   font-size: 26px;
   font-weight: 750;
-  color: #1a1f2e;
+  color: var(--text);
   letter-spacing: -0.3px;
 }
 .dash-title-icon { font-size: 30px; }
 .dash-title-text {
-  background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 60%);
+  background: linear-gradient(135deg, var(--brand-2) 0%, var(--brand) 60%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -314,13 +314,13 @@ onActivated(async () => {
 .dash-subtitle {
   margin: 0;
   font-size: 13px;
-  color: #6b7280;
+  color: var(--text-2);
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
 }
-.dash-subtitle-sep { color: #d1d5db; }
+.dash-subtitle-sep { color: var(--border-2); }
 
 /* ----- Toolbar (file selector) ----- */
 .dash-toolbar {
@@ -337,10 +337,10 @@ onActivated(async () => {
   gap: 8px;
   font-size: 17px;
   font-weight: 700;
-  color: #1f2937;
+  color: var(--text);
   margin: 24px 0 12px 0;
   padding-left: 10px;
-  border-left: 3px solid #2563eb;
+  border-left: 3px solid var(--brand);
   line-height: 1;
 }
 
@@ -353,165 +353,5 @@ onActivated(async () => {
 @keyframes kpi-pulse {
   0%, 100% { transform: scale(1); opacity: 1; }
   50%      { transform: scale(1.08); opacity: .85; }
-}
-</style>
-
-<!-- ================================================================
-     Night Theme (data-theme="night") — Midnight Studio
-     Global (non-scoped) selectors to override light theme.
-     Follows NIGHT_THEME_STYLE_GUIDE.md colour system.
-     ================================================================ -->
-<style>
-:root.theme-night .dashboard-page {
-  background: linear-gradient(165deg, #1a1a2e 0%, #16213e 100%);
-}
-
-/* ----- Header ----- */
-:root.theme-night .dash-header {
-  border-bottom-color: rgba(255,255,255,0.1);
-}
-:root.theme-night .dash-title {
-  color: #ffffff;
-}
-:root.theme-night .dash-title-text {
-  background: linear-gradient(135deg, #f9a825 0%, #ffd54f 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-:root.theme-night .dash-subtitle {
-  color: rgba(255,255,255,0.6);
-}
-:root.theme-night .dash-subtitle b {
-  color: rgba(255,255,255,0.9);
-}
-:root.theme-night .dash-subtitle-sep {
-  color: rgba(255,255,255,0.15);
-}
-
-/* ----- KPI Cards (scoped inside KpiCards.vue, but needs global override for night) ----- */
-:root.theme-night .kpi-card {
-  background: rgba(255,255,255,0.06);
-  border-color: rgba(255,255,255,0.1);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-}
-:root.theme-night .kpi-card:hover {
-  background: rgba(255,255,255,0.1);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-}
-:root.theme-night .kpi-card--blue  { --kpi-accent: #4facfe; }
-:root.theme-night .kpi-card--green { --kpi-accent: #11998e; }
-:root.theme-night .kpi-card--amber { --kpi-accent: #f9a825; }
-:root.theme-night .kpi-card--slate { --kpi-accent: rgba(255,255,255,0.4); }
-:root.theme-night .kpi-card--blue::before  { background: linear-gradient(90deg, #4facfe, #00f2fe); }
-:root.theme-night .kpi-card--green::before { background: linear-gradient(90deg, #11998e, #38ef7d); }
-:root.theme-night .kpi-card--amber::before { background: linear-gradient(90deg, #c17900, #f9a825); }
-:root.theme-night .kpi-card--slate::before { background: linear-gradient(90deg, rgba(255,255,255,0.2), rgba(255,255,255,0.4)); }
-:root.theme-night .kpi-label {
-  color: rgba(255,255,255,0.6);
-}
-:root.theme-night .kpi-value {
-  color: #ffffff;
-}
-:root.theme-night .kpi-unit {
-  color: rgba(255,255,255,0.6);
-}
-:root.theme-night .kpi-sub {
-  color: rgba(255,255,255,0.4);
-}
-
-/* ----- Section Title (gold accent per night theme) ----- */
-:root.theme-night .sec-title {
-  color: rgba(255,255,255,0.9);
-  border-left-color: #c17900;
-}
-
-/* ----- Panel Row & Card ----- */
-:root.theme-night .panel-card {
-  background: rgba(255,255,255,0.05);
-  border-color: rgba(255,255,255,0.1);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-}
-:root.theme-night .panel-head {
-  background: rgba(255,255,255,0.03);
-  color: rgba(255,255,255,0.85);
-  border-bottom-color: rgba(255,255,255,0.06);
-}
-
-/* ----- Summary Cards ----- */
-:root.theme-night .summary-card {
-  background: rgba(255,255,255,0.05);
-  border-color: rgba(255,255,255,0.1);
-}
-:root.theme-night .summary-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-}
-:root.theme-night .summary-card p {
-  color: rgba(255,255,255,0.7);
-}
-:root.theme-night .summary-card p b {
-  color: rgba(255,255,255,0.9);
-}
-:root.theme-night .summary-card--blue  { border-left-color: #4facfe; }
-:root.theme-night .summary-card--blue  h4 { color: #4facfe; }
-:root.theme-night .summary-card--red   { border-left-color: #f5576c; }
-:root.theme-night .summary-card--red   h4 { color: #f5576c; }
-:root.theme-night .summary-card--green { border-left-color: #38ef7d; }
-:root.theme-night .summary-card--green h4 { color: #38ef7d; }
-
-/* ----- Fail Total ----- */
-:root.theme-night .fail-total {
-  background: rgba(245,87,108,0.1);
-  border-top-color: rgba(245,87,108,0.2);
-}
-
-/* ----- Yield Stats ----- */
-:root.theme-night .yield-stat-label {
-  color: rgba(255,255,255,0.6);
-}
-:root.theme-night .yield-stat-value {
-  color: #ffffff;
-}
-
-/* ----- Table Cell Helpers ----- */
-:root.theme-night .cell-active {
-  color: rgba(255,255,255,0.9);
-}
-:root.theme-night .cell-inactive {
-  color: rgba(255,255,255,0.3);
-}
-:root.theme-night .cell-count {
-  color: rgba(255,255,255,0.8);
-}
-:root.theme-night .cell-unit {
-  color: rgba(255,255,255,0.4);
-}
-:root.theme-night .cell-spec {
-  color: rgba(255,255,255,0.8);
-}
-:root.theme-night .cell-na {
-  color: rgba(255,255,255,0.4);
-}
-:root.theme-night .cell-fail {
-  color: #f5576c;
-}
-:root.theme-night .overview-total {
-  color: rgba(255,255,255,0.5);
-}
-
-/* ----- Footer ----- */
-:root.theme-night .dash-footer-note {
-  color: rgba(255,255,255,0.3);
-}
-
-/* ----- Pulse animation — gold tint for night ----- */
-@media (prefers-reduced-motion: no-preference) {
-  :root.theme-night .dash-title-icon {
-    animation-name: kpi-pulse-night;
-  }
-}
-@keyframes kpi-pulse-night {
-  0%, 100% { transform: scale(1); opacity: 1; text-shadow: 0 0 6px rgba(249,168,37,0.3); }
-  50%      { transform: scale(1.08); opacity: .85; text-shadow: 0 0 14px rgba(249,168,37,0.5); }
 }
 </style>

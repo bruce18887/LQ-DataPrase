@@ -1,8 +1,7 @@
 <template>
   <div class="dp-empty">
-    <div class="dp-empty__icon">
+    <div class="dp-empty__icon" aria-hidden="true">
       <svg
-        aria-hidden="true"
         xmlns="http://www.w3.org/2000/svg"
         viewBox="0 0 24 24"
         fill="none"
@@ -27,12 +26,12 @@
 
 <script setup lang="ts">
 /**
- * Empty 空状态组件
+ * Empty 空状态组件（指南 §10.8：图标 34 半透明 + 说明 13/600 + 主动作插槽）
  *
  * @example
  * <Empty description="暂无数据" />
  * <Empty description="没有找到相关内容">
- *   <Button variant="primary">刷新</Button>
+ *   <Button variant="primary" size="small">刷新</Button>
  * </Empty>
  */
 
@@ -51,57 +50,32 @@ withDefaults(defineProps<Props>(), {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 60px 20px;
+  padding: 48px 20px;
   color: var(--text-2);
 }
 
 .dp-empty__icon {
-  width: 80px;
-  height: 80px;
-  margin-bottom: 20px;
+  width: 34px;
+  height: 34px;
+  margin-bottom: 12px;
   color: var(--text-3);
-  opacity: 0.6;
+  opacity: 0.5;
 }
 
 .dp-empty__icon svg {
   width: 100%;
   height: 100%;
-  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--brand) 15%, transparent));
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .dp-empty__icon {
-    animation: dp-float 3s ease-in-out infinite;
-  }
 }
 
 .dp-empty__text {
-  font-size: 16px;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--text-2);
-  margin-bottom: 16px;
+  margin-bottom: 12px;
   text-align: center;
 }
 
 .dp-empty__extra {
-  margin-top: 8px;
-}
-
-@keyframes dp-float {
-  0%, 100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-10px);
-  }
-}
-
-/* 悬停效果 */
-.dp-empty:hover .dp-empty__icon {
-  color: var(--brand);
-  opacity: 0.8;
-}
-
-.dp-empty:hover .dp-empty__icon svg {
-  filter: drop-shadow(0 0 12px color-mix(in srgb, var(--brand) 30%, transparent));
+  margin-top: 4px;
 }
 </style>

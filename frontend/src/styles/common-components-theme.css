@@ -10,9 +10,7 @@
    ======================================== */
 
 :root[data-theme="night"] .toolbar,
-:root[data-theme="night"] [class*="toolbar"],
-:root.theme-night .toolbar,
-:root.theme-night [class*="toolbar"] {
+:root[data-theme="night"] [class*="toolbar"] {
   background-color: var(--bg-2) !important;
   border-color: var(--border-2) !important;
   color: var(--text) !important;
@@ -23,9 +21,7 @@
    ======================================== */
 
 :root[data-theme="night"] .panel,
-:root[data-theme="night"] [class*="panel"],
-:root.theme-night .panel,
-:root.theme-night [class*="panel"] {
+:root[data-theme="night"] [class*="panel"] {
   background-color: var(--bg-2) !important;
   border-color: var(--border-2) !important;
 }
@@ -34,8 +30,7 @@
    容器 (Container)
    ======================================== */
 
-:root[data-theme="night"] .container,
-:root.theme-night .container {
+:root[data-theme="night"] .container {
   background-color: var(--bg) !important;
 }
 
@@ -44,9 +39,7 @@
    ======================================== */
 
 :root[data-theme="night"] .chart-container,
-:root[data-theme="night"] [class*="chart"],
-:root.theme-night .chart-container,
-:root.theme-night [class*="chart"] {
+:root[data-theme="night"] [class*="chart"] {
   background-color: transparent !important;
 }
 
