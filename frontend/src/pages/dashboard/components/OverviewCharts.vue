@@ -62,11 +62,11 @@ function buildCpkDistOption() {
   }
 
   const getColorByLevel = (levelName: string) => {
-    if (levelName.startsWith('A级')) return '#059669'  // 绿色 - 优秀
-    if (levelName.startsWith('B级')) return '#d97706'  // 橙色 - 良好
-    if (levelName.startsWith('C级')) return '#dc2626'  // 红色 - 一般
-    if (levelName.startsWith('D级')) return '#9ca3af'  // 灰色 - 不足
-    return '#d1d5db'
+    if (levelName.startsWith('A级')) return 'var(--success)'  // 绿色 - 优秀
+    if (levelName.startsWith('B级')) return 'var(--warn-2)'  // 橙色 - 良好
+    if (levelName.startsWith('C级')) return 'var(--error-2)'  // 红色 - 一般
+    if (levelName.startsWith('D级')) return 'var(--text-3)'  // 灰色 - 不足
+    return 'var(--border-2)'
   }
 
   return {
@@ -119,7 +119,7 @@ function buildFailBarOption() {
         color: {
           type: 'linear',
           x: 0, y: 0, x2: 1, y2: 0,
-          colorStops: [{ offset: 0, color: '#f87171' }, { offset: 1, color: '#dc2626' }],
+          colorStops: [{ offset: 0, color: '#f87171' }, { offset: 1, color: 'var(--error-2)' }],
         },
       },
       label: { show: true, position: 'right', fontSize: 10 },
@@ -191,10 +191,10 @@ defineExpose({ handleResize })
    Panel Card
    ================================================================ */
 .panel-card {
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 10px;
-  box-shadow: 0 1px 3px rgba(0,0,0,.04);
+  box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -202,7 +202,7 @@ defineExpose({ handleResize })
 .panel-head {
   font-size: 14px;
   font-weight: 650;
-  color: #374151;
+  color: var(--text);
   padding: 10px 16px;
   border-bottom: 1px solid #f3f4f6;
   background: #fafbfc;

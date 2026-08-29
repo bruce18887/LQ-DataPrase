@@ -1,80 +1,73 @@
 <template>
-  <span :class="['dp-badge', `dp-badge--${type}`]">
+  <span :class="['dp-badge', `dp-badge--${type}`, { 'dp-badge--lg': size === 'lg' }]">
     {{ value }}
   </span>
 </template>
 
 <script setup lang="ts">
 /**
- * Badge 徽章组件
+ * Badge 徽章组件（指南 §10.1 主变体 V1 柔和底）
+ *
+ * 彩底 color-mix(语义色 13%) + 同色文字，无边框、无发光、无 hover 放大；
+ * 11.5px/700，圆角 6，tabular-nums；大号 12.5px（顶部条/关键位）
  *
  * @example
  * <Badge value="成功" type="success" />
- * <Badge value="警告" type="warning" />
- * <Badge value="错误" type="error" />
- * <Badge value="信息" type="info" />
+ * <Badge value="98.2%" type="warning" size="lg" />
+ * <Badge value="中性" type="neutral" />
  */
 
 interface Props {
   value: string | number
-  type?: 'success' | 'warning' | 'error' | 'info'
+  type?: 'success' | 'warning' | 'error' | 'info' | 'neutral'
+  size?: 'sm' | 'lg'
 }
 
 withDefaults(defineProps<Props>(), {
-  type: 'info'
+  type: 'info',
+  size: 'sm'
 })
 </script>
 
 <style scoped>
 .dp-badge {
   display: inline-block;
-  padding: 4px 12px;
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
   line-height: 1.5;
-  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.dp-badge--lg {
+  font-size: 12.5px;
+  padding: 3px 10px;
 }
 
 .dp-badge--success {
-  background: color-mix(in srgb, var(--success) 10%, transparent);
+  background: color-mix(in srgb, var(--success) 13%, transparent);
   color: var(--success);
-  border: 1px solid var(--success);
-  box-shadow:
-    0 0 8px color-mix(in srgb, var(--success) 20%, transparent),
-    inset 0 0 8px color-mix(in srgb, var(--success) 5%, transparent);
 }
 
 .dp-badge--warning {
-  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  background: color-mix(in srgb, var(--warn) 13%, transparent);
   color: var(--warn);
-  border: 1px solid var(--warn);
-  box-shadow:
-    0 0 8px color-mix(in srgb, var(--warn) 20%, transparent),
-    inset 0 0 8px color-mix(in srgb, var(--warn) 5%, transparent);
 }
 
 .dp-badge--error {
-  background: color-mix(in srgb, var(--error) 10%, transparent);
+  background: color-mix(in srgb, var(--error) 13%, transparent);
   color: var(--error);
-  border: 1px solid var(--error);
-  box-shadow:
-    0 0 8px color-mix(in srgb, var(--error) 20%, transparent),
-    inset 0 0 8px color-mix(in srgb, var(--error) 5%, transparent);
 }
 
 .dp-badge--info {
-  background: color-mix(in srgb, var(--info) 10%, transparent);
+  background: color-mix(in srgb, var(--info) 13%, transparent);
   color: var(--info);
-  border: 1px solid var(--info);
-  box-shadow:
-    0 0 8px color-mix(in srgb, var(--info) 20%, transparent),
-    inset 0 0 8px color-mix(in srgb, var(--info) 5%, transparent);
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .dp-badge:hover {
-    transform: scale(1.05);
-  }
+.dp-badge--neutral {
+  background: color-mix(in srgb, var(--text-2) 12%, transparent);
+  color: var(--text-2);
 }
 </style>

@@ -52,10 +52,10 @@ defineProps<{
   gap: 8px;
   font-size: 17px;
   font-weight: 700;
-  color: #1f2937;
+  color: var(--text);
   margin: 24px 0 12px 0;
   padding-left: 10px;
-  border-left: 3px solid #2563eb;
+  border-left: 3px solid var(--brand);
   line-height: 1;
 }
 
@@ -71,11 +71,11 @@ defineProps<{
 @media (max-width: 768px) { .summary-row { grid-template-columns: 1fr; } }
 
 .summary-card {
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 18px 20px;
-  border-left: 3px solid #2563eb;
+  border-left: 3px solid var(--brand);
   transition: transform .2s ease, box-shadow .2s ease;
 }
 .summary-card:hover {
@@ -90,15 +90,15 @@ defineProps<{
 .summary-card p {
   margin: 6px 0;
   font-size: 13px;
-  color: #4b5563;
+  color: var(--text-2);
 }
 .summary-card p b {
-  color: #1f2937;
+  color: var(--text);
 }
-.summary-card--blue  { border-left-color: #2563eb; }
-.summary-card--blue  h4 { color: #2563eb; }
-.summary-card--red   { border-left-color: #dc2626; }
-.summary-card--red   h4 { color: #dc2626; }
-.summary-card--green { border-left-color: #059669; }
-.summary-card--green h4 { color: #059669; }
+.summary-card--blue  { border-left-color: var(--brand); }
+.summary-card--blue  h4 { color: var(--brand); }
+.summary-card--red   { border-left-color: var(--error-2); }
+.summary-card--red   h4 { color: var(--error-2); }
+.summary-card--green { border-left-color: var(--success); }
+.summary-card--green h4 { color: var(--success); }
 </style>

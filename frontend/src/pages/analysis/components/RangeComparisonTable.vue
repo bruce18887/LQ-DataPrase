@@ -67,15 +67,8 @@ function rangeRowClass({ row }: { row: RangeRow }) {
 
 <style>
 .range-active-row {
-  background-color: #d0e8ff !important;
+  background-color: color-mix(in srgb, var(--error) 10%, transparent) !important;
   font-weight: bold;
-  color: #e53935;
-}
-
-/* night：避免亮浅蓝块穿透深色表格（统一用红色微透明底） */
-:root[data-theme="night"] .range-active-row,
-:root.theme-night .range-active-row {
-  background-color: rgba(245, 87, 108, 0.15) !important;
-  color: #f5576c;
+  color: var(--error);
 }
 </style>

@@ -91,17 +91,15 @@ const toggleTheme = () => {
   transform: rotate(180deg) scale(0.5);
 }
 
-/* 夜晚主题特殊效果 */
-:root[data-theme="night"] .theme-toggle,
-:root.theme-night .theme-toggle {
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+/* 双主题统一取语义层（指南 §7/§8，无页面级覆盖） */
+.theme-toggle {
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
 }
 
-:root[data-theme="night"] .theme-toggle:hover,
-:root.theme-night .theme-toggle:hover {
-  background: var(--brand);
+.theme-toggle:hover {
+  background: var(--active-bg);
   border-color: var(--brand);
-  box-shadow: 0 0 20px rgba(249, 168, 37, 0.4);
+  box-shadow: var(--shadow-sm);
 }
 </style>

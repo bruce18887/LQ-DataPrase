@@ -50,8 +50,8 @@ defineProps<{
 @media (max-width: 576px) { .kpi-row { grid-template-columns: 1fr; } }
 
 .kpi-card {
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 18px 16px 14px;
   text-align: center;
@@ -64,14 +64,14 @@ defineProps<{
   position: relative;
   overflow: hidden;
   transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
-  box-shadow: 0 1px 3px rgba(0,0,0,.04);
+  box-shadow: var(--shadow-sm);
 }
 @media (prefers-reduced-motion: reduce) {
   .kpi-card { transition: none; }
 }
 .kpi-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(0,0,0,.08);
+  box-shadow: var(--shadow-md);
 }
 /* Top accent bar — invisible until hover */
 .kpi-card::before {
@@ -86,21 +86,21 @@ defineProps<{
 }
 .kpi-card:hover::before { transform: scaleX(1); }
 
-.kpi-card--blue  { --kpi-accent: #2563eb; }
-.kpi-card--green { --kpi-accent: #059669; }
-.kpi-card--amber { --kpi-accent: #d97706; }
-.kpi-card--slate { --kpi-accent: #4b5563; }
-.kpi-card--blue::before  { background: linear-gradient(90deg, #1d4ed8, #3b82f6); }
-.kpi-card--green::before { background: linear-gradient(90deg, #047857, #10b981); }
-.kpi-card--amber::before { background: linear-gradient(90deg, #b45309, #f59e0b); }
-.kpi-card--slate::before { background: linear-gradient(90deg, #374151, #6b7280); }
+.kpi-card--blue  { --kpi-accent: var(--brand); }
+.kpi-card--green { --kpi-accent: var(--success); }
+.kpi-card--amber { --kpi-accent: var(--warn-2); }
+.kpi-card--slate { --kpi-accent: var(--text-2); }
+.kpi-card--blue::before  { background: linear-gradient(90deg, var(--brand-2), var(--brand)); }
+.kpi-card--green::before { background: linear-gradient(90deg, var(--success), var(--success-2)); }
+.kpi-card--amber::before { background: linear-gradient(90deg, var(--warn), var(--warn-2)); }
+.kpi-card--slate::before { background: linear-gradient(90deg, var(--text), var(--text-2)); }
 
-.kpi-card:hover { border-color: var(--kpi-accent, #2563eb); }
+.kpi-card:hover { border-color: var(--kpi-accent, var(--brand)); }
 
 .kpi-icon   { font-size: 22px; line-height: 1; }
-.kpi-label  { font-size: 12px; color: #6b7280; font-weight: 500; text-transform: uppercase; letter-spacing: .4px; }
-.kpi-value  { font-size: 28px; font-weight: 700; color: #111827; line-height: 1.15; }
-.kpi-unit   { font-size: 16px; font-weight: 600; color: #6b7280; margin-left: 1px; }
-.kpi-sub    { font-size: 11px; color: #9ca3af; margin-top: 1px; }
+.kpi-label  { font-size: 12px; color: var(--text-2); font-weight: 500; text-transform: uppercase; letter-spacing: .4px; }
+.kpi-value  { font-size: 28px; font-weight: 700; color: var(--text); line-height: 1.15; }
+.kpi-unit   { font-size: 16px; font-weight: 600; color: var(--text-2); margin-left: 1px; }
+.kpi-sub    { font-size: 11px; color: var(--text-3); margin-top: 1px; }
 .kpi-tag    { margin-top: 4px; }
 </style>

@@ -58,7 +58,7 @@ function siteRowClass({ row }: { row: SiteStatRow }) {
 
 .error-msg {
   padding: 12px;
-  color: #f5576c;
+  color: var(--error-2);
   font-size: 11px;
   text-align: center;
 }
@@ -67,14 +67,8 @@ function siteRowClass({ row }: { row: SiteStatRow }) {
 <style>
 .el-table tr.site-fail-row > td {
   background-color: #fdecea !important;
-  color: #dc2626 !important;
+  color: var(--error-2) !important;
   font-weight: 700;
   text-shadow: 0 0 1px #fff, 0 0 2px #fff;
-}
-:root.theme-night .el-table tr.site-fail-row > td {
-  background-color: rgba(245, 87, 108, 0.28) !important;
-  color: #ff8a95 !important;
-  font-weight: 700;
-  text-shadow: 0 0 1px #1a1a2e, 0 0 2px #1a1a2e;
 }
 </style>

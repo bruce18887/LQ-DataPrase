@@ -103,7 +103,7 @@ function buildSiteYieldBarOption() {
     return isNaN(v) ? 0 : v
   })
 
-  const getYieldColor = (y: number) => y >= 95 ? '#059669' : y < 90 ? '#dc2626' : '#d97706'
+  const getYieldColor = (y: number) => y >= 95 ? 'var(--success)' : y < 90 ? 'var(--error-2)' : 'var(--warn-2)'
 
   return {
     tooltip: {
@@ -152,9 +152,9 @@ function buildYieldGaugeOption() {
         lineStyle: {
           width: 8,
           color: [
-            [0.90, '#dc2626'],
-            [0.95, '#d97706'],
-            [1, '#059669'],
+            [0.90, 'var(--error-2)'],
+            [0.95, 'var(--warn-2)'],
+            [1, 'var(--success)'],
           ],
         },
       },
@@ -296,32 +296,16 @@ defineExpose({ handleResize })
   font-weight: 600;
 }
 .yield-stat-tag--max {
-  background: rgba(5, 150, 105, 0.1);
-  color: #059669;
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  color: var(--success);
 }
 .yield-stat-tag--min {
-  background: rgba(220, 38, 38, 0.1);
-  color: #dc2626;
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  color: var(--error-2);
 }
 .yield-stat-tag--diff {
-  background: rgba(107, 114, 128, 0.12);
-  color: #6b7280;
-}
-/* night：深底提亮，保证可读性（原内联 #059669/#dc2626 在深底对比度不足） */
-:root[data-theme="night"] .yield-stat-tag--max,
-:root.theme-night .yield-stat-tag--max {
-  background: rgba(56, 239, 125, 0.15);
-  color: #38ef7d;
-}
-:root[data-theme="night"] .yield-stat-tag--min,
-:root.theme-night .yield-stat-tag--min {
-  background: rgba(245, 87, 108, 0.18);
-  color: #f5576c;
-}
-:root[data-theme="night"] .yield-stat-tag--diff,
-:root.theme-night .yield-stat-tag--diff {
-  background: rgba(255, 255, 255, 0.08);
-  color: #ffffff;
+  background: color-mix(in srgb, var(--text-2) 14%, transparent);
+  color: var(--text-2);
 }
 .yield-stat-label {
   font-size: 11px;
@@ -348,30 +332,15 @@ defineExpose({ handleResize })
   font-variant-numeric: tabular-nums;
 }
 .yield-pill--max {
-  background: rgba(5, 150, 105, 0.12);
-  color: #059669;
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  color: var(--success);
 }
 .yield-pill--min {
-  background: rgba(220, 38, 38, 0.12);
-  color: #dc2626;
+  background: color-mix(in srgb, var(--error) 14%, transparent);
+  color: var(--error-2);
 }
 .yield-pill--diff {
-  background: rgba(107, 114, 128, 0.14);
-  color: #6b7280;
-}
-:root[data-theme="night"] .yield-pill--max,
-:root.theme-night .yield-pill--max {
-  background: rgba(56, 239, 125, 0.16);
-  color: #38ef7d;
-}
-:root[data-theme="night"] .yield-pill--min,
-:root.theme-night .yield-pill--min {
-  background: rgba(245, 87, 108, 0.18);
-  color: #f5576c;
-}
-:root[data-theme="night"] .yield-pill--diff,
-:root.theme-night .yield-pill--diff {
-  background: rgba(255, 255, 255, 0.10);
-  color: #ffffff;
+  background: color-mix(in srgb, var(--text-2) 16%, transparent);
+  color: var(--text-2);
 }
 </style>

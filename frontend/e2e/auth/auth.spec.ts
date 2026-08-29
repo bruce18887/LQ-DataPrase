@@ -18,14 +18,14 @@ test.describe('认证与路由守卫', { tag: ['@auth'] }, () => {
     await expect(page.getByRole('heading', { level: 1, name: 'LQ-DataPrase' })).toBeVisible()
     await expect(page.getByPlaceholder('用户名')).toBeVisible()
     await expect(page.getByPlaceholder('密码')).toBeVisible()
-    await expect(page.locator('button.neon-button')).toBeVisible()
+    await expect(page.locator('button.login-button')).toBeVisible()
   })
 
   test('@p0 空输入触发表单校验', async ({ page }) => {
     await page.goto('/login')
     await page.getByPlaceholder('用户名').fill('')
     await page.getByPlaceholder('密码').fill('')
-    await page.locator('button.neon-button').click()
+    await page.locator('button.login-button').click()
     // 仍停留在登录页，且出现校验错误
     await expect(page).toHaveURL(/\/login/)
     await expect(page.locator('.el-form-item__error').first()).toBeVisible()
@@ -154,7 +154,7 @@ test.describe('认证与路由守卫', { tag: ['@auth'] }, () => {
     await page.goto('/login')
     await page.getByPlaceholder('用户名').fill('ghost-user-does-not-exist')
     await page.getByPlaceholder('密码').fill('whatever-12345')
-    await page.locator('button.neon-button').click()
+    await page.locator('button.login-button').click()
 
     // 错误提示 + 类别 class（user_not_found）都应出现
     const hint = page.getByTestId('login-error-hint').or(page.locator('.error-msg'))
@@ -167,7 +167,7 @@ test.describe('认证与路由守卫', { tag: ['@auth'] }, () => {
     await page.goto('/login')
     await page.getByPlaceholder('用户名').fill(ACCOUNTS.admin.username)
     await page.getByPlaceholder('密码').fill('wrong-password-xyz')
-    await page.locator('button.neon-button').click()
+    await page.locator('button.login-button').click()
 
     // LoginPage 自身 try/catch 内联展示错误（不走全局 401 → /login 拦截）
     await expect(page.locator('.error-msg--invalid_credentials')).toBeVisible({

@@ -22,7 +22,7 @@
               size="large"
               name="username"
               autocomplete="username"
-              class="neon-input"
+              class="login-input"
             />
           </el-form-item>
           <el-form-item prop="password" label="密码" required>
@@ -34,7 +34,7 @@
               name="password"
               autocomplete="current-password"
               show-password
-              class="neon-input"
+              class="login-input"
             />
           </el-form-item>
           <el-form-item>
@@ -43,7 +43,7 @@
               size="large"
               :loading="loading"
               native-type="submit"
-              class="neon-button"
+              class="login-button"
             >
               <span v-if="!loading">登 录</span>
               <span v-else>登录中…</span>
@@ -141,47 +141,20 @@ async function handleLogin() {
   padding: 20px;
 }
 
-/* 登录卡片 - 霓虹边框效果 */
+/* 登录卡片（指南 §10.4：--card 底 + --border + 圆角 12 + --shadow-lg，旧霓虹发光已移除） */
 .login-card {
   width: 100%;
   max-width: 400px;
   padding: 48px 40px;
-  background: var(--bg-2);
-  border: 1px solid var(--brand);
-  border-radius: 16px;
-  box-shadow:
-    0 0 20px color-mix(in srgb, var(--brand) 20%, transparent),
-    0 0 40px color-mix(in srgb, var(--brand) 10%, transparent),
-    inset 0 0 60px color-mix(in srgb, var(--brand) 3%, transparent);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
   position: relative;
   z-index: 1;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .login-card {
-    animation: cardGlow 3s ease-in-out infinite;
-  }
-}
-
-@keyframes cardGlow {
-  0%, 100% {
-    box-shadow:
-      0 0 20px color-mix(in srgb, var(--brand) 20%, transparent),
-      0 0 40px color-mix(in srgb, var(--brand) 10%, transparent),
-      inset 0 0 60px color-mix(in srgb, var(--brand) 3%, transparent);
-  }
-  50% {
-    box-shadow:
-      0 0 30px color-mix(in srgb, var(--brand) 30%, transparent),
-      0 0 60px color-mix(in srgb, var(--brand) 15%, transparent),
-      inset 0 0 80px color-mix(in srgb, var(--brand) 5%, transparent);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .login-card {
-    animation: none;
-  }
   .logo-icon {
     animation: none;
   }
@@ -196,28 +169,19 @@ async function handleLogin() {
 
 .logo-icon {
   color: var(--brand);
-  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--brand) 40%, transparent));
-  animation: logoFloat 3s ease-in-out infinite;
 }
 
-@keyframes logoFloat {
-  0%, 100% {
-    transform: translateY(0px);
-  }
-  50% {
-    transform: translateY(-10px);
-  }
-}
-
-/* 品牌标题 */
+/* 品牌标题（渐变文字裁切，基调 A） */
 .login-title {
   text-align: center;
   font-size: 32px;
-  font-weight: 700;
-  color: var(--text);
+  font-weight: 800;
+  background: var(--grad-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
   margin: 0 0 8px;
   letter-spacing: 2px;
-  text-shadow: 0 0 20px color-mix(in srgb, var(--brand) 30%, transparent);
 }
 
 .login-subtitle {
@@ -247,68 +211,63 @@ async function handleLogin() {
   font-size: 12px;
 }
 
-/* 霓虹输入框 */
-:deep(.neon-input .el-input__wrapper) {
+/* 输入框（指南 §10.3：--bg 底 + --border-2 + 品牌焦点环） */
+:deep(.login-input .el-input__wrapper) {
   background-color: var(--bg);
   border: 1px solid var(--border-2);
+  border-radius: 8px;
   box-shadow: none;
-  transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-:deep(.neon-input .el-input__wrapper:hover) {
+:deep(.login-input .el-input__wrapper:hover) {
   border-color: var(--brand);
 }
 
-:deep(.neon-input .el-input__wrapper.is-focus) {
+:deep(.login-input .el-input__wrapper.is-focus) {
   border-color: var(--brand);
-  box-shadow:
-    0 0 10px color-mix(in srgb, var(--brand) 20%, transparent),
-    0 0 20px color-mix(in srgb, var(--brand) 10%, transparent),
-    inset 0 0 10px color-mix(in srgb, var(--brand) 5%, transparent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
-:deep(.neon-input .el-input__inner) {
+:deep(.login-input .el-input__inner) {
   color: var(--text);
   font-size: 14px;
 }
 
-:deep(.neon-input .el-input__inner::placeholder) {
+:deep(.login-input .el-input__inner::placeholder) {
   color: var(--text-3);
 }
 
-/* 霓虹按钮 */
-:deep(.neon-button) {
+/* 主按钮（指南 §10.2：品牌渐变 + X 抬升悬停） */
+:deep(.login-button) {
   width: 100%;
-  height: 48px;
-  background: var(--brand);
-  border: 1px solid var(--brand);
+  height: 44px;
+  background: var(--grad-brand);
+  border: none;
   border-radius: 8px;
-  font-size: 16px;
+  color: var(--on-brand);
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: 2px;
-  box-shadow: 0 0 20px color-mix(in srgb, var(--brand) 20%, transparent);
-  transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.12s ease, transform 0.12s ease;
 }
 
-:deep(.neon-button:hover) {
-  transform: translateY(-2px);
-  box-shadow:
-    0 0 30px color-mix(in srgb, var(--brand) 30%, transparent),
-    0 4px 20px color-mix(in srgb, var(--brand) 20%, transparent);
-  background: var(--brand-2);
+:deep(.login-button:hover) {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
 }
 
-:deep(.neon-button:active) {
+:deep(.login-button:active) {
   transform: translateY(0);
 }
 
-:deep(.neon-button.is-loading) {
-  background: var(--brand);
+:deep(.login-button.is-loading) {
   opacity: 0.8;
 }
 
 /* 加载动画 */
-:deep(.neon-button .el-icon.is-loading) {
+:deep(.login-button .el-icon.is-loading) {
   animation: rotating 2s linear infinite;
 }
 
