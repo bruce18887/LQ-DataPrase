@@ -45,29 +45,30 @@ export function useEChartsTheme() {
         // 背景色
         backgroundColor: 'transparent',
 
-        // 文本色
-        textColor: 'rgba(255, 255, 255, 0.8)',
+        // 文本色（对齐指南 §6.2：--text / --text-2 / --text-3）
+        textColor: 'rgba(255, 255, 255, 0.76)',
         titleColor: '#ffffff',
-        subtextColor: 'rgba(255, 255, 255, 0.6)',
+        subtextColor: 'rgba(255, 255, 255, 0.55)',
 
-        // 轴线颜色
-        axisLineColor: 'rgba(255, 255, 255, 0.28)',
-        axisLabelColor: 'rgba(255, 255, 255, 0.7)',
-        splitLineColor: 'rgba(255, 255, 255, 0.16)',
+        // 轴线颜色（--border / --bar-grid）
+        axisLineColor: 'rgba(255, 255, 255, 0.10)',
+        axisLabelColor: 'rgba(255, 255, 255, 0.76)',
+        splitLineColor: 'rgba(255, 255, 255, 0.04)',
 
         // 边框颜色
-        borderColor: 'rgba(255, 255, 255, 0.1)',
+        borderColor: 'rgba(255, 255, 255, 0.10)',
 
         // 图例颜色
-        legendTextColor: 'rgba(255, 255, 255, 0.8)',
+        legendTextColor: 'rgba(255, 255, 255, 0.76)',
 
-        // 工具提示背景
-        tooltipBg: 'rgba(22, 33, 62, 0.95)',
-        tooltipBorder: 'rgba(255, 255, 255, 0.2)',
+        // 工具提示（--card-glass / --border-2 / --text）
+        tooltipBg: 'rgba(19, 19, 39, 0.88)',
+        tooltipBorder: 'rgba(255, 255, 255, 0.18)',
         tooltipText: '#ffffff',
 
-        // 系列颜色（图表数据颜色；经 CVD 色盲模拟验证 protan/deutan ΔE≥15，
-        // 唯 青绿/粉红 protan 12.2 为语义锚点对（success/error），使用处均有文字标签）
+        // 系列颜色：2026-08-29 新色板（--chart-1..8）CVD 复验未通过
+        // （tasks/cvd_verify.mjs：light 灰/青绿 deutan ΔE=7.6、night 浅蓝/粉红 deutan ΔE=13.6），
+        // 按指南 §6.2 维持现状；轴系/文本/tooltip 已对齐。
         seriesColors: [
           '#fdd835', // 金色
           '#14b8a6', // 青绿
@@ -81,19 +82,20 @@ export function useEChartsTheme() {
       }
     } else {
       return {
-        // 浅色主题配置
+        // 浅色主题配置（对齐指南 §6.2）
         backgroundColor: 'transparent',
-        textColor: '#606266',
-        titleColor: '#303133',
-        subtextColor: '#909399',
-        axisLineColor: '#e4e7ed',
-        axisLabelColor: '#606266',
-        splitLineColor: '#e4e7ed',
-        borderColor: '#e4e7ed',
-        legendTextColor: '#606266',
-        tooltipBg: 'rgba(255, 255, 255, 0.95)',
-        tooltipBorder: '#e4e7ed',
-        tooltipText: '#303133',
+        textColor: '#6b7280',
+        titleColor: '#1f2937',
+        subtextColor: '#9ca3af',
+        axisLineColor: '#e5e7eb',
+        axisLabelColor: '#6b7280',
+        splitLineColor: '#eef0f3',
+        borderColor: '#e5e7eb',
+        legendTextColor: '#6b7280',
+        tooltipBg: 'rgba(255, 255, 255, 0.92)',
+        tooltipBorder: '#e5e7eb',
+        tooltipText: '#1f2937',
+        // 系列颜色：同 night 分支说明，CVD 复验未过维持现状
         seriesColors: [
           '#2563eb', // 专业蓝
           '#047857', // 绿色
