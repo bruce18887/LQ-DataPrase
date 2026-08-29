@@ -75,13 +75,13 @@ watch(() => [props.items, props.count], () => {
 
 .card-title {
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .card-footer {
   margin-top: 12px;
   padding: 12px;
-  background: var(--bg-secondary);
+  background: var(--bg-2);
   border-radius: 8px;
   display: flex;
   align-items: center;

@@ -48,9 +48,9 @@ withDefaults(defineProps<{
   gap: 16px;
   margin-bottom: 12px;
   padding: 8px 12px;
-  background: var(--bg-tertiary, #f8f9fa);
+  background: var(--bg-3, #f8f9fa);
   border-radius: 6px;
-  border: 1px solid var(--border-default, #e4e7ed);
+  border: 1px solid var(--border-2, #e4e7ed);
 }
 
 .main-row {

@@ -7,7 +7,7 @@
       stripe
       style="width: 100%"
       v-loading="loading"
-      :header-cell-style="{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontWeight: '600' }"
+      :header-cell-style="{ background: 'var(--bg-2)', color: 'var(--text)', fontWeight: '600' }"
       :row-class-name="tableRowClassName"
       :default-sort="{ prop: 'created_at', order: 'descending' }"
       @sort-change="onSortChange"
@@ -251,7 +251,7 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
 
 <style scoped>
 .empty-text {
-  color: var(--text-tertiary);
+  color: var(--text-3);
 }
 
 /* ============================
@@ -288,7 +288,7 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
 .file-name {
   font-size: 13px;
   font-weight: 500;
-  color: var(--text-primary);
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -332,16 +332,16 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
   height: 24px;
   padding: 0 8px;
   font-size: 12px;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  border: 1px solid var(--brand-primary);
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--brand);
   border-radius: 4px;
   outline: none;
   box-sizing: border-box;
 }
 
 .tag-native-input::placeholder {
-  color: var(--text-tertiary);
+  color: var(--text-3);
 }
 
 .tag-input-wrapper {
@@ -356,8 +356,8 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
   min-width: 180px;
   max-height: 200px;
   overflow-y: auto;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-default);
+  background: var(--bg);
+  border: 1px solid var(--border-2);
   border-radius: 6px;
   box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
   z-index: 100;
@@ -367,19 +367,19 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
 .tag-suggestion-item {
   padding: 6px 12px;
   font-size: 12px;
-  color: var(--text-primary);
+  color: var(--text);
   cursor: pointer;
   transition: background 0.15s;
 }
 
 .tag-suggestion-item:hover,
 .tag-suggestion-item.is-active {
-  background: var(--bg-secondary);
-  color: var(--brand-primary);
+  background: var(--bg-2);
+  color: var(--brand);
 }
 
 :root[data-theme="night"] .tag-suggestions {
-  background: var(--bg-secondary);
+  background: var(--bg-2);
   border-color: rgba(255, 255, 255, 0.1);
   box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.4);
 }
@@ -388,13 +388,13 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
    Table Styling（列压缩优化：min-width 下限 + 横向滚动条常显）
    ============================ */
 :deep(.el-table) {
-  --el-table-border-color: var(--border-muted);
+  --el-table-border-color: var(--border);
   --el-table-bg-color: transparent;
   --el-table-tr-bg-color: transparent;
-  --el-table-header-bg-color: var(--bg-secondary);
+  --el-table-header-bg-color: var(--bg-2);
   border-radius: 10px;
   overflow: hidden;
-  border: 1px solid var(--border-muted);
+  border: 1px solid var(--border);
 }
 
 :deep(.el-table .el-scrollbar__bar.is-horizontal) {
@@ -412,7 +412,7 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
 }
 
 :deep(.el-table .row-odd) {
-  --el-table-tr-bg-color: var(--bg-secondary);
+  --el-table-tr-bg-color: var(--bg-2);
 }
 
 :deep(.el-table .el-table__row) {
@@ -421,31 +421,31 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
 }
 
 :deep(.el-table .el-table__row:hover > td) {
-  background: var(--bg-secondary) !important;
+  background: var(--bg-2) !important;
 }
 
 .id-badge {
   font-size: 11px;
   font-weight: 600;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   font-family: var(--font-mono);
 }
 
 .program-name-cell {
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-size: 12px;
 }
 
 .time-text {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-family: var(--font-mono);
 }
 
 .size-badge {
   font-size: 12px;
   font-weight: 600;
-  color: var(--color-info);
+  color: var(--info);
   font-family: var(--font-mono);
 }
 
@@ -453,6 +453,6 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
    Night Theme Overrides
    ============================ */
 :root[data-theme="night"] .size-badge {
-  color: var(--color-info);
+  color: var(--info);
 }
 </style>

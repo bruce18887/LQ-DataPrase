@@ -85,7 +85,7 @@ function verdictOf(row: any): 'PASS' | 'FAIL' {
 function verdictStyle(p: any) {
   const pass = p.value === 'PASS'
   return {
-    backgroundColor: pass ? 'var(--color-success)' : 'var(--color-error)',
+    backgroundColor: pass ? 'var(--success)' : 'var(--error)',
     color: '#fff',
     fontWeight: '700',
     borderRadius: '10px',
@@ -194,8 +194,8 @@ const columnDefs = computed(() => {
   align-items: baseline;
   gap: 12px;
   padding: 10px 12px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
   border-bottom: none;
   border-radius: 8px 8px 0 0;
   flex-wrap: wrap;
@@ -204,36 +204,36 @@ const columnDefs = computed(() => {
 .info-title {
   font-size: 14px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .info-files {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 
 .info-files b {
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 .info-meta {
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   margin-left: auto;
 }
 
 /* ag-grid 主题微调（legacy quartz + 项目 CSS 变量） */
 .fc-grid {
-  --ag-foreground-color: var(--text-primary);
-  --ag-background-color: var(--bg-primary);
-  --ag-header-background-color: var(--bg-secondary);
-  --ag-border-color: var(--border-muted);
-  --ag-row-hover-color: var(--bg-secondary);
+  --ag-foreground-color: var(--text);
+  --ag-background-color: var(--bg);
+  --ag-header-background-color: var(--bg-2);
+  --ag-border-color: var(--border);
+  --ag-row-hover-color: var(--bg-2);
   --ag-font-size: 12px;
-  --ag-header-foreground-color: var(--text-primary);
+  --ag-header-foreground-color: var(--text);
   border-radius: 0 0 8px 8px;
   overflow: hidden;
-  border: 1px solid var(--border-muted);
+  border: 1px solid var(--border);
 }
 
 .fc-grid :deep(.ag-header-cell-text),
@@ -258,8 +258,8 @@ const columnDefs = computed(() => {
 }
 
 .fc-grid :deep(.fc-fail-cell) {
-  background: var(--color-fail-bg) !important;
-  color: var(--color-fail-text) !important;
+  background: color-mix(in srgb, var(--error) 22%, transparent) !important;
+  color: var(--error) !important;
   font-weight: 600;
 }
 

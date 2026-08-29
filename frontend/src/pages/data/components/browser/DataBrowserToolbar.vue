@@ -122,26 +122,26 @@ const emit = defineEmits<Emits>()
   display: block;
   font-size: 11px;
   font-weight: 500;
-  color: var(--text-secondary);
+  color: var(--text-2);
   margin-bottom: 4px;
 }
 
 /* Element Plus 控件双主题适配 */
 :deep(.el-input) {
-  --el-input-bg-color: var(--bg-primary);
-  --el-input-border-color: var(--border-default);
-  --el-input-hover-border-color: var(--brand-primary);
-  --el-input-focus-border-color: var(--brand-primary);
-  --el-input-text-color: var(--text-primary);
-  --el-input-placeholder-color: var(--text-secondary);
+  --el-input-bg-color: var(--bg);
+  --el-input-border-color: var(--border-2);
+  --el-input-hover-border-color: var(--brand);
+  --el-input-focus-border-color: var(--brand);
+  --el-input-text-color: var(--text);
+  --el-input-placeholder-color: var(--text-2);
 }
 
 :deep(.el-input__wrapper) {
-  background-color: var(--bg-primary);
+  background-color: var(--bg);
   border-radius: 8px;
 }
 
 :deep(.el-select) {
-  --el-select-input-focus-border-color: var(--brand-primary);
+  --el-select-input-focus-border-color: var(--brand);
 }
 </style>

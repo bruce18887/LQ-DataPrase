@@ -141,13 +141,13 @@ function selectMatches() {
 .match-hint {
   padding: 6px 12px;
   font-size: 12px;
-  color: var(--text-secondary);
-  border-top: 1px solid var(--border-muted);
+  color: var(--text-2);
+  border-top: 1px solid var(--border);
 }
 
 .empty-hint {
   padding: 8px 12px;
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
 }
 </style>

@@ -17,7 +17,7 @@
         </el-radio-group>
       </el-col>
       <el-col :span="6">
-        <span style="font-size: 12px; color: var(--text-secondary); margin-right: 8px">图表高度</span>
+        <span style="font-size: 12px; color: var(--text-2); margin-right: 8px">图表高度</span>
         <el-slider v-model="localHeight" :min="400" :max="900" :step="50" show-input style="flex: 1" />
       </el-col>
       <el-col :span="3">
@@ -41,17 +41,17 @@
 
     <!-- 良率统计卡片 -->
     <el-row v-if="waferData" :gutter="12" style="margin-bottom: 12px">
-      <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-secondary)">Total Dies</div><div style="font-size: 18px; font-weight: bold">{{ waferData.stats?.total ?? '-' }}</div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-secondary)">Pass Dies</div><div style="font-size: 18px; font-weight: bold; color: waferColors.pass">{{ waferData.stats?.pass_count ?? '-' }}</div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-secondary)">Fail Dies</div><div style="font-size: 18px; font-weight: bold; color: waferColors.fail">{{ waferData.stats?.fail_count ?? '-' }}</div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-secondary)">Yield</div><div :style="{ fontSize: '18px', fontWeight: 'bold', color: (waferData.stats?.yield_pct ?? 0) >= 95 ? waferColors.pass : (waferData.stats?.yield_pct ?? 0) >= 85 ? waferColors.zoneMid : waferColors.zoneEdge }">{{ waferData.stats?.yield_pct?.toFixed(1) ?? '-' }}%</div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-2)">Total Dies</div><div style="font-size: 18px; font-weight: bold">{{ waferData.stats?.total ?? '-' }}</div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-2)">Pass Dies</div><div style="font-size: 18px; font-weight: bold; color: waferColors.pass">{{ waferData.stats?.pass_count ?? '-' }}</div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-2)">Fail Dies</div><div style="font-size: 18px; font-weight: bold; color: waferColors.fail">{{ waferData.stats?.fail_count ?? '-' }}</div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-2)">Yield</div><div :style="{ fontSize: '18px', fontWeight: 'bold', color: (waferData.stats?.yield_pct ?? 0) >= 95 ? waferColors.pass : (waferData.stats?.yield_pct ?? 0) >= 85 ? waferColors.zoneMid : waferColors.zoneEdge }">{{ waferData.stats?.yield_pct?.toFixed(1) ?? '-' }}%</div></el-card></el-col>
     </el-row>
 
     <!-- 分区良率统计 -->
     <el-row v-if="localColorBy === 'zone' && zonalData?.zones?.length" :gutter="12" style="margin-bottom: 12px">
-      <el-col :span="8"><el-card shadow="hover" :style="{ borderLeft: '3px solid ' + waferColors.zoneCenter }"><div style="font-size: 11px; color: var(--text-secondary)">中心区 Center Zone</div><div style="font-size: 16px; font-weight: bold; color: waferColors.zoneCenter">{{ getZoneYield('中心区') }}%</div><div style="font-size: 11px; color: var(--text-secondary)">{{ getZoneStat('中心区', 'pass') }} / {{ getZoneStat('中心区', 'total') }}</div></el-card></el-col>
-      <el-col :span="8"><el-card shadow="hover" :style="{ borderLeft: '3px solid ' + waferColors.zoneMid }"><div style="font-size: 11px; color: var(--text-secondary)">中间区 Middle Zone</div><div style="font-size: 16px; font-weight: bold; color: waferColors.zoneMid">{{ getZoneYield('中间区') }}%</div><div style="font-size: 11px; color: var(--text-secondary)">{{ getZoneStat('中间区', 'pass') }} / {{ getZoneStat('中间区', 'total') }}</div></el-card></el-col>
-      <el-col :span="8"><el-card shadow="hover" :style="{ borderLeft: '3px solid ' + waferColors.zoneEdge }"><div style="font-size: 11px; color: var(--text-secondary)">边缘区 Edge Zone</div><div style="font-size: 16px; font-weight: bold; color: waferColors.zoneEdge">{{ getZoneYield('边缘区') }}%</div><div style="font-size: 11px; color: var(--text-secondary)">{{ getZoneStat('边缘区', 'pass') }} / {{ getZoneStat('边缘区', 'total') }}</div></el-card></el-col>
+      <el-col :span="8"><el-card shadow="hover" :style="{ borderLeft: '3px solid ' + waferColors.zoneCenter }"><div style="font-size: 11px; color: var(--text-2)">中心区 Center Zone</div><div style="font-size: 16px; font-weight: bold; color: waferColors.zoneCenter">{{ getZoneYield('中心区') }}%</div><div style="font-size: 11px; color: var(--text-2)">{{ getZoneStat('中心区', 'pass') }} / {{ getZoneStat('中心区', 'total') }}</div></el-card></el-col>
+      <el-col :span="8"><el-card shadow="hover" :style="{ borderLeft: '3px solid ' + waferColors.zoneMid }"><div style="font-size: 11px; color: var(--text-2)">中间区 Middle Zone</div><div style="font-size: 16px; font-weight: bold; color: waferColors.zoneMid">{{ getZoneYield('中间区') }}%</div><div style="font-size: 11px; color: var(--text-2)">{{ getZoneStat('中间区', 'pass') }} / {{ getZoneStat('中间区', 'total') }}</div></el-card></el-col>
+      <el-col :span="8"><el-card shadow="hover" :style="{ borderLeft: '3px solid ' + waferColors.zoneEdge }"><div style="font-size: 11px; color: var(--text-2)">边缘区 Edge Zone</div><div style="font-size: 16px; font-weight: bold; color: waferColors.zoneEdge">{{ getZoneYield('边缘区') }}%</div><div style="font-size: 11px; color: var(--text-2)">{{ getZoneStat('边缘区', 'pass') }} / {{ getZoneStat('边缘区', 'total') }}</div></el-card></el-col>
     </el-row>
 
     <el-card style="margin-top: 12px">

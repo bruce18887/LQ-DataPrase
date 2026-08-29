@@ -241,17 +241,17 @@ void chartRef // bound to <div ref="chartRef"> in template
   gap: 8px;
   width: 100%;
   height: 500px;
-  background: var(--bg-secondary);
-  border: 1px dashed var(--border-default);
+  background: var(--bg-2);
+  border: 1px dashed var(--border-2);
   border-radius: 6px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-size: 14px;
 }
 .boxplot-placeholder__icon {
   font-size: 18px;
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 .boxplot-placeholder__text {
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 </style>

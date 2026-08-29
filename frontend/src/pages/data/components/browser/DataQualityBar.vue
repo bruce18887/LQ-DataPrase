@@ -93,8 +93,8 @@ watch(() => props.fileId, load, { immediate: true })
   gap: 10px;
   padding: 8px 14px;
   margin-bottom: 12px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
   border-radius: 8px;
   flex-wrap: wrap;
 }
@@ -103,7 +103,7 @@ watch(() => props.fileId, load, { immediate: true })
   display: flex;
   flex-direction: column;
   padding: 2px 14px 2px 0;
-  border-right: 1px solid var(--border-muted);
+  border-right: 1px solid var(--border);
   min-width: 56px;
 }
 
@@ -113,7 +113,7 @@ watch(() => props.fileId, load, { immediate: true })
 
 .chip-label {
   font-size: 11px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -121,28 +121,28 @@ watch(() => props.fileId, load, { immediate: true })
 .chip-value {
   font-size: 17px;
   font-weight: 700;
-  color: var(--brand-primary);
+  color: var(--brand);
   line-height: 1.2;
 }
 
 .chip-pass {
-  color: var(--color-success);
+  color: var(--success);
 }
 
 .chip-fail {
-  color: var(--color-error);
+  color: var(--error);
 }
 
 .yield-good {
-  color: var(--color-success);
+  color: var(--success);
 }
 
 .yield-mid {
-  color: var(--color-warning);
+  color: var(--warn);
 }
 
 .yield-bad {
-  color: var(--color-error);
+  color: var(--error);
 }
 
 .chip-tags {

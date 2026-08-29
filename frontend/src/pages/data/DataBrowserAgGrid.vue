@@ -31,7 +31,7 @@
     <div v-loading="loading">
       <p v-if="dataLoaded" style="margin-bottom: 8px; font-size: 14px">
         共 <b>{{ rowCount }}</b> 条数据
-        <span v-if="failRowCount > 0" style="color: var(--color-error); margin-left: 12px; font-weight: bold">
+        <span v-if="failRowCount > 0" style="color: var(--error); margin-left: 12px; font-weight: bold">
           （Fail: {{ failRowCount }} 行<template v-if="siteFilter">，Site {{ siteFilter }} 过滤后</template>）
         </span>
       </p>
@@ -551,76 +551,76 @@ function resolveExportName(headers: Record<string, string>, fallback: string, su
    AG Grid light-theme baseline (scoped — only applies inside this component)
    ================================================================ */
 :deep(.ag-custom-theme.ag-theme-quartz) {
-  --ag-background-color: var(--bg-primary);
-  --ag-foreground-color: var(--text-primary);
-  --ag-data-color: var(--text-primary);
-  --ag-header-background-color: var(--bg-secondary);
-  --ag-header-foreground-color: var(--text-primary);
-  --ag-odd-row-background-color: var(--bg-secondary);
-  --ag-row-hover-color: var(--bg-tertiary);
+  --ag-background-color: var(--bg);
+  --ag-foreground-color: var(--text);
+  --ag-data-color: var(--text);
+  --ag-header-background-color: var(--bg-2);
+  --ag-header-foreground-color: var(--text);
+  --ag-odd-row-background-color: var(--bg-2);
+  --ag-row-hover-color: var(--bg-3);
   --ag-selected-row-background-color: rgba(37, 99, 235, 0.08);
-  --ag-row-border-color: var(--border-default);
-  --ag-border-color: var(--border-default);
-  --ag-secondary-border-color: var(--border-muted);
+  --ag-row-border-color: var(--border-2);
+  --ag-border-color: var(--border-2);
+  --ag-secondary-border-color: var(--border);
   --ag-cell-horizontal-padding: 8px;
   --ag-font-size: 12px;
   --ag-header-column-separator-display: block;
-  --ag-header-column-separator-color: var(--border-default);
-  --ag-input-focus-border-color: var(--brand-primary);
-  --ag-range-selection-border-color: var(--brand-primary);
+  --ag-header-column-separator-color: var(--border-2);
+  --ag-input-focus-border-color: var(--brand);
+  --ag-range-selection-border-color: var(--brand);
   /* flashCells 定位反馈色（light：品牌蓝） */
   --ag-value-change-value-highlight-background-color: rgba(37, 99, 235, 0.35);
 }
 
 :deep(.ag-custom-theme.ag-theme-quartz .ag-row.row-odd) {
-  background-color: var(--bg-secondary) !important;
+  background-color: var(--bg-2) !important;
 }
 
 :deep(.ag-custom-theme.ag-theme-quartz .ag-row.row-even) {
-  background-color: var(--bg-primary) !important;
+  background-color: var(--bg) !important;
 }
 
 :deep(.ag-custom-theme.ag-theme-quartz .ag-cell) {
-  border-right: 1px solid var(--border-default);
-  border-bottom: 1px solid var(--border-default);
+  border-right: 1px solid var(--border-2);
+  border-bottom: 1px solid var(--border-2);
 }
 
 :deep(.ag-custom-theme.ag-theme-quartz .ag-header) {
-  background-color: var(--bg-secondary) !important;
+  background-color: var(--bg-2) !important;
 }
 
 :deep(.ag-custom-theme.ag-theme-quartz .ag-header-cell) {
-  border-right: 1px solid var(--border-default);
-  background-color: var(--bg-secondary) !important;
+  border-right: 1px solid var(--border-2);
+  background-color: var(--bg-2) !important;
 }
 
 :deep(.ag-custom-theme.ag-theme-quartz .ag-header-cell-label) {
   font-size: 12px;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 :deep(.ag-custom-theme.ag-theme-quartz .ag-pinned-left-cols-container) {
-  border-right: 2px solid var(--border-emphasis);
+  border-right: 2px solid var(--text-3);
   box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
 }
 
 :deep(.ag-custom-theme.ag-theme-quartz .ag-pinned-left-header) {
-  border-right: 2px solid var(--border-emphasis);
-  background-color: var(--bg-secondary) !important;
+  border-right: 2px solid var(--text-3);
+  background-color: var(--bg-2) !important;
 }
 
 :deep(.ag-custom-theme.ag-theme-quartz .ag-cell-first-left-pinned) {
-  border-right: 1px solid var(--border-default);
+  border-right: 1px solid var(--border-2);
 }
 
 :deep(.ag-custom-theme.ag-theme-quartz .ag-header-cell-resize::after) {
-  background-color: var(--border-default);
+  background-color: var(--border-2);
 }
 
 /* sorting icons */
 :deep(.ag-custom-theme.ag-theme-quartz .ag-header-cell-sorted-asc .ag-header-cell-label,
       .ag-custom-theme.ag-theme-quartz .ag-header-cell-sorted-desc .ag-header-cell-label) {
-  color: var(--text-primary);
+  color: var(--text);
 }
 </style>
 

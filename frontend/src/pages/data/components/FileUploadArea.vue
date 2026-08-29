@@ -75,20 +75,20 @@ async function handleUpload(options: { file: File }) {
 .upload-section {
   margin-bottom: 16px;
   padding: 16px;
-  background: var(--bg-secondary);
-  border: 1px dashed var(--border-default);
+  background: var(--bg-2);
+  border: 1px dashed var(--border-2);
   border-radius: 10px;
 }
 
 .upload-text {
   font-size: 14px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   margin-top: 8px;
 }
 
 .upload-hint {
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   margin-top: 4px;
 }
 

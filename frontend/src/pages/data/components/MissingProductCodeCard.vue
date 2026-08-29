@@ -45,7 +45,7 @@
     </el-table>
     <div class="card-footer">
       <el-checkbox v-model="confirmed">
-        <span style="color: var(--brand-primary); font-weight: 600">
+        <span style="color: var(--brand); font-weight: 600">
           我已确认要修复这 {{ count }} 个文件的产品名
         </span>
       </el-checkbox>
@@ -92,13 +92,13 @@ watch(() => [props.items, props.count], () => {
 
 .card-title {
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .card-footer {
   margin-top: 12px;
   padding: 12px;
-  background: var(--bg-secondary);
+  background: var(--bg-2);
   border-radius: 8px;
   display: flex;
   align-items: center;
@@ -108,6 +108,6 @@ watch(() => [props.items, props.count], () => {
 }
 
 .empty-text {
-  color: var(--text-tertiary);
+  color: var(--text-3);
 }
 </style>

@@ -111,14 +111,14 @@ const collapse = ref<string[]>([])
 
 .axis-label {
   font-size: 13px;
-  color: var(--text-secondary, #909399);
+  color: var(--text-2, #909399);
   white-space: nowrap;
   min-width: 30px;
 }
 
 :deep(.el-collapse-item__header) {
   font-size: 13px;
-  color: var(--text-secondary, #909399);
+  color: var(--text-2, #909399);
   border: none;
   padding: 4px 0;
 }

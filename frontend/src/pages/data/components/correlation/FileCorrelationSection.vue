@@ -156,8 +156,8 @@ function onExport() {
 }
 
 .section-card {
-  background: var(--bg-primary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
 }
@@ -167,8 +167,8 @@ function onExport() {
   align-items: center;
   justify-content: space-between;
   padding: 12px 20px;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-muted);
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
 }
 
 .card-title-group {
@@ -182,11 +182,11 @@ function onExport() {
 .card-title {
   font-size: 14px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
 }
 .card-subtitle {
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
 }
 
 .card-body {
@@ -208,7 +208,7 @@ function onExport() {
 
 .fc-view-label {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-weight: 500;
   white-space: nowrap;
 }

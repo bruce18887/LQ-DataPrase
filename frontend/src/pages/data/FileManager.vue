@@ -78,11 +78,11 @@
             <el-row :gutter="12">
               <el-col :span="8" v-for="f in group.files" :key="f.id">
                 <el-card shadow="hover" :class="{ 'active-file': f.id === activeFileId }">
-                  <div style="font-weight:bold; color: var(--text-primary)">{{ f.filename }}</div>
-                  <div style="color: var(--text-secondary); font-size:12px; margin:4px 0">
+                  <div style="font-weight:bold; color: var(--text)">{{ f.filename }}</div>
+                  <div style="color: var(--text-2); font-size:12px; margin:4px 0">
                     {{ f.format_type }} | {{ f.row_count }}行×{{ f.col_count }}列
                   </div>
-                  <div style="color: var(--text-secondary); font-size:12px" v-if="f.program_name" class="program-name">{{ f.program_name }}</div>
+                  <div style="color: var(--text-2); font-size:12px" v-if="f.program_name" class="program-name">{{ f.program_name }}</div>
                   <div v-if="f.tags && f.tags.length" class="tag-row">
                     <el-tag
                       v-for="t in f.tags"
@@ -373,16 +373,16 @@ onMounted(() => {
 <style scoped>
 .upload-text {
   font-size: 14px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   margin-top: 8px;
 }
 .upload-hint {
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   margin-top: 4px;
 }
 .active-file {
-  border: 2px solid var(--brand-primary);
+  border: 2px solid var(--brand);
 }
 .program-name {
   overflow: hidden;
@@ -405,18 +405,18 @@ onMounted(() => {
 .batch-group {
   margin-bottom: 20px;
   padding: 14px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
   border-radius: 10px;
 }
 
 .batch-group.unregistered {
-  border-left: 3px solid var(--color-warning);
+  border-left: 3px solid var(--warn);
 }
 
 .batch-size {
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   font-family: var(--font-mono);
 }
 
@@ -438,24 +438,24 @@ onMounted(() => {
 }
 
 .batch-header-clickable:hover {
-  background: var(--bg-primary);
+  background: var(--bg);
 }
 
 .batch-header-clickable:focus-visible {
-  outline: 2px solid var(--brand-primary);
+  outline: 2px solid var(--brand);
   outline-offset: 2px;
 }
 
 .batch-chevron {
   font-size: 14px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   transition: transform 0.2s ease, color 0.2s ease;
   flex-shrink: 0;
 }
 
 .batch-chevron-open {
   transform: rotate(90deg);
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 .section-label-row {
@@ -482,21 +482,21 @@ onMounted(() => {
 .batch-name {
   font-size: 14px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .batch-count {
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   padding: 2px 8px;
-  background: var(--bg-primary);
+  background: var(--bg);
   border-radius: 10px;
 }
 
 .section-label {
   font-size: 14px;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--text-2);
   margin-bottom: 12px;
 }
 
@@ -505,18 +505,18 @@ onMounted(() => {
 }
 
 :deep(.el-upload-dragger) {
-  background-color: var(--bg-secondary);
-  border: 2px dashed var(--border-default);
+  background-color: var(--bg-2);
+  border: 2px dashed var(--border-2);
   border-radius: 8px;
 }
 
 :deep(.el-upload-dragger:hover) {
-  border-color: var(--brand-primary);
+  border-color: var(--brand);
 }
 
 :deep(.el-card) {
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-default);
+  background-color: var(--bg-2);
+  border: 1px solid var(--border-2);
   border-radius: 8px;
 }
 
@@ -536,7 +536,7 @@ onMounted(() => {
 }
 
 :root[data-theme="night"] .batch-chevron-open {
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 :root[data-theme="night"] .batch-count {

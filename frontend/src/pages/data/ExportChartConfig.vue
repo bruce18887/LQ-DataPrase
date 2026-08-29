@@ -63,8 +63,8 @@ function onBarWidthChange(val: number) {
 .chart-config-panel {
   width: 220px;
   flex-shrink: 0;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
 }
@@ -74,7 +74,7 @@ function onBarWidthChange(val: number) {
   align-items: center;
   gap: 6px;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--border-muted);
+  border-bottom: 1px solid var(--border);
 }
 
 .panel-icon {
@@ -84,7 +84,7 @@ function onBarWidthChange(val: number) {
 .panel-title {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -111,7 +111,7 @@ function onBarWidthChange(val: number) {
 .group-label {
   font-size: 11px;
   font-weight: 500;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -119,7 +119,7 @@ function onBarWidthChange(val: number) {
 .value-tag {
   font-size: 11px;
   font-weight: 700;
-  color: var(--brand-primary);
+  color: var(--brand);
   font-family: var(--font-mono);
 }
 

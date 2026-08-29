@@ -81,8 +81,8 @@
         v-if="result.orphaned_db_count === 0 && result.orphaned_disk_count === 0 && result.missing_product_code_count === 0 && result.duplicate_group_count === 0"
         style="text-align: center; padding: 30px"
       >
-        <el-icon :size="64" style="color: var(--color-success)"><CircleCheck /></el-icon>
-        <p style="color: var(--text-primary); margin-top: 12px; font-size: 16px">
+        <el-icon :size="64" style="color: var(--success)"><CircleCheck /></el-icon>
+        <p style="color: var(--text); margin-top: 12px; font-size: 16px">
           数据修复中心检查通过，无问题发现。
         </p>
       </div>

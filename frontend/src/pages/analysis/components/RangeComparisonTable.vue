@@ -60,7 +60,7 @@ function rangeRowClass({ row }: { row: RangeRow }) {
 .table-header {
   font-weight: 600;
   font-size: 12px;
-  color: var(--text-primary);
+  color: var(--text);
   margin-bottom: 6px;
 }
 </style>

@@ -234,16 +234,16 @@ function onCustomHighChange(val: number | null) {
 .config-title {
   font-weight: 600;
   font-size: 13px;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .more-btn {
   font-size: 11px;
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 
 .more-btn:hover {
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 .config-section {
@@ -256,7 +256,7 @@ function onCustomHighChange(val: number | null) {
 
 .section-label {
   font-size: 11px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   margin-bottom: 4px;
   font-weight: 500;
 }
@@ -269,7 +269,7 @@ function onCustomHighChange(val: number | null) {
 
 .value-hint {
   font-size: 11px;
-  color: var(--text-primary);
+  color: var(--text);
   font-weight: 600;
 }
 
@@ -290,7 +290,7 @@ function onCustomHighChange(val: number | null) {
 }
 
 .custom-limit-section {
-  background: var(--bg-tertiary, #f0f7ff);
+  background: var(--bg-3, #f0f7ff);
   border-radius: 4px;
   padding: 8px;
   margin: -4px -4px 10px -4px;
@@ -320,7 +320,7 @@ function onCustomHighChange(val: number | null) {
 
 .limit-sep {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-weight: 500;
 }
 </style>

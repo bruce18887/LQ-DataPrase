@@ -343,7 +343,7 @@ onMounted(() => {
 
 .section-label {
   font-size: 11px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   margin-bottom: 4px;
   font-weight: 500;
 }
@@ -386,15 +386,15 @@ onMounted(() => {
 
 .common-hint {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 
 .chart-wrapper {
   flex: 1;
   min-height: 520px;
-  background: var(--bg-secondary);
+  background: var(--bg-2);
   border-radius: 6px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--border-2);
   overflow: hidden;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04);
 }

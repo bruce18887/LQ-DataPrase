@@ -219,7 +219,7 @@ onActivated(loadFiles)
 .page-header {
   position: relative;
   padding: 28px 32px 20px;
-  background: var(--bg-primary);
+  background: var(--bg);
   margin-bottom: 0;
 }
 
@@ -231,9 +231,9 @@ onActivated(loadFiles)
   height: 3px;
   background: linear-gradient(
     90deg,
-    var(--brand-primary) 0%,
-    var(--color-info) 50%,
-    var(--brand-secondary) 100%
+    var(--brand) 0%,
+    var(--info) 50%,
+    var(--warn) 100%
   );
 }
 
@@ -250,7 +250,7 @@ onActivated(loadFiles)
   margin: 0 0 4px 0;
   font-size: 22px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--text);
   letter-spacing: -0.02em;
 }
 
@@ -259,7 +259,7 @@ onActivated(loadFiles)
 }
 
 .title-text {
-  background: linear-gradient(135deg, var(--brand-primary), var(--color-info));
+  background: linear-gradient(135deg, var(--brand), var(--info));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -268,7 +268,7 @@ onActivated(loadFiles)
 .page-subtitle {
   margin: 0;
   font-size: 13px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   font-weight: 400;
 }
 
@@ -282,15 +282,15 @@ onActivated(loadFiles)
   flex-direction: column;
   align-items: center;
   padding: 8px 16px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
   border-radius: 10px;
   min-width: 80px;
 }
 
 .stat-label {
   font-size: 11px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -299,7 +299,7 @@ onActivated(loadFiles)
 .stat-value {
   font-size: 20px;
   font-weight: 700;
-  color: var(--brand-primary);
+  color: var(--brand);
   line-height: 1.2;
 }
 
@@ -310,8 +310,8 @@ onActivated(loadFiles)
   position: sticky;
   top: 0;
   z-index: 10;
-  background: var(--bg-primary);
-  border-bottom: 1px solid var(--border-muted);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
   padding: 0 32px;
 }
 
@@ -331,22 +331,22 @@ onActivated(loadFiles)
   cursor: pointer;
   font-size: 13px;
   font-weight: 500;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
 }
 
 .tab-btn:hover {
-  color: var(--text-primary);
-  background: var(--bg-secondary);
+  color: var(--text);
+  background: var(--bg-2);
   border-radius: 8px 8px 0 0;
 }
 
 .tab-btn.active {
-  color: var(--brand-primary);
+  color: var(--brand);
   font-weight: 600;
-  border-bottom-color: var(--brand-primary);
+  border-bottom-color: var(--brand);
 }
 
 .tab-icon {
@@ -360,7 +360,7 @@ onActivated(loadFiles)
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  background: var(--brand-primary);
+  background: var(--brand);
   color: var(--text-inverse);
   border-radius: 9px;
   font-size: 10px;
@@ -386,9 +386,9 @@ onActivated(loadFiles)
   gap: 8px;
   padding: 10px 16px;
   margin-bottom: 16px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-muted);
-  border-left: 3px solid var(--brand-primary);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--brand);
   border-radius: 8px;
   font-size: 13px;
 }
@@ -399,7 +399,7 @@ onActivated(loadFiles)
 }
 
 .banner-label {
-  color: var(--text-tertiary);
+  color: var(--text-3);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -423,7 +423,7 @@ onActivated(loadFiles)
    Night Theme Overrides
    ============================ */
 :root[data-theme="night"] .page-header {
-  background: var(--bg-secondary);
+  background: var(--bg-2);
 }
 
 :root[data-theme="night"] .stat-chip {
@@ -432,7 +432,7 @@ onActivated(loadFiles)
 }
 
 :root[data-theme="night"] .stat-value {
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 :root[data-theme="night"] .tab-btn:hover {
@@ -440,7 +440,7 @@ onActivated(loadFiles)
 }
 
 :root[data-theme="night"] .tab-badge {
-  background: var(--brand-primary);
+  background: var(--brand);
   color: var(--text-inverse);
 }
 

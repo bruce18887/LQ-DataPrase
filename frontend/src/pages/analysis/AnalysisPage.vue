@@ -315,7 +315,7 @@ async function loadWaferGlobal(colorBy: string) {
 }
 .analysis-file-selector :deep(.el-form-item__label) {
   white-space: nowrap;
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-weight: 500;
 }
 .analysis-file-selector :deep(.el-form-item__content) {
@@ -333,7 +333,7 @@ async function loadWaferGlobal(colorBy: string) {
 .sensitivity-hint {
   margin-left: 8px;
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
 }
 @media (max-width: 720px) {
   .analysis-file-selector__select {
@@ -349,42 +349,42 @@ async function loadWaferGlobal(colorBy: string) {
 .range-active-row {
   background-color: rgba(37, 99, 235, 0.08) !important;
   font-weight: bold;
-  color: var(--color-error);
+  color: var(--error);
 }
 
 /* Element Plus 组件覆盖 */
 :deep(.el-select) {
-  --el-select-input-focus-border-color: var(--brand-primary);
+  --el-select-input-focus-border-color: var(--brand);
 }
 
 :deep(.el-tabs--border-card) {
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-default);
+  background-color: var(--bg-2);
+  border: 1px solid var(--border-2);
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
 :deep(.el-tabs--border-card > .el-tabs__header) {
-  background-color: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border-default);
+  background-color: var(--bg-3);
+  border-bottom: 1px solid var(--border-2);
 }
 
 :deep(.el-tabs--border-card > .el-tabs__header .el-tabs__item) {
-  color: var(--text-secondary);
-  border-right: 1px solid var(--border-default);
+  color: var(--text-2);
+  border-right: 1px solid var(--border-2);
 }
 
 :deep(.el-tabs--border-card > .el-tabs__header .el-tabs__item.is-active) {
-  background-color: var(--bg-secondary);
-  color: var(--brand-primary);
+  background-color: var(--bg-2);
+  color: var(--brand);
   font-weight: 600;
 }
 
 :deep(.el-tabs--border-card > .el-tabs__header .el-tabs__item:hover) {
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 :deep(.el-empty) {
-  --el-empty-description-color: var(--text-secondary);
+  --el-empty-description-color: var(--text-2);
 }
 </style>

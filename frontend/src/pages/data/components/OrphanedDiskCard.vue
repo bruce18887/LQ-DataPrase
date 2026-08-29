@@ -35,7 +35,7 @@
     </el-table>
     <div class="card-footer">
       <el-checkbox v-model="importConfirmed">
-        <span style="color: var(--color-success); font-weight: 600">
+        <span style="color: var(--success); font-weight: 600">
           我已确认要导入这 {{ count }} 个文件
         </span>
       </el-checkbox>
@@ -49,7 +49,7 @@
           <el-icon><Download /></el-icon> 导入到数据库
         </el-button>
         <el-checkbox v-model="deleteConfirmed">
-          <span style="color: var(--color-warning); font-weight: 600">
+          <span style="color: var(--warn); font-weight: 600">
             确认删除
           </span>
         </el-checkbox>
@@ -101,13 +101,13 @@ watch(() => [props.items, props.count], () => {
 
 .card-title {
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .card-footer {
   margin-top: 12px;
   padding: 12px;
-  background: var(--bg-secondary);
+  background: var(--bg-2);
   border-radius: 8px;
   display: flex;
   align-items: center;

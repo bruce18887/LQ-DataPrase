@@ -146,7 +146,7 @@ defineExpose({
 }
 
 .bf-zero-rows {
-  color: var(--color-warning);
+  color: var(--warn);
   display: inline-flex;
   margin-right: 4px;
   vertical-align: middle;
@@ -155,7 +155,7 @@ defineExpose({
 .batch-filename {
   cursor: pointer;
   font-size: 12px;
-  color: var(--text-primary);
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -173,11 +173,11 @@ defineExpose({
 }
 
 .batch-filename:hover {
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 .batch-filename.is-active {
-  color: var(--brand-primary);
+  color: var(--brand);
   font-weight: 600;
 }
 
@@ -189,7 +189,7 @@ defineExpose({
 }
 
 .dim-text {
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-size: 12px;
 }
 
@@ -198,7 +198,7 @@ defineExpose({
 }
 
 .size-text {
-  color: var(--color-info);
+  color: var(--info);
   font-weight: 600;
 }
 </style>

@@ -77,10 +77,10 @@ function rateClass(rate: number) {
 }
 
 function rateColor(rate: number) {
-  if (rate >= 99) return 'var(--color-success)'
-  if (rate >= 95) return 'var(--color-info)'
-  if (rate >= 90) return 'var(--color-warning)'
-  return 'var(--color-error)'
+  if (rate >= 99) return 'var(--success)'
+  if (rate >= 95) return 'var(--info)'
+  if (rate >= 90) return 'var(--warn)'
+  return 'var(--error)'
 }
 </script>
 
@@ -92,8 +92,8 @@ function rateColor(rate: number) {
 }
 
 .metric-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px 14px;
   display: flex;
@@ -104,7 +104,7 @@ function rateColor(rate: number) {
 
 .metric-label {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -118,25 +118,25 @@ function rateColor(rate: number) {
 .metric-value {
   font-size: 22px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--text);
   font-family: var(--font-mono);
   line-height: 1.2;
 }
 
 .metric-hint {
   font-size: 11px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.value-fail { color: var(--color-error); }
+.value-fail { color: var(--error); }
 
-.rate-excellent { color: var(--color-success); }
-.rate-good { color: var(--color-info); }
-.rate-warn { color: var(--color-warning); }
-.rate-bad { color: var(--color-error); }
+.rate-excellent { color: var(--success); }
+.rate-good { color: var(--info); }
+.rate-warn { color: var(--warn); }
+.rate-bad { color: var(--error); }
 
 .pass-rate-bar {
   margin-top: 2px;
