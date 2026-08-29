@@ -222,3 +222,18 @@
 
 - `SW_Bin` 全列同值（1.0）→ `scipy.stats.probplot` 相关系数 NaN → DRF 序列化 JSON 变 `null` → 前端 `null.toFixed(4)` 抛 TypeError；同时 Vue 报 `Cannot read properties of null (reading "emitsOptions")`——那是**同一实例多代理事件同步入队后二次代理雪崩**的广义 patch failure 信号，不是独立 bug。
 - Rule: 数值渲染前 `Number.isFinite()` 护、interface 写 `number | null`（见 R4）；回归测试套件须含至少一个「全同值/NaN/离散」用例；instrumentation 里引用 props 的 computed/watch 必须放在 `defineProps` **之后**定义。
+
+## 2026-08-30 指南 §11 页面篇落地（单文件 + 批次两批）
+
+- **列表接口不带 metadata，详情接口补字段**：总览条「测试开始」需 `metadata.start_time`，但
+  `DataFileListSerializer` 不含 metadata（列表 payload 含 mins/maxs 大数组不能扩）→ 页面级
+  `loadFileMeta()` 走既有 `/files/:id/` 详情取 start_time（后端零改动、不新增接口，符合 spec「不新增后端接口」）。
+- **临时截图用例必须带 @pN 标签或接受只跑 Edge**：P0/P1/P2 项目 `grep: /@pN/`，无标签用例只在
+  Edge 项目执行；且 `globalSetup` 每轮重置 DB，历史批次不保留 → 批次截图用例需自造批次目录
+  （`media/data/admin/batch/000_E2E_SHOT_<ts>/` + `/batch-dirs/import/` 注册 + 结束 DELETE + rmSync）。
+- **label 内含子元素时 `getByText(x, { exact: true })` 失败**：总览条 UPH 标签内嵌公式 ? 悬停 span，
+  元素全文是「UPH?」→ exact 'UPH' 匹配不到；含嵌套子节点的标签断言改用正则或容器级 testid。
+- **组合多文件全量轮的成片失败先隔离复跑判定**（R2 复用）：dashboard+batch+theme 组合轮
+  night-visibility 4 失败 + 用例数异常，workers=1 隔离复跑 6/6 全绿 → dev server 并行劣化 flake，非代码回归。
+- **ECharts 渲染器默认 SVG，`var(--token)` 可直用**：项目默认 svg 渲染器，itemStyle/label 传
+  `var(--success)` 等语义色可正常解析（既有组件已验证）；切 canvas 渲染器为已知存量约束，新图同样沿用。
