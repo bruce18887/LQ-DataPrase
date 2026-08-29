@@ -1,92 +1,103 @@
 <template>
-  <div v-if="checks.length" class="qa-bar" role="status">
-    <div
-      v-for="(c, i) in checks"
-      :key="i"
-      class="qa-line"
-      :class="isOk(c) ? 'qa-line--ok' : 'qa-line--warn'"
-    >
-      <span class="qa-icon" aria-hidden="true">{{ isOk(c) ? '✅' : '⚠️' }}</span>
-      <span class="qa-title">QA 数量校验</span>
-      <span class="qa-check">{{ c.check }}</span>
-      <span class="qa-vals">
-        期望 <b>{{ c.expected }}</b> / 实际 <b>{{ c.actual }}</b>
-      </span>
-      <span class="qa-status">{{ c.status }}</span>
+  <!-- QA 数量校验（指南 §10.8 四色横幅 + §11.3）：单行汇总（级别取最高）+
+       点击展开明细（各阶段 入库数 = 测试数 对照）；无校验零占位。 -->
+  <div
+    v-if="checks.length"
+    class="qa-banner"
+    :class="`qa-banner--${tone}`"
+    role="status"
+    data-testid="qa-banner"
+  >
+    <div class="banner-head" role="button" tabindex="0" @click="open = !open" @keydown.enter="open = !open">
+      <span class="b-icon">{{ tone === 'success' ? '✅' : '⚠️' }}</span>
+      <span class="b-title">{{ title }}</span>
+      <span class="b-toggle">{{ open ? '收起明细' : '展开明细' }} <span class="b-caret">{{ open ? '▴' : '▾' }}</span></span>
     </div>
+    <ul v-if="open" class="banner-body">
+      <li v-for="(c, i) in checks" :key="i">
+        <b>{{ c.check }}</b> — 期望 <b>{{ c.expected }}</b> / 实际 <b>{{ c.actual }}</b>
+        <span :class="isOk(c) ? 'st-ok' : 'st-warn'">{{ c.status }}</span>
+      </li>
+    </ul>
   </div>
 </template>
 
 <script setup lang="ts">
-defineProps<{
+import { ref, computed } from 'vue'
+
+const props = defineProps<{
   checks: { check: string; expected: string; actual: string; status: string }[]
 }>()
+
+const open = ref(false)
 
 function isOk(c: { check: string; expected: string; actual: string; status: string }): boolean {
   return !c.status.includes('差异') && c.expected === c.actual
 }
+
+const passCount = computed(() => props.checks.filter(isOk).length)
+
+const tone = computed<'success' | 'warning'>(() =>
+  passCount.value === props.checks.length ? 'success' : 'warning'
+)
+
+const title = computed(() =>
+  tone.value === 'success'
+    ? `QA 数量校验 ${passCount.value}/${props.checks.length} 通过`
+    : `QA 数量校验 ${passCount.value}/${props.checks.length} 通过 · ${props.checks.length - passCount.value} 项差异`
+)
 </script>
 
 <style scoped>
-/* 单行紧凑条：替换原整卡表格；语义同 /sftp、/data 的质量色阈值（绿/黄） */
-.qa-bar {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 16px;
+.qa-banner {
+  margin-bottom: 14px;
+  border-radius: 12px;
+  border: 1px solid;
 }
-
-.qa-line {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 7px 14px;
-  border-radius: 8px;
-  border: 1px solid transparent;
-  font-size: 13px;
-  line-height: 1.4;
-}
-
-.qa-line--ok {
+.qa-banner--success {
   background: color-mix(in srgb, var(--success) 10%, transparent);
-  border-color: color-mix(in srgb, var(--success) 35%, transparent);
+  border-color: color-mix(in srgb, var(--success) 40%, transparent);
 }
-
-.qa-line--warn {
+.qa-banner--warning {
   background: color-mix(in srgb, var(--warn) 10%, transparent);
   border-color: color-mix(in srgb, var(--warn) 40%, transparent);
 }
 
-.qa-icon {
-  flex-shrink: 0;
+.banner-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
 }
-
-.qa-title {
-  font-weight: 600;
-  color: var(--text);
+.b-icon { font-size: 15px; }
+.b-title {
+  font-weight: 700;
+  font-size: 13px;
 }
+.qa-banner--success .b-title { color: var(--success); }
+.qa-banner--warning .b-title { color: var(--warn); }
 
-.qa-check {
+.b-toggle {
+  margin-left: auto;
+  font-size: 12px;
   color: var(--text-2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 480px;
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
 }
 
-.qa-vals b {
+.banner-body {
+  padding: 0 16px 11px 42px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.banner-body li {
+  margin: 3px 0 3px 14px;
+}
+.banner-body li b {
   color: var(--text);
-  font-variant-numeric: tabular-nums;
 }
-
-.qa-line--ok .qa-status {
-  color: var(--success);
-  font-weight: 600;
-}
-
-.qa-line--warn .qa-status {
-  color: var(--warn);
-  font-weight: 600;
-}
+.st-ok { color: var(--success); font-weight: 600; }
+.st-warn { color: var(--warn); font-weight: 600; }
 </style>

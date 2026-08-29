@@ -15,10 +15,10 @@ async function waitBatchYieldCharts(page: import('@playwright/test').Page, timeo
   // Bin 分布卡（CollapsibleSection）默认折叠：先展开，复用组件才挂载
   await expandCollapsedSection(page, '📋 Bin 分布')
 
-  // 复用的单文件组件 section 标题
-  const siteYieldTitle = page.getByText(/Site 良率分布/).first()
+  // 复用的单文件组件 section 标题（2026-08-30 重设计后：Site 卡头 / 分区小标题 / 趋势分隔线）
+  const siteYieldTitle = page.getByText(/Site 良率/).first()
   const binSiteTitle = page.getByText(/Bin .* Site 交叉表/).first()
-  const uphTitle = page.getByText('UPH 效率分析').first()
+  const uphTitle = page.getByText(/UPH 效率明细/).first()
   const yieldTitle = page.getByText('📈 良率趋势', { exact: true })
   await expect(siteYieldTitle).toBeVisible()
   await expect(binSiteTitle).toBeVisible()
@@ -331,27 +331,26 @@ test.describe('仪表板', { tag: ['@dashboard'] }, () => {
       return
     }
 
-    // 1) 标题为「📋 Bin 分布」的卡片内，按出现顺序找到 4 个子 section
+    // 1) 标题为「📋 Bin 分布」的卡片内，按出现顺序找到 4 个子区块
     const binCard = page
       .locator('.section-card')
       .filter({ has: page.locator('.el-card__header', { hasText: '📋 Bin 分布' }) })
       .first()
     await expect(binCard, '应存在「📋 Bin 分布」主卡片').toBeVisible()
 
-    // Bin 分布卡默认折叠（CollapsibleSection）——先展开，子 section 才挂载
+    // Bin 分布卡默认折叠（CollapsibleSection）——先展开，子区块才挂载
     await expandCollapsedSection(page, '📋 Bin 分布')
 
-    // 4 个子 section 标题（Bin 分布有 per-phase 标题 + 3 个 divider 标题）
-    await expect(binCard.locator('.chart-title', { hasText: /各阶段 Bin 明细/ })).toBeVisible()
-    await expect(binCard.locator('.bin-card-section-title', { hasText: /Site 良率分布/ })).toBeVisible()
-    await expect(binCard.locator('.bin-card-section-title', { hasText: /Bin .* Site 交叉表/ })).toBeVisible()
-    await expect(binCard.locator('.bin-card-section-title', { hasText: /UPH 效率分析/ })).toBeVisible()
+    // 4 个子区块（重设计后：Pareto 盒 + Site 卡 + Bin×Site 分区 + UPH 分区）
+    await expect(binCard.locator('.cb-title', { hasText: /Bin 构成/ })).toBeVisible()
+    await expect(binCard.getByText(/Site 良率/).first()).toBeVisible()
+    await expect(binCard.locator('.bin-sub-title', { hasText: /Bin .* Site 交叉表/ })).toBeVisible()
+    await expect(binCard.locator('.bin-sub-title', { hasText: /UPH 效率明细/ })).toBeVisible()
 
-    // 2) 至少 3 个 ECharts 容器（per-phase 饼图 + Top Fail 柱图 + Site 良率柱线图）；
-    // 2026-08-30 重设计：Bin×Site 柱状图已改为「表格/热力图」页签（默认表格视图无图表容器）
+    // 2) Site 柱线组合图容器（per-phase 饼图/柱图已移除，Pareto 为纯 CSS）
     const chartContainers = binCard.locator('.chart-container, .chart-fill, [aria-label*="图"]')
     const chartCount = await chartContainers.count()
-    expect(chartCount, 'Bin 分布卡内图表容器数应 >= 3').toBeGreaterThanOrEqual(3)
+    expect(chartCount, 'Bin 分布卡内图表容器数应 >= 1').toBeGreaterThanOrEqual(1)
     // 每个 chart 容器内应能找到 svg 或 canvas
     for (let i = 0; i < Math.min(chartCount, 6); i++) {
       const container = chartContainers.nth(i)

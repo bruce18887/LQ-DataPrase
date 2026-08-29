@@ -3,6 +3,9 @@
     <template #header>
       <button type="button" class="cs-header" :aria-expanded="open" @click="toggle">
         <span class="cs-title">{{ title }}</span>
+        <span class="cs-extra" @click.stop>
+          <slot name="header-extra" />
+        </span>
         <span class="cs-toggle">{{ open ? '收起 ▲' : '展开 ▼' }}</span>
       </button>
     </template>
@@ -68,6 +71,15 @@ function toggle() {
   font-size: 15px;
   color: var(--text);
 }
+
+.cs-extra {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.cs-extra:empty { display: none; }
+.cs-extra + .cs-toggle { margin-left: 12px; }
 
 .cs-toggle {
   font-size: 13px;
