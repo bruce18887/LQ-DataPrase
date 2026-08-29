@@ -50,7 +50,7 @@
 
       <!-- 5. Phase Detail Table（默认展开，可手动收起；max-height 提升以多显示行） -->
       <CollapsibleSection title="📊 阶段明细表" default-open>
-        <el-table :data="filteredPhases" stripe size="small" :border="true" max-height="560" :row-key="(row: any) => row.filename">
+        <el-table :data="filteredPhases" size="small" max-height="560" class="detail-table" :row-key="(row: any) => row.filename">
           <el-table-column type="expand">
             <template #default="{ row }">
               <div class="phase-detail-expand">
@@ -107,9 +107,9 @@
           </el-table-column>
           <el-table-column prop="program_name" label="程序名称" width="140" />
           <el-table-column prop="lot_id" label="Lot ID" width="120" />
-          <el-table-column prop="total" label="测试总数" width="90" align="center" />
-          <el-table-column prop="pass_count" label="Pass" width="80" align="center" />
-          <el-table-column prop="fail_count" label="Fail" width="70" align="center">
+          <el-table-column prop="total" label="测试总数" width="90" align="right" />
+          <el-table-column prop="pass_count" label="Pass" width="80" align="right" />
+          <el-table-column prop="fail_count" label="Fail" width="70" align="right">
             <template #default="{row}">
               <span :style="{ color: row.fail_count > 0 ? 'var(--error)' : 'var(--success)', fontWeight: 'bold' }">
                 {{ row.fail_count }}
@@ -428,6 +428,11 @@ defineExpose({ handleResize })
 }
 .m-na {
   color: var(--text-3);
+}
+
+/* T2 纯分隔：数字列 tabular-nums */
+.detail-table {
+  font-variant-numeric: tabular-nums;
 }
 
 .phase-detail-expand {

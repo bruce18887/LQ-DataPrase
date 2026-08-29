@@ -28,9 +28,8 @@
       :data="treeData"
       row-key="key"
       :tree-props="{ children: 'children' }"
-      stripe
       size="small"
-      :border="true"
+      class="tree-table"
     >
       <el-table-column prop="phase" label="阶段" min-width="220" show-overflow-tooltip>
         <template #default="{ row }">
@@ -39,10 +38,10 @@
           </span>
         </template>
       </el-table-column>
-      <el-table-column prop="file_count" label="文件数" width="80" align="center" />
-      <el-table-column prop="total" label="测试总数" width="100" align="center" />
-      <el-table-column prop="pass_count" label="Pass" width="90" align="center" />
-      <el-table-column prop="fail_count" label="Fail" width="80" align="center">
+      <el-table-column prop="file_count" label="文件数" width="80" align="right" />
+      <el-table-column prop="total" label="测试总数" width="100" align="right" />
+      <el-table-column prop="pass_count" label="Pass" width="90" align="right" />
+      <el-table-column prop="fail_count" label="Fail" width="80" align="right">
         <template #default="{ row }">
           <span :style="{ color: row.fail_count > 0 ? 'var(--error)' : 'var(--success)', fontWeight: 'bold' }">
             {{ row.fail_count }}
@@ -51,7 +50,7 @@
       </el-table-column>
       <el-table-column prop="yield_pct" label="良率" width="100" align="center">
         <template #default="{ row }">
-          <el-tag size="small" :type="tagType(row.yield_pct)">{{ row.yield_pct }}%</el-tag>
+          <YieldBadge :value="row.yield_pct" />
         </template>
       </el-table-column>
     </el-table>
@@ -61,6 +60,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { PhaseSummary, StageYield } from '../../../../types'
+import YieldBadge from '../../../../components/common/YieldBadge.vue'
 
 const props = defineProps<{
   stages: StageYield[]
@@ -95,12 +95,6 @@ const treeData = computed(() => {
 
 function isParent(row: any): boolean {
   return Array.isArray(row.children)
-}
-
-function tagType(pct: number): 'success' | 'warning' | 'danger' {
-  if (pct >= 95) return 'success'
-  if (pct >= 90) return 'warning'
-  return 'danger'
 }
 
 function formatNumber(n: number | null | undefined): string {
@@ -145,17 +139,23 @@ function labelFor(key: string): string {
   font-weight: 600;
 }
 
-/* —— 总览条 —— */
+/* T2 纯分隔：数字列 tabular-nums */
+.tree-table {
+  font-variant-numeric: tabular-nums;
+}
+
+/* —— 总览条（对齐单文件规格 / 审阅页：卡内 --bg 底、圆角 10） —— */
 .summary-strip {
   display: flex;
   align-items: stretch;
   gap: 10px;
   flex-wrap: wrap;
+  row-gap: 8px;
   margin-bottom: 12px;
-  padding: 8px 12px;
-  border: 1px solid var(--border-2);
-  border-radius: 8px;
-  background: var(--bg-2);
+  padding: 9px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
 }
 
 .strip-item {
