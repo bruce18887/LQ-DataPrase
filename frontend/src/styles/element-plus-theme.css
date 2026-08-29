@@ -94,8 +94,8 @@
   --el-fill-color-darker: #d1d5db;
   --el-fill-color-blank: #ffffff;
 
-  /* ========== 遮罩层 ========== */
-  --el-overlay-color: rgba(15, 23, 42, 0.45);
+  /* ========== 遮罩层（§10.7：统一取语义层 --overlay） ========== */
+  --el-overlay-color: var(--overlay);
   --el-overlay-color-light: rgba(15, 23, 42, 0.3);
   --el-overlay-color-lighter: rgba(15, 23, 42, 0.15);
 
@@ -251,8 +251,8 @@
   --el-fill-color-darker: rgba(255, 255, 255, 0.15);
   --el-fill-color-blank: transparent;
 
-  /* ========== 遮罩层 ========== */
-  --el-overlay-color: rgba(0, 0, 0, 0.7);
+  /* ========== 遮罩层（§10.7：统一取语义层 --overlay） ========== */
+  --el-overlay-color: var(--overlay);
   --el-overlay-color-light: rgba(0, 0, 0, 0.5);
   --el-overlay-color-lighter: rgba(0, 0, 0, 0.3);
 
@@ -445,9 +445,13 @@
   background-color: rgba(26, 26, 46, 0.9);
 }
 
-/* 抽屉 */
+/* 抽屉（§10.7：毛玻璃，双主题规则见文件尾 §10.7 段） */
 :root[data-theme="night"] .el-drawer {
-  background-color: #16213e;
+  background: var(--card-glass) !important;
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
 }
 
 :root[data-theme="night"] .el-drawer__header {
@@ -628,7 +632,7 @@
 }
 
 :root[data-theme="night"] .el-pager li {
-  background-color: rgba(255, 255, 255, 0.05) !important;
+  background-color: color-mix(in srgb, var(--text-2) 8%, transparent) !important;
   color: rgba(255, 255, 255, 0.8) !important;
 }
 
@@ -637,14 +641,18 @@
 }
 
 :root[data-theme="night"] .el-pager li.is-active {
-  background-color: #f9a825 !important;
-  color: #1a1a2e !important;
+  background: var(--grad-brand) !important;
+  color: var(--on-brand) !important;
 }
 
-/* 对话框强制覆盖 */
+/* 对话框强制覆盖（§10.7：--card-glass + blur 14 + r12 + --shadow-lg） */
 :root[data-theme="night"] .el-dialog {
-  background-color: #16213e !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  background: var(--card-glass) !important;
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+  box-shadow: var(--shadow-lg) !important;
 }
 
 :root[data-theme="night"] .el-dialog__header {
@@ -660,14 +668,13 @@
   color: rgba(255, 255, 255, 0.8) !important;
 }
 
-/* 消息框强制覆盖 */
+/* 消息框强制覆盖（§10.7：毛玻璃卡；语义色条/文字由文件尾双主题段接管） */
 :root[data-theme="night"] .el-message {
-  background-color: #16213e !important;
-  border-color: rgba(255, 255, 255, 0.1) !important;
-}
-
-:root[data-theme="night"] .el-message__content {
-  color: rgba(255, 255, 255, 0.9) !important;
+  background: var(--card-glass) !important;
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: var(--shadow-lg) !important;
 }
 
 /* 通知强制覆盖 */
@@ -741,5 +748,146 @@
 
 :root[data-theme="night"] .el-textarea__inner::placeholder {
   color: rgba(255, 255, 255, 0.4) !important;
+}
+
+/* ========================================
+   §10.7 浮层（对话框 / 抽屉 / Toast）+ §10.8 分页
+   双主题通用：只取语义层 token，随 data-theme 自动切换（教训 R7，不写 night 分支）
+   ======================================== */
+
+/* 对话框：--card-glass + blur 14 + r12 + --shadow-lg；标题 14/700，正文 13/--text-2；0.18s 动效 */
+.el-dialog {
+  background: var(--card-glass);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.el-dialog__title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.el-dialog__body {
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.el-dialog-fade-enter-active,
+.el-dialog-fade-leave-active {
+  animation-duration: 0.18s;
+}
+
+/* 确认框（el-message-box）同对话框毛玻璃规格，危险动作用纯红按钮（§10.2） */
+.el-message-box {
+  background: var(--card-glass);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+}
+
+.el-message-box__title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.el-message-box__message {
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.el-message-box__btns .el-button--danger {
+  background: var(--error);
+  border-color: var(--error);
+}
+
+/* 抽屉：毛玻璃；头/体分隔，体可滚动；宽度由调用处 size 决定，限宽 92vw */
+.el-drawer {
+  background: var(--card-glass);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--shadow-lg);
+  max-width: 92vw;
+}
+
+.el-drawer__header {
+  margin-bottom: 0;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.el-drawer__body {
+  overflow-y: auto;
+}
+
+/* Toast（el-message）：顶部居中（EP 默认）+ 毛玻璃卡 + 左 3px 语义色条 + 语义色文字 */
+.el-message {
+  background: var(--card-glass);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+}
+
+.el-message--success {
+  border-left-color: var(--success);
+}
+
+.el-message--warning {
+  border-left-color: var(--warn);
+}
+
+.el-message--error {
+  border-left-color: var(--error);
+}
+
+.el-message--info {
+  border-left-color: var(--info);
+}
+
+.el-message--success .el-message__content {
+  color: var(--success);
+}
+
+.el-message--warning .el-message__content {
+  color: var(--warn);
+}
+
+.el-message--error .el-message__content {
+  color: var(--error);
+}
+
+.el-message--info .el-message__content {
+  color: var(--info);
+}
+
+/* 分页（§10.8）：28×28 圆角 6；激活 = --grad-brand + --on-brand；悬停品牌描边 */
+.el-pagination.is-background .el-pager li,
+.el-pagination.is-background .btn-prev,
+.el-pagination.is-background .btn-next {
+  min-width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
+.el-pagination.is-background .el-pager li:not(.is-disabled):not(.is-active):hover {
+  box-shadow: inset 0 0 0 1px var(--brand);
+}
+
+.el-pagination.is-background .el-pager li.is-active {
+  background: var(--grad-brand);
+  color: var(--on-brand);
 }
 
