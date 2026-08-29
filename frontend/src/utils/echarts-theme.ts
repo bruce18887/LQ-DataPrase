@@ -117,7 +117,7 @@ export function useEChartsTheme() {
 
     textStyle: {
       color: colors.value.textColor,
-      // 与全局字体栈保持一致（typography.ts ↔ variables.css 单一事实来源）
+      // 与全局字体栈保持一致（typography.ts ↔ design-tokens.css 单一事实来源）
       fontFamily: fontFamily.sans
     },
 

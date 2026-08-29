@@ -1,17 +1,168 @@
 /**
- * Element Plus 夜晚主题覆盖
+ * Element Plus 双主题覆盖（light/night 双块对称，教训 R7）
  *
- * 此文件覆盖 Element Plus 的默认 CSS 变量，使其在夜晚主题下正确显示
+ * 此文件覆盖 Element Plus 的默认 CSS 变量，使其在双主题下显示品牌色/语义色（指南 §6.3）
  * 必须在 element-plus/dist/index.css 之后导入
  */
 
 /* ========================================
-   字体 — 跟随项目全局字体栈（--font-sans 定义于 variables.css，单一事实来源）
+   字体 — 跟随项目全局字体栈（--font-sans 定义于 design-tokens.css，单一事实来源）
    作用于全部主题（:root），字体不随主题变化
    ======================================== */
 
 :root {
   --el-font-family: var(--font-sans);
+}
+
+/* ========================================
+   浅色主题 - Element Plus CSS 变量覆盖（指南 §6.3：与语义层 --brand/--success/--warn/--error/--info 同源）
+   ======================================== */
+
+:root[data-theme="light"],
+:root.theme-light {
+
+  /* ========== 品牌色 ========== */
+  --el-color-primary: #2563eb;
+  --el-color-primary-light-3: color-mix(in srgb, #2563eb 70%, white);
+  --el-color-primary-light-5: color-mix(in srgb, #2563eb 50%, white);
+  --el-color-primary-light-7: color-mix(in srgb, #2563eb 30%, white);
+  --el-color-primary-light-8: color-mix(in srgb, #2563eb 20%, white);
+  --el-color-primary-light-9: color-mix(in srgb, #2563eb 12%, transparent);
+  --el-color-primary-dark-2: #1d4ed8;
+
+  /* ========== 语义色 ========== */
+  --el-color-success: #047857;
+  --el-color-success-light-3: color-mix(in srgb, #047857 70%, white);
+  --el-color-success-light-5: color-mix(in srgb, #047857 50%, white);
+  --el-color-success-light-7: color-mix(in srgb, #047857 30%, white);
+  --el-color-success-light-8: color-mix(in srgb, #047857 20%, white);
+  --el-color-success-light-9: color-mix(in srgb, #047857 15%, transparent);
+
+  --el-color-warning: #92400e;
+  --el-color-warning-light-3: color-mix(in srgb, #92400e 70%, white);
+  --el-color-warning-light-5: color-mix(in srgb, #92400e 50%, white);
+  --el-color-warning-light-7: color-mix(in srgb, #92400e 30%, white);
+  --el-color-warning-light-8: color-mix(in srgb, #92400e 20%, white);
+  --el-color-warning-light-9: color-mix(in srgb, #92400e 15%, transparent);
+
+  --el-color-danger: #b91c1c;
+  --el-color-danger-light-3: color-mix(in srgb, #b91c1c 70%, white);
+  --el-color-danger-light-5: color-mix(in srgb, #b91c1c 50%, white);
+  --el-color-danger-light-7: color-mix(in srgb, #b91c1c 30%, white);
+  --el-color-danger-light-8: color-mix(in srgb, #b91c1c 20%, white);
+  --el-color-danger-light-9: color-mix(in srgb, #b91c1c 15%, transparent);
+
+  --el-color-error: #b91c1c;
+  --el-color-error-light-3: color-mix(in srgb, #b91c1c 70%, white);
+  --el-color-error-light-5: color-mix(in srgb, #b91c1c 50%, white);
+  --el-color-error-light-7: color-mix(in srgb, #b91c1c 30%, white);
+  --el-color-error-light-8: color-mix(in srgb, #b91c1c 20%, white);
+  --el-color-error-light-9: color-mix(in srgb, #b91c1c 15%, transparent);
+
+  --el-color-info: #0369a1;
+  --el-color-info-light-3: color-mix(in srgb, #0369a1 70%, white);
+  --el-color-info-light-5: color-mix(in srgb, #0369a1 50%, white);
+  --el-color-info-light-7: color-mix(in srgb, #0369a1 30%, white);
+  --el-color-info-light-8: color-mix(in srgb, #0369a1 20%, white);
+  --el-color-info-light-9: color-mix(in srgb, #0369a1 15%, transparent);
+
+  /* ========== 背景色 ========== */
+  --el-bg-color: #ffffff;
+  --el-bg-color-page: #fafbfc;
+  --el-bg-color-overlay: #ffffff;
+
+  /* ========== 文本色 ========== */
+  --el-text-color-primary: #1f2937;
+  --el-text-color-regular: #4b5563;
+  --el-text-color-secondary: #6b7280;
+  --el-text-color-placeholder: #9ca3af;
+  --el-text-color-disabled: #d1d5db;
+
+  /* ========== 边框色 ========== */
+  --el-border-color: #e5e7eb;
+  --el-border-color-light: #e5e7eb;
+  --el-border-color-lighter: #e5e7eb;
+  --el-border-color-extra-light: #f3f4f6;
+  --el-border-color-dark: #d1d5db;
+  --el-border-color-darker: #9ca3af;
+
+  /* ========== 填充色 ========== */
+  --el-fill-color: #f3f4f6;
+  --el-fill-color-light: #f3f4f6;
+  --el-fill-color-lighter: #fafbfc;
+  --el-fill-color-extra-light: #fafbfc;
+  --el-fill-color-dark: #e5e7eb;
+  --el-fill-color-darker: #d1d5db;
+  --el-fill-color-blank: #ffffff;
+
+  /* ========== 遮罩层 ========== */
+  --el-overlay-color: rgba(15, 23, 42, 0.45);
+  --el-overlay-color-light: rgba(15, 23, 42, 0.3);
+  --el-overlay-color-lighter: rgba(15, 23, 42, 0.15);
+
+  /* ========== 阴影 ========== */
+  --el-box-shadow: 0 4px 12px rgba(15, 23, 42, 0.1), 0 2px 6px rgba(15, 23, 42, 0.06);
+  --el-box-shadow-light: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --el-box-shadow-lighter: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --el-box-shadow-dark: 0 8px 24px rgba(15, 23, 42, 0.14), 0 4px 12px rgba(15, 23, 42, 0.08);
+
+  /* ========== 禁用状态 ========== */
+  --el-disabled-bg-color: #f3f4f6;
+  --el-disabled-text-color: #d1d5db;
+  --el-disabled-border-color: #e5e7eb;
+
+  /* ========== 表格 ========== */
+  --el-table-bg-color: #ffffff;
+  --el-table-tr-bg-color: #ffffff;
+  --el-table-header-bg-color: #f3f4f6;
+  --el-table-row-hover-bg-color: color-mix(in srgb, #2563eb 6%, white);
+  --el-table-current-row-bg-color: color-mix(in srgb, #2563eb 10%, white);
+  --el-table-header-text-color: #1f2937;
+  --el-table-text-color: #4b5563;
+  --el-table-border-color: #e5e7eb;
+  --el-table-fixed-box-shadow: 0 0 10px rgba(15, 23, 42, 0.08);
+
+  /* ========== 输入框 ========== */
+  --el-input-bg-color: #ffffff;
+  --el-input-border-color: #d1d5db;
+  --el-input-hover-border-color: #2563eb;
+  --el-input-focus-border-color: #2563eb;
+  --el-input-text-color: #1f2937;
+  --el-input-placeholder-color: #9ca3af;
+  --el-input-icon-color: #6b7280;
+  --el-input-clear-hover-color: #4b5563;
+
+  /* ========== 下拉菜单 ========== */
+  --el-dropdown-menu-box-shadow: 0 4px 12px rgba(15, 23, 42, 0.1);
+  --el-select-input-focus-border-color: #2563eb;
+
+  /* ========== 对话框 ========== */
+  --el-dialog-bg-color: #ffffff;
+  --el-dialog-box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14), 0 4px 12px rgba(15, 23, 42, 0.08);
+
+  /* ========== 分页器 ========== */
+  --el-pagination-bg-color: #ffffff;
+  --el-pagination-hover-color: #2563eb;
+  --el-pagination-button-disabled-bg-color: #f3f4f6;
+
+  /* ========== 标签页 ========== */
+  --el-tabs-header-bg-color: transparent;
+
+  /* ========== 消息提示 ========== */
+  --el-message-bg-color: #ffffff;
+  --el-message-border-color: #e5e7eb;
+
+  /* ========== 通知 ========== */
+  --el-notification-bg-color: #ffffff;
+  --el-notification-border-color: #e5e7eb;
+
+  /* ========== 弹出框 ========== */
+  --el-popover-bg-color: #ffffff;
+  --el-popover-border-color: #e5e7eb;
+
+  /* ========== 工具提示 ========== */
+  --el-tooltip-bg-color: #1f2937;
+  --el-tooltip-text-color: #ffffff;
 }
 
 /* ========================================
@@ -44,7 +195,8 @@
   --el-color-success-light-8: #92d5cf;
   --el-color-success-light-9: rgba(17, 153, 142, 0.15);
 
-  --el-color-warning: #f9a825;
+  --el-color-warning: #ffd54f;
+  /* light-3..9 维持原 #f9a825 基派生（深底观感连续，2026-08-29 §6.3 对齐时保留） */
   --el-color-warning-light-3: #fbb752;
   --el-color-warning-light-5: #fcc673;
   --el-color-warning-light-7: #fdd594;

@@ -1,5 +1,4 @@
-/* 导入设计系统样式 */
-@import './styles/variables.css';
+/* 导入设计系统样式（颜色/字体/间距 token 均在 styles/design-tokens.css，由 main.ts 引入） */
 @import './styles/utilities.css';
 @import './styles/print.css';
 
