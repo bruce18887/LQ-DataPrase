@@ -169,33 +169,33 @@ onMounted(() => {
 <style scoped>
 .settings-page h2 {
   margin-bottom: 20px;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .settings-tabs {
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-default);
+  background-color: var(--bg-2);
+  border: 1px solid var(--border-2);
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
 :deep(.el-tabs__header) {
-  background-color: var(--bg-tertiary);
-  border-right: 1px solid var(--border-default);
+  background-color: var(--bg-3);
+  border-right: 1px solid var(--border-2);
   border-bottom: none;
 }
 
 :deep(.el-tabs__item) {
-  color: var(--text-secondary);
+  color: var(--text-2);
   justify-content: flex-start;
 }
 
 :deep(.el-tabs__item.is-active) {
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 :deep(.el-tabs__active-bar) {
-  background-color: var(--brand-primary);
+  background-color: var(--brand);
 }
 
 :deep(.el-tabs__content) {
@@ -210,78 +210,78 @@ onMounted(() => {
 }
 
 :deep(.el-form-item__label) {
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 :deep(.el-input__wrapper) {
-  background-color: var(--bg-primary);
+  background-color: var(--bg);
   border-radius: 8px;
-  box-shadow: 0 0 0 1px var(--border-default) inset;
+  box-shadow: 0 0 0 1px var(--border-2) inset;
 }
 
 :deep(.el-input__wrapper:hover) {
-  box-shadow: 0 0 0 1px var(--brand-primary) inset;
+  box-shadow: 0 0 0 1px var(--brand) inset;
 }
 
 :deep(.el-input__wrapper.is-focus) {
-  box-shadow: 0 0 0 1px var(--brand-primary) inset;
+  box-shadow: 0 0 0 1px var(--brand) inset;
 }
 
 :deep(.el-input__inner) {
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 :deep(.el-input__inner::placeholder) {
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 
 :deep(.el-table) {
-  --el-table-bg-color: var(--bg-secondary);
-  --el-table-tr-bg-color: var(--bg-secondary);
-  --el-table-header-bg-color: var(--bg-tertiary);
-  --el-table-border-color: var(--border-default);
-  --el-table-text-color: var(--text-primary);
-  --el-table-header-text-color: var(--text-primary);
+  --el-table-bg-color: var(--bg-2);
+  --el-table-tr-bg-color: var(--bg-2);
+  --el-table-header-bg-color: var(--bg-3);
+  --el-table-border-color: var(--border-2);
+  --el-table-text-color: var(--text);
+  --el-table-header-text-color: var(--text);
 }
 
 :deep(.el-table__empty-text) {
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 
 :deep(.el-slider__runway) {
-  background-color: var(--bg-tertiary);
+  background-color: var(--bg-3);
 }
 
 :deep(.el-slider__bar) {
-  background-color: var(--brand-primary);
+  background-color: var(--brand);
 }
 
 :deep(.el-slider__button) {
-  border-color: var(--brand-primary);
+  border-color: var(--brand);
 }
 
 :deep(.el-input-number) {
-  --el-input-number-border-color: var(--border-default);
+  --el-input-number-border-color: var(--border-2);
 }
 
 :deep(.el-input-number .el-input__wrapper) {
-  background-color: var(--bg-primary);
+  background-color: var(--bg);
 }
 
 :deep(.el-select .el-input__wrapper) {
-  background-color: var(--bg-primary);
+  background-color: var(--bg);
 }
 
 :deep(.el-radio__input.is-checked .el-radio__inner) {
-  background-color: var(--brand-primary);
-  border-color: var(--brand-primary);
+  background-color: var(--brand);
+  border-color: var(--brand);
 }
 
 :deep(.el-radio__label) {
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 :deep(.el-empty__description) {
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 </style>

@@ -62,6 +62,6 @@ function formatDate(dateStr: string | null): string {
   display: flex;
   align-items: center;
   font-size: 14px;
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 </style>

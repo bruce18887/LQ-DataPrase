@@ -155,7 +155,7 @@ onMounted(loadPaths)
 }
 
 .path-value {
-  color: var(--text-primary);
+  color: var(--text);
   word-break: break-all;
 }
 
@@ -182,25 +182,25 @@ onMounted(loadPaths)
 
 .paths-hint {
   font-size: 13px;
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 
 :deep(.el-descriptions) {
-  --el-descriptions-table-border: var(--border-default);
+  --el-descriptions-table-border: var(--border-2);
 }
 
 :deep(.el-descriptions__label) {
-  color: var(--text-primary);
-  background-color: var(--bg-tertiary);
+  color: var(--text);
+  background-color: var(--bg-3);
   width: 140px;
 }
 
 :deep(.el-descriptions__content) {
-  color: var(--text-primary);
-  background-color: var(--bg-secondary);
+  color: var(--text);
+  background-color: var(--bg-2);
 }
 
 :deep(.el-descriptions__cell) {
-  border-color: var(--border-default);
+  border-color: var(--border-2);
 }
 </style>

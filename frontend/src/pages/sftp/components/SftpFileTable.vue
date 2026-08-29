@@ -154,25 +154,25 @@ function joinPath(dir: string, name: string): string {
 .file-name-cell { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
 .file-icon {
   display: flex; align-items: center; justify-content: center;
-  width: 36px; height: 36px; background: var(--bg-tertiary); border-radius: 8px; flex-shrink: 0;
+  width: 36px; height: 36px; background: var(--bg-3); border-radius: 8px; flex-shrink: 0;
 }
-.file-icon :deep(.el-icon) { color: var(--brand-primary); }
-.is-dir .file-icon :deep(.el-icon) { color: var(--color-warning); }
+.file-icon :deep(.el-icon) { color: var(--brand); }
+.is-dir .file-icon :deep(.el-icon) { color: var(--warn); }
 .is-dir .file-icon { background: rgba(217, 119, 6, 0.1); }
 .file-info { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .file-name {
-  font-size: 14px; color: var(--text-primary); font-weight: 500;
+  font-size: 14px; color: var(--text); font-weight: 500;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.is-dir .file-name { color: var(--color-warning); font-weight: 600; }
+.is-dir .file-name { color: var(--warn); font-weight: 600; }
 .file-ext {
-  font-size: 12px; color: var(--text-secondary); background: var(--bg-tertiary);
+  font-size: 12px; color: var(--text-2); background: var(--bg-3);
   padding: 1px 6px; border-radius: 4px; white-space: nowrap;
 }
-.file-size { font-size: 13px; color: var(--text-secondary); font-family: var(--font-mono); }
-.file-time { font-size: 13px; color: var(--text-tertiary); }
+.file-size { font-size: 13px; color: var(--text-2); font-family: var(--font-mono); }
+.file-time { font-size: 13px; color: var(--text-3); }
 .dir-label {
-  font-size: 12px; color: var(--color-warning);
+  font-size: 12px; color: var(--warn);
   background: rgba(217, 119, 6, 0.1); padding: 2px 8px; border-radius: 4px;
 }
 
@@ -181,8 +181,8 @@ function joinPath(dir: string, name: string): string {
 .action-cell :deep(.el-button .el-icon) { margin-right: 2px; }
 
 /* Table header override */
-.file-table :deep(.el-table__header th) { background: var(--bg-tertiary); font-weight: 600; font-size: 13px; }
+.file-table :deep(.el-table__header th) { background: var(--bg-3); font-weight: 600; font-size: 13px; }
 
 /* Empty icon */
-.file-list-card :deep(.el-empty .el-icon) { color: var(--text-tertiary); }
+.file-list-card :deep(.el-empty .el-icon) { color: var(--text-3); }
 </style>

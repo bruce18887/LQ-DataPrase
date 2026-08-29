@@ -29,19 +29,19 @@ import { HomeFilled } from '@element-plus/icons-vue'
 .not-found-code {
   font-size: 96px;
   font-weight: 700;
-  color: var(--brand-primary);
+  color: var(--brand);
   line-height: 1;
   margin: 0 0 16px;
 }
 .not-found-text {
   font-size: 24px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
   margin: 0 0 8px;
 }
 .not-found-desc {
   font-size: 14px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   margin: 0 0 32px;
 }
 </style>

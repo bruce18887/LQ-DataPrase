@@ -55,6 +55,6 @@ function onTimeoutChange(value: number | undefined) {
 
 .sftp-timeout-note {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 </style>

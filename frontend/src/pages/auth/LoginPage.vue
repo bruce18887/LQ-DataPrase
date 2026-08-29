@@ -146,13 +146,13 @@ async function handleLogin() {
   width: 100%;
   max-width: 400px;
   padding: 48px 40px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--brand-primary);
+  background: var(--bg-2);
+  border: 1px solid var(--brand);
   border-radius: 16px;
   box-shadow:
-    0 0 20px rgba(var(--brand-primary-rgb), 0.2),
-    0 0 40px rgba(var(--brand-primary-rgb), 0.1),
-    inset 0 0 60px rgba(var(--brand-primary-rgb), 0.03);
+    0 0 20px color-mix(in srgb, var(--brand) 20%, transparent),
+    0 0 40px color-mix(in srgb, var(--brand) 10%, transparent),
+    inset 0 0 60px color-mix(in srgb, var(--brand) 3%, transparent);
   position: relative;
   z-index: 1;
 }
@@ -166,15 +166,15 @@ async function handleLogin() {
 @keyframes cardGlow {
   0%, 100% {
     box-shadow:
-      0 0 20px rgba(var(--brand-primary-rgb), 0.2),
-      0 0 40px rgba(var(--brand-primary-rgb), 0.1),
-      inset 0 0 60px rgba(var(--brand-primary-rgb), 0.03);
+      0 0 20px color-mix(in srgb, var(--brand) 20%, transparent),
+      0 0 40px color-mix(in srgb, var(--brand) 10%, transparent),
+      inset 0 0 60px color-mix(in srgb, var(--brand) 3%, transparent);
   }
   50% {
     box-shadow:
-      0 0 30px rgba(var(--brand-primary-rgb), 0.3),
-      0 0 60px rgba(var(--brand-primary-rgb), 0.15),
-      inset 0 0 80px rgba(var(--brand-primary-rgb), 0.05);
+      0 0 30px color-mix(in srgb, var(--brand) 30%, transparent),
+      0 0 60px color-mix(in srgb, var(--brand) 15%, transparent),
+      inset 0 0 80px color-mix(in srgb, var(--brand) 5%, transparent);
   }
 }
 
@@ -195,8 +195,8 @@ async function handleLogin() {
 }
 
 .logo-icon {
-  color: var(--brand-primary);
-  filter: drop-shadow(0 0 10px rgba(var(--brand-primary-rgb),0.4));
+  color: var(--brand);
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--brand) 40%, transparent));
   animation: logoFloat 3s ease-in-out infinite;
 }
 
@@ -214,15 +214,15 @@ async function handleLogin() {
   text-align: center;
   font-size: 32px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--text);
   margin: 0 0 8px;
   letter-spacing: 2px;
-  text-shadow: 0 0 20px rgba(var(--brand-primary-rgb),0.3);
+  text-shadow: 0 0 20px color-mix(in srgb, var(--brand) 30%, transparent);
 }
 
 .login-subtitle {
   text-align: center;
-  color: var(--text-secondary);
+  color: var(--text-2);
   margin: 0 0 40px;
   font-size: 14px;
   letter-spacing: 1px;
@@ -239,63 +239,63 @@ async function handleLogin() {
   align-items: center;
   height: 40px;
   line-height: 1.2;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 :deep(.el-form-item__error) {
-  color: var(--color-error);
+  color: var(--error);
   font-size: 12px;
 }
 
 /* 霓虹输入框 */
 :deep(.neon-input .el-input__wrapper) {
-  background-color: var(--bg-primary);
-  border: 1px solid var(--border-default);
+  background-color: var(--bg);
+  border: 1px solid var(--border-2);
   box-shadow: none;
   transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 :deep(.neon-input .el-input__wrapper:hover) {
-  border-color: var(--brand-primary);
+  border-color: var(--brand);
 }
 
 :deep(.neon-input .el-input__wrapper.is-focus) {
-  border-color: var(--brand-primary);
+  border-color: var(--brand);
   box-shadow:
-    0 0 10px rgba(var(--brand-primary-rgb),0.2),
-    0 0 20px rgba(var(--brand-primary-rgb),0.1),
-    inset 0 0 10px rgba(var(--brand-primary-rgb),0.05);
+    0 0 10px color-mix(in srgb, var(--brand) 20%, transparent),
+    0 0 20px color-mix(in srgb, var(--brand) 10%, transparent),
+    inset 0 0 10px color-mix(in srgb, var(--brand) 5%, transparent);
 }
 
 :deep(.neon-input .el-input__inner) {
-  color: var(--text-primary);
+  color: var(--text);
   font-size: 14px;
 }
 
 :deep(.neon-input .el-input__inner::placeholder) {
-  color: var(--text-tertiary);
+  color: var(--text-3);
 }
 
 /* 霓虹按钮 */
 :deep(.neon-button) {
   width: 100%;
   height: 48px;
-  background: var(--brand-primary);
-  border: 1px solid var(--brand-primary);
+  background: var(--brand);
+  border: 1px solid var(--brand);
   border-radius: 8px;
   font-size: 16px;
   font-weight: 600;
   letter-spacing: 2px;
-  box-shadow: 0 0 20px rgba(var(--brand-primary-rgb),0.2);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--brand) 20%, transparent);
   transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
 }
 
 :deep(.neon-button:hover) {
   transform: translateY(-2px);
   box-shadow:
-    0 0 30px rgba(var(--brand-primary-rgb),0.3),
-    0 4px 20px rgba(var(--brand-primary-rgb),0.2);
-  background: var(--brand-primary-hover);
+    0 0 30px color-mix(in srgb, var(--brand) 30%, transparent),
+    0 4px 20px color-mix(in srgb, var(--brand) 20%, transparent);
+  background: var(--brand-2);
 }
 
 :deep(.neon-button:active) {
@@ -303,7 +303,7 @@ async function handleLogin() {
 }
 
 :deep(.neon-button.is-loading) {
-  background: var(--brand-primary);
+  background: var(--brand);
   opacity: 0.8;
 }
 
@@ -323,13 +323,13 @@ async function handleLogin() {
 
 /* 错误提示 */
 .error-msg {
-  color: var(--color-error);
+  color: var(--error);
   text-align: center;
   margin-top: 16px;
   font-size: 13px;
   padding: 12px;
-  background: color-mix(in srgb, var(--color-error) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-error) 30%, transparent);
+  background: color-mix(in srgb, var(--error) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--error) 30%, transparent);
   border-radius: 8px;
   line-height: 1.6;
 }
@@ -349,22 +349,22 @@ async function handleLogin() {
 /* Network / timeout: amber, not red */
 .error-msg--timeout,
 .error-msg--network_error {
-  color: var(--color-warning);
-  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
-  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  border-color: color-mix(in srgb, var(--warn) 30%, transparent);
 }
 /* Disabled / locked */
 .error-msg--account_disabled,
 .error-msg--account_locked {
-  color: var(--color-error-emphasis);
-  background: color-mix(in srgb, var(--color-error) 8%, transparent);
-  border-color: color-mix(in srgb, var(--color-error) 40%, transparent);
+  color: var(--error-2);
+  background: color-mix(in srgb, var(--error) 8%, transparent);
+  border-color: color-mix(in srgb, var(--error) 40%, transparent);
 }
 /* Server error */
 .error-msg--server_error {
-  color: var(--color-warning);
-  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
-  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  border-color: color-mix(in srgb, var(--warn) 30%, transparent);
 }
 
 @keyframes shake {

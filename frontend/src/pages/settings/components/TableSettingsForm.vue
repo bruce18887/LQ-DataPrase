@@ -135,13 +135,13 @@ function toggleGroup(cols: string[], checked: boolean) {
 .form-hint {
   margin-left: 10px;
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   line-height: 1.6;
 }
 
 .hidden-cols-hint {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   margin-bottom: 8px;
   line-height: 1.6;
 }
@@ -153,19 +153,19 @@ function toggleGroup(cols: string[], checked: boolean) {
 }
 
 .platform-section {
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--border-2);
   border-radius: 8px;
   overflow: hidden;
-  background: var(--bg-primary);
+  background: var(--bg);
 }
 
 .platform-title {
   padding: 6px 12px;
   font-size: 13px;
   font-weight: 700;
-  color: var(--text-primary);
-  background: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border-default);
+  color: var(--text);
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border-2);
 }
 
 .property-row {
@@ -173,7 +173,7 @@ function toggleGroup(cols: string[], checked: boolean) {
   align-items: center;
   gap: 24px;
   padding: 5px 12px;
-  border-bottom: 1px solid var(--border-muted);
+  border-bottom: 1px solid var(--border);
 }
 
 .property-row:last-child {
