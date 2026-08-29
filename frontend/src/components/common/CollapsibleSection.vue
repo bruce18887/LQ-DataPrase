@@ -58,7 +58,7 @@ function toggle() {
 }
 
 .cs-header:focus-visible {
-  outline: 2px solid var(--brand-primary);
+  outline: 2px solid var(--brand);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -66,16 +66,16 @@ function toggle() {
 .cs-title {
   font-weight: 600;
   font-size: 15px;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .cs-toggle {
   font-size: 13px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   user-select: none;
 }
 
 .cs-toggle:hover {
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 </style>

@@ -35,18 +35,18 @@ withDefaults(defineProps<Props>(), {
 
 <style scoped>
 .dp-card {
-  background: var(--bg-secondary);
+  background: var(--bg-2);
   border-radius: 8px;
   overflow: hidden;
   transition: box-shadow 0.3s ease, border-color 0.3s ease;
 }
 
 .dp-card--default {
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--border-2);
 }
 
 .dp-card--elevated {
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--border-2);
   box-shadow: var(--shadow-md);
 }
 
@@ -56,54 +56,54 @@ withDefaults(defineProps<Props>(), {
 }
 
 .dp-card--bordered {
-  border: 2px solid var(--border-emphasis);
+  border: 2px solid var(--text-3);
 }
 
 .dp-card--neon {
-  border: 1px solid var(--brand-primary);
+  border: 1px solid var(--brand);
   box-shadow:
-    0 0 10px color-mix(in srgb, var(--brand-primary) 20%, transparent),
-    0 0 20px color-mix(in srgb, var(--brand-primary) 10%, transparent),
-    inset 0 0 10px color-mix(in srgb, var(--brand-primary) 5%, transparent);
+    0 0 10px color-mix(in srgb, var(--brand) 20%, transparent),
+    0 0 20px color-mix(in srgb, var(--brand) 10%, transparent),
+    inset 0 0 10px color-mix(in srgb, var(--brand) 5%, transparent);
 }
 
 .dp-card--neon:hover {
   box-shadow:
-    0 0 15px color-mix(in srgb, var(--brand-primary) 30%, transparent),
-    0 0 30px color-mix(in srgb, var(--brand-primary) 15%, transparent),
-    inset 0 0 15px color-mix(in srgb, var(--brand-primary) 8%, transparent);
+    0 0 15px color-mix(in srgb, var(--brand) 30%, transparent),
+    0 0 30px color-mix(in srgb, var(--brand) 15%, transparent),
+    inset 0 0 15px color-mix(in srgb, var(--brand) 8%, transparent);
 }
 
 :root.theme-night .dp-card--neon {
   box-shadow:
-    0 0 10px var(--brand-primary),
-    0 0 20px color-mix(in srgb, var(--brand-primary) 50%, transparent),
-    inset 0 0 10px color-mix(in srgb, var(--brand-primary) 25%, transparent);
+    0 0 10px var(--brand),
+    0 0 20px color-mix(in srgb, var(--brand) 50%, transparent),
+    inset 0 0 10px color-mix(in srgb, var(--brand) 25%, transparent);
 }
 
 :root.theme-night .dp-card--neon:hover {
   box-shadow:
-    0 0 15px var(--brand-primary),
-    0 0 30px color-mix(in srgb, var(--brand-primary) 50%, transparent),
-    inset 0 0 15px color-mix(in srgb, var(--brand-primary) 40%, transparent);
+    0 0 15px var(--brand),
+    0 0 30px color-mix(in srgb, var(--brand) 50%, transparent),
+    inset 0 0 15px color-mix(in srgb, var(--brand) 40%, transparent);
 }
 
 .dp-card__header {
   padding: 16px 20px;
-  border-bottom: 1px solid var(--border-default);
+  border-bottom: 1px solid var(--border-2);
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .dp-card__body {
   padding: 20px;
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 
 .dp-card__footer {
   padding: 12px 20px;
-  border-top: 1px solid var(--border-default);
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
+  border-top: 1px solid var(--border-2);
+  background: var(--bg-3);
+  color: var(--text-2);
 }
 </style>

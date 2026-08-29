@@ -158,8 +158,8 @@ const handleCommand = (command: string) => {
 <style scoped>
 .topbar {
   height: 56px;
-  background-color: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-default);
+  background-color: var(--bg-2);
+  border-bottom: 1px solid var(--border-2);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -178,25 +178,25 @@ const handleCommand = (command: string) => {
 }
 
 :deep(.el-breadcrumb__item) {
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 
 :deep(.el-breadcrumb__inner) {
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-weight: 500;
   transition: color 0.2s ease;
 }
 
 :deep(.el-breadcrumb__inner:hover) {
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 :deep(.el-breadcrumb__item:last-child .el-breadcrumb__inner) {
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 :deep(.el-breadcrumb__separator) {
-  color: var(--text-tertiary);
+  color: var(--text-3);
 }
 
 /* 右侧工具栏 */
@@ -212,27 +212,27 @@ const handleCommand = (command: string) => {
 }
 
 :deep(.el-input) {
-  --el-input-bg-color: var(--bg-primary);
-  --el-input-border-color: var(--border-default);
-  --el-input-hover-border-color: var(--brand-primary);
-  --el-input-focus-border-color: var(--brand-primary);
-  --el-input-text-color: var(--text-primary);
-  --el-input-placeholder-color: var(--text-secondary);
+  --el-input-bg-color: var(--bg);
+  --el-input-border-color: var(--border-2);
+  --el-input-hover-border-color: var(--brand);
+  --el-input-focus-border-color: var(--brand);
+  --el-input-text-color: var(--text);
+  --el-input-placeholder-color: var(--text-2);
 }
 
 :deep(.el-input__wrapper) {
-  background-color: var(--bg-primary);
+  background-color: var(--bg);
   border-radius: 8px;
   box-shadow: none;
   transition: background-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 :deep(.el-input__wrapper:hover) {
-  box-shadow: 0 0 0 1px var(--brand-primary);
+  box-shadow: 0 0 0 1px var(--brand);
 }
 
 :deep(.el-input__wrapper.is-focus) {
-  box-shadow: 0 0 0 1px var(--brand-primary), 0 0 8px rgba(37, 99, 235, 0.2);
+  box-shadow: 0 0 0 1px var(--brand), 0 0 8px rgba(37, 99, 235, 0.2);
 }
 
 /* 版本徽章 */
@@ -242,20 +242,20 @@ const handleCommand = (command: string) => {
   font-size: 12px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: var(--text-secondary);
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-default);
+  color: var(--text-2);
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
   cursor: pointer;
   transition: color 0.2s ease, border-color 0.2s ease;
 }
 
 .version-badge:hover {
-  color: var(--brand-primary);
-  border-color: var(--brand-primary);
+  color: var(--brand);
+  border-color: var(--brand);
 }
 
 .version-badge:focus-visible {
-  outline: 2px solid var(--brand-primary);
+  outline: 2px solid var(--brand);
   outline-offset: 2px;
 }
 
@@ -265,22 +265,22 @@ const handleCommand = (command: string) => {
 }
 
 :deep(.el-badge__content) {
-  background-color: var(--color-error);
+  background-color: var(--error);
   border: none;
 }
 
 .icon-btn {
-  color: var(--text-secondary);
+  color: var(--text-2);
   transition: color 0.2s ease, background-color 0.2s ease;
 }
 
 .icon-btn:hover {
-  color: var(--brand-primary);
-  background-color: var(--bg-tertiary);
+  color: var(--brand);
+  background-color: var(--bg-3);
 }
 
 .icon-btn:focus-visible {
-  outline: 2px solid var(--brand-primary);
+  outline: 2px solid var(--brand);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -301,11 +301,11 @@ const handleCommand = (command: string) => {
 }
 
 .user-menu:hover {
-  background-color: var(--bg-tertiary);
+  background-color: var(--bg-3);
 }
 
 .user-menu:focus-visible {
-  outline: 2px solid var(--brand-primary);
+  outline: 2px solid var(--brand);
   outline-offset: 2px;
 }
 
@@ -315,7 +315,7 @@ const handleCommand = (command: string) => {
   justify-content: center;
   width: 32px;
   height: 32px;
-  background: var(--brand-primary);
+  background: var(--brand);
   border-radius: 50%;
   color: #fff;
 }
@@ -329,43 +329,43 @@ const handleCommand = (command: string) => {
 .user-name {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
   line-height: 1;
 }
 
 .user-role {
   font-size: 11px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   line-height: 1;
 }
 
 .dropdown-icon {
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-size: 12px;
   transition: transform 0.2s ease;
 }
 
 .user-menu:hover .dropdown-icon {
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 /* 下拉菜单样式 */
 :deep(.el-dropdown-menu) {
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-default);
+  background-color: var(--bg-2);
+  border: 1px solid var(--border-2);
   box-shadow: var(--shadow-lg);
 }
 
 :deep(.el-dropdown-menu__item) {
-  color: var(--text-primary);
+  color: var(--text);
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
 :deep(.el-dropdown-menu__item:hover) {
-  background-color: var(--bg-tertiary);
-  color: var(--brand-primary);
+  background-color: var(--bg-3);
+  color: var(--brand);
 }
 
 :deep(.el-dropdown-menu__item .el-icon) {

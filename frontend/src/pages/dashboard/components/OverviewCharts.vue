@@ -29,11 +29,11 @@ let cpkDistHandle: EchartsHandle | null = null
 let failBarHandle: EchartsHandle | null = null
 
 function _tc() {
-  return getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
+  return getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#ffffff'
 }
 
 function _ts() {
-  return getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || 'rgba(255,255,255,0.8)'
+  return getComputedStyle(document.documentElement).getPropertyValue('--text-2').trim() || 'rgba(255,255,255,0.8)'
 }
 
 /* ── CPK 分布饼图 ── */

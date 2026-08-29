@@ -34,14 +34,14 @@ withDefaults(defineProps<Props>(), {
 }
 
 .dp-button--primary {
-  background: var(--brand-primary);
+  background: var(--brand);
   border: none;
   color: var(--text-inverse);
 }
 
 .dp-button--primary:hover {
-  background: var(--brand-primary-hover);
-  box-shadow: 0 4px 12px rgba(var(--brand-primary-rgb), 0.25);
+  background: var(--brand-2);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--brand) 25%, transparent);
   transform: translateY(-1px);
 }
 
@@ -50,31 +50,31 @@ withDefaults(defineProps<Props>(), {
 }
 
 .dp-button--secondary {
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-emphasis);
-  color: var(--text-primary);
+  background: var(--bg-3);
+  border: 1px solid var(--text-3);
+  color: var(--text);
 }
 
 .dp-button--secondary:hover {
-  background: var(--border-default);
-  border-color: var(--brand-primary);
+  background: var(--border-2);
+  border-color: var(--brand);
 }
 
 .dp-button--neon {
   background: transparent;
-  border: 1px solid var(--brand-primary);
-  color: var(--brand-primary);
+  border: 1px solid var(--brand);
+  color: var(--brand);
   box-shadow:
-    0 0 5px rgba(var(--brand-primary-rgb), 0.2),
-    inset 0 0 5px rgba(var(--brand-primary-rgb), 0.05);
+    0 0 5px color-mix(in srgb, var(--brand) 20%, transparent),
+    inset 0 0 5px color-mix(in srgb, var(--brand) 5%, transparent);
 }
 
 .dp-button--neon:hover {
-  background: rgba(var(--brand-primary-rgb), 0.08);
+  background: color-mix(in srgb, var(--brand) 8%, transparent);
   box-shadow:
-    0 0 15px rgba(var(--brand-primary-rgb), 0.4),
-    0 0 30px rgba(var(--brand-primary-rgb), 0.2),
-    inset 0 0 10px rgba(var(--brand-primary-rgb), 0.1);
+    0 0 15px color-mix(in srgb, var(--brand) 40%, transparent),
+    0 0 30px color-mix(in srgb, var(--brand) 20%, transparent),
+    inset 0 0 10px color-mix(in srgb, var(--brand) 10%, transparent);
   transform: translateY(-1px);
 }
 

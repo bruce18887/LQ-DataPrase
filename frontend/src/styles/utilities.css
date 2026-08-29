@@ -4,34 +4,34 @@
  */
 
 /* ========== 文本颜色 ========== */
-.text-primary { color: var(--text-primary); }
-.text-secondary { color: var(--text-secondary); }
-.text-tertiary { color: var(--text-tertiary); }
+.text-primary { color: var(--text); }
+.text-secondary { color: var(--text-2); }
+.text-tertiary { color: var(--text-3); }
 .text-inverse { color: var(--text-inverse); }
-.text-brand { color: var(--brand-primary); }
-.text-success { color: var(--color-success); }
-.text-warning { color: var(--color-warning); }
-.text-error { color: var(--color-error); }
-.text-info { color: var(--color-info); }
+.text-brand { color: var(--brand); }
+.text-success { color: var(--success); }
+.text-warning { color: var(--warn); }
+.text-error { color: var(--error); }
+.text-info { color: var(--info); }
 
 /* ========== 背景色 ========== */
-.bg-primary { background-color: var(--bg-primary); }
-.bg-secondary { background-color: var(--bg-secondary); }
-.bg-tertiary { background-color: var(--bg-tertiary); }
-.bg-brand { background-color: var(--brand-primary); }
-.bg-success { background-color: var(--color-success); }
-.bg-warning { background-color: var(--color-warning); }
-.bg-error { background-color: var(--color-error); }
-.bg-info { background-color: var(--color-info); }
+.bg-primary { background-color: var(--bg); }
+.bg-secondary { background-color: var(--bg-2); }
+.bg-tertiary { background-color: var(--bg-3); }
+.bg-brand { background-color: var(--brand); }
+.bg-success { background-color: var(--success); }
+.bg-warning { background-color: var(--warn); }
+.bg-error { background-color: var(--error); }
+.bg-info { background-color: var(--info); }
 
 /* ========== 边框 ========== */
-.border { border: 1px solid var(--border-default); }
-.border-muted { border-color: var(--border-muted); }
-.border-emphasis { border-color: var(--border-emphasis); }
-.border-t { border-top: 1px solid var(--border-default); }
-.border-b { border-bottom: 1px solid var(--border-default); }
-.border-l { border-left: 1px solid var(--border-default); }
-.border-r { border-right: 1px solid var(--border-default); }
+.border { border: 1px solid var(--border-2); }
+.border-muted { border-color: var(--border); }
+.border-emphasis { border-color: var(--text-3); }
+.border-t { border-top: 1px solid var(--border-2); }
+.border-b { border-bottom: 1px solid var(--border-2); }
+.border-l { border-left: 1px solid var(--border-2); }
+.border-r { border-right: 1px solid var(--border-2); }
 
 /* ========== 字体大小 ========== */
 .text-xs { font-size: var(--text-xs); }
@@ -150,7 +150,7 @@
 .shadow-sm { box-shadow: var(--shadow-sm); }
 .shadow { box-shadow: var(--shadow-md); }
 .shadow-md { box-shadow: var(--shadow-lg); }
-.shadow-lg { box-shadow: var(--shadow-xl); }
+.shadow-lg { box-shadow: var(--shadow-lg); }
 .shadow-none { box-shadow: none; }
 
 /* ========== 显示 ========== */

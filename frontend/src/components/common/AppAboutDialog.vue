@@ -71,7 +71,7 @@ onUnmounted(() => {
   gap: 8px;
   font-size: 18px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .about-logo {
@@ -80,7 +80,7 @@ onUnmounted(() => {
 
 .about-sub {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   margin-bottom: 4px;
 }
 
@@ -98,12 +98,12 @@ onUnmounted(() => {
 }
 
 .about-row dt {
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 
 .about-row dd {
   margin: 0;
-  color: var(--text-primary);
+  color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 </style>

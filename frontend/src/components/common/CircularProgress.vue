@@ -123,32 +123,32 @@ watch(() => props.loading, (val) => {
 }
 .cp-bg {
   fill: none;
-  stroke: var(--bg-tertiary);
+  stroke: var(--bg-3);
   stroke-width: 5;
 }
 .cp-ring {
   fill: none;
-  stroke: var(--brand-primary);
+  stroke: var(--brand);
   stroke-width: 5;
   stroke-linecap: round;
   stroke-dasharray: 263.9;
   transition: stroke-dashoffset 0.25s ease;
 }
 .cp-ring--done {
-  stroke: var(--color-success);
+  stroke: var(--success);
 }
 .cp-text {
   position: absolute;
   font-size: 12px;
   font-weight: 700;
-  color: var(--brand-primary);
+  color: var(--brand);
   user-select: none;
 }
 .cp-check {
   position: absolute;
   font-size: 18px;
   font-weight: 700;
-  color: var(--color-success);
+  color: var(--success);
   user-select: none;
 }
 

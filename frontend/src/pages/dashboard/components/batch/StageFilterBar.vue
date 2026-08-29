@@ -57,10 +57,10 @@ function yieldClass(pct: number): string {
   align-items: baseline;
   gap: 6px;
   padding: 5px 14px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--border-2);
   border-radius: 999px;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
+  background: var(--bg-2);
+  color: var(--text);
   cursor: pointer;
   font: inherit;
   transition:
@@ -70,17 +70,17 @@ function yieldClass(pct: number): string {
 }
 
 .stage-chip:hover {
-  border-color: var(--brand-primary);
+  border-color: var(--brand);
 }
 
 .stage-chip.is-active {
-  border-color: var(--brand-primary);
-  background: color-mix(in srgb, var(--brand-primary) 12%, transparent);
-  color: var(--brand-primary);
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+  color: var(--brand);
 }
 
 .stage-chip:focus-visible {
-  outline: 2px solid var(--brand-primary);
+  outline: 2px solid var(--brand);
   outline-offset: 2px;
 }
 
@@ -95,19 +95,19 @@ function yieldClass(pct: number): string {
 
 .chip-total {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 
 .chip-yield.yield-good {
-  color: var(--color-success);
+  color: var(--success);
 }
 
 .chip-yield.yield-warn {
-  color: var(--color-warning);
+  color: var(--warn);
 }
 
 .chip-yield.yield-bad {
-  color: var(--color-error);
+  color: var(--error);
 }
 </style>

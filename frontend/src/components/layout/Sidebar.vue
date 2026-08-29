@@ -106,14 +106,14 @@ const toggleCollapse = () => {
   width: 240px;
   height: 100vh;
   height: 100dvh;
-  background-color: var(--bg-secondary);
+  background-color: var(--bg-2);
   display: flex;
   flex-direction: column;
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   z-index: 100;
   overflow: hidden;
-  border-right: 1px solid var(--border-default);
+  border-right: 1px solid var(--border-2);
 }
 
 .sidebar.collapsed {
@@ -126,7 +126,7 @@ const toggleCollapse = () => {
   align-items: center;
   gap: 12px;
   padding: 20px 16px;
-  border-bottom: 1px solid var(--border-default);
+  border-bottom: 1px solid var(--border-2);
   min-height: 76px;
 }
 
@@ -136,7 +136,7 @@ const toggleCollapse = () => {
   justify-content: center;
   width: 40px;
   height: 40px;
-  background: var(--brand-primary);
+  background: var(--brand);
   border-radius: 8px;
   color: #fff;
   flex-shrink: 0;
@@ -160,14 +160,14 @@ const toggleCollapse = () => {
 .logo-title {
   font-size: 18px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--text);
   letter-spacing: -0.5px;
   white-space: nowrap;
 }
 
 .logo-subtitle {
   font-size: 11px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   white-space: nowrap;
 }
 
@@ -184,7 +184,7 @@ const toggleCollapse = () => {
 }
 
 .nav-menu::-webkit-scrollbar-thumb {
-  background: var(--border-default);
+  background: var(--border-2);
   border-radius: 2px;
 }
 
@@ -204,11 +204,11 @@ const toggleCollapse = () => {
 }
 
 .menu-item:hover {
-  background-color: var(--bg-tertiary);
+  background-color: var(--bg-3);
 }
 
 .menu-item:focus-visible {
-  outline: 2px solid var(--brand-primary);
+  outline: 2px solid var(--brand);
   outline-offset: -2px;
 }
 
@@ -230,7 +230,7 @@ const toggleCollapse = () => {
   justify-content: center;
   width: 20px;
   height: 20px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   transition: color 0.2s ease;
   flex-shrink: 0;
   font-size: 20px;
@@ -238,19 +238,19 @@ const toggleCollapse = () => {
 
 .menu-item:hover .menu-icon,
 .menu-item.active .menu-icon {
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 .menu-label {
   font-size: 14px;
-  color: var(--text-primary);
+  color: var(--text);
   font-weight: 500;
   white-space: nowrap;
   transition: color 0.2s ease;
 }
 
 .menu-item.active .menu-label {
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 /* 激活指示器 */
@@ -261,7 +261,7 @@ const toggleCollapse = () => {
   transform: translateY(-50%);
   width: 3px;
   height: 20px;
-  background: var(--brand-primary);
+  background: var(--brand);
   border-radius: 0 2px 2px 0;
   box-shadow: 0 0 8px rgba(37, 99, 235, 0.4), 0 0 16px rgba(37, 99, 235, 0.2);
 }
@@ -274,21 +274,21 @@ const toggleCollapse = () => {
   height: 48px;
   width: 100%;
   cursor: pointer;
-  color: var(--text-secondary);
+  color: var(--text-2);
   transition: background-color 0.2s ease, color 0.2s ease;
   border: none;
-  border-top: 1px solid var(--border-default);
+  border-top: 1px solid var(--border-2);
   background: none;
   font: inherit;
 }
 
 .collapse-btn:hover {
-  background-color: var(--bg-tertiary);
-  color: var(--brand-primary);
+  background-color: var(--bg-3);
+  color: var(--brand);
 }
 
 .collapse-btn:focus-visible {
-  outline: 2px solid var(--brand-primary);
+  outline: 2px solid var(--brand);
   outline-offset: -2px;
 }
 
@@ -320,13 +320,13 @@ const toggleCollapse = () => {
 .divider-line {
   flex: 1;
   height: 1px;
-  background: var(--border-default);
+  background: var(--border-2);
 }
 
 .divider-label {
   font-size: 10px;
   font-weight: 600;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   white-space: nowrap;

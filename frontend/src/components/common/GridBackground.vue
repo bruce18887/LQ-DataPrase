@@ -24,10 +24,10 @@ withDefaults(defineProps<Props>(), {
   position: relative;
   width: 100%;
   height: 100%;
-  background-color: var(--bg-primary);
+  background-color: var(--bg);
   background-image:
-    linear-gradient(rgba(var(--brand-primary-rgb), 0.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(var(--brand-primary-rgb), 0.08) 1px, transparent 1px);
+    linear-gradient(color-mix(in srgb, var(--brand) 8%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--brand) 8%, transparent) 1px, transparent 1px);
   background-size: 50px 50px;
   background-position: center center;
 }
@@ -43,7 +43,7 @@ withDefaults(defineProps<Props>(), {
   background: radial-gradient(
     circle at center,
     transparent 0%,
-    var(--bg-primary) 100%
+    var(--bg) 100%
   );
   pointer-events: none;
 }

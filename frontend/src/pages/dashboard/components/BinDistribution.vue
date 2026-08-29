@@ -59,7 +59,7 @@ const binPieTableData = computed(() => {
 })
 
 function _tc() {
-  return getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#ffffff'
+  return getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#ffffff'
 }
 
 function buildBinOption() {
@@ -136,8 +136,8 @@ defineExpose({ handleResize })
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-default);
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -146,9 +146,9 @@ defineExpose({ handleResize })
   padding: 10px 16px;
   font-weight: 600;
   font-size: 14px;
-  color: var(--text-primary);
-  background: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border-default);
+  color: var(--text);
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border-2);
 }
 .panel-body {
   flex: 1;

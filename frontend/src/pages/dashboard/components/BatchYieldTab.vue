@@ -103,7 +103,7 @@
           <el-table-column prop="pass_count" label="Pass" width="80" align="center" />
           <el-table-column prop="fail_count" label="Fail" width="70" align="center">
             <template #default="{row}">
-              <span :style="{ color: row.fail_count > 0 ? 'var(--color-error)' : 'var(--color-success)', fontWeight: 'bold' }">
+              <span :style="{ color: row.fail_count > 0 ? 'var(--error)' : 'var(--success)', fontWeight: 'bold' }">
                 {{ row.fail_count }}
               </span>
             </template>
@@ -341,40 +341,40 @@ defineExpose({ handleResize })
   border-radius: 8px;
 }
 
-.yield-good { color: var(--color-success); font-weight: 600; }
-.yield-warn { color: var(--color-warning); font-weight: 600; }
-.yield-bad { color: var(--color-error); font-weight: 600; }
+.yield-good { color: var(--success); font-weight: 600; }
+.yield-warn { color: var(--warn); font-weight: 600; }
+.yield-bad { color: var(--error); font-weight: 600; }
 
 :deep(.el-card) {
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-default);
+  background-color: var(--bg-2);
+  border: 1px solid var(--border-2);
   border-radius: 8px;
 }
 
 :deep(.el-card__header) {
-  background-color: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border-default);
-  color: var(--text-primary);
+  background-color: var(--bg-3);
+  border-bottom: 1px solid var(--border-2);
+  color: var(--text);
   font-weight: 600;
   padding: 10px 16px;
 }
 
 :deep(.el-table) {
-  --el-table-bg-color: var(--bg-secondary);
-  --el-table-tr-bg-color: var(--bg-secondary);
-  --el-table-header-bg-color: var(--bg-tertiary);
-  --el-table-border-color: var(--border-default);
-  --el-table-text-color: var(--text-primary);
-  --el-table-header-text-color: var(--text-primary);
+  --el-table-bg-color: var(--bg-2);
+  --el-table-tr-bg-color: var(--bg-2);
+  --el-table-header-bg-color: var(--bg-3);
+  --el-table-border-color: var(--border-2);
+  --el-table-text-color: var(--text);
+  --el-table-header-text-color: var(--text);
 }
 
 :deep(.el-table__body tr:hover > td) {
-  background-color: var(--bg-tertiary) !important;
+  background-color: var(--bg-3) !important;
 }
 
 .phase-detail-expand {
   padding: 12px 20px;
-  background-color: var(--bg-secondary);
+  background-color: var(--bg-2);
 }
 
 .detail-row {
@@ -388,13 +388,13 @@ defineExpose({ handleResize })
   flex-shrink: 0;
   width: 96px;
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   text-align: right;
 }
 
 .detail-value {
   font-size: 13px;
-  color: var(--text-primary);
+  color: var(--text);
   word-break: break-all;
 }
 

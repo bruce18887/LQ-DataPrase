@@ -309,7 +309,7 @@ defineExpose({ handleResize })
 
 .bin-hint {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 
 /* 「当前范围」指示：阶段过滤态高亮，提示下方聚合区块的当前口径 */
@@ -322,16 +322,16 @@ defineExpose({ handleResize })
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-secondary);
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-default);
+  color: var(--text-2);
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
   white-space: nowrap;
 }
 
 .bin-scope--filtered {
-  color: var(--brand-primary);
-  border-color: var(--brand-primary);
-  background: color-mix(in srgb, var(--brand-primary) 10%, transparent);
+  color: var(--brand);
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
 }
 
 .bin-card-divider {
@@ -345,21 +345,21 @@ defineExpose({ handleResize })
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-default);
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
   border-radius: 8px;
 }
 
 .bin-card-section-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
   letter-spacing: 0.3px;
 }
 
 /* 分区标题上的当前所选阶段标识（跟随阶段选择器） */
 .bin-section-phase {
-  color: var(--brand-primary);
+  color: var(--brand);
   font-variant-numeric: tabular-nums;
 }
 
@@ -374,7 +374,7 @@ defineExpose({ handleResize })
 .chart-title {
   font-size: 14px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
   margin-bottom: 8px;
   text-align: center;
 }

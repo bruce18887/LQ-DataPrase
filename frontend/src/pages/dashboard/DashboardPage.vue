@@ -193,7 +193,9 @@ async function onFileChange() {
     if (res.data.error) {
       // Partial error: render whatever data came along
       data.value = d
-      metrics.value = d.metrics
+      // 兜底：/summary/ 缺 metrics 时保持默认值，避免模板 metrics.yield_pct 抛 TypeError
+      // （fresh-seed e2e 既有崩溃，2026-08-29 todo Review 已建议修复）
+      metrics.value = d.metrics || metrics.value
       failTestItems.value = d.fail_test_items || []
       quality.value = { ...d.quality_overview, fail_bin_count: d.quality_overview?.fail_bin_count || 0 }
       binTableData.value = d.bin_table_data || []
@@ -204,9 +206,9 @@ async function onFileChange() {
       return
     }
     data.value = d
-    metrics.value = d.metrics
+    metrics.value = d.metrics || metrics.value
     failTestItems.value = d.fail_test_items
-    quality.value = { ...d.quality_overview, fail_bin_count: d.quality_overview.fail_bin_count || 0 }
+    quality.value = { ...d.quality_overview, fail_bin_count: d.quality_overview?.fail_bin_count || 0 }
     binTableData.value = d.bin_table_data || []
     binSiteColumns.value = d.bin_site_columns || []
     testItemOverview.value = d.test_item_overview || []

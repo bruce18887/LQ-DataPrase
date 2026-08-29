@@ -240,7 +240,7 @@ watch(() => props.fileId, () => {
   text-align: center;
   padding: 12px 8px;
   border-radius: 8px;
-  background: var(--bg-secondary, #f8f9fa);
+  background: var(--bg-2, #f8f9fa);
 }
 
 .uph-metric-primary {
@@ -295,30 +295,30 @@ watch(() => props.fileId, () => {
   align-items: center;
   padding: 10px;
   border-radius: 6px;
-  background: var(--bg-secondary, #f0f4ff);
-  border: 1px solid var(--border-default, #e4e7ed);
+  background: var(--bg-2, #f0f4ff);
+  border: 1px solid var(--border-2, #e4e7ed);
 }
 
 .uph-site-label {
   font-size: 11px;
-  color: var(--text-secondary, #666);
+  color: var(--text-2, #666);
 }
 
 .uph-site-value {
   font-size: 20px;
   font-weight: bold;
-  color: var(--text-primary, #333);
+  color: var(--text, #333);
 }
 
 .uph-site-tested {
   font-size: 10px;
-  color: var(--text-tertiary, #999);
+  color: var(--text-3, #999);
 }
 
 .uph-footer {
   margin-top: 12px;
   text-align: right;
   font-size: 13px;
-  color: var(--text-secondary, #666);
+  color: var(--text-2, #666);
 }
 </style>
