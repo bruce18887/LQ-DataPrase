@@ -23,9 +23,9 @@ const { zoom, showIndicator } = useZoom()
   border-radius: 8px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-primary);
-  background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
-  border: 1px solid var(--border-muted);
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  border: 1px solid var(--border);
   box-shadow: var(--shadow-md);
   backdrop-filter: blur(4px);
   pointer-events: none;

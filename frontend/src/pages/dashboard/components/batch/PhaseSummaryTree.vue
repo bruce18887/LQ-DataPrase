@@ -44,7 +44,7 @@
       <el-table-column prop="pass_count" label="Pass" width="90" align="center" />
       <el-table-column prop="fail_count" label="Fail" width="80" align="center">
         <template #default="{ row }">
-          <span :style="{ color: row.fail_count > 0 ? 'var(--color-error)' : 'var(--color-success)', fontWeight: 'bold' }">
+          <span :style="{ color: row.fail_count > 0 ? 'var(--error)' : 'var(--success)', fontWeight: 'bold' }">
             {{ row.fail_count }}
           </span>
         </template>
@@ -153,9 +153,9 @@ function labelFor(key: string): string {
   flex-wrap: wrap;
   margin-bottom: 12px;
   padding: 8px 12px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--border-2);
   border-radius: 8px;
-  background: var(--bg-secondary);
+  background: var(--bg-2);
 }
 
 .strip-item {
@@ -164,7 +164,7 @@ function labelFor(key: string): string {
   align-items: center;
   gap: 1px;
   padding: 2px 18px;
-  border-right: 1px solid var(--border-default);
+  border-right: 1px solid var(--border-2);
 }
 
 .strip-item:last-child {
@@ -173,13 +173,13 @@ function labelFor(key: string): string {
 
 .strip-label {
   font-size: 11px;
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 
 .strip-value {
   font-size: 18px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--text);
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
 }
@@ -187,32 +187,32 @@ function labelFor(key: string): string {
 .strip-unit {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--text-2);
   margin-left: 1px;
 }
 
 .strip-value--pass {
-  color: var(--color-success);
+  color: var(--success);
 }
 
 .strip-value--fail {
-  color: var(--color-error);
+  color: var(--error);
 }
 
 .strip-value--ok {
-  color: var(--color-success);
+  color: var(--success);
 }
 
 .strip-value--good {
-  color: var(--color-success);
+  color: var(--success);
 }
 
 .strip-value--warn {
-  color: var(--color-warning);
+  color: var(--warn);
 }
 
 .strip-value--bad {
-  color: var(--color-error);
+  color: var(--error);
 }
 
 @media (max-width: 720px) {

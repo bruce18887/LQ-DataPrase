@@ -23,7 +23,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   size: '50px',
-  color: 'var(--brand-primary)'
+  color: 'var(--brand)'
 })
 
 const spinnerStyle = computed(() => ({
@@ -43,14 +43,14 @@ const spinnerStyle = computed(() => ({
   width: 100%;
   height: 100%;
   position: relative;
-  border: 3px solid color-mix(in srgb, var(--brand-primary) 15%, transparent);
-  border-top-color: var(--brand-primary);
-  border-right-color: var(--brand-primary);
+  border: 3px solid color-mix(in srgb, var(--brand) 15%, transparent);
+  border-top-color: var(--brand);
+  border-right-color: var(--brand);
   border-radius: 50%;
   animation: dp-spin 0.8s linear infinite;
   box-shadow:
-    0 0 15px color-mix(in srgb, var(--brand-primary) 25%, transparent),
-    inset 0 0 15px color-mix(in srgb, var(--brand-primary) 10%, transparent);
+    0 0 15px color-mix(in srgb, var(--brand) 25%, transparent),
+    inset 0 0 15px color-mix(in srgb, var(--brand) 10%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {

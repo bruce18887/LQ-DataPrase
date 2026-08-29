@@ -52,21 +52,21 @@ withDefaults(defineProps<Props>(), {
   align-items: center;
   justify-content: center;
   padding: 60px 20px;
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 
 .dp-empty__icon {
   width: 80px;
   height: 80px;
   margin-bottom: 20px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   opacity: 0.6;
 }
 
 .dp-empty__icon svg {
   width: 100%;
   height: 100%;
-  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--brand-primary) 15%, transparent));
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--brand) 15%, transparent));
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -77,7 +77,7 @@ withDefaults(defineProps<Props>(), {
 
 .dp-empty__text {
   font-size: 16px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   margin-bottom: 16px;
   text-align: center;
 }
@@ -97,11 +97,11 @@ withDefaults(defineProps<Props>(), {
 
 /* 悬停效果 */
 .dp-empty:hover .dp-empty__icon {
-  color: var(--brand-primary);
+  color: var(--brand);
   opacity: 0.8;
 }
 
 .dp-empty:hover .dp-empty__icon svg {
-  filter: drop-shadow(0 0 12px color-mix(in srgb, var(--brand-primary) 30%, transparent));
+  filter: drop-shadow(0 0 12px color-mix(in srgb, var(--brand) 30%, transparent));
 }
 </style>

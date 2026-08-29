@@ -19,7 +19,7 @@ const themeStore = useThemeStore()
 const { colors } = useEChartsTheme()
 
 function buildOption() {
-  // 注意：ECharts/zrender 不解析 CSS 变量，'var(--text-primary)' 会回退默认深色
+  // 注意：ECharts/zrender 不解析 CSS 变量，'var(--text)' 会回退默认深色
   //（夜晚不可读）——必须用 useEChartsTheme 的实时色值（2026-08-26 修复）
   const tc = colors.value.textColor
   return {

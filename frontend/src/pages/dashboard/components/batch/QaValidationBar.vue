@@ -49,13 +49,13 @@ function isOk(c: { check: string; expected: string; actual: string; status: stri
 }
 
 .qa-line--ok {
-  background: color-mix(in srgb, var(--color-success) 10%, transparent);
-  border-color: color-mix(in srgb, var(--color-success) 35%, transparent);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  border-color: color-mix(in srgb, var(--success) 35%, transparent);
 }
 
 .qa-line--warn {
-  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
-  border-color: color-mix(in srgb, var(--color-warning) 40%, transparent);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
 }
 
 .qa-icon {
@@ -64,11 +64,11 @@ function isOk(c: { check: string; expected: string; actual: string; status: stri
 
 .qa-title {
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .qa-check {
-  color: var(--text-secondary);
+  color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -76,17 +76,17 @@ function isOk(c: { check: string; expected: string; actual: string; status: stri
 }
 
 .qa-vals b {
-  color: var(--text-primary);
+  color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 
 .qa-line--ok .qa-status {
-  color: var(--color-success);
+  color: var(--success);
   font-weight: 600;
 }
 
 .qa-line--warn .qa-status {
-  color: var(--color-warning);
+  color: var(--warn);
   font-weight: 600;
 }
 </style>

@@ -36,8 +36,8 @@ const toggleTheme = () => {
   height: 36px;
   border: none;
   border-radius: 8px;
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
+  background: var(--bg-3);
+  color: var(--text);
   cursor: pointer;
   transition: background-color 0.3s ease, color 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
   position: relative;
@@ -48,20 +48,20 @@ const toggleTheme = () => {
   content: '';
   position: absolute;
   inset: 0;
-  background: var(--brand-primary);
+  background: var(--brand);
   opacity: 0;
   transition: opacity 0.3s ease;
 }
 
 .theme-toggle:hover {
-  background: var(--brand-primary);
+  background: var(--brand);
   color: var(--text-inverse);
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .theme-toggle:focus-visible {
-  outline: 2px solid var(--brand-primary);
+  outline: 2px solid var(--brand);
   outline-offset: 2px;
 }
 
@@ -100,8 +100,8 @@ const toggleTheme = () => {
 
 :root[data-theme="night"] .theme-toggle:hover,
 :root.theme-night .theme-toggle:hover {
-  background: var(--brand-primary);
-  border-color: var(--brand-primary);
+  background: var(--brand);
+  border-color: var(--brand);
   box-shadow: 0 0 20px rgba(249, 168, 37, 0.4);
 }
 </style>

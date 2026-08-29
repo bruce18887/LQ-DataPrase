@@ -25,7 +25,7 @@ import Topbar from '../components/layout/Topbar.vue'
   display: flex;
   height: 100vh;
   height: 100dvh;
-  background-color: var(--bg-primary);
+  background-color: var(--bg);
   overflow: hidden;
 }
 
@@ -41,10 +41,10 @@ import Topbar from '../components/layout/Topbar.vue'
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  background-color: var(--bg-primary);
+  background-color: var(--bg);
   padding: 24px;
   scrollbar-width: thin;
-  scrollbar-color: var(--border-default) var(--bg-primary);
+  scrollbar-color: var(--border-2) var(--bg);
 }
 
 .content-area::-webkit-scrollbar {
@@ -52,15 +52,15 @@ import Topbar from '../components/layout/Topbar.vue'
 }
 
 .content-area::-webkit-scrollbar-track {
-  background: var(--bg-primary);
+  background: var(--bg);
 }
 
 .content-area::-webkit-scrollbar-thumb {
-  background: var(--border-default);
+  background: var(--border-2);
   border-radius: 4px;
 }
 
 .content-area::-webkit-scrollbar-thumb:hover {
-  background: var(--border-emphasis);
+  background: var(--text-3);
 }
 </style>

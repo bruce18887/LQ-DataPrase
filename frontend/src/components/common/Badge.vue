@@ -37,39 +37,39 @@ withDefaults(defineProps<Props>(), {
 }
 
 .dp-badge--success {
-  background: color-mix(in srgb, var(--color-success) 10%, transparent);
-  color: var(--color-success);
-  border: 1px solid var(--color-success);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  color: var(--success);
+  border: 1px solid var(--success);
   box-shadow:
-    0 0 8px color-mix(in srgb, var(--color-success) 20%, transparent),
-    inset 0 0 8px color-mix(in srgb, var(--color-success) 5%, transparent);
+    0 0 8px color-mix(in srgb, var(--success) 20%, transparent),
+    inset 0 0 8px color-mix(in srgb, var(--success) 5%, transparent);
 }
 
 .dp-badge--warning {
-  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
-  color: var(--color-warning);
-  border: 1px solid var(--color-warning);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--warn);
+  border: 1px solid var(--warn);
   box-shadow:
-    0 0 8px color-mix(in srgb, var(--color-warning) 20%, transparent),
-    inset 0 0 8px color-mix(in srgb, var(--color-warning) 5%, transparent);
+    0 0 8px color-mix(in srgb, var(--warn) 20%, transparent),
+    inset 0 0 8px color-mix(in srgb, var(--warn) 5%, transparent);
 }
 
 .dp-badge--error {
-  background: color-mix(in srgb, var(--color-error) 10%, transparent);
-  color: var(--color-error);
-  border: 1px solid var(--color-error);
+  background: color-mix(in srgb, var(--error) 10%, transparent);
+  color: var(--error);
+  border: 1px solid var(--error);
   box-shadow:
-    0 0 8px color-mix(in srgb, var(--color-error) 20%, transparent),
-    inset 0 0 8px color-mix(in srgb, var(--color-error) 5%, transparent);
+    0 0 8px color-mix(in srgb, var(--error) 20%, transparent),
+    inset 0 0 8px color-mix(in srgb, var(--error) 5%, transparent);
 }
 
 .dp-badge--info {
-  background: color-mix(in srgb, var(--color-info) 10%, transparent);
-  color: var(--color-info);
-  border: 1px solid var(--color-info);
+  background: color-mix(in srgb, var(--info) 10%, transparent);
+  color: var(--info);
+  border: 1px solid var(--info);
   box-shadow:
-    0 0 8px color-mix(in srgb, var(--color-info) 20%, transparent),
-    inset 0 0 8px color-mix(in srgb, var(--color-info) 5%, transparent);
+    0 0 8px color-mix(in srgb, var(--info) 20%, transparent),
+    inset 0 0 8px color-mix(in srgb, var(--info) 5%, transparent);
 }
 
 @media (prefers-reduced-motion: no-preference) {

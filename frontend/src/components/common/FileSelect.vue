@@ -302,7 +302,7 @@ function groupFiles(
 
 .dp-file-option__name {
   font-size: 13px;
-  color: var(--text-primary);
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -310,16 +310,16 @@ function groupFiles(
 }
 
 .dp-file-option__name :deep(mark) {
-  color: var(--brand-primary);
+  color: var(--brand);
   font-weight: 600;
-  background-color: rgba(var(--brand-primary-rgb), 0.15);
+  background-color: color-mix(in srgb, var(--brand) 15%, transparent);
   padding: 0 2px;
   border-radius: 2px;
 }
 
 .dp-file-option__meta {
   font-size: 11px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   margin-top: 2px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -344,16 +344,16 @@ function groupFiles(
 }
 
 .dp-file-select-dropdown .el-select-group__title {
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-size: 12px;
 }
 
 .dp-file-select-dropdown .dp-file-group--pinned .el-select-group__title {
-  color: var(--brand-primary);
+  color: var(--brand);
   font-weight: 600;
 }
 
 .dp-file-select-dropdown .el-select-dropdown__empty {
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 </style>
