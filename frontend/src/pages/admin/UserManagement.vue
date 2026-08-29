@@ -249,7 +249,7 @@ onMounted(loadUsers)
 <style scoped>
 .user-management h2 {
   margin-bottom: 20px;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .kpi-grid {
@@ -293,7 +293,7 @@ onMounted(loadUsers)
 
 /* Night theme KPI card overrides */
 :root.theme-night .kpi-card {
-  color: var(--text-primary);
+  color: var(--text);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 :root.theme-night .kpi-card--blue {
@@ -358,48 +358,48 @@ onMounted(loadUsers)
 }
 
 .status-dot--active {
-  background-color: var(--color-success);
+  background-color: var(--success);
 }
 
 .status-dot--locked {
-  background-color: var(--color-error);
+  background-color: var(--error);
 }
 
 .status-dot--disabled {
-  background-color: var(--text-tertiary);
+  background-color: var(--text-3);
 }
 
 :deep(.el-card) {
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-default);
+  background-color: var(--bg-2);
+  border: 1px solid var(--border-2);
   border-radius: 8px;
 }
 
 :deep(.el-table) {
-  --el-table-bg-color: var(--bg-secondary);
-  --el-table-tr-bg-color: var(--bg-secondary);
-  --el-table-header-bg-color: var(--bg-tertiary);
-  --el-table-border-color: var(--border-default);
-  --el-table-text-color: var(--text-primary);
-  --el-table-row-hover-bg-color: var(--bg-tertiary);
+  --el-table-bg-color: var(--bg-2);
+  --el-table-tr-bg-color: var(--bg-2);
+  --el-table-header-bg-color: var(--bg-3);
+  --el-table-border-color: var(--border-2);
+  --el-table-text-color: var(--text);
+  --el-table-row-hover-bg-color: var(--bg-3);
 }
 
 :deep(.el-input__wrapper) {
-  background-color: var(--bg-primary);
+  background-color: var(--bg);
   border-radius: 8px;
-  box-shadow: 0 0 0 1px var(--border-default) inset;
+  box-shadow: 0 0 0 1px var(--border-2) inset;
 }
 
 :deep(.el-input__wrapper:hover) {
-  box-shadow: 0 0 0 1px var(--brand-primary) inset;
+  box-shadow: 0 0 0 1px var(--brand) inset;
 }
 
 :deep(.el-input__wrapper.is-focus) {
-  box-shadow: 0 0 0 1px var(--brand-primary) inset;
+  box-shadow: 0 0 0 1px var(--brand) inset;
 }
 
 :deep(.el-select .el-input__wrapper) {
-  background-color: var(--bg-primary);
+  background-color: var(--bg);
 }
 
 :deep(.el-button) {
@@ -407,7 +407,7 @@ onMounted(loadUsers)
 }
 
 :deep(.el-divider) {
-  border-color: var(--border-default);
+  border-color: var(--border-2);
 }
 
 @media (max-width: 900px) {

@@ -13,9 +13,9 @@
 :root[data-theme="night"] [class*="toolbar"],
 :root.theme-night .toolbar,
 :root.theme-night [class*="toolbar"] {
-  background-color: var(--bg-secondary) !important;
-  border-color: var(--border-default) !important;
-  color: var(--text-primary) !important;
+  background-color: var(--bg-2) !important;
+  border-color: var(--border-2) !important;
+  color: var(--text) !important;
 }
 
 /* ========================================
@@ -26,8 +26,8 @@
 :root[data-theme="night"] [class*="panel"],
 :root.theme-night .panel,
 :root.theme-night [class*="panel"] {
-  background-color: var(--bg-secondary) !important;
-  border-color: var(--border-default) !important;
+  background-color: var(--bg-2) !important;
+  border-color: var(--border-2) !important;
 }
 
 /* ========================================
@@ -36,7 +36,7 @@
 
 :root[data-theme="night"] .container,
 :root.theme-night .container {
-  background-color: var(--bg-primary) !important;
+  background-color: var(--bg) !important;
 }
 
 /* ========================================

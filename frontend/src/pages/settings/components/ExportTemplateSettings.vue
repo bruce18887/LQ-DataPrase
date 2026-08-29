@@ -152,13 +152,13 @@ const allVariables = computed(() => {
 .template-preview {
   margin-top: 4px;
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 
 .template-hint {
   margin-top: 8px;
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   line-height: 2;
 }
 
@@ -167,10 +167,10 @@ const allVariables = computed(() => {
 }
 
 .template-hint__var code {
-  background-color: var(--bg-tertiary);
-  border: 1px solid var(--border-default);
+  background-color: var(--bg-3);
+  border: 1px solid var(--border-2);
   border-radius: 4px;
   padding: 0 4px;
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 </style>

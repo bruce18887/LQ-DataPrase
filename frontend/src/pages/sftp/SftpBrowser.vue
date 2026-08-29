@@ -427,9 +427,9 @@ function formatSize(bytes: number): string {
   gap: 16px;
   margin-bottom: 24px;
   padding: 16px 20px;
-  background: var(--bg-secondary);
+  background: var(--bg-2);
   border-radius: 8px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--border-2);
   box-shadow: var(--shadow-sm);
 }
 
@@ -439,15 +439,15 @@ function formatSize(bytes: number): string {
   justify-content: center;
   width: 56px;
   height: 56px;
-  background: var(--bg-primary);
+  background: var(--bg);
   border-radius: 8px;
   box-shadow: var(--shadow-sm);
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 .header-title { flex: 1; }
-.header-title h2 { margin: 0; font-size: 22px; font-weight: 600; color: var(--text-primary); }
-.header-subtitle { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); }
+.header-title h2 { margin: 0; font-size: 22px; font-weight: 600; color: var(--text); }
+.header-subtitle { margin: 4px 0 0; font-size: 13px; color: var(--text-2); }
 .status-tag { font-size: 13px; padding: 6px 14px; }
 
 /* File Browser */
@@ -455,22 +455,22 @@ function formatSize(bytes: number): string {
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
 /* Element Plus Overrides */
-:deep(.el-card) { background-color: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; }
+:deep(.el-card) { background-color: var(--bg-2); border: 1px solid var(--border-2); border-radius: 8px; }
 :deep(.el-table) {
-  --el-table-bg-color: var(--bg-secondary);
-  --el-table-tr-bg-color: var(--bg-secondary);
-  --el-table-header-bg-color: var(--bg-tertiary);
-  --el-table-border-color: var(--border-default);
-  --el-table-text-color: var(--text-primary);
-  --el-table-row-hover-bg-color: var(--bg-tertiary);
+  --el-table-bg-color: var(--bg-2);
+  --el-table-tr-bg-color: var(--bg-2);
+  --el-table-header-bg-color: var(--bg-3);
+  --el-table-border-color: var(--border-2);
+  --el-table-text-color: var(--text);
+  --el-table-row-hover-bg-color: var(--bg-3);
 }
-:deep(.el-input__wrapper) { background-color: var(--bg-primary); border-radius: 8px; box-shadow: 0 0 0 1px var(--border-default) inset; }
-:deep(.el-input__wrapper:hover) { box-shadow: 0 0 0 1px var(--brand-primary) inset; }
-:deep(.el-input__wrapper.is-focus) { box-shadow: 0 0 0 1px var(--brand-primary) inset; }
+:deep(.el-input__wrapper) { background-color: var(--bg); border-radius: 8px; box-shadow: 0 0 0 1px var(--border-2) inset; }
+:deep(.el-input__wrapper:hover) { box-shadow: 0 0 0 1px var(--brand) inset; }
+:deep(.el-input__wrapper.is-focus) { box-shadow: 0 0 0 1px var(--brand) inset; }
 :deep(.el-button) { border-radius: 8px; }
-:deep(.el-divider) { border-color: var(--border-default); }
+:deep(.el-divider) { border-color: var(--border-2); }
 :deep(.el-breadcrumb__item) { cursor: pointer; }
-:deep(.el-breadcrumb__item:hover .el-breadcrumb__inner) { color: var(--brand-primary); }
-:deep(.el-breadcrumb__inner) { color: var(--text-secondary); }
-:deep(.el-breadcrumb__separator) { color: var(--text-tertiary); }
+:deep(.el-breadcrumb__item:hover .el-breadcrumb__inner) { color: var(--brand); }
+:deep(.el-breadcrumb__inner) { color: var(--text-2); }
+:deep(.el-breadcrumb__separator) { color: var(--text-3); }
 </style>

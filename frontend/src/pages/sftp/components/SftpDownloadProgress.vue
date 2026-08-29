@@ -57,7 +57,7 @@ function formatBytes(bytes: number): string {
 .download-progress-card {
   border-radius: 8px;
   margin-bottom: 8px;
-  border-left: 4px solid var(--brand-primary);
+  border-left: 4px solid var(--brand);
 }
 .download-progress-card :deep(.el-card__body) { padding: 14px 20px; }
 .progress-info {
@@ -72,14 +72,14 @@ function formatBytes(bytes: number): string {
   gap: 6px;
   font-weight: 600;
   font-size: 14px;
-  color: var(--text-primary);
+  color: var(--text);
 }
-.progress-stats { font-size: 13px; color: var(--text-secondary); }
+.progress-stats { font-size: 13px; color: var(--text-2); }
 .progress-detail {
   display: flex;
   justify-content: space-between;
   margin-top: 8px;
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 </style>
