@@ -14,7 +14,13 @@
     </div>
     <div class="chip">
       <span class="chip-label">Yield</span>
-      <span class="chip-value" :class="yieldClass">{{ metrics.yield_pct != null ? metrics.yield_pct + '%' : '-' }}</span>
+      <YieldBadge
+        v-if="metrics.yield_pct != null"
+        :value="metrics.yield_pct"
+        size="lg"
+        class="chip-yield-badge"
+      />
+      <span v-else class="chip-value">-</span>
     </div>
     <div class="chip-tags">
       <el-tag v-for="a in alerts" :key="a.message" :type="a.level === 'error' ? 'danger' : 'warning'" size="small" effect="plain">
@@ -25,8 +31,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { analysisApi } from '../../../../api/analysis'
+import YieldBadge from '../../../../components/common/YieldBadge.vue'
 
 interface Props {
   fileId: number | null
@@ -51,14 +58,6 @@ const metrics = ref<Metrics>({
   format: 'N/A',
 })
 const alerts = ref<Array<{ level: string; message: string }>>([])
-
-const yieldClass = computed(() => {
-  const y = metrics.value.yield_pct
-  if (y == null) return ''
-  if (y >= 90) return 'yield-good'
-  if (y >= 80) return 'yield-mid'
-  return 'yield-bad'
-})
 
 async function load() {
   if (!props.fileId) {
@@ -133,16 +132,9 @@ watch(() => props.fileId, load, { immediate: true })
   color: var(--error);
 }
 
-.yield-good {
-  color: var(--success);
-}
-
-.yield-mid {
-  color: var(--warn);
-}
-
-.yield-bad {
-  color: var(--error);
+.chip-yield-badge {
+  align-self: flex-start;
+  margin-top: 2px;
 }
 
 .chip-tags {

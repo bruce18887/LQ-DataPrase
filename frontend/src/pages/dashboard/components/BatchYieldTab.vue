@@ -110,9 +110,7 @@
           </el-table-column>
           <el-table-column prop="yield_pct" label="良率" width="80" align="center">
             <template #default="{row}">
-              <el-tag size="small" :type="row.yield_pct >= 95 ? 'success' : row.yield_pct >= 90 ? 'warning' : 'danger'">
-                {{ row.yield_pct }}%
-              </el-tag>
+              <YieldBadge :value="row.yield_pct" />
             </template>
           </el-table-column>
           <el-table-column prop="start_time" label="开始时间" width="170" />
@@ -133,7 +131,8 @@
           <template v-for="site in batchData.sorted_sites" :key="site">
             <el-table-column :label="`${site} 良率`" min-width="110" align="center">
               <template #default="{row}">
-                <span :class="getYieldClass(row[`${site}_yield`])">{{ row[`${site}_yield`] }}</span>
+                <YieldBadge v-if="row[`${site}_yield`] && row[`${site}_yield`] !== 'N/A'" :value="row[`${site}_yield`]" compact />
+                <span v-else>{{ row[`${site}_yield`] }}</span>
               </template>
             </el-table-column>
             <el-table-column :label="`${site} Pass/Total`" min-width="110" align="center">
@@ -142,7 +141,8 @@
           </template>
           <el-table-column label="All Site 良率" min-width="120" align="center" fixed="right">
             <template #default="{row}">
-              <span :class="getYieldClass(row['all_yield'])">{{ row['all_yield'] }}</span>
+              <YieldBadge v-if="row['all_yield'] && row['all_yield'] !== 'N/A'" :value="row['all_yield']" compact />
+              <span v-else>{{ row['all_yield'] }}</span>
             </template>
           </el-table-column>
           <el-table-column label="All Site Pass/Total" min-width="130" align="center" fixed="right">
@@ -177,6 +177,7 @@ import YieldTrendChart from './batch/YieldTrendChart.vue'
 import QaValidationBar from './batch/QaValidationBar.vue'
 import BatchBinSection from './batch/BatchBinSection.vue'
 import CollapsibleSection from '../../../components/common/CollapsibleSection.vue'
+import YieldBadge from '../../../components/common/YieldBadge.vue'
 
 const batches = ref<any[]>([])
 const selectedBatch = ref('')
@@ -242,14 +243,6 @@ const summaryKpi = computed(() => {
 
 // ── Site / Bin×Site / UPH 已下沉为 Bin 分布卡内的「单阶段」口径 ──
 //（由 BatchBinSection 从所选阶段现算，见 phaseSiteYieldRows/phaseBinSite/phaseUph）
-
-function getYieldClass(val: string): string {
-  if (!val || val === 'N/A') return ''
-  const v = parseFloat(val)
-  if (v >= 95) return 'yield-good'
-  if (v >= 90) return 'yield-warn'
-  return 'yield-bad'
-}
 
 function onStageFilter(v: string) {
   stageFilter.value = v
@@ -340,10 +333,6 @@ defineExpose({ handleResize })
   margin-bottom: 16px;
   border-radius: 8px;
 }
-
-.yield-good { color: var(--success); font-weight: 600; }
-.yield-warn { color: var(--warn); font-weight: 600; }
-.yield-bad { color: var(--error); font-weight: 600; }
 
 :deep(.el-card) {
   background-color: var(--bg-2);

@@ -5,7 +5,8 @@
       <el-table :data="formattedBinTableData" stripe size="small" max-height="300" border class="panel-table">
         <el-table-column prop="bin" label="Bin" width="70" align="center" fixed="left">
           <template #default="{ row }">
-            <el-tag :type="row.bin.includes('1') ? 'success' : row.bin === 'Total' ? 'info' : 'danger'" size="small">{{ row.bin }}</el-tag>
+            <el-tag v-if="row.bin === 'Total'" type="info" size="small">{{ row.bin }}</el-tag>
+            <BinTag v-else :label="row.bin" :pct="row._pct" />
           </template>
         </el-table-column>
         <el-table-column v-for="col in binSiteColumns" :key="col" :prop="col" :label="`Site ${col}`" align="center" min-width="90">
@@ -32,6 +33,7 @@
 import { ref, computed, watch, nextTick, onMounted, onActivated, onBeforeUnmount } from 'vue'
 import { initEchartsWhenReady, type EchartsHandle } from '../../../utils/echarts-init'
 import { useThemeStore } from '../../../stores/theme'
+import BinTag from '../../../components/common/BinTag.vue'
 
 const themeStore = useThemeStore()
 
@@ -66,6 +68,8 @@ const formattedBinTableData = computed(() => {
     }
     const grandTotal = totalRow.all_site || 1
     const allPct = grandTotal > 0 ? ((row.all_site / grandTotal) * 100).toFixed(1) : '0.0'
+    // BinTag 高失判定用数值占比（Total 行不渲染 BinTag）
+    formatted._pct = grandTotal > 0 ? (row.all_site / grandTotal) * 100 : 0
     if (row.bin === 'Total') {
       formatted.all_site = row.all_site
     } else {

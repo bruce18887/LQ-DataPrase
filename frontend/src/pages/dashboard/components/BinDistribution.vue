@@ -10,7 +10,7 @@
         <el-table :data="binPieTableData" stripe size="small" max-height="380" border class="panel-table">
           <el-table-column prop="name" label="Bin" min-width="90">
             <template #default="{ row }">
-              <el-tag :type="row.name.includes('1') ? 'success' : 'danger'" size="small">{{ row.name }}</el-tag>
+              <BinTag :label="row.name" :pct="Number(row.pct)" />
             </template>
           </el-table-column>
           <el-table-column prop="value" label="数量" width="80" align="right" sortable />
@@ -37,6 +37,7 @@ import { ref, computed, watch, nextTick, onMounted, onActivated, onBeforeUnmount
 import { initEchartsWhenReady, type EchartsHandle } from '../../../utils/echarts-init'
 import { useThemeStore } from '../../../stores/theme'
 import { formatPercent, MIN_BAR_HEIGHT_PCT } from '../../../utils/chart-bar'
+import BinTag from '../../../components/common/BinTag.vue'
 
 const themeStore = useThemeStore()
 
