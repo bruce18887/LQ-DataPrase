@@ -15,6 +15,12 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-08-29 UI token 迁移（四批）新增教训
+
+- **PowerShell `-File` 传数组参数会被外层 shell 吞**：`powershell -File x.ps1 -Paths @('a','b')` 经 cmd/Node 转手后数组丢失，脚本只收到首元素（表现为「只改了一个文件」）。修：改用 `powershell -Command "& '.\x.ps1' -Paths 'a','b' -Tag '1'"`，-Command 的字符串在子进程内按 PS 语法解析。识别信号：批量脚本报告修改数远小于预期。
+- **CSS 自定义属性值保留换行空白**：`--font-sans` 多行书写时 `getComputedStyle().getPropertyValue` 返回含换行/缩进的声明值，e2e 字面断言（fonts.spec）必挂。修：token 文件里字体栈单行书写；凡被 JS 字面读取的自定义属性都不要折行。
+- **e2e DB 种子重复行污染前缀匹配型断言**：legend-color 的 evaluate 按 `filename.startsWith('BPD60320_FT.')` 取 lot，种子被灌过两套同名行（08-25/08-27）→ 后端 4 个 lot vs UI 选 2 个文件，「柱系列数应等于文件数」4≠2 时挂时绿（取决于并行时序）。修：清理旧套重复行（seed_test_data --refresh 按文件名增量，不会重灌）；写前缀匹配型断言前先查 DB 有无同名重复行（R2 家族）。
+
 ## 2026-08-29 e2e 端口被残留 runserver 进程树劫持（同一会话复现两次）
 
 - **现象**：batch-phase e2e 报 `/api/v1/batch-dirs/import/` 404，但该端点在当前代码明确存在（直连探测命中路由返回 401）。

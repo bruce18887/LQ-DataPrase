@@ -138,25 +138,38 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
 
 ---
 
-# 任务：按设计指南完成 UI Token 迁移（四批）（2026-08-29）🚧
+# 任务：按设计指南完成 UI Token 迁移（四批）（2026-08-29）✅
 
 > 设计文档：docs/specs/2026-08-29-ui-token-migration-design.md（本地，不入仓库）；
 > 用户已确认：四批一次到位 / CVD 过则切序列色 / 直接采新值 / 分批硬替换。
 
 ## 实施清单（指南 §9.2 顺序）
 
-- [ ] 批 1：main.ts 接入 design-tokens.css（variables.css 之后）；非颜色旧变量搬入新文件；
+- [x] 批 1：main.ts 接入 design-tokens.css（variables.css 之后）；非颜色旧变量搬入新文件；
       pages/dashboard/** + components/common/* + components/layout/* 按映射表替换；
-      build + theme/dashboard e2e → commit
-- [ ] 批 2：pages/analysis/** + pages/data/** 替换；build + 相关 e2e → commit
-- [ ] 批 3：其余页面清零旧引用；element-plus-theme.css 按指南 §6.3 对齐（双块对称，
-      warning light→#92400e）；typography.ts 字体栈核对；删 variables.css 与 import；
-      build + theme e2e + 双主题截图 → commit
-- [ ] 批 4：echarts-theme.ts 轴系/文本/tooltip 按 §6.2 对齐；CVD 验证脚本（tasks/）
-      复验 --chart-1..8 双主题色板（protan/deutan ΔE≥15）：过则切新色板，不过维持现状；
-      build + 图表相关 e2e → commit
-- [ ] 收尾：全量 e2e 回归（先对 baseline 判存量失败，R2）；释放所有端口；
-      双主题截图留档；本任务追加 Review；踩坑沉淀 lessons.md
+      build + theme/dashboard e2e → commit（0b03b77，顺带修 DashboardPage metrics 兜底存量崩溃）
+- [x] 批 2：pages/analysis/** + pages/data/** 替换；build + 相关 e2e → commit（122f96e）
+- [x] 批 3：其余页面清零旧引用；element-plus-theme.css 按指南 §6.3 对齐（新增完整 light 块、
+      night warning→#ffd54f、双块对称）；typography.ts 字体栈核对；删 variables.css 与 import；
+      build + theme/fonts e2e + 双主题截图留档 → commit（f939765 / 3b59b35）
+- [x] 批 4：echarts-theme.ts 轴系/文本/tooltip 按 §6.2 对齐；CVD 复验（tasks/cvd_verify.mjs）
+      新色板未过（light 灰/青绿 deutan ΔE=7.6、night 浅蓝/粉红 deutan ΔE=13.6）→ 按口径维持现序列色；
+      build + 图表相关 e2e → commit（4ae5800）
+- [x] 收尾：全量 e2e 回归（存量失败按 R2 判定）；释放端口；双主题截图留档；Review 追加
+
+### Review（2026-08-29）
+
+- 终态达成：design-tokens.css 为唯一 token 事实来源；variables.css 已删；全库 scoped 样式
+  只引用语义层（grep 清零）；EP 双主题块对称（light 新增完整块，出厂蓝 #409eff 回潮风险消除）。
+- CVD 复验结论：现行序列色基线 PASS（脚本口径与历史注释一致）；指南 §3.5 目标色板双主题
+  均未过相邻色 ΔE≥15 → 按用户确认口径维持现序列色，仅轴系/文本/tooltip 对齐（指南 §6.2 允许）。
+- 值差异点实装：--text-3 #9ca3af / --warn light #92400e / night 边框 0.10/0.18 均取新值，
+  双主题截图（test/screenshots_night/token_batch3_*.png）目测无失色区块。
+- 顺带修复两个存量问题（均经 baseline/DB 取证非本次引入）：
+  ① DashboardPage /summary/ 缺 metrics 崩溃（2026-08-29 todo 已建议）→ 兜底默认值；
+  ② e2e DB 残留污染：big_*.csv error 行 + BPD60320 重复种子行（legend-color 前缀匹配 4≠2）→ 清理。
+- 新教训（见 lessons.md 2026-08-29 追加）：PowerShell -File 传数组参数被外层 shell 吞（改 -Command）；
+  CSS 自定义属性多行书写会保留换行空白（fonts.spec 字面断言失败）→ token 字体栈单行书写。
 
 ---
 
