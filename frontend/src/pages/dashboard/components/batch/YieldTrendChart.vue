@@ -35,7 +35,7 @@ function buildOption() {
 
   return {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    legend: { data: ['测试总数', 'Pass数量', '良率'], top: 5, textStyle: { color: tc } },
+    legend: { data: ['测试总数', '良率'], top: 5, textStyle: { color: tc } },
     grid: { left: '3%', right: '4%', bottom: '3%', top: '18%', containLabel: true },
     xAxis: {
       type: 'category',
@@ -73,18 +73,16 @@ function buildOption() {
     ],
     series: [
       {
+        // 柱 = 测试总数（品牌 45% 淡染，审阅页 t-bar 同色）
         name: '测试总数', type: 'bar', data: phases.map((p: any) => p.total),
-        itemStyle: { color: '#4facfe' }, barWidth: '25%',
+        itemStyle: { color: 'color-mix(in srgb, var(--brand) 45%, transparent)' }, barWidth: '40%',
       },
       {
-        name: 'Pass数量', type: 'bar', data: phases.map((p: any) => p.pass_count),
-        itemStyle: { color: '#11998e' }, barWidth: '25%',
-      },
-      {
+        // 线 = 良率走势（--info 蓝）
         name: '良率', type: 'line', yAxisIndex: 1,
         data: phases.map((p: any) => p.yield_pct),
-        itemStyle: { color: '#f5576c' }, lineStyle: { width: 3 },
-        symbol: 'circle', symbolSize: 8,
+        itemStyle: { color: 'var(--info)' }, lineStyle: { width: 2, color: 'var(--info)' },
+        symbol: 'circle', symbolSize: 6,
         label: { show: true, formatter: '{c}%', fontSize: 11, color: tc },
       },
     ],
