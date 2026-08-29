@@ -138,6 +138,28 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
 
 ---
 
+# 任务：按设计指南完成 UI Token 迁移（四批）（2026-08-29）🚧
+
+> 设计文档：docs/specs/2026-08-29-ui-token-migration-design.md（本地，不入仓库）；
+> 用户已确认：四批一次到位 / CVD 过则切序列色 / 直接采新值 / 分批硬替换。
+
+## 实施清单（指南 §9.2 顺序）
+
+- [ ] 批 1：main.ts 接入 design-tokens.css（variables.css 之后）；非颜色旧变量搬入新文件；
+      pages/dashboard/** + components/common/* + components/layout/* 按映射表替换；
+      build + theme/dashboard e2e → commit
+- [ ] 批 2：pages/analysis/** + pages/data/** 替换；build + 相关 e2e → commit
+- [ ] 批 3：其余页面清零旧引用；element-plus-theme.css 按指南 §6.3 对齐（双块对称，
+      warning light→#92400e）；typography.ts 字体栈核对；删 variables.css 与 import；
+      build + theme e2e + 双主题截图 → commit
+- [ ] 批 4：echarts-theme.ts 轴系/文本/tooltip 按 §6.2 对齐；CVD 验证脚本（tasks/）
+      复验 --chart-1..8 双主题色板（protan/deutan ΔE≥15）：过则切新色板，不过维持现状；
+      build + 图表相关 e2e → commit
+- [ ] 收尾：全量 e2e 回归（先对 baseline 判存量失败，R2）；释放所有端口；
+      双主题截图留档；本任务追加 Review；踩坑沉淀 lessons.md
+
+---
+
 # 任务：UI 设计指南 + tokens.css 落地（除组件层）（2026-08-29）✅
 
 > 用户确认 demo 后指示：除组件画廊外其它先给出，组件维持现状。
