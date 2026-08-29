@@ -221,5 +221,26 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
       强制主题面板文字继承、窄视口并排、B 级灰误用等（均已留档于 spec）
 - [x] 定稿回写 `docs/reference/ui-design-guide.md` §10 组件篇（10.1–10.9），§1.2 架构图同步转正；
       组件层不新增 token，规格全部直接取语义层 + color-mix
-- [ ] 落地改造（另行确认排期）：components/common/* 旧霓虹清理与 API 对齐 / YieldBadge·CpkBadge·BinTag
+- [x] 落地改造（2026-08-29 当日完成，见下条任务）：components/common/* 旧霓虹清理与 API 对齐 / YieldBadge·CpkBadge·BinTag
       组件化替换手写 span / EP 浮层覆写对齐 + e2e 维护
+
+---
+
+# 任务：指南 §10 组件篇落地（三批改造）（2026-08-29）✅
+
+> 依据：ui-design-guide.md §10（四批定稿转正）；用户确认：§10.9 三项全做 + LoginPage 霓虹一并清理；
+> 定稿留档：docs/specs/2026-08-29-component-redesign-review-design.md。
+
+## 实施清单
+
+- [x] 批 A（97c0e40）：Button/Card/Badge/Loading/Empty 按 §10 重做（V1 柔和底/渐变 primary/纯红 danger/X 抬升/浅底带卡头）；
+      LoginPage 霓虹→login-input/login-button（e2e 同步）；UserManagement kpi-card 去夜块；全库 `.theme-*` 页面级覆盖清零（grep 0）；
+      两主题 css 删 87+7 处并联选择器；4 页删非 scoped 夜块；多处字面 hex→token
+- [x] 批 B（2b83891）：新增 YieldBadge（≥95▲/≥90◆/<90▼，compact 表格变体）、CpkBadge（A✓绿/B●品牌/C◆琥珀/D▼红底 22%）、
+      BinTag（pass✓good/普通—neutral/高失▼bad，占比≥10% 判高失）三组件；替换 6 处手写 span / el-tag：
+      StageFilterBar/DataQualityBar（阈值 90/80→95/90 对齐）/BatchYieldTab（3 处）/TestItemOverviewSection（弃后端 cpk_color 内联色）/
+      BinDistribution/BinSiteCrossTable；顺带清 TestItemOverviewSection 漏网 hex（#f3f4f6/#fafbfc→浅底带）
+- [x] 批 C（64875cf）：element-plus-theme.css 追加 §10.7/§10.8 双主题通用段（只取语义 token 不写 night 分支）：
+      el-dialog/el-drawer/el-message-box/el-message = --card-glass + blur14 + r12 + --shadow-lg；Toast 左 3px 语义色条 + 语义色文字；
+      分页 28×28 r6 激活 --grad-brand；遮罩 →--overlay；同步把旧 night !important 块（dialog/message/drawer/pager）改为同 token 值防双主题割裂
+- [x] 收尾：全量回归 + 分组隔离复跑判定；DB 污染清理（error 行 + e2e_large_qqplot 残留）；todo/lessons 回写；双主题截图留档；端口释放

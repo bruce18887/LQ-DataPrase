@@ -20,6 +20,11 @@
 - **PowerShell `-File` 传数组参数会被外层 shell 吞**：`powershell -File x.ps1 -Paths @('a','b')` 经 cmd/Node 转手后数组丢失，脚本只收到首元素（表现为「只改了一个文件」）。修：改用 `powershell -Command "& '.\x.ps1' -Paths 'a','b' -Tag '1'"`，-Command 的字符串在子进程内按 PS 语法解析。识别信号：批量脚本报告修改数远小于预期。
 - **CSS 自定义属性值保留换行空白**：`--font-sans` 多行书写时 `getComputedStyle().getPropertyValue` 返回含换行/缩进的声明值，e2e 字面断言（fonts.spec）必挂。修：token 文件里字体栈单行书写；凡被 JS 字面读取的自定义属性都不要折行。
 - **e2e DB 种子重复行污染前缀匹配型断言**：legend-color 的 evaluate 按 `filename.startsWith('BPD60320_FT.')` 取 lot，种子被灌过两套同名行（08-25/08-27）→ 后端 4 个 lot vs UI 选 2 个文件，「柱系列数应等于文件数」4≠2 时挂时绿（取决于并行时序）。修：清理旧套重复行（seed_test_data --refresh 按文件名增量，不会重灌）；写前缀匹配型断言前先查 DB 有无同名重复行（R2 家族）。
+- **批量正则删 CSS 夜块的四种副作用**（批 A 清理 `.theme-*` 覆盖时）：① 选择器列表尾逗号被留成悬空选择器（`SEL,` 后直接 `}`/`</style>`）；② 匹配从 HTML 注释内部的 `:root.theme-night` 文字开始→截断未闭合注释；③ 删 `.theme-*` 行时把选择器行的 `{` 一并带走；④ 补括号过度产生 `, {`。规则：批量 CSS 块删除后必跑括号平衡+悬空逗号体检脚本（见 tasks/_css_check.py 模式）+ build，勿只看 diff。
+- **EP 主题 css 新增双主题通用规则与旧 night !important 块的博弈**：文件尾纯选择器规则（`.el-dialog{...}`）优先级低于 `:root[data-theme="night"] .el-dialog{...!important}`——只加通用段不改 night 块，night 下新规格全部不生效（双主题割裂）。修：通用段与旧 night !important 块**同步改为同 token 值**（如 --card-glass/--grad-brand）；night 块保留 !important 只作兼容兑底。
+- **存量失败判定实例：electron.spec 的 `/login` 用例**：P1 项目带 admin storageState，已登录访问 `/login` 被路由守卫重定向到仪表板（DOM 快照可见已登录页面）→ `.login-container` 永不出现，与代码改动无关（同文件 `/#/login` 用例通过）。判据：error-context 的 DOM 快照 + 项目配置交叉验证，勿盲目修代码。
+- **存量失败判定实例 ×2（组件改造收尾全量回归）**：① boxplot-bool-params / file-switch-param-reset 四例：spec 在 page.evaluate 里裸 `fetch('/api/v1/files/?search=…')` 不带 Authorization 头（JWT 在 localStorage、只有 axios 拦截器会加）→ 后端 401 → file_id 解析失败；WebServer 日志看 401 即定位。② large-data-qqplot 断言 `content-encoding === 'gzip'`：GZipMiddleware 已于 2026-08-11 移除（settings 注释明记勿全局恢复），断言陈旧。另：roadmap.spec 页面在旧提交 9b4418d 已删（/roadmap → 404）；判存量先看 git log -S 与后端日志，勿先怀疑本轮改动。
+- **全量 e2e 中 vite dev server 中途崩溃**：并行负载下 webServer 死掉后大量用例报 `ERR_CONNECTION_REFUSED`（跨套件成片），全量汇总数字不可信——按 R2 分组隔离复跑（每轮新 webServer，workers≤2）再定论；纯 UI 套件（theme/data/sftp/exports）隔离后全绿即为环境性。
 
 ## 2026-08-29 e2e 端口被残留 runserver 进程树劫持（同一会话复现两次）
 
