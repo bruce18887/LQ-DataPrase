@@ -18,7 +18,7 @@
       @click="$emit('update:modelValue', modelValue === s.stage ? '' : s.stage)"
     >
       <span class="chip-name">{{ s.stage }}</span>
-      <YieldBadge :value="s.yield_pct" compact />
+      <span class="chip-yield">{{ formatYield(s.yield_pct) }}%</span>
       <span class="chip-total">{{ s.total.toLocaleString() }}</span>
     </button>
   </div>
@@ -26,7 +26,6 @@
 
 <script setup lang="ts">
 import type { StageYield } from '../../../../types'
-import YieldBadge from '../../../../components/common/YieldBadge.vue'
 
 defineProps<{
   stages: StageYield[]
@@ -36,6 +35,11 @@ defineProps<{
 defineEmits<{
   'update:modelValue': [value: string]
 }>()
+
+function formatYield(n: number | null | undefined): string {
+  if (n == null || Number.isNaN(n)) return '-'
+  return n.toFixed(2)
+}
 </script>
 
 <style scoped>
@@ -68,9 +72,15 @@ defineEmits<{
 }
 
 .stage-chip.is-active {
-  border-color: var(--brand);
-  background: color-mix(in srgb, var(--brand) 12%, transparent);
-  color: var(--brand);
+  border-color: transparent;
+  background: var(--grad-brand);
+  color: var(--on-brand);
+  box-shadow: var(--shadow-sm);
+}
+
+.stage-chip.is-active .chip-total {
+  color: var(--on-brand);
+  opacity: 0.85;
 }
 
 .stage-chip:focus-visible {
@@ -85,6 +95,16 @@ defineEmits<{
 .chip-total {
   font-size: 12px;
   color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.stage-chip.is-active .chip-yield,
+.stage-chip.is-active .chip-name {
+  color: var(--on-brand);
+}
+
+.chip-yield {
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 </style>

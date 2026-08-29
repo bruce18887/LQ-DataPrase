@@ -1,43 +1,51 @@
 <template>
   <div class="batch-yield-tab">
-    <!-- Batch selector -->
-    <BatchSelectorBar
-      :batches="batches"
-      :selected-batch="selectedBatch"
-      :loading="loading"
-      :exporting="exporting"
-      :has-data="!!batchData"
-      @update:selectedBatch="onBatchSelect"
-      @load="loadBatchData"
-      @export="exportExcel"
-    />
+    <!-- 页头一行（指南 §11.3）：标题 + 批次下拉 + 元信息 + 加载/导出按钮 -->
+    <header class="batch-head">
+      <h1 class="batch-title"><span aria-hidden="true">📦</span> 批次良率</h1>
+      <div class="batch-selector">
+        <el-select
+          :model-value="selectedBatch"
+          placeholder="选择批次"
+          clearable
+          @update:model-value="onBatchSelect"
+          style="width: 300px"
+        >
+          <el-option
+            v-for="b in batches"
+            :key="b.batch_name"
+            :label="`${b.batch_name} (${b.count}文件)`"
+            :value="b.batch_name"
+          />
+        </el-select>
+      </div>
+      <span class="batch-meta">{{ fileCountText }} · 更新: {{ updateTime }}</span>
+      <el-button :loading="loading" :disabled="!selectedBatch" @click="loadBatchData">🔍 加载批次报表</el-button>
+      <el-button v-if="batchData" type="primary" :loading="exporting" @click="exportExcel">📄 导出 Excel</el-button>
+    </header>
 
     <template v-if="batchData">
-      <!-- 1. 阶段胶囊过滤条：点击即全局过滤（替代原分阶段良率表） -->
+      <!-- 1. 阶段胶囊过滤条：点击即全局过滤（激活 = 品牌渐变实底） -->
       <StageFilterBar
         :stages="batchData.stage_yields || []"
         :model-value="stageFilter"
         @update:modelValue="onStageFilter"
       />
 
-      <!-- 2. QA 数量校验：紧凑单行条（替代原整卡表格），仅全部/FT 阶段可见 -->
+      <!-- 2. QA 数量校验：四色横幅（可展开明细），仅全部/FT 阶段可见 -->
       <QaValidationBar :checks="visibleQaChecks" />
 
-      <!-- 3. 阶段汇总（总览条 + 树形：stage 聚合行 → 版本明细行） -->
+      <!-- 3. 阶段汇总卡：总览条 + 树形表 + 良率趋势同卡合并 -->
       <el-card v-if="filteredStages.length" shadow="never" class="section-card">
-        <template #header>📋 阶段汇总</template>
+        <template #header>📋 阶段汇总 <span class="card-desc">总览条 + 树形表 + 良率趋势</span></template>
         <PhaseSummaryTree
           :stages="filteredStages"
           :phases="filteredSummary"
           :kpi="summaryKpi"
           :stage-filtered="!!stageFilter"
         />
-      </el-card>
-
-      <!-- 4. Yield Trend Combo Chart (Bar + Line)，随阶段过滤收窄 -->
-      <el-card v-if="filteredPhases.length" shadow="never" class="section-card">
-        <template #header>📈 良率趋势</template>
-        <YieldTrendChart ref="yieldTrendChartRef" :phases="filteredPhases" />
+        <div v-if="filteredPhases.length" class="trend-divider">📈 良率趋势</div>
+        <YieldTrendChart v-if="filteredPhases.length" ref="yieldTrendChartRef" :phases="filteredPhases" />
       </el-card>
 
       <!-- 5. Phase Detail Table（默认展开，可手动收起；max-height 提升以多显示行） -->
@@ -124,29 +132,29 @@
         </el-table>
       </CollapsibleSection>
 
-      <!-- 6. Site Yield Matrix（默认展开，可手动收起；min-width 弹性撑满 UI） -->
+      <!-- 6. Site Yield Matrix（每 Site 合并单列：良率徽章 + Pass/Total 小字） -->
       <CollapsibleSection title="🏭 各 Site 良率矩阵" default-open>
-        <el-table :data="filteredSiteMatrix" stripe size="small" :border="true" max-height="350">
+        <el-table :data="filteredSiteMatrix" size="small" max-height="350" class="matrix-table">
           <el-table-column prop="phase" label="阶段" min-width="80" fixed show-overflow-tooltip />
           <template v-for="site in batchData.sorted_sites" :key="site">
-            <el-table-column :label="`${site} 良率`" min-width="110" align="center">
+            <el-table-column :label="site" min-width="130" align="center">
               <template #default="{row}">
-                <YieldBadge v-if="row[`${site}_yield`] && row[`${site}_yield`] !== 'N/A'" :value="row[`${site}_yield`]" compact />
-                <span v-else>{{ row[`${site}_yield`] }}</span>
+                <template v-if="row[`${site}_yield`] && row[`${site}_yield`] !== 'N/A'">
+                  <YieldBadge :value="row[`${site}_yield`]" compact />
+                  <span class="m-ratio">{{ row[`${site}_ratio`] }}</span>
+                </template>
+                <span v-else class="m-na">{{ row[`${site}_yield`] }}</span>
               </template>
             </el-table-column>
-            <el-table-column :label="`${site} Pass/Total`" min-width="110" align="center">
-              <template #default="{row}">{{ row[`${site}_ratio`] }}</template>
-            </el-table-column>
           </template>
-          <el-table-column label="All Site 良率" min-width="120" align="center" fixed="right">
+          <el-table-column label="All Site" min-width="140" align="center" fixed="right">
             <template #default="{row}">
-              <YieldBadge v-if="row['all_yield'] && row['all_yield'] !== 'N/A'" :value="row['all_yield']" compact />
-              <span v-else>{{ row['all_yield'] }}</span>
+              <template v-if="row['all_yield'] && row['all_yield'] !== 'N/A'">
+                <YieldBadge :value="row['all_yield']" compact />
+                <span class="m-ratio">{{ row['all_ratio'] }}</span>
+              </template>
+              <span v-else class="m-na">{{ row['all_yield'] }}</span>
             </template>
-          </el-table-column>
-          <el-table-column label="All Site Pass/Total" min-width="130" align="center" fixed="right">
-            <template #default="{row}">{{ row['all_ratio'] }}</template>
           </el-table-column>
         </el-table>
       </CollapsibleSection>
@@ -170,7 +178,6 @@ import { ref, computed, onMounted, onActivated, onBeforeUnmount, watch } from 'v
 import { ElMessage } from 'element-plus'
 import { batchApi } from '../../../api/batch'
 import { useFilesStore } from '../../../stores/files'
-import BatchSelectorBar from './batch/BatchSelectorBar.vue'
 import StageFilterBar from './batch/StageFilterBar.vue'
 import PhaseSummaryTree from './batch/PhaseSummaryTree.vue'
 import YieldTrendChart from './batch/YieldTrendChart.vue'
@@ -185,6 +192,11 @@ const loading = ref(false)
 const exporting = ref(false)
 const batchData = ref<any>(null)
 const stageFilter = ref('')
+const updateTime = ref('')
+
+const fileCountText = computed(() =>
+  batchData.value?.phases?.length ? `${batchData.value.phases.length} 个文件` : '-'
+)
 
 const filesStore = useFilesStore()
 
@@ -277,6 +289,7 @@ async function loadBatchData() {
   try {
     const { data } = await batchApi.getBatchYieldData(selectedBatch.value)
     batchData.value = data
+    updateTime.value = new Date().toLocaleTimeString('zh-CN')
   } catch {
     // 错误 toast 由 axios 拦截器统一弹出
   } finally {
@@ -329,36 +342,92 @@ defineExpose({ handleResize })
   padding: 0;
 }
 
+/* —— 页头一行 —— */
+.batch-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 2px 0 14px;
+}
+.batch-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+}
+.batch-meta {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* —— Section 卡（§10.4 定稿） —— */
 .section-card {
   margin-bottom: 16px;
-  border-radius: 8px;
+  border-radius: 12px;
 }
 
 :deep(.el-card) {
-  background-color: var(--bg-2);
-  border: 1px solid var(--border-2);
-  border-radius: 8px;
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
 }
 
 :deep(.el-card__header) {
-  background-color: var(--bg-3);
-  border-bottom: 1px solid var(--border-2);
+  background: color-mix(in srgb, var(--bg-2) 60%, var(--card));
+  border-bottom: 1px solid var(--border);
   color: var(--text);
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 13.5px;
   padding: 10px 16px;
 }
 
+.card-desc {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+/* 趋势图并入汇总卡：分隔线 + 小标题 */
+.trend-divider {
+  margin: 14px 0 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+
 :deep(.el-table) {
-  --el-table-bg-color: var(--bg-2);
-  --el-table-tr-bg-color: var(--bg-2);
+  --el-table-bg-color: var(--card);
+  --el-table-tr-bg-color: var(--card);
   --el-table-header-bg-color: var(--bg-3);
-  --el-table-border-color: var(--border-2);
+  --el-table-border-color: var(--border);
   --el-table-text-color: var(--text);
-  --el-table-header-text-color: var(--text);
+  --el-table-header-text-color: var(--text-2);
 }
 
 :deep(.el-table__body tr:hover > td) {
-  background-color: var(--bg-3) !important;
+  background-color: color-mix(in srgb, var(--brand) 10%, transparent) !important;
+}
+
+/* —— Site 矩阵合并格 —— */
+.m-ratio {
+  margin-left: 5px;
+  font-size: 10.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.m-na {
+  color: var(--text-3);
 }
 
 .phase-detail-expand {

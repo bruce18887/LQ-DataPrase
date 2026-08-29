@@ -175,8 +175,8 @@ test.describe('批次阶段解析 UI（胶囊过滤/树形汇总/回退）', { t
       // 4 个关键指标齐全：投入/Pass/Fail/良率
       await expect(strip.locator('.strip-item')).toHaveCount(4)
 
-      // ── 7.6 QA 数量校验条：本批次无 QA 文件 → 紧凑条不渲染（v-if 门控）──
-      await expect(page.locator('.qa-bar')).toHaveCount(0)
+      // ── 7.6 QA 数量校验横幅：本批次无 QA 文件 → 横幅不渲染（v-if 门控）──
+      await expect(page.locator('.qa-banner')).toHaveCount(0)
 
       // ── 7.7 Bin 分布卡：Site 良率 GAP pills / Bin×Site / UPH 均按「所选单阶段」显示 ──
       const binHeader = page.locator('.el-card__header', { hasText: '📋 Bin 分布' }).first()
@@ -193,9 +193,9 @@ test.describe('批次阶段解析 UI（胶囊过滤/树形汇总/回退）', { t
       await expect(batchRoot.locator('.yield-pill').first()).toContainText('%')
       // UPH 卡片（当前所选单阶段口径）
       await expect(batchRoot.locator('.uph-card').first()).toBeVisible()
-      // 分区标题带当前所选阶段标识
+      // 分区标题带当前所选阶段标识（重设计后为 bin-sub-title 小标题）
       await expect(
-        batchRoot.locator('.bin-card-section-title').filter({ hasText: 'Bin × Site' }).first(),
+        batchRoot.locator('.bin-sub-title').filter({ hasText: 'Bin × Site' }).first(),
       ).toContainText('UIS1.0')
 
       // ── 8) 再次点击 UIS 胶囊取消过滤 → 恢复全部 ──
@@ -218,7 +218,7 @@ test.describe('批次阶段解析 UI（胶囊过滤/树形汇总/回退）', { t
         .first()
         .click()
       await expect(
-        batchRoot.locator('.bin-card-section-title').filter({ hasText: 'Bin × Site' }).first(),
+        batchRoot.locator('.bin-sub-title').filter({ hasText: 'Bin × Site' }).first(),
       ).toContainText('CP1')
       const cpTotal = await readBinSiteTotalAll(page)
       // 4 个文件是同一份样例的复制 → 任意单阶段合计都等于 UIS 单文件合计
