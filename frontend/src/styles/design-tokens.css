@@ -4,7 +4,7 @@
  * 架构：① Primitive（--p-*，主题无关）→ ② Semantic（双主题唯一取色入口）
  * 组件层 token 暂缓（见 docs/reference/ui-design-guide.md §10），组件直接用语义层。
  *
- * 状态：已接入（main.ts，层叠在 variables.css 之后）；旧变量迁移映射见指南 §9。
+ * 状态：唯一 token 事实来源（variables.css 已于 2026-08-29 删除）；旧变量迁移映射见指南 §9。
  * 依据：docs/reference/ui-design-guide.md · docs/plans/design-system-preview.html
  */
 
@@ -41,12 +41,10 @@
   --p-fs-xl: 18px; --p-fs-2xl: 22px; --p-fs-3xl: 26px; --p-fs-4xl: 36px;
   --p-fw-regular: 400; --p-fw-medium: 500; --p-fw-semibold: 600; --p-fw-bold: 700; --p-fw-extrabold: 800;
 
-  /* ① Primitive · 字体（唯一事实来源与 variables.css / typography.ts / echarts-theme.ts 同步） */
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC',
-    'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Source Han Sans SC',
-    'Helvetica Neue', Arial, sans-serif;
-  --font-mono: 'SF Mono', 'Cascadia Mono', Consolas, 'Liberation Mono', Menlo,
-    'Courier New', monospace;
+  /* ① Primitive · 字体（唯一事实来源；typography.ts / echarts-theme.ts 必须与此同步；
+     单行书写：fonts.spec 用 getPropertyValue 断言字面一致，多行会保留换行空白） */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'SF Mono', 'Cascadia Mono', 'Consolas', 'Liberation Mono', 'Menlo', 'Courier New', monospace;
 }
 
 /* ============ ② Semantic · Light ============ */
@@ -62,7 +60,7 @@
   --text-disabled: var(--p-slate-300); --text-inverse: #ffffff;
   /* 边框 */
   --border: var(--p-slate-200); --border-2: var(--p-slate-300);
-  /* 品牌（与 variables.css / element-plus-theme.css light 块同源） */
+  /* 品牌（与 element-plus-theme.css light/night 块同源，指南 §6.3） */
   --brand: var(--p-blue-600); --brand-2: var(--p-blue-700);
   --grad-brand: linear-gradient(135deg, var(--p-blue-700), var(--p-blue-600));
   --on-brand: #ffffff;

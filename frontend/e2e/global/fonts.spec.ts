@@ -5,11 +5,11 @@ import { gotoApp } from '../helpers/nav'
  * 字体统一（方案③）：平台感知字体栈 + 单一事实来源。
  * 说明：getComputedStyle().fontFamily 返回的是声明值（非实际渲染字体），
  * 断言与运行机器无关——正对应方案③"声明栈统一"的目标。
- * 单一事实来源：frontend/src/styles/variables.css 的 --font-sans / --font-mono；
+ * 单一事实来源：frontend/src/styles/design-tokens.css 的 --font-sans / --font-mono；
  * TS 侧（typography.ts / echarts-theme.ts）与 Element Plus 覆盖必须与之保持一致。
  */
 
-// 必须与 frontend/src/styles/variables.css 的 --font-sans / --font-mono 完全一致
+// 必须与 frontend/src/styles/design-tokens.css 的 --font-sans / --font-mono 完全一致
 const FONT_SANS =
   "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Helvetica Neue', Arial, sans-serif"
 const FONT_MONO =
