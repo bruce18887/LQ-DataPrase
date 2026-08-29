@@ -222,9 +222,9 @@ async function generate() {
 .tab-header {
   position: relative;
   padding: 16px 20px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-muted);
-  border-left: 3px solid var(--brand-primary);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--brand);
   border-radius: 10px;
   box-shadow: var(--shadow-sm);
 }
@@ -245,9 +245,9 @@ async function generate() {
   margin: 0;
   font-size: 16px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--text);
   letter-spacing: -0.01em;
-  background: linear-gradient(135deg, var(--brand-primary) 0%, var(--color-info) 100%);
+  background: linear-gradient(135deg, var(--brand) 0%, var(--info) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -256,7 +256,7 @@ async function generate() {
 .tab-subtitle {
   margin: 0;
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   line-height: 1.5;
 }
 
@@ -264,8 +264,8 @@ async function generate() {
    Section Card（与 ExportToolsTab / FileCorrelationSection 一致）
    ================================================================ */
 .section-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
   box-shadow: var(--shadow-sm);
@@ -276,8 +276,8 @@ async function generate() {
   align-items: center;
   justify-content: space-between;
   padding: 12px 20px;
-  background: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border-muted);
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border);
 }
 
 .card-title-group {
@@ -294,7 +294,7 @@ async function generate() {
 .card-title {
   font-size: 14px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .card-body {
@@ -309,21 +309,21 @@ async function generate() {
 }
 
 .slot-card {
-  background: var(--bg-primary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .slot-card:hover {
-  border-color: var(--brand-primary);
+  border-color: var(--brand);
   box-shadow: var(--shadow-indigo-focus);
 }
 
 .slot-card.slot-filled {
-  border-color: var(--color-success);
-  background: var(--color-success-bg);
+  border-color: var(--success);
+  background: var(--success-bg);
 }
 
 .slot-label-row {
@@ -336,7 +336,7 @@ async function generate() {
 .slot-label {
   font-size: 13px;
   font-weight: 600;
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 .slot-tag {
@@ -356,8 +356,8 @@ async function generate() {
   justify-content: space-between;
   gap: 12px;
   padding: 14px 20px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: var(--shadow-sm);
   flex-wrap: wrap;
@@ -388,25 +388,25 @@ async function generate() {
    Element Plus 主题适配
    ================================================================ */
 :deep(.el-descriptions) {
-  --el-descriptions-item-bordered-label-background: var(--bg-tertiary);
+  --el-descriptions-item-bordered-label-background: var(--bg-3);
 }
 
 :deep(.el-descriptions__label) {
-  color: var(--text-primary);
+  color: var(--text);
   font-weight: 600;
 }
 
 :deep(.el-descriptions__content) {
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 :deep(.el-checkbox) {
-  --el-checkbox-checked-bg-color: var(--brand-primary);
-  --el-checkbox-checked-input-border-color: var(--brand-primary);
+  --el-checkbox-checked-bg-color: var(--brand);
+  --el-checkbox-checked-input-border-color: var(--brand);
   --el-checkbox-checked-icon-color: var(--text-inverse);
 }
 
 :deep(.el-progress) {
-  --el-color-success: var(--color-success);
+  --el-color-success: var(--success);
 }
 </style>

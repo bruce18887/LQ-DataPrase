@@ -55,9 +55,9 @@ const displayCards = computed(() => {
   grid-template-columns: repeat(5, 1fr);
   gap: 5px;
   padding: 6px 8px;
-  background: var(--bg-tertiary);
+  background: var(--bg-3);
   border-radius: 6px;
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--border-2);
   height: 100%;
   align-content: center;
 }
@@ -68,15 +68,15 @@ const displayCards = computed(() => {
   align-items: center;
   justify-content: center;
   padding: 3px 2px;
-  background: var(--bg-secondary);
+  background: var(--bg-2);
   border-radius: 4px;
-  border: 1px solid var(--border-muted);
+  border: 1px solid var(--border);
   min-height: 42px;
 }
 
 .stat-label {
   font-size: 10px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   line-height: 1.2;
   margin-bottom: 1px;
   white-space: nowrap;
@@ -85,7 +85,7 @@ const displayCards = computed(() => {
 .stat-value {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
   line-height: 1.3;
   text-align: center;
   word-break: break-all;

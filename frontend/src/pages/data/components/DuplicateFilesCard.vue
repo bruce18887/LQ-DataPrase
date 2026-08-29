@@ -40,7 +40,7 @@
     </div>
     <div class="card-footer">
       <el-checkbox v-model="deleteConfirmed" :disabled="!canDelete">
-        <span :style="{ color: canDelete ? 'var(--color-danger)' : 'var(--text-tertiary)', fontWeight: 600 }">
+        <span :style="{ color: canDelete ? 'var(--color-danger)' : 'var(--text-3)', fontWeight: 600 }">
           {{ canDelete ? '我已确认要删除全部重复项' : '仅管理员可删除重复文件' }}
         </span>
       </el-checkbox>
@@ -97,14 +97,14 @@ function dupFileTitle(f: DuplicateGroupFile) {
 
 .card-title {
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .dup-group {
   padding: 10px 12px;
   margin-bottom: 8px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
   border-radius: 8px;
   display: flex;
   flex-wrap: wrap;
@@ -122,7 +122,7 @@ function dupFileTitle(f: DuplicateGroupFile) {
 .dup-group-key {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -131,14 +131,14 @@ function dupFileTitle(f: DuplicateGroupFile) {
 
 .dup-group-size {
   font-size: 11px;
-  color: var(--color-info);
+  color: var(--info);
 }
 
 .dup-group-count {
   font-size: 11px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   padding: 1px 6px;
-  background: var(--bg-primary);
+  background: var(--bg);
   border-radius: 8px;
 }
 
@@ -149,7 +149,7 @@ function dupFileTitle(f: DuplicateGroupFile) {
 .card-footer {
   margin-top: 12px;
   padding: 12px;
-  background: var(--bg-secondary);
+  background: var(--bg-2);
   border-radius: 8px;
   display: flex;
   align-items: center;

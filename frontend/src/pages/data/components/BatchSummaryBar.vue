@@ -46,8 +46,8 @@ const emit = defineEmits<{
   gap: 14px;
   padding: 10px 14px;
   margin-bottom: 14px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
   border-radius: 10px;
   flex-wrap: wrap;
 }
@@ -60,17 +60,17 @@ const emit = defineEmits<{
 
 .summary-label {
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
 }
 
 .summary-value {
   font-size: 15px;
   font-weight: 700;
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 .summary-warning .summary-value {
-  color: var(--color-warning);
+  color: var(--warn);
 }
 
 /* Night theme overrides */

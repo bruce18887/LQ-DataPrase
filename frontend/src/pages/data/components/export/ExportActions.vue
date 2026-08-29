@@ -51,8 +51,8 @@ defineEmits<{
 
 <style scoped>
 .step-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 14px 16px;
 }
@@ -71,7 +71,7 @@ defineEmits<{
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: var(--brand-primary);
+  background: var(--brand);
   color: var(--text-inverse);
   font-size: 12px;
   font-weight: 700;
@@ -81,13 +81,13 @@ defineEmits<{
 .step-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .step-hint {
   margin-left: auto;
   font-size: 11px;
-  color: var(--color-warning);
+  color: var(--warn);
   font-weight: 500;
 }
 
@@ -106,7 +106,7 @@ defineEmits<{
 
 .sigma-label {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   white-space: nowrap;
 }
 

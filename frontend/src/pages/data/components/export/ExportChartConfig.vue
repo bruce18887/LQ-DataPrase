@@ -52,8 +52,8 @@ defineEmits<{
 
 <style scoped>
 .step-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 14px 16px;
 }
@@ -72,7 +72,7 @@ defineEmits<{
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: var(--brand-primary);
+  background: var(--brand);
   color: var(--text-inverse);
   font-size: 12px;
   font-weight: 700;
@@ -82,7 +82,7 @@ defineEmits<{
 .step-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .step-body {
@@ -129,13 +129,13 @@ defineEmits<{
 .bw-label {
   font-size: 11px;
   font-weight: 500;
-  color: var(--text-tertiary);
+  color: var(--text-3);
 }
 
 .bw-value {
   font-size: 11px;
   font-weight: 700;
-  color: var(--brand-primary);
+  color: var(--brand);
   font-family: var(--font-mono);
   min-width: 30px;
   text-align: right;
@@ -143,8 +143,8 @@ defineEmits<{
 
 /* Brand-themed checkboxes */
 :deep(.el-checkbox) {
-  --el-checkbox-checked-bg-color: var(--brand-primary);
-  --el-checkbox-checked-input-border-color: var(--brand-primary);
+  --el-checkbox-checked-bg-color: var(--brand);
+  --el-checkbox-checked-input-border-color: var(--brand);
   --el-checkbox-checked-icon-color: var(--text-inverse);
 }
 </style>

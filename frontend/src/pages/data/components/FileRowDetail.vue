@@ -39,7 +39,7 @@ const emit = defineEmits<{ 'remove-tag': [row: any, tag: string] }>()
 <style scoped>
 .row-detail {
   padding: 12px 24px 16px 56px;
-  background: var(--bg-secondary);
+  background: var(--bg-2);
   border-radius: 6px;
   display: flex;
   flex-direction: column;
@@ -56,13 +56,13 @@ const emit = defineEmits<{ 'remove-tag': [row: any, tag: string] }>()
   flex-shrink: 0;
   width: 96px;
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   padding-top: 1px;
 }
 .detail-value {
   flex: 1;
   font-size: 13px;
-  color: var(--text-primary);
+  color: var(--text);
   word-break: break-all;
   line-height: 1.5;
 }
@@ -75,9 +75,9 @@ const emit = defineEmits<{ 'remove-tag': [row: any, tag: string] }>()
 .mono {
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 .empty-text {
-  color: var(--text-tertiary);
+  color: var(--text-3);
 }
 </style>

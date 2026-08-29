@@ -6,7 +6,7 @@
       :data="tableData"
       size="small"
       :border="true"
-      :header-cell-style="{ background: 'var(--bg-tertiary)', fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
+      :header-cell-style="{ background: 'var(--bg-3)', fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
       :cell-style="{ fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
       table-layout="auto"
     >
@@ -50,7 +50,7 @@ const tableData = computed(() => {
 .table-header {
   font-weight: 600;
   font-size: 12px;
-  color: var(--text-primary);
+  color: var(--text);
   margin-bottom: 6px;
 }
 </style>

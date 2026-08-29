@@ -374,15 +374,15 @@ defineExpose({ loadBatchDirs })
 .section-label {
   font-size: 14px;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--text-2);
   margin-bottom: 12px;
 }
 
 .batch-group {
   margin-bottom: 12px;
   padding: 14px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
   border-radius: 10px;
 }
 
@@ -395,7 +395,7 @@ defineExpose({ loadBatchDirs })
 
 .batch-search-hint {
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
 }
 
 .batch-header {
@@ -417,24 +417,24 @@ defineExpose({ loadBatchDirs })
 }
 
 .batch-header-clickable:hover {
-  background: var(--bg-primary);
+  background: var(--bg);
 }
 
 .batch-header-clickable:focus-visible {
-  outline: 2px solid var(--brand-primary);
+  outline: 2px solid var(--brand);
   outline-offset: 2px;
 }
 
 .batch-chevron {
   font-size: 14px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   transition: transform 0.2s ease, color 0.2s ease;
   flex-shrink: 0;
 }
 
 .batch-chevron-open {
   transform: rotate(90deg);
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 .section-label-row {
@@ -456,20 +456,20 @@ defineExpose({ loadBatchDirs })
 .batch-name {
   font-size: 14px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .batch-count {
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   padding: 2px 8px;
-  background: var(--bg-primary);
+  background: var(--bg);
   border-radius: 10px;
 }
 
 .batch-size {
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   font-family: var(--font-mono);
 }
 
@@ -477,23 +477,23 @@ defineExpose({ loadBatchDirs })
   font-size: 11px;
   padding: 1px 7px;
   border-radius: 9px;
-  background: var(--bg-primary);
-  color: var(--text-tertiary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg);
+  color: var(--text-3);
+  border: 1px solid var(--border);
   white-space: nowrap;
 }
 
 .batch-flag.product {
-  color: var(--color-info);
+  color: var(--info);
 }
 
 .batch-flag.format {
-  color: var(--brand-secondary);
+  color: var(--warn);
 }
 
 .batch-flag.stage {
-  color: var(--brand-primary);
-  background: color-mix(in srgb, var(--brand-primary) 10%, var(--bg-primary));
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 10%, var(--bg));
 }
 
 .batch-files {
@@ -507,11 +507,11 @@ defineExpose({ loadBatchDirs })
   gap: 10px;
   padding: 8px 10px;
   margin-bottom: 8px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 
 /* Night theme overrides */
@@ -529,7 +529,7 @@ defineExpose({ loadBatchDirs })
 }
 
 :root[data-theme="night"] .batch-chevron-open {
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 :root[data-theme="night"] .batch-flag {

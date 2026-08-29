@@ -114,8 +114,8 @@ function selectMatches() {
 
 <style scoped>
 .step-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 14px 16px;
 }
@@ -134,7 +134,7 @@ function selectMatches() {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: var(--brand-primary);
+  background: var(--brand);
   color: var(--text-inverse);
   font-size: 12px;
   font-weight: 700;
@@ -144,14 +144,14 @@ function selectMatches() {
 .step-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .step-count {
   margin-left: auto;
   font-size: 11px;
   font-weight: 500;
-  color: var(--text-tertiary);
+  color: var(--text-3);
 }
 
 .step-body {
@@ -167,7 +167,7 @@ function selectMatches() {
 .match-hint {
   padding: 6px 12px;
   font-size: 12px;
-  color: var(--text-secondary);
-  border-top: 1px solid var(--border-muted);
+  color: var(--text-2);
+  border-top: 1px solid var(--border);
 }
 </style>

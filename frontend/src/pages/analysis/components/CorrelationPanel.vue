@@ -194,14 +194,14 @@ void chartRef // bound to <div ref="chartRef"> in template
 .axis-row { margin-bottom: 8px; }
 .axis-body { display: flex; gap: 24px; }
 .axis-item { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.axis-select-label { font-size: 13px; color: var(--text-secondary, #909399); white-space: nowrap; }
-.metric-card { background: var(--bg-tertiary, #f5f7fa); border-radius: 8px; padding: 12px 16px; text-align: center; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; }
-.metric-label { font-size: 12px; color: var(--text-secondary, #909399); margin-bottom: 4px; }
-.metric-value { font-size: 22px; font-weight: 700; color: var(--text-primary, #303133); }
-.metric-value.r-strong { color: var(--color-success); }
-.metric-value.r-medium { color: var(--color-warning); }
-.metric-value.r-weak { color: var(--text-primary, #303133); }
-:deep(.el-collapse-item__header) { font-size: 13px; color: var(--text-secondary, #909399); border: none; padding: 4px 0; }
+.axis-select-label { font-size: 13px; color: var(--text-2, #909399); white-space: nowrap; }
+.metric-card { background: var(--bg-3, #f5f7fa); border-radius: 8px; padding: 12px 16px; text-align: center; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+.metric-label { font-size: 12px; color: var(--text-2, #909399); margin-bottom: 4px; }
+.metric-value { font-size: 22px; font-weight: 700; color: var(--text, #303133); }
+.metric-value.r-strong { color: var(--success); }
+.metric-value.r-medium { color: var(--warn); }
+.metric-value.r-weak { color: var(--text, #303133); }
+:deep(.el-collapse-item__header) { font-size: 13px; color: var(--text-2, #909399); border: none; padding: 4px 0; }
 :deep(.el-collapse-item__wrap) { border: none; }
 :deep(.el-collapse-item__content) { padding: 8px 0 0 0; }
 </style>

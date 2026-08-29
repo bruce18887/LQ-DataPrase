@@ -470,7 +470,7 @@ void matrixChartRef
 <style scoped>
 .section-label {
   font-size: 11px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   margin-bottom: 4px;
   font-weight: 500;
   display: block;
@@ -478,7 +478,7 @@ void matrixChartRef
 
 .hint-text {
   font-size: 13px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   margin: 0;
 }
 
@@ -488,7 +488,7 @@ void matrixChartRef
 }
 
 .metric-card {
-  background: var(--bg-tertiary, #f5f7fa);
+  background: var(--bg-3, #f5f7fa);
   border-radius: 8px;
   padding: 12px 16px;
   text-align: center;
@@ -501,19 +501,19 @@ void matrixChartRef
 
 .metric-label {
   font-size: 12px;
-  color: var(--text-secondary, #909399);
+  color: var(--text-2, #909399);
   margin-bottom: 4px;
 }
 
 .metric-value {
   font-size: 22px;
   font-weight: 700;
-  color: var(--text-primary, #303133);
+  color: var(--text, #303133);
 }
 
-.metric-value.r-strong { color: var(--color-success); }
-.metric-value.r-medium { color: var(--color-warning); }
-.metric-value.r-weak { color: var(--text-primary, #303133); }
+.metric-value.r-strong { color: var(--success); }
+.metric-value.r-medium { color: var(--warn); }
+.metric-value.r-weak { color: var(--text, #303133); }
 
 .regression-eq {
   font-size: 13px;
@@ -524,9 +524,9 @@ void matrixChartRef
 .chart-wrapper {
   flex: 1;
   min-height: 480px;
-  background: var(--bg-secondary, #fff);
+  background: var(--bg-2, #fff);
   border-radius: 6px;
-  border: 1px solid var(--border-default, #e4e7ed);
+  border: 1px solid var(--border-2, #e4e7ed);
   overflow: hidden;
   display: flex;
   align-items: center;

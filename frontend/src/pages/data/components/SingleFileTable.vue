@@ -204,23 +204,23 @@ const {
 
 .single-file-table {
   width: 100%;
-  background: var(--bg-secondary);
+  background: var(--bg-2);
   border-radius: 8px;
 }
 
 .active-file-name {
-  color: var(--brand-primary);
+  color: var(--brand);
   font-weight: 600;
 }
 
 .mono {
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 
 .program-name-cell {
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-size: 12px;
 }
 
@@ -253,16 +253,16 @@ const {
   height: 24px;
   padding: 0 8px;
   font-size: 12px;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  border: 1px solid var(--brand-primary);
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--brand);
   border-radius: 4px;
   outline: none;
   box-sizing: border-box;
 }
 
 .tag-native-input::placeholder {
-  color: var(--text-tertiary);
+  color: var(--text-3);
 }
 
 .tag-input-wrapper {
@@ -277,8 +277,8 @@ const {
   min-width: 180px;
   max-height: 200px;
   overflow-y: auto;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-default);
+  background: var(--bg);
+  border: 1px solid var(--border-2);
   border-radius: 6px;
   box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
   z-index: 100;
@@ -288,26 +288,26 @@ const {
 .tag-suggestion-item {
   padding: 6px 12px;
   font-size: 12px;
-  color: var(--text-primary);
+  color: var(--text);
   cursor: pointer;
   transition: background 0.15s;
 }
 
 .tag-suggestion-item:hover,
 .tag-suggestion-item.is-active {
-  background: var(--bg-secondary);
-  color: var(--brand-primary);
+  background: var(--bg-2);
+  color: var(--brand);
 }
 
 :root[data-theme="night"] .tag-suggestions {
-  background: var(--bg-secondary);
+  background: var(--bg-2);
   border-color: rgba(255, 255, 255, 0.1);
   box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.4);
 }
 
 .row-detail {
   padding: 12px 24px 16px 56px;
-  background: var(--bg-secondary);
+  background: var(--bg-2);
   border-radius: 6px;
   display: flex;
   flex-direction: column;
@@ -324,13 +324,13 @@ const {
   flex-shrink: 0;
   width: 96px;
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   padding-top: 1px;
 }
 .detail-value {
   flex: 1;
   font-size: 13px;
-  color: var(--text-primary);
+  color: var(--text);
   word-break: break-all;
   line-height: 1.5;
 }
@@ -348,30 +348,30 @@ const {
 }
 
 :deep(.el-table) {
-  --el-table-bg-color: var(--bg-secondary);
-  --el-table-tr-bg-color: var(--bg-secondary);
-  --el-table-header-bg-color: var(--bg-tertiary);
+  --el-table-bg-color: var(--bg-2);
+  --el-table-tr-bg-color: var(--bg-2);
+  --el-table-header-bg-color: var(--bg-3);
   --el-table-row-hover-bg-color: var(--bg-hover);
-  --el-table-border-color: var(--border-muted);
-  --el-table-header-text-color: var(--text-primary);
-  --el-table-text-color: var(--text-primary);
+  --el-table-border-color: var(--border);
+  --el-table-header-text-color: var(--text);
+  --el-table-text-color: var(--text);
 }
 
 :deep(.el-table th.el-table__cell) {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
+  background: var(--bg-3);
+  color: var(--text);
   font-weight: 600;
-  border-bottom: 1px solid var(--border-default);
+  border-bottom: 1px solid var(--border-2);
 }
 
 :deep(.el-table td.el-table__cell) {
-  border-bottom: 1px solid var(--border-muted);
+  border-bottom: 1px solid var(--border);
 }
 
 :deep(.el-pagination) {
-  --el-pagination-bg-color: var(--bg-secondary);
-  --el-pagination-button-bg-color: var(--bg-secondary);
-  --el-pagination-hover-color: var(--brand-primary);
-  color: var(--text-secondary);
+  --el-pagination-bg-color: var(--bg-2);
+  --el-pagination-button-bg-color: var(--bg-2);
+  --el-pagination-hover-color: var(--brand);
+  color: var(--text-2);
 }
 </style>

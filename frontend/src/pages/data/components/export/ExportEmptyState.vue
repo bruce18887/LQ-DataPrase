@@ -14,9 +14,9 @@
   justify-content: center;
   padding: 48px 24px;
   text-align: center;
-  color: var(--text-secondary);
-  background: var(--bg-secondary);
-  border: 1px dashed var(--border-muted);
+  color: var(--text-2);
+  background: var(--bg-2);
+  border: 1px dashed var(--border);
   border-radius: 12px;
 }
 
@@ -29,7 +29,7 @@
 .empty-title {
   font-size: 15px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
   margin-bottom: 6px;
 }
 

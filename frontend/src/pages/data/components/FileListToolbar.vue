@@ -110,14 +110,14 @@ function onSearchInput() {
 .section-title {
   font-size: 15px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .section-count {
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   padding: 2px 8px;
-  background: var(--bg-secondary);
+  background: var(--bg-2);
   border-radius: 10px;
 }
 

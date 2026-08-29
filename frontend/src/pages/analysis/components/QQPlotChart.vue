@@ -252,18 +252,18 @@ void chartRef // bound to <div ref="chartRef"> in template
   align-items: center;
   justify-content: center;
   height: 400px;
-  background: var(--bg-secondary);
+  background: var(--bg-2);
   border-radius: 6px;
-  border: 1px solid var(--border-default);
-  color: var(--text-secondary);
+  border: 1px solid var(--border-2);
+  color: var(--text-2);
   font-size: 14px;
   gap: 8px;
 }
 .qqplot-placeholder__icon {
   font-size: 18px;
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 .qqplot-placeholder__text {
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 </style>

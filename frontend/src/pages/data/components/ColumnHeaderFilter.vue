@@ -136,19 +136,19 @@ function clear() {
 .col-filter-btn {
   padding: 2px;
   height: auto;
-  color: var(--text-tertiary);
+  color: var(--text-3);
 }
 
 .col-filter-btn:hover {
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 .filter-icon-active {
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 .col-filter-active .col-filter-btn {
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 /* popover（teleported=false 时挂在表头单元格内） */

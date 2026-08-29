@@ -81,8 +81,8 @@ defineProps<{
 
 function headerCellStyle() {
   return {
-    background: 'var(--bg-secondary)',
-    color: 'var(--text-primary)',
+    background: 'var(--bg-2)',
+    color: 'var(--text)',
     fontWeight: '600',
     fontSize: '12px',
   }
@@ -123,8 +123,8 @@ function verdictTitle(row: FileCorrelationRow): string {
   align-items: baseline;
   gap: 12px;
   padding: 10px 12px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
   border-bottom: none;
   border-radius: 8px 8px 0 0;
   flex-wrap: wrap;
@@ -133,30 +133,30 @@ function verdictTitle(row: FileCorrelationRow): string {
 .info-title {
   font-size: 14px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .info-files {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 
 .info-files b {
-  color: var(--brand-primary);
+  color: var(--brand);
 }
 
 .info-meta {
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   margin-left: auto;
 }
 
 :deep(.fc-table .inner-el-table) {
-  --el-table-border-color: var(--border-muted);
-  --el-table-header-bg-color: var(--bg-secondary);
-  --el-table-bg-color: var(--bg-primary);
-  --el-table-tr-bg-color: var(--bg-primary);
-  --el-table-row-hover-bg-color: var(--bg-secondary);
+  --el-table-border-color: var(--border);
+  --el-table-header-bg-color: var(--bg-2);
+  --el-table-bg-color: var(--bg);
+  --el-table-tr-bg-color: var(--bg);
+  --el-table-row-hover-bg-color: var(--bg-2);
   border-radius: 0 0 8px 8px;
   overflow: hidden;
 }
@@ -174,14 +174,14 @@ function verdictTitle(row: FileCorrelationRow): string {
 }
 
 .fc-fail-cell {
-  background: var(--color-fail-bg);
-  color: var(--color-fail-text);
+  background: color-mix(in srgb, var(--error) 22%, transparent);
+  color: var(--error);
   font-weight: 600;
 }
 
 .param-name {
   font-size: 12px;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .verdict-badge {
@@ -194,12 +194,12 @@ function verdictTitle(row: FileCorrelationRow): string {
 }
 
 .verdict-pass {
-  background: var(--color-success);
+  background: var(--success);
   color: #fff;
 }
 
 .verdict-fail {
-  background: var(--color-error);
+  background: var(--error);
   color: #fff;
 }
 </style>

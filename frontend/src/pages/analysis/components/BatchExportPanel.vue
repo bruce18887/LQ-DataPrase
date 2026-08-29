@@ -72,8 +72,8 @@ function onExportBatch(format: string) {
 
 <style scoped>
 .batch-export-panel {
-  background: var(--bg-primary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
   margin-top: 16px;
@@ -84,8 +84,8 @@ function onExportBatch(format: string) {
   align-items: center;
   gap: 8px;
   padding: 14px 18px;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-muted);
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
 }
 
 .panel-icon {
@@ -95,7 +95,7 @@ function onExportBatch(format: string) {
 .panel-title {
   font-size: 14px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .panel-body {

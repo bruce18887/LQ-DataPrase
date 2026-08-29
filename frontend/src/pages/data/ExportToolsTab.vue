@@ -114,8 +114,8 @@ function onExportBatch(format: string) {
 }
 
 .export-card {
-  background: var(--bg-primary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
 }
@@ -125,8 +125,8 @@ function onExportBatch(format: string) {
   align-items: center;
   justify-content: space-between;
   padding: 12px 20px;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-muted);
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
 }
 
 .card-title-group {
@@ -140,12 +140,12 @@ function onExportBatch(format: string) {
 .card-title {
   font-size: 14px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .current-file {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;

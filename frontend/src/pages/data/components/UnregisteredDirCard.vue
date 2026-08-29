@@ -44,13 +44,13 @@ const emit = defineEmits<{
 .batch-group {
   margin-bottom: 12px;
   padding: 14px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-muted);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
   border-radius: 10px;
 }
 
 .batch-group.unregistered {
-  border-left: 3px solid var(--color-warning);
+  border-left: 3px solid var(--warn);
 }
 
 .batch-header {
@@ -64,20 +64,20 @@ const emit = defineEmits<{
 .batch-name {
   font-size: 14px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .batch-count {
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   padding: 2px 8px;
-  background: var(--bg-primary);
+  background: var(--bg);
   border-radius: 10px;
 }
 
 .batch-size {
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
   font-family: var(--font-mono);
 }
 
@@ -86,10 +86,10 @@ const emit = defineEmits<{
   margin-top: 8px;
   max-height: 220px;
   overflow-y: auto;
-  border: 1px dashed var(--border-muted);
+  border: 1px dashed var(--border);
   border-radius: 8px;
   padding: 4px 8px;
-  background: var(--bg-primary);
+  background: var(--bg);
 }
 
 .preview-item {
@@ -102,14 +102,14 @@ const emit = defineEmits<{
 }
 
 .preview-name {
-  color: var(--text-primary);
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .preview-size {
-  color: var(--text-tertiary);
+  color: var(--text-3);
   font-size: 11px;
   flex-shrink: 0;
 }
@@ -117,7 +117,7 @@ const emit = defineEmits<{
 .preview-more {
   padding: 4px 0;
   font-size: 11px;
-  color: var(--text-tertiary);
+  color: var(--text-3);
 }
 
 .mono {
@@ -131,6 +131,6 @@ const emit = defineEmits<{
 }
 
 :root[data-theme="night"] .batch-group.unregistered {
-  border-left-color: var(--color-warning);
+  border-left-color: var(--warn);
 }
 </style>

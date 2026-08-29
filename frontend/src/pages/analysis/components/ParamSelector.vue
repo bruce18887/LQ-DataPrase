@@ -157,7 +157,7 @@ function onNext() {
 
 .selector-label {
   font-size: 11px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   font-weight: 500;
 }
 
@@ -181,20 +181,20 @@ function onNext() {
 
 .param-name {
   font-size: 13px;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .param-name :deep(mark) {
-  color: var(--brand-primary);
+  color: var(--brand);
   font-weight: 600;
-  background-color: rgba(var(--brand-primary-rgb), 0.15);
+  background-color: color-mix(in srgb, var(--brand) 15%, transparent);
   padding: 0 2px;
   border-radius: 2px;
 }
 
 .param-hint {
   font-size: 11px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   margin-left: 12px;
   flex-shrink: 0;
 }

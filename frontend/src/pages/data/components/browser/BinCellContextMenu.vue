@@ -116,22 +116,22 @@ function onKeydown(e: KeyboardEvent) {
   min-width: 200px;
   padding: 4px;
   border-radius: 6px;
-  border: 1px solid var(--border-default);
-  background: var(--bg-primary);
+  border: 1px solid var(--border-2);
+  background: var(--bg);
   box-shadow: var(--shadow-lg);
   font-size: 13px;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .bin-cell-menu__header {
   padding: 6px 10px;
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-2);
   white-space: nowrap;
 }
 
 .bin-cell-menu__bin {
-  color: var(--color-error);
+  color: var(--error);
   font-weight: bold;
 }
 
@@ -143,12 +143,12 @@ function onKeydown(e: KeyboardEvent) {
   border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
-  color: var(--color-error);
+  color: var(--error);
 }
 
 .bin-cell-menu__item:hover,
 .bin-cell-menu__item:focus {
-  background: var(--bg-tertiary);
+  background: var(--bg-3);
   outline: none;
 }
 </style>

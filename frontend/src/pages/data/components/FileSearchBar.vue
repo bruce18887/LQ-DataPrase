@@ -92,17 +92,17 @@ watch(() => props.availableTags, (next) => {
 
 :deep(.el-input__wrapper),
 :deep(.el-select__wrapper) {
-  background-color: var(--bg-secondary);
-  box-shadow: 0 0 0 1px var(--border-default) inset;
+  background-color: var(--bg-2);
+  box-shadow: 0 0 0 1px var(--border-2) inset;
 }
 
 :deep(.el-input__wrapper:hover),
 :deep(.el-select__wrapper:hover) {
-  box-shadow: 0 0 0 1px var(--brand-primary) inset;
+  box-shadow: 0 0 0 1px var(--brand) inset;
 }
 
 :deep(.el-input__inner),
 :deep(.el-select__placeholder) {
-  color: var(--text-secondary);
+  color: var(--text-2);
 }
 </style>
