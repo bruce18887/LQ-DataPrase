@@ -1,6 +1,6 @@
 # LQ-DataPrase UI 设计指南（Design Tokens）
 
-**日期**: 2026-08-29 · **状态**: 生效（含组件篇 · 四批定稿，见 §10）
+**日期**: 2026-08-29 · **状态**: 生效（含组件篇 §10 四批定稿 + 仪表板页面篇 §11 定稿）
 **视觉基准**: `docs/plans/dashboard-rebuild-preview.html`、`docs/plans/design-system-preview.html` 与组件审阅页 `docs/plans/component-review-1..4-*.html`
 **配套文件**: `frontend/src/styles/design-tokens.css`（本指南的可落地 CSS，Primitive + Semantic 两层）
 
@@ -347,9 +347,63 @@
 2. 新增业务徽标组件（YieldBadge / CpkBadge / BinTag）替换各页面手写 span。
 3. EP 覆写对齐（§10.7）与 e2e 选择器同步维护（教训 R2）。
 
-## 11. 参考
+## 11. 页面篇：仪表板（单文件 / 批次，定稿 2026-08-30）
+
+> 详细设计与全部确认记录：`docs/specs/2026-08-29-dashboard-content-redesign-design.md`（单文件）、
+> `docs/specs/2026-08-30-batch-dashboard-redesign-design.md`（批次）；可视化审阅页：
+> `docs/plans/dashboard-redesign-review.html`、`docs/plans/batch-redesign-review.html`（双主题可交互）。
+> 本章只定**信息架构与组合方式**，区块内部组件全部按 §10 定稿规格。
+> 目标：提升信息集中度——去 KPI 大卡/Site GAP gauge/重复图表，整页纵向约减 45%。
+
+### 11.1 页面级共用组件（两 Tab 同规格）
+
+- **总览条（信息记录中枢）**：一行 label+value；数值大号 18/700、文本型小号 13.5；
+  Pass 绿 / Fail>0 红 / 良率色阶；窄视口可换行；带 `data-testid`。
+- **告警/QA 横幅**：单行汇总（级别取最高）+ 点击展开明细，无告警零占位（§10.8 四色横幅）。
+- **Bin 构成 = Pareto 横向条**（降序、pass 绿/fail 红、条内「数量 · 占比%」），取代饼图+占比表。
+- **Site 良率 = 柱线组合**（柱色阶 + `--info` 良率折线 + 卡头 3 pills 最高/最低/Δ）；gauge 删除。
+- **Bin×Site = 同卡「表格 / 热力图」页签**：表格热力格等宽居中 `数量(行内占比%)`、
+  合计列 `数量 (占总记录%)`；热力图仅 Fail Bin、色深 = 行内集中度（ECharts heatmap）。
+- **UPH 紧凑明细行**：平均测试时间/总耗时/并行站点数/各站点独立小格/来源标签/警告/公式（? 悬停）。
+- **Section 卡浅底带卡头 + T2 表格 + 双重编码徽标**（§10.4/10.5/10.1）。
+
+### 11.2 单文件分析 Tab 结构（自上而下）
+
+1. 页头一行：标题 + 文件选择器 + 更新时间（居中大标题/工具条行删除）。
+2. 总览条：程序/总记录/Pass/Fail/Yield/UPH/测试时长/测试开始 + 格式 chip。
+3. 告警单横幅。
+4. 图表双列：Bin Pareto + Site 柱线组合（<900px 堆叠）。
+5. Bin×Site 交叉表（表格/热力图页签）。
+6. 测试项总览：CPK 堆叠比例条 + 11 列表格（Fail 列 `数量 (占比%)`，表头全列排序，
+   卡头双复选框「忽略无 Limit/忽略无测试值」默认勾选，行点击跳转数据分析）+ Top 10 Fail 信息 chip 行。
+7. UPH 紧凑明细行（页面最底部）→ 导出页脚。
+
+### 11.3 批次良率 Tab 结构（自上而下）
+
+1. 页头一行：标题 + 批次下拉 + 文件数/更新时间 + 加载/导出按钮。
+2. 阶段胶囊过滤条（激活品牌渐变，点选全局收窄，再点取消）。
+3. QA 数量校验横幅（仅全部/FT 阶段可见）。
+4. 阶段汇总卡：总览条（投入/Pass/Fail/良率，随胶囊联动）+ 树形表（阶段聚合→版本明细）+
+   良率趋势图（柱=总数、线=良率）同卡合并。
+5. 阶段明细表（列结构不变，定稿规格）。
+6. Site 良率矩阵：每 Site **合并单列**（良率徽章 + Pass/Total 小字）+ All Site 列。
+7. Bin 分布卡（单阶段口径，阶段下拉在卡头）：Pareto + Site 柱线双列 + Bin×Site 页签 + UPH 紧凑行。
+   UPH 不上总览条（用户确认保持现状）。
+
+### 11.4 页面篇落地边界（另行排期）
+
+- **不动**：后端接口与聚合、导出链路、阶段过滤联动、单阶段现算口径、行点击跳转/排序逻辑。
+- **删除**：`KpiCards`、`DataQualityOverview`、gauge、Bin 饼图+占比表、CPK 饼图、Top10 柱状、
+  独立工具条行；数据质量独有字段按用户确认移除。
+- **e2e**：KPI 卡/质量概览/矩阵列等既有选择器同步维护（教训 R2）；总览条新增 `data-testid`。
+- 分批执行 + 每批全量回归；批次页 `UphCard` embedded 用法需回归验证。
+
+## 12. 参考
 
 - 视觉基准 / token 展示：`docs/plans/design-system-preview.html`（零依赖可运行）
 - 仪表板重建原型：`docs/plans/dashboard-rebuild-preview.html`
+- 组件审阅页（四批定稿）：`docs/plans/component-review-1..4-*.html`
+- 仪表板重设计审阅页：`docs/plans/dashboard-redesign-review.html`（单文件）、`docs/plans/batch-redesign-review.html`（批次）
+- 仪表板设计文档：`docs/specs/2026-08-29-dashboard-content-redesign-design.md`、`docs/specs/2026-08-30-batch-dashboard-redesign-design.md`
 - 历史理念（已被本指南取代，仅作背景）：`frontend/LIGHT_THEME_STYLE_GUIDE.md`、`frontend/NIGHT_THEME_STYLE_GUIDE.md`
 - 相关教训：`docs/tasks/lessons.md` R7（主题与图表）

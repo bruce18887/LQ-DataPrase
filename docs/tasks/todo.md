@@ -244,3 +244,34 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
       el-dialog/el-drawer/el-message-box/el-message = --card-glass + blur14 + r12 + --shadow-lg；Toast 左 3px 语义色条 + 语义色文字；
       分页 28×28 r6 激活 --grad-brand；遮罩 →--overlay；同步把旧 night !important 块（dialog/message/drawer/pager）改为同 token 值防双主题割裂
 - [x] 收尾：全量回归 + 分组隔离复跑判定；DB 污染清理（error 行 + e2e_large_qqplot 残留）；todo/lessons 回写；双主题截图留档；端口释放
+
+---
+
+# 任务：仪表板内容重设计（单文件 + 批次）定稿 + 指南页面篇（2026-08-29~30）✅
+
+> 设计文档：docs/specs/2026-08-29-dashboard-content-redesign-design.md（单文件）、
+> 2026-08-30-batch-dashboard-redesign-design.md（批次）；审阅页：docs/plans/dashboard-redesign-review.html、
+> batch-redesign-review.html（均双主题可交互、浏览器实测通过）。
+> 目标：去 KPI 卡 / Site GAP，提升信息集中度；批次大部分参考单文件，差异点逐个沟通确认。
+
+## 单文件定稿摘要（指南 §11.2）
+
+- 页头一行（文件选择器并入）；总览条 = 程序/总记录/Pass/Fail/Yield/UPH/测试时长/测试开始 + 格式 chip（UPH 带 ? 公式）
+- 警报单横幅可展开；Bin Pareto + Site 柱线组合双列；Bin×Site 同卡表格/热力图页签（热力格等宽居中
+  `数量(行内占比%)`，合计列 `数量(占总记录%)`）
+- 测试项总览：CPK 堆叠比例条 + 11 列表格（Fail 合并 `数量(占比%)`、表头全列排序、卡头双复选框默认勾选、
+  行点击跳转）+ Top 10 Fail 信息 chip；UPH 紧凑明细行置底（字段全保留含公式/来源/警告/各站小格）
+- 删除：KpiCards / DataQualityOverview / gauge / Bin 饼图表 / CPK 饼图 / Top10 柱状 / 工具条行；整页纵向约减 45%
+- 多轮迭代修正留档：热力格混排错位（统一等宽格）、B 级灰误用、副行/筛选口误澄清（实为表头排序）、
+  UPH 信息补全、Top10 字体降级、合计列百分比口径（与 Pareto 一致）
+
+## 批次定稿摘要（指南 §11.3，六差异点逐个确认）
+
+- 批次选择器并入页头；阶段胶囊条保留；趋势图并入阶段汇总卡；Site 矩阵合并单列（徽章+比值）；
+  Bin 卡全套对齐单文件；UPH 保持现状（只在 Bin 卡内，不上总览条）
+
+## 交付与验证
+
+- [x] 两张审阅页浏览器实测（双主题/交互/窄视口/控制台 0 报错）；截图存档 test/screenshots_night/dashboard_redesign_*、batch_redesign_*
+- [x] 定稿回写 ui-design-guide.md §11 页面篇（参考顺延 §12，状态行更新）
+- [ ] 落地改造（另行排期）：单文件组件删改 + 批次组件改造 + e2e 同步，分批执行每批全量回归
