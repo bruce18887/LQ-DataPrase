@@ -1,167 +1,97 @@
 <template>
-  <div class="bin-dist">
-    <div class="panel-row panel-row--h420">
-      <div class="panel-card">
-        <div class="panel-head">🔴 Bin 分布饼图</div>
-        <div class="panel-body"><div ref="binChart" class="chart-fill" role="img" aria-label="Bin分布饼图" /></div>
+  <!-- Bin 构成 = Pareto 横向条（指南 §11.1，取代饼图+占比表）：
+       按数量降序；pass 绿 / fail 红（色即语义，无图例）；
+       条内右侧「数量 · 占比%」（全精度 formatPercent）；
+       超多 Bin（>12）容器内滚动保持降序可读。 -->
+  <div class="pareto" role="img" aria-label="Bin构成Pareto图">
+    <template v-if="rows.length">
+      <div v-for="r in rows" :key="r.name" class="p-row" :title="`${r.name}: ${r.value.toLocaleString()} (${formatPercent(r.pct)}%)`">
+        <span class="p-name">{{ r.name }}</span>
+        <div class="p-track">
+          <div
+            class="p-bar"
+            :class="r.pass ? 'p-bar--pass' : 'p-bar--fail'"
+            :style="{ width: r.widthPct + '%' }"
+          />
+        </div>
+        <span class="p-val"><b>{{ r.value.toLocaleString() }}</b> · {{ formatPercent(r.pct) }}%</span>
       </div>
-      <div class="panel-card">
-        <div class="panel-head">💹 Bin 占比一览</div>
-        <el-table :data="binPieTableData" stripe size="small" max-height="380" border class="panel-table">
-          <el-table-column prop="name" label="Bin" min-width="90">
-            <template #default="{ row }">
-              <BinTag :label="row.name" :pct="Number(row.pct)" />
-            </template>
-          </el-table-column>
-          <el-table-column prop="value" label="数量" width="80" align="right" sortable />
-          <el-table-column prop="pct" label="占比" width="130" align="center">
-            <template #default="{ row }">
-              <!-- 进度条宽度 = 百分比值，0.001% 是亚像素不可见 → 保底最小宽度
-                   (MIN_BAR_HEIGHT_PCT)，文字用 format 显示真实占比 -->
-              <el-progress
-                :percentage="Math.max(Number(row.pct), MIN_BAR_HEIGHT_PCT)"
-                :format="() => `${formatPercent(Number(row.pct))}%`"
-                :color="row.name.includes('1') ? 'var(--success)' : 'var(--error-2)'"
-                :stroke-width="12"
-              />
-            </template>
-          </el-table-column>
-        </el-table>
-      </div>
-    </div>
+    </template>
+    <el-empty v-else :image-size="60" description="暂无 Bin 数据" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onActivated, onBeforeUnmount } from 'vue'
-import { initEchartsWhenReady, type EchartsHandle } from '../../../utils/echarts-init'
-import { useThemeStore } from '../../../stores/theme'
-import { formatPercent, MIN_BAR_HEIGHT_PCT } from '../../../utils/chart-bar'
-import BinTag from '../../../components/common/BinTag.vue'
-
-const themeStore = useThemeStore()
+import { computed } from 'vue'
+import { formatPercent } from '../../../utils/chart-bar'
 
 const props = defineProps<{
   binPieData: { name: string; value: number }[]
 }>()
 
-const binChart = ref<HTMLElement>()
-let binHandle: EchartsHandle | null = null
-
-const binPieTableData = computed(() => {
-  const pieData = props.binPieData || []
-  const total = pieData.reduce((s, item) => s + item.value, 0)
-  return pieData.map(item => ({
+const rows = computed(() => {
+  const data = props.binPieData || []
+  const total = data.reduce((s, item) => s + item.value, 0)
+  const sorted = [...data].sort((a, b) => b.value - a.value)
+  const max = sorted.length ? sorted[0].value : 0
+  return sorted.map((item) => ({
     name: item.name,
     value: item.value,
-    // 保留全精度数值（不再 toFixed(1)：0.001% 会被截成 "0.0"），显示交给 formatPercent
+    pass: item.name.includes('1'),
     pct: total > 0 ? (item.value / total) * 100 : 0,
+    // 相对最大 Bin 的条宽；非零保底 1.5% 避免亚像素不可见
+    widthPct: max > 0 ? Math.max((item.value / max) * 100, item.value > 0 ? 1.5 : 0) : 0,
   }))
 })
-
-function _tc() {
-  return getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#ffffff'
-}
-
-function buildBinOption() {
-  // CVD 色盲安全 10 色（组合搜索验证 protan/deutan ΔE≥15；原板存在 绿/粉、
-  // 蓝/紫、琥珀/橙、绿/绿 等不可分对；b1 保持 pass 绿语义）
-  const allBinColors = ['var(--success)', 'var(--error-2)', 'var(--warn-2)', 'var(--brand)', '#1F3864', '#475569', '#0284c7', '#56B4E9', '#0d9488', '#F0E442']
-
-  return {
-    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { orient: 'vertical', left: 'left', top: 'center', type: 'scroll', textStyle: { color: _tc() } },
-    series: [{
-      type: 'pie',
-      radius: ['35%', '75%'],
-      center: ['60%', '50%'],
-      data: props.binPieData,
-      color: allBinColors,
-      label: { formatter: '{b}\n{d}%', fontSize: 11 },
-      emphasis: { label: { fontSize: 14, fontWeight: 'bold' } },
-      itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
-    }],
-  }
-}
-
-function renderBinChart() {
-  if (!binChart.value || !props.binPieData?.length) return
-  if (binHandle) {
-    binHandle.chart?.setOption(buildBinOption() as any, { notMerge: true, lazyUpdate: true })
-  } else {
-    binHandle = initEchartsWhenReady(binChart.value, { option: buildBinOption() as any, reuse: true })
-  }
-}
-
-function handleResize() {
-  binHandle?.chart?.resize()
-}
-
-watch(() => props.binPieData, () => {
-  nextTick(() => renderBinChart())
-}, { deep: true, immediate: true })
-
-// 主题切换时重新渲染图表，更新文字颜色
-watch(() => themeStore.currentTheme, () => {
-  nextTick(() => renderBinChart())
-})
-
-onMounted(() => {
-  window.addEventListener('resize', handleResize)
-  nextTick(() => renderBinChart())
-})
-
-onActivated(() => {
-  // keep-alive 重新激活后，旧实例可能绑定到已 detached 的 DOM，强制重建
-  if (binHandle) { binHandle.dispose(); binHandle = null }
-  nextTick(() => renderBinChart())
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('resize', handleResize)
-  binHandle?.dispose(); binHandle = null
-})
-
-defineExpose({ handleResize })
 </script>
 
 <style scoped>
-.panel-row {
-  display: flex;
-  gap: 16px;
-}
-.panel-row--h420 {
-  min-height: 420px;
-}
-.panel-card {
-  flex: 1;
+.pareto {
   display: flex;
   flex-direction: column;
-  background: var(--bg-2);
-  border: 1px solid var(--border-2);
-  border-radius: 8px;
+  gap: 9px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.p-row {
+  display: grid;
+  grid-template-columns: 72px 1fr 118px;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.p-name {
+  font-weight: 600;
+  color: var(--text-2);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.p-track {
+  height: 16px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg-3) 70%, transparent);
   overflow: hidden;
 }
-.panel-head {
-  flex-shrink: 0;
-  padding: 10px 16px;
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--text);
-  background: var(--bg-3);
-  border-bottom: 1px solid var(--border-2);
-}
-.panel-body {
-  flex: 1;
-  min-height: 0;
-  padding: 12px;
-}
-.chart-fill {
-  width: 100%;
+
+.p-bar {
   height: 100%;
-  min-height: 340px;
+  border-radius: 4px;
 }
-.panel-table {
-  width: 100%;
+.p-bar--pass { background: var(--success); }
+.p-bar--fail { background: var(--error); }
+
+.p-val {
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.p-val b {
+  color: var(--text);
+  font-weight: 700;
 }
 </style>

@@ -1,24 +1,11 @@
 <template>
   <div class="dashboard-page">
-    <!-- 页面标题 -->
+    <!-- 页头一行（指南 §11.2）：标题 + 文件选择器 + 更新时间 -->
     <header class="dash-header">
       <h1 class="dash-title">
         <span class="dash-title-icon" aria-hidden="true">📊</span>
         <span class="dash-title-text">数据分析仪表板</span>
       </h1>
-      <p class="dash-subtitle">
-        <span>文件: <b>{{ data?.filename || '未选择' }}</b></span>
-        <span v-if="data?.program_name" class="dash-subtitle-sep">|</span>
-        <span v-if="data?.program_name">程序: <b>{{ data.program_name }}</b></span>
-        <span class="dash-subtitle-sep">|</span>
-        <span>更新: {{ updateTime }}</span>
-      </p>
-    </header>
-
-    <el-tabs v-model="activeTab" class="dash-tabs">
-      <el-tab-pane label="📊 单文件分析" name="single">
-    <!-- 文件选择器 -->
-    <div class="dash-toolbar">
       <FileSelect
         v-model="selectedFileId"
         :files="files"
@@ -29,8 +16,11 @@
         clearable
         class="dash-file-select"
       />
-    </div>
+      <span class="dash-meta">更新: {{ updateTime }}</span>
+    </header>
 
+    <el-tabs v-model="activeTab" class="dash-tabs">
+      <el-tab-pane label="📊 单文件分析" name="single">
     <!-- 空态 / 加载态 / 错误态 -->
     <el-empty v-if="!filesLoading && files.length === 0" description="暂无数据文件，请先在数据管理页面上传 ATE 数据文件" />
     <div v-else-if="filesLoading && !data" v-loading="true" element-loading-text="加载文件列表..." style="min-height:200px" />
@@ -42,48 +32,45 @@
 
     <!-- ==================== 数据态 ==================== -->
     <template v-if="data">
-      <!-- 核心指标卡片 -->
-      <KpiCards :metrics="metrics" />
-
-      <!-- 质量警报 -->
-      <QualityAlerts :alerts="qualityAlerts" />
-
-      <!-- Bin 分布 -->
-      <h2 class="sec-title"><span>📋</span> Bin 分布</h2>
-      <BinDistribution :bin-pie-data="data?.bin_pie_data || []" />
-
-      <!-- Site 良率分布 & Yield 分析 -->
-      <h2 class="sec-title"><span>🟢</span> Site 良率分布 &amp; Yield 分析</h2>
-      <SiteYieldAnalysis
-        :site-yield-data="data?.site_yield_data || []"
-        :overall-yield="metrics.yield_pct || 0"
+      <!-- 总览条（信息记录中枢，取代 KPI 大卡） -->
+      <OverviewStrip
+        :metrics="metrics"
+        :uph="uphData"
+        :program="data?.program_name || ''"
+        :test-start="testStartTime"
       />
 
-      <!-- Bin x Site 交叉表 -->
-      <h2 class="sec-title"><span>📊</span> Bin &times; Site 交叉表</h2>
+      <!-- 质量警报（单横幅，可展开明细） -->
+      <AlertBanner :alerts="qualityAlerts" />
+
+      <!-- 图表双列：Bin 构成 Pareto + Site 良率柱线组合 -->
+      <div class="dash-charts">
+        <div class="sec-card">
+          <div class="sec-head"><h3>📋 Bin 构成</h3><span class="sec-desc">Pareto 降序 · 色即语义</span></div>
+          <div class="sec-body">
+            <BinDistribution :bin-pie-data="data?.bin_pie_data || []" />
+          </div>
+        </div>
+        <SiteYieldAnalysis
+          :site-yield-data="data?.site_yield_data || []"
+          :overall-yield="metrics.yield_pct || 0"
+        />
+      </div>
+
+      <!-- Bin x Site 交叉表（表格 / 热力图页签） -->
       <BinSiteCrossTable
         :bin-table-data="binTableData"
         :bin-site-columns="binSiteColumns"
       />
 
-      <!-- 测试项总览（合并 CPK 参数表 + Fail 测试项明细） -->
+      <!-- 测试项总览（11 列表格 + CPK 比例条 + Top 10 Fail chip） -->
       <TestItemOverviewSection
         :items="testItemOverview"
         :file-id="data?.file_id || null"
       />
 
-      <!-- UPH 效率分析 -->
-      <h2 class="sec-title"><span>⚡</span> UPH 效率分析</h2>
-      <UphCard :file-id="data?.file_id || null" />
-
-      <!-- 数据质量概览 -->
-      <DataQualityOverview
-        :quality="quality"
-        :metrics="metrics"
-        :top-fail-item="topFailItem"
-        :top-fail-count="topFailCount"
-        :fail-test-items-length="failTestItems.length"
-      />
+      <!-- UPH 效率明细（紧凑信息带，页面最底部） -->
+      <UphCard :file-id="data?.file_id || null" :uph-data="uphData" />
 
       <!-- 导出 -->
       <ExportFooter
@@ -102,20 +89,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onActivated, watch, computed } from 'vue'
+import { ref, onMounted, onActivated, watch } from 'vue'
 import { useFilesStore } from '../../stores/files'
 import api from '../../api'
 import { analysisApi } from '../../api/analysis'
 import UphCard from './components/UphCard.vue'
 import BatchYieldTab from './components/BatchYieldTab.vue'
-import KpiCards from './components/KpiCards.vue'
-import QualityAlerts from './components/QualityAlerts.vue'
+import OverviewStrip from './components/OverviewStrip.vue'
+import AlertBanner from './components/AlertBanner.vue'
 import BinDistribution from './components/BinDistribution.vue'
 import SiteYieldAnalysis from './components/SiteYieldAnalysis.vue'
 import BinSiteCrossTable from './components/BinSiteCrossTable.vue'
 import TestItemOverviewSection from './components/TestItemOverviewSection.vue'
-import DataQualityOverview from './components/DataQualityOverview.vue'
-import type { TestItemOverview } from '../../types'
+import type { TestItemOverview, UphData } from '../../types'
 import ExportFooter from './components/ExportFooter.vue'
 import FileSelect from '../../components/common/FileSelect.vue'
 
@@ -151,21 +137,34 @@ const error = ref(false)
 const activeTab = ref('single')
 const data = ref<DashboardData | null>(null)
 const metrics = ref({ total_rows: 0, pass_count: 0, fail_count: 0, yield_pct: 0, format: 'N/A' })
-const failTestItems = ref<{ name: string; fail_count: number; percentage: number }[]>([])
-const quality = ref({ numeric_items: 0, items_with_limits: 0, site_count: 0, bin_types: 0, fail_bin_count: 0 })
 const binTableData = ref<any[]>([])
 const binSiteColumns = ref<string[]>([])
 const updateTime = ref('')
 const testItemOverview = ref<TestItemOverview[]>([])
 const qualityAlerts = ref<any[]>([])
+// 页面级 UPH 拉取：总览条与 UPH 明细共用同一份数据（避免重复请求）
+const uphData = ref<UphData | null>(null)
+// 测试开始：文件元数据 metadata.start_time（列表接口不带 metadata，走详情接口，去时区后缀保留到分钟）
+const testStartTime = ref('')
 
-const topFailItem = computed(() => {
-  if (!failTestItems.value.length) return '无'
-  const name = failTestItems.value[0].name
-  return name.length > 20 ? name.slice(0, 20) + '...' : name
-})
+async function loadUph(fileId: number) {
+  try {
+    const resp = await analysisApi.getUph(fileId)
+    uphData.value = resp.data as UphData
+  } catch {
+    uphData.value = null
+  }
+}
 
-const topFailCount = computed(() => failTestItems.value[0]?.fail_count ?? 0)
+async function loadFileMeta(fileId: number) {
+  try {
+    const { data } = await api.get(`/files/${fileId}/`)
+    const st = data?.metadata?.start_time
+    testStartTime.value = typeof st === 'string' ? st.replace(/\s+UTC[+-]\d+.*$/, '').slice(0, 16) : ''
+  } catch {
+    testStartTime.value = ''
+  }
+}
 
 async function loadFiles() {
   filesLoading.value = true
@@ -183,6 +182,7 @@ async function onFileChange() {
   if (!selectedFileId.value) {
     data.value = null
     error.value = false
+    uphData.value = null
     return
   }
   loading.value = true
@@ -196,8 +196,6 @@ async function onFileChange() {
       // 兜底：/summary/ 缺 metrics 时保持默认值，避免模板 metrics.yield_pct 抛 TypeError
       // （fresh-seed e2e 既有崩溃，2026-08-29 todo Review 已建议修复）
       metrics.value = d.metrics || metrics.value
-      failTestItems.value = d.fail_test_items || []
-      quality.value = { ...d.quality_overview, fail_bin_count: d.quality_overview?.fail_bin_count || 0 }
       binTableData.value = d.bin_table_data || []
       binSiteColumns.value = d.bin_site_columns || []
       testItemOverview.value = d.test_item_overview || []
@@ -207,12 +205,12 @@ async function onFileChange() {
     }
     data.value = d
     metrics.value = d.metrics || metrics.value
-    failTestItems.value = d.fail_test_items
-    quality.value = { ...d.quality_overview, fail_bin_count: d.quality_overview?.fail_bin_count || 0 }
     binTableData.value = d.bin_table_data || []
     binSiteColumns.value = d.bin_site_columns || []
     testItemOverview.value = d.test_item_overview || []
     qualityAlerts.value = d.quality_alerts || []
+    loadUph(selectedFileId.value)
+    loadFileMeta(selectedFileId.value)
   } catch {
     error.value = true
   } finally {
@@ -258,13 +256,13 @@ onActivated(async () => {
 
 <style scoped>
 /* ================================================================
-   LQ-DataPrase Dashboard — Industrial Data Terminal
+   LQ-DataPrase Dashboard — 页面篇（指南 §11.2，定稿 2026-08-30）
    ================================================================ */
 
 /* ----- Root & Containers ----- */
 .dashboard-page {
-  padding: 28px 32px;
-  background: linear-gradient(165deg, var(--bg) 0%, var(--bg-2) 100%);
+  padding: 20px 24px 28px;
+  background: var(--bg);
   min-height: 100%;
 }
 
@@ -286,72 +284,81 @@ onActivated(async () => {
   padding: 0;
 }
 
-/* ----- Header ----- */
+/* ----- Header（一行：标题 + 文件选择器 + 更新时间） ----- */
 .dash-header {
-  text-align: center;
-  margin-bottom: 24px;
-  padding-bottom: 20px;
-  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 2px 0 12px;
 }
 .dash-title {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 10px;
-  margin: 0 0 6px 0;
-  font-size: 26px;
-  font-weight: 750;
-  color: var(--text);
-  letter-spacing: -0.3px;
-}
-.dash-title-icon { font-size: 30px; }
-.dash-title-text {
-  background: linear-gradient(135deg, var(--brand-2) 0%, var(--brand) 60%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-.dash-subtitle {
+  gap: 7px;
   margin: 0;
-  font-size: 13px;
-  color: var(--text-2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-.dash-subtitle-sep { color: var(--border-2); }
-
-/* ----- Toolbar (file selector) ----- */
-.dash-toolbar {
-  margin-bottom: 20px;
-}
-.dash-file-select { width: 320px; max-width: 100%; }
-
-/* ================================================================
-   Section Title
-   ================================================================ */
-.sec-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--text);
-  margin: 24px 0 12px 0;
-  padding-left: 10px;
-  border-left: 3px solid var(--brand);
-  line-height: 1;
+  white-space: nowrap;
+}
+.dash-title-icon { font-size: 17px; }
+.dash-file-select { width: 320px; max-width: 100%; }
+.dash-meta {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
 }
 
 /* ================================================================
-   Animations
+   图表双列（Bin Pareto + Site 柱线组合，<900px 堆叠）
    ================================================================ */
-@media (prefers-reduced-motion: no-preference) {
-  .dash-title-icon { animation: kpi-pulse 2.5s ease-in-out infinite; }
+.dash-charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
 }
-@keyframes kpi-pulse {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50%      { transform: scale(1.08); opacity: .85; }
+@media (max-width: 900px) {
+  .dash-charts { grid-template-columns: 1fr; }
+}
+
+/* Section 卡（§10.4 定稿：浅底带卡头） */
+.sec-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.sec-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-2) 60%, var(--card));
+  flex-shrink: 0;
+}
+.sec-head h3 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+.sec-desc {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.sec-body {
+  flex: 1;
+  min-height: 0;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 </style>
