@@ -161,7 +161,7 @@ test.describe('@theme 主题视觉回归', { tag: ['@p2', '@theme'] }, () => {
     await page.addInitScript(() => localStorage.setItem('theme', 'night'))
 
     const pages: { name: string; url: string; ready: string }[] = [
-      { name: '仪表板', url: '/dashboard', ready: '.kpi-row' },
+      { name: '仪表板', url: '/dashboard', ready: '[data-testid="overview-strip"]' },
       { name: '数据管理-文件列表', url: '/data', ready: '.el-table' },
       { name: '系统设置', url: '/settings', ready: '.el-tabs' },
       { name: 'SFTP 浏览器', url: '/sftp', ready: '.connect-card' },

@@ -1,133 +1,123 @@
 <template>
-  <el-card :shadow="embedded ? 'never' : 'hover'" class="uph-card" :class="{ 'uph-card--embedded': embedded }">
-    <!-- embedded（批次 Bin 分布卡内嵌）：外层分区标题已由父级 divider 提供，不再重复渲染卡片头 -->
-    <template #header>
-      <div v-if="!embedded" class="uph-header">
-        <span>⚡ UPH 效率分析</span>
-        <el-tag v-if="data" size="small" :type="sourceTag.type">
-          {{ sourceTag.label }}
-        </el-tag>
-      </div>
-    </template>
-    <div v-loading="loading" element-loading-text="计算UPH...">
-      <div v-if="error" class="uph-empty">
-        <el-empty description="暂无UPH数据" :image-size="60" />
-      </div>
-      <div v-else-if="data" class="uph-body">
-        <!-- 核心指标 -->
-        <el-row :gutter="16">
-          <el-col :span="8">
-            <div class="uph-metric uph-metric-primary">
-              <div class="uph-metric-label">
-                UPH
-                <el-tooltip placement="top" :width="340">
-                  <template #content>
-                    <div class="uph-helper">
-                      <div class="uph-helper__title">UPH ＝ 每小时产出单元数</div>
-                      <div class="uph-helper__formula">UPH ＝ 测试总数量 ÷ 总耗时 × 3600</div>
-                      <div v-if="data?.site_count" class="uph-helper__formula">
-                        总耗时 ＝ 各单元测试时间之和 ÷ {{ data.site_count }}（并行站点模型）
-                      </div>
-                      <div v-if="helperSourceText" class="uph-helper__source">
-                        {{ helperSourceText }}
-                      </div>
-                    </div>
-                  </template>
-                  <el-icon class="uph-metric-label__help"><QuestionFilled /></el-icon>
-                </el-tooltip>
-              </div>
-              <div class="uph-metric-value">{{ data.uph.toLocaleString() }}</div>
-              <div class="uph-metric-unit">Units/Hour</div>
-            </div>
-          </el-col>
-          <el-col :span="8">
-            <div class="uph-metric">
-              <div class="uph-metric-label">平均测试时间</div>
-              <div class="uph-metric-value">{{ data.avg_test_time.toFixed(4) }}</div>
-              <div class="uph-metric-unit">秒</div>
-            </div>
-          </el-col>
-          <el-col :span="8">
-            <div class="uph-metric">
-              <div class="uph-metric-label">总耗时</div>
-              <div class="uph-metric-value">{{ formatTime(data.total_time_seconds) }}</div>
-              <div class="uph-metric-unit">({{ data.total_tested.toLocaleString() }} units)</div>
-            </div>
-          </el-col>
-        </el-row>
-
-        <!-- 各站点 UPH 明细（如果有） -->
-        <div v-if="data.by_site && data.by_site.length > 0" style="margin-top: 16px">
-          <el-divider style="margin: 8px 0">
-            <span style="font-size: 12px">各站点 UPH 明细</span>
-          </el-divider>
-          <el-row :gutter="12">
-            <el-col
-              v-for="site in data.by_site"
-              :key="site.site"
-              :xs="12"
-              :sm="8"
-              :md="6"
-              style="margin-bottom: 8px"
-            >
-              <div class="uph-site-card">
-                <span class="uph-site-label">Site {{ site.site }}</span>
-                <span class="uph-site-value">{{ site.uph.toLocaleString() }}</span>
-                <span class="uph-site-tested">({{ site.tested }} units)</span>
-              </div>
-            </el-col>
-          </el-row>
+  <!-- UPH 紧凑明细行（指南 §11.1/§2.5.3，取代大格区块卡）：
+       平均测试时间 / 总耗时 / 并行站点数 / 各站点独立小格 / 来源标签 / 警告 / 公式（? 悬停）。
+       embedded（批次 Bin 分布卡内嵌）：不渲染卡片壳，标题由父级分区提供。 -->
+  <div class="uph-card" :class="{ 'uph-card--embedded': embedded }">
+    <template v-if="!embedded">
+      <div class="uph-shell">
+        <div class="uph-head">
+          <h3>⚡ UPH 效率明细</h3>
+          <span class="uph-head-desc">紧凑信息带：核心数字在总览条，明细/公式/来源/警告在此</span>
         </div>
-
-        <!-- 警告信息 -->
-        <div v-if="data.warnings && data.warnings.length > 0" style="margin-top: 12px">
-          <el-alert
-            v-for="(w, i) in data.warnings"
-            :key="i"
-            :title="w"
-            type="warning"
-            :closable="false"
-            show-icon
-            style="margin-bottom: 6px"
+        <div class="uph-body">
+          <UphDetail
+            :data="data"
+            :loading="loading"
+            :error="error"
+            :source-tag="sourceTag"
           />
         </div>
-
-        <!-- 站点数 -->
-        <div class="uph-footer">
-          <span>并行站点数: <b>{{ data.site_count }}</b></span>
-        </div>
       </div>
-    </div>
-  </el-card>
+    </template>
+    <UphDetail
+      v-else
+      :data="data"
+      :loading="loading"
+      :error="error"
+      :source-tag="sourceTag"
+    />
+  </div>
 </template>
 
-<script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+<script lang="ts">
+import { defineComponent, h, ref, computed, watch, type PropType } from 'vue'
 import { QuestionFilled } from '@element-plus/icons-vue'
+import { ElTooltip, ElIcon, ElEmpty } from 'element-plus'
 import { analysisApi } from '../../../api/analysis'
+import type { UphData } from '../../../types'
 
-interface UphSiteData {
-  site: string
-  tested: number
-  uph: number
-}
+/** 紧凑明细行内容（单文件卡内与批次 embedded 共用） */
+const UphDetail = defineComponent({
+  name: 'UphDetail',
+  props: {
+    data: { type: Object as PropType<UphData | null>, default: null },
+    loading: { type: Boolean, default: false },
+    error: { type: Boolean, default: false },
+    sourceTag: {
+      type: Object as PropType<{ tone: 'success' | 'brand' | 'warn' | 'neutral'; label: string }>,
+      required: true,
+    },
+  },
+  setup(props) {
+    function formatTime(seconds: number): string {
+      if (seconds < 60) return `${seconds.toFixed(1)}s`
+      if (seconds < 3600) return `${(seconds / 60).toFixed(1)}min`
+      const h = Math.floor(seconds / 3600)
+      const m = Math.round((seconds % 3600) / 60)
+      return `${h}h ${m}m`
+    }
 
-interface UphData {
-  uph: number
-  avg_test_time: number
-  total_tested: number
-  total_time_seconds: number
-  source: string
-  by_site: UphSiteData[]
-  site_count: number
-  warnings: string[]
-}
+    return () => {
+      if (props.error) {
+        return h('div', { class: 'uph-empty' }, [h(ElEmpty, { description: '暂无UPH数据', imageSize: 60 })])
+      }
+      const data = props.data
+      if (!data) {
+        return h('div', { class: 'uph-empty' }, props.loading ? '计算UPH...' : '')
+      }
+      const nodes: any[] = [
+        h('span', {}, ['平均测试时间 ', h('b', {}, data.avg_test_time.toFixed(4)), ' 秒']),
+        h('span', {}, ['总耗时 ', h('b', {}, formatTime(data.total_time_seconds)), `（${data.total_tested.toLocaleString()} units）`]),
+        h('span', {}, ['并行站点数 ', h('b', {}, String(data.site_count))]),
+        h('span', {}, [
+          '数据来源 ',
+          h('span', { class: `uph-src uph-src--${props.sourceTag.tone}` }, props.sourceTag.label),
+        ]),
+      ]
+      for (const w of data.warnings || []) {
+        nodes.push(h('span', { class: 'uph-warn' }, `⚠ ${w}`))
+      }
+      if (data.by_site && data.by_site.length > 0) {
+        nodes.push(h('span', {}, '各站点 UPH'))
+        nodes.push(
+          h('span', { class: 'site-uph-wrap' },
+            data.by_site.map((site) =>
+              h('span', { class: 'site-uph', key: site.site }, [
+                h('b', {}, `S${site.site}`),
+                ` ${site.uph.toLocaleString()}`,
+              ])
+            )
+          )
+        )
+      }
+      // 公式说明（? 悬停；e2e 既有断言选择器 .uph-metric-label__help 保持）
+      nodes.push(
+        h('span', { class: 'uph-formula' }, [
+          'UPH = 测试总数量 ÷ 总耗时 × 3600',
+          h(ElTooltip, { placement: 'top', width: 340 }, {
+            content: () => h('div', { class: 'uph-helper' }, [
+              h('div', { class: 'uph-helper__title' }, 'UPH ＝ 每小时产出单元数'),
+              h('div', { class: 'uph-helper__formula' }, 'UPH ＝ 测试总数量 ÷ 总耗时 × 3600'),
+              data.site_count
+                ? h('div', { class: 'uph-helper__formula' }, `总耗时 ＝ 各单元测试时间之和 ÷ ${data.site_count}（并行站点模型）`)
+                : null,
+            ]),
+            default: () => h(ElIcon, { class: 'uph-metric-label__help' }, () => h(QuestionFilled)),
+          }),
+        ])
+      )
+      return h('div', { class: 'uph-detail' }, nodes)
+    }
+  },
+})
+</script>
 
+<script setup lang="ts">
 const props = withDefaults(defineProps<{
   fileId?: number | null
   /** Direct UPH data — when provided, skips API fetch (batch mode) */
   uphData?: UphData | null
-  /** 内嵌模式（批次 Bin 分布卡内）：去掉卡片头与悬浮阴影，标题由父级分区提供 */
+  /** 内嵌模式（批次 Bin 分布卡内）：去掉卡片壳，标题由父级分区提供 */
   embedded?: boolean
 }>(), {
   fileId: null,
@@ -142,35 +132,13 @@ const data = ref<UphData | null>(null)
 // Source-aware tag: batch=批次汇总, manual*=手动输入, 其余非空=自动检测列
 // （后端实际取值 'Test_Time (ms→s)' / 'Test_Time' / 'manual (1.2s)' / 'unavailable' / 'batch'，
 //   此前只认 'column' 导致单文件自动检测被误标成「手动输入」）
-const sourceTag = computed<{ type: 'success' | 'primary' | 'warning'; label: string }>(() => {
+const sourceTag = computed<{ tone: 'success' | 'brand' | 'warn' | 'neutral'; label: string }>(() => {
   const source = data.value?.source
-  if (source === 'batch') return { type: 'primary', label: '批次汇总' }
-  if (source && source.startsWith('manual')) return { type: 'warning', label: '手动输入' }
-  if (source && source !== 'unavailable') return { type: 'success', label: '自动检测' }
-  return { type: 'warning', label: '无测试时间' }
+  if (source === 'batch') return { tone: 'brand', label: '批次汇总' }
+  if (source && source.startsWith('manual')) return { tone: 'warn', label: '手动输入' }
+  if (source && source !== 'unavailable') return { tone: 'success', label: `自动检测 ${source}` }
+  return { tone: 'neutral', label: '无测试时间' }
 })
-
-/** helper 里「测试时间来源」说明行：按后端 source 字段区分手动/自动/批次 */
-const helperSourceText = computed(() => {
-  const source = data.value?.source ?? ''
-  if (source === 'batch') return '测试时间来源：批次汇总数据'
-  if (source.startsWith('manual')) {
-    const sec = source.replace(/^manual\s*\(?/, '').replace(/s?\)?$/, '')
-    return `测试时间来源：手动输入每单元测试时间 ${sec}s`
-  }
-  if (source && source !== 'unavailable') {
-    return `测试时间来源：自动检测 ${source} 列（元数据单位 ms 时已换算为秒）`
-  }
-  return '测试时间可自动检测（Test_Time 等列）或手动输入'
-})
-
-function formatTime(seconds: number): string {
-  if (seconds < 60) return `${seconds.toFixed(1)}s`
-  if (seconds < 3600) return `${(seconds / 60).toFixed(1)}min`
-  const h = Math.floor(seconds / 3600)
-  const m = Math.round((seconds % 3600) / 60)
-  return `${h}h ${m}m`
-}
 
 async function fetchUph() {
   if (!props.fileId) {
@@ -191,7 +159,7 @@ async function fetchUph() {
   }
 }
 
-// When uphData is provided directly (batch mode), use it
+// When uphData is provided directly (batch mode / 页面统一下传), use it
 watch(() => props.uphData, (val) => {
   if (val) {
     data.value = val
@@ -199,126 +167,134 @@ watch(() => props.uphData, (val) => {
   }
 }, { immediate: true })
 
-// When fileId changes (single-file mode), fetch from API
+// When fileId changes (single-file mode), fetch from API（uphData 优先）
 watch(() => props.fileId, () => {
-  if (props.fileId) fetchUph()
+  if (props.fileId && !props.uphData) fetchUph()
 }, { immediate: true })
 </script>
 
 <style scoped>
-.uph-card {
-  border-radius: 8px;
+/* Section 卡（§10.4 定稿） */
+.uph-shell {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  margin-bottom: 14px;
 }
-
-/* embedded：el-card 对已声明的 #header 插槽仍会渲染空头部容器（$slots.header 恒真），
-   必须用 CSS 隐藏，否则残留一条带 padding/下边框的空头带 */
-.uph-card--embedded :deep(.el-card__header) {
-  display: none;
-}
-
-.uph-header {
+.uph-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  font-weight: 600;
-  font-size: 15px;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-2) 60%, var(--card));
+}
+.uph-head h3 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+.uph-head-desc {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.uph-body {
+  padding: 14px 16px;
+}
+
+/* embedded：无卡壳（父级提供分区标题） */
+.uph-card--embedded :deep(.uph-detail) {
+  padding: 4px 0;
 }
 
 .uph-empty {
-  min-height: 120px;
+  min-height: 80px;
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.uph-body {
-  min-height: 120px;
-}
-
-/* Core metrics */
-.uph-metric {
-  text-align: center;
-  padding: 12px 8px;
-  border-radius: 8px;
-  background: var(--bg-2, #f8f9fa);
-}
-
-.uph-metric-primary {
-  background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
-  color: #fff;
-}
-
-.uph-metric-label {
+  color: var(--text-3);
   font-size: 12px;
-  opacity: 0.85;
-  margin-bottom: 4px;
 }
 
+/* —— 紧凑信息带 —— */
+.uph-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  font-size: 12px;
+  color: var(--text-2);
+  align-items: center;
+}
+.uph-detail b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.uph-src {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: 6px;
+}
+.uph-src--success {
+  background: color-mix(in srgb, var(--success) 13%, transparent);
+  color: var(--success);
+}
+.uph-src--brand {
+  background: color-mix(in srgb, var(--brand) 13%, transparent);
+  color: var(--brand);
+}
+.uph-src--warn {
+  background: color-mix(in srgb, var(--warn) 13%, transparent);
+  color: var(--warn);
+}
+.uph-src--neutral {
+  background: color-mix(in srgb, var(--text-2) 12%, transparent);
+  color: var(--text-2);
+}
+
+.uph-warn {
+  font-size: 11.5px;
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.site-uph-wrap {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+.site-uph {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  padding: 1px 8px;
+  font-size: 11px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  background: var(--bg);
+}
+
+.uph-formula {
+  color: var(--text-3);
+  font-size: 11px;
+}
 .uph-metric-label__help {
-  margin-left: 2px;
+  margin-left: 3px;
   vertical-align: -2px;
   cursor: help;
-  opacity: 0.85;
 }
-
 .uph-helper__title {
   font-weight: 600;
   margin-bottom: 4px;
 }
-
 .uph-helper__formula {
   line-height: 1.7;
-}
-
-.uph-helper__source {
-  margin-top: 6px;
-  font-size: 12px;
-  opacity: 0.85;
-}
-
-.uph-metric-value {
-  font-size: 28px;
-  font-weight: bold;
-  line-height: 1.2;
-}
-
-.uph-metric-unit {
-  font-size: 11px;
-  opacity: 0.7;
-  margin-top: 2px;
-}
-
-/* Per-site cards */
-.uph-site-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 10px;
-  border-radius: 6px;
-  background: var(--bg-2, #f0f4ff);
-  border: 1px solid var(--border-2, #e4e7ed);
-}
-
-.uph-site-label {
-  font-size: 11px;
-  color: var(--text-2, #666);
-}
-
-.uph-site-value {
-  font-size: 20px;
-  font-weight: bold;
-  color: var(--text, #333);
-}
-
-.uph-site-tested {
-  font-size: 10px;
-  color: var(--text-3, #999);
-}
-
-.uph-footer {
-  margin-top: 12px;
-  text-align: right;
-  font-size: 13px;
-  color: var(--text-2, #666);
 }
 </style>

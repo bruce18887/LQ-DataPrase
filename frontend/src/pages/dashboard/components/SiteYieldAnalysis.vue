@@ -1,48 +1,25 @@
 <template>
-  <div class="site-yield" :class="{ 'site-yield--compact': compact }">
-    <div class="panel-row" :class="compact ? 'panel-row--compact' : 'panel-row--h320'">
-      <div class="panel-card panel-card--standalone">
-        <div class="panel-head panel-head--flex">
-          <span>📊 Site 良率柱状图</span>
-          <!-- compact：GAP 信息以一行小 pills 展示，不再占用独立大面板 -->
-          <div v-if="compact && siteYieldData.length" class="yield-stats yield-stats--inline">
-            <span class="yield-pill yield-pill--max" title="最高 Site 良率">
-              最高 {{ siteYieldStats.maxSite }} · {{ siteYieldStats.max }}%
-            </span>
-            <span class="yield-pill yield-pill--min" title="最低 Site 良率">
-              最低 {{ siteYieldStats.minSite }} · {{ siteYieldStats.min }}%
-            </span>
-            <span class="yield-pill yield-pill--diff" title="最高与最低差异">
-              Δ 差异 {{ siteYieldStats.diff }}%
-            </span>
-          </div>
-        </div>
-        <div class="panel-body">
-          <div v-if="siteYieldData.length" ref="siteYieldBarChart" class="chart-fill" role="img" aria-label="Site良率柱状图" />
-          <el-empty v-else :image-size="60" description="该阶段无 Site 数据" />
-        </div>
+  <!-- Site 良率 = 柱线组合（指南 §11.1）：柱色阶（≥95 绿/≥90 琥珀/<90 红）
+       + --info 良率折线；卡头右侧 3 pills（最高/最低/Δ）。
+       gauge 仪表盘与最高/最低统计列已删除（overallYield 由总览条承载）。 -->
+  <div class="panel-card">
+    <div class="panel-head">
+      <h3>🟢 Site 良率</h3>
+      <div v-if="siteYieldData.length" class="yield-pills">
+        <span class="yield-pill yield-pill--max" title="最高 Site 良率">
+          最高 {{ siteYieldStats.maxSite }} · {{ siteYieldStats.max }}%
+        </span>
+        <span class="yield-pill yield-pill--min" title="最低 Site 良率">
+          最低 {{ siteYieldStats.minSite }} · {{ siteYieldStats.min }}%
+        </span>
+        <span class="yield-pill yield-pill--diff" title="最高与最低差异">
+          Δ {{ siteYieldStats.diff }}%
+        </span>
       </div>
-      <!-- 非 compact（单文件仪表板）：保留整体 Yield 仪表盘 + 最高/最低/差异统计列 -->
-      <div v-if="!compact" class="panel-card panel-card--col">
-        <div ref="yieldGaugeChart" style="height:130px" role="img" aria-label="整体Yield仪表盘" />
-        <div class="yield-stats">
-          <div class="yield-stat">
-            <span class="yield-stat-tag yield-stat-tag--max">{{ siteYieldStats.maxSite }}</span>
-            <span class="yield-stat-label">最高</span>
-            <span class="yield-stat-value">{{ siteYieldStats.max }}%</span>
-          </div>
-          <div class="yield-stat">
-            <span class="yield-stat-tag yield-stat-tag--min">{{ siteYieldStats.minSite }}</span>
-            <span class="yield-stat-label">最低</span>
-            <span class="yield-stat-value">{{ siteYieldStats.min }}%</span>
-          </div>
-          <div class="yield-stat">
-            <span class="yield-stat-tag yield-stat-tag--diff">Δ</span>
-            <span class="yield-stat-label">差异</span>
-            <span class="yield-stat-value">{{ siteYieldStats.diff }}%</span>
-          </div>
-        </div>
-      </div>
+    </div>
+    <div class="panel-body">
+      <div v-if="siteYieldData.length" ref="siteYieldBarChart" class="chart-fill" role="img" aria-label="Site良率柱线组合图" />
+      <el-empty v-else :image-size="60" description="该阶段无 Site 数据" />
     </div>
   </div>
 </template>
@@ -57,16 +34,14 @@ const themeStore = useThemeStore()
 const props = withDefaults(defineProps<{
   siteYieldData: { Site: string; Yield: string | number; Total: number; PassCount: number }[]
   overallYield: number
-  /** 批次页 compact 模式：去掉右侧大面板（gauge+统计列），GAP 以头部 pills 展示 */
+  /** 兼容保留：gauge 删除后单文件/批次均为紧凑形态，参数不再生效 */
   compact?: boolean
 }>(), {
   compact: false,
 })
 
 const siteYieldBarChart = ref<HTMLElement>()
-const yieldGaugeChart = ref<HTMLElement>()
 let siteYieldBarHandle: EchartsHandle | null = null
-let yieldGaugeHandle: EchartsHandle | null = null
 
 function _tc() {
   return getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#ffffff'
@@ -103,18 +78,19 @@ function buildSiteYieldBarOption() {
     return isNaN(v) ? 0 : v
   })
 
-  const getYieldColor = (y: number) => y >= 95 ? 'var(--success)' : y < 90 ? 'var(--error-2)' : 'var(--warn-2)'
+  const getYieldColor = (y: number) => y >= 95 ? 'var(--success)' : y < 90 ? 'var(--error)' : 'var(--warn)'
 
   return {
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
       formatter: (params: any) => {
-        const p = Array.isArray(params) ? params[0] : params
-        return `<b>${p.name}</b><br/>Yield: <b>${p.value.toFixed(2)}%</b>`
+        const items = Array.isArray(params) ? params : [params]
+        const bar = items.find((p: any) => p.seriesType === 'bar') || items[0]
+        return `<b>${bar.name}</b><br/>Yield: <b>${Number(bar.value).toFixed(2)}%</b>`
       },
     },
-    grid: { left: '3%', right: '4%', bottom: '3%', top: '10%', containLabel: true },
+    grid: { left: '3%', right: '4%', bottom: '3%', top: '14%', containLabel: true },
     xAxis: {
       type: 'category',
       data: siteNames,
@@ -125,47 +101,28 @@ function buildSiteYieldBarOption() {
       max: 100,
       axisLabel: { formatter: '{value}%', color: _tc() },
     },
-    series: [{
-      type: 'bar',
-      data: siteYields.map(y => ({
-        value: y,
-        itemStyle: { color: getYieldColor(y) },
-      })),
-      barWidth: '50%',
-      label: { show: true, position: 'top', formatter: '{c}%', fontSize: 12, fontWeight: 'bold' },
-    }],
-  }
-}
-
-function buildYieldGaugeOption() {
-  const yieldPct = props.overallYield
-
-  return {
-    series: [{
-      type: 'gauge',
-      startAngle: 180,
-      endAngle: 0,
-      min: 0,
-      max: 100,
-      splitNumber: 10,
-      axisLine: {
-        lineStyle: {
-          width: 8,
-          color: [
-            [0.90, 'var(--error-2)'],
-            [0.95, 'var(--warn-2)'],
-            [1, 'var(--success)'],
-          ],
-        },
+    series: [
+      {
+        type: 'bar',
+        data: siteYields.map(y => ({
+          value: y,
+          itemStyle: { color: getYieldColor(y) },
+        })),
+        barWidth: '50%',
+        label: { show: true, position: 'top', formatter: '{c}%', fontSize: 12, fontWeight: 'bold' },
       },
-      pointer: { icon: 'path://M12.8,0.7l12,40.1H0.7L12.8,0.7z', length: '60%', width: 6 },
-      axisTick: { length: 10, lineStyle: { color: 'inherit', width: 2 } },
-      splitLine: { length: 15, lineStyle: { color: 'inherit', width: 3 } },
-      axisLabel: { color: _tc(), fontSize: 10, distance: -40 },
-      title: { offsetCenter: [0, '-20%'], fontSize: 14 },
-      detail: { fontSize: 24, offsetCenter: [0, '0%'], valueAnimation: true, formatter: '{value}%', color: 'inherit' },
-      data: [{ value: Math.round(yieldPct * 100) / 100, name: '整体Yield' }],
-    }],
+      {
+        // 良率折线：串起各 Site 走势（--info 蓝）
+        type: 'line',
+        data: siteYields,
+        symbol: 'circle',
+        symbolSize: 6,
+        lineStyle: { color: 'var(--info)', width: 2 },
+        itemStyle: { color: 'var(--info)' },
+        tooltip: { show: false },
+        z: 3,
+      },
+    ],
   }
 }
 
@@ -178,26 +135,14 @@ function renderSiteYieldBarChart() {
   }
 }
 
-function renderYieldGaugeChart() {
-  // compact：无 gauge 面板，必须跳过（容器不存在）
-  if (!yieldGaugeChart.value) return
-  if (yieldGaugeHandle) {
-    yieldGaugeHandle.chart?.setOption(buildYieldGaugeOption() as any, { notMerge: true, lazyUpdate: true })
-  } else {
-    yieldGaugeHandle = initEchartsWhenReady(yieldGaugeChart.value, { option: buildYieldGaugeOption() as any, reuse: true })
-  }
-}
-
 function renderAll() {
   nextTick(() => {
     renderSiteYieldBarChart()
-    renderYieldGaugeChart()
   })
 }
 
 function handleResize() {
   siteYieldBarHandle?.chart?.resize()
-  yieldGaugeHandle?.chart?.resize()
 }
 
 watch(() => [props.siteYieldData, props.overallYield], () => {
@@ -216,57 +161,42 @@ onMounted(() => {
 
 onActivated(() => {
   if (siteYieldBarHandle) { siteYieldBarHandle.dispose(); siteYieldBarHandle = null }
-  if (yieldGaugeHandle) { yieldGaugeHandle.dispose(); yieldGaugeHandle = null }
   nextTick(() => renderAll())
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
   siteYieldBarHandle?.dispose(); siteYieldBarHandle = null
-  yieldGaugeHandle?.dispose(); yieldGaugeHandle = null
 })
 
 defineExpose({ handleResize })
 </script>
 
 <style scoped>
-.panel-row {
-  display: flex;
-  gap: 16px;
-}
-.panel-row--h320 {
-  min-height: 320px;
-}
-.panel-row--compact {
-  min-height: 0;
-}
+/* Section 卡（§10.4 定稿：浅底带卡头） */
 .panel-card {
-  flex: 1;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
-  background: var(--bg-2);
-  border: 1px solid var(--border-2);
-  border-radius: 8px;
   overflow: hidden;
 }
-.panel-card--col {
-  /* panel-card already sets flex column */
-}
 .panel-head {
-  flex-shrink: 0;
-  padding: 10px 16px;
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--text);
-  background: var(--bg-3);
-  border-bottom: 1px solid var(--border-2);
-}
-.panel-head--flex {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-2) 60%, var(--card));
+  flex-shrink: 0;
+}
+.panel-head h3 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
 }
 .panel-body {
   flex: 1;
@@ -278,55 +208,18 @@ defineExpose({ handleResize })
   height: 100%;
   min-height: 240px;
 }
-.yield-stats {
-  display: flex;
-  justify-content: space-around;
-  padding: 8px 12px 12px;
-}
-.yield-stat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-}
-.yield-stat-tag {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-weight: 600;
-}
-.yield-stat-tag--max {
-  background: color-mix(in srgb, var(--success) 12%, transparent);
-  color: var(--success);
-}
-.yield-stat-tag--min {
-  background: color-mix(in srgb, var(--error) 12%, transparent);
-  color: var(--error-2);
-}
-.yield-stat-tag--diff {
-  background: color-mix(in srgb, var(--text-2) 14%, transparent);
-  color: var(--text-2);
-}
-.yield-stat-label {
-  font-size: 11px;
-  color: var(--text-2);
-}
-.yield-stat-value {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text);
-}
 
-/* —— compact：头部内联 GAP pills —— */
-.yield-stats--inline {
+/* —— 卡头内联 GAP pills（批次 compact 同款） —— */
+.yield-pills {
+  display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 0;
+  gap: 7px;
+  margin-left: auto;
 }
 .yield-pill {
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
-  padding: 3px 10px;
+  padding: 2.5px 10px;
   border-radius: 999px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
@@ -337,7 +230,7 @@ defineExpose({ handleResize })
 }
 .yield-pill--min {
   background: color-mix(in srgb, var(--error) 14%, transparent);
-  color: var(--error-2);
+  color: var(--error);
 }
 .yield-pill--diff {
   background: color-mix(in srgb, var(--text-2) 16%, transparent);

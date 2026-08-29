@@ -138,6 +138,24 @@ export interface TestItemOverview {
   percentage: number
 }
 
+/** UPH 分析数据（/analysis/uph/ 返回；批次态由后端 yield_data 内嵌，结构同形） */
+export interface UphSiteData {
+  site: string
+  tested: number
+  uph: number
+}
+
+export interface UphData {
+  uph: number
+  avg_test_time: number
+  total_tested: number
+  total_time_seconds: number
+  source: string
+  by_site: UphSiteData[]
+  site_count: number
+  warnings: string[]
+}
+
 /** 文件相关性对比：LSL/USL Diff 标红规则（A: 差值全为0才pass 默认 / B: B的limit不更紧才pass） */
 export type DiffRule = 'zero' | 'wider'
 

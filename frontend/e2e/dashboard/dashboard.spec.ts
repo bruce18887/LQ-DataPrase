@@ -53,11 +53,11 @@ async function expandCollapsedSection(page: import('@playwright/test').Page, tit
  * 使用注入的 admin storageState（仅需 token，本页不要求管理员角色）。
  * 数据驱动：DB 中已存在激活数据文件，/summary/ 返回 200，故图表会渲染。
  *
- * 选择器依据（DashboardPage.vue）：
- *  - KPI 卡片标签：「总记录数 / Pass 数量 / Yield / 数据格式」
- *  - 章节标题 <h2>：「Bin 分布」「Site 良率分布」「Fail 测试项分析」等
- *  - 图表挂载在 <div ref> 上的 ECharts，各 div 带 role="img" aria-label
- *  - UPH 卡片：components/UphCard.vue 头部「⚡ UPH 效率分析」、单位「Units/Hour」
+ * 选择器依据（DashboardPage.vue，2026-08-30 指南 §11.2 重设计后）：
+ *  - 总览条：data-testid="overview-strip"（取代 KPI 大卡）
+ *  - Section 卡头 <h3>：「Bin 构成」等；Site 柱线图 aria-label=Site良率柱线组合图
+ *  - Bin×Site 交叉表：卡内「表格 / 热力图」页签，表格 data-testid=bin-site-table
+ *  - UPH 紧凑明细行：卡头「⚡ UPH 效率明细」，公式 ? 悬停 .uph-metric-label__help
  */
 
 // describe 只挂模块 tag，优先级由各用例标题的 @pN 前缀承担（避免用例在多个 P 项目重复执行）
@@ -75,8 +75,8 @@ test.describe('仪表板', { tag: ['@dashboard'] }, () => {
     // 已改为 /export/html_report/（ExportFooter.vue）。
     await gotoApp(page, '/dashboard')
     await waitLoadingGone(page)
-    // summary 加载成功（file_id 就绪）后导出按钮才有效
-    await expect(page.getByText('总记录数')).toBeVisible()
+    // 总览条就绪（file_id 就绪）后导出按钮才有效
+    await expect(page.getByTestId('overview-strip')).toBeVisible()
     const download = await captureDownload(
       page,
       async () => {
@@ -88,28 +88,35 @@ test.describe('仪表板', { tag: ['@dashboard'] }, () => {
     expect(download.suggestedName).toMatch(/\.html$/)
   })
 
-  test('@p1 KPI 指标卡片可见', async ({ page }) => {
+  test('@p1 总览条字段可见（取代 KPI 大卡）', async ({ page }) => {
     await gotoApp(page, '/dashboard')
     await waitLoadingGone(page)
-    await expect(page.getByText('总记录数')).toBeVisible()
-    await expect(page.getByText('Pass 数量')).toBeVisible()
-    await expect(page.getByText('Yield', { exact: false }).first()).toBeVisible()
-    await expect(page.getByText('数据格式')).toBeVisible()
+    const strip = page.getByTestId('overview-strip')
+    await expect(strip).toBeVisible()
+    // 指南 §11.2 字段：程序/总记录/Pass/Fail/Yield/UPH/测试时长/测试开始 + 格式 chip；
+    // UPH 标签内含公式 ? 悬停子元素，不能用 exact 匹配
+    for (const label of ['总记录', 'Pass', 'Fail', 'Yield', '测试时长', '测试开始']) {
+      await expect(strip.getByText(label, { exact: true }).first(), `总览条应含 ${label}`).toBeVisible()
+    }
+    await expect(strip.getByText(/UPH/).first(), '总览条应含 UPH').toBeVisible()
   })
 
-  test('@p1 图表渲染（Bin 饼图 / Yield 仪表盘 / Fail 柱状 / CPK）', async ({ page }) => {
+  test('@p1 图表渲染（Bin Pareto + Site 柱线组合）', async ({ page }) => {
     await gotoApp(page, '/dashboard')
     await waitLoadingGone(page)
-    // 章节标题确认内容区已进入（非空/错误态）。/Bin 分布/ 同时匹配 h2 与 info-card h4，取首个
-    await expect(page.getByRole('heading', { name: /Bin 分布/ }).first()).toBeVisible()
-    // 至少两个 ECharts canvas（Bin 饼图 + Yield 仪表盘等）
-    await waitForCharts(page, 2)
-    // 首个 canvas（Bin 分布饼图区域）已正确渲染（可见 + 尺寸 > 0）
-    await expectChartRendered(page, 0)
+    // Section 卡头确认内容区已进入（非空/错误态）
+    await expect(page.getByRole('heading', { name: /Bin 构成/ })).toBeVisible()
+    await expect(page.getByRole('heading', { name: /Site 良率/ })).toBeVisible()
+    // Site 柱线组合图为 ECharts（SVG/canvas）；Pareto 为纯 CSS 条形
+    await waitForCharts(page, 1)
+    const siteChart = page.getByRole('img', { name: 'Site良率柱线组合图' })
+    if (await siteChart.count()) {
+      await expectChartRendered(siteChart, 0)
+    }
   })
 
   /**
-   * 课题1 回归：单文件分析的 SiteYield / BinDistribution / BinSiteCrossTable 等图表
+   * 课题1 回归：单文件分析的 SiteYield / BinSiteCrossTable 等图表
    * 从直接 echarts.init 改为 initEchartsWhenReady（零尺寸容器保护）。
    * 断言：各 role=img 图表容器内 svg/canvas 尺寸 > 0，且控制台无「DOM width or height」0 尺寸警告。
    */
@@ -118,13 +125,16 @@ test.describe('仪表板', { tag: ['@dashboard'] }, () => {
     await gotoApp(page, '/dashboard')
     await waitLoadingGone(page)
 
-    // 关键图表容器（aria-label 来自各组件模板）
+    // 关键图表容器（aria-label 来自各组件模板；重设计后：饼图/仪表盘/柱状图 → 柱线组合 + 热力图页签）
     const labels = [
-      'Bin分布饼图',
-      'Site良率柱状图',
-      '整体Yield仪表盘',
-      'Bin×Site柱状图',
+      'Site良率柱线组合图',
     ]
+    // 热力图需先切页签才挂载（v-if）
+    const heatmapTab = page.getByText('热力图', { exact: true }).first()
+    if (await heatmapTab.isVisible().catch(() => false)) {
+      await heatmapTab.click()
+      labels.push('Bin×Site热力图')
+    }
     for (const label of labels) {
       const img = page.getByRole('img', { name: label })
       if (await img.count() === 0) continue  // 该文件无对应数据时容器可能不渲染
@@ -141,13 +151,13 @@ test.describe('仪表板', { tag: ['@dashboard'] }, () => {
     expect(zeroSize, `不应出现 0 尺寸 ECharts 警告:\n${zeroSize.join('\n')}`).toEqual([])
   })
 
-  test('@p1 UPH 卡片显示', async ({ page }) => {
+  test('@p1 UPH 紧凑明细行显示', async ({ page }) => {
     await gotoApp(page, '/dashboard')
     await waitLoadingGone(page)
-    // UphCard.vue 头部文本（行 6），多处含 "UPH 效率分析"，取第一处
-    await expect(page.getByText('UPH 效率分析').first()).toBeVisible()
-    // 数据态下展示 UPH 指标与单位（UphCard.vue 行 21/23）
-    await expect(page.getByText('Units/Hour')).toBeVisible()
+    // UphCard.vue 卡头文本（重设计后标题改为「效率明细」）
+    await expect(page.getByText('UPH 效率明细').first()).toBeVisible()
+    // 紧凑明细行字段（平均测试时间 / 并行站点数）
+    await expect(page.getByText('平均测试时间').first()).toBeVisible()
 
     // UPH helper（2026-08-13）：hover 问号图标 → tooltip 展示计算公式
     // （el-tooltip popper teleport 到 body，须 :visible + .last()）
@@ -156,32 +166,26 @@ test.describe('仪表板', { tag: ['@dashboard'] }, () => {
     await helpIcon.hover()
     const popper = page.locator('.el-popper:visible').last()
     await expect(popper).toContainText('× 3600', { timeout: 5_000 })
-    await expect(popper).toContainText('并行站点模型')
-    await expect(popper).toContainText('测试时间')
+    // 「并行站点模型/测试时间」行仅在 site_count 就绪时渲染（部分文件无站点数），不作硬断言
   })
 
-  test('@p1 良率趋势可视化渲染', async ({ page }) => {
+  test('@p1 Site 良率柱线组合图渲染', async ({ page }) => {
     await gotoApp(page, '/dashboard')
     await waitLoadingGone(page)
 
-    // 说明：YieldTrendChart.vue 当前未被 DashboardPage.vue 引入挂载（孤儿组件，
-    // 见 report）。仪表板上真正呈现的良率可视化是「整体Yield仪表盘」(行 83)。
-    // 为保持对未来接线的健壮性：断言 YieldTrend 画布/空态文本，或退回到 Yield 仪表盘。
-    const yieldTrendEmpty = page.getByText('暂无良率趋势数据')
-    const yieldTrendImg = page.getByRole('img', { name: '良率趋势图' })
-    const yieldGauge = page.getByRole('img', { name: '整体Yield仪表盘' })
-
-    if (await yieldTrendEmpty.isVisible().catch(() => false)) {
-      // 单文件场景：YieldTrend 显示空态
-      await expect(yieldTrendEmpty).toBeVisible()
-    } else if (await yieldTrendImg.count()) {
-      // 已接线且有数据：YieldTrend 画布渲染
-      await expectChartRendered(yieldTrendImg, 0)
-    } else {
-      // 实际情况：仪表板呈现 Yield 仪表盘（ECharts canvas）
-      await expect(yieldGauge).toBeVisible()
-      await expectChartRendered(yieldGauge, 0)
+    // 重设计（2026-08-30）：gauge 仪表盘已删除，整体 Yield 由总览条承载；
+    // 单文件页的良率可视化 = Site 柱线组合图（柱色阶 + 良率折线）。
+    const siteChart = page.getByRole('img', { name: 'Site良率柱线组合图' })
+    if (await siteChart.count() === 0) {
+      // 无 Site 数据时组件显示空态文案
+      await expect(page.getByText('该阶段无 Site 数据')).toBeVisible()
+      return
     }
+    await expect(siteChart).toBeVisible({ timeout: 15_000 })
+    await expectChartRendered(siteChart, 0)
+    // 卡头 3 pills（最高/最低/Δ）
+    await expect(page.getByText(/最高 /).first()).toBeVisible()
+    await expect(page.getByText(/最低 /).first()).toBeVisible()
   })
 
   test('@p2 批次良率 tab 可见并可切换', async ({ page }) => {
@@ -201,7 +205,7 @@ test.describe('仪表板', { tag: ['@dashboard'] }, () => {
     // Switch back to single file tab
     const singleTab = page.locator('.el-tabs__item').filter({ hasText: '单文件分析' })
     await singleTab.click()
-    await expect(page.locator('.kpi-row')).toBeVisible()
+    await expect(page.getByTestId('overview-strip')).toBeVisible()
   })
 
   /**
@@ -255,15 +259,15 @@ test.describe('仪表板', { tag: ['@dashboard'] }, () => {
 
     // 4) 等待复用组件标题与良率趋势容器就绪 → 断言 canvas/svg 尺寸 > 0
     const { yieldContainer } = await waitBatchYieldCharts(page)
-    // UPH 数据态（批次汇总）应展示单位与「批次汇总」标签
-    await expect(page.getByText('Units/Hour')).toBeVisible()
+    // UPH 数据态（批次汇总）：紧凑明细行字段与来源标签可见（重设计后无 Units/Hour 大格）
+    await expect(page.getByText('平均测试时间').first()).toBeVisible()
     await expect(page.getByText('批次汇总')).toBeVisible()
-    // UPH helper 在批次态下展示「批次汇总」来源文案（2026-08-13）
+    // UPH helper 公式内容（重设计后来源文案改为行内标签，不再进 tooltip）
     const batchHelp = page.locator('.uph-card:visible .uph-metric-label__help').first()
     if (await batchHelp.isVisible().catch(() => false)) {
       await batchHelp.hover()
       const bPopper = page.locator('.el-popper:visible').last()
-      await expect(bPopper).toContainText('批次汇总', { timeout: 5_000 })
+      await expect(bPopper).toContainText('× 3600', { timeout: 5_000 })
     }
     const yieldChart = yieldContainer.locator('svg, canvas').first()
     await expect(yieldChart).toBeVisible({ timeout: 15_000 })
@@ -343,11 +347,11 @@ test.describe('仪表板', { tag: ['@dashboard'] }, () => {
     await expect(binCard.locator('.bin-card-section-title', { hasText: /Bin .* Site 交叉表/ })).toBeVisible()
     await expect(binCard.locator('.bin-card-section-title', { hasText: /UPH 效率分析/ })).toBeVisible()
 
-    // 2) 至少 4 个 ECharts 容器（Bin 饼图 / Top Fail 柱图 / Site 良率柱图 / Bin×Site 柱图 / Yield 仪表盘 …）
-    // Bin 分布卡内应有 4+ 个图表（per-phase 2 + Site 1 + Bin×Site 1 + 良率趋势单独卡 1）
+    // 2) 至少 3 个 ECharts 容器（per-phase 饼图 + Top Fail 柱图 + Site 良率柱线图）；
+    // 2026-08-30 重设计：Bin×Site 柱状图已改为「表格/热力图」页签（默认表格视图无图表容器）
     const chartContainers = binCard.locator('.chart-container, .chart-fill, [aria-label*="图"]')
     const chartCount = await chartContainers.count()
-    expect(chartCount, 'Bin 分布卡内图表容器数应 >= 4').toBeGreaterThanOrEqual(4)
+    expect(chartCount, 'Bin 分布卡内图表容器数应 >= 3').toBeGreaterThanOrEqual(3)
     // 每个 chart 容器内应能找到 svg 或 canvas
     for (let i = 0; i < Math.min(chartCount, 6); i++) {
       const container = chartContainers.nth(i)
@@ -365,41 +369,40 @@ test.describe('仪表板', { tag: ['@dashboard'] }, () => {
   })
 
   /**
-   * 测试项总览（TestItemOverviewSection.vue）：合并 CPK 参数表 + Fail 测试项明细
-   * 为一张全宽大表（排序/分页/点击行跳转分析页），下方并排 CPK 分布饼图 + Top 10 Fail 柱状图。
+   * 测试项总览（TestItemOverviewSection.vue）：11 列全宽表格（排序/分页/点击行跳转分析页）
+   * + 卡头双复选框行级过滤 + CPK 四色堆叠比例条 + Top 10 Fail 信息 chip 行。
    */
-  test('@p1 测试项总览表格渲染（表头 + 下方两图表非空）', async ({ page }) => {
+  test('@p1 测试项总览表格渲染（表头 + 比例条 + chip）', async ({ page }) => {
     const errors = collectConsoleErrors(page)
     await gotoApp(page, '/dashboard')
     await waitLoadingGone(page)
 
-    // 总览区标题与表格
-    await expect(page.getByRole('heading', { name: /测试项总览/ }).first()).toBeVisible()
+    // 总览区表格（重设计后无独立 h2 标题，卡头在 panel-head）
     const table = page.locator('.overview-table')
     await expect(table).toBeVisible({ timeout: 20_000 })
 
-    // 表头列
-    const headers = ['参数名称', '数据点数', 'Mean', 'STD', 'Min', 'Max', 'LSL', 'USL', 'CPK', 'CPK Level', 'Fail数量', 'Fail占比']
+    // 表头列（11 列：Fail数量+Fail占比 已合并为单列 Fail）
+    const headers = ['参数名称', '数据点数', 'Mean', 'STD', 'Min', 'Max', 'LSL', 'USL', 'CPK', 'CPK Level', 'Fail']
     for (const h of headers) {
       await expect(table.locator('th', { hasText: h }).first(), `表头应含 ${h}`).toBeVisible()
     }
 
-    // 页脚统计与分页
+    // 卡头双复选框（默认勾选）
+    await expect(page.getByText('忽略无 Limit')).toBeVisible()
+    await expect(page.getByText('忽略无测试值')).toBeVisible()
+
+    // 页脚统计与分页（总项数 = 过滤后行数）
     await expect(page.getByText(/共 \d+ 项/)).toBeVisible()
     await expect(page.locator('.overview-footer .el-pagination')).toBeVisible()
 
-    // 下方两图表容器：aria-label 可见且 svg/canvas 尺寸 > 0
-    const chartLabels = ['CPK分布统计饼图', 'Top 10 Fail测试项柱状图']
-    for (const label of chartLabels) {
-      const img = page.getByRole('img', { name: label })
-      if (await img.count() === 0) continue  // 无数据时容器不渲染
-      await expect(img.first(), `${label} 容器应可见`).toBeVisible({ timeout: 15_000 })
-      const inner = img.first().locator('svg, canvas').first()
-      await expect(inner, `${label} 应有 svg/canvas`).toBeVisible({ timeout: 15_000 })
-      const box = await inner.boundingBox()
-      expect(box, `${label} 尺寸应非空`).not.toBeNull()
-      expect(box!.width, `${label} 宽度 > 0`).toBeGreaterThan(0)
-      expect(box!.height, `${label} 高度 > 0`).toBeGreaterThan(0)
+    // 下方两图已由新形态取代：CPK 饼图 → 四色堆叠比例条；Top 10 柱状 → 信息 chip 行（有数据时渲染）
+    const cpkStrip = page.locator('.cpk-strip')
+    if (await cpkStrip.count()) {
+      await expect(cpkStrip).toBeVisible()
+    }
+    const failChips = page.locator('.fail-chip')
+    if (await failChips.count()) {
+      await expect(page.getByText('Top 10 Fail 测试项')).toBeVisible()
     }
 
     // 控制台无 ECharts 0 尺寸警告
@@ -448,6 +451,13 @@ test.describe('仪表板', { tag: ['@dashboard'] }, () => {
     await expect(table).toBeVisible({ timeout: 20_000 })
     const pagination = page.locator('.overview-footer .el-pagination')
     await expect(pagination).toBeVisible()
+
+    // 双复选框默认勾选（行级过滤）：取消勾选恢复全量行数，保证总项数口径与历史一致
+    const checks = page.locator('.ov-check input')
+    if (await checks.count() === 2) {
+      await checks.nth(0).uncheck()
+      await checks.nth(1).uncheck()
+    }
 
     // 固定 100 条/页：不渲染 page-size 切换器（.el-pagination__sizes）
     await expect(pagination.locator('.el-pagination__sizes')).toHaveCount(0)
