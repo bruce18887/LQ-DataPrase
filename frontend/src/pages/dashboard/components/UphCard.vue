@@ -1,7 +1,8 @@
 <template>
-  <el-card shadow="hover" class="uph-card">
+  <el-card :shadow="embedded ? 'never' : 'hover'" class="uph-card" :class="{ 'uph-card--embedded': embedded }">
+    <!-- embedded（批次 Bin 分布卡内嵌）：外层分区标题已由父级 divider 提供，不再重复渲染卡片头 -->
     <template #header>
-      <div class="uph-header">
+      <div v-if="!embedded" class="uph-header">
         <span>⚡ UPH 效率分析</span>
         <el-tag v-if="data" size="small" :type="sourceTag.type">
           {{ sourceTag.label }}
@@ -126,9 +127,12 @@ const props = withDefaults(defineProps<{
   fileId?: number | null
   /** Direct UPH data — when provided, skips API fetch (batch mode) */
   uphData?: UphData | null
+  /** 内嵌模式（批次 Bin 分布卡内）：去掉卡片头与悬浮阴影，标题由父级分区提供 */
+  embedded?: boolean
 }>(), {
   fileId: null,
   uphData: null,
+  embedded: false,
 })
 
 const loading = ref(false)
@@ -204,6 +208,12 @@ watch(() => props.fileId, () => {
 <style scoped>
 .uph-card {
   border-radius: 8px;
+}
+
+/* embedded：el-card 对已声明的 #header 插槽仍会渲染空头部容器（$slots.header 恒真），
+   必须用 CSS 隐藏，否则残留一条带 padding/下边框的空头带 */
+.uph-card--embedded :deep(.el-card__header) {
+  display: none;
 }
 
 .uph-header {

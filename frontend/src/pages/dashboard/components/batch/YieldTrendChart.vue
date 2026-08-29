@@ -26,18 +26,28 @@ function buildOption() {
   const lineC = colors.value.axisLineColor
   const splitC = colors.value.splitLineColor
 
+  // X 轴标签用唯一键（同名 phase 带 wafer 后缀），避免不同文件同名 phase
+  // 在 category 轴上重复导致"标签与柱子对不上"。
+  const xLabels = phases.map((p: any) => (p.wafer_id ? `${p.phase}-W${p.wafer_id}` : p.phase))
+  // interval: 0 强制每个分类都出标签（ECharts 默认 auto 会跳签漏签，
+  // 视觉上就是"X 坐标与柱状图对不上"）；数量多时旋转防重叠。
+  const rotate = xLabels.length > 8 ? 45 : 0
+
   return {
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     legend: { data: ['测试总数', 'Pass数量', '良率'], top: 5, textStyle: { color: tc } },
     grid: { left: '3%', right: '4%', bottom: '3%', top: '18%', containLabel: true },
     xAxis: {
       type: 'category',
-      data: phases.map((p: any) => p.phase),
+      data: xLabels,
       axisLine: { lineStyle: { color: lineC } },
+      axisTick: { alignWithLabel: true },
       axisLabel: {
         color: tc,
+        interval: 0,
+        rotate,
         // 回退短文件名较长，截断防标签重叠；tooltip 显示完整阶段名
-        formatter: (val: string) => (val.length > 12 ? val.slice(0, 12) + '…' : val),
+        formatter: (val: string) => (val.length > 10 ? val.slice(0, 10) + '…' : val),
       },
     },
     yAxis: [

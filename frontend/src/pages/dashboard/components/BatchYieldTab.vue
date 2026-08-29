@@ -13,42 +13,36 @@
     />
 
     <template v-if="batchData">
-      <!-- 1. KPI Cards -->
-      <KpiCards :kpi="batchData.kpi" />
-
-      <!-- 1.5 阶段胶囊过滤条：点击即全局过滤（替代原分阶段良率表） -->
+      <!-- 1. 阶段胶囊过滤条：点击即全局过滤（替代原分阶段良率表） -->
       <StageFilterBar
         :stages="batchData.stage_yields || []"
         :model-value="stageFilter"
         @update:modelValue="onStageFilter"
       />
 
-      <!-- 2. 阶段汇总（树形：stage 聚合行 → 版本明细行） -->
+      <!-- 2. QA 数量校验：紧凑单行条（替代原整卡表格），仅全部/FT 阶段可见 -->
+      <QaValidationBar :checks="visibleQaChecks" />
+
+      <!-- 3. 阶段汇总（总览条 + 树形：stage 聚合行 → 版本明细行） -->
       <el-card v-if="filteredStages.length" shadow="never" class="section-card">
         <template #header>📋 阶段汇总</template>
-        <PhaseSummaryTree :stages="filteredStages" :phases="filteredSummary" />
+        <PhaseSummaryTree
+          :stages="filteredStages"
+          :phases="filteredSummary"
+          :kpi="summaryKpi"
+          :stage-filtered="!!stageFilter"
+        />
       </el-card>
 
-      <!-- 3. Yield Trend Combo Chart (Bar + Line)，随阶段过滤收窄 -->
+      <!-- 4. Yield Trend Combo Chart (Bar + Line)，随阶段过滤收窄 -->
       <el-card v-if="filteredPhases.length" shadow="never" class="section-card">
         <template #header>📈 良率趋势</template>
         <YieldTrendChart ref="yieldTrendChartRef" :phases="filteredPhases" />
       </el-card>
 
-      <!-- 4. QA Validation（QA 阶段存在且过滤为全部/QA 时显示） -->
-      <el-card v-if="visibleQaChecks.length" shadow="never" class="section-card">
-        <template #header>🔍 QA 数量校验</template>
-        <el-table :data="visibleQaChecks" stripe size="small" :border="true">
-          <el-table-column prop="check" label="校验项" min-width="200" />
-          <el-table-column prop="expected" label="期望" width="120" align="center" />
-          <el-table-column prop="actual" label="实际" width="120" align="center" />
-          <el-table-column prop="status" label="状态" width="150" align="center" />
-        </el-table>
-      </el-card>
-
-      <!-- 5. Phase Detail Table（默认展开，可手动收起） -->
+      <!-- 5. Phase Detail Table（默认展开，可手动收起；max-height 提升以多显示行） -->
       <CollapsibleSection title="📊 阶段明细表" default-open>
-        <el-table :data="filteredPhases" stripe size="small" :border="true" max-height="350" :row-key="(row: any) => row.filename">
+        <el-table :data="filteredPhases" stripe size="small" :border="true" max-height="560" :row-key="(row: any) => row.filename">
           <el-table-column type="expand">
             <template #default="{ row }">
               <div class="phase-detail-expand">
@@ -132,96 +126,39 @@
         </el-table>
       </CollapsibleSection>
 
-      <!-- 6. Site Yield Matrix（默认展开，可手动收起） -->
+      <!-- 6. Site Yield Matrix（默认展开，可手动收起；min-width 弹性撑满 UI） -->
       <CollapsibleSection title="🏭 各 Site 良率矩阵" default-open>
         <el-table :data="filteredSiteMatrix" stripe size="small" :border="true" max-height="350">
-          <el-table-column prop="phase" label="阶段" width="80" fixed show-overflow-tooltip />
+          <el-table-column prop="phase" label="阶段" min-width="80" fixed show-overflow-tooltip />
           <template v-for="site in batchData.sorted_sites" :key="site">
-            <el-table-column :label="`${site} 良率`" width="110" align="center">
+            <el-table-column :label="`${site} 良率`" min-width="110" align="center">
               <template #default="{row}">
                 <span :class="getYieldClass(row[`${site}_yield`])">{{ row[`${site}_yield`] }}</span>
               </template>
             </el-table-column>
-            <el-table-column :label="`${site} Pass/Total`" width="110" align="center">
+            <el-table-column :label="`${site} Pass/Total`" min-width="110" align="center">
               <template #default="{row}">{{ row[`${site}_ratio`] }}</template>
             </el-table-column>
           </template>
-          <el-table-column label="All Site 良率" width="120" align="center" fixed="right">
+          <el-table-column label="All Site 良率" min-width="120" align="center" fixed="right">
             <template #default="{row}">
               <span :class="getYieldClass(row['all_yield'])">{{ row['all_yield'] }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="All Site Pass/Total" width="130" align="center" fixed="right">
+          <el-table-column label="All Site Pass/Total" min-width="130" align="center" fixed="right">
             <template #default="{row}">{{ row['all_ratio'] }}</template>
           </el-table-column>
         </el-table>
       </CollapsibleSection>
 
-      <!-- 7. Bin 分布大卡（默认展开，可手动收起；内含 4 子区） -->
-      <CollapsibleSection title="📋 Bin 分布" default-open @toggle="onBinSectionToggle">
-        <!-- 7.1 Bin 分布（per-phase 表格 + Bin 饼图 + Top Fail Bin 柱图） -->
-        <div class="bin-selector">
-          <el-select v-model="selectedPhase" placeholder="选择阶段查看Bin分布" @change="onPhaseChange" style="width: 220px">
-            <el-option v-for="p in filteredPhases" :key="phaseKey(p)" :label="phaseLabel(p)" :value="phaseKey(p)" />
-          </el-select>
-          <span class="bin-hint">左侧表格与右侧 Bin 图随阶段切换</span>
-        </div>
-
-        <el-row :gutter="16">
-          <!-- Left: per-phase bin table (2/5) -->
-          <el-col :xs="24" :lg="9">
-            <div class="chart-title">各阶段 Bin 明细（{{ selectedPhase || '-' }}）</div>
-            <el-table
-              v-if="selectedPhaseData"
-              :data="selectedPhaseData.bin_info" stripe size="small" :border="true" max-height="640"
-            >
-              <el-table-column prop="name" label="Bin" width="80" />
-              <el-table-column prop="value" label="数量" width="70" align="center" />
-              <el-table-column prop="pct" label="占比" width="70" align="center" />
-              <template v-for="site in batchData.sorted_sites" :key="site">
-                <el-table-column :label="site" width="80" align="center">
-                  <template #default="{row}">{{ row.sites?.[site] || 0 }}</template>
-                </el-table-column>
-              </template>
-            </el-table>
-            <el-empty v-else :image-size="60" description="无阶段数据" />
-          </el-col>
-
-          <!-- Right: charts (3/5) -->
-          <el-col :xs="24" :lg="15">
-            <div class="chart-title">阶段 Fail Bin（{{ selectedPhase || '-' }}）</div>
-            <div ref="binPieRef" class="chart-container chart-sm" />
-            <div class="chart-title" style="margin-top: 12px;">阶段 Top Fail Bin（{{ selectedPhase || '-' }}）</div>
-            <div ref="binBarRef" class="chart-container chart-sm" />
-          </el-col>
-        </el-row>
-
-        <!-- 7.2 Site 良率分布 & Yield 分析 -->
-        <el-divider class="bin-card-divider">
-          <span class="bin-card-section-title">🟢 Site 良率分布 &amp; Yield 分析</span>
-        </el-divider>
-        <SiteYieldAnalysis
-          ref="siteYieldRef"
-          :site-yield-data="siteYieldData"
-          :overall-yield="overallYield"
-        />
-
-        <!-- 7.3 Bin × Site 交叉表 & 柱状图 -->
-        <el-divider class="bin-card-divider">
-          <span class="bin-card-section-title">📊 Bin &times; Site 交叉表 &amp; 柱状图</span>
-        </el-divider>
-        <BinSiteCrossTable
-          ref="binSiteRef"
-          :bin-table-data="binTableData"
-          :bin-site-columns="binSiteColumns"
-        />
-
-        <!-- 7.4 UPH 效率分析 -->
-        <el-divider class="bin-card-divider">
-          <span class="bin-card-section-title">⚡ UPH 效率分析</span>
-        </el-divider>
-        <UphCard :uph-data="uphData" />
-      </CollapsibleSection>
+      <!-- 7. Bin 分布（阶段下拉可选范围随阶段过滤收窄；卡内各表/图均按所选单阶段切换） -->
+      <BatchBinSection
+        ref="binSectionRef"
+        :phases="filteredPhases"
+        :sorted-sites="batchData.sorted_sites || []"
+        :scope="stageFilter"
+        :phase-count="filteredPhases.length"
+      />
     </template>
 
     <el-empty v-else-if="!loading" description="选择批次并加载数据" />
@@ -229,39 +166,30 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onActivated, nextTick, onBeforeUnmount, watch } from 'vue'
-import * as echarts from 'echarts'
-import { getChartInitOpts, useEChartsTheme } from '../../../utils/echarts-theme'
+import { ref, computed, onMounted, onActivated, onBeforeUnmount, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { batchApi } from '../../../api/batch'
 import { useFilesStore } from '../../../stores/files'
-import { useThemeStore } from '../../../stores/theme'
 import BatchSelectorBar from './batch/BatchSelectorBar.vue'
-import KpiCards from './batch/KpiCards.vue'
 import StageFilterBar from './batch/StageFilterBar.vue'
 import PhaseSummaryTree from './batch/PhaseSummaryTree.vue'
 import YieldTrendChart from './batch/YieldTrendChart.vue'
+import QaValidationBar from './batch/QaValidationBar.vue'
+import BatchBinSection from './batch/BatchBinSection.vue'
 import CollapsibleSection from '../../../components/common/CollapsibleSection.vue'
-import SiteYieldAnalysis from './SiteYieldAnalysis.vue'
-import BinSiteCrossTable from './BinSiteCrossTable.vue'
-import UphCard from './UphCard.vue'
 
 const batches = ref<any[]>([])
 const selectedBatch = ref('')
 const loading = ref(false)
 const exporting = ref(false)
 const batchData = ref<any>(null)
-const selectedPhase = ref('')
 const stageFilter = ref('')
-const binSectionOpen = ref(true)  // Bin 分布卡默认展开，展开态用于过滤后重建内联图表
 
 const filesStore = useFilesStore()
-const themeStore = useThemeStore()
 
 // Ref to child chart components
 const yieldTrendChartRef = ref<InstanceType<typeof YieldTrendChart>>()
-const siteYieldRef = ref<InstanceType<typeof SiteYieldAnalysis>>()
-const binSiteRef = ref<InstanceType<typeof BinSiteCrossTable>>()
+const binSectionRef = ref<InstanceType<typeof BatchBinSection>>()
 
 // ── 阶段全局过滤：胶囊条点击 → 下方所有区块收窄到该 stage ──
 const filteredStages = computed(() => {
@@ -290,68 +218,41 @@ const visibleQaChecks = computed(() => {
   return batchData.value?.qa_checks || []
 })
 
-// Computed props for the Site/Bin×Site/UPH sub-sections (consolidated under
-// the Bin 分布 card). Pulled from the same batch payload the standalone
-// BatchAnalysisCharts used to read.
-const siteYieldData = computed(() => {
-  const rows = batchData.value?.site_pass_data || []
-  return rows.map((r: any) => ({
-    Site: r.site,
-    Yield: r.yield,
-    Total: r.total,
-    PassCount: r.pass,
-  }))
+// 总览条：未过滤 → 批次整体 KPI；选中阶段 → 该阶段汇总值
+const summaryKpi = computed(() => {
+  const k = batchData.value?.kpi
+  if (!k) return { input_total: 0, pass: 0, fail: 0, overall_yield: null }
+  if (!stageFilter.value) {
+    return {
+      input_total: k.input_total ?? 0,
+      pass: k.pass ?? 0,
+      fail: k.fail ?? 0,
+      overall_yield: k.overall_yield ?? null,
+    }
+  }
+  const s = (batchData.value?.stage_yields || []).find((x: any) => x.stage === stageFilter.value)
+  if (!s) return { input_total: 0, pass: 0, fail: 0, overall_yield: null }
+  return {
+    input_total: s.total,
+    pass: s.pass_count,
+    fail: s.fail_count,
+    overall_yield: s.yield_pct,
+  }
 })
 
-const overallYield = computed(() => Number(batchData.value?.kpi?.overall_yield) || 0)
+// ── Site / Bin×Site / UPH 已下沉为 Bin 分布卡内的「单阶段」口径 ──
+//（由 BatchBinSection 从所选阶段现算，见 phaseSiteYieldRows/phaseBinSite/phaseUph）
 
-const binTableData = computed(() => batchData.value?.bin_table_data || [])
-const binSiteColumns = computed(() => batchData.value?.bin_site_columns || [])
-const uphData = computed(() => batchData.value?.uph || null)
-
-// Chart refs for phase-scoped Bin analysis (remain inline)
-const binPieRef = ref<HTMLElement>()
-const binBarRef = ref<HTMLElement>()
-let binPieChart: echarts.ECharts | null = null
-let binBarChart: echarts.ECharts | null = null
-
-const selectedPhaseData = computed(() => {
-  if (!batchData.value || !selectedPhase.value) return null
-  return filteredPhases.value.find((p: any) => phaseKey(p) === selectedPhase.value) || null
-})
-
-function phaseKey(p: any): string {
-  return p.wafer_id ? `${p.phase}-W${p.wafer_id}` : p.phase
-}
-
-function phaseLabel(p: any): string {
-  return p.wafer_id ? `${p.phase}-W${p.wafer_id}` : p.phase
+function getYieldClass(val: string): string {
+  if (!val || val === 'N/A') return ''
+  const v = parseFloat(val)
+  if (v >= 95) return 'yield-good'
+  if (v >= 90) return 'yield-warn'
+  return 'yield-bad'
 }
 
 function onStageFilter(v: string) {
   stageFilter.value = v
-  // 过滤后选中的 Bin 阶段可能已不存在 → 清空并重建内联图表
-  if (selectedPhase.value && !filteredPhases.value.some((p: any) => phaseKey(p) === selectedPhase.value)) {
-    selectedPhase.value = ''
-  }
-  if (binSectionOpen.value) {
-    disposeBinCharts()
-    nextTick(() => renderInlineCharts())
-  }
-}
-
-function onBinSectionToggle(open: boolean) {
-  binSectionOpen.value = open
-  // v-if 重挂载后容器是新的 DOM，旧实例绑定在 detached 节点上 → 销毁重建
-  if (open) {
-    disposeBinCharts()
-    nextTick(() => renderInlineCharts())
-  }
-}
-
-function disposeBinCharts() {
-  if (binPieChart && !binPieChart.isDisposed()) { binPieChart.dispose(); binPieChart = null }
-  if (binBarChart && !binBarChart.isDisposed()) { binBarChart.dispose(); binBarChart = null }
 }
 
 function onBatchSelect(val: string) {
@@ -360,28 +261,8 @@ function onBatchSelect(val: string) {
 }
 
 function onBatchChange() {
-  // Dispose old chart instances before removing DOM (v-if="batchData")
-  disposeBinCharts()
   batchData.value = null
-  selectedPhase.value = ''
   stageFilter.value = ''
-  // CollapsibleSection 随 batchData 卸载，下次加载默认展开 → 同步标记
-  binSectionOpen.value = true
-}
-
-function onPhaseChange() {
-  nextTick(() => {
-    renderBinPieChart()
-    renderBinBarChart()
-  })
-}
-
-function getYieldClass(val: string): string {
-  if (!val || val === 'N/A') return ''
-  const v = parseFloat(val)
-  if (v >= 95) return 'yield-good'
-  if (v >= 90) return 'yield-warn'
-  return 'yield-bad'
 }
 
 async function loadBatches() {
@@ -403,91 +284,11 @@ async function loadBatchData() {
   try {
     const { data } = await batchApi.getBatchYieldData(selectedBatch.value)
     batchData.value = data
-    if (data.phases?.length > 0) {
-      selectedPhase.value = phaseKey(data.phases[0])
-    }
-    // Double nextTick + rAF: wait for v-if DOM mount + layout settle
-    nextTick(() => {
-      requestAnimationFrame(() => renderInlineCharts())
-    })
   } catch {
     // 错误 toast 由 axios 拦截器统一弹出
   } finally {
     loading.value = false
   }
-}
-
-function renderInlineCharts() {
-  if (selectedPhaseData.value) {
-    renderBinPieChart()
-    renderBinBarChart()
-  }
-}
-
-// Per-phase Bin pie chart (fail bins only)
-function renderBinPieChart() {
-  if (!binPieRef.value || !selectedPhaseData.value?.bin_info) return
-  if (!binPieChart) binPieChart = echarts.init(binPieRef.value, undefined, getChartInitOpts())
-  else binPieChart.clear()
-
-  const failBins = selectedPhaseData.value.bin_info.filter(
-    (b: any) => b.value > 0 && b.name !== '1' && !b.name.toLowerCase().includes('pass')
-  )
-  if (failBins.length === 0) return
-
-  const palette = ['#f5576c', '#f9a825', '#4facfe', '#ff6b6b', '#74b9ff', '#fd79a8', '#e17055', '#00b894']
-  // 注意：ECharts/zrender 不解析 CSS 变量，此处必须用主题实时色值（2026-08-26 修复）
-  const tc = useEChartsTheme().colors.value.textColor
-  binPieChart.setOption({
-    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { orient: 'vertical', left: 'left', top: 'center', type: 'scroll', textStyle: { color: tc } },
-    series: [{
-      type: 'pie',
-      radius: ['35%', '65%'],
-      center: ['60%', '50%'],
-      data: failBins,
-      color: palette,
-      label: { formatter: '{b}\n{d}%', color: tc },
-      itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
-    }],
-  })
-}
-
-// Per-phase Bin horizontal bar chart (top 10 fail bins)
-function renderBinBarChart() {
-  if (!binBarRef.value || !selectedPhaseData.value?.bin_info) return
-  if (!binBarChart) binBarChart = echarts.init(binBarRef.value, undefined, getChartInitOpts())
-  else binBarChart.clear()
-
-  const failBins = selectedPhaseData.value.bin_info
-    .filter((b: any) => b.value > 0 && b.name !== '1' && !b.name.toLowerCase().includes('pass'))
-    .sort((a: any, b: any) => b.value - a.value)
-    .slice(0, 10)
-
-  if (failBins.length === 0) return
-
-  const tc = useEChartsTheme().colors.value.textColor
-  binBarChart.setOption({
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: '3%', right: '8%', bottom: '3%', top: '3%', containLabel: true },
-    xAxis: { type: 'value' },
-    yAxis: {
-      type: 'category',
-      data: failBins.map((b: any) => b.name).reverse(),
-      axisLabel: { color: tc, fontSize: 11 },
-    },
-    series: [{
-      type: 'bar',
-      data: failBins.map((b: any) => b.value).reverse(),
-      itemStyle: {
-        color: {
-          type: 'linear', x: 0, y: 0, x2: 1, y2: 0,
-          colorStops: [{ offset: 0, color: '#f093fb' }, { offset: 1, color: '#f5576c' }],
-        },
-      },
-      label: { show: true, position: 'right', fontSize: 10, color: tc },
-    }],
-  })
 }
 
 async function exportExcel() {
@@ -506,10 +307,7 @@ async function exportExcel() {
 
 function handleResize() {
   yieldTrendChartRef.value?.handleResize()
-  siteYieldRef.value?.handleResize()
-  binSiteRef.value?.handleResize()
-  if (binPieChart && !binPieChart.isDisposed()) binPieChart.resize()
-  if (binBarChart && !binBarChart.isDisposed()) binBarChart.resize()
+  binSectionRef.value?.handleResize()
 }
 
 onMounted(() => {
@@ -521,25 +319,13 @@ onMounted(() => {
 // 否则新下载的批次不会出现在选择器里（DashboardPage 被 keep-alive 缓存）。
 onActivated(() => {
   loadBatches()
-  // 内联图表在 keep-alive 缓存期间实例可能绑定到 detached DOM，强制重建
-  disposeBinCharts()
-  nextTick(() => renderInlineCharts())
 })
 watch(() => filesStore.filesVersion, () => {
   loadBatches()
 })
-// 主题切换重建内联图表（Bin 饼图/柱图直接 echarts.init，不会自动跟随主题，
-// 而颜色来自 useEChartsTheme 实时色值——不重建就保留旧主题颜色）
-watch(() => themeStore.currentTheme, () => {
-  nextTick(() => {
-    disposeBinCharts()
-    renderInlineCharts()
-  })
-})
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
-  disposeBinCharts()
 })
 
 defineExpose({ handleResize })
@@ -553,45 +339,6 @@ defineExpose({ handleResize })
 .section-card {
   margin-bottom: 16px;
   border-radius: 8px;
-}
-
-.chart-container {
-  height: 320px;
-}
-
-.chart-sm {
-  height: 280px;
-}
-
-.chart-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: 8px;
-  text-align: center;
-}
-
-.bin-selector {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.bin-hint {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.bin-card-divider {
-  margin: 24px 0 16px;
-}
-
-.bin-card-section-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  letter-spacing: 0.3px;
 }
 
 .yield-good { color: var(--color-success); font-weight: 600; }

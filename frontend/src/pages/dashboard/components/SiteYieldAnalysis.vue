@@ -1,11 +1,29 @@
 <template>
-  <div class="site-yield">
-    <div class="panel-row panel-row--h320">
-      <div class="panel-card">
-        <div class="panel-head">📊 Site 良率柱状图</div>
-        <div class="panel-body"><div ref="siteYieldBarChart" class="chart-fill" role="img" aria-label="Site良率柱状图" /></div>
+  <div class="site-yield" :class="{ 'site-yield--compact': compact }">
+    <div class="panel-row" :class="compact ? 'panel-row--compact' : 'panel-row--h320'">
+      <div class="panel-card panel-card--standalone">
+        <div class="panel-head panel-head--flex">
+          <span>📊 Site 良率柱状图</span>
+          <!-- compact：GAP 信息以一行小 pills 展示，不再占用独立大面板 -->
+          <div v-if="compact && siteYieldData.length" class="yield-stats yield-stats--inline">
+            <span class="yield-pill yield-pill--max" title="最高 Site 良率">
+              最高 {{ siteYieldStats.maxSite }} · {{ siteYieldStats.max }}%
+            </span>
+            <span class="yield-pill yield-pill--min" title="最低 Site 良率">
+              最低 {{ siteYieldStats.minSite }} · {{ siteYieldStats.min }}%
+            </span>
+            <span class="yield-pill yield-pill--diff" title="最高与最低差异">
+              Δ 差异 {{ siteYieldStats.diff }}%
+            </span>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div v-if="siteYieldData.length" ref="siteYieldBarChart" class="chart-fill" role="img" aria-label="Site良率柱状图" />
+          <el-empty v-else :image-size="60" description="该阶段无 Site 数据" />
+        </div>
       </div>
-      <div class="panel-card panel-card--col">
+      <!-- 非 compact（单文件仪表板）：保留整体 Yield 仪表盘 + 最高/最低/差异统计列 -->
+      <div v-if="!compact" class="panel-card panel-card--col">
         <div ref="yieldGaugeChart" style="height:130px" role="img" aria-label="整体Yield仪表盘" />
         <div class="yield-stats">
           <div class="yield-stat">
@@ -36,10 +54,14 @@ import { useThemeStore } from '../../../stores/theme'
 
 const themeStore = useThemeStore()
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   siteYieldData: { Site: string; Yield: string | number; Total: number; PassCount: number }[]
   overallYield: number
-}>()
+  /** 批次页 compact 模式：去掉右侧大面板（gauge+统计列），GAP 以头部 pills 展示 */
+  compact?: boolean
+}>(), {
+  compact: false,
+})
 
 const siteYieldBarChart = ref<HTMLElement>()
 const yieldGaugeChart = ref<HTMLElement>()
@@ -96,7 +118,7 @@ function buildSiteYieldBarOption() {
     xAxis: {
       type: 'category',
       data: siteNames,
-      axisLabel: { fontSize: 12, color: _tc() },
+      axisLabel: { fontSize: 12, color: _tc(), interval: 0 },
     },
     yAxis: {
       type: 'value',
@@ -157,6 +179,7 @@ function renderSiteYieldBarChart() {
 }
 
 function renderYieldGaugeChart() {
+  // compact：无 gauge 面板，必须跳过（容器不存在）
   if (!yieldGaugeChart.value) return
   if (yieldGaugeHandle) {
     yieldGaugeHandle.chart?.setOption(buildYieldGaugeOption() as any, { notMerge: true, lazyUpdate: true })
@@ -214,6 +237,9 @@ defineExpose({ handleResize })
 .panel-row--h320 {
   min-height: 320px;
 }
+.panel-row--compact {
+  min-height: 0;
+}
 .panel-card {
   flex: 1;
   display: flex;
@@ -234,6 +260,13 @@ defineExpose({ handleResize })
   color: var(--text-primary);
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border-default);
+}
+.panel-head--flex {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 .panel-body {
   flex: 1;
@@ -298,5 +331,47 @@ defineExpose({ handleResize })
   font-size: 16px;
   font-weight: 700;
   color: var(--text-primary);
+}
+
+/* —— compact：头部内联 GAP pills —— */
+.yield-stats--inline {
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0;
+}
+.yield-pill {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.yield-pill--max {
+  background: rgba(5, 150, 105, 0.12);
+  color: #059669;
+}
+.yield-pill--min {
+  background: rgba(220, 38, 38, 0.12);
+  color: #dc2626;
+}
+.yield-pill--diff {
+  background: rgba(107, 114, 128, 0.14);
+  color: #6b7280;
+}
+:root[data-theme="night"] .yield-pill--max,
+:root.theme-night .yield-pill--max {
+  background: rgba(56, 239, 125, 0.16);
+  color: #38ef7d;
+}
+:root[data-theme="night"] .yield-pill--min,
+:root.theme-night .yield-pill--min {
+  background: rgba(245, 87, 108, 0.18);
+  color: #f5576c;
+}
+:root[data-theme="night"] .yield-pill--diff,
+:root.theme-night .yield-pill--diff {
+  background: rgba(255, 255, 255, 0.10);
+  color: #ffffff;
 }
 </style>
