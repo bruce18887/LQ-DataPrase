@@ -1,7 +1,7 @@
 # LQ-DataPrase UI 设计指南（Design Tokens）
 
-**日期**: 2026-08-29 · **状态**: 生效（组件层暂缓，见 §10）
-**视觉基准**: `docs/plans/dashboard-rebuild-preview.html` 与 `docs/plans/design-system-preview.html`（可双击打开的 token 展示页）
+**日期**: 2026-08-29 · **状态**: 生效（含组件篇 · 四批定稿，见 §10）
+**视觉基准**: `docs/plans/dashboard-rebuild-preview.html`、`docs/plans/design-system-preview.html` 与组件审阅页 `docs/plans/component-review-1..4-*.html`
 **配套文件**: `frontend/src/styles/design-tokens.css`（本指南的可落地 CSS，Primitive + Semantic 两层）
 
 ---
@@ -21,9 +21,9 @@
         ↓ 只被语义层引用
 ② Semantic（随 data-theme 切换）★ 页面唯一取色入口
    --bg/--text/--border/--brand/--success…/--chart-1..8/--shadow-*
-        ↓ 组件按需引用
-③ Component（暂缓，见 §10）
-   组件级派生 token；当前组件维持现状，直接用②即可
+        ↓ 组件按需引用（不新增组件级 token）
+③ Component（组件设计规范，见 §10）
+   徽标/按钮/表单/卡片/表格/浮层/反馈的统一规格，样式直接取用语义层
 ```
 
 ### 1.3 适用范围
@@ -259,12 +259,93 @@
 
 ---
 
-## 10. 组件层（暂缓）
+## 10. 组件篇（四批定稿 · 2026-08-29）
 
-组件级 token（`--table-head-bg` / `--badge-*-bg` / `--kpi-accent-*` 等）已在
-`design-system-preview.html` 中原型化，但**本轮不落地**：现有组件（`components/common/*`、
-共享卡片组件等）维持现状，直接用语义层即可。待本轮 Semantic 层迁移稳定后，
-再单独评审组件层命名与接入方案。
+> 定稿过程与弃选方案留档：`docs/specs/2026-08-29-component-redesign-review-design.md`；
+> 可视化对照：`docs/plans/component-review-1..4-*.html`（可双击打开，双主题）。
+> 总基调：**A 延续渐变**（按钮/激活页签/Logo 保留品牌渐变）；旧「工业风/霓虹」发光效果一律移除。
+> 组件层不新增 token：以下规格全部直接取用语义层 + `color-mix()` 派生。
+
+### 10.1 徽标 Badges（主变体 = V1 柔和底）
+
+| 项 | 规格 |
+|---|---|
+| 基础样式 | 彩底 `color-mix(in srgb, <语义色> 13%, transparent)` + 同色文字，无边框；11.5px/700，圆角 6，`tabular-nums`；大号 12.5px（顶部条/关键位） |
+| 良率族 | ≥95 优 = `--success` ▲ / ≥90 警 = `--warn` ◆ / <90 差 = `--error` ▼ |
+| CPK 族 | A✓ 绿（--success）/ B● 品牌色（--brand）/ C◆ 琥珀（--warn）/ D▼ 红（--error，底色加深到 22%） |
+| Bin 族 | 并入徽标变体：pass（Bin 1）= good，普通 = neutral，高失 = bad |
+| 中性/趋势 | 中性 = `--text-2` 12% 底；趋势 chip 胶囊形：▲ 绿 / ▼ 红 / — 中性 |
+| 区分原则 | **色相 + 形状双编码**（night 下 --brand 与 --warn 同为金黄，B/C 靠 ●◆ 区分）；禁用纯色实心变体于多行表格 |
+
+### 10.2 按钮 Buttons
+
+| 型 | 规格 |
+|---|---|
+| primary | 品牌渐变 `--grad-brand` + `--on-brand` 文字，`--shadow-sm` |
+| ghost | `--card` 底 + `--border-2` 边框 + `--text-2`；悬停转品牌色 |
+| danger | **纯红实心** `var(--error)`（弃用红色渐变） |
+| text | 无边框、品牌色，链接式 |
+| 尺寸 | 默认 13px/600，内边距 8·15，圆角 8；小 12px，5·11，圆角 7 |
+| 悬停 | **X 抬升**：全部上移 1px + 阴影加深（0.12s） |
+| 禁用/焦点 | 禁用 45% 透明去阴影；`--focus-ring` 2px 焦点环（outline-offset 2px） |
+
+### 10.3 表单
+
+- 输入/下拉/日期：高 34，圆角 8，底 `--bg`（与卡面形成层次），边框 `--border-2`；
+  焦点 = 品牌边框 + 3px `--focus-ring`；禁用 50% 透明 + `--bg-2` 底。
+- 错误态：`--error` 边框 + 25% 红色光环 + 11px 错误提示文字。
+- 开关：开 = 品牌渐变，关 = `--bg-3` + `--border-2`；滑杆 15px。
+- 复选/单选：`accent-color: var(--brand)`，随 `color-scheme` 双主题自适配。
+- 分段控件（视角切换）：`--bg-2` 底容器 + 激活项 `--card` 底/品牌字/`--shadow-sm`。
+
+### 10.4 卡片
+
+- 卡片底 `--card`（night 为半透明白），边框 `--border`，圆角 12，`--shadow-sm`；内边距 16。
+- Section 卡：卡头 = **浅底带**（`color-mix(--bg-2 60%, --card)`）+ 底分隔线；
+  标题 14/700（可带 emoji 图标）+ `--text-3` 说明 + 右侧操作区。
+- KPI Card 不在组件范围（批次报表已删除该组件）。
+- 禁止：neon 发光、2px 粗边框、`:root.theme-*` 页面级覆盖（教训 R7）。
+
+### 10.5 表格（T2 纯分隔线）
+
+- 无斑马纹；行分隔 `--border`；行悬停品牌色 10% 淡染；表头 `--bg-3` 底 + `--text-2` 600。
+- 字号 12.5，行内边距 7–10；数字列右对齐 + `tabular-nums`；行链接品牌色悬停下划线。
+- Fail 列 **>0 一律红字加粗**（`--error`）；热力格按 `color-mix(--error, n%)` 深浅染色。
+- Level 徽标按 §10.1 CPK 族双编码。
+- 斑马纹（T1）已弃选；EP el-table 场景经主题覆写向本规格对齐。
+
+### 10.6 Tabs 与页签（两形态）
+
+- **下划线 Tabs**（页内功能页签）：激活 = 品牌色文字 + 2px 品牌下划线；默认 `--text-2`。
+- **胶囊 Tabs**（顶层视图切换）：激活 = `--grad-brand` 实底 + `--on-brand` 文字；默认卡底描边。
+- 分段控件见 §10.3（视角切换用，不属于 Tabs）。
+
+### 10.7 浮层（对话框 / 抽屉 / Toast）
+
+| 组件 | 规格 |
+|---|---|
+| 对话框 | 居中，`--card-glass` + blur 14，圆角 12，`--shadow-lg`；标题 14/700 + 图标；正文 13/`--text-2`；底部按钮右对齐（危险动作用纯红按钮）；0.18s 缩放动效 |
+| 抽屉 | 右侧 560px（max 92vw），同毛玻璃规格；头/体分隔，体可滚动；0.25s 滑入 |
+| 遮罩 | `--overlay`，点击关闭；浮层 z-41 / 遮罩 z-40 / Toast z-60 |
+| Toast | **顶部居中**（与 EP message 习惯一致）；毛玻璃卡 + 左侧 3px 语义色条 + 语义色文字；2.2s 自动消失 |
+| EP 对齐 | el-dialog / el-drawer / el-message 经 `element-plus-theme.css` 覆写向本规格对齐 |
+
+### 10.8 反馈（横幅 / 空状态 / 骨架 / 分页 / Tooltip）
+
+- 告警横幅（四色）：底 `color-mix(<语义色> 10%)` + 边框 40%，圆角 12；标题语义色 13/700 + 图标；
+  正文 `--text-2` 12；可展开明细（仪表板现有交互保留）。
+- 空状态：图标（34 半透明）+ 说明（13/600 `--text-2`）+ 主动作（primary 小按钮）。
+- 加载骨架：`--bg-2 → --bg-3` 流光，圆角 6；尊重 `prefers-reduced-motion`。
+- 分页：28×28 圆角 6，激活 = `--grad-brand` + `--on-brand`；悬停品牌描边。
+- Tooltip：`--text` 底 + `--bg` 字（反色），11，圆角 6，`--shadow-md`，悬停 0.15s 淡入。
+- 双主题规则：以上全部只取语义层，禁止页面级 night 覆盖（教训 R7）。
+
+### 10.9 落地边界（另行排期）
+
+1. `components/common/*` 改造：旧霓虹/发光样式清理；Button/Card/Badge/Loading/Empty 按本篇规格与 API 对齐；
+   `:root.theme-*` 页面级覆盖清除。
+2. 新增业务徽标组件（YieldBadge / CpkBadge / BinTag）替换各页面手写 span。
+3. EP 覆写对齐（§10.7）与 e2e 选择器同步维护（教训 R2）。
 
 ## 11. 参考
 
