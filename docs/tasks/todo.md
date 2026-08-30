@@ -305,3 +305,14 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
 - [x] 9 阶段明细表删 操作员/工站/Device/Tester 列（展开 drill-down 行保留）
 - [x] 验证：vue-tsc 绿；定向回归 19 passed/8 基线 skip；含截图轮 22 passed/0 failed；
       截图留档 fix_*（single/heatmap/uph/overview/crosstable × light/night + batch）；手动 dev server 已清理
+
+## 用户反馈修正轮 2（2026-08-30 夜）✅
+
+- [x] 1 阶段明细表不撑满容器 + 表格风格与主题不一致：文本/时间列改 min-width 弹性擑满（明细表 +
+      树形表数值列均衡分布）；删 BatchYieldTab 局部 `:deep(.el-table)` 灰头/hover 覆写，
+      统一走全局 element-plus-theme.css（与单文件表同款）
+- [x] 2 滚动缩放后切 Tab 良率趋势空白 / Site 良率挤压：根因 = 隐藏 Tab display:none 时
+      window resize 触发 chart.resize() 锁 0 尺寸；新增 `observeContainerResize`（echarts-init，RO + rAF 防抖），
+      YieldTrendChart/SiteYieldAnalysis/BinSiteCrossTable 三组件迁移（v-if 容器按元素身份挂载）
+- [x] 验证：vue-tsc 绿；临时 resize 用例（隐藏期视口两连变→切回，svg 宽 ≥ 0.8×容器）通过；
+      定向回归 19 passed/8 基线 skip；截图 fix2_batch_after_switch / fix2_detail_table

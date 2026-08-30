@@ -4,7 +4,7 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onActivated, onBeforeUnmount } from 'vue'
-import { initEchartsWhenReady, type EchartsHandle } from '../../../../utils/echarts-init'
+import { initEchartsWhenReady, observeContainerResize, type EchartsHandle } from '../../../../utils/echarts-init'
 import { useThemeStore } from '../../../../stores/theme'
 import { useEChartsTheme } from '../../../../utils/echarts-theme'
 import { formatPercent } from '../../../../utils/chart-bar'
@@ -15,6 +15,7 @@ const props = defineProps<{
 
 const chartRef = ref<HTMLElement>()
 let handle: EchartsHandle | null = null
+let stopObserve: (() => void) | null = null
 
 const themeStore = useThemeStore()
 const { colors } = useEChartsTheme()
@@ -115,9 +116,10 @@ function handleResize() {
 }
 
 onMounted(() => {
-  window.addEventListener('resize', handleResize)
+  // 容器级 RO：隐藏 Tab 切回/缩放均可靠 resize（window resize 覆盖不到 display:none 场景）
+  stopObserve = observeContainerResize(chartRef.value, handleResize)
   // 首次挂载时主动触发：watch 默认不在初始化时触发，
-  // 而 props.phases 在挂载时已被父组件绑定，不存在"变化"
+  // 而 props.phases 在挂载时已被父组件绑定，不存在“变化”
   nextTick(() => ensureChart())
 })
 
@@ -127,7 +129,8 @@ onActivated(() => {
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', handleResize)
+  stopObserve?.()
+  stopObserve = null
   handle?.dispose()
   handle = null
 })

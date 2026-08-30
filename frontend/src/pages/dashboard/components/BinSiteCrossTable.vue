@@ -88,8 +88,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onActivated, onBeforeUnmount } from 'vue'
-import { initEchartsWhenReady, type EchartsHandle } from '../../../utils/echarts-init'
+import { ref, computed, watch, nextTick, onActivated, onBeforeUnmount } from 'vue'
+import { initEchartsWhenReady, observeContainerResize, type EchartsHandle } from '../../../utils/echarts-init'
 import { useThemeStore } from '../../../stores/theme'
 import { formatPercent } from '../../../utils/chart-bar'
 
@@ -107,6 +107,17 @@ const props = withDefaults(defineProps<{
 const view = ref<'table' | 'heatmap'>('table')
 const heatmapChart = ref<HTMLElement>()
 let heatHandle: EchartsHandle | null = null
+let stopHeatObserve: (() => void) | null = null
+let heatObservedEl: HTMLElement | null = null
+
+/** 热力图容器为 v-if 条件渲染：RO 按元素身份挂载（重建后重挂） */
+function attachHeatObserve() {
+  const el = heatmapChart.value
+  if (!el || el === heatObservedEl) return
+  stopHeatObserve?.()
+  heatObservedEl = el
+  stopHeatObserve = observeContainerResize(el, handleResize)
+}
 
 function _tc() {
   return getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#ffffff'
@@ -241,6 +252,7 @@ function renderHeatmap() {
     } else {
       heatHandle = initEchartsWhenReady(heatmapChart.value, { option: buildHeatOption() as any, reuse: true })
     }
+    attachHeatObserve()
   })
 }
 
@@ -272,17 +284,15 @@ watch(() => themeStore.currentTheme, () => {
   }
 })
 
-onMounted(() => {
-  window.addEventListener('resize', handleResize)
-})
-
 onActivated(() => {
   if (heatHandle) { heatHandle.dispose(); heatHandle = null }
   renderHeatmap()
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', handleResize)
+  stopHeatObserve?.()
+  stopHeatObserve = null
+  heatObservedEl = null
   heatHandle?.dispose(); heatHandle = null
 })
 

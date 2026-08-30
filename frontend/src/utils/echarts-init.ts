@@ -26,6 +26,30 @@ export interface InitWhenReadyOptions {
   pollInterval?: number
 }
 
+/**
+ * 容器尺寸监听（ResizeObserver，2026-08-30 修复）：
+ * window resize 事件覆盖不到「窗口未变、容器尺寸变」的场景——
+ * el-tabs 隐藏页 display:none 时缩放会把 chart.resize() 锁到 0 尺寸，
+ * 切回 Tab 图表空白/挤压。RO 在容器 none→可见、宽高等比变化时均触发。
+ * 返回 disconnect 函数；rAF 合帧防抖。
+ */
+export function observeContainerResize(
+  el: HTMLElement | null | undefined,
+  onResize: () => void,
+): () => void {
+  if (!el || typeof ResizeObserver === 'undefined') return () => {}
+  let raf = 0
+  const ro = new ResizeObserver(() => {
+    cancelAnimationFrame(raf)
+    raf = requestAnimationFrame(onResize)
+  })
+  ro.observe(el)
+  return () => {
+    cancelAnimationFrame(raf)
+    ro.disconnect()
+  }
+}
+
 export interface EchartsHandle {
   /** 已就绪的 ECharts 实例（可能为 null：超时未拿到尺寸） */
   chart: echarts.ECharts | null

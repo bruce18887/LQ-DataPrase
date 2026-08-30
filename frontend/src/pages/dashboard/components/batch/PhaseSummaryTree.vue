@@ -38,17 +38,17 @@
           </span>
         </template>
       </el-table-column>
-      <el-table-column prop="file_count" label="文件数" width="80" align="right" />
-      <el-table-column prop="total" label="测试总数" width="100" align="right" />
-      <el-table-column prop="pass_count" label="Pass" width="90" align="right" />
-      <el-table-column prop="fail_count" label="Fail" width="80" align="right">
+      <el-table-column prop="file_count" label="文件数" min-width="80" align="right" />
+      <el-table-column prop="total" label="测试总数" min-width="100" align="right" />
+      <el-table-column prop="pass_count" label="Pass" min-width="90" align="right" />
+      <el-table-column prop="fail_count" label="Fail" min-width="80" align="right">
         <template #default="{ row }">
           <span :style="{ color: row.fail_count > 0 ? 'var(--error)' : 'var(--success)', fontWeight: 'bold' }">
             {{ row.fail_count }}
           </span>
         </template>
       </el-table-column>
-      <el-table-column prop="yield_pct" label="良率" width="100" align="center">
+      <el-table-column prop="yield_pct" label="良率" min-width="100" align="center">
         <template #default="{ row }">
           <YieldBadge :value="row.yield_pct" />
         </template>

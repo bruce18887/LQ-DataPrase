@@ -105,8 +105,8 @@
           <el-table-column label="WAFER_ID" width="100" align="center">
             <template #default="{row}">{{ row.wafer_id || '-' }}</template>
           </el-table-column>
-          <el-table-column prop="program_name" label="程序名称" width="140" />
-          <el-table-column prop="lot_id" label="Lot ID" width="120" />
+          <el-table-column prop="program_name" label="程序名称" min-width="140" />
+          <el-table-column prop="lot_id" label="Lot ID" min-width="120" />
           <el-table-column prop="total" label="测试总数" width="90" align="right" />
           <el-table-column prop="pass_count" label="Pass" width="80" align="right" />
           <el-table-column prop="fail_count" label="Fail" width="70" align="right">
@@ -121,10 +121,10 @@
               <YieldBadge :value="row.yield_pct" />
             </template>
           </el-table-column>
-          <el-table-column prop="start_time" label="开始时间" width="170" />
-          <el-table-column prop="end_time" label="结束时间" width="170" />
-          <el-table-column prop="total_test_time" label="总测试时间" width="110" />
-          <el-table-column prop="handler" label="Handler" width="100" />
+          <el-table-column prop="start_time" label="开始时间" min-width="160" />
+          <el-table-column prop="end_time" label="结束时间" min-width="160" />
+          <el-table-column prop="total_test_time" label="总测试时间" min-width="110" />
+          <el-table-column prop="handler" label="Handler" min-width="100" />
         </el-table>
       </CollapsibleSection>
 
@@ -402,18 +402,8 @@ defineExpose({ handleResize })
   color: var(--text-3);
 }
 
-:deep(.el-table) {
-  --el-table-bg-color: var(--card);
-  --el-table-tr-bg-color: var(--card);
-  --el-table-header-bg-color: var(--bg-3);
-  --el-table-border-color: var(--border);
-  --el-table-text-color: var(--text);
-  --el-table-header-text-color: var(--text-2);
-}
-
-:deep(.el-table__body tr:hover > td) {
-  background-color: color-mix(in srgb, var(--brand) 10%, transparent) !important;
-}
+/* 表格主题统一走全局 element-plus-theme.css（与单文件表一致），
+   不再局部覆写 --el-table-*（2026-08-30 用户反馈：风格与主题不一致） */
 
 /* —— Site 矩阵合并格 —— */
 .m-ratio {
