@@ -11,7 +11,8 @@
       </label>
     </div>
 
-    <!-- CPK 等级分布：一行四色堆叠比例条（取代饼图） -->
+    <!-- CPK 等级分布：一行四色堆叠比例条（取代饼图）；
+         短段保底 min-width 且占比 <10% 时隐藏条内文字，完整读数由下方图例行承载 -->
     <div v-if="cpkSegments.length" class="cpk-strip">
       <span
         v-for="seg in cpkSegments"
@@ -20,7 +21,13 @@
         :class="`cpk-seg--${seg.level.toLowerCase()}`"
         :style="{ flex: seg.count }"
         :title="`${seg.label} ${seg.count} 项 · ${seg.pct}%`"
-      >{{ seg.icon }} {{ seg.level }} · {{ seg.count }}</span>
+      ><template v-if="Number(seg.pct) >= 10">{{ seg.icon }} {{ seg.level }} · {{ seg.count }}</template></span>
+    </div>
+    <div v-if="cpkSegments.length" class="cpk-legend">
+      <span v-for="seg in cpkSegments" :key="`legend-${seg.level}`" class="cpk-legend-item">
+        <i class="cpk-dot" :class="`cpk-seg--${seg.level.toLowerCase()}`" />
+        {{ seg.icon }} {{ seg.level }} · {{ seg.count }} ({{ seg.pct }}%)
+      </span>
     </div>
 
     <el-table
@@ -88,7 +95,7 @@
       <!-- Fail 列：原「Fail数量 + Fail占比」合并为 `数量 (占比%)`（0 时显示 0） -->
       <el-table-column prop="fail_count" label="Fail" width="130" align="center" sortable="custom">
         <template #default="{ row }">
-          <span v-if="row.fail_count > 0" class="cell-fail">{{ row.fail_count }} ({{ row.percentage }}%)</span>
+          <span v-if="row.fail_count > 0" class="cell-fail">{{ row.fail_count }} ({{ formatPercent(row.percentage) }}%)</span>
           <span v-else class="cell-inactive">0</span>
         </template>
       </el-table-column>
@@ -115,7 +122,7 @@
           type="button"
           class="fail-chip"
           @click="goToAnalysis(chip)"
-        >{{ chip.name }} · {{ chip.fail_count }} ({{ chip.percentage }}%)</button>
+        >{{ chip.name }} · {{ chip.fail_count }} ({{ formatPercent(chip.percentage) }}%)</button>
       </div>
     </template>
   </div>
@@ -127,6 +134,7 @@ import { useRouter } from 'vue-router'
 import { useAnalysisStore } from '../../../stores/analysis'
 import type { TestItemOverview } from '../../../types'
 import CpkBadge from '../../../components/common/CpkBadge.vue'
+import { formatPercent } from '../../../utils/chart-bar'
 
 const props = defineProps<{
   items: TestItemOverview[]
@@ -318,11 +326,35 @@ function getCpkTagType(cpk: number): string {
   overflow: hidden;
   font-variant-numeric: tabular-nums;
   cursor: default;
+  /* 短段保底可见宽（2026-08-30 用户反馈：短 CPK 段被压缩到几乎不可见） */
+  min-width: 10px;
 }
 .cpk-seg--a { background: var(--success); }
 .cpk-seg--b { background: var(--brand); }
 .cpk-seg--c { background: var(--warn); }
 .cpk-seg--d { background: var(--error); }
+
+/* 图例行：短段条内文字隐藏后仍可读全量计数/占比 */
+.cpk-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 7px 16px 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.cpk-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.cpk-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+}
 
 /* ================================================================
    Overview specifics

@@ -28,6 +28,7 @@
 import { ref, computed, watch, nextTick, onMounted, onActivated, onBeforeUnmount } from 'vue'
 import { initEchartsWhenReady, type EchartsHandle } from '../../../utils/echarts-init'
 import { useThemeStore } from '../../../stores/theme'
+import { formatPercent } from '../../../utils/chart-bar'
 
 const themeStore = useThemeStore()
 
@@ -109,7 +110,7 @@ function buildSiteYieldBarOption() {
           itemStyle: { color: getYieldColor(y) },
         })),
         barWidth: '50%',
-        label: { show: true, position: 'top', formatter: '{c}%', fontSize: 12, fontWeight: 'bold' },
+        label: { show: true, position: 'top', formatter: (p: any) => `${formatPercent(Number(p.value))}%`, fontSize: 12, fontWeight: 'bold' },
       },
       {
         // 良率折线：串起各 Site 走势（--info 蓝）

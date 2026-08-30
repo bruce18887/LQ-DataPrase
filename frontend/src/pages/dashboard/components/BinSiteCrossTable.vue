@@ -25,7 +25,7 @@
           <el-table-column prop="bin" label="Bin" width="80" align="center" fixed="left">
             <template #default="{ row }">
               <span v-if="row.bin === 'Total'" class="bs-total-label">Total</span>
-              <BinTag v-else :label="row.bin" :pct="row._pct" />
+              <span v-else class="bs-bin-label">{{ row.bin }}</span>
             </template>
           </el-table-column>
           <el-table-column v-for="col in binSiteColumns" :key="col" :label="`Site ${col}`" align="center" min-width="104">
@@ -63,7 +63,7 @@
         <el-table-column prop="bin" label="Bin" width="80" align="center" fixed="left">
           <template #default="{ row }">
             <span v-if="row.bin === 'Total'" class="bs-total-label">Total</span>
-            <BinTag v-else :label="row.bin" :pct="row._pct" />
+            <span v-else class="bs-bin-label">{{ row.bin }}</span>
           </template>
         </el-table-column>
         <el-table-column v-for="col in binSiteColumns" :key="col" :label="`Site ${col}`" align="center" min-width="104">
@@ -92,7 +92,6 @@ import { ref, computed, watch, nextTick, onMounted, onActivated, onBeforeUnmount
 import { initEchartsWhenReady, type EchartsHandle } from '../../../utils/echarts-init'
 import { useThemeStore } from '../../../stores/theme'
 import { formatPercent } from '../../../utils/chart-bar'
-import BinTag from '../../../components/common/BinTag.vue'
 
 const themeStore = useThemeStore()
 
@@ -111,6 +110,19 @@ let heatHandle: EchartsHandle | null = null
 
 function _tc() {
   return getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#ffffff'
+}
+
+function _token(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+}
+
+/** hex → rgba：visualMap 插值只认具体色值（var()/color-mix 不参与插值） */
+function hexToRgba(hex: string, alpha: number): string {
+  let h = hex.replace('#', '')
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('')
+  const n = parseInt(h, 16)
+  if (h.length !== 6 || Number.isNaN(n)) return `rgba(220, 38, 38, ${alpha})`
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`
 }
 
 const isPassBin = (bin: string) => bin.includes('1')
@@ -137,8 +149,6 @@ const formattedRows = computed(() => {
         formatted[`_pct_${col}`] = pct
       }
     }
-    // BinTag 高失判定用占总记录比例
-    formatted._pct = grandTotal > 0 ? (rowTotal / grandTotal) * 100 : 0
     if (row.bin === 'Total') {
       formatted.all_site = (row.all_site || 0).toLocaleString()
     } else {
@@ -181,6 +191,7 @@ const heatHeight = computed(() => 70 + heatBinNames.value.length * 42)
 function buildHeatOption() {
   const sites = props.binSiteColumns
   const bins = heatBinNames.value
+  const err = _token('--error') || '#dc2626'
   return {
     tooltip: {
       formatter: (p: any) => {
@@ -201,18 +212,21 @@ function buildHeatOption() {
       splitArea: { show: true },
       axisLabel: { color: _tc(), fontSize: 12 },
     },
+    // 笛卡尔热力图必须配 visualMap，否则 ECharts 抛
+    // “Heatmap must use with visualMap” 整系列不渲染（2026-08-30 修复）；
+    // show:false 仅按行内集中度（dimension 3）着色。
+    visualMap: {
+      show: false,
+      min: 0,
+      max: 1,
+      dimension: 3,
+      inRange: { color: [hexToRgba(err, 0.1), hexToRgba(err, 0.45)] },
+    },
     series: [{
       type: 'heatmap',
-      data: heatRows.value.map(d => ({
-        value: d.value,
-        // 色深 = 行内集中度：10% 起步、最深 45%（语义色红，双主题自适配）
-        itemStyle: {
-          color: `color-mix(in srgb, var(--error) ${(10 + d.value[3] * 35).toFixed(0)}%, transparent)`,
-          borderRadius: 4,
-        },
-        label: { show: true, color: 'var(--text)', fontSize: 12, fontWeight: 600 },
-      })),
-      label: { show: true, formatter: (p: any) => `${p.value[2]}`, color: 'var(--text)', fontSize: 12, fontWeight: 600 },
+      data: heatRows.value.map(d => ({ value: d.value })),
+      // 数值标签：具体色值，保证双主题可读
+      label: { show: true, formatter: (p: any) => `${p.value[2]}`, color: _tc(), fontSize: 12, fontWeight: 600 },
       emphasis: { itemStyle: { shadowBlur: 6, shadowColor: 'rgba(0,0,0,0.25)' } },
     }],
   }
@@ -338,6 +352,12 @@ defineExpose({ handleResize })
 .bs-total-label {
   font-weight: 700;
   color: var(--text-2);
+}
+/* Bin 列纯文字（2026-08-30 用户定稿：交叉表 Bin 值不用徽标勾，避免误解） */
+.bs-bin-label {
+  font-weight: 600;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
 }
 .bs-fail {
   color: var(--error);
