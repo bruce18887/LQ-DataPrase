@@ -269,3 +269,13 @@
   另：残留 runserver 进程树占 8000 会让 webServer 120s 超时——跑前查 Listen 端口 `taskkill /PID x /F /T`。
 - **el-table 宽屏撑满**：全固定 width 列在超宽屏右侧留白；文本/时间列用 min-width 让余量弹性分配，
   树形表避免单一 min-width 列（phase）独吞余量。
+
+## 2026-08-30 反馈轮 3：图表「经常消失」根因补漏
+
+- **initEchartsWhenReady 超时不能断 ResizeObserver**：原实现 5s 超时连 RO 一起 disconnect——
+  容器 5s 内没尺寸（隐藏 Tab/折叠卡）则 init 永久放弃，之后容器可见也没人重试→图表永久空白。
+  修：超时只停 rAF/轮询，RO 保留到 handle.dispose()，容器后拿尺寸时 onReady 自愈 init。
+- **v-if 图表容器重建必须 dispose 旧实例**：`v-if="data.length"` 空态↔数据切换会重建 div，
+  旧 ECharts 实例绑定已摘除的旧 DOM，`setOption` 渲染进 detached 节点→新容器空白
+  （表象：卡头 pills 有数、图区空）。修：render 内记录容器元素身份，身份变化先 dispose 再 init。
+  通则：任何 v-if/v-for 包裹的图表容器都要在 render 路径做元素身份守卫。

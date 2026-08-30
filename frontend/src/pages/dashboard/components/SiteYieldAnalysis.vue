@@ -44,6 +44,7 @@ const props = withDefaults(defineProps<{
 const siteYieldBarChart = ref<HTMLElement>()
 let siteYieldBarHandle: EchartsHandle | null = null
 let stopObserve: (() => void) | null = null
+let chartEl: HTMLElement | null = null
 
 function _tc() {
   return getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#ffffff'
@@ -130,6 +131,15 @@ function buildSiteYieldBarOption() {
 
 function renderSiteYieldBarChart() {
   if (!siteYieldBarChart.value || !props.siteYieldData?.length) return
+  // v-if 容器重建（空态<->数据切换）时旧实例绑定在已摘除的旧 DOM 上：
+  // 不 dispose 重init，setOption 会渲染进 detached 节点→新容器永久空白（2026-08-30 修复）
+  if (siteYieldBarHandle && chartEl !== siteYieldBarChart.value) {
+    siteYieldBarHandle.dispose()
+    siteYieldBarHandle = null
+    stopObserve?.()
+    stopObserve = null
+  }
+  chartEl = siteYieldBarChart.value
   if (siteYieldBarHandle) {
     siteYieldBarHandle.chart?.setOption(buildSiteYieldBarOption() as any, { notMerge: true, lazyUpdate: true })
   } else {

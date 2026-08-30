@@ -316,3 +316,10 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
       YieldTrendChart/SiteYieldAnalysis/BinSiteCrossTable 三组件迁移（v-if 容器按元素身份挂载）
 - [x] 验证：vue-tsc 绿；临时 resize 用例（隐藏期视口两连变→切回，svg 宽 ≥ 0.8×容器）通过；
       定向回归 19 passed/8 基线 skip；截图 fix2_batch_after_switch / fix2_detail_table
+
+## 用户反馈修正轮 3（2026-08-30 夜）✅
+
+- [x] 图表「经常消失」补漏：① initEchartsWhenReady 5s 超时不再 disconnect ResizeObserver
+      （容器后拿尺寸时自愈 init）；② SiteYieldAnalysis v-if 容器重建时 dispose 旧实例再 init
+      （元素身份守卫），修「卡头有数、图区空白」
+- [x] 验证：vue-tsc 绿；定向回归 19 passed/8 基线 skip
