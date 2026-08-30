@@ -26,7 +26,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onActivated, onBeforeUnmount } from 'vue'
-import { initEchartsWhenReady, type EchartsHandle } from '../../../utils/echarts-init'
+import { initEchartsWhenReady, observeContainerResize, type EchartsHandle } from '../../../utils/echarts-init'
 import { useThemeStore } from '../../../stores/theme'
 import { formatPercent } from '../../../utils/chart-bar'
 
@@ -43,6 +43,7 @@ const props = withDefaults(defineProps<{
 
 const siteYieldBarChart = ref<HTMLElement>()
 let siteYieldBarHandle: EchartsHandle | null = null
+let stopObserve: (() => void) | null = null
 
 function _tc() {
   return getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#ffffff'
@@ -134,6 +135,8 @@ function renderSiteYieldBarChart() {
   } else {
     siteYieldBarHandle = initEchartsWhenReady(siteYieldBarChart.value, { option: buildSiteYieldBarOption() as any, reuse: true })
   }
+  // 数据后到时容器才挂载：RO 补挂（onMounted 时 el 可能尚不存在）
+  if (!stopObserve) stopObserve = observeContainerResize(siteYieldBarChart.value, handleResize)
 }
 
 function renderAll() {
@@ -156,7 +159,8 @@ watch(() => themeStore.currentTheme, () => {
 })
 
 onMounted(() => {
-  window.addEventListener('resize', handleResize)
+  // 容器级 RO：隐藏 Tab 切回/缩放均可靠 resize（window resize 覆盖不到 display:none 场景）
+  stopObserve = observeContainerResize(siteYieldBarChart.value, handleResize)
   renderAll()
 })
 
@@ -166,7 +170,8 @@ onActivated(() => {
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', handleResize)
+  stopObserve?.()
+  stopObserve = null
   siteYieldBarHandle?.dispose(); siteYieldBarHandle = null
 })
 

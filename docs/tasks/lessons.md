@@ -255,3 +255,17 @@
   canvases 目录后 `./x.png` 引用。
 - **百分比显示统一 3 位小数上限**（用户定稿）：formatPercent 自适应上限 6→3，极小非零值
   “<0.001” 防假零；裸值渲染点（`{c}%` 标签、YieldBadge 数字、后端 6 位 percentage）必须过格式化。
+
+## 2026-08-30 反馈轮 2：图表 resize 与 e2e 后端环境
+
+- **图表 resize 必须容器级 ResizeObserver**：window resize 覆盖不到「容器 display:none→可见」——
+  隐藏 Tab 期间缩放会把 `chart.resize()` 锁到 0 尺寸，切回空白/挤压。修：`observeContainerResize`
+  （echarts-init.ts，RO + rAF 合帧）；v-if 条件容器按元素身份挂载（重建后重挂）；
+  数据后到场景在 render 内补挂。e2e 复现法：隐藏 Tab 时 `setViewportSize` 两连变再切回，
+  断言 svg 宽 ≥ 0.8×容器宽。
+- **e2e 勿手动起后端**：后台终端的 `$env:` 赋值不可靠（后端回退项目根 system_config.json 的
+  home data_dir → `/batch-dirs/import/` 404「目录不存在」，盘上目录确实存在却对不上）；
+  用 Playwright webServer（config 显式传 LQDP_SYSTEM_CONFIG_FILE）最稳。
+  另：残留 runserver 进程树占 8000 会让 webServer 120s 超时——跑前查 Listen 端口 `taskkill /PID x /F /T`。
+- **el-table 宽屏撑满**：全固定 width 列在超宽屏右侧留白；文本/时间列用 min-width 让余量弹性分配，
+  树形表避免单一 min-width 列（phase）独吞余量。
