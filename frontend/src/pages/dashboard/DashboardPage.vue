@@ -1,11 +1,17 @@
 <template>
   <div class="dashboard-page">
-    <!-- 页头一行（指南 §11.2）：标题 + 文件选择器 + 更新时间 -->
+    <!-- 页头仅留主标题（放大）；文件选择器下沉到单文件 Tab（与批次页头同一行式） -->
     <header class="dash-header">
       <h1 class="dash-title">
         <span class="dash-title-icon" aria-hidden="true">📊</span>
         <span class="dash-title-text">数据分析仪表板</span>
       </h1>
+    </header>
+
+    <el-tabs v-model="activeTab" class="dash-tabs">
+      <el-tab-pane label="📊 单文件分析" name="single">
+    <!-- 文件选择行（同批次页头结构） -->
+    <header class="single-head">
       <FileSelect
         v-model="selectedFileId"
         :files="files"
@@ -18,9 +24,6 @@
       />
       <span class="dash-meta">更新: {{ updateTime }}</span>
     </header>
-
-    <el-tabs v-model="activeTab" class="dash-tabs">
-      <el-tab-pane label="📊 单文件分析" name="single">
     <!-- 空态 / 加载态 / 错误态 -->
     <el-empty v-if="!filesLoading && files.length === 0" description="暂无数据文件，请先在数据管理页面上传 ATE 数据文件" />
     <div v-else-if="filesLoading && !data" v-loading="true" element-loading-text="加载文件列表..." style="min-height:200px" />
@@ -284,7 +287,7 @@ onActivated(async () => {
   padding: 0;
 }
 
-/* ----- Header（一行：标题 + 文件选择器 + 更新时间） ----- */
+/* ----- Header（主标题放大；文件选择器已下沉到单文件 Tab） ----- */
 .dash-header {
   display: flex;
   align-items: center;
@@ -295,14 +298,23 @@ onActivated(async () => {
 .dash-title {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   margin: 0;
-  font-size: 16px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--text);
   white-space: nowrap;
 }
-.dash-title-icon { font-size: 17px; }
+.dash-title-icon { font-size: 21px; }
+
+/* 单文件 Tab 页头行（同批次页头：选择器 + 更新元信息） */
+.single-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 2px 0 14px;
+}
 .dash-file-select { width: 320px; max-width: 100%; }
 .dash-meta {
   margin-left: auto;

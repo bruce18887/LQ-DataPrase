@@ -123,10 +123,6 @@
           </el-table-column>
           <el-table-column prop="start_time" label="开始时间" width="170" />
           <el-table-column prop="end_time" label="结束时间" width="170" />
-          <el-table-column prop="operator" label="操作员" width="100" />
-          <el-table-column prop="station" label="工站" width="100" />
-          <el-table-column prop="device_name" label="Device" width="140" />
-          <el-table-column prop="tester_type" label="Tester" width="100" />
           <el-table-column prop="total_test_time" label="总测试时间" width="110" />
           <el-table-column prop="handler" label="Handler" width="100" />
         </el-table>

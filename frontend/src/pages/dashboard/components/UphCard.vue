@@ -96,10 +96,10 @@ const UphDetail = defineComponent({
           'UPH = 测试总数量 ÷ 总耗时 × 3600',
           h(ElTooltip, { placement: 'top', width: 340 }, {
             content: () => h('div', { class: 'uph-helper' }, [
-              h('div', { class: 'uph-helper__title' }, 'UPH ＝ 每小时产出单元数'),
-              h('div', { class: 'uph-helper__formula' }, 'UPH ＝ 测试总数量 ÷ 总耗时 × 3600'),
+              h('div', { class: 'uph-helper__title', style: { fontWeight: 600, marginBottom: '4px' } }, 'UPH ＝ 每小时产出单元数'),
+              h('div', { class: 'uph-helper__formula', style: { lineHeight: 1.7 } }, 'UPH ＝ 测试总数量 ÷ 总耗时 × 3600'),
               data.site_count
-                ? h('div', { class: 'uph-helper__formula' }, `总耗时 ＝ 各单元测试时间之和 ÷ ${data.site_count}（并行站点模型）`)
+                ? h('div', { class: 'uph-helper__formula', style: { lineHeight: 1.7 } }, `总耗时 ＝ 各单元测试时间之和 ÷ ${data.site_count}（并行站点模型）`)
                 : null,
             ]),
             default: () => h(ElIcon, { class: 'uph-metric-label__help' }, () => h(QuestionFilled)),
@@ -210,7 +210,9 @@ watch(() => props.fileId, () => {
   padding: 4px 0;
 }
 
-.uph-empty {
+/* UphDetail 为 plain script 内 defineComponent + h() 渲染，scoped 选择器
+   无法命中其内部节点——统一 :deep()（2026-08-30 修复：各站点 UPH 挤作一团） */
+.uph-card :deep(.uph-empty) {
   min-height: 80px;
   display: flex;
   align-items: center;
@@ -220,7 +222,7 @@ watch(() => props.fileId, () => {
 }
 
 /* —— 紧凑信息带 —— */
-.uph-detail {
+.uph-card :deep(.uph-detail) {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 18px;
@@ -228,47 +230,47 @@ watch(() => props.fileId, () => {
   color: var(--text-2);
   align-items: center;
 }
-.uph-detail b {
+.uph-card :deep(.uph-detail b) {
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 
-.uph-src {
+.uph-card :deep(.uph-src) {
   font-size: 11px;
   font-weight: 700;
   padding: 1px 8px;
   border-radius: 6px;
 }
-.uph-src--success {
+.uph-card :deep(.uph-src--success) {
   background: color-mix(in srgb, var(--success) 13%, transparent);
   color: var(--success);
 }
-.uph-src--brand {
+.uph-card :deep(.uph-src--brand) {
   background: color-mix(in srgb, var(--brand) 13%, transparent);
   color: var(--brand);
 }
-.uph-src--warn {
+.uph-card :deep(.uph-src--warn) {
   background: color-mix(in srgb, var(--warn) 13%, transparent);
   color: var(--warn);
 }
-.uph-src--neutral {
+.uph-card :deep(.uph-src--neutral) {
   background: color-mix(in srgb, var(--text-2) 12%, transparent);
   color: var(--text-2);
 }
 
-.uph-warn {
+.uph-card :deep(.uph-warn) {
   font-size: 11.5px;
   color: var(--warn);
   font-weight: 600;
 }
 
-.site-uph-wrap {
+.uph-card :deep(.site-uph-wrap) {
   display: inline-flex;
   flex-wrap: wrap;
   gap: 5px;
   align-items: center;
 }
-.site-uph {
+.uph-card :deep(.site-uph) {
   display: inline-flex;
   align-items: baseline;
   gap: 4px;
@@ -281,20 +283,13 @@ watch(() => props.fileId, () => {
   background: var(--bg);
 }
 
-.uph-formula {
+.uph-card :deep(.uph-formula) {
   color: var(--text-3);
   font-size: 11px;
 }
-.uph-metric-label__help {
+.uph-card :deep(.uph-metric-label__help) {
   margin-left: 3px;
   vertical-align: -2px;
   cursor: help;
-}
-.uph-helper__title {
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-.uph-helper__formula {
-  line-height: 1.7;
 }
 </style>

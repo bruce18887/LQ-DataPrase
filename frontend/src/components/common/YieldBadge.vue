@@ -19,6 +19,7 @@
  * <YieldBadge value="N/A" compact />
  */
 import { computed } from 'vue'
+import { formatPercent } from '../../utils/chart-bar'
 
 interface Props {
   /** 数字百分比或带 % 的字符串；'N/A'/空值不渲染 */
@@ -46,8 +47,9 @@ const icon = computed(() =>
   level.value === 'good' ? '▲' : level.value === 'warn' ? '◆' : '▼',
 )
 
+// 数字值统一限最多 3 位小数（2026-08-30 用户定稿）；字符串值原样透传
 const display = computed(() =>
-  typeof props.value === 'number' ? `${props.value}%` : props.value,
+  typeof props.value === 'number' ? `${formatPercent(props.value)}%` : props.value,
 )
 </script>
 

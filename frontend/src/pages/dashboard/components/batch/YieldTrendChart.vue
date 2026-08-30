@@ -7,6 +7,7 @@ import { ref, watch, nextTick, onMounted, onActivated, onBeforeUnmount } from 'v
 import { initEchartsWhenReady, type EchartsHandle } from '../../../../utils/echarts-init'
 import { useThemeStore } from '../../../../stores/theme'
 import { useEChartsTheme } from '../../../../utils/echarts-theme'
+import { formatPercent } from '../../../../utils/chart-bar'
 
 const props = defineProps<{
   phases: any[]
@@ -83,7 +84,7 @@ function buildOption() {
         data: phases.map((p: any) => p.yield_pct),
         itemStyle: { color: 'var(--info)' }, lineStyle: { width: 2, color: 'var(--info)' },
         symbol: 'circle', symbolSize: 6,
-        label: { show: true, formatter: '{c}%', fontSize: 11, color: tc },
+        label: { show: true, formatter: (p: any) => `${formatPercent(Number(p.value))}%`, fontSize: 11, color: tc },
       },
     ],
   }

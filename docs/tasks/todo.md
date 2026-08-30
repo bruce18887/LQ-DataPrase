@@ -286,3 +286,22 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
       - e2e 同步：dashboard.spec（总览条/柱线/页签/11 列/批次区块断言）、batch-phase.spec、
         night-visibility（ready 选择器）；build ×4 绿；定向回归全绿（batch 条件 skip 为基线）；
         双主题截图留档 dash_batch1_*（4 张）/ dash_batch2_*（2 张）
+
+## 用户反馈修正轮（2026-08-30 晚）✅
+
+用户 8 项反馈（编号 1-6、8、9），全部修正并验证：
+
+- [x] 1 热力图无数值：根因 = 笛卡尔热力图未配 visualMap，ECharts 抛 “Heatmap must use with visualMap”
+      整系列不渲染（截图只见 splitArea）。修：visualMap show:false 按行内集中度（dimension 3）具体 rgba
+      插值着色 + 数值标签具体色值（BinSiteCrossTable）
+- [x] 2 CPK 比例条短段压缩至几乎不可见：min-width 10px 保底 + 占比 <10% 隐藏条内文字，
+      新增图例行承载全量 计数/占比（TestItemOverviewSection）
+- [x] 3/5 百分比位数限最多 3 位：formatPercent 上限 6→3（极小非零 “<0.001”）；测试项总览 Fail 列/chip、
+      Site 柱顶标签、批次趋势图线标签、YieldBadge 数字值统一走该格式化
+- [x] 4 UPH 各站点明细挤作一团：根因 = UphDetail 为 plain script defineComponent + h() 渲染，
+      scoped 选择器命中不到内部节点；统一 :deep() + tooltip（teleported）改内联样式，排版对齐静态审阅页
+- [x] 6 Bin×Site 交叉表 Bin 值去徽标勾改纯文字（两张表）
+- [x] 8 文件下拉移入单文件 Tab（同批次页头行式），页头主标题放大 20px
+- [x] 9 阶段明细表删 操作员/工站/Device/Tester 列（展开 drill-down 行保留）
+- [x] 验证：vue-tsc 绿；定向回归 19 passed/8 基线 skip；含截图轮 22 passed/0 failed；
+      截图留档 fix_*（single/heatmap/uph/overview/crosstable × light/night + batch）；手动 dev server 已清理

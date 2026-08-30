@@ -235,5 +235,23 @@
   元素全文是「UPH?」→ exact 'UPH' 匹配不到；含嵌套子节点的标签断言改用正则或容器级 testid。
 - **组合多文件全量轮的成片失败先隔离复跑判定**（R2 复用）：dashboard+batch+theme 组合轮
   night-visibility 4 失败 + 用例数异常，workers=1 隔离复跑 6/6 全绿 → dev server 并行劣化 flake，非代码回归。
-- **ECharts 渲染器默认 SVG，`var(--token)` 可直用**：项目默认 svg 渲染器，itemStyle/label 传
+- **ECharts 渲染器默认 SVG，`var(--token)` 可直用**：项目默认 svg 渲染器，itemStyle/label 里
   `var(--success)` 等语义色可正常解析（既有组件已验证）；切 canvas 渲染器为已知存量约束，新图同样沿用。
+
+## 2026-08-30 仪表板用户反馈修正轮
+
+- **ECharts 笛卡尔热力图必须配 visualMap**：否则 `setOption` 直接抛
+  “Heatmap must use with visualMap”，整系列不渲染——页面只剩坐标轴 splitArea，
+  极易误判成「配色/标签 bug」。自定义逐格着色方案：`visualMap: { show:false, dimension, inRange }`
+  承担着色（插值只认具体色值，var()/color-mix 不参与），label 用具体色值。
+  诊断捷径：node SSR（`echarts.init(null,null,{renderer:'svg',ssr:true})` + `renderToSVGString()`）
+  秒级复现 setOption 异常与标签输出，比开浏览器快。
+- **SFC scoped 样式打不到 plain script 子组件的 h() 节点**：`<script lang="ts">` 里
+  defineComponent + h() 组装的组件是独立组件，其内部节点不带父 SFC 的 scope 属性 →
+  样式全失效（表象：布局「挤作一团」而非报错）。修：`.root :deep(.x)` 统一穿透；
+  teleported 内容（ElTooltip content）scoped/:deep 都够不到，用内联 style。
+- **Canvas SDK `canvasImage` 双重约束**：① 只收字符串字面量/无插值模板字面量（常量拼接编译期报错）；
+  ② 本地图片必须相对 canvas 文件路径（绝对路径仅本地 canvas 临时可用）——跨目录截图复制进
+  canvases 目录后 `./x.png` 引用。
+- **百分比显示统一 3 位小数上限**（用户定稿）：formatPercent 自适应上限 6→3，极小非零值
+  “<0.001” 防假零；裸值渲染点（`{c}%` 标签、YieldBadge 数字、后端 6 位 percentage）必须过格式化。
