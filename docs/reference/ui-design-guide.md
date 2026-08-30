@@ -1,6 +1,6 @@
 # LQ-DataPrase UI 设计指南（Design Tokens）
 
-**日期**: 2026-08-29 · **状态**: 生效（含组件篇 §10 四批定稿 + 仪表板页面篇 §11 定稿）
+**日期**: 2026-08-29 · **状态**: 生效（含组件篇 §10 四批定稿 + 仪表板页面篇 §11 定稿，§11 已含 2026-08-30 落地修正）
 **视觉基准**: `docs/plans/dashboard-rebuild-preview.html`、`docs/plans/design-system-preview.html` 与组件审阅页 `docs/plans/component-review-1..4-*.html`
 **配套文件**: `frontend/src/styles/design-tokens.css`（本指南的可落地 CSS，Primitive + Semantic 两层）
 
@@ -358,24 +358,33 @@
 ### 11.1 页面级共用组件（两 Tab 同规格）
 
 - **总览条（信息记录中枢）**：一行 label+value；数值大号 18/700、文本型小号 13.5；
-  Pass 绿 / Fail>0 红 / 良率色阶；窄视口可换行；带 `data-testid`。
+  Pass 绿 / Fail>0 红 / 良率色阶；窄视口可换行；带 `data-testid`（`overview-strip`）。
 - **告警/QA 横幅**：单行汇总（级别取最高）+ 点击展开明细，无告警零占位（§10.8 四色横幅）。
 - **Bin 构成 = Pareto 横向条**（降序、pass 绿/fail 红、条内「数量 · 占比%」），取代饼图+占比表。
 - **Site 良率 = 柱线组合**（柱色阶 + `--info` 良率折线 + 卡头 3 pills 最高/最低/Δ）；gauge 删除。
 - **Bin×Site = 同卡「表格 / 热力图」页签**：表格热力格等宽居中 `数量(行内占比%)`、
-  合计列 `数量 (占总记录%)`；热力图仅 Fail Bin、色深 = 行内集中度（ECharts heatmap）。
-- **UPH 紧凑明细行**：平均测试时间/总耗时/并行站点数/各站点独立小格/来源标签/警告/公式（? 悬停）。
-- **Section 卡浅底带卡头 + T2 表格 + 双重编码徽标**（§10.4/10.5/10.1）。
+  合计列 `数量 (占总记录%)`；**Bin 列纯文字不用徽标**（避免勾形误解，两表同）；
+  热力图仅 Fail Bin、色深 = 行内集中度，**必须配 `visualMap`（show:false）**，
+  插值色为具体 rgba（`var()`/`color-mix` 不参与 visualMap 插值，由 token hex 转换），
+  数值标签用具体色值保双主题可读；无 Fail Bin 时空态提示。
+- **百分比显示统一 `formatPercent`**：自适应精度、**最多 3 位小数**、极小非零显示 `<0.001`、去尾零；
+  适用热力格、测试项总览 Fail 列与 chip、Site 柱顶标签、批次趋势线标签、YieldBadge 数值等全部百分比场景。
+- **UPH 紧凑明细行**：平均测试时间/总耗时/并行站点数/各站点独立小格/来源标签/警告/公式（? 悬停）；
+  `UphDetail` 为渲染函数组件，scoped 样式需 `:deep()`，teleported tooltip 用内联样式。
+- **Section 卡浅底带卡头 + T2 表格**（§10.4/10.5）；表格样式统一走全局 `element-plus-theme.css`，
+  禁止页面级 `:deep(.el-table)` 局部覆写；文本/时间列用 `min-width` 弹性撑满容器。
 
 ### 11.2 单文件分析 Tab 结构（自上而下）
 
-1. 页头一行：标题 + 文件选择器 + 更新时间（居中大标题/工具条行删除）。
+1. 页头仅保留主标题（**20px**，图标 21px，左对齐；居中大标题/工具条行删除）；
+   **文件选择器下沉到单文件 Tab 内首行**（与批次页头同一行式：选择器 + 更新元信息）。
 2. 总览条：程序/总记录/Pass/Fail/Yield/UPH/测试时长/测试开始 + 格式 chip。
 3. 告警单横幅。
 4. 图表双列：Bin Pareto + Site 柱线组合（<900px 堆叠）。
 5. Bin×Site 交叉表（表格/热力图页签）。
-6. 测试项总览：CPK 堆叠比例条 + 11 列表格（Fail 列 `数量 (占比%)`，表头全列排序，
-   卡头双复选框「忽略无 Limit/忽略无测试值」默认勾选，行点击跳转数据分析）+ Top 10 Fail 信息 chip 行。
+6. 测试项总览：CPK 堆叠比例条（**短段 `min-width:10px` 保底；占比 <10% 隐藏段内文字；
+   条下方设图例行（色点 + 图标 + 等级 · 计数 (占比)）承载全量读数**）+ 11 列表格（Fail 列 `数量 (占比%)`，
+   表头全列排序，卡头双复选框「忽略无 Limit/忽略无测试值」默认勾选，行点击跳转数据分析）+ Top 10 Fail 信息 chip 行。
 7. UPH 紧凑明细行（页面最底部）→ 导出页脚。
 
 ### 11.3 批次良率 Tab 结构（自上而下）
@@ -385,18 +394,37 @@
 3. QA 数量校验横幅（仅全部/FT 阶段可见）。
 4. 阶段汇总卡：总览条（投入/Pass/Fail/良率，随胶囊联动）+ 树形表（阶段聚合→版本明细）+
    良率趋势图（柱=总数、线=良率）同卡合并。
-5. 阶段明细表（列结构不变，定稿规格）。
+5. 阶段明细表：保留阶段/版本/程序/总数/通过/失败/良率/开始/结束等核心列，
+   **删除操作员/工站/Device/Tester 列**（11 项元数据保留在展开 drill-down 行）；
+   文本/时间列 `min-width` 弹性撑满；样式统一走全局 EP 主题（无局部覆写）。
 6. Site 良率矩阵：每 Site **合并单列**（良率徽章 + Pass/Total 小字）+ All Site 列。
 7. Bin 分布卡（单阶段口径，阶段下拉在卡头）：Pareto + Site 柱线双列 + Bin×Site 页签 + UPH 紧凑行。
    UPH 不上总览条（用户确认保持现状）。
 
-### 11.4 页面篇落地边界（另行排期）
+### 11.4 落地现状与工程约定（2026-08-30 落地完成）
 
+- **已落地**：批 1 单文件（e2aba14）/ 批 2 批次（fec0ff9）+ 三轮用户反馈修正（详见 §11.5）；
+  `KpiCards`/`DataQualityOverview`/`QualityAlerts`/`OverviewCharts`/`BatchSelectorBar` 已删除；
+  新增 `OverviewStrip`（`data-testid=overview-strip`，测试开始取 `/files/:id/` 的 `metadata.start_time`）/
+  `AlertBanner`/`UphDetail`；`CollapsibleSection` 增 `header-extra` 槽。
 - **不动**：后端接口与聚合、导出链路、阶段过滤联动、单阶段现算口径、行点击跳转/排序逻辑。
-- **删除**：`KpiCards`、`DataQualityOverview`、gauge、Bin 饼图+占比表、CPK 饼图、Top10 柱状、
-  独立工具条行；数据质量独有字段按用户确认移除。
-- **e2e**：KPI 卡/质量概览/矩阵列等既有选择器同步维护（教训 R2）；总览条新增 `data-testid`。
-- 分批执行 + 每批全量回归；批次页 `UphCard` embedded 用法需回归验证。
+- **图表生命周期工程约定（防图表消失/空白）**：容器级 `observeContainerResize`
+  （ResizeObserver + rAF 防抖，替代 window resize，避免隐藏 Tab `display:none` 时锁 0 尺寸）；
+  `initEchartsWhenReady` 超时不 disconnect、容器后拿尺寸时自愈 init；`v-if` 容器重建时按元素身份
+  dispose 旧实例再 init。
+- **e2e**：`dashboard.spec`（总览条/柱线/页签/11 列/批次区块）、`batch-phase.spec`、
+  `night-visibility` 已同步；新组件带 `data-testid`。
+
+### 11.5 落地修正记录（与设计稿的差异，均为用户确认）
+
+1. 热力图必须配 `visualMap`（否则 ECharts 拒渲整系列），插值用具体 rgba（见 §11.1）。
+2. CPK 比例条短段保底/隐文/图例行（见 §11.2.6）。
+3. 百分比统一最多 3 位小数（`formatPercent`，见 §11.1）。
+4. UPH 各站小格排版修正（`:deep()` + 内联 tooltip，见 §11.1）。
+5. Bin×Site 两表 Bin 列改纯文字（去徽标勾）。
+6. 页头仅留 20px 主标题，文件选择器下沉入单文件 Tab（见 §11.2.1）。
+7. 阶段明细表删 4 列，元数据入展开行（见 §11.3.5）。
+8. 表格弹性列宽 + 全局 EP 主题统一（禁局部 `:deep(.el-table)` 覆写）。
 
 ## 12. 参考
 
