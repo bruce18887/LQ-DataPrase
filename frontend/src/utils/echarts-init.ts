@@ -168,13 +168,12 @@ export function initEchartsWhenReady(
     if (raf != null) cancelAnimationFrame(raf)
   })
 
-  // 4) 超时兜底：超时后不再尝试 init，但保留 chart 句柄
+  // 4) 超时兜底：超时后停 rAF/轮询（防永不出现的容器空转），
+  //    但保留 ResizeObserver——容器之后拿到尺寸（Tab 切回/折叠展开/数据后到）
+  //    时 onReady 仍会触发完成 init，避免「图表永久消失」（2026-08-30 修复）。
   timeoutId = setTimeout(() => {
-    observer?.disconnect()
-    observer = null
     if (timer) { clearInterval(timer); timer = null }
     if (raf != null) { cancelAnimationFrame(raf); raf = null }
-    // 不 throw，调用方可选择重试或忽略
   }, timeout)
   cleanup.push(() => { if (timeoutId != null) clearTimeout(timeoutId) })
 
