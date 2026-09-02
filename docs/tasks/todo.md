@@ -381,15 +381,75 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
 
 ## 批次 3 — P2 合规
 
-- [ ] 删零引用死组件树（`components/correlation/*Section.vue` + `CorrelationPanel`/
-      `CorrelationMatrixPanel`）；把未挂载的批量导出面板接入分析页
-- [ ] `analysis_views.py` 798→<600（file_correlation 三端点外移）；`tests.py` 2468 行拆 `tests/` 包
-- [ ] 双主题：`OutlierHintBar` 页面级 `:root[data-theme='night']` 覆盖块与硬编码色改 token；
-      `SiteStatsTable`/`RangeComparisonTable` 非 scoped 全局 `!important` 改 scoped
-- [ ] R5：`iqrMultiplier` 等 store 值统一 `storeToRefs` 双向；相关性矩阵默认选择加 12 项上限；
-      数字格式统一
-- [ ] 验证：`npm run build` + 双主题截图 + 后端测试全绿
+- [x] 删零引用死组件树：`components/correlation/*Section.vue` + `CorrelationPanel`/
+      `CorrelationMatrixPanel`/`BatchExportPanel`（6 文件 491 行，只互相引用、无页面挂载）。
+      **审计更正**：原计划「把未挂载的批量导出面板接入分析页」不成立——批量导出早已
+      上线在 数据管理 → 导出工具（`pages/data/ExportToolsTab.vue` 是 `useExport.ts` 的
+      现存消费方），再挂一份是重复功能。`useExport.ts` 因此保留。
+- [x] 600 行上限：`analysis_views.py` 798→591（file_correlation 三端点外移为
+      `views/file_correlation_views.py` 的 `FileCorrelationActions` mixin——DRF
+      `get_extra_actions()` 用 `inspect.getmembers` 沿 MRO 收集，路由前缀一字不变，
+      存量测试 URL 未改即全绿即为证据）；`tests.py` 2468→7 个主题模块
+      （`tests_param_guards`/`tests_chart_config`/`tests_histogram_kde`/
+      `tests_serial_column`/`tests_file_correlation`/`tests_file_correlation_service`/
+      `tests_cpk_trend`，最大 520 行）。搬迁等价性：拆分前后唯一用例 ID 集合
+      151 == 151、diff 为空、套件 OK。踩到的坑：类之间互相复用 fixture
+      （`StaleParamAcrossFileSwitchTests._patched_view` 被 4 个模块用、
+      `ChartConfigFilterTests.METADATA/_frame` 被 2 个用），必须显式跨模块 import；
+      实测跨模块 import 不会被重复收集（Python 3.13 loader 按定义模块过滤）。
+- [x] 双主题：`OutlierHintBar` 夜块 + 硬编码色 → `color-mix(--warn|--error|--success)`
+      三态；`SiteStatsTable`/`RangeComparisonTable` 全局 `!important` 块 → scoped
+      `:deep(td.el-table__cell)`（EP 把行底色画在 td 上，只命中 tr 会被盖掉）；
+      两表头 `#f5f5f5`/`#4a90d9` → `var(--bg-3)`，与同页 `QQPlotStatsTable`/
+      `BoxPlotStatsTable` 既有写法一致。
+- [x] R5：`SingleParamTab` 14 个 store 快照 + 15 条回写 watch → `storeToRefs`，
+      `AnalysisPage` 页头两控件同改。**修掉一个真缺陷**：改「敏感度 (IQR 倍数)」后
+      直方图仍用挂载时快照的 1.5 发请求——e2e 实测 RED 报 `Expected: 3 / Received: 1.5`，
+      即界面显示宽松 3.0x、后端按严格 1.5x 算异常值边界。断言必须按请求体
+      `params:[选中参数]` 精确挑出「单参数直方图」：页面级参数列表请求直读 store
+      本来就带新值，只匹配 `iqr_multiplier` 会误判成已修好。
+      `store.reset()` 仍无调用方（无重置 UI），改造后它已能正确传播，留作后续。
+- [x] 相关性矩阵默认选择加 12 项上限：CTA8280F 实测 **180 个参数默认全选 = 32400 个
+      带文字标签的 heatmap 单元**。r 统一 4 位（格内 2 位为空间例外并注明），
+      p-value < 1e-4 改科学计数法——原 `toFixed(6)` 会把最强显著性显示成 `0.000000`。
+      矩阵 option 构建外移 `composables/matrix-option.ts`，`CorrelationToolsTab.vue`
+      601→553 行。
+- [x] 修两个与现状脱节的陈旧 e2e 断言（都是测试假设过期，非产品缺陷）：
+      ① `large-data-qqplot` 断言 `content-encoding: gzip`，但 GZipMiddleware 已在
+      `45f741e`（2026-08-12，距 HEAD 39 个 commit）按实测理由移除 → 改为断言当前契约
+      （不压缩）+ 响应体 <300KB（性能护栏交给降采样，实测 34808 字节）；
+      ② `file-select` show-meta 把断言锚在 `meta.first()` 上，本地库残留的 2 行 88B
+      测试上传 `program_name` 为空 → metaText 只渲染 4 段，五段正则必失败 →
+      改为先过滤到种子文件 `BPD60320_FT.csv` 再测该行。
+- [x] 双主题可验证化：新增 `e2e/helpers/colors.ts`（rgba()/`color(srgb …)`/hex 三格式
+      解析 + 祖先 alpha 合成 + 对比度），`@theme` 加一条分析页用例。借此**发现并修掉一个
+      真实缺陷**：`styles/element-plus-theme.css` 夜模式对 `td.el-table__cell` 硬压
+      `background-color:#16213e !important`，把组件在单元格上做的语义行着色（当前范围行/
+      失败 Site 行/告警行）整片盖掉——夜模式下这些高亮一直不可见。基础行色本来已由
+      `--el-table-tr-bg-color` 经 EP 自带 `.el-table tr{...}` 生效，故删掉这条 td 底色，
+      实测 tint 由 `rgb(22,33,62)`（被盖）变回 `color(srgb .976 .659 .145 / .12)`。
 
 ## Review（2026-09-02）
 
-（实施后填写）
+- 验证（全部实测，串行）：`npm run build`（vue-tsc + vite）✓ built；
+  `manage.py test apps.analysis` **151 项 OK**（拆分前后唯一用例 ID 集合一致）；
+  全量后端 **605 项 / 1 error**（`test/backend/test_outliers.py` 缺 `pytest`，
+  遗留目录，与本批无关）；分析页 e2e `--project=P1` **97 passed / 0 failed（8.7m，
+  workers=1）**；`@theme` **7 passed**（含本批新增的分析页着色用例）。
+- 本批真实修掉的缺陷：①页头「敏感度」改档后单参数直方图仍按挂载时快照 1.5 发请求
+  （界面显示宽松 3.0x、后端按 1.5x 算边界，全程无报错）；②相关性矩阵无上限默认全选
+  （180 参数 → 32400 个带标签 heatmap 单元）；③夜模式 `td.el-table__cell` 的
+  `background-color !important` 把所有表格语义行着色整片抹掉（当前范围行 tint 实测从
+  被盖成 `rgb(22,33,62)` 恢复为 `color(srgb .976 .659 .145 / .12)`）。
+- 遗留（下次接手的入口）：
+  ① `store.reset()` 仍无调用方（无「重置」UI），storeToRefs 改造后它已能正确传播；
+  ② p-value 科学计数法修正无自动覆盖（要 p<1e-4 的真实相关性数据才看得见）；
+  ③ 晶圆图 payload 1.21 MB（批次 2 已减请求数，未做服务端降采样）；
+  ④ `useChart` resize 走整图重渲染；无 AbortController，切参数时旧请求不取消；
+  ⑤ 夜模式 hover 仍由 `element-plus-theme.css` 的 `!important` 决定，鼠标悬停时
+  语义行 tint 会被 hover 底色盖掉（只影响悬停瞬时态，未改）；
+  ⑥ 分析页未纳入整页对比度扫描的常备页面清单（本批用定向用例覆盖，路由级扫描仍只有
+  仪表板/数据管理/设置/SFTP）。
+- 踩坑与通则已并入 `lessons.md` 2026-09-02 批次 3 段（storeToRefs 快照、同名端点按
+  请求体挑请求、拆测试先量跨类 fixture、陈旧断言反查、行断言勿锚 first()、
+  e2e 与后端套件勿并跑、夜模式 !important 盖 td、`color-mix` 计算值是 `color(srgb …)`）。

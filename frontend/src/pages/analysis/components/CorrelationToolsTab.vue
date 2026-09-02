@@ -152,6 +152,7 @@ import { ref, computed, watch } from 'vue'
 import AnalysisTabLayout from './AnalysisTabLayout.vue'
 import { useCorrelation } from '../composables/useCorrelation'
 import { useCorrelationMatrix } from '../composables/useCorrelationMatrix'
+import { buildCorrelationMatrixOption } from '../composables/matrix-option'
 import CorrelationScatterAxisCard from './CorrelationScatterAxisCard.vue'
 import ErrorBanner from '../../../components/common/ErrorBanner.vue'
 import { useChart } from '../../../composables/useChart'
@@ -415,9 +416,12 @@ function trimMatrixParams() {
 }
 
 // Initialize matrix params when props.params changes（含筛选开关导致的列表收缩）
+// 默认只取前 MATRIX_DEFAULT_MAX 项：热力图 N×N 每格带文字标签，全选 180 项
+// 就是 32400 格，首屏卡数秒。需要更多用「全选」显式加压。
+const MATRIX_DEFAULT_MAX = 12
 watch(() => props.params, (newParams) => {
   if (newParams.length > 0 && selectedMatrixParams.value.length === 0) {
-    selectedMatrixParams.value = [...newParams]
+    selectedMatrixParams.value = newParams.slice(0, MATRIX_DEFAULT_MAX)
   } else {
     trimMatrixParams()
   }
@@ -431,64 +435,12 @@ function onCalculateMatrix() {
   )
 }
 
-/** 显著性星号 */
-function getSignificanceStars(p: number): string {
-  if (p < 0.001) return '***'
-  if (p < 0.01) return '**'
-  if (p < 0.05) return '*'
-  return ''
-}
-
 function buildMatrixOption() {
   if (!matrixData.value) return {}
-  const tc = colors.value.textColor
-  const data = matrixData.value
-  const params: string[] = data.params || []
-  const matrix: number[][] = data.matrix || []
-  const pValues: number[][] = data.p_values || []
-
-  const heatmapData: [number, number, number][] = []
-  for (let i = 0; i < params.length; i++) {
-    for (let j = 0; j < params.length; j++) {
-      heatmapData.push([i, j, matrix[i]?.[j] ?? 0])
-    }
-  }
-
-  return {
-    tooltip: {
-      position: 'top',
-      formatter: (p: any) => {
-        const r = p.value[2]
-        const pi = p.value[0], pj = p.value[1]
-        const pv = pValues[pi]?.[pj] ?? 1
-        const stars = getSignificanceStars(pv)
-        return `${params[pi]} vs ${params[pj]}<br/>Pearson r: ${r.toFixed(4)}${stars}<br/>p-value: ${pv.toFixed(6)}`
-      },
-    },
-    grid: { left: '15%', right: '10%', top: '10%', bottom: '15%' },
-    xAxis: { type: 'category', data: params, splitArea: { show: true }, axisLabel: { rotate: 45, fontSize: 10, color: tc } },
-    yAxis: { type: 'category', data: params, splitArea: { show: true }, axisLabel: { fontSize: 10, color: tc } },
-    visualMap: {
-      min: -1, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: '0%',
-      inRange: { color: isDark.value
-        // RdYlBu 化：原 红→绿 发散带在红绿色盲下正负相关不可分（deutan ΔE 14.6）
-        ? ['#ef5350', '#ff7043', '#ffa726', '#ffee58', '#f8fafc', '#93c5fd', '#3b82f6', '#1d4ed8']
-        : ['#d73027', '#f46d43', '#fdae61', '#fee08b', '#e0f3f8', '#abd9e9', '#74add1', '#4575b4'] },
-    },
-    series: [{
-      name: 'Pearson r', type: 'heatmap', data: heatmapData,
-      label: {
-        show: true, fontSize: 9,
-        formatter: (p: any) => {
-          const r = p.value[2]
-          const pi = p.value[0], pj = p.value[1]
-          const pv = pValues[pi]?.[pj] ?? 1
-          return `${r.toFixed(2)}${getSignificanceStars(pv)}`
-        },
-      },
-      emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0, 0, 0, 0.5)' } },
-    }],
-  }
+  return buildCorrelationMatrixOption(matrixData.value, {
+    textColor: colors.value.textColor,
+    isDark: isDark.value,
+  })
 }
 
 const { chartRef: matrixChartRef } = useChart(buildMatrixOption, [() => matrixData.value], 'matrixChartRef')

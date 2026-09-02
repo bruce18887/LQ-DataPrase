@@ -1,7 +1,7 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
 import { selectAnalysisFile } from '../helpers/params'
-import { RECOMMENDED } from '../fixtures/test-data'
+import { RECOMMENDED, SEEDED_FILES } from '../fixtures/test-data'
 
 /**
  * [FileSelect] 通用文件选择组件（components/common/FileSelect.vue）：
@@ -136,9 +136,18 @@ test.describe('FileSelect 通用文件选择组件', { tag: ['@p1', '@analysis']
 
     await select.click()
     const dropdown = page.locator('.el-select-dropdown:visible').last()
-    const meta = dropdown.locator('.dp-file-option__meta')
-    await expect(meta.first()).toBeVisible({ timeout: 10_000 })
-    const text = (await meta.first().textContent()) ?? ''
+    await expect(dropdown).toBeVisible({ timeout: 10_000 })
+    // 锚定种子文件而非 meta.first()：metaText 对空字段 filter(Boolean)，本地库里
+    // 残留的 2 行 88B 测试上传（program_name 为空）只渲染 4 段，first() 会随数据漂移。
+    await select.locator('input').first().fill(SEEDED_FILES.BUYOFF_FT)
+    const row = dropdown
+      .locator('.el-select-dropdown__item')
+      .filter({ hasText: SEEDED_FILES.BUYOFF_FT })
+      .first()
+    await expect(row).toBeVisible({ timeout: 5_000 })
+    const meta = row.locator('.dp-file-option__meta')
+    await expect(meta).toBeVisible({ timeout: 10_000 })
+    const text = (await meta.textContent()) ?? ''
     // 完整信息行：program · format · N行 · 大小 · 上传时间（2026-08-20 扩展；
     // formatTime 输出 zh-CN 的 MM/DD HH:mm，如 08/20 14:26）
     expect(text).toMatch(/\S+ · \S+ · \d+ 行 · \d+(\.\d+)? (B|KB|MB) · \d{2}\/\d{2} \d{2}:\d{2}/)
@@ -146,17 +155,13 @@ test.describe('FileSelect 通用文件选择组件', { tag: ['@p1', '@analysis']
     // 无裁剪回归（2026-08-13）：EP 默认 .el-select-dropdown__item height:34px
     // + overflow:hidden 会纵向裁掉第二行 meta——修复后 height:auto，
     // meta 行底边必须完整落在 item 内，且双行 item 高度 ≥ 36px（旧代码 34px 必失败）。
-    // 结构：item > .dp-file-option > .dp-file-option__meta，锚定 meta 自己的祖先 item
-    //（下拉含置顶/分组时首个 item 未必带 meta）
-    const metaEl = meta.first()
-    await expect(metaEl).toBeVisible({ timeout: 10_000 })
-    const item = metaEl.locator('..').locator('..')
+    // 结构：item > .dp-file-option > .dp-file-option__meta
     // 下拉开启动画期间高度未稳定（过渡态会短暂坍缩成单行），轮询等双行高度稳定
     await expect
-      .poll(async () => (await item.boundingBox())?.height ?? 0, { timeout: 5_000 })
+      .poll(async () => (await row.boundingBox())?.height ?? 0, { timeout: 5_000 })
       .toBeGreaterThanOrEqual(36)
-    const itemBox = await item.boundingBox()
-    const metaBox = await metaEl.boundingBox()
+    const itemBox = await row.boundingBox()
+    const metaBox = await meta.boundingBox()
     expect(itemBox, '下拉项应有尺寸').not.toBeNull()
     expect(metaBox, 'meta 行应有尺寸').not.toBeNull()
     // 容差 1px：getBoundingClientRect 为亚像素小数值，双行 item 有 padding/行高

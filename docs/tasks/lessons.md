@@ -279,3 +279,48 @@
   旧 ECharts 实例绑定已摘除的旧 DOM，`setOption` 渲染进 detached 节点→新容器空白
   （表象：卡头 pills 有数、图区空）。修：render 内记录容器元素身份，身份变化先 dispose 再 init。
   通则：任何 v-if/v-for 包裹的图表容器都要在 render 路径做元素身份守卫。
+
+## 2026-09-02 批次 3：store 快照、测试大文件拆分
+
+- **`ref(store.x)` 快照 = 单向同步且不报错**：子组件把 store 值拷进本地 ref 再
+  `watch(本地 → store)`，只有本地→store 一个方向；store 变了组件毫无察觉。反向补 watch
+  漏一个字段，该字段就永久停在挂载时快照——界面显示新值、请求带旧值，全程无报错。
+  实测：页头改「敏感度 (IQR 倍数)」后单参数直方图仍发 `iqr_multiplier:1.5`
+  （e2e RED 报 `Expected: 3 / Received: 1.5`）。**通则（R5 补充）：配置类 store 值一律
+  `storeToRefs`，不写快照、不写回写 watch**——逐字段补 watch 本身就是踩坑面。
+- **同名端点多个调用方，e2e 断言必须按请求体挑选对象**：分析页 `/analysis/histogram/`
+  有两个调用方（页头拉参数列表不带 `params`；单参数图带 `params:[选中参数]`）。页头那个
+  直读 store 本来就正确，所以「任一 histogram 请求含 iqr_multiplier:3」今天就已成立 = 假绿。
+  谓词要精确到 `params.length===1 && params[0]===选中参数`。
+- **大测试文件按主题拆分，先量跨类 fixture 依赖再分组**：`tests.py` 2468 行里的类互相借
+  道具（`StaleParamAcrossFileSwitchTests._patched_view` 被 4 个类调、
+  `ChartConfigFilterTests.METADATA/_frame` 被 2 个借，还有 `class 子(父)` 继承），
+  只按相邻行分组会 NameError。跨模块 import 提供者即可，**不会被重复收集**（实测：拆分前后
+  唯一用例 ID 集合 151==151、`Found 151 test(s)` 未涨）。验收口径就用这条：用例 ID 逐条
+  diff 为空 + 总数不变，比"跑起来没报错"强。
+- **产品决策变更后要顺着断言反查旧用例**：`large-data-qqplot.spec.ts` 断言
+  `content-encoding==='gzip'`，而 GZipMiddleware 早在 `45f741e` 就被移除（实测压缩 68MB
+  JSON 耗 3.6s > localhost 传输 0.2s，`config/settings/base.py` 有注释）——该断言自那次
+  提交起必失败（移除发生在 `45f741e`，2026-08-12，距 HEAD 已 39 个 commit）。定位法：
+  `git log -S "<被删的东西>" -- <配置文件>`
+  与 `git log -- <spec>` 比对时间线。修法是改成当前契约（不压缩 + 响应体字节数上限，
+  性能护栏由降采样承担），**不是删断言**。
+- **列表行断言不要锚 `first()`**：`file-select` 的 `meta.first()` + 五段正则 = 假设
+  「本库恰好排第一的行五个字段都全」。`FileSelect.metaText` 对空字段 `filter(Boolean)`，
+  本地库残留的 2 行 88B 测试上传（`program_name=''`）只渲染 4 段 → 必失败，而产品行为
+  是对的。通则（R2 补充）：数据相关断言一律先过滤/锚定到具名种子文件，再取该行。
+- **分析页 e2e 与 Django 测试套件不可并跑**：两者共用 `media/` + `db.sqlite3`，后端套件
+  会覆盖 e2e 依赖的种子文件——并跑那轮 5 例里 3 例假失败（文件行读成「1 行 · 213 B」），
+  串行复跑即绿。跑验证前先确认后台没有其它测试进程。
+- **全局夜模式的 `td.el-table__cell { background-color: X !important }` 会抹掉一切
+  行级语义着色**：`styles/element-plus-theme.css` 里这条 !important 让失败行/当前范围行
+  /告警行在夜模式下集体看不见（组件侧无论 scoped :deep 写得多准都被盖掉）。正确做法是
+  只设 `--el-table-tr-bg-color`——EP 自带 `.el-table tr{background-color:var(--el-table-tr-bg-color)}`
+  会用它，td 保持透明，组件的半透明 tint 自然叠在 tr 底色上。**通则（R7 补充）：
+  主题覆盖层不要对"组件自己负责着色"的元素加 !important，优先改变量。**
+  定位手段（比猜特指度可靠）：遍历 `document.styleSheets`，用 `el.matches(每个逗号分段选择器)`
+  列出所有命中该元素且声明了 background-color 的规则，再看 `getPropertyPriority('background-color')`。
+- **`color-mix()` 的计算值 Chrome 序列化成 `color(srgb r g b / a)`**，不是 `rgba(...)`：
+  只匹配 `rgba(`/`#hex` 的颜色探针会把 alpha 读成 0，直接误判「color-mix 没生效/底色全透明」。
+  e2e 里做颜色断言统一走 `e2e/helpers/colors.ts`（已同时支持 rgba/color()/hex，
+  并把祖先 alpha 自下而上合成再算对比度）。

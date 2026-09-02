@@ -91,15 +91,19 @@ test.describe('大数据文件 QQ 图：不栈溢出 + 正常渲染（回归）'
     await selectParam(page, 'CON_VIN')
     const resp = await respPromise
     expect(resp.status(), 'qqplot 接口应返回 200').toBe(200)
-    // GZipMiddleware：大响应必须 gzip 压缩（浏览器自动解压，前端零改动）
+    // 大响应不做全局 gzip：GZipMiddleware 已于 45f741e 移除（实测压缩 68MB JSON
+    // 耗 3.6s > localhost 传输 0.2s，见 config/settings/base.py MIDDLEWARE 注释）。
+    // 若将来部署到 LAN/WAN 改由 nginx 或定向压缩负责，届时同步此断言。
     expect(
       resp.headers()['content-encoding'] ?? '',
-      '大响应应启用 gzip 压缩',
-    ).toBe('gzip')
+      '本机直连不应出现 gzip（响应体由降采样而非压缩控制）',
+    ).toBe('')
 
-    // 后端大数据保形降采样：8 万点分位数 → ≤2000 点（68k 行文件响应
+    // 关键断言：后端大数据保形降采样：8 万点分位数 → ≤2000 点（68k 行文件响应
     // 1.3MB → 0.04MB）；点数必须大于 0（有效数据）
     const body = await resp.json()
+    const bodyBytes = (await resp.body()).length
+    expect(bodyBytes, '降采样后 8 万行 qqplot 响应体应远小于原始数据量').toBeLessThan(300_000)
     const qLen = body.theoretical_quantiles?.length ?? 0
     expect(qLen, 'qqplot 应返回降采样后的分位数（≤2000）').toBeGreaterThan(0)
     expect(qLen, 'qqplot 分位数不应超过降采样上限').toBeLessThanOrEqual(2000)

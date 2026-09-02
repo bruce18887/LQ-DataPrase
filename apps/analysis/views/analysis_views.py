@@ -1,13 +1,14 @@
-"""Single-file analysis views."""
+"""Single-file analysis views.
 
-import io
+两文件序列相关性（file_correlation*）三端点在 ``file_correlation_views`` 里以
+mixin 形式合入本 ViewSet（600 行上限）——路由、权限声明与 OpenAPI 分组均不变。
+"""
+
 import json
 import os
 from typing import Dict, Optional, Set
 
 import pandas as pd
-from django.http import FileResponse
-from django.shortcuts import get_object_or_404
 
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -43,16 +44,11 @@ from apps.analysis.services.data_services import (
     compute_serial_distribution_data,
     compute_cpk_table_data,
 )
-from apps.analysis.services.file_correlation import (
-    FileCorrelationConfig,
-    compute_file_correlation,
-    list_common_serials,
-    NoCommonParamsError,
-)
 from apps.analysis.services.limits import resolve_limits
 from apps.datafiles.services import get_cached_parsed_file
 from apps.common.params import get_param, get_param_float, get_param_list
 
+from .file_correlation_views import FileCorrelationActions
 from ._helpers import (
     clean_data,
     _filter_blank_params,
@@ -68,7 +64,7 @@ from ._helpers import (
 _cached_low_cpk_items = cached_low_cpk_items
 
 
-class AnalysisViewSet(viewsets.GenericViewSet):
+class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
 
     @action(detail=False, methods=['get', 'post'])
@@ -593,206 +589,3 @@ class AnalysisViewSet(viewsets.GenericViewSet):
                              manual_test_time_sec=manual_test_time_sec)
 
         return Response(clean_data(result))
-
-    @action(detail=False, methods=['post'])
-    def file_correlation_serials(self, request):
-        """List the common serial numbers of two files (serial picker data).
-
-        Request body: ``{file1_id, file2_id}``.
-        Response: ``{serials: [int, ...], total: int}`` — ascending,
-        same ``__serial__`` semantics as the full ``file_correlation``
-        computation (交集、数值化), so the picker and the analysis agree.
-        """
-        payload, err = _load_file_correlation_pair(request)
-        if err is not None:
-            return Response(err[0], status=err[1])
-
-        serials = list_common_serials(payload['ate_df'], payload['bench_df'])
-        return Response({'serials': serials, 'total': len(serials)})
-
-    @action(detail=False, methods=['post'])
-    def file_correlation(self, request):
-        """Compare two files by serial number and compute per-parameter correlation.
-
-        Request body:
-        {
-            "file1_id": 123, "file2_id": 456,
-            "threshold": 3.0, "diff_rule": "zero",
-            "serials": [1, 2, 3],       # 可选：用户勾选的序列（优先）
-            "max_serials": 30,          # 兜底：未传 serials 时取前 N
-            "ignore_no_limit": true, "ignore_no_data": true
-        }
-
-        Response: 模板风格全量数据（每测试项一行的 limit 列 + 每序列
-        ATE/Bench/Delta/%Diff 块 + totals 总结），面板直接渲染。
-        防呆：无相同测试项 → 400 no_common_params；无相同序列 → limits_only。
-        """
-        payload, err = _load_file_correlation_pair(request)
-        if err is not None:
-            return Response(err[0], status=err[1])
-
-        try:
-            result = compute_file_correlation(
-                payload['ate_df'], payload['metadata_a'],
-                payload['bench_df'], payload['metadata_b'],
-                _parse_fc_config(request),
-                file1_name=payload['file1_name'], file2_name=payload['file2_name'])
-        except NoCommonParamsError:
-            return Response(
-                {'error': 'no_common_params', 'detail': '两个文件没有相同的测试项'},
-                status=400)
-
-        return Response(clean_data(result))
-
-    @action(detail=False, methods=['post'])
-    def file_correlation_export(self, request):
-        """Export the two-file correlation sheet in template layout.
-
-        Layout mirrors Data/TemplateExport/Correlation_Excel/Correlation.xlsx:
-        title row + two header rows (Corr Result group, per-serial
-        ATE/Bench/Delta/%Diff blocks) + one row per test item in FILE 1
-        column order.  Delta/%Diff cells are written as Excel formulas
-        (``=K{r}-J{r}`` / ``=L{r}/J{r}``); red fills are decided statically
-        from the same computed values as the JSON endpoint, so the two
-        outputs always agree.
-
-        Request body: 同 file_correlation（threshold / diff_rule /
-        serials 或 max_serials / ignore_no_limit / ignore_no_data）。
-        防呆：无相同测试项 → 400 no_common_params；无相同序列 → limits-only
-        （只导 limit 列，无序列数据列）。
-        """
-        payload, err = _load_file_correlation_pair(request)
-        if err is not None:
-            return Response(err[0], status=err[1])
-
-        try:
-            result = compute_file_correlation(
-                payload['ate_df'], payload['metadata_a'],
-                payload['bench_df'], payload['metadata_b'],
-                _parse_fc_config(request),
-                file1_name=payload['file1_name'], file2_name=payload['file2_name'])
-        except NoCommonParamsError:
-            return Response(
-                {'error': 'no_common_params', 'detail': '两个文件没有相同的测试项'},
-                status=400)
-
-        # 延迟导入：避免 analysis → export 顶层耦合（export 会 import
-        # analysis.services.statistics，已加载无循环风险；但保持轻量）。
-        import excelize
-        from apps.export.excel_builders import build_file_correlation_workbook
-        from apps.export.excelize_helpers import save_excelize
-        from apps.common.export_naming import (
-            base_export_context, render_export_filename,
-        )
-
-        f = excelize.new_file()
-        build_file_correlation_workbook(f, result)
-        buffer = save_excelize(f)
-
-        fname = render_export_filename(
-            request.user, 'file_correlation', 'xlsx',
-            {**base_export_context(request.user),
-             'file1': payload['file1_name'].rsplit('.', 1)[0],
-             'file2': payload['file2_name'].rsplit('.', 1)[0]},
-        )
-        return FileResponse(
-            io.BytesIO(buffer), as_attachment=True, filename=fname,
-            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-
-
-def _load_file_correlation_pair(request):
-    """Load and align two files for file-correlation analysis.
-
-    Returns ``(payload, err)`` where ``err`` is ``None`` on success or a
-    ``(response_dict, http_status)`` tuple the caller returns as-is.
-    ``payload`` keys:
-        ate_df / bench_df   — DataFrames carrying the ``__serial__`` column
-        metadata_a / metadata_b — parser metadata (mins/maxs/units)
-        file1_name/file2_name — DataFile.filename for export naming
-    """
-    file1_id = request.data.get('file1_id')
-    file2_id = request.data.get('file2_id')
-    if not file1_id or not file2_id:
-        return None, ({'error': 'need_two_files'}, 400)
-
-    dfs = {}
-    names = {}
-    metas = {}
-    for fid, label in [(file1_id, 'ATE'), (file2_id, 'Bench')]:
-        df_obj = get_object_or_404(DataFile, pk=fid, owner=request.user)
-        df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk, df_obj)
-        if df is None:
-            continue
-        serial_col = get_serial_column(df)
-        if serial_col:
-            # get_cached_parsed_file 返回 LRU 缓存对象（文档明示只读），
-            # 必须 copy 后再加辅助列，否则污染缓存影响后续所有消费者
-            df = df.copy()
-            df['__serial__'] = pd.to_numeric(df[serial_col], errors='coerce')
-        dfs[label] = df
-        names[label] = df_obj.filename
-        metas[label] = metadata or {}
-
-    if len(dfs) < 2:
-        return None, ({'error': 'parse_failed'}, 400)
-
-    ate_df = dfs['ATE']
-    bench_df = dfs['Bench']
-    ate_ser = ate_df['__serial__'] if '__serial__' in ate_df.columns else None
-    bench_ser = bench_df['__serial__'] if '__serial__' in bench_df.columns else None
-    if ate_ser is None or bench_ser is None:
-        return None, ({'error': 'no_serial_column'}, 400)
-
-    return {
-        'ate_df': ate_df, 'bench_df': bench_df,
-        'metadata_a': metas['ATE'], 'metadata_b': metas['Bench'],
-        'file1_name': names['ATE'], 'file2_name': names['Bench'],
-    }, None
-
-
-def _parse_fc_config(request) -> FileCorrelationConfig:
-    """Parse the file-correlation options from a request body.
-
-    All options default to the panel defaults (threshold 3.0, rule 'zero',
-    serials 未指定 → max_serials 30 兜底, ignore_no_limit / ignore_no_data
-    checked) so a minimal body keeps behaving like the old
-    ``{file1_id, file2_id}`` request.
-    """
-    threshold = get_param_float(request, 'threshold', 3.0)
-    if threshold is None or threshold < 0:
-        threshold = 3.0
-    diff_rule = get_param(request, 'diff_rule', 'zero')
-    if diff_rule not in ('zero', 'wider'):
-        diff_rule = 'zero'
-    max_serials = get_param_float(request, 'max_serials', 30)
-    try:
-        max_serials = max(1, int(max_serials))
-    except (TypeError, ValueError):
-        max_serials = 30
-
-    # 显式序列选择（用户勾选）：优先于 max_serials 兜底；非法值过滤。
-    serials = None
-    raw_serials = request.data.get('serials')
-    if raw_serials is not None:
-        valid = []
-        for v in raw_serials if isinstance(raw_serials, (list, tuple)) else [raw_serials]:
-            try:
-                valid.append(int(v))
-            except (TypeError, ValueError):
-                continue
-        serials = valid
-
-    def _bool_param(key: str, default: bool) -> bool:
-        raw = get_param(request, key, None)
-        if raw is None:
-            return default
-        return str(raw).lower() in ('true', '1', 'yes')
-
-    return FileCorrelationConfig(
-        threshold=float(threshold),
-        diff_rule=diff_rule,
-        max_serials=max_serials,
-        serials=serials,
-        ignore_no_limit=_bool_param('ignore_no_limit', True),
-        ignore_no_data=_bool_param('ignore_no_data', True),
-    )

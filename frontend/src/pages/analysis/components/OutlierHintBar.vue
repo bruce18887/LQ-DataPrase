@@ -103,22 +103,24 @@ const hintText = computed(() => {
   font-size: 12px;
 }
 
+/* 三态只认主题语义 token：底色/描边由 --warn|--error|--success 派生，
+   light 与 night 各自取该主题下的 token 值（R7，不再各写一份夜块） */
 .outlier-hint-bar--clip {
-  background-color: #fff3e0;
-  color: #e65100;
-  border: 1px solid #ffe0b2;
+  background-color: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
 }
 
 .outlier-hint-bar--exclude {
-  background-color: #fce4ec;
-  color: #c62828;
-  border: 1px solid #f8bbd0;
+  background-color: color-mix(in srgb, var(--error) 12%, transparent);
+  color: var(--error);
+  border: 1px solid color-mix(in srgb, var(--error) 30%, transparent);
 }
 
 .outlier-hint-bar--ok {
-  background-color: #e8f5e9;
-  color: #2e7d32;
-  border: 1px solid #c8e6c9;
+  background-color: color-mix(in srgb, var(--success) 12%, transparent);
+  color: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
 }
 
 .outlier-hint-bar__text {
@@ -154,24 +156,5 @@ const hintText = computed(() => {
   word-break: break-all;
   font-family: var(--font-mono);
   font-size: 11px;
-}
-
-/* Dark theme */
-:root[data-theme='night'] .outlier-hint-bar--clip {
-  background-color: #3e2723;
-  color: #ffab91;
-  border: 1px solid #5d4037;
-}
-
-:root[data-theme='night'] .outlier-hint-bar--exclude {
-  background-color: #3e1515;
-  color: #ef9a9a;
-  border: 1px solid #5d2020;
-}
-
-:root[data-theme='night'] .outlier-hint-bar--ok {
-  background-color: #1b3a1b;
-  color: #81c784;
-  border: 1px solid #2e5a2e;
 }
 </style>
