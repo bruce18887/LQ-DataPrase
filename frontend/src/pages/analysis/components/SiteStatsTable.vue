@@ -8,7 +8,7 @@
       :border="true"
       scrollbar-always-on
       :row-class-name="siteRowClass"
-      :header-cell-style="{ background: '#f5f5f5', fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
+      :header-cell-style="{ background: 'var(--bg-3)', fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
       :cell-style="{ fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
       table-layout="auto"
     >
@@ -62,13 +62,13 @@ function siteRowClass({ row }: { row: SiteStatRow }) {
   font-size: 11px;
   text-align: center;
 }
-</style>
 
-<style>
-.el-table tr.site-fail-row > td {
-  background-color: #fdecea !important;
-  color: var(--error-2) !important;
+/* 有 Fail 的行高亮：scoped + 特指到 td.el-table__cell（含 hover 态），
+   天然压过 EP 的单元格底色，故不再需要全局块与 !important（R7） */
+:deep(.el-table tr.site-fail-row > td.el-table__cell),
+:deep(.el-table tr.site-fail-row:hover > td.el-table__cell) {
+  background-color: color-mix(in srgb, var(--error) 12%, transparent);
+  color: var(--error);
   font-weight: 700;
-  text-shadow: 0 0 1px #fff, 0 0 2px #fff;
 }
 </style>

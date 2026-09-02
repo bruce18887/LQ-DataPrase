@@ -8,7 +8,7 @@
       size="small"
       scrollbar-always-on
       :row-class-name="rangeRowClass"
-      :header-cell-style="{ background: '#4a90d9', color: 'white', fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
+      :header-cell-style="{ background: 'var(--bg-3)', fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
       :cell-style="{ fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
       table-layout="auto"
     >
@@ -63,12 +63,13 @@ function rangeRowClass({ row }: { row: RangeRow }) {
   color: var(--text);
   margin-bottom: 6px;
 }
-</style>
 
-<style>
-.range-active-row {
-  background-color: color-mix(in srgb, var(--error) 10%, transparent) !important;
+/* 当前 range 口径所在行：EP 把底色画在 td 上，只命中 tr 的规则会被单元格
+   底色盖掉，故特指到 td.el-table__cell（含 hover 态），无需全局块与 !important */
+:deep(.el-table tr.range-active-row > td.el-table__cell),
+:deep(.el-table tr.range-active-row:hover > td.el-table__cell) {
+  background-color: var(--active-bg);
+  color: var(--brand);
   font-weight: bold;
-  color: var(--error);
 }
 </style>

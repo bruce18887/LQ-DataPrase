@@ -177,6 +177,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useAnalysisStore } from '../../../stores/analysis'
 import { getMaxBarWidthPercent } from '../../../utils/chart-bar'
 import ChartConfigPanel from './ChartConfigPanel.vue'
@@ -206,23 +207,28 @@ const props = defineProps<{
 
 const localSelectedParam = defineModel<string>('selectedParam', { default: '' })
 
-const analysisStore = useAnalysisStore()
-
 // Chart configuration state
-const chartMode = ref(analysisStore.chartMode)
-const rangeType = ref(analysisStore.rangeType)
-const chartConfig = ref<string[]>(analysisStore.chartConfig)
-const barWidthPercent = ref(analysisStore.barWidthPercent)
-const barOverlapPercent = ref(analysisStore.barOverlapPercent)
-const ignoreNoLimit = ref(analysisStore.ignoreNoLimit)
-const ignoreNoTestValue = ref(analysisStore.ignoreNoTestValue)
-const dataOnlyBin1 = ref(analysisStore.dataOnlyBin1)
-const onlyFailTestItem = ref(analysisStore.onlyFailTestItem)
-const onlyLowCpk = ref(analysisStore.onlyLowCpk)
-const customLow = ref<number | null>(analysisStore.customLow)
-const customHigh = ref<number | null>(analysisStore.customHigh)
-const outlierHandling = ref(analysisStore.outlierHandling)
-const iqrMultiplier = ref(analysisStore.iqrMultiplier)
+// 直接取 store 的 ref（storeToRefs），本组件的读写就是 store 的读写。
+// 之前这里是 14 个 `ref(analysisStore.x)` 本地快照 + 逐个 watch 回写，
+// store→组件方向只有 outlierHandling 补了，于是页头改「敏感度」后
+// useHistogram 仍用挂载时快照的 1.5 发请求：界面显示宽松 3.0x，
+// 后端却按严格 1.5x 算异常值边界。
+const {
+  chartMode,
+  rangeType,
+  chartConfig,
+  barWidthPercent,
+  barOverlapPercent,
+  ignoreNoLimit,
+  ignoreNoTestValue,
+  dataOnlyBin1,
+  onlyFailTestItem,
+  onlyLowCpk,
+  customLow,
+  customHigh,
+  outlierHandling,
+  iqrMultiplier,
+} = storeToRefs(useAnalysisStore())
 // 序列列手动选择（空串 = 自动检测）；多候选文件（Serial_No + Dut_No）由
 // SerialChart 选择器写入，文件切换时重置回自动检测
 const serialCol = ref('')
@@ -257,12 +263,9 @@ const barWidthMax = computed(() => {
   const keys = sh ? Object.keys(sh) : []
   return getMaxBarWidthPercent(keys.length >= 1 ? keys.length + 1 : 1, barOverlapPercent.value)
 })
-// 系列数变化时把已超上限的柱宽 clamp 并回写 store（避免 slider 显示 20% 实际 9%）
+// 系列数变化时把已超上限的柱宽 clamp（避免 slider 显示 20% 实际 9%）
 watch(barWidthMax, (max) => {
-  if (barWidthPercent.value > max) {
-    barWidthPercent.value = max
-    analysisStore.barWidthPercent = max
-  }
+  if (barWidthPercent.value > max) barWidthPercent.value = max
 })
 
 // Composable: Serial Distribution
@@ -336,20 +339,8 @@ const {
 )
 
 // ========== Store sync ==========
-watch(chartMode, (val) => { analysisStore.chartMode = val })
-watch(chartConfig, (val) => { analysisStore.chartConfig = val }, { deep: true })
-watch(rangeType, (val) => { analysisStore.rangeType = val })
-watch(barWidthPercent, (val) => { analysisStore.barWidthPercent = val })
-watch(barOverlapPercent, (val) => { analysisStore.barOverlapPercent = val })
-watch(ignoreNoLimit, (val) => { analysisStore.ignoreNoLimit = val })
-watch(ignoreNoTestValue, (val) => { analysisStore.ignoreNoTestValue = val })
-watch(dataOnlyBin1, (val) => { analysisStore.dataOnlyBin1 = val })
-watch(onlyFailTestItem, (val) => { analysisStore.onlyFailTestItem = val })
-watch(onlyLowCpk, (val) => { analysisStore.onlyLowCpk = val })
-watch(customLow, (val) => { analysisStore.customLow = val })
-watch(customHigh, (val) => { analysisStore.customHigh = val })
-watch(outlierHandling, (val) => { analysisStore.outlierHandling = val })
-watch(() => analysisStore.outlierHandling, (val) => { outlierHandling.value = val })
+// 无：图表配置全部经 storeToRefs 直接读写 store（见上方 state 声明），
+// 不再需要「本地快照 + watch 回写」这层胶水。
 
 // ========== Cross-composable orchestration ==========
 // site_stats 只依赖 range_type（与图表配置无关）：改 rangeType 触发一次，

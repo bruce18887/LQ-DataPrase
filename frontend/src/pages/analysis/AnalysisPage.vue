@@ -86,6 +86,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onActivated, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import api from '../../api'
 import { formatError } from '../../utils/error'
 import { useAnalysisStore } from '../../stores/analysis'
@@ -104,10 +105,9 @@ const selectedParam = ref(analysisStore.selectedParam)
 const params = ref<string[]>([])
 const loading = ref(false)
 const activeTab = ref(analysisStore.activeTab)
-const outlierHandling = ref(analysisStore.outlierHandling)
-watch(outlierHandling, (val) => { analysisStore.outlierHandling = val })
-const iqrMultiplier = ref(analysisStore.iqrMultiplier)
-watch(iqrMultiplier, (val) => { analysisStore.iqrMultiplier = val })
+// 异常值处理 / 敏感度直接绑 store 的 ref：子组件与参数列表刷新都以 store 为
+// 准，快照成本地 ref 只会让改动留在页头（回归见 e2e/analysis/iqr-multiplier-propagation.spec.ts）
+const { outlierHandling, iqrMultiplier } = storeToRefs(analysisStore)
 
 // Wafer state
 const waferData = ref<any>(null)
@@ -354,12 +354,6 @@ async function loadWaferGlobal(colorBy: string) {
 .param-select-dropdown .el-select-dropdown__list {
   max-height: 360px;
   overflow-y: auto;
-}
-
-.range-active-row {
-  background-color: rgba(37, 99, 235, 0.08) !important;
-  font-weight: bold;
-  color: var(--error);
 }
 
 /* Element Plus 组件覆盖 */

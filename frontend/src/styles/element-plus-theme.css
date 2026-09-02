@@ -540,8 +540,11 @@
   color: rgba(255, 255, 255, 0.9) !important;
 }
 
+/* 单元格不再硬压底色：夜模式基础行色由上面 .el-table 的 --el-table-tr-bg-color
+   经 EP 自带 .el-table tr{background-color:var(--el-table-tr-bg-color)} 生效。
+   这里再叠一层 !important 会把组件在 td 上做的语义行着色（失败行/当前范围行等）
+   整片抹掉——夜模式下这些高亮会无声消失。 */
 :root[data-theme="night"] .el-table td.el-table__cell {
-  background-color: #16213e !important;
   color: rgba(255, 255, 255, 0.8) !important;
   border-bottom-color: rgba(255, 255, 255, 0.1) !important;
 }

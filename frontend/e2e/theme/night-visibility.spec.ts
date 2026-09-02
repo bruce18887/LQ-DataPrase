@@ -1,5 +1,9 @@
 import { test, expect, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
+import { selectAnalysisFile, selectParam, listParams } from '../helpers/params'
+import { waitLoadingGone } from '../helpers/charts'
+import { tintContrastProbe, tokenTintProbe } from '../helpers/colors'
+import { RECOMMENDED } from '../fixtures/test-data'
 
 /**
  * 主题视觉回归（@p2 增强：主题切换是纯视觉行为，不阻塞核心流程）
@@ -174,6 +178,78 @@ test.describe('@theme 主题视觉回归', { tag: ['@p2', '@theme'] }, () => {
       const severe = issues.filter((i) => i.c < 3.0)
       expect(severe, `${p.name}: 夜晚模式发现 ${severe.length} 个低对比度文本\n` +
         severe.map((i) => `   ${i.c} ${i.sel} "${i.text}" fg=${i.fg} bg=rgb(${i.bg})`).join('\n')).toHaveLength(0)
+    }
+  })
+
+  test('@p2 夜模式：分析页 token 化着色（异常值提示条 / 当前范围行）生效且可读', async ({ page }) => {
+    test.setTimeout(120_000)
+    await page.addInitScript(() => localStorage.setItem('theme', 'night'))
+    await gotoApp(page, '/analysis')
+    await selectAnalysisFile(page, RECOMMENDED.analysis)
+    await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
+    await waitLoadingGone(page.locator('.single-param-tab'))
+    const params = await listParams(page)
+    expect(params.length).toBeGreaterThan(0)
+    await selectParam(page, params[0])
+    await waitLoadingGone(page.locator('.single-param-tab'))
+
+    await page.locator('.el-form-item').filter({ hasText: '异常值处理' }).locator('.el-select').first().click()
+    await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '裁剪范围' }).first().click()
+    await waitLoadingGone(page.locator('.single-param-tab'))
+
+    // 提示条按「有没有异常值」在 --ok / --clip / --exclude 间切换，种子参数无异常值
+    // 时是 --ok，所以不断言具体态，只断言命中的是三态之一并测其实际底色。
+    const bar = page.locator('.outlier-hint-bar').first()
+    await expect(bar).toBeVisible({ timeout: 10_000 })
+    expect(await bar.getAttribute('class')).toMatch(/outlier-hint-bar--(clip|exclude|ok)/)
+
+    const probe = await page.evaluate(tintContrastProbe, {
+      barSel: '.outlier-hint-bar',
+      rowClasses: ['site-fail-row', 'range-active-row'],
+    })
+    expect(probe.barAlpha, `提示条 color-mix 底色不应全透明（css=${probe.barBgCss}）`).toBeGreaterThan(0)
+    expect(probe.barContrast ?? 0, `提示条文字对比度（底色 ${probe.barBgCss}）应 ≥ 3`).toBeGreaterThanOrEqual(3)
+
+    // 三态各自的 token：--clip 用 --warn、--exclude 用 --error、--ok 用 --success，
+    // 底色都是同色 12% 混，故按 percent=12 逐 token 算对比度（不依赖页面渲染哪一态）。
+    const TINT = 12
+    const tokens = ['--warn', '--error', '--success']
+    const nightTokens = await page.evaluate(tokenTintProbe, {
+      tokens, percent: TINT, baseSel: '.single-param-tab',
+    })
+    for (const t of nightTokens.tokens) {
+      expect(t.contrast ?? 0, `夜模式 ${t.name} 12% 底色上文字对比度应 ≥ 3（fg=${t.fg} 底=rgb(${nightTokens.baseBgCss})）`)
+        .toBeGreaterThanOrEqual(3)
+    }
+
+    // 行底色：scoped :deep(.el-table tr.X > td.el-table__cell) 改成主题 token 后，
+    // 最大风险是选择器不再命中（EP 把行底色画在 td 上）→ 着色静默丢失。
+    // range-active-row 一定存在（当前范围类型那行）；site-fail-row 取决于该参数
+    // 有没有失败数，只在出现时附加断言。
+    const active = probe.rows.find((r) => r.cls === 'range-active-row')!
+    const fail = probe.rows.find((r) => r.cls === 'site-fail-row')!
+    expect(active.found, '范围对比表应有当前范围行（range-active-row）').toBe(true)
+    expect(active.differs, `range-active-row 底色应与普通行不同（${active.tintCss}）`).toBe(true)
+    expect(active.contrast ?? 0, `range-active-row 文字对比度应 ≥ 3（${active.tintCss}）`).toBeGreaterThanOrEqual(3)
+    if (fail.found) {
+      expect(fail.differs, `site-fail-row 底色应与普通行不同（${fail.tintCss}）`).toBe(true)
+      expect(fail.contrast ?? 0, 'site-fail-row 文字对比度应 ≥ 3').toBeGreaterThanOrEqual(3)
+    }
+
+    const issues = await page.evaluate(contrastScan)
+    const severe = issues.filter((i) => i.c < 3.0)
+    expect(severe, `夜模式分析页发现 ${severe.length} 个低对比度文本\n` +
+      severe.map((i) => `   ${i.c} ${i.sel} "${i.text}" fg=${i.fg} bg=rgb(${i.bg})`).join('\n')).toHaveLength(0)
+
+    // 同一套 token 在浅色主题下也必须可读（批次 3 删掉了「夜块」，两主题共用一份规则）
+    await page.getByRole('button', { name: '切换到浅色模式' }).click()
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+    const lightTokens = await page.evaluate(tokenTintProbe, {
+      tokens, percent: TINT, baseSel: '.single-param-tab',
+    })
+    for (const t of lightTokens.tokens) {
+      expect(t.contrast ?? 0, `浅色模式 ${t.name} 12% 底色上文字对比度应 ≥ 3（fg=${t.fg} 底=rgb(${lightTokens.baseBgCss})）`)
+        .toBeGreaterThanOrEqual(3)
     }
   })
 })
