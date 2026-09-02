@@ -76,6 +76,12 @@
     </template>
 
     <template #right-panel>
+      <ErrorBanner
+        v-if="histError"
+        :message="histError"
+        title="直方图数据加载失败"
+        @retry="loadHistogram"
+      />
       <!-- 参数选择 + 统计摘要 -->
       <div class="top-bar">
         <ParamSelector
@@ -120,6 +126,7 @@
             :visible="showQQPlot"
             :result="qqResult"
             :loading="qqLoading"
+            :error="qqError"
             :outlier-handling="outlierHandling"
           />
         </div>
@@ -137,6 +144,7 @@
           />
           <BoxPlotChart
             :data="currentBoxPlotData"
+            :error="boxPlotError"
             :show-jitter="showJitter"
             :visible="showBoxPlot"
           />
@@ -183,6 +191,7 @@ import BoxPlotChart from './BoxPlotChart.vue'
 import QQPlotStatsTable from './QQPlotStatsTable.vue'
 import BoxPlotStatsTable from './distribution/BoxPlotStatsTable.vue'
 import AnalysisTabLayout from './AnalysisTabLayout.vue'
+import ErrorBanner from '../../../components/common/ErrorBanner.vue'
 import { useHistogram } from '../composables/useHistogram'
 import { useSerialDistribution } from '../composables/useSerialDistribution'
 import { useSiteStats } from '../composables/useSiteStats'
@@ -224,6 +233,8 @@ const {
   statCards,
   rangeTableData,
   histLoading,
+  histError,
+  loadHistogram,
 } = useHistogram(
   () => props.fileId,
   localSelectedParam,
@@ -293,6 +304,7 @@ const groupByOptions = [
 ]
 const {
   boxPlotData,
+  boxPlotError,
   loading: boxPlotLoading,
 } = useBoxPlot(
   () => props.fileId,
@@ -314,6 +326,7 @@ const showQQPlot = ref(false)
 const {
   qqLoading,
   qqResult,
+  qqError,
   loadQQPlot,
 } = useQQPlot(
   () => props.fileId,

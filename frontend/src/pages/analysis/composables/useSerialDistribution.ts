@@ -19,6 +19,8 @@ export function useSerialDistribution(
 
   async function loadSerialDistribution() {
     const fileId = getSelectedFileId()
+    // 未真正发请求的分支也要清错误态，否则旧 serialError 横幅会一直挂着
+    serialError.value = null
     if (!fileId || !localSelectedParam.value) return
     // Skip if param is known to be non-numeric
     if (availableParams?.value && !availableParams.value.includes(localSelectedParam.value)) return

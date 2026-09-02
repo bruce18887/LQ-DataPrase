@@ -115,7 +115,13 @@
         </div>
         <div class="chart-wrapper">
           <div v-if="corrResult" ref="scatterChartRef" class="chart-inner" />
-          <el-empty v-else description="选择 X/Y 轴参数以分析相关性" />
+          <ErrorBanner
+            v-else-if="corrError"
+            :message="corrError"
+            title="相关性数据加载失败"
+            @retry="reloadCorrelation"
+          />
+          <el-empty v-else-if="!corrResult" description="选择 X/Y 轴参数以分析相关性" />
         </div>
           <OutlierHintBar
             v-if="corrResult"
@@ -147,6 +153,7 @@ import AnalysisTabLayout from './AnalysisTabLayout.vue'
 import { useCorrelation } from '../composables/useCorrelation'
 import { useCorrelationMatrix } from '../composables/useCorrelationMatrix'
 import CorrelationScatterAxisCard from './CorrelationScatterAxisCard.vue'
+import ErrorBanner from '../../../components/common/ErrorBanner.vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
 import { minMax } from '../../../utils/minmax'
@@ -206,7 +213,7 @@ const sigmaX = ref(3); const sigmaY = ref(3)
 const customMinX = ref(0); const customMaxX = ref(0)
 const customMinY = ref(0); const customMaxY = ref(0)
 
-const { corrLoading, corrResult, loadCorrelation } = useCorrelation(() => props.fileId)
+const { corrLoading, corrResult, corrError, loadCorrelation } = useCorrelation(() => props.fileId)
 
 const rColorClass = computed(() => {
   const r = Math.abs(corrResult.value?.pearson_r ?? 0)
@@ -258,6 +265,11 @@ const regressionInfo = computed(() => {
 watch([localX, localY], ([x, y]) => {
   if (x && y) loadCorrelation(x, y, corrFlags.value)
 })
+
+/** 重试当前 X/Y 组合（ErrorBanner @retry 复用既有加载函数，不新造请求逻辑） */
+function reloadCorrelation() {
+  if (localX.value && localY.value) loadCorrelation(localX.value, localY.value, corrFlags.value)
+}
 
 // 筛选开关变化 → 重发散点（X/Y 已选时）+ 矩阵参数与过滤后列表求交集修剪
 watch([ignoreNoTestValue, dataOnlyBin1, onlyFailTestItem, onlyLowCpk, ignoreNoLimit], () => {

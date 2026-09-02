@@ -47,6 +47,13 @@
       <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-2)">Yield</div><div :style="{ fontSize: '18px', fontWeight: 'bold', color: (waferData.stats?.yield_pct ?? 0) >= 95 ? waferColors.pass : (waferData.stats?.yield_pct ?? 0) >= 85 ? waferColors.zoneMid : waferColors.zoneEdge }">{{ waferData.stats?.yield_pct?.toFixed(1) ?? '-' }}%</div></el-card></el-col>
     </el-row>
 
+    <ErrorBanner
+      v-if="zonalError && localColorBy === 'zone'"
+      :message="zonalError"
+      title="分区良率加载失败"
+      @retry="fetchZonalYield"
+    />
+
     <!-- 分区良率统计 -->
     <el-row v-if="localColorBy === 'zone' && zonalData?.zones?.length" :gutter="12" style="margin-bottom: 12px">
       <el-col :span="8"><el-card shadow="hover" :style="{ borderLeft: '3px solid ' + waferColors.zoneCenter }"><div style="font-size: 11px; color: var(--text-2)">中心区 Center Zone</div><div style="font-size: 16px; font-weight: bold; color: waferColors.zoneCenter">{{ getZoneYield('中心区') }}%</div><div style="font-size: 11px; color: var(--text-2)">{{ getZoneStat('中心区', 'pass') }} / {{ getZoneStat('中心区', 'total') }}</div></el-card></el-col>
@@ -65,7 +72,9 @@ import { computed, ref } from 'vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
 import { getSiteColors8 } from '../../../utils/chart-bar'
+import { formatError } from '../../../utils/error'
 import { analysisApi } from '../../../api/analysis'
+import ErrorBanner from '../../../components/common/ErrorBanner.vue'
 
 const props = defineProps<{ params: string[]; loading: boolean; waferData: any; waferError?: string | null; fileId?: number }>()
 const emit = defineEmits<{ load: [param: string, colorBy: string]; loadGlobal: [colorBy: string] }>()
@@ -76,6 +85,7 @@ const localColorBy = ref('result')
 const localHeight = ref(550)
 const localShowEdge = ref(true)
 const zonalData = ref<any>(null)
+const zonalError = ref('')
 
 /**
  * Pass/Fail/分区色（双主题）。night 经 CVD 色盲模拟验证：
@@ -86,12 +96,13 @@ const waferColors = computed(() => isDark.value
   ? { pass: '#4facfe', fail: '#ff9f43', zoneCenter: '#38ef7d', zoneMid: '#fdd835', zoneEdge: '#fb7185' }
   : { pass: '#2ECC71', fail: '#E74C3C', zoneCenter: '#2ECC71', zoneMid: '#F39C12', zoneEdge: '#E74C3C' })
 
-function getZoneYield(name: string): string { const zone = zonalData.value?.zones?.find((z: any) => z.name === name); return zone ? zone.yield.toFixed(1) : '-' }
+function getZoneYield(name: string): string { const zone = zonalData.value?.zones?.find((z: any) => z.name === name); return zone && Number.isFinite(zone.yield) ? zone.yield.toFixed(1) : '-' }
 function getZoneStat(name: string, key: string): string | number { const zone = zonalData.value?.zones?.find((z: any) => z.name === name); return zone ? (zone[key] ?? '-') : '-' }
 
 async function fetchZonalYield() {
   if (!props.fileId) return
-  try { const { data } = await analysisApi.getZonalYield(props.fileId, localParam.value || undefined); zonalData.value = data } catch { zonalData.value = null }
+  zonalError.value = ''
+  try { const { data } = await analysisApi.getZonalYield(props.fileId, localParam.value || undefined); zonalData.value = data } catch (e) { zonalError.value = formatError(e, '分区良率加载失败'); zonalData.value = null }
 }
 
 function onLoad() { zonalData.value = null; emit('load', localParam.value, localColorBy.value); if (localColorBy.value === 'zone' && props.fileId) fetchZonalYield() }

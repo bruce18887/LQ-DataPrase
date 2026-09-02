@@ -32,12 +32,15 @@ export function useMultiFile() {
   const fileNames = ref<{ file_id: number; filename: string }[]>([])
   const lotParam = ref('')
 
-  const { loading: paramsLoading, run: runParams } = useAsyncData<any>({ silent: true })
-  const { loading, data: lotData, run: runDist } = useAsyncData<any>()
+  const { loading: paramsLoading, error: paramsError, run: runParams } = useAsyncData<any>({ silent: true })
+  const { loading, data: lotData, error: distError, run: runDist } = useAsyncData<any>()
 
   async function loadCommonParams(fileIds: number[], ignoreNoLimit: boolean,
                                   rangeType: string = 'RDL',
                                   filters: MultiFilterFlags = {}) {
+    // 未真正发请求的分支也要清错误态，否则取消选择文件后旧横幅会一直挂着
+    paramsError.value = null
+    distError.value = null
     if (fileIds.length < 2) {
       commonParams.value = []
       fileNames.value = []
@@ -69,6 +72,7 @@ export function useMultiFile() {
   async function loadDistribution(fileIds: number[], param: string,
                                     rangeType: string = 'S4',
                                     filters: MultiFilterFlags = {}) {
+    distError.value = null
     if (fileIds.length < 2 || !param) {
       lotData.value = null
       lotParam.value = ''
@@ -83,5 +87,5 @@ export function useMultiFile() {
     if (lotData.value?.param) lotParam.value = lotData.value.param
   }
 
-  return { loading, paramsLoading, commonParams, fileNames, lotData, lotParam, loadCommonParams, loadDistribution }
+  return { loading, paramsLoading, paramsError, distError, commonParams, fileNames, lotData, lotParam, loadCommonParams, loadDistribution }
 }

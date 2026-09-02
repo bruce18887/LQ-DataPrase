@@ -9,12 +9,14 @@ export function useBoxPlot(
   enabled?: Ref<boolean>,
   dataOnlyBin1: Ref<boolean> = ref(false),
 ) {
-  const { loading, data: boxPlotData, run } = useAsyncData<any>({
+  const { loading, data: boxPlotData, error: boxPlotError, run } = useAsyncData<any>({
     silent: true,
   })
 
   async function loadBoxPlot() {
     const fileId = getFileId()
+    // 未真正发请求的分支也要清错误态，避免旧错误文案残留在占位区
+    boxPlotError.value = null
     if (!fileId || !selectedParam.value) return
     if (enabled && !enabled.value) return
     await run(
@@ -39,5 +41,5 @@ export function useBoxPlot(
     watch(enabled, (val) => { if (val && selectedParam.value) loadBoxPlot() })
   }
 
-  return { loading, boxPlotData, stats, loadBoxPlot }
+  return { loading, boxPlotData, boxPlotError, stats, loadBoxPlot }
 }

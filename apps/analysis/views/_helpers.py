@@ -137,7 +137,11 @@ def _load_df_from_request(request):
     file_id = request.data.get('file_id') or request.query_params.get('file_id')
     if not file_id:
         return None, None, None, 'file_id_required'
-    file_id = int(file_id)
+    try:
+        file_id = int(file_id)
+    except (TypeError, ValueError):
+        # 直连 API / 被篡改的 URL 可绕过前端下拉，非数字 id 是客户端错误不是 500
+        return None, None, None, 'file_id_invalid'
     df, metadata, fmt = get_cached_parsed_file(file_id, request.user.pk)
     if df is None and fmt is not None:
         # file_id valid but file not on disk or parse failed

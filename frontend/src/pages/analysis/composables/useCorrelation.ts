@@ -15,13 +15,15 @@ export function useCorrelation(
   getSelectedFileId: () => number | null
 ) {
   // useAsyncData 内建请求保序守卫：快速切换 X/Y 参数时旧响应不会覆盖新结果
-  const { loading: corrLoading, data: corrResult, run } = useAsyncData<any>({
+  const { loading: corrLoading, data: corrResult, error: corrError, run } = useAsyncData<any>({
     silent: true,
   })
 
   async function loadCorrelation(x: string, y: string,
                                  flags: CorrelationFilterFlags = {}) {
     const fileId = getSelectedFileId()
+    // 未真正发请求也要清错误态，否则换文件后旧横幅挂着不动
+    corrError.value = null
     if (!fileId) return
     await run(() => api.post('/analysis/correlation/', {
       file_id: fileId,
@@ -34,6 +36,7 @@ export function useCorrelation(
   return {
     corrLoading,
     corrResult,
+    corrError,
     loadCorrelation,
   }
 }

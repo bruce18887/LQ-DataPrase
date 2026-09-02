@@ -323,3 +323,51 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
       （容器后拿尺寸时自愈 init）；② SiteYieldAnalysis v-if 容器重建时 dispose 旧实例再 init
       （元素身份守卫），修「卡头有数、图区空白」
 - [x] 验证：vue-tsc 绿；定向回归 19 passed/8 基线 skip
+
+---
+
+# 任务：分析页审计修复三批（2026-09-02）
+
+来源：/analysis 页全栈审计（前端 pages/analysis 6004 行 + apps/analysis 7548 行）。
+基线：`manage.py test apps.analysis` = 127 tests OK / 4.5s。
+
+## 批次 1 — P0 正确性与错误暴露 ✅
+
+- [x] `statistics/site_stats`：补 `param not in df.columns` → 400 `param_not_found`（对齐
+      serial:469 / qqplot:546，R3①）；`no_site_column` 由 200+body.error 改 400 且不再回传
+      `available_columns` 全量列名
+- [x] `_load_df_from_request`：`int(file_id)` 非数字 → 400 `file_id_invalid` 而非 500
+- [x] 新增 `/statistics/zonal_yield/`（落 StatisticsViewSet：`analysis_views.py` 已 798 行
+      不允许再增长，且该端点返回聚合统计与 site_stats/bin_stats 同类）：三分区良率，
+      几何抽 `compute_wafer_geometry` 与晶圆图同源；`WaferMapPanel` 去掉空 catch
+- [x] 删死端点关联代码：孤儿组件 `dashboard/components/YieldTrendChart.vue`（真正在用的是
+      `batch/YieldTrendChart.vue`）+ `api/analysis.ts getYieldTrend`
+- [x] 前端失败不再伪装空态：useHistogram/useBoxPlot/useQQPlot/useCorrelation/useMultiFile
+      透出 `error`，各 Tab/图表位渲染 ErrorBanner + 重试；`zonal_yield` 失败同样可见；
+      未发请求的提前返回分支统一清错误态（防旧横幅跨上下文残留）
+- [x] 验证：`manage.py test apps.analysis` 141 项全绿（新增 14：守卫/分区服务/分区端点）；
+      `npm run build`（vue-tsc -b + vite）通过；e2e `chart-error-state.spec.ts` 2 用例
+      （500 → 横幅 → 重试恢复 / 切文件横幅不残留）通过
+
+## 批次 2 — P1 性能
+
+- [ ] `wafer_map.py` 逐行 `df.loc` 改列级向量化 + 接入 `statistics/downsample`；
+      前端晶圆图走 canvas/large
+- [ ] 四个 `el-tab-pane` 加 `lazy`；筛选 watcher 收窄到真正受影响的 Tab；配置面板改动防抖
+- [ ] `datafiles/services.py` 解析缓存：按字节上限 LRU + per-key 单飞锁；bin1 改布尔掩码
+- [ ] 验证：向量化前后点位/统计等价性测试；晶圆图延迟与载荷实测对比
+
+## 批次 3 — P2 合规
+
+- [ ] 删零引用死组件树（`components/correlation/*Section.vue` + `CorrelationPanel`/
+      `CorrelationMatrixPanel`）；把未挂载的批量导出面板接入分析页
+- [ ] `analysis_views.py` 798→<600（file_correlation 三端点外移）；`tests.py` 2468 行拆 `tests/` 包
+- [ ] 双主题：`OutlierHintBar` 页面级 `:root[data-theme='night']` 覆盖块与硬编码色改 token；
+      `SiteStatsTable`/`RangeComparisonTable` 非 scoped 全局 `!important` 改 scoped
+- [ ] R5：`iqrMultiplier` 等 store 值统一 `storeToRefs` 双向；相关性矩阵默认选择加 12 项上限；
+      数字格式统一
+- [ ] 验证：`npm run build` + 双主题截图 + 后端测试全绿
+
+## Review（2026-09-02）
+
+（实施后填写）

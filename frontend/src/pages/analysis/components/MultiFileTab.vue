@@ -83,6 +83,12 @@
           v-if="fileIds.length < 2"
           description="请至少选择 2 个数据文件"
         />
+        <ErrorBanner
+          v-else-if="paramsError"
+          :message="paramsError"
+          title="共有测试项加载失败"
+          @retry="reloadParams"
+        />
         <el-empty
           v-else-if="commonParams.length === 0 && !paramsLoading"
           description="所选文件没有共有测试项"
@@ -104,6 +110,12 @@
               :bar-width-percent="barWidthPercent"
               :file-names="resolvedNames"
               :selected-param="selectedParam"
+            />
+            <ErrorBanner
+              v-else-if="distError"
+              :message="distError"
+              title="多文件分布加载失败"
+              @retry="loadDistribution(fileIds, selectedParam, rangeType, multiFilters)"
             />
             <el-empty
               v-else-if="lotData && selectedParam"
@@ -128,6 +140,7 @@ import ChartConfigPanel from './ChartConfigPanel.vue'
 import ParamSelector from './ParamSelector.vue'
 import MultiFileChart from './MultiFileChart.vue'
 import CircularProgress from '../../../components/common/CircularProgress.vue'
+import ErrorBanner from '../../../components/common/ErrorBanner.vue'
 import FileSelect from '../../../components/common/FileSelect.vue'
 
 const props = defineProps<{ files: any[] }>()
@@ -155,7 +168,7 @@ const multiFilters = computed(() => ({
   only_low_cpk: onlyLowCpk.value,
 }))
 
-const { loading, paramsLoading, commonParams, lotData, lotParam, loadCommonParams, loadDistribution } = useMultiFile()
+const { loading, paramsLoading, paramsError, distError, commonParams, lotData, lotParam, loadCommonParams, loadDistribution } = useMultiFile()
 
 // 柱宽 slider 上限：随文件数联动（N 系列并排柱组必须 ≤ bin 宽，否则贴限柱体
 // 越过 USL 线——回归 limit-line-cross）
