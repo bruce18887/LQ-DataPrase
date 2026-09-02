@@ -55,7 +55,7 @@
       </el-tab-pane>
 
       <!-- ========== 晶圆图 tab ========== -->
-      <el-tab-pane label="&#128309; 晶圆图" name="wafer">
+      <el-tab-pane label="&#128309; 晶圆图" name="wafer" lazy>
         <WaferMapPanel
           :params="params"
           :loading="loading"
@@ -68,15 +68,16 @@
       </el-tab-pane>
 
       <!-- ========== 多文件分析 tab ========== -->
-      <el-tab-pane label="&#128200; 多文件分析" name="multi-file">
+      <el-tab-pane label="&#128200; 多文件分析" name="multi-file" lazy>
         <MultiFileTab :files="files" />
       </el-tab-pane>
 
       <!-- ========== 相关性工具 tab ========== -->
-      <el-tab-pane label="&#128279; 相关性对比" name="correlation-tools">
+      <el-tab-pane label="&#128279; 相关性对比" name="correlation-tools" lazy>
         <CorrelationToolsTab
           :file-id="selectedFileId"
           :params="params"
+          :active="activeTab === 'correlation-tools'"
         />
       </el-tab-pane>
     </el-tabs>
@@ -187,6 +188,9 @@ async function loadFiles() {
 watch(selectedFileId, (val) => { analysisStore.selectedFileId = val })
 watch(selectedParam, (val) => { analysisStore.selectedParam = val })
 watch(activeTab, (val) => { analysisStore.activeTab = val })
+// 6 个开关任一变化都要重取参数列表（列表本身按开关收缩），但每次都是
+// 全文件重算——连续勾选时合并为一次请求
+let flagRefreshTimer: ReturnType<typeof setTimeout> | null = null
 watch([
   () => analysisStore.ignoreNoLimit,
   () => analysisStore.ignoreNoTestValue,
@@ -195,7 +199,13 @@ watch([
   () => analysisStore.onlyLowCpk,
   // 异常值检测敏感度影响低 CPK 判定（filtered CPK 口径），变化时刷新列表
   () => analysisStore.iqrMultiplier,
-], () => { onFileChange() })
+], () => {
+  if (flagRefreshTimer) clearTimeout(flagRefreshTimer)
+  flagRefreshTimer = setTimeout(() => {
+    flagRefreshTimer = null
+    onFileChange()
+  }, 250)
+})
 
 // ========== File change ==========
 async function onFileChange() {

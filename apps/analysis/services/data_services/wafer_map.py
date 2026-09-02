@@ -2,11 +2,15 @@
 
 import math
 
+import numpy as np
+import pandas as pd
+
 from apps.analysis.services.statistics import (
     compute_wafer_fail_data,
     get_site_column,
     get_serial_column,
     get_bin_column,
+    get_1d_from,
 )
 
 # 分区半径比例：必须与前端 WaferMapPanel.buildOption 画的圆环一致
@@ -86,11 +90,23 @@ def compute_wafer_zone_stats(xs, ys, fail_flags, wafer):
     return zones
 
 
+def _str_column(df, col):
+    """按位取列并逐元素 str 化（NaN→'nan'、bool→'True'/'False'）。
+
+    与历史逐行 ``str(df.loc[idx, col])`` 保持一致；重名列走 get_1d_from
+    的「取首列」语义，而不是整行被丢弃。
+    """
+    return get_1d_from(df, col).astype(str).tolist()
+
+
 def compute_wafer_map_data(df, metadata, param, color_by, x_col, y_col):
     """Build wafer-map point list, wafer boundary circle, and die size.
 
     Returns a dict with ``points``, ``stats`` (from
     :func:`~statistics.compute_wafer_fail_data`) and ``wafer`` info.
+
+    坐标与标签列都按**整列**取一次（历史上每行做 5–6 次 ``df.loc``，
+    10 万行实测 4.7s），非有限坐标用掩码剔除。
     """
     fail_mask, wafer_stats = compute_wafer_fail_data(df, metadata, param)
     site_col = get_site_column(df)
@@ -98,32 +114,30 @@ def compute_wafer_map_data(df, metadata, param, color_by, x_col, y_col):
     serial_col = get_serial_column(df)
     bin_col = get_bin_column(df, metadata)
 
+    xs = pd.to_numeric(get_1d_from(df, x_col), errors='coerce').to_numpy(dtype='float64', copy=False)
+    ys = pd.to_numeric(get_1d_from(df, y_col), errors='coerce').to_numpy(dtype='float64', copy=False)
+    valid = np.isfinite(xs) & np.isfinite(ys)
+
+    serial_vals = _str_column(df, serial_col) if serial_col else None
+    bin_vals = _str_column(df, bin_col) if bin_col else None
+    site_vals = _str_column(df, site_col) if site_col else None
+    statuses = np.where(fail_mask.to_numpy(dtype=bool, copy=False), 'Fail', 'Pass')
+
     points = []
-    for idx in df.index:
-        try:
-            x_val = float(df.loc[idx, x_col])
-            y_val = float(df.loc[idx, y_col])
-            if not math.isfinite(x_val) or not math.isfinite(y_val):
-                continue
-        except (ValueError, TypeError):
-            continue
-        point = {
-            'x': x_val,
-            'y': y_val,
-            'status': 'Fail' if fail_mask.loc[idx] else 'Pass',
-        }
-        if serial_col:
-            point['serial'] = str(df.loc[idx, serial_col])
-        if bin_col:
-            point['bin'] = str(df.loc[idx, bin_col])
-        if site_col:
-            point['site'] = str(df.loc[idx, site_col])
-        if color_by == 'site' and site_col:
-            point['color_group'] = f'Site {df.loc[idx, site_col]}'
+    for i in np.flatnonzero(valid):
+        point = {'x': float(xs[i]), 'y': float(ys[i]), 'status': statuses[i]}
+        if serial_vals is not None:
+            point['serial'] = serial_vals[i]
+        if bin_vals is not None:
+            point['bin'] = bin_vals[i]
+        if site_vals is not None:
+            point['site'] = site_vals[i]
+            if color_by == 'site':
+                point['color_group'] = f'Site {site_vals[i]}'
         points.append(point)
 
-    x_vals = [p['x'] for p in points]
-    y_vals = [p['y'] for p in points]
+    x_vals = xs[valid].tolist()
+    y_vals = ys[valid].tolist()
 
     return {
         'points': points,

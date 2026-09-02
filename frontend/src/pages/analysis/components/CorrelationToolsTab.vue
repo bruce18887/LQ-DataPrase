@@ -164,6 +164,8 @@ import OutlierHintBar from './OutlierHintBar.vue'
 const props = defineProps<{
   fileId: number | null
   params: string[]
+  /** 本 tab 是否处于激活态（AnalysisPage 传入）：隐藏时不重发全量计算 */
+  active?: boolean
 }>()
 
 const analysisStore = useAnalysisStore()
@@ -272,10 +274,24 @@ function reloadCorrelation() {
 }
 
 // 筛选开关变化 → 重发散点（X/Y 已选时）+ 矩阵参数与过滤后列表求交集修剪
+// 本 tab 隐藏时不重发（全文件重算）：记一笔欠账，切回来再补
+let reloadOwed = false
 watch([ignoreNoTestValue, dataOnlyBin1, onlyFailTestItem, onlyLowCpk, ignoreNoLimit], () => {
-  if (localX.value && localY.value) loadCorrelation(localX.value, localY.value, corrFlags.value)
   // props.params 由 AnalysisPage 联动刷新；本页修剪过期选中项防 400
+  if (props.active === false) {
+    reloadOwed = true
+    trimMatrixParams()
+    return
+  }
+  if (localX.value && localY.value) loadCorrelation(localX.value, localY.value, corrFlags.value)
   trimMatrixParams()
+})
+
+watch(() => props.active, (val) => {
+  if (val && reloadOwed) {
+    reloadOwed = false
+    reloadCorrelation()
+  }
 })
 
 function computeRange(mode: string, sigma: number, cMin: number, cMax: number, vals: number[]) {
