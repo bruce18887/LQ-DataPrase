@@ -23,9 +23,10 @@ interface BoxPlotData {
   param: string; overall?: BoxPlotStats; by_site?: Record<string, BoxPlotStats>; by_bin?: Record<string, BoxPlotStats>
 }
 
-const props = withDefaults(defineProps<{ data: BoxPlotData | null; title?: string; showJitter?: boolean; visible?: boolean }>(), {
+const props = withDefaults(defineProps<{ data: BoxPlotData | null; title?: string; showJitter?: boolean; visible?: boolean; error?: string | null }>(), {
   showJitter: false,
   visible: true,
+  error: null,
 })
 const { colors } = useEChartsTheme()
 
@@ -51,6 +52,7 @@ const hasValidData = computed(() => {
 })
 
 const placeholderText = computed(() => {
+  if (props.error) return props.error
   if (!props.data) return '请先选择参数以查看箱线图'
   return '该参数无有效数值数据，无法绘制箱线图'
 })

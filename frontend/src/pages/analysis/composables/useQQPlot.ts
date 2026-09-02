@@ -8,12 +8,14 @@ export function useQQPlot(
   enabled?: Ref<boolean>,
   dataOnlyBin1: Ref<boolean> = ref(false),
 ) {
-  const { loading: qqLoading, data: qqResult, run } = useAsyncData<any>({
+  const { loading: qqLoading, data: qqResult, error: qqError, run } = useAsyncData<any>({
     silent: true,
   })
 
   async function loadQQPlot() {
     const fileId = getFileId()
+    // 未真正发请求的分支也要清错误态，避免旧错误文案残留在占位区
+    qqError.value = null
     if (!fileId || !selectedParam.value) {
       qqResult.value = null
       return
@@ -47,5 +49,5 @@ export function useQQPlot(
     })
   }
 
-  return { qqLoading, qqResult, loadQQPlot }
+  return { qqLoading, qqResult, qqError, loadQQPlot }
 }

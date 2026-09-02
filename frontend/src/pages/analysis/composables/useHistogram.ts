@@ -20,7 +20,7 @@ export function useHistogram(
   const histResult = ref<any>(null)
   const statCards = ref<{ label: string; value: string; color?: string }[]>([])
   const rangeTableData = ref<any[]>([])
-  const { loading: histLoading, run } = useAsyncData<any>({ silent: true })
+  const { loading: histLoading, error: histError, run } = useAsyncData<any>({ silent: true })
 
   const themeStore = useThemeStore()
   const isDark = computed(() => themeStore.currentTheme === 'night')
@@ -35,6 +35,8 @@ export function useHistogram(
   // 请求保序由 useAsyncData 内建守卫保证（过期 run() 返回 null 且不落地）
   async function loadHistogram() {
     const fileId = getSelectedFileId()
+    // 未真正发请求的分支也要清错误态，否则切文件/清空参数后旧横幅会一直挂着
+    histError.value = null
     if (!fileId || !localSelectedParam.value) return
     const result = await run(() => api.post('/analysis/histogram/', {
       file_id: fileId,
@@ -140,5 +142,5 @@ export function useHistogram(
   watch(outlierHandling, () => { if (lastResults) histogramUpdateView(lastResults) })
   watch(getSelectedFileId, () => { if (getSelectedFileId() && localSelectedParam.value) loadHistogram() })
 
-  return { histResult, statCards, rangeTableData, loadHistogram, histLoading }
+  return { histResult, statCards, rangeTableData, loadHistogram, histLoading, histError }
 }

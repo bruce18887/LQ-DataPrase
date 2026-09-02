@@ -39,14 +39,11 @@ export const analysisApi = {
   getParamTrend(fileIds: number[], param: string) {
     return api.get('/statistics/param_trend/', { params: { file_ids: fileIds, param } })
   },
-  getYieldTrend(fileIds: number[]) {
-    return api.get('/analysis/yield_trend/', { params: { file_ids: fileIds } })
-  },
   getQQPlot(fileId: number, param: string) {
     return api.get('/analysis/qqplot/', { params: { file_id: fileId, param } })
   },
   getZonalYield(fileId: number, param?: string) {
-    return api.get('/analysis/zonal_yield/', { params: { file_id: fileId, param } })
+    return api.get('/statistics/zonal_yield/', { params: { file_id: fileId, param } })
   },
   getUph(fileId: number, testTimeCol?: string, manualTestTimeSec?: number) {
     const query: Record<string, any> = { file_id: fileId }

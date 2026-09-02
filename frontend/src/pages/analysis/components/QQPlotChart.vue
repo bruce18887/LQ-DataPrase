@@ -6,9 +6,13 @@
       <span>正在计算QQ图...</span>
     </div>
     <!-- Empty / no-data state: plain div to avoid el-empty emitsOptions race -->
-    <div v-else-if="!result || isEmptyResult" class="qqplot-placeholder">
+    <div
+      v-else-if="!result || isEmptyResult"
+      class="qqplot-placeholder"
+      :data-testid="error ? 'chart-error' : undefined"
+    >
       <el-icon class="qqplot-placeholder__icon"><InfoFilled /></el-icon>
-      <span class="qqplot-placeholder__text">{{ !result ? '暂无QQ图数据' : '该参数无有效数值数据' }}</span>
+      <span class="qqplot-placeholder__text">{{ error || (!result ? '暂无QQ图数据' : '该参数无有效数值数据') }}</span>
     </div>
     <!-- Chart container -->
     <div v-else class="qqplot-chart-inner">
@@ -35,6 +39,9 @@ const props = defineProps<{
   visible: boolean
   result: any
   loading: boolean
+  /** 请求失败消息（来自 useQQPlot 的 error）：有值时占位文案直接显示它，
+   *  与「该参数没有数据」的空态区分开 */
+  error?: string | null
   outlierHandling?: 'clip' | 'exclude' | 'off'
 }>()
 

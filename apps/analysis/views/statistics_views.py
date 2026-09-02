@@ -30,6 +30,12 @@ from apps.analysis.services.statistics import (
     ensure_numeric,
     filter_bin1_rows,
     filter_test_items,
+    get_coord_columns,
+    compute_wafer_fail_data,
+)
+from apps.analysis.services.data_services import (
+    compute_wafer_geometry,
+    compute_wafer_zone_stats,
 )
 from apps.datafiles.services import get_cached_parsed_file
 from apps.common.params import get_param, get_param_float, get_param_list
@@ -95,6 +101,11 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         param = get_param(request, 'param')
         if not param:
             return Response({'error': 'param_required'}, status=400)
+        if param not in df.columns:
+            return Response({
+                'error': 'param_not_found',
+                'detail': f'参数 {param!r} 不在该文件中',
+            }, status=400)
 
         range_type = get_param(request, 'range_type', 'RDL')
         # data_only_bin1 narrows the rows before series/site extraction so
@@ -108,9 +119,8 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         if not site_col:
             return Response({
                 'error': 'no_site_column',
-                'site_data': [],
-                'available_columns': list(df.columns),
-            })
+                'detail': '该文件没有 Site 列，无法进行站点统计',
+            }, status=400)
 
         stats = compute_range_statistics(data_series, metadata, param)
         lower_limit, upper_limit = resolve_limits(range_type, stats)
@@ -124,6 +134,46 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         return Response(clean_data({
             'param': param,
             'site_data': site_result,
+        }))
+
+    @action(detail=False, methods=['get', 'post'])
+    def zonal_yield(self, request):
+        """晶圆分区良率：按半径 1/3、2/3 切中心/中间/边缘三区。
+
+        Pass/Fail 判定复用 :func:`compute_wafer_fail_data`，与晶圆图同一口径；
+        几何复用 :func:`compute_wafer_geometry`，与前端画出的圆环同源。
+        ``param`` 缺省时按全部有 Limit 的测试项做全局判定（同 wafer_map）。
+        """
+        df, datafile, metadata, err = _load_df_from_request(request)
+        if err:
+            return Response({'error': err}, status=400)
+
+        param = get_param(request, 'param')
+        if param and param not in df.columns:
+            return Response({
+                'error': 'param_not_found',
+                'detail': f'参数 {param!r} 不在该文件中',
+            }, status=400)
+
+        x_col, y_col = get_coord_columns(df)
+        if not x_col or not y_col:
+            return Response({
+                'error': 'no_coord_columns',
+                'detail': '该文件没有坐标列（X_COORD/Y_COORD），无法分区统计',
+            }, status=400)
+
+        xs = pd.to_numeric(get_1d_from(df, x_col), errors='coerce')
+        ys = pd.to_numeric(get_1d_from(df, y_col), errors='coerce')
+        finite = xs.notna() & ys.notna()
+        geometry = compute_wafer_geometry(xs[finite].tolist(), ys[finite].tolist())
+        fail_mask, _stats = compute_wafer_fail_data(df, metadata, param)
+
+        return Response(clean_data({
+            'file_id': datafile.id,
+            'param': param or '',
+            'wafer': geometry,
+            'zones': compute_wafer_zone_stats(
+                xs.tolist(), ys.tolist(), fail_mask.tolist(), geometry),
         }))
 
     @action(detail=False, methods=['get', 'post'])
