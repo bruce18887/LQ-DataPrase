@@ -229,9 +229,8 @@ test.describe('@p2 晶圆图渲染', { tag: ['@p2', '@analysis'] }, () => {
     )
     await loadBtn.click()
     await resp
-    await expect
-      .poll(() => page.locator('.el-tab-pane:visible svg').count(), { timeout: 15_000 })
-      .toBeGreaterThanOrEqual(1)
+    // 渲染器无关：上万 die 走 canvas，小晶圆走 svg
+    await expectChartRendered(page.locator('.el-tab-pane:visible').first(), 0, 15_000)
   })
 })
 

@@ -70,7 +70,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useChart } from '../../../composables/useChart'
-import { useEChartsTheme } from '../../../utils/echarts-theme'
+import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
 import { getSiteColors8 } from '../../../utils/chart-bar'
 import { formatError } from '../../../utils/error'
 import { analysisApi } from '../../../api/analysis'
@@ -109,6 +109,10 @@ function onLoad() { zonalData.value = null; emit('load', localParam.value, local
 function onLoadGlobal() { zonalData.value = null; emit('loadGlobal', localColorBy.value); if (localColorBy.value === 'zone' && props.fileId) fetchZonalYield() }
 function onReRender() { /* triggers watch via localShowEdge change */ }
 
+// 上万 die 时逐点 SVG rect 是主要卡顿源（与相关性散点同阈值）：强制 canvas
+// + large，小晶圆图行为零变更
+const isLarge = computed(() => ((props.waferData?.points?.length) ?? 0) >= 5000)
+
 function buildOption() {
   if (!props.waferData) return {}
   const tc = colors.value.textColor
@@ -122,12 +126,13 @@ function buildOption() {
     const siteMap = new Map<string, any[]>()
     for (const p of pts) { const g = p.color_group || 'Unknown'; if (!siteMap.has(g)) siteMap.set(g, []); siteMap.get(g)!.push(p) }
     Array.from(siteMap.keys()).sort().forEach((siteName, idx) => {
-      series.push({ name: siteName, type: 'scatter', symbol: 'rect', symbolSize: [8, 8], data: siteMap.get(siteName)!.map((p: any) => ({ value: [p.x, p.y], serial: p.serial, bin: p.bin, site: p.site, status: p.status })), itemStyle: { color: getSiteColors8(isDark.value)[idx % 8], opacity: 0.9 } })
+      series.push({ name: siteName, type: 'scatter', symbol: 'rect', symbolSize: [8, 8], ...(isLarge.value ? { large: true } : {}), data: siteMap.get(siteName)!.map((p: any) => ({ value: [p.x, p.y], serial: p.serial, bin: p.bin, site: p.site, status: p.status })), itemStyle: { color: getSiteColors8(isDark.value)[idx % 8], opacity: 0.9 } })
     })
   } else {
     const toPt = (p: any) => ({ value: [p.x, p.y], serial: p.serial, bin: p.bin, site: p.site, status: p.status })
-    series.push({ name: 'Pass', type: 'scatter', symbol: 'rect', symbolSize: [8, 8], data: pts.filter((p: any) => p.status === 'Pass').map(toPt), itemStyle: { color: waferColors.value.pass, opacity: 0.9 } })
-    series.push({ name: 'Fail', type: 'scatter', symbol: 'rect', symbolSize: [8, 8], data: pts.filter((p: any) => p.status === 'Fail').map(toPt), itemStyle: { color: waferColors.value.fail, opacity: 0.95 } })
+    const largeOpts = isLarge.value ? { large: true } : {}
+    series.push({ name: 'Pass', type: 'scatter', symbol: 'rect', symbolSize: [8, 8], ...largeOpts, data: pts.filter((p: any) => p.status === 'Pass').map(toPt), itemStyle: { color: waferColors.value.pass, opacity: 0.9 } })
+    series.push({ name: 'Fail', type: 'scatter', symbol: 'rect', symbolSize: [8, 8], ...largeOpts, data: pts.filter((p: any) => p.status === 'Fail').map(toPt), itemStyle: { color: waferColors.value.fail, opacity: 0.95 } })
   }
 
   if (wafer && localShowEdge.value) {
@@ -150,6 +155,8 @@ function buildOption() {
 
   const stats = data.stats || {}; const yieldRate = pts.length > 0 ? ((100 * (stats.pass_count || 0)) / pts.length).toFixed(1) : '0.0'
   return {
+    // 上万 symbol 的入场/更新动画是纯开销，大晶圆直接关掉
+    animation: !isLarge.value,
     title: { text: 'Wafer Map', subtext: `Total: ${pts.length} | Yield: ${yieldRate}%`, left: 'center' },
     tooltip: { trigger: 'item', formatter: (p: any) => { if (!p.value || !Array.isArray(p.value)) return p.name; const d = p.data; let h = `<b>${d.status || p.seriesName}</b><br/>X: ${p.value[0]} | Y: ${p.value[1]}<br/>`; if (d.serial != null) h += `Serial: ${d.serial}<br/>`; if (d.bin != null) h += `Bin: ${d.bin}<br/>`; if (d.site != null) h += `Site: ${d.site}<br/>`; return h }, backgroundColor: colors.value.tooltipBg, borderColor: colors.value.tooltipBorder, textStyle: { color: colors.value.tooltipText }, extraCssText: 'box-shadow:0 2px 8px rgba(0,0,0,0.15);border-radius:4px;padding:8px 12px;' },
     legend: { data: series.map((s: any) => s.name), bottom: 10, type: 'scroll', textStyle: { color: tc } },
@@ -162,6 +169,11 @@ function buildOption() {
   }
 }
 
-const { chartRef } = useChart(buildOption, [() => props.waferData, localShowEdge, localColorBy, zonalData])
+const { chartRef } = useChart(
+  buildOption,
+  [() => props.waferData, localShowEdge, localColorBy, zonalData],
+  'chartRef',
+  () => (isLarge.value ? 'canvas' : getChartRenderer()),
+)
 void chartRef // bound to <div ref="chartRef"> in template
 </script>

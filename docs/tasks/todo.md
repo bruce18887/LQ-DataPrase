@@ -349,13 +349,35 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
       `npm run build`（vue-tsc -b + vite）通过；e2e `chart-error-state.spec.ts` 2 用例
       （500 → 横幅 → 重试恢复 / 切文件横幅不残留）通过
 
-## 批次 2 — P1 性能
+## 批次 2 — P1 性能 ✅
 
-- [ ] `wafer_map.py` 逐行 `df.loc` 改列级向量化 + 接入 `statistics/downsample`；
-      前端晶圆图走 canvas/large
-- [ ] 四个 `el-tab-pane` 加 `lazy`；筛选 watcher 收窄到真正受影响的 Tab；配置面板改动防抖
-- [ ] `datafiles/services.py` 解析缓存：按字节上限 LRU + per-key 单飞锁；bin1 改布尔掩码
-- [ ] 验证：向量化前后点位/统计等价性测试；晶圆图延迟与载荷实测对比
+- [x] `wafer_map.py` 逐行 `df.loc` 改列级向量化：坐标 `pd.to_numeric` 整列取一次 +
+      `np.flatnonzero(isfinite)` 掩码，serial/bin/site 标签改 `_str_column` 整列 `astype(str)`
+      （保持历史 `str(df.loc…)` 口径含 NaN→`'nan'`）。真实文件实测 14174 点位
+      **0.65s → 0.019s（≈35×）**；`apps/analysis/tests_wafer_map_points.py` 断言改造前后
+      points/stats/wafer **逐字段等价**，另含 5 万行 < 2s 用例
+- [x] 前端晶圆图走 canvas/large：≥5000 点时 `large:true` + `animation:false` +
+      renderer 强制 canvas（`useChart` 第 4 参，切换时 dispose 重建），小晶圆图行为零变更；
+      `wafermap-model-not-found` 大文件用例改为渲染器无关（canvas 走 `dispatchAction` 切图例）
+- [x] 三个 `el-tab-pane` 加 `lazy`（晶圆图 / 多文件 / 相关性）：未访问的 tab 不挂载、
+      不发请求、不再在零尺寸容器里 init ECharts；`CorrelationToolsTab` 加 `active` 门控
+      （隐藏期间共享开关变化只记欠账，切回补算一次）；AnalysisPage 6 开关 watcher 250ms 合并
+- [x] `datafiles/services.py` 解析缓存：`lru_cache(maxsize=64)` → `_BytesLRUCache`
+      按**字节预算** LRU（默认 1536MB，`LQDP_PARSE_CACHE_MB` 覆盖，`memory_usage(deep=True)`
+      估算）+ per-key 单飞锁（并发 miss 只解析一次，失败不卡 pending，超预算单值不缓存）。
+      `apps/datafiles/tests_parse_cache.py` 12 项覆盖命中/按字节淘汰/超限/clear/并发单飞
+- [x] 验证：`manage.py test apps.datafiles apps.analysis` = **286 项全绿**；`npm run build`
+      （vue-tsc -b + vite）通过；e2e 新增 `tab-request-fanout.spec.ts` 3 用例 × 3 轮全绿，
+      晶圆图相关 `wafermap-model-not-found` / `wafermap-hidden-tab-init` / `analysis.spec.ts`
+      共 5 用例全绿
+
+### 与审计原结论的偏差（如实记录）
+
+- `bin1 改布尔掩码`：**过时发现**。`filters.py:38 get_bin1_mask` 早已是
+  `unique → isin` 掩码（`dba2fda` 引入），本轮未改动。
+- `wafer_map 接入 statistics/downsample`：**有意不做**。抽样会改变逐 die tooltip /
+  Pass-Fail 统计口径，14k die 载荷实测 1.21MB（85B/点），改由 canvas+large 承接渲染成本。
+  载荷仍是剩余限制，与 `useChart` resize 全量重绘、请求无 AbortController 一并留待后续。
 
 ## 批次 3 — P2 合规
 

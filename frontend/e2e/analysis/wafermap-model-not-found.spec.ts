@@ -56,9 +56,10 @@ test('机制复现：lazyUpdate 期间悬停被移除 series 的陈旧散点 →
   await gotoApp(page, '/analysis')
   await selectAnalysisFile(page, FILE_SUBSTR)
   await expect(page.getByRole('tab', { name: /晶圆图/ })).toBeVisible({ timeout: 30_000 })
+  // lazy 挂载：先打开 tab，面板控件才存在
+  await page.getByRole('tab', { name: /晶圆图/ }).click()
   const loadBtn = page.locator('button').filter({ hasText: '加载晶圆图' })
   await expect(loadBtn).toBeEnabled({ timeout: 120_000 })
-  await page.getByRole('tab', { name: /晶圆图/ }).click()
   const panel = page.getByRole('tabpanel', { name: /晶圆图/ })
   const chart = panel.locator('div[_echarts_instance_]').first()
   await expect(chart).toHaveCount(1, { timeout: 20_000 })
@@ -129,11 +130,11 @@ test('大文件晶圆图：悬停/图例/缩放/模式切换全程无 ECharts mo
   await selectAnalysisFile(page, FILE_SUBSTR)
   await expect(page.getByRole('tab', { name: /晶圆图/ })).toBeVisible({ timeout: 30_000 })
 
-  // 大文件解析慢：等「加载晶圆图」按钮可用（参数列表加载完成）再进入
+  // lazy 挂载：先打开 tab；按钮可用 = 参数列表加载完成
+  await page.getByRole('tab', { name: /晶圆图/ }).click()
   const loadBtn = page.locator('button').filter({ hasText: '加载晶圆图' })
   await expect(loadBtn).toBeEnabled({ timeout: 120_000 })
 
-  await page.getByRole('tab', { name: /晶圆图/ }).click()
   const panel = page.getByRole('tabpanel', { name: /晶圆图/ })
   const chart = panel.locator('div[_echarts_instance_]').first()
   await expect(chart).toHaveCount(1, { timeout: 20_000 })
@@ -154,23 +155,37 @@ test('大文件晶圆图：悬停/图例/缩放/模式切换全程无 ECharts mo
   // 1) 悬停扫过散点区域
   await sweepMouse(chart)
 
-  // 2) 图例交互：逐个点击隐藏/显示 series（触发 legend 重渲染）
-  // force：x 轴 dataZoom 滑块背景 path 覆盖在底部图例上方，正常点击被滑块拦截
-  const legendItems = chart.locator('svg text').filter({ hasText: /Pass|Fail|Wafer Edge|Notch/ })
-  const legendCount = await legendItems.count()
-  expect(legendCount, '图例项应存在').toBeGreaterThanOrEqual(2)
-  for (let i = 0; i < Math.min(legendCount, 3); i++) {
-    await legendItems.nth(i).click({ force: true })
+  // 2) 图例交互：逐个隐藏/显示 series（触发 legend 重渲染）。
+  // canvas 渲染器下图例是像素不是 DOM 节点，改用等价的 legendToggleSelect；
+  // svg 渲染器仍按真实 DOM 点击。
+  const isCanvas = await chart.evaluate((el: any) => !!el.querySelector('canvas'))
+  const legendNames: string[] = await chart.evaluate((el: any) =>
+    ((el.__echartsInstance__.getOption().legend?.[0]?.data ?? []) as any[])
+      .map((d: any) => (typeof d === 'string' ? d : d.name))
+      .filter((n: string) => /Pass|Fail|Wafer Edge|Notch/.test(n)))
+  expect(legendNames.length, '图例项应存在').toBeGreaterThanOrEqual(2)
+  for (const name of legendNames.slice(0, 3)) {
+    if (isCanvas) {
+      await chart.evaluate(
+        (el: any, n: string) => el.__echartsInstance__.dispatchAction({ type: 'legendToggleSelect', name: n }),
+        name,
+      )
+    } else {
+      // force：x 轴 dataZoom 滑块背景 path 覆盖在底部图例上方，正常点击被滑块拦截
+      await chart.locator('svg text').filter({ hasText: name }).first().click({ force: true })
+    }
     await sweepMouse(chart)
   }
 
-  // 3) dataZoom 滑块拖拽（x 滑块在底部）
-  const svg = chart.locator('svg').first()
-  const svgBox = await svg.boundingBox()
-  if (svgBox) {
-    await page.mouse.move(svgBox.x + svgBox.width / 2, svgBox.y + svgBox.height - 15)
+  // 3) dataZoom 滑块拖拽（x 滑块在底部）；canvas 下无 svg，用图表容器定位
+  // 注意：boundingBox() 对空 locator 会等满超时，必须先判存在
+  const dragBox = (await chart.locator('svg').count())
+    ? await chart.locator('svg').first().boundingBox()
+    : await chart.boundingBox()
+  if (dragBox) {
+    await page.mouse.move(dragBox.x + dragBox.width / 2, dragBox.y + dragBox.height - 15)
     await page.mouse.down()
-    await page.mouse.move(svgBox.x + svgBox.width * 0.3, svgBox.y + svgBox.height - 15, { steps: 5 })
+    await page.mouse.move(dragBox.x + dragBox.width * 0.3, dragBox.y + dragBox.height - 15, { steps: 5 })
     await page.mouse.up()
     await sweepMouse(chart)
   }
