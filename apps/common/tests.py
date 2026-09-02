@@ -8,6 +8,7 @@ from datetime import datetime
 from apps.accounts.models import UserSetting
 from .export_naming import (
     EXPORT_TEMPLATE_DEFAULTS,
+    EXPORT_TEMPLATE_VARIABLES,
     sanitize_filename_part,
     resolve_template,
     base_export_context,
@@ -135,7 +136,9 @@ class RenderExportFilenameTests(TestCase):
         self.assertEqual(name, 'gage_m_S1_bad_.xlsx')
 
     def test_defaults_covers_all_export_types(self):
-        self.assertEqual(len(EXPORT_TEMPLATE_DEFAULTS), 8)
+        self.assertEqual(
+            set(EXPORT_TEMPLATE_DEFAULTS), set(EXPORT_TEMPLATE_VARIABLES),
+            '新增导出类型必须同时补 defaults 与 variables')
         for key, default in EXPORT_TEMPLATE_DEFAULTS.items():
             name = render_export_filename(self.user, key, 'xlsx', self.ctx)
             self.assertTrue(name.endswith('.xlsx'), f'{key} default should end with .xlsx: {name}')
