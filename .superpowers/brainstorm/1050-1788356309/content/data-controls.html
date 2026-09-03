@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>分析页 · 数据控制区排版方案对比</title>
+<style>
+@import url("files/design-tokens.css");
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: var(--font-sans); font-size: 14px; }
+body { padding: 0 0 60px; }
+
+.topbar { position: sticky; top: 0; z-index: 9; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 20px; background: var(--card); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-2); }
+.topbar b { font-size: 14px; color: var(--text); }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+.seg button { border: 0; background: transparent; color: var(--text-2); font: inherit; padding: 3px 10px; cursor: pointer; }
+.seg button.on { background: var(--brand); color: #fff; }
+.grow { flex: 1; }
+
+.opt { margin: 22px 20px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--card); overflow-x: auto; }
+.opt > header { display: flex; align-items: baseline; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.opt > header h2 { margin: 0; font-size: 16px; }
+.opt.selected { outline: 2px solid var(--brand); outline-offset: -1px; }
+.thesis { font-size: 12px; color: var(--text-2); }
+.canvas { padding: 14px 16px; width: var(--cw, 1190px); }
+
+/* ── Element Plus 度量复刻（small=24h/12f，default=32h/14f；数值取自 EP 2.x 默认令牌）── */
+.frow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.frow + .frow { margin-top: 0; }
+.flabel { font-size: 14px; color: var(--text-2); font-weight: 500; white-space: nowrap; }
+.sel { display: inline-flex; align-items: center; height: 24px; font-size: 12px; border: 1px solid var(--border);
+  border-radius: 4px; background: var(--bg); padding: 0 6px 0 8px; gap: 6px; white-space: nowrap; }
+.sel .caret { color: var(--text-2); font-size: 10px; }
+.sel.w160 { width: 160px; } .sel.w200 { width: 200px; }
+.sel.file { width: 360px; max-width: 100%; height: 32px; font-size: 14px; }
+.ck { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; white-space: nowrap; }
+.ck .box { width: 14px; height: 14px; border: 1px solid var(--border); border-radius: 3px; background: var(--bg); flex: none; position: relative; }
+.ck.on .box { background: var(--brand); border-color: var(--brand); }
+.ck.on .box::after { content: ""; position: absolute; left: 4px; top: 1px; width: 3px; height: 7px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; font-size: 12px; border-radius: 12px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text-2); white-space: nowrap; cursor: pointer; }
+.chip.on { border-color: var(--brand); color: var(--text); background: color-mix(in srgb, var(--brand) 10%, transparent); }
+.dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.dot.p { background: var(--info); } .dot.s { background: var(--brand); } .dot.v { background: var(--warn); }
+.grp { display: inline-flex; align-items: center; gap: 10px; padding: 0 10px; border-left: 1px solid var(--border); }
+.grp:first-child { padding-left: 0; border-left: 0; }
+.grp > .cap { font-size: 11px; color: var(--text-disabled); letter-spacing: .04em; white-space: nowrap; }
+.btn { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 10px; font-size: 12px; border-radius: 4px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text-2); cursor: pointer; }
+.hint { font-size: 12px; color: var(--text-2); }
+.eff { font-size: 12px; color: var(--text-2); font-family: var(--font-mono); }
+
+/* 左栏卡片（现状 ⚙️ 图表配置） */
+.cols { display: flex; gap: 12px; align-items: flex-start; }
+.panelcard { width: 232px; flex: none; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+.panelcard .ph { padding: 8px 10px; font-size: 13px; border-bottom: 1px solid var(--border); }
+.panelcard .pb { padding: 10px; display: grid; gap: 10px; }
+.sect-l { font-size: 12px; color: var(--text-2); margin-bottom: 4px; }
+.cks { display: flex; flex-wrap: wrap; gap: 6px 12px; }
+.restub { flex: 1; min-width: 0; border: 1px dashed var(--border); border-radius: 6px; padding: 12px; color: var(--text-disabled); font-size: 12px; }
+
+.measure { display: flex; gap: 14px; flex-wrap: wrap; padding: 8px 16px 12px; border-top: 1px dashed var(--border); font-size: 12px; }
+.measure .m { display: flex; gap: 6px; align-items: baseline; }
+.measure .k { color: var(--text-2); } .measure .v { font-family: var(--font-mono); }
+.ok { color: var(--success); } .bad { color: var(--error); } .mid { color: var(--warn); }
+.notes { padding: 0 16px 14px; font-size: 12px; color: var(--text-2); line-height: 1.7; }
+.notes ul { margin: 4px 0 0; padding-left: 18px; }
+
+table.matrix { border-collapse: collapse; width: calc(100% - 40px); margin: 26px 20px 0; font-size: 12px; }
+table.matrix th, table.matrix td { border: 1px solid var(--border); padding: 5px 7px; text-align: center; }
+table.matrix th { background: var(--bg-2, var(--bg)); color: var(--text-2); font-weight: 500; }
+table.matrix td.ctl { text-align: left; white-space: nowrap; color: var(--text); }
+table.matrix td.ctl .dot { display: inline-block; margin-right: 6px; }
+.y { color: var(--success); } .n { color: var(--text-disabled); } .x { color: var(--error); font-weight: 600; }
+.legend { margin: 6px 20px 0; font-size: 12px; color: var(--text-2); }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <b>数据控制区 · 4 个方案</b>
+  <span>画布宽度</span>
+  <span class="seg" id="wseg">
+    <button data-w="1190" class="on">1190（1440 屏实测内容宽）</button>
+    <button data-w="1440">1440</button>
+    <button data-w="1024">1024</button>
+    <button data-w="860">860</button>
+  </span>
+  <span class="grow"></span>
+  <span class="dot p"></span>参数候选
+  <span class="dot s"></span>样本行
+  <span class="dot v"></span>显示裁剪
+  <button class="btn" id="themeBtn">🌙 night</button>
+</div>
+
+<div class="legend">
+  控件度量取自 Element Plus 2.x 默认值（small 控件高 24 / 字号 12，default 高 32 / 字号 14），
+  文字宽度按真实 <code>design-tokens.css</code> 字体栈在本页实时测量；数据取自
+  <code>tasks/dump_analysis_preview_data.py</code> 导出的真实接口结果（生成于 2026-09-01 23:29）。
+</div>
+
+<!-- ══════════════ A · 现状 ══════════════ -->
+<section class="opt" data-choice="A-current" onclick="toggleSelect(this)">
+  <header>
+    <h2>A · 现状</h2>
+    <span class="thesis">页头只管文件+异常值，5 个筛选藏在左栏「⚙️ 图表配置」里，与显示元素平级</span>
+    <span class="grow"></span><span class="hint">基线，不参与选择</span>
+  </header>
+  <div class="canvas" style="--cw:1190px">
+    <div class="frow"><span class="flabel">选择数据文件</span><span class="sel file">BPD80690XBAC-FB_2605290016_TTTCL0HX3_01_CP1_20260603035104.csv<span class="caret">▾</span></span></div>
+    <div class="frow"><span class="flabel">异常值处理</span><span class="sel w160">不处理<span class="caret">▾</span></span></div>
+    <div class="frow"><span class="flabel" style="opacity:.35">敏感度</span><span class="sel w200" style="opacity:.35">严格 (1.5x IQR)<span class="caret">▾</span></span><span class="hint" style="opacity:.35">仅在异常值处理≠不处理时出现</span></div>
+    <div class="cols" style="margin-top:12px">
+      <div class="panelcard"><div class="ph">⚙️ 图表配置</div><div class="pb">
+        <div><div class="sect-l">显示元素</div><div class="cks"><span class="ck on"><span class="box"></span>Limit</span><span class="ck"><span class="box"></span>正态分布</span></div></div>
+        <div><div class="sect-l">范围类型</div><span class="sel w160">RowDataLimit<span class="caret">▾</span></span></div>
+        <div><div class="sect-l">数据筛选</div><div class="cks">
+          <span class="ck"><span class="box"></span>忽略无Limit</span><span class="ck"><span class="box"></span>忽略无测试值</span>
+          <span class="ck"><span class="box"></span>仅用Pass数据(Bin1)</span><span class="ck"><span class="box"></span>仅显示Fail测试项</span>
+          <span class="ck"><span class="box"></span>仅显示低CPK项</span></div></div>
+      </div></div>
+      <div class="restub">图表区（直方图 / QQ / 箱线 / 站点表）…</div>
+    </div>
+  </div>
+  <div class="measure" data-measure>
+    <span class="m"><span class="k">页头占</span><span class="v">3 行</span></span>
+    <span class="m"><span class="k">数据类控件分布</span><span class="v bad">2 处（页头 + 左栏）</span></span>
+    <span class="m"><span class="k">相关性 tab 再露一份</span><span class="v bad">是</span></span>
+  </div>
+  <div class="notes"><ul>
+    <li><b>实测</b>：页头 3 行、合计 80px 高，行间 <code>margin-top:0px</code>（AnalysisPage.vue:319-325 把 <code>margin-bottom</code> 压成 0）—— 三行零间距叠着，没有呼吸感。</li>
+    <li><b>实测</b>：可用宽 1158px 的画布里，三行各只用掉 456 / 242 / 430px —— 最宽的一行也才占 39%，右半边整片空白。</li>
+    <li>「异常值处理」+「敏感度」两行合起来 684px，并到一行还剩 474px 富余 —— 现状的高度不是宽度逼出来的。</li>
+    <li>勾「仅显示低CPK项」会让参数下拉重算，但它和「Limit 线显不显示」排在同一张卡里，用户无法预判哪个会触发重新取数。</li>
+  </ul></div>
+</section>
+
+<!-- ══════════════ B · 双行控制带 ══════════════ -->
+<section class="opt" data-choice="B-band-two-row" onclick="toggleSelect(this)">
+  <header>
+    <h2>B · 页头双行控制带（推荐）</h2>
+    <span class="thesis">第 1 行文件 + 生效摘要，第 2 行按语义分三组的控制带；左栏只留显示项</span>
+    <span class="grow"></span><span class="hint">点击选中</span>
+  </header>
+  <div class="canvas">
+    <div class="frow"><span class="flabel">选择数据文件</span><span class="sel file">BPD80690XBAC-FB_2605290016_TTTCL0HX3_01_CP1_20260603035104.csv<span class="caret">▾</span></span><span class="eff">生效：116 / 131 测试项 · 4401 / 4401 行</span></div>
+    <div class="frow band" data-band="B" style="margin-top:8px">
+      <span class="grp"><span class="cap">测试项</span>
+        <span class="chip on"><span class="dot p"></span>忽略无Limit</span>
+        <span class="chip"><span class="dot p"></span>忽略无测试值</span>
+        <span class="chip"><span class="dot p"></span>仅Fail项</span>
+        <span class="chip"><span class="dot p"></span>仅低CPK</span></span>
+      <span class="grp"><span class="cap">样本</span>
+        <span class="chip"><span class="dot s"></span>仅Pass(Bin1)</span></span>
+      <span class="grp"><span class="cap">异常值</span>
+        <span class="sel w160">裁剪范围<span class="caret">▾</span></span>
+        <span class="sel w200"><span class="dot v" style="margin-right:4px"></span>宽松 3.0x<span class="caret">▾</span></span></span>
+    </div>
+    <div class="cols" style="margin-top:12px">
+      <div class="panelcard"><div class="ph">⚙️ 图表显示</div><div class="pb">
+        <div><div class="sect-l">显示元素</div><div class="cks"><span class="ck on"><span class="box"></span>Limit</span><span class="ck"><span class="box"></span>正态分布</span><span class="ck"><span class="box"></span>3σ线</span></div></div>
+        <div><div class="sect-l">范围类型</div><span class="sel w160">RowDataLimit<span class="caret">▾</span></span></div>
+        <div><div class="sect-l">柱宽 / 柱体重合</div><span class="hint">—— 滑杆 ——</span></div>
+      </div></div>
+      <div class="restub">图表区：控件改一次，页头整条进 loading（“这是全页开关”的视觉反馈）</div>
+    </div>
+  </div>
+  <div class="measure" data-measure>
+    <span class="m"><span class="k">控制带单行需</span><span class="v" data-k="need">–</span></span>
+    <span class="m"><span class="k">当前画布</span><span class="v" data-k="cw">–</span></span>
+    <span class="m"><span class="k">实占</span><span class="v" data-k="rows">–</span></span>
+    <span class="m"><span class="k">页头总高</span><span class="v" data-k="h">–</span></span>
+    <span class="m"><span class="k">左栏省下</span><span class="v ok">5 个复选框 + 1 个分组标题</span></span>
+  </div>
+  <div class="notes"><ul>
+    <li><b>实测</b>：控制带单行需 1045px（测试项组 435 + 样本组 151 + 异常值组 435 + 2×12 间距），画布 ≥1080px 才不折行。1440 屏内容宽 1190px → 余 110px 稳定单行；1024 屏折成 2 行，仍比现状 3 行矮。</li>
+    <li>组的顺序＝作用域顺序：<b>筛哪些测试项 → 筛哪些行 → 怎么裁显示</b>，读一遍就知道会影响什么。</li>
+    <li>chip 上的色点即作用域标记，配合底部生效矩阵，把「全页生效 / 仅候选集 / 不含晶圆图」写在控件脸上。</li>
+    <li>依赖：需先把 <code>iqr_multiplier</code> 传到 qqplot / serial_distribution（现状后端用硬编码 1.5，选「宽松」时 QQ 图与序列图仍按 1.5 裁，见 QQPlotChart.vue:86-88、SerialChart.vue:75-77）。</li>
+  </ul></div>
+</section>
+
+<!-- ══════════════ C · 常驻 + 更多 ══════════════ -->
+<section class="opt" data-choice="C-collapse" onclick="toggleSelect(this)">
+  <header>
+    <h2>C · 单行常驻 + 更多筛选</h2>
+    <span class="thesis">页头只留高频 3 件，其余进弹层；窄屏也不折行</span>
+    <span class="grow"></span><span class="hint">点击选中</span>
+  </header>
+  <div class="canvas">
+    <div class="frow band" data-band="C">
+      <span class="sel file" style="width:300px">TTTCL0HX3_01_CP1<span class="caret">▾</span></span>
+      <span class="chip on"><span class="dot p"></span>忽略无Limit</span>
+      <span class="chip"><span class="dot s"></span>仅Pass(Bin1)</span>
+      <span class="sel w160">裁剪范围<span class="caret">▾</span></span>
+      <span class="btn">更多筛选 (2) ▾</span>
+      <span class="eff" style="margin-left:auto">116 / 131 项 · 4401 行</span>
+    </div>
+    <div class="cols" style="margin-top:10px">
+      <div class="panelcard" style="width:300px"><div class="ph">更多筛选</div><div class="pb">
+        <div class="cks" style="flex-direction:column;align-items:flex-start">
+          <span class="ck"><span class="box"></span>忽略无测试值 <span class="hint">→ 仅收窄测试项列表</span></span>
+          <span class="ck"><span class="box"></span>仅显示Fail测试项 <span class="hint">→ 需文件含 Bin 列</span></span>
+          <span class="ck"><span class="box"></span>仅显示低CPK项 <span class="hint">→ 阈值随敏感度联动</span></span>
+        </div>
+        <div><div class="sect-l">敏感度</div><span class="sel w200">宽松 (3.0x IQR)<span class="caret">▾</span></span></div>
+      </div></div>
+      <div class="panelcard"><div class="ph">⚙️ 图表显示</div><div class="pb">
+        <div><div class="sect-l">显示元素</div><div class="cks"><span class="ck on"><span class="box"></span>Limit</span><span class="ck"><span class="box"></span>正态分布</span></div></div>
+        <div><div class="sect-l">范围类型</div><span class="sel w160">RowDataLimit<span class="caret">▾</span></span></div>
+      </div></div>
+      <div class="restub">图表区</div>
+    </div>
+  </div>
+  <div class="measure" data-measure>
+    <span class="m"><span class="k">控制行单行需</span><span class="v" data-k="need">–</span></span>
+    <span class="m"><span class="k">当前画布</span><span class="v" data-k="cw">–</span></span>
+    <span class="m"><span class="k">实占</span><span class="v" data-k="rows">–</span></span>
+    <span class="m"><span class="k">成本</span><span class="v mid">新增弹层 + 计数徽标 + 展开态持久化</span></span>
+  </div>
+  <div class="notes"><ul>
+    <li><b>实测</b>：常驻行单行需 963px，画布 ≥1000px 就不折行 —— 但这是把文件选择框从 360px 压到 300px 换来的，真实文件名 62 字符（<code>BPD80690XBAC-FB_2605290016_TTTCL0HX3_01_CP1_20260603035104.csv</code>）只能靠省略号 + tooltip。</li>
+    <li>最省高度，但低频项被藏进弹层 —— 「仅显示Fail测试项」这类一旦藏起来，用户会以为功能没了（本项目历史上多次出现"控件不在视野＝功能不存在"的反馈）。</li>
+    <li>弹层内容不在 DOM 常驻，现有 e2e 定位器需整体改写。</li>
+  </ul></div>
+</section>
+
+<!-- ══════════════ D · 不收拢 ══════════════ -->
+<section class="opt" data-choice="D-scoped-inline" onclick="toggleSelect(this)">
+  <header>
+    <h2>D · 不收拢，只做去重 + 就地标作用域</h2>
+    <span class="thesis">筛选留在各 tab 内，但每个控件写明"影响哪些图"，并删掉重复暴露</span>
+    <span class="grow"></span><span class="hint">点击选中</span>
+  </header>
+  <div class="canvas">
+    <div class="frow"><span class="flabel">选择数据文件</span><span class="sel file">BPD80690XBAC-FB_2605290016_TTTCL0HX3_01_CP1_20260603035104.csv<span class="caret">▾</span></span></div>
+    <div class="frow"><span class="flabel">异常值处理</span><span class="sel w160">裁剪范围<span class="caret">▾</span></span><span class="flabel">敏感度</span><span class="sel w200"><span class="dot v" style="margin-right:4px"></span>宽松 3.0x<span class="caret">▾</span></span></div>
+    <div class="cols" style="margin-top:12px">
+      <div class="panelcard" style="width:300px"><div class="ph">⚙️ 图表配置</div><div class="pb">
+        <div><div class="sect-l">数据筛选 <span class="hint">（影响测试项列表与直方图，不含晶圆图）</span></div><div class="cks" style="flex-direction:column;align-items:flex-start">
+          <span class="ck on"><span class="box"></span><span class="dot p"></span>忽略无Limit</span>
+          <span class="ck"><span class="box"></span><span class="dot p"></span>忽略无测试值</span>
+          <span class="ck"><span class="box"></span><span class="dot s"></span>仅用Pass数据(Bin1)</span>
+          <span class="ck"><span class="box"></span><span class="dot p"></span>仅显示Fail测试项</span>
+          <span class="ck"><span class="box"></span><span class="dot p"></span>仅显示低CPK项</span>
+        </div></div>
+      </div></div>
+      <div class="restub">图表区。相关性 tab 内的同名筛选面板删除，改为「沿用左侧数据筛选」一行说明 + 跳转。</div>
+    </div>
+  </div>
+  <div class="measure" data-measure>
+    <span class="m"><span class="k">改动面</span><span class="v ok">最小（文案 + 删重复）</span></span>
+    <span class="m"><span class="k">页头高度</span><span class="v">不变（2 行）</span></span>
+    <span class="m"><span class="k">跨 tab 一致性</span><span class="v bad">仍靠用户自己确认每个 tab</span></span>
+  </div>
+  <div class="notes"><ul>
+    <li>契约最诚实：既然参数候选集筛选对单参数图本就无意义（后端只在候选列表路径生效），就不声称"页面级"。</li>
+    <li>但「一个开关三处出现」的心智负担留在原地，多文件 tab 仍是独立一套 <code>multi*</code> 状态。</li>
+  </ul></div>
+</section>
+
+<!-- ══════════════ 生效矩阵 ══════════════ -->
+<table class="matrix">
+  <tr><th style="text-align:left">控件 ＼ 数据出口</th><th>参数列表</th><th>直方图</th><th>QQ图</th><th>序列图</th><th>箱线图</th><th>站点统计</th><th>晶圆图</th><th>相关性</th><th>多文件</th></tr>
+  <tr><td class="ctl"><span class="dot p"></span>忽略无Limit</td><td class="y">✓</td><td class="y">✓</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="x">✗</td><td class="mid">部分</td></tr>
+  <tr><td class="ctl"><span class="dot p"></span>忽略无测试值</td><td class="y">✓</td><td class="y">✓</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="y">✓</td><td class="y">✓</td></tr>
+  <tr><td class="ctl"><span class="dot p"></span>仅显示Fail测试项</td><td class="y">✓</td><td class="y">✓</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="y">✓</td><td class="y">✓</td></tr>
+  <tr><td class="ctl"><span class="dot p"></span>仅显示低CPK项</td><td class="y">✓</td><td class="y">✓</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="y">✓</td><td class="y">✓</td></tr>
+  <tr><td class="ctl"><span class="dot s"></span>仅用Pass数据(Bin1)</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="x">不该生效</td><td class="y">✓</td><td class="y">✓</td></tr>
+  <tr><td class="ctl"><span class="dot v"></span>异常值处理（前端裁剪）</td><td class="n">—</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="y">✓</td><td class="n">—</td></tr>
+  <tr><td class="ctl"><span class="dot v"></span>敏感度 iqr_multiplier</td><td class="y">✓</td><td class="y">✓</td><td class="x">✗</td><td class="x">✗</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="y">✓</td><td class="x">✗</td></tr>
+</table>
+<div class="legend">
+  <b>✓</b> 后端已实现且前端已传 &nbsp;·&nbsp; <b>—</b> 语义不适用（单参数图没有"候选集"可言；晶圆图本身按 Pass/Fail 判定，Bin1 会抹掉 fail die）&nbsp;
+  <b>✗</b> 用户以为会生效但实际没落实：相关性接口的 <code>ignore_no_limit</code> 解析后从不使用（analysis_views.py:422、statistics_views.py:208）；qqplot / serial / 多文件未传 <code>iqr_multiplier</code>，后端退回硬编码 1.5。
+</div>
+
+<script>
+const CW_KEY = 'preview-cw';
+let cw = parseInt(localStorage.getItem(CW_KEY) || '1190', 10);
+
+function lineCount(kids) {
+  const rects = kids.map(k => k.getBoundingClientRect()).sort((a, b) => a.top - b.top);
+  let lines = 0, bandBottom = -Infinity;
+  for (const r of rects) {
+    if (r.top >= bandBottom) { lines++; bandBottom = r.bottom; }
+    else bandBottom = Math.max(bandBottom, r.bottom);
+  }
+  return lines;
+}
+
+function measure() {
+  document.querySelectorAll('.opt').forEach(opt => {
+    const canvas = opt.querySelector('.canvas');
+    if (canvas) canvas.style.setProperty('--cw', cw + 'px');
+    const band = opt.querySelector('.band');
+    const box = opt.querySelector('[data-measure]');
+    if (!band || !box) return;
+    const cs = getComputedStyle(band);
+    const gap = parseFloat(cs.columnGap || cs.gap || 0);
+    const kids = [...band.children];
+    const need = kids.reduce((s, k) => s + k.offsetWidth, 0) + gap * Math.max(0, kids.length - 1);
+    const rows = lineCount(kids);
+    const set = (k, v, cls) => {
+      const el = box.querySelector('[data-k="' + k + '"]');
+      if (!el) return;
+      el.textContent = v;
+      if (cls) el.className = 'v ' + cls;
+    };
+    set('need', Math.round(need) + 'px');
+    set('cw', cw + 'px');
+    set('rows', rows + ' 行', rows === 1 ? 'ok' : 'mid');
+    set('h', Math.round(opt.querySelector('.canvas').offsetHeight) + 'px');
+  });
+}
+
+document.getElementById('wseg').addEventListener('click', e => {
+  const b = e.target.closest('button[data-w]');
+  if (!b) return;
+  cw = parseInt(b.dataset.w, 10);
+  localStorage.setItem(CW_KEY, String(cw));
+  document.querySelectorAll('#wseg button').forEach(x => x.classList.toggle('on', x === b));
+  requestAnimationFrame(measure);
+});
+document.querySelectorAll('#wseg button').forEach(x => x.classList.toggle('on', parseInt(x.dataset.w, 10) === cw));
+
+document.querySelectorAll('.chip, .ck').forEach(el => el.addEventListener('click', ev => {
+  ev.stopPropagation();
+  el.classList.toggle('on');
+  requestAnimationFrame(measure);
+}));
+
+document.getElementById('themeBtn').addEventListener('click', e => {
+  e.stopPropagation();
+  const next = document.documentElement.dataset.theme === 'night' ? 'light' : 'night';
+  document.documentElement.dataset.theme = next;
+  e.target.textContent = next === 'night' ? '☀️ light' : '🌙 night';
+  requestAnimationFrame(measure);
+});
+
+window.addEventListener('resize', () => requestAnimationFrame(measure));
+document.fonts && document.fonts.ready.then(measure);
+requestAnimationFrame(measure);
+setTimeout(measure, 300);
+</script>
+</body>
+</html>

@@ -1,0 +1,171 @@
+/**
+ * LQ-DataPrase Design Tokens · 落地版
+ *
+ * 架构：① Primitive（--p-*，主题无关）→ ② Semantic（双主题唯一取色入口）
+ * 组件层 token 暂缓（见 docs/reference/ui-design-guide.md §10），组件直接用语义层。
+ *
+ * 状态：唯一 token 事实来源（variables.css 已于 2026-08-29 删除）；旧变量迁移映射见指南 §9。
+ * 依据：docs/reference/ui-design-guide.md · docs/plans/design-system-preview.html
+ */
+
+/* ============ ① Primitive · 色阶（主题无关，从现有 light/night 配色提炼） ============ */
+:root {
+  --p-blue-50: #eff6ff; --p-blue-100: #dbeafe; --p-blue-200: #bfdbfe; --p-blue-300: #93c5fd;
+  --p-blue-400: #60a5fa; --p-blue-500: #3b82f6; --p-blue-600: #2563eb; --p-blue-700: #1d4ed8;
+  --p-blue-800: #1e40af; --p-blue-900: #1e3a8a;
+
+  --p-amber-100: #fef3c7; --p-amber-200: #fde68a; --p-amber-300: #ffd54f; --p-amber-400: #fbc02d;
+  --p-amber-500: #f9a825; --p-amber-600: #f59e0b; --p-amber-700: #c17900; --p-amber-800: #92400e;
+
+  --p-teal-100: #d1fae5; --p-teal-200: #a7f3d0; --p-teal-300: #6ee7b7; --p-teal-400: #38ef7d;
+  --p-teal-500: #10b981; --p-teal-600: #11998e; --p-teal-700: #047857; --p-teal-800: #065f46;
+
+  --p-red-100: #fee2e2; --p-red-200: #fecaca; --p-red-300: #fca5a5; --p-red-400: #f87171;
+  --p-red-500: #f5576c; --p-red-600: #dc2626; --p-red-700: #b91c1c; --p-red-800: #991b1b;
+
+  --p-sky-100: #e0f2fe; --p-sky-200: #bae6fd; --p-sky-300: #7dd3fc; --p-sky-400: #00f2fe;
+  --p-sky-500: #0ea5e9; --p-sky-600: #4facfe; --p-sky-700: #0369a1; --p-sky-800: #075985;
+
+  --p-slate-50: #fafbfc; --p-slate-100: #f3f4f6; --p-slate-200: #e5e7eb; --p-slate-300: #d1d5db;
+  --p-slate-400: #9ca3af; --p-slate-500: #6b7280; --p-slate-600: #4b5563; --p-slate-700: #374151;
+  --p-slate-800: #1f2937; --p-slate-850: #1a1a2e; --p-slate-900: #16213e; --p-slate-950: #131327;
+
+  /* ① Primitive · 间距（4px 基数） */
+  --p-space-1: 4px; --p-space-2: 8px; --p-space-3: 12px; --p-space-4: 16px; --p-space-5: 20px;
+  --p-space-6: 24px; --p-space-8: 32px; --p-space-10: 40px; --p-space-12: 48px; --p-space-16: 64px;
+
+  /* ① Primitive · 圆角 / 字号 / 字重 */
+  --p-radius-xs: 4px; --p-radius-sm: 6px; --p-radius-md: 8px; --p-radius-lg: 12px;
+  --p-radius-xl: 16px; --p-radius-full: 999px;
+  --p-fs-xs: 11px; --p-fs-sm: 12px; --p-fs-md: 12.5px; --p-fs-base: 14px; --p-fs-lg: 16px;
+  --p-fs-xl: 18px; --p-fs-2xl: 22px; --p-fs-3xl: 26px; --p-fs-4xl: 36px;
+  --p-fw-regular: 400; --p-fw-medium: 500; --p-fw-semibold: 600; --p-fw-bold: 700; --p-fw-extrabold: 800;
+
+  /* ① Primitive · 字体（唯一事实来源；typography.ts / echarts-theme.ts 必须与此同步；
+     单行书写：fonts.spec 用 getPropertyValue 断言字面一致，多行会保留换行空白） */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'SF Mono', 'Cascadia Mono', 'Consolas', 'Liberation Mono', 'Menlo', 'Courier New', monospace;
+}
+
+/* ============ ② Semantic · Light ============ */
+:root,
+:root[data-theme='light'],
+.force-light {
+  color-scheme: light;
+  /* 表面 */
+  --bg: var(--p-slate-50); --bg-2: var(--p-slate-100); --bg-3: var(--p-slate-200);
+  --card: #ffffff; --card-glass: rgba(255, 255, 255, 0.92); --overlay: rgba(15, 23, 42, 0.45);
+  /* 文本 */
+  --text: var(--p-slate-800); --text-2: var(--p-slate-500); --text-3: var(--p-slate-400);
+  --text-disabled: var(--p-slate-300); --text-inverse: #ffffff;
+  /* 边框 */
+  --border: var(--p-slate-200); --border-2: var(--p-slate-300);
+  /* 品牌（与 element-plus-theme.css light/night 块同源，指南 §6.3） */
+  --brand: var(--p-blue-600); --brand-2: var(--p-blue-700);
+  --grad-brand: linear-gradient(135deg, var(--p-blue-700), var(--p-blue-600));
+  --on-brand: #ffffff;
+  --active-bg: color-mix(in srgb, var(--brand) 10%, transparent);
+  --focus-ring: color-mix(in srgb, var(--brand) 35%, transparent);
+  /* 状态色（与 EP --el-color-* 对齐，见指南 §6.3） */
+  --success: var(--p-teal-700); --success-2: var(--p-teal-500);
+  --warn: var(--p-amber-800); --warn-2: var(--p-amber-600);
+  --error: var(--p-red-700); --error-2: var(--p-red-600);
+  --info: var(--p-sky-700); --info-2: var(--p-sky-500);
+  --grad-success: linear-gradient(135deg, var(--p-teal-700), var(--p-teal-500));
+  --grad-warn: linear-gradient(135deg, var(--p-amber-800), var(--p-amber-600));
+  --grad-error: linear-gradient(135deg, var(--p-red-700), var(--p-red-600));
+  --grad-info: linear-gradient(135deg, var(--p-sky-700), var(--p-sky-500));
+  /* 图表（ECharts JS 侧映射见指南 §6.2；序列色切换前须重跑 CVD 验证） */
+  --chart-1: var(--p-blue-600); --chart-2: var(--p-teal-500); --chart-3: var(--p-amber-600);
+  --chart-4: var(--p-red-600); --chart-5: var(--p-sky-500); --chart-6: var(--p-slate-500);
+  --chart-7: var(--p-teal-600); --chart-8: var(--p-blue-400);
+  --bin-pass: var(--p-teal-500);
+  --spc-ucl: var(--p-teal-500); --spc-cl: var(--p-slate-400); --spc-lcl: var(--p-red-700);
+  --bar-grid: #eef0f3;
+  /* 阴影 */
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06);
+  --shadow-lg: 0 8px 24px rgba(15, 23, 42, 0.14), 0 4px 12px rgba(15, 23, 42, 0.08);
+  /* chrome */
+  --sidebar-bg: #ffffff; --topbar-bg: rgba(255, 255, 255, 0.92);
+  --row-stripe: rgba(15, 23, 42, 0.015);
+}
+
+/* ============ ② Semantic · Night ============ */
+:root[data-theme='night'],
+.force-night {
+  color-scheme: dark;
+  /* 表面 */
+  --bg: var(--p-slate-850); --bg-2: var(--p-slate-900); --bg-3: rgba(255, 255, 255, 0.05);
+  --card: rgba(255, 255, 255, 0.055); --card-glass: rgba(19, 19, 39, 0.88);
+  --overlay: rgba(5, 8, 20, 0.60);
+  /* 文本 */
+  --text: #ffffff; --text-2: rgba(255, 255, 255, 0.76); --text-3: rgba(255, 255, 255, 0.55);
+  --text-disabled: rgba(255, 255, 255, 0.32); --text-inverse: var(--p-slate-850);
+  /* 边框 */
+  --border: rgba(255, 255, 255, 0.10); --border-2: rgba(255, 255, 255, 0.18);
+  /* 品牌（金黄，与 element-plus-theme.css --el-color-primary 同源） */
+  --brand: var(--p-amber-500); --brand-2: var(--p-amber-300);
+  --grad-brand: linear-gradient(135deg, var(--p-amber-700), var(--p-amber-500) 55%, var(--p-amber-300));
+  --on-brand: #ffffff;
+  --active-bg: color-mix(in srgb, var(--brand) 12%, transparent);
+  --focus-ring: color-mix(in srgb, var(--brand) 40%, transparent);
+  /* 状态色（与 EP --el-color-* 同源，2026-08-26 统一） */
+  --success: var(--p-teal-600); --success-2: var(--p-teal-400);
+  --warn: var(--p-amber-500); --warn-2: var(--p-amber-300);
+  --error: var(--p-red-500); --error-2: #f77889;
+  --info: var(--p-sky-600); --info-2: var(--p-sky-400);
+  --grad-success: linear-gradient(135deg, #0d7a6f, var(--p-teal-600) 55%, var(--p-teal-400));
+  --grad-warn: linear-gradient(135deg, var(--p-amber-700), var(--p-amber-500) 55%, var(--p-amber-300));
+  --grad-error: linear-gradient(135deg, var(--p-red-500), #f093fb);
+  --grad-info: linear-gradient(135deg, var(--p-sky-600), var(--p-sky-400));
+  /* 图表 */
+  --chart-1: var(--p-amber-500); --chart-2: var(--p-teal-400); --chart-3: var(--p-amber-300);
+  --chart-4: var(--p-red-500); --chart-5: var(--p-sky-600); --chart-6: var(--p-sky-400);
+  --chart-7: #f093fb; --chart-8: rgba(255, 255, 255, 0.62);
+  --bin-pass: var(--p-teal-400);
+  --spc-ucl: var(--p-teal-400); --spc-cl: rgba(255, 255, 255, 0.5); --spc-lcl: var(--p-red-500);
+  --bar-grid: rgba(255, 255, 255, 0.04);
+  /* 阴影 */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
+  /* chrome */
+  --sidebar-bg: var(--p-slate-950); --topbar-bg: rgba(19, 19, 39, 0.92);
+  --row-stripe: rgba(255, 255, 255, 0.025);
+}
+
+/* ============ 兼容层 · 旧非颜色变量（自 variables.css 搬入，保名；渐进替换为 --p-* 属低优先） ============ */
+:root {
+  /* 字体大小（rem 档位；新代码请用 --p-fs-*） */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+  --text-4xl: 2.25rem;
+  /* 字体粗细（新代码请用 --p-fw-*） */
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+  /* 行高 */
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.75;
+  /* 间距（rem 档位；新代码请用 --p-space-*） */
+  --spacing-0: 0;
+  --spacing-1: 0.25rem;
+  --spacing-2: 0.5rem;
+  --spacing-3: 0.75rem;
+  --spacing-4: 1rem;
+  --spacing-5: 1.25rem;
+  --spacing-6: 1.5rem;
+  --spacing-8: 2rem;
+  --spacing-10: 2.5rem;
+  --spacing-12: 3rem;
+  --spacing-16: 4rem;
+  --spacing-20: 5rem;
+}
