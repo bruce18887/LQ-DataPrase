@@ -28,9 +28,11 @@
 import { ref, computed, watch, nextTick, onMounted, onActivated, onBeforeUnmount } from 'vue'
 import { initEchartsWhenReady, observeContainerResize, type EchartsHandle } from '../../../utils/echarts-init'
 import { useThemeStore } from '../../../stores/theme'
+import { useEChartsTheme } from '../../../utils/echarts-theme'
 import { formatPercent } from '../../../utils/chart-bar'
 
 const themeStore = useThemeStore()
+const { colors } = useEChartsTheme()
 
 const props = withDefaults(defineProps<{
   siteYieldData: { Site: string; Yield: string | number; Total: number; PassCount: number }[]
@@ -81,7 +83,15 @@ function buildSiteYieldBarOption() {
     return isNaN(v) ? 0 : v
   })
 
-  const getYieldColor = (y: number) => y >= 95 ? 'var(--success)' : y < 90 ? 'var(--error)' : 'var(--warn)'
+  // 良率阈值色：取 useEChartsTheme 的 JS 语义色，不能写 'var(--success)'。
+  // zrender 不解析 CSS 变量，写进去会得到无效颜色（柱子变黑/透明），
+  // 双主题下良率柱与折线全部失色——这是数据可视化失真，不是样式细节。
+  // 在 buildOption 内取 colors.value，主题切换重建 option 时自动生效。
+  const successC = colors.value.successColor
+  const warnC = colors.value.warnColor
+  const errorC = colors.value.errorColor
+  const infoC = colors.value.infoColor
+  const getYieldColor = (y: number) => y >= 95 ? successC : y < 90 ? errorC : warnC
 
   return {
     tooltip: {
@@ -115,13 +125,13 @@ function buildSiteYieldBarOption() {
         label: { show: true, position: 'top', formatter: (p: any) => `${formatPercent(Number(p.value))}%`, fontSize: 12, fontWeight: 'bold' },
       },
       {
-        // 良率折线：串起各 Site 走势（--info 蓝）
+        // 良率折线：串起各 Site 走势（--info 语义色，取 JS 常量）
         type: 'line',
         data: siteYields,
         symbol: 'circle',
         symbolSize: 6,
-        lineStyle: { color: 'var(--info)', width: 2 },
-        itemStyle: { color: 'var(--info)' },
+        lineStyle: { color: infoC, width: 2 },
+        itemStyle: { color: infoC },
         tooltip: { show: false },
         z: 3,
       },

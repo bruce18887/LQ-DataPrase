@@ -40,7 +40,7 @@
     </div>
     <div class="card-footer">
       <el-checkbox v-model="deleteConfirmed" :disabled="!canDelete">
-        <span :style="{ color: canDelete ? 'var(--color-danger)' : 'var(--text-3)', fontWeight: 600 }">
+        <span :style="{ color: canDelete ? 'var(--error)' : 'var(--text-3)', fontWeight: 600 }">
           {{ canDelete ? '我已确认要删除全部重复项' : '仅管理员可删除重复文件' }}
         </span>
       </el-checkbox>

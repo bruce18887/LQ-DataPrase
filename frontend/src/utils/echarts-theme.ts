@@ -66,6 +66,20 @@ export function useEChartsTheme() {
         tooltipBorder: 'rgba(255, 255, 255, 0.18)',
         tooltipText: '#ffffff',
 
+        // 语义状态色：与 design-tokens.css 的 --success/--warn/--error/--info/--brand
+        // 同源（night 分支取 --p-teal-600 / --p-amber-500 / --p-red-500 /
+        // --p-sky-600 / --p-amber-500）。ECharts 走 canvas/svg 渲染，**不解析**
+        // CSS 变量也不解析 color-mix()，所以 setOption 里的颜色必须取这里的
+        // JS 常量；DOM 模板里才用 var(--token)。两个主题分支的键集必须对称，
+        // 否则 TS 会把返回值推成联合类型、访问时报错。
+        successColor: '#11998e',
+        warnColor: '#f9a825',
+        errorColor: '#f5576c',
+        infoColor: '#4facfe',
+        brandColor: '#f9a825',
+        /** 品牌色 45% 透明——替代 CSS color-mix(in srgb, var(--brand) 45%, transparent) */
+        brandColorSoft: 'rgba(249, 168, 37, 0.45)',
+
         // 系列颜色：2026-08-29 新色板（--chart-1..8）CVD 复验未通过
         // （tasks/cvd_verify.mjs：light 灰/青绿 deutan ΔE=7.6、night 浅蓝/粉红 deutan ΔE=13.6），
         // 按指南 §6.2 维持现状；轴系/文本/tooltip 已对齐。
@@ -95,6 +109,14 @@ export function useEChartsTheme() {
         tooltipBg: 'rgba(255, 255, 255, 0.92)',
         tooltipBorder: '#e5e7eb',
         tooltipText: '#1f2937',
+        // 语义状态色：与 night 分支同一组键，取 light 语义层
+        // （--p-teal-700 / --p-amber-800 / --p-red-700 / --p-sky-700 / --p-blue-600）
+        successColor: '#047857',
+        warnColor: '#92400e',
+        errorColor: '#b91c1c',
+        infoColor: '#0369a1',
+        brandColor: '#2563eb',
+        brandColorSoft: 'rgba(37, 99, 235, 0.45)',
         // 系列颜色：同 night 分支说明，CVD 复验未过维持现状
         seriesColors: [
           '#2563eb', // 专业蓝

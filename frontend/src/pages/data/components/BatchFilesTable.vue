@@ -140,7 +140,9 @@ defineExpose({
 }
 
 .bf-error {
-  color: var(--color-danger);
+  /* --color-danger 全项目未定义（只有 --error），声明整条失效 →
+     解析失败图标失去红色警示，双主题下都继承父色。 */
+  color: var(--error);
   display: inline-flex;
   flex-shrink: 0;
 }
