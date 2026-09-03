@@ -122,7 +122,11 @@ function getBackendPath(isDev: boolean): { exe: string; args: string[]; cwd: str
     }
     return {
       exe: venvPython,
-      args: [path.join(projectRoot, 'standalone.py'), '--port', '0'],
+      // --host is passed explicitly (not left to standalone.py's default) so the
+      // loopback-only contract is visible here: main.ts points the renderer at
+      // http://localhost:<port>, and binding 0.0.0.0 would expose the API and
+      // every uploaded test file to the whole subnet.
+      args: [path.join(projectRoot, 'standalone.py'), '--port', '0', '--host', '127.0.0.1'],
       // Python needs the project root as cwd so that the `config` package
       // (and other project packages) are importable.
       cwd: projectRoot,
@@ -135,7 +139,7 @@ function getBackendPath(isDev: boolean): { exe: string; args: string[]; cwd: str
   console.log(`[electron] Backend exe exists: ${fs.existsSync(exePath)}`)
   return {
     exe: exePath,
-    args: ['--port', '0'],
+    args: ['--port', '0', '--host', '127.0.0.1'],
     cwd: resourcesPath,
   }
 }

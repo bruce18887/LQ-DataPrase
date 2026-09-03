@@ -5,6 +5,14 @@ from .models import User, UserSetting, DEFAULT_HIDDEN_COLUMNS
 
 
 class UserSerializer(serializers.ModelSerializer):
+    """Admin-facing representation.
+
+    ``role`` / ``is_active`` stay writable here on purpose: this is the
+    serializer ``UserManagementViewSet`` uses for its CRUD, and that ViewSet is
+    gated by ``FeaturePermission('user_management')`` (administrators only).
+    Self-service profile writes must use :class:`UserProfileSerializer`.
+    """
+
     class Meta:
         model = User
         fields = [
@@ -12,6 +20,31 @@ class UserSerializer(serializers.ModelSerializer):
             'is_active', 'date_joined', 'last_login', 'lockout_until',
         ]
         read_only_fields = ['id', 'date_joined', 'last_login', 'lockout_until']
+
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    """Self-service profile (``PUT /api/v1/auth/profile/``).
+
+    Deliberately narrower than :class:`UserSerializer`. That endpoint only
+    requires ``IsAuthenticated``, and ``FeaturePermission`` re-reads ``role``
+    from the DB on every request — so a writable ``role`` let any viewer
+    promote itself with ``PUT /auth/profile/ {"role": "administrator"}`` and
+    then reach user management / data delete / system config. A writable
+    ``is_active`` likewise allowed self-unlock after a lockout, and a writable
+    ``username`` would rename the login identity. Role and activation changes
+    remain an admin-only action via ``UserManagementViewSet``.
+    """
+
+    class Meta:
+        model = User
+        fields = [
+            'id', 'username', 'email', 'display_name', 'role',
+            'is_active', 'date_joined', 'last_login', 'lockout_until',
+        ]
+        read_only_fields = [
+            'id', 'username', 'role', 'is_active',
+            'date_joined', 'last_login', 'lockout_until',
+        ]
 
 
 class UserCreateSerializer(serializers.ModelSerializer):

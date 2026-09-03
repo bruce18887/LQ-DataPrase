@@ -21,6 +21,11 @@ if _base_dir != BASE_DIR:
 
 DEBUG = True
 
+# Swagger/schema stay routed in development. playwright.config.ts health-checks
+# the backend at /api/schema/, and the packaged build turns this off
+# (config.settings.standalone) so the API surface is not anonymously readable.
+API_DOCS_ENABLED = True
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',

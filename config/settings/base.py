@@ -16,6 +16,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 _SECRET_KEY_DEFAULT = 'django-insecure-b&@*da(*2$=ac%q!!96zhi%=64@$j7u#$vu0qfv34@%no50=)q'
 SECRET_KEY = os.environ.get('SECRET_KEY') or _SECRET_KEY_DEFAULT
 
+# NOTE: the default stays True on purpose. This module is a *mixin* imported by
+# development.py / standalone.py (both of which set DEBUG explicitly), and the
+# SECRET_KEY guard below runs at import time -- defaulting to False here would
+# make ``from config.settings.base import *`` raise ImproperlyConfigured before
+# development.py ever gets to set DEBUG=True, breaking every ``manage.py``
+# invocation that has no SECRET_KEY in the environment. The shipped product uses
+# config.settings.standalone, which hard-codes DEBUG=False.
 DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('1', 'true', 'yes', 'on')
 
 ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', '*').split(',')
@@ -74,6 +81,18 @@ MIDDLEWARE = [
 ]
 
 CORS_ALLOW_ALL_ORIGINS = True
+# ^ Deliberately still permissive. The packaged Electron app loads the SPA via
+# ``win.loadFile()`` (a ``file://`` document, whose Origin header is ``null``)
+# while the API lives on ``http://localhost:<port>`` -- so every production
+# request is cross-origin and narrowing this list would break the shipped app.
+# In browser/dev mode the Vite server *proxies* ``/api`` to :8000, so no CORS
+# is involved there either. The proper fix is to serve the SPA over http:// from
+# Django (same origin) and then turn CORS off entirely; that changes how the
+# packaged app loads and must be validated against a real installer build.
+# Mitigations that ARE in place: the backend binds 127.0.0.1 by default, and
+# ``standalone._bootstrap`` refuses a non-loopback bind with the default
+# credential. Residual risk: a malicious web page can still reach the loopback
+# API -- it just cannot authenticate without a token.
 
 ROOT_URLCONF = 'config.urls'
 
@@ -134,6 +153,13 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
+    # Fail-closed default. All 23 existing DRF views declare permission_classes
+    # explicitly (LoginView uses AllowAny), so this changes no current behaviour
+    # -- it only stops a *future* view that forgets the declaration from being
+    # anonymously reachable, which is what DRF's own AllowAny fallback would do.
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    ),
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
     'DEFAULT_FILTER_BACKENDS': (
@@ -179,6 +205,12 @@ SPECTACULAR_SETTINGS = {
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
 }
+
+# Whether /api/schema/ and its Swagger UI are routed at all. drf-spectacular's
+# views default to AllowAny, so the shipped build turns the routes off rather
+# than exposing the whole endpoint surface anonymously. See config/urls.py.
+# development.py keeps it on (playwright health-checks /api/schema/).
+API_DOCS_ENABLED = True
 
 SESSION_COOKIE_AGE = 1800
 SESSION_SAVE_EVERY_REQUEST = True

@@ -15,6 +15,7 @@ from .serializers import (
     LoginSerializer,
     TokenResponseSerializer,
     UserCreateSerializer,
+    UserProfileSerializer,
     UserSerializer,
     UserSettingSerializer,
 )
@@ -173,7 +174,10 @@ class UserProfileView(APIView):
         return Response(serializer.data)
 
     def put(self, request):
-        serializer = UserSerializer(
+        # UserProfileSerializer, not UserSerializer: this endpoint is open to
+        # every authenticated user, so role/is_active/username must not be
+        # writable here (self-promotion to administrator was a single PUT away).
+        serializer = UserProfileSerializer(
             request.user, data=request.data, partial=True
         )
         serializer.is_valid(raise_exception=True)

@@ -53,7 +53,7 @@ const routes = [
         path: 'admin/users',
         name: 'UserManagement',
         component: () => import('../pages/admin/UserManagement.vue'),
-        meta: { title: '用户管理' },
+        meta: { title: '用户管理', requiresAdmin: true },
       },
       {
         path: 'settings',
@@ -137,6 +137,11 @@ router.beforeEach(async (to, _from, next) => {
   if (to.meta.requiresAuth && !auth.isLoggedIn) {
     next('/login')
   } else if (to.path === '/login' && auth.isLoggedIn) {
+    next('/dashboard')
+  } else if (to.meta.requiresAdmin && !auth.isAdmin) {
+    // 纵深防御：后端 UserManagementViewSet 已由 FeaturePermission
+    // ('user_management') 拦住所有请求（普通用户 403），但没有这道守卫时
+    // 普通用户在地址栏敲 #/admin/users 仍会看到完整的管理页骨架。
     next('/dashboard')
   } else {
     next()
