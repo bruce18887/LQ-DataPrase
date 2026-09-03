@@ -4,8 +4,9 @@ import numpy as np
 import pandas as pd
 
 from apps.analysis.services.statistics import (
+    filter_finite,
     get_columns_with_limits,
-    parse_limit_string,
+    resolve_spec_limits,
     safe_gap,
 )
 
@@ -61,9 +62,12 @@ def _resolve_param_limits(df, metadata, param, series):
     """
     if param not in set(get_columns_with_limits(df, metadata)):
         return None, None
-    lower = parse_limit_string(str(metadata.get('mins', {}).get(param, '')), series)
-    upper = parse_limit_string(str(metadata.get('maxs', {}).get(param, '')), series)
-    return round(float(lower), 6), round(float(upper), 6)
+    # resolve_spec_limits 对缺失/占位/字面 'Min'/'Max' 返回 None，不会再把
+    # 数据自身极值当规格限（那会让多文件图的限值线落在数据边界上，
+    # 并使 CPK 数学上必然 ≤ 0.5）。
+    lower, upper = resolve_spec_limits(metadata, param)
+    return (round(lower, 6) if lower is not None else None,
+            round(upper, 6) if upper is not None else None)
 
 
 def _resolve_multi_range(range_type, combined, global_mean, global_std,
@@ -135,9 +139,12 @@ def compute_multi_lot_distribution(datasets, all_series, param,
         return None
 
     combined = pd.concat(all_series)
-    # Clean data: remove NaN and Inf values
-    combined = combined.dropna()
-    combined = combined[abs(combined) < float('inf')]
+    # Clean data: remove NaN and Inf values. filter_finite also coerces the
+    # dtype — measured on a real CTA8290D file, ``Start_T`` is a pandas 3.0 str
+    # column and ``abs(series)`` raises ``TypeError: bad operand type for
+    # abs(): 'str'``, so one non-numeric column aborted the whole multi-file
+    # request instead of being skipped.
+    combined = filter_finite(combined)
     if len(combined) == 0:
         return None
 
@@ -153,8 +160,7 @@ def compute_multi_lot_distribution(datasets, all_series, param,
 
     for idx, (fid, ds) in enumerate(datasets.items()):
         # Clean per-file data
-        series = ds['series'].dropna()
-        series = series[abs(series) < float('inf')]
+        series = filter_finite(ds['series'])
         if len(series) == 0:
             continue
 

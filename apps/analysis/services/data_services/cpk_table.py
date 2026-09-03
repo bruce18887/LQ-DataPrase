@@ -29,15 +29,9 @@ def compute_cpk_table_data(df, metadata, params):
             'std': round(stats['std'], 6),
             'cp': round(cpk_result['cp'], 4) if cpk_result['cp'] is not None else None,
             'cpk': round(cpk_result['cpk'], 4),
-            'pp': round(cpk_result['pp'], 4) if cpk_result['pp'] is not None else None,
-            'ppk': round(cpk_result['ppk'], 4),
             'cp_level': cpk_result['cp_level'],
             'cpk_level': cpk_result['cpk_level'],
-            'pp_level': cpk_result['pp_level'],
-            'ppk_level': cpk_result['ppk_level'],
             'cp_color': cpk_result['cp_color'],
             'cpk_color': cpk_result['cpk_color'],
-            'pp_color': cpk_result['pp_color'],
-            'ppk_color': cpk_result['ppk_color'],
         }
     return {'results': results, 'count': len(results)}

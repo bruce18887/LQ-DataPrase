@@ -28,9 +28,11 @@ import excelize
 
 from apps.analysis.services.statistics import (
     ensure_numeric, get_bin_column_name, detect_fail_data,
-    get_columns_with_limits, compute_cpk,
+    get_columns_with_limits, compute_cpk, filter_finite, get_1d_from,
 )
 from apps.datafiles.parsers.base import SYSTEM_COLUMNS
+from .columns import measurable_numeric_columns
+from .spec_limits import spec_limits
 from .excelize_helpers import (
     make_plain_header_style, make_plain_data_style,
     make_plain_red_style, make_plain_orange_style,
@@ -236,7 +238,10 @@ def export_to_xlsx_optimized(df: pd.DataFrame, metadata: Dict,
             header_rows.append(row_vals)
             f.set_sheet_row(sheet_name, f"A{row_idx}", row_vals)
 
-        numeric_cols = [col for col in cols if df[col].dtype in ['int64', 'float64']]
+        # 可分析数值列（缺陷 #11）：旧白名单 ``dtype in ['int64','float64']`` 会漏掉
+        # int32/float32/UInt8 等窄 dtype；pandas 3.0 下字符串列是 str dtype（== object
+        # 恒 False）；bool 列（Dut_Pass）虽是数值 dtype 但不是测量值，须排除。
+        numeric_cols = measurable_numeric_columns(df)
         col_positions = {col: i for i, col in enumerate(cols)}
 
         format_type = metadata.get('format', 'CTA8290D')
@@ -249,21 +254,32 @@ def export_to_xlsx_optimized(df: pd.DataFrame, metadata: Dict,
 
         stats_values = {}
         for col_name in stats_cols:
-            col_data = ensure_numeric(df, col_name).dropna()
+            # filter_finite 与屏幕侧同源：NaN 与 ±inf 一并滤掉（inf 会让
+            # mean=inf / std=nan，再被 excelize 写成文本 'NaN'）
+            col_data = filter_finite(get_1d_from(df, col_name))
             if len(col_data) > 0:
-                # 统计值统一保留 4 位小数（对齐截图 Min/Avg/Max/Range/STD/CPK 行）
-                col_min = round(float(col_data.min()), 4)
-                col_avg = round(float(col_data.mean()), 4)
-                col_max = round(float(col_data.max()), 4)
-                col_range = round(float(col_data.max() - col_data.min()), 4)
-                col_std = round(float(col_data.std()), 4)
+                # 统计值统一保留 4 位小数（对齐截图 Min/Avg/Max/Range/STD/CPK 行）；
+                # CPK 用**未舍入**原值计算，避免二次舍入（缺陷 #1）——窄分布上
+                # round(std, 4) 会归零，把 0 喂给 compute_cpk 得到恒定 CPK=0。
+                raw_min = float(col_data.min())
+                raw_avg = float(col_data.mean())
+                raw_max = float(col_data.max())
+                # ddof=0（总体标准差）：与 computations.compute_range_statistics /
+                # histogram / buyoff / multi_lot 全仓口径一致（缺陷 #1）。pandas 默认
+                # ddof=1，n=10 时 σ 偏大 √(10/9)=5.4%，CPK 反向偏小 5.4%。
+                raw_std = float(col_data.std(ddof=0))
 
-                try:
-                    min_val = float(metadata['mins'][col_name])
-                    max_val = float(metadata['maxs'][col_name])
-                    col_cpk = round(compute_cpk(col_avg, col_std, min_val, max_val)['cpk'], 4)
-                except (ValueError, TypeError, KeyError):
-                    col_cpk = 0
+                col_min = round(raw_min, 4)
+                col_avg = round(raw_avg, 4)
+                col_max = round(raw_max, 4)
+                col_std = round(raw_std, 4)
+                # Range 由**表格里展示的** Max − Min 得出（缺陷 #2）：Min/Max 各自
+                # 已 round 到 4 位，用未舍入极值相减会出现 Range ≠ Max − Min。
+                col_range = round(col_max - col_min, 4)
+
+                # 限值缺失/占位 → None（不回退 0.0），compute_cpk 对 None 返回 0.0
+                min_val, max_val = spec_limits(metadata, col_name)
+                col_cpk = round(compute_cpk(raw_avg, raw_std, min_val, max_val)['cpk'], 4)
 
                 pos = col_positions[col_name]
                 for label, val in (

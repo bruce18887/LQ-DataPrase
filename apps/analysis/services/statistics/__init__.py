@@ -33,6 +33,8 @@ from .helpers import (
 from .limits import (
     get_columns_with_limits,
     parse_limit_string,
+    resolve_spec_limit,
+    resolve_spec_limits,
     detect_fail_data,
     calculate_fail_bin_statistics,
     calculate_fail_test_item_statistics,
@@ -100,6 +102,8 @@ __all__ = [
     # limits
     'get_columns_with_limits',
     'parse_limit_string',
+    'resolve_spec_limit',
+    'resolve_spec_limits',
     'detect_fail_data',
     'calculate_fail_bin_statistics',
     'calculate_fail_test_item_statistics',

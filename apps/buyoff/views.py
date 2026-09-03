@@ -1,5 +1,4 @@
 import io
-import pandas as pd
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -8,6 +7,7 @@ from rest_framework.permissions import IsAuthenticated
 from django.http import FileResponse
 import excelize
 
+from apps.analysis.services.statistics import filter_bin1_rows
 from apps.datafiles.models import DataFile
 from apps.datafiles.services import get_cached_parsed_file
 from apps.buyoff.services import compute_buyoff_stats
@@ -72,16 +72,22 @@ class BuyoffViewSet(viewsets.GenericViewSet):
             if df is None:
                 continue
             if only_bin1:
-                from apps.analysis.services.statistics import get_bin_column_name
-                bin_col = get_bin_column_name(df_obj.format_type)
-                if bin_col in df.columns:
-                    bin_numeric = pd.to_numeric(df[bin_col], errors='coerce')
-                    df = df[bin_numeric == 1].copy()
+                # 用统一的 Bin1 判定（支持 1 / '1' / 'Bin1' / 'BIN 1'）；
+                # 旧写法 pd.to_numeric(errors='coerce') == 1 会把文本 bin 全变 NaN
+                # → 整个 df 被静默清空。
+                meta = dict(metadata or {})
+                meta.setdefault('format', df_obj.format_type)
+                df = filter_bin1_rows(df, meta)
             numeric_cols = [c for c in df.columns if df[c].dtype in ('int64', 'float64')]
             datasets[df_obj.filename] = {
                 'df': df, 'metadata': metadata,
                 'numeric_cols': numeric_cols, 'file_id': fid,
             }
+
+        # 与兄弟端点 identify_common_items 对齐：全部解析失败时 400，
+        # 否则下面的 all_col_sets[0] 会 IndexError → 500。
+        if not datasets:
+            return Response({'error': 'parse_failed'}, status=400)
 
         # Find common numeric columns
         all_col_sets = [set(d['numeric_cols']) for d in datasets.values()]

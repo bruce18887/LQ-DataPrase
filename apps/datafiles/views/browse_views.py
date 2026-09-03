@@ -1,6 +1,7 @@
 """Data browsing and maintenance views."""
 
 import json
+import logging
 import os
 
 import pandas as pd
@@ -33,6 +34,8 @@ from ._helpers import (
     _find_duplicate_groups,
     _delete_duplicate_files,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class FileActivateView(GenericAPIView):
@@ -148,8 +151,17 @@ class DataBrowserView(APIView):
 
     def get(self, request):
         datafile_id = request.query_params.get('datafile_id')
-        page = int(request.query_params.get('page', 1))
-        page_size = int(request.query_params.get('page_size', 50))
+        # Safe pagination: non-numeric → default; clamp to valid range.
+        try:
+            page = int(request.query_params.get('page', 1))
+        except (ValueError, TypeError):
+            page = 1
+        page = max(1, page)
+        try:
+            page_size = int(request.query_params.get('page_size', 50))
+        except (ValueError, TypeError):
+            page_size = 50
+        page_size = max(1, min(page_size, 100000))
         search = request.query_params.get('search', '')
         pass_filter = request.query_params.get('pass_filter', '')
         site_filter = request.query_params.get('site_filter', '')
@@ -490,6 +502,10 @@ class DataConsistencyCheckView(APIView):
                     _register_file(user, fp, 'batch', batch_name, sub_batch)
                 imported_count += 1
             except Exception:
+                logger.warning(
+                    '_import_orphaned_disk: failed to register %s', fp,
+                    exc_info=True,
+                )
                 skipped_count += 1
 
         return Response({

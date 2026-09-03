@@ -1,3 +1,8 @@
+# DEAD CODE — not wired into any view; the live path is
+# gage_legacy_builder.build_gage_summary_excel. excelize_layout re-exports
+# build_summary_sheet / build_per_file_sheets but nothing calls them. Kept only
+# as a reference implementation — do NOT bug-fix here expecting it to change the
+# exported report; fix gage_legacy_builder instead.
 """Summary and per-file sheet builders for Gage R&R reports."""
 
 import pandas as pd

@@ -9,6 +9,9 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from apps.analysis.services.statistics.helpers import normal_pdf_curve
 from apps.analysis.services.statistics.kde import GaussianKDE
+from apps.export.histogram_grid import (
+    bin_percentages, build_histogram_grid, finite_or_none,
+)
 
 COLORS_SITE_8 = ['#E53935', '#1E88E5', '#43A047', '#F9A825', '#8E24AA', '#00ACC1', '#F57C00', '#D81B60']
 COLOR_LSL = '#C62828'
@@ -27,12 +30,14 @@ def _get_export_dpi():
 
 
 def build_histogram_bins(low: float, high: float):
-    """直方图 bin 边界（导出用）：gap = (high-low)/20，两端各外扩 2.5 gap，
-    共 26 个边界。
+    """.. deprecated:: 兼容 shim —— 生产路径请用 ``build_histogram_grid``。
 
-    bin 宽度必须与屏幕 ECharts / 直方图服务的 ``safe_gap``（/20）一致，
-    否则导出图与用户审阅的画面分箱形状不一致（export_ppt 曾误用 /25）。
-    返回 ``(bins, data_gap)`` —— data_gap 供 x 轴标签等调用方复用。
+    旧几何（26 条有限边界、两端各外扩 2.5 gap、无 ±inf 兜底）与屏幕侧
+    ``histogram.compute_histogram_stats`` 平移了 0.5·gap，且超范围值被
+    ``np.histogram`` 静默丢弃、限值退化时整张图空白（缺陷 #4/#5）。
+    本函数只为 ``apps/export/tests.py::BuildHistogramBinsTests`` 保留原几何，
+    导出侧（charts / export_ppt）已全部改走 ``build_histogram_grid``；
+    测试迁移那一轮应连同本 shim 一起删除。
     """
     data_gap = (high - low) / 20 if (high - low) > 0 else 1.0
     bin_start = low - 2.5 * data_gap
@@ -58,11 +63,15 @@ def _render_histogram_payload(
     if len(data_series) == 0:
         return io.BytesIO()
 
-    param_low_limit = rdl_min if rdl_min is not None else float(data_series.min())
-    param_high_limit = rdl_max if rdl_max is not None else float(data_series.max())
-
-    all_bins, data_gap = build_histogram_bins(param_low_limit, param_high_limit)
-    x_labels = [param_low_limit + (i - 2) * data_gap for i in range(25)]
+    # 限值可能缺失/退化：parse_limit_string 新语义下缺失返回 None，旧语义回退
+    # 0.0 造成幻影 (0, 0) —— 两种都由 resolve_bin_range 统一回退到数据范围，
+    # 否则 TEMP 型数据（25~33）会全部落在 bin 外 → 导出图空白（缺陷 #5）。
+    low_limit = finite_or_none(rdl_min)
+    high_limit = finite_or_none(rdl_max)
+    all_bins, bin_centers, data_gap = build_histogram_grid(rdl_min, rdl_max, data_series)
+    # x 轴刻度唯一来源 = bin 中心（缺陷 #3：不要再另算一套公式）
+    x_labels = [float(c) for c in bin_centers]
+    n_bins = len(x_labels)
 
     fig, ax = plt.subplots(figsize=(10, 5.5))
     fig.patch.set_facecolor('white')
@@ -90,10 +99,10 @@ def _render_histogram_payload(
                 sdata = pd.Series(dtype=float)
             total = len(sdata)
             hist, _ = np.histogram(sdata, bins=all_bins)
-            hist_percent = [round((count / total) * 100, 2) if total > 0 else 0 for count in hist]
-            bar_data = [hist_percent[i] if i < len(hist_percent) else 0 for i in range(25)]
+            # 6 位口径（bin_percentages）：1/50000 = 0.002% 不得被归零（缺陷 #12）
+            bar_data = bin_percentages(hist, total)
             offset = (idx - len(site_values) / 2 + 0.5) * bar_width
-            bar_x = [x_labels[i] + offset for i in range(25)]
+            bar_x = [x_labels[i] + offset for i in range(n_bins)]
 
             ax.bar(
                 bar_x, bar_data, width=bar_width * 0.9,
@@ -102,15 +111,13 @@ def _render_histogram_payload(
             )
     else:
         hist, _ = np.histogram(data_series, bins=all_bins)
-        total = len(data_series)
-        hist_percent = [round((count / total) * 100, 2) if total > 0 else 0 for count in hist]
-        bar_data = [hist_percent[i] if i < len(hist_percent) else 0 for i in range(25)]
+        bar_data = bin_percentages(hist, len(data_series))
         ax.bar(x_labels, bar_data, width=data_gap * 0.9, color='#1E88E5', alpha=0.7, label='数据分布', edgecolor='white', linewidth=0.5)
 
-    if show_limit and rdl_min is not None:
-        ax.axvline(x=param_low_limit, color=COLOR_LSL, linewidth=2.5, linestyle='--')
-    if show_limit and rdl_max is not None:
-        ax.axvline(x=param_high_limit, color=COLOR_USL, linewidth=2.5, linestyle='--')
+    if show_limit and low_limit is not None:
+        ax.axvline(x=low_limit, color=COLOR_LSL, linewidth=2.5, linestyle='--')
+    if show_limit and high_limit is not None:
+        ax.axvline(x=high_limit, color=COLOR_USL, linewidth=2.5, linestyle='--')
 
     for sigma, flag, color, label_prefix in [
         (3, show_3sigma, COLOR_SIGMA_3, '3σ'), (4, show_4sigma, COLOR_SIGMA_4, '4σ'), (6, show_6sigma, COLOR_SIGMA_6, '6σ')
@@ -159,10 +166,10 @@ def _render_histogram_payload(
     ax.yaxis.set_major_formatter(ticker.FormatStrFormatter('%.0f%%'))
     ax.grid(True, alpha=0.3)
 
-    if show_limit and rdl_min is not None:
-        _add_vline_label(ax, param_low_limit, 'LSL', COLOR_LSL)
-    if show_limit and rdl_max is not None:
-        _add_vline_label(ax, param_high_limit, 'USL', COLOR_USL)
+    if show_limit and low_limit is not None:
+        _add_vline_label(ax, low_limit, 'LSL', COLOR_LSL)
+    if show_limit and high_limit is not None:
+        _add_vline_label(ax, high_limit, 'USL', COLOR_USL)
 
     for sigma, flag, color, label_prefix in [
         (3, show_3sigma, COLOR_SIGMA_3, '3σ'), (4, show_4sigma, COLOR_SIGMA_4, '4σ'), (6, show_6sigma, COLOR_SIGMA_6, '6σ')

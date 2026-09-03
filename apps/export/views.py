@@ -1,5 +1,4 @@
 import io
-import pandas as pd
 from django.http import FileResponse
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -14,6 +13,9 @@ from apps.analysis.services.statistics import (
     calculate_fail_bin_statistics, compute_pass_yield,
     filter_bin1_rows,
 )
+from apps.datafiles.parsers.base import SYSTEM_COLUMNS
+from .columns import measurable_numeric_columns
+from .formatting import format_percent_value
 from .excelize_helpers import save_excelize
 from .excel_builders import (
     build_sigma_limit_sheet,
@@ -21,6 +23,32 @@ from .excel_builders import (
 from .export_ppt import build_batch_charts_pptx
 from .export_complete import export_to_xlsx_optimized
 from .export_csv import export_to_csv
+
+# σ 档位合法区间：前端只提供 3/4/6，给个宽裕的上下界拦住 0 / 负数 / 99
+MIN_SIGMA_LEVEL = 1
+MAX_SIGMA_LEVEL = 10
+DEFAULT_SIGMA_LEVEL = 3
+DEFAULT_CHART_PARAMS = 10
+
+
+def parse_sigma_level(raw):
+    """请求里的 σ 档位 → ``int``；缺失/非法 → ``None``（调用方据此返回 400）。
+
+    缺陷 #7：旧代码 ``request.data.get('sigma', 3)`` 不做类型转换，表单编码
+    把 ``6`` 变成 ``'6'``，下游 ``mean_val - sigma_level * std_val`` 抛
+    ``TypeError: can only concatenate str`` → 500。bool 是 int 的子类，但
+    ``True`` 不是合法档位，显式排除；``3.5`` / ``'abc'`` / ``[3]`` 同样非法。
+    """
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        as_float = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not as_float.is_integer():
+        return None
+    level = int(as_float)
+    return level if MIN_SIGMA_LEVEL <= level <= MAX_SIGMA_LEVEL else None
 
 
 class ExportViewSet(viewsets.GenericViewSet):
@@ -82,7 +110,6 @@ class ExportViewSet(viewsets.GenericViewSet):
     def to_csv(self, request):
         file_id = request.data.get('file_id')
         passfail = request.data.get('passfail', '全部')
-        keep_header = request.data.get('keep_header', False)
         site_filter = request.data.get('site_filter', '全部')
 
         try:
@@ -109,7 +136,15 @@ class ExportViewSet(viewsets.GenericViewSet):
     @action(detail=False, methods=['post'])
     def sigma_limit(self, request):
         file_id = request.data.get('file_id')
-        sigma_level = request.data.get('sigma', 3)
+        # 缺陷 #7：必须转 int 并校验范围——非法值返回 400，而不是让下游
+        # 算 sigma 区间时抛 TypeError 变成 500
+        sigma_level = parse_sigma_level(request.data.get('sigma', DEFAULT_SIGMA_LEVEL))
+        if sigma_level is None:
+            return Response(
+                {'error': 'invalid_sigma',
+                 'detail': f'sigma 必须是 {MIN_SIGMA_LEVEL}~{MAX_SIGMA_LEVEL} 的整数'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         only_valid = request.data.get('only_valid_limits', False)
 
         try:
@@ -145,17 +180,23 @@ class ExportViewSet(viewsets.GenericViewSet):
         except FileLoadError as e:
             return Response({'error': e.error_code}, status=400)
 
+        # data_only_bin1：与 sigma_limit / batch_charts 分支同口径（缺陷 #8）。
+        # 此前 HTML 报告不应用该开关，良率与 xlsx 图表对不上。
+        if request.data.get('data_only_bin1', False):
+            df = filter_bin1_rows(df, metadata)
+
         total_rows = df.shape[0]
         bin_stats = calculate_fail_bin_statistics(df, metadata)
         yield_result = compute_pass_yield(bin_stats, total_rows)
         total_pass = yield_result['pass_count']
-        yield_pct = yield_result['yield_pct']
+        # 6 位口径（缺陷 #12）：``{:.2f}`` 会把 99.998% 显示成误导性的 100.00%
+        yield_text = format_percent_value(yield_result['yield_pct'])
 
         html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>ATE Report - {datafile.filename}</title>
 <style>body{{font-family:Arial;margin:20px}}h1{{color:#2c3e50}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #ddd;padding:8px;text-align:center}}th{{background:#2c3e50;color:white}}</style></head>
 <body><h1>ATE 数据分析报告</h1><p>文件: {datafile.filename} | 格式: {datafile.format_type} | 程序: {datafile.program_name}</p>
 <h2>核心指标</h2><table><tr><th>总记录数</th><th>Pass</th><th>Fail</th><th>Yield</th></tr>
-<tr><td>{total_rows}</td><td>{total_pass}</td><td>{total_rows - total_pass}</td><td>{yield_pct:.2f}%</td></tr></table></body></html>"""
+<tr><td>{total_rows}</td><td>{total_pass}</td><td>{total_rows - total_pass}</td><td>{yield_text}%</td></tr></table></body></html>"""
         # FileResponse (not Response + hand-written header): Django wsgi response
         # headers are latin-1 only — a hand-written Content-Disposition with a
         # Chinese source filename raises UnicodeEncodeError. FileResponse emits
@@ -196,7 +237,11 @@ class ExportViewSet(viewsets.GenericViewSet):
             df = filter_bin1_rows(df, metadata)
 
         if not params:
-            params = [c for c in df.columns if df[c].dtype in ('int64', 'float64')][:10]
+            # 缺陷 #11：旧白名单 ``dtype in ('int64','float64')`` 漏掉 float32/int32
+            # 等窄 dtype，并把 bool / 系统记录列（SW_Bin）当成可分析测量值
+            params = measurable_numeric_columns(
+                df, exclude=SYSTEM_COLUMNS.get(metadata.get('format', 'CTA8290D'), []),
+            )[:DEFAULT_CHART_PARAMS]
 
         site_col = get_site_column(df)
 
@@ -204,7 +249,14 @@ class ExportViewSet(viewsets.GenericViewSet):
                     'filename': datafile.filename.rsplit('.', 1)[0]}
 
         if fmt == 'pptx':
-            pptx_bytes = build_batch_charts_pptx(datafile, df, metadata, params)
+            # 缺陷 #6：pptx 分支必须收到与 xlsx 分支完全相同的图形开关，
+            # 否则同一份配置导出的 pptx 与 xlsx 图形内容不一致
+            pptx_bytes = build_batch_charts_pptx(
+                datafile, df, metadata, params,
+                show_limit=show_limit, show_3sigma=show_3sigma,
+                show_4sigma=show_4sigma, show_6sigma=show_6sigma,
+                show_normal=show_normal, show_kde=show_kde,
+            )
             fname = render_export_filename(request.user, 'batch_charts', 'pptx', base_ctx)
             return FileResponse(io.BytesIO(pptx_bytes), as_attachment=True,
                                 filename=fname,

@@ -7,6 +7,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Count
+from django.shortcuts import get_object_or_404
 import excelize
 from django.http import FileResponse
 
@@ -323,10 +324,23 @@ class BatchReportViewSet(viewsets.GenericViewSet):
         if not file_ids:
             return Response({'error': 'no_files'}, status=400)
 
-        phases = []
+        # fid 非整数 → 400（原实现 int(fid) 抛 ValueError → 500）；
+        # 文件不存在 / 不属于当前用户 → 404（原实现 objects.get 抛
+        # DoesNotExist → 500）。与 buyoff / gage 等同类端点的
+        # get_object_or_404 口径对齐：同一类参数不得一处 404 一处 500。
+        normalized_ids = []
         for fid in file_ids:
-            df_obj = DataFile.objects.get(pk=fid, owner=request.user)
-            df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk, df_obj)
+            try:
+                normalized_ids.append(int(fid))
+            except (TypeError, ValueError):
+                return Response(
+                    {'error': 'invalid_file_id', 'detail': f'file_id 必须为整数: {fid!r}'},
+                    status=400)
+
+        phases = []
+        for fid in normalized_ids:
+            df_obj = get_object_or_404(DataFile, pk=fid, owner=request.user)
+            df, metadata, fmt = get_cached_parsed_file(fid, request.user.pk, df_obj)
             if df is None:
                 continue
 

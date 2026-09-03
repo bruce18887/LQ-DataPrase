@@ -5,10 +5,14 @@ content to one or more sheets.  The caller is responsible for creating
 the file handle and saving/serializing the result.
 """
 
+import math
+
 import pandas as pd
 import excelize
 
-from apps.analysis.services.statistics import get_1d_from
+from apps.analysis.services.statistics import filter_finite, get_1d_from
+from .columns import measurable_numeric_columns
+from .spec_limits import is_placeholder_limit, parse_spec_limit
 from .excelize_helpers import (
     COLOR_FONT_DARK, COLOR_ORIGINAL_LIMIT, COLOR_SIGMA_TIGHT, COLOR_SIGMA_NOT_TIGHT,
     make_header_style,
@@ -74,36 +78,36 @@ def build_sigma_limit_sheet(f, df, metadata, sigma_level=3, only_valid=False):
         f.set_cell_style(sheet_name, cell, cell, header_style)
         f.set_cell_value(sheet_name, cell, h)
 
-    numeric_cols = [c for c in df.columns if df[c].dtype in ('int64', 'float64')]
+    # 可分析数值列（缺陷 #11）：旧白名单漏掉窄 dtype，pandas 3.0 下字符串列
+    # 是 str dtype（== object 恒 False），bool 列（Dut_Pass）则需显式排除。
+    numeric_cols = measurable_numeric_columns(df)
     row_idx = 2
     serial = 1
-    NON_NUM = ['min', 'max', 'lower limit', 'upper limit', 'n/a', 'na', '-', 'none', '']
 
     for param in numeric_cols:
         if param not in metadata.get('mins', {}) or param not in metadata.get('maxs', {}):
             continue
-        min_str = str(metadata['mins'][param]).strip()
-        max_str = str(metadata['maxs'][param]).strip()
-        if only_valid and (min_str.lower() in NON_NUM or max_str.lower() in NON_NUM):
+        raw_low = metadata['mins'][param]
+        raw_high = metadata['maxs'][param]
+        if only_valid and (is_placeholder_limit(raw_low) or is_placeholder_limit(raw_high)):
             continue
 
-        data_series = get_1d_from(df, param).dropna()
+        # filter_finite 而非 dropna()（缺陷 #10）：inf 不被 dropna 滤掉，
+        # 含 inf 的列 mean=inf / std=nan，``round(nan, 4)`` 会被 excelize
+        # 写成文本 'NaN' 落到 σ 限值单元格里。
+        data_series = filter_finite(get_1d_from(df, param))
         if len(data_series) == 0:
             continue
 
         mean_val = float(data_series.mean())
-        std_val = float(data_series.std(ddof=0)) if len(data_series) > 1 else 0
+        std_val = float(data_series.std(ddof=0)) if len(data_series) > 1 else 0.0
         sigma_min = mean_val - sigma_level * std_val
         sigma_max = mean_val + sigma_level * std_val
+        if not (math.isfinite(sigma_min) and math.isfinite(sigma_max)):
+            continue    # 极端量级溢出也不得把 nan/inf 写进单元格
 
-        try:
-            rdl_min = float(min_str)
-        except (ValueError, TypeError):
-            rdl_min = None
-        try:
-            rdl_max = float(max_str)
-        except (ValueError, TypeError):
-            rdl_max = None
+        rdl_min = parse_spec_limit(raw_low)
+        rdl_max = parse_spec_limit(raw_high)
 
         f.set_cell_value(sheet_name, excelize.coordinates_to_cell_name(1, row_idx, False), serial)
         f.set_cell_value(sheet_name, excelize.coordinates_to_cell_name(2, row_idx, False), param)

@@ -1,8 +1,9 @@
 """Outlier detection utilities for data visualization."""
 
 from typing import Any, Dict, Optional, Tuple
-import numpy as np
 import pandas as pd
+
+from .helpers import filter_finite
 
 
 def detect_outliers_iqr(
@@ -52,9 +53,11 @@ def detect_outliers_iqr(
     if data is None or len(data) == 0:
         return empty_result
 
-    # Basic cleaning: coerce to numeric, drop NaN, remove infinities
-    clean = pd.to_numeric(data, errors='coerce').dropna()
-    clean = clean[np.isfinite(clean.values)]
+    # Basic cleaning: coerce to numeric (incl. bool → float), drop NaN and ±inf.
+    # filter_finite is the single numeric entry point for this package — doing
+    # the to_numeric/isfinite dance inline here left bool columns (Dut_Pass)
+    # reaching .quantile() and raising "numpy boolean subtract".
+    clean = filter_finite(data)
 
     if len(clean) < 4:
         # IQR is unreliable with fewer than 4 data points

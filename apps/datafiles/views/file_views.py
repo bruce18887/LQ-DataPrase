@@ -1,5 +1,6 @@
 """File CRUD and upload views."""
 
+import logging
 import os
 import re
 import shutil
@@ -33,7 +34,10 @@ from ._helpers import (
     _parse_last_modified,
     _delete_datafile_file_only,
     _remove_empty_dirs_up_to,
+    _UNSAFE_NAME_CHARS,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_date_bound(raw: str):
@@ -246,6 +250,9 @@ class DataFileViewSet(viewsets.ModelViewSet):
         and the row's filename is updated. ParseHistory rows are audit history
         and are left untouched. The parse cache is cleared so browse uses new
         paths.
+
+        Ordering guarantee: DB changes commit first, file moves execute after.
+        If the DB transaction fails, no file is touched on disk.
         """
         ids = request.data.get('ids') or []
         batch_name = (request.data.get('batch_name') or '').strip()
@@ -282,19 +289,41 @@ class DataFileViewSet(viewsets.ModelViewSet):
         batch_dir = os.path.join(batch_base, batch_name)
         os.makedirs(batch_dir, exist_ok=True)
 
+        # Phase 1: plan moves — compute (src, target, new_filename) for each row.
+        plans = []  # [(df, src, target, new_filename), ...]
+        for df in qs.order_by('id'):
+            src = resolve_file_path(df.file_path)
+            if not os.path.exists(src):
+                continue  # cannot move a missing file; skip it
+            # Defence-in-depth: basename strips any directory traversal that
+            # might have crept into the DB filename field historically.
+            safe_name = os.path.basename(df.filename)
+            if not safe_name or _UNSAFE_NAME_CHARS.search(safe_name):
+                logger.warning(
+                    'combine: skipping df id=%s with unsafe filename %r',
+                    df.pk, df.filename,
+                )
+                continue
+            target = os.path.join(batch_dir, safe_name)
+            if os.path.exists(target):
+                ts = int(time.time())
+                name, ext = os.path.splitext(safe_name)
+                safe_name = f'{name}_{ts}{ext}'
+                target = os.path.join(batch_dir, safe_name)
+            plans.append((df, src, target, safe_name))
+
+        if not plans:
+            return Response({
+                'combined': 0,
+                'batch_name': batch_name,
+                'files': [],
+            })
+
+        # Phase 2: DB changes inside transaction (no file I/O here).
         updated = []
         with transaction.atomic():
-            for df in qs.order_by('id'):
-                src = resolve_file_path(df.file_path)
-                if not os.path.exists(src):
-                    continue  # cannot move a missing file; skip it
-                target = os.path.join(batch_dir, df.filename)
-                if os.path.exists(target):
-                    ts = int(time.time())
-                    name, ext = os.path.splitext(df.filename)
-                    target = os.path.join(batch_dir, f'{name}_{ts}{ext}')
-                    df.filename = os.path.basename(target)
-                shutil.move(src, target)
+            for df, _src, target, new_filename in plans:
+                df.filename = new_filename
                 df.file_path = store_file_path(target)
                 df.file_type = 'batch'
                 df.batch_name = batch_name
@@ -304,6 +333,17 @@ class DataFileViewSet(viewsets.ModelViewSet):
                     'sub_batch', 'updated_at',
                 ])
                 updated.append(df)
+
+        # Phase 3: file moves after successful commit.
+        for df, src, target, _ in plans:
+            try:
+                shutil.move(src, target)
+            except OSError:
+                logger.warning(
+                    'combine: file move failed after DB commit, '
+                    'df id=%s src=%s target=%s', df.pk, src, target,
+                    exc_info=True,
+                )
 
         if updated:
             clear_parse_cache()
@@ -324,6 +364,9 @@ class DataFileViewSet(viewsets.ModelViewSet):
         ``_<ts>`` suffix. Once-empty sub-batch / batch directories are removed
         (an emptied batch disappears from the batch listing). ParseHistory rows
         are audit history and are left untouched. Parse cache is cleared.
+
+        Ordering guarantee: DB changes commit first, file moves execute after.
+        If the DB transaction fails, no file is touched on disk.
         """
         ids = request.data.get('ids') or []
         if not isinstance(ids, list) or not ids or not all(
@@ -346,21 +389,36 @@ class DataFileViewSet(viewsets.ModelViewSet):
 
         single_dir = _user_upload_dir(request.user, 'single')
         batch_base = _user_upload_dir(request.user, 'batch')
+
+        # Phase 1: plan moves.
+        plans = []  # [(df, src, target, new_filename, src_dirname), ...]
+        for df in qs.order_by('id'):
+            src = resolve_file_path(df.file_path)
+            if not os.path.exists(src):
+                continue  # missing on disk: cannot move; skip it
+            safe_name = os.path.basename(df.filename)
+            if not safe_name or _UNSAFE_NAME_CHARS.search(safe_name):
+                logger.warning(
+                    'uncombine: skipping df id=%s with unsafe filename %r',
+                    df.pk, df.filename,
+                )
+                continue
+            target = os.path.join(single_dir, safe_name)
+            if os.path.exists(target):
+                ts = int(time.time())
+                name, ext = os.path.splitext(safe_name)
+                safe_name = f'{name}_{ts}{ext}'
+                target = os.path.join(single_dir, safe_name)
+            plans.append((df, src, target, safe_name, os.path.dirname(src)))
+
+        if not plans:
+            return Response({'moved': 0, 'files': []})
+
+        # Phase 2: DB changes inside transaction (no file I/O here).
         moved = []
         with transaction.atomic():
-            for df in qs.order_by('id'):
-                src = resolve_file_path(df.file_path)
-                if not os.path.exists(src):
-                    continue  # missing on disk: cannot move; skip it
-                target = os.path.join(single_dir, df.filename)
-                if os.path.exists(target):
-                    ts = int(time.time())
-                    name, ext = os.path.splitext(df.filename)
-                    target = os.path.join(single_dir, f'{name}_{ts}{ext}')
-                    df.filename = os.path.basename(target)
-                shutil.move(src, target)
-                # 源位置空目录清理（子批次/批次目录，至 batch_base 含其自身）
-                _remove_empty_dirs_up_to(os.path.dirname(src), batch_base)
+            for df, _src, target, new_filename, _ in plans:
+                df.filename = new_filename
                 df.file_path = store_file_path(target)
                 df.file_type = 'single'
                 df.batch_name = ''
@@ -370,6 +428,19 @@ class DataFileViewSet(viewsets.ModelViewSet):
                     'sub_batch', 'updated_at',
                 ])
                 moved.append(df)
+
+        # Phase 3: file moves + empty dir cleanup after successful commit.
+        for df, src, target, _, src_dirname in plans:
+            try:
+                shutil.move(src, target)
+                # 源位置空目录清理（子批次/批次目录，至 batch_base 含其自身）
+                _remove_empty_dirs_up_to(src_dirname, batch_base)
+            except OSError:
+                logger.warning(
+                    'uncombine: file move failed after DB commit, '
+                    'df id=%s src=%s target=%s', df.pk, src, target,
+                    exc_info=True,
+                )
 
         if moved:
             clear_parse_cache()

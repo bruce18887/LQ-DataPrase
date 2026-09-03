@@ -27,6 +27,7 @@ from apps.analysis.services.statistics import (
     get_coord_columns,
     get_columns_with_limits,
     get_1d_from,
+    filter_finite,
     compute_qqplot,
     compute_uph,
     ensure_numeric,
@@ -316,8 +317,12 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
                 # 分布用 loaded_work（bin1 已收窄）——与筛选后的 common_params 口径一致
                 for fid, df, metadata, filename in loaded_work:
                     if first in df.columns:
-                        s = get_1d_from(df, first).dropna()
-                        s = s[abs(s) < float('inf')]
+                        # filter_finite 而非 ``abs(s) < inf``：实测真实 CTA8290D
+                        # 文件的 Start_T 是 pandas 3.0 str dtype，``abs()`` 直接抛
+                        # ``TypeError: bad operand type for abs(): 'str'``——
+                        # 一个非数值列就能把整个多文件请求打断，而正确行为是
+                        # 把它 coerce 成空集后跳过。
+                        s = filter_finite(get_1d_from(df, first))
                         if len(s) > 0:
                             datasets[str(fid)] = {
                                 'df': df, 'metadata': metadata, 'series': s,
@@ -372,8 +377,7 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
             )
             if not keep:
                 continue
-            s = get_1d_from(work_df, param).dropna()
-            s = s[abs(s) < float('inf')]
+            s = filter_finite(get_1d_from(work_df, param))
             if len(s) > 0:
                 datasets[str(fid)] = {
                     'df': work_df, 'metadata': metadata, 'series': s,

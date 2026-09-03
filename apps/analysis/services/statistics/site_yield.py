@@ -4,20 +4,28 @@ from typing import Optional, Dict, List, Tuple, Any
 
 import pandas as pd
 
-from .helpers import get_1d_from, site_sort_key
-from .limits import parse_limit_string
+from .helpers import ensure_numeric, get_1d_from, site_sort_key
+from .limits import resolve_spec_limits
+
+from pandas.api.types import is_bool_dtype, is_numeric_dtype
 
 
-def compute_site_stats(site_series: pd.Series, site_index, lower_limit: float, upper_limit: float,
+def _no_mask(site_series: pd.Series) -> pd.Series:
+    """全 False 掩码（缺失的规格限侧不参与比较）。"""
+    return pd.Series([False] * len(site_series), index=site_series.index)
+
+
+def compute_site_stats(site_series: pd.Series, site_index, lower_limit: Optional[float], upper_limit: Optional[float],
                        spec_lower: Optional[float], spec_upper: Optional[float], is_serial: bool) -> List[Dict]:
     if isinstance(site_index, pd.DataFrame):
         site_index = site_index.iloc[:, 0]
-    if not is_serial:
-        mask_below = site_series < lower_limit
-        mask_above = site_series > upper_limit
-    else:
-        mask_below = site_series < spec_lower if spec_lower is not None else pd.Series([False] * len(site_series), index=site_series.index)
-        mask_above = site_series > spec_upper if spec_upper is not None else pd.Series([False] * len(site_series), index=site_series.index)
+    lo, hi = (spec_lower, spec_upper) if is_serial else (lower_limit, upper_limit)
+    # 缺失侧不参与比较。限值现在可能是 None（``resolve_spec_limit`` 对缺失/
+    # 占位/字面 'Min'/'Max' 一律返回 None）。旧代码拿幻影 0.0 当真限值，
+    # 单边限参数会产生幽灵 fail：例如真限 min=''(→0.0)、max=5.5，而参数值
+    # 分布在 −3~−1 时全部被判 fail，晶圆图整片红。
+    mask_below = (site_series < lo) if lo is not None else _no_mask(site_series)
+    mask_above = (site_series > hi) if hi is not None else _no_mask(site_series)
     mask_fail = mask_below | mask_above
 
     grouped = site_series.groupby(site_index)
@@ -28,7 +36,8 @@ def compute_site_stats(site_series: pd.Series, site_index, lower_limit: float, u
 
     total_all = int(totals.sum())
     fail_all = int(fail_counts.sum())
-    yield_all = ((total_all - fail_all) / total_all * 100) if total_all > 0 else 100
+    # total_all == 0 意味着根本没数据，不能报成「100% 良率」（旧行为）。
+    yield_all = ((total_all - fail_all) / total_all * 100) if total_all > 0 else None
 
     site_data_list = []
     # Sort site values: numeric first (sorted numerically), then string (sorted alphabetically)
@@ -58,7 +67,8 @@ def compute_site_stats(site_series: pd.Series, site_index, lower_limit: float, u
         })
     site_data_list.append({
         'Site': 'ALL Site',
-        'Yield': f'{yield_all:.3f}%({total_all})',
+        'Yield': (f'{yield_all:.3f}%({total_all})' if yield_all is not None
+                  else f'N/A({total_all})'),
         'FailCount': _fmt_count(fail_all, total_all),
         'ExceedMin': _fmt_count(int(exceed_mins.sum()), total_all),
         'ExceedMax': _fmt_count(int(exceed_maxs.sum()), total_all),
@@ -112,7 +122,7 @@ def compute_site_yield_data(df: pd.DataFrame, bin_col: str, site_col: str, pass_
             if pass_bin_raw in site_bin_cross.index and site in site_bin_cross.columns:
                 site_pass_count = int(site_bin_cross.loc[pass_bin_raw, site])
 
-        yield_pct = (site_pass_count / site_total * 100) if site_total > 0 else 0.0
+        yield_pct = round((site_pass_count / site_total * 100), 6) if site_total > 0 else 0.0
 
         # 格式化Site名称：加Site前缀
         try:
@@ -121,7 +131,7 @@ def compute_site_yield_data(df: pd.DataFrame, bin_col: str, site_col: str, pass_
                 site_display = f'Site{int(site_num)}'
             else:
                 site_display = str(site)
-        except:
+        except (ValueError, TypeError):
             site_display = str(site)
 
         yield_data_list.append({
@@ -162,32 +172,53 @@ def compute_site_yield_data(df: pd.DataFrame, bin_col: str, site_col: str, pass_
     return result
 
 
+def _limit_fail_mask(data_series: pd.Series, lower_limit: Optional[float],
+                     upper_limit: Optional[float]) -> pd.Series:
+    """按**存在**的规格限侧构造 fail 掩码；两侧都缺失 → 全 False。
+
+    旧写法 `if lower_limit != 0.0 or upper_limit != 0.0:` 只要一侧是真限值
+    就进入 `(data < lower) | (data > upper)`，另一侧的幻影 0.0 仍在参与比较：
+    例如真限 min=''(→0.0)、max=5.5，参数值分布在 −3~−1 时全判 fail，
+    晶圆图整片红。NaN 与限值比较为 False，不会被当成 fail。
+    """
+    mask = pd.Series([False] * len(data_series), index=data_series.index)
+    if lower_limit is not None:
+        mask = mask | (data_series < lower_limit)
+    if upper_limit is not None:
+        mask = mask | (data_series > upper_limit)
+    return mask
+
+
 def compute_wafer_fail_data(df: pd.DataFrame, metadata: Optional[Dict] = None,
                             selected_param: Optional[str] = None) -> Tuple[pd.Series, Dict]:
     fail_mask = pd.Series([False] * len(df), index=df.index)
     if selected_param and selected_param in df.columns and metadata:
-        if selected_param in metadata.get('mins', {}) and selected_param in metadata.get('maxs', {}):
-            data_series = pd.to_numeric(get_1d_from(df, selected_param), errors='coerce')
-            lower_limit = parse_limit_string(str(metadata['mins'][selected_param]), data_series, 0.0, 0.0)
-            upper_limit = parse_limit_string(str(metadata['maxs'][selected_param]), data_series, 0.0, 0.0)
-            if lower_limit != 0.0 or upper_limit != 0.0:
-                fail_mask = (data_series < lower_limit) | (data_series > upper_limit)
+        # ensure_numeric（不 dropna）保留全长与原索引，同时把 bool 转 float、
+        # 无法转换的转 NaN；filter_finite 会掉行，不能用于构造全长掩码。
+        data_series = ensure_numeric(df, selected_param)
+        lower_limit, upper_limit = resolve_spec_limits(metadata, selected_param)
+        fail_mask = _limit_fail_mask(data_series, lower_limit, upper_limit)
     else:
         if metadata and 'mins' in metadata and 'maxs' in metadata:
             for col in df.columns:
-                if df[col].dtype in ['int64', 'float64']:
-                    if col in metadata['mins'] and col in metadata['maxs']:
-                        data_series = pd.to_numeric(get_1d_from(df, col), errors='coerce')
-                        lower_limit = parse_limit_string(str(metadata['mins'][col]), data_series, 0.0, 0.0)
-                        upper_limit = parse_limit_string(str(metadata['maxs'][col]), data_series, 0.0, 0.0)
-                        if lower_limit != 0.0 or upper_limit != 0.0:
-                            col_fail = (data_series < lower_limit) | (data_series > upper_limit)
-                            fail_mask = fail_mask | col_fail
+                # dtype 白名单 ('int64','float64') 漏掉 int32/float32/UInt8，
+                # 且 pandas 3.0 下字符串列是 str dtype 而不是 object；
+                # bool（真实数据的 Dut_Pass）不是测量值，必须显式排除。
+                if not (is_numeric_dtype(df[col]) and not is_bool_dtype(df[col])):
+                    continue
+                if col not in metadata['mins'] or col not in metadata['maxs']:
+                    continue
+                data_series = ensure_numeric(df, col)
+                lower_limit, upper_limit = resolve_spec_limits(metadata, col)
+                fail_mask = fail_mask | _limit_fail_mask(
+                    data_series, lower_limit, upper_limit)
 
     total = len(df)
     pass_count = int((~fail_mask).sum())
     fail_count = int(fail_mask.sum())
-    yield_pct = (pass_count / total * 100) if total > 0 else 0.0
+    # 6 位小数：对齐项目口径（limits.compute_pass_yield 同为 round(..., 6)），
+    # 1/50000 = 0.002% 不因舍入归零（回归：tiny-fail-bar）。
+    yield_pct = round((pass_count / total * 100), 6) if total > 0 else 0.0
 
     stats = {'total': total, 'pass_count': pass_count, 'fail_count': fail_count, 'yield_pct': yield_pct}
     return fail_mask, stats

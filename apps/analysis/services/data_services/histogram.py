@@ -141,10 +141,18 @@ def compute_histogram_stats(df, metadata, param, site_col,
     site_data = None
     site_idx = None
     if site_col:
-        site_series = get_1d_from(df, param)
+        # 用已 coerce 的 data_series（filter_finite 后）而不是原始列：
+        # 原始列可能是 str/bool dtype，与 float 限值比较直接抛
+        # "Invalid comparison between dtype=str and float" → 500。
+        # site 索引按 data_series 对齐，与下方 site_histograms 的
+        # site_idx_aligned = site_idx[data_series.index] 同源——否则 NaN/inf 行
+        # 不进直方图分母却进 site 分母，同一响应里 ALL Site 良率与
+        # site_histograms 互相矛盾。
+        site_series = data_series
         site_idx = get_1d_from(df, site_col)
         site_data = compute_site_stats(
-            site_series, site_idx, stats['rdl'][0], stats['rdl'][1],
+            site_series, site_idx.loc[data_series.index],
+            stats['rdl'][0], stats['rdl'][1],
             None, None, False
         )
 
@@ -247,20 +255,17 @@ def compute_histogram_stats(df, metadata, param, site_col,
         'mean': round(stats['mean'], 6),
         'std': round(stats['std'], 6),
         'unit': stats['unit'],
-        'lower_limit': round(stats['rdl'][0], 6),
-        'upper_limit': round(stats['rdl'][1], 6),
+        # 规格限缺失时为 None（JSON null），前端据此**不画** LSL/USL 线。
+        # 旧行为回退 0.0，会在 0 处画出一条不存在的幻影限值线，
+        # 并把 CPK 拉成 −|μ|/(3σ) 的大负数。
+        'lower_limit': round(stats['rdl'][0], 6) if stats['rdl'][0] is not None else None,
+        'upper_limit': round(stats['rdl'][1], 6) if stats['rdl'][1] is not None else None,
         'cp': round(cpk_result['cp'], 4) if cpk_result['cp'] is not None else None,
         'cpk': round(cpk_result['cpk'], 4),
-        'pp': round(cpk_result['pp'], 4) if cpk_result['pp'] is not None else None,
-        'ppk': round(cpk_result['ppk'], 4),
         'cp_level': cpk_result['cp_level'],
         'cpk_level': cpk_result['cpk_level'],
-        'pp_level': cpk_result['pp_level'],
-        'ppk_level': cpk_result['ppk_level'],
         'cp_color': cpk_result['cp_color'],
         'cpk_color': cpk_result['cpk_color'],
-        'pp_color': cpk_result['pp_color'],
-        'ppk_color': cpk_result['ppk_color'],
         'data_min': round(stats['dr'][0], 6),
         'data_max': round(stats['dr'][1], 6),
         'sigma3_min': round(stats['s3'][0], 6),

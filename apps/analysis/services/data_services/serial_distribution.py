@@ -5,6 +5,7 @@ import pandas as pd
 
 from apps.analysis.services.statistics import (
     compute_range_statistics,
+    filter_finite,
     get_1d_from,
     get_bin_column,
     get_site_column,
@@ -147,7 +148,15 @@ def compute_serial_distribution_data(df, metadata, param, range_type,
             list(set(all_serials.dropna().tolist())))
 
     # -- Stats & limits ---------------------------------------------------
-    data_series = get_1d_from(df, param).dropna()
+    # 统计量必须与 plotted 数据**同源**：图上每个 serial 只画最后一次重测值
+    # （serial_grouped = groupby(serial).last()），而旧写法用含全部重测行的
+    # 原始 df 算 mean/std/±σ 标记线/outlier 栅栏——同一响应里 fail/pass_count
+    # 来自去重集、统计量来自重测膨胀集，两者互相矛盾。
+    # filter_finite 同时完成 bool/str coerce 与 inf 过滤（旧写法只 dropna）。
+    if param in serial_grouped.columns:
+        data_series = filter_finite(serial_grouped[param])
+    else:
+        data_series = filter_finite(get_1d_from(df, param))
     stats = compute_range_statistics(data_series, metadata, param)
     outlier_info = detect_outliers_iqr(
         data_series, include_values=False,
