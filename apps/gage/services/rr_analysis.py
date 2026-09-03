@@ -1,3 +1,8 @@
+# DEAD CODE — not wired into any view; the live path is
+# gage_legacy_builder.build_gage_summary_excel (re-exported via
+# excelize_layout). views.py used to import compute_rr_statistics but never
+# called it. Kept only as a reference implementation — do NOT bug-fix here
+# expecting it to change the exported report; fix gage_legacy_builder instead.
 """R&R (Repeatability & Reproducibility) analysis service for Gage R&R reports."""
 
 import numpy as np
@@ -51,6 +56,22 @@ def _safe_float(val, default=0.0):
         return default
 
 
+def _limit_or_none(val):
+    """Parse a spec limit into float, or None when missing/non-numeric.
+
+    Never falls back to a magic 0/4 — a legitimate limit of 0 or 4 must be
+    distinguishable from an absent one (defect #3).
+    """
+    if val is None:
+        return None
+    if isinstance(val, (int, float)) and not isinstance(val, bool):
+        return float(val)
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
+
+
 def compute_file_statistics(df, test_name, metadata) -> dict:
     """Compute per-file statistics for a test item. Returns {mean, std, min, max, cp, cpk}."""
     data = ensure_numeric(df, test_name).dropna()
@@ -61,10 +82,10 @@ def compute_file_statistics(df, test_name, metadata) -> dict:
     std_v = float(arr.std(ddof=0)) if len(arr) > 1 else 0
     min_v = float(arr.min())
     max_v = float(arr.max())
-    ll = _safe_float(metadata.get('mins', {}).get(test_name, 0))
-    hl = _safe_float(metadata.get('maxs', {}).get(test_name, 4))
+    ll = _limit_or_none(metadata.get('mins', {}).get(test_name))
+    hl = _limit_or_none(metadata.get('maxs', {}).get(test_name))
     cp = cpk = 0
-    if std_v > 0:
+    if std_v > 0 and ll is not None and hl is not None:
         tol = hl - ll
         cp = tol / (6 * std_v) if tol > 0 else 0
         cpl = (mean_v - ll) / (3 * std_v)
@@ -79,8 +100,8 @@ def compute_rr_statistics(file_datasets, test_name, num_sigma=6) -> dict:
     test_values, test_mins, test_maxs, test_units = {}, {}, {}, {}
     for ds in file_datasets:
         fn = ds['filename']
-        test_mins[fn] = _safe_float(ds['metadata'].get('mins', {}).get(test_name, 0))
-        test_maxs[fn] = _safe_float(ds['metadata'].get('maxs', {}).get(test_name, 4))
+        test_mins[fn] = _limit_or_none(ds['metadata'].get('mins', {}).get(test_name))
+        test_maxs[fn] = _limit_or_none(ds['metadata'].get('maxs', {}).get(test_name))
         test_units[fn] = ds['metadata'].get('units', {}).get(test_name, '')
         if test_name in ds['df'].columns:
             try:
@@ -106,7 +127,7 @@ def compute_rr_statistics(file_datasets, test_name, num_sigma=6) -> dict:
             file_stds = np.append(file_stds, f_std)
             ll, hl = test_mins[fn], test_maxs[fn]
             cp = cpk = 0
-            if f_std > 0:
+            if f_std > 0 and ll is not None and hl is not None:
                 tol = hl - ll
                 cp = tol / (6 * f_std) if tol > 0 else 0
                 cpl, cpu = (f_mean - ll) / (3 * f_std), (hl - f_mean) / (3 * f_std)
@@ -119,19 +140,24 @@ def compute_rr_statistics(file_datasets, test_name, num_sigma=6) -> dict:
     global_mean = float(all_arr.mean()) if len(all_arr) > 0 else 0
     global_std = float(all_arr.std(ddof=0)) if len(all_arr) > 0 else 0
 
-    # Tolerance from first file with non-equal limits
-    low_limit = high_limit = tolerance = 0
+    # Tolerance from first file with valid, non-equal numeric limits (defect #3:
+    # a missing limit stays None and never defaults to a magic 0/4).
+    low_limit = high_limit = None
+    tolerance = 0
     for fn, lv in test_mins.items():
         hv = test_maxs[fn]
-        if hv != lv:
+        if lv is not None and hv is not None and hv != lv:
             low_limit, high_limit, tolerance = lv, hv, hv - lv
             break
 
     num_files = len(file_datasets)
     overall_cp = tolerance / (6 * global_std) if global_std > 0 and tolerance > 0 else 0
-    cpk_low = (global_mean - low_limit) / (3 * global_std) if global_std > 0 else 0
-    cpk_high = (high_limit - global_mean) / (3 * global_std) if global_std > 0 else 0
-    overall_cpk = min(cpk_low, cpk_high)
+    if global_std > 0 and low_limit is not None and high_limit is not None:
+        cpk_low = (global_mean - low_limit) / (3 * global_std)
+        cpk_high = (high_limit - global_mean) / (3 * global_std)
+        overall_cpk = min(cpk_low, cpk_high)
+    else:
+        overall_cpk = 0
 
     sumsq = np.sum(np.square(file_stds))
     repeatability = num_sigma * (sumsq / num_files) ** 0.5 if len(file_stds) > 0 and file_stds.sum() > 0 else 0

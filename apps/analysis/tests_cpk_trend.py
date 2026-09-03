@@ -89,21 +89,23 @@ class NormalPdfCurveTests(SimpleTestCase):
 
 
 class ComputeCpkSingleSidedTests(SimpleTestCase):
-    """compute_cpk 单边规格限：cp/pp 必须为 None（双侧才可定义），cpk/ppk 单侧可算。
+    """compute_cpk 单边规格限：cp 必须为 None（双侧才可定义），cpk 单侧可算。
 
     回归：缺失侧以 -inf/+inf 传入时 cp = inf，破坏 JSON 序列化且语义错误。
+    pp/ppk 已于 2026-09-03 删除（它们恒等于 cp/cpk，两个名字报同一个数），
+    下面用 assertNotIn 钉住删除，防止无意识回填。
     """
 
     def test_lower_only_limit(self):
         from apps.analysis.services.statistics import compute_cpk
         result = compute_cpk(10.0, 1.0, float('-inf'), 12.0)
         self.assertIsNone(result['cp'])
-        self.assertIsNone(result['pp'])
+        self.assertNotIn('pp', result)
         self.assertEqual(result['cp_level'], 'N/A')
         self.assertEqual(result['cp_color'], 'gray')
         # 单侧能力 = (12-10)/(3*1) = 0.667
         self.assertAlmostEqual(result['cpk'], 0.6667, places=3)
-        self.assertEqual(result['ppk'], result['cpk'])
+        self.assertNotIn('ppk', result)
 
     def test_upper_only_limit(self):
         from apps.analysis.services.statistics import compute_cpk
@@ -115,7 +117,8 @@ class ComputeCpkSingleSidedTests(SimpleTestCase):
         from apps.analysis.services.statistics import compute_cpk
         result = compute_cpk(10.0, 1.0, 8.0, 12.0)
         self.assertAlmostEqual(result['cp'], 0.6667, places=3)
-        self.assertIsNotNone(result['pp'])
+        self.assertNotIn('pp', result)
+        self.assertNotIn('ppk', result)
 
 
 class FilterFiniteTests(SimpleTestCase):

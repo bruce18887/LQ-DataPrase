@@ -18,10 +18,9 @@ never mutate the cached DataFrame in place.
 """
 from typing import Dict, List, Optional, Set
 
-import numpy as np
 import pandas as pd
 
-from .helpers import ensure_numeric, get_1d_from, get_bin_column
+from .helpers import filter_finite, get_1d_from, get_bin_column
 from .limits import (
     get_columns_with_limits,
     calculate_fail_test_item_statistics,
@@ -66,8 +65,7 @@ def has_enough_test_values(df: pd.DataFrame, param: str,
     total = len(df)
     if total == 0:
         return False
-    series = ensure_numeric(df, param).dropna()
-    series = series[series.abs() < np.inf]
+    series = filter_finite(get_1d_from(df, param))
     return len(series) / total >= min_ratio
 
 
@@ -137,8 +135,7 @@ def compute_low_cpk_test_items(df: pd.DataFrame, metadata: Dict,
         cols = get_columns_with_limits(df, metadata)
     low_cpk: Set[str] = set()
     for col in cols:
-        series = ensure_numeric(df, col).dropna()
-        series = series[series.abs() < np.inf]
+        series = filter_finite(get_1d_from(df, col))
         if len(series) == 0:
             continue
         if _display_cpk(series, metadata, col, iqr_multiplier) < threshold:

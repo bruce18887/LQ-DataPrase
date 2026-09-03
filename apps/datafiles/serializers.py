@@ -76,7 +76,7 @@ class DataFileSerializer(serializers.ModelSerializer):
             'status', 'status_display',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'owner', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'owner', 'filename', 'created_at', 'updated_at']
 
     def get_file_path(self, obj) -> str:
         return resolve_file_path(obj.file_path)

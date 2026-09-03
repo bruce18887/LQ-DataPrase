@@ -1,19 +1,16 @@
 import io
-import pandas as pd
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.http import FileResponse
-import excelize
 
 from apps.datafiles.models import DataFile
 from apps.datafiles.parsers import get_parser
 from apps.datafiles.services import get_cached_parsed_file
 from apps.export.excelize_helpers import save_excelize
 from apps.common.export_naming import base_export_context, render_export_filename
-from apps.gage.services.rr_analysis import compute_rr_statistics
 
 
 class GageViewSet(viewsets.GenericViewSet):
@@ -36,11 +33,13 @@ class GageViewSet(viewsets.GenericViewSet):
             if df is None:
                 continue
             if only_bin1:
-                from apps.analysis.services.statistics import get_bin_column_name
-                bin_col = get_bin_column_name(df_obj.format_type)
-                if bin_col in df.columns:
-                    bin_numeric = pd.to_numeric(df[bin_col], errors='coerce')
-                    df = df[bin_numeric == 1].copy()
+                # Use the shared pass-bin filter so text bins ('Bin1'/'BIN 1')
+                # are recognized; the old pd.to_numeric(...) == 1 turned every
+                # text bin into NaN → False and silently emptied the frame
+                # (defect #9). filter_bin1_rows is imported read-only from
+                # apps.analysis and never mutates the cached df.
+                from apps.analysis.services.statistics import filter_bin1_rows
+                df = filter_bin1_rows(df, metadata)
             file_datasets.append({
                 'filename': df_obj.filename,
                 'df': df,

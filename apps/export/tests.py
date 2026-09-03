@@ -330,7 +330,14 @@ class ExportApiTests(APITestCase):
             # 限 1.4~1.6：Site1 两行全部越限 → ALL Site FailCountNum = 2 > 0
             'Vth': [1.0, 1.1, 2.0, 2.5],
         })
-        metadata = {'limits': {'Vth': (1.4, 1.6)}, 'unit': {'Vth': ''}}
+        # 限值必须放在 metadata['mins']/['maxs']——这才是 compute_range_statistics
+        # 读取的键（unit 同理是 'units'）。旧写法用 {'limits': {...}}，而 export 侧
+        # 根本不消费该键 → rdl 退化成幻影 (0.0, 0.0)，于是「所有 Vth > 0」全被判
+        # fail，红底断言碰巧通过——它验证的是幻影限值 bug 而不是站点统计。
+        # 改成真实限值后 Site1 的 1.0/1.1 < LSL 1.4 是**真**越限（Site2 的 2.0/2.5
+        # > USL 1.6 也是），ALL Site FailCountNum = 4，红底断言才有意义。
+        metadata = {'mins': {'Vth': '1.4'}, 'maxs': {'Vth': '1.6'},
+                    'units': {'Vth': ''}}
         buf = build_batch_charts_xlsx_with_charts(
             df, metadata, ['Vth'], site_col='Site_No',
             show_limit=True, show_3sigma=False, show_4sigma=False,

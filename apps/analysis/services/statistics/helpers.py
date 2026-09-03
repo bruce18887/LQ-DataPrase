@@ -147,13 +147,23 @@ def normal_pdf_curve(mean: float, std: float, x_min: float, x_max: float,
 
 
 def filter_finite(series: pd.Series) -> pd.Series:
-    """移除 NaN 与 ±inf（向量化）。
+    """移除 NaN 与 ±inf（向量化），并强制 float dtype。
 
-    等价于 ``pd.to_numeric(errors='coerce').dropna()`` 后再滤 inf，一步完成；
-    替代历史 ``series.apply(lambda x: abs(x) < float('inf'))`` 逐行模式
+    等价于 ``pd.to_numeric(errors='coerce').astype(float).dropna()`` 后再滤 inf，
+    一步完成；替代历史 ``series.apply(lambda x: abs(x) < float('inf'))`` 逐行模式
     （依赖 NaN 比较语义且慢）。返回 Series（索引为原索引子集）。
+
+    ``.astype(float)`` 是不可省的一步：``pd.to_numeric`` **不会**把 bool 列转成
+    数值 dtype（实测真实 CTA8290D 文件的 ``Dut_Pass`` 进去仍是 bool），而 bool
+    Series 上做减法（``.quantile()`` 内部）在 numpy 2.x 抛
+    ``TypeError: numpy boolean subtract, the '-' operator, is not supported``。
+    同理 ``abs(series)`` 在 pandas 3.0 的 str 列（实测 ``Start_T``）上抛
+    ``TypeError: bad operand type for abs(): 'str'``——一个非数值列就能把整个
+    请求打断，而正确行为是 coerce 成 NaN 后自然被滤掉。
+    统一走本函数即同时消除这两类崩溃（与 ``computations.compute_boxplot_stats``
+    已修好的写法同源）。
     """
-    clean = pd.to_numeric(series, errors='coerce')
+    clean = pd.to_numeric(series, errors='coerce').astype(float)
     return clean[np.isfinite(clean.values)]
 
 
@@ -166,7 +176,13 @@ def site_sort_key(site_name):
 
 
 def ensure_numeric(df: pd.DataFrame, col: str) -> pd.Series:
-    return pd.to_numeric(get_1d_from(df, col), errors='coerce')
+    """取列并强制为 float（无法转换的值→NaN）。
+
+    ``.astype(float)`` 的理由同 ``filter_finite``：``pd.to_numeric`` 不改 bool
+    dtype，而下游的 ``.quantile()`` / ``.std()`` / 算术在 bool 上会抛
+    numpy boolean subtract。保留 NaN（不 dropna），由调用方决定语义。
+    """
+    return pd.to_numeric(get_1d_from(df, col), errors='coerce').astype(float)
 
 
 def safe_gap(min_val: float, max_val: float) -> float:

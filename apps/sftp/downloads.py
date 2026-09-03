@@ -23,6 +23,7 @@ from contextlib import contextmanager
 from apps.datafiles.views import _register_file
 
 from . import pool
+from .local_paths import remove_partial as _remove_partial
 
 logger = logging.getLogger(__name__)
 
@@ -75,14 +76,6 @@ def channel_timeout(sftp, seconds):
                 channel.settimeout(old)
         except Exception:
             logger.warning('Failed to restore SFTP channel timeout', exc_info=True)
-
-
-def _remove_partial(file_path):
-    """删除下载失败留下的半截文件（绝不让未注册的残片留在用户目录）。"""
-    try:
-        os.remove(file_path)
-    except OSError:
-        pass
 
 
 def iter_remote_chunks(sftp, remote_path, chunk_size=DOWNLOAD_CHUNK_SIZE):

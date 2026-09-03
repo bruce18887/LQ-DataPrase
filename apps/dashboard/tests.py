@@ -197,15 +197,29 @@ class SummaryApiGageTests(APITestCase):
         self.assertEqual(names, [c for c in df.columns if c in limits])
 
     def test_overview_row_schema(self):
-        """每行含全部 13 键；限值行统计为数值；无 fail 行 fail_count==0。"""
+        """每行含全部 13 键；统计为数值；lsl/usl/cpk 仅在**真有规格限**时为数值。
+
+        本样本（gage_m_S1.csv）里 Serial_No / Part_No / Dut_No / Site_No /
+        Dut_Pass / SW_Bin / X_COORD / Y_COORD / QR_Code / Start_T / Test_Time /
+        Alarm 共 13 个系统列的限值字段是字面 ``'Min'``/``'Max'``——在该格式里
+        这就是「无规格限」的占位写法。旧实现（parse_limit_string）把它们解析成
+        **数据自身的极值**当 LSL/USL，于是这些列都算出 Cpk（μ ∈ [min,max] 且
+        range ≈ 6.9σ → Cpk 必然 ≤ 0.5）并判 D 级红——把系统列报成工艺能力不足。
+        现在 resolve_spec_limit 对 'Min'/'Max' 返回 None，这三列输出 None。
+        """
+        from apps.datafiles.parsers import get_parser
+        from apps.analysis.services.statistics import resolve_spec_limit
+
         resp = self.client.get('/api/v1/summary/', {'file_id': self.datafile.id})
         self.assertEqual(resp.status_code, 200)
         rows = resp.data['test_item_overview']
         self.assertGreater(len(rows), 0)
+        _df, meta = get_parser('CTA8290D').parse(GAGE_S1_PATH)
         expected_keys = {
             'name', 'data_count', 'mean', 'std', 'min', 'max', 'lsl', 'usl',
             'cpk', 'cpk_level', 'cpk_color', 'unit', 'fail_count', 'percentage',
         }
+        placeholder_rows = []
         for row in rows:
             self.assertEqual(set(row.keys()), expected_keys, f'{row["name"]} 键集')
             self.assertEqual(row['fail_count'], 0)  # GAGE 无 fail
@@ -213,11 +227,30 @@ class SummaryApiGageTests(APITestCase):
             self.assertGreaterEqual(row['data_count'], 0)
             if row['data_count'] > 0:
                 self.assertIsInstance(row['mean'], float)
-                self.assertIsInstance(row['cpk'], float)
-                self.assertIsInstance(row['lsl'], float)
-                self.assertIsInstance(row['usl'], float)
+                real_lsl = resolve_spec_limit(meta.get('mins', {}).get(row['name'], ''))
+                real_usl = resolve_spec_limit(meta.get('maxs', {}).get(row['name'], ''))
+                # 逐侧判定：单边限时缺失侧为 None、另一侧仍为数值
+                if real_lsl is None:
+                    self.assertIsNone(row['lsl'], f'{row["name"]} 无 LSL → 应为 None')
+                else:
+                    self.assertIsInstance(row['lsl'], float, f'{row["name"]} lsl')
+                if real_usl is None:
+                    self.assertIsNone(row['usl'], f'{row["name"]} 无 USL → 应为 None')
+                else:
+                    self.assertIsInstance(row['usl'], float, f'{row["name"]} usl')
+                if real_lsl is None and real_usl is None:
+                    self.assertIsNone(
+                        row['cpk'], f'{row["name"]} 两侧都无规格限 → cpk 应为 None')
+                    placeholder_rows.append(row['name'])
+                else:
+                    self.assertIsInstance(row['cpk'], float, f'{row["name"]} cpk')
             else:
                 self.assertIsNone(row['cpk'], f'{row["name"]} 全 NaN 列 cpk 应为 None')
+        # 钉住「'Min'/'Max' 占位列确实存在且被正确识别」，否则上面那段
+        # None 分支永远不执行，测试就退化成只验证了数值分支。
+        self.assertIn('Serial_No', placeholder_rows)
+        self.assertIn('Test_Time', placeholder_rows)
+        self.assertGreaterEqual(len(placeholder_rows), 10)
 
     def test_param_stats_derived_consistent(self):
         """param_stats 与 overview 同名行 cpk 一致（防双路径漂移）+ CPK 升序。"""

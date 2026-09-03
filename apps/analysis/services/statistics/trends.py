@@ -6,32 +6,29 @@ from typing import Dict, List, Any
 import numpy as np
 
 from .limits import (
-    parse_limit_string,
+    resolve_spec_limits,
     calculate_fail_bin_statistics,
     compute_pass_yield,
+    is_pass_bin,
 )
 from .computations import compute_cpk
-from .helpers import NON_NUMERIC_KEYWORDS, get_1d_from, filter_finite
+from .helpers import get_1d_from, filter_finite
 
 logger = logging.getLogger(__name__)
 
-# parse_limit_string 对 'min'/'max' 等关键字按数据边界解析（真实限值），
-# 其余 NON_NUMERIC_KEYWORDS 与空串一律回退 default（0.0）——区分两者
-_REAL_LIMIT_KEYWORDS = {'min', 'lower limit', 'max', 'upper limit'}
+def _bin_sort_key(bin_value):
+    """Bin1 优先，其余按数值序（无法数值化的排最后、按字符串）。
 
-
-def _has_real_limit(raw: str) -> bool:
-    """限值字符串是否为真实规格限（空串/na/- 等占位不是）。"""
-    cleaned = raw.strip().lower()
-    if cleaned in _REAL_LIMIT_KEYWORDS:
-        return True
-    if not cleaned or cleaned in NON_NUMERIC_KEYWORDS:
-        return False
+    ``calculate_fail_bin_statistics`` 直接拿 pandas ``value_counts`` 的原始键，
+    所以真实 CTA8290D 文件的 ``SW_Bin``（int64）会得到 **int** 键；旧写法
+    ``key=lambda x: (x != 'Bin1' and x != '1', x)`` 对 int 键永远为 True
+    （排不出 Bin1 优先），而且跨文件 int/str 混用时 ``sorted`` 直接 TypeError。
+    """
+    priority = 0 if is_pass_bin(bin_value) else 1
     try:
-        float(cleaned)
-        return True
-    except (ValueError, TypeError):
-        return False
+        return (priority, 0, float(bin_value), '')
+    except (TypeError, ValueError):
+        return (priority, 1, 0.0, str(bin_value))
 
 
 def compute_bin_trend(file_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -75,8 +72,13 @@ def compute_bin_trend(file_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
         for bin_name, bin_info in bin_stats.items():
             count = bin_info.get('count', 0)
             total_count += count
-            if bin_name == 'Bin1' or bin_name == '1':
-                pass_count = count
+            # is_pass_bin 而非 ``== 'Bin1' or == '1'``：真实文件的 SW_Bin 是
+            # int64，bin_stats 的键是 Python int，``1 == '1'`` 恒为 False，
+            # pass_count 永远停在 0 → yield_trend 整条归零，而同 app 的
+            # compute_yield_trend（走 compute_pass_yield）算出正确良率，
+            # 两个良率端点互相矛盾。用 += 与 compute_pass_yield 保持一致。
+            if is_pass_bin(bin_name):
+                pass_count += count
 
         # Calculate percentages
         for bin_name, bin_info in bin_stats.items():
@@ -103,8 +105,8 @@ def compute_bin_trend(file_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
 
         yield_trend.append(yield_val)
 
-    # Sort bins (Bin1 first, then others)
-    bins_sorted = sorted(list(all_bins), key=lambda x: (x != 'Bin1' and x != '1', x))
+    # Sort bins (Bin1 first, then numeric order)
+    bins_sorted = sorted(list(all_bins), key=_bin_sort_key)
 
     return {
         'files': files_info,
@@ -167,17 +169,20 @@ def compute_yield_trend(file_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
         yield_values.append(yield_pct)
 
     # Calculate SPC control limits
+    # 口径（用户 2026-09-03 确认）：维持 X̄-chart 近似（mean ± 3·std）而不改
+    # p-chart；但上下界必须对称钳位——良率是百分比，旧代码只钳 lcl>=0
+    # 却不钳 ucl<=100，会画出 >100% 的控制限。精度对齐项目 6 位口径
+    # （同文件良率与 limits.compute_pass_yield 均为 round(..., 6)）。
     n = len(yield_values)
     if n > 1:
         mean_yield = float(np.mean(yield_values))
         std_yield = float(np.std(yield_values, ddof=0))
-        ucl = round(mean_yield + 3 * std_yield, 2)
-        cl = round(mean_yield, 2)
-        lcl = round(mean_yield - 3 * std_yield, 2)
-        lcl = max(lcl, 0.0)  # yield cannot be negative
+        ucl = round(min(mean_yield + 3 * std_yield, 100.0), 6)
+        cl = round(mean_yield, 6)
+        lcl = round(max(mean_yield - 3 * std_yield, 0.0), 6)  # yield cannot be negative
     elif n == 1:
         mean_yield = yield_values[0]
-        ucl = cl = lcl = round(mean_yield, 2)
+        ucl = cl = lcl = round(mean_yield, 6)
     else:
         ucl = cl = lcl = None
 
@@ -258,26 +263,21 @@ def compute_param_trend(file_data_list: List[Dict[str, Any]], param: str) -> Dic
         max_val = float(data_series.max())
 
         # 每文件独立解析规格限并计算 CPK —— 不同批次/程序版本的规格可能不同，
-        # 沿用第一个文件的限值会让后续文件的 CPK 数学上错误
-        mins_dict = metadata.get('mins', {})
-        maxs_dict = metadata.get('maxs', {})
-        min_raw = str(mins_dict.get(param, ''))
-        max_raw = str(maxs_dict.get(param, ''))
-        file_lsl = parse_limit_string(min_raw, data_series, 0.0, 0.0)
-        file_usl = parse_limit_string(max_raw, data_series, 0.0, 0.0)
-        # parse_limit_string 对缺失/占位限值回退 0.0，与真实 [0,0] 规格无法
-        # 区分——用原始字符串判断是否真有限值，缺失文件不算 CPK（避免负值）
-        has_lsl = _has_real_limit(min_raw)
-        has_usl = _has_real_limit(max_raw)
+        # 沿用第一个文件的限值会让后续文件的 CPK 数学上错误。
+        # resolve_spec_limits 对缺失/占位/字面 'Min'/'Max' 一律返回 None，
+        # 所以不再需要旧的 _has_real_limit 局部绕过（那是为了区分
+        # 「真没有限值」与「幻影 0.0」而写的补丁，根因修完就可以删）。
+        file_lsl, file_usl = resolve_spec_limits(metadata, param)
 
         # Compute CPK if limits available
         cpk_val = 0.0
-        if has_lsl and has_usl and std_val > 0:
+        if file_lsl is not None and file_usl is not None and std_val > 0:
             cpk_result = compute_cpk(mean_val, std_val, file_lsl, file_usl)
             cpk_val = cpk_result['cpk']
 
         # 响应级 limits 字段取首个完整（双限齐全）对，向后兼容
-        if response_lsl is None and response_usl is None and has_lsl and has_usl:
+        if (response_lsl is None and response_usl is None
+                and file_lsl is not None and file_usl is not None):
             response_lsl, response_usl = file_lsl, file_usl
 
         files_info.append({
@@ -293,8 +293,8 @@ def compute_param_trend(file_data_list: List[Dict[str, Any]], param: str) -> Dic
             'min': round(min_val, 6),
             'max': round(max_val, 6),
             'cpk': round(cpk_val, 4),
-            'lsl': round(file_lsl, 6) if has_lsl else None,
-            'usl': round(file_usl, 6) if has_usl else None,
+            'lsl': round(file_lsl, 6) if file_lsl is not None else None,
+            'usl': round(file_usl, 6) if file_usl is not None else None,
             'count': len(data_series)
         })
 

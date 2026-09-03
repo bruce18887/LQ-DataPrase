@@ -3,6 +3,7 @@ import math
 import os
 
 import pandas as pd
+from django.conf import settings
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
@@ -86,7 +87,7 @@ def compute_test_item_overview(df, metadata, fail_stats):
     无规格限的 fail 项：统计列返回 None（前端显示 N/A）；
     无 fail 的参数：fail_count / percentage 返回 0。
     """
-    from apps.analysis.services.statistics import compute_cpk, parse_limit_string
+    from apps.analysis.services.statistics import compute_cpk, resolve_spec_limits
 
     # 限值判定沿用原 compute_parameter_summary 的宽松语义：单边限参数也保留
     # （缺失侧以 -inf/+inf 传入 compute_cpk 计算单边 CPK，输出时转 None）。
@@ -126,10 +127,17 @@ def compute_test_item_overview(df, metadata, fail_stats):
                     row['min'] = round(float(data_series.min()), 4)
                     row['max'] = round(float(data_series.max()), 4)
 
-                    lsl = parse_limit_string(
-                        str(metadata['mins'][param]), data_series, 0.0, 0.0) if has_valid_lsl else float('-inf')
-                    usl = parse_limit_string(
-                        str(metadata['maxs'][param]), data_series, 0.0, 0.0) if has_valid_usl else float('inf')
+                    # resolve_spec_limits 对缺失/占位/字面 'Min'/'Max' 返回 None。
+                    # 旧写法用 parse_limit_string(..., 0.0, 0.0) + _has_valid_limit，
+                    # 而 _has_valid_limit 只排除 ''/nan/none/n/a，**不排除 'Min'/'Max'**
+                    # —— 于是这类参数把数据自身极值当 LSL/USL，CPK 数学上必然
+                    # ≤ 0.5 而永远判红。此处沿用本函数既有约定：缺失侧以
+                    # -inf/+inf 传入 compute_cpk 算单边 CPK，输出时转 None。
+                    # 注意：行集口径（_has_valid_limit）刻意未改，只修限值取值，
+                    # 以保证测试项总览表的行数与既有 e2e 断言不变。
+                    lsl_raw, usl_raw = resolve_spec_limits(metadata, param)
+                    lsl = float('-inf') if lsl_raw is None else lsl_raw
+                    usl = float('inf') if usl_raw is None else usl_raw
                     row['lsl'] = round(lsl, 4) if lsl != float('-inf') else None
                     row['usl'] = round(usl, 4) if usl != float('inf') else None
 
@@ -321,4 +329,7 @@ class DashboardSummaryView(APIView):
             raise
         except Exception as e:
             logger.exception(f"DashboardSummaryView error: {e}")
-            return Response({'error': 'internal_error', 'detail': str(e)}, status=500)
+            body = {'error': 'internal_error'}
+            if settings.DEBUG:
+                body['detail'] = str(e)
+            return Response(body, status=500)

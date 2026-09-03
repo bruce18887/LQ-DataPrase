@@ -1,4 +1,6 @@
 import os, time, logging
+# 保留 paramiko 绑定：主机密钥校验已下沉到 apps/sftp/host_keys.py，它通过
+# ``paramiko.Transport`` 建连（同一模块属性，既有测试的 patch 目标仍然生效）。
 import paramiko
 from stat import S_ISDIR
 from rest_framework import viewsets, status
@@ -11,10 +13,12 @@ logger = logging.getLogger(__name__)
 
 from apps.datafiles.views import _user_upload_dir
 from apps.accounts.models import UserSetting
+from . import host_keys
 from .cache import set_session, delete_session, SftpSessionCacheError
 from .config_views import SftpConfigMixin
 from .models import SftpConfig
 from . import pool
+from .local_paths import remove_partial, resolve_local_path
 from .downloads import (
     clamp_timeout,
     download_dir_events,
@@ -84,10 +88,14 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
     def _connect_impl(self, request, *, host, port, username, password, config_name=''):
         """Shared connect logic: handshake → persist session → record last visit."""
         try:
-            transport = paramiko.Transport((host, port))
-            transport.connect(username=username, password=password)
+            # TOFU 主机密钥校验：已记录的主机公钥不匹配时抛
+            # HostKeyMismatchError（paramiko 在认证**之前**比对，凭据不外泄）。
+            transport = host_keys.open_verified_transport(
+                host, port, username, password)
             transport.close()
         except Exception as e:
+            logger.warning('SFTP handshake failed for %s:%s: %s', host, port, e,
+                           exc_info=True)
             return Response({'status': 'error', 'message': str(e)}, status=400)
 
         # Persist the session (password encrypted at rest) in Redis or
@@ -230,11 +238,12 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
                 items.sort(key=lambda x: (not x['is_dir'], key_fn(x)), reverse=reverse)
 
             # 断线续连：每次成功浏览都更新上次路径（即使不点断开、直接刷新也记录）。
-            # 记录失败绝不影响浏览。
+            # 记录失败绝不影响浏览，但必须留痕，否则排查时无从下手。
             try:
                 self._record_last_visit(request.user, path=path)
             except Exception:
-                pass
+                logger.warning('Failed to record last SFTP path %s', path,
+                               exc_info=True)
 
             return Response({'path': path, 'items': items})
         except Exception as e:
@@ -248,6 +257,11 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
     @action(detail=False, methods=['post'])
     def download(self, request):
         remote_path = request.data.get('path')
+        # ``request.data.get(k, default)`` 的 default 只在键**缺失**时生效；键存在
+        # 但值为 None 时拿到 None → os.path.splitext(None) TypeError → 500。
+        # 与 download_and_parse 的 ``elif remote_path:`` 守卫对齐。
+        if not remote_path:
+            return Response({'error': '缺少 path 参数'}, status=400)
         if not _is_csv(remote_path):
             return Response({'error': '仅支持 CSV 文件'}, status=400)
 
@@ -255,14 +269,10 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
         if not sftp:
             return Response({'error': 'not_connected'}, status=400)
 
+        file_path = None
         try:
-            filename = os.path.basename(remote_path)
             upload_dir = _user_upload_dir(request.user, 'single')
-            file_path = os.path.join(upload_dir, filename)
-            if os.path.exists(file_path):
-                ts = int(time.time())
-                name, ext = os.path.splitext(filename)
-                file_path = os.path.join(upload_dir, f"{name}_{ts}{ext}")
+            file_path = resolve_local_path(upload_dir, os.path.basename(remote_path))
 
             sftp.get(remote_path, file_path)
             file_size = os.path.getsize(file_path)
@@ -276,7 +286,12 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
                 'datafile_id': datafile.id,
             })
         except Exception as e:
+            # 与 SSE 路径（downloads 的 _remove_partial）同语义：失败不留半截文件，
+            # 也不注册任何 DB 行。
+            remove_partial(file_path)
             pool.invalidate(request.user.id)
+            logger.warning('SFTP download failed for %s: %s', remote_path, e,
+                           exc_info=True)
             return Response({'error': str(e)}, status=400)
 
     @action(detail=False, methods=['post'])
@@ -289,6 +304,8 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
         或 error(message)。下载即注册（与 /download/ 同语义）。
         """
         remote_path = request.data.get('path')
+        if not remote_path:
+            return Response({'error': '缺少 path 参数'}, status=400)
         if not _is_csv(remote_path):
             return Response({'error': '仅支持 CSV 文件'}, status=400)
 
@@ -303,18 +320,15 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
         timeout_sec = clamp_timeout(timeout_sec)
 
         try:
-            filename = os.path.basename(remote_path)
             upload_dir = _user_upload_dir(request.user, 'single')
-            file_path = os.path.join(upload_dir, filename)
-            if os.path.exists(file_path):
-                ts = int(time.time())
-                name, ext = os.path.splitext(filename)
-                file_path = os.path.join(upload_dir, f"{name}_{ts}{ext}")
+            file_path = resolve_local_path(upload_dir, os.path.basename(remote_path))
 
             events = download_file_events(
                 sftp, request.user, remote_path, file_path, timeout_sec)
         except Exception as e:
             pool.invalidate(request.user.id)
+            logger.warning('SFTP stream download setup failed for %s: %s',
+                           remote_path, e, exc_info=True)
             return Response({'error': str(e)}, status=400)
 
         response = StreamingHttpResponse(
@@ -335,6 +349,8 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
         （见 ``downloads.download_dir_events``），大文件下载期间不会卡在低百分比。
         """
         remote_path = request.data.get('path')
+        if not remote_path:
+            return Response({'error': '缺少 path 参数'}, status=400)
         timeout_sec = request.data.get('timeout')
         if timeout_sec is None:
             setting, _ = UserSetting.objects.get_or_create(user=request.user)
@@ -389,13 +405,10 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
             upload_dir = _user_upload_dir(request.user, 'single')
             saved = []
             for remote_path in paths:
+                file_path = None
                 try:
-                    filename = os.path.basename(remote_path)
-                    file_path = os.path.join(upload_dir, filename)
-                    if os.path.exists(file_path):
-                        ts = int(time.time())
-                        name, ext = os.path.splitext(filename)
-                        file_path = os.path.join(upload_dir, f"{name}_{ts}{ext}")
+                    file_path = resolve_local_path(
+                        upload_dir, os.path.basename(remote_path))
                     sftp.get(remote_path, file_path)
                     # 与单文件下载同语义：下载即注册（single）
                     _register_file(request.user, file_path, 'single')
@@ -404,7 +417,10 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
                         'size': os.path.getsize(file_path),
                     })
                 except Exception as e:
-                    logger.warning(f"SFTP batch download failed for {remote_path}: {e}")
+                    remove_partial(file_path)
+                    logger.warning(
+                        f"SFTP batch download failed for {remote_path}: {e}",
+                        exc_info=True)
 
             return Response({
                 'status': 'ok',
@@ -413,6 +429,7 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
             })
         except Exception as e:
             pool.invalidate(request.user.id)
+            logger.warning('SFTP batch download aborted: %s', e, exc_info=True)
             return Response({'error': str(e)}, status=400)
 
     # ------------------------------------------------------------------
@@ -442,6 +459,7 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
         if not sftp:
             return Response({'error': 'not_connected'}, status=400)
 
+        file_path = None
         try:
             filename = os.path.basename(remote_path)
             # 单文件解析 → single 目录（旧实现下载到 batch 目录却注册 single，
@@ -449,11 +467,7 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
             upload_dir = _user_upload_dir(request.user, 'single')
 
             # Handle collision
-            file_path = os.path.join(upload_dir, filename)
-            if os.path.exists(file_path):
-                ts = int(time.time())
-                name, ext = os.path.splitext(filename)
-                file_path = os.path.join(upload_dir, f"{name}_{ts}{ext}")
+            file_path = resolve_local_path(upload_dir, filename)
 
             sftp.get(remote_path, file_path)
 
@@ -463,7 +477,10 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
                 'files': [{'id': datafile.id, 'filename': datafile.filename}],
             })
         except Exception as e:
+            remove_partial(file_path)
             pool.invalidate(request.user.id)
+            logger.warning('SFTP download-and-parse failed for %s: %s',
+                           remote_path, e, exc_info=True)
             return Response({'error': str(e)}, status=400)
 
     def _batch_download_parse(self, request, paths):
@@ -482,18 +499,26 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
 
             created = []
             for remote_path in paths:
+                file_path = None
                 try:
                     filename = os.path.basename(remote_path)
                     if _is_summary_csv(filename):
                         continue  # summary dump, not test data
-                    file_path = os.path.join(batch_dir, filename)
+                    # 与 download / download_batch / _single_download_parse 同款
+                    # 碰撞处理：旧实现直接 join 同名路径 → 覆盖既有文件并
+                    # 注册出指向同一路径的重复 DB 行。
+                    file_path = resolve_local_path(batch_dir, filename)
 
                     sftp.get(remote_path, file_path)
 
                     datafile = _register_file(request.user, file_path, 'batch', batch_name)
                     created.append({'id': datafile.id, 'filename': datafile.filename})
-                except:
-                    continue
+                except Exception as e:
+                    # 旧实现是裸 ``except:``（会吞 KeyboardInterrupt/SystemExit）
+                    # 且静默 continue：既无日志又留下半截文件。
+                    remove_partial(file_path)
+                    logger.warning('SFTP batch parse failed for %s: %s',
+                                   remote_path, e, exc_info=True)
 
             return Response({
                 'status': 'ok',
@@ -502,6 +527,7 @@ class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
             })
         except Exception as e:
             pool.invalidate(request.user.id)
+            logger.warning('SFTP batch parse aborted: %s', e, exc_info=True)
             return Response({'error': str(e)}, status=400)
 
     # ------------------------------------------------------------------

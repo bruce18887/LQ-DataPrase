@@ -35,7 +35,10 @@ def load_user_file(request, file_id=None, *, check_exists=False):
     if not file_id:
         raise FileLoadError('file_id_required')
 
-    file_id = int(file_id)
+    try:
+        file_id = int(file_id)
+    except (ValueError, TypeError):
+        raise FileLoadError('file_id_invalid')
     datafile = get_object_or_404(DataFile, pk=file_id, owner=request.user)
 
     if check_exists:

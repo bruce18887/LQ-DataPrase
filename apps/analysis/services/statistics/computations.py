@@ -11,27 +11,37 @@ import numpy as np
 
 from .distributions import norm_probplot, t_cdf
 from .downsample import uniform_indices, DOWN_SAMPLE_THRESHOLD
-from .helpers import safe_gap, get_1d_from, get_coord_columns
-from .limits import parse_limit_string
+from .helpers import safe_gap, get_1d_from, get_coord_columns, filter_finite
+from .limits import resolve_spec_limits
 from .outliers import detect_outliers_iqr
 
 
 def compute_cpk(mean_val: float, std_val: float, cpk_lower: Optional[float], cpk_upper: Optional[float],
                 cpk_a: float = 1.67, cpk_b: float = 1.33, cpk_c: float = 1.0) -> Dict[str, Any]:
     """
-    Compute Cp, Cpk, Pp, Ppk with quality levels.
+    Compute Cp / Cpk with quality levels.
 
     Args:
         mean_val: Mean of the data
-        std_val: Standard deviation (short-term, within-subgroup)
-        cpk_lower: Lower specification limit (LSL)
-        cpk_upper: Upper specification limit (USL)
+        std_val: Standard deviation. **All current callers pass the overall
+            sigma** (``std(ddof=0)`` of the whole sample), so the indices below
+            are performance-style. This function accepts only one sigma.
+        cpk_lower: Lower specification limit (LSL); None when absent
+        cpk_upper: Upper specification limit (USL); None when absent
         cpk_a: Threshold for A-level quality (default 1.67)
         cpk_b: Threshold for B-level quality (default 1.33)
         cpk_c: Threshold for C-level quality (default 1.0)
 
     Returns:
-        Dictionary with cp, cpk, pp, ppk values and their quality levels/colors
+        Dictionary with cp, cpk and their quality levels/colors.
+
+    Pp/Ppk were removed (user decision 2026-09-03): they used to be literal
+    copies of Cp/Cpk (``pp = cp``, ``ppk = cpk``) because the function only ever
+    received one sigma, so the UI reported the same number under two names and
+    the Ppk/Cpk ratio -- the actual stability indicator -- was always 1. Doing
+    it properly needs a within-subgroup sigma (MR-bar/1.128 or R-bar/d2), which
+    is a separate change. Nothing in the frontend or apps/export ever consumed
+    the pp/ppk fields (both verified 0 references).
     """
     def get_quality_level(value: float) -> Tuple[str, str]:
         """Get quality level and color for a capability index."""
@@ -48,60 +58,39 @@ def compute_cpk(mean_val: float, std_val: float, cpk_lower: Optional[float], cpk
         return {
             'cp': 0.0,
             'cpk': 0.0,
-            'pp': 0.0,
-            'ppk': 0.0,
             'cp_level': "N/A",
             'cpk_level': "N/A",
-            'pp_level': "N/A",
-            'ppk_level': "N/A",
             'cp_color': "gray",
-            'cpk_color': "gray",
-            'pp_color': "gray",
-            'ppk_color': "gray"
+            'cpk_color': "gray"
         }
 
     # 单边规格（缺失侧以 -inf/+inf 传入）：Cp 需要双侧规格才可定义 → None；
-    # Cpk/Ppk 单侧可算（缺失侧能力为 +inf，min 取有限侧）
+    # Cpk 单侧可算（缺失侧能力为 +inf，min 取有限侧）
     one_sided = not math.isfinite(cpk_lower) or not math.isfinite(cpk_upper)
 
     if one_sided:
         cp = None
-        pp = None
         cp_level = "N/A"
         cp_color = "gray"
-        pp_level = "N/A"
-        pp_color = "gray"
     else:
         # Cp: Process Capability (potential capability, ignores centering)
         cp = (cpk_upper - cpk_lower) / (6 * std_val)
-        pp = cp  # In this implementation, we use the same std for both
         cp_level, cp_color = get_quality_level(cp)
-        pp_level, pp_color = get_quality_level(pp)
 
     # Cpk: Process Capability Index (actual capability, considers centering)
     upper_cap = (cpk_upper - mean_val) / (3 * std_val) if math.isfinite(cpk_upper) else float('inf')
     lower_cap = (mean_val - cpk_lower) / (3 * std_val) if math.isfinite(cpk_lower) else float('inf')
     cpk = min(upper_cap, lower_cap)
 
-    # Ppk: Process Performance Index (same as Cpk, but uses overall std)
-    ppk = cpk  # In this implementation, we use the same std for both
-
     cpk_level, cpk_color = get_quality_level(cpk)
-    ppk_level, ppk_color = get_quality_level(ppk)
 
     return {
         'cp': cp,
         'cpk': cpk,
-        'pp': pp,
-        'ppk': ppk,
         'cp_level': cp_level,
         'cpk_level': cpk_level,
-        'pp_level': pp_level,
-        'ppk_level': ppk_level,
         'cp_color': cp_color,
-        'cpk_color': cpk_color,
-        'pp_color': pp_color,
-        'ppk_color': ppk_color
+        'cpk_color': cpk_color
     }
 
 
@@ -133,35 +122,51 @@ def compute_correlation_matrix(df: pd.DataFrame, params: List[str], method: str 
             'params': valid_params,
             'matrix': [],
             'sample_size': 0,
+            'insufficient_data': True,
             'method': method
         }
 
     # Select only numeric columns and drop NaN
     df_subset = df[valid_params].copy()
 
-    # Convert to numeric, coercing errors to NaN
+    # Convert to numeric, coercing errors to NaN. astype(float) 是必需的：
+    # pd.to_numeric 不改 bool dtype（真实数据的 Dut_Pass），而 bool 列参与
+    # corr/减法会抛 numpy boolean subtract。
     for col in df_subset.columns:
-        df_subset[col] = pd.to_numeric(df_subset[col], errors='coerce')
+        df_subset[col] = pd.to_numeric(df_subset[col], errors='coerce').astype(float)
 
     # Drop rows with any NaN values
     df_clean = df_subset.dropna()
 
     if len(df_clean) < 2:
+        # 样本不足时相关系数**无定义**。旧写法返回全 1.0 矩阵，前端热力图
+        # 会显示「所有参数两两完全正相关」（实测 {'A':[1.0,nan],'B':[2.0,nan]}
+        # → matrix=[[1,1],[1,1]]、sample_size=1），是把「算不出来」伪装成
+        # 「最强相关」。改为全 None + insufficient_data 标记：前端
+        # matrix-option.ts 已有 `?? 0` 兜底，不会崩，也不会再谎报。
+        n = len(valid_params)
         return {
             'params': valid_params,
-            'matrix': [[1.0] * len(valid_params) for _ in range(len(valid_params))],
+            'matrix': [[None] * n for _ in range(n)],
             'sample_size': len(df_clean),
+            'insufficient_data': True,
             'method': method
         }
 
     # Compute correlation matrix
     corr_matrix = df_clean.corr(method=method)
+    corr_values = corr_matrix.values.astype(float)
+    # 自相关恒为 1，即使该列是常量（std=0 → corr 给 NaN）。对角线为 0
+    # 会让热力图显示「参数与自己零相关」（实测常量列 A → matrix[0][0]=0.0）。
+    np.fill_diagonal(corr_values, 1.0)
 
-    # Convert to list of lists for JSON serialization
-    matrix_list = corr_matrix.values.tolist()
-
-    # Round values to 4 decimal places
-    matrix_list = [[round(val, 4) if not math.isnan(val) else 0.0 for val in row] for row in matrix_list]
+    # Convert to list of lists for JSON serialization.
+    # 非对角线的 NaN 表示「相关系数无定义」（常量列），输出 None 让前端
+    # 渲染空格——旧写法一律变 0.0，把「未定义」与「不相关」混为一谈。
+    matrix_list = [
+        [round(float(val), 4) if not math.isnan(val) else None for val in row]
+        for row in corr_values.tolist()
+    ]
 
     # Compute p-value matrix (vectorized from correlation coefficients)
     n_obs = len(df_clean)
@@ -182,6 +187,7 @@ def compute_correlation_matrix(df: pd.DataFrame, params: List[str], method: str 
         'matrix': matrix_list,
         'p_values': p_matrix_list,
         'sample_size': len(df_clean),
+        'insufficient_data': False,
         'method': method
     }
 
@@ -284,13 +290,20 @@ def compute_range_statistics(data_series: pd.Series, metadata: Dict, selected_pa
 
     unit = metadata.get('units', {}).get(selected_param, '')
 
-    rdl_min = parse_limit_string(str(metadata.get('mins', {}).get(selected_param, '')), data_series, 0.0, 0.0)
-    rdl_max = parse_limit_string(str(metadata.get('maxs', {}).get(selected_param, '')), data_series, 0.0, 0.0)
-    rdl_gap = safe_gap(rdl_min, rdl_max)
-
+    # 数据范围先算：rdl 缺失时拿它兜底出 gap，保证 safe_gap 永不吃 None。
     dr_min = float(data_series.min()) if len(data_series) > 0 else 0.0
     dr_max = float(data_series.max()) if len(data_series) > 0 else 0.0
     dr_gap = safe_gap(dr_min, dr_max)
+
+    # 规格限：缺失侧为 None。旧写法用 parse_limit_string(..., 0.0, 0.0)，
+    # 把「没有限值」变成幻影 0.0（CPK → −|μ|/(3σ)、outlier 低侧栅栏被
+    # min(lb, 0.0) 钳死、导出直方图捕获 0 点），并把字面 'Min'/'Max'
+    # 当成数据自身极值（Cpk 必然 ≤ 0.5 → 永远判红）。详见 resolve_spec_limit。
+    rdl_min, rdl_max = resolve_spec_limits(metadata, selected_param)
+    if rdl_min is not None and rdl_max is not None:
+        rdl_gap = safe_gap(rdl_min, rdl_max)
+    else:
+        rdl_gap = dr_gap
 
     s3_min = mean_val - 3 * std_val
     s3_max = mean_val + 3 * std_val
@@ -331,8 +344,7 @@ def compute_qqplot(data_series: pd.Series, metadata: dict = None, param: str = N
     Returns:
         Dictionary with theoretical quantiles, observed values, R-squared, and normality verdict.
     """
-    clean = pd.to_numeric(data_series, errors='coerce').dropna()
-    clean = clean[np.isfinite(clean.values)]
+    clean = filter_finite(data_series)
 
     # Detect outliers, respecting spec limits (RDL) if available
     spec_limits = None

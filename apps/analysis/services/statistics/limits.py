@@ -5,6 +5,7 @@ Functions for identifying columns with valid limits, parsing limit strings,
 detecting fail rows, and computing per-bin / per-test-item fail statistics.
 """
 from typing import Optional, Dict, List, Tuple
+import math
 import pandas as pd
 
 from .helpers import (
@@ -35,19 +36,69 @@ def get_columns_with_limits(df: pd.DataFrame, metadata: Dict) -> List[str]:
     return cols_with_limits
 
 
-def parse_limit_string(limit_str: str, data_series: pd.Series, default_min: float = 0.0, default_max: float = 0.0) -> float:
-    limit_str_clean = limit_str.strip()
-    if limit_str_clean.lower() in NON_NUMERIC_KEYWORDS or not limit_str_clean:
-        if limit_str_clean.lower() in ['min', 'lower limit']:
-            return float(data_series.min()) if len(data_series) > 0 else default_min
-        elif limit_str_clean.lower() in ['max', 'upper limit']:
-            return float(data_series.max()) if len(data_series) > 0 else default_max
-        else:
-            return default_min
+def resolve_spec_limit(limit_str) -> Optional[float]:
+    """解析单个规格限字段，**没有真实限值时返回 None**。
+
+    这是限值解析的单一实现（``parse_limit_string`` 已降为它的兼容壳）。
+
+    两类输入都归为 None：
+
+    1. 占位/缺失：空串、``n/a``、``na``、``-``、``none``、``nan`` 等
+       ``NON_NUMERIC_KEYWORDS``。
+    2. 字面 ``'Min'`` / ``'Max'`` / ``'Lower Limit'`` / ``'Upper Limit'``
+       关键字。
+
+    第 2 类是旧实现最大的错：它把 ``'Min'``/``'Max'`` 解析成 **数据自身的
+    极值** 当成 LSL/USL。实测真实文件的 ``Test_Time`` 限值字段就是字面
+    ``'Min'``/``'Max'``，于是 LSL/USL = 5.22721/7.51017（即数据 min/max），
+    算出 cpk=0.4245、判 D 级红。这在数学上是必然的：μ ∈ [min, max] 且
+    n 较大时 range ≈ 6.9σ，Cpk 上限 ≈ 0.5，**任何工艺能力都会被判红**；
+    同时 outlier 栅栏被数据 min 钳死，``outlier_count`` 恒为 0。
+    需要数据范围时请显式用 ``stats['dr']``，不要伪装成规格限。
+
+    旧实现对第 1 类回退 ``default_min``（各调用点传的 0.0），造成「幻影
+    规格限 0.0」：CPK 变成 ``−|μ|/(3σ)`` 的大负数，``detect_outliers_iqr``
+    的 ``min(lower_bound, 0.0)`` 把低侧栅栏钳死使低侧异常值永远检不出，
+    导出 PPT 的直方图因为 bin 区间变成 −2.5..22.5 而捕获 0 个数据点（全空白）。
+    真实的 ``[0, 0]`` 规格与「缺失」本来就无法区分，所以一律用 None 表达。
+    """
+    if limit_str is None:
+        return None
+    raw = str(limit_str).strip()
+    if not raw or raw.lower() in NON_NUMERIC_KEYWORDS:
+        return None
     try:
-        return float(limit_str_clean)
+        value = float(raw)
     except (ValueError, TypeError):
-        return default_min
+        return None
+    return value if math.isfinite(value) else None
+
+
+def resolve_spec_limits(metadata: Dict, param: str) -> Tuple[Optional[float], Optional[float]]:
+    """一次取回参数的 ``(LSL, USL)``，缺失侧为 None。
+
+    集中一处读取 ``metadata['mins']``/``['maxs']``，避免各调用点重复
+    ``str(metadata.get('mins', {}).get(param, ''))`` 并各自忘记处理 None。
+    """
+    mins = metadata.get('mins', {}) if isinstance(metadata, dict) else {}
+    maxs = metadata.get('maxs', {}) if isinstance(metadata, dict) else {}
+    if not isinstance(mins, dict) or not isinstance(maxs, dict):
+        return None, None
+    return (resolve_spec_limit(mins.get(param, '')),
+            resolve_spec_limit(maxs.get(param, '')))
+
+
+def parse_limit_string(limit_str: str, data_series: pd.Series = None,
+                       default_min: float = 0.0, default_max: float = 0.0) -> float:
+    """DEPRECATED — 请改用 :func:`resolve_spec_limit` / :func:`resolve_spec_limits`。
+
+    保留只是因为尚有调用方按「总是返回 float」写代码；它委派给
+    ``resolve_spec_limit``，所以解析逻辑只有一份。缺失时返回 ``default_min``
+    （历史上的幻影 0.0 行为）——**不要在新代码里用它**，那正是 CPK 变负数、
+    outlier 栅栏被钳死的根因。
+    """
+    value = resolve_spec_limit(limit_str)
+    return default_min if value is None else value
 
 
 def detect_fail_data(df: pd.DataFrame, metadata: Dict, ignore_no_limit: bool = True,

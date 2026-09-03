@@ -32,6 +32,7 @@ import paramiko
 from django.conf import settings
 
 from .cache import get_session, SftpSessionCacheError
+from . import host_keys
 
 logger = logging.getLogger(__name__)
 
@@ -64,11 +65,11 @@ def _close_entry(entry: Optional[_Entry]) -> None:
     try:
         entry.sftp.close()
     except Exception:
-        pass
+        logger.warning('Failed to close SFTP client', exc_info=True)
     try:
         entry.transport.close()
     except Exception:
-        pass
+        logger.warning('Failed to close SFTP transport', exc_info=True)
 
 
 def _build_entry(user_id) -> _Entry:
@@ -81,9 +82,13 @@ def _build_entry(user_id) -> _Entry:
         raise SftpPoolError('no cached session (not connected)')
 
     try:
-        transport = paramiko.Transport((data['host'], data['port']))
-        transport.connect(username=data['username'], password=data['password'])
+        # 主机密钥 TOFU 校验（见 apps/sftp/host_keys.py）：已记录的主机必须
+        # 公钥匹配，否则拒绝连接——凭据不会发往可疑主机。
+        transport = host_keys.open_verified_transport(
+            data['host'], data['port'], data['username'], data['password'])
         sftp = paramiko.SFTPClient.from_transport(transport)
+    except host_keys.HostKeyMismatchError as exc:
+        raise SftpPoolError(f'SFTP 主机密钥校验失败: {exc}') from exc
     except Exception as exc:
         raise SftpPoolError(f'failed to establish SFTP connection: {exc}') from exc
 
@@ -105,6 +110,8 @@ def get_connection(user_id) -> paramiko.SFTPClient:
         try:
             alive = entry.transport.is_active()
         except Exception:
+            logger.warning('SFTP liveness probe failed for user %s; rebuilding',
+                           user_id, exc_info=True)
             alive = False
         if alive and (now - entry.last_used) <= _idle_ttl():
             entry.last_used = now

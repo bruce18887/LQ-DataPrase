@@ -15,15 +15,21 @@ from pptx.util import Inches
 from apps.analysis.services.statistics import (
     compute_cpk, compute_range_statistics, get_1d_from, filter_finite,
 )
-from apps.export.charts import build_histogram_bins
+from apps.analysis.services.statistics.helpers import normal_pdf_curve
+from apps.analysis.services.statistics.kde import GaussianKDE
+from apps.export.histogram_grid import build_histogram_grid, finite_or_none
 
 
-def build_batch_charts_pptx(datafile, df, metadata, params):
+def build_batch_charts_pptx(datafile, df, metadata, params,
+                            show_limit=True, show_3sigma=False,
+                            show_4sigma=False, show_6sigma=True,
+                            show_normal=False, show_kde=False):
     """Build batch charts PPTX with histogram slides.
 
-    For each parameter in *params* a matplotlib histogram is rendered
-    (showing LSL/USL dashed lines and optional 6-sigma dotted lines)
-    and embedded into a blank PPTX slide.
+    For each parameter in *params* a matplotlib histogram is rendered and
+    embedded into a blank PPTX slide.  The overlay switches mirror the xlsx
+    branch (``build_batch_charts_xlsx_with_charts``) so the same chart config
+    produces the same picture in both formats (缺陷 #6: pptx 曾一个开关都不收).
 
     Parameters
     ----------
@@ -33,6 +39,8 @@ def build_batch_charts_pptx(datafile, df, metadata, params):
     metadata : dict
     params : list of str
         Parameter (column) names to chart.
+    show_limit, show_3sigma, show_4sigma, show_6sigma, show_normal, show_kde : bool
+        与前端图表配置一一对应的叠加开关。
 
     Returns
     -------
@@ -55,26 +63,63 @@ def build_batch_charts_pptx(datafile, df, metadata, params):
             continue
 
         stats = compute_range_statistics(data_series, metadata, param)
-        cpk_result = compute_cpk(
-            stats['mean'], stats['std'], stats['rdl'][0], stats['rdl'][1]
-        )
+        # 限值可能为 None（parse_limit_string 新语义）或非有限：统一收敛后再用，
+        # compute_cpk 对 None 返回 0.0，绘图侧则跳过标记线（不画幻影 LSL/USL）
+        rdl_min = finite_or_none(stats['rdl'][0])
+        rdl_max = finite_or_none(stats['rdl'][1])
+        cpk_result = compute_cpk(stats['mean'], stats['std'], rdl_min, rdl_max)
         cpk_val = cpk_result['cpk']
         cpk_level = cpk_result.get('cpk_color', 'gray')
 
         # Create matplotlib chart
         fig, ax = plt.subplots(figsize=(8, 4.5))
-        rdl_min, rdl_max, _ = stats['rdl']
-        # 分箱与屏幕/Excel 导出保持一致（/20），避免 PPT 图与审阅画面形状不一致
-        bins, _ = build_histogram_bins(rdl_min, rdl_max)
-        ax.hist(data_series.dropna(), bins=bins, color='#1E88E5', edgecolor='white', alpha=0.85)
+        values = data_series.to_numpy(dtype=float)
+        # 分箱与屏幕/xlsx 导出同一套网格（缺陷 #4/#5）：27 边界 = 25 内边界
+        # + ±inf 兜底，超范围值计入首/尾 bin；限值退化时回退数据范围。
+        edges, centers, gap = build_histogram_grid(rdl_min, rdl_max, values)
+        counts, _ = np.histogram(values, bins=edges)
+        ax.bar(centers, counts, width=gap * 0.9, color='#1E88E5',
+               edgecolor='white', alpha=0.85, label='数据分布')
+        ax.set_xlim(float(centers[0]), float(centers[-1]))
 
-        if rdl_min is not None:
+        if show_limit and rdl_min is not None:
             ax.axvline(rdl_min, color='#C62828', linestyle='--', linewidth=2, label='LSL')
-        if rdl_max is not None:
+        if show_limit and rdl_max is not None:
             ax.axvline(rdl_max, color='#C62828', linestyle='--', linewidth=2, label='USL')
-        if stats.get('s6'):
-            ax.axvline(stats['s6'][0], color='#E65100', linestyle=':', linewidth=1.5, label='6σL')
-            ax.axvline(stats['s6'][1], color='#E65100', linestyle=':', linewidth=1.5, label='6σU')
+
+        peak = int(counts.max()) if len(counts) else 0
+        for sigma, flag in ((3, show_3sigma), (4, show_4sigma), (6, show_6sigma)):
+            band = stats.get(f's{sigma}')
+            if flag and band and stats['std'] > 0:
+                ax.axvline(band[0], color='#E65100', linestyle=':', linewidth=1.5,
+                           label=f'{sigma}σL')
+                ax.axvline(band[1], color='#E65100', linestyle=':', linewidth=1.5,
+                           label=f'{sigma}σU')
+
+        if show_normal and stats['std'] > 0 and peak > 0:
+            # 公式单一来源 normal_pdf_curve（与屏幕 / xlsx 导出同源），此处只做
+            # max-normalize 到频数轴
+            curve = normal_pdf_curve(stats['mean'], stats['std'],
+                                     float(centers[0]), float(centers[-1]))
+            if curve:
+                x_pdf = np.array([x for x, _ in curve])
+                y_pdf = np.array([y for _, y in curve])
+                if np.max(y_pdf) > 0:
+                    ax.plot(x_pdf, y_pdf / np.max(y_pdf) * peak,
+                            color='#F57F17', linewidth=2, label='正态分布')
+
+        if show_kde and peak > 0:
+            # Best-effort：退化数据拟合失败就省略曲线，不让导出整体失败
+            try:
+                if len(values) >= 3 and np.ptp(values) > 0:
+                    kde = GaussianKDE(values, bw_method='silverman')
+                    x_kde = np.linspace(float(centers[0]), float(centers[-1]), 200)
+                    y_kde = kde(x_kde)
+                    if np.max(y_kde) > 0:
+                        ax.plot(x_kde, y_kde / np.max(y_kde) * peak,
+                                color='#7B1FA2', linewidth=2, label='KDE曲线')
+            except Exception:  # noqa: BLE001
+                pass
 
         ax.set_title(
             f'{param}  |  CPK={cpk_val:.4f} ({cpk_level})  |  N={len(data_series)}',
@@ -82,7 +127,9 @@ def build_batch_charts_pptx(datafile, df, metadata, params):
         )
         ax.set_xlabel(stats.get('unit', ''))
         ax.set_ylabel('Frequency')
-        ax.legend(loc='upper right', fontsize=8)
+        handles, labels = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend(handles, labels, loc='upper right', fontsize=8)
         fig.tight_layout()
 
         buf = io.BytesIO()

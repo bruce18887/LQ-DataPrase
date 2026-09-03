@@ -19,6 +19,7 @@ from apps.analysis.services.statistics import (
 )
 from .charts import _create_histogram_chart
 from .chart_workers import render_histogram_worker
+from .histogram_grid import finite_or_none
 
 HEADER_FILL = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
 HEADER_FONT = Font(color="FFFFFF", bold=True, size=11)
@@ -104,11 +105,13 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
             continue
 
         stats = compute_range_statistics(data_series, metadata, selected_param)
-        cpk_result = compute_cpk(stats['mean'], stats['std'], stats['rdl'][0], stats['rdl'][1])
+        # 限值可能为 None（parse_limit_string 新语义）或非有限 → 统一收敛，下游
+        # 的 ``is not None`` 守卫与图表回退才能真正生效（缺陷 #5）
+        rdl_min = finite_or_none(stats['rdl'][0])
+        rdl_max = finite_or_none(stats['rdl'][1])
+        cpk_result = compute_cpk(stats['mean'], stats['std'], rdl_min, rdl_max)
         mean_val = stats['mean']
         std_val = stats['std']
-        rdl_min = stats['rdl'][0]
-        rdl_max = stats['rdl'][1]
 
         # Site stats
         site_stats = []
