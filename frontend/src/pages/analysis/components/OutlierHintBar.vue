@@ -84,12 +84,16 @@ const displayedValues = computed(() => {
 const hintText = computed(() => {
   if (!props.outlierInfo) return ''
   const info = props.outlierInfo
+  // 后端 NaN → JSON null（R4②）：bound 可能为 null，而 computed 是在渲染期
+  // 求值的，裸 .toFixed() 抛 TypeError 会直接打断组件渲染。
+  const fmt = (v: number | null | undefined) =>
+    typeof v === 'number' && Number.isFinite(v) ? v.toFixed(4) : 'N/A'
   if (!info.has_outliers) {
-    return `异常值检测: 未发现异常值（IQR 范围: ${info.lower_bound.toFixed(4)} ~ ${info.upper_bound.toFixed(4)}）`
+    return `异常值检测: 未发现异常值（IQR 范围: ${fmt(info.lower_bound)} ~ ${fmt(info.upper_bound)}）`
   }
   const modeText = props.mode === 'clip' ? '已裁剪' : '已排除'
-  const bounds = `（正常范围: ${info.lower_bound.toFixed(4)} ~ ${info.upper_bound.toFixed(4)}）`
-  return `${modeText} ${info.outlier_count} 个异常值 ${bounds}`
+  const bounds = `（正常范围: ${fmt(info.lower_bound)} ~ ${fmt(info.upper_bound)}）`
+  return `${modeText} ${info.outlier_count ?? 0} 个异常值 ${bounds}`
 })
 </script>
 

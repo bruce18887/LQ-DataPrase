@@ -120,8 +120,19 @@ def detect_fail_data(df: pd.DataFrame, metadata: Dict, ignore_no_limit: bool = T
     cols_with_limits = columns if columns is not None else get_columns_with_limits(df, metadata)
 
     for col in cols_with_limits:
-        min_val = float(str(metadata['mins'][col]).strip())
-        max_val = float(str(metadata['maxs'][col]).strip())
+        # 必须走 resolve_spec_limit 而不能裸 float()：当 ``columns`` 由调用方
+        # 显式传入时（如 analysis_views.histogram 传 columns=params），上面的
+        # ``cols_with_limits = columns if columns is not None else ...`` 会
+        # **绕过 get_columns_with_limits 的占位过滤**，于是限值为 'Min'/'Max'/
+        # 'n/a'/'' 的列直接进 float() → ValueError: could not convert string to
+        # float: 'Min' → POST /analysis/histogram/ 500（e2e 实测，真实
+        # gage_m_S1.csv 有 13 个系统列的限值就是字面 'Min'/'Max'）。
+        # .get(col) 同时修掉「显式 columns 含 metadata 里没有的列」时的 KeyError。
+        # 无有效双限的参数无法判定越限，跳过（与 get_columns_with_limits 同语义）。
+        min_val = resolve_spec_limit(metadata.get('mins', {}).get(col))
+        max_val = resolve_spec_limit(metadata.get('maxs', {}).get(col))
+        if min_val is None or max_val is None:
+            continue
         col_data = ensure_numeric(df, col)
         fail_mask = fail_row_mask & ((col_data < min_val) | (col_data > max_val))
         fail_rows = df.index[fail_mask].tolist()

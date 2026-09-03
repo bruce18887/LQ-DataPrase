@@ -28,9 +28,11 @@ import pandas as pd
 from django.test import SimpleTestCase
 
 from apps.analysis.services.statistics import (
+    calculate_fail_test_item_statistics,
     compute_correlation_matrix,
     compute_cpk,
     compute_range_statistics,
+    detect_fail_data,
     detect_outliers_iqr,
     parse_limit_string,
     resolve_spec_limit,
@@ -185,3 +187,67 @@ class CorrelationMatrixTests(SimpleTestCase):
         })
         result = compute_correlation_matrix(df, ['Dut_Pass', 'V'])
         self.assertIn('matrix', result)
+
+
+class DetectFailDataExplicitColumnsTests(SimpleTestCase):
+    """``columns=`` bypass: the 500 that e2e caught on /analysis/histogram/.
+
+    ``detect_fail_data`` does::
+
+        cols_with_limits = columns if columns is not None else get_columns_with_limits(...)
+
+    so when a caller passes ``columns`` explicitly (``analysis_views.histogram``
+    passes ``columns=params``), the placeholder filtering inside
+    ``get_columns_with_limits`` is **bypassed** and the loop used to do a bare
+    ``float(str(metadata['mins'][col]))``. On real gage_m_S1.csv, 13 system
+    columns carry the literal limits ``'Min'``/``'Max'`` ->
+    ``ValueError: could not convert string to float: 'Min'`` -> HTTP 500.
+    """
+
+    def _fixture(self):
+        df = pd.DataFrame({
+            'Good': [1.0, 2.0, 9.0],        # 真限 0.5~8.0：9.0 越上限
+            'Test_Time': [5.0, 6.0, 7.0],   # 限值是字面 'Min'/'Max'
+            'NoLimit': [1.0, 2.0, 3.0],     # 限值缺失（空串）
+            'SW_Bin': [1, 1, 7],
+        })
+        meta = {
+            'format': 'CTA8290D',
+            'mins': {'Good': '0.5', 'Test_Time': 'Min', 'NoLimit': ''},
+            'maxs': {'Good': '8.0', 'Test_Time': 'Max', 'NoLimit': ''},
+        }
+        return df, meta
+
+    def test_placeholder_limit_columns_do_not_raise(self):
+        df, meta = self._fixture()
+        _idx, fail_columns, _cells = detect_fail_data(
+            df, meta, columns=['Good', 'Test_Time', 'NoLimit'])
+        # 真限列仍正常判越限；占位/缺失限值的列不参与判定也不报错
+        self.assertIn('Good', fail_columns)
+        self.assertNotIn('Test_Time', fail_columns)
+        self.assertNotIn('NoLimit', fail_columns)
+
+    def test_fail_test_item_statistics_with_explicit_columns(self):
+        """analysis_views.histogram 走的就是这个入口。"""
+        df, meta = self._fixture()
+        out = calculate_fail_test_item_statistics(
+            df, meta, columns=['Good', 'Test_Time', 'NoLimit'])
+        self.assertIn('Good', out)
+        self.assertEqual(out['Good']['fail_count'], 1)
+        self.assertNotIn('Test_Time', out)
+        self.assertNotIn('NoLimit', out)
+
+    def test_column_absent_from_metadata_does_not_keyerror(self):
+        """旧写法用 metadata['mins'][col] 下标，显式 columns 多给一个列就 KeyError。"""
+        df, meta = self._fixture()
+        _idx, fail_columns, _cells = detect_fail_data(
+            df, meta, columns=['Good', 'NotInMetadata'])
+        self.assertNotIn('NotInMetadata', fail_columns)
+        self.assertIn('Good', fail_columns)
+
+    def test_default_path_still_filters_placeholders(self):
+        """不传 columns 时走 get_columns_with_limits，行为保持不变。"""
+        df, meta = self._fixture()
+        _idx, fail_columns, _cells = detect_fail_data(df, meta)
+        self.assertIn('Good', fail_columns)
+        self.assertNotIn('Test_Time', fail_columns)
