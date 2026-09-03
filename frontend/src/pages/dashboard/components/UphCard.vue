@@ -65,10 +65,20 @@ const UphDetail = defineComponent({
       if (!data) {
         return h('div', { class: 'uph-empty' }, props.loading ? '计算UPH...' : '')
       }
+      // 后端 NaN → JSON null（R4②）：这几个字段运行时可能是 null，而此处是
+      // render 函数内直接 .toFixed() / .toLocaleString()——null 会抛 TypeError，
+      // 那是**不可恢复的渲染崩溃**（整块白屏），不是「显示不好看」。
+      const num = (v: unknown, digits: number) =>
+        typeof v === 'number' && Number.isFinite(v) ? v.toFixed(digits) : 'N/A'
+      const int = (v: unknown) =>
+        typeof v === 'number' && Number.isFinite(v) ? v.toLocaleString() : 'N/A'
+      const totalText = typeof data.total_time_seconds === 'number' && Number.isFinite(data.total_time_seconds)
+        ? formatTime(data.total_time_seconds)
+        : 'N/A'
       const nodes: any[] = [
-        h('span', {}, ['平均测试时间 ', h('b', {}, data.avg_test_time.toFixed(4)), ' 秒']),
-        h('span', {}, ['总耗时 ', h('b', {}, formatTime(data.total_time_seconds)), `（${data.total_tested.toLocaleString()} units）`]),
-        h('span', {}, ['并行站点数 ', h('b', {}, String(data.site_count))]),
+        h('span', {}, ['平均测试时间 ', h('b', {}, num(data.avg_test_time, 4)), ' 秒']),
+        h('span', {}, ['总耗时 ', h('b', {}, totalText), `（${int(data.total_tested)} units）`]),
+        h('span', {}, ['并行站点数 ', h('b', {}, int(data.site_count))]),
         h('span', {}, [
           '数据来源 ',
           h('span', { class: `uph-src uph-src--${props.sourceTag.tone}` }, props.sourceTag.label),
