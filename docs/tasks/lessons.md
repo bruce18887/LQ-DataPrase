@@ -15,6 +15,67 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-09-03 全量评审修复（四批）新增教训
+
+- **测试风格必须匹配唯一 runner，否则静默零覆盖**：`test/backend/test_outliers.py` 是裸 `class TestX` +
+  `import pytest` + 12 处 `pytest.approx`，而项目唯一 runner 是 `manage.py test`（unittest）且 pytest 不在
+  requirements、未装进 `.venv` → 整个模块 `ModuleNotFoundError`，20 个用例一个没跑，只记 1 个 error。
+  **只删 `import pytest` 更危险**：裸 class 不被 unittest 收集，会从「1 个 error」变成「零错误、零覆盖」。
+  验收标准不是「命令没报错」，而是 `Ran N tests` 的 N 真的包含新增用例 + grep `_FailedTest`
+  （`unittest.loader._FailedTest` 就是整模块 import 失败的特征信号）。
+- **`manage.py test --parallel N` 在本项目会掩盖真实失败**：报 `TypeError: cannot pickle 'traceback' object`
+  并直接崩，看不到是哪个用例挂。全量回归一律串行跑（857 项 ~250s，可接受）。
+- **改根因函数前先用真实数据确认占位符语义，别信注释**：`apps/common/constants.py:3` 的注释写着
+  「'min'/'max' 类关键字按数据边界解析，不在此列」，而下一行的 `NON_NUMERIC_KEYWORDS` **实际包含**
+  'min'/'max'/'lower limit'/'upper limit'。实测真实 `gage_m_S1.csv` 有 13 个系统列（Serial_No/Dut_Pass/
+  SW_Bin/QR_Code/Start_T/Test_Time…）的限值字段就是字面 `'Min'`/`'Max'` —— 在该格式里这是「无规格限」
+  的占位，不是「用数据极值」。旧 `parse_limit_string` 把它们解析成数据 min/max 当 LSL/USL，
+  数学上必然 Cpk ≤ 0.5（μ∈[min,max] 且 range≈6.9σ）→ 13 个系统列全部判 D 级红。
+  规则：注释与代码冲突时以**代码 + 真实数据**为准；限值/哨兵语义要用真实样本文件验，不要靠推断。
+- **改根因函数要一次性 grep 全部消费方，含「隐藏的内部调用」**：把 `parse_limit_string` 改成可返回 None 时，
+  差点漏掉 `compute_range_statistics` 内部的 `safe_gap(rdl_min, rdl_max)` —— `safe_gap(None, None)` 直接
+  `TypeError`，会让所有经它的导出端点 500。规则：改返回类型前先 grep 该返回值的**算术/round/比较**消费点，
+  而不只是 grep 函数名。
+- **现有测试可能钉住的就是 bug 本身**：本轮两个失败用例都是这种。① `dashboard/tests.py::test_overview_row_schema`
+  断言 `assertIsInstance(row['cpk'], float)`，而那 13 个 `'Min'/'Max'` 占位列因此**必须**有 float cpk；
+  ② `export/tests.py::test_batch_charts_site_stats_string_failcount` 的 metadata 写成 `{'limits': {...}}`，
+  而实现读的是 `mins`/`maxs` → rdl 退化成幻影 `(0.0,0.0)` → 「所有值 > 0」全判 fail → 红底断言碰巧通过。
+  规则：改动后测试变红，先判断它钉的是**契约**还是**缺陷**（看它的 fixture 是否真的走了它声称的路径），
+  再决定改代码还是改测试；改测试必须在注释里写清旧断言依赖的是哪个 bug，并补一条「防止 None 分支
+  永不执行导致测试退化」的正向断言（如 `assertIn('Serial_No', placeholder_rows)`）。
+- **子代理的实测结论也要复核，本轮 6 处被推翻或修正**：① str 列 `abs()` 抛的是**可捕获的**
+  `TypeError: bad operand type for abs(): 'str'`，不是声称的 `ArrowNotImplementedError`（严重度下调）；
+  ② buyoff 文本 bin 的真实症状是**静默丢行返回 200**（4 行只剩 1 行），比声称的 400 更危险；
+  ③ `charts.py` 的 x 轴**没有**错开 0.5·gap —— `low-2*gap` 恰好是第一个 bin 的**中心**，
+  原结论是拿「中心」比「边界」得出的，属误判；④ `download_file_stream` 本来就有半截清理；
+  ⑤ bool 列在旧 export 白名单下本来就被排除（真缺陷是 int32/float32 漏列 + pandas 3.0 下 `==object`
+  对 str 列恒 False）；⑥ 反向风险：换成 `is_numeric_dtype` 后 bool **会被纳入**，必须显式 `and not is_bool_dtype`。
+  规则：转述子代理结论前，对「要写进代码注释」和「要当修复依据」的那几条亲自跑一次最小复现；
+  已写进注释的错误说法要一并更正，否则错误会被下一个人当事实引用。
+- **收窄序列化器字段前先查它被谁复用**：堵 `PUT /auth/profile/` 自助提权时，不能直接把
+  `UserSerializer.role` 设 `read_only` —— `UserManagementViewSet.get_serializer_class()` 复用它，
+  那样管理员也改不了角色（且会撞既有 `test_put_with_full_body_still_works`）。正解是新增窄口径的
+  `UserProfileSerializer`，并配一条**防过度修复**的用例（管理员仍能改角色/停用）。
+- **锁权限类改动先查有没有人拿它当健康检查**：`playwright.config.ts:124` 用 `/api/schema/` 做后端
+  webServer 就绪探测，直接给 Swagger 加 `SERVE_PERMISSIONS` 会让整套 e2e 起不来。改用
+  `API_DOCS_ENABLED` 开关（development=True / standalone=False）既关掉出货版的匿名暴露，又不动 e2e 基建。
+- **settings mixin 的 import 期守卫会限制「把默认值改安全」**：`config/settings/base.py` 被
+  development/standalone 以 `import *` 复用，而它的 SECRET_KEY 守卫在 import 期执行 —— 把 `DEBUG` 默认
+  改 False 会让 `from ...base import *` 在 development.py 来得及设 `DEBUG=True` 之前就抛
+  `ImproperlyConfigured`，打断所有没设 SECRET_KEY 的 `manage.py` 调用。规则：改「安全默认值」前先看该模块
+  是不是被 import 的 mixin、有没有模块级 raise；不能改就把理由写进代码注释，别留下一个看起来像疏忽的默认值。
+- **桌面应用的网络暴露面要按「打包后怎么加载」判断**：生产 Electron 是 `win.loadFile()`（`file://`，
+  Origin 为 `null`）访问 `http://localhost:<port>`，所以**每个生产请求都是跨源**，`CORS_ALLOW_ALL_ORIGINS`
+  不能一刀切关（会直接打断打包版）；而 dev 态 vite 是 proxy `/api`，本来就不需要 CORS。可先做的收敛是
+  绑 127.0.0.1 + bootstrap 硬互锁（非回环绑定 + 默认口令 → 拒绝启动）；彻底解法是让 Django 同源提供 SPA。
+- **`<str:>` URL 转换器只挡 `/`，挡不住 `..`**：`batch-dirs/<str:dir_name>/` 配 `shutil.rmtree` 时，
+  `dir_name='..'`（或 e2e/攻击里用 `%2e%2e`，Django 在路由前就已解码）能过 `isdir` 校验并把
+  **整个用户上传根**（batch/ + single/）删掉，且 `ignore_errors=True` 静默。而从**请求体**取名的端点
+  （`BatchDirImportView` 的 `dir_name`）连 `/` 都不受限制，`../../<他人>` 可跨用户 os.walk 并注册其文件。
+  规则：任何「用户提供的名字 → 拼路径 → rmtree/os.walk/open」都必须过统一守卫（非法字符黑名单 +
+  拒 `.`/`..` + `realpath` + `commonpath` 归属校验 + 拒绝解析结果等于 base 本身）；仓库里已有
+  `_safe_extract_zip` 的 Zip-Slip 范式可直接沿用，别在各端点各写一套。
+
 ## 2026-08-29 UI token 迁移（四批）新增教训
 
 - **PowerShell `-File` 传数组参数会被外层 shell 吞**：`powershell -File x.ps1 -Paths @('a','b')` 经 cmd/Node 转手后数组丢失，脚本只收到首元素（表现为「只改了一个文件」）。修：改用 `powershell -Command "& '.\x.ps1' -Paths 'a','b' -Tag '1'"`，-Command 的字符串在子进程内按 PS 语法解析。识别信号：批量脚本报告修改数远小于预期。

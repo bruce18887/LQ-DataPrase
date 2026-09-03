@@ -28,7 +28,7 @@
     </el-table>
     <div class="card-footer">
       <el-checkbox v-model="confirmed">
-        <span style="color: var(--color-danger); font-weight: 600">
+        <span style="color: var(--error); font-weight: 600">
           我已确认要删除这 {{ count }} 条孤立记录
         </span>
       </el-checkbox>

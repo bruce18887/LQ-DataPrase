@@ -23,10 +23,15 @@ const { colors } = useEChartsTheme()
 function buildOption() {
   const phases = props.phases || []
   // 注意：ECharts/zrender 不解析 CSS 变量，'var(--text)' 会回退默认深色
-  //（夜晚不可读）——必须用 useEChartsTheme 的实时色值（2026-08-26 修复）
+  //（夜晚不可读）——必须用 useEChartsTheme 的实时色值（2026-08-26 修复）。
+  // 同理 zrender 也不解析 CSS 函数 color-mix()：下方柱/线的颜色一度写成
+  // 'color-mix(in srgb, var(--brand) 45%, transparent)' 与 'var(--info)'，
+  // 与本注释自相矛盾，批次趋势图的柱体与折线在双主题下全部失色。
   const tc = colors.value.textColor
   const lineC = colors.value.axisLineColor
   const splitC = colors.value.splitLineColor
+  const barC = colors.value.brandColorSoft
+  const infoC = colors.value.infoColor
 
   // X 轴标签用唯一键（同名 phase 带 wafer 后缀），避免不同文件同名 phase
   // 在 category 轴上重复导致"标签与柱子对不上"。
@@ -77,13 +82,13 @@ function buildOption() {
       {
         // 柱 = 测试总数（品牌 45% 淡染，审阅页 t-bar 同色）
         name: '测试总数', type: 'bar', data: phases.map((p: any) => p.total),
-        itemStyle: { color: 'color-mix(in srgb, var(--brand) 45%, transparent)' }, barWidth: '40%',
+        itemStyle: { color: barC }, barWidth: '40%',
       },
       {
-        // 线 = 良率走势（--info 蓝）
+        // 线 = 良率走势（--info 语义色）
         name: '良率', type: 'line', yAxisIndex: 1,
         data: phases.map((p: any) => p.yield_pct),
-        itemStyle: { color: 'var(--info)' }, lineStyle: { width: 2, color: 'var(--info)' },
+        itemStyle: { color: infoC }, lineStyle: { width: 2, color: infoC },
         symbol: 'circle', symbolSize: 6,
         label: { show: true, formatter: (p: any) => `${formatPercent(Number(p.value))}%`, fontSize: 11, color: tc },
       },
