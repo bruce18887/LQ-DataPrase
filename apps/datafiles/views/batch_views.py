@@ -1,5 +1,6 @@
 """Batch directory management views."""
 
+import logging
 import os
 import shutil
 
@@ -17,8 +18,11 @@ from apps.datafiles.utils import extract_data_date, extract_stage, resolve_file_
 from ._helpers import (
     _is_data_csv,
     _register_file,
+    _safe_batch_dir,
     _user_upload_dir,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class BatchDirListView(APIView):
@@ -133,7 +137,15 @@ class BatchDirImportView(APIView):
             return Response({'error': 'dir_name is required'}, status=400)
 
         batch_base = _user_upload_dir(request.user, 'batch')
-        dir_path = os.path.join(batch_base, dir_name)
+        # dir_name arrives in the request body, so it is not constrained by the
+        # URL converter: without this guard ``../../<other-user>`` walked and
+        # registered another user's CSVs as the caller's own.
+        dir_path = _safe_batch_dir(batch_base, dir_name)
+        if dir_path is None:
+            return Response(
+                {'error': 'dir_name 包含非法字符'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if not os.path.isdir(dir_path):
             return Response({'error': f'目录 "{dir_name}" 不存在'}, status=404)
 
@@ -163,6 +175,10 @@ class BatchDirImportView(APIView):
                         df = _register_file(request.user, fp, 'batch', dir_name, sub_batch)
                         created.append(df)
                     except Exception:
+                        logger.warning(
+                            'BatchDirImportView: failed to register %s', fp,
+                            exc_info=True,
+                        )
                         continue
 
         return Response(
@@ -177,7 +193,14 @@ class BatchDirDeleteView(APIView):
 
     def delete(self, request, dir_name):
         batch_base = _user_upload_dir(request.user, 'batch')
-        dir_path = os.path.join(batch_base, dir_name)
+        # A bare ``..`` segment passes the ``<str:>`` converter and used to make
+        # the rmtree below delete the whole per-user upload root (batch + single).
+        dir_path = _safe_batch_dir(batch_base, dir_name)
+        if dir_path is None:
+            return Response(
+                {'error': 'dir_name 包含非法字符'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if not os.path.isdir(dir_path):
             return Response({'error': f'目录 "{dir_name}" 不存在'}, status=404)
 
@@ -205,8 +228,20 @@ class SubBatchDeleteView(APIView):
 
     def delete(self, request, batch_name, sub_batch_name):
         batch_base = _user_upload_dir(request.user, 'batch')
-        batch_dir = os.path.join(batch_base, batch_name)
-        sub_batch_dir = os.path.join(batch_dir, sub_batch_name)
+        # ``..`` as sub_batch_name resolves to batch_dir itself, which the
+        # rmtree below would then delete wholesale.
+        batch_dir = _safe_batch_dir(batch_base, batch_name)
+        if batch_dir is None:
+            return Response(
+                {'error': 'batch_name 包含非法字符'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        sub_batch_dir = _safe_batch_dir(batch_dir, sub_batch_name)
+        if sub_batch_dir is None:
+            return Response(
+                {'error': 'sub_batch_name 包含非法字符'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if not os.path.isdir(batch_dir):
             return Response({'error': f'批次目录 "{batch_name}" 不存在'}, status=404)

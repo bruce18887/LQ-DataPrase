@@ -85,7 +85,15 @@ const router = useRouter()
 const auth = useAuthStore()
 
 const formRef = ref<FormInstance>()
-const form = reactive({ username: 'admin', password: 'admin123' })
+// 不再预填真实凭据：渲染层打进安装包后可被反编译读出，等于把管理员
+// 口令随产品分发（后端 bootstrap 仍会建 admin）。开发态如需免输入，在
+// frontend/.env.development.local 里写 VITE_DEV_LOGIN_USER / VITE_DEV_LOGIN_PASS；
+// import.meta.env.DEV 分支在生产构建中被 tree-shake 掉，不会泄露。
+// e2e 不受影响：helpers/auth.ts 的 uiLogin 用 fill() 覆盖式输入。
+const form = reactive({
+  username: import.meta.env.DEV ? (import.meta.env.VITE_DEV_LOGIN_USER ?? '') : '',
+  password: import.meta.env.DEV ? (import.meta.env.VITE_DEV_LOGIN_PASS ?? '') : '',
+})
 const rules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }],

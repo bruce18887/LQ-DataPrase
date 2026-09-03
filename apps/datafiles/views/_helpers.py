@@ -1,5 +1,6 @@
 """Private helper functions for datafiles views."""
 
+import logging
 import os
 import re
 import shutil
@@ -13,6 +14,49 @@ from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import BaseATEParser, get_parser
 from apps.datafiles.services import clear_parse_cache
 from apps.datafiles.utils import extract_product_code, resolve_file_path, store_file_path
+
+logger = logging.getLogger(__name__)
+
+
+# Windows-illegal + path-separator + control characters. Mirrors the blacklist
+# already used by ``FileViewSet.combine`` (``file_views.py``) and
+# ``_zip_base_name`` below, so every name that becomes a directory goes
+# through the same character rule.
+_UNSAFE_NAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _safe_batch_dir(base, name):
+    """Resolve ``name`` under ``base``, refusing anything that escapes it.
+
+    Returns the resolved absolute path, or ``None`` when ``name`` is not a
+    safe single path segment or resolves outside ``base``.
+
+    ``BatchDirDeleteView`` / ``SubBatchDeleteView`` feed the result straight
+    into ``shutil.rmtree``, and ``BatchDirImportView`` takes ``dir_name`` from
+    the *request body* — where no ``<str:>`` URL converter strips slashes. A
+    bare ``..`` therefore used to resolve to the parent (wiping the whole
+    upload root, batch and single dirs alike), and ``../../<other-user>`` on
+    the import path walked another user's tree and registered their CSVs as
+    the caller's own. Same guard shape as ``_safe_extract_zip`` (Zip-Slip).
+    """
+    if not isinstance(name, str):
+        return None
+    name = name.strip()
+    if not name or name in ('.', '..'):
+        return None
+    if _UNSAFE_NAME_CHARS.search(name):
+        return None
+    try:
+        real_base = os.path.realpath(base)
+        target = os.path.realpath(os.path.join(base, name))
+        # Reject the base itself: rmtree(base) would delete every batch.
+        if target == real_base:
+            return None
+        if os.path.commonpath([real_base, target]) != real_base:
+            return None
+    except (OSError, ValueError):
+        return None  # different drive / unreadable → treat as outside
+    return target
 
 
 def _is_summary_csv(filename):
@@ -59,7 +103,10 @@ def _register_file(user, file_path, file_type='single', batch_name='', sub_batch
                 col_count = df.shape[1]
                 program_name = metadata.get('program_name', '')
     except Exception:
-        pass
+        logger.warning(
+            '_register_file: parse failed for %s, recording as error',
+            file_path, exc_info=True,
+        )
 
     # 相对化存储：MEDIA_ROOT 之下存相对路径，数据目录迁移时无需重写 DB。
     stored_path = store_file_path(file_path)
@@ -364,6 +411,10 @@ def _register_zip_batch(user, zip_file, filename):
             try:
                 created.append(_register_file(user, fp, 'batch', batch_name, sub_batch))
             except Exception:
+                logger.warning(
+                    '_register_zip_batch: failed to register %s', fp,
+                    exc_info=True,
+                )
                 continue
     return created, None
 
@@ -392,7 +443,10 @@ def _resolve_product_code(filename, file_path, program_name):
             if df is not None:
                 refreshed = metadata.get('program_name', '')
     except Exception:
-        pass
+        logger.warning(
+            '_resolve_product_code: reparse failed for %s', file_path,
+            exc_info=True,
+        )
     return extract_product_code(filename, refreshed), refreshed
 
 

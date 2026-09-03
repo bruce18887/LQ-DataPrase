@@ -25,6 +25,17 @@ import os
 import sys
 from pathlib import Path
 
+# Loopback bind targets. Anything else means the API is reachable from the
+# network, which the built-in default credential cannot survive (see
+# ``_bootstrap``).
+_LOOPBACK_HOSTS = ('127.0.0.1', 'localhost', '::1')
+
+# Built-in first-run credential. Kept because the desktop UX assumes a
+# one-click first login; the server binds loopback by default so it is not
+# reachable from the network, and ``_bootstrap`` refuses to start when the two
+# are combined the wrong way round.
+_DEFAULT_BOOTSTRAP_PASSWORD = 'admin123'
+
 
 def _setup_path():
     """Ensure the frozen bundle's root is on sys.path.
@@ -68,7 +79,7 @@ def _promote_superusers():
     return promoted
 
 
-def _bootstrap():
+def _bootstrap(bind_host='127.0.0.1'):
     """Run migrations, create superuser, collect static files."""
     from django.conf import settings
     from django.core.management import call_command
@@ -88,13 +99,30 @@ def _bootstrap():
     from django.contrib.auth import get_user_model
     User = get_user_model()
     if not User.objects.filter(is_superuser=True).exists():
-        print('[bootstrap] Creating default admin user (admin / admin123)...', flush=True)
+        password = os.environ.get('LQDP_BOOTSTRAP_ADMIN_PASSWORD') or _DEFAULT_BOOTSTRAP_PASSWORD
+        username = os.environ.get('LQDP_BOOTSTRAP_ADMIN_USER') or 'admin'
+        if password == _DEFAULT_BOOTSTRAP_PASSWORD and bind_host not in _LOOPBACK_HOSTS:
+            # Hard interlock: a network-visible service must not ship with the
+            # publicly known first-run credential.
+            raise SystemExit(
+                f'[bootstrap] Refusing to bind {bind_host} with the built-in default '
+                'admin credential. Set LQDP_BOOTSTRAP_ADMIN_PASSWORD to a real '
+                f'password, or bind one of {", ".join(_LOOPBACK_HOSTS)}.'
+            )
+        print(f'[bootstrap] Creating default admin user ({username})...', flush=True)
         User.objects.create_superuser(
-            username='admin',
-            password='admin123',
+            username=username,
+            password=password,
             email='admin@localhost',
         )
-        print('[bootstrap] IMPORTANT: Change the default password after first login!', flush=True)
+        if password == _DEFAULT_BOOTSTRAP_PASSWORD:
+            print(
+                '[bootstrap] WARNING: using the built-in default password. This is only '
+                'safe because the server is bound to loopback. Change it after first '
+                'login, and set LQDP_BOOTSTRAP_ADMIN_PASSWORD before ever binding a '
+                'non-loopback --host.',
+                flush=True,
+            )
 
     # Repair legacy installs: older bootstraps used Django's stock
     # create_superuser, which never set the custom ``role`` field — those
@@ -139,7 +167,10 @@ def _bootstrap():
 def main():
     parser = argparse.ArgumentParser(description='LQ-DataPrase Standalone Server')
     parser.add_argument('--port', type=int, default=8000, help='Port to listen on (default: 8000)')
-    parser.add_argument('--host', default='0.0.0.0', help='Host to bind (default: 0.0.0.0)')
+    parser.add_argument('--host', default='127.0.0.1',
+                        help='Host to bind (default: 127.0.0.1 — loopback only. This is a '
+                             'desktop app; binding 0.0.0.0 exposes the API, /admin/ and every '
+                             'uploaded test file to the whole subnet.)')
     parser.add_argument('--ready-fd', type=int, default=None,
                         help='File descriptor to write "ready\\n" when server is up (Electron integration)')
     args = parser.parse_args()
@@ -151,7 +182,7 @@ def main():
 
     _setup_path()
     _setup_django()
-    _bootstrap()
+    _bootstrap(args.host)
 
     # When --port 0 is given (used by the Electron main process to auto-assign
     # a free port), resolve a real port via the OS before starting runserver.

@@ -64,8 +64,18 @@ _base.BASE_DIR = BASE_DIR
 # ---------------------------------------------------------------------------
 DEBUG = False
 
-# Accept connections from any host (the user may access via IP/hostname).
-ALLOWED_HOSTS = ['*']
+# Loopback only. standalone.py now binds 127.0.0.1 by default and the Electron
+# renderer calls http://localhost:<port>, so these three cover every legitimate
+# Host header. Deliberate LAN exposure (``--host 0.0.0.0``) must opt in via
+# DJANGO_ALLOWED_HOSTS -- and standalone._bootstrap refuses to start that way
+# with the built-in default admin credential.
+ALLOWED_HOSTS = os.environ.get(
+    'DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1,[::1]'
+).split(',')
+
+# No anonymous Swagger/schema in the shipped product (config/urls.py gates the
+# routes on this flag; drf-spectacular's views default to AllowAny).
+API_DOCS_ENABLED = False
 
 # ---------------------------------------------------------------------------
 # Database — SQLite (no PostgreSQL required)
