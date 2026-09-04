@@ -129,6 +129,17 @@ def _sanitize_numeric_params(df, params):
         # Skip non-numeric
         if not pd.api.types.is_numeric_dtype(col):
             continue
+        # Skip bool columns (real data has ``Dut_Pass``): ``is_numeric_dtype``
+        # returns True for bool, but a pass/fail flag is not a measurable
+        # parameter — a boxplot / correlation row for it is meaningless, and
+        # before ``ensure_numeric`` gained ``.astype(float)`` it also crashed
+        # ``.quantile()`` with "numpy boolean subtract".
+        # 常量列（nunique()==1）**不排除**：全一致的列（如整文件 pass 的
+        # SW_Bin、数字 trim code）画箱线图是合法的，而相关矩阵的对角线/
+        # NaN 已在 compute_correlation_matrix 里从根上修好（fill_diagonal(1.0)
+        # + 非对角 NaN → None），不需要在这里靠剔列规避。
+        if pd.api.types.is_bool_dtype(col):
+            continue
         valid.append(p)
     return valid
 

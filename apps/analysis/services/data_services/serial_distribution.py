@@ -11,6 +11,7 @@ from apps.analysis.services.statistics import (
     get_site_column,
     get_serial_column,
     get_serial_candidates,
+    site_sort_key,
 )
 from apps.analysis.services.statistics.limits import is_pass_bin
 from apps.analysis.services.limits import resolve_limits
@@ -234,8 +235,11 @@ def compute_serial_distribution_data(df, metadata, param, range_type,
 
     series_data = []
     if site_col:
+        # site_sort_key 而非 key=str：纯数字站点按数值排序，否则字符串序会把
+        # Site10 排在 Site2 前面，与 histogram.py / site_yield.py / correlation.py
+        # 的图例顺序不一致。
         for si, site in enumerate(
-                sorted(serial_grouped[site_col].unique(), key=str)):
+                sorted(serial_grouped[site_col].unique(), key=site_sort_key)):
             sdf = serial_grouped[serial_grouped[site_col] == site]
             series_data.append({
                 'name': f'Site {site}',

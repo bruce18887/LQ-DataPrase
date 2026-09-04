@@ -6,6 +6,7 @@ from apps.analysis.services.statistics import (
     get_1d_from,
     get_site_column,
     compute_range_statistics,
+    site_sort_key,
 )
 from apps.analysis.services.statistics.outliers import detect_outliers_iqr
 from apps.analysis.services.statistics.downsample import (
@@ -76,7 +77,10 @@ def compute_correlation_scatter(df, param_x, param_y, metadata=None,
         site_idx = get_1d_from(df, site_col).loc[common_idx]
         x_arr = x_vals.values
         y_arr = y_vals.values
-        for site in sorted(site_idx.unique(), key=str):
+        # site_sort_key 而非 key=str：纯数字站点按数值排序，否则字符串序会把
+        # Site10 排在 Site2 前面，与 histogram.py / site_yield.py 的图例顺序不一致
+        #（同一产品不同图的站点顺序不同）。
+        for site in sorted(site_idx.unique(), key=site_sort_key):
             smask = (site_idx == site).values
             pts = _build_pts(x_arr[smask], y_arr[smask])
             pts = _downsample_pts(pts)
