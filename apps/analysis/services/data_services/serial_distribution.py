@@ -22,7 +22,8 @@ from apps.analysis.services.statistics.downsample import (
 
 
 def compute_serial_distribution_data(df, metadata, param, range_type,
-                                     chart_config, serial_col=None):
+                                     chart_config, serial_col=None,
+                                     iqr_multiplier: float = 1.5):
     """Build serial-distribution scatter data, continuous serials, and mark
     lines.
 
@@ -161,6 +162,9 @@ def compute_serial_distribution_data(df, metadata, param, range_type,
     outlier_info = detect_outliers_iqr(
         data_series, include_values=False,
         spec_limits=(stats['rdl'][0], stats['rdl'][1]),
+        # 跟随用户的「敏感度 (IQR 倍数)」：旧写法写死 1.5，调敏感度后
+        # 直方图变了而序列分布的异常值标记不变，同屏矛盾。
+        iqr_multiplier=iqr_multiplier,
     )
     mean_val = stats['mean']
     std_val = stats['std']

@@ -14,7 +14,8 @@ from apps.analysis.services.statistics.downsample import (
 )
 
 
-def compute_correlation_scatter(df, param_x, param_y, metadata=None):
+def compute_correlation_scatter(df, param_x, param_y, metadata=None,
+                                iqr_multiplier: float = 1.5):
     """Build scatter-point series and Pearson r for two parameters.
 
     Returns a dict with ``param_x``, ``param_y``, ``n``, ``pearson_r``,
@@ -42,11 +43,15 @@ def compute_correlation_scatter(df, param_x, param_y, metadata=None):
         x_spec_limits = (x_stats['rdl'][0], x_stats['rdl'][1])
         y_spec_limits = (y_stats['rdl'][0], y_stats['rdl'][1])
 
+    # iqr_multiplier 跟随用户的「敏感度 (IQR 倍数)」：旧写法两轴都写死 1.5，
+    # 调敏感度后直方图的异常值集合变了而散点图两轴仍按 1.5 标记，同屏矛盾。
     x_outlier_info = detect_outliers_iqr(
         x_vals, include_values=False, spec_limits=x_spec_limits,
+        iqr_multiplier=iqr_multiplier,
     )
     y_outlier_info = detect_outliers_iqr(
         y_vals, include_values=False, spec_limits=y_spec_limits,
+        iqr_multiplier=iqr_multiplier,
     )
 
     def _build_pts(xv: np.ndarray, yv: np.ndarray):

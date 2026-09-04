@@ -192,12 +192,25 @@ def compute_correlation_matrix(df: pd.DataFrame, params: List[str], method: str 
     }
 
 
-def compute_boxplot_stats(data: pd.Series) -> Dict[str, Any]:
+def compute_boxplot_stats(
+    data: pd.Series,
+    spec_limits: Optional[Tuple[Optional[float], Optional[float]]] = None,
+    iqr_multiplier: float = 1.5,
+) -> Dict[str, Any]:
     """
     Compute five-number summary + outliers for box plot.
 
     Args:
         data: Pandas Series of numeric data
+        spec_limits: Optional (LSL, USL); either side may be None. When given,
+            the whiskers are expanded to include them so in-spec data is never
+            flagged as an outlier — mirrors ``detect_outliers_iqr``.
+        iqr_multiplier: Whisker multiplier, i.e. the user's 「敏感度 (IQR 倍数)」
+            setting. Must be threaded through from the request: it used to be
+            hardcoded 1.5 here, so turning sensitivity to 3.0 changed the
+            histogram / QQ / serial / scatter charts but left the box plot
+            flagging outliers at 1.5 — four charts contradicting each other on
+            the same screen.
 
     Returns:
         Dictionary with min, q1, median, q3, max, and outliers
@@ -242,9 +255,21 @@ def compute_boxplot_stats(data: pd.Series) -> Dict[str, Any]:
     q3 = float(clean_data.quantile(0.75))
     iqr = q3 - q1
 
-    # Compute whiskers (1.5 * IQR rule)
-    lower_whisker = q1 - 1.5 * iqr
-    upper_whisker = q3 + 1.5 * iqr
+    # Compute whiskers (IQR rule, multiplier follows the user's 敏感度 setting)
+    lower_whisker = q1 - iqr_multiplier * iqr
+    upper_whisker = q3 + iqr_multiplier * iqr
+
+    # Expand to the spec limits when present, mirroring detect_outliers_iqr:
+    # data inside the RowDataLimit is legitimate, not an outlier. Without this
+    # the box plot flagged in-spec points — the same 「纯 IQR 把规格限内合法
+    # 数据标为异常」 defect that outliers.py already fixed. Either side may be
+    # None (no real spec limit), in which case that side is left alone.
+    if spec_limits is not None:
+        spec_lower, spec_upper = spec_limits
+        if spec_lower is not None:
+            lower_whisker = min(lower_whisker, float(spec_lower))
+        if spec_upper is not None:
+            upper_whisker = max(upper_whisker, float(spec_upper))
 
     # Find outliers
     outliers = clean_data[(clean_data < lower_whisker) | (clean_data > upper_whisker)]
@@ -332,7 +357,8 @@ def compute_range_statistics(data_series: pd.Series, metadata: Dict, selected_pa
     }
 
 
-def compute_qqplot(data_series: pd.Series, metadata: dict = None, param: str = None) -> Dict[str, Any]:
+def compute_qqplot(data_series: pd.Series, metadata: dict = None, param: str = None,
+                   iqr_multiplier: float = 1.5) -> Dict[str, Any]:
     """
     Compute QQ plot data for normality testing (norm_probplot — numpy).
 
@@ -352,7 +378,10 @@ def compute_qqplot(data_series: pd.Series, metadata: dict = None, param: str = N
         stats = compute_range_statistics(clean, metadata, param)
         spec_limits = (stats['rdl'][0], stats['rdl'][1])
 
-    outlier_info = detect_outliers_iqr(clean, include_values=False, spec_limits=spec_limits)
+    outlier_info = detect_outliers_iqr(
+        clean, include_values=False, spec_limits=spec_limits,
+        iqr_multiplier=iqr_multiplier,
+    )
     if len(clean) < 3:
         return {
             'theoretical_quantiles': [],

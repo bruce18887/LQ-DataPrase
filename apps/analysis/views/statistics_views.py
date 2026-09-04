@@ -23,6 +23,8 @@ from apps.analysis.services.statistics import (
     compute_site_stats,
     get_site_column,
     get_columns_with_limits,
+    get_bin_column_name,
+    resolve_spec_limits,
     get_1d_from,
     filter_finite,
     build_fail_mask,
@@ -319,6 +321,11 @@ class StatisticsViewSet(viewsets.GenericViewSet):
             df = filter_bin1_rows(df, metadata)
 
         results = {}
+        # 敏感度（IQR 倍数）与规格限一并传给箱线图：此前 compute_boxplot_stats
+        # 的 whisker 写死 1.5*iqr 且完全不看规格限，导致① 调敏感度后同屏
+        # 其他四图变了、箱线图没变；② 规格限内的合法数据被当异常值
+        #（outliers.py 早已修好的同一个缺陷，箱线图没跟上）。
+        iqr_multiplier = get_param_float(request, 'iqr_multiplier', 1.5)
 
         for param in params:
             if param not in df.columns:
@@ -327,8 +334,10 @@ class StatisticsViewSet(viewsets.GenericViewSet):
             data_series = ensure_numeric(df, param)
             if data_series.dropna().empty:
                 continue
+            spec_limits = resolve_spec_limits(metadata, param)
             param_result = {
-                'overall': compute_boxplot_stats(data_series)
+                'overall': compute_boxplot_stats(
+                    data_series, spec_limits, iqr_multiplier)
             }
 
             # Group by site or bin if requested
@@ -344,15 +353,21 @@ class StatisticsViewSet(viewsets.GenericViewSet):
                         if isinstance(mask, pd.Series):
                             mask = mask.values
                         site_data = data_series[mask]
-                        by_group[str(site)] = compute_boxplot_stats(site_data)
+                        by_group[str(site)] = compute_boxplot_stats(
+                            site_data, spec_limits, iqr_multiplier)
                     param_result['by_site'] = by_group
 
             elif group_by == 'bin':
-                bin_col = None
-                for col in df.columns:
-                    if 'bin' in col.lower():
-                        bin_col = col
-                        break
+                # 优先用按格式映射的 bin 列（与 limits.calculate_fail_bin_statistics
+                # 同源）。旧写法扫「第一个列名含 bin 的列」，依赖列序，可能取到
+                # 硬件 bin 而不是软件 bin → 箱线图分组与良率统计分组不是同一个 bin。
+                bin_col = get_bin_column_name(metadata.get('format', ''))
+                if bin_col not in df.columns:
+                    bin_col = None
+                    for col in df.columns:
+                        if 'bin' in col.lower():
+                            bin_col = col
+                            break
                 if bin_col:
                     bin_idx = get_1d_from(df, bin_col)
                     by_group = {}
@@ -363,7 +378,8 @@ class StatisticsViewSet(viewsets.GenericViewSet):
                         if isinstance(mask, pd.Series):
                             mask = mask.values
                         bin_data = data_series[mask]
-                        by_group[str(bin_val)] = compute_boxplot_stats(bin_data)
+                        by_group[str(bin_val)] = compute_boxplot_stats(
+                            bin_data, spec_limits, iqr_multiplier)
                     param_result['by_bin'] = by_group
 
             results[param] = param_result
