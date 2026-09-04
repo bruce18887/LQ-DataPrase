@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile } from '../helpers/params'
+import { selectAnalysisFile, selectParamWithSpecLimits } from '../helpers/params'
 import { RECOMMENDED } from '../fixtures/test-data'
 
 /**
@@ -29,6 +29,15 @@ test.describe('@p1 图例颜色严格对应', { tag: ['@p1', '@analysis'] }, () 
     await selectAnalysisFile(page, RECOMMENDED.analysis)
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
     const container = `${SINGLE} .chart-wrapper div[_echarts_instance_]`
+    await expect(page.locator(container)).toBeVisible({ timeout: 20_000 })
+
+    // 默认选中的第一列（CTA8280F 的 Index_No）限值字段是字面 'Min'/'Max'，
+    // 语义为「无规格限」→ 后端修正后返回 null，HistogramChart.vue:173 不再画
+    // 「规格限」 markLine 组。本用例要校的正是规格限 + 6σ 两组 markLine 的
+    // 图例色，所以必须先选一个真有规格限的参数。旧行为下它靠 Index_No 的
+    // **幻影限值线**（把数据自身极值当 LSL/USL）凑够 2 组 —— 钉住的是 bug。
+    const limited = await selectParamWithSpecLimits(page)
+    test.skip(!limited, '当前文件没有带真实规格限的参数')
     await expect(page.locator(container)).toBeVisible({ timeout: 20_000 })
 
     const opt = await readOption(page.locator(container).first())

@@ -24,9 +24,23 @@ async function findParamWithOutliers(page: import('@playwright/test').Page): Pro
     if (response.status() !== 200) return
     try {
       const body = await response.json()
-      const res = body.results as Record<string, { outlier_info: OutlierInfo }>
+      const res = body.results as Record<string, {
+        outlier_info: OutlierInfo
+        lower_limit: number | null
+        upper_limit: number | null
+      }>
       for (const [param, data] of Object.entries(res || {})) {
-        if (data?.outlier_info?.has_outliers) {
+        // 除了「有异常值」还要求「有真实规格限」：CTA8280F 的前几列
+        // （Index_No / SW_Bin / X_COORD / Test_Time …）限值字段是字面
+        // 'Min'/'Max' = 无规格限。后端修正后 detect_outliers_iqr 收到
+        // spec_limits=(None, None) → 纯 IQR 栅栏，于是 SW_Bin 这种离散列
+        // 也报 has_outliers，助手就会停在它上面；而它没有 LSL/USL，
+        // 「裁剪后应保留 Limit 线」必然失败。旧行为下幻影 spec_limits
+        // =(数据min, 数据max) 会把栅栏撑到覆盖全部数据 → has_outliers=False
+        // → 助手自然跳过它、选到后面真有限值的参数。故这里显式要求
+        // lower/upper_limit 非 null，把选参数的口径钉回用例的真实意图。
+        if (data?.outlier_info?.has_outliers
+          && data.lower_limit != null && data.upper_limit != null) {
           results.push({ param, info: data.outlier_info })
         }
       }
