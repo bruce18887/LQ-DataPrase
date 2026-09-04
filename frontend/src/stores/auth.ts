@@ -4,11 +4,13 @@ import { authApi } from '../api/auth'
 import { resetExportTimeoutCache } from '../utils/exportTimeout'
 import { resetSftpTimeoutCache } from '../utils/sftpTimeout'
 import { resetFilenameWrapCache } from '../utils/filenameWrap'
+import { safeGetItem, safeSetItem, safeRemoveItem } from '../utils/safeStorage'
 import type { User } from '../types'
 
 export const useAuthStore = defineStore('auth', () => {
-  const token = ref<string | null>(localStorage.getItem('access_token'))
-  const refreshToken = ref<string | null>(localStorage.getItem('refresh_token'))
+  // safeGetItem 替代裸 localStorage.getItem：Electron 磁盘满/权限异常时不白屏
+  const token = ref<string | null>(safeGetItem('access_token'))
+  const refreshToken = ref<string | null>(safeGetItem('refresh_token'))
   const user = ref<User | null>(null)
 
   const isLoggedIn = computed(() => !!token.value)
@@ -22,8 +24,8 @@ export const useAuthStore = defineStore('auth', () => {
     const { data } = await authApi.login(username, password)
     token.value = data.token
     refreshToken.value = data.refresh
-    localStorage.setItem('access_token', data.token)
-    localStorage.setItem('refresh_token', data.refresh)
+    safeSetItem('access_token', data.token)
+    safeSetItem('refresh_token', data.refresh)
     const { data: profile } = await authApi.getProfile()
     user.value = profile
   }
@@ -36,8 +38,8 @@ export const useAuthStore = defineStore('auth', () => {
   function setTokens(accessToken: string, newRefreshToken: string) {
     token.value = accessToken
     refreshToken.value = newRefreshToken
-    localStorage.setItem('access_token', accessToken)
-    localStorage.setItem('refresh_token', newRefreshToken)
+    safeSetItem('access_token', accessToken)
+    safeSetItem('refresh_token', newRefreshToken)
   }
 
   // Restore the in-memory profile after a hard refresh: the token persists in
@@ -65,8 +67,8 @@ export const useAuthStore = defineStore('auth', () => {
     token.value = null
     refreshToken.value = null
     user.value = null
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('refresh_token')
+    safeRemoveItem('access_token')
+    safeRemoveItem('refresh_token')
     resetExportTimeoutCache()
     resetSftpTimeoutCache()
     resetFilenameWrapCache()

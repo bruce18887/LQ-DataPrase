@@ -1,11 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
+import { safeGetItem, safeSetItem } from '../utils/safeStorage'
 
 export type Theme = 'light' | 'night'
 
 export const useThemeStore = defineStore('theme', () => {
-  // 从localStorage读取保存的主题，默认为浅色
-  const currentTheme = ref<Theme>((localStorage.getItem('theme') as Theme) || 'light')
+  // safeGetItem 替代裸 localStorage.getItem：Electron 磁盘满/权限异常时不白屏
+  const currentTheme = ref<Theme>((safeGetItem('theme') as Theme) || 'light')
 
   // 切换主题
   function toggleTheme() {
@@ -19,8 +20,8 @@ export const useThemeStore = defineStore('theme', () => {
 
   // 监听主题变化，应用到DOM和localStorage
   watch(currentTheme, (newTheme) => {
-    // 保存到localStorage
-    localStorage.setItem('theme', newTheme)
+    // 持久化到 localStorage（安全封装，异常不崩溃）
+    safeSetItem('theme', newTheme)
 
     document.documentElement.setAttribute('data-theme', newTheme)
 

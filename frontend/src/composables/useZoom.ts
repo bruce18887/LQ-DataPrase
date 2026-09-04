@@ -13,6 +13,7 @@
  * 任意组件调用 useZoom() 均共享同一份状态。
  */
 import { ref, onMounted, onUnmounted } from 'vue'
+import { safeGetItem, safeSetItem } from '../utils/safeStorage'
 
 const STORAGE_KEY = 'lqdp-zoom-factor'
 const MIN_ZOOM = 0.5
@@ -42,11 +43,8 @@ export function useZoom() {
   async function applyZoomFactor(value: number, silent = false): Promise<void> {
     const clamped = clampZoom(value)
     zoom.value = Math.round(clamped * 100) / 100
-    try {
-      localStorage.setItem(STORAGE_KEY, String(zoom.value))
-    } catch {
-      // localStorage 不可用时不影响功能
-    }
+    // 统一走 safeSetItem（此前同文件 setItem 有 try/catch 而 getItem 无——不一致）
+    safeSetItem(STORAGE_KEY, String(zoom.value))
 
     if (isElectron()) {
       await window.electronAPI?.setZoomFactor(zoom.value)
@@ -86,7 +84,9 @@ export function useZoom() {
       }
     }
 
-    const stored = localStorage.getItem(STORAGE_KEY)
+    // 统一走 safeGetItem（此前裸调 localStorage.getItem 无 try/catch，
+    // 而同文件 setItem 有——不一致，Electron 磁盘异常时此处会抛异常导致缩放初始化失败）
+    const stored = safeGetItem(STORAGE_KEY)
     if (stored !== null) {
       const parsed = parseFloat(stored)
       if (!Number.isNaN(parsed)) {

@@ -17,7 +17,7 @@
 
     <!-- 导航菜单 -->
     <nav class="nav-menu" aria-label="主导航">
-      <template v-for="(item, index) in menuItems" :key="item.path">
+      <template v-for="(item, index) in visibleMenuItems" :key="item.path">
         <!-- 分组分隔线 -->
         <div
           v-if="item.groupStart && index > 0"
@@ -30,10 +30,12 @@
           </transition>
         </div>
 
+        <!-- v-if 替代原 class="hidden"：管理员菜单项对普通用户不渲染 DOM，
+             修复 DevTools 可取消隐藏 + 屏幕阅读器可朗读的安全/可访问性问题 -->
         <router-link
           :to="item.path"
           class="menu-item"
-          :class="{ active: isActive(item.path), hidden: item.requiresAdmin && !isAdmin }"
+          :class="{ active: isActive(item.path) }"
           :aria-current="isActive(item.path) ? 'page' : undefined"
         >
           <div class="menu-item-content">
@@ -91,6 +93,18 @@ const menuItems = [
   { path: '/admin/users', label: '用户管理', icon: User, requiresAdmin: true, groupStart: true, groupLabel: '系统管理' },
   { path: '/settings', label: '系统设置', icon: Setting, requiresAdmin: false },
 ]
+
+/**
+ * 过滤后的可见菜单项：管理员专属项对普通用户不渲染 DOM。
+ * 此前用 CSS class="hidden" 隐藏，导致：
+ * 1. DevTools 可取消隐藏看到管理员链接
+ * 2. 屏幕阅读器仍可能朗读隐藏元素
+ * 3. “系统管理”分隔线在非管理员下成为浮动标签（下方无可见项）
+ * 改用 v-if 后以上问题均修复。
+ */
+const visibleMenuItems = computed(() =>
+  menuItems.filter(item => !item.requiresAdmin || isAdmin.value)
+)
 
 const isActive = (path: string) => {
   return route.path === path || route.path.startsWith(path + '/')
@@ -199,9 +213,8 @@ const toggleCollapse = () => {
   color: inherit;
 }
 
-.menu-item.hidden {
-  display: none;
-}
+/* 移除 .menu-item.hidden 规则：已改用 v-if 条件渲染，管理员菜单对普通用户
+   不存在于 DOM，无需 CSS 隐藏。保留该规则无实际作用且产生死代码。 */
 
 .menu-item:hover {
   background-color: var(--bg-3);

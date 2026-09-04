@@ -85,7 +85,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onActivated } from 'vue'
+import { ref, computed, onMounted, onActivated, onBeforeUnmount } from 'vue'
 import { FolderOpened, CircleCheck, CircleClose } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { sftpApi, type SftpLastVisit } from '../../api/sftp'
@@ -135,6 +135,23 @@ const dirDownloading = ref(false)
 const dlProgress = ref({
   percent: 0, speed: 0, eta: 0, currentFile: '',
   current: 0, total: 0, bytes_done: 0, total_bytes: 0,
+})
+
+// ---- 生命周期清理（修复 SSE 流无法取消 + setTimeout 幽灵回调）----
+// 问题：组件销毁后 SSE reader 仍持有并回调更新已失效 ref → 内存泄漏；
+// setTimeout 1s 内销毁时回调修改已失效 ref。
+let fileAbortCtrl: AbortController | null = null
+let dirAbortCtrl: AbortController | null = null
+let fileDoneTimer: ReturnType<typeof setTimeout> | null = null
+let dirDoneTimer: ReturnType<typeof setTimeout> | null = null
+
+onBeforeUnmount(() => {
+  // 取消进行中的 SSE 流，避免 reader 回调更新已失效 ref
+  fileAbortCtrl?.abort()
+  dirAbortCtrl?.abort()
+  // 清除未触发的延迟复位定时器
+  if (fileDoneTimer) { clearTimeout(fileDoneTimer); fileDoneTimer = null }
+  if (dirDoneTimer) { clearTimeout(dirDoneTimer); dirDoneTimer = null }
 })
 
 const fileItems = computed(() => items.value.filter(i => !i.is_dir && isCsv(i.name)))
@@ -296,6 +313,8 @@ async function downloadAndParse(row: any) {
 async function singleFileDownload(row: any, key: string) {
   downloadingRows.value.add(key)
   startFileProgress(row.name)
+  // 创建 AbortController 以支持组件卸载时取消 SSE 流
+  fileAbortCtrl = new AbortController()
   try {
     await sftpApi.downloadFileStream(
       joinPath(currentPath.value, row.name),
@@ -312,17 +331,20 @@ async function singleFileDownload(row: any, key: string) {
         fileProgress.value.bytes_done = fileProgress.value.total_bytes
         ElMessage.success(`已导入: ${d.filename} (${formatSize(d.size)})`)
         filesStore.notifyFilesChanged()
-        setTimeout(() => { fileDownloading.value = false }, 1000)
+        // 保存定时器引用，onBeforeUnmount 中可清理（修复幽灵回调）
+        fileDoneTimer = setTimeout(() => { fileDownloading.value = false; fileDoneTimer = null }, 1000)
       },
       (msg) => {
         fileDownloading.value = false
         ElMessage.error(msg || '下载失败')
       },
+      fileAbortCtrl.signal,
     )
   } catch {
     fileDownloading.value = false
   } finally {
     downloadingRows.value.delete(key)
+    fileAbortCtrl = null
   }
 }
 
@@ -338,6 +360,8 @@ async function downloadDirectory(dirName?: string) {
   const path = dirName ? joinPath(currentPath.value, dirName) : currentPath.value
   dirDownloading.value = true
   dlProgress.value = { percent: 0, speed: 0, eta: 0, currentFile: '', current: 0, total: 0, bytes_done: 0, total_bytes: 0 }
+  // 创建 AbortController 以支持组件卸载时取消 SSE 流
+  dirAbortCtrl = new AbortController()
   try {
     await sftpApi.downloadDirStream(
       path,
@@ -360,17 +384,21 @@ async function downloadDirectory(dirName?: string) {
         dlProgress.value.percent = 100
         ElMessage.success(`目录 "${data.dir_name}" 已保存 (${data.file_count} 个文件)`)
         filesStore.notifyFilesChanged()
-        setTimeout(() => { dirDownloading.value = false }, 1000)
+        // 保存定时器引用，onBeforeUnmount 中可清理（修复幽灵回调）
+        dirDoneTimer = setTimeout(() => { dirDownloading.value = false; dirDoneTimer = null }, 1000)
       },
       (msg) => {
         ElMessage.error(msg || '目录下载失败')
         dirDownloading.value = false
       },
+      dirAbortCtrl.signal,
     )
   } catch {
     // downloadDirStream 走原生 fetch，其失败经 onError 回调提示（见上），
     // 此处仅兜底重置下载状态。
     dirDownloading.value = false
+  } finally {
+    dirAbortCtrl = null
   }
 }
 
