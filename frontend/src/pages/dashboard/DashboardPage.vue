@@ -181,6 +181,11 @@ async function loadFiles() {
   }
 }
 
+// 请求序号守卫：快速切换文件时旧请求晚到会覆盖新数据（竞态）。
+// onFileChange 直接 await analysisApi.getDashboard() 而未走 useAsyncData，
+// 故须手动加序号守卫——过期响应不写入 ref。
+let _dashSeq = 0
+
 async function onFileChange() {
   if (!selectedFileId.value) {
     data.value = null
@@ -188,10 +193,12 @@ async function onFileChange() {
     uphData.value = null
     return
   }
+  const mySeq = ++_dashSeq
   loading.value = true
   error.value = false
   try {
     const res = await analysisApi.getDashboard(selectedFileId.value)
+    if (mySeq !== _dashSeq) return // 过期响应，丢弃
     const d = res.data as DashboardData
     if (res.data.error) {
       // Partial error: render whatever data came along
@@ -215,9 +222,10 @@ async function onFileChange() {
     loadUph(selectedFileId.value)
     loadFileMeta(selectedFileId.value)
   } catch {
+    if (mySeq !== _dashSeq) return // 过期请求的错误同样丢弃
     error.value = true
   } finally {
-    loading.value = false
+    if (mySeq === _dashSeq) loading.value = false
   }
 }
 

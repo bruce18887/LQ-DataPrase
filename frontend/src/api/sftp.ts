@@ -2,6 +2,7 @@ import type { AxiosRequestConfig } from 'axios'
 
 import api from './index'
 import { getSftpTimeoutSec } from '../utils/sftpTimeout'
+import { safeGetItem } from '../utils/safeStorage'
 
 export interface SseProgressData {
   event: 'progress'
@@ -146,6 +147,7 @@ export const sftpApi = {
     onProgress: (data: SseFileProgressData) => void,
     onDone: (data: SseFileDoneData) => void,
     onError: (msg: string) => void,
+    signal?: AbortSignal,
   ) {
     try {
       await postSse(
@@ -156,8 +158,11 @@ export const sftpApi = {
           else if (data.event === 'done') onDone(data as SseFileDoneData)
           else if (data.event === 'error') onError(data.message || '下载失败')
         },
+        signal,
       )
     } catch (e: any) {
+      // AbortError 表示用户主动取消（组件卸载），不弹错误提示
+      if (e?.name === 'AbortError') return
       onError(e?.message || '网络错误')
     }
   },
@@ -172,6 +177,7 @@ export const sftpApi = {
     onProgress: (data: SseProgressData) => void,
     onDone: (data: SseDoneData) => void,
     onError: (msg: string) => void,
+    signal?: AbortSignal,
   ) {
     const timeoutSec = await getSftpTimeoutSec()
     try {
@@ -183,8 +189,11 @@ export const sftpApi = {
           else if (data.event === 'done') onDone(data as SseDoneData)
           else if (data.event === 'error') onError(data.message || '下载失败')
         },
+        signal,
       )
     } catch (e: any) {
+      // AbortError 表示用户主动取消（组件卸载），不弹错误提示
+      if (e?.name === 'AbortError') return
       onError(e?.message || '网络错误')
     }
   },
@@ -193,13 +202,18 @@ export const sftpApi = {
 /**
  * POST 一个 SSE 端点并逐事件回调。非 2xx：解析错误体后抛出（调用方负责
  * 提示）；流式解析与事件分发与旧 downloadDirStream 实现一致。
+ *
+ * signal: 可选 AbortSignal，透传给 fetch —— 修复此前无法取消进行中 SSE 流
+ * 的缺陷（组件卸载后 reader 仍持有并回调更新已失效 ref → 内存泄漏 + 幽灵回调）。
+ * localStorage 读取改走 safeGetItem（Electron 磁盘满/权限异常时不白屏）。
  */
 async function postSse(
   url: string,
   body: Record<string, unknown>,
   onData: (data: any) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const token = localStorage.getItem('access_token')
+  const token = safeGetItem('access_token')
   // Re-use the axios base URL so this works in Electron (file://) as well as
   // the browser dev/prod builds, where absolute paths resolve incorrectly.
   const baseUrl = (api.defaults.baseURL || '/api/v1').replace(/\/$/, '')
@@ -210,6 +224,7 @@ async function postSse(
       'Authorization': `Bearer ${token}`,
     },
     body: JSON.stringify(body),
+    signal,
   })
   if (!response.ok) {
     const err = await response.json().catch(() => ({ error: '请求失败' }))

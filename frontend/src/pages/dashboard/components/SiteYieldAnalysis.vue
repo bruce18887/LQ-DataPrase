@@ -83,6 +83,10 @@ function buildSiteYieldBarOption() {
     return isNaN(v) ? 0 : v
   })
 
+  // 性能优化：_tc() 每次调用都触发 getComputedStyle → 强制样式重计算。
+  // buildOption 内多处用到轴标签色，取一次并复用。
+  const textColor = _tc()
+
   // 良率阈值色：取 useEChartsTheme 的 JS 语义色，不能写 'var(--success)'。
   // zrender 不解析 CSS 变量，写进去会得到无效颜色（柱子变黑/透明），
   // 双主题下良率柱与折线全部失色——这是数据可视化失真，不是样式细节。
@@ -107,12 +111,12 @@ function buildSiteYieldBarOption() {
     xAxis: {
       type: 'category',
       data: siteNames,
-      axisLabel: { fontSize: 12, color: _tc(), interval: 0 },
+      axisLabel: { fontSize: 12, color: textColor, interval: 0 },
     },
     yAxis: {
       type: 'value',
       max: 100,
-      axisLabel: { formatter: '{value}%', color: _tc() },
+      axisLabel: { formatter: '{value}%', color: textColor },
     },
     series: [
       {

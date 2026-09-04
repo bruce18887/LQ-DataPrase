@@ -10,7 +10,6 @@ import router from './router'
 import './style.css'
 import './styles/design-tokens.css'  // 设计指南两层 token（唯一事实来源，见 docs/reference/ui-design-guide.md）
 import './styles/element-plus-theme.css'  // Element Plus 夜晚主题覆盖
-import './styles/common-components-theme.css'  // 通用组件夜晚主题
 
 const app = createApp(App)
 
