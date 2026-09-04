@@ -111,8 +111,13 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
             _meta_cols = set(get_serial_candidates(df))
             _stc = get_site_column(df)
             if _stc: _meta_cols.add(_stc)
+            # dtype 白名单 ('int64','float64') 漏掉 int32/float32/UInt8，且
+            # pandas 3.0 下字符串列是 str dtype 而不是 object（== object 恒 False）。
+            # 改用 is_numeric_dtype 后 bool（真实数据的 Dut_Pass）**会被纳入**，
+            # 所以必须显式排除 —— pass/fail 标志不是可测量的参数。
             numeric_cols = [c for c in df.columns
-                           if df[c].dtype in ('int64', 'float64')
+                           if pd.api.types.is_numeric_dtype(df[c])
+                           and not pd.api.types.is_bool_dtype(df[c])
                            and not df[c].dropna().empty
                            and c not in _meta_cols]
             if ignore_no_limit:

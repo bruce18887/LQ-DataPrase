@@ -27,9 +27,15 @@ def compute_common_params(loaded, ignore_no_limit=False):
     param_sets = []
     param_orders = []  # Store original column order for each file
     for _fid, df, metadata, _filename in loaded:
+        # dtype 白名单 ('int64','float64') 漏掉 int32/float32/UInt8；改用
+        # is_numeric_dtype 后 bool（Dut_Pass）会被纳入，必须显式排除。
+        # 与 analysis_views 快路径的参数候选口径保持一致，否则单文件页与
+        # 多文件页可选参数集不同。
         numeric_cols = [
             c for c in df.columns
-            if str(c).strip() and df[c].dtype in ('int64', 'float64')
+            if str(c).strip()
+            and pd.api.types.is_numeric_dtype(df[c])
+            and not pd.api.types.is_bool_dtype(df[c])
         ]
         if ignore_no_limit:
             numeric_cols = [c for c in numeric_cols if c in set(get_columns_with_limits(df, metadata))]
@@ -233,10 +239,14 @@ def compute_multi_lot_distribution(datasets, all_series, param,
     all_bins = np.array([-np.inf] + inner_edges + [np.inf])
     # 27 edges → 26 bins: 1 underflow + 24 normal + 1 overflow
 
-    # Bin centers: underflow/overflow use edge values, normal bins use midpoint
-    bin_centers = [inner_edges[0] - data_gap]  # underflow center
-    bin_centers += [(inner_edges[i] + inner_edges[i + 1]) / 2 for i in range(24)]
-    bin_centers.append(inner_edges[-1] + data_gap)  # overflow center
+    # Bin centers: underflow/overflow use edge values, normal bins use midpoint.
+    # 在构造处就 round 到 6 位（而不是只在输出字段上 round）：下面
+    # bar_data = [[bin_centers[i], pcts[i]] …] 也用同一个数组，两处必须同源，
+    # 否则前端拿 bin_centers 对齐/去重 bar_data 时会因浮点尾数失配。
+    # 精度与 histogram.py 的 [round(c, 6) for c in bin_centers] 对齐。
+    bin_centers = [round(inner_edges[0] - data_gap, 6)]  # underflow center
+    bin_centers += [round((inner_edges[i] + inner_edges[i + 1]) / 2, 6) for i in range(24)]
+    bin_centers.append(round(inner_edges[-1] + data_gap, 6))  # overflow center
     bin_count = len(bin_centers)
 
     # Second pass: compute histograms and assemble lot_data
