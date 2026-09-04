@@ -78,13 +78,37 @@ test.describe('@p1 图表配置数据筛选开关', { tag: ['@p1', '@analysis'] 
     expect(allParams.length).toBeGreaterThan(1)
 
     // 仅显示 Fail 测试项
+    // 参数下拉列表来自**快路径**响应（body 不含 "params"），而计算路径响应
+    // （含 "params"）只驱动图表。旧写法只等计算路径就去读下拉，而两个请求的
+    // 到达顺序不保证 → 偶发读到刷新前的全量列表（实测隔离连跑 3 次：1 绿 2 红）。
+    // 后端本身是对的：同一文件同口径实测 numeric_cols=180、fail_items=80、
+    // filter_test_items(only_fail_test_item=True) → 80。
+    // 修法：两个响应都注册在触发动作**之前**（R2①），并用条件轮询代替
+    // 「等一次就读」的固定时序（condition-based waiting）。
+    const fastFailResp = page.waitForResponse(
+      (r) =>
+        r.url().includes('/analysis/histogram/') &&
+        r.request().method() === 'POST' &&
+        r.request().postData()?.includes('"only_fail_test_item":true') === true &&
+        r.request().postData()?.includes('"params":') === false &&
+        r.status() < 500,
+      { timeout: 20_000 },
+    )
     const failResp = page.waitForResponse(histogramReqWith('"only_fail_test_item":true'), { timeout: 20_000 })
     await toggleFilter(page, '仅显示Fail测试项')
     const fr = await failResp
     expect(fr.request().postData() || '').toContain('"only_fail_test_item":true')
+    const fastFr = await fastFailResp
+    expect(fastFr.request().postData() || '', '参数列表刷新请求应携带 only_fail_test_item')
+      .toContain('"only_fail_test_item":true')
     await waitLoadingGone(page.locator(SINGLE))
+    await expect
+      .poll(async () => (await listParams(page)).length, {
+        timeout: 15_000,
+        message: 'Fail 项应少于全量参数（下拉列表应已按快路径响应刷新）',
+      })
+      .toBeLessThan(allParams.length)
     const failParams = await listParams(page)
-    expect(failParams.length, 'Fail 项应少于全量参数').toBeLessThan(allParams.length)
     expect(failParams.length, 'Fail 项列表不应为空').toBeGreaterThan(0)
 
     // 叠加仅显示低 CPK 项（Fail∩低CPK，可能为空集——允许为空但请求必须正确）
