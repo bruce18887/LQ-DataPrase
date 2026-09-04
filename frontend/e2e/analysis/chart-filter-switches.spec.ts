@@ -134,8 +134,15 @@ test.describe('@p1 图表配置数据筛选开关', { tag: ['@p1', '@analysis'] 
     expect(resp.request().postData() || '').toContain('"ignore_no_test_value":true')
     await waitLoadingGone(page.locator(SINGLE))
     await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
-    const params = await listParams(page)
-    expect(params.length).toBeGreaterThan(0)
+    // 与 :71 同族的读取时机竞态：切换开关会触发参数列表刷新（快路径
+    // 响应），单次 listParams 可能落在刷新中途而读到 0 项（实测偏发，
+    // 重试即过）。用条件轮询代替「等一次就读」。
+    await expect
+      .poll(async () => (await listParams(page)).length, {
+        timeout: 15_000,
+        message: '参数列表刷新后应仍有可选项',
+      })
+      .toBeGreaterThan(0)
   })
 
   test('序列分布模式：勾选仅用Pass数据后序列图按过滤数据重新加载', async ({ page }) => {

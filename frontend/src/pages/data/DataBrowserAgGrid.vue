@@ -139,6 +139,9 @@ onMounted(() => window.addEventListener('resize', onResize))
 onUnmounted(() => {
   window.removeEventListener('resize', onResize)
   if (passfailTimer) clearTimeout(passfailTimer)
+  // siteFilterTimer 也必须清：watcher 随组件作用域自动停止，但已排期的
+  // setTimeout 仍会在卸载后触发 reload() → 对已销毁的 grid 发幽灵请求。
+  if (siteFilterTimer) clearTimeout(siteFilterTimer)
 })
 
 const gridWrapperStyle = computed(() => ({
