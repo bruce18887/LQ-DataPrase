@@ -130,7 +130,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch, onMounted } from 'vue'
+import { computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useAnalysisStore } from '../../../stores/analysis'
 import { useMultiFile } from '../composables/useMultiFile'
@@ -314,6 +314,13 @@ watch(fileIds, () => {
   if (fileDebounce) clearTimeout(fileDebounce)
   fileDebounce = setTimeout(() => { reloadParams() }, 150)
 }, { deep: true })
+// 本 tab 是 lazy 的 el-tab-pane，切走即销毁：watcher 会随组件作用域停止，
+// 但已排期的 setTimeout 仍会在 150ms 内触发 reloadParams() → 对已卸载的
+// tab 发幽灵请求（勾选文件后立即切 tab 就能复现）。
+onBeforeUnmount(() => {
+  if (fileDebounce) clearTimeout(fileDebounce)
+  fileDebounce = null
+})
 watch(ignoreNoLimit, () => { reloadParams() })
 // 数据筛选开关变化 → 重载公共参数列表（合并请求携带全部开关）
 watch([ignoreNoTestValue, dataOnlyBin1, onlyFailTestItem, onlyLowCpk], () => { reloadParams() })
