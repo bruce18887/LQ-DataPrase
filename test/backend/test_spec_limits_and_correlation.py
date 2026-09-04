@@ -29,6 +29,7 @@ from django.test import SimpleTestCase
 
 from apps.analysis.services.statistics import (
     calculate_fail_test_item_statistics,
+    compute_boxplot_stats,
     compute_correlation_matrix,
     compute_cpk,
     compute_range_statistics,
@@ -251,3 +252,59 @@ class DetectFailDataExplicitColumnsTests(SimpleTestCase):
         _idx, fail_columns, _cells = detect_fail_data(df, meta)
         self.assertIn('Good', fail_columns)
         self.assertNotIn('Test_Time', fail_columns)
+
+
+class BoxplotSensitivityAndSpecLimitTests(SimpleTestCase):
+    """箱线图必须跟随敏感度与规格限。
+
+    旧实现 whisker 写死 ``q1 - 1.5*iqr`` / ``q3 + 1.5*iqr`` 且完全不看规格限：
+    ① 用户把「敏感度 (IQR 倍数)」调到 3.0 后，同屏直方图/QQ/序列/散点
+    的异常值集合都变了，只有箱线图没变；② 规格限内的合法数据被当
+    异常值（outliers.py 早已修好的同一个缺陷，箱线图没跟上）。
+    """
+
+    def _series(self):
+        # 19 个密集值（9.8~10.2 → Q1=9.9, Q3=10.1, IQR=0.2）+ 一个 mild outlier 10.6：
+        # 1.5×IQR 栅栏 [9.6, 10.4] 判它为异常，3.0×IQR 栅栏 [9.3, 10.7] 不判。
+        # （取值必须落在两个栅栏之间，否则「放宽倍数 → 异常变少」测不出来。）
+        return pd.Series([10.0, 10.1, 9.9, 10.2, 9.8, 10.0, 10.1, 9.9,
+                          10.0, 10.2, 9.8, 10.1, 10.0, 9.9, 10.1, 10.0,
+                          9.9, 10.2, 10.0, 10.6])
+
+    def test_default_multiplier_is_backward_compatible(self):
+        """无参调用必须与旧行为一致（既有测试大量用 compute_boxplot_stats(s)）。"""
+        s = self._series()
+        self.assertEqual(compute_boxplot_stats(s), compute_boxplot_stats(s, None, 1.5))
+
+    def test_looser_multiplier_detects_fewer_outliers(self):
+        s = self._series()
+        strict = compute_boxplot_stats(s, iqr_multiplier=1.5)
+        loose = compute_boxplot_stats(s, iqr_multiplier=3.0)
+        self.assertGreater(len(strict['outliers']), 0)
+        self.assertLess(len(loose['outliers']), len(strict['outliers']))
+
+    def test_spec_limits_expand_whiskers_so_in_spec_is_not_an_outlier(self):
+        s = self._series()
+        without = compute_boxplot_stats(s, iqr_multiplier=1.5)
+        self.assertIn(10.6, without['outliers'])
+        # 规格上限 13.0 覆盖 10.6 → 它是合法数据，不该被当异常值
+        with_spec = compute_boxplot_stats(s, (9.0, 13.0), 1.5)
+        self.assertNotIn(10.6, with_spec['outliers'])
+        self.assertEqual(len(with_spec['outliers']), 0)
+
+    def test_one_sided_and_none_spec_limits_do_not_crash(self):
+        s = self._series()
+        for spec in ((None, None), (9.0, None), (None, 13.0)):
+            out = compute_boxplot_stats(s, spec)
+            self.assertEqual(out['count'], 20)
+
+    def test_agrees_with_detect_outliers_iqr(self):
+        """箱线图与直方图共用同一栅栏口径，否则同屏两图异常值集合不一致。"""
+        s = self._series()
+        for mult in (1.5, 3.0):
+            for spec in (None, (9.0, 13.0)):
+                box = compute_boxplot_stats(s, spec, mult)
+                iqr_info = detect_outliers_iqr(s, spec_limits=spec, iqr_multiplier=mult)
+                self.assertEqual(
+                    len(box['outliers']), iqr_info['outlier_count'],
+                    f'mult={mult} spec={spec}: 箱线图与 IQR 栅栏口径分歧')

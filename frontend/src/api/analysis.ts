@@ -30,10 +30,14 @@ export const analysisApi = {
   getBinTrend(fileIds: number[]) {
     return api.get('/statistics/bin_trend/', { params: { file_ids: fileIds } })
   },
-  getBoxPlot(fileId: number, params: string[], groupBy?: string, dataOnlyBin1?: boolean) {
+  getBoxPlot(fileId: number, params: string[], groupBy?: string, dataOnlyBin1?: boolean,
+             iqrMultiplier?: number) {
     const query: Record<string, any> = { file_id: fileId, params }
     if (groupBy) query.group_by = groupBy
     if (dataOnlyBin1) query.data_only_bin1 = dataOnlyBin1
+    // 敏感度（IQR 倍数）：后端箱线图的 whisker 此前写死 1.5*iqr，调敏感度后
+    // 同屏直方图/QQ/序列/散点都变了、只有箱线图没变。
+    if (iqrMultiplier != null) query.iqr_multiplier = iqrMultiplier
     return api.get('/statistics/boxplot/', { params: query })
   },
   getParamTrend(fileIds: number[], param: string) {

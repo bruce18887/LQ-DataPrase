@@ -453,7 +453,10 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
                 'detail': '参数在当前数据筛选下无效（如非 Fail 测试项），请调整筛选或参数',
             }, status=400)
 
-        result = compute_correlation_scatter(df, param_x, param_y, metadata)
+        # iqr_multiplier 已在上方 flags 里读出（此前只喂给 low_cpk_items），
+        # 现在一并贯穿到散点两轴的异常值判定，与直方图同口径。
+        result = compute_correlation_scatter(
+            df, param_x, param_y, metadata, iqr_multiplier=iqr_multiplier)
 
         return Response(clean_data(result))
 
@@ -497,7 +500,9 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
         try:
             result = compute_serial_distribution_data(
                 df, metadata, param, range_type, chart_config,
-                serial_col=serial_col)
+                serial_col=serial_col,
+                # 本端点此前连 parse_filter_flags 都没调，敏感度写死 1.5
+                iqr_multiplier=get_param_float(request, 'iqr_multiplier', 1.5))
         except TypeError:
             return Response({'error': 'serial_distribution_failed',
                              'detail': '数据列存在重复或格式异常'}, status=400)
@@ -563,7 +568,9 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
         if data_series.dropna().empty:
             return Response({'error': 'param_no_valid_data'}, status=400)
         try:
-            result = compute_qqplot(data_series, metadata, param)
+            result = compute_qqplot(
+                data_series, metadata, param,
+                iqr_multiplier=get_param_float(request, 'iqr_multiplier', 1.5))
         except (TypeError, ValueError) as e:
             return Response({'error': 'qqplot_failed', 'detail': str(e)}, status=400)
 
