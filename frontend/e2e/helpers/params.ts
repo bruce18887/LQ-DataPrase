@@ -66,6 +66,50 @@ export async function selectParam(page: Page, name: string) {
 }
 
 /**
+ * 选中第一个「有真实规格限」的参数，返回其名字（找不到返回 null）。
+ *
+ * 为什么需要：CTA8280F 等格式里 Index_No / SW_Bin / X_COORD / Test_Time 这类
+ * 系统列的限值字段是字面 'Min'/'Max'，语义是「无规格限」。后端曾把它们
+ * 解析成**数据自身极值**当 LSL/USL，前端于是画出一条幻影限值线（且使
+ * Cpk 数学上必然 ≤ 0.5 → 永远判红）；修正后这些列返回 null 且不画线。
+ * 因此凡是要断言 LSL/USL 线的用例，都不能再依赖「默认选中的第一列」，
+ * 必须显式选一个真有限值的参数。
+ *
+ * 实现：监听 histogram 响应，按 listParams 顺序逐个试，读到 lower_limit 与
+ * upper_limit 都非 null 即停（实测 CTA8280F 在第 9 个参数 Kelvin_VIN 命中）。
+ * 等待用条件轮询而非固定长睡眠，命中即返回。
+ */
+export async function selectParamWithSpecLimits(page: Page, maxTries = 20): Promise<string | null> {
+  let found: string | null = null
+  const handler = async (response: import('@playwright/test').Response) => {
+    if (found || !response.url().includes('/analysis/histogram/')) return
+    if (response.request().method() !== 'POST' || response.status() !== 200) return
+    try {
+      const body = await response.json()
+      for (const [param, data] of Object.entries((body?.results ?? {}) as Record<string, any>)) {
+        if (data?.lower_limit != null && data?.upper_limit != null) {
+          found = param
+          return
+        }
+      }
+    } catch { /* 非 JSON / 已销毁的响应，忽略 */ }
+  }
+  page.on('response', handler)
+  try {
+    const params = await listParams(page)
+    for (const p of params.slice(0, maxTries)) {
+      if (found) break
+      await selectParam(page, p)
+      // 条件轮询：最多等 3s，命中立即继续（不用固定 waitForTimeout）
+      for (let i = 0; i < 30 && !found; i++) await page.waitForTimeout(100)
+    }
+  } finally {
+    page.off('response', handler)
+  }
+  return found
+}
+
+/**
  * 从参数列表中随机抽取 n 个（去重）。
  * 普通测试文件中允许使用 Math.random。
  */
