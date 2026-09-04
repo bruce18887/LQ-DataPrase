@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import { gotoApp } from '../helpers/nav'
 import { uploadFile } from '../helpers/upload'
 import { makeZip } from '../helpers/zip'
-import { cleanupQuiet } from '../helpers/cleanup'
+import { cleanupQuiet, deleteBatchQuiet } from '../helpers/cleanup'
 
 /** 最小可解析 CTA8290D CSV（marker + 表头/单位/下限/上限 + 数据行） */
 const MIN_CSV = [
@@ -61,6 +61,11 @@ test.describe('ZIP 压缩包上传：自动解析为批次数据', { tag: ['@p2'
       await expect(files.filter({ hasText: 'below.csv' })).toBeVisible()
       await expect(files.filter({ hasText: 'root.csv' })).toBeVisible()
     } finally {
+      // 必须同时清掉上传产生的批次：只删临时 zip 会把 root.csv/below.csv
+      // 的 DataFile 行留在共享 DB 里（它们只有 col1/col2、无 Site 列），
+      // 按 -created_at 排到最前后会被分析页自动选中 → site_stats 400 →
+      // P0 冒烟「无控制台错误」挂。详见 helpers/cleanup.deleteBatchQuiet。
+      await deleteBatchQuiet(page, zipBase)
       cleanupQuiet(zipPath)
     }
   })
@@ -106,6 +111,8 @@ test.describe('ZIP 压缩包上传：自动解析为批次数据', { tag: ['@p2'
       await expect(header).toBeVisible({ timeout: 15_000 })
       await expect(header.locator('.batch-count')).toHaveText('2 个文件')
     } finally {
+      // 同上：a.csv/b.csv 也是 2行×2列无 Site 列，不清就会污染后续套件
+      await deleteBatchQuiet(page, zipBase)
       cleanupQuiet(zipPath)
     }
   })
