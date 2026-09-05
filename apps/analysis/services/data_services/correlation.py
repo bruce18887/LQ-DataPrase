@@ -7,6 +7,7 @@ from apps.analysis.services.statistics import (
     get_site_column,
     compute_range_statistics,
     site_sort_key,
+    filter_finite,
 )
 from apps.analysis.services.statistics.outliers import detect_outliers_iqr
 from apps.analysis.services.statistics.downsample import (
@@ -23,17 +24,15 @@ def compute_correlation_scatter(df, param_x, param_y, metadata=None,
     ``series_data`` (one series per site if a site column exists, otherwise
     a single "Data" series).
     """
-    x_series = get_1d_from(df, param_x)
-    y_series = get_1d_from(df, param_y)
-
-    # 向量化去 inf/nan（原实现逐值 lambda，68k 行文件 ~300ms 的元凶之一）
-    mask = np.isfinite(x_series.astype(float).values) \
-        & np.isfinite(y_series.astype(float).values)
-    x_series = x_series.iloc[mask].dropna()
-    y_series = y_series.iloc[mask].dropna()
+    # 向量化去 inf/nan（原实现逐值 lambda，68k 行文件 ~300ms 的元凶之一）。
+    # filter_finite 同时完成 str/bool 列 coerce：裸 `.astype(float)` 在 pandas 3.0
+    # 的 str 列（真实文件存在 `Start_T`）上抛 ValueError → 500；视图层守卫
+    # 400 之外，服务层对任何直连调用也要容错（R3②）。
+    x_series = filter_finite(get_1d_from(df, param_x))
+    y_series = filter_finite(get_1d_from(df, param_y))
     common_idx = x_series.index.intersection(y_series.index)
-    x_vals = x_series.loc[common_idx].astype(float)
-    y_vals = y_series.loc[common_idx].astype(float)
+    x_vals = x_series.loc[common_idx]
+    y_vals = y_series.loc[common_idx]
 
     # Detect outliers for both axes, respecting spec limits (RDL)
     x_spec_limits = None

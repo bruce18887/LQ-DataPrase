@@ -790,3 +790,69 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
       全量转绿。消费方套件（dashboard+exports+smoke+data）106 passed / 7 skipped / 0 failed；
       补审计新增 @theme 对比度用例揪出 light 下 `.sensitivity-hint` 用 --text-3 仅 2.54:1，
       已随 DataFilterSection/.wafer-note 改用 --text-2。详见 lessons 2026-09-05。
+
+---
+
+# 数据分析界面 Bug 修复（2026-09-05 审查后）
+
+> 来源：四路子代理审查（组件层/状态层/后端/前后端契约）+ 人工复核，完整计划见
+> `~/.commandcode/plans/analysis-interface-bugfix-plan.md`。分批实施，每批验证通过即提交。
+
+## P0 批次 1：后端 500 修复
+
+- [x] 1.1 直方图单边限值 → 500：`histogram.py:165-178` 空操作兜底改逐侧回退（对齐
+      `multi_lot._resolve_multi_range`）+ 单侧限值单测（LSL='0'/USL='MAX' 占位语义）
+- [x] 1.2 correlation str 列 → 500：数值入口走 `ensure_numeric` 模式 + 视图补
+      `_sanitize_numeric_params` 同形守卫（400）+ 契约测试
+- [x] 1.3 cpk 端点零校验 → 500：补空白过滤 + 列存在校验（400 `param_not_found`）+ 测试
+
+> 批次 1 Review（2026-09-05）：新增 `apps/analysis/tests_one_sided_limits.py` 9 用例全绿；
+> `manage.py test apps.analysis` 串行 160/160 OK。`compute_site_stats`（site_yield.py:27-28）
+> 与 `serial_distribution`（y_min/y_max None 判断）经核实本就 None 容错，同族无需改。
+
+## P0 批次 2：前端高严重度
+
+- [ ] 2.1 序列分布图 X 轴错位：`SerialChart.vue` category 轴数值 x 映射为索引 + tooltip realSerial
+- [ ] 2.2 相关性 tab 切文件滞留：`CorrelationToolsTab.vue` 补 `watch(fileId)` 清 localX/Y + 结果
+- [ ] 2.3 multi_lot 双写竞态：`useMultiFile.ts` 两写入路径加共享 lotWriteSeq 守卫
+- [ ] 2.4 ParamSelector v-html XSS：删 v-html，列名转义后高亮
+
+## P1 批次 3：前端竞态家族
+
+- [ ] 3.1 useSiteStats 过期响应清表 → 快照比对
+- [ ] 3.2 WaferMapPanel 三裸请求加 seq 守卫 + loading 计数器
+- [ ] 3.3 ParamSelector popper-class 作用域化（dp-param-popper-<scope>）
+- [ ] 3.4 BoxPlotChart 跳组错位 → 先过滤有效组再映射
+- [ ] 3.5 useTabFileParams 守卫升级 file_id+序号 + loading 引用计数
+- [ ] 3.6 useHistogram/useSerialDistribution 早退清态（对齐 useQQPlot）
+- [ ] 3.7 multi tab URL：mf_ids 与文件列表求交 + syncToQuery 删键 + 跨页防抖守卫
+- [ ] 3.8 切参数 QQ/序列图双发请求 → 删 watch(histResult) 联动
+
+## P1 批次 4：后端守卫与契约统一
+
+- [ ] 4.1 wafer_map 参数守卫对齐 zonal_yield（空 param 保留全局判定）
+- [ ] 4.2 serial_distribution chart_config 解析防护 → 400 invalid_chart_config
+- [ ] 4.3 uph 视图层裸 float() 移除，让服务层容错生效
+- [ ] 4.4 file_correlation dtype 白名单 → is_numeric_dtype 且排除 bool
+- [ ] 4.5 histogram 计算路径：部分无效带 skipped_params，全无效 400 no_valid_params
+- [ ] 4.6 histogram 响应补 median 字段（前端 Median 卡不再恒 '-'）
+- [ ] 4.7 by_bin 箱线图标签 "Bin N"（BoxPlotChart 接收 groupBy prop）
+- [ ] 4.8 'CL' 哨兵统一为用户自定义限：site_stats/serial_distribution 读写 custom_low/high
+
+## P2 批次 5：低严重度小修
+
+- [ ] 5.1 BoxPlotStatsTable 数值 Number.isFinite 护卫
+- [ ] 5.2 WaferMapPanel 静态 style 改 :style 绑定
+- [ ] 5.3 相关矩阵 null → 'N/A'（不 ?? 0）
+- [ ] 5.4 serial 非整数不截断（走字符串 label 路径）
+- [ ] 5.5 bin NaN 不再判 fail（df[bin].eq(1)，与 bin_stats 口径一致）
+- [ ] 5.6 get_param_float 拒 NaN + custom_low>custom_high → 400
+- [ ] 5.7 multi_lot 无参分支过 clean_data；docstring 删未实现的 group_by
+- [ ] 5.8 api/analysis.ts 删 8 个死 helper
+
+## 验证
+
+- [ ] `manage.py test apps.analysis` 串行全绿（Ran N 含新增用例）
+- [ ] `npm run build` 绿
+- [ ] 分析页相关 e2e 全绿（Playwright 自起后端，跑前查端口占用进程，跑完释放端口）
+- [ ] 全量 `manage.py test` + 收尾回归；每批 commit

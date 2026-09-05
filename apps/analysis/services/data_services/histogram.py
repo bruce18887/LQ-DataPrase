@@ -163,8 +163,15 @@ def compute_histogram_stats(df, metadata, param, site_col,
         bin_min, bin_max = float(custom_low), float(custom_high)
     else:
         bin_min, bin_max = resolve_limits(range_type, stats)
-        if bin_min is None or bin_max is None:
-            bin_min, bin_max = stats['rdl'][0], stats['rdl'][1]
+        # 单边限值（如 LSL='0'、USL='MAX'/'Min' 占位 → resolve_spec_limits 对该侧
+        # 返回 None）：旧兜底 `= stats['rdl'][0], stats['rdl'][1]` 把同一对值原样
+        # 赋回，是空操作 —— None 一路活到 safe_gap(None, x) 抛 TypeError → 500，
+        # 而 range_type 默认就是 'RDL'。改为逐侧回退数据范围（与
+        # multi_lot._resolve_multi_range 的单侧回退同语义）。
+        if bin_min is None:
+            bin_min = float(data_series.min())
+        if bin_max is None:
+            bin_max = float(data_series.max())
 
     # Degenerate range (missing/zero-width limits, or std==0 for sigma ranges):
     # fall back to the actual data range, then to a ±0.5 window, so ECharts

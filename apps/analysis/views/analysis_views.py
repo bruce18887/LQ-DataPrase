@@ -442,6 +442,16 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
                 cpk_threshold, iqr_multiplier, flags['data_only_bin1'])
         if flags['data_only_bin1']:
             df = filter_bin1_rows(df, metadata)
+        # 非数值列（str/bool/全 NaN）与兄弟端点（boxplot/correlation_matrix）同形
+        # 守卫 → 400 no_valid_params：此前服务层 `.astype(float)` 对 str 列直接
+        # ValueError → 500，同类入参一个 400 一个 500 的守卫不一致（R3①）。
+        # x==y 时 _sanitize 不去重，仍返回两元素，不会误伤同参数自相关。
+        if len(_sanitize_numeric_params(df, [param_x, param_y])) < 2:
+            return Response({
+                'error': 'no_valid_params',
+                'detail': '请求的参数不是有效数值列，请重新选择参数',
+                'requested': [param_x, param_y],
+            }, status=400)
         keep = filter_test_items(
             df, metadata, [param_x, param_y],
             ignore_no_test_value=flags['ignore_no_test_value'],
@@ -529,6 +539,20 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
         params = get_param_list(request,'params')
         if not params:
             params = get_columns_with_limits(df, metadata)
+
+        # 与 histogram 同形守卫：切文件后的 stale selectedParam 打到本端点曾是
+        # `df[param]` KeyError → 500（histogram 加 param_not_found 守卫的注释里
+        # 记载过同一场景）；CTA8280F 尾逗号空列名同样先滤掉。
+        params = _filter_blank_params(params)
+        valid_params = [p for p in params if p in df.columns]
+        if params and not valid_params:
+            return Response({
+                'error': 'param_not_found',
+                'detail': '请求的参数均不在该文件中，请重新选择文件或参数',
+                'requested': params,
+                'missing': [p for p in params if p not in df.columns],
+            }, status=400)
+        params = valid_params
 
         result = compute_cpk_table_data(df, metadata, params)
 
