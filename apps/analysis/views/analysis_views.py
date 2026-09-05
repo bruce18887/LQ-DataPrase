@@ -175,6 +175,13 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
         range_type = get_param(request, 'range_type', 'RDL')
         custom_low = get_param_float(request, 'custom_low')
         custom_high = get_param_float(request, 'custom_high')
+        # CL 模式的自定义区间必须有效：下限 > 上限会产出退化 bin 网格
+        if range_type == 'CL' and custom_low is not None and custom_high is not None \
+                and custom_low > custom_high:
+            return Response({
+                'error': 'invalid_custom_limits',
+                'detail': '自定义下限不能大于上限',
+            }, status=400)
 
         results = {}
         site_col = get_site_column(df)
@@ -197,6 +204,7 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
                 'missing': missing_params,
             }, status=400)
         params = valid_params
+        skipped_params = []
         for param in params:
             # 计算路径不吞异常：任何意外内部错误直接 500 暴露（param 不在 df
             # 的情况已在上面作为 400 处理）
@@ -206,12 +214,25 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
                 iqr_multiplier=iqr_multiplier)
             if result is not None:
                 results[param] = result
+            else:
+                # str 列 / 筛选后全 NaN：此前 200 但缺 key，前端「图表区域空白
+                # 但无任何提示」——部分无效随响应带 skipped_params 提示，全部
+                # 无效对齐 boxplot 的 400 no_valid_params
+                skipped_params.append(param)
+        if not results:
+            return Response({
+                'error': 'no_valid_params',
+                'detail': '请求的参数均无有效数值数据',
+                'requested': params,
+                'skipped': skipped_params,
+            }, status=400)
 
         return Response(clean_data({
             'file_id': datafile.id,
             'filename': datafile.filename,
             'format_type': datafile.format_type,
             'results': results,
+            'skipped_params': skipped_params,
         }))
 
     @action(detail=False, methods=['get', 'post'])
@@ -229,6 +250,15 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
             }, status=400)
 
         param = get_param(request, 'param')
+        # 与 zonal_yield 同源同守卫（同一份 compute_wafer_fail_data）：stale
+        # 参数不得静默按「全局判定」返回一张着色完全错误的晶圆图——zonal 是
+        # 400 param_not_found，这里曾是 200 + 全局判定着色（R3① 守卫不一致）。
+        # 空 param 保留「全局判定」语义。
+        if param and param not in df.columns:
+            return Response({
+                'error': 'param_not_found',
+                'detail': f'参数 {param!r} 不在该文件中',
+            }, status=400)
         color_by = get_param(request, 'color_by', 'result')
 
         wm = compute_wafer_map_data(df, metadata, param, color_by, x_col, y_col)
@@ -341,7 +371,10 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
                     if dist:
                         response['range_type'] = range_type
                         response.update(dist)  # param/global stats/bin/lot_data
-            return Response(response)
+            # 与带 param 分支（clean_data(result)）同一序列化防线：任何 service
+            # 改动引入 NaN/Inf 时该分支不再直接吐非法 JSON（DRF strict JSON
+            # 下表现为 500）
+            return Response(clean_data(response))
 
         # With param → per-file distribution (no SITE split; one series/file).
         flags = parse_filter_flags(request)
@@ -505,7 +538,17 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
             return Response({'error': 'param_no_valid_data'}, status=400)
 
         chart_config_raw = get_param(request, 'chart_config', '[]')
-        chart_config = chart_config_raw if isinstance(chart_config_raw, list) else json.loads(chart_config_raw)
+        # 客户端可控输入：非法 JSON（GET ?chart_config=limit）或非数组类型
+        # （{"limit":true} / 123）曾直接 json.loads 抛异常 → 500
+        try:
+            chart_config = chart_config_raw if isinstance(chart_config_raw, list) else json.loads(chart_config_raw)
+        except (TypeError, ValueError):
+            chart_config = None
+        if not isinstance(chart_config, list):
+            return Response({
+                'error': 'invalid_chart_config',
+                'detail': 'chart_config 必须是 JSON 数组（如 ["limit","s3","s6"]）',
+            }, status=400)
         range_type = get_param(request, 'range_type', 'RDL')
         # data_only_bin1 narrows the rows after param validation, so the
         # per-unit serial series only contains pass-bin units.
@@ -517,7 +560,10 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
                 df, metadata, param, range_type, chart_config,
                 serial_col=serial_col,
                 # 本端点此前连 parse_filter_flags 都没调，敏感度写死 1.5
-                iqr_multiplier=get_param_float(request, 'iqr_multiplier', 1.5))
+                iqr_multiplier=get_param_float(request, 'iqr_multiplier', 1.5),
+                # CL 语义三端点统一为「用户自定义限」（与 histogram 同口径）
+                custom_low=get_param_float(request, 'custom_low'),
+                custom_high=get_param_float(request, 'custom_high'))
         except TypeError:
             return Response({'error': 'serial_distribution_failed',
                              'detail': '数据列存在重复或格式异常'}, status=400)
@@ -622,9 +668,10 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
             return Response({'error': err}, status=400)
 
         test_time_col = get_param(request, 'test_time_col')
+        # 不在视图层做 float()：服务层 compute_uph 对无效的 manual_test_time_sec
+        # 有 try/except 降级告警（"手动测试时间无效，已忽略"），视图层裸转换
+        # 会让 {"manual_test_time_sec": "abc"} 在容错生效前就 500（防御写错了层）
         manual_test_time_sec = get_param(request, 'manual_test_time_sec')
-        if manual_test_time_sec is not None:
-            manual_test_time_sec = float(manual_test_time_sec)
         result = compute_uph(df, metadata, test_time_col=test_time_col,
                              manual_test_time_sec=manual_test_time_sec)
 

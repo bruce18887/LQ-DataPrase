@@ -24,7 +24,8 @@ from apps.analysis.services.statistics.downsample import (
 
 def compute_serial_distribution_data(df, metadata, param, range_type,
                                      chart_config, serial_col=None,
-                                     iqr_multiplier: float = 1.5):
+                                     iqr_multiplier: float = 1.5,
+                                     custom_low=None, custom_high=None):
     """Build serial-distribution scatter data, continuous serials, and mark
     lines.
 
@@ -142,9 +143,17 @@ def compute_serial_distribution_data(df, metadata, param, range_type,
     # -- Build continuous serials -----------------------------------------
     all_serials = serial_grouped[serial_col].dropna()
     try:
-        all_serials = all_serials.astype(int)
-        continuous_serials = list(
-            range(int(all_serials.min()), int(all_serials.max()) + 1))
+        as_int = all_serials.astype(int)
+        # 整数性校验：astype(int) 对 2.5 这类非整数序列号**截断成功**，而 sv
+        # 的键是原始 2.5 → `s in sv` 永远 False，该 die 的点静默丢失（不是
+        # anchor=1，是整个点没了，2026-09-05 审查 L2）。非整数走原值集合路径：
+        # 不展开 range、不截断，点按原值匹配（前端数值 x 按值映射类别下标）。
+        if (as_int == all_serials).all():
+            all_serials = as_int
+            continuous_serials = list(
+                range(int(all_serials.min()), int(all_serials.max()) + 1))
+        else:
+            raise ValueError
     except (ValueError, TypeError):
         continuous_serials = sorted(
             list(set(all_serials.dropna().tolist())))
@@ -169,7 +178,13 @@ def compute_serial_distribution_data(df, metadata, param, range_type,
     )
     mean_val = stats['mean']
     std_val = stats['std']
-    spec_lower, spec_upper = resolve_limits(range_type, stats)
+    # CL 语义与 histogram 统一为「用户自定义限」：resolve_limits('CL') 的
+    # stats['cl'] 是数据极值，把数据 min/max 画成 "LSL/USL" 虚线是幻影限值
+    #（三端点同语义，2026-09-05 审查 契约#4）；未提供 custom 时才回退。
+    if range_type == 'CL' and custom_low is not None and custom_high is not None:
+        spec_lower, spec_upper = float(custom_low), float(custom_high)
+    else:
+        spec_lower, spec_upper = resolve_limits(range_type, stats)
 
     # -- Y-axis limits with padding ---------------------------------------
     # Computed before the points so out-of-range values can be anchor-flagged

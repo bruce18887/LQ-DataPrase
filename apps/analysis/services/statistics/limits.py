@@ -112,7 +112,12 @@ def detect_fail_data(df: pd.DataFrame, metadata: Dict, ignore_no_limit: bool = T
 
     fail_row_mask = pd.Series([False] * len(df), index=df.index)
     if target_bin_col in df.columns:
-        fail_row_mask = ensure_numeric(df, target_bin_col) != 1
+        bin_num = ensure_numeric(df, target_bin_col)
+        # bin 缺失（NaN）的行不是 fail：`!= 1` 利用 NaN 比较恒 False 的语义把
+        # NaN 判成 fail，而 bin_stats/trend 的分母（value_counts）不含这些行，
+        # 跨端点良率互相矛盾（2026-09-05 审查 L3）。对齐口径：只有「确认不是
+        # 1」的行才 fail，无 bin 结果的行既非 pass 也非 fail。
+        fail_row_mask = bin_num.notna() & (bin_num != 1)
 
     # ``columns`` narrows the over-limit scan (used by the analysis compute
     # path, which only needs the requested test items) — the bin column
