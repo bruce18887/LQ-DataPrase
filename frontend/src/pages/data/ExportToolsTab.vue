@@ -37,7 +37,7 @@ import { ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../../api'
 import { useExport } from '../analysis/composables/useExport'
-import { useAnalysisStore } from '../../stores/analysis'
+import { useSingleTabStore } from '../../stores/analysisTabs'
 import ExportEmptyState from './components/export/ExportEmptyState.vue'
 import ExportParamSelector from './components/export/ExportParamSelector.vue'
 import ExportChartConfig from './components/export/ExportChartConfig.vue'
@@ -48,14 +48,16 @@ const props = defineProps<{
   fileId?: number | null
 }>()
 
-const analysisStore = useAnalysisStore()
+// 导出面板沿用「单文件分析」那一份图表显示与筛选口径（同一子 store），
+// 不会因分析页的 tab 拆分而读到空字段
+const singleTab = useSingleTabStore()
 
 const params = ref<string[]>([])
 const localParams = ref<string[]>([])
 const localSigma = ref(3)
-const chartConfig = ref<string[]>(analysisStore.chartConfig)
-const barWidthPercent = ref(analysisStore.barWidthPercent)
-const ignoreNoLimit = ref(analysisStore.ignoreNoLimit)
+const chartConfig = ref<string[]>(singleTab.chartConfig)
+const barWidthPercent = ref(singleTab.barWidthPercent)
+const ignoreNoLimit = ref(singleTab.ignoreNoLimit)
 
 const currentFileName = computed(() => {
   const f = props.files.find((item) => item.id === props.fileId)
@@ -77,9 +79,9 @@ watch(() => props.fileId, async (fileId) => {
 }, { immediate: true })
 
 // Persist UI config to store
-watch(chartConfig, (val) => { analysisStore.chartConfig = val }, { deep: true })
-watch(barWidthPercent, (val) => { analysisStore.barWidthPercent = val })
-watch(ignoreNoLimit, (val) => { analysisStore.ignoreNoLimit = val })
+watch(chartConfig, (val) => { singleTab.chartConfig = val }, { deep: true })
+watch(barWidthPercent, (val) => { singleTab.barWidthPercent = val })
+watch(ignoreNoLimit, (val) => { singleTab.ignoreNoLimit = val })
 
 function onExportSigma() {
   // silent + 页面提示：保留超时/失败的定制文案，避免与拦截器全局提示重复

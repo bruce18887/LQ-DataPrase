@@ -3,21 +3,15 @@
     <el-row :gutter="12" class="main-row">
       <!-- 左侧配置面板 -->
       <el-col :span="6" class="left-panel">
-        <!-- 文件多选 -->
+        <!-- 文件多选（本 tab 自己的一份，与其他 tab 无关） -->
         <el-card shadow="hover" :body-style="{ padding: '12px' }">
-          <label class="section-label" for="multi-file-select">数据文件 (最少 2 个)</label>
-          <FileSelect
-            id="multi-file-select"
+          <AnalysisFilePicker
             v-model="fileIds"
             :files="files"
+            scope="multi"
             multiple
-            collapse-tags
-            collapse-tags-tooltip
-            placeholder="选择数据文件"
-            size="small"
-            style="width: 100%"
-            show-meta
-            data-file-picker="multi"
+            label="数据文件 (最少 2 个)"
+            block
           />
 
           <!-- 自定义图例名 -->
@@ -39,16 +33,22 @@
 
         <ChartConfigPanel
           variant="multi-file"
-          full-filters
           v-model:chart-config="chartConfig"
           v-model:bar-width-percent="barWidthPercent"
           :bar-width-max="barWidthMax"
+          :range-type="'RDL'"
+        />
+
+        <!-- 数据筛选：多文件图表不消费前端裁剪口径 → 不显示「异常值处理」，
+             敏感度仅作为低 CPK 判定阈值透给 multi_lot -->
+        <DataFilterSection
           v-model:ignore-no-limit="ignoreNoLimit"
           v-model:ignore-no-test-value="ignoreNoTestValue"
           v-model:data-only-bin1="dataOnlyBin1"
           v-model:only-fail-test-item="onlyFailTestItem"
           v-model:only-low-cpk="onlyLowCpk"
-          :range-type="'RDL'"
+          v-model:iqr-multiplier="iqrMultiplier"
+          :show-outlier="false"
         />
 
         <!-- 范围类型 -->
@@ -133,40 +133,43 @@
 <script setup lang="ts">
 import { computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useAnalysisStore } from '../../../stores/analysis'
+import { useMultiTabStore } from '../../../stores/analysisTabs'
 import { useMultiFile } from '../composables/useMultiFile'
 import { getMaxBarWidthPercent, mapLotColorToTheme, SITE_COLORS_8_LIGHT } from '../../../utils/chart-bar'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
 import ChartConfigPanel from './ChartConfigPanel.vue'
+import DataFilterSection from './DataFilterSection.vue'
+import AnalysisFilePicker from './AnalysisFilePicker.vue'
 import ParamSelector from './ParamSelector.vue'
 import MultiFileChart from './MultiFileChart.vue'
 import CircularProgress from '../../../components/common/CircularProgress.vue'
 import ErrorBanner from '../../../components/common/ErrorBanner.vue'
-import FileSelect from '../../../components/common/FileSelect.vue'
 
 const props = defineProps<{ files: any[] }>()
 
-const analysisStore = useAnalysisStore()
+const multiStore = useMultiTabStore()
 const {
-  multiFileIds: fileIds,
-  multiSelectedParam: selectedParam,
-  multiFileNames: fileNames,
-  multiChartConfig: chartConfig,
-  multiBarWidthPercent: barWidthPercent,
-  multiIgnoreNoLimit: ignoreNoLimit,
-  multiRangeType: rangeType,
-  multiIgnoreNoTestValue: ignoreNoTestValue,
-  multiDataOnlyBin1: dataOnlyBin1,
-  multiOnlyFailTestItem: onlyFailTestItem,
-  multiOnlyLowCpk: onlyLowCpk,
-} = storeToRefs(analysisStore)
+  fileIds,
+  selectedParam,
+  fileNames,
+  chartConfig,
+  barWidthPercent,
+  ignoreNoLimit,
+  rangeType,
+  ignoreNoTestValue,
+  dataOnlyBin1,
+  onlyFailTestItem,
+  onlyLowCpk,
+  iqrMultiplier,
+} = storeToRefs(multiStore)
 
-// 数据筛选开关载荷（与单文件 5 开关同口径，2026-08-20）
+// 数据筛选开关载荷（5 开关 + 敏感度：后端 multi_lot 用 iqr 算低 CPK 候选集）
 const multiFilters = computed(() => ({
   ignore_no_test_value: ignoreNoTestValue.value,
   data_only_bin1: dataOnlyBin1.value,
   only_fail_test_item: onlyFailTestItem.value,
   only_low_cpk: onlyLowCpk.value,
+  iqr_multiplier: iqrMultiplier.value,
 }))
 
 const { loading, paramsLoading, paramsError, distError, commonParams, lotData, lotParam, loadCommonParams, loadDistribution } = useMultiFile()
@@ -177,12 +180,10 @@ const barWidthMax = computed(() => {
   const n = lotData.value?.lot_data?.length ?? 0
   return getMaxBarWidthPercent(n > 1 ? n : 1)
 })
-// 文件数变化时把已超上限的柱宽 clamp 并回写 store
+// 文件数变化时把已超上限的柱宽 clamp（barWidthPercent 就是 store 的 ref，
+// 写它即写 store）
 watch(barWidthMax, (max) => {
-  if (barWidthPercent.value > max) {
-    barWidthPercent.value = max
-    analysisStore.multiBarWidthPercent = max
-  }
+  if (barWidthPercent.value > max) barWidthPercent.value = max
 })
 
 // 当前选中文件对象（保持下拉顺序）
@@ -323,8 +324,9 @@ onBeforeUnmount(() => {
   fileDebounce = null
 })
 watch(ignoreNoLimit, () => { reloadParams() })
-// 数据筛选开关变化 → 重载公共参数列表（合并请求携带全部开关）
-watch([ignoreNoTestValue, dataOnlyBin1, onlyFailTestItem, onlyLowCpk], () => { reloadParams() })
+// 数据筛选开关变化 → 重载公共参数列表（合并请求携带全部开关；敏感度只
+// 影响低 CPK 候选集，但同样走这条合并请求）
+watch([ignoreNoTestValue, dataOnlyBin1, onlyFailTestItem, onlyLowCpk, iqrMultiplier], () => { reloadParams() })
 watch(rangeType, () => {
   // 范围类型变化总是需要按新 range_type 重算分布（合并请求用的是默认类型）
   if (selectedParam.value) loadDistribution(fileIds.value, selectedParam.value, rangeType.value, multiFilters.value)
@@ -336,7 +338,7 @@ watch(selectedParam, (p) => {
 })
 
 onMounted(() => {
-  analysisStore.initFromQuery()
+  multiStore.initFromQuery()
   if (fileIds.value.length >= 2) reloadParams()
 })
 </script>

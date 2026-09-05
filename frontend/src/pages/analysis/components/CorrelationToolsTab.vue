@@ -3,27 +3,30 @@
   <AnalysisTabLayout :loading="corrLoading || matrixLoading">
     <!-- 工具栏 -->
     <template #toolbar>
+      <AnalysisFilePicker
+        v-model="fileId"
+        :files="files"
+        scope="correlation"
+        :loading="listLoading"
+      />
       <el-radio-group v-model="viewMode" size="small">
         <el-radio-button value="scatter">散点图</el-radio-button>
         <el-radio-button value="matrix">相关性矩阵</el-radio-button>
       </el-radio-group>
-      <el-switch v-model="ignoreNoLimit" size="small" active-text="Ignore No Limit" style="margin-left: 12px" />
     </template>
 
     <!-- 左侧面板 -->
     <template #left-panel>
-      <!-- 数据筛选（与单文件 5 开关同口径，2026-08-20）：散点/矩阵两种模式共享。
-           切换后参数列表由 AnalysisPage 的 store watch 自动刷新，请求携带全部开关 -->
-      <el-card shadow="hover" :body-style="{ padding: '12px' }">
-        <label class="section-label">数据筛选</label>
-        <div class="corr-filter-box">
-          <el-checkbox v-model="ignoreNoLimit" size="small" data-filter="ignore-no-limit">忽略无Limit</el-checkbox>
-          <el-checkbox v-model="ignoreNoTestValue" size="small" data-filter="ignore-no-test-value">忽略无测试值</el-checkbox>
-          <el-checkbox v-model="dataOnlyBin1" size="small" data-filter="data-only-bin1">仅用Pass数据(Bin1)</el-checkbox>
-          <el-checkbox v-model="onlyFailTestItem" size="small" data-filter="only-fail-test-item">仅显示Fail测试项</el-checkbox>
-          <el-checkbox v-model="onlyLowCpk" size="small" data-filter="only-low-cpk">仅显示低CPK项</el-checkbox>
-        </div>
-      </el-card>
+      <!-- 数据筛选 + 异常值处理：只动本 tab 自己那份（与单文件 tab 互不影响） -->
+      <DataFilterSection
+        v-model:ignore-no-limit="ignoreNoLimit"
+        v-model:ignore-no-test-value="ignoreNoTestValue"
+        v-model:data-only-bin1="dataOnlyBin1"
+        v-model:only-fail-test-item="onlyFailTestItem"
+        v-model:only-low-cpk="onlyLowCpk"
+        v-model:outlier-handling="outlierHandling"
+        v-model:iqr-multiplier="iqrMultiplier"
+      />
 
       <!-- 散点图模式 -->
       <template v-if="viewMode === 'scatter'">
@@ -149,9 +152,13 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import AnalysisTabLayout from './AnalysisTabLayout.vue'
+import AnalysisFilePicker from './AnalysisFilePicker.vue'
+import DataFilterSection from './DataFilterSection.vue'
 import { useCorrelation } from '../composables/useCorrelation'
 import { useCorrelationMatrix } from '../composables/useCorrelationMatrix'
+import { useTabFileParams } from '../composables/useTabFileParams'
 import { buildCorrelationMatrixOption } from '../composables/matrix-option'
 import CorrelationScatterAxisCard from './CorrelationScatterAxisCard.vue'
 import ErrorBanner from '../../../components/common/ErrorBanner.vue'
@@ -159,52 +166,52 @@ import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
 import { minMax } from '../../../utils/minmax'
 import { formatAxisValue, getSiteColors8 } from '../../../utils/chart-bar'
-import { useAnalysisStore } from '../../../stores/analysis'
+import { useCorrelationTabStore } from '../../../stores/analysisTabs'
+import type { DataFile } from '../../../types'
 import OutlierHintBar from './OutlierHintBar.vue'
 
 const props = defineProps<{
-  fileId: number | null
-  params: string[]
-  /** 本 tab 是否处于激活态（AnalysisPage 传入）：隐藏时不重发全量计算 */
+  /** 文件列表（页面统一拉）；本 tab 自己的选择与开关存在相关性子 store */
+  files: DataFile[]
+  /** 本 tab 是否处于激活态：隐藏时不重发全量计算 */
   active?: boolean
 }>()
 
-const analysisStore = useAnalysisStore()
 const { colors, isDark } = useEChartsTheme()
+
+// 本 tab 的文件→参数列表 + 数据筛选/异常值（与单文件 tab 同构但完全独立）
+const {
+  fileId,
+  params,
+  loading: listLoading,
+  ignoreNoLimit,
+  ignoreNoTestValue,
+  dataOnlyBin1,
+  onlyFailTestItem,
+  onlyLowCpk,
+  outlierHandling,
+  iqrMultiplier,
+} = storeToRefs(useCorrelationTabStore())
 
 // View mode
 const viewMode = ref<'scatter' | 'matrix'>('scatter')
-const ignoreNoLimit = ref(analysisStore.ignoreNoLimit)
-watch(ignoreNoLimit, (val) => { analysisStore.ignoreNoLimit = val })
-// 数据筛选开关（与单文件 store 5 开关同源：AnalysisPage 的 watch 会联动
-// 刷新参数列表；本页 watch 只负责重发散点/矩阵请求）
-const ignoreNoTestValue = ref(analysisStore.ignoreNoTestValue)
-const dataOnlyBin1 = ref(analysisStore.dataOnlyBin1)
-const onlyFailTestItem = ref(analysisStore.onlyFailTestItem)
-const onlyLowCpk = ref(analysisStore.onlyLowCpk)
-for (const [local, key] of [
-  [ignoreNoTestValue, 'ignoreNoTestValue'],
-  [dataOnlyBin1, 'dataOnlyBin1'],
-  [onlyFailTestItem, 'onlyFailTestItem'],
-  [onlyLowCpk, 'onlyLowCpk'],
-] as const) {
-  watch(local, (val) => { (analysisStore as any)[key] = val })
-  watch(() => (analysisStore as any)[key], (val) => { local.value = val })
-}
 
-/** 散点/矩阵请求携带的筛选载荷 */
+/** 散点/矩阵请求携带的筛选载荷（也是拉参数列表的同一批开关，口径不会分叉） */
 const corrFlags = computed(() => ({
   ignore_no_limit: ignoreNoLimit.value,
   ignore_no_test_value: ignoreNoTestValue.value,
   data_only_bin1: dataOnlyBin1.value,
   only_fail_test_item: onlyFailTestItem.value,
   only_low_cpk: onlyLowCpk.value,
-  iqr_multiplier: analysisStore.iqrMultiplier,
+  iqr_multiplier: iqrMultiplier.value,
 }))
 
-const outlierHandling = ref(analysisStore.outlierHandling)
-watch(outlierHandling, (val) => { analysisStore.outlierHandling = val })
-watch(() => analysisStore.outlierHandling, (val) => { outlierHandling.value = val })
+// 本 tab 的文件→参数列表（必须排在 corrFlags 之后：watch 建立时就会读一次）
+useTabFileParams({
+  ctx: { fileId, params, loading: listLoading },
+  files: computed(() => props.files),
+  filters: () => corrFlags.value,
+})
 
 // ===== Scatter mode =====
 const localX = ref('')
@@ -216,7 +223,7 @@ const sigmaX = ref(3); const sigmaY = ref(3)
 const customMinX = ref(0); const customMaxX = ref(0)
 const customMinY = ref(0); const customMaxY = ref(0)
 
-const { corrLoading, corrResult, corrError, loadCorrelation } = useCorrelation(() => props.fileId)
+const { corrLoading, corrResult, corrError, loadCorrelation } = useCorrelation(() => fileId.value)
 
 const rColorClass = computed(() => {
   const r = Math.abs(corrResult.value?.pearson_r ?? 0)
@@ -274,11 +281,11 @@ function reloadCorrelation() {
   if (localX.value && localY.value) loadCorrelation(localX.value, localY.value, corrFlags.value)
 }
 
-// 筛选开关变化 → 重发散点（X/Y 已选时）+ 矩阵参数与过滤后列表求交集修剪
-// 本 tab 隐藏时不重发（全文件重算）：记一笔欠账，切回来再补
+// 筛选开关与敏感度变化 → 重发散点（X/Y 已选时）+ 矩阵参数与过滤后列表求交集
+// 修剪。本 tab 隐藏时不重发（全文件重算）：记一笔欠账，切回来再补。
 let reloadOwed = false
-watch([ignoreNoTestValue, dataOnlyBin1, onlyFailTestItem, onlyLowCpk, ignoreNoLimit], () => {
-  // props.params 由 AnalysisPage 联动刷新；本页修剪过期选中项防 400
+watch([ignoreNoTestValue, dataOnlyBin1, onlyFailTestItem, onlyLowCpk, ignoreNoLimit, iqrMultiplier], () => {
+  // 参数列表由本 tab 的 useTabFileParams 联动刷新；本页修剪过期选中项防 400
   if (props.active === false) {
     reloadOwed = true
     trimMatrixParams()
@@ -403,23 +410,23 @@ watch(() => corrResult.value, (data) => {
 
 // ===== Matrix mode =====
 const selectedMatrixParams = ref<string[]>([])
-const { loading: matrixLoading, matrixData, loadCorrelationMatrix } = useCorrelationMatrix(() => props.fileId)
+const { loading: matrixLoading, matrixData, loadCorrelationMatrix } = useCorrelationMatrix(() => fileId.value)
 
 /** 矩阵参数与当前（可能已筛选收缩的）参数列表求交集——防过期项 400 */
 function trimMatrixParams() {
   if (selectedMatrixParams.value.length === 0) return
-  const valid = new Set(props.params)
+  const valid = new Set(params.value)
   const kept = selectedMatrixParams.value.filter((p) => valid.has(p))
   if (kept.length !== selectedMatrixParams.value.length) {
     selectedMatrixParams.value = kept
   }
 }
 
-// Initialize matrix params when props.params changes（含筛选开关导致的列表收缩）
+// Initialize matrix params when the param list changes（含筛选开关导致的列表收缩）
 // 默认只取前 MATRIX_DEFAULT_MAX 项：热力图 N×N 每格带文字标签，全选 180 项
 // 就是 32400 格，首屏卡数秒。需要更多用「全选」显式加压。
 const MATRIX_DEFAULT_MAX = 12
-watch(() => props.params, (newParams) => {
+watch(params, (newParams) => {
   if (newParams.length > 0 && selectedMatrixParams.value.length === 0) {
     selectedMatrixParams.value = newParams.slice(0, MATRIX_DEFAULT_MAX)
   } else {
@@ -428,7 +435,7 @@ watch(() => props.params, (newParams) => {
 }, { immediate: true })
 
 function onCalculateMatrix() {
-  if (!props.fileId) return
+  if (!fileId.value) return
   loadCorrelationMatrix(
     selectedMatrixParams.value.length > 0 ? selectedMatrixParams.value : undefined,
     corrFlags.value,
@@ -528,22 +535,6 @@ void matrixChartRef
 
 .matrix-param-header .section-label {
   margin-bottom: 0;
-}
-
-.corr-filter-box {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 12px;
-}
-
-.corr-filter-box :deep(.el-checkbox) {
-  margin-right: 0;
-  height: 24px;
-}
-
-.corr-filter-box :deep(.el-checkbox__label) {
-  font-size: 12px;
-  padding-left: 4px;
 }
 
 .matrix-param-actions {

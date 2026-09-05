@@ -1,6 +1,12 @@
 <template>
   <AnalysisTabLayout :loading="histLoading" class="single-param-tab">
     <template #toolbar>
+      <AnalysisFilePicker
+        v-model="fileId"
+        :files="files"
+        scope="single"
+        :loading="tabLoading"
+      />
       <el-radio-group v-model="chartMode" size="small">
         <el-radio-button value="distribution">数值分布</el-radio-button>
         <el-radio-button value="serial">序列分布</el-radio-button>
@@ -52,13 +58,18 @@
         v-model:bar-width-percent="barWidthPercent"
         :bar-width-max="barWidthMax"
         v-model:bar-overlap-percent="barOverlapPercent"
-        v-model:ignore-no-limit="ignoreNoLimit"
         v-model:custom-low="customLow"
         v-model:custom-high="customHigh"
+      />
+      <!-- 数据筛选与异常值处理：只动本 tab 的那份状态 -->
+      <DataFilterSection
+        v-model:ignore-no-limit="ignoreNoLimit"
         v-model:ignore-no-test-value="ignoreNoTestValue"
         v-model:data-only-bin1="dataOnlyBin1"
         v-model:only-fail-test-item="onlyFailTestItem"
         v-model:only-low-cpk="onlyLowCpk"
+        v-model:outlier-handling="outlierHandling"
+        v-model:iqr-multiplier="iqrMultiplier"
       />
       <RangeComparisonTable :range-table-data="rangeTableData" :range-type="rangeType" />
       <SiteStatsTable :site-stats="siteStats" :site-stats-error="siteStatsError" />
@@ -121,7 +132,7 @@
         </div>
         <div v-if="showQQPlot" :key="`qq-${localSelectedParam}`" class="chart-wrapper chart-wrapper--bottom">
           <QQPlotChart
-            :file-id="props.fileId"
+            :file-id="fileId"
             :param="localSelectedParam"
             :visible="showQQPlot"
             :result="qqResult"
@@ -178,9 +189,12 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useAnalysisStore } from '../../../stores/analysis'
+import { useSingleTabStore } from '../../../stores/analysisTabs'
+import type { DataFile } from '../../../types'
 import { getMaxBarWidthPercent } from '../../../utils/chart-bar'
 import ChartConfigPanel from './ChartConfigPanel.vue'
+import DataFilterSection from './DataFilterSection.vue'
+import AnalysisFilePicker from './AnalysisFilePicker.vue'
 import RangeComparisonTable from './RangeComparisonTable.vue'
 import SiteStatsTable from './SiteStatsTable.vue'
 import ParamSelector from './ParamSelector.vue'
@@ -198,22 +212,24 @@ import { useSerialDistribution } from '../composables/useSerialDistribution'
 import { useSiteStats } from '../composables/useSiteStats'
 import { useBoxPlot } from '../composables/useBoxPlot'
 import { useQQPlot } from '../composables/useQQPlot'
+import { useTabFileParams } from '../composables/useTabFileParams'
 
 const props = defineProps<{
-  fileId: number | null
-  params: string[]
-  loading: boolean
+  /** 文件列表（页面统一拉一次给 4 个 tab；本 tab 自己的选择存在单文件 store） */
+  files: DataFile[]
 }>()
 
-const localSelectedParam = defineModel<string>('selectedParam', { default: '' })
-
 // Chart configuration state
-// 直接取 store 的 ref（storeToRefs），本组件的读写就是 store 的读写。
+// 直接取本 tab 子 store 的 ref（storeToRefs），本组件的读写就是 store 的读写。
 // 之前这里是 14 个 `ref(analysisStore.x)` 本地快照 + 逐个 watch 回写，
 // store→组件方向只有 outlierHandling 补了，于是页头改「敏感度」后
 // useHistogram 仍用挂载时快照的 1.5 发请求：界面显示宽松 3.0x，
 // 后端却按严格 1.5x 算异常值边界。
 const {
+  fileId,
+  params,
+  selectedParam: localSelectedParam,
+  loading: tabLoading,
   chartMode,
   rangeType,
   chartConfig,
@@ -228,7 +244,21 @@ const {
   customHigh,
   outlierHandling,
   iqrMultiplier,
-} = storeToRefs(useAnalysisStore())
+} = storeToRefs(useSingleTabStore())
+
+// 本 tab 的文件→参数列表（与晶圆图/相关性 tab 互不影响）
+useTabFileParams({
+  ctx: { fileId, params, loading: tabLoading, selectedParam: localSelectedParam },
+  files: computed(() => props.files),
+  filters: () => ({
+    ignore_no_limit: ignoreNoLimit.value,
+    ignore_no_test_value: ignoreNoTestValue.value,
+    data_only_bin1: dataOnlyBin1.value,
+    only_fail_test_item: onlyFailTestItem.value,
+    only_low_cpk: onlyLowCpk.value,
+    iqr_multiplier: iqrMultiplier.value,
+  }),
+})
 // 序列列手动选择（空串 = 自动检测）；多候选文件（Serial_No + Dut_No）由
 // SerialChart 选择器写入，文件切换时重置回自动检测
 const serialCol = ref('')
@@ -242,7 +272,7 @@ const {
   histError,
   loadHistogram,
 } = useHistogram(
-  () => props.fileId,
+  () => fileId.value,
   localSelectedParam,
   ignoreNoLimit,
   rangeType,
@@ -274,14 +304,15 @@ const {
   serialError,
   loadSerialDistribution,
 } = useSerialDistribution(
-  () => props.fileId,
+  () => fileId.value,
   localSelectedParam,
   chartMode,
   chartConfig,
   rangeType,
-  computed(() => props.params),
+  params,
   dataOnlyBin1,
   serialCol,
+  iqrMultiplier,
 )
 
 // Composable: Site Stats
@@ -290,7 +321,7 @@ const {
   siteStatsError,
   loadSiteStats,
 } = useSiteStats(
-  () => props.fileId,
+  () => fileId.value,
   localSelectedParam,
   rangeType,
   dataOnlyBin1,
@@ -310,11 +341,12 @@ const {
   boxPlotError,
   loading: boxPlotLoading,
 } = useBoxPlot(
-  () => props.fileId,
+  () => fileId.value,
   localSelectedParam,
   groupBy,
   showBoxPlot,
   dataOnlyBin1,
+  iqrMultiplier,
 )
 const currentBoxPlotData = computed(() => {
   if (!boxPlotData.value || !localSelectedParam.value) return null
@@ -332,10 +364,11 @@ const {
   qqError,
   loadQQPlot,
 } = useQQPlot(
-  () => props.fileId,
+  () => fileId.value,
   localSelectedParam,
   showQQPlot,
   dataOnlyBin1,
+  iqrMultiplier,
 )
 
 // ========== Store sync ==========
@@ -363,31 +396,28 @@ watch(histResult, () => {
   }
 })
 
-// When the file changes, the parent component is responsible for resetting
-// the selectedParam (see AnalysisPage.onFileChange). This watcher is a
-// defense-in-depth fallback: if a parent path forgets to reset it, we
-// don't carry the stale value into the new file's chart APIs.
-watch(() => props.fileId, () => {
-  localSelectedParam.value = ''
+// 换文件时本 tab 的参数由 useTabFileParams 重新校验/回退首项（它拉新列表时
+// 已把不在列表里的旧参数丢掉）；序列列选择是文件局部的配置，必须重置回自动检测
+watch(fileId, () => {
   serialCol.value = ''
 })
 
 // ========== Param navigation ==========
 function prevParam() {
-  const idx = props.params.indexOf(localSelectedParam.value)
+  const idx = params.value.indexOf(localSelectedParam.value)
   if (idx > 0) {
-    localSelectedParam.value = props.params[idx - 1]
-  } else if (props.params.length > 0) {
-    localSelectedParam.value = props.params[props.params.length - 1]
+    localSelectedParam.value = params.value[idx - 1]
+  } else if (params.value.length > 0) {
+    localSelectedParam.value = params.value[params.value.length - 1]
   }
 }
 
 function nextParam() {
-  const idx = props.params.indexOf(localSelectedParam.value)
-  if (idx < props.params.length - 1) {
-    localSelectedParam.value = props.params[idx + 1]
-  } else if (props.params.length > 0) {
-    localSelectedParam.value = props.params[0]
+  const idx = params.value.indexOf(localSelectedParam.value)
+  if (idx < params.value.length - 1) {
+    localSelectedParam.value = params.value[idx + 1]
+  } else if (params.value.length > 0) {
+    localSelectedParam.value = params.value[0]
   }
 }
 </script>

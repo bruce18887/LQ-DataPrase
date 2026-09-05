@@ -1,7 +1,7 @@
 <template>
   <el-card shadow="hover" :body-style="{ padding: '12px' }">
     <div class="config-header">
-      <span class="config-title">⚙️ 图表配置</span>
+      <span class="config-title">⚙️ 图表显示</span>
       <el-button
         v-if="variant === 'full'"
         link
@@ -96,54 +96,7 @@
       </div>
     </el-collapse-transition>
 
-    <!-- 数据筛选：忽略无Limit 两种变体都显示，其余四项仅单参数完整版 -->
-    <div class="config-section filter-section">
-      <div class="section-label">数据筛选</div>
-      <div class="filter-checkboxes">
-        <el-checkbox
-          :model-value="ignoreNoLimit"
-          size="small"
-          data-filter="ignore-no-limit"
-          @change="onIgnoreNoLimitChange"
-        >
-          忽略无Limit
-        </el-checkbox>
-        <template v-if="variant === 'full' || fullFilters">
-          <el-checkbox
-            :model-value="ignoreNoTestValue"
-            size="small"
-            data-filter="ignore-no-test-value"
-            @change="onIgnoreNoTestValueChange"
-          >
-            忽略无测试值
-          </el-checkbox>
-          <el-checkbox
-            :model-value="dataOnlyBin1"
-            size="small"
-            data-filter="data-only-bin1"
-            @change="onDataOnlyBin1Change"
-          >
-            仅用Pass数据(Bin1)
-          </el-checkbox>
-          <el-checkbox
-            :model-value="onlyFailTestItem"
-            size="small"
-            data-filter="only-fail-test-item"
-            @change="onOnlyFailTestItemChange"
-          >
-            仅显示Fail测试项
-          </el-checkbox>
-          <el-checkbox
-            :model-value="onlyLowCpk"
-            size="small"
-            data-filter="only-low-cpk"
-            @change="onOnlyLowCpkChange"
-          >
-            仅显示低CPK项
-          </el-checkbox>
-        </template>
-      </div>
-    </div>
+    <!-- 数据筛选与异常值处理已移到 DataFilterSection（每 tab 一份，2026-09-05） -->
   </el-card>
 </template>
 
@@ -159,27 +112,14 @@ interface Props {
   barWidthMax?: number
   /** 柱体重合度 0-100（barGap 负值）：重合越高柱组越窄、柱宽上限越高 */
   barOverlapPercent?: number
-  ignoreNoLimit: boolean
   customLow?: number | null
   customHigh?: number | null
-  /** 数据筛选开关（默认仅单参数完整版显示；multi-file 变体传 full-filters 开启全部 5 个） */
-  ignoreNoTestValue?: boolean
-  dataOnlyBin1?: boolean
-  onlyFailTestItem?: boolean
-  onlyLowCpk?: boolean
-  /** 多文件/其它变体强制显示完整数据筛选区（2026-08-20） */
-  fullFilters?: boolean
-  /** 'full' = 单参数分析完整配置；'multi-file' = 多文件分析阉割版（仅 Limit + 柱宽 + 忽略无Limit） */
+  /** 'full' = 单参数分析完整配置；'multi-file' = 多文件分析阉割版（仅 Limit + 柱宽） */
   variant?: 'full' | 'multi-file'
 }
 
 const props = withDefaults(defineProps<Props>(), {
   variant: 'full',
-  ignoreNoTestValue: false,
-  dataOnlyBin1: false,
-  onlyFailTestItem: false,
-  onlyLowCpk: false,
-  fullFilters: false,
   barWidthMax: 100,
   barOverlapPercent: 5,
 })
@@ -189,13 +129,8 @@ const emit = defineEmits<{
   (e: 'update:rangeType', val: string): void
   (e: 'update:barWidthPercent', val: number): void
   (e: 'update:barOverlapPercent', val: number): void
-  (e: 'update:ignoreNoLimit', val: boolean): void
   (e: 'update:customLow', val: number | null): void
   (e: 'update:customHigh', val: number | null): void
-  (e: 'update:ignoreNoTestValue', val: boolean): void
-  (e: 'update:dataOnlyBin1', val: boolean): void
-  (e: 'update:onlyFailTestItem', val: boolean): void
-  (e: 'update:onlyLowCpk', val: boolean): void
 }>()
 
 const showMore = ref(false)
@@ -217,26 +152,6 @@ function onBarWidthChange(val: number) {
 
 function onBarOverlapChange(val: number) {
   emit('update:barOverlapPercent', val)
-}
-
-function onIgnoreNoLimitChange(val: boolean) {
-  emit('update:ignoreNoLimit', val)
-}
-
-function onIgnoreNoTestValueChange(val: boolean) {
-  emit('update:ignoreNoTestValue', val)
-}
-
-function onDataOnlyBin1Change(val: boolean) {
-  emit('update:dataOnlyBin1', val)
-}
-
-function onOnlyFailTestItemChange(val: boolean) {
-  emit('update:onlyFailTestItem', val)
-}
-
-function onOnlyLowCpkChange(val: boolean) {
-  emit('update:onlyLowCpk', val)
 }
 
 function onCustomLowChange(val: number | null) {
@@ -319,22 +234,6 @@ function onCustomHighChange(val: number | null) {
   border-radius: 4px;
   padding: 8px;
   margin: -4px -4px 10px -4px;
-}
-
-.filter-checkboxes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 12px;
-}
-
-.filter-checkboxes :deep(.el-checkbox) {
-  margin-right: 0;
-  height: 24px;
-}
-
-.filter-checkboxes :deep(.el-checkbox__label) {
-  font-size: 12px;
-  padding-left: 4px;
 }
 
 .custom-limit-inputs {

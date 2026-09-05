@@ -1,15 +1,15 @@
 import { type Ref, ref, watch } from 'vue'
 import api from '../../../api'
 import { useAsyncData } from '../../../composables/useAsyncData'
-import { useAnalysisStore } from '../../../stores/analysis'
 
 export function useQQPlot(
   getFileId: () => number | null,
   selectedParam: Ref<string>,
   enabled?: Ref<boolean>,
   dataOnlyBin1: Ref<boolean> = ref(false),
+  // 敏感度由调用方 tab 自己持有（不再从全局 store 直读）
+  iqrMultiplier: Ref<number> = ref(1.5),
 ) {
-  const analysisStore = useAnalysisStore()
   const { loading: qqLoading, data: qqResult, error: qqError, run } = useAsyncData<any>({
     silent: true,
   })
@@ -31,10 +31,10 @@ export function useQQPlot(
       file_id: fileId,
       param: selectedParam.value,
       data_only_bin1: dataOnlyBin1.value,
-      // 敏感度在**发请求时**实时读 store，不是挂载时快照——2026-09-02
+      // 敏感度在**发请求时**实时读 ref，不是挂载时快照——2026-09-02
       // 批次 3 修的就是「快照导致改了敏感度仍按 1.5 发请求」。后端
       // qqplot 此前忽略该字段（写死 1.5），现已贯穿到 detect_outliers_iqr。
-      iqr_multiplier: analysisStore.iqrMultiplier,
+      iqr_multiplier: iqrMultiplier.value,
     }))
   }
 
@@ -42,7 +42,7 @@ export function useQQPlot(
   watch(selectedParam, () => loadQQPlot())
   // 敏感度变化 → 重发（与 useHistogram 的 watch(iqrMultiplier) 同口径）：
   // 否则用户调完敏感度，直方图的异常值集合变了而 QQ 图滞留旧值。
-  watch(() => analysisStore.iqrMultiplier, () => loadQQPlot())
+  watch(iqrMultiplier, () => loadQQPlot())
   // Row-level filter change: reload with the narrowed frame (same pattern
   // as useHistogram). loadQQPlot is a no-op when not enabled.
   watch(dataOnlyBin1, () => loadQQPlot())

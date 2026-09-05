@@ -25,6 +25,8 @@ export interface MultiFilterFlags {
   data_only_bin1?: boolean
   only_fail_test_item?: boolean
   only_low_cpk?: boolean
+  /** 敏感度（IQR 倍数）：后端用它算「仅显示低CPK项」候选集（分布数值不受影响） */
+  iqr_multiplier?: number
 }
 
 export function useMultiFile() {

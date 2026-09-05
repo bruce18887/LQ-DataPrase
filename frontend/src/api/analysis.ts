@@ -12,6 +12,10 @@ export const analysisApi = {
   getWaferMap(fileId: number, param?: string) {
     return api.get('/analysis/wafer_map/', { params: { file_id: fileId, param } })
   },
+  /** 晶圆图主路径：POST 带 color_by（按结果/Site/分区），端点两种方法都收 */
+  postWaferMap(payload: Record<string, any>) {
+    return api.post('/analysis/wafer_map/', payload)
+  },
   getSerialDistribution(fileId: number, param: string) {
     return api.get('/analysis/serial_distribution/', { params: { file_id: fileId, param } })
   },
