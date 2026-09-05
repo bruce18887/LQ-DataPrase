@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
 import { expectChartRendered, waitLoadingGone } from '../helpers/charts'
-import { selectAnalysisFile, listParams, selectParam } from '../helpers/params'
+import { selectAnalysisFile, listParams, selectParam, pickTabFileAndWaitCompute } from '../helpers/params'
 import { RECOMMENDED } from '../fixtures/test-data'
 
 /**
@@ -129,10 +129,17 @@ test.describe('@p1 自定义限值重算 CPK', { tag: ['@p1', '@analysis'] }, ()
 
   test('二次修改 limit 值后 CPK 重新计算（回归：第二次 change 不生效）', async ({ page }) => {
     await gotoApp(page, '/analysis')
-    await selectAnalysisFile(page, RECOMMENDED.analysis)
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
     await waitLoadingGone(page.locator(SINGLE))
     await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
+
+    // 切文件：必须等到新文件自己的计算请求完成再读表 —— 切换窗口内 UI 仍显示
+    // 上一个文件（自动选中的列表首项，受 DB 残留影响）的范围表，实测读到过
+    // 恒定列的 1/1 → span=0 → high1==high2 假红（2026-09-05 探针实证）。
+    // selectAnalysisFile = pickTabFileAndWaitCompute 的单文件别名，已选同一
+    // 文件时不会空等。
+    await selectAnalysisFile(page, RECOMMENDED.analysis)
+    await waitLoadingGone(page.locator(SINGLE))
 
     // 从「Data Range」行读取数据范围
     const drRow = page.locator(`${SINGLE} .left-panel .el-table__row`, { hasText: 'Data Range' }).first()

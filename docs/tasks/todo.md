@@ -780,5 +780,13 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
   runserver**，`reuseExistingServer: !CI` 静默复用它 → e2e 后端连到用户目录库 → 文件
   id 存在但磁盘无对应文件 → 38 条用例 `file_not_found_or_parse_failed`。一开始被当成
   代码回归，实际是 todo 2026-09-02 条目已经预警过的同一个坑。
-- [ ] 待确认：本轮 e2e 全量账目（清理端口后重跑）——失败项必须回到已知的 5 条存量
-      （boxplot-bool-params×2、file-switch-param-reset、wafermap-×2 负载 flake）以内
+- [x] 待确认 → 已结清（清理端口后重跑全量）：分析页套件 **117 passed / 5 failed**，失败项
+      与批次 1 基线完全同一组存量（boxplot-bool-params×2、file-switch-param-reset、
+      wafermap-×2 负载 flake，后两条隔离复跑 5 passed）；期间多出的两条假红
+      （custom-limit-cpk:130、chart-filter-switches:271）已定性为「切文件后读旧文件数据」
+      竞态 —— 切换窗口内范围表/参数列表仍是上一个文件（残留 a.csv 恒定列 1/1 →
+      span=0 → 假红），基线时推荐文件恰好是列表首项所以从不暴露；已用
+      `waitForNextHistogramCompute`/`pickTabFileAndWaitCompute`（helpers/params.ts）修掉并
+      全量转绿。消费方套件（dashboard+exports+smoke+data）106 passed / 7 skipped / 0 failed；
+      补审计新增 @theme 对比度用例揪出 light 下 `.sensitivity-hint` 用 --text-3 仅 2.54:1，
+      已随 DataFilterSection/.wafer-note 改用 --text-2。详见 lessons 2026-09-05。

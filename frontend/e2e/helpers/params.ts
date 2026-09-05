@@ -49,9 +49,16 @@ function paramSelect(page: Page) {
   return page.locator('.param-selector .el-select')
 }
 
-/** 选择数据分析页的数据文件（不传则选第一个） */
+/**
+ * 选择数据分析页的数据文件（不传则选第一项）。
+ *
+ * 等到新文件自己的计算请求发出后才返回：切换窗口内 UI 仍显示上一个文件的
+ * 图表/范围表（遮罩不在，waitLoadingGone 拦不住），直接读值会拿到旧数据。
+ * 注意：若调用前初始自动选中的文件尚未发出计算请求，这里等到的是它的
+ * 计算请求 —— 需要绝对严谨的用例请先等初始加载完再选（见 custom-limit-cpk）。
+ */
 export async function selectAnalysisFile(page: Page, labelSubstring?: string) {
-  await pickTabFile(page, 'single', labelSubstring)
+  await pickTabFileAndWaitCompute(page, 'single', labelSubstring)
 }
 
 /**
@@ -105,7 +112,9 @@ export async function listParams(page: Page): Promise<string[]> {
   return texts
 }
 
-/** 选中指定参数（利用 filterable 输入过滤后点击） */
+/**
+ * 选中指定参数（利用 filterable 输入过滤后点击）
+ */
 export async function selectParam(page: Page, name: string) {
   const sel = paramSelect(page)
   await openElSelect(sel)
@@ -114,6 +123,48 @@ export async function selectParam(page: Page, name: string) {
   await input.fill(name)
   const options = visibleOptions(page, 'param-select-dropdown')
   await options.filter({ hasText: name }).first().click()
+}
+
+/**
+ * 等待本 tab 的**下一次** histogram 计算请求（带 params 的 POST）完成。
+ *
+ * 为什么需要：切文件后 UI 在新文件的计算响应到达前仍显示上一个文件的图表/
+ * 范围表（产品行为，非 bug），waitLoadingGone 只看遮罩，遮罩此刻根本不在。
+ * 实测（2026-09-05 探针）：选中 DA35 后 Data Range 短暂显示残留文件 a.csv 的
+ * 恒定列范围 1/1，凡在此窗口读数值/列表的用例都会拿到旧数据。
+ *
+ * 前提：调用前初始自动选中的文件已加载完（先 waitLoadingGone/expectChartRendered），
+ * 否则可能等到的是初始文件的计算请求。配对用法：
+ *   const computeP = waitForNextHistogramCompute(page)
+ *   await selectAnalysisFile(page, NAME)
+ *   await computeP
+ *   await waitLoadingGone(...)
+ */
+export function waitForNextHistogramCompute(page: Page) {
+  return page.waitForRequest((r) =>
+    r.url().includes('/analysis/histogram/') &&
+    r.method() === 'POST' &&
+    (r.postData() || '').includes('"params":['),
+  )
+}
+
+/**
+ * 在指定 tab 选文件**并等到新文件自己的计算请求完成**。
+ *
+ * 目标文件已是当前选中项时直接返回（选已选中项不触发新请求，等会超时）。
+ * 之后仍应跟一次 waitLoadingGone 让计算响应落图。多选 tab 不适用（多选
+ * 勾选不逐个触发计算）。
+ */
+export async function pickTabFileAndWaitCompute(
+  page: Page,
+  scope: 'single' | 'wafer' | 'correlation',
+  labelSubstring?: string,
+) {
+  const before = (await filePicker(page, scope).innerText()).trim()
+  if (labelSubstring && before.includes(labelSubstring)) return
+  const computeP = waitForNextHistogramCompute(page)
+  await pickTabFile(page, scope, labelSubstring)
+  await computeP
 }
 
 /**

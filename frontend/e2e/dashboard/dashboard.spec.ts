@@ -516,10 +516,20 @@ test.describe('仪表板', { tag: ['@dashboard'] }, () => {
     }
 
     const paramName = (await bodyRows.first().locator('.cell-param').innerText()).trim()
+    // 跳转前记下仪表板正在看的数据文件：2026-09-05 起每个 tab 各持一份文件
+    // 选择，跳转必须精确写进「单文件分析」那一份，不能页头共享了就算对
+    const dashFile = (await page.locator('.single-head .el-select').first().innerText()).trim()
     await bodyRows.first().click()
 
     // 跳转到数据分析页
     await page.waitForURL(/\/analysis/, { timeout: 15_000 })
+    // 落在单文件分析 tab，且该 tab 的文件就是仪表板那份
+    await expect(page.getByRole('tab', { name: /单文件分析/ })).toHaveClass(/is-active/)
+    // 「请选择数据文件」是占位符不是真文件（表格有行时不应出现，但别拿它当断言依据）
+    if (dashFile && !dashFile.includes('请选择')) {
+      await expect(page.locator('[data-file-picker="single"]'), `单文件 tab 应选中仪表板的文件（${dashFile}）`)
+        .toContainText(dashFile.slice(0, 12), { timeout: 20_000 })
+    }
     // 参数选择器应选中参数（选中值渲染为 select 文本而非 input value）。
     // 若点击的参数是非数值列（metadata 有占位限值但分析页 histogram 不返回），
     // 会自愈回退到首个可分析参数——两种都算跳转成功。
