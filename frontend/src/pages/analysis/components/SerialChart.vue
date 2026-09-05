@@ -66,6 +66,16 @@ function buildOption() {
   const serialCol = d.serial_col || 'Serial'
   const continuousSerials = d.continuous_serials || []
 
+  // category 轴上数值 x 会被 ECharts 当作**索引**而不是类别名匹配：序列号从
+  // 1 开始（本项目 e2e fixture 即 Serial_No=1..6）时每个点右移一格，末颗 die
+  // 画出绘图区外；有序号空洞时错位量 = 最小序列号，tooltip 的真实序列号与
+  // 轴标签互相矛盾。统一映射 serial → 轴下标；字符串序列号路径本就按 label
+  // 匹配，不走此映射。映射不到的值（不应发生）保持原值兜底。
+  const serialIndex = new Map<number, number>()
+  continuousSerials.forEach((s: unknown, i: number) => {
+    if (typeof s === 'number') serialIndex.set(s, i)
+  })
+
   // Apply outlier clipping to y-axis (must precede point mapping: anchored
   // points are placed on the *visible* axis edges)
   const outlierInfo = d.outlier_info
@@ -93,9 +103,11 @@ function buildOption() {
     const fail = (isFail ?? 0) === 1
     if (a === 1) return null
     const y = a === 2 ? (yAxisMax ?? 0) : (a === 3 ? (yAxisMin ?? 0) : v)
+    const x = typeof s === 'number' ? (serialIndex.get(s) ?? s) : s
     return {
-      value: [s, y, isFail ?? 0, a],
+      value: [x, y, isFail ?? 0, a],
       realY: v,
+      realSerial: s,
       isFail: fail,
       anchor: a,
     }
@@ -144,7 +156,8 @@ function buildOption() {
       formatter: (p: any) => {
         const pt = p.data || {}
         const anchor = pt.anchor ?? 0
-        let html = `${p.seriesName}<br/>${serialCol}: ${p.value[0]}<br/>结果: ${pt.isFail ? 'FAIL' : 'PASS'}`
+        // value[0] 是轴下标（category 映射），真实序列号在 realSerial
+        let html = `${p.seriesName}<br/>${serialCol}: ${pt.realSerial ?? p.value[0]}<br/>结果: ${pt.isFail ? 'FAIL' : 'PASS'}`
         html += `<br/>Value: ${Number(pt.realY ?? p.value[1]).toFixed(4)}`
         if (anchor === 2) html += '<br/>超出显示范围（真实值偏大）'
         if (anchor === 3) html += '<br/>超出显示范围（真实值偏小）'

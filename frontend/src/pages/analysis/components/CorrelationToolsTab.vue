@@ -413,6 +413,17 @@ watch(() => corrResult.value, (data) => {
 const selectedMatrixParams = ref<string[]>([])
 const { loading: matrixLoading, matrixData, loadCorrelationMatrix } = useCorrelationMatrix(() => fileId.value)
 
+// 换文件后旧数据不再属于当前选择，直接清掉防止误读（对照 WaferMapPanel 的
+// 同款 watch）：localX/localY 是本组件本地 ref，不随 useTabFileParams 的参数
+// 列表刷新重置——不清的话散点图/Pearson r/回归方程会无限期显示上一个文件的
+// 结果；新文件恰有同名参数时更是静默错误数据。矩阵数据同清，用户重选后重算。
+watch(fileId, () => {
+  localX.value = ''
+  localY.value = ''
+  corrResult.value = null
+  matrixData.value = null
+})
+
 /** 矩阵参数与当前（可能已筛选收缩的）参数列表求交集——防过期项 400 */
 function trimMatrixParams() {
   if (selectedMatrixParams.value.length === 0) return

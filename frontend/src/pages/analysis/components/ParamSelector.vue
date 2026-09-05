@@ -21,7 +21,16 @@
         :value="item.value"
       >
         <div class="param-option">
-          <span class="param-name" v-html="item.highlighted || item.value" />
+          <span class="param-name">
+            <template v-if="item.segments">
+              <span
+                v-for="(seg, i) in item.segments"
+                :key="i"
+                :class="{ 'param-name__hit': seg.mark }"
+              >{{ seg.text }}</span>
+            </template>
+            <template v-else>{{ item.value }}</template>
+          </span>
           <!-- 分类提示：暂时关闭，后续开发启用 -->
           <!-- <span v-if="item.hint" class="param-hint">{{ item.hint }}</span> -->
         </div>
@@ -41,9 +50,11 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 
+interface ParamSegment { text: string; mark: boolean }
+
 interface ParamItem {
   value: string
-  highlighted?: string
+  segments?: ParamSegment[]
   hint?: string
 }
 
@@ -77,7 +88,7 @@ const filteredItems = computed<ParamItem[]>(() => {
     .filter((item) => item.value.toLowerCase().includes(query))
     .map((item) => ({
       ...item,
-      highlighted: highlightMatch(item.value, filterText.value),
+      segments: highlightSegments(item.value, filterText.value),
     }))
     .sort((a, b) => {
       // 前缀匹配优先
@@ -103,12 +114,28 @@ function getParamHint(param: string): string {
   return ''
 }
 
-/** 高亮匹配文本 */
-function highlightMatch(text: string, query: string): string {
-  if (!query) return text
-  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const regex = new RegExp(`(${escaped})`, 'gi')
-  return text.replace(regex, '<mark>$1</mark>')
+/** 高亮分段：返回 {text, mark} 片段列表，模板用 {{ }} 插值渲染。
+ * 不走 v-html：参数名来自上传文件的列头（用户可控输入），旧实现对 text
+ * 未转义，列名含 `<img src=x onerror=...>` 即成存储型 XSS，普通 `<`/`&`
+ * 也会被当标签/实体吞掉导致下拉显示错乱。大小写不敏感子串匹配与旧
+ * `gi` 正则高亮等价，且无正则元字符转义问题。 */
+function highlightSegments(text: string, query: string): ParamSegment[] {
+  if (!query) return [{ text, mark: false }]
+  const lower = text.toLowerCase()
+  const q = query.toLowerCase()
+  const segments: ParamSegment[] = []
+  let i = 0
+  while (i < text.length) {
+    const idx = lower.indexOf(q, i)
+    if (idx === -1) {
+      segments.push({ text: text.slice(i), mark: false })
+      break
+    }
+    if (idx > i) segments.push({ text: text.slice(i, idx), mark: false })
+    segments.push({ text: text.slice(idx, idx + q.length), mark: true })
+    i = idx + q.length
+  }
+  return segments
 }
 
 /** 自定义过滤方法 */
@@ -184,7 +211,7 @@ function onNext() {
   color: var(--text);
 }
 
-.param-name :deep(mark) {
+.param-name__hit {
   color: var(--brand);
   font-weight: 600;
   background-color: color-mix(in srgb, var(--brand) 15%, transparent);

@@ -35,7 +35,14 @@ export function useMultiFile() {
   const lotParam = ref('')
 
   const { loading: paramsLoading, error: paramsError, run: runParams } = useAsyncData<any>({ silent: true })
-  const { loading, data: lotData, error: distError, run: runDist } = useAsyncData<any>()
+  const { loading, data: distRaw, error: distError, run: runDist } = useAsyncData<any>()
+  const lotData = ref<any>(null)
+  // lotData 有两条互不知晓对方序号的写入路径（合并响应的显式赋值 + 分布请求
+  // 的落地拷贝）：合并请求（慢）后到会覆盖刚落地的分布数据，或反向——
+  // 图表渲染的参数与下拉所选参数持久错位且不自愈（2026-09-05 审查 H2；
+  // useAsyncData 的 seq 只保证各自实例内保序，跨路径无效）。
+  // 共享写序号守卫：只有最新一次请求才允许写 lotData/lotParam。
+  let lotWriteSeq = 0
 
   async function loadCommonParams(fileIds: number[], ignoreNoLimit: boolean,
                                   rangeType: string = 'RDL',
@@ -43,6 +50,8 @@ export function useMultiFile() {
     // 未真正发请求的分支也要清错误态，否则取消选择文件后旧横幅会一直挂着
     paramsError.value = null
     distError.value = null
+    // 先取号再早退：取消选择也要让在途请求的写入判过期
+    const mySeq = ++lotWriteSeq
     if (fileIds.length < 2) {
       commonParams.value = []
       fileNames.value = []
@@ -60,10 +69,13 @@ export function useMultiFile() {
       commonParams.value = result.common_params || []
       fileNames.value = result.file_names || []
       if (result.lot_data && result.bin_centers) {
-        // 合并响应：分布数据随 common params 一起到达
-        lotData.value = result
-        lotParam.value = result.param || ''
-      } else {
+        // 合并响应：分布数据随 common params 一起到达（仅仍是最新请求时写入）
+        if (mySeq === lotWriteSeq) {
+          lotData.value = result
+          lotParam.value = result.param || ''
+        }
+      } else if (mySeq === lotWriteSeq) {
+        // 有更新的分布请求在途/已落地时不得清，否则它返回后图表被清空
         lotData.value = null
         lotParam.value = ''
       }
@@ -75,7 +87,9 @@ export function useMultiFile() {
                                     rangeType: string = 'S4',
                                     filters: MultiFilterFlags = {}) {
     distError.value = null
+    const mySeq = ++lotWriteSeq
     if (fileIds.length < 2 || !param) {
+      distRaw.value = null
       lotData.value = null
       lotParam.value = ''
       return
@@ -86,6 +100,9 @@ export function useMultiFile() {
       range_type: rangeType,
       ...filters,
     }))
+    // 过期（期间发了更新的合并/分布请求）→ 不落地，等最新请求自己写
+    if (mySeq !== lotWriteSeq) return
+    lotData.value = distRaw.value
     if (lotData.value?.param) lotParam.value = lotData.value.param
   }
 
