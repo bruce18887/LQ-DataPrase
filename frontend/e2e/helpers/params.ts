@@ -5,8 +5,10 @@ import { expect, type Locator, type Page } from '@playwright/test'
  *
  * 注意：Element Plus 2.14 的 el-select 不再用 input[placeholder]，
  * 占位符是 <span class="el-select__placeholder">，故不能用 getByPlaceholder 定位 select。
- * 改为按稳定容器定位：
- *  - 文件选择器：AnalysisPage 顶部第一个 .el-select
+ * 定位一律走组件上显式挂的稳定契约属性（不依赖顺序与文案，见
+ * docs/specs/2026-09-02 §7.1 选择器契约）：
+ *  - 文件选择器：`[data-file-picker="single|wafer|correlation|multi"]`
+ *  - 数据控件：`[data-filter="outlier-handling|iqr-multiplier|ignore-no-limit|…"]`
  *  - 参数选择器：ParamSelector 根 div.param-selector 内的 .el-select（filterable，popper-class=param-select-dropdown）
  *  - 选项：.el-select-dropdown__item
  */
@@ -23,9 +25,18 @@ function visibleOptions(page: Page, popperClass?: string) {
   return page.locator(`${scope}.el-select-dropdown__item:visible`)
 }
 
-/** 数据分析页顶部的“数据文件”选择器（页面上第一个 el-select） */
-function fileSelect(page: Page) {
-  return page.locator('.el-select').first()
+/** 分析页某 tab 的数据文件选择器（scope = 契约属性值，页内唯一） */
+export function filePicker(page: Page, scope: 'single' | 'wafer' | 'correlation' | 'multi' = 'single') {
+  return page.locator(`[data-file-picker="${scope}"]`)
+}
+
+/** 按 data-filter 契约定位分析页数据控件 */
+export function filterControl(
+  page: Page,
+  name: 'outlier-handling' | 'iqr-multiplier' | 'ignore-no-limit' | 'ignore-no-test-value'
+    | 'data-only-bin1' | 'only-fail-test-item' | 'only-low-cpk',
+) {
+  return page.locator(`[data-filter="${name}"]`)
 }
 
 /** ParamSelector 的参数选择器 */
@@ -35,13 +46,38 @@ function paramSelect(page: Page) {
 
 /** 选择数据分析页的数据文件（不传则选第一个） */
 export async function selectAnalysisFile(page: Page, labelSubstring?: string) {
-  await openElSelect(fileSelect(page))
+  await pickTabFile(page, 'single', labelSubstring)
+}
+
+/**
+ * 在指定 tab 的文件选择器里选文件（不传 substring 选第一项）。
+ * 单选语义；多文件 tab 的多选勾选仍由各 spec 自己驱动。
+ */
+export async function pickTabFile(
+  page: Page,
+  scope: 'single' | 'wafer' | 'correlation',
+  labelSubstring?: string,
+) {
+  const sel = filePicker(page, scope)
+  await openElSelect(sel)
   const options = visibleOptions(page)
   await expect(options.first()).toBeVisible({ timeout: 15_000 })
   const target = labelSubstring
     ? options.filter({ hasText: labelSubstring }).first()
     : options.first()
   await target.click()
+}
+
+/** 选异常值处理模式（「裁剪范围」/「不处理」） */
+export async function pickOutlierMode(page: Page, mode: string) {
+  await openElSelect(filterControl(page, 'outlier-handling'))
+  await visibleOptions(page).filter({ hasText: mode }).first().click()
+}
+
+/** 选敏感度档位（如「宽松 (3.0x IQR)」） */
+export async function pickSensitivity(page: Page, label: string) {
+  await openElSelect(filterControl(page, 'iqr-multiplier'))
+  await visibleOptions(page).filter({ hasText: label }).first().click()
 }
 
 /** 读取参数下拉的全部选项文本 */

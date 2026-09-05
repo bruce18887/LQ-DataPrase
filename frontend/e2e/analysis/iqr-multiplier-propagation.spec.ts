@@ -1,14 +1,16 @@
 import { test, expect } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, selectParam, listParams } from '../helpers/params'
+import { selectAnalysisFile, selectParam, listParams, filterControl, pickOutlierMode } from '../helpers/params'
 import { waitLoadingGone } from '../helpers/charts'
 import { RECOMMENDED } from '../fixtures/test-data'
 
 const SINGLE = '.single-param-tab'
 
 /**
- * 「敏感度 (IQR 倍数)」是页头控件，值存在 analysisStore.iqrMultiplier。
- * 单参数直方图按此倍数向后端请求异常值边界，所以页头改档位后必须重发。
+ * 「敏感度 (IQR 倍数)」是分析页数据控件，值存在 analysisStore.iqrMultiplier。
+ * 单参数直方图按此倍数向后端请求异常值边界，所以改档位后必须重发。
+ *
+ * 定位统一走 `[data-filter=…]` 契约属性（不依赖页头/卡内位置与文案）。
  *
  * 断言只认「单参数直方图」请求：body.params === [选中参数]。
  * 页面级 /analysis/histogram/（拉参数列表）不带 params 字段，且它直接读
@@ -30,13 +32,9 @@ function watchParamHistogram(page: import('@playwright/test').Page, param: strin
   return multipliers
 }
 
-function outlierSelect(page: import('@playwright/test').Page) {
-  return page.locator('.el-form-item').filter({ hasText: '异常值处理' }).locator('.el-select').first()
-}
-
 // 敏感度只在 异常值处理 !== 'off' 时渲染
 function sensitivitySelect(page: import('@playwright/test').Page) {
-  return page.locator('.el-form-item').filter({ hasText: '敏感度' }).locator('.el-select').first()
+  return filterControl(page, 'iqr-multiplier')
 }
 
 test.describe('@p1 敏感度状态传播', { tag: ['@p1', '@analysis'] }, () => {
@@ -51,8 +49,7 @@ test.describe('@p1 敏感度状态传播', { tag: ['@p1', '@analysis'] }, () => 
     await selectParam(page, params[0])
     await waitLoadingGone(page.locator(SINGLE))
 
-    await outlierSelect(page).click()
-    await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '裁剪范围' }).first().click()
+    await pickOutlierMode(page, '裁剪范围')
     await expect(sensitivitySelect(page)).toBeVisible({ timeout: 10_000 })
 
     // 计数器装好之后再改敏感度，避免把前置请求计入

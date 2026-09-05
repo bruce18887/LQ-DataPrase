@@ -6,6 +6,7 @@ import {
   listParams,
   selectParam,
   sampleN,
+  filterControl,
 } from '../helpers/params'
 import { pickOption } from '../helpers/elplus'
 import { PARAM_SAMPLE_COUNT, RECOMMENDED, SINGLE_SITE_FILES } from '../fixtures/test-data'
@@ -169,9 +170,8 @@ test.describe('@p1 单参数分析', { tag: ['@p1', '@analysis'] }, () => {
 test.describe('@p1 默认配置', { tag: ['@p1', '@analysis'] }, () => {
   test('异常值处理默认为「不处理」', async ({ page }) => {
     await enterAnalysis(page, RECOMMENDED.analysis)
-    // 第二个 analysis-file-selector__select 为异常值处理下拉框
-    const outlierSelect = page.locator('.analysis-file-selector__select').nth(1)
-    await expect(outlierSelect).toHaveText('不处理')
+    // data-filter 契约属性定位（不依赖页头位置与顺序）
+    await expect(filterControl(page, 'outlier-handling')).toHaveText('不处理')
   })
 
   test('多文件分析范围类型默认为 RDL', async ({ page }) => {

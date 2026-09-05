@@ -17,11 +17,11 @@
       <el-card shadow="hover" :body-style="{ padding: '12px' }">
         <label class="section-label">数据筛选</label>
         <div class="corr-filter-box">
-          <el-checkbox v-model="ignoreNoLimit" size="small">忽略无Limit</el-checkbox>
-          <el-checkbox v-model="ignoreNoTestValue" size="small">忽略无测试值</el-checkbox>
-          <el-checkbox v-model="dataOnlyBin1" size="small">仅用Pass数据(Bin1)</el-checkbox>
-          <el-checkbox v-model="onlyFailTestItem" size="small">仅显示Fail测试项</el-checkbox>
-          <el-checkbox v-model="onlyLowCpk" size="small">仅显示低CPK项</el-checkbox>
+          <el-checkbox v-model="ignoreNoLimit" size="small" data-filter="ignore-no-limit">忽略无Limit</el-checkbox>
+          <el-checkbox v-model="ignoreNoTestValue" size="small" data-filter="ignore-no-test-value">忽略无测试值</el-checkbox>
+          <el-checkbox v-model="dataOnlyBin1" size="small" data-filter="data-only-bin1">仅用Pass数据(Bin1)</el-checkbox>
+          <el-checkbox v-model="onlyFailTestItem" size="small" data-filter="only-fail-test-item">仅显示Fail测试项</el-checkbox>
+          <el-checkbox v-model="onlyLowCpk" size="small" data-filter="only-low-cpk">仅显示低CPK项</el-checkbox>
         </div>
       </el-card>
 

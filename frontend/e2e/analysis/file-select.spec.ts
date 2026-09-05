@@ -1,6 +1,6 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile } from '../helpers/params'
+import { selectAnalysisFile, filePicker } from '../helpers/params'
 import { RECOMMENDED, SEEDED_FILES } from '../fixtures/test-data'
 
 /**
@@ -17,9 +17,9 @@ import { RECOMMENDED, SEEDED_FILES } from '../fixtures/test-data'
 
 const TAB = '.multi-file-tab'
 
-/** 分析页顶部「数据文件」选择器（页面上第一个 el-select） */
+/** 分析页「数据文件」选择器（data-file-picker 契约属性，不依赖页序） */
 function fileSelect(page: Page): Locator {
-  return page.locator('.el-select').first()
+  return filePicker(page)
 }
 
 /** 打开分析页文件下拉，返回可见下拉面板 */
