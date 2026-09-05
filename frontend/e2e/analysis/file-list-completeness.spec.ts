@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import { gotoApp } from '../helpers/nav'
 import { uploadMultipleFiles, expectUploadSuccess } from '../helpers/upload'
 import { cleanupQuiet } from '../helpers/cleanup'
+import { filePicker } from '../helpers/params'
 
 /**
  * 文件列表完整性：分析页文件选择框数量与数据管理页一致（回归钉）。
@@ -78,7 +79,7 @@ test.describe('文件列表完整性：分析页下拉与数据管理页数量�
     // 分析页：打开文件下拉，数选项
     await gotoApp(page, '/analysis')
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
-    const fileSel = page.locator('.el-select').first()
+    const fileSel = filePicker(page)
     await expect(fileSel).toBeVisible({ timeout: 15_000 })
     await fileSel.click()
     const options = page.locator('.el-select-dropdown__item:visible')

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, selectParam, listParams } from '../helpers/params'
+import { selectAnalysisFile, selectParam, listParams, filterControl, pickOutlierMode } from '../helpers/params'
 import { waitLoadingGone } from '../helpers/charts'
 import { RECOMMENDED } from '../fixtures/test-data'
 
@@ -133,9 +133,7 @@ test.describe('@p1 异常值处理', { tag: ['@p1', '@analysis'] }, () => {
     const { info } = found
 
     // Ensure clip mode is selected.
-    const outlierSelect = page.locator('.el-form-item').filter({ hasText: '异常值处理' }).locator('.el-select').first()
-    await outlierSelect.click()
-    await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '裁剪范围' }).first().click()
+    await pickOutlierMode(page, '裁剪范围')
     await waitLoadingGone(page.locator(SINGLE))
 
     // Hint bar should be visible and describe the outlier count and bounds.
@@ -164,7 +162,7 @@ test.describe('@p1 异常值处理', { tag: ['@p1', '@analysis'] }, () => {
     const found = await findParamWithOutliers(page)
     test.skip(!found, '当前数据文件未找到含异常值的参数')
 
-    const outlierSelect = page.locator('.el-form-item').filter({ hasText: '异常值处理' }).locator('.el-select').first()
+    const outlierSelect = filterControl(page, 'outlier-handling')
     const kdeFullCheckbox = page.locator(`${SINGLE} .config-checkboxes .el-checkbox`).filter({ hasText: 'KDE含超限' })
 
     // 确保 RDL + 不处理（默认状态，KDE 默认勾选、含超限默认不勾选）
@@ -216,7 +214,7 @@ test.describe('@p1 异常值处理', { tag: ['@p1', '@analysis'] }, () => {
     const found = await findParamWithOutliers(page)
     test.skip(!found, '当前数据文件未找到含异常值的参数')
 
-    const outlierSelect = page.locator('.el-form-item').filter({ hasText: '异常值处理' }).locator('.el-select').first()
+    const outlierSelect = filterControl(page, 'outlier-handling')
 
     // 默认状态为「不处理」，提示条应不可见。
     await expect(page.locator(`${SINGLE} .outlier-hint-bar`)).not.toBeVisible()
@@ -238,7 +236,7 @@ test.describe('@p1 异常值处理', { tag: ['@p1', '@analysis'] }, () => {
     const found = await findParamWithOutliers(page)
     test.skip(!found, '当前数据文件未找到含异常值的参数')
 
-    const outlierSelect = page.locator('.el-form-item').filter({ hasText: '异常值处理' }).locator('.el-select').first()
+    const outlierSelect = filterControl(page, 'outlier-handling')
     const rangeSelect = page.locator(`${SINGLE} .config-section`).filter({ hasText: '范围类型' }).locator('.el-select').first()
 
     // Ensure we are in RDL mode for this assertion.
@@ -289,7 +287,7 @@ test.describe('@p1 异常值处理', { tag: ['@p1', '@analysis'] }, () => {
     test.skip(!found, '当前数据文件未找到含异常值的参数')
 
     // 切到裁剪模式（此操作不重发请求，histogramUpdateView 复用 lastResults）
-    const outlierSelect = page.locator('.el-form-item').filter({ hasText: '异常值处理' }).locator('.el-select').first()
+    const outlierSelect = filterControl(page, 'outlier-handling')
     await outlierSelect.click()
     await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '裁剪范围' }).first().click()
     await waitLoadingGone(page.locator(SINGLE))
@@ -413,7 +411,7 @@ test.describe('@p1 异常值处理', { tag: ['@p1', '@analysis'] }, () => {
       return null
     }
 
-    const outlierSelect = page.locator('.el-form-item').filter({ hasText: '异常值处理' }).locator('.el-select').first()
+    const outlierSelect = filterControl(page, 'outlier-handling')
 
     // 裁剪范围：Y 轴应 pin 到过滤后观测值区间（±5% 边距），不再被全量拟合
     // 参考线撑到含离群点的范围

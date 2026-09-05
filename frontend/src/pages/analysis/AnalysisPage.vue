@@ -9,6 +9,7 @@
           :files="files"
           placeholder="选择数据文件"
           show-meta
+          data-file-picker="single"
           @change="onFileChange"
           class="analysis-file-selector__select"
         />
@@ -18,6 +19,7 @@
         <el-select
           v-model="outlierHandling"
           size="small"
+          data-filter="outlier-handling"
           class="analysis-file-selector__select"
           style="width: 160px"
         >
@@ -29,6 +31,7 @@
         <el-select
           v-model="iqrMultiplier"
           size="small"
+          data-filter="iqr-multiplier"
           class="analysis-file-selector__select"
           style="width: 200px"
         >

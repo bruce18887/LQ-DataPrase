@@ -100,20 +100,45 @@
     <div class="config-section filter-section">
       <div class="section-label">数据筛选</div>
       <div class="filter-checkboxes">
-        <el-checkbox :model-value="ignoreNoLimit" size="small" @change="onIgnoreNoLimitChange">
+        <el-checkbox
+          :model-value="ignoreNoLimit"
+          size="small"
+          data-filter="ignore-no-limit"
+          @change="onIgnoreNoLimitChange"
+        >
           忽略无Limit
         </el-checkbox>
         <template v-if="variant === 'full' || fullFilters">
-          <el-checkbox :model-value="ignoreNoTestValue" size="small" @change="onIgnoreNoTestValueChange">
+          <el-checkbox
+            :model-value="ignoreNoTestValue"
+            size="small"
+            data-filter="ignore-no-test-value"
+            @change="onIgnoreNoTestValueChange"
+          >
             忽略无测试值
           </el-checkbox>
-          <el-checkbox :model-value="dataOnlyBin1" size="small" @change="onDataOnlyBin1Change">
+          <el-checkbox
+            :model-value="dataOnlyBin1"
+            size="small"
+            data-filter="data-only-bin1"
+            @change="onDataOnlyBin1Change"
+          >
             仅用Pass数据(Bin1)
           </el-checkbox>
-          <el-checkbox :model-value="onlyFailTestItem" size="small" @change="onOnlyFailTestItemChange">
+          <el-checkbox
+            :model-value="onlyFailTestItem"
+            size="small"
+            data-filter="only-fail-test-item"
+            @change="onOnlyFailTestItemChange"
+          >
             仅显示Fail测试项
           </el-checkbox>
-          <el-checkbox :model-value="onlyLowCpk" size="small" @change="onOnlyLowCpkChange">
+          <el-checkbox
+            :model-value="onlyLowCpk"
+            size="small"
+            data-filter="only-low-cpk"
+            @change="onOnlyLowCpkChange"
+          >
             仅显示低CPK项
           </el-checkbox>
         </template>

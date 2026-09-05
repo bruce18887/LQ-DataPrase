@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, selectParam } from '../helpers/params'
+import { selectAnalysisFile, selectParam, pickOutlierMode } from '../helpers/params'
 import { waitLoadingGone } from '../helpers/charts'
 import { SEEDED_FILES } from '../fixtures/test-data'
 
@@ -60,9 +60,7 @@ test.describe('@p1 柱状图 Fail Bin 可视化', { tag: ['@p1', '@analysis'] },
       await waitLoadingGone(page.locator(SINGLE))
     }
     // Fail bins are only visible when outlier handling is disabled.
-    const outlierSelect = page.locator('.el-form-item').filter({ hasText: '异常值处理' }).locator('.el-select').first()
-    await outlierSelect.click()
-    await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '不处理' }).first().click()
+    await pickOutlierMode(page, '不处理')
     await waitLoadingGone(page.locator(SINGLE))
 
     // Wait for the chart to render the target param.

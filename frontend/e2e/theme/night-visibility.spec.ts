@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, selectParam, listParams } from '../helpers/params'
+import { selectAnalysisFile, selectParam, listParams, filePicker, pickOutlierMode } from '../helpers/params'
 import { waitLoadingGone } from '../helpers/charts'
 import { tintContrastProbe, tokenTintProbe } from '../helpers/colors'
 import { RECOMMENDED } from '../fixtures/test-data'
@@ -140,7 +140,7 @@ test.describe('@theme 主题视觉回归', { tag: ['@p2', '@theme'] }, () => {
     await gotoApp(page, '/analysis')
 
     // 选 CTA8280F（含多 Site → All Site 轴）
-    await page.locator('.el-select').first().click()
+    await filePicker(page).click()
     await page.locator('.el-select-dropdown__item:visible').filter({ hasText: 'DA35_BPC50338_CL08D4' }).first().click()
     await expect(page.locator('svg text').filter({ hasText: '百分比' }).first()).toBeVisible({ timeout: 30_000 })
     await page.waitForTimeout(2000)
@@ -193,8 +193,7 @@ test.describe('@theme 主题视觉回归', { tag: ['@p2', '@theme'] }, () => {
     await selectParam(page, params[0])
     await waitLoadingGone(page.locator('.single-param-tab'))
 
-    await page.locator('.el-form-item').filter({ hasText: '异常值处理' }).locator('.el-select').first().click()
-    await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '裁剪范围' }).first().click()
+    await pickOutlierMode(page, '裁剪范围')
     await waitLoadingGone(page.locator('.single-param-tab'))
 
     // 提示条按「有没有异常值」在 --ok / --clip / --exclude 间切换，种子参数无异常值

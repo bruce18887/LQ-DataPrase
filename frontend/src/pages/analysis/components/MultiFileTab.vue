@@ -17,6 +17,7 @@
             size="small"
             style="width: 100%"
             show-meta
+            data-file-picker="multi"
           />
 
           <!-- 自定义图例名 -->
