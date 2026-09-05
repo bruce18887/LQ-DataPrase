@@ -23,10 +23,11 @@ interface BoxPlotData {
   param: string; overall?: BoxPlotStats; by_site?: Record<string, BoxPlotStats>; by_bin?: Record<string, BoxPlotStats>
 }
 
-const props = withDefaults(defineProps<{ data: BoxPlotData | null; title?: string; showJitter?: boolean; visible?: boolean; error?: string | null }>(), {
+const props = withDefaults(defineProps<{ data: BoxPlotData | null; title?: string; showJitter?: boolean; visible?: boolean; error?: string | null; /** 分组来源：决定数值类目的前缀（by_bin 曾被错标成 "Site N"） */ groupKind?: 'site' | 'bin' }>(), {
   showJitter: false,
   visible: true,
   error: null,
+  groupKind: 'site',
 })
 const { colors } = useEChartsTheme()
 
@@ -36,17 +37,18 @@ const boxColor = '#1E88E5'
 const jitterColor = computed(() => colors.value.seriesColors[4])
 const outlierColor = '#E53935'
 
+const groupOk = (grp?: BoxPlotStats) =>
+  !!grp && typeof grp.min === 'number' && Number.isFinite(grp.min)
+
+// 只要有**任一**有效组即可渲染（旧实现只看第一组：第一组全 NaN 会把整图
+// 误判成无数据）
 const hasValidData = computed(() => {
   if (!props.data) return false
   const { overall, by_site, by_bin } = props.data
-  if (overall && typeof overall.min === 'number' && Number.isFinite(overall.min)) return true
-  if (by_site && Object.keys(by_site).length > 0) {
-    const grp = by_site[Object.keys(by_site)[0]]
-    if (grp && typeof grp.min === 'number' && Number.isFinite(grp.min)) return true
-  }
-  if (by_bin && Object.keys(by_bin).length > 0) {
-    const grp = by_bin[Object.keys(by_bin)[0]]
-    if (grp && typeof grp.min === 'number' && Number.isFinite(grp.min)) return true
+  if (groupOk(overall)) return true
+  const grouped = by_site ?? by_bin
+  if (grouped && Object.keys(grouped).length > 0) {
+    return Object.values(grouped).some(groupOk)
   }
   return false
 })
@@ -76,12 +78,16 @@ function buildOption() {
       if (!isNaN(numA) && !isNaN(numB)) return numA - numB
       return a.localeCompare(b)
     })
-    categories = sortedKeys.map(key =>
-      /^\d+(\.\d+)?$/.test(key) ? `Site ${key}` : key
+    // 全 NaN 组（后端 NaN→null → min/max 非有限）必须**整组剔除且不占类别
+    // 位**：旧写法跳过箱体但保留原始 idx，箱体紧缩前移而异常点/jitter 钉在
+    // 原下标，画到别的 Site 名下（2026-09-05 审查 M4）
+    const validKeys = sortedKeys.filter((key) => groupOk(groupedData[key]))
+    const prefix = props.groupKind === 'bin' ? 'Bin' : 'Site'
+    categories = validKeys.map(key =>
+      /^\d+(\.\d+)?$/.test(key) ? `${prefix} ${key}` : key
     )
-    sortedKeys.forEach((group, idx) => {
+    validKeys.forEach((group, idx) => {
       const s = groupedData[group]
-      if (!s || !Number.isFinite(s.min) || !Number.isFinite(s.max)) return
       boxData.push([s.min, s.q1, s.median, s.q3, s.max])
       if (Array.isArray(s.outliers)) {
         s.outliers.forEach(o => outlierData.push([idx, o]))

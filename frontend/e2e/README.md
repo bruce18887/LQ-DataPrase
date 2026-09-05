@@ -152,7 +152,9 @@ python manage.py seed_test_data --clear
   （用 `filterControl(page, name)` / `pickOutlierMode` / `pickSensitivity`）；
   ⚠️ 这些属性**每个 tab 一份**，`filterControl` 已限定在 `.el-tab-pane:visible` 内，自定义定位器
   也必须加可见 pane 限定，否则访问过两个 tab 后会撞上 strict mode。参数选择器仍是
-  `.param-selector .el-select`（filterable，popper class `param-select-dropdown`）；选项
+  `.param-selector .el-select`（filterable；popper class **按实例隔离**：单文件 tab
+  `dp-param-popper-single`、多文件 tab `dp-param-popper-multi`，teleport 到 body 的
+  面板同名会让隐藏 pane 的那一份参与全局 `:visible` 查询）；选项
   `.el-select-dropdown__item`。不得再用「页面上第几个 .el-select」这类位置定位。
 - 分析页切文件后读数据（2026-09-05）：切换窗口内 UI 仍显示**上一个文件**的图表/范围表
   （遮罩不在，`waitLoadingGone` 拦不住），直接读值会拿到旧数据 —— 实测读到过残留文件

@@ -16,6 +16,9 @@ export function useSerialDistribution(
   serialCol?: Ref<string>,
   /** 敏感度（IQR 倍数）：属于调用方 tab 自己的状态 */
   iqrMultiplier: Ref<number> = ref(1.5),
+  /** CL 模式的用户自定义限：与 histogram 同口径（后端 resolve 'CL'） */
+  customLow?: Ref<number | null>,
+  customHigh?: Ref<number | null>,
 ) {
   const { data: serialDistData, error: serialError, run } = useAsyncData<any>({ silent: true })
 
@@ -23,14 +26,26 @@ export function useSerialDistribution(
     const fileId = getSelectedFileId()
     // 未真正发请求的分支也要清错误态，否则旧 serialError 横幅会一直挂着
     serialError.value = null
-    if (!fileId || !localSelectedParam.value) return
+    if (!fileId || !localSelectedParam.value) {
+      // 切文件清参数的早退：旧文件的序列图滞留会误导（与 useQQPlot 同口径，
+      // 2026-09-05 审查 M2）
+      serialDistData.value = null
+      return
+    }
     // Skip if param is known to be non-numeric
-    if (availableParams?.value && !availableParams.value.includes(localSelectedParam.value)) return
+    if (availableParams?.value && !availableParams.value.includes(localSelectedParam.value)) {
+      serialDistData.value = null
+      return
+    }
     await run(() => api.post('/analysis/serial_distribution/', {
       file_id: fileId,
       param: localSelectedParam.value,
       chart_config: chartConfig.value,
       range_type: rangeType.value,
+      // CL 语义三端点统一为「用户自定义限」：不带的话后端把数据 min/max
+      // 画成 "LSL/USL" 幻影限值线，与同屏直方图矛盾
+      custom_low: rangeType.value === 'CL' ? customLow?.value ?? null : null,
+      custom_high: rangeType.value === 'CL' ? customHigh?.value ?? null : null,
       data_only_bin1: dataOnlyBin1?.value ?? false,
       serial_col: serialCol?.value || undefined,
       // 敏感度在**发请求时**实时读 ref（不是挂载时快照）。后端本端点

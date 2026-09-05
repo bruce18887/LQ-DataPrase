@@ -46,7 +46,15 @@ export function useTabFileParams(opts: {
   const { ctx, files, filters } = opts
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
 
+  // 请求序号：过期守卫不能只比 file_id——同一文件、不同筛选口径的并发响应
+  // （250ms 防抖到期发 #1 后用户又改开关发 #2）逆序到达时旧口径列表会覆盖
+  // 新口径（2026-09-05 审查 M1）。loading 用在途引用计数：先返回的一方
+  // （含过期分支）不得熄灭仍在途方的加载态。
+  let loadSeq = 0
+  let inflight = 0
+
   async function loadParams() {
+    const mySeq = ++loadSeq
     const fileId = ctx.fileId.value
     // 预设参数必须在清空前捕获：仪表板跳转会先把目标参数写进 store
     const preset = ctx.selectedParam?.value || ''
@@ -63,14 +71,15 @@ export function useTabFileParams(opts: {
     // 文件**的参数先打一次请求（实测 400 no_valid_params + 一个错误 toast），
     // 预设值已在上方记下，响应回来后按新列表重新选中
     if (ctx.selectedParam) ctx.selectedParam.value = ''
+    inflight++
     try {
       const { data } = await api.post('/analysis/histogram/', {
         file_id: fileId,
         ...(filters ? filters() : {}),
       })
-      // 过期响应守卫：自动加载的首个文件与用户手动选择并发时，慢到的旧响应
-      // 不能用自己的列表覆盖新文件的列表
-      if (data.file_id !== ctx.fileId.value) return
+      // 过期响应守卫：换文件（file_id 变了）或同文件换了筛选口径（序号变了）
+      // 的慢响应都不能用自己的列表覆盖当前选择
+      if (mySeq !== loadSeq || data.file_id !== ctx.fileId.value) return
       const results = data.results as Record<string, unknown>
       ctx.params.value = Object.keys(results || {}).filter((p) => p && p.trim() !== '')
       if (ctx.selectedParam) {
@@ -81,7 +90,8 @@ export function useTabFileParams(opts: {
     } catch {
       // 错误 toast 由 axios 拦截器统一弹出
     } finally {
-      ctx.loading.value = false
+      inflight--
+      ctx.loading.value = inflight > 0
     }
   }
 

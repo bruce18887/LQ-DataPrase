@@ -1,38 +1,17 @@
 import api from './index'
 
+// 仅保留有调用点的 helper：getHistogram/getWaferMap(GET)/getSerialDistribution/
+// getCorrelation/getMultiLotData/getCorrelationMatrix/getBinTrend/getParamTrend/
+// getQQPlot 全项目 0 调用（页面实际都直接 api.post），且它们走 GET+query 序列化
+// 路径，与页面 POST 路径是两套未经验证的契约——单侧改动另一侧不会跟随，属
+// 契约漂移温床（2026-09-05 审查 5.8 / 契约#6），删除。
 export const analysisApi = {
   getDashboard(fileId: number) {
     return api.get('/summary/', { params: { file_id: fileId } })
   },
-  getHistogram(fileId: number, params: string[], iqrMultiplier?: number) {
-    const query: Record<string, any> = { file_id: fileId, params }
-    if (iqrMultiplier != null) query.iqr_multiplier = iqrMultiplier
-    return api.get('/analysis/histogram/', { params: query })
-  },
-  getWaferMap(fileId: number, param?: string) {
-    return api.get('/analysis/wafer_map/', { params: { file_id: fileId, param } })
-  },
   /** 晶圆图主路径：POST 带 color_by（按结果/Site/分区），端点两种方法都收 */
   postWaferMap(payload: Record<string, any>) {
     return api.post('/analysis/wafer_map/', payload)
-  },
-  getSerialDistribution(fileId: number, param: string) {
-    return api.get('/analysis/serial_distribution/', { params: { file_id: fileId, param } })
-  },
-  getCorrelation(fileId: number, paramX: string, paramY: string) {
-    return api.get('/analysis/correlation/', { params: { file_id: fileId, param_x: paramX, param_y: paramY } })
-  },
-  getMultiLotData(fileIds: number[], param: string) {
-    return api.get('/analysis/multi_lot/', { params: { file_ids: fileIds, param } })
-  },
-  getCorrelationMatrix(fileId: number, params?: string[], method?: string) {
-    const query: Record<string, any> = { file_id: fileId }
-    if (params && params.length) query.params = params
-    if (method) query.method = method
-    return api.get('/statistics/correlation_matrix/', { params: query })
-  },
-  getBinTrend(fileIds: number[]) {
-    return api.get('/statistics/bin_trend/', { params: { file_ids: fileIds } })
   },
   getBoxPlot(fileId: number, params: string[], groupBy?: string, dataOnlyBin1?: boolean,
              iqrMultiplier?: number) {
@@ -43,12 +22,6 @@ export const analysisApi = {
     // 同屏直方图/QQ/序列/散点都变了、只有箱线图没变。
     if (iqrMultiplier != null) query.iqr_multiplier = iqrMultiplier
     return api.get('/statistics/boxplot/', { params: query })
-  },
-  getParamTrend(fileIds: number[], param: string) {
-    return api.get('/statistics/param_trend/', { params: { file_ids: fileIds, param } })
-  },
-  getQQPlot(fileId: number, param: string) {
-    return api.get('/analysis/qqplot/', { params: { file_id: fileId, param } })
   },
   getZonalYield(fileId: number, param?: string) {
     return api.get('/statistics/zonal_yield/', { params: { file_id: fileId, param } })

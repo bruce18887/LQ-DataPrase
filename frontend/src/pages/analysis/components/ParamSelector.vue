@@ -12,7 +12,7 @@
       :virtual="filteredItems.length > 50"
       @change="onParamChange"
       @visible-change="onVisibleChange"
-      popper-class="param-select-dropdown"
+      :popper-class="popperClass"
     >
       <el-option
         v-for="item in filteredItems"
@@ -58,10 +58,15 @@ interface ParamItem {
   hint?: string
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   params: string[]
   selectedParam: string
-}>()
+  /** teleport 到 body 的下拉面板**实例级** class：ParamSelector 在单文件 tab
+   * （非 lazy 常驻）与多文件 tab 各挂一个，同名 popper 会让隐藏 pane 的面板
+   * 参与全局 `:visible` 选项查询——reference 零尺寸导致 popper 逐帧重定位、
+   * `.first()` 误点另一个 tab 的选项（lessons 2026-09-05） */
+  popperClass?: string
+}>(), { popperClass: 'dp-param-popper-single' })
 
 const emit = defineEmits<{
   'update:selectedParam': [value: string]

@@ -8,8 +8,11 @@
  *    把最强的显著性显示成零。
  */
 
-/** Pearson r：与散点视图、KPI 卡片同为 4 位小数 */
-export function formatR(r: number): string {
+/** Pearson r：与散点视图、KPI 卡片同为 4 位小数。
+ * null（常数列 Pearson 无定义，后端 NaN→JSON null）显示 'N/A'——旧写法
+ * `?? 0` 把「无定义相关」伪装成实测零相关（2026-09-05 审查 5.3） */
+export function formatR(r: number | null | undefined): string {
+  if (r == null || !Number.isFinite(r)) return 'N/A'
   return r.toFixed(4)
 }
 
@@ -44,10 +47,12 @@ export function buildCorrelationMatrixOption(
   const matrix: number[][] = data.matrix || []
   const pValues: number[][] = data.p_values || []
 
-  const heatmapData: [number, number, number][] = []
+  const heatmapData: [number, number, number | null][] = []
   for (let i = 0; i < params.length; i++) {
     for (let j = 0; j < params.length; j++) {
-      heatmapData.push([i, j, matrix[i]?.[j] ?? 0])
+      // null 保留进数据元组（ECharts 对 null 值不渲染色块）：`?? 0` 会在
+      // formatter 看到之前把 null 吞成实测零相关
+      heatmapData.push([i, j, matrix[i]?.[j] ?? null])
     }
   }
 
@@ -78,7 +83,8 @@ export function buildCorrelationMatrixOption(
         show: true, fontSize: 9,
         formatter: (p: any) => {
           const [pi, pj, r] = p.value as [number, number, number]
-          // 格内空间只容得下 2 位小数，完整 4 位看 tooltip
+          // 格内空间只容得下 2 位小数，完整 4 位看 tooltip；null → 'N/A'
+          if (r == null || !Number.isFinite(r)) return 'N/A'
           return `${r.toFixed(2)}${getSignificanceStars(pOf(pi, pj))}`
         },
       },

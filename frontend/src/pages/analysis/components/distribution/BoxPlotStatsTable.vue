@@ -31,17 +31,22 @@ interface BoxPlotStats {
 
 const props = defineProps<{ stats: BoxPlotStats | null }>()
 
+// 后端 NaN→JSON null：overall 字段可能为 null（如过滤后计数为 0），
+// 裸 .toFixed 会 TypeError 打断渲染（对齐 OutlierHintBar/QQPlotStatsTable）
+const fmt = (v: unknown): string =>
+  typeof v === 'number' && Number.isFinite(v) ? v.toFixed(4) : '-'
+
 const tableData = computed(() => {
   if (!props.stats) return []
   const s = props.stats
   return [
     { label: 'Count', value: s.count },
-    { label: 'Min', value: s.min.toFixed(4) },
-    { label: 'Q1', value: s.q1.toFixed(4) },
-    { label: 'Median', value: s.median.toFixed(4) },
-    { label: 'Q3', value: s.q3.toFixed(4) },
-    { label: 'Max', value: s.max.toFixed(4) },
-    { label: 'Outliers', value: s.outliers.length },
+    { label: 'Min', value: fmt(s.min) },
+    { label: 'Q1', value: fmt(s.q1) },
+    { label: 'Median', value: fmt(s.median) },
+    { label: 'Q3', value: fmt(s.q3) },
+    { label: 'Max', value: fmt(s.max) },
+    { label: 'Outliers', value: s.outliers?.length ?? 0 },
   ]
 })
 </script>

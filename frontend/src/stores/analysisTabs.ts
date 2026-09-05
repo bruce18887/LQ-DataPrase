@@ -137,14 +137,22 @@ export const useMultiTabStore = defineStore('analysisTabMulti', () => {
   function syncToQuery() {
     if (syncTimer) clearTimeout(syncTimer)
     syncTimer = setTimeout(() => {
-      const q: Record<string, string> = {}
+      // 防抖窗口内已路由跳转：把 mf_* 写进别的页面的 URL 是跨页污染
+      if (route.name !== 'Analysis') return
+      // mf_* 键必须先显式剔除再按现值回填：选择清到 <2 个时旧写法
+      // `{...route.query, ...q}` 不含该键就不会删，URL 与 store 分叉，
+      // 刷新后 initFromQuery 把已清空的选择复活（2026-09-05 审查 M3）
+      const q = { ...route.query }
+      delete q.mf_ids
+      delete q.mf_param
+      delete q.mf_range
       const fileIds = bag.fileIds.value
       const selectedParam = bag.selectedParam.value
       const rangeType = bag.rangeType.value
       if (fileIds.length >= 2) q.mf_ids = fileIds.join(',')
       if (selectedParam) q.mf_param = selectedParam
       if (rangeType && rangeType !== 'RDL') q.mf_range = rangeType
-      router.replace({ query: { ...route.query, ...q } })
+      router.replace({ query: q })
     }, 300)
   }
 
