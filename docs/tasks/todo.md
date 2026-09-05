@@ -825,36 +825,36 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
 
 ## P1 批次 3：前端竞态家族
 
-- [ ] 3.1 useSiteStats 过期响应清表 → 快照比对
-- [ ] 3.2 WaferMapPanel 三裸请求加 seq 守卫 + loading 计数器
-- [ ] 3.3 ParamSelector popper-class 作用域化（dp-param-popper-<scope>）
-- [ ] 3.4 BoxPlotChart 跳组错位 → 先过滤有效组再映射
-- [ ] 3.5 useTabFileParams 守卫升级 file_id+序号 + loading 引用计数
-- [ ] 3.6 useHistogram/useSerialDistribution 早退清态（对齐 useQQPlot）
-- [ ] 3.7 multi tab URL：mf_ids 与文件列表求交 + syncToQuery 删键 + 跨页防抖守卫
-- [ ] 3.8 切参数 QQ/序列图双发请求 → 删 watch(histResult) 联动
+- [x] 3.1 useSiteStats 过期响应清表 → 快照比对
+- [x] 3.2 WaferMapPanel 三裸请求加 seq 守卫 + loading 计数器
+- [x] 3.3 ParamSelector popper-class 作用域化（dp-param-popper-single/multi）
+- [x] 3.4 BoxPlotChart 跳组错位 → 先过滤有效组再映射
+- [x] 3.5 useTabFileParams 守卫升级 file_id+序号 + loading 引用计数
+- [x] 3.6 useHistogram/useSerialDistribution 早退清态（对齐 useQQPlot）
+- [x] 3.7 multi tab URL：mf_ids 与文件列表求交 + syncToQuery 删键 + 跨页防抖守卫
+- [x] 3.8 切参数 QQ/序列图双发请求 → 删 watch(histResult) 联动
 
 ## P1 批次 4：后端守卫与契约统一
 
-- [ ] 4.1 wafer_map 参数守卫对齐 zonal_yield（空 param 保留全局判定）
-- [ ] 4.2 serial_distribution chart_config 解析防护 → 400 invalid_chart_config
-- [ ] 4.3 uph 视图层裸 float() 移除，让服务层容错生效
-- [ ] 4.4 file_correlation dtype 白名单 → is_numeric_dtype 且排除 bool
-- [ ] 4.5 histogram 计算路径：部分无效带 skipped_params，全无效 400 no_valid_params
-- [ ] 4.6 histogram 响应补 median 字段（前端 Median 卡不再恒 '-'）
-- [ ] 4.7 by_bin 箱线图标签 "Bin N"（BoxPlotChart 接收 groupBy prop）
-- [ ] 4.8 'CL' 哨兵统一为用户自定义限：site_stats/serial_distribution 读写 custom_low/high
+- [x] 4.1 wafer_map 参数守卫对齐 zonal_yield（空 param 保留全局判定）
+- [x] 4.2 serial_distribution chart_config 解析防护 → 400 invalid_chart_config
+- [x] 4.3 uph 视图层裸 float() 移除，让服务层容错生效
+- [x] 4.4 file_correlation dtype 白名单 → is_numeric_dtype 且排除 bool
+- [x] 4.5 histogram 计算路径：部分无效带 skipped_params，全无效 400 no_valid_params
+- [x] 4.6 histogram 响应补 median 字段（前端 Median 卡不再恒 '-'）
+- [x] 4.7 by_bin 箱线图标签 "Bin N"（BoxPlotChart 接收 groupKind prop）
+- [x] 4.8 'CL' 哨兵统一为用户自定义限：site_stats/serial_distribution 读写 custom_low/high
 
 ## P2 批次 5：低严重度小修
 
-- [ ] 5.1 BoxPlotStatsTable 数值 Number.isFinite 护卫
-- [ ] 5.2 WaferMapPanel 静态 style 改 :style 绑定
-- [ ] 5.3 相关矩阵 null → 'N/A'（不 ?? 0）
-- [ ] 5.4 serial 非整数不截断（走字符串 label 路径）
-- [ ] 5.5 bin NaN 不再判 fail（df[bin].eq(1)，与 bin_stats 口径一致）
-- [ ] 5.6 get_param_float 拒 NaN + custom_low>custom_high → 400
-- [ ] 5.7 multi_lot 无参分支过 clean_data；docstring 删未实现的 group_by
-- [ ] 5.8 api/analysis.ts 删 8 个死 helper
+- [x] 5.1 BoxPlotStatsTable 数值 Number.isFinite 护卫
+- [x] 5.2 WaferMapPanel 静态 style 改 :style 绑定
+- [x] 5.3 相关矩阵 null → 'N/A'（不 ?? 0）
+- [x] 5.4 serial 非整数不截断（走原值集合路径）
+- [x] 5.5 bin NaN 不再判 fail（notna & != 1，与 bin_stats 口径一致）
+- [x] 5.6 get_param_float 拒 NaN + custom_low>custom_high → 400
+- [x] 5.7 multi_lot 无参分支过 clean_data；docstring 删未实现的 group_by
+- [x] 5.8 api/analysis.ts 删 9 个死 helper（含 getQQPlot，grep 确认 0 调用）
 
 ## 验证
 

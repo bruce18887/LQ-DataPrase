@@ -52,7 +52,7 @@ async function selectLimitsParam(page: Page): Promise<string | null> {
 
   // 读取参数列表（filterable：输入过滤后点击）
   await select.click()
-  const dropdown = page.locator('.param-select-dropdown .el-select-dropdown__item:visible')
+  const dropdown = page.locator('.dp-param-popper-multi .el-select-dropdown__item:visible')
   await expect(dropdown.first()).toBeVisible({ timeout: 15_000 })
   const params = (await dropdown.allInnerTexts()).map((t) => t.trim()).filter(Boolean)
   await page.keyboard.press('Escape')
@@ -69,7 +69,7 @@ async function selectLimitsParam(page: Page): Promise<string | null> {
     await select.click()
     const input = select.locator('input').first()
     await input.fill(name)
-    const option = page.locator('.param-select-dropdown .el-select-dropdown__item:visible')
+    const option = page.locator('.dp-param-popper-multi .el-select-dropdown__item:visible')
       .filter({ hasText: name }).first()
     await expect(option).toBeVisible({ timeout: 10_000 })
     await option.click()

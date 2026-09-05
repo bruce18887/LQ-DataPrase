@@ -37,7 +37,16 @@ export function useHistogram(
     const fileId = getSelectedFileId()
     // 未真正发请求的分支也要清错误态，否则切文件/清空参数后旧横幅会一直挂着
     histError.value = null
-    if (!fileId || !localSelectedParam.value) return
+    if (!fileId || !localSelectedParam.value) {
+      // 切文件清参数的早退：旧文件的图表/统计卡/范围表滞留会误导（与
+      // useQQPlot 早退清态同口径）。lastResults 一并清，否则 outlierHandling
+      // 的重渲染 watch 会把旧数据写回卡片
+      histResult.value = null
+      statCards.value = []
+      rangeTableData.value = []
+      lastResults = null
+      return
+    }
     const result = await run(() => api.post('/analysis/histogram/', {
       file_id: fileId,
       params: [localSelectedParam.value],

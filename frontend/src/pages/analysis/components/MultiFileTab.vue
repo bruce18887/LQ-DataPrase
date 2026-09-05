@@ -100,6 +100,7 @@
             <ParamSelector
               :params="commonParams"
               v-model:selected-param="selectedParam"
+              popper-class="dp-param-popper-multi"
             />
             <div class="common-hint">共有测试项：{{ commonParams.length }} 项</div>
             <CircularProgress :loading="loading" />
@@ -338,10 +339,25 @@ watch(selectedParam, (p) => {
   } else lotData.value = null
 })
 
+// URL 恢复的 mf_ids 可能指向已删除/无权文件：与当前文件列表求交，死 id
+// 不清掉的话每次 reload 都带上——后端对缺失文件静默 continue，剩余 <2 个
+// 时整体 400，用户只看到一个含糊报错（2026-09-05 审查 M3；单文件侧的
+// 同类守卫在 useTabFileParams，multi 侧此前没有对等物）
+function pruneDeadFileIds() {
+  if (!props.files.length || fileIds.value.length === 0) return
+  const valid = new Set(props.files.map((f: any) => f.id))
+  const kept = fileIds.value.filter((id) => valid.has(id))
+  if (kept.length !== fileIds.value.length) fileIds.value = kept
+}
+
 onMounted(() => {
   multiStore.initFromQuery()
+  pruneDeadFileIds()
   if (fileIds.value.length >= 2) reloadParams()
 })
+
+// keep-alive 期间数据管理页删文件后回到分析页：files 刷新时同样要重校验
+watch(() => props.files, pruneDeadFileIds)
 </script>
 
 <style scoped>

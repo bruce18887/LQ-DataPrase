@@ -9,7 +9,8 @@ import { expect, type Locator, type Page } from '@playwright/test'
  * docs/specs/2026-09-02 §7.1 选择器契约）：
  *  - 文件选择器：`[data-file-picker="single|wafer|correlation|multi"]`
  *  - 数据控件：`[data-filter="outlier-handling|iqr-multiplier|ignore-no-limit|…"]`
- *  - 参数选择器：ParamSelector 根 div.param-selector 内的 .el-select（filterable，popper-class=param-select-dropdown）
+ *  - 参数选择器：ParamSelector 根 div.param-selector 内的 .el-select（filterable，
+ *    popper-class 按实例隔离：单文件 dp-param-popper-single / 多文件 dp-param-popper-multi）
  *  - 选项：.el-select-dropdown__item
  */
 
@@ -44,7 +45,7 @@ export function filterControl(
   return page.locator(`.el-tab-pane:visible [data-filter="${name}"]`)
 }
 
-/** ParamSelector 的参数选择器 */
+/** ParamSelector 的参数选择器（单文件 tab 实例；多文件 tab 用 dp-param-popper-multi） */
 function paramSelect(page: Page) {
   return page.locator('.param-selector .el-select')
 }
@@ -102,10 +103,10 @@ export async function pickSensitivity(page: Page, label: string, scope = 'single
     .filter({ hasText: label }).first().click()
 }
 
-/** 读取参数下拉的全部选项文本 */
+/** 打开参数下拉后取全部选项文本（限定单文件 tab 自己的 popper 面板） */
 export async function listParams(page: Page): Promise<string[]> {
   await openElSelect(paramSelect(page))
-  const options = visibleOptions(page, 'param-select-dropdown')
+  const options = visibleOptions(page, 'dp-param-popper-single')
   await expect(options.first()).toBeVisible({ timeout: 15_000 })
   const texts = (await options.allInnerTexts()).map((t) => t.trim()).filter(Boolean)
   await page.keyboard.press('Escape')
@@ -121,7 +122,7 @@ export async function selectParam(page: Page, name: string) {
   // filterable：向内部 input 输入以过滤
   const input = sel.locator('input').first()
   await input.fill(name)
-  const options = visibleOptions(page, 'param-select-dropdown')
+  const options = visibleOptions(page, 'dp-param-popper-single')
   await options.filter({ hasText: name }).first().click()
 }
 

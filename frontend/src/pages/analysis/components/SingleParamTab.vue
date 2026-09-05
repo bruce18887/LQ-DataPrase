@@ -158,6 +158,7 @@
             :error="boxPlotError"
             :show-jitter="showJitter"
             :visible="showBoxPlot"
+            :group-kind="groupBy === 'bin' ? 'bin' : 'site'"
           />
         </div>
       </div>
@@ -302,7 +303,6 @@ watch(barWidthMax, (max) => {
 const {
   serialDistData,
   serialError,
-  loadSerialDistribution,
 } = useSerialDistribution(
   () => fileId.value,
   localSelectedParam,
@@ -313,6 +313,8 @@ const {
   dataOnlyBin1,
   serialCol,
   iqrMultiplier,
+  customLow,
+  customHigh,
 )
 
 // Composable: Site Stats
@@ -325,6 +327,8 @@ const {
   localSelectedParam,
   rangeType,
   dataOnlyBin1,
+  customLow,
+  customHigh,
 )
 
 // Composable: BoxPlot
@@ -362,7 +366,6 @@ const {
   qqLoading,
   qqResult,
   qqError,
-  loadQQPlot,
 } = useQQPlot(
   () => fileId.value,
   localSelectedParam,
@@ -387,14 +390,10 @@ watch(localSelectedParam, () => {
   loadSiteStats()
 })
 
-watch(histResult, () => {
-  if (chartMode.value === 'serial') {
-    loadSerialDistribution()
-  }
-  if (showQQPlot.value && chartMode.value === 'distribution') {
-    loadQQPlot()
-  }
-})
+// （watch(histResult) 联动已删）切参数/改敏感度时 QQ 图与序列分布各发两次
+// 相同请求：useQQPlot/useSerialDistribution 内部已有同触发的 watch（参数、
+// 敏感度、bin1、模式），histResult 落地后再发的那次纯属重复——三个端点都
+// 是后端重计算接口（2026-09-05 审查 L1/3.8）。
 
 // 换文件时本 tab 的参数由 useTabFileParams 重新校验/回退首项（它拉新列表时
 // 已把不在列表里的旧参数丢掉）；序列列选择是文件局部的配置，必须重置回自动检测

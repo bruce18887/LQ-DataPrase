@@ -60,8 +60,8 @@
     <!-- 良率统计卡片 -->
     <el-row v-if="waferData" :gutter="12" style="margin-bottom: 12px">
       <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-2)">Total Dies</div><div style="font-size: 18px; font-weight: bold">{{ waferData.stats?.total ?? '-' }}</div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-2)">Pass Dies</div><div style="font-size: 18px; font-weight: bold; color: waferColors.pass">{{ waferData.stats?.pass_count ?? '-' }}</div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-2)">Fail Dies</div><div style="font-size: 18px; font-weight: bold; color: waferColors.fail">{{ waferData.stats?.fail_count ?? '-' }}</div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-2)">Pass Dies</div><div :style="{ fontSize: '18px', fontWeight: 'bold', color: waferColors.pass }">{{ waferData.stats?.pass_count ?? '-' }}</div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-2)">Fail Dies</div><div :style="{ fontSize: '18px', fontWeight: 'bold', color: waferColors.fail }">{{ waferData.stats?.fail_count ?? '-' }}</div></el-card></el-col>
       <el-col :span="6"><el-card shadow="hover"><div style="font-size: 12px; color: var(--text-2)">Yield</div><div :style="{ fontSize: '18px', fontWeight: 'bold', color: (waferData.stats?.yield_pct ?? 0) >= 95 ? waferColors.pass : (waferData.stats?.yield_pct ?? 0) >= 85 ? waferColors.zoneMid : waferColors.zoneEdge }">{{ waferData.stats?.yield_pct?.toFixed(1) ?? '-' }}%</div></el-card></el-col>
     </el-row>
 
@@ -74,9 +74,9 @@
 
     <!-- 分区良率统计 -->
     <el-row v-if="localColorBy === 'zone' && zonalData?.zones?.length" :gutter="12" style="margin-bottom: 12px">
-      <el-col :span="8"><el-card shadow="hover" :style="{ borderLeft: '3px solid ' + waferColors.zoneCenter }"><div style="font-size: 11px; color: var(--text-2)">中心区 Center Zone</div><div style="font-size: 16px; font-weight: bold; color: waferColors.zoneCenter">{{ getZoneYield('中心区') }}%</div><div style="font-size: 11px; color: var(--text-2)">{{ getZoneStat('中心区', 'pass') }} / {{ getZoneStat('中心区', 'total') }}</div></el-card></el-col>
-      <el-col :span="8"><el-card shadow="hover" :style="{ borderLeft: '3px solid ' + waferColors.zoneMid }"><div style="font-size: 11px; color: var(--text-2)">中间区 Middle Zone</div><div style="font-size: 16px; font-weight: bold; color: waferColors.zoneMid">{{ getZoneYield('中间区') }}%</div><div style="font-size: 11px; color: var(--text-2)">{{ getZoneStat('中间区', 'pass') }} / {{ getZoneStat('中间区', 'total') }}</div></el-card></el-col>
-      <el-col :span="8"><el-card shadow="hover" :style="{ borderLeft: '3px solid ' + waferColors.zoneEdge }"><div style="font-size: 11px; color: var(--text-2)">边缘区 Edge Zone</div><div style="font-size: 16px; font-weight: bold; color: waferColors.zoneEdge">{{ getZoneYield('边缘区') }}%</div><div style="font-size: 11px; color: var(--text-2)">{{ getZoneStat('边缘区', 'pass') }} / {{ getZoneStat('边缘区', 'total') }}</div></el-card></el-col>
+      <el-col :span="8"><el-card shadow="hover" :style="{ borderLeft: '3px solid ' + waferColors.zoneCenter }"><div style="font-size: 11px; color: var(--text-2)">中心区 Center Zone</div><div :style="{ fontSize: '16px', fontWeight: 'bold', color: waferColors.zoneCenter }">{{ getZoneYield('中心区') }}%</div><div style="font-size: 11px; color: var(--text-2)">{{ getZoneStat('中心区', 'pass') }} / {{ getZoneStat('中心区', 'total') }}</div></el-card></el-col>
+      <el-col :span="8"><el-card shadow="hover" :style="{ borderLeft: '3px solid ' + waferColors.zoneMid }"><div style="font-size: 11px; color: var(--text-2)">中间区 Middle Zone</div><div :style="{ fontSize: '16px', fontWeight: 'bold', color: waferColors.zoneMid }">{{ getZoneYield('中间区') }}%</div><div style="font-size: 11px; color: var(--text-2)">{{ getZoneStat('中间区', 'pass') }} / {{ getZoneStat('中间区', 'total') }}</div></el-card></el-col>
+      <el-col :span="8"><el-card shadow="hover" :style="{ borderLeft: '3px solid ' + waferColors.zoneEdge }"><div style="font-size: 11px; color: var(--text-2)">边缘区 Edge Zone</div><div :style="{ fontSize: '16px', fontWeight: 'bold', color: waferColors.zoneEdge }">{{ getZoneYield('边缘区') }}%</div><div style="font-size: 11px; color: var(--text-2)">{{ getZoneStat('边缘区', 'pass') }} / {{ getZoneStat('边缘区', 'total') }}</div></el-card></el-col>
     </el-row>
 
     <el-card style="margin-top: 12px">
@@ -126,14 +126,25 @@ const waferData = ref<any>(null)
 const waferError = ref<string | null>(null)
 const waferLoading = ref(false)
 
-// 缺坐标列等错误走 axios 抛错路径（后端 400），不再静默空白
+// 缺坐标列等错误走 axios 抛错路径（后端 400），不再静默空白。
+// 两条数据通道各自维护「最新请求」序号：裸 await 无守卫时，切文件/快速连点
+// 后在途旧响应会把旧文件的晶圆图/分区数据写回（2026-09-05 审查 M2）；
+// waferLoading 由最新请求独占管理，先完成的一方不再熄灭在途方的加载态。
+// loadWafer/loadWaferGlobal 同写 waferData 共用 waferLoadSeq；
+// fetchZonalYield 写 zonalData，是独立通道，单独计数（不能与晶圆图互斥）。
+let waferLoadSeq = 0
+let zonalLoadSeq = 0
+
 async function loadWafer() {
   if (!fileId.value) return
+  const mySeq = ++waferLoadSeq
+  const reqFileId = fileId.value
   waferLoading.value = true
   try {
-    const payload: any = { file_id: fileId.value, color_by: localColorBy.value }
+    const payload: any = { file_id: reqFileId, color_by: localColorBy.value }
     if (localParam.value) payload.param = localParam.value
     const { data } = await analysisApi.postWaferMap(payload)
+    if (mySeq !== waferLoadSeq || fileId.value !== reqFileId) return
     if (data.error) {
       // 防御旧后端 200 错误载荷
       waferError.value = formatError({ response: { data } })
@@ -142,9 +153,10 @@ async function loadWafer() {
       waferError.value = null
     }
   } catch (e) {
+    if (mySeq !== waferLoadSeq) return
     waferError.value = formatError(e)
   } finally {
-    waferLoading.value = false
+    if (mySeq === waferLoadSeq) waferLoading.value = false
   }
 }
 
@@ -155,12 +167,15 @@ async function loadWafer() {
  */
 async function loadWaferGlobal() {
   if (!fileId.value) return
+  const mySeq = ++waferLoadSeq
+  const reqFileId = fileId.value
   waferLoading.value = true
   try {
     const { data } = await analysisApi.postWaferMap({
-      file_id: fileId.value,
+      file_id: reqFileId,
       color_by: localColorBy.value,
     })
+    if (mySeq !== waferLoadSeq || fileId.value !== reqFileId) return
     if (data.error) {
       waferError.value = formatError({ response: { data } })
     } else {
@@ -168,9 +183,10 @@ async function loadWaferGlobal() {
       waferError.value = null
     }
   } catch (e) {
+    if (mySeq !== waferLoadSeq) return
     waferError.value = formatError(e)
   } finally {
-    waferLoading.value = false
+    if (mySeq === waferLoadSeq) waferLoading.value = false
   }
 }
 
@@ -195,8 +211,19 @@ function getZoneStat(name: string, key: string): string | number { const zone = 
 
 async function fetchZonalYield() {
   if (!fileId.value) return
+  const mySeq = ++zonalLoadSeq
+  const reqFileId = fileId.value
+  const reqParam = localParam.value
   zonalError.value = ''
-  try { const { data } = await analysisApi.getZonalYield(fileId.value, localParam.value || undefined); zonalData.value = data } catch (e) { zonalError.value = formatError(e, '分区良率加载失败'); zonalData.value = null }
+  try {
+    const { data } = await analysisApi.getZonalYield(reqFileId, reqParam || undefined)
+    if (mySeq !== zonalLoadSeq || fileId.value !== reqFileId || localParam.value !== reqParam) return
+    zonalData.value = data
+  } catch (e) {
+    if (mySeq !== zonalLoadSeq) return
+    zonalError.value = formatError(e, '分区良率加载失败')
+    zonalData.value = null
+  }
 }
 
 function onLoad() { zonalData.value = null; loadWafer(); if (localColorBy.value === 'zone') fetchZonalYield() }
