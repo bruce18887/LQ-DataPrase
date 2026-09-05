@@ -132,6 +132,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAnalysisStore } from '../../../stores/analysis'
+import { useSingleTabStore } from '../../../stores/analysisTabs'
 import type { TestItemOverview } from '../../../types'
 import CpkBadge from '../../../components/common/CpkBadge.vue'
 import { formatPercent } from '../../../utils/chart-bar'
@@ -221,10 +222,14 @@ function handleSortChange({ prop, order }: { prop: string; order: 'ascending' | 
 
 function goToAnalysis(row: TestItemOverview) {
   if (!props.fileId) return
-  analysisStore.selectedFileId = props.fileId
-  analysisStore.selectedParam = row.name
+  // 跳转只写「单文件分析」那一份上下文：其他 tab 的文件选择与它无关。
+  // selectedParam 先于参数列表写入，由 useTabFileParams 的「预设参数仍在
+  // 新列表里就保留」策略接住（列表加载后若不存在则回退首项）。
+  const singleTab = useSingleTabStore()
+  singleTab.fileId = props.fileId
+  singleTab.selectedParam = row.name
+  singleTab.chartMode = 'distribution'
   analysisStore.activeTab = 'single-param'
-  analysisStore.chartMode = 'distribution'
   router.push('/analysis')
 }
 

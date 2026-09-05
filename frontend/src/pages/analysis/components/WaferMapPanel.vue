@@ -1,8 +1,26 @@
 <template>
   <div>
+    <!-- 本 tab 自己选文件：与单文件分析/相关性/多文件四个 tab 互不影响 -->
+    <el-row :gutter="12" style="margin-bottom: 10px" align="middle">
+      <el-col :span="10">
+        <AnalysisFilePicker
+          v-model="fileId"
+          :files="files"
+          scope="wafer"
+          :loading="listLoading"
+        />
+      </el-col>
+      <el-col :span="14">
+        <span class="wafer-note">
+          本图按全部 die 的 Pass/Fail 判定，数据筛选不影响本图；
+          可选参数取自直方图的测试项列表。
+        </span>
+      </el-col>
+    </el-row>
+
     <el-row :gutter="12" style="margin-bottom: 12px" align="middle">
       <el-col :span="3">
-        <el-button type="primary" @click="onLoad" :loading="loading" style="width: 100%">加载晶圆图</el-button>
+        <el-button type="primary" @click="onLoad" :loading="waferLoading" style="width: 100%">加载晶圆图</el-button>
       </el-col>
       <el-col :span="4">
         <el-select v-model="localParam" placeholder="判定参数(可选)" clearable style="width: 100%" @change="onLoad">
@@ -68,24 +86,100 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useWaferTabStore } from '../../../stores/analysisTabs'
+import type { DataFile } from '../../../types'
 import { useChart } from '../../../composables/useChart'
+import { useTabFileParams } from '../composables/useTabFileParams'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
 import { getSiteColors8 } from '../../../utils/chart-bar'
 import { formatError } from '../../../utils/error'
 import { analysisApi } from '../../../api/analysis'
+import AnalysisFilePicker from './AnalysisFilePicker.vue'
 import ErrorBanner from '../../../components/common/ErrorBanner.vue'
 
-const props = defineProps<{ params: string[]; loading: boolean; waferData: any; waferError?: string | null; fileId?: number }>()
-const emit = defineEmits<{ load: [param: string, colorBy: string]; loadGlobal: [colorBy: string] }>()
+const props = defineProps<{ files: DataFile[] }>()
 const { colors, isDark } = useEChartsTheme()
 
+// 文件与参数列表是本 tab 自己的（`wafer_map` 不读任何筛选字段，且
+// `data_only_bin1` 会把 fail die 全抹掉 → 拉参数列表时不带开关）
+const { fileId, params, loading: listLoading } = storeToRefs(useWaferTabStore())
+useTabFileParams({
+  ctx: { fileId, params, loading: listLoading },
+  files: computed(() => props.files),
+})
+
+// 判定参数可选：不入 store，换文件/换列表后若已不在候选集里就回到「无」
 const localParam = ref('')
+watch(params, (list) => {
+  if (localParam.value && !list.includes(localParam.value)) localParam.value = ''
+})
 const localColorBy = ref('result')
 const localHeight = ref(550)
 const localShowEdge = ref(true)
 const zonalData = ref<any>(null)
 const zonalError = ref('')
+
+// 晶圆图数据（此前挂在 AnalysisPage 上，随文件选择一起下放到本 tab）
+const waferData = ref<any>(null)
+const waferError = ref<string | null>(null)
+const waferLoading = ref(false)
+
+// 缺坐标列等错误走 axios 抛错路径（后端 400），不再静默空白
+async function loadWafer() {
+  if (!fileId.value) return
+  waferLoading.value = true
+  try {
+    const payload: any = { file_id: fileId.value, color_by: localColorBy.value }
+    if (localParam.value) payload.param = localParam.value
+    const { data } = await analysisApi.postWaferMap(payload)
+    if (data.error) {
+      // 防御旧后端 200 错误载荷
+      waferError.value = formatError({ response: { data } })
+    } else {
+      waferData.value = data
+      waferError.value = null
+    }
+  } catch (e) {
+    waferError.value = formatError(e)
+  } finally {
+    waferLoading.value = false
+  }
+}
+
+/**
+ * 全局判定：不带参数重取——与「不选判定参数」同口径。
+ * 旧实现额外发一个 `global_judgment` 字段，但后端从不读它（
+ * docs/specs/2026-09-02 §1 的「死字段」），因此这里不再透传。
+ */
+async function loadWaferGlobal() {
+  if (!fileId.value) return
+  waferLoading.value = true
+  try {
+    const { data } = await analysisApi.postWaferMap({
+      file_id: fileId.value,
+      color_by: localColorBy.value,
+    })
+    if (data.error) {
+      waferError.value = formatError({ response: { data } })
+    } else {
+      waferData.value = data
+      waferError.value = null
+    }
+  } catch (e) {
+    waferError.value = formatError(e)
+  } finally {
+    waferLoading.value = false
+  }
+}
+
+// 换文件后旧数据不再属于当前选择，直接清掉防止误读
+watch(fileId, () => {
+  waferData.value = null
+  waferError.value = null
+  zonalData.value = null
+})
 
 /**
  * Pass/Fail/分区色（双主题）。night 经 CVD 色盲模拟验证：
@@ -100,23 +194,23 @@ function getZoneYield(name: string): string { const zone = zonalData.value?.zone
 function getZoneStat(name: string, key: string): string | number { const zone = zonalData.value?.zones?.find((z: any) => z.name === name); return zone ? (zone[key] ?? '-') : '-' }
 
 async function fetchZonalYield() {
-  if (!props.fileId) return
+  if (!fileId.value) return
   zonalError.value = ''
-  try { const { data } = await analysisApi.getZonalYield(props.fileId, localParam.value || undefined); zonalData.value = data } catch (e) { zonalError.value = formatError(e, '分区良率加载失败'); zonalData.value = null }
+  try { const { data } = await analysisApi.getZonalYield(fileId.value, localParam.value || undefined); zonalData.value = data } catch (e) { zonalError.value = formatError(e, '分区良率加载失败'); zonalData.value = null }
 }
 
-function onLoad() { zonalData.value = null; emit('load', localParam.value, localColorBy.value); if (localColorBy.value === 'zone' && props.fileId) fetchZonalYield() }
-function onLoadGlobal() { zonalData.value = null; emit('loadGlobal', localColorBy.value); if (localColorBy.value === 'zone' && props.fileId) fetchZonalYield() }
+function onLoad() { zonalData.value = null; loadWafer(); if (localColorBy.value === 'zone') fetchZonalYield() }
+function onLoadGlobal() { zonalData.value = null; loadWaferGlobal(); if (localColorBy.value === 'zone') fetchZonalYield() }
 function onReRender() { /* triggers watch via localShowEdge change */ }
 
 // 上万 die 时逐点 SVG rect 是主要卡顿源（与相关性散点同阈值）：强制 canvas
 // + large，小晶圆图行为零变更
-const isLarge = computed(() => ((props.waferData?.points?.length) ?? 0) >= 5000)
+const isLarge = computed(() => ((waferData.value?.points?.length) ?? 0) >= 5000)
 
 function buildOption() {
-  if (!props.waferData) return {}
+  if (!waferData.value) return {}
   const tc = colors.value.textColor
-  const data = props.waferData
+  const data = waferData.value
   const pts: any[] = data.points || []
   const wafer = data.wafer
   const colorBy = localColorBy.value
@@ -171,9 +265,18 @@ function buildOption() {
 
 const { chartRef } = useChart(
   buildOption,
-  [() => props.waferData, localShowEdge, localColorBy, zonalData],
+  [waferData, localShowEdge, localColorBy, zonalData],
   'chartRef',
   () => (isLarge.value ? 'canvas' : getChartRenderer()),
 )
 void chartRef // bound to <div ref="chartRef"> in template
 </script>
+
+<style scoped>
+/* 晶圆图不吃数据筛选的例外说明（与左栏筛选区同屏时防用户误以为会影响本图） */
+.wafer-note {
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+</style>

@@ -1,134 +1,33 @@
 import { defineStore } from 'pinia'
-import { ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref } from 'vue'
+import {
+  useCorrelationTabStore,
+  useMultiTabStore,
+  useSingleTabStore,
+  useWaferTabStore,
+} from './analysisTabs'
 
+/**
+ * 分析页的跨 tab 状态：只剩「当前打开哪个 tab」。
+ *
+ * 文件选择、参数列表、数据筛选、异常值处理都按 tab 独立，收在
+ * `stores/analysisTabs.ts` 的四个子 store 里（2026-09-05）——页头那份
+ * 全局 `selectedFileId` 会让任一 tab 的选择静默换掉其他 tab 的数据源。
+ */
 export const useAnalysisStore = defineStore('analysis', () => {
-  const route = useRoute()
-  const router = useRouter()
-
-  // 持久化状态
-  const selectedFileId = ref<number | null>(null)
-  const selectedParam = ref('')
   const activeTab = ref('single-param')
-  const chartMode = ref('distribution')
-  const chartConfig = ref<string[]>(['limit', 's6', 'kde'])
-  const rangeType = ref('RDL')
-  const barWidthPercent = ref(20)
-  // 柱体重合度 0-100（barGap 负值）：重合越高柱组越窄、柱宽上限越高。
-  // 默认 5%（接近完全并排，柱宽上限约 10%）；0 = 完全并排，柱宽受限于 ~9%
-  const barOverlapPercent = ref(5)
-  const ignoreNoLimit = ref(false)
-  // 图表配置筛选开关：两个筛选测试项（参数列表），一个筛选数据行（仅 Bin1）
-  const ignoreNoTestValue = ref(false)
-  const dataOnlyBin1 = ref(false)
-  const onlyFailTestItem = ref(false)
-  const onlyLowCpk = ref(false)
-  const customLow = ref<number | null>(null)
-  const customHigh = ref<number | null>(null)
-  const outlierHandling = ref<'clip' | 'exclude' | 'off'>('off')
-  const iqrMultiplier = ref<number>(1.5)
 
-  // Tab: 多文件分析（multi-file）
-  const multiFileIds = ref<number[]>([])
-  const multiSelectedParam = ref('')
-  const multiFileNames = ref<Record<number, string>>({})
-  const multiChartConfig = ref<string[]>(['limit'])
-  const multiBarWidthPercent = ref(20)
-  const multiIgnoreNoLimit = ref(false)
-  const multiRangeType = ref('RDL')
-  // 多文件分析数据筛选（与单文件 5 开关同口径，2026-08-20）
-  const multiIgnoreNoTestValue = ref(false)
-  const multiDataOnlyBin1 = ref(false)
-  const multiOnlyFailTestItem = ref(false)
-  const multiOnlyLowCpk = ref(false)
-
-  // Initialize from URL query params
-  function initFromQuery() {
-    const q = route.query
-    if (q.mf_ids) {
-      const ids = String(q.mf_ids).split(',').map(Number).filter(n => !isNaN(n))
-      if (ids.length >= 2) multiFileIds.value = ids
-    }
-    if (q.mf_param) multiSelectedParam.value = String(q.mf_param)
-    if (q.mf_range) multiRangeType.value = String(q.mf_range)
-  }
-
-  // Sync multi-file state to URL query params (debounced)
-  let syncTimer: ReturnType<typeof setTimeout> | null = null
-  function syncToQuery() {
-    if (syncTimer) clearTimeout(syncTimer)
-    syncTimer = setTimeout(() => {
-      const q: Record<string, string> = {}
-      if (multiFileIds.value.length >= 2) q.mf_ids = multiFileIds.value.join(',')
-      if (multiSelectedParam.value) q.mf_param = multiSelectedParam.value
-      if (multiRangeType.value && multiRangeType.value !== 'RDL') q.mf_range = multiRangeType.value
-      router.replace({ query: { ...route.query, ...q } })
-    }, 300)
-  }
-
-  watch([multiFileIds, multiSelectedParam, multiRangeType], syncToQuery)
-
+  /** 全量重置（含四个 tab 上下文）。目前无调用点，保留给「清空会话」类入口。 */
   function reset() {
-    selectedFileId.value = null
-    selectedParam.value = ''
     activeTab.value = 'single-param'
-    chartMode.value = 'distribution'
-    chartConfig.value = ['limit', 's6', 'kde']
-    rangeType.value = 'RDL'
-    barWidthPercent.value = 20
-    barOverlapPercent.value = 5
-    ignoreNoLimit.value = false
-    ignoreNoTestValue.value = false
-    dataOnlyBin1.value = false
-    onlyFailTestItem.value = false
-    onlyLowCpk.value = false
-    customLow.value = null
-    customHigh.value = null
-    outlierHandling.value = 'off'
-    iqrMultiplier.value = 1.5
-    multiFileIds.value = []
-    multiSelectedParam.value = ''
-    multiFileNames.value = {}
-    multiChartConfig.value = ['limit']
-    multiBarWidthPercent.value = 20
-    multiIgnoreNoLimit.value = false
-    multiRangeType.value = 'RDL'
-    multiIgnoreNoTestValue.value = false
-    multiDataOnlyBin1.value = false
-    multiOnlyFailTestItem.value = false
-    multiOnlyLowCpk.value = false
+    useSingleTabStore().reset()
+    useWaferTabStore().reset()
+    useCorrelationTabStore().reset()
+    useMultiTabStore().reset()
   }
 
   return {
-    selectedFileId,
-    selectedParam,
     activeTab,
-    chartMode,
-    chartConfig,
-    rangeType,
-    barWidthPercent,
-    barOverlapPercent,
-    ignoreNoLimit,
-    ignoreNoTestValue,
-    dataOnlyBin1,
-    onlyFailTestItem,
-    onlyLowCpk,
-    customLow,
-    customHigh,
-    outlierHandling,
-    iqrMultiplier,
-    multiFileIds,
-    multiSelectedParam,
-    multiFileNames,
-    multiChartConfig,
-    multiBarWidthPercent,
-    multiIgnoreNoLimit,
-    multiRangeType,
-    multiIgnoreNoTestValue,
-    multiDataOnlyBin1,
-    multiOnlyFailTestItem,
-    multiOnlyLowCpk,
-    initFromQuery,
     reset,
   }
 })
