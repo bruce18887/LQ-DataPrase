@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile } from '../helpers/params'
+import { selectAnalysisFile, pickTabFile, filterControl } from '../helpers/params'
 import { RECOMMENDED } from '../fixtures/test-data'
 
 /**
@@ -57,6 +57,20 @@ function corrScope(page: Page) {
   return page.locator('.el-tab-pane').filter({ hasText: '文件相关性' }).filter({ visible: true }).first()
 }
 
+/**
+ * 打开相关性 tab 并选上本 tab 自己的文件。
+ *
+ * 2026-09-05 起四个 tab 各持一份文件选择：在单文件 tab 选的文件不会
+ * 自动带给相关性 tab，不显式选到 CTA8280F 就没有 Index_No / Kelvin_VIN。
+ */
+async function openCorrelationTab(page: Page) {
+  await gotoApp(page, '/analysis')
+  await page.getByRole('tab', { name: /相关性对比/ }).click()
+  await pickTabFile(page, 'correlation', RECOMMENDED.analysis)
+  // 等本 tab 的参数列表到达（选 X/Y 依赖它）
+  await expect(filterControl(page, 'data-only-bin1')).toBeVisible({ timeout: 20_000 })
+}
+
 test.describe('@p1 多文件分析与相关性筛选开关', { tag: ['@p1', '@analysis'] }, () => {
   test('多文件分析：仅用Pass数据 → multi_lot 请求携带 data_only_bin1 且分布重算', async ({ page }) => {
     await openMultiFile(page)
@@ -95,11 +109,7 @@ test.describe('@p1 多文件分析与相关性筛选开关', { tag: ['@p1', '@an
   })
 
   test('相关性散点：勾选仅用Pass数据 → correlation 请求携带开关', async ({ page }) => {
-    await gotoApp(page, '/analysis')
-    await selectAnalysisFile(page, RECOMMENDED.analysis)
-    await page.getByRole('tab', { name: /相关性对比/ }).click()
-    // 等 tab 面板挂载完成（CorrelationToolsTab setup 里 loadFiles 等异步）
-    await page.waitForTimeout(800)
+    await openCorrelationTab(page)
 
     // 选 X/Y 参数（CTA8280F_FT 固定存在的两个数值列），自动触发 correlation 请求。
     // 注意：el-select 必须按「含 label 的卡片」定位——pane 级 hasText 会把
@@ -132,11 +142,9 @@ test.describe('@p1 多文件分析与相关性筛选开关', { tag: ['@p1', '@an
         r.request().postData()?.includes('"data_only_bin1":true') === true,
       { timeout: 20_000 },
     )
-    await toggleFilter(page, '.corr-filter-box', '仅用Pass数据(Bin1)')
+    await filterControl(page, 'data-only-bin1').click()
     // 勾选态必须生效（防点击落空导致请求缺失的假失败）
-    await expect(
-      page.locator('.corr-filter-box .el-checkbox').filter({ hasText: '仅用Pass数据(Bin1)' }).first(),
-    ).toHaveClass(/is-checked/)
+    await expect(filterControl(page, 'data-only-bin1')).toHaveClass(/is-checked/)
     const resp = await respPromise
     expect(resp.request().postData() || '', 'correlation 请求应携带 data_only_bin1')
       .toContain('"data_only_bin1":true')
@@ -144,9 +152,7 @@ test.describe('@p1 多文件分析与相关性筛选开关', { tag: ['@p1', '@an
   })
 
   test('相关性矩阵：勾选仅用Pass数据 → correlation_matrix 请求携带开关', async ({ page }) => {
-    await gotoApp(page, '/analysis')
-    await selectAnalysisFile(page, RECOMMENDED.analysis)
-    await page.getByRole('tab', { name: /相关性对比/ }).click()
+    await openCorrelationTab(page)
 
     // 切到矩阵模式并计算（默认参数全选）
     await page.locator('.el-radio-button').filter({ hasText: '相关性矩阵' }).first().click()
@@ -158,8 +164,7 @@ test.describe('@p1 多文件分析与相关性筛选开关', { tag: ['@p1', '@an
         r.status() < 500,
       { timeout: 20_000 },
     )
-    await toggleFilter(page, '.corr-filter-box', '仅用Pass数据(Bin1)')
-    // 开关变化会触发散点重载（X/Y 未选时无请求）与矩阵参数修剪；再手动计算矩阵
+    await filterControl(page, 'data-only-bin1').click()
     await page.getByRole('button', { name: /计算相关性矩阵/ }).click()
     const resp = await respPromise
     expect(resp.request().postData() || '', 'correlation_matrix 请求应携带 data_only_bin1')

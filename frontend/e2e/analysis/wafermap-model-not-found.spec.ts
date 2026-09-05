@@ -1,6 +1,6 @@
 import { test, expect, type Locator } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile } from '../helpers/params'
+import { pickTabFile } from '../helpers/params'
 import { expectChartRendered } from '../helpers/charts'
 
 /**
@@ -54,10 +54,10 @@ test('机制复现：lazyUpdate 期间悬停被移除 series 的陈旧散点 →
   })
 
   await gotoApp(page, '/analysis')
-  await selectAnalysisFile(page, FILE_SUBSTR)
   await expect(page.getByRole('tab', { name: /晶圆图/ })).toBeVisible({ timeout: 30_000 })
-  // lazy 挂载：先打开 tab，面板控件才存在
+  // lazy 挂载：先打开 tab，面板控件才存在；晶圆图吃自己那份文件选择（与单文件 tab 无关）
   await page.getByRole('tab', { name: /晶圆图/ }).click()
+  await pickTabFile(page, 'wafer', FILE_SUBSTR)
   const loadBtn = page.locator('button').filter({ hasText: '加载晶圆图' })
   await expect(loadBtn).toBeEnabled({ timeout: 120_000 })
   const panel = page.getByRole('tabpanel', { name: /晶圆图/ })
@@ -127,11 +127,12 @@ test('大文件晶圆图：悬停/图例/缩放/模式切换全程无 ECharts mo
   const problems = collectEChartsConsole(page)
 
   await gotoApp(page, '/analysis')
-  await selectAnalysisFile(page, FILE_SUBSTR)
   await expect(page.getByRole('tab', { name: /晶圆图/ })).toBeVisible({ timeout: 30_000 })
 
-  // lazy 挂载：先打开 tab；按钮可用 = 参数列表加载完成
+  // lazy 挂载：先打开 tab；按钮可用 = 参数列表加载完成。
+  // 文件在晶圆图 tab 内选（每个 tab 自己的选择器）
   await page.getByRole('tab', { name: /晶圆图/ }).click()
+  await pickTabFile(page, 'wafer', FILE_SUBSTR)
   const loadBtn = page.locator('button').filter({ hasText: '加载晶圆图' })
   await expect(loadBtn).toBeEnabled({ timeout: 120_000 })
 

@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile } from '../helpers/params'
+import { selectAnalysisFile, pickTabFile } from '../helpers/params'
 import { RECOMMENDED } from '../fixtures/test-data'
 import { waitLoadingGone } from '../helpers/charts'
 
@@ -73,9 +73,11 @@ async function selectTwoFilesInMultiTab(page: Page) {
   await expect(page.locator(`${MULTI} .common-hint`)).toBeVisible({ timeout: 60_000 })
 }
 
-/** 相关性 tab：选 X/Y 参数触发一次 correlation */
+/** 相关性 tab：选自己的文件 + 选 X/Y 参数触发一次 correlation */
 async function selectScatterParams(page: Page) {
   await page.getByRole('tab', { name: /相关性对比/ }).click()
+  // 2026-09-05 起相关性 tab 吃自己那份文件选择，不选到 CTA8280F 就找不到这两个参数
+  await pickTabFile(page, 'correlation', RECOMMENDED.analysis)
   const xCard = page.locator('.el-tab-pane:visible .el-card').filter({ hasText: 'X 轴测试项' }).first()
   const xSelect = xCard.locator('.el-select').first()
   await xSelect.click()
@@ -114,7 +116,7 @@ test.describe('@p1 分析页请求扇出', { tag: ['@p1', '@analysis'] }, () => 
     expect(wafer.count, '晶圆图只在点击「加载晶圆图」时请求').toBe(0)
   })
 
-  test('相关性 tab 访问过后隐藏：单文件侧切开关不重发，切回时补一次', async ({ page }) => {
+  test('单文件侧开关与相关性侧开关互不相干：不重发也不补发', async ({ page }) => {
     await gotoApp(page, '/analysis')
     await selectAnalysisFile(page, RECOMMENDED.analysis)
     await waitHistogramSettled(page)
@@ -123,6 +125,7 @@ test.describe('@p1 分析页请求扇出', { tag: ['@p1', '@analysis'] }, () => 
     await page.getByRole('tab', { name: /单文件分析/ }).click()
     await expect(page.locator(SINGLE)).toBeVisible({ timeout: 30_000 })
 
+    // 在单文件 tab 勾 Bin1：只应重发单文件侧的取数，相关性 tab 自己的开关未变
     const corr = postCounter(page, '/analysis/correlation/')
     await page.locator(`${SINGLE} .el-checkbox`).filter({ hasText: BIN1 }).first().click()
     await expect(
@@ -130,18 +133,24 @@ test.describe('@p1 分析页请求扇出', { tag: ['@p1', '@analysis'] }, () => 
     ).toHaveClass(/is-checked/)
     await waitHistogramSettled(page, '"data_only_bin1":true')
     await page.waitForTimeout(2_000)
-    expect(corr.count, '隐藏的相关性 tab 不应跟着共享开关重算散点').toBe(0)
+    expect(corr.count, '隐藏的相关性 tab 不应跟着单文件侧开关重算散点').toBe(0)
 
-    // 切回相关性 tab：必须把隐藏期间的开关变化补上（不能静默留旧图）
+    // 切回相关性 tab：仍然不应补发——两个 tab 的开关不再是同一批字段
     await page.getByRole('tab', { name: /相关性对比/ }).click()
-    const resp = await page.waitForResponse(
+    await page.waitForTimeout(2_000)
+    expect(corr.count, '切回相关性 tab 也不应补发 correlation').toBe(0)
+
+    // 相关性 tab 内自己勾 Bin1 → 才会带 data_only_bin1 重发
+    const resp = page.waitForResponse(
       (r) =>
         r.url().includes('/analysis/correlation/') &&
         r.request().method() === 'POST' &&
         r.request().postData()?.includes('"data_only_bin1":true') === true,
       { timeout: 120_000 },
     )
-    expect(resp.status(), '补发的 correlation 请求应成功').toBeLessThan(500)
+    await page.locator('.el-tab-pane:visible .filter-section .el-checkbox')
+      .filter({ hasText: BIN1 }).first().click()
+    expect((await resp).status(), '本 tab 开关变化应重发散点').toBeLessThan(500)
   })
 
   test('URL 带 mf_ids 进入：默认单文件 tab 不预打 multi_lot，点进去才算', async ({ page }) => {

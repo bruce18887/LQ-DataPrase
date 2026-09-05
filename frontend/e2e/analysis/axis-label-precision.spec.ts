@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile } from '../helpers/params'
+import { selectAnalysisFile, pickTabFile } from '../helpers/params'
 import { waitLoadingGone } from '../helpers/charts'
 import { pickOption } from '../helpers/elplus'
 import { RECOMMENDED } from '../fixtures/test-data'
@@ -202,6 +202,8 @@ test.describe('@p1 轴刻度小数位精度（formatAxisValue 统一）', { tag:
   test('相关性散点 X/Y 轴：智能 4 位格式（用户点名回归）', async ({ page }) => {
     await enterAnalysis(page, RECOMMENDED.analysis)
     await page.getByRole('tab', { name: /相关性对比/ }).click()
+    // 相关性 tab 吃自己那份文件选择：不选到 CTA8280F 就没有 KELVIN_VIN/KELVIN_SW
+    await pickTabFile(page, 'correlation', RECOMMENDED.analysis)
 
     const layout = page.locator('.analysis-tab-layout:visible')
     await expect(layout).toBeVisible({ timeout: 10_000 })

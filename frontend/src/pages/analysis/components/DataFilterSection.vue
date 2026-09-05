@@ -53,6 +53,7 @@
           size="small"
           aria-label="异常值处理"
           data-filter="outlier-handling"
+          :popper-class="`dp-outlier-popper-${scope}`"
           class="control-select"
           @change="emit('update:outlierHandling', $event)"
         >
@@ -70,6 +71,7 @@
           size="small"
           aria-label="敏感度"
           data-filter="iqr-multiplier"
+          :popper-class="`dp-iqr-popper-${scope}`"
           class="control-select control-select--wide"
           @change="emit('update:iqrMultiplier', $event)"
         >
@@ -107,11 +109,17 @@ const props = withDefaults(defineProps<{
   showOutlier?: boolean
   /** 敏感度档位是否可暴露（晶圆图整块不显示筛选） */
   showSensitivity?: boolean
+  /**
+   * 所属 tab（single|correlation|multi）：决定两个下拉的 popper class。
+   * popper 被 teleport 到 body，不随隐藏 pane 一起消失，测试必须按它收窄定位。
+   */
+  scope?: string
 }>(), {
   outlierHandling: 'off',
   iqrMultiplier: 1.5,
   showOutlier: true,
   showSensitivity: true,
+  scope: 'single',
 })
 
 const emit = defineEmits<{

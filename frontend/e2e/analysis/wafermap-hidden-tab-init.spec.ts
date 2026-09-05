@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile } from '../helpers/params'
+import { pickTabFile } from '../helpers/params'
 
 /**
  * 回归：晶圆图「点击加载后无显示」——隐藏 tab 容器下的僵尸 init handle。
@@ -27,11 +27,11 @@ test('隐藏 tab 超时后打开晶圆图并加载：图表必须真实渲染散
   tag: ['@p1', '@analysis'],
 }, async ({ page }) => {
   await gotoApp(page, '/analysis')
-  await selectAnalysisFile(page, FILE_SUBSTR)
   // 关键步骤：停留在默认 tab 超过 init 超时窗口，模拟真实用户（先看别的 tab）
   await page.waitForTimeout(STAY_DURATION_MS)
   await page.getByRole('tab', { name: /晶圆图/ }).click()
-  // lazy 挂载：面板控件在首次打开后才存在
+  // lazy 挂载：面板控件在首次打开后才存在；文件在晶圆图自己的选择器里选
+  await pickTabFile(page, 'wafer', FILE_SUBSTR)
   const loadBtn = page.locator('button').filter({ hasText: '加载晶圆图' })
   await expect(loadBtn).toBeEnabled({ timeout: 120_000 })
 

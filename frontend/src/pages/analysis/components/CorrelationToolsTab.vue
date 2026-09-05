@@ -19,6 +19,7 @@
     <template #left-panel>
       <!-- 数据筛选 + 异常值处理：只动本 tab 自己那份（与单文件 tab 互不影响） -->
       <DataFilterSection
+        scope="correlation"
         v-model:ignore-no-limit="ignoreNoLimit"
         v-model:ignore-no-test-value="ignoreNoTestValue"
         v-model:data-only-bin1="dataOnlyBin1"

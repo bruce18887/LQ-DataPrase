@@ -145,7 +145,15 @@ python manage.py seed_test_data --clear
 - 主布局容器：`.main-layout`；侧边栏：`aside.sidebar`；侧边栏菜单项：`sidebarLink(page, '菜单名')`，激活态含 class `active`。
   - 菜单名（exact）：仪表板 / 数据管理 / 数据分析 / 批次报表 / SFTP浏览器 / 系统设置 / 功能路线图 / 用户管理。
   - ⚠️ Topbar 面包屑里有同名 link，断言菜单务必限定 `aside.sidebar`。
-- 分析页：文件选择器 `getByPlaceholder('选择数据文件')`；参数选择器 `getByPlaceholder('选择测试参数')`（filterable，popper class `param-select-dropdown`）；选项 `.el-select-dropdown__item`。
+- 分析页（2026-09-05 起每个 tab 独立选文件）：文件选择器一律按契约属性
+  `[data-file-picker="single|wafer|correlation|multi"]`（用 `filePicker(page, scope)` /
+  `pickTabFile(page, scope, name)`，**调用前先切到该 tab**，lazy pane 未挂载时选择器不在 DOM 里）；
+  数据控件按 `[data-filter="outlier-handling|iqr-multiplier|ignore-no-limit|ignore-no-test-value|data-only-bin1|only-fail-test-item|only-low-cpk"]`
+  （用 `filterControl(page, name)` / `pickOutlierMode` / `pickSensitivity`）；
+  ⚠️ 这些属性**每个 tab 一份**，`filterControl` 已限定在 `.el-tab-pane:visible` 内，自定义定位器
+  也必须加可见 pane 限定，否则访问过两个 tab 后会撞上 strict mode。参数选择器仍是
+  `.param-selector .el-select`（filterable，popper class `param-select-dropdown`）；选项
+  `.el-select-dropdown__item`。不得再用「页面上第几个 .el-select」这类位置定位。
 - ECharts 图表：断言 `canvas` 可见且尺寸 > 0（用 `expectChartRendered`）。
 - ElMessageBox 确认框 teleport 到 body，按钮文本「确定」「取消」「删除」等，全局可定位。
 - 下载：`captureDownload(page, () => 点击导出, '子目录')`。

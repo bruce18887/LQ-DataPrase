@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile } from '../helpers/params'
+import { pickTabFile } from '../helpers/params'
 import { waitLoadingGone } from '../helpers/charts'
 import { RECOMMENDED } from '../fixtures/test-data'
 
@@ -24,8 +24,9 @@ function parseChosenTotal(text: string | null) {
 test.describe('@p2 相关性矩阵默认选择', { tag: ['@p2', '@analysis'] }, () => {
   test('参数多于 12 个时默认只选 12 项', async ({ page }) => {
     await gotoApp(page, '/analysis')
-    await selectAnalysisFile(page, RECOMMENDED.analysis)
     await page.getByRole('tab', { name: /相关性对比/ }).click()
+    // 矩阵参数来自相关性 tab 自己的文件与参数列表
+    await pickTabFile(page, 'correlation', RECOMMENDED.analysis)
     await page.locator('.el-radio-button').filter({ hasText: '相关性矩阵' }).first().click()
 
     const label = page.locator(HEADER)
