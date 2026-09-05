@@ -270,8 +270,12 @@ test.describe('@p1 图表配置数据筛选开关', { tag: ['@p1', '@analysis'] 
 
   test('全 Pass 文件（Gage）：勾选仅用Pass数据后参数列表不变', async ({ page }) => {
     await gotoApp(page, '/analysis')
-    await selectAnalysisFile(page, RECOMMENDED.gage[0])
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
+    await waitLoadingGone(page.locator(SINGLE))
+    // 先等初始文件加载完再切：保证 selectAnalysisFile 等到的是 gage 自己的
+    // 计算请求而非初始文件残留的（切换窗口内列表/图表仍是上一个文件的）
+    await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
+    await selectAnalysisFile(page, RECOMMENDED.gage[0])
     await waitLoadingGone(page.locator(SINGLE))
 
     const before = await listParams(page)

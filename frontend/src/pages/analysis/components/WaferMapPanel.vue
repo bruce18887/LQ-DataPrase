@@ -276,7 +276,8 @@ void chartRef // bound to <div ref="chartRef"> in template
 /* 晶圆图不吃数据筛选的例外说明（与左栏筛选区同屏时防用户误以为会影响本图） */
 .wafer-note {
   font-size: 12px;
-  color: var(--text-3);
+  /* 同 DataFilterSection 的提示文字：浅色下 --text-3 在白底仅 2.54:1 */
+  color: var(--text-2);
   line-height: 1.5;
 }
 </style>

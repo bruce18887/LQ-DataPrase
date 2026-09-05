@@ -154,6 +154,11 @@ python manage.py seed_test_data --clear
   也必须加可见 pane 限定，否则访问过两个 tab 后会撞上 strict mode。参数选择器仍是
   `.param-selector .el-select`（filterable，popper class `param-select-dropdown`）；选项
   `.el-select-dropdown__item`。不得再用「页面上第几个 .el-select」这类位置定位。
+- 分析页切文件后读数据（2026-09-05）：切换窗口内 UI 仍显示**上一个文件**的图表/范围表
+  （遮罩不在，`waitLoadingGone` 拦不住），直接读值会拿到旧数据 —— 实测读到过残留文件
+  恒定列的 1/1 范围。读数值/参数列表前用 `selectAnalysisFile`（已内置等待新文件计算
+  请求发出）或 `pickTabFileAndWaitCompute(page, scope, name)`；要绝对严谨先等初始加载完
+  再切（见 `custom-limit-cpk.spec.ts:130` 的注释）。
 - ECharts 图表：断言 `canvas` 可见且尺寸 > 0（用 `expectChartRendered`）。
 - ElMessageBox 确认框 teleport 到 body，按钮文本「确定」「取消」「删除」等，全局可定位。
 - 下载：`captureDownload(page, () => 点击导出, '子目录')`。

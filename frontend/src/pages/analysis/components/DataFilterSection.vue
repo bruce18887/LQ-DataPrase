@@ -194,6 +194,8 @@ const sensitivityHint = computed(() => {
 
 .sensitivity-hint {
   font-size: 12px;
-  color: var(--text-3);
+  /* 不用 --text-3：浅色主题它是 #9ca3af，落在白底卡片上仅 2.54:1（e2e
+     对比度扫描实测），12px 提示文字读不动；--text-2 两套主题均 ≥ 3 */
+  color: var(--text-2);
 }
 </style>

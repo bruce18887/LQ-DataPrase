@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, selectParam, listParams, filePicker, pickOutlierMode } from '../helpers/params'
+import { selectAnalysisFile, selectParam, listParams, filePicker, pickOutlierMode, filterControl } from '../helpers/params'
 import { waitLoadingGone } from '../helpers/charts'
 import { tintContrastProbe, tokenTintProbe } from '../helpers/colors'
 import { RECOMMENDED } from '../fixtures/test-data'
@@ -249,6 +249,65 @@ test.describe('@theme 主题视觉回归', { tag: ['@p2', '@theme'] }, () => {
     for (const t of lightTokens.tokens) {
       expect(t.contrast ?? 0, `浅色模式 ${t.name} 12% 底色上文字对比度应 ≥ 3（fg=${t.fg} 底=rgb(${lightTokens.baseBgCss})）`)
         .toBeGreaterThanOrEqual(3)
+    }
+  })
+
+  test('@p2 夜+昼模式：分析页 tab 内新控件（文件选择器 / 数据筛选 / 异常值处理）可读', async ({ page }) => {
+    test.setTimeout(180_000)
+    // 2026-09-05 页头控件下移到各 tab 后，新增的三处文字（选择器 label、筛选区
+    // 小标题、敏感度提示）只用了 CSS token。本用例钉住它们在两套主题下都 ≥ 3，
+    // 并确认边框与卡片底色不同色（轮廓存在；底色本身不拿当对比度门槛）。
+    const NEW_CLASSES = ['picker-label', 'section-label', 'sensitivity-hint', 'el-checkbox__label']
+
+    for (const theme of ['night', 'light'] as const) {
+      // 后注册的 init script 后执行，同一页里循环切换主题不会互相残留
+      await page.addInitScript((t) => localStorage.setItem('theme', t), theme)
+      await gotoApp(page, '/analysis')
+      await selectAnalysisFile(page, RECOMMENDED.analysis)
+      await waitLoadingGone(page.locator('.single-param-tab'))
+
+      // 勾「仅显示低CPK项」让敏感度行与其提示文字渲染出来（否则无样本可测）
+      await page.locator('.el-tab-pane:visible .filter-section .el-checkbox')
+        .filter({ hasText: '仅显示低CPK项' }).first().click()
+      await expect(filterControl(page, 'iqr-multiplier')).toBeVisible({ timeout: 30_000 })
+
+      // ① 控件真的在屏上（否则后面的扫描会空转假绿）
+      for (const sel of ['.dp-analysis-filepicker .picker-label',
+        '.el-tab-pane:visible .filter-section .section-label',
+        '.el-tab-pane:visible .sensitivity-hint',
+        '.el-tab-pane:visible .filter-section .el-checkbox__label']) {
+        await expect(page.locator(sel).first(), `${theme}: ${sel} 应渲染`).toBeVisible({ timeout: 15_000 })
+      }
+
+      // ② 实渲文字对比度：复用全页扫描，只看新控件的类（其他元素自有用例）
+      const issues = await page.evaluate(contrastScan)
+      const mine = issues.filter((i) => NEW_CLASSES.some((c) => i.sel.includes(c)))
+      expect(mine, `${theme}: 新控件存在低对比度文字\n${JSON.stringify(mine)}`).toHaveLength(0)
+
+      // ③ token 实色 vs 筛选卡片有效底色（percent=0 即不混色）。
+      // 只钉新控件真正用的 --text-2；--text-3（浅色 #9ca3af）在白底只有
+      // 2.54:1，不能拿来做正文字色（本组件已改用 --text-2；全页扫描的步骤②会守住残留项）。
+      // baseSel 必须是**纯 CSS**：它在 page.evaluate 里交给 document.querySelector，
+      // Playwright 的 `:visible` 伪类在那里是非法选择器（直接抛 SyntaxError）。
+      const probe = await page.evaluate(tokenTintProbe, {
+        tokens: ['--text-2', '--text-3', '--border'],
+        percent: 0,
+        baseSel: '.single-param-tab .filter-section',
+      })
+      const byName: Record<string, { fg: string; contrast: number | null }> = {}
+      for (const t of probe.tokens) byName[t.name] = t
+      expect(byName['--text-2'].contrast ?? 0, `${theme}: --text-2（小标题/提示文字）对卡片底色`).toBeGreaterThanOrEqual(3)
+      // 反向钉住一个事实：浅色下 --text-3 不够对比度，所以提示文字不得用它
+      if (theme === 'light') {
+        expect(byName['--text-3'].contrast ?? 99, '浅色下 --text-3 不够 3:1，只能当装饰色')
+          .toBeLessThan(3)
+      }
+      expect(byName['--border'].fg, `${theme}: --border 应能解析出实色`).not.toBe('')
+      // 底色是 "r,g,b"（无空格）、计算色是 "rgb(r, g, b)"（有空格），
+      // 不归一化空格这条断言永远成立（假绿）。
+      const borderRgb = byName['--border'].fg.replace(/\s+/g, '')
+      expect(borderRgb, `${theme}: 边框不得与卡片底色同值（轮廓消失）`)
+        .not.toContain(`rgb(${probe.baseBgCss})`)
     }
   })
 })
