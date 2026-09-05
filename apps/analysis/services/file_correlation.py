@@ -69,8 +69,14 @@ def _numeric_params(df: pd.DataFrame) -> List[str]:
     防呆（NoCommonParamsError）永远无法触发。
     """
     excluded = set(get_serial_candidates(df)) | {'__serial__'}
+    # dtype 白名单 ('int64','float64') 漏掉 int32/float32/UInt8（真实 ETS/STDF
+    # 衍生格式常见），pandas 3.0 下 str 列也不是 object——与 analysis_views /
+    # multi_lot 的候选口径对齐改 is_numeric_dtype；bool（Dut_Pass）会被纳入，
+    # 必须显式排除（pass/fail 标志不是可对比的测试项）
     return [c for c in df.columns
-            if c not in excluded and df[c].dtype in ('int64', 'float64')]
+            if c not in excluded
+            and pd.api.types.is_numeric_dtype(df[c])
+            and not pd.api.types.is_bool_dtype(df[c])]
 
 
 def _limits_for(param: str, meta: dict) -> Tuple[Optional[float], Optional[float]]:

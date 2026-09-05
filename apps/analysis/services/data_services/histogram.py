@@ -260,6 +260,8 @@ def compute_histogram_stats(df, metadata, param, site_col,
 
     return {
         'mean': round(stats['mean'], 6),
+        # 前端 Median 统计卡消费此字段：响应此前从不带 median，卡片永远显示 '-'
+        'median': round(float(data_series.median()), 6),
         'std': round(stats['std'], 6),
         'unit': stats['unit'],
         # 规格限缺失时为 None（JSON null），前端据此**不画** LSL/USL 线。

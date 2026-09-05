@@ -110,6 +110,11 @@ class StatisticsViewSet(viewsets.GenericViewSet):
             }, status=400)
 
         range_type = get_param(request, 'range_type', 'RDL')
+        # CL 语义三端点统一为「用户自定义限」（与 histogram 同口径）：未提供
+        # custom 时才回退 stats['cl']（数据极值）——旧口径下 CL 模式 Site 表的
+        # Fail 恒 0、Yield 恒 100%（2026-09-05 审查 契约#4）
+        custom_low = get_param_float(request, 'custom_low')
+        custom_high = get_param_float(request, 'custom_high')
         # data_only_bin1 narrows the rows before series/site extraction so
         # the site table matches the histogram's Bin1-filtered stats.
         if get_bool_param(request, 'data_only_bin1'):
@@ -125,7 +130,10 @@ class StatisticsViewSet(viewsets.GenericViewSet):
             }, status=400)
 
         stats = compute_range_statistics(data_series, metadata, param)
-        lower_limit, upper_limit = resolve_limits(range_type, stats)
+        if range_type == 'CL' and custom_low is not None and custom_high is not None:
+            lower_limit, upper_limit = float(custom_low), float(custom_high)
+        else:
+            lower_limit, upper_limit = resolve_limits(range_type, stats)
 
         site_idx = get_1d_from(df, site_col)
         site_result = compute_site_stats(
@@ -256,8 +264,7 @@ class StatisticsViewSet(viewsets.GenericViewSet):
 
         Request body:
         {
-            "file_ids": [123, 124, 125],
-            "group_by": "file"  // Optional: "file" or "date"
+            "file_ids": [123, 124, 125]
         }
         """
         file_ids = get_param_list(request,'file_ids')
@@ -398,8 +405,7 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         Request body:
         {
             "file_ids": [123, 124, 125],
-            "param": "Param1",
-            "group_by": "file"  // Optional: "file" or "date"
+            "param": "Param1"
         }
         """
         file_ids = get_param_list(request,'file_ids')
