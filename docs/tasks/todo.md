@@ -812,10 +812,16 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
 
 ## P0 批次 2：前端高严重度
 
-- [ ] 2.1 序列分布图 X 轴错位：`SerialChart.vue` category 轴数值 x 映射为索引 + tooltip realSerial
-- [ ] 2.2 相关性 tab 切文件滞留：`CorrelationToolsTab.vue` 补 `watch(fileId)` 清 localX/Y + 结果
-- [ ] 2.3 multi_lot 双写竞态：`useMultiFile.ts` 两写入路径加共享 lotWriteSeq 守卫
-- [ ] 2.4 ParamSelector v-html XSS：删 v-html，列名转义后高亮
+- [x] 2.1 序列分布图 X 轴错位：`SerialChart.vue` category 轴数值 x 映射为索引 + tooltip realSerial
+- [x] 2.2 相关性 tab 切文件滞留：`CorrelationToolsTab.vue` 补 `watch(fileId)` 清 localX/Y + 结果
+- [x] 2.3 multi_lot 双写竞态：`useMultiFile.ts` 两写入路径加共享 lotWriteSeq 守卫
+- [x] 2.4 ParamSelector v-html XSS：删 v-html，列名转义后高亮
+
+> 批次 2 Review（2026-09-05）：`npm run build` 绿；e2e `serial-fail-count`（含新增
+> X 轴对齐断言：散点 x == serial 在轴 data 中的下标、serial=1 落下标 0）与新增
+> `correlation-file-switch-reset`（切文件 → 指标卡/散点清空、X/Y 回占位符）全绿；
+> 跑前按 lessons 清掉两个未钉 `LQDP_SYSTEM_CONFIG_FILE` 的残留 runserver 进程树，
+> 跑后端口已释放。marks 系列经核实 data 为空数组（纯 yAxis markLine），无需映射。
 
 ## P1 批次 3：前端竞态家族
 

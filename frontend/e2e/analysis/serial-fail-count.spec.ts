@@ -117,5 +117,26 @@ test.describe('序列分布：fail 数量与 bin 汇总颗数一致', { tag: ['@
       return series?.data?.length ?? 0
     })
     expect(pointCount).toBe(5)
+
+    // X 轴对齐回归（2026-09-05 审查）：category 轴上的数值 x 曾被 ECharts 当
+    // **索引**用，Serial_No 从 1 开始时每个点右移一格（tooltip 的真实序列号
+    // 与轴标签互相矛盾）。修复后散点 x = serial 在轴 data 中的下标，
+    // realSerial 保留真实序列号供 tooltip 显示。
+    const alignment = await wrapper.locator('div[_echarts_instance_]').evaluate((el: any) => {
+      const opt = el.__echartsInstance__?.getOption?.()
+      const xAxisData: unknown[] = opt?.xAxis?.[0]?.data ?? []
+      const series = (opt?.series ?? []).find((s: any) => s.type === 'scatter' && s.data?.length)
+      return (series?.data ?? []).map((pt: any) => ({
+        serial: pt.realSerial,
+        x: pt.value[0],
+        expected: xAxisData.indexOf(pt.realSerial),
+      }))
+    })
+    expect(alignment.length).toBe(5)
+    for (const pt of alignment) {
+      expect(pt.x, `serial ${pt.serial} 应落在轴下标 ${pt.expected}`).toBe(pt.expected)
+    }
+    // serial=1 必须落在下标 0（旧行为落在下标 1，即「2」的刻度下方）
+    expect(alignment.find((pt: any) => pt.serial === 1)?.x).toBe(0)
   })
 })
