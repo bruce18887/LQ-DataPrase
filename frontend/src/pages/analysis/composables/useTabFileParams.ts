@@ -56,8 +56,13 @@ export function useTabFileParams(opts: {
       return
     }
     ctx.loading.value = true
-    // 换文件后旧参数可能不存在于新文件，留着它发请求会 400/500
+    // 换文件后旧参数可能不存在于新文件，留着它发请求会 400/500；参数列表也
+    // 必须同时清空，否则下拉会短暂提供旧文件的参数
     ctx.params.value = []
+    // 先清预设再拉列表：不清的话，`useHistogram`/`useQQPlot` 等会拿着**上一个
+    // 文件**的参数先打一次请求（实测 400 no_valid_params + 一个错误 toast），
+    // 预设值已在上方记下，响应回来后按新列表重新选中
+    if (ctx.selectedParam) ctx.selectedParam.value = ''
     try {
       const { data } = await api.post('/analysis/histogram/', {
         file_id: fileId,

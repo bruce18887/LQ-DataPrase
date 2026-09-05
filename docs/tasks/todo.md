@@ -739,3 +739,46 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
       ④ 后端 `lower_limit`/`upper_limit` 现在会返回 null、pp/ppk 字段消失、相关矩阵出现 null 与
       `insufficient_data`——分析页/导出相关 e2e 断言需复核。
 - [ ] 双主题截图留档（本轮改了图表颜色与删除警示色，属可见变更）
+
+---
+
+# 分析页「每个 tab 独立选文件」与异常值处理归位（2026-09-05）
+
+> 需求：删掉数据分析页最上方的「选择数据文件」，改为每个 tab 有自己独立的文件
+> 选择；「异常值处理」放进「数据筛选」。确认口径：文件选择**完全独立**，数据筛选
+> 与异常值处理也**随 tab 独立**。设计见
+> `docs/specs/2026-09-05-analysis-per-tab-file-selection-design.md`。
+
+## 实施清单
+
+- [x] 批次 1｜选择器契约先行（不改行为）：`data-file-picker="single|wafer|correlation|multi"`
+      与 `data-filter="outlier-handling|iqr-multiplier|…"` 挂到现有控件；`helpers/params.ts`
+      新增 `filePicker/filterControl/pickTabFile/pickOutlierMode/pickSensitivity`，8 个 spec
+      的文案与顺序定位器迁到契约属性
+- [x] 批次 2｜`stores/analysisTabs.ts`：单文件/晶圆图/相关性/多文件四个子 store（工厂 +
+      不分叉的 `reset()`）；`stores/analysis.ts` 只剩 `activeTab`；`useBoxPlot/useQQPlot/
+      useSerialDistribution` 改为接收传入的 `iqrMultiplier` Ref；`ExportToolsTab`、
+      `TestItemOverviewSection` 改指单文件子 store
+- [x] 批次 3｜`useTabFileParams`（防抖/过期响应守卫/预设参数自愈/空白列/文件失效回落）+
+      `AnalysisFilePicker` + `DataFilterSection`；四个 tab 接线；`ChartConfigPanel` 退为纯
+      显示配置卡；`AnalysisPage` 395 → 106 行；晶圆图加载下放；多文件补传 `iqr_multiplier`；
+      敏感度可见条件改为 `outlier!=off || onlyLowCpk`；删除相关性重复 switch 与镜像 ref；
+      不再透传后端从不读的 `global_judgment`
+- [x] 批次 4｜e2e：存量用例改为「在目标 tab 内选文件」（wafermap-×2、相关性×3、分析页
+      晶圆图用例）；`tab-request-fanout` 第 2 条按新语义重写（不重发也不补发）；新增
+      `tab-independent-files.spec.ts` 6 条独立性契约
+- [x] 批次 5｜设计归档 + 09-02 spec 取代标注 + 用户指南（`04-analysis.md`、
+      `01-quickstart.md`）+ `e2e/README.md` 选择器契约章节
+
+## Review
+
+- 验证：`npm run build`（vue-tsc -b + vite）绿；分析页 + `@theme` 套件全量（workers=1
+  retries=0）结果见下方账目；浏览器双主题烟测 7 项全绿（页头已无全局控件、每个 tab
+  各一个选择器、单文件选 A / 晶圆图选 B 互不覆盖、相关性提示条按自己的档位、多文件
+  只有敏感度没有裁剪）
+- 踩坑（已记 lessons）：端口 8000 上残留一个**未钉 `LQDP_SYSTEM_CONFIG_FILE` 的旧
+  runserver**，`reuseExistingServer: !CI` 静默复用它 → e2e 后端连到用户目录库 → 文件
+  id 存在但磁盘无对应文件 → 38 条用例 `file_not_found_or_parse_failed`。一开始被当成
+  代码回归，实际是 todo 2026-09-02 条目已经预警过的同一个坑。
+- [ ] 待确认：本轮 e2e 全量账目（清理端口后重跑）——失败项必须回到已知的 5 条存量
+      （boxplot-bool-params×2、file-switch-param-reset、wafermap-×2 负载 flake）以内

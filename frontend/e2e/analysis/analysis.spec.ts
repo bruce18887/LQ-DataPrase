@@ -7,6 +7,7 @@ import {
   selectParam,
   sampleN,
   filterControl,
+  pickTabFile,
 } from '../helpers/params'
 import { pickOption } from '../helpers/elplus'
 import { PARAM_SAMPLE_COUNT, RECOMMENDED, SINGLE_SITE_FILES } from '../fixtures/test-data'
@@ -216,8 +217,10 @@ test.describe('@p1 各分析 Tab 可达', { tag: ['@p1', '@analysis'] }, () => {
 
 test.describe('@p2 晶圆图渲染', { tag: ['@p2', '@analysis'] }, () => {
   test('加载 CP 数据后晶圆图 canvas 渲染', async ({ page }) => {
-    await enterAnalysis(page, RECOMMENDED.waferMap)
+    await enterAnalysis(page, RECOMMENDED.analysis)
     await page.getByRole('tab', { name: /晶圆图/ }).click()
+    // 晶圆图吃自己那份文件选择：CP 文件必须在本 tab 内选（单文件 tab 的选择与它无关）
+    await pickTabFile(page, 'wafer', RECOMMENDED.waferMap)
 
     const loadBtn = page.getByRole('button', { name: /加载晶圆图/ })
     if (!(await loadBtn.isVisible().catch(() => false))) {
@@ -353,6 +356,8 @@ test.describe('@p1 测试项相关性分析', { tag: ['@p1', '@analysis'] }, () 
   test('相关性散点图完整流程：选择参数 → 自动加载 → 渲染图表 → 显示指标', async ({ page }) => {
     await enterAnalysis(page, RECOMMENDED.analysis)
     await page.getByRole('tab', { name: /相关性对比/ }).click()
+    // 相关性 tab 吃自己那份文件选择：不选到 CTA8280F 就没有 KELVIN_VIN/KELVIN_SW
+    await pickTabFile(page, 'correlation', RECOMMENDED.analysis)
 
     // 相关性工具面板（AnalysisTabLayout 三层布局；旧 .correlation-panel 已随
     // 2026-06-13 重构移除，选择器须匹配当前 DOM）
@@ -394,6 +399,7 @@ test.describe('@p1 测试项相关性分析', { tag: ['@p1', '@analysis'] }, () 
   test('坐标轴范围：西格玛模式出现倍数选择器', async ({ page }) => {
     await enterAnalysis(page, RECOMMENDED.analysis)
     await page.getByRole('tab', { name: /相关性对比/ }).click()
+    await pickTabFile(page, 'correlation', RECOMMENDED.analysis)
 
     const layout = page.locator('.analysis-tab-layout:visible')
     await expect(layout).toBeVisible({ timeout: 10_000 })

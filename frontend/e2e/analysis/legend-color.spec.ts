@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, selectParamWithSpecLimits } from '../helpers/params'
+import { selectAnalysisFile, selectParamWithSpecLimits, pickTabFile } from '../helpers/params'
 import { RECOMMENDED } from '../fixtures/test-data'
 
 /**
@@ -130,8 +130,9 @@ test.describe('@p1 图例颜色严格对应', { tag: ['@p1', '@analysis'] }, () 
 
   test('相关性散点：回归线 itemStyle.color 与 lineStyle.color 一致', async ({ page }) => {
     await gotoApp(page, '/analysis')
-    await selectAnalysisFile(page, RECOMMENDED.analysis)
     await page.getByRole('tab', { name: /相关性对比/ }).click()
+    // 相关性 tab 吃自己那份文件选择（不选到 CTA8280F 就没有 Kelvin_VIN）
+    await pickTabFile(page, 'correlation', RECOMMENDED.analysis)
     await page.waitForTimeout(800)
     const xCard = page.locator('.el-tab-pane:visible .el-card').filter({ hasText: 'X 轴测试项' }).first()
     const xSelect = xCard.locator('.el-select').first()

@@ -30,13 +30,18 @@ export function filePicker(page: Page, scope: 'single' | 'wafer' | 'correlation'
   return page.locator(`[data-file-picker="${scope}"]`)
 }
 
-/** 按 data-filter 契约定位分析页数据控件 */
+/**
+ * 按 data-filter 契约定位分析页数据控件。
+ *
+ * 必须限定在**可见 tab pane** 内：异常值处理/敏感度与 5 个开关现在每个
+ * tab 一份，访问过两个 tab 后同名属性会有多份实例，严格模式会报「matched 2 elements」。
+ */
 export function filterControl(
   page: Page,
   name: 'outlier-handling' | 'iqr-multiplier' | 'ignore-no-limit' | 'ignore-no-test-value'
     | 'data-only-bin1' | 'only-fail-test-item' | 'only-low-cpk',
 ) {
-  return page.locator(`[data-filter="${name}"]`)
+  return page.locator(`.el-tab-pane:visible [data-filter="${name}"]`)
 }
 
 /** ParamSelector 的参数选择器 */
@@ -51,6 +56,7 @@ export async function selectAnalysisFile(page: Page, labelSubstring?: string) {
 
 /**
  * 在指定 tab 的文件选择器里选文件（不传 substring 选第一项）。
+ * 调用前必须先切到该 tab（lazy pane 未挂载时选择器不在 DOM 里）。
  * 单选语义；多文件 tab 的多选勾选仍由各 spec 自己驱动。
  */
 export async function pickTabFile(
@@ -60,7 +66,11 @@ export async function pickTabFile(
 ) {
   const sel = filePicker(page, scope)
   await openElSelect(sel)
-  const options = visibleOptions(page)
+  // 选项必须限定在**本 picker 自己的 popper** 里：四个 tab 的下拉面板都被
+  // teleport 到 body，隐藏 pane 的那一份仍会被全局 `:visible` 命中（它的
+  // reference 尺寸为零 → popper 逐帧重定位→“element is not stable”，
+  // 而且 `.first()` 会点到另一个 tab 的文件上）
+  const options = page.locator(`.dp-file-picker-${scope}:visible .el-select-dropdown__item`)
   await expect(options.first()).toBeVisible({ timeout: 15_000 })
   const target = labelSubstring
     ? options.filter({ hasText: labelSubstring }).first()
@@ -68,16 +78,21 @@ export async function pickTabFile(
   await target.click()
 }
 
-/** 选异常值处理模式（「裁剪范围」/「不处理」） */
-export async function pickOutlierMode(page: Page, mode: string) {
+/**
+ * 选异常值处理模式（「裁剪范围」/「不处理」）。
+ * scope = 控件所在 tab（默认单文件）；同样要限定在本 tab 的 popper 内。
+ */
+export async function pickOutlierMode(page: Page, mode: string, scope = 'single') {
   await openElSelect(filterControl(page, 'outlier-handling'))
-  await visibleOptions(page).filter({ hasText: mode }).first().click()
+  await page.locator(`.dp-outlier-popper-${scope}:visible .el-select-dropdown__item`)
+    .filter({ hasText: mode }).first().click()
 }
 
 /** 选敏感度档位（如「宽松 (3.0x IQR)」） */
-export async function pickSensitivity(page: Page, label: string) {
+export async function pickSensitivity(page: Page, label: string, scope = 'single') {
   await openElSelect(filterControl(page, 'iqr-multiplier'))
-  await visibleOptions(page).filter({ hasText: label }).first().click()
+  await page.locator(`.dp-iqr-popper-${scope}:visible .el-select-dropdown__item`)
+    .filter({ hasText: label }).first().click()
 }
 
 /** 读取参数下拉的全部选项文本 */

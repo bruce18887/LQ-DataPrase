@@ -42,6 +42,7 @@
         <!-- 数据筛选：多文件图表不消费前端裁剪口径 → 不显示「异常值处理」，
              敏感度仅作为低 CPK 判定阈值透给 multi_lot -->
         <DataFilterSection
+          scope="multi"
           v-model:ignore-no-limit="ignoreNoLimit"
           v-model:ignore-no-test-value="ignoreNoTestValue"
           v-model:data-only-bin1="dataOnlyBin1"

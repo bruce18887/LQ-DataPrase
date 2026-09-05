@@ -15,6 +15,30 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-09-05 分析页 tab 独立文件选择新增教训
+
+- **多个 teleport 下拉面板共存时，全局 `:visible` 选项查询必错**：给 4 个 tab 各放一个
+  `el-select` 后，它们的面板都被 teleport 到 `body`，**不随隐藏 pane 的 `display:none`
+  一起消失**。用 `.el-select-dropdown__item:visible` 全局取选项会命中隐藏 pane 那一份，而它的
+  reference 尺寸为零 → popper 逐帧重定位 → Playwright 永判“element is not stable”（实测卡满
+  15s actionTimeout），而且 `.first()` 会点到**另一个 tab** 的文件上（表现为“选 A 实际选了 B”，
+  断言拿到相同 file_id）。规则：任何可重复出现的 select 必须带**实例级 popper-class**
+  （本轮：`dp-file-picker-<scope>` / `dp-outlier-popper-<scope>` / `dp-iqr-popper-<scope>`），
+  测试选项一律从 `.dp-xxx-<scope>:visible .el-select-dropdown__item` 取；同一理由，
+  `data-filter` 类契约属性也需限定在 `.el-tab-pane:visible` 内（访问过两个 tab 后同名属性有多份）。
+- **不要把 `loading` 透传给 `el-select`**：EP 会往后缀插槽放 `is-loading` 无限旋转图标，
+  reference 子树逐帧变化 → popper 逐帧重定位 → 下拉永不安定；加载状态要用**常驻固定尺寸
+  槽位**里的指示器（槽位不预留时，它的挂载/移除会改变 flex 行宽，同样让 select 宽度变化）。
+- **手工起 dev 服务会污染 e2e 数据环境**（本仓第二次踩）：不带 `LQDP_SYSTEM_CONFIG_FILE`
+  跑 `manage.py runserver` → 按项目根 `system_config.json` 的 `data_dir` 连到**用户目录库**；
+  而 `playwright.config.ts` 是 `reuseExistingServer: !CI`，会**静默复用**这个旧进程 → e2e 列表
+  里的 file_id 存于用户目录库、磁盘文件在项目根 media → 38 条 `file_not_found_or_parse_failed`。
+  一开始被当成代码回归。规则：跑 e2e 前除了查端口占用，还要确认占用者的**命令行与数据目录**；
+  判定“是不是我引入的回归”时，先看失败是不是后端 4xx（数据层）而不是断言不匹配（UI 层）。
+- **同一端点被多个 tab 各自发时，请求计数类断言要取对时机**：`/analysis/histogram/` 快路径
+  现在每个 tab 各发一份，测试里“取最后一个请求的 file_id”必须在**切 tab 之前**取值，否则
+  会拿到新 tab 那一次（本轮新增用例自己踩到，断言假失败）。
+
 ## 2026-09-03 全量评审修复（四批）新增教训
 
 - **测试风格必须匹配唯一 runner，否则静默零覆盖**：`test/backend/test_outliers.py` 是裸 `class TestX` +
