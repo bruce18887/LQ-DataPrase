@@ -12,6 +12,7 @@
  */
 import { ref, type Ref } from 'vue'
 import { safeGetItem, safeSetItem, safeRemoveItem } from '../../../utils/safeStorage'
+import { loadChartMemory, saveChartState, isMemoryEnabled } from '../../../composables/useChartMemory'
 
 export type ChartKey = 'hist' | 'serial' | 'qq' | 'box'
 const ALL_KEYS: ChartKey[] = ['hist', 'serial', 'qq', 'box']
@@ -91,10 +92,6 @@ function loadLayout(): DockLayout | null {
   }
 }
 
-function saveLayout(l: DockLayout) {
-  safeSetItem(DOCK_LAYOUT_STORAGE_KEY, JSON.stringify({ v: VERSION, ...l }))
-}
-
 export interface ChartDockApi {
   rows: Ref<ChartKey[][]>
   rowPcts: Ref<number[]>
@@ -123,6 +120,10 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
     const rowPcts = ref<number[]>([...init.rowPcts])
     const colPcts = ref<number[][]>(init.colPcts.map((c) => [...c]))
 
+    // 设置异步返回前用户是否已手动改过布局（moveTo/行占比/列占比/重置）；
+    // 已动手则账号状态不套用（本机优先），防止覆盖用户刚做的调整
+    let userTouched = false
+
     const normalizeSizes = () => {
       if (rowPcts.value.length !== rows.value.length || rowPcts.value.some((n) => !Number.isFinite(n))) {
         rowPcts.value = defaultRowPcts(rows.value.length)
@@ -141,7 +142,11 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
       })
     }
 
-    const persist = () => saveLayout({ rows: rows.value, rowPcts: rowPcts.value, colPcts: colPcts.value })
+    const persist = () => {
+      const payload = { v: VERSION, rows: rows.value, rowPcts: rowPcts.value, colPcts: colPcts.value }
+      if (isMemoryEnabled() !== false) safeSetItem(DOCK_LAYOUT_STORAGE_KEY, JSON.stringify(payload))
+      saveChartState({ layout: payload })
+    }
 
     const findPos = (key: ChartKey) => {
       for (let ri = 0; ri < rows.value.length; ri++) {
@@ -168,6 +173,7 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
     }
 
     const moveTo: ChartDockApi['moveTo'] = (from, to, dir) => {
+      userTouched = true
       if (from === to) return
       const f = findPos(from)
       const t = findPos(to)
@@ -206,6 +212,7 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
     }
 
     const reset = (active: ChartKey[]) => {
+      userTouched = true
       safeRemoveItem(DOCK_LAYOUT_STORAGE_KEY)
       const d = defaultLayout(active)
       rows.value = d.rows
@@ -214,13 +221,34 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
       persist()
     }
 
-    const setRowPcts = (pcts: number[]) => { rowPcts.value = pcts; persist() }
+    const setRowPcts = (pcts: number[]) => { userTouched = true; rowPcts.value = pcts; persist() }
     const setColPcts = (rowIndex: number, pcts: number[]) => {
+      userTouched = true
       const c = [...colPcts.value]
       c[rowIndex] = pcts
       colPcts.value = c
       persist()
     }
+
+    // 账号级记忆接线（load 单飞；仅 ChartDock 一个消费方，挂一次即可）
+    void loadChartMemory().then(({ memoryEnabled, state }) => {
+      if (userTouched) return
+      if (state.layout) {
+        rows.value = state.layout.rows.map((r) => [...r])
+        rowPcts.value = [...state.layout.rowPcts]
+        colPcts.value = state.layout.colPcts.map((c) => [...c])
+        reconcile(getActive()) // 账号布局可能不含当前勾选的图 → reconcile 补齐并持久化
+      } else if (memoryEnabled === true) {
+        persist() // 账号空：把本机布局推上账号（第二台设备获得第一台的布局）
+      } else if (memoryEnabled === false) {
+        // 开关关 = 完全不记忆：回默认布局并清本机残留（不打断已发生的用户操作）
+        rows.value = defaultLayout(getActive()).rows
+        rowPcts.value = defaultRowPcts(rows.value.length)
+        colPcts.value = rows.value.map((r) => equalPct(r.length))
+        safeRemoveItem(DOCK_LAYOUT_STORAGE_KEY)
+      }
+      // memoryEnabled === null（未返回/拉取失败）：什么都不做，本机布局保留
+    })
 
     singleton = { rows, rowPcts, colPcts, reconcile, moveTo, reset, setRowPcts, setColPcts, findPos }
   }
