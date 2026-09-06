@@ -79,7 +79,7 @@ test.describe('序列分布：fail 数量与 bin 汇总颗数一致', { tag: ['@
         r.request().postData()?.includes('"param":"KELVIN_VIN"') === true,
       { timeout: 20_000 },
     )
-    await page.locator('.el-radio-button').filter({ hasText: '序列分布' }).first().click()
+    await page.getByText('显示序列分布').click()
     const resp = await respPromise
     expect(resp.status()).toBe(200)
     const body = await resp.json()

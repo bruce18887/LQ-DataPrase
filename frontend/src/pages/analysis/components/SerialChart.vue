@@ -18,8 +18,10 @@
         />
       </el-select>
     </div>
-    <!-- 底部需容纳 轴名+图例+滑块 三层（≈135px），450px 会把绘图区挤到 ~240px；600px 时绘图区 ≈390px -->
-    <div ref="chartRef" style="height: 600px" />
+    <!-- 高度由外层 .chart-wrapper--serial（单文件 440px）决定；本容器 flex 列，
+         画布 flex:1 吃掉选择器/离群条以外的空间。底部三层需容纳 轴名+图例+滑块
+         （grid.bottom≈150），过矮会挤压绘图区 -->
+    <div ref="chartRef" class="serial-canvas" />
     <OutlierHintBar
       :mode="outlierHandling || 'off'"
       :outlier-info="data?.outlier_info ?? null"
@@ -205,6 +207,18 @@ void chartRef // bound to <div ref="chartRef"> in template
 </script>
 
 <style scoped>
+/* 填满外层 .chart-wrapper--serial；选择器与离群条为固定高度，画布 flex:1 占剩余 */
+.serial-chart-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+}
+.serial-canvas {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
 .serial-col-selector {
   display: flex;
   align-items: center;

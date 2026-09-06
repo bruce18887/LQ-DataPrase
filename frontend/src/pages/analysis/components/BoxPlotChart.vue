@@ -6,7 +6,7 @@
     <el-icon class="boxplot-placeholder__icon"><InfoFilled /></el-icon>
     <span class="boxplot-placeholder__text">{{ placeholderText }}</span>
   </div>
-  <div v-else ref="chartRef" class="chart-container" style="width: 100%; height: 500px" />
+  <div v-else ref="chartRef" class="chart-container" />
 </template>
 
 <script setup lang="ts">
@@ -31,11 +31,10 @@ const props = withDefaults(defineProps<{ data: BoxPlotData | null; title?: strin
 })
 const { colors } = useEChartsTheme()
 
-// 箱体/异常点固定直方图基准色（风格统一 2026-08-13，双主题恒定）；
-// jitter 散点覆盖层保留主题系列色自适应
-const boxColor = '#1E88E5'
-const jitterColor = computed(() => colors.value.seriesColors[4])
-const outlierColor = '#E53935'
+// 箱体/离群点跟随主题（不再写死 #1E88E5/#E53935，对齐原型 C.series[0] / C.error）：
+// 箱体用系列主色（浅=蓝 / 暗=金），离群点用语义红，二者颜色分明
+const boxColor = computed(() => colors.value.seriesColors[0])
+const outlierColor = computed(() => colors.value.errorColor)
 
 const groupOk = (grp?: BoxPlotStats) =>
   !!grp && typeof grp.min === 'number' && Number.isFinite(grp.min)
@@ -69,7 +68,6 @@ function buildOption() {
   let categories: string[] = []
   let boxData: number[][] = []
   let outlierData: number[][] = []
-  let jitterSeries: any[] = []
   let yMin = Infinity, yMax = -Infinity
 
   if (hasGroupedData) {
@@ -89,42 +87,21 @@ function buildOption() {
     validKeys.forEach((group, idx) => {
       const s = groupedData[group]
       boxData.push([s.min, s.q1, s.median, s.q3, s.max])
+      // 离群点横向抖动落在本组名下（对齐原型）；仅在「离群点」勾选时随 series 显示
       if (Array.isArray(s.outliers)) {
-        s.outliers.forEach(o => outlierData.push([idx, o]))
+        s.outliers.forEach(o => outlierData.push([idx + (Math.random() - 0.5) * 0.3, o]))
       }
       yMin = Math.min(yMin, s.min)
       yMax = Math.max(yMax, s.max)
-
-      if (props.showJitter && s.raw_values && s.raw_values.length > 0) {
-        jitterSeries.push({
-          name: `${categories[idx]} 数据点`,
-          type: 'scatter',
-          data: s.raw_values.map((v: number) => [idx + (Math.random() - 0.5) * 0.3, v]),
-          symbolSize: 3,
-          itemStyle: { color: jitterColor.value, opacity: 0.25 },
-          silent: true,
-        })
-      }
     })
   } else if (overall) {
     categories = [props.data.param]
     boxData.push([overall.min, overall.q1, overall.median, overall.q3, overall.max])
     if (Array.isArray(overall.outliers)) {
-      overall.outliers.forEach(o => outlierData.push([0, o]))
+      overall.outliers.forEach(o => outlierData.push([(Math.random() - 0.5) * 0.3, o]))
     }
     yMin = overall.min
     yMax = overall.max
-
-    if (props.showJitter && overall.raw_values && overall.raw_values.length > 0) {
-      jitterSeries.push({
-        name: '数据点',
-        type: 'scatter',
-        data: overall.raw_values.map((v: number) => [(Math.random() - 0.5) * 0.3, v]),
-        symbolSize: 3,
-        itemStyle: { color: jitterColor.value, opacity: 0.25 },
-        silent: true,
-      })
-    }
   }
 
   if (boxData.length === 0 || !Number.isFinite(yMin) || !Number.isFinite(yMax)) {
@@ -191,14 +168,14 @@ function buildOption() {
         type: 'boxplot',
         data: boxData,
         itemStyle: {
-          color: boxColor + '30',
-          borderColor: boxColor,
+          color: boxColor.value + '30',
+          borderColor: boxColor.value,
           borderWidth: 2,
         },
         emphasis: {
           itemStyle: {
-            color: boxColor + '50',
-            borderColor: boxColor,
+            color: boxColor.value + '50',
+            borderColor: boxColor.value,
             borderWidth: 3,
           },
         },
@@ -209,29 +186,30 @@ function buildOption() {
               return p?.name ? `<strong>${p.name}</strong>` : ''
             }
             const fmt = (n: any) => (typeof n === 'number' && Number.isFinite(n) ? n.toFixed(4) : 'N/A')
+            // d[0]/d[4] 是「须端」（非离群范围的 min/max），不叫「最小/最大值」（对齐统计表口径）
             return `<strong>${p.name}</strong><br/>` +
-              `Max: ${fmt(d[4])}<br/>` +
+              `上须端: ${fmt(d[4])}<br/>` +
               `Q3: ${fmt(d[3])}<br/>` +
               `Median: ${fmt(d[2])}<br/>` +
               `Q1: ${fmt(d[1])}<br/>` +
-              `Min: ${fmt(d[0])}`
+              `下须端: ${fmt(d[0])}`
           },
         },
       },
-      {
-        name: 'Outliers',
+      // 「离群点」勾选时才显示：真实离群值横向抖动、语义红（原型 drawBox 口径）
+      ...(props.showJitter ? [{
+        name: '离群点',
         type: 'scatter',
         data: outlierData,
-        itemStyle: { color: outlierColor, opacity: 0.8 },
-        symbolSize: 7,
+        itemStyle: { color: outlierColor.value, opacity: 0.7 },
+        symbolSize: 6,
         symbol: 'circle',
         tooltip: { formatter: (p: any) => {
           if (!p?.value || !Array.isArray(p.value) || p.value.length < 2) return ''
           const v = p.value[1]
-          return `异常值: ${typeof v === 'number' && Number.isFinite(v) ? v.toFixed(4) : 'N/A'}`
+          return `离群点: ${typeof v === 'number' && Number.isFinite(v) ? v.toFixed(4) : 'N/A'}`
         }},
-      },
-      ...jitterSeries,
+      }] : []),
     ],
   }
 }
@@ -248,7 +226,7 @@ void chartRef // bound to <div ref="chartRef"> in template
   justify-content: center;
   gap: 8px;
   width: 100%;
-  height: 500px;
+  height: 400px;
   background: var(--bg-2);
   border: 1px dashed var(--border-2);
   border-radius: 6px;

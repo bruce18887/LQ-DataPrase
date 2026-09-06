@@ -92,7 +92,7 @@ test.describe('@p1 单参数分析', { tag: ['@p1', '@analysis'] }, () => {
     await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
   })
 
-  test('@p1 开启 QQ 图后渲染 QQ 图与正态性标签', async ({ page }) => {
+  test('@p1 开启 QQ 图后渲染 QQ 图', async ({ page }) => {
     await enterAnalysis(page, RECOMMENDED.analysis)
     await waitLoadingGone(page.locator(SINGLE))
 
@@ -103,11 +103,10 @@ test.describe('@p1 单参数分析', { tag: ['@p1', '@analysis'] }, () => {
     await page.getByText('显示QQ图').click()
     await respPromise
 
-    // QQ 激活后为上下双图（SVG 渲染）
+    // QQ 激活后：直方图 + QQ 图两个 SVG（QQ 与箱线勾选时在同一行左右并排）
     await expect
       .poll(() => page.locator(`${SINGLE} svg`).count(), { timeout: 15_000 })
       .toBeGreaterThanOrEqual(2)
-    await expect(page.locator(`${SINGLE} .normality-tag`)).toBeVisible()
   })
 
   test('@p1 开启 QQ 图后逐个抽样参数不应触发 4xx/5xx (回归: 空列名 + cross axisPointer)', async ({ page }) => {
@@ -242,8 +241,7 @@ test.describe('@p1 箱线图', { tag: ['@p1', '@analysis'] }, () => {
     await enterAnalysis(page, RECOMMENDED.analysis)
     await waitLoadingGone(page.locator(SINGLE))
 
-    // 切换到数值分布模式
-    await page.click('.el-radio-button:has-text("数值分布")')
+    // 数值视图已是默认基态（序列/QQ/箱线均为勾选，不再需要切模式）
 
     // 点击显示箱线图 checkbox
     const respPromise = page.waitForResponse(
@@ -267,8 +265,7 @@ test.describe('@p1 箱线图', { tag: ['@p1', '@analysis'] }, () => {
     await enterAnalysis(page, RECOMMENDED.analysis)
     await waitLoadingGone(page.locator(SINGLE))
 
-    // 切换到数值分布模式
-    await page.click('.el-radio-button:has-text("数值分布")')
+    // 数值视图已是默认基态（序列/QQ/箱线均为勾选，不再需要切模式）
 
     // 开启箱线图
     const respPromise1 = page.waitForResponse(
@@ -294,12 +291,11 @@ test.describe('@p1 箱线图', { tag: ['@p1', '@analysis'] }, () => {
       .toBeGreaterThanOrEqual(1)
   })
 
-  test('箱线图 Jitter 散点切换', async ({ page }) => {
+  test('箱线图 离群点切换', async ({ page }) => {
     await enterAnalysis(page, RECOMMENDED.analysis)
     await waitLoadingGone(page.locator(SINGLE))
 
-    // 切换到数值分布模式
-    await page.click('.el-radio-button:has-text("数值分布")')
+    // 数值视图已是默认基态（序列/QQ/箱线均为勾选，不再需要切模式）
 
     // 开启箱线图
     const respPromise = page.waitForResponse(
@@ -309,8 +305,8 @@ test.describe('@p1 箱线图', { tag: ['@p1', '@analysis'] }, () => {
     await page.getByText('显示箱线图').click()
     await respPromise
 
-    // 开启 Jitter（不需要新的 API 调用）
-    await page.getByText('Jitter散点').click()
+    // 开启离群点（原 Jitter，现居左栏，不需要新的 API 调用）
+    await page.getByText('离群点').click()
 
     // 验证图表更新
     await expect
@@ -322,8 +318,7 @@ test.describe('@p1 箱线图', { tag: ['@p1', '@analysis'] }, () => {
     await enterAnalysis(page, RECOMMENDED.analysis)
     await waitLoadingGone(page.locator(SINGLE))
 
-    // 切换到数值分布模式
-    await page.click('.el-radio-button:has-text("数值分布")')
+    // 数值视图已是默认基态（序列/QQ/箱线均为勾选，不再需要切模式）
 
     // 开启箱线图
     const respPromise1 = page.waitForResponse(

@@ -1,7 +1,11 @@
 <template>
-  <el-card shadow="hover" :body-style="{ padding: '12px' }">
-    <div class="filter-section">
-      <div class="section-label">数据筛选</div>
+  <el-card
+    :shadow="variant === 'bar' ? 'never' : 'hover'"
+    :class="['filter-card', variant === 'bar' ? 'filter-card--bar' : '']"
+    :body-style="variant === 'bar' ? { padding: '0' } : { padding: '12px' }"
+  >
+    <div class="filter-section" :class="{ 'filter-section--bar': variant === 'bar' }">
+      <div class="section-label filter-title">数据筛选</div>
       <div class="filter-checkboxes">
         <el-checkbox
           :model-value="ignoreNoLimit"
@@ -46,7 +50,7 @@
       </div>
 
       <!-- 异常值处理：只在前端确实消费裁剪口径的 tab 显示（多文件不消费） -->
-      <div v-if="showOutlier" class="control-line">
+      <div v-if="showOutlier" class="control-line control-outlier">
         <span class="section-label control-label">异常值处理</span>
         <el-select
           :model-value="outlierHandling"
@@ -64,7 +68,7 @@
 
       <!-- 敏感度：既是裁剪栅栏的倍数，也是「仅显示低CPK项」的判定阈值，
            所以任一在用就必须可见（旧页头只在非 off 时显示，勾了低CPK却调不了阈值） -->
-      <div v-if="showSensitivity && sensitivityVisible" class="control-line">
+      <div v-if="showSensitivity && sensitivityVisible" class="control-line control-sens">
         <span class="section-label control-label">敏感度</span>
         <el-select
           :model-value="iqrMultiplier"
@@ -92,6 +96,12 @@
  * 改的档位实际影响的是别的 tab 的数据源。收拢到一个组件后，控件与它作用的那
  * 份状态同屏同归属（docs/specs/2026-09-05-analysis-per-tab-file-selection-design.md）。
  *
+ * variant：
+ *   - 'card'（默认）：独立卡片，纵向堆叠 —— 相关性/多文件 Tab 仍用它，外观不变。
+ *   - 'bar'：无卡片边框/背景，横向内联换行（异常值·敏感度在前、数据筛选在后），
+ *     供单文件 Tab 嵌入顶部控件面板。所有 [data-filter] 属性与 emit 保持一致，
+ *     e2e 契约不受影响。
+ *
  * 本组件不持有任何状态，也不做「本地快照 + 双向 watch」（lessons R5）。
  */
 import { computed } from 'vue'
@@ -114,12 +124,15 @@ const props = withDefaults(defineProps<{
    * popper 被 teleport 到 body，不随隐藏 pane 一起消失，测试必须按它收窄定位。
    */
   scope?: string
+  /** 'card' 独立卡（默认）；'bar' 内联进顶部控件面板 */
+  variant?: 'card' | 'bar'
 }>(), {
   outlierHandling: 'off',
   iqrMultiplier: 1.5,
   showOutlier: true,
   showSensitivity: true,
   scope: 'single',
+  variant: 'card',
 })
 
 const emit = defineEmits<{
@@ -198,4 +211,25 @@ const sensitivityHint = computed(() => {
      对比度扫描实测），12px 提示文字读不动；--text-2 两套主题均 ≥ 3 */
   color: var(--text-2);
 }
+
+/* ── bar 变体：嵌入顶部面板，去卡片，横向内联换行 ── */
+.filter-card--bar {
+  border: 0;
+  background: transparent;
+  box-shadow: none !important;
+}
+.filter-card--bar :deep(.el-card__body) {
+  padding: 0;
+}
+.filter-section--bar {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+}
+/* 异常值·敏感度在前，数据筛选标题+复选在后（贴齐顶部面板预览） */
+.filter-section--bar .control-outlier { order: 1; }
+.filter-section--bar .control-sens { order: 2; }
+.filter-section--bar .filter-title { order: 3; }
+.filter-section--bar .filter-checkboxes { order: 4; gap: 0 10px; }
 </style>

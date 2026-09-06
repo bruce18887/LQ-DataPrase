@@ -45,7 +45,7 @@ const props = defineProps<{
   outlierHandling?: 'clip' | 'exclude' | 'off'
 }>()
 
-const { colors, isDark } = useEChartsTheme()
+const { colors } = useEChartsTheme()
 
 const isEmptyResult = computed(() => {
   if (!props.result) return false
@@ -140,29 +140,6 @@ function buildOption() {
     diagonal = [[x0, fitIntercept + fitSlope * x0], [x1, fitIntercept + fitSlope * x1]]
   }
 
-  const rSquared = r.r_squared
-  const isNormal = r.is_normal === true
-
-  const graphic: any[] = []
-  if (rSquared != null) {
-    graphic.push({
-      type: 'text', left: 10, top: 32, z: 100,
-      style: {
-        text: `R² = ${rSquared.toFixed(4)}`, fill: colors.value.tooltipText, fontSize: 13, fontWeight: 'bold',
-        backgroundColor: colors.value.tooltipBg, padding: [4, 8], borderRadius: 4,
-      },
-    })
-  }
-  graphic.push({
-    type: 'text', right: 10, top: 32, z: 100,
-    style: {
-      // 正态徽章：红-绿对在红绿色盲下不可分（deutan ΔE 17.5），改用语义 success/error 色；
-      // night 深底用深色文字（白字对比度仅 2.5-2.7 不达标）
-      text: isNormal ? '正态' : '非正态', fill: isDark.value ? '#1a1a2e' : '#ffffff', fontSize: 12, fontWeight: 'bold',
-      backgroundColor: isNormal ? (isDark.value ? '#14b8a6' : '#047857') : (isDark.value ? '#fb7185' : '#b91c1c'), padding: [4, 10], borderRadius: 4,
-    },
-  })
-
   return {
     // large 模式下上万 symbol 的入场/更新动画是纯开销，直接关闭
     animation: !isLarge.value,
@@ -213,14 +190,14 @@ function buildOption() {
       axisLabel: { fontSize: 9, formatter: formatAxisValue, color: tc },
       ...(yAxisMinMax ?? {}),
     },
-    graphic,
     series: [
       {
         name: '数据点', type: 'scatter', data: scatterData, symbolSize: 5,
-        itemStyle: { color: '#1E88E5' },
+        // 跟随主题：不再写死 #1E88E5（对齐原型，浅=蓝 / 暗=金，与离群/参考线区分）
+        itemStyle: { color: colors.value.seriesColors[0], opacity: 0.55 },
         ...(isLarge.value ? { large: true } : {}),
       },
-      { name: 'y=x参考线', type: 'line', data: diagonal, lineStyle: { color: '#9E9E9E', type: 'dashed', width: 2 }, symbol: 'none', silent: true },
+      { name: '正态拟合线', type: 'line', data: diagonal, lineStyle: { color: colors.value.errorColor, width: 1.5 }, symbol: 'none', silent: true },
     ],
   }
 }

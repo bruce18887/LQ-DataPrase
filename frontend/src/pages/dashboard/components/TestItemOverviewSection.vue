@@ -228,7 +228,6 @@ function goToAnalysis(row: TestItemOverview) {
   const singleTab = useSingleTabStore()
   singleTab.fileId = props.fileId
   singleTab.selectedParam = row.name
-  singleTab.chartMode = 'distribution'
   analysisStore.activeTab = 'single-param'
   router.push('/analysis')
 }

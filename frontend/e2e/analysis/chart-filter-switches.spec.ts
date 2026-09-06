@@ -151,8 +151,8 @@ test.describe('@p1 图表配置数据筛选开关', { tag: ['@p1', '@analysis'] 
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
     await waitLoadingGone(page.locator(SINGLE))
 
-    // 切到序列分布（el-radio-button 的 input 同样隐藏，点击按钮容器）
-    await page.locator('.el-radio-button').filter({ hasText: '序列分布' }).first().click()
+    // 勾选「显示序列分布」（序列图现叠加显示在直方图下方，非互斥模式）
+    await page.getByText('显示序列分布').click()
     await waitLoadingGone(page.locator(SINGLE))
 
     const respPromise = page.waitForResponse(

@@ -185,7 +185,7 @@ test.describe('@p1 轴刻度小数位精度（formatAxisValue 统一）', { tag:
       (r) => r.url().includes('/analysis/serial_distribution/') && r.request().method() === 'POST' && r.status() < 500,
       { timeout: 30_000 },
     )
-    await page.locator('.el-radio-button').filter({ hasText: '序列分布' }).first().click()
+    await page.getByText('显示序列分布').click()
     await respPromise
     await expect(page.locator(`${SINGLE} .serial-chart-wrapper`)).toBeVisible({ timeout: 20_000 })
 
@@ -225,7 +225,7 @@ test.describe('@p1 轴刻度小数位精度（formatAxisValue 统一）', { tag:
     await assertSmartFormatter(page, container, 'yAxis')
   })
 
-  test('箱线图 Y 轴：智能 4 位格式 + 箱体固定直方图蓝', async ({ page }) => {
+  test('箱线图 Y 轴：智能 4 位格式 + 箱体跟随主题主色', async ({ page }) => {
     await enterAnalysis(page, RECOMMENDED.analysis)
     await waitLoadingGone(page.locator(SINGLE))
 
@@ -242,7 +242,8 @@ test.describe('@p1 轴刻度小数位精度（formatAxisValue 统一）', { tag:
 
     const boxSeries = await readOption(page, container, (opt) =>
       (opt.series || []).find((s: any) => s.type === 'boxplot')?.itemStyle?.borderColor)
-    expect(boxSeries, '箱体边框应固定直方图蓝 #1E88E5').toBe('#1E88E5')
+    // 箱体不再写死 #1E88E5，改跟随主题 series[0]（e2e 默认 light 主题 = 专业蓝 #2563eb）
+    expect(boxSeries, '箱体边框应跟随主题 series[0]').toBe('#2563eb')
   })
 
   test('多文件对比 X 轴：智能 4 位格式', async ({ page }) => {
