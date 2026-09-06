@@ -166,6 +166,10 @@ test.describe('@p1 图表布局账号记忆', { tag: ['@p1', '@settings'] }, () 
         { timeout: 5_000 },
       )
 
+      // 清本机布局键：记忆开时 persist 双写同值，不清则刷新后的布局恢复可能
+      // 只命中 localStorage——清掉后布局断言只能来自账号（钉死「换设备恢复」承诺）
+      await page.evaluate((key) => localStorage.removeItem(key), LAYOUT_KEY)
+
       // 刷新：文件需重选；勾选与布局自动恢复
       await page.reload()
       await openAnalysis(page, seedName)
