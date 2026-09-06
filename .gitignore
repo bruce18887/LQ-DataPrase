@@ -174,3 +174,4 @@ frontend/build-out.txt
 *.orig
 *.rej
 frontend/tasks/
+db.sqlite3.bak*
