@@ -3,11 +3,16 @@
  * ────────────────────────────────────────────────
  * - load() 单飞：分析页多个消费方（useChartDock / SingleParamTab）共享一次拉取。
  * - save() 防抖合并：layout（useChartDock 各 persist 点）与 toggles（勾选 watch）
- *   各自上报，800ms 内合并为一次部分 PUT。
- * - 开关三态：null=settings 未返回（localStorage 照写、后端暂存，load 返回后
- *   按开关发出或丢弃）/ true=正常同步 / false=两层都阻断；拉取失败按 false。
+ *   各自上报，800ms 内合并为一次部分 PUT；pagehide 立即冲刷防丢最后一次改动。
+ * - 开关三态：null=settings 未返回或拉取失败（localStorage 照写、后端不写——
+ *   与「用户关开关」区分开，避免一次网络抖动被当成主动关闭而清掉本机布局）/
+ *   true=正常同步 / false=用户已关闭（两层都阻断）。
  * - 结构校验在本模块；后端哑 JSON 存储同 export_filename_templates 模式。
+ * - 登录/登出必须调 resetChartMemoryCache()（auth store 已接），否则 SPA 内
+ *   换账号会复用上一账号的设置缓存。
  * 放 src/composables 而非 pages/analysis/composables：设置页恢复按钮也复用。
+ * 注意：与 useChartDock 运行时互相 import（ESM 活绑定，调用时解析安全），
+ * 任何一侧都不得在模块顶层调用对方的导出。
  */
 import { authApi } from '../api/auth'
 import { safeRemoveItem } from '../utils/safeStorage'
@@ -17,13 +22,18 @@ const DEBOUNCE_MS = 800
 
 export interface ChartToggles { serial: boolean; qq: boolean; box: boolean }
 export interface ChartMemorySnapshot { layout: DockLayout | null; toggles: ChartToggles | null }
+export interface ChartMemoryLoadResult {
+  memoryEnabled: boolean | null
+  fetchFailed: boolean
+  state: ChartMemorySnapshot
+}
 
-let settingsPromise: Promise<{ memoryEnabled: boolean; state: ChartMemorySnapshot }> | null = null
+let settingsPromise: Promise<ChartMemoryLoadResult> | null = null
 let memoryEnabled: boolean | null = null
 let latest: { layout?: DockLayout; toggles?: ChartToggles } | null = null
 let timer: ReturnType<typeof setTimeout> | null = null
 
-/** 当前记忆开关（null = settings 未返回）。useChartDock.persist 用它门控本机写入 */
+/** 当前记忆开关（null = settings 未返回或拉取失败，非用户主动关闭） */
 export function isMemoryEnabled(): boolean | null {
   return memoryEnabled
 }
@@ -41,7 +51,7 @@ function parseState(raw: unknown): ChartMemorySnapshot {
   return { layout: isValidLayout(o.layout) ? o.layout : null, toggles: parseToggles(o.toggles) }
 }
 
-export function loadChartMemory(): Promise<{ memoryEnabled: boolean; state: ChartMemorySnapshot }> {
+export function loadChartMemory(): Promise<ChartMemoryLoadResult> {
   if (!settingsPromise) {
     settingsPromise = authApi
       .getSettings()
@@ -50,13 +60,15 @@ export function loadChartMemory(): Promise<{ memoryEnabled: boolean; state: Char
         memoryEnabled = d.analysis_chart_memory !== false
         const state = parseState(d.analysis_chart_state)
         if (memoryEnabled && latest) scheduleFlush()
-        else if (!memoryEnabled) latest = null
-        return { memoryEnabled, state }
+        else if (memoryEnabled === false) latest = null
+        return { memoryEnabled, fetchFailed: false, state }
       })
       .catch(() => {
-        memoryEnabled = false
+        // 拉取失败 ≠ 用户关开关：后端本会话不写；本机门控保持开启，
+        // 避免下游「关=复位布局」分支把一次网络抖动误清成默认布局
+        memoryEnabled = null
         latest = null
-        return { memoryEnabled, state: { layout: null, toggles: null } }
+        return { memoryEnabled, fetchFailed: true, state: { layout: null, toggles: null } }
       })
   }
   return settingsPromise
@@ -79,21 +91,45 @@ function flush() {
 
 /** layout / toggles 变化上报（内部判开关 + 防抖合并为一次 PUT） */
 export function saveChartState(patch: { layout?: DockLayout; toggles?: ChartToggles }) {
+  if (memoryEnabled === false) return // 用户已关：不积累、不发送
   latest = { ...(latest ?? {}), ...patch }
   if (memoryEnabled === true) scheduleFlush()
 }
 
-/** 清空账号状态 + 本机布局。设置页「恢复默认布局」与「保存为关」共用 */
-export async function clearChartMemoryState() {
+/** 清空账号状态 + 本机布局。「保存为关」传 { disableMemory: true } 同步断写 */
+export async function clearChartMemoryState(opts: { disableMemory?: boolean } = {}) {
   latest = null
   if (timer) {
     clearTimeout(timer)
     timer = null
   }
   safeRemoveItem(DOCK_LAYOUT_STORAGE_KEY)
+  if (opts.disableMemory) memoryEnabled = false
   try {
     await authApi.updateSettings({ analysis_chart_state: {} })
   } catch {
-    /* 设置页有统一错误提示；本机已清 */
+    /* 本机已清；账号清理失败由调用方决定提示策略 */
   }
+}
+
+/** 登录/登出/账号切换时重置全部模块态（auth store 的 reset*Cache 同款先例） */
+export function resetChartMemoryCache() {
+  settingsPromise = null
+  memoryEnabled = null
+  latest = null
+  if (timer) {
+    clearTimeout(timer)
+    timer = null
+  }
+}
+
+// 关标签/刷新前立即冲刷：800ms 防抖窗口内的最后一次改动不能丢
+if (typeof document !== 'undefined') {
+  document.addEventListener('pagehide', () => {
+    if (timer) {
+      clearTimeout(timer)
+      timer = null
+    }
+    flush()
+  })
 }

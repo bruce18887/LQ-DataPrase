@@ -4,6 +4,7 @@ import { authApi } from '../api/auth'
 import { resetExportTimeoutCache } from '../utils/exportTimeout'
 import { resetSftpTimeoutCache } from '../utils/sftpTimeout'
 import { resetFilenameWrapCache } from '../utils/filenameWrap'
+import { resetChartMemoryCache } from '../composables/useChartMemory'
 import { safeGetItem, safeSetItem, safeRemoveItem } from '../utils/safeStorage'
 import type { User } from '../types'
 
@@ -21,6 +22,7 @@ export const useAuthStore = defineStore('auth', () => {
     resetSftpTimeoutCache()
     resetFilenameWrapCache()
     resetFilenameWrapCache()
+    resetChartMemoryCache()
     const { data } = await authApi.login(username, password)
     token.value = data.token
     refreshToken.value = data.refresh
@@ -72,6 +74,7 @@ export const useAuthStore = defineStore('auth', () => {
     resetExportTimeoutCache()
     resetSftpTimeoutCache()
     resetFilenameWrapCache()
+    resetChartMemoryCache()
   }
 
   function logout() {
