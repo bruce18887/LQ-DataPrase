@@ -4,6 +4,7 @@ GET/PUT /api/v1/auth/settings/：字段在 serializer 白名单内可往返。�
 （同 export_filename_templates 模式），结构校验由前端 useChartMemory 负责。
 独立模块：accounts/tests.py 已 494 行，遵守 600 行限制（CLAUDE.md）。
 """
+from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -26,7 +27,7 @@ class ChartMemorySettingTests(APITestCase):
             username='mem-user', password='strong-pass-123',
         )
         self.client.force_authenticate(user=self.user)
-        self.url = '/api/v1/auth/settings/'
+        self.url = reverse('settings')
 
     def test_get_defaults_memory_on_state_empty(self):
         resp = self.client.get(self.url)
@@ -55,4 +56,7 @@ class ChartMemorySettingTests(APITestCase):
             self.url, {'analysis_chart_memory': False}, format='json',
         )
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertIs(resp.data['analysis_chart_memory'], False)
+        # GET 再验：开关已持久化，非仅响应回显
+        resp = self.client.get(self.url)
         self.assertIs(resp.data['analysis_chart_memory'], False)
