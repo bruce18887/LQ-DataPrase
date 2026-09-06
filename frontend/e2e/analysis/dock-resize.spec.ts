@@ -194,17 +194,15 @@ test.describe('@p1 dock 面板缩放自适应', { tag: ['@p1', '@analysis'] }, (
     await expectAllCanvasFit(page)
   })
 
-  test('最大化可复原：勾选变化自动退出最大化，dock 栏有显式退出按钮', async ({ page }) => {
+  test('最大化可复原：勾选变化自动退出最大化，⤡ 还原按钮可复原', async ({ page }) => {
     await enterAll(page)
     const panels = page.locator('.chart-panel')
-    const exitBtn = page.locator('.chart-dock__bar button').filter({ hasText: '退出最大化' })
 
-    // 最大化 hist → 只剩一张；面板按钮翻转为「恢复布局」、dock 栏出现退出按钮
+    // 最大化 hist → 只剩一张；按钮翻转为还原态（title=还原；字形 ⤡ 与 ⤢ 成对，
+    // 不再用 ⤓——它与下载箭头近形，用户误读为导出）
     await page.locator('.chart-panel[data-chart-key="hist"] .chart-h__btn[title="最大化"]').click()
     await expect(panels).toHaveCount(1)
-    await expect(page.locator('.chart-panel[data-chart-key="hist"] .chart-h__btn[title="恢复布局"]')).toBeVisible()
-    await expect(exitBtn).toBeVisible()
-    await expect(exitBtn).toContainText('直方图')
+    await expect(page.locator('.chart-panel[data-chart-key="hist"] .chart-h__btn[title="还原"]')).toBeVisible()
 
     // 关键回归（2026-09-06 用户卡死场景）：最大化态下取消再勾选其它图，
     // 必须自动退出最大化、四张图全部回来（旧行为：maxKey 残留，新勾的图
@@ -214,10 +212,10 @@ test.describe('@p1 dock 面板缩放自适应', { tag: ['@p1', '@analysis'] }, (
     await toggle(page, '显示序列分布').click()
     await expect(panels).toHaveCount(4)
 
-    // 显式出口：最大化 serial → 点 dock 栏「退出最大化」复原
+    // 显式出口：最大化 serial → 点其 ⤡ 还原按钮复原
     await page.locator('.chart-panel[data-chart-key="serial"] .chart-h__btn[title="最大化"]').click()
     await expect(panels).toHaveCount(1)
-    await exitBtn.click()
+    await page.locator('.chart-panel[data-chart-key="serial"] .chart-h__btn[title="还原"]').click()
     await expect(panels).toHaveCount(4)
     await expectAllCanvasFit(page)
   })
