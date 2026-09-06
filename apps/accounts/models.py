@@ -100,6 +100,12 @@ class UserSetting(models.Model):
     # 文件名显示：自动换行（文件列表 + 批次数据列表共同生效）。默认开启——长文件名
     # 不换行只能 hover 看全名，体验差；关闭 = 单行截断（hover 看全名）。
     filename_wrap = models.BooleanField(default=True)
+    # 单文件分析图表记忆：总开关 + 布局/勾选快照（layout 与前端 useChartDock
+    # .DockLayout 同构、含 v 版本号）。哑 JSON 存储、后保存者胜，结构校验在前端。
+    # 两字段必须加进 UserSettingSerializer.fields，否则 DRF 静默丢弃
+    # （chart_renderer 的前车之鉴，见下方注释）。
+    analysis_chart_memory = models.BooleanField(default=True)
+    analysis_chart_state = models.JSONField(default=dict, blank=True)
 
     class Meta:
         db_table = 'accounts_user_setting'

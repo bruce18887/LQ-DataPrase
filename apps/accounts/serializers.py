@@ -93,6 +93,8 @@ class UserSettingSerializer(serializers.ModelSerializer):
             'sftp_download_timeout',
             'default_hidden_columns',
             'filename_wrap',
+            'analysis_chart_memory',
+            'analysis_chart_state',
         ]
 
     def to_representation(self, instance):
