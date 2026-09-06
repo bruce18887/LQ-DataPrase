@@ -103,7 +103,7 @@ class UserSetting(models.Model):
     # 单文件分析图表记忆：总开关 + 布局/勾选快照（layout 与前端 useChartDock
     # .DockLayout 同构、含 v 版本号）。哑 JSON 存储、后保存者胜，结构校验在前端。
     # 两字段必须加进 UserSettingSerializer.fields，否则 DRF 静默丢弃
-    # （chart_renderer 的前车之鉴，见下方注释）。
+    # （chart_renderer 的前车之鉴，见上方该字段注释）。
     analysis_chart_memory = models.BooleanField(default=True)
     analysis_chart_state = models.JSONField(default=dict, blank=True)
 
