@@ -241,7 +241,9 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
       void loadChartMemory()
         .then(({ memoryEnabled, state }) => {
           if (userTouched) return
-          if (state.layout) {
+          if (memoryEnabled === true && state.layout) {
+            // 「关=不读」：memory=false + state 非空的异常服务端态（清空 PUT 失败/
+            // in-flight 竞态）不得套用旧布局，落到下方 ===false 复位分支
             rows.value = state.layout.rows.map((r) => [...r])
             rowPcts.value = [...(state.layout.rowPcts ?? [])]
             colPcts.value = (state.layout.colPcts ?? []).map((c) => [...c])

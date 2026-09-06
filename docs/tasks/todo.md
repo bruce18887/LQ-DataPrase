@@ -1021,3 +1021,17 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
 用户自己的 dev 后端（数据目录在用户主目录）需要应用新迁移：下次重启后端前跑一次
 `python manage.py migrate accounts`（应用 0010），或看到 runserver 的
 unapplied migrations 警告时按提示处理。
+
+### 终审遗留账（2026-09-06 整体评审落册，均不阻塞）
+
+- [ ] `useChartDock.ts` wireMemory 闭包捕获首个 ChartDock 实例的 getActive——SPA 换账号
+      重臂后套用读已卸载实例的死 props（低危：toggles 组件本地、keep-alive 既有性质
+      同源）；修法：模块级「最新调用方注册」。
+- [ ] reconcile 套用后把刚套用的布局原样 PUT 回账号（幂等回写兼当 localStorage 回写
+      路径，良性；可在 reconcile 检测结构未变时跳过 persist）。
+- [ ] in-flight flush PUT vs 清空 PUT 竞态可复活旧 state（窗口 ≈800ms+一次往返，惰性；
+      套用分支已按 memoryEnabled===true 门控兜住读侧）。
+- [ ] login() 里 resetFilenameWrapCache 连调两次（基线既有，幂等无害，顺手删一行）。
+- [ ] AnalysisLayoutSettings「恢复默认布局」toast 文案「下次进入分析页生效」在同 SPA
+      会话内不严谨（单例不重挂载不重套用）；可改文案为「已清除，重新打开分析页后生效」。
+- [ ] `label=" "` 空标签对齐 hack（全库唯一）；可用 #label 插槽或该 item label-width 0。
