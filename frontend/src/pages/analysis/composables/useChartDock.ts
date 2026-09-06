@@ -109,6 +109,13 @@ export interface ChartDockApi {
 let singleton: ChartDockApi | null = null
 let refCount = 0
 
+// 账号记忆的会话态：登出/登入由 resetChartDockMemoryState() 复位（stores/auth.ts
+// 调用）。否则一次性接线 + 粘性脏标记会让 SPA 换账号后：新账号布局永不套用、
+// 旧账号基底的布局被写进新账号。
+let userTouched = false
+let memoryWired = false
+let wireMemory: (() => void) | null = null
+
 /**
  * @param getActive 返回当前可见 key（由 SingleParamTab 依 toggles 计算）
  */
@@ -119,10 +126,6 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
     const rows = ref<ChartKey[][]>(init.rows.map((r) => [...r]))
     const rowPcts = ref<number[]>([...init.rowPcts])
     const colPcts = ref<number[][]>(init.colPcts.map((c) => [...c]))
-
-    // 设置异步返回前用户是否已手动改过布局（moveTo/行占比/列占比/重置）；
-    // 已动手则账号状态不套用（本机优先），防止覆盖用户刚做的调整
-    let userTouched = false
 
     const normalizeSizes = () => {
       if (rowPcts.value.length !== rows.value.length || rowPcts.value.some((n) => !Number.isFinite(n))) {
@@ -230,29 +233,39 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
       persist()
     }
 
-    // 账号级记忆接线（load 单飞；仅 ChartDock 一个消费方，挂一次即可）
-    void loadChartMemory().then(({ memoryEnabled, state }) => {
-      if (userTouched) return
-      if (state.layout) {
-        rows.value = state.layout.rows.map((r) => [...r])
-        rowPcts.value = [...state.layout.rowPcts]
-        colPcts.value = state.layout.colPcts.map((c) => [...c])
-        reconcile(getActive()) // 账号布局可能不含当前勾选的图 → reconcile 补齐并持久化
-      } else if (memoryEnabled === true) {
-        persist() // 账号空：把本机布局推上账号（第二台设备获得第一台的布局）
-      } else if (memoryEnabled === false) {
-        // 开关关 = 完全不记忆：回默认布局并清本机残留（不打断已发生的用户操作）
-        rows.value = defaultLayout(getActive()).rows
-        rowPcts.value = defaultRowPcts(rows.value.length)
-        colPcts.value = rows.value.map((r) => equalPct(r.length))
-        safeRemoveItem(DOCK_LAYOUT_STORAGE_KEY)
-      }
-      // memoryEnabled === null（未返回/拉取失败）：什么都不做，本机布局保留
-    })
+    // 账号级记忆接线：可重臂——auth 复位后由 useChartDock() 重新挂接，
+    // SPA 换账号后新账号的布局才能套用（memoryWired 防重复挂接）
+    wireMemory = () => {
+      if (memoryWired) return
+      memoryWired = true
+      void loadChartMemory()
+        .then(({ memoryEnabled, state }) => {
+          if (userTouched) return
+          if (state.layout) {
+            rows.value = state.layout.rows.map((r) => [...r])
+            rowPcts.value = [...(state.layout.rowPcts ?? [])]
+            colPcts.value = (state.layout.colPcts ?? []).map((c) => [...c])
+            reconcile(getActive()) // 账号布局可能不含当前勾选的图 → reconcile 补齐并持久化
+          } else if (memoryEnabled === true) {
+            persist() // 账号空：把本机布局推上账号（第二台设备获得第一台的布局）
+          } else if (memoryEnabled === false) {
+            // 开关关 = 完全不记忆：回默认布局并清本机残留（不打断已发生的用户操作）
+            const d = defaultLayout(getActive())
+            rows.value = d.rows
+            rowPcts.value = d.rowPcts
+            colPcts.value = d.colPcts
+            safeRemoveItem(DOCK_LAYOUT_STORAGE_KEY)
+          }
+          // memoryEnabled === null（未返回/拉取失败）：什么都不做，本机布局保留
+        })
+        .catch(() => {})
+    }
+    wireMemory()
 
     singleton = { rows, rowPcts, colPcts, reconcile, moveTo, reset, setRowPcts, setColPcts, findPos }
   }
   refCount++
+  wireMemory?.() // 已接线则 no-op；auth 复位后此处重新挂接新账号布局
   const api = singleton
   return api
 }
@@ -260,6 +273,12 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
 /** 供组件卸载时调用（当前单例常驻，保留布局；预留钩子） */
 export function releaseChartDock() {
   refCount = Math.max(0, refCount - 1)
+}
+
+/** 登出/登入（stores/auth.ts）调用：复位脏标记与接线臂，新账号重新套用其布局 */
+export function resetChartDockMemoryState() {
+  userTouched = false
+  memoryWired = false
 }
 
 /** resize-end 的像素数组折回百分比（0-100，相加≈100），用于持久化与 :size 回填 */
