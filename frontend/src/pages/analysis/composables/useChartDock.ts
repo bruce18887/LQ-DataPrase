@@ -126,6 +126,14 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
     const normalizeSizes = () => {
       if (rowPcts.value.length !== rows.value.length || rowPcts.value.some((n) => !Number.isFinite(n))) {
         rowPcts.value = defaultRowPcts(rows.value.length)
+      } else if (rows.value.length > 0) {
+        // 删行路径（moveTo 删空源行 / 旧版本持久化残留）只把该项占比从数组移除、
+        // 长度不变，剩余占比之和会 ≠100 → 末行下方留出等量空白（底部横条贴不到
+        // 图表）。按比例归一补齐，保留用户已调好的行间比例。
+        const sum = rowPcts.value.reduce((a, b) => a + b, 0)
+        if (Number.isFinite(sum) && sum > 0 && Math.abs(sum - 100) > 0.5) {
+          rowPcts.value = rowPcts.value.map((p) => (p / sum) * 100)
+        }
       }
       colPcts.value = rows.value.map((r, i) => {
         const prev = colPcts.value[i]

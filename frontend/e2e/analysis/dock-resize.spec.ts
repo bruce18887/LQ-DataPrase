@@ -113,6 +113,15 @@ async function dragBar(
   await page.waitForTimeout(600)
 }
 
+/** 底部横条顶边与最下方面板底边的距离（布局填满时应 ≈ flex gap 6px） */
+async function bottomGap(page: import('@playwright/test').Page): Promise<number> {
+  return page.evaluate(() => {
+    const rt = document.querySelector('.chart-dock__resize')!.getBoundingClientRect().top
+    const pb = Math.max(...[...document.querySelectorAll('.chart-panel')].map((p) => p.getBoundingClientRect().bottom))
+    return rt - pb
+  })
+}
+
 test.describe('@p1 dock 面板缩放自适应', { tag: ['@p1', '@analysis'] }, () => {
   test('底部横条压矮/撑高 → 4 图画布双向跟随（不只面板高度）', async ({ page }) => {
     await enterAll(page)
@@ -153,6 +162,35 @@ test.describe('@p1 dock 面板缩放自适应', { tag: ['@p1', '@analysis'] }, (
     await expect
       .poll(async () => await panelHeight(page, 'serial'), { timeout: 8_000 })
       .toBeGreaterThan(serialBefore)
+    await expectAllCanvasFit(page)
+  })
+
+  test('拖图合并行（删行）→ 行占比自动归一，底部横条贴合最后一行', async ({ page }) => {
+    await enterAll(page)
+    // 默认 4 行 [[hist],[serial],[qq],[box]]。把 box 的 ⠿ 手柄拖到 QQ 图左半
+    // （drop dir=left 合并为一行）→ moveTo 删掉 box 空行。
+    const grip = page.locator('.chart-panel[data-chart-key="box"] .chart-h__grip')
+    await grip.scrollIntoViewIfNeeded()
+    await page.waitForTimeout(300)
+    const gb = (await grip.boundingBox())!
+    // QQ 面板在 box 行正上方一行：drop 点取其左 15%、垂直居中（rx<0.3 → dir=left）
+    const qb = (await page.locator('.chart-panel[data-chart-key="qq"]').boundingBox())!
+    const tx = qb.x + qb.width * 0.15
+    const ty = qb.y + qb.height / 2
+    await page.mouse.move(gb.x + gb.width / 2, gb.y + gb.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(tx, ty, { steps: 12 })
+    await page.mouse.up()
+    await page.waitForTimeout(600)
+
+    // 结构变化生效：面板仍 4 张、行数变 3（box 与 qq 同行）
+    await expect(page.locator('.chart-panel')).toHaveCount(4)
+    await expect(page.locator('.chart-dock__row')).toHaveCount(3)
+    // 关键回归断言：删行后剩余行占比必须重新铺满 dock body，
+    // 否则底部横条与最后一行之间留下 (100−sum)% 的永久空白（2026-09-06 用户截图症状）
+    await expect
+      .poll(async () => await bottomGap(page), { timeout: 8_000, message: '底部横条应贴合最后一行图表（行占比归一）' })
+      .toBeLessThanOrEqual(14)
     await expectAllCanvasFit(page)
   })
 })

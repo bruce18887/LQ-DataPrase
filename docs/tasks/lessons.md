@@ -462,3 +462,16 @@
   **画布 rect == 宿主容器自身 client 尺寸**（±4px），仍能抓住「画布大于容器=被裁」的 bug 形态。
   另：循环断言多面板缩放时基线必须**逐 key 采集**，复用单 key（如 hist）基线会让其它面板
   「撑高 > hist 原高」恒假红。
+
+## 2026-09-06 dock 底部空白二次修复（行占比归一）新增教训
+
+- **删行只删长度不重分配，残留占比和 ≠100 → 末行下方永久空白**：`moveTo` 删空源行时把该行
+  占比从 `rowPcts` 里 filter 掉，`normalizeSizes` 只校验**长度**一致就不动 → 和从 100 掉到
+  100−删去项，`rowHeightCss` 按原占比渲染，dock body 底部留出 (100−sum)% 空白（底部横条
+  「贴不到图表」的真正根因；今天上午修的画布 minmax/observer 是它的伴随症状）。
+  规则：**占比数组的一切增删后必须归一到 sum=100**（按比例补齐保留用户比例，勿无脑重置均分）。
+- **合成 PointerEvent 排查 DOM 事件链：先量 `elementFromPoint` 再怀疑处理器**：浏览器工具
+  注入的 pointer 事件能正常触发 pointerdown/move（ghost 跟手、drop-left 指示出现），但
+  `dropTarget` 恒 null——根因是 drop 点滚出了视口，`document.elementFromPoint` 对视口外坐标
+  返回 null。拖拽类断言/脚本先 `scrollIntoView` 保证源与目标都可见。不可靠环境下直接上
+  Playwright 真实鼠标（trusted events），同一条用例兼做回归钉。

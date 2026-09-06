@@ -911,3 +911,29 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
   （grid minmax(0,1fr) / observer 挂载时机 / e2e 画布参照两陷阱 + 逐 key 基线）
 - e2e 第一版两例假红复盘：参照选 .chart-b（serial 有固定高度兄弟）+ 单 key 基线循环复用，
   均为测试缺陷非产品回归，修法见 lessons
+
+---
+
+# 任务：dock 底部横条贴合最后一行（删行后行占比归一）（2026-09-06 下午）✅
+
+> 用户截图：底部横条与最下方面板之间留 ~300px 空白。实测复现：4 图默认 4 行
+> [58,14,14,14]，把 box 拖到 QQ 左侧合并行（Playwright 真实鼠标）→ 行数 3、
+> rowPcts 被过滤成 [58,14,14]（和 86）→ 底部空 196px = 14%×1400，与截图同根因。
+
+## 根因与修复
+
+- `useChartDock.ts` `normalizeSizes` 只校验 rowPcts **长度**，而 `moveTo` 删空源行只把
+  该项占比 filter 掉（长度恰好一致、和不一致）→ 永不重算 → 末行下方永久空白
+- 修复：normalizeSizes 增加 sum≠100（>0.5 容差）时**按比例归一**（保留用户已调比例）；
+  存量坏 localStorage 在下一次结构变化/mount reconcile 时自愈
+
+## 验证
+
+- [x] e2e 新增「拖图合并行（删行）→ 行占比自动归一，底部横条贴合最后一行」：
+      修复前 RED（gap=196.4px）、修复后 GREEN（≤14px）；dock-resize + 3 邻接 spec
+      26 passed / 0 failed；`npm run build` 绿
+- [x] 浏览器实测：合成拖拽 box→QQ 左半（drop-left）→ 行 [[hist],[serial],[box,qq]]、
+      pcts [67.4,16.3,16.3]（和 100）、gap=6px；截图留档；跑后 8000 已释放（3000 为
+      用户手动 dev vite，按契约复用未杀）
+- [x] 排查插曲（已记 lessons）：合成 PointerEvent 的 dropTarget 恒 null = drop 点滚出
+      视口后 elementFromPoint 返回 null，非处理器未触发；拖拽脚本先 scrollIntoView
