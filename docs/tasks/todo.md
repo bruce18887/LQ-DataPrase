@@ -966,3 +966,58 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
 - [x] 验证：浏览器实测卡死序列修复（勾选重勾后 4 面板回来、console 0 报错）；
       `npm run build` 绿；dock-resize 6/6 绿；相邻 5 spec（chart-filter-switches/
       serial-no-column/kde-curve/chart-error-state/analysis）45/45 绿；8000 释放
+
+---
+
+# 任务：单文件分析图表布局账号级记忆（2026-09-06）✅
+
+> 需求来源：用户提「系统设置加布局记忆」→ 澄清为**账号级**（换设备登录即恢复）+
+> 勾选记忆 + 设置页管理入口；「显示元素」类设置不做。设置页「显示设置」提供图表
+> 布局记忆开关（关=完全不记忆）与「恢复默认布局」按钮。
+> 计划：`docs/plans/2026-09-06-analysis-chart-memory-plan.md`（子代理驱动逐任务执行，
+> 每任务后质量审查出修复任务 3R/4R/6R）；spec：`docs/specs/2026-09-06-analysis-chart-memory-design.md`。
+
+## 实施清单（13 commit）
+
+- [x] 后端：`UserSetting` 加 `analysis_chart_memory`（默认 True）+ `analysis_chart_state`
+      （哑 JSON：layout/toggles）两字段 + serializer 白名单 + 迁移 0010 + 独立测试模块
+      `tests_chart_memory.py`（bf8a0e8）
+- [x] `seed_users` 强制关闭 e2e 账号记忆（多 worker 隔离前提，661cf66）
+- [x] `useChartMemory.ts` composable：load 单飞 + 800ms 防抖合并 PUT（6ca670e；
+      3d97994 修复：缓存按账号重置/拉取失败不误清本机/关开关即断写/pagehide 冲刷）
+- [x] `useChartDock` 布局接线：套用/推送/关闭复位（f98161a；1cd44c1 修复：接线可重臂
+      + SPA 换账号防串号 + 套用防御与复位简化）
+- [x] `SingleParamTab` 勾选接线（7d0a707）
+- [x] 设置页 UI：开关随「保存设置」持久化 + 恢复默认布局按钮（f467fe5；
+      1018933 修复：会话内重开记忆立即恢复同步）
+- [x] e2e `chart-memory.spec.ts` 三用例：主流程跨刷新/推送分支/关闭复位（eab0eaa；
+      b439313 主流程刷新前清本机布局键，恢复断言钉死账号源）
+- [x] 收尾清理：models 注释方向修正 + 测试 URL 用 `reverse('settings')` + 开关持久化
+      GET 断言（cd06561）
+
+## 验证
+
+- [x] `manage.py test apps.accounts` 52/52 全绿（含 chart-memory 4 用例）
+- [x] `npm run build` 绿（vue-tsc + vite）
+- [x] e2e 定向回归：settings 组（含 chart-memory 三用例：跨刷新保持/推送上报/关闭复位）
+      + dock-resize + chart-filter-switches = 41 passed / 1 flaky / 0 failed / 0 skipped
+      （flake 为 chart-filter-switches 既有用例重试过，与 todo 2026-09-05 Review 记录同组）
+- [x] 跑后端口释放：8000 已释放；3000 为用户 dev vite 按契约复用未动
+
+### Review 要点
+
+- **两层存储模型**：localStorage 是即时层（settings 未返回也照写，用户操作零感知），
+  账号层（/auth/settings/ 的 `analysis_chart_state`）是事实源；load 返回后按开关
+  决定套用/推送/丢弃；「恢复默认布局」与「保存为关」同时清两层。
+- **e2e 隔离三件套**：seed 强制关记忆（存量账号归零）+ 功能用例走 user 低权账号专属
+  storageState + finally API 清场（PUT memory:false + state:{}，前置清场同理）——
+  按账号存的状态配共享测试账号是并行污染源，缺一不可（详见 lessons 2026-09-06）。
+- 已知边界：dock 布局套用发生在 `useChartDock` 单例初始化（挂载）时，已开着的分析页
+  不热套用（留待下次挂载生效）；SPA 不刷新换账号时 keep-alive 页面不复位为既有性质
+  （reset 钩子已接进 auth store，新挂载的页面全部正确）。
+
+### ⚠️ 收尾提醒（写给用户，不执行）
+
+用户自己的 dev 后端（数据目录在用户主目录）需要应用新迁移：下次重启后端前跑一次
+`python manage.py migrate accounts`（应用 0010），或看到 runserver 的
+unapplied migrations 警告时按提示处理。
