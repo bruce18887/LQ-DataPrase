@@ -97,7 +97,7 @@ export function saveChartState(patch: { layout?: DockLayout; toggles?: ChartTogg
 }
 
 /** 清空账号状态 + 本机布局。「保存为关」传 { disableMemory: true } 同步断写 */
-export async function clearChartMemoryState(opts: { disableMemory?: boolean } = {}) {
+export async function clearChartMemoryState(opts: { disableMemory?: boolean } = {}): Promise<boolean> {
   latest = null
   if (timer) {
     clearTimeout(timer)
@@ -107,8 +107,9 @@ export async function clearChartMemoryState(opts: { disableMemory?: boolean } = 
   if (opts.disableMemory) memoryEnabled = false
   try {
     await authApi.updateSettings({ analysis_chart_state: {} })
+    return true
   } catch {
-    /* 本机已清；账号清理失败由调用方决定提示策略 */
+    return false
   }
 }
 

@@ -5,6 +5,7 @@
     <el-tabs v-model="activeTab" tab-position="left" class="settings-tabs">
       <el-tab-pane name="display" label="📊 显示设置">
         <ChartSettingsForm :settings="settings" />
+        <AnalysisLayoutSettings :settings="settings" />
       </el-tab-pane>
       <el-tab-pane name="table" label="📋 表格设置">
         <TableSettingsForm :settings="settings" />
@@ -50,6 +51,8 @@ import { setChartRenderer } from '../../utils/echarts-theme'
 import type { ExportTypeKey, SettingsData } from '../../types'
 import { EXPORT_TEMPLATE_META, EXPORT_TEMPLATE_KEYS } from '../../constants/export-templates'
 import ChartSettingsForm from './components/ChartSettingsForm.vue'
+import AnalysisLayoutSettings from './components/AnalysisLayoutSettings.vue'
+import { clearChartMemoryState } from '../../composables/useChartMemory'
 import TableSettingsForm from './components/TableSettingsForm.vue'
 import CpkSettingsForm from './components/CpkSettingsForm.vue'
 import SystemPathsSettings from './components/SystemPathsSettings.vue'
@@ -89,6 +92,7 @@ const defaults: SettingsData = {
   sftp_download_timeout: 600,
   default_hidden_columns: [...DEFAULT_HIDDEN_COLUMNS],
   filename_wrap: true,
+  analysis_chart_memory: true,
 }
 
 const activeTab = ref('display')
@@ -140,6 +144,8 @@ async function saveSettings() {
     setExportTimeoutSec(settings.value.export_timeout)
     setSftpTimeoutSec(settings.value.sftp_download_timeout)
     setFilenameWrapCache(settings.value.filename_wrap)
+    // 关 = 完全不记忆：保存为关时一并清空已存状态（账号 + 本机）并断写本会话
+    if (!settings.value.analysis_chart_memory) await clearChartMemoryState({ disableMemory: true })
     ElMessage.success('设置已保存')
   } catch {
     // 错误 toast 由 axios 拦截器统一弹出
