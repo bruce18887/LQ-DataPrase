@@ -10,6 +10,9 @@
     <div class="chart-dock__bar">
       <span class="chart-dock__hint">拖 ⠿ 手柄重排图表 · 拖分隔条改单图高宽 · 拖底部横条改整体高度（双击复原）</span>
       <span class="chart-dock__spacer" />
+      <el-button v-if="maxKey" size="small" type="primary" text bg @click="toggleMax(null)">
+        退出最大化（{{ titleOf(maxKey) }}）
+      </el-button>
       <el-button size="small" text bg @click="onReset">重置布局</el-button>
     </div>
 
@@ -122,14 +125,19 @@ const TITLES: Record<ChartKey, string> = {
 }
 const titleOf = (k: ChartKey) => TITLES[k] ?? k
 
-// activeKeys 变化 → 补/去面板（保留既有相对顺序与尺寸）
-watch(() => props.activeKeys.join(','), () => dock.reconcile(props.activeKeys), { immediate: true })
-
 // 最大化：临时只显示某一张（视图态，不持久化）
 const maxKey = ref<ChartKey | null>(null)
 function toggleMax(k: ChartKey | null) {
   maxKey.value = k
 }
+
+// activeKeys 变化 → 补/去面板（保留既有相对顺序与尺寸）。
+// 勾选集一变就退出最大化：maxKey 若残留，最大化期间勾选的图不显示、
+// 关掉的图重新勾上会突然独占全屏，用户怎么点都回不去（只能刷新）。
+watch(() => props.activeKeys.join(','), () => {
+  maxKey.value = null
+  dock.reconcile(props.activeKeys)
+}, { immediate: true })
 
 const visibleRows = computed(() => rows.value.filter((r) => r.length > 0))
 const displayRows = computed<ChartKey[][]>(() => {

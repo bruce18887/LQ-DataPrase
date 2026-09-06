@@ -937,3 +937,29 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
       用户手动 dev vite，按契约复用未杀）
 - [x] 排查插曲（已记 lessons）：合成 PointerEvent 的 dropTarget 恒 null = drop 点滚出
       视口后 elementFromPoint 返回 null，非处理器未触发；拖拽脚本先 scrollIntoView
+
+---
+
+# 任务：dock 最大化后无法复原修复（2026-09-06）✅
+
+> 用户反馈：点击面板标题栏最右「最大化」⤢ 后其它图表消失，勾选框怎么点都不回来，
+> 只能刷新整个页面（截图：仅剩直方图、显示序列分布仍勾选却不显示）。
+
+## 根因（浏览器实测复现）
+
+`ChartDock.vue` 的最大化是临时视图态 `maxKey`，只在 toggleMax 写入；activeKeys
+变化（勾选/关闭 → reconcile）不感知：
+- 最大化期间取消再勾选其它图 → reconcile 正常补行，但 displayRows 恒 `[[maxKey]]`
+  → 新勾的图永远不显示（勾选看似失效）；
+- 被最大化的图被关闭 → maxKey 残留，重新勾上该图会突然独占全屏；
+- 唯一复原入口是面板标题栏 ⤓（与 ⤢ 近形、无文字），用户无从发现 → 观感「只能刷新」。
+
+## 实施清单
+
+- [x] `ChartDock.vue`：activeKeys watch 里先 `maxKey = null` 再 reconcile（勾选集一变
+      即退出最大化）；dock 栏新增显眼「退出最大化（图名）」文字按钮（type=primary text）
+- [x] e2e `dock-resize.spec.ts` 新增用例：最大化→面板 1 张+按钮翻转+退出按钮出现；
+      最大化态取消/重勾序列分布→自动退出、4 图全回；最大化 serial→点退出按钮复原
+- [x] 验证：浏览器实测卡死序列修复（勾选重勾后 4 面板回来、console 0 报错）；
+      `npm run build` 绿；dock-resize 6/6 绿；相邻 5 spec（chart-filter-switches/
+      serial-no-column/kde-curve/chart-error-state/analysis）45/45 绿；8000 释放
