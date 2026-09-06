@@ -68,4 +68,11 @@ class Command(BaseCommand):
                 else:
                     self.stdout.write(self.style.WARNING(f'User already exists: {user.username}'))
 
+            # e2e 确定性：Playwright 多 worker 共用同一账号，布局/勾选的账号级
+            # 记忆会让用例互相污染 → seed 一律强制关闭（真实用户默认开，
+            # 见 UserSetting.analysis_chart_memory default=True）。
+            UserSetting.objects.update_or_create(
+                user=user, defaults={'analysis_chart_memory': False},
+            )
+
         self.stdout.write(self.style.SUCCESS('Seed users completed.'))
