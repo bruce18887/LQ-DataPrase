@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(powershell -NoProfile -Command \"(Get-Content 'docs/tasks/todo.md' | Measure-Object -Line).Lines\")",
+      "Shell(.venvScriptspython.exe:*)",
+      "powershell",
+      "Shell(git add apps/analysis/services/data_services/histogram.py apps/analysis/services/data_services/correlation.py apps/analysis/views/analysis_views.py apps/analysis/tests_one_sided_limits.py docs/tasks/todo.md && git commit -F - <<'EOF' fix(analysis): 修单边限值直方图 500、correlation str 列 500、cpk 零校验 500（批次1） - histogram: RDL 单边限值兜底改为逐侧回退数据范围（旧写法把 (x, None) 原样赋回是空操作，safe_gap(None, x) TypeError → 500），对齐 multi_lot._resolve_multi_range 语义 - correlation: 服务层数值入口改 filter_finite（str 列 coerce，不再 ValueError → 500）；视图补 _sanitize_numeric_params 同形 400 守卫， 与 boxplot/correlation_matrix 对齐（R3①），x==y 自相关不受影响 - cpk: 补 _filter_blank_params + 列存在校验，stale 参数 400 param_not_found（与 histogram 同形），空串列名不再 KeyError - 新增 tests_one_sided_limits.py 9 用例；apps.analysis 160/160 串行全绿 Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)",
+      "Shell(git:*)",
+      "Shell(npm:*)",
+      "Shell(netstat:*)",
+      "Shell(findstr:*)",
+      "Shell(wmic process where \"ProcessId=21436\" get ProcessId,CommandLine /format:list 2>nul | findstr /v \"^$\")",
+      "Shell(npx playwright test e2e/analysis/serial-fail-count.spec.ts e2e/analysis/correlation-file-switch-reset.spec.ts --project=P1 --reporter=list 2 >& 1)",
+      "Shell(npx playwright test e2e/analysis/serial-fail-count.spec.ts e2e/analysis/correlation-file-switch-reset.spec.ts --project=P1 --reporter=list)",
+      "Shell(npx playwright test e2e/analysis/correlation-file-switch-reset.spec.ts --project=P1 --reporter=list)",
+      "Shell(npx playwright test e2e/analysis/file-switch-param-reset.spec.ts e2e/analysis/chart-filter-switches.spec.ts e2e/analysis/tab-independent-files.spec.ts e2e/analysis/boxplot-bool-params.spec.ts e2e/analysis/serial-fail-count.spec.ts e2e/analysis/multi-file.spec.ts e2e/analysis/wafermap-hidden-tab-init.spec.ts --reporter=list 2 >& 1)",
+      "Shell(npx playwright test e2e/analysis/file-switch-param-reset.spec.ts e2e/analysis/chart-filter-switches.spec.ts e2e/analysis/tab-independent-files.spec.ts e2e/analysis/boxplot-bool-params.spec.ts e2e/analysis/serial-fail-count.spec.ts e2e/analysis/multi-file.spec.ts e2e/analysis/wafermap-hidden-tab-init.spec.ts --reporter=list)",
+      "Shell(npx playwright test e2e/analysis/file-switch-param-reset.spec.ts e2e/analysis/chart-filter-switches.spec.ts e2e/analysis/tab-independent-files.spec.ts e2e/analysis/boxplot-bool-params.spec.ts e2e/analysis/serial-fail-count.spec.ts --reporter=list 2>&1)",
+      "Shell(npx playwright test e2e/analysis/file-switch-param-reset.spec.ts e2e/analysis/chart-filter-switches.spec.ts e2e/analysis/tab-independent-files.spec.ts e2e/analysis/boxplot-bool-params.spec.ts e2e/analysis/serial-fail-count.spec.ts --reporter=list 2 >& 1)",
+      "Shell(npx playwright test e2e/analysis/chart-filter-switches.spec.ts --workers=2 --retries=0 --reporter=list 2 >& 1)",
+      "Shell(npx playwright test e2e/analysis/custom-limit-cpk.spec.ts e2e/analysis/correlation-matrix-default-cap.spec.ts e2e/analysis/serial-no-column.spec.ts e2e/analysis/tab-independent-files.spec.ts e2e/analysis/multi-file.spec.ts --reporter=list 2 >& 1)",
+      "Shell(npx playwright test e2e/analysis/multi-file.spec.ts --reporter=list 2 >& 1)",
+      "Shell(npx playwright test e2e/analysis --project=P1 --project=P2 --project=Edge --reporter=list 2 >& 1)",
+      "Shell(npx playwright test e2e/analysis/wafermap-hidden-tab-init.spec.ts e2e/analysis/wafermap-model-not-found.spec.ts --workers=2 --retries=0 --reporter=list 2 >& 1)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}

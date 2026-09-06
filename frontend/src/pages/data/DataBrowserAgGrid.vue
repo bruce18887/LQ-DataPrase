@@ -14,6 +14,7 @@
       :loading="loading"
       :exporting-excel="exportingExcel"
       :exporting-csv="exportingCsv"
+      :export-disabled="!fileId"
       @update:selected-test-cols="selectedTestCols = $event"
       @update:passfail="passfail = $event"
       @update:site-filter="siteFilter = $event"
@@ -340,7 +341,8 @@ const rowClassRules = {
 watch(
   () => props.fileId,
   () => {
-    // 切换文件后 Site/显示测试列/元信息属于旧文件，重置避免误导
+    // 切换文件后 Site/PassFail/显示测试列/元信息属于旧文件，重置避免误导
+    passfail.value = ''
     siteFilter.value = ''
     selectedTestCols.value = []
     siteOptions.value = []
@@ -495,11 +497,12 @@ function reload() {
 }
 
 async function exportExcel() {
+  if (!props.fileId) return
   exportingExcel.value = true
   try {
     const resp = await api.post(
       '/export/to_excel/',
-      { file_id: props.fileId, passfail: passfail.value, site_filter: siteFilter.value },
+      { file_id: props.fileId, passfail: passfail.value, site_filter: siteFilter.value, ...currentGridModels() },
       // 大文件（万行×百列）excelize 导出可达数十秒，必须放宽超时（全局 30s 会 abort → Broken pipe）；
       // 超时秒数由系统设置「导出超时」控制（默认 600s）
       { responseType: 'blob', timeout: await getExportTimeoutMs() }
@@ -514,11 +517,12 @@ async function exportExcel() {
 }
 
 async function exportCsv() {
+  if (!props.fileId) return
   exportingCsv.value = true
   try {
     const resp = await api.post(
       '/export/to_csv/',
-      { file_id: props.fileId, passfail: passfail.value, site_filter: siteFilter.value },
+      { file_id: props.fileId, passfail: passfail.value, site_filter: siteFilter.value, ...currentGridModels() },
       { responseType: 'blob', timeout: await getExportTimeoutMs() }
     )
     downloadBlob(resp.data as Blob, resolveExportName(resp.headers as Record<string, string>, 'export.csv', '_data.csv'))
@@ -527,6 +531,23 @@ async function exportCsv() {
     // 错误 toast 由 axios 拦截器统一弹出
   } finally {
     exportingCsv.value = false
+  }
+}
+
+/**
+ * 当前表格的排序/列过滤模型（与 IRM getRows 同语义），供导出透传后端：
+ * 看到的行 == 导出的行。grid 未就绪时返回空模型（= 不筛选不排序）。
+ */
+function currentGridModels(): { sort_model: string; filter_model: string } {
+  const api = gridApi.value
+  if (!api) return { sort_model: '[]', filter_model: '{}' }
+  // IRM sortModel 形状 [{colId, sort}]：从列状态按 sortIndex 还原
+  const cols = api.getColumnState().filter((c) => c.sort).sort(
+    (a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0),
+  )
+  return {
+    sort_model: JSON.stringify(cols.map((c) => ({ colId: c.colId, sort: c.sort }))),
+    filter_model: JSON.stringify(api.getFilterModel() ?? {}),
   }
 }
 

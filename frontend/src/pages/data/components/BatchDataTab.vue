@@ -200,8 +200,13 @@ const filteredUnregisteredDirs = computed(() => {
 const totalFileCount = computed(() =>
   batchGroups.value.reduce((acc, g) => acc + g.files.length, 0),
 )
+// 汇总条总大小只统计已导入批次行（file_size 求和），不含未导入目录的
+// 磁盘 total_size——否则待导入目录会污染“已导入批次”汇总。
 const totalByteSize = computed(() =>
-  batchDirs.value.reduce((acc, d) => acc + (d.total_size || 0), 0),
+  batchGroups.value.reduce(
+    (acc, g) => acc + g.files.reduce((s, f: any) => s + (Number(f.file_size) || 0), 0),
+    0,
+  ),
 )
 
 // ── 展开/折叠 ───────────────────────────────────────────────────────
@@ -239,7 +244,9 @@ async function loadBatchDirs() {
   try {
     const { data } = await datafilesApi.listBatchDirs()
     batchDirs.value = Array.isArray(data) ? data : []
-    emit('total-change', batchDirs.value.length)
+    // tab 角标 = 已导入批次文件总数（与汇总条口径一致；未导入目录另有
+    // pending-dirs 警示数，不混入此处）。
+    emit('total-change', batchGroups.value.reduce((acc, g) => acc + g.files.length, 0))
     // 清理已不存在的批次（用户可能在别的 tab 删了批次）
     const valid = new Set(batchGroups.value.map((g) => g.name))
     const filtered = new Set([...expandedBatches.value].filter((n) => valid.has(n)))

@@ -150,10 +150,12 @@ class BatchDirImportView(APIView):
             return Response({'error': f'目录 "{dir_name}" 不存在'}, status=404)
 
         # Get already-registered file paths for this batch (skip duplicates).
-        # normpath both sides so mixed-separator legacy paths still dedup —
-        # otherwise re-importing would create duplicate DataFile rows.
+        # normpath + resolve_file_path both sides: DB stores relative paths
+        # (data/<user>/...) while os.walk yields absolute disk paths — without
+        # resolving, the set diff never matches and re-import creates dupes.
+        # Mirrors BatchDirListView registered_files normalization above.
         existing_paths = set(
-            os.path.normpath(p) for p in
+            os.path.normpath(resolve_file_path(p)) for p in
             DataFile.objects.filter(
                 owner=request.user, file_type='batch', batch_name=dir_name
             ).values_list('file_path', flat=True)

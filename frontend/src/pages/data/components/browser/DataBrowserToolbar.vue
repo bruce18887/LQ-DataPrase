@@ -71,10 +71,10 @@
         <el-button type="primary" :loading="loading" @click="emit('load')">
           <el-icon><Refresh /></el-icon> 加载数据
         </el-button>
-        <el-button :loading="exportingExcel" @click="emit('export-excel')">
+        <el-button :loading="exportingExcel" :disabled="exportDisabled" @click="emit('export-excel')">
           <el-icon><Download /></el-icon> 导出 Excel
         </el-button>
-        <el-button :loading="exportingCsv" @click="emit('export-csv')">
+        <el-button :loading="exportingCsv" :disabled="exportDisabled" @click="emit('export-csv')">
           <el-icon><Document /></el-icon> 导出 CSV
         </el-button>
       </el-col>
@@ -99,6 +99,7 @@ interface Props {
   loading: boolean
   exportingExcel: boolean
   exportingCsv: boolean
+  exportDisabled: boolean
 }
 
 interface Emits {
