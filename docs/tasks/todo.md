@@ -858,7 +858,23 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
 
 ## 验证
 
-- [ ] `manage.py test apps.analysis` 串行全绿（Ran N 含新增用例）
-- [ ] `npm run build` 绿
-- [ ] 分析页相关 e2e 全绿（Playwright 自起后端，跑前查端口占用进程，跑完释放端口）
-- [ ] 全量 `manage.py test` + 收尾回归；每批 commit
+- [x] `manage.py test apps.analysis` 串行全绿（Ran N 含新增用例）
+- [x] `npm run build` 绿
+- [x] 分析页相关 e2e 全绿（Playwright 自起后端，跑前查端口占用进程，跑完释放端口）
+- [x] 全量 `manage.py test` + 收尾回归；每批 commit
+
+## Review（2026-09-05 收尾）
+
+- 提交：4cf5606（批次1 后端500）→ 03ba0c5（批次2 前端高危）→ 14e59db（批次4+5 后端）
+  → 5634f80（批次3+4+5 前端+e2e）
+- 验证账目：`manage.py test apps.analysis` 173/173、全量 888/888 串行 OK（243s）；
+  `npm run build` 绿；e2e serial-fail-count（含新增 X 轴对齐断言）、
+  correlation-file-switch-reset、chart-filter-switches（隔离 11/11）、multi-file
+  14/14、tab-independent 5/5、custom-limit-cpk、correlation-matrix、serial-no-column
+  全绿；multi-file.spec 4 个失败为**本批 popper class 改名的连带**（spec 内联选择器
+  引用旧类），已修后 14/14 全绿
+- 基线存量失败（与 lessons 2026-09-05 记录同组，非本批回归）：boxplot-bool-params×2
+  （裸 fetch 无 Authorization→401）、file-switch-param-reset（qqplot 等响应超时）
+- e2e 前置已清 2 个未钉 `LQDP_SYSTEM_CONFIG_FILE` 的残留 runserver 进程树；跑后端口释放
+- ⚠️ 遗留：wafer_map 快路径计算慢（1MB+ 响应）但属既有性能特性未动；「文件不存在
+  三行为统一」契约变更仍列为后续议题（需 baseline 确认后动）
