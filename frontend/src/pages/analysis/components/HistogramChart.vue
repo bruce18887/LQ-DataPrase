@@ -248,8 +248,11 @@ function buildOption() {
   }
   const yAxes: any[] = [{ type: 'value', name: '百分比 (%)', nameTextStyle: { color: AXIS.left, fontWeight: 'bold' }, position: 'left', min: 0, max: leftYMax, axisLabel: { formatter: '{value}%', color: AXIS.left }, axisLine: { show: true, lineStyle: { color: AXIS.left } } }]
   if (hasSiteData) yAxes.push({ type: 'value', name: 'All Site (%)', nameTextStyle: { color: AXIS.allsite, fontWeight: 'bold' }, position: 'right', min: 0, axisLabel: { formatter: '{value}%', color: AXIS.allsite }, axisLine: { show: true, lineStyle: { color: AXIS.allsite } }, splitLine: { show: false } })
-  if (hasKde) yAxes.push({ type: 'value', name: 'KDE密度', nameTextStyle: { color: AXIS.kde, fontWeight: 'bold' }, position: 'left', offset: 55, min: 0, axisLabel: { formatter: (v: number) => v.toExponential(2), color: AXIS.kde }, axisLine: { show: true, lineStyle: { color: AXIS.kde } }, splitLine: { show: false } })
-  if (hasNormal) yAxes.push({ type: 'value', name: '概率密度', nameTextStyle: { color: AXIS.normal, fontWeight: 'bold' }, position: 'right', offset: hasSiteData ? 50 : 0, min: 0, axisLabel: { formatter: (v: number) => v.toExponential(2), color: AXIS.normal }, axisLine: { show: true, lineStyle: { color: AXIS.normal } }, splitLine: { show: false } })
+  // KDE/正态的独立密度轴保留在 option 里（曲线仍绑各自 yAxisIndex 独立缩放），
+  // 但 show:false 不画刻度/轴名/轴线 → 省出 X 轴横向空间（2026-09-06 需求：
+  // 去掉占位的密度 Y 轴、曲线照旧显示）。勾选开关仍切换曲线本身显隐。
+  if (hasKde) yAxes.push({ type: 'value', name: 'KDE密度', show: false, position: 'left', min: 0, splitLine: { show: false } })
+  if (hasNormal) yAxes.push({ type: 'value', name: '概率密度', show: false, position: 'right', min: 0, splitLine: { show: false } })
 
   const unitStr = r.unit || ''
   const limitStr = (r.lower_limit != null && r.upper_limit != null) ? `Limit [${r.lower_limit.toFixed(4)}, ${r.upper_limit.toFixed(4)}]` : ''
@@ -288,7 +291,8 @@ function buildOption() {
     },
     legend: { data: series.map((s: any) => s.name), top: 'bottom', type: 'scroll', textStyle: { color: tc } },
     toolbox: { feature: { saveAsImage: { name: `${props.selectedParam}_分析` } } },
-    grid: { top: 55, bottom: 70, left: hasKde ? 110 : 55, right: (hasSiteData && hasNormal) ? 120 : (hasSiteData || hasNormal) ? 80 : 55 },
+    // 密度轴（KDE/正态）已 show:false 不占位，grid 随之收窄，绘图区更宽
+    grid: { top: 55, bottom: 70, left: hasKde ? 70 : 55, right: (hasSiteData && hasNormal) ? 90 : (hasSiteData || hasNormal) ? 80 : 55 },
     xAxis: { type: 'value', name: '', nameLocation: 'middle', nameGap: 28, min: xAxisMin, max: xAxisMax, axisLabel: { rotate: 45, show: true, interval: 0, fontSize: 9, formatter: formatAxisValue, color: tc }, splitNumber: 24 },
     yAxis: yAxes,
     series,

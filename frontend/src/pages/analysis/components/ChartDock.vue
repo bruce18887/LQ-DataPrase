@@ -18,7 +18,7 @@
         <el-splitter-panel
           v-for="(row, ri) in displayRows"
           :key="'r:' + row.join('|')"
-          :min="'120px'"
+          :min="'200px'"
           :size="rowPctStr(ri)"
           :resizable="displayRows.length > 1"
         >
@@ -49,7 +49,7 @@
             <el-splitter-panel
               v-for="(key, ci) in row"
               :key="key"
-              :min="'150px'"
+              :min="'240px'"
               :size="colPctStr(ri, ci)"
             >
               <ChartPanel
