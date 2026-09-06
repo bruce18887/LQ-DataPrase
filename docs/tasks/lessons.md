@@ -441,3 +441,24 @@
   只匹配 `rgba(`/`#hex` 的颜色探针会把 alpha 读成 0，直接误判「color-mix 没生效/底色全透明」。
   e2e 里做颜色断言统一走 `e2e/helpers/colors.ts`（已同时支持 rgba/color()/hex，
   并把祖先 alpha 自下而上合成再算对比度）。
+
+## 2026-09-06 dock 图表布局缩放二次修复新增教训
+
+- **CSS Grid 轨道裸 `1fr` 压不小**：`1fr` = `minmax(auto, 1fr)`，auto 最小尺寸 = 内容尺寸，
+  轨道会被内容（含 ECharts 容器 wrapper 的历史高度）撑住 → 拖分隔条面板变小、画布不动被
+  裁掉。直方图幸存只因外层滚动容器（overflow 非 visible）的 auto-min 归零，属巧合非机制。
+  规则：**想让格子严格等于可用空间，列/行一律写 `minmax(0, 1fr)`**，不依赖每个子组件自己
+  `overflow: hidden` 自保。
+- **ResizeObserver 只护 onMounted 时已存在的容器**：QQ/箱线先渲染占位符、数据到达后 `v-if`
+  才翻转出真容器——onMounted 时 chartRef 为空，observer 跳过且永不补挂；v-if 重建的新 DOM
+  同理让旧 observer 盯死节点。修法（useChart）：`setupResizeObserver()` 先 disconnect 再判断
+  （早退守卫前不移除旧 observer 会永久残留）+ `watch(chartRef)` 在容器出现/替换时补挂 observer
+  并 ensureInit。R7③ 的「v-if 重建校验 getDom 身份」管实例复用，本条管 observer 挂载时机，
+  两者缺一图表都不会跟随缩放。
+- **e2e 断言画布尺寸的两个参照陷阱**：① `inst.getWidth()/getHeight()` 是 ECharts 内部缓存，
+  实测出现过 inst 报旧值而真实 svg 已贴合 → 量宿主容器内 svg/canvas 的 getBoundingClientRect；
+  ② 参照不能用 `.chart-b`/面板体——序列图宿主因 col-selector/OutlierHintBar 等固定高度兄弟
+  legitimately 小于面板体，全等断言必假红（第一版 e2e 因此 2 例挂）。正确口径：
+  **画布 rect == 宿主容器自身 client 尺寸**（±4px），仍能抓住「画布大于容器=被裁」的 bug 形态。
+  另：循环断言多面板缩放时基线必须**逐 key 采集**，复用单 key（如 hist）基线会让其它面板
+  「撑高 > hist 原高」恒假红。
