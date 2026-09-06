@@ -161,7 +161,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useSingleTabStore } from '../../../stores/analysisTabs'
 import type { DataFile } from '../../../types'
@@ -189,6 +189,7 @@ import { useBoxPlot } from '../composables/useBoxPlot'
 import { useQQPlot } from '../composables/useQQPlot'
 import { useTabFileParams } from '../composables/useTabFileParams'
 import type { ChartKey } from '../composables/useChartDock'
+import { loadChartMemory, saveChartState } from '../../../composables/useChartMemory'
 
 const props = defineProps<{
   /** 文件列表（页面统一拉一次给 4 个 tab；本 tab 自己的选择存在单文件 store） */
@@ -366,6 +367,25 @@ function onDockClose(key: ChartKey) {
   else if (key === 'qq') showQQPlot.value = false
   else if (key === 'box') showBoxPlot.value = false
 }
+
+// ========== 图表勾选账号记忆 ==========
+// 套用与上报互斥：套用期间 watcher 不回写（避免把「恢复」当「用户改动」再存一遍）
+let togglesApplying = false
+let togglesTouched = false
+watch([showSerial, showQQPlot, showBoxPlot], ([s, q, b]) => {
+  if (togglesApplying) return
+  togglesTouched = true
+  saveChartState({ toggles: { serial: s, qq: q, box: b } })
+})
+void loadChartMemory().then(({ memoryEnabled, state }) => {
+  // 开关关/未加载（null）一律不套用：记忆功能只在明确开启时生效
+  if (memoryEnabled !== true || !state.toggles || togglesTouched) return
+  togglesApplying = true
+  showSerial.value = state.toggles.serial
+  showQQPlot.value = state.toggles.qq
+  showBoxPlot.value = state.toggles.box
+  nextTick(() => { togglesApplying = false })
+})
 
 // ========== Store sync ==========
 // 无：图表配置全部经 storeToRefs 直接读写 store（见上方 state 声明），
