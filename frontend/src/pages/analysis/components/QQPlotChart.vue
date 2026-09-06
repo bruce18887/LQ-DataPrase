@@ -58,12 +58,10 @@ const isEmptyResult = computed(() => {
 const pointCount = computed(() => props.result?.theoretical_quantiles?.length ?? 0)
 const isLarge = computed(() => pointCount.value >= 5000)
 
-// 图表布局常量（与下方 CSS .qqplot-container 的 height: 400px 同步）：
-// Y 轴滑动块必须与 grid 同源定位——top 对齐 grid 顶，高度 = 容器高 − top − bottom，
-// 否则滑块与 Y 轴长度不一致
+// 图表布局常量：dock 下面板高度由 el-splitter 决定（不定高），Y 轴滑条改用
+// top+bottom 定位自动撑满，与 grid 同源，避免滑块与轴长度不一致
 const GRID_TOP = 50
 const GRID_BOTTOM = 40
-const CHART_HEIGHT = 400
 
 function buildOption() {
   const r = props.result
@@ -160,14 +158,14 @@ function buildOption() {
     grid: { top: GRID_TOP, bottom: GRID_BOTTOM, left: 55, right: 40 },
     // Y 轴数据缩放（滑块 + 滚轮）：观测值区间局部放大，定位离群点/区间
     // 形态；双主题：filler/手柄跟随主题主色（亮=蓝 #2563eb、暗=金 #fdd835）；
-    // 滑块与 grid 同源定位——top 对齐、高度 = 容器高 − top − bottom
+    // 滑块与 grid 同源定位——top 对齐、bottom 收口，高度自适应容器（dock 不定高）
     dataZoom: [
       {
         type: 'slider',
         yAxisIndex: 0,
         right: 4,
         top: GRID_TOP,
-        height: CHART_HEIGHT - GRID_TOP - GRID_BOTTOM,
+        bottom: GRID_BOTTOM,
         backgroundColor: 'transparent',
         borderColor: colors.value.axisLineColor,
         fillerColor: `${colors.value.seriesColors[0]}26`,
@@ -217,25 +215,29 @@ void chartRef // bound to <div ref="chartRef"> in template
 .qqplot-chart {
   width: 100%;
   height: 100%;
-  min-height: 400px;
+  min-height: 0;
   position: relative;
 }
 
 .qqplot-chart-inner {
   display: flex;
   flex-direction: column;
+  height: 100%;
+  min-height: 0;
 }
 
 .qqplot-container {
   width: 100%;
-  height: 400px;
+  flex: 1;
+  min-height: 0;
 }
 
 .qqplot-placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 400px;
+  height: 100%;
+  min-height: 200px;
   background: var(--bg-2);
   border-radius: 6px;
   border: 1px solid var(--border-2);

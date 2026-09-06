@@ -219,14 +219,15 @@ void chartRef // bound to <div ref="chartRef"> in template
 </script>
 
 <style scoped>
-.chart-container { width: 100%; height: 100%; min-height: 400px; }
+.chart-container { width: 100%; height: 100%; min-height: 0; }
 .boxplot-placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   width: 100%;
-  height: 400px;
+  height: 100%;
+  min-height: 200px;
   background: var(--bg-2);
   border: 1px dashed var(--border-2);
   border-radius: 6px;
