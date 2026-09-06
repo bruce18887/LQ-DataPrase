@@ -113,6 +113,11 @@ export async function clearChartMemoryState(opts: { disableMemory?: boolean } = 
   }
 }
 
+/** 设置页「保存为开」时调用：SPA 会话内把开关拨回 true（布局套用下次进入分析页生效） */
+export function setChartMemoryEnabled(enabled: boolean) {
+  memoryEnabled = enabled
+}
+
 /** 登录/登出/账号切换时重置全部模块态（auth store 的 reset*Cache 同款先例） */
 export function resetChartMemoryCache() {
   settingsPromise = null
