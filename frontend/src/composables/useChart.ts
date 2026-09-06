@@ -32,11 +32,6 @@ export function useChart<T = echarts.EChartsOption>(
   /** 渲染器 getter：返回当前期望的渲染器（跟随数据量/用户设置变化）；
    * 缺省跟随全局设置。实例渲染器与期望不一致时自动 dispose 重建。 */
   renderer?: () => 'svg' | 'canvas',
-  /** 可选：仅重算布局（grid/dataZoom 等随容器尺寸变化的像素项）。容器尺寸变化
-   * 稳定后（防抖）以 merge（非 notMerge）方式套用，只更新 grid/dataZoom，不重建
-   * series、不触发 markLine 入场动画 → 序列图 X 轴、QQ 缩放条随面板高宽自适应，
-   * 且不再有每帧全量重建的抖动/卡顿。 */
-  buildLayout?: (w: number, h: number) => { grid?: unknown; dataZoom?: unknown; legend?: unknown } | null,
 ) {
   const chartRef = useTemplateRef<HTMLElement>(refKey)
   const chartInstance: Ref<echarts.ECharts | null> = ref(null)
@@ -47,8 +42,6 @@ export function useChart<T = echarts.EChartsOption>(
   let pollTimeout: ReturnType<typeof setTimeout> | null = null
   let resizeObserver: ResizeObserver | null = null
   let resizeRaf: ReturnType<typeof requestAnimationFrame> | null = null
-  // 容器尺寸稳定后防抖重算布局（grid/dataZoom）的定时器
-  let layoutTimer: ReturnType<typeof setTimeout> | null = null
   let disposed = false
   // 上一次观测到的容器尺寸；0 表示当时不可见（display:none / 未布局）。
   // 用于区分「尺寸变化（只需 resize）」与「从隐藏恢复（需补一次 renderOption）」，
@@ -213,28 +206,6 @@ export function useChart<T = echarts.EChartsOption>(
     chartInstance.value?.resize()
   }
 
-  function clearLayoutTimer() {
-    if (layoutTimer != null) { clearTimeout(layoutTimer); layoutTimer = null }
-  }
-
-  /**
-   * 容器尺寸变化后：立即 resize()（廉价、无动画），并防抖 ~160ms 重算一次布局
-   * （grid/dataZoom 随容器高宽变化的像素项）。用 merge（非 notMerge）只更新布局，
-   * 不重建 series、不触发 markLine 入场动画。让序列图 X 轴、QQ 缩放条随面板缩放。
-   */
-  function scheduleLayout(w: number, h: number) {
-    if (!buildLayout) return
-    clearLayoutTimer()
-    layoutTimer = setTimeout(() => {
-      layoutTimer = null
-      if (disposed || !chartInstance.value) return
-      try {
-        const lay = buildLayout(w, h)
-        if (lay) chartInstance.value.setOption(lay as echarts.EChartsOption)
-      } catch { /* 布局重算失败忽略（下一次 resize 会再试） */ }
-    }, 160)
-  }
-
   /**
    * 持续监听容器尺寸变化。解决 el-tabs/keep-alive/路由缓存 等场景下：
    * - 容器从 display:none /  detached 恢复为可见时，ECharts 实例需要 resize() 才能重绘；
@@ -268,7 +239,6 @@ export function useChart<T = echarts.EChartsOption>(
           if (boundDom === chartRef.value) {
             resize()
             if (recovering) renderOption()
-            else scheduleLayout(r.width, r.height)
           } else {
             // 容器被替换（v-if 切换）→ 在新 DOM 上重建 observer
             ensureInit()
@@ -321,7 +291,6 @@ export function useChart<T = echarts.EChartsOption>(
     disposed = true
     clearPollTimers()
     clearResizeRaf()
-    clearLayoutTimer()
     resizeObserver?.disconnect()
     resizeObserver = null
     window.removeEventListener('resize', resize)
