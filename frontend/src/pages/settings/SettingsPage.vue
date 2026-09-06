@@ -52,7 +52,7 @@ import type { ExportTypeKey, SettingsData } from '../../types'
 import { EXPORT_TEMPLATE_META, EXPORT_TEMPLATE_KEYS } from '../../constants/export-templates'
 import ChartSettingsForm from './components/ChartSettingsForm.vue'
 import AnalysisLayoutSettings from './components/AnalysisLayoutSettings.vue'
-import { clearChartMemoryState } from '../../composables/useChartMemory'
+import { clearChartMemoryState, setChartMemoryEnabled } from '../../composables/useChartMemory'
 import TableSettingsForm from './components/TableSettingsForm.vue'
 import CpkSettingsForm from './components/CpkSettingsForm.vue'
 import SystemPathsSettings from './components/SystemPathsSettings.vue'
@@ -144,8 +144,13 @@ async function saveSettings() {
     setExportTimeoutSec(settings.value.export_timeout)
     setSftpTimeoutSec(settings.value.sftp_download_timeout)
     setFilenameWrapCache(settings.value.filename_wrap)
-    // 关 = 完全不记忆：保存为关时一并清空已存状态（账号 + 本机）并断写本会话
-    if (!settings.value.analysis_chart_memory) await clearChartMemoryState({ disableMemory: true })
+    if (settings.value.analysis_chart_memory) {
+      // 会话内「关→开」：立即恢复同步；账号布局套用下次进入分析页生效
+      setChartMemoryEnabled(true)
+    } else {
+      // 关 = 完全不记忆：保存为关时一并清空已存状态（账号 + 本机）并断写本会话
+      await clearChartMemoryState({ disableMemory: true })
+    }
     ElMessage.success('设置已保存')
   } catch {
     // 错误 toast 由 axios 拦截器统一弹出
