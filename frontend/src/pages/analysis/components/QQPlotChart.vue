@@ -154,26 +154,10 @@ function buildOption() {
         `理论分位数: ${Number(p.value[0]).toFixed(4)}<br/>观测值: ${Number(p.value[1]).toFixed(4)}`,
     },
     toolbox: { feature: { saveAsImage: { name: `${props.param}_QQ图` } } },
-    // grid.right 预留右侧 Y 轴滑动块空间（宽 30 + 边距）
-    grid: { top: GRID_TOP, bottom: GRID_BOTTOM, left: 55, right: 40 },
-    // Y 轴数据缩放（滑块 + 滚轮）：观测值区间局部放大，定位离群点/区间
-    // 形态；双主题：filler/手柄跟随主题主色（亮=蓝 #2563eb、暗=金 #fdd835）；
-    // 滑块与 grid 同源：top/bottom 都对齐 grid → ECharts resize() 自动撑满整条
-    // Y 轴、随面板高变化（不用固定 height，否则 resize 时长度不跟随 → 窄条 bug）
+    grid: { top: GRID_TOP, bottom: GRID_BOTTOM, left: 55, right: 20 },
+    // Y 轴缩放：去掉右侧滑块（滑块与面板高度联动易出问题、且占右栏），改纯 inside
+    // 滚轮缩放（与序列图同款）——鼠标在图上滚即缩放观测值区间，定位离群点/形态。
     dataZoom: [
-      {
-        type: 'slider',
-        yAxisIndex: 0,
-        right: 4,
-        top: GRID_TOP,
-        bottom: GRID_BOTTOM,
-        backgroundColor: 'transparent',
-        borderColor: colors.value.axisLineColor,
-        fillerColor: `${colors.value.seriesColors[0]}26`,
-        handleStyle: { color: colors.value.seriesColors[0], borderColor: 'transparent' },
-        moveHandleStyle: { color: colors.value.seriesColors[0] },
-        textStyle: { color: colors.value.subtextColor, fontSize: 10 },
-      },
       { type: 'inside', yAxisIndex: 0 },
     ],
     xAxis: {

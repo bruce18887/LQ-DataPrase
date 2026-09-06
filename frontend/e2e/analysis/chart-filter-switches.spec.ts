@@ -209,36 +209,27 @@ test.describe('@p1 图表配置数据筛选开关', { tag: ['@p1', '@analysis'] 
     expect(lineData, '参考线（series[1]）应存在').toBeTruthy()
     expect(lineData[0][1], '参考线端点 y ≠ x（数据均值非 0，拟合线被抬升）').not.toBe(lineData[0][0])
 
-    // Y 轴 dataZoom：右侧滑块（slider）+ 滚轮（inside）作用于 yAxis 0，
-    // dispatch 缩放后 start/end 更新（注意：getOption() 每次返回新快照，
-    // 必须 dispatch 后再取，不能复用旧数组引用）
+    // Y 轴缩放：QQ 图已去掉右侧 slider，改纯 inside（滚轮）缩放，作用于 yAxis 0。
+    // dispatch dataZoom 后 start/end 更新即证明缩放功能在（注意：getOption 每次返回新快照）。
     const zoomState = await page.locator('.qqplot-container[_echarts_instance_]').evaluate((el: any) => {
       const inst = el.__echartsInstance__
       const dz = inst?.getOption?.()?.dataZoom ?? []
       inst?.dispatchAction?.({ type: 'dataZoom', dataZoomIndex: 0, start: 20, end: 60 })
       const dz2 = inst?.getOption?.()?.dataZoom ?? []
-      const grid = (inst?.getOption?.()?.grid ?? [])[0] ?? {}
       return {
         count: dz.length,
         firstType: dz[0]?.type ?? null,
+        hasSlider: dz.some((d: any) => d.type === 'slider'),
         yAxis: dz[0]?.yAxisIndex ?? null,
-        after: dz2[0]?.start ?? null,
-        // 滑块与 Y 轴(grid)同源：top/bottom 都对齐 grid → resize() 自动撑满整条轴、
-        // 随面板高变化（旧实现用固定 height，面板变高时长度不跟随 → 窄条 bug）
-        sliderTop: dz[0]?.top ?? null,
-        sliderBottom: dz[0]?.bottom ?? null,
-        gridTop: grid.top ?? null,
-        gridBottom: grid.bottom ?? null,
-        containerHeight: el.clientHeight,
+        afterStart: dz2[0]?.start ?? null,
+        afterEnd: dz2[0]?.end ?? null,
       }
     })
-    expect(zoomState.count, '应配置 slider + inside 两个 dataZoom').toBeGreaterThanOrEqual(2)
-    expect(zoomState.firstType, '首个 dataZoom 应为 slider 滑块').toBe('slider')
+    expect(zoomState.hasSlider, 'QQ 图不应再有 slider（改纯 inside 滚轮缩放）').toBe(false)
+    expect(zoomState.firstType, '首个 dataZoom 应为 inside 滚轮缩放').toBe('inside')
     expect(zoomState.yAxis, 'dataZoom 应作用于 Y 轴').toBe(0)
-    expect(zoomState.after, '拖动滑块后 dataZoom.start 应更新').toBe(20)
-    expect(zoomState.sliderTop, '滑块顶部应与 Y 轴（grid）顶部对齐').toBe(zoomState.gridTop)
-    expect(zoomState.sliderBottom, '滑块底部应与 Y 轴（grid）底部对齐（随容器变长）')
-      .toBe(zoomState.gridBottom)
+    expect(zoomState.afterStart, '滚轮缩放后 dataZoom.start 应更新').toBe(20)
+    expect(zoomState.afterEnd, '滚轮缩放后 dataZoom.end 应更新').toBe(60)
   })
 
   test('数值分布：勾选仅用Pass数据后箱线图请求携带开关且图表正常渲染', async ({ page }) => {

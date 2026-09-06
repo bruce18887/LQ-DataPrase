@@ -14,14 +14,10 @@
     </div>
 
     <div class="chart-dock__body" :style="{ height: effH + 'px' }">
-      <el-splitter layout="vertical" :lazy="true" @resize-end="onRowResize">
-        <el-splitter-panel
-          v-for="(row, ri) in displayRows"
-          :key="'r:' + row.join('|')"
-          :min="'240px'"
-          :size="rowPctStr(ri)"
-          :resizable="displayRows.length > 1"
-        >
+      <!-- 行：普通 flex 列 + 百分比高度（容器变高时天然等比缩放；el-splitter 会把行
+           尺寸锁成 px、不随容器重算，故行不用它）。行间用自定义拖拽条改占比。 -->
+      <template v-for="(row, ri) in displayRows" :key="'r:' + row.join('|')">
+        <div class="chart-dock__row" :style="{ height: rowHeightCss(ri) }">
           <!-- 单图：直接铺 -->
           <ChartPanel
             v-if="row.length === 1"
@@ -44,7 +40,7 @@
             </template>
           </ChartPanel>
 
-          <!-- 多图：横向 splitter 分列 -->
+          <!-- 多图：横向 splitter 分列（宽度不受底部条影响，el-splitter 足够） -->
           <el-splitter v-else layout="horizontal" :lazy="true" @resize-end="(_i: number, px: number[]) => onColResize(ri, px)">
             <el-splitter-panel
               v-for="(key, ci) in row"
@@ -73,8 +69,21 @@
               </ChartPanel>
             </el-splitter-panel>
           </el-splitter>
-        </el-splitter-panel>
-      </el-splitter>
+        </div>
+
+        <!-- 行间自定义水平拖拽条：改上下两行占比（仅多行时） -->
+        <div
+          v-if="ri < displayRows.length - 1"
+          class="chart-dock__rowbar"
+          :class="{ 'is-active': rowResize }"
+          role="separator"
+          aria-orientation="horizontal"
+          title="上下拖动调整两行高度"
+          @pointerdown="onRowDown(ri, $event)"
+        >
+          <span class="chart-dock__rowbar-grip" />
+        </div>
+      </template>
     </div>
 
     <!-- 底部横条：按住上下拖改整个图表区高度；双击回到按行数自动高度 -->
@@ -164,15 +173,53 @@ function resetHeight() {
   bodyH.value = null
 }
 
-const rowPctStr = (ri: number) => (Number.isFinite(rowPcts.value[ri]) ? `${rowPcts.value[ri]}%` : undefined)
+// 行高：占比% 减去「行间拖拽条」占位（rowbar 10px × (行数-1)），使各行 + 分隔条
+// 正好铺满 dock body、且随 body 变高按占比等比缩放。flex-grow 置 0 以免被均分覆盖。
+const ROWBAR_H = 10
+const rowHeightCss = (ri: number) => {
+  const pct = Number.isFinite(rowPcts.value[ri]) ? rowPcts.value[ri] : 100 / displayRows.value.length
+  const bars = Math.max(0, displayRows.value.length - 1) * ROWBAR_H
+  return `calc(${pct}% - ${(bars * pct) / 100}px)`
+}
+
 const colPctStr = (ri: number, ci: number) => {
   const c = colPcts.value[ri]?.[ci]
   return Number.isFinite(c) ? `${c}%` : undefined
 }
 
-function onRowResize(_i: number, pxSizes: number[]) {
-  if (maxKey.value) return // 最大化态是临时视图（单格 100%），不回写真实行尺寸
-  dock.setRowPcts(pctFromPx(pxSizes))
+// 行间自定义拖拽条：按住上下拖，把两行的高度占比此消彼长（受单行最小 200px 约束）
+const rowResize = ref(false)
+function onRowDown(ri: number, ev: PointerEvent) {
+  if (ev.button !== 0 || maxKey.value) return
+  ev.preventDefault()
+  const startY = ev.clientY
+  const a0 = rowPcts.value[ri] ?? 50
+  const b0 = rowPcts.value[ri + 1] ?? 50
+  const bodyPx = effH.value
+  const minPct = (200 / bodyPx) * 100
+  rowResize.value = true
+  document.body.style.userSelect = 'none'
+  const onMove = (e: PointerEvent) => {
+    const dPct = ((e.clientY - startY) / bodyPx) * 100
+    let a = a0 + dPct
+    let b = b0 - dPct
+    if (a < minPct) { a = minPct; b = a0 + b0 - minPct }
+    if (b < minPct) { b = minPct; a = a0 + b0 - minPct }
+    const next = [...rowPcts.value]
+    next[ri] = a
+    next[ri + 1] = b
+    dock.setRowPcts(next)
+  }
+  const onUp = () => {
+    rowResize.value = false
+    document.body.style.userSelect = ''
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onUp)
+  }
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
+  window.addEventListener('pointercancel', onUp)
 }
 function onColResize(ri: number, pxSizes: number[]) {
   if (maxKey.value) return // 同上：避免把 [100] 之类临时尺寸持久化
@@ -263,6 +310,37 @@ onBeforeUnmount(cleanupDrag)
 .chart-dock__body {
   position: relative;
   flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+/* 行：高度由 inline calc(占比% − rowbar 占位) 精确决定，flex 不 grow/shrink
+   （否则被均分覆盖占比）。随 dock body 变高按占比等比缩放。 */
+.chart-dock__row {
+  flex: 0 0 auto;
+  min-height: 0;
+  display: flex;
+}
+.chart-dock__row > * { flex: 1; min-width: 0; min-height: 0; }
+/* 行间自定义水平拖拽条 */
+.chart-dock__rowbar {
+  flex: 0 0 auto;
+  height: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: row-resize;
+  border-radius: 5px;
+  background: var(--bg-3, #f0f1f3);
+  touch-action: none;
+}
+.chart-dock__rowbar:hover { background: color-mix(in srgb, var(--brand) 14%, var(--bg-3)); }
+.chart-dock__rowbar.is-active { background: color-mix(in srgb, var(--brand) 24%, var(--bg-3)); }
+.chart-dock__rowbar-grip {
+  width: 36px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--text-3, #9ca3af);
 }
 /* 底部整体高度拖拽横条 */
 .chart-dock__resize {
