@@ -5,6 +5,7 @@ import { resetExportTimeoutCache } from '../utils/exportTimeout'
 import { resetSftpTimeoutCache } from '../utils/sftpTimeout'
 import { resetFilenameWrapCache } from '../utils/filenameWrap'
 import { resetChartMemoryCache } from '../composables/useChartMemory'
+import { resetChartDockMemoryState } from '../pages/analysis/composables/useChartDock'
 import { safeGetItem, safeSetItem, safeRemoveItem } from '../utils/safeStorage'
 import type { User } from '../types'
 
@@ -23,6 +24,7 @@ export const useAuthStore = defineStore('auth', () => {
     resetFilenameWrapCache()
     resetFilenameWrapCache()
     resetChartMemoryCache()
+    resetChartDockMemoryState()
     const { data } = await authApi.login(username, password)
     token.value = data.token
     refreshToken.value = data.refresh
@@ -75,6 +77,7 @@ export const useAuthStore = defineStore('auth', () => {
     resetSftpTimeoutCache()
     resetFilenameWrapCache()
     resetChartMemoryCache()
+    resetChartDockMemoryState()
   }
 
   function logout() {
