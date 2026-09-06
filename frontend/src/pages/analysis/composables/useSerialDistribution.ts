@@ -5,7 +5,8 @@ import { useAsyncData } from '../../../composables/useAsyncData'
 export function useSerialDistribution(
   getSelectedFileId: () => number | null,
   localSelectedParam: Ref<string>,
-  chartMode: Ref<string>,
+  /** 「显示序列分布」勾选态：为 true 时才拉取/响应各 watch（原 chartMode==='serial' 模式改勾选共存） */
+  serialEnabled: Ref<boolean>,
   chartConfig: Ref<string[]>,
   rangeType: Ref<string>,
   /** Available numeric param names — skip API call if current param is not numeric */
@@ -54,16 +55,18 @@ export function useSerialDistribution(
     }))
   }
 
-  watch(chartMode, (val) => { if (val === 'serial') loadSerialDistribution() })
+  // 「显示序列分布」勾选 → 立即拉取；取消勾选不主动清空（组件不渲染即隐藏），
+  // 再勾回时若数据已在则复用，避免重复请求（与 useQQPlot enabled 口径一致）
+  watch(serialEnabled, (val) => { if (val) loadSerialDistribution() })
   // 敏感度变化 → 重发（与 useHistogram 同口径），否则序列分布的异常值
   // 标记会滞留旧值，与同屏直方图矛盾。
   watch(iqrMultiplier, () => {
-    if (chartMode.value === 'serial') loadSerialDistribution()
+    if (serialEnabled.value) loadSerialDistribution()
   })
-  watch([chartConfig, rangeType], () => { if (chartMode.value === 'serial') loadSerialDistribution() }, { deep: true })
-  watch(localSelectedParam, () => { if (chartMode.value === 'serial') loadSerialDistribution() })
-  if (dataOnlyBin1) watch(dataOnlyBin1, () => { if (chartMode.value === 'serial') loadSerialDistribution() })
-  if (serialCol) watch(serialCol, () => { if (chartMode.value === 'serial') loadSerialDistribution() })
+  watch([chartConfig, rangeType], () => { if (serialEnabled.value) loadSerialDistribution() }, { deep: true })
+  watch(localSelectedParam, () => { if (serialEnabled.value) loadSerialDistribution() })
+  if (dataOnlyBin1) watch(dataOnlyBin1, () => { if (serialEnabled.value) loadSerialDistribution() })
+  if (serialCol) watch(serialCol, () => { if (serialEnabled.value) loadSerialDistribution() })
 
   return { serialDistData, serialError, loadSerialDistribution }
 }

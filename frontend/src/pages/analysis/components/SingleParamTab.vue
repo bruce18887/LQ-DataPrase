@@ -1,54 +1,35 @@
 <template>
   <AnalysisTabLayout :loading="histLoading" class="single-param-tab">
     <template #toolbar>
-      <AnalysisFilePicker
-        v-model="fileId"
-        :files="files"
-        scope="single"
-        :loading="tabLoading"
-      />
-      <el-radio-group v-model="chartMode" size="small">
-        <el-radio-button value="distribution">数值分布</el-radio-button>
-        <el-radio-button value="serial">序列分布</el-radio-button>
-      </el-radio-group>
-      <el-checkbox
-        v-if="chartMode === 'distribution'"
-        v-model="showQQPlot"
-        size="small"
-        style="margin-left: 12px;"
-      >
-        显示QQ图
-      </el-checkbox>
-      <el-checkbox
-        v-if="chartMode === 'distribution'"
-        v-model="showBoxPlot"
-        size="small"
-        style="margin-left: 12px;"
-      >
-        显示箱线图
-      </el-checkbox>
-      <el-checkbox
-        v-if="showBoxPlot"
-        v-model="showJitter"
-        size="small"
-        style="margin-left: 12px;"
-      >
-        Jitter散点
-      </el-checkbox>
-      <el-select
-        v-if="showBoxPlot"
-        v-model="groupBy"
-        size="small"
-        style="width: 120px; margin-left: 8px"
-        placeholder="分组方式"
-      >
-        <el-option
-          v-for="opt in groupByOptions"
-          :key="opt.value"
-          :label="opt.label"
-          :value="opt.value"
-        />
-      </el-select>
+      <div class="control-panel">
+        <!-- 第一行：选文件（左） + 三个「显示…」图表勾选（右对齐） -->
+        <div class="control-panel__main">
+          <AnalysisFilePicker
+            v-model="fileId"
+            :files="files"
+            scope="single"
+            :loading="tabLoading"
+          />
+          <div class="chart-toggles">
+            <el-checkbox v-model="showSerial" size="small">显示序列分布</el-checkbox>
+            <el-checkbox v-model="showQQPlot" size="small">显示QQ图</el-checkbox>
+            <el-checkbox v-model="showBoxPlot" size="small">显示箱线图</el-checkbox>
+          </div>
+        </div>
+        <!-- 第二行：数据口径（异常值处理 · 敏感度 · 数据筛选），内联无卡片 -->
+        <div class="control-panel__filters">
+          <DataFilterSection
+            variant="bar"
+            v-model:ignore-no-limit="ignoreNoLimit"
+            v-model:ignore-no-test-value="ignoreNoTestValue"
+            v-model:data-only-bin1="dataOnlyBin1"
+            v-model:only-fail-test-item="onlyFailTestItem"
+            v-model:only-low-cpk="onlyLowCpk"
+            v-model:outlier-handling="outlierHandling"
+            v-model:iqr-multiplier="iqrMultiplier"
+          />
+        </div>
+      </div>
     </template>
 
     <template #left-panel>
@@ -61,22 +42,32 @@
         v-model:custom-low="customLow"
         v-model:custom-high="customHigh"
       />
-      <!-- 数据筛选与异常值处理：只动本 tab 的那份状态 -->
-      <DataFilterSection
-        v-model:ignore-no-limit="ignoreNoLimit"
-        v-model:ignore-no-test-value="ignoreNoTestValue"
-        v-model:data-only-bin1="dataOnlyBin1"
-        v-model:only-fail-test-item="onlyFailTestItem"
-        v-model:only-low-cpk="onlyLowCpk"
-        v-model:outlier-handling="outlierHandling"
-        v-model:iqr-multiplier="iqrMultiplier"
-      />
       <RangeComparisonTable :range-table-data="rangeTableData" :range-type="rangeType" />
       <SiteStatsTable :site-stats="siteStats" :site-stats-error="siteStatsError" />
       <QQPlotStatsTable v-if="showQQPlot && qqResult" :result="qqResult" />
+      <!-- 箱线图专属控件：离群点 + 分组方式，置于「箱线图统计」上方，避免与顶部工具条混淆 -->
+      <el-card
+        v-if="showBoxPlot"
+        shadow="never"
+        class="box-controls-card"
+        :body-style="{ padding: '8px' }"
+      >
+        <div class="box-controls">
+          <el-select v-model="groupBy" size="small" style="width: 120px" placeholder="分组方式">
+            <el-option
+              v-for="opt in groupByOptions"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
+          <el-checkbox v-model="showJitter" size="small">离群点</el-checkbox>
+        </div>
+      </el-card>
       <BoxPlotStatsTable
-        v-if="showBoxPlot && boxPlotOverallStats && !boxPlotLoading"
-        :stats="boxPlotOverallStats"
+        v-if="showBoxPlot && currentBoxPlotData && !boxPlotLoading"
+        :data="currentBoxPlotData"
+        :group-by="groupBy"
       />
       <el-skeleton
         v-else-if="showBoxPlot && boxPlotLoading"
@@ -103,22 +94,11 @@
         />
         <div class="top-bar-right">
           <StatsSummary :stat-cards="statCards" />
-          <el-tag
-            v-if="qqResult && showQQPlot"
-            :type="qqResult.is_normal ? 'success' : 'danger'"
-            size="small"
-            class="normality-tag"
-          >
-            {{ qqResult.is_normal ? '正态' : '非正态' }}
-          </el-tag>
         </div>
       </div>
 
-      <!-- 图表：distribution 模式 -->
-      <div
-        v-if="chartMode === 'distribution' && histResult"
-        class="chart-vertical-layout"
-      >
+      <!-- 图表：直方图为基态常驻；序列/QQ/箱线按勾选追加在其下方 -->
+      <div v-if="histResult" class="chart-vertical-layout">
         <div class="chart-wrapper chart-wrapper--top">
           <HistogramChart
             :result="histResult"
@@ -130,58 +110,65 @@
             :outlier-handling="outlierHandling"
           />
         </div>
-        <div v-if="showQQPlot" :key="`qq-${localSelectedParam}`" class="chart-wrapper chart-wrapper--bottom">
-          <QQPlotChart
-            :file-id="fileId"
-            :param="localSelectedParam"
-            :visible="showQQPlot"
-            :result="qqResult"
-            :loading="qqLoading"
-            :error="qqError"
+        <!-- 序列分布：勾选后显示在直方图正下方（与其余图共存，非互斥模式） -->
+        <div v-if="showSerial" class="chart-wrapper chart-wrapper--serial">
+          <!-- 无序列号列等错误：优先展示提示，避免渲染残留旧数据或空图 -->
+          <el-alert
+            v-if="serialError"
+            :title="serialError"
+            type="error"
+            show-icon
+            :closable="false"
+            class="serial-error-alert"
+          />
+          <SerialChart
+            v-else-if="serialDistData"
+            :data="serialDistData"
             :outlier-handling="outlierHandling"
+            :serial-col="serialCol"
+            :serial-candidates="serialDistData.serial_candidates || []"
+            @update:serial-col="(v: string) => { serialCol = v }"
           />
+          <el-empty v-else description="当前参数无序列分布数据，请选择其他参数" />
         </div>
+        <!-- QQ 图与箱线图：都勾选时一行并排各占 50%，只勾其一时独占整行 -->
         <div
-          v-if="showBoxPlot"
-          :key="`bp-${localSelectedParam}`"
-          class="chart-wrapper chart-wrapper--bottom"
-          style="position: relative;"
+          v-if="showQQPlot || showBoxPlot"
+          :key="`duo-${showQQPlot}-${showBoxPlot}`"
+          class="chart-duo-row"
         >
-          <el-skeleton
-            v-if="boxPlotLoading"
-            :rows="6"
-            animated
-            style="position: absolute; inset: 0; z-index: 10; background: var(--el-bg-color);"
-          />
-          <BoxPlotChart
-            :data="currentBoxPlotData"
-            :error="boxPlotError"
-            :show-jitter="showJitter"
-            :visible="showBoxPlot"
-            :group-kind="groupBy === 'bin' ? 'bin' : 'site'"
-          />
+          <div v-if="showQQPlot" :key="`qq-${localSelectedParam}`" class="chart-wrapper chart-wrapper--bottom">
+            <QQPlotChart
+              :file-id="fileId"
+              :param="localSelectedParam"
+              :visible="showQQPlot"
+              :result="qqResult"
+              :loading="qqLoading"
+              :error="qqError"
+              :outlier-handling="outlierHandling"
+            />
+          </div>
+          <div
+            v-if="showBoxPlot"
+            :key="`bp-${localSelectedParam}`"
+            class="chart-wrapper chart-wrapper--bottom"
+            style="position: relative;"
+          >
+            <el-skeleton
+              v-if="boxPlotLoading"
+              :rows="6"
+              animated
+              style="position: absolute; inset: 0; z-index: 10; background: var(--el-bg-color);"
+            />
+            <BoxPlotChart
+              :data="currentBoxPlotData"
+              :error="boxPlotError"
+              :show-jitter="showJitter"
+              :visible="showBoxPlot"
+              :group-kind="groupBy === 'bin' ? 'bin' : 'site'"
+            />
+          </div>
         </div>
-      </div>
-      <!-- 图表：serial 模式 -->
-      <div v-else-if="chartMode === 'serial'" class="chart-wrapper">
-        <!-- 无序列号列等错误：优先展示提示，避免渲染残留旧数据或空图 -->
-        <el-alert
-          v-if="serialError"
-          :title="serialError"
-          type="error"
-          show-icon
-          :closable="false"
-          class="serial-error-alert"
-        />
-        <SerialChart
-          v-else-if="serialDistData"
-          :data="serialDistData"
-          :outlier-handling="outlierHandling"
-          :serial-col="serialCol"
-          :serial-candidates="serialDistData.serial_candidates || []"
-          @update:serial-col="(v: string) => { serialCol = v }"
-        />
-        <el-empty v-else description="当前参数无序列分布数据，请选择其他参数" />
       </div>
     </template>
   </AnalysisTabLayout>
@@ -231,7 +218,6 @@ const {
   params,
   selectedParam: localSelectedParam,
   loading: tabLoading,
-  chartMode,
   rangeType,
   chartConfig,
   barWidthPercent,
@@ -263,6 +249,9 @@ useTabFileParams({
 // 序列列手动选择（空串 = 自动检测）；多候选文件（Serial_No + Dut_No）由
 // SerialChart 选择器写入，文件切换时重置回自动检测
 const serialCol = ref('')
+// 序列分布由「显示序列分布」勾选驱动（原 chartMode==='serial' 互斥模式已移除），
+// 勾选后序列图叠加显示在直方图下方，与 QQ/箱线共存
+const showSerial = ref(false)
 
 // Composable: Histogram
 const {
@@ -306,7 +295,7 @@ const {
 } = useSerialDistribution(
   () => fileId.value,
   localSelectedParam,
-  chartMode,
+  showSerial,
   chartConfig,
   rangeType,
   params,
@@ -358,7 +347,6 @@ const currentBoxPlotData = computed(() => {
   if (!paramData) return null
   return { ...paramData, param: localSelectedParam.value }
 })
-const boxPlotOverallStats = computed(() => currentBoxPlotData.value?.overall ?? null)
 
 // Composable: QQ Plot
 const showQQPlot = ref(false)
@@ -449,8 +437,42 @@ function nextParam() {
   min-width: 0;
 }
 
-.normality-tag {
-  flex-shrink: 0;
+.box-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.box-controls-card :deep(.el-card__body) {
+  padding: 8px;
+}
+
+/* 顶部控件面板：两行（控件行 + 数据口径行），嵌在 AnalysisTabLayout 的 .toolbar 框内 */
+.control-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.control-panel__main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.control-panel__main > .dp-analysis-filepicker {
+  flex: 1;
+  min-width: 240px;
+}
+.chart-toggles {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+.control-panel__filters {
+  border-top: 1px dashed var(--border-2, #e4e7ed);
+  padding-top: 8px;
 }
 
 .chart-wrapper {
@@ -476,9 +498,41 @@ function nextParam() {
   margin-top: 12px;
 }
 
+/* 左栏数据筛选移到顶部后整体变矮：直方图降高为固定 320，不再 flex 撑高 */
+.chart-wrapper--top {
+  flex: 0 0 auto;
+  height: 320px;
+  min-height: 320px;
+}
+
+/* 序列分布：勾选后显示在直方图下方，固定 440（SerialChart 内部填满） */
+.chart-wrapper--serial {
+  flex: 0 0 auto;
+  height: 440px;
+  min-height: 440px;
+  margin-top: 12px;
+}
+
 .chart-vertical-layout {
   flex: 1;
   display: flex;
   flex-direction: column;
+}
+
+/* QQ 图与箱线图一行并排：各占一半、允许收缩；沿用 chart-wrapper--bottom 类名以兼容既有 e2e 选择器 */
+.chart-duo-row {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+.chart-duo-row > .chart-wrapper {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
+}
+@media (max-width: 1200px) {
+  .chart-duo-row {
+    flex-direction: column;
+  }
 }
 </style>

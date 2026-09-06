@@ -129,7 +129,7 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
         r.status() < 500,
       { timeout: 20_000 },
     )
-    await page.locator('.el-radio-button').filter({ hasText: '序列分布' }).first().click()
+    await page.getByText('显示序列分布').click()
     const resp = await respPromise
     expect(resp.status(), '无序列号列必须返回 400（此前 200 静默空白）').toBe(400)
     const body = await resp.json()
@@ -164,7 +164,7 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
         r.request().postData()?.includes('"param":"CONT_GATE"') === true,
       { timeout: 20_000 },
     )
-    await page.locator('.el-radio-button').filter({ hasText: '序列分布' }).first().click()
+    await page.getByText('显示序列分布').click()
     const resp = await respPromise
     expect(resp.status(), 'STS8200 文件必须回退到 PART_ID 并返回 200').toBe(200)
 
@@ -200,7 +200,7 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
         r.request().postData()?.includes('"param":"CONT_GATE"') === true,
       { timeout: 20_000 },
     )
-    await page.locator('.el-radio-button').filter({ hasText: '序列分布' }).first().click()
+    await page.getByText('显示序列分布').click()
     const resp = await respPromise
     expect(resp.status()).toBe(200)
     const body = await resp.json()
@@ -254,7 +254,7 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
         r.request().postData()?.includes('"param":"KELVIN_VIN"') === true,
       { timeout: 20_000 },
     )
-    await page.locator('.el-radio-button').filter({ hasText: '序列分布' }).first().click()
+    await page.getByText('显示序列分布').click()
     const resp = await respPromise
     expect(resp.status()).toBe(200)
 
@@ -287,7 +287,7 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
         r.request().postData()?.includes('"param":"KELVIN_VIN"') === true,
       { timeout: 20_000 },
     )
-    await page.locator('.el-radio-button').filter({ hasText: '序列分布' }).first().click()
+    await page.getByText('显示序列分布').click()
     const resp = await respPromise
     expect(resp.status()).toBe(200)
 
@@ -314,7 +314,7 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
         !r.request().postData()?.includes('serial_col'),
       { timeout: 20_000 },
     )
-    await page.locator('.el-radio-button').filter({ hasText: '序列分布' }).first().click()
+    await page.getByText('显示序列分布').click()
     await firstResp
 
     // 候选 >1 → 选择器可见，当前值为自动检测的 Serial_No
@@ -359,7 +359,7 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
         r.request().postData()?.includes('"param":"KELVIN_VIN"') === true,
       { timeout: 20_000 },
     )
-    await page.locator('.el-radio-button').filter({ hasText: '序列分布' }).first().click()
+    await page.getByText('显示序列分布').click()
     await respPromise
     await expect(page.locator(`${SINGLE} .serial-chart-wrapper`)).toBeVisible({ timeout: 15_000 })
     await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
@@ -413,7 +413,7 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
     await waitLoadingGone(page.locator(SINGLE))
     await selectParam(page, 'KELVIN_VIN')
     await waitLoadingGone(page.locator(SINGLE))
-    await page.locator('.el-radio-button').filter({ hasText: '序列分布' }).first().click()
+    await page.getByText('显示序列分布').click()
     const wrapper = page.locator(`${SINGLE} .serial-chart-wrapper`)
     await expect(wrapper).toBeVisible({ timeout: 15_000 })
     await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)

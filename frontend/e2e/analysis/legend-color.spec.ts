@@ -110,7 +110,7 @@ test.describe('@p1 图例颜色严格对应', { tag: ['@p1', '@analysis'] }, () 
     await selectAnalysisFile(page, RECOMMENDED.analysis)
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
     // 切到序列分布模式
-    await page.locator('.el-radio-button').filter({ hasText: '序列分布' }).first().click()
+    await page.getByText('显示序列分布').click()
     const container = `${SINGLE} div[_echarts_instance_]`
     await expect(page.locator(container).first()).toBeVisible({ timeout: 20_000 })
 

@@ -64,8 +64,9 @@ function createSingleState() {
     params: ref<string[]>([]),
     selectedParam: ref(''),
     loading: ref(false),
-    // 图表显示配置（仅单文件 tab 消费；数据管理页的导出面板读同一份口径）
-    chartMode: ref('distribution'),
+    // 图表显示配置（仅单文件 tab 消费）。原 chartMode（数值/序列互斥）已由
+    // SingleParamTab 的 showSerial/showQQPlot/showBoxPlot 勾选取代，序列图与
+    // 直方图共存，故不再持久化模式。
     chartConfig: ref<string[]>(['limit', 's6', 'kde']),
     rangeType: ref('RDL'),
     barWidthPercent: ref(20),
