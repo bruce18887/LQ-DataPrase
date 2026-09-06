@@ -15,6 +15,11 @@
     />
     <el-table :data="items" max-height="200" size="small">
       <el-table-column prop="filename" label="文件名" min-width="180" />
+      <el-table-column prop="file_type" label="类型" width="90">
+        <template #default="{ row }">
+          <span>{{ row.file_type === 'single' ? '单文件' : '批次' }}</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="batch_name" label="批次" width="120">
         <template #default="{ row }">
           <span>{{ row.batch_name || '—' }}</span>

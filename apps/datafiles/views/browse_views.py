@@ -218,7 +218,6 @@ class DataBrowserView(APIView):
         fail_indices, fail_columns, fail_cells = get_cached_fail_data(datafile.id, request.user.pk, datafile)
         if fail_cells is None:
             return Response({'error': 'parse_failed'}, status=400)
-        col_meta = build_col_meta(df, metadata)
 
         fail_set = set(fail_indices)
 
@@ -341,19 +340,23 @@ class DataConsistencyCheckView(APIView):
         and duplicate files (same filename + size)."""
         user = request.user
 
-        # Orphaned DB records: batch rows whose disk file no longer exists.
+        # Orphaned DB records: rows of any file_type whose disk file is gone.
+        # file_path is dual-format (relative since 2026-08-21, absolute for
+        # legacy rows) — must resolve before the existence check, otherwise
+        # every relative-path row is falsely reported as orphaned.
         db_files = DataFile.objects.filter(
-            owner=user, file_type='batch'
-        ).values_list('id', 'file_path', 'filename', 'batch_name', 'sub_batch')
+            owner=user
+        ).values_list('id', 'file_path', 'filename', 'batch_name', 'sub_batch', 'file_type')
 
         orphaned_db = []
-        for f_id, f_path, f_name, f_batch, f_sub in db_files:
-            if not os.path.exists(f_path):
+        for f_id, f_path, f_name, f_batch, f_sub, f_type in db_files:
+            if not os.path.exists(resolve_file_path(f_path)):
                 orphaned_db.append({
                     'id': f_id,
                     'filename': f_name,
                     'batch_name': f_batch,
                     'sub_batch': f_sub,
+                    'file_type': f_type,
                     'file_path': f_path,
                 })
 
@@ -443,14 +446,15 @@ class DataConsistencyCheckView(APIView):
         return self._fix_product_codes(user, action)
 
     def _delete_orphaned_db(self, user, action):
-        # Delete DB records with missing disk files
+        # Delete DB records with missing disk files (any file_type; paths
+        # must be resolved — see GET above — or relative rows get wiped).
         db_files = DataFile.objects.filter(
-            owner=user, file_type='batch'
+            owner=user
         ).values_list('id', 'file_path')
 
         deleted_ids = []
         for f_id, f_path in db_files:
-            if not os.path.exists(f_path):
+            if not os.path.exists(resolve_file_path(f_path)):
                 deleted_ids.append(f_id)
 
         deleted_count = DataFile.objects.filter(id__in=deleted_ids).delete()[0]

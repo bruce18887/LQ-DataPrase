@@ -192,6 +192,7 @@ export interface OrphanedDbRecord {
   filename: string
   batch_name: string
   sub_batch: string
+  file_type: 'single' | 'batch'
   file_path: string
 }
 

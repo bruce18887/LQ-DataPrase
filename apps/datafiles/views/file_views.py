@@ -94,7 +94,7 @@ class DataFileViewSet(viewsets.ModelViewSet):
     # search_fields 刻意留空，让 SearchFilter 对该视图变为 no-op。
     search_fields = []
     filterset_fields = ['product_code', 'format_type', 'file_type']
-    ordering_fields = ['created_at', 'source_mtime', 'filename', 'file_size']
+    ordering_fields = ['id', 'created_at', 'source_mtime', 'filename', 'file_size']
 
     def get_queryset(self):
         queryset = DataFile.objects.filter(owner=self.request.user)
@@ -291,6 +291,7 @@ class DataFileViewSet(viewsets.ModelViewSet):
 
         # Phase 1: plan moves — compute (src, target, new_filename) for each row.
         plans = []  # [(df, src, target, new_filename), ...]
+        used_targets = set()  # targets claimed by earlier plans in this batch
         for df in qs.order_by('id'):
             src = resolve_file_path(df.file_path)
             if not os.path.exists(src):
@@ -305,11 +306,15 @@ class DataFileViewSet(viewsets.ModelViewSet):
                 )
                 continue
             target = os.path.join(batch_dir, safe_name)
-            if os.path.exists(target):
+            # Collision vs disk OR vs an earlier plan in this same request:
+            # two same-named singles would otherwise resolve to one target
+            # and the later move would overwrite the earlier file.
+            while target in used_targets or os.path.exists(target):
                 ts = int(time.time())
                 name, ext = os.path.splitext(safe_name)
-                safe_name = f'{name}_{ts}{ext}'
+                safe_name = f'{name}_{ts}_{df.pk}{ext}'
                 target = os.path.join(batch_dir, safe_name)
+            used_targets.add(target)
             plans.append((df, src, target, safe_name))
 
         if not plans:
@@ -392,6 +397,7 @@ class DataFileViewSet(viewsets.ModelViewSet):
 
         # Phase 1: plan moves.
         plans = []  # [(df, src, target, new_filename, src_dirname), ...]
+        used_targets = set()
         for df in qs.order_by('id'):
             src = resolve_file_path(df.file_path)
             if not os.path.exists(src):
@@ -404,11 +410,12 @@ class DataFileViewSet(viewsets.ModelViewSet):
                 )
                 continue
             target = os.path.join(single_dir, safe_name)
-            if os.path.exists(target):
+            while target in used_targets or os.path.exists(target):
                 ts = int(time.time())
                 name, ext = os.path.splitext(safe_name)
-                safe_name = f'{name}_{ts}{ext}'
+                safe_name = f'{name}_{ts}_{df.pk}{ext}'
                 target = os.path.join(single_dir, safe_name)
+            used_targets.add(target)
             plans.append((df, src, target, safe_name, os.path.dirname(src)))
 
         if not plans:
@@ -515,9 +522,18 @@ class FileUploadView(APIView):
             return Response({'error': '未选择文件'}, status=400)
 
         # CSV files and ZIP archives (containing CSVs) are supported.
+        # basename first: a crafted multipart filename like "../../x.csv"
+        # would otherwise escape the per-user upload dir via os.path.join.
+        # Same rule as combine/uncombine (basename + _UNSAFE_NAME_CHARS).
         allowed_exts = {'.csv', '.zip'}
         for uploaded_file in files:
-            ext = os.path.splitext(uploaded_file.name)[1].lower()
+            safe_name = os.path.basename(uploaded_file.name or '')
+            if not safe_name or _UNSAFE_NAME_CHARS.search(safe_name):
+                return Response(
+                    {'error': f'文件名非法，无法上传 {uploaded_file.name}'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            ext = os.path.splitext(safe_name)[1].lower()
             if ext not in allowed_exts:
                 return Response(
                     {'error': f'仅支持 CSV 或 ZIP 文件，无法上传 {uploaded_file.name}'},
@@ -531,7 +547,8 @@ class FileUploadView(APIView):
         created = []
 
         for idx, uploaded_file in enumerate(files):
-            base_name = uploaded_file.name
+            # Sanitized in the validation loop above: basename + charset check.
+            base_name = os.path.basename(uploaded_file.name or '')
             ext = os.path.splitext(base_name)[1].lower()
 
             lm_value = last_modified_list[idx] if idx < len(last_modified_list) else None
