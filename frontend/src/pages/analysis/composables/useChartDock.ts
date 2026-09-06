@@ -15,7 +15,7 @@ import { safeGetItem, safeSetItem, safeRemoveItem } from '../../../utils/safeSto
 
 export type ChartKey = 'hist' | 'serial' | 'qq' | 'box'
 const ALL_KEYS: ChartKey[] = ['hist', 'serial', 'qq', 'box']
-const STORAGE_KEY = 'lqdp-analysis-chart-layout'
+export const DOCK_LAYOUT_STORAGE_KEY = 'lqdp-analysis-chart-layout'
 const VERSION = 1
 
 /** hist 首行占比、辅助行均分剩余（首屏默认，直方图明显更高） */
@@ -62,7 +62,7 @@ function defaultRowPcts(n: number): number[] {
   return out
 }
 
-function isValid(parsed: unknown): parsed is DockLayout {
+export function isValidLayout(parsed: unknown): parsed is DockLayout {
   if (!parsed || typeof parsed !== 'object') return false
   const p = parsed as Record<string, unknown>
   if (p.v !== VERSION) return false
@@ -79,11 +79,11 @@ function isValid(parsed: unknown): parsed is DockLayout {
 }
 
 function loadLayout(): DockLayout | null {
-  const raw = safeGetItem(STORAGE_KEY)
+  const raw = safeGetItem(DOCK_LAYOUT_STORAGE_KEY)
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw)
-    if (!isValid(parsed)) return null
+    if (!isValidLayout(parsed)) return null
     const l = parsed as unknown as DockLayout & { v: number }
     return { rows: l.rows, rowPcts: l.rowPcts ?? [], colPcts: l.colPcts ?? [] }
   } catch {
@@ -92,7 +92,7 @@ function loadLayout(): DockLayout | null {
 }
 
 function saveLayout(l: DockLayout) {
-  safeSetItem(STORAGE_KEY, JSON.stringify({ v: VERSION, ...l }))
+  safeSetItem(DOCK_LAYOUT_STORAGE_KEY, JSON.stringify({ v: VERSION, ...l }))
 }
 
 export interface ChartDockApi {
@@ -206,7 +206,7 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
     }
 
     const reset = (active: ChartKey[]) => {
-      safeRemoveItem(STORAGE_KEY)
+      safeRemoveItem(DOCK_LAYOUT_STORAGE_KEY)
       const d = defaultLayout(active)
       rows.value = d.rows
       rowPcts.value = d.rowPcts
