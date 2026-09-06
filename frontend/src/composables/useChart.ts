@@ -213,8 +213,10 @@ export function useChart<T = echarts.EChartsOption>(
    * - 容器被替换（v-if 切换）后，在新 DOM 上重建 observer。
    */
   function setupResizeObserver() {
-    if (typeof ResizeObserver === 'undefined' || !chartRef.value) return
+    // 先断旧 observer 再判断：容器被 v-if 翻转销毁时旧 observer 还盯着
+    // 已脱离的死节点，不先断开就早退会永久残留
     resizeObserver?.disconnect()
+    if (typeof ResizeObserver === 'undefined' || !chartRef.value) return
     resizeObserver = new ResizeObserver(() => {
       if (disposed || !chartRef.value?.isConnected) return
       const rect = chartRef.value.getBoundingClientRect()
@@ -262,6 +264,23 @@ export function useChart<T = echarts.EChartsOption>(
       })
     })
   }
+
+  // ── Container watcher ──
+  // 容器可能由 v-if 翻转才创建（QQ/箱线先渲染占位符、数据到达后才出现 chartRef
+  // div），onMounted 时 chartRef 为空 → ResizeObserver 挂不上且此后无人补挂，
+  // 图表永不随容器缩放；v-if 重建出的新 DOM 同理会让旧 observer 盯死节点。
+  // 在 ref 变化处补挂/重挂 observer，并确保实例绑定在**当前**容器上。
+  watch(chartRef, (el) => {
+    if (disposed) return
+    if (el) {
+      setupResizeObserver()
+      if (!chartInstance.value) {
+        nextTick(() => { if (!disposed) ensureInit() })
+      }
+    } else {
+      resizeObserver?.disconnect()
+    }
+  })
 
   // ── Theme watcher ──
   watch(() => themeStore.currentTheme, () => {

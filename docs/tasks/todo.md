@@ -878,3 +878,36 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
 - e2e 前置已清 2 个未钉 `LQDP_SYSTEM_CONFIG_FILE` 的残留 runserver 进程树；跑后端口释放
 - ⚠️ 遗留：wafer_map 快路径计算慢（1MB+ 响应）但属既有性能特性未动；「文件不存在
   三行为统一」契约变更仍列为后续议题（需 baseline 确认后动）
+
+---
+
+# 任务：单文件分析 dock 图表布局修复（跟随分隔线缩放 + 底部条贴合 + 覆盖）（2026-09-06）✅
+
+> 用户报告三症状：底部横条不跟随图表最下方 / 序列-QQ-箱线不随分隔线缩放 / 三图互相覆盖。
+> 计划：`~/.qoder/plans/frosty-pine-loach.md`（根因已浏览器实测定位，双根因叠加）。
+
+## 根因
+
+- **A（布局链）**：`ChartPanel.vue` `.chart-b` grid 轨道裸 `1fr`（=minmax(auto,1fr)）被内容
+  撑住压不小 → 缩小时画布被裁、放大时不撑满（直方图因 wrapper 恰有 overflow:hidden 幸存）。
+- **B（观察器缺失）**：`useChart.ts` 只在 onMounted 给当时存在的 chartRef 挂 ResizeObserver，
+  QQ/箱线 v-if 翻转出的容器永不补挂、v-if 重建后旧 observer 盯死节点 → 不触发 resize。
+
+## 实施清单
+
+- [x] `useChart.ts`：`setupResizeObserver()` 先 disconnect 再早退守卫 + `watch(chartRef)`
+      容器出现/替换时补挂 observer 并 ensureInit
+- [x] `ChartPanel.vue`：`.chart-b` 轨道改 `minmax(0, 1fr)`（列+行）
+- [x] `e2e/analysis/dock-resize.spec.ts` 重写：断言画布 svg/canvas rect == 宿主容器 client
+      尺寸（±4px，不用 inst.getWidth 缓存、不用 .chart-b 参照）+ 压矮/撑高双向 + 行间拖拽条
+- [x] 验证：浏览器实测缩/放/行间条/列宽四场景 × 4 图全贴合，双主题截图正常、console 无新错；
+      `npm run build` 绿；e2e dock-resize + chart-filter-switches + serial-no-column +
+      kde-curve 全绿（chart-filter-switches 1 例既有 flake 重试过，非本批）；跑后 8000 释放
+      （3000 为用户手动 dev vite 未杀，e2e 按契约复用）
+
+### Review（2026-09-06）
+
+- 提交：见 `git log` 本日 `fix(analysis)`；教训已记 lessons.md 2026-09-06 段
+  （grid minmax(0,1fr) / observer 挂载时机 / e2e 画布参照两陷阱 + 逐 key 基线）
+- e2e 第一版两例假红复盘：参照选 .chart-b（serial 有固定高度兄弟）+ 单 key 基线循环复用，
+  均为测试缺陷非产品回归，修法见 lessons

@@ -139,10 +139,14 @@ function onGripKey(ev: KeyboardEvent) {
   flex: 1;
   min-height: 0;
   /* 1×1 网格：slot 注入的图组件天然铺满单元格（子项默认 stretch），
-     规避 scoped CSS 选不到 slot 子节点的问题，也无需子组件自带 flex 规则 */
+     规避 scoped CSS 选不到 slot 子节点的问题，也无需子组件自带 flex 规则。
+     轨道必须 minmax(0,1fr) 而非裸 1fr：1fr=minmax(auto,1fr)，auto 最小尺寸
+     =内容尺寸，会把单元格（连同里面的 ECharts 画布）撑得压不小——dock 里
+     拖分隔条缩行高/列宽时图表不再跟随（直方图只因外层恰好 overflow:hidden
+     才幸存）。min 0 后单元格严格等于面板体，画布随 ResizeObserver 缩放。 */
   display: grid;
-  grid-template-columns: 1fr;
-  grid-template-rows: 1fr;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
 
