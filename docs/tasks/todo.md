@@ -957,7 +957,10 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
 ## 实施清单
 
 - [x] `ChartDock.vue`：activeKeys watch 里先 `maxKey = null` 再 reconcile（勾选集一变
-      即退出最大化）；dock 栏新增显眼「退出最大化（图名）」文字按钮（type=primary text）
+      即退出最大化）
+- [x] `ChartPanel.vue`：还原图标 ⤓→⤡（与最大化 ⤢ 成对镜像；⤓ 似下载箭头被误读为导出）。
+      追记：初版曾按 dock 栏「退出最大化（图名）」文字按钮实现，用户两轮反馈后定为
+      原位图标方案（文字太丑、⤓ 形义误导），dock 栏按钮已移除
 - [x] e2e `dock-resize.spec.ts` 新增用例：最大化→面板 1 张+按钮翻转+退出按钮出现；
       最大化态取消/重勾序列分布→自动退出、4 图全回；最大化 serial→点退出按钮复原
 - [x] 验证：浏览器实测卡死序列修复（勾选重勾后 4 面板回来、console 0 报错）；

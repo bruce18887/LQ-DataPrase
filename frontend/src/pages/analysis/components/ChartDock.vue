@@ -10,9 +10,6 @@
     <div class="chart-dock__bar">
       <span class="chart-dock__hint">拖 ⠿ 手柄重排图表 · 拖分隔条改单图高宽 · 拖底部横条改整体高度（双击复原）</span>
       <span class="chart-dock__spacer" />
-      <el-button v-if="maxKey" size="small" type="primary" text bg @click="toggleMax(null)">
-        退出最大化（{{ titleOf(maxKey) }}）
-      </el-button>
       <el-button size="small" text bg @click="onReset">重置布局</el-button>
     </div>
 

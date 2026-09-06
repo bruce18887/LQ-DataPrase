@@ -26,9 +26,9 @@
         v-if="maximizable"
         class="chart-h__btn"
         type="button"
-        :title="maximized ? '恢复布局' : '最大化'"
+        :title="maximized ? '还原' : '最大化'"
         @click="maximized ? emit('restore') : emit('maximize')"
-      >{{ maximized ? '⤓' : '⤢' }}</button>
+      >{{ maximized ? '⤡' : '⤢' }}</button>
       <button
         v-if="closable"
         class="chart-h__btn"
