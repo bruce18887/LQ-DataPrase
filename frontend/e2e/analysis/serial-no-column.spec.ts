@@ -344,7 +344,7 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
     await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
   })
 
-  test('序列分布：图例与 dataZoom 滑块互不重叠（不被遮挡回归）', async ({ page }) => {
+  test('序列分布：无锚底滑块、图例正常渲染（改纯 inside 缩放后不被挤没）', async ({ page }) => {
     await gotoApp(page, '/analysis')
     await selectAnalysisFile(page, 'Site12358-Chip12345_c')
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
@@ -364,46 +364,24 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
     await expect(page.locator(`${SINGLE} .serial-chart-wrapper`)).toBeVisible({ timeout: 15_000 })
     await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
 
-    // 几何不重叠断言：图例行与 dataZoom 滑块在垂直方向不得相交（任一层在另一层上方均可，
-    // 当前布局 = 滑块在上、图例在最底）。回归形态：legend 与 dataZoom 都锚定容器底部且
-    // ECharts 不自动堆叠 → 图例顶部被滑块覆盖。修复 = 显式 grid.bottom + 两层各自 bottom。
-    // dataZoom 滑块定位：svg 底部 100px 内、宽 >500、高 29-45 的矩形 path 并集
-    // （滑块背景 h≈30，图例背景 h≈25 即使加宽也达不到 29，可区分）。
-    const geometry = await page.locator(`${SINGLE} .serial-chart-wrapper svg`).evaluate((svg) => {
-      const svgRect = svg.getBoundingClientRect()
-      let sliderTop = Infinity
-      let sliderBottom = -Infinity
-      for (const p of svg.querySelectorAll('path')) {
-        const r = p.getBoundingClientRect()
-        if (r.width > 500 && r.height >= 29 && r.height <= 45 && r.bottom > svgRect.bottom - 100) {
-          sliderTop = Math.min(sliderTop, r.top)
-          sliderBottom = Math.max(sliderBottom, r.bottom)
-        }
-      }
+    // 序列图已去掉锚底 dataZoom 滑块（改纯 inside 缩放，与直方图同款：底部只留图例 +
+    // 轴标签）。断言：图例正常渲染、且不再存在占位的 slider（option.dataZoom 无 slider 项）。
+    const result = await page.locator(`${SINGLE} .serial-chart-wrapper svg`).evaluate((svg) => {
       const legendRects = [...svg.querySelectorAll('text')]
         .filter((t) => t.textContent?.trim().startsWith('Site '))
         .map((t) => t.getBoundingClientRect())
+      const host = svg.closest('div[_echarts_instance_]') as (HTMLElement & { __echartsInstance__?: any }) | null
+      const dz = host?.__echartsInstance__?.getOption?.()?.dataZoom ?? []
       return {
-        svgBottom: svgRect.bottom,
-        sliderTop,
-        sliderBottom,
-        legendTop: Math.min(...legendRects.map((r) => r.top)),
-        legendBottom: Math.max(...legendRects.map((r) => r.bottom)),
         legendCount: legendRects.length,
+        legendBottom: Math.max(...legendRects.map((r) => r.bottom), 0),
+        svgBottom: svg.getBoundingClientRect().bottom,
+        hasSlider: dz.some((d: any) => d.type === 'slider'),
       }
     })
-
-    expect(geometry.legendCount, '图例项缺失（应为 Site1/2/3/5/8 等）').toBeGreaterThanOrEqual(3)
-    expect(geometry.sliderTop, 'dataZoom 滑块未渲染').toBeLessThan(geometry.svgBottom)
-    const overlapped = !(
-      geometry.legendBottom <= geometry.sliderTop ||
-      geometry.legendTop >= geometry.sliderBottom
-    )
-    expect(
-      overlapped,
-      `图例与 dataZoom 重叠（图例 [${geometry.legendTop}, ${geometry.legendBottom}]，滑块 [${geometry.sliderTop}, ${geometry.sliderBottom}]）`,
-    ).toBe(false)
-    expect(geometry.legendBottom, '图例超出图表容器底部').toBeLessThanOrEqual(geometry.svgBottom)
+    expect(result.legendCount, '图例项缺失（应为 Site1/2/3/5/8 等）').toBeGreaterThanOrEqual(3)
+    expect(result.hasSlider, '序列图不应再有占位的 dataZoom slider').toBe(false)
+    expect(result.legendBottom, '图例超出图表容器底部').toBeLessThanOrEqual(result.svgBottom)
   })
 
   test('序列分布：切换参数后图例隐藏状态保持（notMerge 重置回归）', async ({ page }) => {

@@ -18,7 +18,7 @@
         <el-splitter-panel
           v-for="(row, ri) in displayRows"
           :key="'r:' + row.join('|')"
-          :min="'200px'"
+          :min="'240px'"
           :size="rowPctStr(ri)"
           :resizable="displayRows.length > 1"
         >
@@ -129,11 +129,12 @@ const displayRows = computed<ChartKey[][]>(() => {
 })
 
 /* ── 整体高度：按行数自适应，底部横条可覆盖 ───────────────── */
-// 行数越多默认越高（4 图 2×2 → 2 行 → ~680，明显大于上轮固定高度）；null=自动
+// 行数越多默认越高（2 行→920、4 图 2×2 每行 ~460，Y 轴初始不被挤没）；null=自动
 const bodyH = ref<number | null>(null)
-const MIN_H = 320
-const MAX_H = 2400
-const autoH = computed(() => Math.max(520, Math.min(displayRows.value.length * 340, 1080)))
+const MIN_H = 480
+const MAX_H = 2600
+// 每行默认 460px（序列图/QQ/箱线的 Y 轴初始不被挤没），单行下限 640、总上限 1400
+const autoH = computed(() => Math.max(640, Math.min(displayRows.value.length * 460, 1400)))
 const effH = computed(() => bodyH.value ?? autoH.value)
 
 const heightResize = ref(false)

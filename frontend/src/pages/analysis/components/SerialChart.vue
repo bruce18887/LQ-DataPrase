@@ -59,25 +59,6 @@ const pointCount = computed(() =>
     (sum: number, sd: { data?: unknown[] }) => sum + (sd.data?.length ?? 0), 0))
 const isLarge = computed(() => pointCount.value >= 5000)
 
-/**
- * 随容器高度自适应的底部布局（2026-09-06 修：拖分隔条把序列图压矮时，原固定
- * grid.bottom=150 会把绘图区挤没、X 轴被遮）。图例(bottom5)与 dataZoom 滑块
- * (bottom45,高30) 位置**保持不变**（原本就互不重叠、且滑块高 30 满足渲染判定）；
- * 只让 grid.bottom 在 105(矮)~150(高) 间缩放——压缩的是滑块上方的轴标签留白，
- * 绘图区底边始终 ≥ 滑块顶(75)，故 X 轴不被遮、滑块/图例也不重叠。
- */
-function computeLayout(h: number) {
-  const gridBottom = Math.max(105, Math.min(150, Math.round(h * 0.42)))
-  return {
-    gridBottom,
-    legend: { bottom: 5 },
-    slider: { bottom: 45, height: 30 },
-  }
-}
-function canvasH(): number {
-  return (document.querySelector('.serial-canvas') as HTMLElement | null)?.clientHeight || 440
-}
-
 function buildOption() {
   if (!props.data) return {}
   const tc = colors.value.textColor
@@ -165,8 +146,6 @@ function buildOption() {
     subtext += `  |  Pass: ${d.pass_count ?? '-'} · Fail: ${d.fail_count}`
   }
 
-  const lay = computeLayout(canvasH())
-
   return {
     // large 模式下上万 symbol 的入场/更新动画是纯开销，直接关闭
     animation: !isLarge.value,
@@ -187,8 +166,8 @@ function buildOption() {
         return html
       },
     },
-    // 底部三层各自独立、互不重叠；三层高度随容器高自适应（见 computeLayout）
-    legend: { data: series.map((s: any) => s.name), bottom: lay.legend.bottom, type: 'scroll', textStyle: { color: tc } },
+    // 图例在最底（与直方图同款：底部只留 图例 + 轴标签，无 dataZoom 滑块占位）
+    legend: { data: series.map((s: any) => s.name), bottom: 5, type: 'scroll', textStyle: { color: tc } },
     toolbox: { feature: { saveAsImage: { name: `${param}_Serial分布` } } },
     xAxis: {
       type: 'category', data: continuousSerials, name: serialCol,
@@ -203,38 +182,24 @@ function buildOption() {
       axisLine: { lineStyle: { color: colors.value.axisLineColor } },
       axisLabel: { formatter: formatAxisValue, fontSize: 9, color: tc },
     },
+    // 缩放改为纯 inside（滚轮/拖拽平移），去掉锚底的 slider：slider 与图例同锚容器
+    // 底、矮面板下会挤没 X 轴。inside 缩放不占布局 → 与直方图同款、resize 纯比例缩放。
     dataZoom: [
-      // slider 在图例上方；bottom/height 随容器高自适应（见 computeLayout）
-      { type: 'slider', xAxisIndex: 0, start: 0, end: 100, bottom: lay.slider.bottom, height: lay.slider.height },
       { type: 'inside', xAxisIndex: 0 },
     ],
-    // grid.bottom 随容器高缩放（矮→98、高→150），把 X 轴标签区留在滑块之上、
-    // 绘图区之下；left/right 保持默认（y 轴大数值标签宽可达 ~70px，固定值会裁切）
-    grid: { top: 60, bottom: lay.gridBottom },
+    // grid.bottom 收小（图例 + 轴标签，无滑块），绘图区随容器高等比缩放、X 轴不被遮
+    grid: { top: 60, bottom: 85 },
     series,
   }
 }
 
 // 大数据量强制 canvas（SVG 渲染器对 large 符号仍会为每点发射 DOM 元素；
 // canvas 无 DOM 节点，官方推荐大数据散点必用 canvas）；小数据量跟随用户全局设置
-// buildLayout：容器尺寸变化稳定后仅重算 grid/dataZoom（merge，不重建 20 万点 series）
-const buildSerialLayout = (_w: number, h: number) => {
-  const lay = computeLayout(h)
-  return {
-    grid: { top: 60, bottom: lay.gridBottom },
-    dataZoom: [
-      { bottom: lay.slider.bottom, height: lay.slider.height },
-      {},
-    ],
-    legend: { bottom: lay.legend.bottom },
-  }
-}
 const { chartRef } = useChart(
   buildOption,
   [() => props.data, () => props.outlierHandling],
   'chartRef',
   () => (isLarge.value ? 'canvas' : getChartRenderer()),
-  buildSerialLayout,
 )
 void chartRef // bound to <div ref="chartRef"> in template
 </script>

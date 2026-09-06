@@ -42,7 +42,6 @@ async function readOption(page: import('@playwright/test').Page, key: string, pi
     }
     if (!inst) return -1
     const o = inst.getOption()
-    if (pick === 'serialGridBottom') return (o.grid?.[0]?.bottom ?? -1) as number
     if (pick === 'qqSliderBottom') return (o.dataZoom?.[0]?.bottom ?? -1) as number
     if (pick === 'qqGridBottom') return (o.grid?.[0]?.bottom ?? -1) as number
     return -2
@@ -69,40 +68,24 @@ test.describe('@p1 dock 面板缩放自适应', { tag: ['@p1', '@analysis'] }, (
     await expect(page.locator('.chart-panel[data-chart-key="serial"]')).toBeVisible({ timeout: 20_000 })
     await expectChartRendered(page.locator('.chart-panel[data-chart-key="serial"]'), 0)
 
+    // 先压到 200 建立明确基线，再撑到 620 → 两图都应有显著增长（避免默认高度贴边 flaky）
+    await setPanelHeight(page, 'hist', 200)
+    await setPanelHeight(page, 'serial', 200)
+    await page.waitForTimeout(300)
     const histBefore = await plotHeight(page, 'hist')
     const serialBefore = await plotHeight(page, 'serial')
-    expect(histBefore).toBeGreaterThan(80)
-    expect(serialBefore).toBeGreaterThan(80)
+    expect(histBefore).toBeGreaterThan(40)
+    expect(serialBefore).toBeGreaterThan(40)
 
-    // 撑到 600（明显高于默认面板），确保两图都有增长空间（避免阈值贴边导致 flaky）
-    await setPanelHeight(page, 'hist', 600)
-    await setPanelHeight(page, 'serial', 600)
+    await setPanelHeight(page, 'hist', 620)
+    await setPanelHeight(page, 'serial', 620)
 
     await expect
       .poll(async () => await plotHeight(page, 'hist'), { timeout: 8_000, message: '直方图应随容器变高重排' })
-      .toBeGreaterThan(histBefore + 20)
+      .toBeGreaterThan(histBefore + 60)
     await expect
       .poll(async () => await plotHeight(page, 'serial'), { timeout: 8_000, message: '序列图应随容器变高重排' })
-      .toBeGreaterThan(serialBefore + 20)
-  })
-
-  test('序列图 grid.bottom 随容器高自适应（X 轴不被固定 150 挤没）', async ({ page }) => {
-    await enterWith(page, true, false)
-    await expect(page.locator('.chart-panel[data-chart-key="serial"]')).toBeVisible({ timeout: 20_000 })
-    await expectChartRendered(page.locator('.chart-panel[data-chart-key="serial"]'), 0)
-
-    // 矮容器：grid.bottom 应收缩到 <150（否则 X 轴被遮）
-    await setPanelHeight(page, 'serial', 220)
-    await expect
-      .poll(async () => await readOption(page, 'serial', 'serialGridBottom'), { timeout: 8_000 })
-      .toBeLessThan(150)
-    const shortBottom = await readOption(page, 'serial', 'serialGridBottom')
-
-    // 高容器：grid.bottom 应比矮时更大（证明随容器响应，而非固定值）
-    await setPanelHeight(page, 'serial', 520)
-    await expect
-      .poll(async () => (await readOption(page, 'serial', 'serialGridBottom')) > shortBottom, { timeout: 8_000, message: 'grid.bottom 应随容器变高而增大' })
-      .toBe(true)
+      .toBeGreaterThan(serialBefore + 60)
   })
 
   test('QQ 图 Y 轴缩放条与 grid 同源锚定（top/bottom 对齐 → 随面板变高自动撑满）', async ({ page }) => {
