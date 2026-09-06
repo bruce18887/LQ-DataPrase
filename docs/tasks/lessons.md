@@ -45,7 +45,31 @@
   （选已选中项不触发切换）所以从不暴露；DB 残留改变 `files[0]` 后才现形 ——
   **看似新失败先查 files[0] 是不是变成了残留文件**。修法：读值前用
   `selectAnalysisFile` / `pickTabFileAndWaitCompute`（helpers/params.ts）等新文件
-  自己的计算请求；严谨场景先等初始加载完再切。
+   自己的计算请求；严谨场景先等初始加载完再切。
+
+## 2026-09-05 分析页 31 项 bug 修复（四批）新增教训
+
+- **改 popper-class 名 = 同改 spec 内联定位器**：ParamSelector 作用域化
+  （`param-select-dropdown` → `dp-param-popper-single/multi`）时，
+  helpers/params.ts 的 selectParam/listParams 一并迁了，但 multi-file.spec.ts
+  的**内联** `selectLimitsParam` 还引用旧类 → 4 个用例 15s 超时。e2e/README 的
+  契约章节也一并改。规则：全局 class 改名后 grep 全仓（src + e2e + docs），
+  存量 spec 的内联定位器不走 helper，最容易漏。
+- **response 的 `postData()` 在 `request()` 上**：Playwright 的
+  `waitForResponse` 谓词里是 `r.request().postData()`，写成 `r.postData()` 是
+  TypeError 立挂。已有存量写法（如 multi-file.spec.ts:65）可抄。
+- **后台跑 e2e 丢输出**：长命令套 `run_in_background` 时日志文件常为空（退出码
+  1 也无堆栈）。30s+ 的命令直接前台跑（timeout 拉满），或改管道只留关键行；
+  `findstr` 过滤失败时输出（exit code 1）也一起吞。本轮全量后端（888 项 ~243s）
+  前台直跑一次看清。
+- **astype(int) 对非整数序列号截断成功**：`pd.Series([2.5]).astype(int)` 不抛异常
+  （截成 2），sv 的键仍是 2.5 → 点静默丢失。修法：转前 `(as_int == s).all()` 校验
+  整数性，失败走原值集合路径（serial_distribution.py 注释已记）。
+- **空操作兜底最难被发现**：histogram 的 `bin_min, bin_max = stats['rdl'][0], stats['rdl'][1]`
+  看似兜底，实际赋值来源与 resolve 值**同一对**（单边 None 时仍是 None）。
+  修这类代码时先问「兜底的输入与输出是不是同一个值」。
+- **防御写在错误的层会失效**：uph 服务层有 `try/except` 降级告警，但视图层先裸
+  `float()` —— 异常在容错之前就抛。改守卫先看调用链上哪一层先碰到脏数据。
 
 ## 2026-09-03 全量评审修复（四批）新增教训
 
