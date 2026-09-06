@@ -223,9 +223,10 @@ test.describe('@p1 图表配置数据筛选开关', { tag: ['@p1', '@analysis'] 
         firstType: dz[0]?.type ?? null,
         yAxis: dz[0]?.yAxisIndex ?? null,
         after: dz2[0]?.start ?? null,
-        // 滑块与 Y 轴同源定位：top 对齐 grid 顶，高度 = 容器高 − top − bottom
+        // 滑块与 Y 轴(grid)同源：top/bottom 都对齐 grid → resize() 自动撑满整条轴、
+        // 随面板高变化（旧实现用固定 height，面板变高时长度不跟随 → 窄条 bug）
         sliderTop: dz[0]?.top ?? null,
-        sliderHeight: dz[0]?.height ?? null,
+        sliderBottom: dz[0]?.bottom ?? null,
         gridTop: grid.top ?? null,
         gridBottom: grid.bottom ?? null,
         containerHeight: el.clientHeight,
@@ -236,8 +237,8 @@ test.describe('@p1 图表配置数据筛选开关', { tag: ['@p1', '@analysis'] 
     expect(zoomState.yAxis, 'dataZoom 应作用于 Y 轴').toBe(0)
     expect(zoomState.after, '拖动滑块后 dataZoom.start 应更新').toBe(20)
     expect(zoomState.sliderTop, '滑块顶部应与 Y 轴（grid）顶部对齐').toBe(zoomState.gridTop)
-    expect(zoomState.sliderHeight, '滑块高度应与 Y 轴等长（容器高 − top − bottom）')
-      .toBe(zoomState.containerHeight - zoomState.gridTop - zoomState.gridBottom)
+    expect(zoomState.sliderBottom, '滑块底部应与 Y 轴（grid）底部对齐（随容器变长）')
+      .toBe(zoomState.gridBottom)
   })
 
   test('数值分布：勾选仅用Pass数据后箱线图请求携带开关且图表正常渲染', async ({ page }) => {

@@ -138,12 +138,6 @@ function buildOption() {
     diagonal = [[x0, fitIntercept + fitSlope * x0], [x1, fitIntercept + fitSlope * x1]]
   }
 
-  // 容器实际高度：dock 下面板高度不固定，滑块必须与 Y 轴同源按真实 clientHeight 计算，
-  // 保持「滑块高 = 容器高 − top − bottom」不变式。直接查容器 DOM（不引用 useChart 返回的
-  // chartRef，避免 buildOption↔chartRef 的类型循环推断）。
-  const el = document.querySelector('.qqplot-container') as HTMLElement | null
-  const containerH = el?.clientHeight || 400
-
   return {
     // large 模式下上万 symbol 的入场/更新动画是纯开销，直接关闭
     animation: !isLarge.value,
@@ -164,14 +158,15 @@ function buildOption() {
     grid: { top: GRID_TOP, bottom: GRID_BOTTOM, left: 55, right: 40 },
     // Y 轴数据缩放（滑块 + 滚轮）：观测值区间局部放大，定位离群点/区间
     // 形态；双主题：filler/手柄跟随主题主色（亮=蓝 #2563eb、暗=金 #fdd835）；
-    // 滑块与 grid 同源定位——top 对齐、高度按容器实际 clientHeight 计算（dock 不定高）
+    // 滑块与 grid 同源：top/bottom 都对齐 grid → ECharts resize() 自动撑满整条
+    // Y 轴、随面板高变化（不用固定 height，否则 resize 时长度不跟随 → 窄条 bug）
     dataZoom: [
       {
         type: 'slider',
         yAxisIndex: 0,
         right: 4,
         top: GRID_TOP,
-        height: containerH - GRID_TOP - GRID_BOTTOM,
+        bottom: GRID_BOTTOM,
         backgroundColor: 'transparent',
         borderColor: colors.value.axisLineColor,
         fillerColor: `${colors.value.seriesColors[0]}26`,
