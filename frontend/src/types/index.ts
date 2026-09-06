@@ -51,6 +51,8 @@ export interface SettingsData {
   default_hidden_columns: string[]
   /** 文件名自动换行（文件列表 + 批次列表共同生效，默认开启） */
   filename_wrap: boolean
+  /** 单文件分析图表记忆总开关（布局+勾选跟随账号；关=完全不记忆） */
+  analysis_chart_memory: boolean
 }
 
 export interface DataFile {
