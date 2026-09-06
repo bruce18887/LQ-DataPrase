@@ -43,6 +43,11 @@ export function useChart<T = echarts.EChartsOption>(
   let resizeObserver: ResizeObserver | null = null
   let resizeRaf: ReturnType<typeof requestAnimationFrame> | null = null
   let disposed = false
+  // 上一次观测到的容器尺寸；0 表示当时不可见（display:none / 未布局）。
+  // 用于区分「尺寸变化（只需 resize）」与「从隐藏恢复（需补一次 renderOption）」，
+  // 避免拖分隔条/缩放时每帧 setOption(notMerge) 全量重建 → limit 线抖动 + CPU 飙升。
+  let lastW = 0
+  let lastH = 0
 
   // Expose the ECharts instance on the container DOM for debugging/tests.
   watch(chartInstance, (instance) => {
@@ -213,18 +218,31 @@ export function useChart<T = echarts.EChartsOption>(
     resizeObserver = new ResizeObserver(() => {
       if (disposed || !chartRef.value?.isConnected) return
       const rect = chartRef.value.getBoundingClientRect()
-      if (rect.width === 0 || rect.height === 0) return
+      if (rect.width === 0 || rect.height === 0) {
+        // 容器不可见（el-tabs 未激活 / display:none）：记 0，恢复时据此补渲染
+        lastW = 0
+        lastH = 0
+        return
+      }
       clearResizeRaf()
       resizeRaf = requestAnimationFrame(() => {
         if (disposed || !chartRef.value?.isConnected) return
+        const r = chartRef.value.getBoundingClientRect()
+        if (r.width === 0 || r.height === 0) return
+        // 从 0/隐藏恢复才需要重渲染；纯尺寸变化只需 resize()（否则每帧 notMerge
+        // 全量重建会让 limit 参考线反复重新入场动画 → 抖动 + CPU 飙升）
+        const recovering = lastW === 0 || lastH === 0
+        lastW = r.width
+        lastH = r.height
         if (chartInstance.value) {
           const boundDom = chartInstance.value.getDom?.() as HTMLElement | undefined
           if (boundDom === chartRef.value) {
             resize()
-            // 容器刚从隐藏恢复时，lazyUpdate 可能未实际绘制，用当前 option 重新渲染
-            renderOption()
+            if (recovering) renderOption()
           } else {
+            // 容器被替换（v-if 切换）→ 在新 DOM 上重建 observer
             ensureInit()
+            setupResizeObserver()
           }
         } else {
           if (ensureInit()) renderOption()

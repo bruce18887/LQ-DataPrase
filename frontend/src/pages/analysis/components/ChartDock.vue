@@ -8,12 +8,12 @@
 <template>
   <div class="chart-dock" :class="{ 'is-dragging': !!drag }">
     <div class="chart-dock__bar">
-      <span class="chart-dock__hint">拖 ⠿ 手柄重排图表 · 拖分隔条改高宽</span>
+      <span class="chart-dock__hint">拖 ⠿ 手柄重排图表 · 拖分隔条改单图高宽 · 拖底部横条改整体高度（双击复原）</span>
       <span class="chart-dock__spacer" />
       <el-button size="small" text bg @click="onReset">重置布局</el-button>
     </div>
 
-    <div class="chart-dock__body">
+    <div class="chart-dock__body" :style="{ height: effH + 'px' }">
       <el-splitter layout="vertical" :lazy="true" @resize-end="onRowResize">
         <el-splitter-panel
           v-for="(row, ri) in displayRows"
@@ -77,6 +77,19 @@
       </el-splitter>
     </div>
 
+    <!-- 底部横条：按住上下拖改整个图表区高度；双击回到按行数自动高度 -->
+    <div
+      class="chart-dock__resize"
+      :class="{ 'is-active': heightResize }"
+      role="separator"
+      aria-orientation="horizontal"
+      title="上下拖动调整图表区整体高度（双击复原自动）"
+      @pointerdown="onHeightDown"
+      @dblclick="resetHeight"
+    >
+      <span class="chart-dock__resize-grip" />
+    </div>
+
     <!-- 拖拽跟随的幽灵标签 -->
     <div v-if="drag" class="chart-dock__ghost" :style="{ left: drag.x + 'px', top: drag.y + 'px' }">
       {{ titleOf(drag.key) }}
@@ -114,6 +127,41 @@ const displayRows = computed<ChartKey[][]>(() => {
   if (maxKey.value && visibleRows.value.some((r) => r.includes(maxKey.value!))) return [[maxKey.value]]
   return visibleRows.value
 })
+
+/* ── 整体高度：按行数自适应，底部横条可覆盖 ───────────────── */
+// 行数越多默认越高（4 图 2×2 → 2 行 → ~680，明显大于上轮固定高度）；null=自动
+const bodyH = ref<number | null>(null)
+const MIN_H = 320
+const MAX_H = 2400
+const autoH = computed(() => Math.max(520, Math.min(displayRows.value.length * 340, 1080)))
+const effH = computed(() => bodyH.value ?? autoH.value)
+
+const heightResize = ref(false)
+function onHeightDown(ev: PointerEvent) {
+  if (ev.button !== 0) return
+  ev.preventDefault()
+  const startY = ev.clientY
+  const startH = effH.value
+  heightResize.value = true
+  document.body.style.userSelect = 'none'
+  const onMove = (e: PointerEvent) => {
+    const next = Math.max(MIN_H, Math.min(MAX_H, startH + (e.clientY - startY)))
+    bodyH.value = next
+  }
+  const onUp = () => {
+    heightResize.value = false
+    document.body.style.userSelect = ''
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onUp)
+  }
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
+  window.addEventListener('pointercancel', onUp)
+}
+function resetHeight() {
+  bodyH.value = null
+}
 
 const rowPctStr = (ri: number) => (Number.isFinite(rowPcts.value[ri]) ? `${rowPcts.value[ri]}%` : undefined)
 const colPctStr = (ri: number, ci: number) => {
@@ -195,11 +243,10 @@ onBeforeUnmount(cleanupDrag)
 
 <style scoped>
 .chart-dock {
-  flex: 1;
-  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
 }
 .chart-dock__bar {
   display: flex;
@@ -213,10 +260,29 @@ onBeforeUnmount(cleanupDrag)
 }
 .chart-dock__spacer { flex: 1; }
 .chart-dock__body {
-  flex: 1;
-  min-height: 660px;
-  /* 桌面式可停靠区：占满右栏剩余高度，最小 660 保证直方图默认明显比上轮 320 高 */
-  height: 100%;
+  position: relative;
+  flex: 0 0 auto;
+}
+/* 底部整体高度拖拽横条 */
+.chart-dock__resize {
+  flex: 0 0 auto;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: row-resize;
+  border-radius: 6px;
+  background: var(--bg-3, #f0f1f3);
+  border: 1px solid var(--border-2, #e4e7ed);
+  touch-action: none;
+}
+.chart-dock__resize:hover { background: color-mix(in srgb, var(--brand) 12%, var(--bg-3)); }
+.chart-dock__resize.is-active { background: color-mix(in srgb, var(--brand) 22%, var(--bg-3)); }
+.chart-dock__resize-grip {
+  width: 36px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--text-3, #9ca3af);
 }
 .chart-dock.is-dragging { user-select: none; }
 .chart-dock.is-dragging :deep(.chart-b) { pointer-events: none; }
@@ -235,7 +301,7 @@ onBeforeUnmount(cleanupDrag)
   box-shadow: var(--shadow-sm, 0 2px 8px rgba(0, 0, 0, 0.15));
   white-space: nowrap;
 }
-/* el-splitter 在 flex 容器里需撑满 */
+/* el-splitter 撑满 body（body 高度由内联 style 决定） */
 .chart-dock__body :deep(.el-splitter) { height: 100%; }
 .chart-dock__body :deep(.el-splitter-panel) { overflow: hidden; }
 </style>
