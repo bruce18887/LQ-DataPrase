@@ -13,9 +13,9 @@ import { RECOMMENDED } from '../fixtures/test-data'
  *   - 取消勾选 → 图例与曲线消失；重新勾选 → 恢复；
  *   - 回归：正态分布开关不受影响。
  *
- * 独立 Y 轴（2026-08-08 追加需求）：KDE 曲线使用独立紫色「KDE密度」轴
- * （放最左），正态曲线保留右侧橙色「概率密度」轴；两个轴都只在对应曲线
- * 勾选时出现。本 spec 同时断言轴名的存在/消失。
+ * 独立 Y 轴（2026-08-08）+ 密度轴隐藏（2026-09-06）：KDE/正态曲线仍各自绑定独立
+ * 密度轴缩放，但该轴 show:false——不再绘制刻度/轴名以省 X 轴横向空间。故曲线
+ * 是否显示改由「图例名」判定（KDE曲线 / 正态分布），不再断言轴名文字存在。
  *
  * 竞态防护：图例断言作用域限定在 `.chart-wrapper text`（SVG），避免把
  * 复选框 HTML 文案误判为图例；状态变化用 expect.poll 轮询而非固定等待。
@@ -49,38 +49,29 @@ test.describe('@p1 KDE曲线显示开关', { tag: ['@p1', '@analysis'] }, () => 
     await waitLoadingGone(page.locator(SINGLE))
     await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
 
-    // 默认状态：KDE曲线 勾选 + 图例渲染 + 独立紫色「KDE密度」轴出现
-    // （正态未勾选 → 右侧「概率密度」轴不应出现）
+    // 默认状态：KDE曲线 勾选 + 图例渲染该曲线（密度轴已隐藏，不断言轴名文字）
+    // 正态未勾选 → 图例不含「正态分布」
     await expect(kdeCheckbox(page), 'KDE曲线应默认勾选').toHaveClass(/is-checked/)
     await expect
       .poll(async () => legendText(page), { timeout: 8_000 })
       .toContain('KDE曲线')
     await expect
       .poll(async () => legendText(page), { timeout: 8_000 })
-      .toContain('KDE密度')
-    await expect
-      .poll(async () => legendText(page), { timeout: 8_000 })
-      .not.toContain('概率密度')
+      .not.toContain('正态分布')
 
-    // 取消勾选 → 图例与 KDE 轴都消失
+    // 取消勾选 → 图例曲线项消失
     await kdeCheckbox(page).click()
     await expect(kdeCheckbox(page), '取消后应为未选中态').not.toHaveClass(/is-checked/)
     await expect
       .poll(async () => legendText(page), { timeout: 8_000 })
       .not.toContain('KDE曲线')
-    await expect
-      .poll(async () => legendText(page), { timeout: 8_000 })
-      .not.toContain('KDE密度')
 
-    // 重新勾选 → 图例与轴都恢复
+    // 重新勾选 → 图例曲线项恢复
     await kdeCheckbox(page).click()
     await expect(kdeCheckbox(page), '重新勾选后应为选中态').toHaveClass(/is-checked/)
     await expect
       .poll(async () => legendText(page), { timeout: 8_000 })
       .toContain('KDE曲线')
-    await expect
-      .poll(async () => legendText(page), { timeout: 8_000 })
-      .toContain('KDE密度')
   })
 
   test('「KDE含超限」开关默认关闭，可勾选切换且不影响 KDE 曲线显示', async ({ page }) => {
@@ -115,16 +106,16 @@ test.describe('@p1 KDE曲线显示开关', { tag: ['@p1', '@analysis'] }, () => 
     await waitLoadingGone(page.locator(SINGLE))
     await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
 
-    // 正态分布默认不勾选（与 KDE 默认勾选互不影响）→ 右侧「概率密度」轴不出现
+    // 正态分布默认不勾选（与 KDE 默认勾选互不影响）→ 图例不含「正态分布」
     await expect(normalCheckbox(page)).not.toHaveClass(/is-checked/)
     await expect
       .poll(async () => legendText(page), { timeout: 8_000 })
       .not.toContain('正态分布')
     await expect
       .poll(async () => legendText(page), { timeout: 8_000 })
-      .not.toContain('概率密度')
+      .toContain('KDE曲线')
 
-    // 勾选 → 图例出现 + 右侧「概率密度」轴出现；KDE曲线 与 KDE 轴仍在
+    // 勾选正态 → 图例出现「正态分布」，与 KDE曲线 并存（密度轴隐藏，不断言轴名）
     await normalCheckbox(page).click()
     await expect(normalCheckbox(page)).toHaveClass(/is-checked/)
     await expect
@@ -132,11 +123,9 @@ test.describe('@p1 KDE曲线显示开关', { tag: ['@p1', '@analysis'] }, () => 
       .toContain('正态分布')
     const withBoth = await legendText(page)
     expect(withBoth, '正态分布与 KDE曲线 应并存').toContain('KDE曲线')
-    expect(withBoth, '两个密度轴应并存（KDE密度 在左、概率密度 在右）')
-      .toContain('KDE密度')
-    expect(withBoth, '勾选正态后「概率密度」轴出现').toContain('概率密度')
+    expect(withBoth, '勾选正态后图例出现「正态分布」').toContain('正态分布')
 
-    // 取消 → 图例消失 + 「概率密度」轴消失；KDE 轴不受影响
+    // 取消 → 图例「正态分布」消失；KDE曲线 不受影响
     await normalCheckbox(page).click()
     await expect(normalCheckbox(page)).not.toHaveClass(/is-checked/)
     await expect
@@ -144,9 +133,6 @@ test.describe('@p1 KDE曲线显示开关', { tag: ['@p1', '@analysis'] }, () => 
       .not.toContain('正态分布')
     await expect
       .poll(async () => legendText(page), { timeout: 8_000 })
-      .not.toContain('概率密度')
-    await expect
-      .poll(async () => legendText(page), { timeout: 8_000 })
-      .toContain('KDE密度')
+      .toContain('KDE曲线')
   })
 })
