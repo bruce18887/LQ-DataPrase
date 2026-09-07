@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile } from '../helpers/params'
+import { selectAnalysisFile, filePicker } from '../helpers/params'
 import { RECOMMENDED } from '../fixtures/test-data'
 
 /**
@@ -25,9 +25,9 @@ async function enterMultiFile(page: Page) {
   await expect(page.locator(TAB)).toBeVisible({ timeout: 20_000 })
 }
 
-/** 在多文件 tab 左栏的「数据文件」多选里勾选若干文件名（filterable：开一次下拉，逐个过滤点选） */
+/** 在多文件 tab 顶部的「数据文件」多选里勾选若干文件名（filterable：开一次下拉，逐个过滤点选） */
 async function pickFiles(page: Page, names: string[]) {
-  const select = page.locator(`${TAB} .left-panel .el-select`).first()
+  const select = filePicker(page, 'multi')
   const input = select.locator('input').first()
   await select.click()
   const dropdown = page.locator('.el-select-dropdown:visible').last()
@@ -226,8 +226,8 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
     )
     await expect(page.locator(`${TAB} .chart-wrapper svg`)).toBeVisible({ timeout: 15_000 })
 
-    // 改第一个文件的自定义名
-    const firstNameInput = page.locator(`${TAB} .custom-names .name-row input`).first()
+    // 改第一个文件的自定义名（图例名卡已从左栏第一卡改为独立卡，class 沿用）
+    const firstNameInput = page.locator(`${TAB} .name-row input`).first()
     await firstNameInput.fill('对照组A')
     await page.waitForTimeout(600)
 

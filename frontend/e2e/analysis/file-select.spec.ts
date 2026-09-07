@@ -99,7 +99,7 @@ test.describe('FileSelect 通用文件选择组件', { tag: ['@p1', '@analysis']
     await gotoApp(page, '/analysis')
     await selectAnalysisFile(page, RECOMMENDED.analysis)
     await page.getByRole('tab', { name: /多文件分析/ }).click()
-    const select = page.locator(`${TAB} .left-panel .el-select`).first()
+    const select = filePicker(page, 'multi')
     await expect(select).toBeVisible({ timeout: 20_000 })
 
     const input = select.locator('input').first()
@@ -131,7 +131,7 @@ test.describe('FileSelect 通用文件选择组件', { tag: ['@p1', '@analysis']
     await gotoApp(page, '/analysis')
     await selectAnalysisFile(page, RECOMMENDED.analysis)
     await page.getByRole('tab', { name: /多文件分析/ }).click()
-    const select = page.locator(`${TAB} .left-panel .el-select`).first()
+    const select = filePicker(page, 'multi')
     await expect(select).toBeVisible({ timeout: 20_000 })
 
     await select.click()

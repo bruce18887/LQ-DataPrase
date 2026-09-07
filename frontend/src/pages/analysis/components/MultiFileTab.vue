@@ -1,33 +1,45 @@
 <template>
   <div class="multi-file-tab">
+    <!-- 顶部 toolbar 盒：文件多选行 + 筛选行（对齐单文件两行结构）。
+         敏感度仅作低 CPK 阈值（后端不消费裁剪口径），无「异常值处理」。 -->
+    <div class="dp-analysis-toolbar multi-toolbar">
+      <AnalysisFilePicker
+        v-model="fileIds"
+        :files="files"
+        scope="multi"
+        multiple
+        label="数据文件 (最少 2 个)"
+      />
+      <DataFilterSection
+        variant="bar"
+        scope="multi"
+        class="multi-toolbar__filters"
+        v-model:ignore-no-limit="ignoreNoLimit"
+        v-model:ignore-no-test-value="ignoreNoTestValue"
+        v-model:data-only-bin1="dataOnlyBin1"
+        v-model:only-fail-test-item="onlyFailTestItem"
+        v-model:only-low-cpk="onlyLowCpk"
+        v-model:iqr-multiplier="iqrMultiplier"
+        :show-outlier="false"
+      />
+    </div>
+
     <el-row :gutter="12" class="main-row">
       <!-- 左侧配置面板 -->
       <el-col :span="6" class="left-panel">
-        <!-- 文件多选（本 tab 自己的一份，与其他 tab 无关） -->
-        <el-card shadow="hover" :body-style="{ padding: '12px' }">
-          <AnalysisFilePicker
-            v-model="fileIds"
-            :files="files"
-            scope="multi"
-            multiple
-            label="数据文件 (最少 2 个)"
-            block
-          />
-
-          <!-- 自定义图例名 -->
-          <div v-if="selectedFileObjs.length" class="custom-names">
-            <div class="section-label" style="margin-top: 10px">自定义图例名</div>
-            <div v-for="f in selectedFileObjs" :key="f.id" class="name-row">
-              <span class="name-dot" :style="{ background: colorOf(f.id) }" />
-              <label :for="`file-name-${f.id}`" class="sr-only">{{ f.filename }} 图例名</label>
-              <el-input
-                :id="`file-name-${f.id}`"
-                v-model="fileNames[f.id]"
-                :placeholder="f.filename"
-                size="small"
-                clearable
-              />
-            </div>
+        <!-- 自定义图例名（依赖选中文件列表；文件多选已上移 toolbar） -->
+        <el-card v-if="selectedFileObjs.length" shadow="hover" :body-style="{ padding: '12px' }">
+          <div class="section-label">自定义图例名</div>
+          <div v-for="f in selectedFileObjs" :key="f.id" class="name-row">
+            <span class="name-dot" :style="{ background: colorOf(f.id) }" />
+            <label :for="`file-name-${f.id}`" class="sr-only">{{ f.filename }} 图例名</label>
+            <el-input
+              :id="`file-name-${f.id}`"
+              v-model="fileNames[f.id]"
+              :placeholder="f.filename"
+              size="small"
+              clearable
+            />
           </div>
         </el-card>
 
@@ -37,19 +49,6 @@
           v-model:bar-width-percent="barWidthPercent"
           :bar-width-max="barWidthMax"
           :range-type="'RDL'"
-        />
-
-        <!-- 数据筛选：多文件图表不消费前端裁剪口径 → 不显示「异常值处理」，
-             敏感度仅作为低 CPK 判定阈值透给 multi_lot -->
-        <DataFilterSection
-          scope="multi"
-          v-model:ignore-no-limit="ignoreNoLimit"
-          v-model:ignore-no-test-value="ignoreNoTestValue"
-          v-model:data-only-bin1="dataOnlyBin1"
-          v-model:only-fail-test-item="onlyFailTestItem"
-          v-model:only-low-cpk="onlyLowCpk"
-          v-model:iqr-multiplier="iqrMultiplier"
-          :show-outlier="false"
         />
 
         <!-- 范围类型 -->
@@ -365,6 +364,26 @@ watch(() => props.files, pruneDeadFileIds)
   padding: 0;
 }
 
+/* 顶部 toolbar 盒：多选行宽撑开，筛选行虚线分隔（对齐单文件 control-panel） */
+.multi-toolbar {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  row-gap: 8px;
+}
+.multi-toolbar > .dp-analysis-filepicker {
+  flex: 1 1 420px;
+  min-width: 280px;
+}
+.multi-toolbar__filters {
+  flex: 1 1 100%;
+  border-top: 1px dashed var(--border-2, #e4e7ed);
+  padding-top: 8px;
+}
+.multi-toolbar__filters.filter-card {
+  border: 0;
+  background: transparent;
+}
+
 .main-row {
   margin-bottom: 16px;
 }
@@ -386,12 +405,6 @@ watch(() => props.files, pruneDeadFileIds)
   color: var(--text-2);
   margin-bottom: 4px;
   font-weight: 500;
-}
-
-.custom-names {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
 }
 
 .name-row {

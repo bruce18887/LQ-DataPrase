@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, pickTabFile } from '../helpers/params'
+import { selectAnalysisFile, pickTabFile, filePicker } from '../helpers/params'
 import { waitLoadingGone } from '../helpers/charts'
 import { pickOption } from '../helpers/elplus'
 import { RECOMMENDED } from '../fixtures/test-data'
@@ -256,7 +256,7 @@ test.describe('@p1 轴刻度小数位精度（formatAxisValue 统一）', { tag:
       (r) => r.url().includes('/analysis/multi_lot/') && r.request().method() === 'POST' && r.status() < 500,
       { timeout: 30_000 },
     )
-    const select = page.locator('.multi-file-tab .left-panel .el-select').first()
+    const select = filePicker(page, 'multi')
     const input = select.locator('input').first()
     await select.click()
     const dropdown = page.locator('.el-select-dropdown:visible').last()
