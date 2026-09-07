@@ -1,30 +1,35 @@
 <!-- frontend/src/pages/analysis/components/CorrelationToolsTab.vue -->
 <template>
   <AnalysisTabLayout :loading="corrLoading || matrixLoading">
-    <!-- 工具栏：文件选择（散点/矩阵 radio 已删——2026-09-07 同屏改造，两卡常驻） -->
+    <!-- 工具栏：第一行文件选择 + 第二行数据筛选 bar（对齐单文件 tab 两行结构） -->
     <template #toolbar>
-      <AnalysisFilePicker
-        v-model="fileId"
-        :files="files"
-        scope="correlation"
-        :loading="listLoading"
-      />
+      <div class="control-panel">
+        <div class="control-panel__main">
+          <AnalysisFilePicker
+            v-model="fileId"
+            :files="files"
+            scope="correlation"
+            :loading="listLoading"
+          />
+        </div>
+        <div class="control-panel__filters">
+          <DataFilterSection
+            variant="bar"
+            scope="correlation"
+            v-model:ignore-no-limit="ignoreNoLimit"
+            v-model:ignore-no-test-value="ignoreNoTestValue"
+            v-model:data-only-bin1="dataOnlyBin1"
+            v-model:only-fail-test-item="onlyFailTestItem"
+            v-model:only-low-cpk="onlyLowCpk"
+            v-model:outlier-handling="outlierHandling"
+            v-model:iqr-multiplier="iqrMultiplier"
+          />
+        </div>
+      </div>
     </template>
 
     <!-- 左侧面板 -->
     <template #left-panel>
-      <!-- 数据筛选 + 异常值处理：只动本 tab 自己那份（与单文件 tab 互不影响） -->
-      <DataFilterSection
-        scope="correlation"
-        v-model:ignore-no-limit="ignoreNoLimit"
-        v-model:ignore-no-test-value="ignoreNoTestValue"
-        v-model:data-only-bin1="dataOnlyBin1"
-        v-model:only-fail-test-item="onlyFailTestItem"
-        v-model:only-low-cpk="onlyLowCpk"
-        v-model:outlier-handling="outlierHandling"
-        v-model:iqr-multiplier="iqrMultiplier"
-      />
-
       <!-- 散点对选择（双入口之一：X/Y 下拉；另一个入口是点矩阵格） -->
       <el-card shadow="hover" :body-style="{ padding: '12px' }">
         <label class="section-label">X 轴测试项</label>
@@ -427,6 +432,29 @@ void matrixChartInstance
 </script>
 
 <style scoped>
+/* 顶部控件面板：两行（文件行 + 筛选行），嵌在共享 toolbar 盒内 */
+.control-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.control-panel__main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.control-panel__main > .dp-analysis-filepicker {
+  flex: 1;
+  min-width: 240px;
+}
+.control-panel__filters {
+  border-top: 1px dashed var(--border-2, #e4e7ed);
+  padding-top: 8px;
+}
+
 .section-label {
   font-size: 11px;
   color: var(--text-2);
