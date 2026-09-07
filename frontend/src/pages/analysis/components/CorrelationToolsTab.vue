@@ -80,6 +80,16 @@
           >
             <el-option v-for="p in params" :key="p" :label="p" :value="p" />
           </el-select>
+          <div style="margin-top: 10px">
+            <label class="section-label">相关系数方法</label>
+            <!-- data-corr-method：e2e 契约选择器（同 data-file-picker/data-filter 惯例），
+                 卡内还有参数多选，按顺序定位会点错 -->
+            <el-select v-model="method" data-corr-method style="width: 100%">
+              <el-option label="Pearson（线性）" value="pearson" />
+              <el-option label="Spearman（秩相关）" value="spearman" />
+              <el-option label="Kendall（秩相关）" value="kendall" />
+            </el-select>
+          </div>
         </el-card>
         <el-button
           type="primary"
@@ -107,6 +117,12 @@
           <div class="metric-card">
             <div class="metric-label">R²</div>
             <div class="metric-value">{{ ((corrResult?.pearson_r ?? 0) ** 2).toFixed(4) }}</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">p 值（双侧）</div>
+            <div class="metric-value metric-value-p">
+              {{ scatterPText }}<span v-if="scatterPStars" class="p-stars">{{ scatterPStars }}</span>
+            </div>
           </div>
           <div class="metric-card">
             <div class="metric-label">数据点数</div>
@@ -141,6 +157,7 @@
 
       <!-- 矩阵模式 -->
       <template v-if="viewMode === 'matrix'">
+        <div v-if="matrixData" class="matrix-meta">{{ matrixMeta }}</div>
         <div class="chart-wrapper">
           <div v-if="matrixData" ref="matrixChartRef" class="chart-inner" />
           <el-empty v-else description="选择参数后点击「计算相关性矩阵」按钮" />
@@ -160,13 +177,14 @@ import DataFilterSection from './DataFilterSection.vue'
 import { useCorrelation } from '../composables/useCorrelation'
 import { useCorrelationMatrix } from '../composables/useCorrelationMatrix'
 import { useTabFileParams } from '../composables/useTabFileParams'
-import { buildCorrelationMatrixOption } from '../composables/matrix-option'
+import { buildCorrelationMatrixOption, formatPValue, getSignificanceStars } from '../composables/matrix-option'
+import { buildCorrelationScatterOption, linearRegression } from '../composables/scatter-option'
 import CorrelationScatterAxisCard from './CorrelationScatterAxisCard.vue'
 import ErrorBanner from '../../../components/common/ErrorBanner.vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
 import { minMax } from '../../../utils/minmax'
-import { formatAxisValue, getSiteColors8 } from '../../../utils/chart-bar'
+import { getSiteColors8 } from '../../../utils/chart-bar'
 import { useCorrelationTabStore } from '../../../stores/analysisTabs'
 import type { DataFile } from '../../../types'
 import OutlierHintBar from './OutlierHintBar.vue'
@@ -192,6 +210,7 @@ const {
   onlyLowCpk,
   outlierHandling,
   iqrMultiplier,
+  method,
 } = storeToRefs(useCorrelationTabStore())
 
 // View mode
@@ -233,6 +252,14 @@ const rColorClass = computed(() => {
   return 'r-weak'
 })
 
+// 散点 p 值（后端 /analysis/correlation/ 2026-09-06 起返回；n<=2 或 σ=0 时为 null）
+const scatterP = computed<number | null>(() => {
+  const p = corrResult.value?.p_value
+  return (p === null || p === undefined || !Number.isFinite(p)) ? null : p
+})
+const scatterPText = computed(() => scatterP.value === null ? '-' : formatPValue(scatterP.value))
+const scatterPStars = computed(() => scatterP.value === null ? '' : getSignificanceStars(scatterP.value))
+
 // 大数据量（≥5000 点）启用 large 模式 + canvas：上万散点不再产生上万
 // DOM 节点（与 SerialChart/QQPlotChart 一致）
 const isLarge = computed(() => {
@@ -240,21 +267,6 @@ const isLarge = computed(() => {
   return series.reduce((sum: number, sd: { data?: unknown[] }) =>
     sum + (sd.data?.length ?? 0), 0) >= 5000
 })
-
-/** 线性回归计算 */
-function linearRegression(points: number[][]): { slope: number; intercept: number } {
-  const n = points.length
-  if (n < 2) return { slope: 0, intercept: 0 }
-  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0
-  for (const [x, y] of points) {
-    sumX += x; sumY += y; sumXY += x * y; sumX2 += x * x
-  }
-  const denom = n * sumX2 - sumX * sumX
-  if (Math.abs(denom) < 1e-12) return { slope: 0, intercept: sumY / n }
-  const slope = (n * sumXY - sumX * sumY) / denom
-  const intercept = (sumY - slope * sumX) / n
-  return { slope, intercept }
-}
 
 /** 回归信息（方程 + R²） */
 const regressionInfo = computed(() => {
@@ -303,93 +315,29 @@ watch(() => props.active, (val) => {
   }
 })
 
-function computeRange(mode: string, sigma: number, cMin: number, cMax: number, vals: number[]) {
-  if (mode === 'custom') return { min: cMin, max: cMax }
-  if (mode === 'sigma') {
-    const m = vals.reduce((a, b) => a + b, 0) / vals.length
-    const s = Math.sqrt(vals.reduce((sum, v) => sum + (v - m) ** 2, 0) / vals.length)
-    return { min: m - sigma * s, max: m + sigma * s }
-  }
-  const [dMin, dMax] = minMax(vals)
-  const rng = dMax > dMin ? dMax - dMin : 1
-  return { min: dMin - rng / 2, max: dMax + rng / 2 }
-}
-
-function buildScatterOption() {
-  if (!corrResult.value) return {}
-  const tc = colors.value.textColor
-  const d = corrResult.value
-  const series: any[] = (d.series_data || []).map(
-    (sd: { name: string; data: number[][] }, idx: number) => ({
-      name: sd.name, type: 'scatter', data: sd.data, symbolSize: 6,
-      itemStyle: { color: getSiteColors8(isDark.value)[idx % 8], opacity: 0.6 },
-      ...(isLarge.value ? { large: true } : {}),
-    }),
-  )
-  const allX: number[] = [], allY: number[] = []
-  for (const sd of d.series_data || []) for (const pt of sd.data || []) { allX.push(pt[0]); allY.push(pt[1]) }
-  const xR = allX.length > 0 ? computeRange(axisModeX.value, sigmaX.value, customMinX.value, customMaxX.value, allX) : { min: undefined, max: undefined }
-  const yR = allY.length > 0 ? computeRange(axisModeY.value, sigmaY.value, customMinY.value, customMaxY.value, allY) : { min: undefined, max: undefined }
-
-  // Apply outlier clipping to axis ranges
-  if (outlierHandling.value === 'clip') {
-    if (d.x_outlier_info?.has_outliers) {
-      if (axisModeX.value === 'data') {
-        xR.min = d.x_outlier_info.lower_bound
-        xR.max = d.x_outlier_info.upper_bound
-      }
-    }
-    if (d.y_outlier_info?.has_outliers) {
-      if (axisModeY.value === 'data') {
-        yR.min = d.y_outlier_info.lower_bound
-        yR.max = d.y_outlier_info.upper_bound
-      }
-    }
-  }
-
-  // Regression line
-  if (showRegression.value && allX.length >= 2) {
-    const { slope, intercept } = linearRegression(allX.map((x, i) => [x, allY[i]]))
-    const [xAllMin, xAllMax] = minMax(allX)
-    const xMin = xR.min ?? xAllMin
-    const xMax = xR.max ?? xAllMax
-    const r2 = (d.pearson_r ?? 0) ** 2
-    series.push({
-      name: '回归线',
-      type: 'line',
-      data: [[xMin, slope * xMin + intercept], [xMax, slope * xMax + intercept]],
-      // itemStyle.color 与 lineStyle 同源——图例 marker 只取 itemStyle（2026-08-20）
-      itemStyle: { color: colors.value.seriesColors[3] },
-      lineStyle: { type: 'dashed', color: colors.value.seriesColors[3], width: 2 },
-      symbol: 'none',
-      tooltip: {
-        formatter: () => `回归方程: y = ${slope.toFixed(4)}x + ${intercept.toFixed(4)}<br/>R² = ${r2.toFixed(4)}`,
-      },
-    })
-  }
-
-  return {
-    // large 模式下上万 symbol 的入场/更新动画是纯开销，直接关闭
-    animation: !isLarge.value,
-    title: { text: `${d.param_x} vs ${d.param_y}`, subtext: `Pearson r = ${d.pearson_r?.toFixed(4) ?? '-'}`, left: 'center', textStyle: { color: tc, fontSize: 15 }, subtextStyle: { color: tc, fontSize: 12 } },
-    toolbox: { feature: { saveAsImage: { title: '保存图片' }, restore: { title: '还原' } }, right: 10 },
-    tooltip: { trigger: 'item', backgroundColor: colors.value.tooltipBg, borderColor: colors.value.tooltipBorder, textStyle: { color: colors.value.tooltipText }, formatter: (p: any) => `${p.seriesName}<br/>${d.param_x}: ${Number(p.value[0]).toFixed(4)}<br/>${d.param_y}: ${Number(p.value[1]).toFixed(4)}` },
-    legend: { data: series.map((s: any) => s.name), bottom: 5, type: 'scroll', textStyle: { color: tc } },
-    xAxis: { type: 'value', name: d.param_x, nameLocation: 'center', nameGap: 30, min: xR.min, max: xR.max, axisLine: { lineStyle: { color: colors.value.axisLineColor } }, axisLabel: { fontSize: 9, formatter: formatAxisValue, color: tc }, nameTextStyle: { color: tc } },
-    yAxis: { type: 'value', name: d.param_y, nameLocation: 'center', nameGap: 40, min: yR.min, max: yR.max, axisLine: { lineStyle: { color: colors.value.axisLineColor } }, axisLabel: { fontSize: 9, formatter: formatAxisValue, color: tc }, nameTextStyle: { color: tc } },
-    dataZoom: [
-      { type: 'slider', xAxisIndex: 0, start: 0, end: 100 },
-      { type: 'slider', yAxisIndex: 0, start: 0, end: 100 },
-      { type: 'inside', xAxisIndex: 0 },
-      { type: 'inside', yAxisIndex: 0 },
-    ],
-    series,
-  }
-}
-
-// 大数据量强制 canvas（SVG 渲染器对 large 符号仍会为每点发射 DOM 元素）；
-// 小数据量跟随用户全局设置
-const { chartRef: scatterChartRef } = useChart(buildScatterOption, [
+// 散点 option 构建已外移 composables/scatter-option.ts（撞 600 行上限，与
+// matrix-option.ts 同款处理）；此处仅把响应式状态装配进去
+const { chartRef: scatterChartRef } = useChart(() => buildCorrelationScatterOption({
+  result: corrResult.value,
+  theme: {
+    textColor: colors.value.textColor,
+    axisLineColor: colors.value.axisLineColor,
+    tooltipBg: colors.value.tooltipBg,
+    tooltipBorder: colors.value.tooltipBorder,
+    tooltipText: colors.value.tooltipText,
+    regressionColor: colors.value.seriesColors[3],
+    siteColors: getSiteColors8(isDark.value),
+  },
+  isLarge: isLarge.value,
+  showRegression: showRegression.value,
+  axis: {
+    axisModeX: axisModeX.value, axisModeY: axisModeY.value,
+    sigmaX: sigmaX.value, sigmaY: sigmaY.value,
+    customMinX: customMinX.value, customMaxX: customMaxX.value,
+    customMinY: customMinY.value, customMaxY: customMaxY.value,
+    outlierHandling: outlierHandling.value,
+  },
+}), [
   () => corrResult.value,
   () => showRegression.value,
   () => axisModeX.value, () => axisModeY.value,
@@ -451,19 +399,52 @@ function onCalculateMatrix() {
   loadCorrelationMatrix(
     selectedMatrixParams.value.length > 0 ? selectedMatrixParams.value : undefined,
     corrFlags.value,
+    method.value,
   )
 }
+
+// 矩阵 meta 行（照原型 cMxMeta）：方法 · n · 星标口径 · 色相语义
+const matrixMeta = computed(() => {
+  if (!matrixData.value) return ''
+  const n = matrixData.value.sample_size ?? 0
+  return `${method.value} · n=${n.toLocaleString()} · 星标 <0.001 ***/<0.01 **/<0.05 * · 色相表方向，非表好坏`
+})
 
 function buildMatrixOption() {
   if (!matrixData.value) return {}
   return buildCorrelationMatrixOption(matrixData.value, {
     textColor: colors.value.textColor,
     isDark: isDark.value,
+    brandColor: colors.value.brandColor,
   })
 }
 
-const { chartRef: matrixChartRef } = useChart(buildMatrixOption, [() => matrixData.value], 'matrixChartRef')
+const { chartRef: matrixChartRef, chartInstance: matrixChartInstance } = useChart(
+  buildMatrixOption, [() => matrixData.value], 'matrixChartRef')
 void matrixChartRef
+
+// 矩阵格 → 散点联动（2026-09-06 参照原型 .cell 点击）：热力图 data 项 value
+// 为 [i, j, r]，对角（恒 1）与 r 无定义的格不响应；切到散点视图并选中该对后，
+// 既有 watch([localX, localY]) 自动加载，不新造请求逻辑。矩阵参数本就 ⊆
+// 散点参数列表（同一 params 源），无失效对。实例可能因渲染器切换被重建，
+// 故 watch chartInstance 重挂前先 off 防重复绑定。
+watch(matrixChartInstance, (chart) => {
+  if (!chart) return
+  chart.off('click')
+  chart.on('click', (p: any) => {
+    if (p?.componentType !== 'series') return
+    const [i, j, r] = (p.value ?? []) as [number, number, number | null]
+    if (i === j || r == null) return
+    const list: string[] = matrixData.value?.params || []
+    const x = list[i]
+    const y = list[j]
+    if (!x || !y) return
+    localX.value = x
+    localY.value = y
+    viewMode.value = 'scatter'
+  })
+})
+void matrixChartInstance
 </script>
 
 <style scoped>
@@ -513,6 +494,24 @@ void matrixChartRef
 .metric-value.r-strong { color: var(--success); }
 .metric-value.r-medium { color: var(--warn); }
 .metric-value.r-weak { color: var(--text, #303133); }
+
+/* p 值科学计数（1.23e-7）比 4 位小数宽，卡内字号单独收一档 */
+.metric-value-p {
+  font-size: 16px;
+}
+
+.p-stars {
+  font-size: 12px;
+  color: var(--warn, #e6a23c);
+  margin-left: 2px;
+}
+
+/* 矩阵 meta 行（照原型 .review-note 的信息密度，不做卡片只做一行说明） */
+.matrix-meta {
+  font-size: 11px;
+  color: var(--text-2, #909399);
+  padding: 0 2px 6px;
+}
 
 .regression-eq {
   font-size: 13px;

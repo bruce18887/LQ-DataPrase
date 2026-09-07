@@ -103,6 +103,9 @@ function createCorrelationState() {
     fileId: ref<number | null>(null),
     params: ref<string[]>([]),
     loading: ref(false),
+    // 相关系数方法（仅矩阵模式消费；后端 correlation_matrix 已支持三法，
+    // UI 于 2026-09-06 参照原型补暴露）
+    method: ref('pearson'),
     ...createFilterState(),
   }
 }

@@ -37,26 +37,48 @@ export function getSignificanceStars(p: number): string {
 export interface MatrixOptionTheme {
   textColor: string
   isDark: boolean
+  /** hover 描边色（原型 .cell:hover outline 同款）；缺省取两主题 brand 兜底 */
+  brandColor?: string
 }
 
 export function buildCorrelationMatrixOption(
   data: any,
-  { textColor, isDark }: MatrixOptionTheme,
+  { textColor, isDark, brandColor }: MatrixOptionTheme,
 ) {
   const params: string[] = data.params || []
   const matrix: number[][] = data.matrix || []
   const pValues: number[][] = data.p_values || []
+  const brand = brandColor ?? (isDark ? '#f9a825' : '#2563eb')
 
-  const heatmapData: [number, number, number | null][] = []
+  // 色带方向对齐原型 .cell（2026-09-06）：正=红、负=蓝、0=中性底。
+  // 旧 RdYlBu 是 -1=红 → +1=蓝，与原型相反；色相不变只换极性，CVD 安全性不变。
+  // 中性停靠 dark 用石板灰 / light 用近面板色：|r|≈0 的格子视觉上「无话可说」。
+  const ramp = isDark
+    ? ['#1d4ed8', '#3b82f6', '#334155', '#f87171', '#ef5350']
+    : ['#4575b4', '#abd9e9', '#f1f5f9', '#fca5a5', '#d73027']
+  const neutral = ramp[2]
+
+  const pOf = (i: number, j: number) => pValues[i]?.[j] ?? 1
+
+  const heatmapData: { value: [number, number, number | null]; label: { color: string }; itemStyle?: { color: string } }[] = []
   for (let i = 0; i < params.length; i++) {
     for (let j = 0; j < params.length; j++) {
       // null 保留进数据元组（ECharts 对 null 值不渲染色块）：`?? 0` 会在
       // formatter 看到之前把 null 吞成实测零相关
-      heatmapData.push([i, j, matrix[i]?.[j] ?? null])
+      const r = matrix[i]?.[j] ?? null
+      // 高 |r| 格内白字（原型 t>0.55 同款阈值），其余用主题文字色
+      const strong = r != null && Number.isFinite(r) && Math.abs(r) > 0.55
+      const item: (typeof heatmapData)[number] = {
+        value: [i, j, r],
+        label: { color: strong ? '#fff' : textColor },
+      }
+      if (i === j) {
+        // 对角线恒为 1、无信息量：照原型置中性色，把色阶让给真实数据对
+        item.itemStyle = { color: neutral }
+      }
+      heatmapData.push(item)
     }
   }
-
-  const pOf = (i: number, j: number) => pValues[i]?.[j] ?? 1
 
   return {
     tooltip: {
@@ -72,10 +94,7 @@ export function buildCorrelationMatrixOption(
     yAxis: { type: 'category', data: params, splitArea: { show: true }, axisLabel: { fontSize: 10, color: textColor } },
     visualMap: {
       min: -1, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: '0%',
-      inRange: { color: isDark
-        // RdYlBu 化：原 红→绿 发散带在红绿色盲下正负相关不可分（deutan ΔE 14.6）
-        ? ['#ef5350', '#ff7043', '#ffa726', '#ffee58', '#f8fafc', '#93c5fd', '#3b82f6', '#1d4ed8']
-        : ['#d73027', '#f46d43', '#fdae61', '#fee08b', '#e0f3f8', '#abd9e9', '#74add1', '#4575b4'] },
+      inRange: { color: ramp },
     },
     series: [{
       name: 'Pearson r', type: 'heatmap', data: heatmapData,
@@ -88,7 +107,8 @@ export function buildCorrelationMatrixOption(
           return `${r.toFixed(2)}${getSignificanceStars(pOf(pi, pj))}`
         },
       },
-      emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0, 0, 0, 0.5)' } },
+      // hover 描边替代阴影（原型 :hover outline 同款）
+      emphasis: { itemStyle: { borderColor: brand, borderWidth: 2 } },
     }],
   }
 }
