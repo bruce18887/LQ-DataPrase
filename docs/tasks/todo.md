@@ -1078,3 +1078,51 @@ unapplied migrations 警告时按提示处理。
   **重新拖一次布局**即可，之后刷新/换设备都会保持。
 - dev 库里 `user` / `viewer` 两账号的记忆开关是**关**的（seed_users 所种）；若用这两
   个账号测试，先到 系统设置 → 显示设置 打开「图表布局记忆」。
+
+---
+
+# 任务：相关性对比页同屏布局改造（2026-09-07）✅
+
+> Spec：docs/specs/2026-09-07-correlation-inline-layout-design.md（用户逐项拍板）；
+> 计划：docs/superpowers/plans/2026-09-07-correlation-inline-layout.md。
+> 依据保守重设计原型把「散点/矩阵 radio 二选一」改为矩阵卡+散点卡同屏常驻。
+
+## 实施清单
+
+- [x] 后端 p 值精度修复（TDD）：correlation.py / computations.py 删 round(p,6)。
+      **计划外发现第二层根因**：`2*(1 - t_cdf(|t|))` 在 |t| 大时灾难性抵消
+      （t=137 → 1-cdf 恒 0），删 round 后测试仍红。新增
+      `distributions.t_sf()`（半尾 incomplete beta，与 scipy `2*t.sf` 逐位
+      一致，实测 t=137/df=198 → 2.14e-198），两个调用点改用。
+- [x] MatrixParamPicker.vue（新）：搜索框+chips 网格（选中高亮、固定高度滚动、
+      全选作用于可见项、清空、无匹配空态）；契约属性 data-matrix-param-picker /
+      data-matrix-search；默认仍前 12（MATRIX_DEFAULT_MAX）。
+- [x] CorrelationToolsTab 同屏重构：删 viewMode radio 与 5 张 KPI 大卡；右栏
+      矩阵卡（data-corr-matrix-card，卡头 meta 行）+ 散点卡
+      （data-corr-scatter-card，卡头一行 r/p/n/回归式 + 抽样注记）；点格联动
+      就地更新散点（删视图切换分支）；X/Y 下拉/回归线开关/轴卡/方法下拉/
+      计算按钮原位保留；555→527 行。抽样注记零后端改动（n 本就是降采样前口径）。
+- [x] matrix-option.ts：visualMap show:false（去色阶滑块，色带不变）；
+      tooltip/series 标签随 method（Pearson r / Spearman ρ / Kendall τ）。
+- [x] e2e：重写 correlation-matrix-linkage（同屏断言）；迁移 default-cap /
+      file-switch-reset / analysis / axis-label-precision / legend-color /
+      multi-file-filter / tab-request-fanout（旧 radio/metric-card/chart-wrapper
+      定位器）；新增 correlation-inline（chips 搜索/选取消/清空、卡头指标行、
+      抽样注记 skip 门）。X/Y/方法下拉补实例级 popper-class
+      （dp-corr-x/y/method-popper，lessons 2026-09-05 教训复现钉死）。
+- [x] 验证：后端全量 899 OK(skip7=基线)；apps.analysis 173 OK；npm run build 绿；
+      分析页全量 e2e 101 passed + 2 个基础设施 flake 隔离复跑绿；
+      @theme 7/7 × 3 轮绿；跑后端口已释放（8000/3000 均无监听）。
+
+## Review（2026-09-07）
+
+- 端到端 p 值：n=200 强相关散点 p=1.57e-191、矩阵 p01=5.92e-250（修前恒 0.0）。
+- e2e 踩坑三则（已修）：① convertToPixel 像素点格偶发脱靶 → 点击前重查像素
+  +等 resize 安定（svg path DOM 序与数据序不保证一致，实测点 path[1] 命中
+  Data_Num 行）；② X/Y 选中后占位文本消失 → 按卡内序定位 + 值文本断言；
+  ③ canvas large 大文件下渲染器切换期实例 div 短暂消失 → 轮询卡头指标后再读实例。
+- ⚠️ 遗留：浏览器双主题人工走查未完成——收尾时用户 dev vite(3000)/后端均已停止，
+  起临时服务会污染 e2e 数据环境（lessons 已两次踩坑）；双主题 token 断言由
+  @theme 套件覆盖（新组件全部语义 token，无双主题风险点），建议用户下次开 dev
+  环境时目测一遍相关性 Tab（chips 选中态、卡头指标配色）。
+- 提交：待用户授权后 commit（15 个修改 + 2 个新文件）。

@@ -49,6 +49,10 @@ export function buildCorrelationMatrixOption(
   const matrix: number[][] = data.matrix || []
   const pValues: number[][] = data.p_values || []
   const brand = brandColor ?? (isDark ? '#f9a825' : '#2563eb')
+  // Pearson r / Spearman ρ / Kendall τ：tooltip 与 series.name 不能硬编码
+  // Pearson——切方法后文案就错了（method 由后端响应体回传）
+  const SYMBOLS: Record<string, string> = { pearson: 'Pearson r', spearman: 'Spearman ρ', kendall: 'Kendall τ' }
+  const rLabel = SYMBOLS[data.method] ?? 'r'
 
   // 色带方向对齐原型 .cell（2026-09-06）：正=红、负=蓝、0=中性底。
   // 旧 RdYlBu 是 -1=红 → +1=蓝，与原型相反；色相不变只换极性，CVD 安全性不变。
@@ -86,18 +90,20 @@ export function buildCorrelationMatrixOption(
       formatter: (p: any) => {
         const [pi, pj, r] = p.value as [number, number, number]
         const pv = pOf(pi, pj)
-        return `${params[pi]} vs ${params[pj]}<br/>Pearson r: ${formatR(r)}${getSignificanceStars(pv)}<br/>p-value: ${formatPValue(pv)}`
+        return `${params[pi]} vs ${params[pj]}<br/>${rLabel}: ${formatR(r)}${getSignificanceStars(pv)}<br/>p-value: ${formatPValue(pv)}`
       },
     },
     grid: { left: '15%', right: '10%', top: '10%', bottom: '15%' },
     xAxis: { type: 'category', data: params, splitArea: { show: true }, axisLabel: { rotate: 45, fontSize: 10, color: textColor } },
     yAxis: { type: 'category', data: params, splitArea: { show: true }, axisLabel: { fontSize: 10, color: textColor } },
     visualMap: {
-      min: -1, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: '0%',
+      min: -1, max: 1, calculable: false, orient: 'horizontal', left: 'center', bottom: '0%',
+      // 对齐原型紧凑卡形态：色阶滑块藏掉（show:false），映射与色带不变
+      show: false,
       inRange: { color: ramp },
     },
     series: [{
-      name: 'Pearson r', type: 'heatmap', data: heatmapData,
+      name: rLabel, type: 'heatmap', data: heatmapData,
       label: {
         show: true, fontSize: 9,
         formatter: (p: any) => {

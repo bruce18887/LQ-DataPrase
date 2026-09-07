@@ -134,20 +134,29 @@ test.describe('@p1 图例颜色严格对应', { tag: ['@p1', '@analysis'] }, () 
     // 相关性 tab 吃自己那份文件选择（不选到 CTA8280F 就没有 Kelvin_VIN）
     await pickTabFile(page, 'correlation', RECOMMENDED.analysis)
     await page.waitForTimeout(800)
-    const xCard = page.locator('.el-tab-pane:visible .el-card').filter({ hasText: 'X 轴测试项' }).first()
-    const xSelect = xCard.locator('.el-select').first()
+    // 同屏改造（2026-09-07）后 X/Y 两个下拉合进同一张卡，按卡内序区分
+    const pairCard = page.locator('.el-tab-pane:visible .el-card').filter({ hasText: 'X 轴测试项' }).first()
+    const xSelect = pairCard.locator('.el-select').first()
     await xSelect.click()
     await page.locator('.el-select-dropdown:visible .el-select-dropdown__item').filter({ hasText: 'Index_No' }).first().click()
-    const yCard = page.locator('.el-tab-pane:visible .el-card').filter({ hasText: 'Y 轴测试项' }).first()
-    const ySelect = yCard.locator('.el-select').first()
+    const ySelect = pairCard.locator('.el-select').nth(1)
     await ySelect.click()
     await ySelect.locator('input').first().pressSequentially('Kelvin_VIN')
     await page.waitForTimeout(600)
     await page.locator('.el-select-dropdown:visible .el-select-dropdown__item').filter({ hasText: 'Kelvin_VIN' }).first().click()
 
-    const container = '.el-tab-pane:visible .chart-wrapper div[_echarts_instance_]'
-    await expect(page.locator(container).first()).toBeVisible({ timeout: 20_000 })
-    const opt = await readOption(page.locator(container).first())
+    // 大文件（n=10000）散点走 canvas large + 渲染器切换时实例会短暂
+    // dispose 重建，直接等 div[_echarts_instance_] 可能撞上空窗。
+    // 改为轮询卡片头出现指标（渲染完成的事实信号）后再从容器读实例。
+    const layout = page.locator('.analysis-tab-layout:visible')
+    await expect(
+      layout.locator('[data-corr-scatter-card] .head-metric').filter({ hasText: 'r=' }),
+    ).toBeVisible({ timeout: 25_000 })
+    const inst = page.locator('.el-tab-pane:visible .scatter-chart-inner div[_echarts_instance_]').first()
+    await expect
+      .poll(async () => (await inst.count()) > 0, { timeout: 20_000 })
+      .toBe(true)
+    const opt = await readOption(inst)
     const reg = (opt?.series ?? []).find((s: any) => s.name === '回归线')
     expect(reg, '回归线系列应存在').toBeTruthy()
     expect(reg.lineStyle?.color, '回归线 lineStyle 应有色').toBeTruthy()

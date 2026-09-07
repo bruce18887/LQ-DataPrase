@@ -14,7 +14,7 @@ import { RECOMMENDED } from '../fixtures/test-data'
  * 该下拉属于单文件 tab，切到相关性对比后并不在 DOM 里。
  */
 
-const HEADER = '.matrix-param-header .section-label'
+const HEADER = '[data-matrix-param-picker] .matrix-param-header .section-label'
 
 function parseChosenTotal(text: string | null) {
   const m = (text || '').match(/已选\s*(\d+)\s*\/\s*(\d+)/)
@@ -25,9 +25,8 @@ test.describe('@p2 相关性矩阵默认选择', { tag: ['@p2', '@analysis'] }, 
   test('参数多于 12 个时默认只选 12 项', async ({ page }) => {
     await gotoApp(page, '/analysis')
     await page.getByRole('tab', { name: /相关性对比/ }).click()
-    // 矩阵参数来自相关性 tab 自己的文件与参数列表
+    // 矩阵参数来自相关性 tab 自己的文件与参数列表（同屏改造后左栏常驻，无 radio）
     await pickTabFile(page, 'correlation', RECOMMENDED.analysis)
-    await page.locator('.el-radio-button').filter({ hasText: '相关性矩阵' }).first().click()
 
     const label = page.locator(HEADER)
     await expect(label).toBeVisible({ timeout: 10_000 })

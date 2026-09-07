@@ -112,14 +112,12 @@ test.describe('@p1 多文件分析与相关性筛选开关', { tag: ['@p1', '@an
     await openCorrelationTab(page)
 
     // 选 X/Y 参数（CTA8280F_FT 固定存在的两个数值列），自动触发 correlation 请求。
-    // 注意：el-select 必须按「含 label 的卡片」定位——pane 级 hasText 会把
-    // X/Y 两个下拉都命中，first() 恒取到 X 轴（2026-08-20 踩坑）
-    const xCard = page.locator('.el-tab-pane:visible .el-card').filter({ hasText: 'X 轴测试项' }).first()
-    const xSelect = xCard.locator('.el-select').first()
+    // 同屏改造（2026-09-07）后 X/Y 两个下拉合进同一张卡，按卡内序区分
+    const pairCard = page.locator('.el-tab-pane:visible .el-card').filter({ hasText: 'X 轴测试项' }).first()
+    const xSelect = pairCard.locator('.el-select').first()
     await xSelect.click()
     await page.locator('.el-select-dropdown:visible .el-select-dropdown__item').filter({ hasText: 'Index_No' }).first().click()
-    const yCard = page.locator('.el-tab-pane:visible .el-card').filter({ hasText: 'Y 轴测试项' }).first()
-    const ySelect = yCard.locator('.el-select').first()
+    const ySelect = pairCard.locator('.el-select').nth(1)
     await ySelect.click()
     // 参数下拉 filterable：输入过滤后等渲染稳定再普通点击（Kelvin_VIN 在
     // 180 项列表中在可视区外；过滤渲染期间项持续重排，force 点击可能落空）
@@ -130,7 +128,7 @@ test.describe('@p1 多文件分析与相关性筛选开关', { tag: ['@p1', '@an
     await expect(xSelect).toContainText('Index_No')
     await expect(ySelect).toContainText('Kelvin_VIN')
     await expect
-      .poll(() => page.locator('.el-tab-pane:visible .chart-wrapper svg, .el-tab-pane:visible .chart-wrapper canvas').count(), { timeout: 15_000 })
+      .poll(() => page.locator('.el-tab-pane:visible .scatter-chart-inner svg, .el-tab-pane:visible .scatter-chart-inner canvas').count(), { timeout: 15_000 })
       .toBeGreaterThan(0)
 
     // 谓词只匹配请求体（不带状态过滤——Vite 代理偶发 502 属基础设施噪声，
@@ -154,8 +152,7 @@ test.describe('@p1 多文件分析与相关性筛选开关', { tag: ['@p1', '@an
   test('相关性矩阵：勾选仅用Pass数据 → correlation_matrix 请求携带开关', async ({ page }) => {
     await openCorrelationTab(page)
 
-    // 切到矩阵模式并计算（默认参数全选）
-    await page.locator('.el-radio-button').filter({ hasText: '相关性矩阵' }).first().click()
+    // 同屏改造后矩阵卡常驻，直接计算（默认参数前 12 选中）
     const respPromise = page.waitForResponse(
       (r) =>
         r.url().includes('/statistics/correlation_matrix/') &&
