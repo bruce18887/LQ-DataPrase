@@ -372,23 +372,23 @@ test.describe('@p1 测试项相关性分析', { tag: ['@p1', '@analysis'] }, () 
     expect(r.status(), 'correlation API 应返回 200').toBe(200)
 
     // 散点图渲染（SVG 或 canvas——大文件 large 模式为 canvas）
-    const chart = layout.locator('.chart-inner svg, .chart-inner canvas').first()
+    const chart = layout.locator('.scatter-chart-inner svg, .scatter-chart-inner canvas').first()
     await expect(chart, '散点图应渲染').toBeVisible({ timeout: 15_000 })
     const box = await chart.boundingBox()
     expect(box, '图表应有有效尺寸').not.toBeNull()
     expect(box!.width, '宽 > 0').toBeGreaterThan(0)
     expect(box!.height, '高 > 0').toBeGreaterThan(0)
 
-    // Pearson r 指标卡片
-    const rCard = layout.locator('.metric-card').first()
-    await expect(rCard).toBeVisible()
-    await expect(rCard.locator('.metric-value')).not.toBeEmpty()
+    // 卡头一行指标（同屏改造 2026-09-07：KPI 大卡并入散点卡头）
+    const rMetric = layout.locator('.head-metric').filter({ hasText: 'r=' }).first()
+    await expect(rMetric).toBeVisible()
+    await expect(rMetric).not.toBeEmpty()
 
-    // 数据点数指标卡片（Pearson r / R² / 数据点数 / 回归方程 的第 3 张）
-    const nCard = layout.locator('.metric-card').nth(2)
-    await expect(nCard).toBeVisible()
-    const nText = await nCard.locator('.metric-value').innerText()
-    expect(Number(nText.replace(/,/g, ''))).toBeGreaterThan(0)
+    // 数据点数指标
+    const nMetric = layout.locator('.head-metric').filter({ hasText: /^n=/ }).first()
+    await expect(nMetric).toBeVisible()
+    const nText = await nMetric.innerText()
+    expect(Number(nText.replace(/^n=|,/g, ''))).toBeGreaterThan(0)
   })
 
   test('坐标轴范围：西格玛模式出现倍数选择器', async ({ page }) => {

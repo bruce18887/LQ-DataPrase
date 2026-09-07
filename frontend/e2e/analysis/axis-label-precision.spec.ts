@@ -219,7 +219,7 @@ test.describe('@p1 轴刻度小数位精度（formatAxisValue 统一）', { tag:
     await respPromise
 
     // locator 用 :visible 唯一化；页面上下文用不带伪类的选择器（finder 内部判可见性）
-    const container = '.analysis-tab-layout .chart-inner'
+    const container = '.analysis-tab-layout .scatter-chart-inner'
     await waitChartRendered(page, container)
     await assertSmartFormatter(page, container, 'xAxis')
     await assertSmartFormatter(page, container, 'yAxis')

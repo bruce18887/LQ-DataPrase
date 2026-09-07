@@ -1,7 +1,7 @@
 <!-- frontend/src/pages/analysis/components/CorrelationToolsTab.vue -->
 <template>
   <AnalysisTabLayout :loading="corrLoading || matrixLoading">
-    <!-- 工具栏 -->
+    <!-- 工具栏：文件选择（散点/矩阵 radio 已删——2026-09-07 同屏改造，两卡常驻） -->
     <template #toolbar>
       <AnalysisFilePicker
         v-model="fileId"
@@ -9,10 +9,6 @@
         scope="correlation"
         :loading="listLoading"
       />
-      <el-radio-group v-model="viewMode" size="small">
-        <el-radio-button value="scatter">散点图</el-radio-button>
-        <el-radio-button value="matrix">相关性矩阵</el-radio-button>
-      </el-radio-group>
     </template>
 
     <!-- 左侧面板 -->
@@ -29,141 +25,114 @@
         v-model:iqr-multiplier="iqrMultiplier"
       />
 
-      <!-- 散点图模式 -->
-      <template v-if="viewMode === 'scatter'">
-        <el-card shadow="hover" :body-style="{ padding: '12px' }">
-          <label class="section-label">X 轴测试项</label>
-          <el-select v-model="localX" placeholder="选择 X 轴参数" filterable style="width: 100%">
-            <el-option v-for="p in params" :key="p" :label="p" :value="p" />
-          </el-select>
-        </el-card>
-        <el-card shadow="hover" :body-style="{ padding: '12px' }">
-          <label class="section-label">Y 轴测试项</label>
-          <el-select v-model="localY" placeholder="选择 Y 轴参数" filterable style="width: 100%">
-            <el-option v-for="p in params" :key="p" :label="p" :value="p" />
-          </el-select>
-        </el-card>
-        <el-card shadow="hover" :body-style="{ padding: '12px' }">
+      <!-- 散点对选择（双入口之一：X/Y 下拉；另一个入口是点矩阵格） -->
+      <el-card shadow="hover" :body-style="{ padding: '12px' }">
+        <label class="section-label">X 轴测试项</label>
+        <el-select v-model="localX" placeholder="选择 X 轴参数" filterable style="width: 100%"
+          popper-class="dp-corr-x-popper">
+          <el-option v-for="p in params" :key="p" :label="p" :value="p" />
+        </el-select>
+        <label class="section-label" style="margin-top: 10px">Y 轴测试项</label>
+        <el-select v-model="localY" placeholder="选择 Y 轴参数" filterable style="width: 100%"
+          popper-class="dp-corr-y-popper">
+          <el-option v-for="p in params" :key="p" :label="p" :value="p" />
+        </el-select>
+        <div style="margin-top: 10px">
           <el-switch v-model="showRegression" size="small" active-text="显示回归线" />
-        </el-card>
+        </div>
+      </el-card>
 
-        <!-- 坐标轴范围设置 -->
-        <CorrelationScatterAxisCard
-          :show="!!corrResult"
-          v-model:axis-mode-x="axisModeX"
-          v-model:axis-mode-y="axisModeY"
-          v-model:sigma-x="sigmaX"
-          v-model:sigma-y="sigmaY"
-          v-model:custom-min-x="customMinX"
-          v-model:custom-min-y="customMinY"
-          v-model:custom-max-x="customMaxX"
-          v-model:custom-max-y="customMaxY"
-        />
-      </template>
+      <!-- 坐标轴范围设置 -->
+      <CorrelationScatterAxisCard
+        :show="!!corrResult"
+        v-model:axis-mode-x="axisModeX"
+        v-model:axis-mode-y="axisModeY"
+        v-model:sigma-x="sigmaX"
+        v-model:sigma-y="sigmaY"
+        v-model:custom-min-x="customMinX"
+        v-model:custom-min-y="customMinY"
+        v-model:custom-max-x="customMaxX"
+        v-model:custom-max-y="customMaxY"
+      />
 
-      <!-- 矩阵模式 -->
-      <template v-if="viewMode === 'matrix'">
-        <el-card shadow="hover" :body-style="{ padding: '12px' }">
-          <div class="matrix-param-header">
-            <label class="section-label">选择参数（已选 {{ selectedMatrixParams.length }}/{{ params.length }}）</label>
-            <div class="matrix-param-actions">
-              <el-button link type="primary" size="small" @click="selectedMatrixParams = [...params]">全选</el-button>
-              <el-button link type="primary" size="small" @click="selectedMatrixParams = []">清空</el-button>
-            </div>
-          </div>
-          <el-select
-            v-model="selectedMatrixParams"
-            multiple
-            filterable
-            placeholder="选择参数"
-            style="width: 100%"
-          >
-            <el-option v-for="p in params" :key="p" :label="p" :value="p" />
-          </el-select>
-          <div style="margin-top: 10px">
-            <label class="section-label">相关系数方法</label>
-            <!-- data-corr-method：e2e 契约选择器（同 data-file-picker/data-filter 惯例），
-                 卡内还有参数多选，按顺序定位会点错 -->
-            <el-select v-model="method" data-corr-method style="width: 100%">
-              <el-option label="Pearson（线性）" value="pearson" />
-              <el-option label="Spearman（秩相关）" value="spearman" />
-              <el-option label="Kendall（秩相关）" value="kendall" />
-            </el-select>
-          </div>
-        </el-card>
-        <el-button
-          type="primary"
-          size="small"
-          :loading="matrixLoading"
-          :disabled="selectedMatrixParams.length < 2"
-          style="width: 100%"
-          @click="onCalculateMatrix"
-        >
-          计算相关性矩阵（{{ selectedMatrixParams.length }} 项）
-        </el-button>
-      </template>
-
+      <!-- 矩阵参数选择（搜索框+chips）+ 方法 + 计算按钮（按钮留左栏原位） -->
+      <MatrixParamPicker :params="params" v-model:selected="selectedMatrixParams" />
+      <el-card shadow="hover" :body-style="{ padding: '12px' }">
+        <label class="section-label">相关系数方法</label>
+        <!-- data-corr-method：e2e 契约选择器（同 data-file-picker/data-filter 惯例） -->
+        <el-select v-model="method" data-corr-method style="width: 100%"
+          popper-class="dp-corr-method-popper">
+          <el-option label="Pearson（线性）" value="pearson" />
+          <el-option label="Spearman（秩相关）" value="spearman" />
+          <el-option label="Kendall（秩相关）" value="kendall" />
+        </el-select>
+      </el-card>
+      <el-button
+        type="primary"
+        size="small"
+        :loading="matrixLoading"
+        :disabled="selectedMatrixParams.length < 2"
+        style="width: 100%"
+        @click="onCalculateMatrix"
+      >
+        计算相关性矩阵（{{ selectedMatrixParams.length }} 项）
+      </el-button>
     </template>
 
-    <!-- 右侧面板 -->
+    <!-- 右侧面板：矩阵卡 + 散点卡同屏常驻（对齐原型布局） -->
     <template #right-panel>
-      <!-- 散点图模式 -->
-      <template v-if="viewMode === 'scatter'">
-        <div v-if="corrResult" class="top-bar">
-          <div class="metric-card">
-            <div class="metric-label">Pearson r</div>
-            <div class="metric-value" :class="rColorClass">{{ (corrResult?.pearson_r ?? 0).toFixed(4) }}</div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-label">R²</div>
-            <div class="metric-value">{{ ((corrResult?.pearson_r ?? 0) ** 2).toFixed(4) }}</div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-label">p 值（双侧）</div>
-            <div class="metric-value metric-value-p">
-              {{ scatterPText }}<span v-if="scatterPStars" class="p-stars">{{ scatterPStars }}</span>
-            </div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-label">数据点数</div>
-            <div class="metric-value">{{ (corrResult?.n ?? 0).toLocaleString() }}</div>
-          </div>
-          <div v-if="regressionInfo" class="metric-card">
-            <div class="metric-label">回归方程</div>
-            <div class="metric-value regression-eq">{{ regressionInfo.equation }}</div>
-          </div>
+      <!-- 矩阵卡 -->
+      <div class="inline-card" data-corr-matrix-card>
+        <div class="inline-card-h">
+          <span>相关系数矩阵</span>
+          <span class="grow"></span>
+          <span v-if="matrixData" class="matrix-meta-inline">{{ matrixMeta }}</span>
         </div>
-        <div class="chart-wrapper">
-          <div v-if="corrResult" ref="scatterChartRef" class="chart-inner" />
+        <div class="inline-card-b">
+          <div v-if="matrixData" ref="matrixChartRef" class="matrix-chart-inner" />
+          <el-empty
+            v-else
+            description="选择参数后点击左栏「计算相关性矩阵」按钮"
+            :image-size="72"
+          />
+        </div>
+      </div>
+
+      <!-- 散点卡：卡头一行承载 r/p/n/回归式（KPI 大卡已并入） -->
+      <div class="inline-card" data-corr-scatter-card>
+        <div class="inline-card-h">
+          <span>散点明细<template v-if="corrResult"> · {{ corrResult.param_x }} × {{ corrResult.param_y }}</template></span>
+          <span class="grow"></span>
+          <template v-if="corrResult">
+            <span class="head-metric" :class="rColorClass">r={{ (corrResult.pearson_r ?? 0).toFixed(4) }}<span v-if="scatterPStars" class="p-stars">{{ scatterPStars }}</span></span>
+            <span class="head-metric">p={{ scatterPText }}</span>
+            <span class="head-metric">n={{ (corrResult.n ?? 0).toLocaleString() }}</span>
+            <span v-if="regressionInfo" class="head-metric head-eq">{{ regressionInfo.equation }}</span>
+          </template>
+        </div>
+        <div class="inline-card-b">
+          <div v-if="corrResult" ref="scatterChartRef" class="scatter-chart-inner" />
           <ErrorBanner
             v-else-if="corrError"
             :message="corrError"
             title="相关性数据加载失败"
             @retry="reloadCorrelation"
           />
-          <el-empty v-else-if="!corrResult" description="选择 X/Y 轴参数以分析相关性" />
+          <el-empty v-else description="选择 X/Y 轴参数或点击矩阵格以分析相关性" :image-size="72" />
         </div>
-          <OutlierHintBar
-            v-if="corrResult"
-            :mode="outlierHandling"
-            :outlier-info="corrResult?.x_outlier_info ?? null"
-          />
-          <OutlierHintBar
-            v-if="corrResult"
-            :mode="outlierHandling"
-            :outlier-info="corrResult?.y_outlier_info ?? null"
-          />
-      </template>
+        <div v-if="sampledText" class="sample-note">{{ sampledText }}</div>
+      </div>
 
-      <!-- 矩阵模式 -->
-      <template v-if="viewMode === 'matrix'">
-        <div v-if="matrixData" class="matrix-meta">{{ matrixMeta }}</div>
-        <div class="chart-wrapper">
-          <div v-if="matrixData" ref="matrixChartRef" class="chart-inner" />
-          <el-empty v-else description="选择参数后点击「计算相关性矩阵」按钮" />
-        </div>
-      </template>
-
+      <OutlierHintBar
+        v-if="corrResult"
+        :mode="outlierHandling"
+        :outlier-info="corrResult?.x_outlier_info ?? null"
+      />
+      <OutlierHintBar
+        v-if="corrResult"
+        :mode="outlierHandling"
+        :outlier-info="corrResult?.y_outlier_info ?? null"
+      />
     </template>
   </AnalysisTabLayout>
 </template>
@@ -174,6 +143,7 @@ import { storeToRefs } from 'pinia'
 import AnalysisTabLayout from './AnalysisTabLayout.vue'
 import AnalysisFilePicker from './AnalysisFilePicker.vue'
 import DataFilterSection from './DataFilterSection.vue'
+import MatrixParamPicker from './MatrixParamPicker.vue'
 import { useCorrelation } from '../composables/useCorrelation'
 import { useCorrelationMatrix } from '../composables/useCorrelationMatrix'
 import { useTabFileParams } from '../composables/useTabFileParams'
@@ -213,8 +183,8 @@ const {
   method,
 } = storeToRefs(useCorrelationTabStore())
 
-// View mode
-const viewMode = ref<'scatter' | 'matrix'>('scatter')
+// View mode 已删除（2026-09-07 同屏改造）：矩阵卡与散点卡常驻右栏，
+// 点矩阵格就地更新下方散点，不再有视图切换
 
 /** 散点/矩阵请求携带的筛选载荷（也是拉参数列表的同一批开关，口径不会分叉） */
 const corrFlags = computed(() => ({
@@ -259,6 +229,16 @@ const scatterP = computed<number | null>(() => {
 })
 const scatterPText = computed(() => scatterP.value === null ? '-' : formatPValue(scatterP.value))
 const scatterPStars = computed(() => scatterP.value === null ? '' : getSignificanceStars(scatterP.value))
+
+// 抽样注记：后端 n 是降采样前全量口径（correlation.py n = len(common_idx)），
+// 已画点数 = 各 series data 长度和；N < M 才显示「抽样 N/M 点」
+const sampledText = computed(() => {
+  if (!corrResult.value) return ''
+  const drawn = (corrResult.value.series_data || []).reduce(
+    (sum: number, sd: { data?: unknown[] }) => sum + (sd.data?.length ?? 0), 0)
+  const total = corrResult.value.n ?? 0
+  return drawn < total ? `抽样 ${drawn.toLocaleString()}/${total.toLocaleString()} 点` : ''
+})
 
 // 大数据量（≥5000 点）启用 large 模式 + canvas：上万散点不再产生上万
 // DOM 节点（与 SerialChart/QQPlotChart 一致）
@@ -423,8 +403,8 @@ const { chartRef: matrixChartRef, chartInstance: matrixChartInstance } = useChar
   buildMatrixOption, [() => matrixData.value], 'matrixChartRef')
 void matrixChartRef
 
-// 矩阵格 → 散点联动（2026-09-06 参照原型 .cell 点击）：热力图 data 项 value
-// 为 [i, j, r]，对角（恒 1）与 r 无定义的格不响应；切到散点视图并选中该对后，
+// 矩阵格 → 散点联动（同屏就地更新，2026-09-07）：热力图 data 项 value
+// 为 [i, j, r]，对角（恒 1）与 r 无定义的格不响应；选中该对后，
 // 既有 watch([localX, localY]) 自动加载，不新造请求逻辑。矩阵参数本就 ⊆
 // 散点参数列表（同一 params 源），无失效对。实例可能因渲染器切换被重建，
 // 故 watch chartInstance 重挂前先 off 防重复绑定。
@@ -441,7 +421,6 @@ watch(matrixChartInstance, (chart) => {
     if (!x || !y) return
     localX.value = x
     localY.value = y
-    viewMode.value = 'scatter'
   })
 })
 void matrixChartInstance
@@ -456,100 +435,80 @@ void matrixChartInstance
   display: block;
 }
 
-.hint-text {
-  font-size: 13px;
-  color: var(--text-2);
-  margin: 0;
-}
-
-.top-bar {
-  display: flex;
-  gap: 12px;
-}
-
-.metric-card {
-  background: var(--bg-3, #f5f7fa);
-  border-radius: 8px;
-  padding: 12px 16px;
-  text-align: center;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-}
-
-.metric-label {
-  font-size: 12px;
-  color: var(--text-2, #909399);
-  margin-bottom: 4px;
-}
-
-.metric-value {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--text, #303133);
-}
-
-.metric-value.r-strong { color: var(--success); }
-.metric-value.r-medium { color: var(--warn); }
-.metric-value.r-weak { color: var(--text, #303133); }
-
-/* p 值科学计数（1.23e-7）比 4 位小数宽，卡内字号单独收一档 */
-.metric-value-p {
-  font-size: 16px;
-}
-
-.p-stars {
-  font-size: 12px;
-  color: var(--warn, #e6a23c);
-  margin-left: 2px;
-}
-
-/* 矩阵 meta 行（照原型 .review-note 的信息密度，不做卡片只做一行说明） */
-.matrix-meta {
-  font-size: 11px;
-  color: var(--text-2, #909399);
-  padding: 0 2px 6px;
-}
-
-.regression-eq {
-  font-size: 13px;
-  font-weight: 600;
-  word-break: break-all;
-}
-
-.chart-wrapper {
-  flex: 1;
-  min-height: 480px;
-  background: var(--bg-2, #fff);
+/* 同屏双卡（对齐原型 .chart/.chart-h/.chart-b 结构） */
+.inline-card {
+  background: var(--card);
+  border: 1px solid var(--border-2);
   border-radius: 6px;
-  border: 1px solid var(--border-2, #e4e7ed);
   overflow: hidden;
   display: flex;
+  flex-direction: column;
+}
+
+.inline-card-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.inline-card-h .grow { flex: 1; }
+
+.inline-card-b {
+  padding: 6px;
+  min-height: 480px;
+  display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.chart-inner {
+.matrix-chart-inner,
+.scatter-chart-inner {
   width: 100%;
-  height: 100%;
-  min-height: 480px;
+  height: 480px;
 }
 
-.matrix-param-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 4px;
+/* 卡头一行指标（badge/note 规格） */
+.head-metric {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  color: var(--text);
+  white-space: nowrap;
 }
 
-.matrix-param-header .section-label {
-  margin-bottom: 0;
+.head-metric.r-strong { color: var(--success); }
+.head-metric.r-medium { color: var(--warn); }
+.head-metric.r-weak { color: var(--text-2); }
+
+.p-stars {
+  color: var(--warn);
+  font-size: 11px;
+  margin-left: 1px;
 }
 
-.matrix-param-actions {
-  display: flex;
-  gap: 4px;
+.head-eq {
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.matrix-meta-inline {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sample-note {
+  padding: 2px 10px 6px;
+  font-size: 11px;
+  color: var(--text-3);
 }
 </style>

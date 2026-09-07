@@ -78,13 +78,13 @@ async function selectScatterParams(page: Page) {
   await page.getByRole('tab', { name: /相关性对比/ }).click()
   // 2026-09-05 起相关性 tab 吃自己那份文件选择，不选到 CTA8280F 就找不到这两个参数
   await pickTabFile(page, 'correlation', RECOMMENDED.analysis)
-  const xCard = page.locator('.el-tab-pane:visible .el-card').filter({ hasText: 'X 轴测试项' }).first()
-  const xSelect = xCard.locator('.el-select').first()
+  // 同屏改造（2026-09-07）后 X/Y 两个下拉合进同一张卡。选中后占位文本消失，
+  // 用「卡内第 N 个 select + 值文本」断言而非占位符过滤
+  const xSelect = page.locator('.el-tab-pane:visible .el-card').filter({ hasText: 'X 轴测试项' }).locator('.el-select').first()
   await xSelect.click()
   await page.locator('.el-select-dropdown:visible .el-select-dropdown__item')
     .filter({ hasText: 'Index_No' }).first().click()
-  const yCard = page.locator('.el-tab-pane:visible .el-card').filter({ hasText: 'Y 轴测试项' }).first()
-  const ySelect = yCard.locator('.el-select').first()
+  const ySelect = page.locator('.el-tab-pane:visible .el-card').filter({ hasText: 'X 轴测试项' }).locator('.el-select').nth(1)
   await ySelect.click()
   await ySelect.locator('input').first().pressSequentially('Kelvin_VIN')
   await page.waitForTimeout(600)

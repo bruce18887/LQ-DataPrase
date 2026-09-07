@@ -34,9 +34,9 @@ test.describe('@p1 相关性 tab 切文件清空旧结果', { tag: ['@p1', '@ana
     const resp = await respPromise
     expect(resp.status()).toBe(200)
 
-    // 旧文件结果已展示
-    await expect(layout.locator('.metric-card').first()).toBeVisible({ timeout: 15_000 })
-    await expect(layout.locator('.chart-inner')).toBeVisible()
+    // 旧文件结果已展示（同屏改造后指标在散点卡头一行）
+    await expect(layout.locator('.head-metric').first()).toBeVisible({ timeout: 15_000 })
+    await expect(layout.locator('.scatter-chart-inner')).toBeVisible()
 
     // 切到另一个文件：等新文件自己的参数列表请求（fast-path 携带筛选开关，
     // 不带 params 键——waitForNextHistogramCompute 匹配的是计算请求，这里用不上）
@@ -49,11 +49,11 @@ test.describe('@p1 相关性 tab 切文件清空旧结果', { tag: ['@p1', '@ana
     await pickTabFile(page, 'correlation', SEEDED_FILES.GAGE_S1)
     await listP
 
-    // 指标卡与散点清空，回到空态提示
-    await expect(layout.locator('.metric-card')).toHaveCount(0)
-    await expect(layout.locator('.chart-inner')).toHaveCount(0)
+    // 指标与散点清空，回到空态提示
+    await expect(layout.locator('.head-metric')).toHaveCount(0)
+    await expect(layout.locator('.scatter-chart-inner')).toHaveCount(0)
     await expect(
-      layout.locator('.el-empty').filter({ hasText: '选择 X/Y 轴参数以分析相关性' }),
+      layout.locator('.el-empty').filter({ hasText: '选择 X/Y 轴参数或点击矩阵格以分析相关性' }),
     ).toBeVisible()
     // X/Y 选择回到占位符（本地选择已被重置，不是滞留旧文件的参数名）
     await expect(layout.locator('.el-select').filter({ hasText: '选择 X 轴参数' })).toBeVisible()
