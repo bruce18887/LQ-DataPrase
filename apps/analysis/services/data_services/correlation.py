@@ -9,7 +9,7 @@ from apps.analysis.services.statistics import (
     site_sort_key,
     filter_finite,
 )
-from apps.analysis.services.statistics.distributions import t_cdf
+from apps.analysis.services.statistics.distributions import t_sf
 from apps.analysis.services.statistics.outliers import detect_outliers_iqr
 from apps.analysis.services.statistics.downsample import (
     bucket_minmax_indices,
@@ -104,21 +104,24 @@ def compute_correlation_scatter(df, param_x, param_y, metadata=None,
         if sx > 0 and sy > 0:
             pearson_r = float(np.corrcoef(x_arr, y_arr)[0, 1])
             # p_value 与 correlation_matrix 的 p_values 同一公式同一助手：
-            # t = r*sqrt((n-2)/(1-r²))，双侧 p = 2*(1 - t_cdf(|t|, n-2))。
+            # t = r*sqrt((n-2)/(1-r²))，双侧 p = 2*t_sf(|t|, n-2)。
+            # （不能用 2*(1 - t_cdf(|t|))：|t| 大时 1-cdf 灾难性抵消为 0。）
             # n<=2 或 σ=0 时 r 无定义 → None；|r|>=1 → p=0；r==0 → p=1。
             r = pearson_r
             if abs(r) >= 1:
                 p_value = 0.0
             elif r != 0:
                 t = r * np.sqrt((n - 2) / (1 - r * r))
-                p_value = float(2 * (1 - t_cdf(abs(t), n - 2)))
+                p_value = float(2 * t_sf(abs(t), n - 2))
 
     return {
         'param_x': param_x,
         'param_y': param_y,
         'n': n,
         'pearson_r': round(pearson_r, 6),
-        'p_value': round(p_value, 6) if p_value is not None else None,
+        # p 值保留完整双精度：round(_, 6) 会把大 n 的强相关 p（~1e-40）抹成
+        # 0.0，前端 formatPValue 的科学计数法分支吃不到真值。
+        'p_value': p_value if p_value is not None else None,
         'series_data': series_data,
         'x_outlier_info': x_outlier_info,
         'y_outlier_info': y_outlier_info,

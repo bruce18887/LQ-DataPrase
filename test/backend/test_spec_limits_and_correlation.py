@@ -189,6 +189,18 @@ class CorrelationMatrixTests(SimpleTestCase):
         result = compute_correlation_matrix(df, ['Dut_Pass', 'V'])
         self.assertIn('matrix', result)
 
+    def test_p_values_not_rounded_to_zero_for_large_n(self):
+        """矩阵 p_values 同样曾被 round(6) 抹零：大 n 强相关对的真实 p
+        远小于 1e-6。修后应保留完整双精度。"""
+        rng = np.random.RandomState(3)
+        x = rng.normal(0, 1, 200)
+        df = pd.DataFrame({'A': x, 'B': x * 2 + rng.normal(0, 0.1, 200)})
+        result = compute_correlation_matrix(df, ['A', 'B'])
+        p01 = result['p_values'][0][1]
+        self.assertIsNotNone(p01)
+        self.assertGreater(p01, 0.0)
+        self.assertLess(p01, 1e-10)
+
 
 class DetectFailDataExplicitColumnsTests(SimpleTestCase):
     """``columns=`` bypass: the 500 that e2e caught on /analysis/histogram/.

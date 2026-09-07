@@ -66,3 +66,12 @@ class CorrelationPValueTests(SimpleTestCase):
         out = compute_correlation_scatter(df, 'A', 'B')
         self.assertEqual(out['n'], 2)
         self.assertIsNone(out['p_value'])
+
+    def test_p_not_rounded_to_zero_for_large_n(self):
+        """round(p, 6) 会把大 n 的强相关 p（~1e-40）抹成 0.0——
+        前端 formatPValue 的科学计数法分支永远吃不到真值，「p=0」语义错误。
+        响应必须保留完整双精度（非 0、非 1、量级 <1e-10）。"""
+        out = compute_correlation_scatter(self._df_xy(), 'X', 'Y')
+        self.assertIsNotNone(out['p_value'])
+        self.assertGreater(out['p_value'], 0.0)
+        self.assertLess(out['p_value'], 1e-10)

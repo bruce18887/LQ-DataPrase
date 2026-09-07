@@ -200,3 +200,22 @@ def t_cdf(t, df):
         x = df / (df + t * t)
         half_i = 0.5 * _betainc(0.5 * df, 0.5, x)
     return np.where(t >= 0, 1.0 - half_i, half_i)
+
+
+def t_sf(t, df):
+    """Survival function P(T > t) of Student's t (scipy ``t.sf`` semantics).
+
+    Correlation p-values need the *upper* tail; computing it as
+    ``1 - t_cdf(|t|, df)`` suffers catastrophic cancellation once |t| is
+    large (t=137 → cdf returns 1 - 1.07e-198, which IS 1.0 in float64, so
+    the two-sided p collapses to exactly 0.0 while the true p ~2.1e-198).
+    Directly returning the half-tail I_x(df/2, 1/2) keeps full relative
+    precision down to ~1e-300 (verified equal to scipy ``2*t.sf``).
+    """
+    t = np.asarray(t, dtype=float)
+    df = float(df)
+    if not np.isfinite(df) or df <= 0:
+        raise ValueError('df must be a positive finite number')
+    with np.errstate(divide='ignore', invalid='ignore'):
+        x = df / (df + t * t)
+        return 0.5 * _betainc(0.5 * df, 0.5, x)
