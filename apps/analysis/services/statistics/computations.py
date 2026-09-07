@@ -9,7 +9,7 @@ from typing import Optional, Dict, List, Tuple, Any
 import pandas as pd
 import numpy as np
 
-from .distributions import norm_probplot, t_cdf
+from .distributions import norm_probplot, t_sf
 from .downsample import uniform_indices, DOWN_SAMPLE_THRESHOLD
 from .helpers import safe_gap, get_1d_from, get_coord_columns, filter_finite
 from .limits import resolve_spec_limits
@@ -175,12 +175,14 @@ def compute_correlation_matrix(df: pd.DataFrame, params: List[str], method: str 
     if n_obs > 2:
         with np.errstate(divide='ignore', invalid='ignore'):
             t_values = r_values * np.sqrt((n_obs - 2) / (1 - r_values ** 2))
-        p_values = 2 * (1 - t_cdf(np.abs(t_values), df=n_obs - 2))
+        # 双侧 p = 2*t_sf(|t|)：走 1-cdf 会在 |t| 大时灾难性抵消成 0
+        p_values = 2 * t_sf(np.abs(t_values), df=n_obs - 2)
         np.fill_diagonal(p_values, 1.0)
         p_values = np.nan_to_num(p_values, nan=1.0, posinf=1.0, neginf=1.0)
     else:
         p_values = np.ones((n_params, n_params))
-    p_matrix_list = [[round(val, 6) for val in row] for row in p_values.tolist()]
+    # p 值保留完整双精度（理由同 correlation.py 散点侧）：round(6) 抹零。
+    p_matrix_list = [[float(val) for val in row] for row in p_values.tolist()]
 
     return {
         'params': valid_params,
