@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, pickTabFile, filterControl } from '../helpers/params'
+import { selectAnalysisFile, pickTabFile, filterControl, filePicker } from '../helpers/params'
 import { RECOMMENDED } from '../fixtures/test-data'
 
 /**
@@ -23,7 +23,7 @@ async function openMultiFile(page: Page) {
   await gotoApp(page, '/analysis')
   await selectAnalysisFile(page, RECOMMENDED.analysis)
   await page.getByRole('tab', { name: /多文件分析/ }).click()
-  const select = page.locator(`${TAB} .left-panel .el-select`).first()
+  const select = filePicker(page, 'multi')
   await expect(select).toBeVisible({ timeout: 20_000 })
   await select.click()
   const dropdown = page.locator('.el-select-dropdown:visible').last()

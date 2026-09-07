@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, selectParamWithSpecLimits, pickTabFile } from '../helpers/params'
+import { selectAnalysisFile, selectParamWithSpecLimits, pickTabFile, filePicker } from '../helpers/params'
 import { RECOMMENDED } from '../fixtures/test-data'
 
 /**
@@ -63,7 +63,7 @@ test.describe('@p1 图例颜色严格对应', { tag: ['@p1', '@analysis'] }, () 
     await gotoApp(page, '/analysis')
     await selectAnalysisFile(page, RECOMMENDED.analysis)
     await page.getByRole('tab', { name: /多文件分析/ }).click()
-    const select = page.locator('.multi-file-tab .left-panel .el-select').first()
+    const select = filePicker(page, 'multi')
     await expect(select).toBeVisible({ timeout: 20_000 })
     await select.click()
     const dropdown = page.locator('.el-select-dropdown:visible').last()

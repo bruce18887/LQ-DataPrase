@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, pickTabFile } from '../helpers/params'
+import { selectAnalysisFile, pickTabFile, filePicker } from '../helpers/params'
 import { RECOMMENDED } from '../fixtures/test-data'
 import { waitLoadingGone } from '../helpers/charts'
 
@@ -51,7 +51,7 @@ async function waitHistogramSettled(page: Page, postDataIncludes?: string) {
 /** 多文件 tab：选 BUYOFF_FT + BUYOFF_QA1，等首次 multi_lot 返回 */
 async function selectTwoFilesInMultiTab(page: Page) {
   await page.getByRole('tab', { name: /多文件分析/ }).click()
-  const select = page.locator(`${MULTI} .left-panel .el-select`).first()
+  const select = filePicker(page, 'multi')
   await expect(select).toBeVisible({ timeout: 30_000 })
   await select.click()
   const dropdown = page.locator('.el-select-dropdown:visible').last()

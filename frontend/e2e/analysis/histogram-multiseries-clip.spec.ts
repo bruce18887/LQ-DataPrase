@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, selectParam } from '../helpers/params'
+import { selectAnalysisFile, selectParam, filePicker } from '../helpers/params'
 import { waitLoadingGone } from '../helpers/charts'
 import { SEEDED_FILES, RECOMMENDED } from '../fixtures/test-data'
 
@@ -105,8 +105,8 @@ test.describe('@p1 多系列直方图边缘柱体不被裁剪', { tag: ['@p1', '
     await page.getByRole('tab', { name: /多文件分析/ }).click()
     await expect(page.locator(MULTI)).toBeVisible({ timeout: 20_000 })
 
-    // 在左栏「数据文件」多选里勾选两个 buyoff 文件
-    const select = page.locator(`${MULTI} .left-panel .el-select`).first()
+    // 在顶部 toolbar 的「数据文件」多选里勾选两个 buyoff 文件
+    const select = filePicker(page, 'multi')
     const input = select.locator('input').first()
     await select.click()
     const dropdown = page.locator('.el-select-dropdown:visible').last()
