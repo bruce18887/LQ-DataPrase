@@ -1,7 +1,7 @@
 <template>
   <div class="analysis-tab-layout">
     <!-- 顶部工具栏 -->
-    <div v-if="$slots.toolbar" class="toolbar">
+    <div v-if="$slots.toolbar" class="toolbar dp-analysis-toolbar">
       <slot name="toolbar" />
     </div>
 
@@ -42,16 +42,7 @@ withDefaults(defineProps<{
   padding: 0;
 }
 
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 12px;
-  padding: 8px 12px;
-  background: var(--bg-3, #f8f9fa);
-  border-radius: 6px;
-  border: 1px solid var(--border-2, #e4e7ed);
-}
+/* .toolbar 盒样式来自共享 .dp-analysis-toolbar（styles/utilities.css） */
 
 .main-row {
   margin-bottom: 16px;
