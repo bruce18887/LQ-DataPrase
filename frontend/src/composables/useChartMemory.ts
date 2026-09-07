@@ -59,6 +59,14 @@ export function loadChartMemory(): Promise<ChartMemoryLoadResult> {
         const d = (data ?? {}) as Record<string, unknown>
         memoryEnabled = d.analysis_chart_memory !== false
         const state = parseState(d.analysis_chart_state)
+        // 快速 F5 会丢掉防抖窗口里的勾选上报（pagehide 请求在 unload 中被浏览器
+        // 取消），服务端可能只剩 layout 没有 toggles。布局里的 key 就是「当时勾着」
+        // 的事实记录，由它反推勾选——否则勾选缺省全 false → active 收缩 →
+        // reconcile 把已存布局裁剪掉（两层同时降级，之后每次刷新都复现）。
+        if (memoryEnabled && state.layout && !state.toggles) {
+          const keys = new Set(state.layout.rows.flat())
+          state.toggles = { serial: keys.has('serial'), qq: keys.has('qq'), box: keys.has('box') }
+        }
         if (memoryEnabled && latest) scheduleFlush()
         else if (memoryEnabled === false) latest = null
         return { memoryEnabled, fetchFailed: false, state }
@@ -129,13 +137,19 @@ export function resetChartMemoryCache() {
   }
 }
 
-// 关标签/刷新前立即冲刷：800ms 防抖窗口内的最后一次改动不能丢
+// 关标签/刷新前立即冲刷：800ms 防抖窗口内的最后一次改动不能丢。
+// 必须走 fetch keepalive——axios(XHR) 在 unload 期间会被浏览器直接取消，
+// 快速 F5 的最后一次拖拽/勾选就这样静默丢失（服务端留旧态，下次加载
+// 「服务端覆盖本机」把新布局吃掉，即「刷新后恢复默认」的种子）。
 if (typeof document !== 'undefined') {
   document.addEventListener('pagehide', () => {
     if (timer) {
       clearTimeout(timer)
       timer = null
     }
-    flush()
+    if (memoryEnabled !== true || !latest) return
+    const payload = latest
+    latest = null
+    authApi.updateSettingsKeepalive({ analysis_chart_state: { ...payload } })
   })
 }

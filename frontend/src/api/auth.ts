@@ -166,4 +166,27 @@ export const authApi = {
   updateSettings(data: Record<string, unknown>) {
     return api.put('/auth/settings/', data)
   },
+  /**
+   * 卸载期冲刷专用（pagehide）：XHR 在 unload 中会被浏览器取消，只有
+   * fetch keepalive（≤64KB）能存活到发送完成。fire-and-forget，失败静默
+   * （下一会话以服务端/本机各自的最后一致态为准）。
+   */
+  updateSettingsKeepalive(data: Record<string, unknown>): void {
+    const base = (api.defaults.baseURL ?? '/api/v1').replace(/\/$/, '')
+    const token =
+      typeof localStorage !== 'undefined' ? localStorage.getItem('access_token') : null
+    try {
+      void fetch(`${base}/auth/settings/`, {
+        method: 'PUT',
+        keepalive: true,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(data),
+      }).catch(() => {})
+    } catch {
+      /* 卸载期构造失败即放弃 */
+    }
+  },
 }

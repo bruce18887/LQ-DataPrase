@@ -209,6 +209,54 @@ test.describe('@p1 图表布局账号记忆', { tag: ['@p1', '@settings'] }, () 
     }
   })
 
+  test('毒状态自愈：账号只有 layout 无 toggles + GET 慢于 dock 挂载 → 布局勾选仍恢复且不降级', async ({ page }) => {
+    // 复现用户实测「刷新后恢复默认」：快速 F5 会丢掉防抖窗口里的勾选上报
+    // （pagehide 请求被浏览器取消），服务端只剩 layout 没有 toggles；刷新后
+    // 勾选全为默认 false，dock 挂载时 active=['hist']，reconcile 把已存布局
+    // 裁剪成 [['hist']] 并持久化 → 两层布局同时降级，此后每次刷新都复现。
+    // 再叠加 GET /auth/settings/ 慢于 hist（dock 先挂载）的真实时序。
+    test.setTimeout(120_000)
+    const seedName = `${SEED_BASE}_poison.csv`
+    let seedId: number | null = null
+    try {
+      await putSettings(page, {
+        analysis_chart_memory: true,
+        analysis_chart_state: {
+          layout: { v: 1, rows: [['hist'], ['serial']], rowPcts: [32, 68], colPcts: [[100], [100]] },
+        },
+      })
+      seedId = await uploadSeedFile(page, seedName)
+      // dock 挂载（hist 返回）先于记忆到达：settings GET 延迟 1.5s
+      const settingsRoute = /\/auth\/settings\//
+      await page.route(settingsRoute, async (route) => {
+        if (route.request().method() === 'GET') await new Promise((r) => setTimeout(r, 1500))
+        await route.continue()
+      })
+
+      await page.evaluate((key) => localStorage.removeItem(key), LAYOUT_KEY)
+      await page.reload()
+      await openAnalysis(page, seedName)
+
+      // 勾选由 layout keys 反推恢复；布局 2 行、首行 ≈ 920×32% − 10×32% ≈ 291px
+      // （默认单行 640 / 默认 58% 两行 ≈528 均落不进 ±15 容差，钉死非默认占比）
+      await expect(serialToggle(page)).toHaveClass(/is-checked/, { timeout: 20_000 })
+      await expect(page.locator('.chart-panel[data-chart-key="serial"]')).toBeVisible({ timeout: 20_000 })
+      await expect(page.locator('.chart-dock__row')).toHaveCount(2)
+      await expect(page.locator('.chart-dock__rowbar')).toHaveCount(1)
+      await expect
+        .poll(async () => Math.abs((await histRowHeight(page)) - 291), { timeout: 8_000 })
+        .toBeLessThanOrEqual(15)
+
+      // 服务端 state 不被挂载裁剪降级：serial 行仍在
+      const state = await getSettingsState(page)
+      expect(state.layout?.rows?.flat()).toContain('serial')
+    } finally {
+      await page.unroute(/\/auth\/settings\//)
+      await putSettings(page, { analysis_chart_memory: false, analysis_chart_state: {} })
+      if (seedId != null) await deleteSeedFile(page, seedId)
+    }
+  })
+
   test('关闭复位分支：记忆关 + 本机残留布局 → 进分析页回默认并清本机', async ({ page }) => {
     test.setTimeout(120_000)
     const seedName = `${SEED_BASE}_reset.csv`
