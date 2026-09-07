@@ -10,7 +10,7 @@
  * 单例：module 级 ref（仿 useZoom.ts 的 refCount 模式），避免面板 v-if/重排丢态。
  * 纯模型 + 变换 + 存储，不碰 DOM —— 拖拽指针逻辑在 ChartDock.vue。
  */
-import { ref, type Ref } from 'vue'
+import { nextTick, ref, type Ref } from 'vue'
 import { safeGetItem, safeSetItem, safeRemoveItem } from '../../../utils/safeStorage'
 import { loadChartMemory, saveChartState, isMemoryEnabled } from '../../../composables/useChartMemory'
 
@@ -96,8 +96,12 @@ export interface ChartDockApi {
   rows: Ref<ChartKey[][]>
   rowPcts: Ref<number[]>
   colPcts: Ref<number[][]>
-  /** 让 rows 覆盖到 active 集合：补新、去旧，保留既有相对顺序 */
-  reconcile: (active: ChartKey[]) => void
+  /**
+   * 让 rows 覆盖到 active 集合：补新、去旧，保留既有相对顺序。
+   * { persist: false } 只改内存不落盘——挂载首次对齐（勾选可能尚未从账号
+   * 记忆恢复，此时落盘会把已存布局裁剪降级）与恢复后的权威对齐区分开。
+   */
+  reconcile: (active: ChartKey[], opts?: { persist?: boolean }) => void
   moveTo: (from: ChartKey, to: ChartKey, dir: 'left' | 'right' | 'above' | 'below' | 'swap') => void
   reset: (active: ChartKey[]) => void
   /** 行内列 resize-end 折回百分比 */
@@ -159,7 +163,7 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
       return null
     }
 
-    const reconcile = (active: ChartKey[]) => {
+    const reconcile: ChartDockApi['reconcile'] = (active, opts) => {
       const activeSet = new Set(active)
       // 去掉不再可见的
       let next = rows.value.map((r) => r.filter((k) => activeSet.has(k))).filter((r) => r.length)
@@ -172,7 +176,7 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
       rows.value = next
       // 结构变了 → 重算尺寸长度（尽量保留）
       normalizeSizes()
-      persist()
+      if (opts?.persist !== false) persist()
     }
 
     const moveTo: ChartDockApi['moveTo'] = (from, to, dir) => {
@@ -243,13 +247,28 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
           if (userTouched) return
           if (memoryEnabled === true && state.layout) {
             // 「关=不读」：memory=false + state 非空的异常服务端态（清空 PUT 失败/
-            // in-flight 竞态）不得套用旧布局，落到下方 ===false 复位分支
-            rows.value = state.layout.rows.map((r) => [...r])
-            rowPcts.value = [...(state.layout.rowPcts ?? [])]
-            colPcts.value = (state.layout.colPcts ?? []).map((c) => [...c])
-            reconcile(getActive()) // 账号布局可能不含当前勾选的图 → reconcile 补齐并持久化
+            // in-flight 竞态）不得套用旧布局，落到下方 ===false 复位分支。
+            // 必须等 nextTick（父组件重渲染）后再套用：勾选恢复回调（同一 promise
+            // FIFO 先行）只改了 ref，本组件的 activeKeys prop 要等渲染刷新才更新——
+            // 立即 reconcile 会拿旧 prop 把已存布局裁剪降级、占比回默认。
+            void nextTick(() => {
+              if (userTouched) return
+              rows.value = state.layout!.rows.map((r) => [...r])
+              rowPcts.value = [...(state.layout!.rowPcts ?? [])]
+              colPcts.value = (state.layout!.colPcts ?? []).map((c) => [...c])
+              reconcile(getActive())
+            })
           } else if (memoryEnabled === true) {
-            persist() // 账号空：把本机布局推上账号（第二台设备获得第一台的布局）
+            // 账号空：把本机布局推上账号（第二台设备获得第一台的布局）。
+            // 挂载 reconcile 只为渲染裁剪、不落盘，推 localStorage 原始布局
+            //（可能含暂未勾选的图——下次进入由 layout 反推勾选恢复）
+            const stored = loadLayout()
+            if (stored) {
+              const payload = { v: VERSION, rows: stored.rows, rowPcts: stored.rowPcts, colPcts: stored.colPcts }
+              saveChartState({ layout: payload })
+            } else {
+              persist()
+            }
           } else if (memoryEnabled === false) {
             // 开关关 = 完全不记忆：回默认布局并清本机残留（不打断已发生的用户操作）
             const d = defaultLayout(getActive())
@@ -258,7 +277,8 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
             colPcts.value = d.colPcts
             safeRemoveItem(DOCK_LAYOUT_STORAGE_KEY)
           }
-          // memoryEnabled === null（未返回/拉取失败）：什么都不做，本机布局保留
+          // memoryEnabled === null（未返回/拉取失败）：什么都不做、也不落盘
+          // 挂载裁剪的结果——本机布局保留（一次网络抖动不得清掉本机数据）
         })
         .catch(() => {})
     }

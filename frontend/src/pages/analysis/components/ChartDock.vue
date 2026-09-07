@@ -131,9 +131,14 @@ function toggleMax(k: ChartKey | null) {
 // activeKeys 变化 → 补/去面板（保留既有相对顺序与尺寸）。
 // 勾选集一变就退出最大化：maxKey 若残留，最大化期间勾选的图不显示、
 // 关掉的图重新勾上会突然独占全屏，用户怎么点都回不去（只能刷新）。
+// 挂载首拍（immediate）只对齐渲染不落盘：此刻勾选可能尚未从账号记忆恢复
+// （active 暂为 ['hist']），落盘会把已存布局裁剪降级；记忆 settle 后由
+// wireMemory 以最终 active 做唯一权威 reconcile+落盘。
+let dockMounted = false
 watch(() => props.activeKeys.join(','), () => {
   maxKey.value = null
-  dock.reconcile(props.activeKeys)
+  dock.reconcile(props.activeKeys, { persist: dockMounted })
+  dockMounted = true
 }, { immediate: true })
 
 const visibleRows = computed(() => rows.value.filter((r) => r.length > 0))
