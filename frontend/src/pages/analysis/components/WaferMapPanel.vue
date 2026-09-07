@@ -1,22 +1,19 @@
 <template>
   <div>
-    <!-- 本 tab 自己选文件：与单文件分析/相关性/多文件四个 tab 互不影响 -->
-    <el-row :gutter="12" style="margin-bottom: 10px" align="middle">
-      <el-col :span="10">
-        <AnalysisFilePicker
-          v-model="fileId"
-          :files="files"
-          scope="wafer"
-          :loading="listLoading"
-        />
-      </el-col>
-      <el-col :span="14">
-        <span class="wafer-note">
-          本图按全部 die 的 Pass/Fail 判定，数据筛选不影响本图；
-          可选参数取自直方图的测试项列表。
-        </span>
-      </el-col>
-    </el-row>
+    <!-- 顶部 toolbar 盒：文件选择行（与单文件/相关性同位）。
+         晶圆图不吃任何筛选（wafer_map 不读筛选字段），故无筛选行。 -->
+    <div class="dp-analysis-toolbar wafer-toolbar">
+      <AnalysisFilePicker
+        v-model="fileId"
+        :files="files"
+        scope="wafer"
+        :loading="listLoading"
+      />
+      <span class="wafer-note">
+        本图按全部 die 的 Pass/Fail 判定，数据筛选不影响本图；
+        可选参数取自直方图的测试项列表。
+      </span>
+    </div>
 
     <el-row :gutter="12" style="margin-bottom: 12px" align="middle">
       <el-col :span="3">
@@ -300,6 +297,15 @@ void chartRef // bound to <div ref="chartRef"> in template
 </script>
 
 <style scoped>
+/* 晶圆图 toolbar 盒：选择器定宽，说明文字占余宽换行 */
+.wafer-toolbar {
+  flex-wrap: wrap;
+}
+.wafer-toolbar > .dp-analysis-filepicker {
+  flex: 0 0 360px;
+  min-width: 240px;
+}
+
 /* 晶圆图不吃数据筛选的例外说明（与左栏筛选区同屏时防用户误以为会影响本图） */
 .wafer-note {
   font-size: 12px;
