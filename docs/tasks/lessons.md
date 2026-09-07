@@ -506,3 +506,26 @@
   ——主流程用例 reload 前先清布局键，恢复只能来自账号层。
 - **user 账号无种子文件**：seed_test_data 只种 admin 且 DataFile 按 owner 隔离
   ——低权账号的分析页用例需自上传自清理，别假设 admin 的文件对 user 可见。
+
+## 2026-09-07 图表记忆「刷新即默认」三根因修复新增教训
+
+- **Vue 子组件 prop 更新滞后于 promise 微任务回调**：父组件 setup 里 `promise.then` 先改
+  ref（勾选恢复），子组件（v-if 后挂载）同 promise 的回调后执行——但子组件读到的
+  `props.activeKeys` 仍是旧值：prop 要等父组件重渲染才流入，微任务跑在渲染刷新之前。
+  微任务回调里对「依赖 prop 的派生数据」做结构性操作（reconcile/裁剪）前必须
+  `nextTick`，否则按旧 active 集合操作（实测：apply 裁掉 serial 行、占比被
+  normalizeSizes 重置回默认 58/42，覆盖服务端 32/68）。e2e 用 `page.route` 给
+  settings GET 延迟 1.5s 把「dock 先挂载、记忆后到」钉成确定性时序再断言。
+- **XHR/axios 在 pagehide/unload 期间会被浏览器取消**：防抖 + pagehide 冲刷的持久化
+  方案必须用 `fetch(…, { keepalive: true })`（≤64KB），否则快速 F5 静默丢掉最后一次
+  改动；而「服务端是事实源、加载时覆盖本机」的架构会把这次丢失放大成
+  「刷新即回默认」（服务端旧态每次都覆盖本机新布局）。
+- **「挂载即 reconcile 并持久化」在可恢复视图态下是自毁写**：勾选未就绪时 active
+  暂为 ['hist']，reconcile+persist 把已存多图布局裁剪降级——本机+服务端两层同毁，
+  且此后每次刷新都复现（毒状态自我维持，实测 dev 库被降级成 [['hist']] 无 toggles）。
+  规则：挂载首拍只对齐渲染**不落盘**（`reconcile(active, { persist: false })`），
+  落盘交给「数据 settle 后的权威对齐」；网络失败（memoryEnabled=null）分支同样
+  不落盘挂载裁剪结果，保住「一次网络抖动不清本机」的设计承诺。
+- **布局本身是勾选的事实记录**：服务端 state 只剩 layout 没有 toggles 时（上报丢失
+  的产物），由 layout keys 反推 toggles 自愈——否则勾选缺省 false 与已存布局矛盾，
+  矛盾会被 reconcile「修复」成降级。

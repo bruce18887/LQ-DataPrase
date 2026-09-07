@@ -1035,3 +1035,46 @@ unapplied migrations 警告时按提示处理。
 - [ ] AnalysisLayoutSettings「恢复默认布局」toast 文案「下次进入分析页生效」在同 SPA
       会话内不严谨（单例不重挂载不重套用）；可改文案为「已清除，重新打开分析页后生效」。
 - [ ] `label=" "` 空标签对齐 hack（全库唯一）；可用 #label 插槽或该 item label-width 0。
+
+# 任务：图表布局记忆「刷新即默认」修复（2026-09-07）✅
+
+用户实测反馈：拖好布局刷新网页就恢复默认。排查（读代码 + 查 dev 库实况 + e2e 探针追
+事件序）定位三个叠加根因，全部修复（commit 3dfa75a）。
+
+## 根因与修复
+
+1. **毒状态自我维持**（根）：快速 F5 丢掉防抖窗口内的勾选上报（XHR 在 unload 中被
+   浏览器取消）→ 服务端只剩 layout 没有 toggles → 刷新后勾选缺省全 false → dock
+   挂载时 active=['hist'] → reconcile 把已存布局裁剪成 [['hist']] 并持久化，本机+
+   服务端两层同毁，此后每次刷新复现。修复：`loadChartMemory` 由 layout keys 反推
+   toggles（布局即「当时勾着」的事实记录），毒状态自愈。
+2. **挂载首拍落盘 + prop 滞后**：ChartDock 挂载 immediate reconcile 会把内存布局
+   裁剪并持久化（发生在勾选恢复前）；且 settle 回调（微任务）读到的 activeKeys
+   prop 是旧值（prop 等父组件重渲染），apply 立即 reconcile 拿旧 prop 裁剪后，
+   渲染期 watch 再追加时只能给默认占比。修复：挂载首拍 `reconcile(active, {persist:false})`
+   只对齐渲染；settle 后 `nextTick` 里做唯一权威套用+落盘（回调内重查 userTouched）。
+3. **pagehide 冲刷被丢弃**（毒的种子）：axios/XHR 在 unload 中被浏览器取消 → 快速
+   F5 丢最后一次改动，服务端留旧态、下次加载覆盖本机。修复：pagehide 改
+   `fetch keepalive`（authApi.updateSettingsKeepalive）。
+
+## 验证
+
+- e2e 新增「毒状态自愈」用例：服务端 state 只有 layout（32/68 非默认占比、无 toggles）
+  + settings GET 延迟 1.5s 钉死「dock 先挂载」时序 → 断言勾选恢复、双行、首行 ≈291px、
+  服务端 state 不降级（RED→GREEN）。
+- chart-memory 4/4、dock-resize+settings 目录 23、analysis 定向 42，共 69 全过；
+  `npm run build` 绿；端口 8000 已释放。
+
+## 遗留账更新（2026-09-07）
+
+- [x]（已解决）~~reconcile 套用后原样 PUT 回账号（冗余回写）~~——挂载首拍免落盘后，
+      进入分析页只剩 settle 后一次权威落盘。
+- [ ] 其余 2026-09-06 终审遗留账不变（wireMemory 死 props 闭包、in-flight flush vs
+      清空竞态、login 重复 reset、toast 文案、label=" " hack）。
+
+## 写给用户（不执行）
+
+- 你的 admin 账号库里存的布局已被旧 bug 降级成单行 hist（含 toggles 丢失），修复后
+  **重新拖一次布局**即可，之后刷新/换设备都会保持。
+- dev 库里 `user` / `viewer` 两账号的记忆开关是**关**的（seed_users 所种）；若用这两
+  个账号测试，先到 系统设置 → 显示设置 打开「图表布局记忆」。
