@@ -63,6 +63,14 @@ test.describe('@p1 分析页 tab 独立文件选择', { tag: ['@p1', '@analysis'
     await expect(filePicker(page, 'single')).not.toContainText('选择数据文件', { timeout: 20_000 })
     // 异常值处理在本 tab 的「数据筛选」区内，不再是页头
     await expect(filterControl(page, 'outlier-handling')).toBeVisible()
+
+    // 2026-09-07 统一 toolbar：单文件 tab 的筛选 bar 与文件选择同在顶部工具栏；
+    // 晶圆图不吃筛选（wafer_map 不读筛选字段）→ 数据筛选不应出现在晶圆图 pane。
+    // （相关性/多文件 tab 为 lazy 挂载，未访问时不在 DOM，须访问后再断言。）
+    await page.getByRole('tab', { name: /晶圆图/ }).click()
+    const waferPane = page.getByRole('tabpanel', { name: /晶圆图/ })
+    await expect(filePicker(page, 'wafer')).toBeVisible({ timeout: 20_000 })
+    await expect(waferPane.locator('[data-filter]')).toHaveCount(0)
   })
 
   test('单文件与晶圆图各选各的文件：请求 file_id 不同且互不覆盖', async ({ page }) => {
@@ -178,5 +186,21 @@ test.describe('@p1 分析页 tab 独立文件选择', { tag: ['@p1', '@analysis'
     await waitLoadingGone(page.locator(SINGLE))
     await expect(page.locator(`${SINGLE} .chart-wrapper`).first()).toBeVisible()
     await expect(page.locator(`${SINGLE} .el-empty`)).toHaveCount(0)
+  })
+
+  test('相关性/多文件 tab 的筛选 bar 在顶部 toolbar 内（非左栏卡片）', async ({ page }) => {
+    await gotoApp(page, '/analysis')
+    await page.getByRole('tab', { name: /相关性对比/ }).click()
+    await expect(filePicker(page, 'correlation')).toBeVisible({ timeout: 20_000 })
+    // lazy 挂载后筛选控件可见，且其祖先链上存在 .dp-analysis-toolbar（顶部工具栏）
+    const corrFilter = filterControl(page, 'data-only-bin1')
+    await expect(corrFilter).toBeVisible({ timeout: 20_000 })
+    await expect(corrFilter.locator('xpath=ancestor::div[contains(@class,"dp-analysis-toolbar")]')).toHaveCount(1)
+
+    await page.getByRole('tab', { name: /多文件分析/ }).click()
+    await expect(filePicker(page, 'multi')).toBeVisible({ timeout: 20_000 })
+    const multiFilter = filterControl(page, 'data-only-bin1')
+    await expect(multiFilter).toBeVisible({ timeout: 20_000 })
+    await expect(multiFilter.locator('xpath=ancestor::div[contains(@class,"dp-analysis-toolbar")]')).toHaveCount(1)
   })
 })
