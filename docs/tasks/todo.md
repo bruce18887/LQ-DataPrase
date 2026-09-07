@@ -1,3 +1,45 @@
+# 任务：分析页四 tab 文件选择/数据筛选对齐单文件（2026-09-07）✅
+
+用户需求：晶圆图/相关性/多文件三 tab 的文件选择与数据筛选 UI 对齐单文件 tab 形态。
+spec：docs/specs/2026-09-07-analysis-unified-toolbar-controls-design.md（docs/specs 不入 git）；
+plan：docs/superpowers/plans/2026-09-07-analysis-unified-toolbar-controls.md。
+
+## 实施清单
+
+- [x] `.dp-analysis-toolbar` 共享盒样式（styles/utilities.css，全语义 token）；
+      AnalysisTabLayout 的 .toolbar 挂共享 class 删 scoped 重复样式（单文件视觉零变化）
+- [x] CorrelationToolsTab：toolbar 扩两行（文件选择 + DataFilterSection bar，
+      scope="correlation"），左栏删筛选卡（6 卡→5 卡），514→542 行
+- [x] WaferMapPanel：文件选择移入顶部共享 toolbar 盒 + 说明文字；无筛选行
+      （wafer_map 不读筛选字段，store 注释口径），自绘 el-row 删除
+- [x] MultiFileTab：文件多选 + DataFilterSection bar（show-outlier=false，6 项口径）
+      移入顶部 toolbar 盒；左栏第一卡改纯「自定义图例名」卡；445→462 行
+- [x] e2e 定位器迁移 8 处：`.left-panel .el-select` → `filePicker(page,'multi')`
+      （file-select×2 / multi-file / multi-file-filter / histogram-multiseries-clip /
+      legend-color / axis-label-precision / tab-request-fanout）；multi-file 的
+      custom-names 定位器随卡片结构改 `.name-row input`；全部契约属性定位
+- [x] 新增形态契约 e2e（tab-independent-files.spec）：晶圆图 pane 无 [data-filter]；
+      相关性/多文件筛选 bar 祖先链含 .dp-analysis-toolbar
+- [x] 验证：npm run build 全绿；全量 e2e/analysis 105 passed + 4 flake（隔离复跑全绿，
+      根因均为存量时序/数据竞态，见 Review）；跑后 8000/3000/45678 端口全释放
+
+## Review（2026-09-07）
+
+- e2e 契约设计兑现：相关性筛选从左栏移 toolbar、晶圆图选择器换容器，依赖
+  data-file-picker/data-filter/popper-class 的 11 处存量断言全部零改动通过。
+- 全量 4 flake 根因归属（隔离复跑均绿）：① multi-file-filter×2 / tab-independent
+  敏感度：筛选开关点击时序竞态（点击落空/合并请求窗口竞态），重试绿；
+  ② wafermap-hidden-tab-init「Fail 散点应已渲染」：serial-no-column 上传的
+  e2e_sts8200_part_id_* 残留文件程序名同含 BN281R3CYCAA 且排序在前 →
+  pickTabFile 过滤选中它，其 8 行全 Pass（Fail Dies=0）。属 lessons R2③
+  「files[0] 被残留文件顶掉」同族数据污染，非本次回归；serial-no-column
+  的 finally 清理应把 DB 行一并删（现有清理只删磁盘临时文件，遗留账）。
+- ⚠️ 遗留：浏览器双主题人工走查未做——用户 dev 环境未运行，起临时服务会污染
+  e2e 数据环境（lessons 两次踩坑）；本次新增样式全部走语义 token（--bg-3/
+  --border-2），双主题风险点仅 toolbar 盒观感，建议用户下次开 dev 时目测四 tab。
+
+---
+
 # 任务：良率批次报表 UI 优化（2026-08-29）✅
 
 用户 7 项反馈：删顶部 KPI 卡片 / 趋势 X 轴对齐 / QA 校验紧凑化 / 明细表更多行 /
