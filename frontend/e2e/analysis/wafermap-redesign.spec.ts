@@ -104,14 +104,16 @@ test.describe('@p1 晶圆图重设计形态', { tag: ['@p1', '@analysis'] }, () 
 
   test('自动结论条：三区有数时出现且文案含「径向梯度」', async ({ page }) => {
     const panel = await enterWafer(page)
-    // 分区数据在选文件后默认拉一次；三区行必须齐
-    await expect(panel.locator('[data-wafer-zone-table] tr')).toHaveCount(3, { timeout: 60_000 })
+    // 分区数据在选文件后默认拉一次，但比晶圆图请求慢：先等空态行消失（zones 落数），
+    // 再数区行（空态行本身也是一个 tr，直接 toHaveCount(3) 会把「还空着」误判成成功）
+    await expect(panel.locator('[data-wafer-zone-table] .stat-empty')).toHaveCount(0, { timeout: 60_000 })
+    await expect(panel.locator('[data-wafer-zone-table] tbody tr')).toHaveCount(3)
     const conclusion = panel.locator('[data-wafer-conclusion]')
     // 某区 total=0 时 yield=null → 结论条按契约不出现；种子 CP 文件三区都有 die，
     // 若环境数据漂移到空区，跳过而不是假红
     if (!(await conclusion.isVisible())) {
       const emptyZone = await panel
-        .locator('[data-wafer-zone-table] tr')
+        .locator('[data-wafer-zone-table] tbody tr')
         .filter({ hasText: '-' })
         .count()
       test.skip(emptyZone > 0, '分区数据存在空区（环境数据漂移），结论条契约不适用')
