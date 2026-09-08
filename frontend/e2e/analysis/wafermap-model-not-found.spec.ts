@@ -70,7 +70,7 @@ test('机制复现：lazyUpdate 期间悬停被移除 series 的陈旧散点 →
   )
   await loadBtn.click()
   expect((await respPromise).status()).toBe(200)
-  await expect(panel.getByText('Total Dies')).toBeVisible({ timeout: 30_000 })
+  await expect(panel.locator('[data-wafer-stat-table]')).toBeVisible({ timeout: 30_000 })
   await expectChartRendered(chart, 0, 60_000)
 
   // 在真实实例上做确定性复现（分两步，避免基线/陈旧阶段的警告混在一起）：
@@ -149,8 +149,8 @@ test('大文件晶圆图：悬停/图例/缩放/模式切换全程无 ECharts mo
   const resp = await respPromise
   expect(resp.status()).toBe(200)
 
-  // 统计卡片出现（Total Dies）→ 数据真正渲染
-  await expect(panel.getByText('Total Dies')).toBeVisible({ timeout: 30_000 })
+  // 左栏统计表出现（data-wafer-stat-table）→ 数据真正渲染
+  await expect(panel.locator('[data-wafer-stat-table]')).toBeVisible({ timeout: 30_000 })
   await expectChartRendered(chart, 0, 60_000)
 
   // 1) 悬停扫过散点区域
@@ -192,24 +192,31 @@ test('大文件晶圆图：悬停/图例/缩放/模式切换全程无 ECharts mo
   }
 
   // 4) 模式切换 result → site → zone → result（每次切换都是 notMerge 全量重渲染）
-  for (const mode of [/按\s*Site/, '分区模式', '按结果']) {
-    await page.locator('.el-radio-button').filter({ hasText: mode }).click()
+  // 2026-09-08 重设计：着色 4 档 radio（挂 data-wafer-color）、「分区模式」独立 checkbox
+  await page.locator('[data-wafer-color] .el-radio-button').filter({ hasText: /Site/ }).click()
+  await expectChartRendered(chart, 0, 60_000)
+  await sweepMouse(chart)
+  await panel.locator('.el-checkbox').filter({ hasText: '分区模式' }).check()
+  await expectChartRendered(chart, 0, 60_000)
+  await sweepMouse(chart)
+  await panel.locator('.el-checkbox').filter({ hasText: '分区模式' }).uncheck()
+  await expectChartRendered(chart, 0, 60_000)
+  await sweepMouse(chart)
+  await page.locator('[data-wafer-color] .el-radio-button').filter({ hasText: '判定结果' }).click()
+  await expectChartRendered(chart, 0, 60_000)
+  await sweepMouse(chart)
+
+  // 5) 图表高度调节（2026-09-08 起为原生 range：input 触发 v-model → 高度变化 →
+  //    ResizeObserver → renderOption 全量重渲染；每步随机跨度避免固定值被去重）
+  const heightInput = panel.locator('input.height-range')
+  for (const h of [450, 700, 550]) {
+    await heightInput.evaluate((el: HTMLInputElement, val: number) => {
+      el.value = String(val)
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+    }, h)
     await expectChartRendered(chart, 0, 60_000)
     await sweepMouse(chart)
   }
-
-  // 5) 图表高度拖拽（每步触发 ResizeObserver → renderOption 全量重渲染）
-  // 必须限定在晶圆图 tabpanel 内：页面上其它 tab 的滑块是隐藏的；
-  // dragTo 会被滑块自身容器拦截，改用手动 mouse 拖动
-  const heightSlider = panel.locator('.el-slider__button').first()
-  const hb = await heightSlider.boundingBox()
-  if (hb) {
-    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2)
-    await page.mouse.down()
-    await page.mouse.move(hb.x + hb.width / 2 + 60, hb.y + hb.height / 2, { steps: 10 })
-    await page.mouse.up()
-  }
-  await sweepMouse(chart)
 
   const bad = problems.filter((m) => /model or view can not be found/.test(m))
   expect(bad, `ECharts 出现 model-or-view 警告（共 ${problems.length} 条 ECharts 消息）:\n${problems.join('\n')}`).toEqual([])
