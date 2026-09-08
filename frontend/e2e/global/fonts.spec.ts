@@ -26,10 +26,13 @@ test.describe('@p2 字体统一', { tag: ['@p2', '@global'] }, () => {
         elFont: cs.getPropertyValue('--el-font-family').trim(),
       }
     })
-    expect(tokens.sans).toBe(FONT_SANS)
-    expect(tokens.mono).toBe(FONT_MONO)
+    // 生产构建的 CSS 压缩（lightningcss）会把 'Segoe UI' 规范化为 "Segoe UI"：
+    // 比较前两侧统一剥离引号（下方 body 用例同款处理），否则 dev 绿 / preview 必挂
+    const strip = (s: string) => s.replace(/["']/g, '')
+    expect(strip(tokens.sans)).toBe(strip(FONT_SANS))
+    expect(strip(tokens.mono)).toBe(strip(FONT_MONO))
     // Element Plus 组件字体跟随 --font-sans（element-plus-theme.css 覆盖）
-    expect(tokens.elFont).toBe(FONT_SANS)
+    expect(strip(tokens.elFont)).toBe(strip(FONT_SANS))
   })
 
   test('body 继承统一字体栈（中文平台字体顺序固定）', async ({ page }) => {
