@@ -103,6 +103,60 @@ class WaferMapPointsShapeTests(SimpleTestCase):
         out = compute_wafer_map_data(df, _meta(), 'P1', 'result', 'X_COORD', 'X_COORD')
         self.assertEqual(len(out['points']), 2)
 
+    def test_param_selected_adds_pointwise_value(self):
+        """选中判定参数时逐点补 value（参数值着色的数据源）。"""
+        df = pd.DataFrame({
+            'X_COORD': [0.0, 10.0, 20.0],
+            'Y_COORD': [0.0, 10.0, 20.0],
+            'Site': ['1', '1', '1'],
+            'P1': [1.0, -5.0, 3.0],
+        })
+        out = compute_wafer_map_data(df, _meta(), 'P1', 'result', 'X_COORD', 'Y_COORD')
+        self.assertEqual([p['value'] for p in out['points']], [1.0, -5.0, 3.0])
+
+    def test_value_nan_points_omit_field(self):
+        """参数列 NaN/非数值的点省略 value 字段（前端归入「无值」灰档）。"""
+        df = pd.DataFrame({
+            'X_COORD': [0.0, 10.0, 20.0],
+            'Y_COORD': [0.0, 10.0, 20.0],
+            'Site': ['1', '1', '1'],
+            'P1': [1.0, None, 'abc'],
+        })
+        out = compute_wafer_map_data(df, _meta(), 'P1', 'result', 'X_COORD', 'Y_COORD')
+        self.assertEqual(out['points'][0]['value'], 1.0)
+        self.assertNotIn('value', out['points'][1])
+        self.assertNotIn('value', out['points'][2])
+
+    def test_no_param_omits_value(self):
+        """未选参数（全局判定）不下发 value——省 payload。"""
+        df = pd.DataFrame({
+            'X_COORD': [0.0, 10.0], 'Y_COORD': [0.0, 10.0],
+            'Site': ['1', '1'], 'P1': [1.0, 2.0],
+        })
+        out = compute_wafer_map_data(df, _meta(), None, 'result', 'X_COORD', 'Y_COORD')
+        for p in out['points']:
+            self.assertNotIn('value', p)
+
+    def test_value_ignores_color_by(self):
+        """value 与 color_by 解耦：选参数时无论着色模式都下发。"""
+        df = pd.DataFrame({
+            'X_COORD': [0.0, 10.0], 'Y_COORD': [0.0, 10.0],
+            'Site': ['1', '2'], 'P1': [1.0, 2.0],
+        })
+        out = compute_wafer_map_data(df, _meta(), 'P1', 'site', 'X_COORD', 'Y_COORD')
+        self.assertEqual([p['value'] for p in out['points']], [1.0, 2.0])
+
+    def test_value_index_aligns_with_coords_mask(self):
+        """坐标被剔除的行不产生点，value 不得错位（掩码对齐）。"""
+        df = pd.DataFrame({
+            'X_COORD': [0.0, np.nan, 20.0],
+            'Y_COORD': [0.0, 10.0, 20.0],
+            'Site': ['1', '1', '1'],
+            'P1': [1.0, 99.0, 3.0],
+        })
+        out = compute_wafer_map_data(df, _meta(), 'P1', 'result', 'X_COORD', 'Y_COORD')
+        self.assertEqual([p['value'] for p in out['points']], [1.0, 3.0])
+
 
 class WaferMapBuildSpeedGuardTests(SimpleTestCase):
     """量级守卫：向量化前 50k 行约 2.3s，向量化后应远低于该量级。
