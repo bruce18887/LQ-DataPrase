@@ -29,8 +29,12 @@ const FRONTEND_URL = 'http://localhost:3000'
 const BACKEND_PORT = '8000'
 const BACKEND_URL = `http://localhost:${BACKEND_PORT}`
 
-// 默认由 Playwright 自动拉起前后端；设 PW_NO_WEBSERVER=1 改为手动起服务
+// 默认由 Playwright 自动拉起前后端；设 PW_NO_WEBSERVER=1 改为手动起服务，
+// 设 PW_DEV_SERVER=1 前端改用 vite dev（单 spec 快速迭代用；全量默认走
+// vite build + preview：dev 模式每次导航要拉取数百个模块，~350 次 goto 的
+// 累计开销显著，且 6 workers 曾压垮 dev server，见 lessons）
 const NO_WEBSERVER = process.env.PW_NO_WEBSERVER === '1'
+const USE_DEV_SERVER = process.env.PW_DEV_SERVER === '1'
 
 export default defineConfig({
   testDir: './e2e',
@@ -56,7 +60,7 @@ export default defineConfig({
   metadata: {
     title: 'LQ-DataPrase E2E',
     description: 'ATE 量产数据分析平台 — 端到端测试套件',
-    modules: 'smoke | auth | global | dashboard | data | analysis | batch | sftp | settings | roadmap | admin | exports',
+    modules: 'smoke | auth | global | dashboard | data | analysis | batch | sftp | settings | admin | exports',
     priorities: '@p0 冒烟 | @p1 核心 | @p2 增强',
   },
 
@@ -137,12 +141,13 @@ export default defineConfig({
           },
         },
         {
-          // Vite 前端（/api 代理到 8000）
-          command: 'npm run dev',
+          // Vite 前端：默认生产构建 + preview（加载快、负载稳）；
+          // PW_DEV_SERVER=1 时退回 dev server（改测试时快速迭代用）
+          command: USE_DEV_SERVER ? 'npm run dev' : 'npm run build && npm run preview',
           cwd: __dirname,
           url: FRONTEND_URL,
           reuseExistingServer: !process.env.CI,
-          timeout: 120_000,
+          timeout: USE_DEV_SERVER ? 120_000 : 300_000,
           stdout: 'pipe',
           stderr: 'pipe',
         },
