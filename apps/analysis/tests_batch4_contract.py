@@ -108,6 +108,66 @@ class WaferMapParamGuardTests(_PatchedDfTest):
         response.render()
         self.assertEqual(response.status_code, 200, response.content)
 
+    def test_param_response_carries_spec_limits(self):
+        """参数值着色归一口径的数据源：真规格限原样下发。"""
+        from apps.analysis.views import AnalysisViewSet
+
+        df = pd.DataFrame({
+            'X_COORD': [0, 1, 0, 1], 'Y_COORD': [0, 0, 1, 1],
+            'Param0': [1.0, 2.0, 1.5, 2.5], 'SW_Bin': [1, 1, 2, 1],
+        })
+        self._patch_and_track(df, _meta(mins={'Param0': '0'}, maxs={'Param0': '10'}))
+        factory, force_authenticate = _make_request_factory()
+        request = _authed(factory.post('/api/v1/analysis/wafer_map/', {
+            'file_id': 1, 'param': 'Param0',
+        }, format='json'), force_authenticate)
+        view = AnalysisViewSet.as_view({'post': 'wafer_map'})
+        response = view(request)
+        response.render()
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.data['spec_low'], 0.0)
+        self.assertEqual(response.data['spec_high'], 10.0)
+
+    def test_placeholder_limits_serialize_to_null(self):
+        """'Min'/'Max' 占位列（无规格限语义）→ spec_low/high 为 null。"""
+        from apps.analysis.views import AnalysisViewSet
+
+        df = pd.DataFrame({
+            'X_COORD': [0, 1, 0, 1], 'Y_COORD': [0, 0, 1, 1],
+            'Param0': [1.0, 2.0, 1.5, 2.5], 'SW_Bin': [1, 1, 2, 1],
+        })
+        self._patch_and_track(df, _meta(mins={'Param0': 'Min'}, maxs={'Param0': 'Max'}))
+        factory, force_authenticate = _make_request_factory()
+        request = _authed(factory.post('/api/v1/analysis/wafer_map/', {
+            'file_id': 1, 'param': 'Param0',
+        }, format='json'), force_authenticate)
+        view = AnalysisViewSet.as_view({'post': 'wafer_map'})
+        response = view(request)
+        response.render()
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIsNone(response.data['spec_low'])
+        self.assertIsNone(response.data['spec_high'])
+
+    def test_no_param_spec_fields_still_present(self):
+        """未选参数时字段也在（统一契约，前端不用判键存在）。"""
+        from apps.analysis.views import AnalysisViewSet
+
+        df = pd.DataFrame({
+            'X_COORD': [0, 1, 0, 1], 'Y_COORD': [0, 0, 1, 1],
+            'Param0': [1.0, 2.0, 1.5, 2.5], 'SW_Bin': [1, 1, 2, 1],
+        })
+        self._patch_and_track(df)
+        factory, force_authenticate = _make_request_factory()
+        request = _authed(factory.post('/api/v1/analysis/wafer_map/', {
+            'file_id': 1,
+        }, format='json'), force_authenticate)
+        view = AnalysisViewSet.as_view({'post': 'wafer_map'})
+        response = view(request)
+        response.render()
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIsNone(response.data['spec_low'])
+        self.assertIsNone(response.data['spec_high'])
+
 
 class SerialChartConfigGuardTests(_PatchedDfTest):
     """chart_config 非法输入 → 400（此前 json.loads 直接抛 → 500）。"""
