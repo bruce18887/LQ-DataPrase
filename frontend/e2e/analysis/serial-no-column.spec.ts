@@ -112,11 +112,19 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
     // -created_at 顶到 files[0]，其 program_name（JAVBN281R3CYCAAV1.6.pgs）
     // 含 'BN281R3CYCAA' 子串，会让晶圆图用例的 hasText 选文件选中它（0 Fail die
     // →「Fail 散点 > 0」必挂）。2026-09-08 实证，见 helpers/cleanup.ts 注释。
-    const ctx = await browser.newContext()
+    // ⚠️ storageState 必须显式清空：本项目下 browser.newContext() 会继承
+    // Edge/P1 项目的 admin.json 登录态——token 有效期内 /login 被路由守卫
+    // 弹回 /dashboard，loginAs 找不到登录表单必挂（2026-09-08 探针实证）。
+    // 旧行为「只有 token 过期后才碰巧能清」是 30 分钟定时炸弹。
+    const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
     const page = await ctx.newPage()
-    await gotoApp(page, '/login')
+    // 不能用 gotoApp('/login')：它等 .main-layout，而登录页没有这层壳
+    // （uiLogin 自带 goto('/login')，直接等表单）。
     await loginAs(page, 'admin')
+    // 三个上传名都要清：只清 sts8200 会漏掉 no_serial/no_coord 两行（实测泄漏）
     await deleteFilesByNameQuiet(page, 'e2e_sts8200_part_id_')
+    await deleteFilesByNameQuiet(page, 'e2e_no_serial_')
+    await deleteFilesByNameQuiet(page, 'e2e_no_coord_')
     await ctx.close()
   })
 

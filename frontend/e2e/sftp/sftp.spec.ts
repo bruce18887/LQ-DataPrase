@@ -1,6 +1,7 @@
 import { test, expect, type Locator } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
 import { captureDownload } from '../helpers/download'
+import { deleteSftpImportsQuiet } from '../helpers/cleanup'
 
 /**
  * SFTP 浏览器（/sftp）端到端用例。
@@ -453,4 +454,9 @@ test.describe('@p2 SFTP 目录下载SSE（env-gated）', { tag: ['@p2', '@sftp']
 
     console.log('[sftp] 目录下载SSE完成')
   })
+})
+
+test.afterAll(async ({ browser }) => {
+  // 下载即注册的数据行失败路径会泄漏（sample.csv / root.csv / big_*），按名单清
+  await deleteSftpImportsQuiet(browser)
 })

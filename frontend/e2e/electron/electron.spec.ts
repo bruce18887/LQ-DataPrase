@@ -45,6 +45,13 @@ test.describe('Electron - API layer', { tag: ['@p1', '@electron'] }, () => {
     // Verify the page loaded — if baseURL was wrong it would 404.
     await expect(page.locator('.login-container')).toBeVisible({ timeout: 10_000 })
   })
+})
+
+test.describe('Electron - API fallback', { tag: ['@p1', '@electron'] }, () => {
+  // 已登录访问 /login 会被路由守卫弹回 /dashboard（router/index.ts beforeEach），
+  // .login-container 永不出现。本用例验证「无 electronAPI 时 axios 回落 /api/v1」，
+  // 需要未登录态才能停留在登录页——用空 storageState 覆盖。
+  test.use({ storageState: { cookies: [], origins: [] } })
 
   test('falls back to /api/v1 when no electronAPI', async ({ page }) => {
     await page.goto('/login')

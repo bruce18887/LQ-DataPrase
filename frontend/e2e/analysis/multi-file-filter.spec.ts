@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, pickTabFile, filterControl, filePicker } from '../helpers/params'
+import { pickTabFile, filterControl, filePicker, closeFilePopper } from '../helpers/params'
+import { waitLoadingGone } from '../helpers/charts'
 import { RECOMMENDED } from '../fixtures/test-data'
 
 /**
@@ -21,7 +22,9 @@ async function toggleFilter(page: Page, scope: string, name: string) {
 /** 多文件分析 tab：选 2 个文件并等参数列表加载 */
 async function openMultiFile(page: Page) {
   await gotoApp(page, '/analysis')
-  await selectAnalysisFile(page, RECOMMENDED.analysis)
+  // 2026-09-05 起四个 tab 各持独立文件选择：multi tab 有自己的选择器，
+  // 旧版在这里先到单文件 tab 选 DA35 是共享选择器时代的遗留（还会引入
+  // 「初始计算未 settle 就选文件」竞态），删除。
   await page.getByRole('tab', { name: /多文件分析/ }).click()
   const select = filePicker(page, 'multi')
   await expect(select).toBeVisible({ timeout: 20_000 })
@@ -32,13 +35,25 @@ async function openMultiFile(page: Page) {
   // 时滚动定位不稳定；过滤后选项少且已选置顶重排影响小）
   const input = select.locator('input').first()
   await input.pressSequentially('BPD60320')
+  // ⚠️ 注册必须先于第二次勾选：两文件 multi_lot 在勾上第二个文件时立即发出
+  // （1 个文件时 loadCommonParams 直接早退不发请求），响应先到、注册后到就
+  // 永远等不到（R2④；closeFilePopper 再耗掉几百 ms 放大窗口）
+  const twoFileLot = page.waitForResponse(
+    (r) =>
+      r.url().includes('/analysis/multi_lot/') &&
+      r.request().method() === 'POST' &&
+      /"file_ids":\[\d+,\d+\]/.test(r.request().postData() || ''),
+    { timeout: 20_000 },
+  )
   for (const name of RECOMMENDED.analysisMulti) {
     const opt = dropdown.locator('.el-select-dropdown__item').filter({ hasText: name.slice(0, 12) }).first()
     await expect(opt).toBeVisible({ timeout: 5_000 })
     await opt.click()
-    await page.waitForTimeout(300)
+    // EP 选中后给选项加 .selected —— 用类名条件等待替代固定 waitForTimeout
+    await expect(opt).toHaveClass(/is-selected/, { timeout: 5_000 })
   }
-  await page.keyboard.press('Escape')
+  await closeFilePopper(page, 'multi')
+  await twoFileLot
   // 等公共参数列表加载（合并请求响应到达）
   await expect(page.locator(`${TAB} .common-hint`)).toBeVisible({ timeout: 20_000 })
   await expect(page.locator(`${TAB} svg, ${TAB} canvas`).first()).toBeVisible({ timeout: 20_000 })
@@ -66,7 +81,18 @@ function corrScope(page: Page) {
 async function openCorrelationTab(page: Page) {
   await gotoApp(page, '/analysis')
   await page.getByRole('tab', { name: /相关性对比/ }).click()
+  // 参数列表来自「不带 params 的 histogram 快路径」（useTabFileParams），
+  // 注册先于 pickTabFile：文件一选中请求立即发出，后注册必漏（R2④）。
+  // 等它回来 = X/Y 下拉的选项保证已就位，否则下拉空开 15s 超时（实测 flake）。
+  const listResp = page.waitForResponse(
+    (r) =>
+      r.url().includes('/analysis/histogram/') &&
+      r.request().method() === 'POST' &&
+      !(r.request().postData() || '').includes('"params"'),
+    { timeout: 20_000 },
+  )
   await pickTabFile(page, 'correlation', RECOMMENDED.analysis)
+  await listResp
   // 等本 tab 的参数列表到达（选 X/Y 依赖它）
   await expect(filterControl(page, 'data-only-bin1')).toBeVisible({ timeout: 20_000 })
 }

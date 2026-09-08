@@ -34,6 +34,33 @@ test.describe('用户管理 / 权限', { tag: ['@admin'] }, () => {
   // 清空注入的 storageState，强制走实时 UI 登录使 user/isAdmin 生效
   test.use({ storageState: { cookies: [], origins: [] } })
 
+  // 失败路径也会泄漏 e2e_toggle_* 用户（用例中途断言失败 → 末尾的 UI 删除
+  // 不执行，实测残留多轮），afterAll 按 username 前缀兜底清场
+  test.afterAll(async ({ browser }) => {
+    const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
+    try {
+      const login = await ctx.request.post('/api/v1/auth/login/', {
+        data: { username: 'admin', password: 'admin123' },
+      })
+      if (!login.ok()) return
+      const { token } = await login.json()
+      const headers = { Authorization: `Bearer ${token}` }
+      const list = await ctx.request.get('/api/v1/auth/users/', { headers, failOnStatusCode: false })
+      if (!list.ok()) return
+      const body = await list.json()
+      const users: Array<{ id: number; username: string }> = Array.isArray(body) ? body : body.results || []
+      for (const u of users) {
+        if (u.username?.startsWith('e2e_toggle_')) {
+          await ctx.request.delete(`/api/v1/auth/users/${u.id}/`, { headers, failOnStatusCode: false })
+        }
+      }
+    } catch {
+      // 清理失败静默（残留由下一轮兜底再清）
+    } finally {
+      await ctx.close()
+    }
+  })
+
   test('@p1 普通用户：侧边栏无“用户管理”入口，且直达 /admin/users 不被路由拦截', async ({
     page,
   }) => {
@@ -136,18 +163,20 @@ test.describe('用户管理 / 权限', { tag: ['@admin'] }, () => {
     const row = table.locator('tr').filter({ hasText: uniqueName })
     await expect(row).toBeVisible({ timeout: 15_000 })
 
-    // 1) 禁用：点该行的「禁用」按钮 → 后端 200 → 状态变 已禁用
+    // 1) 禁用：点该行的「禁用」按钮 → 后端 200 → 状态变 disabled
+    // （状态列文案 = statusLabel 的原始值 disabled/locked/active，非中文映射）
     const toggleBtn = row.getByRole('button', { name: '禁用', exact: true })
     await expect(toggleBtn).toBeVisible()
     await toggleBtn.click()
     await expect(page.getByText('状态已更新')).toBeVisible({ timeout: 15_000 })
-    // 表格刷新后状态文案变 已禁用，按钮文案变 启用
-    await expect(row.getByText('已禁用', { exact: true })).toBeVisible({ timeout: 15_000 })
+    // 表格刷新后状态文案变 disabled，按钮文案变 启用
+    await expect(row.getByText('disabled', { exact: true })).toBeVisible({ timeout: 15_000 })
     await expect(row.getByRole('button', { name: '启用', exact: true })).toBeVisible()
 
     // 2) 启用：点「启用」按钮 → 状态回到 active
     await row.getByRole('button', { name: '启用', exact: true }).click()
     await expect(page.getByText('状态已更新')).toBeVisible({ timeout: 15_000 })
+    await expect(row.getByText('active', { exact: true })).toBeVisible({ timeout: 15_000 })
     await expect(row.getByRole('button', { name: '禁用', exact: true })).toBeVisible()
 
     // 清理：删除该用户

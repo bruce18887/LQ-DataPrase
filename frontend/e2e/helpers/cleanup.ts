@@ -48,6 +48,45 @@ export async function deleteBatchQuiet(page: Page, batchName: string): Promise<v
 }
 
 /**
+ * 清理 SFTP 测试导入注册的数据行（sample.csv / root.csv / big_*）。
+ *
+ * 为什么必须做：SFTP 下载即注册 DataFile，失败路径不执行用例末尾的清理时
+ * （实测每轮失败泄漏 2-5 行），残留按 -created_at 顶到 files[0] 污染
+ * 「最新文件」类断言。globalSetup 只清 e2e_ 前缀，这些名字不在其中
+ * （root 库是开发数据快照 + e2e 专属，不能扩大全局 purge 名单误删真实文件）。
+ *
+ * 用 API 直登 + 按名单删除；失败静默（下一轮兜底再清）。
+ */
+export async function deleteSftpImportsQuiet(browser: import('@playwright/test').Browser): Promise<void> {
+  const SFTP_IMPORTED = /^(sample|root)\.csv$|^big_/i
+  try {
+    const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
+    const login = await ctx.request.post('/api/v1/auth/login/', {
+      data: { username: 'admin', password: 'admin123' },
+      failOnStatusCode: false,
+    })
+    if (login.ok()) {
+      const { token } = await login.json()
+      const headers = { Authorization: `Bearer ${token}` }
+      const list = await ctx.request.get('/api/v1/files/?page_size=9999', { headers, failOnStatusCode: false })
+      if (list.ok()) {
+        const body = await list.json()
+        const rows: Array<{ id: number; filename: string }> = body.results ?? body ?? []
+        for (const f of rows) {
+          if (SFTP_IMPORTED.test(f.filename ?? '')) {
+            await ctx.request.delete(`/api/v1/files/${f.id}/`, { headers, failOnStatusCode: false })
+          }
+        }
+      }
+    }
+    await ctx.close()
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn('[cleanup] SFTP 导入数据清理失败（残留测试数据）:', e)
+  }
+}
+
+/**
  * 按文件名子串删除 e2e 上传产生的 DataFile 行（含磁盘文件）。
  *
  * 为什么必须做：DataFile 默认按 -created_at 排序，上传型用例（如

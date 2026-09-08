@@ -9,6 +9,7 @@ import {
   pickSensitivity,
   listParams,
   selectParam,
+  closeFilePopper,
 } from '../helpers/params'
 import { waitLoadingGone } from '../helpers/charts'
 import { RECOMMENDED } from '../fixtures/test-data'
@@ -157,9 +158,12 @@ test.describe('@p1 分析页 tab 独立文件选择', { tag: ['@p1', '@analysis'
       const opt = dropdown.locator('.el-select-dropdown__item').filter({ hasText: name.slice(0, 12) }).first()
       await expect(opt).toBeVisible({ timeout: 10_000 })
       await opt.click()
-      await page.waitForTimeout(300)
+      // EP 选中后给选项加 .selected —— 类名条件等待替代固定 waitForTimeout
+      await expect(opt).toHaveClass(/is-selected/, { timeout: 10_000 })
     }
-    await page.keyboard.press('Escape')
+    // multiple 下拉选中后保持开启，Escape 焦点不在就落空 → popper 残留
+    // 拦截后面复选框的点击（2026-09-08 专项清理）；必须确定性关闭
+    await closeFilePopper(page, 'multi')
     await expect(page.locator(`${MULTI} .common-hint`)).toBeVisible({ timeout: 120_000 })
 
     // 多文件图表不消费前端裁剪口径 → 数据筛选区里不该有「异常值处理」
@@ -182,7 +186,10 @@ test.describe('@p1 分析页 tab 独立文件选择', { tag: ['@p1', '@analysis'
     for (const name of ['晶圆图', '多文件分析', '相关性对比']) {
       await expect(page.getByRole('tab', { name: new RegExp(name) })).toBeVisible()
     }
-    // 单文件 tab 有数据即渲染图表，不因别的 tab 的选择而清空
+    // 单文件 tab 有数据即渲染图表，不因别的 tab 的选择而清空。
+    // 显式选已知好文件：auto-select 回落的是 files[0]（-created_at 最新），
+    // 并行上传窗口里它可能是刚传一半/解析失败的文件，断言会随机假红。
+    await selectAnalysisFile(page, RECOMMENDED.analysis)
     await waitLoadingGone(page.locator(SINGLE))
     await expect(page.locator(`${SINGLE} .chart-wrapper`).first()).toBeVisible()
     await expect(page.locator(`${SINGLE} .el-empty`)).toHaveCount(0)
