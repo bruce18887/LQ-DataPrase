@@ -1,3 +1,73 @@
+# 任务：晶圆图页面对齐保守重设计原型（2026-09-08）✅
+
+用户需求：参考 docs/plans/analysis-conservative-preview.html 的晶圆图设计改造晶圆图 tab。
+spec：docs/superpowers/specs/2026-09-08-wafermap-redesign-design.md（用户 9 项决策逐项拍板，
+方案 B=功能+布局对齐、保持单文件）；
+plan：docs/superpowers/plans/2026-09-08-wafermap-redesign.md。
+
+## 实施清单
+
+- [x] 后端 TDD（6a0a237）：`compute_wafer_map_data` 选中判定参数时逐点下发 `value`
+      （NaN/inf 省略字段；与 color_by 解耦；掩码对齐），5 个新用例 + 存量 10 个全绿
+- [x] 后端 TDD（8a03833）：wafer_map 视图下发 `spec_low/spec_high`
+      （`resolve_spec_limits` 统一口径，'Min'/'Max' 占位 → JSON null），3 个新用例
+- [x] WaferStatTables.vue（885a0b9）：左栏两表组件（分区良率表 + 该片统计表，
+      纯展示，全语义 token 零字面 hex，data-wafer-zone-table/stat-table 契约）
+- [x] WaferMapPanel.vue 重写（6688c2e，317→559 行）：着色 4 档 radio
+      （判定结果/Site/Bin/参数值，data-wafer-color）+「分区模式」独立 checkbox
+      （勾选覆盖着色，按 hypot 距离落 1/3·2/3 环带，与后端
+      compute_wafer_zone_stats 同口径）+「边界圆+Notch」改名（功能不变）+
+      删「全局判定」按钮（与不选参数同口径）+ 高度改原生 range + 左栏 25%/右栏 75%
+      布局 + 自动结论条（极差 <0.5pp → 无径向梯度文案，data-wafer-conclusion）+
+      die 尺寸按 wafer.die_size 真实换算（替代写死 8×8）+ param 档 visualMap 渐变
+      （双口径归一：规格限 LSL→USL / 数据 min→max，NaN 灰档「无值」，全 NaN 降级回落
+      Pass/Fail + 图内注记）
+- [x] e2e 存量迁移（bdeb2b8）：3 个 spec 的「Total Dies」→ `[data-wafer-stat-table]`；
+      model-not-found 的旧 radio 文案（按 Site/按结果/分区模式三档）迁 data-wafer-color
+      + 分区 checkbox，el-slider 拖拽迁原生 range input 事件
+- [x] e2e 新增（d386314 + e51ba84）：wafermap-redesign.spec.ts 4 用例
+      （着色 4 档 series 结构 / 分区 checkbox 叠加与恢复 / 两表与图 title 数字一致性 /
+      结论条文案分支），6/6 全绿
+- [x] e2e README 契约章节：data-wafer-* 四属性 + 旧控件形态变更说明
+- [x] 验证：npm run build 绿；`manage.py test apps.analysis` 181 项 OK；
+      分析页全量 e2e（结果见 Review）
+
+## Review（2026-09-08）
+
+- 逻辑面零回归：apps.analysis 181/181；构建 vue-tsc + vite 通过。
+- e2e 账目（workers=1）：wafermap-redesign 6/6；wafermap-hidden-tab-init +
+  wafermap-model-not-found 迁移后全绿；analysis 套件其余用例结果见上方清单。
+- 存量 flake 判定：tab-independent-files.spec.ts:145（多文件敏感度贯穿 multi_lot）
+  两次同点位失败——多文件 tab 的文件下拉 popper 挡住筛选区点击（dp-file-option__
+  subtree intercepts pointer events）。本次 diff 只动晶圆图组件与晶圆图 spec，
+  多文件 tab 代码零触碰；与 todo 2026-09-07 Review 记录的「筛选开关点击时序竞态」
+  同族（lessons R2③），非本批回归，留待 flake 专项清理。
+- [x] 计划外修复（6b4e596）：全量 e2e 中 wafermap-hidden-tab-init /
+      wafermap-model-not-found 两用例「Fail 散点应已渲染 >0」失败——根因**不是**
+      本批 UI 改动，而是 serial-no-column 上传残留文件 e2e_sts8200_part_id_*（其
+      program_name=JAVBN281R3CYCAAV1.6.pgs 含 'BN281R3CYCAA' 子串，FileSelect
+      show-meta 把 program_name 渲染进选项文本 → pickTabFile hasText 命中两个，
+      .first() 按 -created_at 选中残留文件 → 该文件唯一参数 CONT_GATE 全在限内
+      → 0 Fail die）。修：①手动清掉存量残留行+磁盘文件（DB id=396）；
+      ②helpers/cleanup.ts 新增 deleteFilesByNameQuiet；③serial-no-column
+      afterAll 补 DB 清理。复跑两 spec 5/5 全绿即证。这正是 todo 2026-09-07
+      Review 预警的「serial-no-column 的 finally 清理应把 DB 行一并删」遗留账，
+      本批结清。
+- e2e 设计教训（新）：①「先 toHaveCount(3) 再断言内容」会跳过加载态——空态行本身
+  也是一个 tr，分区请求慢于晶圆图请求时先等 `.stat-empty` toHaveCount(0) 再数区行；
+  ② el-slider → 原生 range 后，拖拽用例改为 evaluate 直接 set value + dispatch
+  input 事件（v-model.number 生效），比合成鼠标拖拽稳定；
+  ③「Fail 散点 >0」类数据依赖断言 + hasText 选文件，对 program_name 子串撞车
+  敏感——新上传用例一律配 DB 清理（R2③ 自建自清）。
+- ⚠️ 遗留账：
+  ① `analysis_views.py` 686 行（600 上限被 2026-09-03 后的历史批次修复突破，
+     本批仅 +8）——建议单独安排视图层拆分；
+  ② 双主题人工走查未做（新样式全语义 token，@theme 套件覆盖对比度；建议用户下次
+     开 dev 环境时目测晶圆图 tab：着色 4 档/分区叠加/左栏两表/结论条/窄 range）；
+  ③ tab-independent-files:145 存量 flake（见上）。
+
+---
+
 # 任务：分析页四 tab 文件选择/数据筛选对齐单文件（2026-09-07）✅
 
 用户需求：晶圆图/相关性/多文件三 tab 的文件选择与数据筛选 UI 对齐单文件 tab 形态。
