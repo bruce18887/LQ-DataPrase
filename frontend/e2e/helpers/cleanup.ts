@@ -46,3 +46,40 @@ export async function deleteBatchQuiet(page: Page, batchName: string): Promise<v
     console.warn(`[cleanup] 删除批次 ${batchName} 失败（残留测试数据）:`, e)
   }
 }
+
+/**
+ * 按文件名子串删除 e2e 上传产生的 DataFile 行（含磁盘文件）。
+ *
+ * 为什么必须做：DataFile 默认按 -created_at 排序，上传型用例（如
+ * serial-no-column 的 e2e_sts8200_part_id_*）不留 DB 清理时，残留行会顶到
+ * files[0]；若其 program_name 恰含其它用例的选文件子串（实测残留的
+ * program_name=JAVBN281R3CYCAAV1.6.pgs 含 'BN281R3CYCAA'），pickTabFile 的
+ * hasText 过滤会 .first() 选中残留文件而非目标文件 —— 晶圆图两用例的
+ * 「Fail 散点 > 0」因此必挂（该残留文件唯一参数全在限内，0 Fail）。
+ * 属 lessons R2③「跨套件共享 DB 状态要自建/自清」的又一实证（2026-09-08）。
+ *
+ * 走页面 Bearer token 调 DELETE /api/v1/files/<id>/（同时删磁盘文件）。
+ * 失败静默同 deleteBatchQuiet。
+ */
+export async function deleteFilesByNameQuiet(page: Page, filenameSubstring: string): Promise<void> {
+  try {
+    const token = await page.evaluate(() => localStorage.getItem('access_token'))
+    if (!token) return
+    const headers = { Authorization: `Bearer ${token}` }
+    const resp = await page.request.get('/api/v1/files/?page_size=9999', {
+      headers, failOnStatusCode: false, timeout: 30_000,
+    })
+    if (!resp.ok()) return
+    const body = await resp.json()
+    const files: { id: number; filename: string }[] = Array.isArray(body) ? body : (body.results ?? [])
+    for (const f of files) {
+      if (!f.filename.includes(filenameSubstring)) continue
+      await page.request.delete(`/api/v1/files/${f.id}/`, {
+        headers, failOnStatusCode: false, timeout: 30_000,
+      })
+    }
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn(`[cleanup] 按名删除文件（${filenameSubstring}）失败（残留测试数据）:`, e)
+  }
+}

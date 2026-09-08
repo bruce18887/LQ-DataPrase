@@ -4,7 +4,8 @@ import os from 'node:os'
 import fs from 'node:fs'
 import { gotoApp } from '../helpers/nav'
 import { uploadFile } from '../helpers/upload'
-import { cleanupQuiet } from '../helpers/cleanup'
+import { cleanupQuiet, deleteFilesByNameQuiet } from '../helpers/cleanup'
+import { loginAs } from '../helpers/auth'
 import { expectChartRendered, waitLoadingGone } from '../helpers/charts'
 import { selectAnalysisFile, selectParam } from '../helpers/params'
 
@@ -103,10 +104,20 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
     fs.writeFileSync(sts8200Path, STS8200_NO_SERIAL_CSV, 'utf-8')
   })
 
-  test.afterAll(() => {
+  test.afterAll(async ({ browser }) => {
     cleanupQuiet(csvPath)
     cleanupQuiet(noCoordPath)
     cleanupQuiet(sts8200Path)
+    // 上传产生的 DataFile 行必须一并删：磁盘-only 清理留下的残留行按
+    // -created_at 顶到 files[0]，其 program_name（JAVBN281R3CYCAAV1.6.pgs）
+    // 含 'BN281R3CYCAA' 子串，会让晶圆图用例的 hasText 选文件选中它（0 Fail die
+    // →「Fail 散点 > 0」必挂）。2026-09-08 实证，见 helpers/cleanup.ts 注释。
+    const ctx = await browser.newContext()
+    const page = await ctx.newPage()
+    await gotoApp(page, '/login')
+    await loginAs(page, 'admin')
+    await deleteFilesByNameQuiet(page, 'e2e_sts8200_part_id_')
+    await ctx.close()
   })
 
   test('无 Serial_No 列文件：序列分布显示错误提示而非空白图', async ({ page }) => {
