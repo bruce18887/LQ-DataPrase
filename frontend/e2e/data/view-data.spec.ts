@@ -34,13 +34,31 @@ function viewScope(page: Page) {
  * - farIdx/farCol：首个「含非 bin fail 列且该列在 headers 中 index >= 50」的行（346 列文件必在屏幕外）
  * - binOnlyIdx：首个 __fail_cells__ 恰为 [bin] 的行（仅 bin fail，无测试列越限）
  */
+/**
+ * 负载下大响应体可能截断（Unexpected end of JSON input）——重试逻辑必须
+ * 定义在 page.evaluate 内部（闭包不序列化）。
+ */
 async function fetchBinFailInfo(page: Page, filename: string) {
   return page.evaluate(async (filename) => {
+    async function fetchJsonRetry(url: string, headers: Record<string, string>): Promise<any> {
+      let lastErr: unknown = null
+      for (let i = 0; i < 3; i++) {
+        try {
+          const r = await fetch(url, { headers })
+          if (!r.ok) throw new Error(`HTTP ${r.status}`)
+          return await r.json()
+        } catch (e) {
+          lastErr = e
+          await new Promise((res) => setTimeout(res, 800))
+        }
+      }
+      throw lastErr
+    }
     const token = localStorage.getItem('access_token')
     const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
-    const files = await fetch(`/api/v1/files/?search=${encodeURIComponent(filename)}`, { headers }).then((r) => r.json())
+    const files = await fetchJsonRetry(`/api/v1/files/?search=${encodeURIComponent(filename)}`, headers)
     const file = ((files.results ?? files) as any[]).find((f: any) => f.filename === filename)
-    const d = await fetch(`/api/v1/browse/?datafile_id=${file.id}&page_size=99999`, { headers }).then((r) => r.json())
+    const d = await fetchJsonRetry(`/api/v1/browse/?datafile_id=${file.id}&page_size=99999`, headers)
     // 传输格式压缩：headers + data（行值数组）+ fail_cells 并行数组 → zip 成行对象
     const colHeaders = (d.headers ?? []) as string[]
     const data = (d.data ?? []) as unknown[][]
@@ -150,9 +168,9 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     // 打开固定列下拉：选中后占位文本消失，用 aria-label 定位输入框所在 select，点击 wrapper 打开
     const pinSelect = viewScope(page).locator('.el-select:has(input[aria-label="固定列"])').first()
     await pinSelect.locator('.el-select__wrapper').click()
-    // 等待下拉动画完成、选项渲染
+    // 等待下拉动画完成、选项渲染（选项依赖 numericColumns 就位，负载下 5s 不够）
     const options = page.locator('.el-select-dropdown:visible .el-select-dropdown__item')
-    await expect(options.first()).toBeVisible({ timeout: 5_000 })
+    await expect(options.first()).toBeVisible({ timeout: 15_000 })
     const count = await options.count()
     expect(count).toBeGreaterThan(1)
 
@@ -170,7 +188,7 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     await expect(page.locator('.ag-pinned-left-header')).toContainText(target, { timeout: 10_000 })
   })
 
-  test('@p1 Pass/Fail 筛选：未选文件时预选，选文件后生效', async ({ page }) => {
+  test('@p1 Pass/Fail 筛选：未选文件时预选，切文件后筛选重置（契约升级）', async ({ page }) => {
     await gotoApp(page, '/data')
 
     // 先用 API 拿全量与 Pass 过滤后的 total 作对比基准（search 精确定位文件，避免分页干扰）
@@ -193,27 +211,30 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     await pfSelect.locator('.el-select__wrapper').click()
     await page.locator('.el-select-dropdown__item:visible').filter({ hasText: 'Pass' }).first().click()
 
-    // 再选文件 → 筛选应生效（请求带 pass_filter）。
-    // 注：banner 下拉在此流程（view tab 预选筛选后）不可靠（历史 A/B 预存在失败），
-    // 改用文件列表服务端搜索 + 「查看」按钮的可靠路径（passfail 状态跨 tab 保留）。
+    // 再选文件 → 筛选被重置（2026-09-06 契约：Site/PassFail/测试列/元信息属于
+    // 旧文件，切文件一律重置避免旧口径误导，见 DataBrowserAgGrid watch(fileId)）。
+    // 注：banner 下拉在此流程不可靠（历史 A/B 预存在失败），改用文件列表
+    // 服务端搜索 + 「查看」按钮的可靠路径。
     await page.locator('.tab-btn').filter({ hasText: '文件列表' }).click()
     const searchInput = page.locator('input[placeholder="按文件名/程序名/标签搜索"]')
     await searchInput.fill('DA35_BPC50338')
     const fileRow = page.locator('.el-table .el-table__row').filter({ hasText: 'DA35_BPC5033' }).first()
     await fileRow.waitFor({ state: 'visible', timeout: 30_000 })
     const browseResp = page.waitForResponse(
-      (r) => r.url().includes('/browse/') && r.url().includes('pass_filter=Pass'),
+      (r) => r.url().includes('/browse/') && !r.url().includes('pass_filter='),
       { timeout: 15_000 },
     )
     await fileRow.locator('button').filter({ hasText: '查看' }).click()
     expect((await browseResp).status()).toBe(200)
 
-    // 行数与 Pass 总数一致
+    // 行数与全量一致（未过滤），且 Pass/Fail 下拉回到空（重置生效的可观察状态）。
+    // 注意用精确匹配：下拉占位符本身含「Pass」（Pass/Fail筛选），子串匹配恒假。
     await expect(page.locator('.ag-root').first()).toBeVisible({ timeout: 30_000 })
     await expect(viewScope(page).locator('p').filter({ hasText: '条数据' })).toContainText(
-      String(totals.pass),
+      String(totals.all),
       { timeout: 15_000 },
     )
+    await expect(pfSelect.getByText('Pass', { exact: true })).toHaveCount(0)
   })
 
   test('@p2 导出：文件名取自源文件（Content-Disposition 优先）', async ({ page }) => {
@@ -821,7 +842,7 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     expect(await hScroll.evaluate((el) => el.scrollLeft)).toBe(before)
   })
 
-  test('@p2 默认隐藏列：记录列默认隐藏，列菜单可重新显示', async ({ page }) => {
+  test('@p2 默认隐藏列：记录列默认隐藏，更新隐藏列设置后重新显示', async ({ page }) => {
     // 设置默认隐藏列（系统设置同源）；finally 恢复默认（[] → 后端回退默认 8 列）
     const putHidden = (cols: string[]) =>
       page.evaluate(async (cols) => {
@@ -853,37 +874,18 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
         await expect(page.locator(`.ag-header-cell[col-id="${col}"]`)).toHaveCount(0)
       }
 
-      // 列定义层面：hide 标记生效（ag-grid-vue3 向模板 ref expose api，见其源码
-      // expose({ api })，可从组件根元素 __vueParentComponent.exposed 读取）
-      const colHideState = await page.evaluate(() => {
-        let api: any = null
-        for (const el of document.querySelectorAll('div')) {
-          const ex = el.__vueParentComponent?.exposed
-          if (ex?.api?.value?.getColumnDef) {
-            api = ex.api.value
-            break
-          }
-        }
-        if (!api) return null
-        return {
-          partNo: !!api.getColumnDef('Part_No')?.hide,
-          serialNo: !!api.getColumnDef('Serial_No')?.hide,
-        }
-      })
-      expect(colHideState).toEqual({ partNo: true, serialNo: false })
+      // 隐藏/可见由上面的 DOM 断言充分覆盖。原先经 __vueParentComponent 读
+      // grid api 的 colDef.hide 断言是 dev-only 探针——生产构建的 Vue 不在
+      // DOM 元素上挂组件实例，恒返回 null（preview webServer 上线后暴露）。
 
-      // 通过 grid API 重新显示 Part_No（等价于列菜单勾选）→ 表头渲染
-      await page.evaluate(() => {
-        for (const el of document.querySelectorAll('div')) {
-          const ex = el.__vueParentComponent?.exposed
-          if (ex?.api?.value?.getColumnDef) {
-            ex.api.value.setColumnsVisible(['Part_No'], true)
-            break
-          }
-        }
-      })
+      // 重新显示 Part_No：系统设置是隐藏列的权威事实源（grid 无列菜单 UI 可用，
+      // 且 view 页不把文件选择写进 URL——reload 会丢失选中文件得到空网格），
+      // 更新设置后走一次完整重导航（openViewTab 会重挂 DataBrowserAgGrid、
+      // onMounted 重读 getSettings），Part_No 回到表头
+      await putHidden(HIDDEN.filter((c) => c !== 'Part_No'))
+      await openViewTab(page, SEEDED_FILES.GAGE_S1)
       await expect(page.locator('.ag-header-cell[col-id="Part_No"]').first()).toBeVisible({
-        timeout: 10_000,
+        timeout: 30_000,
       })
     } finally {
       await putHidden([])

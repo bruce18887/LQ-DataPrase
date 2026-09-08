@@ -82,8 +82,18 @@ test.describe('认证与路由守卫', { tag: ['@auth'] }, () => {
     // 故用 waitForURL 等待重定向，不对 goto 抛错断言。
     page.goto('/data').catch(() => {})
     await page.waitForURL(/\/login/, { timeout: 15_000 })
-    const token = await page.evaluate(() => localStorage.getItem('access_token'))
-    expect(token).toBeNull()
+    // 首次落地 /login 后，其余在途请求仍会各自触发 401 → 再次 window.location
+    // 重定向；生产包导航更密，evaluate 可能撞上导航（context destroyed）→ 捕获重试
+    await expect.poll(
+      async () => {
+        try {
+          return await page.evaluate(() => localStorage.getItem('access_token'))
+        } catch {
+          return 'navigating'
+        }
+      },
+      { timeout: 10_000 },
+    ).toBe(null)
   })
 
   test('@p2 /auth/refresh/ 返回新的 access 与 refresh（轮换 + 黑名单）', async ({ page }) => {
