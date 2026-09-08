@@ -114,6 +114,11 @@ def compute_wafer_map_data(df, metadata, param, color_by, x_col, y_col):
     serial_col = get_serial_column(df)
     bin_col = get_bin_column(df, metadata)
 
+    # 参数值着色数据源：选中判定参数时逐点取值（与 xs/ys 同一掩码，NaN 不下发）。
+    # 无论 color_by 都取——着色分支是前端职责，后端只管给数据。
+    param_vals = (pd.to_numeric(get_1d_from(df, param), errors='coerce').to_numpy(dtype='float64', copy=False)
+                  if param else None)
+
     xs = pd.to_numeric(get_1d_from(df, x_col), errors='coerce').to_numpy(dtype='float64', copy=False)
     ys = pd.to_numeric(get_1d_from(df, y_col), errors='coerce').to_numpy(dtype='float64', copy=False)
     valid = np.isfinite(xs) & np.isfinite(ys)
@@ -134,6 +139,10 @@ def compute_wafer_map_data(df, metadata, param, color_by, x_col, y_col):
             point['site'] = site_vals[i]
             if color_by == 'site':
                 point['color_group'] = f'Site {site_vals[i]}'
+        if param_vals is not None:
+            v = param_vals[i]
+            if math.isfinite(v):
+                point['value'] = float(v)
         points.append(point)
 
     x_vals = xs[valid].tolist()
