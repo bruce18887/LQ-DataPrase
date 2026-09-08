@@ -239,3 +239,11 @@
   border-radius: 6px;
   border: 1px solid var(--border-2, #e4e7ed);
 }
+
+/* light 主题降一档底色：light 下 --bg-3 与 --border 同为 slate-200，工具栏内
+ * 所有 --border 描边（筛选分区/选择器轮廓）会与底色同值消失（night-visibility
+ * e2e 契约：边框不得与卡片底色同值）。night 的 --bg-3 是白 5%、与 --border
+ * 白 10% 天然分离，保持不变。 */
+:root[data-theme='light'] .dp-analysis-toolbar {
+  background: var(--bg-2, #f1f5f9);
+}
