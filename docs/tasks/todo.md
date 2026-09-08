@@ -1,3 +1,62 @@
+# 任务：e2e 体系修复（21 个确定性失败 + 提速基建）（2026-09-08）✅
+
+用户需求：「都修复一下」——按 2026-09-08 e2e 排查报告全项修复。
+排查结论（实测）：全量 wall 7min05s / 总工作量 37.2min / 并行度 5.3·6 已打满；
+24 失败 = 21 确定性 + 3 负载 flake；失败行占 24% 工作量；57 条 ≥10s 长尾占 53%；
+后端非瓶颈（histogram 65ms）；119 处 waitForTimeout 合计 83s。
+
+## 实施清单
+
+- [x] 修复「登录重定向/页面渲染」家族：electron fallback ×1、roadmap ×3、
+      night-visibility ×1、serial-no-column ×5（afterAll loginAs 链路）
+- [x] 修复「种子数据解析」家族：boxplot-bool-params ×2（resolveFileId null）
+- [x] 修复「断言/契约」家族：multi-file-filter ×2、tab-independent-files ×1、
+      view-data Pass/Fail ×1、legend-color 相关性散点 ×1、admin 禁用启用 ×1、
+      wafermap-hidden-tab-init ×1、wafermap-model-not-found ×1
+- [x] 失败 spec 的 afterAll/finally 清理修复（当前每轮泄漏 DB 行：
+      e2e_no_coord/e2e_sts8200/sample.csv/big_* 等）
+- [x] seed_test_data 清理模式补齐：非 e2e_ 前缀的测试泄漏名（**偏离：改为测试级
+      自清**，见 Review）
+- [x] playwright webServer 换 vite build + preview（砍 dev 模块图加载，
+      ~350 次 goto）；package.json 加 quick 脚本（Edge+P0+P1 组合）
+- [x] waitForTimeout 有把握转换的条件等待化（本批触及 spec + 顶部 offender，
+      逐文件复跑验证）；其余存量评估后记录
+- [x] 全量验证：npm run build 绿 + 全量 e2e 绿 + 释放端口；todo Review 落账
+
+## 修正说明
+
+- 排查报告原建议「本地 retries 改 0」→ 不改：retries 只在失败时花时间，失败修清后
+  retries:1 成本≈0 且保留对真 flake 的防护；配置注释为既有决策（dev 劣化防护）。
+
+## Review（2026-09-09 凌晨收尾）
+
+- 修复账目：21 个确定性失败全绿。基线 297 过/24 终败 → 终局 311 过/1 终败+7 flaky。
+  三家族根因：① fresh context 继承 storageState + /login 路由守卫弹回（登录/渲染
+  家族）；② DB 跨轮泄漏下游污染（serial-no/SFTP 导入 sample.csv 等，清理后
+  wafermap×2 与 multi-file 自愈）；③ 断言/契约过时（view-data Pass/Fail 重置契约、
+  legend-color 容器本体定位器、admin 状态文案、boxplot-bool 400 契约、popper 残留）。
+- **计划偏离（seed 清理）**：原建议 seed_test_data 补清非 e2e_ 前缀泄漏名 → 放弃
+  全局 purge：sample.csv/big_* 是用户可正常上传的命名，全局清有误删真实数据风险。
+  改为测试级自清（sftp×2 afterAll 接 deleteSftpImportsQuiet；serial-no 修
+  storageState 继承后 afterAll 正常自清）。
+- **preview 切换暴露 3 处 dev-only 假设**（全量跑才现形，均修复）：fonts 的 CSS
+  压缩引号规范化、auth401 二次重定向撞 evaluate、view-data 的 __vueParentComponent
+  dev-only 探针（产品无列菜单 UI，重显改设置+重导航）。
+- **转换引入 1 个真回归并修复**：file-switch 选参改 params[1]——QQ/Box 开启时文件
+  切换自动选参已为 params[0] 发过请求，同值点击不触发 change（安静环境 2/2 必挂，
+  旧代码靠竞态通过）。
+- waitForTimeout 转换：exports 19→0、file-switch 8→2、gage-qqbox 11→7、outlier
+  10→6（stale-trap 断言与对抗窗口的 500ms 保留并注释），加此前批次合计 37 处；
+  全库余 ~80 处多为有界轮询/有意窗口，后续逐 spec 渗透。
+- 最终全量（workers=6 静默机）：311 过/7 flaky/1 终败/18 skip，wall 438s。终败 =
+  view-data 固定列 @p1，审计边界清单内的既有满载 flake（安静复跑绿，本批不追）。
+  wall 与基线 424.6s 持平：提速被 7 flaky 重试双跑吃掉，确定性失败清零后的收益在
+  「红→修→重跑」循环消失与结果可信度，不在单跑 wall。
+- 提交分块：0b24663(ui) → 1886e78(21失败+清理) → 9163718(dev-only) →
+  03861f4(基建+roadmap) → 61b3ea2(等待转换) → 本提交(docs)。
+
+---
+
 # 任务：晶圆图页面对齐保守重设计原型（2026-09-08）✅
 
 用户需求：参考 docs/plans/analysis-conservative-preview.html 的晶圆图设计改造晶圆图 tab。

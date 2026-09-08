@@ -16,6 +16,49 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-09-08 e2e 体系修复（21 确定性失败 + 提速基建）新增教训
+
+- **`browser.newContext()` 会继承项目的 `use.storageState`**：afterAll 清理里裸
+  `newContext()` 拿到的是**已登录** context（storageState 从 playwright projects 配置
+  继承），并非干净上下文；旧 token 30 分钟有效期内清理链路「时好时坏」被误判为 flake。
+  需要未登录态必须显式 `newContext({ storageState: { cookies: [], origins: [] } })`。
+  另：`.main-layout` 是 App.vue 全路由根节点（登录页也有），`gotoApp('/login')` 恒
+  「过」但语义错误，不能用它证明「当前在登录页」。
+- **EP multiple el-select 的 popper 残留不是 flake 而是确定性坑**：Escape 依赖焦点
+  仍在 select 上，焦点被抢后按键落空 → popper 残留，`dp-file-option__meta` 子树拦截
+  后续对筛选区控件的点击（2026-09-07/08 两次被归「flake」的本体）。multiple 模式
+  勾选后 popper 本就不自动关。修法见 helpers/params.ts `closeFilePopper`（Escape →
+  仍未 hidden → 点 tab 标题 → toBeHidden 兜底断言），四个 tab 作用域共用。
+- **ECharts 实例属性定位器必须匹配容器本体**：实例属性挂在 `echarts.init` 传入的
+  容器元素**本体**上；ref 即容器的组件（如 `.scatter-chart-inner`）要写
+  `.scatter-chart-inner[_echarts_instance_]`，后代形式 `div[...]` 恒为空 → 定位器
+  永假红（legend-color 相关性散点用例跨天失败的本体）。
+- **R2④ 再现两例（注册时机必须紧贴触发动作）**：① exports spec 的 histogram 响应
+  注册写在文件选择 click 之后，响应先到则白等满 15s（有 .catch 兜底成纯浪费）；
+  ② file-switch spec 的 boxplot 注册晚于选参、中间还垫了 500ms，响应先到等满 20s
+  直接假红。规则不变：waitForResponse 与触发动作相邻且在前，中间不许再插任何 await。
+- **vite preview 不继承 `server.proxy`**：webServer 换 `vite build + preview` 后
+  /api 代理静默失效（页面能开、接口全 404），必须在 vite.config.ts 显式配
+  `preview.proxy`（内容同 server.proxy）。改 webServer 形态时先想这条。
+- **EP el-select 对已选中值再点一次不触发 change、不发请求**：条件等待
+  （waitLoadingGone 等「自动选参链完成」）把时序钉死后，原本靠竞态通过（自动选参
+  未完成 → 点击 = 真切换）的用例会**确定性**失败——实测 file-switch-param-reset：
+  QQ/Box 开启时文件切换已自动为 params[0] 发过 qqplot/boxplot，再
+  `selectParam(params[0])` 是同值点击，两个 20s waitForResponse 全超时（安静环境
+  2/2 必挂）。规则：用例要「驱动切换」必须选**不同于当前选中**的值（params[1]）；
+  写「选 X → 断言请求」前先想清楚 X 是否已被产品自动选过。
+- **webServer 换 build+preview 后，e2e 跑的是生产 bundle——dev-only 机制探针必挂**
+  （一换全暴露，3 例同根因）：① `__vueParentComponent` 是 Vue **仅 dev** 挂在 DOM
+  上的属性，生产构建恒 undefined → view-data 经它读 grid api 的断言拿到 null；
+  且产品无列菜单 UI（defaultColDef 未启用 filter → ag-grid 不渲染表头菜单按钮），
+  重显路径改走「系统设置（权威事实源）更新 + 完整重导航」（view 页不把文件选择写
+  进 URL，裸 reload 丢文件选择得空网格）。② CSS 压缩器（lightningcss）
+  把源码 `'Segoe UI'` 规范化为 `"Segoe UI"` → fonts token 用例按原文比较 dev 绿 /
+  preview 必挂，比较前两侧剥引号。③ 生产包导航快且密 → auth401 落地 /login 后
+  其余在途 401 再触发 window.location 重定向，evaluate 撞上导航抛 context
+  destroyed → try/catch + expect.poll 重试。规则：动 webServer 形态后，全量跑一遍
+  找「依赖 dev 行为（未压缩 CSS / dev 时序 / dev 全局变量）」的用例。
+
 ## 2026-09-07 图表记忆「刷新即默认」三根因修复新增教训
 
 - **Vue 子组件 prop 更新滞后于 promise 微任务回调**：父组件 setup 里 `promise.then` 先改
