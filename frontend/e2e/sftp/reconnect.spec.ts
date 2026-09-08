@@ -1,6 +1,7 @@
 import { test, expect, type Locator } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
 import { startSftpServer, type SftpTestServer } from '../helpers/sftpServer'
+import { deleteSftpImportsQuiet } from '../helpers/cleanup'
 
 /**
  * SFTP 断线续连（记住上次路径）端到端用例。
@@ -79,8 +80,10 @@ test.beforeAll(async () => {
   server = await startSftpServer()
 })
 
-test.afterAll(async () => {
+test.afterAll(async ({ browser }) => {
   server?.stop()
+  // 导入注册的数据行失败路径会泄漏（sample.csv / root.csv / big_*），按名单清
+  await deleteSftpImportsQuiet(browser)
 })
 
 // 后端 SFTP 会话/断线续连记录按 user_id 存储，多 worker 并行会互相覆盖

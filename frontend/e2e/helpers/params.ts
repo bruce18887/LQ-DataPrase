@@ -169,6 +169,29 @@ export async function pickTabFileAndWaitCompute(
 }
 
 /**
+ * 确定性关闭某 tab 的文件选择器下拉（multiple 模式选中后 EP 保持开启）。
+ *
+ * 为什么不能只按一次 Escape：Escape 依赖焦点仍在 select 上——焦点不在时
+ * 按键落空，popper 残留开会用 dp-file-option__meta 子树挡住后续对筛选区
+ * 复选框/控件的点击（2026-09-07/08 两次被归为「flake」的本体，实测拦截；
+ * 2026-09-08 专项清理）。Escape → 仍未关 → 点 tab 标题（click-outside）→
+ * 最终以 hidden 断言兜底。locator 必须限定外层 .el-popper：popper-class
+ * 同时挂在外层 popper 与内层 .el-select-dropdown 上，裸类名会 strict violation。
+ */
+export async function closeFilePopper(page: Page, scope: 'single' | 'wafer' | 'correlation' | 'multi') {
+  const popper = page.locator(`.el-popper.dp-file-picker-${scope}`)
+  for (let i = 0; (await popper.count()) > 0 && (await popper.isVisible()) && i < 3; i++) {
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(150)
+    if (await popper.isVisible()) {
+      await page.locator('.el-tabs__item.is-active').click()
+      await page.waitForTimeout(150)
+    }
+  }
+  await expect(popper).toBeHidden({ timeout: 5_000 })
+}
+
+/**
  * 选中第一个「有真实规格限」的参数，返回其名字（找不到返回 null）。
  *
  * 为什么需要：CTA8280F 等格式里 Index_No / SW_Bin / X_COORD / Test_Time 这类

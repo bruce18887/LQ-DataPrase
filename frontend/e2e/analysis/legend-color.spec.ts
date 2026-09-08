@@ -131,9 +131,18 @@ test.describe('@p1 图例颜色严格对应', { tag: ['@p1', '@analysis'] }, () 
   test('相关性散点：回归线 itemStyle.color 与 lineStyle.color 一致', async ({ page }) => {
     await gotoApp(page, '/analysis')
     await page.getByRole('tab', { name: /相关性对比/ }).click()
-    // 相关性 tab 吃自己那份文件选择（不选到 CTA8280F 就没有 Kelvin_VIN）
+    // 相关性 tab 吃自己那份文件选择（不选到 CTA8280F 就没有 Kelvin_VIN）。
+    // 参数列表来自不带 params 的 histogram 快路径 —— 注册先于 pickTabFile
+    // （R2④），列表落位前 X 下拉是空的（并行负载下 800ms 固定等待不够）。
+    const listResp = page.waitForResponse(
+      (r) =>
+        r.url().includes('/analysis/histogram/') &&
+        r.request().method() === 'POST' &&
+        !(r.request().postData() || '').includes('"params"'),
+      { timeout: 20_000 },
+    )
     await pickTabFile(page, 'correlation', RECOMMENDED.analysis)
-    await page.waitForTimeout(800)
+    await listResp
     // 同屏改造（2026-09-07）后 X/Y 两个下拉合进同一张卡，按卡内序区分
     const pairCard = page.locator('.el-tab-pane:visible .el-card').filter({ hasText: 'X 轴测试项' }).first()
     const xSelect = pairCard.locator('.el-select').first()
@@ -142,8 +151,9 @@ test.describe('@p1 图例颜色严格对应', { tag: ['@p1', '@analysis'] }, () 
     const ySelect = pairCard.locator('.el-select').nth(1)
     await ySelect.click()
     await ySelect.locator('input').first().pressSequentially('Kelvin_VIN')
-    await page.waitForTimeout(600)
-    await page.locator('.el-select-dropdown:visible .el-select-dropdown__item').filter({ hasText: 'Kelvin_VIN' }).first().click()
+    const yOpt = page.locator('.el-select-dropdown:visible .el-select-dropdown__item').filter({ hasText: 'Kelvin_VIN' }).first()
+    await expect(yOpt).toBeVisible({ timeout: 15_000 })
+    await yOpt.click()
 
     // 大文件（n=10000）散点走 canvas large + 渲染器切换时实例会短暂
     // dispose 重建，直接等 div[_echarts_instance_] 可能撞上空窗。
@@ -152,9 +162,13 @@ test.describe('@p1 图例颜色严格对应', { tag: ['@p1', '@analysis'] }, () 
     await expect(
       layout.locator('[data-corr-scatter-card] .head-metric').filter({ hasText: 'r=' }),
     ).toBeVisible({ timeout: 25_000 })
-    const inst = page.locator('.el-tab-pane:visible .scatter-chart-inner div[_echarts_instance_]').first()
+    // ⚠️ 实例属性挂在 .scatter-chart-inner 本体（ref 即 echarts 容器，探针实测
+    // inner 子树无 div[_echarts_instance_]）：同屏改造后容器不再是「wrapper > 图表 div」
+    // 的包裹结构，旧的『.scatter-chart-inner div[_echarts_instance_]』后代选择器
+    // 恒不命中（假红根源）
+    const inst = page.locator('.el-tab-pane:visible .scatter-chart-inner[_echarts_instance_]').first()
     await expect
-      .poll(async () => (await inst.count()) > 0, { timeout: 20_000 })
+      .poll(async () => (await inst.count()) > 0, { timeout: 30_000 })
       .toBe(true)
     const opt = await readOption(inst)
     const reg = (opt?.series ?? []).find((s: any) => s.name === '回归线')
