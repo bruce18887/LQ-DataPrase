@@ -156,6 +156,12 @@ python manage.py seed_test_data --clear
   `dp-param-popper-single`、多文件 tab `dp-param-popper-multi`，teleport 到 body 的
   面板同名会让隐藏 pane 的那一份参与全局 `:visible` 查询）；选项
   `.el-select-dropdown__item`。不得再用「页面上第几个 .el-select」这类位置定位。
+- 晶圆图（2026-09-08 起对齐保守重设计原型）：着色 radio 挂 `data-wafer-color`；
+  左栏两表挂 `[data-wafer-zone-table]` / `[data-wafer-stat-table]`；
+  自动结论条挂 `[data-wafer-conclusion]`。旧「Total Dies/Pass Dies/Fail Dies」el-card
+  统计卡已删（数字并入左栏统计表），「按结果/按 Site/分区模式」radio 三档已改为
+  着色 4 档 radio + 「分区模式」独立 checkbox，el-slider 高度已换原生
+  `input.height-range`——存量定位器一律走上述契约属性，勿再按文案或控件类型猜。
 - 分析页切文件后读数据（2026-09-05）：切换窗口内 UI 仍显示**上一个文件**的图表/范围表
   （遮罩不在，`waitLoadingGone` 拦不住），直接读值会拿到旧数据 —— 实测读到过残留文件
   恒定列的 1/1 范围。读数值/参数列表前用 `selectAnalysisFile`（已内置等待新文件计算
