@@ -48,6 +48,19 @@ export default defineConfig({
       },
     },
   },
+  // e2e 的生产构建 webServer（playwright.config 的 PW_DEV_SERVER=1 逃生门不用它）：
+  // preview 不继承 server.proxy，必须显式声明同一份 /api 代理
+  preview: {
+    host: '0.0.0.0',
+    port: 3000,
+    strictPort: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+    },
+  },
   build: {
     // Suppress "chunks larger than 500 kB" warnings — the analysis and
     // data-management views legitimately bundle echarts/ag-grid which are

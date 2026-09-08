@@ -54,7 +54,7 @@ e2e/
     upload.ts          # uploadFile / expectUploadSuccess
     params.ts          # selectAnalysisFile / listParams / selectParam / sampleN
     download.ts        # captureDownload（保存到 .downloads/ 供人工比对）
-  smoke/  auth/  global/  dashboard/  data/  analysis/  batch/  sftp/  settings/  roadmap/  admin/  exports/
+  smoke/  auth/  global/  dashboard/  data/  analysis/  batch/  sftp/  settings/  admin/  exports/
   .auth/        # storageState（gitignore）
   .downloads/   # 导出文件落地（gitignore）
 ```
