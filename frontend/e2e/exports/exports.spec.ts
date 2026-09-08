@@ -53,6 +53,19 @@ async function openTab(page: Page, tabLabel: string, panelHeading: string) {
 }
 
 /**
+ * 条件等待下拉选项就绪（数量 > 0）；超时仍为 0 时静默返回当前数量，
+ * 由调用方决定是否走 Escape 重试 / skip 分支。
+ * （替代固定 waitForTimeout(200)：选项就绪快慢不定，固定等待两头都不稳）
+ */
+async function waitForOptions(options: Locator): Promise<number> {
+  await expect
+    .poll(() => options.count(), { timeout: 5_000 })
+    .toBeGreaterThan(0)
+    .catch(() => {})
+  return options.count()
+}
+
+/**
  * 依次为前 N 个 el-select 选择不同文件。
  * el-select 选项 teleport 到 body（.el-select-dropdown__item），逐个打开并取“可用项”。
  * 返回成功分配的数量。
@@ -68,19 +81,17 @@ async function assignFiles(page: Page, selects: Locator, want: number): Promise<
       await sel.click()
       const dropdown = page.locator('.el-select-dropdown:visible')
       await dropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
-      await page.waitForTimeout(200)
 
       // 重试：首次打开可能 API 还未返回、选项为 0
       let options = dropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
-      let count = await options.count()
+      let count = await waitForOptions(options)
       if (count === 0) {
         await page.keyboard.press('Escape')
-        await page.waitForTimeout(500)
+        await dropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
         await sel.click()
         await dropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
-        await page.waitForTimeout(200)
         options = dropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
-        count = await options.count()
+        count = await waitForOptions(options)
       }
 
       if (count === 0) {
@@ -91,7 +102,6 @@ async function assignFiles(page: Page, selects: Locator, want: number): Promise<
       await options.first().click()
       assigned++
       await dropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
-      await page.waitForTimeout(200)
     } catch (e) {
       await page.keyboard.press('Escape').catch(() => {})
       break
@@ -288,18 +298,16 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     await fileSelect.click()
     const dropdown = page.locator('.el-select-dropdown:visible')
     await dropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
-    await page.waitForTimeout(200)
     let options = dropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
-    let count = await options.count()
+    let count = await waitForOptions(options)
     if (count === 0) {
       console.log('[export-tools] 文件下拉为空，重试一次')
       await page.keyboard.press('Escape')
-      await page.waitForTimeout(500)
+      await dropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
       await fileSelect.click()
       await dropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
-      await page.waitForTimeout(200)
       options = dropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
-      count = await options.count()
+      count = await waitForOptions(options)
     }
     if (count === 0) {
       console.log('[export-tools] 可选文件为空，跳过点击断言')
@@ -307,15 +315,17 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
       test.skip(true, '无可用上传文件')
       return
     }
+    // 等待参数列表加载（ExportToolsTab.vue 选文件后拉 /analysis/histogram/）
+    // 注册必须先于触发点击（R2④：响应先到则永远等不到）
+    const histogramResp = page
+      .waitForResponse(
+        (r) => /\/analysis\/histogram\/?/.test(new URL(r.url()).pathname) && r.status() === 200,
+        { timeout: 15_000 },
+      )
+      .catch(() => null)
     await options.first().click()
     await dropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
-    await page.waitForTimeout(200)
-
-    // 等待参数列表加载（ExportToolsTab.vue 拉 /analysis/histogram/）
-    await page.waitForResponse(
-      (r) => /\/analysis\/histogram\/?/.test(new URL(r.url()).pathname) && r.status() === 200,
-      { timeout: 15_000 },
-    ).catch(() => {})
+    await histogramResp
 
     // 选择第一个参数，确保批量导出按钮可用
     const paramSelect = page.locator('.export-tools .el-select').filter({ hasText: '点击选择要导出的参数' }).first()
@@ -379,30 +389,31 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     await fileSelect.click()
     const dropdown = page.locator('.el-select-dropdown:visible')
     await dropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
-    await page.waitForTimeout(200)
     let options = dropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
-    if (await options.count() === 0) {
+    let count = await waitForOptions(options)
+    if (count === 0) {
       await page.keyboard.press('Escape')
-      await page.waitForTimeout(500)
+      await dropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
       await fileSelect.click()
       await dropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
-      await page.waitForTimeout(200)
       options = dropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
+      count = await waitForOptions(options)
     }
-    if (await options.count() === 0) {
+    if (count === 0) {
       await page.keyboard.press('Escape')
       test.skip(true, '无可用上传文件')
       return
     }
+    // 等待参数列表加载（注册先于触发点击，R2④）
+    const histogramResp = page
+      .waitForResponse(
+        (r) => /\/analysis\/histogram\/?/.test(new URL(r.url()).pathname) && r.status() === 200,
+        { timeout: 15_000 },
+      )
+      .catch(() => null)
     await options.first().click()
     await dropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
-    await page.waitForTimeout(200)
-
-    // 等待参数列表加载
-    await page.waitForResponse(
-      (r) => /\/analysis\/histogram\/?/.test(new URL(r.url()).pathname) && r.status() === 200,
-      { timeout: 15_000 },
-    ).catch(() => {})
+    await histogramResp
 
     // 全选参数：E2E 环境参数过多时可能导致后端超时，因此最多选 20 个
     const panel = page.locator('.export-tools')
@@ -469,30 +480,31 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     await fileSelect.click()
     const dropdown = page.locator('.el-select-dropdown:visible')
     await dropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
-    await page.waitForTimeout(200)
     let options = dropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
-    if (await options.count() === 0) {
+    let count = await waitForOptions(options)
+    if (count === 0) {
       await page.keyboard.press('Escape')
-      await page.waitForTimeout(500)
+      await dropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
       await fileSelect.click()
       await dropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
-      await page.waitForTimeout(200)
       options = dropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
+      count = await waitForOptions(options)
     }
-    if (await options.count() === 0) {
+    if (count === 0) {
       await page.keyboard.press('Escape')
       test.skip(true, '无可用上传文件')
       return
     }
+    // 等待参数列表加载（注册先于触发点击，R2④）
+    const histogramResp = page
+      .waitForResponse(
+        (r) => /\/analysis\/histogram\/?/.test(new URL(r.url()).pathname) && r.status() === 200,
+        { timeout: 15_000 },
+      )
+      .catch(() => null)
     await options.first().click()
     await dropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
-    await page.waitForTimeout(200)
-
-    // 等待参数列表加载
-    await page.waitForResponse(
-      (r) => /\/analysis\/histogram\/?/.test(new URL(r.url()).pathname) && r.status() === 200,
-      { timeout: 15_000 },
-    ).catch(() => {})
+    await histogramResp
 
     const panel = page.locator('.export-tools')
 
@@ -501,19 +513,18 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     await paramSelect.click()
     let paramDropdown = page.locator('.el-select-dropdown:visible')
     await paramDropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
-    await page.waitForTimeout(200)
     let paramOptions = paramDropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
+    await waitForOptions(paramOptions)
     let P = (await paramOptions.allTextContents()).map((n) => n.trim()).filter(Boolean)
     if (P.length < 2) {
       // 重试一次：参数列表请求可能未完成
       await page.keyboard.press('Escape')
       await paramDropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
-      await page.waitForTimeout(500)
       await paramSelect.click()
       paramDropdown = page.locator('.el-select-dropdown:visible')
       await paramDropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
-      await page.waitForTimeout(200)
       paramOptions = paramDropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
+      await waitForOptions(paramOptions)
       P = (await paramOptions.allTextContents()).map((n) => n.trim()).filter(Boolean)
     }
     if (P.length < 2) {

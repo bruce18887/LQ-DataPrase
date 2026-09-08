@@ -15,9 +15,11 @@
 import { test, expect } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
 import { selectAnalysisFile, listParams, selectParam, sampleN } from '../helpers/params'
+import { waitLoadingGone } from '../helpers/charts'
 import { SEEDED_FILES, PARAM_SAMPLE_COUNT } from '../fixtures/test-data'
 
 const LAYOUT = '.analysis-tab-layout'
+const SINGLE = '.single-param-tab'
 
 test.describe('@regression gage_m_S4 QQ/Box plot emitsOptions null bug', () => {
   test('stress test: file switch + param switch + QQ/Box toggles', async ({ page }) => {
@@ -39,7 +41,7 @@ test.describe('@regression gage_m_S4 QQ/Box plot emitsOptions null bug', () => {
     // 1) Switch to gage_m_S4
     await selectAnalysisFile(page, SEEDED_FILES.GAGE_S4)
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
-    await page.waitForTimeout(2000)
+    await waitLoadingGone(page.locator(SINGLE))
 
     const all = await listParams(page)
     expect(all.length, 'params should be non-empty').toBeGreaterThan(0)
@@ -88,9 +90,9 @@ test.describe('@regression gage_m_S4 QQ/Box plot emitsOptions null bug', () => {
 
     // 7) Switch to another file and back
     await selectAnalysisFile(page, SEEDED_FILES.GAGE_S3)
-    await page.waitForTimeout(2000)
+    await waitLoadingGone(page.locator(SINGLE))
     await selectAnalysisFile(page, SEEDED_FILES.GAGE_S4)
-    await page.waitForTimeout(2000)
+    await waitLoadingGone(page.locator(SINGLE))
 
     console.log('\n========== Page errors ==========')
     pageErrors.forEach((e) => console.log(e))
@@ -108,7 +110,7 @@ test.describe('@regression gage_m_S4 QQ/Box plot emitsOptions null bug', () => {
     await gotoApp(page, '/analysis')
     await selectAnalysisFile(page, SEEDED_FILES.GAGE_S4)
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
-    await page.waitForTimeout(2000)
+    await waitLoadingGone(page.locator(SINGLE))
 
     // Click box plot. Catch the very brief placeholder window with a 1.5s window.
     const placeholderAppeared = await Promise.race([

@@ -64,7 +64,7 @@ test.describe('@regression file switch resets selectedParam', () => {
     await expect(
       page.getByRole('tab', { name: /单文件分析/ }),
     ).toBeVisible({ timeout: 20_000 })
-    await page.waitForTimeout(1500)
+    await waitLoadingGone(page.locator(SINGLE))
 
     const gageParams = await listParams(page)
     expect(gageParams.length, 'gage params should be non-empty').toBeGreaterThan(0)
@@ -74,7 +74,7 @@ test.describe('@regression file switch resets selectedParam', () => {
     // leak into the next file's API calls".
     const firstParam = gageParams[0]
     await selectParam(page, firstParam)
-    await page.waitForTimeout(500)
+    await waitLoadingGone(page.locator(SINGLE))
 
     // 2) Enable QQ + Box so the next file switch has live chart calls
     await page.getByText('显示QQ图').click()
@@ -86,7 +86,7 @@ test.describe('@regression file switch resets selectedParam', () => {
     //    selectedParam and the store, and the new file's first param
     //    should be auto-selected.
     await selectAnalysisFile(page, SEEDED_FILES.ETS88_FT)
-    await page.waitForTimeout(2000)
+    await waitLoadingGone(page.locator(SINGLE))
 
     // 4) Sanity check: param dropdown should now show ETS88 params,
     //    NOT contain the gage-only firstParam from step 1.
@@ -102,8 +102,14 @@ test.describe('@regression file switch resets selectedParam', () => {
     // 5) Drive a param switch on the new file to confirm the chart
     //    APIs accept it. If the stale `firstParam` was leaking in, this
     //    would 400 (or 500 for histogram).
+    // 注意：QQ/Box 开启时，文件切换的自动选参已为 params[0] 发过 qqplot/boxplot
+    // （上面的 waitLoadingGone 等到遮罩清零 = 自动选参链已完成），对已选中值
+    // 再点一次不触发 change、不发请求（实测静默必挂）→ 必须选一个不同的参数。
+    const switchTo = ets88Params[1] ?? ets88Params[0]
+    // qqplot 与 boxplot 由同一次选参触发：两个等待都必须先注册（R2④）
     const qqResponse = page.waitForResponse(qqplotUrl, { timeout: 20_000 })
-    await selectParam(page, ets88Params[0])
+    const bpResponse = page.waitForResponse(boxplotUrl, { timeout: 20_000 })
+    await selectParam(page, switchTo)
     const qq = await qqResponse
     expect(
       [200, 400].includes(qq.status()),
@@ -114,8 +120,6 @@ test.describe('@regression file switch resets selectedParam', () => {
       `qqplot must not 4xx/5xx for a valid new-file param, got ${qq.status()}`,
     ).toBe(200)
 
-    const bpResponse = page.waitForResponse(boxplotUrl, { timeout: 20_000 })
-    await page.waitForTimeout(500)
     const bp = await bpResponse
     expect(
       bp.status(),
@@ -147,7 +151,7 @@ test.describe('@regression file switch resets selectedParam', () => {
     await expect(
       page.getByRole('tab', { name: /单文件分析/ }),
     ).toBeVisible({ timeout: 20_000 })
-    await page.waitForTimeout(1500)
+    await waitLoadingGone(page.locator(SINGLE))
 
     // Enable QQ + Box (no param chosen yet)
     await page.getByText('显示QQ图').click()
@@ -159,7 +163,7 @@ test.describe('@regression file switch resets selectedParam', () => {
     // placeholder text — different chart components use different
     // empty states — only that the layout is stable.
     await selectAnalysisFile(page, SEEDED_FILES.ETS88_FT)
-    await page.waitForTimeout(2000)
+    await waitLoadingGone(page.locator(SINGLE))
     await expect(page.locator(LAYOUT)).toBeVisible()
   })
 

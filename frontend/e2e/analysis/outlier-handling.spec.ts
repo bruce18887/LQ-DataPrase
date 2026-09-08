@@ -58,9 +58,8 @@ async function findParamWithOutliers(page: import('@playwright/test').Page): Pro
   for (const param of allParams) {
     if (results.length > 0) break
     await selectParam(page, param)
+    // loading 遮罩消失前响应体必已到达并被上方 handler 入列（监听先于请求挂好）
     await waitLoadingGone(page.locator(SINGLE))
-    // Give the response listener a tick to populate results.
-    await page.waitForTimeout(300)
   }
 
   page.off('response', handler)
@@ -173,18 +172,21 @@ test.describe('@p1 异常值处理', { tag: ['@p1', '@analysis'] }, () => {
     await outlierSelect.click()
     await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '不处理' }).first().click()
     await waitLoadingGone(page.locator(SINGLE))
-    await page.waitForTimeout(500)
 
     // off + 开关关（默认）：KDE = 剔除曲线（不含超限数据，主峰忠实）
+    await expect
+      .poll(async () => findSeriesData(await getHistogramChartOption(page), 'KDE曲线'), { timeout: 10_000 })
+      .toBeTruthy()
     const kdeOffFiltered = findSeriesData(await getHistogramChartOption(page), 'KDE曲线')
-    expect(kdeOffFiltered, 'off 模式应渲染 KDE 曲线').toBeTruthy()
 
     // off + 勾选「KDE含超限」→ 全量曲线（含超限数据）——开关全局生效的关键断言
     await kdeFullCheckbox.click()
     await expect(kdeFullCheckbox, '勾选后应为选中态').toHaveClass(/is-checked/)
-    await page.waitForTimeout(500)
+    // 陈旧选项是剔除曲线，不可能通过 not.toEqual → 条件等待可安全替代固定 500ms
+    await expect
+      .poll(async () => findSeriesData(await getHistogramChartOption(page), 'KDE曲线'), { timeout: 10_000 })
+      .not.toEqual(kdeOffFiltered)
     const kdeOffFull = findSeriesData(await getHistogramChartOption(page), 'KDE曲线')
-    expect(kdeOffFull, 'off 下勾选含超限应为全量曲线（≠ 剔除曲线）').not.toEqual(kdeOffFiltered)
     await kdeFullCheckbox.click()
 
     // 裁剪范围 + 开关关 → 剔除曲线，与 off 不勾选逐字节一致（与模式解耦）
@@ -199,7 +201,10 @@ test.describe('@p1 异常值处理', { tag: ['@p1', '@analysis'] }, () => {
     // 裁剪范围 + 开关开 → 全量曲线（= off 勾选）
     await kdeFullCheckbox.click()
     await expect(kdeFullCheckbox, '勾选后应为选中态').toHaveClass(/is-checked/)
-    await page.waitForTimeout(500)
+    // 陈旧选项是 clip+未勾选（剔除曲线），与目标全量曲线不同 → 条件等待安全
+    await expect
+      .poll(async () => findSeriesData(await getHistogramChartOption(page), 'KDE曲线'), { timeout: 10_000 })
+      .toEqual(kdeOffFull)
     const kdeClipFull = findSeriesData(await getHistogramChartOption(page), 'KDE曲线')
     expect(kdeClipFull, 'clip 下勾选含超限应为全量曲线（= off 勾选）').toEqual(kdeOffFull)
 
