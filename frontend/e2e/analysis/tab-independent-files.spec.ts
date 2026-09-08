@@ -89,7 +89,7 @@ test.describe('@p1 分析页 tab 独立文件选择', { tag: ['@p1', '@analysis'
     await page.getByRole('tab', { name: /晶圆图/ }).click()
     await pickTabFile(page, 'wafer', RECOMMENDED.waferMap)
     await page.getByRole('button', { name: /加载晶圆图/ }).click()
-    await expect(page.getByText('Total Dies')).toBeVisible({ timeout: 120_000 })
+    await expect(page.locator('[data-wafer-stat-table]')).toBeVisible({ timeout: 120_000 })
 
     // 两个 tab 的请求打在**不同文件**上：晶圆图请求的 file_id 不等于单文件侧的
     const waferFileId = waferIds[waferIds.length - 1]

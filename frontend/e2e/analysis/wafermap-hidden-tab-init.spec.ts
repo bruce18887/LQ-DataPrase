@@ -47,8 +47,8 @@ test('隐藏 tab 超时后打开晶圆图并加载：图表必须真实渲染散
   await loadBtn.click()
   expect((await respPromise).status()).toBe(200)
 
-  // 数据已返回：统计卡片出现
-  await expect(panel.getByText('Total Dies')).toBeVisible({ timeout: 30_000 })
+  // 数据已返回：左栏统计表出现（2026-09-08 重设计后统计卡已删）
+  await expect(panel.locator('[data-wafer-stat-table]')).toBeVisible({ timeout: 30_000 })
 
   // 图表实例必须持有数据系列（修复前 series 为空、图表空白）
   const seriesInfo = await chart.evaluate((el: any) => {
