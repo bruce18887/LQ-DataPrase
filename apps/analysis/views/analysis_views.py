@@ -26,6 +26,7 @@ from apps.analysis.services.statistics import (
     get_serial_candidates,
     get_coord_columns,
     get_columns_with_limits,
+    resolve_spec_limits,
     get_1d_from,
     filter_finite,
     compute_qqplot,
@@ -263,6 +264,11 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
 
         wm = compute_wafer_map_data(df, metadata, param, color_by, x_col, y_col)
 
+        # 参数值着色的归一口径由前端做（有真规格限按 LSL→USL、否则按数据范围），
+        # 这里只下发原始规格限：'Min'/'Max' 占位等「无规格限」语义经
+        # resolve_spec_limits 统一为 None（JSON null），前端不用再判占位符。
+        spec_low, spec_high = resolve_spec_limits(metadata, param) if param else (None, None)
+
         return Response(clean_data({
             'file_id': datafile.id,
             'x_col': x_col,
@@ -270,6 +276,8 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
             'points': wm['points'],
             'stats': wm['stats'],
             'wafer': wm['wafer'],
+            'spec_low': spec_low,
+            'spec_high': spec_high,
         }))
 
     @action(detail=False, methods=['get', 'post'])
