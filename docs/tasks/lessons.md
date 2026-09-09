@@ -16,6 +16,26 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-09-09 SFTP 互斥/取消 + 文件相关性六项改进新增教训
+
+- **EP 2.14 filterable select + automatic-dropdown 会把焦点困在 wrapper，打字全丢**：
+  mousedown 时 filter input 仍 display:none，浏览器默认焦点落到 tabindex=-1 的
+  `el-select__wrapper`；`useFocusController.afterFocus` 在 wrapper 获焦时即开菜单
+  （automatic-dropdown 语义）→ input 显形；随后的 click 里 EP 本应把焦点挪进 input
+  的 `handleClick` 被 `isFocusable(event.target)` 守卫 early-return → 焦点停在
+  wrapper，之后键入全部丢失（**真实用户同样中招**，不只是 e2e；旧「首击只聚焦不
+  展开、二击才开」怪象是同一机制的另一面）。规则：**automatic-dropdown 必须配
+  「打开即显式聚焦 filter input」**（visible-change(true) → nextTick focus，见
+  SerialSelector.vue）；e2e 要断言「打开后打字能过滤」（footer 文案切换），只断言
+  菜单可见钉不住。ExportParamSelector / TestColumnSelector 的同类首击怪象同根因，
+  待后续批次套用同一修法。
+- **本地秒传的传输链路用 `page.route` 延迟钉出确定性断言窗口**：route 处理器里
+  `setTimeout` 3s 再 `continue()`，请求被拦在浏览器、进度卡/互斥禁用已即时渲染 →
+  从容断言互斥与取消；abort 后 `route.continue()` 会 reject，**必须
+  `.catch(() => {})`**；断言完 `unroute` 恢复真实链路再验证状态未被取消破坏。
+- **excelize `auto_filter` 写绝对引用**：写 `'A2:I3'` 读回是 `$A$2:$I$3`——测试断言
+  先 `replace('$','')` 再比对，别照搬 openpyxl 的行为预期。
+
 ## 2026-09-08 e2e 体系修复（21 确定性失败 + 提速基建）新增教训
 
 - **`browser.newContext()` 会继承项目的 `use.storageState`**：afterAll 清理里裸
