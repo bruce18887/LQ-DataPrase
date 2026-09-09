@@ -527,3 +527,18 @@ class FileCorrelationExportTests(TestCase):
         ws = load_workbook(io.BytesIO(self._body(resp)))['测试值对比']
         self.assertEqual(ws['A4'].value, 'ParamA')
         self.assertEqual(ws['A5'].value, 'ParamB')
+
+    def test_export_limit_sheet_has_auto_filter(self):
+        import io
+        from openpyxl import load_workbook
+
+        df1 = pd.DataFrame({'Serial_No': [1], 'ParamA': [1.0]})
+        df2 = pd.DataFrame({'Serial_No': [1], 'ParamA': [1.0]})
+        resp = self._call_export({1: df1, 2: df2})
+        body = self._body(resp)
+        self.assertEqual(resp.status_code, 200, body[:500])
+        ws = load_workbook(io.BytesIO(body))['Limit对比']
+        # 表头行 2 + 1 行数据（行 3）→ 筛选范围 A2:I3（2026-09-09 需求 6）。
+        # excelize 写入绝对引用形式 $A$2:$I$3，剥 $ 后比较（excelize 既有先例
+        # apps/export/tests.py:117 对 auto_filter 只断存在不比字面量）。
+        self.assertEqual(ws.auto_filter.ref.replace('$', ''), 'A2:I3')

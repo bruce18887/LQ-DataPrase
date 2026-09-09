@@ -236,6 +236,10 @@ def build_file_correlation_workbook(f, result):
                          red_style if (r['lsl_fail'] or r['usl_fail']) else data_style)
         row_idx += 1
 
+    # 判定列筛选（2026-09-09 需求 6）：表头行 2 到最后一条数据行；仅 Limit对比 sheet
+    if row_idx > 3:
+        f.auto_filter(sheet_limit, f'A2:I{row_idx - 1}', [])
+
     limit_widths = {'A': 33.125, 'B': 6.0, 'C': 6.25, 'D': 6.0, 'E': 6.25,
                     'F': 7.375, 'G': 7.375, 'H': 9.0, 'I': 9.0}
     for cl, w in limit_widths.items():
