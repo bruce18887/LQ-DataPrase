@@ -1,23 +1,55 @@
-# 任务：SFTP 传输互斥/取消 + 文件相关性对比六项改进（2026-09-09）
+# 任务：SFTP 传输互斥/取消 + 文件相关性对比六项改进（2026-09-09）✅
 
 > spec：docs/superpowers/specs/2026-09-09-sftp-mutex-cancel-and-file-correlation-design.md；
 > 计划：docs/superpowers/plans/2026-09-09-sftp-mutex-cancel-and-file-correlation.md。
 
 ## 实施清单
 
-- [ ] 后端 tight_pct 规则（TDD）
-- [ ] 后端 ignore 开关默认翻转（TDD + 存量测试审计）
-- [ ] 后端 serials 端点免整表拷贝（TDD）
-- [ ] 后端 Excel Limit对比 sheet auto_filter（TDD）
-- [ ] 前端 DiffRule 契约 + 文案 map
-- [ ] 前端 规则C UI + ignore 默认翻转
-- [ ] 前端 序列下拉渲染截断 300
-- [ ] 前端 Limit 判定列排序
-- [ ] 前端 SFTP 传输互斥
-- [ ] 前端 SFTP 下载取消按钮
-- [ ] e2e file-correlation 更新
-- [ ] e2e reconnect 互斥+取消用例
-- [ ] 全量验证 + Review 落账
+- [x] 后端 tight_pct 规则（TDD）
+- [x] 后端 ignore 开关默认翻转（TDD + 存量测试审计）
+- [x] 后端 serials 端点免整表拷贝（TDD）
+- [x] 后端 Excel Limit对比 sheet auto_filter（TDD）
+- [x] 前端 DiffRule 契约 + 文案 map
+- [x] 前端 规则C UI + ignore 默认翻转
+- [x] 前端 序列下拉渲染截断 300
+- [x] 前端 Limit 判定列排序
+- [x] 前端 SFTP 传输互斥
+- [x] 前端 SFTP 下载取消按钮
+- [x] e2e file-correlation 更新
+- [x] e2e reconnect 互斥+取消用例
+- [x] 全量验证 + Review 落账
+
+## Review（2026-09-09 晚收尾）
+
+- **验证账目**：后端全量 `apps.analysis + apps.export` 218 tests OK（76.9s）；
+  `npm run build` 绿；e2e 定向回归 file-correlation P2 **8 过**（27.3s，零 flake）+
+  sftp P1（reconnect + sftp）**10 过 / 1 skip**（3.1m，skip 为既有条件跳过）；
+  跑前按 lessons 2026-08-29 杀掉 8000 端口未钉 `LQDP_SYSTEM_CONFIG_FILE` 的用户
+  runserver 整棵进程树（由 playwright 自起钉配置的后端接管），跑完 8000/3000
+  零监听残留。
+- **需求 → 提交映射**：①互斥 3b34370；②取消按钮 77bf574；③大文件卡死
+  f5697c4（渲染截断 300）+ 5fb0f00（后端免整表拷贝）；④规则C 1a8d200 +
+  bbfb1ce + aca8c6a + 5699c61；⑤ignore 默认翻转 500f0e0 + 05d7b90 + 5699c61；
+  ⑥判定排序 2ec004c + auto_filter d06a0b5；e2e adf2c31 + af4e0ba；
+  计划外修复 7ba94ce（见偏离②）。子代理两阶段审查全程闭环（05d7b90、54dd9cf
+  为审查驱动的补钉）。
+- **计划偏离**：① Task 4 excelize `auto_filter` 落盘为绝对引用 `$A$2:$I$3`，
+  断言剥 `$` 比对（审查者独立复现认可）；② Task 11 收尾查明「序列下拉首击不
+  展开」**非本批回归**，而是 EP 2.14 automatic-dropdown/焦点机制陷阱——焦点困在
+  tabindex=-1 wrapper、打字全丢（真实用户同样中招）→ 计划外 7ba94ce：
+  automatic-dropdown + 打开即显式聚焦 filter input，e2e 同步去掉条件补击
+  workaround；③ Task 11 排序用例 `getByText('Unit')` 加 `.first()`（⑤翻转后
+  9 个无 limit 元数据行进视图，与表头文案 strict 冲突，探针实测 10 处匹配）。
+- **已知限制 / 跟进项**：① 远端停滞场景 1.2s 收尾冷却仍有残余竞态窗口——根治需
+  后端 cancel 标志（生成器协作中断），前端现状已严格优于改动前，记录不追；
+  ② ExportParamSelector / TestColumnSelector 与序列下拉同类 EP 首击怪象，待后续
+  批次套用 7ba94ce 修法（lessons 已记根因）；③ auto_filter 测试在 openpyxl 读出
+  `ws.auto_filter.ref` 为 None 时会 AttributeError（小瑕疵，失败即红不影响判定）；
+  ④ 规则C radio 文案「规则C：B 收紧 ≤ 容差% 允许」未插值实际 x% 值，后续可插值。
+- **双主题**：新增 UI（取消图标按钮、规则C radio、收紧容差输入、footer 提示、
+  互斥禁用态）全走语义 token（`var(--text-2)` / `var(--error)` / `var(--border-2)`
+  等）；LimitTable 判定徽章 `color: #fff` 为本批前既有（token 背景上的对比字），
+  本批未动。
 
 ---
 
