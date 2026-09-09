@@ -16,6 +16,22 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-09-09 分析页 dock 整体高度进布局记忆新增教训
+
+- **e2e 记忆类用例必须先开开关，否则整条持久化链路静默不跑**：seed_users 把 e2e
+  账号 `analysis_chart_memory` 强制 False（防并行污染）→ saveChartState 早退（无 PUT）、
+  persist 不写 localStorage、wireMemory 走复位分支清本机键；UI 一切正常、只表现为
+  「刷新丢」，曾先误判为并行竞态。规则：记忆类 e2e 开头
+  `PUT /auth/settings/ {analysis_chart_memory:true, analysis_chart_state:{}}` 清场+开启、
+  finally 复原 False（chart-memory.spec 模式）；断言服务端写入用本上下文
+  `page.on('request')` 捕 PUT 载荷，勿读共享服务端态（并行同账号必竞态）。
+- **刷新恢复断言要断掉 settings GET 防并行覆盖**：`page.route` abort GET → 记忆开关落
+  null 态 → 不套服务端布局，恢复只走本机 localStorage 链路；此时勾选不恢复需手动勾
+  （enterAll 会翻掉已恢复勾选的同款坑）。
+- **组件局部 ref 是「记忆漏项」的温床**：dock 底部横条高度原是 ChartDock.vue 局部
+  `bodyH` ref，布局记忆只存 rows/rowPcts/colPcts → 刷新必丢。新增视图态要么明确
+  「不持久化」（如最大化，注释写明），要么进 dock 单例同链路持久化，不留第三种。
+
 ## 2026-09-09 SFTP 互斥/取消 + 文件相关性六项改进新增教训
 
 - **EP 2.14 filterable select + automatic-dropdown 会把焦点困在 wrapper，打字全丢**：

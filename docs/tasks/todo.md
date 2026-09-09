@@ -1,3 +1,29 @@
+# 任务：分析页 dock 底部高度滑条进布局记忆（2026-09-09）✅
+
+用户报告：「数据分析页布局记忆不记最底下的高度滑条，一刷新高度就还原」。
+根因：底部横条改的整体高度是 ChartDock.vue 组件局部 `bodyH` ref，布局记忆
+（localStorage + 账号级 analysis_chart_state.layout）只存 rows/rowPcts/colPcts。
+
+## 实施清单
+
+- [x] DockLayout 增 `bodyH: number | null`（sanitizeBodyH 夹取 480–2600，非法不牵连布局）
+- [x] bodyH 进 dock 单例：persist/reset/wireMemory 三分支（套用/推本机/关开关复位）同链路
+- [x] ChartDock.vue 改消费单例 bodyH；拖拽中只改内存、松手 setBodyH 落盘；双击复原落 null
+- [x] e2e dock-resize 新增记忆用例（开关独占开启/finally 复原 + PUT 载荷自证 + 断 settings 走本机链路）
+
+## Review
+
+- **验证账目**：`npm run build` 绿；e2e dock-resize + chart-memory P1 合跑
+  **11 过**（39.5s，零 flake）；跑完 8000/3000 零监听残留。
+- **e2e 两度红的根因**（已入 lessons）：① seed_users 把 e2e 账号记忆开关强制 False，
+  整条持久化链路静默不跑（无 PUT/不写 localStorage）；② 并行用例共享 admin 账号态，
+  读服务端必竞态 → 改为本上下文捕 PUT + 刷新阶段 abort settings GET 走本机链路。
+- **兼容性**：旧持久化载荷无 bodyH → sanitizeBodyH(undefined)=null → 按行数自动，
+  与改动前行为一致；VERSION 不变（结构未破坏性变更）。
+- **双主题**：无新增视觉元素，零主题工作。
+
+---
+
 # 任务：文件对比规则C 升级双侧容差（B 放宽过度标异常）（2026-09-09）✅
 
 用户需求：「Data B 比 Data A limit 宽特别多的标异常」（如 -80/80 → -1000/1000）。
