@@ -363,7 +363,7 @@ class FileCorrelationSerialsApiTests(TestCase):
         self.user = get_user_model().objects.create_user(
             username='fc_serials_test', password='x')
 
-    def _call(self, frames, body=None):
+    def _call(self, frames, body=None, parsed=None, serial_col='Serial_No'):
         from rest_framework.test import APIClient
         # 必须 patch 实际消费模块（R6③）：三端点已迁到 file_correlation_views
         from apps.analysis.views import file_correlation_views as fc_views
@@ -378,8 +378,9 @@ class FileCorrelationSerialsApiTests(TestCase):
                 format_type='CTA8290D'))
         fc_views.get_cached_parsed_file = (
             lambda fid, owner_id, datafile=None: (
-                frames[int(fid)], {'format': 'CTA8290D'}, 'CTA8290D'))
-        fc_views.get_serial_column = lambda df: 'Serial_No'
+                (frames[int(fid)], {'format': 'CTA8290D'}, 'CTA8290D')
+                if parsed is None else parsed))
+        fc_views.get_serial_column = lambda df: serial_col
         self.addCleanup(lambda: setattr(fc_views, 'get_object_or_404', orig_404))
         self.addCleanup(lambda: setattr(fc_views, 'get_cached_parsed_file', orig_load))
         self.addCleanup(lambda: setattr(fc_views, 'get_serial_column', orig_serial))
@@ -411,3 +412,16 @@ class FileCorrelationSerialsApiTests(TestCase):
         resp = client.post('/api/v1/analysis/file_correlation_serials/', {}, format='json')
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.json()['error'], 'need_two_files')
+
+    def test_unparseable_files_returns_parse_failed(self):
+        # 两个文件都解析失败（get_cached_parsed_file 返回 None）→ 400 parse_failed
+        resp = self._call({}, parsed=(None, None, None))
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['error'], 'parse_failed')
+
+    def test_missing_serial_column_returns_no_serial_column(self):
+        # 文件加载成功但序列列缺失 → 400 no_serial_column（区别于 parse_failed）
+        df = pd.DataFrame({'ParamA': [1.0, 2.0]})
+        resp = self._call({1: df, 2: df}, serial_col=None)
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['error'], 'no_serial_column')

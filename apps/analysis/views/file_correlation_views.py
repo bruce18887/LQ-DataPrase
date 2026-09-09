@@ -209,7 +209,7 @@ def _load_fc_serial_series(request):
     loaded = 0
     for fid, label in [(file1_id, 'ATE'), (file2_id, 'Bench')]:
         df_obj = get_object_or_404(DataFile, pk=fid, owner=request.user)
-        df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk, df_obj)
+        df, _, _ = get_cached_parsed_file(int(fid), request.user.pk, df_obj)
         if df is None:
             continue
         loaded += 1
