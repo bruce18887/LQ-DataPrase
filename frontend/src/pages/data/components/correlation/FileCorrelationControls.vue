@@ -41,7 +41,22 @@
       >
         <el-radio-button value="zero">A：Diff 必须为 0</el-radio-button>
         <el-radio-button value="wider">B：B 的 Limit 不更紧</el-radio-button>
+        <el-radio-button value="tight_pct">C：收紧 ≤ x%</el-radio-button>
       </el-radio-group>
+    </div>
+
+    <div v-if="diffRule === 'tight_pct'" class="fc-opt">
+      <label class="fc-opt-label">收紧容差 (%)</label>
+      <el-input-number
+        :model-value="tightPct"
+        :min="0"
+        :max="100"
+        :step="0.1"
+        :precision="1"
+        size="small"
+        style="width: 92px"
+        @update:model-value="(v: number | undefined) => emit('update:tightPct', v ?? 30)"
+      />
     </div>
 
     <div class="fc-opt fc-serial-sel">
@@ -95,6 +110,7 @@ interface Props {
   file2: number | null
   threshold: number
   diffRule: DiffRule
+  tightPct: number
   serials: number[]
   commonSerials: number[]
   serialsLoading?: boolean
@@ -111,6 +127,7 @@ const emit = defineEmits<{
   (e: 'update:file2', v: number | null): void
   (e: 'update:threshold', v: number): void
   (e: 'update:diffRule', v: DiffRule): void
+  (e: 'update:tightPct', v: number): void
   (e: 'update:serials', v: number[]): void
   (e: 'update:ignoreNoLimit', v: boolean): void
   (e: 'update:ignoreNoData', v: boolean): void

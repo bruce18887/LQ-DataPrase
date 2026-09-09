@@ -15,6 +15,7 @@
           v-model:file2="file2"
           v-model:threshold="options.threshold"
           v-model:diff-rule="options.diffRule"
+          v-model:tight-pct="options.tightPct"
           v-model:serials="options.serials"
           v-model:ignore-no-limit="options.ignoreNoLimit"
           v-model:ignore-no-data="options.ignoreNoData"
@@ -117,8 +118,8 @@ const options = ref<FileCorrelationOptions>({
   diffRule: 'zero',
   serials: [],
   tightPct: 30,
-  ignoreNoLimit: true,
-  ignoreNoData: true,
+  ignoreNoLimit: false,
+  ignoreNoData: false,
 })
 /** 对比视图：data=测试值对比（默认）/ limit=Limit 对比 */
 const viewMode = ref<'data' | 'limit'>('data')
