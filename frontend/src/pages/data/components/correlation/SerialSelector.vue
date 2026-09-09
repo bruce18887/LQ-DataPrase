@@ -5,6 +5,7 @@
       :model-value="modelValue"
       multiple
       filterable
+      automatic-dropdown
       placeholder="搜索序列号"
       collapse-tags
       collapse-tags-tooltip
@@ -43,7 +44,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 
 /**
  * 对比序列选择器：交互与查看数据「搜索测试项」输入框（TestColumnSelector）
@@ -120,9 +121,16 @@ function clearFilterInput() {
   }
 }
 
-/** 下拉关闭时清空过滤，避免残留过滤误导下一次打开 */
+/** 下拉打开时聚焦过滤框；关闭时清空过滤，避免残留过滤误导下一次打开 */
 function onVisibleChange(visible: boolean) {
-  if (!visible) clearFilterInput()
+  if (visible) {
+    // EP 2.14 automatic-dropdown：菜单在 wrapper 获焦（mousedown）时就打开，此时
+    // filter input 仍 display:none，EP 的 click 焦点逻辑被 isFocusable 守卫跳过，
+    // 焦点困在 tabindex=-1 的 wrapper 上——打开后须显式聚焦 input 才能打字过滤。
+    nextTick(() => selectRef.value?.$el?.querySelector('input')?.focus())
+  } else {
+    clearFilterInput()
+  }
 }
 
 function selectAll() {
