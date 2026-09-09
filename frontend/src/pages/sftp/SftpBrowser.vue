@@ -44,6 +44,7 @@
         :is-indeterminate="isIndeterminate"
         :batch-downloading="batchDownloading"
         :batch-parsing="batchParsing"
+        :transfer-active="transferActive"
         @select-all="toggleSelectAll"
         @invert="invertSelection"
         @batch-download="batchDownload"
@@ -66,6 +67,7 @@
         :loading="listLoading"
         :sort-by="sortBy"
         :sort-order="sortOrder"
+        :transfer-active="transferActive"
         @navigate="navigateTo"
         @sort-change="handleSortChange"
         @download="downloadFile"
@@ -136,6 +138,13 @@ const dlProgress = ref({
   percent: 0, speed: 0, eta: 0, currentFile: '',
   current: 0, total: 0, bytes_done: 0, total_bytes: 0,
 })
+
+/** 传输互斥：后端按用户复用同一条 paramiko 连接（非线程安全），任意两类
+ * 传输并发（SSE 单文件/SSE 目录/批量 POST）都会在共享 channel 上打架，
+ * 故同时只允许一个下载（2026-09-09 用户拍板）。 */
+const transferActive = computed(() =>
+  fileDownloading.value || dirDownloading.value ||
+  batchDownloading.value || batchParsing.value)
 
 // ---- 生命周期清理（修复 SSE 流无法取消 + setTimeout 幽灵回调）----
 // 问题：组件销毁后 SSE reader 仍持有并回调更新已失效 ref → 内存泄漏；

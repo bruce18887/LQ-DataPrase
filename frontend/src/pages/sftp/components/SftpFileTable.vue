@@ -51,6 +51,7 @@
                 size="small"
                 @click.stop="emit('download', row)"
                 :loading="isDownloading(`file_${row.name}`)"
+                :disabled="transferActive"
               >
                 <el-icon><Download /></el-icon> 下载
               </el-button>
@@ -60,6 +61,7 @@
                 type="primary"
                 @click.stop="emit('download-and-parse', row)"
                 :loading="isDownloading(`parse_${row.name}`)"
+                :disabled="transferActive"
               >
                 <el-icon><DataAnalysis /></el-icon> 解析
               </el-button>
@@ -72,6 +74,7 @@
                 plain
                 @click.stop="emit('download-directory', row.name)"
                 :loading="isDownloading(`dir_${row.name}`)"
+                :disabled="transferActive"
               >
                 <el-icon><Download /></el-icon> 下载
               </el-button>
@@ -104,6 +107,8 @@ const props = defineProps<{
   loading?: boolean
   sortBy?: string
   sortOrder?: 'asc' | 'desc'
+  /** 传输互斥：任意传输进行中时禁用所有下载入口（后端共享 paramiko 连接非线程安全） */
+  transferActive?: boolean
 }>()
 
 const emit = defineEmits<{
