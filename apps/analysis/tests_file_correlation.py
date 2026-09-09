@@ -480,3 +480,38 @@ class FileCorrelationExportTests(TestCase):
         resp = self._call_export({1: df1, 2: df2})
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.json()['error'], 'no_common_params')
+
+    def test_export_diff_rule_tight_pct_and_tolerance_passthrough(self):
+        import io
+        from openpyxl import load_workbook
+
+        df1 = pd.DataFrame({'Serial_No': [1], 'ParamA': [1.0]})
+        df2 = pd.DataFrame({'Serial_No': [1], 'ParamA': [1.0]})
+        # B 收紧 20%（0.5→0.6）：默认容差 30 → PASS；容差 10 → FAIL
+        meta_tight = {'format': 'CTA8290D',
+                      'mins': {'ParamA': '0.6'}, 'maxs': {'ParamA': '2.0'},
+                      'units': {'ParamA': 'V'}}
+        resp = self._call_export({1: df1, 2: df2}, metas={2: meta_tight},
+                                 body={'diff_rule': 'tight_pct'})
+        ws = load_workbook(io.BytesIO(self._body(resp)))['Limit对比']
+        self.assertEqual(ws['I3'].value, 'PASS')
+
+        resp2 = self._call_export({1: df1, 2: df2}, metas={2: meta_tight},
+                                  body={'diff_rule': 'tight_pct', 'tight_pct': 10.0})
+        ws2 = load_workbook(io.BytesIO(self._body(resp2)))['Limit对比']
+        self.assertEqual(ws2['I3'].value, 'FAIL')
+
+    def test_export_invalid_diff_rule_falls_back_to_zero(self):
+        import io
+        from openpyxl import load_workbook
+
+        df1 = pd.DataFrame({'Serial_No': [1], 'ParamA': [1.0]})
+        df2 = pd.DataFrame({'Serial_No': [1], 'ParamA': [1.0]})
+        # B 的 LSL 更宽（0.4 < 0.5）→ 回退 zero 规则：diff ≠ 0 → FAIL
+        meta_b = {'format': 'CTA8290D',
+                  'mins': {'ParamA': '0.4'}, 'maxs': {'ParamA': '2.0'},
+                  'units': {'ParamA': 'V'}}
+        resp = self._call_export({1: df1, 2: df2}, metas={2: meta_b},
+                                 body={'diff_rule': 'bogus'})
+        ws = load_workbook(io.BytesIO(self._body(resp)))['Limit对比']
+        self.assertEqual(ws['I3'].value, 'FAIL')

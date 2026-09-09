@@ -10,6 +10,8 @@ Comparison rules (mirrored by the frontend panel one-to-one):
     'zero'  : pass iff both diffs are exactly 0.
     'wider' : pass iff file B's limit is no tighter than file A's
               (LSL_B ≤ LSL_A and USL_B ≥ USL_A).
+    'tight_pct': pass iff B is no tighter than A, or the tightening is
+              within ``tight_pct``% of A's limit (per side).
 - Serial selection: explicit ``serials`` list (user-chosen, request order)
   takes precedence; otherwise the first ``max_serials`` common serials
   (ascending) are used as a fallback cap.
@@ -41,9 +43,10 @@ class NoCommonParamsError(Exception):
 class FileCorrelationConfig:
     """Comparison options; the frontend panel mirrors these one-to-one."""
     threshold: float = 3.0
-    diff_rule: str = 'zero'          # 'zero' | 'wider'
+    diff_rule: str = 'zero'          # 'zero' | 'wider' | 'tight_pct'
     max_serials: int = 30            # fallback cap when ``serials`` is None
     serials: Optional[List[int]] = None  # explicit user selection (优先)
+    tight_pct: float = 30.0          # 'tight_pct' 规则的收紧容差（%，相对 A 侧限值）
     ignore_no_limit: bool = True
     ignore_no_data: bool = True
 
@@ -120,12 +123,28 @@ def list_common_serials(ate_df: pd.DataFrame, bench_df: pd.DataFrame) -> List[in
 
 def _evaluate_diff_rule(lsl_a: Optional[float], usl_a: Optional[float],
                         lsl_b: Optional[float], usl_b: Optional[float],
-                        rule: str) -> Tuple[bool, bool]:
-    """→ (lsl_fail, usl_fail).  A missing limit on either side is a fail."""
+                        rule: str, tight_pct: float = 30.0) -> Tuple[bool, bool]:
+    """→ (lsl_fail, usl_fail).  A missing limit on either side is a fail.
+
+    'tight_pct'：wider 语义 + 收紧容差 —— B 收紧幅度 ≤ tight_pct%（相对 A 侧
+    限值，带 1e-9 浮点容差，恰好等于容差判过）时放行；A 侧限值为 0 无百分比
+    基准 → fail。
+    """
     if rule == 'wider':
         # B 的 limit 不更紧才算 pass（更宽或相等）
         lsl_fail = not (lsl_a is not None and lsl_b is not None and lsl_b <= lsl_a)
         usl_fail = not (usl_a is not None and usl_b is not None and usl_b >= usl_a)
+    elif rule == 'tight_pct':
+        lsl_fail = not (
+            lsl_a is not None and lsl_b is not None
+            and (lsl_b <= lsl_a
+                 or (lsl_a != 0
+                     and (lsl_b - lsl_a) / abs(lsl_a) * 100.0 <= tight_pct + 1e-9)))
+        usl_fail = not (
+            usl_a is not None and usl_b is not None
+            and (usl_b >= usl_a
+                 or (usl_a != 0
+                     and (usl_a - usl_b) / abs(usl_a) * 100.0 <= tight_pct + 1e-9)))
     else:  # 'zero'（默认）：两侧差值必须恰为 0
         lsl_fail = not (lsl_a is not None and lsl_b is not None
                         and (lsl_b - lsl_a) == 0.0)
@@ -224,7 +243,7 @@ def compute_file_correlation(ate_df: pd.DataFrame, meta_a: dict,
         lsl_diff = _jf(lsl_b - lsl_a) if (lsl_a is not None and lsl_b is not None) else None
         usl_diff = _jf(usl_b - usl_a) if (usl_a is not None and usl_b is not None) else None
         lsl_fail, usl_fail = _evaluate_diff_rule(lsl_a, usl_a, lsl_b, usl_b,
-                                                 cfg.diff_rule)
+                                                 cfg.diff_rule, cfg.tight_pct)
 
         cells = []
         compared = 0

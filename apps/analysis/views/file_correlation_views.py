@@ -200,8 +200,11 @@ def _parse_fc_config(request) -> FileCorrelationConfig:
     if threshold is None or threshold < 0:
         threshold = 3.0
     diff_rule = get_param(request, 'diff_rule', 'zero')
-    if diff_rule not in ('zero', 'wider'):
+    if diff_rule not in ('zero', 'wider', 'tight_pct'):
         diff_rule = 'zero'
+    tight_pct = get_param_float(request, 'tight_pct', 30.0)
+    if tight_pct is None or tight_pct < 0:
+        tight_pct = 30.0
     max_serials = get_param_float(request, 'max_serials', 30)
     try:
         max_serials = max(1, int(max_serials))
@@ -231,6 +234,7 @@ def _parse_fc_config(request) -> FileCorrelationConfig:
         diff_rule=diff_rule,
         max_serials=max_serials,
         serials=serials,
+        tight_pct=float(tight_pct),
         ignore_no_limit=_bool_param('ignore_no_limit', True),
         ignore_no_data=_bool_param('ignore_no_data', True),
     )
