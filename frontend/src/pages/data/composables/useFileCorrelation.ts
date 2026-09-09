@@ -72,6 +72,7 @@ export function useFileCorrelation() {
       file2_id: file2,
       threshold: opts.threshold,
       diff_rule: opts.diffRule,
+      tight_pct: opts.tightPct,
       serials: opts.serials,
       ignore_no_limit: opts.ignoreNoLimit,
       ignore_no_data: opts.ignoreNoData,

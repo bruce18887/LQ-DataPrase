@@ -9,7 +9,7 @@
       </el-checkbox>
       <span class="info-meta">
         {{ viewLabel }} · 序列 {{ result.serials.length }} 个 · 阈值 {{ threshold }}% ·
-        {{ diffRule === 'zero' ? '规则A：Diff 必须为 0' : '规则B：B 的 Limit 不更紧' }}
+        {{ DIFF_RULE_LABELS[diffRule] }}
       </span>
     </div>
 
@@ -39,7 +39,7 @@ import { computed, ref } from 'vue'
 import { AgGridVue } from 'ag-grid-vue3'
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community'
 import { useThemeStore } from '../../../../stores/theme'
-import type { DiffRule, FileCorrelationResult } from '../../../../types'
+import { type DiffRule, type FileCorrelationResult, DIFF_RULE_LABELS } from '../../../../types'
 
 // 注册 ag-grid 模块（幂等；与 DataBrowserAgGrid 同源初始化）
 ModuleRegistry.registerModules([AllCommunityModule])

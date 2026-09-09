@@ -158,8 +158,15 @@ export interface UphData {
   warnings: string[]
 }
 
-/** 文件相关性对比：LSL/USL Diff 标红规则（A: 差值全为0才pass 默认 / B: B的limit不更紧才pass） */
-export type DiffRule = 'zero' | 'wider'
+/** 文件相关性对比：LSL/USL Diff 标红规则（A: 差值全为0才pass 默认 / B: B的limit不更紧才pass / C: wider+收紧容差） */
+export type DiffRule = 'zero' | 'wider' | 'tight_pct'
+
+/** Limit Diff 规则文案（数据视图 / Limit 视图 / 汇总卡共用） */
+export const DIFF_RULE_LABELS: Record<DiffRule, string> = {
+  zero: '规则A：Diff 必须为 0',
+  wider: '规则B：B 的 Limit 不更紧',
+  tight_pct: '规则C：B 收紧 ≤ 容差% 允许',
+}
 
 /** 文件相关性对比：单个序列的 ATE/Bench/Delta/%Diff 单元格 */
 export interface FileCorrelationCell {
@@ -217,6 +224,8 @@ export interface FileCorrelationOptions {
   diffRule: DiffRule
   /** 用户勾选的对比序列（默认前 10 颗；空数组 = 仅对比 Limit） */
   serials: number[]
+  /** tight_pct 规则的收紧容差（%），仅 diffRule='tight_pct' 时后端消费 */
+  tightPct: number
   ignoreNoLimit: boolean
   ignoreNoData: boolean
 }
