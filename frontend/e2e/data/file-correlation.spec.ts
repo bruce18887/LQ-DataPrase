@@ -173,13 +173,9 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
     // 注意：已选序列后占位文本消失，不能再用占位符定位 → 用容器 class；
     // 下拉 teleport 到 body，footer 提示需从可见 dropdown 中取。
     const serialSel = section.locator('.fc-serial-sel .el-select')
+    // 首击即开（automatic-dropdown）且组件在打开时显式聚焦过滤框（EP 2.14 会把
+    // 焦点困在 tabindex=-1 wrapper 上，不补聚焦则打字丢失）→ 打开即可直接打字
     await serialSel.click()
-    // EP 现状（2026-09-09 观察）：首个单击可能只聚焦不展开（二击才展开，
-    // 疑似交互回归待组件侧跟进）——按真实用户习惯补一次点击
-    await page.waitForTimeout(400)
-    if ((await page.locator('.el-select-dropdown:visible').count()) === 0) {
-      await serialSel.click()
-    }
     await expect(page.locator('.el-select-dropdown:visible')).toBeVisible()
     await page.keyboard.type('1')
     await expect(page.locator('.el-select-dropdown:visible .match-hint')).toContainText('按 Enter 全选', { timeout: 5000 })
