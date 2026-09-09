@@ -6,7 +6,7 @@
       <span class="info-files">{{ result.file1_name }} <b>VS</b> {{ result.file2_name }}</span>
       <span class="info-meta">
         Limit 对比 · {{ result.totals.params }} 个测试项 ·
-        {{ diffRule === 'zero' ? '规则A：Diff 必须为 0' : '规则B：B 的 Limit 不更紧' }}
+        {{ DIFF_RULE_LABELS[diffRule] }}
       </span>
     </div>
 
@@ -71,7 +71,7 @@
 </template>
 
 <script setup lang="ts">
-import type { DiffRule, FileCorrelationResult, FileCorrelationRow } from '../../../../types'
+import { type DiffRule, type FileCorrelationResult, type FileCorrelationRow, DIFF_RULE_LABELS } from '../../../../types'
 
 defineProps<{
   result: FileCorrelationResult

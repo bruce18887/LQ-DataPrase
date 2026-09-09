@@ -116,6 +116,7 @@ const options = ref<FileCorrelationOptions>({
   threshold: 3,
   diffRule: 'zero',
   serials: [],
+  tightPct: 30,
   ignoreNoLimit: true,
   ignoreNoData: true,
 })

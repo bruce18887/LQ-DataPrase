@@ -56,14 +56,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { DiffRule, FileCorrelationResult } from '../../../../types'
+import { DIFF_RULE_LABELS } from '../../../../types'
 
 const props = defineProps<{
   result: FileCorrelationResult
   diffRule: DiffRule
 }>()
 
-const diffRuleLabel = computed(() =>
-  props.diffRule === 'zero' ? '规则A：Diff 必须为 0' : '规则B：B 的 Limit 不更紧')
+const diffRuleLabel = computed(() => DIFF_RULE_LABELS[props.diffRule])
 
 /** 任一测试项的 LSL/USL Diff 未通过 → Limit 对比 Fail */
 const limitFailCount = computed(() =>
