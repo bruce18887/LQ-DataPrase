@@ -1,3 +1,26 @@
+# 任务：SFTP 传输互斥/取消 + 文件相关性对比六项改进（2026-09-09）
+
+> spec：docs/superpowers/specs/2026-09-09-sftp-mutex-cancel-and-file-correlation-design.md；
+> 计划：docs/superpowers/plans/2026-09-09-sftp-mutex-cancel-and-file-correlation.md。
+
+## 实施清单
+
+- [ ] 后端 tight_pct 规则（TDD）
+- [ ] 后端 ignore 开关默认翻转（TDD + 存量测试审计）
+- [ ] 后端 serials 端点免整表拷贝（TDD）
+- [ ] 后端 Excel Limit对比 sheet auto_filter（TDD）
+- [ ] 前端 DiffRule 契约 + 文案 map
+- [ ] 前端 规则C UI + ignore 默认翻转
+- [ ] 前端 序列下拉渲染截断 300
+- [ ] 前端 Limit 判定列排序
+- [ ] 前端 SFTP 传输互斥
+- [ ] 前端 SFTP 下载取消按钮
+- [ ] e2e file-correlation 更新
+- [ ] e2e reconnect 互斥+取消用例
+- [ ] 全量验证 + Review 落账
+
+---
+
 # 任务：e2e 体系修复（21 个确定性失败 + 提速基建）（2026-09-08）✅
 
 用户需求：「都修复一下」——按 2026-09-08 e2e 排查报告全项修复。
