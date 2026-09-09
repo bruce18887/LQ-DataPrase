@@ -114,9 +114,14 @@ class FileCorrelationServiceTests(SimpleTestCase):
         df2['ParamC'] = [0.1, 0.2, 0.3]
         meta['mins']['ParamC'] = '-'
         meta['maxs']['ParamC'] = '-'
-        # 默认（不传 ignore_*）：无 limit 的 ParamC 参与对比（2026-09-09 需求 5）
+        df1['ParamD'] = [float('nan'), float('nan'), float('nan')]
+        df2['ParamD'] = [float('nan'), float('nan'), float('nan')]
+        meta['mins']['ParamD'] = '-'
+        meta['maxs']['ParamD'] = '-'
+        # 默认（不传 ignore_*）：无 limit 的 ParamC 参与对比（2026-09-09 需求 5）；
+        # 全 NaN 且无 limit 的 ParamD 同样参与（钉住 ignore_no_data 默认）
         r = compute_file_correlation(df1, meta, df2, meta, FileCorrelationConfig())
-        self.assertEqual(r['params'], ['ParamA', 'ParamB', 'ParamC'])
+        self.assertEqual(r['params'], ['ParamA', 'ParamB', 'ParamC', 'ParamD'])
 
     def test_missing_limit_on_one_side_fails_both_rules(self):
         from apps.analysis.services.file_correlation import (

@@ -52,7 +52,7 @@ class FileCorrelationCacheIsolationTests(SimpleTestCase):
         factory = APIRequestFactory()
         request = factory.post('/api/v1/analysis/file_correlation/', {
             'file1_id': 1, 'file2_id': 2,
-            # mock 的 metadata 无 limits —— 关掉 ignore_no_limit 让参数参与对比
+            # mock 的 metadata 无 limits —— ignore_no_limit=False：无 limit 参数参与对比（默认已不勾选，显式传值自文档化）
             'ignore_no_limit': False,
         }, format='json')
         force_authenticate(request, user=types.SimpleNamespace(
@@ -108,7 +108,7 @@ class FileCorrelationNanJsonTests(SimpleTestCase):
         factory = APIRequestFactory()
         request = factory.post('/api/v1/analysis/file_correlation/', {
             'file1_id': 1, 'file2_id': 2, 'threshold': 3.0,
-            # mock 的 metadata 无 limits —— 关掉 ignore_no_limit 让参数参与对比
+            # mock 的 metadata 无 limits —— ignore_no_limit=False：无 limit 参数参与对比（默认已不勾选，显式传值自文档化）
             'ignore_no_limit': False,
             **(extra or {}),
         }, format='json')
@@ -145,9 +145,8 @@ class FileCorrelationNanJsonTests(SimpleTestCase):
             'Serial_No': [1, 2, 3],
             'ParamA': [float('nan'), float('nan'), float('nan')],
         })
-        # ignore_no_data=False：全 NaN 参数保留在结果中（compared=0），
-        # 而不是被「忽略无数据」过滤掉
-        response = self._call_endpoint(shared_df, extra={'ignore_no_data': False})
+        # 默认不勾选 ignore_no_data：全 NaN 参数保留在结果中（compared=0）
+        response = self._call_endpoint(shared_df)
         self.assertEqual(response.status_code, 200, response.content)
         by_param = {r['param']: r for r in response.data['rows']}
         self.assertEqual(by_param['ParamA']['compared'], 0)
@@ -291,7 +290,7 @@ class FileCorrelationExportTests(TestCase):
                         ('Q3', 'Comment')]:
             self.assertEqual(ws_d[cell].value, h)
 
-        # 数据行按文件1列顺序（ignore_no_limit 默认过滤无 limit 的序列列）
+        # 数据行按文件1列顺序（序列列不参与参数对比）
         self.assertEqual(ws_d['A4'].value, 'ParamA')
         self.assertEqual(ws_d['A5'].value, 'ParamB')
         self.assertEqual(ws_d.max_row, 5)
@@ -520,10 +519,11 @@ class FileCorrelationExportTests(TestCase):
         import io
         from openpyxl import load_workbook
 
-        df1 = pd.DataFrame({'Serial_No': [1], 'ParamA': [1.0]})
-        df2 = pd.DataFrame({'Serial_No': [1], 'ParamA': [1.1]})
+        df1 = pd.DataFrame({'Serial_No': [1], 'ParamA': [1.0], 'ParamB': [float('nan')]})
+        df2 = pd.DataFrame({'Serial_No': [1], 'ParamA': [1.1], 'ParamB': [float('nan')]})
         no_limits = {'format': 'CTA8290D', 'mins': {}, 'maxs': {}, 'units': {}}
-        # 不传 ignore_* → 默认不过滤无 limit 的测试项（2026-09-09 需求 5）
+        # 不传 ignore_* → 默认不过滤无 limit/无数据的测试项（2026-09-09 需求 5）
         resp = self._call_export({1: df1, 2: df2}, metas={1: no_limits, 2: no_limits})
         ws = load_workbook(io.BytesIO(self._body(resp)))['测试值对比']
         self.assertEqual(ws['A4'].value, 'ParamA')
+        self.assertEqual(ws['A5'].value, 'ParamB')
