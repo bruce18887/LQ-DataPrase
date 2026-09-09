@@ -332,6 +332,13 @@ class FileCorrelationServiceTests(SimpleTestCase):
         self.assertFalse(r['truncated'])
         self.assertEqual(r['totals']['serials'], 3)
 
+    def test_list_common_serials_accepts_series(self):
+        from apps.analysis.services.file_correlation import list_common_serials
+
+        s1 = pd.to_numeric(pd.Series([3, 1, 2], name='Serial_No'), errors='coerce')
+        s2 = pd.to_numeric(pd.Series([2, 1, 99], name='Serial_No'), errors='coerce')
+        self.assertEqual(list_common_serials(s1, s2), [1, 2])
+
     def test_list_common_serials_ascending(self):
         from apps.analysis.services.file_correlation import list_common_serials
 
@@ -339,7 +346,13 @@ class FileCorrelationServiceTests(SimpleTestCase):
         df2 = pd.DataFrame({'Serial_No': [2, 1, 99], 'ParamA': [1.0, 1.0, 1.0]})
         for d in (df1, df2):
             d['__serial__'] = pd.to_numeric(d['Serial_No'], errors='coerce')
-        self.assertEqual(list_common_serials(df1, df2), [1, 2])
+        # 签名迁移：改收已数值化的序列 Series（serials 端点只抽序列列，
+        # 不再为此整表 copy —— 与视图 _load_fc_serial_series 的调用形态一致）
+        self.assertEqual(
+            list_common_serials(
+                pd.to_numeric(df1['__serial__'], errors='coerce'),
+                pd.to_numeric(df2['__serial__'], errors='coerce')),
+            [1, 2])
 
 
 class FileCorrelationSerialsApiTests(TestCase):
