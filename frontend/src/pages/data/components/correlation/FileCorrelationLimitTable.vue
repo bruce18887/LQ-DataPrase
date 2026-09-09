@@ -6,7 +6,7 @@
       <span class="info-files">{{ result.file1_name }} <b>VS</b> {{ result.file2_name }}</span>
       <span class="info-meta">
         Limit 对比 · {{ result.totals.params }} 个测试项 ·
-        {{ DIFF_RULE_LABELS[diffRule] }}
+        {{ diffRuleLabel(diffRule, changePct) }}
       </span>
     </div>
 
@@ -71,12 +71,13 @@
 </template>
 
 <script setup lang="ts">
-import { type DiffRule, type FileCorrelationResult, type FileCorrelationRow, DIFF_RULE_LABELS } from '../../../../types'
+import { type DiffRule, type FileCorrelationResult, type FileCorrelationRow, diffRuleLabel } from '../../../../types'
 
 defineProps<{
   result: FileCorrelationResult
   threshold: number
   diffRule: DiffRule
+  changePct: number
 }>()
 
 function headerCellStyle() {

@@ -34,7 +34,7 @@
     <div class="metric-card">
       <div class="metric-label">Limit Diff Fail</div>
       <div class="metric-value" :class="{ 'value-fail': limitFailCount > 0 }">{{ limitFailCount }}</div>
-      <div class="metric-hint">{{ diffRuleLabel }}</div>
+      <div class="metric-hint">{{ ruleLabel }}</div>
     </div>
 
     <div class="metric-card">
@@ -56,14 +56,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { DiffRule, FileCorrelationResult } from '../../../../types'
-import { DIFF_RULE_LABELS } from '../../../../types'
+import { diffRuleLabel } from '../../../../types'
 
 const props = defineProps<{
   result: FileCorrelationResult
   diffRule: DiffRule
+  changePct: number
 }>()
 
-const diffRuleLabel = computed(() => DIFF_RULE_LABELS[props.diffRule])
+const ruleLabel = computed(() => diffRuleLabel(props.diffRule, props.changePct))
 
 /** 任一测试项的 LSL/USL Diff 未通过 → Limit 对比 Fail */
 const limitFailCount = computed(() =>

@@ -9,7 +9,7 @@
       </el-checkbox>
       <span class="info-meta">
         {{ viewLabel }} · 序列 {{ result.serials.length }} 个 · 阈值 {{ threshold }}% ·
-        {{ DIFF_RULE_LABELS[diffRule] }}
+        {{ diffRuleLabel(diffRule, changePct) }}
       </span>
     </div>
 
@@ -39,7 +39,7 @@ import { computed, ref } from 'vue'
 import { AgGridVue } from 'ag-grid-vue3'
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community'
 import { useThemeStore } from '../../../../stores/theme'
-import { type DiffRule, type FileCorrelationResult, DIFF_RULE_LABELS } from '../../../../types'
+import { type DiffRule, type FileCorrelationResult, diffRuleLabel } from '../../../../types'
 
 // 注册 ag-grid 模块（幂等；与 DataBrowserAgGrid 同源初始化）
 ModuleRegistry.registerModules([AllCommunityModule])
@@ -48,6 +48,7 @@ const props = defineProps<{
   result: FileCorrelationResult
   threshold: number
   diffRule: DiffRule
+  changePct: number
   /** 视图标签（信息栏展示，区分 Limit 对比） */
   viewLabel?: string
 }>()

@@ -1,3 +1,31 @@
+# 任务：文件对比规则C 升级双侧容差（B 放宽过度标异常）（2026-09-09）✅
+
+用户需求：「Data B 比 Data A limit 宽特别多的标异常」（如 -80/80 → -1000/1000）。
+口径（用户确认）：规则C 由「只判收紧」升级为「每侧限值变化幅度 ≤ x%」双侧容差，
+收紧与放宽同公式 |Δ%| = |B−A| / |A| × 100 双向生效；规则 A/B 语义不变。
+
+## 实施清单
+
+- [x] 后端 `_evaluate_diff_rule` C 分支改 `_side_change_fail` 对称判定（含 A=0 边界）
+- [x] 配置/契约改名 tight_pct → change_pct（views 保留旧键别名防静默降级）
+- [x] 前端 radio/输入文案（C：变化 ≤ x% / 变化容差）+ 三处信息栏插值实际容差（销上批跟进项④）
+- [x] 单测：放宽过度/恰等容差/A=0 用例 + export 透传用例（40 tests OK）
+- [x] e2e：文案断言更新 + 新增「放宽 40%：容差 30 FAIL / 容差 50 PASS」用例（P2 9 过）
+
+## Review
+
+- **验证账目**：`manage.py test apps.analysis.tests_file_correlation_service
+  apps.analysis.tests_file_correlation` 40 tests OK；`npm run build` 绿；
+  e2e file-correlation P2 9 过（29.1s）；跑前 8000/3000 零监听、跑后零残留。
+- **种子数据依据**：tasks/_fc_widen_probe.py 实测种子对含 113 处放宽 >30%
+  （如 lkg_VCC_SNSP_6V：-50/50 → -70/70 = 40%），e2e 据此钉死双向判定与容差驱动。
+- **兼容性**：wire 层接受旧键 `diff_rule='tight_pct'` / `tight_pct` 并映射
+  change_pct，防旧标签页把规则静默降级成 zero；service 层只认新名。
+- **双主题**：仅文案与判定语义变更，无新增视觉元素，标红/FAIL 徽章沿用既有
+  `var(--error)` token，双主题零新增工作。
+
+---
+
 # 任务：SFTP 传输互斥/取消 + 文件相关性对比六项改进（2026-09-09）✅
 
 > spec：docs/superpowers/specs/2026-09-09-sftp-mutex-cancel-and-file-correlation-design.md；
