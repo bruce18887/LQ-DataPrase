@@ -23,8 +23,11 @@
         <div class="empty-hint">无匹配序列</div>
       </template>
       <template #footer>
-        <div v-if="matches.length > 0" class="match-hint">
-          匹配 {{ matches.length }} 项，按 Enter 全选
+        <div v-if="kw && matches.length > 0" class="match-hint">
+          匹配 {{ matches.length }} 项{{ matches.length > SERIAL_RENDER_CAP ? `（显示前 ${SERIAL_RENDER_CAP}）` : '' }}，按 Enter 全选
+        </div>
+        <div v-else-if="!kw && options.length > SERIAL_RENDER_CAP" class="match-hint">
+          仅显示前 {{ SERIAL_RENDER_CAP }} 项，可搜索或直接全选
         </div>
       </template>
     </el-select>
@@ -63,6 +66,10 @@ const emit = defineEmits<{
 /** 已选序列上限（el-table 无列虚拟化：200 序列 × 4 列 ≈ 800 列已到现实极限） */
 const MAX_SELECTED = 200
 
+/** 下拉渲染上限：el-option 是完整组件实例，序列上万时挂载即冻结主线程；
+ * 渲染截断，全选/Enter 全选仍作用于完整集合 */
+const SERIAL_RENDER_CAP = 300
+
 const filterText = ref('')
 const selectRef = ref<{ $el: HTMLElement }>()
 
@@ -73,8 +80,9 @@ const matches = computed(() =>
   kw.value ? props.options.filter((s) => String(s).toLowerCase().includes(kw.value)) : [],
 )
 
-/** 下拉选项：有关键字显示过滤结果，否则全量 */
-const filteredItems = computed(() => (kw.value ? matches.value : props.options))
+/** 下拉选项：有关键字显示过滤结果，否则全量；渲染层一律截断到前 N */
+const filteredItems = computed(() =>
+  (kw.value ? matches.value : props.options).slice(0, SERIAL_RENDER_CAP))
 
 /** 超限裁剪：保留前 N（配合 multiple-limit 双保险） */
 function clamp(sel: number[]): number[] {
