@@ -324,4 +324,49 @@ test.describe('@sftp SFTP 浏览器增强：类型过滤 / 文件进度 / 下载
 
     await disconnect(page)
   })
+
+  test('@p1 下载互斥与取消：传输中其它下载入口禁用，取消后恢复并可再下载', async ({ page }) => {
+    await gotoApp(page, '/sftp')
+    await ensureDisconnected(page)
+    await manualConnect(page, server)
+    await goRoot(page)
+
+    // 拦住 SSE 请求 3s：进度卡在前端即时渲染（fileDownloading 同步置 true），
+    // 后端尚未开始传输 → 断言窗口确定（本地 big.csv 秒传无法人工点击）。
+    await page.route('**/sftp/download_file_stream/', async (route) => {
+      await new Promise((r) => setTimeout(r, 3000))
+      await route.continue().catch(() => {})
+    })
+
+    const bigRow = page.locator('.file-table .el-table__row').filter({
+      has: page.locator('.file-name', { hasText: 'big.csv' }),
+    })
+    await bigRow.getByRole('button', { name: '下载' }).click()
+    await expect(page.locator('.download-progress-card')).toBeVisible({ timeout: 10_000 })
+
+    // 互斥：其它文件的下载/解析与目录下载全部禁用
+    const rootRow = page.locator('.file-table .el-table__row').filter({
+      has: page.locator('.file-name', { hasText: 'root.csv' }),
+    })
+    await expect(rootRow.getByRole('button', { name: '下载' })).toBeDisabled()
+    await expect(rootRow.getByRole('button', { name: '解析' })).toBeDisabled()
+    const sub1Row = page.locator('.file-table .el-table__row').filter({
+      has: page.locator('.file-name', { hasText: 'sub1' }),
+    })
+    await expect(sub1Row.getByRole('button', { name: '下载' })).toBeDisabled()
+
+    // 取消：进度卡立即消失（AbortError 被前端吞掉 → 显式复位）
+    await page.locator('.dl-cancel-btn').click()
+    await expect(page.locator('.download-progress-card')).toBeHidden({ timeout: 5_000 })
+
+    // 冷却期（1.2s，等后端生成器收尾）结束后按钮恢复
+    await expect(rootRow.getByRole('button', { name: '下载' })).toBeEnabled({ timeout: 10_000 })
+    await page.unroute('**/sftp/download_file_stream/')
+
+    // 状态干净：再下载 root.csv 正常完成（证明连接/状态未被取消破坏）
+    await rootRow.getByRole('button', { name: '下载' }).click()
+    await expect(page.getByText(/已导入: root\.csv/)).toBeVisible({ timeout: 60_000 })
+
+    await disconnect(page)
+  })
 })
