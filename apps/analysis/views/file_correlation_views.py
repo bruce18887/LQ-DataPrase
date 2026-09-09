@@ -56,6 +56,7 @@ class FileCorrelationActions:
         {
             "file1_id": 123, "file2_id": 456,
             "threshold": 3.0, "diff_rule": "zero",
+            "tight_pct": 30.0,          # 'tight_pct' 规则的收紧容差（%）
             "serials": [1, 2, 3],       # 可选：用户勾选的序列（优先）
             "max_serials": 30,          # 兜底：未传 serials 时取前 N
             "ignore_no_limit": true, "ignore_no_data": true
@@ -191,9 +192,9 @@ def _load_file_correlation_pair(request):
 def _parse_fc_config(request) -> FileCorrelationConfig:
     """Parse the file-correlation options from a request body.
 
-    All options default to the panel defaults (threshold 3.0, rule 'zero',
-    serials 未指定 → max_serials 30 兜底, ignore_no_limit / ignore_no_data
-    checked) so a minimal body keeps behaving like the old
+    All options default to the panel defaults (threshold 3.0 / tight_pct 30.0,
+    rule 'zero', serials 未指定 → max_serials 30 兜底, ignore_no_limit /
+    ignore_no_data checked) so a minimal body keeps behaving like the old
     ``{file1_id, file2_id}`` request.
     """
     threshold = get_param_float(request, 'threshold', 3.0)

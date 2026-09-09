@@ -158,8 +158,8 @@ def build_file_correlation_workbook(f, result):
 
     Sheet「Limit对比」: 单行表头（Parameters / LSL A / USL A / LSL B /
         USL B / LSL Diff / USL Diff / Unit / 判定）+ 每测试项一行；
-        差值按 diff_rule 标红（zero：差值≠0；wider：B 更紧），判定列
-        仅按 limit 差异给 PASS/FAIL。
+        差值按 diff_rule 标红（zero：差值≠0；wider：B 更紧；tight_pct：
+        B 收紧 ≤ x% 容差），判定列仅按 limit 差异给 PASS/FAIL。
 
     Sheet「测试值对比」: 模板布局（对齐 Correlation.xlsx）——标题行 +
         两行表头（A 参数列跨两行；'Limit / Unit (Data A)' 组 LSL A/USL A/
