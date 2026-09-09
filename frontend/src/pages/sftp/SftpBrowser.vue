@@ -56,8 +56,9 @@
         v-if="fileDownloading"
         mode="file"
         :progress="fileProgress"
+        @cancel="cancelFileDownload"
       />
-      <SftpDownloadProgress v-if="dirDownloading" mode="dir" :progress="dlProgress" />
+      <SftpDownloadProgress v-if="dirDownloading" mode="dir" :progress="dlProgress" @cancel="cancelDirDownload" />
 
       <!-- File List -->
       <SftpFileTable
@@ -139,12 +140,37 @@ const dlProgress = ref({
   current: 0, total: 0, bytes_done: 0, total_bytes: 0,
 })
 
+/** 取消冷却：abort 后后端生成器要到下一个 yield 边界才收到 GeneratorExit
+ * 并 invalidate 连接，立即再开新传输会在共享连接上与收尾中的旧传输竞态
+ * （本地半秒内收尾，1.2s 足够）。 */
+const transferCooldown = ref(false)
+let cooldownTimer: ReturnType<typeof setTimeout> | null = null
+
+function startCooldown() {
+  transferCooldown.value = true
+  if (cooldownTimer) clearTimeout(cooldownTimer)
+  cooldownTimer = setTimeout(() => { transferCooldown.value = false; cooldownTimer = null }, 1200)
+}
+
+function cancelFileDownload() {
+  fileAbortCtrl?.abort()
+  // AbortError 被 api 层静默吞掉 → catch 不触发，必须显式复位进度卡
+  fileDownloading.value = false
+  startCooldown()
+}
+
+function cancelDirDownload() {
+  dirAbortCtrl?.abort()
+  dirDownloading.value = false
+  startCooldown()
+}
+
 /** 传输互斥：后端按用户复用同一条 paramiko 连接（非线程安全），任意两类
  * 传输并发（SSE 单文件/SSE 目录/批量 POST）都会在共享 channel 上打架，
  * 故同时只允许一个下载（2026-09-09 用户拍板）。 */
 const transferActive = computed(() =>
   fileDownloading.value || dirDownloading.value ||
-  batchDownloading.value || batchParsing.value)
+  batchDownloading.value || batchParsing.value || transferCooldown.value)
 
 // ---- 生命周期清理（修复 SSE 流无法取消 + setTimeout 幽灵回调）----
 // 问题：组件销毁后 SSE reader 仍持有并回调更新已失效 ref → 内存泄漏；
@@ -161,6 +187,7 @@ onBeforeUnmount(() => {
   // 清除未触发的延迟复位定时器
   if (fileDoneTimer) { clearTimeout(fileDoneTimer); fileDoneTimer = null }
   if (dirDoneTimer) { clearTimeout(dirDoneTimer); dirDoneTimer = null }
+  if (cooldownTimer) { clearTimeout(cooldownTimer); cooldownTimer = null }
 })
 
 const fileItems = computed(() => items.value.filter(i => !i.is_dir && isCsv(i.name)))
@@ -358,6 +385,8 @@ async function singleFileDownload(row: any, key: string) {
 }
 
 function startFileProgress(filename: string) {
+  // 清掉上一轮可能残留的 1s done 定时器（防幽灵回调把新传输的 downloading 复位）
+  if (fileDoneTimer) { clearTimeout(fileDoneTimer); fileDoneTimer = null }
   fileDownloading.value = true
   fileProgress.value = {
     percent: 0, speed: 0, eta: 0, currentFile: filename,
@@ -366,6 +395,8 @@ function startFileProgress(filename: string) {
 }
 
 async function downloadDirectory(dirName?: string) {
+  // 清掉上一轮可能残留的 1s done 定时器（防幽灵回调把新传输的 downloading 复位）
+  if (dirDoneTimer) { clearTimeout(dirDoneTimer); dirDoneTimer = null }
   const path = dirName ? joinPath(currentPath.value, dirName) : currentPath.value
   dirDownloading.value = true
   dlProgress.value = { percent: 0, speed: 0, eta: 0, currentFile: '', current: 0, total: 0, bytes_done: 0, total_bytes: 0 }
@@ -440,8 +471,9 @@ async function batchDownloadAndParse() {
     filesStore.notifyFilesChanged()
   } catch {
     // 错误 toast 由 axios 拦截器统一弹出
+  } finally {
+    batchParsing.value = false
   }
-  batchParsing.value = false
 }
 
 function formatSize(bytes: number): string {
