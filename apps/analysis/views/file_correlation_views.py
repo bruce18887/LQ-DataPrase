@@ -95,7 +95,7 @@ class FileCorrelationActions:
         from the same computed values as the JSON endpoint, so the two
         outputs always agree.
 
-        Request body: 同 file_correlation（threshold / diff_rule /
+        Request body: 同 file_correlation（threshold / diff_rule / tight_pct /
         serials 或 max_serials / ignore_no_limit / ignore_no_data）。
         防呆：无相同测试项 → 400 no_common_params；无相同序列 → limits-only
         （只导 limit 列，无序列数据列）。
@@ -194,8 +194,8 @@ def _parse_fc_config(request) -> FileCorrelationConfig:
 
     All options default to the panel defaults (threshold 3.0 / tight_pct 30.0,
     rule 'zero', serials 未指定 → max_serials 30 兜底, ignore_no_limit /
-    ignore_no_data unchecked（默认不勾选）) so a minimal body keeps behaving
-    like the old ``{file1_id, file2_id}`` request.
+    ignore_no_data unchecked（默认不勾选）) so a minimal body applies the panel defaults (ignore 开关默认
+    不勾选：无 limit / 无数据的测试项参与对比).
     """
     threshold = get_param_float(request, 'threshold', 3.0)
     if threshold is None or threshold < 0:
