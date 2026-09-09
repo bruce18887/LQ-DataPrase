@@ -5,11 +5,23 @@
         <el-icon><Download /></el-icon>
         {{ mode === 'file' ? `正在下载 ${progress.currentFile}` : '正在下载目录...' }}
       </span>
-      <span class="progress-stats" v-if="mode === 'dir'">
-        {{ progress.current }}/{{ progress.total }} 文件 ·
-        {{ formatBytes(progress.bytes_done) }} / {{ formatBytes(progress.total_bytes) }}
-      </span>
-      <span class="progress-stats" v-else>{{ formatBytes(progress.bytes_done) }} / {{ formatBytes(progress.total_bytes) }}</span>
+      <div class="progress-right">
+        <span class="progress-stats" v-if="mode === 'dir'">
+          {{ progress.current }}/{{ progress.total }} 文件 ·
+          {{ formatBytes(progress.bytes_done) }} / {{ formatBytes(progress.total_bytes) }}
+        </span>
+        <span class="progress-stats" v-else>{{ formatBytes(progress.bytes_done) }} / {{ formatBytes(progress.total_bytes) }}</span>
+        <el-tooltip content="取消下载" placement="top">
+          <el-button
+            class="dl-cancel-btn"
+            :icon="Close"
+            size="small"
+            circle
+            aria-label="取消下载"
+            @click="emit('cancel')"
+          />
+        </el-tooltip>
+      </div>
     </div>
     <el-progress :percentage="progress.percent" :stroke-width="12" :format="(p: number) => `${p}%`" />
     <div class="progress-detail">
@@ -20,7 +32,7 @@
 </template>
 
 <script setup lang="ts">
-import { Download } from '@element-plus/icons-vue'
+import { Download, Close } from '@element-plus/icons-vue'
 
 /**
  * 下载进度卡片：
@@ -43,6 +55,8 @@ defineProps<{
     total_bytes: number
   }
 }>()
+
+const emit = defineEmits<{ (e: 'cancel'): void }>()
 
 function formatBytes(bytes: number): string {
   if (!bytes) return '0 B'
@@ -75,6 +89,19 @@ function formatBytes(bytes: number): string {
   color: var(--text);
 }
 .progress-stats { font-size: 13px; color: var(--text-2); }
+.progress-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dl-cancel-btn {
+  color: var(--text-2);
+  border-color: var(--border-2);
+}
+.dl-cancel-btn:hover {
+  color: var(--error);
+  border-color: var(--error);
+}
 .progress-detail {
   display: flex;
   justify-content: space-between;
