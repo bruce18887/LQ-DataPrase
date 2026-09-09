@@ -442,8 +442,8 @@ class FileCorrelationExportTests(TestCase):
         df2 = pd.DataFrame({'Serial_No': [1, 2],
                             'ParamA': [1.1, 2.1],
                             'ParamB': [float('nan'), float('nan')]})
-        # 默认 ignore_no_data=True → ParamB（无配对数据）被过滤
-        resp = self._call_export({1: df1, 2: df2})
+        # 显式 ignore_no_data=True → ParamB（无配对数据）被过滤
+        resp = self._call_export({1: df1, 2: df2}, body={'ignore_no_data': True})
         ws = load_workbook(io.BytesIO(self._body(resp)))['测试值对比']
         self.assertEqual(ws.max_row, 4)
         self.assertEqual(ws['A4'].value, 'ParamA')
@@ -515,3 +515,15 @@ class FileCorrelationExportTests(TestCase):
                                  body={'diff_rule': 'bogus'})
         ws = load_workbook(io.BytesIO(self._body(resp)))['Limit对比']
         self.assertEqual(ws['I3'].value, 'FAIL')
+
+    def test_ignore_flags_default_off_api(self):
+        import io
+        from openpyxl import load_workbook
+
+        df1 = pd.DataFrame({'Serial_No': [1], 'ParamA': [1.0]})
+        df2 = pd.DataFrame({'Serial_No': [1], 'ParamA': [1.1]})
+        no_limits = {'format': 'CTA8290D', 'mins': {}, 'maxs': {}, 'units': {}}
+        # 不传 ignore_* → 默认不过滤无 limit 的测试项（2026-09-09 需求 5）
+        resp = self._call_export({1: df1, 2: df2}, metas={1: no_limits, 2: no_limits})
+        ws = load_workbook(io.BytesIO(self._body(resp)))['测试值对比']
+        self.assertEqual(ws['A4'].value, 'ParamA')

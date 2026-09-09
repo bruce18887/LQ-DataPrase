@@ -59,7 +59,7 @@ class FileCorrelationActions:
             "tight_pct": 30.0,          # 'tight_pct' 规则的收紧容差（%）
             "serials": [1, 2, 3],       # 可选：用户勾选的序列（优先）
             "max_serials": 30,          # 兜底：未传 serials 时取前 N
-            "ignore_no_limit": true, "ignore_no_data": true
+            "ignore_no_limit": false, "ignore_no_data": false
         }
 
         Response: 模板风格全量数据（每测试项一行的 limit 列 + 每序列
@@ -194,8 +194,8 @@ def _parse_fc_config(request) -> FileCorrelationConfig:
 
     All options default to the panel defaults (threshold 3.0 / tight_pct 30.0,
     rule 'zero', serials 未指定 → max_serials 30 兜底, ignore_no_limit /
-    ignore_no_data checked) so a minimal body keeps behaving like the old
-    ``{file1_id, file2_id}`` request.
+    ignore_no_data unchecked（默认不勾选）) so a minimal body keeps behaving
+    like the old ``{file1_id, file2_id}`` request.
     """
     threshold = get_param_float(request, 'threshold', 3.0)
     if threshold is None or threshold < 0:
@@ -236,6 +236,6 @@ def _parse_fc_config(request) -> FileCorrelationConfig:
         max_serials=max_serials,
         serials=serials,
         tight_pct=float(tight_pct),
-        ignore_no_limit=_bool_param('ignore_no_limit', True),
-        ignore_no_data=_bool_param('ignore_no_data', True),
+        ignore_no_limit=_bool_param('ignore_no_limit', False),
+        ignore_no_data=_bool_param('ignore_no_data', False),
     )
