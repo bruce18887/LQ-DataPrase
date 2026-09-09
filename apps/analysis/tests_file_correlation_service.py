@@ -111,7 +111,7 @@ class FileCorrelationServiceTests(SimpleTestCase):
         df1, df2, _ = self._frames()
         meta_a = {'mins': {'ParamA': '0.5'}, 'maxs': {'ParamA': '2.0'}, 'units': {}}
         meta_b = {'mins': {}, 'maxs': {'ParamA': '2.0'}, 'units': {}}
-        for rule in ('zero', 'wider'):
+        for rule in ('zero', 'wider', 'tight_pct'):
             r = compute_file_correlation(df1, meta_a, df2, meta_b,
                                          FileCorrelationConfig(diff_rule=rule,
                                                               ignore_no_limit=False))
@@ -146,6 +146,57 @@ class FileCorrelationServiceTests(SimpleTestCase):
                                            FileCorrelationConfig(diff_rule='wider'))
         self.assertTrue(r_tight['rows'][0]['lsl_fail'])
         self.assertTrue(r_tight['rows'][0]['usl_fail'])
+
+    def test_diff_rule_tight_pct(self):
+        from apps.analysis.services.file_correlation import (
+            compute_file_correlation, FileCorrelationConfig)
+
+        df1, df2, _ = self._frames()
+        meta_a = {'mins': {'ParamA': '0.5'}, 'maxs': {'ParamA': '2.0'}, 'units': {}}
+        cfg = FileCorrelationConfig(diff_rule='tight_pct', ignore_no_limit=True)
+
+        # B 收紧 20%（LSL 0.5→0.6，USL 2.0→1.6）→ ≤30% 默认容差 → pass
+        meta_tol = {'mins': {'ParamA': '0.6'}, 'maxs': {'ParamA': '1.6'}, 'units': {}}
+        r = compute_file_correlation(df1, meta_a, df2, meta_tol, cfg)
+        self.assertFalse(r['rows'][0]['lsl_fail'])
+        self.assertFalse(r['rows'][0]['usl_fail'])
+
+        # USL 收紧 40%（2.0→1.2）超容差 → fail；LSL 20% 仍在容差内 → pass
+        meta_over = {'mins': {'ParamA': '0.6'}, 'maxs': {'ParamA': '1.2'}, 'units': {}}
+        r2 = compute_file_correlation(df1, meta_a, df2, meta_over, cfg)
+        self.assertFalse(r2['rows'][0]['lsl_fail'])
+        self.assertTrue(r2['rows'][0]['usl_fail'])
+
+        # B 更宽 → pass（wider 基础语义）
+        meta_wide = {'mins': {'ParamA': '0.4'}, 'maxs': {'ParamA': '2.5'}, 'units': {}}
+        r3 = compute_file_correlation(df1, meta_a, df2, meta_wide, cfg)
+        self.assertFalse(r3['rows'][0]['lsl_fail'])
+        self.assertFalse(r3['rows'][0]['usl_fail'])
+
+        # 恰好等于容差（USL 收紧 30%：2.0→1.4）→ pass（≤ 语义）
+        meta_edge = {'mins': {'ParamA': '0.5'}, 'maxs': {'ParamA': '1.4'}, 'units': {}}
+        r4 = compute_file_correlation(df1, meta_a, df2, meta_edge, cfg)
+        self.assertFalse(r4['rows'][0]['usl_fail'])
+
+        # A 侧限值为 0（无百分比基准）→ fail
+        meta_a0 = {'mins': {'ParamA': '0'}, 'maxs': {'ParamA': '2.0'}, 'units': {}}
+        meta_b0 = {'mins': {'ParamA': '0.1'}, 'maxs': {'ParamA': '2.0'}, 'units': {}}
+        r5 = compute_file_correlation(df1, meta_a0, df2, meta_b0, cfg)
+        self.assertTrue(r5['rows'][0]['lsl_fail'])
+
+    def test_diff_rule_tight_pct_custom_tolerance(self):
+        from apps.analysis.services.file_correlation import (
+            compute_file_correlation, FileCorrelationConfig)
+
+        df1, df2, _ = self._frames()
+        meta_a = {'mins': {'ParamA': '0.5'}, 'maxs': {'ParamA': '2.0'}, 'units': {}}
+        meta_tol = {'mins': {'ParamA': '0.6'}, 'maxs': {'ParamA': '2.0'}, 'units': {}}
+        # x=10：收紧 20% 超容差 → fail
+        r = compute_file_correlation(
+            df1, meta_a, df2, meta_tol,
+            FileCorrelationConfig(diff_rule='tight_pct', tight_pct=10.0,
+                                  ignore_no_limit=True))
+        self.assertTrue(r['rows'][0]['lsl_fail'])
 
     def test_zero_ate_pair_is_uncomputable(self):
         from apps.analysis.services.file_correlation import (
