@@ -47,8 +47,8 @@ class FileCorrelationConfig:
     max_serials: int = 30            # fallback cap when ``serials`` is None
     serials: Optional[List[int]] = None  # explicit user selection (优先)
     tight_pct: float = 30.0          # 'tight_pct' 规则的收紧容差（%，相对 A 侧限值）
-    ignore_no_limit: bool = True
-    ignore_no_data: bool = True
+    ignore_no_limit: bool = False
+    ignore_no_data: bool = False
 
 
 def _parse_limit(raw) -> Optional[float]:
@@ -198,7 +198,7 @@ def compute_file_correlation(ate_df: pd.DataFrame, meta_a: dict,
     if not params:
         raise NoCommonParamsError()
 
-    # ignore no limit（默认勾选）：任一侧都没有 limit 的测试项不参与对比
+    # ignore no limit（默认关闭）：任一侧都没有 limit 的测试项不参与对比
     if cfg.ignore_no_limit:
         params = [p for p in params
                   if _has_any_limit(p, meta_a) and _has_any_limit(p, meta_b)]
@@ -223,7 +223,7 @@ def compute_file_correlation(ate_df: pd.DataFrame, meta_a: dict,
     aggs_a = _serial_frame(ate_df, serials, params)
     aggs_b = _serial_frame(bench_df, serials, params)
 
-    # ignore no data（默认勾选，非 limits-only 时）：所选序列上无任何
+    # ignore no data（默认关闭，非 limits-only 时）：所选序列上无任何
     # 有限配对数据的测试项不参与对比
     if cfg.ignore_no_data and not limits_only:
         keep = []

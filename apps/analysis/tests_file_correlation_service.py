@@ -92,17 +92,31 @@ class FileCorrelationServiceTests(SimpleTestCase):
             compute_file_correlation, FileCorrelationConfig)
 
         df1, df2, meta = self._frames()
-        # 加入两侧都无 limit 的 ParamC（'-'/'-'）→ 默认被 ignore_no_limit 过滤
+        # 加入两侧都无 limit 的 ParamC（'-'/'-'）→ 显式 ignore_no_limit=True 被过滤
         df1['ParamC'] = [0.1, 0.2, 0.3]
         df2['ParamC'] = [0.1, 0.2, 0.3]
         meta['mins']['ParamC'] = '-'
         meta['maxs']['ParamC'] = '-'
-        r = compute_file_correlation(df1, meta, df2, meta, FileCorrelationConfig())
+        r = compute_file_correlation(df1, meta, df2, meta,
+                                     FileCorrelationConfig(ignore_no_limit=True))
         self.assertEqual(r['params'], ['ParamA', 'ParamB'])
         # 关闭后 ParamC 参与（数据相同 → 无超差）
         r2 = compute_file_correlation(df1, meta, df2, meta,
                                       FileCorrelationConfig(ignore_no_limit=False))
         self.assertEqual(r2['params'], ['ParamA', 'ParamB', 'ParamC'])
+
+    def test_ignore_flags_default_off(self):
+        from apps.analysis.services.file_correlation import (
+            compute_file_correlation, FileCorrelationConfig)
+
+        df1, df2, meta = self._frames()
+        df1['ParamC'] = [0.1, 0.2, 0.3]
+        df2['ParamC'] = [0.1, 0.2, 0.3]
+        meta['mins']['ParamC'] = '-'
+        meta['maxs']['ParamC'] = '-'
+        # 默认（不传 ignore_*）：无 limit 的 ParamC 参与对比（2026-09-09 需求 5）
+        r = compute_file_correlation(df1, meta, df2, meta, FileCorrelationConfig())
+        self.assertEqual(r['params'], ['ParamA', 'ParamB', 'ParamC'])
 
     def test_missing_limit_on_one_side_fails_both_rules(self):
         from apps.analysis.services.file_correlation import (
