@@ -140,6 +140,8 @@ def _evaluate_diff_rule(lsl_a: Optional[float], usl_a: Optional[float],
             and (lsl_b <= lsl_a
                  or (lsl_a != 0
                      and (lsl_b - lsl_a) / abs(lsl_a) * 100.0 <= tight_pct + 1e-9)))
+        # 注意：USL 侧减法方向与 LSL 相反（usl_a - usl_b），收紧时差值为正；
+        # 若改反会让「收紧全部放行」，语义静默反转
         usl_fail = not (
             usl_a is not None and usl_b is not None
             and (usl_b >= usl_a
