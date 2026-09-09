@@ -58,13 +58,21 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
     await expect(ruleGroup.locator('.el-radio-button').filter({ hasText: 'A：Diff 必须为 0' }))
       .toHaveClass(/is-active/)
 
+    // 规则 C：选中后出现「收紧容差」输入（默认 30.0），切回 A 后隐藏
+    await ruleGroup.locator('.el-radio-button').filter({ hasText: 'C：收紧' }).click()
+    const tol = section.locator('.fc-opt').filter({ hasText: '收紧容差' }).locator('.el-input-number input')
+    await expect(tol).toBeVisible()
+    await expect(tol).toHaveValue('30.0', { timeout: 5000 })
+    await ruleGroup.locator('.el-radio-button').filter({ hasText: 'A：Diff 必须为 0' }).click()
+    await expect(tol).toHaveCount(0)
+
     // 序列选择器（替换原「序列上限」输入框）：未选文件时提示仅对比 Limit
     await expect(elSelectByPlaceholder(section, '搜索序列号')).toBeVisible()
     await expect(section.locator('.fc-serial-hint')).toContainText('无公共序列，仅对比 Limit')
 
-    // ignore no limit / ignore no data 默认勾选
-    await expect(section.locator('.el-checkbox').filter({ hasText: 'Ignore No Limit' })).toHaveClass(/is-checked/)
-    await expect(section.locator('.el-checkbox').filter({ hasText: 'Ignore No Data' })).toHaveClass(/is-checked/)
+    // ignore no limit / ignore no data 默认不勾选（2026-09-09 需求 5）
+    await expect(section.locator('.el-checkbox').filter({ hasText: 'Ignore No Limit' })).not.toHaveClass(/is-checked/)
+    await expect(section.locator('.el-checkbox').filter({ hasText: 'Ignore No Data' })).not.toHaveClass(/is-checked/)
 
     // 分析 / 导出按钮
     await expect(section.getByRole('button', { name: '分析', exact: true })).toBeVisible()
@@ -98,14 +106,16 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
       .toMatch(/\d+/)
 
     // 默认视图 = 测试值对比：Parameters + Data A 的 Limit/单位 + 判定 + 每序列块；
-    // B 侧 Limit（LSL B/USL Diff）不在本视图
+    // B 侧 Limit（LSL B/USL Diff）不在本视图。
+    // 注意：ignore 开关默认关闭（2026-09-09 需求 5）后，无 limit 的元数据行
+    // （Part_No 等，unit 列文案恰为 "Unit"）也进入数据视图 → 取首个（表头）
     const table = section.locator('.fc-table')
     await expect(table).toBeVisible({ timeout: 20_000 })
     await expect(section.locator('.fc-table-info')).toContainText('Data A VS Data B')
     await expect(table.getByText('Parameters', { exact: true })).toBeVisible()
     await expect(table.getByText('LSL A', { exact: true })).toBeVisible()
     await expect(table.getByText('USL A', { exact: true })).toBeVisible()
-    await expect(table.getByText('Unit', { exact: true })).toBeVisible()
+    await expect(table.getByText('Unit', { exact: true }).first()).toBeVisible()
     await expect(table.getByText('判定', { exact: true })).toBeVisible()
     await expect(table.getByText('ATE', { exact: true }).first()).toBeVisible()
     await expect(table.getByText('LSL B', { exact: true })).toHaveCount(0)
@@ -164,6 +174,13 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
     // 下拉 teleport 到 body，footer 提示需从可见 dropdown 中取。
     const serialSel = section.locator('.fc-serial-sel .el-select')
     await serialSel.click()
+    // EP 现状（2026-09-09 观察）：首个单击可能只聚焦不展开（二击才展开，
+    // 疑似交互回归待组件侧跟进）——按真实用户习惯补一次点击
+    await page.waitForTimeout(400)
+    if ((await page.locator('.el-select-dropdown:visible').count()) === 0) {
+      await serialSel.click()
+    }
+    await expect(page.locator('.el-select-dropdown:visible')).toBeVisible()
     await page.keyboard.type('1')
     await expect(page.locator('.el-select-dropdown:visible .match-hint')).toContainText('按 Enter 全选', { timeout: 5000 })
     await page.keyboard.press('Enter')
@@ -203,5 +220,33 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
     const download = await downloadPromise
     // 默认导出文件名模板：{file1}_vs_{file2}_correlation.xlsx
     expect(download.suggestedFilename()).toMatch(/BPD60320_FT_vs_BPD60320_QA1_correlation\.xlsx/)
+  })
+
+  test('Limit 视图判定列排序：FAIL 排前 → 反向 PASS 在前', async ({ page }) => {
+    await gotoApp(page, '/data')
+    await page.locator('.tab-btn').filter({ hasText: '文件对比' }).click()
+
+    const section = page.locator('.file-corr-section')
+    await expect(section).toBeVisible({ timeout: 10_000 })
+    await pickFilePair(section, page)
+    await expect(section.locator('.fc-serial-hint')).toContainText(/已选 10 \/ 共 \d+ 颗/, { timeout: 15_000 })
+
+    await section.getByRole('button', { name: '分析', exact: true }).click()
+    await expect(section.locator('.fc-table')).toBeVisible({ timeout: 30_000 })
+
+    await section.locator('.el-radio-button').filter({ hasText: 'Limit 对比' }).click()
+    const table = section.locator('.fc-table')
+    const verdictHeader = table.getByText('判定', { exact: true })
+    await expect(verdictHeader).toBeVisible()
+
+    const firstRowVerdict = () =>
+      table.locator('.el-table__row').first().locator('.verdict-badge').textContent()
+
+    // 升序（第一次点击）：FAIL rank 0 → 在前（种子对 limit 有同有异，FAIL/PASS 均存在）
+    await verdictHeader.click()
+    await expect.poll(firstRowVerdict, { timeout: 10_000 }).toBe('FAIL')
+    // 降序（第二次点击）：PASS 在前
+    await verdictHeader.click()
+    await expect.poll(firstRowVerdict, { timeout: 10_000 }).toBe('PASS')
   })
 })
