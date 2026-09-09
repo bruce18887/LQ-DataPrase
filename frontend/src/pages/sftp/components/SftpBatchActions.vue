@@ -7,10 +7,10 @@
     <template v-if="selectedCount > 0">
       <el-divider direction="vertical" />
       <el-tag type="info" size="small">已选 {{ selectedCount }} 个文件</el-tag>
-      <el-button size="small" type="primary" @click="emit('batch-download')" :loading="batchDownloading">
+      <el-button size="small" type="primary" @click="emit('batch-download')" :loading="batchDownloading" :disabled="transferActive">
         <el-icon><Download /></el-icon> 批量下载
       </el-button>
-      <el-button size="small" type="success" @click="emit('batch-download-and-parse')" :loading="batchParsing">
+      <el-button size="small" type="success" @click="emit('batch-download-and-parse')" :loading="batchParsing" :disabled="transferActive">
         <el-icon><DataAnalysis /></el-icon> 批量下载解析
       </el-button>
     </template>
@@ -26,6 +26,8 @@ defineProps<{
   isIndeterminate: boolean
   batchDownloading: boolean
   batchParsing: boolean
+  /** 传输互斥：任意传输进行中时禁用所有下载入口（后端共享 paramiko 连接非线程安全） */
+  transferActive?: boolean
 }>()
 
 const emit = defineEmits<{
