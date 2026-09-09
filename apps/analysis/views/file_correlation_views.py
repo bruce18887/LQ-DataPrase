@@ -59,7 +59,7 @@ class FileCorrelationActions:
         {
             "file1_id": 123, "file2_id": 456,
             "threshold": 3.0, "diff_rule": "zero",
-            "tight_pct": 30.0,          # 'tight_pct' 规则的收紧容差（%）
+            "change_pct": 30.0,         # 'change_pct' 规则的限值变化容差（%，收紧/放宽双向）
             "serials": [1, 2, 3],       # 可选：用户勾选的序列（优先）
             "max_serials": 30,          # 兜底：未传 serials 时取前 N
             "ignore_no_limit": false, "ignore_no_data": false
@@ -98,7 +98,7 @@ class FileCorrelationActions:
         from the same computed values as the JSON endpoint, so the two
         outputs always agree.
 
-        Request body: 同 file_correlation（threshold / diff_rule / tight_pct /
+        Request body: 同 file_correlation（threshold / diff_rule / change_pct /
         serials 或 max_serials / ignore_no_limit / ignore_no_data）。
         防呆：无相同测试项 → 400 no_common_params；无相同序列 → limits-only
         （只导 limit 列，无序列数据列）。
@@ -229,20 +229,28 @@ def _load_fc_serial_series(request):
 def _parse_fc_config(request) -> FileCorrelationConfig:
     """Parse the file-correlation options from a request body.
 
-    All options default to the panel defaults (threshold 3.0 / tight_pct 30.0,
+    All options default to the panel defaults (threshold 3.0 / change_pct 30.0,
     rule 'zero', serials 未指定 → max_serials 30 兜底, ignore_no_limit /
     ignore_no_data unchecked（默认不勾选）) so a minimal body applies the panel defaults (ignore 开关默认
     不勾选：无 limit / 无数据的测试项参与对比).
+
+    旧键别名（2026-09-09 规则C 升级双侧容差）：``diff_rule='tight_pct'`` 与
+    ``tight_pct`` 仍被接受并映射到 ``change_pct``——防止旧客户端/旧标签页
+    把规则静默降级成 'zero'。
     """
     threshold = get_param_float(request, 'threshold', 3.0)
     if threshold is None or threshold < 0:
         threshold = 3.0
     diff_rule = get_param(request, 'diff_rule', 'zero')
-    if diff_rule not in ('zero', 'wider', 'tight_pct'):
+    if diff_rule not in ('zero', 'wider', 'change_pct', 'tight_pct'):
         diff_rule = 'zero'
-    tight_pct = get_param_float(request, 'tight_pct', 30.0)
-    if tight_pct is None or tight_pct < 0:
-        tight_pct = 30.0
+    if diff_rule == 'tight_pct':
+        diff_rule = 'change_pct'
+    change_pct = get_param_float(request, 'change_pct', None)
+    if change_pct is None or change_pct < 0:
+        change_pct = get_param_float(request, 'tight_pct', 30.0)
+    if change_pct is None or change_pct < 0:
+        change_pct = 30.0
     max_serials = get_param_float(request, 'max_serials', 30)
     try:
         max_serials = max(1, int(max_serials))
@@ -272,7 +280,7 @@ def _parse_fc_config(request) -> FileCorrelationConfig:
         diff_rule=diff_rule,
         max_serials=max_serials,
         serials=serials,
-        tight_pct=float(tight_pct),
+        change_pct=float(change_pct),
         ignore_no_limit=_bool_param('ignore_no_limit', False),
         ignore_no_data=_bool_param('ignore_no_data', False),
     )

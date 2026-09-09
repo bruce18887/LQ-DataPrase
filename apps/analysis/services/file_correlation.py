@@ -10,8 +10,9 @@ Comparison rules (mirrored by the frontend panel one-to-one):
     'zero'  : pass iff both diffs are exactly 0.
     'wider' : pass iff file B's limit is no tighter than file A's
               (LSL_B ≤ LSL_A and USL_B ≥ USL_A).
-    'tight_pct': pass iff B is no tighter than A, or the tightening is
-              within ``tight_pct``% of A's limit (per side).
+    'change_pct': pass iff each side's limit change stays within
+              ``change_pct``% of A's limit, in BOTH directions —
+              tightening and widening alike (B 放宽过度同样标异常).
 - Serial selection: explicit ``serials`` list (user-chosen, request order)
   takes precedence; otherwise the first ``max_serials`` common serials
   (ascending) are used as a fallback cap.
@@ -43,10 +44,10 @@ class NoCommonParamsError(Exception):
 class FileCorrelationConfig:
     """Comparison options; the frontend panel mirrors these one-to-one."""
     threshold: float = 3.0
-    diff_rule: str = 'zero'          # 'zero' | 'wider' | 'tight_pct'
+    diff_rule: str = 'zero'          # 'zero' | 'wider' | 'change_pct'
     max_serials: int = 30            # fallback cap when ``serials`` is None
     serials: Optional[List[int]] = None  # explicit user selection (优先)
-    tight_pct: float = 30.0          # 'tight_pct' 规则的收紧容差（%，相对 A 侧限值）
+    change_pct: float = 30.0         # 'change_pct' 规则的限值变化容差（%，相对 A 侧限值，收紧/放宽双向）
     ignore_no_limit: bool = False
     ignore_no_data: bool = False
 
@@ -120,32 +121,36 @@ def list_common_serials(ate_ser: pd.Series, bench_ser: pd.Series) -> List[int]:
         set(ate_ser.dropna().astype(int)) & set(bench_ser.dropna().astype(int)))
 
 
+def _side_change_fail(a: Optional[float], b: Optional[float],
+                      change_pct: float) -> bool:
+    """单侧限值变化是否超容差（'change_pct' 规则的单元判定）。
+
+    任一侧缺失 → fail；A 侧为 0 无百分比基准 → B 侧任何非零变化都 fail；
+    其余按 |B−A| / |A| × 100 > change_pct 判 fail（带 1e-9 浮点容差，
+    恰好等于容差判过）。收紧与放宽同公式双向生效。
+    """
+    if a is None or b is None:
+        return True
+    if a == 0:
+        return b != 0
+    return abs(b - a) / abs(a) * 100.0 > change_pct + 1e-9
+
+
 def _evaluate_diff_rule(lsl_a: Optional[float], usl_a: Optional[float],
                         lsl_b: Optional[float], usl_b: Optional[float],
-                        rule: str, tight_pct: float = 30.0) -> Tuple[bool, bool]:
+                        rule: str, change_pct: float = 30.0) -> Tuple[bool, bool]:
     """→ (lsl_fail, usl_fail).  A missing limit on either side is a fail.
 
-    'tight_pct'：wider 语义 + 收紧容差 —— B 收紧幅度 ≤ tight_pct%（相对 A 侧
-    限值，带 1e-9 浮点容差，恰好等于容差判过）时放行；A 侧限值为 0 无百分比
-    基准 → fail。
+    'change_pct'：双侧容差 —— 每侧限值相对 A 的变化幅度（收紧或放宽）
+    ≤ change_pct% 才放行；B 放宽过度（如 -80/80 → -1000/1000）同样标异常。
     """
     if rule == 'wider':
         # B 的 limit 不更紧才算 pass（更宽或相等）
         lsl_fail = not (lsl_a is not None and lsl_b is not None and lsl_b <= lsl_a)
         usl_fail = not (usl_a is not None and usl_b is not None and usl_b >= usl_a)
-    elif rule == 'tight_pct':
-        lsl_fail = not (
-            lsl_a is not None and lsl_b is not None
-            and (lsl_b <= lsl_a
-                 or (lsl_a != 0
-                     and (lsl_b - lsl_a) / abs(lsl_a) * 100.0 <= tight_pct + 1e-9)))
-        # 注意：USL 侧减法方向与 LSL 相反（usl_a - usl_b），收紧时差值为正；
-        # 若改反会让「收紧全部放行」，语义静默反转
-        usl_fail = not (
-            usl_a is not None and usl_b is not None
-            and (usl_b >= usl_a
-                 or (usl_a != 0
-                     and (usl_a - usl_b) / abs(usl_a) * 100.0 <= tight_pct + 1e-9)))
+    elif rule == 'change_pct':
+        lsl_fail = _side_change_fail(lsl_a, lsl_b, change_pct)
+        usl_fail = _side_change_fail(usl_a, usl_b, change_pct)
     else:  # 'zero'（默认）：两侧差值必须恰为 0
         lsl_fail = not (lsl_a is not None and lsl_b is not None
                         and (lsl_b - lsl_a) == 0.0)
@@ -244,7 +249,7 @@ def compute_file_correlation(ate_df: pd.DataFrame, meta_a: dict,
         lsl_diff = _jf(lsl_b - lsl_a) if (lsl_a is not None and lsl_b is not None) else None
         usl_diff = _jf(usl_b - usl_a) if (usl_a is not None and usl_b is not None) else None
         lsl_fail, usl_fail = _evaluate_diff_rule(lsl_a, usl_a, lsl_b, usl_b,
-                                                 cfg.diff_rule, cfg.tight_pct)
+                                                 cfg.diff_rule, cfg.change_pct)
 
         cells = []
         compared = 0

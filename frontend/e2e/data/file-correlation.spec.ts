@@ -58,9 +58,9 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
     await expect(ruleGroup.locator('.el-radio-button').filter({ hasText: 'A：Diff 必须为 0' }))
       .toHaveClass(/is-active/)
 
-    // 规则 C：选中后出现「收紧容差」输入（默认 30.0），切回 A 后隐藏
-    await ruleGroup.locator('.el-radio-button').filter({ hasText: 'C：收紧' }).click()
-    const tol = section.locator('.fc-opt').filter({ hasText: '收紧容差' }).locator('.el-input-number input')
+    // 规则 C：选中后出现「变化容差」输入（默认 30.0），切回 A 后隐藏
+    await ruleGroup.locator('.el-radio-button').filter({ hasText: 'C：变化' }).click()
+    const tol = section.locator('.fc-opt').filter({ hasText: '变化容差' }).locator('.el-input-number input')
     await expect(tol).toBeVisible()
     await expect(tol).toHaveValue('30.0', { timeout: 5000 })
     await ruleGroup.locator('.el-radio-button').filter({ hasText: 'A：Diff 必须为 0' }).click()
@@ -201,6 +201,39 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
     await section.getByRole('button', { name: '分析', exact: true }).click()
     await expect(section.locator('.fc-alert')).toContainText('没有可对比的序列', { timeout: 15_000 })
     await expect(section.locator('.fc-table')).toBeVisible({ timeout: 15_000 })
+  })
+
+  test('规则C 双侧容差：放宽过度标 FAIL，调大容差回 PASS', async ({ page }) => {
+    await gotoApp(page, '/data')
+    await page.locator('.tab-btn').filter({ hasText: '文件对比' }).click()
+
+    const section = page.locator('.file-corr-section')
+    await expect(section).toBeVisible({ timeout: 10_000 })
+    await pickFilePair(section, page)
+    await expect(section.locator('.fc-serial-hint')).toContainText(/已选 10 \/ 共 \d+ 颗/, { timeout: 15_000 })
+
+    // 选规则 C（默认容差 30）→ 分析 → Limit 视图
+    await section.locator('.el-radio-group').first()
+      .locator('.el-radio-button').filter({ hasText: 'C：变化' }).click()
+    await section.getByRole('button', { name: '分析', exact: true }).click()
+    await expect(section.locator('.fc-table')).toBeVisible({ timeout: 30_000 })
+    await section.locator('.el-radio-button').filter({ hasText: 'Limit 对比' }).click()
+
+    // 汇总卡文案插值实际容差（2026-09-09 规则C 升级双侧容差）
+    await expect(section.locator('.fc-summary'))
+      .toContainText('规则C：B 变化幅度 ≤ 30% 允许', { timeout: 15_000 })
+
+    // 种子对 lkg_VCC_SNSP_6V：A -50/50 → B -70/70（放宽 40% > 30）→ FAIL
+    const wideRow = section.locator('.el-table__row').filter({
+      has: page.getByText('lkg_VCC_SNSP_6V', { exact: true }),
+    })
+    await expect(wideRow.locator('.verdict-badge')).toHaveText('FAIL', { timeout: 15_000 })
+
+    // 容差调到 50 → 重新分析 → 同一行回 PASS（容差驱动放宽判定）
+    const tol = section.locator('.fc-opt').filter({ hasText: '变化容差' }).locator('.el-input-number input')
+    await tol.fill('50')
+    await section.getByRole('button', { name: '分析', exact: true }).click()
+    await expect(wideRow.locator('.verdict-badge')).toHaveText('PASS', { timeout: 30_000 })
   })
 
   test('导出 Excel 触发模板命名下载', async ({ page }) => {

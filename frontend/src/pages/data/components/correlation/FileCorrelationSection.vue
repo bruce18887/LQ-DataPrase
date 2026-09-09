@@ -15,7 +15,7 @@
           v-model:file2="file2"
           v-model:threshold="options.threshold"
           v-model:diff-rule="options.diffRule"
-          v-model:tight-pct="options.tightPct"
+          v-model:change-pct="options.changePct"
           v-model:serials="options.serials"
           v-model:ignore-no-limit="options.ignoreNoLimit"
           v-model:ignore-no-data="options.ignoreNoData"
@@ -59,7 +59,11 @@
             </el-radio-group>
           </div>
 
-          <FileCorrelationSummary :result="result" :diff-rule="options.diffRule" />
+          <FileCorrelationSummary
+            :result="result"
+            :diff-rule="options.diffRule"
+            :change-pct="options.changePct"
+          />
 
           <!-- 重型表格：ag-grid 行列双虚拟化后 DOM 很小，tab 不活跃时仅
                v-show 隐藏（display:none 切换毫秒级），切回无需重渲染 -->
@@ -69,6 +73,7 @@
             :result="result"
             :threshold="options.threshold"
             :diff-rule="options.diffRule"
+            :change-pct="options.changePct"
           />
           <FileCorrelationLimitTable
             v-if="viewMode === 'limit'"
@@ -76,6 +81,7 @@
             :result="result"
             :threshold="options.threshold"
             :diff-rule="options.diffRule"
+            :change-pct="options.changePct"
           />
         </template>
         <el-empty
@@ -117,7 +123,7 @@ const options = ref<FileCorrelationOptions>({
   threshold: 3,
   diffRule: 'zero',
   serials: [],
-  tightPct: 30,
+  changePct: 30,
   ignoreNoLimit: false,
   ignoreNoData: false,
 })
