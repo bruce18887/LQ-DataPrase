@@ -108,15 +108,14 @@ def _serial_frame(df: pd.DataFrame, serials: List[int],
     return agg.reindex(serials)
 
 
-def list_common_serials(ate_df: pd.DataFrame, bench_df: pd.DataFrame) -> List[int]:
+def list_common_serials(ate_ser: pd.Series, bench_ser: pd.Series) -> List[int]:
     """Sorted common serial numbers of the two files (same ``__serial__``
     semantics as :func:`compute_file_correlation`).
 
-    The frontend serial picker calls this via ``file_correlation_serials``;
-    it is pure and cheap (no per-param computation).
+    接收已数值化的序列 Series（``pd.to_numeric(..., errors='coerce')`` 的
+    产物）——serials 端点只消费序列列，不值得为此整表 copy（大文件下整表
+    拷贝是主要开销）。
     """
-    ate_ser = pd.to_numeric(ate_df['__serial__'], errors='coerce')
-    bench_ser = pd.to_numeric(bench_df['__serial__'], errors='coerce')
     return sorted(
         set(ate_ser.dropna().astype(int)) & set(bench_ser.dropna().astype(int)))
 

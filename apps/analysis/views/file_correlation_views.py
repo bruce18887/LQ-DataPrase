@@ -40,12 +40,15 @@ class FileCorrelationActions:
         Response: ``{serials: [int, ...], total: int}`` — ascending,
         same ``__serial__`` semantics as the full ``file_correlation``
         computation (交集、数值化), so the picker and the analysis agree.
+
+        只消费序列列：不做整表 copy（大文件下 copy 是主要开销），
+        ``pd.to_numeric`` 返回新 Series 不触碰 LRU 缓存原帧。
         """
-        payload, err = _load_file_correlation_pair(request)
+        sers, err = _load_fc_serial_series(request)
         if err is not None:
             return Response(err[0], status=err[1])
 
-        serials = list_common_serials(payload['ate_df'], payload['bench_df'])
+        serials = list_common_serials(sers['ATE'], sers['Bench'])
         return Response({'serials': serials, 'total': len(serials)})
 
     @action(detail=False, methods=['post'])
@@ -187,6 +190,40 @@ def _load_file_correlation_pair(request):
         'metadata_a': metas['ATE'], 'metadata_b': metas['Bench'],
         'file1_name': names['ATE'], 'file2_name': names['Bench'],
     }, None
+
+
+def _load_fc_serial_series(request):
+    """Load only the numeric serial Series of two files (serials 端点专用).
+
+    与 ``_load_file_correlation_pair`` 相同的文件解析与错误契约
+    （need_two_files / parse_failed / no_serial_column），但不注入
+    ``__serial__``、不做整表 copy。Returns ``(sers, err)``，``sers`` 为
+    ``{'ATE': Series, 'Bench': Series}``。
+    """
+    file1_id = request.data.get('file1_id')
+    file2_id = request.data.get('file2_id')
+    if not file1_id or not file2_id:
+        return None, ({'error': 'need_two_files'}, 400)
+
+    sers = {}
+    loaded = 0
+    for fid, label in [(file1_id, 'ATE'), (file2_id, 'Bench')]:
+        df_obj = get_object_or_404(DataFile, pk=fid, owner=request.user)
+        df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk, df_obj)
+        if df is None:
+            continue
+        loaded += 1
+        serial_col = get_serial_column(df)
+        if serial_col:
+            # pd.to_numeric 返回新 Series；缓存 DataFrame 只读不变量不受影响
+            sers[label] = pd.to_numeric(df[serial_col], errors='coerce')
+
+    if loaded < 2:
+        return None, ({'error': 'parse_failed'}, 400)
+    if len(sers) < 2:
+        return None, ({'error': 'no_serial_column'}, 400)
+
+    return sers, None
 
 
 def _parse_fc_config(request) -> FileCorrelationConfig:
