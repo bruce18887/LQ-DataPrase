@@ -15,6 +15,7 @@ import { RECOMMENDED } from '../fixtures/test-data'
  *    元素本来就不等于面板体）。
  *  - 底部横条改整体高度：4 张图画布双向（压矮/撑高）都跟随。
  *  - 行间自定义拖拽条改两行占比：两行图画布此消彼长且都跟随。
+ *  - 底部横条高度进布局记忆：刷新后恢复拖拽值、不回按行数默认（2026-09-09）。
  * 行不再用 el-splitter（它把行尺寸一次性锁成 px、容器变高不重算），改自定义 % 行。
  */
 
@@ -122,6 +123,21 @@ async function bottomGap(page: import('@playwright/test').Page): Promise<number>
   })
 }
 
+/** 直写账号设置（seed 把 e2e 账号的记忆开关置 False 防并行污染，记忆用例独占开启） */
+async function putChartSettings(page: import('@playwright/test').Page, payload: Record<string, unknown>) {
+  if (!page.url().startsWith('http')) await page.goto('/')
+  await page.evaluate(async (body) => {
+    await fetch('/api/v1/auth/settings/', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+      },
+      body: JSON.stringify(body),
+    })
+  }, payload)
+}
+
 test.describe('@p1 dock 面板缩放自适应', { tag: ['@p1', '@analysis'] }, () => {
   test('底部横条压矮/撑高 → 4 图画布双向跟随（不只面板高度）', async ({ page }) => {
     await enterAll(page)
@@ -146,6 +162,69 @@ test.describe('@p1 dock 面板缩放自适应', { tag: ['@p1', '@analysis'] }, (
         .toBeGreaterThan(before[k])
     }
     await expectAllCanvasFit(page)
+  })
+
+  test('底部横条高度进布局记忆：刷新后恢复拖拽值（不回默认）', async ({ page }) => {
+    // 开关独占开启 + 清场；finally 复原 False（seed 默认），不留状态给并行用例
+    await putChartSettings(page, { analysis_chart_memory: true, analysis_chart_state: {} })
+    try {
+      await enterAll(page)
+
+      const bodyH = () =>
+        page.locator('.chart-dock__body').evaluate((el) => Math.round(el.getBoundingClientRect().height))
+      const h0 = await bodyH()
+
+      // 捕获账号态 PUT：payload 必须带上 bodyH（账号级记忆链路自证，不读共享
+      // 服务端态——并行用例同账号会互相覆盖，读服务端必竞态）
+      const putBodies: Record<string, unknown>[] = []
+      page.on('request', (req) => {
+        if (req.method() === 'PUT' && req.url().includes('/auth/settings/')) {
+          try {
+            putBodies.push(JSON.parse(req.postData() ?? '{}') as Record<string, unknown>)
+          } catch {
+            /* 非 JSON 忽略 */
+          }
+        }
+      })
+
+      // 撑高 300px → 松手落盘（localStorage 同步写 + 账号态防抖 PUT）
+      await dragBar(page, '.chart-dock__resize', 0, 300)
+      const h1 = await bodyH()
+      expect(h1).toBeGreaterThan(h0 + 200)
+      await expect
+        .poll(
+          () => putBodies.some(
+            (b) => (b.analysis_chart_state as { layout?: { bodyH?: number | null } } | undefined)?.layout?.bodyH === h1,
+          ),
+          { timeout: 5_000, message: '账号态 PUT 应携带拖拽后的 bodyH' },
+        )
+        .toBe(true)
+
+      // 刷新阶段断掉 settings GET：记忆开关落 null 态 → 不套服务端布局（并行用例
+      // 共享账号态会互相覆盖），高度恢复只走本机 localStorage 链路；勾选不恢复
+      // → 手动勾上三张图
+      await page.route('**/api/v1/auth/settings/**', (route) => {
+        if (route.request().method() === 'GET') void route.abort()
+        else void route.continue()
+      })
+      await page.reload()
+      await selectAnalysisFile(page, RECOMMENDED.analysis)
+      for (const label of ['显示序列分布', '显示QQ图', '显示箱线图']) {
+        await toggle(page, label).click()
+      }
+      for (const k of KEYS) {
+        await expect(page.locator(`.chart-panel[data-chart-key="${k}"]`)).toBeVisible({ timeout: 20_000 })
+      }
+      await waitLoadingGone(page.locator(SINGLE))
+
+      // 关键断言：高度 = 拖拽后的值，而非按行数的默认 autoH
+      await expect
+        .poll(async () => await bodyH(), { timeout: 10_000, message: '刷新后 dock 高度应恢复为用户拖拽值' })
+        .toBe(h1)
+    } finally {
+      await page.unroute('**/api/v1/auth/settings/**')
+      await putChartSettings(page, { analysis_chart_memory: false, analysis_chart_state: {} })
+    }
   })
 
   test('行间拖拽条改两行占比 → 上下两行图画布都跟随', async ({ page }) => {

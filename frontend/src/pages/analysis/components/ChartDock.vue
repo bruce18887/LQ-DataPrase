@@ -109,13 +109,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import ChartPanel from './ChartPanel.vue'
-import { useChartDock, pctFromPx, type ChartKey } from '../composables/useChartDock'
+import { useChartDock, pctFromPx, DOCK_BODY_MIN_H, DOCK_BODY_MAX_H, type ChartKey } from '../composables/useChartDock'
 
 const props = defineProps<{ activeKeys: ChartKey[] }>()
 const emit = defineEmits<{ (e: 'close', key: ChartKey): void }>()
 
 const dock = useChartDock(() => props.activeKeys)
-const { rows, rowPcts, colPcts } = dock
+const { rows, rowPcts, colPcts, bodyH } = dock
 
 const TITLES: Record<ChartKey, string> = {
   hist: '直方图', serial: '序列分布', qq: 'QQ 图', box: '箱线图',
@@ -147,11 +147,8 @@ const displayRows = computed<ChartKey[][]>(() => {
   return visibleRows.value
 })
 
-/* ── 整体高度：按行数自适应，底部横条可覆盖 ───────────────── */
+/* ── 整体高度：按行数自适应，底部横条可覆盖（bodyH 持久化于布局记忆）── */
 // 行数越多默认越高（2 行→920、4 图 2×2 每行 ~460，Y 轴初始不被挤没）；null=自动
-const bodyH = ref<number | null>(null)
-const MIN_H = 480
-const MAX_H = 2600
 // 每行默认 460px（序列图/QQ/箱线的 Y 轴初始不被挤没），单行下限 640、总上限 1400
 const autoH = computed(() => Math.max(640, Math.min(displayRows.value.length * 460, 1400)))
 const effH = computed(() => bodyH.value ?? autoH.value)
@@ -165,7 +162,7 @@ function onHeightDown(ev: PointerEvent) {
   heightResize.value = true
   document.body.style.userSelect = 'none'
   const onMove = (e: PointerEvent) => {
-    const next = Math.max(MIN_H, Math.min(MAX_H, startH + (e.clientY - startY)))
+    const next = Math.max(DOCK_BODY_MIN_H, Math.min(DOCK_BODY_MAX_H, startH + (e.clientY - startY)))
     bodyH.value = next
   }
   const onUp = () => {
@@ -174,13 +171,14 @@ function onHeightDown(ev: PointerEvent) {
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
     window.removeEventListener('pointercancel', onUp)
+    dock.setBodyH(bodyH.value) // 松手一次性落盘（拖拽中只改内存）
   }
   window.addEventListener('pointermove', onMove)
   window.addEventListener('pointerup', onUp)
   window.addEventListener('pointercancel', onUp)
 }
 function resetHeight() {
-  bodyH.value = null
+  dock.setBodyH(null)
 }
 
 // 行高：占比% 减去「行间拖拽条」占位（rowbar 10px × (行数-1)），使各行 + 分隔条

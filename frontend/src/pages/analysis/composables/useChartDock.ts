@@ -6,6 +6,7 @@
  *   4 图 2×2 [[a,b],[c,d]]；任意组合由此表达。
  * 尺寸：rowPcts / colPcts 为百分比（0-100，同层相加≈100），仅在结构变化时重置为
  *   均分、在 splitter resize-end 时按最终像素折算回写并持久化。
+ *   bodyH 为底部横条拖出的整体高度覆盖（px，null=按行数自动），同链路持久化。
  * 持久化：safeStorage（Electron 下防 DOMException），键 lqdp-analysis-chart-layout。
  * 单例：module 级 ref（仿 useZoom.ts 的 refCount 模式），避免面板 v-if/重排丢态。
  * 纯模型 + 变换 + 存储，不碰 DOM —— 拖拽指针逻辑在 ChartDock.vue。
@@ -19,6 +20,10 @@ const ALL_KEYS: ChartKey[] = ['hist', 'serial', 'qq', 'box']
 export const DOCK_LAYOUT_STORAGE_KEY = 'lqdp-analysis-chart-layout'
 const VERSION = 1
 
+/** 底部横条拖拽的整体高度上下限（px）——持久化回填时同限夹取 */
+export const DOCK_BODY_MIN_H = 480
+export const DOCK_BODY_MAX_H = 2600
+
 /** hist 首行占比、辅助行均分剩余（首屏默认，直方图明显更高） */
 const HIST_FIRST_PCT = 58
 
@@ -26,6 +31,15 @@ export interface DockLayout {
   rows: ChartKey[][]
   rowPcts: number[]
   colPcts: number[][]
+  /** 底部横条拖出的整体高度覆盖（px）；null = 按行数自动 */
+  bodyH: number | null
+}
+
+/** 持久化 bodyH 容错：缺失/非法/超限 → null（不牵连整个布局作废） */
+export function sanitizeBodyH(v: unknown): number | null {
+  if (v === null || v === undefined) return null
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null
+  return Math.round(Math.max(DOCK_BODY_MIN_H, Math.min(DOCK_BODY_MAX_H, v)))
 }
 
 function equalPct(n: number): number[] {
@@ -51,6 +65,7 @@ export function defaultLayout(active: ChartKey[]): DockLayout {
     rows,
     rowPcts: rows.length === 1 ? [100] : defaultRowPcts(rows.length),
     colPcts: rows.map((r) => equalPct(r.length)),
+    bodyH: null,
   }
 }
 
@@ -86,7 +101,12 @@ function loadLayout(): DockLayout | null {
     const parsed = JSON.parse(raw)
     if (!isValidLayout(parsed)) return null
     const l = parsed as unknown as DockLayout & { v: number }
-    return { rows: l.rows, rowPcts: l.rowPcts ?? [], colPcts: l.colPcts ?? [] }
+    return {
+      rows: l.rows,
+      rowPcts: l.rowPcts ?? [],
+      colPcts: l.colPcts ?? [],
+      bodyH: sanitizeBodyH(l.bodyH),
+    }
   } catch {
     return null
   }
@@ -96,6 +116,8 @@ export interface ChartDockApi {
   rows: Ref<ChartKey[][]>
   rowPcts: Ref<number[]>
   colPcts: Ref<number[][]>
+  /** 整体高度覆盖（px，null=自动）；拖拽中直接写、松手调 setBodyH 落盘 */
+  bodyH: Ref<number | null>
   /**
    * 让 rows 覆盖到 active 集合：补新、去旧，保留既有相对顺序。
    * { persist: false } 只改内存不落盘——挂载首次对齐（勾选可能尚未从账号
@@ -107,6 +129,8 @@ export interface ChartDockApi {
   /** 行内列 resize-end 折回百分比 */
   setRowPcts: (pcts: number[]) => void
   setColPcts: (rowIndex: number, pcts: number[]) => void
+  /** 底部横条松手/双击复原时落盘整体高度 */
+  setBodyH: (h: number | null) => void
   findPos: (key: ChartKey) => { ri: number; ci: number } | null
 }
 
@@ -130,6 +154,7 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
     const rows = ref<ChartKey[][]>(init.rows.map((r) => [...r]))
     const rowPcts = ref<number[]>([...init.rowPcts])
     const colPcts = ref<number[][]>(init.colPcts.map((c) => [...c]))
+    const bodyH = ref<number | null>(init.bodyH ?? null)
 
     const normalizeSizes = () => {
       if (rowPcts.value.length !== rows.value.length || rowPcts.value.some((n) => !Number.isFinite(n))) {
@@ -150,7 +175,13 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
     }
 
     const persist = () => {
-      const payload = { v: VERSION, rows: rows.value, rowPcts: rowPcts.value, colPcts: colPcts.value }
+      const payload = {
+        v: VERSION,
+        rows: rows.value,
+        rowPcts: rowPcts.value,
+        colPcts: colPcts.value,
+        bodyH: bodyH.value,
+      }
       if (isMemoryEnabled() !== false) safeSetItem(DOCK_LAYOUT_STORAGE_KEY, JSON.stringify(payload))
       saveChartState({ layout: payload })
     }
@@ -225,6 +256,7 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
       rows.value = d.rows
       rowPcts.value = d.rowPcts
       colPcts.value = d.colPcts
+      bodyH.value = null
       persist()
     }
 
@@ -234,6 +266,11 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
       const c = [...colPcts.value]
       c[rowIndex] = pcts
       colPcts.value = c
+      persist()
+    }
+    const setBodyH = (h: number | null) => {
+      userTouched = true
+      bodyH.value = sanitizeBodyH(h)
       persist()
     }
 
@@ -256,6 +293,7 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
               rows.value = state.layout!.rows.map((r) => [...r])
               rowPcts.value = [...(state.layout!.rowPcts ?? [])]
               colPcts.value = (state.layout!.colPcts ?? []).map((c) => [...c])
+              bodyH.value = sanitizeBodyH(state.layout!.bodyH)
               reconcile(getActive())
             })
           } else if (memoryEnabled === true) {
@@ -264,7 +302,13 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
             //（可能含暂未勾选的图——下次进入由 layout 反推勾选恢复）
             const stored = loadLayout()
             if (stored) {
-              const payload = { v: VERSION, rows: stored.rows, rowPcts: stored.rowPcts, colPcts: stored.colPcts }
+              const payload = {
+                v: VERSION,
+                rows: stored.rows,
+                rowPcts: stored.rowPcts,
+                colPcts: stored.colPcts,
+                bodyH: stored.bodyH,
+              }
               saveChartState({ layout: payload })
             } else {
               persist()
@@ -275,6 +319,7 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
             rows.value = d.rows
             rowPcts.value = d.rowPcts
             colPcts.value = d.colPcts
+            bodyH.value = null
             safeRemoveItem(DOCK_LAYOUT_STORAGE_KEY)
           }
           // memoryEnabled === null（未返回/拉取失败）：什么都不做、也不落盘
@@ -284,7 +329,10 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
     }
     wireMemory()
 
-    singleton = { rows, rowPcts, colPcts, reconcile, moveTo, reset, setRowPcts, setColPcts, findPos }
+    singleton = {
+      rows, rowPcts, colPcts, bodyH,
+      reconcile, moveTo, reset, setRowPcts, setColPcts, setBodyH, findPos,
+    }
   }
   refCount++
   wireMemory?.() // 已接线则 no-op；auth 复位后此处重新挂接新账号布局
