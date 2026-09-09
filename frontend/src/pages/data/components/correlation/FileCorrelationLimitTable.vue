@@ -55,7 +55,7 @@
       <el-table-column label="Unit" width="70" align="center">
         <template #default="{ row }">{{ row.unit || '—' }}</template>
       </el-table-column>
-      <el-table-column label="判定" width="92" align="center">
+      <el-table-column label="判定" width="92" align="center" sortable :sort-method="verdictSort">
         <template #default="{ row }">
           <span :class="['verdict-badge', rowVerdict(row) === 'PASS' ? 'verdict-pass' : 'verdict-fail']"
             :title="verdictTitle(row)"
@@ -103,6 +103,13 @@ function fmtDiff(v: number | null | undefined): string {
 /** Limit 判定：仅按 LSL/USL Diff 规则（超差在测试值对比视图判定列） */
 function rowVerdict(row: FileCorrelationRow): 'PASS' | 'FAIL' {
   return (row.lsl_fail || row.usl_fail) ? 'FAIL' : 'PASS'
+}
+
+/** 判定列排序：FAIL rank 0 / PASS rank 1 → 升序 FAIL 在前；同判定保持原 rows 序 */
+function verdictSort(a: FileCorrelationRow, b: FileCorrelationRow): number {
+  const ra = rowVerdict(a) === 'FAIL' ? 0 : 1
+  const rb = rowVerdict(b) === 'FAIL' ? 0 : 1
+  return ra - rb
 }
 
 function verdictTitle(row: FileCorrelationRow): string {
