@@ -75,14 +75,24 @@
       <!-- 当前测试项各文件统计 -->
       <el-card v-if="lotStats.length" shadow="hover" :body-style="{ padding: '8px' }">
         <div class="section-label">各文件统计</div>
-        <el-table :data="lotStats" size="small" stripe>
-          <el-table-column prop="name" label="文件" min-width="90" show-overflow-tooltip />
-          <el-table-column prop="mean" label="Mean" width="78" />
+        <el-table :data="lotStats" size="small" stripe max-height="300">
+          <el-table-column prop="name" label="文件" min-width="80" show-overflow-tooltip fixed />
+          <el-table-column prop="mean" label="Mean" width="75" />
           <el-table-column prop="std" label="STD" width="70" />
-          <el-table-column prop="count" label="N" width="56" />
-          <el-table-column label="Yield" width="68">
+          <el-table-column prop="median" label="Median" width="75" />
+          <el-table-column label="CPK" width="65">
+            <template #default="{ row }">
+              <span :class="row.cpk_color !== 'gray' ? `cpk-${row.cpk_color}` : ''">
+                {{ row.cpk != null ? row.cpk.toFixed(2) : '—' }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="count" label="N" width="55" />
+          <el-table-column label="Yield" width="65">
             <template #default="{ row }">{{ row.yield_pct }}%</template>
           </el-table-column>
+          <el-table-column prop="min_v" label="Min" width="70" />
+          <el-table-column prop="max_v" label="Max" width="70" />
         </el-table>
       </el-card>
     </template>
@@ -313,8 +323,14 @@ const lotStats = computed(() => {
     name: resolvedNames.value[lot.file_id] || lot.name,
     mean: lot.mean,
     std: lot.std,
+    median: lot.median,
+    cpk: lot.cpk,
+    cpk_level: lot.cpk_level,
+    cpk_color: lot.cpk_color,
     count: lot.count,
     yield_pct: lot.yield_pct,
+    min_v: lot.min_v,
+    max_v: lot.max_v,
   }))
 })
 
@@ -434,6 +450,7 @@ watch(() => props.files, pruneDeadFileIds)
   display: flex;
   align-items: center;
   gap: 6px;
+  min-height: 24px;
 }
 
 .name-dot {
@@ -443,12 +460,11 @@ watch(() => props.files, pruneDeadFileIds)
   flex-shrink: 0;
 }
 
-.name-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 24px;
-}
+/* CPK 着色：与单文件 tab 的 cpk-badge 同源色（el-table scoped slot 内需 :deep） */
+:deep(.cpk-green) { color: #22c55e; font-weight: 600; }
+:deep(.cpk-orange) { color: #f59e0b; font-weight: 600; }
+:deep(.cpk-darkorange) { color: #ea580c; font-weight: 600; }
+:deep(.cpk-red) { color: #ef4444; font-weight: 600; }
 
 .top-bar {
   display: flex;
