@@ -136,7 +136,7 @@
             v-else-if="distError"
             :message="distError"
             title="多文件分布加载失败"
-            @retry="loadDistribution(fileIds, selectedParam, rangeType, multiFilters)"
+            @retry="loadDistribution(fileIds, selectedParam, rangeType, multiFilters, showKde)"
           />
           <el-empty
             v-else-if="lotData && selectedParam"
@@ -338,7 +338,7 @@ async function reloadParams() {
   // 合并请求：loadCommonParams 的响应已含首个公共参数的分布（lotParam 标记）。
   // 必须传当前 rangeType——后端合并分支无该参数时默认 S4，先切类型再选文件/
   // URL 恢复场景下初始图表会与下拉不一致（2026-08-13 回归）
-  await loadCommonParams(fileIds.value, ignoreNoLimit.value, rangeType.value, multiFilters.value)
+  await loadCommonParams(fileIds.value, ignoreNoLimit.value, rangeType.value, multiFilters.value, showKde.value)
   // 选中项失效时回退到第一项
   if (commonParams.value.length === 0) {
     selectedParam.value = ''
@@ -347,7 +347,7 @@ async function reloadParams() {
     // watch(selectedParam) 触发时若 lotParam === 该参数则跳过（分布已随合并响应到达）
   } else if (lotParam.value !== selectedParam.value) {
     // 列表变了但当前项仍有效且分布未随合并响应到达，主动刷新一次
-    await loadDistribution(fileIds.value, selectedParam.value, rangeType.value, multiFilters.value)
+    await loadDistribution(fileIds.value, selectedParam.value, rangeType.value, multiFilters.value, showKde.value)
   }
 }
 
@@ -368,13 +368,15 @@ watch(ignoreNoLimit, () => { reloadParams() })
 // 数据筛选开关变化 → 重载公共参数列表（合并请求携带全部开关；敏感度只
 // 影响低 CPK 候选集，但同样走这条合并请求）
 watch([ignoreNoTestValue, dataOnlyBin1, onlyFailTestItem, onlyLowCpk, iqrMultiplier], () => { reloadParams() })
+// KDE 勾选变化 → 重载（携带 include_kde，后端返回 kde_curve 数据）
+watch(showKde, () => { reloadParams() })
 watch(rangeType, () => {
   // 范围类型变化总是需要按新 range_type 重算分布（合并请求用的是默认类型）
-  if (selectedParam.value) loadDistribution(fileIds.value, selectedParam.value, rangeType.value, multiFilters.value)
+  if (selectedParam.value) loadDistribution(fileIds.value, selectedParam.value, rangeType.value, multiFilters.value, showKde.value)
 })
 watch(selectedParam, (p) => {
   if (p) {
-    if (lotParam.value !== p) loadDistribution(fileIds.value, p, rangeType.value, multiFilters.value)
+    if (lotParam.value !== p) loadDistribution(fileIds.value, p, rangeType.value, multiFilters.value, showKde.value)
   } else lotData.value = null
 })
 

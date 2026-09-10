@@ -163,6 +163,29 @@ function buildOption() {
     }
   }
 
+  // KDE 曲线：每个文件独立颜色
+  const showKde = props.chartConfig.includes('kde')
+  if (showKde) {
+    for (const lot of lots) {
+      const dn = displayName(lot)
+      const lc = lotThemeColor(lot)
+      if (lot.kde_curve && lot.kde_curve.length > 0) {
+        series.push({
+          name: `${dn} KDE`,
+          type: 'line',
+          data: lot.kde_curve,
+          smooth: true,
+          lineStyle: { color: lc, width: 2.5 },
+          itemStyle: { color: lc },
+          symbol: 'none',
+          yAxisIndex: 1,
+          z: 10,
+        })
+        legendData.push(`${dn} KDE`)
+      }
+    }
+  }
+
   const titleText = `${props.selectedParam}  ${r.global_mean != null ? `(μ=${r.global_mean})` : ''}`
 
   // 多系列 bar 分组偏移的边缘 pad（见下方 xAxis 注释）：N = 文件数；无 bin_centers
@@ -185,8 +208,8 @@ function buildOption() {
     },
   ]
 
-  // 如果显示正态分布曲线，添加概率密度Y轴
-  if (showNormal) {
+  // 如果显示正态分布曲线或 KDE 曲线，添加概率密度Y轴
+  if (showNormal || showKde) {
     yAxisConfig.push({
       type: 'value',
       name: '概率密度',
@@ -228,7 +251,7 @@ function buildOption() {
     },
     legend: { data: legendData, top: 'bottom', type: 'scroll', textStyle: { color: tc } },
     toolbox: { feature: { saveAsImage: { name: `${props.selectedParam}_多文件对比` } } },
-    grid: { top: 55, bottom: 70, left: 55, right: showNormal ? 80 : 55 },
+    grid: { top: 55, bottom: 70, left: 55, right: (showNormal || showKde) ? 80 : 55 },
     // 轴 min/max 向两端扩展多系列 bar 分组偏移量（getBarGroupPad）：N 个文件系列
     // 在同一 value 轴上分组错位，最左系列第 0 点柱体（x=bin_centers[0]）与最右系列
     // 最后点柱体（x=bin_centers[-1]）会被挤出绘图区整根裁剪（回归：edge-clip，

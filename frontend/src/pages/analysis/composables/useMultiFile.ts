@@ -46,7 +46,8 @@ export function useMultiFile() {
 
   async function loadCommonParams(fileIds: number[], ignoreNoLimit: boolean,
                                   rangeType: string = 'RDL',
-                                  filters: MultiFilterFlags = {}) {
+                                  filters: MultiFilterFlags = {},
+                                  includeKde: boolean = false) {
     // 未真正发请求的分支也要清错误态，否则取消选择文件后旧横幅会一直挂着
     paramsError.value = null
     distError.value = null
@@ -64,6 +65,7 @@ export function useMultiFile() {
       ignore_no_limit: ignoreNoLimit,
       range_type: rangeType,
       ...filters,
+      include_kde: includeKde,
     }))
     if (result) {
       commonParams.value = result.common_params || []
@@ -85,7 +87,8 @@ export function useMultiFile() {
 
   async function loadDistribution(fileIds: number[], param: string,
                                     rangeType: string = 'S4',
-                                    filters: MultiFilterFlags = {}) {
+                                    filters: MultiFilterFlags = {},
+                                    includeKde: boolean = false) {
     distError.value = null
     const mySeq = ++lotWriteSeq
     if (fileIds.length < 2 || !param) {
@@ -99,6 +102,7 @@ export function useMultiFile() {
       param,
       range_type: rangeType,
       ...filters,
+      include_kde: includeKde,
     }))
     // 过期（期间发了更新的合并/分布请求）→ 不落地，等最新请求自己写
     if (mySeq !== lotWriteSeq) return
