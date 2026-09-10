@@ -373,9 +373,10 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
                             }
                             all_series.append(s)
                 if all_series:
+                    include_kde = get_bool_param(request, 'include_kde')
                     dist = compute_multi_lot_distribution(
                         datasets, all_series, first, range_type,
-                        custom_low, custom_high)
+                        custom_low, custom_high, include_kde=include_kde)
                     if dist:
                         response['range_type'] = range_type
                         response.update(dist)  # param/global stats/bin/lot_data
@@ -444,9 +445,11 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
                 'global_usl': None,
             })
 
+        include_kde = get_bool_param(request, 'include_kde')
         result = compute_multi_lot_distribution(
             datasets, all_series, param,
             range_type=range_type, custom_low=custom_low, custom_high=custom_high,
+            include_kde=include_kde,
         )
 
         return Response(clean_data(result))

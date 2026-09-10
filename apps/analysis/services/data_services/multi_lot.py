@@ -4,11 +4,13 @@ import numpy as np
 import pandas as pd
 
 from apps.analysis.services.statistics import (
+    compute_cpk,
     filter_finite,
     get_columns_with_limits,
     resolve_spec_limits,
     safe_gap,
 )
+from apps.analysis.services.data_services.histogram import compute_kde_curve
 
 
 def compute_common_params(loaded, ignore_no_limit=False):
@@ -126,7 +128,7 @@ def _resolve_multi_range(range_type, combined, global_mean, global_std,
 
 def compute_multi_lot_distribution(datasets, all_series, param,
                                     range_type='S4', custom_low=None,
-                                    custom_high=None):
+                                    custom_high=None, include_kde=False):
     """Compute multi-lot distribution bins and lot-level stats.
 
     Args:
@@ -273,6 +275,13 @@ def compute_multi_lot_distribution(datasets, all_series, param,
         lo = lower_limit if lower_limit is not None else -float('inf')
         hi = upper_limit if upper_limit is not None else float('inf')
         fail = int(((series < lo) | (series > hi)).sum())
+        cpk_result = compute_cpk(pre['mean_v'], pre['std_v'], lower_limit, upper_limit)
+        median_v = round(float(series.median()), 6)
+        q1_v = round(float(series.quantile(0.25)), 6)
+        q3_v = round(float(series.quantile(0.75)), 6)
+        kde = None
+        if include_kde and len(series) >= 3:
+            kde = compute_kde_curve(series, bin_min, bin_max)
         lot_data.append({
             'name': ds.get('name', fid),
             'file_id': ds.get('file_id'),
@@ -291,6 +300,14 @@ def compute_multi_lot_distribution(datasets, all_series, param,
             ),
             'min_v': round(float(series.min()), 6),
             'max_v': round(float(series.max()), 6),
+            'cpk': round(cpk_result['cpk'], 4),
+            'cp': round(cpk_result['cp'], 4) if cpk_result['cp'] is not None else None,
+            'cpk_level': cpk_result['cpk_level'],
+            'cpk_color': cpk_result['cpk_color'],
+            'median': median_v,
+            'q1': q1_v,
+            'q3': q3_v,
+            'kde_curve': kde,
         })
 
     return {
