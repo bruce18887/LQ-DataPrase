@@ -447,4 +447,65 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
     // 验证 bin_centers 数量固定为 26（eedeceb 重构误写 range(26) 曾产生 27 个，回归修复）
     expect(distJson.bin_centers.length, 'X 轴应固定为 26 个坐标').toBe(26)
   })
+
+  test('统计对比表包含 CPK 和 Median 列', async ({ page }) => {
+    test.slow()
+    await enterMultiFile(page)
+    await pickFiles(page, [RECOMMENDED.buyoff[0], RECOMMENDED.buyoff[1]])
+    // 等待分布数据返回
+    await page.waitForResponse(
+      (r) => r.url().includes('/analysis/multi_lot/') && r.request().method() === 'POST' && r.status() < 500,
+      { timeout: 25_000 },
+    )
+    // 统计表应包含 Median 和 CPK 列头
+    const statsTable = page.locator(`${TAB} .left-panel .el-table`)
+    await expect(statsTable).toBeVisible({ timeout: 10_000 })
+    const headers = await statsTable.locator('th').allTextContents()
+    expect(headers.join(',')).toContain('Median')
+    expect(headers.join(',')).toContain('CPK')
+  })
+
+  test('箱线图 checkbox 控制折叠区显隐', async ({ page }) => {
+    test.slow()
+    await enterMultiFile(page)
+    await pickFiles(page, [RECOMMENDED.buyoff[0], RECOMMENDED.buyoff[1]])
+    await page.waitForResponse(
+      (r) => r.url().includes('/analysis/multi_lot/') && r.request().method() === 'POST' && r.status() < 500,
+      { timeout: 25_000 },
+    )
+    // 默认不显示箱线图
+    const boxCard = page.locator(`${TAB} .boxplot-card`)
+    await expect(boxCard).toHaveCount(0)
+    // 勾选后出现（限定到 TAB 作用域，避免与单文件 tab 的同名 checkbox 冲突）
+    await page.locator(TAB).getByRole('checkbox', { name: '显示箱线图' }).check()
+    await expect(boxCard).toBeVisible({ timeout: 5_000 })
+    // 取消后消失
+    await page.locator(TAB).getByRole('checkbox', { name: '显示箱线图' }).uncheck()
+    await expect(boxCard).toHaveCount(0)
+  })
+
+  test('KDE checkbox 触发 include_kde 请求', async ({ page }) => {
+    test.slow()
+    await enterMultiFile(page)
+    // 收集请求体
+    const bodies: string[] = []
+    page.on('request', (req) => {
+      if (req.method() === 'POST' && req.url().includes('/analysis/multi_lot/')) {
+        bodies.push(req.postData() || '')
+      }
+    })
+    await pickFiles(page, [RECOMMENDED.buyoff[0], RECOMMENDED.buyoff[1]])
+    await page.waitForResponse(
+      (r) => r.url().includes('/analysis/multi_lot/') && r.request().method() === 'POST' && r.status() < 500,
+      { timeout: 25_000 },
+    )
+    // 默认不含 include_kde=true
+    expect(bodies.some(b => b.includes('"include_kde":true'))).toBe(false)
+    // 勾选后触发新请求带 include_kde=true
+    await page.locator(TAB).getByRole('checkbox', { name: '显示KDE' }).check()
+    await expect.poll(
+      () => bodies.some(b => b.includes('"include_kde":true')),
+      { timeout: 15_000 },
+    ).toBe(true)
+  })
 })
