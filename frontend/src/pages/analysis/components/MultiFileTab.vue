@@ -248,38 +248,54 @@ function colorOf(fid: number): string {
 
 /**
  * 从多个文件名中自动提取差异部分作为图例名。
- * 找到公共前缀和公共后缀，截去后保留中间的差异子串。
+ * 增强版：先剥离时间戳后缀，再尝试匹配阶段关键字（FT/QA/RT/CP/UIS/EQC），
+ * 最后回退到公共前后缀裁剪。
  */
 function autoExtractLabel(filenames: string[]): string[] {
   if (filenames.length <= 1) return filenames
 
-  // Find common prefix
-  let prefix = filenames[0]
-  for (let i = 1; i < filenames.length; i++) {
-    while (prefix.length > 0 && !filenames[i].startsWith(prefix)) {
-      prefix = prefix.slice(0, -1)
-    }
+  // Phase 0: 剥离扩展名和时间戳后缀
+  const stripped = filenames.map(f =>
+    f.replace(/\.(csv|txt|xlsx)$/i, '')
+     .replace(/[_\-.]\d{8}[_\-]?\d{6}$/, '')
+     .replace(/[_\-.]\d{8}$/, '')
+  )
+
+  // Phase 1: 尝试阶段关键字识别
+  const STAGE_RE = /(?:FT|QA|RT|CP|UIS|EQC)\d*/gi
+  const stages = stripped.map(f => {
+    const m = f.match(STAGE_RE)
+    return m ? m[m.length - 1] : null
+  })
+  if (stages.every(s => s !== null)) {
+    // 去重：相同阶段名追加序号
+    const seen = new Map<string, number>()
+    return stages.map(s => {
+      const count = seen.get(s!) ?? 0
+      seen.set(s!, count + 1)
+      return count > 0 ? `${s} (${count + 1})` : s!
+    })
   }
 
-  // Find common suffix
-  let suffix = filenames[0]
-  for (let i = 1; i < filenames.length; i++) {
-    while (suffix.length > 0 && !filenames[i].endsWith(suffix)) {
-      suffix = suffix.slice(1)
-    }
+  // Phase 2: 回退到公共前后缀裁剪
+  let prefix = stripped[0]
+  for (let i = 1; i < stripped.length; i++) {
+    while (prefix.length > 0 && !stripped[i].startsWith(prefix)) prefix = prefix.slice(0, -1)
+  }
+  let suffix = stripped[0]
+  for (let i = 1; i < stripped.length; i++) {
+    while (suffix.length > 0 && !stripped[i].endsWith(suffix)) suffix = suffix.slice(1)
   }
 
-  return filenames.map(f => {
+  return stripped.map(f => {
     let mid = f.slice(prefix.length)
     if (suffix.length) mid = mid.slice(0, -suffix.length)
-    // Trim leading/trailing separators
     mid = mid.replace(/^[_\-. ]+|[_\-. ]+$/g, '')
-    // Truncate at meaningful separator if too long
     if (mid.length > 30) {
       const sep = mid.search(/[_\-].{8,}/)
       if (sep > 0) mid = mid.slice(0, sep)
     }
-    return mid || f  // fallback to full name if empty
+    return mid || f
   })
 }
 
