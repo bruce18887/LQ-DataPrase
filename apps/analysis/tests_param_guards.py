@@ -250,6 +250,57 @@ class MultiFileAnalysisTests(SimpleTestCase):
         # DR 是纯数据范围（窄），不应被扩展到规格限
         self.assertLess(spans['DR'], 0.5)
 
+    def test_lot_data_includes_cpk_median_quartiles(self):
+        """每个 lot_data 项包含 cpk/cp/median/q1/q3 字段。"""
+        from apps.analysis.services.data_services import compute_multi_lot_distribution
+
+        s1 = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0])
+        s2 = pd.Series([2.0, 3.0, 4.0, 5.0, 6.0])
+        datasets = {
+            '1': {'df': pd.DataFrame({'A': s1}),
+                  'metadata': {'mins': {'A': '0'}, 'maxs': {'A': '6'}},
+                  'series': s1, 'name': 'f1', 'file_id': 1},
+            '2': {'df': pd.DataFrame({'A': s2}),
+                  'metadata': {'mins': {'A': '0'}, 'maxs': {'A': '6'}},
+                  'series': s2, 'name': 'f2', 'file_id': 2},
+        }
+        out = compute_multi_lot_distribution(datasets, [s1, s2], 'A')
+        for lot in out['lot_data']:
+            self.assertIn('cpk', lot)
+            self.assertIn('cp', lot)
+            self.assertIn('cpk_level', lot)
+            self.assertIn('cpk_color', lot)
+            self.assertIn('median', lot)
+            self.assertIn('q1', lot)
+            self.assertIn('q3', lot)
+            self.assertIsInstance(lot['median'], float)
+            self.assertIsInstance(lot['q1'], float)
+
+    def test_lot_data_kde_included_when_requested(self):
+        """include_kde=True 时每个 lot 包含 kde_curve，默认不含。"""
+        from apps.analysis.services.data_services import compute_multi_lot_distribution
+
+        s1 = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0] * 20)
+        s2 = pd.Series([2.0, 3.0, 4.0, 5.0, 6.0] * 20)
+        datasets = {
+            '1': {'df': pd.DataFrame({'A': s1}),
+                  'metadata': {'mins': {'A': '0'}, 'maxs': {'A': '7'}},
+                  'series': s1, 'name': 'f1', 'file_id': 1},
+            '2': {'df': pd.DataFrame({'A': s2}),
+                  'metadata': {'mins': {'A': '0'}, 'maxs': {'A': '7'}},
+                  'series': s2, 'name': 'f2', 'file_id': 2},
+        }
+        # Default: no kde
+        out = compute_multi_lot_distribution(datasets, [s1, s2], 'A')
+        for lot in out['lot_data']:
+            self.assertIsNone(lot.get('kde_curve'))
+        # With include_kde
+        out2 = compute_multi_lot_distribution(datasets, [s1, s2], 'A', include_kde=True)
+        for lot in out2['lot_data']:
+            self.assertIsNotNone(lot['kde_curve'])
+            self.assertIsInstance(lot['kde_curve'], list)
+            self.assertGreater(len(lot['kde_curve']), 0)
+
 
 class BoxPlotStatsDtypeToleranceTests(SimpleTestCase):
     """Lock down ``compute_boxplot_stats`` behaviour on non-float dtypes.
