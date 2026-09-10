@@ -1,134 +1,154 @@
 <template>
-  <div class="multi-file-tab">
-    <!-- 顶部 toolbar 盒：文件多选行 + 筛选行（对齐单文件两行结构）。
+  <AnalysisTabLayout :loading="loading" class="multi-file-tab">
+    <!-- toolbar：第一行「文件多选 + 图表勾选」，第二行「数据口径」，与单文件
+         Tab 的 control-panel 两行结构对齐。
          敏感度仅作低 CPK 阈值（后端不消费裁剪口径），无「异常值处理」。 -->
-    <div class="dp-analysis-toolbar multi-toolbar">
-      <AnalysisFilePicker
-        v-model="fileIds"
-        :files="files"
-        scope="multi"
-        multiple
-        label="数据文件 (最少 2 个)"
+    <template #toolbar>
+      <div class="control-panel">
+        <div class="control-panel__main">
+          <AnalysisFilePicker
+            v-model="fileIds"
+            :files="files"
+            scope="multi"
+            multiple
+            label="数据文件 (最少 2 个)"
+          />
+          <div class="chart-toggles">
+            <el-checkbox v-model="showBoxPlot" size="small">显示箱线图</el-checkbox>
+            <el-checkbox v-model="showKde" size="small">显示KDE</el-checkbox>
+          </div>
+        </div>
+        <div class="control-panel__filters">
+          <DataFilterSection
+            variant="bar"
+            scope="multi"
+            v-model:ignore-no-limit="ignoreNoLimit"
+            v-model:ignore-no-test-value="ignoreNoTestValue"
+            v-model:data-only-bin1="dataOnlyBin1"
+            v-model:only-fail-test-item="onlyFailTestItem"
+            v-model:only-low-cpk="onlyLowCpk"
+            v-model:iqr-multiplier="iqrMultiplier"
+            :show-outlier="false"
+          />
+        </div>
+      </div>
+    </template>
+
+    <!-- 左侧配置面板 -->
+    <template #left-panel>
+      <!-- 自定义图例名（依赖选中文件列表；文件多选已上移 toolbar） -->
+      <el-card v-if="selectedFileObjs.length" shadow="hover" :body-style="{ padding: '12px' }">
+        <div class="section-label">自定义图例名</div>
+        <div v-for="f in selectedFileObjs" :key="f.id" class="name-row">
+          <span class="name-dot" :style="{ background: colorOf(f.id) }" />
+          <label :for="`file-name-${f.id}`" class="sr-only">{{ f.filename }} 图例名</label>
+          <el-input
+            :id="`file-name-${f.id}`"
+            v-model="fileNames[f.id]"
+            :placeholder="f.filename"
+            size="small"
+            clearable
+          />
+        </div>
+      </el-card>
+
+      <ChartConfigPanel
+        variant="multi-file"
+        v-model:chart-config="chartConfig"
+        v-model:bar-width-percent="barWidthPercent"
+        :bar-width-max="barWidthMax"
+        :range-type="'RDL'"
       />
-      <DataFilterSection
-        variant="bar"
-        scope="multi"
-        class="multi-toolbar__filters"
-        v-model:ignore-no-limit="ignoreNoLimit"
-        v-model:ignore-no-test-value="ignoreNoTestValue"
-        v-model:data-only-bin1="dataOnlyBin1"
-        v-model:only-fail-test-item="onlyFailTestItem"
-        v-model:only-low-cpk="onlyLowCpk"
-        v-model:iqr-multiplier="iqrMultiplier"
-        :show-outlier="false"
+
+      <!-- 范围类型 -->
+      <el-card shadow="hover" :body-style="{ padding: '12px' }">
+        <label class="section-label" for="multi-range-type">范围类型</label>
+        <el-select id="multi-range-type" v-model="rangeType" size="small" style="width: 100%">
+          <el-option label="Spec Limits (RDL)" value="RDL" />
+          <el-option label="Data Range (DR)" value="DR" />
+          <el-option label="3 Sigma (S3)" value="S3" />
+          <el-option label="4 Sigma (S4)" value="S4" />
+          <el-option label="6 Sigma (S6)" value="S6" />
+        </el-select>
+      </el-card>
+
+      <!-- 当前测试项各文件统计 -->
+      <el-card v-if="lotStats.length" shadow="hover" :body-style="{ padding: '8px' }">
+        <div class="section-label">各文件统计</div>
+        <el-table :data="lotStats" size="small" stripe>
+          <el-table-column prop="name" label="文件" min-width="90" show-overflow-tooltip />
+          <el-table-column prop="mean" label="Mean" width="78" />
+          <el-table-column prop="std" label="STD" width="70" />
+          <el-table-column prop="count" label="N" width="56" />
+          <el-table-column label="Yield" width="68">
+            <template #default="{ row }">{{ row.yield_pct }}%</template>
+          </el-table-column>
+        </el-table>
+      </el-card>
+    </template>
+
+    <!-- 右侧图表区 -->
+    <template #right-panel>
+      <el-empty
+        v-if="fileIds.length < 2"
+        description="请至少选择 2 个数据文件"
       />
-    </div>
-
-    <el-row :gutter="12" class="main-row">
-      <!-- 左侧配置面板 -->
-      <el-col :span="6" class="left-panel">
-        <!-- 自定义图例名（依赖选中文件列表；文件多选已上移 toolbar） -->
-        <el-card v-if="selectedFileObjs.length" shadow="hover" :body-style="{ padding: '12px' }">
-          <div class="section-label">自定义图例名</div>
-          <div v-for="f in selectedFileObjs" :key="f.id" class="name-row">
-            <span class="name-dot" :style="{ background: colorOf(f.id) }" />
-            <label :for="`file-name-${f.id}`" class="sr-only">{{ f.filename }} 图例名</label>
-            <el-input
-              :id="`file-name-${f.id}`"
-              v-model="fileNames[f.id]"
-              :placeholder="f.filename"
-              size="small"
-              clearable
-            />
+      <ErrorBanner
+        v-else-if="paramsError"
+        :message="paramsError"
+        title="共有测试项加载失败"
+        @retry="reloadParams"
+      />
+      <el-empty
+        v-else-if="commonParams.length === 0 && !paramsLoading"
+        description="所选文件没有共有测试项"
+      />
+      <template v-else>
+        <div class="top-bar">
+          <ParamSelector
+            :params="commonParams"
+            v-model:selected-param="selectedParam"
+            popper-class="dp-param-popper-multi"
+          />
+          <div class="common-hint">共有测试项：{{ commonParams.length }} 项</div>
+          <CircularProgress :loading="loading" />
+        </div>
+        <div class="chart-wrapper">
+          <MultiFileChart
+            v-if="lotData && lotData.lot_data && lotData.lot_data.length > 0"
+            :lot-data="lotData"
+            :chart-config="chartConfig"
+            :bar-width-percent="barWidthPercent"
+            :file-names="resolvedNames"
+            :selected-param="selectedParam"
+          />
+          <ErrorBanner
+            v-else-if="distError"
+            :message="distError"
+            title="多文件分布加载失败"
+            @retry="loadDistribution(fileIds, selectedParam, rangeType, multiFilters)"
+          />
+          <el-empty
+            v-else-if="lotData && selectedParam"
+            :description="`${selectedParam} 暂无有效数据`"
+            style="height: 100%; display: flex; align-items: center; justify-content: center;"
+          />
+        </div>
+        <!-- 箱线图对比：由 toolbar「显示箱线图」勾选驱动，固定高度挂在柱状图下方 -->
+        <el-card
+          v-if="showBoxPlot && lotData?.lot_data?.length"
+          shadow="hover"
+          :body-style="{ padding: '12px' }"
+          class="boxplot-card"
+        >
+          <div class="section-label">箱线图对比</div>
+          <div style="height: 240px">
+            <MultiFileBoxPlot :lot-data="lotData" :file-names="resolvedNames" />
           </div>
         </el-card>
-
-        <ChartConfigPanel
-          variant="multi-file"
-          v-model:chart-config="chartConfig"
-          v-model:bar-width-percent="barWidthPercent"
-          :bar-width-max="barWidthMax"
-          :range-type="'RDL'"
-        />
-
-        <!-- 范围类型 -->
-        <el-card shadow="hover" :body-style="{ padding: '12px' }">
-          <label class="section-label" for="multi-range-type">范围类型</label>
-          <el-select id="multi-range-type" v-model="rangeType" size="small" style="width: 100%">
-            <el-option label="Spec Limits (RDL)" value="RDL" />
-            <el-option label="Data Range (DR)" value="DR" />
-            <el-option label="3 Sigma (S3)" value="S3" />
-            <el-option label="4 Sigma (S4)" value="S4" />
-            <el-option label="6 Sigma (S6)" value="S6" />
-          </el-select>
-        </el-card>
-
-        <!-- 当前测试项各文件统计 -->
-        <el-card v-if="lotStats.length" shadow="hover" :body-style="{ padding: '8px' }">
-          <div class="section-label">各文件统计</div>
-          <el-table :data="lotStats" size="small" stripe>
-            <el-table-column prop="name" label="文件" min-width="90" show-overflow-tooltip />
-            <el-table-column prop="mean" label="Mean" width="78" />
-            <el-table-column prop="std" label="STD" width="70" />
-            <el-table-column prop="count" label="N" width="56" />
-            <el-table-column label="Yield" width="68">
-              <template #default="{ row }">{{ row.yield_pct }}%</template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-      </el-col>
-
-      <!-- 右侧图表区 -->
-      <el-col :span="18" class="right-panel" v-loading="loading" element-loading-text="正在分析数据...">
-        <el-empty
-          v-if="fileIds.length < 2"
-          description="请至少选择 2 个数据文件"
-        />
-        <ErrorBanner
-          v-else-if="paramsError"
-          :message="paramsError"
-          title="共有测试项加载失败"
-          @retry="reloadParams"
-        />
-        <el-empty
-          v-else-if="commonParams.length === 0 && !paramsLoading"
-          description="所选文件没有共有测试项"
-        />
-        <template v-else>
-          <div class="top-bar">
-            <ParamSelector
-              :params="commonParams"
-              v-model:selected-param="selectedParam"
-              popper-class="dp-param-popper-multi"
-            />
-            <div class="common-hint">共有测试项：{{ commonParams.length }} 项</div>
-            <CircularProgress :loading="loading" />
-          </div>
-          <div class="chart-wrapper">
-            <MultiFileChart
-              v-if="lotData && lotData.lot_data && lotData.lot_data.length > 0"
-              :lot-data="lotData"
-              :chart-config="chartConfig"
-              :bar-width-percent="barWidthPercent"
-              :file-names="resolvedNames"
-              :selected-param="selectedParam"
-            />
-            <ErrorBanner
-              v-else-if="distError"
-              :message="distError"
-              title="多文件分布加载失败"
-              @retry="loadDistribution(fileIds, selectedParam, rangeType, multiFilters)"
-            />
-            <el-empty
-              v-else-if="lotData && selectedParam"
-              :description="`${selectedParam} 暂无有效数据`"
-              style="height: 100%; display: flex; align-items: center; justify-content: center;"
-            />
-          </div>
-        </template>
-      </el-col>
-    </el-row>
-  </div>
+      </template>
+    </template>
+  </AnalysisTabLayout>
 </template>
 
 <script setup lang="ts">
@@ -143,6 +163,8 @@ import DataFilterSection from './DataFilterSection.vue'
 import AnalysisFilePicker from './AnalysisFilePicker.vue'
 import ParamSelector from './ParamSelector.vue'
 import MultiFileChart from './MultiFileChart.vue'
+import MultiFileBoxPlot from './MultiFileBoxPlot.vue'
+import AnalysisTabLayout from './AnalysisTabLayout.vue'
 import CircularProgress from '../../../components/common/CircularProgress.vue'
 import ErrorBanner from '../../../components/common/ErrorBanner.vue'
 
@@ -162,6 +184,8 @@ const {
   onlyFailTestItem,
   onlyLowCpk,
   iqrMultiplier,
+  showBoxPlot,
+  showKde,
 } = storeToRefs(multiStore)
 
 // 数据筛选开关载荷（5 开关 + 敏感度：后端 multi_lot 用 iqr 算低 CPK 候选集）
@@ -364,40 +388,39 @@ watch(() => props.files, pruneDeadFileIds)
   padding: 0;
 }
 
-/* 顶部 toolbar 盒：多选行宽撑开，筛选行虚线分隔（对齐单文件 control-panel） */
-.multi-toolbar {
+/* 顶部控件面板：两行（文件多选 + 图表勾选行 / 数据口径行），
+   嵌在 AnalysisTabLayout 的 .toolbar 框内（与 SingleParamTab 同构） */
+.control-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.control-panel__main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
   flex-wrap: wrap;
-  align-items: flex-start;
-  row-gap: 8px;
 }
-.multi-toolbar > .dp-analysis-filepicker {
-  flex: 1 1 420px;
-  min-width: 280px;
+.control-panel__main > .dp-analysis-filepicker {
+  flex: 1;
+  min-width: 240px;
 }
-.multi-toolbar__filters {
-  flex: 1 1 100%;
+.chart-toggles {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+.control-panel__filters {
   border-top: 1px dashed var(--border-2, #e4e7ed);
   padding-top: 8px;
 }
-.multi-toolbar__filters.filter-card {
-  border: 0;
-  background: transparent;
-}
 
-.main-row {
-  margin-bottom: 16px;
-}
-
-.left-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.right-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+/* 箱线图对比卡：固定高度挂在 chart-wrapper 下方，不参与弹性伸展 */
+.boxplot-card {
+  flex-shrink: 0;
 }
 
 .section-label {
