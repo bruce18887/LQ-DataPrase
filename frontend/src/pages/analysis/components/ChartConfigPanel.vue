@@ -27,6 +27,7 @@
           <el-checkbox value="kde_full">KDE含超限</el-checkbox>
         </template>
         <el-checkbox value="normal">正态分布</el-checkbox>
+        <el-checkbox v-if="variant === 'multi-file'" value="kde">KDE曲线</el-checkbox>
       </el-checkbox-group>
     </div>
 
