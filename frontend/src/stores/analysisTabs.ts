@@ -127,6 +127,8 @@ function createMultiState() {
     chartConfig: ref<string[]>(['limit']),
     barWidthPercent: ref(20),
     rangeType: ref('RDL'),
+    showBoxPlot: ref(false),
+    showKde: ref(false),
     // 加载态由 useMultiFile 自己拿（multi_lot 一条请求同时回列表与分布）
     ...createFilterStateWithoutOutlier(),
   }
