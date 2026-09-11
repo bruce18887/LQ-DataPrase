@@ -88,7 +88,7 @@ import type { DataFile } from '../../../types'
 import { useChart } from '../../../composables/useChart'
 import { useTabFileParams } from '../composables/useTabFileParams'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
-import { getSiteColors8 } from '../../../utils/chart-bar'
+import { getSiteColors8, buildChartToolbox } from '../../../utils/chart-bar'
 import { formatError } from '../../../utils/error'
 import { analysisApi } from '../../../api/analysis'
 import AnalysisFilePicker from './AnalysisFilePicker.vue'
@@ -422,7 +422,7 @@ function buildOption() {
   const option: any = {
     // 上万 symbol 的入场/更新动画是纯开销，大晶圆直接关掉
     animation: !isLarge.value,
-    title: { text: 'Wafer Map', subtext, left: 'center' },
+    title: { text: 'Wafer Map', subtext, left: 'center', textStyle: { fontSize: 15, fontWeight: 'bold', color: tc }, subtextStyle: { fontSize: 12, color: tc } },
     tooltip: {
       trigger: 'item',
       formatter: (p: any) => {
@@ -440,7 +440,7 @@ function buildOption() {
       extraCssText: 'box-shadow:0 2px 8px rgba(0,0,0,0.15);border-radius:4px;padding:8px 12px;',
     },
     legend: { data: series.map((s: any) => s.name), bottom: 10, type: 'scroll', textStyle: { color: tc } },
-    toolbox: { feature: { saveAsImage: { title: '保存', pixelRatio: 2 }, dataZoom: { title: { zoom: '缩放', back: '还原' } }, restore: { title: '还原' } }, right: 20, top: 20 },
+    toolbox: buildChartToolbox({ name: 'WaferMap', extra: { dataZoom: { title: { zoom: '缩放', back: '还原' } }, restore: { title: '还原' } }, right: 20, top: 20 }),
     grid: { left: 50, right: 60, top: 60, bottom: 50 },
     xAxis: { type: 'value', name: data.x_col ?? 'X', nameTextStyle: { color: tc }, scale: true, axisLabel: { formatter: (v: number) => v.toFixed(0), color: tc } },
     yAxis: { type: 'value', name: data.y_col ?? 'Y', nameTextStyle: { color: tc }, scale: true, axisLabel: { formatter: (v: number) => v.toFixed(0), color: tc } },
