@@ -476,11 +476,23 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
     // 默认不显示箱线图
     const boxCard = page.locator(`${TAB} .boxplot-card`)
     await expect(boxCard).toHaveCount(0)
-    // 勾选后出现（限定到 TAB 作用域，避免与单文件 tab 的同名 checkbox 冲突）
-    await page.locator(TAB).getByRole('checkbox', { name: '显示箱线图' }).check()
+    // 勾选后出现（限定到 TAB 作用域；EP 隐藏原生 input，getByRole().check() 会因
+    // input 不可见超时，故点 label 文本切换——与正态分布用例同款已验证写法）
+    const boxToggle = page.locator(TAB).locator('.el-checkbox').filter({ hasText: '显示箱线图' })
+    await boxToggle.getByText('显示箱线图').click()
     await expect(boxCard).toBeVisible({ timeout: 5_000 })
+// 箱线图 ECharts 实例 option 应含统一 saveAsImage（第 1 项硬伤修复证据；
+// SVG 渲染下 toolbox 图标无稳定 accessible name，故读实例 option 比 DOM 定位可靠）
+await page.waitForFunction(() => {
+  const el = document.querySelector('.boxplot-card .chart-container') as any
+  const inst = el?.__echartsInstance__
+  const opt = inst?.getOption?.()
+  const tb = Array.isArray(opt?.toolbox) ? opt.toolbox[0] : opt?.toolbox
+  const sai = tb?.feature?.saveAsImage
+  return !!sai && sai.pixelRatio === 2
+}, null, { timeout: 5_000 })
     // 取消后消失
-    await page.locator(TAB).getByRole('checkbox', { name: '显示箱线图' }).uncheck()
+    await boxToggle.getByText('显示箱线图').click()
     await expect(boxCard).toHaveCount(0)
   })
 
@@ -502,7 +514,7 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
     // 默认不含 include_kde=true
     expect(bodies.some(b => b.includes('"include_kde":true'))).toBe(false)
     // 勾选后触发新请求带 include_kde=true
-    await page.locator(TAB).getByRole('checkbox', { name: '显示KDE' }).check()
+    await page.locator(TAB).locator('.el-checkbox').filter({ hasText: '显示KDE' }).getByText('显示KDE').click()
     await expect.poll(
       () => bodies.some(b => b.includes('"include_kde":true')),
       { timeout: 15_000 },
