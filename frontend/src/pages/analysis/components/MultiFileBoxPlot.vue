@@ -5,11 +5,12 @@
 <script setup lang="ts">
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
-import { mapLotColorToTheme } from '../../../utils/chart-bar'
+import { mapLotColorToTheme, buildChartToolbox } from '../../../utils/chart-bar'
 
 const props = defineProps<{
   lotData: any
   fileNames: Record<number, string>
+  param?: string
 }>()
 
 const { colors, isDark } = useEChartsTheme()
@@ -47,6 +48,7 @@ function buildOption() {
         return `<b>${params.name}</b><br/>Max: ${max}<br/>Q3: ${q3}<br/>Median: ${med}<br/>Q1: ${q1}<br/>Min: ${min}`
       },
     },
+    toolbox: buildChartToolbox({ name: `${props.param ?? '多文件'}_箱线图对比` }),
     grid: { top: 20, bottom: 40, left: 100, right: 30 },
     xAxis: {
       type: 'value',
