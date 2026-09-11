@@ -116,3 +116,36 @@ export function mapLotColorToTheme(color: string, isDark: boolean): string {
   if (idx < 0) return color
   return getSiteColors8(isDark)[idx]
 }
+
+/**
+ * 各分析图表统一的 toolbox 构建（2026-09-11 图表风格硬伤修复）。
+ *
+ * saveAsImage 三属性齐备：name（下载文件名）+ title（按钮提示，统一「保存图片」）
+ * + pixelRatio:2（高清导出，与晶圆图看齐）。此前柱状图家族只设 name、散点/晶圆
+ * 只设 title、pixelRatio 仅晶圆设，导出体验不一致。
+ *
+ * extra 叠加各图特有 feature（散点 restore、晶圆 dataZoom+restore），保持现状；
+ * right/top 位置各图保持现状（不传则 ECharts 默认右上角），规避 title 布局冲突。
+ */
+export interface ChartToolboxOptions {
+  /** 下载文件名（不含扩展名），如 `${param}_分析` */
+  name: string
+  /** 叠加各图特有 feature（restore/dataZoom 等），与 saveAsImage 合并 */
+  extra?: Record<string, unknown>
+  /** toolbox 水平位置（不传则 ECharts 默认右上角） */
+  right?: number | string
+  /** toolbox 垂直位置 */
+  top?: number | string
+}
+
+export function buildChartToolbox(opts: ChartToolboxOptions): Record<string, unknown> {
+  const toolbox: Record<string, unknown> = {
+    feature: {
+      saveAsImage: { name: opts.name, title: '保存图片', pixelRatio: 2 },
+      ...(opts.extra ?? {}),
+    },
+  }
+  if (opts.right != null) toolbox.right = opts.right
+  if (opts.top != null) toolbox.top = opts.top
+  return toolbox
+}
