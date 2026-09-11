@@ -153,7 +153,7 @@
         >
           <div class="section-label">箱线图对比</div>
           <div style="height: 240px">
-            <MultiFileBoxPlot :lot-data="lotData" :file-names="resolvedNames" />
+            <MultiFileBoxPlot :lot-data="lotData" :file-names="resolvedNames" :param="selectedParam" />
           </div>
         </el-card>
       </template>
