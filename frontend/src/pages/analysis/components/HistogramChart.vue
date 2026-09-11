@@ -11,7 +11,7 @@
 <script setup lang="ts">
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
-import { clampBarValue, formatPercent, formatAxisValue, getBarGroupPad, getMaxBarWidthPercent, getSiteColors8 } from '../../../utils/chart-bar'
+import { clampBarValue, formatPercent, formatAxisValue, getBarGroupPad, getMaxBarWidthPercent, getSiteColors8, buildChartToolbox } from '../../../utils/chart-bar'
 import OutlierHintBar from './OutlierHintBar.vue'
 
 const props = withDefaults(defineProps<{
@@ -290,7 +290,7 @@ function buildOption() {
       },
     },
     legend: { data: series.map((s: any) => s.name), top: 'bottom', type: 'scroll', textStyle: { color: tc } },
-    toolbox: { feature: { saveAsImage: { name: `${props.selectedParam}_分析` } } },
+    toolbox: buildChartToolbox({ name: `${props.selectedParam}_分析` }),
     // 密度轴（KDE/正态）已 show:false 不占位，grid 随之收窄，绘图区更宽
     grid: { top: 55, bottom: 70, left: hasKde ? 70 : 55, right: (hasSiteData && hasNormal) ? 90 : (hasSiteData || hasNormal) ? 80 : 55 },
     xAxis: { type: 'value', name: '', nameLocation: 'middle', nameGap: 28, min: xAxisMin, max: xAxisMax, axisLabel: { rotate: 45, show: true, interval: 0, fontSize: 9, formatter: formatAxisValue, color: tc }, splitNumber: 24 },

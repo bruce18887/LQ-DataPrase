@@ -33,7 +33,7 @@
 import { computed } from 'vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
-import { formatAxisValue, getSiteColors8 } from '../../../utils/chart-bar'
+import { formatAxisValue, getSiteColors8, buildChartToolbox } from '../../../utils/chart-bar'
 import OutlierHintBar from './OutlierHintBar.vue'
 
 const props = withDefaults(defineProps<{
@@ -168,7 +168,7 @@ function buildOption() {
     },
     // 图例在最底（与直方图同款：底部只留 图例 + 轴标签，无 dataZoom 滑块占位）
     legend: { data: series.map((s: any) => s.name), bottom: 5, type: 'scroll', textStyle: { color: tc } },
-    toolbox: { feature: { saveAsImage: { name: `${param}_Serial分布` } } },
+    toolbox: buildChartToolbox({ name: `${param}_Serial分布` }),
     xAxis: {
       type: 'category', data: continuousSerials, name: serialCol,
       nameTextStyle: { color: tc }, nameLocation: 'middle', nameGap: 30,
