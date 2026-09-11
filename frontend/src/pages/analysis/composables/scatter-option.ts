@@ -5,7 +5,7 @@
  * 与 matrix-option.ts 同款处理——r/p 与 option 的显示口径集中一处。
  */
 import { minMax } from '../../../utils/minmax'
-import { formatAxisValue } from '../../../utils/chart-bar'
+import { formatAxisValue, buildChartToolbox } from '../../../utils/chart-bar'
 
 export interface ScatterOptionTheme {
   textColor: string
@@ -127,7 +127,7 @@ export function buildCorrelationScatterOption(
     // large 模式下上万 symbol 的入场/更新动画是纯开销，直接关闭
     animation: !isLarge,
     title: { text: `${d.param_x} vs ${d.param_y}`, subtext: `Pearson r = ${d.pearson_r?.toFixed(4) ?? '-'}`, left: 'center', textStyle: { color: tc, fontSize: 15 }, subtextStyle: { color: tc, fontSize: 12 } },
-    toolbox: { feature: { saveAsImage: { title: '保存图片' }, restore: { title: '还原' } }, right: 10 },
+    toolbox: buildChartToolbox({ name: `${d.param_x}_vs_${d.param_y}_散点`, extra: { restore: { title: '还原' } }, right: 10 }),
     tooltip: { trigger: 'item', backgroundColor: theme.tooltipBg, borderColor: theme.tooltipBorder, textStyle: { color: theme.tooltipText }, formatter: (p: any) => `${p.seriesName}<br/>${d.param_x}: ${Number(p.value[0]).toFixed(4)}<br/>${d.param_y}: ${Number(p.value[1]).toFixed(4)}` },
     legend: { data: series.map((s: any) => s.name), bottom: 5, type: 'scroll', textStyle: { color: tc } },
     xAxis: { type: 'value', name: d.param_x, nameLocation: 'center', nameGap: 30, min: xR.min, max: xR.max, axisLine: { lineStyle: { color: theme.axisLineColor } }, axisLabel: { fontSize: 9, formatter: formatAxisValue, color: tc }, nameTextStyle: { color: tc } },
