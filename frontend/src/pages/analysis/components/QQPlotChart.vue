@@ -30,7 +30,7 @@ import { computed } from 'vue'
 import { Loading, InfoFilled } from '@element-plus/icons-vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
-import { formatAxisValue } from '../../../utils/chart-bar'
+import { formatAxisValue, buildChartToolbox } from '../../../utils/chart-bar'
 import OutlierHintBar from './OutlierHintBar.vue'
 
 const props = defineProps<{
@@ -153,7 +153,7 @@ function buildOption() {
       formatter: (p: any) =>
         `理论分位数: ${Number(p.value[0]).toFixed(4)}<br/>观测值: ${Number(p.value[1]).toFixed(4)}`,
     },
-    toolbox: { feature: { saveAsImage: { name: `${props.param}_QQ图` } } },
+    toolbox: buildChartToolbox({ name: `${props.param}_QQ图` }),
     grid: { top: GRID_TOP, bottom: GRID_BOTTOM, left: 55, right: 20 },
     // Y 轴缩放：去掉右侧滑块（滑块与面板高度联动易出问题、且占右栏），改纯 inside
     // 滚轮缩放（与序列图同款）——鼠标在图上滚即缩放观测值区间，定位离群点/形态。

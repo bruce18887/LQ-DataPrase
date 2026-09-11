@@ -5,7 +5,7 @@
 <script setup lang="ts">
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
-import { clampBarValue, formatPercent, formatAxisValue, getBarGroupPad, getMaxBarWidthPercent, mapLotColorToTheme } from '../../../utils/chart-bar'
+import { clampBarValue, formatPercent, formatAxisValue, getBarGroupPad, getMaxBarWidthPercent, mapLotColorToTheme, buildChartToolbox } from '../../../utils/chart-bar'
 
 const props = defineProps<{
   /** /analysis/multi_lot/ 带 param 的响应 */
@@ -250,7 +250,7 @@ function buildOption() {
       },
     },
     legend: { data: legendData, top: 'bottom', type: 'scroll', textStyle: { color: tc } },
-    toolbox: { feature: { saveAsImage: { name: `${props.selectedParam}_多文件对比` } } },
+    toolbox: buildChartToolbox({ name: `${props.selectedParam}_多文件对比` }),
     grid: { top: 55, bottom: 70, left: 55, right: (showNormal || showKde) ? 80 : 55 },
     // 轴 min/max 向两端扩展多系列 bar 分组偏移量（getBarGroupPad）：N 个文件系列
     // 在同一 value 轴上分组错位，最左系列第 0 点柱体（x=bin_centers[0]）与最右系列
