@@ -205,7 +205,7 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
   test('双主题：Fail 层色随主题 errorColor', async ({ page }) => {
     const { canvas, resp } = await enterSerial(page, RECOMMENDED.analysis)
     const body = await resp.json()
-    test.skip(!(body.fail_count > 0), 'fixture 全 pass，无 Fail 层')
+    test.skip(!hasDrawnFailPoints(body), 'fixture 无可绘制 fail 点，无 Fail 层')
     const failColor = () =>
       readOption(canvas).then(
         (o: any) => o?.series?.find((s: any) => s.name === 'Fail/超界')?.itemStyle?.color,
@@ -232,6 +232,10 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
     await page.locator('button.theme-toggle').click()
     const t1 = t0 === 'light' ? 'night' : 'light'
     await expect(page.locator('html')).toHaveAttribute('data-theme', t1)
+    // 主题切换后等图表 option 重绘（Fail 层色随 errorColor）再截图，避免抓到旧主题
+    await expect.poll(async () =>
+      (await readOption(canvas))?.series?.find((s: any) => s.name === 'Fail/超界')?.itemStyle?.color,
+    ).toBe(t1 === 'light' ? '#b91c1c' : '#f5576c')
     await shot(`split_${t1}`)
     await page.getByText('按 Site 拆分').click()
     await expect.poll(async () => (await readOption(canvas))?.grid?.length).toBe(1)
