@@ -14,8 +14,9 @@ import { selectAnalysisFile, selectParam } from '../helpers/params'
  * 缺陷形态（用户报告）：fail 值远超规格限（如 Kelvin 10000 vs USL 10）时被
  * 显式 Y 轴整段裁切不可见；且 fail 判定只看当前参数是否超限，跨测试项 fail
  * 的 die 看起来像 pass。修复后：
- *  - fail 按 die 最终 bin 判定（fail_count 与 bin 汇总颗数一致），点色与
- *    站点图例一致（不标红）；
+ *  - fail 按 die 最终 bin 判定（fail_count 与 bin 汇总颗数一致）；自 2026-09-12
+ *    重叠可读性改造（spec §1.3）起 fail/超界点抽到独立「Fail/超界」系列并以
+ *    主题 errorColor 标红置顶（不再随站点色）；
  *  - 超界值锚定到可见轴边缘（anchor=2/3），无测量值点不绘制（anchor=1，
  *    避免在 X 轴底部被误读为 0 值数据点；颗数仍计入副标题）；
  *  - 副标题显示 Pass/Fail 颗数。
