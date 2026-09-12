@@ -49,7 +49,7 @@ function expectedTier(total: number) {
 }
 
 /**
- * site 系列 + Fail/超界 系列的点数总和（= 拆 Fail 层前的 pointCount）
+ * site 系列 + Fail/超界 系列的点数总和（≈ 拆 Fail 层前的 pointCount（差 anchor=1 不绘制点数））
  *
  * 注意口径微差：本函数返回的是「绘制点数」，而组件分级依据是 pointCount
  *（原始 series_data 长度和，含 anchor=1 的不绘制点，spec §1.1 定义）。两者仅
@@ -106,6 +106,7 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
     // Fail/超界 强调层（spec §1.3）；全 pass fixture 退化为「不应存在」
     // 前提用「存在被绘制的 fail 点」而非 fail_count>0：fail 全为 anchor=1（无值不绘制）时
     // fail_count>0 但组件不会创建 Fail 层，用 fail_count 会误红
+    expect(hasDrawnFailPoints(body), 'CTA8280F fixture 应含被绘制的 fail/超界点（spec §1.3）').toBe(true)
     if (hasDrawnFailPoints(body)) {
       const fail = series.find((s) => s.name === 'Fail/超界')
       expect(fail, 'Fail/超界 强调层应存在').toBeTruthy()
@@ -146,12 +147,12 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
     for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight')
     await expect.poll(siteSymbol).toBe(Math.min(before + 3, 8))
 
-    // 透明度 -1 步（step 5 → 百分比 -5 → 小数 -0.05），仍为 5 的整数倍
+    // 透明度 -1 步（step 5 → 百分比 -5 → 小数 -0.05），精确断言
     const opBtn = page.locator(`${SINGLE} .serial-header__slider`).nth(1).locator('.el-slider__button-wrapper')
+    const opBefore = await siteOpacity()
     await opBtn.focus()
     await page.keyboard.press('ArrowLeft')
-    const opNow = await siteOpacity()
-    expect(Math.round(opNow * 100) % 5).toBe(0)
+    await expect.poll(siteOpacity).toBe(Math.max(opBefore - 0.05, 0.1))
 
     // 切过滤触发数据重载 → override 清零回自动（spec §3）
     const respPromise = page.waitForResponse(
@@ -193,7 +194,9 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
     // 图例去 Site、保留参考线
     const legend: string[] = opt.legend[0].data
     expect(legend.some((l) => /^Site /.test(l))).toBe(false)
-    expect(legend.length).toBeGreaterThan(0)
+    const markNames = (body.marks || []).map((m: any) => m.name)
+    expect(markNames.length, 'fixture 应带参考线（默认 chart_config 含 limit）').toBeGreaterThan(0)
+    expect(legend, '拆分模式图例 = 参考线条目').toEqual(markNames)
     // 取消勾选恢复单面板
     await page.getByText('按 Site 拆分').click()
     await expect.poll(async () => (await readOption(canvas))?.grid?.length).toBe(1)
