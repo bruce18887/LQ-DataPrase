@@ -2,6 +2,7 @@
   <div class="serial-chart-wrapper">
     <!-- 工具栏：点径/透明度 slider + 序列列选择器（spec §3；拆分开关见后续任务） -->
     <div class="serial-header">
+      <el-checkbox v-if="siteCount >= 2" v-model="splitBySite" size="small">按 Site 拆分</el-checkbox>
       <div class="serial-header__slider">
         <span class="serial-header__label">点径 {{ effSize }} {{ sizeAutoHint }}</span>
         <el-slider
@@ -69,6 +70,9 @@ const { colors, isDark } = useEChartsTheme()
 // 选择器显示当前生效的列：显式选择优先，否则回退到后端自动检测结果
 const activeSerialCol = computed(() => props.serialCol || props.data?.serial_col || '')
 const showSelector = computed(() => (props.serialCandidates?.length ?? 0) > 1)
+/** 按 Site 拆分小多图开关（spec §2；会话级偏好，不随数据重载重置） */
+const splitBySite = ref(false)
+const siteCount = computed(() => (props.data?.series_data || []).length)
 
 // 大数据量（≥5000 点）启用 ECharts 官方 large 模式：每个系列只渲染 1 个
 // path 元素（类型化数组 + 单次绘制），SVG/canvas 渲染器下均生效，避免
@@ -182,39 +186,109 @@ function buildOption() {
     .sort((a, b) => counts[b] - counts[a])
     .forEach((idx, rank) => zOfSite.set(idx, 2 + rank))
 
+  const split = splitBySite.value && siteSeriesRaw.length >= 2
+  const laneCount = split ? siteSeriesRaw.length : 1
+
   const series: any[] = siteSeriesRaw.map((sd, idx) => ({
     name: sd.name, type: 'scatter',
     data: passData[idx],
+    ...(split ? { xAxisIndex: idx, yAxisIndex: idx } : {}),
     symbolSize: effSize.value,
     itemStyle: { color: siteColors[idx % 8], opacity: effOpacity.value },
-    z: zOfSite.get(idx),
+    ...(split ? {} : { z: zOfSite.get(idx) }),
     ...(isLarge.value ? { large: true } : {}),
   }))
-  if (failAll.length) {
+  if (split) {
+    // Fail 层按 lane 复制（同名系列 → 图例单项联动所有 lane）
+    failDataBySite.forEach((fdata, idx) => {
+      if (!fdata.length) return
+      series.push({
+        name: 'Fail/超界', type: 'scatter', data: fdata,
+        xAxisIndex: idx, yAxisIndex: idx,
+        symbolSize: effSize.value + 2,
+        itemStyle: { color: colors.value.errorColor, opacity: 1 },
+        ...(isLarge.value ? { large: true } : {}),
+      })
+    })
+  } else if (failAll.length) {
     series.push({
       name: 'Fail/超界', type: 'scatter', data: failAll,
       symbolSize: effSize.value + 2,
       itemStyle: { color: colors.value.errorColor, opacity: 1 },
-      // 高于所有 site 系列（site z = 2..N+1）；site 数 >8 时 10 不够，随 N 抬
       z: Math.max(10, 2 + siteSeriesRaw.length),
       ...(isLarge.value ? { large: true } : {}),
     })
   }
 
-  // marks（LSL/USL/σ 参考线）图例 marker 与线色严格对应：itemStyle.color 取
-  // 线色（后端 serial_distribution 每条线颜色一致），缺省时回退主题色板。
-  // 参考线恒在数据带之上：markLine 的 z 取自身模型（echarts 默认 5），不继承
-  // 宿主 series 的 z，故须在 markLine 内显式抬到 20（site z = 2..N+1，N≥4 时
-  // 只靠 series z 会被半透明散点带压住）。
+  // —— 轴/网格：合并单面板；拆分 N 条同步 lane（spec §2：top 12% 留标题、
+  // bottom 22% 留 X 标签+图例，其余 N 等分、lane 间距 2%）——
+  function xAxisDef(i: number, showLabel: boolean) {
+    return {
+      type: 'category', data: continuousSerials, gridIndex: i,
+      axisLine: { lineStyle: { color: colors.value.axisLineColor } },
+      ...(showLabel
+        ? {
+            name: serialCol, nameTextStyle: { color: tc },
+            nameLocation: 'middle', nameGap: 30,
+            axisLabel: { rotate: 45, interval: 'auto', fontSize: 9, color: tc },
+          }
+        : { axisLabel: { show: false }, axisTick: { show: false } }),
+    }
+  }
+  function yAxisDef(i: number, laneName: string | null, laneColor?: string) {
+    return {
+      type: 'value', gridIndex: i, min: yAxisMin, max: yAxisMax,
+      axisLine: { lineStyle: { color: colors.value.axisLineColor } },
+      axisLabel: { formatter: formatAxisValue, fontSize: 9, color: tc },
+      ...(laneName
+        ? {
+            name: laneName, nameLocation: 'end', nameGap: 6,
+            nameTextStyle: { color: laneColor, fontSize: 10, fontWeight: 'bold' },
+          }
+        : {
+            name: unit ? `${param} (${unit})` : param,
+            nameTextStyle: { color: tc }, nameLocation: 'middle', nameGap: 40,
+          }),
+    }
+  }
+
+  let grids: any[]
+  let xAxes: any[]
+  let yAxes: any[]
+  let dataZoom: any[]
+  if (split) {
+    const lanePct = 66 / laneCount
+    grids = siteSeriesRaw.map((_, i) => ({
+      left: 70, right: 30,
+      top: `${12 + i * lanePct}%`,
+      height: `${Math.max(lanePct - 2, 4)}%`,
+    }))
+    xAxes = siteSeriesRaw.map((_, i) => xAxisDef(i, i === laneCount - 1))
+    yAxes = siteSeriesRaw.map((sd, i) => yAxisDef(i, sd.name, siteColors[i % 8]))
+    dataZoom = [{ type: 'inside', xAxisIndex: siteSeriesRaw.map((_, i) => i) }]
+  } else {
+    grids = [{ top: 60, bottom: 85 }]
+    xAxes = [xAxisDef(0, true)]
+    yAxes = [yAxisDef(0, null)]
+    dataZoom = [{ type: 'inside', xAxisIndex: [0] }]
+  }
+
+  // 参考线按 lane 复制（同名系列，图例单项控制全 lane）
   for (const mark of d.marks || []) {
     const lineColor = mark.markLine?.data?.[0]?.lineStyle?.color
-    series.push({
-      name: mark.name, type: mark.type || 'scatter', data: mark.data || [],
-      markLine: mark.markLine ? { ...mark.markLine, z: 20 } : mark.markLine,
-      silent: true, z: 20,
-      ...(lineColor ? { itemStyle: { color: lineColor } } : {}),
-    })
+    for (let lane = 0; lane < laneCount; lane++) {
+      series.push({
+        name: mark.name, type: mark.type || 'scatter', data: mark.data || [],
+        markLine: { ...mark.markLine, z: 20 }, silent: true,
+        xAxisIndex: lane, yAxisIndex: lane, z: 20,
+        ...(lineColor ? { itemStyle: { color: lineColor } } : {}),
+      })
+    }
   }
+
+  // 拆分模式图例只留参考线条目（lane 即 site 图例，去重复表达）
+  const markNames = (d.marks || []).map((m: any) => m.name)
+  const legendData = split ? markNames : series.map((s: any) => s.name)
 
   let subtext = unit ? `Unit: ${unit}` : ''
   if (d.lower_limit != null && d.upper_limit != null) {
@@ -248,28 +322,12 @@ function buildOption() {
       },
     },
     // 图例在最底（与直方图同款：底部只留 图例 + 轴标签，无 dataZoom 滑块占位）
-    legend: { data: series.map((s: any) => s.name), bottom: 5, type: 'scroll', textStyle: { color: tc } },
+    legend: { data: legendData, bottom: 5, type: 'scroll', textStyle: { color: tc } },
     toolbox: buildChartToolbox({ name: `${param}_Serial分布` }),
-    xAxis: {
-      type: 'category', data: continuousSerials, name: serialCol,
-      nameTextStyle: { color: tc }, nameLocation: 'middle', nameGap: 30,
-      axisLine: { lineStyle: { color: colors.value.axisLineColor } },
-      axisLabel: { rotate: 45, interval: 'auto', fontSize: 9, color: tc },
-    },
-    yAxis: {
-      type: 'value', name: unit ? `${param} (${unit})` : param,
-      nameTextStyle: { color: tc }, nameLocation: 'middle', nameGap: 40,
-      min: yAxisMin, max: yAxisMax,
-      axisLine: { lineStyle: { color: colors.value.axisLineColor } },
-      axisLabel: { formatter: formatAxisValue, fontSize: 9, color: tc },
-    },
-    // 缩放改为纯 inside（滚轮/拖拽平移），去掉锚底的 slider：slider 与图例同锚容器
-    // 底、矮面板下会挤没 X 轴。inside 缩放不占布局 → 与直方图同款、resize 纯比例缩放。
-    dataZoom: [
-      { type: 'inside', xAxisIndex: 0 },
-    ],
-    // grid.bottom 收小（图例 + 轴标签，无滑块），绘图区随容器高等比缩放、X 轴不被遮
-    grid: { top: 60, bottom: 85 },
+    xAxis: xAxes,
+    yAxis: yAxes,
+    dataZoom,
+    grid: grids,
     series,
   }
 }
@@ -278,7 +336,7 @@ function buildOption() {
 // canvas 无 DOM 节点，官方推荐大数据散点必用 canvas）；小数据量跟随用户全局设置
 const { chartRef } = useChart(
   buildOption,
-  [() => props.data, () => props.outlierHandling, () => effSize.value, () => effOpacityPct.value],
+  [() => props.data, () => props.outlierHandling, () => effSize.value, () => effOpacityPct.value, () => splitBySite.value],
   'chartRef',
   () => (isLarge.value ? 'canvas' : getChartRenderer()),
 )
