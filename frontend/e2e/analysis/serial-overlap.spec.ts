@@ -1,6 +1,6 @@
 import { test, expect, type Page, type Locator } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, selectParamWithSpecLimits } from '../helpers/params'
+import { selectAnalysisFile, selectParamWithSpecLimits, filterControl } from '../helpers/params'
 import { RECOMMENDED } from '../fixtures/test-data'
 
 /**
@@ -129,5 +129,45 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
       expect(s.symbolSize).toBe(6)
       expect(s.itemStyle.opacity).toBe(0.85)
     }
+  })
+
+  test('slider 覆盖与重载重置：拖改生效、数据重载回自动', async ({ page }) => {
+    const { canvas } = await enterSerial(page, RECOMMENDED.analysis)
+    const siteSymbol = () =>
+      readOption(canvas).then((o: any) => o?.series?.find((s: any) => /^Site /.test(s.name))?.symbolSize)
+    const siteOpacity = () =>
+      readOption(canvas).then((o: any) => o?.series?.find((s: any) => /^Site /.test(s.name))?.itemStyle?.opacity)
+    await expect.poll(siteSymbol).toBeGreaterThanOrEqual(3)
+
+    // 点径 自动值 → 键盘 +3 步；断言覆盖生效（max 8 封顶）
+    const before = await siteSymbol()
+    const sizeBtn = page.locator(`${SINGLE} .serial-header__slider`).nth(0).locator('.el-slider__button-wrapper')
+    await sizeBtn.focus()
+    for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight')
+    await expect.poll(siteSymbol).toBe(Math.min(before + 3, 8))
+
+    // 透明度 -1 步（step 5 → 百分比 -5 → 小数 -0.05），仍为 5 的整数倍
+    const opBtn = page.locator(`${SINGLE} .serial-header__slider`).nth(1).locator('.el-slider__button-wrapper')
+    await opBtn.focus()
+    await page.keyboard.press('ArrowLeft')
+    const opNow = await siteOpacity()
+    expect(Math.round(opNow * 100) % 5).toBe(0)
+
+    // 切过滤触发数据重载 → override 清零回自动（spec §3）
+    const respPromise = page.waitForResponse(
+      (r) =>
+        r.url().includes('/analysis/serial_distribution/') &&
+        r.request().method() === 'POST' &&
+        r.status() < 500,
+      { timeout: 30_000 },
+    )
+    // Bin1 过滤开关在「数据筛选」区（非 .chart-toggles），按 data-filter 契约属性定位
+    await filterControl(page, 'data-only-bin1').click()
+    await expect(filterControl(page, 'data-only-bin1')).toHaveClass(/is-checked/)
+    await respPromise
+    const opt = await readOption(canvas)
+    const tier = expectedTier(siteAndFailTotals(opt))
+    await expect.poll(siteSymbol).toBe(tier.size)
+    await expect.poll(siteOpacity).toBe(tier.opacity)
   })
 })
