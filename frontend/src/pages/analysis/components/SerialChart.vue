@@ -59,6 +59,17 @@ const pointCount = computed(() =>
     (sum: number, sd: { data?: unknown[] }) => sum + (sd.data?.length ?? 0), 0))
 const isLarge = computed(() => pointCount.value >= 5000)
 
+// —— 重叠可读性（spec 2026-09-12 §1.1）：按总点数自适应点径/透明度，
+// 大文件散点不再糊成实色带；slider 覆盖在后续任务接入 ——
+function autoPointStyle(count: number): { size: number; opacity: number } {
+  if (count < 5000) return { size: 6, opacity: 0.85 }
+  if (count <= 20000) return { size: 4, opacity: 0.5 }
+  return { size: 3, opacity: 0.35 }
+}
+const autoStyle = computed(() => autoPointStyle(pointCount.value))
+const effSize = computed(() => autoStyle.value.size)
+const effOpacity = computed(() => autoStyle.value.opacity)
+
 function buildOption() {
   if (!props.data) return {}
   const tc = colors.value.textColor
@@ -99,7 +110,7 @@ function buildOption() {
    * 会被整段裁切，图上根本看不到 fail 点。无测量值（anchor=1）不绘制：画在 X 轴
    * 底部会被误读成 0 值数据点（其颗数仍计入副标题 Pass/Fail）。
    */
-  function toPoint(p: number[], _idx: number) {
+  function toPoint(p: number[], siteName: string) {
     const [s, v, isFail, anchor] = p
     const a = anchor ?? 0
     const fail = (isFail ?? 0) === 1
@@ -112,27 +123,66 @@ function buildOption() {
       realSerial: s,
       isFail: fail,
       anchor: a,
+      site: siteName,
     }
   }
 
-  // 颜色按系列统一（图例一致；large 模式不支持逐点样式，必须放 series 级）
-  const series: any[] = (d.series_data || []).map(
-    (sd: { name: string; data: number[][]; type?: string; symbolSize?: number }, idx: number) => ({
-      name: sd.name, type: sd.type || 'scatter',
-      data: (sd.data || []).map((p: number[]) => toPoint(p, idx)).filter((pt: any) => pt !== null),
-      symbolSize: sd.symbolSize || 6,
-      itemStyle: { color: getSiteColors8(isDark.value)[idx % 8] },
+  // —— pass/fail 拆分：fail/超界点抽到置顶强调层（spec §1.3；large 模式
+  // 不支持逐点样式，强调只能靠独立系列）——
+  const siteSeriesRaw: { name: string; data: number[][] }[] = d.series_data || []
+  const siteColors = getSiteColors8(isDark.value)
+  const passData: any[][] = siteSeriesRaw.map(() => [])
+  const failDataBySite: any[][] = siteSeriesRaw.map(() => [])
+  siteSeriesRaw.forEach((sd, idx) => {
+    ;(sd.data || []).forEach((p: number[]) => {
+      const pt = toPoint(p, sd.name)
+      if (!pt) return
+      if (pt.isFail || pt.anchor !== 0) failDataBySite[idx].push(pt)
+      else passData[idx].push(pt)
+    })
+  })
+  const failAll = failDataBySite.flat()
+  // 绘制序：最密垫底（spec §1.2）——按点数降序赋 z；数组序保持 site 升序
+  // （图例顺序与直方图等其它图表一致的既有约定）。密度口径取**实际绘制的
+  // pass 点数**（fail/超界点已抽到独立置顶层，不参与 site 带层叠），与视觉
+  // 上的散点带浓淡一致；用原始点数会在 fail/无值点分布不均时排出反的层叠序。
+  const counts = passData.map((pd) => pd.length)
+  const zOfSite = new Map<number, number>()
+  counts
+    .map((_, i) => i)
+    .sort((a, b) => counts[b] - counts[a])
+    .forEach((idx, rank) => zOfSite.set(idx, 2 + rank))
+
+  const series: any[] = siteSeriesRaw.map((sd, idx) => ({
+    name: sd.name, type: 'scatter',
+    data: passData[idx],
+    symbolSize: effSize.value,
+    itemStyle: { color: siteColors[idx % 8], opacity: effOpacity.value },
+    z: zOfSite.get(idx),
+    ...(isLarge.value ? { large: true } : {}),
+  }))
+  if (failAll.length) {
+    series.push({
+      name: 'Fail/超界', type: 'scatter', data: failAll,
+      symbolSize: effSize.value + 2,
+      itemStyle: { color: colors.value.errorColor, opacity: 1 },
+      // 高于所有 site 系列（site z = 2..N+1）；site 数 >8 时 10 不够，随 N 抬
+      z: Math.max(10, 2 + siteSeriesRaw.length),
       ...(isLarge.value ? { large: true } : {}),
-    }),
-  )
+    })
+  }
 
   // marks（LSL/USL/σ 参考线）图例 marker 与线色严格对应：itemStyle.color 取
-  // 线色（后端 serial_distribution 每条线颜色一致），缺省时回退主题色板
+  // 线色（后端 serial_distribution 每条线颜色一致），缺省时回退主题色板。
+  // 参考线恒在数据带之上：markLine 的 z 取自身模型（echarts 默认 5），不继承
+  // 宿主 series 的 z，故须在 markLine 内显式抬到 20（site z = 2..N+1，N≥4 时
+  // 只靠 series z 会被半透明散点带压住）。
   for (const mark of d.marks || []) {
     const lineColor = mark.markLine?.data?.[0]?.lineStyle?.color
     series.push({
       name: mark.name, type: mark.type || 'scatter', data: mark.data || [],
-      markLine: mark.markLine, silent: true,
+      markLine: mark.markLine ? { ...mark.markLine, z: 20 } : mark.markLine,
+      silent: true, z: 20,
       ...(lineColor ? { itemStyle: { color: lineColor } } : {}),
     })
   }
@@ -159,7 +209,9 @@ function buildOption() {
         const pt = p.data || {}
         const anchor = pt.anchor ?? 0
         // value[0] 是轴下标（category 映射），真实序列号在 realSerial
-        let html = `${p.seriesName}<br/>${serialCol}: ${pt.realSerial ?? p.value[0]}<br/>结果: ${pt.isFail ? 'FAIL' : 'PASS'}`
+        let html = `${p.seriesName}`
+        if (p.seriesName === 'Fail/超界' && pt.site) html += ` · ${pt.site}`
+        html += `<br/>${serialCol}: ${pt.realSerial ?? p.value[0]}<br/>结果: ${pt.isFail ? 'FAIL' : 'PASS'}`
         html += `<br/>Value: ${Number(pt.realY ?? p.value[1]).toFixed(4)}`
         if (anchor === 2) html += '<br/>超出显示范围（真实值偏大）'
         if (anchor === 3) html += '<br/>超出显示范围（真实值偏小）'
