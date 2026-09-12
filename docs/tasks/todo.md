@@ -1417,3 +1417,45 @@ unapplied migrations 警告时按提示处理。
 - [x] 验证：行级守恒 comm 差集恰为 9 行去重白名单（零计划外丢行）；段数 39=18+21；
       10 个关键术语两文件均可检索；68,727B→45,486B（−34%），两文件合计 69,031B（+304B 为新增头部行）。
 - 提交：docs(lessons) 本轮 commit。
+
+---
+
+# 任务：序列分布多 Site 重叠可读性优化（2026-09-12）✅
+
+> Spec：docs/superpowers/specs/2026-09-12-serial-overlap-design.md
+> Plan：docs/superpowers/plans/2026-09-12-serial-overlap.md
+
+## 改动文件清单
+
+- `frontend/src/pages/analysis/components/SerialChart.vue`（198→374 行）：自适应点径/透明度
+  分级表（≤500/≤2k/≤5k/≤10k/≤20k/>20k 六档）、最密垫底 + Fail/超界置顶强调层、点径/透明度
+  slider 与重载回自动语义、按 Site 拆分小多图模式（共享刻度 + 联动缩放）、拆分模式标题让位
+  + lane 标签旋转左置防裁切、markLine 守卫
+- `frontend/e2e/analysis/serial-overlap.spec.ts`（新建，6 用例）：分级表一致性断言、强调层
+  z 序、slider 交互、拆分模式布局、双主题视觉快照、hasDrawnFailPoints skip 口径
+- `frontend/e2e/analysis/serial-fail-count.spec.ts`：断言口径适配（Fail 层存在性前提同口径、
+  注释口径修正）
+- spec/plan 文档（上述两文件）
+
+## Commits 链
+
+ad62f81 → b47f509 → 9e313c8 → 837b3dc → 6f8a608 → 4f1d8af → 13ab77c → d7b278e（+ 本 Task 收尾提交）
+
+## E2E 结果
+
+- 新 spec `serial-overlap.spec.ts --project=P1`：**8 passed**（6 用例 + 2 setup，55.9s）
+- 回归套件（legend-color / axis-label-precision / serial-no-column / chart-filter-switches /
+  chart-memory / outlier，P1+P2）：**41 passed**（1.4 min），零失败零 flaky
+- 端口确认：3000/8000 无 LISTENING（playwright webServer 自收）
+- 注：webServer 复用了 Qoder IDE test-server 常驻的 vite dev（reuseExistingServer 机制），
+  非 preview 构建；测试逻辑与构建模式无关，结果有效
+
+## 快照路径
+
+`.qoder/verify_serial_{merged,split}_{light,night}.png`（4 张，双主题 × 合并/拆分）
+
+## 遗留说明
+
+- >20k 档无 fixture（靠分级表一致性断言覆盖逻辑，不依赖实际大数据文件）
+- 拆分模式 8 site 极小 lane 为已知权衡（配合面板最大化可缓解）
+- 双主题/快照 skip 口径已统一 `hasDrawnFailPoints`（d7b278e）
