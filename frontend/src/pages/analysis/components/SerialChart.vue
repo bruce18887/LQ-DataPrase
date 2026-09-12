@@ -273,6 +273,9 @@ function buildOption() {
     dataZoom = [{ type: 'inside', xAxisIndex: [0] }]
   }
 
+  // 参考线 z 恒高于 site(2..N+1)/Fail(max(10,2+N)) 两层：N≤16 时 20 够，
+  // 更大 site 数随 N 抬升（极端边界防御）
+  const markZ = Math.max(20, siteSeriesRaw.length + 4)
   // 参考线按 lane 复制（同名系列，图例单项控制全 lane）
   for (const mark of d.marks || []) {
     const lineColor = mark.markLine?.data?.[0]?.lineStyle?.color
@@ -280,9 +283,9 @@ function buildOption() {
       series.push({
         name: mark.name, type: mark.type || 'scatter', data: mark.data || [],
         // markLine 的 z 不继承宿主 series（ECharts MarkerView 取 MarkLineModel 自身 z，
-        // 默认 5）——site z 可达 N+1，必须显式抬到 20 保证参考线恒在数据带之上
-        markLine: mark.markLine ? { ...mark.markLine, z: 20 } : mark.markLine, silent: true,
-        xAxisIndex: lane, yAxisIndex: lane, z: 20,
+        // 默认 5）——site z 可达 N+1，必须显式抬到 markZ 保证参考线恒在数据带之上
+        markLine: mark.markLine ? { ...mark.markLine, z: markZ } : mark.markLine, silent: true,
+        xAxisIndex: lane, yAxisIndex: lane, z: markZ,
         ...(lineColor ? { itemStyle: { color: lineColor } } : {}),
       })
     }

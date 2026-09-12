@@ -74,6 +74,11 @@ function hasDrawnFailPoints(body: any): boolean {
   )
 }
 
+/** 按系列名计数（拆分模式同名系列按 lane 复制） */
+function seriesCountByName(opt: any, name: string): number {
+  return (opt?.series ?? []).filter((s: any) => s.name === name).length
+}
+
 test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analysis'] }, () => {
   test('自动档：分级表一致 + 最密垫底 + Fail/超界置顶强调层 + 图例 Site 升序', async ({ page }) => {
     const { canvas, resp } = await enterSerial(page, RECOMMENDED.analysis)
@@ -197,6 +202,28 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
     const markNames = (body.marks || []).map((m: any) => m.name)
     expect(markNames.length, 'fixture 应带参考线（默认 chart_config 含 limit）').toBeGreaterThan(0)
     expect(legend, '拆分模式图例 = 参考线条目').toEqual(markNames)
+    // per-lane 复制契约（spec §2）：Fail 层数 = 有可绘制 fail 点的 lane 数；
+    // 每个参考线名的系列数 = laneCount；markLine z 与宿主 series z 同取动态上限
+    const drawnFailLanes = (body.series_data || []).filter((sd: any) =>
+      (sd.data || []).some((p: any[]) => {
+        const anchor = p[3] ?? 0
+        return anchor !== 1 && ((p[2] ?? 0) === 1 || anchor !== 0)
+      }),
+    ).length
+    expect(
+      seriesCountByName(opt, 'Fail/超界'),
+      'Fail 层按 lane 复制数 = 有可绘制 fail 点的 lane 数',
+    ).toBe(drawnFailLanes)
+    for (const m of body.marks || []) {
+      expect(seriesCountByName(opt, m.name), `参考线 ${m.name} 按 lane 复制`).toBe(n)
+    }
+    const markZExpected = Math.max(20, n + 4)
+    for (const s of opt.series ?? []) {
+      if (s.markLine?.data?.length) {
+        expect(s.markLine.z, 'markLine z 动态上限').toBe(markZExpected)
+        expect(s.z, 'marks 宿主 series z 同值').toBe(markZExpected)
+      }
+    }
     // 取消勾选恢复单面板
     await page.getByText('按 Site 拆分').click()
     await expect.poll(async () => (await readOption(canvas))?.grid?.length).toBe(1)
