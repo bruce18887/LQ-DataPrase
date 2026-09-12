@@ -48,12 +48,29 @@ function expectedTier(total: number) {
   return { size: 3, opacity: 0.35 }
 }
 
-/** site 系列 + Fail/超界 系列的点数总和（= 拆 Fail 层前的 pointCount） */
+/**
+ * site 系列 + Fail/超界 系列的点数总和（= 拆 Fail 层前的 pointCount）
+ *
+ * 注意口径微差：本函数返回的是「绘制点数」，而组件分级依据是 pointCount
+ *（原始 series_data 长度和，含 anchor=1 的不绘制点，spec §1.1 定义）。两者仅
+ * 在存在 anchor=1 点时相差该数量；当前两个 fixture（10k / 500 点）均远离
+ * 5000 / 20000 档位边界，故两种口径落在同一档。换 fixture 时需留意边界。
+ */
 function siteAndFailTotals(opt: any): number {
   return (opt?.series ?? []).reduce(
     (a: number, s: any) =>
       /^Site /.test(s.name) || s.name === 'Fail/超界' ? a + (s.data?.length ?? 0) : a,
     0,
+  )
+}
+
+/** body 中是否存在「会被绘制」的 fail 点（is_fail=1 或 anchor∈{2,3}；anchor=1 无值不绘制）——与组件 Fail 层创建条件同口径 */
+function hasDrawnFailPoints(body: any): boolean {
+  return (body?.series_data || []).some((sd: any) =>
+    (sd.data || []).some((p: any[]) => {
+      const anchor = p[3] ?? 0
+      return anchor !== 1 && ((p[2] ?? 0) === 1 || anchor !== 0)
+    }),
   )
 }
 
@@ -87,7 +104,9 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
     expect(legend.slice(0, siteSeries.length)).toEqual(siteSeries.map((s) => s.name))
 
     // Fail/超界 强调层（spec §1.3）；全 pass fixture 退化为「不应存在」
-    if (body.fail_count > 0) {
+    // 前提用「存在被绘制的 fail 点」而非 fail_count>0：fail 全为 anchor=1（无值不绘制）时
+    // fail_count>0 但组件不会创建 Fail 层，用 fail_count 会误红
+    if (hasDrawnFailPoints(body)) {
       const fail = series.find((s) => s.name === 'Fail/超界')
       expect(fail, 'Fail/超界 强调层应存在').toBeTruthy()
       expect(fail.itemStyle.opacity).toBe(1)
