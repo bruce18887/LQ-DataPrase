@@ -220,8 +220,8 @@ function buildOption() {
     })
   }
 
-  // —— 轴/网格：合并单面板；拆分 N 条同步 lane（spec §2：top 12% 留标题、
-  // bottom 22% 留 X 标签+图例，其余 N 等分、lane 间距 2%）——
+  // —— 轴/网格：合并单面板；拆分 N 条同步 lane（spec §2：top 16% 留标题+副标题、
+  // bottom 24% 留 X 标签+图例，其余 N 等分、lane 间距 2%）——
   function xAxisDef(i: number, showLabel: boolean) {
     return {
       type: 'category', data: continuousSerials, gridIndex: i,
@@ -242,7 +242,7 @@ function buildOption() {
       axisLabel: { formatter: formatAxisValue, fontSize: 9, color: tc },
       ...(laneName
         ? {
-            name: laneName, nameLocation: 'end', nameGap: 6,
+            name: laneName, nameLocation: 'middle', nameGap: 48, nameRotate: 90,
             nameTextStyle: { color: laneColor, fontSize: 10, fontWeight: 'bold' },
           }
         : {
@@ -257,10 +257,10 @@ function buildOption() {
   let yAxes: any[]
   let dataZoom: any[]
   if (split) {
-    const lanePct = 66 / laneCount
+    const lanePct = 60 / laneCount
     grids = siteSeriesRaw.map((_, i) => ({
       left: 70, right: 30,
-      top: `${12 + i * lanePct}%`,
+      top: `${16 + i * lanePct}%`,
       height: `${Math.max(lanePct - 2, 4)}%`,
     }))
     xAxes = siteSeriesRaw.map((_, i) => xAxisDef(i, i === laneCount - 1))
@@ -304,7 +304,9 @@ function buildOption() {
   return {
     // large 模式下上万 symbol 的入场/更新动画是纯开销，直接关闭
     animation: !isLarge.value,
-    title: { text: `${param} Serial分布`, subtext, left: 'center', textStyle: { fontSize: 15, fontWeight: 'bold', color: tc }, subtextStyle: { fontSize: 12 } },
+    // split 模式 grid top 16% 仅≈45px，默认标题块（y≈21-54）会压首 lane：
+    // 仅拆分态把标题块上移收紧（top 4 / itemGap 6 → 块底≈37），合并模式保持默认零改动
+    title: { text: `${param} Serial分布`, subtext, left: 'center', textStyle: { fontSize: 15, fontWeight: 'bold', color: tc }, subtextStyle: { fontSize: 12 }, ...(split ? { top: 4, itemGap: 6 } : {}) },
     tooltip: {
       trigger: 'item',
       backgroundColor: colors.value.tooltipBg,

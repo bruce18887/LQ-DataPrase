@@ -61,12 +61,12 @@ series 数组顺序与 `legend.data` 仍保持 site 升序——图例顺序与�
 ## §2 按 Site 拆分小多图模式
 
 - **开关**：头部工具栏「按 Site 拆分」checkbox，仅 site 系列数 ≥2 时显示。
-- **布局**（同一 ECharts 实例内）：N 条等高 grid lane，百分比表达——top≈12% 留标题、
-  bottom≈22% 留 X 轴标签+图例，其余 N 等分、lane 间距 2%；
+- **布局**（同一 ECharts 实例内）：N 条等高 grid lane，百分比表达——top≈16% 留标题+副标题、
+  bottom≈24% 留 X 轴标签+图例，其余 N 等分、lane 间距 2%；
   全 lane 共享 `yAxisMin/Max`（复用现有离群裁剪逻辑）与同一 category X 轴；
   仅**最末 lane** 显示 X 轴标签（rotate 45），其余 lane 隐藏标签/刻度；
-  lane 标签 = 该 lane `yAxis.name`（`Site n`，`nameLocation: 'end'`），
-  文字色 = 该 Site 系列色。
+  lane 标签 = 该 lane `yAxis.name`（`Site n`，`nameLocation: 'middle'` 旋转 90° 左置，
+  与合并模式 Y 轴名同款），文字色 = 该 Site 系列色。
 - **交互联动**：`dataZoom inside` 的 `xAxisIndex` 覆盖全 lane 轴（tooltip 为
   `trigger: 'item'`，无 axisPointer，不引入 link 配置），任一 lane 缩放/平移全 lane 同步。
 - **系列组织**：每 lane 仅本 Site pass 点（套 §1 点径/透明度）；Fail/超界层按 lane 复制；
