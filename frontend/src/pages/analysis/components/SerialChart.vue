@@ -215,7 +215,7 @@ function buildOption() {
       name: 'Fail/超界', type: 'scatter', data: failAll,
       symbolSize: effSize.value + 2,
       itemStyle: { color: colors.value.errorColor, opacity: 1 },
-      z: Math.max(10, 2 + siteSeriesRaw.length),
+      z: Math.max(10, 2 + siteSeriesRaw.length), // site z = 2..N+1；N>8 时固定 10 不够置顶，取动态上限
       ...(isLarge.value ? { large: true } : {}),
     })
   }
@@ -279,7 +279,9 @@ function buildOption() {
     for (let lane = 0; lane < laneCount; lane++) {
       series.push({
         name: mark.name, type: mark.type || 'scatter', data: mark.data || [],
-        markLine: { ...mark.markLine, z: 20 }, silent: true,
+        // markLine 的 z 不继承宿主 series（ECharts MarkerView 取 MarkLineModel 自身 z，
+        // 默认 5）——site z 可达 N+1，必须显式抬到 20 保证参考线恒在数据带之上
+        markLine: mark.markLine ? { ...mark.markLine, z: 20 } : mark.markLine, silent: true,
         xAxisIndex: lane, yAxisIndex: lane, z: 20,
         ...(lineColor ? { itemStyle: { color: lineColor } } : {}),
       })
