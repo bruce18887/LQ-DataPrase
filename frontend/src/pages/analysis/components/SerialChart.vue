@@ -1,22 +1,41 @@
 <template>
   <div class="serial-chart-wrapper">
-    <!-- 多候选序列列（Serial_No 与 Dut_No 并存等）：显示选择器供用户手动切换，
-         单选 = 自动检测（优先级 Serial_No > Dut_No > PART_ID） -->
-    <div v-if="showSelector" class="serial-col-selector">
-      <span class="serial-col-selector__label">序列列</span>
-      <el-select
-        :model-value="activeSerialCol"
-        size="small"
-        style="width: 200px"
-        @update:model-value="(v: string) => emit('update:serialCol', v)"
-      >
-        <el-option
-          v-for="c in serialCandidates"
-          :key="c"
-          :label="c"
-          :value="c"
+    <!-- 工具栏：点径/透明度 slider + 序列列选择器（spec §3；拆分开关见后续任务） -->
+    <div class="serial-header">
+      <div class="serial-header__slider">
+        <span class="serial-header__label">点径 {{ effSize }} {{ sizeAutoHint }}</span>
+        <el-slider
+          :model-value="effSize" :min="2" :max="8" :step="1" size="small"
+          class="serial-header__range"
+          @update:model-value="(v: number | [number, number]) => (pointSizeOverride = Array.isArray(v) ? v[0] : v)"
         />
-      </el-select>
+      </div>
+      <div class="serial-header__slider">
+        <span class="serial-header__label">透明度 {{ effOpacityPct }}% {{ opacityAutoHint }}</span>
+        <el-slider
+          :model-value="effOpacityPct" :min="10" :max="100" :step="5" size="small"
+          class="serial-header__range"
+          @update:model-value="(v: number | [number, number]) => (opacityOverridePct = Array.isArray(v) ? v[0] : v)"
+        />
+      </div>
+      <!-- 多候选序列列（Serial_No 与 Dut_No 并存等）：显示选择器供用户手动切换，
+           单选 = 自动检测（优先级 Serial_No > Dut_No > PART_ID） -->
+      <div v-if="showSelector" class="serial-col-selector">
+        <span class="serial-col-selector__label">序列列</span>
+        <el-select
+          :model-value="activeSerialCol"
+          size="small"
+          style="width: 200px"
+          @update:model-value="(v: string) => emit('update:serialCol', v)"
+        >
+          <el-option
+            v-for="c in serialCandidates"
+            :key="c"
+            :label="c"
+            :value="c"
+          />
+        </el-select>
+      </div>
     </div>
     <!-- 高度由外层 .chart-wrapper--serial（单文件 440px）决定；本容器 flex 列，
          画布 flex:1 吃掉选择器/离群条以外的空间。底部三层需容纳 轴名+图例+滑块
@@ -30,7 +49,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
 import { formatAxisValue, getSiteColors8, buildChartToolbox } from '../../../utils/chart-bar'
@@ -60,15 +79,25 @@ const pointCount = computed(() =>
 const isLarge = computed(() => pointCount.value >= 5000)
 
 // —— 重叠可读性（spec 2026-09-12 §1.1）：按总点数自适应点径/透明度，
-// 大文件散点不再糊成实色带；slider 覆盖在后续任务接入 ——
+// 大文件散点不再糊成实色带；slider 手动覆盖见下方 override 语义（§3） ——
 function autoPointStyle(count: number): { size: number; opacity: number } {
   if (count < 5000) return { size: 6, opacity: 0.85 }
   if (count <= 20000) return { size: 4, opacity: 0.5 }
   return { size: 3, opacity: 0.35 }
 }
 const autoStyle = computed(() => autoPointStyle(pointCount.value))
-const effSize = computed(() => autoStyle.value.size)
-const effOpacity = computed(() => autoStyle.value.opacity)
+/** 手动覆盖（null = 自动）：每次数据重载清零，避免手动值毁掉小文件（spec §3） */
+const pointSizeOverride = ref<number | null>(null)
+const opacityOverridePct = ref<number | null>(null) // 百分比 10-100
+watch(() => props.data, () => {
+  pointSizeOverride.value = null
+  opacityOverridePct.value = null
+})
+const effSize = computed(() => pointSizeOverride.value ?? autoStyle.value.size)
+const effOpacityPct = computed(() => opacityOverridePct.value ?? Math.round(autoStyle.value.opacity * 100))
+const effOpacity = computed(() => effOpacityPct.value / 100)
+const sizeAutoHint = computed(() => (pointSizeOverride.value == null ? '(自动)' : ''))
+const opacityAutoHint = computed(() => (opacityOverridePct.value == null ? '(自动)' : ''))
 
 function buildOption() {
   if (!props.data) return {}
@@ -249,7 +278,7 @@ function buildOption() {
 // canvas 无 DOM 节点，官方推荐大数据散点必用 canvas）；小数据量跟随用户全局设置
 const { chartRef } = useChart(
   buildOption,
-  [() => props.data, () => props.outlierHandling],
+  [() => props.data, () => props.outlierHandling, () => effSize.value, () => effOpacityPct.value],
   'chartRef',
   () => (isLarge.value ? 'canvas' : getChartRenderer()),
 )
@@ -274,10 +303,30 @@ void chartRef // bound to <div ref="chartRef"> in template
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  margin-bottom: 8px;
 }
 .serial-col-selector__label {
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+.serial-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.serial-header__slider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.serial-header__label {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+}
+.serial-header__range {
+  width: 110px;
 }
 </style>
