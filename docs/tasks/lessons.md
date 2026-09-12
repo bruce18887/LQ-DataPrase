@@ -16,6 +16,17 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-09-12 序列分布重叠优化新增教训
+
+- **ECharts markLine 的 z 不继承宿主 series**：MarkerView.updateZ 走 retrieveZInfo(
+  markerModel)，取 MarkLineModel 自身 z（默认 5）——宿主 series 抬 z 后参考线反被
+  数据带压住（序列分布 site z=2..N+1 时 N≥4 即触发）。规则：markLine 需独立显式
+  抬 z（写进 markLine 配置内），且上限要高于 site/Fail 层动态 z（本项目取
+  max(20, N+4)）。
+- **EP slider 键盘驱动 e2e 必须 focus `.el-slider__button-wrapper`**：tabindex=0 与
+  onKeydown 挂在外层 wrapper（button.vue），内层 `.el-slider__button` 是不可聚焦的
+  视觉 div——对内层 focus 后方向键静默无效（断言停在旧值）。
+
 ## 2026-09-09 分析页 dock 整体高度进布局记忆新增教训
 
 - **e2e 记忆类用例必须先开开关，否则整条持久化链路静默不跑**：seed_users 把 e2e
