@@ -170,4 +170,32 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
     await expect.poll(siteSymbol).toBe(tier.size)
     await expect.poll(siteOpacity).toBe(tier.opacity)
   })
+
+  test('按 Site 拆分：N lane 共享刻度 + 联动缩放 + 图例去 Site', async ({ page }) => {
+    const { canvas, resp } = await enterSerial(page, RECOMMENDED.analysis)
+    const body = await resp.json()
+    const n = (body.series_data || []).length
+    test.skip(n < 2, 'fixture 无多 site，拆分模式不适用')
+    await page.getByText('按 Site 拆分').click()
+    await expect.poll(async () => (await readOption(canvas))?.grid?.length).toBe(n)
+    const opt = await readOption(canvas)
+    expect(opt.xAxis.length).toBe(n)
+    expect(opt.yAxis.length).toBe(n)
+    // 共享刻度（跨 Site 可比）
+    expect(new Set(opt.yAxis.map((y: any) => y.min)).size).toBe(1)
+    expect(new Set(opt.yAxis.map((y: any) => y.max)).size).toBe(1)
+    // 仅末 lane 显示 X 标签
+    opt.xAxis.forEach((x: any, i: number) => {
+      expect(x.axisLabel.show, `lane ${i} X 标签`).toBe(i === n - 1)
+    })
+    // 缩放联动覆盖全 lane
+    expect(opt.dataZoom[0].xAxisIndex).toEqual(Array.from({ length: n }, (_, i) => i))
+    // 图例去 Site、保留参考线
+    const legend: string[] = opt.legend[0].data
+    expect(legend.some((l) => /^Site /.test(l))).toBe(false)
+    expect(legend.length).toBeGreaterThan(0)
+    // 取消勾选恢复单面板
+    await page.getByText('按 Site 拆分').click()
+    await expect.poll(async () => (await readOption(canvas))?.grid?.length).toBe(1)
+  })
 })
