@@ -20,7 +20,7 @@ import { DOCK_LAYOUT_STORAGE_KEY, isValidLayout, type DockLayout } from '../page
 
 const DEBOUNCE_MS = 800
 
-export interface ChartToggles { serial: boolean; qq: boolean; box: boolean }
+export interface ChartToggles { hist: boolean; serial: boolean; qq: boolean; box: boolean }
 export interface ChartMemorySnapshot { layout: DockLayout | null; toggles: ChartToggles | null }
 export interface ChartMemoryLoadResult {
   memoryEnabled: boolean | null
@@ -42,7 +42,13 @@ function parseToggles(raw: unknown): ChartToggles | null {
   if (!raw || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
   if (typeof o.serial !== 'boolean' || typeof o.qq !== 'boolean' || typeof o.box !== 'boolean') return null
-  return { serial: o.serial, qq: o.qq, box: o.box }
+  // hist 为 2026-09-13 新增字段：旧账号数据缺它 → 默认 true（直方图原为常驻不可关）
+  return {
+    hist: typeof o.hist === 'boolean' ? o.hist : true,
+    serial: o.serial,
+    qq: o.qq,
+    box: o.box,
+  }
 }
 
 function parseState(raw: unknown): ChartMemorySnapshot {
@@ -65,7 +71,12 @@ export function loadChartMemory(): Promise<ChartMemoryLoadResult> {
         // reconcile 把已存布局裁剪掉（两层同时降级，之后每次刷新都复现）。
         if (memoryEnabled && state.layout && !state.toggles) {
           const keys = new Set(state.layout.rows.flat())
-          state.toggles = { serial: keys.has('serial'), qq: keys.has('qq'), box: keys.has('box') }
+          state.toggles = {
+            hist: keys.has('hist'),
+            serial: keys.has('serial'),
+            qq: keys.has('qq'),
+            box: keys.has('box'),
+          }
         }
         if (memoryEnabled && latest) scheduleFlush()
         else if (memoryEnabled === false) latest = null

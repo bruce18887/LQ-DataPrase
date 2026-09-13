@@ -11,6 +11,7 @@
             :loading="tabLoading"
           />
           <div class="chart-toggles">
+            <el-checkbox v-model="showHistogram" size="small">显示直方图</el-checkbox>
             <el-checkbox v-model="showSerial" size="small">显示序列分布</el-checkbox>
             <el-checkbox v-model="showQQPlot" size="small">显示QQ图</el-checkbox>
             <el-checkbox v-model="showBoxPlot" size="small">显示箱线图</el-checkbox>
@@ -76,9 +77,10 @@
       </div>
 
       <!-- 图表：可停靠拼格区（el-splitter 拖分隔条改高宽 + 标题栏手柄拖拽换布局 + 持久化） -->
-      <ChartDock v-if="histResult" :active-keys="activeChartKeys" @close="onDockClose">
+      <ChartDock v-if="dockVisible" :active-keys="activeChartKeys" @close="onDockClose">
         <template #hist>
           <HistogramChart
+            v-if="histResult"
             :result="histResult"
             :chart-config="chartConfig"
             :range-type="rangeType"
@@ -87,6 +89,7 @@
             :selected-param="localSelectedParam"
             :outlier-handling="outlierHandling"
           />
+          <el-empty v-else description="直方图数据加载中" />
         </template>
 
         <template #serial>
@@ -192,6 +195,11 @@
           <el-checkbox v-model="showJitter" size="small">离群点</el-checkbox>
         </template>
       </ChartDock>
+      <el-empty
+        v-else-if="!anyChartVisible"
+        class="chart-empty"
+        description="未选择任何图表，请勾选上方图表显示"
+      />
     </template>
   </AnalysisTabLayout>
 </template>
@@ -275,6 +283,8 @@ useTabFileParams({
     iqr_multiplier: iqrMultiplier.value,
   }),
 })
+// 直方图勾选（默认勾选；取消即关闭面板，2026-09-13 由常驻改为可关闭）
+const showHistogram = ref(true)
 // 序列列手动选择（空串 = 自动检测）；多候选文件（Serial_No + Dut_No）由
 // SerialChart 选择器写入，文件切换时重置回自动检测
 const serialCol = ref('')
@@ -408,15 +418,22 @@ const {
 // 当前可见图表 key 列表：直方图恒在，序列/QQ/箱线随勾选增删。
 // 顺序即 ChartDock 的 reconcile 依据（新增图追加、取消勾选移除，保留其余相对顺序）。
 const activeChartKeys = computed<ChartKey[]>(() => {
-  const keys: ChartKey[] = ['hist']
+  const keys: ChartKey[] = []
+  if (showHistogram.value) keys.push('hist')
   if (showSerial.value) keys.push('serial')
   if (showQQPlot.value) keys.push('qq')
   if (showBoxPlot.value) keys.push('box')
   return keys
 })
-// 面板「×」关闭 → 复位对应勾选（与顶部三个显示勾选同源）
+// 至少一个图表勾选 = 有内容可渲染
+const anyChartVisible = computed(() => activeChartKeys.value.length > 0)
+// dock 显隐：其余图由各自 showX 决定挂载，唯直方图需要数据才渲染有意义——
+// 当直方图是唯一选中项且数据未到时先不挂 dock，避免空图
+const dockVisible = computed(() => anyChartVisible.value && (!showHistogram.value || !!histResult.value))
+// 面板「×」关闭 → 复位对应勾选（与顶部四个显示勾选同源）
 function onDockClose(key: ChartKey) {
-  if (key === 'serial') showSerial.value = false
+  if (key === 'hist') showHistogram.value = false
+  else if (key === 'serial') showSerial.value = false
   else if (key === 'qq') showQQPlot.value = false
   else if (key === 'box') showBoxPlot.value = false
 }
@@ -425,15 +442,16 @@ function onDockClose(key: ChartKey) {
 // 套用与上报互斥：套用期间 watcher 不回写（避免把「恢复」当「用户改动」再存一遍）
 let togglesApplying = false
 let togglesTouched = false
-watch([showSerial, showQQPlot, showBoxPlot], ([s, q, b]) => {
+watch([showHistogram, showSerial, showQQPlot, showBoxPlot], ([h, s, q, b]) => {
   if (togglesApplying) return
   togglesTouched = true
-  saveChartState({ toggles: { serial: s, qq: q, box: b } })
+  saveChartState({ toggles: { hist: h, serial: s, qq: q, box: b } })
 })
 void loadChartMemory().then(({ memoryEnabled, state }) => {
   // 开关关/未加载（null）一律不套用：记忆功能只在明确开启时生效
   if (memoryEnabled !== true || !state.toggles || togglesTouched) return
   togglesApplying = true
+  showHistogram.value = state.toggles.hist
   showSerial.value = state.toggles.serial
   showQQPlot.value = state.toggles.qq
   showBoxPlot.value = state.toggles.box
@@ -545,6 +563,11 @@ function nextParam() {
 }
 
 /* dock 布局接管图表区的高度/宽度/排列；这里仅保留被 slot 注入的两处样式 */
+
+/* 全部图表取消勾选时的占位 */
+.chart-empty {
+  margin-top: 40px;
+}
 
 /* 序列无列等错误提示：作为 ChartPanel 网格单元，贴顶不铺满 */
 .serial-error-alert {
