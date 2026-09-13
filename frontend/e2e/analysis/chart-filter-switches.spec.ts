@@ -339,11 +339,12 @@ test.describe('@p1 柱宽设置生效', { tag: ['@p1', '@analysis'] }, () => {
     // 默认生效值 = min(20, 上限)——多系列文件上限 <20（CTA8280F 4 site → 18%）
     expect(before.opt).toMatch(/^\d+%$/)
 
-    // 展开「更多」露出柱宽 slider（第一个），End 键拖到上限
-    await page.locator(`${SINGLE} .more-btn`).click()
-    const slider = page.locator(`${SINGLE} .el-slider`).first()
+    // 打开直方图标题栏齿轮面板（2026-09-13 柱宽从「更多」折叠区迁入齿轮弹层）
+    await page.locator(`${SINGLE} [data-testid="hist-settings-btn"]`).click()
+    const pop = page.locator('.dp-hist-settings-popper')
+    const slider = pop.locator('.el-slider').first()
     await expect(slider).toBeVisible({ timeout: 10_000 })
-    const hint = page.locator(`${SINGLE} .config-section .value-hint`).first()
+    const hint = pop.locator('[data-hist-setting="bar-width"]')
     await expect(hint).toContainText(before.opt)
 
     const btn = slider.locator('.el-slider__button-wrapper')

@@ -36,9 +36,6 @@
       <ChartConfigPanel
         v-model:chart-config="chartConfig"
         v-model:range-type="rangeType"
-        v-model:bar-width-percent="barWidthPercent"
-        :bar-width-max="barWidthMax"
-        v-model:bar-overlap-percent="barOverlapPercent"
         v-model:custom-low="customLow"
         v-model:custom-high="customHigh"
       />
@@ -143,6 +140,21 @@
           </div>
         </template>
 
+        <!-- 直方图专属控件（齿轮）：柱宽/柱体重合，图标题栏右上角同屏 -->
+        <template #controls-hist>
+          <ChartSettingsPopover
+            popper-class="dp-hist-settings-popper"
+            testid="hist-settings-btn"
+            title="直方图设置"
+          >
+            <HistogramSettingsForm
+              v-model:bar-width-percent="barWidthPercent"
+              v-model:bar-overlap-percent="barOverlapPercent"
+              :bar-width-max="barWidthMax"
+            />
+          </ChartSettingsPopover>
+        </template>
+
         <!-- 箱线图专属控件：分组方式 + 离群点，随图标题栏同屏（原在左栏，现归箱线图） -->
         <template #controls-box>
           <el-select v-model="groupBy" size="small" style="width: 120px" placeholder="分组方式">
@@ -167,6 +179,8 @@ import { useSingleTabStore } from '../../../stores/analysisTabs'
 import type { DataFile } from '../../../types'
 import { getMaxBarWidthPercent } from '../../../utils/chart-bar'
 import ChartConfigPanel from './ChartConfigPanel.vue'
+import ChartSettingsPopover from './ChartSettingsPopover.vue'
+import HistogramSettingsForm from './HistogramSettingsForm.vue'
 import DataFilterSection from './DataFilterSection.vue'
 import AnalysisFilePicker from './AnalysisFilePicker.vue'
 import RangeComparisonTable from './RangeComparisonTable.vue'
