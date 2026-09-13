@@ -10,8 +10,11 @@ import excelize
 import tempfile
 import os
 from apps.analysis.services.statistics import ensure_numeric
+from apps.common.constants import NON_NUMERIC_KEYWORDS
 from apps.datafiles.parsers.base import SYSTEM_COLUMNS
-from .gage_styles import NON_NUMERIC_KEYWORDS, FILL_GRAY_HEX, FILL_LIGHT_BLUE_HEX
+
+FILL_GRAY_HEX = "E0E0E0"
+FILL_LIGHT_BLUE_HEX = "D6EAF8"
 
 
 def _safe_float_or_none(val):

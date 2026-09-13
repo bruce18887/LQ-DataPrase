@@ -50,7 +50,7 @@ class GageViewSet(viewsets.GenericViewSet):
             return Response({'error': 'need_at_least_2_files'}, status=400)
 
         # ── Build Excel workbook using old version's complete logic ──
-        from apps.gage.excelize_layout import build_gage_summary_excel
+        from apps.gage.gage_legacy_builder import build_gage_summary_excel
         save_buffer = build_gage_summary_excel(file_datasets, ignore_no_limit)
 
         fname = render_export_filename(
