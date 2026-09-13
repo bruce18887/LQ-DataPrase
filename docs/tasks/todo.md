@@ -1480,3 +1480,18 @@ ad62f81 → b47f509 → 9e313c8 → 837b3dc → 6f8a608 → 4f1d8af → 13ab77c 
 
 - `npm run build` 门禁过；serial-overlap + serial-fail-count + 回归套件全绿（见提交）
 - 快照 `.qoder/verify_serial_*.png` 重生成（无红层形态）
+
+---
+
+# 任务：后端死代码清除 P0（2026-09-12 出方案 / 2026-09-13 起执行）
+
+> 计划：`docs/superpowers/plans/2026-09-12-backend-dedup-p0-dead-code.md`
+> 设计：`docs/superpowers/specs/2026-09-12-backend-dedup-cleanup-design.md` §3
+
+## 基线
+
+- L0 基线：`manage.py test` → `Ran 919 tests`，`OK (skipped=7)`，246.78s（串行）
+- 工作树起点：`git rev-parse --short HEAD` = `1d235c8`
+- 历史记录里的 888 / 899 已过时，本次及后续差值核对一律以 **919** 为准
+- 取数方式：`manage.py test > tasks/p0-baseline-test.log 2>&1` 再 grep 汇总行
+      （`2>&1 | tail` 会因 stdout 块缓冲把 `Ran/OK` 挤出窗口，别用）
