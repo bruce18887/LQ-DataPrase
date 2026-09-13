@@ -814,11 +814,15 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
 - [ ] `site_yield.py:31,46`：`total==0` 返回 None 而非 100%；`:124` 裸 except 对齐 `:141`
 - [ ] 百分比精度统一 6 位（`site_yield.py:190`、`multi_lot.py:273`、`export/views.py:158`、`buyoff/excelize_layout.py:281,306`）
 - [ ] `charts.py:65`：x_labels 由 bins 直接推导（现错开 0.5·gap）；`:37-39` 与 `histogram.py:180-205` 网格统一
+      ↳ 2026-09-13 行号已过时：`:37-39` 原指 `build_histogram_bins` shim，该 shim 已随 `e2512da` 删除；
+      现 `charts.py:55-57` 已是 `build_histogram_grid(...)` + `x_labels = bin_centers`，**本条看起来已被
+      「导出网格收敛到 build_histogram_grid」满足**。下一轮先复核再决定关闭，别按旧行号找代码。
 - [ ] `export/views.py:207`：pptx 分支补齐 show_limit/sigma/kde 开关透传；`:112` `sigma` 补 int() 与范围校验；
       `:148` html_report 补 `filter_bin1_rows`；`:85` 删死代码 `keep_header`
 - [ ] `file_views.py:286-306,350-372`：`shutil.move`/删目录移出 `transaction.atomic()`；`filename` 设 read_only 或 basename 校验
 - [ ] `statistics_views.py:350`：bin 列改 `get_bin_column_name(format_type)`，不再「第一个列名含 bin」
-- [ ] 死代码：`export/views.py:85 keep_header`、`gage/services/rr_analysis.py` + `gage_summary_builder.py`（标注或删）
+- [ ] 死代码：`export/views.py:85 keep_header`（`gage/services/rr_analysis.py` + `gage_summary_builder.py`
+      已于 2026-09-13 随 `be50689` 的 gage 死代码链一并删除，不再是待办）
 - [ ] 补测试：gage/buyoff 数值级断言（构造已知均值/方差→读回单元格到 1e-4）、`compute_bin_trend` int64 键良率、
       `detect_outliers_iqr`/`filter_finite` 的 bool 与 str dtype 用例、limit 缺失应为 None/N/A
 - [ ] 验证 + 提交
@@ -969,11 +973,14 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
   且原评审标注为「需业务确认」。列为后续。
 - **Gage R&R 的 AIAG 公式口径**（σ_AV 修正 / %Study Var / ndc）：用户决策 1 明确本轮不动。
   子代理据此**移除**了 V/W 列里的方差贡献分数而非另开新列（避免改 27 列布局），已记录。
-- **`build_histogram_bins` 保留为弃用 shim**：`apps/export/tests.py` 的 `BuildHistogramBinsTests` 把旧几何
-  pin 死了，而测试迁移是下一轮的事。生产路径（charts/export_ppt/export_batch_charts_xlsx）已全部改走
-  新的 `build_histogram_grid`，shim 只服务那个旧测试。
+- ~~**`build_histogram_bins` 保留为弃用 shim**~~ → **已于 2026-09-13 删除**（`e2512da`）：
+  `apps/export/tests.py` 的 `BuildHistogramBinsTests` 与 `test/backend/test_export_histogram_grid.py`
+  的 `LegacyBinsShimTests` 一并处理——旧几何公式移入该测试文件的模块级 `_legacy_bins_geometry`
+  作为历史事实存档（它拿公式与自己比对，不是防护网），新几何的 pin 留在
+  `GridGeometryTests` / `GridMatchesScreenTests`。生产路径本就已全走 `build_histogram_grid`。
 - **结构重构全部延后**（用户决策 4）：600 行拆分、`apps/*/tests.py` → `test/backend/` 迁移、超大测试文件拆分。
-  注：`apps/gage/gage_legacy_builder.py` 因本轮修缺陷从 857 → 901 行，下一轮拆分时一并处理。
+  注：`apps/gage/gage_legacy_builder.py` 因本轮修缺陷从 857 → 901 行，`be50689` 并入死代码链的
+  3 个存活常量后为 904 行，仍超 600，下一轮拆分时一并处理。
 
 ### 未完成（下一轮入口）
 
@@ -1483,7 +1490,7 @@ ad62f81 → b47f509 → 9e313c8 → 837b3dc → 6f8a608 → 4f1d8af → 13ab77c 
 
 ---
 
-# 任务：后端死代码清除 P0（2026-09-12 出方案 / 2026-09-13 起执行）
+# 任务：后端死代码清除 P0（2026-09-12 出方案 / 2026-09-13 执行完毕）✅
 
 > 计划：`docs/superpowers/plans/2026-09-12-backend-dedup-p0-dead-code.md`
 > 设计：`docs/superpowers/specs/2026-09-12-backend-dedup-cleanup-design.md` §3
@@ -1495,3 +1502,43 @@ ad62f81 → b47f509 → 9e313c8 → 837b3dc → 6f8a608 → 4f1d8af → 13ab77c 
 - 历史记录里的 888 / 899 已过时，本次及后续差值核对一律以 **919** 为准
 - 取数方式：`manage.py test > tasks/p0-baseline-test.log 2>&1` 再 grep 汇总行
       （`2>&1 | tail` 会因 stdout 块缓冲把 `Ran/OK` 挤出窗口，别用）
+
+## 验证（Plan A 完成）
+
+- [x] 全量 `manage.py test`：**Ran 917 tests / OK (skipped=7)** = 基线 919 − 2
+      （差值恰为随 `BuildHistogramBinsTests` 一起删除的 2 例；该数本身是门禁——
+      若 `test_export_histogram_grid.py` 因模块级 import 断裂而整体不收集，会少更多）
+- [x] 定向：`test.backend.test_gage_builder`(11) + `apps.gage`(2) 绿；`apps.analysis`
+      `apps.datafiles` `apps.export` `apps.gage` 合计 355 绿；`test.backend.test_export_histogram_grid` 24 绿
+- [x] `manage.py check` 无 issue；`netstat` 查 8000/3000 无监听
+- [x] DoD grep：`gage_summary_builder` / `rr_analysis` / `build_histogram_bins` /
+      `FileUploadSerializer` / `get_1d([^_]|$)` / `COLOR_ALT_ROW` 在 `apps/ config/ test/` 内均零命中；
+      `_disk_mtime` 只剩 live 的 `_disk_mtime_ns`
+- [x] 行数：`git diff --numstat 3c4c9c0 HEAD` = 22 文件 / +33 / −783 → **净删 750 行**
+- 提交：`be50689` gage 死代码链（−632/+5）→ `537181a` parser 修复前分叉（−59）
+      → `7ca0341` spec 悬空 hiddenimport（−1）→ `e2512da` shim + 零星死代码 + 未用 import（−91/+28）
+
+### 与计划的偏差（后续复盘用）
+
+- 多了一个 commit：审计只查了 `.py`，`lq_dataprase.spec` 的 `hiddenimports` 里 `'apps.gage.services'`
+  漏网。它不会报错——`git rm` 残留的空目录让这个包以 namespace package 身份被 `find_spec` 命中，
+  PyInstaller 于是静默跳过。**删模块必须连带 grep 非 .py 的构建配置**（已补进 Plan A 的 A1）。
+- `test_gage_builder` 是 11 例不是 12 例（计划原文写错），13 = 11 + `apps/gage/tests.py` 2 例。
+- A3 Step 3d 给的替换类只有 1 个用例，而被替换的 `LegacyBinsShimTests` 有 2 个——照抄会让
+  用例数变 916 破掉 917 门禁。实施时保留了第二条 `test_legacy_geometry_stays_the_buggy_reference`
+  走测试内 helper，用例数不变。
+- 审查后追加两处测试诚信修正：`_legacy_bins_geometry` 的 docstring 原称"防止用例空转"是
+  过度声明（helper 与自己比对，永远不会因生产回归变红），已改为"历史事实存档"；
+  并把随 `BuildHistogramBinsTests` 一起消失的末边界 pin（`bins[-1] == 32.5`）补进保留用例。
+
+### 未做
+
+- A4：`apps/gage/excelize_layout.py.bak`（18 KB，未跟踪且被 `.gitignore` 忽略，删了 git 找不回）
+  等用户确认；可选 `rm` 或 `mv` 到 `tasks/`。
+- e2e 未跑：本批不改任何响应结构与前端契约，门禁按用户所选"后端全量 + 定向回归"。
+  gage 导出的 live 路径其实已被 `apps/gage/tests.py:42,59` 真实 POST
+  `/api/v1/gage/generate_summary/` 覆盖，`views.py:53` 的惰性 import 不是盲区。
+- 顺手发现但按范围不动：`apps/sftp/views.py:6` 的 `status` 确实未用（`:2-3` 注释只背书
+  `paramiko`）；`analysis_views.py` 681 行、`gage_legacy_builder.py` 904 行仍超 600（Plan B D4）。
+
+→ P1/P2 见 `docs/superpowers/plans/2026-09-12-backend-dedup-p1-p2-refactor.md`（未开始，需单独授权）
