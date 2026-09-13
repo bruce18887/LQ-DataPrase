@@ -1,5 +1,5 @@
 <template>
-  <div class="param-selector">
+  <div class="param-selector" :class="{ 'param-selector--inline': inline }">
     <div class="selector-label">选择参数 (↑↓ 切换)</div>
     <el-select
       :model-value="selectedParam"
@@ -7,7 +7,7 @@
       filterable
       clearable
       size="small"
-      style="width: 100%"
+      :style="inline ? 'width: 260px' : 'width: 100%'"
       :filter-method="filterMethod"
       :virtual="filteredItems.length > 50"
       @change="onParamChange"
@@ -66,7 +66,10 @@ const props = withDefaults(defineProps<{
    * 参与全局 `:visible` 选项查询——reference 零尺寸导致 popper 逐帧重定位、
    * `.first()` 误点另一个 tab 的选项（lessons 2026-09-05） */
   popperClass?: string
-}>(), { popperClass: 'dp-param-popper-single' })
+  /** inline：横向单行（label + select + 上下一个），用于单文件 tab 顶部冻结行；
+      默认纵向堆叠（多文件 tab 的 top-bar 布局不变） */
+  inline?: boolean
+}>(), { popperClass: 'dp-param-popper-single', inline: false })
 
 const emit = defineEmits<{
   'update:selectedParam': [value: string]
@@ -202,6 +205,24 @@ function onNext() {
   flex: 1;
   padding: 6px 8px;
   font-size: 12px;
+}
+
+/* inline：单行不换行、按钮自适应宽度（不撑满） */
+.param-selector--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.param-selector--inline .selector-label {
+  white-space: nowrap;
+}
+.param-selector--inline .nav-buttons {
+  flex: none;
+}
+.param-selector--inline .nav-buttons :deep(.el-button) {
+  flex: none;
+  padding: 5px 8px;
 }
 
 .param-option {

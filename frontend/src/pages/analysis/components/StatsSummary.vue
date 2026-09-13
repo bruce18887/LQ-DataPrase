@@ -5,12 +5,11 @@
       :key="card.label"
       class="stat-item"
       :class="{ 'has-color': card.color }"
-      :style="card.color ? { borderColor: card.color + '40', backgroundColor: card.color + '0d' } : undefined"
     >
-      <div class="stat-label">{{ card.label }}</div>
-      <div class="stat-value" :style="card.color ? { color: card.color } : undefined">
+      <span class="stat-label">{{ card.label }}</span>
+      <span class="stat-value" :style="card.color ? { color: card.color } : undefined">
         {{ card.value }}
-      </div>
+      </span>
     </div>
   </div>
 </template>
@@ -50,35 +49,33 @@ const displayCards = computed(() => {
 </script>
 
 <style scoped>
+/* 单行紧凑条（2026-09-13：原 5 列卡片网格最多 3 行 ≈126px，占掉图表纵向空间）。
+   语义 token；类名 .stats-summary/.stat-item/.stat-label/.stat-value 为 e2e 契约，勿改。 */
 .stats-summary {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 5px;
-  padding: 6px 8px;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: baseline;
+  gap: 2px 18px;
+  padding: 4px 10px;
   background: var(--bg-3);
   border-radius: 6px;
   border: 1px solid var(--border-2);
-  height: 100%;
-  align-content: center;
+  /* 强制单行（窄屏/多项时横向滚动，而非折行增高）：目标是固定 ~26px 高度，
+     折行会把高度翻倍回到旧卡片网格的观感。 */
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-2) transparent;
 }
 
 .stat-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 3px 2px;
-  background: var(--bg-2);
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  min-height: 42px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
 }
 
 .stat-label {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-2);
-  line-height: 1.2;
-  margin-bottom: 1px;
   white-space: nowrap;
 }
 
@@ -86,8 +83,6 @@ const displayCards = computed(() => {
   font-size: 12px;
   font-weight: 600;
   color: var(--text);
-  line-height: 1.3;
-  text-align: center;
-  word-break: break-all;
+  white-space: nowrap;
 }
 </style>

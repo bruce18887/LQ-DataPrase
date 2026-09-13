@@ -17,22 +17,45 @@ Python 的 `apps/analysis/services/statistics/`；回写用原生公式（保留
 ### Phase 0 — 前置闸门与脚手架
 
 - [x] 提取 Exp 表模板常量（`tasks/_extract_exp_constants.py`，pyxlsb 只读；dump 见 `tasks/_exp_dump.txt`）
-- [ ] **闸门：取一次真实运行后的 Exp 表** —— 提取结果证明 VBA 的 Exp 写列整体 +1 偏移
-      （阶梯写进 D=All Site、计数写进 E=Site1/N、单位写进 G36、统计写进 C53），
-      且 `B3:B27` 实为比较运算符而非乘数（`<=`/`<`/`>`），疑似 `B3` 应为 `A3`。
-      源码不足以定稿 Phase 4，需用户跑一次宏后保存工作簿作为基准
-- [ ] `yo office` → Excel Task Pane → TS，落位 `DataPrase-LightVBA/addin/`（`yo` 尚未安装）
-- [ ] 重接 Vue3 + Vite（`@ui` 别名 → `../../frontend/src`）；manifest + Ribbon + HTTPS 证书 + side-load
-- [ ] 建 vitest + playwright（沿用仓库 `@p0/@p1/@p2` 标签约定）
+- [x] **Exp 基准决策：不做** —— 用户确认「按修正推断做」。已证实的 VBA 两处硬伤作为修正依据：
+      ① 写 Exp 的列号整体 **+1 偏移**（阶梯写进 D=All Site、计数写进 E=Site1/N、
+      单位写进 G36 而非 F36、统计写进 C53 而非紧邻标签 A53 的 B53）；
+      ② 把 `B3:B27` 当乘数，但该列实为比较运算符（`<=`/`<`/`>`），真正像乘数的是
+      `A3:A27 = -2,-1,0,…,22` → `B3` 疑为 `A3` 笔误。
+      Phase 4 按修正布局实现：**C=Range(bin 边缘) / D=All Site / E–L=Site1–8 / M–U=百分比**
+- [x] 脚手架落位 `DataPrase-LightVBA/addin/` —— **偏离**：`yo office` 向导失败（github.com 被阻断，
+      ECONNRESET；codeload/raw 可达但 zip 入口在 github.com）。改为手动复刻生成器行为：
+      取官方 `Office-Addin-TaskPane` release 模板 → 跑 `node convertToSingleHost.js excel xml
+      "LQ-DataPrase Light" random`。结果与向导一致（manifest.xml 单主机 + Id 8869cf9c-…）
+- [x] 重接 Vue3 + Vite（模板原为 webpack+babel）：换 Vite 8 + vue-tsc；入口提到根
+      `taskpane.html` / `commands.html`；`assets/` → `public/assets/`；加 `@` / `@ui` 别名
+      （`@ui` → `../../frontend/src`）；删 webpack.config.js / babel.config.json / 模板 demo
+- [x] HTTPS 开发证书：`office-addin-dev-certs` 自动生成并安装受信任 CA
+      （`C:\Users\Administrator\.office-addin-dev-certs`）。**副作用**：该包每次调用都会重装 CA，
+      已限定只在 `command === 'serve'` 时装载，构建不再触碰证书
+- [x] vitest 接线跑通（`vitest.config.ts`，node 环境，4 tests 通过）
+- [ ] playwright（浏览器内 stub Office；沿用仓库 `@p0/@p1/@p2` 标签约定）+ manifest Ribbon 按钮（Phase 5）
 
-### Phase 1 — 解析与统计内核（纯 TS）
+**Phase 0 出口验证**：`npm run build` 绿（110ms，无证书操作）；dev server 起于
+`https://localhost:3000`，`/taskpane.html` 与 `/assets/icon-32.png` 均 200；测完端口 3000 已释放。
 
-- [ ] `core/parse/worksheet.ts` 机型识别（5 组标识）+ TestNameRow 定位 + 测试项列区间
-- [ ] `core/parse/normalize.ts`：`fixNegativeDecimal` / 列名去重 / 尾元数据行剔除
-- [ ] `core/stats/limits.ts`：`resolveSpecLimit(s)` / `detectFailData` / `getSiteColumn`
-- [ ] `core/stats/computations.ts`：`meanDdof0` / `stdDdof0`（ddof=0）/ `computeRangeStatistics` / `computeCpk`
-- [ ] `core/json.ts`：NaN/±Inf → null（类型一律 `number | null`）
-- [ ] 一致性 fixture：`tasks/gen_addin_conformance.py` 冻结 Python 输出，vitest 断言 TS 一致
+### Phase 1 — 解析与统计内核（纯 TS）✅
+
+- [x] `core/types.ts` / `core/constants.ts`（NON_NUMERIC_KEYWORDS、BIN_COLUMN_MAPPING、SYSTEM/NON_NUMERIC_COLUMNS）
+- [x] `core/parse/normalize.ts`：`fixNegativeDecimal` / `toNumericCell` / `cellText` / `makeColumnNamesUnique` / `dropTailMetadataRows`
+- [x] `core/parse/tester-table.ts`：VBA `Tester(0..4)` 单元格模型 + bin/site 列索引
+- [x] `core/parse/worksheet.ts`：机型识别（含 ETS88 第 2/3 行回退）→ 列头行定位 → 测试项列区间 → 单位/上下限 → 数据行区间；`toParsedTable` 转通用表
+- [x] `core/stats/limits.ts`：`resolveSpecLimit(s)`（占位关键字/'Min'/'Max' → null）/ `getColumnsWithLimits` / `getSiteColumn` / `detectFailData`
+- [x] `core/stats/computations.ts`：`meanDdof0` / `stdDdof0`（**ddof=0**）/ `safeGap` / `minMax`（栈安全）/ `computeRangeStatistics` / `computeCpk`
+- [x] `core/json.ts`：NaN/±Inf → null（类型一律 `number | null`）
+- [x] 一致性夹具：`tasks/gen_addin_conformance.py` 生成 4 个真实 datalog 的单元格矩阵 + Python 参考结果 → `addin/test/fixtures/*.json`（6–31 KB）
+
+**关键修正（一致性测试抓出来的）**：ETS88 的真实版式是
+`列名行(Test Name, 1728 段) → +2 Lower Limit → +3 Upper Limit → +4 Units → marker 行(仅 5 段) → 数据`。
+**marker 行不是列头行**，它只用来定数据起点（= 列名行 + 6）。VBA 的 ETS88 偏移
+（lowOffset=2/highOffset=3/unitOffset=4/dataRowOffset=6）**是对的**；我一度误判为过期偏移。
+另一坑：文件第 8 行也有 `Test Name`（设备名行，仅 2 段），列头行判据须能区分——
+现取「列 A 为 Test Name 的候选中最宽的一行」（优先 > 50 段，矩阵被截断时退化为取最长）。
 
 ### Phase 2 — 任务窗格只读分析
 
@@ -60,8 +83,29 @@ Python 的 `apps/analysis/services/statistics/`；回写用原生公式（保留
 
 ## Review
 
-（进行中）
+**Phase 0 验证账目**：`npm run build` 绿（110ms，无证书操作）；dev server 起于
+`https://localhost:3000`，`/taskpane.html` 与 `/assets/icon-32.png` 均 200；测完端口 3000 已释放；
+用户在 Excel 里 side-load 成功。
 
+**Phase 1 验证账目**：`npx vitest run` **80 tests 全绿**（6 个文件，598ms）；
+`npm run typecheck`（vue-tsc）绿；`npm run build` 绿。
+其中 `conformance.test.ts` 用 4 个真实 datalog（STS8200 / CTA8290D / CTA8280F / ETS88）
+对拍 Python 参考：机型、列头行、测试项起始列、数据首行、bin 列索引、测试项单位/上下限、
+数据区数值，全部一致。夹具仅 6–31 KB（列截断到 25 列 + 只保留到数据首行后 2 行）。
+
+**踩坑记录**：
+- 我一度把 ETS88 的 marker 行当列头行，误判 VBA 偏移「过期」并据此改了实现；
+  一致性测试立刻红（`测试项列区间为空（起始列 5 起即为空）`），实地打印该文件 58–87 行后
+  确认 VBA 偏移正确，已回正并写进 `tester-table.ts` 注释。
+- 夹具按列截断会让 ETS88 的「>50 段」判据失效（列名行与设备名行都被截到 25/2），
+  故列头行判据改为「候选中取最宽」，两种情形都成立。
+
+**待办（Phase 1 未覆盖）**：`toParsedTable` 未把 bin/site 列强制为字符串之外的处理；
+真实 Excel 打开 CSV 时的类型强转（日期/前导零）仍是真机验证项，见风险 ②。
+
+---
+
+# 任务：分析页 dock 底部高度滑条进布局记忆（2026-09-09）✅
 
 用户报告：「数据分析页布局记忆不记最底下的高度滑条，一刷新高度就还原」。
 根因：底部横条改的整体高度是 ChartDock.vue 组件局部 `bodyH` ref，布局记忆
@@ -1663,3 +1707,40 @@ ad62f81 → b47f509 → 9e313c8 → 837b3dc → 6f8a608 → 4f1d8af → 13ab77c 
 - **待用户确认**：可选批次 5（相关性散点 data 模式 padding `rng/2 → rng*0.08` + 显式 grid）。
 - **环境**：跑 e2e 前按 lessons 杀掉 8000 端口未钉 `LQDP_SYSTEM_CONFIG_FILE` 的**用户 dev
   runserver 整棵进程树**（playwright 自起钉配置的后端接管）；用户 dev 服务需其自行重启。
+
+---
+
+# 任务：分析页顶部统计条压缩 + 参数选择器随文件选择行冻结（2026-09-13）
+
+> 计划：`~/.claude/plans/adaptive-crunching-simon.md`（用户确认：统计条压成单行 + 只冻结「文件+参数」行）
+
+用户反馈：① 图表上方 N/Mean/Median 统计卡太大（尤其高度），希望缩小或移左栏；
+② 参数选择器在最上方，向下滚看图表时滚出视野、要滚回才能切参数。希望放到选择数据 UI 那行并冻结。
+
+## 实施清单
+
+- [x] `StatsSummary`：5 列卡片网格 → 单行紧凑条（nowrap + 横向滚动，高度 ≈126px → ~26px）
+- [x] `ParamSelector`：新增 `inline` 模式（默认纵向不变，MultiFileTab 零影响）
+- [x] `SingleParamTab`：参数选择器移入文件选择行；筛选行拆到新 `#toolbar-2`
+- [x] `AnalysisTabLayout`：`#toolbar` sticky 冻结 + 新增 `#toolbar-2`（非冻结）
+- [x] `AnalysisPage`：`:deep(.el-tabs__content){overflow:visible}` 放开 sticky 祖先
+- [x] e2e：新增 `toolbar-sticky.spec.ts`（3 用例：冻结行贴顶 / 筛选行不冻结 / 统计条单行）
+
+## Review（2026-09-13）
+
+- **验证账目**：`npm run build` 绿；e2e `analysis` + `settings` P1 **144 passed / 3 flaky /
+  0 failed**（3 flaky 与本批前同组：dock-resize 最大化 / legend-color / tiny-fail-bar，隔离复跑
+  绿——sticky 顶栏**未**引入 pointer-intercept 新失败）；数据套件 `histogram-first-row-empty`
+  + `view-data` **8 passed / 2 flaky**（StatsSummary 被 HistogramColumnDialog 复用正常）；
+  新 `toolbar-sticky` **5 passed**。
+- **实测数据**：统计条 49px（wrap 折两行）→ 改 `nowrap + overflow-x:auto` 后 ~26px；
+  sticky 实测偏移 24px = `.content-area` 的 padding-top（sticky 贴的是 padding 盒顶边）。
+- **环境障碍（未自行处理，如实记录）**：e2e 前置检查发现 3000 被 **LightVBA addin 的 dev
+  server** 占用（`vite.config.ts` 的 `server.port`/`preview.port` 硬编码 3000 + strictPort，
+  无法就地改端口），8000 上另有一个 **Playwright 残留测试后端**（真实 API 正常，仅
+  `/api/schema/` 500，而它正是 webServer 的就绪探测端点 → 探测超时）。前者属另一会话在跑的
+  服务、后者需权限清理，均未动；改用**临时** Playwright 配置（前端换 3100 起 preview + 后端
+  就绪探测换 `/api/v1/files/` 复用既有进程）完成本轮验证，临时配置用完已删。
+- **双主题**：统计条/工具栏/参数选择器全用语义 token，无字面色。
+- **待用户处理**：① 3000 的 addin dev 与 8000 的残留后端会阻塞常规 `npm run test:e2e`，
+  需释放后再跑全量；② 建议在 dev 环境目测统计条与冻结行的双主题观感。

@@ -74,6 +74,13 @@ watch(activeTab, (val) => { analysisStore.activeTab = val })
 </script>
 
 <style scoped>
+/* sticky 顶栏（AnalysisTabLayout 的 .toolbar）要以 .content-area 为滚动祖先：
+   EP 的 .el-tabs__content 默认 overflow:hidden 会把 sticky 困在 tab 内容盒里、
+   相对页面滚动失效。放开后顶栏才能在滚到下方时贴住视口顶部。 */
+:deep(.el-tabs__content) {
+  overflow: visible;
+}
+
 :deep(.el-tabs--border-card) {
   background-color: var(--bg-2);
   border: 1px solid var(--border-2);
