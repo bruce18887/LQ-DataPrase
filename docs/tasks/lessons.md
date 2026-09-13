@@ -513,3 +513,20 @@
 - **给超界点预留的头部可能反噬**：初版在数据范围外再加 15% 头部避免贴边锚点与数据带
   重叠，实测对「数据本就贴近规格限」的参数把范围撑得比改动前更宽（负优化）。规则：
   自适应轴只取 anchor==0 值 ± 固定 padding；padding 已足以分离贴边锚点，勿叠加预留。
+
+## 2026-09-13 分析页工具栏冻结 + 统计条压缩新增教训
+
+- **`position: sticky` 的参照是「padding 盒顶边」而非 border 盒**：给 `.content-area`（padding
+  24px）里滚动的顶栏写断言，`toolbar.y − container.getBoundingClientRect().top` 恒等于
+  padding-top（实测 24px，看着像「没生效」）。规则：sticky 断言基准用
+  `容器 rect.top + getComputedStyle(el).paddingTop`，别直接比容器顶。
+- **sticky 失效的头号原因是祖先 `overflow` 而非 z-index**：EP 的 `.el-tabs__content` 默认
+  `overflow:hidden`，会把 sticky 的滚动祖先换成它自己（自身不滚动）→ 相对页面滚动永久失效。
+  规则：加 sticky 前先过一遍祖先链，把中间层的 `overflow:hidden` 放开（本项目：
+  `AnalysisPage` 的 `:deep(.el-tabs__content){overflow:visible}`）。
+- **「固定高度单行条」必须 `flex-wrap:nowrap + overflow-x:auto`**：`flex-wrap:wrap` 在窄容器
+  下折行会让高度翻倍（实测 26px→49px），压缩高度的目标落空。规则：要求固定高度的横向统计条
+  一律 nowrap + 横向滚动，别拿 wrap 当兜底。
+- **他人进程不要硬杀；被权限拦住就绕**：e2e 跑不动先分清占用者是「另一会话在跑的服务」还是
+  「本仓测试残留」。前者绝不能杀（打断他人工作），后者也应先确认。被工具权限拒绝时，用**临时
+  配置绕开**（前端换端口起 preview + 后端就绪探测换端点复用既有进程）完成任务，别把杀进程当解法。

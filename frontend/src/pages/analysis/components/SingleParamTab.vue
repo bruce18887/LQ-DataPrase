@@ -1,35 +1,44 @@
 <template>
   <AnalysisTabLayout :loading="histLoading" class="single-param-tab">
     <template #toolbar>
-      <div class="control-panel">
-        <!-- 第一行：选文件（左） + 三个「显示…」图表勾选（右对齐） -->
-        <div class="control-panel__main">
-          <AnalysisFilePicker
-            v-model="fileId"
-            :files="files"
-            scope="single"
-            :loading="tabLoading"
-          />
-          <div class="chart-toggles">
-            <el-checkbox v-model="showHistogram" size="small">显示直方图</el-checkbox>
-            <el-checkbox v-model="showSerial" size="small">显示序列分布</el-checkbox>
-            <el-checkbox v-model="showQQPlot" size="small">显示QQ图</el-checkbox>
-            <el-checkbox v-model="showBoxPlot" size="small">显示箱线图</el-checkbox>
-          </div>
+      <!-- 冻结行（sticky）：文件选择 + 参数选择 + 图表勾选，向下滚动始终可见 -->
+      <div class="control-panel__main">
+        <AnalysisFilePicker
+          v-model="fileId"
+          :files="files"
+          scope="single"
+          :loading="tabLoading"
+        />
+        <ParamSelector
+          :params="params"
+          v-model:selected-param="localSelectedParam"
+          popper-class="dp-param-popper-single"
+          inline
+          @prev="prevParam"
+          @next="nextParam"
+        />
+        <div class="chart-toggles">
+          <el-checkbox v-model="showHistogram" size="small">显示直方图</el-checkbox>
+          <el-checkbox v-model="showSerial" size="small">显示序列分布</el-checkbox>
+          <el-checkbox v-model="showQQPlot" size="small">显示QQ图</el-checkbox>
+          <el-checkbox v-model="showBoxPlot" size="small">显示箱线图</el-checkbox>
         </div>
-        <!-- 第二行：数据口径（异常值处理 · 敏感度 · 数据筛选），内联无卡片 -->
-        <div class="control-panel__filters">
-          <DataFilterSection
-            variant="bar"
-            v-model:ignore-no-limit="ignoreNoLimit"
-            v-model:ignore-no-test-value="ignoreNoTestValue"
-            v-model:data-only-bin1="dataOnlyBin1"
-            v-model:only-fail-test-item="onlyFailTestItem"
-            v-model:only-low-cpk="onlyLowCpk"
-            v-model:outlier-handling="outlierHandling"
-            v-model:iqr-multiplier="iqrMultiplier"
-          />
-        </div>
+      </div>
+    </template>
+
+    <template #toolbar-2>
+      <!-- 数据口径行（异常值处理 · 敏感度 · 数据筛选）：随内容滚动 -->
+      <div class="control-panel__filters">
+        <DataFilterSection
+          variant="bar"
+          v-model:ignore-no-limit="ignoreNoLimit"
+          v-model:ignore-no-test-value="ignoreNoTestValue"
+          v-model:data-only-bin1="dataOnlyBin1"
+          v-model:only-fail-test-item="onlyFailTestItem"
+          v-model:only-low-cpk="onlyLowCpk"
+          v-model:outlier-handling="outlierHandling"
+          v-model:iqr-multiplier="iqrMultiplier"
+        />
       </div>
     </template>
 
@@ -63,18 +72,8 @@
         title="直方图数据加载失败"
         @retry="loadHistogram"
       />
-      <!-- 参数选择 + 统计摘要 -->
-      <div class="top-bar">
-        <ParamSelector
-          :params="params"
-          v-model:selected-param="localSelectedParam"
-          @prev="prevParam"
-          @next="nextParam"
-        />
-        <div class="top-bar-right">
-          <StatsSummary :stat-cards="statCards" />
-        </div>
-      </div>
+      <!-- 统计摘要（单行紧凑条）：位于图表上方 -->
+      <StatsSummary :stat-cards="statCards" />
 
       <!-- 图表：可停靠拼格区（el-splitter 拖分隔条改高宽 + 标题栏手柄拖拽换布局 + 持久化） -->
       <ChartDock v-if="dockVisible" :active-keys="activeChartKeys" @close="onDockClose">
@@ -506,42 +505,11 @@ function nextParam() {
 </script>
 
 <style scoped>
-.top-bar {
-  display: flex;
-  gap: 12px;
-  align-items: stretch;
-}
-
-.top-bar > *:first-child {
-  flex: 0 0 320px;
-}
-
-.top-bar > *:last-child {
-  flex: 1;
-  min-width: 0;
-}
-
-.top-bar-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.top-bar-right > :first-child {
-  flex: 1;
-  min-width: 0;
-}
-
-/* 顶部控件面板：两行（控件行 + 数据口径行），嵌在 AnalysisTabLayout 的 .toolbar 框内 */
-.control-panel {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
+/* 冻结行（AnalysisTabLayout #toolbar）：文件选择 + 参数选择 + 图表勾选。
+   行本身由 .dp-analysis-toolbar 提供 flex/间距/底色，这里只负责占满与换行。 */
 .control-panel__main {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -557,9 +525,10 @@ function nextParam() {
   gap: 12px;
   margin-left: auto;
 }
+/* 数据口径行（AnalysisTabLayout #toolbar-2，随内容滚动） */
 .control-panel__filters {
-  border-top: 1px dashed var(--border-2, #e4e7ed);
-  padding-top: 8px;
+  flex: 1;
+  min-width: 0;
 }
 
 /* dock 布局接管图表区的高度/宽度/排列；这里仅保留被 slot 注入的两处样式 */
