@@ -91,33 +91,84 @@ function buildOption() {
     if (typeof s === 'number') serialIndex.set(s, i)
   })
 
-  // Apply outlier clipping to y-axis (must precede point mapping: anchored
-  // points are placed on the *visible* axis edges)
+  // —— Y 轴范围：默认按数据自适应（2026-09-13）——
+  // 后端 y_min/y_max = 规格限 ±10% padding；规格限离数据很远时（如某参数 USL/LSL
+  // 远于数据带），整个绘图区被撑成「数据窄带 + 大片空白」。改为由 anchor==0 点的
+  // 实际值算紧凑范围，规格限/σ 线超出视野时在 markLine 层贴边钳制并加 ↑/↓。
+  //
+  // 不变量（勿破坏）：后端 _anchor() 以 [spec_lower, spec_upper]±10% 标记 anchor，
+  // 而 anchor==0 的定义就是落在该范围内 → 前端自适应范围必是后端范围的**子集**。
+  // 因此 anchor=2/3 点仍必落在自适应范围之外、贴边钳制继续正确；anchor=0 点永不
+  // 被裁掉。若把 marks（规格限/σ）的绝对值并入范围，此性质即被破坏。
   const outlierInfo = d.outlier_info
   const handlingMode = props.outlierHandling || 'off'
-  let yAxisMin = d.y_min
-  let yAxisMax = d.y_max
-  if (handlingMode !== 'off' && outlierInfo?.has_outliers) {
-    yAxisMin = outlierInfo.lower_bound
-    yAxisMax = outlierInfo.upper_bound
-    const pad = (yAxisMax - yAxisMin) * 0.1
-    yAxisMin -= pad
-    yAxisMax += pad
+
+  /** 一组原始点（[serial, value, is_fail, anchor]）→ 该组 anchor==0 值的紧凑范围 */
+  function rangeOfPoints(points: number[][], fbLo: number, fbHi: number): [number, number] {
+    let mn = Infinity
+    let mx = -Infinity
+    let hasAbove = false
+    let hasBelow = false
+    for (const p of points) {
+      const a = p[3] ?? 0
+      if (a === 2) hasAbove = true
+      else if (a === 3) hasBelow = true
+      if (a !== 0) continue
+      const v = p[1]
+      if (typeof v !== 'number' || !Number.isFinite(v)) continue
+      if (v < mn) mn = v
+      if (v > mx) mx = v
+    }
+    if (mn === Infinity) return [fbLo, fbHi] // 无有效值 → 回退后端范围
+    let lo: number
+    let hi: number
+    if (mx > mn) {
+      const pad = (mx - mn) * 0.08
+      lo = mn - pad
+      hi = mx + pad
+    } else {
+      const dlt = Math.max(Math.abs(mx) * 0.05, 1e-9)
+      lo = mn - dlt
+      hi = mx + dlt
+    }
+    // 锚到轴边的超界点若与数据带重叠，就丢了「远远超限」的视觉信息 → 有则多留头部
+    const span = hi - lo
+    if (hasAbove) hi += span * 0.15
+    if (hasBelow) lo -= span * 0.15
+    return [lo, hi]
   }
+
+  const siteSeriesRaw: { name: string; data: number[][] }[] = d.series_data || []
+  const siteColors = getSiteColors8(isDark.value)
+  const split = props.splitBySite && siteSeriesRaw.length >= 2
+  const laneCount = split ? siteSeriesRaw.length : 1
+
+  // 离群处理开启且确有异常值：沿用 IQR 栅栏范围（有意的裁剪口径，不改成数据自适应，
+  // 否则「异常值处理」的视觉语义丢失）。否则按数据自适应。
+  const useIqrRange = handlingMode !== 'off' && outlierInfo?.has_outliers
+  let iqrBounds: [number, number] | null = null
+  if (useIqrRange) {
+    const pad = (outlierInfo.upper_bound - outlierInfo.lower_bound) * 0.1
+    iqrBounds = [outlierInfo.lower_bound - pad, outlierInfo.upper_bound + pad]
+  }
+  // 合并：全体 anchor=0 值并集；拆分：每 lane 各自贴合其数据范围
+  const laneBounds: [number, number][] = laneCount === 1
+    ? [iqrBounds ?? rangeOfPoints(siteSeriesRaw.flatMap((sd) => sd.data || []), d.y_min, d.y_max)]
+    : siteSeriesRaw.map((sd) => iqrBounds ?? rangeOfPoints(sd.data || [], d.y_min, d.y_max))
 
   /**
    * 点格式 [serial, value|null, is_fail, anchor]（无 bin 列的文件为 [serial, value]）。
-   * anchor: 0=正常 1=无测量值 2=值>y_max 3=值<y_min。超界点锚定到可见轴边缘——
-   * 显式 yAxis min/max 不会随数据扩展，不锚定的话巨大的 fail 值（如 Kelvin 10000）
-   * 会被整段裁切，图上根本看不到 fail 点。无测量值（anchor=1）不绘制：画在 X 轴
-   * 底部会被误读成 0 值数据点（其颗数仍计入副标题 Pass/Fail）。
+   * anchor: 0=正常 1=无测量值 2=值>后端 y_max 3=值<后端 y_min。超界点锚定到**可见**
+   * 轴边缘——自适应 yAxis min/max 不随数据扩展，不锚定的话巨大的 fail 值（如 Kelvin
+   * 10000）会被整段裁切，图上根本看不到 fail 点。无测量值（anchor=1）不绘制：画在
+   * X 轴底部会被误读成 0 值数据点（其颗数仍计入副标题 Pass/Fail）。
    */
-  function toPoint(p: number[]) {
+  function toPoint(p: number[], lo: number, hi: number) {
     const [s, v, isFail, anchor] = p
     const a = anchor ?? 0
     const fail = (isFail ?? 0) === 1
     if (a === 1) return null
-    const y = a === 2 ? (yAxisMax ?? 0) : (a === 3 ? (yAxisMin ?? 0) : v)
+    const y = a === 2 ? hi : (a === 3 ? lo : v)
     const x = typeof s === 'number' ? (serialIndex.get(s) ?? s) : s
     return {
       value: [x, y, isFail ?? 0, a],
@@ -130,10 +181,12 @@ function buildOption() {
 
   // —— fail/超界点不拆独立强调层：随 Site 系列着色（2026-09-13 按用户反馈回退
   // §1.3 强调层：并集层名易被误读为「红点=超界」）；anchor=1（无值）仍不绘制 ——
-  const siteSeriesRaw: { name: string; data: number[][] }[] = d.series_data || []
-  const siteColors = getSiteColors8(isDark.value)
-  const siteData: any[][] = siteSeriesRaw.map((sd) =>
-    (sd.data || []).map((p: number[]) => toPoint(p)).filter((pt: any) => pt !== null))
+  const siteData: any[][] = siteSeriesRaw.map((sd, idx) => {
+    const bounds = laneBounds[split ? idx : 0]
+    return (sd.data || [])
+      .map((p: number[]) => toPoint(p, bounds[0], bounds[1]))
+      .filter((pt: any) => pt !== null)
+  })
   // 绘制序：最密垫底（spec §1.2）——按点数降序赋 z；数组序保持 site 升序
   // （图例顺序与直方图等其它图表一致的既有约定）。密度口径取实际绘制点数
   // （fail/超界点随 Site 系列着色、参与带层叠），与视觉上的散点带浓淡一致。
@@ -143,9 +196,6 @@ function buildOption() {
     .map((_, i) => i)
     .sort((a, b) => counts[b] - counts[a])
     .forEach((idx, rank) => zOfSite.set(idx, 2 + rank))
-
-  const split = props.splitBySite && siteSeriesRaw.length >= 2
-  const laneCount = split ? siteSeriesRaw.length : 1
 
   const series: any[] = siteSeriesRaw.map((sd, idx) => ({
     name: sd.name, type: 'scatter',
@@ -157,8 +207,57 @@ function buildOption() {
     ...(isLarge.value ? { large: true } : {}),
   }))
 
-  // —— 轴/网格：合并单面板；拆分 N 条同步 lane（spec §2：top 16% 留标题+副标题、
-  // bottom 24% 留 X 标签+图例，其余 N 等分、lane 间距 2%）——
+  let grids: any[]
+  let xAxes: any[]
+  let yAxes: any[]
+  let dataZoom: any[]
+  // —— 轴/网格：合并单面板；拆分 N 条 lane（每 lane 贴合自身数据范围，2026-09-13）——
+  if (split) {
+    // 拆分小多图：把纵向可用区从旧的 60% 提到 74%（lane 更高），bottom 16% 留
+    // 末 lane 的 X 标签+轴名，图例绝对 bottom:5 不受 grid 影响
+    const topStart = 10
+    const bottomReserve = 16
+    const lanePct = (100 - topStart - bottomReserve) / laneCount
+    const laneGap = Math.min(1.5, lanePct * 0.15)
+    grids = siteSeriesRaw.map((_, i) => ({
+      left: 60, right: 16,
+      top: `${topStart + i * lanePct}%`,
+      height: `${Math.max(lanePct - laneGap, 3)}%`,
+    }))
+    xAxes = siteSeriesRaw.map((_, i) => xAxisDef(i, i === laneCount - 1))
+    yAxes = siteSeriesRaw.map((sd, i) => yAxisDef(i, laneBounds[i], sd.name, siteColors[i % 8]))
+    dataZoom = [{ type: 'inside', xAxisIndex: siteSeriesRaw.map((_, i) => i) }]
+  } else {
+    // 合并单面板：显式收紧四边留白（旧实现 left/right 走 ECharts 默认 10%，
+    // 超宽屏下左右各浪费上百像素）；right 留出 markLine 的 end 位置标签
+    grids = [{ left: 60, right: 48, top: 52, bottom: 68 }]
+    xAxes = [xAxisDef(0, true)]
+    yAxes = [yAxisDef(0, laneBounds[0], null)]
+    dataZoom = [{ type: 'inside', xAxisIndex: [0] }]
+  }
+
+  /** markLine 贴边钳制：超出该 lane 可见范围的参考线钉到轴边并加 ↑/↓（副标题
+      已显示数值 LSL/USL，箭头只提示「贴边且真实值更外」）。不改 d.marks 本体。 */
+  function clampMarkLine(ml: any, lo: number, hi: number) {
+    if (!ml?.data) return ml
+    return {
+      ...ml,
+      data: ml.data.map((it: any) => {
+        if (it.yAxis == null) return it
+        let v = it.yAxis
+        let suf = ''
+        if (v > hi) { v = hi; suf = ' ↑' } else if (v < lo) { v = lo; suf = ' ↓' }
+        if (!suf) return it
+        const f = it.label?.formatter
+        return {
+          ...it,
+          yAxis: v,
+          label: it.label ? { ...it.label, formatter: `${typeof f === 'string' ? f : ''}${suf}` } : it.label,
+        }
+      }),
+    }
+  }
+
   function xAxisDef(i: number, showLabel: boolean) {
     return {
       type: 'category', data: continuousSerials, gridIndex: i,
@@ -172,9 +271,9 @@ function buildOption() {
         : { axisLabel: { show: false }, axisTick: { show: false } }),
     }
   }
-  function yAxisDef(i: number, laneName: string | null, laneColor?: string) {
+  function yAxisDef(i: number, bounds: [number, number], laneName: string | null, laneColor?: string) {
     return {
-      type: 'value', gridIndex: i, min: yAxisMin, max: yAxisMax,
+      type: 'value', gridIndex: i, min: bounds[0], max: bounds[1],
       axisLine: { lineStyle: { color: colors.value.axisLineColor } },
       axisLabel: { formatter: formatAxisValue, fontSize: 9, color: tc },
       ...(laneName
@@ -189,27 +288,6 @@ function buildOption() {
     }
   }
 
-  let grids: any[]
-  let xAxes: any[]
-  let yAxes: any[]
-  let dataZoom: any[]
-  if (split) {
-    const lanePct = 60 / laneCount
-    grids = siteSeriesRaw.map((_, i) => ({
-      left: 70, right: 30,
-      top: `${16 + i * lanePct}%`,
-      height: `${Math.max(lanePct - 2, 4)}%`,
-    }))
-    xAxes = siteSeriesRaw.map((_, i) => xAxisDef(i, i === laneCount - 1))
-    yAxes = siteSeriesRaw.map((sd, i) => yAxisDef(i, sd.name, siteColors[i % 8]))
-    dataZoom = [{ type: 'inside', xAxisIndex: siteSeriesRaw.map((_, i) => i) }]
-  } else {
-    grids = [{ top: 60, bottom: 85 }]
-    xAxes = [xAxisDef(0, true)]
-    yAxes = [yAxisDef(0, null)]
-    dataZoom = [{ type: 'inside', xAxisIndex: [0] }]
-  }
-
   // 参考线 z 恒高于 site 层（2..N+1）：N≤16 时 20 够，
   // 更大 site 数随 N 抬升（极端边界防御）
   const markZ = Math.max(20, siteSeriesRaw.length + 4)
@@ -220,8 +298,12 @@ function buildOption() {
       series.push({
         name: mark.name, type: mark.type || 'scatter', data: mark.data || [],
         // markLine 的 z 不继承宿主 series（ECharts MarkerView 取 MarkLineModel 自身 z，
-        // 默认 5）——site z 可达 N+1，必须显式抬到 markZ 保证参考线恒在数据带之上
-        markLine: mark.markLine ? { ...mark.markLine, z: markZ } : mark.markLine, silent: true,
+        // 默认 5）——site z 可达 N+1，必须显式抬到 markZ 保证参考线恒在数据带之上。
+        // 参考线按本 lane 的可见范围贴边钳制（超出则钉到轴边 + ↑/↓）。
+        markLine: mark.markLine
+          ? { ...clampMarkLine(mark.markLine, laneBounds[lane][0], laneBounds[lane][1]), z: markZ }
+          : mark.markLine,
+        silent: true,
         xAxisIndex: lane, yAxisIndex: lane, z: markZ,
         ...(lineColor ? { itemStyle: { color: lineColor } } : {}),
       })
@@ -244,8 +326,8 @@ function buildOption() {
   return {
     // large 模式下上万 symbol 的入场/更新动画是纯开销，直接关闭
     animation: !isLarge.value,
-    // split 模式 grid top 16% 仅≈45px，默认标题块（y≈21-54）会压首 lane：
-    // 仅拆分态把标题块上移收紧（top 4 / itemGap 6 → 块底≈37），合并模式保持默认零改动
+    // split 模式 grid 从 top 10% 起（lane 区 ≈74%），首 lane 顶距标题块仍有富余；
+    // 仅拆分态把标题块上移收紧（top 4 / itemGap 6），合并模式保持默认
     title: { text: `${param} Serial分布`, subtext, left: 'center', textStyle: { fontSize: 15, fontWeight: 'bold', color: tc }, subtextStyle: { fontSize: 12 }, ...(split ? { top: 4, itemGap: 6 } : {}) },
     tooltip: {
       trigger: 'item',

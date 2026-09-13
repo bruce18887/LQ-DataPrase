@@ -80,6 +80,35 @@ function seriesCountByName(opt: any, name: string): number {
   return (opt?.series ?? []).filter((s: any) => s.name === name).length
 }
 
+/**
+ * 复刻组件的每 lane 数据自适应范围规则（SerialChart.rangeOfPoints，2026-09-13）：
+ * anchor==0 值的 min/max ±8% pad（单值退化用 |v|·5%），有锚到轴边的超界点再多留
+ * 15% 头部。测试侧重写一份算法 = 回归钉（旧行为共享完整规格限范围时会不等）。
+ */
+function expectedLaneRange(points: any[]): { min: number; max: number } | null {
+  const vals: number[] = []
+  let above = false
+  let below = false
+  for (const p of points) {
+    const a = p[3] ?? 0
+    if (a === 2) above = true
+    else if (a === 3) below = true
+    if (a !== 0) continue
+    if (typeof p[1] === 'number' && Number.isFinite(p[1])) vals.push(p[1])
+  }
+  if (!vals.length) return null
+  const mn = Math.min(...vals)
+  const mx = Math.max(...vals)
+  let lo: number
+  let hi: number
+  if (mx > mn) { const pad = (mx - mn) * 0.08; lo = mn - pad; hi = mx + pad }
+  else { const dlt = Math.max(Math.abs(mx) * 0.05, 1e-9); lo = mn - dlt; hi = mx + dlt }
+  const span = hi - lo
+  if (above) hi += span * 0.15
+  if (below) lo -= span * 0.15
+  return { min: lo, max: hi }
+}
+
 /** 序列图齿轮设置按钮（点径/透明度/按 Site 拆分都在弹层里，2026-09-13 齿轮化） */
 const serialGear = (page: Page) => page.locator(`${SINGLE} [data-testid="serial-settings-btn"]`)
 
@@ -198,7 +227,7 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
     await expect.poll(siteOpacity).toBe(tier.opacity)
   })
 
-  test('按 Site 拆分：N lane 共享刻度 + 联动缩放 + 图例去 Site', async ({ page }) => {
+  test('按 Site 拆分：每 lane 贴合自身数据范围 + 联动缩放 + 图例去 Site', async ({ page }) => {
     const { canvas, resp } = await enterSerial(page, RECOMMENDED.analysis)
     const body = await resp.json()
     const n = (body.series_data || []).length
@@ -208,9 +237,13 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
     const opt = await readOption(canvas)
     expect(opt.xAxis.length).toBe(n)
     expect(opt.yAxis.length).toBe(n)
-    // 共享刻度（跨 Site 可比）
-    expect(new Set(opt.yAxis.map((y: any) => y.min)).size).toBe(1)
-    expect(new Set(opt.yAxis.map((y: any) => y.max)).size).toBe(1)
+    // 每 lane 各自贴合其数据范围（2026-09-13：不再共享完整规格限范围，减少 lane 内空白）
+    opt.yAxis.forEach((y: any, i: number) => {
+      const exp = expectedLaneRange(body.series_data[i].data || [])
+      if (!exp) return
+      expect(y.min, `lane ${i} y 下限贴该 lane 数据`).toBeCloseTo(exp.min, 6)
+      expect(y.max, `lane ${i} y 上限贴该 lane 数据`).toBeCloseTo(exp.max, 6)
+    })
     // 仅末 lane 显示 X 标签
     opt.xAxis.forEach((x: any, i: number) => {
       expect(x.axisLabel.show, `lane ${i} X 标签`).toBe(i === n - 1)
