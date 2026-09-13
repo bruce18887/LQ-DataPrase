@@ -2,16 +2,6 @@
   <el-card shadow="hover" :body-style="{ padding: '12px' }">
     <div class="config-header">
       <span class="config-title">⚙️ 图表显示</span>
-      <el-button
-        v-if="variant === 'full'"
-        link
-        size="small"
-        class="more-btn"
-        @click="showMore = !showMore"
-      >
-        <el-icon><Setting /></el-icon>
-        更多
-      </el-button>
     </div>
 
     <!-- 图表元素开关 -->
@@ -70,49 +60,36 @@
       </div>
     </div>
 
-    <!-- 柱状图宽度：完整版藏在「更多」里，多文件版直接展开 -->
-    <el-collapse-transition>
-      <div v-show="variant === 'multi-file' || showMore">
-        <div class="config-section">
-          <div class="section-label flex-between">
-            <span>柱宽</span>
-            <span class="value-hint">{{ displayBarWidth }}%</span>
-          </div>
-          <!-- 必须监听 update:modelValue：EP slider 的值更新走 update:modelValue，
-               change 事件发出的是 props.modelValue（单向绑定下永远是旧值）——
-               此前只绑 @change 导致柱宽设置永远无效 -->
-          <!-- max 随系列数联动（barWidthMax）：多系列并排柱组必须 ≤ bin 宽，
-               否则贴限柱体越过 USL 线（回归 limit-line-cross）；min/step 从 10/5
-               收窄到 1/1 以适配 8-site 时上限 ≈9% -->
-          <el-slider :model-value="displayBarWidth" :min="1" :max="barWidthMax" :step="1" size="small" @update:model-value="onBarWidthChange" />
-        </div>
-        <!-- 柱体重合：重合越高柱组越窄、柱宽上限越高（仅单参数完整版） -->
-        <div v-if="variant === 'full'" class="config-section">
-          <div class="section-label flex-between">
-            <span>柱体重合</span>
-            <span class="value-hint">{{ barOverlapPercent }}%</span>
-          </div>
-          <el-slider :model-value="barOverlapPercent" :min="0" :max="100" :step="5" size="small" @update:model-value="onBarOverlapChange" />
-        </div>
+    <!-- 柱状图宽度：仅多文件分析版（单文件版的柱宽/柱体重合已移入直布图标题栏
+         齿轮面板，2026-09-13 工具栏齿轮化） -->
+    <div v-if="variant === 'multi-file'" class="config-section">
+      <div class="section-label flex-between">
+        <span>柱宽</span>
+        <span class="value-hint">{{ displayBarWidth }}%</span>
       </div>
-    </el-collapse-transition>
+      <!-- 必须监听 update:modelValue：EP slider 的值更新走 update:modelValue，
+           change 事件发出的是 props.modelValue（单向绑定下永远是旧值）——
+           此前只绑 @change 导致柱宽设置永远无效 -->
+      <!-- max 随系列数联动（barWidthMax）：多系列并排柱组必须 ≤ bin 宽，
+           否则贴限柱体越过 USL 线（回归 limit-line-cross）；min/step 从 10/5
+           收窄到 1/1 以适配 8-site 时上限 ≈9% -->
+      <el-slider :model-value="displayBarWidth" :min="1" :max="barWidthMax" :step="1" size="small" @update:model-value="onBarWidthChange" />
+    </div>
 
     <!-- 数据筛选与异常值处理已移到 DataFilterSection（每 tab 一份，2026-09-05） -->
   </el-card>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { Setting } from '@element-plus/icons-vue'
+import { computed } from 'vue'
 
 interface Props {
   chartConfig: string[]
   rangeType: string
-  barWidthPercent: number
+  /** 柱宽（%）：仅 multi-file 变体消费；full 变体不需要（已移入直方图齿轮面板） */
+  barWidthPercent?: number
   /** 柱宽 slider 上限（%）：随系列数联动（多系列并排柱组 ≤ bin 宽） */
   barWidthMax?: number
-  /** 柱体重合度 0-100（barGap 负值）：重合越高柱组越窄、柱宽上限越高 */
-  barOverlapPercent?: number
   customLow?: number | null
   customHigh?: number | null
   /** 'full' = 单参数分析完整配置；'multi-file' = 多文件分析阉割版（仅 Limit + 柱宽） */
@@ -121,20 +98,17 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   variant: 'full',
+  barWidthPercent: 20,
   barWidthMax: 100,
-  barOverlapPercent: 5,
 })
 
 const emit = defineEmits<{
   (e: 'update:chartConfig', val: string[]): void
   (e: 'update:rangeType', val: string): void
   (e: 'update:barWidthPercent', val: number): void
-  (e: 'update:barOverlapPercent', val: number): void
   (e: 'update:customLow', val: number | null): void
   (e: 'update:customHigh', val: number | null): void
 }>()
-
-const showMore = ref(false)
 
 /** slider 显示值：柱宽被系列数上限 clamp（多系列并排柱组 ≤ bin 宽） */
 const displayBarWidth = computed(() => Math.min(props.barWidthPercent, props.barWidthMax))
@@ -149,10 +123,6 @@ function onRangeTypeChange(val: string) {
 
 function onBarWidthChange(val: number) {
   emit('update:barWidthPercent', val)
-}
-
-function onBarOverlapChange(val: number) {
-  emit('update:barOverlapPercent', val)
 }
 
 function onCustomLowChange(val: number | null) {
@@ -176,15 +146,6 @@ function onCustomHighChange(val: number | null) {
   font-weight: 600;
   font-size: 13px;
   color: var(--text);
-}
-
-.more-btn {
-  font-size: 11px;
-  color: var(--text-2);
-}
-
-.more-btn:hover {
-  color: var(--brand);
 }
 
 .config-section {

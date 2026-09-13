@@ -194,9 +194,11 @@ test.describe('@p1 多系列直方图边缘柱体不被裁剪', { tag: ['@p1', '
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
     await waitLoadingGone(page.locator(SINGLE))
 
-    // 展开「更多」显示柱宽/柱体重合 slider（aria 挂在 button-wrapper，EP role="slider"）
-    await page.locator('.more-btn').click()
-    const sliders = page.locator('.single-param-tab .el-slider__button-wrapper')
+    // 打开直方图标题栏齿轮面板（2026-09-13 柱宽/重合从「更多」折叠区迁入齿轮弹层）；
+    // aria 挂在 button-wrapper，EP role="slider"；popper teleport 到 body，按实例类定位
+    await page.locator(`${SINGLE} [data-testid="hist-settings-btn"]`).click()
+    const pop = page.locator('.dp-hist-settings-popper')
+    const sliders = pop.locator('.el-slider__button-wrapper')
     await expect(sliders.first()).toBeVisible({ timeout: 10_000 })
     await expect(sliders, '应有两个 slider：柱宽 + 柱体重合').toHaveCount(2)
     const widthSlider = sliders.nth(0)

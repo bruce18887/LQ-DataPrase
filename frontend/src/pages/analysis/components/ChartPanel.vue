@@ -20,8 +20,9 @@
         @keydown="onGripKey"
       >⠿</span>
       <span class="chart-h__title">{{ title }}</span>
-      <span class="chart-h__controls"><slot name="controls" /></span>
       <span class="chart-h__grow" />
+      <!-- controls 在 grow 之后 = 标题栏右上角（齿轮设置 / 箱线图控件） -->
+      <span class="chart-h__controls"><slot name="controls" /></span>
       <button
         v-if="maximizable"
         class="chart-h__btn"
