@@ -181,13 +181,18 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
       readOption(canvas).then((o: any) => o?.series?.find((s: any) => /^Site /.test(s.name))?.itemStyle?.opacity)
     await expect.poll(siteSymbol).toBeGreaterThanOrEqual(3)
 
-    // 点径 自动值 → 键盘 +3 步；断言覆盖生效（max 8 封顶）
+    // 点径 自动值 → 键盘 +3 步；断言覆盖生效（max 8 封顶）。
+    // 逐步按并逐步轮询：slider 是单向绑定（:model-value + 事件），高负载下连按
+    // 方向键会快于 prop 回流导致 EP 内部值被旧 prop 拽回（并发全量跑必现 3 步只
+    // 生效 1 步），逐按轮询既稳定又不掩盖真实行为。
     const before = await siteSymbol()
     const pop = await openSerialSettings(page)
     const sizeBtn = pop.locator('.el-slider__button-wrapper').nth(0)
     await sizeBtn.focus()
-    for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight')
-    await expect.poll(siteSymbol).toBe(Math.min(before + 3, 8))
+    for (let i = 1; i <= 3; i++) {
+      await page.keyboard.press('ArrowRight')
+      await expect.poll(siteSymbol).toBe(Math.min(before + i, 8))
+    }
 
     // 透明度 -1 步（step 5 → 百分比 -5 → 小数 -0.05），精确断言
     // 用整数百分比空间算术避免浮点雷（0.85-0.05=0.7999999999999999≠0.8）——与组件 effOpacityPct 同源

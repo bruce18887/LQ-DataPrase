@@ -1,4 +1,67 @@
-# 任务：分析页 dock 底部高度滑条进布局记忆（2026-09-09）✅
+# 任务：LightVBA 迁 Excel Office Web 加载项（路线 B，纯前端 TS）（2026-09-13）
+
+用户需求：用 Yeoman `generator-office` 把 `DataPrase-LightVBA/` 的 VBA 宏迁成 Excel 任务窗格
+加载项，纯前端 TypeScript、不依赖后端（路线 B），跨平台，并**完整替代**现有 VBA。
+
+已确认的三项决策：工程落 `DataPrase-LightVBA/addin/`；v1 范围=完整替代；数据来源=只读当前工作表。
+
+由「只读当前工作表」推出的关键判断：该移植 **VBA 的单元格解析模型**（`Tester(0..4)` 偏移表本就是
+为「CSV 已在 Excel 打开」写的），而非 `apps/datafiles/parsers/*.py` 的 CSV 文本模型；统计口径移植
+Python 的 `apps/analysis/services/statistics/`；回写用原生公式（保留改 mode 即重分箱的实时行为）；
+失败标记用条件格式替代 VBA 逐格涂色。
+
+计划全文：`~/.claude/plans/logical-dancing-sedgewick.md`。
+
+## 实施清单
+
+### Phase 0 — 前置闸门与脚手架
+
+- [x] 提取 Exp 表模板常量（`tasks/_extract_exp_constants.py`，pyxlsb 只读；dump 见 `tasks/_exp_dump.txt`）
+- [ ] **闸门：取一次真实运行后的 Exp 表** —— 提取结果证明 VBA 的 Exp 写列整体 +1 偏移
+      （阶梯写进 D=All Site、计数写进 E=Site1/N、单位写进 G36、统计写进 C53），
+      且 `B3:B27` 实为比较运算符而非乘数（`<=`/`<`/`>`），疑似 `B3` 应为 `A3`。
+      源码不足以定稿 Phase 4，需用户跑一次宏后保存工作簿作为基准
+- [ ] `yo office` → Excel Task Pane → TS，落位 `DataPrase-LightVBA/addin/`（`yo` 尚未安装）
+- [ ] 重接 Vue3 + Vite（`@ui` 别名 → `../../frontend/src`）；manifest + Ribbon + HTTPS 证书 + side-load
+- [ ] 建 vitest + playwright（沿用仓库 `@p0/@p1/@p2` 标签约定）
+
+### Phase 1 — 解析与统计内核（纯 TS）
+
+- [ ] `core/parse/worksheet.ts` 机型识别（5 组标识）+ TestNameRow 定位 + 测试项列区间
+- [ ] `core/parse/normalize.ts`：`fixNegativeDecimal` / 列名去重 / 尾元数据行剔除
+- [ ] `core/stats/limits.ts`：`resolveSpecLimit(s)` / `detectFailData` / `getSiteColumn`
+- [ ] `core/stats/computations.ts`：`meanDdof0` / `stdDdof0`（ddof=0）/ `computeRangeStatistics` / `computeCpk`
+- [ ] `core/json.ts`：NaN/±Inf → null（类型一律 `number | null`）
+- [ ] 一致性 fixture：`tasks/gen_addin_conformance.py` 冻结 Python 输出，vitest 断言 TS 一致
+
+### Phase 2 — 任务窗格只读分析
+
+- [ ] `office/bridge.ts` 读 `range.values` → `string[][]`；无 `Office` 走 stub 供 e2e
+- [ ] 机型识别 + 测试项下拉（替代 ComboBox）；5 种 limit 模式配置面板
+- [ ] 分布图复用 `frontend/src/.../HistogramChart.vue` + `useChart` + `echarts-theme` + `chart-bar`
+- [ ] 统计卡片 Range/Mean/STD/CPK；双主题（dark + light）
+
+### Phase 3 — 回写：失败标记与统计
+
+- [ ] 条件格式 3 条规则替代逐格涂色（Bin≠1 整行红 / 超限红加粗 / 单边等于 limit 琥珀）
+- [ ] 统计公式行回写（SUBTOTAL + CPK 公式）；冻结窗格 / 自动筛选 / 隐藏列三开关
+
+### Phase 4 — Exp 等价工作表
+
+- [ ] 建 Exp 表：bin 阶梯 + 分 Site COUNTIFS + 5 种 limit 模式表 + 统计
+- [ ] 写原生 COUNTIFS/SUBTOTAL 公式，保留实时重分箱
+- [ ] 修正 VBA 的两处 bug：`$D$3`/`$D$4` 绝对引用（致 23 格同值）、+1 列偏移与 `B3`→`A3`
+
+### Phase 5 — 分发与验证
+
+- [ ] Ribbon 按钮与快捷键（替代 Ctrl+Shift+Q）
+- [ ] 全量一致性回归 + e2e（浏览器内 stub Office）+ 跑完释放端口
+- [ ] 跨平台检查；`docs/specs/` 设计稿
+
+## Review
+
+（进行中）
+
 
 用户报告：「数据分析页布局记忆不记最底下的高度滑条，一刷新高度就还原」。
 根因：底部横条改的整体高度是 ChartDock.vue 组件局部 `bodyH` ref，布局记忆
@@ -1542,3 +1605,61 @@ ad62f81 → b47f509 → 9e313c8 → 837b3dc → 6f8a608 → 4f1d8af → 13ab77c 
   `paramiko`）；`analysis_views.py` 681 行、`gage_legacy_builder.py` 904 行仍超 600（Plan B D4）。
 
 → P1/P2 见 `docs/superpowers/plans/2026-09-12-backend-dedup-p1-p2-refactor.md`（未开始，需单独授权）
+
+---
+
+# 任务：分析页图表工具栏齿轮化 + 序列分布空间利用率（2026-09-13）
+
+> 计划：`~/.claude/plans/spicy-doodling-shamir.md`（用户已确认 4 项 + 3 个设计决策）
+> 用户需求：①直方图柱宽/重叠度→右上角齿轮；②序列 拆分/点径/透明度→右上角齿轮；
+> ③直方图加勾选（默认勾选、可关闭）；④序列空间利用率（合并 Y 轴数据自适应、收紧边距、
+> 拆分 lane 增高且每 lane 贴合自身范围）+ 分析其它图表同类问题。
+> 决策：齿轮只放柱宽+重叠度；序列列下拉保持内联；序列优化三项全做。
+
+## 实施清单（4 批，每批独立验证 + commit）
+
+- [x] 批次1 齿轮基建 + 直方图设置搬迁（ChartSettingsPopover / HistogramSettingsForm /
+      ChartPanel controls 槽右移 / ChartConfigPanel 精简 / #controls-hist）
+- [x] 批次2 序列设置上提（useSerialChartSettings / SerialSettingsForm / SerialChart props 化 /
+      #controls-serial；序列列下拉保持内联）
+- [x] 批次3 直方图勾选 + 账号记忆（showHist / ChartDock closable+空态 /
+      useChartMemory.ChartToggles.hist 含容错与反推 / useChartDock 行占比）
+- [x] 批次4 序列 Y 轴数据自适应 + grid/lane 布局（rangeOfPoints / laneBounds / markLine 贴边钳制）
+- [x] 验证：npm run build + 定向 e2e + 双主题 + 端口释放；manage.py test apps.analysis
+- [x] todo Review + lessons 回写
+
+## 其它图表分析结论（第 4 点交付物）
+
+- 直方图/MultiFile 柱图/QQ/箱线/晶圆图/相关性矩阵：轴范围自适应或类目铺满，风险低。
+- **相关性散点 data 模式**（`scatter-option.ts:59 computeRange`）：轴跨度=2×数据跨度、
+  利用率≈25%，与序列同类；列为可选批次 5，待用户确认后单独做。
+
+## Review（2026-09-13）
+
+- **提交链**：`a8acd5b` 直方图齿轮 → `fda5f88` 序列齿轮 → `45a9009` 直方图勾选+记忆 →
+  `47cb7c3` 序列 Y 轴自适应 → `ca405a0` 去头部预留+边距微调 → 本提交（e2e 稳健性 + docs）。
+- **验证账目**：`npm run build` 全程绿；后端 `manage.py test apps.analysis` **193 项 OK**
+  （零后端改动）；e2e 分析页全量 P1 **122 passed / 4 flaky / 0 failed**（4.2m，flake 为
+  dock-resize×2 / legend-color / tiny-fail-bar，隔离复跑均绿——负载型）；settings
+  chart-memory + dock-resize **11 passed / 1 flaky**；跑后 8000/3000 零监听。
+- **新增/维护 e2e**：新增 `serial-adaptive-range.spec.ts`（数据自适应范围 + `page.route`
+  注入远离数据的规格限钉贴边钳制）；`chart-memory.spec.ts` 新增直方图勾选用例；
+  `serial-overlap` / `chart-filter-switches` / `histogram-multiseries-clip` 迁移到齿轮
+  popper（实例级 `dp-hist/serial-settings-popper`）。
+- **设计要点**：① 齿轮抽 `ChartSettingsPopover`（实例级 popper-class）+ 两个 Form + 一个
+  composable，`SingleParamTab`/`SerialChart` 均 <600 行；② `ChartPanel` 的 controls 槽移到
+  `grow` 之后 = 真正右上角（全仓无该位置断言）；③ 序列 3 项设置从 SerialChart 上提
+  （齿轮在标题栏、图表体在 body，状态必须父级持有）；④ **Y 轴自适应不破坏 anchor 语义**：
+  前端范围由 anchor==0 点决定，必为后端 spec±10% 范围的子集 → 超界点仍贴边、正常点不被裁
+  （已写进 SerialChart 注释）；⑤ 离群 IQR 分支保留（有意裁剪口径）。
+- **踩坑**：① 编辑 SerialChart 时用「注释+函数声明」做 old_string 替换，误删了
+  `function xAxisDef` 声明并把声明块落在函数之前 → 编译期连环报错，靠 build 及时发现
+  （教训：替换函数头这类锚点要连前缀声明一并纳入新串）；② 测试 `:model-value` 单向绑定
+  slider：高负载下 3 次连按方向键快于 prop 回流 → EP 内部值被旧 prop 拽回（3 步只生效 1 步），
+  改为逐按轮询（产品行为对真实用户无碍，仅 e2e 时序假设需要修）；③ 种子数据规格限未必远离
+  数据带 → 贴边钳制用例改为 route 注入，避免「测试永远 skip = 零覆盖」。
+- **双主题**：新增 UI（齿轮按钮/两个设置表单/空态）全用语义 token；图表色板仍走
+  `useChartTheme()`；弹层由 EP 主题接管。序列快照已重生成 `.qoder/verify_serial_{merged,split}_{light,night}.png`。
+- **待用户确认**：可选批次 5（相关性散点 data 模式 padding `rng/2 → rng*0.08` + 显式 grid）。
+- **环境**：跑 e2e 前按 lessons 杀掉 8000 端口未钉 `LQDP_SYSTEM_CONFIG_FILE` 的**用户 dev
+  runserver 整棵进程树**（playwright 自起钉配置的后端接管）；用户 dev 服务需其自行重启。
