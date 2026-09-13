@@ -1,27 +1,10 @@
 <template>
   <div class="serial-chart-wrapper">
-    <!-- 工具栏：点径/透明度 slider + 序列列选择器（spec §3；拆分开关见后续任务） -->
-    <div class="serial-header">
-      <el-checkbox v-if="siteCount >= 2" v-model="splitBySite" size="small">按 Site 拆分</el-checkbox>
-      <div class="serial-header__slider">
-        <span class="serial-header__label">点径 {{ effSize }} {{ sizeAutoHint }}</span>
-        <el-slider
-          :model-value="effSize" :min="2" :max="8" :step="1" size="small"
-          class="serial-header__range"
-          @update:model-value="(v: number | [number, number]) => (pointSizeOverride = Array.isArray(v) ? v[0] : v)"
-        />
-      </div>
-      <div class="serial-header__slider">
-        <span class="serial-header__label">透明度 {{ effOpacityPct }}% {{ opacityAutoHint }}</span>
-        <el-slider
-          :model-value="effOpacityPct" :min="10" :max="100" :step="5" size="small"
-          class="serial-header__range"
-          @update:model-value="(v: number | [number, number]) => (opacityOverridePct = Array.isArray(v) ? v[0] : v)"
-        />
-      </div>
+    <!-- 序列列选择器保留内联（点径/透明度/按 Site 拆分已移入标题栏齿轮面板，2026-09-13） -->
+    <div v-if="showSelector" class="serial-header">
       <!-- 多候选序列列（Serial_No 与 Dut_No 并存等）：显示选择器供用户手动切换，
            单选 = 自动检测（优先级 Serial_No > Dut_No > PART_ID） -->
-      <div v-if="showSelector" class="serial-col-selector">
+      <div class="serial-col-selector">
         <span class="serial-col-selector__label">序列列</span>
         <el-select
           :model-value="activeSerialCol"
@@ -50,7 +33,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
 import { formatAxisValue, getSiteColors8, buildChartToolbox } from '../../../utils/chart-bar'
@@ -63,16 +46,19 @@ const props = withDefaults(defineProps<{
   serialCol?: string
   /** 后端返回的候选列（>1 时显示选择器） */
   serialCandidates?: string[]
-}>(), { serialCol: '', serialCandidates: () => [] })
+  /** 按 Site 拆分小多图（状态由父级 useSerialChartSettings 持有） */
+  splitBySite?: boolean
+  /** 生效点径（自动档或手动覆盖后） */
+  symbolSize?: number
+  /** 生效透明度 0-1 */
+  opacity?: number
+}>(), { serialCol: '', serialCandidates: () => [], splitBySite: false, symbolSize: 6, opacity: 0.85 })
 const emit = defineEmits<{ (e: 'update:serialCol', value: string): void }>()
 const { colors, isDark } = useEChartsTheme()
 
 // 选择器显示当前生效的列：显式选择优先，否则回退到后端自动检测结果
 const activeSerialCol = computed(() => props.serialCol || props.data?.serial_col || '')
 const showSelector = computed(() => (props.serialCandidates?.length ?? 0) > 1)
-/** 按 Site 拆分小多图开关（spec §2；会话级偏好，不随数据重载重置） */
-const splitBySite = ref(false)
-const siteCount = computed(() => (props.data?.series_data || []).length)
 
 // 大数据量（≥5000 点）启用 ECharts 官方 large 模式：每个系列只渲染 1 个
 // path 元素（类型化数组 + 单次绘制），SVG/canvas 渲染器下均生效，避免
@@ -82,26 +68,9 @@ const pointCount = computed(() =>
     (sum: number, sd: { data?: unknown[] }) => sum + (sd.data?.length ?? 0), 0))
 const isLarge = computed(() => pointCount.value >= 5000)
 
-// —— 重叠可读性（spec 2026-09-12 §1.1）：按总点数自适应点径/透明度，
-// 大文件散点不再糊成实色带；slider 手动覆盖见下方 override 语义（§3） ——
-function autoPointStyle(count: number): { size: number; opacity: number } {
-  if (count < 5000) return { size: 6, opacity: 0.85 }
-  if (count <= 20000) return { size: 4, opacity: 0.5 }
-  return { size: 3, opacity: 0.35 }
-}
-const autoStyle = computed(() => autoPointStyle(pointCount.value))
-/** 手动覆盖（null = 自动）：每次数据重载清零，避免手动值毁掉小文件（spec §3） */
-const pointSizeOverride = ref<number | null>(null)
-const opacityOverridePct = ref<number | null>(null) // 百分比 10-100
-watch(() => props.data, () => {
-  pointSizeOverride.value = null
-  opacityOverridePct.value = null
-})
-const effSize = computed(() => pointSizeOverride.value ?? autoStyle.value.size)
-const effOpacityPct = computed(() => opacityOverridePct.value ?? Math.round(autoStyle.value.opacity * 100))
-const effOpacity = computed(() => effOpacityPct.value / 100)
-const sizeAutoHint = computed(() => (pointSizeOverride.value == null ? '(自动)' : ''))
-const opacityAutoHint = computed(() => (opacityOverridePct.value == null ? '(自动)' : ''))
+// 点径/透明度/按 Site 拆分的状态与「自动档」逻辑上提到 useSerialChartSettings
+// （齿轮面板在标题栏、由 SingleParamTab 渲染），本组件只消费 props.symbolSize/
+// props.opacity/props.splitBySite。
 
 function buildOption() {
   if (!props.data) return {}
@@ -175,15 +144,15 @@ function buildOption() {
     .sort((a, b) => counts[b] - counts[a])
     .forEach((idx, rank) => zOfSite.set(idx, 2 + rank))
 
-  const split = splitBySite.value && siteSeriesRaw.length >= 2
+  const split = props.splitBySite && siteSeriesRaw.length >= 2
   const laneCount = split ? siteSeriesRaw.length : 1
 
   const series: any[] = siteSeriesRaw.map((sd, idx) => ({
     name: sd.name, type: 'scatter',
     data: siteData[idx],
     ...(split ? { xAxisIndex: idx, yAxisIndex: idx } : {}),
-    symbolSize: effSize.value,
-    itemStyle: { color: siteColors[idx % 8], opacity: effOpacity.value },
+    symbolSize: props.symbolSize,
+    itemStyle: { color: siteColors[idx % 8], opacity: props.opacity },
     ...(split ? {} : { z: zOfSite.get(idx) }),
     ...(isLarge.value ? { large: true } : {}),
   }))
@@ -309,7 +278,7 @@ function buildOption() {
 // canvas 无 DOM 节点，官方推荐大数据散点必用 canvas）；小数据量跟随用户全局设置
 const { chartRef } = useChart(
   buildOption,
-  [() => props.data, () => props.outlierHandling, () => effSize.value, () => effOpacityPct.value, () => splitBySite.value],
+  [() => props.data, () => props.outlierHandling, () => props.symbolSize, () => props.opacity, () => props.splitBySite],
   'chartRef',
   () => (isLarge.value ? 'canvas' : getChartRenderer()),
 )
@@ -346,18 +315,5 @@ void chartRef // bound to <div ref="chartRef"> in template
   gap: 12px;
   flex-wrap: wrap;
   margin-bottom: 8px;
-}
-.serial-header__slider {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.serial-header__label {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  white-space: nowrap;
-}
-.serial-header__range {
-  width: 110px;
 }
 </style>

@@ -105,6 +105,9 @@
             :outlier-handling="outlierHandling"
             :serial-col="serialCol"
             :serial-candidates="serialDistData.serial_candidates || []"
+            :split-by-site="splitBySite"
+            :symbol-size="effSize"
+            :opacity="effOpacity"
             @update:serial-col="(v: string) => { serialCol = v }"
           />
           <el-empty v-else description="当前参数无序列分布数据，请选择其他参数" />
@@ -138,6 +141,27 @@
               :group-kind="groupBy === 'bin' ? 'bin' : 'site'"
             />
           </div>
+        </template>
+
+        <!-- 序列分布专属控件（齿轮）：按 Site 拆分 / 点径 / 透明度 -->
+        <template #controls-serial>
+          <ChartSettingsPopover
+            popper-class="dp-serial-settings-popper"
+            testid="serial-settings-btn"
+            title="序列分布设置"
+          >
+            <SerialSettingsForm
+              :can-split="canSplit"
+              :split-by-site="splitBySite"
+              :eff-size="effSize"
+              :size-auto-hint="sizeAutoHint"
+              :eff-opacity-pct="effOpacityPct"
+              :opacity-auto-hint="opacityAutoHint"
+              @update:split-by-site="(v: boolean) => { splitBySite = v }"
+              @update:point-size="(v: number) => { pointSizeOverride = v }"
+              @update:opacity-pct="(v: number) => { opacityOverridePct = v }"
+            />
+          </ChartSettingsPopover>
         </template>
 
         <!-- 直方图专属控件（齿轮）：柱宽/柱体重合，图标题栏右上角同屏 -->
@@ -181,6 +205,7 @@ import { getMaxBarWidthPercent } from '../../../utils/chart-bar'
 import ChartConfigPanel from './ChartConfigPanel.vue'
 import ChartSettingsPopover from './ChartSettingsPopover.vue'
 import HistogramSettingsForm from './HistogramSettingsForm.vue'
+import SerialSettingsForm from './SerialSettingsForm.vue'
 import DataFilterSection from './DataFilterSection.vue'
 import AnalysisFilePicker from './AnalysisFilePicker.vue'
 import RangeComparisonTable from './RangeComparisonTable.vue'
@@ -202,6 +227,7 @@ import { useSiteStats } from '../composables/useSiteStats'
 import { useBoxPlot } from '../composables/useBoxPlot'
 import { useQQPlot } from '../composables/useQQPlot'
 import { useTabFileParams } from '../composables/useTabFileParams'
+import { useSerialChartSettings } from '../composables/useSerialChartSettings'
 import type { ChartKey } from '../composables/useChartDock'
 import { loadChartMemory, saveChartState } from '../../../composables/useChartMemory'
 
@@ -308,6 +334,19 @@ const {
   customLow,
   customHigh,
 )
+
+// 序列图设置（点径/透明度/按 Site 拆分）：状态由本组件持有，齿轮面板与图表共用同一份
+const {
+  splitBySite,
+  pointSizeOverride,
+  opacityOverridePct,
+  effSize,
+  effOpacity,
+  effOpacityPct,
+  sizeAutoHint,
+  opacityAutoHint,
+  canSplit,
+} = useSerialChartSettings(serialDistData)
 
 // Composable: Site Stats
 const {
