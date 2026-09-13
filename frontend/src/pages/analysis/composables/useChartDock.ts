@@ -63,7 +63,11 @@ export function defaultLayout(active: ChartKey[]): DockLayout {
   if (rows.length === 0) rows.push([])
   return {
     rows,
-    rowPcts: rows.length === 1 ? [100] : defaultRowPcts(rows.length),
+    // 有 hist 时首行更高（HIST_FIRST_PCT）；无 hist（用户取消勾选）则各行均分，
+    // 否则无 hist 时首行仍白占 58%
+    rowPcts: rows.length === 1
+      ? [100]
+      : (active.includes('hist') ? defaultRowPcts(rows.length) : equalPct(rows.length)),
     colPcts: rows.map((r) => equalPct(r.length)),
     bodyH: null,
   }

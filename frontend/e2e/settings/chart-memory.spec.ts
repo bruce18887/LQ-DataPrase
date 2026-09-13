@@ -103,6 +103,10 @@ function serialToggle(page: Page) {
   return page.locator(`${SINGLE} .chart-toggles .el-checkbox`).filter({ hasText: '显示序列分布' })
 }
 
+function histToggle(page: Page) {
+  return page.locator(`${SINGLE} .chart-toggles .el-checkbox`).filter({ hasText: '显示直方图' })
+}
+
 async function histRowHeight(page: Page): Promise<number> {
   return page.evaluate(() => document.querySelector('.chart-dock__row')!.getBoundingClientRect().height)
 }
@@ -203,6 +207,43 @@ test.describe('@p1 图表布局账号记忆', { tag: ['@p1', '@settings'] }, () 
         .toBe(true)
       const state = await getSettingsState(page)
       expect(state.layout?.rows?.flat()).toContain('serial')
+    } finally {
+      await putSettings(page, { analysis_chart_memory: false, analysis_chart_state: {} })
+      if (seedId != null) await deleteSeedFile(page, seedId)
+    }
+  })
+
+  test('直方图勾选：默认勾选、取消即关面板、× 关闭与勾选同源、可持久化', async ({ page }) => {
+    test.setTimeout(120_000)
+    const seedName = `${SEED_BASE}_hist.csv`
+    let seedId: number | null = null
+    try {
+      await putSettings(page, { analysis_chart_memory: true, analysis_chart_state: {} })
+      seedId = await uploadSeedFile(page, seedName)
+      await openAnalysis(page, seedName)
+
+      const histPanel = page.locator('.chart-panel[data-chart-key="hist"]')
+      // 默认勾选：直方图面板在、勾选框 checked
+      await expect(histToggle(page)).toHaveClass(/is-checked/, { timeout: 20_000 })
+      await expect(histPanel).toBeVisible()
+
+      // 取消勾选 → 面板消失、全空占位出现
+      await histToggle(page).click()
+      await expect(histPanel).toBeHidden()
+      await expect(page.locator(`${SINGLE} .chart-empty`)).toBeVisible()
+      // 关掉直方图上账号（与其它图同链路）
+      await expect
+        .poll(async () => (await getSettingsState(page))?.toggles?.hist, { timeout: 15_000 })
+        .toBe(false)
+
+      // 重新勾选 → 面板回来
+      await histToggle(page).click()
+      await expect(histPanel).toBeVisible({ timeout: 20_000 })
+
+      // 面板标题栏「×」→ 勾选同步取消（两者同源）
+      await histPanel.locator('.chart-h__btn[aria-label="关闭图表"]').click()
+      await expect(histToggle(page)).not.toHaveClass(/is-checked/)
+      await expect(histPanel).toBeHidden()
     } finally {
       await putSettings(page, { analysis_chart_memory: false, analysis_chart_state: {} })
       if (seedId != null) await deleteSeedFile(page, seedId)
