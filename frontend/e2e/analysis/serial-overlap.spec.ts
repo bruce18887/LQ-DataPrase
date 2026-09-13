@@ -82,31 +82,21 @@ function seriesCountByName(opt: any, name: string): number {
 
 /**
  * 复刻组件的每 lane 数据自适应范围规则（SerialChart.rangeOfPoints，2026-09-13）：
- * anchor==0 值的 min/max ±8% pad（单值退化用 |v|·5%），有锚到轴边的超界点再多留
- * 15% 头部。测试侧重写一份算法 = 回归钉（旧行为共享完整规格限范围时会不等）。
+ * anchor==0 值的 min/max ±8% pad（单值退化用 |v|·5%）。测试侧重写一份算法 =
+ * 回归钉（旧行为共享完整规格限范围时会不等）。
  */
 function expectedLaneRange(points: any[]): { min: number; max: number } | null {
   const vals: number[] = []
-  let above = false
-  let below = false
   for (const p of points) {
-    const a = p[3] ?? 0
-    if (a === 2) above = true
-    else if (a === 3) below = true
-    if (a !== 0) continue
+    if ((p[3] ?? 0) !== 0) continue
     if (typeof p[1] === 'number' && Number.isFinite(p[1])) vals.push(p[1])
   }
   if (!vals.length) return null
   const mn = Math.min(...vals)
   const mx = Math.max(...vals)
-  let lo: number
-  let hi: number
-  if (mx > mn) { const pad = (mx - mn) * 0.08; lo = mn - pad; hi = mx + pad }
-  else { const dlt = Math.max(Math.abs(mx) * 0.05, 1e-9); lo = mn - dlt; hi = mx + dlt }
-  const span = hi - lo
-  if (above) hi += span * 0.15
-  if (below) lo -= span * 0.15
-  return { min: lo, max: hi }
+  if (mx > mn) { const pad = (mx - mn) * 0.08; return { min: mn - pad, max: mx + pad } }
+  const dlt = Math.max(Math.abs(mx) * 0.05, 1e-9)
+  return { min: mn - dlt, max: mx + dlt }
 }
 
 /** 序列图齿轮设置按钮（点径/透明度/按 Site 拆分都在弹层里，2026-09-13 齿轮化） */

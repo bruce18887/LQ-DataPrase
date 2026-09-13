@@ -107,35 +107,20 @@ function buildOption() {
   function rangeOfPoints(points: number[][], fbLo: number, fbHi: number): [number, number] {
     let mn = Infinity
     let mx = -Infinity
-    let hasAbove = false
-    let hasBelow = false
     for (const p of points) {
-      const a = p[3] ?? 0
-      if (a === 2) hasAbove = true
-      else if (a === 3) hasBelow = true
-      if (a !== 0) continue
+      if ((p[3] ?? 0) !== 0) continue // 超界点锚到轴边，不参与范围计算（否则极值炸开）
       const v = p[1]
       if (typeof v !== 'number' || !Number.isFinite(v)) continue
       if (v < mn) mn = v
       if (v > mx) mx = v
     }
     if (mn === Infinity) return [fbLo, fbHi] // 无有效值 → 回退后端范围
-    let lo: number
-    let hi: number
     if (mx > mn) {
       const pad = (mx - mn) * 0.08
-      lo = mn - pad
-      hi = mx + pad
-    } else {
-      const dlt = Math.max(Math.abs(mx) * 0.05, 1e-9)
-      lo = mn - dlt
-      hi = mx + dlt
+      return [mn - pad, mx + pad]
     }
-    // 锚到轴边的超界点若与数据带重叠，就丢了「远远超限」的视觉信息 → 有则多留头部
-    const span = hi - lo
-    if (hasAbove) hi += span * 0.15
-    if (hasBelow) lo -= span * 0.15
-    return [lo, hi]
+    const dlt = Math.max(Math.abs(mx) * 0.05, 1e-9) // 单值/全等退化
+    return [mn - dlt, mx + dlt]
   }
 
   const siteSeriesRaw: { name: string; data: number[][] }[] = d.series_data || []
@@ -213,10 +198,10 @@ function buildOption() {
   let dataZoom: any[]
   // —— 轴/网格：合并单面板；拆分 N 条 lane（每 lane 贴合自身数据范围，2026-09-13）——
   if (split) {
-    // 拆分小多图：把纵向可用区从旧的 60% 提到 74%（lane 更高），bottom 16% 留
-    // 末 lane 的 X 标签+轴名，图例绝对 bottom:5 不受 grid 影响
+    // 拆分小多图：纵向可用区从旧的 60% 提到 68%（lane 更高）；bottom 22% 需容纳
+    // 末 lane 的 45° X 标签 + 轴名(nameGap 30) + 图例(绝对 bottom:5，否则会压轴名)
     const topStart = 10
-    const bottomReserve = 16
+    const bottomReserve = 22
     const lanePct = (100 - topStart - bottomReserve) / laneCount
     const laneGap = Math.min(1.5, lanePct * 0.15)
     grids = siteSeriesRaw.map((_, i) => ({
@@ -230,7 +215,7 @@ function buildOption() {
   } else {
     // 合并单面板：显式收紧四边留白（旧实现 left/right 走 ECharts 默认 10%，
     // 超宽屏下左右各浪费上百像素）；right 留出 markLine 的 end 位置标签
-    grids = [{ left: 60, right: 48, top: 52, bottom: 68 }]
+    grids = [{ left: 60, right: 48, top: 58, bottom: 68 }]
     xAxes = [xAxisDef(0, true)]
     yAxes = [yAxisDef(0, laneBounds[0], null)]
     dataZoom = [{ type: 'inside', xAxisIndex: [0] }]
