@@ -449,3 +449,12 @@
 - 主题治理：页面级全局 night 覆盖是根因 → 组件只认 token（scoped `var(--xxx)`）→ 删除全局块；图表色板统一 `useChartTheme()` semantic（pass/fail/warn/limit/sigma/kde/cpk/failBar）；双主题选择器统一 `:root[data-theme="night"]`；light 下 EP 主色是出厂 #409eff 而非品牌 #2563eb → 补对称 light 块（详见 R7）。
 - **`<script setup>` 里 export interface 在本项目 Vue 3.5 是允许的**，不必为此改写。
 - el-tabs 隐藏 pane 也在 DOM：两个 tab 的 `.context-bar` 同时存在 → 用 `.context-bar:visible` 或 `.first()`；el-drawer 关闭按钮是 `.el-drawer__close-btn`（无文字），断言关闭别按 hasText('关闭')。
+
+## 2026-09-13 序列分布 Fail/超界 强调层回退（产品反馈）
+
+- **并集语义的强调层名会被用户误读**：「Fail/超界」层入层条件是「die fail（值可能完全
+  正常、跨测试项 fail）」∪「值超显示范围」，但用户把带内红点全部读成「超界」并质疑
+  数据（「值在范围内为什么也是越界」）。教训：强调层入层条件是并集时，层名/图例必须
+  让主语义（本例为 Fail die）自明，或拆成两层分别表达；渲染正确≠可读正确。回退后
+  fail/超界点随 Site 系列着色，其余可读性改动（自适应点径/透明度、最密垫底 z 序、
+  拆分小多图、slider）保留；回退钉见 serial-overlap.spec.ts「自动档」用例。

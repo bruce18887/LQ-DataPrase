@@ -143,7 +143,7 @@ function buildOption() {
    * 会被整段裁切，图上根本看不到 fail 点。无测量值（anchor=1）不绘制：画在 X 轴
    * 底部会被误读成 0 值数据点（其颗数仍计入副标题 Pass/Fail）。
    */
-  function toPoint(p: number[], siteName: string) {
+  function toPoint(p: number[]) {
     const [s, v, isFail, anchor] = p
     const a = anchor ?? 0
     const fail = (isFail ?? 0) === 1
@@ -156,30 +156,19 @@ function buildOption() {
       realSerial: s,
       isFail: fail,
       anchor: a,
-      site: siteName,
     }
   }
 
-  // —— pass/fail 拆分：fail/超界点抽到置顶强调层（spec §1.3；large 模式
-  // 不支持逐点样式，强调只能靠独立系列）——
+  // —— fail/超界点不拆独立强调层：随 Site 系列着色（2026-09-13 按用户反馈回退
+  // §1.3 强调层：并集层名易被误读为「红点=超界」）；anchor=1（无值）仍不绘制 ——
   const siteSeriesRaw: { name: string; data: number[][] }[] = d.series_data || []
   const siteColors = getSiteColors8(isDark.value)
-  const passData: any[][] = siteSeriesRaw.map(() => [])
-  const failDataBySite: any[][] = siteSeriesRaw.map(() => [])
-  siteSeriesRaw.forEach((sd, idx) => {
-    ;(sd.data || []).forEach((p: number[]) => {
-      const pt = toPoint(p, sd.name)
-      if (!pt) return
-      if (pt.isFail || pt.anchor !== 0) failDataBySite[idx].push(pt)
-      else passData[idx].push(pt)
-    })
-  })
-  const failAll = failDataBySite.flat()
+  const siteData: any[][] = siteSeriesRaw.map((sd) =>
+    (sd.data || []).map((p: number[]) => toPoint(p)).filter((pt: any) => pt !== null))
   // 绘制序：最密垫底（spec §1.2）——按点数降序赋 z；数组序保持 site 升序
-  // （图例顺序与直方图等其它图表一致的既有约定）。密度口径取**实际绘制的
-  // pass 点数**（fail/超界点已抽到独立置顶层，不参与 site 带层叠），与视觉
-  // 上的散点带浓淡一致；用原始点数会在 fail/无值点分布不均时排出反的层叠序。
-  const counts = passData.map((pd) => pd.length)
+  // （图例顺序与直方图等其它图表一致的既有约定）。密度口径取实际绘制点数
+  // （fail/超界点随 Site 系列着色、参与带层叠），与视觉上的散点带浓淡一致。
+  const counts = siteData.map((sd) => sd.length)
   const zOfSite = new Map<number, number>()
   counts
     .map((_, i) => i)
@@ -191,34 +180,13 @@ function buildOption() {
 
   const series: any[] = siteSeriesRaw.map((sd, idx) => ({
     name: sd.name, type: 'scatter',
-    data: passData[idx],
+    data: siteData[idx],
     ...(split ? { xAxisIndex: idx, yAxisIndex: idx } : {}),
     symbolSize: effSize.value,
     itemStyle: { color: siteColors[idx % 8], opacity: effOpacity.value },
     ...(split ? {} : { z: zOfSite.get(idx) }),
     ...(isLarge.value ? { large: true } : {}),
   }))
-  if (split) {
-    // Fail 层按 lane 复制（同名系列 → 图例单项联动所有 lane）
-    failDataBySite.forEach((fdata, idx) => {
-      if (!fdata.length) return
-      series.push({
-        name: 'Fail/超界', type: 'scatter', data: fdata,
-        xAxisIndex: idx, yAxisIndex: idx,
-        symbolSize: effSize.value + 2,
-        itemStyle: { color: colors.value.errorColor, opacity: 1 },
-        ...(isLarge.value ? { large: true } : {}),
-      })
-    })
-  } else if (failAll.length) {
-    series.push({
-      name: 'Fail/超界', type: 'scatter', data: failAll,
-      symbolSize: effSize.value + 2,
-      itemStyle: { color: colors.value.errorColor, opacity: 1 },
-      z: Math.max(10, 2 + siteSeriesRaw.length), // site z = 2..N+1；N>8 时固定 10 不够置顶，取动态上限
-      ...(isLarge.value ? { large: true } : {}),
-    })
-  }
 
   // —— 轴/网格：合并单面板；拆分 N 条同步 lane（spec §2：top 16% 留标题+副标题、
   // bottom 24% 留 X 标签+图例，其余 N 等分、lane 间距 2%）——
@@ -273,7 +241,7 @@ function buildOption() {
     dataZoom = [{ type: 'inside', xAxisIndex: [0] }]
   }
 
-  // 参考线 z 恒高于 site(2..N+1)/Fail(max(10,2+N)) 两层：N≤16 时 20 够，
+  // 参考线 z 恒高于 site 层（2..N+1）：N≤16 时 20 够，
   // 更大 site 数随 N 抬升（极端边界防御）
   const markZ = Math.max(20, siteSeriesRaw.length + 4)
   // 参考线按 lane 复制（同名系列，图例单项控制全 lane）
@@ -319,9 +287,7 @@ function buildOption() {
         const pt = p.data || {}
         const anchor = pt.anchor ?? 0
         // value[0] 是轴下标（category 映射），真实序列号在 realSerial
-        let html = `${p.seriesName}`
-        if (p.seriesName === 'Fail/超界' && pt.site) html += ` · ${pt.site}`
-        html += `<br/>${serialCol}: ${pt.realSerial ?? p.value[0]}<br/>结果: ${pt.isFail ? 'FAIL' : 'PASS'}`
+        let html = `${p.seriesName}<br/>${serialCol}: ${pt.realSerial ?? p.value[0]}<br/>结果: ${pt.isFail ? 'FAIL' : 'PASS'}`
         html += `<br/>Value: ${Number(pt.realY ?? p.value[1]).toFixed(4)}`
         if (anchor === 2) html += '<br/>超出显示范围（真实值偏大）'
         if (anchor === 3) html += '<br/>超出显示范围（真实值偏小）'
