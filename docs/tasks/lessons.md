@@ -458,3 +458,34 @@
   让主语义（本例为 Fail die）自明，或拆成两层分别表达；渲染正确≠可读正确。回退后
   fail/超界点随 Site 系列着色，其余可读性改动（自适应点径/透明度、最密垫底 z 序、
   拆分小多图、slider）保留；回退钉见 serial-overlap.spec.ts「自动档」用例。
+
+## 2026-09-13 后端死代码清除（Plan A P0）：删代码的五条取证规则
+
+- **重复检测器的输出不能直接决定「删哪一侧」**：token/行级重复扫描把
+  `gage_legacy_builder.py`（唯一 live 的 Gage 导出实现）报成「10+ 处陈旧的重复块」，
+  还给出超过文件长度的行号，按其结论删除会直接搞坏导出。规则：先用调用链取证
+  （`views.py` 入口 → re-export 层 → builder，加测试直接 import 哪个），再决定删谁；
+  两个互为镜像命名的文件（`gage_legacy_builder` vs `gage_summary_builder`）必须逐个
+  确认死活方向，动手前把「哪个是 live」这句话复述一遍。检测器只能提出候选，不能下判决。
+- **删模块要 grep 非 `.py` 的构建配置；悬空 hiddenimport 会静默自洽**：
+  `lq_dataprase.spec` 的 `hiddenimports` 仍列着已删的 `apps.gage.services`。PyInstaller 对
+  缺失 hidden import 只写一行日志就 `continue`，而 `git rm` 残留的空目录（只剩
+  `__pycache__`）让这个名字以 **namespace package** 身份被 `find_spec` 命中，连那行日志都不
+  打——构建期运行期都不报错，产物里却根本没有这个包。规则：删模块后
+  `grep -rn "<module>" --include="*.spec" --include="*.json" --include="*.yml" ...`，
+  并 `rm -rf` 掉只剩 `__pycache__` 的空目录（`find <dir> -type f` 先确认）。
+- **`manage.py test 2>&1 | tail -N` 读不到汇总行**：stdout 被 pipe 时是块缓冲，
+  `Seed users completed.` 这类 stdout 在进程退出才 flush，排到 stderr 的 `Ran/OK` **之后**，
+  `tail` 恰好把汇总挤出窗口 → 看起来像"没跑完"，实际 exit=0 全绿。规则：读用例数一律
+  `> tasks/x.log 2>&1` 再 `grep -aE "^(Ran |OK|FAILED|ERROR)"`。
+- **纯删除批次要用「精确用例数」当门禁，不能只看 OK**：`test_export_histogram_grid.py:26`
+  是模块级 import，删掉生产 shim 后只要这行漏改，整个文件不收集，钉着**新**几何的
+  `GridMatchesScreenTests` 一起静默消失，而全量只少几个用例、照样 `OK`。规则：删除前先
+  记真值基线（本次 919），每批断言确切差值（A3 应正好 −2 → 917），差值不符即停。
+  历史「888/899」这类记忆数字不可信，基线必须现测。
+- **把已删函数的算式复制进测试文件只是「历史事实存档」，不是防护网**：为了留住
+  「旧网格会把 8 个点全丢掉」这一前置事实，测试里留了 `_legacy_bins_geometry`。用例拿它
+  与它自己比对，生产侧再怎么回归它都不会变红——docstring 若写"防止用例空转"就是过度
+  声明，会误导后人以为这里有保护。规则：这类 helper 要明写「存档、非守卫」，并把真正的
+  守卫指回钉生产路径的用例；同时承接被删测试独有的断言事实（本次补了 `bins[-1]=32.5`），
+  别只换个名字继续跑。
