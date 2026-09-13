@@ -80,6 +80,25 @@ function seriesCountByName(opt: any, name: string): number {
   return (opt?.series ?? []).filter((s: any) => s.name === name).length
 }
 
+/** 序列图齿轮设置按钮（点径/透明度/按 Site 拆分都在弹层里，2026-09-13 齿轮化） */
+const serialGear = (page: Page) => page.locator(`${SINGLE} [data-testid="serial-settings-btn"]`)
+
+/** 打开序列图齿轮弹层并返回 popper（teleport 到 body，按实例类定位） */
+async function openSerialSettings(page: Page): Promise<Locator> {
+  await serialGear(page).click()
+  const pop = page.locator('.dp-serial-settings-popper')
+  await expect(pop).toBeVisible({ timeout: 10_000 })
+  return pop
+}
+
+/** 点开齿轮 → 切换「按 Site 拆分」→ 再点齿轮收起弹层（避免弹层遮挡快照/后续交互） */
+async function toggleSplitBySite(page: Page) {
+  const pop = await openSerialSettings(page)
+  await pop.getByText('按 Site 拆分').click()
+  await serialGear(page).click()
+  await expect(pop).toBeHidden()
+}
+
 test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analysis'] }, () => {
   test('自动档：分级表一致 + 最密垫底 + fail 随 Site 着色 + 图例 Site 升序', async ({ page }) => {
     const { canvas, resp } = await enterSerial(page, RECOMMENDED.analysis)
@@ -145,14 +164,15 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
 
     // 点径 自动值 → 键盘 +3 步；断言覆盖生效（max 8 封顶）
     const before = await siteSymbol()
-    const sizeBtn = page.locator(`${SINGLE} .serial-header__slider`).nth(0).locator('.el-slider__button-wrapper')
+    const pop = await openSerialSettings(page)
+    const sizeBtn = pop.locator('.el-slider__button-wrapper').nth(0)
     await sizeBtn.focus()
     for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight')
     await expect.poll(siteSymbol).toBe(Math.min(before + 3, 8))
 
     // 透明度 -1 步（step 5 → 百分比 -5 → 小数 -0.05），精确断言
     // 用整数百分比空间算术避免浮点雷（0.85-0.05=0.7999999999999999≠0.8）——与组件 effOpacityPct 同源
-    const opBtn = page.locator(`${SINGLE} .serial-header__slider`).nth(1).locator('.el-slider__button-wrapper')
+    const opBtn = pop.locator('.el-slider__button-wrapper').nth(1)
     const opBefore = await siteOpacity()
     await opBtn.focus()
     await page.keyboard.press('ArrowLeft')
@@ -183,7 +203,7 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
     const body = await resp.json()
     const n = (body.series_data || []).length
     test.skip(n < 2, 'fixture 无多 site，拆分模式不适用')
-    await page.getByText('按 Site 拆分').click()
+    await toggleSplitBySite(page)
     await expect.poll(async () => (await readOption(canvas))?.grid?.length).toBe(n)
     const opt = await readOption(canvas)
     expect(opt.xAxis.length).toBe(n)
@@ -216,7 +236,7 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
       }
     }
     // 取消勾选恢复单面板
-    await page.getByText('按 Site 拆分').click()
+    await toggleSplitBySite(page)
     await expect.poll(async () => (await readOption(canvas))?.grid?.length).toBe(1)
   })
 
@@ -226,7 +246,7 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
     const shot = (name: string) => canvas.screenshot({ path: `../.qoder/verify_serial_${name}.png` })
     const t0 = await themeNow()
     await shot(`merged_${t0}`)
-    await page.getByText('按 Site 拆分').click()
+    await toggleSplitBySite(page)
     await expect.poll(async () => (await readOption(canvas))?.grid?.length).toBeGreaterThanOrEqual(2)
     await shot(`split_${t0}`)
     const titleColor = () =>
@@ -238,7 +258,7 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
     // 主题切换后等图表 option 重绘（标题文字色随主题）再截图，避免抓到旧主题
     await expect.poll(titleColor).not.toBe(c0)
     await shot(`split_${t1}`)
-    await page.getByText('按 Site 拆分').click()
+    await toggleSplitBySite(page)
     await expect.poll(async () => (await readOption(canvas))?.grid?.length).toBe(1)
     await shot(`merged_${t1}`)
   })
