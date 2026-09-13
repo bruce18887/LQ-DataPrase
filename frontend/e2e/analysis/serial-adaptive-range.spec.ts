@@ -41,26 +41,16 @@ async function enterSerial(page: Page, fileLabel: string) {
 /** 复刻组件 SerialChart.rangeOfPoints 的规则（回归钉） */
 function expectedRange(points: any[]): { min: number; max: number } | null {
   const vals: number[] = []
-  let above = false
-  let below = false
   for (const p of points) {
-    const a = p[3] ?? 0
-    if (a === 2) above = true
-    else if (a === 3) below = true
-    if (a !== 0) continue
+    if ((p[3] ?? 0) !== 0) continue
     if (typeof p[1] === 'number' && Number.isFinite(p[1])) vals.push(p[1])
   }
   if (!vals.length) return null
   const mn = Math.min(...vals)
   const mx = Math.max(...vals)
-  let lo: number
-  let hi: number
-  if (mx > mn) { const pad = (mx - mn) * 0.08; lo = mn - pad; hi = mx + pad }
-  else { const dlt = Math.max(Math.abs(mx) * 0.05, 1e-9); lo = mn - dlt; hi = mx + dlt }
-  const span = hi - lo
-  if (above) hi += span * 0.15
-  if (below) lo -= span * 0.15
-  return { min: lo, max: hi }
+  if (mx > mn) { const pad = (mx - mn) * 0.08; return { min: mn - pad, max: mx + pad } }
+  const dlt = Math.max(Math.abs(mx) * 0.05, 1e-9)
+  return { min: mn - dlt, max: mx + dlt }
 }
 
 test.describe('@p1 序列分布 Y 轴数据自适应', { tag: ['@p1', '@analysis'] }, () => {
