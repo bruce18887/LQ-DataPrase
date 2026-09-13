@@ -5,7 +5,7 @@
 * ``apps/export/charts.py`` 被 ``chart_workers``（ProcessPoolExecutor，Windows
   spawn）子进程 import，**必须保持 Django-free**；本模块只依赖 numpy 与
   analysis 的纯计算 helper，可以安全被子进程加载。
-* 网格构造此前在 ``charts.build_histogram_bins`` 里另算一套（26 条有限边界、
+* 网格构造此前在 charts 里另算一套 shim（26 条有限边界、
   两端各外扩 2.5·gap、无 ±inf 兜底），与屏幕侧（25 条内边界 + ±inf = 27 边界、
   两端各外扩 2·gap）平移了 0.5·gap，且超范围值被 ``np.histogram`` **静默丢弃**。
   现在两侧共用本模块的几何。

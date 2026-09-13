@@ -5,8 +5,6 @@ mixin 形式合入本 ViewSet（600 行上限）——路由、权限声明与 O
 """
 
 import json
-import os
-from typing import Dict, Optional, Set
 
 import pandas as pd
 
@@ -17,10 +15,6 @@ from rest_framework.permissions import IsAuthenticated
 
 from apps.datafiles.models import DataFile
 from apps.analysis.services.statistics import (
-    compute_correlation_matrix,
-    compute_boxplot_stats,
-    compute_range_statistics,
-    compute_site_stats,
     get_site_column,
     get_serial_column,
     get_serial_candidates,
@@ -31,11 +25,9 @@ from apps.analysis.services.statistics import (
     filter_finite,
     compute_qqplot,
     compute_uph,
-    ensure_numeric,
     calculate_fail_test_item_statistics,
     filter_bin1_rows,
     filter_test_items,
-    compute_low_cpk_test_items,
 )
 from apps.analysis.services.data_services import (
     compute_histogram_stats,

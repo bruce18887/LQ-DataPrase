@@ -23,11 +23,21 @@ from matplotlib.axes import Axes
 
 from apps.analysis.services.data_services import compute_histogram_stats
 from apps.analysis.services.statistics import filter_finite
-from apps.export.charts import _render_histogram_payload, build_histogram_bins
+from apps.export.charts import _render_histogram_payload
 from apps.export.export_ppt import build_batch_charts_pptx
 from apps.export.histogram_grid import build_histogram_grid, resolve_bin_range
 
 TEMP = np.array([25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 31.0, 33.0])
+
+
+def _legacy_bins_geometry(low, high):
+    """已删除的 charts.build_histogram_bins 旧几何（26 条有限边界、两端外扩
+    2.5·gap、无 ±inf 兜底）。留在测试里只为复现"旧网格把点全丢了"的前置事实，
+    防止相关用例因两侧都修好而空转。
+    """
+    data_gap = (high - low) / 20 if (high - low) > 0 else 1.0
+    bin_start = low - 2.5 * data_gap
+    return np.array([bin_start + j * data_gap for j in range(26)]), data_gap
 
 
 def _assert_pair(test, actual, expected, places=9):
@@ -174,7 +184,7 @@ class PhantomLimitChartNotEmptyTests(SimpleTestCase):
         回退 0.0 → 幻影 (0, 0) → 旧几何 gap 兜底 1.0、bins −2.5..22.5，
         TEMP 型数据（25~33）的 8 个点**全部落在 bin 范围外**。
         """
-        legacy_bins, legacy_gap = build_histogram_bins(0.0, 0.0)
+        legacy_bins, legacy_gap = _legacy_bins_geometry(0.0, 0.0)
         self.assertEqual(legacy_gap, 1.0)
         counts, _ = np.histogram(TEMP, bins=legacy_bins)
         self.assertEqual(int(counts.sum()), 0,
@@ -221,7 +231,7 @@ class PhantomLimitChartNotEmptyTests(SimpleTestCase):
 class PptxPhantomLimitTests(SimpleTestCase):
     """缺陷 #5 端到端（PPT 侧）：限值缺失不得让导出的 PPT 直方图完全空白。
 
-    ``build_histogram_bins(0.0, 0.0)`` 走 ``data_gap=1.0`` 兜底、bins 变成
+    ``_legacy_bins_geometry``（旧几何）走 ``data_gap=1.0`` 兜底、bins 变成
     −2.5..22.5，而屏幕侧会回退到数据范围正常渲染 → 用户看屏有图、导出空白。
     """
 
@@ -277,19 +287,25 @@ class TinyBarPrecisionTests(SimpleTestCase):
         self.assertAlmostEqual(sum(heights), 100.0, places=3)
 
 
-class LegacyBinsShimTests(SimpleTestCase):
-    """``build_histogram_bins`` 保留为兼容 shim（既有 apps/export/tests.py 仍 pin 它）。
+class GridGeometryTests(SimpleTestCase):
+    """导出网格几何：25 内边界 + ±inf = 26 bin，且不得回到旧几何的平移起点。
 
-    生产路径必须走 ``build_histogram_grid``；shim 只保证旧断言不破。
+    旧 shim charts.build_histogram_bins 已删除；其几何（首中心 7.5 = 10 - 2.5·gap
+    + 0.5·gap）与屏幕侧平移 0.5·gap，正是缺陷 #4/#5 的根因，这里把"不再如此"钉住。
     """
 
-    def test_shim_keeps_legacy_geometry(self):
-        bins, gap = build_histogram_bins(10.0, 30.0)
+    def test_legacy_geometry_stays_the_buggy_reference(self):
+        """旧几何（测试内 helper）自身：首边界 7.5 = 10 − 2.5·gap、26 条有限边界。
+
+        它是下一条用例的对照物；shim 已从生产代码删除，公式只留在测试里。
+        """
+        bins, gap = _legacy_bins_geometry(10.0, 30.0)
         self.assertEqual(len(bins), 26)
         self.assertAlmostEqual(gap, 1.0, places=9)
         self.assertAlmostEqual(bins[0], 7.5, places=9)
 
-    def test_shim_is_not_used_by_grid(self):
-        _, centers, _ = build_histogram_grid(10.0, 30.0)
+    def test_grid_geometry_matches_screen_side(self):
+        _, centers, gap = build_histogram_grid(10.0, 30.0)
         self.assertEqual(len(centers), 26)
+        self.assertAlmostEqual(gap, 1.0, places=9)
         self.assertNotAlmostEqual(centers[0], 7.5, places=9)

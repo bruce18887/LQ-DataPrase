@@ -30,7 +30,6 @@ from ._helpers import (
     _register_file,
     _register_zip_batch,
     _user_upload_dir,
-    _disk_mtime,
     _parse_last_modified,
     _delete_datafile_file_only,
     _remove_empty_dirs_up_to,

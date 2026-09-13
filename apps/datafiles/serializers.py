@@ -142,7 +142,3 @@ class ParseHistorySerializer(serializers.ModelSerializer):
 
     def get_filepath(self, obj) -> str:
         return resolve_file_path(obj.filepath)
-
-
-class FileUploadSerializer(serializers.Serializer):
-    file = serializers.FileField()
