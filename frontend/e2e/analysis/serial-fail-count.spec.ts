@@ -14,9 +14,8 @@ import { selectAnalysisFile, selectParam } from '../helpers/params'
  * 缺陷形态（用户报告）：fail 值远超规格限（如 Kelvin 10000 vs USL 10）时被
  * 显式 Y 轴整段裁切不可见；且 fail 判定只看当前参数是否超限，跨测试项 fail
  * 的 die 看起来像 pass。修复后：
- *  - fail 按 die 最终 bin 判定（fail_count 与 bin 汇总颗数一致）；自 2026-09-12
- *    重叠可读性改造（spec §1.3）起 fail/超界点抽到独立「Fail/超界」系列并以
- *    主题 errorColor 标红置顶（不再随站点色）；
+ *  - fail 按 die 最终 bin 判定（fail_count 与 bin 汇总颗数一致），点色与
+ *    站点图例一致（不标红）；
  *  - 超界值锚定到可见轴边缘（anchor=2/3），无测量值点不绘制（anchor=1，
  *    避免在 X 轴底部被误读为 0 值数据点；颗数仍计入副标题）；
  *  - 副标题显示 Pass/Fail 颗数。
@@ -111,22 +110,16 @@ test.describe('序列分布：fail 数量与 bin 汇总颗数一致', { tag: ['@
     ).toBeVisible({ timeout: 15_000 })
 
     // 无测量值点不绘制：ECharts 实例中散点数量 = 5（6 颗 die − 1 无值），
-    // 不残留锚定在 X 轴底部的幽灵点。fail/超界点自 2026-09-12 重叠可读性改造
-    // （spec §1.3）起被抽到独立的「Fail/超界」置顶强调系列，故绘制点数口径 =
-    // 各 site pass 点 + 该强调层之和（marks 参考线系列不计入）。
+    // 不残留锚定在 X 轴底部的幽灵点。fail/超界点随 Site 系列着色
+    // （2026-09-13 回退 §1.3 独立强调层），绘制点数口径 = 各 site 系列之和
+    // （marks 参考线系列不计入）。
     const drawnPoints = await wrapper.locator('div[_echarts_instance_]').evaluate((el: any) => {
       const opt = el.__echartsInstance__?.getOption?.()
       return (opt?.series ?? [])
-        .filter((s: any) => /^Site /.test(s.name) || s.name === 'Fail/超界')
+        .filter((s: any) => /^Site /.test(s.name))
         .flatMap((s: any) => s.data ?? [])
     })
     expect(drawnPoints.length).toBe(5)
-    // fail/超界点确实进了强调层（本 fixture：serial 3/4 fail+anchor=2、serial 5 跨项 fail）
-    const failLayer: any[] = await wrapper.locator('div[_echarts_instance_]').evaluate((el: any) => {
-      const opt = el.__echartsInstance__?.getOption?.()
-      return (opt?.series ?? []).find((s: any) => s.name === 'Fail/超界')?.data ?? []
-    })
-    expect(failLayer.map((pt) => pt.realSerial).sort((a: number, b: number) => a - b)).toEqual([3, 4, 5])
 
     // X 轴对齐回归（2026-09-05 审查）：category 轴上的数值 x 曾被 ECharts 当
     // **索引**用，Serial_No 从 1 开始时每个点右移一格（tooltip 的真实序列号
@@ -136,7 +129,7 @@ test.describe('序列分布：fail 数量与 bin 汇总颗数一致', { tag: ['@
       const opt = el.__echartsInstance__?.getOption?.()
       const xAxisData: unknown[] = opt?.xAxis?.[0]?.data ?? []
       return (opt?.series ?? [])
-        .filter((s: any) => /^Site /.test(s.name) || s.name === 'Fail/超界')
+        .filter((s: any) => /^Site /.test(s.name))
         .flatMap((s: any) => s.data ?? [])
         .map((pt: any) => ({
           serial: pt.realSerial,

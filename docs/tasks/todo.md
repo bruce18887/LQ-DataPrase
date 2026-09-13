@@ -1459,3 +1459,24 @@ ad62f81 → b47f509 → 9e313c8 → 837b3dc → 6f8a608 → 4f1d8af → 13ab77c 
 - >20k 档无 fixture（靠分级表一致性断言覆盖逻辑，不依赖实际大数据文件）
 - 拆分模式 8 site 极小 lane 为已知权衡（配合面板最大化可缓解）
 - 双主题/快照 skip 口径已统一 `hasDrawnFailPoints`（d7b278e）
+
+---
+
+# 任务：回退 Fail/超界 独立强调层（2026-09-13）✅
+
+> 背景：用户反馈并集层名易被误读为「红点=超界」（带内红点实为跨测试项 fail 的 die）；
+> 回退 spec §1.3，其余改动（§1.1/§1.2、§2、§3）保留。
+
+## 改动文件清单
+
+- `SerialChart.vue`：删除 Fail/超界 独立系列（合并 + 拆分 lane 复制两路），fail/超界点
+  恢复随 Site 系列着色；z 序密度口径改回各 site 实际绘制点数；tooltip 去层内 site 归属分支
+- `serial-overlap.spec.ts`：删强调层断言与双主题 errorColor 用例；加回退钉（独立层不存在 +
+  fail 点随 Site 系列可见 + 图例不含 Fail/超界）；快照重绘信号改标题文字色
+- `serial-fail-count.spec.ts`：绘制点数口径回各 site 系列之和，删 Fail 层断言与旧注释
+- spec 文档头部加回退注记；lessons.md 加并集层名误读教训
+
+## 验证
+
+- `npm run build` 门禁过；serial-overlap + serial-fail-count + 回归套件全绿（见提交）
+- 快照 `.qoder/verify_serial_*.png` 重生成（无红层形态）
