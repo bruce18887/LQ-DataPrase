@@ -32,8 +32,12 @@ TEMP = np.array([25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 31.0, 33.0])
 
 def _legacy_bins_geometry(low, high):
     """已删除的 charts.build_histogram_bins 旧几何（26 条有限边界、两端外扩
-    2.5·gap、无 ±inf 兜底）。留在测试里只为复现"旧网格把点全丢了"的前置事实，
-    防止相关用例因两侧都修好而空转。
+    2.5·gap、无 ±inf 兜底）——**历史事实存档，不是防护网**。
+
+    调用它的用例是拿公式与自己比对，生产侧再怎么改都不会让它变红；它存在的意义
+    只是给"旧网格会把 TEMP 那 8 个点全部丢光"这类前置事实提供数值来源，免得这个
+    缺陷的成因随 shim 一起消失。真正盯住新几何的是 GridGeometryTests 与
+    GridMatchesScreenTests。
     """
     data_gap = (high - low) / 20 if (high - low) > 0 else 1.0
     bin_start = low - 2.5 * data_gap
@@ -295,14 +299,17 @@ class GridGeometryTests(SimpleTestCase):
     """
 
     def test_legacy_geometry_stays_the_buggy_reference(self):
-        """旧几何（测试内 helper）自身：首边界 7.5 = 10 − 2.5·gap、26 条有限边界。
+        """旧几何（测试内 helper）自身：26 条有限边界、首边界 7.5 = 10 − 2.5·gap、
+        末边界 32.5 = 7.5 + 25·gap。
 
         它是下一条用例的对照物；shim 已从生产代码删除，公式只留在测试里。
+        首/末边界两条 pin 承接自已删的 apps/export/tests.py::BuildHistogramBinsTests。
         """
         bins, gap = _legacy_bins_geometry(10.0, 30.0)
         self.assertEqual(len(bins), 26)
         self.assertAlmostEqual(gap, 1.0, places=9)
         self.assertAlmostEqual(bins[0], 7.5, places=9)
+        self.assertAlmostEqual(bins[-1], 32.5, places=9)
 
     def test_grid_geometry_matches_screen_side(self):
         _, centers, gap = build_histogram_grid(10.0, 30.0)
