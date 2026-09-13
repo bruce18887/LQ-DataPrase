@@ -1,14 +1,7 @@
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Optional, Tuple, Dict, List
 import pandas as pd
-import numpy as np
 import re
-import logging
-
-logger = logging.getLogger(__name__)
-
-from apps.common.constants import NON_NUMERIC_KEYWORDS
 
 class BaseATEParser(ABC):
     format_type: str = ''
@@ -16,58 +9,6 @@ class BaseATEParser(ABC):
     @abstractmethod
     def parse(self, file_path: str) -> Tuple[Optional[pd.DataFrame], Optional[Dict]]:
         ...
-    
-    def get_columns_with_limits(self, df: pd.DataFrame, metadata: Dict) -> List[str]:
-        cols_with_limits = []
-        for col in df.columns:
-            if col not in metadata.get('mins', {}) or col not in metadata.get('maxs', {}):
-                continue
-            min_str = str(metadata['mins'][col]).strip()
-            max_str = str(metadata['maxs'][col]).strip()
-            if not min_str or not max_str:
-                continue
-            if min_str.lower() in NON_NUMERIC_KEYWORDS or max_str.lower() in NON_NUMERIC_KEYWORDS:
-                continue
-            try:
-                float(min_str)
-                float(max_str)
-                cols_with_limits.append(col)
-            except (ValueError, TypeError):
-                continue
-        return cols_with_limits
-    
-    def detect_fail_data(self, df: pd.DataFrame, metadata: Dict):
-        fail_indices = []
-        fail_columns = []
-        fail_cells = {}
-        format_type = metadata.get('format', self.format_type)
-        target_bin_col = self.get_bin_column_name()
-        cols_with_limits = self.get_columns_with_limits(df, metadata)
-        fail_row_mask = pd.Series([False] * len(df), index=df.index)
-        if target_bin_col in df.columns:
-            fail_row_mask = pd.to_numeric(df[target_bin_col], errors='coerce') != 1
-        for col in cols_with_limits:
-            min_val = float(str(metadata['mins'][col]).strip())
-            max_val = float(str(metadata['maxs'][col]).strip())
-            col_data = pd.to_numeric(df[col], errors='coerce')
-            fail_mask = fail_row_mask & ((col_data < min_val) | (col_data > max_val))
-            fail_rows = df.index[fail_mask].tolist()
-            for idx in fail_rows:
-                fail_indices.append(idx)
-                fail_columns.append(col)
-                if idx not in fail_cells:
-                    fail_cells[idx] = []
-                fail_cells[idx].append(col)
-        if target_bin_col in df.columns:
-            fail_bin_indices = df.index[fail_row_mask].tolist()
-            for idx in fail_bin_indices:
-                if idx not in fail_cells:
-                    fail_cells[idx] = []
-                if target_bin_col not in fail_cells[idx]:
-                    fail_cells[idx].append(target_bin_col)
-                if idx not in set(fail_indices):
-                    fail_indices.append(idx)
-        return fail_indices, fail_columns, fail_cells
     
     @staticmethod
     def make_column_names_unique(columns: List[str]) -> List[str]:
