@@ -83,7 +83,6 @@ def build_gage_summary_excel(file_datasets, ignore_no_limit=False):
     COLOR_HEADER_BG = "2C3E50"
     COLOR_HEADER_FONT = "FFFFFF"
     COLOR_DATA_BG = "F8F9FA"
-    COLOR_ALT_ROW = "EDF2F7"
     COLOR_BORDER = "BDC3C7"
     COLOR_FONT_DARK = "2C3E50"
     COLOR_RED_BG = "F5B7B1"

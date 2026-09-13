@@ -160,17 +160,6 @@ def _user_upload_dir(user, file_type='single'):
     return path
 
 
-def _disk_mtime(file_path):
-    """Return the on-disk modification time as an aware datetime (or None)."""
-    try:
-        return timezone.make_aware(
-            timezone.datetime.fromtimestamp(os.path.getmtime(file_path)),
-            timezone.get_current_timezone(),
-        )
-    except (OSError, ValueError):
-        return None
-
-
 def _parse_last_modified(value):
     """Parse a browser-provided last_modified epoch-ms value into a datetime.
 

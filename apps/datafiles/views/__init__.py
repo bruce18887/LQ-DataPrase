@@ -11,7 +11,6 @@ from ._helpers import (  # noqa: F401
     _safe_extract_zip,
     _zip_base_name,
     _user_upload_dir,
-    _disk_mtime,
     _parse_last_modified,
     _delete_datafile_file_only,
     _remove_empty_dirs_up_to,

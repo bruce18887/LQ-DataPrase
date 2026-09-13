@@ -29,22 +29,6 @@ def _get_export_dpi():
     return 100
 
 
-def build_histogram_bins(low: float, high: float):
-    """.. deprecated:: 兼容 shim —— 生产路径请用 ``build_histogram_grid``。
-
-    旧几何（26 条有限边界、两端各外扩 2.5 gap、无 ±inf 兜底）与屏幕侧
-    ``histogram.compute_histogram_stats`` 平移了 0.5·gap，且超范围值被
-    ``np.histogram`` 静默丢弃、限值退化时整张图空白（缺陷 #4/#5）。
-    本函数只为 ``apps/export/tests.py::BuildHistogramBinsTests`` 保留原几何，
-    导出侧（charts / export_ppt）已全部改走 ``build_histogram_grid``；
-    测试迁移那一轮应连同本 shim 一起删除。
-    """
-    data_gap = (high - low) / 20 if (high - low) > 0 else 1.0
-    bin_start = low - 2.5 * data_gap
-    bins = np.array([bin_start + j * data_gap for j in range(26)])
-    return bins, data_gap
-
-
 def _render_histogram_payload(
     param, data_series, site_values, site_series,
     mean_val, std_val, rdl_min, rdl_max,

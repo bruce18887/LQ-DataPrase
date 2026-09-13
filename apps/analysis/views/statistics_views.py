@@ -1,16 +1,12 @@
 """Statistics and cross-file analysis views."""
 
-import os
-
 import pandas as pd
 
-from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
-from apps.datafiles.models import DataFile
 from apps.analysis.services.statistics import (
     detect_fail_data,
     calculate_fail_bin_statistics,
@@ -39,7 +35,6 @@ from apps.analysis.services.data_services import (
     compute_wafer_geometry,
     compute_wafer_zone_stats,
 )
-from apps.datafiles.services import get_cached_parsed_file
 from apps.common.params import get_param, get_param_float, get_param_list
 from apps.analysis.services.limits import resolve_limits
 

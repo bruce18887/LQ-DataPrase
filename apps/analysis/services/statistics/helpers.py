@@ -101,12 +101,6 @@ def get_bin_column(df: pd.DataFrame, metadata: Dict) -> Optional[str]:
     return None
 
 
-def get_1d(series_or_df):
-    if isinstance(series_or_df, pd.DataFrame):
-        return series_or_df.iloc[:, 0]
-    return series_or_df
-
-
 def get_1d_from(df: pd.DataFrame, col: str) -> pd.Series:
     s = df[col]
     if isinstance(s, pd.DataFrame):
