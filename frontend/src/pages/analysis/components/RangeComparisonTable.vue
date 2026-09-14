@@ -1,6 +1,11 @@
 <template>
   <el-card shadow="hover" :body-style="{ padding: '8px' }">
-    <div class="table-header">📊 范围对比</div>
+    <div class="table-header">
+      📊 范围对比
+      <!-- 单位每个参数只有一个（后端 unit 字段，各行同值），放表头比占一整列窄 49px：
+           左栏只有 ~385px，125% 缩放时那 49px 正是 Gap/Unit 被裁掉的原因 -->
+      <span v-if="unitLabel" class="table-header__unit">（{{ unitLabel }}）</span>
+    </div>
     <el-table
       v-if="rangeTableData.length"
       :data="rangeTableData"
@@ -8,20 +13,21 @@
       size="small"
       scrollbar-always-on
       :row-class-name="rangeRowClass"
-      :header-cell-style="{ background: 'var(--bg-3)', fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
-      :cell-style="{ fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
+      :header-cell-style="{ background: 'var(--bg-3)', fontSize: '10px', padding: '3px 4px', whiteSpace: 'nowrap' }"
+      :cell-style="{ fontSize: '10px', padding: '3px 4px', whiteSpace: 'nowrap' }"
       table-layout="auto"
     >
       <el-table-column prop="label" label="" align="left" min-width="95" />
       <el-table-column prop="low" label="Low" align="center" min-width="60" />
       <el-table-column prop="high" label="High" align="center" min-width="60" />
       <el-table-column prop="gap" label="Gap" align="center" min-width="60" />
-      <el-table-column prop="unit" label="Unit" align="center" min-width="50" />
     </el-table>
   </el-card>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+
 interface RangeRow {
   label: string
   low: string
@@ -36,6 +42,9 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+
+/** 单位：后端按参数下发一个值，各行相同，故提到表头（无值时整个后缀不渲染） */
+const unitLabel = computed(() => props.rangeTableData[0]?.unit || '')
 
 function rangeRowClass({ row }: { row: RangeRow }) {
   const active =
@@ -62,6 +71,11 @@ function rangeRowClass({ row }: { row: RangeRow }) {
   font-size: 12px;
   color: var(--text);
   margin-bottom: 6px;
+}
+
+.table-header__unit {
+  font-weight: 400;
+  color: var(--text-2);
 }
 
 /* 当前 range 口径所在行：EP 把底色画在 td 上，只命中 tr 的规则会被单元格
