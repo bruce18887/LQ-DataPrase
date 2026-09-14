@@ -8,8 +8,8 @@
       :border="true"
       scrollbar-always-on
       :row-class-name="siteRowClass"
-      :header-cell-style="{ background: 'var(--bg-3)', fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
-      :cell-style="{ fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
+      :header-cell-style="{ background: 'var(--bg-3)', fontSize: '10px', padding: '3px 4px', whiteSpace: 'nowrap' }"
+      :cell-style="{ fontSize: '10px', padding: '3px 4px', whiteSpace: 'nowrap' }"
       table-layout="auto"
     >
       <el-table-column prop="Site" label="Site" align="center" min-width="65" />

@@ -1,150 +1,160 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, listParams, selectParam } from '../helpers/params'
+import { selectAnalysisFile, listParams, selectParam, pickOutlierMode } from '../helpers/params'
 import { waitLoadingGone } from '../helpers/charts'
 import { RECOMMENDED } from '../fixtures/test-data'
 
 /**
- * 回归：Ctrl+滚轮页面缩放后，「📊 范围对比」「📱 Site统计」表格必须能完整查看每一列。
+ * 回归：「📊 范围对比」「📱 Site统计」在页面缩放后必须**无需横向滚动就同屏看全每一列**。
  *
- * 行为约定（修复后）：
- * - 表格内容超过容器宽度时（内容本身较宽，或页面放大后容器变窄），
- *   表格内部出现常显横向滚动条（scrollbar-always-on）；
- * - 滚动到末尾后最后一列表头完整落在表格可视区域内 —— 任何缩放级别下每一列都可达。
+ * 2026-09-14 修复前：左栏宽度 = el-col 的 25%，1920 视口 125% 缩放下只剩 307px，
+ * 而两表的列宽由内容决定（范围对比 404px / Site统计 339px）→ Gap+Unit、>Max
+ * 列在视口里根本看不到。旧用例把「表格内部能滚到最后一列」当通过口径，
+ * 恰好掩盖了这一点（滚动条存在 ≠ 列可见）。
+ *
+ * 修复三处（详见各自文件注释）：
+ *  - AnalysisTabLayout：左栏 min-width 385px（扣掉卡片内边距 30px 后容器 ~355px，
+ *    两表内在宽实测 ~275 / ~319px），右栏改吃剩余空间；≤1120px 视口改纵向堆叠；
+ *  - 范围对比：单位提到卡头（后端 unit 每个参数只有一个值），省掉一整列；
+ *  - 两表单元格内边距 6px → 4px。
+ *
+ * 用例口径（升级后）：列清单固定 + 表格零横向溢出 + 最后一列右缘落在表格内。
+ * 只留「滚动兜底」不成立也没关系 —— 极端内容仍可由表格自带横向滚动条兜底，
+ * 但那是退化路径，不再作为通过条件。
  */
 const SINGLE = '.single-param-tab'
-const VIEWPORT = { width: 1920, height: 1080 }
-const TABLES = [
-  { title: '📊 范围对比', lastHeader: 'Unit' },
-  { title: '📱 Site统计', lastHeader: '>Max' },
-]
+const RANGE = '范围对比'
+const SITE = 'Site统计'
+const RANGE_COLS = ['', 'Low', 'High', 'Gap']
+const SITE_COLS = ['Site', 'Yield', 'Fail', '<Min', '>Max']
 
-/** 通过真实的 Ctrl+滚轮事件放大页面 steps 步（每步 0.1） */
-async function zoomInBy(page: import('@playwright/test').Page, steps: number) {
-  for (let i = 0; i < steps; i++) {
-    await page.evaluate(() => {
-      const event = new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, bubbles: true })
-      window.dispatchEvent(event)
-    })
-  }
-  await expect
-    .poll(() => page.evaluate(() => parseFloat(document.documentElement.style.zoom || '1')))
-    .toBeGreaterThanOrEqual(1 + steps * 0.1)
+interface TableMetrics {
+  cols: string[]
+  /** 表格内部横向溢出量（>0 即需要横向滚动才能看全列） */
+  innerOverflow: number
+  /** 最后一列表头右缘超出表格右缘的像素（>0 即被裁） */
+  lastColOverflow: number
+  /** 行 label 是否带 " (cut)" 后缀（裁剪范围模式下最宽的行标签） */
+  hasCut: boolean
 }
 
-/** 读取表格内部可横向滚动容器的尺寸（优先 el-scrollbar，回退 body-wrapper） */
-function scrollMetrics(page: import('@playwright/test').Page, title: string) {
+function tableMetrics(page: Page, title: string): Promise<TableMetrics | null> {
   return page.evaluate((t) => {
-    const card = [...document.querySelectorAll<HTMLElement>('.el-card')].find((c) =>
-      c.textContent?.includes(t),
-    )
+    const card = [...document.querySelectorAll<HTMLElement>('.left-panel .el-card')]
+      .find((c) => c.querySelector('.table-header')?.textContent?.includes(t))
     const table = card?.querySelector<HTMLElement>('.el-table')
     if (!table) return null
-    const wrap =
-      table.querySelector<HTMLElement>('.el-scrollbar__wrap') ??
-      table.querySelector<HTMLElement>('.el-table__body-wrapper')
-    if (!wrap) return null
-    return {
-      wrapClientWidth: wrap.clientWidth,
-      wrapScrollWidth: wrap.scrollWidth,
-    }
-  }, title)
-}
-
-/** 滚动表格到最右并返回最后一列表头的可视边界 */
-function scrollToLastColumn(page: import('@playwright/test').Page, title: string) {
-  return page.evaluate((t) => {
-    const card = [...document.querySelectorAll<HTMLElement>('.el-card')].find((c) =>
-      c.textContent?.includes(t),
-    )
-    const table = card?.querySelector<HTMLElement>('.el-table')
-    if (!table) return null
-    const wrap =
-      table.querySelector<HTMLElement>('.el-scrollbar__wrap') ??
-      table.querySelector<HTMLElement>('.el-table__body-wrapper')
-    if (!wrap) return null
-    wrap.scrollLeft = wrap.scrollWidth
-    const ths = [...table.querySelectorAll<HTMLElement>('th')]
+    const wrap = table.querySelector<HTMLElement>('.el-scrollbar__wrap')
+      ?? table.querySelector<HTMLElement>('.el-table__body-wrapper')
+    // 列清单只看真实列：body 出现纵向滚动条时 EP 会在 thead 末尾塞一个 gutter 占位 th
+    const ths = [...table.querySelectorAll<HTMLElement>('thead th')]
+      .filter((th) => !th.classList.contains('gutter'))
     const last = ths[ths.length - 1]
-    if (!last) return null
-    const tRect = table.getBoundingClientRect()
-    const lRect = last.getBoundingClientRect()
     return {
-      tableLeft: tRect.left,
-      tableRight: tRect.right,
-      lastLeft: lRect.left,
-      lastRight: lRect.right,
-      scrollLeft: wrap.scrollLeft,
+      cols: ths.map((th) => th.textContent?.trim() ?? ''),
+      innerOverflow: wrap ? wrap.scrollWidth - wrap.clientWidth : -1,
+      lastColOverflow: last
+        ? Math.round(last.getBoundingClientRect().right - table.getBoundingClientRect().right)
+        : -1,
+      hasCut: [...table.querySelectorAll('tbody tr td:first-child')]
+        .some((td) => td.textContent?.includes('(cut)')),
     }
   }, title)
 }
 
-/** 表格内横向滚动条（el-scrollbar bar）是否存在且有实际宽度 */
-function horizontalBarWidth(page: import('@playwright/test').Page, title: string) {
-  return page.evaluate((t) => {
-    const card = [...document.querySelectorAll<HTMLElement>('.el-card')].find((c) =>
-      c.textContent?.includes(t),
-    )
-    const bar = card?.querySelector<HTMLElement>('.el-scrollbar__bar.is-horizontal .el-scrollbar__thumb')
-    return bar ? bar.getBoundingClientRect().width : 0
-  }, title)
+/** 两张表都要：列清单正确、零横向溢出、最后一列完整落在表格内 */
+async function expectNoClippedColumns(page: Page) {
+  const expected: [string, string[]][] = [[RANGE, RANGE_COLS], [SITE, SITE_COLS]]
+  for (const [title, cols] of expected) {
+    await expect
+      .poll(async () => (await tableMetrics(page, title)) !== null, {
+        message: `${title} 应已渲染`,
+      })
+      .toBe(true)
+    const m = (await tableMetrics(page, title))!
+    expect(m.cols, `${title} 列清单`).toEqual(cols)
+    expect(m.innerOverflow, `${title} 不应需要横向滚动才能看全列`).toBeLessThanOrEqual(1)
+    expect(m.lastColOverflow, `${title} 最后一列右缘应在表格内`).toBeLessThanOrEqual(1)
+  }
 }
 
-/** 断言：滚动表格到末尾后，最后一列表头完整落在表格可视区域内 */
-async function expectLastColumnReachable(
-  page: import('@playwright/test').Page,
-  title: string,
-  lastHeader: string,
-) {
-  const box = await scrollToLastColumn(page, title)
-  expect(box, `${title} 应存在内部横向滚动容器`).not.toBeNull()
-  expect(box!.lastRight, `${title} 最后一列右缘不超出表格`).toBeLessThanOrEqual(box!.tableRight + 1)
-  expect(box!.lastLeft, `${title} 最后一列左缘不早于表格左缘`).toBeGreaterThanOrEqual(box!.tableLeft - 1)
-  await expect(page.locator(SINGLE).getByText(lastHeader).last()).toBeVisible()
+/** 在给定时间内等范围对比表出现 (cut) 行标签；没有则返回 false（不抛错） */
+async function hasCutWithin(page: Page, ms: number): Promise<boolean> {
+  try {
+    await expect
+      .poll(async () => (await tableMetrics(page, RANGE))?.hasCut ?? false, { timeout: ms })
+      .toBe(true)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** 打开单文件分析并选中第一个参数，返回抽样的参数列表 */
+async function openSingleTab(page: Page): Promise<string[]> {
+  await gotoApp(page, '/analysis')
+  await selectAnalysisFile(page, RECOMMENDED.analysis)
+  await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
+  const params = await listParams(page)
+  expect(params.length).toBeGreaterThan(0)
+  await selectParam(page, params[0])
+  await waitLoadingGone(page.locator(SINGLE))
+  await expect(page.locator(`${SINGLE} .el-table__row`).first()).toBeVisible({ timeout: 15_000 })
+  return params
 }
 
 test.describe('@p2 表格随缩放完整显示每一列', { tag: ['@p2', '@analysis'] }, () => {
-  test('zoom 1.0 与 zoom 2.0 下均可滚动到最后一列，滚动条可见', async ({ page }) => {
-    await page.setViewportSize(VIEWPORT)
-    await gotoApp(page, '/analysis')
-    await selectAnalysisFile(page, RECOMMENDED.analysis)
-    await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
+  test('100% 与应用缩放 125% 下两表全列同屏可见（含裁剪范围最宽场景）', async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 })
+    const params = await openSingleTab(page)
 
-    const params = await listParams(page)
-    expect(params.length).toBeGreaterThan(0)
-    await selectParam(page, params[0])
-    await waitLoadingGone(page.locator(SINGLE))
+    // 1) 100%
+    await expectNoClippedColumns(page)
 
-    // 左面板两个表格渲染出数据行
-    for (const { title } of TABLES) {
-      await expect(page.locator(SINGLE).getByText(title)).toBeVisible()
+    // 2) 125%：useZoom 的浏览器分支就是给 <html> 设 style.zoom（Ctrl+滚轮/`+`）
+    await page.evaluate(() => { document.documentElement.style.zoom = '1.25' })
+    await expectNoClippedColumns(page)
+
+    // 3) 最宽场景：裁剪范围 → 行 label 带 " (cut)"（label 列最宽）。
+    //    该后缀只在参数**确实有异常值**时出现（useFiltered = hasOutliers && 模式≠off），
+    //    而哪些参数有异常值取决于数据 → 在抽样参数里找第一个带 (cut) 的。
+    await pickOutlierMode(page, '裁剪范围')
+    let cutCovered = (await tableMetrics(page, RANGE))?.hasCut ?? false
+    for (const name of cutCovered ? [] : params) {
+      await selectParam(page, name)
+      await waitLoadingGone(page.locator(SINGLE))
+      cutCovered = await hasCutWithin(page, 3_000)
+      if (cutCovered) break
     }
-    await expect(page.locator(SINGLE).locator('.el-table__row').first()).toBeVisible({
-      timeout: 15_000,
+    // 一个都没找到也不失败：本用例的不变量（列不裁）与 label 是否带后缀无关，
+    // 只是没覆盖到最宽情况，用注解如实记录下来。
+    test.info().annotations.push({
+      type: 'cut-suffix',
+      description: cutCovered ? '已覆盖带 (cut) 的最宽行标签' : '抽样参数均无异常值，未覆盖 (cut)',
     })
+    await expectNoClippedColumns(page)
+  })
 
-    // 1) zoom 1.0（1920 视口）：每一列都可通过表格内部横向滚动完整查看
-    for (const { title, lastHeader } of TABLES) {
-      await expectLastColumnReachable(page, title, lastHeader)
-    }
+  test('浏览器缩放 125%（1536 视口）下两表全列同屏可见', async ({ page }) => {
+    // 浏览器 Ctrl+`+` 到 125%：1920 物理像素只剩 1536 CSS px，是同一问题的另一条路径
+    await page.setViewportSize({ width: 1536, height: 864 })
+    await openSingleTab(page)
+    await expectNoClippedColumns(page)
+  })
 
-    // 2) 放大到 2.0：容器变窄导致横向溢出扩大，滚动范围 > 1px
-    await zoomInBy(page, 10)
-    for (const { title } of TABLES) {
-      await expect
-        .poll(async () => {
-          const m = await scrollMetrics(page, title)
-          return m ? m.wrapScrollWidth - m.wrapClientWidth : null
-        })
-        .toBeGreaterThan(1)
-    }
+  test('窄视口（1024）左栏整行堆叠，页面无横向溢出', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 900 })
+    await openSingleTab(page)
 
-    // 3) zoom 2.0 下横向滚动条常显（scrollbar-always-on），且每一列仍可完整查看
-    for (const { title, lastHeader } of TABLES) {
-      await expect
-        .poll(() => horizontalBarWidth(page, title), { message: `${title} 横向滚动条应可见` })
-        .toBeGreaterThan(0)
-      await expectLastColumnReachable(page, title, lastHeader)
-    }
+    const left = (await page.locator(`${SINGLE} > .main-row > .left-panel`).boundingBox())!
+    const right = (await page.locator(`${SINGLE} > .main-row > .right-panel`).boundingBox())!
+    expect(right.y, '图表区应落在左栏下方（纵向堆叠）').toBeGreaterThan(left.y + left.height - 4)
+    expect(left.width, '堆叠后左栏占整行').toBeGreaterThan(600)
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    )
+    expect(overflow, '页面不应横向溢出').toBeLessThanOrEqual(1)
+    await expectNoClippedColumns(page)
   })
 })
