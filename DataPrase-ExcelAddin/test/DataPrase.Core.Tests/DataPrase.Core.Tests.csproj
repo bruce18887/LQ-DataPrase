@@ -1,0 +1,43 @@
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{A1B2C3D4-0003-4E5F-8A9B-C0D1E2F30003}</ProjectGuid>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>DataPrase.Core.Tests</RootNamespace>
+    <AssemblyName>DataPrase.Core.Tests</AssemblyName>
+    <TargetFrameworkVersion>v4.6.2</TargetFrameworkVersion>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <LangVersion>7.3</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="TestSheet.cs" />
+    <Compile Include="TesterRegistryTests.cs" />
+    <Compile Include="VbaStringTests.cs" />
+    <Compile Include="TesterDetectorTests.cs" />
+    <Compile Include="DatalogLayoutTests.cs" />
+    <Compile Include="ColumnNamesTests.cs" />
+    <Compile Include="TestItemReaderTests.cs" />
+    <Compile Include="LimitEvaluatorTests.cs" />
+    <Compile Include="MarkPlannerTests.cs" />
+    <Compile Include="StatsFormulaBuilderTests.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DataPrase.Core\DataPrase.Core.csproj">
+      <Project>{A1B2C3D4-0001-4E5F-8A9B-C0D1E2F30001}</Project>
+      <Name>DataPrase.Core</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net462" Version="1.0.3" PrivateAssets="All" />
+    <PackageReference Include="NUnitLite" Version="3.13.3" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

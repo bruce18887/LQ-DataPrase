@@ -1,110 +1,3 @@
-# 任务：LightVBA 迁 Excel Office Web 加载项（路线 B，纯前端 TS）（2026-09-13）
-
-用户需求：用 Yeoman `generator-office` 把 `DataPrase-LightVBA/` 的 VBA 宏迁成 Excel 任务窗格
-加载项，纯前端 TypeScript、不依赖后端（路线 B），跨平台，并**完整替代**现有 VBA。
-
-已确认的三项决策：工程落 `DataPrase-LightVBA/addin/`；v1 范围=完整替代；数据来源=只读当前工作表。
-
-由「只读当前工作表」推出的关键判断：该移植 **VBA 的单元格解析模型**（`Tester(0..4)` 偏移表本就是
-为「CSV 已在 Excel 打开」写的），而非 `apps/datafiles/parsers/*.py` 的 CSV 文本模型；统计口径移植
-Python 的 `apps/analysis/services/statistics/`；回写用原生公式（保留改 mode 即重分箱的实时行为）；
-失败标记用条件格式替代 VBA 逐格涂色。
-
-计划全文：`~/.claude/plans/logical-dancing-sedgewick.md`。
-
-## 实施清单
-
-### Phase 0 — 前置闸门与脚手架
-
-- [x] 提取 Exp 表模板常量（`tasks/_extract_exp_constants.py`，pyxlsb 只读；dump 见 `tasks/_exp_dump.txt`）
-- [x] **Exp 基准决策：不做** —— 用户确认「按修正推断做」。已证实的 VBA 两处硬伤作为修正依据：
-      ① 写 Exp 的列号整体 **+1 偏移**（阶梯写进 D=All Site、计数写进 E=Site1/N、
-      单位写进 G36 而非 F36、统计写进 C53 而非紧邻标签 A53 的 B53）；
-      ② 把 `B3:B27` 当乘数，但该列实为比较运算符（`<=`/`<`/`>`），真正像乘数的是
-      `A3:A27 = -2,-1,0,…,22` → `B3` 疑为 `A3` 笔误。
-      Phase 4 按修正布局实现：**C=Range(bin 边缘) / D=All Site / E–L=Site1–8 / M–U=百分比**
-- [x] 脚手架落位 `DataPrase-LightVBA/addin/` —— **偏离**：`yo office` 向导失败（github.com 被阻断，
-      ECONNRESET；codeload/raw 可达但 zip 入口在 github.com）。改为手动复刻生成器行为：
-      取官方 `Office-Addin-TaskPane` release 模板 → 跑 `node convertToSingleHost.js excel xml
-      "LQ-DataPrase Light" random`。结果与向导一致（manifest.xml 单主机 + Id 8869cf9c-…）
-- [x] 重接 Vue3 + Vite（模板原为 webpack+babel）：换 Vite 8 + vue-tsc；入口提到根
-      `taskpane.html` / `commands.html`；`assets/` → `public/assets/`；加 `@` / `@ui` 别名
-      （`@ui` → `../../frontend/src`）；删 webpack.config.js / babel.config.json / 模板 demo
-- [x] HTTPS 开发证书：`office-addin-dev-certs` 自动生成并安装受信任 CA
-      （`C:\Users\Administrator\.office-addin-dev-certs`）。**副作用**：该包每次调用都会重装 CA，
-      已限定只在 `command === 'serve'` 时装载，构建不再触碰证书
-- [x] vitest 接线跑通（`vitest.config.ts`，node 环境，4 tests 通过）
-- [ ] playwright（浏览器内 stub Office；沿用仓库 `@p0/@p1/@p2` 标签约定）+ manifest Ribbon 按钮（Phase 5）
-
-**Phase 0 出口验证**：`npm run build` 绿（110ms，无证书操作）；dev server 起于
-`https://localhost:3000`，`/taskpane.html` 与 `/assets/icon-32.png` 均 200；测完端口 3000 已释放。
-
-### Phase 1 — 解析与统计内核（纯 TS）✅
-
-- [x] `core/types.ts` / `core/constants.ts`（NON_NUMERIC_KEYWORDS、BIN_COLUMN_MAPPING、SYSTEM/NON_NUMERIC_COLUMNS）
-- [x] `core/parse/normalize.ts`：`fixNegativeDecimal` / `toNumericCell` / `cellText` / `makeColumnNamesUnique` / `dropTailMetadataRows`
-- [x] `core/parse/tester-table.ts`：VBA `Tester(0..4)` 单元格模型 + bin/site 列索引
-- [x] `core/parse/worksheet.ts`：机型识别（含 ETS88 第 2/3 行回退）→ 列头行定位 → 测试项列区间 → 单位/上下限 → 数据行区间；`toParsedTable` 转通用表
-- [x] `core/stats/limits.ts`：`resolveSpecLimit(s)`（占位关键字/'Min'/'Max' → null）/ `getColumnsWithLimits` / `getSiteColumn` / `detectFailData`
-- [x] `core/stats/computations.ts`：`meanDdof0` / `stdDdof0`（**ddof=0**）/ `safeGap` / `minMax`（栈安全）/ `computeRangeStatistics` / `computeCpk`
-- [x] `core/json.ts`：NaN/±Inf → null（类型一律 `number | null`）
-- [x] 一致性夹具：`tasks/gen_addin_conformance.py` 生成 4 个真实 datalog 的单元格矩阵 + Python 参考结果 → `addin/test/fixtures/*.json`（6–31 KB）
-
-**关键修正（一致性测试抓出来的）**：ETS88 的真实版式是
-`列名行(Test Name, 1728 段) → +2 Lower Limit → +3 Upper Limit → +4 Units → marker 行(仅 5 段) → 数据`。
-**marker 行不是列头行**，它只用来定数据起点（= 列名行 + 6）。VBA 的 ETS88 偏移
-（lowOffset=2/highOffset=3/unitOffset=4/dataRowOffset=6）**是对的**；我一度误判为过期偏移。
-另一坑：文件第 8 行也有 `Test Name`（设备名行，仅 2 段），列头行判据须能区分——
-现取「列 A 为 Test Name 的候选中最宽的一行」（优先 > 50 段，矩阵被截断时退化为取最长）。
-
-### Phase 2 — 任务窗格只读分析
-
-- [ ] `office/bridge.ts` 读 `range.values` → `string[][]`；无 `Office` 走 stub 供 e2e
-- [ ] 机型识别 + 测试项下拉（替代 ComboBox）；5 种 limit 模式配置面板
-- [ ] 分布图复用 `frontend/src/.../HistogramChart.vue` + `useChart` + `echarts-theme` + `chart-bar`
-- [ ] 统计卡片 Range/Mean/STD/CPK；双主题（dark + light）
-
-### Phase 3 — 回写：失败标记与统计
-
-- [ ] 条件格式 3 条规则替代逐格涂色（Bin≠1 整行红 / 超限红加粗 / 单边等于 limit 琥珀）
-- [ ] 统计公式行回写（SUBTOTAL + CPK 公式）；冻结窗格 / 自动筛选 / 隐藏列三开关
-
-### Phase 4 — Exp 等价工作表
-
-- [ ] 建 Exp 表：bin 阶梯 + 分 Site COUNTIFS + 5 种 limit 模式表 + 统计
-- [ ] 写原生 COUNTIFS/SUBTOTAL 公式，保留实时重分箱
-- [ ] 修正 VBA 的两处 bug：`$D$3`/`$D$4` 绝对引用（致 23 格同值）、+1 列偏移与 `B3`→`A3`
-
-### Phase 5 — 分发与验证
-
-- [ ] Ribbon 按钮与快捷键（替代 Ctrl+Shift+Q）
-- [ ] 全量一致性回归 + e2e（浏览器内 stub Office）+ 跑完释放端口
-- [ ] 跨平台检查；`docs/specs/` 设计稿
-
-## Review
-
-**Phase 0 验证账目**：`npm run build` 绿（110ms，无证书操作）；dev server 起于
-`https://localhost:3000`，`/taskpane.html` 与 `/assets/icon-32.png` 均 200；测完端口 3000 已释放；
-用户在 Excel 里 side-load 成功。
-
-**Phase 1 验证账目**：`npx vitest run` **80 tests 全绿**（6 个文件，598ms）；
-`npm run typecheck`（vue-tsc）绿；`npm run build` 绿。
-其中 `conformance.test.ts` 用 4 个真实 datalog（STS8200 / CTA8290D / CTA8280F / ETS88）
-对拍 Python 参考：机型、列头行、测试项起始列、数据首行、bin 列索引、测试项单位/上下限、
-数据区数值，全部一致。夹具仅 6–31 KB（列截断到 25 列 + 只保留到数据首行后 2 行）。
-
-**踩坑记录**：
-- 我一度把 ETS88 的 marker 行当列头行，误判 VBA 偏移「过期」并据此改了实现；
-  一致性测试立刻红（`测试项列区间为空（起始列 5 起即为空）`），实地打印该文件 58–87 行后
-  确认 VBA 偏移正确，已回正并写进 `tester-table.ts` 注释。
-- 夹具按列截断会让 ETS88 的「>50 段」判据失效（列名行与设备名行都被截到 25/2），
-  故列头行判据改为「候选中取最宽」，两种情形都成立。
-
-**待办（Phase 1 未覆盖）**：`toParsedTable` 未把 bin/site 列强制为字符串之外的处理；
-真实 Excel 打开 CSV 时的类型强转（日期/前导零）仍是真机验证项，见风险 ②。
-
----
-
 # 任务：分析页 dock 底部高度滑条进布局记忆（2026-09-09）✅
 
 用户报告：「数据分析页布局记忆不记最底下的高度滑条，一刷新高度就还原」。
@@ -1662,15 +1555,15 @@ ad62f81 → b47f509 → 9e313c8 → 837b3dc → 6f8a608 → 4f1d8af → 13ab77c 
 
 ## 实施清单（4 批，每批独立验证 + commit）
 
-- [x] 批次1 齿轮基建 + 直方图设置搬迁（ChartSettingsPopover / HistogramSettingsForm /
+- [ ] 批次1 齿轮基建 + 直方图设置搬迁（ChartSettingsPopover / HistogramSettingsForm /
       ChartPanel controls 槽右移 / ChartConfigPanel 精简 / #controls-hist）
-- [x] 批次2 序列设置上提（useSerialChartSettings / SerialSettingsForm / SerialChart props 化 /
+- [ ] 批次2 序列设置上提（useSerialChartSettings / SerialSettingsForm / SerialChart props 化 /
       #controls-serial；序列列下拉保持内联）
-- [x] 批次3 直方图勾选 + 账号记忆（showHist / ChartDock closable+空态 /
+- [ ] 批次3 直方图勾选 + 账号记忆（showHist / ChartDock closable+空态 /
       useChartMemory.ChartToggles.hist 含容错与反推 / useChartDock 行占比）
-- [x] 批次4 序列 Y 轴数据自适应 + grid/lane 布局（rangeOfPoints / laneBounds / markLine 贴边钳制）
-- [x] 验证：npm run build + 定向 e2e + 双主题 + 端口释放；manage.py test apps.analysis
-- [x] todo Review + lessons 回写
+- [ ] 批次4 序列 Y 轴数据自适应 + grid/lane 布局（dataRange / laneBounds / markLine 贴边钳制）
+- [ ] 验证：npm run build + 定向 e2e + 双主题 + 端口释放；manage.py test apps.analysis
+- [ ] todo Review + lessons 回写
 
 ## 其它图表分析结论（第 4 点交付物）
 
@@ -1678,69 +1571,100 @@ ad62f81 → b47f509 → 9e313c8 → 837b3dc → 6f8a608 → 4f1d8af → 13ab77c 
 - **相关性散点 data 模式**（`scatter-option.ts:59 computeRange`）：轴跨度=2×数据跨度、
   利用率≈25%，与序列同类；列为可选批次 5，待用户确认后单独做。
 
-## Review（2026-09-13）
-
-- **提交链**：`a8acd5b` 直方图齿轮 → `fda5f88` 序列齿轮 → `45a9009` 直方图勾选+记忆 →
-  `47cb7c3` 序列 Y 轴自适应 → `ca405a0` 去头部预留+边距微调 → 本提交（e2e 稳健性 + docs）。
-- **验证账目**：`npm run build` 全程绿；后端 `manage.py test apps.analysis` **193 项 OK**
-  （零后端改动）；e2e 分析页全量 P1 **122 passed / 4 flaky / 0 failed**（4.2m，flake 为
-  dock-resize×2 / legend-color / tiny-fail-bar，隔离复跑均绿——负载型）；settings
-  chart-memory + dock-resize **11 passed / 1 flaky**；跑后 8000/3000 零监听。
-- **新增/维护 e2e**：新增 `serial-adaptive-range.spec.ts`（数据自适应范围 + `page.route`
-  注入远离数据的规格限钉贴边钳制）；`chart-memory.spec.ts` 新增直方图勾选用例；
-  `serial-overlap` / `chart-filter-switches` / `histogram-multiseries-clip` 迁移到齿轮
-  popper（实例级 `dp-hist/serial-settings-popper`）。
-- **设计要点**：① 齿轮抽 `ChartSettingsPopover`（实例级 popper-class）+ 两个 Form + 一个
-  composable，`SingleParamTab`/`SerialChart` 均 <600 行；② `ChartPanel` 的 controls 槽移到
-  `grow` 之后 = 真正右上角（全仓无该位置断言）；③ 序列 3 项设置从 SerialChart 上提
-  （齿轮在标题栏、图表体在 body，状态必须父级持有）；④ **Y 轴自适应不破坏 anchor 语义**：
-  前端范围由 anchor==0 点决定，必为后端 spec±10% 范围的子集 → 超界点仍贴边、正常点不被裁
-  （已写进 SerialChart 注释）；⑤ 离群 IQR 分支保留（有意裁剪口径）。
-- **踩坑**：① 编辑 SerialChart 时用「注释+函数声明」做 old_string 替换，误删了
-  `function xAxisDef` 声明并把声明块落在函数之前 → 编译期连环报错，靠 build 及时发现
-  （教训：替换函数头这类锚点要连前缀声明一并纳入新串）；② 测试 `:model-value` 单向绑定
-  slider：高负载下 3 次连按方向键快于 prop 回流 → EP 内部值被旧 prop 拽回（3 步只生效 1 步），
-  改为逐按轮询（产品行为对真实用户无碍，仅 e2e 时序假设需要修）；③ 种子数据规格限未必远离
-  数据带 → 贴边钳制用例改为 route 注入，避免「测试永远 skip = 零覆盖」。
-- **双主题**：新增 UI（齿轮按钮/两个设置表单/空态）全用语义 token；图表色板仍走
-  `useChartTheme()`；弹层由 EP 主题接管。序列快照已重生成 `.qoder/verify_serial_{merged,split}_{light,night}.png`。
-- **待用户确认**：可选批次 5（相关性散点 data 模式 padding `rng/2 → rng*0.08` + 显式 grid）。
-- **环境**：跑 e2e 前按 lessons 杀掉 8000 端口未钉 `LQDP_SYSTEM_CONFIG_FILE` 的**用户 dev
-  runserver 整棵进程树**（playwright 自起钉配置的后端接管）；用户 dev 服务需其自行重启。
-
 ---
 
-# 任务：分析页顶部统计条压缩 + 参数选择器随文件选择行冻结（2026-09-13）
+# 任务：VBA → Excel 加载项迁移（Excel-DNA）（2026-09-14）🚧
 
-> 计划：`~/.claude/plans/adaptive-crunching-simon.md`（用户确认：统计条压成单行 + 只冻结「文件+参数」行）
-
-用户反馈：① 图表上方 N/Mean/Median 统计卡太大（尤其高度），希望缩小或移左栏；
-② 参数选择器在最上方，向下滚看图表时滚出视野、要滚回才能切参数。希望放到选择数据 UI 那行并冻结。
+> 需求：把 `DataPrase-LightVBA/` 导出的 VBA 小工具迁移为 Excel 加载项，**内部离线自用**。
+> 选型结论：**Excel-DNA 1.x（C# / .NET Framework 4.6.2）**，非 VSTO——部署零摩擦
+> （无需 VSTO 运行时）、兼容 Excel 2007~365、可单测；VSTO 只吃 .NET Framework 且部署
+> 繁重（VSTO 运行时 + ClickOnce 签名 + 注册表），离线自用场景收益为负。
+> 工具链（本机实测）：**无 .NET SDK、无 .NET Framework 目标包** → 采用「经典 csproj +
+> `Microsoft.NETFramework.ReferenceAssemblies.net462` NuGet + VS2022 MSBuild」，
+> **零系统安装**即可编出 x86/x64 packed `.xll`（已冒烟验证）。
 
 ## 实施清单
 
-- [x] `StatsSummary`：5 列卡片网格 → 单行紧凑条（nowrap + 横向滚动，高度 ≈126px → ~26px）
-- [x] `ParamSelector`：新增 `inline` 模式（默认纵向不变，MultiFileTab 零影响）
-- [x] `SingleParamTab`：参数选择器移入文件选择行；筛选行拆到新 `#toolbar-2`
-- [x] `AnalysisTabLayout`：`#toolbar` sticky 冻结 + 新增 `#toolbar-2`（非冻结）
-- [x] `AnalysisPage`：`:deep(.el-tabs__content){overflow:visible}` 放开 sticky 祖先
-- [x] e2e：新增 `toolbar-sticky.spec.ts`（3 用例：冻结行贴顶 / 筛选行不冻结 / 统计条单行）
+### 批次 1｜脚手架 + 冒烟
+- [x] 新顶层 `DataPrase-ExcelAddin/`（与 LightVBA 并列）：sln + `src/DataPrase.Core` +
+      `src/DataPrase.AddIn` + `test/DataPrase.Core.Tests`
+- [x] Core：经典 csproj（net462，NuGet 参考程序集，**零 Excel 依赖**）
+- [x] AddIn：ExcelDna.AddIn 1.9.0 + Ribbon + 配置对话框骨架
+- [x] 构建产出 x86 / x64 packed `.xll`（`build/build.cmd` 一条命令）
+- [x] Core 单测 7/7 通过（NUnitLite 自包含 runner，免 vstest/dotnet SDK）
+- [ ] 冒烟：`Application.RegisterXLL` 加载验证 —— **待用户执行**（Excel COM 启动被
+      权限分类器拦截，见下 Review）
 
-## Review（2026-09-13）
+### 批次 1 Review（2026-09-14）
+- **构建门禁**：`MSBuild.exe DataPrase-ExcelAddin.sln -t:Restore,Build` 全绿；
+  产出 `DataPrase.AddIn-AddIn(-64)(-packed).xll` ×4 + 测试 exe。**零系统组件安装**。
+- **测试门禁**：`DataPrase.Core.Tests.exe` → 7 passed / 0 failed。
+- **待验证（需用户）**：Excel 实际加载。命令：
+  `powershell -NoProfile -File build/smoke-register-xll.ps1 -XllPath <packed .xll 路径>`
+  （本机 Excel 为 64 位 → 用 `-AddIn64-packed.xll`）。
+- ⚠️ **已发现问题（批次 4 处理）**：packed `.xll` **未内嵌 `DataPrase.Core.dll`**——
+  批次 1 的 AddIn 代码尚未引用 Core 类型，编译器不生成程序集引用 → Excel-DNA 打包器
+  识别不到该依赖（packed xll 仅比 base 大约 3.4KB，正是 AddIn.dll 的 LZMA 体积）。
+  目前靠同目录的 Core.dll 运行；批次 2/3 接线后会自然入包，届时以 packed xll 体积
+  + 删掉旁置 dll 后仍能加载来钉死单文件分发。
 
-- **验证账目**：`npm run build` 绿；e2e `analysis` + `settings` P1 **144 passed / 3 flaky /
-  0 failed**（3 flaky 与本批前同组：dock-resize 最大化 / legend-color / tiny-fail-bar，隔离复跑
-  绿——sticky 顶栏**未**引入 pointer-intercept 新失败）；数据套件 `histogram-first-row-empty`
-  + `view-data` **8 passed / 2 flaky**（StatsSummary 被 HistogramColumnDialog 复用正常）；
-  新 `toolbar-sticky` **5 passed**。
-- **实测数据**：统计条 49px（wrap 折两行）→ 改 `nowrap + overflow-x:auto` 后 ~26px；
-  sticky 实测偏移 24px = `.content-area` 的 padding-top（sticky 贴的是 padding 盒顶边）。
-- **环境障碍（未自行处理，如实记录）**：e2e 前置检查发现 3000 被 **LightVBA addin 的 dev
-  server** 占用（`vite.config.ts` 的 `server.port`/`preview.port` 硬编码 3000 + strictPort，
-  无法就地改端口），8000 上另有一个 **Playwright 残留测试后端**（真实 API 正常，仅
-  `/api/schema/` 500，而它正是 webServer 的就绪探测端点 → 探测超时）。前者属另一会话在跑的
-  服务、后者需权限清理，均未动；改用**临时** Playwright 配置（前端换 3100 起 preview + 后端
-  就绪探测换 `/api/v1/files/` 复用既有进程）完成本轮验证，临时配置用完已删。
-- **双主题**：统计条/工具栏/参数选择器全用语义 token，无字面色。
-- **待用户处理**：① 3000 的 addin dev 与 8000 的残留后端会阻塞常规 `npm run test:e2e`，
-  需释放后再跑全量；② 建议在 dev 环境目测统计条与冻结行的双主题观感。
+### 批次 2｜Core 纯逻辑 + 单测
+- [x] `TesterSpec` + `TesterRegistry`（5 机台偏移配置，忠实移植 VBA Tester(0..4)）
+- [x] `TesterDetector`（识别：整格相等 0/1/2 → 子串 3/4 → ETS88 兜底 + 不支持提示）
+- [x] `DatalogLayout`（行/列索引标定，含 reCalibrate 的 +7/-1 与两类终止行语义）
+- [x] `LimitEvaluator`（失效 Bin + 压限/越限判定）
+- [x] `StatsFormulaBuilder`（Min/Avg/Max/Range/STD/CPK 公式串）
+- [x] 辅助：`ICellReader`/`ArrayCellReader`（Excel 解耦）、`VbaString`（VBA 比较语义）、
+      `ColumnNames`（列号→列名）、`TestItem`
+- [x] 单元测试 **55/55 通过**
+- 偏差：`TesterSpec` 暂留代码内 `TesterRegistry`，未按计划外置 JSON——先保证可测，
+      加机台需求出现时再抽 JSON（机械改动）。
+
+### 批次 2 Review（2026-09-14）
+- **验证账目**：`MSBuild ... -t:Restore,Build` 全绿；`DataPrase.Core.Tests.exe`
+  → **55 passed / 0 failed**。覆盖：机台识别 5 型 + ETS88 兜底 + 不支持、标定（初始/重标定/
+  非 ETS88 双空行终止/列扫描遇空即停）、列名转换边界（Z/AA/ZZ/AAA）、失效 Bin 与
+  压限/越限判定、公式串逐字符比对。
+- **移植期发现的三处 VBA 语义陷阱**（已写进代码注释 + lessons）：
+  1. **VBA `=`/`<>` 比较会给短串补尾空格** —— `"Report Generated By"` 与带尾空格的常量
+     判等；C# `==` 不会。统一走 `VbaString.EqualsPadded`（两侧 TrimEnd + 序数比较）。
+     TesterRegistry 里把 VBA 带尾空格的常量存成去空规范值。
+  2. **`IsEmpty(Range)`** —— VBA 退出循环的条件写成 `IsEmpty(Cells(i,1))`（传对象而非
+     `.Value`），靠 VB 默认属性求值才等价于「单元格为空」；C# 侧显式用 `IsBlank`。
+  3. **`NoLimit = (Lolimit = Empty And Hilimit = Empty)`** —— Lolimit/Hilimit 是 Double，
+     与 Empty 比较等价于与 0 比较 → **双限值 = 0 即「无限制」**（限值格为空格时 VBA 不赋值、
+     保持默认 0，同落此支）。已按此实现，未「顺手修正」。
+- ⚠️ **仍未做的关键验证**：Excel 实际加载冒烟（权限拦截，待用户）。
+
+### 批次 3｜Import / Mark
+- [x] Core：`TestItemReader`（读测试项元数据）+ `MarkPlanner`（标记规划）+ `ColumnNames.ToNumber`
+- [x] Core 单测 **72/72 通过**（新增 17：列引用解析、测试项读取、标记规划）
+- [x] AddIn：`ExcelInterop`（一次性批量读 UsedRange→`ICellReader`；写色按 30 格分批
+      `Range["A1,B3,..."]` 多区域地址）、`Actions`（Import/Mark 编排）、`ExcelStateGuard`
+      （ScreenUpdating/Calculation 的 `finally` 恢复）、Ribbon 三按钮接线
+- [x] 接入 `ExcelDna.Interop` 16.0.0（PIA 以 `EmbedInteropTypes` 内嵌，无需随包分发）
+- [ ] ⚠️ **Excel 实机验证**（导入/标记在真工作簿上的行为）——**待用户执行**，见下
+- [ ] 14k 行 CSV 压测（随实机验证一并做）
+
+### 批次 3 Review（2026-09-15）
+- **构建门禁**：全绿、零警告；packed xll 产出正常。
+- **单测门禁**：72 passed / 0 failed。
+- **未验证（重要）**：interop 路径**完全没有实机跑过**（Excel 启动被权限分类器拦）。
+  代码只保证编译通过 + Core 逻辑单测正确；`Range`/`Interior`/地址串等 Excel 侧行为待实机确认。
+- **依赖打包结论**：`DataPrase.Core.dll` **未被打进 packed xll**（实证：packed xll 体积增量
+  8704B ≈ 主程序集 LZMA 资源 8090B + 开销；Core.dll 19456B 不在内）。`ExcelDnaPackManagedDependencies`
+  实测为 true 却未生效，机制待查。**判定为非阻塞**：离线自用分发 xll + Core.dll 两文件即可；
+  单文件化列为批次 4 优化项。
+- **分发正确性**：`ExcelDna.Interop` 的 targets 给 PIA 打了 `EmbedInteropTypes=true` 并从
+  copy-local 移除 → 输出目录无 `Microsoft.Office.Interop.Excel.dll`，无需随包分发，符合预期。
+
+### 批次 4｜公式注入 + Exp 模板 + 收尾
+- [ ] `Exp` 模板表内嵌资源 + 运行时注入（XLL 无宿主工作簿）
+- [ ] 冻结 / 筛选 / 隐藏列 / 另存副本
+- [ ] x86+x64 打包脚本 + 内部分发说明
+
+## 关键约束（自 VBA 复盘）
+- 禁止逐单元格 interop，一律批量读写
+- `Marshal.ReleaseComObject` 统一 `finally`（防 EXCEL.EXE 残留）
+- `ScreenUpdating` / `Calculation` 必须 `finally` 恢复（VBA 版异常时不恢复）
+- 双 build x86+x64（老机器多为 32 位 Excel）
