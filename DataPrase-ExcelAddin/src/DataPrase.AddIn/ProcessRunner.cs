@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using DataPrase.Core;
 using Excel = Microsoft.Office.Interop.Excel;
 
@@ -41,39 +42,68 @@ namespace DataPrase.AddIn
             WriteStatFormulas(sheet, spec, layout, plan);
             MarkFailures(sheet, spec, layout, plan, items);
 
-            if (config.EnableAutoFreeze)
-            {
-                FreezePanes(app, sheet, layout, plan);
-            }
+            // 行号到此已定型，先记录上下文——后面的都是可选步骤，任一失败都不该让「分布表」失效。
+            ProcessSession.Record(workbook.Name, sheet.Name, spec, layout, plan, items);
 
+            var warnings = new List<string>();
+            var summary = new StringBuilder("识别机台：" + spec.TesterName);
+
+            // 先隐藏列再冻结：避免「冻结窗格后隐藏冻结区内列」这类交互（VBA 是反序，但结果等价）。
             if (config.EnableAutoHideColumns)
             {
-                HideColumns(sheet, plan);
+                Append(summary, warnings, "隐藏列", () => HideColumns(sheet, plan), "已隐藏无关列");
+            }
+
+            if (config.EnableAutoFreeze)
+            {
+                Append(summary, warnings, "冻结窗格", () => FreezePanes(app, sheet, layout, plan), "已冻结窗格");
             }
 
             if (config.EnableAutoFilter)
             {
-                ApplyAutoFilter(app, sheet, plan);
+                Append(summary, warnings, "自动筛选", () => ApplyAutoFilter(app, sheet, plan), "已开启筛选");
             }
 
-            string summary = "识别机台：" + spec.TesterName;
-
-            // VBA 顺序：先另存副本，再复制 Exp 表（SaveAs 之后活动工作簿即为副本，Exp 表也进副本）。
             if (config.EnableAutoCopyMarkedFile)
             {
-                summary += "\r\n已另存副本：" + SaveMarkedCopy(workbook);
+                try
+                {
+                    string saved = SaveMarkedCopy(workbook);
+                    ProcessSession.UpdateWorkbookName(workbook.Name);   // SaveAs 后活动工作簿已换名
+                    summary.Append("\r\n已另存副本：").Append(saved);
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add("另存副本失败：" + ex.Message);
+                }
             }
-
-            // 记录上下文，供「分布表」按钮复用（对应 VBA 的模块级全局变量）
-            ProcessSession.Record(workbook.Name, sheet.Name, spec, layout, plan, items);
 
             if (config.EnableAutoDataDistribution)
             {
-                ExpTemplate.Inject(app, workbook);
-                summary += "\r\n已复制 Exp 分布表";
+                Append(summary, warnings, "复制 Exp 分布表",
+                    () => ExpTemplate.Inject(app, workbook), "已复制 Exp 分布表");
             }
 
-            return summary;
+            foreach (string warning in warnings)
+            {
+                summary.Append("\r\n⚠ ").Append(warning);
+            }
+
+            return summary.ToString();
+        }
+
+        /// <summary>执行一个可选步骤：失败只记警告，不中断整体处理。</summary>
+        private static void Append(StringBuilder summary, IList<string> warnings, string label, Action action, string okText)
+        {
+            try
+            {
+                action();
+                summary.Append("\r\n").Append(okText);
+            }
+            catch (Exception ex)
+            {
+                warnings.Add(label + "失败：" + ex.Message);
+            }
         }
 
         /// <summary>把当前（已标记的）工作簿另存为同目录的 &lt;原名&gt;Copy.xlsx；原文件保持未修改。</summary>
@@ -199,17 +229,38 @@ namespace DataPrase.AddIn
 
         private static void HideColumns(Excel.Worksheet sheet, ProcessPlan plan)
         {
+            if (sheet.ProtectContents)
+            {
+                throw new InvalidOperationException("工作表处于受保护状态，无法隐藏列。");
+            }
+
+            if (plan.HiddenColumns.Count == 0)
+            {
+                return;
+            }
+
             foreach (int column in plan.HiddenColumns)
             {
                 string letter = ColumnNames.ToLetter(column);
-                Excel.Range range = sheet.Range[letter + ":" + letter];
+                Excel.Range columnRange = sheet.Range[letter + ":" + letter];
+                Excel.Range entireColumn = null;
+
                 try
                 {
-                    range.Hidden = true;
+                    // Range.Hidden 只在「整列/整行」范围内有效；显式取 EntireColumn 与 VBA 的
+                    // Columns("B").Hidden 完全等价。
+                    entireColumn = columnRange.EntireColumn;
+                    entireColumn.Hidden = true;
+                }
+                catch (COMException ex)
+                {
+                    throw new InvalidOperationException(
+                        "隐藏 " + letter + " 列失败（" + ex.Message + "）。", ex);
                 }
                 finally
                 {
-                    ExcelInterop.Release(range);
+                    ExcelInterop.Release(entireColumn);
+                    ExcelInterop.Release(columnRange);
                 }
             }
         }

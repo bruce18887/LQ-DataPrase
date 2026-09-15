@@ -42,6 +42,12 @@ namespace DataPrase.AddIn
             Items = items;
         }
 
+        /// <summary>另存副本后活动工作簿换了名字，同步更新，否则「分布表」会认不出当前工作簿。</summary>
+        public static void UpdateWorkbookName(string workbookName)
+        {
+            WorkbookName = workbookName;
+        }
+
         public static void Clear()
         {
             WorkbookName = null;
