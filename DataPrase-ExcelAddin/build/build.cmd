@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 rem Build the LQ-DataPrase Excel add-in (x86 + x64 packed .xll).
 rem Uses VS2022 MSBuild; no .NET SDK required (classic csproj + NuGet reference assemblies).
 setlocal enabledelayedexpansion

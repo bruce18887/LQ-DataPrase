@@ -19,6 +19,7 @@ namespace DataPrase.AddIn
         </group>
         <group id='DataPraseActionGroup' label='处理'>
           <button id='btnMark' label='处理并标记' size='large' onAction='OnMark' screentip='插公式行/冻结/筛选/隐藏列，并按 Bin 与限值标记失效' />
+          <button id='btnDistribution' label='分布表' size='large' onAction='OnDistribution' screentip='选定测试项，写入 Exp 分布表' />
           <button id='btnSettings' label='设置' size='large' onAction='OnSettings' screentip='处理选项' />
         </group>
       </tab>
@@ -39,6 +40,11 @@ namespace DataPrase.AddIn
         public void OnMark(IRibbonControl control)
         {
             Actions.MarkFailures();
+        }
+
+        public void OnDistribution(IRibbonControl control)
+        {
+            Actions.GenerateDistribution();
         }
 
         public void OnSettings(IRibbonControl control)

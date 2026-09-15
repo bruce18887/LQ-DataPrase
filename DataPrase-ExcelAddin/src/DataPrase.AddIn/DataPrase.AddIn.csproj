@@ -25,11 +25,17 @@
     <Compile Include="ExcelInterop.cs" />
     <Compile Include="Actions.cs" />
     <Compile Include="ProcessRunner.cs" />
+    <Compile Include="ProcessSession.cs" />
+    <Compile Include="ExpTemplate.cs" />
+    <Compile Include="ItemPickerDialog.cs" />
     <Compile Include="Ribbon.cs" />
     <Compile Include="ConfigDialog.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Exp-template.xlsb" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\DataPrase.Core\DataPrase.Core.csproj">
