@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -86,8 +87,13 @@ namespace DataPrase.AddIn
 
             if (config.EnableAutoDataDistribution)
             {
-                Append(summary, warnings, "复制 Exp 分布表",
-                    () => ExpTemplate.Inject(app, workbook), "已复制 Exp 分布表");
+                Append(summary, warnings, "复制 Exp 分布表", () =>
+                {
+                    Excel.Worksheet exp = ExpTemplate.Inject(app, workbook);
+                    // 模板里的公式全部指向外部工作簿（[1]Data!…），不填就是一张 #REF! 表；
+                    // 这里直接按第一个测试项填好，用户之后可用「分布表」换项。
+                    WriteExpDistribution(exp, workbook, layout, plan, spec, FirstDataColumn(items));
+                }, "已复制并填充 Exp 分布表（第一个测试项）");
             }
 
             foreach (string warning in warnings)
@@ -275,7 +281,8 @@ namespace DataPrase.AddIn
         {
             // 不用 VBA 那套「选数据区上一整行再 AutoFilter」：那一行是插入的第 7 个空行（只写 6 个
             // 统计行），拿空的整行当筛选头 Excel 会直接报「_AutoFilter 方法无效」。
-            // 改为显式指定「表头行 = 数据区上一行」到「最后一列 @ 数据区末行」的完整区块。
+            // 改为显式指定「表头行 = 数据区上一行」到「最后一列 @ 数据区末行」的完整区块，
+            // 并直接对区块调用（不经 Selection，避免选区不是 Range 时的二次失败）。
             Excel.Range first = (Excel.Range)sheet.Cells[plan.DataStartRow - 1, 1];
             Excel.Range last = (Excel.Range)sheet.Cells[plan.DataStopRow, layout.DataStopColumn];
             Excel.Range block = null;
@@ -283,14 +290,88 @@ namespace DataPrase.AddIn
             try
             {
                 block = sheet.Range[first, last];
-                block.Select();
-                ((Excel.Range)app.Selection).AutoFilter();
+                block.AutoFilter();
             }
             finally
             {
                 ExcelInterop.Release(block);
                 ExcelInterop.Release(last);
                 ExcelInterop.Release(first);
+            }
+        }
+
+        /// <summary>把 Exp 分布表按指定测试项列填好（Actions 的「分布表」按钮与自动填充共用）。</summary>
+        internal static void WriteExpDistribution(
+            Excel.Worksheet exp, Excel.Workbook workbook, LayoutResult layout, ProcessPlan plan, TesterSpec spec, int column)
+        {
+            IList<FormulaWrite> writes = DistributionFormulaBuilder.Build(
+                ColumnNames.ToLetter(column),
+                layout.TestNameRow,
+                plan.DataStartRow,
+                plan.DataStopRow,
+                ReadLimitSelector(exp),
+                spec);
+
+            foreach (FormulaWrite write in writes)
+            {
+                Excel.Range range = exp.Range[write.Address];
+                try
+                {
+                    range.Formula = write.Formula;
+                }
+                finally
+                {
+                    ExcelInterop.Release(range);
+                }
+            }
+
+            // 覆盖后仍在的其他外部引用（模板残留）会显示 #REF!，直接断开链接。
+            BreakExternalLinks(workbook);
+        }
+
+        internal static int FirstDataColumn(IDictionary<int, TestItem> items)
+        {
+            int first = int.MaxValue;
+            foreach (int column in items.Keys)
+            {
+                if (column < first)
+                {
+                    first = column;
+                }
+            }
+
+            return first == int.MaxValue ? 0 : first;
+        }
+
+        internal static int ReadLimitSelector(Excel.Worksheet exp)
+        {
+            Excel.Range cell = (Excel.Range)exp.Cells[DistributionFormulaBuilder.LimitBaseRow, 2];   // B36
+            try
+            {
+                object value = cell.Value2;
+                double parsed = 0;
+                bool ok = value != null && double.TryParse(
+                    Convert.ToString(value, CultureInfo.InvariantCulture),
+                    NumberStyles.Float, CultureInfo.InvariantCulture, out parsed);
+                return ok ? (int)parsed : 0;
+            }
+            finally
+            {
+                ExcelInterop.Release(cell);
+            }
+        }
+
+        internal static void BreakExternalLinks(Excel.Workbook workbook)
+        {
+            var links = workbook.LinkSources(Excel.XlLink.xlExcelLinks) as Array;
+            if (links == null)
+            {
+                return;
+            }
+
+            foreach (object link in links)
+            {
+                workbook.BreakLink((string)link, Excel.XlLinkType.xlLinkTypeExcelLinks);
             }
         }
 

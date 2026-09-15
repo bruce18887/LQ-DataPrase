@@ -153,67 +153,8 @@ namespace DataPrase.AddIn
             {
                 Excel.Worksheet exp = ExcelInterop.FindSheet(workbook, ExpTemplate.SheetName)
                                       ?? ExpTemplate.Inject(app, workbook);
-                WriteDistribution(exp, workbook, column);
-            }
-        }
-
-        private static void WriteDistribution(Excel.Worksheet exp, Excel.Workbook workbook, int column)
-        {
-            int selector = ReadLimitSelector(exp);
-            IList<FormulaWrite> writes = DistributionFormulaBuilder.Build(
-                ColumnNames.ToLetter(column),
-                ProcessSession.Layout.TestNameRow,
-                ProcessSession.Plan.DataStartRow,
-                ProcessSession.Plan.DataStopRow,
-                selector,
-                ProcessSession.Spec);
-
-            foreach (FormulaWrite write in writes)
-            {
-                Excel.Range range = exp.Range[write.Address];
-                try
-                {
-                    range.Formula = write.Formula;
-                }
-                finally
-                {
-                    ExcelInterop.Release(range);
-                }
-            }
-
-            // 刚复制过来的模板公式带外部链接引用（[1]Data!…），这里已被全部覆盖；再断开残留链接。
-            BreakExternalLinks(workbook);
-        }
-
-        private static int ReadLimitSelector(Excel.Worksheet exp)
-        {
-            Excel.Range cell = (Excel.Range)exp.Cells[DistributionFormulaBuilder.LimitBaseRow, 2];   // B36
-            try
-            {
-                object value = cell.Value2;
-                double parsed = 0;
-                bool ok = value != null && double.TryParse(
-                    Convert.ToString(value, CultureInfo.InvariantCulture),
-                    NumberStyles.Float, CultureInfo.InvariantCulture, out parsed);
-                return ok ? (int)parsed : 0;
-            }
-            finally
-            {
-                ExcelInterop.Release(cell);
-            }
-        }
-
-        private static void BreakExternalLinks(Excel.Workbook workbook)
-        {
-            var links = workbook.LinkSources(Excel.XlLink.xlExcelLinks) as Array;
-            if (links == null)
-            {
-                return;
-            }
-
-            foreach (object link in links)
-            {
-                workbook.BreakLink((string)link, Excel.XlLinkType.xlLinkTypeExcelLinks);
+                ProcessRunner.WriteExpDistribution(
+                    exp, workbook, ProcessSession.Layout, ProcessSession.Plan, ProcessSession.Spec, column);
             }
         }
 
