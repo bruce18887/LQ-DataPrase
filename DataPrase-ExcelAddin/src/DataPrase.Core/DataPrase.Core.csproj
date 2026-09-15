@@ -34,6 +34,7 @@
     <Compile Include="MarkPlanner.cs" />
     <Compile Include="ProcessPlanner.cs" />
     <Compile Include="StatsFormulaBuilder.cs" />
+    <Compile Include="DistributionFormulaBuilder.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

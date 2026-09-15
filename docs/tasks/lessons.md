@@ -16,6 +16,21 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-09-15 把 0 基 dump 当 1 基读，凭空造出两个假 bug
+
+- **现象**：route-B 会话用 pyxlsb 导出的 `tasks/_exp_dump.txt` 作为依据，判定 VBA 写 Exp 分布表
+  有「列号整体 +1 偏移（All Site 计数写进了 E=Site1 列）」与「`B3:B27` 是运算符列却被当乘数」
+  两个硬伤，并据此拍板了「修正布局（C=Range / D=All Site / E–L=Site1–8）」。
+- **根因**：该 dump 的**行、列都是 0 基**编号（它的 "A2" 实际是 Excel 的 B3、"C1" 是 D2）。
+  当 1 基读，整张表就被平移一列，于是「模板本来就该在 D/E 的写入」看起来像偏了一格。
+- **事实**：用 openpyxl 读 `Exp-template.xlsm` 的**真实单元格与公式**逐格核对，VBA 的写入位置与
+  模板**完全一致**——`D2='Range'` / `E2='All Site'` / `F2:M2='Site1/N'…`；`D3='=$D$36+B3*$F$36'`
+  （模板自己就用 B3 当乘数）；`D36/E36`=Low/High Limit；`C53:C56`=Range/Mean/STD/CPK；`G36`=Unit。
+  差一点把**正确**的生产代码改成错的。
+- **规则**：拿到 dump / 探针输出，先确认**坐标系**（0 基还是 1 基、列号还是列名、是否跳过表头），
+  再用**权威原件**交叉验证（能读原始文件就别只信中间产物），之后才动生产代码。凭单一中间产物
+  下的「口径修正」结论，须标注为**待原件验证**。
+
 ## 2026-09-14 VBA → Excel-DNA 加载项迁移新增教训
 
 - **VBA 的 `=` / `<>` 字符串比较会给较短串补尾空格，C# `==` 不会**：VBA 里

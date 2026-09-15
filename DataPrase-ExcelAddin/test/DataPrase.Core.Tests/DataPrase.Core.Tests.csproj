@@ -29,6 +29,7 @@
     <Compile Include="MarkPlannerTests.cs" />
     <Compile Include="ProcessPlannerTests.cs" />
     <Compile Include="StatsFormulaBuilderTests.cs" />
+    <Compile Include="DistributionFormulaBuilderTests.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\DataPrase.Core\DataPrase.Core.csproj">
