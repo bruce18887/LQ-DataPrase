@@ -20,6 +20,18 @@ namespace DataPrase.AddIn
         public bool EnableAutoHideColumns { get { return _chkHideColumns.Checked; } }
         public bool EnableAutoCopyMarkedFile { get { return _chkCopyMarkedFile.Checked; } }
 
+        public DataPrase.Core.ProcessConfig ToProcessConfig()
+        {
+            return new DataPrase.Core.ProcessConfig
+            {
+                EnableAutoDataDistribution = _chkDataDistribution.Checked,
+                EnableAutoFreeze = _chkFreeze.Checked,
+                EnableAutoFilter = _chkFilter.Checked,
+                EnableAutoHideColumns = _chkHideColumns.Checked,
+                EnableAutoCopyMarkedFile = _chkCopyMarkedFile.Checked,
+            };
+        }
+
         public ConfigDialog()
         {
             Text = "DataPrase 处理选项";

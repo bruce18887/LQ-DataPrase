@@ -27,6 +27,7 @@
     <Compile Include="TestItemReaderTests.cs" />
     <Compile Include="LimitEvaluatorTests.cs" />
     <Compile Include="MarkPlannerTests.cs" />
+    <Compile Include="ProcessPlannerTests.cs" />
     <Compile Include="StatsFormulaBuilderTests.cs" />
   </ItemGroup>
   <ItemGroup>

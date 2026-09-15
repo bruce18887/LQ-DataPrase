@@ -78,16 +78,22 @@ namespace DataPrase.AddIn
             Excel.Application app = ExcelInterop.Application;
             Excel.Worksheet sheet = GetDataSheet(app);
 
+            ProcessConfig config;
+            using (var dialog = new ConfigDialog())
+            {
+                if (dialog.ShowDialog() != DialogResult.OK)
+                {
+                    return;
+                }
+
+                config = dialog.ToProcessConfig();
+            }
+
             using (new ExcelStateGuard(app))
             {
-                DataContext context = BuildContext(sheet, reCalibrate: false);
-                MarkPlan plan = MarkPlanner.Build(context.Layout, context.Spec, context.Items, context.Reader);
-
-                ExcelInterop.ApplyMarks(sheet, plan, ColumnNames.ToNumber(context.Spec.BinColumn));
-
+                string testerName = ProcessRunner.Run(app, sheet, config);
                 MessageBox.Show(
-                    "标记完成。\r\n失效 Bin 行：" + plan.FailBinRows.Count
-                    + "\r\n着色单元格：" + plan.Cells.Count,
+                    "处理完成。\r\n识别机台：" + testerName,
                     "LQ-DataPrase - 标记失效");
             }
         }

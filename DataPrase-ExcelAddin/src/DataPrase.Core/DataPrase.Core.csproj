@@ -29,8 +29,10 @@
     <Compile Include="ColumnNames.cs" />
     <Compile Include="TestItem.cs" />
     <Compile Include="TestItemReader.cs" />
+    <Compile Include="ProcessConfig.cs" />
     <Compile Include="LimitEvaluator.cs" />
     <Compile Include="MarkPlanner.cs" />
+    <Compile Include="ProcessPlanner.cs" />
     <Compile Include="StatsFormulaBuilder.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

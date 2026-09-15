@@ -18,7 +18,7 @@ namespace DataPrase.AddIn
           <button id='btnImport' label='导入数据' size='large' onAction='OnImport' screentip='导入并识别测试机 datalog' />
         </group>
         <group id='DataPraseActionGroup' label='处理'>
-          <button id='btnMark' label='标记失效' size='large' onAction='OnMark' screentip='按 Bin 与限值标记失效数据' />
+          <button id='btnMark' label='处理并标记' size='large' onAction='OnMark' screentip='插公式行/冻结/筛选/隐藏列，并按 Bin 与限值标记失效' />
           <button id='btnSettings' label='设置' size='large' onAction='OnSettings' screentip='处理选项' />
         </group>
       </tab>

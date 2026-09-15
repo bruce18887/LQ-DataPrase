@@ -1657,11 +1657,39 @@ ad62f81 → b47f509 → 9e313c8 → 837b3dc → 6f8a608 → 4f1d8af → 13ab77c 
   单文件化列为批次 4 优化项。
 - **分发正确性**：`ExcelDna.Interop` 的 targets 给 PIA 打了 `EmbedInteropTypes=true` 并从
   copy-local 移除 → 输出目录无 `Microsoft.Office.Interop.Excel.dll`，无需随包分发，符合预期。
+- **有意偏离 VBA（2026-09-15 追加）**：`DatalogLayout` 列头行选取由「第一列最后一次匹配」
+  改为「候选中非空单元格最多的一行（并列取靠后者）」。依据：被放弃的 route-B 会话实测
+  ETS88 datalog 有两行 `Test Name`（设备名行仅 2 段 vs 真列头上千段）。新增 2 个用例钉住
+  （含「窄行在后也不覆盖」以区别于 VBA 口径），测试 74/74。
+- **route-B 遗留资料（2026-09-15 回收）**：`tasks/_exp_dump.txt`（Exp 表真实常量）**仍在**，
+  是批次 4 实现分布表的依据；`tasks/_extract_exp_constants.py` 与
+  `tasks/gen_addin_conformance.py` 已随 `addin/` 删除。该 dump 证实 VBA 写 Exp 的两处硬伤：
+  ① 列号整体 +1（All Site 计数写进了 E=Site1 列，应为 D）；② `B3:B27` 是运算符列、被当乘数，
+  真正该用的是 `A3:A27`（bin 边缘 -2…22）。用户此前已拍板「按修正布局做」：
+  **C=Range / D=All Site / E–L=Site1–8 / M–U=百分比**，批次 4 沿用。
 
-### 批次 4｜公式注入 + Exp 模板 + 收尾
-- [ ] `Exp` 模板表内嵌资源 + 运行时注入（XLL 无宿主工作簿）
-- [ ] 冻结 / 筛选 / 隐藏列 / 另存副本
+### 批次 4｜工作簿处理 + Exp 模板 + 收尾
+- [x] Core：`ProcessPlanner`（ETS88 空行删除/插行数 6|7/数据区平移/统计标签/隐藏列决策）
+      + `ProcessConfig` + `LayoutResult.WithDataRows`；新增 5 用例（**79/79**）
+- [x] AddIn：`ProcessRunner`（删空行 → 插公式行 → 写 Min/Avg/Max/Range/STD/CPK → 标记 →
+      冻结 → 隐藏列 → 筛选），Ribbon「处理并标记」接 `ConfigDialog`
+- [ ] `Exp` 模板表内嵌资源 + 运行时注入（XLL 无宿主工作簿）；分布表 COUNTIFS（按修正布局）
+- [ ] 另存标记副本（`EnableAutoCopyMarkedFile`）
 - [ ] x86+x64 打包脚本 + 内部分发说明
+
+### 批次 4 Review（2026-09-15，进行中）
+- **验证账目**：构建零错误零警告；单测 **79/79**（新增 `ProcessPlannerTests` 5 例）。
+- **移植中修正的两处理解/正确性**：
+  1. `StatsFormulaBuilder` 的注释原写「Range/CPK 引用 datalog 自带统计行」是**错的**——
+     spec 里 Min/Mean/Max/STD/CPK 的 Offset 都 ≥ `FormulaRowOffset`，落在**新插入的统计行**上
+     （Low/High/Unit 的 Offset 在其上，才是 datalog 原有行）。公式串本身正确，注释已改。
+  2. 标记必须**重新读表**：插行使数据区整体下移，而 ETS88 还删过空行 → 偏移**非均匀**，
+     不能用「统一 +InsertCount」平移原始数组。改为行操作后重读，再用 `plan.DataStartRow/
+     DataStopRow` 标记（`LayoutResult.WithDataRows` 复用其余标定）。
+- ⚠️ **`ProcessRunner` 是破坏性操作且完全未实机验证**：会删行/插行/改窗口状态。
+  实机验证务必在**副本**上做。
+- **待决**：Exp 分布表按你此前拍板的修正布局（C=Range / D=All Site / E–L=Site1–8 / M–U=百分比）
+  实现；模板来源需定（内嵌 .xlsb 原表 / 生成精简模板）。
 
 ## 关键约束（自 VBA 复盘）
 - 禁止逐单元格 interop，一律批量读写
