@@ -26,6 +26,6 @@ namespace DataPrase.AddIn
 
     internal static class AddInVersion
     {
-        public const string Value = "0.1.4";
+        public const string Value = "0.1.5";
     }
 }

@@ -7,8 +7,6 @@ namespace DataPrase.Core
 
         public bool EnableAutoFreeze { get; set; }
 
-        public bool EnableAutoFilter { get; set; }
-
         public bool EnableAutoHideColumns { get; set; }
 
         public bool EnableAutoCopyMarkedFile { get; set; }
