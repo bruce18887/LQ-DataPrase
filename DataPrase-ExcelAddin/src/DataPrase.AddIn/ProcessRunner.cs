@@ -48,8 +48,14 @@ namespace DataPrase.AddIn
             var warnings = new List<string>();
             var summary = new StringBuilder("识别机台：" + spec.TesterName);
 
+            // 只读工作簿：隐藏列与另存副本都做不了，直接说明原因，别丢一个 COM 错误给用户。
+            if (workbook.ReadOnly)
+            {
+                warnings.Add("工作簿以只读方式打开：隐藏列与另存副本已跳过（请以可写方式打开后重跑）。");
+            }
+
             // 先隐藏列再冻结：避免「冻结窗格后隐藏冻结区内列」这类交互（VBA 是反序，但结果等价）。
-            if (config.EnableAutoHideColumns)
+            if (config.EnableAutoHideColumns && !workbook.ReadOnly)
             {
                 Append(summary, warnings, "隐藏列", () => HideColumns(sheet, plan), "已隐藏无关列");
             }
@@ -64,7 +70,7 @@ namespace DataPrase.AddIn
                 Append(summary, warnings, "自动筛选", () => ApplyAutoFilter(app, sheet, plan), "已开启筛选");
             }
 
-            if (config.EnableAutoCopyMarkedFile)
+            if (config.EnableAutoCopyMarkedFile && !workbook.ReadOnly)
             {
                 try
                 {
