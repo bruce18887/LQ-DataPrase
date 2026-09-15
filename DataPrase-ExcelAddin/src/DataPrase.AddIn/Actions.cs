@@ -133,26 +133,30 @@ namespace DataPrase.AddIn
                 throw new InvalidOperationException("请先对当前工作簿执行「处理并标记」，再生成分布表。");
             }
 
-            int column;
-            using (var picker = new ItemPickerDialog(ProcessSession.Items))
-            {
-                if (picker.ShowDialog() != DialogResult.OK)
-                {
-                    return;
-                }
-
-                column = picker.SelectedColumn;
-            }
-
-            if (column <= 0)
-            {
-                throw new InvalidOperationException("未选择测试项。");
-            }
-
             using (new ExcelStateGuard(app))
             {
                 Excel.Worksheet exp = ExcelInterop.FindSheet(workbook, ExpTemplate.SheetName)
                                       ?? ExpTemplate.Inject(app, workbook);
+
+                int column;
+                int limitSelector;
+                using (var picker = new ItemPickerDialog(ProcessSession.Items, ProcessRunner.ReadLimitSelector(exp)))
+                {
+                    if (picker.ShowDialog() != DialogResult.OK)
+                    {
+                        return;
+                    }
+
+                    column = picker.SelectedColumn;
+                    limitSelector = picker.SelectedLimitSelector;
+                }
+
+                if (column <= 0)
+                {
+                    throw new InvalidOperationException("未选择测试项。");
+                }
+
+                ProcessRunner.WriteLimitSelector(exp, limitSelector);
                 ProcessRunner.WriteExpDistribution(
                     exp, workbook, ProcessSession.Layout, ProcessSession.Plan, ProcessSession.Spec, column);
             }

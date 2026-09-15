@@ -315,6 +315,20 @@ namespace DataPrase.AddIn
             return first == int.MaxValue ? 0 : first;
         }
 
+        /// <summary>写入 B36（阶梯基准选择器，原模板由 5 个 ActiveX 选项按钮驱动）。</summary>
+        internal static void WriteLimitSelector(Excel.Worksheet exp, int selector)
+        {
+            Excel.Range cell = (Excel.Range)exp.Cells[DistributionFormulaBuilder.LimitBaseRow, 2];   // B36
+            try
+            {
+                cell.Value2 = selector;
+            }
+            finally
+            {
+                ExcelInterop.Release(cell);
+            }
+        }
+
         internal static int ReadLimitSelector(Excel.Worksheet exp)
         {
             Excel.Range cell = (Excel.Range)exp.Cells[DistributionFormulaBuilder.LimitBaseRow, 2];   // B36
