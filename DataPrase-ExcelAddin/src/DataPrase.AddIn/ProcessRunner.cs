@@ -65,9 +65,9 @@ namespace DataPrase.AddIn
                 Append(summary, warnings, "冻结窗格", () => FreezePanes(app, sheet, layout, plan), "已冻结窗格");
             }
 
-            if (config.EnableAutoFilter)
+            if (config.EnableAutoFilter && !workbook.ReadOnly)
             {
-                Append(summary, warnings, "自动筛选", () => ApplyAutoFilter(app, sheet, plan), "已开启筛选");
+                Append(summary, warnings, "自动筛选", () => ApplyAutoFilter(app, sheet, layout, plan), "已开启筛选");
             }
 
             if (config.EnableAutoCopyMarkedFile && !workbook.ReadOnly)
@@ -271,18 +271,26 @@ namespace DataPrase.AddIn
             }
         }
 
-        private static void ApplyAutoFilter(Excel.Application app, Excel.Worksheet sheet, ProcessPlan plan)
+        private static void ApplyAutoFilter(Excel.Application app, Excel.Worksheet sheet, LayoutResult layout, ProcessPlan plan)
         {
-            // 复刻 VBA：选中数据区上一行后开关 AutoFilter。
-            Excel.Range headerRow = SheetRange(sheet, "A" + (plan.DataStartRow - 1)).EntireRow;
+            // 不用 VBA 那套「选数据区上一整行再 AutoFilter」：那一行是插入的第 7 个空行（只写 6 个
+            // 统计行），拿空的整行当筛选头 Excel 会直接报「_AutoFilter 方法无效」。
+            // 改为显式指定「表头行 = 数据区上一行」到「最后一列 @ 数据区末行」的完整区块。
+            Excel.Range first = (Excel.Range)sheet.Cells[plan.DataStartRow - 1, 1];
+            Excel.Range last = (Excel.Range)sheet.Cells[plan.DataStopRow, layout.DataStopColumn];
+            Excel.Range block = null;
+
             try
             {
-                headerRow.Select();
+                block = sheet.Range[first, last];
+                block.Select();
                 ((Excel.Range)app.Selection).AutoFilter();
             }
             finally
             {
-                ExcelInterop.Release(headerRow);
+                ExcelInterop.Release(block);
+                ExcelInterop.Release(last);
+                ExcelInterop.Release(first);
             }
         }
 
