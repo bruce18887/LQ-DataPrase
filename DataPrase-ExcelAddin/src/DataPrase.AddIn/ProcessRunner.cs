@@ -279,25 +279,42 @@ namespace DataPrase.AddIn
 
         private static void ApplyAutoFilter(Excel.Application app, Excel.Worksheet sheet, LayoutResult layout, ProcessPlan plan)
         {
-            // 不用 VBA 那套「选数据区上一整行再 AutoFilter」：那一行是插入的第 7 个空行（只写 6 个
-            // 统计行），拿空的整行当筛选头 Excel 会直接报「_AutoFilter 方法无效」。
-            // 改为显式指定「表头行 = 数据区上一行」到「最后一列 @ 数据区末行」的完整区块，
-            // 并直接对区块调用（不经 Selection，避免选区不是 Range 时的二次失败）。
-            Excel.Range first = (Excel.Range)sheet.Cells[plan.DataStartRow - 1, 1];
-            Excel.Range last = (Excel.Range)sheet.Cells[plan.DataStopRow, layout.DataStopColumn];
-            Excel.Range block = null;
+            // VBA 原本是「选中数据区上一整行再 Selection.AutoFilter」。那一行是插入进来的第 7 个
+            // **空行**（只写 6 个统计行），拿空行当筛选头 Excel 会报「_AutoFilter 方法无效」。
+            // 依次尝试两种表头，取第一个成功的；都失败才把异常抛给上层记警告。
+            var candidates = new[]
+            {
+                new { HeaderRow = plan.DataStartRow - 1, Label = "数据区上一行（VBA 口径）" },
+                new { HeaderRow = layout.TestNameRow, Label = "列名行" },
+            };
 
-            try
+            var failures = new List<string>();
+
+            foreach (var candidate in candidates)
             {
-                block = sheet.Range[first, last];
-                block.AutoFilter();
+                Excel.Range first = (Excel.Range)sheet.Cells[candidate.HeaderRow, 1];
+                Excel.Range last = (Excel.Range)sheet.Cells[plan.DataStopRow, layout.DataStopColumn];
+                Excel.Range block = null;
+
+                try
+                {
+                    block = sheet.Range[first, last];
+                    block.AutoFilter();
+                    return;
+                }
+                catch (COMException ex)
+                {
+                    failures.Add(candidate.Label + "：" + ex.Message);
+                }
+                finally
+                {
+                    ExcelInterop.Release(block);
+                    ExcelInterop.Release(last);
+                    ExcelInterop.Release(first);
+                }
             }
-            finally
-            {
-                ExcelInterop.Release(block);
-                ExcelInterop.Release(last);
-                ExcelInterop.Release(first);
-            }
+
+            throw new InvalidOperationException(string.Join("；", failures.ToArray()));
         }
 
         /// <summary>把 Exp 分布表按指定测试项列填好（Actions 的「分布表」按钮与自动填充共用）。</summary>
