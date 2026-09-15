@@ -11,4 +11,16 @@ TestResult.xml
 
 # Visual Studio local state
 .vs/
+*.user
+*.suo
 *.dtbcache.json
+
+# NuGet
+packages/
+*.nupkg
+
+# The repo-root .gitignore has a global "build/" rule (for the Python/Electron build dir),
+# which also swallows this add-in's build/ folder. Re-include it: the build & smoke scripts
+# here are source, not artifacts.
+!build/
+!build/**
