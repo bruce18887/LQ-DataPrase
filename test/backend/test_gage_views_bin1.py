@@ -50,6 +50,7 @@ class GageOnlyBin1Tests(APITestCase):
         # pass bins written as text; only Bin2 is a fail row
         df = pd.DataFrame({
             'SW_Bin': ['Bin1', 'BIN 1', 'Bin2'],
+            'Site_No': ['1', '1', '2'],
             'T1': [1.0, 2.0, 3.0],
         })
         meta = {'format': 'CTA8290D', 'mins': {'T1': '0'},
@@ -58,7 +59,8 @@ class GageOnlyBin1Tests(APITestCase):
                         return_value=(df, meta, 'CTA8290D')):
             resp = self.client.post(
                 GAGE_URL,
-                {'file_ids': [f.id for f in self.files],
+                {'assignments': [{'file_id': f.id, 'site': 1}
+                                 for f in self.files],
                  'only_bin1': True, 'ignore_no_limit': False},
                 format='json',
             )

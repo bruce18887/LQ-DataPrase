@@ -1,20 +1,19 @@
 """Legacy monolithic Gage R&R summary Excel builder.
 
-This module contains the original build_gage_summary_excel function
-which is self-contained with its own styles, helpers, and logic.
+`build_gage_summary_excel` 负责编排：写 Summary 工作表（跨文件对比 + R&R）
+并逐个写文件工作表。样式与单文件版式已拆到 `gage_styles` / `gage_file_sheet`，
+本模块只保留统计与布局编排逻辑。
 """
 
 import numpy as np
-import pandas as pd
 import excelize
 import tempfile
 import os
 from apps.analysis.services.statistics import ensure_numeric
 from apps.common.constants import NON_NUMERIC_KEYWORDS
 from apps.datafiles.parsers.base import SYSTEM_COLUMNS
-
-FILL_GRAY_HEX = "E0E0E0"
-FILL_LIGHT_BLUE_HEX = "D6EAF8"
+from apps.gage.gage_file_sheet import write_file_sheet
+from apps.gage.gage_styles import create_summary_styles, create_file_sheet_styles
 
 
 def _safe_float_or_none(val):
@@ -79,167 +78,12 @@ def build_gage_summary_excel(file_datasets, ignore_no_limit=False):
     col_letter_27 = excelize.column_number_to_name(summary_header_count)
 
     # === STYLES ===
-    # 现代专业配色（与 buyoff 统一）
-    COLOR_HEADER_BG = "2C3E50"
-    COLOR_HEADER_FONT = "FFFFFF"
-    COLOR_DATA_BG = "F8F9FA"
-    COLOR_BORDER = "BDC3C7"
-    COLOR_FONT_DARK = "2C3E50"
-    COLOR_RED_BG = "F5B7B1"
-    COLOR_GREEN_OK = "27AE60"
-
-    header_style = f.new_style(excelize.Style(
-        font=excelize.Font(bold=True, size=12, color=COLOR_HEADER_FONT, family="Calibri"),
-        fill=excelize.Fill(type="pattern", color=[COLOR_HEADER_BG], pattern=1),
-        border=[
-            excelize.Border(type="left", color=COLOR_BORDER, style=2),
-            excelize.Border(type="top", color=COLOR_BORDER, style=2),
-            excelize.Border(type="bottom", color=COLOR_BORDER, style=2),
-            excelize.Border(type="right", color=COLOR_BORDER, style=2),
-        ],
-        alignment=excelize.Alignment(horizontal="center", vertical="center"),
-    ))
-    title_style = f.new_style(excelize.Style(
-        font=excelize.Font(bold=True, size=16, color=COLOR_HEADER_FONT, family="Calibri"),
-        fill=excelize.Fill(type="pattern", color=[COLOR_HEADER_BG], pattern=1),
-        alignment=excelize.Alignment(horizontal="center", vertical="center"),
-    ))
-    info_label_style = f.new_style(excelize.Style(
-        font=excelize.Font(bold=True, size=10, color=COLOR_FONT_DARK, family="Calibri"),
-        alignment=excelize.Alignment(horizontal="left", vertical="center"),
-    ))
-    info_value_style = f.new_style(excelize.Style(
-        font=excelize.Font(size=10, color=COLOR_FONT_DARK, family="Calibri"),
-        alignment=excelize.Alignment(horizontal="left", vertical="center"),
-    ))
-    warning_style = f.new_style(excelize.Style(
-        font=excelize.Font(size=9, color=COLOR_RED_BG, family="Calibri"),
-        alignment=excelize.Alignment(horizontal="left", vertical="center", wrap_text=True),
-    ))
-    data_style = f.new_style(excelize.Style(
-        font=excelize.Font(size=10, color=COLOR_FONT_DARK, family="Calibri"),
-        fill=excelize.Fill(type="pattern", color=[COLOR_DATA_BG], pattern=1),
-        border=[
-            excelize.Border(type="left", color=COLOR_BORDER, style=1),
-            excelize.Border(type="top", color=COLOR_BORDER, style=1),
-            excelize.Border(type="bottom", color=COLOR_BORDER, style=1),
-            excelize.Border(type="right", color=COLOR_BORDER, style=1),
-        ],
-        alignment=excelize.Alignment(horizontal="center", vertical="center"),
-    ))
-    thick_top_style = f.new_style(excelize.Style(
-        font=excelize.Font(size=10, color=COLOR_FONT_DARK, family="Calibri"),
-        fill=excelize.Fill(type="pattern", color=[COLOR_DATA_BG], pattern=1),
-        border=[
-            excelize.Border(type="left", color=COLOR_BORDER, style=2),
-            excelize.Border(type="top", color=COLOR_BORDER, style=2),
-            excelize.Border(type="bottom", color=COLOR_BORDER, style=1),
-            excelize.Border(type="right", color=COLOR_BORDER, style=1),
-        ],
-        alignment=excelize.Alignment(horizontal="center", vertical="center"),
-    ))
-    thick_top_mid_style = f.new_style(excelize.Style(
-        font=excelize.Font(size=10, color=COLOR_FONT_DARK, family="Calibri"),
-        fill=excelize.Fill(type="pattern", color=[COLOR_DATA_BG], pattern=1),
-        border=[
-            excelize.Border(type="left", color=COLOR_BORDER, style=1),
-            excelize.Border(type="top", color=COLOR_BORDER, style=2),
-            excelize.Border(type="bottom", color=COLOR_BORDER, style=1),
-            excelize.Border(type="right", color=COLOR_BORDER, style=1),
-        ],
-        alignment=excelize.Alignment(horizontal="center", vertical="center"),
-    ))
-    thick_top_right_style = f.new_style(excelize.Style(
-        font=excelize.Font(size=10, color=COLOR_FONT_DARK, family="Calibri"),
-        fill=excelize.Fill(type="pattern", color=[COLOR_DATA_BG], pattern=1),
-        border=[
-            excelize.Border(type="left", color=COLOR_BORDER, style=1),
-            excelize.Border(type="top", color=COLOR_BORDER, style=2),
-            excelize.Border(type="bottom", color=COLOR_BORDER, style=1),
-            excelize.Border(type="right", color=COLOR_BORDER, style=2),
-        ],
-        alignment=excelize.Alignment(horizontal="center", vertical="center"),
-    ))
-    thick_left_style = f.new_style(excelize.Style(
-        font=excelize.Font(size=10, color=COLOR_FONT_DARK, family="Calibri"),
-        fill=excelize.Fill(type="pattern", color=[COLOR_DATA_BG], pattern=1),
-        border=[
-            excelize.Border(type="left", color=COLOR_BORDER, style=2),
-            excelize.Border(type="top", color=COLOR_BORDER, style=1),
-            excelize.Border(type="bottom", color=COLOR_BORDER, style=1),
-            excelize.Border(type="right", color=COLOR_BORDER, style=1),
-        ],
-        alignment=excelize.Alignment(horizontal="center", vertical="center"),
-    ))
-    thick_right_style = f.new_style(excelize.Style(
-        font=excelize.Font(size=10, color=COLOR_FONT_DARK, family="Calibri"),
-        fill=excelize.Fill(type="pattern", color=[COLOR_DATA_BG], pattern=1),
-        border=[
-            excelize.Border(type="left", color=COLOR_BORDER, style=1),
-            excelize.Border(type="top", color=COLOR_BORDER, style=1),
-            excelize.Border(type="bottom", color=COLOR_BORDER, style=1),
-            excelize.Border(type="right", color=COLOR_BORDER, style=2),
-        ],
-        alignment=excelize.Alignment(horizontal="center", vertical="center"),
-    ))
-    thick_bottom_style = f.new_style(excelize.Style(
-        font=excelize.Font(size=10, color=COLOR_FONT_DARK, family="Calibri"),
-        fill=excelize.Fill(type="pattern", color=[COLOR_DATA_BG], pattern=1),
-        border=[
-            excelize.Border(type="left", color=COLOR_BORDER, style=2),
-            excelize.Border(type="top", color=COLOR_BORDER, style=1),
-            excelize.Border(type="bottom", color=COLOR_BORDER, style=2),
-            excelize.Border(type="right", color=COLOR_BORDER, style=1),
-        ],
-        alignment=excelize.Alignment(horizontal="center", vertical="center"),
-    ))
-    thick_bottom_mid_style = f.new_style(excelize.Style(
-        font=excelize.Font(size=10, color=COLOR_FONT_DARK, family="Calibri"),
-        fill=excelize.Fill(type="pattern", color=[COLOR_DATA_BG], pattern=1),
-        border=[
-            excelize.Border(type="left", color=COLOR_BORDER, style=1),
-            excelize.Border(type="top", color=COLOR_BORDER, style=1),
-            excelize.Border(type="bottom", color=COLOR_BORDER, style=2),
-            excelize.Border(type="right", color=COLOR_BORDER, style=1),
-        ],
-        alignment=excelize.Alignment(horizontal="center", vertical="center"),
-    ))
-    thick_bottom_right_style = f.new_style(excelize.Style(
-        font=excelize.Font(size=10, color=COLOR_FONT_DARK, family="Calibri"),
-        fill=excelize.Fill(type="pattern", color=[COLOR_DATA_BG], pattern=1),
-        border=[
-            excelize.Border(type="left", color=COLOR_BORDER, style=1),
-            excelize.Border(type="top", color=COLOR_BORDER, style=1),
-            excelize.Border(type="bottom", color=COLOR_BORDER, style=2),
-            excelize.Border(type="right", color=COLOR_BORDER, style=2),
-        ],
-        alignment=excelize.Alignment(horizontal="center", vertical="center"),
-    ))
-
-    # Regular red fill style for direct cell coloring
-    red_cell_style = f.new_style(excelize.Style(
-        fill=excelize.Fill(type="pattern", color=[COLOR_RED_BG], pattern=1),
-    ))
-
-    # Percentage format style for R&R% column
-    r_r_pct_style = f.new_style(excelize.Style(
-        custom_num_fmt="0.000%",
-    ))
-
-    # Red fill + percentage format for Bad1 R&R% cells
-    red_rr_pct_style = f.new_style(excelize.Style(
-        fill=excelize.Fill(type="pattern", color=[COLOR_RED_BG], pattern=1),
-        custom_num_fmt="0.000%",
-    ))
-
-    # Bold style for Bad1 count
-    bad1_ok_style = f.new_style(excelize.Style(
-        font=excelize.Font(bold=True, size=11, color=COLOR_GREEN_OK, family="Calibri"),
-    ))
-    bad1_fail_style = f.new_style(excelize.Style(
-        font=excelize.Font(bold=True, size=11, color="FFFFFF", family="Calibri"),
-        fill=excelize.Fill(type="pattern", color=[COLOR_RED_BG], pattern=1),
-    ))
+    (header_style, title_style, info_label_style, info_value_style,
+     warning_style, data_style, thick_top_style, thick_top_mid_style,
+     thick_top_right_style, thick_left_style, thick_right_style,
+     thick_bottom_style, thick_bottom_mid_style, thick_bottom_right_style,
+     red_cell_style, r_r_pct_style, red_rr_pct_style, bad1_ok_style,
+     bad1_fail_style) = create_summary_styles(f)
 
     # === WRITE SUMMARY SHEET HEADER INFO ===
     def _set_cell(sheet, cell, value):
@@ -643,244 +487,12 @@ def build_gage_summary_excel(file_datasets, ignore_no_limit=False):
     ))
 
     # Pre-create styles for individual file sheets
-    light_blue_style = f.new_style(excelize.Style(
-        fill=excelize.Fill(type="pattern", color=[FILL_LIGHT_BLUE_HEX], pattern=1),
-        border=[
-            excelize.Border(type="left", color="000000", style=1),
-            excelize.Border(type="top", color="000000", style=1),
-            excelize.Border(type="bottom", color="000000", style=1),
-            excelize.Border(type="right", color="000000", style=1),
-        ],
-    ))
-    gray_style = f.new_style(excelize.Style(
-        fill=excelize.Fill(type="pattern", color=[FILL_GRAY_HEX], pattern=1),
-        border=[
-            excelize.Border(type="left", color="000000", style=1),
-            excelize.Border(type="top", color="000000", style=1),
-            excelize.Border(type="bottom", color="000000", style=1),
-            excelize.Border(type="right", color="000000", style=1),
-        ],
-    ))
-    stats_gray_style = f.new_style(excelize.Style(
-        fill=excelize.Fill(type="pattern", color=[FILL_GRAY_HEX], pattern=1),
-        border=[
-            excelize.Border(type="left", color="000000", style=1),
-            excelize.Border(type="top", color="000000", style=1),
-            excelize.Border(type="bottom", color="000000", style=1),
-            excelize.Border(type="right", color="000000", style=1),
-        ],
-        alignment=excelize.Alignment(horizontal="right"),
-    ))
-    stats_border_style = f.new_style(excelize.Style(
-        border=[
-            excelize.Border(type="left", color="000000", style=1),
-            excelize.Border(type="top", color="000000", style=1),
-            excelize.Border(type="bottom", color="000000", style=1),
-            excelize.Border(type="right", color="000000", style=1),
-        ],
-        alignment=excelize.Alignment(horizontal="right"),
-    ))
+    file_styles = create_file_sheet_styles(f)
 
     # === INDIVIDUAL FILE SHEETS ===
     for file_info in file_datasets:
-        filename = file_info['filename']
-        df = file_info['df']
-        metadata = file_info['metadata']
-
-        sheet_name = filename[:31]
-        f.new_sheet(sheet_name)
-
-        tester_id = metadata.get('tester_id', '')
-        program_name = metadata.get('program_name', '')
-        start_time = metadata.get('start_time', '')
-
-        # Header rows (1-7)
-        _set_cell(sheet_name, "A1", "RawData2")
-        _set_cell(sheet_name, "B1", len(df.columns))
-        _set_cell(sheet_name, "C1", min(len(df), 100))
-        _set_cell(sheet_name, "D1", "Changchuan")
-        _set_cell(sheet_name, "E1", "CTA8290D")
-
-        _set_cell(sheet_name, "B3", f"LotID,{filename}")
-        _set_cell(sheet_name, "B4", f"Tester ID,{tester_id}")
-        _set_cell(sheet_name, "B5", "User,admin")
-        _set_cell(sheet_name, "B6", f"Program Name,{program_name}")
-        _set_cell(sheet_name, "B7", f"DateTime,{start_time}")
-
-        # Determine columns for this sheet
-        data_header = list(df.columns)
-        test_units = metadata.get('units', {})
-        test_mins = metadata.get('mins', {})
-        test_maxs = metadata.get('maxs', {})
-
-        if ignore_no_limit:
-            data_header = [col for col in data_header
-                          if col in test_mins and col in test_maxs
-                          and test_mins[col].strip() and test_maxs[col].strip()
-                          and test_mins[col].strip().lower() not in non_numeric_keywords
-                          and test_maxs[col].strip().lower() not in non_numeric_keywords]
-
-        # Column A styles
-        _set_cell(sheet_name, "A8", "Test Name")
-        _set_cell(sheet_name, "A9", "Test Number")
-        _set_cell(sheet_name, "A10", "Test Units")
-        _set_cell(sheet_name, "A11", "Low Limits")
-        _set_cell(sheet_name, "A12", "High Limits")
-        _set_cell(sheet_name, "H8", "Data_Cnt")
-
-        for row in range(8, 13):
-            for col in range(8, len(data_header) + 9):
-                cl = excelize.column_number_to_name(col)
-                f.set_cell_style(sheet_name, f"{cl}{row}", f"{cl}{row}", light_blue_style)
-        f.set_cell_style(sheet_name, "H8", "H8", light_blue_style)
-
-        # Write test item headers (columns 9+)
-        cl_h = excelize.column_number_to_name(8)
-        for test_idx, col_name in enumerate(data_header):
-            col_letter = excelize.column_number_to_name(test_idx + 9)
-            _set_cell(sheet_name, f"{col_letter}8", col_name)
-            f.set_cell_value(sheet_name, f"{col_letter}9", "")
-            _set_cell(sheet_name, f"{col_letter}10", test_units.get(col_name, ''))
-            low_raw = test_mins.get(col_name)
-            high_raw = test_maxs.get(col_name)
-            _set_cell(sheet_name, f"{col_letter}11", low_raw if low_raw not in (None, '') else 'N/A')
-            _set_cell(sheet_name, f"{col_letter}12", high_raw if high_raw not in (None, '') else 'N/A')
-
-        # Data header row 13 (gray fill)
-        for col in range(2, 8):
-            cl = excelize.column_number_to_name(col)
-            f.set_cell_style(sheet_name, f"{cl}13", f"{cl}13", gray_style)
-        for col in range(8, len(data_header) + 9):
-            cl = excelize.column_number_to_name(col)
-            f.set_cell_style(sheet_name, f"{cl}13", f"{cl}13", gray_style)
-
-        _set_cell(sheet_name, "B13", "Site #")
-        _set_cell(sheet_name, "C13", "Serial #")
-        _set_cell(sheet_name, "D13", "Bin")
-        _set_cell(sheet_name, "E13", "XCoord")
-        _set_cell(sheet_name, "F13", "YCoord")
-        _set_cell(sheet_name, "G13", "Test Time")
-
-        # Write data rows (up to 100)
-        data_start_row = 14
-        data_rows_to_write = min(len(df), 100)
-
-        site_col = 'Site'
-        serial_col = 'Serial'
-        bin_col = 'Bin'
-        xcol = 'XCoord'
-        ycol = 'YCoord'
-
-        if 'Site #' in df.columns:
-            site_col = 'Site #'
-        if 'Serial #' in df.columns:
-            serial_col = 'Serial #'
-
-        has_site = site_col in df.columns
-        has_serial = serial_col in df.columns
-        has_bin = bin_col in df.columns
-        has_xcol = xcol in df.columns
-        has_ycol = ycol in df.columns
-
-        for row_idx in range(data_rows_to_write):
-            excel_row = data_start_row + row_idx
-            row_data = df.iloc[row_idx]
-
-            _set_cell(sheet_name, f"B{excel_row}", float(row_data[site_col]) if has_site else 1)
-            _set_cell(sheet_name, f"C{excel_row}", float(row_data[serial_col]) if has_serial else (row_idx + 1))
-            _set_cell(sheet_name, f"D{excel_row}", float(row_data[bin_col]) if has_bin else 1)
-            _set_cell(sheet_name, f"E{excel_row}", float(row_data[xcol]) if has_xcol else -30000)
-            _set_cell(sheet_name, f"F{excel_row}", float(row_data[ycol]) if has_ycol else -30000)
-            _set_cell(sheet_name, f"G{excel_row}", -1)
-            _set_cell(sheet_name, f"H{excel_row}", len(df))
-
-            for test_idx, col_name in enumerate(data_header):
-                try:
-                    val = row_data[col_name]
-                    if pd.notna(val):
-                        col_letter = excelize.column_number_to_name(test_idx + 9)
-                        _set_cell(sheet_name, f"{col_letter}{excel_row}", float(val))
-                except (ValueError, TypeError):
-                    pass
-
-        last_data_row_excel = data_start_row + data_rows_to_write - 1
-
-        # Pre-calculated statistics rows (115-128) instead of formulas
-
-        for row in range(115, 129):
-            for col in range(2, 8):
-                cl = excelize.column_number_to_name(col)
-                f.set_cell_style(sheet_name, f"{cl}{row}", f"{cl}{row}", stats_gray_style)
-            for col in range(8, len(data_header) + 9):
-                cl = excelize.column_number_to_name(col)
-                f.set_cell_style(sheet_name, f"{cl}{row}", f"{cl}{row}", stats_border_style)
-
-        stat_labels = [
-            (115, "Low Limit"), (116, "High Limit"), (117, "Min"), (118, "Max"),
-            (119, "Range"), (120, "Mean"), (121, "Std"), (122, "Mean-6*std"),
-            (123, "Mean-3*std"), (124, "Mean+3*std"), (125, "Mean+6*std"),
-            (126, "CPK-LowLimti"), (127, "CPK-HighLimit"), (128, "CPK"),
-        ]
-        for row_num, label in stat_labels:
-            _set_cell(sheet_name, f"A{row_num}", label)
-
-        # Pre-calculate statistics for each test column
-        for test_idx, col_name in enumerate(data_header):
-            col_letter = excelize.column_number_to_name(test_idx + 9)
-            col_data = ensure_numeric(df, col_name).dropna()
-
-            low_val = test_mins.get(col_name)
-            high_val = test_maxs.get(col_name)
-
-            # Limits (rows 115-116) — 'N/A' when missing, never a magic 0/4 (defect #3)
-            _set_cell(sheet_name, f"{col_letter}115", low_val if low_val not in (None, '') else 'N/A')
-            _set_cell(sheet_name, f"{col_letter}116", high_val if high_val not in (None, '') else 'N/A')
-
-            if len(col_data) > 0:
-                col_min = float(col_data.min())
-                col_max = float(col_data.max())
-                col_range = col_max - col_min
-                col_mean = float(col_data.mean())
-                col_std = float(col_data.std(ddof=1)) if len(col_data) > 1 else 0.0
-
-                _set_cell(sheet_name, f"{col_letter}117", round(col_min, 6))
-                _set_cell(sheet_name, f"{col_letter}118", round(col_max, 6))
-                _set_cell(sheet_name, f"{col_letter}119", round(col_range, 6))
-                _set_cell(sheet_name, f"{col_letter}120", round(col_mean, 6))
-                _set_cell(sheet_name, f"{col_letter}121", round(col_std, 6))
-                _set_cell(sheet_name, f"{col_letter}122", round(col_mean - 6 * col_std, 6))
-                _set_cell(sheet_name, f"{col_letter}123", round(col_mean - 3 * col_std, 6))
-                _set_cell(sheet_name, f"{col_letter}124", round(col_mean + 3 * col_std, 6))
-                _set_cell(sheet_name, f"{col_letter}125", round(col_mean + 6 * col_std, 6))
-
-                # CPK calculations
-                if col_std > 0:
-                    try:
-                        low_float = float(low_val) if low_val not in ('', None) and str(low_val).strip().lower() not in non_numeric_keywords else None
-                    except (ValueError, TypeError):
-                        low_float = None
-                    try:
-                        high_float = float(high_val) if high_val not in ('', None) and str(high_val).strip().lower() not in non_numeric_keywords else None
-                    except (ValueError, TypeError):
-                        high_float = None
-
-                    if low_float is not None:
-                        cpk_low = abs(col_mean - low_float) / (3 * col_std)
-                        _set_cell(sheet_name, f"{col_letter}126", round(cpk_low, 6))
-                    if high_float is not None:
-                        cpk_high = abs(col_mean - high_float) / (3 * col_std)
-                        _set_cell(sheet_name, f"{col_letter}127", round(cpk_high, 6))
-                    if low_float is not None and high_float is not None:
-                        cpk = min(abs(col_mean - low_float), abs(col_mean - high_float)) / (3 * col_std)
-                        _set_cell(sheet_name, f"{col_letter}128", round(cpk, 6))
-
-        # Row group for data rows (> 6), default collapsed
-        if data_rows_to_write > 6:
-            group_start = data_start_row + 3
-            group_end = last_data_row_excel - 3
-            for row in range(group_start, group_end + 1):
-                f.set_row_outline_level(sheet_name, row, 1)
-                f.set_row_visible(sheet_name, row, False)
+        write_file_sheet(f, file_info, ignore_no_limit, non_numeric_keywords,
+                         file_styles, _set_cell)
 
     # Save to bytes — try/finally guarantees the temp file and the excelize
     # handle are released even if save_as / read raises (defect #10). Mirrors
