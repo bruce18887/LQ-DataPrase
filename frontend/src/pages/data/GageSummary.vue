@@ -6,7 +6,7 @@
         <span class="tab-title-icon" aria-hidden="true">📊</span>
         <h3 class="tab-title">Gage Summary 生成</h3>
       </div>
-      <p class="tab-subtitle">为 8 个 Site 槽位分配文件，生成多 Site 统计对比报表</p>
+      <p class="tab-subtitle">为 8 个 Site 槽位分配文件：每个槽位对应其工位编号（S1→Site 1 … S8→Site 8），仅导出该工位的数据，生成多 Site 统计对比报表</p>
     </header>
 
     <!-- Site 槽位分配 -->
@@ -27,7 +27,7 @@
               </div>
               <FileSelect
                 v-model="slot.fileId"
-                :files="availableFiles(slot.key)"
+                :files="availableFiles()"
                 placeholder="选择文件"
                 clearable
                 show-meta
@@ -95,12 +95,15 @@ import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { gageApi } from '../../api/gage'
 import { downloadBlob, extractFilenameFromContentDisposition } from '../../utils/download'
+import { formatError, parseBlobError } from '../../utils/error'
 import type { DataFile } from '../../types'
 import FileSelect from '../../components/common/FileSelect.vue'
 
 interface SiteSlot {
   key: string
   label: string
+  /** 该槽位对应的工位编号，随槽位固定（S1→1 … S8→8） */
+  site: number
   fileId: number | null
 }
 
@@ -117,14 +120,14 @@ const loading = ref(false)
 const progress = ref(0)
 
 const siteSlots = ref<SiteSlot[]>([
-  { key: 'S1', label: 'Site 1 (_S1)', fileId: null },
-  { key: 'S2', label: 'Site 2 (_S2)', fileId: null },
-  { key: 'S3', label: 'Site 3 (_S3)', fileId: null },
-  { key: 'S4', label: 'Site 4 (_S4)', fileId: null },
-  { key: 'S5', label: 'Site 5 (_S5)', fileId: null },
-  { key: 'S6', label: 'Site 6 (_S6)', fileId: null },
-  { key: 'S7', label: 'Site 7 (_S7)', fileId: null },
-  { key: 'S8', label: 'Site 8 (_S8)', fileId: null },
+  { key: 'S1', label: 'Site 1 (_S1)', site: 1, fileId: null },
+  { key: 'S2', label: 'Site 2 (_S2)', site: 2, fileId: null },
+  { key: 'S3', label: 'Site 3 (_S3)', site: 3, fileId: null },
+  { key: 'S4', label: 'Site 4 (_S4)', site: 4, fileId: null },
+  { key: 'S5', label: 'Site 5 (_S5)', site: 5, fileId: null },
+  { key: 'S6', label: 'Site 6 (_S6)', site: 6, fileId: null },
+  { key: 'S7', label: 'Site 7 (_S7)', site: 7, fileId: null },
+  { key: 'S8', label: 'Site 8 (_S8)', site: 8, fileId: null },
 ])
 
 // 数据库文件被删除后自动清理已失效的槽位分配（keep-alive 下组件常驻，
@@ -154,19 +157,11 @@ const assignedFileIds = computed(() => {
 })
 
 /**
- * 当前槽位可选文件：排除其它槽位已占用；当前槽位已选文件即使被其它槽位
- * 占用也并回 options（否则 el-select 对不在 options 中的值显示裸 id 数字）。
+ * 槽位可选文件：返回全部文件。同一文件可能含多个工位，允许在多个槽位复用
+ * （各槽位只取对应工位的数据），因此不再按槽位互斥。
  */
-function availableFiles(currentKey: string) {
-  const usedIds = new Set<number>()
-  for (const slot of siteSlots.value) {
-    if (slot.key !== currentKey && slot.fileId !== null) {
-      usedIds.add(slot.fileId)
-    }
-  }
-  const own = siteSlots.value.find((s) => s.key === currentKey)?.fileId
-  if (own != null) usedIds.delete(own)
-  return props.files.filter(f => !usedIds.has(f.id))
+function availableFiles() {
+  return props.files
 }
 
 async function generate() {
@@ -185,8 +180,12 @@ async function generate() {
   }, 300)
 
   try {
+    const assignments = assignedSlots.value.map(s => ({
+      file_id: s.fileId as number,
+      site: s.site,
+    }))
     const resp = await gageApi.generateSummary(
-      assignedFileIds.value,
+      assignments,
       onlyBin1.value,
       ignoreNoLimit.value,
     )
@@ -196,8 +195,11 @@ async function generate() {
     ) ?? 'Gage_Summary.xlsx'
     downloadBlob(resp.data as Blob, fname)
     ElMessage.success('Gage Summary 已下载')
-  } catch {
-    // 错误 toast 由 axios 拦截器统一弹出
+  } catch (err) {
+    // 生成请求 silent，错误体是 Blob：优先解析后端的具体提示
+    // （如「文件 X 不含 Site 3 的数据」），解析不到再回退通用格式化。
+    const msg = await parseBlobError(err)
+    ElMessage.error(msg ?? formatError(err))
   } finally {
     clearInterval(progressInterval)
     loading.value = false

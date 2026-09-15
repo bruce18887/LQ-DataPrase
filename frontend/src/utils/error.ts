@@ -29,6 +29,9 @@ export const ERROR_CODE_MAP: Record<string, string> = {
   param_x_and_param_y_required: '缺少 X/Y 参数',
   param_is_metadata: '该参数为元数据，无法分析',
   no_site_column: '缺少站点列',
+  site_not_found: '该文件不含所选工位的数据',
+  invalid_assignment: '工位分配参数无效',
+  duplicate_assignment: '同一文件与工位重复分配',
   no_files: '没有文件',
   no_data: '没有数据',
   no_coord_columns: '缺少坐标列',
@@ -71,4 +74,31 @@ export function formatError(err: unknown, fallback = '请求失败'): string {
     }
   }
   return e.message || fallback
+}
+
+/**
+ * 解析 `responseType: 'blob'` 请求失败时被包成 Blob 的 JSON 错误体。
+ *
+ * Blob 下载接口（如 Gage Summary 生成）失败时，后端仍返回 JSON，但 axios
+ * 因 responseType 把它读成了 Blob，formatError 的同步逻辑取不到 message。
+ * 调用方需 `await parseBlobError(err)` 拿到可读消息，再自行 toast。
+ * 非 Blob / 非 JSON 时返回 null，由调用方回退 formatError。
+ */
+export async function parseBlobError(err: unknown): Promise<string | null> {
+  const data = (err as ErrorLike | undefined)?.response?.data
+  if (!(data instanceof Blob)) return null
+  try {
+    const parsed = JSON.parse(await data.text())
+    if (parsed && typeof parsed === 'object') {
+      const d = parsed as Record<string, unknown>
+      if (typeof d.message === 'string' && d.message) return d.message
+      if (typeof d.detail === 'string' && d.detail) return d.detail
+      if (typeof d.error === 'string' && d.error) {
+        return hasCJK(d.error) ? d.error : (ERROR_CODE_MAP[d.error] ?? d.error)
+      }
+    }
+  } catch {
+    return null
+  }
+  return null
 }

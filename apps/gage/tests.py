@@ -40,7 +40,8 @@ class GenerateSummaryFilenameTests(APITestCase):
 
     def test_default_template_contains_datetime(self):
         resp = self.client.post('/api/v1/gage/generate_summary/',
-                                {'file_ids': [f.id for f in self.files],
+                                {'assignments': [{'file_id': f.id, 'site': 1}
+                                                 for f in self.files],
                                  'only_bin1': False, 'ignore_no_limit': False},
                                 format='json')
         self.assertEqual(resp.status_code, 200, resp.data if hasattr(resp, 'data') else '')
@@ -57,7 +58,8 @@ class GenerateSummaryFilenameTests(APITestCase):
                                format='json')
         self.assertEqual(resp.status_code, 200, resp.data)
         resp = self.client.post('/api/v1/gage/generate_summary/',
-                                {'file_ids': [f.id for f in self.files],
+                                {'assignments': [{'file_id': f.id, 'site': 1}
+                                                 for f in self.files],
                                  'only_bin1': False, 'ignore_no_limit': False},
                                 format='json')
         self.assertEqual(resp.status_code, 200)

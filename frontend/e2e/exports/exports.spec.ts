@@ -2,7 +2,7 @@ import { test, expect, type Page, type Locator } from '@playwright/test'
 import path from 'node:path'
 import os from 'node:os'
 import fs from 'node:fs'
-import { PRIMARY_SAMPLE_FILE } from '../fixtures/test-data'
+import { PRIMARY_SAMPLE_FILE, SEEDED_FILES } from '../fixtures/test-data'
 import { gotoApp } from '../helpers/nav'
 import { uploadFile, expectUploadSuccess } from '../helpers/upload'
 import { elSelectByPlaceholder } from '../helpers/elplus'
@@ -110,6 +110,28 @@ async function assignFiles(page: Page, selects: Locator, want: number): Promise<
   return assigned
 }
 
+/**
+ * 在指定 el-select 中按文件名选择选项（返回是否成功）。
+ * Gage 槽位 = 工位编号，需要把「含对应工位」的文件放到正确槽位，
+ * 因此不能像 assignFiles 那样取任意可用项。
+ */
+async function pickOptionByName(page: Page, sel: Locator, name: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await sel.click()
+    const dropdown = page.locator('.el-select-dropdown:visible')
+    await dropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
+    const option = dropdown.locator('.el-select-dropdown__item', { hasText: name })
+    if ((await option.count()) > 0) {
+      await option.first().click()
+      await dropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
+      return true
+    }
+    await page.keyboard.press('Escape')
+    await dropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
+  }
+  return false
+}
+
 test.describe('@p2 导出 - Gage Summary', { tag: ['@p2', '@exports'] }, () => {
   test('Gage tab 控件渲染', async ({ page }) => {
     const panel = await openTab(page, 'Gage Summary', 'Gage Summary 生成')
@@ -126,16 +148,17 @@ test.describe('@p2 导出 - Gage Summary', { tag: ['@p2', '@exports'] }, () => {
     await expect(generateBtn).toBeVisible()
   })
 
-  test('可选文件足够则生成并下载 xlsx', async ({ page }) => {
+  // 槽位 = 工位编号：S1 分配含 Site 1 的文件、S2 分配含 Site 2 的文件，
+  // 生成只含各工位数据的 xlsx（不再把文件里的全部工位混在一起）。
+  test('按槽位工位过滤并生成下载 xlsx', async ({ page }) => {
     test.slow() // 分配 dropdown + 下载可能耗时较长
     const panel = await openTab(page, 'Gage Summary', 'Gage Summary 生成')
 
-    // 分配时用原始 .el-select（索引稳定；选中后占位文本会消失，不能用占位过滤集合）
     const selects = panel.locator('.el-select')
-    const assigned = await assignFiles(page, selects, 2)
-
-    if (assigned < 2) {
-      console.log(`[gage] 可选上传文件不足（已分配 ${assigned}，需 >=2），跳过下载验证`)
+    const ok1 = await pickOptionByName(page, selects.nth(0), SEEDED_FILES.GAGE_S1)
+    const ok2 = await pickOptionByName(page, selects.nth(1), SEEDED_FILES.GAGE_S2)
+    if (!ok1 || !ok2) {
+      console.log('[gage] 未找到预期的 gage 样例文件，跳过下载验证')
       test.skip(true)
       return
     }
@@ -143,7 +166,6 @@ test.describe('@p2 导出 - Gage Summary', { tag: ['@p2', '@exports'] }, () => {
     const generateBtn = page.getByRole('button', { name: /生成 Gage Summary/ })
     await expect(generateBtn).toBeEnabled()
 
-    // 并行等待响应 + 可选的下载事件（短超时），避免 download 未触发阻塞整个测试
     const respPromise = page.waitForResponse(
       (r) => /\/gage\/generate_summary\/?$/.test(new URL(r.url()).pathname),
       { timeout: 60_000 },
@@ -152,15 +174,45 @@ test.describe('@p2 导出 - Gage Summary', { tag: ['@p2', '@exports'] }, () => {
 
     await generateBtn.click()
     const [resp, dl] = await Promise.all([respPromise, dlPromise])
-    expect(resp.status(), 'generate_summary 不应 5xx').toBeLessThan(500)
+    expect(resp.status(), '正确分配工位应返回 200').toBe(200)
 
     if (dl) {
       const name = dl.suggestedFilename()
       console.log(`[gage] downloaded ${name}`)
       expect(name.toLowerCase()).toMatch(/\.xlsx$/)
     } else {
-      console.log(`[gage] 未捕获下载（后端可能返回非文件响应），响应状态=${resp.status()}`)
+      console.log('[gage] 未捕获下载事件（响应仍为 200）')
     }
+  })
+
+  // 槽位文件不含该工位的数据 → 后端 400，前端弹出具体原因，不下载。
+  test('槽位文件不含该工位时报错', async ({ page }) => {
+    const panel = await openTab(page, 'Gage Summary', 'Gage Summary 生成')
+
+    const selects = panel.locator('.el-select')
+    // gage_m_S1.csv 只含 Site 1：分配到槽位 S2（Site 2）必然缺该工位
+    const ok1 = await pickOptionByName(page, selects.nth(0), SEEDED_FILES.GAGE_S1)
+    const ok2 = await pickOptionByName(page, selects.nth(1), SEEDED_FILES.GAGE_S1)
+    if (!ok1 || !ok2) {
+      console.log('[gage] 未找到预期的 gage 样例文件，跳过报错验证')
+      test.skip(true)
+      return
+    }
+
+    const generateBtn = page.getByRole('button', { name: /生成 Gage Summary/ })
+    await expect(generateBtn).toBeEnabled()
+
+    const respPromise = page.waitForResponse(
+      (r) => /\/gage\/generate_summary\/?$/.test(new URL(r.url()).pathname),
+      { timeout: 60_000 },
+    )
+    await generateBtn.click()
+    const resp = await respPromise
+    expect(resp.status(), '缺工位应返回 400').toBe(400)
+
+    await expect(
+      page.locator('.el-message').filter({ hasText: '不含 Site 2' }),
+    ).toBeVisible({ timeout: 10_000 })
   })
 })
 
