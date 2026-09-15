@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Windows.Forms;
 using DataPrase.Core;
 using Excel = Microsoft.Office.Interop.Excel;
@@ -29,7 +30,7 @@ namespace DataPrase.AddIn
         }
     }
 
-    /// <summary>Ribbon 按钮的业务入口。对应 VBA 的 ImportButton_Changed / ProcessDataAndMarkFailuresConfigRun。</summary>
+    /// <summary>Ribbon 按钮的业务入口。</summary>
     internal static class Actions
     {
         public static void Import()
@@ -39,7 +40,12 @@ namespace DataPrase.AddIn
 
         public static void MarkFailures()
         {
-            Run("标记失效", MarkCore);
+            Run("处理并标记", MarkCore);
+        }
+
+        public static void GenerateDistribution()
+        {
+            Run("分布表", DistributionCore);
         }
 
         private static void Run(string title, Action action)
@@ -54,10 +60,17 @@ namespace DataPrase.AddIn
             }
         }
 
+        /// <summary>诊断用：识别机台 + 标定 + 读测试项，不做任何修改。</summary>
         private static void ImportCore()
         {
             Excel.Application app = ExcelInterop.Application;
-            Excel.Worksheet sheet = GetDataSheet(app);
+            Excel.Workbook workbook = app.ActiveWorkbook;
+            if (workbook == null)
+            {
+                throw new InvalidOperationException("请先打开数据工作簿。");
+            }
+
+            Excel.Worksheet sheet = GetDataSheet(app, workbook);
 
             using (new ExcelStateGuard(app))
             {
@@ -76,7 +89,11 @@ namespace DataPrase.AddIn
         private static void MarkCore()
         {
             Excel.Application app = ExcelInterop.Application;
-            Excel.Worksheet sheet = GetDataSheet(app);
+            Excel.Workbook workbook = app.ActiveWorkbook;
+            if (workbook == null)
+            {
+                throw new InvalidOperationException("请先打开数据工作簿。");
+            }
 
             ProcessConfig config;
             using (var dialog = new ConfigDialog())
@@ -89,25 +106,121 @@ namespace DataPrase.AddIn
                 config = dialog.ToProcessConfig();
             }
 
+            Excel.Worksheet sheet = GetDataSheet(app, workbook);
+
             using (new ExcelStateGuard(app))
             {
-                string testerName = ProcessRunner.Run(app, sheet, config);
-                MessageBox.Show(
-                    "处理完成。\r\n识别机台：" + testerName,
-                    "LQ-DataPrase - 标记失效");
+                string summary = ProcessRunner.Run(app, workbook, sheet, config);
+                MessageBox.Show("处理完成。\r\n" + summary, "LQ-DataPrase - 处理并标记");
             }
         }
 
-        private static Excel.Worksheet GetDataSheet(Excel.Application app)
+        /// <summary>对应 VBA 的 ComboBox_Changed：选定测试项后把分布表公式写进 Exp 工作表。</summary>
+        private static void DistributionCore()
         {
+            Excel.Application app = ExcelInterop.Application;
             Excel.Workbook workbook = app.ActiveWorkbook;
             if (workbook == null)
             {
                 throw new InvalidOperationException("请先打开数据工作簿。");
             }
 
-            // 数据表不要求预先叫 "Data"：处理的是**当前活动工作表**（VBA 口径），
-            // 随后把它改名为 "Data"——Exp 分布表的公式全部按 Data! 引用。
+            if (!ProcessSession.HasResult
+                || !string.Equals(workbook.Name, ProcessSession.WorkbookName, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("请先对当前工作簿执行「处理并标记」，再生成分布表。");
+            }
+
+            int column;
+            using (var picker = new ItemPickerDialog(ProcessSession.Items))
+            {
+                if (picker.ShowDialog() != DialogResult.OK)
+                {
+                    return;
+                }
+
+                column = picker.SelectedColumn;
+            }
+
+            if (column <= 0)
+            {
+                throw new InvalidOperationException("未选择测试项。");
+            }
+
+            using (new ExcelStateGuard(app))
+            {
+                Excel.Worksheet exp = ExcelInterop.FindSheet(workbook, ExpTemplate.SheetName)
+                                      ?? ExpTemplate.Inject(app, workbook);
+                WriteDistribution(exp, workbook, column);
+            }
+        }
+
+        private static void WriteDistribution(Excel.Worksheet exp, Excel.Workbook workbook, int column)
+        {
+            int selector = ReadLimitSelector(exp);
+            IList<FormulaWrite> writes = DistributionFormulaBuilder.Build(
+                ColumnNames.ToLetter(column),
+                ProcessSession.Layout.TestNameRow,
+                ProcessSession.Plan.DataStartRow,
+                ProcessSession.Plan.DataStopRow,
+                selector,
+                ProcessSession.Spec);
+
+            foreach (FormulaWrite write in writes)
+            {
+                Excel.Range range = exp.Range[write.Address];
+                try
+                {
+                    range.Formula = write.Formula;
+                }
+                finally
+                {
+                    ExcelInterop.Release(range);
+                }
+            }
+
+            // 刚复制过来的模板公式带外部链接引用（[1]Data!…），这里已被全部覆盖；再断开残留链接。
+            BreakExternalLinks(workbook);
+        }
+
+        private static int ReadLimitSelector(Excel.Worksheet exp)
+        {
+            Excel.Range cell = (Excel.Range)exp.Cells[DistributionFormulaBuilder.LimitBaseRow, 2];   // B36
+            try
+            {
+                object value = cell.Value2;
+                double parsed = 0;
+                bool ok = value != null && double.TryParse(
+                    Convert.ToString(value, CultureInfo.InvariantCulture),
+                    NumberStyles.Float, CultureInfo.InvariantCulture, out parsed);
+                return ok ? (int)parsed : 0;
+            }
+            finally
+            {
+                ExcelInterop.Release(cell);
+            }
+        }
+
+        private static void BreakExternalLinks(Excel.Workbook workbook)
+        {
+            var links = workbook.LinkSources(Excel.XlLink.xlExcelLinks) as Array;
+            if (links == null)
+            {
+                return;
+            }
+
+            foreach (object link in links)
+            {
+                workbook.BreakLink((string)link, Excel.XlLinkType.xlLinkTypeExcelLinks);
+            }
+        }
+
+        /// <summary>
+        /// 取要处理的数据表：**不要求预先叫 "Data"**——用当前活动工作表，并改名为 "Data"
+        /// （Exp 分布表的公式全部按 <c>Data!</c> 引用，这一步是必需的）。
+        /// </summary>
+        private static Excel.Worksheet GetDataSheet(Excel.Application app, Excel.Workbook workbook)
+        {
             var sheet = app.ActiveSheet as Excel.Worksheet;
             if (sheet == null)
             {

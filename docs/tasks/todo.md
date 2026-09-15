@@ -1682,12 +1682,27 @@ ad62f81 → b47f509 → 9e313c8 → 837b3dc → 6f8a608 → 4f1d8af → 13ab77c 
       （`D2='Range'`/`E2='All Site'`/`F2:M2='Site1/N'…；`D3='=$D$36+B3*$F$36'`；`D36/E36`=Low/High
       Limit；`C53:C56`=Range/Mean/STD/CPK；`G36`=Unit）。**故按 VBA 原样实现，不做「修正布局」。**
       上面批次 3 Review 里那条「按修正布局」的待决项作废。
-- [ ] `Exp` 模板内嵌为资源 + 运行时注入（XLL 无宿主工作簿）；写入上述公式
-- [ ] 另存标记副本（`EnableAutoCopyMarkedFile`）
-- [ ] x86+x64 打包脚本 + 内部分发说明
+- [x] `Exp` 模板内嵌为资源 + 运行时注入（`ExpTemplate`：写临时文件 → 禁宏/不更新链接/不弹警告
+      打开 → 复制 `Exp` 表 → 删除临时文件）；「分布表」按钮 + `ItemPickerDialog` 替代原 ComboBox
+- [x] 另存标记副本（`SaveMarkedCopy`，顺序按 VBA：先另存副本再注 Exp，副本即为活动工作簿）
+- [x] x86+x64 打包脚本 + 安装/卸载脚本：`build/package.cmd` → `dist/DataPrase-AddIn/`
+      （32/64 位 packed xll + Core.dll + install.ps1/uninstall.ps1/README.txt，按 Excel 位数自动选）
 
-### 批次 4 Review（2026-09-15，进行中）
-- **验证账目**：构建零错误零警告；单测 **79/79**（新增 `ProcessPlannerTests` 5 例）。
+### 批次 4 Review（2026-09-15，完成）
+- **验证账目**：Debug/Release 构建零错误零警告；单测 **85/85**；`package.cmd` 实跑通过
+  （产物 32 位 771KB / 64 位 697KB packed xll + Core.dll + 脚本）；
+  内嵌资源名用反射核对为 `DataPrase.AddIn.Resources.Exp-template.xlsb`（与代码常量一致）。
+- **模板**：用户已瘦身（去掉 ActiveX 控件）另存为 `Exp-template.xlsb`（27KB，保留图表）；
+  **宏工程与外部链接仍在**（二进制格式无法安全剥离）→ 运行时以
+  `AutomationSecurity=ForceDisable` + `UpdateLinks=0` + `DisplayAlerts=False` 打开，
+  并在写完分布公式后 `BreakLink` 断开残留外部链接。
+- ⚠️ **两个编码坑（已修，见 lessons）**：
+  1. **cmd.exe 要求 CRLF**：`.cmd` 用 LF 行尾会被逐字拆错执行（报 `'uild.exe`)'` 之类）。
+  2. **PowerShell 5.1 按 ANSI(GBK) 读 `.ps1`**：UTF-8 中文会把引号读坏导致语法错误 →
+     `.ps1` 存 UTF-8 **带 BOM**；`.cmd` 内一律 ASCII（cmd 走控制台代码页，UTF-8 中文会乱码，
+     首版生成的 `安装说明.txt` 文件名就成了乱码 `瀹夎璇存槑.txt`，改为 ASCII 的 `README.txt`）。
+- ⚠️ **仍未实机验证**：本批全部 Excel 侧行为（模板注入、分布写入、另存、冻结/筛选）只有编译保证。
+- **分发形态**：xll + Core.dll 两文件（Core 未进 packed xll）；`dist/` 被根 .gitignore 忽略，不入库。
 - **移植中修正的两处理解/正确性**：
   1. `StatsFormulaBuilder` 的注释原写「Range/CPK 引用 datalog 自带统计行」是**错的**——
      spec 里 Min/Mean/Max/STD/CPK 的 Offset 都 ≥ `FormulaRowOffset`，落在**新插入的统计行**上
@@ -1695,10 +1710,6 @@ ad62f81 → b47f509 → 9e313c8 → 837b3dc → 6f8a608 → 4f1d8af → 13ab77c 
   2. 标记必须**重新读表**：插行使数据区整体下移，而 ETS88 还删过空行 → 偏移**非均匀**，
      不能用「统一 +InsertCount」平移原始数组。改为行操作后重读，再用 `plan.DataStartRow/
      DataStopRow` 标记（`LayoutResult.WithDataRows` 复用其余标定）。
-- ⚠️ **`ProcessRunner` 是破坏性操作且完全未实机验证**：会删行/插行/改窗口状态。
-  实机验证务必在**副本**上做。
-- **待决**：Exp 分布表按你此前拍板的修正布局（C=Range / D=All Site / E–L=Site1–8 / M–U=百分比）
-  实现；模板来源需定（内嵌 .xlsb 原表 / 生成精简模板）。
 
 ## 关键约束（自 VBA 复盘）
 - 禁止逐单元格 interop，一律批量读写

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Runtime.InteropServices;
 using DataPrase.Core;
 using Excel = Microsoft.Office.Interop.Excel;
@@ -13,7 +14,7 @@ namespace DataPrase.AddIn
     /// </summary>
     internal static class ProcessRunner
     {
-        public static string Run(Excel.Application app, Excel.Worksheet sheet, ProcessConfig config)
+        public static string Run(Excel.Application app, Excel.Workbook workbook, Excel.Worksheet sheet, ProcessConfig config)
         {
             int rows;
             int columns;
@@ -55,7 +56,37 @@ namespace DataPrase.AddIn
                 ApplyAutoFilter(app, sheet, plan);
             }
 
-            return spec.TesterName;
+            string summary = "识别机台：" + spec.TesterName;
+
+            // VBA 顺序：先另存副本，再复制 Exp 表（SaveAs 之后活动工作簿即为副本，Exp 表也进副本）。
+            if (config.EnableAutoCopyMarkedFile)
+            {
+                summary += "\r\n已另存副本：" + SaveMarkedCopy(workbook);
+            }
+
+            // 记录上下文，供「分布表」按钮复用（对应 VBA 的模块级全局变量）
+            ProcessSession.Record(workbook.Name, sheet.Name, spec, layout, plan, items);
+
+            if (config.EnableAutoDataDistribution)
+            {
+                ExpTemplate.Inject(app, workbook);
+                summary += "\r\n已复制 Exp 分布表";
+            }
+
+            return summary;
+        }
+
+        /// <summary>把当前（已标记的）工作簿另存为同目录的 &lt;原名&gt;Copy.xlsx；原文件保持未修改。</summary>
+        private static string SaveMarkedCopy(Excel.Workbook workbook)
+        {
+            string fullName = workbook.FullName;
+            string folder = Path.GetDirectoryName(fullName);
+            string target = Path.Combine(
+                folder ?? string.Empty,
+                Path.GetFileNameWithoutExtension(fullName) + "Copy.xlsx");
+
+            workbook.SaveAs(target, Excel.XlFileFormat.xlOpenXMLWorkbook);
+            return target;
         }
 
         private static void DeleteEmptyRows(Excel.Worksheet sheet, ProcessPlan plan)
