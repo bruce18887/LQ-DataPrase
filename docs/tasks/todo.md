@@ -1673,7 +1673,16 @@ ad62f81 → b47f509 → 9e313c8 → 837b3dc → 6f8a608 → 4f1d8af → 13ab77c 
       + `ProcessConfig` + `LayoutResult.WithDataRows`；新增 5 用例（**79/79**）
 - [x] AddIn：`ProcessRunner`（删空行 → 插公式行 → 写 Min/Avg/Max/Range/STD/CPK → 标记 →
       冻结 → 隐藏列 → 筛选），Ribbon「处理并标记」接 `ConfigDialog`
-- [ ] `Exp` 模板表内嵌资源 + 运行时注入（XLL 无宿主工作簿）；分布表 COUNTIFS（按修正布局）
+- [x] Core：`DistributionFormulaBuilder`（Exp 分布表全部写入项，逐格比对模板）；新增 6 用例（**85/85**）
+- [x] 数据表不要求预先叫 `Data`：改为取**当前活动工作表**并在处理前改名为 `Data`
+      （用户指出；Exp 公式全部按 `Data!` 引用，改名是必需的）
+- [ ] ⚠️ **纠正此前记录**：`tasks/_exp_dump.txt` 是**行/列都 0 基**编号（其 "A" 实为第 2 列），
+      route-B 会话当 1 基读，才得出「VBA 列号整体 +1」「B3 应为 A3」两个**假 bug**。
+      用 openpyxl 读 `Exp-template.xlsm` 的真实公式逐格核对后确认：**VBA 写入位置与模板完全一致**
+      （`D2='Range'`/`E2='All Site'`/`F2:M2='Site1/N'…；`D3='=$D$36+B3*$F$36'`；`D36/E36`=Low/High
+      Limit；`C53:C56`=Range/Mean/STD/CPK；`G36`=Unit）。**故按 VBA 原样实现，不做「修正布局」。**
+      上面批次 3 Review 里那条「按修正布局」的待决项作废。
+- [ ] `Exp` 模板内嵌为资源 + 运行时注入（XLL 无宿主工作簿）；写入上述公式
 - [ ] 另存标记副本（`EnableAutoCopyMarkedFile`）
 - [ ] x86+x64 打包脚本 + 内部分发说明
 
@@ -1696,3 +1705,25 @@ ad62f81 → b47f509 → 9e313c8 → 837b3dc → 6f8a608 → 4f1d8af → 13ab77c 
 - `Marshal.ReleaseComObject` 统一 `finally`（防 EXCEL.EXE 残留）
 - `ScreenUpdating` / `Calculation` 必须 `finally` 恢复（VBA 版异常时不恢复）
 - 双 build x86+x64（老机器多为 32 位 Excel）
+
+## Gage Summary 按工位（Site）导出（2026-09-15）
+需求：文件含多工位时，应按所选槽位的工位只导出/统计该工位的数据；文件不含该工位时报错。
+
+- 约定：8 个槽位 = 工位编号（S1→Site 1 … S8→Site 8）；同一文件可分配到多个槽位（对比文件内多工位）。
+- [x] 后端：新增 `apps/gage/site_selection.py`（归一化/可用工位/按工位过滤，复用 analysis 的
+      `get_site_column`/`site_sort_key`）；`views.py` 改收 `assignments=[{file_id, site}]`，
+      逐个按工位过滤、统一收集失败项后 400（`site_not_found`/`no_site_column`/`duplicate_assignment`/
+      `invalid_assignment`），message 直接可读；工作表名 = stem+工位（唯一、≤31）。
+- [x] builder：工位列探测改用共享 `get_site_column`（修 CTA `Site_No`/STS `SITE_NUM` 被当常量 1）；
+      工作表名改用视图传入的 `sheet_name`（同文件多工位不再重名）。
+- [x] 前端：`api/gage.ts` 改传 assignments + `silent`；`GageSummary.vue` 槽位=工位、允许文件复用、
+      解析 Blob 错误体展示具体原因；`utils/error.ts` 新增 `parseBlobError`。
+- [x] 测试：`test/backend/test_gage_site_filter.py`（10 例）全绿；更新 `apps/gage/tests.py`、
+      `test/backend/test_gage_views_bin1.py`;e2e `exports.spec.ts` Gage 组重写（按名分配 + 缺工位报错），
+      P2 6 例全绿，端口已释放。
+### 拆分（2026-09-15，同日）
+- [x] `gage_legacy_builder.py` 903 行 → 拆为 4 个模块，全部 ≤600 行：
+      `gage_legacy_builder.py`（515，Summary 布局+统计+编排）、`gage_styles.py`（239，配色常量+样式工厂）、
+      `gage_file_sheet.py`（221，单文件工作表）、`site_selection.py`（60）。
+- 验证：`tasks/_gage_golden.py` 固定合成数据集 → 规范化工作簿快照，重构前后 **逐字节无差异**
+      （2529 单元格，ignore_no_limit 两档）；后端 13/13、e2e Gage 6/6 全绿；端口已释放。

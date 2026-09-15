@@ -106,10 +106,23 @@ namespace DataPrase.AddIn
                 throw new InvalidOperationException("请先打开数据工作簿。");
             }
 
-            Excel.Worksheet sheet = ExcelInterop.FindSheet(workbook, "Data");
+            // 数据表不要求预先叫 "Data"：处理的是**当前活动工作表**（VBA 口径），
+            // 随后把它改名为 "Data"——Exp 分布表的公式全部按 Data! 引用。
+            var sheet = app.ActiveSheet as Excel.Worksheet;
             if (sheet == null)
             {
-                throw new InvalidOperationException("当前工作簿没有名为 \"Data\" 的工作表。");
+                throw new InvalidOperationException("请先选中要处理的数据工作表。");
+            }
+
+            if (!string.Equals(sheet.Name, "Data", StringComparison.OrdinalIgnoreCase))
+            {
+                Excel.Worksheet conflicting = ExcelInterop.FindSheet(workbook, "Data");
+                if (conflicting != null)
+                {
+                    throw new InvalidOperationException("工作簿已存在名为 \"Data\" 的工作表，请先重命名其中之一。");
+                }
+
+                sheet.Name = "Data";
             }
 
             return sheet;
