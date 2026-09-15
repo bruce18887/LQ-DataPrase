@@ -111,7 +111,9 @@ namespace DataPrase.AddIn
             using (new ExcelStateGuard(app))
             {
                 string summary = ProcessRunner.Run(app, workbook, sheet, config);
-                MessageBox.Show("处理完成。\r\n" + summary, "LQ-DataPrase - 处理并标记");
+                MessageBox.Show(
+                    "处理完成（加载项 v" + AddInVersion.Value + "）。\r\n" + summary,
+                    "LQ-DataPrase - 处理并标记");
             }
         }
 
