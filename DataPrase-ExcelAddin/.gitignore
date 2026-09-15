@@ -1,0 +1,14 @@
+# Build outputs (classic csproj: bin/ + obj/ hold compiled DLLs and NuGet restore assets)
+bin/
+obj/
+
+# Excel-DNA generated artifacts (*.dna lists packed assemblies; *.xll are the built add-ins)
+*.dna
+*.xll
+
+# Test runner output
+TestResult.xml
+
+# Visual Studio local state
+.vs/
+*.dtbcache.json
