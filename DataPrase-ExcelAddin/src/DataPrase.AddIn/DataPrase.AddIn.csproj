@@ -24,6 +24,7 @@
     <Compile Include="AddIn.cs" />
     <Compile Include="ExcelInterop.cs" />
     <Compile Include="Actions.cs" />
+    <Compile Include="ProcessRunner.cs" />
     <Compile Include="Ribbon.cs" />
     <Compile Include="ConfigDialog.cs">
       <SubType>Form</SubType>

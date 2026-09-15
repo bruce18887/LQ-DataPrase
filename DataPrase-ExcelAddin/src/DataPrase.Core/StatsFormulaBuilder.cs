@@ -24,8 +24,9 @@ namespace DataPrase.Core
 
     /// <summary>
     /// 统计公式构建（移植自 VBA，纯字符串、无 Excel 依赖）。
-    /// 注意口径：Min/Avg/Max/STD 是对数据列做 SUBTOTAL；而 Range 与 CPK 引用的是
-    /// datalog 自带的统计行（由 spec 的各 Offset 定位），不是上面这四行——VBA 原样如此。
+    /// 口径说明：Min/Avg/Max/STD 是对数据列做 SUBTOTAL；Range 与 CPK 引用的是**新插入的
+    /// 统计行**（Lower/High/Unit 各 Offset 落在插入点之上，Min/Mean/Max/STD/CPK 各 Offset
+    /// 落在插入的统计行上——spec 的偏移表本就按此设计，不是 datalog 自带的统计行）。
     /// </summary>
     public static class StatsFormulaBuilder
     {
