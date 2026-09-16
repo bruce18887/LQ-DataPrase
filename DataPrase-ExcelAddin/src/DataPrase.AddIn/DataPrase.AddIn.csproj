@@ -28,6 +28,8 @@
     <Compile Include="ProcessSession.cs" />
     <Compile Include="ExpTemplate.cs" />
     <Compile Include="ItemPickerDialog.cs" />
+    <Compile Include="ExpPaneControl.cs" />
+    <Compile Include="DistributionPane.cs" />
     <Compile Include="Ribbon.cs" />
     <Compile Include="ConfigDialog.cs">
       <SubType>Form</SubType>

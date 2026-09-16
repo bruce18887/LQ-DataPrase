@@ -45,7 +45,14 @@ namespace DataPrase.AddIn
 
         public static void GenerateDistribution()
         {
-            Run("分布表", DistributionCore);
+            Run("分布表", () =>
+            {
+                // 首选任务窗格（常驻，还原原 Exp 表上的一排控件）；建不出来就退回模态对话框。
+                if (!DistributionPane.TryShow())
+                {
+                    DistributionCore();
+                }
+            });
         }
 
         private static void Run(string title, Action action)
