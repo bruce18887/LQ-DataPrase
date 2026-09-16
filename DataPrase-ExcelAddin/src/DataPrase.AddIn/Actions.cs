@@ -45,14 +45,7 @@ namespace DataPrase.AddIn
 
         public static void GenerateDistribution()
         {
-            Run("分布表", () =>
-            {
-                // 首选任务窗格（常驻，还原原 Exp 表上的一排控件）；建不出来就退回模态对话框。
-                if (!DistributionPane.TryShow())
-                {
-                    DistributionCore();
-                }
-            });
+            Run("分布表", DistributionWindow.Show);
         }
 
         private static void Run(string title, Action action)
@@ -121,51 +114,6 @@ namespace DataPrase.AddIn
                 MessageBox.Show(
                     "处理完成（加载项 v" + AddInVersion.Value + "）。\r\n" + summary,
                     "LQ-DataPrase - 处理并标记");
-            }
-        }
-
-        /// <summary>对应 VBA 的 ComboBox_Changed：选定测试项后把分布表公式写进 Exp 工作表。</summary>
-        private static void DistributionCore()
-        {
-            Excel.Application app = ExcelInterop.Application;
-            Excel.Workbook workbook = app.ActiveWorkbook;
-            if (workbook == null)
-            {
-                throw new InvalidOperationException("请先打开数据工作簿。");
-            }
-
-            if (!ProcessSession.HasResult
-                || !string.Equals(workbook.Name, ProcessSession.WorkbookName, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException("请先对当前工作簿执行「处理并标记」，再生成分布表。");
-            }
-
-            using (new ExcelStateGuard(app))
-            {
-                Excel.Worksheet exp = ExcelInterop.FindSheet(workbook, ExpTemplate.SheetName)
-                                      ?? ExpTemplate.Inject(app, workbook);
-
-                int column;
-                int limitSelector;
-                using (var picker = new ItemPickerDialog(ProcessSession.Items, ProcessRunner.ReadLimitSelector(exp)))
-                {
-                    if (picker.ShowDialog() != DialogResult.OK)
-                    {
-                        return;
-                    }
-
-                    column = picker.SelectedColumn;
-                    limitSelector = picker.SelectedLimitSelector;
-                }
-
-                if (column <= 0)
-                {
-                    throw new InvalidOperationException("未选择测试项。");
-                }
-
-                ProcessRunner.WriteLimitSelector(exp, limitSelector);
-                ProcessRunner.WriteExpDistribution(
-                    exp, workbook, ProcessSession.Layout, ProcessSession.Plan, ProcessSession.Spec, column);
             }
         }
 
