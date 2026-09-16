@@ -315,6 +315,48 @@ namespace DataPrase.AddIn
             return first == int.MaxValue ? 0 : first;
         }
 
+        /// <summary>百分比列开关所在行（Exp 表 N1:V1，对应原模板的 9 个 CheckBox）。</summary>
+        private const int PercentToggleRow = 1;
+
+        private const int PercentToggleFirstColumn = 14;   // N
+
+        internal static void WritePercentToggles(Excel.Worksheet exp, bool[] toggles)
+        {
+            for (int i = 0; i < toggles.Length; i++)
+            {
+                Excel.Range cell = (Excel.Range)exp.Cells[PercentToggleRow, PercentToggleFirstColumn + i];
+                try
+                {
+                    cell.Value2 = toggles[i];
+                }
+                finally
+                {
+                    ExcelInterop.Release(cell);
+                }
+            }
+        }
+
+        internal static bool[] ReadPercentToggles(Excel.Worksheet exp)
+        {
+            var result = new bool[9];
+
+            for (int i = 0; i < result.Length; i++)
+            {
+                Excel.Range cell = (Excel.Range)exp.Cells[PercentToggleRow, PercentToggleFirstColumn + i];
+                try
+                {
+                    object value = cell.Value2;
+                    result[i] = !(value is bool) || (bool)value;
+                }
+                finally
+                {
+                    ExcelInterop.Release(cell);
+                }
+            }
+
+            return result;
+        }
+
         /// <summary>写入 B36（阶梯基准选择器，原模板由 5 个 ActiveX 选项按钮驱动）。</summary>
         internal static void WriteLimitSelector(Excel.Worksheet exp, int selector)
         {
