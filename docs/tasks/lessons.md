@@ -31,6 +31,24 @@
   再用**权威原件**交叉验证（能读原始文件就别只信中间产物），之后才动生产代码。凭单一中间产物
   下的「口径修正」结论，须标注为**待原件验证**。
 
+## 2026-09-16 表内 ActiveX 控件无法移植到 XLL；兜底要判「事实」而非「异常」
+
+- **原工具的「UI」是 16 个 ActiveX(MSForms) 控件**：拆开 `Exp-template.xlsm` 才确认——
+  `xl/activeX/activeX1..15.bin` + `xl/drawings/vmlDrawing1.vml` 给出控件名
+  （`ComboBox1` / `OptionButton1..5` / `CheckBox1..9` / 按钮），事件代码在 `xl/vbaProject.bin`。
+  **XLL 结构上复刻不了**：ActiveX 的点击事件过程必须存在于**工作簿自己的 VBA 工程**里，
+  加载项无法给控件挂事件（写工作簿 VBA 要开「信任对 VBA 工程对象模型的访问」，且不该改用户文件）。
+  → 规则：**承诺移植 UI 前，先确认原控件是 ActiveX 还是 Form Control**。ActiveX 一律过不了
+  XLL 这一关；只有 Form Control（`OnAction` 指向宏名）才有机会。
+- **换容器格式会静默丢部件**：`Exp-template.xlsb` 里**根本没有 `xl/activeX/`**——把 .xlsm 转成
+  .xlsb 时这些部件被丢了，所以注入出的 Exp 表**天生没有控件**。用户报「Exp 里没有控件」
+  的根因在此，不是代码没写。规则：**.xlsm↔.xlsb 转换后要逐项核对原始部件清单**。
+- **兜底要判「事实」而不是「异常」**：无模式 `Form.Show()` 后**检查 `_form.Visible` 是否为真**，
+  为假才退到模态路径。这直接补上本日上一条「异常式兜底对静默失败无效」的漏洞——
+  静默失败不抛异常，但「窗口到底有没有出来」是**可读的事实**。
+- **UI 尽量留在 Excel 主线程**：WinForms 窗口跑主线程 → 「应用」回调直接调 COM 合法，
+  **无需跨线程编组**（`ExcelAsyncUtil.QueueAsMacro`）；只有把窗口放独立线程才需要它。
+
 ## 2026-09-16 Excel-DNA 任务窗格「静默失败」——异常式兜底因此失效
 
 - **现象**：`CustomTaskPaneFactory.CreateCustomTaskPane(ctrl, title)` **编译通过**（API 用法正确），
