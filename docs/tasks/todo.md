@@ -1733,6 +1733,21 @@ ad62f81 → b47f509 → 9e313c8 → 837b3dc → 6f8a608 → 4f1d8af → 13ab77c 
 - `ScreenUpdating` / `Calculation` 必须 `finally` 恢复（VBA 版异常时不恢复）
 - 双 build x86+x64（老机器多为 32 位 Excel）
 
+### 批次 5 分布表 UI：任务窗格（静默失败）→ 无模式浮动窗口（2026-09-16）
+- **背景**：用户报「Exp 里面没有控件啊」「没弹出任何东西」。查清根因后才明白——
+  原 Exp 表 UI 是 **16 个 ActiveX 控件**（`xl/activeX/*.bin` + `vmlDrawing1.vml`），
+  事件代码在 `xl/vbaProject.bin`；而注入用的 `Exp-template.xlsb` **转格式时丢了 activeX 部件**，
+  所以注入出的 Exp 表**天生没有控件**。
+- **结论**：XLL 加载项**结构上无法**复刻表内 ActiveX 控件（事件必须活在工作簿 VBA 工程里）。
+  与用户确认后走「**纯加载项 + 浮动面板**」，接受 UI 与原控件样式不同、功能等价。
+- [x] `DistributionWindow`：无模式 WinForms 浮动窗口承载 `ExpPaneControl`（1 下拉 + 5 单选 + 9 复选 + 应用），
+      归属 Excel 主窗口；跑主线程（「应用」回调直接调 COM，无跨线程编组）。
+- [x] **事实性兜底**：`Show()` 后判 `_form.Visible`，为假才退到模态路径（配置对话框一直用的就是它）。
+      补上本日「异常式兜底对静默失败无效」的漏洞。
+- [x] 删除被取代的 `DistributionPane.cs`（任务窗格）与 `ItemPickerDialog.cs`，`Actions` 精简为一行。
+- 版本 **v0.2.2**；构建零错误零警告；单测 **85/85**；已 `package.cmd` 出 `dist/DataPrase-AddIn/`。
+- ⚠️ **仍未实机验证**：浮动窗口首显、`Visible` 兜底是否触发——待用户实机复跑确认。
+
 ## Gage Summary 按工位（Site）导出（2026-09-15）
 需求：文件含多工位时，应按所选槽位的工位只导出/统计该工位的数据；文件不含该工位时报错。
 
@@ -1754,3 +1769,148 @@ ad62f81 → b47f509 → 9e313c8 → 837b3dc → 6f8a608 → 4f1d8af → 13ab77c 
       `gage_file_sheet.py`（221，单文件工作表）、`site_selection.py`（60）。
 - 验证：`tasks/_gage_golden.py` 固定合成数据集 → 规范化工作簿快照，重构前后 **逐字节无差异**
       （2529 单元格，ignore_no_limit 两档）；后端 13/13、e2e Gage 6/6 全绿；端口已释放。
+
+## Buyoff / Gage 导出配色改造：素雅专业 + 抽公共样式模块（2026-09-15）
+需求：两个模板配色饱和、对比度差、观感不正式 → 统一为素雅专业配色。
+
+**定位到的病灶**
+1. **白字压淡彩底**（对比度失效的根源）：buyoff `red_result_style` 用 `FFFFFF` 压 `F5B7B1`；
+   Gage `bad1_fail_style` 同款；Gage `warning_style` 更把 `F5B7B1` 当**字体色**（粉字压白底）。
+2. **大面积高明度色块**：buyoff A 列四条竖带 `3498DB`/`27AE60`/`E67E22`/`8E44AD`，B 列整列 `ECF0F1`。
+3. **Gage 深色表头带根本没显示**：`gage_legacy_builder.py:131` 写完 `header_style` 后，
+   `:424` 的 `range(11, last_data_row + 1)` **包含第 11 行**，被整片 `data_style` 覆盖；
+   冻结窗格设在 `y_split=11`，说明原意正是让表头带常驻。
+4. Gage 单文件工作表四边全 `000000` 黑细网格。
+
+**改动**
+- [x] 新增 `apps/export/excel_theme.py`：单一配色源 + 参数化样式工厂
+      （`make_title_style`/`make_header_style`/`make_label_style`/`make_data_style`/
+      `make_unit_style`/`make_section_style`/`make_verdict_style`/`thin_border`）。
+      判定语义：pass/warn/fail **只用深色字体色、不铺底**；na 用极浅灰底（「有底色 = 不可判定」）。
+- [x] `apps/buyoff/excelize_layout.py`：删本地分区/判定色与 `_section_style`，四条竖带合并为
+      一个中性灰分区样式（靠竖排文字区分），判定格改字色。
+- [x] `apps/gage/gage_styles.py`：两工厂改从 excel_theme 取样式；删死样式 `red_cell_style`
+      （解包后从未使用，19→18）；`thick_*` 组框外缘改中灰 `B0B7BD`；`r_r_pct/red_rr_pct`
+      补底与边框（`set_cell_style` 是替换语义，原来会留网格洞）；文件工作表黑框改浅灰。
+- [x] `apps/gage/gage_legacy_builder.py`：解包 19→18；`:424` `range(11,…)` → `range(12,…)`
+      **修掉表头带被覆盖**。
+- [x] **不动 `apps/export/excelize_helpers.py`**：它被 batch_report / sigma-limit / 数据导出 /
+      file-correlation 消费（`apps/batch_report/tests.py:243` 还硬断言 `FF2C3E50`）。
+- [x] 测试：`test/backend/test_buyoff_layout.py` 断言口径由「填充色=判定色」改为
+      「判定格无填充+字体语义色」与「N/A 是唯一带底色者」；新增 `test/backend/test_excel_theme.py`
+      用 WCAG 对比度把「≥4.5:1」固化成回归断言。
+
+**验证**
+- golden 快照：2529 单元格，`value`/`number_format`/`merges`/`freeze`/隐藏行列 **零差异**，
+  仅 fill/font 变化 —— 只改视觉未改数据。
+- 后端全量 931 项全绿（7 跳过；含 batch_report，反证共享模块未被波及）。
+- e2e `Buyoff|Gage` 15 项全绿，端口 3000/8000/4173 已释放。
+- 样张：`tasks/_theme_preview/{before,after}/{Buyoff,Gage}_sample.xlsx`
+      （before 用 `git archive HEAD` 取出改动前代码生成，非工作区改动）。
+
+**遗留**：`excelize_helpers.make_red_style`（白字压 `F5B7B1`）因 buyoff 改用新配色后已无消费方，
+但按"不动该模块"的约束保留待清理。
+
+### 第二轮：Result 区改用条件格式（2026-09-15，同日）
+用户看过实际效果后改口径：**标题带改浅灰、表头保持深蓝，Result 区按百分比用底色表达判定**，
+并明确要求"用条件格式"。确认：分档沿用 |pct| <5% 绿 / 5–10% 黄 / >10% 红；红底定深红
+`#C62828` 配白字（5.6:1）。
+
+- [x] **技术前提**：百分比原本存文本（`"6.000000%"`），条件格式只能比数值 → 改为存小数
+      + `0.000000%` 数字格式。excelize 的 `get_cell_value` 返回**格式化后**的串，所以显示与
+      既有断言一字未变，改得很便宜。
+- [x] `apps/export/excel_theme.py`：骨架色改为浅灰标题 `F2F2F2` + 深蓝表头 `1F4E79`；
+      新增判定底色三档（`D5F5E3`/`FCF3CF`/`C62828`）与配套字色；新增
+      `add_percent_verdict_rules` / `add_fail_if_nonpositive_rule` / `add_fail_if_at_least_rule`。
+- [x] `apps/buyoff/excelize_layout.py`：Result 4 行全部改 CF；标题左对齐浅灰；分区标签
+      去竖排改横向；单位行去底。
+- [x] `apps/gage/*`：跟骨架色；R&R% 的 Bad1 高亮由静态红底改 CF（`>= 0.3`），
+      **顺手修掉 `set_cell_style` 替换语义导致 R&R% 格丢边框、在网格上留洞的老问题**。
+      阈值提为常量 `RR_PCT_BAD1`，与 FailLevel/分组折叠共用一处。
+- [x] 测试：`test_buyoff_layout.py` 把"读字体色"改成**落盘用 openpyxl 读 CF 规则并按
+      `stop_if_true` 模拟求值**（避免只断言"规则存在"）；`test_excel_theme.py` 扩展对比度断言。
+
+**踩到的坑**（细节见 lessons 2026-09-15）：excelize 的 `criteria='between'` 只写 operator
+不写边界 formula，不可用 → 改用严格比较 + `stop_if_true` 排序；CF 的底色读回来在 `bgColor`
+而非 `fgColor`；`save_excelize` 会关句柄，一个用例里既要读值又要读 CF 时得用 `save_as`。
+
+**验证**
+- 后端全量 `manage.py test` 全绿（含 batch_report）。
+- 样张 `tasks/_theme_preview/v3/`：逐格核对 —— 标题 `F2F2F2`、表头 `1F4E79`、
+  百分比存数值（`0.12` 配 `0.000000%`）、CF 10 条规则落盘；模拟求值确认
+  12% → 红、7%/8% → 黄、3%/0% → 绿、`N/A` → 静态灰底、差值 `<= 0` → 红；Gage `Y12=0.673` → 红。
+- e2e `Buyoff|Gage` 全绿，端口已释放。
+
+### 第三轮：修「空白格被标红」+ Bad2 橙档 + 列宽自适应（2026-09-16）
+用户实机打开 Gage Summary 后报三件事。
+
+- [x] **空白格被标红（bug）**。根因不在条件格式，而在**数据**：`row_data` 里大量 `''`
+      被逐格写进 Summary，excelize 落成**文本单元格**（`t="s"`）；Excel 里文本恒大于
+      任何数值，于是 `>= 30%` 对空白格成立 → 整列标红。修法是在 `_set_cell` 统一
+      拦掉 `None`/`''`（单一收口，顺便消除这一类隐患），留真空格。验证：非组首行的
+      Y 格现在是 `<c r="Y13" s="6"></c>`（无值、无 `t="s"`），openpyxl 读回 `None`。
+- [x] **Bad2 标橙**。R&R% 分档由单阈值改为两档（`RR_PCT_BAD1=0.30` 红 / `RR_PCT_BAD2=0.10` 橙），
+      阈值常量同时供 Fail Level 判定使用，不再两处各写一遍。`add_fail_if_at_least_rule`
+      泛化为 `add_threshold_verdict_rules(tiers)`。
+- [x] **Summary 列宽自适应**。excelize 没有 auto-fit（只有 get/set_col_width），新增
+      `excel_theme.autofit_columns`：读 `get_cols` 的**显示值**算宽度（东亚宽字符按 2 计），
+      跳过横向合并区（否则 A1:AA1 的标题会把 A 列撑满整行），`min_row` 之前不参与
+      （否则 A3 那句 "Failed Items (R&R% >= 30%): 3" 会把 A 列撑到 32.5）。
+- [x] 共享的 CF/列宽读取助手抽到 `test/backend/excel_cf.py`，buyoff 与 gage 测试共用。
+- [x] 测试新增 `GageSummaryPresentationTests`：真空格、两档分色、列宽装得下表头。
+
+**顺带**：warn 档的橙色 `#FFE0B2` 让原来的 `#7D6608` 掉到 4.38:1 —— 被上一轮加的
+对比度守门测试当场拦下，压深为 `#6B5607`（5.6:1）。注意该档与 buyoff 的 5–10% 档共用，
+buyoff 的边际档因此也从浅黄变橙（一处改动、两处生效）。
+
+**验证**：样张 `tasks/_theme_preview/v4/` 覆盖四种情况 —— 19.5% 橙、61.7%/142% 红、
+`N/A` 文本不着色、6.3% 不着色，另有 10 个真空格不参与；列宽逐列核对均容得下表头。
+
+### 第四轮：派生值改 Excel 公式（2026-09-17）
+用户要求把导出表的「派生值」从死数字改成**可审计、随数据重算的 Excel 公式**。
+经评估定范围（用户选项确认）：**Buyoff 的 4 个 Result 行** + **Gage 的组级派生列 V/W/X/Y**。
+
+**为什么范围是这样**（评估结论）：
+- Buyoff 4 行的操作数全是**同表**已有单元格（FT/QA1/QA2 段固定行距），公式纯粹自引用 → 低风险。
+- Gage 逐文件 6 列（Mean/STD/Min/Max/CP/CPK）**不改**：文件工作表只写前 100 行
+  （`gage_file_sheet.py:104`），而 Summary 统计跑全量行（`gage_legacy_builder.py:217`），
+  改成引用文件表在 n>100 时**会算错**（正确性硬伤）。
+- Gage 的 V/W/X/Y 是**逐文件 H/I 与 E/F 的同表函数** → 可改，且能随手改逐文件数值重算。
+
+- [x] `apps/export/excel_theme.py` 新增 `set_formula`（**去掉前导 `=`**）与 `enable_full_recalc`。
+- [x] `apps/buyoff/excelize_layout.py`：段落循环记录 `role_rows`（各角色 上限/下限/均值 行号）；
+      限值格在可解析时写 **float**（而非原字符串）以保证被引用操作数是数值；Result 4 行
+      在可判定时写 `ROUND(...)` 公式，不可判定仍是静态 `N/A`。
+- [x] `apps/gage/gage_legacy_builder.py`：V/W/X/Y 写公式，引用本表逐文件 H(Mean)/I(STD)/E,F(限值)
+      与 FileQuantity(B7)；公差不可用时 Y 仍是静态 `N/A`。ROUND 位数沿用旧 Python 口径，
+      所以**显示不变**。
+- [x] 两处都调 `enable_full_recalc`（`fullCalcOnLoad`），否则文件在 Excel 重算前是空白。
+- [x] 新增 `test/backend/excel_formula.py`（`open_handle`/`formula_of`/`calc`/`as_number`）；
+      gage 测试的 `_f` 改走 `calc_cell_value`（公式格用 openpyxl 读到的是公式串）；
+      buyoff 测试的 `_value` 改走 `calc_cell_value`（返回**格式化后**显示值，既有断言一字未改）；
+      两处都补了「是公式 + 算值==手算」「N/A 不落公式」的用例。
+
+**踩到的坑**（细节见 lessons 2026-09-17）：`set_cell_formula` 把字符串**原样**写进 `<f>`，
+传前导 `=` 会写成非法的 `<f>=A1+A2</f>` → 必须去掉；公式格不落缓存值，
+`get_cell_value` 读回空串，取值要 `calc_cell_value`；且 excelize 自带计算器对
+`ROUND(6*SQRT(x/y),4)` 这种「常数×SQRT(除法)」解析不了（算成 0），改成 `ROUND(SQRT(x/y)*6,4)` 正常
+（Excel 本身两种都对，纯属 excelize 计算器 bug）。
+
+**已知取舍**：Gage 的 Fail Level 文本、行折叠、B3 计数是**结构性**属性，仍由 Python 决定；
+用户手改逐文件数值时 V/W/X/Y 与 Y 的红橙 CF 会更新，但这三项不会跟随 → 存在
+「值动了、结构没动」的不一致（已与用户确认范围时说明）。
+
+**验证**
+- 定向 63 项全绿。
+- 后端全量 `manage.py test`：941 项，**1 项失败，与本轮无关** ——
+  `apps.datafiles.tests.ZipUploadTests.test_zip_upload_reupload_refreshes_disk_content`
+  用 `mtime_ns` 当解析缓存键，两次紧邻写入在 Windows 上可能落进同一个时间戳刻度
+  → 缓存没失效、读回旧内容（`np.int64(2) != 6`）。单独跑该用例、或单独跑整个
+  `apps.datafiles`（135 项）都通过 —— 是**运行期时序/顺序**导致的 flake，
+  `apps/datafiles` 也不引用本轮任何模块。新增用例改变了执行顺序，把它暴露出来。
+- 样张 `tasks/_theme_preview/v5/`：Buyoff 20 个公式格、Gage 19 个，`fullCalcOnLoad=True`，
+  无前导 `=` 非法公式；逐格算值核对 —— Buyoff R1=-0.3 / R2=0 / R3=12% / R4=3%，
+  Gage V=0.3341 / W=1.918 / X=1.9469 / Y=19.469% 且 `Fail Level=Bad2` 自洽。
+- `manage.py check` 干净；改动文件均 < 600 行。
+
+

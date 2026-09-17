@@ -20,7 +20,7 @@ def write_file_sheet(f, file_info, ignore_no_limit, non_numeric_keywords,
     filename = file_info['filename']
     df = file_info['df']
     metadata = file_info['metadata']
-    (light_blue_style, gray_style,
+    (header_block_style, gray_style,
      stats_gray_style, stats_border_style) = file_styles
 
     # 工作表名由视图统一生成（stem + 工位，唯一且 ≤31 字符）；
@@ -69,8 +69,8 @@ def write_file_sheet(f, file_info, ignore_no_limit, non_numeric_keywords,
     for row in range(8, 13):
         for col in range(8, len(data_header) + 9):
             cl = excelize.column_number_to_name(col)
-            f.set_cell_style(sheet_name, f"{cl}{row}", f"{cl}{row}", light_blue_style)
-    f.set_cell_style(sheet_name, "H8", "H8", light_blue_style)
+            f.set_cell_style(sheet_name, f"{cl}{row}", f"{cl}{row}", header_block_style)
+    f.set_cell_style(sheet_name, "H8", "H8", header_block_style)
 
     # Write test item headers (columns 9+)
     cl_h = excelize.column_number_to_name(8)

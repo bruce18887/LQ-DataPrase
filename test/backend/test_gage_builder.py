@@ -2,7 +2,8 @@
 
 These drive the *live* builder ``apps.gage.gage_legacy_builder.build_gage_summary_excel``
 with synthetic DataFrames whose mean/variance are known by hand, then read the
-generated .xlsx cells back with openpyxl and assert the reported statistics.
+generated .xlsx cells back and assert the reported statistics. 逐文件统计用
+openpyxl 读值；组级派生列 V/W/X/Y 是 Excel 公式，用 excelize 求值后断言。
 
 Every case is constructed so it FAILS against the pre-fix builder (verified by
 running the identical datasets through ``git show HEAD:`` of the module):
@@ -22,8 +23,12 @@ import io
 import pandas as pd
 from django.test import SimpleTestCase
 from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
+from apps.export import excel_theme
 from apps.gage.gage_legacy_builder import build_gage_summary_excel
+from test.backend.excel_cf import cf_rules_for_cell, cf_verdict, column_widths
+from test.backend.excel_formula import open_handle, calc, formula_of, as_number
 
 
 def _dataset(filename, cols, mins, maxs, units=None, fmt='CTA8290D'):
@@ -44,22 +49,40 @@ def _dataset(filename, cols, mins, maxs, units=None, fmt='CTA8290D'):
     }
 
 
+class _SummaryView:
+    """同时持有 openpyxl（读值/款式/空白判定）与 excelize（求公式值）两个视图。
+
+    逐文件统计（H/I/L/M…）仍是写死的数值，公式只出现在组级派生列 V/W/X/Y 上；
+    ``_f`` 必须走 excelize 的 ``calc_cell_value`` 才拿得到公式格的结果
+    （openpyxl 对公式格返回的是公式串本身）。
+    """
+
+    def __init__(self, data):
+        self.ws = load_workbook(io.BytesIO(data))['Summary']
+        self.handle = open_handle(data)
+
+    def close(self):
+        self.handle.close()
+
+
 def _summary_ws(datasets, ignore_no_limit=False):
-    data = build_gage_summary_excel(datasets, ignore_no_limit)
-    wb = load_workbook(io.BytesIO(data))
-    return wb['Summary']
+    return _SummaryView(build_gage_summary_excel(datasets, ignore_no_limit))
 
 
-def _v(ws, ref):
-    return ws[ref].value
+def _v(view, ref):
+    return view.ws[ref].value
 
 
-def _f(ws, ref):
-    val = ws[ref].value
-    return None if val in (None, '') else float(val)
+def _f(view, ref):
+    """数值断言：走公式求值（普通格子也返回其显示值），统一解析成 float/None。"""
+    text = calc(view.handle, 'Summary', ref)
+    if text is None or text in ('', 'N/A'):
+        return None
+    return as_number(text)
 
 
-def _test_names(ws):
+def _test_names(view):
+    ws = view.ws
     names = set()
     for row in range(12, ws.max_row + 1):
         c = ws[f'C{row}'].value
@@ -275,3 +298,74 @@ class GageBuilderNumericTests(SimpleTestCase):
         # T2 means [11,14,17,20] std=3.3541020 -> AV=20.1246118 ; average equal
         self.assertIsNotNone(_f(ws, 'V20'))
         self.assertAlmostEqual(_f(ws, 'W20'), 20.1246118, delta=1e-3)
+
+
+class GageSummaryPresentationTests(SimpleTestCase):
+    """Summary 表展示层回归：空白格不被条件格式误标、Bad2 分档、列宽自适应。"""
+
+    def test_blank_rr_pct_cells_are_truly_empty(self):
+        """R&R% 只在组首行有值，其余行必须是**真空格**。
+
+        写 ``''`` 会变成文本单元格，而 Excel 里文本恒大于任何数值 ——
+        ``>= 30%`` 这类条件格式会把整列空白格都标红（用户报的那个 bug）。
+        """
+        ws = _summary_ws(_main_datasets())
+        self.assertAlmostEqual(_f(ws, 'Y12'), 0.15491933, delta=1e-4)
+        for ref in ('Y13', 'Y14'):
+            self.assertIsNone(ws.ws[ref].value, f'{ref} 应为真空格，而不是空串')
+
+    def test_rr_pct_tiers_bad1_red_bad2_orange(self):
+        """R&R% 按档上色：≥30% 红（Bad1）、≥10% 橙（Bad2），其余不着色。"""
+        ws = _summary_ws(_main_datasets())
+        rules = cf_rules_for_cell(ws.ws, 'Y12')
+        self.assertEqual(cf_verdict(rules, 0.15491933), excel_theme.FILL_WARN)  # 15.5% → Bad2 橙
+        self.assertEqual(cf_verdict(rules, 0.42), excel_theme.FILL_FAIL)        # Bad1 红
+        self.assertIsNone(cf_verdict(rules, 0.05))                              # Good 不着色
+        self.assertIsNone(cf_verdict(rules, 0.0))                               # 空白按 0 → 不着色
+
+    def test_summary_column_widths_fit_headers(self):
+        """列宽自适应：每个表头都要放得下（"Repeatibility"/"Reproducibility" 曾被截断）。"""
+        data = build_gage_summary_excel(_main_datasets())
+        wb = load_workbook(io.BytesIO(data))
+        self.assertEqual(wb.sheetnames[0], 'Summary')
+        ws = wb['Summary']
+        widths = column_widths(data)
+        for idx in range(1, 28):
+            header = ws.cell(row=11, column=idx).value
+            if not header:
+                continue
+            letter = get_column_letter(idx)
+            self.assertGreaterEqual(
+                widths.get(letter, 0), len(str(header)),
+                f'{letter} 列宽 {widths.get(letter)} 装不下表头 {header!r}')
+
+
+class GageDerivedFormulaTests(SimpleTestCase):
+    """组级派生列 V/W/X/Y 改为 Excel 公式：可审计、随逐文件数值重算。"""
+
+    def test_group_derived_cells_are_formulas(self):
+        ws = _summary_ws(_main_datasets())
+        for ref in ('V12', 'W12', 'X12', 'Y12'):
+            self.assertTrue(formula_of(ws.handle, 'Summary', ref).startswith('ROUND('),
+                            f'{ref} 应为公式')
+        # 公式算值 == 手算（口径见 test_main_known_values 顶部注释）
+        self.assertAlmostEqual(_f(ws, 'V12'), 4.8989795, delta=1e-4)   # 6σ repeatability
+        self.assertAlmostEqual(_f(ws, 'W12'), 14.6969385, delta=1e-4)  # 6σ reproducibility
+        self.assertAlmostEqual(_f(ws, 'X12'), 15.4919334, delta=1e-4)  # R&R
+        self.assertAlmostEqual(_f(ws, 'Y12'), 0.15491933, delta=1e-4)  # R&R%
+
+    def test_only_group_first_row_carries_formulas(self):
+        """组级派生值只在组首行；其余行不得出现公式。"""
+        ws = _summary_ws(_main_datasets())
+        for ref in ('V13', 'W13', 'X13', 'Y13'):
+            self.assertEqual(formula_of(ws.handle, 'Summary', ref), '', ref)
+
+    def test_vw_formulas_reference_per_file_cells(self):
+        """V/W 引用同表逐文件的 H(Mean)/I(STD) 与 FileQuantity(B7)。"""
+        ws = _summary_ws(_main_datasets())
+        self.assertEqual(formula_of(ws.handle, 'Summary', 'V12'),
+                         'ROUND(SQRT(SUMSQ(I12:I14)/B7)*6,4)')
+        self.assertEqual(formula_of(ws.handle, 'Summary', 'W12'),
+                         'ROUND(IFERROR(6*STDEV.P(H12:H14),0),4)')
+        self.assertEqual(formula_of(ws.handle, 'Summary', 'Y12'),
+                         'ROUND(X12/(F12-E12),6)')
