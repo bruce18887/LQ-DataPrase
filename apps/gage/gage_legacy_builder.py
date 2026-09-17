@@ -14,6 +14,14 @@ from apps.common.constants import NON_NUMERIC_KEYWORDS
 from apps.datafiles.parsers.base import SYSTEM_COLUMNS
 from apps.gage.gage_file_sheet import write_file_sheet
 from apps.gage.gage_styles import create_summary_styles, create_file_sheet_styles
+from apps.export.excel_theme import (
+    add_threshold_verdict_rules, autofit_columns, set_formula, enable_full_recalc,
+)
+
+# R&R% 分档：≥ 30% = Bad1（红），≥ 10% = Bad2（橙）。
+# 同一组阈值既决定 Fail Level / 分组折叠，也是 R&R% 列条件格式的分档。
+RR_PCT_BAD1 = 0.30
+RR_PCT_BAD2 = 0.10
 
 
 def _safe_float_or_none(val):
@@ -82,13 +90,18 @@ def build_gage_summary_excel(file_datasets, ignore_no_limit=False):
      warning_style, data_style, thick_top_style, thick_top_mid_style,
      thick_top_right_style, thick_left_style, thick_right_style,
      thick_bottom_style, thick_bottom_mid_style, thick_bottom_right_style,
-     red_cell_style, r_r_pct_style, red_rr_pct_style, bad1_ok_style,
+     r_r_pct_style, bad1_ok_style,
      bad1_fail_style) = create_summary_styles(f)
 
     # === WRITE SUMMARY SHEET HEADER INFO ===
     def _set_cell(sheet, cell, value):
         if isinstance(value, np.generic):
             value = value.item()
+        # 空串会被写成**文本**单元格（t="s"）。Excel 里文本恒大于任何数值，
+        # 所以数值型条件格式（如 R&R% >= 30%）会把空白格也判中 → 整列标红。
+        # 留真空格才是正确的「没有值」表示。
+        if value is None or value == '':
+            return
         f.set_cell_value(sheet, cell, value)
 
     # Title row
@@ -264,11 +277,13 @@ def build_gage_summary_excel(file_datasets, ignore_no_limit=False):
         low_limit = None
         high_limit = None
         tolerance = 0.0
-        for entry in per_file:
+        tol_idx = None
+        for idx, entry in enumerate(per_file):
             lv, hv = entry['low_l'], entry['high_l']
             if lv is not None and hv is not None and hv != lv:
                 low_limit, high_limit = lv, hv
                 tolerance = hv - lv
+                tol_idx = idx
                 break
 
         overall_cp = 0.0
@@ -306,15 +321,18 @@ def build_gage_summary_excel(file_datasets, ignore_no_limit=False):
         reproducibility_series.append(reproducibility_val)
 
         group_start_row = current_row
+        # 组的行范围（每文件一行）与「公差来源行」，供 V/W/X/Y 公式引用。
+        group_last_row = group_start_row + len(per_file) - 1
+        tol_row = group_start_row + tol_idx if tol_idx is not None else None
         group_first_data_row = None
 
         if r_r_pct is None:
             fail_level = 'N/A'
             is_bad_group = False
         else:
-            r_r_pct_display = r_r_pct * 100
-            fail_level = 'Bad1' if r_r_pct_display >= 30 else ('Bad2' if r_r_pct_display >= 10 else 'Good')
-            is_bad_group = r_r_pct_display >= 30
+            fail_level = ('Bad1' if r_r_pct >= RR_PCT_BAD1
+                          else 'Bad2' if r_r_pct >= RR_PCT_BAD2 else 'Good')
+            is_bad_group = r_r_pct >= RR_PCT_BAD1
         if is_bad_group:
             has_fail_tests = True
             bad1_count += 1
@@ -370,16 +388,25 @@ def build_gage_summary_excel(file_datasets, ignore_no_limit=False):
                     rr_pct_col = excelize.column_number_to_name(COL_RR_PCT)
                     fail_col = excelize.column_number_to_name(COL_FAIL)
 
-                    # V/W carry the 6σ values only (defect #6): no variance
-                    # fraction mixed in, no hardcoded file_idx == 1.
-                    _set_cell("Summary", f"{v_col}{current_row}", round(repeatability_val, 4))
-                    _set_cell("Summary", f"{w_col}{current_row}", round(reproducibility_val, 4))
-                    _set_cell("Summary", f"{rr_col}{current_row}", round(r_r_val, 4))
+                    # V/W/X/Y 写成公式（引用本表逐文件的 H(Mean)/I(STD) 与 E/F(限值)），
+                    # 用户改逐文件数值后自动重算。ROUND 位数与旧 Python 口径一致，
+                    # 故显示不变。Python 仍算同一批值，供 Fail Level / 折叠 / B3 使用。
+                    r = current_row
+                    # 注意 6 要放在 SQRT 之后：excelize 的内置计算器解析不了
+                    # `6*SQRT(.../B7)` 这种「常数 × SQRT(除法)」形式（算出 0），
+                    # `SQRT(...)*6` 正常。Excel 本身两种都对。
+                    set_formula(f, "Summary", f"{v_col}{r}",
+                                f"=ROUND(SQRT(SUMSQ(I{group_start_row}:I{group_last_row})/B7)*6,4)")
+                    set_formula(f, "Summary", f"{w_col}{r}",
+                                f"=ROUND(IFERROR(6*STDEV.P(H{group_start_row}:H{group_last_row}),0),4)")
+                    set_formula(f, "Summary", f"{rr_col}{r}",
+                                f"=ROUND(SQRT({v_col}{r}*{v_col}{r}+{w_col}{r}*{w_col}{r}),4)")
 
-                    if r_r_pct is not None:
-                        _set_cell("Summary", f"{rr_pct_col}{current_row}", round(r_r_pct, 6))
+                    if tol_row is not None:
+                        set_formula(f, "Summary", f"{rr_pct_col}{r}",
+                                    f"=ROUND({rr_col}{r}/(F{tol_row}-E{tol_row}),6)")
                     else:
-                        _set_cell("Summary", f"{rr_pct_col}{current_row}", 'N/A')
+                        _set_cell("Summary", f"{rr_pct_col}{r}", 'N/A')
 
                     _set_cell("Summary", f"{fail_col}{current_row}", fail_level)
             else:
@@ -421,7 +448,9 @@ def build_gage_summary_excel(file_datasets, ignore_no_limit=False):
     f.set_cell_style("Summary", "B3", "B3", bad1_style)
 
     # === FORMATTING: Borders ===
-    for row in range(11, last_data_row + 1):
+    # 从第 12 行起（数据首行）。第 11 行是表头，必须留在上面的 header_style，
+    # 否则整片 data_style 会把刚写好的深色表头带覆盖成浅灰。
+    for row in range(12, last_data_row + 1):
         start_cell = f"A{row}"
         end_cell = f"{col_letter_27}{row}"
         f.set_cell_style("Summary", start_cell, end_cell, data_style)
@@ -452,13 +481,18 @@ def build_gage_summary_excel(file_datasets, ignore_no_limit=False):
         comments_col = excelize.column_number_to_name(COL_COMMENTS)
         f.merge_cell("Summary", f"{comments_col}{group_start}", f"{comments_col}{group_end}")
 
-        # Direct red fill on R&R% cell for bad groups (matching original behavior)
-        if is_bad:
-            rr_pct_col = excelize.column_number_to_name(COL_RR_PCT)
-        # Apply R&R% style (red+percentage for Bad1, percentage-only for others)
+        # R&R% 格统一用基样式；Bad1 的红色高亮由 Y 列上的条件格式统一处理。
+        # （条件格式是叠加的，不像 set_cell_style 那样把格子的底色与边框替换掉。）
         rr_pct_col_letter = excelize.column_number_to_name(COL_RR_PCT)
-        rr_style = red_rr_pct_style if is_bad else r_r_pct_style
-        f.set_cell_style("Summary", f"{rr_pct_col_letter}{group_start}", f"{rr_pct_col_letter}{group_start}", rr_style)
+        f.set_cell_style("Summary", f"{rr_pct_col_letter}{group_start}",
+                         f"{rr_pct_col_letter}{group_start}", r_r_pct_style)
+
+    # R&R% 分档上色：Bad1 红、Bad2 橙。一条规则覆盖整条 R&R% 数据区，
+    # 改值后颜色自动跟随；空白格不参与（见 _set_cell 的空串说明）。
+    rr_pct_col_letter = excelize.column_number_to_name(COL_RR_PCT)
+    add_threshold_verdict_rules(
+        f, "Summary", f"{rr_pct_col_letter}12:{rr_pct_col_letter}{last_data_row}",
+        [(RR_PCT_BAD1, 'fail'), (RR_PCT_BAD2, 'warn')])
 
     # Row grouping: fold Good groups (R&R% < 30%)
     for group_start, group_end, is_bad in group_info:
@@ -477,6 +511,10 @@ def build_gage_summary_excel(file_datasets, ignore_no_limit=False):
         f.set_col_visible("Summary", cl, False)
         f.set_col_outline_level("Summary", cl, 1)
 
+    # 列宽按显示内容自适应（表头 "Repeatability"/"Reproducibility" 等否则会被截断）。
+    # 从表头行（11）起算，免得上面那行 "Failed Items (...)" 标签把 A 列撑宽。
+    autofit_columns(f, "Summary", min_row=11)
+
     # Freeze panes at E12
     f.set_panes("Summary", excelize.Panes(
         freeze=True,
@@ -485,6 +523,9 @@ def build_gage_summary_excel(file_datasets, ignore_no_limit=False):
         y_split=11,
         top_left_cell="E12",
     ))
+
+    # V/W/X/Y 是公式，Excel 打开时须重算（否则在重算前显示空白）。
+    enable_full_recalc(f)
 
     # Pre-create styles for individual file sheets
     file_styles = create_file_sheet_styles(f)

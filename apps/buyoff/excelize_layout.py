@@ -3,29 +3,24 @@ Generates the single-sheet buyoff form with vertical FT/QA1/QA2 sections.
 """
 
 import excelize
-from apps.export.excelize_helpers import (
-    make_header_style, make_data_style, make_red_style,
-    make_unit_style, make_title_style,
-    COLOR_BORDER, COLOR_FONT_DARK, thin_border,
+from apps.export.excel_theme import (
+    make_header_style, make_data_style, make_unit_style, make_title_style,
+    make_label_style, make_section_style, make_verdict_style,
+    add_percent_verdict_rules, add_fail_if_nonpositive_rule,
+    set_formula, enable_full_recalc,
 )
 from apps.buyoff.services import NA, parse_limit
-
-# ── Section Colors ──
-COLOR_SECTION_FT = "3498DB"
-COLOR_SECTION_QA1 = "27AE60"
-COLOR_SECTION_QA2 = "E67E22"
-COLOR_RESULT_BG = "8E44AD"
-COLOR_STAT_LABEL_BG = "ECF0F1"
-COLOR_GREEN_BG = "D5F5E3"
-COLOR_YELLOW_BG = "FCF3CF"
-COLOR_RED_BG = "F5B7B1"
-# 「无法判定」灰底：刻意不属于红/黄/绿判定色，避免把 N/A 误读成结论。
-COLOR_NA_BG = "D5D8DC"
-COLOR_NA_FONT = "566573"
 
 # 百分比小数位：项目口径 6 位（apps/analysis/services/statistics/limits.py 的
 # round(..., 6)），否则 1/50000 = 0.002% 会被 2 位小数归零。
 PCT_DECIMALS = 6
+# Result 百分比以**数值**存小数（0.06）+ 百分比数字格式，显示仍是 6.000000%。
+# 存文本的话条件格式无法做数值比较。
+PCT_NUM_FMT = "0." + "0" * PCT_DECIMALS + "%"
+
+# Result 判定阈值（|百分比|）：> fail 判红、> warn 判黄、其余浅绿。
+PCT_WARN_THRESHOLD = 5
+PCT_FAIL_THRESHOLD = 10
 
 # ── Stat rows definition ──
 STAT_ROWS = [
@@ -47,13 +42,8 @@ STAT_ROWS = [
 
 
 def _na_style(f):
-    """灰色「无法判定」样式（与 red/yellow/green 判定色明确区分）。"""
-    return f.new_style(excelize.Style(
-        font=excelize.Font(bold=True, size=10, color=COLOR_NA_FONT, family="Calibri"),
-        fill=excelize.Fill(type="pattern", color=[COLOR_NA_BG], pattern=1),
-        border=thin_border(),
-        alignment=excelize.Alignment(horizontal="center", vertical="center"),
-    ))
+    """浅灰「无法判定」样式（与 pass/warn/fail 判定色明确区分）。"""
+    return make_verdict_style(f, 'na')
 
 
 def _write_na(f, sheet_name, cell, na_style):
@@ -82,37 +72,25 @@ def _qa_range(stats):
     return span if span != 0 else None
 
 
-def _section_style(f, color_hex):
-    """Create a section header style with colored background."""
-    return f.new_style(excelize.Style(
-        font=excelize.Font(bold=True, size=13, color="FFFFFF", family="Calibri"),
-        fill=excelize.Fill(type="pattern", color=[color_hex], pattern=1),
-        border=[
-            excelize.Border(type="left", color=COLOR_BORDER, style=2),
-            excelize.Border(type="top", color=COLOR_BORDER, style=2),
-            excelize.Border(type="bottom", color=COLOR_BORDER, style=2),
-            excelize.Border(type="right", color=COLOR_BORDER, style=2),
-        ],
-        alignment=excelize.Alignment(horizontal="center", vertical="center", text_rotation=255),
-    ))
-
-
 def build_buyoff_form(f, role_mapping, common_items, all_stats, datasets, ordered_roles):
     """Build the buyoff form on an existing excelize file handle.
 
     Layout (single sheet):
       Row 1:  Merged title "Buyoff Analysis Report"
       Row 3-5: Column headers + test number + units
-      FT section:  14 stat rows (blue #3498DB section header)
-      QA1 section: 14 stat rows (green #27AE60 section header)
-      QA2 section: 14 stat rows (orange #E67E22 section header)
-      Results: 5 rows (purple #8E44AD section header)
+      FT section:  14 stat rows
+      QA1 section: 14 stat rows
+      QA2 section: 14 stat rows
+      Results: 5 rows
        - FT-LL minus QA-LL
        - QA-UL minus FT-UL
        - (QA1 Mean - FT Mean)/range %
        - (QA2 Mean - FT Mean)/range %
        - Comments
       Freeze panes at C6
+
+    四个分区（FT/QA1/QA2/Result）共用同一条中性灰竖带，靠竖排文字区分；
+    判定结果只改字体色，不铺整格淡彩底。
     """
     sheet_name = "Buyoff data"
     sheet_list = f.get_sheet_list()
@@ -122,52 +100,16 @@ def build_buyoff_form(f, role_mapping, common_items, all_stats, datasets, ordere
     # ── Shared styles ──
     header_style = make_header_style(f, 12)
     data_style = make_data_style(f)
-    red_style = make_red_style(f)
     unit_style = make_unit_style(f)
-    title_style = make_title_style(f)
+    title_style = make_title_style(f, 14)
+    section_style = make_section_style(f)
+    stat_label_style = make_label_style(f, 10, bold=True, align="left")
 
-    ft_section_style = _section_style(f, COLOR_SECTION_FT)
-    qa1_section_style = _section_style(f, COLOR_SECTION_QA1)
-    qa2_section_style = _section_style(f, COLOR_SECTION_QA2)
-    result_section_style = _section_style(f, COLOR_RESULT_BG)
-
-    stat_label_style = f.new_style(excelize.Style(
-        font=excelize.Font(bold=True, size=10, color=COLOR_FONT_DARK, family="Calibri"),
-        fill=excelize.Fill(type="pattern", color=[COLOR_STAT_LABEL_BG], pattern=1),
-        border=[
-            excelize.Border(type="left", color=COLOR_BORDER, style=1),
-            excelize.Border(type="top", color=COLOR_BORDER, style=1),
-            excelize.Border(type="bottom", color=COLOR_BORDER, style=1),
-            excelize.Border(type="right", color=COLOR_BORDER, style=1),
-        ],
-        alignment=excelize.Alignment(horizontal="left", vertical="center"),
-    ))
-
-    green_result_style = f.new_style(excelize.Style(
-        font=excelize.Font(bold=True, size=10, color="145A32", family="Calibri"),
-        fill=excelize.Fill(type="pattern", color=[COLOR_GREEN_BG], pattern=1),
-        border=thin_border(),
-        alignment=excelize.Alignment(horizontal="center", vertical="center"),
-    ))
-    yellow_result_style = f.new_style(excelize.Style(
-        font=excelize.Font(bold=True, size=10, color="7D6608", family="Calibri"),
-        fill=excelize.Fill(type="pattern", color=[COLOR_YELLOW_BG], pattern=1),
-        border=thin_border(),
-        alignment=excelize.Alignment(horizontal="center", vertical="center"),
-    ))
-    red_result_style = f.new_style(excelize.Style(
-        font=excelize.Font(bold=True, size=10, color="FFFFFF", family="Calibri"),
-        fill=excelize.Fill(type="pattern", color=[COLOR_RED_BG], pattern=1),
-        border=thin_border(),
-        alignment=excelize.Alignment(horizontal="center", vertical="center"),
-    ))
+    # Result 区的判定底色由**条件格式**承载（改值后颜色自动跟随），
+    # 所以这里只需要一个基色：|pct| 未过 warn 的浅绿。
+    # 「无法判定」仍是静态灰底，不参与条件格式。
+    pass_pct_style = make_verdict_style(f, 'pass', num_fmt=PCT_NUM_FMT)
     na_style = _na_style(f)
-
-    section_styles = {
-        'FT': ft_section_style,
-        'QA1': qa1_section_style,
-        'QA2': qa2_section_style,
-    }
 
     # ── Layout setup ──
     test_col_start = 3  # A=section header, B=stat label, C+=test items
@@ -220,12 +162,15 @@ def build_buyoff_form(f, role_mapping, common_items, all_stats, datasets, ordere
 
     # ── Section writing loop ──
     row_idx = 6
+    # 记下每个角色 上限/下限/均值 所在的行号，Result 区的公式要引用它们。
+    role_rows = {}
     for role_name in ordered_roles:
         section_start = row_idx
         fname = role_mapping[role_name]
         ds = datasets[fname]
 
         for stat_name, stat_key, is_limit in STAT_ROWS:
+            role_rows.setdefault(role_name, {})[stat_key] = row_idx
             # Col B: stat label
             f.set_cell_value(sheet_name, f"B{row_idx}", stat_name)
             f.set_cell_style(sheet_name, f"B{row_idx}", f"B{row_idx}", stat_label_style)
@@ -242,7 +187,9 @@ def build_buyoff_form(f, role_mapping, common_items, all_stats, datasets, ordere
                     if raw is None or (isinstance(raw, str) and not raw.strip()):
                         _write_na(f, sheet_name, cell, na_style)
                     else:
-                        f.set_cell_value(sheet_name, cell, raw)
+                        # 数值限值写成 float（而非原字符串）：Result 公式要对这两格做算术。
+                        parsed = parse_limit(raw)
+                        f.set_cell_value(sheet_name, cell, parsed if parsed is not None else raw)
                         f.set_cell_style(sheet_name, cell, cell, data_style)
                 elif param in all_stats.get(role_name, {}):
                     val = all_stats[role_name][param].get(stat_key)
@@ -263,8 +210,7 @@ def build_buyoff_form(f, role_mapping, common_items, all_stats, datasets, ordere
         # Merge col A for section header
         f.merge_cell(sheet_name, f"A{section_start}", f"A{section_end}")
         f.set_cell_value(sheet_name, f"A{section_start}", role_name)
-        style = section_styles.get(role_name, ft_section_style)
-        f.set_cell_style(sheet_name, f"A{section_start}", f"A{section_start}", style)
+        f.set_cell_style(sheet_name, f"A{section_start}", f"A{section_start}", section_style)
 
         # Blank row between sections
         row_idx += 1
@@ -276,7 +222,7 @@ def build_buyoff_form(f, role_mapping, common_items, all_stats, datasets, ordere
 
     f.merge_cell(sheet_name, f"A{results_start}", f"A{results_end}")
     f.set_cell_value(sheet_name, f"A{results_start}", "Result")
-    f.set_cell_style(sheet_name, f"A{results_start}", f"A{results_start}", result_section_style)
+    f.set_cell_style(sheet_name, f"A{results_start}", f"A{results_start}", section_style)
 
     # Result row 1: FT Lower Limit - QA Lower Limit
     f.set_cell_value(sheet_name, f"B{row_idx}", "FT Lower Limit - QA Lower Limit")
@@ -291,11 +237,13 @@ def build_buyoff_form(f, role_mapping, common_items, all_stats, datasets, ordere
                 # 限值缺失/不可解析 → 「无法判定」，不能当 diff=0 渲染成红色 FAIL。
                 _write_na(f, sheet_name, cell, na_style)
                 continue
-            diff = ft_ll - qa_ll
-            f.set_cell_value(sheet_name, cell, round(diff, 6))
-            f.set_cell_style(sheet_name, cell, cell, red_style if diff <= 0 else data_style)
+            ft_row = role_rows['FT']['lower_limit']
+            qa_row = role_rows['QA1']['lower_limit']
+            set_formula(f, sheet_name, cell, f"=ROUND({cl}{ft_row}-{cl}{qa_row},6)")
+            f.set_cell_style(sheet_name, cell, cell, data_style)
         else:
             _write_na(f, sheet_name, cell, na_style)
+    add_fail_if_nonpositive_rule(f, sheet_name, f"C{row_idx}:{last_col_letter}{row_idx}")
     row_idx += 1
 
     # Result row 2: QA Upper Limit - FT Upper Limit
@@ -310,11 +258,13 @@ def build_buyoff_form(f, role_mapping, common_items, all_stats, datasets, ordere
             if ft_ul is None or qa_ul is None:
                 _write_na(f, sheet_name, cell, na_style)
                 continue
-            diff = qa_ul - ft_ul
-            f.set_cell_value(sheet_name, cell, round(diff, 6))
-            f.set_cell_style(sheet_name, cell, cell, red_style if diff <= 0 else data_style)
+            qa_row = role_rows['QA1']['upper_limit']
+            ft_row = role_rows['FT']['upper_limit']
+            set_formula(f, sheet_name, cell, f"=ROUND({cl}{qa_row}-{cl}{ft_row},6)")
+            f.set_cell_style(sheet_name, cell, cell, data_style)
         else:
             _write_na(f, sheet_name, cell, na_style)
+    add_fail_if_nonpositive_rule(f, sheet_name, f"C{row_idx}:{last_col_letter}{row_idx}")
     row_idx += 1
 
     # Result row 3: (QA1 Mean - FT Mean) / range
@@ -330,17 +280,19 @@ def build_buyoff_form(f, role_mapping, common_items, all_stats, datasets, ordere
             if qa_range is None:
                 _write_na(f, sheet_name, cell, na_style)
                 continue
-            mean_diff = all_stats['QA1'][param]['mean'] - all_stats['FT'][param]['mean']
-            pct = (mean_diff / qa_range) * 100
-            f.set_cell_value(sheet_name, cell, f"{pct:.{PCT_DECIMALS}f}%")
-            if abs(pct) > 10:
-                f.set_cell_style(sheet_name, cell, cell, red_result_style)
-            elif abs(pct) > 5:
-                f.set_cell_style(sheet_name, cell, cell, yellow_result_style)
-            else:
-                f.set_cell_style(sheet_name, cell, cell, green_result_style)
+            # 公式存分数（小数），显示交给 pass_pct_style 的百分比格式；
+            # ROUND 位数与旧 Python 口径（PCT_DECIMALS + 2）一致。
+            m_qa = role_rows['QA1']['mean']
+            m_ft = role_rows['FT']['mean']
+            ul = role_rows['QA1']['upper_limit']
+            ll = role_rows['QA1']['lower_limit']
+            set_formula(f, sheet_name, cell,
+                        f"=ROUND(({cl}{m_qa}-{cl}{m_ft})/({cl}{ul}-{cl}{ll}),{PCT_DECIMALS + 2})")
+            f.set_cell_style(sheet_name, cell, cell, pass_pct_style)
         else:
             _write_na(f, sheet_name, cell, na_style)
+    add_percent_verdict_rules(f, sheet_name, f"C{row_idx}:{last_col_letter}{row_idx}",
+                              warn=PCT_WARN_THRESHOLD, fail=PCT_FAIL_THRESHOLD)
     row_idx += 1
 
     # Result row 4: (QA2 Mean - FT Mean) / range
@@ -356,17 +308,17 @@ def build_buyoff_form(f, role_mapping, common_items, all_stats, datasets, ordere
             if qa_range is None:
                 _write_na(f, sheet_name, cell, na_style)
                 continue
-            mean_diff = all_stats['QA2'][param]['mean'] - all_stats['FT'][param]['mean']
-            pct = (mean_diff / qa_range) * 100
-            f.set_cell_value(sheet_name, cell, f"{pct:.{PCT_DECIMALS}f}%")
-            if abs(pct) > 10:
-                f.set_cell_style(sheet_name, cell, cell, red_result_style)
-            elif abs(pct) > 5:
-                f.set_cell_style(sheet_name, cell, cell, yellow_result_style)
-            else:
-                f.set_cell_style(sheet_name, cell, cell, green_result_style)
+            m_qa = role_rows['QA2']['mean']
+            m_ft = role_rows['FT']['mean']
+            ul = role_rows['QA2']['upper_limit']
+            ll = role_rows['QA2']['lower_limit']
+            set_formula(f, sheet_name, cell,
+                        f"=ROUND(({cl}{m_qa}-{cl}{m_ft})/({cl}{ul}-{cl}{ll}),{PCT_DECIMALS + 2})")
+            f.set_cell_style(sheet_name, cell, cell, pass_pct_style)
         else:
             _write_na(f, sheet_name, cell, na_style)
+    add_percent_verdict_rules(f, sheet_name, f"C{row_idx}:{last_col_letter}{row_idx}",
+                              warn=PCT_WARN_THRESHOLD, fail=PCT_FAIL_THRESHOLD)
     row_idx += 1
 
     # Result row 5: Comments
@@ -391,3 +343,6 @@ def build_buyoff_form(f, role_mapping, common_items, all_stats, datasets, ordere
     for c_num in range(test_col_start, test_col_start + len(common_items)):
         cl = excelize.column_number_to_name(c_num)
         f.set_col_width(sheet_name, cl, cl, 18)
+
+    # Result 区是公式，Excel 打开时须重算（否则在重算前显示空白）。
+    enable_full_recalc(f)

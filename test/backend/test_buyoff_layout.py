@@ -1,7 +1,13 @@
 """Buyoff Excel 版式缺陷回归测试（缺陷 #4 / #5 / #6 / #7）。
 
 直接驱动 ``apps.buyoff.excelize_layout.build_buyoff_form``（真实 excelize 句柄），
-把生成的单元格值与填充色读回来断言：
+把生成的单元格值、填充色、以及**条件格式规则**读回来断言：
+
+- 判定语义由 Result 区的**条件格式**承载（`>fail` 红 / `>warn` 黄 / 其余浅绿基色）。
+  excelize 没有 CF 读取接口，所以用例会把工作簿存下来用 openpyxl 读回规则，
+  再按 `stop_if_true` 顺序**模拟 Excel 求值**，断言具体数值命中哪一档 —— 比只断言
+  "规则存在"更能守住业务口径。
+- 「无法判定」（N/A）是静态浅灰底，不参与条件格式。
 
 - #4 ``qa_range == 0`` 时旧实现把分母换成「1 个工程单位」，Result 列输出无意义
   大数并被判红 → 应写 ``'N/A'`` + 灰色样式，且不参与红/黄/绿判定；
@@ -14,16 +20,23 @@
 runner: ``manage.py test test.backend.test_buyoff_layout``
 """
 
+import io
+import os
+import tempfile
+
 import excelize
 from django.test import SimpleTestCase
+from openpyxl import load_workbook
 
 from apps.buyoff import excelize_layout as layout
+from apps.export import excel_theme
+from test.backend.excel_cf import cf_rules_for_cell, cf_verdict
 
 SHEET = 'Buyoff data'
 
-# Result 区的红/黄/绿判定底色 + make_red_style 的 FAIL 底色
-RESULT_COLORS = {'F5B7B1', 'FCF3CF', 'D5F5E3'}
-RED_BG = 'F5B7B1'
+# Result 区判定改由条件格式承载。判定格有静态浅绿基色，|pct| 过 warn/fail 时由 CF 覆盖。
+NA_FILL = excel_theme.FILL_NA
+BASE_FILL = excel_theme.FILL_PASS
 
 PARAM = 'V_R'
 
@@ -68,11 +81,33 @@ def _datasets(ft=('0.5', '1.5'), qa1=('0.5', '1.5'), qa2=('0.5', '1.5'),
 ROLE_MAPPING = {'FT': 'FT.csv', 'QA1': 'QA1.csv', 'QA2': 'QA2.csv'}
 
 
+def _safe_close(f):
+    try:
+        f.close()
+    except Exception:  # noqa: BLE001 — 已 close 过就无所谓
+        pass
+
+
+def _load_workbook(f):
+    """存到临时文件再读回。用 save_as（不是 save_excelize）以免关闭 f，后续还能继续读单元格。"""
+    tmp = tempfile.mktemp(suffix='.xlsx')
+    try:
+        f.save_as(tmp)
+        with open(tmp, 'rb') as fh:
+            data = fh.read()
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+    return load_workbook(io.BytesIO(data))
+
+
 class _LayoutBase(SimpleTestCase):
     def _build(self, all_stats, datasets=None, role_mapping=None,
                ordered_roles=None, common_items=(PARAM,)):
         f = excelize.new_file()
-        self.addCleanup(f.close)
+        self.addCleanup(_safe_close, f)
         layout.build_buyoff_form(
             f,
             role_mapping if role_mapping is not None else dict(ROLE_MAPPING),
@@ -96,7 +131,14 @@ class _LayoutBase(SimpleTestCase):
         return f'{col}{row}'
 
     def _value(self, f, label, col='C'):
-        return f.get_cell_value(SHEET, self._cell(f, label, col))
+        # Result 区四行现在是**公式**：公式格 get_cell_value 读回空串，必须用
+        # calc_cell_value。它返回**格式化后**的显示值，正好与下面这些
+        # 'N/A' / 'x.xxxxxx%' 断言一致。
+        return f.calc_cell_value(SHEET, self._cell(f, label, col))
+
+    def _formula(self, f, label, col='C'):
+        """取该格的公式串（不含前导 '='）；非公式格返回 ''。"""
+        return f.get_cell_formula(SHEET, self._cell(f, label, col))
 
     def _fill(self, f, label, col='C'):
         cell = self._cell(f, label, col)
@@ -104,6 +146,11 @@ class _LayoutBase(SimpleTestCase):
         fill = getattr(style, 'fill', None)
         colors = getattr(fill, 'color', None) if fill is not None else None
         return str(colors[0]).upper() if colors else ''
+
+    def _rules_for_cell(self, f, label, col='C'):
+        """取覆盖该格的 CF 规则（按优先级排序），供 cf_verdict 模拟求值。"""
+        ws = _load_workbook(f)[SHEET]
+        return cf_rules_for_cell(ws, self._cell(f, label, col))
 
 
 QA1_ROW = '(QA1 Mean - FT Mean)/ (QA Upper Limit - QA Lower Limit)'
@@ -125,8 +172,10 @@ class ZeroQaRangeTests(_LayoutBase):
         f = self._build(all_stats)
         for label in (QA1_ROW, QA2_ROW):
             self.assertEqual(self._value(f, label), 'N/A', f'{label} 公差为 0 应写 N/A')
-            self.assertNotIn(self._fill(f, label), RESULT_COLORS,
-                             f'{label} 无法判定不得参与红/黄/绿判定')
+            self.assertEqual(self._fill(f, label), NA_FILL,
+                             f'{label} 无法判定应是静态浅灰底')
+            self.assertNotEqual(self._fill(f, label), BASE_FILL,
+                                f'{label} 无法判定不得用判定基色（浅绿）')
 
     def test_missing_limit_writes_na(self):
         """限值缺失（None）→ 公差未知 → 同样 'N/A' + 灰色。"""
@@ -138,7 +187,7 @@ class ZeroQaRangeTests(_LayoutBase):
         f = self._build(all_stats)
         for label in (QA1_ROW, QA2_ROW):
             self.assertEqual(self._value(f, label), 'N/A')
-            self.assertNotIn(self._fill(f, label), RESULT_COLORS)
+            self.assertEqual(self._fill(f, label), NA_FILL)
 
     def test_valid_range_still_judged(self):
         """正向对照：公差可用时仍按阈值给绿/黄/红。"""
@@ -148,8 +197,12 @@ class ZeroQaRangeTests(_LayoutBase):
             'QA2': {PARAM: _stats(1.15)},          # 15% → 红
         }
         f = self._build(all_stats)
-        self.assertEqual(self._fill(f, QA1_ROW), 'D5F5E3')
-        self.assertEqual(self._fill(f, QA2_ROW), 'F5B7B1')
+        # 1% 未过 5% 门槛 → 条件格式不介入，留在基色（浅绿）
+        self.assertIsNone(cf_verdict(self._rules_for_cell(f, QA1_ROW), 0.01))
+        self.assertEqual(self._fill(f, QA1_ROW), BASE_FILL)
+        # 15% > 10% → 判红
+        self.assertEqual(cf_verdict(self._rules_for_cell(f, QA2_ROW), 0.15),
+                         excel_theme.FILL_FAIL)
 
 
 class MissingFtStatTests(_LayoutBase):
@@ -164,7 +217,7 @@ class MissingFtStatTests(_LayoutBase):
         f = self._build(all_stats)   # 修复前：KeyError → 500
         for label in (QA1_ROW, QA2_ROW):
             self.assertEqual(self._value(f, label), 'N/A')
-            self.assertNotIn(self._fill(f, label), RESULT_COLORS)
+            self.assertEqual(self._fill(f, label), NA_FILL)
 
     def test_ft_role_absent_does_not_raise(self):
         """只有 FT+QA2（无 QA1 角色）时两行 Result 都不能崩。"""
@@ -193,7 +246,9 @@ class UnparsableLimitRenderTests(_LayoutBase):
         for label in (FT_LL_ROW, QA_UL_ROW):
             self.assertEqual(self._value(f, label), 'N/A',
                              f'{label} 限值不可解析应写 N/A')
-            self.assertNotEqual(self._fill(f, label), RED_BG,
+            self.assertEqual(self._fill(f, label), NA_FILL,
+                             f'{label} 限值不可解析应带 N/A 灰底')
+            self.assertNotEqual(self._fill(f, label), excel_theme.FILL_FAIL,
                                 f'{label}「无法判定」不得渲染成红色 FAIL')
 
     def test_missing_limits_render_na_not_red(self):
@@ -206,7 +261,7 @@ class UnparsableLimitRenderTests(_LayoutBase):
         f = self._build(all_stats, datasets=_datasets(present=False))
         for label in (FT_LL_ROW, QA_UL_ROW):
             self.assertEqual(self._value(f, label), 'N/A')
-            self.assertNotEqual(self._fill(f, label), RED_BG)
+            self.assertEqual(self._fill(f, label), NA_FILL)
 
     def test_numeric_limits_still_judged_red_when_tighter(self):
         """正向对照：QA 下限高于 FT 下限（diff<=0）仍判红。"""
@@ -219,7 +274,8 @@ class UnparsableLimitRenderTests(_LayoutBase):
         f = self._build(all_stats, datasets=_datasets(ft=('0.5', '1.5'),
                                                       qa1=('0.8', '1.5')))
         self.assertAlmostEqual(float(self._value(f, FT_LL_ROW)), -0.3, places=6)
-        self.assertEqual(self._fill(f, FT_LL_ROW), RED_BG)
+        self.assertEqual(cf_verdict(self._rules_for_cell(f, FT_LL_ROW), -0.3),
+                         excel_theme.FILL_FAIL)
 
 
 class PercentagePrecisionTests(_LayoutBase):
@@ -236,7 +292,8 @@ class PercentagePrecisionTests(_LayoutBase):
         self.assertEqual(self._value(f, QA1_ROW), '0.002000%')
         self.assertEqual(self._value(f, QA2_ROW), '0.002000%')
         # 微小偏移仍是绿（未超 5% 阈值）
-        self.assertEqual(self._fill(f, QA1_ROW), 'D5F5E3')
+        self.assertIsNone(cf_verdict(self._rules_for_cell(f, QA1_ROW), 0.00002))
+        self.assertEqual(self._fill(f, QA1_ROW), BASE_FILL)
 
     def test_normal_percentage_has_six_decimals(self):
         all_stats = {
@@ -246,16 +303,26 @@ class PercentagePrecisionTests(_LayoutBase):
         }
         f = self._build(all_stats)
         self.assertEqual(self._value(f, QA1_ROW), '6.000000%')
-        self.assertEqual(self._fill(f, QA1_ROW), 'FCF3CF')
+        self.assertEqual(cf_verdict(self._rules_for_cell(f, QA1_ROW), 0.06),
+                         excel_theme.FILL_WARN)
 
 
 class NaStyleConstantTests(_LayoutBase):
-    """灰色「无法判定」样式必须是版式模块的一等常量（可被测试与前端对齐）。"""
+    """「无法判定」必须与判定档视觉可区分：前者是静态浅灰底，后者走浅绿基色 + 条件格式。"""
 
-    def test_na_color_constant_exists(self):
-        self.assertTrue(hasattr(layout, 'COLOR_NA_BG'),
-                        'excelize_layout 应导出 COLOR_NA_BG（N/A 灰底）')
-        self.assertNotIn(layout.COLOR_NA_BG.upper(), RESULT_COLORS)
+    def test_na_and_verdict_are_distinguishable(self):
+        all_stats = {
+            'FT': {PARAM: _stats(1.0)},
+            'QA1': {PARAM: _stats(1.5, lower=2.0, upper=2.0)},  # 公差 0 → 无法判定
+            'QA2': {PARAM: _stats(1.01)},                        # 1% → 通过
+        }
+        f = self._build(all_stats)
+        # 无法判定：静态浅灰底，且该行虽有条件格式，数值档都命中不了
+        self.assertEqual(self._fill(f, QA1_ROW), NA_FILL)
+        self.assertIsNone(cf_verdict(self._rules_for_cell(f, QA1_ROW), 0.0))
+        # 可判定：基色浅绿 + 条件格式覆盖到该行
+        self.assertEqual(self._fill(f, QA2_ROW), BASE_FILL)
+        self.assertTrue(self._rules_for_cell(f, QA2_ROW))
 
     def test_stat_rows_render_na_for_none_limits(self):
         """Lower/Upper Limit 行：限值不可解析 → 'N/A'（不是空白/0）。"""
@@ -275,3 +342,48 @@ class NaStyleConstantTests(_LayoutBase):
                     if str(f.get_cell_value(SHEET, f'B{r}')) == 'Cpk']
         self.assertTrue(cpk_rows)
         self.assertEqual(f.get_cell_value(SHEET, f'C{cpk_rows[0]}'), 'N/A')
+
+
+class ResultFormulaTests(_LayoutBase):
+    """Result 四行改为 Excel 公式：可审计、随限值/均值重算。
+
+    公式只引用**本表**已写好的限值行与均值行（同表引用，不依赖外部原始数据），
+    且仅在可判定时写入；不可判定仍是静态 'N/A'（不落公式）。
+    """
+
+    def test_result_rows_are_formulas(self):
+        all_stats = {
+            'FT': {PARAM: _stats(1.0)},
+            'QA1': {PARAM: _stats(1.1)},
+            'QA2': {PARAM: _stats(1.05)},
+        }
+        f = self._build(all_stats)
+        for label in (FT_LL_ROW, QA_UL_ROW, QA1_ROW, QA2_ROW):
+            self.assertTrue(self._formula(f, label).startswith('ROUND('),
+                            f'{label} 应为公式，实际 {self._formula(f, label)!r}')
+
+    def test_result_formula_values_match_hand_calc(self):
+        all_stats = {
+            'FT': {PARAM: _stats(1.0)},
+            'QA1': {PARAM: _stats(1.1)},
+            'QA2': {PARAM: _stats(1.05)},
+        }
+        f = self._build(all_stats, datasets=_datasets(ft=('0.5', '1.5'),
+                                                      qa1=('0.8', '1.6'),
+                                                      qa2=('0.5', '1.5')))
+        self.assertAlmostEqual(float(self._value(f, FT_LL_ROW)), 0.5 - 0.8, places=6)  # -0.3
+        self.assertAlmostEqual(float(self._value(f, QA_UL_ROW)), 1.6 - 1.5, places=6)  # 0.1
+        self.assertEqual(self._value(f, QA1_ROW), '12.500000%')  # (1.1-1.0)/(1.6-0.8)
+        self.assertEqual(self._value(f, QA2_ROW), '5.000000%')   # (1.05-1.0)/(1.5-0.5)
+
+    def test_na_cells_carry_no_formula(self):
+        """不可判定（公差 0）时写静态 'N/A'，不落公式。"""
+        all_stats = {
+            'FT': {PARAM: _stats(1.0)},
+            'QA1': {PARAM: _stats(1.5, lower=2.0, upper=2.0)},
+            'QA2': {PARAM: _stats(1.5, lower=2.0, upper=2.0)},
+        }
+        f = self._build(all_stats)
+        for label in (QA1_ROW, QA2_ROW):
+            self.assertEqual(self._formula(f, label), '')
+            self.assertEqual(self._value(f, label), 'N/A')
