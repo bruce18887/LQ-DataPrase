@@ -142,6 +142,36 @@ async function ensureRowRendered(page: Page, rowIndex: number) {
   return row
 }
 
+/**
+ * 横向渐进滚动，直到 `probe`（文档级选择器）渲染出来。
+ *
+ * 三件事是实测出来的（手工探针跑在「查看数据」表格上，188 列 / 36400px 宽的那份 DA35 文件）：
+ * ① `.ag-header-viewport`、`.ag-center-cols-viewport`、`.ag-body-horizontal-scroll-viewport`
+ *   三者滚动量同步，写任意一个都带动表头与表体 —— 元素选择不是这里的关键。
+ * ② 可滚上限是 `scrollWidth - clientWidth`（实测 35674 = 36400 - 726）。旧写法判
+ *   `scrollLeft < scrollWidth` 永远为真 → 目标列一旦没渲染出来就是死循环，表现为整条用例
+ *   60s 超时且没有任何断言消息（2026-09-20 全量跑实测）。
+ * ③ `.ag-root` 刚出现时**列宽还没测出来**：实测那一刻 `scrollWidth === clientWidth === 926`、
+ *   表头单元格数 0，约 265ms 后才变成 36400 / 6。在这之前既滚不动也探不到目标 → 必须先等
+ *   可滚宽度出现，否则上面那条死循环就是必然。
+ */
+async function scrollGridUntil(page: Page, probe: string) {
+  await page.locator('.ag-header-viewport').evaluate(async (el, sel) => {
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
+    let max = 0
+    for (let i = 0; i < 100; i++) {
+      max = el.scrollWidth - el.clientWidth
+      if (max > 0 || document.querySelector(sel)) break
+      await wait(100)
+    }
+    for (let x = 0; max > 0; x += 400) {
+      el.scrollLeft = Math.min(x, max)
+      await wait(60)
+      if (document.querySelector(sel) || x >= max) return
+    }
+  }, probe)
+}
+
 test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () => {
   test('@p0 未选文件：空态引导 + 去文件列表按钮', async ({ page }) => {
     await gotoApp(page, '/data')
@@ -326,14 +356,9 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
   test('@p1 服务端排序：点列头触发 sort_model 请求且顺序正确', async ({ page }) => {
     await openViewTab(page, SEEDED_FILES.CTA8280F_FT)
 
-    // Kelvin_VIN 是测试列，在 188 列中超出视口（表头虚拟化）→ 渐进横向滚动表头
+    // Kelvin_VIN 是测试列，在 188 列中超出视口（表头虚拟化）→ 渐进横向滚动
     // 直到目标列渲染（位置依赖列序，不能假设固定像素）
-    await page.locator('.ag-header-viewport').evaluate(async (el) => {
-      while (!el.querySelector('[col-id="Kelvin_VIN"]') && el.scrollLeft < el.scrollWidth) {
-        el.scrollLeft += 400
-        await new Promise((r) => setTimeout(r, 30))
-      }
-    })
+    await scrollGridUntil(page, '.ag-header-cell[col-id="Kelvin_VIN"]')
     const header = page.locator('.ag-header-cell[col-id="Kelvin_VIN"]')
     await expect(header).toBeVisible({ timeout: 10_000 })
 
@@ -356,14 +381,11 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
       const vinIdx = d.headers.indexOf('Kelvin_VIN')
       return d.data[0][vinIdx]
     }, SEEDED_FILES.CTA8280F_FT)
-    // 排序重载后横向滚动可能被重置 → 渐进滚动 body 直到 Kelvin_VIN 单元格渲染再断言
-    await page.locator('.ag-center-cols-viewport').evaluate(async (el) => {
-      const target = `.ag-row[row-index="0"] [col-id="Kelvin_VIN"]`
-      while (!el.querySelector(target) && el.scrollLeft < el.scrollWidth) {
-        el.scrollLeft += 400
-        await new Promise((r) => setTimeout(r, 30))
-      }
-    })
+    // 排序重载后横向滚动会被重置 → 再滚一次，直到首行 Kelvin_VIN 单元格渲染
+    await scrollGridUntil(
+      page,
+      '.ag-center-cols-container .ag-row[row-index="0"] [col-id="Kelvin_VIN"]',
+    )
     await expect(
       page.locator('.ag-center-cols-container .ag-row[row-index="0"] [col-id="Kelvin_VIN"]'),
     ).toContainText(String(expected), { timeout: 10_000 })
@@ -434,13 +456,8 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     }, { min: minVal.min, fileId: minVal.fileId })
     expect(apiTotal).toBeGreaterThan(0)
 
-    // 渐进滚动表头到 Kelvin_VIN → hover 打开列菜单（默认即 filter 面板）
-    await page.locator('.ag-header-viewport').evaluate(async (el) => {
-      while (!el.querySelector('[col-id="Kelvin_VIN"]') && el.scrollLeft < el.scrollWidth) {
-        el.scrollLeft += 400
-        await new Promise((r) => setTimeout(r, 30))
-      }
-    })
+    // 渐进滚动到 Kelvin_VIN 表头 → hover 打开列菜单（默认即 filter 面板）
+    await scrollGridUntil(page, '.ag-header-cell[col-id="Kelvin_VIN"]')
     const header = page.locator('.ag-header-cell[col-id="Kelvin_VIN"]')
     await expect(header).toBeVisible({ timeout: 10_000 })
     await header.hover()
@@ -486,12 +503,7 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     // 选中列可见；未选中的另一个测试列被过滤（恒不渲染）；系统列（bin）仍显示。
     // 系统列块（记录级 13 列）把目标测试列推到横向视口外（表头虚拟化不挂载屏外
     // 表头单元格）→ 先渐进横向滚动到目标列渲染（位置依赖列序，不能假设像素）。
-    await page.locator('.ag-header-viewport').evaluate(async (el, col) => {
-      while (!el.querySelector(`[col-id="${col}"]`) && el.scrollLeft < el.scrollWidth) {
-        el.scrollLeft += 400
-        await new Promise((r) => setTimeout(r, 30))
-      }
-    }, testCol)
+    await scrollGridUntil(page, `.ag-header-cell[col-id="${testCol}"]`)
     await expect(page.locator('.ag-header-cell').filter({ hasText: testCol }).first()).toBeVisible({
       timeout: 10_000,
     })
