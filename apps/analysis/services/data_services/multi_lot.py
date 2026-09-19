@@ -11,6 +11,7 @@ from apps.analysis.services.statistics import (
     safe_gap,
 )
 from apps.analysis.services.data_services.histogram import compute_kde_curve
+from apps.common.user_settings import DEFAULT_CPK_THRESHOLDS
 
 
 def compute_common_params(loaded, ignore_no_limit=False):
@@ -128,8 +129,12 @@ def _resolve_multi_range(range_type, combined, global_mean, global_std,
 
 def compute_multi_lot_distribution(datasets, all_series, param,
                                     range_type='S4', custom_low=None,
-                                    custom_high=None, include_kde=False):
+                                    custom_high=None, include_kde=False,
+                                    cpk_thresholds=None):
     """Compute multi-lot distribution bins and lot-level stats.
+
+    ``cpk_thresholds``（CpkThresholds）= 当前账号在系统设置里配的 A/B/C 分级阈值，
+    决定各批次行的 cpk_level / cpk_color；None 时用默认 1.67/1.33/1.0。
 
     Args:
         datasets: ``{fid: {series, metadata, name, ...}}``.
@@ -143,6 +148,7 @@ def compute_multi_lot_distribution(datasets, all_series, param,
         Dict with keys ``param``, ``global_mean``, ``global_std``,
         ``chart_min``, ``chart_max``, ``bin_centers``, ``lot_data``.
     """
+    th = cpk_thresholds or DEFAULT_CPK_THRESHOLDS
     if not all_series:
         return None
 
@@ -275,7 +281,8 @@ def compute_multi_lot_distribution(datasets, all_series, param,
         lo = lower_limit if lower_limit is not None else -float('inf')
         hi = upper_limit if upper_limit is not None else float('inf')
         fail = int(((series < lo) | (series > hi)).sum())
-        cpk_result = compute_cpk(pre['mean_v'], pre['std_v'], lower_limit, upper_limit)
+        cpk_result = compute_cpk(pre['mean_v'], pre['std_v'], lower_limit, upper_limit,
+                                 **th.as_kwargs())
         median_v = round(float(series.median()), 6)
         q1_v = round(float(series.quantile(0.25)), 6)
         q3_v = round(float(series.quantile(0.75)), 6)

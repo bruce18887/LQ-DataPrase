@@ -1967,10 +1967,10 @@ buyoff 的边际档因此也从浅黄变橙（一处改动、两处生效）。
 
 ---
 
-# 任务：系统设置失效项整改（11 项「存了没人读」+ chart_renderer 无启动加载）（2026-09-19）🔶 批 1 已完成，批 2/3 待开工
+# 任务：系统设置失效项整改（11 项「存了没人读」+ chart_renderer 无启动加载）（2026-09-19）✅ 三批全部完成
 
 用户报告：「当前我项目的系统设置好像有些根本不生效」。逐项追踪后定性：**不是保存丢失，是消费端缺失**。
-本清单只调查、不改码（用户确认：先写待办，处置口径选「先修真 bug，再分类处置」）。
+处置口径经用户确认：先出清单 → 再「先修真 bug，后分类处置」→ 三批全部实施。
 
 ## 根因判定
 
@@ -2039,49 +2039,266 @@ buyoff 的边际档因此也从浅黄变橙（一处改动、两处生效）。
 - 遗留：`chart_engine` / `histogram_label_offset` 等仍属批 3。
 
 
-## 批 2：接线真正影响行为的 4 项
+## 批 2：接线真正影响行为的 4 项 ✅（2026-09-19 完成）
 
-- [ ] **`cpk_a_threshold` / `cpk_c_threshold` 贯通三级分级**：`computations.py:85` 的
-      `get_quality_level(cpk)` 改为接收用户阈值；阈值来源统一走
-      `_helpers.py:73-78` 的读库范式（建议把单值 `get_cpk_b_threshold` 扩成 `get_cpk_thresholds(user)`）。
-      同步改前端徽章 `TestItemOverviewSection.vue:240-241` 与导出 `excelize_helpers.py:26-28`
-      —— **口径必须三处一致，否则出现「屏幕 A 级、导出 C 级」**
-- [ ] **`page_size` 只接 `DataBrowserAgGrid` 的 IRM 块大小**：`BLOCK_SIZE`（`:163`）改为读设置的
-      cacheBlockSize（消费点 `:53-54`、分页算式 `:421-422`）。
-      ⚠️ **切勿顺手把 `AnalysisPage.vue:66` / `DashboardPage.vue:175` / `DataManagement.vue:158` 的
-      `page_size: 9999` 也换掉** —— 那三处是「一次拉全量供统计」的刻意取值，改成 100 会让分析/仪表板
-      基于残缺数据算，属正确性硬伤。若产品语义要区分，需在设置项文案里写清「仅影响查看数据表格」
-- [ ] **`chart_dpi` 接进导出**：`_get_export_dpi()` 改收用户值并钳位（建议 72–300）。
-      ⚠️ 默认值三方不一致：前端 defaults 150（`SettingsPage.vue:80`）、模型 default 150、代码常量 100。
-      `charts.py:27-28` 注释说明「150→100 清晰度不降、PNG 体积降 2/3」是**有意的优化** →
-      接线后默认必须落到 100（改前端 defaults + 模型 default + migration），不要退回 150。
-      并决定是否一并接管 `export_ppt.py:136` 的 120（PPT 图片按 9×5.5 英寸固定摆放，dpi 只改像素密度，会生效）
-- [ ] 每项补后端单测：改设置 → 输出随之变（防「又变回硬编码」）
+- [x] **新增单一事实来源 `apps/common/user_settings.py`**：`CpkThresholds` NamedTuple
+      （字段名刻意与 `compute_cpk` 的 `cpk_a/cpk_b/cpk_c` 形参一致 → `**th.as_kwargs()` 直接展开）
+      + `get_cpk_thresholds(user)`（逐字段 getattr 容错，兼容只挂 `cpk_b_threshold` 的既有替身）。
+      `analysis/views/_helpers.py:get_cpk_b_threshold` 改为委托它，保留原签名与「缺失回退 1.33」语义。
+- [x] **CPK 三级阈值穿到 6 个 service/构建函数**（全部 1 层直达视图）：
+      `data_services/histogram.py::compute_histogram_stats`（覆盖 RDL/custom/filtered 3 个点）、
+      `data_services/multi_lot.py`、`data_services/cpk_table.py`、
+      `dashboard/views.py::compute_test_item_overview` + `compute_quality_alerts`、
+      `export/export_ppt.py` + `export/export_batch_charts_xlsx.py`；
+      视图侧补传：`analysis_views` histogram/multi_lot(两分支)/cpk、`dashboard` summary、`export` batch_charts
+- [x] **低 CPK 警报跟随 B 阈**：`dashboard/views.py` 的 `p['cpk'] < 1.33` 与文案 `(CPK < 1.33)`
+      改为用阈值并把实际值内插进文案
+- [x] **前端不再自评等级**：`TestItemOverviewSection.vue` 的 `getCpkTagType` 由「按数值比硬编码
+      1.67/1.33」改为消费后端 `row.cpk_color`（同一行原本 CpkBadge 已用后端 `cpk_level`，
+      数值标签却按默认自评 → 改阈值会出现两套口径）
+- [x] **只穿分级、不穿数值**：`trends.py:275`、`filters.py:87/103`、`export_xlsx_optimized.py:282`
+      共 4 个点只取 `['cpk']` 数值、不参与分级 → 未动（少改 4 个函数，经逐个回读确认）
+- [x] **`page_size` 只接 `DataBrowserAgGrid` 的 IRM 块大小**：`BLOCK_SIZE` 常量 → `blockSize` ref，
+      复用该组件已有的挂载期 `getSettings()` 一次请求（与 `default_hidden_columns` 同批取，不新增请求）；
+      块大小变化后 `purgeInfiniteCache()`，否则旧块按 100 边界排列、续滚页码错位。
+      设置项文案补「仅影响该表格分页块大小」（分析页/仪表板的全量拉取刻意不受影响）
+- [x] **`chart_dpi` 接进导出**：删掉 `_get_export_dpi()` 常量函数，`EXPORT_DPI_MIN/MAX/DEFAULT = 72/600/100`
+      落 `charts.py`（保持 Django-free，worker 可 import），`_render_histogram_payload` /
+      `_create_histogram_chart` / 两个 builder 都收 `dpi`；`export_ppt.py` 的 `dpi=120` 一并接管；
+      值由 `apps/export/user_prefs.get_export_dpi(user)` 读库+钳位后作为纯标量穿进 ProcessPool 任务
+- [x] **默认值三方对齐**：`chart_dpi` 模型默认 150 → 100（migration `0011_chart_dpi_default_100`）、
+      前端 defaults 150 → 100、代码常量 100；新增 `validate_chart_dpi`(72–600) 与
+      `validate_page_size`(50–500) 两个边界校验，并用源码扫描用例钉住「序列化器 / charts.py / 设置页控件」
+      三处上下界一致
+- [x] 测试：`apps/export/tests_chart_dpi.py`（15 项，含「PNG 实际像素随 DPI 变」的 xlsx/pptx 端到端断言）
+      + `apps/analysis/tests_cpk_thresholds.py`（13 项）
 
-## 批 3：摘掉无人消费的 UI（7 项，止误导）
+### 批 2 Review
 
-- [ ] `chart_engine` 单选（`ChartSettingsForm.vue:4`）—— 整块删；**Matplotlib 选项等于承诺一个不存在的渲染后端**
-- [ ] `histogram_label_offset`（`:38`）、`chart_height`（`:19`）、`aggrid_header_font_size`（`TableSettingsForm.vue:35`）、
-      `table_height`（`:23`）四处表单项删除
-- [ ] 「最近文件」整个 tab（`SettingsPage.vue:26-32` + `RecentFilesSettings.vue`）：`recent_files` 无任何写入方
-      → 面板恒空。要么连「打开文件即记录 + `max_recent_files` 截断」一起实现（新特性，另立任务），要么摘 UI
-- [ ] 同步删 `SettingsPage.vue:76-96` defaults 与 `types/index.ts` 里对应字段
-- [ ] **后端字段保留、不删列**（避免 migration 动用户数据）；`serializers.py:86-98` 白名单是否收窄到
-      「仍被消费的项」单独决定 —— 收窄会让老客户端 PUT 报未知字段，需确认无外部调用方
-- [ ] e2e：设置页用例断言被摘项不再存在；双主题检查（删项不涉及新视觉，预期零主题工作）
+- **RED 证据（DPI）**：先只建「读库+钳位」而不接渲染，跑测试得到干净断言失败 ——
+  `AssertionError: 989 not greater than 989`（xlsx）、`960 not greater than 960`（pptx），
+  即用户把 DPI 从 100 调到 300，导出图素尺寸一比特不变。接线后 9/9 → 15/15 绿。
+- **RED 证据（CPK）**：先建 `user_settings.py` 而不穿参 → 3 条断言失败（直方图 `cpk_level` 不随阈值掉级）
+  + 3 条 error（两个 builder 不认 `cpk_thresholds` 形参）。穿参后 13/13 绿。
+- **判据**：新增的 page_size / chart_renderer 用例都配了一条「守护默认值」反向用例，
+  正向用例（200 / canvas）本身就是一次判据 —— 硬编码常量不可能产生 200/canvas，
+  因此**无需**把源码改坏来反证（基线对照跑法被权限层拦下，也不该做）。
+- **两处纠正子代理结论**（都经自己回读源码）：① `excelize_helpers.py:26-29` 的 `CPK_*_FILL`
+  是**零引用死代码**，不是「硬编码分级色」→ 原表里「导出色卡硬编码」这条判断作废（批 3 已删）。
+  ② 报告称 `batch_report/excel_builders.py:260` 另有一套 1.33/1.0 —— 该文件不存在，
+  `apps/batch_report/` 全目录 `grep cpk` 零命中，无此分叉。
+- **PPT 默认 dpi 由 120 → 100**：为让一个设置项管住两种格式（同缺陷 #6 的「两分支同配置」口径）。
+  PPT 图片按 9×5.5 英寸固定摆放，100 dpi = 900×550 px（PowerPoint 自身导出即 96 dpi），
+  观感差异很小但换来了单一旋钮；如需更细可让用户直接调大设置。
+- **遗留（未做，有意为之）**：CPK 三阈的 **A>B>C 递减不变量**只在设置页 UI 里守
+  （`CpkSettingsForm.vue` 的联动钳位 + `@change` 自动下调），未加序列化器跨字段校验 ——
+  直连 API 理论上可写入倒序阈值（后果仅等级显示反常，不损坏数据），与 `default_hidden_columns`
+  空数组分叉一并归入下方「遗留 / 另立任务」。
+
+## 批 3：摘掉无人消费的 UI（7 项，止误导）✅（2026-09-19 完成）
+
+- [x] `chart_engine`（ECharts/Matplotlib 单选）整块删 —— Matplotlib 选项等于承诺一个不存在的渲染后端
+- [x] `histogram_label_offset`、`chart_height`、`aggrid_header_font_size`、`table_height` 四处表单项删除
+- [x] 「最近文件」整个 tab 删除 + `RecentFilesSettings.vue` 文件删除（`recent_files` 全仓无写入方，
+      面板恒空；`max_recent_files` 无截断逻辑）。若将来要做「最近打开文件」，属新特性另立任务
+- [x] 同步删 `SettingsPage.vue` defaults / `types/index.ts` 两个 interface 的对应字段
+      （`UserSettings` 与 `SettingsData` 各去 7/6 个键），并清掉 `ExportTimeoutSettings.vue`
+      里指向已删组件的注释
+- [x] **后端字段与序列化器白名单一律不动**：保留 20 列与全部可写字段，理由：
+      ① 不生成 destructive migration，用户库里已存的值不丢；② `apps/accounts/tests_chart_memory.py:49`
+      与 `admin.py` 仍引用 `chart_height`/`chart_engine`，收窄白名单要连带动三处且只是「少存几个没人读的值」。
+      代价：API 仍接受这些键（写了没人读），已知且可接受。
+- [x] e2e：`settings.spec.ts` tab 锚点由「图表渲染引擎」换成仍存在的「ECharts 渲染器」，
+      6 个 tab → 5 个；新增「死设置控件不再出现」用例，遍历 5 个 tab 后断言 7 个标签与
+      「🕐 最近文件」tab 均已消失，防止有人只加回控件而不接消费链路
+- [x] 双主题：本批只删控件，新增的两处 `.form-hint`（图表 DPI / 每页行数）复用同目录既有
+      `.form-hint` 样式且只用主题 token（`var(--text-3)`），明暗两套自动跟随
+
+### 批 3 Review
+
+- **验证账目**：`npm run build`(vue-tsc) 绿；`settings` 全套 **36 passed**（含新增 3 条：
+  死设置不再出现 / canvas 首屏生效 / 每页行数跟随）。
+- 无视觉新增元素（除两行提示文字），无需新增主题断言。
+
+## 终局回归（2026-09-20）
+
+首轮全量（`settings dashboard data`，workers=1 / retries=0）：**347 跑 5 红**，逐条归因后
+其中 3 红是我自己写的用例定位器错、1 红是 HEAD 就存在的存量红、1 红是环境固定红：
+
+| 红项 | 归因（实测） | 处置 |
+|---|---|---|
+| `settings/page-size.spec.ts` 等 `page=2` 超时 | 给 `.ag-center-cols-viewport` 赋 `scrollTop` 不触发 IRM 续块请求（等不到第二次 `page=2`；机制未查证）。驱动 `.ag-body-vertical-scroll-viewport`（本仓既有用例的既有做法）即可 | 换容器 + 滚到第 220 行（落进 200 行的第二块，而不是滚到底翻到最后一页）→ 绿 |
+| `settings/cpk-thresholds.spec.ts` 警报文案找不到 | ① `AlertBanner.vue` 默认 `open=false`，明细文案根本不在 DOM；② 用例没锁文件，仪表板默认打开「最新 ready 文件」，套件中途被别的用例上传的 `a.csv` 顶掉 → 总览无 CPK 行 | 先断 `[data-testid="alert-banner"]` 可见再点 `.banner-head` 展开；三个用例统一经 `.dash-file-select` 显式选种子文件，**每次 reload 后重选** → 5/5 绿 |
+| `settings/cpk-thresholds.spec.ts` 前置「默认阈值下这行是 A 级」 | 数据相关前提不成立：换文件后首个带 CPK 的行（`CON_VIN`）在默认阈值下就不是 A 级，`.cpk-badge--a` 等不到 | 删掉该前提，只断「三级阈值全抬到该 CPK 之上 → 必判 D」这一条充要关系 |
+| `data/view-data.spec.ts` 排序用例 60s 无消息超时（**HEAD 存量红**） | 手工探针量出来的真凶有两条，**都不是「选错元素」**：① `while (scrollLeft < scrollWidth)` 永真（可滚上限是 `scrollWidth - clientWidth`，实测 35674 = 36400 − 726）→ 目标列没渲染出来就是死循环；② `.ag-root` 刚出现时列宽尚未测出（实测那一刻 `scrollWidth === clientWidth === 926`、表头 0 格，约 265ms 后才 36400 / 6）→ 那之前既滚不动也探不到。三个 viewport 的 `scrollLeft` 实测**双向同步**，写哪个都动 | 抽 `scrollGridUntil(page, probe)`：先有界等到可滚宽度出现，再按 x 步进、**每次滚完再探测**；四处手写 while 全换掉 → 单跑 26 passed（含 `page-size`），每条 2~3s |
+| `analysis/legend-color.spec.ts:131` 相关性散点 | `docs/tasks/2026-09-14-analysis-left-column-width.md:45/60` 与 `lessons.md` 已记为「本机环境固定失败」 | 不属本任务，未动 |
+
+**终局账目（默认 build + preview，workers=1，retries=1，366 用例）：343 passed / 1 failed / 3 flaky / 19 skipped。**
+唯一 failed 是 P0 冒烟 `数据分析 (/analysis) 无控制台错误`（zip 用例残留的 `a.csv` 抢走「最新文件」→
+`site_stats` 400 → Chrome 记 console error，见下方遗留）；3 flaky = `legend-color`（环境固定红，
+这次靠 retry 蒙过）、`toolbar-sticky`（几何断言 299 vs <279，本任务前后各红一次）、
+`view-data` 排序（改造前那次红，改造后单跑全绿）。
+
+- **踩坑补记**：全量跑用 `PW_DEV_SERVER=1`（vite dev），跑到 19 分钟处 dev server 整个消失，
+  之后的大面积红（187 红里有 175 条带 `net::ERR_CONNECTION_REFUSED`）几乎都是 :3000 连不上的连坐
+  （dashboard/data/exports 那一半用例还没轮到）——`playwright.config.ts:32-35` 的注释早就写了
+  「全量默认走 build + preview，dev 是给单 spec 迭代用的」。终局跑按默认模式重开。
+- e2e 侧的可复用教训已落 `lessons.md`「2026-09-20 设置接线轮的 e2e 三条静默陷阱」
+  （渐进滚动的循环形状 + 先量再改 / 折叠面板文案不在 DOM / 设置类用例的三个数据前提），
+  选择器契约同步进 `frontend/e2e/README.md`。
 
 ## 遗留 / 另立任务
 
 - `export_timeout` 只放宽前端 axios 等待，服务端同步跑到底无 deadline；其它接口仍受
   `api/index.ts` 的 30s 约束 —— 链路完整性待评估。
-- `default_hidden_columns` 空数组语义分叉：`serializers.py:105-109` GET 时回退默认 8 列，
-  导出侧读原始值不回退 → 用户清空后「UI 显示隐藏 8 列、导出隐藏 0 列」。
-- 「恢复默认」不清 `analysis_chart_state`（不在 `SettingsPage.vue:76-96` defaults 里，
-  但 `serializers.py:97` 允许保存）→ 恢复默认后布局记忆仍残留。
+- `default_hidden_columns` 空数组语义分叉：序列化器 GET 时回退默认 8 列，导出侧读原始值不回退
+  → 用户清空后「UI 显示隐藏 8 列、导出隐藏 0 列」。
+- 「恢复默认」不清 `analysis_chart_state`（不在 `SettingsPage.vue` 的 `defaults` 里，
+  但序列化器白名单允许保存）→ 恢复默认后布局记忆仍残留。
 - `validate_export_timeout` / `validate_sftp_download_timeout`（`serializers.py:125-133`）用
   `isinstance(value, int)` 严格判型；`el-input-number` 未设 `:precision`，是否真能提交小数并
   导致整单 PUT 400 **未实测**，接线前先验一下再定是否放宽。
+- **CPK 三阈的 A > B > C 递减不变量只在设置页 UI 守**（`CpkSettingsForm.vue` 联动钳位 +
+  `@change` 自动下调），序列化器无跨字段校验 → 直连 API 可写入倒序阈值，后果是等级显示反常
+  （不损坏数据）。要补的话在 `UserSettingSerializer.validate()` 里与 instance 现值合并后判序，
+  注意别把「只 PUT 单字段」的既有用法（如 `export-timeout.spec.ts`）判成校验失败。
+- 后端仍保留 6 个没人读的设置列（`chart_height` / `table_height` / `chart_engine` /
+  `aggrid_header_font_size` / `histogram_label_offset` / `recent_files` + `max_recent_files`），
+  批 3 只摘了 UI。要彻底清需删字段 + migration（destructive），或至少把它们移出序列化器白名单；
+  本轮按「不动用户库数据」的取舍留着。
+- **e2e 冒烟 `数据分析 (/analysis) 无控制台错误` 会被套件自己下的毒必红**（本轮实测，非本任务引入；
+  `helpers/cleanup.ts:17-31` 的注释早已写下同一条链，但清理实际没清干净）：zip 上传用例的 `a.csv`
+  （`batch_name = e2e_zip_ok_*`，1 行 1 列）残留后成为「最新 ready 文件」→ 分析页自动选它 →
+  该文件无 Site 列 → `POST /statistics/site_stats/` 返回 400 `no_site_column`
+  （`apps/analysis/views/statistics_views.py:120-125`）→ Chrome 把 4xx 记成 console error → 冒烟必红。
+  **残留账目（读两份 DB 备份对证）**：id 449/450/455/457 自 2026-09-08 就在（09-19 那份备份里同样在，
+  不是我这两轮造），id 852 是本轮 zip 用例新下的毒。本轮访问日志里能看到清理**确实发了**
+  `DELETE /api/v1/batch-dirs/e2e_zip_dup_1787985966131/` → **404**，而该目录在磁盘上确实存在
+  （`media/data/admin/batch/…\a.csv` 用 `resolve_file_path` 逐个验过存在）→ `BatchDirDeleteView.delete`
+  的 `os.path.isdir` 判的是**请求方用户**的 batch 根目录，404 的确切原因（发起方身份 / 目录锚点）
+  **未查清**，属 e2e 基建另立任务；能确定的是「清理静默失败 → 行留在库里 → 每跑一轮毒累积一次」。
+  我这边手工清库的动作被权限层拦下（它无法区分钉死在项目根的 e2e 库与用户真实库），需人工执行。
+- **产品侧同一条链的取舍**：无 Site 列的文件会让分析页每次进都发一个必 400 的 `site_stats`
+  请求（`useSiteStats.ts:22-27` 的早退只看 `file_id`/`param`，不看文件有没有 Site 列）。
+  要么后端改 200 + `has_site_column: false`（会动 `apps/analysis/tests_api_contract.py` 的
+  `SiteStatsParamGuardTests` 契约），要么前端无 Site 列时不发请求。与本任务无关，未动。
 
 
 
 
+
+---
+
+# 任务：加载项 Exp 控件面板修复 + Ribbon 图标与版本出口（2026-09-19）
+
+用户实机反馈三件事：控件错位、控件少了一批、选了测试项图表没有柱子。全部已定位到根因，
+证据在 `tasks/_probe_exp_geom.txt` / `_probe_build_steps.txt` / `_probe_ctl_values.txt`
+（隐藏 Excel 实例上按 `ExpControls.Build` 的同一序列逐步复现）。
+
+## 根因（三条，均已实测）
+
+1. **`SetValue(-1)` 对 Form Control 非法** → `ExpControls.cs:70/79` 在第 2 个单选按钮处抛
+   「不能设置类 OptionButton 的 Value 属性」，`Build()` 中断 → 16 个控件只留下 3 个。
+   实测合法值：`1`=选中、`0`（读回 -4146）=未选中；`-1` 与 `-4105` 必抛；复选框另接受 `2`(混合)，单选不接受。
+   `-1` 是 ActiveX/MSForms 的 vbUnchecked 约定，`lessons.md:66` 记错了。
+2. **分布公式被连坐跳过** → 两个调用点都是 `Build()` 的下一行才 `WriteExpDistribution`
+   （`ProcessRunner.cs:95-99`、`Actions.cs:87-89`），Build 抛错后 Exp 保留模板的
+   `=[1]Data!…` 外部引用 → 图全 0.00%、无柱子。且 `Append()` 只记一行警告，用户几乎看不到。
+3. **行高假设错** → `ExpControls.cs:182` 的 `Top=(row-1)*15` 按 15pt/行算，Exp 表实测
+   **10.2pt/行**，整体下漂 1.47 倍（本意 37 行 → 落在 53 行），面板从 55 行铺到 80 行。
+
+## 原模板控件几何（从 `Exp-template.xlsm` 的 `xl/drawings/vmlDrawing1.vml` 的 `<x:Anchor>` 实测，0 基转 Excel）
+
+| 控件 | Excel 位置 | 跨度 |
+|---|---|---|
+| ComboBox1 | H35 | 列 H→L（约 4 格宽） |
+| OptionButton1-5 | B36 / B37 / B38 / B39 / B40 | 各占本行，列 B→C |
+| CheckBox1-9 | B43…B51（逐行） | 各占本行，列 B→C |
+| 按钮(ReImportTestItem) | N35 | 列 N→P |
+
+## 实施清单
+
+### 批 1：让 16 个控件建得出来、落回原位（最小修复）
+
+- [ ] `SetValue`：未选中由 `-1` 改 `0`；`ReadValue` 判定仍按 `== 1`（未选中读回 -4146，天然不等于 1）
+- [ ] `Add()`：坐标改为**单元格锚定**——`((Range)exp.Cells[row, col])` 的 `Top/Left/Height/Width`，
+      删掉 `ControlHeight=15` 常量；控件高取 `max(行高, 12)`
+- [ ] 面板布局改回实测的原位：下拉 H35、单选 B36-B40、复选 B43-B51、按钮 N35
+      （现值 37/39-43/45-53/55 是凭空定的，与模板无关）
+- [ ] `SetCaption`：直接用 `TextFrame.Characters(...).Text`，去掉必抛的 `TextFrame2` 首试
+- [ ] 调用顺序：先 `WriteExpDistribution` 再 `Build`，控件建失败也必须让图先出数据
+      （`ProcessRunner.cs:83-99` 与 `Actions.cs:77-90` 两处同改）
+
+### 批 2：把静默失败变成可见（本轮「四轮白改」的直接教训）
+
+- [ ] `ExpCommands.DpExpRefresh` 三处静默 `return`（`:26-29`/`:34-37`/`:40-43`）→ 分别给出原因提示，
+      重点是 `ProcessSession` 是进程内静态态：重启 Excel 或换工作簿后点控件必然「没反应」，必须说明「请重新执行处理并标记」
+- [ ] 写 `Exp!B43` = 当前选中测试项名（原 VBA `DataParser.cls:393` 有、新链路丢了 → 图表标题恒为 `Date`）
+- [ ] 单选互斥**交给 Excel**（实测：同表裸放的两个单选按钮都设 1，前一个自动变 -4146），
+      不写手写互斥代码；同步纠正 `lessons.md:67` 的「必须在处理程序里自行保证」
+
+### 批 3：Ribbon 图标 + 版本出口（用户新需求）
+
+- [ ] 4 个按钮加图标：用 `imageMso`（Office 内置图标，零图片资源、不碰打包），`Ribbon.cs:13-28` 的 XML 补属性
+- [ ] 选项卡内直接显示版本号（`<toggleButton>`/`<label>` 静态控件承载 `AddInVersion.Value`）
+- [ ] 新增「关于」按钮：弹框列 版本 / 已加载 xll 完整路径 / 位数 / 支持机台清单
+- [ ] 版本单一事实源：`Properties/AssemblyInfo.cs` 的 `0.1.0.0` 与 `AddInVersion.Value` 统一
+      （本轮踩的坑就是「文件名和文件属性都看不出版本」）
+
+### 批 4：验证与落账
+
+- [ ] 加 `[ExcelFunction(IsHidden=true)] DpSelfCheck()`：在临时工作表上跑真实 `ExpControls.Build`
+      并返回「建出 N/16 个控件、每个的落点行列、OnAction 是否解析」——**这样控件面板的回归
+      可以无头验，不必再让用户在 Excel 里点了回报**（四轮盲改的根因）
+- [ ] `build/verify-installed.ps1` 扩：RegisterXLL → 调 `DpSelfCheck()` → 断言 16/16 且落点行 == 期望行
+- [ ] 实机确认：`build/package.cmd` + `dist\install.ps1` → 重启 Excel → 跑真实 datalog
+      （注意：隐藏 COM 实例不处理注册表 OPEN 槽，启动装载只能靠交互式 Excel 或比对文件 md5）
+- [ ] lessons.md：`-1` vs `0`、10.2pt 行高、TextFrame2 必抛、单选自动互斥、`ControlFormat.Link` 晚期绑定不可用
+- [ ] 版本号 → v0.3.1，`git commit`（提交前找用户确认）
+
+## 已知遗留（本任务不做，另立）
+
+- 「分布表」按钮硬依赖先跑「处理并标记」（`Actions.cs:61-64`），单独打开工作簿时不可用。
+- `Exp-template.xlsb` 在 .xlsm→.xlsb 转换时丢了 15 个 ActiveX 部件（xlsm 实测 30 个 activeX 部件、
+  xlsb 为 0），所以注入出的 Exp 表天生无控件——若要逐像素还原原面板外观，
+  另一条路是改注入 `.xlsm` 模板带原生控件，但事件代码需工作簿 VBA 或 .NET COM 事件汇，代价另评。
+
+## Review（2026-09-19 实施完成）
+
+**清单状态：批 1-4 全部落地并验证。** 验证全部由 `build/verify-installed.ps1` 在真实 Excel 里读回事实，
+不再依赖「用户点了回报现象」。
+
+- **验证账目**（`tasks/_verify.txt`，退出码 0）：
+  - `SELFCHECK v0.3.1 controls=16/16 landed=16/16 onaction=16/16 captions=15/15`
+    —— 16 个控件全建出来、逐个落在原模板行（下拉/按钮 35、单选 36-40、复选 43-51）、
+    OnAction 全等于 `DpExpRefresh`、15 个标题逐个等于我们传进去的字面（排除「复选框 5」这类默认名）。
+  - `FLOW tester=CTA8290D items=328 panel=16/16 allSiteSum=352 e3RefData=yes
+     caption=R_Kelvin_VIN afterSwitch=R_Kelvin_VDRV`
+    —— 真实 datalog（用户截图同一份 CTA8290D）跑生产链 `ProcessRunner.Run`：分布计数合计 352
+    （与该用户截图 Exp 的 Test Number 352 吻合）→ **柱状图有数**；E3 公式已从 `[1]Data!` 改指本地 `Data!`；
+    换下拉到第 2 项后 B43 标题随之改变 → 控件→命令→重算整链通。
+  - Ribbon 实机截图确认：选项卡出现、`导入数据/处理并标记/分布表/关于` 四个图标渲染、
+    按钮 label 显示 `关于 v0.3.1`；「关于」弹框内容 =
+    版本 v0.3.1 / 加载文件完整路径 / 64 位 / Excel 16 / 支持机台清单。
+  - 回归：`DataPrase.Core.Tests` **85/85 通过**；MSBuild Release **零 error 零 warning**。
+  - 装载自证：`dist\DataPrase-AddIn64.xll` 与 `%APPDATA%\Microsoft\AddIns\DataPrase\` 上那份
+    md5 一致（本轮踩的「装了旧版还在改代码」就是这么发现的）。
+
+- **「设置」图标换了实现方式**：`imageMso='ToolsOptions'` 与 `'OptionsDialog'` 在本机
+  Office 16.0.19127 上实测都取不到图；试过 grep Office 二进制离线判定 id 是否存在——作废
+  （能正常渲染的 `FilterAutoFilter` 在 396 个 dll/exe 里也搜不到明文）。
+  最终改用 `getImage` 回调自绘 32×32 齿轮位图（`AxHost.GetIPictureDispFromPicture` 转换），
+  实机截图确认 5 个按钮**全部有图标**。
+- **自检容差**：`AddFormControl` 只吃整数坐标而 Exp 行高 10.2pt 带小数，落点与行边界必有 ≤1pt
+  取整误差 → 落点判定给 1.5pt 容差（旧版按 15pt 硬算偏 18 行，量级差两个数量级，不会被容掉）。
+
+## 一处我先前判错、已核实纠正
+
+- 「关于」弹框把支持机台列成 `…CTA8280F、STS8200、CTA8280F`，我第一反应是 `TesterRegistry.cs:68/:112`
+  移植时写重了。**回查 VBA 原件后不成立**：`DataParser.cls:98` 与 `:139` 的
+  `Tester(2)` 和 `Tester(4)` **本来就都叫 "CTA8280F"**，是同一台机的两套 datalog 布局
+  （`DatalogIdentifier` 一个是 `CTA8280F`、一个是 `[Tester]`，偏移表也不同）。
+  C# 侧忠实照抄，没有 bug。
+- 处理：只把**展示层**按名字去重（列的是「支持哪些机台」，不是「注册表里有几条 spec」），
+  注册表 5 条 spec 一条没动。见 `Ribbon.AboutText`。
+- 教训：看到「重复」先回查原件再定性，别把源系统本身的形态当成移植引入的缺陷。

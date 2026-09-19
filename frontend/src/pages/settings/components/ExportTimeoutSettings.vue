@@ -36,7 +36,7 @@ interface Emits {
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
-// el-input-number 清空输入时发射 undefined，钳位到当前值（仿 RecentFilesSettings）
+// el-input-number 清空输入时发射 undefined，钳位到当前值（避免把 undefined 存进设置）
 function onTimeoutChange(value: number | undefined) {
   emit('update:timeout', value ?? props.timeout)
 }

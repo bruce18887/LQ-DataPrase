@@ -23,10 +23,24 @@ COLOR_NORMAL = '#F57F17'
 COLOR_KDE = '#7B1FA2'
 
 
-def _get_export_dpi():
-    # Excel 嵌入图以固定 EMU 尺寸显示（openpyxl Image 800×450px），与源分辨率
-    # 无关；150→100 后清晰度不降反升，PNG 体积约降 2/3（10.9MB → 4-6MB）。
-    return 100
+# 导出图表 DPI：合法区间与设置页 el-input-number 的 min/max 一致
+# （ChartSettingsForm.vue:30-31 = 72–600）。默认 100 的依据：Excel 嵌入图以固定
+# EMU 尺寸显示（openpyxl Image 800×450px），与源分辨率无关，150→100 后清晰度不降
+# 反升，PNG 体积约降 2/3（10.9MB → 4-6MB）。
+EXPORT_DPI_MIN = 72
+EXPORT_DPI_MAX = 600
+EXPORT_DPI_DEFAULT = 100
+
+
+def clamp_export_dpi(value) -> int:
+    """把任意输入折成合法 DPI：非数字/越界回退默认或就近钳到端点。"""
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return EXPORT_DPI_DEFAULT
+    if num != num:  # NaN
+        return EXPORT_DPI_DEFAULT
+    return int(min(EXPORT_DPI_MAX, max(EXPORT_DPI_MIN, num)))
 
 
 def _render_histogram_payload(
@@ -34,6 +48,7 @@ def _render_histogram_payload(
     mean_val, std_val, rdl_min, rdl_max,
     show_limit=True, show_3sigma=False, show_4sigma=False,
     show_6sigma=False, show_normal=False, show_kde=False,
+    dpi=EXPORT_DPI_DEFAULT,
 ):
     """渲染单个参数直方图 PNG，返回 io.BytesIO。
 
@@ -169,7 +184,7 @@ def _render_histogram_payload(
     plt.tight_layout()
 
     img_buffer = io.BytesIO()
-    plt.savefig(img_buffer, format='png', dpi=_get_export_dpi(), bbox_inches='tight')
+    plt.savefig(img_buffer, format='png', dpi=dpi, bbox_inches='tight')
     plt.close(fig)
     img_buffer.seek(0)
     return img_buffer
@@ -179,7 +194,7 @@ def _create_histogram_chart(
     df, metadata, selected_param, data_series, mean_val, std_val,
     rdl_min, rdl_max, show_limit=True, show_3sigma=False,
     show_4sigma=False, show_6sigma=False, show_normal=False,
-    show_kde=False, site_col=None
+    show_kde=False, site_col=None, dpi=EXPORT_DPI_DEFAULT
 ):
     """薄包装：从 DataFrame 提取 site 数据后委托 _render_histogram_payload。
 
@@ -199,4 +214,5 @@ def _create_histogram_chart(
         show_limit=show_limit, show_3sigma=show_3sigma,
         show_4sigma=show_4sigma, show_6sigma=show_6sigma,
         show_normal=show_normal, show_kde=show_kde,
+        dpi=dpi,
     )

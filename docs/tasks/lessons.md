@@ -16,6 +16,66 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-09-19 加载项「UI 一直还原不了」的根因不在 UI 代码：Excel 装的是四轮前的旧 xll
+
+- **现象**：用户连续反馈「Exp 里没有控件」「没弹出任何东西」「还原不了原来的 UI」。据此换过四轮方案
+  （v0.2.0 任务窗格 → v0.2.1 无模式浮动窗口 → v0.2.2 可见性兜底 → v0.3.0 表上 Form Control），
+  四轮全部提交在**零实机验证**下（本机 COM 启动曾被权限拦截）。
+- **根因（硬证据）**：`HKCU\Software\Microsoft\Office\16.0\Excel\Options\OPEN` 指向
+  `%APPDATA%\Microsoft\AddIns\DataPrase\DataPrase-AddIn64.xll`，该文件 mtime **09-15 23:26**、
+  md5 `7880dbf9…`；而 `dist\` 与 `bin\Release\` 的 v0.3.0 产物 md5 `17e2e043…`（09-19 22:25）。
+  **两者不是同一个二进制**：`package.cmd` 只刷新 `dist/`，`install.ps1` 9/15 之后从未再跑，
+  所以 Excel 一直在加载 v0.1.5。用户报的「弹出旧的模态选测试项框」正是 v0.1.5 的
+  `ItemPickerDialog` 行为（该文件在 v0.2.1 已删）——**症状与最新源码无关**。
+- **规则**：**报「改了没效果」，先证「跑的是不是新代码」**，再看代码。三条廉价判据：
+  ①比对**装载路径**上的二进制与构建产物的 md5/mtime（不是源码目录的产物，是宿主实际读的那份）；
+  ②读宿主的注册加载项键（Excel = `Options\OPEN*`）确认实际加载的是哪个文件；
+  ③让产物自带**可查询的版本出口**（本例 `=DpPing()` → `DataPrase 0.1.5` 一锤定音）。
+- **版本号别只改一处**：`AddIn.cs` 的 `AddInVersion.Value` 是手写常量，而
+  `Properties/AssemblyInfo.cs` 的 `AssemblyVersion` 一直停在 `0.1.0.0`，xll 文件名也不带版本
+  → 光看文件属性/文件名无法区分四轮，只有 `=DpPing()` 认得出来。**分发物必须能从运行时读出版本**。
+- **顺带纠正一处过度断言**：`Exp-template.xlsm` 实测含 30 个 `xl/activeX/` 部件（15 控件 .xml+.bin）
+  +2 vml +1 ctrlProps，而 `Exp-template.xlsb` **一个都没有**（20 部件）；原始宿主
+  `LiqunData_V0.066.xlsb` 却有 34 个 activeX 部件 → 「.xlsb 存不进 ActiveX」不成立，
+  丢部件的是这一次格式转换。核对部件清单时**注意大小写**：对 `x.lower()` 的集合搜 `'activeX'`
+  恒为 0，会把自己骗成「模板本来就没控件」。
+
+## 2026-09-19 隐藏 COM 实例不处理 Options\OPEN——验证通路必须显式 RegisterXLL
+
+- **实测**：`New-Object -ComObject Excel.Application` + `Visible=$false` 起实例后，
+  `Workbooks` 集合为**空**、`=DpPing()` 返回 `#NAME?`（值 -2146826259）、`Run('DpExpRefresh')`
+  报「无法运行宏」——**注册表 OPEN 槽里的 xll 在自动化实例里根本没装载**。
+  照这个现象判「加载项坏了」会判错：用户交互式 Excel 里是正常的。
+- **规则**：无头自检脚本一律显式 `excel.RegisterXLL(绝对路径)` 再断言；启动路径的正确性用
+  「读注册表 OPEN 值 + 比对目标文件 md5」另证，别指望自动化实例替你复现启动加载。
+- **由此首次验证通过的未知点**：`[ExcelCommand]` 注册的宏名**能被 Excel 按裸名解析**
+  （RegisterXLL 后 `Run('DpExpRefresh')` 无错，v0.1.5 同一调用必报「宏不可用」）——
+  即 lessons:69 记的「Form Control `OnAction` 能否解析 XLL 命令名，本方案最大未知」在
+  **名称解析这一层已通**（`OnAction` 与 `Application.Run` 走同一套宏名查找）。
+  仍**未**验证：真实点击控件时 Excel 是否回调该命令、控件外观/位置是否符合原面板。
+- 脚本：`DataPrase-ExcelAddin/build/verify-installed.ps1`（打印 OPEN 槽 / 启动时 Workbooks /
+  DpPing 版本 / `Run('DpExpRefresh')` / `AddFormControl` 建-读-删往返）。
+
+## 2026-09-19 设置项接线（批 2/3）四条可复用约束
+
+- **ag-grid IRM 的块大小是「两端共用一个数」**：前端 `getRows` 用 `floor(startRow / 块大小)` 反推页码，
+  而 `startRow` 由 grid 自己的 `cacheBlockSize` 决定。只把设置值喂给请求、没让 grid 采纳
+  → 第二次请求会算回 `page=1`，表现为「滚到底又从头开始、行重复」。所以改块大小后必须
+  `purgeInfiniteCache()`，且**断言要验第二次请求的 `page=2`**，只断言第一次请求带新值不算过。
+- **同一个数值区间的三份字面量必然漂移**：设置页控件 `:min/:max`、序列化器校验、读取侧钳位
+  三处各写一份，改一处忘两处是常态。做法：常量放读取侧（`EXPORT_DPI_MIN/MAX` 落 Django-free 的
+  `charts.py`）、序列化器引用自己的一对、再用一条**源码扫描**用例断言三者相等
+  （读 `ChartSettingsForm.vue` 抠 `:min/:max`）。先例：`test_export_stats_consistency.py` 的源码扫描。
+- **`apps/export/charts.py` 被 ProcessPoolExecutor 子进程 import**（`chart_workers.py:3-8` 明文禁止
+  在其中加 Django import）。所以「读用户设置」必须放独立模块（本次 `apps/export/user_prefs.py`），
+  读库 + 钳位在那儿做完，穿进 worker 的只能是**已钳位的纯标量**（放进 task dict）。
+- **接线项的默认值要三方对齐后再定**：`chart_dpi` 曾有模型 150 / 前端 150 / 代码常量 100 三个值，
+  其中 100 带着「PNG 体积降 2/3」的实测理由。接线时默认一律取**代码里被实测过的那个**，
+  并同步改模型默认 + migration + 前端 defaults；否则「设置生效了」的第一秒就把用户体积翻倍。
+
+（同日另一条见上方「chart_renderer 接线」条目：写用户级设置的 e2e 必须先确认 8000 属主读哪份
+system_config，以及「判别式用例要一条该红一条该绿」。）
+
 ## 2026-09-19 chart_renderer 接线：写用户级设置的 e2e 复用了真实数据目录的后端
 
 - **险情（比"测试红"更严重）**：8000 上原有两个手起 `manage.py runserver`，不带 `LQDP_SYSTEM_CONFIG_FILE`
@@ -801,3 +861,95 @@
   而相邻列正常，先怀疑该列独有的函数名/写法，再看有没有 `IFERROR` 吞了错误；
   另外"单元格里显示公式原文"通常是**在编辑态**，不代表存的是文本。
 
+
+## 2026-09-19 加载项 Exp 面板「少控件 + 图全 0」= 一个非法控件值；Form Control 的取值口径别照抄 ActiveX
+
+- **现象**：Exp 表上只出现 3 个控件（下拉 + 2 个单选），分布图全 0.00% 没有柱子。
+- **根因**：`ExpControls.SetValue` 给未选中的单选/复选框写 `Value = -1`（ActiveX/MSForms 的
+  `vbUnchecked` 约定）。**Form Control 不认 -1**，实测必抛「不能设置类 OptionButton 的 Value 属性」。
+  而 `Build()` 的循环是「先 Add 再 SetValue」，所以抛错时该控件已经建出来了——
+  于是现场恰好留下 3 个形状（下拉 + Limit0 + Limit1），看着像「建到一半」，其实是**第二个单选抛的**。
+- **合法取值（隐藏实例逐个试出来的）**：初始值 **-4146**；`1`=选中、`0`=未选中（读回 -4146）；
+  复选框还接受 `2`（混合），**单选按钮不接受 2**；`-1` 与 `-4105` 一律抛。
+  → 规则：**跨控件家族搬「约定」前先在本机实测取值域**，ActiveX 与 Form Control 的
+  `Value` 语义不通用（`lessons:66` 那条「1/-1」就是照抄来的，已纠正）。
+- **连坐**：两个调用点都是 `Build()` 的下一行才 `WriteExpDistribution`（`ProcessRunner.cs`、`Actions.cs`），
+  Build 抛错 → 分布公式没写 → Exp 停在模板的 `[1]Data!` 外部引用 → **图全 0**。
+  一个 bug 同时造出「少控件」和「没柱子」两个看似无关的现象。
+  → 规则：**可选的化妆性步骤不能挡在必需的数据步骤前面**；顺序改成先写公式再建面板。
+- **`ProcessRunner.Append()` 把异常降级成一行警告**，用户几乎看不见 → 破坏性流程里的可选步骤
+  失败要显眼，否则现场只剩「结果不对」而没有任何线索。
+
+## 2026-09-19 控件位置：别按「行号 × 行高」算，Exp 行高实测 10.2pt 不是 15pt
+
+- `ExpControls.Add` 用 `Top = (row - 1) * 15` 假设每行 15pt；Exp 表实际 **10.2pt/行**
+  → 整面板下漂 1.47 倍（本意 37 行落在 53 行），这就是用户说的「错位」。
+- 修法：**按单元格锚定**——`Cells[row, col].Resize[h, w]` 的 `Top/Left/Width/Height` 直接取。
+  原模板的控件本来就是单元格锚定（`Exp-template.xlsm` 的 `xl/drawings/vmlDrawing1.vml`
+  里 `<x:Anchor>` 8 元组，0 基行列）：ComboBox H35 跨 5 列 2 行、OptionButton B36-B40、
+  CheckBox B43-B51、按钮 N35 跨 3 列 2 行。**还原 UI 要先量原件，别自己编行号。**
+- `AddFormControl` 只吃 **int** 坐标，10.2pt 行高必然带小数：`(int)` 强转是向下截断，
+  逐行累积仍显错位 → 用 `Math.Round`；自检的落点判定也要留 **1.5pt 容差**，
+  否则会把取整误差误判成 bug（真 bug 偏 18 行，量级差两个数量级）。
+- `TextFrame2.TextRange.Text` 对 Form Control **必抛**（「在此对象上找不到属性 Text」），
+  只有旧式 `TextFrame.Characters().Text` 可用；`ControlFormat.Link` 在 PowerShell 晚期绑定下
+  报「找不到成员」（与 `AutoFilter`/`Hidden` 同族陷阱），别用晚期绑定判存在性。
+- 表上**裸放的单选按钮 Excel 自己就互斥**（实测：两个都设 1，前一个自动回 -4146），
+  `lessons:67` 说「互斥必须在处理程序里自行保证」不成立——除非放进 GroupBox 才需要分组。
+
+## 2026-09-19 无头自检两条硬坑：MessageBox 会挂死自动化、`$x = Function` 会吞掉标签
+
+- **`MessageBox.Show` 在 COM 自动化实例里会永久阻塞**：给 `DpExpRefresh` 加「说清原因」的提示后，
+  `Run('DpExpRefresh')` 直接把自检脚本挂死（Excel 进程留着标题为「LQ-DataPrase - 分布表控件」的
+  隐形模态框）。→ 产品侧：任何由宏/命令触发的提示都要先判 `Application.Interactive`；
+  脚本侧：`New-Object -ComObject Excel.Application` 之后**显式设 `$excel.Interactive = $false`**
+  （COM 起来的实例默认仍报 Interactive=true，这点反直觉）。
+- **PowerShell 里 `$v = Step "label" { ... }` 会把标签行和值一起捕获**，日志里看不到标签、
+  断言还拿到脏字符串。要单独打印的分支就别走这个包装函数。
+- 自检函数（`DpSelfCheck` / `DpSelfCheckFlow`，`IsHidden=true`）跑的是**生产代码路径**：
+  前者在临时簿上重建面板并回报「16/16 建出、落点行、OnAction 是否挂上」，
+  后者打开真实 datalog 跑 `ProcessRunner.Run` 再回报「panel/allSiteSum/e3 是否已指向本地 Data!/B43 标题」。
+  实测：`controls=16/16 landed=16/16 onaction=16/16`、`tester=CTA8290D items=328 allSiteSum=352`
+  （与该用户截图里 Exp 的 Test Number 352 对得上）、换测试项后 B43 由 `R_Kelvin_VIN` → `R_Kelvin_VDRV`。
+- **`imageMso` 会静默不渲染，且离线判不出来**：`ToolsOptions` 与 `OptionsDialog` 在本机
+  Office 16.0.19127 上都取不到图（按钮只剩文字），而 `FileOpen`/`FilterAutoFilter`/`ChartInsert`/`Help`
+  正常。试过把候选 id 拿去 grep Office 二进制做离线判定——**作废**：`FilterAutoFilter` 明明能渲染，
+  在 `Office16` 下 396 个 dll/exe 里却搜不到明文，说明名字表不是明文资源。
+  → 结论：**imageMso 只能实机肉眼看**；要确定性就别依赖它，用 `getImage` 回调自绘位图。
+- **`getImage` 自绘图标可用**：`public object GetSettingsImage(IRibbonControl)` 里用 GDI+ 画
+  32×32 透明底 + `Segoe UI Symbol` 的 `⚙`，经 `AxHost.GetIPictureDispFromPicture` 转成
+  `IPictureDisp` 返回（派生一个 `AxHost` 子类暴露该受保护静态方法，`base("00000000-...-000000000046")`）。
+  实测 ribbon 上正常出图。两个坑：① 返回类型写 `object`，别引 `stdole`；
+  ② `Image` 在 `System.Drawing` 与 `ExcelDna.Integration` 里**同名**，必须全限定，否则 CS0104；
+  ③ 回调里任何异常都要吞掉返回 null，否则整条 ribbon 可能加载失败。
+  字符用 `"\u2699"` 转义写，别在源码里放非 ASCII 图标字符（Ribbon.cs 无 BOM，靠 Roslyn 猜编码）。
+
+## 2026-09-20 设置接线轮的 e2e 三条静默陷阱（现象都不是「断言写错」那么简单）
+
+- **e2e「滚不到目标列」的红：真凶是循环形状，不是选错元素**（ag-grid 35.3 实测）。
+  `.ag-header-viewport` / `.ag-center-cols-viewport` / `.ag-body-horizontal-scroll-viewport`
+  三者横向滚动量**双向同步**，写哪个都动 —— 我前两版分别断言「只有滚动条代理是权威」
+  「赋 scrollLeft 会被同帧写回」，都是自己圆现象，手工探针一跑全部推翻。两个真坑：
+  ① 可滚上限是 `scrollWidth - clientWidth`（实测 35674 = 36400 - 726），而
+  `while (el.scrollLeft < el.scrollWidth)` 永真 → 目标列没渲染出来就是**死循环**，
+  症状是整条用例 60s 超时、零断言消息（`view-data.spec.ts` 在 HEAD 上就这么红的）；
+  ② `.ag-root` 刚出现时列宽还没测出来（实测那一刻 `scrollWidth === clientWidth === 926`、
+  表头 0 格，约 265ms 后才 36400 / 6）→ 那之前既滚不动也探不到。规则：渐进滚动一律
+  **按 x 有界推进 + 每次滚完再探测 + 先等有界等到可滚宽度**（见 `scrollGridUntil`）。
+  纵向另说：给 `.ag-center-cols-viewport` 赋 `scrollTop` 不触发 IRM 续块（实测等不到
+  `page=2`），驱动 `.ag-body-vertical-scroll-viewport` 就好（机制未查证，按可用做法写）。
+- **定位器类失败先量再改**：这类问题一次浏览器内 `evaluate` 探针（量 `clientWidth` /
+  `scrollWidth` / 写后可读回值 / 目标元素出现位置）只要 3 分钟，而我先连改两版、跑两轮 e2e
+  各 20+ 分钟才逼出真相。**能在页面里一次测出来的东西，不要靠猜 + 跑套件去验**（R2②
+  「选择器先经 trace 确认真实存在」的加强版：存在且可写 ≠ 语义是你以为的那个）。
+- **折叠式汇总面板让「文案不在 DOM」看起来像功能没生效**：`AlertBanner.vue` 默认 `open=false`，
+  多条告警合成一行「N 项告警」，逐条 `message` 要点了 `.banner-head` 才渲染。断言链必须是
+  「`[data-testid="alert-banner"]` 可见 → 点头部展开 → 再断文案」，直接 `getByText(明细文案)`
+  会误判成「后端警报没生成」。
+- **设置类用例的三个数据前提都不能假设**：① 「仪表板默认打开最新 ready 文件」会被同套件里
+  别的用例中途上传的文件顶掉（实测被残留的 `a.csv` 夺走 → 总览一行 CPK 都没有，
+  helper 抛「没有带 CPK 数值的行」）→ 必须经 `.dash-file-select` **显式选种子文件**，
+  且**每次 `page.reload()` 后重选**（`DashboardPage.reconcileSelection` 在挂载时把选中重置回
+  `files[0]`，选中态不落盘）；② 别把「默认阈值下这一行是 A 级」写成前置断言——哪行 CPK 多少
+  取决于数据，只断言充分关系（三级阈值全抬到该 CPK 之上 → 必判 D）；③ PUT 用户级设置后
+  `finally` 写回**原值**而不是硬编码默认，admin storageState 是全套件共享账号。

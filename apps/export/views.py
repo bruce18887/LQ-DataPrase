@@ -23,6 +23,8 @@ from .excel_builders import (
     build_sigma_limit_sheet,
 )
 from .export_ppt import build_batch_charts_pptx
+from .user_prefs import get_export_dpi
+from apps.common.user_settings import get_cpk_thresholds
 from .export_complete import export_to_xlsx_optimized
 from .export_csv import export_to_csv
 
@@ -279,6 +281,12 @@ class ExportViewSet(viewsets.GenericViewSet):
 
         site_col = get_site_column(df)
 
+        # 导出图表 DPI 取用户系统设置（已钳到设置页合法区间）。必须是纯标量：
+        # xlsx 分支会把图形渲染提交到 ProcessPoolExecutor worker，worker 禁读 Django/DB。
+        dpi = get_export_dpi(request.user)
+        # CPK 分级阈值同理：主进程算好等级色，穿进两个分支（与分析页/仪表板同一份设置）
+        cpk_thresholds = get_cpk_thresholds(request.user)
+
         base_ctx = {**base_export_context(request.user),
                     'filename': datafile.filename.rsplit('.', 1)[0]}
 
@@ -290,6 +298,7 @@ class ExportViewSet(viewsets.GenericViewSet):
                 show_limit=show_limit, show_3sigma=show_3sigma,
                 show_4sigma=show_4sigma, show_6sigma=show_6sigma,
                 show_normal=show_normal, show_kde=show_kde,
+                dpi=dpi, cpk_thresholds=cpk_thresholds,
             )
             fname = render_export_filename(request.user, 'batch_charts', 'pptx', base_ctx)
             return FileResponse(io.BytesIO(pptx_bytes), as_attachment=True,
@@ -302,6 +311,7 @@ class ExportViewSet(viewsets.GenericViewSet):
                 show_limit=show_limit, show_3sigma=show_3sigma,
                 show_4sigma=show_4sigma, show_6sigma=show_6sigma,
                 show_normal=show_normal, show_kde=show_kde,
+                dpi=dpi, cpk_thresholds=cpk_thresholds,
             )
             fname = render_export_filename(request.user, 'batch_charts', 'xlsx', base_ctx)
             return FileResponse(io.BytesIO(xlsx_bytes), as_attachment=True,

@@ -62,7 +62,10 @@ class UserSetting(models.Model):
     page_size = models.IntegerField(default=100)
     chart_height = models.IntegerField(default=500)
     table_height = models.IntegerField(default=700)
-    chart_dpi = models.IntegerField(default=150)
+    # 导出图表 DPI（系统设置 → 显示设置）。默认 100 = apps/export/charts.py 里
+    # EXPORT_DPI_DEFAULT 的实测最优值（Excel 按固定 EMU 显示，100 与 150 观感相同
+    # 而 PNG 体积小 2/3）；合法区间 72–600 与设置页 el-input-number 一致。
+    chart_dpi = models.IntegerField(default=100)
     cpk_a_threshold = models.FloatField(default=1.67)
     cpk_b_threshold = models.FloatField(default=1.33)
     cpk_c_threshold = models.FloatField(default=1.0)

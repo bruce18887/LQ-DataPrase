@@ -22,6 +22,7 @@ from apps.analysis.services.statistics import (
 )
 from apps.datafiles.services import get_cached_parsed_file
 from apps.datafiles.utils import resolve_file_path
+from apps.common.user_settings import get_cpk_thresholds
 
 logger = logging.getLogger(__name__)
 
@@ -79,8 +80,11 @@ def _has_valid_limit(limit_str) -> bool:
     return bool(s) and s.lower() not in ('', 'nan', 'none', 'n/a')
 
 
-def compute_test_item_overview(df, metadata, fail_stats):
+def compute_test_item_overview(df, metadata, fail_stats, thresholds=None):
     """合并「CPK 参数表」与「Fail 测试项明细」：一行一个测试项。
+
+    ``thresholds``（CpkThresholds）= 当前账号的 CPK 分级阈值，决定 cpk_level /
+    cpk_color；None 时用默认 1.67/1.33/1.0。
 
     行集 = 有规格限的参数（全部，不再 Top10）∪ 出现 Fail 的测试项；
     行序 = df.columns 原始顺序（前端默认排序）。
@@ -88,6 +92,9 @@ def compute_test_item_overview(df, metadata, fail_stats):
     无 fail 的参数：fail_count / percentage 返回 0。
     """
     from apps.analysis.services.statistics import compute_cpk, resolve_spec_limits
+    from apps.common.user_settings import DEFAULT_CPK_THRESHOLDS
+
+    th = thresholds or DEFAULT_CPK_THRESHOLDS
 
     # 限值判定沿用原 compute_parameter_summary 的宽松语义：单边限参数也保留
     # （缺失侧以 -inf/+inf 传入 compute_cpk 计算单边 CPK，输出时转 None）。
@@ -142,7 +149,8 @@ def compute_test_item_overview(df, metadata, fail_stats):
                     row['usl'] = round(usl, 4) if usl != float('inf') else None
 
                     if not (lsl == float('-inf') and usl == float('inf')):
-                        cpk_result = compute_cpk(row['mean'], row['std'], lsl, usl)
+                        cpk_result = compute_cpk(row['mean'], row['std'], lsl, usl,
+                                                 **th.as_kwargs())
                         if math.isfinite(cpk_result['cpk']):  # 防 inf 破坏 JSON
                             row['cpk'] = round(cpk_result['cpk'], 3)
                             row['cpk_level'] = cpk_result['cpk_level']
@@ -174,8 +182,16 @@ def _derive_param_stats(overview_rows):
     )
 
 
-def compute_quality_alerts(yield_pct, param_stats, site_yield_data):
-    """生成质量警报"""
+def compute_quality_alerts(yield_pct, param_stats, site_yield_data, thresholds=None):
+    """生成质量警报
+
+    ``thresholds``（CpkThresholds）里的 B 阈就是「低 CPK」警报的判定线，与
+    分析页「仅低 CPK 项」筛选、总览表分级共用同一个账号设置值；文案内插该值，
+    不再写死 1.33（否则用户改了阈值后警报与界面判定线不一致）。
+    """
+    from apps.common.user_settings import DEFAULT_CPK_THRESHOLDS
+
+    cpk_b = (thresholds or DEFAULT_CPK_THRESHOLDS).cpk_b
     alerts = []
 
     # 警报1：低良率
@@ -193,12 +209,12 @@ def compute_quality_alerts(yield_pct, param_stats, site_yield_data):
         })
 
     # 警报2：低CPK参数
-    low_cpk_params = [p for p in param_stats if p['cpk'] < 1.33]
+    low_cpk_params = [p for p in param_stats if p['cpk'] < cpk_b]
     if low_cpk_params:
         alerts.append({
             'level': 'warning',
             'type': 'low_cpk',
-            'message': f'{len(low_cpk_params)}个参数CPK不足 (CPK < 1.33)',
+            'message': f'{len(low_cpk_params)}个参数CPK不足 (CPK < {cpk_b:g})',
             'params': [p['param'] for p in low_cpk_params[:3]]
         })
 
@@ -291,11 +307,16 @@ class DashboardSummaryView(APIView):
             bin_table_data, bin_site_columns = compute_bin_site_table(df, fmt, site_col)
 
             # 合并参数CPK统计与Fail测试项明细为测试项总览（行序=原始列序）
-            test_item_overview = compute_test_item_overview(df, metadata, test_item_stats)
+            # CPK 分级阈值取当前账号的系统设置，与「低 CPK」警报判定线同源，
+            # 避免总览说 A 级而警报按 1.33 判。
+            cpk_thresholds = get_cpk_thresholds(request.user)
+            test_item_overview = compute_test_item_overview(
+                df, metadata, test_item_stats, thresholds=cpk_thresholds)
             param_stats = _derive_param_stats(test_item_overview)
 
             # 生成质量警报
-            quality_alerts = compute_quality_alerts(yield_pct, param_stats, site_yield_data)
+            quality_alerts = compute_quality_alerts(
+                yield_pct, param_stats, site_yield_data, thresholds=cpk_thresholds)
 
             return Response({
                 'file_id': datafile.id,

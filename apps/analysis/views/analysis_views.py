@@ -53,6 +53,7 @@ from ._helpers import (
     parse_filter_flags,
     cached_low_cpk_items,
 )
+from apps.common.user_settings import get_cpk_thresholds
 
 # 兼容既有调用名（低 CPK 缓存已上移 _helpers，多视图共享）
 _cached_low_cpk_items = cached_low_cpk_items
@@ -77,7 +78,9 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
         data_only_bin1 = get_bool_param(request, 'data_only_bin1')
         only_fail_test_item = get_bool_param(request, 'only_fail_test_item')
         only_low_cpk = get_bool_param(request, 'only_low_cpk')
-        cpk_threshold = get_cpk_b_threshold(request.user)
+        # 一次读账号阈值：B 阈 = 「仅低 CPK 项」判定线，三值 = cpk_level/cpk_color 分级线
+        cpk_thresholds = get_cpk_thresholds(request.user)
+        cpk_threshold = cpk_thresholds.cpk_b
         # 低 CPK 判定跟随前端统计卡显示口径（有异常值即用 filtered CPK），
         # iqr_multiplier 影响异常值集合，须与直方图计算一致。
         iqr_multiplier = get_param_float(request, 'iqr_multiplier', 1.5)
@@ -204,7 +207,7 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
             result = compute_histogram_stats(
                 df, metadata, param, site_col,
                 range_type=range_type, custom_low=custom_low, custom_high=custom_high,
-                iqr_multiplier=iqr_multiplier)
+                iqr_multiplier=iqr_multiplier, cpk_thresholds=cpk_thresholds)
             if result is not None:
                 results[param] = result
             else:
@@ -300,7 +303,8 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
         # （冷缓存 ~3.6s → ~2.2s）。
         if not param:
             flags = parse_filter_flags(request)
-            cpk_threshold = get_cpk_b_threshold(request.user)
+            cpk_thresholds = get_cpk_thresholds(request.user)
+            cpk_threshold = cpk_thresholds.cpk_b
             iqr_multiplier = flags['iqr_multiplier']
             # data_only_bin1 先收窄行再派生基础候选列表（与单文件 fast-path 口径一致）
             loaded_work = loaded
@@ -368,7 +372,8 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
                     include_kde = get_bool_param(request, 'include_kde')
                     dist = compute_multi_lot_distribution(
                         datasets, all_series, first, range_type,
-                        custom_low, custom_high, include_kde=include_kde)
+                        custom_low, custom_high, include_kde=include_kde,
+                        cpk_thresholds=cpk_thresholds)
                     if dist:
                         response['range_type'] = range_type
                         response.update(dist)  # param/global stats/bin/lot_data
@@ -379,7 +384,8 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
 
         # With param → per-file distribution (no SITE split; one series/file).
         flags = parse_filter_flags(request)
-        cpk_threshold = get_cpk_b_threshold(request.user)
+        cpk_thresholds = get_cpk_thresholds(request.user)
+        cpk_threshold = cpk_thresholds.cpk_b
         iqr_multiplier = flags['iqr_multiplier']
         range_type = get_param(request, 'range_type', 'S4')
         custom_low = get_param_float(request, 'custom_low')
@@ -442,6 +448,7 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
             datasets, all_series, param,
             range_type=range_type, custom_low=custom_low, custom_high=custom_high,
             include_kde=include_kde,
+            cpk_thresholds=cpk_thresholds,
         )
 
         return Response(clean_data(result))
@@ -603,7 +610,9 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
             }, status=400)
         params = valid_params
 
-        result = compute_cpk_table_data(df, metadata, params)
+        result = compute_cpk_table_data(
+            df, metadata, params,
+            cpk_thresholds=get_cpk_thresholds(request.user))
 
         return Response(clean_data(result))
 

@@ -18,13 +18,20 @@ from apps.analysis.services.statistics import (
 from apps.analysis.services.statistics.helpers import normal_pdf_curve
 from apps.analysis.services.statistics.kde import GaussianKDE
 from apps.export.histogram_grid import build_histogram_grid, finite_or_none
+from apps.common.user_settings import DEFAULT_CPK_THRESHOLDS
+from .charts import EXPORT_DPI_DEFAULT
 
 
 def build_batch_charts_pptx(datafile, df, metadata, params,
                             show_limit=True, show_3sigma=False,
                             show_4sigma=False, show_6sigma=True,
-                            show_normal=False, show_kde=False):
+                            show_normal=False, show_kde=False,
+                            dpi=EXPORT_DPI_DEFAULT,
+                            cpk_thresholds=None):
     """Build batch charts PPTX with histogram slides.
+
+    ``cpk_thresholds``（CpkThresholds）= 当前账号的 CPK 分级阈值，决定幻灯片标题里
+    的等级色名；与 xlsx 分支同源，None 时用默认 1.67/1.33/1.0。
 
     For each parameter in *params* a matplotlib histogram is rendered and
     embedded into a blank PPTX slide.  The overlay switches mirror the xlsx
@@ -50,6 +57,7 @@ def build_batch_charts_pptx(datafile, df, metadata, params,
     prs = Presentation()
     # blank layout
     blank_layout = prs.slide_layouts[6]
+    th = cpk_thresholds or DEFAULT_CPK_THRESHOLDS
 
     # Chinese font support
     plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
@@ -67,7 +75,8 @@ def build_batch_charts_pptx(datafile, df, metadata, params,
         # compute_cpk 对 None 返回 0.0，绘图侧则跳过标记线（不画幻影 LSL/USL）
         rdl_min = finite_or_none(stats['rdl'][0])
         rdl_max = finite_or_none(stats['rdl'][1])
-        cpk_result = compute_cpk(stats['mean'], stats['std'], rdl_min, rdl_max)
+        cpk_result = compute_cpk(stats['mean'], stats['std'], rdl_min, rdl_max,
+                                 **th.as_kwargs())
         cpk_val = cpk_result['cpk']
         cpk_level = cpk_result.get('cpk_color', 'gray')
 
@@ -133,7 +142,7 @@ def build_batch_charts_pptx(datafile, df, metadata, params,
         fig.tight_layout()
 
         buf = io.BytesIO()
-        fig.savefig(buf, format='png', dpi=120)
+        fig.savefig(buf, format='png', dpi=dpi)
         buf.seek(0)
         plt.close(fig)
 

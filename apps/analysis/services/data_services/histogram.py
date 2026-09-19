@@ -18,6 +18,7 @@ from apps.analysis.services.statistics import (
 from apps.analysis.services.statistics.helpers import _dense_x_grid
 from apps.analysis.services.statistics.outliers import detect_outliers_iqr
 from apps.analysis.services.limits import resolve_limits
+from apps.common.user_settings import DEFAULT_CPK_THRESHOLDS
 
 
 def compute_kde_curve(data_series, bin_min, bin_max, n_points=200):
@@ -47,8 +48,11 @@ def compute_kde_curve(data_series, bin_min, bin_max, n_points=200):
 
 def compute_histogram_stats(df, metadata, param, site_col,
                             range_type='RDL', custom_low=None, custom_high=None,
-                            iqr_multiplier=1.5):
+                            iqr_multiplier=1.5, cpk_thresholds=None):
     """Compute histogram binning, CPK stats, and per-site histograms.
+
+    ``cpk_thresholds`` 是 ``apps.common.user_settings.CpkThresholds``：账号在系统设置
+    里配的 A/B/C 分级阈值，决定 cpk_level / cpk_color（None = 用 1.67/1.33/1.0 默认）。
 
     Returns the same dict that ``AnalysisViewSet.histogram`` built inline,
     or ``None`` when there is no valid data for *param*.
@@ -65,6 +69,7 @@ def compute_histogram_stats(df, metadata, param, site_col,
     ``range_type == 'CL'`` and both are provided.
     ``iqr_multiplier`` controls outlier detection sensitivity (default 1.5).
     """
+    th = cpk_thresholds or DEFAULT_CPK_THRESHOLDS
     data_series = filter_finite(get_1d_from(df, param))
     if len(data_series) == 0:
         return None
@@ -78,7 +83,8 @@ def compute_histogram_stats(df, metadata, param, site_col,
         iqr_multiplier=iqr_multiplier,
     )
     cpk_result = compute_cpk(
-        stats['mean'], stats['std'], stats['rdl'][0], stats['rdl'][1]
+        stats['mean'], stats['std'], stats['rdl'][0], stats['rdl'][1],
+        **th.as_kwargs(),
     )
 
     # Custom-limit CPK: in 'CL' mode the user-supplied bounds act as spec
@@ -91,6 +97,7 @@ def compute_histogram_stats(df, metadata, param, site_col,
         custom_cpk_result = compute_cpk(
             stats['mean'], stats['std'],
             float(custom_low), float(custom_high),
+            **th.as_kwargs(),
         )
         custom_cpk = round(custom_cpk_result['cpk'], 4)
         custom_cpk_level = custom_cpk_result['cpk_level']
@@ -132,7 +139,8 @@ def compute_histogram_stats(df, metadata, param, site_col,
                 filtered_normal_curve = None  # 需 bin_min/bin_max，响应前计算
                 filtered_cpk_result = compute_cpk(
                     filtered_mean, filtered_std,
-                    stats['rdl'][0], stats['rdl'][1]
+                    stats['rdl'][0], stats['rdl'][1],
+                    **th.as_kwargs(),
                 )
                 filtered_cpk = round(filtered_cpk_result['cpk'], 4)
                 filtered_cpk_level = filtered_cpk_result['cpk_level']

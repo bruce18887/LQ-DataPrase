@@ -27,8 +27,10 @@ from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APIClient
 
+from apps.common.user_settings import DEFAULT_CPK_THRESHOLDS
 from apps.export import export_complete
 from apps.export import views as export_views
+from apps.export.charts import EXPORT_DPI_DEFAULT
 from apps.export.export_csv import export_to_csv
 from apps.export.export_ppt import build_batch_charts_pptx
 
@@ -162,7 +164,17 @@ class HtmlReportYieldPrecisionTests(_ExportViewTests):
 
 
 class PptxSwitchPassThroughTests(_ExportViewTests):
-    """缺陷 #6：pptx 分支必须收到与 xlsx 分支相同的图形开关。"""
+    """缺陷 #6：pptx 分支必须收到与 xlsx 分支相同的图形配置。
+
+    「图形配置」自 2026-09-19 起含 6 个叠加开关 + DPI + CPK 分级阈值
+    （系统设置失效项整改批 2），两分支同样必须一一致。
+    """
+
+    GRAPH_KEYS = set(SWITCHES) | {'dpi', 'cpk_thresholds'}
+
+    def _graph_config(self, kwargs):
+        """取出视图透传给导出分支的图形配置键（xlsx 另有 site_col，不参与比较）。"""
+        return {k: v for k, v in kwargs.items() if k in self.GRAPH_KEYS}
 
     def _spy(self):
         calls = {}
@@ -185,8 +197,11 @@ class PptxSwitchPassThroughTests(_ExportViewTests):
         resp = self.client.post(CHARTS_URL, payload, format='json')
         self.assertEqual(resp.status_code, 200)
         expected = {name: payload[name] for name in SWITCHES}
-        self.assertEqual(calls['kwargs'], expected,
-                         'pptx 分支必须把 6 个图形开关原样透传')
+        # 测试用户没有 UserSetting 行 → 两项图形设置都取代码默认值
+        expected.update({'dpi': EXPORT_DPI_DEFAULT,
+                         'cpk_thresholds': DEFAULT_CPK_THRESHOLDS})
+        self.assertEqual(self._graph_config(calls['kwargs']), expected,
+                         'pptx 分支必须把 6 个图形开关 + DPI + CPK 阈值原样透传')
 
     def test_switch_defaults_forwarded_to_pptx_builder(self):
         calls = self._spy()
@@ -194,7 +209,7 @@ class PptxSwitchPassThroughTests(_ExportViewTests):
                                 {'file_id': 1, 'params': ['V1'], 'format': 'pptx'},
                                 format='json')
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(set(calls['kwargs']), set(SWITCHES))
+        self.assertEqual(set(self._graph_config(calls['kwargs'])), self.GRAPH_KEYS)
         self.assertTrue(calls['kwargs']['show_limit'])
         self.assertTrue(calls['kwargs']['show_6sigma'])
 
@@ -216,9 +231,9 @@ class PptxSwitchPassThroughTests(_ExportViewTests):
                 'show_normal': True, 'show_kde': True}
         self.client.post(CHARTS_URL, {**base, 'format': 'pptx'}, format='json')
         self.client.post(CHARTS_URL, {**base, 'format': 'xlsx'}, format='json')
-        self.assertEqual(pptx_calls['kwargs'],
-                         {k: v for k, v in xlsx_calls['kwargs'].items() if k in SWITCHES},
-                         '同一份配置导出的 pptx 与 xlsx 图形开关必须一致')
+        self.assertEqual(self._graph_config(pptx_calls['kwargs']),
+                         self._graph_config(xlsx_calls['kwargs']),
+                         '同一份配置导出的 pptx 与 xlsx 图形配置（开关+DPI+CPK 阈值）必须一致')
 
 
 class PptxBuilderHonorsSwitchesTests(SimpleTestCase):

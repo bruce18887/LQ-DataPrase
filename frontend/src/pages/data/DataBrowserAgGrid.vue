@@ -50,8 +50,8 @@
           :columnDefs="columnDefs"
           :rowModelType="'infinite'"
           :datasource="datasource"
-          :infiniteInitialRowCount="BLOCK_SIZE"
-          :cacheBlockSize="BLOCK_SIZE"
+          :infiniteInitialRowCount="blockSize"
+          :cacheBlockSize="blockSize"
           :maxBlocksInCache="20"
           :overlayNoRowsTemplate="'没有匹配的数据'"
           :defaultColDef="defaultColDef"
@@ -159,8 +159,10 @@ const failRowCount = ref(0)
 // 请求竞态防护：快速切换筛选时丢弃过期响应（只丢弃 refs 更新，grid 本身有块版本号守卫）
 let loadSeq = 0
 
-// 服务端分页块大小（IRM cacheBlockSize）
-const BLOCK_SIZE = 100
+// 服务端分页块大小（IRM cacheBlockSize）= 系统设置 → 表格设置 → 默认每页行数。
+// 初值取设置页同款默认 100；onMounted 拉到账号设置后覆盖（见下方 settings 拉取）。
+const PAGE_SIZE_DEFAULT = 100
+const blockSize = ref(PAGE_SIZE_DEFAULT)
 
 // ── 列直方图（右键列名打开） ──
 const histDialogVisible = ref(false)
@@ -197,6 +199,7 @@ const systemCols = ref<string[]>([])
 
 // 默认隐藏列（系统设置 → 表格设置）：命中列 hide=true，列仍存在，用户可通过
 // ag-grid 表头列菜单重新显示；与导出 Excel 的隐藏列共用同一份设置。
+// 同一次拉取顺带套「默认每页行数」→ IRM 块大小（见 applyBlockSize），不额外发请求。
 const defaultHiddenCols = ref<string[]>([])
 onMounted(async () => {
   try {
@@ -204,10 +207,29 @@ onMounted(async () => {
     defaultHiddenCols.value = Array.isArray(data?.default_hidden_columns)
       ? data.default_hidden_columns
       : []
+    applyBlockSize(data?.page_size)
   } catch {
-    // 设置加载失败：保持全部可见（静默降级）
+    // 设置加载失败：隐藏列保持全部可见、块大小用默认 100（静默降级）
   }
 })
+
+/** 设置页「默认每页行数」的可取范围（= TableSettingsForm 下拉的端点）。 */
+const BLOCK_SIZE_MIN = 50
+const BLOCK_SIZE_MAX = 500
+
+/**
+ * 套用账号的每页行数作为 IRM 块大小；越界/非数字忽略，留默认。
+ *
+ * 块大小变了必须 purge 已缓存块：否则旧块仍按 100 行边界排列，续滚时
+ * getRows 用新块大小反推页码 → 页边界错位、行重复或缺失。
+ */
+function applyBlockSize(raw: unknown) {
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < BLOCK_SIZE_MIN || n > BLOCK_SIZE_MAX) return
+  if (n === blockSize.value) return
+  blockSize.value = n
+  gridApi.value?.purgeInfiniteCache()
+}
 
 function isSystemCol(name: string): boolean {
   return systemCols.value.includes(name)
@@ -418,8 +440,8 @@ const datasource: IDatasource = {
     try {
       const resp = await datafilesApi.browse({
         datafile_id: props.fileId,
-        page: Math.floor(params.startRow / BLOCK_SIZE) + 1,
-        page_size: BLOCK_SIZE,
+        page: Math.floor(params.startRow / blockSize.value) + 1,
+        page_size: blockSize.value,
         pass_filter: passfail.value,
         site_filter: siteFilter.value,
         sort_model: JSON.stringify(params.sortModel),

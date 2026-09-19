@@ -12,13 +12,10 @@ export type ExportTypeKey =
 
 export interface UserSettings {
   page_size: number
-  chart_height: number
-  table_height: number
   chart_dpi: number
   cpk_a_threshold: number
   cpk_b_threshold: number
   cpk_c_threshold: number
-  chart_engine: string
   chart_renderer: 'svg' | 'canvas'
   export_filename_templates: Record<ExportTypeKey, string>
   export_timeout: number
@@ -31,18 +28,11 @@ export interface UserSettings {
 /** 系统设置页完整设置项（GET/PUT /auth/settings/ 的载荷）。 */
 export interface SettingsData {
   page_size: number
-  chart_height: number
-  table_height: number
   chart_dpi: number
   cpk_a_threshold: number
   cpk_b_threshold: number
   cpk_c_threshold: number
-  chart_engine: string
   chart_renderer: 'svg' | 'canvas'
-  aggrid_header_font_size: number
-  recent_files: Array<{ id: number; name: string; accessed_at: string }>
-  max_recent_files: number
-  histogram_label_offset: number
   export_filename_templates: Record<ExportTypeKey, string>
   export_timeout: number
   /** SFTP 浏览器单文件下载超时（秒）：SSE 流服务端 deadline + axios timeout */

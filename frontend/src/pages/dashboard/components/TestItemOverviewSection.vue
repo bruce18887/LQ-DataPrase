@@ -82,7 +82,7 @@
       </el-table-column>
       <el-table-column prop="cpk" label="CPK" width="90" align="center" sortable="custom">
         <template #default="{ row }">
-          <el-tag v-if="row.cpk !== null" :type="getCpkTagType(row.cpk)" size="small">{{ row.cpk.toFixed(2) }}</el-tag>
+          <el-tag v-if="row.cpk !== null" :type="getCpkTagType(row.cpk_color)" size="small">{{ row.cpk.toFixed(2) }}</el-tag>
           <span v-else class="cell-na">N/A</span>
         </template>
       </el-table-column>
@@ -236,10 +236,21 @@ function fmtNum(v: number): string {
   return v.toFixed(4)
 }
 
-function getCpkTagType(cpk: number): string {
-  if (cpk >= 1.67) return 'success'
-  if (cpk >= 1.33) return 'warning'
-  return 'danger'
+function getCpkTagType(cpkColor: string | null): 'success' | 'warning' | 'danger' | 'info' {
+  // 等级语义由后端按账号阈值算好后随 cpk_color 下发（apps/common/user_settings 的
+  // A/B/C 三阈）。此前这里按写死的 1.67/1.33 自评，用户改阈值时同一行会出现
+  // 「CpkBadge 已跟随、数值标签仍按默认」两套口径。
+  switch (cpkColor) {
+    case 'green':
+      return 'success'
+    case 'orange':
+    case 'darkorange':
+      return 'warning'
+    case 'red':
+      return 'danger'
+    default:
+      return 'info'
+  }
 }
 </script>
 
