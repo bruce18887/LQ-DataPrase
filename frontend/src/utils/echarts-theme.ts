@@ -9,20 +9,61 @@
 import { useThemeStore } from '../stores/theme'
 import { computed } from 'vue'
 import { fontFamily } from '../theme/typography'
+import { authApi } from '../api/auth'
 
 // ============================================================
 //  渲染器模式 — 全局单一切换点，改为 'canvas' 即可切回
 // ============================================================
 let _chartRenderer: 'svg' | 'canvas' = 'svg'
+let _rendererFetched = false
+let _rendererPromise: Promise<void> | null = null
+
+/** 只接受 'canvas'，其余（含缺失/未知值）一律回退 'svg'，与模块初值一致。 */
+function clampChartRenderer(value: unknown): 'svg' | 'canvas' {
+  return value === 'canvas' ? 'canvas' : 'svg'
+}
 
 /** 获取 echarts.init 的第三个参数（渲染器配置）；单图可覆盖（如大数据量强制 canvas） */
 export function getChartInitOpts(rendererOverride?: 'svg' | 'canvas'): { renderer: 'svg' | 'canvas' } {
   return { renderer: rendererOverride ?? _chartRenderer }
 }
 
-/** 运行时动态设置渲染器 */
+/** 运行时动态设置渲染器（设置页加载/保存后调用，等同于已取到账号真值） */
 export function setChartRenderer(renderer: 'svg' | 'canvas') {
-  _chartRenderer = renderer
+  _chartRenderer = clampChartRenderer(renderer)
+  _rendererFetched = true
+}
+
+/** 清空缓存并退回默认值（auth store 登录/登出时调用，防跨账号串值）。 */
+export function resetChartRendererCache(): void {
+  _chartRenderer = 'svg'
+  _rendererFetched = false
+  _rendererPromise = null
+}
+
+/**
+ * 把账号级 chart_renderer 取进上面的模块缓存。
+ *
+ * 图表初始化链路是同步的（echarts-init.ts 的 tryInit 里直接 getChartInitOpts），
+ * 没法就地 await，所以由路由守卫在任何页面组件挂载前 await 本函数一次：
+ * 未取过时单飞发一次 /auth/settings/ 请求，整页生命周期内只发一次。
+ * 请求失败静默回退 'svg' 并记为已取过 —— 与 utils/exportTimeout.ts 的降级口径
+ * 一致，避免每次导航都重试。
+ */
+export function ensureChartRenderer(): Promise<void> {
+  if (_rendererFetched) return Promise.resolve()
+  if (!_rendererPromise) {
+    _rendererPromise = (async () => {
+      try {
+        const { data } = await authApi.getSettings()
+        _chartRenderer = clampChartRenderer(data?.chart_renderer)
+      } catch {
+        _chartRenderer = 'svg'
+      }
+      _rendererFetched = true
+    })()
+  }
+  return _rendererPromise
 }
 
 /** 获取当前渲染器模式 */

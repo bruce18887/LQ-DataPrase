@@ -1733,13 +1733,47 @@ ad62f81 → b47f509 → 9e313c8 → 837b3dc → 6f8a608 → 4f1d8af → 13ab77c 
 - `ScreenUpdating` / `Calculation` 必须 `finally` 恢复（VBA 版异常时不恢复）
 - 双 build x86+x64（老机器多为 32 位 Excel）
 
+### 批次 6：把 Exp 控件放回**表上**（C-form，2026-09-19）✅
+**目标**：不再用浮动窗口，改为原 Exp 表那排控件**长在表上**，点控件即重算分布表。
+
+**已查清的事实**（拆 `Exp-template.xlsm` + 读 `vbaProject.bin` + 读 `DataParser.cls`）：
+- 原控件 = `ComboBox1` + `OptionButton1..5` + `CheckBox1..9`（**MSForms ActiveX**，`<controls>` 里 16 项）+ 1 个 Form-Control 按钮。
+- 事件处理是**工作表模块 VBA**：`ComboBox1_Change` / `OptionButtonN_Click` / `CheckBoxN_Click`，
+  经 `AutoMark.bas` 的 `On_ComboxChanged`/`On_ImportButtonClick` 调到 `DataParser.cls`。
+- 原流程：数据是 **CSV**（`GetOpenFilename("*.csv")`）→ 打开 → `ThisWorkbook.Sheets("Exp").Copy`
+  把带控件的 Exp 表复制进该工作簿（`DataParser.cls:626`）。即**原来就靠跨工作簿 Copy 带控件**。
+
+**C 的两个变体**：
+- **C-form（表内 Form Control）**：`Shapes.AddFormControl` 建 下拉/复选/单选/按钮，`OnAction` 指向
+  **Excel-DNA `[ExcelCommand]`**（docs 确认「for macro commands」），处理程序用 `Application.Caller`
+  辨认是哪个控件、读其状态后重算。**任意格式可用（含 .xlsx）**、无 MSForms 依赖、确定性强；
+  代价：外观是 Form Control（与 ActiveX 略不同），OptionButton 分组要在处理程序里自行保证互斥。
+- **C-true（真 MSForms ActiveX）**：本机有 `FM20.DLL`，需 `tlbimp` 生成互操作 →
+  `(MSForms.ComboBox)sheet.OLEObjects("ComboBox1").Object` 挂 .NET 事件。风险：①ActiveX **存不进 .xlsx**；
+  ②`AutomationSecurity=ForceDisable` 可能挡 ActiveX；③互操作生成 + 事件汇，**本机无法实机验证**。
+
+**备选**：**B 任务窗格**——控件加 `public + [ComVisible(true)]`（两行）即可停靠右侧常驻。
+
+**用户选定**：C-form。**已实现**：
+- [x] `ExpControls.cs`：在 Exp 表上建 1 下拉（测试项）+ 5 单选（阶梯基准）+ 9 复选（百分比列）+ 1 按钮；
+      下拉列表来源写在 AZ 列、`ListFillRange` 指向它；全部控件 `OnAction="DpExpRefresh"`；幂等（先删 `DpExp*` 再建）。
+- [x] `ExpCommands.cs`：`[ExcelCommand] DpExpRefresh` —— 读回控件状态 → 写 B36/N1:V1 → 重算分布表（无需工作簿 VBA）。
+- [x] `ProcessRunner`：注入 Exp 后即建控件并填第一个测试项；新增 `SortedDataColumns`。
+- [x] `Actions.BuildDistributionControls`：取代原浮动窗口——「分布表」按钮 (重)建控件并激活 Exp 表。
+- [x] 删除被取代的 `DistributionWindow.cs` / `ExpPaneControl.cs`（浮动窗口方案作废）。
+- 版本 **v0.3.0**；构建零错误零警告；单测 **85/85**；已 `package.cmd` 出 dist。
+- ⚠️ **待实机验证**：控件是否出现、点击是否触发 `DpExpRefresh`（`[ExcelCommand]` 能否被 OnAction 解析是本批最大未知）。
+
 ### 批次 5 分布表 UI：任务窗格（静默失败）→ 无模式浮动窗口（2026-09-16）
 - **背景**：用户报「Exp 里面没有控件啊」「没弹出任何东西」。查清根因后才明白——
   原 Exp 表 UI 是 **16 个 ActiveX 控件**（`xl/activeX/*.bin` + `vmlDrawing1.vml`），
   事件代码在 `xl/vbaProject.bin`；而注入用的 `Exp-template.xlsb` **转格式时丢了 activeX 部件**，
   所以注入出的 Exp 表**天生没有控件**。
-- **结论**：XLL 加载项**结构上无法**复刻表内 ActiveX 控件（事件必须活在工作簿 VBA 工程里）。
-  与用户确认后走「**纯加载项 + 浮动面板**」，接受 UI 与原控件样式不同、功能等价。
+- **结论（2026-09-19 修正）**：先前写的「XLL **结构上无法**复刻表内 ActiveX」是**过度断言**——联网核实有公开先例：
+  .NET 可对**已存在**的表内 ActiveX 挂事件（`(MSForms.CommandButton)sheet.OLEObjects(name).Object` → `.Click +=`；
+  SO 24003113 / Excel-DNA #303 / DBAddin）。真正的难点是「从加载项**新建**控件」与「注入的 `.xlsb` 已丢 activeX 部件」。
+  本轮仍走「**纯加载项 + 浮动面板**」（用户拍板），接受 UI 与原控件样式不同、功能等价；若日后要原样还原，
+  路径是「注入含 activeX 的模板 + OLEObjects 挂 .NET 事件（无需工作簿 VBA）」。
 - [x] `DistributionWindow`：无模式 WinForms 浮动窗口承载 `ExpPaneControl`（1 下拉 + 5 单选 + 9 复选 + 应用），
       归属 Excel 主窗口；跑主线程（「应用」回调直接调 COM，无跨线程编组）。
 - [x] **事实性兜底**：`Show()` 后判 `_form.Visible`，为假才退到模态路径（配置对话框一直用的就是它）。
@@ -1912,5 +1946,142 @@ buyoff 的边际档因此也从浅黄变橙（一处改动、两处生效）。
   无前导 `=` 非法公式；逐格算值核对 —— Buyoff R1=-0.3 / R2=0 / R3=12% / R4=3%，
   Gage V=0.3341 / W=1.918 / X=1.9469 / Y=19.469% 且 `Fail Level=Bad2` 自洽。
 - `manage.py check` 干净；改动文件均 < 600 行。
+
+**实机反馈修复（2026-09-17，同日）**：用户打开导出的 Gage Summary，**Reproducibility（W）整列是 0**。
+根因：W 用了 `STDEV.P`（点号函数名，Excel 2010 才加），部分查看器认不出 → 公式报错；
+外面套的 `IFERROR(...,0)` 把错误**静默吞成 0**，所以既不报警也看不出异常。
+- [x] 改为老函数名 `STDEVP`（Excel 97 起即有），并把单文件边界从 `IFERROR` 换成显式的
+      `IF(COUNT(H..)<2, 0, STDEVP(H..)*6)` —— 真不兼容时宁可显示 `#NAME?` 也不要静默的 0。
+- [x] 测试加 `test_formulas_avoid_excel2010_dot_functions`（断言公式里不出现 `STDEV.`）
+      兜住这类"看着对、其实认不出"的函数名。
+- 复核其余公式：V（SUMSQ/SQRT/ROUND）、X（SQRT）、Y（ROUND）与 Buyoff 四行（ROUND）
+      都只用 1985 年的老函数，无点号函数名。
+- 验证：复现数据 W 由 0 → 0.2573/5.7428/0.6057；样张 `v5` 的 W12=1.918；定向 33 项全绿。
+
+**表头字号调整（2026-09-19）**：Gage Summary 与 Buyoff Form 的表头行
+（File Name / Tester ID / Test Name / 参数名…）字号 **12 → 10**。
+- [x] 仅两处调用点：`gage_styles.py` 的 `make_header_style(f, 12)` 与
+      `buyoff/excelize_layout.py` 的同款（`batch_report`/`excel_builders` 用的是
+      `excelize_helpers` 里的同名函数，不受影响）。
+- [x] 各加一条字号回归断言（`test_header_row_font_size_is_10`），`v5` 样张读回 `font.size=10`。
+
+---
+
+# 任务：系统设置失效项整改（11 项「存了没人读」+ chart_renderer 无启动加载）（2026-09-19）🔶 批 1 已完成，批 2/3 待开工
+
+用户报告：「当前我项目的系统设置好像有些根本不生效」。逐项追踪后定性：**不是保存丢失，是消费端缺失**。
+本清单只调查、不改码（用户确认：先写待办，处置口径选「先修真 bug，再分类处置」）。
+
+## 根因判定
+
+- **持久化层清白**：`apps/accounts/serializers.py:86-98` 的字段白名单含前端发的全部 19 个 key，
+  逐项 PUT/GET 可往返，没有 key 被裁剪（`chart_renderer` 历史上被 DRF 静默丢弃过，
+  `models.py:90` 注释记录已由 migration 0005 修好）。所以「改了没反应」和「重启后回退」无关。
+- **失效全在「读」这一侧**：`SettingsPage.vue:76-96` 定义 19 项默认值，其中 11 项在整个 `frontend/src`
+  只出现于三处 —— `types/index.ts` 的类型声明、`SettingsPage.vue` 的 defaults、设置表单组件的 `v-model`。
+  **没有任何功能代码读取这些值**。
+- **当前只有三条真实生效链路**：① 组件挂载时自查（`DataBrowserAgGrid.vue:201-210` 拉 `default_hidden_columns`）；
+  ② 惰性单飞缓存（范式见 `utils/exportTimeout.ts:43-57`，覆盖 `filename_wrap` / 两个 timeout / `analysis_chart_memory`）；
+  ③ 后端读库（`export_filename_templates` → `common/export_naming.py`、`sftp_download_timeout` → `sftp/views.py`、
+  `cpk_b_threshold` → `analysis/views/_helpers.py:73-78`）。
+
+## 逐项判定
+
+| key | UI 在改什么 | 真实生效路径 | 判定 |
+|---|---|---|---|
+| `chart_renderer` | svg/canvas 单选 | 只有 `SettingsPage.vue:125`（挂载）与 `:143`（保存）会 `setChartRenderer` | **部分生效（真 bug）** |
+| `page_size` | 下拉 50–500 | 无。请求处硬编码：`AnalysisPage.vue:66`、`DashboardPage.vue:175`、`DataManagement.vue:158` 传 `page_size: 9999`；表格用 `DataBrowserAgGrid.vue:163` `BLOCK_SIZE = 100` | 完全不生效 |
+| `chart_dpi` | 数字输入 | 无。`apps/export/charts.py:26-29` 的 `_get_export_dpi()` 无参、**恒 `return 100`**；`export_ppt.py:136` 另写死 `dpi=120` | 完全不生效 |
+| `cpk_a_threshold` | 1.67 | 无。`computations.py:20` 的 `get_quality_level(..., cpk_a=1.67, ...)` 靠形参默认值，`:85` 调用时一个阈值都不传；前端徽章 `TestItemOverviewSection.vue:240` 写死 `>= 1.67` | 完全不生效 |
+| `cpk_c_threshold` | 1.0 | 无（同上；`excelize_helpers.py:26-28` 分级色亦硬编码） | 完全不生效 |
+| `chart_engine` | ECharts/Matplotlib 单选 | **全仓无引擎分支**，选 Matplotlib 零作用 | 完全不生效（误导性 UI） |
+| `recent_files` | 列表展示 | 无写入方。只 `SettingsPage.vue:126` 读、`:140` 原样写回 —— 自读自写，永空 | 完全不生效 |
+| `max_recent_files` | 数字输入 | 无截断逻辑读取 | 完全不生效 |
+| `table_height` | 下拉 500–1000 | 无。高度由视口算：`DataBrowserAgGrid.vue:135`（`innerHeight - 320`） | 完全不生效 |
+| `aggrid_header_font_size` | 滑条 8–18 | 无消费者 | 完全不生效 |
+| `chart_height` | 数字输入 | 无消费者（组件高度由 CSS 撑） | 完全不生效 |
+| `histogram_label_offset` | 数字输入 | 前后端零消费 | 完全不生效 |
+| `cpk_b_threshold` | 1.33 | 后端 `analysis_views.py:80,303,382,468`、`statistics_views.py:214` 读，**但只用于「仅低 CPK 项」筛选口径**，不影响 A/B/C 分级显示 | 部分生效 |
+| `export_timeout` | 秒数 | 前端惰性缓存 → axios；服务端无 deadline | 半生效（见遗留项） |
+| `sftp_download_timeout` / `export_filename_templates` / `filename_wrap` / `default_hidden_columns` / `analysis_chart_memory` | — | 三链路之一，双向都读 | 生效 |
+
+## 批 1：修真 bug —— chart_renderer 补启动期加载 ✅（2026-09-19 完成）
+
+- [x] 在 `utils/echarts-theme.ts` 就地扩（不新建模块，避免两份渲染器状态）：
+      `clampChartRenderer`（只认 `'canvas'`，其余含缺失一律回退 `'svg'`）+
+      `resetChartRendererCache()` + `ensureChartRenderer()`（单飞 `_rendererPromise`，
+      失败也记为「已取过」→ 不逐次导航重试，与 `exportTimeout.ts` 降级口径一致）
+- [x] **落点改选「路由守卫 bootstrap」而非「把 `getChartInitOpts` 改异步」**：图表初始化链路是同步的
+      （`echarts-init.ts:104` 在 `tryInit` 里直接取），改异步要动 `tryInit`/轮询/`useChart` 一整条链，
+      收益为零。改为在 `router/index.ts` 守卫的 rehydrate 块之后 `await ensureChartRenderer()` ——
+      早于任何页面组件挂载，消费点一行未动。守卫是覆盖「硬刷新」与「登录后首跳」两条路径的唯一公共点
+      （`main.ts` 拿不到 store，且刷新时 token 已从 localStorage 复原但 `login()` 不会被调用）
+- [x] `stores/auth.ts` 的 `login()` 与 `clearSession()` 两处 reset 列表补 `resetChartRendererCache()`
+- [x] 修 `stores/auth.ts:25` **重复调用的 `resetFilenameWrapCache()`** —— 已确证是漏写：该行替换为
+      renderer reset 后两条链路各出现一次，与 `clearSession()` 的列表对齐
+- [x] 新增 e2e `frontend/e2e/settings/chart-renderer.spec.ts`：账号 `PUT chart_renderer=canvas` →
+      重新导航（全新 JS 上下文，全程不进设置页）→ 断言 `SiteYieldAnalysis.vue:21` 那个
+      `role=img` 容器内是 `<canvas>`；另配一条 svg 守护用例防接线反噬
+
+### 批 1 Review
+
+- **TDD 账目**：RED 首跑两条全红，暴露出我的选择器假设错误（`svg[data-zr-dom-id]` 在 ECharts 6 下
+  取不到，`data-zr-dom-id` 不落在画笔根上）→ 改回与 `helpers/charts.ts` 同口径的「容器内 canvas/svg」
+  判定；重跑 **RED 正确**（canvas 用例挂「找不到 canvas」= bug 本体，svg 用例过 = 选择器有效）。
+  接线后 GREEN：2 passed。
+- **回归账目**：`npm run build`（vue-tsc）绿；`settings + auth + smoke + dashboard` **63 passed / 2 skipped**；
+  `analysis.spec + chart-filter-switches + night-visibility` **37 passed**。跑完 8000/3000 零监听残留。
+- **环境前置**：8000 上原有两个 `runserver` 读仓库根 `system_config.json`（`data_dir = C:\Users\Administrator\LQ-DataPrase`
+  = 真实数据目录）。Playwright `reuseExistingServer` 会静默复用它，那条 PUT 就会写进真实账号设置
+  —— 经用户确认后停掉两个 PID，让 Playwright 自起带 `LQDP_SYSTEM_CONFIG_FILE` 的服务再跑。
+- **代价**：每次「整页首次导航」多一个 `GET /auth/settings/`（已登录时）。日志实测同页第二次导航不再发。
+- **双主题**：纯数据链路，零视觉元素，无需主题工作。
+- 遗留：`chart_engine` / `histogram_label_offset` 等仍属批 3。
+
+
+## 批 2：接线真正影响行为的 4 项
+
+- [ ] **`cpk_a_threshold` / `cpk_c_threshold` 贯通三级分级**：`computations.py:85` 的
+      `get_quality_level(cpk)` 改为接收用户阈值；阈值来源统一走
+      `_helpers.py:73-78` 的读库范式（建议把单值 `get_cpk_b_threshold` 扩成 `get_cpk_thresholds(user)`）。
+      同步改前端徽章 `TestItemOverviewSection.vue:240-241` 与导出 `excelize_helpers.py:26-28`
+      —— **口径必须三处一致，否则出现「屏幕 A 级、导出 C 级」**
+- [ ] **`page_size` 只接 `DataBrowserAgGrid` 的 IRM 块大小**：`BLOCK_SIZE`（`:163`）改为读设置的
+      cacheBlockSize（消费点 `:53-54`、分页算式 `:421-422`）。
+      ⚠️ **切勿顺手把 `AnalysisPage.vue:66` / `DashboardPage.vue:175` / `DataManagement.vue:158` 的
+      `page_size: 9999` 也换掉** —— 那三处是「一次拉全量供统计」的刻意取值，改成 100 会让分析/仪表板
+      基于残缺数据算，属正确性硬伤。若产品语义要区分，需在设置项文案里写清「仅影响查看数据表格」
+- [ ] **`chart_dpi` 接进导出**：`_get_export_dpi()` 改收用户值并钳位（建议 72–300）。
+      ⚠️ 默认值三方不一致：前端 defaults 150（`SettingsPage.vue:80`）、模型 default 150、代码常量 100。
+      `charts.py:27-28` 注释说明「150→100 清晰度不降、PNG 体积降 2/3」是**有意的优化** →
+      接线后默认必须落到 100（改前端 defaults + 模型 default + migration），不要退回 150。
+      并决定是否一并接管 `export_ppt.py:136` 的 120（PPT 图片按 9×5.5 英寸固定摆放，dpi 只改像素密度，会生效）
+- [ ] 每项补后端单测：改设置 → 输出随之变（防「又变回硬编码」）
+
+## 批 3：摘掉无人消费的 UI（7 项，止误导）
+
+- [ ] `chart_engine` 单选（`ChartSettingsForm.vue:4`）—— 整块删；**Matplotlib 选项等于承诺一个不存在的渲染后端**
+- [ ] `histogram_label_offset`（`:38`）、`chart_height`（`:19`）、`aggrid_header_font_size`（`TableSettingsForm.vue:35`）、
+      `table_height`（`:23`）四处表单项删除
+- [ ] 「最近文件」整个 tab（`SettingsPage.vue:26-32` + `RecentFilesSettings.vue`）：`recent_files` 无任何写入方
+      → 面板恒空。要么连「打开文件即记录 + `max_recent_files` 截断」一起实现（新特性，另立任务），要么摘 UI
+- [ ] 同步删 `SettingsPage.vue:76-96` defaults 与 `types/index.ts` 里对应字段
+- [ ] **后端字段保留、不删列**（避免 migration 动用户数据）；`serializers.py:86-98` 白名单是否收窄到
+      「仍被消费的项」单独决定 —— 收窄会让老客户端 PUT 报未知字段，需确认无外部调用方
+- [ ] e2e：设置页用例断言被摘项不再存在；双主题检查（删项不涉及新视觉，预期零主题工作）
+
+## 遗留 / 另立任务
+
+- `export_timeout` 只放宽前端 axios 等待，服务端同步跑到底无 deadline；其它接口仍受
+  `api/index.ts` 的 30s 约束 —— 链路完整性待评估。
+- `default_hidden_columns` 空数组语义分叉：`serializers.py:105-109` GET 时回退默认 8 列，
+  导出侧读原始值不回退 → 用户清空后「UI 显示隐藏 8 列、导出隐藏 0 列」。
+- 「恢复默认」不清 `analysis_chart_state`（不在 `SettingsPage.vue:76-96` defaults 里，
+  但 `serializers.py:97` 允许保存）→ 恢复默认后布局记忆仍残留。
+- `validate_export_timeout` / `validate_sftp_download_timeout`（`serializers.py:125-133`）用
+  `isinstance(value, int)` 严格判型；`el-input-number` 未设 `:precision`，是否真能提交小数并
+  导致整单 PUT 400 **未实测**，接线前先验一下再定是否放宽。
+
+
 
 
