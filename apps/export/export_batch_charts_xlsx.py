@@ -17,9 +17,10 @@ from openpyxl.drawing.image import Image as XlImage
 from apps.analysis.services.statistics import (
     get_1d_from, filter_finite, compute_range_statistics, compute_cpk, compute_site_stats,
 )
-from .charts import _create_histogram_chart
+from .charts import _create_histogram_chart, EXPORT_DPI_DEFAULT
 from .chart_workers import render_histogram_worker
 from .histogram_grid import finite_or_none
+from apps.common.user_settings import DEFAULT_CPK_THRESHOLDS
 
 HEADER_FILL = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
 HEADER_FONT = Font(color="FFFFFF", bold=True, size=11)
@@ -43,12 +44,18 @@ def _site_fail_count(si: dict) -> int:
 def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
                                          show_limit=True, show_3sigma=False,
                                          show_4sigma=False, show_6sigma=True,
-                                         show_normal=False, show_kde=False):
+                                         show_normal=False, show_kde=False,
+                                         dpi=EXPORT_DPI_DEFAULT,
+                                         cpk_thresholds=None):
     """Build batch charts Excel with embedded histogram images.
+
+    ``cpk_thresholds``（CpkThresholds）= 当前账号的 CPK 分级阈值，决定总览 CPK 单元格
+    的等级色；None 时用默认 1.67/1.33/1.0。必须在主进程用（worker 只收渲染标量）。
 
     Ported from old project's export_batch_distribution_chart_excel + _export_charts_to_xlsx.
     Returns bytes of the .xlsx file.
     """
+    th = cpk_thresholds or DEFAULT_CPK_THRESHOLDS
     plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS']
     plt.rcParams['axes.unicode_minus'] = False
 
@@ -109,7 +116,8 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
         # 的 ``is not None`` 守卫与图表回退才能真正生效（缺陷 #5）
         rdl_min = finite_or_none(stats['rdl'][0])
         rdl_max = finite_or_none(stats['rdl'][1])
-        cpk_result = compute_cpk(stats['mean'], stats['std'], rdl_min, rdl_max)
+        cpk_result = compute_cpk(stats['mean'], stats['std'], rdl_min, rdl_max,
+                                 **th.as_kwargs())
         mean_val = stats['mean']
         std_val = stats['std']
 
@@ -233,6 +241,8 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
                         'show_6sigma': show_6sigma,
                         'show_normal': show_normal,
                         'show_kde': show_kde,
+                        # DPI 必须是已钳位的纯标量：worker 进程禁读 Django/DB
+                        'dpi': dpi,
                     },
                 )
             for title in processed_params:
@@ -257,7 +267,8 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
                 chart_data['rdl_min'], chart_data['rdl_max'],
                 show_limit=show_limit, show_3sigma=show_3sigma,
                 show_4sigma=show_4sigma, show_6sigma=show_6sigma,
-                show_normal=show_normal, show_kde=show_kde, site_col=site_col
+                show_normal=show_normal, show_kde=show_kde, site_col=site_col,
+                dpi=dpi,
             )
         else:
             img_buffer = io.BytesIO(png)

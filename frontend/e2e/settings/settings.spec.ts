@@ -12,12 +12,26 @@ import { gotoApp } from '../helpers/nav'
  */
 
 const TABS = [
-  { label: '📊 显示设置', content: '图表渲染引擎' },
+  { label: '📊 显示设置', content: 'ECharts 渲染器' },
   { label: '📋 表格设置', content: '默认每页行数' },
   { label: '📐 CPK 阈值', content: 'CPK A 级阈值' },
   { label: '📄 导出模板', content: '导出文件名' },
   { label: '📁 存储路径', content: '数据目录' },
-  { label: '🕐 最近文件', content: '最多保留' },
+]
+
+/**
+ * 已摘除的死设置：曾在设置页有控件、但前后端都无人读取（2026-09-19 批 3 移除，
+ * 见 docs/tasks/todo.md「系统设置失效项整改」）。断言它们不再出现，防止有人
+ * 只加回控件而不接消费链路。
+ */
+const REMOVED_DEAD_SETTINGS = [
+  '图表渲染引擎',
+  '图表高度',
+  '直方图标签偏移',
+  '表格高度',
+  '表头字号',
+  '最近文件',
+  '最多保留',
 ]
 
 async function clickTab(page: import('@playwright/test').Page, label: string) {
@@ -39,13 +53,13 @@ async function restoreChartRenderer(page: import('@playwright/test').Page) {
 }
 
 test.describe('@p1 系统设置页', { tag: ['@p1', '@settings'] }, () => {
-  test('页面渲染：6 个标签页与关键设置区块可见', async ({ page }) => {
+  test('页面渲染：5 个标签页与关键设置区块可见', async ({ page }) => {
     await gotoApp(page, '/settings')
 
     // 页面标题（SettingsPage.vue <h2>⚙️ 系统设置</h2>）
     await expect(page.getByRole('heading', { name: '系统设置' })).toBeVisible()
 
-    // 6 个 tab 标签（SettingsPage.vue el-tab-pane）
+    // 5 个 tab 标签（SettingsPage.vue el-tab-pane）
     for (const tab of TABS) {
       await expect(page.getByRole('tab', { name: tab.label })).toBeVisible()
     }
@@ -53,6 +67,18 @@ test.describe('@p1 系统设置页', { tag: ['@p1', '@settings'] }, () => {
     // 操作按钮（全局，不随 tab 切换）
     await expect(page.getByRole('button', { name: '💾 保存设置' })).toBeVisible()
     await expect(page.getByRole('button', { name: '🔄 恢复默认' })).toBeVisible()
+  })
+
+  test('死设置控件不再出现（曾「存了没人读」，2026-09-19 批 3 摘除）', async ({ page }) => {
+    await gotoApp(page, '/settings')
+    for (const tab of TABS) {
+      await clickTab(page, tab.label)
+    }
+    for (const label of REMOVED_DEAD_SETTINGS) {
+      await expect(page.getByText(label, { exact: true }), `应已移除：${label}`).toHaveCount(0)
+    }
+    // 承载死设置的「最近文件」tab 整体摘除
+    await expect(page.getByRole('tab', { name: '🕐 最近文件' })).toHaveCount(0)
   })
 
   test('切换各标签页 → 对应设置内容可见', async ({ page }) => {

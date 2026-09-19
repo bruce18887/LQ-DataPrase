@@ -3,6 +3,17 @@ from rest_framework import serializers
 from apps.common.export_naming import EXPORT_TEMPLATE_DEFAULTS, MAX_TEMPLATE_LENGTH
 from .models import User, UserSetting, DEFAULT_HIDDEN_COLUMNS
 
+# 图表 DPI 合法区间：须与设置页 el-input-number 的 min/max（ChartSettingsForm.vue）
+# 以及 apps/export/charts.py 的 EXPORT_DPI_MIN/MAX 三处一致，
+# 由 apps/export/tests_chart_dpi.py 的三方一致性用例钉住。
+CHART_DPI_MIN = 72
+CHART_DPI_MAX = 600
+
+# 「默认每页行数」= 查看数据表格的 IRM 块大小。上下界须与设置页下拉端点
+# （TableSettingsForm.vue）与前端消费侧一致；过小会把滚动变成请求风暴。
+PAGE_SIZE_MIN = 50
+PAGE_SIZE_MAX = 500
+
 
 class UserSerializer(serializers.ModelSerializer):
     """Admin-facing representation.
@@ -130,6 +141,18 @@ class UserSettingSerializer(serializers.ModelSerializer):
     def validate_sftp_download_timeout(self, value):
         if not isinstance(value, int) or not 30 <= value <= 3600:
             raise serializers.ValidationError('SFTP 下载超时必须在 30-3600 秒之间')
+        return value
+
+    def validate_chart_dpi(self, value):
+        if not isinstance(value, int) or not CHART_DPI_MIN <= value <= CHART_DPI_MAX:
+            raise serializers.ValidationError(
+                f'图表 DPI 必须在 {CHART_DPI_MIN}-{CHART_DPI_MAX} 之间')
+        return value
+
+    def validate_page_size(self, value):
+        if not isinstance(value, int) or not PAGE_SIZE_MIN <= value <= PAGE_SIZE_MAX:
+            raise serializers.ValidationError(
+                f'每页行数必须在 {PAGE_SIZE_MIN}-{PAGE_SIZE_MAX} 之间')
         return value
 
     def validate_default_hidden_columns(self, value):

@@ -6,14 +6,19 @@ from apps.analysis.services.statistics import (
     get_1d_from,
     filter_finite,
 )
+from apps.common.user_settings import DEFAULT_CPK_THRESHOLDS
 
 
-def compute_cpk_table_data(df, metadata, params):
+def compute_cpk_table_data(df, metadata, params, cpk_thresholds=None):
     """Compute CPK table for the given parameters.
+
+    ``cpk_thresholds``（CpkThresholds）决定 cpk_level / cpk_color 的分级线，
+    由视图按当前账号的系统设置传入；None 时用 1.67/1.33/1.0 默认。
 
     Returns ``{'results': {param: {...}}, 'count': N}``, matching the
     original response shape of ``AnalysisViewSet.cpk``.
     """
+    th = cpk_thresholds or DEFAULT_CPK_THRESHOLDS
     results = {}
     for param in params:
         data_series = filter_finite(get_1d_from(df, param))
@@ -22,7 +27,8 @@ def compute_cpk_table_data(df, metadata, params):
 
         stats = compute_range_statistics(data_series, metadata, param)
         cpk_result = compute_cpk(
-            stats['mean'], stats['std'], stats['rdl'][0], stats['rdl'][1]
+            stats['mean'], stats['std'], stats['rdl'][0], stats['rdl'][1],
+            **th.as_kwargs(),
         )
         results[param] = {
             'mean': round(stats['mean'], 6),

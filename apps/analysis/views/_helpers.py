@@ -71,13 +71,14 @@ def parse_filter_flags(request):
 
 
 def get_cpk_b_threshold(user):
-    """Read the user's B-level CPK threshold (UserSetting.cpk_b_threshold),
-    falling back to 1.33 when the OneToOne settings row is missing or the
-    user object has no ``settings`` attribute (e.g. test fakes)."""
-    try:
-        return float(user.settings.cpk_b_threshold)
-    except Exception:
-        return 1.33
+    """用户的 B 级 CPK 阈值 = 「仅低 CPK 项」筛选的判定线。
+
+    单一事实来源已上移到 apps.common.user_settings.get_cpk_thresholds（A/B/C 三值
+    一起读，供分级/警报/导出共用），这里保留原签名与「缺失回退 1.33」语义，
+    避免既有调用点与替身型测试同时改两处。
+    """
+    from apps.common.user_settings import get_cpk_thresholds
+    return get_cpk_thresholds(user).cpk_b
 
 
 def clean_data(data):

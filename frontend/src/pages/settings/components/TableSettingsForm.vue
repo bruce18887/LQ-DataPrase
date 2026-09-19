@@ -17,27 +17,10 @@
         <el-option :value="200" label="200" />
         <el-option :value="500" label="500" />
       </el-select>
-    </el-form-item>
-
-    <el-form-item label="表格高度">
-      <el-select v-model="settings.table_height">
-        <el-option :value="500" label="500" />
-        <el-option :value="600" label="600" />
-        <el-option :value="700" label="700" />
-        <el-option :value="800" label="800" />
-        <el-option :value="900" label="900" />
-        <el-option :value="1000" label="1000" />
-      </el-select>
-    </el-form-item>
-
-    <el-form-item label="表头字号">
-      <el-slider
-        v-model="settings.aggrid_header_font_size"
-        :min="8"
-        :max="18"
-        :step="1"
-        show-input
-      />
+      <div class="form-hint">
+        「查看数据」表格每次向服务端取多少行（滚动到底自动续取）。仅影响该表格的分页
+        块大小；分析页/仪表板的文件下拉是另按全量拉取，不受此项影响。
+      </div>
     </el-form-item>
 
     <el-form-item label="默认隐藏列">

@@ -23,13 +23,6 @@
       <el-tab-pane name="paths" label="📁 存储路径">
         <SystemPathsSettings />
       </el-tab-pane>
-      <el-tab-pane name="recent" label="🕐 最近文件">
-        <RecentFilesSettings
-          :recent-files="recentFiles"
-          :max-recent-files="settings.max_recent_files"
-          @update:max-recent-files="settings.max_recent_files = $event"
-        />
-      </el-tab-pane>
     </el-tabs>
 
     <div class="settings-actions">
@@ -56,7 +49,6 @@ import { clearChartMemoryState, setChartMemoryEnabled } from '../../composables/
 import TableSettingsForm from './components/TableSettingsForm.vue'
 import CpkSettingsForm from './components/CpkSettingsForm.vue'
 import SystemPathsSettings from './components/SystemPathsSettings.vue'
-import RecentFilesSettings from './components/RecentFilesSettings.vue'
 import ExportTemplateSettings from './components/ExportTemplateSettings.vue'
 import ExportTimeoutSettings from './components/ExportTimeoutSettings.vue'
 import SftpTimeoutSettings from './components/SftpTimeoutSettings.vue'
@@ -75,18 +67,11 @@ function defaultTemplates(): Record<ExportTypeKey, string> {
 
 const defaults: SettingsData = {
   page_size: 100,
-  chart_height: 500,
-  table_height: 700,
-  chart_dpi: 150,
+  chart_dpi: 100,
   cpk_a_threshold: 1.67,
   cpk_b_threshold: 1.33,
   cpk_c_threshold: 1.0,
-  chart_engine: 'echarts',
   chart_renderer: 'svg' as const,
-  aggrid_header_font_size: 11,
-  recent_files: [],
-  max_recent_files: 10,
-  histogram_label_offset: 4,
   export_filename_templates: defaultTemplates(),
   export_timeout: 600,
   sftp_download_timeout: 600,
@@ -97,8 +82,6 @@ const defaults: SettingsData = {
 
 const activeTab = ref('display')
 const settings = ref<SettingsData>({ ...defaults })
-
-const recentFiles = ref<Array<{ id: number; name: string; accessed_at: string }>>([])
 
 async function loadSettings() {
   try {
@@ -123,7 +106,6 @@ async function loadSettings() {
     }
     settings.value = merged as SettingsData
     setChartRenderer(merged.chart_renderer as 'svg' | 'canvas')
-    recentFiles.value = Array.isArray(data?.recent_files) ? data.recent_files : []
     // 导出超时同步到模块缓存，使导出调用点无需访问本页即可使用最新值
     setExportTimeoutSec(merged.export_timeout)
     // SFTP 下载超时同步到模块缓存（SFTP 浏览器读取此值）
@@ -135,11 +117,7 @@ async function loadSettings() {
 
 async function saveSettings() {
   try {
-    const payload: Record<string, unknown> = {
-      ...settings.value,
-      recent_files: recentFiles.value,
-    }
-    await authApi.updateSettings(payload)
+    await authApi.updateSettings({ ...settings.value })
     setChartRenderer(settings.value.chart_renderer)
     setExportTimeoutSec(settings.value.export_timeout)
     setSftpTimeoutSec(settings.value.sftp_download_timeout)
@@ -165,7 +143,6 @@ async function resetDefaults() {
       { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
     )
     settings.value = { ...defaults }
-    recentFiles.value = []
     ElMessage.success('已恢复默认设置（请点击保存以持久化）')
   } catch {
     // cancelled
