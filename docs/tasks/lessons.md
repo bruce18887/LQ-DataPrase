@@ -31,6 +31,22 @@
   再用**权威原件**交叉验证（能读原始文件就别只信中间产物），之后才动生产代码。凭单一中间产物
   下的「口径修正」结论，须标注为**待原件验证**。
 
+## 2026-09-19 加载项给表上加「能响应的控件」：Form Control + [ExcelCommand]（不是 ActiveX）
+
+- **结论**：加载项要在工作表上放能响应的控件，走 **Form Control**（`Shapes.AddFormControl`）+ 把控件
+  `OnAction` 指向 **Excel-DNA `[ExcelCommand]`** 宏（已确认该特性存在，docs 记作「for macro commands」）。
+  宏里用 `Shape.ControlFormat.Value` 读状态、`Application.Caller` 认是哪个控件。**不需要任何工作簿 VBA**，
+  且 Form Control 能存进 `.xlsx`。
+- **对比真 ActiveX**：ActiveX 的点击事件过程必须活在工作簿**自己的 VBA 工程**里（原工具靠宏格式 `.xlsb`
+  承载 `ComboBox1_Change` / `OptionButtonN_Click` / `CheckBoxN_Click`；拆 `vbaProject.bin` 得到）。加载项
+  没有工作簿 VBA，要对 ActiveX 挂事件得引 MSForms 互操作（`tlbimp` FM20.DLL）做 COM 事件汇。→ 只有「外观
+  必须与 ActiveX 完全一致」时才值得走 ActiveX。
+- **API 坑**：①`Shapes.AddFormControl(Type, Left, Top, Width, Height)` 的坐标是 **int**（传 double 编译不过）；
+  ②下拉取值靠 `ControlFormat.ListFillRange` 指向一段单元格（本实现写到 AZ 列），`ControlFormat.Value` 是
+  **1 基**索引；③复选/单选的 `Value` 为 1(选中) / -1(未选)；④表上**单选按钮的分组不可靠**（按相邻/插入顺序），
+  **互斥必须在处理程序里自行保证**；⑤`ExcelCommandAttribute` 无属性，命令名 = **方法名**。
+- **未验证点**（本机无法实机跑 Excel）：`OnAction` 能否解析 XLL 注册的命令名——是本方案最大未知，标注待验。
+
 ## 2026-09-16 表内 ActiveX 控件无法移植到 XLL；兜底要判「事实」而非「异常」
 
 - **原工具的「UI」是 16 个 ActiveX(MSForms) 控件**：拆开 `Exp-template.xlsm` 才确认——
