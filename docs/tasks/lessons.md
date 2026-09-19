@@ -36,10 +36,14 @@
 - **原工具的「UI」是 16 个 ActiveX(MSForms) 控件**：拆开 `Exp-template.xlsm` 才确认——
   `xl/activeX/activeX1..15.bin` + `xl/drawings/vmlDrawing1.vml` 给出控件名
   （`ComboBox1` / `OptionButton1..5` / `CheckBox1..9` / 按钮），事件代码在 `xl/vbaProject.bin`。
-  **XLL 结构上复刻不了**：ActiveX 的点击事件过程必须存在于**工作簿自己的 VBA 工程**里，
-  加载项无法给控件挂事件（写工作簿 VBA 要开「信任对 VBA 工程对象模型的访问」，且不该改用户文件）。
-  → 规则：**承诺移植 UI 前，先确认原控件是 ActiveX 还是 Form Control**。ActiveX 一律过不了
-  XLL 这一关；只有 Form Control（`OnAction` 指向宏名）才有机会。
+- **⚠️ 修正（2026-09-19，联网核实）**：先前断言「XLL 结构上无法驱动表内 ActiveX」是**过度断言**。
+  公开先例证明 .NET 侧能对**已存在**的表内 ActiveX 控件挂事件：
+  `var cb = (MSForms.CommandButton)sheet.OLEObjects(name).Object; cb.Click += handler;`
+  （SO 24003113 / Excel-DNA issue #303 / 项目 DBAddin / MSDN「run C# code behind a button on a
+  worksheet without VBA」）。**能挂事件**；真正的难点是 ①从加载项**新建** ActiveX 控件、
+  ②本项目注入的 `.xlsb` **已丢 activeX 部件**。
+- 规则：**断言「某平台结构上做不到」前先联网核实**（Office COM/OLE 这类历史久、先例多的领域尤其），
+  别把「我一时没做到 / 想复杂了」当成「结构上不可能」；措辞不确定时用「本轮未走通」而非「不可能」。
 - **换容器格式会静默丢部件**：`Exp-template.xlsb` 里**根本没有 `xl/activeX/`**——把 .xlsm 转成
   .xlsb 时这些部件被丢了，所以注入出的 Exp 表**天生没有控件**。用户报「Exp 里没有控件」
   的根因在此，不是代码没写。规则：**.xlsm↔.xlsb 转换后要逐项核对原始部件清单**。
@@ -62,6 +66,12 @@
   `Width`/`Visible` 全都能编译通过——**编译验证比反射可信**；反射拿不到成员，不代表类型不可用。
 - 决策口径同 2026-09-15 那条：**无复现手段 + 主路径静默失败 → 立刻换确定能成的实现**，
   不要让用户在「没反应」和「没反应」之间来回试。
+- **⚠️ 根因（2026-09-19 联网核实）**：`CreateCustomTaskPane` 在**控件未 COM 可见**时会失败——
+  .NET Framework 需 `[ComVisible(true)]`（类接口自动生成），.NET 6+ 还需**显式默认接口**
+  （公开 `interface` + `[ComDefaultInterface]` + `[Guid]`），否则报裸 `E_FAIL`（0x80004005）/
+  「Unable to create specified ActiveX control」（Excel-DNA issue #558、docs issue #17、
+  SO 55738903 已采纳答案）。本项目 `ExpPaneControl` 是 `internal` 且无 `[ComVisible(true)]`
+  → 正命中该失败画像。规则：**任务窗格控件必须 `public` + `[ComVisible(true)]`（.NET Core 另加默认接口）**。
 
 ## 2026-09-15 两个输入报同一错 = 换方向；无复现手段时别把不确定性连推给用户
 
@@ -745,4 +755,12 @@
 - **公式化的边界要有"静态兜底"**：只有操作数可判定时才落公式，`N/A`（限值缺失/公差为 0）
   仍写静态文本、不落公式。这样既避免 `#VALUE!`，又保住了 N/A 的灰色语义，也让
   「不可判定」在测试里仍可被 openpyxl 直接读到。
+- **别用带点号的函数名（`STDEV.P`/`STDEV.S`/…），也别用 `IFERROR` 兜底掩盖错误**：
+  用户实机打开时 Gage 的 Reproducibility 整列变 0 ——根因是公式用了 `STDEV.P`（Excel 2010
+  才加的点号函数名，部分查看器认不出会报错），而外面套的 `IFERROR(...,0)` 把错误**静默吞成 0**，
+  既没报错也没显示异常，极难定位。改法：用老函数名 `STDEVP`（Excel 97 起就有），
+  并把单文件边界写成显式的 `IF(COUNT(range)<2, 0, …)` 而不是 `IFERROR` —— 万一将来还有不兼容，
+  会显示 `#NAME?`/`#DIV/0!` 而不是又一个静默的 0。**诊断线索**：若整列某个统计量恒为 0、
+  而相邻列正常，先怀疑该列独有的函数名/写法，再看有没有 `IFERROR` 吞了错误；
+  另外"单元格里显示公式原文"通常是**在编辑态**，不代表存的是文本。
 
