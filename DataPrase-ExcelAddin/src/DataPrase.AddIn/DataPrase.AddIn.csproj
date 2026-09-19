@@ -27,8 +27,8 @@
     <Compile Include="ProcessRunner.cs" />
     <Compile Include="ProcessSession.cs" />
     <Compile Include="ExpTemplate.cs" />
-    <Compile Include="ExpPaneControl.cs" />
-    <Compile Include="DistributionWindow.cs" />
+    <Compile Include="ExpControls.cs" />
+    <Compile Include="ExpCommands.cs" />
     <Compile Include="Ribbon.cs" />
     <Compile Include="ConfigDialog.cs">
       <SubType>Form</SubType>

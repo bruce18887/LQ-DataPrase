@@ -45,7 +45,49 @@ namespace DataPrase.AddIn
 
         public static void GenerateDistribution()
         {
-            Run("分布表", DistributionWindow.Show);
+            Run("分布表", BuildDistributionControls);
+        }
+
+        /// <summary>在 Exp 表上（重）建控件面板并激活该表；Exp 缺失时补注入。</summary>
+        private static void BuildDistributionControls()
+        {
+            Excel.Application app = ExcelInterop.Application;
+            Excel.Workbook workbook = app.ActiveWorkbook;
+            if (workbook == null)
+            {
+                throw new InvalidOperationException("请先打开数据工作簿。");
+            }
+
+            if (!ProcessSession.HasResult)
+            {
+                throw new InvalidOperationException("请先执行「处理并标记」。");
+            }
+
+            IList<int> columns = ProcessRunner.SortedDataColumns(ProcessSession.Items);
+            if (columns.Count == 0)
+            {
+                throw new InvalidOperationException("没有可用的测试项。");
+            }
+
+            var names = new List<string>();
+            foreach (int column in columns)
+            {
+                names.Add(ProcessSession.Items[column].TestName);
+            }
+
+            using (new ExcelStateGuard(app))
+            {
+                Excel.Worksheet exp = ExcelInterop.FindSheet(workbook, ExpTemplate.SheetName);
+                if (exp == null)
+                {
+                    exp = ExpTemplate.Inject(app, workbook);
+                }
+
+                ExpControls.Build(exp, names, ProcessRunner.ReadLimitSelector(exp), ProcessRunner.ReadPercentToggles(exp));
+                ProcessRunner.WriteExpDistribution(
+                    exp, workbook, ProcessSession.Layout, ProcessSession.Plan, ProcessSession.Spec, columns[0]);
+                exp.Activate();
+            }
         }
 
         private static void Run(string title, Action action)

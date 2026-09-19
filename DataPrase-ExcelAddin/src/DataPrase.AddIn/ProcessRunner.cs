@@ -85,10 +85,18 @@ namespace DataPrase.AddIn
                 Append(summary, warnings, "复制 Exp 分布表", () =>
                 {
                     Excel.Worksheet exp = ExpTemplate.Inject(app, workbook);
+                    IList<int> dataColumns = SortedDataColumns(items);
+                    var names = new List<string>();
+                    foreach (int column in dataColumns)
+                    {
+                        names.Add(items[column].TestName);
+                    }
+
+                    ExpControls.Build(exp, names, ReadLimitSelector(exp), ReadPercentToggles(exp));
                     // 模板里的公式全部指向外部工作簿（[1]Data!…），不填就是一张 #REF! 表；
-                    // 这里直接按第一个测试项填好，用户之后可用「分布表」换项。
+                    // 这里直接按第一个测试项填好，用户之后可用表上控件换项。
                     WriteExpDistribution(exp, workbook, layout, plan, spec, FirstDataColumn(items));
-                }, "已复制并填充 Exp 分布表（第一个测试项）");
+                }, "已复制 Exp 分布表 + 表上控件（默认第一个测试项）");
             }
 
             foreach (string warning in warnings)
@@ -301,18 +309,17 @@ namespace DataPrase.AddIn
             BreakExternalLinks(workbook);
         }
 
+        internal static IList<int> SortedDataColumns(IDictionary<int, TestItem> items)
+        {
+            var columns = new List<int>(items.Keys);
+            columns.Sort();
+            return columns;
+        }
+
         internal static int FirstDataColumn(IDictionary<int, TestItem> items)
         {
-            int first = int.MaxValue;
-            foreach (int column in items.Keys)
-            {
-                if (column < first)
-                {
-                    first = column;
-                }
-            }
-
-            return first == int.MaxValue ? 0 : first;
+            IList<int> columns = SortedDataColumns(items);
+            return columns.Count == 0 ? 0 : columns[0];
         }
 
         /// <summary>百分比列开关所在行（Exp 表 N1:V1，对应原模板的 9 个 CheckBox）。</summary>
