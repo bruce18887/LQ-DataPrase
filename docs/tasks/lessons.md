@@ -16,6 +16,27 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-09-19 chart_renderer 接线：写用户级设置的 e2e 复用了真实数据目录的后端
+
+- **险情（比"测试红"更严重）**：8000 上原有两个手起 `manage.py runserver`，不带 `LQDP_SYSTEM_CONFIG_FILE`
+  → 读仓库根 `system_config.json` → `data_dir = C:\Users\Administrator\LQ-DataPrase`（**真实数据目录**）。
+  `playwright.config.ts` 本地 `reuseExistingServer: !CI` 为真，会静默复用它。新用例要
+  `PUT /auth/settings/ {chart_renderer: 'canvas'}`，这条写请求就会**落进用户真实账号的设置**，
+  而用例 `finally` 把值固定恢复成 `'svg'` —— 若用户原本存的是 `canvas`，会被用例收尾静默改掉。
+- **规则**：凡 e2e 用例会 **PUT/POST 用户级持久化设置**（`/auth/settings/`、系统路径等）的，
+  跑之前必须先确认 8000 的属主读哪份 config：`Get-NetTCPConnection -LocalPort 8000` 取 PID →
+  `Get-CimInstance Win32_Process` 看 CommandLine，再比对仓库根 `system_config.json` 与
+  `%TEMP%\lqdp-e2e-system-config.json` 的 `data_dir` 是否同一份。不是同一份就**别复用**，
+  让 Playwright 自起带钉死配置的服务；动别人的 PID 前先问用户。
+- **推论**：用例的 `finally` 恢复逻辑只能恢复**它自己假设的初值**，不是"用户原值"。要写用户级设置，
+  正确做法是先 GET 存原值、`finally` 写回原值（现有 `export-timeout.spec.ts` 的 `restoreTimeout`
+  同样有硬编码 600 这个隐患，只是该项默认恰好等于 600 才没暴露）。
+- **顺带（R2② 我又犯了一次）**：断言渲染器时假设 zrender 画笔根带 `data-zr-dom-id`，未经 trace 确认 →
+  首跑两条全红，其中"默认 svg"这条本应恒过，它的红才暴露选择器错。ECharts 6 下判渲染器的正确口径
+  与 `e2e/helpers/charts.ts` 一致：**echarts.init 宿主容器内**有 `<canvas>` 即 canvas、有 `<svg>` 即 svg
+  （宿主 div 自身无子节点，Element Plus 图标不会落进来），不要依赖 zrender 内部属性名。
+  判别式测试要设计成「一条该红、一条该绿」，两条同红 = 大概率是测试自己的问题。
+
 ## 2026-09-15 把 0 基 dump 当 1 基读，凭空造出两个假 bug
 
 - **现象**：route-B 会话用 pyxlsb 导出的 `tasks/_exp_dump.txt` 作为依据，判定 VBA 写 Exp 分布表

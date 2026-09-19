@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, createWebHashHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { ensureChartRenderer } from '../utils/echarts-theme'
 
 // Electron loads the SPA via file:// protocol, where HTML5 pushState routing
 // does not work. Fall back to hash-based routing (#/dashboard) when the
@@ -133,6 +134,11 @@ router.beforeEach(async (to, _from, next) => {
       // Session invalid — fetchProfile already cleared it; fall through to the
       // requiresAuth check below, which redirects to /login.
     }
+  }
+  // 账号级 ECharts 渲染器必须在任何页面组件挂载前进模块缓存：图表初始化是同步的，
+  // 错过这次就整页都用默认 'svg'（内部单飞，整页生命周期只发一次请求，失败静默回退）。
+  if (auth.isLoggedIn) {
+    await ensureChartRenderer()
   }
   if (to.meta.requiresAuth && !auth.isLoggedIn) {
     next('/login')
