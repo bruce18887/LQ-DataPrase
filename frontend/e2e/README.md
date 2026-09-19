@@ -167,7 +167,27 @@ python manage.py seed_test_data --clear
   恒定列的 1/1 范围。读数值/参数列表前用 `selectAnalysisFile`（已内置等待新文件计算
   请求发出）或 `pickTabFileAndWaitCompute(page, scope, name)`；要绝对严谨先等初始加载完
   再切（见 `custom-limit-cpk.spec.ts:130` 的注释）。
-- ECharts 图表：断言 `canvas` 可见且尺寸 > 0（用 `expectChartRendered`）。
+- ECharts 图表：断言 `canvas` 可见且尺寸 > 0（用 `expectChartRendered`）。渲染器改 canvas 后
+  SVG 定位器全废，容器内一律按 `canvas` / `svg` 断（`settings/chart-renderer.spec.ts`）。
+- ag-grid（35.3 实测）：横向滚动量在 `.ag-header-viewport` / `.ag-center-cols-viewport` /
+  `.ag-body-horizontal-scroll-viewport` 三者之间**双向同步**，写任意一个都能带动表头与表体
+  （188 列那份 DA35 文件实测：写 1600 后 `Kelvin_VIN` 表头单元格出现）。所以「滚不到目标列」
+  通常不是选错元素。真正的两个坑：
+  ① 可滚上限是 `scrollWidth - clientWidth`（实测 35674 = 36400 - 726），而
+  `while (el.scrollLeft < el.scrollWidth)` 的退出条件**永远**不成立 → 目标列没渲染出来就是
+  死循环，表现为整条用例 60s 超时、没有任何断言消息。写渐进滚动一律按 x 有界推进、
+  并在每次滚动**之后**探测（虚拟化要一帧才落 DOM）。
+  ② `.ag-root` 刚出现时**列宽还没测出来**（实测那一刻 `scrollWidth === clientWidth === 926`、
+  表头单元格 0 个，约 265ms 后才变成 36400 / 6）→ 滚不动也探不到，必须先等有界地等到可滚宽度
+  （见 `e2e/data/view-data.spec.ts` 的 `scrollGridUntil`）。
+  垂直方向：驱动 `.ag-body-vertical-scroll-viewport`（1 行 = 30px，`scrollTop = rowIndex * 30`）；
+  实测给 `.ag-center-cols-viewport` 赋 `scrollTop` 不会触发 IRM 续块请求（等不到第二次 `page=2`），
+  机制未查证，按可用做法写即可。
+- 仪表板：默认打开「最新的 ready 文件」，且每次挂载都重算（`DashboardPage.reconcileSelection`）
+  → 依赖具体文件的用例必须经 `.dash-file-select`（`input` 填关键字 →
+  `.dp-file-select-dropdown .el-select-dropdown__item`）**显式选文件，并在每次 reload 后重选**。
+- 折叠式汇总条（`AlertBanner`，`[data-testid="alert-banner"]`）默认只显示「N 项告警」，
+  逐条 `message` 不在 DOM 里 → 先断横幅可见，再点 `.banner-head` 展开后断文案。
 - ElMessageBox 确认框 teleport 到 body，按钮文本「确定」「取消」「删除」等，全局可定位。
 - 下载：`captureDownload(page, () => 点击导出, '子目录')`。
 
@@ -175,3 +195,12 @@ python manage.py seed_test_data --clear
 1. **登录错误被吞**：`api/index.ts` 全局响应拦截器对任何 401 都 `window.location.href='/login'`，
    导致登录接口 401 时 `LoginPage` 内联 `error-msg` 来不及显示。测试改为断言“停留登录页 + 未获 token”。
 2. **刷新丢失身份**：App 启动不重新拉取 `/auth/profile/`，刷新后 `user=null`、管理员菜单消失（见“角色相关用例”约定）。
+3. **无 Site 列的文件让分析页必发一个 400**：`useSiteStats.ts` 的早退只看 `file_id`/`param`，
+   不看文件有没有 Site 列，而后端 `statistics_views.py` 对无 Site 列直接 400 `no_site_column`。
+   Chrome 把 4xx 记成 console error → P0 冒烟「/analysis 无控制台错误」必红。
+   **为什么会命中**：分析页/仪表板自动选「最新 ready 文件」，而 zip 用例造的 `a.csv`/`b.csv`/
+   `below.csv`（2 行 2 列、无 Site 列）在 `deleteBatchQuiet` 静默失败后就常驻库里
+   （2026-09-20 实测：清理确实发了 `DELETE /api/v1/batch-dirs/e2e_zip_dup_*/` → 404，
+   而目录在磁盘上存在 → 行没被删；库里同类残留自 09-08 起共 4 行）。
+   临时处置：手工清掉 `batch_name LIKE 'e2e%'` 的行；根治要么后端 200 + `has_site_column:false`
+   （动 `apps/analysis/tests_api_contract.py` 的守卫契约），要么前端无 Site 列时不发请求。
