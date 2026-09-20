@@ -100,6 +100,35 @@ test.describe('用户管理 / 权限', { tag: ['@admin'] }, () => {
     await expect(table.getByText('admin', { exact: true })).toBeVisible({ timeout: 15_000 })
   })
 
+  /**
+   * 2026-09-20 回归：管理员禁用/删除自己会把自己永久锁在门外——登录端点对
+   * 停用账号直接 403、SimpleJWT 立刻吊销 token，只能直连数据库恢复。
+   * 前端把本行的「禁用」「删除」置灰（后端 _guard_lockout 是权威守卫）。
+   */
+  test('@p1 管理员本行的「禁用」「删除」按钮置灰，不能操作自己', async ({ page }) => {
+    await loginAs(page, 'admin')
+    await sidebarLink(page, '用户管理').click()
+    await expect(page).toHaveURL(/\/admin\/users/)
+
+    const table = page.locator('.el-table')
+    await expect(table).toBeVisible()
+
+    // 自己的行：按用户名单元格精确文本过滤。不用 hasText 子串匹配，
+    // 免得将来出现名字含 "admin" 的账号时命中两行。
+    const selfRow = table
+      .locator('tbody tr')
+      .filter({ has: page.getByText('admin', { exact: true }) })
+    await expect(selfRow).toHaveCount(1)
+
+    await expect(selfRow.getByRole('button', { name: '禁用', exact: true })).toBeDisabled()
+    await expect(selfRow.getByRole('button', { name: '删除', exact: true })).toBeDisabled()
+
+    // 防过度修复：「重置密码」不造成锁死，必须仍可点。
+    await expect(
+      selfRow.getByRole('button', { name: '重置密码', exact: true }),
+    ).toBeEnabled()
+  })
+
   test('@p2 新增并删除用户：唯一用户 → 出现 → 删除（确认框）→ 消失', async ({ page }) => {
     await loginAs(page, 'admin')
 

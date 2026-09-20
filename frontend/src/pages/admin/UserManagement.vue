@@ -65,7 +65,12 @@
         </el-table-column>
         <el-table-column label="操作" min-width="240">
           <template #default="{ row }">
-            <el-button size="small" @click="toggleUser(row)">
+            <el-button
+              size="small"
+              :disabled="isSelf(row)"
+              :title="isSelf(row) ? '不能禁用或删除自己的账号' : undefined"
+              @click="toggleUser(row)"
+            >
               {{ row.is_active ? '禁用' : '启用' }}
             </el-button>
             <el-button size="small" type="warning" @click="resetPassword(row)">
@@ -79,7 +84,13 @@
             >
               解锁
             </el-button>
-            <el-button size="small" type="danger" @click="deleteUser(row)">
+            <el-button
+              size="small"
+              type="danger"
+              :disabled="isSelf(row)"
+              :title="isSelf(row) ? '不能禁用或删除自己的账号' : undefined"
+              @click="deleteUser(row)"
+            >
               删除
             </el-button>
           </template>
@@ -116,6 +127,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../../api'
+import { useAuthStore } from '../../stores/auth'
 
 interface User {
   id: number
@@ -130,6 +142,18 @@ interface User {
 
 const users = ref<User[]>([])
 const newUser = ref({ username: '', password: '', role: 'user' })
+const auth = useAuthStore()
+
+/**
+ * 本行是不是当前登录账号。禁用/删除自己会把自己锁在门外：登录端点对
+ * 停用账号直接 403、SimpleJWT 也立刻吊销 token，只能直连数据库恢复。
+ * 后端 UserManagementViewSet._guard_lockout 是权威守卫（这里只是不让点）。
+ * 注意硬刷新后 auth.user 可能为 null（本页不自拉 profile），此时按钮回落
+ * 成可点，由后端 400 + toast 兜住。
+ */
+function isSelf(user: User): boolean {
+  return user.id === auth.user?.id
+}
 
 const kpi = computed(() => {
   return {
