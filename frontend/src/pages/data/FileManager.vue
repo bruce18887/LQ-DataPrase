@@ -79,10 +79,10 @@
               <el-col :span="8" v-for="f in group.files" :key="f.id">
                 <el-card shadow="hover" :class="{ 'active-file': f.id === activeFileId }">
                   <div style="font-weight:bold; color: var(--text)">{{ f.filename }}</div>
-                  <div style="color: var(--text-2); font-size:12px; margin:4px 0">
+                  <div style="color: var(--text-2); font-size: var(--p-fs-dense); margin:4px 0">
                     {{ f.format_type }} | {{ f.row_count }}行×{{ f.col_count }}列
                   </div>
-                  <div style="color: var(--text-2); font-size:12px" v-if="f.program_name" class="program-name">{{ f.program_name }}</div>
+                  <div style="color: var(--text-2); font-size: var(--p-fs-dense)" v-if="f.program_name" class="program-name">{{ f.program_name }}</div>
                   <div v-if="f.tags && f.tags.length" class="tag-row">
                     <el-tag
                       v-for="t in f.tags"
@@ -372,12 +372,12 @@ onMounted(() => {
 
 <style scoped>
 .upload-text {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   color: var(--text-2);
   margin-top: 8px;
 }
 .upload-hint {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
   margin-top: 4px;
 }
@@ -399,7 +399,7 @@ onMounted(() => {
 }
 
 .file-tag {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
 }
 
 .batch-group {
@@ -415,7 +415,7 @@ onMounted(() => {
 }
 
 .batch-size {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
   font-family: var(--font-mono);
 }
@@ -447,7 +447,7 @@ onMounted(() => {
 }
 
 .batch-chevron {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   color: var(--text-3);
   transition: transform 0.2s ease, color 0.2s ease;
   flex-shrink: 0;
@@ -471,7 +471,7 @@ onMounted(() => {
 }
 
 .batch-toggle-all {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
 }
 
 .batch-files-grid {
@@ -480,13 +480,13 @@ onMounted(() => {
 }
 
 .batch-name {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   font-weight: 600;
   color: var(--text);
 }
 
 .batch-count {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
   padding: 2px 8px;
   background: var(--bg);
@@ -494,7 +494,7 @@ onMounted(() => {
 }
 
 .section-label {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   font-weight: 600;
   color: var(--text-2);
   margin-bottom: 12px;

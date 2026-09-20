@@ -112,7 +112,7 @@ function onGripKey(ev: KeyboardEvent) {
   padding: 0 8px;
   background: var(--bg-3, #f8f9fa);
   border-bottom: 1px solid var(--border-2, #e4e7ed);
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 600;
   color: var(--text);
   user-select: none;
@@ -122,7 +122,7 @@ function onGripKey(ev: KeyboardEvent) {
   cursor: grab;
   color: var(--text-3, #9ca3af);
   padding: 0 4px;
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   line-height: 1;
   border-radius: 3px;
 }
@@ -133,7 +133,7 @@ function onGripKey(ev: KeyboardEvent) {
 .chart-h__grow { flex: 1; }
 .chart-h__btn {
   border: 0; background: transparent; cursor: pointer; color: var(--text-3, #9ca3af);
-  font-size: 14px; line-height: 1; padding: 2px 6px; border-radius: 3px;
+  font-size: var(--p-fs-base); line-height: 1; padding: 2px 6px; border-radius: 3px;
 }
 .chart-h__btn:hover { color: var(--brand); background: color-mix(in srgb, var(--brand) 10%, transparent); }
 .chart-b {

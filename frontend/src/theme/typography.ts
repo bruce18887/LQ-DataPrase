@@ -1,7 +1,7 @@
 /**
  * 排版常量（TS 侧）
  *
- * 单一事实来源是 `styles/design-tokens.css`：字体栈与字号档位在那边，本文件只把
+ * 单一事实来源是 `styles/design-tokens.css`：字体栈与字号九档在那边，本文件只把
  * ECharts 这类「必须给 JS 数值」的消费方接过去，不得自行发明档位。
  * 两边的一致性由 e2e/global/fonts.spec.ts 断言（CSS token ↔ 本文件数值）。
  */
@@ -12,10 +12,19 @@ export const fontFamily = {
   mono: "'SF Mono', 'Cascadia Mono', 'Consolas', 'Liberation Mono', 'Menlo', 'Courier New', monospace",
 } as const;
 
-// ECharts 的 fontSize 只吃数值，所以这里用 px 数字而非 token 里的 rem 档位。
-// 每个值都必须等于注释标出的那档 --p-fs-*（design-tokens.css:40-41）。
+/**
+ * 字号九档的 TS 镜像。键名与 --p-fs-<键> 一致（ECharts 的 fontSize 只吃数字，
+ * 所以只能镜像值、不能引用 CSS 变量）。改 design-tokens.css 那边必须同步这里，
+ * 否则 fonts.spec 的「TS ↔ CSS」用例会红。
+ */
 export const chartFontSize = {
-  axis: 11,   // --p-fs-xs
-  body: 12,   // --p-fs-sm
-  title: 16,  // --p-fs-lg
+  micro: 11,
+  dense: 12,
+  small: 13,
+  base: 14,
+  lead: 16,
+  title: 18,
+  headline: 22,
+  display: 26,
+  hero: 32,
 } as const;

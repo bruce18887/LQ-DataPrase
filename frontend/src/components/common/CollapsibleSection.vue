@@ -68,7 +68,7 @@ function toggle() {
 
 .cs-title {
   font-weight: 600;
-  font-size: 15px;
+  font-size: var(--p-fs-base);
   color: var(--text);
 }
 
@@ -82,7 +82,7 @@ function toggle() {
 .cs-extra + .cs-toggle { margin-left: 12px; }
 
 .cs-toggle {
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   color: var(--text-2);
   user-select: none;
 }

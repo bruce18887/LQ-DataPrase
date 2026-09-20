@@ -456,7 +456,7 @@ void matrixChartInstance
 }
 
 .section-label {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-2);
   margin-bottom: 4px;
   font-weight: 500;
@@ -480,7 +480,7 @@ void matrixChartInstance
   padding: 7px 10px;
   background: var(--bg-3);
   border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 600;
   color: var(--text);
 }
@@ -503,7 +503,7 @@ void matrixChartInstance
 
 /* 卡头一行指标（badge/note 规格） */
 .head-metric {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 600;
   font-family: var(--font-mono, monospace);
   color: var(--text);
@@ -516,7 +516,7 @@ void matrixChartInstance
 
 .p-stars {
   color: var(--warn);
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   margin-left: 1px;
 }
 
@@ -526,7 +526,7 @@ void matrixChartInstance
 }
 
 .matrix-meta-inline {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   font-weight: 400;
   color: var(--text-2);
   white-space: nowrap;
@@ -536,7 +536,7 @@ void matrixChartInstance
 
 .sample-note {
   padding: 2px 10px 6px;
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-3);
 }
 </style>

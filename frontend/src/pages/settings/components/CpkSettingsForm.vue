@@ -68,7 +68,7 @@ function onCpkBChanged() {
 <style scoped>
 .threshold-hint {
   margin-left: 12px;
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   color: var(--text-2);
 }
 </style>

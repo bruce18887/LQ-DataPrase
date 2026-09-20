@@ -166,7 +166,7 @@ defineExpose({ handleResize })
 }
 
 .bin-hint {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
 }
 
@@ -177,7 +177,7 @@ defineExpose({ handleResize })
   gap: 4px;
   padding: 3px 10px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 600;
   color: var(--text-2);
   background: var(--bg-3);
@@ -211,7 +211,7 @@ defineExpose({ handleResize })
   flex-direction: column;
 }
 .cb-title {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 700;
   color: var(--text);
   margin-bottom: 10px;
@@ -231,7 +231,7 @@ defineExpose({ handleResize })
   margin: 16px 0 8px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 700;
   color: var(--text);
 }

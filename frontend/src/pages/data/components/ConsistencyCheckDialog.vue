@@ -82,7 +82,7 @@
         style="text-align: center; padding: 30px"
       >
         <el-icon :size="64" style="color: var(--success)"><CircleCheck /></el-icon>
-        <p style="color: var(--text); margin-top: 12px; font-size: 16px">
+        <p style="color: var(--text); margin-top: 12px; font-size: var(--p-fs-lead)">
           数据修复中心检查通过，无问题发现。
         </p>
       </div>

@@ -139,14 +139,14 @@ watch(() => props.loading, (val) => {
 }
 .cp-text {
   position: absolute;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 700;
   color: var(--brand);
   user-select: none;
 }
 .cp-check {
   position: absolute;
-  font-size: 18px;
+  font-size: var(--p-fs-title);
   font-weight: 700;
   color: var(--success);
   user-select: none;

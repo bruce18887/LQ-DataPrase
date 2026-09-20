@@ -189,19 +189,19 @@ export function useEChartsTheme() {
     title: {
       textStyle: {
         color: colors.value.titleColor,
-        fontSize: chartFontSize.title,
+        fontSize: chartFontSize.lead,
         fontWeight: 600
       },
       subtextStyle: {
         color: colors.value.subtextColor,
-        fontSize: chartFontSize.body
+        fontSize: chartFontSize.dense
       }
     },
 
     legend: {
       textStyle: {
         color: colors.value.legendTextColor,
-        fontSize: chartFontSize.body
+        fontSize: chartFontSize.dense
       },
       pageTextStyle: {
         color: colors.value.legendTextColor
@@ -214,7 +214,7 @@ export function useEChartsTheme() {
       borderWidth: 1,
       textStyle: {
         color: colors.value.tooltipText,
-        fontSize: chartFontSize.body
+        fontSize: chartFontSize.dense
       },
       axisPointer: {
         lineStyle: {
@@ -238,7 +238,7 @@ export function useEChartsTheme() {
       },
       axisLabel: {
         color: colors.value.axisLabelColor,
-        fontSize: chartFontSize.axis
+        fontSize: chartFontSize.micro
       },
       splitLine: {
         lineStyle: {
@@ -258,7 +258,7 @@ export function useEChartsTheme() {
       },
       axisLabel: {
         color: colors.value.axisLabelColor,
-        fontSize: chartFontSize.axis
+        fontSize: chartFontSize.micro
       },
       splitLine: {
         lineStyle: {

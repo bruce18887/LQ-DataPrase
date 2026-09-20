@@ -203,12 +203,12 @@ watch(() => props.fileId, () => {
 }
 .uph-head h3 {
   margin: 0;
-  font-size: 13.5px;
+  font-size: var(--p-fs-small);
   font-weight: 700;
   color: var(--text);
 }
 .uph-head-desc {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-3);
 }
 .uph-body {
@@ -228,7 +228,7 @@ watch(() => props.fileId, () => {
   align-items: center;
   justify-content: center;
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
 }
 
 /* —— 紧凑信息带 —— */
@@ -236,7 +236,7 @@ watch(() => props.fileId, () => {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 18px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
   align-items: center;
 }
@@ -246,7 +246,7 @@ watch(() => props.fileId, () => {
 }
 
 .uph-card :deep(.uph-src) {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   font-weight: 700;
   padding: 1px 8px;
   border-radius: 6px;
@@ -269,7 +269,7 @@ watch(() => props.fileId, () => {
 }
 
 .uph-card :deep(.uph-warn) {
-  font-size: 11.5px;
+  font-size: var(--p-fs-micro);
   color: var(--warn);
   font-weight: 600;
 }
@@ -287,7 +287,7 @@ watch(() => props.fileId, () => {
   border: 1px solid var(--border-2);
   border-radius: 6px;
   padding: 1px 8px;
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
   background: var(--bg);
@@ -295,7 +295,7 @@ watch(() => props.fileId, () => {
 
 .uph-card :deep(.uph-formula) {
   color: var(--text-3);
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
 }
 .uph-card :deep(.uph-metric-label__help) {
   margin-left: 3px;

@@ -81,6 +81,7 @@
 </template>
 
 <script setup lang="ts">
+import { chartFontSize } from '../../../theme/typography'
 import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useWaferTabStore } from '../../../stores/analysisTabs'
@@ -422,7 +423,7 @@ function buildOption() {
   const option: any = {
     // 上万 symbol 的入场/更新动画是纯开销，大晶圆直接关掉
     animation: !isLarge.value,
-    title: { text: 'Wafer Map', subtext, left: 'center', textStyle: { fontSize: 15, fontWeight: 'bold', color: tc }, subtextStyle: { fontSize: 12, color: tc } },
+    title: { text: 'Wafer Map', subtext, left: 'center', textStyle: { fontSize: chartFontSize.base, fontWeight: 'bold', color: tc }, subtextStyle: { fontSize: chartFontSize.dense, color: tc } },
     tooltip: {
       trigger: 'item',
       formatter: (p: any) => {
@@ -480,7 +481,7 @@ void chartRef // bound to <div ref="chartRef"> in template
 
 /* 晶圆图不吃数据筛选的例外说明（与左栏筛选区同屏时防用户误以为会影响本图） */
 .wafer-note {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   /* 同 DataFilterSection 的提示文字：浅色下 --text-3 在白底仅 2.54:1 */
   color: var(--text-2);
   line-height: 1.5;
@@ -499,7 +500,7 @@ void chartRef // bound to <div ref="chartRef"> in template
   border-radius: 6px;
 }
 .ctl-label {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
   font-weight: 500;
   white-space: nowrap;
@@ -512,7 +513,7 @@ void chartRef // bound to <div ref="chartRef"> in template
   accent-color: var(--brand);
 }
 .height-val {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text);
   font-weight: 600;
   font-family: var(--font-mono);
@@ -543,7 +544,7 @@ void chartRef // bound to <div ref="chartRef"> in template
 .wafer-conclusion {
   margin-top: 10px;
   padding: 6px 10px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
   border-left: 3px solid var(--info);
   background: color-mix(in srgb, var(--info) 9%, transparent);
@@ -552,7 +553,7 @@ void chartRef // bound to <div ref="chartRef"> in template
 .wafer-fallback-note {
   margin-top: 6px;
   padding: 4px 10px;
-  font-size: 11.5px;
+  font-size: var(--p-fs-micro);
   color: var(--warn-2, var(--warn));
   text-align: center;
 }

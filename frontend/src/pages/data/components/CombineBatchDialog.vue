@@ -101,7 +101,7 @@ function submit() {
 
 .combine-hint {
   margin-top: 10px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--warn);
 }
 </style>

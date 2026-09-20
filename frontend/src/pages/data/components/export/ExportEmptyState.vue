@@ -21,20 +21,20 @@
 }
 
 .empty-icon {
-  font-size: 40px;
+  font-size: 40px; /* @type-scale-one-off 空状态装饰图标 */
   margin-bottom: 12px;
   opacity: 0.6;
 }
 
 .empty-title {
-  font-size: 15px;
+  font-size: var(--p-fs-base);
   font-weight: 600;
   color: var(--text);
   margin-bottom: 6px;
 }
 
 .empty-desc {
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   max-width: 420px;
   line-height: 1.6;
 }

@@ -34,7 +34,7 @@ withDefaults(defineProps<Props>(), {
 <style scoped>
 .dp-button {
   border-radius: 8px;
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   font-weight: 600;
   padding: 8px 15px;
   transition:
@@ -46,7 +46,7 @@ withDefaults(defineProps<Props>(), {
 }
 
 .dp-button--sm {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   padding: 5px 11px;
   border-radius: 7px;
 }

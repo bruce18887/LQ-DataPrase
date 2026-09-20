@@ -78,11 +78,11 @@ function onBarWidthChange(val: number) {
 }
 
 .panel-icon {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
 }
 
 .panel-title {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 600;
   color: var(--text);
   text-transform: uppercase;
@@ -109,7 +109,7 @@ function onBarWidthChange(val: number) {
 }
 
 .group-label {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   font-weight: 500;
   color: var(--text-3);
   text-transform: uppercase;
@@ -117,7 +117,7 @@ function onBarWidthChange(val: number) {
 }
 
 .value-tag {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   font-weight: 700;
   color: var(--brand);
   font-family: var(--font-mono);
@@ -135,7 +135,7 @@ function onBarWidthChange(val: number) {
 }
 
 .checkbox-row :deep(.el-checkbox__label) {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   padding-left: 4px;
 }
 

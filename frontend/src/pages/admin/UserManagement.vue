@@ -298,18 +298,18 @@ onMounted(loadUsers)
 .kpi-card--purple .kpi-card__icon { color: var(--info); }
 
 .kpi-card__icon {
-  font-size: 36px;
+  font-size: 36px; /* @type-scale-one-off 装饰图标，非 UI 文本，不进九档 */
   flex-shrink: 0;
 }
 
 .kpi-card__label {
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   color: var(--text-2);
   margin-bottom: 4px;
 }
 
 .kpi-card__value {
-  font-size: 22px;
+  font-size: var(--p-fs-headline);
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   color: var(--text);
@@ -331,7 +331,7 @@ onMounted(loadUsers)
 }
 
 .role-icon {
-  font-size: 18px;
+  font-size: var(--p-fs-title);
 }
 
 .status-cell {

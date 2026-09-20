@@ -136,20 +136,20 @@ function selectMatches() {
   border-radius: 50%;
   background: var(--brand);
   color: var(--text-inverse);
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 700;
   flex-shrink: 0;
 }
 
 .step-title {
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   font-weight: 600;
   color: var(--text);
 }
 
 .step-count {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   font-weight: 500;
   color: var(--text-3);
 }
@@ -166,7 +166,7 @@ function selectMatches() {
 
 .match-hint {
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
   border-top: 1px solid var(--border);
 }

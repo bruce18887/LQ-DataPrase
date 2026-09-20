@@ -8,8 +8,8 @@
       :border="true"
       scrollbar-always-on
       :row-class-name="siteRowClass"
-      :header-cell-style="{ background: 'var(--bg-3)', fontSize: '10px', padding: '3px 4px', whiteSpace: 'nowrap' }"
-      :cell-style="{ fontSize: '10px', padding: '3px 4px', whiteSpace: 'nowrap' }"
+      :header-cell-style="{ background: 'var(--bg-3)', fontSize: 'var(--p-fs-micro)', padding: '3px 4px', whiteSpace: 'nowrap' }"
+      :cell-style="{ fontSize: 'var(--p-fs-micro)', padding: '3px 4px', whiteSpace: 'nowrap' }"
       table-layout="auto"
     >
       <el-table-column prop="Site" label="Site" align="center" min-width="65" />
@@ -51,7 +51,7 @@ function siteRowClass({ row }: { row: SiteStatRow }) {
 <style scoped>
 .table-header {
   font-weight: 600;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text);
   margin-bottom: 6px;
 }
@@ -59,7 +59,7 @@ function siteRowClass({ row }: { row: SiteStatRow }) {
 .error-msg {
   padding: 12px;
   color: var(--error-2);
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   text-align: center;
 }
 

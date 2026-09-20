@@ -181,7 +181,7 @@ onMounted(loadPaths)
 }
 
 .paths-hint {
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   color: var(--text-2);
 }
 

@@ -62,13 +62,13 @@ const emit = defineEmits<{
 }
 
 .batch-name {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   font-weight: 600;
   color: var(--text);
 }
 
 .batch-count {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
   padding: 2px 8px;
   background: var(--bg);
@@ -76,7 +76,7 @@ const emit = defineEmits<{
 }
 
 .batch-size {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
   font-family: var(--font-mono);
 }
@@ -98,7 +98,7 @@ const emit = defineEmits<{
   justify-content: space-between;
   gap: 10px;
   padding: 2px 0;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
 }
 
 .preview-name {
@@ -110,13 +110,13 @@ const emit = defineEmits<{
 
 .preview-size {
   color: var(--text-3);
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   flex-shrink: 0;
 }
 
 .preview-more {
   padding: 4px 0;
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-3);
 }
 

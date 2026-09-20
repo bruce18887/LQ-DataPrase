@@ -59,12 +59,12 @@ const emit = defineEmits<{
 }
 
 .summary-label {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
 }
 
 .summary-value {
-  font-size: 15px;
+  font-size: var(--p-fs-base);
   font-weight: 700;
   color: var(--brand);
 }

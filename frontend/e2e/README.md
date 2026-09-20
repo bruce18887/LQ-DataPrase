@@ -73,6 +73,11 @@ npm run test:e2e:p2          # --grep @p2
 npx playwright test e2e/dashboard   # 仅仪表板模块
 ```
 
+`@tool` 是**工具型用例**，不是回归断言：`global/type-snapshot.spec.ts` 只在设了
+`TYPE_SNAPSHOT=before|after` 时运行（否则整文件 skip），用来产出字号计算值快照
+`test/type-snapshot/*.json`，供 `node scripts/type_scale_diff.mjs` 比对「批量改字号前后
+到底动了哪些元素」。它没有 `@pN` 标签，所以不会被 P0/P1/P2 项目捞到。
+
 ### UI 模式（可视化筛选）
 
 **方式一：Playwright 内置 UI**

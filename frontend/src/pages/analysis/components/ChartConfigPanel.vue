@@ -144,7 +144,7 @@ function onCustomHighChange(val: number | null) {
 
 .config-title {
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   color: var(--text);
 }
 
@@ -157,7 +157,7 @@ function onCustomHighChange(val: number | null) {
 }
 
 .section-label {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-2);
   margin-bottom: 4px;
   font-weight: 500;
@@ -170,7 +170,7 @@ function onCustomHighChange(val: number | null) {
 }
 
 .value-hint {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text);
   font-weight: 600;
 }
@@ -187,7 +187,7 @@ function onCustomHighChange(val: number | null) {
 }
 
 .config-checkboxes :deep(.el-checkbox__label) {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   padding-left: 4px;
 }
 
@@ -205,7 +205,7 @@ function onCustomHighChange(val: number | null) {
 }
 
 .limit-sep {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
   font-weight: 500;
 }

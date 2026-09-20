@@ -3,6 +3,7 @@
 </template>
 
 <script setup lang="ts">
+import { chartFontSize } from '../../../theme/typography'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
 import { mapLotColorToTheme, buildChartToolbox } from '../../../utils/chart-bar'
@@ -52,14 +53,14 @@ function buildOption() {
     grid: { top: 20, bottom: 40, left: 100, right: 30 },
     xAxis: {
       type: 'value',
-      axisLabel: { color: tc, fontSize: 10 },
+      axisLabel: { color: tc, fontSize: chartFontSize.micro },
       axisLine: { lineStyle: { color: colors.value.axisLineColor } },
       splitLine: { lineStyle: { color: colors.value.axisLineColor, opacity: 0.15 } },
     },
     yAxis: {
       type: 'category',
       data: categories,
-      axisLabel: { color: tc, fontSize: 11 },
+      axisLabel: { color: tc, fontSize: chartFontSize.micro },
       axisLine: { lineStyle: { color: colors.value.axisLineColor } },
     },
     series: [{

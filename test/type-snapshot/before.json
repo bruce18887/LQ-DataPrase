@@ -1,0 +1,2929 @@
+{
+  "capturedAt": "2026-09-20T03:44:58.115Z",
+  "groups": {
+    "light/dashboard": {
+      "div>div.main-layout>a.skip-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "跳转到主内容"
+      },
+      "div.logo-section>h1.logo-text>a.router-link-active>span.logo-title": {
+        "sizes": {
+          "18px": 1
+        },
+        "sample": "LQ-DataPrase"
+      },
+      "div.logo-section>h1.logo-text>a.router-link-active>span.logo-subtitle": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "ATE数据分析平台"
+      },
+      "nav.nav-menu>a.router-link-active>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "仪表板"
+      },
+      "nav.nav-menu>a.menu-item>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 5
+        },
+        "sample": "数据管理"
+      },
+      "aside.sidebar>nav.nav-menu>div.menu-divider>span.divider-label": {
+        "sizes": {
+          "10px": 1
+        },
+        "sample": "系统管理"
+      },
+      "div.topbar-left>div.el-breadcrumb>span.el-breadcrumb__item>span.is-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "仪表板"
+      },
+      "div.main-content>header.topbar>div.topbar-right>button.version-badge": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "v0.7.0"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-name": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-role": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.dashboard-page>header.dash-header>h1.dash-title>span.dash-title-icon": {
+        "sizes": {
+          "21px": 1
+        },
+        "sample": "📊"
+      },
+      "div.dashboard-page>header.dash-header>h1.dash-title>span.dash-title-text": {
+        "sizes": {
+          "20px": 1
+        },
+        "sample": "数据分析仪表板"
+      },
+      "div.is-top>div.el-tabs__nav-scroll>div.is-top>div.is-top": {
+        "sizes": {
+          "14px": 4
+        },
+        "sample": "📊 单文件分析"
+      },
+      "div.is-filterable>div.el-select__selection>div.el-select__selected-item>span": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "BZJ1789870319642_FT.csv"
+      },
+      "div.el-tabs__content>div.el-tab-pane>header.single-head>span.dash-meta": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "更新: 11:44:46"
+      },
+      "div.el-tab-pane>div.overview-strip>div.strip-item>span.strip-label": {
+        "sizes": {
+          "11px": 8
+        },
+        "sample": "程序"
+      },
+      "div.el-tab-pane>div.overview-strip>div.strip-item>span.strip-value": {
+        "sizes": {
+          "13.5px": 3,
+          "18px": 5
+        },
+        "sample": "BPD60320_FT_AAA_BPD60320XBAF"
+      },
+      "div.overview-strip>div.strip-item>span.strip-value>span.strip-unit": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "%"
+      },
+      "div.overview-strip>div.strip-item>span.strip-label>span.strip-help": {
+        "sizes": {
+          "9px": 1
+        },
+        "sample": "?"
+      },
+      "div.el-tabs__content>div.el-tab-pane>div.overview-strip>span.strip-chip": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "CTA8290D"
+      },
+      "div.el-tab-pane>div.alert-banner>div.banner-head>span.b-icon": {
+        "sizes": {
+          "16px": 1
+        },
+        "sample": "⚠️"
+      },
+      "div.el-tab-pane>div.alert-banner>div.banner-head>span.b-title": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "3 项告警"
+      },
+      "div.el-tab-pane>div.alert-banner>div.banner-head>span.b-toggle": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "展开明细"
+      },
+      "div.alert-banner>div.banner-head>span.b-toggle>span.b-caret": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "▾"
+      },
+      "div.dash-charts>div.sec-card>div.sec-head>h3": {
+        "sizes": {
+          "13.5px": 1
+        },
+        "sample": "📋 Bin 构成"
+      },
+      "div.dash-charts>div.sec-card>div.sec-head>span.sec-desc": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "Pareto 降序 · 色即语义"
+      },
+      "div.sec-body>div.pareto>div.p-row>span.p-name": {
+        "sizes": {
+          "12px": 9
+        },
+        "sample": "Bin 1"
+      },
+      "div.sec-body>div.pareto>div.p-row>span.p-val": {
+        "sizes": {
+          "12px": 9
+        },
+        "sample": "· 91.13%"
+      },
+      "div.pareto>div.p-row>span.p-val>b": {
+        "sizes": {
+          "12px": 9
+        },
+        "sample": "2,301"
+      },
+      "div.dash-charts>div.panel-card>div.panel-head>h3": {
+        "sizes": {
+          "13.5px": 1
+        },
+        "sample": "🟢 Site 良率"
+      },
+      "div.panel-card>div.panel-head>div.yield-pills>span.yield-pill": {
+        "sizes": {
+          "11.5px": 3
+        },
+        "sample": "最高 Site4 · 95.35%"
+      },
+      "div>svg>g>text": {
+        "sizes": {
+          "12px": 14
+        },
+        "sample": "0%"
+      },
+      "div.bin-site-cross>div.panel-card>div.panel-head>h3": {
+        "sizes": {
+          "13.5px": 1
+        },
+        "sample": "📊 Bin × Site 交叉表"
+      },
+      "div.bin-site-cross>div.panel-card>div.panel-head>span.panel-desc": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "卡内页签切换：精确读数 / 一眼定位问题 Site"
+      },
+      "thead>tr>th.is-center>div.cell": {
+        "sizes": {
+          "12px": 9
+        },
+        "sample": "Bin"
+      },
+      "tr.el-table__row>td.is-center>div.cell>span.bs-bin-label": {
+        "sizes": {
+          "12px": 9
+        },
+        "sample": "Bin 1"
+      },
+      "tr.el-table__row>td.is-center>div.cell>span.heat-cell": {
+        "sizes": {
+          "12.5px": 36
+        },
+        "sample": "522(22.69%)"
+      },
+      "tr.el-table__row>td.is-center>div.cell>span.bs-total-num": {
+        "sizes": {
+          "12px": 14
+        },
+        "sample": "2,301 (91.13%)"
+      },
+      "tr.el-table__row>td.is-center>div.cell>span.bs-total-label": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "Total"
+      },
+      "div.el-tab-pane>div.panel-card>div.panel-head>span.panel-title": {
+        "sizes": {
+          "13.5px": 1
+        },
+        "sample": "🔬 测试项总览"
+      },
+      "div.el-tab-pane>div.panel-card>div.panel-head>span.panel-desc": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "点击参数行跳转数据分析 · 表头全列可排序"
+      },
+      "div.el-tab-pane>div.panel-card>div.panel-head>label.ov-check": {
+        "sizes": {
+          "12px": 2
+        },
+        "sample": "忽略无 Limit"
+      },
+      "div.el-tab-pane>div.panel-card>div.cpk-strip>span.cpk-seg": {
+        "sizes": {
+          "11px": 2
+        },
+        "sample": "✓ A · 245"
+      },
+      "div.el-tab-pane>div.panel-card>div.cpk-legend>span.cpk-legend-item": {
+        "sizes": {
+          "11.5px": 4
+        },
+        "sample": "✓ A · 245 (72.5%)"
+      },
+      "thead>tr>th.is-last-column>div.cell": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "参数名称"
+      },
+      "thead>tr>th.is-right>div.cell": {
+        "sizes": {
+          "12px": 7
+        },
+        "sample": "数据点数"
+      },
+      "tr.el-table__row>td.is-last-column>div.cell>span.cell-param": {
+        "sizes": {
+          "12px": 100
+        },
+        "sample": "Site1_Connection_Check"
+      },
+      "tbody>tr.el-table__row>td.is-right>div.cell": {
+        "sizes": {
+          "12px": 100
+        },
+        "sample": "627"
+      },
+      "tr.el-table__row>td.is-right>div.cell>span": {
+        "sizes": {
+          "12px": 600
+        },
+        "sample": "9.9779"
+      },
+      "td.is-right>div.cell>span>span.cell-unit": {
+        "sizes": {
+          "11px": 99
+        },
+        "sample": "Kohm"
+      },
+      "td.is-center>div.cell>span.el-tag>span.el-tag__content": {
+        "sizes": {
+          "12px": 100
+        },
+        "sample": "992.63"
+      },
+      "tr.el-table__row>td.is-center>div.cell>span.cpk-badge": {
+        "sizes": {
+          "11.5px": 100
+        },
+        "sample": "✓A"
+      },
+      "tr.el-table__row>td.is-center>div.cell>span.cell-inactive": {
+        "sizes": {
+          "12px": 70
+        },
+        "sample": "0"
+      },
+      "tr.el-table__row>td.is-center>div.cell>span.cell-fail": {
+        "sizes": {
+          "12px": 30
+        },
+        "sample": "1 (0.22%)"
+      },
+      "div.el-tab-pane>div.panel-card>div.overview-footer>span.overview-total": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "共 352 项 · 点击参数行跳转数据分析页"
+      },
+      "div.panel-card>div.overview-footer>div.is-background>span.is-first": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "Total 352"
+      },
+      "div.overview-footer>div.is-background>ul.el-pager>li.is-active": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "1"
+      },
+      "div.overview-footer>div.is-background>ul.el-pager>li.number": {
+        "sizes": {
+          "12px": 3
+        },
+        "sample": "2"
+      },
+      "div.el-tabs__content>div.el-tab-pane>div.panel-card>div.ov-sub": {
+        "sizes": {
+          "12.5px": 1
+        },
+        "sample": "🔥 Top 10 Fail 测试项"
+      },
+      "div.el-tab-pane>div.panel-card>div.ov-sub>span": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "信息形式 · 点击跳转分析"
+      },
+      "div.el-tab-pane>div.panel-card>div.fail-chips>button.fail-chip": {
+        "sizes": {
+          "11.5px": 10
+        },
+        "sample": "PGOOD_Kelvin · 112 (24.09%)"
+      },
+      "div.uph-card>div.uph-shell>div.uph-head>h3": {
+        "sizes": {
+          "13.5px": 1
+        },
+        "sample": "⚡ UPH 效率明细"
+      },
+      "div.uph-card>div.uph-shell>div.uph-head>span.uph-head-desc": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "紧凑信息带：核心数字在总览条，明细/公式/来源/警告在此"
+      },
+      "div.uph-shell>div.uph-body>div.uph-detail>span": {
+        "sizes": {
+          "12px": 5
+        },
+        "sample": "平均测试时间 秒"
+      },
+      "div.uph-body>div.uph-detail>span>b": {
+        "sizes": {
+          "12px": 3
+        },
+        "sample": "8.7930"
+      },
+      "div.uph-body>div.uph-detail>span>span.uph-src": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "自动检测 Test_Time"
+      },
+      "div.uph-shell>div.uph-body>div.uph-detail>span.uph-warn": {
+        "sizes": {
+          "11.5px": 1
+        },
+        "sample": "⚠ 测试时间列「Test_Time」单位「unit」无法"
+      },
+      "div.uph-body>div.uph-detail>span.site-uph-wrap>span.site-uph": {
+        "sizes": {
+          "11px": 4
+        },
+        "sample": "409"
+      },
+      "div.uph-detail>span.site-uph-wrap>span.site-uph>b": {
+        "sizes": {
+          "11px": 4
+        },
+        "sample": "S1"
+      },
+      "div.uph-shell>div.uph-body>div.uph-detail>span.uph-formula": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "UPH = 测试总数量 ÷ 总耗时 × 3600"
+      },
+      "div.el-tab-pane>div.dash-footer>button.el-button>span": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "保存 HTML 报表"
+      },
+      "div.dash-footer>button.el-button>span>span": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "📥"
+      },
+      "div.el-tabs__content>div.el-tab-pane>div.dash-footer>p.dash-footer-note": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "📅 最后更新: 11:44:46 | LiqunDat"
+      }
+    },
+    "light/analysis": {
+      "div>div.main-layout>a.skip-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "跳转到主内容"
+      },
+      "div.logo-section>h1.logo-text>a.logo-link>span.logo-title": {
+        "sizes": {
+          "18px": 1
+        },
+        "sample": "LQ-DataPrase"
+      },
+      "div.logo-section>h1.logo-text>a.logo-link>span.logo-subtitle": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "ATE数据分析平台"
+      },
+      "nav.nav-menu>a.menu-item>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 5
+        },
+        "sample": "仪表板"
+      },
+      "nav.nav-menu>a.router-link-active>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "数据分析"
+      },
+      "aside.sidebar>nav.nav-menu>div.menu-divider>span.divider-label": {
+        "sizes": {
+          "10px": 1
+        },
+        "sample": "系统管理"
+      },
+      "div.topbar-left>div.el-breadcrumb>span.el-breadcrumb__item>span.is-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "数据分析"
+      },
+      "div.main-content>header.topbar>div.topbar-right>button.version-badge": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "v0.7.0"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-name": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-role": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.main-content>main.content-area>div>h2": {
+        "sizes": {
+          "24px": 1
+        },
+        "sample": "📈 数据分析"
+      },
+      "div.is-top>div.el-tabs__nav-scroll>div.is-top>div.is-top": {
+        "sizes": {
+          "14px": 4
+        },
+        "sample": "📊 单文件分析"
+      },
+      "div.toolbar>div.control-panel__main>div.dp-analysis-filepicker>label.picker-label": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "选择数据文件"
+      },
+      "div.is-filterable>div.el-select__selection>div.el-select__selected-item>span": {
+        "sizes": {
+          "12px": 2
+        },
+        "sample": "BZJ1789870319642_FT.csv"
+      },
+      "div.toolbar>div.control-panel__main>div.param-selector>div.selector-label": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "选择参数 (↑↓ 切换)"
+      },
+      "div.param-selector>div.nav-buttons>button.el-button>span": {
+        "sizes": {
+          "12px": 2
+        },
+        "sample": "◀ 上一个"
+      },
+      "div.control-panel__main>div.chart-toggles>label.is-checked>span.el-checkbox__label": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "显示直方图"
+      },
+      "div.control-panel__main>div.chart-toggles>label.el-checkbox>span.el-checkbox__label": {
+        "sizes": {
+          "12px": 3
+        },
+        "sample": "显示序列分布"
+      },
+      "div.is-never-shadow>div.el-card__body>div.filter-section>div.section-label": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "数据筛选"
+      },
+      "div.filter-section>div.filter-checkboxes>label.el-checkbox>span.el-checkbox__label": {
+        "sizes": {
+          "12px": 5
+        },
+        "sample": "忽略无Limit"
+      },
+      "div.el-card__body>div.filter-section>div.control-line>span.section-label": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "异常值处理"
+      },
+      "div.el-select__wrapper>div.el-select__selection>div.el-select__selected-item>span": {
+        "sizes": {
+          "12px": 2
+        },
+        "sample": "不处理"
+      },
+      "div.is-hover-shadow>div.el-card__body>div.config-header>span.config-title": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "⚙️ 图表显示"
+      },
+      "div.is-hover-shadow>div.el-card__body>div.config-section>div.section-label": {
+        "sizes": {
+          "11px": 2
+        },
+        "sample": "显示元素"
+      },
+      "div.config-section>div.config-checkboxes>label.is-checked>span.el-checkbox__label": {
+        "sizes": {
+          "12px": 3
+        },
+        "sample": "Limit"
+      },
+      "div.config-section>div.config-checkboxes>label.el-checkbox>span.el-checkbox__label": {
+        "sizes": {
+          "12px": 4
+        },
+        "sample": "3σ线"
+      },
+      "div.is-guttered>div.is-hover-shadow>div.el-card__body>div.table-header": {
+        "sizes": {
+          "12px": 2
+        },
+        "sample": "📊 范围对比"
+      },
+      "div.is-hover-shadow>div.el-card__body>div.table-header>span.table-header__unit": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "（Unit）"
+      },
+      "thead.el-table__body-header>tr>th.is-center>div.cell": {
+        "sizes": {
+          "10px": 8
+        },
+        "sample": "Low"
+      },
+      "tbody>tr.range-active-row>td.is-left>div.cell": {
+        "sizes": {
+          "10px": 1
+        },
+        "sample": "RowDataLimit"
+      },
+      "tbody>tr.range-active-row>td.is-center>div.cell": {
+        "sizes": {
+          "10px": 3
+        },
+        "sample": "-"
+      },
+      "tbody>tr.el-table__row>td.is-left>div.cell": {
+        "sizes": {
+          "10px": 5
+        },
+        "sample": "Data Range"
+      },
+      "tbody>tr.el-table__row>td.is-center>div.cell": {
+        "sizes": {
+          "10px": 40
+        },
+        "sample": "1.00000"
+      },
+      "div.is-guttered>div.stats-summary>div.stat-item>span.stat-label": {
+        "sizes": {
+          "11px": 10
+        },
+        "sample": "N"
+      },
+      "div.is-guttered>div.stats-summary>div.stat-item>span.stat-value": {
+        "sizes": {
+          "12px": 10
+        },
+        "sample": "2,525"
+      },
+      "div.is-guttered>div.chart-dock>div.chart-dock__bar>span.chart-dock__hint": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "拖 ⠿ 手柄重排图表 · 拖分隔条改单图高宽 · 拖底部"
+      },
+      "div.chart-dock>div.chart-dock__bar>button.is-text>span": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "重置布局"
+      },
+      "div.chart-dock__row>div.chart-panel>div.chart-h>span.chart-h__grip": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "⠿"
+      },
+      "div.chart-dock__row>div.chart-panel>div.chart-h>span.chart-h__title": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "直方图"
+      },
+      "div.chart-dock__row>div.chart-panel>div.chart-h>button.chart-h__btn": {
+        "sizes": {
+          "14px": 2
+        },
+        "sample": "⤢"
+      },
+      "div>svg>g>text": {
+        "sizes": {
+          "12px": 23,
+          "9px": 30,
+          "10px": 20,
+          "15px": 1
+        },
+        "sample": "百分比 (%)"
+      }
+    },
+    "light/data-files": {
+      "div>div.main-layout>a.skip-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "跳转到主内容"
+      },
+      "div.logo-section>h1.logo-text>a.logo-link>span.logo-title": {
+        "sizes": {
+          "18px": 1
+        },
+        "sample": "LQ-DataPrase"
+      },
+      "div.logo-section>h1.logo-text>a.logo-link>span.logo-subtitle": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "ATE数据分析平台"
+      },
+      "nav.nav-menu>a.menu-item>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 5
+        },
+        "sample": "仪表板"
+      },
+      "nav.nav-menu>a.router-link-active>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "数据管理"
+      },
+      "aside.sidebar>nav.nav-menu>div.menu-divider>span.divider-label": {
+        "sizes": {
+          "10px": 1
+        },
+        "sample": "系统管理"
+      },
+      "div.topbar-left>div.el-breadcrumb>span.el-breadcrumb__item>span.is-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "数据管理"
+      },
+      "div.main-content>header.topbar>div.topbar-right>button.version-badge": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "v0.7.0"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-name": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-role": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.header-content>div.header-left>h1.page-title>span.title-icon": {
+        "sizes": {
+          "24px": 1
+        },
+        "sample": "📦"
+      },
+      "div.header-content>div.header-left>h1.page-title>span.title-text": {
+        "sizes": {
+          "22px": 1
+        },
+        "sample": "数据管理"
+      },
+      "div.page-header>div.header-content>div.header-left>p.page-subtitle": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "上传、查看、导出你的测试数据文件"
+      },
+      "div.header-content>div.header-stats>div.stat-chip>span.stat-label": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "文件总数"
+      },
+      "div.header-content>div.header-stats>div.stat-chip>span.stat-value": {
+        "sizes": {
+          "20px": 1
+        },
+        "sample": "95"
+      },
+      "div.tabs-wrapper>div.tabs-nav>button.tab-btn>span.tab-icon": {
+        "sizes": {
+          "15px": 7
+        },
+        "sample": "📋"
+      },
+      "div.tabs-wrapper>div.tabs-nav>button.tab-btn>span.tab-label": {
+        "sizes": {
+          "13px": 7
+        },
+        "sample": "文件列表"
+      },
+      "div.tabs-wrapper>div.tabs-nav>button.tab-btn>span.tab-badge": {
+        "sizes": {
+          "10px": 2
+        },
+        "sample": "95"
+      },
+      "div.file-list-tab>div.list-toolbar>div.toolbar-left>span.section-title": {
+        "sizes": {
+          "15px": 1
+        },
+        "sample": "📋 文件列表"
+      },
+      "div.file-list-tab>div.list-toolbar>div.toolbar-left>span.section-count": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "95 个文件"
+      },
+      "div.list-toolbar>div.toolbar-right>button.is-disabled>span": {
+        "sizes": {
+          "14px": 2
+        },
+        "sample": "组合为批次"
+      },
+      "div.list-toolbar>div.toolbar-right>button.el-button>span": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "上传文件"
+      },
+      "div.list-toolbar>div.toolbar-right>button.is-plain>span": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "数据修复"
+      },
+      "thead>tr>th.is-center>div.cell": {
+        "sizes": {
+          "12px": 2
+        },
+        "sample": "ID"
+      },
+      "tr>th.is-leaf>div.cell>span.header-with-filter": {
+        "sizes": {
+          "12px": 4
+        },
+        "sample": "文件名"
+      },
+      "thead>tr>th.is-leaf>div.cell": {
+        "sizes": {
+          "12px": 2
+        },
+        "sample": "阶段"
+      },
+      "tr>th.tag-cell>div.cell>span.header-with-filter": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "标签"
+      },
+      "thead>tr>th.descending>div.cell": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "上传时间"
+      },
+      "thead>tr>th.is-right>div.cell": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "大小"
+      },
+      "tr.row-even>td.is-center>div.cell>span.id-badge": {
+        "sizes": {
+          "11px": 10
+        },
+        "sample": "#949"
+      },
+      "td.el-table_1_column_4>div.cell>div.filename-cell>span.file-icon": {
+        "sizes": {
+          "16px": 20
+        },
+        "sample": "📄"
+      },
+      "td.el-table_1_column_4>div.cell>div.filename-cell>span.file-name": {
+        "sizes": {
+          "13px": 20
+        },
+        "sample": "BZJ1789870319642_FT.csv"
+      },
+      "td.el-table_1_column_5>div.cell>span.el-tag>span.el-tag__content": {
+        "sizes": {
+          "12px": 20
+        },
+        "sample": "BZJ1789870319642"
+      },
+      "tbody>tr.row-even>td.el-table_1_column_6>div.cell": {
+        "sizes": {
+          "14px": 10
+        },
+        "sample": "CTA8290D"
+      },
+      "td.el-table_1_column_7>div.cell>span.el-tag>span.el-tag__content": {
+        "sizes": {
+          "12px": 18
+        },
+        "sample": "FT"
+      },
+      "tr.row-even>td.el-table_1_column_8>div.cell>span.program-name-cell": {
+        "sizes": {
+          "12px": 10
+        },
+        "sample": "BPD60320_FT_AAA_BPD60320XBAF"
+      },
+      "tr.row-even>td.el-table_1_column_10>div.cell>span.time-text": {
+        "sizes": {
+          "12px": 10
+        },
+        "sample": "09/20 10:12"
+      },
+      "tr.row-even>td.el-table_1_column_11>div.cell>span.time-text": {
+        "sizes": {
+          "12px": 10
+        },
+        "sample": "—"
+      },
+      "tr.row-even>td.is-right>div.cell>span.size-badge": {
+        "sizes": {
+          "12px": 10
+        },
+        "sample": "8.6 MB"
+      },
+      "td.is-center>div.cell>button.is-plain>span": {
+        "sizes": {
+          "12px": 40
+        },
+        "sample": "查看"
+      },
+      "tr.row-odd>td.is-center>div.cell>span.id-badge": {
+        "sizes": {
+          "11px": 10
+        },
+        "sample": "#940"
+      },
+      "tbody>tr.row-odd>td.el-table_1_column_6>div.cell": {
+        "sizes": {
+          "14px": 10
+        },
+        "sample": "CTA8290D"
+      },
+      "tr.row-odd>td.el-table_1_column_8>div.cell>span.program-name-cell": {
+        "sizes": {
+          "12px": 10
+        },
+        "sample": "BPD60320_FT_AAA_BPD60320XBAF"
+      },
+      "tr.row-odd>td.el-table_1_column_10>div.cell>span.time-text": {
+        "sizes": {
+          "12px": 10
+        },
+        "sample": "09/20 10:10"
+      },
+      "tr.row-odd>td.el-table_1_column_11>div.cell>span.time-text": {
+        "sizes": {
+          "12px": 10
+        },
+        "sample": "—"
+      },
+      "tr.row-odd>td.is-right>div.cell>span.size-badge": {
+        "sizes": {
+          "12px": 10
+        },
+        "sample": "8.6 MB"
+      },
+      "div.cell>div.tag-cell-inner>span.is-closable>span.el-tag__content": {
+        "sizes": {
+          "12px": 5
+        },
+        "sample": "e2e_hdr_1789838645707"
+      },
+      "tr.row-odd>td.el-table_1_column_7>div.cell>span.empty-text": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "—"
+      },
+      "tr.row-even>td.el-table_1_column_7>div.cell>span.empty-text": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "—"
+      },
+      "div.file-list-tab>div.list-pagination>div.is-background>span.is-first": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "Total 95"
+      },
+      "div.list-pagination>div.is-background>ul.el-pager>li.is-active": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "1"
+      },
+      "div.list-pagination>div.is-background>ul.el-pager>li.number": {
+        "sizes": {
+          "14px": 4
+        },
+        "sample": "2"
+      }
+    },
+    "light/data-grid": {
+      "div>div.main-layout>a.skip-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "跳转到主内容"
+      },
+      "div.logo-section>h1.logo-text>a.logo-link>span.logo-title": {
+        "sizes": {
+          "18px": 1
+        },
+        "sample": "LQ-DataPrase"
+      },
+      "div.logo-section>h1.logo-text>a.logo-link>span.logo-subtitle": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "ATE数据分析平台"
+      },
+      "nav.nav-menu>a.menu-item>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 5
+        },
+        "sample": "仪表板"
+      },
+      "nav.nav-menu>a.router-link-active>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "数据管理"
+      },
+      "aside.sidebar>nav.nav-menu>div.menu-divider>span.divider-label": {
+        "sizes": {
+          "10px": 1
+        },
+        "sample": "系统管理"
+      },
+      "div.topbar-left>div.el-breadcrumb>span.el-breadcrumb__item>span.is-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "数据管理"
+      },
+      "div.main-content>header.topbar>div.topbar-right>button.version-badge": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "v0.7.0"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-name": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-role": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.header-content>div.header-left>h1.page-title>span.title-icon": {
+        "sizes": {
+          "24px": 1
+        },
+        "sample": "📦"
+      },
+      "div.header-content>div.header-left>h1.page-title>span.title-text": {
+        "sizes": {
+          "22px": 1
+        },
+        "sample": "数据管理"
+      },
+      "div.page-header>div.header-content>div.header-left>p.page-subtitle": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "上传、查看、导出你的测试数据文件"
+      },
+      "div.header-content>div.header-stats>div.stat-chip>span.stat-label": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "文件总数"
+      },
+      "div.header-content>div.header-stats>div.stat-chip>span.stat-value": {
+        "sizes": {
+          "20px": 1
+        },
+        "sample": "1"
+      },
+      "div.tabs-wrapper>div.tabs-nav>button.tab-btn>span.tab-icon": {
+        "sizes": {
+          "15px": 7
+        },
+        "sample": "📋"
+      },
+      "div.tabs-wrapper>div.tabs-nav>button.tab-btn>span.tab-label": {
+        "sizes": {
+          "13px": 7
+        },
+        "sample": "文件列表"
+      },
+      "div.tabs-wrapper>div.tabs-nav>button.tab-btn>span.tab-badge": {
+        "sizes": {
+          "10px": 2
+        },
+        "sample": "1"
+      },
+      "div.tab-content>div.content-section>div.active-file-banner>span.banner-icon": {
+        "sizes": {
+          "15px": 1
+        },
+        "sample": "📄"
+      },
+      "div.tab-content>div.content-section>div.active-file-banner>span.banner-label": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "当前文件"
+      },
+      "div.is-filterable>div.el-select__selection>div.el-select__selected-item>span": {
+        "sizes": {
+          "14px": 2
+        },
+        "sample": "BPD60320_QA2.csv"
+      },
+      "div>div.el-row>div.is-guttered>span.ctl-label": {
+        "sizes": {
+          "11px": 5
+        },
+        "sample": "显示测试列"
+      },
+      "div.is-filterable>div.el-select__selection>div.is-transparent>span": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "搜索测试列"
+      },
+      "div.test-col-selector>div.col-actions>button.is-link>span": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "全选"
+      },
+      "div.test-col-selector>div.col-actions>button.is-disabled>span": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "清空"
+      },
+      "div.el-select__wrapper>div.el-select__selection>div.is-transparent>span": {
+        "sizes": {
+          "14px": 2
+        },
+        "sample": "Pass/Fail筛选"
+      },
+      "div.el-select__wrapper>div.el-select__selection>div.el-select__selected-item>span": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "手动调整"
+      },
+      "div.el-row>div.el-col>button.el-button>span": {
+        "sizes": {
+          "14px": 3
+        },
+        "sample": "加载数据"
+      },
+      "div>div.quality-bar>div.chip>span.chip-label": {
+        "sizes": {
+          "11px": 4
+        },
+        "sample": "Total"
+      },
+      "div>div.quality-bar>div.chip>span.chip-value": {
+        "sizes": {
+          "17px": 3
+        },
+        "sample": "1,992"
+      },
+      "div>div.quality-bar>div.chip>span.yield-badge": {
+        "sizes": {
+          "12.5px": 1
+        },
+        "sample": "▲100%"
+      },
+      "div.quality-bar>div.chip-tags>span.el-tag>span.el-tag__content": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "10个参数CPK不足 (CPK < 1.33)"
+      },
+      "div.content-section>div>div>p": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "共 条数据"
+      },
+      "div>div>p>b": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "1992"
+      },
+      "div.ag-header-cell-comp-wrapper>div.ag-cell-label-container>div.ag-header-cell-label>span.ag-header-cell-text": {
+        "sizes": {
+          "12px": 6
+        },
+        "sample": "SW_Bin (Unit) [Min, Max]"
+      },
+      "div.ag-row-even>div.ag-cell>div.ag-cell-wrapper>span.ag-cell-value": {
+        "sizes": {
+          "12px": 72
+        },
+        "sample": "1"
+      },
+      "div.ag-row-odd>div.ag-cell>div.ag-cell-wrapper>span.ag-cell-value": {
+        "sizes": {
+          "12px": 66
+        },
+        "sample": "1"
+      }
+    },
+    "light/sftp": {
+      "div>div.main-layout>a.skip-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "跳转到主内容"
+      },
+      "div.logo-section>h1.logo-text>a.logo-link>span.logo-title": {
+        "sizes": {
+          "18px": 1
+        },
+        "sample": "LQ-DataPrase"
+      },
+      "div.logo-section>h1.logo-text>a.logo-link>span.logo-subtitle": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "ATE数据分析平台"
+      },
+      "nav.nav-menu>a.menu-item>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 5
+        },
+        "sample": "仪表板"
+      },
+      "nav.nav-menu>a.router-link-active>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "SFTP浏览器"
+      },
+      "aside.sidebar>nav.nav-menu>div.menu-divider>span.divider-label": {
+        "sizes": {
+          "10px": 1
+        },
+        "sample": "系统管理"
+      },
+      "div.topbar-left>div.el-breadcrumb>span.el-breadcrumb__item>span.is-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "SFTP浏览器"
+      },
+      "div.main-content>header.topbar>div.topbar-right>button.version-badge": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "v0.7.0"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-name": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-role": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.sftp-browser>div.page-header>div.header-title>h2": {
+        "sizes": {
+          "22px": 1
+        },
+        "sample": "SFTP 浏览器"
+      },
+      "div.sftp-browser>div.page-header>div.header-title>p.header-subtitle": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "安全文件传输协议浏览器"
+      },
+      "div.sftp-browser>div.page-header>span.status-tag>span.el-tag__content": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "未连接"
+      },
+      "div.is-hover-shadow>div.el-card__header>div.card-header>span": {
+        "sizes": {
+          "15px": 1
+        },
+        "sample": "连接配置"
+      },
+      "form.connect-form>div.is-light>div.el-alert__content>span.el-alert__title": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "上次访问路径：/，连接后将自动跳转"
+      },
+      "div.el-row>div.is-guttered>div.is-required>label.el-form-item__label": {
+        "sizes": {
+          "14px": 2
+        },
+        "sample": "主机"
+      },
+      "div.el-row>div.is-guttered>div.asterisk-left>label.el-form-item__label": {
+        "sizes": {
+          "14px": 2
+        },
+        "sample": "端口"
+      },
+      "div.asterisk-left>div.el-form-item__content>button.el-button>span": {
+        "sizes": {
+          "14px": 2
+        },
+        "sample": "连接"
+      }
+    },
+    "light/settings": {
+      "div>div.main-layout>a.skip-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "跳转到主内容"
+      },
+      "div.logo-section>h1.logo-text>a.logo-link>span.logo-title": {
+        "sizes": {
+          "18px": 1
+        },
+        "sample": "LQ-DataPrase"
+      },
+      "div.logo-section>h1.logo-text>a.logo-link>span.logo-subtitle": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "ATE数据分析平台"
+      },
+      "nav.nav-menu>a.menu-item>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 5
+        },
+        "sample": "仪表板"
+      },
+      "aside.sidebar>nav.nav-menu>div.menu-divider>span.divider-label": {
+        "sizes": {
+          "10px": 1
+        },
+        "sample": "系统管理"
+      },
+      "nav.nav-menu>a.router-link-active>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "系统设置"
+      },
+      "div.topbar-left>div.el-breadcrumb>span.el-breadcrumb__item>span.is-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "系统设置"
+      },
+      "div.main-content>header.topbar>div.topbar-right>button.version-badge": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "v0.7.0"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-name": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-role": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.main-content>main.content-area>div.settings-page>h2": {
+        "sizes": {
+          "24px": 1
+        },
+        "sample": "⚙️ 系统设置"
+      },
+      "div.is-left>div.el-tabs__nav-scroll>div.is-left>div.is-left": {
+        "sizes": {
+          "14px": 6
+        },
+        "sample": "📊 显示设置"
+      },
+      "div.el-tab-pane>form.el-form>div.asterisk-left>label.el-form-item__label": {
+        "sizes": {
+          "14px": 2
+        },
+        "sample": "ECharts 渲染器"
+      },
+      "div.el-form-item__content>div.el-radio-group>label.is-checked>span.el-radio__label": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "SVG（推荐 · 无损缩放 · 支持 CSS 操控）"
+      },
+      "div.el-form-item__content>div.el-radio-group>label.el-radio>span.el-radio__label": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "Canvas（大数据量时性能更好）"
+      },
+      "form.el-form>div.asterisk-left>div.el-form-item__content>div.form-hint": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "导出图表（数据分析页「批量图表」导出的 Excel / "
+      },
+      "div.el-tab-pane>form.chart-memory-settings>div.asterisk-left>label.el-form-item__label": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "图表布局记忆"
+      },
+      "form.chart-memory-settings>div.asterisk-left>div.el-form-item__content>span.chart-memory-settings__hint": {
+        "sizes": {
+          "12px": 2
+        },
+        "sample": "记住单文件分析的图表布局与勾选（跟随账号，换设备不丢）"
+      },
+      "div.asterisk-left>div.el-form-item__content>button.el-button>span": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "恢复默认布局"
+      },
+      "div.settings-page>div.settings-actions>button.el-button>span": {
+        "sizes": {
+          "14px": 2
+        },
+        "sample": "💾 保存设置"
+      }
+    },
+    "night/dashboard": {
+      "div>div.main-layout>a.skip-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "跳转到主内容"
+      },
+      "div.logo-section>h1.logo-text>a.router-link-active>span.logo-title": {
+        "sizes": {
+          "18px": 1
+        },
+        "sample": "LQ-DataPrase"
+      },
+      "div.logo-section>h1.logo-text>a.router-link-active>span.logo-subtitle": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "ATE数据分析平台"
+      },
+      "nav.nav-menu>a.router-link-active>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "仪表板"
+      },
+      "nav.nav-menu>a.menu-item>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 5
+        },
+        "sample": "数据管理"
+      },
+      "aside.sidebar>nav.nav-menu>div.menu-divider>span.divider-label": {
+        "sizes": {
+          "10px": 1
+        },
+        "sample": "系统管理"
+      },
+      "div.topbar-left>div.el-breadcrumb>span.el-breadcrumb__item>span.is-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "仪表板"
+      },
+      "div.main-content>header.topbar>div.topbar-right>button.version-badge": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "v0.7.0"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-name": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-role": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.dashboard-page>header.dash-header>h1.dash-title>span.dash-title-icon": {
+        "sizes": {
+          "21px": 1
+        },
+        "sample": "📊"
+      },
+      "div.dashboard-page>header.dash-header>h1.dash-title>span.dash-title-text": {
+        "sizes": {
+          "20px": 1
+        },
+        "sample": "数据分析仪表板"
+      },
+      "div.is-top>div.el-tabs__nav-scroll>div.is-top>div.is-top": {
+        "sizes": {
+          "14px": 4
+        },
+        "sample": "📊 单文件分析"
+      },
+      "div.is-filterable>div.el-select__selection>div.el-select__selected-item>span": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "BZJ1789870319642_FT.csv"
+      },
+      "div.el-tabs__content>div.el-tab-pane>header.single-head>span.dash-meta": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "更新: 11:44:52"
+      },
+      "div.el-tab-pane>div.overview-strip>div.strip-item>span.strip-label": {
+        "sizes": {
+          "11px": 8
+        },
+        "sample": "程序"
+      },
+      "div.el-tab-pane>div.overview-strip>div.strip-item>span.strip-value": {
+        "sizes": {
+          "13.5px": 3,
+          "18px": 5
+        },
+        "sample": "BPD60320_FT_AAA_BPD60320XBAF"
+      },
+      "div.overview-strip>div.strip-item>span.strip-value>span.strip-unit": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "%"
+      },
+      "div.overview-strip>div.strip-item>span.strip-label>span.strip-help": {
+        "sizes": {
+          "9px": 1
+        },
+        "sample": "?"
+      },
+      "div.el-tabs__content>div.el-tab-pane>div.overview-strip>span.strip-chip": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "CTA8290D"
+      },
+      "div.el-tab-pane>div.alert-banner>div.banner-head>span.b-icon": {
+        "sizes": {
+          "16px": 1
+        },
+        "sample": "⚠️"
+      },
+      "div.el-tab-pane>div.alert-banner>div.banner-head>span.b-title": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "3 项告警"
+      },
+      "div.el-tab-pane>div.alert-banner>div.banner-head>span.b-toggle": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "展开明细"
+      },
+      "div.alert-banner>div.banner-head>span.b-toggle>span.b-caret": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "▾"
+      },
+      "div.dash-charts>div.sec-card>div.sec-head>h3": {
+        "sizes": {
+          "13.5px": 1
+        },
+        "sample": "📋 Bin 构成"
+      },
+      "div.dash-charts>div.sec-card>div.sec-head>span.sec-desc": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "Pareto 降序 · 色即语义"
+      },
+      "div.sec-body>div.pareto>div.p-row>span.p-name": {
+        "sizes": {
+          "12px": 9
+        },
+        "sample": "Bin 1"
+      },
+      "div.sec-body>div.pareto>div.p-row>span.p-val": {
+        "sizes": {
+          "12px": 9
+        },
+        "sample": "· 91.13%"
+      },
+      "div.pareto>div.p-row>span.p-val>b": {
+        "sizes": {
+          "12px": 9
+        },
+        "sample": "2,301"
+      },
+      "div.dash-charts>div.panel-card>div.panel-head>h3": {
+        "sizes": {
+          "13.5px": 1
+        },
+        "sample": "🟢 Site 良率"
+      },
+      "div.panel-card>div.panel-head>div.yield-pills>span.yield-pill": {
+        "sizes": {
+          "11.5px": 3
+        },
+        "sample": "最高 Site4 · 95.35%"
+      },
+      "div>svg>g>text": {
+        "sizes": {
+          "12px": 14
+        },
+        "sample": "0%"
+      },
+      "div.bin-site-cross>div.panel-card>div.panel-head>h3": {
+        "sizes": {
+          "13.5px": 1
+        },
+        "sample": "📊 Bin × Site 交叉表"
+      },
+      "div.bin-site-cross>div.panel-card>div.panel-head>span.panel-desc": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "卡内页签切换：精确读数 / 一眼定位问题 Site"
+      },
+      "thead>tr>th.is-center>div.cell": {
+        "sizes": {
+          "12px": 9
+        },
+        "sample": "Bin"
+      },
+      "tr.el-table__row>td.is-center>div.cell>span.bs-bin-label": {
+        "sizes": {
+          "12px": 9
+        },
+        "sample": "Bin 1"
+      },
+      "tr.el-table__row>td.is-center>div.cell>span.heat-cell": {
+        "sizes": {
+          "12.5px": 36
+        },
+        "sample": "522(22.69%)"
+      },
+      "tr.el-table__row>td.is-center>div.cell>span.bs-total-num": {
+        "sizes": {
+          "12px": 14
+        },
+        "sample": "2,301 (91.13%)"
+      },
+      "tr.el-table__row>td.is-center>div.cell>span.bs-total-label": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "Total"
+      },
+      "div.el-tab-pane>div.panel-card>div.panel-head>span.panel-title": {
+        "sizes": {
+          "13.5px": 1
+        },
+        "sample": "🔬 测试项总览"
+      },
+      "div.el-tab-pane>div.panel-card>div.panel-head>span.panel-desc": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "点击参数行跳转数据分析 · 表头全列可排序"
+      },
+      "div.el-tab-pane>div.panel-card>div.panel-head>label.ov-check": {
+        "sizes": {
+          "12px": 2
+        },
+        "sample": "忽略无 Limit"
+      },
+      "div.el-tab-pane>div.panel-card>div.cpk-strip>span.cpk-seg": {
+        "sizes": {
+          "11px": 2
+        },
+        "sample": "✓ A · 245"
+      },
+      "div.el-tab-pane>div.panel-card>div.cpk-legend>span.cpk-legend-item": {
+        "sizes": {
+          "11.5px": 4
+        },
+        "sample": "✓ A · 245 (72.5%)"
+      },
+      "thead>tr>th.is-last-column>div.cell": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "参数名称"
+      },
+      "thead>tr>th.is-right>div.cell": {
+        "sizes": {
+          "12px": 7
+        },
+        "sample": "数据点数"
+      },
+      "tr.el-table__row>td.is-last-column>div.cell>span.cell-param": {
+        "sizes": {
+          "12px": 100
+        },
+        "sample": "Site1_Connection_Check"
+      },
+      "tbody>tr.el-table__row>td.is-right>div.cell": {
+        "sizes": {
+          "12px": 100
+        },
+        "sample": "627"
+      },
+      "tr.el-table__row>td.is-right>div.cell>span": {
+        "sizes": {
+          "12px": 600
+        },
+        "sample": "9.9779"
+      },
+      "td.is-right>div.cell>span>span.cell-unit": {
+        "sizes": {
+          "11px": 99
+        },
+        "sample": "Kohm"
+      },
+      "td.is-center>div.cell>span.el-tag>span.el-tag__content": {
+        "sizes": {
+          "12px": 100
+        },
+        "sample": "992.63"
+      },
+      "tr.el-table__row>td.is-center>div.cell>span.cpk-badge": {
+        "sizes": {
+          "11.5px": 100
+        },
+        "sample": "✓A"
+      },
+      "tr.el-table__row>td.is-center>div.cell>span.cell-inactive": {
+        "sizes": {
+          "12px": 70
+        },
+        "sample": "0"
+      },
+      "tr.el-table__row>td.is-center>div.cell>span.cell-fail": {
+        "sizes": {
+          "12px": 30
+        },
+        "sample": "1 (0.22%)"
+      },
+      "div.el-tab-pane>div.panel-card>div.overview-footer>span.overview-total": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "共 352 项 · 点击参数行跳转数据分析页"
+      },
+      "div.panel-card>div.overview-footer>div.is-background>span.is-first": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "Total 352"
+      },
+      "div.overview-footer>div.is-background>ul.el-pager>li.is-active": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "1"
+      },
+      "div.overview-footer>div.is-background>ul.el-pager>li.number": {
+        "sizes": {
+          "12px": 3
+        },
+        "sample": "2"
+      },
+      "div.el-tabs__content>div.el-tab-pane>div.panel-card>div.ov-sub": {
+        "sizes": {
+          "12.5px": 1
+        },
+        "sample": "🔥 Top 10 Fail 测试项"
+      },
+      "div.el-tab-pane>div.panel-card>div.ov-sub>span": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "信息形式 · 点击跳转分析"
+      },
+      "div.el-tab-pane>div.panel-card>div.fail-chips>button.fail-chip": {
+        "sizes": {
+          "11.5px": 10
+        },
+        "sample": "PGOOD_Kelvin · 112 (24.09%)"
+      },
+      "div.uph-card>div.uph-shell>div.uph-head>h3": {
+        "sizes": {
+          "13.5px": 1
+        },
+        "sample": "⚡ UPH 效率明细"
+      },
+      "div.uph-card>div.uph-shell>div.uph-head>span.uph-head-desc": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "紧凑信息带：核心数字在总览条，明细/公式/来源/警告在此"
+      },
+      "div.uph-shell>div.uph-body>div.uph-detail>span": {
+        "sizes": {
+          "12px": 5
+        },
+        "sample": "平均测试时间 秒"
+      },
+      "div.uph-body>div.uph-detail>span>b": {
+        "sizes": {
+          "12px": 3
+        },
+        "sample": "8.7930"
+      },
+      "div.uph-body>div.uph-detail>span>span.uph-src": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "自动检测 Test_Time"
+      },
+      "div.uph-shell>div.uph-body>div.uph-detail>span.uph-warn": {
+        "sizes": {
+          "11.5px": 1
+        },
+        "sample": "⚠ 测试时间列「Test_Time」单位「unit」无法"
+      },
+      "div.uph-body>div.uph-detail>span.site-uph-wrap>span.site-uph": {
+        "sizes": {
+          "11px": 4
+        },
+        "sample": "409"
+      },
+      "div.uph-detail>span.site-uph-wrap>span.site-uph>b": {
+        "sizes": {
+          "11px": 4
+        },
+        "sample": "S1"
+      },
+      "div.uph-shell>div.uph-body>div.uph-detail>span.uph-formula": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "UPH = 测试总数量 ÷ 总耗时 × 3600"
+      },
+      "div.el-tab-pane>div.dash-footer>button.el-button>span": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "保存 HTML 报表"
+      },
+      "div.dash-footer>button.el-button>span>span": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "📥"
+      },
+      "div.el-tabs__content>div.el-tab-pane>div.dash-footer>p.dash-footer-note": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "📅 最后更新: 11:44:52 | LiqunDat"
+      }
+    },
+    "night/analysis": {
+      "div>div.main-layout>a.skip-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "跳转到主内容"
+      },
+      "div.logo-section>h1.logo-text>a.logo-link>span.logo-title": {
+        "sizes": {
+          "18px": 1
+        },
+        "sample": "LQ-DataPrase"
+      },
+      "div.logo-section>h1.logo-text>a.logo-link>span.logo-subtitle": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "ATE数据分析平台"
+      },
+      "nav.nav-menu>a.menu-item>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 5
+        },
+        "sample": "仪表板"
+      },
+      "nav.nav-menu>a.router-link-active>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "数据分析"
+      },
+      "aside.sidebar>nav.nav-menu>div.menu-divider>span.divider-label": {
+        "sizes": {
+          "10px": 1
+        },
+        "sample": "系统管理"
+      },
+      "div.topbar-left>div.el-breadcrumb>span.el-breadcrumb__item>span.is-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "数据分析"
+      },
+      "div.main-content>header.topbar>div.topbar-right>button.version-badge": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "v0.7.0"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-name": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-role": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.main-content>main.content-area>div>h2": {
+        "sizes": {
+          "24px": 1
+        },
+        "sample": "📈 数据分析"
+      },
+      "div.is-top>div.el-tabs__nav-scroll>div.is-top>div.is-top": {
+        "sizes": {
+          "14px": 4
+        },
+        "sample": "📊 单文件分析"
+      },
+      "div.toolbar>div.control-panel__main>div.dp-analysis-filepicker>label.picker-label": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "选择数据文件"
+      },
+      "div.is-filterable>div.el-select__selection>div.el-select__selected-item>span": {
+        "sizes": {
+          "12px": 2
+        },
+        "sample": "BZJ1789870319642_FT.csv"
+      },
+      "div.toolbar>div.control-panel__main>div.param-selector>div.selector-label": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "选择参数 (↑↓ 切换)"
+      },
+      "div.param-selector>div.nav-buttons>button.el-button>span": {
+        "sizes": {
+          "12px": 2
+        },
+        "sample": "◀ 上一个"
+      },
+      "div.control-panel__main>div.chart-toggles>label.is-checked>span.el-checkbox__label": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "显示直方图"
+      },
+      "div.control-panel__main>div.chart-toggles>label.el-checkbox>span.el-checkbox__label": {
+        "sizes": {
+          "12px": 3
+        },
+        "sample": "显示序列分布"
+      },
+      "div.is-never-shadow>div.el-card__body>div.filter-section>div.section-label": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "数据筛选"
+      },
+      "div.filter-section>div.filter-checkboxes>label.el-checkbox>span.el-checkbox__label": {
+        "sizes": {
+          "12px": 5
+        },
+        "sample": "忽略无Limit"
+      },
+      "div.el-card__body>div.filter-section>div.control-line>span.section-label": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "异常值处理"
+      },
+      "div.el-select__wrapper>div.el-select__selection>div.el-select__selected-item>span": {
+        "sizes": {
+          "12px": 2
+        },
+        "sample": "不处理"
+      },
+      "div.is-hover-shadow>div.el-card__body>div.config-header>span.config-title": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "⚙️ 图表显示"
+      },
+      "div.is-hover-shadow>div.el-card__body>div.config-section>div.section-label": {
+        "sizes": {
+          "11px": 2
+        },
+        "sample": "显示元素"
+      },
+      "div.config-section>div.config-checkboxes>label.is-checked>span.el-checkbox__label": {
+        "sizes": {
+          "12px": 3
+        },
+        "sample": "Limit"
+      },
+      "div.config-section>div.config-checkboxes>label.el-checkbox>span.el-checkbox__label": {
+        "sizes": {
+          "12px": 4
+        },
+        "sample": "3σ线"
+      },
+      "div.is-guttered>div.is-hover-shadow>div.el-card__body>div.table-header": {
+        "sizes": {
+          "12px": 2
+        },
+        "sample": "📊 范围对比"
+      },
+      "div.is-hover-shadow>div.el-card__body>div.table-header>span.table-header__unit": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "（Unit）"
+      },
+      "thead.el-table__body-header>tr>th.is-center>div.cell": {
+        "sizes": {
+          "10px": 8
+        },
+        "sample": "Low"
+      },
+      "tbody>tr.range-active-row>td.is-left>div.cell": {
+        "sizes": {
+          "10px": 1
+        },
+        "sample": "RowDataLimit"
+      },
+      "tbody>tr.range-active-row>td.is-center>div.cell": {
+        "sizes": {
+          "10px": 3
+        },
+        "sample": "-"
+      },
+      "tbody>tr.el-table__row>td.is-left>div.cell": {
+        "sizes": {
+          "10px": 5
+        },
+        "sample": "Data Range"
+      },
+      "tbody>tr.el-table__row>td.is-center>div.cell": {
+        "sizes": {
+          "10px": 40
+        },
+        "sample": "1.00000"
+      },
+      "div.is-guttered>div.stats-summary>div.stat-item>span.stat-label": {
+        "sizes": {
+          "11px": 10
+        },
+        "sample": "N"
+      },
+      "div.is-guttered>div.stats-summary>div.stat-item>span.stat-value": {
+        "sizes": {
+          "12px": 10
+        },
+        "sample": "2,525"
+      },
+      "div.is-guttered>div.chart-dock>div.chart-dock__bar>span.chart-dock__hint": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "拖 ⠿ 手柄重排图表 · 拖分隔条改单图高宽 · 拖底部"
+      },
+      "div.chart-dock>div.chart-dock__bar>button.is-text>span": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "重置布局"
+      },
+      "div.chart-dock__row>div.chart-panel>div.chart-h>span.chart-h__grip": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "⠿"
+      },
+      "div.chart-dock__row>div.chart-panel>div.chart-h>span.chart-h__title": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "直方图"
+      },
+      "div.chart-dock__row>div.chart-panel>div.chart-h>button.chart-h__btn": {
+        "sizes": {
+          "14px": 2
+        },
+        "sample": "⤢"
+      },
+      "div>svg>g>text": {
+        "sizes": {
+          "12px": 23,
+          "9px": 30,
+          "10px": 20,
+          "15px": 1
+        },
+        "sample": "百分比 (%)"
+      }
+    },
+    "night/data-files": {
+      "div>div.main-layout>a.skip-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "跳转到主内容"
+      },
+      "div.logo-section>h1.logo-text>a.logo-link>span.logo-title": {
+        "sizes": {
+          "18px": 1
+        },
+        "sample": "LQ-DataPrase"
+      },
+      "div.logo-section>h1.logo-text>a.logo-link>span.logo-subtitle": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "ATE数据分析平台"
+      },
+      "nav.nav-menu>a.menu-item>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 5
+        },
+        "sample": "仪表板"
+      },
+      "nav.nav-menu>a.router-link-active>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "数据管理"
+      },
+      "aside.sidebar>nav.nav-menu>div.menu-divider>span.divider-label": {
+        "sizes": {
+          "10px": 1
+        },
+        "sample": "系统管理"
+      },
+      "div.topbar-left>div.el-breadcrumb>span.el-breadcrumb__item>span.is-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "数据管理"
+      },
+      "div.main-content>header.topbar>div.topbar-right>button.version-badge": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "v0.7.0"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-name": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-role": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.header-content>div.header-left>h1.page-title>span.title-icon": {
+        "sizes": {
+          "24px": 1
+        },
+        "sample": "📦"
+      },
+      "div.header-content>div.header-left>h1.page-title>span.title-text": {
+        "sizes": {
+          "22px": 1
+        },
+        "sample": "数据管理"
+      },
+      "div.page-header>div.header-content>div.header-left>p.page-subtitle": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "上传、查看、导出你的测试数据文件"
+      },
+      "div.header-content>div.header-stats>div.stat-chip>span.stat-label": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "文件总数"
+      },
+      "div.header-content>div.header-stats>div.stat-chip>span.stat-value": {
+        "sizes": {
+          "20px": 1
+        },
+        "sample": "95"
+      },
+      "div.tabs-wrapper>div.tabs-nav>button.tab-btn>span.tab-icon": {
+        "sizes": {
+          "15px": 7
+        },
+        "sample": "📋"
+      },
+      "div.tabs-wrapper>div.tabs-nav>button.tab-btn>span.tab-label": {
+        "sizes": {
+          "13px": 7
+        },
+        "sample": "文件列表"
+      },
+      "div.tabs-wrapper>div.tabs-nav>button.tab-btn>span.tab-badge": {
+        "sizes": {
+          "10px": 2
+        },
+        "sample": "95"
+      },
+      "div.file-list-tab>div.list-toolbar>div.toolbar-left>span.section-title": {
+        "sizes": {
+          "15px": 1
+        },
+        "sample": "📋 文件列表"
+      },
+      "div.file-list-tab>div.list-toolbar>div.toolbar-left>span.section-count": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "95 个文件"
+      },
+      "div.list-toolbar>div.toolbar-right>button.is-disabled>span": {
+        "sizes": {
+          "14px": 2
+        },
+        "sample": "组合为批次"
+      },
+      "div.list-toolbar>div.toolbar-right>button.el-button>span": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "上传文件"
+      },
+      "div.list-toolbar>div.toolbar-right>button.is-plain>span": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "数据修复"
+      },
+      "thead>tr>th.is-center>div.cell": {
+        "sizes": {
+          "12px": 2
+        },
+        "sample": "ID"
+      },
+      "tr>th.is-leaf>div.cell>span.header-with-filter": {
+        "sizes": {
+          "12px": 4
+        },
+        "sample": "文件名"
+      },
+      "thead>tr>th.is-leaf>div.cell": {
+        "sizes": {
+          "12px": 2
+        },
+        "sample": "阶段"
+      },
+      "tr>th.tag-cell>div.cell>span.header-with-filter": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "标签"
+      },
+      "thead>tr>th.descending>div.cell": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "上传时间"
+      },
+      "thead>tr>th.is-right>div.cell": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "大小"
+      },
+      "tr.row-even>td.is-center>div.cell>span.id-badge": {
+        "sizes": {
+          "11px": 10
+        },
+        "sample": "#949"
+      },
+      "td.el-table_1_column_4>div.cell>div.filename-cell>span.file-icon": {
+        "sizes": {
+          "16px": 20
+        },
+        "sample": "📄"
+      },
+      "td.el-table_1_column_4>div.cell>div.filename-cell>span.file-name": {
+        "sizes": {
+          "13px": 20
+        },
+        "sample": "BZJ1789870319642_FT.csv"
+      },
+      "td.el-table_1_column_5>div.cell>span.el-tag>span.el-tag__content": {
+        "sizes": {
+          "12px": 20
+        },
+        "sample": "BZJ1789870319642"
+      },
+      "tbody>tr.row-even>td.el-table_1_column_6>div.cell": {
+        "sizes": {
+          "14px": 10
+        },
+        "sample": "CTA8290D"
+      },
+      "td.el-table_1_column_7>div.cell>span.el-tag>span.el-tag__content": {
+        "sizes": {
+          "12px": 18
+        },
+        "sample": "FT"
+      },
+      "tr.row-even>td.el-table_1_column_8>div.cell>span.program-name-cell": {
+        "sizes": {
+          "12px": 10
+        },
+        "sample": "BPD60320_FT_AAA_BPD60320XBAF"
+      },
+      "tr.row-even>td.el-table_1_column_10>div.cell>span.time-text": {
+        "sizes": {
+          "12px": 10
+        },
+        "sample": "09/20 10:12"
+      },
+      "tr.row-even>td.el-table_1_column_11>div.cell>span.time-text": {
+        "sizes": {
+          "12px": 10
+        },
+        "sample": "—"
+      },
+      "tr.row-even>td.is-right>div.cell>span.size-badge": {
+        "sizes": {
+          "12px": 10
+        },
+        "sample": "8.6 MB"
+      },
+      "td.is-center>div.cell>button.is-plain>span": {
+        "sizes": {
+          "12px": 40
+        },
+        "sample": "查看"
+      },
+      "tr.row-odd>td.is-center>div.cell>span.id-badge": {
+        "sizes": {
+          "11px": 10
+        },
+        "sample": "#940"
+      },
+      "tbody>tr.row-odd>td.el-table_1_column_6>div.cell": {
+        "sizes": {
+          "14px": 10
+        },
+        "sample": "CTA8290D"
+      },
+      "tr.row-odd>td.el-table_1_column_8>div.cell>span.program-name-cell": {
+        "sizes": {
+          "12px": 10
+        },
+        "sample": "BPD60320_FT_AAA_BPD60320XBAF"
+      },
+      "tr.row-odd>td.el-table_1_column_10>div.cell>span.time-text": {
+        "sizes": {
+          "12px": 10
+        },
+        "sample": "09/20 10:10"
+      },
+      "tr.row-odd>td.el-table_1_column_11>div.cell>span.time-text": {
+        "sizes": {
+          "12px": 10
+        },
+        "sample": "—"
+      },
+      "tr.row-odd>td.is-right>div.cell>span.size-badge": {
+        "sizes": {
+          "12px": 10
+        },
+        "sample": "8.6 MB"
+      },
+      "div.cell>div.tag-cell-inner>span.is-closable>span.el-tag__content": {
+        "sizes": {
+          "12px": 5
+        },
+        "sample": "e2e_hdr_1789838645707"
+      },
+      "tr.row-odd>td.el-table_1_column_7>div.cell>span.empty-text": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "—"
+      },
+      "tr.row-even>td.el-table_1_column_7>div.cell>span.empty-text": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "—"
+      },
+      "div.file-list-tab>div.list-pagination>div.is-background>span.is-first": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "Total 95"
+      },
+      "div.list-pagination>div.is-background>ul.el-pager>li.is-active": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "1"
+      },
+      "div.list-pagination>div.is-background>ul.el-pager>li.number": {
+        "sizes": {
+          "14px": 4
+        },
+        "sample": "2"
+      }
+    },
+    "night/data-grid": {
+      "div>div.main-layout>a.skip-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "跳转到主内容"
+      },
+      "div.logo-section>h1.logo-text>a.logo-link>span.logo-title": {
+        "sizes": {
+          "18px": 1
+        },
+        "sample": "LQ-DataPrase"
+      },
+      "div.logo-section>h1.logo-text>a.logo-link>span.logo-subtitle": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "ATE数据分析平台"
+      },
+      "nav.nav-menu>a.menu-item>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 5
+        },
+        "sample": "仪表板"
+      },
+      "nav.nav-menu>a.router-link-active>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "数据管理"
+      },
+      "aside.sidebar>nav.nav-menu>div.menu-divider>span.divider-label": {
+        "sizes": {
+          "10px": 1
+        },
+        "sample": "系统管理"
+      },
+      "div.topbar-left>div.el-breadcrumb>span.el-breadcrumb__item>span.is-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "数据管理"
+      },
+      "div.main-content>header.topbar>div.topbar-right>button.version-badge": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "v0.7.0"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-name": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-role": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.header-content>div.header-left>h1.page-title>span.title-icon": {
+        "sizes": {
+          "24px": 1
+        },
+        "sample": "📦"
+      },
+      "div.header-content>div.header-left>h1.page-title>span.title-text": {
+        "sizes": {
+          "22px": 1
+        },
+        "sample": "数据管理"
+      },
+      "div.page-header>div.header-content>div.header-left>p.page-subtitle": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "上传、查看、导出你的测试数据文件"
+      },
+      "div.header-content>div.header-stats>div.stat-chip>span.stat-label": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "文件总数"
+      },
+      "div.header-content>div.header-stats>div.stat-chip>span.stat-value": {
+        "sizes": {
+          "20px": 1
+        },
+        "sample": "1"
+      },
+      "div.tabs-wrapper>div.tabs-nav>button.tab-btn>span.tab-icon": {
+        "sizes": {
+          "15px": 7
+        },
+        "sample": "📋"
+      },
+      "div.tabs-wrapper>div.tabs-nav>button.tab-btn>span.tab-label": {
+        "sizes": {
+          "13px": 7
+        },
+        "sample": "文件列表"
+      },
+      "div.tabs-wrapper>div.tabs-nav>button.tab-btn>span.tab-badge": {
+        "sizes": {
+          "10px": 2
+        },
+        "sample": "1"
+      },
+      "div.tab-content>div.content-section>div.active-file-banner>span.banner-icon": {
+        "sizes": {
+          "15px": 1
+        },
+        "sample": "📄"
+      },
+      "div.tab-content>div.content-section>div.active-file-banner>span.banner-label": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "当前文件"
+      },
+      "div.is-filterable>div.el-select__selection>div.el-select__selected-item>span": {
+        "sizes": {
+          "14px": 2
+        },
+        "sample": "BPD60320_QA2.csv"
+      },
+      "div>div.el-row>div.is-guttered>span.ctl-label": {
+        "sizes": {
+          "11px": 5
+        },
+        "sample": "显示测试列"
+      },
+      "div.is-filterable>div.el-select__selection>div.is-transparent>span": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "搜索测试列"
+      },
+      "div.test-col-selector>div.col-actions>button.is-link>span": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "全选"
+      },
+      "div.test-col-selector>div.col-actions>button.is-disabled>span": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "清空"
+      },
+      "div.el-select__wrapper>div.el-select__selection>div.is-transparent>span": {
+        "sizes": {
+          "14px": 2
+        },
+        "sample": "Pass/Fail筛选"
+      },
+      "div.el-select__wrapper>div.el-select__selection>div.el-select__selected-item>span": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "手动调整"
+      },
+      "div.el-row>div.el-col>button.el-button>span": {
+        "sizes": {
+          "14px": 3
+        },
+        "sample": "加载数据"
+      },
+      "div>div.quality-bar>div.chip>span.chip-label": {
+        "sizes": {
+          "11px": 4
+        },
+        "sample": "Total"
+      },
+      "div>div.quality-bar>div.chip>span.chip-value": {
+        "sizes": {
+          "17px": 3
+        },
+        "sample": "1,992"
+      },
+      "div>div.quality-bar>div.chip>span.yield-badge": {
+        "sizes": {
+          "12.5px": 1
+        },
+        "sample": "▲100%"
+      },
+      "div.quality-bar>div.chip-tags>span.el-tag>span.el-tag__content": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "10个参数CPK不足 (CPK < 1.33)"
+      },
+      "div.content-section>div>div>p": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "共 条数据"
+      },
+      "div>div>p>b": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "1992"
+      },
+      "div.ag-header-cell-comp-wrapper>div.ag-cell-label-container>div.ag-header-cell-label>span.ag-header-cell-text": {
+        "sizes": {
+          "12px": 6
+        },
+        "sample": "SW_Bin (Unit) [Min, Max]"
+      },
+      "div.ag-row-even>div.ag-cell>div.ag-cell-wrapper>span.ag-cell-value": {
+        "sizes": {
+          "12px": 72
+        },
+        "sample": "1"
+      },
+      "div.ag-row-odd>div.ag-cell>div.ag-cell-wrapper>span.ag-cell-value": {
+        "sizes": {
+          "12px": 66
+        },
+        "sample": "1"
+      }
+    },
+    "night/sftp": {
+      "div>div.main-layout>a.skip-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "跳转到主内容"
+      },
+      "div.logo-section>h1.logo-text>a.logo-link>span.logo-title": {
+        "sizes": {
+          "18px": 1
+        },
+        "sample": "LQ-DataPrase"
+      },
+      "div.logo-section>h1.logo-text>a.logo-link>span.logo-subtitle": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "ATE数据分析平台"
+      },
+      "nav.nav-menu>a.menu-item>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 5
+        },
+        "sample": "仪表板"
+      },
+      "nav.nav-menu>a.router-link-active>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "SFTP浏览器"
+      },
+      "aside.sidebar>nav.nav-menu>div.menu-divider>span.divider-label": {
+        "sizes": {
+          "10px": 1
+        },
+        "sample": "系统管理"
+      },
+      "div.topbar-left>div.el-breadcrumb>span.el-breadcrumb__item>span.is-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "SFTP浏览器"
+      },
+      "div.main-content>header.topbar>div.topbar-right>button.version-badge": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "v0.7.0"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-name": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-role": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.sftp-browser>div.page-header>div.header-title>h2": {
+        "sizes": {
+          "22px": 1
+        },
+        "sample": "SFTP 浏览器"
+      },
+      "div.sftp-browser>div.page-header>div.header-title>p.header-subtitle": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "安全文件传输协议浏览器"
+      },
+      "div.sftp-browser>div.page-header>span.status-tag>span.el-tag__content": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "未连接"
+      },
+      "div.is-hover-shadow>div.el-card__header>div.card-header>span": {
+        "sizes": {
+          "15px": 1
+        },
+        "sample": "连接配置"
+      },
+      "form.connect-form>div.is-light>div.el-alert__content>span.el-alert__title": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "上次访问路径：/，连接后将自动跳转"
+      },
+      "div.el-row>div.is-guttered>div.is-required>label.el-form-item__label": {
+        "sizes": {
+          "14px": 2
+        },
+        "sample": "主机"
+      },
+      "div.el-row>div.is-guttered>div.asterisk-left>label.el-form-item__label": {
+        "sizes": {
+          "14px": 2
+        },
+        "sample": "端口"
+      },
+      "div.asterisk-left>div.el-form-item__content>button.el-button>span": {
+        "sizes": {
+          "14px": 2
+        },
+        "sample": "连接"
+      }
+    },
+    "night/settings": {
+      "div>div.main-layout>a.skip-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "跳转到主内容"
+      },
+      "div.logo-section>h1.logo-text>a.logo-link>span.logo-title": {
+        "sizes": {
+          "18px": 1
+        },
+        "sample": "LQ-DataPrase"
+      },
+      "div.logo-section>h1.logo-text>a.logo-link>span.logo-subtitle": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "ATE数据分析平台"
+      },
+      "nav.nav-menu>a.menu-item>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 5
+        },
+        "sample": "仪表板"
+      },
+      "aside.sidebar>nav.nav-menu>div.menu-divider>span.divider-label": {
+        "sizes": {
+          "10px": 1
+        },
+        "sample": "系统管理"
+      },
+      "nav.nav-menu>a.router-link-active>div.menu-item-content>span.menu-label": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "系统设置"
+      },
+      "div.topbar-left>div.el-breadcrumb>span.el-breadcrumb__item>span.is-link": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "系统设置"
+      },
+      "div.main-content>header.topbar>div.topbar-right>button.version-badge": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "v0.7.0"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-name": {
+        "sizes": {
+          "13px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.el-dropdown>button.user-menu>div.user-info>span.user-role": {
+        "sizes": {
+          "11px": 1
+        },
+        "sample": "管理员"
+      },
+      "div.main-content>main.content-area>div.settings-page>h2": {
+        "sizes": {
+          "24px": 1
+        },
+        "sample": "⚙️ 系统设置"
+      },
+      "div.is-left>div.el-tabs__nav-scroll>div.is-left>div.is-left": {
+        "sizes": {
+          "14px": 6
+        },
+        "sample": "📊 显示设置"
+      },
+      "div.el-tab-pane>form.el-form>div.asterisk-left>label.el-form-item__label": {
+        "sizes": {
+          "14px": 2
+        },
+        "sample": "ECharts 渲染器"
+      },
+      "div.el-form-item__content>div.el-radio-group>label.is-checked>span.el-radio__label": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "SVG（推荐 · 无损缩放 · 支持 CSS 操控）"
+      },
+      "div.el-form-item__content>div.el-radio-group>label.el-radio>span.el-radio__label": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "Canvas（大数据量时性能更好）"
+      },
+      "form.el-form>div.asterisk-left>div.el-form-item__content>div.form-hint": {
+        "sizes": {
+          "12px": 1
+        },
+        "sample": "导出图表（数据分析页「批量图表」导出的 Excel / "
+      },
+      "div.el-tab-pane>form.chart-memory-settings>div.asterisk-left>label.el-form-item__label": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "图表布局记忆"
+      },
+      "form.chart-memory-settings>div.asterisk-left>div.el-form-item__content>span.chart-memory-settings__hint": {
+        "sizes": {
+          "12px": 2
+        },
+        "sample": "记住单文件分析的图表布局与勾选（跟随账号，换设备不丢）"
+      },
+      "div.asterisk-left>div.el-form-item__content>button.el-button>span": {
+        "sizes": {
+          "14px": 1
+        },
+        "sample": "恢复默认布局"
+      },
+      "div.settings-page>div.settings-actions>button.el-button>span": {
+        "sizes": {
+          "14px": 2
+        },
+        "sample": "💾 保存设置"
+      }
+    }
+  }
+}

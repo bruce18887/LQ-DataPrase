@@ -120,7 +120,7 @@ function dupFileTitle(f: DuplicateGroupFile) {
 }
 
 .dup-group-key {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 600;
   color: var(--text);
   overflow: hidden;
@@ -130,12 +130,12 @@ function dupFileTitle(f: DuplicateGroupFile) {
 }
 
 .dup-group-size {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--info);
 }
 
 .dup-group-count {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-3);
   padding: 1px 6px;
   background: var(--bg);

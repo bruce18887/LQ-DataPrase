@@ -203,13 +203,13 @@ const columnDefs = computed(() => {
 }
 
 .info-title {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   font-weight: 700;
   color: var(--text);
 }
 
 .info-files {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
 }
 
@@ -218,7 +218,7 @@ const columnDefs = computed(() => {
 }
 
 .info-meta {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
   margin-left: auto;
 }
@@ -230,7 +230,7 @@ const columnDefs = computed(() => {
   --ag-header-background-color: var(--bg-2);
   --ag-border-color: var(--border);
   --ag-row-hover-color: var(--bg-2);
-  --ag-font-size: var(--p-fs-sm);
+  --ag-font-size: var(--p-fs-dense);
   --ag-font-family: var(--font-sans);  /* quartz 内置栈无 CJK 档，见 DataBrowserAgGrid 同款注释 */
   --ag-header-foreground-color: var(--text);
   border-radius: 0 0 8px 8px;
@@ -241,7 +241,7 @@ const columnDefs = computed(() => {
 .fc-grid :deep(.ag-header-cell-text),
 .fc-grid :deep(.ag-header-group-text),
 .fc-grid :deep(.ag-cell) {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
 }
 
 .fc-grid :deep(.ag-header-cell) {
@@ -249,14 +249,14 @@ const columnDefs = computed(() => {
 }
 
 .fc-grid :deep(.fc-param-cell) {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
 }
 
 .fc-grid :deep(.fc-verdict-cell) {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
 }
 
 .fc-grid :deep(.fc-fail-cell) {

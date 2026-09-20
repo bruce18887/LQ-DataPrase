@@ -151,13 +151,13 @@ const allVariables = computed(() => {
 
 .template-preview {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
 }
 
 .template-hint {
   margin-top: 8px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
   line-height: 2;
 }

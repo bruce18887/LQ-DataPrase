@@ -108,13 +108,13 @@ function onSearchInput() {
 }
 
 .section-title {
-  font-size: 15px;
+  font-size: var(--p-fs-base);
   font-weight: 600;
   color: var(--text);
 }
 
 .section-count {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
   padding: 2px 8px;
   background: var(--bg-2);

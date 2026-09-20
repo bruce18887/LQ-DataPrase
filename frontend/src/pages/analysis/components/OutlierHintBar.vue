@@ -104,7 +104,7 @@ const hintText = computed(() => {
   padding: 6px 12px;
   border-radius: 4px;
   margin-top: 4px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
 }
 
 /* 三态只认主题语义 token：底色/描边由 --warn|--error|--success 派生，
@@ -135,13 +135,13 @@ const hintText = computed(() => {
 }
 
 .outlier-hint-bar__icon {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   flex-shrink: 0;
 }
 
 .outlier-hint-bar__action {
   margin-left: 4px;
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   opacity: 0.85;
   text-decoration: underline;
   cursor: help;
@@ -159,6 +159,6 @@ const hintText = computed(() => {
 .outlier-hint-bar__tooltip-values {
   word-break: break-all;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
 }
 </style>

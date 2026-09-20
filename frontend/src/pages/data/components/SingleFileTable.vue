@@ -215,13 +215,13 @@ const {
 
 .mono {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
 }
 
 .program-name-cell {
   color: var(--text-2);
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
 }
 
 .tag-cell-inner {
@@ -239,7 +239,7 @@ const {
 }
 
 .add-tag-btn {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   padding: 2px 8px;
   height: 24px;
 }
@@ -252,7 +252,7 @@ const {
   width: 140px;
   height: 24px;
   padding: 0 8px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   background: var(--bg-2);
   color: var(--text);
   border: 1px solid var(--brand);
@@ -287,7 +287,7 @@ const {
 
 .tag-suggestion-item {
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text);
   cursor: pointer;
   transition: background 0.15s;
@@ -323,13 +323,13 @@ const {
 .detail-label {
   flex-shrink: 0;
   width: 96px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
   padding-top: 1px;
 }
 .detail-value {
   flex: 1;
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   color: var(--text);
   word-break: break-all;
   line-height: 1.5;

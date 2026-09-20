@@ -3,6 +3,7 @@
 </template>
 
 <script setup lang="ts">
+import { chartFontSize } from '../../../theme/typography'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
 import { clampBarValue, formatPercent, formatAxisValue, getBarGroupPad, getMaxBarWidthPercent, mapLotColorToTheme, buildChartToolbox } from '../../../utils/chart-bar'
@@ -74,7 +75,7 @@ function buildOption() {
           const real = params.data?.[2] ?? params.data?.[1]
           return real > 0 ? `${formatPercent(real)}%` : ''
         },
-        fontSize: 10,
+        fontSize: chartFontSize.micro,
         color: lc,
         fontWeight: 'bold',
       },
@@ -98,7 +99,7 @@ function buildOption() {
             formatter: `${dn} USL`,
             position: 'end',
             color: lc,
-            fontSize: 10,
+            fontSize: chartFontSize.micro,
             fontWeight: 'bold',
           },
         })
@@ -112,7 +113,7 @@ function buildOption() {
             formatter: `${dn} LSL`,
             position: 'end',
             color: lc,
-            fontSize: 10,
+            fontSize: chartFontSize.micro,
             fontWeight: 'bold',
           },
         })
@@ -227,7 +228,7 @@ function buildOption() {
       text: titleText,
       left: 'center',
       top: 6,
-      textStyle: { fontSize: 15, fontWeight: 'bold', color: tc },
+      textStyle: { fontSize: chartFontSize.base, fontWeight: 'bold', color: tc },
     },
     tooltip: {
       trigger: 'axis',
@@ -265,7 +266,7 @@ function buildOption() {
         rotate: 45,
         show: true,
         interval: 0,
-        fontSize: 9,
+        fontSize: chartFontSize.micro,
         formatter: formatAxisValue,
         color: tc,
       },

@@ -287,7 +287,7 @@ onActivated(async () => {
 }
 
 .dash-tabs :deep(.el-tabs__item) {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   font-weight: 600;
 }
 
@@ -308,12 +308,12 @@ onActivated(async () => {
   align-items: center;
   gap: 8px;
   margin: 0;
-  font-size: 20px;
+  font-size: var(--p-fs-title);
   font-weight: 700;
   color: var(--text);
   white-space: nowrap;
 }
-.dash-title-icon { font-size: 21px; }
+.dash-title-icon { font-size: var(--p-fs-headline); }
 
 /* 单文件 Tab 页头行（同批次页头：选择器 + 更新元信息） */
 .single-head {
@@ -326,7 +326,7 @@ onActivated(async () => {
 .dash-file-select { width: 320px; max-width: 100%; }
 .dash-meta {
   margin-left: auto;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
   white-space: nowrap;
 }
@@ -365,12 +365,12 @@ onActivated(async () => {
 }
 .sec-head h3 {
   margin: 0;
-  font-size: 13.5px;
+  font-size: var(--p-fs-small);
   font-weight: 700;
   color: var(--text);
 }
 .sec-desc {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-3);
 }
 .sec-body {

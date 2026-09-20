@@ -45,7 +45,7 @@ const emit = defineEmits<{ retry: [] }>()
 }
 
 .eb-icon {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   line-height: 1;
 }
 
@@ -55,13 +55,13 @@ const emit = defineEmits<{ retry: [] }>()
 }
 
 .eb-title {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 700;
   color: var(--error-2);
 }
 
 .eb-msg {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-2);
   word-break: break-all;
 }

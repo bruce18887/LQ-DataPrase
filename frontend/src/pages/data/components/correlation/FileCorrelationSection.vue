@@ -186,14 +186,14 @@ function onExport() {
   flex-wrap: wrap;
 }
 
-.card-icon { font-size: 16px; }
+.card-icon { font-size: var(--p-fs-lead); }
 .card-title {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   font-weight: 600;
   color: var(--text);
 }
 .card-subtitle {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
 }
 
@@ -215,7 +215,7 @@ function onExport() {
 }
 
 .fc-view-label {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
   font-weight: 500;
   white-space: nowrap;

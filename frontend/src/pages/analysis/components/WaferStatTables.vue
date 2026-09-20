@@ -79,14 +79,14 @@ function zoneYieldClass(v: number | null): Record<string, boolean> {
   padding: 7px 10px;
   background: var(--bg-3);
   border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 600;
   color: var(--text);
 }
 .stat-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
 }
 .stat-table th,
 .stat-table td {
@@ -110,7 +110,7 @@ function zoneYieldClass(v: number | null): Record<string, boolean> {
 .stat-table tbody tr:last-child td { border-bottom: 0; }
 .stat-empty {
   color: var(--text-2);
-  font-size: 11.5px;
+  font-size: var(--p-fs-micro);
 }
 .val-good { color: var(--success); }
 .val-warn { color: var(--warn); }

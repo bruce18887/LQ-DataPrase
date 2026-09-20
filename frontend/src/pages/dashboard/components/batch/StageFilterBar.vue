@@ -93,7 +93,7 @@ function formatYield(n: number | null | undefined): string {
 }
 
 .chip-total {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }

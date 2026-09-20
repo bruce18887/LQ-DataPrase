@@ -271,7 +271,7 @@ function getCpkTagType(cpkColor: string | null): 'success' | 'warning' | 'danger
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13.5px;
+  font-size: var(--p-fs-small);
   font-weight: 700;
   color: var(--text);
   padding: 10px 16px;
@@ -283,11 +283,11 @@ function getCpkTagType(cpkColor: string | null): 'success' | 'warning' | 'danger
   flex-wrap: wrap;
 }
 .panel-title {
-  font-size: 13.5px;
+  font-size: var(--p-fs-small);
   font-weight: 700;
 }
 .panel-desc {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   font-weight: 500;
   color: var(--text-3);
 }
@@ -304,7 +304,7 @@ function getCpkTagType(cpkColor: string | null): 'success' | 'warning' | 'danger
   align-items: center;
   gap: 5px;
   margin-left: auto;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 500;
   color: var(--text-2);
   cursor: pointer;
@@ -327,7 +327,7 @@ function getCpkTagType(cpkColor: string | null): 'success' | 'warning' | 'danger
   margin: 12px 16px 0;
   border-radius: 6px;
   overflow: hidden;
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   font-weight: 700;
   color: var(--text-inverse);
   box-shadow: var(--shadow-sm);
@@ -355,7 +355,7 @@ function getCpkTagType(cpkColor: string | null): 'success' | 'warning' | 'danger
   flex-wrap: wrap;
   gap: 4px 16px;
   margin: 7px 16px 0;
-  font-size: 11.5px;
+  font-size: var(--p-fs-micro);
   font-weight: 600;
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
@@ -400,7 +400,7 @@ function getCpkTagType(cpkColor: string | null): 'success' | 'warning' | 'danger
 }
 .cell-unit {
   color: var(--text-3);
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
 }
 .overview-footer {
   display: flex;
@@ -412,7 +412,7 @@ function getCpkTagType(cpkColor: string | null): 'success' | 'warning' | 'danger
   background: color-mix(in srgb, var(--bg-2) 60%, var(--card));
 }
 .overview-total {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
 }
 
@@ -424,12 +424,12 @@ function getCpkTagType(cpkColor: string | null): 'success' | 'warning' | 'danger
   align-items: baseline;
   gap: 6px;
   margin: 14px 16px 0;
-  font-size: 12.5px;
+  font-size: var(--p-fs-dense);
   font-weight: 700;
   color: var(--text);
 }
 .ov-sub span {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   font-weight: 500;
   color: var(--text-3);
 }
@@ -441,7 +441,7 @@ function getCpkTagType(cpkColor: string | null): 'success' | 'warning' | 'danger
 }
 .fail-chip {
   font: inherit;
-  font-size: 11.5px;
+  font-size: var(--p-fs-micro);
   font-weight: 600;
   padding: 3px 10px;
   border: none;

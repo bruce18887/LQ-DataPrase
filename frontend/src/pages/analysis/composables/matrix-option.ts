@@ -1,3 +1,4 @@
+import { chartFontSize } from '../../../theme/typography'
 /**
  * 相关性矩阵热力图 option 构建（从 CorrelationToolsTab.vue 外移）。
  *
@@ -94,8 +95,8 @@ export function buildCorrelationMatrixOption(
       },
     },
     grid: { left: '15%', right: '10%', top: '10%', bottom: '15%' },
-    xAxis: { type: 'category', data: params, splitArea: { show: true }, axisLabel: { rotate: 45, fontSize: 10, color: textColor } },
-    yAxis: { type: 'category', data: params, splitArea: { show: true }, axisLabel: { fontSize: 10, color: textColor } },
+    xAxis: { type: 'category', data: params, splitArea: { show: true }, axisLabel: { rotate: 45, fontSize: chartFontSize.micro, color: textColor } },
+    yAxis: { type: 'category', data: params, splitArea: { show: true }, axisLabel: { fontSize: chartFontSize.micro, color: textColor } },
     visualMap: {
       min: -1, max: 1, calculable: false, orient: 'horizontal', left: 'center', bottom: '0%',
       // 对齐原型紧凑卡形态：色阶滑块藏掉（show:false），映射与色带不变
@@ -105,7 +106,7 @@ export function buildCorrelationMatrixOption(
     series: [{
       name: rLabel, type: 'heatmap', data: heatmapData,
       label: {
-        show: true, fontSize: 9,
+        show: true, fontSize: chartFontSize.micro,
         formatter: (p: any) => {
           const [pi, pj, r] = p.value as [number, number, number]
           // 格内空间只容得下 2 位小数，完整 4 位看 tooltip；null → 'N/A'

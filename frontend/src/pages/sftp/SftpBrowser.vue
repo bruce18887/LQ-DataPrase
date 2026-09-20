@@ -515,9 +515,9 @@ function formatSize(bytes: number): string {
 }
 
 .header-title { flex: 1; }
-.header-title h2 { margin: 0; font-size: 22px; font-weight: 600; color: var(--text); }
-.header-subtitle { margin: 4px 0 0; font-size: 13px; color: var(--text-2); }
-.status-tag { font-size: 13px; padding: 6px 14px; }
+.header-title h2 { margin: 0; font-size: var(--p-fs-headline); font-weight: 600; color: var(--text); }
+.header-subtitle { margin: 4px 0 0; font-size: var(--p-fs-small); color: var(--text-2); }
+.status-tag { font-size: var(--p-fs-small); padding: 6px 14px; }
 
 /* File Browser */
 .file-browser { animation: fadeIn 0.3s ease; }

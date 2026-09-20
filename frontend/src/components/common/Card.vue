@@ -67,13 +67,13 @@ withDefaults(defineProps<Props>(), {
 }
 
 .dp-card__title {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   font-weight: 700;
   color: var(--text);
 }
 
 .dp-card__desc {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 500;
   color: var(--text-3);
 }

@@ -282,7 +282,7 @@ async function doConnect() {
 
 <style scoped>
 .connect-card { border-radius: 8px; margin-bottom: 20px; }
-.card-header { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; color: var(--text); }
+.card-header { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: var(--p-fs-base); color: var(--text); }
 .connect-form { padding-top: 8px; }
 .path-hint { margin-bottom: 12px; }
 .form-actions { margin-top: 8px; margin-bottom: 0; }
@@ -295,9 +295,9 @@ async function doConnect() {
 .config-active { box-shadow: 0 0 0 2px var(--brand) inset; }
 .config-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .config-header :deep(.el-icon) { color: var(--brand); }
-.config-name { font-weight: 600; font-size: 15px; color: var(--text); }
+.config-name { font-weight: 600; font-size: var(--p-fs-base); color: var(--text); }
 .pw-tag { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
 .config-info { margin-bottom: 12px; }
-.config-row { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); margin-bottom: 4px; }
+.config-row { display: flex; align-items: center; gap: 6px; font-size: var(--p-fs-small); color: var(--text-2); margin-bottom: 4px; }
 .config-actions { display: flex; gap: 8px; }
 </style>

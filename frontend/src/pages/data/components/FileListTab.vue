@@ -356,7 +356,7 @@ defineExpose({ reload: loadFiles })
 }
 
 .filter-hint {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
   display: inline-flex;
   align-items: center;

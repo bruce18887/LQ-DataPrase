@@ -93,7 +93,7 @@ const popperClass = `dp-file-picker-${props.scope}`
 }
 
 .picker-label {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
   white-space: nowrap;
   font-weight: 500;

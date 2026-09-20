@@ -10,6 +10,7 @@
 </template>
 
 <script setup lang="ts">
+import { chartFontSize } from '../../../theme/typography'
 import { computed } from 'vue'
 import { InfoFilled } from '@element-plus/icons-vue'
 import { useChart } from '../../../composables/useChart'
@@ -119,7 +120,7 @@ function buildOption() {
     title: {
       text: props.title || `Box Plot - ${props.data.param}`,
       left: 'center',
-      textStyle: { fontSize: 15, fontWeight: 'bold', color: tc },
+      textStyle: { fontSize: chartFontSize.base, fontWeight: 'bold', color: tc },
     },
     tooltip: {
       trigger: 'item',
@@ -136,12 +137,12 @@ function buildOption() {
       name: xAxisName,
       nameLocation: 'center',
       nameGap: 35,
-      nameTextStyle: { color: tc, fontSize: 13, fontWeight: 500 },
+      nameTextStyle: { color: tc, fontSize: chartFontSize.small, fontWeight: 500 },
       axisLine: { lineStyle: { color: colors.value.axisLineColor } },
       axisLabel: {
         rotate: categories.length > 10 ? 45 : 0,
         interval: 0,
-        fontSize: 11,
+        fontSize: chartFontSize.micro,
         color: tc,
         fontWeight: 500,
         formatter: (val: string) => {
@@ -157,8 +158,8 @@ function buildOption() {
       name: 'Value',
       min: yMin - yPad,
       max: yMax + yPad,
-      nameTextStyle: { color: tc, fontSize: 12, fontWeight: 500 },
-      axisLabel: { color: tc, fontSize: 9, formatter: formatAxisValue },
+      nameTextStyle: { color: tc, fontSize: chartFontSize.dense, fontWeight: 500 },
+      axisLabel: { color: tc, fontSize: chartFontSize.micro, formatter: formatAxisValue },
       splitLine: { lineStyle: { type: 'dashed', color: colors.value.splitLineColor } },
       splitArea: { show: false },
     },
@@ -232,10 +233,10 @@ void chartRef // bound to <div ref="chartRef"> in template
   border: 1px dashed var(--border-2);
   border-radius: 6px;
   color: var(--text-2);
-  font-size: 14px;
+  font-size: var(--p-fs-base);
 }
 .boxplot-placeholder__icon {
-  font-size: 18px;
+  font-size: var(--p-fs-title);
   color: var(--text-2);
 }
 .boxplot-placeholder__text {

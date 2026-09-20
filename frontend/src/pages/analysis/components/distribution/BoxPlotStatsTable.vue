@@ -6,8 +6,8 @@
       :data="rows"
       size="small"
       :border="true"
-      :header-cell-style="{ background: 'var(--bg-3)', fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
-      :cell-style="{ fontSize: '10px', padding: '3px 6px', whiteSpace: 'nowrap' }"
+      :header-cell-style="{ background: 'var(--bg-3)', fontSize: 'var(--p-fs-micro)', padding: '3px 6px', whiteSpace: 'nowrap' }"
+      :cell-style="{ fontSize: 'var(--p-fs-micro)', padding: '3px 6px', whiteSpace: 'nowrap' }"
       table-layout="auto"
     >
       <el-table-column prop="grp" label="组" align="center" />
@@ -82,13 +82,13 @@ const rows = computed(() => {
 <style scoped>
 .table-header {
   font-weight: 600;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text);
   margin-bottom: 6px;
 }
 .table-note {
   margin-top: 4px;
-  font-size: 10px;
+  font-size: var(--p-fs-micro);
   line-height: 1.3;
   color: var(--text-3);
 }

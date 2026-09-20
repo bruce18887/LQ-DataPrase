@@ -56,6 +56,6 @@ async function exportHtml() {
 .dash-footer-note {
   margin: 16px 0 0;
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
 }
 </style>

@@ -351,14 +351,14 @@ defineExpose({ handleResize })
   align-items: center;
   gap: 7px;
   margin: 0;
-  font-size: 16px;
+  font-size: var(--p-fs-lead);
   font-weight: 700;
   color: var(--text);
   white-space: nowrap;
 }
 .batch-meta {
   margin-left: auto;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
   white-space: nowrap;
 }
@@ -381,13 +381,13 @@ defineExpose({ handleResize })
   border-bottom: 1px solid var(--border);
   color: var(--text);
   font-weight: 700;
-  font-size: 13.5px;
+  font-size: var(--p-fs-small);
   padding: 10px 16px;
 }
 
 .card-desc {
   margin-left: 6px;
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   font-weight: 500;
   color: var(--text-3);
 }
@@ -397,7 +397,7 @@ defineExpose({ handleResize })
   margin: 14px 0 8px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
-  font-size: 11.5px;
+  font-size: var(--p-fs-micro);
   font-weight: 600;
   color: var(--text-3);
 }
@@ -408,7 +408,7 @@ defineExpose({ handleResize })
 /* —— Site 矩阵合并格 —— */
 .m-ratio {
   margin-left: 5px;
-  font-size: 10.5px;
+  font-size: var(--p-fs-micro);
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
@@ -436,19 +436,19 @@ defineExpose({ handleResize })
 .detail-label {
   flex-shrink: 0;
   width: 96px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
   text-align: right;
 }
 
 .detail-value {
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   color: var(--text);
   word-break: break-all;
 }
 
 .detail-value.mono {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
 }
 </style>

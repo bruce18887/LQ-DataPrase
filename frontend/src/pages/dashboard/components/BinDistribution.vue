@@ -59,7 +59,7 @@ const rows = computed(() => {
   grid-template-columns: 72px 1fr 118px;
   align-items: center;
   gap: 10px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
 }
 
 .p-name {

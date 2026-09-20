@@ -30,7 +30,7 @@
 
     <!-- 数据表格 -->
     <div v-loading="loading">
-      <p v-if="dataLoaded" style="margin-bottom: 8px; font-size: 14px">
+      <p v-if="dataLoaded" style="margin-bottom: 8px; font-size: var(--p-fs-base)">
         共 <b>{{ rowCount }}</b> 条数据
         <span v-if="failRowCount > 0" style="color: var(--error); margin-left: 12px; font-weight: bold">
           （Fail: {{ failRowCount }} 行<template v-if="siteFilter">，Site {{ siteFilter }} 过滤后</template>）
@@ -609,7 +609,7 @@ function resolveExportName(headers: Record<string, string>, fallback: string, su
   --ag-border-color: var(--border-2);
   --ag-secondary-border-color: var(--border);
   --ag-cell-horizontal-padding: 8px;
-  --ag-font-size: var(--p-fs-sm);
+  --ag-font-size: var(--p-fs-dense);
   /* quartz 主题内置栈没有 CJK 档，中文一直在按浏览器默认回退；接上全局栈。
      拉丁字符不变（两边都解析到 Segoe UI）。 */
   --ag-font-family: var(--font-sans);
@@ -644,7 +644,7 @@ function resolveExportName(headers: Record<string, string>, fallback: string, su
 }
 
 :deep(.ag-custom-theme.ag-theme-quartz .ag-header-cell-label) {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text);
 }
 

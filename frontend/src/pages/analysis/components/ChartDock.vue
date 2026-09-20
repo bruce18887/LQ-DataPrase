@@ -311,7 +311,7 @@ onBeforeUnmount(cleanupDrag)
   flex: 0 0 auto;
 }
 .chart-dock__hint {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-3);
 }
 .chart-dock__spacer { flex: 1; }
@@ -380,7 +380,7 @@ onBeforeUnmount(cleanupDrag)
   transform: translate(12px, 12px);
   pointer-events: none;
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 600;
   color: var(--on-brand, #fff);
   background: var(--brand, #2563eb);

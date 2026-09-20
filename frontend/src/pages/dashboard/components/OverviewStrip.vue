@@ -116,24 +116,24 @@ function formatTime(seconds: number): string {
 .strip-item:last-of-type { border-right: none; }
 
 .strip-label {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-3);
   white-space: nowrap;
 }
 
 .strip-value {
-  font-size: 18px;
+  font-size: var(--p-fs-title);
   font-weight: 700;
   color: var(--text);
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
 }
 .strip-value--sm {
-  font-size: 13.5px;
+  font-size: var(--p-fs-small);
   font-weight: 600;
 }
 .strip-unit {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 600;
   color: var(--text-2);
   margin-left: 1px;
@@ -148,7 +148,7 @@ function formatTime(seconds: number): string {
 
 .strip-chip {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   font-weight: 700;
   padding: 2px 9px;
   border-radius: 6px;
@@ -166,12 +166,12 @@ function formatTime(seconds: number): string {
   border-radius: 50%;
   border: 1px solid var(--border-2);
   color: var(--text-3);
-  font-size: 9px;
+  font-size: var(--p-fs-micro);
   cursor: help;
 }
 
 .strip-helper {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   line-height: 1.7;
 }
 

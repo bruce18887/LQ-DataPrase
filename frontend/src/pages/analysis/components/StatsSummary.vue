@@ -74,13 +74,13 @@ const displayCards = computed(() => {
 }
 
 .stat-label {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-2);
   white-space: nowrap;
 }
 
 .stat-value {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 600;
   color: var(--text);
   white-space: nowrap;

@@ -119,13 +119,13 @@ function onKeydown(e: KeyboardEvent) {
   border: 1px solid var(--border-2);
   background: var(--bg);
   box-shadow: var(--shadow-lg);
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   color: var(--text);
 }
 
 .bin-cell-menu__header {
   padding: 6px 10px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
   white-space: nowrap;
 }

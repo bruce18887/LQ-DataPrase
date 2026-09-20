@@ -70,17 +70,17 @@ const title = computed(() =>
   padding: 10px 16px;
   cursor: pointer;
 }
-.b-icon { font-size: 15px; }
+.b-icon { font-size: var(--p-fs-base); }
 .b-title {
   font-weight: 700;
-  font-size: 13px;
+  font-size: var(--p-fs-small);
 }
 .qa-banner--success .b-title { color: var(--success); }
 .qa-banner--warning .b-title { color: var(--warn); }
 
 .b-toggle {
   margin-left: auto;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
   display: inline-flex;
   gap: 4px;
@@ -89,7 +89,7 @@ const title = computed(() =>
 
 .banner-body {
   padding: 0 16px 11px 42px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
 }
 .banner-body li {
