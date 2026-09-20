@@ -2302,3 +2302,94 @@ buyoff 的边际档因此也从浅黄变橙（一处改动、两处生效）。
 - 处理：只把**展示层**按名字去重（列的是「支持哪些机台」，不是「注册表里有几条 spec」），
   注册表 5 条 spec 一条没动。见 `Ribbon.AboutText`。
 - 教训：看到「重复」先回查原件再定性，别把源系统本身的形态当成移植引入的缺陷。
+
+---
+
+# 任务：文件对比「测试项不全」——测试项名忽略大小写对齐（2026-09-20）✅
+
+用户报告：Data/DebugData 里两个 CSV 做 Limit 比对时测试项不全，但文件里是全的。
+
+## 根因
+
+`compute_file_correlation` 用**精确列名**取交集（`p in bench_numeric`）。两份文件是
+同一器件（BPC86355，同 Lot/Wafer）的两个测试程序：
+
+- 文件 A：`..._RT1_...`（CTA8290D，467 测试项）
+- 文件 B：`..._UIS1.0_...`（CTA8280F，138 测试项）
+
+同一测试项两份程序大小写拼法不同（`LKG_`↔`lkg_`、`VIN`↔`Vin`、`RES`↔`Res`、
+`PHASE`↔`Phase`、`POST`↔`post`），精确比较把它们全判成「两文件没有的项」：
+精确交集仅 **17**（其中 7 个还是 `Site_No`/`X_COORD`/`Y_COORD`/`SW_Bin`/`QR_Code`/
+`Test_Time` 数值型系统列 + 1 个空列名），忽略大小写后 **80** 个真实测试项全部配对
+（如 `CON_VIN`[-0.555,-0.375] ↔ `CON_Vin`[-0.555,-0.375]、
+`LKG_EN_Res`[0.73,1.04] ↔ `lkg_EN_RES`[0.73,1.04]）。解析层未丢列（A 480 列 / B 152 列全保留）。
+
+## 实施清单
+
+- [x] `_match_key`（strip + casefold）作跨文件对齐键；显示名沿用文件 A 拼写，
+      每侧 limit / 数值取本文件自己的列名（`(a_name, b_name)` 配对贯穿全函数）
+- [x] `_numeric_params(df, fmt)` 按格式权威 `SYSTEM_COLUMNS` 剔除记录级系统列 + 空列名
+- [x] 服务层回归用例：`test_param_match_is_case_insensitive`、`test_system_columns_excluded_from_params`
+- [x] e2e：`file-correlation.spec.ts` 新增「跨程序同名异拼法仍配对 + 系统列不冒充测试项」
+      （CTA8290D `lkg_Vin_8V` × CTA8280F `lkg_VIN_8V`）
+
+## Review
+
+- **验证账目**：`manage.py test apps.analysis` **206 过**；`file-correlation.spec.ts` e2e
+  **10 过**（28.5s）；真实 DebugData 对复算 **17 → 80 行**，无 `X_COORD`/`Site_No`/空列名噪声，
+  `CON_EN_POST`(-0.635/-0.455 vs -0.73/-0.55) 等真实 limit 差异正常标 FAIL。
+- **兼容性**：现有种子对（BPD60320_FT vs QA1）两侧本就同拼法，精确/忽略大小写交集同为 284，
+  存量行为零变化；B 侧键冲突取首列（保序确定），文件内无大小写冲突列已实测确认。
+- **口径确认**：用户拍板「忽略大小写对齐」+「剔除记录级系统列」；不做并集展示。
+- **端口**：e2e 后 8000/3000 无 LISTEN 残留。
+- **复现脚本**：`tasks/_dbg_fc_params.py`（精确 vs 忽略大小写交集）、`tasks/_dbg_fc_run.py`（真实服务复算）。
+
+---
+
+# 字号统一 · 第二步（Type Scale 归档）2026-09-20
+
+前提：第一步（导出字族 + token 接线）已提交 `6657c93`。第二步会改像素，用户选定
+「计算值快照差量」而非像素截图基线，档位选 **9 档就近归档**。
+
+## 实施清单
+
+- [x] 计算值基线设施 `frontend/e2e/global/type-snapshot.spec.ts`（6 页态 × light/night）
+- [x] 证明基线可复现：同一源码两次跑 482 元素路径 **DIFF=0**
+- [x] `scripts/type_scale_diff.mjs` 自检：同一份基线自比 482/482 未变化、0 回归；
+      5 个合成反例（改在档值 / 凭空多档 / 折叠目标缺失 / 大字被误改 / 正确归档）全部被正确判定
+- [x] `--p-fs-*` 重定义为九档 micro11/dense12/small13/base14/lead16/title18/headline22/display26/hero32
+- [x] 退役 rem 字号档 `--text-xs..4xl` 与 8 个零使用的 `.text-*` 工具类
+      （注意 `--text-2/-3/-inverse` 是语义色，不能按前缀删）
+- [x] EP 六档 `--el-font-size-*` 全量接档；AG Grid / typography.ts / echarts-theme.ts 跟着换名
+- [x] `scripts/type_scale_migrate.mjs` codemod：**109 文件 / 400 处**（351 CSS + 9 引号 px + 40 ECharts 裸数值）
+- [x] 4 处 >32px 装饰大字保留字面量 + `@type-scale-one-off` 标记（404 / 登录图标 / KPI 图标 / 空态图标）
+- [x] 源码级守门用例：`frontend/src` 内不得再出现字面量字号（除标记行与 design-tokens.css）
+- [x] 规范文档 `docs/reference/ui-design-guide.md`：字号表 + §10.5 表格 12.5→12
+- [x] 守门正则补强：原式抓不到 `--xx-font-size: 12px`（`[^\w-]` 把连字符排掉了），
+      修正后 8/8 合成反例正确、实扫 `frontend/src` 190 文件 0 offender
+- [x] 连带修 `e2e/analysis/axis-label-precision.spec.ts` 3 条断言：它们把旧的 9/15 魔数
+      当契约（搜 `'15px'` 漏掉了不带 px 的裸数字断言），改判 `chartFontSize.micro/base`
+- [x] 全量回归：分析页 workers=1 一轮 **146 过 / 2 跳过 / 0 红**（16.1m）
+- [x] 补「文字溢出容器」探针（计算值快照覆盖不到的那一项）：6 页态 × 双主题 **0 处溢出**
+
+## Review
+
+- **差量核对**：before → after = **400 未变化 / 86 预期内折叠 / 0 回归**（482 元素路径）。
+  即：所有原本已在档位上的元素一个没动，只有 off-scale 的按规则折叠。
+- **后端**：`manage.py test test.backend` **393 过**（本步未改后端）。
+- **构建**：`vue-tsc -b && vite build` 通过；codemod 插入的 10 处 import 全部落在 script 块内
+  （实测 0 个 .vue 的 import 出现在 `<template>` 之前）。
+- **e2e**：`fonts.spec.ts` **9 过**（含新增守门与 CSS↔TS 九档对齐）；
+  global/theme/dashboard/data/exports/settings/sftp/admin/batch/smoke **188 过 / 17 跳过**
+  （workers=2；workers=6 时 preview server 中途被压垮，成片 `ERR_CONNECTION_REFUSED`，
+  按 R2 降并发复跑后干净 —— 印证 lessons 既有那条）。
+- **唯一红**：`data.spec.ts:742` 富信息行断言取到同套件别的用例刚上传的 0 行文件（缺 format 段），
+  隔离复跑 `data.spec.ts` **29 过** → 存量数据时序 flaky，与本步无关。
+- **分析页全量**（workers=1，按 lessons 那条强制口径）：**146 过 / 2 跳过 / 0 红**（16.1m）。
+  这一轮同时复核了 `axis-label-precision.spec.ts` 改成 `chartFontSize.micro/base` 后的三条断言。
+- **溢出探针**：`type-snapshot.spec.ts` 的 clip 模式在归档后跑 6 页态 × 双主题，
+  **0 处文字溢出容器**（`test/type-snapshot/clipping.txt` 为空）。计算值快照只能证明「值变了什么」，
+  证明不了「变大的字被容器裁掉」，这条是补上的那个缺口。
+- **收敛自证**：codemod dry-run 现状 **0 文件待改**；`frontend/src` 内 `var(--p-fs-*)` 引用 **370 处**
+  （dense 145 / micro 86 / small 51 / base 48 …），源码级守门用例常驻防回潮。
+

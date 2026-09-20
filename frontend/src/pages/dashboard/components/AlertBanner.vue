@@ -73,10 +73,10 @@ const summaryTitle = computed(() => {
   padding: 11px 16px;
   cursor: pointer;
 }
-.b-icon { font-size: 16px; }
+.b-icon { font-size: var(--p-fs-lead); }
 .b-title {
   font-weight: 700;
-  font-size: 13px;
+  font-size: var(--p-fs-small);
 }
 .alert-banner--warning .b-title { color: var(--warn); }
 .alert-banner--error .b-title { color: var(--error); }
@@ -84,7 +84,7 @@ const summaryTitle = computed(() => {
 
 .b-toggle {
   margin-left: auto;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
   display: inline-flex;
   gap: 4px;
@@ -93,7 +93,7 @@ const summaryTitle = computed(() => {
 
 .banner-body {
   padding: 0 16px 12px 42px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
 }
 .banner-body li {

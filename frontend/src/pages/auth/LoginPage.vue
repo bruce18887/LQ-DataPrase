@@ -182,7 +182,7 @@ async function handleLogin() {
 /* 品牌标题（渐变文字裁切，基调 A） */
 .login-title {
   text-align: center;
-  font-size: 32px;
+  font-size: var(--p-fs-hero);
   font-weight: 800;
   background: var(--grad-brand);
   -webkit-background-clip: text;
@@ -196,7 +196,7 @@ async function handleLogin() {
   text-align: center;
   color: var(--text-2);
   margin: 0 0 40px;
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   letter-spacing: 1px;
 }
 
@@ -216,7 +216,7 @@ async function handleLogin() {
 
 :deep(.el-form-item__error) {
   color: var(--error);
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
 }
 
 /* 输入框（指南 §10.3：--bg 底 + --border-2 + 品牌焦点环） */
@@ -239,7 +239,7 @@ async function handleLogin() {
 
 :deep(.login-input .el-input__inner) {
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--p-fs-base);
 }
 
 :deep(.login-input .el-input__inner::placeholder) {
@@ -254,7 +254,7 @@ async function handleLogin() {
   border: none;
   border-radius: 8px;
   color: var(--on-brand);
-  font-size: 15px;
+  font-size: var(--p-fs-base);
   font-weight: 600;
   letter-spacing: 2px;
   box-shadow: var(--shadow-sm);
@@ -293,7 +293,7 @@ async function handleLogin() {
   color: var(--error);
   text-align: center;
   margin-top: 16px;
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   padding: 12px;
   background: color-mix(in srgb, var(--error) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--error) 30%, transparent);
@@ -310,7 +310,7 @@ async function handleLogin() {
 .error-hint {
   display: block;
   margin-top: 4px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   opacity: 0.85;
 }
 /* Network / timeout: amber, not red */
@@ -356,11 +356,11 @@ async function handleLogin() {
   }
 
   .login-title {
-    font-size: 28px;
+    font-size: var(--p-fs-display);
   }
 
   .logo-icon {
-    font-size: 48px;
+    font-size: 48px; /* @type-scale-one-off 登录页装饰图标 */
   }
 }
 </style>

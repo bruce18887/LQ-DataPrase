@@ -37,8 +37,12 @@
   /* ① Primitive · 圆角 / 字号 / 字重 */
   --p-radius-xs: 4px; --p-radius-sm: 6px; --p-radius-md: 8px; --p-radius-lg: 12px;
   --p-radius-xl: 16px; --p-radius-full: 999px;
-  --p-fs-xs: 11px; --p-fs-sm: 12px; --p-fs-md: 12.5px; --p-fs-base: 14px; --p-fs-lg: 16px;
-  --p-fs-xl: 18px; --p-fs-2xl: 22px; --p-fs-3xl: 26px; --p-fs-4xl: 36px;
+  /* 字号 9 档 —— 全站唯一的字号真相，组件里不要再写字面 px（守门见 e2e/global/fonts.spec）。
+     折叠规则「就近归档、平手取小」：11.5→11、12.5→12、13.5→13、15→14、17→16、
+     20→18、24→22、28→26。档位名同时用作 TS 侧 chartFontSize 的键，所以必须是合法标识符。 */
+  --p-fs-micro: 11px; --p-fs-dense: 12px; --p-fs-small: 13px; --p-fs-base: 14px;
+  --p-fs-lead: 16px; --p-fs-title: 18px; --p-fs-headline: 22px; --p-fs-display: 26px;
+  --p-fs-hero: 32px;
   --p-fw-regular: 400; --p-fw-medium: 500; --p-fw-semibold: 600; --p-fw-bold: 700; --p-fw-extrabold: 800;
 
   /* ① Primitive · 字体（唯一事实来源；typography.ts / echarts-theme.ts 必须与此同步；
@@ -137,15 +141,9 @@
 
 /* ============ 兼容层 · 旧非颜色变量（自 variables.css 搬入，保名；渐进替换为 --p-* 属低优先） ============ */
 :root {
-  /* 字体大小（rem 档位；新代码请用 --p-fs-*） */
-  --text-xs: 0.75rem;
-  --text-sm: 0.875rem;
-  --text-base: 1rem;
-  --text-lg: 1.125rem;
-  --text-xl: 1.25rem;
-  --text-2xl: 1.5rem;
-  --text-3xl: 1.875rem;
-  --text-4xl: 2.25rem;
+  /* 字号旧的 rem 档（--text-xs..4xl）已退役：Electron 里 Ctrl± 缩放走 Chromium zoom，
+     对 px 同样生效，rem 换不来可访问性收益，只多出第二套真相。注意 --text / --text-2
+     / --text-3 / --text-inverse 是**语义色**，与本条无关、不要按前缀清理。 */
   /* 字体粗细（新代码请用 --p-fw-*） */
   --font-normal: 400;
   --font-medium: 500;

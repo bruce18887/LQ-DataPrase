@@ -2,7 +2,7 @@
   <div class="qqplot-chart">
     <!-- Loading state -->
     <div v-if="loading" class="qqplot-placeholder">
-      <el-icon class="is-loading" style="font-size: 24px; margin-right: 8px;"><Loading /></el-icon>
+      <el-icon class="is-loading" style="font-size: var(--p-fs-headline); margin-right: 8px;"><Loading /></el-icon>
       <span>正在计算QQ图...</span>
     </div>
     <!-- Empty / no-data state: plain div to avoid el-empty emitsOptions race -->
@@ -26,6 +26,7 @@
 </template>
 
 <script setup lang="ts">
+import { chartFontSize } from '../../../theme/typography'
 import { computed } from 'vue'
 import { Loading, InfoFilled } from '@element-plus/icons-vue'
 import { useChart } from '../../../composables/useChart'
@@ -143,7 +144,7 @@ function buildOption() {
     animation: !isLarge.value,
     title: {
       text: `${props.param} QQ图`, left: 'center', top: 6,
-      textStyle: { fontSize: 15, fontWeight: 'bold', color: tc },
+      textStyle: { fontSize: chartFontSize.base, fontWeight: 'bold', color: tc },
     },
     tooltip: {
       trigger: 'item',
@@ -164,13 +165,13 @@ function buildOption() {
       type: 'value', name: '理论分位数', nameLocation: 'middle', nameGap: 30,
       nameTextStyle: { color: tc },
       axisLine: { lineStyle: { color: colors.value.axisLineColor } },
-      axisLabel: { fontSize: 9, formatter: formatAxisValue, color: tc },
+      axisLabel: { fontSize: chartFontSize.micro, formatter: formatAxisValue, color: tc },
     },
     yAxis: {
       type: 'value', name: '观测值', nameLocation: 'middle', nameGap: 45,
       nameTextStyle: { color: tc },
       axisLine: { lineStyle: { color: colors.value.axisLineColor } },
-      axisLabel: { fontSize: 9, formatter: formatAxisValue, color: tc },
+      axisLabel: { fontSize: chartFontSize.micro, formatter: formatAxisValue, color: tc },
       ...(yAxisMinMax ?? {}),
     },
     series: [
@@ -229,11 +230,11 @@ void chartRef // bound to <div ref="chartRef"> in template
   border-radius: 6px;
   border: 1px solid var(--border-2);
   color: var(--text-2);
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   gap: 8px;
 }
 .qqplot-placeholder__icon {
-  font-size: 18px;
+  font-size: var(--p-fs-title);
   color: var(--text-2);
 }
 .qqplot-placeholder__text {

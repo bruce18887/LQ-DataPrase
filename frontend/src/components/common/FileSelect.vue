@@ -301,7 +301,7 @@ function groupFiles(
 }
 
 .dp-file-option__name {
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -318,7 +318,7 @@ function groupFiles(
 }
 
 .dp-file-option__meta {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-2);
   margin-top: 2px;
   overflow: hidden;
@@ -345,7 +345,7 @@ function groupFiles(
 
 .dp-file-select-dropdown .el-select-group__title {
   color: var(--text-2);
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
 }
 
 .dp-file-select-dropdown .dp-file-group--pinned .el-select-group__title {

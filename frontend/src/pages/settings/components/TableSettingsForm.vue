@@ -117,13 +117,13 @@ function toggleGroup(cols: string[], checked: boolean) {
 
 .form-hint {
   margin-left: 10px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
   line-height: 1.6;
 }
 
 .hidden-cols-hint {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
   margin-bottom: 8px;
   line-height: 1.6;
@@ -144,7 +144,7 @@ function toggleGroup(cols: string[], checked: boolean) {
 
 .platform-title {
   padding: 6px 12px;
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   font-weight: 700;
   color: var(--text);
   background: var(--bg-3);

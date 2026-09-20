@@ -25,6 +25,7 @@
 </template>
 
 <script setup lang="ts">
+import { chartFontSize } from '../../../theme/typography'
 import { ref, computed, watch, nextTick, onMounted, onActivated, onBeforeUnmount } from 'vue'
 import { initEchartsWhenReady, observeContainerResize, type EchartsHandle } from '../../../utils/echarts-init'
 import { useThemeStore } from '../../../stores/theme'
@@ -111,7 +112,7 @@ function buildSiteYieldBarOption() {
     xAxis: {
       type: 'category',
       data: siteNames,
-      axisLabel: { fontSize: 12, color: textColor, interval: 0 },
+      axisLabel: { fontSize: chartFontSize.dense, color: textColor, interval: 0 },
     },
     yAxis: {
       type: 'value',
@@ -126,7 +127,7 @@ function buildSiteYieldBarOption() {
           itemStyle: { color: getYieldColor(y) },
         })),
         barWidth: '50%',
-        label: { show: true, position: 'top', formatter: (p: any) => `${formatPercent(Number(p.value))}%`, fontSize: 12, fontWeight: 'bold' },
+        label: { show: true, position: 'top', formatter: (p: any) => `${formatPercent(Number(p.value))}%`, fontSize: chartFontSize.dense, fontWeight: 'bold' },
       },
       {
         // 良率折线：串起各 Site 走势（--info 语义色，取 JS 常量）
@@ -224,7 +225,7 @@ defineExpose({ handleResize })
 }
 .panel-head h3 {
   margin: 0;
-  font-size: 13.5px;
+  font-size: var(--p-fs-small);
   font-weight: 700;
   color: var(--text);
 }
@@ -247,7 +248,7 @@ defineExpose({ handleResize })
   margin-left: auto;
 }
 .yield-pill {
-  font-size: 11.5px;
+  font-size: var(--p-fs-micro);
   font-weight: 600;
   padding: 2.5px 10px;
   border-radius: 999px;

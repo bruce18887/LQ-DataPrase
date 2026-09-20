@@ -4,6 +4,7 @@ import { selectAnalysisFile, pickTabFile, filePicker } from '../helpers/params'
 import { waitLoadingGone } from '../helpers/charts'
 import { pickOption } from '../helpers/elplus'
 import { RECOMMENDED } from '../fixtures/test-data'
+import { chartFontSize } from '../../src/theme/typography'
 
 /**
  * 轴刻度小数位精度（2026-08-13 回归）：
@@ -155,7 +156,7 @@ test.describe('@p1 轴刻度小数位精度（formatAxisValue 统一）', { tag:
       .toBe('')
   })
 
-  test('QQ 图 X/Y 轴：智能 4 位格式 + fontSize 9 + 标题 15', async ({ page }) => {
+  test('QQ 图 X/Y 轴：智能 4 位格式 + 轴与标题字号取自九档', async ({ page }) => {
     await enterAnalysis(page, RECOMMENDED.analysis)
     await waitLoadingGone(page.locator(SINGLE))
 
@@ -172,12 +173,14 @@ test.describe('@p1 轴刻度小数位精度（formatAxisValue 统一）', { tag:
     await assertSmartFormatter(page, container, 'yAxis')
 
     const axisLabel = await readOption(page, container, (opt) => opt.xAxis?.[0]?.axisLabel)
-    expect((axisLabel as any)?.fontSize, 'X 轴刻度字号应统一为 9').toBe(9)
+    // 字号不再写魔数：断言它等于九档里的某一档（typography.ts 是 CSS 的镜像，
+    // fonts.spec 负责钉住镜像不漂移）。旧的 9/15 按「就近归档、平手取小」折成 11/14。
+    expect((axisLabel as any)?.fontSize, 'X 轴刻度字号应为 --p-fs-micro').toBe(chartFontSize.micro)
     const title = await readOption(page, container, (opt) => opt.title?.[0]?.textStyle)
-    expect((title as any)?.fontSize, '标题字号应统一为 15').toBe(15)
+    expect((title as any)?.fontSize, '标题字号应为 --p-fs-base').toBe(chartFontSize.base)
   })
 
-  test('序列分布 Y 轴：智能 4 位格式 + 8 色板 + 标题 15', async ({ page }) => {
+  test('序列分布 Y 轴：智能 4 位格式 + 8 色板 + 标题字号取自九档', async ({ page }) => {
     await enterAnalysis(page, RECOMMENDED.analysis)
     await waitLoadingGone(page.locator(SINGLE))
 
@@ -196,7 +199,7 @@ test.describe('@p1 轴刻度小数位精度（formatAxisValue 统一）', { tag:
     const firstSeries = await readOption(page, container, (opt) => opt.series?.[0]?.itemStyle?.color)
     expect(PALETTE_8, '系列色应来自直方图 8 色板').toContain(firstSeries)
     const title = await readOption(page, container, (opt) => opt.title?.[0]?.textStyle)
-    expect((title as any)?.fontSize, '标题字号应统一为 15').toBe(15)
+    expect((title as any)?.fontSize, '标题字号应为 --p-fs-base').toBe(chartFontSize.base)
   })
 
   test('相关性散点 X/Y 轴：智能 4 位格式（用户点名回归）', async ({ page }) => {

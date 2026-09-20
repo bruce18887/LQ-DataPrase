@@ -58,7 +58,7 @@ const display = computed(() =>
   display: inline-block;
   padding: 2px 8px;
   border-radius: 6px;
-  font-size: 11.5px;
+  font-size: var(--p-fs-micro);
   font-weight: 700;
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
@@ -66,7 +66,7 @@ const display = computed(() =>
 }
 
 .yield-badge--lg {
-  font-size: 12.5px;
+  font-size: var(--p-fs-dense);
   padding: 3px 10px;
 }
 

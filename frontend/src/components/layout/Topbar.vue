@@ -174,7 +174,7 @@ const handleCommand = (command: string) => {
 }
 
 :deep(.el-breadcrumb) {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
 }
 
 :deep(.el-breadcrumb__item) {
@@ -239,7 +239,7 @@ const handleCommand = (command: string) => {
 .version-badge {
   padding: 3px 10px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--text-2);
@@ -327,21 +327,21 @@ const handleCommand = (command: string) => {
 }
 
 .user-name {
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   font-weight: 600;
   color: var(--text);
   line-height: 1;
 }
 
 .user-role {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-2);
   line-height: 1;
 }
 
 .dropdown-icon {
   color: var(--text-2);
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   transition: transform 0.2s ease;
 }
 
@@ -369,7 +369,7 @@ const handleCommand = (command: string) => {
 }
 
 :deep(.el-dropdown-menu__item .el-icon) {
-  font-size: 16px;
+  font-size: var(--p-fs-lead);
 }
 
 @media (prefers-reduced-motion: reduce) {

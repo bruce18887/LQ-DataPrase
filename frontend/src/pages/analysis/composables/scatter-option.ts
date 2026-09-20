@@ -4,6 +4,7 @@
  * 外移动机：组件撞项目 600 行上限（矩阵联动/meta 行/p 值卡加入后越界），
  * 与 matrix-option.ts 同款处理——r/p 与 option 的显示口径集中一处。
  */
+import { chartFontSize } from '../../../theme/typography'
 import { minMax } from '../../../utils/minmax'
 import { formatAxisValue, buildChartToolbox } from '../../../utils/chart-bar'
 
@@ -126,12 +127,12 @@ export function buildCorrelationScatterOption(
   return {
     // large 模式下上万 symbol 的入场/更新动画是纯开销，直接关闭
     animation: !isLarge,
-    title: { text: `${d.param_x} vs ${d.param_y}`, subtext: `Pearson r = ${d.pearson_r?.toFixed(4) ?? '-'}`, left: 'center', textStyle: { color: tc, fontSize: 15 }, subtextStyle: { color: tc, fontSize: 12 } },
+    title: { text: `${d.param_x} vs ${d.param_y}`, subtext: `Pearson r = ${d.pearson_r?.toFixed(4) ?? '-'}`, left: 'center', textStyle: { color: tc, fontSize: chartFontSize.base }, subtextStyle: { color: tc, fontSize: chartFontSize.dense } },
     toolbox: buildChartToolbox({ name: `${d.param_x}_vs_${d.param_y}_散点`, extra: { restore: { title: '还原' } }, right: 10 }),
     tooltip: { trigger: 'item', backgroundColor: theme.tooltipBg, borderColor: theme.tooltipBorder, textStyle: { color: theme.tooltipText }, formatter: (p: any) => `${p.seriesName}<br/>${d.param_x}: ${Number(p.value[0]).toFixed(4)}<br/>${d.param_y}: ${Number(p.value[1]).toFixed(4)}` },
     legend: { data: series.map((s: any) => s.name), bottom: 5, type: 'scroll', textStyle: { color: tc } },
-    xAxis: { type: 'value', name: d.param_x, nameLocation: 'center', nameGap: 30, min: xR.min, max: xR.max, axisLine: { lineStyle: { color: theme.axisLineColor } }, axisLabel: { fontSize: 9, formatter: formatAxisValue, color: tc }, nameTextStyle: { color: tc } },
-    yAxis: { type: 'value', name: d.param_y, nameLocation: 'center', nameGap: 40, min: yR.min, max: yR.max, axisLine: { lineStyle: { color: theme.axisLineColor } }, axisLabel: { fontSize: 9, formatter: formatAxisValue, color: tc }, nameTextStyle: { color: tc } },
+    xAxis: { type: 'value', name: d.param_x, nameLocation: 'center', nameGap: 30, min: xR.min, max: xR.max, axisLine: { lineStyle: { color: theme.axisLineColor } }, axisLabel: { fontSize: chartFontSize.micro, formatter: formatAxisValue, color: tc }, nameTextStyle: { color: tc } },
+    yAxis: { type: 'value', name: d.param_y, nameLocation: 'center', nameGap: 40, min: yR.min, max: yR.max, axisLine: { lineStyle: { color: theme.axisLineColor } }, axisLabel: { fontSize: chartFontSize.micro, formatter: formatAxisValue, color: tc }, nameTextStyle: { color: tc } },
     dataZoom: [
       { type: 'slider', xAxisIndex: 0, start: 0, end: 100 },
       { type: 'slider', yAxisIndex: 0, start: 0, end: 100 },

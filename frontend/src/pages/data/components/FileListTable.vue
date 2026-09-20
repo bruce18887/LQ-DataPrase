@@ -275,7 +275,7 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
 }
 
 .file-icon {
-  font-size: 16px;
+  font-size: var(--p-fs-lead);
   flex-shrink: 0;
 }
 
@@ -288,7 +288,7 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
 }
 
 .file-name {
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   font-weight: 500;
   color: var(--text);
   overflow: hidden;
@@ -324,7 +324,7 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
 }
 
 .add-tag-btn {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   padding: 2px 8px;
   height: 24px;
 }
@@ -333,7 +333,7 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
   width: 140px;
   height: 24px;
   padding: 0 8px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   background: var(--bg-2);
   color: var(--text);
   border: 1px solid var(--brand);
@@ -368,7 +368,7 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
 
 .tag-suggestion-item {
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text);
   cursor: pointer;
   transition: background 0.15s;
@@ -404,7 +404,7 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
 }
 
 :deep(.el-table th.el-table__cell) {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -427,7 +427,7 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
 }
 
 .id-badge {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   font-weight: 600;
   color: var(--text-3);
   font-family: var(--font-mono);
@@ -435,17 +435,17 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
 
 .program-name-cell {
   color: var(--text-2);
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
 }
 
 .time-text {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
   font-family: var(--font-mono);
 }
 
 .size-badge {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 600;
   color: var(--info);
   font-family: var(--font-mono);

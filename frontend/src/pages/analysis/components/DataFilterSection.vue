@@ -163,7 +163,7 @@ const sensitivityHint = computed(() => {
 }
 
 .section-label {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-2);
   font-weight: 500;
 }
@@ -180,7 +180,7 @@ const sensitivityHint = computed(() => {
 }
 
 .filter-checkboxes :deep(.el-checkbox__label) {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   padding-left: 4px;
 }
 
@@ -206,7 +206,7 @@ const sensitivityHint = computed(() => {
 }
 
 .sensitivity-hint {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   /* 不用 --text-3：浅色主题它是 #9ca3af，落在白底卡片上仅 2.54:1（e2e
      对比度扫描实测），12px 提示文字读不动；--text-2 两套主题均 ≥ 3 */
   color: var(--text-2);

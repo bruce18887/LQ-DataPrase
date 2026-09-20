@@ -88,6 +88,7 @@
 </template>
 
 <script setup lang="ts">
+import { chartFontSize } from '../../../theme/typography'
 import { ref, computed, watch, nextTick, onActivated, onBeforeUnmount } from 'vue'
 import { initEchartsWhenReady, observeContainerResize, type EchartsHandle } from '../../../utils/echarts-init'
 import { useThemeStore } from '../../../stores/theme'
@@ -215,13 +216,13 @@ function buildHeatOption() {
       type: 'category',
       data: sites.map(s => `Site ${s}`),
       splitArea: { show: true },
-      axisLabel: { color: _tc(), fontSize: 12 },
+      axisLabel: { color: _tc(), fontSize: chartFontSize.dense },
     },
     yAxis: {
       type: 'category',
       data: bins,
       splitArea: { show: true },
-      axisLabel: { color: _tc(), fontSize: 12 },
+      axisLabel: { color: _tc(), fontSize: chartFontSize.dense },
     },
     // 笛卡尔热力图必须配 visualMap，否则 ECharts 抛
     // “Heatmap must use with visualMap” 整系列不渲染（2026-08-30 修复）；
@@ -237,7 +238,7 @@ function buildHeatOption() {
       type: 'heatmap',
       data: heatRows.value.map(d => ({ value: d.value })),
       // 数值标签：具体色值，保证双主题可读
-      label: { show: true, formatter: (p: any) => `${p.value[2]}`, color: _tc(), fontSize: 12, fontWeight: 600 },
+      label: { show: true, formatter: (p: any) => `${p.value[2]}`, color: _tc(), fontSize: chartFontSize.dense, fontWeight: 600 },
       emphasis: { itemStyle: { shadowBlur: 6, shadowColor: 'rgba(0,0,0,0.25)' } },
     }],
   }
@@ -322,12 +323,12 @@ defineExpose({ handleResize })
 }
 .panel-head h3 {
   margin: 0;
-  font-size: 13.5px;
+  font-size: var(--p-fs-small);
   font-weight: 700;
   color: var(--text);
 }
 .panel-desc {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-3);
 }
 .panel-body {
@@ -350,7 +351,7 @@ defineExpose({ handleResize })
   border-radius: 5px;
   text-align: center;
   font-variant-numeric: tabular-nums;
-  font-size: 12.5px;
+  font-size: var(--p-fs-dense);
   color: var(--text);
 }
 
@@ -378,7 +379,7 @@ defineExpose({ handleResize })
 .bs-heatmap { width: 100%; }
 .bs-note {
   margin: 10px 0 0;
-  font-size: 11.5px;
+  font-size: var(--p-fs-micro);
   color: var(--text-3);
 }
 </style>

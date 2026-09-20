@@ -14,7 +14,7 @@ body {
   font-family: var(--font-sans);
   background-color: var(--bg);
   color: var(--text);
-  font-size: var(--text-base);
+  font-size: var(--p-fs-lead);
   line-height: var(--leading-normal);
   transition: background-color 0.3s ease, color 0.3s ease;
 }
@@ -73,7 +73,7 @@ textarea:focus-visible,
   background: var(--brand);
   color: var(--text-inverse);
   border-radius: 4px;
-  font-size: var(--text-sm);
+  font-size: var(--p-fs-base);
   text-decoration: none;
   transition: top 0.2s ease;
 }

@@ -55,13 +55,13 @@ const emit = defineEmits<{ 'remove-tag': [row: any, tag: string] }>()
 .detail-label {
   flex-shrink: 0;
   width: 96px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
   padding-top: 1px;
 }
 .detail-value {
   flex: 1;
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   color: var(--text);
   word-break: break-all;
   line-height: 1.5;
@@ -74,7 +74,7 @@ const emit = defineEmits<{ 'remove-tag': [row: any, tag: string] }>()
 }
 .mono {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
 }
 .empty-text {

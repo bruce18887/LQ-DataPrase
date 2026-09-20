@@ -32,7 +32,7 @@ defineProps<{ settings: SettingsData }>()
 /* 与 TableSettingsForm.vue 的 .form-hint 同款：只用主题 token，明暗两套自动跟随 */
 .form-hint {
   margin-left: 10px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
   line-height: 1.6;
 }

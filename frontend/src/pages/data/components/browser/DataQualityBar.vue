@@ -111,14 +111,14 @@ watch(() => props.fileId, load, { immediate: true })
 }
 
 .chip-label {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-3);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .chip-value {
-  font-size: 17px;
+  font-size: var(--p-fs-lead);
   font-weight: 700;
   color: var(--brand);
   line-height: 1.2;

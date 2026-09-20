@@ -172,7 +172,7 @@ const toggleCollapse = () => {
 }
 
 .logo-title {
-  font-size: 18px;
+  font-size: var(--p-fs-title);
   font-weight: 700;
   color: var(--text);
   letter-spacing: -0.5px;
@@ -180,7 +180,7 @@ const toggleCollapse = () => {
 }
 
 .logo-subtitle {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-2);
   white-space: nowrap;
 }
@@ -246,7 +246,7 @@ const toggleCollapse = () => {
   color: var(--text-2);
   transition: color 0.2s ease;
   flex-shrink: 0;
-  font-size: 20px;
+  font-size: var(--p-fs-title);
 }
 
 .menu-item:hover .menu-icon,
@@ -255,7 +255,7 @@ const toggleCollapse = () => {
 }
 
 .menu-label {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   color: var(--text);
   font-weight: 500;
   white-space: nowrap;
@@ -337,7 +337,7 @@ const toggleCollapse = () => {
 }
 
 .divider-label {
-  font-size: 10px;
+  font-size: var(--p-fs-micro);
   font-weight: 600;
   color: var(--text-3);
   text-transform: uppercase;

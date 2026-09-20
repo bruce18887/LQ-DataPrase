@@ -458,7 +458,7 @@ watch(() => props.files, pruneDeadFileIds)
 }
 
 .section-label {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-2);
   margin-bottom: 4px;
   font-weight: 500;
@@ -495,7 +495,7 @@ watch(() => props.files, pruneDeadFileIds)
 }
 
 .common-hint {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
 }
 

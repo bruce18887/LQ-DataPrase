@@ -172,12 +172,12 @@ function labelFor(key: string): string {
 }
 
 .strip-label {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-2);
 }
 
 .strip-value {
-  font-size: 18px;
+  font-size: var(--p-fs-title);
   font-weight: 700;
   color: var(--text);
   font-variant-numeric: tabular-nums;
@@ -185,7 +185,7 @@ function labelFor(key: string): string {
 }
 
 .strip-unit {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 600;
   color: var(--text-2);
   margin-left: 1px;

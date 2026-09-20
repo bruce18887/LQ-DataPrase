@@ -53,7 +53,7 @@
 |---|---|---|
 | 间距 | `--p-space-1..12/16` | 4px 基数：1=4 · 2=8 · 3=12 · 4=16 · 5=20 · 6=24 · 8=32 · 10=40 · 12=48 · 16=64 |
 | 圆角 | `--p-radius-xs/sm/md/lg/xl/full` | 4 / 6 / 8 / 12 / 16 / 999px（卡片默认 `lg`=12，控件 `md`=8，胶囊 `full`） |
-| 字号 | `--p-fs-xs/sm/md/base/lg/xl/2xl/3xl/4xl` | 11 / 12 / 12.5 / 14 / 16 / 18 / 22 / 26 / 36 |
+| 字号 | `--p-fs-micro/dense/small/base/lead/title/headline/display/hero` | 11 / 12 / 13 / 14 / 16 / 18 / 22 / 26 / 32（九档；折叠规则「就近归档、平手取小」，组件内不得再写字面 px，守门见 `e2e/global/fonts.spec.ts`。装饰性大字可留字面量但须标 `@type-scale-one-off`） |
 | 字重 | `--p-fw-regular/medium/semibold/bold/extrabold` | 400 / 500 / 600 / 700 / 800 |
 | 字体 | `--font-sans` / `--font-mono` | 与 `variables.css` 同源（拉丁在前 + CJK 回退）；`typography.ts` / `echarts-theme.ts` 必须同步 |
 
@@ -309,7 +309,7 @@
 ### 10.5 表格（T2 纯分隔线）
 
 - 无斑马纹；行分隔 `--border`；行悬停品牌色 10% 淡染；表头 `--bg-3` 底 + `--text-2` 600。
-- 字号 12.5，行内边距 7–10；数字列右对齐 + `tabular-nums`；行链接品牌色悬停下划线。
+- 字号 12（`--p-fs-dense`；旧稿的 12.5 按九档就近折到 12），行内边距 7–10；数字列右对齐 + `tabular-nums`；行链接品牌色悬停下划线。
 - Fail 列 **>0 一律红字加粗**（`--error`）；热力格按 `color-mix(--error, n%)` 深浅染色。
 - Level 徽标按 §10.1 CPK 族双编码。
 - 斑马纹（T1）已弃选；EP el-table 场景经主题覆写向本规格对齐。

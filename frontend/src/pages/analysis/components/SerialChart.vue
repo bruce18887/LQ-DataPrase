@@ -33,6 +33,7 @@
 </template>
 
 <script setup lang="ts">
+import { chartFontSize } from '../../../theme/typography'
 import { computed } from 'vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
@@ -251,7 +252,7 @@ function buildOption() {
         ? {
             name: serialCol, nameTextStyle: { color: tc },
             nameLocation: 'middle', nameGap: 30,
-            axisLabel: { rotate: 45, interval: 'auto', fontSize: 9, color: tc },
+            axisLabel: { rotate: 45, interval: 'auto', fontSize: chartFontSize.micro, color: tc },
           }
         : { axisLabel: { show: false }, axisTick: { show: false } }),
     }
@@ -260,11 +261,11 @@ function buildOption() {
     return {
       type: 'value', gridIndex: i, min: bounds[0], max: bounds[1],
       axisLine: { lineStyle: { color: colors.value.axisLineColor } },
-      axisLabel: { formatter: formatAxisValue, fontSize: 9, color: tc },
+      axisLabel: { formatter: formatAxisValue, fontSize: chartFontSize.micro, color: tc },
       ...(laneName
         ? {
             name: laneName, nameLocation: 'middle', nameGap: 48, nameRotate: 90,
-            nameTextStyle: { color: laneColor, fontSize: 10, fontWeight: 'bold' },
+            nameTextStyle: { color: laneColor, fontSize: chartFontSize.micro, fontWeight: 'bold' },
           }
         : {
             name: unit ? `${param} (${unit})` : param,
@@ -313,7 +314,7 @@ function buildOption() {
     animation: !isLarge.value,
     // split 模式 grid 从 top 10% 起（lane 区 ≈74%），首 lane 顶距标题块仍有富余；
     // 仅拆分态把标题块上移收紧（top 4 / itemGap 6），合并模式保持默认
-    title: { text: `${param} Serial分布`, subtext, left: 'center', textStyle: { fontSize: 15, fontWeight: 'bold', color: tc }, subtextStyle: { fontSize: 12 }, ...(split ? { top: 4, itemGap: 6 } : {}) },
+    title: { text: `${param} Serial分布`, subtext, left: 'center', textStyle: { fontSize: chartFontSize.base, fontWeight: 'bold', color: tc }, subtextStyle: { fontSize: chartFontSize.dense }, ...(split ? { top: 4, itemGap: 6 } : {}) },
     tooltip: {
       trigger: 'item',
       backgroundColor: colors.value.tooltipBg,
@@ -372,7 +373,7 @@ void chartRef // bound to <div ref="chartRef"> in template
   gap: 8px;
 }
 .serial-col-selector__label {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--el-text-color-secondary);
 }
 .serial-header {

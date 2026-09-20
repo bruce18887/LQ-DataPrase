@@ -68,7 +68,7 @@ const displayBarWidth = computed(() => Math.min(props.barWidthPercent, props.bar
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-2);
   margin-bottom: 2px;
 }

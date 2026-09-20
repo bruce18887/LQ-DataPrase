@@ -81,13 +81,13 @@ async function handleUpload(options: { file: File }) {
 }
 
 .upload-text {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   color: var(--text-2);
   margin-top: 8px;
 }
 
 .upload-hint {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
   margin-top: 4px;
 }

@@ -152,7 +152,7 @@ const serialsHint = computed(() => {
 }
 
 .vs-badge {
-  font-size: 10px;
+  font-size: var(--p-fs-micro);
   font-weight: 700;
   color: var(--text-3);
   background: var(--bg-2);
@@ -170,7 +170,7 @@ const serialsHint = computed(() => {
 }
 
 .fc-opt-label {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-2);
   font-weight: 500;
   white-space: nowrap;
@@ -181,7 +181,7 @@ const serialsHint = computed(() => {
 }
 
 .fc-serial-hint {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-3);
   white-space: nowrap;
 }
@@ -197,7 +197,7 @@ const serialsHint = computed(() => {
 }
 
 .fc-checks :deep(.el-checkbox__label) {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
 }
 
 .fc-actions {

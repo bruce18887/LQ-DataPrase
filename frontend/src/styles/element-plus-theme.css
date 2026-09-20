@@ -13,13 +13,15 @@
 :root {
   --el-font-family: var(--font-sans);
 
-  /* EP 字号接上 --p-fs-*。只接这 4 档是因为它们与 EP 默认值逐位相同
-     （12/14/16/18），换过来不改变任何像素；EP 的 small 13px 与
-     extra-large 20px 在 token 里没有对应档位，等字号归档时一并定。 */
-  --el-font-size-extra-small: var(--p-fs-sm);
+  /* EP 字号全部接进 --p-fs-* 九档。extra-small/base/medium/large/small 五档与 EP 默认值
+     逐位相同（12/14/16/18/13），换过来不改变像素；extra-large 默认 20px 按九档规则
+     就近折到 18px（title）—— 这一档是**有意的视觉变化**，见基线差量报告。 */
+  --el-font-size-extra-small: var(--p-fs-dense);
+  --el-font-size-small: var(--p-fs-small);
   --el-font-size-base: var(--p-fs-base);
-  --el-font-size-medium: var(--p-fs-lg);
-  --el-font-size-large: var(--p-fs-xl);
+  --el-font-size-medium: var(--p-fs-lead);
+  --el-font-size-large: var(--p-fs-title);
+  --el-font-size-extra-large: var(--p-fs-title);
 }
 
 /* ========================================
@@ -778,13 +780,13 @@
 }
 
 .el-dialog__title {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   font-weight: 700;
   color: var(--text);
 }
 
 .el-dialog__body {
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   color: var(--text-2);
 }
 
@@ -804,13 +806,13 @@
 }
 
 .el-message-box__title {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   font-weight: 700;
   color: var(--text);
 }
 
 .el-message-box__message {
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   color: var(--text-2);
 }
 
@@ -832,7 +834,7 @@
   margin-bottom: 0;
   padding: 14px 16px;
   border-bottom: 1px solid var(--border);
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   font-weight: 700;
   color: var(--text);
 }

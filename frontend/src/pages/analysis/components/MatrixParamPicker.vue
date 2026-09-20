@@ -86,7 +86,7 @@ function selectAllVisible() {
 }
 
 .section-label {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-2);
   font-weight: 500;
   display: block;
@@ -103,7 +103,7 @@ function selectAllVisible() {
 
 .chip {
   font: inherit;
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   line-height: 1.4;
   max-width: 100%;
   overflow: hidden;
@@ -125,7 +125,7 @@ function selectAllVisible() {
 }
 
 .chips-empty {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-3);
   padding: 6px 2px;
 }

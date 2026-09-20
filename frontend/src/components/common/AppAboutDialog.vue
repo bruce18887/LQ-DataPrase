@@ -69,17 +69,17 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 18px;
+  font-size: var(--p-fs-title);
   font-weight: 700;
   color: var(--text);
 }
 
 .about-logo {
-  font-size: 22px;
+  font-size: var(--p-fs-headline);
 }
 
 .about-sub {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
   margin-bottom: 4px;
 }
@@ -94,7 +94,7 @@ onUnmounted(() => {
 .about-row {
   display: flex;
   justify-content: space-between;
-  font-size: 13px;
+  font-size: var(--p-fs-small);
 }
 
 .about-row dt {

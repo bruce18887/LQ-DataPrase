@@ -3,6 +3,7 @@
 </template>
 
 <script setup lang="ts">
+import { chartFontSize } from '../../../../theme/typography'
 import { ref, watch, nextTick, onMounted, onActivated, onBeforeUnmount } from 'vue'
 import { initEchartsWhenReady, observeContainerResize, type EchartsHandle } from '../../../../utils/echarts-init'
 import { useThemeStore } from '../../../../stores/theme'
@@ -90,7 +91,7 @@ function buildOption() {
         data: phases.map((p: any) => p.yield_pct),
         itemStyle: { color: infoC }, lineStyle: { width: 2, color: infoC },
         symbol: 'circle', symbolSize: 6,
-        label: { show: true, formatter: (p: any) => `${formatPercent(Number(p.value))}%`, fontSize: 11, color: tc },
+        label: { show: true, formatter: (p: any) => `${formatPercent(Number(p.value))}%`, fontSize: chartFontSize.micro, color: tc },
       },
     ],
   }

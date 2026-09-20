@@ -140,14 +140,14 @@ function selectMatches() {
 
 .match-hint {
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
   border-top: 1px solid var(--border);
 }
 
 .empty-hint {
   padding: 8px 12px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
 }
 </style>

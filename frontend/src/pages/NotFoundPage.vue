@@ -27,20 +27,20 @@ import { HomeFilled } from '@element-plus/icons-vue'
   text-align: center;
 }
 .not-found-code {
-  font-size: 96px;
+  font-size: 96px; /* @type-scale-one-off 404 装饰大字，故意远大于文案档 */
   font-weight: 700;
   color: var(--brand);
   line-height: 1;
   margin: 0 0 16px;
 }
 .not-found-text {
-  font-size: 24px;
+  font-size: var(--p-fs-headline);
   font-weight: 600;
   color: var(--text);
   margin: 0 0 8px;
 }
 .not-found-desc {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   color: var(--text-2);
   margin: 0 0 32px;
 }

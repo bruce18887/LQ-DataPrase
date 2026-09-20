@@ -248,14 +248,14 @@ onActivated(loadFiles)
   align-items: center;
   gap: 10px;
   margin: 0 0 4px 0;
-  font-size: 22px;
+  font-size: var(--p-fs-headline);
   font-weight: 700;
   color: var(--text);
   letter-spacing: -0.02em;
 }
 
 .title-icon {
-  font-size: 24px;
+  font-size: var(--p-fs-headline);
 }
 
 .title-text {
@@ -267,7 +267,7 @@ onActivated(loadFiles)
 
 .page-subtitle {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   color: var(--text-3);
   font-weight: 400;
 }
@@ -289,7 +289,7 @@ onActivated(loadFiles)
 }
 
 .stat-label {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-3);
   font-weight: 500;
   text-transform: uppercase;
@@ -297,7 +297,7 @@ onActivated(loadFiles)
 }
 
 .stat-value {
-  font-size: 20px;
+  font-size: var(--p-fs-title);
   font-weight: 700;
   color: var(--brand);
   line-height: 1.2;
@@ -329,7 +329,7 @@ onActivated(loadFiles)
   background: transparent;
   border: none;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   font-weight: 500;
   color: var(--text-3);
   transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
@@ -350,7 +350,7 @@ onActivated(loadFiles)
 }
 
 .tab-icon {
-  font-size: 15px;
+  font-size: var(--p-fs-base);
 }
 
 .tab-badge {
@@ -363,7 +363,7 @@ onActivated(loadFiles)
   background: var(--brand);
   color: var(--text-inverse);
   border-radius: 9px;
-  font-size: 10px;
+  font-size: var(--p-fs-micro);
   font-weight: 700;
   line-height: 1;
 }
@@ -390,11 +390,11 @@ onActivated(loadFiles)
   border: 1px solid var(--border);
   border-left: 3px solid var(--brand);
   border-radius: 8px;
-  font-size: 13px;
+  font-size: var(--p-fs-small);
 }
 
 .banner-icon {
-  font-size: 15px;
+  font-size: var(--p-fs-base);
   flex-shrink: 0;
 }
 

@@ -126,6 +126,10 @@ DEBUG_*.md
 /Data/
 /test/*
 !/test/backend/
+# 字号计算值基线（e2e/global/type-snapshot.spec.ts 产出，差量核对的对照物，必须入库）
+!/test/type-snapshot/
+/test/type-snapshot/after.json
+/test/type-snapshot/clipping.txt
 /tasks/
 # 过程/设计文档（内部使用，不入仓库）；
 # docs/tasks/ 保留入库（lessons.md/todo.md 需版本保护，可经 git 回退误覆盖），仅排除临时产物

@@ -74,13 +74,13 @@ defineEmits<{
   border-radius: 50%;
   background: var(--brand);
   color: var(--text-inverse);
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 700;
   flex-shrink: 0;
 }
 
 .step-title {
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   font-weight: 600;
   color: var(--text);
 }
@@ -106,7 +106,7 @@ defineEmits<{
 }
 
 .inline-checkboxes :deep(.el-checkbox__label) {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   padding-left: 3px;
 }
 
@@ -115,7 +115,7 @@ defineEmits<{
 }
 
 .ignore-no-limit :deep(.el-checkbox__label) {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   padding-left: 3px;
 }
 
@@ -127,13 +127,13 @@ defineEmits<{
 }
 
 .bw-label {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   font-weight: 500;
   color: var(--text-3);
 }
 
 .bw-value {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   font-weight: 700;
   color: var(--brand);
   font-family: var(--font-mono);

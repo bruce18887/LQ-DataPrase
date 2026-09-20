@@ -9,6 +9,7 @@
 </template>
 
 <script setup lang="ts">
+import { chartFontSize } from '../../../theme/typography'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
 import { clampBarValue, formatPercent, formatAxisValue, getBarGroupPad, getMaxBarWidthPercent, getSiteColors8, buildChartToolbox } from '../../../utils/chart-bar'
@@ -151,7 +152,7 @@ function buildOption() {
       itemStyle: { color: '#90CAF9', opacity: 0.5 }, barWidth: `${effectiveBarWidth}%`, barGap: `${-props.barOverlapPercent}%`,
       // 柱顶百分比标签：night 必须白字——柱面是 50% 半透明 #90CAF9 叠在深底
       // ≈ 中蓝 rgb(83,117,155)，深蓝 #1565C0 贴中蓝面对比度≈1.3:1（8/26 用户反馈）
-      label: { show: true, position: 'top', formatter: (p: any) => { const real = p.data[2] ?? p.data[1]; return real > 0 ? `${formatPercent(real)}%` : '' }, fontSize: 10, color: isDark.value ? '#ffffff' : '#1565C0', fontWeight: 'bold' },
+      label: { show: true, position: 'top', formatter: (p: any) => { const real = p.data[2] ?? p.data[1]; return real > 0 ? `${formatPercent(real)}%` : '' }, fontSize: chartFontSize.micro, color: isDark.value ? '#ffffff' : '#1565C0', fontWeight: 'bold' },
     })
   } else {
     series.push({
@@ -260,9 +261,9 @@ function buildOption() {
 
   return {
     title: { text: titleText, left: 'center', top: 6, textStyle: { rich: {
-      name: { fontSize: 15, fontWeight: 'bold', color: tc },
-      unit: { fontSize: 12, color: tc, fontWeight: 500 },
-      limit: { fontSize: 12, color: isDark.value ? '#FFB74D' : '#E65100', fontWeight: 600, backgroundColor: isDark.value ? 'rgba(255, 183, 77, 0.15)' : '#FFF3E0', padding: [2, 6], borderRadius: 3 },
+      name: { fontSize: chartFontSize.base, fontWeight: 'bold', color: tc },
+      unit: { fontSize: chartFontSize.dense, color: tc, fontWeight: 500 },
+      limit: { fontSize: chartFontSize.dense, color: isDark.value ? '#FFB74D' : '#E65100', fontWeight: 600, backgroundColor: isDark.value ? 'rgba(255, 183, 77, 0.15)' : '#FFF3E0', padding: [2, 6], borderRadius: 3 },
     } } },
     tooltip: {
       trigger: 'axis',
@@ -293,7 +294,7 @@ function buildOption() {
     toolbox: buildChartToolbox({ name: `${props.selectedParam}_分析` }),
     // 密度轴（KDE/正态）已 show:false 不占位，grid 随之收窄，绘图区更宽
     grid: { top: 55, bottom: 70, left: hasKde ? 70 : 55, right: (hasSiteData && hasNormal) ? 90 : (hasSiteData || hasNormal) ? 80 : 55 },
-    xAxis: { type: 'value', name: '', nameLocation: 'middle', nameGap: 28, min: xAxisMin, max: xAxisMax, axisLabel: { rotate: 45, show: true, interval: 0, fontSize: 9, formatter: formatAxisValue, color: tc }, splitNumber: 24 },
+    xAxis: { type: 'value', name: '', nameLocation: 'middle', nameGap: 28, min: xAxisMin, max: xAxisMax, axisLabel: { rotate: 45, show: true, interval: 0, fontSize: chartFontSize.micro, formatter: formatAxisValue, color: tc }, splitNumber: 24 },
     yAxis: yAxes,
     series,
   }

@@ -121,7 +121,7 @@ const emit = defineEmits<Emits>()
 /* 控件上方小字 label（双主题：CSS 变量自动适配） */
 .ctl-label {
   display: block;
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   font-weight: 500;
   color: var(--text-2);
   margin-bottom: 4px;

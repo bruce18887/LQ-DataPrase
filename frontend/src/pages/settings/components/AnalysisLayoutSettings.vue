@@ -32,7 +32,7 @@ async function onResetLayout() {
 .chart-memory-settings { margin-top: 8px; }
 .chart-memory-settings__hint {
   margin-left: 12px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
 }
 </style>

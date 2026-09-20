@@ -55,7 +55,7 @@ withDefaults(defineProps<{
   background: transparent;
   cursor: pointer;
   color: var(--text-3, #9ca3af);
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   line-height: 1;
   padding: 2px 6px;
   border-radius: 3px;
@@ -73,7 +73,7 @@ withDefaults(defineProps<{
   gap: 12px;
 }
 .chart-settings-title {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 600;
   color: var(--text);
 }

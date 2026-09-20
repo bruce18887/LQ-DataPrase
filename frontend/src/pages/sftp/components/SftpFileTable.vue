@@ -166,27 +166,27 @@ function joinPath(dir: string, name: string): string {
 .is-dir .file-icon { background: rgba(217, 119, 6, 0.1); }
 .file-info { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .file-name {
-  font-size: 14px; color: var(--text); font-weight: 500;
+  font-size: var(--p-fs-base); color: var(--text); font-weight: 500;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .is-dir .file-name { color: var(--warn); font-weight: 600; }
 .file-ext {
-  font-size: 12px; color: var(--text-2); background: var(--bg-3);
+  font-size: var(--p-fs-dense); color: var(--text-2); background: var(--bg-3);
   padding: 1px 6px; border-radius: 4px; white-space: nowrap;
 }
-.file-size { font-size: 13px; color: var(--text-2); font-family: var(--font-mono); }
-.file-time { font-size: 13px; color: var(--text-3); }
+.file-size { font-size: var(--p-fs-small); color: var(--text-2); font-family: var(--font-mono); }
+.file-time { font-size: var(--p-fs-small); color: var(--text-3); }
 .dir-label {
-  font-size: 12px; color: var(--warn);
+  font-size: var(--p-fs-dense); color: var(--warn);
   background: rgba(217, 119, 6, 0.1); padding: 2px 8px; border-radius: 4px;
 }
 
 .action-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.action-cell :deep(.el-button) { font-size: 12px; }
+.action-cell :deep(.el-button) { font-size: var(--p-fs-dense); }
 .action-cell :deep(.el-button .el-icon) { margin-right: 2px; }
 
 /* Table header override */
-.file-table :deep(.el-table__header th) { background: var(--bg-3); font-weight: 600; font-size: 13px; }
+.file-table :deep(.el-table__header th) { background: var(--bg-3); font-weight: 600; font-size: var(--p-fs-small); }
 
 /* Empty icon */
 .file-list-card :deep(.el-empty .el-icon) { color: var(--text-3); }

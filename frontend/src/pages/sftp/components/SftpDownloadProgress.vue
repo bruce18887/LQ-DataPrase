@@ -85,10 +85,10 @@ function formatBytes(bytes: number): string {
   align-items: center;
   gap: 6px;
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   color: var(--text);
 }
-.progress-stats { font-size: 13px; color: var(--text-2); }
+.progress-stats { font-size: var(--p-fs-small); color: var(--text-2); }
 .progress-right {
   display: flex;
   align-items: center;
@@ -106,7 +106,7 @@ function formatBytes(bytes: number): string {
   display: flex;
   justify-content: space-between;
   margin-top: 8px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
 }
 </style>

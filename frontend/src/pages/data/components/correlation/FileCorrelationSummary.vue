@@ -104,7 +104,7 @@ function rateColor(rate: number) {
 }
 
 .metric-label {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
   display: flex;
   align-items: center;
@@ -117,7 +117,7 @@ function rateColor(rate: number) {
 }
 
 .metric-value {
-  font-size: 22px;
+  font-size: var(--p-fs-headline);
   font-weight: 700;
   color: var(--text);
   font-family: var(--font-mono);
@@ -125,7 +125,7 @@ function rateColor(rate: number) {
 }
 
 .metric-hint {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-3);
   white-space: nowrap;
   overflow: hidden;

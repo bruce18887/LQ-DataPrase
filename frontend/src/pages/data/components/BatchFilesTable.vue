@@ -156,7 +156,7 @@ defineExpose({
 
 .batch-filename {
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -192,7 +192,7 @@ defineExpose({
 
 .dim-text {
   color: var(--text-2);
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
 }
 
 .mono {

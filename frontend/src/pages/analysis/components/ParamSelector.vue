@@ -191,7 +191,7 @@ function onNext() {
 }
 
 .selector-label {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-2);
   font-weight: 500;
 }
@@ -204,7 +204,7 @@ function onNext() {
 .nav-buttons :deep(.el-button) {
   flex: 1;
   padding: 6px 8px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
 }
 
 /* inline：单行不换行、按钮自适应宽度（不撑满） */
@@ -233,7 +233,7 @@ function onNext() {
 }
 
 .param-name {
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   color: var(--text);
 }
 
@@ -246,7 +246,7 @@ function onNext() {
 }
 
 .param-hint {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-2);
   margin-left: 12px;
   flex-shrink: 0;

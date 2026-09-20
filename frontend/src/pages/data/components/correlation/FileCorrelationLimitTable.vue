@@ -85,7 +85,7 @@ function headerCellStyle() {
     background: 'var(--bg-2)',
     color: 'var(--text)',
     fontWeight: '600',
-    fontSize: '12px',
+    fontSize: 'var(--p-fs-dense)',
   }
 }
 
@@ -139,13 +139,13 @@ function verdictTitle(row: FileCorrelationRow): string {
 }
 
 .info-title {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   font-weight: 700;
   color: var(--text);
 }
 
 .info-files {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
 }
 
@@ -154,7 +154,7 @@ function verdictTitle(row: FileCorrelationRow): string {
 }
 
 .info-meta {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
   margin-left: auto;
 }
@@ -170,7 +170,7 @@ function verdictTitle(row: FileCorrelationRow): string {
 }
 
 :deep(.el-table th.el-table__cell) {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
 }
 
 .fc-cell {
@@ -178,7 +178,7 @@ function verdictTitle(row: FileCorrelationRow): string {
   padding: 1px 6px;
   border-radius: 4px;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
 }
 
 .fc-fail-cell {
@@ -188,7 +188,7 @@ function verdictTitle(row: FileCorrelationRow): string {
 }
 
 .param-name {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text);
 }
 
@@ -196,7 +196,7 @@ function verdictTitle(row: FileCorrelationRow): string {
   display: inline-block;
   padding: 2px 10px;
   border-radius: 10px;
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   font-weight: 700;
   letter-spacing: 0.03em;
 }

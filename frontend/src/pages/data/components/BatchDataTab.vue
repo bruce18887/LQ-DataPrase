@@ -379,7 +379,7 @@ defineExpose({ loadBatchDirs })
 }
 
 .section-label {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   font-weight: 600;
   color: var(--text-2);
   margin-bottom: 12px;
@@ -401,7 +401,7 @@ defineExpose({ loadBatchDirs })
 }
 
 .batch-search-hint {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
 }
 
@@ -433,7 +433,7 @@ defineExpose({ loadBatchDirs })
 }
 
 .batch-chevron {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   color: var(--text-3);
   transition: transform 0.2s ease, color 0.2s ease;
   flex-shrink: 0;
@@ -457,17 +457,17 @@ defineExpose({ loadBatchDirs })
 }
 
 .batch-toggle-all {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
 }
 
 .batch-name {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   font-weight: 600;
   color: var(--text);
 }
 
 .batch-count {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
   padding: 2px 8px;
   background: var(--bg);
@@ -475,13 +475,13 @@ defineExpose({ loadBatchDirs })
 }
 
 .batch-size {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
   font-family: var(--font-mono);
 }
 
 .batch-flag {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   padding: 1px 7px;
   border-radius: 9px;
   background: var(--bg);
@@ -517,7 +517,7 @@ defineExpose({ loadBatchDirs })
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
 }
 

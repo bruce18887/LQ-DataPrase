@@ -73,20 +73,20 @@ defineEmits<{
   border-radius: 50%;
   background: var(--brand);
   color: var(--text-inverse);
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   font-weight: 700;
   flex-shrink: 0;
 }
 
 .step-title {
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   font-weight: 600;
   color: var(--text);
 }
 
 .step-hint {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--warn);
   font-weight: 500;
 }
@@ -105,7 +105,7 @@ defineEmits<{
 }
 
 .sigma-label {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
   white-space: nowrap;
 }

@@ -284,13 +284,13 @@ async function generate() {
 }
 
 .tab-title-icon {
-  font-size: 18px;
+  font-size: var(--p-fs-title);
   line-height: 1;
 }
 
 .tab-title {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--p-fs-lead);
   font-weight: 700;
   color: var(--text);
   letter-spacing: -0.01em;
@@ -302,7 +302,7 @@ async function generate() {
 
 .tab-subtitle {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-3);
   line-height: 1.5;
 }
@@ -334,12 +334,12 @@ async function generate() {
 }
 
 .card-icon {
-  font-size: 16px;
+  font-size: var(--p-fs-lead);
   line-height: 1;
 }
 
 .card-title {
-  font-size: 14px;
+  font-size: var(--p-fs-base);
   font-weight: 600;
   color: var(--text);
 }
@@ -369,7 +369,7 @@ async function generate() {
 }
 
 .role-label {
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   font-weight: 600;
   color: var(--brand);
   margin-bottom: 8px;
@@ -395,7 +395,7 @@ async function generate() {
 }
 
 .section-title {
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   font-weight: 600;
   color: var(--text);
   margin-bottom: 10px;
@@ -416,7 +416,7 @@ async function generate() {
 }
 
 .more-text {
-  font-size: 12px;
+  font-size: var(--p-fs-dense);
   color: var(--text-2);
   padding: 0 4px;
 }

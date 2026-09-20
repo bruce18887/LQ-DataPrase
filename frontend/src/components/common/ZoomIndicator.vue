@@ -21,7 +21,7 @@ const { zoom, showIndicator } = useZoom()
   z-index: 3000;
   padding: 8px 16px;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   font-weight: 600;
   color: var(--text);
   background: color-mix(in srgb, var(--bg) 88%, transparent);

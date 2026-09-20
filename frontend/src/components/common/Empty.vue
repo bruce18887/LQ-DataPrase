@@ -68,7 +68,7 @@ withDefaults(defineProps<Props>(), {
 }
 
 .dp-empty__text {
-  font-size: 13px;
+  font-size: var(--p-fs-small);
   font-weight: 600;
   color: var(--text-2);
   margin-bottom: 12px;

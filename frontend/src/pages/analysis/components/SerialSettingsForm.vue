@@ -61,7 +61,7 @@ const emit = defineEmits<{
   gap: 10px;
 }
 .ss-item__head {
-  font-size: 11px;
+  font-size: var(--p-fs-micro);
   color: var(--text-2);
   margin-bottom: 2px;
 }
