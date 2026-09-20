@@ -49,7 +49,7 @@ def create_summary_styles(f):
         thick_bottom_style, thick_bottom_mid_style, thick_bottom_right_style,
         r_r_pct_style, bad1_ok_style, bad1_fail_style
     """
-    header_style = theme.make_header_style(f, 12)
+    header_style = theme.make_header_style(f, 10)
     title_style = theme.make_title_style(f, 16)
     info_label_style = _text_style(f, theme.COLOR_FONT, 10)
     info_value_style = _text_style(f, theme.COLOR_FONT, 10, bold=False)

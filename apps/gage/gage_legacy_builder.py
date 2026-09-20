@@ -397,8 +397,13 @@ def build_gage_summary_excel(file_datasets, ignore_no_limit=False):
                     # `SQRT(...)*6` 正常。Excel 本身两种都对。
                     set_formula(f, "Summary", f"{v_col}{r}",
                                 f"=ROUND(SQRT(SUMSQ(I{group_start_row}:I{group_last_row})/B7)*6,4)")
+                    # 用 `STDEVP`（无点号）而非 `STDEV.P`：带点号的函数名是 Excel 2010 才加的，
+                    # 部分查看器认不出 —— `STDEV.P` 报错后被 IFERROR 悄悄吞成 0，整列 Reproducibility 全 0。
+                    # 单文件时 STDEVP 本身会 #DIV/0!，用 `IF(COUNT<2,…)` 显式给 0（与 Python 口径一致），
+                    # 不用 IFERROR —— 免得再出现"报错被吞成 0"的静默失败。
                     set_formula(f, "Summary", f"{w_col}{r}",
-                                f"=ROUND(IFERROR(6*STDEV.P(H{group_start_row}:H{group_last_row}),0),4)")
+                                f"=ROUND(IF(COUNT(H{group_start_row}:H{group_last_row})<2,0,"
+                                f"STDEVP(H{group_start_row}:H{group_last_row})*6),4)")
                     set_formula(f, "Summary", f"{rr_col}{r}",
                                 f"=ROUND(SQRT({v_col}{r}*{v_col}{r}+{w_col}{r}*{w_col}{r}),4)")
 

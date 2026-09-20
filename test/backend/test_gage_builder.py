@@ -323,6 +323,12 @@ class GageSummaryPresentationTests(SimpleTestCase):
         self.assertIsNone(cf_verdict(rules, 0.05))                              # Good 不着色
         self.assertIsNone(cf_verdict(rules, 0.0))                               # 空白按 0 → 不着色
 
+    def test_header_row_font_size_is_10(self):
+        """表头行（File Name / Tester ID / Test Name …）字号为 10。"""
+        ws = _summary_ws(_main_datasets())
+        for ref in ('A11', 'B11', 'C11'):
+            self.assertEqual(ws.ws[ref].font.size, 10, ref)
+
     def test_summary_column_widths_fit_headers(self):
         """列宽自适应：每个表头都要放得下（"Repeatibility"/"Reproducibility" 曾被截断）。"""
         data = build_gage_summary_excel(_main_datasets())
@@ -366,6 +372,17 @@ class GageDerivedFormulaTests(SimpleTestCase):
         self.assertEqual(formula_of(ws.handle, 'Summary', 'V12'),
                          'ROUND(SQRT(SUMSQ(I12:I14)/B7)*6,4)')
         self.assertEqual(formula_of(ws.handle, 'Summary', 'W12'),
-                         'ROUND(IFERROR(6*STDEV.P(H12:H14),0),4)')
+                         'ROUND(IF(COUNT(H12:H14)<2,0,STDEVP(H12:H14)*6),4)')
         self.assertEqual(formula_of(ws.handle, 'Summary', 'Y12'),
                          'ROUND(X12/(F12-E12),6)')
+
+    def test_formulas_avoid_excel2010_dot_functions(self):
+        """公式不得出现带点号的函数名（`STDEV.P`/`STDEV.S` 等）。
+
+        这类函数是 Excel 2010 才加入的，部分查看器认不出会让公式报错 —— 若外面还套了
+        IFERROR，就会**静默算成 0**（用户实际踩到的就是 Reproducibility 整列 0）。
+        用 `STDEVP` 这类老函数名替代表达。
+        """
+        ws = _summary_ws(_main_datasets())
+        for ref in ('V12', 'W12', 'X12', 'Y12'):
+            self.assertNotIn('STDEV.', formula_of(ws.handle, 'Summary', ref), ref)

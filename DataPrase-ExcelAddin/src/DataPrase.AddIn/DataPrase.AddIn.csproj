@@ -29,6 +29,7 @@
     <Compile Include="ExpTemplate.cs" />
     <Compile Include="ExpControls.cs" />
     <Compile Include="ExpCommands.cs" />
+    <Compile Include="SelfCheck.cs" />
     <Compile Include="Ribbon.cs" />
     <Compile Include="ConfigDialog.cs">
       <SubType>Form</SubType>
