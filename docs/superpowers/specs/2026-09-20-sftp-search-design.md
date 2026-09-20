@@ -330,7 +330,15 @@ dest="use_threading"`（默认 True），`django/core/servers/basehttp.py:261-26
 - **配额降级**：开第 k 条失败 → 降到 k−1 继续，并报 `notice{code:"workers_reduced", actual}`；
   一条都开不出来 → `workers=1` 用单连接，搜索照跑只是慢。**必须上报实际并行数**，
   否则用户看到的并行数是假的。
-- 每条临时连接自带 socket timeout = 15s（搜索专用常量，不复用下载的 `clamp_timeout`）。
+- **读超时机制（已核实，勿凭直觉实现）**：本项目装的是 **paramiko 5.0.0**，
+  `Transport.__init__(sock, default_window_size, default_max_packet_size, ...)`
+  **已无 `default_timeout` 参数**，所以「给连接设 socket 超时」这条路不存在。
+  超时只能设在 channel 上 —— 直接复用现成的
+  `apps/sftp/downloads.py:53` `channel_timeout(sftp, seconds)`（设 `channel.settimeout`、
+  退出时恢复原值、异常路径由 `contextmanager` 保证恢复）。搜索专用常量
+  `READ_TIMEOUT_SEC = 15`，作用域是**单个文件的扫描**，不复用下载的 `clamp_timeout`。
+  在临时连接上设它没有污染风险（该连接此刻只属于一个 worker），
+  这也正是「绝不拿池连接做扫描」的又一个理由。
 - `finally` 无条件关闭全部连接；暴露 `opened` / `closed` 计数供测试断言无泄漏。
 - **绝不用池连接做扫描**：`channel_timeout` 会改共享 channel 的 socket 超时，污染浏览与下载。
 
@@ -376,10 +384,12 @@ done        {matched, scanned, elapsed_s, truncated, limits_hit:[code], engine}
 2. **worker 收不到 `GeneratorExit`**，只认 `threading.Event`。取消 = 三件事：
    `cancel_event.set()` → `shutdown(wait=False, cancel_futures=True)` → 关闭全部临时连接
    （连接一关，卡在 `read()` 上的 worker 立刻拿到异常返回）。
-3. **最坏取消延迟 = 临时连接 socket timeout = 15s**，写进本文而非含糊过去；
-   期间前端按已取消处理、不阻塞用户。
+3. **最坏取消延迟 = `READ_TIMEOUT_SEC` = 15s**（卡在 `read()` 上的 worker 要等 channel
+   超时抛异常才脱身，见 §3.7），写进本文而非含糊过去；期间前端按已取消处理、不阻塞用户。
+   注意 `close_all()` 会关掉 transport，通常让卡住的读**立刻**报错返回，所以 15s 是
+   上界而非典型值。
 4. 生成器收到 `GeneratorExit` 后不得再 `yield`（RuntimeError）。清理全在 `finally`。
-5. **前端不再于导航时 abort**（与 §4 驻留决策一致）：仅「显式取消」与「退出应用」才 abort。
+5. **前端不再于导航时 abort**（与 §1.2 驻留决策一致）：仅「显式取消」与「退出应用」才 abort。
    后端 `timeout` 是在制品泄漏的兜底（threaded runserver 下每条流占一个 daemon thread，
    不是占死一个 worker，故不会冻结应用）。
 
@@ -468,11 +478,25 @@ class SftpSearchPreset(models.Model):
 **与现有搜索框的关系**：工具栏那个本地过滤框**保留不动**（零延迟、当前目录即时过滤，
 是它该有的样子），不替换、不做两套结果视图。
 
+**搜索页怎么知道「未连接」**：项目**没有**连接状态端点，也不为它新建一个。
+搜索页不做前置探测，而是让 `POST /sftp/search/` 在会话缺失时返回
+`400 {"error": "... not connected ..."}`，页面据此显示「请先在 SFTP 浏览器建立连接」
++「去连接」跳转。辅助提示可复用现成的 `GET /sftp/last_visit/` 的 `can_auto_connect`。
+理由：加一个只读状态端点会引入「前端缓存的连接态与服务端真实态不一致」这个新问题，
+而失败路径本来就必须实现——少写一条会漂移的路，比少写一个端点更划算。
+
 ## 4. 测试与验证
 
 四级，前三级设施项目里已有。
 
-### 4.1 纯逻辑单测 → `test/backend/test_sftp_search.py`
+### 4.1 纯逻辑单测 → `test/backend/test_sftp_search_*.py`
+
+按被测模块分文件（每个测试文件对应一个后端搜索模块，便于失败定位与单独跑）：
+`test_sftp_search_contract.py`（契约与钳位）、`test_sftp_search_engine.py`（引擎选择谓词）、
+`test_sftp_search_connect.py`（连接借还/降级/泄漏）、`test_sftp_search_walk.py`（遍历与过滤）、
+`test_sftp_search_scan.py`（扫描内核）、`test_sftp_search_grep.py`（命令构造与探测）、
+`test_sftp_search_engine_stream.py`（阶段机与取消）、`test_sftp_pool_lock.py`（§3.12）。
+共享内存夹具在 `test/backend/sftp_fake.py`。
 
 `unittest` + `django.setup()`，无 DB。这级吃下搜索最值钱的部分：
 
