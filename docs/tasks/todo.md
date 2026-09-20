@@ -2393,3 +2393,69 @@ buyoff 的边际档因此也从浅黄变橙（一处改动、两处生效）。
 - **收敛自证**：codemod dry-run 现状 **0 文件待改**；`frontend/src` 内 `var(--p-fs-*)` 引用 **370 处**
   （dense 145 / micro 86 / small 51 / base 48 …），源码级守门用例常驻防回潮。
 
+---
+
+# 任务：用户管理「管理员把自己禁用」死锁修复（2026-09-20）✅
+
+用户提问：「用户管理，管理员自己把自己禁用了，如何处理？」
+
+## 根因
+
+`is_active=False` 同时掐断两条自救路径：登录端点在 `authenticate()` **之前**就拦截
+停用账号（`views.py:90-95` → 403 `account_disabled`），SimpleJWT 每请求校验
+`is_active` 立刻吊销 token。Django admin 登录同样要求 `is_active`；`seed_users`
+只修 `role`/`is_superuser`、从不碰 `is_active`（`seed_users.py:51-61`）→ **只能直连
+数据库改回来**。而 `UserManagementViewSet` 的 `update`/`destroy` 对任意目标用户
+放行 `is_active=False` / `delete`，从不比对 `request.user`；前端 `toggleUser()`
+（`UserManagement.vue:199`）同样无自校验。
+
+用户拍板：防护「自我保护 + 最后管理员」两档；不额外做恢复命令（shell 一行足够）。
+
+## 实施清单
+
+- [x] 后端 `UserManagementViewSet`：新增 `perform_update` / `perform_destroy` +
+      `_guard_lockout`（规则①不能禁用/删除自己 ②不能移除最后一个启用的管理员）；
+      **未动** 既有 `update()` 的 `partial=True` 覆写，也**未动** `UserSerializer`
+      字段可写性（它被本 ViewSet 复用，收窄会撞 `test_put_with_full_body_still_works`）
+- [x] 前端 `UserManagement.vue`：接入 `useAuthStore` + `isSelf(row)`；自己那行的
+      「禁用」「删除」加 `:disabled` 与原生 `title`（重置密码/解锁不禁用——不造成锁死）
+- [x] `test/backend/test_admin_lockout.py`（新，6 用例）：禁自己 / 删自己 / 唯一管理员
+      自降角色 → 400；有第二管理员时自降角色 / 停用另一个管理员 / 删他人 → 放行
+- [x] e2e `admin.spec.ts` 新增「管理员本行的禁用、删除按钮置灰」用例（含
+      「重置密码仍可点」防过度修复断言）
+
+## Review
+
+- **验证账目**：
+  - 后端 `manage.py test test.backend.test_admin_lockout apps.accounts
+    test.backend.test_profile_privilege` → **Ran 66 / OK**（35.0s）。
+  - **RED-GREEN 已实测**：`git stash push -- apps/accounts/views.py` 后复跑，
+    恰好 3 条守卫用例变红（delete self / disable self / demote sole admin）、
+    3 条防过度修复用例照常绿 → 断言有判别力，不是空转。
+  - `npm run build`（vue-tsc -b + vite）绿，零类型错误。
+  - e2e `e2e/admin` **串行 workers=1 → 7 passed（31.4s，零 flake）**；
+    workers=6 下我的新用例同样通过（2.0s）。
+  - 跑前 8000/3000 均空闲、跑后**零监听残留**（Playwright 自收）。
+- **功能实证（非仅断言）**：workers=6 失败轮留下的 DOM 快照里，
+  `row "admin …"` 下的按钮是 `button "禁用" [disabled]` / `button "删除" [disabled]`，
+  而 `user` / `viewer` / `e2e_*` 各行按钮无 `[disabled]` —— 置灰只落在自己那行。
+- **既有 flake 归因（已排除本批）**：`@p2 禁用 / 启用用户` 在 workers=6 下每轮
+  flake 一次（重试即过）。做基线对照时**先把前端改动 stash 掉**再跑 3 轮 →
+  **3/3 复现同一条**，故与本批无关；串行 workers=1 下 7/7 全绿。
+  失败点在**用例末的清理删除**（断言 `已删除` 超时），后端访问日志显示
+  `DELETE /auth/users/38/ 204` 之后紧跟一条 `PUT /auth/users/38/ → 404` ——
+  两个并行 @p2 用例共用同一 admin 账号 + 同一 DB 互踩（lessons 2026-09-06
+  「共享测试账号 = e2e 并行污染源」同族）。**机制未完全定位，未擅自改测试**，
+  留作单独处置。中途一次基线跑被 `ERR_CONNECTION_REFUSED`（vite preview 崩）
+  污染、数字不可用，按 lessons 既有口径作废重跑。
+- **兼容性**：不新增字段、不改响应结构、无需 migration；`ValidationError` 经
+  `custom_exception_handler` 归一成 `{code:'validation_error', message:'中文原因'}`
+  后由前端 `formatError` 直接 toast，前端零适配。
+- **双主题**：置灰态走 Element Plus 既有 disabled token，未引入新色值，
+  零主题工作量。
+- **已知降级（有意）**：硬刷新后 `auth.user` 可能为 null（本页不自拉 profile），
+  此时按钮回落成可点，由后端 400 + toast 兜住 —— 后端是权威守卫。
+- **应急恢复**：`.venv/Scripts/python.exe manage.py shell -c "from
+  apps.accounts.models import User; User.objects.filter(username='admin').update(is_active=True)"`
+  （`.update()` 绕过 `save()`/信号，用于恢复 `is_active` 安全；`seed_users` 救不了）。
+

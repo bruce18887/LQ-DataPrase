@@ -4,6 +4,7 @@ from django.contrib.auth import authenticate
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -227,6 +228,49 @@ class UserManagementViewSet(viewsets.ModelViewSet):
         """
         kwargs['partial'] = True
         return super().update(request, *args, **kwargs)
+
+    def perform_update(self, serializer):
+        self._guard_lockout(
+            self.request, serializer.instance, serializer.validated_data
+        )
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        # 删除没有 serializer，构造等价的「停用」变更集交给同一守卫。
+        self._guard_lockout(self.request, instance, {'is_active': False})
+        instance.delete()
+
+    @staticmethod
+    def _guard_lockout(request, target, changes):
+        """拒绝会把请求者自己、或整个系统锁在门外的改动。
+
+        ``changes`` 是本次实际写入的字段（部分更新时只含请求体出现的键），
+        缺的键回落到目标当前值。管理员一旦被停用，登录端点会在
+        ``authenticate()`` 之前直接 403（``account_disabled``），SimpleJWT
+        也会立刻吊销其 token，事后只能直连数据库改回来 —— 所以这里必须拦。
+
+        规则二实际只拦「唯一管理员把*自己*降级掉角色」：请求者必然已是
+        启用的管理员（SimpleJWT 挡住停用者），目标非自己时请求者本人就在
+        ``exclude(pk=target)`` 里，该规则不可能成立。
+        """
+        role = changes.get('role', target.role)
+        is_active = changes.get('is_active', target.is_active)
+
+        if target.pk == request.user.pk and not is_active:
+            raise ValidationError('不能禁用或删除自己的账号')
+
+        loses_admin = (
+            target.role == 'administrator'
+            and target.is_active
+            and not (role == 'administrator' and is_active)
+        )
+        still_another = (
+            User.objects.filter(role='administrator', is_active=True)
+            .exclude(pk=target.pk)
+            .exists()
+        )
+        if loses_admin and not still_another:
+            raise ValidationError('系统必须保留至少一个启用的管理员')
 
     @action(detail=True, methods=['post'])
     def reset_password(self, request, pk=None):
