@@ -7,8 +7,7 @@
 import excelize
 
 from apps.export import excel_theme as theme
-
-_FONT = "Calibri"
+from apps.export.fonts import EXCEL_FONT_FAMILY as _FONT
 
 
 def _grid_style(f, strong):

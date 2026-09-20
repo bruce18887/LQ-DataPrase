@@ -953,3 +953,26 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   `files[0]`，选中态不落盘）；② 别把「默认阈值下这一行是 A 级」写成前置断言——哪行 CPK 多少
   取决于数据，只断言充分关系（三级阈值全抬到该 CPK 之上 → 必判 D）；③ PUT 用户级设置后
   `finally` 写回**原值**而不是硬编码默认，admin storageState 是全套件共享账号。
+
+## 2026-09-20 字体接线轮：探针宿主与「单一来源」的四条
+
+- **e2e 探针的宿主兜底会让断言静默空过**：`document.querySelector(host) || documentElement`
+  在宿主不存在时落到 html/body，读到的是**继承值**，「字体栈应含 Microsoft YaHei」照样绿。
+  实测 `/data` 上 `.ag-grid-wrapper` 一直在（el-tab-pane 保持挂载），但未选文件时 AG Grid
+  **整个不渲染**，声明在 `:deep(.ag-custom-theme.ag-theme-quartz)` 上的 `--ag-*` 一个都没读到；
+  只有字号断言报出 `16px`（= body 的 `--text-base`）才把真相暴露出来。
+  规则：断言作用域内 CSS 变量必须打在**真实渲染的元素**上（`.ag-cell`），探针宿主缺失要 fail
+  而不是兜底；写这类用例先确认目标组件在该路由下是否真的挂载。
+- **判断「有没有测试」要把 `test/` 和 `frontend/e2e/` 一起扫**：我只 grep 了 `test/` 就断言
+  「项目里没有任何字体测试」，实际 `frontend/e2e/global/fonts.spec.ts` 早就在钉 `--font-sans`
+  与 `--el-font-family`，方案里写成「新建」差点重复造一套。规则：覆盖判断先两处都查，已有
+  spec 一律扩写。
+- **注释里的「必须与 X 同步」要先实测两边是否真一致**：`theme/typography.ts` 自称与
+  design-tokens 同步，实际 `fontSize` 整套 rem（12/14/16/18/20/24/30/36）与 `--p-fs-*`
+  （11/12/12.5/14/16/18/22/26/36）互相矛盾，且除 `fontFamily` 外零消费方。规则：拿它当事实
+  之前先量一次，量完发现是死导出就直接删，别留着继续骗人。
+- **跨模块统一常量要扫源码，不能只顺着工厂函数**：改前的字族旁路比审计列出的更多——
+  `export_batch_charts_xlsx.py:59` 自带第 3 份 rcParams 列表，`excel_builders.py` 在建表函数里
+  就地 `new_style(family=...)` 绕过 helpers，样式对象回读只覆盖得到「走工厂的那部分」。
+  规则：这类「单一来源」整改自带一个源码级 grep 用例把旁路变成红的（见
+  `test/backend/test_export_fonts.py::NoBypassSourceTests`），别靠 review 的眼力。

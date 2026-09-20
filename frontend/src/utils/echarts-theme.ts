@@ -8,7 +8,7 @@
 
 import { useThemeStore } from '../stores/theme'
 import { computed } from 'vue'
-import { fontFamily } from '../theme/typography'
+import { chartFontSize, fontFamily } from '../theme/typography'
 import { authApi } from '../api/auth'
 
 // ============================================================
@@ -189,19 +189,19 @@ export function useEChartsTheme() {
     title: {
       textStyle: {
         color: colors.value.titleColor,
-        fontSize: 16,
+        fontSize: chartFontSize.title,
         fontWeight: 600
       },
       subtextStyle: {
         color: colors.value.subtextColor,
-        fontSize: 12
+        fontSize: chartFontSize.body
       }
     },
 
     legend: {
       textStyle: {
         color: colors.value.legendTextColor,
-        fontSize: 12
+        fontSize: chartFontSize.body
       },
       pageTextStyle: {
         color: colors.value.legendTextColor
@@ -214,7 +214,7 @@ export function useEChartsTheme() {
       borderWidth: 1,
       textStyle: {
         color: colors.value.tooltipText,
-        fontSize: 12
+        fontSize: chartFontSize.body
       },
       axisPointer: {
         lineStyle: {
@@ -238,7 +238,7 @@ export function useEChartsTheme() {
       },
       axisLabel: {
         color: colors.value.axisLabelColor,
-        fontSize: 11
+        fontSize: chartFontSize.axis
       },
       splitLine: {
         lineStyle: {
@@ -258,7 +258,7 @@ export function useEChartsTheme() {
       },
       axisLabel: {
         color: colors.value.axisLabelColor,
-        fontSize: 11
+        fontSize: chartFontSize.axis
       },
       splitLine: {
         lineStyle: {

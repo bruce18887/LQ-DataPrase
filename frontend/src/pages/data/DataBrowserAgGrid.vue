@@ -609,7 +609,10 @@ function resolveExportName(headers: Record<string, string>, fallback: string, su
   --ag-border-color: var(--border-2);
   --ag-secondary-border-color: var(--border);
   --ag-cell-horizontal-padding: 8px;
-  --ag-font-size: 12px;
+  --ag-font-size: var(--p-fs-sm);
+  /* quartz 主题内置栈没有 CJK 档，中文一直在按浏览器默认回退；接上全局栈。
+     拉丁字符不变（两边都解析到 Segoe UI）。 */
+  --ag-font-family: var(--font-sans);
   --ag-header-column-separator-display: block;
   --ag-header-column-separator-color: var(--border-2);
   --ag-input-focus-border-color: var(--brand);

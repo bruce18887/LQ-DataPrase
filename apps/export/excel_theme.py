@@ -12,6 +12,8 @@ import unicodedata
 
 import excelize
 
+from .fonts import EXCEL_FONT_FAMILY as _FONT
+
 # ── 骨架色 ──
 COLOR_TITLE_BG = "F2F2F2"      # 浅灰：标题带
 COLOR_HEADER_BG = "1F4E79"     # 深蓝：表头带
@@ -39,8 +41,6 @@ FONT_NA = "5B6470"
 FONT_PASS = "1E7A34"
 FONT_WARN = "8A5A00"
 FONT_FAIL = "B3261E"
-
-_FONT = "Calibri"
 
 _VERDICT = {
     'pass': (FILL_PASS, FONT_ON_PASS),
