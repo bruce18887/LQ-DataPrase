@@ -27,6 +27,17 @@ from .user_prefs import get_export_dpi
 from apps.common.user_settings import get_cpk_thresholds
 from .export_complete import export_to_xlsx_optimized
 from .export_csv import export_to_csv
+from .fonts import HTML_FONT_STACK
+
+# HTML 报告的内联样式。字族取 fonts.HTML_FONT_STACK（与前端 --font-sans 同源），
+# 提到模块级是为了让「中文正文不能是裸 Arial」这条能被测试断言到。
+ATE_REPORT_CSS = (
+    "body{font-family:" + HTML_FONT_STACK + ";margin:20px}"
+    "h1{color:#2c3e50}"
+    "table{border-collapse:collapse;width:100%}"
+    "th,td{border:1px solid #ddd;padding:8px;text-align:center}"
+    "th{background:#2c3e50;color:white}"
+)
 
 # σ 档位合法区间：前端只提供 3/4/6，给个宽裕的上下界拦住 0 / 负数 / 99
 MIN_SIGMA_LEVEL = 1
@@ -229,7 +240,7 @@ class ExportViewSet(viewsets.GenericViewSet):
         yield_text = format_percent_value(yield_result['yield_pct'])
 
         html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>ATE Report - {datafile.filename}</title>
-<style>body{{font-family:Arial;margin:20px}}h1{{color:#2c3e50}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #ddd;padding:8px;text-align:center}}th{{background:#2c3e50;color:white}}</style></head>
+<style>{ATE_REPORT_CSS}</style></head>
 <body><h1>ATE 数据分析报告</h1><p>文件: {datafile.filename} | 格式: {datafile.format_type} | 程序: {datafile.program_name}</p>
 <h2>核心指标</h2><table><tr><th>总记录数</th><th>Pass</th><th>Fail</th><th>Yield</th></tr>
 <tr><td>{total_rows}</td><td>{total_pass}</td><td>{total_rows - total_pass}</td><td>{yield_text}%</td></tr></table></body></html>"""

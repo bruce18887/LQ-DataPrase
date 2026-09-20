@@ -8,7 +8,6 @@ import pandas as pd
 
 import matplotlib
 matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
@@ -21,9 +20,10 @@ from .charts import _create_histogram_chart, EXPORT_DPI_DEFAULT
 from .chart_workers import render_histogram_worker
 from .histogram_grid import finite_or_none
 from apps.common.user_settings import DEFAULT_CPK_THRESHOLDS
+from .fonts import EXCEL_FONT_FAMILY, apply_matplotlib_fonts
 
 HEADER_FILL = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-HEADER_FONT = Font(color="FFFFFF", bold=True, size=11)
+HEADER_FONT = Font(name=EXCEL_FONT_FAMILY, color="FFFFFF", bold=True, size=11)
 HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center")
 
 
@@ -56,8 +56,7 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
     Returns bytes of the .xlsx file.
     """
     th = cpk_thresholds or DEFAULT_CPK_THRESHOLDS
-    plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS']
-    plt.rcParams['axes.unicode_minus'] = False
+    apply_matplotlib_fonts()
 
     wb = Workbook()
     ws_summary = wb.active
@@ -68,8 +67,8 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
     all_fill = PatternFill(start_color="F5F5F5", end_color="F5F5F5", fill_type="solid")
     normal_fill = PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid")
     stats_label_fill = PatternFill(start_color="D9E2F3", end_color="D9E2F3", fill_type="solid")
-    summary_hyperlink_font = Font(name='Calibri', size=11, color="0563C1")
-    return_hyperlink_font = Font(name='Calibri', size=11, color="0563C1")
+    summary_hyperlink_font = Font(name=EXCEL_FONT_FAMILY, size=11, color="0563C1")
+    return_hyperlink_font = Font(name=EXCEL_FONT_FAMILY, size=11, color="0563C1")
 
     CPK_COLOR_MAP = {
         'green': ("4CAF50", "FFFFFF"), 'orange': ("FFA726", "FFFFFF"),

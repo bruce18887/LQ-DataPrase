@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import type { Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
 
 /**
@@ -7,6 +8,10 @@ import { gotoApp } from '../helpers/nav'
  * 断言与运行机器无关——正对应方案③"声明栈统一"的目标。
  * 单一事实来源：frontend/src/styles/design-tokens.css 的 --font-sans / --font-mono；
  * TS 侧（typography.ts / echarts-theme.ts）与 Element Plus 覆盖必须与之保持一致。
+ *
+ * 字号侧的「接线」同样在这里钉住：EP 的 --el-font-size-* 与 AG Grid 的
+ * --ag-font-size/--ag-font-family 必须解析回 --p-fs-* / --font-sans 的值，
+ * 这样以后谁把 token 改回去会红，而不是静默漂移成第二套字号真相。
  */
 
 // 必须与 frontend/src/styles/design-tokens.css 的 --font-sans / --font-mono 完全一致
@@ -14,6 +19,23 @@ const FONT_SANS =
   "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Source Han Sans SC', 'Helvetica Neue', Arial, sans-serif"
 const FONT_MONO =
   "'SF Mono', 'Cascadia Mono', 'Consolas', 'Liberation Mono', 'Menlo', 'Courier New', monospace"
+
+/**
+ * 页内字号/字族探针：把 var() 写在一个挂到 host 下的隐形节点上，读它的**计算值**。
+ * 直接 getPropertyValue('--x') 拿到的是书写形式，解析不到实际 px。
+ */
+function probeFont(page: Page, hostSel: string, css: string) {
+  return page.evaluate(({ hostSel, css }) => {
+    const host = document.querySelector(hostSel) || document.documentElement
+    const el = document.createElement('span')
+    el.style.cssText = 'position:absolute;left:-9999px;top:0;' + css
+    host.appendChild(el)
+    const cs = getComputedStyle(el)
+    const out = { fontFamily: cs.fontFamily, fontSize: cs.fontSize }
+    el.remove()
+    return out
+  }, { hostSel, css })
+}
 
 test.describe('@p2 字体统一', { tag: ['@p2', '@global'] }, () => {
   test('字体 Token 与单一事实来源一致', async ({ page }) => {
@@ -56,5 +78,48 @@ test.describe('@p2 字体统一', { tag: ['@p2', '@global'] }, () => {
       .poll(() => page.evaluate(() => document.documentElement.getAttribute('data-theme')))
       .not.toBe(themeBefore)
     expect(await readSans()).toBe(before)
+  })
+
+  test('Element Plus 字号变量解析回 --p-fs-* 档位', async ({ page }) => {
+    await gotoApp(page, '/dashboard')
+    // 只接了与 EP 默认值逐位相同的 4 档（small 13 / extra-large 20 无对应档位，
+    // 留给字号归档那一步），所以这里断言的也就是这 4 对。
+    const pairs = [
+      ['--el-font-size-extra-small', '--p-fs-sm', '12px'],
+      ['--el-font-size-base', '--p-fs-base', '14px'],
+      ['--el-font-size-medium', '--p-fs-lg', '16px'],
+      ['--el-font-size-large', '--p-fs-xl', '18px'],
+    ] as const
+    for (const [elVar, token, px] of pairs) {
+      const viaEl = await probeFont(page, 'body', `font-size: var(${elVar})`)
+      const viaToken = await probeFont(page, 'body', `font-size: var(${token})`)
+      expect(viaEl.fontSize, `${elVar} 应解析成 ${px}`).toBe(px)
+      expect(viaEl.fontSize, `${elVar} 与 ${token} 不同源`).toBe(viaToken.fontSize)
+    }
+  })
+
+  test('AG Grid 单元格使用全局字体栈与 --p-fs-sm（quartz 内置栈无 CJK 档）', async ({ page }) => {
+    // 必须落到真实渲染的单元格上：grid 主题变量声明在 :deep(.ag-custom-theme.ag-theme-quartz)，
+    // 未选文件时 AG Grid 整个不挂载，读外层 .ag-grid-wrapper 只会拿到 body 继承来的
+    // --font-sans，字族断言会空过（实测如此）。流程与 theme/night-visibility.spec 同款。
+    await gotoApp(page, '/data')
+    const searchInput = page.locator('input[placeholder="按文件名/程序名/标签搜索"]')
+    await searchInput.fill('BPD60320_QA2'.slice(0, 15))
+    const row = page.locator('.el-table .el-table__row').filter({ hasText: 'BPD60320_QA2' }).first()
+    await expect(row).toBeVisible({ timeout: 30_000 })
+    await row.locator('button').filter({ hasText: '查看' }).click()
+    await expect(page.locator('.tab-btn.active')).toContainText('查看数据')
+    const cell = page.locator('.ag-custom-theme .ag-center-cols-container .ag-cell').first()
+    await expect(cell).toBeVisible({ timeout: 30_000 })
+
+    const style = await cell.evaluate((el) => {
+      const cs = getComputedStyle(el)
+      return { fontFamily: cs.fontFamily, fontSize: cs.fontSize }
+    })
+    const stripped = style.fontFamily.replace(/["']/g, '')
+    for (const name of ['Microsoft YaHei', 'Noto Sans CJK SC']) {
+      expect(stripped, 'AG Grid 字体栈应含中文字体档').toContain(name)
+    }
+    expect(style.fontSize, 'AG Grid 字号应解析成 --p-fs-sm').toBe('12px')
   })
 })

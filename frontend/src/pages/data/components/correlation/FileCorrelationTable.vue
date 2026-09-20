@@ -230,7 +230,8 @@ const columnDefs = computed(() => {
   --ag-header-background-color: var(--bg-2);
   --ag-border-color: var(--border);
   --ag-row-hover-color: var(--bg-2);
-  --ag-font-size: 12px;
+  --ag-font-size: var(--p-fs-sm);
+  --ag-font-family: var(--font-sans);  /* quartz 内置栈无 CJK 档，见 DataBrowserAgGrid 同款注释 */
   --ag-header-foreground-color: var(--text);
   border-radius: 0 0 8px 8px;
   overflow: hidden;

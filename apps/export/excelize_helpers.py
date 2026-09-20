@@ -5,6 +5,8 @@ import pandas as pd
 import numpy as np
 import excelize
 
+from .fonts import EXCEL_FONT_FAMILY as _FONT
+
 # ── Color Palette (matches old project) ──
 COLOR_HEADER_BG = "2C3E50"
 COLOR_HEADER_FONT = "FFFFFF"
@@ -33,7 +35,7 @@ CPK_D_FILL = ["F44336"]   # red — CPK < 1.0
 def make_header_style(f, font_size=12):
     """Dark header with white bold text, medium borders."""
     return f.new_style(excelize.Style(
-        font=excelize.Font(bold=True, size=float(font_size), color=COLOR_HEADER_FONT, family="Calibri"),
+        font=excelize.Font(bold=True, size=float(font_size), color=COLOR_HEADER_FONT, family=_FONT),
         fill=excelize.Fill(type="pattern", color=[COLOR_HEADER_BG], pattern=1),
         border=[
             excelize.Border(type="left", color=COLOR_BORDER, style=2),
@@ -48,7 +50,7 @@ def make_header_style(f, font_size=12):
 def make_data_style(f):
     """Light gray background, dark text, thin borders."""
     return f.new_style(excelize.Style(
-        font=excelize.Font(size=10, color=COLOR_FONT_DARK, family="Calibri"),
+        font=excelize.Font(size=10, color=COLOR_FONT_DARK, family=_FONT),
         fill=excelize.Fill(type="pattern", color=[COLOR_DATA_BG], pattern=1),
         border=[
             excelize.Border(type="left", color=COLOR_BORDER, style=1),
@@ -63,7 +65,7 @@ def make_data_style(f):
 def make_red_style(f):
     """Red background, white bold text — for fail cell highlighting."""
     return f.new_style(excelize.Style(
-        font=excelize.Font(bold=True, size=10, color="FFFFFF", family="Calibri"),
+        font=excelize.Font(bold=True, size=10, color="FFFFFF", family=_FONT),
         fill=excelize.Fill(type="pattern", color=[COLOR_RED_BG], pattern=1),
         border=[
             excelize.Border(type="left", color=COLOR_BORDER, style=1),
@@ -78,7 +80,7 @@ def make_red_style(f):
 def make_unit_style(f):
     """Italic 9pt for unit rows."""
     return f.new_style(excelize.Style(
-        font=excelize.Font(size=9, color=COLOR_FONT_DARK, italic=True, family="Calibri"),
+        font=excelize.Font(size=9, color=COLOR_FONT_DARK, italic=True, family=_FONT),
         fill=excelize.Fill(type="pattern", color=[COLOR_DATA_BG], pattern=1),
         border=[
             excelize.Border(type="left", color=COLOR_BORDER, style=1),
@@ -93,7 +95,7 @@ def make_unit_style(f):
 def make_title_style(f):
     """Large title style for report headers."""
     return f.new_style(excelize.Style(
-        font=excelize.Font(bold=True, size=16, color=COLOR_HEADER_FONT, family="Calibri"),
+        font=excelize.Font(bold=True, size=16, color=COLOR_HEADER_FONT, family=_FONT),
         fill=excelize.Fill(type="pattern", color=[COLOR_HEADER_BG], pattern=1),
         alignment=excelize.Alignment(horizontal="center", vertical="center"),
     ))
@@ -102,27 +104,27 @@ def make_title_style(f):
 # ── Correlation 模板样式（对齐 Data/TemplateExport/Correlation_Excel/Correlation.xlsx）──
 
 def make_template_title_style(f):
-    """模板标题：等线 14、居中、thin 边框（无填充）。"""
+    """模板标题：统一字族 14、居中、thin 边框（无填充）。"""
     return f.new_style(excelize.Style(
-        font=excelize.Font(size=14, family="等线"),
+        font=excelize.Font(size=14, family=_FONT),
         border=thin_border(),
         alignment=excelize.Alignment(horizontal="center", vertical="center"),
     ))
 
 
 def make_template_header_style(f):
-    """模板表头：Arial 10、居中、thin 边框（无深色底）。"""
+    """模板表头：统一字族 10、居中、thin 边框（无深色底）。"""
     return f.new_style(excelize.Style(
-        font=excelize.Font(size=10, family="Arial"),
+        font=excelize.Font(size=10, family=_FONT),
         border=thin_border(),
         alignment=excelize.Alignment(horizontal="center", vertical="center"),
     ))
 
 
 def make_template_data_style(f, num_fmt=None):
-    """模板数据格：等线 10、居中、thin 边框（无填充）；可选数字格式。"""
+    """模板数据格：统一字族 10、居中、thin 边框（无填充）；可选数字格式。"""
     return f.new_style(excelize.Style(
-        font=excelize.Font(size=10, family="等线"),
+        font=excelize.Font(size=10, family=_FONT),
         border=thin_border(),
         alignment=excelize.Alignment(horizontal="center", vertical="center"),
         custom_num_fmt=num_fmt,
@@ -130,9 +132,9 @@ def make_template_data_style(f, num_fmt=None):
 
 
 def make_template_red_style(f, num_fmt=None):
-    """模板 Fail 格：等线 10、浅红底（F5B7B1）、thin 边框；可选数字格式。"""
+    """模板 Fail 格：统一字族 10、浅红底（F5B7B1）、thin 边框；可选数字格式。"""
     return f.new_style(excelize.Style(
-        font=excelize.Font(size=10, family="等线"),
+        font=excelize.Font(size=10, family=_FONT),
         fill=excelize.Fill(type="pattern", color=[COLOR_RED_BG], pattern=1),
         border=thin_border(),
         alignment=excelize.Alignment(horizontal="center", vertical="center"),
@@ -145,7 +147,7 @@ def make_template_red_style(f, num_fmt=None):
 def make_plain_header_style(f, font_size=11):
     """默认风格表头：白底、黑加粗、细灰边框、居中。"""
     return f.new_style(excelize.Style(
-        font=excelize.Font(bold=True, size=float(font_size), color=COLOR_PLAIN_FONT, family="Calibri"),
+        font=excelize.Font(bold=True, size=float(font_size), color=COLOR_PLAIN_FONT, family=_FONT),
         border=plain_thin_border(),
         alignment=excelize.Alignment(horizontal="center", vertical="center"),
     ))
@@ -154,7 +156,7 @@ def make_plain_header_style(f, font_size=11):
 def make_plain_data_style(f, font_size=11):
     """默认风格数据格：白底、黑字、细灰边框、居中。"""
     return f.new_style(excelize.Style(
-        font=excelize.Font(size=float(font_size), color=COLOR_PLAIN_FONT, family="Calibri"),
+        font=excelize.Font(size=float(font_size), color=COLOR_PLAIN_FONT, family=_FONT),
         border=plain_thin_border(),
         alignment=excelize.Alignment(horizontal="center", vertical="center"),
     ))
@@ -163,7 +165,7 @@ def make_plain_data_style(f, font_size=11):
 def make_plain_red_style(f, font_size=11):
     """默认风格 Fail 格：纯红底（FF0000）、黑加粗字、细灰边框（截图样式）。"""
     return f.new_style(excelize.Style(
-        font=excelize.Font(bold=True, size=float(font_size), color=COLOR_PLAIN_FONT, family="Calibri"),
+        font=excelize.Font(bold=True, size=float(font_size), color=COLOR_PLAIN_FONT, family=_FONT),
         fill=excelize.Fill(type="pattern", color=[COLOR_PLAIN_RED_FILL], pattern=1),
         border=plain_thin_border(),
         alignment=excelize.Alignment(horizontal="center", vertical="center"),
@@ -173,7 +175,7 @@ def make_plain_red_style(f, font_size=11):
 def make_plain_orange_style(f, font_size=11):
     """默认风格「与上下限重叠」格：橙底（FFC000）、黑字、细灰边框。"""
     return f.new_style(excelize.Style(
-        font=excelize.Font(size=float(font_size), color=COLOR_PLAIN_FONT, family="Calibri"),
+        font=excelize.Font(size=float(font_size), color=COLOR_PLAIN_FONT, family=_FONT),
         fill=excelize.Fill(type="pattern", color=[COLOR_PLAIN_ORANGE_FILL], pattern=1),
         border=plain_thin_border(),
         alignment=excelize.Alignment(horizontal="center", vertical="center"),

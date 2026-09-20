@@ -20,6 +20,7 @@ from apps.analysis.services.statistics.kde import GaussianKDE
 from apps.export.histogram_grid import build_histogram_grid, finite_or_none
 from apps.common.user_settings import DEFAULT_CPK_THRESHOLDS
 from .charts import EXPORT_DPI_DEFAULT
+from .fonts import apply_matplotlib_fonts
 
 
 def build_batch_charts_pptx(datafile, df, metadata, params,
@@ -59,9 +60,7 @@ def build_batch_charts_pptx(datafile, df, metadata, params,
     blank_layout = prs.slide_layouts[6]
     th = cpk_thresholds or DEFAULT_CPK_THRESHOLDS
 
-    # Chinese font support
-    plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
-    plt.rcParams['axes.unicode_minus'] = False
+    apply_matplotlib_fonts()
 
     for param in params:
         if param not in df.columns:

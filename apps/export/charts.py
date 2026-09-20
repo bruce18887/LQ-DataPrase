@@ -12,6 +12,7 @@ from apps.analysis.services.statistics.kde import GaussianKDE
 from apps.export.histogram_grid import (
     bin_percentages, build_histogram_grid, finite_or_none,
 )
+from apps.export.fonts import apply_matplotlib_fonts
 
 COLORS_SITE_8 = ['#E53935', '#1E88E5', '#43A047', '#F9A825', '#8E24AA', '#00ACC1', '#F57C00', '#D81B60']
 COLOR_LSL = '#C62828'
@@ -56,8 +57,7 @@ def _render_histogram_payload(
     （data_series/site_series 为 ndarray，site_values 为标量列表）——
     供 chart_workers 多进程渲染调用，不依赖 DataFrame。
     """
-    plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS']
-    plt.rcParams['axes.unicode_minus'] = False
+    apply_matplotlib_fonts()
 
     if len(data_series) == 0:
         return io.BytesIO()

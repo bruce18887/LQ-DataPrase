@@ -12,6 +12,7 @@ import excelize
 
 from apps.analysis.services.statistics import filter_finite, get_1d_from
 from .columns import measurable_numeric_columns
+from .fonts import EXCEL_FONT_FAMILY as _FONT
 from .spec_limits import is_placeholder_limit, parse_spec_limit
 from .excelize_helpers import (
     COLOR_FONT_DARK, COLOR_ORIGINAL_LIMIT, COLOR_SIGMA_TIGHT, COLOR_SIGMA_NOT_TIGHT,
@@ -57,17 +58,17 @@ def build_sigma_limit_sheet(f, df, metadata, sigma_level=3, only_valid=False):
 
     orig_limit_fill = f.new_style(excelize.Style(
         fill=excelize.Fill(type="pattern", color=[COLOR_ORIGINAL_LIMIT], pattern=1),
-        font=excelize.Font(size=10, color=COLOR_FONT_DARK, family="Calibri"),
+        font=excelize.Font(size=10, color=COLOR_FONT_DARK, family=_FONT),
         alignment=excelize.Alignment(horizontal="center", vertical="center"),
     ))
     sigma_tight_fill = f.new_style(excelize.Style(
         fill=excelize.Fill(type="pattern", color=[COLOR_SIGMA_TIGHT], pattern=1),
-        font=excelize.Font(bold=True, size=10, color="FFFFFF", family="Calibri"),
+        font=excelize.Font(bold=True, size=10, color="FFFFFF", family=_FONT),
         alignment=excelize.Alignment(horizontal="center", vertical="center"),
     ))
     sigma_not_tight_fill = f.new_style(excelize.Style(
         fill=excelize.Fill(type="pattern", color=[COLOR_SIGMA_NOT_TIGHT], pattern=1),
-        font=excelize.Font(size=10, color=COLOR_FONT_DARK, family="Calibri"),
+        font=excelize.Font(size=10, color=COLOR_FONT_DARK, family=_FONT),
         alignment=excelize.Alignment(horizontal="center", vertical="center"),
     ))
 

@@ -12,6 +12,14 @@
 
 :root {
   --el-font-family: var(--font-sans);
+
+  /* EP 字号接上 --p-fs-*。只接这 4 档是因为它们与 EP 默认值逐位相同
+     （12/14/16/18），换过来不改变任何像素；EP 的 small 13px 与
+     extra-large 20px 在 token 里没有对应档位，等字号归档时一并定。 */
+  --el-font-size-extra-small: var(--p-fs-sm);
+  --el-font-size-base: var(--p-fs-base);
+  --el-font-size-medium: var(--p-fs-lg);
+  --el-font-size-large: var(--p-fs-xl);
 }
 
 /* ========================================
