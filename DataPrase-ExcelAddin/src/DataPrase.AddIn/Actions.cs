@@ -83,9 +83,11 @@ namespace DataPrase.AddIn
                     exp = ExpTemplate.Inject(app, workbook);
                 }
 
-                ExpControls.Build(exp, names, ProcessRunner.ReadLimitSelector(exp), ProcessRunner.ReadPercentToggles(exp));
+                // 顺序同 ProcessRunner：先让分布表有数据，再建控件面板。
                 ProcessRunner.WriteExpDistribution(
                     exp, workbook, ProcessSession.Layout, ProcessSession.Plan, ProcessSession.Spec, columns[0]);
+                ProcessRunner.WriteItemCaption(exp, ProcessSession.Items[columns[0]].TestName);
+                ExpControls.Build(exp, names, ProcessRunner.ReadLimitSelector(exp), ProcessRunner.ReadPercentToggles(exp));
                 exp.Activate();
             }
         }

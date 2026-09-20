@@ -387,3 +387,18 @@ class ResultFormulaTests(_LayoutBase):
         for label in (QA1_ROW, QA2_ROW):
             self.assertEqual(self._formula(f, label), '')
             self.assertEqual(self._value(f, label), 'N/A')
+
+
+class HeaderStyleTests(_LayoutBase):
+    """表头行（Test Name / 参数名 …）字号为 10。"""
+
+    def test_header_row_font_size_is_10(self):
+        all_stats = {
+            'FT': {PARAM: _stats(1.0)},
+            'QA1': {PARAM: _stats(1.0)},
+            'QA2': {PARAM: _stats(1.0)},
+        }
+        f = self._build(all_stats)
+        ws = _load_workbook(f)[SHEET]
+        for ref in ('A3', 'B3', 'C3'):
+            self.assertEqual(ws[ref].font.size, 10, ref)

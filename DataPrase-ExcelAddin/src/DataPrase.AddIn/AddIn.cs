@@ -24,8 +24,13 @@ namespace DataPrase.AddIn
         }
     }
 
+    /// <summary>
+    /// 版本号的唯一事实源是 <c>Properties/AssemblyInfo.cs</c> 的 AssemblyVersion——
+    /// 之前这里是另一个手写常量，两处各改各的，导致「文件名、文件属性、运行时字符串」互不印证。
+    /// </summary>
     internal static class AddInVersion
     {
-        public const string Value = "0.3.0";
+        public static readonly string Value =
+            typeof(AddIn).Assembly.GetName().Version.ToString(3);
     }
 }

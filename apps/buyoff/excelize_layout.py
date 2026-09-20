@@ -98,7 +98,7 @@ def build_buyoff_form(f, role_mapping, common_items, all_stats, datasets, ordere
         f.set_sheet_name(sheet_list[0], sheet_name)
 
     # ── Shared styles ──
-    header_style = make_header_style(f, 12)
+    header_style = make_header_style(f, 10)
     data_style = make_data_style(f)
     unit_style = make_unit_style(f)
     title_style = make_title_style(f, 14)

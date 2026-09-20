@@ -92,10 +92,16 @@ namespace DataPrase.AddIn
                         names.Add(items[column].TestName);
                     }
 
+                    // 先写分布公式、后建控件面板：面板建失败也不能让 Exp 停在模板的外部引用上。
+                    // 上一版顺序相反，Build 抛异常把 WriteExpDistribution 一起带没了 → 分布图全 0。
+                    int firstColumn = FirstDataColumn(items);
+                    WriteExpDistribution(exp, workbook, layout, plan, spec, firstColumn);
+                    if (items.ContainsKey(firstColumn))
+                    {
+                        WriteItemCaption(exp, items[firstColumn].TestName);
+                    }
+
                     ExpControls.Build(exp, names, ReadLimitSelector(exp), ReadPercentToggles(exp));
-                    // 模板里的公式全部指向外部工作簿（[1]Data!…），不填就是一张 #REF! 表；
-                    // 这里直接按第一个测试项填好，用户之后可用表上控件换项。
-                    WriteExpDistribution(exp, workbook, layout, plan, spec, FirstDataColumn(items));
                 }, "已复制 Exp 分布表 + 表上控件（默认第一个测试项）");
             }
 
@@ -362,6 +368,23 @@ namespace DataPrase.AddIn
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Exp!B43：原 VBA（<c>DataParser.cls:393</c>）把下拉选中的测试项名写在这里，图表标题取它。
+        /// 新链路一度丢了这一步，标题就一直停在模板值 'Date' 上。
+        /// </summary>
+        internal static void WriteItemCaption(Excel.Worksheet exp, string testName)
+        {
+            Excel.Range cell = (Excel.Range)exp.Cells[43, 2];
+            try
+            {
+                cell.Value2 = testName;
+            }
+            finally
+            {
+                ExcelInterop.Release(cell);
+            }
         }
 
         /// <summary>写入 B36（阶梯基准选择器，原模板由 5 个 ActiveX 选项按钮驱动）。</summary>
