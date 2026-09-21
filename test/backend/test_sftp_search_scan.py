@@ -1,4 +1,5 @@
-"""字节级内容扫描内核（spec §3.5，移植自参考工具 csv_content_searcher.py）。
+"""扫描内核（spec §3.5）：字节级内容匹配（参考工具 csv_content_searcher.py）
++ CSV 列值读取（参考工具 csv_column_reader.py）。
 
 跑法：python manage.py test test.backend.test_sftp_search_scan
 """
@@ -33,13 +34,20 @@ def scan(content: bytes, path: str = PATH, **over):
 
 
 class _NoPrefetchFile:
-    """只暴露 read/close/with 的句柄壳：真 paramiko 老版本就没有 ``prefetch``。"""
+    """只暴露 read/readline/close/with 的句柄壳：真 paramiko 老版本就没有 ``prefetch``。
+
+    ``readline`` 也得有 —— ``read_column`` 是行级读取，只给 ``read`` 就等于把
+    「没有 prefetch」测成了「没有 readline」，那是另一回事。
+    """
 
     def __init__(self, inner):
         self._inner = inner
 
     def read(self, n: int = -1) -> bytes:
         return self._inner.read(n)
+
+    def readline(self) -> bytes:
+        return self._inner.readline()
 
     def close(self):
         self._inner.close()
@@ -325,3 +333,145 @@ class ErrorPathTests(SimpleTestCase):
         cand = walker.Candidate(PATH, 'a.csv', len(content), 0)
         self.assertIsNotNone(scanners.scan_file(
             _NoPrefetchSftp({PATH: content}), cand, spec()))
+
+
+class ColumnTests(SimpleTestCase):
+    ATE = ('[HEADER]\r\nTestFile,D:\\stdf\\x.stdf\r\n'
+           'StartTime,2026-09-01 08:00:00,\r\n[DATA]\r\n'
+           'SN,ShadowReg2,Vcc\r\n1,0.42,3\r\n2,,3.1\r\n3,0.44,\r\n').encode()
+
+    def read(self, content=None, column='ShadowReg2', rows=10, **over):
+        raw = self.ATE if content is None else content
+        base = {'roots': ['/d'], 'mode': 'column',
+                'column_name': column, 'column_rows': rows}
+        base.update(over)
+        cand = walker.Candidate(PATH, 'a.csv', len(raw), 0)
+        return scanners.read_column(FakeSftp({PATH: raw}), cand,
+                                    contracts.parse_spec(base))
+
+    def test_values_in_row_order_skipping_blanks(self):
+        self.assertEqual(self.read()['values'], ['0.42', '0.44'])
+
+    def test_respects_column_rows(self):
+        self.assertEqual(self.read(rows=1)['values'], ['0.42'])
+
+    def test_absent_column_returns_none(self):
+        self.assertIsNone(self.read(column='NoSuchCol'))
+
+    def test_column_position_follows_header_order(self):
+        """表头顺序才是列位置的事实来源，不能按列名猜偏移。"""
+        self.assertEqual(self.read(column='Vcc')['values'], ['3', '3.1'])
+
+    def test_header_metadata_extracted(self):
+        out = self.read()
+        self.assertEqual(out['test_file'], 'x.stdf')
+        self.assertEqual(out['start_time'], '2026-09-01 08:00:00')
+
+    def test_no_data_section_means_no_table(self):
+        """[DATA] 之前的 key,value 行不是数据表。参考工具缺这条约束，
+        列名撞上文件头键名就会读出垃圾 —— 这里钉住它。"""
+        self.assertIsNone(self.read(
+            content=b'TestFile,a\r\nSN,ShadowReg2\r\n1,0.5\r\n'))
+
+    def test_gbk_column_name_and_values(self):
+        raw = '[DATA]\r\nSN,漏电电流\r\n1,0.5\r\n'.encode('gbk')
+        self.assertEqual(self.read(content=raw, column='漏电电流')['values'],
+                         ['0.5'])
+
+    def test_short_rows_are_skipped_not_index_error(self):
+        raw = b'[DATA]\r\nSN,ShadowReg2,Vcc\r\n1\r\n2,0.9,4\r\n'
+        self.assertEqual(self.read(content=raw)['values'], ['0.9'])
+
+    def test_no_values_returns_none(self):
+        self.assertIsNone(self.read(
+            content=b'[DATA]\r\nSN,ShadowReg2\r\n1,\r\n2,\r\n'))
+
+    def test_unreadable_file_returns_none_and_logs(self):
+        with self.assertLogs('apps.sftp.search.scanners', level='WARNING'):
+            cand = walker.Candidate('/d/nope.csv', 'nope.csv', 1, 0)
+            self.assertIsNone(scanners.read_column(
+                FakeSftp({}), cand,
+                contracts.parse_spec({'roots': ['/d'], 'mode': 'column',
+                                      'column_name': 'x'})))
+
+    def test_connection_error_propagates(self):
+        cand = walker.Candidate(PATH, 'a.csv', 10, 0)
+        with self.assertRaises(scanners.CONNECTION_ERRORS):
+            scanners.read_column(FakeSftp({}, broken=True), cand,
+                                 contracts.parse_spec(
+                                     {'roots': ['/d'], 'mode': 'column',
+                                      'column_name': 'x'}))
+
+    # —— 计划外补的钉桩：都是「用户看得见结果」的分支，不是实现细节 ——
+
+    def test_absent_column_is_not_a_read_failure(self):
+        """「列不存在」与「文件读失败」都返回 None，分水岭就是有没有 WARNING：
+        列不存在是正常无结果（几千个文件里只有几个含该列是常态），不该刷日志。"""
+        with self.assertNoLogs('apps.sftp.search.scanners', level='WARNING'):
+            self.assertIsNone(self.read(column='NoSuchCol'))
+
+    def test_blank_line_between_data_marker_and_header_is_skipped(self):
+        """真实形态：``Data/`` 下 56/56 个含 ``[DATA]`` 的 ATE datalog 都在
+        ``[DATA]`` 与表头之间夹一个空行。把「[DATA] 后第一行」当表头（参考工具就是这么
+        写的）会对**所有**真文件读不出列 —— 功能整体静默失效。"""
+        self.assertEqual(
+            self.read(content=b'[DATA]' + CRLF + CRLF
+                      + b'SN,ShadowReg2' + CRLF + b'1,0.42' + CRLF)['values'],
+            ['0.42'])
+
+    def test_unit_and_limit_rows_count_as_values(self):
+        """钉**当前**行为（与参考工具一致）：真文件表头下面紧跟 Unit/Min/Max 三行，
+        它们会被当值取走。要不要跳过它们是产品决定，改之前先看这条测试。"""
+        raw = (b'[DATA]' + CRLF + CRLF + b'SN,LKG_VIN' + CRLF
+               + b'Unit,nA' + CRLF + b'Min,-50.00' + CRLF
+               + b'Max,50.00' + CRLF + b'1,7.495500' + CRLF)
+        self.assertEqual(self.read(content=raw, column='LKG_VIN')['values'],
+                         ['nA', '-50.00', '50.00', '7.495500'])
+
+    def test_naive_comma_split_matches_quoted_field_free_data(self):
+        """切分口径：本域 ``[DATA]`` 段实测**没有**引号字段也没有内嵌逗号
+        （Data/ 全量比对 naive ``split(',')`` 与 ``csv.reader`` 逐行结果一致，含 342 列的
+        表头），所以沿用参考工具的朴素切分。这条钉住「表头里没有带引号的项名」这个前提。"""
+        header = b'SN,LKG_VIN,Vcc'
+        out = self.read(content=b'[DATA]' + CRLF + header + CRLF
+                        + b'1,7.49,3' + CRLF, column='Vcc')
+        self.assertEqual(out['values'], ['3'])
+
+    def test_quoted_field_with_embedded_comma_shifts_the_index(self):
+        """朴素切分的**可观察代价**（本域实测不发生，钉行为而非钉理想）：含引号逗号的
+        项名会把列索引右移，于是该列一格都读不到 → None。真出现这种 datalog 时该改的是
+        切分方式，而不是把 None 当「这个文件没有该列」放过。"""
+        self.assertIsNone(self.read(
+            column='Vcc',
+            content=b'[DATA]' + CRLF + b'SN,"A,B",Vcc' + CRLF + b'1,x,3' + CRLF))
+
+    def test_result_carries_candidate_metadata(self):
+        """engine/SSE 直接消费这个 dict，形状在此钉住，别等前端发现。"""
+        out = self.read()
+        self.assertEqual(out['path'], PATH)
+        self.assertEqual(out['name'], 'a.csv')
+        self.assertEqual(out['size'], len(self.ATE))
+        self.assertEqual(out['mtime'], 0)
+        self.assertEqual(out['column_name'], 'ShadowReg2')
+
+    def test_long_value_capped_at_snippet_max(self):
+        raw = b'[DATA]' + CRLF + b'SN,ShadowReg2' + CRLF + b'1,' + b'9' * 400 + CRLF
+        self.assertEqual(len(self.read(content=raw)['values'][0]),
+                         scanners.SNIPPET_MAX)
+
+    def test_scan_budget_applies_to_column_reads(self):
+        """``max_scan_bytes`` 是搜索级预算、与模式无关：某列全空时不该把巨型日志整读
+        （contracts 明写「会悄悄失效的字段比报错更糟」）。"""
+        raw = (b'[DATA]' + CRLF + b'SN,ShadowReg2' + CRLF
+               + (b'1,' + CRLF) * 4000)
+        self.assertIsNone(self.read(content=raw, max_scan_bytes=4096))
+
+    def test_missing_prefetch_attribute_still_reads_column(self):
+        """列值读取同样只把 prefetch 当加速，不是必需能力。"""
+        raw = b'[DATA]' + CRLF + b'SN,ShadowReg2' + CRLF + b'1,0.42' + CRLF
+        cand = walker.Candidate(PATH, 'a.csv', len(raw), 0)
+        out = scanners.read_column(
+            _NoPrefetchSftp({PATH: raw}), cand,
+            contracts.parse_spec({'roots': ['/d'], 'mode': 'column',
+                                  'column_name': 'ShadowReg2'}))
+        self.assertEqual(out['values'], ['0.42'])

@@ -1,4 +1,7 @@
-"""字节级内容扫描内核（spec §3.5，移植参考工具 ``csv_content_searcher.py:407`` 全套）。
+"""扫描内核（spec §3.5）：字节级内容匹配 ``scan_file`` 与列值读取 ``read_column``。
+
+两个入口共用一套地基（needle 构造、编码四探、``[DATA]``/文件头解析、异常分层判据），
+移植参考工具 ``csv_content_searcher.py:407`` 与 ``csv_column_reader.py`` 全套。
 
 四条不能写的性质（前两条是「两档引擎给出同一结果集」的前提）：
 
@@ -202,6 +205,21 @@ _HEAD_FIELDS = {'TestFile': 'test_file', 'StartTime': 'start_time',
                 'PtsModifyTime': 'pts_modify_time'}
 
 
+def _section_of(text: str) -> Optional[str]:
+    """``'[Data],,,,'`` → ``'DATA'``，非 section 行 → ``None``。
+
+    section 行语法的**唯一**解释处：``parse_head`` 与 :func:`read_column` 都要判它，
+    两处各写一遍就会在对方面前悄悄分叉（比如一处漏了 ``upper()``，同一个文件就变成
+    「内容档认得 ``[DATA]``、列值档读不出表头」）。真实 ATE datalog 写的是
+    ``[Data],,,,``（大小写混排 + 尾随逗号，有的行连通道名都跟在同一行上），
+    所以只取 ``]`` 之前的部分比对，而非整行相等。
+    """
+    if not text.startswith('['):
+        return None
+    name, _, _ = text[1:].partition(']')
+    return name.strip().upper()
+
+
 def parse_head(head: bytes) -> Tuple[str, str, str]:
     """从文件头抽 ``(TestFile, StartTime, PtsModifyTime)``，遇 ``[DATA]`` 即停。
 
@@ -220,8 +238,9 @@ def parse_head(head: bytes) -> Tuple[str, str, str]:
         if encoding is None:
             encoding = detect_encoding(raw)
         text = decode_line(raw, encoding).rstrip('\r')
-        if text.startswith('['):
-            if text[1:].partition(']')[0].strip().upper() == 'DATA':
+        section = _section_of(text)
+        if section is not None:
+            if section == 'DATA':
                 break
             continue          # 别的 section 标记行照常跳过
         key, _, value = text.partition(',')
@@ -378,3 +397,89 @@ def scan_file(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, obj
         'pts_modify_time': pts_modify_time,
     }
     return result
+
+
+def read_column(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, object]]:
+    """取 ``spec.column_name`` 列的前 ``spec.column_rows`` 个**非空**值（spec §3.5 末段）。
+
+    三段状态机：``[DATA]`` 之前只攒 head 字节（元数据交给 :func:`parse_head`，与
+    :func:`scan_file` 共用同一套半行保护）→ 定表头取列索引 → 逐行取值，凑够即早停。
+    与 :func:`scan_file` 的分工：那边是字节级命中、要整词判定，这边是**行级**取第 N 格，
+    所以逐行 ``readline()``，不建滚动窗口。
+
+    返回 ``None`` 有两件事，靠「有没有 WARNING」分开（各有测试钉着）：表头里没有这一列
+    = 这个文件正常没有结果（几千个文件里只有几个含该列是常态，刷日志会淹掉真错误）；
+    读不了 = 文件级故障，必须留 WARNING。
+
+    切分口径是**朴素** ``split(',')``（与参考工具一致，也与 :func:`parse_head` 的
+    ``partition(',')`` 同族）：本域 ``[DATA]`` 段实测无引号字段、无内嵌逗号，与
+    ``csv.reader`` 逐行结果一致。带引号逗号的项名（ETS 那批文件里有）会把列索引右移，
+    代价与理由见测试 ``test_quoted_field_with_embedded_comma_shifts_the_index``。
+    """
+    want = max(1, spec.column_rows)
+    values: List[str] = []
+    head = b''
+    encoding: Optional[str] = None
+    in_data = False
+    headers_read = False
+    col_idx = 0
+    scanned = 0
+
+    try:
+        with sftp.open(cand.path, 'rb') as remote:
+            _start_prefetch(remote, cand.size)   # readline 每次只取一个 bufsize，更依赖流水线
+            while True:
+                raw = remote.readline()
+                if not raw:
+                    break                       # EOF：读到的值照样返回，读不够也不报错
+                scanned += len(raw)
+                if spec.max_scan_bytes and scanned >= spec.max_scan_bytes:
+                    break     # 预算与模式无关：某列全空的巨型日志不该被整读
+                if encoding is None and raw.strip():
+                    # 只按**非空**首行探测：空行谁都能解开，会把 utf-8 锁死在编码上
+                    encoding = detect_encoding(raw)
+                text = decode_line(raw, encoding).strip()
+                if not in_data:
+                    if len(head) < HEAD_SIZE:
+                        head += raw[:HEAD_SIZE - len(head)]
+                    if _section_of(text) == 'DATA':
+                        in_data = True
+                    continue
+                if not text:
+                    # [DATA] 与表头之间的空行 —— 真实 ATE datalog（Data/ 下 56/56 个
+                    # 含 [DATA] 的文件）都有这一行，不跳就会把空行当表头、对所有真文件
+                    # 永远读不出列（参考工具正是这个行为）。
+                    continue
+                if not headers_read:
+                    headers = [h.strip() for h in text.split(',')]
+                    if spec.column_name not in headers:
+                        return None          # 列不存在：不是故障，安静地没有结果
+                    col_idx = headers.index(spec.column_name)
+                    headers_read = True
+                    continue
+                row = text.split(',')
+                if col_idx >= len(row):
+                    continue                 # 短行（尾列整片为空时常发生）跳过，不 IndexError
+                value = row[col_idx].strip()
+                if value:
+                    values.append(value[:SNIPPET_MAX])
+                    if len(values) >= want:
+                        break
+    except CONNECTION_ERRORS as exc:
+        if not _is_file_scoped(exc):
+            raise              # 与 scan_file 同一条判据：脏连接交回 SearchSession
+        logger.warning('SFTP search could not read column of %s: %s', cand.path, exc)
+        return None
+    except Exception as exc:  # noqa: BLE001 —— 单文件的意外只丢这个文件，不丢搜索
+        logger.warning('Search could not read column of %s: %s', cand.path, exc)
+        return None
+
+    if not values:
+        return None
+    test_file, start_time, pts_modify_time = parse_head(head)
+    return {
+        'path': cand.path, 'name': cand.name, 'size': cand.size, 'mtime': cand.mtime,
+        'column_name': spec.column_name, 'values': values,
+        'test_file': test_file, 'start_time': start_time,
+        'pts_modify_time': pts_modify_time,
+    }
