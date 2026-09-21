@@ -1,17 +1,17 @@
-"""引擎选择谓词（spec §3.3）。本文件后续由「engine 阶段机」任务续写，目前只有谓词。
+"""引擎选择谓词（spec §3.3）：这次查询能不能用服务端 grep。
 
-搜索引擎有两档：客户端字节扫描（永远正确）与服务端 ``grep`` 加速。本模块的唯一职责是
-回答「这次能不能用 grep」，而它存在的全部理由是：
+阶段机与事件流在 :mod:`apps.sftp.search.runner`（spec §3.8 / §3.9），本模块只回答
+「这次用哪一档」。它存在的全部理由是：
 
     **同一个查询在有无 grep 的两台服务器上必须给出同一个结果集。**
 
 因此回落条件里没有一条是性能取舍——每一条都是「grep 档在这一查询上给不出与 client 档
 相同的结果集」。宁可慢，不可静默少结果。任何一条不满足即回落 client，且**必须带一句
-可显示的原因**（engine 转成 ``notice`` 事件，前端展示），不能让用户猜这次是哪档跑的。
+可显示的原因**（runner 转成 ``notice`` 事件，前端展示），不能让用户猜这次是哪档跑的。
 """
 
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Optional, Tuple
 
 from apps.sftp.search import filters
 from apps.sftp.search.contracts import SearchSpec
@@ -39,6 +39,10 @@ GREP_SELECT_INTERSECTION_MSG = (
 NEEDS_FIND_XARGS_MSG = (
     '按大小/时间筛文件、或文件名模式需与「仅数据文件」求交集，这些只有 GNU find/xargs '
     '能表达，服务器不具备，故改用客户端引擎')
+# 这条不是回落理由，而是「连探测都不必发」的说明：列候选/列值/用户关掉加速的查询用不上
+# grep，探测那一次 exec 往返是白花的。runner._probe 把它当 ProbeResult.reason 用，
+# select_engine 读到的是自己那几条 spec 侧判据，两者不冲突。
+PROBE_NO_ACCELERATION = '本次查询不使用服务端加速'
 
 
 @dataclass(frozen=True)
@@ -104,3 +108,16 @@ def select_engine(spec: SearchSpec, probe: ProbeResult) -> Tuple[str, str]:
         # 缺 GNU find/xargs 就只能回落。判据与 shell_grep 选分支用的是同一个函数。
         return 'client', NEEDS_FIND_XARGS_MSG
     return 'grep', '服务端 grep 可用'
+
+
+def probe_caused_fallback(reason: str, probe: Optional[ProbeResult]) -> bool:
+    """这次回落是不是探测造成的（决定 runner 要不要发 ``grep_unavailable``）。
+
+    只比 reason 而不在 runner 里重跑一遍 :func:`select_engine` 的判序，是因为那份判序
+    已经写在一个地方了，抄第二遍就迟早漂移。``select_engine`` 只有两条分支会返回探测侧
+    的文案（``probe.reason`` 本身、缺 GNU find/xargs 的那条），逐字对得上就够了。
+    """
+    if probe is None:
+        return False
+    return bool(probe.reason) and reason in (probe.reason, NEEDS_FIND_XARGS_MSG)
+
