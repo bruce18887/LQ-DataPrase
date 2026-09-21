@@ -49,8 +49,7 @@
         :engine="run.engine"
         :engine-reason="run.engineReason"
         :workers-actual="run.workersActual"
-        :truncated="run.status === 'partial' || !!run.done?.truncated"
-        :limits-hit="run.done?.limits_hit ?? []"
+        :notices="run.notices"
         @cancel="store.cancel(run.id)"
       />
 
@@ -94,7 +93,7 @@
         </span>
       </el-tooltip>
       <el-button size="small" :disabled="!finishedCount" @click="store.clearFinished()">清除已结束</el-button>
-      <span class="ssp-bar-note">切到别的页面搜索照跑（右上角常驻条可取消）；搜索期间下载按钮禁用。</span>
+      <span class="ssp-bar-note">切到别的页面搜索照跑（顶栏下方那条常驻条可取消）；搜索期间下载按钮禁用。</span>
     </div>
   </div>
 </template>

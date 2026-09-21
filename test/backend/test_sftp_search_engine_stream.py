@@ -18,8 +18,9 @@ from django.test import SimpleTestCase  # noqa: E402
 
 from apps.sftp.search import contracts, engine, walker  # noqa: E402
 # 码表按名字取：模块名 events 与这些测试里满地的局部变量 events 同名。
-from apps.sftp.search.events import (SCAN_THREAD_PREFIX, CLAMPED_TEXT,
-                                    NOTICE_TEXT)  # noqa: E402
+from apps.sftp.search.events import (SCAN_THREAD_PREFIX, CLAMPED_TEXT, INCOMPLETE_CODES,
+                                      NOTICE_TEXT, SPEED_ONLY_CODES, TRUNCATION_TEXT,
+                                      notice)  # noqa: E402
 from apps.sftp.search.runner import SearchRunner  # noqa: E402
 from test.backend.sftp_fake import FakeSession, FakeSftp, sample_tree  # noqa: E402
 
@@ -32,7 +33,9 @@ ALL_CLAMP_CODES = ('clamped_workers', 'clamped_timeout', 'clamped_max_entries',
                    'clamped_max_scan_bytes', 'clamped_max_depth')
 ALL_LIMIT_CODES = ('truncated_depth', 'truncated_entries', 'truncated_candidates',
                    'truncated_matches', 'scan_budget_exceeded', 'grep_fallback',
-                   'grep_unavailable', 'workers_reduced', 'dir_unreadable')
+                   'grep_unavailable', 'workers_reduced', 'dir_unreadable',
+                   # 不在 §3.8 的清单里，但 events.py 补了它（到点静默返回同样是少结果）
+                   'timeout')
 
 
 class _SlowSftp(FakeSftp):
@@ -143,6 +146,12 @@ class HelloTests(SimpleTestCase):
         self.assertEqual(events[0]['workers_actual'], 2)
         self.assertIn('workers_reduced', codes(events))
         self.assertIn('workers_reduced', first(events, 'done')['limits_hit'])
+        # 但它只是「慢」不是「少」：把它报成 truncated 会让一次完整的搜索显示成 partial，
+        # 用户据此判定结果不可信并重搜 —— 那是假警报（spec §3.13 的黄条只属于少结果）。
+        self.assertFalse(first(events, 'done')['truncated'])
+        reduced = [e for e in events if e['kind'] == 'notice' and e['code'] == 'workers_reduced']
+        self.assertTrue(reduced)
+        self.assertFalse(reduced[0]['incomplete'], '只影响快慢的码不许标成结果不完整')
 
 
 class StageProtocolTests(SimpleTestCase):
@@ -245,6 +254,53 @@ class TruncationTests(SimpleTestCase):
         self.assertTrue([e for e in events if e['kind'] == 'notice'])
         for evt in (e for e in events if e['kind'] == 'notice'):
             self.assertTrue(evt['message'].strip(), evt)
+
+    def test_limit_codes_are_split_into_two_classes(self):
+        """「少结果」/「只是慢」这一分类必须逐码有归属，且不重不漏。
+
+        这是**双向**键名比对：新增一个 limits_hit 码而忘了分类，这条就红 —— 前端不再抄
+        一份码名表（它只读 `notice.incomplete`），所以唯一的漂移闸就是这里。
+        """
+        both = INCOMPLETE_CODES & SPEED_ONLY_CODES
+        self.assertEqual(both, set(), f'同一码不可能既少结果又只是慢：{sorted(both)}')
+        missing = set(TRUNCATION_TEXT) - (INCOMPLETE_CODES | SPEED_ONLY_CODES)
+        self.assertEqual(missing, set(), f'未分类的 limits_hit 码：{sorted(missing)}')
+        unknown = (INCOMPLETE_CODES | SPEED_ONLY_CODES) - set(TRUNCATION_TEXT)
+        self.assertEqual(unknown, set(), f'分类里有、码表里没有（文案会 KeyError）：{sorted(unknown)}')
+        self.assertFalse(set(CLAMPED_TEXT) & set(TRUNCATION_TEXT),
+                         '钳位码只告知不进 limits_hit，混进截断表就会串味')
+
+    def test_incomplete_flag_follows_the_class(self):
+        self.assertTrue(notice('truncated_candidates')['incomplete'])
+        for code in ('workers_reduced', 'grep_fallback', 'grep_unavailable'):
+            self.assertFalse(notice(code)['incomplete'], code)
+        self.assertFalse(notice('clamped_workers')['incomplete'])
+
+    def test_truncation_notice_is_marked_incomplete_in_the_stream(self):
+        events, _ = run(spec(max_candidates=1))
+        hits = [e for e in events if e['kind'] == 'notice' and e['code'] == 'truncated_candidates']
+        self.assertTrue(hits)
+        self.assertTrue(hits[0]['incomplete'])
+        self.assertTrue(first(events, 'done')['truncated'])
+
+    def test_every_limits_hit_code_also_arrived_as_a_notice(self):
+        """前端能只渲染 notice 文案的前提：进了 `limits_hit` 的码必然也发过一条带文案的 notice。
+
+        破一条就是用户看到一个裸英文码（或啥也看不见），而前端并没有第二份码表可查。
+        """
+        cases = [spec(max_candidates=1), spec(max_matches=3, data_files_only=False),
+                 spec(mode='name', depth='children', data_files_only=False),
+                 spec(workers=8, max_candidates=1)]
+        for s in cases:
+            with self.subTest(**{k: getattr(s, k) for k in ('mode', 'depth', 'max_candidates')}):
+                events, _ = run(s)
+                done = first(events, 'done')
+                emitted = {e['code']: e for e in events if e['kind'] == 'notice'}
+                for code in done['limits_hit']:
+                    self.assertIn(code, emitted, f'{code} 只进了 limits_hit，没发 notice')
+                    self.assertTrue(emitted[code]['message'].strip())
+                    self.assertEqual(emitted[code]['incomplete'],
+                                     code in INCOMPLETE_CODES, code)
 
 
 class MatchPayloadTests(SimpleTestCase):

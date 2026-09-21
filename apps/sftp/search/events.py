@@ -6,7 +6,8 @@
 
 1. 「上限一律显式告知」要求**每个码都有文案**，缺一个就是运行期 ``KeyError``；
    码表集中一处才谈得上被测试逐码钉住（``test_every_limit_code_has_a_message``）。
-2. 前端要按同一张表渲染降级/截断提示，两处各写一份字面量迟早分叉。
+2. 前端要渲染降级/截断提示，但它**只抄事件里带来的 ``message``**（连同 ``incomplete``
+   这个分类结果）—— 在 TS 里再维护一份码表，迟早与这张表分叉。
 """
 
 from typing import Any, Callable, Dict, List, Optional
@@ -34,7 +35,9 @@ CLAMPED_TEXT = {
 }
 
 # spec §3.8 的截断/降级码表。钳位码只告知、不进 done.limits_hit（用户的输入被完整执行
-# 了，只是落在了一个可接受的档位上）；下面这些是「结果集确实不完整」的那些。
+# 了，只是落在了一个可接受的档位上）；下面这些**都**进 done.limits_hit，但里面混着两类
+# 语义完全不同的码：「结果集确实不完整」与「只是换了引擎/少了两条并发」。两者的分界
+# 就在下面那两个 frozenset，别在本表里加注释列（注释会过期，代码不会）。
 TRUNCATION_TEXT = {
     'truncated_depth': '已达递归深度上限，更深的目录没有遍历',
     'truncated_entries': '已达遍历条目上限，剩余目录没有列完',
@@ -46,17 +49,35 @@ TRUNCATION_TEXT = {
     'workers_reduced': '服务器接受的并发连接少于请求数',
     'dir_unreadable': '有目录读不了，其内容未纳入结果',
     # spec §3.8 的码表里没有超时这一条，但静默到点返回正是「少结果不吭声」，
-    # 所以补一个码；它同样进 done.limits_hit（前端把它当截断看待）。
+    # 所以补一个码；它同样进 done.limits_hit，且确实代表结果不完整（见 INCOMPLETE_CODES）。
     'timeout': '已达搜索超时，结果集不完整',
 }
+
+# —— 「这条告知代不代表结果集不完整」的分类，**只住在这里这一处** ——
+# 为什么要后端算好再随事件送出去：前端要么抄一份码名表（第二份抄件就是下一个 ``only_data``
+# 式的漂移源），要么每次改分类都来动 TS。现在前端只读 ``notice.incomplete`` 这一个布尔值，
+# 黄条与中性提示的判据与 ``done.truncated`` 同源（runner 用同一个集合算）。
+# 分类判据：**用户的输入被完整执行了吗**。换引擎、少两条并发 = 只是慢；
+# 少扫了目录/文件/命中 = 结果集不完整（spec §3.13 那条「不可关闭的黄条」只属于后者）。
+INCOMPLETE_CODES = frozenset({
+    'truncated_depth', 'truncated_entries', 'truncated_candidates', 'truncated_matches',
+    'scan_budget_exceeded', 'dir_unreadable', 'timeout',
+})
+# 只影响快慢、结果仍是完整的那几个（同样进 done.limits_hit —— 上限从不静默，但它是中性提示）。
+SPEED_ONLY_CODES = frozenset({'grep_fallback', 'grep_unavailable', 'workers_reduced'})
 
 NOTICE_TEXT = {**CLAMPED_TEXT, **TRUNCATION_TEXT}
 
 
 def notice(code: str, message: Optional[str] = None) -> Dict[str, Any]:
-    """一条 ``notice`` 事件。不带 message 时取码表文案（缺码就地 KeyError）。"""
+    """一条 ``notice`` 事件。不带 message 时取码表文案（缺码就地 KeyError）。
+
+    ``incomplete`` 由 :data:`INCOMPLETE_CODES` 算出，是前端「黄色提示条 vs 中性一行」的唯一
+    判据（分类的落点只有那个集合，理由见那里）。钳位码不在 TRUNCATION_TEXT 里，天然为 False。
+    """
     return {'kind': 'notice', 'code': code,
-            'message': message if message is not None else NOTICE_TEXT[code]}
+            'message': message if message is not None else NOTICE_TEXT[code],
+            'incomplete': code in INCOMPLETE_CODES}
 
 
 def brief(exc: BaseException) -> str:

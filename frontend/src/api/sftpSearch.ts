@@ -122,9 +122,16 @@ export interface ProgressEvent {
 
 export interface NoticeEvent {
   kind: 'notice'
-  /** 码表事实来源 = `events.py` 的 CLAMPED_TEXT / TRUNCATION_TEXT */
+  /** 码表事实来源 = `events.py` 的 CLAMPED_TEXT / TRUNCATION_TEXT；文案由后端随事件送全，前端不再抄一份 */
   code: string
   message: string
+  /**
+   * 「这条告知代不代表**结果集不完整**」（spec §3.13 的常驻黄条判据）。
+   * 分类住在 `events.py` 的 `INCOMPLETE_CODES`，由后端算好送出来：前端只读这个布尔值，
+   * 绝不按 `code` 自己判 —— 码名表抄第二份就是下一个漂移源。`false` 的是中性一行
+   * （钳位、换引擎、少并发：用户的输入被完整执行了，只是慢）。
+   */
+  incomplete: boolean
 }
 
 export interface ErrorEvent {
@@ -140,8 +147,13 @@ export interface DoneEvent {
   matched: number
   scanned: number
   elapsed_s: number
-  /** `limits_hit` 非空即结果不完整：前端必须常驻提示，不可手动关闭 */
+  /**
+   * 结果集不完整（`limits_hit` 里有 `INCOMPLETE_CODES` 的那几个码）。
+   * 非空即前端必须常驻黄条、不可手动关闭。
+   * **不等于 `limits_hit.length > 0`**：换引擎/少并发那几个码只影响快慢。
+   */
   truncated: boolean
+  /** 全部触达过的码（含只影响快慢的）；文案与 incomplete 分类看对应的 `notice` 事件 */
   limits_hit: string[]
   engine: SearchEngine
   /** 用户取消导致的收尾（达到 max_matches 的自停不算取消） */
