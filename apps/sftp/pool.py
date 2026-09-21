@@ -14,17 +14,25 @@ for the ``listdir`` round-trip.
 
 Concurrency model
 -----------------
-This is **lock-free by design**. The deployment runs gunicorn with *sync*
-workers (``--workers N`` without ``-k``), so a single worker process handles
-exactly one request at a time and will never touch the same ``user_id`` entry
-concurrently. paramiko's ``SFTPClient`` is *not* thread-safe, so if the worker
-class is ever switched to ``gthread`` / ``gevent`` (concurrent requests within
-one process), this module MUST grow a per-user lock around connection use.
+A per-user ``threading.RLock`` serialises this module's *state transitions*:
+the liveness check, the rebuild, and the pop/close in ``invalidate``/``close``.
+
+The original "lock-free by design" note rested on gunicorn sync workers, but the
+shipping desktop app runs ``manage.py runserver`` (standalone.py:224), which is
+threaded by default in Django 6 (--nothreading is store_false). Concurrent
+same-user requests therefore really do reach here from different threads.
+
+What the lock does NOT cover: it guards the pool dict and the transport/sftp
+lifecycle, not paramiko's ``SFTPClient`` *operations*. Two threads running
+``listdir``/``open`` on the same client would still desync the protocol stream.
+That stays kept away by one-connection-per-user + the frontend transfer mutex +
+searches using their own ephemeral connections (``search/connect.py``).
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Dict, Optional
 
@@ -53,6 +61,19 @@ class _Entry:
 
 
 _pool: Dict[object, _Entry] = {}
+
+# threaded runserver（桌面版实际形态）下同 user 会并发进来，_pool 的状态转换必须串行。
+# 锁按 user_id 分：否则一个用户的慢握手会挡住所有用户。
+_locks: Dict[object, threading.RLock] = {}
+_locks_guard = threading.Lock()
+
+
+def _lock_for(user_id) -> threading.RLock:
+    with _locks_guard:
+        lock = _locks.get(user_id)
+        if lock is None:
+            lock = _locks[user_id] = threading.RLock()
+        return lock
 
 
 def _idle_ttl() -> int:
@@ -102,34 +123,39 @@ def get_connection(user_id) -> paramiko.SFTPClient:
     idle beyond ``SFTP_POOL_IDLE_TTL``. Raises ``SftpPoolError`` if no live
     connection can be established (e.g. session expired / handshake failed).
     """
-    now = time.time()
-    entry = _pool.get(user_id)
+    # 整个函数体（含 _build_entry 握手）都在锁内：只锁字典不锁握手的话，
+    # N 个线程会各握一次手，后完成的覆盖先完成的，白丢连接。
+    with _lock_for(user_id):
+        now = time.time()
+        entry = _pool.get(user_id)
 
-    if entry is not None:
-        alive = False
-        try:
-            alive = entry.transport.is_active()
-        except Exception:
-            logger.warning('SFTP liveness probe failed for user %s; rebuilding',
-                           user_id, exc_info=True)
+        if entry is not None:
             alive = False
-        if alive and (now - entry.last_used) <= _idle_ttl():
-            entry.last_used = now
-            return entry.sftp
-        # Stale or dead: drop and rebuild.
-        _close_entry(entry)
-        _pool.pop(user_id, None)
+            try:
+                alive = entry.transport.is_active()
+            except Exception:
+                logger.warning('SFTP liveness probe failed for user %s; rebuilding',
+                               user_id, exc_info=True)
+                alive = False
+            if alive and (now - entry.last_used) <= _idle_ttl():
+                entry.last_used = now
+                return entry.sftp
+            # Stale or dead: drop and rebuild.
+            _close_entry(entry)
+            _pool.pop(user_id, None)
 
-    entry = _build_entry(user_id)
-    _pool[user_id] = entry
-    return entry.sftp
+        entry = _build_entry(user_id)
+        _pool[user_id] = entry
+        return entry.sftp
 
 
 def invalidate(user_id) -> None:
     """Drop and close the user's connection so the next call rebuilds it."""
-    _close_entry(_pool.pop(user_id, None))
+    with _lock_for(user_id):
+        _close_entry(_pool.pop(user_id, None))
 
 
 def close(user_id) -> None:
     """Close and remove the user's connection (used on explicit disconnect)."""
-    _close_entry(_pool.pop(user_id, None))
+    with _lock_for(user_id):
+        _close_entry(_pool.pop(user_id, None))
