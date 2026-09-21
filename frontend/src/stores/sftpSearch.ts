@@ -266,9 +266,16 @@ export const useSftpSearchStore = defineStore('sftpSearch', () => {
   }
 
   /**
-   * 取消：**先定稿，再指望事件**。后端最坏 15s 才收得拢（spec §3.9 第 3 条），
-   * 用户点完必须当场看到「已取消」；依赖 catch/`done` 回调来置状态是 09-09
-   * 记过的缺陷形态（那一版把 abort 放进 catch，结果取消后进度卡还挂着）。
+   * 取消：**当场定稿，不指望事件**。后端最坏 15s 才收得拢（spec §3.9 第 3 条），
+   * 用户点完取消必须立刻看到「已取消」。
+   *
+   * 09-09 记过的缺陷形态正好相反：AbortError 在 api 层就被静默吞掉
+   * （`api/sftp.ts` 的 `if (e?.name === 'AbortError') return`），组件的 catch 根本不
+   * 触发，于是取消之后进度卡一直挂着 —— 那次的修复是 abort 完立即显式复位。
+   * 本 store 同构照办：`status` / `finishedAt` 在 abort 之前就写好，后面的
+   * `finalize()` 只是补一次幂等收口，事件与 catch 都不参与「取消成功没有」的判定。
+   * （搜索这条路 `run()` 不吞 AbortError，所以 catch 也在，但它对 AbortError
+   * 直接返回——取消不该再被记一次失败。）
    */
   function cancel(id?: number): void {
     const run = find(id ?? activeRunId.value ?? -1)
