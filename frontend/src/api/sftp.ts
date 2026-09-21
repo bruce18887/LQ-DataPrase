@@ -2,7 +2,7 @@ import type { AxiosRequestConfig } from 'axios'
 
 import api from './index'
 import { getSftpTimeoutSec } from '../utils/sftpTimeout'
-import { safeGetItem } from '../utils/safeStorage'
+import { postSse } from '../utils/ssePost'
 
 export interface SseProgressData {
   event: 'progress'
@@ -197,53 +197,4 @@ export const sftpApi = {
       onError(e?.message || '网络错误')
     }
   },
-}
-
-/**
- * POST 一个 SSE 端点并逐事件回调。非 2xx：解析错误体后抛出（调用方负责
- * 提示）；流式解析与事件分发与旧 downloadDirStream 实现一致。
- *
- * signal: 可选 AbortSignal，透传给 fetch —— 修复此前无法取消进行中 SSE 流
- * 的缺陷（组件卸载后 reader 仍持有并回调更新已失效 ref → 内存泄漏 + 幽灵回调）。
- * localStorage 读取改走 safeGetItem（Electron 磁盘满/权限异常时不白屏）。
- */
-async function postSse(
-  url: string,
-  body: Record<string, unknown>,
-  onData: (data: any) => void,
-  signal?: AbortSignal,
-): Promise<void> {
-  const token = safeGetItem('access_token')
-  // Re-use the axios base URL so this works in Electron (file://) as well as
-  // the browser dev/prod builds, where absolute paths resolve incorrectly.
-  const baseUrl = (api.defaults.baseURL || '/api/v1').replace(/\/$/, '')
-  const response = await fetch(`${baseUrl}${url}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-    },
-    body: JSON.stringify(body),
-    signal,
-  })
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({ error: '请求失败' }))
-    throw new Error(err.error || `HTTP ${response.status}`)
-  }
-  const reader = response.body!.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const events = buffer.split('\n\n')
-    buffer = events.pop()!
-    for (const evt of events) {
-      if (!evt.startsWith('data: ')) continue
-      try {
-        onData(JSON.parse(evt.slice(6)))
-      } catch { /* skip malformed events */ }
-    }
-  }
 }
