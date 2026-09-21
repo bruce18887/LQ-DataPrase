@@ -204,6 +204,33 @@ class SearchEndpointTests(APITestCase):
         self.assertEqual(resp['Cache-Control'], 'no-cache')
         self.assertEqual(resp['X-Accel-Buffering'], 'no')
 
+    def test_accept_event_stream_header_is_not_406(self):
+        """客户端理直气壮发 ``Accept: text/event-stream`` 时也必须正常出流。
+
+        Task 11 Step 5 真机验证抓出来的：只有 JSONRenderer 在谈，DRF 的内容协商会在
+        **进 action 之前**抛 406 —— 浏览器 fetch 默认发 ``*/*`` 所以单测与 test client
+        一路绿，真实 SSE 客户端一加这个头就全红。这条钉住那个头不再致命。
+        """
+        resp = self.client.post(URL, {'roots': ['/data'], 'mode': 'content',
+                                      'term': 'ShadowReg2'},
+                                format='json', HTTP_ACCEPT='text/event-stream')
+        self.assertEqual(resp.status_code, 200, getattr(resp, 'data', resp))
+        events = sse_events(self.consume(resp))
+        self.assertEqual(events[0]['kind'], 'hello')
+        self.assertEqual(events[-1]['kind'], 'done')
+
+    def test_validation_failure_with_sse_accept_is_still_a_json_400(self):
+        """同一个头下，流开始**前**的失败仍是 ``400 {'error': msg}``，不能变成 406。
+
+        错误体形状比 Content-Type 更要紧：``utils/ssePost.ts`` 读的就是 ``err.error``。
+        （Content-Type 会跟着客户端要的那个头走 —— DRF 的常规行为，所以这里解析
+        ``resp.content`` 而不是 ``resp.json()``，后者会因类型不符直接抛 ValueError。）
+        """
+        resp = self.client.post(URL, {'roots': [], 'mode': 'content'},
+                                format='json', HTTP_ACCEPT='text/event-stream')
+        self.assertEqual(resp.status_code, 400, getattr(resp, 'data', resp))
+        self.assertEqual(json.loads(resp.content)['error'], 'roots 不能为空')
+
     def test_frame_sequence_ends_with_done(self):
         resp = self.post({'roots': ['/data'], 'mode': 'content',
                           'term': 'ShadowReg2'})
