@@ -159,6 +159,14 @@ export type SearchEvent =
   | ErrorEvent
   | DoneEvent
 
+/**
+ * store 里 `SearchRun.notices` / `.errors` 用的名字（计划 Task 14 的接口段就这么写的，
+ * 但 Task 13 的类型块里没有它们——这里补两个**别名**而不是重定义字段：
+ * 事件载荷只有一份形状，另写一份接口就是等着漂移的两处）。
+ */
+export type SearchNotice = NoticeEvent
+export type SearchError = ErrorEvent
+
 // ------------------------------------------------------------------ 预设契约
 
 export interface SearchPresetItem {
