@@ -3,6 +3,8 @@
 > 来源：用户需求「为 SFTP 浏览器做一个功能强大的搜索功能，参考 `DataPrase-SFTP Searcher/`」。
 > 6 项决策已逐项拍板（见 §1.2）。实现计划另出（writing-plans）。
 > 本文 file:line 为 2026-09-20 HEAD 快照，均已回读源码核实。
+> 2026-09-21 按后端实施（Task 1–9）回写若干处：§2.5、§2.6、§3.1、§3.2、§3.3、§3.4、§3.5、§3.6、§4.1、§6、§7。
+> 其中 §3.5 一条**纠正了本文原来的一个前提**。新增引用以函数名为准（行号会随实施漂移）。
 
 ## 1. 需求与决策
 
@@ -100,6 +102,11 @@ dest="use_threading"`（默认 True），`django/core/servers/basehttp.py:261-26
 
 本次一并补 per-user `RLock`（§3.12）。
 
+**该结论已被实施确认，且已修**：Task 1 落地 per-user `RLock`（commit `d99745d`），
+锁只覆盖池自身的状态转换。配套的并发测试给假握手加了 0.05s sleep
+（`test/backend/test_sftp_pool_lock.py` 的 `BUILD_DELAY`）——**没有这个 sleep 就等于
+无锁也测不出红**，写这类测试时必须带上。
+
 ### 2.6 参考工具可复用资产
 
 `DataPrase-SFTP Searcher/`（未跟踪目录，2026-09-20 新建的 CLI 原型）：
@@ -110,7 +117,7 @@ dest="use_threading"`（默认 True），`django/core/servers/basehttp.py:261-26
 | 同上 `server_grep_supported` / `search_via_server` / `_build_grep_command` | 服务端 grep 快路径（含 chroot 路径映射验证、GBK `$'..'` bashism） | 移植，但**收紧启用条件**（§3.3） |
 | 同上 `search_in_files` / `_open_connection` / `_recycle` | 每 worker 一条独立连接、连接坏了重开并重试一次 | 移植为 `connect.py` |
 | `search/file_retriever.py` | 递归遍历 + `fnmatch` + 扩展名/大小/日期过滤 | 移植，但**遍历结构改 BFS**（§3.4） |
-| `search/csv_column_reader.py` | `[DATA]` section 定位 + 表头取列 + 前 N 有效值 | 移植为列值模式 |
+| `search/csv_column_reader.py` | `[DATA]` section 定位 + 表头取列 + 前 N 有效值 | 移植为列值模式，**但它「`[DATA]` 后首行即表头」的读法对真实数据必然读出 0 值**（§3.5） |
 | `utils/cli_interface.py` | worker 数钳位 1–8、实时 summary、导出、文件名合法性校验 | 取钳位区间与导出思路 |
 | `config/sftp_connection.py:21` | `set_missing_host_key_policy(paramiko.AutoAddPolicy())` | **不移植**，必须换成 `host_keys.open_verified_transport()` |
 
@@ -120,16 +127,26 @@ dest="use_threading"`（默认 True），`django/core/servers/basehttp.py:261-26
 
 后端全部新增，`apps/sftp/views.py` 的 561 行**一行不动**：
 
-| 文件 | 预算 | 单一职责 |
+| 文件 | 预算 / 实际 | 单一职责 |
 |---|---|---|
-| `apps/sftp/search/contracts.py` | ~170 | `SearchSpec` dataclass、`clamp_spec()` 校验与钳位、`limits_hit` 记录 |
-| `apps/sftp/search/connect.py` | ~130 | `SearchSession`：借还 N 条独立连接、降级、`opened/closed` 计数、统一关闭 |
-| `apps/sftp/search/walker.py` | ~190 | BFS 目录队列、深度/条目/候选上限、环保护、`prune_dirs`、元数据过滤 |
-| `apps/sftp/search/scanners.py` | ~270 | 内容扫描（字节级 + prefetch + 编码探测 + 命中即停）与列值扫描 |
-| `apps/sftp/search/shell_grep.py` | ~180 | 两级能力探测、grep 命令构造（全 token `shlex.quote`）、输出解析、exec 通道 |
-| `apps/sftp/search/engine.py` | ~290 | `select_engine()` 谓词、阶段机、线程池、事件队列、取消、进度节流 |
-| `apps/sftp/search_views.py` | ~200 | `SftpSearchMixin`：`POST /sftp/search/`（SSE）+ 预设 CRUD |
-| `apps/sftp/models.py` | +30 | `SftpSearchPreset` + 迁移 |
+| `apps/sftp/search/contracts.py` | ~170 / **360** | `SearchSpec` dataclass、`parse_spec()` 校验与钳位、`limits_hit` 记录 |
+| `apps/sftp/search/connect.py` | ~130 / **227** | `SearchSession`：借还 N 条独立连接、降级、`opened/closed` 计数、统一关闭 |
+| `apps/sftp/search/walker.py` | ~190 / **313** | BFS 目录队列、深度/条目/候选上限、环保护、`prune_dirs`、元数据过滤 |
+| `apps/sftp/search/filters.py` | — / **118** | walker 与 `shell_grep` **共享**的条目判定谓词 + glob 常量 + `needs_find`（新增，见下） |
+| `apps/sftp/search/scanners.py` | ~270 / **485** | 内容扫描（字节级 + prefetch + 编码探测 + 命中即停）与列值扫描 |
+| `apps/sftp/search/shell_grep.py` | ~180 / **421** | 三级能力探测、grep 命令构造（全 token `shlex.quote`）、输出解析、exec 通道 |
+| `apps/sftp/search/engine.py` | ~290 / 106 | `select_engine()` 谓词、阶段机、线程池、事件队列、取消、进度节流（实际列只含谓词，阶段机未写） |
+| `apps/sftp/search_views.py` | ~200 / 未落地 | `SftpSearchMixin`：`POST /sftp/search/`（SSE）+ 预设 CRUD |
+| `apps/sftp/models.py` | +30 / 未落地 | `SftpSearchPreset` + 迁移 |
+
+**预算不是承诺**（2026-09-21 实施快照）：实际普遍超预算（上表加粗列），**全部仍在 600 硬上限内**，
+最紧的 `scanners.py` 也还剩 115 行余量。超出的原因是「平价」这件事比预估吃行数——
+每条 grep 表达不出来的判据都要么翻译成 glob、要么补一条回落条件。
+`apps/sftp/search/filters.py` 是**实施时新增的一行**（本文 2026-09-20 版没有它）：
+dot 条目 / 汇总 CSV / 数据 CSV 三条判定 + 它们在 grep 与 find 两侧的 glob 写法 + `needs_find`，
+walker 直接调谓词、`shell_grep` 只调这里的 glob 常量，**两档引擎同一套过滤规则的单一事实源**
+（§3.3 平价的地基；判据在两处各写一份就会漂移，「换服务器换结果集」重新变成可能）。
+测试侧同样因 600 上限拆分：`test/backend/test_sftp_search_parity.py`（§4.1）。
 
 切分着力点：**`walker` / `scanners` / `shell_grep` 只吃 spec、只吐事件，不知道 Django 也不知道彼此**，
 可脱离 ORM 单测。`engine.py` 是唯一持有「阶段」概念的地方。
@@ -218,7 +235,7 @@ dest="use_threading"`（默认 True），`django/core/servers/basehttp.py:261-26
 |---|---|---|---|
 | `roots` | 必填 | 20 条 | |
 | `depth` → `max_depth` | `all` = 不限 | 64 | 仅防路径长度爆掉，不作为防失控手段 |
-| `max_entries` | 200 000 | 500 000 | **唯一真正防遍历失控的闸**；剪枝命中的目录不计入 |
+| `max_entries` | 200 000 | 500 000 | **唯一真正防遍历失控的闸**；只有 `prune_dirs` 命中的目录不计入（口径见 §3.4） |
 | `max_candidates` | 5 000 | 50 000 | 达上限即停止列举，转 `scanning` |
 | `max_matches` | 2 000 | 20 000 | 也是「结果驻留在渲染进程内存」的上限依据 |
 | `matches_per_file` | 1 | 20 | |
@@ -241,9 +258,29 @@ dest="use_threading"`（默认 True），`django/core/servers/basehttp.py:261-26
 4. `not one_per_folder`
 5. `not stop_after_listing`
 6. `allow_server_grep`
-7. 能力探测通过（分两级，见 §3.6）
+7. `depth == "all"` —— **GNU grep 没有 `--max-depth`**，限深的查询在 grep 档表达不出来
+   （`--exclude-dir` 只匹 basename，挡不住深层目录里的文件），只能回落。
+8. **根目录自身不撞目录排除条件**（`filters.root_collides_with_dir_excludes`）——
+   `--exclude-dir` 与 `-prune` **会命中命令行上那个根目录本身**，而 walker 总会进入根目录；
+   根 basename 撞上任一 prune 模式（或以 `.` 开头）即回落，否则是**整棵子树安静消失**这种最恶劣的假阴性。
+   只有最后一段参与判定（实测 `--exclude-dir=tmp /tmp/ggrep/e` 不受影响），故深层目录名撞模式是平价的。
+   `build_command()` 里有**第二道 `ValueError` 闸**，防绕过 `select_engine` 直接拼命令。
+9. 需要 find 管道时探测必须有 `find_xargs` 级（`filters.needs_find`）——三类原因：按 **mtime** 选文件、
+   按 **size** 选文件（grep 都没有对应原语），以及 `name_pattern` 与「仅 `.csv`」的**交集**
+   （`--include` 之间是**并集**，两条 `--include` 装不出「既匹配模式又是 csv」）。
+   这类查询走 `find ... | xargs grep` 分支，**「需要 find 却探测不到 find」即回落**。
+   原实现这条判据只看时间过滤，size 与求交是 Task 8 补进同一函数的。
+10. 能力探测通过（**分三级**，见 §3.6）
 
 任一不满足 → 回落 client 引擎，**回落原因必须进 `notice` 事件**，不能让人猜这次是哪档跑的。
+
+**`prune_dirs` / 汇总 CSV / dot 条目不是回落项：它们可逐字翻译**（Task 8 的平价工作）——
+`prune_dirs` → 每个模式一条 `--exclude-dir`；汇总 CSV → `--exclude='[sS][uU][mM]_*'`；
+dot 条目 → `--exclude='.*'` **与** `--exclude-dir='.*'` **两条都要**（实测 `--exclude` 只判文件、
+`--exclude-dir` 只判目录）。grep 侧 glob 一律大小写敏感，而 walker 判扩展名/前缀时先 `.lower()`，
+所以必须写成 bracket 折叠形式，否则 `DATA.CSV` 这类文件名在两档间漂移。
+代价就是第 8 条：把 `prune_dirs` 翻成 `--exclude-dir` 之后，那个选项会连命令行上的根目录一起判，
+于是「可翻译」多了一条前提条件。判据与 glob 全在 `filters.py`（§3.1），两档共用一份。
 
 三条非显然条件的理由：
 
@@ -279,9 +316,17 @@ dest="use_threading"`（默认 True），`django/core/servers/basehttp.py:261-26
 从「待访问目录」队列取目录，所以**候选从搜索一开始就在往 UI 流**，取消也只是不再消费队列。
 
 - 环保护：已访问目录路径集合 + `sftp.realpath()` 归一。SFTP 协议判 symlink 不可靠，靠这个兜。
-- 跳过 `.` 开头条目（与 `views.py:537` `_collect_files` 现有行为一致）。
+- 跳过 `.` 开头条目（与 `views.py:537` `_collect_files` 现有行为一致）；**dot 条目照吃预算**，
+  它只是不成为候选，列目录的代价一分没省。
 - 单目录 `listdir_attr` 失败 → `error{scope:"dir"}` 事件，**继续搜索**，不终止。
-- 剪枝在**进入前**判定，被剪掉的子树不计 `max_entries`。
+- **`max_entries` 的口径（实施修正，commit `c813a78`）：计入所有实际看到的非剪枝条目**，包括被
+  `name_pattern` / 大小 / 时间过滤掉的文件与 dot 条目；**唯一豁免**是 `prune_dirs` 命中的子树
+  （剪枝在进入前判定）。把预算只记在候选上等于给它换个名字叫「候选上限」，
+  而「剪掉最外层」也会因为预算照烧而变成白剪。
+- `name_pattern` 与 `prune_dirs` 的匹配用 **`fnmatch.fnmatchcase`** 而非 `fnmatch.fnmatch`：
+  后者在 Windows 上经 `os.path.normcase` 变成大小写不敏感，同一份条件在开发机与生产机
+  （大小写敏感的 POSIX）会给出不同结果；且 grep 的 `--include`/`--exclude-dir` 本就大小写敏感，
+  **两档同语义**才谈得上 §3.3 的平价。
 
 ### 3.5 扫描内核（scanners）
 
@@ -304,13 +349,48 @@ dest="use_threading"`（默认 True），`django/core/servers/basehttp.py:261-26
 
 `mode="column"` 移植 `csv_column_reader.py`：定位 `[DATA]` → 表头取列索引 → 前 N 个非空值。
 
+**但「`[DATA]` 之后的第一行就是表头」这个前提是错的**——本文、实施计划、参考工具三处同错。
+真实 datalog 在 `[DATA]` 与表头行之间**夹一个空行**：`Data/` 目录下 122 个 CSV、56 个含 `[DATA]` 者，
+**56/56 都有这一行**。照「后一行即表头」读，就是把空行当表头，`column_name not in headers` →
+**对所有真实数据读出 0 个值**，整个列值模式静默失效（不报错、只是永远没有结果）。
+实现（Task 7）已改为进入 `[DATA]` 后跳过空行，并用真数据冒烟验证：**56/56 都读到值与
+`TestFile` / `StartTime`**。
+
+两条随之钉下的事实：
+
+- 真表头之后紧跟 `Unit` / `Min` / `Max` 三行，所以「取前 N 个非空值」**目前会把这三行当值取走**。
+  与参考工具一致 → 钉为已知行为（`test_sftp_search_scan.py` 的
+  `test_unit_and_limit_rows_count_as_values`），要不要排除是**产品决定**，挂 §7。
+- 列名匹配是**大小写敏感 + 精确相等**。spec 与计划均未表态，实现取保守侧：
+  表头里没有这一列 = 这个文件正常没有结果（不报错、不刷日志），不做任何模糊匹配——
+  模糊匹配会把不同测试项的数值混成同一列。
+
 ### 3.6 grep 加速档（shell_grep）
 
-- **两级探测**：
-  - `grep` 级：`grep --version` 可用 + SFTP/shell 路径映射一致（chroot 验证，参考
-    `csv_content_searcher.py:213` 的 probe 手法）→ 支持无时间过滤的查询。
-  - `find_xargs` 级：额外要求 `find -newermt` 与 `xargs -0 -r`（GNU 依赖）→ 才支持带时间过滤。
+- **三级探测**（`shell_grep.probe`；本文 2026-09-20 版是两级，实施补了中间那级。**三级不过分别回落**）：
+  - `grep` 级：`grep --version` 可用 + SFTP/shell **路径映射一致**（chroot 验证）→ 才支持无时间过滤的查询。
+    映射不过即整档作废：chroot 下 grep 一个错路径不是「慢」，是**假阴性**。参考
+    `csv_content_searcher.py:213` 的 probe 手法，实现有意偏离：直接测 root 本身而非取一个条目再验，
+    判别力相同而省一次 SFTP 往返（探测只有一个 transport 可用）。
+  - **选项级（实施新增）**：真跑一次 `printf '' | LC_ALL=C grep -q -F -e zz --exclude=zz
+    --exclude-dir=zz --include=zz`，退出码 >1 即不过。grep 档的文件选择平价**全靠这三条**（§3.3），
+    所以 **`has_grep` 的含义随之变严**：不只是「远端有 grep」，而是「有 grep 且认这三个选项」。
+    少了这一级会怎样：探测通过而选项不存在 → 命令以退出码 2 结束 → 一整趟白跑。
+    这三条语义是 **GNU 实现细节而非 POSIX**，故必须实测，不能假定。
+  - `find_xargs` 级：额外要求 GNU `find -newermt` 与 `xargs -0 -r` → 才支持带**时间/大小**过滤
+    与「`name_pattern` ∩ 仅 `.csv`」求交的查询（§3.3 条件 9）。**这一级只挡需要 find 的那类查询**，
+    缺它时其余查询仍可用 grep。
   - 探测不过 → 回落 client，`notice{code:"grep_unavailable", reason}`。
+- **`--include` 必须全部排在 `--exclude` 之前，这是命令构造的硬约束，不许调换。**
+  本文与计划原以为「GNU grep 里 `--exclude` 压过 `--include`」——**实测是错的**：
+  grep 3.0 把 `--include`/`--exclude` 当作**一张按 argv 顺序求值的规则表，最后命中的那条决定去留**。
+  include 全先发、exclude 全后发，是「最后命中者」与「exclude 恒压 include」**两种语义下唯一同解**的排法；
+  排反的后果实测过：16 个文件全被放回来，而 walker 侧只有 6 个。目录侧是独立命名空间
+  （`--exclude-dir` 只判目录，与文件规则无交叉，实测）。
+- **两档文件选择的平价已真跑取证**：本机 GNU grep 3.0 + findutils 4.10，对 13 个代表性 spec
+  逐条比对两档保留的文件/目录集合，**结果全部相等**。自动化侧另有
+  `test_sftp_search_parity.py`（把发出去的命令用 `fnmatch` 复算一遍，与 walker 判定逐个比），
+  它钉的是「命令不会漂移」，真跑钉的是「复算所用的语义本身是对的」，两者不可互替。
 - **执行通道**：池 `_Entry` 无 `SSHClient`，故走 `transport.open_session()` 自行开会话。
   grep 档只跑**一条** exec 通道（本质是一条命令），与 `workers` 无关。
 - **注入防护不变量**：`shell_grep.py` 是**全项目唯一**拼 shell 命令字符串的地方。
@@ -497,13 +577,17 @@ class SftpSearchPreset(models.Model):
 `test_sftp_search_scan.py`（扫描内核）、`test_sftp_search_grep.py`（命令构造与探测）、
 `test_sftp_search_engine_stream.py`（阶段机与取消）、`test_sftp_pool_lock.py`（§3.12）。
 共享内存夹具在 `test/backend/sftp_fake.py`。
+另有一个文件不按模块切：`test_sftp_search_parity.py`（§3.6 的结果集平价断言）——
+它要同时引 `shell_grep` / `filters` / `walker` 三方，留在 grep 那个文件里两边都撞 600 上限。
 
 `unittest` + `django.setup()`，无 DB。这级吃下搜索最值钱的部分：
 
-- `select_engine(spec)` 决策表——**§3.3 的 7 条条件每条单独钉一个正/反例**，尤其
+- `select_engine(spec)` 决策表——**§3.3 的每条条件（实施后为 10 条）单独钉一个正/反例**，尤其
   「非 ASCII `term` 必须回落」（防静默漏 GBK 文件）、「`fuzzy` 必须回落」、
   「整词 + ASCII 允许 grep」。这些条件存在的理由正是**结果不能取决于服务器恰好有没有 grep**。
-- `clamp_spec()`——每个上限的边界值、**未知键必须被拒绝**、`mode=content` 空 `term` 报错、
+  实施还钉了**判断顺序**：spec 侧那几条先判、`probe.reason` 后判，否则非 ASCII 查询会拿到
+  一句「服务器上没有 grep」，把真原因藏掉（`engine.py` `select_engine` docstring）。
+- `parse_spec()`——每个上限的边界值、**未知键必须被拒绝**、`mode=content` 空 `term` 报错、
   `depth` 档位到 `max_depth` 的映射。
 - 字节匹配内核：utf-8 / gbk / utf-16-le / utf-16-be × ASCII / 中文 × 大小写；
   `_extract_line` 跨 chunk 边界；行号计数正确性。
@@ -587,6 +671,7 @@ e2e 相关 spec 通过；收尾释放 8000 / 3000 端口。
 | 服务器限 `MaxSessions` | 并行上不去，搜索变慢 | 开不出即降级并 `notice{workers_reduced}`，报真实并行数 |
 | 客户端无 shell exec（chroot-only SFTP） | 无 grep 加速，走 client 引擎 | 探测自动回落；`notice{grep_unavailable}` |
 | grep 档结果与 client 档在极端输入上可能不同（如文件名含 `:` 破坏 `path:line:content` 解析） | 个别命中被丢弃 | `_parse_grep_line` 解析失败的行必须记 WARNING，不得静默跳过 |
+| **软链接语义两档不等价**（实施新发现，**未闭合**）：walker 把 listing 里非 `S_IFDIR` 的条目一律当文件打开（跟随软链接），而 `grep -r` 与 `find -type f` 都**跳过**软链接 | grep 档少结果，且是静默的 | **本地无法取证**（Git Bash 造不出真软链接）→ 列为残留风险，由后端真机验证（计划 Task 11 Step 5）定夺。换 `-R` / `find -L` 只是把分歧挪到「服务器把软链接目录报成 `S_IFDIR` 还是 `S_IFLNK`」那一侧，两个方向都不平价 → **定夺前不要把 `-r` 改成 `-R`**（那是换个分歧，不是消除分歧） |
 | 大文件扫描耗时长 | 单次搜索分钟级 | `max_scan_bytes` 预算 + 命中即停 + 可取消 + 进度可见 |
 | 临时连接消耗服务器 fd/线程 | 影响他人 | `workers` 上限 8，`finally` 无条件关闭，测试断言 `opened == closed` |
 | 在制品 SSE 流泄漏占 daemon 线程 | 内存/句柄增长 | threaded runserver 下不冻结应用；`timeout` 兜底 + 显式取消入口常驻 |
@@ -597,3 +682,11 @@ e2e 相关 spec 通过；收尾释放 8000 / 3000 端口。
 
 （实施后填写：后端全量测试数、e2e 通过数、grep 档真机人工验证的服务器与结果、
 dark/light 截图位置。）
+
+2026-09-21 更新时仍未闭合的两条：
+
+1. **grep/find 档与 client 档的真机结果集比对**——含 §6 那条软链接分歧的定夺。
+   自动化只能证「我们发出的命令等价于 walker 的判定」（§4.5 缺口 + 本机 grep 3.0 真跑比对），
+   证不了目标服务器上真跑得出同一结果。
+2. **列值模式的 `Unit` / `Min` / `Max` 三行是否应排除**（§3.5）——**待用户拍板的产品问题**。
+   现状与参考工具一致：这三行被当作前三个值取走，已由测试钉住，改动前先回到那条测试看理由。
