@@ -420,14 +420,42 @@ class ColumnTests(SimpleTestCase):
                       + b'SN,ShadowReg2' + CRLF + b'1,0.42' + CRLF)['values'],
             ['0.42'])
 
-    def test_unit_and_limit_rows_count_as_values(self):
-        """钉**当前**行为（与参考工具一致）：真文件表头下面紧跟 Unit/Min/Max 三行，
-        它们会被当值取走。要不要跳过它们是产品决定，改之前先看这条测试。"""
-        raw = (b'[DATA]' + CRLF + CRLF + b'SN,LKG_VIN' + CRLF
+    def test_unit_and_limit_rows_are_skipped(self):
+        """表头下紧邻的 Unit/Min/Max 三行**不是**读数（2026-09-21 产品拍板跳过；此前与
+        参考工具一致地把它们当值取走）。真数据 56/56 个含 ``[DATA]`` 的 datalog 都在表头
+        下方写这三行（``Data/`` 全量比对每行首格），不跳的话结果前几格是单位与限值。
+        位置判据的另一个来源是 ``apps/datafiles/parsers/base.py:154-155``
+        （CTA8290D/CTA8280F：header +1 / unit +2 / min +3 / max +4 / data +5）。"""
+        raw = (b'[DATA]' + CRLF + b'SN,LKG_VIN' + CRLF
                + b'Unit,nA' + CRLF + b'Min,-50.00' + CRLF
                + b'Max,50.00' + CRLF + b'1,7.495500' + CRLF)
         self.assertEqual(self.read(content=raw, column='LKG_VIN')['values'],
-                         ['nA', '-50.00', '50.00', '7.495500'])
+                         ['7.495500'])
+
+    def test_skip_is_capped_at_three_rows(self):
+        """只跳表头下**紧邻**的最多三行，第四行起一律当数据：没有 Unit/Min/Max 的文件
+        不能被白吃三行读数，未知生产者多写一行也不该连带吃掉真值。"""
+        raw = (b'[DATA]' + CRLF + b'SN,LKG_VIN' + CRLF
+               + b'Unit,nA' + CRLF + b'Min,-50.00' + CRLF + b'Max,50.00' + CRLF
+               + b'Min,-1.00' + CRLF + b'1,7.0' + CRLF)
+        self.assertEqual(self.read(content=raw, column='LKG_VIN')['values'],
+                         ['-1.00', '7.0'])
+
+    def test_limit_tokens_match_case_insensitively(self):
+        """首格比 token 集合走小写：真数据写的是 ``Unit``/``Min``/``Max``，
+        大小写混排的生产者不该因此漏跳。"""
+        raw = (b'[DATA]' + CRLF + b'SN,LKG_VIN' + CRLF
+               + b'UNITS,nA' + CRLF + b'min,-50.00' + CRLF + b'Max,50.00' + CRLF
+               + b'1,7.0' + CRLF)
+        self.assertEqual(self.read(content=raw, column='LKG_VIN')['values'],
+                         ['7.0'])
+
+    def test_column_with_only_limit_rows_is_not_a_hit(self):
+        """跳过之后该列再无值 → 不算命中。这是语义变更的另一半：以前光靠单位行就能
+        命中一个文件，现在必须有真读数。"""
+        raw = (b'[DATA]' + CRLF + b'SN,LKG_VIN' + CRLF
+               + b'Unit,nA' + CRLF + b'Min,-50.00' + CRLF + b'Max,50.00' + CRLF)
+        self.assertIsNone(self.read(content=raw, column='LKG_VIN'))
 
     def test_naive_comma_split_matches_quoted_field_free_data(self):
         """切分口径：本域 ``[DATA]`` 段实测**没有**引号字段也没有内嵌逗号

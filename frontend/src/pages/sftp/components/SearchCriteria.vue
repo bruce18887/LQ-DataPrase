@@ -264,7 +264,7 @@
               <el-input v-model="matchesPerFile" data-testid="sftp-search-matches-per-file" class="sc-num" type="number" :min="1" :max="20" placeholder="默认 1，上限 20" :disabled="firstHitPerFile" />
             </div>
           </el-form-item>
-          <el-form-item v-if="mode === 'column'" label="读表头行数">
+          <el-form-item v-if="mode === 'column'" label="取值行数">
             <el-input v-model="columnRows" data-testid="sftp-search-column-rows" class="sc-num" type="number" :min="1" :max="50" placeholder="默认 10，上限 50" />
           </el-form-item>
         </el-collapse-item>
