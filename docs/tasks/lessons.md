@@ -1027,3 +1027,78 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   `DELETE /auth/users/38/ 204` 之后紧跟一条 `PUT /auth/users/38/ → 404`——
   两个页面互相操作了对方的用户 id。失败点落在用例**末的清理删除**（断言 `已删除`
   超时），不在断言链中间，容易被误读成产品 bug。**机制未完全定位，未擅自改测试**。
+
+## 2026-09-21 HTML 报表导出：三处「看起来对但会被工具打脸」的坑
+
+- **`locator.isVisible()` 不重试，动画/异步渲染的可见性判断必须用 `waitFor`**：批次
+  下拉（Element Plus popper）展开有动画，`firstOption.isVisible()` 在动画未完成时立即
+  返回 `false`（该方法是一次性快照，**不自动等待**），于是用例稳定「跳过」。
+  对照：`expect(locator).toBeVisible({timeout})` 与 `locator.waitFor({state:'visible'})`
+  才会重试。规则：判断「某元素是否已出现」时用 `waitFor`；`isVisible()` 只用于「现在就
+  在不在」的无等待场景。诊断线索：skip 前的 `[diag]` 日志已证明选项数量（104）非零，
+  坑在**可见**而非**存在**。
+- **源码扫描守门会被你自己的注释触发**：`test_export_fonts` 用正则
+  `rcParams\[\s*['"]font\.sans-serif['"]\]` 扫 `apps/export/**/*.py`。新模块的 docstring
+  里写了「不在本模块内自设 `rcParams['font.sans-serif']`」——**那句说明本身就是命中**，
+  测试直接红。规则：在受源码正则守门的模块里，连「解释为什么不要写 X」的注释都要规避 X
+  的字面量（改写成自然语言，如「sans-serif 候选列表」）。
+- **`vue-tsc --noEmit` 不是本仓的构建校验入口，`vue-tsc -b` 才是**：新增 composable 后
+  用 `npx vue-tsc --noEmit` 报「无输出=通过」，但 e2e 的 webServer 跑 `npm run build`
+  （= `vue-tsc -b && vite build`）时立刻报 `TS2307 Cannot find module`（导入路径多一级）。
+  两者 project references 行为不同。规则：本地校验前端类型请跑 `npm run build` 或
+  `npx vue-tsc -b`，别信 `--noEmit` 的沉默。
+
+## 2026-09-21 SFTP 搜索子系统：移植、依赖漂移与「测不出来的那一类」
+
+- **参考工具里能跑 ≠ 能移植**：`DataPrase-SFTP Searcher/config/sftp_connection.py:18` 用的是
+  `AutoAddPolicy()`，照搬进本项目会**直接破**主机密钥 TOFU 契约（
+  `test/backend/test_sftp_host_keys.py::test_mismatch_refuses_and_credentials_are_not_sent`
+  钉着「密钥不匹配即拒绝、凭据不发往可疑主机」）。**怎么办**：移植前先查「这段代码依赖的性质
+  在本项目有没有反向钉桩」，再用真数据/真服务冒烟一次，并核对**当前依赖版本**的 API 签名。
+  （同一族的「转述前先自己复现一次」见 2026-09-08 段。）
+- **依赖版本升级会让「看着还在」的保护静默失效**：venv 里 paramiko 5.0.0 的 `SFTPClient`
+  **没有** `realpath`（只有 `normalize`），而 `search/walker.py::_resolve_dir` 早期只按
+  `realpath` 取解析结果 → 每个目录都静默退回 normpath，软链接环保护名存实亡；单元测试全绿
+  （`FakeSftp` 两个名字都有），**只有真 paramiko 服务器跑起来才现形**。同族漂移：
+  `Transport.__init__` 在 5.0 已无 `default_timeout`，读超时只能用现成的
+  `downloads.channel_timeout`（设 channel 的 socket 超时）。**怎么办**：降级路径必须走异常，
+  不许静默 fallback；并给降级补一条 `assertNoLogs` 用例（见
+  `test_sftp_search_integration.py::test_dir_resolution_never_degrades_silently_on_real_client`）。
+- **多线程共用一条 paramiko SFTP channel 的表现是永久卡死，不是返回错值**：并行 IO 打在同一
+  个 client 上会把协议流错位，`as_completed` 永不返回；而 `spec.timeout` 只覆盖扫描循环
+  （runner 的判点在两批目录之间），**救不到列目录阶段**。**怎么办**：并行 IO 的测试要有看门狗
+  （本子系统 `HARD_CAP_SEC = 60`），把「挂死整轮 test run」换成一次有界、可复现的 FAIL。
+- **DRF 内容协商会吃掉 SSE 的 `Accept` 头**：客户端发 `Accept: text/event-stream` 时，视图若
+  只有 JSONRenderer 在谈，会在**进 action 之前**被判 **406**（连「400 + 一句原因」都到不了用户
+  手里）。Django test client 默认不发这个头、浏览器 fetch 默认 `*/*`、curl 默认 `*/*` →
+  单测与手工 curl **全都测不到**。**怎么办**：流式端点至少做一次真 socket 的 HTTP 全链路验证；
+  修法是把 `text/event-stream` 声明成可协商类型（`search_views.SSERenderer`，真流走
+  `StreamingHttpResponse` 不经渲染器），并留一条 `HTTP_ACCEPT='text/event-stream'` 的回归用例
+  （`apps/sftp/tests_search.py`），同一头下的校验失败仍须是 400 + JSON 体。
+- **两档实现自动降级时，语义不等价的能力必须整体禁掉其中一档**：服务端 grep 档与客户端档在
+  模糊（grep 无子序列原语）、非 ASCII（grep 只按 UTF-8 字节 → 本域 GBK 文件**静默漏**）、
+  跨语言整词（`LC_ALL=C grep -w` 与 `re` 的 `\b` 对 CJK 判定相反）、递归深度（GNU grep **没有**
+  `--max-depth`）上都不等价。做法：这类查询在 `search/engine.select_engine` 整体排除 grep 档，
+  并给一条写明**后果**的用户可见 `notice`。理由：**「同一查询的结果取决于服务器恰好有什么」
+  是比缺功能更糟的性质**。
+- **`LC_ALL=C grep` 的 `--include`/`--exclude` 按 argv 顺序求值、最后命中者决定去留**
+  （实测 GNU grep 3.0），**不是**「exclude 恒压 include」。若某实现要求 exclude 优先而 grep
+  给不到，唯一同时满足两种语义的排法是**把全部 `--include` 排在 `--exclude` 之前**
+  （`search/shell_grep.py` 就是这么排的；排反的后果实测：16 个文件全回来，参照档只该有 6 个）。
+  另：`--exclude='.*'` 不管目录，目录要另给 `--exclude-dir`。**怎么办**：别凭记忆写 shell 工具的
+  语义，跑一次真二进制取证，并把结论同时钉进注释与平价测试
+  （`test/backend/test_sftp_search_parity.py`）。
+- **一个永远不可能变红的测试不是测试**：给 `apps/sftp/pool.py` 补 per-user RLock 时，原计划的
+  并发用例用微秒级 mock 握手，GIL 不在临界区内切换 → **不加锁也全绿**，计划预测的红压根不出现。
+  加 `BUILD_DELAY = 0.05`（`test/backend/test_sftp_pool_lock.py`）让线程真重叠之后用例才有效。
+  **怎么办**：写完并发测试先故意把被测保护撤掉，确认它会红，再恢复保护。
+- **桌面版后端的并发模型要与代码自述的前提对账**：`pool.py` 曾自述「gunicorn sync worker 下
+  同用户不会并发」故不加锁，但 `standalone.py:224` 实跑的是 `runserver --noreload`，而
+  **Django 6.0 的 `--nothreading` 是 `action="store_false"`，默认 threaded** → 前提早已失效。
+  **怎么办**：读到「本实现无锁/无校验，因为 X」这类注释，去核实 X 在**当前部署形态**下还成立
+  不成立——运行时假设和代码一样会腐烂。
+- **把一条测试划进「人工验证」之前，先问它防的是不是竞态/时序**：`workers=1` 与 `workers=4`
+  结果必须逐字一致这条，一度被降级成 curl 人工清单，而它是全计划里唯一能抓出并行协议错乱的
+  保护；收进自动化后第一次跑就抓到上面那条 realpath 静默失效。**这类缺陷只在自动化里反复跑
+  才现形**，人工清单跑过一次就再也不跑。
+
