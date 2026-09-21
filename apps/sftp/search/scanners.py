@@ -446,9 +446,9 @@ def read_column(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, o
                         in_data = True
                     continue
                 if not text:
-                    # [DATA] 与表头之间的空行 —— 真实 ATE datalog（Data/ 下 56/56 个
-                    # 含 [DATA] 的文件）都有这一行，不跳就会把空行当表头、对所有真文件
-                    # 永远读不出列（参考工具正是这个行为）。
+                    # 防御性容错，**不是**对实测数据的适配：Data/ 全量原始字节复核过，
+                    # 56/56 个含 [DATA] 的文件都是表头紧跟标记行（空行只出现在标记**之前**，
+                    # 49/56）。真数据走不到本分支，它挡的是未知生产者或手工编辑留的空行。
                     continue
                 if not headers_read:
                     headers = [h.strip() for h in text.split(',')]
