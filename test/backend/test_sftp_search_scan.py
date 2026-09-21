@@ -411,9 +411,10 @@ class ColumnTests(SimpleTestCase):
             self.assertIsNone(self.read(column='NoSuchCol'))
 
     def test_blank_line_between_data_marker_and_header_is_skipped(self):
-        """真实形态：``Data/`` 下 56/56 个含 ``[DATA]`` 的 ATE datalog 都在
-        ``[DATA]`` 与表头之间夹一个空行。把「[DATA] 后第一行」当表头（参考工具就是这么
-        写的）会对**所有**真文件读不出列 —— 功能整体静默失效。"""
+        """防御性容错分支，**不是**真实形态：`Data/` 按原始字节复算，56/56 个含 ``[DATA]``
+        的 datalog 都是**表头紧跟标记行**，空行只出现在标记**之前**（49/56）。这条测的是
+        「万一标记与表头之间夹了空行（未知生产者、手工编辑的文件），列仍取得到」。
+        别把它读成「真数据有此空行」——上一轮就是这么记反了方位的。"""
         self.assertEqual(
             self.read(content=b'[DATA]' + CRLF + CRLF
                       + b'SN,ShadowReg2' + CRLF + b'1,0.42' + CRLF)['values'],
