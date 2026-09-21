@@ -184,9 +184,20 @@ def _is_dir(attr) -> bool:
 
 
 def _resolve_dir(sftp, path: str) -> str:
-    """``realpath`` 归一：SFTP 协议判 symlink 不可靠（§3.4），靠解析后的真身去重。"""
+    """``realpath`` 归一：SFTP 协议判 symlink 不可靠（§3.4），靠解析后的真身去重。
+
+    **两个名字都要试**：paramiko 5.0 把客户端的 ``SFTPClient.realpath`` 改名成
+    ``normalize``（同一个 CMD_REALPATH 往返），只认前者的话在真服务器上每个目录都
+    静默退回 normpath —— 环保护名存实亡，而这种降级 MagicMock 与 ``FakeSftp``
+    （它两个都有）永远测不出来，只有真客户端会现形。降级只许是异常路径。
+    """
+    resolve = getattr(sftp, 'realpath', None) or getattr(sftp, 'normalize', None)
+    if resolve is None:
+        logger.warning('SFTP client offers no realpath/normalize for %s, falling back '
+                       'to normpath: symlink cycle protection is degraded', path)
+        return posixpath.normpath(path)
     try:
-        return posixpath.normpath(sftp.realpath(path))
+        return posixpath.normpath(resolve(path))
     except Exception as exc:  # noqa: BLE001 —— 归一失败退回字面路径，目录照列
         logger.warning('SFTP realpath failed for %s: %s, falling back to normpath',
                        path, exc)
