@@ -19,11 +19,13 @@
         <el-button size="small" type="primary" data-testid="sftp-search-goto-connect" @click="goConnect">去连接</el-button>
       </div>
     </el-alert>
-    <el-alert v-else-if="connHint" class="ssp-alert" type="info" show-icon :closable="false"
+    <!-- 这条只是预告（真信号是上面那条 error：400 里的 not_connected）。
+         plain 底 + link 按钮：它是可忽略的提示，不该和右上的「搜索」主按钮抢视觉权重。 -->
+    <el-alert v-else-if="connHint" class="ssp-alert" type="info" effect="plain" show-icon :closable="false"
               title="当前没有可自动重连的 SFTP 配置">
       <div class="ssp-alert-body">
         <span>若还没在 SFTP 浏览器里连接，搜索会直接失败——先连一次更省事。</span>
-        <el-button size="small" :icon="Link" @click="goConnect">去连接</el-button>
+        <el-button size="small" link :icon="Link" @click="goConnect">去连接</el-button>
       </div>
     </el-alert>
 

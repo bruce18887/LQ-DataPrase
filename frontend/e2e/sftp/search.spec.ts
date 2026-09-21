@@ -600,6 +600,38 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
     expect(await line.innerText()).not.toContain('grep_unavailable')
     expect((await badge(page)).matches).toBeGreaterThan(0)
   })
+
+  test('16 控件按档显隐：这一档消费不到的控件不出现', async ({ page }) => {
+    // 「匹配方式 / 区分大小写」只被 scan_file 消费：列名档是表头**精确**匹配
+    // （`scanners.read_column` 判 `column_name in headers`），文件名档走 fnmatch。
+    // 「服务端加速」更窄：`engine.select_engine` 第一条判据就是 `mode !== 'content'` → client。
+    // 摆着不生效的控件比缺控件更坏 —— 用户会以为动了它结果就变（2026-09-21 UI 体检第 1 条）。
+    await gotoApp(page, '/sftp/search')
+    await expect(page.getByTestId('sftp-search-roots')).toBeVisible({ timeout: 15_000 })
+    await page.getByText('高级：并发、超时与各上限').click()   // 服务端加速在折叠区里，不展开恒不可见
+
+    const mode = page.getByTestId('sftp-search-mode')
+    const matching = page.getByTestId('sftp-search-matching')
+    const caseOpt = page.locator('.search-criteria').getByText('区分大小写')
+    const grep = page.getByTestId('sftp-search-server-grep')
+
+    await mode.getByText('文件名').click()
+    await expect(matching).toBeHidden()
+    await expect(caseOpt).toBeHidden()
+    await expect(grep).toBeHidden()
+
+    await mode.getByText('列名').click()
+    await expect(page.getByTestId('sftp-search-column')).toBeVisible()
+    await expect(page.getByTestId('sftp-search-column-rows')).toBeVisible()
+    await expect(matching).toBeHidden()
+    await expect(caseOpt).toBeHidden()
+    await expect(grep).toBeHidden()
+
+    await mode.getByText('内容含').click()
+    await expect(matching).toBeVisible()
+    await expect(caseOpt).toBeVisible()
+    await expect(grep).toBeVisible()
+  })
 })
 
 /**

@@ -204,7 +204,9 @@
         />
       </el-form-item>
 
-      <el-form-item v-if="mode !== 'name'" label="匹配方式">
+      <!-- 匹配方式/区分大小写只对「内容含」有效：列名档是表头精确匹配（scanners.read_column
+           判 `column_name in headers`），文件名档走 fnmatch，两者都不消费这两个值。 -->
+      <el-form-item v-if="mode === 'content'" label="匹配方式">
         <div class="sc-inline sc-inline--wrap">
           <el-radio-group v-model="matching" data-testid="sftp-search-matching">
             <el-radio value="substring">子串</el-radio>
@@ -214,7 +216,7 @@
           <el-checkbox v-model="caseSensitive">区分大小写</el-checkbox>
         </div>
       </el-form-item>
-      <div v-if="mode !== 'name'" class="sc-note">
+      <div v-if="mode === 'content'" class="sc-note">
         模糊匹配、以及含中文等非 ASCII 字符的关键词必然走客户端引擎：服务端 grep 给不出同一个
         结果集（会静默漏 GBK 文件）。整词不在其列 —— 关键词是纯 ASCII 时它照样能走服务端加速。
       </div>
@@ -237,7 +239,9 @@
           <el-form-item label="超时(秒)">
             <el-input v-model="timeout" data-testid="sftp-search-timeout" class="sc-num" type="number" :min="30" :max="3600" placeholder="默认 600，30–3600" />
           </el-form-item>
-          <el-form-item label="服务端加速">
+          <!-- engine.select_engine 对 mode !== 'content' 恒返回 client，
+               所以这个开关在「文件名」「列名」两档不改变任何结果，就不摆出来误导。 -->
+          <el-form-item v-if="mode === 'content'" label="服务端加速">
             <div class="sc-inline">
               <el-switch v-model="allowServerGrep" data-testid="sftp-search-server-grep" />
               <span class="sc-inline-hint">允许服务器上有 grep 时用它加速（结果不等价的查询会自动回落客户端）</span>
