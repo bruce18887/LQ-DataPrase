@@ -120,7 +120,7 @@ dest="use_threading"`（默认 True），`django/core/servers/basehttp.py:261-26
 | 同上 `server_grep_supported` / `search_via_server` / `_build_grep_command` | 服务端 grep 快路径（含 chroot 路径映射验证、GBK `$'..'` bashism） | 移植，但**收紧启用条件**（§3.3） |
 | 同上 `search_in_files` / `_open_connection` / `_recycle` | 每 worker 一条独立连接、连接坏了重开并重试一次 | 移植为 `connect.py` |
 | `search/file_retriever.py` | 递归遍历 + `fnmatch` + 扩展名/大小/日期过滤 | 移植，但**遍历结构改 BFS**（§3.4） |
-| `search/csv_column_reader.py` | `[DATA]` section 定位 + 表头取列 + 前 N 有效值 | 移植为列值模式，其「`[DATA]` 后首行即表头」的读法经复算在真实数据上成立（56/56 表头紧跟标记），照搬即可（§3.5） |
+| `search/csv_column_reader.py` | `[DATA]` section 定位 + 表头取列 + 前 N 有效值 | 移植为列值模式，其「`[DATA]` 后首行即表头」的读法经复算在真实数据上成立（56/56 表头紧跟标记）。**前 N 有效值这一条不照搬**：2026-09-21 拍板改为先跳过表头下紧邻的 `Unit`/`Min`/`Max` 三行再取值（判据、代价与复测见 §3.5） |
 | `utils/cli_interface.py` | worker 数钳位 1–8、实时 summary、导出、文件名合法性校验 | 取钳位区间与导出思路 |
 | `config/sftp_connection.py:21` | `set_missing_host_key_policy(paramiko.AutoAddPolicy())` | **不移植**，必须换成 `host_keys.open_verified_transport()` |
 
@@ -243,7 +243,7 @@ walker 直接调谓词、`shell_grep` 只调这里的 glob 常量，**两档引�
 | `max_matches` | 2 000 | 20 000 | 也是「结果驻留在渲染进程内存」的上限依据 |
 | `matches_per_file` | 1 | 20 | |
 | `max_scan_bytes` | 64 MiB | 1 GiB | 单文件扫描预算，超出记 `scan_budget_exceeded` 并跳过该文件剩余 |
-| `column_rows` | 10 | 50 | |
+| `column_rows` | 10 | 50 | 每个命中文件取该列**前 N 个非空读数**（不是「往下找几行表头」）。表头下紧邻的 `Unit`/`Min`/`Max` 三行不计入（§3.5） |
 | `workers` | 4 | 8 | 与参考工具 `cli_interface.py:324` 的 1–8 钳位一致 |
 | `term` 长度 | — | 200 字符 | |
 | `timeout` | 600s | 30–3600s | 复用 `clamp_timeout` 同款钳位范式 |
@@ -377,6 +377,7 @@ dot 条目 → `--exclude='.*'` **与** `--exclude-dir='.*'` **两条都要**（
 
 真数据冒烟（直接调 `scanners.read_column` 扫 `Data/` 那 56 个含标记的文件，各取其表头里的
 一列）：**56/56 读到列值，且 56/56 拿到 `TestFile` / `StartTime` 元数据，0 例读空。**
+（这一条是**跳过 `Unit`/`Min`/`Max` 之前**跑的；之后按同口径复跑仍 56/56，见下一条。）
 
 两条经核实成立的事实：
 
@@ -385,9 +386,14 @@ dot 条目 → `--exclude='.*'` **与** `--exclude-dir='.*'` **两条都要**（
   `{unit, units, min, max}`（那三行的测试列里装的是各自的单位与限值，只有前置系统列才是
   字面 token），且只认表头下**紧邻**的最多三行，断档即停。这是**对参考工具的有意偏离**。
   语义代价一并拍板接受：某列只在单位/限值行有内容 → 该文件不再算命中（命中必须有真读数）。
-  复测口径（2026-09-21 全量重跑）：`Data/` 的 122 个 csv 里 **56 个含 `[Data]` 标记**，
-  这 56 个**全部**是「标记后 1 行即表头」且「表头后三行首格恰为 `Unit`/`Min`/`Max`」
-  （56/56，无一例外）。位置判据的第二来源：`apps/datafiles/parsers/base.py:154-155`
+  复测口径（2026-09-21，`Data/` 全量）：122 个 csv 里 **56 个含 `[Data]` 标记**，这 56 个
+  **全部**是「标记后 1 行即表头」且「表头后三行首格恰为 `Unit`/`Min`/`Max`」（56/56，无一例外）。
+  改后同一批文件各取表头第 20、40 列直调 `read_column`：**56/56 有值**，且首值不再出现在
+  `Unit`/`Min`/限值那三格里。
+  **取数口径注意**：`[Data]` 标记在真文件里出现在第 400+ 行（实测某文件在 423 行），
+  流式「读前 N 行找标记」的探针若 N 太小会把标记都没读到的文件判成异常样本
+  ——本轮初测就因此把 56 误报成 47，别拿那种数往账里写。
+  位置判据的第二来源：`apps/datafiles/parsers/base.py:154-155`
   的 `unit/min/max_offset = 2/3/4`、`data_offset = 5`。测试见
   `test_sftp_search_scan.ColumnTests` 的 `test_unit_and_limit_rows_are_skipped` 等四条。
 - 列名匹配是**大小写敏感 + 精确相等**。spec 与计划均未表态，实现取保守侧：
