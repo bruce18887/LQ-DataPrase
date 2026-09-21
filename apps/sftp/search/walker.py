@@ -8,7 +8,9 @@
    ``contracts.DEPTH_TO_MAX``）。防失控的闸是 ``max_entries`` 预算与 deadline，它们与
    目录形状无关；用深度兜会在目标树恰好深一层时**静默少结果**（§3.2）。
 3. **剪枝在进入前判定**：被 ``prune_dirs`` 命中的子树既不进入、也不计条目预算，否则
-   「剪掉最外层」等于白剪。
+   「剪掉最外层」等于白剪。这是 ``max_entries`` 的**唯一**豁免（§3.2「遍历到的目录条目
+   总数」）：被 ``name_pattern``/大小/时间窗拒掉的文件照吃预算，它们只是不成为候选，
+   列目录的代价一点没省——把预算只记在候选上等于给它换个名字叫「候选上限」。
 
 ``depth`` 的口径：根目录是 0 层，根的直属子目录是 1 层，一个目录被列出的条件是其层数
 ``<= max_depth``。所以 ``self``=0 只列根、``children``=1 多列一层，与前端档位文案
@@ -65,7 +67,7 @@ class WalkResult:
     def __init__(self) -> None:
         self.candidates: List[Candidate] = []
         self.events: List[dict] = []
-        self.entries_seen: int = 0
+        self.entries_seen: int = 0     # 实际所见的非剪枝条目（含被元数据过滤掉的）
         self.truncated: List[str] = []
         self.cancelled: bool = False
 
@@ -124,36 +126,47 @@ def _as_datetime(mtime: int) -> datetime:
 
 
 def list_one(sftp, path: str,
-             spec: SearchSpec) -> Tuple[List[str], List[Candidate], Optional[str]]:
-    """列一个目录：返回 ``(可进入的子目录, 通过过滤的候选, 错误消息或 None)``。
+             spec: SearchSpec) -> Tuple[List[str], List[Candidate], Optional[str],
+                                        int]:
+    """列一个目录：返回 ``(可进入的子目录, 通过过滤的候选, 错误消息或 None, 所见条目数)``。
 
     **本函数不抛异常**（除了 KeyboardInterrupt 这类 BaseException）：调用方在 worker
     线程里，抛出等于把整次搜索炸掉。子目录已经过 ``realpath`` 归一，供上层做环保护。
+
+    ``seen`` 的口径（spec §3.2 钳位表「遍历到的目录条目总数」+ §3.4 唯一豁免）：数的是
+    这一层**实际看到**的条目，含 dot 条目、含被 ``name_pattern``/大小/时间窗拒掉的文件
+    —— 被拒条目只是「不成为候选」，它们照样消耗了一次列目录。唯一的豁免是 ``prune_dirs``
+    命中的目录：剪枝的全部意义就是连进都不进，若剪掉的子树还吃预算，「剪掉最外层」等于
+    白剪。空名条目不是真实条目，不计。
     """
     try:
         attrs = sftp.listdir_attr(path)
     except Exception as exc:  # noqa: BLE001 —— 降级为 dir 事件，绝不终止遍历
         logger.warning('SFTP listdir failed for %s: %s', path, exc)
-        return [], [], str(exc) or type(exc).__name__
+        return [], [], str(exc) or type(exc).__name__, 0
 
     base = path.rstrip('/') or '/'
     dirs: List[str] = []
     found: List[Candidate] = []
+    seen = 0
     for attr in attrs:
         name = getattr(attr, 'filename', '')
-        if not name or name.startswith('.'):
+        if not name:
             continue
+        if _is_dir(attr) and is_pruned(name, spec.prune_dirs):
+            continue                       # 唯一豁免预算的一条：见 docstring
+        seen += 1
+        if name.startswith('.'):
+            continue                       # 与 views.py:537 _collect_files 现状一致
         full = posixpath.join(base, name)
         if _is_dir(attr):
-            if is_pruned(name, spec.prune_dirs):
-                continue
             dirs.append(_resolve_dir(sftp, full))
         elif passes_metadata(name, getattr(attr, 'st_size', None),
                              getattr(attr, 'st_mtime', None), spec):
             found.append(Candidate(full, name,
                                    getattr(attr, 'st_size', None) or 0,
                                    getattr(attr, 'st_mtime', None) or 0))
-    return dirs, found, None
+    return dirs, found, None, seen
 
 
 def _is_dir(attr) -> bool:
@@ -188,16 +201,17 @@ def _list_via_session(session, path: str,
                       spec: SearchSpec) -> Tuple[List[str], List[Candidate], str, int]:
     """借一条连接列一个目录。坏连接在这里标出来还给池（「脏了就换」这条）。
 
-    条目预算 ``len(dirs) + len(files)`` 数的是**可见**条目：dot 条目与被剪枝的子树在
-    ``list_one`` 里就没了，所以「剪掉最外层」不会把 ``max_entries`` 吃光（§3.4）。
+    条目预算 ``seen`` 由 :func:`list_one` 就地数：它是**实际所见**的条目数，被元数据
+    过滤掉的文件照算，只有 ``prune_dirs`` 命中的子树在 ``list_one`` 里就豁免掉，所以
+    「剪掉最外层」不会把 ``max_entries`` 吃光（§3.2 口径 + §3.4 唯一豁免）。
     """
     item = session.borrow()
     broken = False
     try:
-        dirs, files, err = list_one(item[1], path, spec)
+        dirs, files, err, seen = list_one(item[1], path, spec)
         if err and _looks_connection_level(err):
             broken = True
-        return dirs, files, err or '', len(dirs) + len(files)
+        return dirs, files, err or '', seen
     finally:
         session.give_back(item, broken=broken)
 

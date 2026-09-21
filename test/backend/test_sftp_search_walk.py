@@ -75,6 +75,25 @@ class HiddenAndBudgetTests(SimpleTestCase):
         res, _ = walk(max_entries=2)
         self.assertIn('truncated_entries', res.truncated)
 
+    def test_filtered_out_entries_still_consume_entry_budget(self):
+        """spec §3.2 口径：预算数的是**遍历到的目录条目总数**，不是候选数。
+
+        被 ``name_pattern`` 拒掉的 100 个文件必须照吃预算——否则「条目预算」退化成
+        「候选上限的别名」，深树里海量不匹配文件就不受任何闸约束（§3.2「唯一真正防
+        遍历失控的闸」）。挡在预算外的正是第二层的 ``/data/sub``：它没被剪枝、也不是
+        dot 条目，唯一的解释是它前面的 101 个条目把 50 的预算吃光了。
+        """
+        tree = {'/data/sub/RT_target.csv': b'[DATA]\r\n'}
+        for i in range(100):
+            tree['/data/noise_%03d.txt' % i] = b'x'
+        s = contracts.parse_spec({'roots': ['/data'], 'mode': 'name',
+                                  'name_pattern': '*RT*',
+                                  'data_files_only': False, 'max_entries': 50})
+        res = walker.walk(s, FakeSession(FakeSftp(tree)))
+        self.assertIn('truncated_entries', res.truncated)
+        self.assertNotIn('/data/sub/RT_target.csv',
+                         {c.path for c in res.candidates})
+
     def test_candidate_budget_stops_listing(self):
         res, _ = walk(max_candidates=1)
         self.assertEqual(len(res.candidates), 1)
