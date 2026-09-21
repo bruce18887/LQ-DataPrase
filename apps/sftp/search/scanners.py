@@ -51,6 +51,15 @@ _PROBE_ENCODINGS = ('utf-8', 'gbk', 'gb2312', 'utf-16')
 _FILE_SCOPE_ERRNOS = frozenset({
     errno.ENOENT, errno.EACCES, errno.EPERM, errno.ENOTDIR, errno.EISDIR})
 
+# 列值档：表头之下、真读数之前的「元数据行」，判据是**首格**命中这些 token。
+# 真数据 56/56 个含 ``[Data]`` 标记的样本（``Data/`` 全量）都是 ``Unit``/``Min``/``Max``
+# 三行，位置与 ``apps/datafiles/parsers/base.py:154-155`` 的 unit/min/max_offset = 2/3/4 一致。
+# 取首格而非整行相等：那三行的测试列里装的是各自的单位与限值，只有前置系统列才是字面 token。
+LIMIT_ROW_TOKENS = frozenset({'unit', 'units', 'min', 'max'})
+# 最多跳三行，且必须紧邻表头：断档即停止跳（未知生产者多写一行也只当读数），
+# 没有这三行的文件更不该被白吃掉三行读数。
+LIMIT_ROW_SKIP_MAX = 3
+
 
 # ------------------------------------------------------------------ needle 与匹配
 
@@ -400,7 +409,11 @@ def scan_file(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, obj
 
 
 def read_column(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, object]]:
-    """取 ``spec.column_name`` 列的前 ``spec.column_rows`` 个**非空**值（spec §3.5 末段）。
+    """取 ``spec.column_name`` 列的前 ``spec.column_rows`` 个**非空读数**（spec §3.5 末段）。
+
+    跳过表头下紧邻的 ``Unit``/``Min``/``Max`` 三行（判据与上限见那两个常量）：那是单位与
+    限值行，不是测量值。**这一条是对参考工具的有意偏离**（``csv_column_reader.py`` 把它们
+    当值取走），代价是「该列只有单位/限值」的文件现在不再算命中 —— 命中必须有真读数。
 
     三段状态机：``[DATA]`` 之前只攒 head 字节（元数据交给 :func:`parse_head`，与
     :func:`scan_file` 共用同一套半行保护）→ 定表头取列索引 → 逐行取值，凑够即早停。
@@ -422,6 +435,7 @@ def read_column(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, o
     encoding: Optional[str] = None
     in_data = False
     headers_read = False
+    meta_rows_left = 0
     col_idx = 0
     scanned = 0
 
@@ -456,8 +470,13 @@ def read_column(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, o
                         return None          # 列不存在：不是故障，安静地没有结果
                     col_idx = headers.index(spec.column_name)
                     headers_read = True
+                    meta_rows_left = LIMIT_ROW_SKIP_MAX
                     continue
                 row = text.split(',')
+                if meta_rows_left and row[0].strip().lower() in LIMIT_ROW_TOKENS:
+                    meta_rows_left -= 1
+                    continue
+                meta_rows_left = 0           # 三行的额度用尽/断档，之后一律当读数
                 if col_idx >= len(row):
                     continue                 # 短行（尾列整片为空时常发生）跳过，不 IndexError
                 value = row[col_idx].strip()
