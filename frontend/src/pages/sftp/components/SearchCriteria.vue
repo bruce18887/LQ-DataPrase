@@ -215,7 +215,8 @@
         </div>
       </el-form-item>
       <div v-if="mode !== 'name'" class="sc-note">
-        整词 / 模糊 / 含中文的关键词必然走客户端引擎：服务端 grep 给不出同一个结果集（会静默漏 GBK 文件）。
+        模糊匹配、以及含中文等非 ASCII 字符的关键词必然走客户端引擎：服务端 grep 给不出同一个
+        结果集（会静默漏 GBK 文件）。整词不在其列 —— 关键词是纯 ASCII 时它照样能走服务端加速。
       </div>
 
       <!-- one_per_folder 放命中区显眼位置，不藏进「高级」（spec §3.13） -->
@@ -287,7 +288,8 @@
  * `inheritAttrs:false` + 把属性绑进内层 `<input>`（先例 `ColumnHeaderFilter.vue:57` 配
  * `file-list-sort-filter.spec.ts:157`）。唯一例外 `el-date-picker` 见模板里那段注释。
  *
- * 钳位由后端 `apps/sftp/search/contracts.py` 负责（超界夹住并记 `limits_hit`）；下面的 MAX_*
+ * 钳位由后端 `apps/sftp/search/contracts.py` 负责（超界夹住并出一条 `notice`，钳位码只告知、
+ * 不进 `limits_hit`）；下面的 MAX_*
  * 只是抄同名常量用于「输入时就拦住」，留空的数值字段一律发 `null` = 用后端默认值。
  *
  * e2e 契约钩子（Task 18 按名定位，勿改，均带 `sftp-search-` 前缀）：roots / depth / prune /

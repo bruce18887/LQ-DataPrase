@@ -87,11 +87,12 @@ export interface SearchRun {
   /** 数组是否已被摘要化清空（见 `compactHistory`） */
   compacted: boolean
   progress: SearchProgressState | null
+  /** 后端 `notice` 事件原样收在这里，由 `SearchProgress` 渲染（文案与 incomplete 分类都在事件里） */
   notices: SearchNotice[]
   errors: SearchError[]
   startedAt: number
   finishedAt: number | null
-  /** `done` 事件载荷：`truncated` / `limits_hit` 决定那条不可关闭的黄色提示 */
+  /** `done` 事件载荷：`truncated` 决定这条 run 是 `done` 还是 `partial` */
   done?: DoneEvent
   /** `null` = 已结束。Vue 的 reactive 不代理 AbortController 这类宿主对象，存进来仍是原实例 */
   abort: AbortController | null

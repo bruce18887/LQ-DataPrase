@@ -34,8 +34,9 @@ from apps.sftp.search.engine import (PROBE_NO_ACCELERATION, ProbeResult,
                                      probe_caused_fallback, select_engine)
 # 逐个名字 import，不是 ``import events``：类里有个叫 ``events()`` 的方法，类体中
 # ``events.Flusher`` 会先撞上那个方法对象（注解在 class 语句执行时就要求值）。
-from apps.sftp.search.events import (EVENT_POLL_SEC, SCAN_THREAD_PREFIX,
-                                     TRUNCATION_TEXT, Flusher, brief, notice)
+from apps.sftp.search.events import (EVENT_POLL_SEC, INCOMPLETE_CODES,
+                                      SCAN_THREAD_PREFIX, TRUNCATION_TEXT,
+                                      Flusher, brief, notice)
 
 logger = logging.getLogger(__name__)
 
@@ -500,7 +501,12 @@ class SearchRunner:
         out.append(self._stage('done', self._candidates_emitted, matched))
         out.append({'kind': 'done', 'matched': matched, 'scanned': files_scanned,
                     'elapsed_s': round(self.now() - self._started, 3),
-                    'truncated': bool(self._limits), 'limits_hit': list(self._limits),
+                    # ``truncated`` 说的是「结果集不完整」，不是「本次有过告知」：
+                    # workers_reduced / grep_fallback / grep_unavailable 只改快慢，
+                    # 把它们算进来会把一次完整搜索报成 partial（黄条说谎）。
+                    # 判据与 notice.incomplete 同源，都在 events.INCOMPLETE_CODES。
+                    'truncated': any(c in INCOMPLETE_CODES for c in self._limits),
+                    'limits_hit': list(self._limits),
                     'engine': self.engine_used, 'cancelled': self.cancelled,
                     'timed_out': self.timed_out})
         return out

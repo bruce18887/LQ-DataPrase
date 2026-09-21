@@ -175,7 +175,7 @@ async function runSearch(page: Page, form: SearchForm) {
  * 整页重载搜索页 = store 与表单一起清零，让**下一条 run 成为唯一的一条**。
  *
  * 本地 SFTP 上一次列目录档的搜索不到 100ms 就跑完，`running` 那一帧在第一次轮询前就翻成
- * done/partial（实测 43 次轮询全看到 partial），「等它变 running」对快查询不成立；而不等又
+ * done/partial（实测 43 次轮询全看到终态），「等它变 running」对快查询不成立；而不等又
  * 危险 —— DOM 上还挂着上一条 run 的终态徽章，`waitSettled` 会立刻拿旧 run 判绿。
  */
 async function resetSearchPage(page: Page) {
@@ -467,7 +467,7 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
     }
   })
 
-  test('10 截断告知：partial 黄条常驻且不可关', async ({ page }) => {
+  test('10 截断告知：partial 黄条常驻且不可关，且说的是中文', async ({ page }) => {
     await connectAndOpenSearch(page, '/')
     // 上限只在**两批目录之间**判（`walker.walk` 的循环头），所以要一个「还有下一批」的形状：
     // 根 '/' + depth all + name 档（不读内容，纯列举触发）。拿 /batch1 的 self 档试过：列完
@@ -476,11 +476,15 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
     await runSearch(page, { mode: 'name', depth: 'all', maxCandidates: '1' })
     await waitSettled(page)
     await expect(page.getByTestId(STATUS)).toHaveText('partial')
-    const alert = page.locator('.sp-alert')
+    const alert = page.getByTestId('sftp-search-truncated')
     await expect(alert).toBeVisible()
     await expect(alert).toContainText('结果不完整')
-    // 说的是「候选上限」这条截断（不是顺带被深度档位挡了一下）
-    await expect(alert).toContainText('truncated_candidates')
+    // 说的是「候选上限」这条截断（不是顺带被深度档位挡了一下）：码名只在 data-code 上，
+    // 用户读到的那句中文直接来自后端 notice.message —— 前端没有第二份码表可对照。
+    await expect(alert.locator('[data-code="truncated_candidates"]'))
+      .toHaveText('候选数已达上限，结果集不完整')
+    const shown = (await alert.locator('p').allInnerTexts()).join('\n')
+    expect(shown).not.toMatch(/truncated_|scan_budget_|dir_unreadable/)
     // 不可关：EP 的关闭按钮压根不该渲染出来（:closable="false"），而不是「有但藏起来」
     await expect(alert.locator('.el-alert__close-btn')).toHaveCount(0)
     await page.locator('.srt-title').click()                  // 碰一下别处，验证它不自动消失
@@ -573,6 +577,28 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
     await expect(page.getByTestId(STATUS)).toHaveText('error')
     await page.getByTestId('sftp-search-goto-connect').click()
     await expect(page).toHaveURL(/\/sftp$/)
+  })
+
+  test('15 只影响快慢的降级不染黄：grep 回落是中性一行，状态仍是 done', async ({ page }) => {
+    // e2e 那台 SFTP 服务器拒一切 exec 请求（`helpers/sftp_server.py` 的
+    // `check_channel_request` 只放行 session），所以「服务器没有 grep」在这里是常态、在生产
+    // 环境更是常态。这类码只改快慢不改结果，一旦并进黄条判据，每次内容搜索都会被报成
+    // partial（用户于是把完整结果当残缺结果重搜 —— 假警报比静默更耗信任）。
+    // 深度用 **全部递归**：`self`/`children` 档会实打实记一条 `truncated_depth`（更深的目录
+    // 确实没遍历），那是「少结果」该出黄条，测不到这条用例想测的性质。
+    await connectAndOpenSearch(page, '/batch1')
+    await runSearch(page, { mode: 'content', term: 'ShadowReg2', depth: 'all' })
+    await waitSettled(page)
+    await expect(page.getByTestId(STATUS)).toHaveText('done')
+    await expect(page.getByTestId('sftp-search-truncated')).toHaveCount(0)
+    const neutral = page.getByTestId('sftp-search-notices')
+    await expect(neutral).toBeVisible()
+    const line = neutral.locator('[data-code="grep_unavailable"]')
+    await expect(line).toHaveCount(1)
+    // 文案仍是后端给的那句（含探测原因），不许退化成裸码
+    expect(await line.innerText()).toMatch(/grep/)
+    expect(await line.innerText()).not.toContain('grep_unavailable')
+    expect((await badge(page)).matches).toBeGreaterThan(0)
   })
 })
 
