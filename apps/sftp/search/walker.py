@@ -29,8 +29,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-from apps.datafiles.views import _is_summary_csv
-
+from apps.sftp.search import filters
 from apps.sftp.search.contracts import SearchSpec
 
 logger = logging.getLogger(__name__)
@@ -81,7 +80,8 @@ def is_pruned(dirname: str, patterns: Sequence[str]) -> bool:
     用 :func:`fnmatch.fnmatchcase` 而不是 :func:`fnmatch.fnmatch`：后者在 Windows 上会
     经 ``os.path.normcase`` 变成大小写不敏感，而服务器是大小写敏感的 POSIX —— 同一份
     条件在开发机和生产机会给出不同结果。``shell_grep`` 的 ``--include=`` 同样大小写敏感，
-    两边一致才能保证换引擎不改结果。
+    两边一致才能保证换引擎不改结果；目录侧同理，grep 档的 ``--exclude-dir`` 模式取自
+    :func:`apps.sftp.search.filters.dir_exclude_globs`（dot 规则 + 本函数的同一批模式）。
     """
     for pattern in patterns:
         if fnmatch.fnmatchcase(dirname, pattern):
@@ -91,15 +91,18 @@ def is_pruned(dirname: str, patterns: Sequence[str]) -> bool:
 
 def passes_metadata(name: str, size: Optional[int], mtime: Optional[int],
                     spec: SearchSpec) -> bool:
-    """元数据过滤。判定顺序见下，缺一即与 spec §3.4 不等价。"""
-    if name.startswith('.'):
+    """元数据过滤。判定顺序见下，缺一即与 spec §3.4 不等价。
+
+    dot / 汇总 / 非 csv 这三条**不在此处另写一遍**，取自 :mod:`.filters`：那是 walker 与
+    ``shell_grep`` 的唯一共享定义（grep 档把它们翻成 ``--exclude`` glob），任何一份本地
+    副本都会让「换服务器换结果集」重新变成可能。
+    """
+    if filters.is_hidden(name):
         return False                       # 与 views.py:537 _collect_files 现状一致
     if spec.name_pattern and not fnmatch.fnmatchcase(name, spec.name_pattern):
         return False
-    if spec.data_files_only:
-        ext = posixpath.splitext(name)[1].lower()
-        if ext != '.csv' or _is_summary_csv(name):
-            return False
+    if spec.data_files_only and not filters.is_data_csv(name):
+        return False
     size = size or 0
     if spec.min_size is not None and size < spec.min_size:
         return False
@@ -156,7 +159,7 @@ def list_one(sftp, path: str,
         if _is_dir(attr) and is_pruned(name, spec.prune_dirs):
             continue                       # 唯一豁免预算的一条：见 docstring
         seen += 1
-        if name.startswith('.'):
+        if filters.is_hidden(name):
             continue                       # 与 views.py:537 _collect_files 现状一致
         full = posixpath.join(base, name)
         if _is_dir(attr):
