@@ -702,8 +702,7 @@ e2e 相关 spec 通过；收尾释放 8000 / 3000 端口。
 
 ## 7. 验收账目
 
-（实施后填写：后端全量测试数、e2e 通过数、grep 档真机人工验证的服务器与结果、
-dark/light 截图位置。）
+以下按时间追加：`2026-09-21 Task 11`（后端真机闸门）、`2026-09-21 Task 20`（收尾验证与账目）。
 
 ### 2026-09-21 Task 11（预设 CRUD + 后端真机 HTTP 验证）
 
@@ -734,3 +733,73 @@ dark/light 截图位置。）
    证不了目标服务器上真跑得出同一结果。
 2. **列值模式的 `Unit` / `Min` / `Max` 三行是否应排除**（§3.5）——**待用户拍板的产品问题**。
    现状与参考工具一致：这三行被当作前三个值取走，已由测试钉住，改动前先回到那条测试看理由。
+
+### 2026-09-21 Task 20（收尾验证与账目，HEAD `9efbbe2`）
+
+本节数字全部为本机当场复跑所得；凡引用更早结论处均标明出处 commit。
+
+**后端全量复跑**
+- `.venv/Scripts/python.exe manage.py test` → `Ran 1338 tests in 475.254s` / `OK (skipped=7)`。
+- 与 `f91a2dc` 时的 1338（出处 `52e7fdd`）逐字一致；`git diff f91a2dc..HEAD` 只含
+  13 个 `frontend/` 文件（Task 17 前端接线 + Task 18 e2e）→ 证明这两次提交确实没动后端。
+
+**前端类型检查**
+- `npx vue-tsc -b --force` → exit 0，无诊断输出。
+
+**@sftp e2e 复现性（两次）**
+- 第 1 次（Task 18 实施时，既有结果引用于此）：`npx playwright test --project=P1 --grep @sftp --workers=1`
+  → 25 passed / 1 skipped，9.0m（加搜索用例前基线 10 passed / 1 skipped）。
+- 第 2 次（本次复跑）：同命令 → **25 passed / 1 skipped，9.0m，与第 1 次完全一致**。
+  skipped 那条是 `sftp.spec.ts` 的 env-gated 真实连接用例（无 `SFTP_HOST` 凭据，设计如此）。
+  结论：该套 e2e 可复现，不是抖动出来的账。
+
+**后端真机 HTTP 全链路（Task 11 Step 5 结论，出处 commit `52e7fdd`）**
+- SSE 分帧 16/14/13 帧全合规、`hello`→`done`、双响应头齐备、硬断后 Django→SFTP 连接数
+  回落 0 且再搜成功、中文 snippet 逐字不变形，连跑两遍 9/9；顺带抓出并修了 `Accept:
+  text/event-stream` 被 DRF 判 406 的真缺陷。
+
+**打包版冒烟（计划 Step 3）：未执行**。逐条核实过的原因（不是回避）：
+- `build.bat` 无条件 `taskkill /F /IM python.exe /T`——共享工作区会连带杀死其它会话的进程；
+- 无条件 `rmdir /s /q out` 并删 `dist\LQ-DataPrase`：`out/` 现存历史安装包
+  `LQ-DataPrase-0.6.0-Setup.exe`（2026-09-08），0.6.0 的源码状态已不在当前树上，删掉不可恢复；
+- `npm run dist:win` = 前端生产构建 + PyInstaller + electron-builder（主程序 ~188 MB）全链，
+  为验证跑一次，时长与破坏风险都不可接受。
+- **需要的条件**：用户确认 `out/` 产物可弃（或改脚本输出到独立目录），或在独立干净
+  机器/worktree 上执行；然后走「连接→搜索→下载→分析」全链路冒烟一次。
+
+**threaded runserver 并发不阻塞（开发形态补证，本次实测）**
+- 来源复核：`standalone.py:224` 只传 `--noreload`；本机安装 Django 6.0.5 的
+  `--nothreading` 为 `action="store_false"`（dest `use_threading`，默认 True）→
+  桌面/打包后端默认多线程（§2.5 结论复核成立）。
+- 实测（`tasks/_sftp_search_concurrency_verify.py`，复用 Task 11 脚手架、临时库隔离；
+  `tasks/` 在 .gitignore 内，脚本仅存本机不入库）：种入 40×8 MiB（309 MiB）无命中
+  文本，一次 content 搜索（workers=1）真实持续 **5.27s**：
+  - A 组（默认 threaded）：`hello` 之后、`done` 之前发 6 个普通 API 请求
+    （预设列表 / OpenAPI schema），单个 latency **0.02–0.09s**，6 个全部在流仍开着时
+    完成（open_after 全真）→ 并发不互相阻塞；
+  - B 组（对照组，显式 `--nothreading`，流时长 5.37s）：首个普通请求 latency=**5.36s**，
+    直到流的 done 帧到达后才返回 → A 的判据有鉴别力，现象归因 threading。
+- 打包版相对该实测只多 PyInstaller 冻结环境这一层，记在「打包版冒烟未执行」缺口下。
+
+**grep 档真机人工验证：仍未闭合（最要紧的残留项）**
+- 缺的环境：一台开 shell/exec 的真实企业 SFTP（非 chroot，或 chroot 且路径映射一致），
+  其上须有一棵含**真软链接**的目录树——Windows/Git Bash 造不出真软链接，本地无法取证。
+  需用户提供：该服务器地址（入账时脱敏）、账号凭据。
+- 要做的比对：同一查询在 grep 档与 client 档各跑一次，记录 grep/find 版本、是否 chroot、
+  `workers=1` vs `workers=4` 结果是否一致，并据此定夺 §6「grep 跳过软链接 vs walker 跟随」。
+- 定夺完成前**不得**把 `grep -r` 改成 `-R`（那只是把分歧挪到服务器报法那一侧，不消除分歧）。
+
+**待用户拍板的两个产品问题**
+1. 列值模式目前把表头之后的 `Unit`/`Min`/`Max` 三行当作数据值取走（56/56 真数据皆如此，
+   与参考工具一致；已由 `test_sftp_search_scan.py::test_unit_and_limit_rows_count_as_values`
+   钉住）——是否改为排除，是产品决定（§3.5）。
+2. `max_candidates` 默认 5000（契约允许上限 50,000）：用户曾表示要能一次捞上万再分批
+   下载——默认值是否上调（或表单直接暴露该参数）待定夺。
+
+**dark/light 主题走查证据位置**
+- Task 17 走查截图 5 张在 `test/screenshots_night/walk17_*.png`（`02_dir_context_menu`、
+  `03_chip_on_data_night`、`04_download_disabled_night`、`08_chip_on_data_light`、
+  `08_download_disabled_light`）；`test/*` 在 .gitignore 内 → 只存本机，不入库。
+- Task 15/16 的走查按计划做过（类型检查 + 手动走查），但走查截图随当时的临时脚手架
+  清理删除，**无落盘件**（如实记录）。
+
