@@ -16,6 +16,7 @@ from apps.accounts.models import UserSetting
 from . import host_keys
 from .cache import set_session, delete_session, SftpSessionCacheError
 from .config_views import SftpConfigMixin
+from .search_views import SftpSearchMixin
 from .models import SftpConfig
 from . import pool
 from .local_paths import remove_partial, resolve_local_path
@@ -40,7 +41,7 @@ SORT_KEYS = {
 }
 
 
-class SftpViewSet(SftpConfigMixin, viewsets.GenericViewSet):
+class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
 
     def _get_connection(self, request):
