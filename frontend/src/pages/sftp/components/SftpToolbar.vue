@@ -42,6 +42,16 @@
           style="width: 200px; margin-right: 12px"
           :prefix-icon="Search"
         />
+        <el-tooltip content="进入 SFTP 搜索页（以当前面包屑目录为搜索根）" placement="bottom">
+          <el-button
+            size="small"
+            type="primary"
+            plain
+            :icon="Search"
+            data-testid="sftp-advanced-search"
+            @click="goAdvancedSearch"
+          >高级搜索</el-button>
+        </el-tooltip>
         <el-button size="small" type="danger" plain @click="emit('disconnect')">
           <el-icon><CircleClose /></el-icon> 断开
         </el-button>
@@ -52,6 +62,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { ArrowUp, HomeFilled, Search, CircleClose } from '@element-plus/icons-vue'
 
 const props = defineProps<{
@@ -67,6 +78,18 @@ const emit = defineEmits<{
   navigate: [path: string]
   disconnect: []
 }>()
+
+const router = useRouter()
+
+/**
+ * 「高级搜索」= 进搜索页并把当前面包屑目录带过去当 roots（计划 Task 17 Step 5.1 /
+ * spec §3.13 roots 入口之一）。这里直接 `router.push` 而不 emit 给 `SftpBrowser`：
+ * 中间人只会多两行透传，而它自己并不需要知道用户去了哪儿（搜索流在 store 里，
+ * 与本页无关）。
+ */
+function goAdvancedSearch(): void {
+  void router.push({ name: 'SftpSearch', query: { root: props.currentPath } })
+}
 
 const pathSegments = computed(() => {
   const segs = props.currentPath.split('/').filter(Boolean)

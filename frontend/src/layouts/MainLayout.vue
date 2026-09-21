@@ -4,6 +4,9 @@
     <Sidebar />
     <div class="main-content">
       <Topbar />
+      <!-- App 级常驻搜索条（计划 Task 17 Step 4）：挂在这一层而不是 SftpBrowser 内部，
+           切到任何页面都还在 —— 这是「搜索运行状态跨页面驻留」唯一的可见落点。 -->
+      <ActiveSearchChip />
       <main id="main-content" class="content-area" tabindex="-1">
         <router-view v-slot="{ Component }">
           <keep-alive :max="10">
@@ -18,6 +21,7 @@
 <script setup lang="ts">
 import Sidebar from '../components/layout/Sidebar.vue'
 import Topbar from '../components/layout/Topbar.vue'
+import ActiveSearchChip from '../components/common/ActiveSearchChip.vue'
 </script>
 
 <style scoped>

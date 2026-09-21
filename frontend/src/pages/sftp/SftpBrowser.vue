@@ -45,6 +45,7 @@
         :batch-downloading="batchDownloading"
         :batch-parsing="batchParsing"
         :transfer-active="transferActive"
+        :search-active="searchStore.isRunning"
         @select-all="toggleSelectAll"
         @invert="invertSelection"
         @batch-download="batchDownload"
@@ -69,6 +70,7 @@
         :sort-by="sortBy"
         :sort-order="sortOrder"
         :transfer-active="transferActive"
+        :search-active="searchStore.isRunning"
         @navigate="navigateTo"
         @sort-change="handleSortChange"
         @download="downloadFile"
@@ -93,6 +95,7 @@ import { FolderOpened, CircleCheck, CircleClose } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { sftpApi, type SftpLastVisit } from '../../api/sftp'
 import { useFilesStore } from '../../stores/files'
+import { useSftpSearchStore } from '../../stores/sftpSearch'
 import { getSftpTimeoutSec } from '../../utils/sftpTimeout'
 import SftpConnectionPanel from './components/SftpConnectionPanel.vue'
 import SftpToolbar from './components/SftpToolbar.vue'
@@ -167,10 +170,15 @@ function cancelDirDownload() {
 
 /** 传输互斥：后端按用户复用同一条 paramiko 连接（非线程安全），任意两类
  * 传输并发（SSE 单文件/SSE 目录/批量 POST）都会在共享 channel 上打架，
- * 故同时只允许一个下载（2026-09-09 用户拍板）。 */
+ * 故同时只允许一个下载（2026-09-09 用户拍板）。
+ * 搜索也算一类（计划 Task 17 Step 5.3）：它自己开临时连接不抢池连接，但与下载并发
+ * 会把两条长任务叠在同一会话上，故并入本判据 → 现有全部下载入口自动禁用。
+ * 取消冷却只读 store 那一份时钟（Step 6），这边不再另起一次 startCooldown()。 */
+const searchStore = useSftpSearchStore()
 const transferActive = computed(() =>
   fileDownloading.value || dirDownloading.value ||
-  batchDownloading.value || batchParsing.value || transferCooldown.value)
+  batchDownloading.value || batchParsing.value || transferCooldown.value ||
+  searchStore.isRunning || searchStore.inCancelCooldown)
 
 // ---- 生命周期清理（修复 SSE 流无法取消 + setTimeout 幽灵回调）----
 // 问题：组件销毁后 SSE reader 仍持有并回调更新已失效 ref → 内存泄漏；

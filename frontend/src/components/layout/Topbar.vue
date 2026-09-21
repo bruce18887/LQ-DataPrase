@@ -123,6 +123,7 @@ const breadcrumbs = computed(() => {
     settings: '系统设置',
     batch: '批次报表',
     sftp: 'SFTP浏览器',
+    search: '高级搜索',
     admin: '管理',
     users: '用户管理',
   }
