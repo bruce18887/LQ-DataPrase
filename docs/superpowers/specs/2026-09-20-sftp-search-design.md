@@ -683,6 +683,28 @@ e2e 相关 spec 通过；收尾释放 8000 / 3000 端口。
 （实施后填写：后端全量测试数、e2e 通过数、grep 档真机人工验证的服务器与结果、
 dark/light 截图位置。）
 
+### 2026-09-21 Task 11（预设 CRUD + 后端真机 HTTP 验证）
+
+- **后端全量**：`python manage.py test` → `Ran 1338 tests OK (skipped=7)`
+  （开工前 1308；本次 +28 预设契约 `apps/sftp/tests_search_preset.py`、
+  +2 SSE `Accept` 回归 `apps/sftp/tests_search.py`）。
+- **预设端点**：`/sftp/search_presets/` · `/save/` · `/delete/` 三个 action 挂在
+  `SftpSearchMixin` 上（`@action(url_path=...)` 带斜杠可用，DefaultRouter 走 `re_path`）。
+  保存前过 `parse_spec`；每人上限 50（`PRESET_MAX_PER_USER`）；跨用户不可见/不可改/不可删。
+- **真机 HTTP 全链路**（`tasks/_sftp_search_http_verify.py`，临时 SFTP 服务器 +
+  临时 `runserver` + `http.client` 逐行读真实 socket，连跑两遍 9/9）：
+  a. 16/14/13 帧全部 `data: {...}` + 空行，0 例半截 JSON，字节账目 raw=framed；
+  b. 首帧 `hello` 末帧 `done`，`match` 批大小 max=89 ≤ 200（`FLUSH_MAX_ITEMS`）；
+  c. `X-Accel-Buffering: no` + `Cache-Control: no-cache` 真在响应头上，首帧 +0.000s
+     早于服务端自报 `elapsed_s=0.28s`（被缓冲则首帧≈收尾、写批次塌成 1），实测 3 个写批次；
+  d. 收到 2 帧后硬断连接：Django→SFTP 的 ESTABLISHED 由 4（d0 完整搜索实测）回落 0，
+     服务端留下 `walker`/`shell_grep` 的 WARNING 与 traceback 痕迹，**再发一次搜索成功**
+     （13 帧、`done`、命中 1）；
+  e. GBK 中文 `漏电电流` 的 snippet 与路径逐字不变形（线上全 `\uXXXX` 转义，非 ASCII 字节 0）。
+- **Step 5 抓出并修掉的真实缺陷**：`Accept: text/event-stream` 被 DRF 内容协商判 **406**
+  （只有 JSONRenderer 在谈；`fetch` 默认发 `*/*`，所以 test client 与 curl 都测不到）。
+  修法是给 `search` action 一个只参与协商的 `SSERenderer`，失败响应仍是 `400 {'error': msg}`。
+
 2026-09-21 更新时仍未闭合的两条：
 
 1. **grep/find 档与 client 档的真机结果集比对**——含 §6 那条软链接分歧的定夺。
