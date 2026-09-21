@@ -19,9 +19,31 @@ GBK 编码，grep 只按 UTF-8 字节匹配会静默漏结果），所以这里�
 另一编码的 needle」那类写法：参考工具用的是 bash 专有的 ANSI-C 引用语法，在 dash/sh 下
 语义不同 —— 那等于把结果是否完整押在远端 shell 是哪个上。
 
-探测分两级（spec §3.6）：``grep`` 级 = ``grep --version`` + SFTP/shell 路径映射一致；
-``find_xargs`` 级 = 额外的 GNU ``find -newermt`` 与 ``xargs -0 -r``。任何一级不过都
-交回 :class:`ProbeResult`，由上层回落 client 并出 ``notice``。
+探测分两级（spec §3.6）：``grep`` 级 = ``grep --version`` + **我们拼的那几个选项它认不认**
++ SFTP/shell 路径映射一致；``find_xargs`` 级 = 额外的 GNU ``find -newermt`` 与 ``xargs -0 -r``。
+任何一级不过都交回 :class:`ProbeResult`，由上层回落 client 并出 ``notice``。
+
+**为什么选项存在性也是探测的一部分**：``--include`` / ``--exclude`` / ``--exclude-dir``
+的语义（大小写敏感、按命令行顺序求值且**最后命中的规则决定去留**、``--exclude`` 不管
+目录而 ``--exclude-dir`` 不管文件、多条 ``--include`` 之间是并集）是 **GNU grep 的实现
+细节，不是 POSIX**。本模块的结果集平价正是钉在这几条语义上的，所以「``grep --version``
+过了」并不够——探测必须真的拿这三个选项跑一次：探测通过而选项不存在 == 命令以退出码 2
+结束 == 一次白跑（虽然会被 :func:`grep_stream` 抛回落，但要慢一整趟）。
+
+**与 walker 的结果集平价（spec §3.3）**：dot 条目、``prune_dirs``、``data_files_only``
+（汇总 CSV 与非 ``.csv``）三条规则在 walker 里是 Python 判定，这里必须翻成语义逐字相同
+的 glob —— 判据与 glob 写法全部取自 :mod:`apps.sftp.search.filters`（唯一共享定义，
+含「grep 侧大小写敏感所以要写成 ``[sS][uU][mM]_*``」这类细节）。翻不出来的就回落：
+``depth`` 限制（GNU grep 没有 ``--max-depth``）、``name_pattern`` 与 ``*.csv`` 求交
+（``--include`` 是并集 → 改走 find 分支）、以及根目录名撞上目录排除模式（grep/find 会
+连根一起跳过，walker 却总会进根目录），判据都在 ``select_engine``/``filters``。
+
+**已知残留（未闭合，故显式记录）**：软链接的取舍两档不同 —— walker 把 listing 里
+非 ``S_IFDIR`` 的条目一律当文件打开（跟随软链接），而 ``grep -r`` 与 ``find -type f``
+都**跳过**软链接。换 ``-R`` / ``find -L`` 只是把分歧挪到「服务器把软链接目录报成
+``S_IFDIR`` 还是 ``S_IFLNK``」那一侧（``walker._is_dir`` 的 docstring 记的就是这个不确定），
+两个方向都不平价。本地无法取证（Git Bash 造不出真软链接），处置留 Task 11 真机验证；
+在此之前不要把 ``-r`` 改成 ``-R``，那属于换了个分歧而不是消除分歧。
 """
 
 import logging
@@ -30,8 +52,10 @@ import socket
 import time
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple
 
+from apps.sftp.search import filters
 from apps.sftp.search.contracts import SearchSpec
-from apps.sftp.search.engine import PATH_MAPPING_MSG, ProbeResult
+from apps.sftp.search.engine import (GREP_SELECT_INTERSECTION_MSG, PATH_MAPPING_MSG,
+                                     ProbeResult, ROOT_EXCLUSION_MSG)
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +65,15 @@ _GREP_VERSION_CMD = 'grep --version 2>&1'
 _FIND_XARGS_CMD = 'find --version 2>&1; xargs --version 2>&1'
 _MAPPING_TOKEN = 'MAPPING_OK'
 
+# 选项存在性探测：喂空输入，让「选项被接受」表现为退出码 1（没有一行匹配），
+# 「不认这个选项」表现为 2 + 一句 unrecognized option。``-q`` 只是不想让远端把
+# 探测当成真查询往外吐数据；选项解析在 ``-q`` 生效之前，报错照样进 2>&1。
+_SELECTION_OPTS_CMD = ("printf '' | LC_ALL=C grep -q -F -e zz --exclude=zz "
+                       '--exclude-dir=zz --include=zz 2>&1')
+
 _GREP_MISSING_MSG = '服务端没有可用的 grep（grep --version 未通过）'
+_SELECTION_OPTS_MSG = ('服务端 grep 不认 --include/--exclude/--exclude-dir'
+                       '（文件选择平价靠的就是这三条）')
 _PROBE_FAILED_MSG = '探测服务端 grep 失败'
 _PROBE_TIMEOUT_SEC = 5      # 探测卡住 == 探测不过，宁可快速回落
 _READ_TICK_SEC = 2.0        # grep 流的读超时：把取消延迟压到秒级
@@ -73,18 +105,51 @@ def _grep_options(spec: SearchSpec) -> List[str]:
 
 
 def build_command(spec: SearchSpec, *, use_find: bool) -> str:
-    """拼出这次要发给远端的命令。``use_find`` = 需要按 mtime/size 先筛文件。"""
+    """拼出这次要发给远端的命令。``use_find`` = 文件选择不能只靠 grep 的选项完成。
+
+    走哪条分支由 :func:`apps.sftp.search.filters.needs_find` 判（``grep_stream`` 就是
+    这么调的）。因此 ``use_find=False`` 却带上 grep 表达不出的选择条件，等于设计被绕过
+    —— 下面两道 ``ValueError`` 与「``term`` 非空」那道是同一类第二道闸：宁可拒绝发命令，
+    也不发一条会**静默少结果**的命令。
+    """
     if not spec.term:
         raise ValueError('grep requires a non-empty term')
+    if filters.root_collides_with_dir_excludes(spec):
+        raise ValueError(ROOT_EXCLUSION_MSG)
+    if not use_find and filters.grep_cannot_select(spec):
+        raise ValueError(GREP_SELECT_INTERSECTION_MSG)
     needle = ['-e', _q(spec.term)]
     if use_find:
         return _find_then_grep(spec, _grep_options(spec) + needle)
     parts = ['LC_ALL=C', 'grep', *_grep_options(spec), *needle]
+    # **顺序就是语义**（实测 GNU grep 3.0）：``--include``/``--exclude`` 是一个按命令行
+    # 顺序求值的规则表，**最后命中的那条决定**去留（不是「exclude 恒压 include」）。
+    # 所以 include 必须全部先发、exclude 全部后发 —— 这样在「exclude 恒压 include」
+    # 那一类实现里也得到同一个结果，两种语义同解，才谈得上跨服务器平价。反过来排会
+    # 静默把 dot 文件与汇总 CSV 放进来（本次实测过：include 后发时 16 个文件全回来）。
+    # 目录侧独立命名空间：``--exclude-dir`` 只判目录，与文件规则无交叉（实测）。
+    if spec.data_files_only:
+        # 汇总 CSV 与 .csv 后缀：grep 这两条 glob 都是大小写敏感的，折叠写法在 filters。
+        parts.append(f'--include={_q(filters.CSV_GREP_GLOB)}')
     if spec.name_pattern:
         parts.append(f'--include={_q(spec.name_pattern)}')
+    parts.append(f'--exclude={_q(filters.DOT_GLOB)}')
+    if spec.data_files_only:
+        parts.append(f'--exclude={_q(filters.SUMMARY_GREP_GLOB)}')
+    parts += _dir_exclusion_args(spec)
     parts.append('--')
     parts += [_q(root) for root in spec.roots]
     return ' '.join(parts)
+
+
+def _dir_exclusion_args(spec: SearchSpec) -> List[str]:
+    """``prune_dirs`` + dot 目录 → 每个模式一条 ``--exclude-dir``（照旧逐条过 :func:`_q`）。
+
+    grep 只拿目录的 basename 去匹这些 glob，命中即不进入 —— 与 walker
+    :func:`~apps.sftp.search.walker.is_pruned`（basename + ``fnmatchcase``）同口径，
+    所以被剪掉的整棵子树在两档里以同样的方式消失。
+    """
+    return [f'--exclude-dir={_q(glob)}' for glob in filters.dir_exclude_globs(spec)]
 
 
 def _find_then_grep(spec: SearchSpec, grep_args: Sequence[str]) -> str:
@@ -92,12 +157,35 @@ def _find_then_grep(spec: SearchSpec, grep_args: Sequence[str]) -> str:
 
     ``-print0``/``-0`` 是一对：文件名带空格换行也不分裂；``-r`` 让空结果集
     根本不启动 grep（否则 xargs 会带空参数列表跑一次，读 stdin 卡住）。
+
+    文件选择整个交给 find 的谓词（grep 那边一个 ``--include``/``--exclude`` 都不发）：
+    只有 find 能把多个 glob 以**与**的方式串起来。三段与 walker 一一对应：
+
+    * ``find <roots> ( -type d ( -name '.*' -o -name <prune> ... ) -prune )``
+      —— 不进入 dot 目录与被 ``prune_dirs`` 命中的目录。``-type d`` 是必需的：walker
+      只对目录判 prune，一个恰好叫 ``cache`` 的**文件**照样是候选。
+    * ``-o ( -type f`` + ``! -name '.*'`` —— dot 文件不进结果（dot 目录已被上面剪掉，
+      这条补的是文件侧，与 grep 分支那两条 ``--exclude``/``--exclude-dir`` 等价）。
+    * ``[ -name <name_pattern> ] [ -iname '*.csv' ! -iname 'sum_*' ]`` —— 文件名模式与
+      「仅数据文件」的求交在这里才表达得出来；``-iname`` 自带大小写不敏感，正好对上
+      walker 的 ``.lower()`` 判据。
+
+    圆括号必须引：它们在 shell 里是分组语法，不过 :func:`_q` 就是一次命令注入面。
     """
     parts = ['find']
     parts += [_q(root) for root in spec.roots]
-    parts += ['-type', 'f']
+    parts += [_q('('), '-type', 'd', _q('(')]
+    for index, glob in enumerate(filters.dir_exclude_globs(spec)):
+        if index:
+            parts.append('-o')
+        parts += ['-name', _q(glob)]
+    parts += [_q(')'), '-prune', _q(')'), '-o', _q('('),
+              '-type', 'f', _q('!'), '-name', _q(filters.DOT_GLOB)]
     if spec.name_pattern:
         parts += ['-name', _q(spec.name_pattern)]
+    if spec.data_files_only:
+        parts += ['-iname', _q(filters.CSV_FIND_GLOB),
+                  _q('!'), '-iname', _q(filters.SUMMARY_FIND_GLOB)]
     if spec.min_size is not None:
         parts += ['-size', _q(f'+{int(spec.min_size)}c')]
     if spec.max_size is not None:
@@ -108,21 +196,9 @@ def _find_then_grep(spec: SearchSpec, grep_args: Sequence[str]) -> str:
         # 「早于」= 非（新于或等于）：`!` 在 bash 里是历史展开，必须引。
         parts += [_q('!'), '-newermt',
                   _q(spec.modified_before.strftime(_DATE_ARG_FORMAT))]
-    parts += ['-print0', '2>/dev/null']
+    parts += ['-print0', _q(')'), '2>/dev/null']
     tail = ' '.join(['xargs', '-0', '-r', 'env', 'LC_ALL=C', 'grep', *grep_args, '--'])
     return ' '.join(parts) + ' | ' + tail
-
-
-def _needs_find(spec: SearchSpec) -> bool:
-    """时间/大小过滤只有 find 分支能表达（grep 没有按 mtime/size 选文件的原语）。
-
-    ``select_engine`` 只在**有时间过滤**时要求 ``has_find_xargs``（engine.py:73），
-    「只有大小过滤」的查询因此会落到 grep 档、却仍走这条 find 路。真机上若没有
-    GNU find，命令以退出码 >=2 结束 → :func:`grep_stream` 抛错 → 上层回落 client：
-    看得见地绕一步，不静默给出「没在指定大小范围内」的命中。
-    """
-    return bool(spec.modified_after or spec.modified_before
-                or spec.min_size is not None or spec.max_size is not None)
 
 
 # ------------------------------------------------------------------ 输出解析
@@ -204,10 +280,13 @@ def _run(chan: Any, cmd: str) -> Tuple[int, bytes]:
 
 
 def probe(chan_factory: Callable[[], Any], roots: Sequence[str]) -> ProbeResult:
-    """两级探测；任何异常都收成 ``ProbeResult(usable=False)``，绝不上抛。
+    """三级探测（grep 在 → grep 认我们的选项 → 路径映射一致，外加 find/xargs 一级）。
+
+    任何异常都收成 ``ProbeResult(usable=False)``，绝不上抛。
 
     探测不过不是错误而是环境事实——上层据此回落 client，搜索照跑。让它抛就等于
-    「服务器没有 grep」变成「搜索 500」。
+    「服务器没有 grep」变成「搜索 500」。选项存在性排在映射之前：那三条 glob 选项是
+    结果集平价的地基（见模块 docstring），不认就是整档不可用，不必再花时间试路径。
     """
     chan: Any = None
     try:
@@ -219,6 +298,12 @@ def probe(chan_factory: Callable[[], Any], roots: Sequence[str]) -> ProbeResult:
         if not has_grep:
             hint = out[:200].decode('utf-8', errors='ignore').strip()
             return ProbeResult(False, False, False, f'{_GREP_MISSING_MSG}：{hint}')
+
+        exit_code, out = _run(chan, _SELECTION_OPTS_CMD)
+        if exit_code > 1:
+            hint = out[:200].decode('utf-8', errors='ignore').strip()
+            return ProbeResult(False, False, False,
+                               f'{_SELECTION_OPTS_MSG}：{hint or f"退出码 {exit_code}"}')
 
         exit_code, out = _run(chan, _FIND_XARGS_CMD)
         low = out.lower()
@@ -268,7 +353,7 @@ def grep_stream(chan: Any, spec: SearchSpec, *,
     ``>=2`` 是 grep 自己出错了 —— 必须抛出让上层回落 client，绝不能被当成
     「这个目录里没有」而静默少结果。
     """
-    chan.exec_command(build_command(spec, use_find=_needs_find(spec)))
+    chan.exec_command(build_command(spec, use_find=filters.needs_find(spec)))
     _arm_read_timeout(chan, _READ_TICK_SEC)
     stream = chan.makefile('rb')
     unparsed: List[bytes] = []

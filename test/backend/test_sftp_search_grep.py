@@ -65,11 +65,16 @@ class CommandShapeTests(SimpleTestCase):
             spec(matching='whole_word'), use_find=False)))
 
     def test_include_only_with_pattern(self):
-        with_pat = shell_grep.build_command(spec(name_pattern='*RT*.csv'),
-                                            use_find=False)
-        without = shell_grep.build_command(spec(), use_find=False)
-        self.assertTrue(any(t.startswith('--include=') for t in flags(with_pat)))
-        self.assertFalse(any(t.startswith('--include=') for t in flags(without)))
+        """``data_files_only=False`` 才轮到「一条 include」的干净形态：
+        「仅数据文件」的 ``*.csv`` 与 ``name_pattern`` 求交走不了 grep 分支（``--include``
+        之间是并集），那一条断言在 test_sftp_search_parity.py。
+        """
+        with_pat = shell_grep.build_command(
+            spec(name_pattern='*RT*.csv', data_files_only=False), use_find=False)
+        without = shell_grep.build_command(spec(data_files_only=False),
+                                           use_find=False)
+        self.assertIn('--include=*RT*.csv', flags(with_pat))
+        self.assertFalse([t for t in flags(without) if t.startswith('--include=')])
 
     def test_lc_all_c_prefix(self):
         self.assertTrue(shell_grep.build_command(spec(), use_find=False)
@@ -113,8 +118,9 @@ class InjectionTests(SimpleTestCase):
         self.assertNotIn('-rf', tokens[:tokens.index('-e')])
 
     def test_name_pattern_quoted_as_one_token(self):
-        cmd = shell_grep.build_command(spec(name_pattern=self.EVIL_PATTERN),
-                                       use_find=False)
+        cmd = shell_grep.build_command(
+            spec(name_pattern=self.EVIL_PATTERN, data_files_only=False),
+            use_find=False)
         self.assertTrue(any(t == f'--include={self.EVIL_PATTERN}'
                             for t in shlex.split(cmd)))
         self.assertNotIn('--include=$(', cmd)
@@ -136,12 +142,29 @@ class InjectionTests(SimpleTestCase):
             use_find=True)
         self.assertIn(shlex.quote(self.EVIL_ROOT), cmd)
 
-    def test_prune_and_column_never_reach_the_command(self):
-        """这两项只在客户端引擎用到；出现在 grep 命令里就是设计被绕过。"""
+    def test_prune_dirs_reach_the_command_only_as_quoted_exclude_dirs(self):
+        """``prune_dirs`` 现在必须翻译成 ``--exclude-dir``（平价要求），但每条仍要过
+        ``shlex.quote``：钉的是「未引形态一出现就说明远端会自己去执行它」。
+        """
         cmd = shell_grep.build_command(
-            spec(prune_dirs=['$(id)'], column_name='`id`'), use_find=False)
-        self.assertNotIn('$(id)', cmd)
-        self.assertNotIn('`id`', cmd)
+            spec(prune_dirs=['$(id)', 'a b'], column_name='`id`'), use_find=False)
+        argv = flags(cmd)
+        self.assertIn('--exclude-dir=$(id)', argv)
+        self.assertIn('--exclude-dir=a b', argv)
+        self.assertIn("--exclude-dir='$(id)'", cmd)
+        self.assertIn("--exclude-dir='a b'", cmd)
+        self.assertNotIn('--exclude-dir=$(', cmd)
+        self.assertNotIn('--exclude-dir=a b', cmd)
+        self.assertNotIn('`id`', cmd)          # column_name 与 grep 档无关（mode 已回落）
+
+    def test_prune_globs_reach_the_find_branch_too(self):
+        """find 分支靠 ``-prune`` 组，grep 分支靠 ``--exclude-dir``：两条都得剪。"""
+        cmd = shell_grep.build_command(
+            spec(prune_dirs=['$(id)'], modified_after='2026-09-01'), use_find=True)
+        argv = shlex.split(cmd.split('|')[0])
+        self.assertIn('-prune', argv)
+        self.assertIn('$(id)', argv[:argv.index('-prune')])
+        self.assertIn("-name '$(id)'", cmd)
 
     # —— 以下为计划外补充：Task 8 交付要求点名的三类载荷，逐条钉住 ——
 
@@ -156,7 +179,8 @@ class InjectionTests(SimpleTestCase):
 
     def test_name_pattern_with_glob_and_command_substitution(self):
         pattern = '*.$(id).csv'
-        cmd = shell_grep.build_command(spec(name_pattern=pattern), use_find=False)
+        cmd = shell_grep.build_command(
+            spec(name_pattern=pattern, data_files_only=False), use_find=False)
         # 命令串里它带着引号（未引的形态一出现就说明远端会自己去展开）；
         # shlex.split 解掉引号后必须正好还原成一个 argv。
         self.assertIn(f"--include={shlex.quote(pattern)}", cmd)
@@ -236,13 +260,18 @@ class ParseLineTests(SimpleTestCase):
 
 
 class _Chan:
-    """最小 paramiko Channel 替身：按序回放 stdout，记录发过的命令。"""
+    """最小 paramiko Channel 替身：按序回放 stdout，记录发过的命令。
 
-    def __init__(self, replies, exit_status=0, stderr=b''):
+    ``exit_statuses`` 是给能力探测那类「一条通道跑几条命令、每条退出码不同」的场景：
+    单个 exit 值表达不出「grep 在、但它不认 ``--exclude-dir``」，而那正是必须回落的情况。
+    """
+
+    def __init__(self, replies, exit_status=0, stderr=b'', exit_statuses=None):
         self.replies = list(replies)
         self.stderr = stderr
         self.commands = []
         self.exit_status = exit_status
+        self.exit_statuses = list(exit_statuses or [])
         self.closed = False
 
     def exec_command(self, cmd):
@@ -258,17 +287,29 @@ class _Chan:
         return self.replies.pop(0) if self.replies else b''
 
     def recv_exit_status(self):
+        if self.exit_statuses:
+            return self.exit_statuses.pop(0)
         return self.exit_status
 
     def close(self):
         self.closed = True
 
 
+def _probe_chan(find_out=b'find (GNU findutils) 4.9.0\nxargs (GNU findutils) 4.9.0\n',
+                mapping=b'MAPPING_OK\n', opts_out=b'', opts_exit=1):
+    """按 ``probe`` 的命令顺序回放四条：``grep --version`` → 选项存在性 → find/xargs → 映射。
+
+    选项探测的「通过」形态是**退出码 1、无输出**：喂进去的输入是空的，没有一行匹配，
+    跟「没找到」同一个码；不认选项才是退出码 2 并带 unrecognized option。
+    """
+    return _Chan([b'grep (GNU grep) 3.7\n', opts_out, find_out, mapping],
+                 exit_statuses=[0, opts_exit, 0, 0])
+
+
 class ProbeTests(SimpleTestCase):
     def test_grep_available(self):
-        chan = _Chan([b'grep (GNU grep) 3.7\n', b'find 4.9\nxargs 4.9\n',
-                      b'MAPPING_OK\n', b''])
-        self.assertTrue(shell_grep.probe(lambda: chan, ['/data']).has_grep)
+        self.assertTrue(shell_grep.probe(lambda: _probe_chan(),
+                                         ['/data']).has_grep)
 
     def test_missing_grep_unusable_with_displayable_reason(self):
         chan = _Chan([b'', b'bash: grep: command not found\n'])
@@ -279,22 +320,20 @@ class ProbeTests(SimpleTestCase):
 
     def test_find_xargs_absence_reported_separately(self):
         """缺 find/xargs 只该关掉时间过滤这条路，不该把 grep 整体判死。"""
-        chan = _Chan([b'grep (GNU grep) 3.7\n', b'', b'MAPPING_OK\n', b''])
-        probe = shell_grep.probe(lambda: chan, ['/data'])
+        probe = shell_grep.probe(lambda: _probe_chan(find_out=b''), ['/data'])
         self.assertTrue(probe.has_grep)
         self.assertFalse(probe.has_find_xargs)
 
     def test_chroot_mapping_mismatch_blocks_grep(self):
         """SFTP 里存在的路径在 shell 侧可能不在同一位置（chroot）。
         不验就会 grep 一个不存在的路径、安静返回 0 命中。"""
-        chan = _Chan([b'grep 3.7\n', b'find 4.9\n', b'', b''])
-        probe = shell_grep.probe(lambda: chan, ['/data'])
+        probe = shell_grep.probe(lambda: _probe_chan(mapping=b''), ['/data'])
         self.assertTrue(probe.has_grep)
         self.assertFalse(probe.path_mapping_ok)
         self.assertIn('路径映射', probe.reason)
 
     def test_probe_closes_its_channel(self):
-        chan = _Chan([b'grep 3.7\n', b'', b'MAPPING_OK\n', b''])
+        chan = _probe_chan()
         shell_grep.probe(lambda: chan, ['/data'])
         self.assertTrue(chan.closed)
 
@@ -354,6 +393,30 @@ class GrepStreamTests(SimpleTestCase):
         chan = _Chan([])
         list(shell_grep.grep_stream(chan, spec(min_size=1024)))
         self.assertIn('-size +1024c', chan.commands[0])
+
+
+class ProbeOptionSupportTests(SimpleTestCase):
+    """探测必须覆盖我们拼的那几个选项**存在**（真 bug 风险：探测过了但 grep 不认 →
+    命令以退出码 2 结束 → 结果集凭空少一半）。"""
+
+    def test_selection_options_are_probed(self):
+        chan = _probe_chan()
+        shell_grep.probe(lambda: chan, ['/data'])
+        probed = ' '.join(chan.commands)
+        for opt in ('--exclude-dir=', '--exclude=', '--include='):
+            self.assertIn(opt, probed)
+
+    def test_grep_without_selection_options_is_reported_unusable(self):
+        chan = _probe_chan(opts_out=b'grep: unrecognized option\n', opts_exit=2)
+        probe = shell_grep.probe(lambda: chan, ['/data'])
+        self.assertFalse(probe.has_grep)
+        self.assertFalse(probe.usable)
+        self.assertIn('exclude-dir', probe.reason)
+
+    def test_probe_still_closes_the_channel_when_options_are_rejected(self):
+        chan = _probe_chan(opts_out=b'grep: unrecognized option\n', opts_exit=2)
+        shell_grep.probe(lambda: chan, ['/data'])
+        self.assertTrue(chan.closed)
 
 
 class ShellSurfaceTests(SimpleTestCase):

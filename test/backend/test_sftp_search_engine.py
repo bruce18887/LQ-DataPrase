@@ -70,6 +70,74 @@ class GrepEligibleTests(SimpleTestCase):
     def test_name_pattern_does_not_block_grep(self):
         self.assertEqual(name_of(spec(name_pattern='*RT*.csv')), 'grep')
 
+    def test_limited_depth_still_uses_grep_when_unlimited(self):
+        """正例半边：``depth='all'``（默认）不设深度闸，也就没什么可翻译的。"""
+        self.assertEqual(name_of(spec(depth='all')), 'grep')
+
+
+class DepthAndScopeFallbackTests(SimpleTestCase):
+    """第四条件（深度）与翻译过程中新暴露的两条 scope 缺口。
+
+    判据只有一条：**grep 拼不出与 walker 相同的结果集**。性能不在考虑范围内——
+    前三条能翻成 grep 选项，``depth`` 翻不了（GNU grep 没有 ``--max-depth``），
+    根目录撞剪枝模式则两条路都翻不动（walker 永远会进根目录，grep/find 会整棵跳过）。
+    """
+
+    def test_each_limited_depth_falls_back(self):
+        for over in ({'depth': 'self'}, {'depth': 'children'},
+                     {'depth': 'custom', 'max_depth': 2}):
+            with self.subTest(**over):
+                name, reason = engine.select_engine(spec(**over), OK)
+                self.assertEqual(name, 'client', f'{over} 必须回落 client')
+                self.assertIn('深度', reason)
+
+    def test_root_matching_a_prune_pattern_falls_back(self):
+        """根目录自身叫 ``backup`` 又剪 ``backup``：walker 照常进，grep 整棵跳过。"""
+        name, reason = engine.select_engine(
+            spec(roots=['/data/backup'], prune_dirs=['backup', 'cache']), OK)
+        self.assertEqual(name, 'client')
+        self.assertIn('根', reason)
+
+    def test_hidden_root_falls_back(self):
+        """dot 规则也作用于命令行上的根（实测 grep 3.0），故隐藏根同样必须回落。"""
+        self.assertEqual(name_of(spec(roots=['/data/.snapshot'])), 'client')
+
+    def test_root_with_pruned_component_deeper_down_still_uses_grep(self):
+        """只有根的**最后一段**参与这条判定：中间层撞模式时两档都会进那个根。"""
+        self.assertEqual(
+            name_of(spec(roots=['/data/backup/lot12'], prune_dirs=['backup'])), 'grep')
+
+    def test_prune_dirs_alone_do_not_block_grep(self):
+        """前三条是「翻译」不是「回落」：只勾剪枝/汇总/dot 也必须能用 grep。"""
+        self.assertEqual(
+            name_of(spec(prune_dirs=['cache', '*bak*'], data_files_only=True)), 'grep')
+
+    def test_name_pattern_with_data_only_needs_find_xargs(self):
+        """``name_pattern`` ∩「仅数据文件」求交只有 find 分支能表达（``--include`` 是或）。"""
+        probe = engine.ProbeResult(has_grep=True, has_find_xargs=False,
+                                   path_mapping_ok=True)
+        name, reason = engine.select_engine(spec(name_pattern='RT_*'), probe)
+        self.assertEqual(name, 'client')
+        self.assertIn('find', reason)
+
+    def test_size_filter_without_find_xargs_falls_back(self):
+        """大小过滤和深度无关，但它同样走 find 管道 → 探测缺 xargs 就不能留给 grep 档。
+
+        原实现只在**有时间过滤**时要求 has_find_xargs，于是「只勾大小范围」的查询会
+        拼出一条 find 命令发到没有 GNU find 的服务器上，靠退出码 2 才发现。
+        """
+        probe = engine.ProbeResult(has_grep=True, has_find_xargs=False,
+                                   path_mapping_ok=True)
+        self.assertEqual(engine.select_engine(spec(min_size=1024), probe)[0], 'client')
+
+    def test_name_pattern_without_data_only_needs_no_find(self):
+        """反例半边：不求交时 ``--include`` 一条就够，不该把 find 档拉进来当条件。"""
+        probe = engine.ProbeResult(has_grep=True, has_find_xargs=False,
+                                   path_mapping_ok=True)
+        self.assertEqual(
+            engine.select_engine(spec(name_pattern='RT_*', data_files_only=False),
+                                 probe)[0], 'grep')
+
 
 class MustFallBackTests(SimpleTestCase):
     CASES = [
