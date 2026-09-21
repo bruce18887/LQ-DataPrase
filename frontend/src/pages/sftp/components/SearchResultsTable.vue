@@ -28,12 +28,29 @@
         <el-button size="small" text bg data-testid="sftp-results-export" :disabled="!rows.length" @click="emit('export')">
           导出 CSV
         </el-button>
-        <el-button size="small" text bg data-testid="sftp-results-download" :disabled="!selectedPaths.length" @click="emit('download', selectedPaths)">
-          下载
-        </el-button>
-        <el-button size="small" text bg type="primary" data-testid="sftp-results-download-parse" :disabled="!selectedPaths.length" @click="emit('download-parse', selectedPaths)">
-          下载并解析
-        </el-button>
+        <!-- 下载是**传输**，与导出不同：它要抢后端那条共享 paramiko 连接，所以互斥判据
+             由页面把 `transferActive` 传下来（计划 Task 17 Step 5）。禁用态必须配 tooltip
+             说明「为什么禁着」，否则用户只会觉得按钮坏了；触发元素包一层 span —— EP 的
+             tooltip 挂在 `<button disabled>` 上收不到 mouseenter（浏览器不给禁用控件派发
+             鼠标事件），不包就永远不显示。 -->
+        <el-tooltip :content="actionsDisabledReason" :disabled="!actionsDisabled" placement="top">
+          <span class="srt-tip-anchor">
+            <el-button size="small" text bg data-testid="sftp-results-download"
+                       :disabled="!selectedPaths.length || actionsDisabled"
+                       @click="emit('download', selectedPaths)">
+              下载
+            </el-button>
+          </span>
+        </el-tooltip>
+        <el-tooltip :content="actionsDisabledReason" :disabled="!actionsDisabled" placement="top">
+          <span class="srt-tip-anchor">
+            <el-button size="small" text bg type="primary" data-testid="sftp-results-download-parse"
+                       :disabled="!selectedPaths.length || actionsDisabled"
+                       @click="emit('download-parse', selectedPaths)">
+              下载并解析
+            </el-button>
+          </span>
+        </el-tooltip>
       </div>
     </div>
 
@@ -61,18 +78,16 @@
 
 <script lang="ts">
 /**
- * 普通 `<script>` 只放「必须被别的模块读走的纯件」：`<script setup>` 不能 export，
- * 而 `AUTO_GROUP_THRESHOLD` 与 `resultRows()` 正是页面（Task 17）要读的那两份口径 ——
- * 页面拿 `resultRows()` 的结果去调 `exportSearchResults()`，才能保证「导出的行 = 看到的行」。
+ * 普通 `<script>` 只放本组件内部的纯件与类型（`<script setup>` 不能 export，两块 script
+ * 合并成同一模块作用域 —— UphCard.vue 同款结构）。
+ *
+ * 曾在这里「顺手导出」的 `AUTO_GROUP_THRESHOLD` 与 `resultRows()` 已按计划 Task 17 Step 1
+ * 安家到 `stores/sftpSearch.ts`（与 `RUN_HISTORY_KEEP` / `CANCEL_COOLDOWN_MS` 同一落点）：
+ * 阈值与行集口径由页面和本组件**各 import 同一份**，才不会「导出的行 ≠ 看到的行」。
  */
-// 类型全部走普通 <script> 的导入：两块 script 合并成同一模块作用域（UphCard.vue 同款结构）
-import type { CandidateItem, MatchItem, SearchMode, SearchEngine } from '../../../api/sftpSearch'
-
-/** 候选 + 命中超过这个数就默认按目录分组（计划 Global Constraints 的前端共享常量） */
-export const AUTO_GROUP_THRESHOLD = 200
-
-/** 表格与导出共用的行集合类型 */
-export type SearchResultRow = CandidateItem | MatchItem
+// 类型全部走普通 <script> 的导入：两块 script 合并成同一模块作用域
+import type { CandidateItem, MatchItem, SearchEngine, SearchMode } from '../../../api/sftpSearch'
+import { resultRows, type SearchResultRow } from '../../../stores/sftpSearch'
 
 /** 组行（只在 grouped 时插进数据源；叶子行沿用 store 里的原对象，保持身份不重渲染） */
 export interface SearchGroupRow {
@@ -84,20 +99,6 @@ export interface SearchGroupRow {
 
 /** 交给 grid 的数据源：叶子行（store 里的原对象）与合成组行混排 */
 export type SearchGridRow = SearchResultRow | SearchGroupRow
-
-/**
- * 表格显示哪一批行：`name` 档后端只发候选（`runner.py` 在 mode=name 时不扫内容）；
- * `content`/`column` 档在第一条命中到来前先显示候选清单，之后只看命中
- * （grep 档全程没有候选事件，spec §3.8）。
- */
-export function resultRows(
-  candidates: CandidateItem[],
-  matches: MatchItem[],
-  mode: SearchMode,
-): SearchResultRow[] {
-  if (mode === 'name' || matches.length === 0) return candidates
-  return matches
-}
 
 /** 目录部分：同时兜住反斜杠，免得 Windows 风格路径整串被当成 basename */
 export function dirnameOf(path: string): string {
@@ -166,7 +167,7 @@ import { useThemeStore } from '../../../stores/theme'
 // 不新增模块清单）
 ModuleRegistry.registerModules([AllCommunityModule])
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   candidates: CandidateItem[]
   matches: MatchItem[]
   mode: SearchMode
@@ -176,7 +177,18 @@ const props = defineProps<{
   grouped: boolean
   /** 表单的 case_sensitive：不区分大小写时高亮才与命中位置一致 */
   caseSensitive?: boolean
-}>()
+  /**
+   * 下载入口的互斥禁用：页面把「搜索进行中 / 取消冷却 / 已有下载在跑」合并成的
+   * `transferActive` 传下来（计划 Task 17 Step 5：搜索页自身的下载按钮读同一个判据）。
+   */
+  actionsDisabled?: boolean
+  /** 为什么禁着（tooltip 文案）：只有 `actionsDisabled` 为真时才用得上 */
+  actionsDisabledReason?: string
+}>(), {
+  caseSensitive: false,
+  actionsDisabled: false,
+  actionsDisabledReason: '上一次传输还在收尾，稍候即可',
+})
 
 const emit = defineEmits<{
   'selection-change': [paths: string[]]
@@ -409,6 +421,7 @@ function onRowClicked(e: any): void {
 .srt-engine { font-size: var(--p-fs-micro); color: var(--text-3); }
 .srt-actions { display: flex; align-items: center; gap: var(--p-space-1); margin-left: auto; flex-wrap: wrap; }
 .srt-actions :deep(.el-button) { font-size: var(--p-fs-dense); }
+.srt-tip-anchor { display: inline-flex; }
 
 /* AG Grid 主题接线：与 DataBrowserAgGrid.vue 同款 —— 只把项目语义 token 喂给 --ag-* 变量，
    两套主题靠 token 自己翻转（quartz 内置栈无 CJK 档，字族必须接 --font-sans）。 */

@@ -5,6 +5,7 @@
       :data="items"
       :default-sort="{ prop: sortBy, order: sortOrder === 'desc' ? 'descending' : 'ascending' }"
       @row-click="(row: any) => { if (row.is_dir) emit('navigate', joinPath(currentPath, row.name)) }"
+      @row-contextmenu="onRowContextmenu"
       @sort-change="(sort: any) => emit('sort-change', sort)"
       class="file-table"
     >
@@ -45,43 +46,50 @@
       <el-table-column label="操作" width="220" align="center" fixed="right">
         <template #default="{row}">
           <div class="action-cell">
-            <el-button-group v-if="!row.is_dir">
-              <el-button
-                v-if="isCsv(row.name)"
-                size="small"
-                @click.stop="emit('download', row)"
-                :loading="isDownloading(`file_${row.name}`)"
-                :disabled="transferActive"
-              >
-                <el-icon><Download /></el-icon> 下载
-              </el-button>
-              <el-button
-                v-if="isCsv(row.name)"
-                size="small"
-                type="primary"
-                @click.stop="emit('download-and-parse', row)"
-                :loading="isDownloading(`parse_${row.name}`)"
-                :disabled="transferActive"
-              >
-                <el-icon><DataAnalysis /></el-icon> 解析
-              </el-button>
-              <el-tag v-if="!isCsv(row.name)" type="info" size="small" effect="plain">仅支持 CSV</el-tag>
-            </el-button-group>
-            <el-button-group v-else>
-              <el-button
-                size="small"
-                type="warning"
-                plain
-                @click.stop="emit('download-directory', row.name)"
-                :loading="isDownloading(`dir_${row.name}`)"
-                :disabled="transferActive"
-              >
-                <el-icon><Download /></el-icon> 下载
-              </el-button>
-              <el-button size="small" type="info" plain @click.stop="emit('navigate', joinPath(currentPath, row.name))">
-                <el-icon><FolderOpened /></el-icon> 打开
-              </el-button>
-            </el-button-group>
+            <!-- 整组包一个 tooltip 而不是逐个包：`el-button-group` 靠直接子元素拼圆角，
+                 中间插 span 会把它拆散；禁用原因对整组是同一句话。span 是必需的触发物 ——
+                 浏览器不给 disabled 的 <button> 派发鼠标事件，直接挂按钮上永远不显示。 -->
+            <el-tooltip :content="transferReason" :disabled="!transferActive" placement="top">
+              <span class="tip-anchor">
+                <el-button-group v-if="!row.is_dir">
+                  <el-button
+                    v-if="isCsv(row.name)"
+                    size="small"
+                    @click.stop="emit('download', row)"
+                    :loading="isDownloading(`file_${row.name}`)"
+                    :disabled="transferActive"
+                  >
+                    <el-icon><Download /></el-icon> 下载
+                  </el-button>
+                  <el-button
+                    v-if="isCsv(row.name)"
+                    size="small"
+                    type="primary"
+                    @click.stop="emit('download-and-parse', row)"
+                    :loading="isDownloading(`parse_${row.name}`)"
+                    :disabled="transferActive"
+                  >
+                    <el-icon><DataAnalysis /></el-icon> 解析
+                  </el-button>
+                  <el-tag v-if="!isCsv(row.name)" type="info" size="small" effect="plain">仅支持 CSV</el-tag>
+                </el-button-group>
+                <el-button-group v-else>
+                  <el-button
+                    size="small"
+                    type="warning"
+                    plain
+                    @click.stop="emit('download-directory', row.name)"
+                    :loading="isDownloading(`dir_${row.name}`)"
+                    :disabled="transferActive"
+                  >
+                    <el-icon><Download /></el-icon> 下载
+                  </el-button>
+                  <el-button size="small" type="info" plain @click.stop="emit('navigate', joinPath(currentPath, row.name))">
+                    <el-icon><FolderOpened /></el-icon> 打开
+                  </el-button>
+                </el-button-group>
+              </span>
+            </el-tooltip>
           </div>
         </template>
       </el-table-column>
@@ -92,12 +100,28 @@
         <el-icon :size="60"><FolderOpened /></el-icon>
       </template>
     </el-empty>
+
+    <!-- 目录行右键菜单 = roots 的第三个入口（spec §3.13）。自建 fixed 浮层而不是
+         el-dropdown：右键坐标才是菜单该出现的地方，EP 的下拉没有「按坐标弹出」的公开入口。
+         只给目录行出菜单 —— 文件行右键是「进它的目录再搜」，那是两步，不做成隐式语义。 -->
+    <div
+      v-if="ctxMenu.visible"
+      class="ctx-menu"
+      :style="{ left: `${ctxMenu.x}px`, top: `${ctxMenu.y}px` }"
+      role="menu"
+    >
+      <button type="button" class="ctx-item" role="menuitem" data-testid="sftp-search-in-dir" @click="searchThisDir">
+        <el-icon :size="14"><Search /></el-icon> 在此目录搜索
+      </button>
+    </div>
   </el-card>
 </template>
 
 <script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, reactive } from 'vue'
+import { useRouter } from 'vue-router'
 import {
-  Folder, Document, FolderOpened, Download, DataAnalysis,
+  Folder, Document, FolderOpened, Download, DataAnalysis, Search,
 } from '@element-plus/icons-vue'
 
 const props = defineProps<{
@@ -109,6 +133,8 @@ const props = defineProps<{
   sortOrder?: 'asc' | 'desc'
   /** 传输互斥：任意传输进行中时禁用所有下载入口（后端共享 paramiko 连接非线程安全） */
   transferActive?: boolean
+  /** 只为把禁用原因说准（搜索进行中 ≠ 又一次下载）；判据本身仍是 `transferActive` */
+  searchActive?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -118,6 +144,65 @@ const emit = defineEmits<{
   'download-and-parse': [row: any]
   'download-directory': [name: string]
 }>()
+
+const router = useRouter()
+
+const transferReason = computed(() => (props.searchActive
+  ? '搜索进行中：下载与搜索互斥，同时只允许一路传输（去右上角或搜索页取消搜索）'
+  : '已有传输在进行：同一时刻只允许一路下载'))
+
+const ctxMenu = reactive({ visible: false, x: 0, y: 0, path: '' })
+
+function onRowContextmenu(row: any, _column: unknown, event: MouseEvent): void {
+  if (!row?.is_dir) { ctxMenu.visible = false; return }
+  ctxMenu.path = joinPath(props.currentPath, row.name)
+  ctxMenu.x = event.clientX
+  ctxMenu.y = event.clientY
+  ctxMenu.visible = true
+  event.preventDefault()
+}
+
+function closeCtxMenu(): void { ctxMenu.visible = false }
+
+/**
+ * 收掉浮层的三条路：左键点在菜单之外、滚动、换尺寸。
+ *
+ * **只认左键**（走查抓到的真缺陷）：Chromium 一次右键的事件序里 `mousedown` 与
+ * `contextmenu` 谁先到并不稳定，两者都收菜单的话就有先后的那一种会把**刚弹出的**
+ * 菜单在同一拍里关掉 —— 表现为「右键永远弹不出菜单」。右键落在别处的清理交给
+ * `onDocContextMenu`，它对表格行放行（行内该开该关由 `onRowContextmenu` 自己决定）。
+ */
+function onDocMouseDown(event: MouseEvent): void {
+  if (event.button !== 0 || !ctxMenu.visible) return
+  if ((event.target as HTMLElement | null)?.closest?.('.ctx-menu')) return
+  closeCtxMenu()
+}
+
+function onDocContextMenu(event: MouseEvent): void {
+  if (!ctxMenu.visible) return
+  const el = event.target as HTMLElement | null
+  if (el?.closest?.('.ctx-menu') || el?.closest?.('.el-table__row')) return
+  closeCtxMenu()
+}
+
+function searchThisDir(): void {
+  const path = ctxMenu.path
+  closeCtxMenu()
+  if (path) void router.push({ name: 'SftpSearch', query: { root: path } })
+}
+
+onMounted(() => {
+  document.addEventListener('mousedown', onDocMouseDown)
+  document.addEventListener('contextmenu', onDocContextMenu)
+  window.addEventListener('scroll', closeCtxMenu, true)
+  window.addEventListener('resize', closeCtxMenu)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('mousedown', onDocMouseDown)
+  document.removeEventListener('contextmenu', onDocContextMenu)
+  window.removeEventListener('scroll', closeCtxMenu, true)
+  window.removeEventListener('resize', closeCtxMenu)
+})
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return bytes + ' B'
@@ -184,6 +269,35 @@ function joinPath(dir: string, name: string): string {
 .action-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .action-cell :deep(.el-button) { font-size: var(--p-fs-dense); }
 .action-cell :deep(.el-button .el-icon) { margin-right: 2px; }
+.tip-anchor { display: inline-flex; }
+
+/* 右键浮层：坐标是 clientX/Y，故 fixed。z-index 3000 压在 EP 弹层（2000+）之上、
+   对话框之下；配色全是语义 token，dark/light 由 token 自己翻。 */
+.ctx-menu {
+  position: fixed;
+  z-index: 3000;
+  min-width: 150px;
+  padding: var(--p-space-1);
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--p-radius-sm);
+  box-shadow: var(--shadow-sm);
+}
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: var(--p-space-2);
+  width: 100%;
+  padding: var(--p-space-2);
+  background: none;
+  border: none;
+  border-radius: var(--p-radius-xs);
+  font: inherit;
+  font-size: var(--p-fs-dense);
+  color: var(--text);
+  cursor: pointer;
+}
+.ctx-item:hover { background: var(--bg-3); color: var(--brand); }
 
 /* Table header override */
 .file-table :deep(.el-table__header th) { background: var(--bg-3); font-weight: 600; font-size: var(--p-fs-small); }

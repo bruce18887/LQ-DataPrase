@@ -46,6 +46,14 @@ const routes = [
         meta: { title: 'SFTP 浏览器' },
       },
       {
+        // 搜索页与浏览器页同父级、同 `requiresAuth` 守卫（计划 Task 17 Step 3）；
+        // 懒加载：不进 SFTP 的用户不该下载 AG Grid + 搜索组件那一份 chunk。
+        path: 'sftp/search',
+        name: 'SftpSearch',
+        component: () => import('../pages/sftp/SftpSearchPage.vue'),
+        meta: { title: 'SFTP 搜索' },
+      },
+      {
         path: 'batch',
         redirect: '/dashboard',
       },

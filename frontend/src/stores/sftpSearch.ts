@@ -28,6 +28,7 @@ import type {
   SearchEngine,
   SearchError,
   SearchEvent,
+  SearchMode,
   SearchNotice,
   SearchSpec,
 } from '../api/sftpSearch'
@@ -46,6 +47,17 @@ export const RUN_HISTORY_KEEP = 20
  * 同一次取消被记进两个时钟，改一处忘一处就出现「按钮一半禁着一半没禁」。
  */
 export const CANCEL_COOLDOWN_MS = 1200
+
+/**
+ * 结果行数超过这个数就默认切「按目录分组」（spec §3.13「结果分组」；计划 Global
+ * Constraints 把它与上面两个常量并列列为**前端共享常量**）。
+ *
+ * **归属定在这里**（计划 Task 17 Step 1 要求「正式安一处」，Task 16 交付时它只是
+ * 结果表组件的临时出口）：全前端的共享常量与「结果行」口径只有本模块一个落点，
+ * 页面（决定初始 `grouped`）与结果表（渲染行集）各自 import 同一份 —— 阈值写两处
+ * 就会有一处不动，用户看到的分组门槛和他以为的就不是一回事了。
+ */
+export const AUTO_GROUP_THRESHOLD = 200
 
 export type SearchRunStatus = 'running' | 'done' | 'cancelled' | 'partial' | 'error'
 
@@ -90,6 +102,25 @@ function emptyProgress(stage: string): SearchProgressState {
   return { stage, done: 0, total: null, elapsed_s: 0, files_scanned: 0, bytes_scanned: 0 }
 }
 
+/** 结果表与 CSV 导出共用的行类型（候选行没有 `line`/`snippet` 等命中字段） */
+export type SearchResultRow = CandidateItem | MatchItem
+
+/**
+ * 「这一次搜索的结果行是哪一批」的**唯一口径**（与 `AUTO_GROUP_THRESHOLD` 同一个落点，
+ * 理由见那里）。结果表按它渲染，页面按它导出 —— 分开写就会出现「导出的行 ≠ 看到的行」：
+ * - `name` 档后端只发候选（`runner.py` 在该档不下内容），所以显示的就是候选清单；
+ * - 其余两档在第一条命中到来前先显示**待扫描的候选**（用户要知道范围对不对），之后只看命中；
+ * - grep 档全程没有候选事件（spec §3.8），所以它天然只有命中行。
+ */
+export function resultRows(
+  candidates: CandidateItem[],
+  matches: MatchItem[],
+  mode: SearchMode,
+): SearchResultRow[] {
+  if (mode === 'name' || matches.length === 0) return candidates
+  return matches
+}
+
 export const useSftpSearchStore = defineStore('sftpSearch', () => {
   /** 最新在前；`runs[0]` 是唯一保留全量结果的那条 */
   const runs = ref<SearchRun[]>([])
@@ -105,8 +136,21 @@ export const useSftpSearchStore = defineStore('sftpSearch', () => {
   )
   /** 有没有任何一条流还在跑 —— 下载互斥读它（Task 17 Step 5），不是「activeRun 在跑」 */
   const isRunning = computed(() => runs.value.some(r => r.status === 'running'))
-  /** chip 要显示的就是 activeRun 本身，所以它比 `isRunning` 多一层条件 */
-  const chipVisible = computed(() => activeRun.value?.status === 'running')
+  /**
+   * chip 报的是**哪一条** run（计划 Task 17 Step 4 的 `v-if="store.isRunning"` 只解决了
+   * 「要不要显示」，没解决「显示谁」）：优先 `activeRun` —— `start()` 刚把新起的那条设成
+   * active，正常路径就是它；用户在底部历史里切到已结束条目时退回「还在跑的那条」。
+   *
+   * 为什么不直接写 `isRunning` + `activeRun` 两个量：那样 `activeRun` 为 null 或已结束时
+   * 模板仍要防一次 null；而退回 running 那条也顺带修掉一个真缺陷 —— chip 上的取消走
+   * `cancel()`（无参 = 取消 activeRun），若 activeRun 已经跑完，`cancel()` 对非 running
+   * 条目直接 return，用户点取消**毫无反应**而流还在跑。这里显式带 id 取消（见 chip）。
+   * 净结果：有任何一条流在跑时 chip 常驻，与计划原文的 `isRunning` 判据等价。
+   */
+  const chipRun = computed<SearchRun | null>(() =>
+    (activeRun.value?.status === 'running'
+      ? activeRun.value
+      : runs.value.find(r => r.status === 'running')) ?? null)
   /** 「开始搜索」按钮的唯一判据：冷却与并发都只在这里说一次，页面别自己再拼一遍 */
   const canStart = computed(() => !isRunning.value && !inCancelCooldown.value)
 
@@ -326,7 +370,7 @@ export const useSftpSearchStore = defineStore('sftpSearch', () => {
 
   return {
     runs, activeRunId, inCancelCooldown,
-    activeRun, isRunning, chipVisible, canStart,
+    activeRun, isRunning, chipRun, canStart,
     start, apply, cancel, finalize, removeRun, clearFinished,
   }
 })
