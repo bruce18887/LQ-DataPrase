@@ -200,12 +200,12 @@
           data-testid="sftp-search-column"
           :maxlength="MAX_TERM_LEN"
           clearable
-          placeholder="表头里的列名，如 ShadowReg2"
+          placeholder="精确列名，或 *BV*2* 这类通配"
         />
       </el-form-item>
 
-      <!-- 匹配方式/区分大小写只对「内容含」有效：列名档是表头精确匹配（scanners.read_column
-           判 `column_name in headers`），文件名档走 fnmatch，两者都不消费这两个值。 -->
+      <!-- 匹配方式/区分大小写只被 scan_file 消费：列名档走 match_headers（精确或 fnmatch），
+           文件名档走 name_pattern 的 fnmatch，两者都不消费这两个值。 -->
       <el-form-item v-if="mode === 'content'" label="匹配方式">
         <div class="sc-inline sc-inline--wrap">
           <el-radio-group v-model="matching" data-testid="sftp-search-matching">
@@ -216,9 +216,9 @@
           <el-checkbox v-model="caseSensitive">区分大小写</el-checkbox>
         </div>
       </el-form-item>
-      <div v-if="mode === 'content'" class="sc-note">
-        模糊匹配、以及含中文等非 ASCII 字符的关键词必然走客户端引擎：服务端 grep 给不出同一个
-        结果集（会静默漏 GBK 文件）。整词不在其列 —— 关键词是纯 ASCII 时它照样能走服务端加速。
+      <div v-if="mode === 'content'" class="sc-note">{{ CONTENT_ENGINE_NOTE }}</div>
+      <div v-if="mode === 'column'" class="sc-note" data-testid="sftp-search-column-note">
+        {{ COLUMN_MATCH_NOTE }}
       </div>
 
       <!-- one_per_folder 放命中区显眼位置，不藏进「高级」（spec §3.13） -->
@@ -306,6 +306,7 @@ import { computed, ref } from 'vue'
 import { Aim, Delete, FolderOpened, Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { SearchDepth, SearchMatching, SearchMode, SearchPresetItem, SearchSpec } from '../../../api/sftpSearch'
+import { COLUMN_MATCH_NOTE, CONTENT_ENGINE_NOTE } from './searchHints'
 
 /** 与 `contracts.py` 同名常量同源（前端拿不到 Python，抄的是「拦住输入」这一层） */
 const MAX_ROOTS = 20

@@ -62,20 +62,51 @@ class FakeRemoteFile:
         self.close()
 
 
+class NoPrefetchFile:
+    """只暴露 read/readline/close/with 的句柄壳：真 paramiko 老版本就没有 ``prefetch``。
+
+    ``readline`` 也得有 —— ``read_column`` 是行级读取，只给 ``read`` 就等于把
+    「没有 prefetch」测成了「没有 readline」，那是另一回事。
+    """
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def read(self, n: int = -1) -> bytes:
+        return self._inner.read(n)
+
+    def readline(self) -> bytes:
+        return self._inner.readline()
+
+    def close(self):
+        self._inner.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
 class FakeSftp:
     """files: {绝对路径: bytes}；unreadable: 匹中这些 glob 的目录 listdir 抛错。
 
     broken=True 时一切操作抛 SFTPError，用于验「连接脏了要换」那条路径。
+    no_prefetch=True 时 ``open`` 返回 :class:`NoPrefetchFile`，用于验「prefetch 只是
+    加速、不是必需能力」——两个消费模块（``scan_file`` 与 ``read_column``）都要测这条，
+    所以垫层在夹具里，不在各测试文件里各写一份。
     """
 
     def __init__(self, files: Dict[str, bytes],
                  unreadable: Optional[List[str]] = None,
                  mtimes: Optional[Dict[str, int]] = None,
-                 broken: bool = False):
+                 broken: bool = False,
+                 no_prefetch: bool = False):
         self.files = dict(files)
         self.unreadable = unreadable or []
         self.mtimes = mtimes or {}
         self.broken = broken
+        self.no_prefetch = no_prefetch
         self.listdir_calls: List[str] = []
         self.open_count = 0
 
@@ -131,7 +162,8 @@ class FakeSftp:
         if path not in self.files:
             raise IOError(f'No such file: {path}')
         self.open_count += 1
-        return FakeRemoteFile(self.files[path])
+        handle = FakeRemoteFile(self.files[path])
+        return NoPrefetchFile(handle) if self.no_prefetch else handle
 
     def get_channel(self):
         return None

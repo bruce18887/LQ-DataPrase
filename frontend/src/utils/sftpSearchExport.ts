@@ -18,7 +18,8 @@
  * 那套模板要后端渲染，而搜索结果的整份数据已经在前端手里，为拼个名字再发一次请求不值。
  */
 import { downloadBlob } from './download'
-import type { CandidateItem, MatchItem, SearchMode } from '../api/sftpSearch'
+import { NO_DATA_LABEL } from '../api/sftpSearch'
+import type { CandidateItem, MatchedColumn, MatchItem, SearchMode } from '../api/sftpSearch'
 
 /** 结果行：`name` 档只有候选（后端 `runner.py` 在 mode=name 时不产生命中），其余两档是命中行 */
 export type SearchResultRow = CandidateItem | MatchItem
@@ -43,14 +44,37 @@ const COLUMNS: Record<SearchMode, Array<[key: string, label: string]>> = {
             ['values', '值'], ['test_file', 'TestFile'], ['start_time', 'StartTime']],
 }
 
+/**
+ * mode=column 的两格派生值。后端现在下发 `columns: [{column_name, values}]`
+ * （一个文件可以命中多列），导出仍保持「列名 / 值」两列，与结果表所见一致。
+ *
+ * 多列时值必须挂回列名 —— 只留 `0.1 | 0.2` 没人知道属于哪一列；单列时不重复
+ * （那一行的「列名」格已经写了）。与 `SearchResultsTable.vue` 的 ValuesCell 同一口径。
+ */
+function derivedColumnText(row: MatchItem, key: string): string {
+  const cols: MatchedColumn[] = row.columns ?? []
+  if (!cols.length) return ''
+  if (key === 'column_name') return cols.map(c => c.column_name).join(' | ')
+  const labelEach = cols.length > 1
+  return cols.map(c => {
+    const values = c.values.length ? c.values.join(' | ') : NO_DATA_LABEL
+    return labelEach ? `${c.column_name}=${values}` : values
+  }).join('; ')
+}
+
+function cellFor(row: SearchResultRow, key: string): unknown {
+  if (key === 'column_name' || key === 'values') {
+    return derivedColumnText(row as MatchItem, key)
+  }
+  const v = (row as unknown as Record<string, unknown>)[key]
+  return Array.isArray(v) ? v.join(' | ') : v      // hits 等多值并成一格
+}
+
 export function buildCsv(rows: SearchResultRow[], mode: SearchMode): string {
   const cols = COLUMNS[mode]
   const lines = [cols.map(([, label]) => cell(label)).join(',')]
   for (const row of rows) {
-    lines.push(cols.map(([key]) => {
-      const v = (row as unknown as Record<string, unknown>)[key]
-      return cell(Array.isArray(v) ? v.join(' | ') : v)   // values 并成一格
-    }).join(','))
+    lines.push(cols.map(([key]) => cell(cellFor(row, key))).join(','))
   }
   return lines.join('\r\n') + '\r\n'
 }

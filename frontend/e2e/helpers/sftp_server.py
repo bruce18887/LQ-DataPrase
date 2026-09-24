@@ -137,8 +137,10 @@ def write_fixture_tree(root: str) -> None:
     GBK 编码的中文测试项（编码探测在真 read() 分块下）、``Sum_*.csv`` 与 ``notes.txt``
     （``data_files_only`` 排除，两者都刻意含查询串，否则「被排除」是空转）、
     ``NoAccess/``（服务端列不出来，验 ``error{scope:"dir"}`` 隔离）、
-    一个 20 万行的 ``BIG.csv``（跨 chunk 的行号计数与进度），以及 ``batch1/many/`` 下
-    200 份小文件（把并行扫描的借还次数推到能抓出偶发协议竞态的量级）。
+    一个 20 万行的 ``BIG.csv``（跨 chunk 的行号计数与进度）、``batch1/many/`` 下
+    200 份小文件（把并行扫描的借还次数推到能抓出偶发协议竞态的量级），以及
+    ``bv/BV_1.csv``（列名档：通配一次命中多列 + 有一列在表头里却整片没读数 → ``no data``；
+    这一份只服务列名档 e2e，``sample_tree()`` 里没有对应项）。
     """
     files = {
         'batch1/RT_1.csv': b'[HEADER]\r\nTestFile,D:\\stdf\\lotA_w01.stdf\r\n'
@@ -154,6 +156,9 @@ def write_fixture_tree(root: str) -> None:
         '.hidden/RT_8.csv': b'[DATA]\r\nSN,ShadowReg2\r\n8,0.8\r\n',
         'NoAccess/RT_7.csv': b'[DATA]\r\nSN,ShadowReg2\r\n7,0.7\r\n',
         f'NoAccess/{DENY_LIST_MARKER}': b'',
+        # 单独一个目录、且不含 ShadowReg2：用例 1/2/7 拿 /batch1 的命中集合与计数做精确
+        # 断言，塞进 batch1 会连带改掉那三条。
+        'bv/BV_1.csv': b'[DATA]\r\nSN,BV2,CBV12,BV20\r\n1,11,22,\r\n2,33,44,\r\n',
     }
     for rel, content in files.items():
         full = os.path.join(root, *rel.split('/'))

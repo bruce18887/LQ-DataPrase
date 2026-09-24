@@ -318,10 +318,26 @@ class MatchPayloadTests(SimpleTestCase):
         self.assertEqual([i['test_file'] for i in with_head], ['lotA_w01.stdf'])
         self.assertEqual(with_head[0]['start_time'], '2026-09-01 08:12:33')
 
-    def test_column_match_carries_values(self):
+    def test_column_match_carries_matched_columns(self):
+        """SSE 里列值命中带的是 ``columns``（每个匹配列一组值），不再是单列 ``values``。
+        形状钉在这里一层：前端消费的是事件载荷，不是 ``read_column`` 的返回值。"""
         events, _ = run(spec(mode='column', term='', column_name='ShadowReg2'))
         items = match_items(events)
-        self.assertTrue(items and items[0]['values'])
+        self.assertTrue(items)
+        for one in items:
+            self.assertNotIn('values', one)
+            self.assertEqual([c['column_name'] for c in one['columns']],
+                             ['ShadowReg2'])
+            self.assertTrue(one['columns'][0]['values'])
+
+    def test_column_match_is_emitted_even_when_every_value_is_blank(self):
+        """``no data`` 必须真的**到达前端**：runner 只在结果为真值时发 match，
+        所以「匹配到列但一个读数都没有」得是带 ``columns`` 的 dict，不能是 None。"""
+        tree = {'/data/batch1/RT_001.csv': b'[DATA]\r\nSN,BV2\r\n1,\r\n2,\r\n'}
+        events, _ = run(spec(mode='column', term='', column_name='*BV*'), tree)
+        items = match_items(events)
+        self.assertEqual([(c['column_name'], c['values'])
+                          for c in items[0]['columns']], [('BV2', [])])
 
     def test_name_mode_emits_no_match_events(self):
         events, _ = run(spec(mode='name', data_files_only=False))

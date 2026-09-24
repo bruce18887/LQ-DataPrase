@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import errno
+import fnmatch
 import logging
 from typing import Dict, List, Optional, Tuple
 
@@ -408,36 +409,72 @@ def scan_file(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, obj
     return result
 
 
+# 列名档的 glob 元字符集。**不含这三个 = 精确相等**（今天的口径），含了才按通配展开。
+_GLOB_META = '*?['
+
+
+def match_headers(headers: List[str], column: str) -> List[int]:
+    """表头里被 ``column`` 选中的列下标，按表头顺序 —— 列名档匹配判据的唯一出处。
+
+    通配走 :func:`fnmatch.fnmatchcase`（**不是** :func:`fnmatch.fnmatch`）：与
+    :func:`apps.sftp.search.walker.is_pruned`、``name_pattern`` 同一口径，服务器是
+    大小写敏感的 POSIX，用后者会让开发机与生产机对同一个查询给出不同列。
+
+    代价是 ``?`` 也算元字符：列名里真带问号的精确查询会被放宽成单字符通配。
+    这条必须同时出现在前端 help 提示里，不能只写在这里。
+    """
+    if not any(ch in column for ch in _GLOB_META):
+        return [i for i, header in enumerate(headers) if header == column]
+    return [i for i, header in enumerate(headers)
+            if fnmatch.fnmatchcase(header, column)]
+
+
 def read_column(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, object]]:
-    """取 ``spec.column_name`` 列的前 ``spec.column_rows`` 个**非空读数**（spec §3.5 末段）。
+    """取**所有**匹配 ``spec.column_name`` 的列，每列各取前 ``spec.column_rows`` 个非空读数。
+
+    列名可以是 fnmatch 通配（判据只有一份，见 :func:`match_headers`）。一条命中带全部匹配列
+    （``columns: [{column_name, values}]``）：``*BV*2*`` 在真 datalog 里常常同时命中好几列，
+    只报最左那列等于把其余的悄悄藏起来。
+
+    **命中判据（2026-09-24 变更，spec §3.5）**：表头匹配到列 = 命中，值全空照样返回，
+    交前端渲染 ``no data``。此前是「命中必须有真读数」（2026-09-21 拍板），它把
+    「有这一列但一个数都没记」与「根本没这一列」压成同一个 ``None`` —— 而前者正是
+    停测/良率线索。**唯一例外是预算**：``no data`` 是**读到 EOF 才有资格说的话** ——
+    被 ``max_scan_bytes`` 截断的那一趟对「还没读到」的列一无所知，那种列整列不报
+    （挂个假的 no data 会被读成「这列没有数据」），一列都没观测到才返回 ``None``；
+    这趟不完整由 runner 的 ``scan_budget_exceeded`` notice 说明。
 
     跳过表头下紧邻的 ``Unit``/``Min``/``Max`` 三行（判据与上限见那两个常量）：那是单位与
     限值行，不是测量值。**这一条是对参考工具的有意偏离**（``csv_column_reader.py`` 把它们
-    当值取走），代价是「该列只有单位/限值」的文件现在不再算命中 —— 命中必须有真读数。
+    当值取走）。
 
     三段状态机：``[DATA]`` 之前只攒 head 字节（元数据交给 :func:`parse_head`，与
-    :func:`scan_file` 共用同一套半行保护）→ 定表头取列索引 → 逐行取值，凑够即早停。
-    与 :func:`scan_file` 的分工：那边是字节级命中、要整词判定，这边是**行级**取第 N 格，
-    所以逐行 ``readline()``，不建滚动窗口。
+    :func:`scan_file` 共用同一套半行保护）→ 定表头取全部匹配列的索引 → 逐行取值，
+    **每一列各自**凑够才早停。与 :func:`scan_file` 的分工：那边是字节级命中、要整词判定，
+    这边是**行级**取第 N 格，所以逐行 ``readline()``，不建滚动窗口。
 
-    返回 ``None`` 有两件事，靠「有没有 WARNING」分开（各有测试钉着）：表头里没有这一列
-    = 这个文件正常没有结果（几千个文件里只有几个含该列是常态，刷日志会淹掉真错误）；
-    读不了 = 文件级故障，必须留 WARNING。
+    返回 ``None`` 有三件事，靠「有没有 WARNING」与「有没有读完」分开（各有测试钉着）：
+    表头里没有匹配列 = 这个文件正常没有结果（几千个文件里只有几个含该列是常态，
+    刷日志会淹掉真错误）；读不了 = 文件级故障，必须留 WARNING；预算截断且一值未取到 =
+    判不出有没有数据，按无结果处理。
 
     切分口径是**朴素** ``split(',')``（与参考工具一致，也与 :func:`parse_head` 的
     ``partition(',')`` 同族）：本域 ``[DATA]`` 段实测无引号字段、无内嵌逗号，与
-    ``csv.reader`` 逐行结果一致。带引号逗号的项名（ETS 那批文件里有）会把列索引右移，
-    代价与理由见测试 ``test_quoted_field_with_embedded_comma_shifts_the_index``。
+    ``csv.reader`` 逐行结果一致。带引号逗号的项名会把列索引右移，**而右移的后果现在变严重
+    了**：从「静默无结果」变成「正面宣称 no data」。真出现这种 datalog 时要改的是切分方式，
+    不能把这个假 no data 放过，见 ``test_quoted_field_with_embedded_comma_now_claims_no_data``。
     """
     want = max(1, spec.column_rows)
-    values: List[str] = []
+    names: List[str] = []
+    taken: List[List[str]] = []
+    positions: List[int] = []
     head = b''
     encoding: Optional[str] = None
     in_data = False
     headers_read = False
     meta_rows_left = 0
-    col_idx = 0
     scanned = 0
+    truncated = False
 
     try:
         with sftp.open(cand.path, 'rb') as remote:
@@ -445,10 +482,11 @@ def read_column(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, o
             while True:
                 raw = remote.readline()
                 if not raw:
-                    break                       # EOF：读到的值照样返回，读不够也不报错
+                    break          # EOF：读完即有资格报 no data，读不够也不报错
                 scanned += len(raw)
                 if spec.max_scan_bytes and scanned >= spec.max_scan_bytes:
-                    break     # 预算与模式无关：某列全空的巨型日志不该被整读
+                    truncated = True
+                    break          # 预算与模式无关：某列全空的巨型日志不该被整读
                 if encoding is None and raw.strip():
                     # 只按**非空**首行探测：空行谁都能解开，会把 utf-8 锁死在编码上
                     encoding = detect_encoding(raw)
@@ -460,15 +498,16 @@ def read_column(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, o
                         in_data = True
                     continue
                 if not text:
-                    # 防御性容错，**不是**对实测数据的适配：Data/ 全量原始字节复核过，
-                    # 56/56 个含 [DATA] 的文件都是表头紧跟标记行（空行只出现在标记**之前**，
-                    # 49/56）。真数据走不到本分支，它挡的是未知生产者或手工编辑留的空行。
+                    # 防御性容错，**不是**对实测数据的适配：真数据走不到本分支，
+                    # 它挡的是未知生产者或手工编辑在标记与表头之间留的空行。
                     continue
                 if not headers_read:
                     headers = [h.strip() for h in text.split(',')]
-                    if spec.column_name not in headers:
-                        return None          # 列不存在：不是故障，安静地没有结果
-                    col_idx = headers.index(spec.column_name)
+                    positions = match_headers(headers, spec.column_name)
+                    if not positions:
+                        return None    # 没有匹配列：不是故障，安静地没有结果
+                    names = [headers[i] for i in positions]
+                    taken = [[] for _ in positions]
                     headers_read = True
                     meta_rows_left = LIMIT_ROW_SKIP_MAX
                     continue
@@ -476,14 +515,15 @@ def read_column(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, o
                 if meta_rows_left and row[0].strip().lower() in LIMIT_ROW_TOKENS:
                     meta_rows_left -= 1
                     continue
-                meta_rows_left = 0           # 三行的额度用尽/断档，之后一律当读数
-                if col_idx >= len(row):
-                    continue                 # 短行（尾列整片为空时常发生）跳过，不 IndexError
-                value = row[col_idx].strip()
-                if value:
-                    values.append(value[:SNIPPET_MAX])
-                    if len(values) >= want:
-                        break
+                meta_rows_left = 0     # 三行的额度用尽/断档，之后一律当读数
+                for slot, position in enumerate(positions):
+                    if len(taken[slot]) >= want or position >= len(row):
+                        continue       # 已凑够的列、短行（尾列整片为空时常发生）都不吃
+                    value = row[position].strip()
+                    if value:
+                        taken[slot].append(value[:SNIPPET_MAX])
+                if all(len(values) >= want for values in taken):
+                    break              # 每一列都凑够才停：只看第一列会把后面的截在半途
     except CONNECTION_ERRORS as exc:
         if not _is_file_scoped(exc):
             raise              # 与 scan_file 同一条判据：脏连接交回 SearchSession
@@ -493,12 +533,20 @@ def read_column(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, o
         logger.warning('Search could not read column of %s: %s', cand.path, exc)
         return None
 
-    if not values:
+    if not headers_read:
+        return None
+    # 「no data」是 EOF 才有的资格：截断的那一趟对没取到值的列一无所知，
+    # 报 no data 会被读成「这列没有数据」，而真相是「没读到」。这样的列整列不报
+    # （runner 另发 scan_budget_exceeded notice 说明这趟不完整）；一列都没观测到 = 无结果。
+    columns = [{'column_name': name, 'values': values}
+               for name, values in zip(names, taken)
+               if values or not truncated]
+    if not columns:
         return None
     test_file, start_time, pts_modify_time = parse_head(head)
     return {
         'path': cand.path, 'name': cand.name, 'size': cand.size, 'mtime': cand.mtime,
-        'column_name': spec.column_name, 'values': values,
+        'columns': columns,
         'test_file': test_file, 'start_time': start_time,
         'pts_modify_time': pts_modify_time,
     }
