@@ -236,6 +236,39 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
     await expect(wideRow.locator('.verdict-badge')).toHaveText('PASS', { timeout: 30_000 })
   })
 
+  test('跨程序同名异拼法（仅大小写不同）测试项仍配对，系统列不冒充测试项', async ({ page }) => {
+    // 回归（2026-09-20 用户 DebugData 报告）：CTA8290D 写 lkg_Vin_8V、
+    // CTA8280F 写 lkg_VIN_8V，精确名比较会把它判成「两文件没有的项」→ 缺项。
+    await gotoApp(page, '/data')
+    await page.locator('.tab-btn').filter({ hasText: '文件对比' }).click()
+
+    const section = page.locator('.file-corr-section')
+    await expect(section).toBeVisible({ timeout: 10_000 })
+
+    await elSelectByPlaceholder(section, '文件1 (ATE)').click()
+    await expect
+      .poll(() => visibleSelectOptions(page).count(), { timeout: 15_000 })
+      .toBeGreaterThan(0)
+    await visibleSelectOptions(page).filter({ hasText: SEEDED_FILES.CTA8290D_FT }).first().click()
+    await page.waitForTimeout(600)
+    await elSelectByPlaceholder(section, '文件2 (Bench)').click()
+    await visibleSelectOptions(page).filter({ hasText: SEEDED_FILES.CTA8280F_FT }).first().click()
+    await page.waitForTimeout(600)
+
+    await section.getByRole('button', { name: '分析', exact: true }).click()
+    await expect(section.locator('.fc-table')).toBeVisible({ timeout: 30_000 })
+    await section.locator('.el-radio-button').filter({ hasText: 'Limit 对比' }).click()
+
+    // 文件 A 的拼写入表 → 忽略大小写配对成功（修前此行不存在）
+    await expect(
+      section.locator('.el-table__row').filter({ hasText: 'lkg_Vin_8V' }).first(),
+    ).toBeVisible({ timeout: 15_000 })
+
+    // 记录级系统列已按格式剔除，不冒充测试项（修前 X_COORD 会稳定判 FAIL）
+    await expect(section.locator('.el-table__row').filter({ hasText: 'X_COORD' })).toHaveCount(0)
+    await expect(section.locator('.el-table__row').filter({ hasText: 'Site_No' })).toHaveCount(0)
+  })
+
   test('导出 Excel 触发模板命名下载', async ({ page }) => {
     await gotoApp(page, '/data')
     await page.locator('.tab-btn').filter({ hasText: '文件对比' }).click()

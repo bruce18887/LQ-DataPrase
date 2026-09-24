@@ -13,6 +13,11 @@ Comparison rules (mirrored by the frontend panel one-to-one):
     'change_pct': pass iff each side's limit change stays within
               ``change_pct``% of A's limit, in BOTH directions —
               tightening and widening alike (B 放宽过度同样标异常).
+- Param alignment: test items are matched across the two files by a
+  case-insensitive key (``_match_key``: strip + casefold), because ATE
+  programs routinely spell the same item differently (``LKG_``/``lkg_``,
+  ``VIN``/``Vin``, ``RES``/``Res``, ``POST``/``post``).  The display name is
+  file A's spelling; each side's limits/values come from its own column.
 - Serial selection: explicit ``serials`` list (user-chosen, request order)
   takes precedence; otherwise the first ``max_serials`` common serials
   (ascending) are used as a fallback cap.
@@ -29,6 +34,7 @@ import pandas as pd
 
 from apps.analysis.services.statistics.helpers import get_serial_candidates
 from apps.common.constants import NON_NUMERIC_KEYWORDS
+from apps.datafiles.parsers.base import SYSTEM_COLUMNS
 
 # Extra placeholders parsers may emit meaning "no limit" on top of the
 # shared NON_NUMERIC_KEYWORDS list.
@@ -65,20 +71,37 @@ def _parse_limit(raw) -> Optional[float]:
         return None
 
 
-def _numeric_params(df: pd.DataFrame) -> List[str]:
+def _match_key(name) -> str:
+    """跨文件对齐测试项的匹配键：去首尾空白 + 忽略大小写。
+
+    ATE 程序常对同一测试项用不同大小写拼法（LKG_/lkg_、VIN/Vin、
+    RES/Res、POST/post），精确比较会把它们全部判成「两个文件没有的项」，
+    对比结果因此大面积缺项。
+    """
+    return str(name).strip().casefold()
+
+
+def _numeric_params(df: pd.DataFrame, fmt: Optional[str] = None) -> List[str]:
     """Numeric columns in file order.
 
     排除序列候选列（Serial_No / Dut_No / PART_ID 等）——序列列是两文件的
     对齐键，把序列号本身当测试项对比毫无意义，还会让「无相同测试项」
     防呆（NoCommonParamsError）永远无法触发。
+
+    ``fmt`` 给出时再按该格式的权威 ``SYSTEM_COLUMNS`` 剔除记录级系统列
+    （序列/槽位/Bin/坐标/时间戳等）与空列名——它们同样不是可对比的测试项，
+    否则会在结果里冒充测试项并稳定判成 FAIL。
+
+    dtype 白名单改用 is_numeric_dtype（旧 'int64'/'float64' 漏掉
+    int32/float32/UInt8 等真实 ETS/STDF 衍生窄类型）；bool（Dut_Pass）
+    不是可对比的测试项，必须显式排除。
     """
     excluded = set(get_serial_candidates(df)) | {'__serial__'}
-    # dtype 白名单 ('int64','float64') 漏掉 int32/float32/UInt8（真实 ETS/STDF
-    # 衍生格式常见），pandas 3.0 下 str 列也不是 object——与 analysis_views /
-    # multi_lot 的候选口径对齐改 is_numeric_dtype；bool（Dut_Pass）会被纳入，
-    # 必须显式排除（pass/fail 标志不是可对比的测试项）
+    if fmt:
+        excluded |= set(SYSTEM_COLUMNS.get(fmt, ()))
     return [c for c in df.columns
             if c not in excluded
+            and str(c).strip()
             and pd.api.types.is_numeric_dtype(df[c])
             and not pd.api.types.is_bool_dtype(df[c])]
 
@@ -197,15 +220,26 @@ def compute_file_correlation(ate_df: pd.DataFrame, meta_a: dict,
     common_serials = sorted(
         set(ate_ser.dropna().astype(int)) & set(bench_ser.dropna().astype(int)))
 
-    bench_numeric = set(_numeric_params(bench_df))
-    params = [p for p in _numeric_params(ate_df) if p in bench_numeric]
-    if not params:
+    # 测试项对齐：按忽略大小写的匹配键配对（B 侧键冲突取首列，保序确定）。
+    # 显示名沿用文件 A 的拼写；limit / 数值各取本文件自己的列名。
+    bench_by_key = {}
+    for c in _numeric_params(bench_df, meta_b.get('format')):
+        bench_by_key.setdefault(_match_key(c), c)
+    pairs: List[Tuple[str, str]] = []
+    seen_keys = set()
+    for a_name in _numeric_params(ate_df, meta_a.get('format')):
+        key = _match_key(a_name)
+        b_name = bench_by_key.get(key)
+        if b_name is not None and key not in seen_keys:
+            seen_keys.add(key)
+            pairs.append((a_name, b_name))
+    if not pairs:
         raise NoCommonParamsError()
 
     # ignore no limit（默认关闭）：任一侧都没有 limit 的测试项不参与对比
     if cfg.ignore_no_limit:
-        params = [p for p in params
-                  if _has_any_limit(p, meta_a) and _has_any_limit(p, meta_b)]
+        pairs = [(a, b) for a, b in pairs
+                 if _has_any_limit(a, meta_a) and _has_any_limit(b, meta_b)]
 
     # 序列选择：显式 serials（用户勾选，保持请求顺序、过滤非法/重复值）优先；
     # 否则回退公共序列升序前 max_serials 个（旧行为兜底）。
@@ -224,27 +258,27 @@ def compute_file_correlation(ate_df: pd.DataFrame, meta_a: dict,
     limits_only = not serials
 
     # 每文件一次 groupby 聚合 → 后续全部按参数向量化（需求9：导出高速）
-    aggs_a = _serial_frame(ate_df, serials, params)
-    aggs_b = _serial_frame(bench_df, serials, params)
+    aggs_a = _serial_frame(ate_df, serials, [a for a, _ in pairs])
+    aggs_b = _serial_frame(bench_df, serials, [b for _, b in pairs])
 
     # ignore no data（默认关闭，非 limits-only 时）：所选序列上无任何
     # 有限配对数据的测试项不参与对比
     if cfg.ignore_no_data and not limits_only:
         keep = []
-        for p in params:
-            a = pd.to_numeric(aggs_a[p], errors='coerce').to_numpy(dtype=float)
-            b = pd.to_numeric(aggs_b[p], errors='coerce').to_numpy(dtype=float)
+        for a_name, b_name in pairs:
+            a = pd.to_numeric(aggs_a[a_name], errors='coerce').to_numpy(dtype=float)
+            b = pd.to_numeric(aggs_b[b_name], errors='coerce').to_numpy(dtype=float)
             if (np.isfinite(a) & np.isfinite(b)).any():
-                keep.append(p)
-        params = keep
+                keep.append((a_name, b_name))
+        pairs = keep
 
     n = len(serials)
     rows = []
     totals_paired = 0
     totals_fail = 0
-    for param in params:
+    for param, bench_param in pairs:
         lsl_a, usl_a = _limits_for(param, meta_a)
-        lsl_b, usl_b = _limits_for(param, meta_b)
+        lsl_b, usl_b = _limits_for(bench_param, meta_b)
         # 有符号 B−A（规则判定用原始值，输出 8 位规整去浮点噪声）
         lsl_diff = _jf(lsl_b - lsl_a) if (lsl_a is not None and lsl_b is not None) else None
         usl_diff = _jf(usl_b - usl_a) if (usl_a is not None and usl_b is not None) else None
@@ -257,7 +291,7 @@ def compute_file_correlation(ate_df: pd.DataFrame, meta_a: dict,
         max_diff = 0.0
         if n:
             a = pd.to_numeric(aggs_a[param], errors='coerce').to_numpy(dtype=float)
-            b = pd.to_numeric(aggs_b[param], errors='coerce').to_numpy(dtype=float)
+            b = pd.to_numeric(aggs_b[bench_param], errors='coerce').to_numpy(dtype=float)
             both = np.isfinite(a) & np.isfinite(b)
             delta = np.full(n, np.nan)
             diff_pct = np.full(n, np.nan)

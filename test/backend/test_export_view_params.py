@@ -70,7 +70,7 @@ class _ExportViewTests(TestCase):
         self.client.force_authenticate(user=self.user)
         self.df = self.build_df()
         self.metadata = self.build_metadata()
-        self.datafile = SimpleNamespace(filename='probe.csv',
+        self.datafile = SimpleNamespace(id=1, filename='probe.csv',
                                         format_type='CTA8290D',
                                         program_name='PRG')
         original = export_views.load_user_file
@@ -133,15 +133,15 @@ class HtmlReportBin1Tests(_ExportViewTests):
                                 format='json')
         self.assertEqual(resp.status_code, 200)
         html = self.body(resp).decode('utf-8')
-        self.assertIn('<td>3</td>', html, '总记录数应为过滤后的 bin1 行数')
-        self.assertIn('100.00%', html, 'bin1 子集良率应为 100%')
+        self.assertIn('data-field="total">3<', html, '总记录数应为过滤后的 bin1 行数')
+        self.assertIn('data-field="yield">100.00%<', html, 'bin1 子集良率应为 100%')
 
     def test_without_switch_reports_all_rows(self):
         resp = self.client.post(HTML_URL, {'file_id': 1}, format='json')
         self.assertEqual(resp.status_code, 200)
         html = self.body(resp).decode('utf-8')
-        self.assertIn('<td>4</td>', html)
-        self.assertIn('75.00%', html)
+        self.assertIn('data-field="total">4<', html)
+        self.assertIn('data-field="yield">75.00%<', html)
 
 
 class HtmlReportYieldPrecisionTests(_ExportViewTests):
@@ -159,8 +159,9 @@ class HtmlReportYieldPrecisionTests(_ExportViewTests):
         resp = self.client.post(HTML_URL, {'file_id': 1}, format='json')
         self.assertEqual(resp.status_code, 200)
         html = self.body(resp).decode('utf-8')
-        self.assertIn('99.998%', html)
-        self.assertNotIn('100.00%', html, '0.002% 的 fail 不得被 2 位小数吞掉')
+        self.assertIn('data-field="yield">99.998%<', html)
+        self.assertNotIn('data-field="yield">100.00%<', html,
+                         '0.002% 的 fail 不得被 2 位小数吞掉')
 
 
 class PptxSwitchPassThroughTests(_ExportViewTests):

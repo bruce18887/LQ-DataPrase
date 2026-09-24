@@ -284,6 +284,72 @@ class FileCorrelationServiceTests(SimpleTestCase):
         with self.assertRaises(NoCommonParamsError):
             compute_file_correlation(df1, {}, df2, {}, FileCorrelationConfig())
 
+    def test_param_match_is_case_insensitive(self):
+        """同一测试项两份程序只差大小写 → 必须配对（显示名沿用文件 A）。
+
+        真实场景（2026-09-20 用户 DebugData 报告）：CTA8290D 写 LKG_EN_Res /
+        CON_VIN，CTA8280F 写 lkg_EN_RES / CON_Vin，精确比较会把它们全判成
+        「两个文件没有的项」，对比结果大面积缺项。
+        """
+        from apps.analysis.services.file_correlation import (
+            compute_file_correlation, FileCorrelationConfig)
+
+        df1 = pd.DataFrame({'Serial_No': [1, 2],
+                            'LKG_EN_Res': [0.8, 0.9],
+                            'CON_VIN': [0.1, 0.2]})
+        df2 = pd.DataFrame({'Serial_No': [1, 2],
+                            'lkg_EN_RES': [0.81, 0.88],
+                            'CON_Vin': [0.11, 0.22]})
+        for d in (df1, df2):
+            d['__serial__'] = pd.to_numeric(d['Serial_No'], errors='coerce')
+        meta_a = {'mins': {'LKG_EN_Res': '0.73', 'CON_VIN': '-0.555'},
+                  'maxs': {'LKG_EN_Res': '1.04', 'CON_VIN': '-0.375'},
+                  'units': {'LKG_EN_Res': 'ohm', 'CON_VIN': 'V'}}
+        meta_b = {'mins': {'lkg_EN_RES': '0.73', 'CON_Vin': '-0.52'},
+                  'maxs': {'lkg_EN_RES': '1.04', 'CON_Vin': '-0.34'},
+                  'units': {'lkg_EN_RES': 'ohm', 'CON_Vin': 'V'}}
+
+        r = compute_file_correlation(df1, meta_a, df2, meta_b,
+                                     FileCorrelationConfig())
+        # 显示名与顺序均按文件 A
+        self.assertEqual(r['params'], ['LKG_EN_Res', 'CON_VIN'])
+        by = {row['param']: row for row in r['rows']}
+        # unit 取 A 侧，B 侧 limit 取 B 自己的列名
+        self.assertEqual(by['LKG_EN_Res']['unit'], 'ohm')
+        self.assertEqual(by['LKG_EN_Res']['lsl_b'], 0.73)
+        # 数值各按本文件自己的列取
+        self.assertEqual(by['LKG_EN_Res']['cells'][0]['ate'], 0.8)
+        self.assertEqual(by['LKG_EN_Res']['cells'][0]['bench'], 0.81)
+        # CON_VIN 两侧 limit 不同（-0.555/-0.375 vs -0.52/-0.34）→ 判定 FAIL
+        self.assertTrue(by['CON_VIN']['lsl_fail'])
+        self.assertTrue(by['CON_VIN']['usl_fail'])
+
+    def test_system_columns_excluded_from_params(self):
+        """按格式剔除记录级系统列与空列名：它们不是可对比的测试项。
+
+        否则 Site_No / X_COORD / SW_Bin 这类数值型系统列会冒充测试项，
+        在 'zero' 规则下稳定判成 FAIL 噪声行。
+        """
+        from apps.analysis.services.file_correlation import (
+            compute_file_correlation, FileCorrelationConfig)
+
+        df1 = pd.DataFrame({'Serial_No': [1], 'Site_No': [1],
+                            'X_COORD': [-30000], 'SW_Bin': [1],
+                            'ParamA': [1.0], '': [9.0]})
+        df2 = pd.DataFrame({'Serial_No': [1], 'Site_No': [1],
+                            'X_COORD': [-30000], 'SW_Bin': [2],
+                            'pArAmA': [1.0], '': [9.0]})
+        for d in (df1, df2):
+            d['__serial__'] = pd.to_numeric(d['Serial_No'], errors='coerce')
+        meta_a = {'format': 'CTA8290D', 'mins': {'ParamA': '-1'},
+                  'maxs': {'ParamA': '1'}, 'units': {}}
+        meta_b = {'format': 'CTA8280F', 'mins': {'pArAmA': '-1'},
+                  'maxs': {'pArAmA': '1'}, 'units': {}}
+
+        r = compute_file_correlation(df1, meta_a, df2, meta_b,
+                                     FileCorrelationConfig())
+        self.assertEqual(r['params'], ['ParamA'])
+
     def test_duplicate_serial_rows_take_first_occurrence(self):
         from apps.analysis.services.file_correlation import (
             compute_file_correlation, FileCorrelationConfig)

@@ -22,6 +22,7 @@
       <span class="batch-meta">{{ fileCountText }} · 更新: {{ updateTime }}</span>
       <el-button :loading="loading" :disabled="!selectedBatch" @click="loadBatchData">🔍 加载批次报表</el-button>
       <el-button v-if="batchData" type="primary" :loading="exporting" @click="exportExcel">📄 导出 Excel</el-button>
+      <el-button v-if="batchData" :loading="exporting" @click="exportHtmlReport(selectedBatch)">📥 导出 HTML</el-button>
     </header>
 
     <template v-if="batchData">
@@ -171,8 +172,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onActivated, onBeforeUnmount, watch } from 'vue'
-import { ElMessage } from 'element-plus'
 import { batchApi } from '../../../api/batch'
+import { useBatchExport } from '../composables/useBatchExport'
 import { useFilesStore } from '../../../stores/files'
 import StageFilterBar from './batch/StageFilterBar.vue'
 import PhaseSummaryTree from './batch/PhaseSummaryTree.vue'
@@ -185,10 +186,11 @@ import YieldBadge from '../../../components/common/YieldBadge.vue'
 const batches = ref<any[]>([])
 const selectedBatch = ref('')
 const loading = ref(false)
-const exporting = ref(false)
 const batchData = ref<any>(null)
 const stageFilter = ref('')
 const updateTime = ref('')
+
+const { exporting, exportExcel, exportHtmlReport } = useBatchExport(() => batchData.value)
 
 const fileCountText = computed(() =>
   batchData.value?.phases?.length ? `${batchData.value.phases.length} 个文件` : '-'
@@ -290,20 +292,6 @@ async function loadBatchData() {
     // 错误 toast 由 axios 拦截器统一弹出
   } finally {
     loading.value = false
-  }
-}
-
-async function exportExcel() {
-  if (!batchData.value) return
-  exporting.value = true
-  try {
-    // Get file IDs from the batch
-    await batchApi.generateReport(
-      batchData.value.phases.map((_: any, i: number) => i) // placeholder
-    )
-    ElMessage.info('导出功能开发中')
-  } finally {
-    exporting.value = false
   }
 }
 
