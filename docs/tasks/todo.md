@@ -2513,3 +2513,62 @@ HTML 按钮。
   本任务相关域（export/dashboard/batch_report/accounts/analysis + test.backend）全绿。
 
 
+
+---
+
+# 任务：SFTP 搜索列名档支持 fnmatch 通配 + `no data`（2026-09-24）✅
+
+用户需求：在 datalog 里搜「是否含 `*BV*2` 这类测试项」，命中后输出该列前 10 个非空读数；
+若确实全空要显式看到 `no data`，而不是这个文件从结果里消失。
+
+根因是两条既有口径：`scanners.read_column` 判 `spec.column_name in headers`（精确相等），
+且「凑不到非空读数」与「表头没有这一列」共用同一个 `return None`。
+
+## 实施清单
+
+- [x] R1 表头匹配谓词 `match_headers`：列名含 `*` `?` `[` 才走 `fnmatchcase`（大小写敏感，
+      与 `is_pruned`/`name_pattern` 同口径），否则保持精确相等 —— 先写失败单测
+- [x] R2 一文件一命中、含**所有**匹配列：返回体 `{column_name, values}` → `columns: [{column_name, values}]`
+- [x] R3 `no data` 判据：**完整读到 EOF** 且匹配到列 → 值数组可为空仍算命中；
+      按**列**判定：被 `max_scan_bytes` 截断时未取到值的列整列不报（`no data` 是 EOF 才有的资格）
+- [x] R4 翻转三条旧钉桩：`test_no_values_returns_none`、
+      `test_column_with_only_limit_rows_is_not_a_hit`、`test_result_carries_candidate_metadata`
+- [x] R5 下游：`test_sftp_search_engine_stream` 载荷断言、`MatchItem` 类型、
+      结果表多列渲染 + `no data`（双主题）、CSV 导出多列拼接、`SearchCriteria` 列名 help 提示
+- [x] R6 fixture 树补一份含 `*BV*2` 多列（其中一列全空）的 CSV + e2e 用例（`--project=P1 --workers=1`）
+- [x] R7 spec §3.2 `column_rows` 口径、§3.5「精确相等」那条改写并在 §7 记账；lessons 追加
+
+## Review
+
+- **验证账目**：后端全量 `python manage.py test` → `Ran 1357 tests in 288.725s / OK (skipped=7)`。
+  第一轮全量有一红点是 `apps.datafiles.tests_parse_cache` 的并发单飞用例（本次未碰
+  `apps/datafiles` 任何文件，隔离单跑 3/3 绿）→ 判为负载下的时序偶发，重跑全量即 OK。
+  搜索域 `test.backend -p "test_sftp*.py"` → `Ran 340 OK`；新文件
+  `test/backend/test_sftp_search_column.py` 34 例。前端 `npm run build`（vue-tsc -b + vite build）
+  exit 0。e2e `e2e/sftp/search.spec.ts --project=P1 --workers=1` 共 20 例分两次跑完：
+  第一次 13 passed + 第 11 例红（`manualConnect` 等 `.toolbar-card` 20s 超时，实测冷连接 ~22s）
+  + serial 连带 skip 6 条；从第 11 例起重跑 → 9 passed / exit 0。跑完 8000/3000 零监听。
+- **TDD 三循环各自先看红**：谓词缺失（`AttributeError: match_headers`）→ 形状未改
+  （18 例 `KeyError: 'columns'`）→ 截断未按列（`[('BV1',['0.1']),('BV2',[])] != [('BV1',['0.1'])]`）。
+  中间我自己写错一条断言：以为 `*BV*2` 能匹 `CBV21`，实测 `fnmatch.translate` 尾部锚定
+  （`...2\Z`）要求以 2 结尾 → 改数据前先跑真 `fnmatchcase` 确认，并把这条陷阱写进 help 提示与指南。
+- **计划外的一处收紧**（设计时只写了「值全空也算命中」）：`no data` 改成**按列**判据 ——
+  被 `max_scan_bytes` 截断的那趟对没读到的列一无所知，整列不报而不是挂个假的 `no data`。
+- **兼容性**：`mode=column` 的 SSE 命中载荷由 `{column_name, values}` 变 `columns: [...]`，
+  **不留双形状**（同一 mode 两套输出迟早打架）；旧预设里存的精确列名继续可用（不含元字符
+  时逐字走原来的精确相等分支）。`test/backend/sftp_fake.py` 新增 `no_prefetch=` 参数（默认
+  False， additive），`test_sftp_search_scan.py` 里两条自述「等夹具加上就删」的本地垫层类已删。
+- **双主题**：新样式只用语义 token（`--text-3`/`--p-fs-micro`/`--font-mono`/`--p-space-1`），
+  零字面色值；**未逐主题截图**（e2e 只覆盖 P1 默认主题），这条如实记着。
+- **600 行**：`scanners.py` 552、`SearchCriteria.vue` 596（改前 595，help 文案抽到
+  `components/searchHints.ts` 才没越限）、列值测试新文件 284、`test_sftp_search_scan.py` 296。
+- **文档同步**：spec §3.2/§3.5/§4 测试布局/§5 范围外/§7 记账全部改到位（含撤销 2026-09-21
+  「命中必须有真读数」那条代价、修掉两处指向已迁移测试类的引用）。
+  `docs/user-guide/06-sftp.md` 的三处口径同步改了，但 **`/docs/user-guide/` 在 .gitignore:139**
+  → 该文件是本地件，不在本次提交里（`node build.js` 已确认渲染正常）。
+- **本轮未闭合**：① 生产 SFTP 服务器上的真机验证（列名档恒 client，理论无关，但没真机账目
+  就只是推断）；② `max_candidates` 默认值仍待定（spec §7 既有条目，未动）。
+- **lessons**：本轮无用户纠正、无反复踩的通用坑（`no data` 按列判据那处是自己回看测试时
+  发现的，已进 spec §7 而非 lessons —— 它是本子系统的事实，不是跨任务的方法教训）。
+
+

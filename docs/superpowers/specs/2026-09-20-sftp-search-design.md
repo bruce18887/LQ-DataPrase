@@ -243,7 +243,7 @@ walker 直接调谓词、`shell_grep` 只调这里的 glob 常量，**两档引�
 | `max_matches` | 2 000 | 20 000 | 也是「结果驻留在渲染进程内存」的上限依据 |
 | `matches_per_file` | 1 | 20 | |
 | `max_scan_bytes` | 64 MiB | 1 GiB | 单文件扫描预算，超出记 `scan_budget_exceeded` 并跳过该文件剩余 |
-| `column_rows` | 10 | 50 | 每个命中文件取该列**前 N 个非空读数**（不是「往下找几行表头」）。表头下紧邻的 `Unit`/`Min`/`Max` 三行不计入（§3.5） |
+| `column_rows` | 10 | 50 | 列名档匹配的**每一列**各取前 N 个非空读数（不是「往下找几行表头」）。表头下紧邻的 `Unit`/`Min`/`Max` 三行不计入；一列全无读数仍算命中并标 `no data`（§3.5） |
 | `workers` | 4 | 8 | 与参考工具 `cli_interface.py:324` 的 1–8 钳位一致 |
 | `term` 长度 | — | 200 字符 | |
 | `timeout` | 600s | 30–3600s | 复用 `clamp_timeout` 同款钳位范式 |
@@ -386,6 +386,8 @@ dot 条目 → `--exclude='.*'` **与** `--exclude-dir='.*'` **两条都要**（
   `{unit, units, min, max}`（那三行的测试列里装的是各自的单位与限值，只有前置系统列才是
   字面 token），且只认表头下**紧邻**的最多三行，断档即停。这是**对参考工具的有意偏离**。
   语义代价一并拍板接受：某列只在单位/限值行有内容 → 该文件不再算命中（命中必须有真读数）。
+  **这条代价已于 2026-09-24 撤销**：命中判据改为「表头匹配到列」，只有单位/限值的列变成
+  `no data` 命中而不是消失，见本节第 3 条与 §7 同日条目。
   复测口径（2026-09-21，`Data/` 全量）：122 个 csv 里 **56 个含 `[Data]` 标记**，这 56 个
   **全部**是「标记后 1 行即表头」且「表头后三行首格恰为 `Unit`/`Min`/`Max`」（56/56，无一例外）。
   改后同一批文件各取表头第 20、40 列直调 `read_column`：**56/56 有值**，且首值不再出现在
@@ -395,10 +397,40 @@ dot 条目 → `--exclude='.*'` **与** `--exclude-dir='.*'` **两条都要**（
   ——本轮初测就因此把 56 误报成 47，别拿那种数往账里写。
   位置判据的第二来源：`apps/datafiles/parsers/base.py:154-155`
   的 `unit/min/max_offset = 2/3/4`、`data_offset = 5`。测试见
-  `test_sftp_search_scan.ColumnTests` 的 `test_unit_and_limit_rows_are_skipped` 等四条。
-- 列名匹配是**大小写敏感 + 精确相等**。spec 与计划均未表态，实现取保守侧：
-  表头里没有这一列 = 这个文件正常没有结果（不报错、不刷日志），不做任何模糊匹配——
-  模糊匹配会把不同测试项的数值混成同一列。
+  `test_sftp_search_column.ColumnTests` 的 `test_unit_and_limit_rows_are_skipped` 等四条。
+- 列名匹配：**默认精确相等，含 glob 元字符时才按通配**（2026-09-24 变更，此前是「只有精确
+  相等」）。判据只有一份，在 `scanners.match_headers`：`column_name` 不含 `*` `?` `[` 三者
+  之一 → 与表头逐字精确比较；含则对每个表头走 `fnmatch.fnmatchcase`（**大小写敏感**，与
+  `walker.is_pruned`、`name_pattern` 同口径——用 `fnmatch.fnmatch` 会让开发机与 POSIX 服务器
+  给出不同的列）。fnmatch 匹的是**整个**列名，所以 `*BV*2` 读作「以 2 结尾」。
+  - 为什么这一档可以放开而内容档的正则不行：`engine.select_engine` 第一条判据就是
+    `mode !== 'content'` → **列名档恒走客户端引擎**，§3.3 那条「两档语义不等价」的前提
+    在这里不存在，没有可漂移的第二档。
+  - 为什么用 fnmatch 而不是正则：用户写的就是 `*BV*1*` 这一族，且「名称模式」「跳过目录」
+    两处已是 fnmatch —— 第三种心智模型只会让条件写错。正则仍在 §5 范围外。
+  - **精确侧不许放宽**：不含元字符时今天的文件逐字节同结果（回归由
+    `test_plain_name_is_exact_not_substring` 钉）。
+  - **代价（必须同时出现在前端 help 提示里，不能只活在 spec）**：`?` 也是元字符 —— 列名里
+    真带问号的精确查询会被放宽成单字符通配；`[2` 这类未闭合的方括号进 glob 分支后被 fnmatch
+    当字面量，既不报错也不放宽。
+- **命中判据 = 表头匹配到列**（2026-09-24，取代「命中必须有真读数」）。一条命中带**全部**
+  匹配列：`read_column` 的返回体从 `{column_name, values}` 变成
+  `columns: [{column_name, values}]`，每列各取满 `column_rows` 个非空读数，
+  **所有**列都凑够才早停（只看第一列会把后面的列截在半途）。值全空的列 `values: []`，
+  前端与导出渲染 `no data`（同一个常量 `api/sftpSearch.ts::NO_DATA_LABEL`）。
+  - 「有这一列但一个读数都没记」与「根本没这一列」是两件不同的事，压成同一个 `None`
+    正是本次变更的动因；前者是停测/良率线索。
+  - **唯一的反向闸是预算：`no data` 是「读到 EOF」才有的资格**。被 `max_scan_bytes` 截断的
+    那一趟对「还没读到」的列一无所知，于是**值还没取到的列整列不报**（挂个假的 `no data`
+    会被读成「这列没有数据」，比静默少结果更恶劣）；一列都没观测到才返回 `None`。
+    这趟不完整由 runner 的 `scan_budget_exceeded` notice 说明，不靠结果表自己解释。
+  - 朴素 `split(',')` 的代价因此**变严重**：带引号逗号的项名把列索引右移后，现在会得到一句
+    假的 `no data`（以前是静默无结果）。本域实测不发生，钉在
+    `test_quoted_field_with_embedded_comma_now_claims_no_data`；真遇到必须改切分。
+  - 「一文件一命中」使 `max_matches` 在列名档仍是**按文件**计（runner 本就按候选文件计数）。
+  - 消费侧四处同改：`MatchItem.columns`（类型）、结果表（多列分组 + `no data`，多列时值挂回
+    列名）、CSV 导出（`derivedColumnText`，与表格同口径）、`SearchCriteria` 的列名 help 提示
+    （文案在 `components/searchHints.ts`，因为该 Vue 文件已贴近 600 行硬上限）。
 
 ### 3.6 grep 加速档（shell_grep）
 
@@ -609,8 +641,10 @@ class SftpSearchPreset(models.Model):
 按被测模块分文件（每个测试文件对应一个后端搜索模块，便于失败定位与单独跑）：
 `test_sftp_search_contract.py`（契约与钳位）、`test_sftp_search_engine.py`（引擎选择谓词）、
 `test_sftp_search_connect.py`（连接借还/降级/泄漏）、`test_sftp_search_walk.py`（遍历与过滤）、
-`test_sftp_search_scan.py`（扫描内核）、`test_sftp_search_grep.py`（命令构造与探测）、
+`test_sftp_search_scan.py`（扫描内核的内容匹配那一半）、`test_sftp_search_grep.py`（命令构造与探测）、
 `test_sftp_search_engine_stream.py`（阶段机与取消）、`test_sftp_pool_lock.py`（§3.12）。
+扫描内核有两个入口，2026-09-24 起测试也按这两个入口分：`read_column` 那一半在
+`test_sftp_search_column.py`（`test_sftp_search_scan.py` 已贴近 600 行硬上限）。
 共享内存夹具在 `test/backend/sftp_fake.py`。
 另有一个文件不按模块切：`test_sftp_search_parity.py`（§3.6 的结果集平价断言）——
 它要同时引 `shell_grep` / `filters` / `walker` 三方，留在 grep 那个文件里两边都撞 600 上限。
@@ -691,7 +725,8 @@ e2e 相关 spec 通过；收尾释放 8000 / 3000 端口。
 
 - ❌ **跨应用重启的结果持久化**（需后端 job 表 + 分块结果存储 + 轮询/重连，与现有单请求 SSE
   范式并存两套长任务模型）。长期保留用「存为预设」复跑。
-- ❌ **正则表达式匹配**（理由见 §3.3：两档引擎语义不等价）。
+- ❌ **正则表达式匹配**（理由见 §3.3：两档引擎语义不等价）。2026-09-24 放开的只是**列名档**的
+  fnmatch 通配，且该档恒走客户端引擎（§3.5），内容档的正则仍在范围外。
 - ❌ 元数据索引先行（方案 B）。搜索是偶发操作，索引需要失效策略，收益不抵复杂度。
 - ❌ 搜索与下载并发（保持 09-09 的互斥语义，仅把「搜索」纳入传输的一种）。
 - ❌ 多结果集跨会话比对（会话内运行历史只用于回看，不做 diff）。
@@ -805,7 +840,7 @@ e2e 相关 spec 通过；收尾释放 8000 / 3000 端口。
 **待用户拍板的产品问题**
 1. ~~列值模式把表头之后的 `Unit`/`Min`/`Max` 三行当作数据值取走~~ → **2026-09-21 已拍板
    改为跳过**（论证、判据与真数据 56/56 复测见 §3.5；实现 `scanners.py` 的
-   `LIMIT_ROW_TOKENS`，测试 `test_sftp_search_scan.ColumnTests`）。
+   `LIMIT_ROW_TOKENS`，测试 `test_sftp_search_column.ColumnTests`）。
 2. `max_candidates` 默认 5000（契约允许上限 50,000）：用户曾表示要能一次捞上万再分批
    下载——默认值是否上调（或表单直接暴露该参数）**仍待定夺**。
 
@@ -816,3 +851,72 @@ e2e 相关 spec 通过；收尾释放 8000 / 3000 端口。
 - Task 15/16 的走查按计划做过（类型检查 + 手动走查），但走查截图随当时的临时脚手架
   清理删除，**无落盘件**（如实记录）。
 
+### 2026-09-24 列名档 fnmatch 通配 + `no data`（计划外变更，语义见 §3.5）
+
+**动因**（用户提的用例）：在 `BPD80590_..._FT1_....csv` 这类 datalog 里搜「是否含 `*BV*2`
+这种测试项」，命中后要看到该测试项前 10 个非空读数；**确实全空时要看到 `no data`，
+而不是这个文件从结果里消失**。今天的两处口径挡死了它：`column_name in headers` 精确相等、
+以及「凑不到非空读数」与「表头没这一列」共用同一个 `return None`。
+
+**为什么不撞 §3.3 那条「正则两档不等价」**：`engine.select_engine` 第一条判据就是
+`mode !== 'content'` → 列名档**恒走客户端引擎**，没有可漂移的第二档。§5 的
+「正则不做」对内容档仍然有效，本次没有推翻它，只是给列名档放开 fnmatch。
+选 fnmatch 而不是正则：用户写的就是 `*BV*1*` 这一族，且「名称模式」「跳过目录」两处已是
+fnmatch —— 第三种心智模型只会让条件写错。
+
+**实施中计划外收紧的一条**（设计时只写了「值全空也算命中」）：写完多列早停后回看测试，
+发现 `max_scan_bytes` 截断的那一趟会**替还没读到的列**说话——多列场景下文件级判据
+（「一值未取到才不报」）会让「A 列有值、B 列没读到」把 B 列谎报成 `no data`。
+改成**按列**判定：截断时未取到值的列整列不报，`no data` 是读到 EOF 才有的资格。
+先补失败用例 `test_truncated_run_omits_columns_it_could_not_observe` 再改实现。
+
+**归属决定（计划里写的是 `filters.py`，实施时改判）**：`filters.py` 的 docstring 把自身
+职责限定为「walker 的 Python 判定 ↔ shell_grep 的 glob 翻译」，而列名档永远到不了 grep 档
+—— 这个谓词只有一个消费者。按仓库既有惯例（同样只用在一处的 fnmatch 判据
+`is_pruned` 住在 `walker.py`），`match_headers` 落在 `scanners.py`。
+
+**计划外发现（原设计未列）**
+
+1. 朴素 `split(',')` 的既有代价因此**变严重**：带引号逗号的项名把列索引右移后，
+   过去是静默无结果，现在会正面宣称 `no data`（假断言）。原 `read_column` docstring 括注
+   「ETS 那批文件里有」——**2026-09-24 按 `Data/` 复算未复现**：246 个 csv（文件名含 ETS 的
+   34 个）中 114 个含 `[data]` 标记，标记之后含引号逗号者 **0**。口径与 §3.5 那批 56 文件的
+   结论一致，故保留朴素切分、把该用例（`test_quoted_field_with_embedded_comma_now_claims_no_data`）
+   改成钉住「现在会说谎」这一事实，真遇到再改切分。
+2. 「命中必须有真读数」（2026-09-21 拍板的那条代价）被本次变更**撤销**：只有
+   `Unit`/`Min`/`Max` 的列从「不算命中」变成「命中且 `no data`」。原计划说「不受影响」不成立，
+   故该用例一并翻转并在 §3.5 记账。
+3. 测试按 `scanners.py` 的两个入口分文件：`test_sftp_search_scan.py`（内容匹配）已到 555 行，
+   `read_column` 那一半移到 `test_sftp_search_column.py`（600 行硬上限）。共享夹具
+   `sftp_fake.FakeSftp` 顺势加上 `no_prefetch=` 参数 —— 那正是 `test_sftp_search_scan.py`
+   里两条本地垫层类自述的收敛去向（「夹具真加上参数后，本类删掉即可」），垫层已删。
+4. `SearchCriteria.vue` 改前实测 595 行（上限 600），加一段 help 提示必然越限，故把「命中」区
+   两段长文案抽到 `components/searchHints.ts`（纯文案模块），组件降到 596 行。
+
+**前端 help 提示**（用户明确要求：语义静默放宽必须用户看得见）：列名档下新增一条
+`sc-note`，交代「含 `*` `?` `[` 才按通配 / 匹的是整个列名（`*BV*2` = 以 2 结尾）/ 大小写敏感 /
+`?` 会放宽精确名 / 匹配列全部列出 / 全空列标 `no data`」。`docs/user-guide/06-sftp.md`
+的匹配模式表、结果表列说明、`取值行数` 参数说明同步改写。
+
+**验证账目**
+- **列值域（含新形状与 `no data`）**：`test.backend.test_sftp_search_column` **34 例**新文件
+  （`ColumnHeaderMatchTests` 7 + `ColumnTests` 27）；`test.backend -p "test_sftp*.py"`
+  → `Ran 340 tests OK`。三轮 RED→GREEN 各自先看红：谓词缺失（`AttributeError`）、
+  形状未改（`KeyError: 'columns'` 18 例）、截断按列不报（`[('BV1',['0.1']),('BV2',[])] != [('BV1',['0.1'])]`）。
+- **fnmatch 语义是实测不是推断**：`fnmatch.translate('*BV*2')` → `(?s:(?>.*?BV).*2)\Z`，
+  尾部锚定 → 首版用例把 `CBV21` 期望成命中是**我写错的断言**，改数据前先跑了一次真实
+  `fnmatchcase` 确认。这条直接决定了 help 提示与用户指南里那句「以 2 结尾」的措辞。
+- **前端门禁**：`npm run build`（`vue-tsc -b && vite build`）exit 0。
+- **e2e**：`npx playwright test e2e/sftp/search.spec.ts --project=P1 --workers=1`
+  新增第 17 例（列名通配：`命中 1`、列名格 `BV2 | CBV12 | BV20`、值格三行含 `BV20 no data`、
+  导出 `BV2=11 | 33; CBV12=22 | 44; BV20=no data`、help 提示可见）。
+  全量分两次跑完 20 例：第一次 13 passed + 第 11 例红 + 6 条 serial 连带 skip；
+  第 11 例红的现场是 `manualConnect` 等 `.toolbar-card` 20s 超时（实测一次冷连接要 ~22s），
+  单独从第 11 例起重跑 → **9 passed / exit 0**。判定为环境偶发，非本改动回归。
+- **600 行硬上限**：`scanners.py` 552、`test_sftp_search_column.py` 284、
+  `test_sftp_search_scan.py` 296、`SearchCriteria.vue` 596、`SearchResultsTable.vue` 494。
+- **双主题**：新增三条样式只用语义 token（`--text-3`、`--p-fs-micro`、`--font-mono`、
+  `--p-space-1`），未新增字面色值；**未做逐主题截图**（e2e 只在 P1 默认主题下跑）。
+- **端口**：跑完 8000 / 3000 零监听。
+- **本轮仍未闭合**：① 目标生产 SFTP 服务器上的真机验证（列名档恒 client，理论上与服务器
+  无关，但没有真机账目就只是推断）；② `max_candidates` 默认值待定（本条目既有第 2 条，未动）。

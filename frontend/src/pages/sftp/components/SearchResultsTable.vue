@@ -86,7 +86,7 @@
  * 阈值与行集口径由页面和本组件**各 import 同一份**，才不会「导出的行 ≠ 看到的行」。
  */
 // 类型全部走普通 <script> 的导入：两块 script 合并成同一模块作用域
-import type { CandidateItem, MatchItem, SearchEngine, SearchMode } from '../../../api/sftpSearch'
+import type { CandidateItem, MatchedColumn, MatchItem, SearchEngine, SearchMode } from '../../../api/sftpSearch'
 import { resultRows, type SearchResultRow } from '../../../stores/sftpSearch'
 
 /** 组行（只在 grouped 时插进数据源；叶子行沿用 store 里的原对象，保持身份不重渲染） */
@@ -158,10 +158,11 @@ function isGroupRow(row: unknown): row is SearchGroupRow {
 </script>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, markRaw, ref, watch } from 'vue'
+import { computed, defineComponent, h, markRaw, ref, watch, type VNode } from 'vue'
 import { AgGridVue } from 'ag-grid-vue3'
 import { ModuleRegistry, AllCommunityModule, type ColDef } from 'ag-grid-community'
 import { useThemeStore } from '../../../stores/theme'
+import { NO_DATA_LABEL } from '../../../api/sftpSearch'
 
 // 注册 ag-grid 模块（幂等；与 DataBrowserAgGrid.vue / FileCorrelationTable.vue 同一写法，
 // 不新增模块清单）
@@ -326,12 +327,24 @@ const ValuesCell = markRaw(defineComponent({
     return () => {
       const row = cellProps.params.data as MatchItem
       if (isGroupRow(row)) return h('span')
-      const vals = row.values ?? []
-      const chips = vals.slice(0, VALUE_CHIPS).map((v: string) => h('span', { class: 'srt-chip' }, v))
-      if (vals.length > VALUE_CHIPS) {
-        chips.push(h('span', { class: 'srt-more' }, `+${vals.length - VALUE_CHIPS}`))
-      }
-      return h('span', { class: 'srt-values' }, chips)
+      const cols: MatchedColumn[] = row.columns ?? []
+      // 多列时必须把值挂回列名，否则没人知道第几格属于哪一列；单列时「列名」那格已经写了
+      const labelEach = cols.length > 1
+      return h('span', { class: 'srt-columns' }, cols.map((c) => {
+        const kids: VNode[] = labelEach
+          ? [h('span', { class: 'srt-col-name' }, c.column_name)] : []
+        if (!c.values.length) {
+          kids.push(h('span', { class: 'srt-nodata' }, NO_DATA_LABEL))
+        } else {
+          kids.push(...c.values.slice(0, VALUE_CHIPS)
+            .map((v: string) => h('span', { class: 'srt-chip' }, v)))
+          if (c.values.length > VALUE_CHIPS) {
+            kids.push(h('span', { class: 'srt-more' },
+              `+${c.values.length - VALUE_CHIPS}`))
+          }
+        }
+        return h('span', { class: 'srt-values' }, kids)
+      }))
     }
   },
 }))
@@ -359,7 +372,9 @@ const columnDefs = computed<ColDef[]>(() => {
       tooltipValueGetter: (p: any) => snippetTooltip(p.data) })
   }
   if (props.mode === 'column') {
-    cols.push({ colId: 'column_name', field: 'column_name', headerName: '列名', width: 160 })
+    cols.push({ colId: 'column_name', headerName: '列名', width: 160,
+      valueGetter: (p: any) => ((p.data?.columns ?? []) as MatchedColumn[])
+        .map(c => c.column_name).join(' | ') })
     cols.push({ colId: 'values', field: 'values', headerName: '值', minWidth: 260,
       cellRenderer: ValuesCell })
   }
@@ -465,6 +480,12 @@ function onRowClicked(e: any): void {
 }
 .srt-grid :deep(.srt-more) { color: var(--text-3); margin-left: var(--p-space-1); }
 .srt-grid :deep(.srt-values) { display: flex; align-items: center; gap: var(--p-space-1); overflow: hidden; }
+.srt-grid :deep(.srt-columns) { display: flex; flex-direction: column; gap: var(--p-space-1); }
+.srt-grid :deep(.srt-col-name) {
+  font-family: var(--font-mono); font-size: var(--p-fs-micro); color: var(--text-3);
+  flex: 0 0 auto;
+}
+.srt-grid :deep(.srt-nodata) { font-size: var(--p-fs-micro); color: var(--text-3); font-style: italic; }
 .srt-grid :deep(.srt-chip) {
   font-size: var(--p-fs-micro); color: var(--text-2); background: var(--bg-3);
   border: 1px solid var(--border-2); border-radius: var(--p-radius-full);

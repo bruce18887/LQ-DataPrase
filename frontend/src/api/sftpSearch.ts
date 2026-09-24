@@ -68,6 +68,16 @@ export interface CandidateItem {
   mtime: number
 }
 
+/** mode=column 的一个匹配列：`*BV*2*` 这类模式会同时命中多列 */
+export interface MatchedColumn {
+  column_name: string
+  /** 该列前 N 个非空读数；空数组 = 表头有这一列但一个读数都没有（`no data`） */
+  values: string[]
+}
+
+/** 「有列没值」的显示串。表格与 CSV 导出共用，两处各写一份迟早漂。 */
+export const NO_DATA_LABEL = 'no data'
+
 export interface MatchItem extends CandidateItem {
   line?: number
   snippet?: string
@@ -76,9 +86,8 @@ export interface MatchItem extends CandidateItem {
   test_file?: string
   start_time?: string
   pts_modify_time?: string
-  /** mode=column */
-  values?: string[]
-  column_name?: string
+  /** mode=column：按表头顺序的全部匹配列，一文件一条命中 */
+  columns?: MatchedColumn[]
 }
 
 export interface HelloEvent {

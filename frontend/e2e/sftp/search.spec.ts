@@ -132,6 +132,7 @@ async function addTag(page: Page, testId: string, value: string) {
 interface SearchForm {
   mode?: 'name' | 'content' | 'column'
   term?: string
+  column?: string
   pattern?: string
   depth?: 'self' | 'children' | 'all' | 'custom'
   prune?: string[]
@@ -150,10 +151,12 @@ const DEPTH_LABEL = { self: '仅当前层', children: '含下一层', all: '全�
  * 之后 —— URL 上的 `?root=` 还在，重载后照样预填），这样每条用例只有一处决定搜哪个目录。
  */
 async function runSearch(page: Page, form: SearchForm) {
+  // 模式必须**先**切：term / column 两个输入框是 v-if 出来的，切了档才渲染
   if (form.mode) {
     await page.getByTestId('sftp-search-mode').getByText(MODE_LABEL[form.mode]).click()
   }
   if (form.term) await page.getByTestId('sftp-search-term').fill(form.term)
+  if (form.column) await page.getByTestId('sftp-search-column').fill(form.column)
   if (form.pattern) await page.getByTestId('sftp-search-pattern').fill(form.pattern)
   if (form.depth) {
     await page.getByTestId('sftp-search-depth').getByText(DEPTH_LABEL[form.depth]).click()
@@ -224,6 +227,17 @@ async function pathCells(page: Page): Promise<string[]> {
 /** 顺序不参与断言的比较：把可见路径排序后再比集合 */
 async function sortedPaths(page: Page): Promise<string[]> {
   return (await pathCells(page)).sort()
+}
+
+/**
+ * 「值」格现在是一格多行（每个匹配列一行：列名 + 各自读数 chip），而 `textContent`
+ * 会把同一行里的兄弟 span 直接粘成 `BV211 33` 这种没法读的串 —— 所以这格按**结构**读，
+ * 每个 `.srt-values` 返回一行「列名 值 …」。
+ */
+async function valuesCellRows(page: Page): Promise<string[]> {
+  return page.locator('.ag-cell[col-id="values"] .srt-values')
+    .evaluateAll((rows) => rows.map((r) => Array.from(r.children)
+      .map((el) => el.textContent?.trim() ?? '').filter(Boolean).join(' ')))
 }
 
 /** 把搜索响应压住 `ms` 毫秒（制造确定的「进行中」窗口），返回解除阻塞用的收尾函数 */
@@ -602,8 +616,8 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
   })
 
   test('16 控件按档显隐：这一档消费不到的控件不出现', async ({ page }) => {
-    // 「匹配方式 / 区分大小写」只被 scan_file 消费：列名档是表头**精确**匹配
-    // （`scanners.read_column` 判 `column_name in headers`），文件名档走 fnmatch。
+    // 「匹配方式 / 区分大小写」只被 scan_file 消费：列名档走 match_headers（精确或
+    // fnmatch 通配），文件名档走 name_pattern 的 fnmatch，两者都不读这两个字段。
     // 「服务端加速」更窄：`engine.select_engine` 第一条判据就是 `mode !== 'content'` → client。
     // 摆着不生效的控件比缺控件更坏 —— 用户会以为动了它结果就变（2026-09-21 UI 体检第 1 条）。
     await gotoApp(page, '/sftp/search')
@@ -631,6 +645,32 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
     await expect(matching).toBeVisible()
     await expect(caseOpt).toBeVisible()
     await expect(grep).toBeVisible()
+  })
+
+  test('17 列名通配：一条命中列出全部匹配列，空列标 no data 且导出同口径', async ({ page }) => {
+    // 通配判据在 `scanners.match_headers`（含 * ? [ 才 fnmatch，匹的是**整个**列名），
+    // no data 判据在 `read_column`（读完且匹配到列 = 命中）。列名档恒走客户端引擎，
+    // 所以这一条与服务器有没有 grep 无关。
+    await connectAndOpenSearch(page, '/bv')
+    await runSearch(page, { mode: 'column', column: '*BV*2*', depth: 'self' })
+    await waitSettled(page)
+    // help 提示要看得见：通配条件、大小写、no data 三条口径不能只活在 spec 与代码注释里
+    await expect(page.getByTestId('sftp-search-column-note'))
+      .toContainText('按通配匹配整个列名')
+    expect((await badge(page)).matches).toBe(1)               // 一文件一条命中
+    expect(await agColumnCells(page, 'column_name')).toEqual(['BV2 | CBV12 | BV20'])
+    expect(await valuesCellRows(page)).toEqual([
+      'BV2 11 33', 'CBV12 22 44', 'BV20 no data',
+    ])
+
+    const { savedPath } = await captureDownload(
+      page, () => page.getByTestId('sftp-results-export').click(), 'sftp-search')
+    const rows = splitCsv(fs.readFileSync(savedPath).subarray(3).toString('utf8'))
+    fs.rmSync(savedPath, { force: true })
+    expect(rows[0]).toEqual(['名称', '完整路径', '列名', '值', 'TestFile', 'StartTime'])
+    // 多列时值必须挂回列名，否则没人知道「11 | 33」属于哪一列（与表格 ValuesCell 同一口径）
+    expect(rows[1][2]).toBe('BV2 | CBV12 | BV20')
+    expect(rows[1][3]).toBe('BV2=11 | 33; CBV12=22 | 44; BV20=no data')
   })
 })
 
