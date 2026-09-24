@@ -2459,3 +2459,57 @@ buyoff 的边际档因此也从浅黄变橙（一处改动、两处生效）。
   apps.accounts.models import User; User.objects.filter(username='admin').update(is_active=True)"`
   （`.update()` 绕过 `save()`/信号，用于恢复 `is_active` 安全；`seed_users` 救不了）。
 
+---
+
+# 任务：HTML 报表导出（含图 · 自包含单文件）（2026-09-21）
+
+用户需求：「当前项目的 html 报表导出暂时都没实现，请帮我分析下该导出哪些信息？」→
+确认范围：**含图**、**加批次入口**、**自包含单文件**、报告**仅 light**（打印友好）、
+单文件报告**只含仪表板已展示的图**（不做逐参数直方图）。
+
+现状：`apps/export/views.py:222` 的 `html_report` 是半成品（仅 4 个数字），却已被
+仪表板单文件 Tab 的「📥 保存 HTML 报表」按钮调用；批次 Tab 只有「📄 导出 Excel」。
+
+方案：报告=仪表板静态快照。抽服务保证单一数据源 → 新建 `apps/export/html_report/`
+包（matplotlib 图表 + base64 内联 + 全量 `esc()` 转义修 XSS）→ 批次端点复用
+`batch_report` 命名 key（不新增 key，守 `accounts/tests.py:326` 契约）→ 前端加批次
+HTML 按钮。
+
+## 实施清单
+
+- [x] P0 抽 `apps/dashboard/services.py::compute_dashboard_summary` + `apps/batch_report/services.py::compute_batch_yield_data`；views 变薄并 re-import；补特征化测试跑绿
+- [x] P1 `apps/export/html_report/` 包：styles / _html / report_charts / tables / sections / single / batch
+- [x] P1 扩展 `ExportViewSet.html_report`（load → bin1 过滤 → summary → uph → build）；re-export `ATE_REPORT_CSS`
+- [x] P2 `html_report/batch.py` 编排 + `BatchReportViewSet.batch_html_report` 端点
+- [x] P2 前端 `api/batch.ts`（复用 api.post）+ `pages/dashboard/composables/useBatchExport.ts` + `BatchYieldTab.vue` 按钮
+- [x] 测试：更新 `test_export_view_params.py` 两个 HTML 类；新增 single/batch（含 XSS）、service 特征化；e2e `exports/html-report.spec.ts`
+- [x] 验证：后端测试 / vue-tsc -b / e2e 全绿，跑后释放端口
+
+## Review
+
+- **交付**：单文件 HTML 报告从「4 个数字」扩为仪表板静态快照（元数据 + 总览条 + 质量警报 +
+  Bin Pareto / Site 良率 / Bin×Site 热力图 3 张内联图 + 交叉表 + 测试项总览 + CPK 分级 +
+  Top10 Fail + UPH）；新增批次 HTML 报告（KPI + QA + 阶段汇总/明细 + 良率趋势图 + Site×阶段矩阵
+  + Bin 分布/热力图 + 聚合 UPH）。自包含单文件（内联 CSS + base64，零外链），**仅 light**、
+  A4 打印友好。批次 Tab 补「📥 导出 HTML」按钮。
+- **单一数据源**：`compute_dashboard_summary` / `compute_batch_yield_data` 抽为服务，
+  API 与报告共用；`apps.dashboard.views` 保留 re-import，历史导入路径不破。
+- **XSS 修复**（原 `views.py:242/244` 未转义）：所有动态值过 `esc()`；新增用例断言
+  `<script>` / `<img src=x` 原始标签不出现、转义形式出现。
+- **缺陷 #12 口径保留**：总览条良率走 `format_percent_value`（99.998% 不被吞成 100.00%），
+  现有精度测试改断言稳定标记 `data-field="yield"` 后继续守门。
+- **验证账目**：后端 207 测试全绿（含新增 9 + 5 + 4 用例）；`vue-tsc -b` 绿；
+  e2e `exports/html-report.spec.ts` **4 过 0 跳过**（单文件 + 批次各 2 项目），
+  `dashboard.spec.ts` 14 过 2 跳过（既有跳过，非回归）；跑后 8000/3000 零监听残留。
+- **实测图**：真实数据渲染单文件 130KB / 批次 156KB，各 3 张 base64 图；导出 PNG 肉眼核验
+  中文（良率/数量/累计/Bin N/SiteN）无方块。
+- **命名契约**：批次复用既有 `batch_report` key（`Batch_Report_….html`），不新增 key，
+  `accounts/tests.py:326` 的导出类型集合断言未动。
+- **双主题**：批次按钮用原生 `el-button`，继承 Element Plus token，未引入颜色字面量；
+  报告为静态产物，按用户确认仅 light。
+- **全量套件唯一红点与本任务无关**：`manage.py test` 1104 条中 1 error =
+  `test/backend/test_sftp_search_grep.py` 导入 `apps.sftp.search.shell_grep` 失败
+  （均为**未跟踪的在研文件**，属 SFTP 搜索子系统）。与 HTML 报告无交集，未擅自修。
+  本任务相关域（export/dashboard/batch_report/accounts/analysis + test.backend）全绿。
+
+
