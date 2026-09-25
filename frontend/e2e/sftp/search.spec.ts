@@ -4,6 +4,8 @@ import path from 'node:path'
 import { gotoApp } from '../helpers/nav'
 import { startSftpServer, type SftpTestServer } from '../helpers/sftpServer'
 import { captureDownload } from '../helpers/download'
+import { STATUS, addTag, badge, connectAndOpenSearch, ensureDisconnected, manualConnect,
+  resetSearchPage, runSearch, spaTo, waitSettled, waitTableReady } from '../helpers/sftpSearchFlow'
 
 /**
  * SFTP 搜索子系统 e2e（计划 Task 18 / spec §3.13、§4.4）。四条不显然的前提：
@@ -22,85 +24,12 @@ import { captureDownload } from '../helpers/download'
  * 跑法：`npx playwright test e2e/sftp/search.spec.ts --project=P1 --workers=1` —— 会话与主机
  * 密钥按 user 存，必须 serial（R6）；不带 `--project=P1` 会落进 Edge 那个 `grepInvert`
  * project 被静默跳过（假绿）。本文件不触发下载导入，故无 DB 残留要清。
+ *
+ * 连接 / 填表 / 等终态 / 读数那一层流程在 `helpers/sftpSearchFlow.ts`（与布局用例共用）。
  */
-const PASSWORD = 'e2e123'
 const SEARCH_ROUTE = '**/sftp/search/'
-const STATUS = 'sftp-search-status'
 
 let server: SftpTestServer
-
-// ---------------------------------------------------------------- 连接与导航
-function fieldByLabel(page: Page, label: string): Locator {
-  return page
-    .locator('.connect-form .el-form-item')
-    .filter({ has: page.locator('.el-form-item__label', { hasText: label }) })
-    .locator('input')
-    .first()
-}
-
-/** 与 reconnect.spec.ts 同款：断线续连的预填异步到达，先等它稳定再 fill（R4） */
-async function manualConnect(page: Page, srv: SftpTestServer) {
-  const host = page.getByPlaceholder('例如: 192.168.1.1')
-  await expect.poll(async () => {
-    const v1 = await host.inputValue()
-    await page.waitForTimeout(300)
-    return v1 === (await host.inputValue())
-  }, { timeout: 10_000 }).toBe(true)
-  await host.fill(srv.host)
-  await fieldByLabel(page, '端口').fill(String(srv.port))
-  await fieldByLabel(page, '端口').blur()      // el-input-number 要 blur 才发 model-value
-  await fieldByLabel(page, '用户名').fill('e2e')
-  await fieldByLabel(page, '密码').fill(PASSWORD)
-  await page.getByRole('button', { name: '连接' }).click()
-  await expect(page.locator('.toolbar-card')).toBeVisible({ timeout: 20_000 })
-}
-
-async function ensureDisconnected(page: Page) {
-  await page.locator('.toolbar-card').waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
-  if (await page.locator('.toolbar-card').isVisible()) {
-    await page.getByRole('button', { name: '断开' }).click()
-    await expect(page.locator('.connect-card')).toBeVisible({ timeout: 15_000 })
-  }
-}
-
-/**
- * 连接 → 用浏览器页走到 `root` → 从工具栏「高级搜索」进搜索页（roots 就是那个目录）。
- *
- * 不能 `gotoApp('/sftp/search')`：① 整页加载会连带清掉 `SftpBrowser.vue` 的 `connected`
- * 这份**页面状态**（后端会话还在，页面却回到连接表单），用例 8a/9 之后要回浏览器页看下载
- * 按钮，那时根本没表格；② 预填的 roots 由面包屑当前目录决定，而连接落在哪个目录取决于上一条
- * 用例（断线续连是设计行为）→ 先把浏览器页开到明确目录，roots 才可复现。
- */
-async function connectAndOpenSearch(page: Page, root = '/') {
-  await gotoApp(page, '/sftp')
-  await ensureDisconnected(page)
-  await manualConnect(page, server)
-  await page.waitForTimeout(500)                   // 等「跳到上次访问目录」那一步先落地
-  await page.locator('.toolbar-card .el-breadcrumb__item').first().click()   // Home 回根
-  await waitTableReady(page)
-  await expect(page.locator('.file-name', { hasText: 'root.csv' })).toBeVisible({ timeout: 20_000 })
-  for (const seg of root.split('/').filter(Boolean)) {
-    await page.locator('.file-name', { hasText: seg }).first().click()
-    await expect(page.locator('.toolbar-card .el-breadcrumb')).toContainText(seg, { timeout: 20_000 })
-    await waitTableReady(page)
-  }
-  await page.getByTestId('sftp-advanced-search').click()
-  await expect(page.getByTestId('sftp-search-run')).toBeVisible({ timeout: 15_000 })
-  await expect(page.locator('.sc-tags .el-tag')).toHaveText([root], { timeout: 10_000 })
-}
-
-/** 同文档导航（**不能**用 page.goto，见文件头） */
-async function spaTo(page: Page, menuLabel: string) {
-  await page.locator('aside.sidebar').getByRole('link', { name: menuLabel, exact: true }).click()
-  await page.waitForURL(/.+/)
-  await page.waitForTimeout(400)
-}
-
-/** 等表格真正可交互：listLoading 期间遮罩吃掉全部鼠标事件（右键「弹不出」的真相，R2④） */
-async function waitTableReady(page: Page) {
-  await expect(page.locator('.el-loading-mask')).toHaveCount(0, { timeout: 30_000 })
-  await page.waitForTimeout(200)
-}
 
 /**
  * 真鼠标右键（move + down/up）。`click({button:'right'})` 会**额外**派发 click → 目录行
@@ -114,90 +43,6 @@ async function rightClick(page: Page, target: Locator) {
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
   await page.mouse.down({ button: 'right' })
   await page.mouse.up({ button: 'right' })
-}
-
-// ---------------------------------------------------------------- 表单与读数
-async function openAdvanced(page: Page) {
-  await page.locator('.sc-adv .el-collapse-item__header').click()
-  await expect(page.getByTestId('sftp-search-workers')).toBeVisible({ timeout: 5_000 })
-}
-
-async function addTag(page: Page, testId: string, value: string) {
-  const box = page.getByTestId(testId)
-  await box.fill(value)
-  await box.press('Enter')
-  await expect(box).toHaveValue('')             // 回车即收录（草稿清空 = addRoot 跑过了）
-}
-
-interface SearchForm {
-  mode?: 'name' | 'content' | 'column'
-  term?: string
-  column?: string
-  pattern?: string
-  depth?: 'self' | 'children' | 'all' | 'custom'
-  prune?: string[]
-  workers?: string
-  maxCandidates?: string
-  maxMatches?: string
-  stopAfterListing?: boolean
-}
-
-const MODE_LABEL = { name: '文件名', content: '内容含', column: '列名' } as const
-const DEPTH_LABEL = { self: '仅当前层', children: '含下一层', all: '全部递归', custom: '自定义' } as const
-
-/**
- * 填条件并点「搜索」。模式先切（term 输入框是 v-if 出来的，切了才渲染）。
- * roots 不在这里填：它由 `connectAndOpenSearch` 走「高级搜索」预填进来（含 `resetSearchPage`
- * 之后 —— URL 上的 `?root=` 还在，重载后照样预填），这样每条用例只有一处决定搜哪个目录。
- */
-async function runSearch(page: Page, form: SearchForm) {
-  // 模式必须**先**切：term / column 两个输入框是 v-if 出来的，切了档才渲染
-  if (form.mode) {
-    await page.getByTestId('sftp-search-mode').getByText(MODE_LABEL[form.mode]).click()
-  }
-  if (form.term) await page.getByTestId('sftp-search-term').fill(form.term)
-  if (form.column) await page.getByTestId('sftp-search-column').fill(form.column)
-  if (form.pattern) await page.getByTestId('sftp-search-pattern').fill(form.pattern)
-  if (form.depth) {
-    await page.getByTestId('sftp-search-depth').getByText(DEPTH_LABEL[form.depth]).click()
-  }
-  for (const p of form.prune ?? []) await addTag(page, 'sftp-search-prune', p)
-  if (form.stopAfterListing || form.workers || form.maxCandidates || form.maxMatches) {
-    await openAdvanced(page)
-    if (form.stopAfterListing) {
-      await page.getByTestId('sftp-search-stop-after-listing').click()
-    }
-    if (form.workers) await page.getByTestId('sftp-search-workers').fill(form.workers)
-    if (form.maxCandidates) await page.getByTestId('sftp-search-max-candidates').fill(form.maxCandidates)
-    if (form.maxMatches) await page.getByTestId('sftp-search-max-matches').fill(form.maxMatches)
-  }
-  await page.getByTestId('sftp-search-run').click()
-}
-
-/**
- * 整页重载搜索页 = store 与表单一起清零，让**下一条 run 成为唯一的一条**。
- *
- * 本地 SFTP 上一次列目录档的搜索不到 100ms 就跑完，`running` 那一帧在第一次轮询前就翻成
- * done/partial（实测 43 次轮询全看到终态），「等它变 running」对快查询不成立；而不等又
- * 危险 —— DOM 上还挂着上一条 run 的终态徽章，`waitSettled` 会立刻拿旧 run 判绿。
- */
-async function resetSearchPage(page: Page) {
-  await page.reload()
-  await expect(page.getByTestId('sftp-search-run')).toBeVisible({ timeout: 15_000 })
-  await expect(page.getByTestId(STATUS)).toHaveCount(0)
-}
-
-/** 等这条 run 收尾（done/partial/cancelled/error 都是终态） */
-async function waitSettled(page: Page, timeout = 90_000) {
-  await expect(page.getByTestId(STATUS))
-    .toHaveText(/done|partial|cancelled|error/, { timeout })
-}
-
-/** 结果表徽章：store 落到 DOM 的行数口径（虚拟滚动下唯一可信的「有多少行」） */
-async function badge(page: Page): Promise<{ candidates: number; matches: number; rows: number }> {
-  const text = await page.getByTestId('sftp-search-results-count').innerText()
-  const pick = (re: RegExp) => Number((text.match(re) ?? [])[1] ?? NaN)
-  return { candidates: pick(/候选 (\d+)/), matches: pick(/命中 (\d+)/), rows: pick(/表格 (\d+) 行/) }
 }
 
 /**
@@ -295,7 +140,7 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
   test.afterAll(() => { server?.stop() })
 
   test('1 仅文件名搜索：*RT* 的命中集合与路径', async ({ page }) => {
-    await connectAndOpenSearch(page, '/batch1')
+    await connectAndOpenSearch(page, server, '/batch1')
     await runSearch(page, { mode: 'name', pattern: '*RT*', depth: 'self' })
     await waitSettled(page)
     await expect(page.getByTestId(STATUS)).toHaveText(/done|partial/)
@@ -308,7 +153,7 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
   })
 
   test('2 内容搜索命中：片段含 term 且带行号', async ({ page }) => {
-    await connectAndOpenSearch(page, '/batch1')
+    await connectAndOpenSearch(page, server, '/batch1')
     await runSearch(page, { mode: 'content', term: 'ShadowReg2', depth: 'self' })
     await waitSettled(page)
     // /batch1 直属：RT_1、RT_2、BIG.csv 命中；FT_1 不含该串；Sum_total 被 data_files_only 排除
@@ -322,7 +167,7 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
   })
 
   test('3 深度档位：children 搜不到两层下的文件，all 搜得到', async ({ page }) => {
-    await connectAndOpenSearch(page, '/')
+    await connectAndOpenSearch(page, server, '/')
     // /batch1/Deep/RT_3.csv 在根的第二个子层下（batch1=1 层，Deep=2 层）
     await runSearch(page, { mode: 'name', pattern: 'RT_3*', depth: 'children' })
     await waitSettled(page)
@@ -336,7 +181,7 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
   })
 
   test('4 剪枝：prune_dirs 让 backup 整棵子树消失', async ({ page }) => {
-    await connectAndOpenSearch(page, '/')
+    await connectAndOpenSearch(page, server, '/')
     await runSearch(page, { mode: 'name', pattern: 'RT_9*', depth: 'children' })
     await waitSettled(page)
     expect(await sortedPaths(page)).toEqual(['/backup/RT_9.csv'])
@@ -350,7 +195,7 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
   })
 
   test('5 中文 term：回落客户端引擎且 GBK 文件被命中', async ({ page }) => {
-    await connectAndOpenSearch(page, '/batch2')
+    await connectAndOpenSearch(page, server, '/batch2')
     await runSearch(page, { mode: 'content', term: '漏电电流', depth: 'self' })
     await waitSettled(page)
     // 引擎徽章只在收到 hello 后出现（未确定时压根不渲染这个 testid，见 SearchProgress）
@@ -362,7 +207,7 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
   })
 
   test('6 仅列候选：只出范围不出命中', async ({ page }) => {
-    await connectAndOpenSearch(page, '/')
+    await connectAndOpenSearch(page, server, '/')
     const started = Date.now()
     await runSearch(page, {
       mode: 'content', term: 'ShadowReg2', depth: 'self', stopAfterListing: true,
@@ -379,7 +224,7 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
   test('7 取消：进行中可取消，取消后真实链路仍可用', async ({ page }) => {
     const release = await holdSearchResponse(page)
     try {
-      await connectAndOpenSearch(page, '/batch1')
+      await connectAndOpenSearch(page, server, '/batch1')
       await runSearch(page, { mode: 'content', term: 'ShadowReg2', depth: 'self' })
       const chip = page.getByTestId('sftp-search-chip')
       // 响应被压住 → 一个事件都没到 → running 是一段有保证的窗口（不是撞运气）
@@ -405,7 +250,7 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
   })
 
   test('8a 驻留：搜索已结束，切页再回来结果不丢不重不重排', async ({ page }) => {
-    await connectAndOpenSearch(page, '/batch1')
+    await connectAndOpenSearch(page, server, '/batch1')
     await runSearch(page, { mode: 'content', term: 'ShadowReg2', depth: 'self' })
     await waitSettled(page)
 
@@ -427,7 +272,7 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
   })
 
   test('8b 驻留：进行中切页 chip 计数仍在涨，可在别页取消', async ({ page }) => {
-    await connectAndOpenSearch(page, '/lots')
+    await connectAndOpenSearch(page, server, '/lots')
     // lots/ 那 6000 份 + workers=1 才有十几秒窗口；上限要抬到树之上，否则 2000 命中处
     // 自停，用户还没切完页它就已经跑完了 —— 那时断言的是「已结束」，不是本条要证的性质
     await runSearch(page, {
@@ -460,7 +305,7 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
     const release = await holdSearchResponse(page, 12_000)
     try {
       // 根 '/'：浏览器页要能同时看到**目录行**（batch1）与**文件行**（root.csv）的下载按钮
-      await connectAndOpenSearch(page, '/')
+      await connectAndOpenSearch(page, server, '/')
       await runSearch(page, { mode: 'content', term: 'ShadowReg2', depth: 'self' })
       await expect(page.getByTestId(STATUS)).toHaveText('running')
       await spaTo(page, 'SFTP浏览器')
@@ -482,7 +327,7 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
   })
 
   test('10 截断告知：partial 黄条常驻且不可关，且说的是中文', async ({ page }) => {
-    await connectAndOpenSearch(page, '/')
+    await connectAndOpenSearch(page, server, '/')
     // 上限只在**两批目录之间**判（`walker.walk` 的循环头），所以要一个「还有下一批」的形状：
     // 根 '/' + depth all + name 档（不读内容，纯列举触发）。拿 /batch1 的 self 档试过：列完
     // 唯一那个目录后 pending 已空，`truncated_candidates` 根本不会被记，黄条只剩
@@ -507,7 +352,7 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
   })
 
   test('11 导出 CSV：带 BOM 且含逗号字段不被拆列', async ({ page }) => {
-    await connectAndOpenSearch(page, '/lots/lot0')
+    await connectAndOpenSearch(page, server, '/lots/lot0')
     await runSearch(page, { mode: 'name', pattern: 'RT_a*', depth: 'self' })
     await waitSettled(page)
     expect(await sortedPaths(page)).toEqual(['/lots/lot0/RT_a,b.csv'])
@@ -559,7 +404,7 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
   test('13 命中片段是字面文本：XSS 红线（spec §3.13 四条硬约束之一）', async ({ page }) => {
     let dialogFired = false
     page.on('dialog', async (d) => { dialogFired = true; await d.dismiss().catch(() => {}) })
-    await connectAndOpenSearch(page, '/lots/lot0')
+    await connectAndOpenSearch(page, server, '/lots/lot0')
     await runSearch(page, {
       mode: 'content', term: '<img src=x onerror=alert(1)>', depth: 'self',
     })
@@ -600,7 +445,7 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
     // partial（用户于是把完整结果当残缺结果重搜 —— 假警报比静默更耗信任）。
     // 深度用 **全部递归**：`self`/`children` 档会实打实记一条 `truncated_depth`（更深的目录
     // 确实没遍历），那是「少结果」该出黄条，测不到这条用例想测的性质。
-    await connectAndOpenSearch(page, '/batch1')
+    await connectAndOpenSearch(page, server, '/batch1')
     await runSearch(page, { mode: 'content', term: 'ShadowReg2', depth: 'all' })
     await waitSettled(page)
     await expect(page.getByTestId(STATUS)).toHaveText('done')
@@ -651,7 +496,7 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
     // 通配判据在 `scanners.match_headers`（含 * ? [ 才 fnmatch，匹的是**整个**列名），
     // no data 判据在 `read_column`（读完且匹配到列 = 命中）。列名档恒走客户端引擎，
     // 所以这一条与服务器有没有 grep 无关。
-    await connectAndOpenSearch(page, '/bv')
+    await connectAndOpenSearch(page, server, '/bv')
     await runSearch(page, { mode: 'column', column: '*BV*2*', depth: 'self' })
     await waitSettled(page)
     // help 提示要看得见：通配条件、大小写、no data 三条口径不能只活在 spec 与代码注释里
