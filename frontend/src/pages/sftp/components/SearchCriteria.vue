@@ -1,11 +1,20 @@
 <template>
-  <el-card class="search-criteria" shadow="never">
+  <el-card :class="['search-criteria', { 'is-collapsed': collapsed }]" shadow="never">
     <template #header>
       <div class="sc-head">
         <div class="sc-head-title">
           <el-icon :size="18"><Search /></el-icon>
           <span>搜索条件</span>
         </div>
+        <!-- 收起态的摘要**并进卡头这一行**：另起一行等于收起只省下表单的高度，
+             那一行本身还在。标题左、动作右，中间这条空带正好放条件摘要。 -->
+        <SearchCriteriaSummary
+          v-if="collapsed"
+          :spec="modelValue"
+          class="sc-head-summary"
+          data-testid="sftp-search-criteria-summary"
+          @expand="collapsed = false"
+        />
         <div class="sc-head-actions">
           <el-select
             v-model="presetId"
@@ -41,6 +50,15 @@
           <el-button data-testid="sftp-search-preset-save" size="small" :disabled="!presetName.trim()" @click="onSavePreset">
             存为预设
           </el-button>
+          <!-- 收起只压高度、不动条件值（表单 v-show 不卸载），摘要行替它说话 -->
+          <el-button
+            size="small"
+            text
+            bg
+            :icon="collapsed ? ArrowDown : ArrowUp"
+            data-testid="sftp-search-criteria-toggle"
+            @click="collapsed = !collapsed"
+          >{{ collapsed ? '展开条件' : '收起条件' }}</el-button>
           <el-tooltip :content="canRun ? blockReason || '开始搜索' : '上一次搜索还在收尾，稍候即可'" placement="top">
             <el-button
               type="primary"
@@ -54,10 +72,11 @@
       </div>
     </template>
 
-    <el-form label-width="86px" label-position="left" @submit.prevent>
+    <el-form v-show="!collapsed" class="sc-form" label-width="86px" label-position="left" @submit.prevent>
       <!-- ---------------- 范围 ---------------- -->
-      <div class="sc-group-title">范围</div>
-      <el-form-item label="搜索目录">
+      <div class="sc-group-title sc-span">范围</div>
+      <!-- sc-span 的判据只有一条：这一格里装的是长绝对路径，压进一栏就会一直换行 -->
+      <el-form-item class="sc-span" label="搜索目录">
         <div class="sc-roots">
           <div class="sc-tags">
             <el-tag
@@ -68,21 +87,19 @@
               closable
               @close="removeRoot(i)"
             >{{ r }}</el-tag>
-            <span v-if="!roots.length" class="sc-empty">还没有目录，回车或点「使用当前目录」</span>
           </div>
-          <div class="sc-inline">
-            <el-input
-              v-model="rootDraft"
-              data-testid="sftp-search-roots"
-              :prefix-icon="FolderOpened"
-              placeholder="绝对路径，回车添加（最多 20 条）"
-              @keyup.enter="addRoot()"
-              @blur="addRoot()"
-            />
-            <el-tooltip content="取面包屑当前所在的目录" placement="top">
-              <el-button :icon="Aim" :disabled="!currentDirUsable" @click="useCurrentDir">使用当前目录</el-button>
-            </el-tooltip>
-          </div>
+          <el-input
+            v-model="rootDraft"
+            class="sc-root-input"
+            data-testid="sftp-search-roots"
+            :prefix-icon="FolderOpened"
+            placeholder="绝对路径，回车添加（最多 20 条）"
+            @keyup.enter="addRoot()"
+            @blur="addRoot()"
+          />
+          <el-tooltip content="取面包屑当前所在的目录" placement="top">
+            <el-button :icon="Aim" :disabled="!currentDirUsable" @click="useCurrentDir">使用当前目录</el-button>
+          </el-tooltip>
         </div>
       </el-form-item>
 
@@ -120,12 +137,11 @@
               closable
               @close="removePrune(i)"
             >{{ p }}</el-tag>
-            <span v-if="!pruneDirs.length" class="sc-empty">不跳过任何目录</span>
           </div>
           <el-input
             v-model="pruneDraft"
             data-testid="sftp-search-prune"
-            placeholder="fnmatch 目录名，如 *backup*、*_old（回车加一条）"
+            placeholder="fnmatch 目录名，如 *backup*（回车加一条）"
             @keyup.enter="addPrune()"
             @blur="addPrune()"
           />
@@ -133,7 +149,7 @@
       </el-form-item>
 
       <!-- ---------------- 过滤 ---------------- -->
-      <div class="sc-group-title">过滤</div>
+      <div class="sc-group-title sc-span">过滤</div>
       <el-form-item label="名称模式">
         <el-input
           v-model="namePattern"
@@ -175,7 +191,7 @@
       </el-form-item>
 
       <!-- ---------------- 命中 ---------------- -->
-      <div class="sc-group-title">命中</div>
+      <div class="sc-group-title sc-span">命中</div>
       <el-form-item label="匹配模式">
         <el-radio-group v-model="mode" data-testid="sftp-search-mode">
           <el-radio value="name">文件名</el-radio>
@@ -184,25 +200,33 @@
         </el-radio-group>
       </el-form-item>
 
-      <el-form-item v-if="mode === 'content'" label="关键词">
-        <el-input
-          v-model="term"
-          data-testid="sftp-search-term"
-          :maxlength="MAX_TERM_LEN"
-          show-word-limit
-          clearable
-          placeholder="要搜的测试项 / 文本"
-        />
-      </el-form-item>
-      <el-form-item v-if="mode === 'column'" label="列名">
-        <el-input
-          v-model="columnName"
-          data-testid="sftp-search-column"
-          :maxlength="MAX_TERM_LEN"
-          clearable
-          placeholder="精确列名，或 *BV*2* 这类通配"
-        />
-      </el-form-item>
+      <!-- sc-cell：输入框和「这一档怎么匹配」的提示必须同格，提示是那个字段的说明，
+           独立成跨行的一格会在网格里飘到别的字段底下去。 -->
+      <div class="sc-cell">
+        <el-form-item v-if="mode === 'content'" label="关键词">
+          <el-input
+            v-model="term"
+            data-testid="sftp-search-term"
+            :maxlength="MAX_TERM_LEN"
+            show-word-limit
+            clearable
+            placeholder="要搜的测试项 / 文本"
+          />
+        </el-form-item>
+        <el-form-item v-if="mode === 'column'" label="列名">
+          <el-input
+            v-model="columnName"
+            data-testid="sftp-search-column"
+            :maxlength="MAX_TERM_LEN"
+            clearable
+            placeholder="精确列名，或 *BV*2* 这类通配"
+          />
+        </el-form-item>
+        <p v-if="mode === 'content'" class="sc-note">{{ CONTENT_ENGINE_NOTE }}</p>
+        <p v-if="mode === 'column'" class="sc-note" data-testid="sftp-search-column-note">
+          {{ COLUMN_MATCH_NOTE }}
+        </p>
+      </div>
 
       <!-- 匹配方式/区分大小写只被 scan_file 消费：列名档走 match_headers（精确或 fnmatch），
            文件名档走 name_pattern 的 fnmatch，两者都不消费这两个值。 -->
@@ -216,23 +240,19 @@
           <el-checkbox v-model="caseSensitive">区分大小写</el-checkbox>
         </div>
       </el-form-item>
-      <div v-if="mode === 'content'" class="sc-note">{{ CONTENT_ENGINE_NOTE }}</div>
-      <div v-if="mode === 'column'" class="sc-note" data-testid="sftp-search-column-note">
-        {{ COLUMN_MATCH_NOTE }}
-      </div>
 
-      <!-- one_per_folder 放命中区显眼位置，不藏进「高级」（spec §3.13） -->
-      <div class="sc-flag">
+      <!-- one_per_folder 放命中区显眼位置，不藏进「高级」（spec §3.13）；说明文字保留可见，
+           收进 tooltip 就等于把「这一档改变的是命中集合」这件事藏起来。 -->
+      <div class="sc-flag sc-span">
         <el-switch v-model="onePerFolder" data-testid="sftp-search-one-per-folder" />
-        <div class="sc-flag-text">
-          <strong>每目录只取一个</strong>
-          <span>全递归时这才是「哪些文件夹里有这个测试项」的开关：勾上后每个目录最多贡献一个命中，扫描量除以每目录文件数。</span>
-        </div>
+        <strong>每目录只取一个</strong>
+        <span>全递归时这才是「哪些文件夹里有这个测试项」的开关：每个目录最多贡献一个命中，扫描量除以每目录文件数。</span>
       </div>
 
       <!-- ---------------- 高级（默认收起） ---------------- -->
-      <el-collapse class="sc-adv">
+      <el-collapse class="sc-adv sc-span">
         <el-collapse-item title="高级：并发、超时与各上限（留空即用后端默认值）" name="advanced">
+          <div class="sc-adv-grid">
           <el-form-item label="并发数">
             <el-input v-model="workers" data-testid="sftp-search-workers" class="sc-num" type="number" :min="1" :max="8" placeholder="默认 4，上限 8" />
           </el-form-item>
@@ -271,10 +291,11 @@
           <el-form-item v-if="mode === 'column'" label="取值行数">
             <el-input v-model="columnRows" data-testid="sftp-search-column-rows" class="sc-num" type="number" :min="1" :max="50" placeholder="默认 10，上限 50" />
           </el-form-item>
+          </div>
         </el-collapse-item>
       </el-collapse>
 
-      <div v-if="blockReason" class="sc-block">{{ blockReason }}</div>
+      <div v-if="blockReason" class="sc-block sc-span">{{ blockReason }}</div>
     </el-form>
   </el-card>
 </template>
@@ -283,9 +304,16 @@
 /**
  * 搜索条件表单（计划 Task 15 Step 2 / spec §3.13）：范围 → 过滤 → 命中 → 高级，四段同序。
  *
+ * **版式（2026-09-25 重做）**：`el-form` 本体是一张 CSS grid，栏数由可用宽度自己决定
+ * （`auto-fill minmax(420px,1fr)`），跨整行只有一个判据「这一格装长绝对路径」。改版前是
+ * 定宽单列，1440 与 1280 下高度一模一样（实测 805px > 一页预算 796px）。卡头可收起成一行
+ * 摘要（`SearchCriteriaSummary`，渲染在卡头那条空带上，收起后整张卡 71px）。
+ * 版式的承重断言在 `e2e/sftp/search-layout.spec.ts`，改样式前先读它的三条口径。
+ *
  * 状态归属：表单值**不住在这里**，`modelValue` 由页面持有，每次改动 emit 一份新对象回去
  * （不原地改 props、也不另存副本，否则「预设回填」与「用户改动」互相看不见）；预设的增删查
  * 同样只 emit，HTTP 在页面侧；`canRun` 是页面把 store 的 `canStart` 传下来的。
+ * 字段级的 getter/setter 在 `useSearchSpecFields.ts`（本文件的 600 行上限装不下两份）。
  *
  * 数值字段一律 `el-input[type=number]` 而非 `el-input-number`：后者的 fallthrough 属性落在
  * 组件根 div，`data-testid` 挂上去后 e2e 的 `fill()` 会打在非编辑元素上；而 `el-input` 是
@@ -293,26 +321,27 @@
  * `file-list-sort-filter.spec.ts:157`）。唯一例外 `el-date-picker` 见模板里那段注释。
  *
  * 钳位由后端 `apps/sftp/search/contracts.py` 负责（超界夹住并出一条 `notice`，钳位码只告知、
- * 不进 `limits_hit`）；下面的 MAX_*
- * 只是抄同名常量用于「输入时就拦住」，留空的数值字段一律发 `null` = 用后端默认值。
+ * 不进 `limits_hit`）；`MAX_*` / `HARD_MAX_DEPTH` 只是抄同名常量用于「输入时就拦住」，
+ * 留空的数值字段一律发 `null` = 用后端默认值。
  *
  * e2e 契约钩子（Task 18 按名定位，勿改，均带 `sftp-search-` 前缀）：roots / depth / prune /
  * pattern / time-from / time-to / mode / term / matching / one-per-folder / workers /
  * timeout / run / preset-select / preset-save。本组件另附计划未要求的：-preset-name /
  * -preset-delete / -column / -max-depth / -server-grep / -stop-after-listing /
- * -max-{entries,candidates,matches} / -matches-per-file / -column-rows。
+ * -max-{entries,candidates,matches} / -matches-per-file / -column-rows /
+ * -criteria-toggle / -criteria-summary（后两个挂在摘要子组件的根元素上）。
  */
 import { computed, ref } from 'vue'
-import { Aim, Delete, FolderOpened, Search } from '@element-plus/icons-vue'
+import { Aim, ArrowDown, ArrowUp, Delete, FolderOpened, Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import type { SearchDepth, SearchMatching, SearchMode, SearchPresetItem, SearchSpec } from '../../../api/sftpSearch'
+import type { SearchPresetItem, SearchSpec } from '../../../api/sftpSearch'
 import { COLUMN_MATCH_NOTE, CONTENT_ENGINE_NOTE } from './searchHints'
-
-/** 与 `contracts.py` 同名常量同源（前端拿不到 Python，抄的是「拦住输入」这一层） */
-const MAX_ROOTS = 20
-const HARD_MAX_DEPTH = 64
-const MAX_TERM_LEN = 200
-const PRESET_NAME_MAX = 80
+import SearchCriteriaSummary from './SearchCriteriaSummary.vue'
+// 字段绑定层与那几个「与 contracts.py 同名」的上限常量一起住在 composable 里：
+// 本组件的 600 行上限装不下两份，而「表单值 ↔ spec」这件事也只该有一处实现。
+import {
+  HARD_MAX_DEPTH, MAX_ROOTS, MAX_TERM_LEN, PRESET_NAME_MAX, useSearchSpecFields,
+} from './useSearchSpecFields'
 
 const props = withDefaults(defineProps<{
   modelValue: SearchSpec
@@ -334,96 +363,26 @@ const emit = defineEmits<{
   'delete-preset': [number]
 }>()
 
+/**
+ * 收起态：表单 `v-show` 掉而不是卸载 —— 条件值本来就住在页面持有的 `spec` 上，
+ * 但目录/跳过目录的**草稿**（还没回车的输入）住在这里，卸载会把它们擦掉。
+ * 只在组件实例活着的时候成立，刷新即回到展开（与搜索结果的驻留口径一致）。
+ */
+const collapsed = ref(false)
+
 function patch(part: Record<string, unknown>): void {
   emit('update:modelValue', { ...props.modelValue, ...part } as SearchSpec)
 }
 
 // ------------------------------------------------------------------ 字段绑定
-
-const roots = computed(() => props.modelValue.roots ?? [])
-const pruneDirs = computed(() => props.modelValue.prune_dirs ?? [])
-const mode = computed<SearchMode>({
-  get: () => props.modelValue.mode ?? 'name',
-  set: v => patch({ mode: v }),
-})
-const depth = computed<SearchDepth>({
-  get: () => props.modelValue.depth ?? 'all',
-  set: v => patch({ depth: v }),
-})
-const matching = computed<SearchMatching>({
-  get: () => props.modelValue.matching ?? 'substring',
-  set: v => patch({ matching: v }),
-})
-const namePattern = computed<string>({
-  get: () => props.modelValue.name_pattern ?? '',
-  set: v => patch({ name_pattern: v }),
-})
-const term = computed<string>({
-  get: () => props.modelValue.term ?? '',
-  set: v => patch({ term: v }),
-})
-const columnName = computed<string>({
-  get: () => props.modelValue.column_name ?? '',
-  set: v => patch({ column_name: v }),
-})
-const timeFrom = computed<string | null>({
-  get: () => props.modelValue.modified_after ?? null,
-  set: v => patch({ modified_after: v }),
-})
-const timeTo = computed<string | null>({
-  get: () => props.modelValue.modified_before ?? null,
-  set: v => patch({ modified_before: v }),
-})
-const dataFilesOnly = computed<boolean>({
-  get: () => props.modelValue.data_files_only ?? true,
-  set: v => patch({ data_files_only: v }),
-})
-const caseSensitive = computed<boolean>({
-  get: () => props.modelValue.case_sensitive ?? false,
-  set: v => patch({ case_sensitive: v }),
-})
-const onePerFolder = computed<boolean>({
-  get: () => props.modelValue.one_per_folder ?? false,
-  set: v => patch({ one_per_folder: v }),
-})
-const firstHitPerFile = computed<boolean>({
-  get: () => props.modelValue.first_hit_per_file ?? true,
-  set: v => patch({ first_hit_per_file: v }),
-})
-const allowServerGrep = computed<boolean>({
-  get: () => props.modelValue.allow_server_grep ?? true,
-  set: v => patch({ allow_server_grep: v }),
-})
-const stopAfterListing = computed<boolean>({
-  get: () => props.modelValue.stop_after_listing ?? false,
-  set: v => patch({ stop_after_listing: v }),
-})
-
-/** 数值输入统一走字符串：空 = 发 `null`（后端 `_get` 把 null 当「用契约默认值」） */
-type NumKey = 'max_depth' | 'column_rows' | 'matches_per_file' | 'workers' | 'timeout'
-  | 'max_entries' | 'max_candidates' | 'max_matches'
-
-function num(key: NumKey) {
-  return computed<string>({
-    get: () => {
-      const raw = props.modelValue[key]
-      return raw === undefined || raw === null ? '' : String(raw)
-    },
-    set: raw => {
-      const text = String(raw ?? '').trim()
-      const parsed = Number(text)
-      patch({ [key]: text !== '' && Number.isFinite(parsed) ? parsed : null })
-    },
-  })
-}
-const maxDepth = num('max_depth')
-const workers = num('workers')
-const timeout = num('timeout')
-const maxEntries = num('max_entries')
-const maxCandidates = num('max_candidates')
-const maxMatches = num('max_matches')
-const matchesPerFile = num('matches_per_file')
-const columnRows = num('column_rows')
+// getter 读 props.modelValue、setter 发一份合并后的新 spec —— 真相只有页面那一份，
+// 所以「预设整体回填」和「用户逐字段改」才看得见彼此（值在这里再存一份副本就会打架）。
+const {
+  roots, pruneDirs, mode, depth, matching, namePattern, term, columnName, timeFrom, timeTo,
+  dataFilesOnly, caseSensitive, onePerFolder, firstHitPerFile, allowServerGrep,
+  stopAfterListing, maxDepth, workers, timeout, maxEntries, maxCandidates, maxMatches,
+  matchesPerFile, columnRows,
+} = useSearchSpecFields(() => props.modelValue, patch)
 
 // ------------------------------------------------------------------ 标签式输入
 
@@ -534,9 +493,15 @@ function onDeletePreset(): void {
 <style scoped>
 .search-criteria { border-radius: var(--p-radius-md); border-left: 4px solid var(--brand); }
 .search-criteria :deep(.el-card__body) { padding: var(--p-space-3) var(--p-space-5) var(--p-space-2); }
+/* 收起态整张卡只剩卡头那一行：摘要已经并进卡头，卡体没有内容了，
+   但 el-card 的 body 还在 —— 不关掉它，收起就白收（它还占那份内边距）。
+   表单本身是 v-show 掉的（草稿在组件里，卸载会擦掉），这里关的是容器。 */
+.search-criteria.is-collapsed :deep(.el-card__body) { display: none; }
 
 .sc-head { display: flex; align-items: center; justify-content: space-between; gap: var(--p-space-3); flex-wrap: wrap; }
 .sc-head-title { display: flex; align-items: center; gap: var(--p-space-2); font-weight: var(--p-fw-semibold); font-size: var(--p-fs-base); color: var(--text); }
+/* 摘要吃卡头中间那条空带；`min-width:0` 才允许它被压短（否则 chips 会把卡头顶宽） */
+.sc-head-summary { flex: 1 1 200px; min-width: 0; }
 .sc-head-actions { display: flex; align-items: center; gap: var(--p-space-2); flex-wrap: wrap; }
 .sc-preset-select { width: 140px; }
 .sc-preset-name { width: 130px; }
@@ -552,11 +517,32 @@ function onDeletePreset(): void {
   color: var(--brand);
 }
 
-.sc-roots { display: flex; flex-direction: column; gap: var(--p-space-2); width: 100%; }
-.sc-tags { display: flex; align-items: center; gap: var(--p-space-1); flex-wrap: wrap; min-height: 28px; }
+/* 表单是一张网格：栏数由可用宽度自己决定（420px 是「一个字段 + 86px 标签」还呼吸得下的
+   下限），所以 1440 两栏、超宽屏三栏、窄窗自动回一栏，不需要按视口写断点 —— 视口断点会
+   把侧边栏宽度算错，而侧边栏可折叠。跨整行只有一个判据：这一格装长绝对路径。 */
+.sc-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 0 var(--p-space-6);
+  align-items: start;
+}
+/* EP 默认 18px 行距是给「一行一字段」的长表单留呼吸；网格里行与行已经同宽并排，
+   段落感由三节标题与分隔线承担，18px 就纯浪费高度（8 行 × 6px = 48px）。 */
+.sc-form :deep(.el-form-item) { margin-bottom: var(--p-space-3); }
+.sc-span { grid-column: 1 / -1; }
+/* 420px 下限在超宽屏会铺出 5 栏以上，条件表单铺那么宽只会读成一条横线 */
+@media (min-width: 2200px) {
+  .sc-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+/* 一个输入框 + 属于它的那句提示，占网格里的一个格 */
+.sc-cell { display: flex; flex-direction: column; min-width: 0; }
+
+.sc-roots { display: flex; align-items: center; gap: var(--p-space-2); flex-wrap: wrap; width: 100%; }
+.sc-root-input { flex: 1 1 260px; min-width: 180px; }
+.sc-tags { display: flex; align-items: center; gap: var(--p-space-1); flex-wrap: wrap; min-width: 0; }
 .sc-tag { max-width: 100%; }
 .sc-tag :deep(.el-tag__content) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sc-empty { font-size: var(--p-fs-micro); color: var(--text-3); }
 .sc-inline { display: flex; align-items: center; gap: var(--p-space-2); flex-wrap: wrap; width: 100%; }
 .sc-inline--wrap { align-items: center; }
 .sc-inline-hint { font-size: var(--p-fs-micro); color: var(--text-2); }
@@ -565,31 +551,31 @@ function onDeletePreset(): void {
 .sc-date :deep(.el-date-editor) { width: 190px; }
 
 .sc-note {
-  margin: 0 0 var(--p-space-3) 86px;
+  margin: 0 0 var(--p-space-2) 86px;
   font-size: var(--p-fs-micro);
+  line-height: var(--leading-normal);
   color: var(--text-2);
 }
 
-/* 「每目录只取一个」显眼花在命中区：品牌左边框 + 说明文字 */
+/* 「每目录只取一个」显花在命中区：品牌左边框 + 一句话说明。
+   86px 缩进是让开关与上面的输入框左对齐（它跨整行，不缩进会顶到标签列外面）。 */
 .sc-flag {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--p-space-3);
-  margin: var(--p-space-2) 0 var(--p-space-3) 86px;
-  padding: var(--p-space-3);
-  border: 1px solid var(--border-2);
+  margin: var(--p-space-1) 0 var(--p-space-3) 86px;
+  padding-left: var(--p-space-3);
   border-left: 3px solid var(--brand);
-  border-radius: var(--p-radius-sm);
-  background: var(--bg-2);
 }
-.sc-flag-text { display: flex; flex-direction: column; gap: 2px; }
-.sc-flag-text strong { font-size: var(--p-fs-small); color: var(--text); }
-.sc-flag-text span { font-size: var(--p-fs-micro); color: var(--text-2); line-height: var(--leading-normal); }
+.sc-flag strong { flex: none; font-size: var(--p-fs-small); color: var(--text); }
+.sc-flag > span { font-size: var(--p-fs-micro); color: var(--text-2); line-height: var(--leading-normal); }
 
 .sc-adv { margin-top: var(--p-space-2); border-top: 1px solid var(--border); }
 .sc-adv :deep(.el-collapse-item__header) { font-size: var(--p-fs-small); color: var(--text-2); }
 .sc-adv :deep(.el-collapse-item__wrap) { border-top: none; }
 .sc-adv :deep(.el-form-item) { margin-bottom: var(--p-space-2); }
+/* 高级区全是 180px 的数字框，横着排才不浪费折叠体那点宽度 */
+.sc-adv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0 var(--p-space-5); }
 
 .sc-block { margin-left: 86px; font-size: var(--p-fs-micro); color: var(--error); }
 code { font-family: var(--font-mono); font-size: var(--p-fs-micro); }

@@ -1,0 +1,182 @@
+import { test, expect, type Locator, type Page } from '@playwright/test'
+import { startSftpServer, type SftpTestServer } from '../helpers/sftpServer'
+import {
+  badge, connectAndOpenSearch, runSearch, waitSettled,
+} from '../helpers/sftpSearchFlow'
+
+/**
+ * SFTP 搜索页的**版式承重**用例（2026-09-25 改版：条件表单从定宽单列改成响应式网格，
+ * 结果表从写死 520px 改成跟随视口，条件卡可收起成一行摘要）。
+ *
+ * 为什么值得单独一个文件：这些断言读的是**像素与几何**，不是数据。它们与 `search.spec.ts`
+ * 共用 `helpers/sftpSearchFlow` 那条真链路，但结论只在窗口尺寸变化时才会变 —— 混进功能
+ * 套件会让那边每条用例都背重视口耦合。
+ *
+ * 三条不显然的口径：
+ * - **一页的预算是 796px**：基准视口 1440×900，`.content-area` 客户高实测 844（900 − 顶栏 56），
+ *   再减它自己的上下 24px 内边距。改版前光条件卡就 821px —— 一进页就要滚 1.7 屏。
+ * - **并排怎么判**：比较两个字段**整行**（`.el-form-item`）的 `boundingBox().y`。
+ *   `label-position="left"` 下标签与控件同行，所以「同 y」=「同一行」；用 `offsetTop` 会被
+ *   flex 居中的父级骗到（差几像素），量像素三条陷阱之一。
+ * - **表格要证的是「会跟着窗口长」**：只测 900 高的话流体值(396)反而比写死的 520 小，看不出
+ *   改了什么。所以关键断言是**增量**：视口从 900 升到 1200（+300），grid 必须至少 +200。
+ *   写死 520px 时这条永远不成立，而它不依赖任何一方的绝对像素估计。
+ *
+ * 跑法同 `search.spec.ts`：`--project=P1 --workers=1`（不带 `--project` 会落进 Edge project
+ * 的 `grepInvert` 被静默跳过 = 假绿）。所有读数都 `console.log`，红的时候先看到真实像素，
+ * 再判是版式坏了还是断言写错。
+ */
+let server: SftpTestServer
+
+async function heightOf(loc: Locator): Promise<number> {
+  const box = await loc.boundingBox()
+  if (!box) throw new Error('目标不可见，量不到高度')
+  return Math.round(box.height)
+}
+
+async function topOf(loc: Locator): Promise<number> {
+  const box = await loc.boundingBox()
+  if (!box) throw new Error('目标不可见，量不到位置')
+  return Math.round(box.y)
+}
+
+/** 表单里某个 testid 所属的那一行（el-form-item）—— 判并排要比整行，不比控件 */
+function itemOf(page: Page, testId: string): Locator {
+  return page.locator('.el-form-item').filter({ has: page.getByTestId(testId) })
+}
+
+async function sameRow(page: Page, a: string, b: string): Promise<boolean> {
+  const [ya, yb] = [await topOf(itemOf(page, a)), await topOf(itemOf(page, b))]
+  console.log(`[几何] ${a}.y=${ya} ${b}.y=${yb}`)
+  return ya === yb
+}
+
+/** 整页还要滚多少：`.content-area` 才是滚动容器（`overflow-x:hidden`，所以溢出只能靠 scrollWidth 判） */
+async function pageScroll(page: Page): Promise<number> {
+  const [sh, ch] = await page.locator('.content-area')
+    .evaluate((el) => [el.scrollHeight, el.clientHeight])
+  return Math.round(sh - ch)
+}
+
+async function hOverflow(page: Page): Promise<number> {
+  return page.locator('.content-area')
+    .evaluate((el) => Math.round(el.scrollWidth - el.clientWidth))
+}
+
+test.describe.configure({ mode: 'serial', timeout: 240_000 })
+test.use({ viewport: { width: 1440, height: 900 } })
+
+test.describe('@sftp SFTP 搜索页版式', { tag: ['@p1', '@sftp'] }, () => {
+  test.beforeAll(async () => {
+    server = await startSftpServer({ fixture: true })
+  })
+
+  test.afterAll(() => { server?.stop() })
+
+  test('L1 条件卡展开态不再吃掉一整屏', async ({ page }) => {
+    await connectAndOpenSearch(page, server, '/batch1')
+    const h = await heightOf(page.locator('.search-criteria'))
+    console.log(`[L1] 条件卡展开=${h}px（改版前实测 821px；一页预算 796px）`)
+    expect(h).toBeLessThanOrEqual(560)
+    // 两套主题各留一张全页图（test-results/ 不入库）：版式改动光看像素断言不够，
+    // chips 换行、栏间空隙这类只有看图才判得出来
+    await page.screenshot({ path: 'test-results/sftp-search-layout-light.png', fullPage: true })
+  })
+
+  test('L2 短字段真的并排了：横向空间被用上', async ({ page }) => {
+    await connectAndOpenSearch(page, server, '/batch1')
+    // 切到内容档只为把「关键词」控件渲染出来（列名/关键词是 v-if 出来的）
+    await page.getByTestId('sftp-search-mode').getByText('内容含').click()
+    await page.getByTestId('sftp-search-term').fill('ShadowReg2')
+
+    expect(await sameRow(page, 'sftp-search-pattern', 'sftp-search-time-from'),
+      '名称模式与修改时间应同处一行').toBe(true)
+    expect(await sameRow(page, 'sftp-search-mode', 'sftp-search-term'),
+      '匹配模式与关键词应同处一行').toBe(true)
+
+    // 跨整行的字段仍要独占地带：目录输入框得吃满它那一行
+    const rootsW = (await page.getByTestId('sftp-search-roots').boundingBox())?.width ?? 0
+    console.log(`[L2] 搜索目录输入框宽=${rootsW}px`)
+    expect(rootsW).toBeGreaterThan(600)
+  })
+
+  test('L3 窄窗口回落单栏，且不出现横向溢出', async ({ page }) => {
+    await connectAndOpenSearch(page, server, '/batch1')
+    await page.setViewportSize({ width: 900, height: 900 })
+    await expect(page.getByTestId('sftp-search-roots')).toBeVisible()
+
+    expect(await sameRow(page, 'sftp-search-pattern', 'sftp-search-time-from'),
+      '900 宽下应退回单栏（两者不同行）').toBe(false)
+    const overflow = await hOverflow(page)
+    console.log(`[L3] 900 宽横向溢出=${overflow}px`)
+    expect(overflow, '条件区不得横向溢出被裁').toBeLessThanOrEqual(1)
+  })
+
+  test('L4 收起条件：压成一行摘要，摘要说清这次搜的是什么', async ({ page }) => {
+    await connectAndOpenSearch(page, server, '/batch1')
+    await runSearch(page, { mode: 'column', column: '*BV*2*', depth: 'self' })
+    await waitSettled(page)
+
+    const expanded = await heightOf(page.locator('.search-criteria'))
+    await page.getByTestId('sftp-search-criteria-toggle').click()
+    const collapsed = await heightOf(page.locator('.search-criteria'))
+    console.log(`[L4] 条件卡 展开=${expanded}px 收起=${collapsed}px`)
+    expect(collapsed).toBeLessThanOrEqual(72)
+
+    const summary = page.getByTestId('sftp-search-criteria-summary')
+    await expect(summary).toContainText('/batch1')
+    await expect(summary).toContainText('*BV*2*')
+    await expect(summary).toContainText('列名')
+    // 收起走 v-show 而非卸载：条件值住在页面持有的 spec 上，但表单不销毁才不会引出
+    // 「收起再展开后预填/草稿丢了」这类第三种真相
+    await expect(page.locator('.sc-form')).toBeHidden()
+    await expect(page.getByTestId('sftp-search-run')).toBeVisible()
+
+    await page.getByTestId('sftp-search-criteria-toggle').click()
+    expect(await heightOf(page.locator('.search-criteria'))).toBe(expanded)
+    await page.getByTestId('sftp-search-criteria-toggle').click()
+    await page.screenshot({ path: 'test-results/sftp-search-layout-collapsed.png', fullPage: true })
+  })
+
+  test('L5 结果表跟随视口增高，收起条件后整页不再滚动', async ({ page }) => {
+    await connectAndOpenSearch(page, server, '/batch1')
+    await runSearch(page, { mode: 'name', pattern: '*RT*', depth: 'self' })
+    await waitSettled(page)
+    expect((await badge(page)).rows).toBe(2)
+
+    const grid = page.locator('.srt-grid')
+    const expanded = await heightOf(grid)
+    console.log(`[L5] 1440×900 条件展开 grid=${expanded}px 整页滚动=${await pageScroll(page)}px`)
+    // 条件全展开时上方占位已经超出一屏，表格退到 `.srt` 的保底高度（约 10 行）+ 整页可滚，
+    // 这是有意的取舍：不把条件表单压扁去换表格高度。保底值由样式声明，这里只兜住它。
+    expect(expanded, '条件展开时表格仍要站住保底高度').toBeGreaterThanOrEqual(300)
+
+    await page.getByTestId('sftp-search-criteria-toggle').click()
+    const collapsed = await heightOf(grid)
+    const scrolled = await pageScroll(page)
+    console.log(`[L5] 1440×900 条件收起 grid=${collapsed}px 整页滚动=${scrolled}px`)
+    // 实测（1440×900）：收起条件后上方占位共 400px → grid 396px（13 行）且整页零滚动。
+    // 阈值取 380：只兜住「flex 真的把剩余高度给了表格」这件事，不兜某个窗口的具体像素。
+    expect(collapsed).toBeGreaterThanOrEqual(380)
+    expect(scrolled, '900 高 + 收起条件应基本免整页滚动').toBeLessThanOrEqual(24)
+
+    // 关键的一条：表格必须**跟着窗口长**。断言写成增量而不是绝对像素 —— 绝对值会随
+    // 上方占位变化而失真，而「视口 +300 就得至少 +200」正是写死 520px 时永远不成立的性质。
+    await page.setViewportSize({ width: 1440, height: 1200 })
+    await expect.poll(() => heightOf(grid), { timeout: 10_000 }).toBeGreaterThanOrEqual(collapsed + 200)
+    const at1200 = await heightOf(grid)
+    console.log(`[L5] 1440×1200 grid=${at1200}px（视口 +300 → 表格 +${at1200 - collapsed}；改版前恒为 520px）`)
+  })
+
+  test('L6 深色主题下版式不变形', async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem('theme', 'night'))
+    await connectAndOpenSearch(page, server, '/batch1')
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'night')
+
+    const h = await heightOf(page.locator('.search-criteria'))
+    console.log(`[L6] night 条件卡=${h}px 横向溢出=${await hOverflow(page)}px`)
+    expect(h).toBeLessThanOrEqual(560)
+    expect(await hOverflow(page)).toBeLessThanOrEqual(1)
+    await page.screenshot({ path: 'test-results/sftp-search-layout-night.png', fullPage: true })
+  })
+})
