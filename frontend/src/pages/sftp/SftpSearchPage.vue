@@ -2,7 +2,7 @@
   <div class="sftp-search-page">
     <div class="page-header">
       <div class="header-icon">
-        <el-icon :size="30" aria-hidden="true"><Search /></el-icon>
+        <el-icon :size="20" aria-hidden="true"><Search /></el-icon>
       </div>
       <div class="header-title">
         <h2>SFTP 搜索</h2>
@@ -288,21 +288,30 @@ onActivated(applyQueryRoot)
 </script>
 
 <style scoped>
-.sftp-search-page { padding: 8px; }
+/* 页面是一列 flex：条件卡/进度/底部条按自身高度站住，结果表（`.srt` 自己声明 grow）
+   吃掉剩余视口。`min-height: 100%` 而不是 `height: 100%` —— 内容多于视口时要让整页
+   还能滚（同 `DataManagement.vue` 的口径），不能让 flex 把内容压扁。 */
+.sftp-search-page {
+  display: flex; flex-direction: column;
+  min-height: 100%; padding: 8px;
+}
+.sftp-search-page > * { flex-shrink: 0; }
+
 .page-header {
   display: flex; align-items: center; gap: var(--p-space-4);
-  margin-bottom: var(--p-space-5); padding: var(--p-space-4) var(--p-space-5);
+  margin-bottom: var(--p-space-3); padding: var(--p-space-2) var(--p-space-4);
   background: var(--bg-2); border: 1px solid var(--border-2);
   border-radius: var(--p-radius-md); box-shadow: var(--shadow-sm);
 }
 .header-icon {
   display: flex; align-items: center; justify-content: center;
-  width: 52px; height: 52px; background: var(--bg);
-  border-radius: var(--p-radius-md); box-shadow: var(--shadow-sm); color: var(--brand);
+  width: 32px; height: 32px; background: var(--bg);
+  border-radius: var(--p-radius-sm); box-shadow: var(--shadow-sm); color: var(--brand);
 }
-.header-title { flex: 1; }
-.header-title h2 { margin: 0; font-size: var(--p-fs-headline); font-weight: var(--p-fw-semibold); color: var(--text); }
-.header-subtitle { margin: 4px 0 0; font-size: var(--p-fs-small); color: var(--text-2); }
+/* 标题与副标题同一行：这一带原本占 84px，改版后只给用户要看的结果腾地方 */
+.header-title { flex: 1; display: flex; align-items: baseline; gap: var(--p-space-4); min-width: 0; }
+.header-title h2 { margin: 0; flex: none; font-size: var(--p-fs-headline); font-weight: var(--p-fw-semibold); color: var(--text); }
+.header-subtitle { margin: 0; font-size: var(--p-fs-small); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ssp-alert { margin-bottom: var(--p-space-3); }
 .ssp-alert-body { display: flex; align-items: center; gap: var(--p-space-3); flex-wrap: wrap; }
 

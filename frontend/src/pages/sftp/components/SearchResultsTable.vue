@@ -55,11 +55,12 @@
     </div>
 
     <!-- 5000 行靠 AG Grid 的行虚拟化吃下（row-buffer 10）：这里既不分页也不截断，
-         折叠只是把该目录的行暂时移出 grid 的数据源，不是少给用户数据。 -->
+         折叠只是把该目录的行暂时移出 grid 的数据源，不是少给用户数据。
+         高度**不写死**（曾是 520px）：由 `.srt` 的 flex 布局给多少长多少，见样式注释。 -->
     <ag-grid-vue
       :class="['ag-theme-quartz', isDark ? 'ag-theme-quartz-dark' : '', 'srt-grid']"
       :theme="'legacy'"
-      style="height: 520px; width: 100%"
+      style="width: 100%"
       :column-defs="columnDefs"
       :default-col-def="defaultColDef"
       :row-data="gridRows"
@@ -422,9 +423,18 @@ function onRowClicked(e: any): void {
 </script>
 
 <style scoped>
-.srt { min-width: 0; }
+/* 结果区自己是一列 flex，grid 吃掉页面让出来的剩余高度。
+ *
+ * 为什么不用 `window.innerHeight - 固定偏移`（`DataBrowserAgGrid.vue` 那套）：本页上方
+ * 占位**会变** —— 条件卡可收起、进度带可长可短、notices 与错误列表按运行结果出现。
+ * 写死偏移量等于每次改版式都要重新量一个魔法数字，量错一次就是一块切掉表格的空白。 */
+.srt {
+  display: flex; flex-direction: column;
+  flex-grow: 1; min-width: 0; min-height: 360px;
+}
 
 .srt-bar {
+  flex: none;
   display: flex; align-items: center; gap: var(--p-space-3); flex-wrap: wrap;
   padding: var(--p-space-2) var(--p-space-3);
   background: var(--bg-2); border: 1px solid var(--border); border-bottom: none;
@@ -441,6 +451,7 @@ function onRowClicked(e: any): void {
 /* AG Grid 主题接线：与 DataBrowserAgGrid.vue 同款 —— 只把项目语义 token 喂给 --ag-* 变量，
    两套主题靠 token 自己翻转（quartz 内置栈无 CJK 档，字族必须接 --font-sans）。 */
 .srt-grid {
+  flex: 1 1 auto; min-height: 0;
   --ag-background-color: var(--bg);
   --ag-foreground-color: var(--text);
   --ag-data-color: var(--text);
