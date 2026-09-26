@@ -2637,3 +2637,41 @@ HTML 按钮。
   `max_candidates` 默认值两条，本轮未动。
 - **lessons**：本轮无用户纠正。一条通用做法值得复用且已在 `project-ui-design-workflow` 里
   （先收拢定位契约再动版式、布局结论必须给实测像素），未新增条目。
+
+---
+
+# 任务：e2e 三层判据（T1/T2/T3）+ 改动范围门禁 + 夜间全量兜底轮（2026-09-26）
+
+用户提出：全量 e2e 随功能增长会线性变慢，如何平衡开发与测试。分析后选定 A（断言下沉）
++ B（按改动范围选例）两条，并加定时全量兜底。设计见
+`docs/superpowers/specs/2026-09-26-e2e-tier-and-affected-gate-design.md`。
+
+## 实施清单
+
+- [x] T2 层：`vitest@^5`（peer 支持 vite 8，不装 jsdom）+ `frontend/vitest.config.ts`
+      （environment node）+ `tsconfig.unit.json` 进根 references（让 `npm run build` 类型检查单测）
+- [x] 首批 T2 白名单按实测 import 圈定：format / minmax / batchAggregation / error → 31 例
+- [x] `scripts/e2e_affected.mjs`：base 解析 + 前缀映射表 + 三条升级全量兜底 + P0 只补跑未选模块
+      + 后端解释器自检 pytest + `NO AFFECTED TESTS` 反假绿输出 + `--files` 供核判定
+- [x] `scripts/e2e_nightly.mjs`：前置三门（端口/锁/工作区）不过即 SKIPPED+exit0、CI=1 自起自收、
+      禁 taskkill/git 写、`results.json` + `latest.json` 时间序列 + `LATEST.md`、三条退化阈值
+- [x] npm 面：`test:unit` / `test:e2e:affected` / `e2e:nightly`（保留既有 `test:e2e:quick`）
+
+## Review
+
+- **验证账目**：T2 `npx vitest run` → 31 例 / **162 ms** 全绿；`npm run build` 绿且
+  `tsconfig.unit.tsbuildinfo` 列出 4 个 spec（证明进了类型门禁）；affected 判定用 `--files`
+  跑 13 个场景逐个核（docs-only→无门禁 / analysis 页→[analysis] / token→全量 / 7 模块→全量阈值 /
+  未知路径→全量 / 迁移→全量）；nightly 前置门当场真实命中（8000/3000 被并行会话占用 →
+  SKIPPED + exit 0），`--dry-run` 出计划三段。
+- **撞墙四条（已回写 spec）**：① 纯契约 spec 全仓只 1 个 → 收益主源是「新断言不再进 T3」而非删存量；
+  ② `frontend/test/` 漏进映射表，dry-run 当场暴露「任何 T2 改动 = 全量」；③ Playwright JSON 墙钟
+  在 `stats.duration`，顶层 `duration` 是 undefined；④ `PLAYWRIGHT_JSON_OUTPUT_NAME` 在 node_modules
+  grep 不到但实测有效 —— 这类判据只能实测不能靠 grep。
+- **未闭合**：① 夜间轮 T3 真实执行路径未跑过（端口被并行会话占，前置门按设计拦住），需空闲时段真跑
+  一次核 `results.json` 解析与表格渲染；② 393/399 例的分诊清单未产出，「可下沉比例」仍是未知数；
+  ③ 试点簇（CPK/限值族 3 文件）未实施；④ 三层判据要进 `.claude/CLAUDE.md` 才会被每个会话自动加载，
+  该改动待用户点头。
+- **基线漂移**：本轮内 `--list` 从 393 例 / 74 文件变到 399 / 75（并行会话在加 spec）——
+  分诊必须以实施当时快照为准，阈值 450 例留了缓冲。
+- **双主题 / 产品代码**：零改动。
