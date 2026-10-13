@@ -1221,3 +1221,20 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   `reuseExistingServer` 会挂到一个正在死的进程上。② 「整文件/全默认值断言成片红」
   的第一假设应是**环境与共享账号态**，不是我的改动——先用单 spec 隔离复跑证伪，再谈回归。
   ③ 那条 flaky（`waitForResponse` 注册竞态）是 R2④ 的老面孔，不新开条目。
+
+## 2026-10-13 `git commit -- <pathspec>` 会把先前 `git rm --cached` 的删除还原成跟踪
+
+- **现象**：批1 先 `git rm --cached system_config.json`（保留工作区文件），再按项目惯例
+  逐文件显式提交 `git commit -m … -- apps/… .gitignore system_config.json …`。提交显示
+  「6 files changed, 315 insertions(**+)**」——一个删除批次里零 deletion，当场可疑。
+  复查 `git ls-tree HEAD` 证实文件**仍在 HEAD**，`.gitignore` 那条 `/system_config.json`
+  也因文件仍被跟踪而完全不生效（`git check-ignore` 对它返回空）。
+- **根因**：pathspec 形态的 `git commit -- <path>` 是拿**工作区内容**构造提交的，
+  不是拿索引里暂存的状态；所以只要该路径在工作区还存在，索引里那条「删除」就被还原成
+  「按磁盘内容提交」。而「逐文件显式 add 再 pathspec 提交」正是本仓为避免误提交而定的
+  习惯 —— 两个正确习惯叠在一起就漏了这个洞。
+- **规则**：① **凡是批次里含删除/改名，`git show --stat` 的 insertion/deletion 构成必须
+  先对一遍再往下走**，「本该有删除的提交零 deletion」是免费的报警；② 提交删除用
+  `git rm --cached X && git diff --cached --name-status && git commit`（**不带 pathspec**），
+  先确认暂存区只有这一条；③ 脱离跟踪后必须 `git check-ignore -v <path>` 实测命中，
+  「.gitignore 里写了」≠「它被忽略」。
