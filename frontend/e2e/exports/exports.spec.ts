@@ -186,34 +186,6 @@ test.describe('@p2 导出 - Gage Summary', { tag: ['@p2', '@exports'] }, () => {
   })
 
   // 槽位文件不含该工位的数据 → 后端 400，前端弹出具体原因，不下载。
-  test('槽位文件不含该工位时报错', async ({ page }) => {
-    const panel = await openTab(page, 'Gage Summary', 'Gage Summary 生成')
-
-    const selects = panel.locator('.el-select')
-    // gage_m_S1.csv 只含 Site 1：分配到槽位 S2（Site 2）必然缺该工位
-    const ok1 = await pickOptionByName(page, selects.nth(0), SEEDED_FILES.GAGE_S1)
-    const ok2 = await pickOptionByName(page, selects.nth(1), SEEDED_FILES.GAGE_S1)
-    if (!ok1 || !ok2) {
-      console.log('[gage] 未找到预期的 gage 样例文件，跳过报错验证')
-      test.skip(true)
-      return
-    }
-
-    const generateBtn = page.getByRole('button', { name: /生成 Gage Summary/ })
-    await expect(generateBtn).toBeEnabled()
-
-    const respPromise = page.waitForResponse(
-      (r) => /\/gage\/generate_summary\/?$/.test(new URL(r.url()).pathname),
-      { timeout: 60_000 },
-    )
-    await generateBtn.click()
-    const resp = await respPromise
-    expect(resp.status(), '缺工位应返回 400').toBe(400)
-
-    await expect(
-      page.locator('.el-message').filter({ hasText: '不含 Site 2' }),
-    ).toBeVisible({ timeout: 10_000 })
-  })
 })
 
 test.describe('@p2 导出 - Buyoff Form', { tag: ['@p2', '@exports'] }, () => {

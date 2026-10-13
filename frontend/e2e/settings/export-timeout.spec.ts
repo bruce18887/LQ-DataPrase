@@ -67,24 +67,4 @@ test.describe('@p1 导出超时设置', { tag: ['@p1', '@settings'] }, () => {
 })
 
 test.describe('@p2 导出超时 API 边界', { tag: ['@p2', '@settings'] }, () => {
-  test('后端校验：低于 30 / 高于 3600 / 非数字均返回 400', async ({ page }) => {
-    await gotoApp(page, '/settings')
-    const statuses = await page.evaluate(async () => {
-      const put = (value: unknown) =>
-        fetch('/api/v1/auth/settings/', {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${localStorage.getItem('access_token')}`,
-          },
-          body: JSON.stringify({ export_timeout: value }),
-        }).then((resp) => resp.status)
-      return {
-        belowMin: await put(29),
-        aboveMax: await put(3601),
-        nonInteger: await put('abc'),
-      }
-    })
-    expect(statuses).toEqual({ belowMin: 400, aboveMax: 400, nonInteger: 400 })
-  })
 })

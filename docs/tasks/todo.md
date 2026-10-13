@@ -2709,3 +2709,24 @@ HTML 按钮。
 - **工作区事故与恢复**：提交前发现 `docs/tasks/todo.md` 在工作区被清成 0 字节（2677 行删除 / 0 新增，
   非本会话所为，共享工作区另一会话所致）。已用 `git checkout HEAD -- docs/tasks/todo.md` 恢复到
   2677 行，内容含本会话同日提交的任务记录，零丢失。
+
+## B 组清理（同日续做）
+
+- [x] 删 5 条后端/vitest 已有同名判据的 e2e 用例：`settings/export-timeout:70`、`auth/auth:99`、
+      `sftp/sftp:153`、`exports/exports:189`、`global/error-handling:44`；392 → **387 例**
+- [x] **2 条与代理结论相反、按判断保留**：`exports/html-report:15/36`（只有它能证按钮真触发下载）、
+      `settings/cpk-thresholds:141`（防的是前端把 1.33 写死，后端用例看不见这个回归）
+- [x] 背书：基线 91 例执行（85P/1F/5S）→ 删除后串行 86 例（**81P/0F/5S**），差额恰等于删除数
+
+### B 组 Review
+
+- **第一版删除脚本是错的并已回滚**：按花括号计数找块尾，把 `test('x', async ({ page }) => {` 里的
+  成对括号判成已配平 → 每条只删首行、留下悬空函数体，`--list` 直接变成 0 文件。改用仓库的两空格
+  缩进约定（`^  })`）+「块内必须有 expect」自检后重做。**教训：删代码的脚本要靠语法/集合级校验兜底
+  （这里就是 `--list` 的 392→387），不能只看脚本自己打印的行数。**
+- **组合范围验证必须 `workers=1`**：默认 6 workers 下删后首跑出现「15 passed / 8 did not run」的
+  成片红，隔离跑与串行跑均 0 失败。根因是 `settings.spec.ts:158「恢复默认」` 会在共享 admin 账号上
+  重置全部持久化设置，与 `export-templates` / `system-paths` 同批并发时把后者踩掉。
+- **基线那条红被证为并行 flake**：`settings/chart-renderer.spec.ts:45` 在 `workers=1` 下为绿，
+  故不记 T0、不算存量回归。
+- 明细账目写入 `docs/reference/e2e-tier-triage.md` 的「B 组执行结果」节。

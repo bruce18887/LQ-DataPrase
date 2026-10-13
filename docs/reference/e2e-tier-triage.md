@@ -320,3 +320,34 @@ kde-curve.spec.ts:102 | 正态分布开关仍独立 | T3① | legendText()).not.
   删之前要跑一轮干净套件确认无其它用例依赖该文件的种子数据。
 - ⏳ 其余 324 例分诊。
 - ⏳ 试点簇 #2 `custom-limit-cpk`（3 例 T1+T3，拆法已在上面标出）、#3 `settings/cpk-thresholds`。
+
+## B 组执行结果（2026-09-26，已按「需要一轮 e2e 背书」的要求做完）
+
+删了 5 条（每条删除前 grep 确认后端 / vitest 有同名判据）：
+`settings/export-timeout.spec.ts:70`(20 行)、`auth/auth.spec.ts:99`(34 行)、
+`sftp/sftp.spec.ts:153`(62 行)、`exports/exports.spec.ts:189`(28 行)、
+`global/error-handling.spec.ts:44`(7 行)。392 → **387 例**，`--list` 无解析错误。
+
+**2 条按判断不删**，与代理结论相反，理由记录在此以免下轮被当成重复清掉：
+
+- `exports/html-report.spec.ts:15/36` —— 后端确实已覆盖**文件内容**四条断言，但只有这两例能证
+  「仪表板按钮真触发了下载 + 落盘产物自包含」。整删等于把 T3④ 的接线证明一起丢掉。
+- `settings/cpk-thresholds.spec.ts:141` —— 它防的回归是**前端把 1.33 写死**。后端用例断的是后端
+  生成的文案；前端一旦不再消费该字段，会呈现后端全绿、界面显示错常量的局面。
+
+背书账目（同一范围，`--retries=0`）：
+
+| 轮 | workers | 结果 |
+|---|---|---|
+| 删除前基线 | 6（默认） | 85 passed / **1 failed** / 5 skipped = 91 |
+| 删除后同范围 | 6 | 15 passed / 5 skipped / **8 did not run**（成片红） |
+| 删除后仅改过的 5 文件 | 1 | 28 passed / 4 skipped / **0 failed** |
+| 删除后同范围 | 1 | 81 passed / 5 skipped / **0 failed** = 91 − 5 ✓ |
+
+两个副产品结论：
+
+1. 第 2 行的成片红是**并发秩序污染**而非删除后果：`settings.spec.ts:158「恢复默认」`会在共享
+   admin 账号上重置全部持久化设置，与 `export-templates` / `system-paths` 同批并发时把后者踩掉；
+   串行即全绿。这条决定了**组合范围验证必须 `workers=1`**，否则任何删除都会被误判成回归。
+2. 基线那 1 条 `settings/chart-renderer.spec.ts:45` 的红在 `workers=1` 下为绿 → 它是并行 flake，
+   **不是存量回归，分诊表里不记 T0**。

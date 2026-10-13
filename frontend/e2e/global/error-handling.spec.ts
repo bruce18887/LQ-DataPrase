@@ -41,11 +41,4 @@ test.describe('@p2 通用后端报错提示', { tag: ['@p2', '@global'] }, () =>
     ).toBeVisible()
   })
 
-  test('网络中断统一提示无法连接', async ({ page }) => {
-    await page.route('**/api/v1/files/**', (route) => route.abort('failed'))
-    await gotoApp(page, '/data')
-    await expect(
-      page.locator('.el-message--error').filter({ hasText: '无法连接服务器，请检查网络' }),
-    ).toBeVisible()
-  })
 })
