@@ -431,6 +431,43 @@ E 组里 **两条"重复"实测判错**（原文见上方 E2/E3/E4 条目）：`
 背书：`settings.spec.ts` + `admin.spec.ts` 串行 `--retries=0` → 13 passed / 0 failed；
 单跑 `settings.spec.ts` → 8 passed。端口已释放。
 
+## 夜间全量轮四轮真跑（2026-10-13）：88 条红里只有 5 条是真的
+
+同一套件（385 例）连跑四轮，每轮都先用 `--report-only` 复核，再按「开跑后相对分钟」分桶定位：
+
+| 轮 | 红 | 墙钟 | 这一轮学到什么 |
+|---|---|---|---|
+| 1 | 113 | 35.6min | 30 分钟处 dev server 死亡 → 106 条是 `ERR_CONNECTION_REFUSED` 级联。**无头作业当时没落 run.log**，凶手查不到（已补） |
+| 2 | 73 | 89.2min | 全部三次重试都红 ⇒ 不是负载抖动；墙钟被失败本身抬高（548 个 attempt 合计 85.9min） |
+| 3 | 88 | 100.7min | 同上，且 `data.spec` 新增 12 条 |
+| 4 | **5** | **37.1min** | 单价 5.21 s/例，不判 DEGRADED |
+
+**根因一（85/88 条）——token 寿命跨不过串行全量轮**：第 2、3 轮按相对分钟分桶：
+30 min 前 3 红/267（1%），30 min 后 **85 红/94（90% 红率）**。`ACCESS_TOKEN_LIFETIME=30min`，
+而 `storageState` 是开跑时铸的**一份** token，每条新用例从同一个 `admin.json` 重取它，
+续签来的新值只活在该 context 里 → 30 分钟后才被调度的用例全部被守卫踢回 `/login`，
+表现为「`.main-layout` 不存在」。开发态 `workers=6` 全程约 6 分钟，永远撞不到这条线；
+**串行化本身就是新故障面**。修法：`LQDP_ACCESS_TOKEN_MINUTES` env 化（默认仍 30），
+只有 Playwright 的 Django webServer 注入 720。
+
+**根因二（残余里最贵的一条）——改设置的用例没有失败兜底，上一轮弄红下一轮**：
+e2e 库里 admin 实测停在 `filename_wrap=False`、`page_size=200`、`cpk_a/b/c=3.0/2.99/2.98`、
+`analysis_chart_memory=False`。成因例如 `data/file-list-sort-filter.spec.ts:276` 先 PUT false、
+`:293` 才还原 true —— 用例在两步之间失败就永久留下 false，于是 `.batch-filename-wrap` 不再渲染，
+**连 `combine.spec` 都被它带红**；阈值类的还原还写成 `if (original) put(original)`，读不到快照就跳过。
+修法：`auth.setup.ts` 开跑前把这几项钉回模型默认值（不含 `recent_files`/`analysis_chart_state`/
+`sftp_last_*` 这类用户历史）。同组文件从 7 红降到 3 红，`combine`、`view-data` 转绿。
+
+### 第四轮之后仍剩 3 条（都不由本轮分层/清理引入，逐条已定性）
+
+| 用例 | 定性 | 该谁修 |
+|---|---|---|
+| `analysis/legend-color.spec.ts:131` | 已登记 known-red：下拉 `element is not stable` → 自己关掉 | 待修 spec |
+| `smoke/pages.spec.ts`「数据分析 正常加载且无报错」 | **产品侧**：分析页自动选中最新文件（本轮是别家 spec 留下的 `a.csv`），却带着**上一个文件的 param** 发 `POST /statistics/site_stats/` → 后端正确返回 `param_not_found`。属 lessons R5「持久化选择在上下文切换时未重置」 | 待拍：前端纠偏 or 页面不再自动选 |
+| `data/file-list-sort-filter.spec.ts`「默认排序：上传时间倒序」 | 数据态相关（库里 108 行、含各轮上传残留） | 待修 |
+
+> 因此 **cron 暂缓注册**：闸口是"绿了才建"，现在还差这三条，其中一条要产品侧拍。
+
 ## 失效 import 清理 + 常驻守卫（2026-10-13）
 
 体检通路：一次性给 `e2e/**/*.ts` 跑 `tsc --noUnusedLocals`（此前 **没有任何 tsconfig 覆盖 e2e**，
