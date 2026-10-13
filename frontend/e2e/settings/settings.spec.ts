@@ -61,6 +61,19 @@ async function restoreChartRenderer(page: import('@playwright/test').Page) {
   await putSetting(page, { chart_renderer: 'svg' })
 }
 
+/**
+ * 账号级设置快照。GET 返回的就是 UserSettingSerializer 的那批**可写字段**，
+ * 所以原样 PUT 回去是一次干净往返（不含只读键）。
+ */
+async function snapshotSettings(page: import('@playwright/test').Page): Promise<Record<string, unknown>> {
+  return page.evaluate(async () => {
+    const resp = await fetch('/api/v1/auth/settings/', {
+      headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
+    })
+    return resp.json()
+  })
+}
+
 test.describe('@p1 系统设置页', { tag: ['@p1', '@settings'] }, () => {
   test('页面渲染：6 个标签页与关键设置区块可见', async ({ page }) => {
     await gotoApp(page, '/settings')
@@ -174,21 +187,37 @@ test.describe('@p1 系统设置页', { tag: ['@p1', '@settings'] }, () => {
 })
 
 test.describe('@p2 恢复默认', { tag: ['@p2', '@settings'] }, () => {
-  test('点击恢复默认 → 确认对话框 → 提示已恢复', async ({ page }) => {
+  test('点击恢复默认 → 确认对话框 → 提示已恢复，随后把账号设置原样还回', async ({ page }) => {
     await gotoApp(page, '/settings')
+    // 这条会把共享 admin 账号的**全部**设置洗成出厂值。不还原就会踩掉后面所有读设置的 spec ——
+    // 实测：settings.spec 跑完紧接 fonts.spec，fonts 从 0 红变 5 红（2026-10-13 夜间轮
+    // 73 条稳定红的元凶之一，见 docs/reference/e2e-tier-triage.md）。
+    const before = await snapshotSettings(page)
+    try {
+      // 触发 ElMessageBox.confirm
+      await page.getByRole('button', { name: '🔄 恢复默认' }).click()
 
-    // 触发 ElMessageBox.confirm
-    await page.getByRole('button', { name: '🔄 恢复默认' }).click()
+      // 确认框 teleport 到 body（.el-message-box）
+      const messageBox = page.locator('.el-message-box')
+      await expect(messageBox).toBeVisible()
+      await expect(messageBox.getByText('确定恢复所有设置为默认值吗？')).toBeVisible()
 
-    // 确认框 teleport 到 body（.el-message-box）
-    const messageBox = page.locator('.el-message-box')
-    await expect(messageBox).toBeVisible()
-    await expect(messageBox.getByText('确定恢复所有设置为默认值吗？')).toBeVisible()
+      // 点击「确定」
+      await messageBox.getByRole('button', { name: '确定' }).click()
 
-    // 点击「确定」
-    await messageBox.getByRole('button', { name: '确定' }).click()
+      // 成功 ElMessage
+      await expect(page.locator('.el-message').filter({ hasText: /已恢复默认|恢复/ })).toBeVisible()
 
-    // 成功 ElMessage
-    await expect(page.locator('.el-message').filter({ hasText: /已恢复默认|恢复/ })).toBeVisible()
+      // 先证「真的被洗过」，否则后面的还原会把这条断言变成摆设
+      await expect.poll(
+        async () => {
+          const s = await snapshotSettings(page)
+          return s.chart_dpi
+        },
+        { timeout: 10_000 },
+      ).toBe(100)
+    } finally {
+      await putSetting(page, before)
+    }
   })
 })
