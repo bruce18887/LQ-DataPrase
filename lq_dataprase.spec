@@ -113,6 +113,11 @@ _hiddenimports += [
     'apps.common',
     'apps.common.file_loading',
     'apps.common.params',
+    # apps.common.apps 只能由 Django 在运行时按 INSTALLED_APPS 字符串自动发现，
+    # 而 WAL/busy_timeout 的接收器就注册在它的 ready() 里 —— 不显式收集的话，
+    # 冻结产物会退回默认 AppConfig，pragma 在出货桌面版上静默不生效。
+    'apps.common.apps',
+    'apps.common.db_pragmas',
 
     # Config package
     'config',

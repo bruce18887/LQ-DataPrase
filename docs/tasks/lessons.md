@@ -1238,3 +1238,20 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   `git rm --cached X && git diff --cached --name-status && git commit`（**不带 pathspec**），
   先确认暂存区只有这一条；③ 脱离跟踪后必须 `git check-ignore -v <path>` 实测命中，
   「.gitignore 里写了」≠「它被忽略」。
+
+## 2026-10-13 给 app 加 `apps.py` 必须同步补 `lq_dataprase.spec`，否则只在打包态静默失效
+
+- **现象**：批1 给 `apps.common` 补了 `apps.py`（`ready()` 里注册 `connection_created`），
+  开发态与测试全绿。自查 spec 时发现 `lq_dataprase.spec:113-115` 的 hiddenimports 对
+  `apps.common` 只列了 `file_loading`/`params`，**没有 `apps.common.apps`**。
+- **根因**：Django 靠 `INSTALLED_APPS` 的字符串在**运行时**自动发现 `<app>.apps`，PyInstaller
+  的静态分析看不到这条 import；本仓 spec 又是逐模块手工枚举（其余 9 个 app 都显式列了
+  `.apps`，改前差集恰好只剩 `common`，正因为它此前确实没有 apps.py）。漏了不报错，
+  只是退回默认 AppConfig → `ready()` 不执行 → **pragma 在出货桌面版上静默不生效**，
+  而 dev/test 全绿，属于最难查的一类「只有产品坏」。
+- **规则**：凡是**靠运行时字符串/约定发现**的模块（`AppConfig.ready()` 钩子、signal receiver、
+  动态 import 的 service），新增后先跑一次判据：
+  `ls apps/*/apps.py` 对 `grep -oE "apps\.[a-z_]+\.apps" lq_dataprase.spec` 取差集，空才算完；
+  同类枚举还有 `config.settings.*`（批2 加 server 档时必须一并补）。
+- **边界声明**：本轮**没有**实机跑 `build.bat` 验证冻结产物（它会 taskkill 其它会话进程），
+  所以这条只证到「枚举缺口已补」，未证到「装好的 exe 真带上 WAL」。

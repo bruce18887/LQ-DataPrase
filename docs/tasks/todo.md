@@ -2782,6 +2782,14 @@ busy_timeout 走 Django 默认 5 秒 —— 写会整库挡读，20 人并发先
   `git commit -- <pathspec>` 逐文件提交，而 pathspec 形态按**工作区内容**建提交，
   把先前 `git rm --cached` 暂存的删除还原成了跟踪（当场靠「315 insertions / 零 deletion」
   发现），详见 lessons 同日条目。
+- **打包侧补漏（提交后自查发现）**：`lq_dataprase.spec` 的 hiddenimports 是**逐模块枚举**的，
+  `apps.common` 只列了 `file_loading`/`params`。新加的 `apps.common.apps` 只能由 Django 在
+  运行时按 `INSTALLED_APPS` 字符串自动发现 → 不补进 spec，冻结产物会退回默认 AppConfig，
+  **pragma 在出货桌面版上静默不生效**。判据：`ls apps/*/apps.py` 十个 app 对照 spec 里的
+  `apps.<x>.apps`，改前差集恰好只剩 `common` 一个（因为它此前确实没有 apps.py）。
+  已补 `apps.common.apps` + `apps.common.db_pragmas`。
+  **未做实机安装验证**：跑 `build.bat` 会 taskkill 其它会话的进程（见共享工作区教训），故留作
+  下一次正常打包时核对，不在本轮擅自触发。
 - **双主题**：纯后端改动，零前端视觉工作。
 - **遗留风险（需用户拍板，不在本轮擅自动）**：WAL 对**网络盘/SMB** 不安全（依赖共享内存），
   而桌面用户的 `data_dir` 可被指到映射盘。若线上出现桌面版打不开库，第一条该试的就是
