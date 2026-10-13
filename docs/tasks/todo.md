@@ -2794,3 +2794,153 @@ busy_timeout 走 Django 默认 5 秒 —— 写会整库挡读，20 人并发先
 - **遗留风险（需用户拍板，不在本轮擅自动）**：WAL 对**网络盘/SMB** 不安全（依赖共享内存），
   而桌面用户的 `data_dir` 可被指到映射盘。若线上出现桌面版打不开库，第一条该试的就是
   给 `standalone` 档关掉 WAL（接收器已按 vendor 分流，加一个 settings 开关即可）。
+
+---
+
+# 任务：砍掉 e2e 里被吞掉的固定等待（2026-10-13 夜）
+
+用户诉求「e2e 太慢」，批准方案 1（砍 analysis/sftp 的重前置）。三个只读代理分头定位后，
+主代理逐条读码 + 读 run.log 复核，结论**与原计划不同**：墙钟不是花在断言上，也不是花在
+后端计算上，而是花在**三处被 `.catch(() => {})` 吞掉的超时等待**上。因此本轮不做
+「把断言搬进 test/backend」（理由见文末「不做的事」），只做砍前置。
+
+## 根因与实测账目（全部有 file:line 或日志时间戳）
+
+| # | 位置 | 机制 | 单例浪费 | 影响例数 | 小计 |
+|---|---|---|---|---|---|
+| F1 | `e2e/helpers/sftpSearchFlow.ts:53` | `ensureDisconnected` 盲等 `.toolbar-card` 可见 **20s** 再 `.catch(()=>{})`；全新页面没有已保存配置 → 不自动重连 → toolbar 永不出现 → 20s 全额烧掉 | 20s | 24（search 17 + reconnect 7） | **8.0 min** |
+| F2 | `e2e/sftp/reconnect.spec.ts:70-77` | F1 的**复制体**，同款 20s 盲等（抽取共用助手时漏掉的一处） | 20s | 7 | 已计入 F1 |
+| F3 | `e2e/exports/exports.spec.ts:48-51`（另 `:315/:406/:497` 三处同形） | `waitForResponse(/files/)` **注册晚于触发**：`gotoApp('/data')` 时 `loadFiles()` 已把响应拿回来了，之后才注册 → 15s 全额烧掉再被 `.catch` 吞；而 `:60 waitForOptions` 本来就在轮询下拉项数，这个等待是**冗余**的 | 15s | 7 | **1.75 min** |
+| F4 | `e2e/helpers/params.ts:229-230` | 注释写「命中即返回」，实现是 `for(i<30 && !found) waitForTimeout(100)`；**未命中时 `found` 恒为 null → 每个 miss 烧满 3s**。CTA8280F 在第 9 个参数才命中 → 8×3s=24s | 24s | 8（serial-overlap 5 + adaptive-range 2 + legend-color 1） | **3.2 min** |
+| F5 | `e2e/analysis/multi-file.spec.ts:49-86` | `selectLimitsParam` 逐个探测共有参数，每轮 = 一次 2 文件 multi_lot 重算 + 固定 `waitForTimeout(300)` + 对整个 tab `allTextContents()`；Buyoff 的带限值参数排在十余个系统列之后 → ~10-13 轮 | ~30s | 3（同文件其余 11 例仅 2.1-5.1s） | **1.5 min** |
+| F6 | `e2e/data/view-data.spec.ts:398-401` | 硬编码 `page=81`（假定 `page_size=100`），而分块大小来自账号设置；那轮账号漂到 200 → 实际请求 `page=41` → 15s 超时 ×3 次重试 = 51.8s | — | 1 | 0.9 min（红已由 `7411ed8` 的 canonicalize 兜住，F6 只防复发） |
+
+**决定性证据（F1）**：`tasks/e2e-nightly/2026-10-13/run.log` 里页面加载请求停在 `15:47:49`，
+`POST /api/v1/sftp/connect/` 落在 `15:48:09` —— 中间 **20 秒后端零流量**，连接返回 200 后
+`list_files` 同一秒完成。即**服务端连接 <1s，那 20s 全在客户端空转**。
+
+**决定性证据（F3）**：同文件第 8 例「上传新文件后下拉无需 reload」只花 **2.4s**，因为它的
+`waitForResponse` 注册在 `uploadFile` 之后，而上传会 bump `filesVersion` 触发**新的** `/files/`
+请求 → 注册先于触发 → 立即命中。同一个端点、同一份代码，只差注册顺序，17s vs 2.4s。
+这违反本项目自己的 R2④（「注册必须先于触发」，同文件 `:344/:431` 有注释明写）。
+
+合计可回收 ≈ **14.5 min / 37.1 min**，目标全量墙钟 **~22-23 min**，且**一条判据都不删**。
+
+## 实施清单
+
+- [x] F1 `sftpSearchFlow.ts:52-58`：`ensureDisconnected` 改成 `.toolbar-card` 与 `.connect-card`
+      **赛跑**，谁先出现走谁；connect-card 胜出即直接返回（不再等 20s）。为防「先闪 connect-card
+      再自动重连成 toolbar」漏掉必要的断开，胜出后补一次 ~500ms 稳定复核再判定。
+- [x] F2 `reconnect.spec.ts:70-77`：删掉本地复制体，改 import 共用 `ensureDisconnected`
+      （它比共用版多一条末尾 `.connect-card` 断言 —— 该断言并入共用版，语义不减）。
+- [x] F3 `exports.spec.ts`：`openTab:48-51` 与 `:315/:406/:497` 三处 `waitForResponse(/files/)`
+      一律**删除**（`waitForOptions` 已是正确机制）；`:263` 那处注册在 upload 之后、顺序正确，保留。
+- [x] F4 `params.ts:208-236`：把内层 3s 定时轮询换成**响应驱动推进** —— handler 每处理完一个
+      histogram POST 响应就 `settled++`，每轮探测等 `settled` 前进（上限 10s、超时按未命中继续）。
+      **保持响应驱动**：`:130-143` 记录了「陈旧图表」危险，退化成纯计时会把那个坑放回来。
+- [x] F5 `multi-file.spec.ts:49-86`（**方案②**）：`selectLimitsParam(page, merged)` 从用例已经等到的
+      那次合并请求里取 URL 与载荷、只多覆盖 `ignore_no_limit: true`，在页面内 fetch 一次拿
+      `common_params[0]`，再在 UI 里选中它。**不勾 UI 上那个「忽略无Limit」开关** —— 勾上这三例
+      就只在过滤路径下跑，未过滤路径的 per-file limit 图例回归会漏。
+- [x] F6 `view-data.spec.ts:394-408`：`page=81` 改成从 `/browse/` 请求自己的 `page_size` 推导
+      （`floor(8000/size)+1`），不再假定账号设置。
+- [x] F7（本轮新增）`auth.setup.ts` 的 `CANONICAL_SETTINGS` 补 `analysis_chart_state: {}`。
+      原注释断言"没有用例依赖它"，**被实测证伪**：库里 admin 停在四个 toggle 全 true，
+      导致 ① `legend-color:27` 的 `.chart-wrapper div[_echarts_instance_]` strict mode 命中 3 个
+      实例直接红；② 序列分布开关被上一个文件持久化成"开"，`serial-overlap` 里逐字相同的
+      `enterSerial` 同一次点击变成"关" → 不发 POST → 30s+20s 双超时。
+      钉成模型默认 `{}` 即中性态（`SingleParamTab.vue:451` 在 `state.toggles` 缺失时不套用记忆，
+      组件默认 hist=true / serial=qq=box=false，见 `:286/:292/:375/:403`）。
+- [x] F8（本轮新增）`legend-color.spec.ts:62` 的 lot.color 基准改成**读图表自己消费的那份
+      multi_lot 响应**，不再自己按文件名搜 `/files/` 再重发一次。
+      实测根因：`/api/v1/files/?search=BPD60320_` 返回 `count=21` 而每页 20 行，页 1 被 17 个
+      别家 spec 上传残留的 `BZJ*_FT.csv` 占满，`BPD60320_FT.csv` 落在第 2 页 → `ids=[76]`
+      只有一个 → `multi_lot` 400 `need_at_least_2_files` → `lotColors.length===0`。
+      它在夜跑里能过纯属侥幸（那轮账号 `page_size` 漂到 200）。顺带消掉了
+      「比对基准与图表数据来自两次不同请求」这条缝。属分诊清单 D6「期望值依赖种子库累积」。
+- [x] F9（本轮新增）把两份**逐字相同**的 `enterSerial` 尾巴抽成共用
+      `helpers/params.ts::openSerialDistribution(page)`，并把「显示序列分布」这个开关
+      **收敛到关再点开**。F7 只解决了"跨轮"污染，解决不了"跨文件/跨用例"：
+      `analysis_chart_memory=true` 会让每次点击都写回账号，所以**同一轮内**前一个文件点开之后，
+      后一个文件的同一次点击就变成"关"。实测判据：`:225` 单跑作为文件第一条 12.2s 绿、
+      在文件内排第 4 必红 40.4s。收尾状态与旧实现一致（开着），不给后面留新携带。
+      顺带删掉两个文件各自的 `SERIAL_CANVAS` 常量（adaptive-range 的 `SINGLE` 也一并删，
+      它只被那个常量用到）。**套件里还有 7 个文件点同一个开关**（axis-label-precision、
+      chart-filter-switches、dock-resize、legend-color、serial-fail-count、serial-no-column、
+      chart-memory），本轮**不动**——它们目前是绿的，未验证的改动是净风险；
+      但它们有同一个潜在地雷，新写用例应直接用 `openSerialDistribution`。
+- [ ] 逐文件串行真跑（`--retries=0 --workers=1`）对比墙钟，记账进本文 Review。
+- [ ] 全量夜跑一轮：目标 ~22 min / 0 红；**绿了才注册 cron**（`executionAuthorization=false`、
+      `30 3 * * *`、Asia/Shanghai）。
+- [ ] 夜跑阈值按新墙钟收紧（`scripts/e2e_nightly.mjs` 的 `wallMs` 与设计文档的 35min 都已失效）。
+- [ ] 纠正旧账：`docs/tasks/todo.md:2549` 与项目记忆里「实测冷连接 ~22s」需按本轮日志重写
+      —— 当前代码里那 20s 是 `ensureDisconnected` 的空转，不是连接耗时。追加 lessons 条目。
+
+## Review（进行中）
+
+验证环境：手起 `.venv` Django（`LQDP_SYSTEM_CONFIG_FILE` 指向 e2e 那份、
+`LQDP_ACCESS_TOKEN_MINUTES=720`）+ `npm run build && npm run preview`，`PW_NO_WEBSERVER=1`，
+`--retries=0 --workers=1`，与夜跑同口径。
+
+**第一轮（F1–F4、F6 已改，F5/F7/F8/F9 未改）：8 个文件 1173s → 381s，−792s（−13.2min）**
+
+| 文件 | 夜跑 | 本轮 | 差 |
+|---|---|---|---|
+| `sftp/search.spec.ts` | 386s | 55s | **−331s** |
+| `sftp/reconnect.spec.ts` | 161s | 25s | **−136s** |
+| `exports/exports.spec.ts` | 134s | 31s | **−103s** |
+| `data/view-data.spec.ts` | 109s | 58s | −51s |
+| `sftp/search-layout.spec.ts` | 47s | 8s | −39s |
+| `analysis/legend-color.spec.ts` | 92s | 24s | −68s（含 3 红） |
+| `analysis/serial-adaptive-range` | 71s | 39s | −32s |
+| `analysis/serial-overlap` | 172s | 140s | −33s（含 2×30s 超时白等） |
+
+这 8 个文件占夜跑总耗时（2154s）的一半，其余 66 个文件未变（~981s）
+⇒ 全量推算 **37.1min → ~23min**；F5 与 serial-overlap 的超时恢复后还能再降。
+
+**第二轮（补 F5、F7）：analysis 四文件 23 passed / 4 failed / 5.1min**
+
+F5 实测（三条判据全部仍在过）：
+
+| 用例 | 夜跑 | 本轮 |
+|---|---|---|
+| `multi-file:110` 选 2+ 文件（per-file limit 图例） | 36.3s | **3.3s** |
+| `multi-file:152` 切换范围类型（回归 2026-08-13） | 38.8s | **6.7s** |
+| `multi-file:328` Limit 线标注含文件名 | 36.2s | **3.6s** |
+
+F7 实测：`legend-color:27` 由红转绿（19.4s），证实 3 个 echarts 实例来自账号态污染。
+但 F7 **不足以**治好 `serial-overlap`：`:122` 转绿而 `:225` 仍红 40.4s ⇒ 才引出 F9。
+
+**第三轮（补 F8、F9，按字母序正好复现出问题的那个组合）：12 passed / 1 failed / 2.6min**
+
+| 用例 | 夜跑 | 第三轮 |
+|---|---|---|
+| `legend-color:27` 直方图 markLine 图例色 | 34.3s | **17.1s** ✅ |
+| `legend-color:62` 多文件柱色 == 后端 lot.color | 2.5s | **2.4s** ✅（F8） |
+| `serial-adaptive-range` 两例 | 35.2 / 35.7s | **19.9 / 9.2s** ✅ |
+| `serial-overlap` 五例 | 34.9/22.1/38.5/38.4/38.2s | **9.5/15.0/14.3/23.2/14.5s** ✅（F9） |
+| `legend-color:132` 相关性散点回归线 | 红（known-red） | 红 17.0s（不变） |
+
+三个 analysis 文件合计 **335s → ~144s**。唯一的红是已登记的 known-red
+（下拉 `element is not stable` → 15s 内自己关掉），与本轮改动无关，已用 HEAD 副本 A/B 证实过。
+
+
+
+## 不做的事（附理由，免得下一轮又被当成待办捡起来）
+
+- **不把 serial-overlap / serial-adaptive-range / legend-color 的断言搬进 `test/backend`**：
+  代理逐族核对后端覆盖后，「规格限贴边钳制 + ↑/↓ 标签」「分级表 6px/0.85」「按 Site 分 lane 范围」
+  三项都是**渲染侧**判据，按判据表本就属 T3①，搬不动；而 multi-file 共有测试项
+  （`apps/analysis/tests_param_guards.py:161,173`）、per-file 上下限（`:206-210`）、
+  `filtered_sigma`/裁剪（`apps/analysis/tests_histogram_kde.py:229-258,303-312`）、
+  RowDataLimit（`test/backend/test_histogram_range_type.py`）**后端已全覆盖**。
+  与试点簇 #2/#3 同一形状：搬迁前先读目标层现有覆盖。
+- **不搬 exports 家族**：gage 槽位/工位过滤与 400 分支（`test/backend/test_gage_site_filter.py:39-130`）、
+  buyoff（`test/backend/test_buyoff_generate_form.py:87-151`）、sigma_limit（`apps/export/tests.py:369,433`）、
+  batch_charts（`apps/export/tests.py:301-441`）、html_report（`test/backend/test_html_report_single.py:55-80`）
+  **全部已在 T1**；e2e 那 8 例的独有价值是「按钮真触发下载 + 产物落盘」，属 T3④。
+- **不动并行模型**（`workers`）：那是方案 2，前置条件是共享账号/单库的隔离，本轮不碰。
+
+## Review
+
+（待实施后填写：逐文件墙钟对比、全量夜跑账目、端口释放确认。）
