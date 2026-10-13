@@ -1158,3 +1158,17 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   ② 用例会话级凭据（token/cookie）的寿命必须 ≥ 最慢一轮的墙钟，或者每条用例自己铸。
   ③ 凡 mutate 共享账号/全局配置的用例，必须在 `finally` 里还原**它读到的值**（不是还原成"我以为的默认值"），
   并先断言"确实被改过"，否则还原会把断言变成摆设。
+
+## 2026-10-13 「e2e 账号漂移」的第一次诊断是错的：本仓有**两个** db.sqlite3
+
+- **现象**：查 e2e 的 admin 账号设置读到 `chart_engine=matplotlib`、`chart_dpi=200`、
+  `sftp_last_host=220.184.x.x`，据此写下"漂移导致成片红"并照着钉默认值。改完再查，值**一个没变**。
+- **根因**：`config/settings/development.py` 会先 `apply_system_config(BASE_DIR)` 再定 `DATABASES`，
+  所以库路径跟着 `data_dir` 走。人用的 `system_config.json` 指 `C:\Users\Administrator\LQ-DataPrase`
+  （另一个库），而 e2e 由 `playwright.config.ts` 注入 `LQDP_SYSTEM_CONFIG_FILE=<tmp>/lqdp-e2e-system-config.json`
+  把 `data_dir` 钉在项目根。**裸跑 `manage.py shell` 读的是人用的那份**，与 e2e 服务器根本不是同一个库。
+- **修复/规则**：① 任何"查测试环境的现状"都必须带上 e2e 的那份 env 再查
+  （`LQDP_SYSTEM_CONFIG_FILE=... python manage.py shell`），并把 `settings.DATABASES['default']['NAME']`
+  一起打出来当自证；② 结论如果来自"我读到的值"，先确认读的是**哪一个**库/环境，再落进文档 ——
+  这条错判差点被我写进 lessons 与代码注释（已在实现时按正确库重写规范集）；③ 真正有效的漂移
+  是 `filename_wrap=False`/`page_size=200`/`cpk_*` 那几项，它们在正确库里可见 —— 换个库看，结论会反过来。
