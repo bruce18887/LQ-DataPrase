@@ -65,6 +65,13 @@ test.describe('@p1 图例颜色严格对应', { tag: ['@p1', '@analysis'] }, () 
     await page.getByRole('tab', { name: /多文件分析/ }).click()
     const select = filePicker(page, 'multi')
     await expect(select).toBeVisible({ timeout: 20_000 })
+    // 合并请求必须在选文件**之前**注册（R2④）。只认 200：单文件时后端返回
+    // 400 need_at_least_2_files，第一个 200 就是「两个文件都选上」那一次。
+    const mergedResp = page.waitForResponse(
+      (r) => r.url().includes('/analysis/multi_lot/') &&
+        r.request().method() === 'POST' && r.status() === 200,
+      { timeout: 25_000 },
+    )
     await select.click()
     const dropdown = page.locator('.el-select-dropdown:visible').last()
     await expect(dropdown).toBeVisible({ timeout: 10_000 })
@@ -76,26 +83,20 @@ test.describe('@p1 图例颜色严格对应', { tag: ['@p1', '@analysis'] }, () 
       await page.waitForTimeout(300)
     }
     await page.keyboard.press('Escape')
+    const merged = await mergedResp
 
     const container = '.multi-file-tab .chart-wrapper div[_echarts_instance_]'
     await expect(page.locator(container)).toBeVisible({ timeout: 25_000 })
     const opt = await readOption(page.locator(container).first())
     const series: any[] = opt?.series ?? []
-    // 响应中的 lot.color（后端浅色板）——light 主题下映射恒等，柱色必须等于它
-    const lotColors = await page.evaluate(async () => {
-      const token = localStorage.getItem('access_token')
-      const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
-      const files = await fetch(`/api/v1/files/?search=${encodeURIComponent('BPD60320_')}`, { headers }).then((r) => r.json())
-      const ids = ((files.results ?? files) ?? [])
-        .filter((f: any) => f.filename.startsWith('BPD60320_FT.') || f.filename.startsWith('BPD60320_QA1.'))
-        .map((f: any) => f.id)
-      const d = await fetch('/api/v1/analysis/multi_lot/', {
-        method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_ids: ids, ignore_no_limit: false, range_type: 'RDL' }),
-      }).then((r) => r.json())
-      return (d.lot_data ?? []).map((lot: any) => ({ file_id: lot.file_id, color: lot.color }))
-    })
-    expect(lotColors.length).toBeGreaterThanOrEqual(2)
+    // lot.color 直接读**图表消费的那一份响应**（后端浅色板；light 主题下映射恒等，
+    // 柱色必须等于它）。不再自己按文件名搜 /files/ 再重发一次 multi_lot：
+    // 那条路每页只有 20 行，库里累积的 BZJ*_FT.csv 上传残留会把 BPD60320_FT.csv
+    // 挤到第 2 页 → 只搜到 1 个 id → 400 need_at_least_2_files（2026-10-13 实测）。
+    // 顺带也消掉了「比对基准与图表数据来自两次不同请求」这条缝。
+    const lotColors = ((await merged.json())?.lot_data ?? [])
+      .map((lot: any) => ({ file_id: lot.file_id, color: lot.color }))
+    expect(lotColors.length, 'multi_lot 响应应带 >=2 个 lot_data').toBeGreaterThanOrEqual(2)
     // 柱系列按 lot_data 顺序与后端颜色一一对应（每个文件独立颜色）
     const barSeries = series.filter((s: any) => s.type === 'bar')
     expect(barSeries.length, '柱系列数应等于文件数').toBe(lotColors.length)

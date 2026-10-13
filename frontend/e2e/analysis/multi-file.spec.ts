@@ -43,46 +43,67 @@ async function pickFiles(page: Page, names: string[]) {
 }
 
 /** 多文件默认参数是 commonParams[0]（可能无规格限，如 Serial_No 序列号列）——
- * 遍历参数直到图例出现 USL/LSL，返回命中参数；找不到返回 null。
+ * 选出一个「每个文件都带有效规格限」的共有参数、让图表落到它上面，返回参数名；找不到返回 null。
+ *
+ * **不再逐个探测**：旧实现每轮 = 一次 2 文件 multi_lot 重算 + 固定 `waitForTimeout(300)` +
+ * 扫全 tab 文本，而 BUYOFF 的带限值参数排在十余个系统列之后 → 单例 ~30s
+ * （夜跑实测这三例 36–39s，同文件其余 11 例只要 2.1–5.1s）。
+ * 后端本来就能直接回答：`compute_common_params(ignore_no_limit=True)` 返回的正是这个集合
+ * （`apps/analysis/services/data_services/multi_lot.py:43-44`），取首项即可。
+ *
+ * 两点约束：
+ * - **走页面内的 fetch，不去勾 UI 上那个「忽略无Limit」开关** —— 勾上它这三例就只在
+ *   过滤路径下跑，未过滤路径的 per-file limit 图例回归会漏掉。
+ * - URL 与载荷从用例**已经等到的那次合并请求**里原样取、只多覆盖一个 flag，
+ *   因此不写死端点与请求体结构。
+ *
  * 注意：el-tabs 非懒渲染，单文件 tab 的 ParamSelector 也在 DOM 里，
  * 定位必须作用域到 multi-file tab（helpers 的 listParams/selectParam 无作用域参数）。 */
-async function selectLimitsParam(page: Page): Promise<string | null> {
+async function selectLimitsParam(
+  page: Page,
+  merged: import('@playwright/test').Response,
+): Promise<string | null> {
+  const req = merged.request()
+  const payload = JSON.parse(req.postData() ?? '{}') as Record<string, unknown>
+  const name = await page.evaluate(
+    async ([url, body]: [string, Record<string, unknown>]) => {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+        },
+        body: JSON.stringify({ ...body, ignore_no_limit: true }),
+      })
+      if (!r.ok) return null
+      const j = await r.json()
+      const list = Array.isArray(j?.common_params) ? j.common_params : []
+      return list.length ? String(list[0]) : null
+    },
+    [req.url(), payload] as [string, Record<string, unknown>],
+  )
+  if (!name) return null
+
+  // 仍要在 UI 里真正选中它：三条调用点的判据（图例 USL/LSL、X 轴跨度、标注格式）都读图。
+  const distResp = page.waitForResponse(
+    (r) =>
+      r.url().includes('/analysis/multi_lot/') &&
+      r.request().method() === 'POST' &&
+      (r.request().postData() || '').includes('"param"') &&
+      r.status() < 500,
+    { timeout: 20_000 },
+  )
   const select = page.locator(`${TAB} .param-selector .el-select`).first()
   await expect(select).toBeVisible({ timeout: 15_000 })
-
-  // 读取参数列表（filterable：输入过滤后点击）
   await select.click()
-  const dropdown = page.locator('.dp-param-popper-multi .el-select-dropdown__item:visible')
-  await expect(dropdown.first()).toBeVisible({ timeout: 15_000 })
-  const params = (await dropdown.allInnerTexts()).map((t) => t.trim()).filter(Boolean)
-  await page.keyboard.press('Escape')
-
-  for (const name of params) {
-    const distResp = page.waitForResponse(
-      (r) =>
-        r.url().includes('/analysis/multi_lot/') &&
-        r.request().method() === 'POST' &&
-        (r.request().postData() || '').includes('"param"') &&
-        r.status() < 500,
-      { timeout: 20_000 },
-    )
-    await select.click()
-    const input = select.locator('input').first()
-    await input.fill(name)
-    const option = page.locator('.dp-param-popper-multi .el-select-dropdown__item:visible')
-      .filter({ hasText: name }).first()
-    await expect(option).toBeVisible({ timeout: 10_000 })
-    await option.click()
-    try {
-      await distResp
-    } catch {
-      continue // 该参数无分布响应（非数值/空数据），试下一个
-    }
-    await page.waitForTimeout(300)
-    const allTexts = await page.locator(`${TAB} text`).allTextContents()
-    if (allTexts.some((t) => /USL|LSL/.test(t))) return name
-  }
-  return null
+  await select.locator('input').first().fill(name)
+  const option = page.locator('.dp-param-popper-multi .el-select-dropdown__item:visible')
+    .filter({ hasText: name }).first()
+  await expect(option).toBeVisible({ timeout: 10_000 })
+  await option.click()
+  // 选中的恰好就是当前参数时不会发新请求，图已经是对的 —— 别把这当成失败
+  await distResp.catch(() => {})
+  return name
 }
 
 test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
@@ -100,7 +121,7 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
       { timeout: 25_000 },
     )
     await pickFiles(page, [RECOMMENDED.buyoff[0], RECOMMENDED.buyoff[1]])
-    await distResp
+    const merged = await distResp
 
     // 共有测试项数量提示
     await expect(page.locator(`${TAB} .common-hint`)).toContainText(/共有测试项/)
@@ -116,7 +137,7 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
     expect(box!.height).toBeGreaterThan(0)
 
     // 默认参数可能是无规格限的列（Serial_No），显式选中一个含规格限的参数
-    const limitsParam = await selectLimitsParam(page)
+    const limitsParam = await selectLimitsParam(page, merged)
     expect(limitsParam, 'BUYOFF 共有参数中应存在含规格限的参数').not.toBeNull()
 
     // 图例：每文件一项 + per-file limit 线（新实现：每个文件独立显示）
@@ -132,7 +153,7 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
     test.slow()
     await enterMultiFile(page)
     await pickFiles(page, [RECOMMENDED.buyoff[0], RECOMMENDED.buyoff[1]])
-    await page.waitForResponse(
+    const merged = await page.waitForResponse(
       (r) => r.url().includes('/analysis/multi_lot/') && r.status() < 500,
       { timeout: 25_000 },
     )
@@ -141,7 +162,7 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
     // 选带规格限参数——无规格限参数下各 range_type 范围本就不同；
     // 带规格限窄分布参数才是旧 bug 场景（后端曾把范围扩展到规格限，
     // 5 种类型 X 轴完全相同）
-    const limitsParam = await selectLimitsParam(page)
+    const limitsParam = await selectLimitsParam(page, merged)
     expect(limitsParam, 'BUYOFF 共有参数中应存在含规格限的参数').not.toBeNull()
 
     const readAxisSpan = async (): Promise<number | null> => {
@@ -308,14 +329,14 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
     test.slow()
     await enterMultiFile(page)
     await pickFiles(page, [RECOMMENDED.buyoff[0], RECOMMENDED.buyoff[1]])
-    await page.waitForResponse(
+    const merged = await page.waitForResponse(
       (r) => r.url().includes('/analysis/multi_lot/') && r.status() < 500,
       { timeout: 25_000 },
     )
     await expect(page.locator(`${TAB} .chart-wrapper svg`)).toBeVisible({ timeout: 15_000 })
 
     // 默认参数可能是无规格限的列（Serial_No），显式选中一个含规格限的参数
-    const limitsParam = await selectLimitsParam(page)
+    const limitsParam = await selectLimitsParam(page, merged)
     expect(limitsParam, 'BUYOFF 共有参数中应存在含规格限的参数').not.toBeNull()
 
     // Limit 标注应包含文件名和规格限类型

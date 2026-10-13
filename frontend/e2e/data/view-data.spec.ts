@@ -391,13 +391,20 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     ).toContainText(String(expected), { timeout: 10_000 })
   })
 
-  test('@p1 滚动加载分块：滚动到 8000 行触发第 81 块请求并渲染', async ({ page }) => {
+  test('@p1 滚动加载分块：滚动到 8000 行触发覆盖该行的分块请求并渲染', async ({ page }) => {
     await openViewTab(page, SEEDED_FILES.CTA8280F_FT)
     await expect(page.locator('.ag-row').first()).toBeVisible({ timeout: 30_000 })
 
-    // 垂直滚动到 8000 行 → IRM 请求 page=81（startRow 8000/100 + 1）
+    // 分块大小来自账号设置 page_size，**不能写死 page=81**：2026-10-13 夜跑那轮账号
+    // 漂到 page_size=200，实际请求是 page=41，写死的 81 永不出现 → 15s 超时 ×3 次重试。
+    // 判据改成「请求的正是覆盖第 8000 行的那一块」，page_size 从它自己的 URL 现读。
     const blockResp = page.waitForResponse(
-      (r) => r.url().includes('/browse/') && r.url().includes('page=81'),
+      (r) => {
+        if (!r.url().includes('/browse/')) return false
+        const q = new URL(r.url()).searchParams
+        const size = Number(q.get('page_size')) || 100
+        return Number(q.get('page')) === Math.floor(8000 / size) + 1
+      },
       { timeout: 15_000 },
     )
     await page.locator('.ag-body-vertical-scroll-viewport').evaluate((el) => { el.scrollTop = 8000 * 30 })

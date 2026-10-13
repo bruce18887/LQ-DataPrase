@@ -49,12 +49,31 @@ export async function manualConnect(page: Page, srv: SftpTestServer) {
   await expect(page.locator('.toolbar-card')).toBeVisible({ timeout: 20_000 })
 }
 
+/**
+ * 把浏览器页收敛到「断开态」起跑（断线续连是应用设计行为：存在已保存配置 +
+ * 连接记录时进页面会自动重连，实测会连到上一会话留下的**真实**服务器，如
+ * 220.184.158.242 的 te/Test_Data；此时 `manualConnect` 的预填等待会因连接表单
+ * 根本不渲染而超时）。
+ *
+ * 两态**赛跑**而不是盲等 toolbar：全新页面没有已保存配置 → 不自动重连 →
+ * `.toolbar-card` 永不出现，盲等它会把 20s 超时烧满再被 catch 吞掉。2026-10-13
+ * 夜跑 run.log 实测：页面加载请求停在 15:47:49、`POST /sftp/connect/` 落在
+ * 15:48:09，中间 20 秒后端零流量 —— 那 20s 全在这个等待里，服务端连接本身 <1s。
+ */
 export async function ensureDisconnected(page: Page) {
-  await page.locator('.toolbar-card').waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
-  if (await page.locator('.toolbar-card').isVisible()) {
+  const toolbar = page.locator('.toolbar-card')
+  const connectCard = page.locator('.connect-card')
+  await Promise.race([
+    toolbar.waitFor({ state: 'visible', timeout: 20_000 }),
+    connectCard.waitFor({ state: 'visible', timeout: 20_000 }),
+  ]).catch(() => {})
+  // 自动重连是异步的：connect-card 可能先渲染一帧再翻成 toolbar。稳定复核一次，
+  // 否则会把「正在自动重连」误判成断开态、跳过必要的断开。
+  if (!(await toolbar.isVisible())) await page.waitForTimeout(500)
+  if (await toolbar.isVisible()) {
     await page.getByRole('button', { name: '断开' }).click()
-    await expect(page.locator('.connect-card')).toBeVisible({ timeout: 15_000 })
   }
+  await expect(connectCard).toBeVisible({ timeout: 15_000 })
 }
 
 /**

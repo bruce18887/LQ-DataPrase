@@ -2,6 +2,9 @@ import { test, expect, type Locator } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
 import { startSftpServer, type SftpTestServer } from '../helpers/sftpServer'
 import { deleteSftpImportsQuiet } from '../helpers/cleanup'
+// 与 search.spec.ts 共用同一份「收敛到断开态」的实现：两处对「什么时候算连上」的
+// 判断必须一致，复制体会各自漂移（本地那份曾盲等 toolbar 20s，见共用版注释）。
+import { ensureDisconnected } from '../helpers/sftpSearchFlow'
 
 /**
  * SFTP 断线续连（记住上次路径）端到端用例。
@@ -58,21 +61,6 @@ async function enterSub1(page: Parameters<typeof gotoApp>[0]) {
 
 async function disconnect(page: Parameters<typeof gotoApp>[0]) {
   await page.getByRole('button', { name: '断开' }).click()
-  await expect(page.locator('.connect-card')).toBeVisible({ timeout: 15_000 })
-}
-
-/**
- * 断线续连是应用设计行为：上一会话存在「已保存配置 + 连接记录」时进入页面
- * 会自动重连（甚至连上真实服务器，如 220.184.158.242 的 te/Test_Data 目录）。
- * 用例统一从「断开态」起跑：若已连接先断开，再等连接表单出现。否则
- * manualConnect 的预填等待会因表单根本不渲染而超时。
- */
-async function ensureDisconnected(page: Parameters<typeof gotoApp>[0]) {
-  const toolbar = page.locator('.toolbar-card')
-  await toolbar.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
-  if (await toolbar.isVisible()) {
-    await disconnect(page)
-  }
   await expect(page.locator('.connect-card')).toBeVisible({ timeout: 15_000 })
 }
 
