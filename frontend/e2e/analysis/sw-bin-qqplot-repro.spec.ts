@@ -47,25 +47,4 @@ test.describe('@regression QQ plot for SW_Bin', () => {
     const emitsOptionsErrors = pageErrors.filter((e) => e.includes('emitsOptions'))
     expect(emitsOptionsErrors, `Should not throw "emitsOptions" errors, got:\n${pageErrors.join('\n')}`).toEqual([])
   })
-
-  test('SW_Bin on gage_m_S4: capture full state in DOM', async ({ page }) => {
-    // Take a screenshot for visual verification
-    await gotoApp(page, '/analysis')
-    await selectAnalysisFile(page, SEEDED_FILES.GAGE_S4)
-    await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
-    await page.waitForTimeout(1500)
-
-    await selectParam(page, 'SW_Bin')
-    await page.waitForTimeout(1000)
-    await page.getByText('显示QQ图').click()
-    await page.waitForTimeout(3000)
-
-    // Inspect DOM: either chart canvas or placeholder must be present
-    const hasChart = await page.locator('.analysis-tab-layout .qqplot-container canvas').count()
-    const hasPlaceholder = await page.locator('.analysis-tab-layout .qqplot-placeholder').count()
-    console.log(`SW_Bin: chart canvas count=${hasChart}, placeholder count=${hasPlaceholder}`)
-
-    // Whatever the state, take a screenshot
-    await page.screenshot({ path: 'test-results/sw-bin-qq-state.png', fullPage: true })
-  })
 })
