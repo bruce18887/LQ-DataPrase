@@ -15,8 +15,6 @@ import { RECOMMENDED, SEEDED_FILES } from '../fixtures/test-data'
  * 各测试上传均用唯一命名（e2e_* 前缀），不污染这些计数。
  */
 
-const TAB = '.multi-file-tab'
-
 /** 分析页「数据文件」选择器（data-file-picker 契约属性，不依赖页序） */
 function fileSelect(page: Page): Locator {
   return filePicker(page)

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
 import { selectAnalysisFile, selectParamWithSpecLimits, pickTabFile, filePicker } from '../helpers/params'
 import { RECOMMENDED } from '../fixtures/test-data'

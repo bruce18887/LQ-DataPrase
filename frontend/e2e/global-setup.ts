@@ -7,10 +7,7 @@
 import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { E2E_SYSTEM_CONFIG_FILE, PROJECT_ROOT, DOWNLOAD_DIR } from './fixtures/test-data'
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const PYTHON = process.env.PYTHON_BIN || path.join(PROJECT_ROOT, '.venv', 'Scripts', 'python.exe')
 

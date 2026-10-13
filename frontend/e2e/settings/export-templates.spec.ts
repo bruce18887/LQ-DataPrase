@@ -26,11 +26,6 @@ async function gotoExportTab(page: import('@playwright/test').Page) {
 
 async function restoreTemplates(page: import('@playwright/test').Page) {
   await page.evaluate(async () => {
-    const resp = await fetch('/api/v1/auth/settings/', {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
-    })
-    const data = await resp.json()
     const defaults: Record<string, string> = {
       to_excel: '{filename}_analysis',
       to_csv: '{filename}_data',

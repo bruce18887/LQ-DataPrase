@@ -268,6 +268,9 @@ console.log(
 )
 
 let code = 0
+// e2e 静态体检放在最前（约 3 s）：删掉用例后残留的失效 import、失去调用者的助手要在这里
+// 出声，而不是等几分钟的浏览器跑完才发现，也不用等下轮有人读文件。
+code ||= run('npm run lint:e2e', 'npm run lint:e2e')
 // T2 永远跑（162 ms 量级），全量分支也不例外。
 code ||= run('npm run test:unit', 'npm run test:unit')
 if (selected?.includes('electron')) console.log('note:     e2e/electron 需要 `npm run electron:build:ts` 产物，缺则该模块会红')

@@ -4,7 +4,7 @@ import os from 'node:os'
 import fs from 'node:fs'
 import { PRIMARY_SAMPLE_FILE } from '../fixtures/test-data'
 import { gotoApp } from '../helpers/nav'
-import { uploadMultipleFiles, uploadFile, expectUploadSuccess } from '../helpers/upload'
+import { uploadMultipleFiles, expectUploadSuccess } from '../helpers/upload'
 import { cleanupQuiet } from '../helpers/cleanup'
 
 /**

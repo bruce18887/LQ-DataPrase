@@ -21,8 +21,6 @@ import { filePicker } from '../helpers/params'
  *  - 数据管理页分页 total == 分析页下拉选项数（同一 /files/ 全量口径）。
  */
 
-const SINGLE = '.single-param-tab'
-
 const MIN_CSV = [
   'CTA8280F,',
   'Device Name,TEST_DEVICE,',
