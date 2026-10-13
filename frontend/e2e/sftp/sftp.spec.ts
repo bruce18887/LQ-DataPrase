@@ -1,6 +1,5 @@
 import { test, expect, type Locator } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { captureDownload } from '../helpers/download'
 import { deleteSftpImportsQuiet } from '../helpers/cleanup'
 
 /**

@@ -65,6 +65,3 @@ test.describe('@p1 导出超时设置', { tag: ['@p1', '@settings'] }, () => {
     }
   })
 })
-
-test.describe('@p2 导出超时 API 边界', { tag: ['@p2', '@settings'] }, () => {
-})
