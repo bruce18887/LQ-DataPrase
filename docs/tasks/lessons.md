@@ -1172,3 +1172,52 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   一起打出来当自证；② 结论如果来自"我读到的值"，先确认读的是**哪一个**库/环境，再落进文档 ——
   这条错判差点被我写进 lessons 与代码注释（已在实现时按正确库重写规范集）；③ 真正有效的漂移
   是 `filename_wrap=False`/`page_size=200`/`cpk_*` 那几项，它们在正确库里可见 —— 换个库看，结论会反过来。
+
+## 2026-10-13 部署整改批1：连接级 pragma 没法用 `override_settings(DATABASES)` 测
+
+- **现象**：为 WAL/busy_timeout 写红测，第一版给 `DATABASES` 加了个指向临时文件库的别名
+  `wal_file`，跑起来直接 `ConnectionDoesNotExist: The connection 'wal_file' doesn't exist`
+  （Django 6.0.5）。
+- **根因**：`ConnectionHandler.databases` 是 cached_property，`override_settings(DATABASES=...)`
+  不会让已构造的连接处理器重新读设置；叠加两层限制 —— `SimpleTestCase` 默认只放行 default 别名
+  （5.1+ 才有 `allowed_database_aliases`），而测试运行器把 default 换成 `:memory:`，
+  **内存库根本不支持 WAL**（`PRAGMA journal_mode` 回 `memory`）。三条凑一起，
+  「拿真实 Django 连接验 pragma」这条路是走不通的。
+- **规则**：① 测连接级初始化就**真发信号**：`connection_created.send(sender=…, connection=适配器)`，
+  适配器只补 Django 的接口形状（`vendor` + `cursor()` 上下文管理器），底层是真实
+  `sqlite3.connect(临时文件)` —— pragma 结果仍从真实库里读出来，不是 mock 出来的。
+  ② **WAL/busy_timeout 是连接属性不是库属性**：`journal_mode` 虽然会持久化进库头，
+  `busy_timeout` 每个新连接都得重设，所以只能挂 `connection_created`，建库时跑一次不够。
+  ③ 接收器必须显式 `if connection.vendor != 'sqlite': return`，否则 Postgres 连接被塞 SQLite 语法。
+- **顺带一条自我纠正**：我先在评估里断言「开 WAL 后 `_migrate` 逐个 copy2 三件套 + 只读
+  `integrity_check` 会打不开需恢复的 WAL 库」，红测（子进程 `os._exit` 造真实崩溃残留 `-wal`）
+  首跑即绿，**证伪了这条推断**。教训同 R 系列旧条：把推测写成「必须先修的缺陷」之前，
+  先让它接受一次可复现的实测；证伪了就当回归钉留下，别删。
+
+## 2026-10-13 快门禁 `test:e2e:affected` 的后端部分从未跑通过（cwd 拼错）
+
+- **现象**：改 `apps/common/*` 后跑受影响门禁，脚本自己判定「全量 e2e」并附带
+  `python manage.py test apps.common test.backend`，结果 `python: can't open file
+  '…\frontend\manage.py'`，整条门禁在后端步骤上断。
+- **根因**：`scripts/e2e_affected.mjs` 的 `run()` 把 `cwd` 写死成 `FRONTEND`（因为
+  `lint:e2e`/`test:unit`/`npx playwright` 都该在 frontend/ 跑），而 `manage.py` 在仓库根。
+  又因为 npm 脚本只挂在 `frontend/package.json`（根 package.json 只有 pyinstaller/dist:win*），
+  所以**不存在一个能同时跑通两步的 cwd** —— 只要改动命中后端标签，这一步就必断。
+  之前没人发现，是因为它只在「改动选中后端标签」时才执行。
+- **规则**：① 门禁脚本里凡是「一条命令串多个工作目录」的，cwd 必须做成参数而不是常量；
+  ② 声称「快门禁覆盖 X」之前，先制造一次 X 真的被选中的改动跑一遍——**没被触发过的分支等于没有分支**；
+  ③ 顺带记一句：`apps/common/*`、`.gitignore`、`system_config.json` 命中「全局清单」→ 门禁
+  直接升级全量（并行 12min / 串行 37min），CLAUDE.md 里那句「<5min」对这类改动不成立。
+
+## 2026-10-13 一轮刚跑完立刻再起一轮，会拿到「整文件成片红」的假回归
+
+- **现象**：全量门禁（并行）356 过 / 3 失败刚结束，我马上把其中 2 个 spec 用 `--workers=1`
+  复跑，得到 **19 失败 / 6 通过**，红的全是「默认值断言」类用例（`异常值处理默认为「不处理」`、
+  `多文件分析范围类型默认为 RDL`、CPK 阈值三条）。看着像我把设置搞坏了。
+- **证伪过程**：单跑其中 1 条 → 21s 绿；等端口从 `TIME_WAIT` 落干后整文件再串行复跑 →
+  **24 passed / 1 flaky**。所以那 19 红不是代码回归。
+- **规则**：① 复跑前先看 `netstat -ano | grep -E ':(3000|8000)'` 里有没有 `LISTENING`，
+  只剩 `TIME_WAIT` 才算干净；上一轮的 webServer 还在收尾时，playwright 的
+  `reuseExistingServer` 会挂到一个正在死的进程上。② 「整文件/全默认值断言成片红」
+  的第一假设应是**环境与共享账号态**，不是我的改动——先用单 spec 隔离复跑证伪，再谈回归。
+  ③ 那条 flaky（`waitForResponse` 注册竞态）是 R2④ 的老面孔，不新开条目。

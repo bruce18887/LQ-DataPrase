@@ -167,6 +167,9 @@ frontend/build-out.txt
 /db.sqlite3-journal
 /db.sqlite3-shm
 /db.sqlite3-wal
+# 本机存储路径配置（data_dir/temp_dir）。入库会把写死的个人绝对路径带进新克隆，
+# settings 导入期即触发一次数据目录迁移；缺文件时 load_config 回 {} 用内置默认值。
+/system_config.json
 
 # ================== Repo root JS (Electron tooling) ==================
 # Only the lock files and package.json are committed; node_modules is global

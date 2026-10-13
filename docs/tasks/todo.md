@@ -2730,3 +2730,54 @@ HTML 按钮。
 - **基线那条红被证为并行 flake**：`settings/chart-renderer.spec.ts:45` 在 `workers=1` 下为绿，
   故不记 T0、不算存量回归。
 - 明细账目写入 `docs/reference/e2e-tier-triage.md` 的「B 组执行结果」节。
+
+---
+
+# 任务：部署整改批1 —— system_config.json 出 git + SQLite WAL/busy_timeout（2026-10-13）✅
+
+背景：部署评估把运行形态收敛为「单进程 + 约 20 人共用一个 SQLite 库」（OS 未定 / 无
+Postgres·Redis / 无 nginx / Electron 暂留）。实测当前库跑在 `journal_mode=delete`、
+busy_timeout 走 Django 默认 5 秒 —— 写会整库挡读，20 人并发先撞 `database is locked`。
+批1 只做**与目标 OS 无关**的两件事。
+
+## 实施清单
+
+- [x] `apps/common/db_pragmas.py`：`configure_sqlite_connection(connection, **kwargs)`，
+      `vendor != 'sqlite'` 直接返回；否则在**同一新连接**上打
+      `PRAGMA journal_mode=WAL` + `PRAGMA busy_timeout=30000`
+- [x] `apps/common/apps.py`（新增；此前 `apps.common` 是本仓唯一没有 AppConfig 的 app）
+      在 `ready()` 里以 `dispatch_uid='lqdp_sqlite_pragmas'` 挂上 `connection_created`
+- [x] `system_config.json` 出 git：`git rm --cached`（工作区文件保留）+ `.gitignore` 写明理由
+- [x] 红测 `test/backend/test_sqlite_wal.py`（5 例，T1 后端契约层）
+- [x] 验证 + 提交
+
+## Review
+
+- **红→绿**：首跑 2 FAIL（`'delete' != 'wal'`、`5000 not >= 30000`），实现后 5/5 OK。
+- **红测把一条我自己下的结论证伪了**：原以为「开 WAL 后 `_migrate` 逐个 `copy2`
+  db/-wal/-shm 非原子、且 `_verify_sqlite` 用 `mode=ro` 打不开需恢复的 WAL 库」。
+  用子进程 `os._exit` 造出真实崩溃残留 `-wal` 后，两条迁移用例**首跑即绿**，
+  故本轮不加 checkpoint 逻辑，只把它们留作回归钉（WAL 一开这条链路必须有钉子）。
+- **真实库自证**（按 2026-10-13 那条「本仓有两个 db.sqlite3」教训，连 NAME 一起打）：
+  `tasks/_sqlite_pragma_probe.py` 两档 profile 均报
+  `NAME=C:\Users\Administrator\LQ-DataPrase\db.sqlite3 journal_mode=wal busy_timeout=30000`。
+- **边界（已知且可接受）**：`system_config.py:234,347` 用裸 `sqlite3.connect`，不走信号、
+  拿不到放宽的 busy_timeout。两者都跑在启动期 `_startup_lock` 之内、非并发路径。
+- **门禁**：`npm run lint:e2e` 干净；`npm run build` 绿（vue-tsc -b + vite，950ms）；
+  `test:unit` 31 例全过；后端全量串行 `manage.py test test.backend apps`（.venv）=
+  **1367 例 / 296s / OK (skipped=7)**，含本轮新增 5 例。
+- **受影响门禁升级成全量**：改动命中「全局清单」（`.gitignore`、`system_config.json`、
+  `apps/common/*`）→ `scripts/e2e_affected.mjs` 判定「全量 e2e」，并行跑 **356 过 / 3 失败 /
+  11 flaky / 15 skipped（12.0m）**。3 条失败逐条定性：
+  ① `smoke/pages /analysis 无报错` = 今晚夜跑已知那条（`site_stats` 400），非本轮；
+  ② `analysis:294 箱线图离群点切换`、③ `cpk-thresholds:92 阈值抬高压到 D`
+  在 `--workers=1` 下**全绿**（干净复跑 24 passed / 1 flaky）→ 判定为并行 worker
+  污染共享 admin 设置，按既有教训不记 T0、不算存量回归。
+- **门禁自身的既存缺陷（顺带修掉）**：`run()` 恒用 `cwd: FRONTEND`，而后端步骤拼的是
+  `python manage.py test …` → 只要后端标签被选中就必报 `No such file: frontend\manage.py`。
+  由于 npm 脚本只挂在 `frontend/package.json`，这条快门禁的后端部分此前**从未跑通过**。
+  现给 `run()` 加 cwd 参数、后端步骤传 `ROOT`。
+- **双主题**：纯后端改动，零前端视觉工作。
+- **遗留风险（需用户拍板，不在本轮擅自动）**：WAL 对**网络盘/SMB** 不安全（依赖共享内存），
+  而桌面用户的 `data_dir` 可被指到映射盘。若线上出现桌面版打不开库，第一条该试的就是
+  给 `standalone` 档关掉 WAL（接收器已按 vendor 分流，加一个 settings 开关即可）。
