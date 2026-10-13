@@ -138,6 +138,10 @@ export default defineConfig({
           env: {
             ...process.env,
             LQDP_SYSTEM_CONFIG_FILE: E2E_SYSTEM_CONFIG_FILE,
+            // 全量轮 CI=1 下 workers=1 要跑 40+ min，而 storageState 里的 access token
+            // 只有 30 min（config/settings/base.py）；这里放宽只对本机 e2e 的 webServer
+            // 生效，生产与默认开发配置不变。
+            LQDP_ACCESS_TOKEN_MINUTES: '720',
           },
         },
         {

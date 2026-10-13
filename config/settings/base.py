@@ -171,7 +171,14 @@ REST_FRAMEWORK = {
 }
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
+    # 默认仍是 30 min；只有 Playwright 的 webServer 会把它设大（LQDP_ACCESS_TOKEN_MINUTES）。
+    # 原因：夜间全量轮在 CI=1 下强制 workers=1，一轮要跑 40–100 min，而 storageState 是
+    # 开跑时铸的**一份** token —— 每条新用例都从同一个文件重取它，刷新后的新值只活在该
+    # context 里。30 min 之后才被调度的用例会一律被路由守卫踢回 /login（2026-10-13 三次
+    # 真跑实测：30min 前红率 1%，30min 后 90%）。开发态 workers=6 全程 6 min，所以撞不到。
+    'ACCESS_TOKEN_LIFETIME': timedelta(
+        minutes=int(os.environ.get('LQDP_ACCESS_TOKEN_MINUTES', '30'))
+    ),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
