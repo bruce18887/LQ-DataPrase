@@ -224,11 +224,11 @@ function backendLabels(files) {
   return [...labels]
 }
 
-function run(cmd, printCmd) {
+function run(cmd, printCmd, cwd = FRONTEND) {
   console.log(`\n$ ${printCmd}`)
   if (DRY) return 0
   // Windows 下 npm/npx 是 .cmd，必须走 shell；Git Bash 里 shell:true 同样可用。
-  const r = spawnSync(cmd, { cwd: FRONTEND, stdio: 'inherit', shell: true })
+  const r = spawnSync(cmd, { cwd, stdio: 'inherit', shell: true })
   return r.status ?? 1
 }
 
@@ -279,7 +279,10 @@ if (RUN_BACKEND && labels.length) {
   if (py.status !== 0) {
     console.error('BACKEND SKIPPED: 当前 `python` 无 pytest —— 用 .venv 跑会把 test_outliers 的 import 失败伪装成回归，故拒绝执行')
   } else {
-    code ||= run(`python manage.py test ${labels.join(' ')}`, `python manage.py test ${labels.join(' ')}`)
+    // manage.py 在仓库根，而 npm 脚本挂在 frontend/ —— cwd 必须跟着切，
+    // 否则 python 会在 frontend/ 下找不到 manage.py（2026-10-13 实测：后端步骤
+    // 只要被选中就必断，这条快门禁从没跑通过）。
+    code ||= run(`python manage.py test ${labels.join(' ')}`, `python manage.py test ${labels.join(' ')}`, ROOT)
   }
 }
 if (d.global) {
