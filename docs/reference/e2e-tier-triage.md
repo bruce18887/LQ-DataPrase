@@ -52,7 +52,7 @@
 2. **32 例无处可落，三个代理各自独立撞到同一堵墙**：见下方「判据缺口」，需你决策后才能继续搬。
 3. **成本集中度高于数量集中度**：`sftp` 38 例（9.6% 用例数）约占全量墙钟三分之一；
    `batch/batch.spec.ts` 6 例里有 4 例是死代码。按「例数 × 单例成本」排，
-   性价比第一梯队是 **砍掉 sftp 版式 4 例的无用连接**（零判据损失，见 E1）。
+   性价比第一梯队是 **砍掉 sftp 版式 4 例的无用连接**（零判据损失，见 E1，**已做：112s→24s**）。
 
 ### 模块级汇总（其余 324 例）
 
@@ -114,9 +114,13 @@ function）、`expectedTier` 档表、`MultiFileTab.vue:259-293` 图例提名、
 
 ### E. 砍前置不砍判据（**性价比第一**）
 
-- **E1 `sftp/search-layout.spec.ts` 的 L1/L2/L3/L6 四例根本不需要连 SFTP**：条件卡的渲染只依赖
-  roots 预填，`connectAndOpenSearch` 是共用流程层带来的额外成本。换成 `gotoApp('/sftp/search')`
-  可把这四例从「冷连 ~22 s」降到一次 goto，**零判据损失、不动任何断言**。
+- **E1 ✅ 已做（2026-10-13）`sftp/search-layout.spec.ts` 的 L1/L2/L3/L6 四例根本不需要连 SFTP**：
+  条件卡的几何只依赖 roots 里有没有那枚 tag，不依赖会话 —— `connectAndOpenSearch` 是共用流程层
+  顺带塞进来的成本。改为新增的 `openSearchForm()`：`gotoApp('/sftp/search')` + `addTag` 手工补一枚
+  `/batch1`（做法抄 `search.spec.ts:430-432` 那条「未连接」用例，它已经这么干了）。
+  **实测（workers=1，同机同负载）**：这四例 22.0s/例 → **0.60–0.70s/例**；只跑这四例 112s → 24s；
+  整份文件 8 passed，全量 **1.2 分钟**。判据一条没动，且 L1/L6 条件卡高度改前改后都是 **559px**
+  —— 数字一模一样，证明补 tag 与面包屑预填是同一份版式。L4/L5 仍走真链路（要跑一次搜索才有对象）。
 - E2 `multi-file.spec.ts:307` 与 `:334` 断言逐行相同 → 合并 1 例。
 - E3 `auth:40` ≡ `global:186`、`auth:48` ≡ `auth:176`、`sftp.spec.ts:404` ≡ `reconnect:292` → 各留 1。
 - E4 `chart-renderer.spec.ts:45/63` 成对（canvas/svg 各一次全量重启）→ 可并 1 例两断言。
