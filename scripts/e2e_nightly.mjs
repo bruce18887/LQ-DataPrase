@@ -25,14 +25,35 @@ const LOCK = path.join(OUT_ROOT, 'e2e-nightly.lock')
 
 // 退化阈值：任一命中即在 LATEST.md 顶部打 ⚠ DEGRADED。改阈值=改代码，不留口头约定。
 const THRESHOLDS = {
-  wallMs: 35 * 60_000, // 全量墙钟
-  specs: 450, // 用例数（2026-09-26 基线 393）
+  // 「变慢」的信号是**单价**（每例平均执行时长），不是墙钟 —— 套件变大由 specs 那条单独报。
+  // 2026-10-13 首次真跑实测 `workers=1` 单价 6.29 s/例（255 例 / 26.7 min），此处留 ~1.3 倍余量。
+  perSpecMs: 8_000,
+  // 墙钟只当**挂死探测器**：CI=1 强制 workers=1，385 例天然就要 ~43 min，
+  // 之前写死的 35 min 属于没实测过的拍脑袋，首跑即夜夜假红（已证实）。
+  wallMs: 75 * 60_000,
+  specs: 450, // 用例数（2026-10-13 快照 385）
   flakes: 5, // 重试后才过的用例数
 }
 
 const args = process.argv.slice(2)
 const DRY = args.includes('--dry-run')
 const ALLOW_DIRTY = args.includes('--allow-dirty')
+
+// 只复盘既有产物，不开浏览器：改阈值/改单价口径时用这条验证，
+// 不该为确认一个公式再花 40 分钟跑全量。
+const REPORT_ONLY = args.find((a, i) => args[i - 1] === '--report-only')
+if (REPORT_ONLY) {
+  const rep = parseReport(path.resolve(REPORT_ONLY))
+  const b = breach(rep)
+  console.log(
+    `specs=${rep.specs} 墙钟=${(rep.wallMs / 60000).toFixed(1)}min ` +
+      `单价=${(rep.perSpecMs / 1000).toFixed(2)}s/例 ` +
+      `flaky=${rep.stats?.flaky} unexpected=${rep.stats?.unexpected} skipped=${rep.stats?.skipped}`,
+  )
+  console.log(b.length ? `判 DEGRADED：${b.join('；')}` : '不判 DEGRADED')
+  for (const [f, ms] of rep.top.slice(0, 5)) console.log(`  ${(ms / 1000).toFixed(0).padStart(5)}s  ${f}`)
+  process.exit(0)
+}
 
 function git(...a) {
   return execFileSync('git', a, { cwd: ROOT, encoding: 'utf-8' }).trim()
@@ -87,10 +108,18 @@ function parseReport(file) {
   const j = JSON.parse(fs.readFileSync(file, 'utf-8'))
   const perFile = new Map()
   let specs = 0
+  let passMs = 0
+  let passCount = 0
   const walk = (node) => {
     for (const s of node.specs ?? []) {
       specs += 1
-      const ms = (s.tests ?? []).flatMap((t) => t.results ?? []).reduce((a, r) => a + (r.duration ?? 0), 0)
+      const results = (s.tests ?? []).flatMap((t) => t.results ?? [])
+      const ms = results.reduce((a, r) => a + (r.duration ?? 0), 0)
+      // 单价只按**跑完并通过**的用例计：连不上、秒失败的那些时长≈0，
+      // 把它们算进分母会让"整片崩溃"看起来比健康轮更快（2026-10-13 首跑实测 4.48 < 6.29）。
+      for (const r of results) {
+        if (r.status === 'passed') { passMs += r.duration ?? 0; passCount += 1 }
+      }
       const key = s.file ?? '(unknown)'
       perFile.set(key, (perFile.get(key) ?? 0) + ms)
     }
@@ -99,12 +128,20 @@ function parseReport(file) {
   for (const s of j.suites ?? []) walk(s)
   const top = [...perFile.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)
   // 实测：墙钟在 stats.duration，顶层 duration 是 undefined。
-  return { stats: j.stats ?? {}, specs, wallMs: j.stats?.duration ?? j.duration ?? 0, top }
+  return {
+    stats: j.stats ?? {}, specs, wallMs: j.stats?.duration ?? j.duration ?? 0,
+    // 2026-10-13 首跑：255 例通过 / 26.7 min → 6.29 s/例（workers=1）。分母为 0 时不判退化。
+    perSpecMs: passCount ? passMs / passCount : 0,
+    top,
+  }
 }
 
 function breach(rep) {
   const b = []
-  if (rep.wallMs > THRESHOLDS.wallMs) b.push(`墙钟 ${(rep.wallMs / 60000).toFixed(1)}min > ${THRESHOLDS.wallMs / 60000}min`)
+  if (rep.perSpecMs > THRESHOLDS.perSpecMs) {
+    b.push(`单价 ${(rep.perSpecMs / 1000).toFixed(2)}s/例 > ${THRESHOLDS.perSpecMs / 1000}s/例`)
+  }
+  if (rep.wallMs > THRESHOLDS.wallMs) b.push(`墙钟 ${(rep.wallMs / 60000).toFixed(1)}min > ${THRESHOLDS.wallMs / 60000}min（挂死探测）`)
   if (rep.specs > THRESHOLDS.specs) b.push(`用例数 ${rep.specs} > ${THRESHOLDS.specs}`)
   if ((rep.stats?.flaky ?? 0) > THRESHOLDS.flakes) b.push(`flake ${rep.stats.flaky} > ${THRESHOLDS.flakes}`)
   return b
@@ -137,6 +174,16 @@ if (skip) {
         CI: '1',
         PLAYWRIGHT_JSON_OUTPUT_NAME: jsonFile,
       })
+      // 无头作业必须自己留下可归因的现场：webServer 的 stdout/stderr 只在进程内，
+      // 不落盘就永远不知道「30 分钟处大面积连不上」是谁把服务杀了（2026-10-13 首跑的教训）。
+      if (!DRY) {
+        fs.writeFileSync(
+          path.join(outDir, 'run.log'),
+          `===== python manage.py test（exit=${t1.status}）=====\n${t1.output}\n` +
+            `===== npx playwright test（exit=${t3.status}）=====\n${t3.output}\n`,
+        )
+        console.log(`日志: ${path.relative(ROOT, path.join(outDir, 'run.log'))}`)
+      }
       if (DRY) {
         series.push({ date: today, result: 'DRY-RUN', breaches: [] })
       } else if (!fs.existsSync(jsonFile)) {
@@ -156,6 +203,7 @@ if (skip) {
           breaches,
           specs: rep.specs,
           wallMs: rep.wallMs,
+          perSpecMs: rep.perSpecMs,
           stats: rep.stats,
           top: rep.top,
         })
@@ -189,7 +237,7 @@ const rows = history
     if (h.result === 'SKIPPED') return `| ${h.date} | SKIPPED | ${h.reason} | — |`
     const warn = h.breaches?.length ? '⚠ DEGRADED ' : ''
     if (h.wallMs == null) return `| ${h.date} | ${warn}${h.result} | ${h.reason ?? '—'} | — |`
-    return `| ${h.date} | ${warn}${h.result} | ${(h.wallMs / 60000).toFixed(1)}min | ${h.specs} 例 / flaky ${h.stats?.flaky ?? '?'} |`
+    return `| ${h.date} | ${warn}${h.result} | ${(h.wallMs / 60000).toFixed(1)}min · ${(h.perSpecMs / 1000).toFixed(2)}s/例 | ${h.specs} 例 / flaky ${h.stats?.flaky ?? '?'} |`
   })
   .join('\n')
 
@@ -197,8 +245,8 @@ fs.writeFileSync(
   path.join(OUT_ROOT, 'LATEST.md'),
   `# 夜间全量兜底轮（最近 ${history.length} 轮）
 
-阈值：墙钟 ${THRESHOLDS.wallMs / 60000}min · 用例 ${THRESHOLDS.specs} · flaky ${THRESHOLDS.flakes}
-最近一轮明细：\`tasks/e2e-nightly/${today}/\`（results.json + playwright-report）
+阈值：单价 ${THRESHOLDS.perSpecMs / 1000}s/例 · 墙钟 ${THRESHOLDS.wallMs / 60000}min（挂死探测）· 用例 ${THRESHOLDS.specs} · flaky ${THRESHOLDS.flakes}
+最近一轮明细：\`tasks/e2e-nightly/${today}/\`（results.json + run.log + playwright-report）
 
 | 日期 | 结果 | 墙钟 | 规模 |
 |---|---|---|---|
