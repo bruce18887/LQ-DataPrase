@@ -2777,6 +2777,11 @@ busy_timeout 走 Django 默认 5 秒 —— 写会整库挡读，20 人并发先
   `python manage.py test …` → 只要后端标签被选中就必报 `No such file: frontend\manage.py`。
   由于 npm 脚本只挂在 `frontend/package.json`，这条快门禁的后端部分此前**从未跑通过**。
   现给 `run()` 加 cwd 参数、后端步骤传 `ROOT`。
+- **提交分三支**：`dd98706` 门禁 cwd 缺陷修复 → `7addfd0` WAL+pragma+测试+文档 →
+  `2a832ee` 把 `system_config.json` 真正移出索引。第三支是必须的：第二支用
+  `git commit -- <pathspec>` 逐文件提交，而 pathspec 形态按**工作区内容**建提交，
+  把先前 `git rm --cached` 暂存的删除还原成了跟踪（当场靠「315 insertions / 零 deletion」
+  发现），详见 lessons 同日条目。
 - **双主题**：纯后端改动，零前端视觉工作。
 - **遗留风险（需用户拍板，不在本轮擅自动）**：WAL 对**网络盘/SMB** 不安全（依赖共享内存），
   而桌面用户的 `data_dir` 可被指到映射盘。若线上出现桌面版打不开库，第一条该试的就是
