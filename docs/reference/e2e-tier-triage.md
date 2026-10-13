@@ -178,6 +178,7 @@ function）、`expectedTier` 档表、`MultiFileTab.vue:259-293` 图例提名、
 - 代理 4 纠正了我给的 T0 举例：`admin.spec` 的中文「已禁用」断言**在当前代码里不存在**
   （断的是原始 `'disabled'`，与 `statusLabel()` 一致）；陈旧物是注释，不是断言。
   本轮 settings 实质 T0 只有 `settings.spec.ts:56`「5 个标签页」（实现 6 个，漏 🔌 SFTP 设置）。
+- ✅ 上述三条 T0 已在 2026-10-13 修完（改断言/改注释，不是删用例），见文末「T0 修正结果」。
 
 
 ## 切片：analysis 第 1–19 文件（73 例）
@@ -384,3 +385,21 @@ E 组里 **两条"重复"实测判错**（原文见上方 E2/E3/E4 条目）：`
 两种可观测行为；`sftp:341` 是 env-gated 真机冒烟，不是 fixture 用例的副本。这正是 R1 的老形状 ——
 代理给的"可直删"标签必须先按内容实测一遍再落刀：分诊清单写的是**行号**，而 A/B 两组删除已经把
 后面的行号整体前移过（`auth:176`→`:141`、`sftp:404`→`:341`），照号删会删错对象。
+
+## T0 修正结果（2026-10-13）
+
+三条都**改断言/改注释**，没有减少用例数（385 例不变）：
+
+1. `settings.spec.ts` TABS 补第 6 项 `🔌 SFTP 设置`（`SettingsPage.vue:20` 早已有该 pane），
+   标题「5 个标签页」→「6 个」。这条以前是**假窄**：新增 tab 不会被任何用例发现。
+2. `settings.spec.ts:99` 的 `expect(response.request().method()).toBe('PUT')` 是同义反复
+   （`waitForResponse` 的 predicate 已经按 PUT 过滤），换成**断请求体** `"chart_dpi":200` +
+   响应 200；predicate 同时补 `postData` 过滤，与渲染器用例同一口径，避免并行 project 互抓 PUT。
+   另补 `finally` 把 `chart_dpi` 恢复成默认 100 —— 它住在共享 admin 账号上，不复位会把 200
+   漏给后面的渲染类断言（这也是 `settings.spec.ts:177「恢复默认」` 那类秩序污染的同一形状）。
+   复原助手 `putSetting` 自带 `expect(status).toBe(200)`：fire-and-forget 的 finally 坏了没人知道。
+3. `admin.spec.ts:176` 注释说断「已禁用」，body 实际断原始值 `disabled`（与 `statusLabel()` 一致）
+   → 改注释，断言不动（代理 4 的纠正成立：陈旧物是注释，不是判据）。
+
+背书：`settings.spec.ts` + `admin.spec.ts` 串行 `--retries=0` → 13 passed / 0 failed；
+单跑 `settings.spec.ts` → 8 passed。端口已释放。

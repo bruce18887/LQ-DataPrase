@@ -173,7 +173,8 @@ test.describe('用户管理 / 权限', { tag: ['@admin'] }, () => {
    * 2026-06-07 回归：PUT /auth/users/<id>/ {is_active:false} 之前 400，
    * 因为 DRF 默认 ModelViewSet.update() 不传 partial=True。
    * 修复在 UserManagementViewSet.update() 中强制 partial=True。
-   * 该用例负责：点击「禁用」按钮 → 后端 200 → 状态文案变「已禁用」 → 再次点击 → 启用。
+   * 该用例负责：点击「禁用」按钮 → 后端 200 → 状态文案变 `disabled` → 再次点击 → `active`。
+   * 状态列显示的是 statusLabel 原始值（不是中文映射），断言按此写成 `disabled`/`active`。
    */
   test('@p2 禁用 / 启用用户：单字段 PUT 200 后状态文案切换', async ({ page }) => {
     await loginAs(page, 'admin')
