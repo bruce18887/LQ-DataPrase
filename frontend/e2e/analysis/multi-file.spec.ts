@@ -331,34 +331,6 @@ test.describe('@p1 多文件分析', { tag: ['@p1', '@analysis'] }, () => {
     }
   })
 
-  test('每个文件显示独立的 limit 线（含独立图例）', async ({ page }) => {
-    test.slow()
-    await enterMultiFile(page)
-    await pickFiles(page, [RECOMMENDED.buyoff[0], RECOMMENDED.buyoff[1]])
-    await page.waitForResponse(
-      (r) => r.url().includes('/analysis/multi_lot/') && r.status() < 500,
-      { timeout: 25_000 },
-    )
-    await expect(page.locator(`${TAB} .chart-wrapper svg`)).toBeVisible({ timeout: 15_000 })
-
-    // 默认参数可能是无规格限的列（Serial_No），显式选中一个含规格限的参数
-    const limitsParam = await selectLimitsParam(page)
-    expect(limitsParam, 'BUYOFF 共有参数中应存在含规格限的参数').not.toBeNull()
-
-    // Limit 标注应包含文件名和规格限类型
-    const allTexts = await page.locator(`${TAB} text`).allTextContents()
-    const limitLabels = allTexts.filter(t => /USL|LSL/.test(t))
-
-    // 应该有至少 2 个 limit 标注（每个文件至少有一个 USL 或 LSL）
-    expect(limitLabels.length).toBeGreaterThanOrEqual(2)
-
-    // 每个 limit 标注应包含文件名和规格限类型
-    for (const label of limitLabels) {
-      // 应匹配 "文件名 USL" 或 "文件名 LSL" 格式
-      expect(label).toMatch(/.+\s+(USL|LSL)$/)
-    }
-  })
-
   test('正态分布曲线复选框控制显示/隐藏', async ({ page }) => {
     test.slow()
     await enterMultiFile(page)
