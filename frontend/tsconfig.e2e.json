@@ -1,0 +1,23 @@
+// e2e 规格不在 tsconfig.app/node/unit 的任何 include 里，所以 `npm run build` 从不检查它们 ——
+// 删除用例后留下的失效 import、空 describe、失去调用者的助手正是因此能长期潜伏（2026-10-13
+// 一次性体检出 11 处）。本配置只补一类零风险判据：未使用的 import / 局部量 / 形参。
+//
+// strict 先关着：存量有 17 条可空性 / 隐式 any 报错（outlier-handling、helpers/colors、
+// sftp/search.spec 等），修它们属于另一件事，清单见 docs/reference/e2e-tier-triage.md。
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["ES2023", "DOM"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "strict": false,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  // src/electron.d.ts 声明了 window.electronAPI / __backendUrl__，不带进来会让
+  // electron.spec.ts 报出 3 条并不存在的类型错误。
+  "include": ["e2e/**/*.ts", "src/electron.d.ts"]
+}

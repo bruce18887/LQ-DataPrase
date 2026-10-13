@@ -403,3 +403,35 @@ E 组里 **两条"重复"实测判错**（原文见上方 E2/E3/E4 条目）：`
 
 背书：`settings.spec.ts` + `admin.spec.ts` 串行 `--retries=0` → 13 passed / 0 failed；
 单跑 `settings.spec.ts` → 8 passed。端口已释放。
+
+## 失效 import 清理 + 常驻守卫（2026-10-13）
+
+体检通路：一次性给 `e2e/**/*.ts` 跑 `tsc --noUnusedLocals`（此前 **没有任何 tsconfig 覆盖 e2e**，
+`npm run build` 从不检查它们 —— 这正是 A/B 两组删除后的残留能潜伏的原因）。结果 28 条报错，其中
+**11 条是未使用符号**，逐条清完：
+
+`custom-limit-cpk`(死 import `pickTabFileAndWaitCompute`)、`legend-color`(`type Page`)、
+`combine`(`uploadFile`)、`data.spec`(整行 elplus import + 死助手 `fileCard`)、
+`multi-file-filter`(`waitLoadingGone` + 死助手 `corrScope`)、`file-list-completeness`(`SINGLE`)、
+`file-select`(`TAB`)、`global-setup`(`__dirname` 与 `fileURLToPath`)、
+`export-templates`(restore 助手里一次**读完就扔**的 GET)。
+
+守卫落地：`frontend/tsconfig.e2e.json` + `npm run lint:e2e`，并接进 `scripts/e2e_affected.mjs`
+的第一件事（约 3 s，跑在浏览器之前）。`strict` 暂时关着 —— 存量还有 **17 条**可空性/隐式 any
+报错（`outlier-handling:132/378`、`helpers/colors:37/115`、`sftp/search.spec:290/294`、
+`night-visibility` 6 条、`settings.spec:158` 的 predicate 返回 `boolean|undefined`），
+开 strict 前要先清这 17 条，那是另一件事。
+
+顺带修掉一个自造缺陷：`package.json` 里 `test:e2e:quick` **重复声明了两次**（第 18、21 行，
+是我早轮编辑 package.json 时补回来的位置错了）。JSON 同名键后者胜出，运行时无害，但没人会
+注意到自己维护着两份。
+
+### 本轮暴露的两条**存量**失败（不是清理造成的，已用 HEAD 副本 A/B 证实）
+
+- `analysis/legend-color.spec.ts:131`「回归线 itemStyle.color 与 lineStyle.color 一致」——
+  单跑也红：`el-select-dropdown__item` 命中了 `Kelvin_VIN` 但 `element is not stable` →
+  15 s 内下拉自己关掉了。同文件其余 5 例绿。
+- `analysis/file-list-completeness.spec.ts`「下拉显示全部文件，与数据管理页总数一致」——
+  与别的 spec 同批跑会红、单跑绿 → 用例间数据秩序依赖（下拉选项数被同批上传/清理踩到）。
+
+两条都属于**夜间全量轮该盯的红**，不是本轮删除的后果；登记在此以免下一轮被误当成清理回归。

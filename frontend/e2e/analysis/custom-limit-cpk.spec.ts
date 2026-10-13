@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
 import { expectChartRendered, waitLoadingGone } from '../helpers/charts'
-import { selectAnalysisFile, listParams, selectParam, pickTabFileAndWaitCompute } from '../helpers/params'
+import { selectAnalysisFile, listParams, selectParam } from '../helpers/params'
 import { RECOMMENDED } from '../fixtures/test-data'
 
 /**

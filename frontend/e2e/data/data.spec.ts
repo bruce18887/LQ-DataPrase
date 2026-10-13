@@ -5,15 +5,9 @@ import fs from 'node:fs'
 import { SEEDED_FILE_COUNT, PRIMARY_SAMPLE_FILE, SEEDED_FILES } from '../fixtures/test-data'
 import { gotoApp } from '../helpers/nav'
 import { uploadFile, uploadMultipleFiles, expectUploadSuccess } from '../helpers/upload'
-import { elSelectByPlaceholder, visibleSelectOptions } from '../helpers/elplus'
 import { openHeaderFilter, selectHeaderFilterOption } from '../helpers/colfilter'
 
 const SEEDED_MIN = SEEDED_FILE_COUNT
-
-/** 在文件列表 tab 内按文件名定位卡片 */
-function fileCard(page: import('@playwright/test').Page, filename: string) {
-  return page.locator('.el-card').filter({ hasText: filename })
-}
 
 test.describe('数据管理 /data', { tag: ['@data'] }, () => {
   test('@p0 页面渲染：已植入文件列表可见，/files/ 返回 200', async ({ page }) => {

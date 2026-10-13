@@ -1,7 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
 import { pickTabFile, filterControl, filePicker, closeFilePopper } from '../helpers/params'
-import { waitLoadingGone } from '../helpers/charts'
 import { RECOMMENDED } from '../fixtures/test-data'
 
 /**
@@ -65,11 +64,6 @@ function multiLotReqWith(...fragments: string[]) {
     r.request().method() === 'POST' &&
     fragments.every((f) => r.request().postData()?.includes(f) === true) &&
     r.status() < 500
-}
-
-/** 当前可见相关性对比 tab 的容器（el-tabs 隐藏 pane display:none） */
-function corrScope(page: Page) {
-  return page.locator('.el-tab-pane').filter({ hasText: '文件相关性' }).filter({ visible: true }).first()
 }
 
 /**
