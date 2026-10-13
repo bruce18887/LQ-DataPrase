@@ -1,7 +1,8 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { startSftpServer, type SftpTestServer } from '../helpers/sftpServer'
+import { gotoApp } from '../helpers/nav'
 import {
-  badge, connectAndOpenSearch, runSearch, waitSettled,
+  addTag, badge, connectAndOpenSearch, runSearch, waitSettled,
 } from '../helpers/sftpSearchFlow'
 
 /**
@@ -9,8 +10,12 @@ import {
  * 结果表从写死 520px 改成跟随视口，条件卡可收起成一行摘要）。
  *
  * 为什么值得单独一个文件：这些断言读的是**像素与几何**，不是数据。它们与 `search.spec.ts`
- * 共用 `helpers/sftpSearchFlow` 那条真链路，但结论只在窗口尺寸变化时才会变 —— 混进功能
- * 套件会让那边每条用例都背重视口耦合。
+ * 共用 `helpers/sftpSearchFlow`，但结论只在窗口尺寸变化时才会变 —— 混进功能套件会让那边
+ * 每条用例都背重视口耦合。
+ *
+ * 前置分两档：**L4/L5 要真链路**（要跑一次搜索才知道摘要与表格长成什么样）；**L1/L2/L3/L6
+ * 只读版式**，走 `openSearchForm` 的直接入口，一次连接都不用 —— 连接那条链路的成本（约
+ * 15s/例）比它们要测的东西贵得多。
  *
  * 三条不显然的口径：
  * - **一页的预算是 796px**：基准视口 1440×900，`.content-area` 客户高实测 844（900 − 顶栏 56），
@@ -27,6 +32,20 @@ import {
  * 再判是版式坏了还是断言写错。
  */
 let server: SftpTestServer
+
+/**
+ * 版式用例的免连接入口：只量几何、不发搜索，因此不需要活的 SFTP 会话。
+ *
+ * 直接 `gotoApp('/sftp/search')` 拿到的是空表单（roots 平时由浏览器页的面包屑预填），
+ * 所以要手工补一个与预填同文的 tag —— 少这一格占位条件卡就矮一截，而 L1/L6 的阈值离实测
+ * 只差 1px，占位不齐就测不出同一份版式。做法同 `search.spec.ts` 的「未连接」那条用例。
+ */
+async function openSearchForm(page: Page, root = '/batch1') {
+  await gotoApp(page, '/sftp/search')
+  await expect(page.getByTestId('sftp-search-roots')).toBeVisible({ timeout: 15_000 })
+  await addTag(page, 'sftp-search-roots', root)
+  await expect(page.locator('.sc-tags .el-tag')).toHaveText([root])
+}
 
 async function heightOf(loc: Locator): Promise<number> {
   const box = await loc.boundingBox()
@@ -74,7 +93,7 @@ test.describe('@sftp SFTP 搜索页版式', { tag: ['@p1', '@sftp'] }, () => {
   test.afterAll(() => { server?.stop() })
 
   test('L1 条件卡展开态不再吃掉一整屏', async ({ page }) => {
-    await connectAndOpenSearch(page, server, '/batch1')
+    await openSearchForm(page)
     const h = await heightOf(page.locator('.search-criteria'))
     console.log(`[L1] 条件卡展开=${h}px（改版前实测 821px；一页预算 796px）`)
     expect(h).toBeLessThanOrEqual(560)
@@ -84,7 +103,7 @@ test.describe('@sftp SFTP 搜索页版式', { tag: ['@p1', '@sftp'] }, () => {
   })
 
   test('L2 短字段真的并排了：横向空间被用上', async ({ page }) => {
-    await connectAndOpenSearch(page, server, '/batch1')
+    await openSearchForm(page)
     // 切到内容档只为把「关键词」控件渲染出来（列名/关键词是 v-if 出来的）
     await page.getByTestId('sftp-search-mode').getByText('内容含').click()
     await page.getByTestId('sftp-search-term').fill('ShadowReg2')
@@ -101,7 +120,7 @@ test.describe('@sftp SFTP 搜索页版式', { tag: ['@p1', '@sftp'] }, () => {
   })
 
   test('L3 窄窗口回落单栏，且不出现横向溢出', async ({ page }) => {
-    await connectAndOpenSearch(page, server, '/batch1')
+    await openSearchForm(page)
     await page.setViewportSize({ width: 900, height: 900 })
     await expect(page.getByTestId('sftp-search-roots')).toBeVisible()
 
@@ -170,7 +189,7 @@ test.describe('@sftp SFTP 搜索页版式', { tag: ['@p1', '@sftp'] }, () => {
 
   test('L6 深色主题下版式不变形', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('theme', 'night'))
-    await connectAndOpenSearch(page, server, '/batch1')
+    await openSearchForm(page)
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'night')
 
     const h = await heightOf(page.locator('.search-criteria'))
