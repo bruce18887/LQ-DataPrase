@@ -152,6 +152,20 @@ function）、`expectedTier` 档表、`MultiFileTab.vue:259-293` 图例提名、
   payload builder。→ 要么定义 **T1f + 抽出 `buildHistogramRequest()` 纯函数**，要么明确这类永留 e2e。
 - **D3「组件内联逻辑」无档（约 14 例）**：条件渲染显隐、默认值、菜单顺序、`aria-expanded`、
   store 持久化。jsdom + @vue/test-utils 完全能复现，但**设计时你明确选了"不做组件/DOM 层"**。
+
+### 对 D1/D2/D3 的实测结论：三条其实是**一堵墙**，建议现在不要翻（2026-10-13）
+
+- D1 与 D3 同源：`grep -l lineStyle src/pages/analysis/components/*.vue` 命中
+  `HistogramChart / BoxPlotChart / MultiFileBoxPlot / MultiFileChart / QQPlotChart / SerialChart`
+  **6 个 .vue** —— option 是在组件里就地拼的，所以「读 getOption」和「组件内联逻辑」都是同一件事：
+  要先做纯函数提取才谈得上 T2。`src/utils/echarts-theme.ts` 也卡在同一处：它 `import authApi` +
+  `useThemeStore`，这正是当初把它排除出 T2 白名单的原因。
+- **翻墙的收益不成立**：提取之后这 ~36 例仍各需留一条 T3 接线证明（判据落点变了，浏览器用例
+  数不会掉），而墙钟成本由冷启动决定、不由断言条数决定 —— 花了改动 6 个最易碎组件的风险，
+  换来的只是「以后新断言有地方写」，而这一条 `npm run test:e2e:affected` 的 T1/T2 规则已经做到了。
+- 建议维持现状 + 设一个**再议触发条件**：当夜间轮 `⚠ DEGRADED`（墙钟 > 35min 或用例 > 450）真的
+  触发一次，再启动提取；届时首选 D2 的 `buildHistogramRequest()`，它是 6 个组件之外唯一的、
+  改动面最小的纯函数（`postData` 类断言约 20 例，面积最大而耦合最低）。
   现状是这 14 例既进不了 T2（有 DOM）也不在 T3 五类里。
 - **D4「负向请求计数」无档（3 例）**：`某端点被调用 0 次 / 恰好 1 次`（懒挂载、watch 去重）。
   五档皆不合，却确实是唯一防线 → 建议显式判为「浏览器独占·不可下沉」并补进 T3。
@@ -336,8 +350,21 @@ kde-curve.spec.ts:102 | 正态分布开关仍独立 | T3① | legendText()).not.
 
 - ✅ `boxplot-bool-params.spec.ts` 两条 → `test/backend/test_boxplot_nonnumeric_params.py`
   （5 例 / 10 ms，另补 3 条语义）。e2e 侧整文件已在 A 组删除（`9fec0dd`，138 行）。
-- ⏳ 其余 324 例分诊。
-- ⏳ 试点簇 #2 `custom-limit-cpk`（3 例 T1+T3，拆法已在上面标出）、#3 `settings/cpk-thresholds`。
+- ✅ 其余 324 例分诊（2026-10-13 结案：文首已记「全部 397 例已分诊」，这条待办早该划掉）。
+- ✅ 试点簇 #3 `settings/cpk-thresholds`（2026-10-13 结案，同样**无需搬迁**）：后端
+  `apps/analysis/tests_cpk_thresholds.py` 已有 12 例把数值侧钉死，含同方向与反方向
+  （`test_raising_thresholds_downgrades_the_same_cpk`、`test_b_and_c_boundaries_use_user_values`、
+  `test_overview_level_follows_thresholds`、`test_low_cpk_alert_uses_user_b_threshold`）。
+  e2e 三条各证一个**不同的 DOM 面**：`:92` 等级 + 数值标签同色、`:121` `.cpk-badge--a` 与
+  `el-tag--success` 两个 class、`:141` 警报文案内插用户 B 阈。三条不能合并的原因是它们 PUT 的
+  阈值档位互斥（抬高 / 压低 / 卡在 B 阈附近），合并就得丢掉一档。**保留三条**。
+- ✅ 试点簇 #2 `custom-limit-cpk`（2026-10-13 结案，**结论是无需搬迁**）：原计划把数值组合下沉到
+  `test/backend/test_histogram_range_type.py`，读实现后发现有 4 条 CL 判据**早就在 T1**了
+  （`:107` 重算、`:125` custom==RDL 必须同值、`:135` 非 CL **与单边 CL** 一律 `custom_cpk=None`、
+  `:77` CL 覆盖分箱）。尤其 `:143-149` 正是 e2e 从没覆盖的那一格（只填下限、上限为 null）。
+  e2e 三条留哪：case 1 是双卡与 markLine 的接线证明，case 2/3 防的是**前端**「第二次 change 不生效」
+  与「旧响应后到覆盖」——T1 表达不了，三条都有承重，不动。
+  教训：搬迁前先读目标层的现有覆盖，别按"e2e 里有数值断言"就假定后端缺。
 
 ## B 组执行结果（2026-10-13，已按「需要一轮 e2e 背书」的要求做完）
 
