@@ -16,6 +16,7 @@ const TABS = [
   { label: '📋 表格设置', content: '默认每页行数' },
   { label: '📐 CPK 阈值', content: 'CPK A 级阈值' },
   { label: '📄 导出模板', content: '导出文件名' },
+  { label: '🔌 SFTP 设置', content: 'SFTP 下载超时' },
   { label: '📁 存储路径', content: '数据目录' },
 ]
 
@@ -38,28 +39,36 @@ async function clickTab(page: import('@playwright/test').Page, label: string) {
   await page.getByRole('tab', { name: label }).click()
 }
 
-/** 恢复渲染器为默认 svg（只 PUT 单字段，不触碰其它设置） */
-async function restoreChartRenderer(page: import('@playwright/test').Page) {
-  await page.evaluate(async () => {
-    await fetch('/api/v1/auth/settings/', {
+/** 只 PUT 指定字段（不触碰其它设置）—— 用例改过的账号级设置都靠它复原 */
+async function putSetting(page: import('@playwright/test').Page, body: Record<string, unknown>) {
+  const status = await page.evaluate(async (payload) => {
+    const resp = await fetch('/api/v1/auth/settings/', {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${localStorage.getItem('access_token')}`,
       },
-      body: JSON.stringify({ chart_renderer: 'svg' }),
+      body: JSON.stringify(payload),
     })
-  })
+    return resp.status
+  }, body)
+  // 复原失败必须出声：共享 admin 账号上留下的脏值会踩掉后续用例的前提
+  expect(status, `PUT ${JSON.stringify(body)} 应成功`).toBe(200)
+}
+
+/** 恢复渲染器为默认 svg */
+async function restoreChartRenderer(page: import('@playwright/test').Page) {
+  await putSetting(page, { chart_renderer: 'svg' })
 }
 
 test.describe('@p1 系统设置页', { tag: ['@p1', '@settings'] }, () => {
-  test('页面渲染：5 个标签页与关键设置区块可见', async ({ page }) => {
+  test('页面渲染：6 个标签页与关键设置区块可见', async ({ page }) => {
     await gotoApp(page, '/settings')
 
     // 页面标题（SettingsPage.vue <h2>⚙️ 系统设置</h2>）
     await expect(page.getByRole('heading', { name: '系统设置' })).toBeVisible()
 
-    // 5 个 tab 标签（SettingsPage.vue el-tab-pane）
+    // 6 个 tab 标签（SettingsPage.vue el-tab-pane）
     for (const tab of TABS) {
       await expect(page.getByRole('tab', { name: tab.label })).toBeVisible()
     }
@@ -90,31 +99,41 @@ test.describe('@p1 系统设置页', { tag: ['@p1', '@settings'] }, () => {
     }
   })
 
-  test('修改设置项并保存 → PUT /auth/settings/ 且出现成功提示', async ({ page }) => {
-    await gotoApp(page, '/settings')
+  test('修改设置项并保存 → PUT 请求体带上改动字段且出现成功提示', async ({ page }) => {
+    try {
+      await gotoApp(page, '/settings')
 
-    // 进入「显示设置」标签页，修改一个安全的数值字段：图表 DPI
-    await clickTab(page, '📊 显示设置')
-    const dpiInput = page
-      .getByText('图表 DPI')
-      .locator('xpath=ancestor::*[contains(@class,"el-form-item")]')
-      .getByRole('spinbutton')
-    await expect(dpiInput).toBeVisible()
-    await dpiInput.fill('200')
-    // 触发 el-input-number 的 change（失焦提交值）
-    await dpiInput.blur()
+      // 进入「显示设置」标签页，修改一个安全的数值字段：图表 DPI
+      await clickTab(page, '📊 显示设置')
+      const dpiInput = page
+        .getByText('图表 DPI')
+        .locator('xpath=ancestor::*[contains(@class,"el-form-item")]')
+        .getByRole('spinbutton')
+      await expect(dpiInput).toBeVisible()
+      await dpiInput.fill('200')
+      // 触发 el-input-number 的 change（失焦提交值）
+      await dpiInput.blur()
 
-    // 点击保存并断言发生 PUT /auth/settings/
-    const [response] = await Promise.all([
-      page.waitForResponse(
-        (resp) => /\/auth\/settings\//.test(resp.url()) && resp.request().method() === 'PUT'
-      ),
-      page.getByRole('button', { name: '💾 保存设置' }).click(),
-    ])
-    expect(response.request().method()).toBe('PUT')
+      // 点保存并断言「改动真的发出去了」。
+      // 只断 method 是同义反复（predicate 已经按 PUT 过滤），且并行 project 的 PUT
+      // 会被错抓（见上面渲染器用例的同类处理）—— 所以判据落在请求体上。
+      const [response] = await Promise.all([
+        page.waitForResponse(
+          (resp) =>
+            /\/auth\/settings\//.test(resp.url()) &&
+            resp.request().method() === 'PUT' &&
+            /"chart_dpi":\s*200/.test(resp.request().postData() ?? ''),
+        ),
+        page.getByRole('button', { name: '💾 保存设置' }).click(),
+      ])
+      expect(response.status(), '保存应返回 200').toBe(200)
 
-    // 成功 ElMessage — 限定 .el-message 避免命中标题/按钮文本
-    await expect(page.locator('.el-message').filter({ hasText: /保存|成功/ })).toBeVisible()
+      // 成功 ElMessage — 限定 .el-message 避免命中标题/按钮文本
+      await expect(page.locator('.el-message').filter({ hasText: /保存|成功/ })).toBeVisible()
+    } finally {
+      // DPI 住在共享 admin 账号上，不复位会把 200 漏给后续用例（渲染相关断言按 100 估）
+      await putSetting(page, { chart_dpi: 100 })
+    }
   })
 
   test('渲染器保存持久化：改为 Canvas → 保存 → 后端回显 canvas；结束后恢复 SVG', async ({ page }) => {
