@@ -136,6 +136,12 @@ e2e 套件已长到全量一轮 ≥20 min，功能继续加就会线性变慢。
    → `parseReport` 取 `stats.duration`。
 4. **`PLAYWRIGHT_JSON_OUTPUT_NAME` 在 1.60 仍有效但 `grep node_modules` 找不到**
    （代码被打包）。→ 这类"能不能用"只能实测，不能靠 grep 结论。
+5. **映射表复查（2026-10-13，因新增 `tsconfig.e2e.json` 而起）**：用 `--files` 虚构改动集再探一遍
+   未覆盖路径 —— `frontend/src/pages/` 实际只有 admin/analysis/auth/dashboard/data/settings/sftp
+   七个子目录，与表内条目**一一对上，没有漏网的页面目录**；`scripts/e2e_affected.mjs` 自身与
+   `frontend/src/pages/batch/`（不存在的路径）都走「未知路径 → 全局清单」这条**安全**分支，
+   不会退化成 `NO AFFECTED TESTS`；新文件 `frontend/tsconfig.e2e.json` 被既有前缀
+   `frontend/tsconfig` 命中 → 全量（对 tsconfig.app/node 是对的，对 e2e 那份偏保守但安全）。
 
 ## 未验证清单（下一轮实施要补）
 
