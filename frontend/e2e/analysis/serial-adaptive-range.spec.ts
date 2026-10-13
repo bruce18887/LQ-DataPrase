@@ -1,6 +1,6 @@
 import { test, expect, type Page, type Locator } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, selectParamWithSpecLimits } from '../helpers/params'
+import { selectAnalysisFile, selectParamWithSpecLimits, openSerialDistribution } from '../helpers/params'
 import { RECOMMENDED } from '../fixtures/test-data'
 
 /**
@@ -10,9 +10,6 @@ import { RECOMMENDED } from '../fixtures/test-data'
  * 「数据窄带 + 大片空白」。前端改为按 anchor==0 点的实际值算紧凑范围，超视野的
  * 规格限/σ 线贴边钳制并加 ↑/↓。后端契约不变（本 spec 只读响应比对）。
  */
-
-const SINGLE = '.single-param-tab'
-const SERIAL_CANVAS = `${SINGLE} .serial-chart-wrapper div[_echarts_instance_]`
 
 async function readOption(loc: Locator): Promise<any> {
   return loc.evaluate((el: any) => el.__echartsInstance__?.getOption?.() ?? null)
@@ -24,18 +21,7 @@ async function enterSerial(page: Page, fileLabel: string) {
   await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
   const limited = await selectParamWithSpecLimits(page)
   test.skip(!limited, '当前文件没有带真实规格限的参数')
-  const respPromise = page.waitForResponse(
-    (r) =>
-      r.url().includes('/analysis/serial_distribution/') &&
-      r.request().method() === 'POST' &&
-      r.status() < 500,
-    { timeout: 30_000 },
-  )
-  await page.getByText('显示序列分布').click()
-  const resp = await respPromise
-  const canvas = page.locator(SERIAL_CANVAS).first()
-  await expect(canvas).toBeVisible({ timeout: 20_000 })
-  return { canvas, resp }
+  return openSerialDistribution(page)
 }
 
 /** 复刻组件 SerialChart.rangeOfPoints 的规则（回归钉） */

@@ -1,6 +1,6 @@
 import { test, expect, type Page, type Locator } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, selectParamWithSpecLimits, filterControl } from '../helpers/params'
+import { selectAnalysisFile, selectParamWithSpecLimits, filterControl, openSerialDistribution } from '../helpers/params'
 import { RECOMMENDED } from '../fixtures/test-data'
 
 /**
@@ -13,7 +13,6 @@ import { RECOMMENDED } from '../fixtures/test-data'
  */
 
 const SINGLE = '.single-param-tab'
-const SERIAL_CANVAS = `${SINGLE} .serial-chart-wrapper div[_echarts_instance_]`
 
 /** 读图表实例 option（useChart 把实例挂在容器 div 本身） */
 async function readOption(loc: Locator): Promise<any> {
@@ -27,19 +26,7 @@ async function enterSerial(page: Page, fileLabel: string) {
   await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
   const limited = await selectParamWithSpecLimits(page)
   test.skip(!limited, '当前文件没有带真实规格限的参数')
-  // R2④：waitForResponse 必须在触发动作之前注册
-  const respPromise = page.waitForResponse(
-    (r) =>
-      r.url().includes('/analysis/serial_distribution/') &&
-      r.request().method() === 'POST' &&
-      r.status() < 500,
-    { timeout: 30_000 },
-  )
-  await page.getByText('显示序列分布').click()
-  const resp = await respPromise
-  const canvas = page.locator(SERIAL_CANVAS).first()
-  await expect(canvas).toBeVisible({ timeout: 20_000 })
-  return { canvas, resp }
+  return openSerialDistribution(page)
 }
 
 /** 分级表一致性（spec §1.1）：点径/透明度由总点数决定 */

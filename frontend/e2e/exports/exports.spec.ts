@@ -43,12 +43,9 @@ async function openTab(page: Page, tabLabel: string, panelHeading: string) {
   await gotoApp(page, '/data')
   await page.getByRole('tab', { name: tabLabel }).click()
   await expect(page.getByRole('heading', { name: panelHeading })).toBeVisible({ timeout: 15_000 })
-  // 文件列表由 DataManagement 的 loadFiles()（onMounted）拉取后作为 prop 传入，
-  // 必须等 /files/ 返回才能保证 el-select 下拉有可选项，否则下拉为空。
-  await page.waitForResponse(
-    (r) => /\/files\/?(\?|$)/.test(r.url()) && r.status() === 200,
-    { timeout: 15_000 },
-  ).catch(() => {})
+  // 这里**不要**再等 /files/：loadFiles() 在 onMounted 就发了，等它必须注册在
+  // gotoApp 之前（R2④），注册晚了只会把 15s 超时烧满再被 catch 吞掉。「下拉有可选项」
+  // 由下面的 waitForOptions 轮询保证 —— 那才是正确机制。
   return page.locator('[role="tabpanel"]:visible')
 }
 
@@ -311,12 +308,6 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     // 切到 "导出工具" tab (DataManagement.vue tabs-nav > button.tab-btn)
     await page.locator('.tab-btn').filter({ hasText: '导出工具' }).click()
 
-    // 等待 /files/ 返回，确保 banner 下拉有可选文件
-    await page.waitForResponse(
-      (r) => /\/files\/?(\?|$)/.test(r.url()) && r.status() === 200,
-      { timeout: 15_000 },
-    ).catch(() => {})
-
     // 在父级 banner 中选择第一个文件 (DataManagement.vue 当前文件选择器)，重试一次防并行负载竞态
     const fileSelect = page.locator('.active-file-banner:visible .el-select').first()
     await fileSelect.click()
@@ -403,11 +394,6 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     await gotoApp(page, '/data')
     await page.locator('.tab-btn').filter({ hasText: '导出工具' }).click()
 
-    await page.waitForResponse(
-      (r) => /\/files\/?(\?|$)/.test(r.url()) && r.status() === 200,
-      { timeout: 15_000 },
-    ).catch(() => {})
-
     // 选择第一个文件（重试一次：并行负载下 /files/ API 可能未返回、选项为 0）
     const fileSelect = page.locator('.active-file-banner:visible .el-select').first()
     await fileSelect.click()
@@ -493,11 +479,6 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
   test('输入关键字按 Enter 可全选匹配参数（过滤 + 清空 + 增量累计）', async ({ page }) => {
     await gotoApp(page, '/data')
     await page.locator('.tab-btn').filter({ hasText: '导出工具' }).click()
-
-    await page.waitForResponse(
-      (r) => /\/files\/?(\?|$)/.test(r.url()) && r.status() === 200,
-      { timeout: 15_000 },
-    ).catch(() => {})
 
     // 选择第一个文件（重试一次：并行负载下 /files/ API 可能未返回、选项为 0）
     const fileSelect = page.locator('.active-file-banner:visible .el-select').first()

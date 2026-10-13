@@ -203,36 +203,83 @@ export async function closeFilePopper(page: Page, scope: 'single' | 'wafer' | 'c
  *
  * 实现：监听 histogram 响应，按 listParams 顺序逐个试，读到 lower_limit 与
  * upper_limit 都非 null 即停（实测 CTA8280F 在第 9 个参数 Kelvin_VIN 命中）。
- * 等待用条件轮询而非固定长睡眠，命中即返回。
+ * 推进靠**本轮响应到达**而不是定时睡眠：旧实现未命中时每个参数都要烧满 3s
+ * （8 个系统列 = 24s 纯等待），命中与未命中的代价差了一个数量级。
  */
 export async function selectParamWithSpecLimits(page: Page, maxTries = 20): Promise<string | null> {
   let found: string | null = null
+  // handler 已完整考虑过的 histogram POST 响应数（含非 200）。
+  let settled = 0
   const handler = async (response: import('@playwright/test').Response) => {
-    if (found || !response.url().includes('/analysis/histogram/')) return
-    if (response.request().method() !== 'POST' || response.status() !== 200) return
+    if (!response.url().includes('/analysis/histogram/')) return
+    if (response.request().method() !== 'POST') return
     try {
-      const body = await response.json()
-      for (const [param, data] of Object.entries((body?.results ?? {}) as Record<string, any>)) {
-        if (data?.lower_limit != null && data?.upper_limit != null) {
-          found = param
-          return
+      if (!found && response.status() === 200) {
+        const body = await response.json()
+        for (const [param, data] of Object.entries((body?.results ?? {}) as Record<string, any>)) {
+          if (data?.lower_limit != null && data?.upper_limit != null) {
+            found = param
+            break
+          }
         }
       }
     } catch { /* 非 JSON / 已销毁的响应，忽略 */ }
+    settled++
   }
   page.on('response', handler)
   try {
     const params = await listParams(page)
     for (const p of params.slice(0, maxTries)) {
       if (found) break
+      const before = settled
       await selectParam(page, p)
-      // 条件轮询：最多等 3s，命中立即继续（不用固定 waitForTimeout）
-      for (let i = 0; i < 30 && !found; i++) await page.waitForTimeout(100)
+      // 必须保持响应驱动：见 waitForNextHistogramCompute 的注释——UI 在新响应到达前
+      // 显示的是上一个参数的图表，退化成纯计时会把那个坑放回来。上一轮的迟到响应
+      // 可能让这里提前一格通过，代价只是多探一个参数；found 只由真响应置位，不会误判。
+      await expect
+        .poll(() => settled > before || found !== null, { timeout: 10_000 })
+        .toBe(true)
+        .catch(() => { /* 这一轮没发出请求（非数值列等）：按未命中继续 */ })
     }
   } finally {
     page.off('response', handler)
   }
   return found
+}
+
+/** 序列分布图容器（SingleParamTab 内） */
+const SERIAL_CANVAS = '.single-param-tab .serial-chart-wrapper div[_echarts_instance_]'
+
+/**
+ * 打开「显示序列分布」并返回**这一次**的 serial_distribution 响应与 canvas。
+ *
+ * 为什么不能直接点一下：这个开关是**账号级持久**的（`analysis_chart_memory` 默认 true，
+ * 组件 watch 到 toggle 变化就写回 `analysis_chart_state`）。进页面时它可能已经是开的，
+ * 此时同样一次点击变成「关」——不发请求，`waitForResponse` 30s 超时、canvas 也不出现。
+ * 2026-10-13 实测：`serial-overlap.spec.ts:225` 在文件内排第 4 时必红（40.4s），
+ * 单独作为第 1 条跑则 12.2s 绿；`serial-adaptive-range` 先跑过之后再跑 `serial-overlap`，
+ * 连第 1 条 `:122` 也红。所以先把开关收敛到「关」，再注册 → 点开。
+ *
+ * 收尾状态与旧实现一致（开着），不会给后面的用例留下新的携带状态。
+ */
+export async function openSerialDistribution(page: Page) {
+  const canvas = page.locator(SERIAL_CANVAS).first()
+  if (await canvas.isVisible()) {
+    await page.getByText('显示序列分布').click()
+    await expect(canvas).toBeHidden({ timeout: 15_000 })
+  }
+  // R2④：waitForResponse 必须在触发动作之前注册
+  const respPromise = page.waitForResponse(
+    (r) =>
+      r.url().includes('/analysis/serial_distribution/') &&
+      r.request().method() === 'POST' &&
+      r.status() < 500,
+    { timeout: 30_000 },
+  )
+  await page.getByText('显示序列分布').click()
+  const resp = await respPromise
+  await expect(canvas).toBeVisible({ timeout: 20_000 })
+  return { canvas, resp }
 }
 
 /**

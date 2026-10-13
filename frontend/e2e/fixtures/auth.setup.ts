@@ -37,8 +37,16 @@ async function persist(role: Role, statePath: string, page: import('@playwright/
  *
  * 这是**兜底不是替代**：每条 mutate 账号设置的用例仍该自己 finally 还原（`settings.spec.ts` 的
  * DPI 与「恢复默认」本轮已补上）。规范集只列实测漏过的字段，刻意不含 recent_files /
- * analysis_chart_state / sftp_last_* 这类用户历史 —— 没有用例依赖它们，把它们洗掉反而会把
- * 「恢复默认」那条用例的语义测窄，也会踩掉并行会话真实配下的 SFTP 主机。
+ * sftp_last_* 这类用户历史 —— 没有用例依赖它们，洗掉反而会踩掉并行会话真实配下的 SFTP 主机。
+ *
+ * `analysis_chart_state` 原先也被当作"用户历史"排除，2026-10-13 夜实测**这个判断是错的**：
+ * 库里 admin 停在 `toggles={hist,serial,qq,box 全 true}`，于是
+ * ① `legend-color:27` 的 `.chart-wrapper div[_echarts_instance_]` strict mode 命中 **3** 个实例
+ *    （直方图 + QQ + 箱线图）直接红；② `analysis_chart_memory=true` 会把开关写回账号，
+ *    `serial-adaptive-range` 点成"开"之后，`serial-overlap` 里**逐字相同**的 `enterSerial`
+ *    同一次点击变成"关" → 不发 `serial_distribution` POST → 30s 超时。
+ * 钉成模型默认 `{}` 即中性态：`SingleParamTab.vue:451` 在 `state.toggles` 缺失时不套用记忆，
+ * 组件自身的默认是 hist=true / serial=qq=box=false（`:286/:292/:375/:403`）。
  */
 const CANONICAL_SETTINGS = {
   filename_wrap: true,
@@ -47,6 +55,7 @@ const CANONICAL_SETTINGS = {
   cpk_b_threshold: 1.33,
   cpk_c_threshold: 1.0,
   analysis_chart_memory: true,
+  analysis_chart_state: {},
 }
 
 async function canonicalize(page: import('@playwright/test').Page) {
