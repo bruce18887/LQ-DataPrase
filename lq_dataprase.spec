@@ -118,6 +118,13 @@ _hiddenimports += [
     # 冻结产物会退回默认 AppConfig，pragma 在出货桌面版上静默不生效。
     'apps.common.apps',
     'apps.common.db_pragmas',
+    # 备份命令由 Django 遍历各 app 的 management/commands 包来发现，PyInstaller 不走这条
+    # 发现链路 —— 不显式收集，冻结产物里 call_command('backup_db') 会「找不到命令」。
+    # 与上面 apps.common.apps 那条同一形状（docs/tasks/todo.md:2790-2797）。
+    'apps.common.backup',
+    'apps.common.management',
+    'apps.common.management.commands',
+    'apps.common.management.commands.backup_db',
 
     # Config package
     'config',
