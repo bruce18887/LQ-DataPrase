@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import { gotoApp } from '../helpers/nav'
 import { uploadFile } from '../helpers/upload'
 import { makeZip } from '../helpers/zip'
-import { cleanupQuiet } from '../helpers/cleanup'
+import { cleanupQuiet, deleteBatchQuiet, deleteFilesByNameQuiet } from '../helpers/cleanup'
 
 test.describe('上传限制：仅 CSV 与 ZIP', { tag: ['@p2', '@data'] }, () => {
   test('非 CSV/ZIP 文件会被前端拒绝并给出提示', async ({ page }) => {
@@ -40,6 +40,10 @@ test.describe('上传限制：仅 CSV 与 ZIP', { tag: ['@p2', '@data'] }, () =>
       // Should not show the CSV-only rejection toast.
       await expect(page.getByText(/不是 CSV 或 ZIP/)).not.toBeVisible({ timeout: 5_000 })
     } finally {
+      // 只删临时 csv 会把 `col1,col2` 那一行 DataFile 留在共享 DB 里：它没有
+      // Site 列，按 -created_at 排到最前后会被分析页自动选中 → site_stats 400
+      // no_site_column → P0 冒烟「无控制台错误」挂（R2③ 自建/自清）。
+      await deleteFilesByNameQuiet(page, 'e2e_csv_only_')
       cleanupQuiet(tmpPath)
     }
   })
@@ -47,7 +51,8 @@ test.describe('上传限制：仅 CSV 与 ZIP', { tag: ['@p2', '@data'] }, () =>
   test('ZIP 文件可以进入上传流程（不被拒绝）', async ({ page }) => {
     await gotoApp(page, '/data')
 
-    const zipPath = path.join(os.tmpdir(), `e2e_zip_ok_${Date.now()}.zip`)
+    const zipBase = `e2e_zip_ok_${Date.now()}`
+    const zipPath = path.join(os.tmpdir(), `${zipBase}.zip`)
     makeZip(zipPath, [{ name: 'a.csv', content: '[GENERAL],\nTester_Type,CTA8290DPlus,\n[Data]\ncol1\nu1\nmin1\nmax1\n1\n' }])
 
     try {
@@ -58,6 +63,9 @@ test.describe('上传限制：仅 CSV 与 ZIP', { tag: ['@p2', '@data'] }, () =>
       await expect(page.getByText(/不是 CSV 或 ZIP/)).not.toBeVisible({ timeout: 5_000 })
       await expect(page.getByText(/导入 1 个文件/)).toBeVisible({ timeout: 60_000 })
     } finally {
+      // 同 zip-upload.spec.ts：`a.csv` 只有 col1、无 Site 列，留在库里就顶到
+      // files[0] 被分析页自动选中，P0 冒烟随之挂。批次名 = zip 基础名。
+      await deleteBatchQuiet(page, zipBase)
       cleanupQuiet(zipPath)
     }
   })
