@@ -3298,3 +3298,51 @@ temp_dir/config_file` 披露的是**服务器**的目录结构、库文件与配
 3. 全量 e2e 与门禁数字见上方总账表的「追加」段落（1422 例 / 365 passed）。
 
 
+
+---
+
+# 任务：内容区页头标题删除（与面包屑三处重复）（2026-10-14）
+
+用户看截图问：「数据分析页红框那块（页头标题）能不能去掉或挪到最上方，把右栏抬高」。
+分析结论（全部实测，1536×864 = 1920 屏 125% 缩放，真实种子数据）：
+
+- 那行是 `AnalysisPage.vue` 的 `<h2>📈 数据分析</h2>`，走全局 UA 样式，占位 **50px**
+  （24px 字号 × 1.25 行高 = 30，+ `margin-bottom: --spacing-5` = 20）。
+- **它已经是第三份重复**：Topbar 面包屑末级（`Topbar.vue` routeLabels）与侧栏激活态各写一遍同名。
+  e2e 早就被这个重复咬过 —— `smoke/pages.spec.ts:19` 注释「限定在侧边栏，避免与 Topbar 面包屑同名冲突」。
+- 「换到最上方」= 现状：最上面那条 56px 的 Topbar 已经在显示页面名了，所以 B 选项实质就是 A 选项。
+- 全站只有这 3 页有裸 `<h2>`（数据分析/用户管理/系统设置），**仪表板没有**；
+  数据管理与 SFTP 两页用的是带统计芯片/操作按钮的 `page-header`，不是纯标题 → 保留。
+
+## 实施清单
+
+- [x] 批A（单独提交 `437aaac`）：改版式前先收拢选择器契约 —— `settings.spec.ts:85` 的
+      `getByRole('heading', { name: '系统设置' })` 换成 `[data-testid=breadcrumb]` 末级项，
+      Topbar 的 `<el-breadcrumb>` 加 `data-testid="breadcrumb"`
+- [x] 批B：删 `AnalysisPage.vue` / `admin/UserManagement.vue` / `settings/SettingsPage.vue` 三处 `<h2>`，
+      连带删掉随之失效的 scoped 规则（`.user-management h2`、`.settings-page h2`）
+- [x] 双主题截图留证：light/night × 三页 = 6 张，落 `tasks/probe-shots/`（探针已删，产物不提交）
+- [x] 文档：`docs/reference/ui-design-guide.md` §8 DON'T 增一条「内容区页头不再写页面名」并写明例外；
+      `docs/tasks/lessons.md` 记两条（grep 文案 ≠ 查测试承重；sticky 排版要分首屏/滚动两笔账）
+
+## 被实测否掉的那半方案（不要照抄）
+
+原提议「把第二行工具栏（异常值处理 + 数据筛选）并进 sticky 行」——真机把第二行子节点
+`appendChild` 进第一行量高：1536 → **142px（3 行）**、1920 → **102px（2 行）**。
+只省 14px（128→114），却让 sticky 常驻区从 62 撑到 102，滚动后反而少看 40px 图表。**净负收益，作废**。
+
+## 批C：门禁脚本的 `--` 透传修复（被这次误伤后顺手补）
+
+`scripts/e2e_affected.mjs` 文档写「`--` 之后的参数转给 playwright」，实现里 `PW_EXTRA` 只拼在
+模块分支的 `paths` 上，**全量分支与附带 P0 那条都丢了它** —— 于是 `-- --workers=1` 在最需要它的
+全量档静默失效，6 worker 打单进程 Django 造出 8 条与改动无关的硬红（定性过程见 lessons）。
+
+- [x] 抽出 `TAIL = PW_EXTRA.join(' ')`，拼进三条 playwright 命令（全量 / 模块 / 附带 P0 / base 未知兜底那条）
+- [x] 判据用 `--dry-run` 打印的命令行，不靠读代码：修后输出 `$ npx playwright test --workers=1 --retries=0`
+
+## 验证账目（待补完）
+
+- 8 硬红 + 8 flaky 全部定性为「6 worker 并发 + 共享 admin 账号被 `恢复默认` 的快照-还原固化成 canvas」：
+  隔离 workers=1 复跑剩 4 条 → 把 admin `chart_renderer` 修回 `svg` 后 3 条立绿 → 最后 1 条
+  （`view-data` 固定列）单跑 2.6s 绿。**无一由本改动引起**，也未改动任何产品代码去迁就用例。
+- workers=1 全量门禁：见下方 Review 的实际数字。

@@ -1548,6 +1548,51 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   `django.setup()` + `APIClient` 在子进程里 20 秒就能同时给出 viewer 403、admin 200。
   两份测试（profile 探针读 `settings`、视图用例读 `override_settings`）之间那条接缝，用这种探针补最便宜。
 
+## 2026-10-14 页头标题的测试承重藏在 `role=heading` 里不在文案里；省高度要分「首屏」与「sticky 常驻」两笔账
+
+- **查「有没有用例依赖这个元素」不能只 grep 它的可见文案**：要删 数据分析/用户管理/系统设置 三处
+  `<h2>`，按「数据分析」grep `frontend/e2e` 零命中，我据此写下"零测试承重"。实际
+  `settings.spec.ts:85` 是 `getByRole('heading', { name: '系统设置' })` —— **文案在页面 A、断言在页面 B**，
+  按一个字面量查全部三页必然漏。规则：删可见元素前按**角色/标签/属性**各查一遍
+  （`getByRole('heading'`、`h1, h2`、`data-testid`），别只 grep 屏幕上那行字。
+- **省高度的改动要分「首屏」和「滚动后 sticky 常驻」两笔账**：当时提议把第二行工具栏并进 sticky 行。
+  真机实验（把第二行的子节点 `appendChild` 进第一行再量高）：1536 CSS px → **142px（3 行）**、
+  1920 → **102px（2 行）**。合并只省 14px（128→114），却把 sticky 常驻区从 62 撑到 102 ——
+  滚动后反而少看 40px 图表。**净负收益，方案作废**。规则：凡涉及 sticky 的排版改动，
+  两种状态各算一次账再取差值；"少一行"不等于"省高度"。
+- **量折行的省法**：不用改源码、不用两套分支 —— 在 `page.evaluate` 里把待合并的节点搬过去、
+  量完 `getBoundingClientRect().height` 与 `scrollWidth - clientWidth`，再把节点按记录的
+  `parent/nextSibling` 原样搬回。一次跑完拿到 1280/1536/1920 三档结论。
+- **实测基线（1536×864 = 1920 屏 125% 缩放，真实种子数据）**：删 h2 让内容区首块从 y=131 抬到
+  y=80，**−51px**（30 行高 + 20 `margin-bottom` + 1 边框），三页一致。
+- **顺手记一条存量事实**：sticky 工具栏在 1536 下**本来就折成两行 102px** ——
+  `.dp-analysis-filepicker` 是 `flex:1`，实测吃掉 652.9px，而 param-selector 521.1、
+  chart-toggles 452.1，三者 + gap 32 = 1658 > 可用 1488。这才是下一个真正的高度杠杆（≈40px），
+  代价是文件名可见长度变短，**待拍板**，不要顺手改。
+
+## 2026-10-14 门禁的「快照-还原」助手只在串行下成立；`--` 透传要逐条命令核对
+
+- **现象**：批内快门禁（`scripts/e2e_affected.mjs`）全量档跑出 **8 条硬红 + 8 条 flaky**，跨
+  analysis / data / sftp / theme / settings 五个模块，而本次改动只删了三页的一个 `<h2>`。
+- **定性路径（值得照抄）**：① 墙钟 7.8 min 远低于 workers=1 的 21.4 min 基线 ⇒ 先怀疑并发；
+  ② 日志里 `Running 386 tests using 6 workers` 证实我传的 `--workers=1` 根本没生效；
+  ③ 隔离 workers=1 复跑那 8 条 ⇒ 只剩 4 条；④ 读账号态自证 ⇒ admin
+  `chart_renderer=canvas`（user 仍是 `svg`）、`cpk_b=1.33`（出厂值）；⑤ 把 renderer 修回 `svg`
+  再复跑 ⇒ 3 条立即转绿，最后 1 条（`view-data` 固定列）单跑 2.6s 绿。**8 条全部与本改动无关。**
+- **根因链**：`settings.spec` 的「恢复默认」用例是 `snapshotSettings()` GET → 点恢复 → PUT 回快照。
+  并发时另一条正在做 canvas↔svg 往返的用例（`chart-renderer.spec` / 「渲染器保存持久化」）
+  把自己的**中间态**暴露在那个快照窗口里 → 快照读到 canvas → `finally` 把 canvas 当基线写死。
+  依赖 `svg text` 的用例（`analysis.spec` 单 SITE 图例 ×2、`night-visibility` 轴标签色）于是全红。
+- **规则**：快照-还原类还原助手**天然要求串行**，它防的是"跨轮污染"，防不了"跨用例并发"。
+  凡是读像素/`svg text`/账号档的用例，跑之前先打印一次账号态与 DB 路径自证，别先怀疑产品代码。
+- **判据（下次直接套）**：红跨多个不相关模块 + 存在 failed→passed 的 flaky 配对 + 墙钟明显低于
+  串行基线 ⇒ 先查并发与账号态，再查改动。
+- **另一条工具教训**：`e2e_affected.mjs` 第 9 行文档写「`--` 之后的参数转给 playwright」，
+  实现里 `PW_EXTRA` **只拼在模块分支的 `paths` 上**，全量分支与附带 P0 那条都把它丢了 ——
+  于是 `-- --workers=1` 恰好在最需要它的全量档静默失效。已修（统一 `TAIL` 拼进三条 playwright 命令）。
+  **规则**：给 CLI 承诺"透传"之后，判据不是读代码而是 `--dry-run` 看打印出来的命令行 ——
+  这次现场就是一行 `$ npx playwright test`（参数没了）。
+
 
 
 
