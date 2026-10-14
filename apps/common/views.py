@@ -44,13 +44,21 @@ class SystemPathsSerializer(serializers.Serializer):
 
 
 class SystemPathsView(APIView):
-    """Storage paths — GET for any authenticated user, PUT for admins only."""
+    """Storage paths.
+
+    PUT is administrator-only everywhere (``system_config`` feature). GET is for
+    any authenticated user **on the desktop profile**; when
+    ``SYSTEM_PATHS_VISIBLE_TO_ALL`` is False (server profile) it is admin-only
+    too — the payload describes the server's own filesystem then, and a plain
+    account has no reason to see it.
+    """
 
     permission_classes = [IsAuthenticated]
     required_feature = 'system_config'
 
     def get_permissions(self):
-        if self.request.method == 'PUT':
+        # 闸门在 API 上，不靠前端隐藏（服务器形态下界面根本请求不到这份数据）。
+        if self.request.method == 'PUT' or not settings.SYSTEM_PATHS_VISIBLE_TO_ALL:
             return [IsAuthenticated(), FeaturePermission()]
         return super().get_permissions()
 

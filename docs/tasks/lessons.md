@@ -1528,6 +1528,27 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
 - **损害核对**：真实库 `integrity_check=ok`、行数 100/40734/3/1 与会话开始时的实测完全一致 ——
   那次越界的 `migrate --run-syncdb` 是空操作，未改动数据。修完后单跑 15 例绿、全量重跑确认顺序无关。
 
+## 2026-10-14 在服务器档下做权限探针：先撞上的是 `ALLOWED_HOSTS` 的 400，不是那道闸门
+
+- **现象**：想在一个真实 `config.settings.server` 进程里证 `GET /api/v1/system/paths/` 的角色闸门
+  （viewer 403 / admin 200），用 `rest_framework.test.APIClient` 发请求 —— **两个角色都返回 400**，
+  响应体是一整页 `<title>Bad Request (400)</title>` HTML，看不到任何权限信息。
+- **根因**：`APIClient` 的默认 host 是 `testserver`，而本环境 `DEBUG=False` 且服务器档的
+  `ALLOWED_HOSTS` 只有 `127.0.0.1`（`server.py` 刻意拒绝 `'*'`）→ Django 在**到达视图之前**就把请求拒了。
+  这与权限逻辑完全无关，测试却会"两个角色结果一样"，形状上很容易被读成"闸门没生效"或"全被拦住了"。
+- **规则**：脱离 `manage.py test`（它会把 `testserver` 塞进 `ALLOWED_HOSTS`）去跑真实 profile 的 HTTP 探针时，
+  **先确认请求进到了视图**：要么在 `DJANGO_ALLOWED_HOSTS` 里带上 `testserver`，要么断言响应体是
+  DRF 的 JSON 而不是 HTML。判据要写成 `HAS_DB_PATH`/`NO_PATH_KEYS` 这类**读响应字段**的断言，
+  而不是只看状态码 —— 400 和 403 都是 4xx，只打印状态码会把基建失败混进判定里。
+- **顺带一条自己打自己的断言**：新 e2e 用例断言「表格整块消失」时用了
+  `expect(page.getByText('数据库文件')).toHaveCount(0)`，而那条替代提示的文案里正好写着
+  「…数据库文件…」**这个词** → 用例必红。断言某段文本"缺席"之前，先 grep 自己要显示的提示文案里
+  有没有同一个词；这类缺席断言按结构定位（`.paths-descriptions` 计数）比按文案词更稳。
+- **另一条取证口径**：证明「profile 的旗标真的落到视图上」不需要起 HTTP 服务 ——
+  `django.setup()` + `APIClient` 在子进程里 20 秒就能同时给出 viewer 403、admin 200。
+  两份测试（profile 探针读 `settings`、视图用例读 `override_settings`）之间那条接缝，用这种探针补最便宜。
+
+
 
 
 
