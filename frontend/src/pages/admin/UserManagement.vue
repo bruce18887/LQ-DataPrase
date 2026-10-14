@@ -1,7 +1,5 @@
 <template>
   <div class="user-management">
-    <h2>👥 用户管理</h2>
-
     <div class="kpi-grid">
       <div class="kpi-card kpi-card--blue">
         <div class="kpi-card__icon">👥</div>
@@ -271,11 +269,6 @@ onMounted(loadUsers)
 </script>
 
 <style scoped>
-.user-management h2 {
-  margin-bottom: 20px;
-  color: var(--text);
-}
-
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

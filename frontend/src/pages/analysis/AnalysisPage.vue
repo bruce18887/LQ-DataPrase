@@ -1,7 +1,5 @@
 <template>
   <div>
-    <h2>&#128200; 数据分析</h2>
-
     <el-empty v-if="files.length === 0" description="请先在数据管理页面上传数据文件" />
 
     <!-- 每个 tab 各自选文件、各自筛数据：页头不再有全局文件选择 -->

@@ -1,7 +1,5 @@
 <template>
   <div class="settings-page">
-    <h2>⚙️ 系统设置</h2>
-
     <el-tabs v-model="activeTab" tab-position="left" class="settings-tabs">
       <el-tab-pane name="display" label="📊 显示设置">
         <ChartSettingsForm :settings="settings" />
@@ -159,11 +157,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.settings-page h2 {
-  margin-bottom: 20px;
-  color: var(--text);
-}
-
 .settings-tabs {
   background-color: var(--bg-2);
   border: 1px solid var(--border-2);
