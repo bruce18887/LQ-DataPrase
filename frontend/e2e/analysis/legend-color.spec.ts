@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, selectParamWithSpecLimits, pickTabFile, filePicker } from '../helpers/params'
+import { selectAnalysisFile, selectParamWithSpecLimits, pickTabFile, filePicker, ensureChartToggles } from '../helpers/params'
 import { RECOMMENDED } from '../fixtures/test-data'
 
 /**
@@ -28,6 +28,10 @@ test.describe('@p1 图例颜色严格对应', { tag: ['@p1', '@analysis'] }, () 
     await gotoApp(page, '/analysis')
     await selectAnalysisFile(page, RECOMMENDED.analysis)
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
+    // 只读直方图那一个实例，所以要自己把其它三张图关掉：它们账号级持久，
+    // 起点未必干净（2026-10-13 实测停在四 toggle 全开时，下面这条 strict 选择器
+    // 直接命中 3 个实例，用例在选参数**之前**就红）。
+    await ensureChartToggles(page, { serial: false, qq: false, box: false })
     const container = `${SINGLE} .chart-wrapper div[_echarts_instance_]`
     await expect(page.locator(container)).toBeVisible({ timeout: 20_000 })
 
@@ -110,8 +114,8 @@ test.describe('@p1 图例颜色严格对应', { tag: ['@p1', '@analysis'] }, () 
     await gotoApp(page, '/analysis')
     await selectAnalysisFile(page, RECOMMENDED.analysis)
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
-    // 切到序列分布模式
-    await page.getByText('显示序列分布').click()
+    // 切到序列分布模式（收敛而不是翻动：toggle 账号级持久，进来时可能已经是开的）
+    await ensureChartToggles(page, { serial: true })
     const container = `${SINGLE} div[_echarts_instance_]`
     await expect(page.locator(container).first()).toBeVisible({ timeout: 20_000 })
 

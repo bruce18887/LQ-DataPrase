@@ -251,33 +251,91 @@ export async function selectParamWithSpecLimits(page: Page, maxTries = 20): Prom
 const SERIAL_CANVAS = '.single-param-tab .serial-chart-wrapper div[_echarts_instance_]'
 
 /**
+ * 单文件分析页的四个图表开关。标签是**固定文案**（不随勾选状态变），所以
+ * `getByText('显示QQ图').click()` 是「翻」而不是「开」；而它们**账号级持久**
+ * （`analysis_chart_memory` 默认 true，组件 watch 到变化就写回 `analysis_chart_state`），
+ * 于是「上一条用例把它点开了」会让本条的点击变成关掉 → 不发请求 → `waitForResponse` 超时。
+ * 2026-10-13 全量实测 5 条用例同一形状（analysis.spec 箱线图数条 / axis-label-precision
+ * QQ+箱线 / dock-resize enterAll / chart-filter-switches 柱宽 slider），`retries=2` 下
+ * 表现为「这次点成关掉、重试就过」的 flake，`retries=0` 下就是硬红。
+ */
+const CHART_TOGGLE_LABELS = {
+  hist: '显示直方图',
+  serial: '显示序列分布',
+  qq: '显示QQ图',
+  box: '显示箱线图',
+} as const
+
+export type ChartToggleKey = keyof typeof CHART_TOGGLE_LABELS
+
+function chartToggle(page: Page, key: ChartToggleKey): Locator {
+  return page
+    .locator('.single-param-tab .chart-toggles .el-checkbox')
+    .filter({ hasText: CHART_TOGGLE_LABELS[key] })
+    .first()
+}
+
+function isChartToggled(page: Page, key: ChartToggleKey): Promise<boolean> {
+  return chartToggle(page, key).evaluate((el) => el.classList.contains('is-checked'))
+}
+
+/**
+ * 把指定的几个图表开关**收敛**到目标状态（已是目标态就不点），返回被翻动过的键。
+ * 用例要什么图就自己声明，别继承上一条用例或上一轮留下的状态。
+ */
+export async function ensureChartToggles(
+  page: Page,
+  want: Partial<Record<ChartToggleKey, boolean>>,
+): Promise<ChartToggleKey[]> {
+  const flipped: ChartToggleKey[] = []
+  for (const key of Object.keys(CHART_TOGGLE_LABELS) as ChartToggleKey[]) {
+    const target = want[key]
+    if (target === undefined) continue
+    if ((await isChartToggled(page, key)) !== target) {
+      await chartToggle(page, key).click()
+      flipped.push(key)
+    }
+    await expect.poll(() => isChartToggled(page, key), { timeout: 10_000 }).toBe(target)
+  }
+  return flipped
+}
+
+/**
+ * 让 *key* 对应的图表**真的重新发一次请求**，并把那次响应交给调用方。
+ *
+ * 顺序是刻意的：先收敛到「关」（否则后面那一次点击可能是关掉而不是打开），
+ * 再按 R2④ 注册 `waitForResponse`，最后才点到「开」——这样无论进来时它是开是关，
+ * 拿到的都是本次的响应。
+ */
+export async function enableChartAndWait(
+  page: Page,
+  key: ChartToggleKey,
+  predicate: (r: import('@playwright/test').Response) => boolean,
+  timeout = 25_000,
+): Promise<import('@playwright/test').Response> {
+  await ensureChartToggles(page, { [key]: false })
+  const pending = page.waitForResponse(predicate, { timeout })
+  await ensureChartToggles(page, { [key]: true })
+  return pending
+}
+
+/**
  * 打开「显示序列分布」并返回**这一次**的 serial_distribution 响应与 canvas。
- *
- * 为什么不能直接点一下：这个开关是**账号级持久**的（`analysis_chart_memory` 默认 true，
- * 组件 watch 到 toggle 变化就写回 `analysis_chart_state`）。进页面时它可能已经是开的，
- * 此时同样一次点击变成「关」——不发请求，`waitForResponse` 30s 超时、canvas 也不出现。
- * 2026-10-13 实测：`serial-overlap.spec.ts:225` 在文件内排第 4 时必红（40.4s），
- * 单独作为第 1 条跑则 12.2s 绿；`serial-adaptive-range` 先跑过之后再跑 `serial-overlap`，
- * 连第 1 条 `:122` 也红。所以先把开关收敛到「关」，再注册 → 点开。
- *
- * 收尾状态与旧实现一致（开着），不会给后面的用例留下新的携带状态。
+ * 走 `enableChartAndWait` 而不是直接点（见上面那段注释）——2026-10-13 实测
+ * `serial-overlap.spec.ts` 「按 Site 拆分」在文件内排第 4 时必红 40.4s、
+ * 单独作为第 1 条跑则 12.2s 绿。收尾状态与旧实现一致（开着），不给后面留新携带。
  */
 export async function openSerialDistribution(page: Page) {
-  const canvas = page.locator(SERIAL_CANVAS).first()
-  if (await canvas.isVisible()) {
-    await page.getByText('显示序列分布').click()
-    await expect(canvas).toBeHidden({ timeout: 15_000 })
-  }
-  // R2④：waitForResponse 必须在触发动作之前注册
-  const respPromise = page.waitForResponse(
+  const resp = await enableChartAndWait(
+    page,
+    'serial',
     (r) =>
       r.url().includes('/analysis/serial_distribution/') &&
       r.request().method() === 'POST' &&
       r.status() < 500,
-    { timeout: 30_000 },
+    30_000,
   )
-  await page.getByText('显示序列分布').click()
-  const resp = await respPromise
+  const canvas = page.locator(SERIAL_CANVAS).first()
   await expect(canvas).toBeVisible({ timeout: 20_000 })
   return { canvas, resp }
 }

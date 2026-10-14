@@ -8,6 +8,8 @@ import {
   sampleN,
   filterControl,
   pickTabFile,
+  ensureChartToggles,
+  enableChartAndWait,
 } from '../helpers/params'
 import { pickOption } from '../helpers/elplus'
 import { PARAM_SAMPLE_COUNT, RECOMMENDED, SINGLE_SITE_FILES } from '../fixtures/test-data'
@@ -96,12 +98,11 @@ test.describe('@p1 单参数分析', { tag: ['@p1', '@analysis'] }, () => {
     await enterAnalysis(page, RECOMMENDED.analysis)
     await waitLoadingGone(page.locator(SINGLE))
 
-    const respPromise = page.waitForResponse(
+    await enableChartAndWait(
+      page, 'qq',
       (r) => r.url().includes('/analysis/qqplot/') && r.status() < 500,
-      { timeout: 20_000 },
+      20_000,
     )
-    await page.getByText('显示QQ图').click()
-    await respPromise
 
     // QQ 激活后：直方图 + QQ 图两个 SVG（QQ 与箱线勾选时在同一行左右并排）
     await expect
@@ -123,7 +124,7 @@ test.describe('@p1 单参数分析', { tag: ['@p1', '@analysis'] }, () => {
     }
 
     // 关键断言 2: 开启 QQ 图后, 抽样逐个切换, 不应出现 4xx/5xx
-    await page.getByText('显示QQ图').click()
+    await ensureChartToggles(page, { qq: true })
 
     // 等待首次 qqplot 200 之后, 后续切换也必须 200（避免空列名 400 + ECharts cross axisPointer 500）
     const picks = sampleN(all, Math.min(PARAM_SAMPLE_COUNT, all.length))
@@ -153,15 +154,14 @@ test.describe('@p1 单参数分析', { tag: ['@p1', '@analysis'] }, () => {
       }
     })
     // 关闭→重开 QQ 图触发的是 qqplot 重载（histogram 只在参数/配置变化时
-    // 重发），等 qqplot 响应落地后 ECharts 重新 setOption 验证 axisPointer fix
-    const qqResp = page.waitForResponse(
+    // 重发），等 qqplot 响应落地后 ECharts 重新 setOption 验证 axisPointer fix。
+    // enableChartAndWait 先收敛到「关」、注册、再点到「开」，所以进来时是开是关都能拿到
+    // 那次重载响应；旧写法直接点两次，进来若是关着的就变成「开→关」，重开那次根本没响应。
+    await enableChartAndWait(
+      page, 'qq',
       (r) => r.url().includes('/analysis/qqplot/') && r.status() < 500,
-      { timeout: 20_000 },
+      20_000,
     )
-    await page.getByText('显示QQ图').click() // 关闭
-    await page.waitForTimeout(300)
-    await page.getByText('显示QQ图').click() // 重新开启
-    await qqResp
     await page.waitForTimeout(500)
     expect(fatalErrors, '页面运行时不应出现 axisPointer TypeError').toEqual([])
   })
@@ -241,15 +241,12 @@ test.describe('@p1 箱线图', { tag: ['@p1', '@analysis'] }, () => {
     await enterAnalysis(page, RECOMMENDED.analysis)
     await waitLoadingGone(page.locator(SINGLE))
 
-    // 数值视图已是默认基态（序列/QQ/箱线均为勾选，不再需要切模式）
-
-    // 点击显示箱线图 checkbox
-    const respPromise = page.waitForResponse(
+    // 箱线图默认关着（且开关是账号级持久的），所以自己收敛到「开」并拿本次响应
+    const resp = await enableChartAndWait(
+      page, 'box',
       (r) => r.url().includes('/statistics/boxplot/') && r.status() < 500,
-      { timeout: 20_000 },
+      20_000,
     )
-    await page.getByText('显示箱线图').click()
-    const resp = await respPromise
     expect(resp.status(), 'boxplot API 应返回 200').toBe(200)
 
     // 验证图表渲染（SVG）
@@ -265,15 +262,11 @@ test.describe('@p1 箱线图', { tag: ['@p1', '@analysis'] }, () => {
     await enterAnalysis(page, RECOMMENDED.analysis)
     await waitLoadingGone(page.locator(SINGLE))
 
-    // 数值视图已是默认基态（序列/QQ/箱线均为勾选，不再需要切模式）
-
-    // 开启箱线图
-    const respPromise1 = page.waitForResponse(
+    await enableChartAndWait(
+      page, 'box',
       (r) => r.url().includes('/statistics/boxplot/') && r.status() < 500,
-      { timeout: 20_000 },
+      20_000,
     )
-    await page.getByText('显示箱线图').click()
-    await respPromise1
 
     // 切换到 bin 分组
     const respPromise2 = page.waitForResponse(
@@ -295,15 +288,11 @@ test.describe('@p1 箱线图', { tag: ['@p1', '@analysis'] }, () => {
     await enterAnalysis(page, RECOMMENDED.analysis)
     await waitLoadingGone(page.locator(SINGLE))
 
-    // 数值视图已是默认基态（序列/QQ/箱线均为勾选，不再需要切模式）
-
-    // 开启箱线图
-    const respPromise = page.waitForResponse(
+    await enableChartAndWait(
+      page, 'box',
       (r) => r.url().includes('/statistics/boxplot/') && r.status() < 500,
-      { timeout: 20_000 },
+      20_000,
     )
-    await page.getByText('显示箱线图').click()
-    await respPromise
 
     // 开启离群点（原 Jitter，现居左栏，不需要新的 API 调用）
     await page.getByText('离群点').click()
@@ -318,15 +307,11 @@ test.describe('@p1 箱线图', { tag: ['@p1', '@analysis'] }, () => {
     await enterAnalysis(page, RECOMMENDED.analysis)
     await waitLoadingGone(page.locator(SINGLE))
 
-    // 数值视图已是默认基态（序列/QQ/箱线均为勾选，不再需要切模式）
-
-    // 开启箱线图
-    const respPromise1 = page.waitForResponse(
+    await enableChartAndWait(
+      page, 'box',
       (r) => r.url().includes('/statistics/boxplot/') && r.status() < 500,
-      { timeout: 20_000 },
+      20_000,
     )
-    await page.getByText('显示箱线图').click()
-    await respPromise1
 
     // 切换参数
     const params = await listParams(page)

@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
 import { expectChartRendered, waitLoadingGone } from '../helpers/charts'
-import { selectAnalysisFile } from '../helpers/params'
+import { selectAnalysisFile, ensureChartToggles } from '../helpers/params'
 import { RECOMMENDED } from '../fixtures/test-data'
 
 /**
@@ -87,9 +87,9 @@ async function enterAll(page: import('@playwright/test').Page) {
   await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
   await waitLoadingGone(page.locator(SINGLE))
   await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
-  for (const label of ['显示序列分布', '显示QQ图', '显示箱线图']) {
-    await toggle(page, label).click()
-  }
+  // 盲点这三个 toggle 假定它们都关着，但 toggle 是**账号级持久**的：上一条用例可能
+  // 已经开过，于是这里变成「关掉」，serial panel 永远不出现（2026-10-13 retries=0 实测）。
+  await ensureChartToggles(page, { serial: true, qq: true, box: true })
   for (const k of KEYS) {
     await expect(page.locator(`.chart-panel[data-chart-key="${k}"]`)).toBeVisible({ timeout: 20_000 })
   }
