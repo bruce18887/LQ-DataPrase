@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from apps.common.constants import PAGE_SIZE_MAX, PAGE_SIZE_MIN
 from apps.common.export_naming import EXPORT_TEMPLATE_DEFAULTS, MAX_TEMPLATE_LENGTH
 from .models import User, UserSetting, DEFAULT_HIDDEN_COLUMNS
 
@@ -9,10 +10,7 @@ from .models import User, UserSetting, DEFAULT_HIDDEN_COLUMNS
 CHART_DPI_MIN = 72
 CHART_DPI_MAX = 600
 
-# 「默认每页行数」= 查看数据表格的 IRM 块大小。上下界须与设置页下拉端点
-# （TableSettingsForm.vue）与前端消费侧一致；过小会把滚动变成请求风暴。
-PAGE_SIZE_MIN = 50
-PAGE_SIZE_MAX = 500
+# 「默认每页行数」的上下界住在 apps.common.constants（唯一事实源），此处只引用。
 
 
 class UserSerializer(serializers.ModelSerializer):
