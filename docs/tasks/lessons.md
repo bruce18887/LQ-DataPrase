@@ -1336,3 +1336,35 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   `{error:…}`，再 `?? []` 变成空数组），断言只会说"0 >= 2 不成立"。这类探测要么断 `r.ok`，
   要么干脆别在页面里重发请求。
 
+## 2026-10-14 我让用户在两个错误选项之间拍板，因为我自己没抓过现场
+
+- **经过**：夜跑剩一条硬红 `smoke/pages「数据分析 正常加载」`。我沿用了**上一轮会话留下的结论**
+  （"自动选中最新文件却带着上一个文件的 param → `param_not_found`，属 R5"），据此摆出
+  A. 前端纠偏 / B. 页面不再自动选文件，让用户选。用户选了 A。
+- **抓现场后翻转**：写一次性 scratch spec 把 `page.on('response')` 的请求体与响应体打出来，
+  实际是 `req={"file_id":1614,"param":"col1"}`（**同源一致**，col1 就是那个文件唯一参数）、
+  `resp={"error":"no_site_column"}` → A/B 两个前提都不成立。
+  而 `no_site_column` 400 是被 `apps/analysis/tests_api_contract.py:109` 钉住的**正确契约**
+  （R3① 同类端点守卫一致），前端也已把原因渲染成横幅——用户侧没有 bug。
+- **真因**：`upload-csv-only.spec.ts` 上传的合成 CSV 只有 `col1`（无 Site 列），
+  它的 `finally` 只调 `cleanupQuiet(zipPath)` 删磁盘临时文件、**没删 DataFile 行**；
+  残留按 `-created_at` 顶到 `files[0]` → 被自动选中 → 浏览器为这条 4xx 记 console error →
+  P0 冒烟判失败。**`cleanup.ts::deleteBatchQuiet` 的注释里逐字写着这条链路**，
+  2026-09 只给 `zip-upload.spec.ts` 补了自清，漏了同类的另一个文件。
+- **规则**：
+  1. **写进文档的旧结论是"当时的观测"，不是事实**。要把基于它的决策交给用户前，
+     先自己复现一次——**尤其是"要用户拍板"的分叉，前提错了比不改更糟**（用户已经按错的
+     方向授权了，才发现两个选项都不必做）。
+  2. **读三层代码推不出来，就花 3 分钟抓一次现场**。我这次先读了 `useSiteStats` →
+     `useTabFileParams` → `SingleParamTab` 的接线，每一层都"看起来正确"、彼此矛盾，
+     直到 scratch spec 打出真实 req/resp 才一句话定性。scratch spec 放
+     `frontend/e2e/_diag-*.spec.ts`（不带 @pN → 走 Edge project 的 admin storageState），
+     跑完立刻删。
+  3. **"清理"要分两层**：删临时文件 ≠ 删 DB 行。凡是往共享库写 `DataFile`/批次的用例，
+     `finally` 必须同时 `deleteBatchQuiet`（批次）或 `deleteFilesByNameQuiet`（单文件），
+     判据是"跑完这一批后按名查残留应为 0"，而不是"用例自己绿了"。
+- **顺带一个工具缺陷**：`scripts/e2e_nightly.mjs` 的产物目录按**日期**命名
+  （`tasks/e2e-nightly/<YYYY-MM-DD>/`），同一天跑第二次会**静默覆盖**第一次的
+  `results.json` + `run.log`。本轮靠事先 `cp -r` 保住了第五轮账目；
+  应改成带时分或轮次后缀。
+
