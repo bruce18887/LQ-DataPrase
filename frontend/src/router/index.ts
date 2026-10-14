@@ -1,4 +1,7 @@
 import { createRouter, createWebHistory, createWebHashHistory } from 'vue-router'
+import {
+  Connection, Folder, Odometer, Search, Setting, TrendCharts, User,
+} from '@element-plus/icons-vue'
 import { useAuthStore } from '../stores/auth'
 import { ensureChartRenderer } from '../utils/echarts-theme'
 
@@ -33,25 +36,25 @@ const routes = [
         path: 'dashboard',
         name: 'Dashboard',
         component: () => import('../pages/dashboard/DashboardPage.vue'),
-        meta: { title: '仪表板' },
+        meta: { title: '仪表板', icon: Odometer, desc: '单文件与批次良率总览' },
       },
       {
         path: 'data',
         name: 'DataManagement',
         component: () => import('../pages/data/DataManagement.vue'),
-        meta: { title: '数据管理' },
+        meta: { title: '数据管理', icon: Folder, desc: '上传、查看、导出你的测试数据文件' },
       },
       {
         path: 'analysis',
         name: 'Analysis',
         component: () => import('../pages/analysis/AnalysisPage.vue'),
-        meta: { title: '数据分析' },
+        meta: { title: '数据分析', icon: TrendCharts, desc: '单文件 / 晶圆图 / 多文件 / 相关性对比' },
       },
       {
         path: 'sftp',
         name: 'SftpBrowser',
         component: () => import('../pages/sftp/SftpBrowser.vue'),
-        meta: { title: 'SFTP 浏览器' },
+        meta: { title: 'SFTP 浏览器', icon: Connection, desc: '浏览远端目录并下载测试数据' },
       },
       {
         // 搜索页与浏览器页同父级、同 `requiresAuth` 守卫（计划 Task 17 Step 3）；
@@ -59,7 +62,12 @@ const routes = [
         path: 'sftp/search',
         name: 'SftpSearch',
         component: () => import('../pages/sftp/SftpSearchPage.vue'),
-        meta: { title: 'SFTP 搜索' },
+        meta: {
+          title: 'SFTP 搜索',
+          icon: Search,
+          desc: '范围 → 过滤 → 命中；结果与运行状态跨页面驻留',
+          parent: { label: 'SFTP 浏览器', to: '/sftp' },
+        },
       },
       {
         path: 'batch',
@@ -70,13 +78,20 @@ const routes = [
         path: 'admin/users',
         name: 'UserManagement',
         component: () => import('../pages/admin/UserManagement.vue'),
-        meta: { title: '用户管理', requiresAdmin: true },
+        meta: {
+          title: '用户管理',
+          requiresAdmin: true,
+          icon: User,
+          desc: '账号、角色与锁定状态',
+          // 「系统管理」是侧栏分组名，不是路由 —— 旧面包屑把它链到不存在的 /admin，点了进 404
+          parent: { label: '系统管理' },
+        },
       },
       {
         path: 'settings',
         name: 'Settings',
         component: () => import('../pages/settings/SettingsPage.vue'),
-        meta: { title: '系统设置' },
+        meta: { title: '系统设置', icon: Setting, desc: '图表、表格、阈值与连接' },
       },
       // 404 页面
       {

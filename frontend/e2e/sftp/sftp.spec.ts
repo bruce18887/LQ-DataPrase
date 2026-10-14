@@ -44,9 +44,9 @@ test.describe('@p1 SFTP 页面渲染', { tag: ['@p1', '@sftp'] }, () => {
   test('连接表单字段 + 连接按钮 + 保存配置区可见', async ({ page }) => {
     await gotoApp(page, '/sftp')
 
-    // 页面身份改认顶栏钩子（页头 h2 即将并入身份块）。正则容空格：面包屑写的是「SFTP浏览器」
-    // 而 h2/meta 是「SFTP 浏览器」—— 两份真相已漂，统一命名与本次迁移分属两批。
-    await expect(page.getByTestId('page-identity')).toContainText(/SFTP\s*浏览器/)
+    // 页面身份改认顶栏钩子（页头 h2 即将并入身份块）。「SFTP 浏览器」的空格已在
+    // 侧栏/meta/指南三处统一，不再需要容漂
+    await expect(page.getByTestId('page-identity')).toContainText('SFTP 浏览器')
 
     // 连接配置卡片
     await expect(page.locator('.connect-card')).toBeVisible()

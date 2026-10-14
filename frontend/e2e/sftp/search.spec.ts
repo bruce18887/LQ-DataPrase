@@ -262,7 +262,7 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
     await spaTo(page, '数据管理')
     // 已结束 → chip 必须已经消失（计划 Step 4 明写这条要显式断，不默认它在）
     await expect(page.getByTestId('sftp-search-chip')).toBeHidden()
-    await spaTo(page, 'SFTP浏览器')
+    await spaTo(page, 'SFTP 浏览器')
     await page.getByTestId('sftp-advanced-search').click()
 
     const after = await pathCells(page)
@@ -296,7 +296,7 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
 
     await chip.getByTestId('search-cancel-btn').click()
     await expect(chip).toBeHidden()
-    await spaTo(page, 'SFTP浏览器')
+    await spaTo(page, 'SFTP 浏览器')
     await page.getByTestId('sftp-advanced-search').click()
     await expect(page.getByTestId(STATUS)).toHaveText('cancelled')
   })
@@ -308,7 +308,7 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
       await connectAndOpenSearch(page, server, '/')
       await runSearch(page, { mode: 'content', term: 'ShadowReg2', depth: 'self' })
       await expect(page.getByTestId(STATUS)).toHaveText('running')
-      await spaTo(page, 'SFTP浏览器')
+      await spaTo(page, 'SFTP 浏览器')
       await waitTableReady(page)
       const dirRow = page.locator('.file-table .el-table__row').filter({ hasText: 'batch1' }).first()
       await expect(dirRow.getByRole('button', { name: '下载' })).toBeDisabled()
@@ -393,7 +393,7 @@ test.describe('@sftp SFTP 搜索', { tag: ['@p1', '@sftp'] }, () => {
     await expect(page.locator('.sc-tags .el-tag').first()).toContainText('/batch1', { timeout: 10_000 })
 
     // 另一个入口：工具栏「高级搜索」预填的是**当时**的面包屑目录（计划 Step 5.1）
-    await spaTo(page, 'SFTP浏览器')
+    await spaTo(page, 'SFTP 浏览器')
     await waitTableReady(page)
     await page.locator('.file-name', { hasText: 'batch2' }).first().click()
     await expect(page.locator('.toolbar-card .el-breadcrumb')).toContainText('batch2', { timeout: 20_000 })

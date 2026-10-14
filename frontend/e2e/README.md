@@ -148,8 +148,10 @@ python manage.py seed_test_data --clear
 ### 已验证选择器（实测）
 - 登录：输入 `getByPlaceholder('用户名'|'密码')`；按钮 `button.login-button`（文本是「登 录」含空格）。
 - 主布局容器：`.main-layout`；侧边栏：`aside.sidebar`；侧边栏菜单项：`sidebarLink(page, '菜单名')`，激活态含 class `active`。
-  - 菜单名（exact）：仪表板 / 数据管理 / 数据分析 / 批次报表 / SFTP浏览器 / 系统设置 / 功能路线图 / 用户管理。
-  - ⚠️ Topbar 面包屑里有同名 link，断言菜单务必限定 `aside.sidebar`。
+  - 菜单名（exact）：仪表板 / 数据管理 / 数据分析 / 批次报表 / SFTP 浏览器 / 系统设置 / 功能路线图 / 用户管理。
+  - ⚠️ 顶栏身份块的上级链（SFTP 搜索页会显示「SFTP 浏览器」）与侧栏菜单同名，断言菜单务必限定 `aside.sidebar`。
+- 页面身份：`page.getByTestId('page-identity')`，文本 = 当前页名。单一真相是 `route.meta.title`
+  （名/图标/说明/上级都在 router 里，Topbar 不再有第二份表）。
 - 分析页（2026-09-05 起每个 tab 独立选文件）：文件选择器一律按契约属性
   `[data-file-picker="single|wafer|correlation|multi"]`（用 `filePicker(page, scope)` /
   `pickTabFile(page, scope, name)`，**调用前先切到该 tab**，lazy pane 未挂载时选择器不在 DOM 里）；
