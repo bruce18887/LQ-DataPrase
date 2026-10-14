@@ -1,4 +1,8 @@
-from django.core.management.base import BaseCommand
+import os
+
+from django.conf import settings
+from django.core.management.base import BaseCommand, CommandError
+
 from apps.accounts.models import User, UserSetting
 
 
@@ -6,6 +10,7 @@ class Command(BaseCommand):
     help = 'Seed default users (admin, user, viewer) for development'
 
     def handle(self, *args, **options):
+        self._refuse_weak_seed_outside_dev()
         users_to_create = [
             {
                 'username': 'admin',
@@ -76,3 +81,21 @@ class Command(BaseCommand):
             )
 
         self.stdout.write(self.style.SUCCESS('Seed users completed.'))
+
+    @staticmethod
+    def _refuse_weak_seed_outside_dev():
+        """三个口令是公开已知的，生产档不许落地（与 ``standalone.py:104-111`` 同形）。
+
+        那道互锁只管 ``_bootstrap`` 建 superuser 的路径，看不见本命令 —— 本方法是
+        第二条通路的对应闸门。守卫放在最前，所以拒执时**一个用户都不会被创建**。
+        """
+        if settings.DEBUG:
+            return
+        if os.environ.get('LQDP_ALLOW_WEAK_SEED') == '1':
+            return
+        raise CommandError(
+            'seed_users 写入的是公开已知的弱口令（admin123 / user123 / viewer123），'
+            f'非开发档（DEBUG={settings.DEBUG}）拒绝执行。'
+            '确需在非开发环境建演示账号时设 LQDP_ALLOW_WEAK_SEED=1 显式放行；'
+            '给真实用户开号请走管理界面（/api/v1/auth/users/），'
+            '或按部署文档用 LQDP_BOOTSTRAP_ADMIN_PASSWORD 预设首个管理员口令。')
