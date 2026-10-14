@@ -81,8 +81,10 @@ test.describe('@p1 系统设置页', { tag: ['@p1', '@settings'] }, () => {
   test('页面渲染：各标签页与关键设置区块可见', async ({ page }) => {
     await gotoApp(page, '/settings')
 
-    // 页面标题（SettingsPage.vue <h2>⚙️ 系统设置</h2>）
-    await expect(page.getByRole('heading', { name: '系统设置' })).toBeVisible()
+    // 页面身份 = Topbar 面包屑末级（页头 <h2> 已删：它与面包屑、侧栏激活态三处重复）
+    await expect(
+      page.getByTestId('breadcrumb').locator('.el-breadcrumb__item:last-child'),
+    ).toContainText('系统设置')
 
     // 各 tab 标签（清单 = TABS；加新 tab 必须同步登记，否则「切换各标签页」那条不覆盖它）
     for (const tab of TABS) {
