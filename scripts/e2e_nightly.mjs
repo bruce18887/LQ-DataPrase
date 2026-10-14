@@ -78,12 +78,16 @@ function git(...a) {
 }
 
 function portsBusy() {
+  // 要探的是「本轮实际会用到的端口」，不是写死的 8000/3000：
+  // playwright.config.ts 与 vite.config.ts 现在同读 E2E_PORT / E2E_FRONTEND_PORT，
+  // 端口值的来源只能有一份，否则设了变量的那轮会探错端口（未设时与旧行为逐字一致）。
+  const wanted = new Set([process.env.E2E_PORT || '8000', process.env.E2E_FRONTEND_PORT || '3000'])
   try {
     const out = execFileSync('netstat', ['-ano'], { encoding: 'utf-8' })
     const busy = []
     for (const line of out.split('\n')) {
       const m = /^\s*TCP\s+\S+:(\d{4})\s+\S+\s+(LISTENING)/i.exec(line)
-      if (m && (m[1] === '8000' || m[1] === '3000')) busy.push(`${m[1]}(${m[2].toLowerCase()})`)
+      if (m && wanted.has(m[1])) busy.push(`${m[1]}(${m[2].toLowerCase()})`)
     }
     return [...new Set(busy)]
   } catch (e) {
