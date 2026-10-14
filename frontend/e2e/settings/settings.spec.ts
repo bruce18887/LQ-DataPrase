@@ -78,7 +78,7 @@ async function snapshotSettings(page: import('@playwright/test').Page): Promise<
 }
 
 test.describe('@p1 系统设置页', { tag: ['@p1', '@settings'] }, () => {
-  test('页面渲染：6 个标签页与关键设置区块可见', async ({ page }) => {
+  test('页面渲染：各标签页与关键设置区块可见', async ({ page }) => {
     await gotoApp(page, '/settings')
 
     // 页面标题（SettingsPage.vue <h2>⚙️ 系统设置</h2>）
