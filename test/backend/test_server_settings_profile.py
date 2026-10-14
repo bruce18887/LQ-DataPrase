@@ -132,7 +132,8 @@ class ServerProfileValuesTests(unittest.TestCase):
         'print("SFTP_SET", bool(s.SFTP_CONFIG_KEY));'
         'print("CORS_ALL", s.CORS_ALLOW_ALL_ORIGINS);'
         # 直接取属性（不用 getattr）：旗标被删掉时本探针会 AttributeError 而不是静默通过
-        'print("MIGRATION", s.SYSTEM_CONFIG_MIGRATION_ENABLED)'
+        'print("MIGRATION", s.SYSTEM_CONFIG_MIGRATION_ENABLED);'
+        'print("PATHS_VISIBLE", s.SYSTEM_PATHS_VISIBLE_TO_ALL)'
     )
 
     @classmethod
@@ -173,6 +174,16 @@ class ServerProfileValuesTests(unittest.TestCase):
         """本档不启用 data_dir 交互搬迁（那是桌面语义）；锚点即 BASE_DIR。"""
         self.assertEqual(self._value('MIGRATION'), 'False')
         self.assertTrue(self._under_root(self._value('ANCHOR')))
+
+    def test_storage_paths_hidden_from_non_admins(self):
+        """``GET /api/v1/system/paths/`` 在服务器形态只对管理员披露。
+
+        桌面形态下这五个字段是用户自己的磁盘（viewer 看了不构成秘密，且界面要给他
+        看「数据在哪」）；同一份代码跑在局域网服务器上时，它们披露的是服务器的
+        目录结构、数据库文件与配置文件位置 —— 与使用者是谁无关。默认值留在
+        base.py=True，所以必须由本档显式关掉，本用例就是钉住这一步。
+        """
+        self.assertEqual(self._value('PATHS_VISIBLE'), 'False')
 
     def test_cors_still_open_while_electron_file_protocol_exists(self):
         """D5：本批不收 CORS。这条断言是「现状留痕」而非认可 —— 收紧条件见 spec §6.7。"""

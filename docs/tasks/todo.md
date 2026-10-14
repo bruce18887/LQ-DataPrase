@@ -3200,6 +3200,12 @@ D3 无迁移逻辑、D4 不恢复全局压缩、D5 本批不收 CORS。完整规
 | 恢复演练 | 三件套还原到新目录：`migrate --run-syncdb` 干净、行数 100/40734/3/1 与现场一致、SECRET_KEY 来自还原的 key | 全程临时目录，未碰用户真实 data_dir；顺带查出 §5.2 那条既有密钥缺陷 |
 | 备份轮转 | 预置 3 份不同 mtime + `--keep 3` 实跑 → 只删最旧那份；同秒撞名由 `next_snapshot_path` 让位（T1 钉住） | 实跑那两次落在相邻秒，避让靠单测证明 |
 | 服务器档启动 | loopback 六项全过（SPA 同源 200/401/404、伪造 Host → 400、登录拿 JWT），跑完端口监听计数归 0 | 跨机那台机器的验证做不了 |
+| —— 以下为「追加：存储路径可读性」的门禁（同日收盘后） —— | | |
+| 后端全量 | **1422 例 / 315.0s / OK (skipped=7)**，退出码 0 | 比上表 1396 多出的是本追加条目的 6 例（角色闸门 5 + profile 探针 1）与门禁后续 |
+| 全量 e2e | **365 passed / 2 flaky / 19 skipped / 0 failed，19.9 分钟**，退出码 0（`--workers=1`，`E2E_PORT=8151 E2E_FRONTEND_PORT=3951`） | 那一轮里的新例是「结构断言」版；随后把它改成 light/night 双渲染版定向复跑 → 8 passed / 25.4s |
+| vitest / 类型 / 构建 | 57 例全绿；`vue-tsc -b` 与 `lint:e2e` 退出 0；`npm run build` 868ms 绿 | 前端只动了一个组件与一个 api 文件 |
+| 真实 profile 接缝探针 | 子进程 `django.setup()` + `APIClient`：`FLAG False` → `VIEWER 403 NO_PATH_KEYS (77 B)`、`ADMIN 200 HAS_DB_PATH` | 探针跑在临时 `LQDP_SERVER_BASE_DIR` 里，跑完连目录一起删；未碰真实 data_dir |
+| 双主题实测 | 提示底色 light `rgba(3,105,161,.15)` / night `rgba(79,172,254,.15)`（EP info alert 自己的调色板，组件零自定义颜色） | 只钉「两遍不同色」（硬编码的表现就是同色）；**没有**给数值门槛 —— 15% tint 底色按既有口径到不了 3:1 |
 
 ## 与最终 HEAD 的时间关系（不粉饰）
 
@@ -3220,4 +3226,68 @@ D3 无迁移逻辑、D4 不恢复全局压缩、D5 本批不收 CORS。完整规
 4. spec §4.4 的 SFTP 存密缺陷：**本批只堵不修**。既有 token 换档仍解不开，部署口径是「在服务器重录」；
    要保旧 token 需另做 re-key（旧 key 解、新 key 存）。
 5. 等拍板：OS 与进程模型、无 TLS 的内网明文姿态、serverUrl 怎么发到用户手里、自助找回密码。
+
+---
+
+# 追加：服务器形态收回「存储路径可读性」（2026-10-14 收盘自查补出的半个修复）
+
+## 缘起（先说这是谁的账）
+
+批 4 的语义翻转贴只做了**「远端模式下不能编辑存储路径」**（`canEdit = editable && !remoteMode`）。
+收盘自查时看了端点本身的权限：`SystemPathsView.permission_classes = [IsAuthenticated]`，
+`get_permissions()` 只给 PUT 加了 `FeaturePermission()` —— 也就是**读**一直对所有登录用户开放。
+桌面形态这对不对：对，那一行写的是用户自己的磁盘，`apps/common/tests.py` 的
+`test_get_shape_and_editable_flag` 甚至专门钉了「viewer 能拿到全部字段」。同一份代码跑在局域网服务器上就不对：`data_dir/db_path/media_path/
+temp_dir/config_file` 披露的是**服务器**的目录结构、库文件与配置文件位置，而使用它的是 20 个普通账号。
+所以这不是新功能，是那批工作留下的另外半边，由本追加条目收口。
+
+## 实施清单
+
+- [x] `config/settings/base.py` 新增 `SYSTEM_PATHS_VISIBLE_TO_ALL = True`（默认值即桌面契约，注释写明两种形态各自的理由）；
+      `config/settings/server.py` 显式 `= False`。**没有新增第四份 profile 改动**：development/standalone 从 base 继承 True
+- [x] `apps/common/views.py:get_permissions()`：`PUT` 或「旗标为 False」时都走 `[IsAuthenticated(), FeaturePermission()]`
+      —— 复用 `system_config` 特性位（`permissions.py:16` 已是 `['administrator']`），不新写权限类、不新造「管理员」定义
+- [x] 闸门在 **API** 上而不是界面上（R3②）：非管理员直连 `curl` 也拿不到，前端只是把 403 翻译成人话
+- [x] 前端 `SystemPathsSettings.vue`：`getPaths({ silent: true })` + 403 → `hiddenByServer`，整块表格 `v-else` 撤掉，
+      换成一条 `el-alert type="info"`「存储路径仅管理员可见」，正文里写明**找管理员**；非 403 的错误仍
+      `ElMessage.error(formatError(err))` 报出来（silent 只压这一条请求的 toast，不能顺手把 500 也咽了）
+- [x] `api/system.ts` 的 `getPaths` 增加可选 `AxiosRequestConfig` 形参，并把那段「GET 任何登录用户可见」的模块注释改成
+      按档区分 —— 注释与实际契约不一致是下一轮误判的来源
+- [x] T1 五条（原在 `SystemPathsApiTests`）：默认值为 True（桌面契约）/ viewer 与 user 得 403 **且响应体里不含任何路径字段名**
+      / admin 仍 200 且 `editable` / 匿名仍是 401（闸门不许把「没登录」吞成「没权限」，前端靠 401 触发重登）/
+      旗标为 False 时 PUT 对非管理员仍 403
+- [x] **顺手修一处存量违规**：`apps/common/tests.py` 早已 605 行（超 CLAUDE.md:62 的 600 上限），再加 43 行只会更糟
+      → 把 `SystemPathsApiTests` 整类搬到 `apps/common/tests_system_paths.py`（自带 docstring 与 import），
+      `tests.py` 回落到 491 行、新文件 172 行。**搬迁前后 `manage.py test apps.common` 都是 47 例 / OK** ——
+      这条计数比对是必须的：整类搬走最容易出的事故是「文件名不匹配发现模式 → 测试静默消失、全量数变少」
+- [x] T1 profile 探针补一条：`config.settings.server` 真加载后 `SYSTEM_PATHS_VISIBLE_TO_ALL is False`
+      （用直接取属性而非 `getattr`，旗标被删就 AttributeError，不许静默回落）
+- [x] T3：`e2e/settings/system-paths.spec.ts` 新增一例，用 `page.route` 桩出 403（dev 档产生不出这个响应），断言提示可见、
+      `.paths-descriptions` 计数 0、无保存按钮、**且没有全局错误 toast**；同一例里 light/night 各渲染一遍并断言两套主题
+      底色不同（硬编码颜色的表现就是两遍同色）。既有用例「非管理员：路径只读」在 dev 档仍走 200 分支 → 桌面契约没被打破
+- [x] 双主题（R7①）：新提示只用 `el-alert` + 既有 `.paths-alert`，**组件里零新增 CSS、零硬编码颜色**；
+      新例把 light/night 各渲染一遍并断言两套底色不同（实测值见总账表）。未给它数值门槛，理由同上一条：
+      15% tint 底色的对比度天花板不在 3:1，这条不是状态标识而是说明文字
+- [x] 文档同步：`docs/reference/server-deployment.md` §5 加第 5 条限制（运营要提前知道用户会问这件事）；
+      `docs/user-guide/06-sftp.md` 那条「去 设置→存储路径 找落盘目录」按形态拆开 —— 连服务器时那一行是服务器目录，
+      且普通账号看不到。`docs/user-guide/07-settings.md` **本来就没有「存储路径」这个 tab 的任何段落**（既有缺口，
+      不是本条造成的），登记在下面「还欠的」
+- [x] 真实 profile 下的接缝验证（不起 HTTP 服务）：`django.setup()` + `APIClient` 子进程探针，
+      `SETTINGS_MODULE=config.settings.server` → `FLAG False` → `VIEWER 403 NO_PATH_KEYS (77 B)` / `ADMIN 200 HAS_DB_PATH`。
+      这一步是补两份测试之间的缝：profile 探针证「旗标的值」、视图用例证「视图读旗标」，合起来还需要证「真实档加载后视图确实按角色分叉」
+
+## 自查抓到的一处「自己打自己」
+
+新用例先写成 `expect(page.getByText('数据库文件')).toHaveCount(0)`，而替代提示的正文里正好写着
+「…数据库文件…」这个词 → 必红。改成按结构定位（`.paths-descriptions` 计数 0）。已记 lessons。
+
+## 还欠的（都不阻塞）
+
+1. `docs/user-guide/07-settings.md` 没有「存储路径」tab 的说明段落（连桌面形态都没写），本批只在 06-sftp 里补了形态差别。
+   要补的是完整一节：谁能看、谁能改、改了为什么要重启。
+2. `ConnectPage.vue` / `ConnectionSettings.vue` 用的是 `data-test="…"`，而仓库里被 spec 消费的钩子是
+   `data-testid="…"`（Playwright 未配 `testIdAttribute`，`getByTestId` 找不到 `data-test`）。本次新钩子已按 `data-testid`
+   写并把同文件那条 `paths-remote-notice` 一起对齐；跨机验证落地时把连接页那两个组件的钩子一并改，免得变成两套约定。
+3. 全量 e2e 与门禁数字见下方总账表更新。
+
 

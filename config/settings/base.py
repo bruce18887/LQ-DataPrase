@@ -219,6 +219,14 @@ SPECTACULAR_SETTINGS = {
 # development.py keeps it on (playwright health-checks /api/schema/).
 API_DOCS_ENABLED = True
 
+# Whether a non-administrator may read ``GET /api/v1/system/paths/`` — the
+# effective data dir / db file / media dir / temp dir / config file of *this*
+# install. On a desktop these are the user's own paths (the settings page shows
+# them to every role on purpose). ``config/settings/server.py`` turns it off:
+# there the same fields describe the server's filesystem, which no ordinary
+# account has a reason to see. Enforcement is in the API, not in the UI.
+SYSTEM_PATHS_VISIBLE_TO_ALL = True
+
 SESSION_COOKIE_AGE = 1800
 SESSION_SAVE_EVERY_REQUEST = True
 

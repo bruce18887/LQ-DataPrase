@@ -117,6 +117,50 @@ test.describe('@p2 系统存储路径', { tag: ['@p2', '@settings'] }, () => {
     await expect(page.getByText('默认值')).toHaveCount(2)
   })
 
+  /**
+   * 服务器档（config.settings.server 里 SYSTEM_PATHS_VISIBLE_TO_ALL=False）让非管理员
+   * 读到 403。e2e 的后端跑的是 development 档，产生不出这个响应，所以这里用 route
+   * 桩复现「前端拿到 403」的分支；后端那道闸门本身由
+   * ``apps.common.tests_system_paths.SystemPathsApiTests`` 钉住。
+   */
+  test('GET 被拒（服务器档）：显示「仅管理员可见」而不是空表格或错误 toast', async ({ page }) => {
+    await page.route(`**${PATHS_API}`, (route) =>
+      route.fulfill({
+        status: 403,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          code: 'forbidden', message: '没有权限执行此操作', detail: '没有权限执行此操作',
+        }),
+      })
+    )
+
+    // 两套主题都渲染一遍（R7①）。本用例新加的只有一条 el-alert，样式全走 Element Plus
+    // 自己的 alert 调色板（与 SftpSearchPage 那条 info alert 同一条通路），组件里零自定义
+    // 颜色；所以这里钉的是「两套主题确实给出不同底色」——硬编码颜色的表现就是两遍同色。
+    const bgByTheme: Record<string, string> = {}
+    for (const theme of ['light', 'night'] as const) {
+      await page.addInitScript((t) => localStorage.setItem('theme', t), theme)
+      await gotoApp(page, '/settings')
+      await page.getByRole('tab', { name: '📁 存储路径' }).click()
+
+      const notice = page.getByTestId('paths-hidden-notice')
+      await expect(notice, `${theme}: 提示应渲染`).toBeVisible()
+      await expect(notice, `${theme}: 提示应有正文`).not.toHaveText('')
+      bgByTheme[theme] = await notice.evaluate((el) => getComputedStyle(el).backgroundColor)
+
+      if (theme === 'night') {
+        // 表格整块撤掉（不给一个「全是空值」的路径表）。按 class 而不是按「数据库文件」
+        // 这类字样断言缺席 —— 提示语本身就写着这些字样，用文本断言会自己打自己。
+        await expect(page.locator('.paths-descriptions')).toHaveCount(0)
+        await expect(page.getByRole('button', { name: '💾 保存路径' })).toHaveCount(0)
+        // 403 是预期分支：不该再弹一条全局错误 toast 让用户以为设置页坏了
+        await expect(page.locator('.el-message')).toHaveCount(0)
+      }
+    }
+    expect(bgByTheme.night, `两套主题底色不应相同（实测 light=${bgByTheme.light}）`)
+      .not.toBe(bgByTheme.light)
+  })
+
   test('管理员：非法路径保存 → 400 错误提示且无重启框', async ({ page }) => {
     await gotoApp(page, '/settings')
     const snapshot = await getPaths(page)
