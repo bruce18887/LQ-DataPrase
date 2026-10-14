@@ -1368,3 +1368,86 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   `results.json` + `run.log`。本轮靠事先 `cp -r` 保住了第五轮账目；
   应改成带时分或轮次后缀。
 
+## 2026-10-14 共享工作区：别人改文件会让你的测试跑出「自相矛盾」的假失败
+
+- **现象**：第七轮夜跑里后端套件报 1 条失败（1376 例 / failures=1），而**上一轮是 1367 例 / OK**。
+  报错本身自相矛盾：traceback 打印的源码行是 `assertEqual(body['page'], 1)`，
+  下面的 AssertionError 却是 `500 != 99999`。
+- **判据（三条同时命中即可定性为并发编辑，不用去查产品）**：
+  ① **本轮用例总数与上一轮不同**（1367 → 1376，说明有测试文件在跑的过程中被增删）；
+  ② **源码行与断言值对不上**（unittest 在汇报阶段才读磁盘源码，跑的是旧字节码、印的是新文本）；
+  ③ 目标文件 mtime 落在本轮时间窗内（`test_browse_api.py` mtime 11:09，本轮 11:08 起跑）。
+  本次三条全中，随后单跑该模块 **31 例全过** → 假失败，不修。
+- **规则**：共享工作区里跑长测试套件，**开始时间戳要记下**，任何"只挂 1 条"的失败先对照
+  用例总数变化与文件 mtime，再决定要不要当真。
+- **由此修了一条门**：`e2e_nightly.mjs` 的脏工作区检查原先用 `git status --porcelain`，
+  把未跟踪目录（工具自己的 `.qoder-credits/`）也算脏 → 每轮都被迫 `--allow-dirty`，
+  而那个参数绕过的恰恰就是"别人有未提交在制品"这条保护。改成
+  `--untracked-files=no`：未跟踪目录不拦，跟踪文件的未提交改动仍然拦。
+  （同一天另一会话确实留着 `docs/tasks/todo.md` + 2 个 `test/backend/*.py` 未提交，
+  所以 cron 到点若撞上会 **SKIPPED** —— 这是正确行为，跳过不是失败。）
+
+## 2026-10-14 部署整改批2：Django 测试运行器强制 `DEBUG=False`，凡以 DEBUG 作生产判据都要注意
+
+- **现象**：给 `seed_users` 加「生产档拒写弱口令」闸门后，后端全量从 1367 绿变成
+  `1396 tests / errors=2` —— 红的不是新用例，是**既有**的
+  `test.backend.test_accounts_bootstrap.SeedUsersRepairTests`（两组只测「修复 role 不重置口令」
+  的语义，跟闸门无关）。
+- **根因**：`django.test.utils.setup_test_environment` 会把 `settings.DEBUG` 强制设为 **False**，
+  与 `DJANGO_SETTINGS_MODULE` 无关。所以「用 `settings.DEBUG` 区分开发/生产」这类判据
+  在测试里**永远走生产分支**。我本地单跑闸门那 4 例时全绿（因为我自己用 `override_settings`
+  显式设了 DEBUG），完全看不出会打断别人的用例 —— 只有跑全量才暴露。
+- **规则**：
+  1. 以 `DEBUG` 为判据的新闸门，落地时**必须跑全量后端**而不是只跑自己的用例文件；
+     并预期「同一条命令的其它既有测试」需要显式 opt-in。
+  2. opt-in 要写在**被测语义之外**的地方并留注释：本轮加在 `SeedUsersRepairTests.setUp`
+     （`LQDP_ALLOW_WEAK_SEED=1`），并在闸门自己的测试文件顶部写明这条 Django 行为，
+     否则下一个读代码的人会以为测试里 DEBUG 反映真实档位。
+  3. 判据本身仍然成立（`standalone.py:65` 硬编码 `DEBUG=False`、`development.py:22` 为 True），
+     只是**测试环境不是它的运行环境**。
+
+## 2026-10-14 Django 原生 SQL 写 `?` 会在 DEBUG 档炸，且只有实跑能发现
+
+- **现象**：`backup_db` 用 `cursor.execute('VACUUM INTO ?', [path])`，16 例单测全绿，
+  实跑 `manage.py backup_db`（development 档）直接
+  `TypeError: not all arguments converted during string formatting`，
+  栈在 `django/db/backends/sqlite3/operations.py:181 last_executed_query` 的 `sql % params`。
+- **根因**：Django 原生 SQL 的占位符**必须写 `%s`**，由后端翻译成各家形式；
+  而 DEBUG 档的 SQL 日志会把原始 `sql` 与 params 再做一次 `%` 格式化，`?` 不是格式符 →
+  参数对不上就抛。写 `?` 在 SQLite 上"能跑"是因为 sqlite3 本身接受它，绕过了 Django 的约定。
+- **为什么单测看不见**：我那 16 例传的是包一层裸 `sqlite3.Cursor` 的适配器，
+  **没经过 Django 的 `debug_sql` 通路**。适配器只要只模仿生产接口形状的一部分，就会漏掉这类问题。
+- **规则**：
+  1. Django 里手写 SQL 一律 `%s`；测试适配器要模仿**完整**接口（本轮补了 `%s→?` 翻译，
+     使被测代码保持 Django idiomatic 的写法）。
+  2. 管理命令、Celery 入口这类「测试框架不覆盖的执行通路」**必须真跑一次**再算完成；
+     本轮就是靠它抓到 bug，顺带发现失败会留下 `.tmp` 中间文件，补了失败清理。
+
+## 2026-10-14 SFTP 存密其实是用「仓库里写死的开发密钥」加密的：静态加密等于没做
+
+- **现象**：恢复演练（三件套还原到新目录）里，用还原的 `secret.key` 解库中那条 SFTP 口令
+  报 `InvalidToken`。第一反应是「备份不完整」——但**现场库和还原库给出完全相同的判定**，
+  说明备份是忠实的，问题在现场本来就有。
+- **取证**：`tasks/_sftp_key_probe.py`（只读 `mode=ro`，不 import Django）对
+  `sftp_sftpconfig.password_encrypted`（rowid=1）逐一尝试候选 key，结论唯一：
+  **只有「`base.py:16-17` 的 `django-insecure-...` 默认密钥 + `crypto.py:32-33` 的
+  PBKDF2(salt=b'dataphrase.sftp.config', 390000)」能解开**；
+  `secret.key` 派生的两把（standalone 的 `salt=b'sftp-config',100_000` 与 crypto 兜底）都不行。
+- **根因（两条独立缺陷）**：
+  1. `development.py` 不设 `SECRET_KEY` → 回落到**随源码分发的硬编码默认值**。
+     dev 档存下的 token 就是用这把公开钥匙加密的。
+  2. 同一 SECRET_KEY 在两档下派生出的 key **不同**：`standalone.py:170-173` 提前把
+     `SFTP_CONFIG_KEY` 设成 `PBKDF2(sk, b'sftp-config', 100_000)`，此后 `crypto._derive_key()`
+     直接用它；dev 档没设，走 `PBKDF2(sk, b'dataphrase.sftp.config', 390_000)`。
+     **salt 与迭代次数都不一样** → dev 存的 token 打包版解不开，反之亦然（同一 data_dir 也救不了）。
+- **规则**：
+  1. 「加密密钥在仓库里」= 该加密按不存在处理。判据要问「攻击面里有没有源码」，
+     而不是「有没有 PBKDF2/Fernet」。
+  2. **KDF 参数（salt/迭代/来源）必须与 profile 无关**。加新 settings 档（如批 3 的 server 档）
+     时，凡影响既有存密解密的设置都要显式钉死，不能靠回落链；否则「换档即丢凭据」。
+  3. 这条也**修正了我自己 spec 里的一处隐含前提**：原先写「丢了 secret.key 则 SFTP 存密全废」，
+     实测现场那条根本没用 secret.key。备份仍要带它（JWT 签名、其它派生都靠它），
+     但理由要换成准确的。修复路径与部署口径见 spec §4.4（C8「从头开始」下最省事的选项是
+     「服务器上重录一次 SFTP 配置」）。
+
+
