@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
 import { expectChartRendered, waitLoadingGone } from '../helpers/charts'
-import { selectAnalysisFile, listParams } from '../helpers/params'
+import { selectAnalysisFile, listParams, ensureChartToggles } from '../helpers/params'
 import { RECOMMENDED } from '../fixtures/test-data'
 
 /**
@@ -152,7 +152,8 @@ test.describe('@p1 图表配置数据筛选开关', { tag: ['@p1', '@analysis'] 
     await waitLoadingGone(page.locator(SINGLE))
 
     // 勾选「显示序列分布」（序列图现叠加显示在直方图下方，非互斥模式）
-    await page.getByText('显示序列分布').click()
+    // 收敛而不是翻动：这个开关账号级持久，盲点可能把它关掉（2026-10-13 全量实测）
+    await ensureChartToggles(page, { serial: true })
     await waitLoadingGone(page.locator(SINGLE))
 
     const respPromise = page.waitForResponse(
@@ -175,8 +176,9 @@ test.describe('@p1 图表配置数据筛选开关', { tag: ['@p1', '@analysis'] 
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
     await waitLoadingGone(page.locator(SINGLE))
 
-    // 开启 QQ 图（首次请求无开关，为后续带开关的谓词铺垫）
-    await page.getByText('显示QQ图').click()
+    // 开启 QQ 图（首次请求无开关，为后续带开关的谓词铺垫）。
+    // 收敛而不是翻动：进来时若已被上一条用例打开，盲点会变成关掉 → 下面的谓词永远等不到。
+    await ensureChartToggles(page, { qq: true })
     await expect
       .poll(() => page.locator(`${SINGLE} svg`).count(), { timeout: 15_000 })
       .toBeGreaterThanOrEqual(2)
@@ -238,8 +240,9 @@ test.describe('@p1 图表配置数据筛选开关', { tag: ['@p1', '@analysis'] 
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
     await waitLoadingGone(page.locator(SINGLE))
 
-    // 开启箱线图（首次请求无开关，GET query 断言 data_only_bin1=true）
-    await page.getByText('显示箱线图').click()
+    // 开启箱线图（首次请求无开关，GET query 断言 data_only_bin1=true）。
+    // 收敛而不是翻动：进来时若已是开的，盲点会把它关掉，下面的谓词就永远等不到。
+    await ensureChartToggles(page, { box: true })
     await expect
       .poll(() => page.locator(`${SINGLE} .chart-wrapper--bottom svg`).count(), { timeout: 15_000 })
       .toBeGreaterThanOrEqual(1)
@@ -321,6 +324,11 @@ test.describe('@p1 柱宽设置生效', { tag: ['@p1', '@analysis'] }, () => {
     await selectAnalysisFile(page, RECOMMENDED.analysis)
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
     await waitLoadingGone(page.locator(SINGLE))
+
+    // 本用例只读直方图那一个 ECharts 实例，而 `.chart-wrapper div[_echarts_instance_]`
+    // 会把 QQ/箱线/序列的容器一起算进来（2026-10-13 全量实测 strict mode 命中 **4** 个）。
+    // 这些开关账号级持久，所以必须自己收敛成「只有直方图」，不能指望起点干净。
+    await ensureChartToggles(page, { serial: false, qq: false, box: false })
 
     const chartEl = page.locator(`${SINGLE} .chart-wrapper div[_echarts_instance_]`)
     await expect(chartEl).toBeVisible({ timeout: 15_000 })

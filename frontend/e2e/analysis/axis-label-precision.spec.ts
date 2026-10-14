@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, pickTabFile, filePicker } from '../helpers/params'
+import { selectAnalysisFile, pickTabFile, filePicker, enableChartAndWait } from '../helpers/params'
 import { waitLoadingGone } from '../helpers/charts'
 import { pickOption } from '../helpers/elplus'
 import { RECOMMENDED } from '../fixtures/test-data'
@@ -160,12 +160,11 @@ test.describe('@p1 轴刻度小数位精度（formatAxisValue 统一）', { tag:
     await enterAnalysis(page, RECOMMENDED.analysis)
     await waitLoadingGone(page.locator(SINGLE))
 
-    const respPromise = page.waitForResponse(
+    await enableChartAndWait(
+      page, 'qq',
       (r) => r.url().includes('/analysis/qqplot/') && r.status() < 500,
-      { timeout: 25_000 },
+      25_000,
     )
-    await page.getByText('显示QQ图').click()
-    await respPromise
 
     const container = `${SINGLE} .qqplot-container`
     await waitChartRendered(page, container)
@@ -184,12 +183,11 @@ test.describe('@p1 轴刻度小数位精度（formatAxisValue 统一）', { tag:
     await enterAnalysis(page, RECOMMENDED.analysis)
     await waitLoadingGone(page.locator(SINGLE))
 
-    const respPromise = page.waitForResponse(
+    await enableChartAndWait(
+      page, 'serial',
       (r) => r.url().includes('/analysis/serial_distribution/') && r.request().method() === 'POST' && r.status() < 500,
-      { timeout: 30_000 },
+      30_000,
     )
-    await page.getByText('显示序列分布').click()
-    await respPromise
     await expect(page.locator(`${SINGLE} .serial-chart-wrapper`)).toBeVisible({ timeout: 20_000 })
 
     const container = `${SINGLE} .serial-chart-wrapper div[_echarts_instance_]`
@@ -232,12 +230,11 @@ test.describe('@p1 轴刻度小数位精度（formatAxisValue 统一）', { tag:
     await enterAnalysis(page, RECOMMENDED.analysis)
     await waitLoadingGone(page.locator(SINGLE))
 
-    const respPromise = page.waitForResponse(
+    await enableChartAndWait(
+      page, 'box',
       (r) => r.url().includes('/statistics/boxplot/') && r.status() < 500,
-      { timeout: 30_000 },
+      30_000,
     )
-    await page.getByText('显示箱线图').click()
-    await respPromise
 
     const container = `${SINGLE} .chart-wrapper--bottom .chart-container`
     await waitChartRendered(page, container)

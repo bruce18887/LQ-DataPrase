@@ -47,6 +47,13 @@ async function persist(role: Role, statePath: string, page: import('@playwright/
  *    同一次点击变成"关" → 不发 `serial_distribution` POST → 30s 超时。
  * 钉成模型默认 `{}` 即中性态：`SingleParamTab.vue:451` 在 `state.toggles` 缺失时不套用记忆，
  * 组件自身的默认是 hist=true / serial=qq=box=false（`:286/:292/:375/:403`）。
+ *
+ * ⚠ 这只保证**开跑那一刻**的起点，**不解决**同一轮内的相互污染：`analysis_chart_memory`
+ * 默认 true，任何用例翻动开关都会立刻写回账号。2026-10-13 全量实测证明这一点——钉了默认值
+ * 之后仍有 5 条用例红，撤掉钉默认值它们照样红，**根因不在起点而在用例自己假定状态**
+ * （标签是固定文案，`click()` 是「翻」不是「开」）。正解是用
+ * `helpers/params.ts` 的 `ensureChartToggles` / `enableChartAndWait` 自己收敛，
+ * 不要依赖这里的默认值。
  */
 const CANONICAL_SETTINGS = {
   filename_wrap: true,
