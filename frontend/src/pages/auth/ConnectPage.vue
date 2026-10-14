@@ -148,12 +148,10 @@ async function handleSave(): Promise<void> {
       error.value = result.error ?? '保存失败'
       return
     }
-    if (cfg.value.firstRun) {
-      ElMessage.success('已开始使用所选的连接方式')
-    } else {
-      ElMessage.success('已保存，正在重启以切换后端')
-      await window.electronAPI.restartApp()
-    }
+    // **两种情况都必须重启**：首启时主进程刻意没有 spawn 本机后端（见 planStartup），
+    // 若不重启，用户选完「本机模式」会停在这个页面上面对一个根本不存在的后端。
+    ElMessage.success(cfg.value.firstRun ? '已按所选方式保存，正在启动' : '已保存，正在重启以切换后端')
+    await window.electronAPI.restartApp()
   } finally {
     saving.value = false
   }
