@@ -1450,4 +1450,28 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
      但理由要换成准确的。修复路径与部署口径见 spec §4.4（C8「从头开始」下最省事的选项是
      「服务器上重录一次 SFTP 配置」）。
 
+## 2026-10-14 两个 e2e 并发跑：117 红的形状是 `ERR_CONNECTION_REFUSED`，不是回归
+
+- **现象**：批 4 的门禁 `E2E_PORT=8137 npm run test:e2e:affected` 升成全量后
+  **117 failed / 227 passed / 30 did not run，墙钟只有 5.5 分钟**（对照本项目全量基线 385 例 / 21.4 分钟）。
+  失败横跨 settings / sftp / analysis / data / exports 五个互不相关的族。
+- **根因（两条硬证据）**：① 报错里成片是
+  `page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:3000/analysis` —— 前端 preview 在跑测中途没了；
+  ② 同一时刻另一个会话正在动 e2e（`b687d18 docs(todo): 收尾 cron 注册与第七轮全绿依据`，11:46 提交）。
+  `vite.config.ts` 的 `server.port` 与 `preview.port` 都是 **3000 + `strictPort: true`**，
+  两次并发跑测必然互相抢走对方的前端；后端端口我虽换到 8137，**前端端口没得换**，所以照样被打穿。
+- **规则**：
+  1. **墙钟远低于基线 + 失败横跨多个不相关族 = 先怀疑环境塌方，不是自己的改动**。
+     判据现成（`scripts/e2e_nightly.mjs` 的退化阈值也是按这个形状认的）。
+  2. 归因顺序固定：先看报错是不是 `ERR_CONNECTION_REFUSED` / `did not run` 这类**基础设施形状**，
+     再看共享状态污染（并行 worker 打 admin 设置，见本文 2026-10-13 那条与 `todo.md:2779-2780`），
+     最后才轮到自己的 diff。本次若从 `cpk-thresholds:92`（批 1 就登记过的并行污染 known-red）开始怀疑自己，方向当场就错。
+  3. 同机并发跑 e2e 需要**前端端口也可参数化**（`strictPort` 会让第二个 preview 直接失败而不是自动错开），
+     只换后端端口是半个修复。
+- **复跑确认归因成立**：`--workers=1` 全量 → **364 passed / 2 flaky / 19 skipped / 0 failed，21.1 分钟**
+  （与项目基线 21.4min 吻合）。批 1 登记的那两条并行污染红（`analysis:294`、`cpk-thresholds:92`）在单 worker 下全绿，
+  进一步说明那 117 红与我自己的改动无关。前端端口参数化已补（`E2E_FRONTEND_PORT`，`49a5e19`），
+  并用 `E2E_PORT=8141 E2E_FRONTEND_PORT=3941` 定向复跑 settings.spec（8 passed / 26.2s）证明两个端口都真跟变量走。
+
+
 
