@@ -75,9 +75,10 @@ scripts/e2e_pool.mjs                     ← 新增：池编排器（并行全�
   ├─ ② 前端构建  npm run build 一次（实测 6.6s）
   ├─ ③ 分区      LPT(files, 每文件 pass 时长取自最近夜跑 results.json) → N 桶
   ├─ ④ 起 slot   N 个 `npx playwright test <该桶文件列表> --workers=1` 子进程
-  │              每进程 env（全部已存在，无需新增 settings 档）：
-  │                LQDP_SYSTEM_CONFIG_FILE=<slot>\system-config.json  （data_dir + temp_dir 指向 slot）
-  │                LQDP_SKIP_STORAGE_MIGRATION=1                     ← 承重，见 §4.1
+  │              每进程 env：
+  │                DJANGO_SETTINGS_MODULE=config.settings.e2e_slot   ← 承重，见 §4.1
+  │                LQDP_E2E_SLOT_DIR=<slot>                          （新档唯一读的变量）
+  │                LQDP_SYSTEM_CONFIG_FILE=<slot>\system-config.json （内容固定 data_dir=仓库根 → 空操作）
   │                SECRET_KEY=slot-<i>                               （base.py:17 已读 env）
   │                SFTP_SESSION_REDIS_URL=redis://localhost:6379/<i>  （base.py:271 已读 env）
   │                E2E_PORT=810i / E2E_FRONTEND_PORT=310i             （config:31,38 已参数化）
@@ -88,22 +89,57 @@ scripts/e2e_pool.mjs                     ← 新增：池编排器（并行全�
 
 **slot 目录**（每 slot 独占，`%TEMP%\lqdp-e2e-slot-<i>\`）
 
-- `db.sqlite3` ← 模板库**整文件拷贝**（4MB）。库名硬编码 `BASE_DIR/db.sqlite3`，而 `BASE_DIR` 由 `data_dir` 重定向
-  （`development.py:12-22`）⇒ **不需要任何代码改动**就能让每 slot 各有一份库。
-- `system-config.json` ← 两个字段都要给：`data_dir` 与 `temp_dir` 指向本 slot 目录。
-- `media/` ← 对模板 media 做**硬链镜像**（154 文件，元数据操作、不占磁盘、不搬数据；同卷 C:）。
-- `.downloads/`、`.auth/admin-slot<i>.json` ← 从全局单路径改为 slot 内路径。
+- `db.sqlite3` ← 模板库**整文件拷贝**（实测 2.95MB）。指给它的是新增的 `config/settings/e2e_slot.py`
+  （`DATABASES['default']['NAME'] = <slot>/db.sqlite3`），**不是** `data_dir` 重定向 —— 理由见 §4.1。
+- `media/` ← 对模板 media 做**硬链镜像**（实测 87 文件 / 711MB 种子；元数据操作、不占磁盘、不搬数据；同卷 C:）。
+- `system-config.json` ← 内容固定 `{"data_dir": "<仓库根>"}`，即与今天 e2e 完全相同的**空操作**配置
+  （`data_target == orig` ⇒ 不触发迁移）；slot 的真实路径来自 `LQDP_E2E_SLOT_DIR`。
+- `slot.json` ← 编排器写的清单，harness 只读它（见 §5）。
+- `.downloads/`、`.auth/admin-slot<i>.json`、`temp/` ← 从全局单路径改为 slot 内路径。
 
-### 4.1 承重安全阀：`LQDP_SKIP_STORAGE_MIGRATION=1`
+### 4.1 承重安全阀：slot 绝不走 `data_dir` 重定向，改用专用 settings 档
 
-`apply_system_config` 在 `data_target != orig` 时会执行 `_migrate(original_base_dir, data_target)`
-（`apps/common/system_config.py:389-391`），而 `_migrate` 是**搬走并删源**的语义。
-把 slot 的 `data_dir` 指到 `%TEMP%` 而不设这个开关，等于让 Django 启动时把**仓库根的 `db.sqlite3` 搬走、
-`media/` rmtree 掉** —— 这正是 `playwright.config.ts:11-13` 今天把 `data_dir` 钉在项目根的原因（注释写得很清楚：
-否则首次启动会把项目根数据搬到 `~/LQ-DataPrase`，测试数据全丢）。
-该开关已存在且语义正确（`system_config.py:71-83`：置位时 `data_target` 直接取配置值，跳过迁移）。
-**本设计把它当作硬前提**，P1 第一步就是「不带这个开关时故意跑一次单 slot，确认它确实会毁仓库根 media」
-这条只做代码走读、**不做破坏性实测**（改坏/删数据来证明断言承重是被明令禁止的验证方式）。
+**本节结论是被一次真实事故纠正的**（详见 §12）。我原先写成「设 `LQDP_SKIP_STORAGE_MIGRATION=1` 就可以把
+`data_dir` 指到 slot 目录，零代码改动」。这是错的：
+
+```python
+# apps/common/system_config.py:385-391
+if _migration_disabled():
+    data_target = _canonical(Path(cfg['data_dir'])) if cfg.get('data_dir') else orig
+else:
+    data_target = _canonical(Path(cfg.get('data_dir') or str(_default_data_dir())))
+if data_target != orig:          # ← 在分支外面：开关只改「没配 data_dir 时怎么取默认值」
+    with _startup_lock(original_base_dir):
+        _migrate(original_base_dir, data_target)
+```
+
+而 `_migrate`（`:166-212`）是 **copy → verify → 改写 DB 路径 → `db_src.unlink()` + `rmtree(media_src)`**，
+即「目标已有则跳过并只改路径，否则搬完删源」。**只要显式配了一个不等于锚点的 `data_dir`，无论开关怎么设都会搬走并删源。**
+
+正确机制 = **新增一层 settings 覆写**，完全不碰 `apply_system_config` 的重定向通路：
+
+```python
+# config/settings/e2e_slot.py  （新档；缺 LQDP_E2E_SLOT_DIR 就 fail fast）
+from config.settings.development import *          # 已按仓库根解析，target==orig ⇒ 无迁移
+import os, tempfile
+from pathlib import Path
+slot = Path(os.environ['LQDP_E2E_SLOT_DIR'])
+DATABASES = {**DATABASES, 'default': {**DATABASES['default'], 'NAME': slot / 'db.sqlite3'}}
+MEDIA_ROOT = slot / 'media'
+import config.settings.base as _base; _base.MEDIA_ROOT = MEDIA_ROOT   # 有人直接读 base
+tempfile.tempdir = str(slot / 'temp')
+for k in ('TMP', 'TEMP', 'TMPDIR'): os.environ[k] = tempfile.tempdir    # slot 各自的临时区
+```
+
+于是：slot 的库/媒体/临时区都由 `LQDP_E2E_SLOT_DIR` 一个变量决定；`LQDP_SYSTEM_CONFIG_FILE` 里钉的还是
+`data_dir = 仓库根`（与今天一致 ⇒ `target == orig` ⇒ 迁移分支永不进入）。非 slot 运行不设 `DJANGO_SETTINGS_MODULE`，
+行为逐字不变。
+
+**P1 起加一条不可绕过的守卫**：任何向 Django 发写命令之前，先跑一个只读的解析断言 ——
+`settings.MEDIA_ROOT` 与 `DATABASES['default']['NAME']` 必须**精确等于**预期路径（`==`，不是 `startswith`；
+`startswith` 曾被一个畸形 config 骗过去，见 §12），且仓库根不得出现新的重定向目录。
+配置文件一律用 `fs.writeFileSync(JSON.stringify(...))` 或 Write 工具生成，**禁止用 shell `printf` 拼反斜杠**
+（bash→node→文件 的三层转义会把 `\\` 吃成空，导致 JSON 非法后静默回落默认数据目录）。
 
 ### 4.2 为什么仍然保留同名 `admin`，不做 per-slot 用户
 
@@ -121,11 +157,11 @@ scripts/e2e_pool.mjs                     ← 新增：池编排器（并行全�
 
 | 共享物 | 今天的形状 | slot 化后的机制 | 要动的代码 |
 |---|---|---|---|
-| SQLite 库 | 仓库根单库，globalSetup 跑 `migrate`+seed（`e2e/global-setup.ts:40-46`） | 每 slot 一份模板拷贝；slot 模式下 globalSetup **跳过** migrate/seed | `global-setup.ts` 加分支 |
+| SQLite 库 | 仓库根单库，globalSetup 跑 `migrate`+seed（`e2e/global-setup.ts:40-46`） | 每 slot 一份模板拷贝，路径由新增的 `config/settings/e2e_slot.py` 直接指定（**不经 `data_dir` 重定向**，§4.1）；slot 模式下 globalSetup 跳过 migrate/seed | 新增 settings 档 + `global-setup.ts` 加分支 |
 | 账号持久态 | 全体用例共用一个 admin 行 | 每 slot 是自己的库副本，同名行的**副本**，写回互不可见 | 无 |
 | 上传与删除 | `media/data/admin/…`，只清 `e2e_` 前缀；**删记录会 `os.remove` 盘文件并向上 rmdir 空目录到 MEDIA_ROOT**（`_helpers.py:191-207`，批次走 rmtree） | 硬链镜像 ⇒ 上传写新 inode、删除只摘本 slot 的链，模板与其它 slot 的输入不受影响 | slot 目录构造 |
 | storageState / token | 一份 `admin.json` 开跑时铸（`playwright.config.ts:100,109,116,123`） | 每 slot 各自铸；**per-slot `SECRET_KEY` 是必需的**：每份副本里 user PK 都是 1，共用默认密钥时 slot A 的 token 能在 B 认证，端口搞错会从 401 变成**静默写别人的库** | config 4 处路径 + env |
-| `temp_dir` | `apply_system_config` 把 `TMP/TEMP/TMPDIR` 与 `tempfile.tempdir` 统一指向 `%TEMP%\LQ-DataPrase-Temp`（`system_config.py:394-409`） | slot config 里显式给 `temp_dir` ⇒ 导出/合并的中间文件天然隔离 | 无（配置字段已有） |
+| `temp_dir` | `apply_system_config` 把 `TMP/TEMP/TMPDIR` 与 `tempfile.tempdir` 统一指向 `%TEMP%\LQ-DataPrase-Temp`（`system_config.py:394-409`）—— 4 个 slot 会同享一个临时区 | 由 settings 档覆写：`tempfile.tempdir` 与三个 env 都指向 `<slot>/temp`（不走配置文件的 `temp_dir` 字段，避免顺带触发 `data_dir` 那条通路） | 新增 settings 档内 3 行 |
 | SFTP 会话缓存 | key `sftp:conn:<user_id>`（`apps/sftp/cache.py:43,116`），URL 解析 `SFTP_SESSION_REDIS_URL`→`REDIS_URL`→`CELERY_BROKER_URL`（`cache.py:64-67`、`base.py:271,277`） | **每 slot 一个 Redis db index**。今天 Redis 没起、降级进程内 LocMem（`cache.py:75`）所以还没炸；一旦 Redis 起来，4 份副本的 `user_id` 相同 ⇒ 直接串号 | env |
 | `known_hosts.json` | `MEDIA_ROOT/sftp/known_hosts.json` 固定名 + 固定 `.tmp` 原子替换（`apps/sftp/host_keys.py:33,63,114-126`） | 落在 slot 的 media 镜像里，天然隔离 | 无 |
 | SFTP 测试服务器 | 本地 paramiko，随机端口 + `mkdtemp` root（`e2e/helpers/sftpServer.ts:46,57-59,94-104`） | **已经并行安全** | 无 |
@@ -206,8 +242,9 @@ scripts/e2e_pool.mjs                     ← 新增：池编排器（并行全�
 4. `seed_test_data` 有 `--owner/--clear/--refresh`，`--refresh` 只清 `e2e_` 前缀，幂等靠
    (owner,filename,file_path)+size/mtime；源目录锚在仓库（`parents[4]`），写侧走 MEDIA_ROOT
    （`apps/accounts/management/commands/seed_test_data.py:21,36-55,104-157`）⇒ 模板建在 TEMP 可行。
-5. `LQDP_SKIP_STORAGE_MIGRATION` 已存在（`system_config.py:71-83`）；不设它而改 `data_dir` 会触发搬走并删源的
-   `_migrate`（`:389-391`）⇒ §4.1 的硬前提。
+5. ~~`LQDP_SKIP_STORAGE_MIGRATION` 足以让 `data_dir` 指向 TEMP 变成零副作用~~ **已证伪**（事故，见 §12）：
+   该开关只影响「未配 `data_dir` 时的默认值解析」，`system_config.py:389` 的 `data_target != orig` 判断在分支外，
+   显式配别的目录就一定会触发搬走并删源的 `_migrate` ⇒ 隔离机制改为 §4.1 的 settings 覆写档。
 6. `SECRET_KEY` 读 env（`base.py:17`）、`SFTP_SESSION_REDIS_URL` 读 env（`base.py:271`）
    ⇒ 两项隔离纯靠注入，不需要新增 settings 档。
 7. e2e 侧 `admin` 字面量 28 行 / 9 文件，统一入口已存在（`ACCOUNTS` + `ADMIN_STATE`）；
@@ -219,5 +256,33 @@ scripts/e2e_pool.mjs                     ← 新增：池编排器（并行全�
 - 不引入跨用例共享 context（省冷启的另一条路，会把刚消掉的账号态重新请回来）。
 - 不动 T1/T2/T3 三层判据与 `test:e2e:affected` 的选例逻辑。
 - 不做 per-slot 用户名（理由见 §4.2）。
-- 不用「故意不带 `LQDP_SKIP_STORAGE_MIGRATION` 跑一次」来证明该开关承重（§4.1 明确只走代码读）。
+- 不在真实仓库根上做「保护缺席」的试跑。要证明某个防护分支承重，只能走读代码 + 在副本/临时目录里操作
+  （§12 那次事故就是反过来证明了这条）。
 - 不做 CI/多机；不把后端 888 例并入这 10min。
+
+## 12. 事故记录（2026-10-14 22:37–22:53）
+
+**发生了什么**：P0 探针按计划把 `data_dir` 指到 `%TEMP%\lqdp-e2e-probe-template` 并设了
+`LQDP_SKIP_STORAGE_MIGRATION=1`，以为那样是「只读式重定向」。实际 settings 导入即触发
+`_migrate(仓库根 → 探针目录)`，把仓库根 `db.sqlite3`（4MB）与 `media/`（1.1GB / 154 文件）**搬进探针目录并删源**；
+探针脚本开头又有 `fs.rmSync(PROBE)`，第二次运行把刚搬来的原件删了。
+
+**损失边界**：仓库根 `media/` 与 `db.sqlite3`（两者都在 `.gitignore`：`:61,:64`，`git ls-files` 命中 0 ⇒ 无 git 恢复路径，但也无被跟踪文件受影响）。
+其中 87 个种子 CSV（711MB）与库 schema+种子行**可再生**；不可再生的约 67 个历次测试上传残留（`e2e_*` / 批次目录 / `media/sftp/known_hosts.json`）—— 本就是会被 `seed_test_data --refresh` 与用例自清逻辑清掉的测试垃圾。
+`Data/SampleData`（种子源）、`tasks/e2e-nightly/` 基线、三次文档提交均完好。
+
+**次生副作用（用户已选择不清理）**：随后的恢复命令用 shell `printf` 写配置，反斜杠被转义吃掉 ⇒ JSON 非法 ⇒
+`load_config` 静默回落默认值 ⇒ 命令落到了**你真实使用的** `C:\Users\Administrator\LQ-DataPrase`：
+对 84 条**已存在**的 `DataFile` 重跑解析并 `save`（只写 parser 派生字段，不动 tags/备注；今天新建行数经核为 0），
+追加了 `ParseHistory`，库 14.8MB → 16.0MB。没有删除、没有新增文件。另一次畸形 `data_dir`（无分隔符的相对路径）
+在仓库根造出 `UsersAdministratorDesktopDataPraseLQ-DataPrase/` 垃圾目录并被 `_migrate` 写入了那个 4KB 空壳 —— 已删除。
+
+**恢复与验证**：配置改用 `JSON.stringify` 生成后，先跑只读解析断言（`MEDIA_ROOT` / `DB` 与仓库根**精确相等**），
+再 `migrate + seed_users + seed_test_data --refresh` ⇒ 仓库根 `media/` = 711MB / 87 文件、`db.sqlite3` = 2.95MB。
+可用性验证：`--project=P0 --workers=1 --retries=0` **15/15 绿**；`e2e/analysis/analysis.spec.ts --project=P1`
+**18/18 绿（57.8s）**，含真实参数的直方图/箱线图/QQ/相关性散点 ⇒ 种子数据确实可解析可用。
+顺带一个观察：记忆里「唯一剩下的产品侧硬红 `smoke/pages` 数据分析正常加载」在干净库上**通过了**，
+说明那条红的触发条件与累积的账号/文件状态相关，不是无条件红（Task 6 需要重新确认它的定性）。
+
+**为什么原先的断言没拦住**：我用的判据是 `startswith(仓库根)`，而畸形 `data_dir` 解析成
+`仓库根\UsersAdministrator…\media` —— 以仓库根开头，于是「通过」。规则改为**精确相等**，且额外检查仓库根没长出新的重定向目录。
