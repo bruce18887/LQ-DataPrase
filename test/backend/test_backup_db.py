@@ -36,6 +36,7 @@ from apps.common.backup import (  # noqa: E402
     BackupError,
     check_backupable,
     collect_companions,
+    list_backups,
     resolve_keep,
     rotate,
     vacuum_into,
@@ -276,6 +277,42 @@ def subprocess_run_with_exit(db_path: Path) -> None:
 def shutil_rmtree(path: Path) -> None:
     import shutil
     shutil.rmtree(path, ignore_errors=True)
+
+
+class SnapshotNamingTests(SimpleTestCase):
+    """快照名只精确到秒 —— 同一秒跑两次（cron 与人工撞上）会**静默覆盖掉一份备份**。
+
+    备份最怕的不是失败出声，而是以为有两份其实只有一份，所以撞名必须避让而不是覆盖。
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix='backup_naming_'))
+        self.addCleanup(shutil_rmtree, self.tmp)
+
+    def test_first_name_is_plain_stamp(self):
+        from apps.common.backup import next_snapshot_path
+        got = next_snapshot_path(self.tmp, '20261014043256')
+        self.assertEqual(got.name, 'lqdp-20261014043256.sqlite3')
+        self.assertEqual(len(next_snapshot_path(self.tmp, '20261014043257').name),
+                         len('lqdp-20261014043257.sqlite3'))
+
+    def test_taken_name_gets_a_suffix_instead_of_overwriting(self):
+        from apps.common.backup import next_snapshot_path
+        first = next_snapshot_path(self.tmp, '20261014043256')
+        first.write_text('real-backup', encoding='utf-8')
+
+        second = next_snapshot_path(self.tmp, '20261014043256')
+        self.assertNotEqual(second, first, '同秒必须让开，不能指向同一文件')
+        self.assertEqual(second.name, 'lqdp-20261014043256-1.sqlite3')
+        self.assertEqual(first.read_text(encoding='utf-8'), 'real-backup', '已有那份不得被动过')
+
+        # 再撞一次继续让位（先把上一份让出来的名字真的占住），
+        # 且轮转仍然认得这些文件（同属 lqdp-*.sqlite3 模式）
+        second.write_text('second', encoding='utf-8')
+        third = next_snapshot_path(self.tmp, '20261014043256')
+        self.assertEqual(third.name, 'lqdp-20261014043256-2.sqlite3')
+        third.write_text('x', encoding='utf-8')
+        self.assertEqual(len(list_backups(self.tmp)), 3)
 
 
 if __name__ == '__main__':

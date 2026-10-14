@@ -58,7 +58,7 @@ class Command(BaseCommand):
             raise CommandError(f'备份目录创建失败（{dest_dir}）：{exc}')
 
         stamp = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
-        snapshot = dest_dir / f'{backup.BACKUP_PREFIX}{stamp}{backup.BACKUP_SUFFIX}'
+        snapshot = backup.next_snapshot_path(dest_dir, stamp)
 
         try:
             backup.vacuum_into(connection, snapshot)
