@@ -52,10 +52,13 @@ const api = axios.create({
 })
 
 // Sanity check: in Electron production mode we must have a backend URL.
+// 例外是首次运行的连接页（#/connect）：此刻用户还没选完「连哪个后端」，主进程刻意
+// 不 spawn 本机后端，所以 __backendUrl__ 为空是**预期状态**，不是故障。
+// 因此降级为 warn 并写明这一点 —— 否则日志里一条 error 会把「首启还没选」误诊成「API 全挂」。
 if (typeof window !== 'undefined' && window.electronAPI && !window.__backendUrl__) {
-  console.error(
-    '[api] Electron detected but __backendUrl__ is empty. ' +
-      'API requests will fail because file:// protocol cannot resolve /api/v1.'
+  console.warn(
+    '[api] Electron 内尚未拿到后端地址。若正停留在 #/connect（首次运行的选择页），' +
+      '这是预期状态；选择并重启后即恢复。其它情况下 API 请求会失败。'
   )
 }
 
