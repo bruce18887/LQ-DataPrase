@@ -1473,5 +1473,40 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   进一步说明那 117 红与我自己的改动无关。前端端口参数化已补（`E2E_FRONTEND_PORT`，`49a5e19`），
   并用 `E2E_PORT=8141 E2E_FRONTEND_PORT=3941` 定向复跑 settings.spec（8 passed / 26.2s）证明两个端口都真跟变量走。
 
+## 2026-10-14 Electron 壳不是不能自动化：用 `--remote-debugging-port` + CDP，桌面坐标点击不可信
+
+- **背景**：批 4 的「首启不 spawn / 选择页交互 / 保存后重启 / 远端连不上不白屏 / 远端模式下存储路径只读」
+  被我（以及 CLAUDE.md 的 T3 分类）当成「本仓库无驱动通路、只能人工冒烟」。实际做下来**全部可以自动化**，
+  只是入口不是 Playwright。
+- **可用通路**：`npx electron . --remote-debugging-port=9223` 起进程 → `http://127.0.0.1:9223/json/list` 拿
+  page target 的 `webSocketDebuggerUrl` → Node 24 的**内置 `WebSocket`** 直接发 `Runtime.evaluate`
+  （`awaitPromise + returnByValue`）。脚本留在 `tasks/_cdp_*.mjs`（tasks/ 已 gitignore）。
+  这条路能点控件、填 `el-input`（要用原生 value setter + `dispatchEvent(new Event('input',{bubbles:true}))`
+  才进得了 v-model）、读回 DOM 状态，等于把「Electron 不可替代」那五类真做成了可回归的检查。
+- **反面教训（先走了弯路）**：`computer-use` 的桌面点击三次都没落进渲染进程 —— 截图是 1192×768 而窗口是
+  1400×900（DPI 缩放），坐标换算做了仍不生效，且**失败时无法区分「UI 坏了」与「点偏了」**。
+  判据：点了没反应先去看「有没有产生预期副作用」（PID 变不变、配置文件写没写），别在坐标上继续试。
+- **本轮实测到的三条真行为**（都有输出）：首启 `Startup plan: spawn=false route=#/connect` 且**没拉本机后端**；
+  保存后 `client-config.json` 落盘无 `.tmp` 残留、进程重启并 `loadURL` 到远端；
+  把地址改成一个没人监听的端口 → `Remote probe … → false` → 落回连接页并显示
+  「上次配置的服务器连不上」横幅，`#app` 有子节点，**不是白屏**。
+  远端模式下设置页「存储路径」tab：提示在、`选择目录` 按钮 0 个、`保存路径` 按钮 0 个。
+
+## 2026-10-14 DEBUG=False 下 index.html 被模板缓存：换了 frontend/dist 必须重启服务
+
+- **现象**：服务器档跑着的时候我重建了一次 `frontend/dist`（`VITE_ELECTRON=true`），
+  随后 Electron 加载 `http://127.0.0.1:8142/` **整页空白**：`#app.children == 0`，
+  而 `document.scripts` 指向的是**上一次的** chunk 名（`index-BzyB7Nct.js` 而非新的 `index-CW1h1rFw.js`）。
+- **根因**：`DEBUG=False` 时 Django 的 `cached.Loader` 生效，SPA catch-all 用的 `index.html`
+  在首次渲染后常驻进程缓存；磁盘上的文件换了，进程还在发旧 HTML，而旧 HTML 引用的 chunk 已被新构建替换 → 404 → 不挂载。
+  资源本身（`/assets/...`）是每次读盘的，所以只有入口 HTML 这一层会过期。
+- **规则**：**升级前端的流程是「`npm run build` → 重启服务」**，只换文件不重启会得到一个白屏且没有任何报错的实例。
+  已写进 `docs/reference/server-deployment.md`。同类陷阱：任何「模板/配置在导入期或首次渲染时被缓存」的东西，
+  都不能在进程活着的时候改。
+- **顺带一条**：Electron 侧的 `dist` 必须是 `VITE_ELECTRON=true` 的相对 base 构建，
+  普通 `npm run build`（绝对 `/assets/...`）在 `file://` 下会**静默白屏**、且不产生任何 renderer 报错
+  —— 我 12:41 跑门禁时顺手覆盖过一次，12:52 用 `npx cross-env VITE_ELECTRON=true npm run build` 修回。
+
+
 
 

@@ -49,6 +49,14 @@ python standalone.py --host 0.0.0.0 --port 8000
 前端产物必须先构建：服务器档从源码的 `frontend/dist` 同源发送 SPA（没有 nginx，静态资源也归
 Django 发）。目录不存在时会在启动时给一条可见警告，届时浏览器打开根路径会 404。
 
+**升级前端的正确顺序：`npm run build` → 重启服务。**
+`DEBUG=False` 下 Django 的缓存模板加载器会把 SPA 的 `index.html` 常驻进程内存，只换磁盘文件的话，
+进程仍在发旧 HTML，而旧 HTML 引用的 chunk 名已被新构建替换 → **整页空白且没有任何报错**
+（2026-10-14 实测：`#app` 零子节点，`document.scripts` 还指向上一次的 hash）。
+
+另注意构建模式：给 Electron 用的产物必须是 `npx cross-env VITE_ELECTRON=true npm run build`（相对 base），
+普通 `npm run build` 产出绝对路径 `/assets/...`，在 `file://` 下同样静默白屏。服务器档走 http 同源，两者都能用。
+
 **进程模型未定**：`runserver --noreload` 不是长期服务进程（无 TLS、无慢客户端隔离、无守护）。
 正式的进程托管形态（waitress / gunicorn / IIS）取决于服务器 OS 何时拍板，见 §6。
 

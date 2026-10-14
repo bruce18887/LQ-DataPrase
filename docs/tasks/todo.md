@@ -3137,22 +3137,41 @@ D3 无迁移逻辑、D4 不恢复全局压缩、D5 本批不收 CORS。完整规
 - [x] 双主题：两个新组件都只用 `var(--card)/var(--border)/var(--text)/var(--text-2)/var(--error)/var(--brand)` 等 token，无页面级 night 覆盖（R7①）
 - [x] T2：`frontend/test/unit/clientConfig.spec.ts` **21 例**（坏输入回落 / 地址校验含拒绝带凭证 / 原子写不留 `.tmp` / `planStartup` 四分支），`npm run test:unit` = 52 例全绿
 - [x] T3：不新写 spec 文件，改为**把新 tab 登记进 `e2e/settings/settings.spec.ts` 的 `TABS` 清单** —— 该清单被三条既有用例迭代（标签可见 / 点进去内容可见 / 死设置不复发），加一行即自动获得两条真断言，且浏览器形态无 electronAPI 时 `ConnectionSettings.vue` 显示「由你打开的地址决定」这一分支正好被覆盖。**不写**桩化 `window.electronAPI` 的用例：那会让 `router/index.ts:8` 切成 hash 历史，测到的是我们自己造出来的假象
-- [ ] T3：首启选择窗落盘 → 重启 → 按所选模式起，属 Electron 不可替代项，**本仓库无驱动通路**，留作人工冒烟（步骤见下方 Review）
+- [x] T3：首启选择窗落盘 → 重启 → 按所选模式起 —— **原判「本仓库无驱动通路」是错的**：
+      `--remote-debugging-port` + Node 内置 WebSocket 发 CDP `Runtime.evaluate` 就能驱动真实 Electron 壳，
+      四步全部实跑通过（证据见下方 Review）。桌面坐标点击才是不可信的那条路。
 - [x] 本批**不收 CORS**（`base.py:83` 保持 True）；收紧条件写进 `config/settings/server.py` 末尾注释与本文件
 - [x] 门禁：`npx tsc -p ../electron/tsconfig.json --noEmit` 退出 0；`npm run build` 绿（936ms，最终 HEAD 上重跑）；`lint:e2e` 干净；vitest **57 例**（含 `probeBackendUrl` 特征化 5 例）；全量 e2e 见批 2 那条（364 passed / 0 failed）；**双自定义端口定向复跑** `E2E_PORT=8141 E2E_FRONTEND_PORT=3941 npx playwright test e2e/settings/settings.spec.ts --workers=1` → 8 passed / 26.2s，证明前后端两个端口都真的跟着变量走（不只是"配置能解析"）
 - [x] `playwright.config.ts` 新增 `E2E_PORT`（默认仍 8000）：本轮 8000 被一个读**真实 data_dir** 的外部 `runserver` 占着，`reuseExistingServer` 会静默复用 → 换端口让 Playwright 自起自收，比停别人进程安全
 
 ### Review（批 4）
 
-- **人工冒烟清单（Electron 壳无自动化通路，上线前请逐条走一遍）**：
-  ① 删 `%APPDATA%\\lq-dataprase\\client-config.json` → 启动应直接进「选择连接方式」页，
-  且**本机后端没有被拉起**（判据：日志出现 `Startup plan: spawn=false ... route=#/connect`，
-  且 userData 下不新建 `db.sqlite3`）；
-  ② 选「本机模式」→ 应照常起后端并进入登录页，`client-config.json` 落盘且无 `.tmp` 残留；
-  ③ 选「连接服务器」填一个错误地址 → 保存后应重启回到连接页并显示「服务器连不上」横幅，
-  改回本机应能正常使用；
-  ④ 填真实服务器地址 → 窗口应加载服务器同源页面，设置页「存储路径」tab 显示服务器路径且不可编辑。
-- **实测数字**：vitest 52 例（新增 21）；electron tsc 退出 0；`npm run build` 907ms 绿。
+- **首启冒烟：已执行，且不是人工 —— 通路是 CDP**（`npx electron . --remote-debugging-port=9223` +
+  Node 内置 WebSocket 发 `Runtime.evaluate`，脚本 `tasks/_cdp_{connect,settings}_smoke.mjs`）。
+  原判「本仓库无驱动 Electron 壳的通路、只能人工冒烟」是**错的**，桌面坐标点击才是不可信的那条路（见 lessons 同日条目）。
+  在真机真进程上跑通的四条，全部有输出为证：
+  ① 无 `client-config.json` 启动 → 日志 `Backend target: mode=local firstRun=true` +
+  `Startup plan: spawn=false load=- route=#/connect`，**没有拉起任何本机后端**；窗口标题变成
+  「连接设置 - LQ-DataPrase」，截图确认单选/警示横幅/按钮都在位；
+  ② CDP 点「连接服务器」→ 地址框出现（`v-if` 由 mode 驱动）、填值进 `v-model`（原生 setter + input 事件）、
+  点「开始使用」→ `client-config.json` 落盘为 `{"mode":"remote","serverUrl":"http://127.0.0.1:8142"}`、
+  **无 `.tmp` 残留**、`Client config saved` 后进程重启（旧连接超时即重启的证据）；
+  ③ 重启后 `Remote probe … → true` → `loadURL` 远端，页面 `http://127.0.0.1:8142/#/login`、
+  标题「登录 - LQ-DataPrase」、`#app` 有子节点；用 admin 真登录 → 拿到 token、跳 `/#/dashboard`；
+  ④ 把地址改成无人监听的端口 → `Remote probe … → false` → 落回 `#/connect` 并显示
+  「上次配置的服务器连不上」横幅，`#app.children=1` —— **不白屏**，用户仍有机会改回本机。
+  另验远端模式的语义翻转贴：设置页 7 个 tab 含「🔗 连接」，其 modeTag=「远端服务器」、URL 显示正确；
+  「存储路径」tab 下 `paths-remote-notice` 在、**`选择目录` 按钮 0 个、`保存路径` 按钮 0 个**、
+  且「仅管理员可修改存储路径」那条不再误显示。
+- **仍未覆盖的两条 Electron 项**（不是没做，是这台机器上做不了）：
+  打包 exe 下的本机 spawn（要 `build.bat`，它会 taskkill 其它会话进程）；真·跨机浏览器访问（只有一台机器）。
+  本次的远端验证已经是同机 TCP 能做到的极限（真实 Chromium 客户端连真实服务器档实例）。
+- **实测数字**：vitest 57 例（新增 21 + 探针 5 + 原 31）；electron tsc 退出 0；`npm run build` 936ms 绿。
+- **冒烟过程中撞出的两个非产品问题（都已记 lessons）**：`npm run build`（浏览器 base）会覆盖 Electron 需要的
+  `VITE_ELECTRON=true` 产物，`file://` 下表现为静默白屏；服务器活着的时候换 `frontend/dist`，
+  `DEBUG=False` 的缓存模板加载器仍发旧 `index.html` → 指向已不存在的 chunk → 白屏无报错。
+  结论写进部署文档：**升级前端 = 构建 + 重启服务**。
+
 - **一处自我纠正**：初稿把 `resolveBackendUrl` 留在模块里但没有任何调用者 —— 死代码，已删除，
   改由 `planStartup` 承担同一职责（顺带把「不可达不许兜底 spawn」这条也钉住）。
 - **双主题**：新组件零硬编码颜色，全部走 token；未新增 element-plus 覆盖块。
@@ -3194,7 +3213,8 @@ D3 无迁移逻辑、D4 不恢复全局压缩、D5 本批不收 CORS。完整规
 ## 仍开着的（都不是代码问题）
 
 1. 局域网另一台机浏览器开 `http://<ip>:<port>/login` 能登录并浏览数据 —— 本机只有一台机器。
-2. Electron 首启四步人工冒烟（步骤在本文件批 4 Review 上方）。
+2. ~~Electron 首启四步人工冒烟~~ —— **已用 CDP 自动跑完**（见批 4 Review 的四条实测输出）；
+   只剩打包 exe 下的本机 spawn 与真·跨机访问两条，受本机条件限制做不了。
 3. 冻结产物上 `backup_db` 可见性（`build.bat` 会 taskkill 其它会话，留待下次正常打包核对）；
    并记一条真实缺口：打包 exe 没有子命令入口，`backup_db` 只能在源码形态跑。
 4. spec §4.4 的 SFTP 存密缺陷：**本批只堵不修**。既有 token 换档仍解不开，部署口径是「在服务器重录」；
