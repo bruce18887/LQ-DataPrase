@@ -26,7 +26,12 @@ const PYTHON_BIN =
   process.env.PYTHON_BIN || path.join(PROJECT_ROOT, '.venv', 'Scripts', 'python.exe')
 
 const FRONTEND_URL = 'http://localhost:3000'
-const BACKEND_PORT = '8000'
+// 默认仍是 8000（夜间轮与其它会话的既有约定）。留一个覆盖口：本机常有第二个
+// `manage.py runserver 8000` 挂着，而 reuseExistingServer 会静默复用它 —— 那个进程读的是
+// 仓库根 system_config.json（data_dir = 用户真实数据目录），用例的 PUT /auth/settings/
+// 就会写进真实账号（lessons 2026-09-19 / 2026-10-14 两条同一险情）。
+// 换端口让 Playwright 自起自收，比停掉别人的进程安全。
+const BACKEND_PORT = process.env.E2E_PORT || '8000'
 const BACKEND_URL = `http://localhost:${BACKEND_PORT}`
 
 // 默认由 Playwright 自动拉起前后端；设 PW_NO_WEBSERVER=1 改为手动起服务，
@@ -152,6 +157,9 @@ export default defineConfig({
           url: FRONTEND_URL,
           reuseExistingServer: !process.env.CI,
           timeout: USE_DEV_SERVER ? 120_000 : 300_000,
+          // 显式把后端端口传给 vite：proxy 目标读的就是它（写死 8000 会在换端口时
+          // 让 /api 直接 ECONNREFUSED，登录 setup 全红、383 例不跑 —— 2026-10-14 实测）
+          env: { ...process.env, E2E_PORT: BACKEND_PORT },
           stdout: 'pipe',
           stderr: 'pipe',
         },

@@ -14,6 +14,33 @@ import * as fs from 'fs'
 import { spawnBackend, stopBackend } from './backend'
 import type { BackendInfo } from './backend'
 import { registerIpcHandlers } from './ipc-handlers'
+import { probeBackendUrl } from './backend'
+import {
+  DEFAULT_CLIENT_CONFIG,
+  hasClientConfig,
+  normalizeServerUrl,
+  planStartup,
+  readClientConfig,
+  writeClientConfig,
+} from './client-config'
+import type { ClientConfig } from './client-config'
+
+// ---------------------------------------------------------------------------
+// 「连哪个后端」的运行时状态
+// ---------------------------------------------------------------------------
+// 判据与校验都在 client-config.ts（纯模块，有单测）；这里只负责流程分支：
+//   首启（无配置文件） → 不 spawn 本机后端，窗口先进 #/connect 让用户选
+//   mode=local         → 照旧 spawn 一个 127.0.0.1 后端
+//   mode=remote        → 不 spawn，直接加载服务器地址（同源，Electron 只是壳）
+// 远端连不上时**留在连接页**，不把窗口丢给 Chromium 的错误页 —— 用户得有机会改回本机。
+let clientConfig: ClientConfig = { ...DEFAULT_CLIENT_CONFIG }
+let clientConfigDir = ''
+let isFirstRun = false
+let remoteReachable: boolean | null = null
+/** 远端模式下要加载的地址；null 表示走本机（file://）。 */
+let remoteUrlToLoad: string | null = null
+/** 非空时窗口先落到这个前端路由，例如 '#/connect'。 */
+let startupRoute: string | null = null
 
 // ---------------------------------------------------------------------------
 // Logging
@@ -261,23 +288,41 @@ async function createWindow(): Promise<BrowserWindow> {
 
   if (isDev) {
     // In dev the Vite server is running on :3000
-    console.log('[electron] Loading dev URL http://localhost:3000')
-    await win.loadURL('http://localhost:3000')
+    const devUrl = 'http://localhost:3000' + (startupRoute ?? '')
+    console.log(`[electron] Loading dev URL ${devUrl}`)
+    await win.loadURL(devUrl)
     // Only open DevTools on demand. Auto-opening it floods the terminal with
     // benign Chromium-internal noise (Unknown VE context: language-mismatch,
     // Autofill.enable / Autofill.setAddresses not found, etc.).
     if (process.env.ELECTRON_OPEN_DEVTOOLS === 'true') {
       win.webContents.openDevTools()
     }
+  } else if (remoteUrlToLoad) {
+    // 远端模式：页面由服务器自己发（同源），Electron 退化成壳。
+    // SPA 是按 `base: './'` 构建的相对路径产物，所以 file:// 与 http:// 两种加载方式都成立。
+    const url = remoteUrlToLoad + (startupRoute ?? '')
+    console.log(`[electron] Loading remote URL ${url}`)
+    try {
+      await win.loadURL(url)
+    } catch (err) {
+      console.error(`[electron] Failed to load remote URL ${url}:`, err)
+      startupRoute = '#/connect'
+      remoteUrlToLoad = null
+      await win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'), { hash: '/connect' })
+    }
   } else {
     // In production the frontend/dist/ directory sits in the ASAR next to
     // electron-dist/. Using a relative path + file:// protocol means we must
     // have built the SPA with `base: './'` so asset references are relative.
     const indexPath = path.join(__dirname, '..', 'dist', 'index.html')
-    console.log(`[electron] Loading production file: ${indexPath}`)
+    console.log(`[electron] Loading production file: ${indexPath} route=${startupRoute ?? '-'}`)
     console.log(`[electron] __dirname: ${__dirname}`)
     try {
-      await win.loadFile(indexPath)
+      if (startupRoute) {
+        await win.loadFile(indexPath, { hash: startupRoute.replace(/^#/, '') })
+      } else {
+        await win.loadFile(indexPath)
+      }
     } catch (err) {
       console.error('[electron] Failed to load production index.html:', err)
       throw err
@@ -299,27 +344,101 @@ function showBackendErrorDialog(err: unknown): void {
 }
 
 // ---------------------------------------------------------------------------
+// 连接方式的选择（本机 / 远端服务器）
+// ---------------------------------------------------------------------------
+/**
+ * 校验并落盘用户的选择。**不自动重启**：本机↔远端切换要换的是整个后端进程，
+ * 热切换做不到；界面保存后引导用户重启（复用现成的 restart-app 通道）。
+ *
+ * 落盘失败（磁盘满、目录不可写）不能抛出去 —— 那会在主进程里变成一次无声崩溃。
+ */
+function saveClientConfigChoice(input: {
+  mode: 'local' | 'remote'
+  serverUrl: string
+}): { ok: boolean; error?: string } {
+  let next: ClientConfig
+  if (input.mode === 'local') {
+    next = { mode: 'local', serverUrl: '' }
+  } else {
+    const checked = normalizeServerUrl(input.serverUrl)
+    if (!checked.ok) {
+      return { ok: false, error: checked.error }
+    }
+    next = { mode: 'remote', serverUrl: checked.url }
+  }
+
+  try {
+    writeClientConfig(clientConfigDir, next)
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    console.error('[electron] Failed to persist client config:', err)
+    return { ok: false, error: `配置写入失败（${clientConfigDir}）：${detail}` }
+  }
+
+  clientConfig = next
+  isFirstRun = false
+  console.log(`[electron] Client config saved: mode=${next.mode} url=${next.serverUrl || '-'}`)
+  return { ok: true }
+}
+
+// ---------------------------------------------------------------------------
 // App lifecycle
 // ---------------------------------------------------------------------------
 app.whenReady().then(async () => {
   console.log('[electron] App ready')
   createMenu()
 
-  // Start the Python backend
-  try {
-    console.log('[electron] Starting backend...')
-    backendInfo = await spawnBackend(isDev)
-    backendUrl = `http://localhost:${backendInfo.port}`
-    const managedLabel = backendInfo.managed ? '(managed)' : '(external)'
-    console.log(`[electron] Backend ready on ${backendUrl} ${managedLabel}`)
-  } catch (err) {
-    console.error('[electron] Failed to start backend:', err)
-    showBackendErrorDialog(err)
-    // Continue without backend – the UI will show connection errors.
+  clientConfigDir = app.getPath('userData')
+  isFirstRun = !hasClientConfig(clientConfigDir)
+  clientConfig = readClientConfig(clientConfigDir)
+  console.log(`[electron] Backend target: mode=${clientConfig.mode} firstRun=${isFirstRun}`)
+
+  // 可达性只在「已经选了远端」时才需要探一次；首启不探（还没有地址可探）。
+  if (!isFirstRun && clientConfig.mode === 'remote') {
+    remoteReachable = await probeBackendUrl(clientConfig.serverUrl)
+    console.log(`[electron] Remote probe ${clientConfig.serverUrl} → ${remoteReachable}`)
+  }
+
+  // 四条分支的判据在 client-config.ts 的 planStartup（有 T2 单测）；这里只执行计划。
+  const plan = planStartup(clientConfig, {
+    firstRun: isFirstRun,
+    remoteReachable: remoteReachable === true,
+  })
+  startupRoute = plan.route
+  if (plan.loadUrl) {
+    backendUrl = plan.loadUrl
+    remoteUrlToLoad = plan.loadUrl
+  }
+  console.log(
+    `[electron] Startup plan: spawn=${plan.spawnLocalBackend} load=${plan.loadUrl ?? '-'}` +
+      ` route=${plan.route ?? '-'} remoteReachable=${remoteReachable}`,
+  )
+
+  if (plan.spawnLocalBackend) {
+    // Start the Python backend
+    try {
+      console.log('[electron] Starting backend...')
+      backendInfo = await spawnBackend(isDev)
+      backendUrl = `http://localhost:${backendInfo.port}`
+      const managedLabel = backendInfo.managed ? '(managed)' : '(external)'
+      console.log(`[electron] Backend ready on ${backendUrl} ${managedLabel}`)
+    } catch (err) {
+      console.error('[electron] Failed to start backend:', err)
+      showBackendErrorDialog(err)
+      // Continue without backend – the UI will show connection errors.
+    }
   }
 
   // Register IPC handlers (pass a getter so they always return the current URL)
-  registerIpcHandlers(() => backendUrl)
+  registerIpcHandlers(() => backendUrl, {
+    read: () => ({
+      mode: clientConfig.mode,
+      serverUrl: clientConfig.serverUrl,
+      reachable: remoteReachable,
+      firstRun: isFirstRun,
+    }),
+    save: (input) => saveClientConfigChoice(input),
+  })
 
   // Pass the backend URL to the preload script via an env var so it can
   // synchronously expose window.__backendUrl__ before the SPA's module-init

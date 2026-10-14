@@ -7,11 +7,25 @@
 
 import { ipcMain, dialog, app, BrowserWindow } from 'electron'
 
-export function registerIpcHandlers(getBackendUrl: () => string): void {
+/** 主进程注入的「连哪个后端」桥：读当前状态 / 保存新选择。 */
+export interface ClientConfigBridge {
+  read(): { mode: 'local' | 'remote'; serverUrl: string; reachable: boolean | null; firstRun: boolean }
+  save(input: { mode: 'local' | 'remote'; serverUrl: string }): { ok: boolean; error?: string }
+}
+
+export function registerIpcHandlers(
+  getBackendUrl: () => string,
+  clientConfig: ClientConfigBridge
+): void {
   // ---- Backend URL ---------------------------------------------------------
   ipcMain.handle('get-backend-url', () => {
     return getBackendUrl()
   })
+
+  // ---- 连哪个后端 ----------------------------------------------------------
+  ipcMain.handle('get-client-config', () => clientConfig.read())
+
+  ipcMain.handle('set-client-config', (_event, input) => clientConfig.save(input))
 
   // ---- Zoom ----------------------------------------------------------------
   ipcMain.handle('get-zoom-factor', () => {

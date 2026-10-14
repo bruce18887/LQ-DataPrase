@@ -12,6 +12,7 @@ import { spawn, ChildProcess } from 'child_process'
 import * as path from 'path'
 import * as fs from 'fs'
 import * as http from 'http'
+import * as https from 'https'
 import { app } from 'electron'
 
 export interface BackendInfo {
@@ -220,6 +221,41 @@ function detectDevBackend(timeoutMs: number = 3000): Promise<boolean> {
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+
+/**
+ * 探测一个后端地址是否活着（任意 HTTP 响应都算活着，401 也是）。
+ *
+ * 远端模式下先探再加载：连不上就停在连接页让用户改回本机，
+ * 而不是把窗口丢给一个 Chromium 的「无法访问此网站」错误页。
+ * 与 waitForBackend 的区别：那个只打 127.0.0.1 且靠端口拼 URL，这个接受完整 URL。
+ */
+export function probeBackendUrl(baseUrl: string, timeoutMs = 5000): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (ok: boolean): void => {
+      if (settled) return
+      settled = true
+      resolve(ok)
+    }
+    let target: URL
+    try {
+      target = new URL(baseUrl.replace(/\/+$/, '') + '/api/v1/')
+    } catch {
+      finish(false)
+      return
+    }
+    const lib = target.protocol === 'https:' ? https : http
+    const req = lib.get(target, (res) => {
+      res.resume()
+      finish(true)
+    })
+    req.on('error', () => finish(false))
+    req.setTimeout(timeoutMs, () => {
+      req.destroy()
+      finish(false)
+    })
+  })
+}
 
 /**
  * Prepare the Python backend for Electron.

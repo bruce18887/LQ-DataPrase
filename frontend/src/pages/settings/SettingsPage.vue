@@ -20,6 +20,9 @@
       <el-tab-pane name="sftp" label="🔌 SFTP 设置">
         <SftpTimeoutSettings v-model:timeout="settings.sftp_download_timeout" />
       </el-tab-pane>
+      <el-tab-pane name="connection" label="🔗 连接">
+        <ConnectionSettings />
+      </el-tab-pane>
       <el-tab-pane name="paths" label="📁 存储路径">
         <SystemPathsSettings />
       </el-tab-pane>
@@ -49,6 +52,7 @@ import { clearChartMemoryState, setChartMemoryEnabled } from '../../composables/
 import TableSettingsForm from './components/TableSettingsForm.vue'
 import CpkSettingsForm from './components/CpkSettingsForm.vue'
 import SystemPathsSettings from './components/SystemPathsSettings.vue'
+import ConnectionSettings from './components/ConnectionSettings.vue'
 import ExportTemplateSettings from './components/ExportTemplateSettings.vue'
 import ExportTimeoutSettings from './components/ExportTimeoutSettings.vue'
 import SftpTimeoutSettings from './components/SftpTimeoutSettings.vue'
