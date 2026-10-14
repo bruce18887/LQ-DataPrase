@@ -60,10 +60,15 @@ class Command(BaseCommand):
         stamp = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
         snapshot = backup.next_snapshot_path(dest_dir, stamp)
 
+        # 密钥来源决定 secret.key 是不是必备伴生文件：桌面/打包档它是唯一副本，缺了要报错；
+        # 服务器档（config.settings.server）要求 SECRET_KEY 由环境给定，压根没有这个文件。
+        key_from_env = bool(os.environ.get('SECRET_KEY'))
+
         try:
             backup.vacuum_into(connection, snapshot)
             verdict = backup.verify_backup(snapshot)
-            companions = backup.collect_companions(anchor, cfg_file, dest_dir)
+            companions = backup.collect_companions(anchor, cfg_file, dest_dir,
+                                                   secret_key_from_env=key_from_env)
             deleted = backup.rotate(dest_dir, keep)
         except (BackupError, sqlite3.Error, OSError) as exc:
             # 裸 sqlite3/OSError 也翻成 CommandError：管理员要的是一句话的原因，
@@ -74,6 +79,11 @@ class Command(BaseCommand):
             f'[backup] {verdict}  库快照={snapshot}（{snapshot.stat().st_size // 1024} KB）'))
         for path in companions:
             self.stdout.write(f'[backup] 伴生文件 {path.name} → {path}')
+        if key_from_env and not (dest_dir / backup.SECRET_FILENAME).is_file():
+            self.stdout.write(self.style.WARNING(
+                '[backup] 未携带 secret.key：本次根密钥来自环境变量 SECRET_KEY。'
+                '请把部署配置里的 SECRET_KEY 与 SFTP_CONFIG_KEY 一并纳入备份流程 —— '
+                '库备份本身不含它们，缺任何一个都无法恢复出可用实例。'))
         self.stdout.write(f'[backup] 保留最近 {keep} 份，本次删除 {len(deleted)} 份')
         for path in deleted:
             self.stdout.write(f'[backup]   删 {path.name}')
