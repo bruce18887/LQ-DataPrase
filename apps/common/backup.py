@@ -127,6 +127,22 @@ def collect_companions(anchor_dir: Path, config_file: Path, dest_dir: Path) -> l
     return copied
 
 
+def next_snapshot_path(backup_dir: Path, stamp: str) -> Path:
+    """给这一轮的快照挑一个**没被占用**的文件名。
+
+    名字精确到秒，cron 与人工撞上、或一小时里跑多次都可能出现同一秒。
+    直接写同名文件 = 静默吃掉上一份备份，而「以为有两份其实只有一份」是备份最坏的失败，
+    所以这里让位（``-1``/``-2``…），不覆盖。让出来的名字仍属 ``lqdp-*.sqlite3``，轮转认得。
+    """
+    backup_dir = Path(backup_dir)
+    candidate = backup_dir / f'{BACKUP_PREFIX}{stamp}{BACKUP_SUFFIX}'
+    suffix = 0
+    while candidate.exists():
+        suffix += 1
+        candidate = backup_dir / f'{BACKUP_PREFIX}{stamp}-{suffix}{BACKUP_SUFFIX}'
+    return candidate
+
+
 def list_backups(backup_dir: Path) -> list[Path]:
     """按生成时间排序（最旧在前）的备份文件，忽略 ``.tmp`` 与外来文件。"""
     files = [p for p in Path(backup_dir).glob(BACKUP_PREFIX + '*' + BACKUP_SUFFIX)
