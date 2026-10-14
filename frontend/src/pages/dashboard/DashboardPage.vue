@@ -1,13 +1,5 @@
 <template>
   <div class="dashboard-page">
-    <!-- 页头仅留主标题（放大）；文件选择器下沉到单文件 Tab（与批次页头同一行式） -->
-    <header class="dash-header">
-      <h1 class="dash-title">
-        <span class="dash-title-icon" aria-hidden="true">📊</span>
-        <span class="dash-title-text">数据分析仪表板</span>
-      </h1>
-    </header>
-
     <el-tabs v-model="activeTab" class="dash-tabs">
       <el-tab-pane label="📊 单文件分析" name="single">
     <!-- 文件选择行（同批次页头结构） -->
@@ -294,26 +286,6 @@ onActivated(async () => {
 .dash-tabs :deep(.el-tabs__content) {
   padding: 0;
 }
-
-/* ----- Header（主标题放大；文件选择器已下沉到单文件 Tab） ----- */
-.dash-header {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-  padding: 2px 0 12px;
-}
-.dash-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  font-size: var(--p-fs-title);
-  font-weight: 700;
-  color: var(--text);
-  white-space: nowrap;
-}
-.dash-title-icon { font-size: var(--p-fs-headline); }
 
 /* 单文件 Tab 页头行（同批次页头：选择器 + 更新元信息） */
 .single-head {
