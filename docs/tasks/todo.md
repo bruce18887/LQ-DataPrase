@@ -2890,8 +2890,15 @@ busy_timeout 走 Django 默认 5 秒 —— 写会整库挡读，20 人并发先
       慢了近 2 倍，等于这两条判据形同不存在。用 `--report-only` 拿上一轮产物验算过。
 - [x] 逐文件串行真跑（`--retries=0 --workers=1`）对比墙钟，记账见本文 Review。
 - [x] 全量夜跑第五轮（2026-10-14）：**385 例 / 21.4min / 单价 2.96s / 硬红 1 / flaky 3 / 不判 DEGRADED**。
-- [ ] **注册 cron**：等第六轮全量确认硬红归零即建（`executionAuthorization=false`、
-      `30 3 * * *`、Asia/Shanghai）。
+- [x] **注册 cron**（2026-10-14 完成）：cron `08daed2e`「e2e 夜间全量兜底轮」，
+      `30 3 * * *` Asia/Shanghai · `executionAuthorization=false`（权限模式 auto）·
+      `outputMode=independent` · 绑本工作区，下次执行 10-15 03:30。用 `list` 复核过只此一个。
+      放行依据 = **第七轮全量真跑**（`tasks/e2e-nightly/2026-10-14-1108/`）：
+      385 例 / **19.7min** / `unexpected=0` / 连接级失败 **0/386** / flaky 1 / 单价 2.89 s/例，
+      新阈值（3.5s·30min·flake 5）下**不判 DEGRADED**。
+      该轮账本记 FAILED 只因为后端报了 1 条，而那条是**另一会话在我跑测期间改
+      `test/backend/test_browse_api.py` 造出的假失败**（用例数 1367→1376、traceback 源码行与
+      断言值对不上、mtime 落在时间窗内；单跑该模块 31 例全过），判据已入 lessons。
       ⚠ **第五轮写给用户的归因是错的，已由 `f3bf952` 更正**：那条 `smoke/pages「数据分析 正常加载」`
       **不是产品缺陷**。抓现场显示 `site_stats` 的请求 `{file_id:1614, param:"col1"}` **同源一致**，
       不是"带着上一个文件的 param"，也不是 `param_not_found`；后端返回的是
