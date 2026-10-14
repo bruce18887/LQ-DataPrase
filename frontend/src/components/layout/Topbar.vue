@@ -3,7 +3,14 @@
     <!-- 左侧：面包屑导航 -->
     <div class="topbar-left">
       <el-breadcrumb separator="/" data-testid="breadcrumb">
-        <el-breadcrumb-item v-for="item in breadcrumbs" :key="item.path" :to="item.path">
+        <!-- 页面身份契约：[data-testid=page-identity] 的文本 = 当前页名。钩子挂在哪由版式决定
+             （此刻是面包屑末级，下一步换成顶栏身份块），用例只认这个钩子、不认结构。 -->
+        <el-breadcrumb-item
+          v-for="(item, i) in breadcrumbs"
+          :key="item.path"
+          :to="item.path"
+          :data-testid="i === breadcrumbs.length - 1 ? 'page-identity' : undefined"
+        >
           {{ item.label }}
         </el-breadcrumb-item>
       </el-breadcrumb>

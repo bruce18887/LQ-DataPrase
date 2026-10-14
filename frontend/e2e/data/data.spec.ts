@@ -16,7 +16,7 @@ test.describe('数据管理 /data', { tag: ['@data'] }, () => {
     )
     await gotoApp(page, '/data')
 
-    await expect(page.locator('h1, h2').filter({ hasText: '数据管理' })).toBeVisible()
+    await expect(page.getByTestId('page-identity')).toContainText('数据管理')
 
     // 文件列表 tab should be active by default
     await expect(page.locator('.tab-btn.active')).toContainText('文件列表')
