@@ -2,7 +2,7 @@
   <header class="topbar">
     <!-- 左侧：面包屑导航 -->
     <div class="topbar-left">
-      <el-breadcrumb separator="/">
+      <el-breadcrumb separator="/" data-testid="breadcrumb">
         <el-breadcrumb-item v-for="item in breadcrumbs" :key="item.path" :to="item.path">
           {{ item.label }}
         </el-breadcrumb-item>
