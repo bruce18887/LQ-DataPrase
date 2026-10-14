@@ -18,6 +18,7 @@ never touched.)
 """
 import os
 import sys
+from unittest import mock
 
 # test/backend/ → project root (for `import config` / `from apps...`)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -91,6 +92,18 @@ class PromoteSuperusersTests(TestCase):
 
 
 class SeedUsersRepairTests(TestCase):
+    """seed_users 的「修复既有账号」语义：补 role/flags，但绝不重置口令。
+
+    显式放行弱口令闸门：``seed_users`` 在非开发档会拒执（``seed_users.py`` 的
+    ``_refuse_weak_seed_outside_dev``），而 **Django 测试运行器强制 DEBUG=False**
+    （``django.test.utils.setup_test_environment``），所以本类若不放行就会全红。
+    闸门自身的行为由 ``test.backend.test_seed_users_guard`` 负责，这里不是被测对象。
+    """
+
+    def setUp(self):
+        patcher = mock.patch.dict(os.environ, {'LQDP_ALLOW_WEAK_SEED': '1'})
+        patcher.start()
+        self.addCleanup(patcher.stop)
     def test_repairs_existing_user_role_without_resetting_password(self):
         legacy = User.objects.create_superuser('admin', 'admin@localhost', 'original-pass-9999')
         legacy.role = 'user'
