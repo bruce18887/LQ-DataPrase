@@ -153,6 +153,11 @@ test.describe('@p1 图例颜色严格对应', { tag: ['@p1', '@analysis'] }, () 
     const xSelect = pairCard.locator('.el-select').first()
     await xSelect.click()
     await page.locator('.el-select-dropdown:visible .el-select-dropdown__item').filter({ hasText: 'Index_No' }).first().click()
+    // X 下拉的关闭动画与 Y 下拉的打开重叠时，选项会瞬时不稳定、甚至整个下拉自己关掉
+    // （known-red 的真实症状：`locator.click` 先报 element is not stable，再报
+    // element is not visible）。同款已记录在 axis-label-precision.spec.ts:219，
+    // 那边用固定 600ms 隔开；这里等「没有可见下拉」这个确定信号，而不是猜一个时长。
+    await expect(page.locator('.el-select-dropdown:visible')).toHaveCount(0, { timeout: 10_000 })
     const ySelect = pairCard.locator('.el-select').nth(1)
     await ySelect.click()
     await ySelect.locator('input').first().pressSequentially('Kelvin_VIN')
