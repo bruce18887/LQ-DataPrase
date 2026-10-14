@@ -32,6 +32,7 @@ from django.test import TestCase  # noqa: E402
 from rest_framework.test import APIClient  # noqa: E402
 
 from apps.accounts.models import User  # noqa: E402
+from apps.common.constants import PAGE_SIZE_MAX  # noqa: E402
 from apps.datafiles.models import DataFile  # noqa: E402
 
 PASSWORD = 'x-pass-12345678'
@@ -90,6 +91,11 @@ class BrowseApiTests(TestCase):
         )
 
     def _browse(self, **params):
+        """本文件里的 ``page_size=99999`` 读作「一次取全量」。
+
+        执行域上界会与账号设置域同源后被钳到 ``PAGE_SIZE_MAX``（500），
+        而夹具只有 8 行 < 500，所以「取全量」的语义不变；只有回显字段会带钳后值。
+        """
         params.setdefault('datafile_id', self.datafile.id)
         return self.client.get('/api/v1/browse/', params)
 
@@ -108,7 +114,9 @@ class BrowseApiTests(TestCase):
         body = resp.json()
         self.assertEqual(body['total'], 8)
         self.assertEqual(body['page'], 1)
-        self.assertEqual(body['page_size'], 99999)
+        # 回显的是**钳位后**的执行域块大小：上界与账号设置域同源
+        # （apps/common/constants.PAGE_SIZE_MAX），详见 test_page_size_bounds.py。
+        self.assertEqual(body['page_size'], PAGE_SIZE_MAX)
         self.assertEqual(body['total_pages'], 1)
         self.assertEqual(body['bin_column'], 'SW_Bin')
         self.assertEqual(body['fail_row_count'], 5)

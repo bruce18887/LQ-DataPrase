@@ -14,6 +14,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.common.constants import PAGE_SIZE_MAX
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import get_parser, SYSTEM_COLUMNS
 from apps.datafiles.serializers import DataFileSerializer, ParseHistorySerializer
@@ -158,10 +159,17 @@ class DataBrowserView(APIView):
             page = 1
         page = max(1, page)
         try:
+            # 参数缺失时的兜底块大小维持 50（改动前后一致）；它与「账号设置默认 100」
+            # 是两个不同的量，勿合并。
             page_size = int(request.query_params.get('page_size', 50))
         except (ValueError, TypeError):
             page_size = 50
-        page_size = max(1, min(page_size, 100000))
+        # 只钳**上界**，且与账号设置域的上界同源（apps/common/constants.PAGE_SIZE_MAX）。
+        # 原先这里写死 100000 —— 比合法设置域宽 200 倍，直连 API 可一次要走近乎全表。
+        # 下界刻意保持 1 而非 PAGE_SIZE_MIN：设置页的 50 下限是为「滚动别变成请求风暴」，
+        # 对端点而言小页只是更小的载荷，不是风险；把它抬到 50 会静默改变调用方要的块大小，
+        # 也让按小页验证切片/越界的用例无法表达。勿「对齐」成对称区间。
+        page_size = max(1, min(page_size, PAGE_SIZE_MAX))
         search = request.query_params.get('search', '')
         pass_filter = request.query_params.get('pass_filter', '')
         site_filter = request.query_params.get('site_filter', '')
