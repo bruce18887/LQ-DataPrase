@@ -17,6 +17,9 @@ const TABS = [
   { label: '📐 CPK 阈值', content: 'CPK A 级阈值' },
   { label: '📄 导出模板', content: '导出文件名' },
   { label: '🔌 SFTP 设置', content: 'SFTP 下载超时' },
+  // 批 4 新增：浏览器形态下没有 electronAPI，连接 tab 应显示「由你打开的地址决定」
+  // 而不是 Electron 专属的切换按钮（当前后端这一行描述项始终在）。
+  { label: '🔗 连接', content: '当前后端' },
   { label: '📁 存储路径', content: '数据目录' },
 ]
 
@@ -81,7 +84,7 @@ test.describe('@p1 系统设置页', { tag: ['@p1', '@settings'] }, () => {
     // 页面标题（SettingsPage.vue <h2>⚙️ 系统设置</h2>）
     await expect(page.getByRole('heading', { name: '系统设置' })).toBeVisible()
 
-    // 6 个 tab 标签（SettingsPage.vue el-tab-pane）
+    // 各 tab 标签（清单 = TABS；加新 tab 必须同步登记，否则「切换各标签页」那条不覆盖它）
     for (const tab of TABS) {
       await expect(page.getByRole('tab', { name: tab.label })).toBeVisible()
     }

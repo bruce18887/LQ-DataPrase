@@ -43,7 +43,10 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        // 代理目标跟随 E2E_PORT（默认 8000）：playwright 可以把后端挪到别的端口，
+        // 这里若写死 8000 就会在换端口时静默 ECONNREFUSED（2026-10-14 实测踩过）。
+        // server 与 preview 两处必须同源 —— 只改一处会在 e2e 里表现为「登录全红」。
+        target: `http://localhost:${process.env.E2E_PORT || '8000'}`,
         changeOrigin: true,
       },
     },
@@ -56,7 +59,10 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        // 代理目标跟随 E2E_PORT（默认 8000）：playwright 可以把后端挪到别的端口，
+        // 这里若写死 8000 就会在换端口时静默 ECONNREFUSED（2026-10-14 实测踩过）。
+        // server 与 preview 两处必须同源 —— 只改一处会在 e2e 里表现为「登录全红」。
+        target: `http://localhost:${process.env.E2E_PORT || '8000'}`,
         changeOrigin: true,
       },
     },

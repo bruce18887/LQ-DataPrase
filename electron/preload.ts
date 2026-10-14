@@ -65,6 +65,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ---- App restart --------------------------------------------------------
   restartApp: (): Promise<boolean> => ipcRenderer.invoke('restart-app'),
 
+  // ---- 连哪个后端（本机 spawn / 远端服务器） --------------------------------
+  // 校验与落盘都在主进程（electron/client-config.ts 有单测），渲染进程只搬运字符串，
+  // 所以这里返回的是主进程给的 {ok, error?} —— 错误原因已经是中文，直接显示即可。
+  getClientConfig: (): Promise<unknown> => ipcRenderer.invoke('get-client-config'),
+
+  setClientConfig: (input: {
+    mode: 'local' | 'remote'
+    serverUrl: string
+  }): Promise<unknown> => ipcRenderer.invoke('set-client-config', input),
+
   // ---- Menu callbacks ------------------------------------------------------
   onMenuOpenFile: (callback: () => void): (() => void) => {
     const handler = (): void => callback()

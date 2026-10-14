@@ -11,6 +11,21 @@ export interface FileFilter {
   extensions: string[]
 }
 
+/** 「连哪个后端」的当前状态（判据与校验都在 Electron 侧，见 electron/client-config.ts）。 */
+export interface ClientConfigView {
+  mode: 'local' | 'remote'
+  serverUrl: string
+  /** 远端模式本次启动能否连通；本机/首启为 null（不适用）。 */
+  reachable: boolean | null
+  /** true = 还没有配置文件，界面应把连接页当作首启入口。 */
+  firstRun: boolean
+}
+
+export interface ClientConfigResult {
+  ok: boolean
+  error?: string
+}
+
 export interface ElectronAPI {
   /** Returns the current backend URL (e.g. "http://localhost:8000"). */
   getBackendUrl(): Promise<string>
@@ -39,6 +54,15 @@ export interface ElectronAPI {
 
   /** Relaunches the app (gracefully stops the backend child first). */
   restartApp(): Promise<boolean>
+
+  /** 当前「连哪个后端」的配置。只在 Electron 内可用（浏览器形态下本界面不需要它）。 */
+  getClientConfig(): Promise<ClientConfigView>
+
+  /**
+   * 保存连接方式。Electron 侧校验后落盘；**不会自动重启**，由界面提示用户重启生效
+   * （本机↔远端切换要换的是整个后端进程，热切换做不到）。
+   */
+  setClientConfig(input: { mode: 'local' | 'remote'; serverUrl: string }): Promise<ClientConfigResult>
 
   /** Returns the current web contents zoom factor (1 = 100%). */
   getZoomFactor(): Promise<number>

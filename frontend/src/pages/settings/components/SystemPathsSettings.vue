@@ -10,9 +10,20 @@
       class="paths-alert"
     />
 
+    <el-alert
+      v-if="remoteMode"
+      data-test="paths-remote-notice"
+      title="当前连接的是服务器，这里显示的是服务器上的路径"
+      type="warning"
+      show-icon
+      :closable="false"
+      class="paths-alert"
+      description="存储目录只能在那台机器上、由运行本程序的管理员修改。在这里改动不会影响你自己的电脑，也不会影响服务器上的数据存放位置。"
+    />
+
     <el-descriptions :column="1" border class="paths-descriptions">
       <el-descriptions-item label="数据目录">
-        <template v-if="paths.editable">
+        <template v-if="canEdit">
           <div class="path-edit-row">
             <el-input
               v-model="draftDataDir"
@@ -27,7 +38,7 @@
       </el-descriptions-item>
 
       <el-descriptions-item label="临时文件目录">
-        <template v-if="paths.editable">
+        <template v-if="canEdit">
           <div class="path-edit-row">
             <el-input
               v-model="draftTempDir"
@@ -52,18 +63,18 @@
       </el-descriptions-item>
     </el-descriptions>
 
-    <div v-if="paths.editable" class="paths-actions">
+    <div v-if="canEdit" class="paths-actions">
       <el-button type="primary" :loading="saving" @click="savePaths">
         💾 保存路径
       </el-button>
       <span class="paths-hint">修改路径后需重启应用生效；数据库与上传数据将迁移到新数据目录</span>
     </div>
-    <p v-else class="paths-hint">仅管理员可修改存储路径</p>
+    <p v-else-if="!remoteMode" class="paths-hint">仅管理员可修改存储路径</p>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Folder } from '@element-plus/icons-vue'
 import { systemApi, type SystemPaths } from '../../../api/system'
@@ -84,6 +95,24 @@ const draftDataDir = ref('')
 const draftTempDir = ref('')
 const saving = ref(false)
 const restartPending = ref(false)
+
+/**
+ * 连的是服务器时，本页的目录属于**服务器**磁盘：在这里改它既不影响用户本机，
+ * 也不该被当成用户可改项（语义翻转贴，spec §6.6）。浏览器形态没有这个概念，保持原状。
+ */
+const remoteMode = ref(false)
+const canEdit = computed(() => paths.value.editable && !remoteMode.value)
+
+async function loadConnectionMode(): Promise<void> {
+  if (!window.electronAPI) return
+  try {
+    const view = await window.electronAPI.getClientConfig()
+    remoteMode.value = view.mode === 'remote'
+  } catch {
+    // IPC 取不到就按本机处理：宁可让用户看到原来的可编辑界面，
+    // 也不要因为一次桥接失败把设置页锁死。
+  }
+}
 
 async function loadPaths() {
   try {
@@ -142,7 +171,10 @@ async function promptRestart() {
   }
 }
 
-onMounted(loadPaths)
+onMounted(() => {
+  loadPaths()
+  loadConnectionMode()
+})
 </script>
 
 <style scoped>

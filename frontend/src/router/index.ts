@@ -15,6 +15,14 @@ const routes = [
     meta: { requiresAuth: false, title: '登录' },
   },
   {
+    // 首次运行/切换后端的选择页：只走 IPC，不碰 HTTP —— 此刻「连哪个后端」还没定，
+    // 任何 API 请求都还没有正确的目标可发。
+    path: '/connect',
+    name: 'Connect',
+    component: () => import('../pages/auth/ConnectPage.vue'),
+    meta: { requiresAuth: false, title: '连接设置' },
+  },
+  {
     path: '/',
     component: () => import('../layouts/MainLayout.vue'),
     meta: { requiresAuth: true },
