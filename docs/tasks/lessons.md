@@ -1301,8 +1301,24 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   （先判可见性，已开就先关、等 hidden，再注册→点开）。本轮抽成
   `helpers/params.ts::openSerialDistribution`，收尾态与旧实现一致（开着），不给后面留新携带。
   套件里还有 7 个文件点同一个开关，都有这颗地雷，新写用例直接用该 helper。
-- **同源的另一条**：`.chart-wrapper div[_echarts_instance_]` 在 qq/box 开着时 strict mode 命中 **3** 个
-  实例，用例在选参数**之前**就红。凡是"数容器个数"的选择器，都要想到账号态可能让容器变多。
+- **我给出的第一次归因是错的，被自己的 A/B 推翻**：当时判定"是钉默认值把它们打红的"，于是
+  **临时撤掉 `analysis_chart_state: {}` 那行、把 4 个文件重跑一遍**——5 条照样红（`retries=0`）。
+  ⇒ 根因不在起点，而在**用例自己假定了一个它从不验证的开关状态**：钉默认值只影响第 1 条用例，
+  同轮内任何一次翻动都立刻写回账号，后面的用例继承的是上一手的成果。
+  **规则：归因要用"撤掉嫌疑改动再跑一次"来证，不能用"时间线对得上"来证**——
+  我那时能列出"6 条红里 4 条涉及 box/qq/serial"，说服力很强，仍然是错的。
+- **正解的形状**（比逐个特判更小的抽象）：`ensureChartToggles(page, want)` 收敛到目标态
+  （已是目标态就不点，点后轮询 `is-checked`），加 `enableChartAndWait(page, key, predicate)`
+  = **先收敛到「关」→ 注册 `waitForResponse` → 再点到「开」**。中间那个顺序是关键：
+  直接注册再点，进来时若已是开的就没有请求；直接点两次（旧写法）在"进来是关"时变成「开→关」，
+  重开那次同样没响应。本轮按此改 **13 处**（analysis.spec 6 / axis-label-precision 3 /
+  dock-resize enterAll / chart-filter-switches 柱宽 / legend-color 2）。
+  标签是**固定文案**（`显示QQ图` 不随状态变成 `隐藏QQ图`），所以 `click()` 语义是「翻」——
+  这类控件一律不能靠"点一下"来表达"打开"。
+- **同源的另一条**：`.chart-wrapper div[_echarts_instance_]` 这类**不限定的容器计数选择器**，
+  在 qq/box 开着时 strict mode 命中 **3** 个、四图全开时命中 **4** 个，用例在选参数**之前**就红。
+  凡是"数容器个数"的选择器，都要先自己把图收敛到只剩要读的那一张（本轮
+  `legend-color:27` 与 `chart-filter-switches` 柱宽 slider 各补一处）。
 
 ## 2026-10-13 用 `?search=` 捞 fixture id 会被别人的上传残留挤到第 2 页
 

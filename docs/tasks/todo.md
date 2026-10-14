@@ -2546,8 +2546,13 @@ HTML 按钮。
   搜索域 `test.backend -p "test_sftp*.py"` → `Ran 340 OK`；新文件
   `test/backend/test_sftp_search_column.py` 34 例。前端 `npm run build`（vue-tsc -b + vite build）
   exit 0。e2e `e2e/sftp/search.spec.ts --project=P1 --workers=1` 共 20 例分两次跑完：
-  第一次 13 passed + 第 11 例红（`manualConnect` 等 `.toolbar-card` 20s 超时，实测冷连接 ~22s）
+  第一次 13 passed + 第 11 例红（`manualConnect` 等 `.toolbar-card` 20s 超时，**当时记为"实测冷连接 ~22s"**）
   + serial 连带 skip 6 条；从第 11 例起重跑 → 9 passed / exit 0。跑完 8000/3000 零监听。
+  > ⚠ **该归因已于 2026-10-13 夜更正**：run.log 里页面加载请求停在 15:47:49、
+  > `POST /sftp/connect/` 落在 15:48:09，中间 20 秒后端零流量，连接返回 200 后 `list_files`
+  > 同一秒完成 ⇒ 服务端连接 <1s。那 20s 是测试代码里 `ensureDisconnected` 盲等一个永不出现的
+  > `.toolbar-card`、再被 `.catch(()=>{})` 吞掉的空转（已改为两态赛跑，search.spec 386s→55s）。
+  > 教训：**说"某操作很慢"必须能指出服务端日志里的对应耗时**，否则很可能量的是自己测试的等待。
 - **TDD 三循环各自先看红**：谓词缺失（`AttributeError: match_headers`）→ 形状未改
   （18 例 `KeyError: 'columns'`）→ 截断未按列（`[('BV1',['0.1']),('BV2',[])] != [('BV1',['0.1'])]`）。
   中间我自己写错一条断言：以为 `*BV*2` 能匹 `CBV21`，实测 `fnmatch.translate` 尾部锚定
@@ -2869,12 +2874,26 @@ busy_timeout 走 Django 默认 5 秒 —— 写会整库挡读，20 人并发先
       chart-filter-switches、dock-resize、legend-color、serial-fail-count、serial-no-column、
       chart-memory），本轮**不动**——它们目前是绿的，未验证的改动是净风险；
       但它们有同一个潜在地雷，新写用例应直接用 `openSerialDistribution`。
+- [x] F10（全量夜跑后新增）把「翻动 vs 收敛」这条修到底。全量真跑（385 例 / 21.9min）
+      暴露出 5 条新红/flake，A/B 撤掉 F7 后**它们照样红** ⇒ 根因不是起点，而是这些用例
+      都把「标签为固定文案的账号级持久开关」当成"点开"来用：
+      `analysis.spec` 6 处（QQ ×3 + 箱线 ×4，含一对"关掉/重开"）、
+      `axis-label-precision` 3 处（QQ/序列/箱线）、`dock-resize.enterAll` 盲点三个、
+      `chart-filter-switches` 柱宽 slider（strict mode 命中 **4** 个实例）、
+      `legend-color` 两条（hist-only 基线 + 序列分布）。
+      新增 `helpers/params.ts`：`ensureChartToggles(page, want)` 收敛到目标态并轮询确认，
+      `enableChartAndWait(page, key, predicate, timeout)` = 先收敛到关 → 注册
+      `waitForResponse` → 点到开，保证拿到的总是本次响应；
+      `openSerialDistribution` 改为复用后者（替掉上一轮那段"可见就先关掉"的临时逻辑）。
+- [x] 夜跑退化阈值按新基线收紧：`perSpecMs` 8000→**3500**（实测 2.78 s/例，留 ~26% 余量）、
+      `wallMs` 75min→**30min**（实测 21.9min）。旧阈值是从**未实测**的"天然要 43min"推出来的，
+      慢了近 2 倍，等于这两条判据形同不存在。用 `--report-only` 拿上一轮产物验算过。
 - [ ] 逐文件串行真跑（`--retries=0 --workers=1`）对比墙钟，记账进本文 Review。
 - [ ] 全量夜跑一轮：目标 ~22 min / 0 红；**绿了才注册 cron**（`executionAuthorization=false`、
       `30 3 * * *`、Asia/Shanghai）。
-- [ ] 夜跑阈值按新墙钟收紧（`scripts/e2e_nightly.mjs` 的 `wallMs` 与设计文档的 35min 都已失效）。
 - [ ] 纠正旧账：`docs/tasks/todo.md:2549` 与项目记忆里「实测冷连接 ~22s」需按本轮日志重写
       —— 当前代码里那 20s 是 `ensureDisconnected` 的空转，不是连接耗时。追加 lessons 条目。
+      （lessons 已于 2026-10-13 夜条目里更正；`:2549` 原文仍待改）
 
 ## Review（进行中）
 
@@ -2925,6 +2944,31 @@ F7 实测：`legend-color:27` 由红转绿（19.4s），证实 3 个 echarts 实
 （下拉 `element is not stable` → 15s 内自己关掉），与本轮改动无关，已用 HEAD 副本 A/B 证实过。
 
 
+
+## 遗留地雷清单：仍在「盲点持久化开关」的 22 处（2026-10-13 夜扫出，**本轮未改**）
+
+F10 只改了全量夜跑**实际报错**的 13 处。下面是同一形状但目前是绿的站点——没证据就动它们是净
+风险（本轮已因擅自扩大改动面吃过一次：见 lessons「归因要用撤掉嫌疑改动再跑一次来证」）。
+新写用例一律走 `ensureChartToggles` / `enableChartAndWait`；下轮夜跑若在这些文件出现
+`waitForResponse` 超时或 strict mode 容器计数命中 >1，先来这里对号。
+
+- `analysis/serial-no-column.spec.ts`：`:151 :186 :222 :276 :309 :336 :381 :413`（8 处 `显示序列分布`）
+- `analysis/gage-qqbox-repro.spec.ts`：`:52 :65 :78 :80 :123 :128`（6 处，其中成对的是**有意** off/on 压力循环，改时要保留翻动语义）
+- `analysis/file-switch-param-reset.spec.ts`：`:80 :81 :157 :158`（4 处，QQ+箱线各两次）
+- `analysis/outlier-handling.spec.ts:388`、`analysis/large-data-qqplot.spec.ts:82`、
+  `analysis/sw-bin-qqplot-repro.spec.ts:40`、`analysis/serial-fail-count.spec.ts:82`（各 1 处）
+- `analysis/dock-resize.spec.ts:212`（循环点三个，但前面 `page.route` abort 了 settings GET，
+  组件必然回到本地默认「只有直方图」，**这条是安全的**）；`:289 :291`（最大化态下有意翻动，
+  前提由已收敛的 `enterAll` 保证）
+
+**已排除的假阳性**：`multi-file.spec.ts:475/488` 的 `显示箱线图` 是**多文件 tab 自己**那张
+`.boxplot-card` 的勾选框（`:471` 先断 `toHaveCount(0)`，能在夜跑稳定通过说明它是组件局部态、
+不写账号），只是**标签文案与单文件页的持久化开关撞车**。grep `显示箱线图` 会把它误报成地雷，
+判据是定位是否作用域到 `.multi-file-tab`。
+
+另一条同源判据：凡 `.chart-wrapper div[_echarts_instance_]` 这类**不限定的容器计数选择器**，
+在四图全开时会命中 4 个 → strict mode 必红。本轮已给 `legend-color:27` 与
+`chart-filter-switches` 柱宽 slider 补了「收敛到只有直方图」；其余同形状选择器尚未普查。
 
 ## 不做的事（附理由，免得下一轮又被当成待办捡起来）
 
