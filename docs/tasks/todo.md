@@ -3340,9 +3340,17 @@ temp_dir/config_file` 披露的是**服务器**的目录结构、库文件与配
 - [x] 抽出 `TAIL = PW_EXTRA.join(' ')`，拼进三条 playwright 命令（全量 / 模块 / 附带 P0 / base 未知兜底那条）
 - [x] 判据用 `--dry-run` 打印的命令行，不靠读代码：修后输出 `$ npx playwright test --workers=1 --retries=0`
 
-## 验证账目（待补完）
+## 验证账目
 
+- `npm run build`（含 `vue-tsc -b`）绿，887ms；`npm run lint:e2e` 绿；vitest 57 例绿。
+- **门禁全量 workers=1**：386 例 → **365 passed / 21 skipped / 0 红 / 0 flaky**，墙钟 21.0 min
+  （对齐 2026-10-14 第五轮 21.4 min 基线）。
 - 8 硬红 + 8 flaky 全部定性为「6 worker 并发 + 共享 admin 账号被 `恢复默认` 的快照-还原固化成 canvas」：
   隔离 workers=1 复跑剩 4 条 → 把 admin `chart_renderer` 修回 `svg` 后 3 条立绿 → 最后 1 条
   （`view-data` 固定列）单跑 2.6s 绿。**无一由本改动引起**，也未改动任何产品代码去迁就用例。
-- workers=1 全量门禁：见下方 Review 的实际数字。
+- 双主题六张截图在 `tasks/probe-shots/`（探针 spec 已删，产物不进 git）。
+- **还欠一笔**：`e2e/settings/settings.spec.ts` 的「恢复默认」快照-还原只在串行下安全 ——
+  并发窗口里会把别的用例的中间态（canvas）当基线写死。`test.describe.serial` 只串行化**同文件内**，
+  管不住跨文件并发，所以正解是快照里排除 `chart_renderer` 这类别的用例会写的键
+  （那类键已有自己的 `finally` 还原），或把 settings 模块拆到独占 project。本轮未动
+  （无证据不扩大改动面），已记 lessons。
