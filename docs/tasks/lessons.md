@@ -1507,6 +1507,28 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   普通 `npm run build`（绝对 `/assets/...`）在 `file://` 下会**静默白屏**、且不产生任何 renderer 报错
   —— 我 12:41 跑门禁时顺手覆盖过一次，12:52 用 `npx cross-env VITE_ELECTRON=true npm run build` 修回。
 
+## 2026-10-14 「单跑全绿、全量跑红」的根因是我自己写的测试读到了真实数据目录
+
+- **现象**：`test.backend.test_server_settings_profile` 单跑 15 例全绿；放进后端全量（1416 例）里
+  `test_refuses_default_password_when_not_loopback` **FAIL**：期望的 `REFUSED` 没出现，`_bootstrap` 直接放行了。
+- **根因（两层）**：
+  1. `_bootstrap` 的口令互锁只在**「库里还没有 superuser」**时才检查 —— 空库才需要建管理员。
+  2. 我的子进程只设了 `LQDP_BASE_DIR=<临时目录>`，没钉 `data_dir`；`apply_system_config` 在没有
+     `system_config.json` 时回落到**默认数据目录** `~/LQ-DataPrase`（本机那份有 3 个账号、含 superuser）。
+     于是互锁被跳过，红/绿取决于跑测顺序 —— 而且**测试在读写用户的真实库**（`migrate --run-syncdb` 落到了那份库上）。
+- **为什么单跑是绿的**：单跑时该文件先跑，`~/LQ-DataPrase` 那份库……同样有 superuser，
+  但彼时我改过一版探针（补了 `django.setup()`）后只重跑过整个文件的聚合结果，没单独复核这一条的判定路径。
+  教训是：**"整个文件绿"不等于"每一条都因正确的原因绿"**。
+- **规则**：
+  1. 任何起子进程跑 Django 档的测试，必须**显式钉住 `data_dir`**（写一份临时 `system_config.json` 或设
+     `LQDP_SYSTEM_CONFIG_FILE`），不能依赖"默认值刚好是隔离的"。
+  2. 判据沿用本项目取证那条：**在同一条输出里打印解析后的 `DATABASES['default']['NAME']` 并断言它在临时目录内**。
+     这条自证比任何"我看起来是隔离的"都可靠，因为它把失败从"结果不对"提前到"跑错对象"。
+  3. 互锁类断言要意识到自己的前置条件（"空库才触发"），并在测试里构造那个前置条件，而不是指望环境恰好满足。
+- **损害核对**：真实库 `integrity_check=ok`、行数 100/40734/3/1 与会话开始时的实测完全一致 ——
+  那次越界的 `migrate --run-syncdb` 是空操作，未改动数据。修完后单跑 15 例绿、全量重跑确认顺序无关。
+
+
 
 
 
