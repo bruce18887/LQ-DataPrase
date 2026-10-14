@@ -37,9 +37,10 @@ export default defineConfig({
   plugins: [vue()],
   server: {
     host: '0.0.0.0',
-    port: 3000,
-    // Fail fast if port 3000 is taken — the electron:dev script's wait-on
-    // is hardcoded to :3000, so a silent port shift would hang Electron.
+    // 默认 3000（electron:dev 的 wait-on 写死它）；同机并发跑两套 e2e 时，
+    // strictPort 会让第二个 preview 直接失败而不是自动错开 —— 所以跑测侧需要能显式换端口。
+    // 用 E2E_FRONTEND_PORT 覆盖，与 playwright.config.ts 的 FRONTEND_URL 读同一个变量。
+    port: Number(process.env.E2E_FRONTEND_PORT || 3000),
     strictPort: true,
     proxy: {
       '/api': {
@@ -55,7 +56,7 @@ export default defineConfig({
   // preview 不继承 server.proxy，必须显式声明同一份 /api 代理
   preview: {
     host: '0.0.0.0',
-    port: 3000,
+    port: Number(process.env.E2E_FRONTEND_PORT || 3000),
     strictPort: true,
     proxy: {
       '/api': {
