@@ -16,9 +16,19 @@
 - 每个 slot 进程内固定 `--workers=1`：现有 helper 全部按串行调校，一行不改（spec §3）。
 - slot 数默认 4，`E2E_SLOTS`/`--slots` 可调，上限 6；每 slot 预算 ≈1GB RAM（机器 32GB / 28 逻辑核）。
 - 端口对基址：backend `8101+i`、frontend `3101+i`；不足即 fail fast，**绝不静默复用别人在跑的服务**。
-- `LQDP_SKIP_STORAGE_MIGRATION=1` 是 slot 模式的硬前提：不带它而把 `data_dir` 指向 TEMP 会让
-  `apply_system_config` 走「搬走并删源」的 `_migrate`（`apps/common/system_config.py:389-391`），毁掉仓库根
-  `db.sqlite3` 与 `media/`。**禁止用「故意不带这个开关跑一次」来证明它承重**（spec §4.1 / §11）。
+- **slot 的库/媒体/临时区只由 `config/settings/e2e_slot.py` + `LQDP_E2E_SLOT_DIR` 决定，绝不通过 `data_dir` 重定向**：
+  显式配一个不等于锚点的 `data_dir` 就会触发 `_migrate` 的「copy → verify → unlink 源 + rmtree media」（
+  `apps/common/system_config.py:385-391,166-212`），而 `LQDP_SKIP_STORAGE_MIGRATION` **挡不住它**（该开关只管
+  「未配 `data_dir` 时怎么取默认值」）。这条是被 2026-10-14 的事故纠正的，损失记录见 spec §12。
+- **任何向 Django 发写命令之前，必须先跑只读解析断言**（`tasks/e2e-slot-probe/check-resolve.py` 是参照实现）：
+  `settings.MEDIA_ROOT` / `DATABASES['default']['NAME']` 与预期路径**精确相等**（`==`；`startswith` 会被畸形
+  `data_dir` 骗过——事故里它解析成 `仓库根\UsersAdministratortop…\media`，照样 startswith 仓库根），
+  并断言仓库根没有长出新目录。断言失败 ⇒ 不许执行任何写命令。
+- **配置文件一律用 `fs.writeFileSync(JSON.stringify(...))` 或 Write 工具生成，禁止用 shell `printf`/heredoc 拼反斜杠**
+  （bash→node→文件 三层转义会把 `C:\\Users` 吃成 `C:Users`，JSON 非法后 `load_config` 静默回落默认数据目录，
+  命令就落到用户真实库里 —— 事故第二次）。同理不在 `python -c "…"` 内联里写反斜杠，需要就跑 `.py` 文件。
+- **探针/编排器不得 `rmSync` 一个可能承载「被搬来的原件」的目录**：每次运行用带时间戳的唯一目录，
+  只删自己本次创建的路径。
 - 不做 per-slot 用户名（spec §4.2）：owner-scoped 列表 + 副本库已经隔离。
 - 路径口径统一：`pool-core`/`merged.json`/`durations` 全部用 **相对 testDir 的裸路径**（`analysis/serial-overlap.spec.ts`），
   只有拼给 Playwright CLI 时才加 `e2e/` 前缀。
@@ -32,6 +42,8 @@
 
 | 动作 | 路径 | 职责 |
 |---|---|---|
+| Create | `config/settings/e2e_slot.py` | slot 专用 settings 覆写档：只读 `LQDP_E2E_SLOT_DIR`，直接指 DB/MEDIA_ROOT/临时区；不碰 `data_dir` 通路 |
+| Test | `test/backend/test_e2e_slot_settings.py` | 该档的路径解析断言 + 缺变量 fail fast + 仓库根不受影响 |
 | Create | `frontend/e2e/helpers/pool-core.mjs` | 纯函数：`autoSlots` / `allocatePortBlock` / `partitionFiles` / `assertSafeRelPath` / `buildSlotManifest` / `slotEnv` / `mergeRunStats`。无 fs、无子进程 |
 | Test | `frontend/test/unit/e2ePoolCore.spec.ts` | 上面每个纯函数的 T2 单测（vitest，node 环境） |
 | Create | `frontend/e2e/helpers/slot.ts` | 读 `slot.json` 契约 → 导出 `CURRENT_SLOT` 与 slot-aware 路径；无 slot 时逐字回落今天 |
@@ -50,23 +62,180 @@
 
 ## P0 — 前置实测（不改产品/测试代码）
 
-### Task 1: TEMP 模板库 + 硬链镜像 + WAL 拷贝的可行性与耗时
+### Task 1: slot 专用 settings 覆写档 + P0 实测
 
-编排器的每条前提都在这里验：`data_dir` 指 TEMP 时 `SKIP_STORAGE_MIGRATION` 是否真的零副作用、`seed_test_data`
-能否在 TEMP 目标下播种、SQLite 的 `db.sqlite3-wal/-shm` 会不会让「只拷主文件」丢数据、硬链镜像要多久、
-以及删镜像里的文件会不会伤到模板。
+顺序在这里是刻意的：**先把唯一安全的重定向方式做出来（settings 覆写档），再用它去测**。
+上一版计划让探针直接用 `data_dir` 指 TEMP + `LQDP_SKIP_STORAGE_MIGRATION=1`，结果触发 `_migrate` 的
+「搬走并删源」，毁掉了仓库根 `media/` 与 e2e 库（spec §12 有完整损失记录与恢复验证）。
+本任务同时产出：该档的 Django 侧测试，以及模板构建/硬链/WAL 的实测数字。
 
 **Files:**
+- Create: `config/settings/e2e_slot.py`
+- Test: `test/backend/test_e2e_slot_settings.py`
 - Create: `tasks/e2e-slot-probe/probe-template.mjs`（临时探针，不入库）
+- Reuse: `tasks/e2e-slot-probe/check-resolve.py`（事故后写的只读解析断言，参照实现）
 
 **Interfaces:**
-- Produces: 数字表（模板构建秒数 / 拷库秒数 / 硬链秒数 / sidecar 现状 / seeded 行数）→ 写进 `docs/reference/e2e-tier-triage.md` 文末与 spec §9-P0
+- Produces: 环境变量 `LQDP_E2E_SLOT_DIR`（绝对路径；缺 → `ImproperlyConfigured`）；
+  `settings.DATABASES['default']['NAME'] == <slot>/db.sqlite3`、`settings.MEDIA_ROOT == <slot>/media`、
+  `tempfile.tempdir` 与 `TMP/TEMP/TMPDIR` == `<slot>/temp`
+- Produces: 数字表（模板构建秒数 / 拷库秒数 / 硬链秒数 / WAL sidecar 现状 / 副本行数与 integrity）
+  → 写进 `docs/reference/e2e-tier-triage.md` 文末与 spec §9-P0
 
-- [ ] **Step 1: 写探针脚本**
+- [ ] **Step 0: 确认仓库根现场（只读）**
+
+```bash
+cd /c/Users/Administrator/Desktop/DataPrase/LQ-DataPrase && ls -la db.sqlite3 | head -2 && du -sh media && find media -type f | wc -l
+```
+Expected: `db.sqlite3` 存在、`media/` ≈711MB / 87 文件（2026-10-14 事故恢复后的现场）。
+不符合就先停下来查清楚，不要在状态不明时执行任何写命令。
+
+- [ ] **Step 1: 写失败的 Django 测试**
+
+```python
+# test/backend/test_e2e_slot_settings.py
+"""slot settings 覆写档：路径必须精确指 slot，且绝不引入 data_dir 重定向通路（spec §4.1）。"""
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from unittest import mock
+
+from django.test import SimpleTestCase
+
+ROOT = Path(__file__).resolve().parents[2]
+CHILD = (
+    "import json,tempfile,django;"
+    "django.setup();"
+    "from django.conf import settings as s;"
+    "print(json.dumps({'db':str(s.DATABASES['default']['NAME']),"
+    "'media':str(s.MEDIA_ROOT),'temp':str(tempfile.tempdir)}))"
+)
+
+
+def nc(p: str) -> str:
+    """Windows 下 TEMP 常是 8.3 短名，两侧都 realpath+normcase 才能比。"""
+    return os.path.normcase(os.path.realpath(p))
+
+
+def run_slot_settings(slot_dir: Path):
+    env = {**os.environ, 'DJANGO_SETTINGS_MODULE': 'config.settings.e2e_slot',
+           'LQDP_E2E_SLOT_DIR': str(slot_dir)}
+    out = subprocess.run([sys.executable, '-c', CHILD], capture_output=True, text=True, env=env, cwd=str(ROOT))
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout.strip().splitlines()[-1])
+
+
+class E2eSlotSettingsTests(SimpleTestCase):
+    def test_db_media_and_temp_all_point_into_the_slot(self):
+        slot = Path(tempfile.mkdtemp(prefix='lqdp-slot-settings-'))
+        (slot / 'temp').mkdir(parents=True, exist_ok=True)
+        parsed = run_slot_settings(slot)
+        self.assertEqual(nc(parsed['db']), nc(str(slot / 'db.sqlite3')), parsed['db'])
+        self.assertEqual(nc(parsed['media']), nc(str(slot / 'media')), parsed['media'])
+        self.assertEqual(nc(parsed['temp']), nc(str(slot / 'temp')), parsed['temp'])
+
+    def test_missing_slot_dir_fails_fast(self):
+        env = {k: v for k, v in os.environ.items() if k != 'LQDP_E2E_SLOT_DIR'}
+        env['DJANGO_SETTINGS_MODULE'] = 'config.settings.e2e_slot'
+        out = subprocess.run([sys.executable, '-c', 'import django;django.setup()'],
+                             capture_output=True, text=True, env=env, cwd=str(ROOT))
+        self.assertNotEqual(out.returncode, 0, '缺 LQDP_E2E_SLOT_DIR 必须硬失败，不能静默回落到仓库根')
+        self.assertIn('LQDP_E2E_SLOT_DIR', out.stderr)
+
+    def test_module_does_not_use_the_data_dir_redirect(self):
+        """apply_system_config 是 move 语义：这个档里出现它就叫设计缺陷。"""
+        src = (ROOT / 'config' / 'settings' / 'e2e_slot.py').read_text(encoding='utf-8')
+        self.assertNotIn('apply_system_config', src)
+        self.assertNotIn('data_dir', src)
+
+    def test_development_settings_still_resolve_to_repo_root(self):
+        """非 slot 档不受影响：仓库根仍是 DB/MEDIA 的家（target==orig ⇒ 永不迁移）。"""
+        env = {**os.environ, 'DJANGO_SETTINGS_MODULE': 'config.settings.development',
+               'LQDP_SYSTEM_CONFIG_FILE': os.path.join(tempfile.gettempdir(), 'lqdp-e2e-system-config.json')}
+        out = subprocess.run([sys.executable, '-c', CHILD], capture_output=True, text=True, env=env, cwd=str(ROOT))
+        assert out.returncode == 0, out.stderr
+        parsed = json.loads(out.stdout.strip().splitlines()[-1])
+        self.assertEqual(nc(parsed['db']), nc(str(ROOT / 'db.sqlite3')), parsed['db'])
+        self.assertEqual(nc(parsed['media']), nc(str(ROOT / 'media')), parsed['media'])
+```
+
+Run: `python -m pytest test/backend/test_e2e_slot_settings.py -v`（用带 pytest 的 `python`，**不要用 `.venv` 解释器**：
+`.venv` 无 pytest，`test_outliers.py` 的 `import pytest` 会伪装成回归 —— 见 memory `project-e2e-run-reliability`）
+Expected: FAIL —— `No module named 'config.settings.e2e_slot'` / 缺变量那条也因档不存在而错
+
+- [ ] **Step 2: 实现 settings 覆写档**
+
+```python
+# config/settings/e2e_slot.py
+"""e2e slot 专用配置覆写层：把库/媒体/临时区直接指到 LQDP_E2E_SLOT_DIR。
+
+刻意 **不** 使用 data_dir / apply_system_config —— 那条通路是 move 语义
+（copy → verify → unlink 源 + rmtree media，见 apps/common/system_config.py:166-212），
+且 LQDP_SKIP_STORAGE_MIGRATION 挡不住它（`:385-391` 的 data_target != orig 判断在分支外）。
+2026-10-14 的事故记录见 docs/superpowers/specs/2026-10-14-e2e-slot-pool-parallel-design.md §12。
+"""
+import os
+import tempfile
+from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
+
+from config.settings.base import *  # noqa: F401,F403
+import config.settings.base as _base
+
+# DEBUG / INSTALLED_APPS / 中间件 / JWT 等全部沿用 development，避免两档漂移
+from config.settings.development import *  # noqa: F401,F403
+
+_slot = os.environ.get('LQDP_E2E_SLOT_DIR')
+if not _slot:
+    raise ImproperlyConfigured(
+        'config.settings.e2e_slot 必须由 LQDP_E2E_SLOT_DIR 指定 slot 目录；'
+        '缺该变量时静默回落到仓库根会让多个 e2e 进程共用同一份 db.sqlite3/media，故直接拒绝启动。'
+    )
+_slot = Path(_slot).resolve()
+
+DATABASES = {
+    **DATABASES,  # noqa: F405
+    'default': {**DATABASES['default'], 'NAME': str(_slot / 'db.sqlite3')},  # noqa: F405
+}
+MEDIA_ROOT = _slot / 'media'
+_base.MEDIA_ROOT = MEDIA_ROOT  # 有人直接读 base.MEDIA_ROOT
+
+_slot_temp = _slot / 'temp'
+_slot_temp.mkdir(parents=True, exist_ok=True)
+tempfile.tempdir = str(_slot_temp)
+for _key in ('TMP', 'TEMP', 'TMPDIR'):
+    os.environ[_key] = tempfile.tempdir
+```
+
+注意：`from config.settings.development import *` 会连带跑一次 development 的
+`apply_system_config(BASE_DIR)` —— 因为 `LQDP_SYSTEM_CONFIG_FILE` 里钉的是 `data_dir = 仓库根`
+（`target == orig`），那一步是**空操作**；编排器必须保证每个 slot 进程的这份配置文件写着仓库根。
+这一点由 Step 5 的探针脚本硬断言，不靠注释。
+
+- [ ] **Step 3: 跑测试确认通过**
+
+Run: `python -m pytest test/backend/test_e2e_slot_settings.py -v`
+Expected: 4 条全 PASS。
+
+- [ ] **Step 4: 提交档与测试**
+
+```bash
+git add config/settings/e2e_slot.py test/backend/test_e2e_slot_settings.py
+git commit -m "feat(settings): e2e slot 覆写档 —— 用 LQDP_E2E_SLOT_DIR 直接指库/媒体/临时区，不走 data_dir move 通路"
+```
+
+- [ ] **Step 5: 写探针脚本**
 
 ```js
 // tasks/e2e-slot-probe/probe-template.mjs
-// 只读仓库、只写 %TEMP%\lqdp-e2e-probe-template。绝不 rmtree 仓库根。
+// P0 探针。三条硬规则（都是 2026-10-14 事故换来的）：
+// ① 每次运行用带时间戳的新目录，绝不 rmSync 一个可能装着「被搬来的原件」的旧目录；
+// ② 写命令之前先做只读解析断言，且路径判据是**精确相等**不是 startswith；
+// ③ 每步之后核对仓库根 media 文件数没变少（`_migrate` 的 move 语义就是从这儿偷走数据的）。
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -74,53 +243,89 @@ import path from 'node:path'
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
 const PY = process.env.PYTHON_BIN || path.join(ROOT, '.venv', 'Scripts', 'python.exe')
-const PROBE = path.join(os.tmpdir(), 'lqdp-e2e-probe-template')
+const RUN = path.join(os.tmpdir(), `lqdp-e2e-probe-${new Date().toISOString().replace(/[:.]/g, '')}`)
 const say = (...a) => console.log(...a)
-const ms = (t0) => ((performance.now() - t0) / 1000).toFixed(1) + 's'
+const dur = (t0) => { const x = performance.now() - t0; return x < 1000 ? `${Math.round(x)}ms` : `${(x / 1000).toFixed(1)}s` }
+const last = (s) => String(s).trim().split('\n').filter(Boolean).slice(-1)[0]
+const mediaCount = () => {
+  let n = 0
+  const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) e.isDirectory() ? walk(path.join(d, e.name)) : n++ }
+  if (fs.existsSync(path.join(ROOT, 'media'))) walk(path.join(ROOT, 'media'))
+  return n
+}
 
-fs.rmSync(PROBE, { recursive: true, force: true })
-fs.mkdirSync(path.join(PROBE, 'temp'), { recursive: true })
-const cfg = path.join(PROBE, 'system-config.json')
-fs.writeFileSync(cfg, JSON.stringify({ data_dir: PROBE, temp_dir: path.join(PROBE, 'temp') }), 'utf-8')
+fs.mkdirSync(path.join(RUN, 'temp'), { recursive: true })
+const cfg = path.join(RUN, 'system-config.json')
+// 钉的是**仓库根**（target==orig ⇒ development 里的 apply_system_config 是空操作）。
+// slot 的真实目录来自 LQDP_E2E_SLOT_DIR，由 e2e_slot.py 直接指 DB/MEDIA_ROOT。
+fs.writeFileSync(cfg, JSON.stringify({ data_dir: ROOT.replace(/\\/g, '/') }), 'utf-8')
 
-// 关键：不带 LQDP_SKIP_STORAGE_MIGRATION 就 **不跑** —— 它会走 _migrate 搬走并删仓库根 db+media。
-// 该结论只做代码走读（apps/common/system_config.py:385-391），不做破坏性实测。
 const env = {
-  ...process.env, LQDP_SYSTEM_CONFIG_FILE: cfg, LQDP_SKIP_STORAGE_MIGRATION: '1',
-  SECRET_KEY: 'e2e-probe-not-used', PYTHONIOENCODING: 'utf-8',
+  ...process.env,
+  DJANGO_SETTINGS_MODULE: 'config.settings.e2e_slot',
+  LQDP_E2E_SLOT_DIR: RUN,
+  LQDP_SYSTEM_CONFIG_FILE: cfg,
+  SECRET_KEY: 'e2e-probe-not-used',
+  PYTHONIOENCODING: 'utf-8',
 }
 const dj = (args) => execFileSync(PY, ['manage.py', ...args], {
   cwd: ROOT, env, encoding: 'utf-8', timeout: 900_000, maxBuffer: 128e6,
 })
-const last = (s) => s.trim().split('\n').filter(Boolean).slice(-1)[0]
+
+// —— ② 解析断言：任何写命令之前。三条路径必须精确落在本次 RUN 目录里 ——
+const RESOLVE = [
+  'import json,tempfile,django;django.setup();from django.conf import settings as s;',
+  "print(json.dumps({'db':str(s.DATABASES['default']['NAME']),'media':str(s.MEDIA_ROOT),'temp':str(tempfile.tempdir)}))",
+].join('')
+const parsed = JSON.parse(last(execFileSync(PY, ['-c', RESOLVE], { cwd: ROOT, env, encoding: 'utf-8' })))
+const norm = (p) => path.resolve(p).replace(/\\/g, '/').toLowerCase()
+const RUN_N = norm(RUN)
+for (const [k, v] of Object.entries(parsed)) {
+  if (!norm(v).startsWith(RUN_N + '/')) throw new Error(`解析断言失败 ${k}=${v} 不在 ${RUN_N} 下`)
+}
+if (norm(parsed.db) !== `${RUN_N}/db.sqlite3` || norm(parsed.media) !== `${RUN_N}/media`) {
+  throw new Error(`解析断言失败：${JSON.stringify(parsed)}`)
+}
+say('解析断言 OK:', JSON.stringify(parsed))
+
+const before = mediaCount()
+say('仓库根 media 文件数（起点）:', before)
 
 let t = performance.now()
-say('migrate:', last(dj(['migrate', '--noinput'])), ms(t))
-t = performance.now(); dj(['seed_users']); say('seed_users:', ms(t))
-t = performance.now(); say('seed_test_data --refresh:', ms(t), last(dj(['seed_test_data', '--refresh'])))
-
-// 仓库根没被动过（探针自检，防自己变成那个事故）
-say('仓库根 db 仍在:', fs.existsSync(path.join(ROOT, 'db.sqlite3')), '| media 目录仍在:', fs.existsSync(path.join(ROOT, 'media')))
+say('migrate:', last(dj(['migrate', '--noinput'])), dur(t))
+t = performance.now(); dj(['seed_users']); say('seed_users:', dur(t))
+t = performance.now()
+const seedOut = last(dj(['seed_test_data', '--refresh']))
+say('seed_test_data --refresh:', dur(t), '|', seedOut)
+if (mediaCount() !== before) throw new Error(`仓库根 media 文件数变了 ${before}→${mediaCount()} —— 立即停止`)
 
 // WAL sidecar 现状 + checkpoint 后才拷贝
-const dbSrc = path.join(PROBE, 'db.sqlite3')
+const dbSrc = path.join(RUN, 'db.sqlite3')
 for (const suffix of ['', '-wal', '-shm']) {
   if (fs.existsSync(dbSrc + suffix)) say('sidecar', suffix || '(main)', fs.statSync(dbSrc + suffix).size, 'bytes')
 }
 t = performance.now()
-dj(['shell', '-c', "from django.db import connection as c; c.connection.cursor().execute('PRAGMA wal_checkpoint(TRUNCATE)'); print('checkpointed')"])
-say('wal_checkpoint(TRUNCATE):', ms(t))
+dj(['shell', '-c', "from django.db import connection as c; c.cursor().execute('PRAGMA wal_checkpoint(TRUNCATE)'); print('checkpointed')"])
+say('wal_checkpoint(TRUNCATE):', dur(t))
 
 for (const suffix of ['-wal', '-shm']) { const p = dbSrc + suffix; if (fs.existsSync(p)) fs.rmSync(p) }
-const dbDst = path.join(PROBE, 'copy', 'db.sqlite3')
+const dbDst = path.join(RUN, 'copy', 'db.sqlite3')
 fs.mkdirSync(path.dirname(dbDst), { recursive: true })
-t = performance.now(); fs.copyFileSync(dbSrc, dbDst); say('拷库:', ms(t), fs.statSync(dbSrc).size, 'bytes')
-say('副本行数:', last(dj(['shell', '-c', 'from apps.datafiles.models import DataFile as D; print("rows="+str(D.objects.count()))'])))
+t = performance.now(); fs.copyFileSync(dbSrc, dbDst); say('拷库:', dur(t), fs.statSync(dbSrc).size, 'bytes')
+// 直接查**副本文件**（经 Django 查的话打开的是模板库，验不到拷贝这件事）
+const COPY_CHECK = [
+  'import sqlite3;',
+  `c=sqlite3.connect(r'''${dbDst}''');`,
+  "ig=c.execute('PRAGMA integrity_check').fetchone()[0];",
+  "tb=[t for (t,) in c.execute(\"select name from sqlite_master where type='table' and name like '%datafile%'\")];",
+  "rows=c.execute('select count(*) from datafiles_datafile').fetchone()[0] if 'datafiles_datafile' in tb else -1;",
+  "print('integrity=%s tables=%s rows=%s' % (ig, tb, rows))",
+].join('')
+say('副本自检:', last(execFileSync(PY, ['-c', COPY_CHECK], { encoding: 'utf-8' })))
 
-// 硬链镜像：模板 media → slot media
-const mediaSrc = path.join(PROBE, 'media')
-const mediaDst = path.join(PROBE, 'slot', 'media')
-fs.rmSync(path.join(PROBE, 'slot'), { recursive: true, force: true })
+// 硬链镜像：模板 media → slot media（都在本次 RUN 目录内；RUN 带时间戳，不复用不预删）
+const mediaSrc = path.join(RUN, 'media')
+const mediaDst = path.join(RUN, 'slot', 'media')
 const count = (d) => fs.readdirSync(d, { withFileTypes: true }).reduce((n, e) =>
   n + (e.isDirectory() ? count(path.join(d, e.name)) : 1), 0)
 const mirror = (src, rel = '') => {
@@ -131,7 +336,7 @@ const mirror = (src, rel = '') => {
   }
 }
 t = performance.now(); fs.mkdirSync(mediaDst, { recursive: true }); mirror(mediaSrc)
-say('硬链镜像 media:', ms(t), '文件数:', count(mediaSrc))
+say('硬链镜像 media:', dur(t), '文件数:', count(mediaSrc))
 
 // 删除语义：摘掉镜像里一个文件，模板同名文件必须还在
 const firstFile = (d) => {
@@ -146,20 +351,25 @@ const mirrored = path.join(mediaDst, path.relative(mediaSrc, one))
 say('镜像 nlink(删除前)=', fs.statSync(mirrored).nlink)
 fs.unlinkSync(mirrored)
 say('删镜像后模板文件仍在:', fs.existsSync(one))
+if (mediaCount() !== before) throw new Error(`收尾核对失败：仓库根 media ${before}→${mediaCount()}`)
+say('收尾核对: 仓库根 media 文件数不变 =', before)
 say('DONE')
 ```
 
-- [ ] **Step 2: 跑探针并记录**
+- [ ] **Step 6: 跑探针并记录**
 
 Run: `node tasks/e2e-slot-probe/probe-template.mjs`
-Expected: 一路打到 `DONE`；`仓库根 db 仍在: true`、`删镜像后模板文件仍在: true`、副本查询无异常。
-**闸门**：若 `seed_test_data` 在 TEMP 目标下失败或耗时 >60s ⇒ 停下，把结论写回 spec §10 并重议模板策略，不得继续 Task 4。
+Expected: 依次打出 `解析断言 OK`（三条路径都在本次 RUN 目录下）、`仓库根 media 文件数（起点）: 87`、
+migrate/seed/拷库/硬链四个耗时、`副本自检: integrity=ok … rows=87`、`删镜像后模板文件仍在: true`、
+`收尾核对: 仓库根 media 文件数不变 = 87`、`DONE`。
+**闸门**：任一 `throw` 出现 ⇒ 立刻停止并如实报告，不许「再试一次看看」。
+若 `seed_test_data` 在 slot 档下失败或耗时 >60s ⇒ 停下，把结论写回 spec §10 并重议模板策略，不得继续 Task 4。
 
-- [ ] **Step 3: 数字进台账**
+- [ ] **Step 7: 数字进台账**
 
-把 4 个秒数 + sidecar 现状追加到 `docs/reference/e2e-tier-triage.md` 文末「slot 池 P0 实测」小节，并在 spec §9-P0 后补一行「已实测：…」。探针脚本留在 `tasks/`（不入库）。
+把耗时四项 + sidecar 现状 + 副本 integrity/rows 追加到 `docs/reference/e2e-tier-triage.md` 文末「slot 池 P0 实测」小节，并在 spec §9-P0 后补一行「已实测：…」。探针脚本留在 `tasks/`（不入库）。
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add docs/reference/e2e-tier-triage.md docs/superpowers/specs/2026-10-14-e2e-slot-pool-parallel-design.md
@@ -277,11 +487,12 @@ describe('buildSlotManifest + slotEnv', () => {
     expect(m.slotFile).toContain('slot.json')
     expect(m.templateDbPath).toContain('template')
   })
-  it('env 带齐承重变量：清单、config、迁移禁用、密钥、redis db、端口、token、CI', () => {
+  it('env 带齐承重变量：清单、config、slot settings 档与目录、密钥、redis db、端口、token、CI', () => {
     const env = slotEnv(m, {})
     expect(env.LQDP_E2E_SLOT_FILE).toBe(m.slotFile)
     expect(env.LQDP_SYSTEM_CONFIG_FILE).toBe(m.systemConfigFile)
-    expect(env.LQDP_SKIP_STORAGE_MIGRATION).toBe('1')
+    expect(env.DJANGO_SETTINGS_MODULE).toBe('config.settings.e2e_slot')
+    expect(env.LQDP_E2E_SLOT_DIR).toBe(m.dataDir)
     expect(env.SECRET_KEY).toBe('slot-2-secret')
     expect(env.SFTP_SESSION_REDIS_URL).toBe('redis://localhost:6379/12')
     expect(env.E2E_PORT).toBe('8103')
@@ -396,7 +607,8 @@ export function slotEnv(manifest, baseEnv = process.env) {
     ...baseEnv,
     LQDP_E2E_SLOT_FILE: manifest.slotFile,
     LQDP_SYSTEM_CONFIG_FILE: manifest.systemConfigFile,
-    LQDP_SKIP_STORAGE_MIGRATION: '1',
+    DJANGO_SETTINGS_MODULE: 'config.settings.e2e_slot',
+    LQDP_E2E_SLOT_DIR: manifest.dataDir,
     LQDP_ACCESS_TOKEN_MINUTES: '720',
     SECRET_KEY: manifest.secretKey,
     SFTP_SESSION_REDIS_URL: `redis://localhost:6379/${manifest.redisDb}`,
@@ -542,9 +754,11 @@ export {
 import { CURRENT_SLOT, SYSTEM_CONFIG_FILE as E2E_SYSTEM_CONFIG_FILE, ADMIN_STATE } from './e2e/helpers/slot'
 
 if (CURRENT_SLOT) {
-  // 编排器已写好 system-config.json（data_dir + temp_dir 指 slot）与 slot.json，这里只认不重写。
+  // 编排器已写好 slot.json 与 system-config.json（后者内容固定 data_dir=仓库根，即今天那份空操作配置）。
+  // slot 的库/媒体/临时区来自 e2e_slot 档 + LQDP_E2E_SLOT_DIR —— 绝不改 data_dir（那是 move 语义，spec §4.1）。
   process.env.LQDP_SYSTEM_CONFIG_FILE = CURRENT_SLOT.systemConfigFile
-  process.env.LQDP_SKIP_STORAGE_MIGRATION = '1'
+  process.env.DJANGO_SETTINGS_MODULE = 'config.settings.e2e_slot'
+  process.env.LQDP_E2E_SLOT_DIR = CURRENT_SLOT.dataDir
 } else {
   fs.writeFileSync(E2E_SYSTEM_CONFIG_FILE, JSON.stringify({ data_dir: PROJECT_ROOT }), 'utf-8')
   process.env.LQDP_SYSTEM_CONFIG_FILE = E2E_SYSTEM_CONFIG_FILE
@@ -565,9 +779,10 @@ env: {
   ...process.env,
   LQDP_SYSTEM_CONFIG_FILE: E2E_SYSTEM_CONFIG_FILE,
   LQDP_ACCESS_TOKEN_MINUTES: '720',
-  // slot 模式才注入这 3 条；非 slot 一律不加，保持今天的行为面
+  // slot 模式才注入这 4 条；非 slot 一律不加，保持今天的行为面
   ...(CURRENT_SLOT && {
-    LQDP_SKIP_STORAGE_MIGRATION: '1',
+    DJANGO_SETTINGS_MODULE: 'config.settings.e2e_slot',
+    LQDP_E2E_SLOT_DIR: CURRENT_SLOT.dataDir,
     SECRET_KEY: CURRENT_SLOT.secretKey,
     SFTP_SESSION_REDIS_URL: `redis://localhost:6379/${CURRENT_SLOT.redisDb}`,
   }),
@@ -652,7 +867,18 @@ const PY = process.env.PYTHON_BIN || path.join(ROOT, '.venv', 'Scripts', 'python
 const TEMPLATE = process.env.LQDP_E2E_TEMPLATE_DIR || path.join(os.tmpdir(), 'lqdp-e2e-template')
 const SLOTS_ROOT = path.join(os.tmpdir(), 'lqdp-e2e-slots')
 const PORT_SPAN = 60
+const RUN_ID = new Date().toISOString().replace(/[:.]/g, '')   // 每次运行一套全新 slot 目录，绝不复用/预删
 const log = (...a) => console.log('[pool]', ...a)
+
+/** 仓库根 media 的文件总数 —— 任何模板/slot 操作前后都必须相等（`_migrate` 会偷走整个目录） */
+function repoMediaCount() {
+  const root = path.join(ROOT, 'media')
+  if (!fs.existsSync(root)) return -1
+  let n = 0
+  const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) e.isDirectory() ? walk(path.join(d, e.name)) : n++ }
+  walk(root)
+  return n
+}
 
 const argv = process.argv.slice(2)
 const flag = (name, dflt) => { const i = argv.indexOf(`--${name}`); return i < 0 || i + 1 >= argv.length ? dflt : argv[i + 1] }
@@ -671,20 +897,25 @@ function dj(args, env) {
   })
 }
 
-/** 模板：库 + 种子 media 全在 TEMP。带 SKIP_STORAGE_MIGRATION ⇒ 仓库根 db/media 一律不碰 */
+/** 模板：库 + 种子 media 全在 TEMP。slot 档直接指路径；配置文件里钉的是仓库根 ⇒ 迁移分支永不进入 */
 function buildTemplate() {
+  const before = repoMediaCount()
   fs.mkdirSync(path.join(TEMPLATE, 'temp'), { recursive: true })
   const cfg = path.join(TEMPLATE, 'system-config.json')
-  fs.writeFileSync(cfg, JSON.stringify({ data_dir: TEMPLATE, temp_dir: path.join(TEMPLATE, 'temp') }), 'utf-8')
-  const env = { ...process.env, LQDP_SYSTEM_CONFIG_FILE: cfg, LQDP_SKIP_STORAGE_MIGRATION: '1', SECRET_KEY: 'e2e-template-not-used' }
+  fs.writeFileSync(cfg, JSON.stringify({ data_dir: ROOT.replace(/\\/g, '/') }), 'utf-8')
+  const env = {
+    ...process.env, DJANGO_SETTINGS_MODULE: 'config.settings.e2e_slot', LQDP_E2E_SLOT_DIR: TEMPLATE,
+    LQDP_SYSTEM_CONFIG_FILE: cfg, SECRET_KEY: 'e2e-template-not-used',
+  }
   const t0 = Date.now()
   dj(['migrate', '--noinput'], env)
   dj(['seed_users'], env)
   dj(['seed_test_data', '--refresh'], env)
   // WAL：只拷主文件会丢 -wal 里的内容 ⇒ 先 TRUNCATE checkpoint 落盘，再清 sidecar
-  dj(['shell', '-c', "from django.db import connection as c; c.connection.cursor().execute('PRAGMA wal_checkpoint(TRUNCATE)'); print('ok')"], env)
+  dj(['shell', '-c', "from django.db import connection as c; c.cursor().execute('PRAGMA wal_checkpoint(TRUNCATE)'); print('ok')"], env)
   for (const suffix of ['-wal', '-shm']) { const p = path.join(TEMPLATE, 'db.sqlite3' + suffix); if (fs.existsSync(p)) fs.rmSync(p) }
-  log(`模板就绪 ${((Date.now() - t0) / 1000).toFixed(1)}s → ${TEMPLATE}`)
+  if (repoMediaCount() !== before) throw new Error(`仓库根 media 文件数变了 ${before}→${repoMediaCount()} —— 立即停止，别继续起 slot`)
+  log(`模板就绪 ${((Date.now() - t0) / 1000).toFixed(1)}s → ${TEMPLATE}（仓库根 media 仍为 ${before} 文件）`)
 }
 
 /** 每 slot：清空自建目录 → 拷库 → 硬链镜像 media → 写 config → 写 slot.json */
@@ -701,7 +932,7 @@ function prepareSlot(m) {
   }
   fs.mkdirSync(m.mediaDir, { recursive: true })
   if (fs.existsSync(m.templateMediaDir)) mirror(m.templateMediaDir)
-  fs.writeFileSync(m.systemConfigFile, JSON.stringify({ data_dir: m.dataDir, temp_dir: m.tempDir }), 'utf-8')
+  fs.writeFileSync(m.systemConfigFile, JSON.stringify({ data_dir: ROOT.replace(/\\/g, '/') }), 'utf-8')
   fs.writeFileSync(m.slotFile, JSON.stringify(m, null, 2), 'utf-8')
 }
 
@@ -826,7 +1057,7 @@ async function main() {
 
   const ports = allocatePortBlock(buckets.length, taken)
   const manifests = ports.map((p, i) => buildSlotManifest({
-    index: i, ports: p, slotRoot: path.join(SLOTS_ROOT, `slot${i}`), templateRoot: TEMPLATE,
+    index: i, ports: p, slotRoot: path.join(SLOTS_ROOT, RUN_ID, `slot${i}`), templateRoot: TEMPLATE,
     redisDb: 12 + i, secretKey: `e2e-slot-${i}-${process.pid}`,
   }))
   manifests.forEach(prepareSlot)
@@ -1127,8 +1358,11 @@ git commit -m "feat(e2e): 快门禁复用 slot 池 —— autoSlots 小集合自
 
 - [ ] **Step 1: lessons 追加两条（现象→根因→规则，压到最短）**
 
-① `LQDP_SKIP_STORAGE_MIGRATION` 与 `_migrate` 的「搬走并删源」：把 `data_dir` 指向别处又想要只读副本时，
-不带这个开关会删掉仓库根 `db.sqlite3` 与 `media/`；判据 `apps/common/system_config.py:385-391`。
+① `data_dir` 重定向是 **move 语义**（`_migrate`：copy → verify → `unlink` 源 + `rmtree(media)`），
+而 `LQDP_SKIP_STORAGE_MIGRATION` 只管「没配 `data_dir` 时怎么取默认值」，挡不住
+`system_config.py:389` 的 `data_target != orig` ⇒ 进程级隔离一律改用 settings 覆写档（`config/settings/e2e_slot.py`）。
+附带：判据用 `==` 不用 `startswith`；配置 JSON 不许用 shell `printf` 拼反斜杠（非法后静默回落默认数据目录，
+命令就会落到用户真实库）；探针不许 `rmSync` 可能装着被搬来原件的目录。已落 `docs/tasks/lessons.md`（2026-10-14 条目）。
 ② 并行化的隔离边界要枚举到「缓存键里的 user_id」：每份库副本 admin 的 PK 都是 1，Redis 一旦起来
 `sftp:conn:<user_id>` 就 4 slot 串号（`apps/sftp/cache.py:43,116`）；降级 LocMem 时不暴露，所以必须在设计期查。
 
