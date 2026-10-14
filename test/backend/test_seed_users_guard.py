@@ -8,6 +8,12 @@
 
 判据落在「一个用户都没被创建」上，而不是只断言抛错 —— 半路抛错但已经建了 admin 是最坏形态。
 
+**读这份文件前要先知道的一件事**：Django 测试运行器会强制 ``DEBUG=False``
+（``django.test.utils.setup_test_environment``），所以在测试里 ``settings.DEBUG`` 永远不是
+开发档的真实值。本文件因此一律用 ``override_settings`` 显式设定三种情形，
+而 ``test.backend.test_accounts_bootstrap.SeedUsersRepairTests`` 那组「只测修复语义」的
+用例必须显式设 ``LQDP_ALLOW_WEAK_SEED=1`` 才能继续跑 —— 那是闸门的必然代价，不是回归。
+
 运行：``manage.py test test.backend.test_seed_users_guard``
 """
 import os
