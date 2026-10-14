@@ -16,6 +16,7 @@
 
 运行：``manage.py test test.backend.test_server_settings_profile``
 """
+import json
 import os
 import subprocess
 import sys
@@ -184,6 +185,8 @@ class BootstrapInterlockTests(unittest.TestCase):
     PROBE = (
         'import django, sys\n'
         'django.setup()\n'
+        'from django.conf import settings as s\n'
+        'print("DBPATH", s.DATABASES["default"]["NAME"])\n'
         'import standalone\n'
         'try:\n'
         "    standalone._bootstrap('0.0.0.0')\n"
@@ -194,12 +197,33 @@ class BootstrapInterlockTests(unittest.TestCase):
     )
 
     def _run(self, **extra):
+        """在**独立数据目录**里跑 ``_bootstrap``，并自证读的就是那份库。
+
+        为什么必须显式钉 data_dir（2026-10-14 全量跑实测抓到的）：互锁只在「库里还没有
+        superuser」时才触发，而 ``apply_system_config`` 在没有配置文件时会回落到默认数据目录
+        （``~/LQ-DataPrase``，本机那份有 3 个账号）—— 于是本类既可能跳过互锁（红/绿随跑测顺序变），
+        又在读真实库。判据取自 lessons「取证必须自证读的是哪份库」：探针打印解析后的 NAME，
+        本方法断言它落在临时目录内，否则直接把测试判失败。
+        """
+        base_dir = tempfile.mkdtemp(prefix='lqdp_interlock_')
+        cfg = os.path.join(base_dir, 'system_config.json')
+        with open(cfg, 'w', encoding='utf-8') as fh:
+            json.dump({'data_dir': base_dir.replace('\\', '\\\\')}, fh)
         env = base_env(DJANGO_SETTINGS_MODULE='config.settings.standalone',
-                       LQDP_BASE_DIR=tempfile.mkdtemp(prefix='lqdp_interlock_'),
+                       LQDP_BASE_DIR=base_dir,
                        DJANGO_ALLOWED_HOSTS='0.0.0.0',
+                       LQDP_SYSTEM_CONFIG_FILE=cfg,
                        **extra)
         env.pop('LQDP_SERVER_BASE_DIR', None)
-        return run_python(self.PROBE, env=env)
+        code, out = run_python(self.PROBE, env=env)
+        for line in out.splitlines():
+            if line.startswith('DBPATH '):
+                resolved = line.split(' ', 1)[1].strip()
+                self.assertTrue(
+                    os.path.realpath(resolved).lower()
+                    .startswith(os.path.realpath(base_dir).lower()),
+                    f'探针跑到了临时目录之外的库上：{resolved} —— 会污染真实数据目录')
+        return code, out
 
     def test_refuses_default_password_when_not_loopback(self):
         """只调 ``_bootstrap('0.0.0.0')``，不实际监听 —— 避免在这台局域网机器上真开一个对外端口。"""
