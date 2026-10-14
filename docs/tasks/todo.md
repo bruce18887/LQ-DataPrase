@@ -3283,11 +3283,18 @@ temp_dir/config_file` 披露的是**服务器**的目录结构、库文件与配
 
 ## 还欠的（都不阻塞）
 
-1. `docs/user-guide/07-settings.md` 没有「存储路径」tab 的说明段落（连桌面形态都没写），本批只在 06-sftp 里补了形态差别。
-   要补的是完整一节：谁能看、谁能改、改了为什么要重启。
+1. ~~`docs/user-guide/07-settings.md` 没有「存储路径」tab 的说明段落~~ —— **已补**（同日续做）：
+   新增「存储路径与连接」一节，写清五项字段、谁能看谁能改、改了为什么必须重启，以及连服务器时
+   「那是服务器的目录、普通账号只显示一句提示」。文案里的每个字符串都回读源码核对过：
+   `远端服务器`/`本机内嵌`（`ConnectionSettings.vue:6` 是**内嵌**不是「内置」）、
+   「更改连接方式」（`:16`）、浏览器形态那句原话（`:22`）、按钮「保存并重启」
+   （`ConnectPage.vue:67` + `:154` 保存即 `restartApp()`）。`node docs/user-guide/build.js` 已重跑，
+   `dist/07-settings.html` 里能 grep 到新文案。
 2. `ConnectPage.vue` / `ConnectionSettings.vue` 用的是 `data-test="…"`，而仓库里被 spec 消费的钩子是
    `data-testid="…"`（Playwright 未配 `testIdAttribute`，`getByTestId` 找不到 `data-test`）。本次新钩子已按 `data-testid`
-   写并把同文件那条 `paths-remote-notice` 一起对齐；跨机验证落地时把连接页那两个组件的钩子一并改，免得变成两套约定。
-3. 全量 e2e 与门禁数字见下方总账表更新。
+   写并把同文件那条 `paths-remote-notice` 一起对齐；**跨机验证落地时**把连接页那两个组件的钩子一并改，
+   顺带 `tasks/_cdp_connect_smoke.mjs` 与 `tasks/_cdp_settings_smoke.mjs` 里的 `[data-test=…]` 选择器要同步改
+   —— 这两份 CDP 脚本现在是那批钩子的唯一消费者，只改组件会让脚本静默查不到元素。
+3. 全量 e2e 与门禁数字见上方总账表的「追加」段落（1422 例 / 365 passed）。
 
 
