@@ -1,25 +1,5 @@
 <template>
   <div class="data-mgmt">
-    <!-- Header -->
-    <div class="page-header">
-      <div class="header-accent"></div>
-      <div class="header-content">
-        <div class="header-left">
-          <h1 class="page-title">
-            <span class="title-icon">📦</span>
-            <span class="title-text">数据管理</span>
-          </h1>
-          <p class="page-subtitle">上传、查看、导出你的测试数据文件</p>
-        </div>
-        <div class="header-stats">
-          <div class="stat-chip">
-            <span class="stat-label">文件总数</span>
-            <span class="stat-value">{{ fileTotal }}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- Tabs -->
     <div class="tabs-wrapper">
       <div class="tabs-nav">
@@ -214,96 +194,6 @@ onActivated(loadFiles)
 }
 
 /* ============================
-   Header
-   ============================ */
-.page-header {
-  position: relative;
-  padding: 28px 32px 20px;
-  background: var(--bg);
-  margin-bottom: 0;
-}
-
-.header-accent {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: linear-gradient(
-    90deg,
-    var(--brand) 0%,
-    var(--info) 50%,
-    var(--warn) 100%
-  );
-}
-
-.header-content {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-}
-
-.page-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 0 4px 0;
-  font-size: var(--p-fs-headline);
-  font-weight: 700;
-  color: var(--text);
-  letter-spacing: -0.02em;
-}
-
-.title-icon {
-  font-size: var(--p-fs-headline);
-}
-
-.title-text {
-  background: linear-gradient(135deg, var(--brand), var(--info));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.page-subtitle {
-  margin: 0;
-  font-size: var(--p-fs-small);
-  color: var(--text-3);
-  font-weight: 400;
-}
-
-.header-stats {
-  display: flex;
-  gap: 12px;
-}
-
-.stat-chip {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 8px 16px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  min-width: 80px;
-}
-
-.stat-label {
-  font-size: var(--p-fs-micro);
-  color: var(--text-3);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.stat-value {
-  font-size: var(--p-fs-title);
-  font-weight: 700;
-  color: var(--brand);
-  line-height: 1.2;
-}
-
-/* ============================
    Tabs Navigation
    ============================ */
 .tabs-wrapper {
@@ -422,19 +312,6 @@ onActivated(loadFiles)
 /* ============================
    Night Theme Overrides
    ============================ */
-:root[data-theme="night"] .page-header {
-  background: var(--bg-2);
-}
-
-:root[data-theme="night"] .stat-chip {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-:root[data-theme="night"] .stat-value {
-  color: var(--brand);
-}
-
 :root[data-theme="night"] .tab-btn:hover {
   background: rgba(255, 255, 255, 0.05);
 }
