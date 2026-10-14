@@ -3071,7 +3071,7 @@ D3 无迁移逻辑、D4 不恢复全局压缩、D5 本批不收 CORS。完整规
 - [x] T1：`test/backend/test_seed_users_guard.py` 4 例（拒执 / 未建用户 / 显式放行 / dev 照旧）
 - [x] 门禁：`npm run lint:e2e` 干净；`npm run build` 绿（vue-tsc -b + vite，916ms）；
       后端全量 **`Ran 1396 tests in 302.814s — OK (skipped=7)`**（= 基线 1367 + 本轮 29，退出码 0）
-- [ ] 门禁：`npm run test:e2e:affected` —— **被挡住，未跑**：8000 上有本会话之外的 `manage.py runserver 8000 --noreload`（PID 41132，起于 11:13:53），它不带 `LQDP_SYSTEM_CONFIG_FILE` → 读仓库根 `system_config.json` → `data_dir=C:\Users\Administrator\LQ-DataPrase`（**用户真实数据目录**）。`playwright.config.ts:131 reuseExistingServer: !CI` 会静默复用它，正是 lessons 2026-09-19 记的「用例把用户级设置写进真实账号」险情；而 `BACKEND_PORT` 写死 8000 无 env 覆盖。按「动别人 PID 前先问用户」停手
+- [x] 门禁：`npm run test:e2e:affected`（升级为全量）—— **已跑并结案**。当时 8000 上确有外部 `runserver`（PID 41132，读用户真实 data_dir），按「动别人 PID 前先问」没去停它，而是给 Playwright 加了 `E2E_PORT` 让它自起自收（`49a5e19` 又把 `E2E_FRONTEND_PORT` 一起补上）。第一次跑（6 workers）出 **117 failed / 5.5min**，报错成片 `ERR_CONNECTION_REFUSED at :3000` —— 是并发跑测互相打穿前端，不是回归（判定过程与教训见 lessons 同日条目）。**`--workers=1` 复跑：364 passed / 2 flaky / 19 skipped / 0 failed，21.1 分钟，退出码 0**（与项目基线 21.4min 吻合），且跑完后那个外部 8000 进程已自行消失，全程未动别人的 PID。
 - [x] **恢复演练**：三件套还原到新目录 → `migrate --run-syncdb` 干净 → 行数 100/40734/3 与现场一致 → `SECRET_KEY` 来自还原的 `secret.key`。演练脚本 `tasks/_restore_drill.py`（gitignore）
 
 ### Review（批 2）
@@ -3126,20 +3126,78 @@ D3 无迁移逻辑、D4 不恢复全局压缩、D5 本批不收 CORS。完整规
 
 ## 批 4 实施清单（Electron 首次运行选后端地址）
 
-- [ ] 新建 `electron/client-config.ts`：`userData/client-config.json`（`{mode:'local'|'remote',serverUrl}`）读/校验（协议须 http(s)、host 可解析）/**原子写 tmp→rename**/坏 JSON 回落 local。只能在 Electron 侧：存 DB 是循环依赖，存 localStorage 在 `file://` 与 `http://` 下是两个隔离空间
-- [ ] `electron/main.ts`（375 → 约 420 行）：`app.whenReady()` 在 `spawnBackend`（`:304-319`）前插 `resolveMode()`；remote → 跳过 spawn、`backendUrl=serverUrl`、`createWindow` 走 `loadURL`（`:265` 通路已在用，`:280` 是 loadFile）。remote 下 `managed=false` → `stopBackend`（`backend.ts:372-375`）天然不会去杀服务器
-- [ ] 远端不可达 → 复用 `backend.ts:151-188` 探测改为传 host，失败给提示并允许切回本机，**禁白屏**
-- [ ] 新建 `electron/mode-picker.html` 首启选择窗（独立静态 HTML，**不进 SPA** —— SPA 的 axios 在模块初始化期就打 `/api/v1`，那时后端尚未选定）；文案明写「本机历史记录不会带到服务器」
-- [ ] `preload.ts`（`__backendUrl__` 经 additionalArguments 已支持任意 URL）/`ipc-handlers.ts`（91 行）/`frontend/src/electron.d.ts` 增 `getMode()`/`setMode()`
-- [ ] 设置页新增「连接的后端」区块（显示 mode/url、可切换、切换后重启）；**`SystemPathsSettings.vue:101`（选目录）与 `:136`（重启）在 mode=remote 时禁用并给出原因**（那配的是服务器磁盘）
-- [ ] 双主题（CLAUDE.md:75）：mode-picker 与新区块用 CSS token + `:root[data-theme="night"]`，禁页面级 night 覆盖；element-plus night/light 块对称（R7①）
-- [ ] T2：`frontend/test/unit/` client-config 解析（缺字段/非法协议/坏 JSON → local，不外抛），跑 `npm run test:unit`
-- [ ] T3 只留两条（≈5.4s/例）：① 设置页区块渲染 + remote 下路径项禁用（IPC/`data-*` 契约）；② 首启选择窗可选可落盘、重启后按所选模式起。page_size 全组合边界进 T1，T3 不留
-- [ ] e2e 若写用户级设置：先确认 8000 属主读哪份 `system_config.json`（本机 `data_dir=C:\Users\Administrator\LQ-DataPrase` 与 e2e 钉在项目根的是**两个库**，`:2766-2768`）
-- [ ] 本批**不收 CORS**（`base.py:83` 保持 True）；收紧条件是 Electron 全量转 `loadURL` 后 Origin 同源，届时另立 spec 并回指本节
-- [ ] 收口：全量 e2e 用 `--workers=1` + 后端全量 + `npm run build`
+- [x] 新建 `electron/client-config.ts`：`userData/client-config.json`（`{mode:'local'|'remote',serverUrl}`）读/校验（协议须 http(s)、host 可解析、**拒绝 `user:pass@host`**、去尾部斜杠）/**原子写 tmp→rename**/坏 JSON 与半截文件一律回落 local 且不抛。只能在 Electron 侧：存 DB 是循环依赖，存 localStorage 在 `file://` 与 `http://` 下是两个隔离空间
+- [x] **落地时抽出一个纯函数 `planStartup(cfg,{firstRun,remoteReachable})`**：主进程只执行计划。理由写进模块注释 —— 本仓库没有驱动 Electron 壳的通路（Playwright 只有浏览器 project），而单实例锁会让第二次启动直接走到 second-instance 去聚焦别人的窗口，所以「四条启动分支」只能这样钉进 T2
+- [x] `electron/main.ts`（375 → 约 440 行，限内）：`app.whenReady()` 里先读配置再决定；remote 且可达 → 跳过 spawn、`backendUrl=serverUrl`、窗口 `loadURL`；本机 → 原路径逐字不变。remote 下 `managed=false` → `stopBackend` 天然不会杀服务器
+- [x] 远端不可达 → 新增 `probeBackendUrl()`（`backend.ts`，接受完整 URL、http/https 都支持、任意 HTTP 响应即算活着）；不可达时**留在连接页**，禁白屏，也**不许**偷偷 spawn 本机兜底（那会把用户的分析结果写进另一个库，比报错危险）
+- [x] **实现方式改了（有意偏离本条原案）**：首启选择窗不做 `electron/mode-picker.html`，改成正经前端路由 `#/connect`（`pages/auth/ConnectPage.vue`，`meta.requiresAuth:false`）。三个理由：① 不新增打包资产，`electron-builder` 的文件清单不用动；② 直接继承设计系统 CSS token，dark/light 两套主题免费拿到（CLAUDE.md:75 的硬要求）；③ 原案担心的「SPA 的 axios 在模块初始化期就打 `/api/v1`」实测不成立 —— axios 只建实例不发请求，连接页全程只走 IPC。文案明写「两边历史不互通」
+- [x] `preload.ts` / `ipc-handlers.ts`（91 → 约 105 行）/ `frontend/src/electron.d.ts`：命名取 `getClientConfig()` / `setClientConfig()`（返回 `{mode,serverUrl,reachable,firstRun}` 与 `{ok,error?}`），比原案的 `getMode/setMode` 多带现状可达性，界面才能显示「服务器连不上」而不是笼统失败
+- [x] 设置页新增「🔗 连接」tab（`ConnectionSettings.vue`：显示当前模式与地址 + 「更改连接方式」跳 `#/connect`）；**`SystemPathsSettings.vue` 在 mode=remote 时不再显示选目录/保存（`canEdit = paths.editable && !remoteMode`）并给出「这是服务器上的路径」的说明**；IPC 读失败时按本机处理，不锁死设置页
+- [x] **校验只有一份**：地址校验与落盘都在 Electron 侧，前端只搬运字符串并把主进程给的中文原因直接显示。避免「两处各写一遍校验必然漂移」（lessons 2026-09-19）
+- [x] 双主题：两个新组件都只用 `var(--card)/var(--border)/var(--text)/var(--text-2)/var(--error)/var(--brand)` 等 token，无页面级 night 覆盖（R7①）
+- [x] T2：`frontend/test/unit/clientConfig.spec.ts` **21 例**（坏输入回落 / 地址校验含拒绝带凭证 / 原子写不留 `.tmp` / `planStartup` 四分支），`npm run test:unit` = 52 例全绿
+- [x] T3：不新写 spec 文件，改为**把新 tab 登记进 `e2e/settings/settings.spec.ts` 的 `TABS` 清单** —— 该清单被三条既有用例迭代（标签可见 / 点进去内容可见 / 死设置不复发），加一行即自动获得两条真断言，且浏览器形态无 electronAPI 时 `ConnectionSettings.vue` 显示「由你打开的地址决定」这一分支正好被覆盖。**不写**桩化 `window.electronAPI` 的用例：那会让 `router/index.ts:8` 切成 hash 历史，测到的是我们自己造出来的假象
+- [ ] T3：首启选择窗落盘 → 重启 → 按所选模式起，属 Electron 不可替代项，**本仓库无驱动通路**，留作人工冒烟（步骤见下方 Review）
+- [x] 本批**不收 CORS**（`base.py:83` 保持 True）；收紧条件写进 `config/settings/server.py` 末尾注释与本文件
+- [x] 门禁：`npx tsc -p ../electron/tsconfig.json --noEmit` 退出 0；`npm run build` 绿（936ms，最终 HEAD 上重跑）；`lint:e2e` 干净；vitest **57 例**（含 `probeBackendUrl` 特征化 5 例）；全量 e2e 见批 2 那条（364 passed / 0 failed）；**双自定义端口定向复跑** `E2E_PORT=8141 E2E_FRONTEND_PORT=3941 npx playwright test e2e/settings/settings.spec.ts --workers=1` → 8 passed / 26.2s，证明前后端两个端口都真的跟着变量走（不只是"配置能解析"）
+- [x] `playwright.config.ts` 新增 `E2E_PORT`（默认仍 8000）：本轮 8000 被一个读**真实 data_dir** 的外部 `runserver` 占着，`reuseExistingServer` 会静默复用 → 换端口让 Playwright 自起自收，比停别人进程安全
+
+### Review（批 4）
+
+- **人工冒烟清单（Electron 壳无自动化通路，上线前请逐条走一遍）**：
+  ① 删 `%APPDATA%\\lq-dataprase\\client-config.json` → 启动应直接进「选择连接方式」页，
+  且**本机后端没有被拉起**（判据：日志出现 `Startup plan: spawn=false ... route=#/connect`，
+  且 userData 下不新建 `db.sqlite3`）；
+  ② 选「本机模式」→ 应照常起后端并进入登录页，`client-config.json` 落盘且无 `.tmp` 残留；
+  ③ 选「连接服务器」填一个错误地址 → 保存后应重启回到连接页并显示「服务器连不上」横幅，
+  改回本机应能正常使用；
+  ④ 填真实服务器地址 → 窗口应加载服务器同源页面，设置页「存储路径」tab 显示服务器路径且不可编辑。
+- **实测数字**：vitest 52 例（新增 21）；electron tsc 退出 0；`npm run build` 907ms 绿。
+- **一处自我纠正**：初稿把 `resolveBackendUrl` 留在模块里但没有任何调用者 —— 死代码，已删除，
+  改由 `planStartup` 承担同一职责（顺带把「不可达不许兜底 spawn」这条也钉住）。
+- **双主题**：新组件零硬编码颜色，全部走 token；未新增 element-plus 覆盖块。
+
 
 ## Review
 
 （待实施后填写：备份三件套实测清单与 integrity 输出、四处常量扫描结果、冻结产物 `backup_db` 可见性证据、
 真实恢复演练账目、局域网另一台机登录实测、首启两种模式行为对比、双主题截图、门禁账目、端口释放确认。）
+
+---
+
+# 任务：部署整改批 2-4 总账（2026-10-14 收盘）
+
+## 门禁与验证总账
+
+| 门禁 | 结果 | 备注 |
+|---|---|---|
+| 后端全量 | **1396 例 / 302.8s / OK (skipped=7)**，退出码 0 | 基线 1367 + 本轮 29 例；CLAUDE.md:70 写的「888 例」已过期，按现取值 |
+| vitest（T2） | **57 例全绿**（+21 客户端配置与启动计划，+5 探针特征化） | `npm run test:unit` |
+| 前端类型/构建 | `vue-tsc -b` 退出 0；`npm run build` 绿 936ms（最终 HEAD） | 遵 R8①，不用根目录 `npx vue-tsc --noEmit` |
+| Electron 编译 | `tsc -p electron/tsconfig.json --noEmit` 退出 0 | 一次被我的跨目录引用打破（拖进 `electron` 类型），已以拆模块修复 |
+| `lint:e2e` | 干净 | 改了 spec 后重跑过 |
+| 全量 e2e | **364 passed / 2 flaky / 19 skipped / 0 failed，21.1 分钟**，退出码 0（`--workers=1`） | 与项目基线 21.4min 吻合；第一次 6-workers 跑的 117 红是并发打穿 `:3000`，已定性并记 lessons |
+| 双端口参数化 | `E2E_PORT=8141 E2E_FRONTEND_PORT=3941` 定向复跑 settings.spec → **8 passed / 26.2s** | 证明前后端两个端口都真跟变量走 |
+| 恢复演练 | 三件套还原到新目录：`migrate --run-syncdb` 干净、行数 100/40734/3/1 与现场一致、SECRET_KEY 来自还原的 key | 全程临时目录，未碰用户真实 data_dir；顺带查出 §5.2 那条既有密钥缺陷 |
+| 备份轮转 | 预置 3 份不同 mtime + `--keep 3` 实跑 → 只删最旧那份；同秒撞名由 `next_snapshot_path` 让位（T1 钉住） | 实跑那两次落在相邻秒，避让靠单测证明 |
+| 服务器档启动 | loopback 六项全过（SPA 同源 200/401/404、伪造 Host → 400、登录拿 JWT），跑完端口监听计数归 0 | 跨机那台机器的验证做不了 |
+
+## 与最终 HEAD 的时间关系（不粉饰）
+
+364/0 那轮于 12:20 起跑、webServer 在 12:20-21 构建产物，覆盖到 `4547ce7`（批 4 主体）与 `settings.spec.ts`
+的 7-tab 清单；其后五支（`805530b` 首启必须重启、`012e8b8` 探针拆模块、`49a5e19` 前端端口、
+`ef6c84c` 日志级别、`0fc52b1` 备份在服务器档跑不动、`69101d7` 夜跑端口探测、`0fc52b1` 快照撞名）**不在那一轮的 bundle 内**。
+逐条判其 e2e 相关性：均落在 Electron 侧 / 后端命令 / 脚本 / 日志级别，浏览器面唯一被碰到的是
+`api/index.ts` 的 console 级别（error→warn，无断言依赖）。这几支各自有独立证据（见上表），
+并在最终 HEAD 上重跑了 `npm run build`。要拿 HEAD 完整过一遍 e2e，下一次夜跑兜底即可覆盖。
+
+## 仍开着的（都不是代码问题）
+
+1. 局域网另一台机浏览器开 `http://<ip>:<port>/login` 能登录并浏览数据 —— 本机只有一台机器。
+2. Electron 首启四步人工冒烟（步骤在本文件批 4 Review 上方）。
+3. 冻结产物上 `backup_db` 可见性（`build.bat` 会 taskkill 其它会话，留待下次正常打包核对）；
+   并记一条真实缺口：打包 exe 没有子命令入口，`backup_db` 只能在源码形态跑。
+4. spec §4.4 的 SFTP 存密缺陷：**本批只堵不修**。既有 token 换档仍解不开，部署口径是「在服务器重录」；
+   要保旧 token 需另做 re-key（旧 key 解、新 key 存）。
+5. 等拍板：OS 与进程模型、无 TLS 的内网明文姿态、serverUrl 怎么发到用户手里、自助找回密码。
+
