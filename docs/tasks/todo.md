@@ -2888,9 +2888,16 @@ busy_timeout 走 Django 默认 5 秒 —— 写会整库挡读，20 人并发先
 - [x] 夜跑退化阈值按新基线收紧：`perSpecMs` 8000→**3500**（实测 2.78 s/例，留 ~26% 余量）、
       `wallMs` 75min→**30min**（实测 21.9min）。旧阈值是从**未实测**的"天然要 43min"推出来的，
       慢了近 2 倍，等于这两条判据形同不存在。用 `--report-only` 拿上一轮产物验算过。
-- [ ] 逐文件串行真跑（`--retries=0 --workers=1`）对比墙钟，记账进本文 Review。
-- [ ] 全量夜跑一轮：目标 ~22 min / 0 红；**绿了才注册 cron**（`executionAuthorization=false`、
-      `30 3 * * *`、Asia/Shanghai）。
+- [x] 逐文件串行真跑（`--retries=0 --workers=1`）对比墙钟，记账见本文 Review。
+- [x] 全量夜跑第五轮（2026-10-14）：**385 例 / 21.4min / 单价 2.96s / 硬红 1 / flaky 3 / 不判 DEGRADED**。
+- [ ] **注册 cron**：仍卡在闸门口——唯一那条硬红 `smoke/pages「数据分析 正常加载」` 是**产品侧**，
+      分析页自动选中最新文件却带着上一个文件的 param 发 `POST /statistics/site_stats/` →
+      400 `param_not_found`（R5 家族）。要么**前端纠偏**（选中文件变化时清掉不匹配的 param），
+      要么**页面不再自动选文件**。**等你拍这个点，绿了我就建**
+      （`executionAuthorization=false`、`30 3 * * *`、Asia/Shanghai）。
+- [ ] 新 flake 待归因：`settings/cpk-thresholds:115`「阈值抬到样本 CPK 之上：总览判 D 级」
+      第一次 13.5s 红（`.el-tag` 没有 `el-tag--danger`）、重试 4.9s 绿。
+      形状像「PUT 阈值 → 表格重算」的渲染时序，也可能又是同轮内阈值被别的用例改过。
 - [ ] 纠正旧账：`docs/tasks/todo.md:2549` 与项目记忆里「实测冷连接 ~22s」需按本轮日志重写
       —— 当前代码里那 20s 是 `ensureDisconnected` 的空转，不是连接耗时。追加 lessons 条目。
       （lessons 已于 2026-10-13 夜条目里更正；`:2549` 原文仍待改）
@@ -2942,6 +2949,35 @@ F7 实测：`legend-color:27` 由红转绿（19.4s），证实 3 个 echarts 实
 
 三个 analysis 文件合计 **335s → ~144s**。唯一的红是已登记的 known-red
 （下拉 `element is not stable` → 15s 内自己关掉），与本轮改动无关，已用 HEAD 副本 A/B 证实过。
+
+**第四轮（F10 开关收敛，`--retries=0` 最苛刻口径）：77 例 75 passed / 2 failed / 7.0min**
+
+跑到第 30 条时 `vite preview` 自己退出（`playwright.config.ts:43` 的注释就写了这个已知退化），
+34–70 全是 ~370ms 秒失败 —— 按"连接级/秒失败先判环境"的口径整批重跑，不看错账。
+重跑后两条失败：`legend-color:136`（当时的 known-red，随后单独修掉）与
+`toolbar-sticky:69`（基线轮同样 failed→passed 的存量 flake）。
+**13 处收敛没有引入任何新红。**
+
+**第五轮 = 修完 known-red 后的全量（2026-10-14，`CI=1 retries=2`）**
+
+| 指标 | 基线（10-13 run4） | 第五轮 |
+|---|---|---|
+| 墙钟 | 37.1 min | **21.4 min（−42%）** |
+| 单价（只计通过） | 5.21 s/例 | **2.96 s/例** |
+| 硬红 unexpected | 5 | **1** |
+| flaky | 1 | 3 |
+| 判定 | 不 DEGRADED | 不 DEGRADED（新阈值下不误报） |
+
+逐文件：`sftp/search` 386s→54.5s、`reconnect` 161s→25s、`exports` 134s→31s、
+`multi-file` 141s→43.3s、`serial-overlap` 172s→93.3s（含重试）、
+`axis-label-precision` 89.5s→42.7s、`analysis.spec` 80.9s→51.7s。
+
+**一条诚实的代价**：单价从第四轮的 2.78 升到 2.96 s/例（+0.18）。原因是收敛助手把
+"盲点一次"换成"判态 → 必要时点 → 轮询 `is-checked` 确认"，13 处合计多花这么多；
+墙钟反而略降（21.9→21.4），换来同轮内不再互相污染。这个交换值得。
+
+剩余那条硬红与本轮所有改动无关（产品侧，见实施清单最后一条），
+**所以 cron 仍未注册**：闸门是"绿了才建"，不是我说了算。
 
 
 

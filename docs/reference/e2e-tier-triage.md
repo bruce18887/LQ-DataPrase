@@ -460,13 +460,15 @@ e2e 库里 admin 实测停在 `filename_wrap=False`、`page_size=200`、`cpk_a/b
 
 ### 第四轮之后仍剩 3 条（都不由本轮分层/清理引入，逐条已定性）
 
-| 用例 | 定性 | 该谁修 |
-|---|---|---|
-| `analysis/legend-color.spec.ts:131` | 已登记 known-red：下拉 `element is not stable` → 自己关掉 | 待修 spec |
-| `smoke/pages.spec.ts`「数据分析 正常加载且无报错」 | **产品侧**：分析页自动选中最新文件（本轮是别家 spec 留下的 `a.csv`），却带着**上一个文件的 param** 发 `POST /statistics/site_stats/` → 后端正确返回 `param_not_found`。属 lessons R5「持久化选择在上下文切换时未重置」 | 待拍：前端纠偏 or 页面不再自动选 |
-| `data/file-list-sort-filter.spec.ts`「默认排序：上传时间倒序」 | 数据态相关（库里 108 行、含各轮上传残留） | 待修 |
+| 用例 | 定性 | 该谁修 | 2026-10-14 状态 |
+|---|---|---|---|
+| `analysis/legend-color.spec.ts:131` | 已登记 known-red：下拉 `element is not stable` → 自己关掉 | 待修 spec | ✅ **已修**：根因是 X 下拉的关闭动画与 Y 下拉的打开重叠（同款早记在 `axis-label-precision.spec.ts:219`，那边靠固定 600ms 隔开）。改为等「没有可见下拉」再开 Y，该文件 4/4 绿、这条 17.0s 失败 → 3.4s 通过 |
+| `smoke/pages.spec.ts`「数据分析 正常加载且无报错」 | **产品侧**：分析页自动选中最新文件（本轮是别家 spec 留下的 `a.csv`），却带着**上一个文件的 param** 发 `POST /statistics/site_stats/` → 后端正确返回 `param_not_found`。属 lessons R5「持久化选择在上下文切换时未重置」 | 待拍：前端纠偏 or 页面不再自动选 | ❌ **仍是唯一硬红**，三次重试全红（确定性）。cron 就卡在这条 |
+| `data/file-list-sort-filter.spec.ts`「默认排序：上传时间倒序」 | 数据态相关（库里 108 行、含各轮上传残留） | 待修 | 未再复现（10-13 与 10-14 两轮全量都过）—— 属随残留漂移的那一类，不是稳定红 |
 
 > 因此 **cron 暂缓注册**：闸口是"绿了才建"，现在还差这三条，其中一条要产品侧拍。
+> 10-14 更新：三条已收敛到**只剩 `smoke/pages` 这一条产品侧**；同轮另登记两条 flake
+> （`toolbar-sticky:69` 基线轮就 failed→passed 的存量、`settings/cpk-thresholds:115` 新增待归因）。
 
 ## 失效 import 清理 + 常驻守卫（2026-10-13）
 
