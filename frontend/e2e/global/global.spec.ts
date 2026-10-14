@@ -24,9 +24,9 @@ test.describe('@p1 侧边栏导航', { tag: ['@p1', '@global'] }, () => {
     }
   })
 
-  test('菜单顺序为 仪表板 → 数据管理 → 数据分析 → SFTP浏览器', async ({ page }) => {
+  test('菜单顺序为 仪表板 → 数据管理 → 数据分析 → SFTP 浏览器', async ({ page }) => {
     await gotoApp(page, '/dashboard')
-    const expectedOrder = ['仪表板', '数据管理', '数据分析', 'SFTP浏览器']
+    const expectedOrder = ['仪表板', '数据管理', '数据分析', 'SFTP 浏览器']
     const labels = page.locator('aside.sidebar .menu-item:not(.hidden) .menu-label')
     for (let i = 0; i < expectedOrder.length; i++) {
       await expect(labels.nth(i)).toHaveText(expectedOrder[i])

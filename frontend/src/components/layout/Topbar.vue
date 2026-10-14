@@ -1,19 +1,24 @@
 <template>
   <header class="topbar">
-    <!-- 左侧：面包屑导航 -->
+    <!-- 左侧：页面身份。单一真相是 route.meta（此前这里另有一份按路径段翻译的 routeLabels，
+         与 meta.title 已经漂过：面包屑把 /sftp/search 译成「高级搜索」）。
+         契约：[data-testid=page-identity] 的文本 = 当前页名，用例只认它、不认结构。 -->
     <div class="topbar-left">
-      <el-breadcrumb separator="/" data-testid="breadcrumb">
-        <!-- 页面身份契约：[data-testid=page-identity] 的文本 = 当前页名。钩子挂在哪由版式决定
-             （此刻是面包屑末级，下一步换成顶栏身份块），用例只认这个钩子、不认结构。 -->
-        <el-breadcrumb-item
-          v-for="(item, i) in breadcrumbs"
-          :key="item.path"
-          :to="item.path"
-          :data-testid="i === breadcrumbs.length - 1 ? 'page-identity' : undefined"
-        >
-          {{ item.label }}
-        </el-breadcrumb-item>
-      </el-breadcrumb>
+      <div class="page-identity">
+        <span v-if="identity.icon" class="identity-badge" aria-hidden="true">
+          <el-icon :size="16"><component :is="identity.icon" /></el-icon>
+        </span>
+        <div class="identity-text">
+          <h1 class="identity-name" data-testid="page-identity">{{ identity.name }}</h1>
+          <span v-if="identity.sub.length" class="identity-sub">
+            <template v-for="(part, i) in identity.sub" :key="part.label">
+              <span v-if="i > 0" class="sub-sep" aria-hidden="true">›</span>
+              <router-link v-if="part.to" :to="part.to" class="sub-link">{{ part.label }}</router-link>
+              <span v-else>{{ part.label }}</span>
+            </template>
+          </span>
+        </div>
+      </div>
     </div>
 
     <!-- 右侧：搜索、通知、主题切换、用户菜单 -->
@@ -118,33 +123,12 @@ const roleLabel = computed(() => {
   return '用户'
 })
 
-const breadcrumbs = computed(() => {
-  const items: Array<{ path: string; label: string }> = []
-  const pathSegments = route.path.split('/').filter(Boolean)
-
-  // 路由标题映射
-  const routeLabels: Record<string, string> = {
-    dashboard: '仪表板',
-    data: '数据管理',
-    analysis: '数据分析',
-    settings: '系统设置',
-    batch: '批次报表',
-    sftp: 'SFTP浏览器',
-    search: '高级搜索',
-    admin: '管理',
-    users: '用户管理',
-  }
-
-  let currentPath = ''
-  pathSegments.forEach((segment) => {
-    currentPath += `/${segment}`
-    items.push({
-      path: currentPath,
-      label: routeLabels[segment] || segment,
-    })
-  })
-
-  return items
+/** 页面身份 = route.meta：名 + 徽章图标 + 副行（上级 › 说明）。上级与说明都可缺省。 */
+const identity = computed(() => {
+  const sub: Array<{ label: string; to?: string }> = []
+  if (route.meta.parent) sub.push({ ...route.meta.parent })
+  if (route.meta.desc) sub.push({ label: route.meta.desc })
+  return { name: route.meta.title ?? '', icon: route.meta.icon, sub }
 })
 
 const handleCommand = (command: string) => {
@@ -175,36 +159,79 @@ const handleCommand = (command: string) => {
   gap: 24px;
 }
 
-/* 左侧面包屑 */
+/* 左侧：页面身份块 */
 .topbar-left {
   flex: 1;
   min-width: 0;
 }
 
-:deep(.el-breadcrumb) {
-  font-size: var(--p-fs-base);
+.page-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
 
-:deep(.el-breadcrumb__item) {
-  color: var(--text-2);
+/* 徽章底 = 徽标主变体（guide §10.1：品牌色 tint + 同色描边），图标用品牌色的 EP 矢量图标
+   而非 emoji —— 与侧栏菜单同一批组件，认页面靠同一个形，不依赖系统 emoji 字体。 */
+.identity-badge {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--p-radius-md);
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brand) 30%, transparent);
 }
 
-:deep(.el-breadcrumb__inner) {
-  color: var(--text-2);
-  font-weight: 500;
+.identity-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.identity-name {
+  font-size: var(--p-fs-lead);
+  font-weight: var(--font-bold);
+  line-height: 1.2;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.identity-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--p-fs-micro);
+  line-height: 1.2;
+  /* 不用 --text-3：light 档它是 #9ca3af，压在 --bg-2 上实测 2.31:1，11px 说明文字根本读不动
+     （与 DataFilterSection 的 sensitivity-hint 同一条坑）。纯 --text-2 是 4.39，仍差 AA 小字线
+     0.11 —— 再朝 --text 压 22%：light 到 4.5+，night 因 --text 是白而自动变亮，两档同源不写死色。 */
+  color: color-mix(in srgb, var(--text-2) 78%, var(--text));
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sub-link {
+  /* 跟随副行色，避免两处各写一份对比度取值 */
+  color: inherit;
+  text-decoration: none;
   transition: color 0.2s ease;
 }
 
-:deep(.el-breadcrumb__inner:hover) {
+.sub-link:hover {
   color: var(--brand);
 }
 
-:deep(.el-breadcrumb__item:last-child .el-breadcrumb__inner) {
-  color: var(--text);
-}
-
-:deep(.el-breadcrumb__separator) {
-  color: var(--text-3);
+.sub-link:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--p-radius-xs);
 }
 
 /* 右侧工具栏 */
