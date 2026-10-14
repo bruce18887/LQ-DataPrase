@@ -3069,7 +3069,12 @@ D3 无迁移逻辑、D4 不恢复全局压缩、D5 本批不收 CORS。完整规
 
 ### Review（批 2）
 
-- **提交三支**：`66dc9ed` page_size 单一事实源 → `f6635dd` backup_db 三件套 → `cb325de` seed_users 闸门。
+- **提交五支**：`66dc9ed` page_size 单一事实源 → `f6635dd` backup_db 三件套 → `cb325de` seed_users 闸门
+  → `497cb5d` 文档与 lessons → `f6b291e` **补漏**：批2-C 当时逐文件显式 add 只点了命令与新用例，
+  漏掉 `test_accounts_bootstrap.py`（放行闸门）与 `test_seed_users_guard.py`（记录 Django 强制 DEBUG=False）
+  这两处承重改动 —— 而后端全量 1396 绿跑的正是含它们的树。靠 `git status` 收尾自查发现。
+- **同工作区有第二个会话在并发提交**（本轮实测：`08231ce fix(scripts)` 插在 `cb325de` 与 `497cb5d` 之间）。
+  所以「git log 里出现不是我写的提交」不是历史被改写，别据此 reset；核对一律用 `git reflog` + 按内容找。
 - **实跑抓到一条单测结构上抓不到的 bug**：原生 SQL 写 `?` 在 DEBUG 档炸于
   `last_executed_query` 的 `sql % params`。Django 原生 SQL 必须 `%s`。已入 lessons。
 - **自己的设计在执行时改了**：spec §4.2 原写「上下界都钳到设置域」。落地前发现
