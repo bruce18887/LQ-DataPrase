@@ -1,13 +1,8 @@
 <template>
   <div class="sftp-search-page">
-    <div class="page-header">
-      <div class="header-icon">
-        <el-icon :size="20" aria-hidden="true"><Search /></el-icon>
-      </div>
-      <div class="header-title">
-        <h2>SFTP 搜索</h2>
-        <p class="header-subtitle">范围 → 过滤 → 命中；结果与运行状态在本应用内跨页面驻留</p>
-      </div>
+    <!-- 页头（图标/标题/副标题）已收进顶栏身份块，副标题进了 route.meta.desc；
+         这一行只留返回动作 —— 顶栏副行那个「SFTP 浏览器」虽然也能回去，但 11px 小字不该是唯一出口 -->
+    <div class="ssp-back-row">
       <el-button :icon="Back" @click="router.push({ name: 'SftpBrowser' })">返回浏览器</el-button>
     </div>
 
@@ -118,7 +113,7 @@
  */
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Back, Link, Refresh, Search } from '@element-plus/icons-vue'
+import { Back, Link, Refresh } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { isNotConnectedMessage, sftpSearchApi } from '../../api/sftpSearch'
 import type { SearchPresetItem, SearchSpec } from '../../api/sftpSearch'
@@ -297,21 +292,8 @@ onActivated(applyQueryRoot)
 }
 .sftp-search-page > * { flex-shrink: 0; }
 
-.page-header {
-  display: flex; align-items: center; gap: var(--p-space-4);
-  margin-bottom: var(--p-space-3); padding: var(--p-space-2) var(--p-space-4);
-  background: var(--bg-2); border: 1px solid var(--border-2);
-  border-radius: var(--p-radius-md); box-shadow: var(--shadow-sm);
-}
-.header-icon {
-  display: flex; align-items: center; justify-content: center;
-  width: 32px; height: 32px; background: var(--bg);
-  border-radius: var(--p-radius-sm); box-shadow: var(--shadow-sm); color: var(--brand);
-}
-/* 标题与副标题同一行：这一带原本占 84px，改版后只给用户要看的结果腾地方 */
-.header-title { flex: 1; display: flex; align-items: baseline; gap: var(--p-space-4); min-width: 0; }
-.header-title h2 { margin: 0; flex: none; font-size: var(--p-fs-headline); font-weight: var(--p-fw-semibold); color: var(--text); }
-.header-subtitle { margin: 0; font-size: var(--p-fs-small); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 页头整块（图标盒 + 标题 + 副标题）已收进顶栏身份块，这里只剩一行返回动作 */
+.ssp-back-row { margin-bottom: var(--p-space-3); }
 .ssp-alert { margin-bottom: var(--p-space-3); }
 .ssp-alert-body { display: flex; align-items: center; gap: var(--p-space-3); flex-wrap: wrap; }
 

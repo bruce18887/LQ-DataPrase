@@ -1,14 +1,8 @@
 <template>
   <div class="sftp-browser">
-    <!-- Header -->
-    <div class="page-header">
-      <div class="header-icon">
-        <el-icon :size="32" aria-hidden="true"><FolderOpened /></el-icon>
-      </div>
-      <div class="header-title">
-        <h2>SFTP 浏览器</h2>
-        <p class="header-subtitle">安全文件传输协议浏览器</p>
-      </div>
+    <!-- 页头的图标与标题已收进顶栏身份块；这里只留连接状态读数
+         （工具栏那颗「断开」是动作不是状态，未连接时也不该假设用户看得见连接面板） -->
+    <div class="conn-status">
       <el-tag v-if="connected" type="success" effect="dark" class="status-tag">
         <el-icon><CircleCheck /></el-icon> 已连接
       </el-tag>
@@ -91,7 +85,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onActivated, onBeforeUnmount } from 'vue'
-import { FolderOpened, CircleCheck, CircleClose } from '@element-plus/icons-vue'
+import { CircleCheck, CircleClose } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { sftpApi, type SftpLastVisit } from '../../api/sftp'
 import { useFilesStore } from '../../stores/files'
@@ -498,33 +492,12 @@ function formatSize(bytes: number): string {
 }
 
 /* Header */
-.page-header {
+/* 页头整块（56px 图标盒 + 标题 + 副标题）已收进顶栏身份块，这里只剩一条右对齐的状态行 */
+.conn-status {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 24px;
-  padding: 16px 20px;
-  background: var(--bg-2);
-  border-radius: 8px;
-  border: 1px solid var(--border-2);
-  box-shadow: var(--shadow-sm);
+  justify-content: flex-end;
+  margin-bottom: 12px;
 }
-
-.header-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 56px;
-  height: 56px;
-  background: var(--bg);
-  border-radius: 8px;
-  box-shadow: var(--shadow-sm);
-  color: var(--brand);
-}
-
-.header-title { flex: 1; }
-.header-title h2 { margin: 0; font-size: var(--p-fs-headline); font-weight: 600; color: var(--text); }
-.header-subtitle { margin: 4px 0 0; font-size: var(--p-fs-small); color: var(--text-2); }
 .status-tag { font-size: var(--p-fs-small); padding: 6px 14px; }
 
 /* File Browser */
