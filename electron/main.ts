@@ -14,7 +14,7 @@ import * as fs from 'fs'
 import { spawnBackend, stopBackend } from './backend'
 import type { BackendInfo } from './backend'
 import { registerIpcHandlers } from './ipc-handlers'
-import { probeBackendUrl } from './backend'
+import { probeBackendUrl } from './net-probe'
 import {
   DEFAULT_CLIENT_CONFIG,
   hasClientConfig,

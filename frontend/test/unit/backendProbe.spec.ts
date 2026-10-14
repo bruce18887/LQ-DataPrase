@@ -1,5 +1,9 @@
 /**
- * T2：远端后端可达性探测（`electron/backend.ts:probeBackendUrl`）。
+ * T2：远端后端可达性探测（`electron/net-probe.ts:probeBackendUrl`）。
+ *
+ * 该探针刻意住在不 import electron 的独立模块里：一旦测试把 `electron` 的类型声明
+ * 拖进前端 tsconfig 的编译范围，`vue-tsc -b` 就报 `Cannot find module 'electron'`
+ * （2026-10-14 实测：探针最初放在 backend.ts 里，加完这条用例前端类型门禁当场红）。
  *
  * 为什么值得单独钉：这个函数的返回值直接决定首启之后的兜底路径 ——
  * 判成「可达」会把窗口丢给一个其实连不上的服务器，判成「不可达」会把用户留在连接页。
@@ -13,7 +17,7 @@
 import * as http from 'http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { probeBackendUrl } from '../../../electron/backend'
+import { probeBackendUrl } from '../../../electron/net-probe'
 
 let server: http.Server
 let baseUrl = ''
