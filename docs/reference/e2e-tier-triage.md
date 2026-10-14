@@ -463,11 +463,13 @@ e2e 库里 admin 实测停在 `filename_wrap=False`、`page_size=200`、`cpk_a/b
 | 用例 | 定性 | 该谁修 | 2026-10-14 状态 |
 |---|---|---|---|
 | `analysis/legend-color.spec.ts:131` | 已登记 known-red：下拉 `element is not stable` → 自己关掉 | 待修 spec | ✅ **已修**：根因是 X 下拉的关闭动画与 Y 下拉的打开重叠（同款早记在 `axis-label-precision.spec.ts:219`，那边靠固定 600ms 隔开）。改为等「没有可见下拉」再开 Y，该文件 4/4 绿、这条 17.0s 失败 → 3.4s 通过 |
-| `smoke/pages.spec.ts`「数据分析 正常加载且无报错」 | **产品侧**：分析页自动选中最新文件（本轮是别家 spec 留下的 `a.csv`），却带着**上一个文件的 param** 发 `POST /statistics/site_stats/` → 后端正确返回 `param_not_found`。属 lessons R5「持久化选择在上下文切换时未重置」 | 待拍：前端纠偏 or 页面不再自动选 | ❌ **仍是唯一硬红**，三次重试全红（确定性）。cron 就卡在这条 |
+| `smoke/pages.spec.ts`「数据分析 正常加载且无报错」 | ~~**产品侧**：带旧 param 发 `site_stats` → `param_not_found`，属 R5~~ **该归因已于 10-14 抓现场后作废**：实际 `req={file_id:1614,param:"col1"}` **同源一致**，后端返回被 `apps/analysis/tests_api_contract.py:109` 钉住的 `no_site_column` 400（正确契约，非缺陷）。真因 = `upload-csv-only.spec.ts` 上传的无 Site 列合成 CSV 只删临时文件、没删 DataFile 行，顶到 `files[0]` 被自动选中 → 浏览器一条 console error → P0 判失败 | ~~待拍产品决策~~ **测试卫生问题，已修** | ✅ **已修（`f3bf952`）**：补 `deleteBatchQuiet(zipBase)` / `deleteFilesByNameQuiet('e2e_csv_only_')`，并清掉存量 5 条。实测 upload-csv-only + zip-upload + smoke/pages 合跑 **15/15 全绿、跑完按名查残留 = 0** |
 | `data/file-list-sort-filter.spec.ts`「默认排序：上传时间倒序」 | 数据态相关（库里 108 行、含各轮上传残留） | 待修 | 未再复现（10-13 与 10-14 两轮全量都过）—— 属随残留漂移的那一类，不是稳定红 |
 
 > 因此 **cron 暂缓注册**：闸口是"绿了才建"，现在还差这三条，其中一条要产品侧拍。
-> 10-14 更新：三条已收敛到**只剩 `smoke/pages` 这一条产品侧**；同轮另登记两条 flake
+> 10-14 更新：三条已全部结案——`legend-color` known-red 已修（根因是 X 下拉关闭动画与 Y 下拉打开
+> 重叠，等「无可见下拉」再开 Y）、`file-list-sort-filter` 两轮未复现、`smoke/pages` **不是产品侧**
+> 而是 upload-csv-only 漏自清（见上一行，已修）。同轮登记两条 flake
 > （`toolbar-sticky:69` 基线轮就 failed→passed 的存量、`settings/cpk-thresholds:115` 新增待归因）。
 
 ## 失效 import 清理 + 常驻守卫（2026-10-13）

@@ -2890,11 +2890,20 @@ busy_timeout 走 Django 默认 5 秒 —— 写会整库挡读，20 人并发先
       慢了近 2 倍，等于这两条判据形同不存在。用 `--report-only` 拿上一轮产物验算过。
 - [x] 逐文件串行真跑（`--retries=0 --workers=1`）对比墙钟，记账见本文 Review。
 - [x] 全量夜跑第五轮（2026-10-14）：**385 例 / 21.4min / 单价 2.96s / 硬红 1 / flaky 3 / 不判 DEGRADED**。
-- [ ] **注册 cron**：仍卡在闸门口——唯一那条硬红 `smoke/pages「数据分析 正常加载」` 是**产品侧**，
-      分析页自动选中最新文件却带着上一个文件的 param 发 `POST /statistics/site_stats/` →
-      400 `param_not_found`（R5 家族）。要么**前端纠偏**（选中文件变化时清掉不匹配的 param），
-      要么**页面不再自动选文件**。**等你拍这个点，绿了我就建**
-      （`executionAuthorization=false`、`30 3 * * *`、Asia/Shanghai）。
+- [ ] **注册 cron**：等第六轮全量确认硬红归零即建（`executionAuthorization=false`、
+      `30 3 * * *`、Asia/Shanghai）。
+      ⚠ **第五轮写给用户的归因是错的，已由 `f3bf952` 更正**：那条 `smoke/pages「数据分析 正常加载」`
+      **不是产品缺陷**。抓现场显示 `site_stats` 的请求 `{file_id:1614, param:"col1"}` **同源一致**，
+      不是"带着上一个文件的 param"，也不是 `param_not_found`；后端返回的是
+      `no_site_column` 400，而这个契约被 `apps/analysis/tests_api_contract.py:109` 钉着、
+      与同类端点守卫一致（R3①），是**正确行为**。
+      真因：`upload-csv-only.spec.ts` 两个用例上传的合成 CSV（无 Site 列）**只删了磁盘临时文件、
+      没删 DataFile 行**，顶到 files[0] 后被分析页自动选中 → 浏览器一条 console error → P0 判失败。
+      `cleanup.ts::deleteBatchQuiet` 的注释早就写明这条链路，2026-09 只给 zip-upload 补了自清、
+      **漏了这个文件**。已按同一约定补 `deleteBatchQuiet(zipBase)` /
+      `deleteFilesByNameQuiet('e2e_csv_only_')`，并一次性清掉存量 5 条
+      （a.csv×3 / b.csv / below.csv）。
+      所以原先摆给用户的 A/B 两个选项（前端纠偏 / 不再自动选文件）**前提不成立，都不必做**。
 - [ ] 新 flake 待归因：`settings/cpk-thresholds:115`「阈值抬到样本 CPK 之上：总览判 D 级」
       第一次 13.5s 红（`.el-tag` 没有 `el-tag--danger`）、重试 4.9s 绿。
       形状像「PUT 阈值 → 表格重算」的渲染时序，也可能又是同轮内阈值被别的用例改过。
