@@ -351,7 +351,12 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     if (await paramOptions.count() > 0) {
       await paramOptions.first().click()
     }
-    await paramDropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
+    // 多选下拉点选项不会自动收起。以前 popper 空间不够会向上翻，恰好没挡住下面的导出按钮；
+    // 页头删除后下方腾出 104px，它改成向下展开，正好把「导出 Sigma Limit」整个盖住 → 点击被
+    // popper 接走，30s 后响应等不到。所以这里显式收起并断言真的收起了（原来那句
+    // waitFor({state:'hidden'}).catch(()=>{}) 把等待吞掉，等于没等）。
+    await page.keyboard.press('Escape')
+    await expect(paramDropdown).toBeHidden({ timeout: 5_000 })
 
     // ExportToolsTab 内的关键控件可见（使用 exact 避免匹配到其他 tab 的相似文本）
     await expect(page.getByText('批量导出参数分布图')).toBeVisible({ timeout: 15_000 })
