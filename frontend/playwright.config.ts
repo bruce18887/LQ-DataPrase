@@ -25,7 +25,11 @@ process.env.LQDP_SYSTEM_CONFIG_FILE = E2E_SYSTEM_CONFIG_FILE
 const PYTHON_BIN =
   process.env.PYTHON_BIN || path.join(PROJECT_ROOT, '.venv', 'Scripts', 'python.exe')
 
-const FRONTEND_URL = 'http://localhost:3000'
+// 前端端口也可换（默认 3000）：vite 的 server/preview 都读 E2E_FRONTEND_PORT。
+// 只换后端端口是半个修复 —— strictPort 下第二个 preview 会失败，而并发跑测会互相
+// 把对方的前端服务打穿，表现为成片 net::ERR_CONNECTION_REFUSED（lessons 2026-10-14）。
+const FRONTEND_PORT = process.env.E2E_FRONTEND_PORT || '3000'
+const FRONTEND_URL = `http://localhost:${FRONTEND_PORT}`
 // 默认仍是 8000（夜间轮与其它会话的既有约定）。留一个覆盖口：本机常有第二个
 // `manage.py runserver 8000` 挂着，而 reuseExistingServer 会静默复用它 —— 那个进程读的是
 // 仓库根 system_config.json（data_dir = 用户真实数据目录），用例的 PUT /auth/settings/
@@ -159,7 +163,7 @@ export default defineConfig({
           timeout: USE_DEV_SERVER ? 120_000 : 300_000,
           // 显式把后端端口传给 vite：proxy 目标读的就是它（写死 8000 会在换端口时
           // 让 /api 直接 ECONNREFUSED，登录 setup 全红、383 例不跑 —— 2026-10-14 实测）
-          env: { ...process.env, E2E_PORT: BACKEND_PORT },
+          env: { ...process.env, E2E_PORT: BACKEND_PORT, E2E_FRONTEND_PORT: FRONTEND_PORT },
           stdout: 'pipe',
           stderr: 'pipe',
         },
