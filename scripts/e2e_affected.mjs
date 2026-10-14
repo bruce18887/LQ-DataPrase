@@ -144,6 +144,13 @@ const args = process.argv.slice(2)
 const sep = args.indexOf('--')
 const opts = sep === -1 ? args : args.slice(0, sep)
 const PW_EXTRA = sep === -1 ? [] : args.slice(sep + 1)
+
+/**
+ * 转发给 playwright 的公共尾巴。此前只拼在模块分支的 `paths` 上，全量分支与
+ * 附带 P0 那条都把它丢了 —— 于是 `-- --workers=1` 恰好在最需要它的全量档里静默失效，
+ * 6 worker 打单进程 Django 造出 8 条与改动无关的硬红（2026-10-14 实测）。
+ */
+const TAIL = PW_EXTRA.join(' ')
 const RUN_BACKEND = !opts.includes('--no-backend')
 const baseIdx = opts.indexOf('--base')
 const BASE = baseIdx === -1 ? null : opts[baseIdx + 1]
@@ -235,7 +242,7 @@ function run(cmd, printCmd, cwd = FRONTEND) {
 const changed = FILES ? { base: '--files（虚构改动集，仅判定）', files: FILES } : collectChanged()
 if (!changed) {
   console.log('FULL (reason: 无法确定 base —— 全量是唯一安全选择)')
-  process.exit(run('npx playwright test', 'npx playwright test') )
+  process.exit(run(`npx playwright test ${TAIL}`, `npx playwright test ${TAIL}`) )
 }
 
 const d = decide(changed.files)
@@ -286,9 +293,9 @@ if (RUN_BACKEND && labels.length) {
   }
 }
 if (d.global) {
-  code ||= run('npx playwright test', 'npx playwright test')
+  code ||= run(`npx playwright test ${TAIL}`, `npx playwright test ${TAIL}`)
 } else if (selected.length) {
   code ||= run(`npx playwright test ${paths}`, `npx playwright test ${paths}`)
-  if (p0Paths) code ||= run(`npx playwright test --project=P0 ${p0Paths}`, `npx playwright test --project=P0 ${p0Paths}`)
+  if (p0Paths) code ||= run(`npx playwright test --project=P0 ${p0Paths} ${TAIL}`, `npx playwright test --project=P0 ${p0Paths} ${TAIL}`)
 }
 process.exit(code)
