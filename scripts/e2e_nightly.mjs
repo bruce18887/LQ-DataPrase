@@ -100,7 +100,12 @@ function precheck() {
     fs.rmSync(LOCK, { force: true }) // 陈旧锁（>4h）视为上一轮崩溃残留
   }
   if (!ALLOW_DIRTY) {
-    const dirty = git('status', '--porcelain').split('\n').filter(Boolean)
+    // 只查**被跟踪文件的未提交改动**：这条门防的是"别人的在制品被算到本轮账上"
+    // （2026-10-14 实测两次：另一会话在夜跑后端套件跑到一半时改
+    // test/backend/test_browse_api.py，制造出一条自相矛盾的假失败，而该文件单独重跑 31 例全过）。
+    // 未跟踪目录（如工具自己的 .qoder-credits/）改不动测试结果，
+    // 却会迫使运维加 --allow-dirty 绕过整条门 —— 那是净损失，所以按 untracked=no 判。
+    const dirty = git('status', '--porcelain', '--untracked-files=no').split('\n').filter(Boolean)
     if (dirty.length) return `工作区有 ${dirty.length} 项未提交改动 —— 全量结果会算到本不归属它的会话头上`
   }
   return null
