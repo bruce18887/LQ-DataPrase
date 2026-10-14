@@ -3354,3 +3354,60 @@ temp_dir/config_file` 披露的是**服务器**的目录结构、库文件与配
   管不住跨文件并发，所以正解是快照里排除 `chart_renderer` 这类别的用例会写的键
   （那类键已有自己的 `finally` 还原），或把 settings 模块拆到独占 project。本轮未动
   （无证据不扩大改动面），已记 lessons。
+
+---
+
+# 任务：顶栏页面身份块 V1 + 全站页头收拢（2026-10-14）✅
+
+上一批删掉三页 `<h2>` 后，用户提两件事：① 数据管理/仪表板等页也改成一致；
+② 顶栏只剩一串 14px 灰字太简陋，要个好看的方式。
+四档方案做成可并排审阅的原型 `docs/plans/topbar-identity-preview.html`（真实 token + 真实计数 138），
+用户选 **V1（柔和底徽章 + 名 + 副行）** 与 **「能删的都删，操作按钮留页内」**。
+
+## 实施清单
+
+- [x] 批1 `a1eafb5`：契约先行 —— `[data-testid=page-identity]` 落成唯一身份钩子，
+      settings/data/sftp 三处按文案或角色定位的用例迁过来（此刻仍挂在面包屑末级，全绿）
+- [x] 批2 `e81745a`：`types/router.d.ts` 给 `RouteMeta` 扩 `icon`/`desc`/`parent`；
+      Topbar 删 `routeLabels`（与 `meta.title` 的两份真相已漂：高级搜索、`/admin` 死链），
+      改渲染身份块；侧栏「SFTP浏览器」→「SFTP 浏览器」与指南 14 处对齐（连带 6 处 exact 定位用例 + README 契约清单）
+- [x] 批3 `bb3ba0f`：数据管理 `.page-header`（实测 104.1px）与仪表板 `.dash-header`（41.5px）整删，
+      副标题进 `meta.desc`，「文件总数」芯片删（与 tab-badge 同一个数），三条页面级 night 覆写一并清掉
+- [x] 批4 `acf3280`：SFTP 浏览器页头 114→36（省 78px，保留连接状态标签）、搜索页 62→44（省 18px，
+      保留「返回浏览器」按钮）；`search-layout.spec` 八例全过
+- [x] 批5 `00660f8`：页头删除改变了导出参数下拉的展开方向（上翻→下开），popper 盖住「导出 Sigma Limit」
+      导致用例 30s 等不到请求。产品行为正常（手工重放按一次 Escape 即可点中并发出
+      `POST /export/sigma_limit/`），坏在用例把 `waitFor({state:'hidden'}).catch(()=>{})` 吞掉了；
+      改成显式 Escape + `toBeHidden` 断言，exports.spec 十条全过（该条 30s→4.5s）
+- [x] 双主题实测对比度：主行 13.34 / 15.89，副行 5.59 / 15.89，徽章图标 3.89 / 6.24（非文本 3:1 达标）
+- [x] 文档：指南新增 §10.10 顶栏页面身份块 + §8 DON'T 改写；lessons 记六条（颜色探针、`--text-3` 三度复发、
+      两份真相、A/B 用 cp 不用 stash、端口归属、popper 展开方向随顶部高度翻转）
+
+## 还欠的（不阻塞）
+
+1. `Sidebar` 菜单数组与 `route.meta` 仍是第二份重复（名/图标/权限各写一遍）。本轮只让顶栏吃 meta；
+   侧栏收拢要连带它的折叠与分组逻辑，另批做。
+2. `sftp.spec.ts:44` 在共享账号存有 SFTP 连接记录时会红（页面自动连接 → 连接表单不渲染），
+   与本轮改动无关（红在第 87 行的表单稳定轮询，第 48 行的身份断言已过）。该用例缺一个
+   「先收敛到未连接」的前置，同类助手在 `helpers/sftpSearchFlow.ts` 已有，补它需要可用的 SFTP 服务端。
+3. 数据管理页的「文件总数」芯片删除后，总数只在 tab 徽标上显示；若运营要一个更显眼的读数，
+   再单独提。
+4. `data/view-data.spec.ts:190`「固定列」在全量轮里红、单跑 2.6s 绿 —— 顺序污染，非本轮引入
+   （第一次 6-worker 门禁里它已红，那时批1-4 还没动）。形状与 lessons 记过的文件列表残留同族：
+   截图里当前文件是 `BZJ1791986746693_FT.csv`、总数 112，即上传类用例留下的行没被清掉，
+   把 `options.first()` 顶成了别的文件。判据应是「跑完按名查残留 = 0」，见 2026-10-14 另一条。
+
+## 验证账目
+
+- 每批各自的门禁：批1 smoke+global+settings+data 25 passed / 0 红；批2 同上含改名后菜单顺序例；
+  批3 data+dashboard+smoke 36 passed / 0 红；批4 `search-layout.spec` 八例全过；
+  批5 `exports.spec` 十条全过。`npm run build`（含 `vue-tsc -b`）与 `npm run lint:e2e` 每批都过。
+- 双主题对比度与几何为真机实测（`tasks/_probe_identity.mjs`，1536×864）：顶栏 56px 不变，
+  主行 13.34 / 15.89，副行 5.59 / 15.89，徽章图标 3.89 / 6.24。
+- **收口全量轮未采信**：`tasks/gate-v3-workers1.log` 85 failed / 277 passed / 40.8 min，
+  但 83 条集中在最后一个 project（P2），无一条连接级错误，且期间仓库根 e2e 库的 `DataFile`
+  行数从 138 → 112 → 87 漂变、机器上同时有 5 个 playwright 进程、另一会话正在同一分支提交
+  （`394fe4e`…`a840bdd` 那批 slot 池工作）。判定为**并发互踩**，不是产品回归。
+  最干净的收口证据仍是上一轮 `gate-v2-workers1.log`：386 例 / 22.1 min / 363 passed / 2 failed，
+  其中一条已由批5 修掉、另一条隔离复跑绿并登记为顺序污染。
+  **待对方会话跑完后重跑一次 workers=1 全量再收口**（这条也正好是 slot 池隔离要解决的场景）。

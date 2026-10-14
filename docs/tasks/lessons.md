@@ -1570,6 +1570,50 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   chart-toggles 452.1，三者 + gap 32 = 1658 > 可用 1488。这才是下一个真正的高度杠杆（≈40px），
   代价是文件名可见长度变短，**待拍板**，不要顺手改。
 
+## 2026-10-14 顶栏身份块：颜色探针会把 `color(srgb …)` 算错，两份真相必然漂，A/B 实测别用 stash
+
+- **Chromium 的 `getComputedStyle` 把带 alpha 的颜色序列化成 `color(srgb r g b / a)`，分量是 0..1**。
+  我写的对比度探针用 `[\d.]+` 抓数字直接当 0..255 用 → 夜档读数全错（`--bg-2` 上本该 ~10:1 的
+  东西报成 15.89，而 light 侧因为是不带 alpha 的 `rgb()` 才碰巧对）。
+  规则：颜色探针**先归一化 `color(srgb …)`**，再拿一个已知答案的样本自证（纯白压纯黑必须 = 21.0），
+  自证不过就别引用它的任何输出。
+- **`--text-3` 的小字坑第三次复发**：身份块副行 11px 用 `--text-3`，light 压在 `--bg-2` 上实测
+  **2.31:1**；换 `--text-2` 是 4.39（仍差 AA 小字线 0.11），再朝 `--text` 压 22% 才到 5.59。
+  规则：任何 <14px 的说明文字取色，**先量再定**，别照抄相邻组件用了什么 —— 前两次踩坑
+  （`sensitivity-hint`、`--text-3` 白底 2.54:1）都是这么复发的。
+- **同一份信息写两处必然漂，而且漂得很安静**：Topbar 的 `routeLabels` 与 router 的 `meta.title`
+  各自维护页面名，实测已漂两处 —— 面包屑把 `/sftp/search` 译成「高级搜索」（meta 和页面都写
+  「SFTP 搜索」），又把侧栏分组名「系统管理」当成路由链到不存在的 `/admin`（点了进 404）。
+  规则：需要"页面级元数据"（图标/说明/上级）时**扩现有那份**（这里是 `RouteMeta` + `types/router.d.ts`
+  声明），不要新建第二份；命名口径以用户指南为准（「SFTP 浏览器」带空格，指南 14 处一致）。
+- **A/B 实测用「临时换回 HEAD 版本」而不是 stash**：共享工作区里 `git stash` 是雷（见 2026-10-14
+  另一条）。可复现做法：`cp 我的文件 tasks/_bN-*.vue` 备份 → `git show HEAD:path > path` → 量 →
+  `cp` 回来 → `git diff --stat` 自证还原没丢。本轮就是这样拿到改前/改后两对真数字
+  （数据管理 104.1px、仪表板 41.5px、SFTP 78px / 18px），而不是拿 CSS 推算糊过去。
+- **端口归属先查再信**：本轮 8000 上出现一个**不是我起的** `runserver`（`Get-CimInstance` 比
+  `CreationDate` 认出来的），且同一个 e2e 库还有真人会话在写（`PUT /auth/settings`、SFTP 连接记录）。
+  规则：验证前比一次归属，不是自己的就换 `E2E_PORT` / `E2E_FRONTEND_PORT` 自起自收
+  （`vite.config.ts` 的 server 与 preview 两处都读这两个变量，换端口是一行 env 的事），
+  别去停别人的进程，也别在共用账号态上推断产品行为。
+
+## 2026-10-14 删掉顶部 104px 会改变下拉的展开方向：popper 从「上翻」变「下开」，把按钮盖住了
+
+- **现象**：页头收拢后全量门禁红一条 `exports.spec.ts:300`（导出 Sigma Limit）。
+  报错点是 `waitForResponse` 30s 超时，看起来像后端没响应。
+- **现场才是判据**：失败截图显示参数**多选下拉点完选项仍然开着**（EP 多选不自动收），
+  popper 正好盖住「导出 Sigma Limit」——点击被 popper 接走，请求当然不发。
+  根因是页头那 104px 没了之后 popper 下方有了空间，展开方向从「向上翻」变成「向下开」。
+- **产品没坏，坏的是用例把等待吞了**：手工探针里按一次 Escape 收起 popper，按钮立刻可点并
+  发出 `POST /api/v1/export/sigma_limit/`。用例原本写
+  `await paramDropdown.waitFor({ state: 'hidden' }).catch(() => {})` —— 收不收都往下走，等于没等。
+  改成显式 `Escape` + `await expect(dropdown).toBeHidden()`。
+- **规则一**：改容器高度 / 顶部结构之后，凡是「点开下拉 → 选一项 → 再点同页另一个控件」的用例
+  都要复查 popper 是否还开着；`.catch(() => {})` 包住的可见性等待一律换成断言
+  （这是「被 catch 吞掉的等待」家族的第 N 次，见 2026-10-13 夜专项）。
+- **规则二**：单次 A/B 只能定「相关」，定不了「机制」。我这次换回旧版跑一次就绿，方向对了，
+  但「为什么坏」只有截图能给 —— 所以 A/B 之后必须补一次失败现场 + 一个最小重放
+  （重放能通而用例不通，说明缺口在用例与产品之间，不在产品里）。
+
 ## 2026-10-14 门禁的「快照-还原」助手只在串行下成立；`--` 透传要逐条命令核对
 
 - **现象**：批内快门禁（`scripts/e2e_affected.mjs`）全量档跑出 **8 条硬红 + 8 条 flaky**，跨
@@ -1592,6 +1636,41 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   于是 `-- --workers=1` 恰好在最需要它的全量档静默失效。已修（统一 `TAIL` 拼进三条 playwright 命令）。
   **规则**：给 CLI 承诺"透传"之后，判据不是读代码而是 `--dry-run` 看打印出来的命令行 ——
   这次现场就是一行 `$ npx playwright test`（参数没了）。
+
+## 2026-10-14 e2e slot 池 P0 探针把仓库根 media/ 与 db.sqlite3 搬走并删掉了
+
+- **现象**：探针按计划设 `LQDP_SKIP_STORAGE_MIGRATION=1` 并把 `data_dir` 指到 `%TEMP%` 建模板库，
+  运行日志末尾自检打出 `仓库根 media 目录仍在: false`。第二次运行前脚本开头的 `fs.rmSync(PROBE)`
+  又把「刚被搬进 PROBE 的原件」删了 ⇒ 仓库根 `media/`（1.1GB / 154 文件）与 `db.sqlite3`（4MB）双双消失。
+- **根因（硬证据）**：`apps/common/system_config.py:385-391` —— `if data_target != orig: _migrate(...)` 这一句
+  在 `if _migration_disabled(): … else: …` 分支**外面**。那个开关只改「没配 `data_dir` 时怎么取默认值」，
+  **只要显式配了一个不等于锚点的目录就必然迁移**，与开关无关。而 `_migrate`（`:166-212`）是
+  copy → verify → 改写 DB 路径 → `db_src.unlink()` + `rmtree(media_src)`，即 move 语义。
+  我把它读成了「置位后 data_target 直取配置值 ⇒ 跳过迁移」，设计文档、实施计划、探针三处都基于这个误读。
+- **规则**：
+  ① **要一个进程级的数据目录隔离，用 settings 覆写档直接指 `DATABASES.NAME` / `MEDIA_ROOT`，
+  永远不要用 `data_dir` 重定向**（`config/settings/e2e_slot.py` + `LQDP_E2E_SLOT_DIR`）。
+  判据：档里出现 `apply_system_config` 或 `data_dir` 就是设计缺陷，已写成一条源码扫描测试。
+  ② **探针/临时脚本绝不 `rmSync` 一个可能装着「被搬来的原件」的目录**；每次运行用带时间戳的新目录，
+  只删自己本次创建的路径。
+  ③ 任何往 Django 发写命令之前，先跑一次**只读解析断言**，且判据是 `==` 精确相等，不是 `startswith`。
+  本次 `startswith(仓库根)` 曾被骗过：畸形 `data_dir` 解析成 `仓库根\UsersAdministratortop…\media`，
+  照样以仓库根开头。断言还要附带「工作区根没长出新目录」。
+- **次生教训（同一个坏味道，另一种形态）**：恢复命令用 shell `printf` 写配置，反斜杠经
+  bash→node→文件 三层转义被吃掉 ⇒ `{"data_dir":"C:UsersAdmin…"}` 是**非法 JSON** ⇒
+  `load_config` 静默回落默认值 ⇒ `migrate/seed_users/seed_test_data` 全跑到了**用户真实数据目录**
+  `C:\Users\Administrator\LQ-DataPrase`（84 条已存在 DataFile 被重解析 save、追加 ParseHistory，库 14.8→16.0MB；
+  无删除、无新增文件、今天新建行数经核为 0）。**规则**：含反斜杠/绝对路径的文件一律用
+  `fs.writeFileSync(JSON.stringify(…))` 或 Write 工具生成，不拼 `printf`；也不在 `python -c "…"` 内联里写反斜杠
+  （同样被吃掉，`SyntaxError` 只是运气好的情形），要跑就落一个 `.py` 文件。
+- **顺带查实的一条**：`manage.py:12-13` 只在 `argv[1]=='test'` 时自动设该开关，注释写的「测试运行器绝不能触发
+  **默认**数据目录迁移」是准确的 —— 它防的正是我没防的那种情况。
+- **恢复与验证**：配置改成 `JSON.stringify` 生成后先断言（`MEDIA_ROOT`/`DB` 与仓库根精确相等）再写 ⇒
+  `migrate + seed_users + seed_test_data --refresh` 重建 `media/` 711MB / 87 文件 + `db.sqlite3` 2.95MB；
+  可用性用 `--project=P0` **15/15 绿** 与 `analysis.spec.ts --project=P1` **18/18 绿（57.8s）** 证明。
+  不可再生的只有约 67 个历次测试上传残留（`e2e_*`/批次目录/`known_hosts.json`），本就属会被自清逻辑清掉的垃圾。
+- **意外收获**：记忆里「唯一剩下的产品侧硬红 `smoke/pages` 数据分析正常加载」在干净库上通过了 ⇒
+  那条红的触发条件与累积状态相关，不是无条件红，定性要重做。
 
 
 
