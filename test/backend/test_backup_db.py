@@ -230,6 +230,39 @@ class CompanionFilesTests(SimpleTestCase):
         self.assertEqual([p.name for p in got], ['secret.key'])
 
 
+class CompanionKeySourceTests(SimpleTestCase):
+    """服务器档下密钥本来就来环境变量、没有 secret.key 文件 —— 此时不许把备份判成失败。
+
+    实测踩过：`backup_db` 在 `config.settings.server` 下 CommandError
+    「找不到 …/secret.key」，也就是它唯一跑不动的形态恰恰是它被写出来要服务的那个。
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix='backup_keysource_'))
+        self.anchor = self.tmp / 'anchor'
+        self.dest = self.tmp / 'backups'
+        self.anchor.mkdir()
+        self.dest.mkdir()
+        self.addCleanup(shutil_rmtree, self.tmp)
+
+    def test_env_sourced_key_without_file_does_not_raise(self):
+        got = collect_companions(self.anchor, self.tmp / 'absent.json', self.dest,
+                                 secret_key_from_env=True)
+        self.assertEqual(got, [], '环境给密钥时没有文件可带，应返回空清单而不是报错')
+
+    def test_env_sourced_key_still_copies_file_if_present(self):
+        """有文件就照带（多一道保险），但缺了不算失败。"""
+        (self.anchor / 'secret.key').write_text('material', encoding='utf-8')
+        got = collect_companions(self.anchor, self.tmp / 'absent.json', self.dest,
+                                 secret_key_from_env=True)
+        self.assertEqual([p.name for p in got], ['secret.key'])
+
+    def test_file_sourced_key_is_still_mandatory(self):
+        """默认（桌面/打包档）语义不变：缺文件必须报错，否则恢复出来的根密钥对不上。"""
+        with self.assertRaises(BackupError):
+            collect_companions(self.anchor, self.tmp / 'absent.json', self.dest)
+
+
 class RotateTests(SimpleTestCase):
     def test_keeps_newest_n_and_ignores_foreign_files(self):
         tmp = Path(tempfile.mkdtemp(prefix='backup_rotate_'))

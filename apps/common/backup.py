@@ -103,22 +103,37 @@ def verify_backup(path: Path) -> str:
     return 'ok'
 
 
-def collect_companions(anchor_dir: Path, config_file: Path, dest_dir: Path) -> list[Path]:
-    """把两样不可再生的伴生文件复制到备份目录。
+def collect_companions(anchor_dir: Path, config_file: Path, dest_dir: Path, *,
+                       secret_key_from_env: bool = False) -> list[Path]:
+    """把不可再生的伴生文件复制到备份目录。
 
-    ``secret.key`` 缺失必须报错；``system_config.json`` 可以不存在（默认安装就没配
-    data_dir），此时只带 key。
+    ``secret_key_from_env`` 的必要性（2026-10-14 实测）：服务器档
+    （``config.settings.server``）要求 ``SECRET_KEY`` 由环境给定，**根本没有 secret.key
+    文件** —— 若一律要求该文件，``backup_db`` 唯一跑不动的形态恰恰是它被写出来要服务的
+    那个形态。三条规则：
+
+    * 文件在 → 一定带上（无论密钥来源是谁，多一道保险）。
+    * 文件不在且密钥来自环境 → 不报错，由调用方出声（密钥的备份责任在部署配置那边）。
+    * 文件不在且密钥不来自环境（桌面/打包档）→ 必须报错。那档下这个文件是根密钥的
+      **唯一副本**，且不随 ``data_dir`` 迁移（``standalone.py:50-56`` 刻意锚在原目录）；
+      漏了它，恢复出来的实例 JWT 签名与所有 PBKDF2 派生密钥都对不上，已存 SFTP 口令
+      也再也解不开。
+
+    ``system_config.json`` 可以不存在（默认安装就没配 data_dir）。
     """
     dest_dir = Path(dest_dir)
-    secret = Path(anchor_dir) / SECRET_FILENAME
-    if not secret.is_file():
-        raise BackupError(
-            f'找不到 {secret}。它是 SFTP 存密密钥的派生来源（见 standalone 档的 PBKDF2），'
-            '缺了它恢复出来的实例连不上数据源服务器，因此不允许只备库就宣布成功。')
+    copied: list[Path] = []
 
-    copied = []
-    shutil.copy2(secret, dest_dir / SECRET_FILENAME)
-    copied.append(dest_dir / SECRET_FILENAME)
+    secret = Path(anchor_dir) / SECRET_FILENAME
+    if secret.is_file():
+        shutil.copy2(secret, dest_dir / SECRET_FILENAME)
+        copied.append(dest_dir / SECRET_FILENAME)
+    elif not secret_key_from_env:
+        raise BackupError(
+            f'找不到 {secret}。桌面/打包档下它是根密钥的唯一副本（刻意不随 data_dir 迁移），'
+            '漏了它恢复出来的实例 JWT 签名与所有派生密钥都对不上、已存 SFTP 口令解不开，'
+            '因此不允许「只备库」就宣布成功。若密钥其实来自环境变量（服务器档），'
+            '需要调用方声明 secret_key_from_env。')
 
     config_file = Path(config_file)
     if config_file.is_file():
