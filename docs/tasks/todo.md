@@ -3033,3 +3033,86 @@ F10 只改了全量夜跑**实际报错**的 13 处。下面是同一形状但�
 ## Review
 
 （待实施后填写：逐文件墙钟对比、全量夜跑账目、端口释放确认。）
+
+---
+
+# 任务：部署整改批 2-4 —— 备份 command + page_size 边界 + seed_users 互锁 + server 档 + 首次运行后端选择（2026-10-14）
+
+背景：服务器部署评估把约束定为八条（C1 OS 未定 / C2 仅 SQLite / C3 约 20 人 / C4 Electron 暂留 / C5 无 nginx /
+**C6 本服务器仅用于分析，原始数据在另一台服务器上且自带备份 ⇒ media 定性为缓存** / C7 链路按百兆评估 /
+**C8 本机历史不带走、从头开始**），决策定为 D1 首次运行选「后端地址」而非「部署形态」、D2 media 不备、
+D3 无迁移逻辑、D4 不恢复全局压缩、D5 本批不收 CORS。完整规格与全部实测行号见
+`docs/specs/2026-10-14-server-deployment-first-run-design.md`。
+
+**编号续 `docs/tasks/todo.md:2741` 的「部署整改批 1」**（system_config 出 git + WAL/busy_timeout，2026-10-13 ✅）。
+该条 Review 的三条既有结论已被本批吸收：裸 `sqlite3.connect` 不走 pragma 信号（`:2769-2771`）、
+新增 `apps.common.*` 模块必须补 `lq_dataprase.spec` 的 hiddenimports（`:2790-2797`）、
+**WAL 在网络盘/SMB 上不安全而 data_dir 可被指到映射盘**（`:2799-2801`）。
+
+## 批 2 实施清单（与部署形态无关，现在就能做，三项互不依赖）
+
+- [x] `PAGE_SIZE_MIN/MAX` 从 `apps/accounts/serializers.py:14-15` 移到 `apps/common/constants.py`（该文件自述「无 Django 依赖」），serializers 与 browse_views 改 import
+- [x] `apps/datafiles/views/browse_views.py:164` 的 `min(page_size, 100000)` 改为引用共享常量**上界**；净增 1 行（该文件 573→576，仍限内）
+- [x] 语义收窄的可见提示：`TableSettingsForm.vue` 的 `form-hint` 补上限说明，`docs/user-guide/07-settings.md` 同步
+- [x] 新建 `apps/common/management/{__init__.py,commands/__init__.py,commands/backup_db.py}` + `apps/common/backup.py`：`VACUUM INTO` 走 **Django 连接**（非裸 sqlite3）→ 携 `secret.key`（锚点 `SYSTEM_CONFIG_ANCHOR_DIR`，**不在 data_dir**）+ `system_config.json` → 对**备份文件**跑 `PRAGMA integrity_check` → `LQDP_BACKUP_KEEP` 轮转默认 14 → 非 SQLite 与 `:memory:` 拒执
+- [x] `lq_dataprase.spec` hiddenimports 补 `apps.common.backup` / `apps.common.management` / `...commands.backup_db`
+- [ ] 在**冻结产物**上实跑 `backup_db` 留证 —— 未做：跑 `build.bat` 会 taskkill 其它会话的进程（`project-shared-worktree-hazards`）。另记一条真实缺口：打包 exe 没有子命令入口，`backup_db` 目前只能在源码形态跑
+- [x] `seed_users.py` 加闸门：`DEBUG=False` 且无 `LQDP_ALLOW_WEAK_SEED=1` → `CommandError`（守卫在 `handle()` 最前，拒执时一个用户都没建）
+- [x] T1：`test/backend/test_backup_db.py` 16 例（三件套 / integrity ok / 轮转 / 缺 secret.key 报错 / 非 SQLite 与内存库拒执 / **-wal 未 checkpoint 仍能取回** / 裸复制得到无表库的反证）
+- [x] T1：`test/backend/test_page_size_bounds.py` 9 例（100000→回显 500 且真少回 100 行、正常值不变、**下界保持 1 的反「对齐」钉**、0/负数回落到 1）
+- [x] T1：四处区间字面量的**源码扫描** + 三份默认值对齐扫描（先例 `apps/export/tests_chart_dpi.py`）
+- [x] T1：`test/backend/test_seed_users_guard.py` 4 例（拒执 / 未建用户 / 显式放行 / dev 照旧）
+- [x] 门禁：`npm run lint:e2e` 干净；`npm run build` 绿（vue-tsc -b + vite，916ms）；
+      后端全量 **`Ran 1396 tests in 302.814s — OK (skipped=7)`**（= 基线 1367 + 本轮 29，退出码 0）
+- [ ] 门禁：`npm run test:e2e:affected` —— **被挡住，未跑**：8000 上有本会话之外的 `manage.py runserver 8000 --noreload`（PID 41132，起于 11:13:53），它不带 `LQDP_SYSTEM_CONFIG_FILE` → 读仓库根 `system_config.json` → `data_dir=C:\Users\Administrator\LQ-DataPrase`（**用户真实数据目录**）。`playwright.config.ts:131 reuseExistingServer: !CI` 会静默复用它，正是 lessons 2026-09-19 记的「用例把用户级设置写进真实账号」险情；而 `BACKEND_PORT` 写死 8000 无 env 覆盖。按「动别人 PID 前先问用户」停手
+- [x] **恢复演练**：三件套还原到新目录 → `migrate --run-syncdb` 干净 → 行数 100/40734/3 与现场一致 → `SECRET_KEY` 来自还原的 `secret.key`。演练脚本 `tasks/_restore_drill.py`（gitignore）
+
+### Review（批 2）
+
+- **提交三支**：`66dc9ed` page_size 单一事实源 → `f6635dd` backup_db 三件套 → `cb325de` seed_users 闸门。
+- **实跑抓到一条单测结构上抓不到的 bug**：原生 SQL 写 `?` 在 DEBUG 档炸于
+  `last_executed_query` 的 `sql % params`。Django 原生 SQL 必须 `%s`。已入 lessons。
+- **自己的设计在执行时改了**：spec §4.2 原写「上下界都钳到设置域」。落地前发现
+  `test_browse_api.py:175` 的 `page=2, page_size=3` 是靠小页表达切片语义的承重用例，
+  且小页对端点不是风险 → **只钳上界**，下界保持 1，不对称在代码注释与反「对齐」钉里各留一处。
+  spec §4.2 与 §12 已同步更正。同时更正一条：`applyBlockSize` 读的是 `/auth/settings/`，
+  不是 browse 回显 → 钳位不影响前端块大小。
+- **闸门打断既有测试 2 条**（Django 测试运行器强制 `DEBUG=False`）：给
+  `SeedUsersRepairTests.setUp` 加 `LQDP_ALLOW_WEAK_SEED=1` 并写明「闸门语义不在这里测」。已入 lessons。
+- **备份忠实性已证**：现场库与还原库对同一 token 给出**完全相同**的判定 → 三件套没漏东西。
+- **演练顺带查出一条既有安全缺陷（不在本批修）**：现场那条 SFTP 存密是用
+  `base.py:16-17` 仓库里写死的开发密钥加密的，且 dev 与 standalone 两档的 KDF salt/迭代次数不同
+  → **换档即解不开**。取证脚本 `tasks/_sftp_key_probe.py`（只读）。详见 lessons 同日条目与 spec §4.4。
+- **本人 spec 的一处前提被这条证伪**：原写「丢 secret.key ⇒ SFTP 存密全废」，实测现场那条没用 secret.key。
+  备份仍带它（JWT 签名等靠它），但理由换成准确的。
+- **双主题**：前端只改了一段 `form-hint` 文本，无新增视觉元素 → 零主题工作。
+
+
+## 批 3 实施清单（服务器 settings 档）
+
+- [ ] 新建 `config/settings/server.py`：`ALLOWED_HOSTS` **必须 env 提供**（不给桌面回环默认）、`DEBUG=False`、`API_DOCS_ENABLED=False`、`BASE_DIR` 走 `LQDP_SERVER_BASE_DIR` 且不继承 `LQDP_BASE_DIR`/userData 语义、`DATABASES` 走 env 且不挂 data_dir 交互搬迁
+- [ ] 确认换档**不需要改 `standalone.py`**：`:55` 是 `os.environ.setdefault`，外部设 `DJANGO_SETTINGS_MODULE` 即生效（易误判成要改入口）
+- [ ] 部署文档进 `docs/reference/`，首段写死：服务器库为空 → 首次启动现场建 superuser → 绑非回环又没设 `LQDP_BOOTSTRAP_ADMIN_PASSWORD` 时 `standalone.py:104-111` **拒绝启动**（桌面时代从没设过它）
+- [ ] 文档「已知限制」列无 TLS / 内网明文口令 —— 等拍板项，不替用户决定
+- [ ] 手工验：未设口令必红（贴拒绝启动输出）、设了必起；局域网另一台机浏览器开 `http://<ip>:<port>/login` 能登录并浏览数据（这条同时证 spec §1.2「浏览器今天已可用」）
+- [ ] 不交付长跑进程模型（`runserver --noreload` 不是服务进程，挂 C1）
+
+## 批 4 实施清单（Electron 首次运行选后端地址）
+
+- [ ] 新建 `electron/client-config.ts`：`userData/client-config.json`（`{mode:'local'|'remote',serverUrl}`）读/校验（协议须 http(s)、host 可解析）/**原子写 tmp→rename**/坏 JSON 回落 local。只能在 Electron 侧：存 DB 是循环依赖，存 localStorage 在 `file://` 与 `http://` 下是两个隔离空间
+- [ ] `electron/main.ts`（375 → 约 420 行）：`app.whenReady()` 在 `spawnBackend`（`:304-319`）前插 `resolveMode()`；remote → 跳过 spawn、`backendUrl=serverUrl`、`createWindow` 走 `loadURL`（`:265` 通路已在用，`:280` 是 loadFile）。remote 下 `managed=false` → `stopBackend`（`backend.ts:372-375`）天然不会去杀服务器
+- [ ] 远端不可达 → 复用 `backend.ts:151-188` 探测改为传 host，失败给提示并允许切回本机，**禁白屏**
+- [ ] 新建 `electron/mode-picker.html` 首启选择窗（独立静态 HTML，**不进 SPA** —— SPA 的 axios 在模块初始化期就打 `/api/v1`，那时后端尚未选定）；文案明写「本机历史记录不会带到服务器」
+- [ ] `preload.ts`（`__backendUrl__` 经 additionalArguments 已支持任意 URL）/`ipc-handlers.ts`（91 行）/`frontend/src/electron.d.ts` 增 `getMode()`/`setMode()`
+- [ ] 设置页新增「连接的后端」区块（显示 mode/url、可切换、切换后重启）；**`SystemPathsSettings.vue:101`（选目录）与 `:136`（重启）在 mode=remote 时禁用并给出原因**（那配的是服务器磁盘）
+- [ ] 双主题（CLAUDE.md:75）：mode-picker 与新区块用 CSS token + `:root[data-theme="night"]`，禁页面级 night 覆盖；element-plus night/light 块对称（R7①）
+- [ ] T2：`frontend/test/unit/` client-config 解析（缺字段/非法协议/坏 JSON → local，不外抛），跑 `npm run test:unit`
+- [ ] T3 只留两条（≈5.4s/例）：① 设置页区块渲染 + remote 下路径项禁用（IPC/`data-*` 契约）；② 首启选择窗可选可落盘、重启后按所选模式起。page_size 全组合边界进 T1，T3 不留
+- [ ] e2e 若写用户级设置：先确认 8000 属主读哪份 `system_config.json`（本机 `data_dir=C:\Users\Administrator\LQ-DataPrase` 与 e2e 钉在项目根的是**两个库**，`:2766-2768`）
+- [ ] 本批**不收 CORS**（`base.py:83` 保持 True）；收紧条件是 Electron 全量转 `loadURL` 后 Origin 同源，届时另立 spec 并回指本节
+- [ ] 收口：全量 e2e 用 `--workers=1` + 后端全量 + `npm run build`
+
+## Review
+
+（待实施后填写：备份三件套实测清单与 integrity 输出、四处常量扫描结果、冻结产物 `backup_db` 可见性证据、
+真实恢复演练账目、局域网另一台机登录实测、首启两种模式行为对比、双主题截图、门禁账目、端口释放确认。）
