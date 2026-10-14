@@ -3102,12 +3102,27 @@ D3 无迁移逻辑、D4 不恢复全局压缩、D5 本批不收 CORS。完整规
 
 ## 批 3 实施清单（服务器 settings 档）
 
-- [ ] 新建 `config/settings/server.py`：`ALLOWED_HOSTS` **必须 env 提供**（不给桌面回环默认）、`DEBUG=False`、`API_DOCS_ENABLED=False`、`BASE_DIR` 走 `LQDP_SERVER_BASE_DIR` 且不继承 `LQDP_BASE_DIR`/userData 语义、`DATABASES` 走 env 且不挂 data_dir 交互搬迁
-- [ ] 确认换档**不需要改 `standalone.py`**：`:55` 是 `os.environ.setdefault`，外部设 `DJANGO_SETTINGS_MODULE` 即生效（易误判成要改入口）
-- [ ] 部署文档进 `docs/reference/`，首段写死：服务器库为空 → 首次启动现场建 superuser → 绑非回环又没设 `LQDP_BOOTSTRAP_ADMIN_PASSWORD` 时 `standalone.py:104-111` **拒绝启动**（桌面时代从没设过它）
-- [ ] 文档「已知限制」列无 TLS / 内网明文口令 —— 等拍板项，不替用户决定
-- [ ] 手工验：未设口令必红（贴拒绝启动输出）、设了必起；局域网另一台机浏览器开 `http://<ip>:<port>/login` 能登录并浏览数据（这条同时证 spec §1.2「浏览器今天已可用」）
-- [ ] 不交付长跑进程模型（`runserver --noreload` 不是服务进程，挂 C1）
+- [x] 新建 `config/settings/server.py`：`ALLOWED_HOSTS` **必须 env 提供**（并拒绝 `*`，除非另设 `LQDP_ALLOW_WILDCARD_HOSTS=1`）、`DEBUG=False`、`API_DOCS_ENABLED=False`、`BASE_DIR` 走 `LQDP_SERVER_BASE_DIR` 且不继承 `LQDP_BASE_DIR`/userData 语义、**不调 `apply_system_config`**（桌面 data_dir 搬迁语义，留 `SYSTEM_CONFIG_MIGRATION_ENABLED=False` 旗标）、同源服务 SPA 与桌面共用 `urls.py` 那套实现
+- [x] **本批新增的一条硬约束（承批 2 演练查出的缺陷）**：`SFTP_CONFIG_KEY` 必须环境给定，**不给任何「从 SECRET_KEY 派生」的回落** —— 否则「换档即解不开既有 token」会再发生一次
+- [x] 确认换档**不需要改 `standalone.py`**：`:55` 是 `os.environ.setdefault`。实测 `DJANGO_SETTINGS_MODULE=config.settings.server python standalone.py --host 127.0.0.1 --port 8137` 一条命令做完「迁移 + 建管理员 + 起服务」
+- [x] T1：`test/backend/test_server_settings_profile.py` 15 例全绿。用**子进程**而非 `override_settings` —— 本档的价值全在导入期按环境拒启，改 globals 测不到；每条拒禁用例都断言「报错点名了那个变量」，否则模块不存在时它们会空过（本轮 RED 阶段就是这样确认的）
+- [x] 手工验（loopback 六项，实测值）：`/` 200 且回 index.html(1719 B)、`/login` 200（catch-all）、`/api/v1/` 401 fail-closed、`/api/schema/` 404、`Host: evil.example` → **400**（`ALLOWED_HOSTS` 真生效）、`POST /api/v1/auth/login/` 拿到 JWT。跑完杀掉自己起的 8137，核对监听计数为 0
+- [ ] **局域网另一台机浏览器开 `http://<ip>:<port>/login` 能登录并浏览数据** —— 未做：本机只有一台机器，无法自证跨机通路。上线前第一件人工验证项
+- [x] 部署文档 `docs/reference/server-deployment.md`（进 git）：首启 `LQDP_BOOTSTRAP_ADMIN_PASSWORD` 必撞的互锁、备份只备三件套、已知限制四条、§6 等拍板清单。文档里管理员重置口令的 URL 已 `reverse` 实测为 `/api/v1/auth/users/{pk}/reset_password/`（DRF 保留下划线，不是连字符）
+- [x] 不交付长跑进程模型（`runserver --noreload` 不是服务进程，挂 C1）—— 已写进文档 §3/§6，是显式不做而非遗漏
+
+### Review（批 3）
+
+- **实测踩到并纠正两处测试基建**：① `base_env` 凭空造一份环境会让 `standalone` 档在
+  `Path.home()`（`system_config._default_data_dir`）上炸 —— 与被测行为无关的红，改成以
+  `os.environ` 为底并显式清掉 `LQDP_BASE_DIR`/`LQDP_SYSTEM_CONFIG_FILE`/`LQDP_BOOTSTRAP_ADMIN_PASSWORD`
+  三条桌面变量；② `tempfile.mkdtemp()` 在 Windows 返回 **8.3 短名**（`C:\Users\ADMINI~1\…`），
+  而档里 `Path(...).resolve()` 会展平 → 比较两侧都取 `realpath`，否则是被命名形式判红。
+- **一处自查**：`server.py` 初稿注释写「OPTIONS 再写 timeout 会覆盖 pragma」，机制说反了
+  （`connection_created` 在 connect 之后跑，pragma 才是最终值）→ 注释改为「不写 OPTIONS 是为了
+  同一件事只有一处来源」。
+- CORS 未收（D5），代码注释与文档 §5.1 都留了收紧条件，避免下次再被 `base.py:89-91` 的陈旧注释带偏。
+- **双主题**：纯后端 + 文档，零前端视觉工作。
 
 ## 批 4 实施清单（Electron 首次运行选后端地址）
 
