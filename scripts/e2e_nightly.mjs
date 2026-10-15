@@ -17,25 +17,20 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  THRESHOLDS, blockingReds, evaluateGates, flakeTotal, isVoided,
+} from '../frontend/e2e/helpers/nightly-gates.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const FRONTEND = path.join(ROOT, 'frontend')
 const OUT_ROOT = path.join(ROOT, 'tasks', 'e2e-nightly')
 const LOCK = path.join(OUT_ROOT, 'e2e-nightly.lock')
+// 并行度唯一旋钮：E2E_SLOTS（默认 4，与 pool-core 的 DEFAULT_SLOTS 同值）。
+// slot 池的端口块 8101+/3101+ 也按它探测，避免抢别的会话。
+const SLOTS = Math.max(1, Number(process.env.E2E_SLOTS || 4))
 
-// 退化阈值：任一命中即在 LATEST.md 顶部打 ⚠ DEGRADED。改阈值=改代码，不留口头约定。
-const THRESHOLDS = {
-  // 「变慢」的信号是**单价**（每例平均执行时长，只计通过的用例），不是墙钟 —— 套件变大由 specs 那条单独报。
-  // 2026-10-13 实测两次：删掉被吞掉的等待**之前** 5.21 s/例（385 例 / 37.1 min），
-  // **之后** 2.78 s/例（21.9 min）。此处按新基线留 ~26% 余量。
-  // 旧值 8 000 是照 6.29 s/例定的 —— 提速后它比实测慢 2.9 倍，等于这条判据失效。
-  perSpecMs: 3_500,
-  // 墙钟只当**挂死探测器**（CI=1 强制 workers=1，385 例实测 21.9 min）。
-  // 旧值 75 min 是照「天然要 43 min」的**未实测估计**定的，那个估计错了 2 倍。
-  wallMs: 30 * 60_000,
-  specs: 450, // 用例数（2026-10-13 快照 385）
-  flakes: 5, // 重试后才过的用例数
-}
+// 退化阈值住在 frontend/e2e/helpers/nightly-gates.mjs（与池的 merged.json 同处判级，
+// 且被 vitest 钉住）—— 并行时代的判据不能只改这里一份。
 
 /**
  * 基础设施塌方判定：连接级错误占比过高时，这一轮的**所有指标都不可信**，
@@ -59,13 +54,20 @@ const ALLOW_DIRTY = args.includes('--allow-dirty')
 // 不该为确认一个公式再花 40 分钟跑全量。
 const REPORT_ONLY = args.find((a, i) => args[i - 1] === '--report-only')
 if (REPORT_ONLY) {
-  const rep = parseReport(path.resolve(REPORT_ONLY))
-  const b = breach(rep)
+  const reportPath = path.resolve(REPORT_ONLY)
+  // 认产物形状：池的 merged.json 走 parseMerged，旧的 playwright results.json 走 parseReport
+  // （不用正则匹配分隔符 —— Windows 上是反斜杠，[\\/] 这种写法在字符串转义里极易写歪）
+  const rep = reportPath.replace(/\\/g, '/').endsWith('/merged.json')
+    ? parseMerged(reportPath)
+    : parseReport(reportPath)
+  const b = breach(rep, rep.slotsPlanned ?? rep.slots ?? 1)
   console.log(
     `specs=${rep.specs} 墙钟=${(rep.wallMs / 60000).toFixed(1)}min ` +
       `单价=${(rep.perSpecMs / 1000).toFixed(2)}s/例 ` +
       `flaky=${rep.stats?.flaky} unexpected=${rep.stats?.unexpected} skipped=${rep.stats?.skipped} ` +
-      `拒连=${rep.infraCount}/${rep.attempts}`,
+      `拒连=${rep.infraCount}/${rep.attempts}` +
+      (rep.slots ? ` · ${rep.slots}slot 效率=${(rep.efficiency ?? 0).toFixed(2)}` : '') +
+      (rep.recheck ? ` · 复跑：真红${rep.recheck.confirmed.length} 抖动${rep.recheck.loadFlakes.length} 未决${rep.recheck.unresolved.length}` : ''),
   )
   if (rep.voidInfra) console.log(`判 VOID(infra)：连接级错误占 ${(rep.infraShare * 100).toFixed(1)}%，本轮指标不可信`)
   else console.log(b.length ? `判 DEGRADED：${b.join('；')}` : '不判 DEGRADED')
@@ -81,7 +83,10 @@ function portsBusy() {
   // 要探的是「本轮实际会用到的端口」，不是写死的 8000/3000：
   // playwright.config.ts 与 vite.config.ts 现在同读 E2E_PORT / E2E_FRONTEND_PORT，
   // 端口值的来源只能有一份，否则设了变量的那轮会探错端口（未设时与旧行为逐字一致）。
-  const wanted = new Set([process.env.E2E_PORT || '8000', process.env.E2E_FRONTEND_PORT || '3000'])
+  // T3 现在走 slot 池 ⇒ 要探的是 8101..(8100+SLOTS) / 3101..(3100+SLOTS) 这一整块；
+  // 仍带上旧的两个口，因为手工设过 PW_NO_WEBSERVER 的会话可能还在 8000/3000 上服务。
+  const wanted = new Set(['8000', '3000'])
+  for (let i = 0; i < SLOTS; i++) { wanted.add(String(8101 + i)); wanted.add(String(3101 + i)) }
   try {
     const out = execFileSync('netstat', ['-ano'], { encoding: 'utf-8' })
     const busy = []
@@ -173,16 +178,19 @@ function parseReport(file) {
   }
 }
 
-function breach(rep) {
-  if (rep.voidInfra) return []   // 这一轮什么都不判：指标不可信，见 INFRA 注释
-  const b = []
-  if (rep.perSpecMs > THRESHOLDS.perSpecMs) {
-    b.push(`单价 ${(rep.perSpecMs / 1000).toFixed(2)}s/例 > ${THRESHOLDS.perSpecMs / 1000}s/例`)
+/** slot 池的 merged.json → 判据需要的形状（自带 verdict/efficiency/recheck/per-file top） */
+function parseMerged(file) {
+  const j = JSON.parse(fs.readFileSync(file, 'utf-8'))
+  const top = Object.entries(j.files ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 10)
+  return {
+    ...j, top, passCount: j.passCount ?? 0,
+    infraCount: (j.health ?? []).reduce((a, h) => a + (h.refusedCount ?? 0), 0),
+    attempts: j.specs ?? 0,
   }
-  if (rep.wallMs > THRESHOLDS.wallMs) b.push(`墙钟 ${(rep.wallMs / 60000).toFixed(1)}min > ${THRESHOLDS.wallMs / 60000}min（挂死探测）`)
-  if (rep.specs > THRESHOLDS.specs) b.push(`用例数 ${rep.specs} > ${THRESHOLDS.specs}`)
-  if ((rep.stats?.flaky ?? 0) > THRESHOLDS.flakes) b.push(`flake ${rep.stats.flaky} > ${THRESHOLDS.flakes}`)
-  return b
+}
+
+function breach(rep, slots = 1) {
+  return evaluateGates(rep, slots)
 }
 
 const now = new Date()
@@ -196,7 +204,8 @@ const today = [
 // 那场 923 次拒连的塌方整个盖掉，账本里那一行也一起没了）。
 const stamp = `${today}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
 const outDir = path.join(OUT_ROOT, stamp)
-const jsonFile = path.join(outDir, 'results.json')
+const jsonFile = path.join(outDir, 'results.json')      // 旧产物名，仅供 --report-only 读历史
+const mergedFile = path.join(outDir, 'merged.json')     // slot 池的合并统计
 
 fs.mkdirSync(outDir, { recursive: true })
 // DRY 只打印计划、什么都不跑，前置门（防的是「真跑时抢别人的端口/工作区」）无意义。
@@ -217,10 +226,9 @@ if (skip) {
     } else {
       const labels = backendLabels()
       const t1 = run(`python manage.py test ${labels.join(' ')}`, { PYTHONIOENCODING: 'utf-8' }, ROOT)
-      const t3 = run('npx playwright test --reporter=json,html,list', {
-        CI: '1',
-        PLAYWRIGHT_JSON_OUTPUT_NAME: jsonFile,
-      })
+      // T3 走 slot 池：1 进程 = 1 worker = 1 slot，每 slot 独立库副本 + 独立 data_dir + 独立端口对。
+      // CI / 端口 / slot 目录等全部由池注入，不在这里拼。
+      const t3 = run(`node scripts/e2e_pool.mjs --slots=${SLOTS}`, { LQDP_E2E_OUTDIR: outDir }, ROOT)
       // 无头作业必须自己留下可归因的现场：webServer 的 stdout/stderr 只在进程内，
       // 不落盘就永远不知道「30 分钟处大面积连不上」是谁把服务杀了（2026-10-13 首跑的教训）。
       if (!DRY) {
@@ -233,22 +241,26 @@ if (skip) {
       }
       if (DRY) {
         series.push({ date: today, result: 'DRY-RUN', breaches: [] })
-      } else if (!fs.existsSync(jsonFile)) {
-        console.log(`FAILED: playwright 未产出 ${path.relative(ROOT, jsonFile)}（exit=${t3.status}）`)
-        series.push({ date: today, stamp, result: 'FAILED', reason: '无 JSON 产物', breaches: [] })
+      } else if (!fs.existsSync(mergedFile)) {
+        console.log(`FAILED: slot 池未产出 ${path.relative(ROOT, mergedFile)}（exit=${t3.status}）—— 各 slot 的 run.log 是归因入口`)
+        series.push({ date: today, stamp, result: 'FAILED', reason: '无 merged.json 产物', breaches: [] })
       } else {
-        const rep = parseReport(jsonFile)
-        const breaches = breach(rep)
+        const rep = parseMerged(mergedFile)
+        const slotsUsed = rep.slotsPlanned ?? rep.slots ?? SLOTS
+        const breaches = breach(rep, slotsUsed)
+        const red = blockingReds(rep)
         console.log(
-          `T3: ${rep.specs} 例 / ${(rep.wallMs / 60000).toFixed(1)}min | expected=${rep.stats?.expected} unexpected=${rep.stats?.unexpected} flaky=${rep.stats?.flaky} skipped=${rep.stats?.skipped} | 连接级失败 ${rep.infraCount}/${rep.attempts} attempt`,
+          `T3: ${rep.specs} 例 / ${(rep.wallMs / 60000).toFixed(1)}min / ${slotsUsed} slot | 单价 ${(rep.perSpecMs / 1000).toFixed(2)}s/例 · 效率 ${(rep.efficiency ?? 0).toFixed(2)} | unexpected=${rep.stats?.unexpected} flaky=${rep.stats?.flaky} skipped=${rep.stats?.skipped}` +
+          (rep.recheck ? ` | 复跑判级：真红 ${rep.recheck.confirmed.length} · 负载抖动 ${rep.recheck.loadFlakes.length} · 悬而未决 ${rep.recheck.unresolved.length}` : '') +
+          (red.count ? ` | 拦门禁的真红 ${red.count}` : ''),
         )
         for (const [f, ms] of rep.top) console.log(`  ${(ms / 1000).toFixed(1).padStart(7)}s  ${f}`)
-        if (rep.voidInfra) {
-          // 环境塌方：不评退化、不记单价 —— 这种轮的指标全部不可信，重跑才是结论
+        if (isVoided(rep)) {
+          // 环境塌方（池自判：某 slot 成片红带连接级错误）—— 指标全部不可信，重跑才是结论
           console.log(
-            `VOID (infra): ${(rep.infraShare * 100).toFixed(1)}% 的 attempt 是连接级错误 ` +
-              `（通过仅 ${rep.passCount}/${rep.specs} 例）—— 服务中途退出之类，` +
-              `本轮不计退化、不比单价，**请重跑**（明细见 ${path.relative(ROOT, jsonFile)}）`,
+            `VOID (infra): slot${(rep.infraSlots ?? []).join('/slot')} 崩池 ` +
+              `（通过 ${rep.passCount}/${rep.specs} 例）—— 本轮不计退化、不比单价，**请重跑**；` +
+              `现场保留在 ${path.relative(ROOT, outDir)}`,
           )
         } else if (breaches.length) {
           console.log(`⚠ DEGRADED: ${breaches.join('; ')}`)
@@ -256,10 +268,16 @@ if (skip) {
         series.push({
           date: today,
           stamp,
-          result: rep.voidInfra
+          result: isVoided(rep)
             ? 'VOID-INFRA'
-            : (rep.stats?.unexpected ?? 0) > 0 || t1.status || unit.status ? 'FAILED' : 'PASSED',
-          breaches: rep.voidInfra ? [] : breaches,
+            : blockingReds(rep).count > 0 || t1.status || unit.status ? 'FAILED' : 'PASSED',
+          breaches: isVoided(rep) ? [] : breaches,
+          slots: slotsUsed,
+          efficiency: rep.efficiency ?? null,
+          flakeTotal: flakeTotal(rep),
+          recheck: rep.recheck
+            ? { confirmed: rep.recheck.confirmed, loadFlakes: rep.recheck.loadFlakes, unresolved: rep.recheck.unresolved }
+            : null,
           specs: rep.specs,
           wallMs: rep.wallMs,
           perSpecMs: rep.voidInfra ? null : rep.perSpecMs,
@@ -309,7 +327,11 @@ const rows = history
     const warn = h.breaches?.length ? '⚠ DEGRADED ' : ''
     if (h.wallMs == null) return `| ${when} | ${warn}${h.result} | ${h.reason ?? '—'} | — |`
     const price = h.perSpecMs == null ? '—' : ` · ${(h.perSpecMs / 1000).toFixed(2)}s/例`
-    return `| ${when} | ${warn}${h.result} | ${(h.wallMs / 60000).toFixed(1)}min${price} | ${h.specs} 例 / flaky ${h.stats?.flaky ?? '?'} |`
+    const par = h.slots ? ` · ${h.slots}slot 效率${(h.efficiency ?? 0).toFixed(2)}` : ''
+    const fl = h.flakeTotal == null ? (h.stats?.flaky ?? '?') : h.flakeTotal
+    const rc = h.recheck && (h.recheck.loadFlakes.length + h.recheck.unresolved.length)
+      ? ` / 抖动${h.recheck.loadFlakes.length} 未决${h.recheck.unresolved.length}` : ''
+    return `| ${when} | ${warn}${h.result} | ${(h.wallMs / 60000).toFixed(1)}min${price}${par} | ${h.specs} 例 / flaky ${fl}${rc} |`
   })
   .join('\n')
 
@@ -317,8 +339,9 @@ fs.writeFileSync(
   path.join(OUT_ROOT, 'LATEST.md'),
   `# 夜间全量兜底轮（最近 ${history.length} 轮）
 
-阈值：单价 ${THRESHOLDS.perSpecMs / 1000}s/例 · 墙钟 ${THRESHOLDS.wallMs / 60000}min（挂死探测）· 用例 ${THRESHOLDS.specs} · flaky ${THRESHOLDS.flakes}
-最近一轮明细：\`tasks/e2e-nightly/${stamp}/\`（results.json + run.log + playwright-report）
+阈值：墙钟 ${THRESHOLDS.wallMs / 60000}min（目标兼挂死）· 单价 ${THRESHOLDS.perSpecMs / 1000}s/例 · 用例 ${THRESHOLDS.specs} · flaky ${THRESHOLDS.flakes} · 效率 ≥${THRESHOLDS.efficiencyFloorFactor}×slot
+判级：负载抖动（红文件独占 slot 复跑转绿）算 flaky 不拦门禁；真红与"复跑没验成"拦。崩池轮 verdict=VOID 不计退化。
+最近一轮明细：\`tasks/e2e-nightly/${stamp}/\`（merged.json + slot<i>.run.log + slot<i>.results.json + 合并 HTML）
 
 | 日期 | 结果 | 墙钟 | 规模 |
 |---|---|---|---|
