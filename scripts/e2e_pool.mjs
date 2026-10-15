@@ -249,8 +249,12 @@ async function main() {
   }
 
   buildTemplate()
-  const built = runTool('npm', ['run', 'build'], { cwd: FRONTEND, stdio: 'ignore' })
-  if (built.status !== 0) throw new Error(`前端构建失败（exit=${built.status}）：${(built.stderr || built.stdout || '').toString().slice(-800)}`)
+  // 构建输出必须接住：失败时 stdio:'ignore' 会让错误一个字都不留（实测撞过一次无从判因）
+  const built = runTool('npm', ['run', 'build'], { cwd: FRONTEND, encoding: 'utf-8' })
+  if (built.status !== 0) {
+    const detail = `${built.stderr || ''}${built.stdout || ''}`.split('\n').filter(Boolean).slice(-12).join('\n  ')
+    throw new Error(`前端构建失败（exit=${built.status}）：\n  ${detail || '无输出'}`)
+  }
 
   const ports = allocatePortBlock(buckets.length, taken)
   const blobRoot = path.join(SLOTS_ROOT, RUN_ID, 'blob')   // 共享：merge-reports 只接受一个目录
