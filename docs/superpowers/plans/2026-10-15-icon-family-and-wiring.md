@@ -575,6 +575,15 @@ git commit -m "feat(build): 图标生成器按帧尺寸注入留白，并对 .ic
 
 ---
 
+> **Task 2 实施期更正（2026-10-15，评审 + 修复轮后）** —— 上面本任务的正文有三处已被推翻，以已提交代码为准：
+> 1. `frameHtml` 的属性顺序：`xmlns` 必须放在标签属性表**末尾**，否则本任务自带的 `/<svg width="32"…/` 正则永远匹配不上（计划文本自相矛盾）。
+> 2. 内框高度用 `Math.ceil` 而非 `Math.round`：`round` 下 16px 帧渲染成 16×14，自检直接 exit 1、**`.ico` 一个字节都写不出来**，而计划给的补救（调 `padPct`）在 16px 档是空操作（`round(16×0.02)=0`）。`ceil` 保证框高 ≥ 比例高，缩放因子仍由宽决定。
+> 3. `frameStats` 多返回 `dominant`（`alpha===255` 里出现最多的实心色），`auditVerdict` 多一条主色门（必须等于导出的 `EXPECTED_TONE = '37,99,235'`）。原因：原设计只数色阶，**对颜色瞎** —— 深色主题构建机产出的金色 `#f9a825` 帧同样是 1 个色阶、同样过检，而防它的只有 `gen-icon.ico.js` 里一行 `emulateMedia`，全仓零测试覆盖。刻意**不**用"grep 那行代码"的源码扫描，改判成锁效果。
+> 4. 本文 236 / 336 / 426 行里的 `−27%`、`92 个色阶`、`16×16→14×14` 是未标口径的旧测法，已被带口径的复测取代（有墨 −22.4% / 实心 −26.4%；旧模糊母版 `α==255` 下 16px 为 89 色阶）。准确数字与口径以 `scripts/icon-lib.cjs` 的注释为准。
+> 接口清单相应更正：`frameStats(buf): { size, tones, bboxW, bboxH, dominant }`、`auditVerdict(stats): string[]`、新增导出 `EXPECTED_TONE`。
+
+---
+
 ## Task 3: Electron 窗口图标与 AppUserModelID
 
 **Files:**
