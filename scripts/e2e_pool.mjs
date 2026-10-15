@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url'
 import {
   MAX_SLOTS, SERIAL_REF_PER_SPEC_MS, SLOT_BACKEND_BASE, SLOT_FRONTEND_BASE,
   allocatePortBlock, assertSafeRelPath, autoSlots, buildSlotManifest, mergeRunStats,
+  LIVENESS_MISSES, LIVENESS_TIMEOUT_MS, nextLivenessState,
   normalizeTotalMs, parseArgs, partitionFiles, roundVerdict, slotEnv,
 } from '../frontend/e2e/helpers/pool-core.mjs'
 
@@ -185,7 +186,7 @@ async function prefetchPorts() {
   }))
 }
 
-function runSlot(m, files, timeoutMs) {
+function runSlot(m, files, timeoutMs, aliveFlags) {
   const out = fs.openSync(m.logFile, 'w')
   // reporter 与输出路径由 playwright.config 在 slot 模式下给出（blob/json 的目录只能走 reporter 选项）
   const args = ['playwright', 'test', ...files.map((f) => assertSafeRelPath(`e2e/${f}`)), '--workers=1']
@@ -196,7 +197,7 @@ function runSlot(m, files, timeoutMs) {
       env: { ...slotEnv(m, process.env), E2E_SKIP_BUILD: '1' },
     })
     const killer = setTimeout(() => { try { child.kill('SIGKILL') } catch { /* 已退出 */ } }, timeoutMs)
-    child.on('close', (code) => { clearTimeout(killer); fs.closeSync(out); resolve(code ?? 1) })
+    child.on('close', (code) => { clearTimeout(killer); fs.closeSync(out); if (aliveFlags) aliveFlags.set(m.index, false); resolve(code ?? 1) })
   })
 }
 
@@ -246,24 +247,32 @@ function statsOf(jsonPath) {
 function probePortOpen(port) {
   return new Promise((res) => {
     const s = net.connect(port, '127.0.0.1')
-    s.setTimeout(150)
+    s.setTimeout(LIVENESS_TIMEOUT_MS)
     s.on('connect', () => { s.destroy(); res(true) })
     s.on('error', () => res(false))
     s.on('timeout', () => { s.destroy(); res(false) })
   })
 }
 
-function startLivenessWatch(manifests) {
-  const alive = new Map()
-  for (const m of manifests) { alive.set(`slot${m.index}:backend:${m.backendPort}`, true); alive.set(`slot${m.index}:preview:${m.frontendPort}`, true) }
+/**
+ * 服务存活看门狗。两条防误报：单次探测不算数（满载时 150ms 会假超时），
+ * 且子进程已经正常退出的 slot 不再判死（端口关闭是收尾不是事故）。
+ */
+function startLivenessWatch(manifests, aliveFlags) {
+  const state = new Map()
+  for (const m of manifests) {
+    state.set(`slot${m.index}:backend:${m.backendPort}`, { misses: 0, dead: false, m, kind: 'backend' })
+    state.set(`slot${m.index}:preview:${m.frontendPort}`, { misses: 0, dead: false, m, kind: 'preview' })
+  }
   const t0 = Date.now()
   const timer = setInterval(async () => {
-    for (const [key, was] of alive) {
-      if (!was) continue
+    for (const [key, st] of state) {
+      if (st.dead || !aliveFlags.get(st.m.index)) continue
       const port = Number(key.split(':').at(-1))
-      if (!(await probePortOpen(port))) {
-        alive.set(key, false)
-        log(`⏱ ${key.replace(/:\d+$/, '')} 掉线（:${port}），开跑后 ${((Date.now() - t0) / 1000).toFixed(0)}s`)
+      st.state = nextLivenessState(st.state ?? { misses: 0, dead: false }, await probePortOpen(port), true)
+      if (st.state.dead) {
+        st.dead = true
+        log(`⏱ slot${st.m.index} 的 ${st.kind}(:${port}) 连续 ${LIVENESS_MISSES} 次探不到，开跑后 ${((Date.now() - t0) / 1000).toFixed(0)}s`)
       }
     }
   }, 20_000)
@@ -308,9 +317,10 @@ async function main() {
   const only = ARGS.onlySlot === undefined ? null : Number(ARGS.onlySlot)
   const timeoutMs = Number(ARGS['timeout-min']) * 60_000
   const started = Date.now()
-  const stopWatch = startLivenessWatch(manifests)
+  const aliveFlags = new Map(manifests.map((m) => [m.index, true]))
+  const stopWatch = startLivenessWatch(manifests, aliveFlags)
   const codes = await Promise.all(manifests.map((m, i) =>
-    (only !== null && Number(only) !== i) ? Promise.resolve(0) : runSlot(m, buckets[i], timeoutMs)))
+    (only !== null && Number(only) !== i) ? Promise.resolve(0) : runSlot(m, buckets[i], timeoutMs, aliveFlags)))
   stopWatch()
   const spanMs = Date.now() - started
 

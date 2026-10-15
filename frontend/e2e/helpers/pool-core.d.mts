@@ -68,6 +68,20 @@ export declare const SERIAL_REF_PER_SPEC_MS: number
 /** 把并发轮测出的总时长折回串行等价量；单价缺失/为 0 时原样返回 */
 export declare function normalizeTotalMs(rawTotalMs: number, perSpecMs?: number, refPerSpecMs?: number): number
 
+export interface LivenessState {
+  misses: number
+  dead: boolean
+}
+
+export declare const LIVENESS_MISSES: number
+export declare const LIVENESS_TIMEOUT_MS: number
+/** 连续 LIVENESS_MISSES 次探不到才算掉线；子进程已退出或已判死则冻结状态（收尾关端口不是事故） */
+export declare function nextLivenessState(
+  s: Partial<LivenessState>,
+  probeOpen: boolean,
+  childAlive: boolean,
+): LivenessState & { done?: boolean }
+
 export interface SlotHealth {
   slot: number
   specs: number
