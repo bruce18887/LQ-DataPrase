@@ -1,5 +1,4 @@
 import path from 'node:path'
-import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -8,27 +7,25 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..')
 
 /**
- * e2e 专用的 system_config.json 位置（与 playwright.config.ts / global-setup.ts 共享）。
- * 内容固定为 `{"data_dir": PROJECT_ROOT}`：让 Django 后端（webServer）与
- * seed 子进程（globalSetup 的 execSync）读同一份配置，把数据目录钉死在
- * 项目根 → apply_system_config 判定 target == original → 零副作用跳过迁移，
- * 防止 Storage Layout v2 的默认迁移把测试数据搬到用户主目录。
+ * 路径全部经 helpers/slot：有 slot 清单（编排器写的 slot.json）时用 slot 自己的目录，
+ * 否则逐字等于本文件历史上的写法 —— 导出名保持不变，调用方零改动。
+ *
+ * 其中 E2E_SYSTEM_CONFIG_FILE 的内容仍是「data_dir 钉在项目根」这一空操作配置：
+ * 让 Django 后端与 seed 子进程读同一份配置，`target == original` ⇒ 导入期那次
+ * 存储目录重定向不会触发。它一旦指向别处就是 move 语义（会搬走并删源），见
+ * docs/superpowers/specs/2026-10-14-e2e-slot-pool-parallel-design.md §4.1。
  */
-export const E2E_SYSTEM_CONFIG_FILE = path.join(
-  os.tmpdir(),
-  'lqdp-e2e-system-config.json',
-)
+export {
+  SYSTEM_CONFIG_FILE as E2E_SYSTEM_CONFIG_FILE,
+  AUTH_DIR,
+  ADMIN_STATE,
+  USER_STATE,
+  DOWNLOAD_DIR,
+  DATA_DIR,
+} from '../helpers/slot'
 
 /** 样例数据根目录 */
 export const SAMPLE_DATA_DIR = path.join(PROJECT_ROOT, 'Data', 'SampleData')
-
-/** 登录态存放目录 */
-export const AUTH_DIR = path.join(__dirname, '..', '.auth')
-export const ADMIN_STATE = path.join(AUTH_DIR, 'admin.json')
-export const USER_STATE = path.join(AUTH_DIR, 'user.json')
-
-/** 下载文件保存目录（供后续人工比对导出内容） */
-export const DOWNLOAD_DIR = path.join(__dirname, '..', '.downloads')
 
 /** 种子账号（来自 apps/accounts/management/commands/seed_users.py） */
 export const ACCOUNTS = {

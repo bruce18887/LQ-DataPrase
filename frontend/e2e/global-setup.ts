@@ -8,6 +8,7 @@ import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { E2E_SYSTEM_CONFIG_FILE, PROJECT_ROOT, DOWNLOAD_DIR } from './fixtures/test-data'
+import { CURRENT_SLOT } from './helpers/slot'
 
 const PYTHON = process.env.PYTHON_BIN || path.join(PROJECT_ROOT, '.venv', 'Scripts', 'python.exe')
 
@@ -34,14 +35,21 @@ function runDjango(cmd: string) {
 }
 
 async function globalSetup() {
-  // e2e 把 data_dir 钉死在项目根（playwright.config.ts），而项目根 db.sqlite3
-  // 可能不存在（Storage Layout v2 默认迁移把开发数据放到了用户主目录）——
-  // 先 migrate 建表，保证 e2e 后端有可用的空库，再播种。
-  runDjango('migrate --noinput')
-  runDjango('seed_users')
-  // --refresh 增量刷新：清理 e2e_* 测试残留 + 仅重灌变化的 SampleData 文件，
-  // 避免每次运行都全量复制/解析 714MB 数据（未变化时秒级完成）
-  runDjango('seed_test_data --refresh')
+  if (CURRENT_SLOT) {
+    // slot 模式：库与种子由 scripts/e2e_pool.mjs 预铸（模板 → 每 slot 一份 db 拷贝 + 硬链镜像 media）。
+    // 这里再 migrate/seed 等于对已经就位且正被别的用例读写的 slot 库重跑一遍播种，
+    // 既慢又会双重写入 SQLite，故跳过。
+    console.log(`[globalSetup] slot=${CURRENT_SLOT.index} 跳过 migrate/seed（模板库已就位：${CURRENT_SLOT.dbPath}）`)
+  } else {
+    // e2e 把 data_dir 钉死在项目根（playwright.config.ts），而项目根 db.sqlite3
+    // 可能不存在（Storage Layout v2 默认迁移把开发数据放到了用户主目录）——
+    // 先 migrate 建表，保证 e2e 后端有可用的空库，再播种。
+    runDjango('migrate --noinput')
+    runDjango('seed_users')
+    // --refresh 增量刷新：清理 e2e_* 测试残留 + 仅重灌变化的 SampleData 文件，
+    // 避免每次运行都全量复制/解析 714MB 数据（未变化时秒级完成）
+    runDjango('seed_test_data --refresh')
+  }
   // 清空上一轮下载产物：.downloads 不在 Playwright outputDir 内，不自动清，
   // 且文件名带时间戳 → 跨运行累积（实测 28.5MB / 59 个文件）。
   try {
