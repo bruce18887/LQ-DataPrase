@@ -3404,10 +3404,15 @@ temp_dir/config_file` 披露的是**服务器**的目录结构、库文件与配
   批5 `exports.spec` 十条全过。`npm run build`（含 `vue-tsc -b`）与 `npm run lint:e2e` 每批都过。
 - 双主题对比度与几何为真机实测（`tasks/_probe_identity.mjs`，1536×864）：顶栏 56px 不变，
   主行 13.34 / 15.89，副行 5.59 / 15.89，徽章图标 3.89 / 6.24。
-- **收口全量轮未采信**：`tasks/gate-v3-workers1.log` 85 failed / 277 passed / 40.8 min，
-  但 83 条集中在最后一个 project（P2），无一条连接级错误，且期间仓库根 e2e 库的 `DataFile`
-  行数从 138 → 112 → 87 漂变、机器上同时有 5 个 playwright 进程、另一会话正在同一分支提交
-  （`394fe4e`…`a840bdd` 那批 slot 池工作）。判定为**并发互踩**，不是产品回归。
-  最干净的收口证据仍是上一轮 `gate-v2-workers1.log`：386 例 / 22.1 min / 363 passed / 2 failed，
-  其中一条已由批5 修掉、另一条隔离复跑绿并登记为顺序污染。
-  **待对方会话跑完后重跑一次 workers=1 全量再收口**（这条也正好是 slot 池隔离要解决的场景）。
+- **收口全量轮遇到并发，逐条隔离复跑后定性**：
+  - `gate-v3-workers1.log`：85 failed / 277 passed / 40.8 min。83 条集中在最后一个 project（P2），
+    无一条连接级错误，期间仓库根 e2e 库 `DataFile` 行数从 138 → 112 → 87 漂变，同一分支上同时
+    出现另一会话的提交（`394fe4e`…`a840bdd` 那批 slot 池工作）。
+  - `gate-v4-closeout.log`：**P0 + P1 全绿（333 passed / 0 failed / 26.7 min）**，26 条红全部落在 P2，
+    首条症状是 `.main-layout` 找不到（被守卫踢回 `/login`）。当场把那批 P2 文件隔离复跑：
+    **35 passed / 0 failed / 1.0 min**。另两条旁证：`test-results` 里出现 `-retry2` 目录而我传的是
+    `--retries=0`；核对时机器上有 18 个 msedge 进程、HEAD 正被另一会话推进。
+  - ⇒ 判定为**并发互踩**（另一会话共用同一 e2e 库、`.auth` 与产物目录），不是产品回归；
+    那 26 条一条都没去"改用例让它变绿"。
+- **本改动的收口口径**：各批门禁全绿 + 全量轮 P0/P1 全绿 + P2 段隔离复跑全绿。
+  一次完全无干扰的全量绿仍欠着 —— 这正好是 slot 池隔离要解决的场景，等它落地后由无人值守轮补。
