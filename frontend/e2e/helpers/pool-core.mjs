@@ -146,6 +146,22 @@ export function normalizeTotalMs(rawTotalMs, perSpecMs, refPerSpecMs = SERIAL_RE
 }
 
 /**
+ * 看门狗的掉线判定：单次探测失败不算掉线。
+ * 实测教训：N=4 满载时一次 150ms 的 connect 探测会超时，于是把活着的 4 个 slot 全报成「掉线」
+ * （那一轮只有 2 条红、verdict MEASURED ⇒ 谎报）。判死必须满足：连续 LIVENESS_MISSES 次探不到，
+ * 且该 slot 的子进程还没退出（退出了端口关闭是正常收尾，不是事故）。
+ */
+export const LIVENESS_MISSES = 2
+export const LIVENESS_TIMEOUT_MS = 1_500
+
+export function nextLivenessState({ misses = 0, dead = false }, probeOpen, childAlive) {
+  if (dead || !childAlive) return { misses, dead, done: true }
+  if (probeOpen) return { misses: 0, dead: false }
+  const next = misses + 1
+  return next >= LIVENESS_MISSES ? { misses: next, dead: true } : { misses: next, dead: false }
+}
+
+/**
  * 单 slot 健康判定：区分「有用例红」与「服务半路死了导致的成片红」。
  * 实测依据：一次 N=4 轮里两个 slot 的 preview+后端在开跑约 1 分钟后失联，
  * 该轮报出 155 unexpected、效率 1.21 —— 当成真实结果发出去就是假信号。

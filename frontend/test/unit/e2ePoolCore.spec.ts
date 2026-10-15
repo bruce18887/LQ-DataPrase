@@ -6,7 +6,26 @@ import {
   SLOT_BACKEND_BASE, SLOT_FRONTEND_BASE, DEFAULT_SLOTS, MAX_SLOTS, SLOT_TARGET_MS,
   autoSlots, allocatePortBlock, partitionFiles, assertSafeRelPath, buildSlotManifest, slotEnv, mergeRunStats, parseArgs,
   normalizeTotalMs, SERIAL_REF_PER_SPEC_MS, classifySlotHealth, roundVerdict,
+  nextLivenessState, LIVENESS_MISSES, LIVENESS_TIMEOUT_MS,
 } from '../../e2e/helpers/pool-core.mjs'
+
+describe('nextLivenessState（看门狗防谎报）', () => {
+  it('单次探测失败不算掉线 —— 满载时 150ms 超时就曾把活着的 4 个 slot 全报死', () => {
+    expect(nextLivenessState({ misses: 0, dead: false }, false, true)).toEqual({ misses: 1, dead: false })
+    expect(nextLivenessState({ misses: 1, dead: false }, false, true).dead).toBe(true)
+  })
+  it('一次成功就把计数清零（间歇性超时不误判）', () => {
+    expect(nextLivenessState({ misses: 99, dead: false }, true, true)).toEqual({ misses: 0, dead: false })
+  })
+  it('子进程已退出或已判死就不再改状态：收尾关端口不是事故', () => {
+    expect(nextLivenessState({ misses: 1, dead: false }, false, false)).toEqual({ misses: 1, dead: false, done: true })
+    expect(nextLivenessState({ misses: 2, dead: true }, true, true)).toEqual({ misses: 2, dead: true, done: true })
+  })
+  it('常量与实测教训一致', () => {
+    expect(LIVENESS_MISSES).toBe(2)
+    expect(LIVENESS_TIMEOUT_MS).toBe(1_500)
+  })
+})
 
 describe('normalizeTotalMs', () => {
   it('串行单价就是参照 ⇒ 不折算', () => {
