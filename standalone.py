@@ -7,7 +7,8 @@ When frozen (packaged by PyInstaller), this script:
 3. Runs database migrations automatically
 4. Creates a default admin user if none exists
 5. Collects static files (frontend SPA + Django admin assets)
-6. Starts the Django development server
+6. Installs graceful-shutdown handlers (see apps/common/shutdown.py)
+7. Starts the Django development server
 
 Usage:
     LQ-DataPrase.exe                     # default port 8000
@@ -184,27 +185,30 @@ def main():
     _setup_django()
     _bootstrap(args.host)
 
-    # When --port 0 is given (used by the Electron main process to auto-assign
-    # a free port), resolve a real port via the OS before starting runserver.
-    # Django's runserver does bind to a real port when given 0, but our startup
-    # banner would still show port 0 — breaking the Electron parent's regex
-    # that parses this line to discover where the backend is listening.
-    if args.port == 0:
-        import socket
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(('', 0))
-            args.port = s.getsockname()[1]
+    # Install graceful-shutdown handlers *before* serving. Without this the
+    # process is killed without ever closing its database connection. On
+    # Windows the SIGTERM that Electron sends does not arrive as a signal at
+    # all (Node implements child.kill with TerminateProcess), which is why
+    # apps/common/shutdown.py also exposes an HTTP shutdown endpoint — Electron
+    # posts to that first and only falls back to a force-kill.
+    from apps.common.shutdown import install_signal_handlers
+    install_signal_handlers()
 
-    from django.core.management import call_command
-
+    # Resolve --port 0 to a real port before starting runserver. Django's
+    # runserver does bind to a real port when given 0, but our startup banner
+    # would still print port 0 — and the Electron parent parses that banner
+    # line with a regex to discover where the backend is listening.
+    #
+    # (This used to be written twice: the first block assigned args.port, which
+    # made the second `if port == 0` unreachable dead code.)
     port = args.port
-    # If port is 0, find a free port
     if port == 0:
         import socket
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind((args.host, 0))
-        port = sock.getsockname()[1]
-        sock.close()
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind((args.host, 0))
+            port = sock.getsockname()[1]
+
+    from django.core.management import call_command
 
     print(f'\n[server] Starting LQ-DataPrase on http://{args.host}:{port}', flush=True)
     print('[server] Press Ctrl+C to stop.\n', flush=True)

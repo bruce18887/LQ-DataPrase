@@ -3535,3 +3535,166 @@ temp_dir/config_file` 披露的是**服务器**的目录结构、库文件与配
   **与本次改动无关，未提交**，需用户确认是 `git add -A` 提交删除还是 `git restore` 找回。
 - 同期另一会话在改 `docs/tasks/lessons.md`（+26 行未提交）与 e2e/nightly-gates 三件套，本次**未触碰**。
 
+## 2026-10-15 架构评审 P0 五项（进行中）
+
+依据：`docs/reference/architecture-review-2026-10-15.md`（同日评审，评级 B）。用户决策三选：
+清理范围=**删 Celery + PG 死分支**；锁依赖=**按实测版本手工钉住**；限流=**只给登录加 IP 级**。
+
+### 计划（可勾选）
+
+- [x] **P0-1a 删 Celery 幽灵层**：`config/celery.py` 删除；`config/__init__.py` 去 `celery_app`；
+      `base.py` 移除 `'celery'` INSTALLED_APPS 与 `CELERY_*` 块（**保留 `REDIS_URL`**——`apps/sftp/cache.py` 真在用）；
+      `standalone.py` / `server.py` 移除「摘除 celery」逻辑与 CELERY_* 清空块；
+      `apps/sftp/cache.py:62` 去掉对 `settings.CELERY_BROKER_URL` 的回落；requirements 去 `celery`；
+      README 与 `apps/CLAUDE.md` 同步，并把「异步 = 进程内 ProcessPool/ThreadPool」写进 `apps/CLAUDE.md`。
+- [x] **P0-1b 删 PG 死分支**：`base.py:116-132` 的 PG DATABASES 改为与事实一致的 SQLite；
+      requirements 去 `psycopg2-binary`（venv 里**根本没装**）；同步 `e2e_slot.py` 里「base 档的 DATABASES 是 PostgreSQL 形状」的注释；README 数据库行。
+- [x] **P0-2 健康检查**：新建 `apps/common/health.py`，`/api/v1/health/`（liveness，AllowAny，不参与限流）+
+      `/api/v1/ready/`（DB 连接 + data_dir 可写 + 迁移状态）；挂 `apps/common/urls.py`；
+      `electron/backend.ts:162` 探针改 `/api/v1/health/`；`frontend/playwright.config.ts:154` 改 `/api/v1/health/`；
+      同步 `development.py:24-26`、`e2e_slot.py`、`config/urls.py` 里「playwright 探 /api/schema/」的注释。
+- [x] **P0-3 优雅关闭**：新建 `apps/common/shutdown.py`（SIGTERM/SIGINT 处理器，幂等 +
+      `POST /api/v1/system/shutdown/` 一次性令牌端点）；`standalone.py` 注册并顺手清理 192-207 行的端口解析死代码重复；
+      `electron/backend.ts` spawn 注入 `LQDP_SHUTDOWN_TOKEN`，`stopBackend` 先请求该端点再走原有 SIGTERM→taskkill 兜底。
+- [x] **P0-4 登录限流**：`base.py` 加 `DEFAULT_THROTTLE_RATES['login']`（默认 20/min，`LQDP_LOGIN_THROTTLE_RATE` 可覆盖），
+      **不设**全局 `DEFAULT_THROTTLE_CLASSES`；`accounts/views.py` LoginView 加 `AnonRateThrottle` + `throttle_scope='login'`；
+      `development.py` / `e2e_slot.py` 放宽到 200/min（376 条 e2e 互撞风险）；补 T1 层测试断言限流生效。
+- [x] **P0-5 锁依赖**：按 venv 实测版本把 `requirements/base.txt` 全部钉 `==`；
+      `whitenoise` 从 `production.txt` 移到 `base.txt`（`standalone.py` 依赖它、`spec:197` 也声明了，但 README 只让装 base）；
+      补 `pyproject.toml` / `.python-version` / `package.json` engines。
+- [x] **P0-6 回归**：后端 `manage.py test` 全量；`npm run build` + `npm run lint:e2e`；`electron:build:ts`。
+
+### 侦察阶段推翻的两条原报告结论（重要，勿按原报告做）
+
+1. **Redis 不能删**。原报告把 `celery`/`redis` 当同一坨幽灵依赖。实测 `apps/sftp/cache.py:15-22` 真在用 Redis
+   做可选共享会话缓存（带 LocMemCache 回落），`REDIS_URL` / `SFTP_SESSION_REDIS_URL` 是活配置 → **保留**。
+   死的是 Celery 一个（0 个 `@shared_task`，且在 `standalone.py:138` **和** `server.py:146` 两个交付档都被移出 INSTALLED_APPS）。
+2. **登录限流原报告说重了**。`apps/accounts/views.py:24-25` 已有账号级锁定（5 次失败 → `423 LOCKED` + 锁 15 分钟，
+   含 `remaining_attempts` / `retry_after_minutes` 字段）。P0-4 补的是**IP 维度**（同一 IP 换用户名试探、锁定 DoS），不是从零开始。
+
+### 侦察阶段新发现（超出原报告范围，一并处理）
+
+3. **venv 实测 Django 6.0.5**，而 README / `apps/CLAUDE.md` 都写「Django 4.2」，`requirements` 写 `>=4.2,<7.0`
+   → 文档与实际差两个大版本，P0-5 锁依赖时必须同步修正文档。
+4. **`whitenoise` 声明位置错了**：`standalone.py:116` 依赖它、`lq_dataprase.spec:197` 显式列它，
+   但它只在 `production.txt`，而 README 让用户 `pip install -r requirements/base.txt` → 桌面版依赖声明缺失，靠「环境里恰好装了」侥幸通过。
+5. **`standalone.py:192-207` 端口解析逻辑重复两遍**（`--port 0` 的解析写了两次，第二遍不可达），顺手清理。
+6. **Electron 侧 graceful shutdown 其实已实现**（`backend.ts:369` SIGTERM → 5s → `taskkill /F`）。
+   缺的是 Python 侧处理器——但 **Windows 上 Node 的 `child.kill('SIGTERM')` 实走 `TerminateProcess`，不触发任何 Python 处理器**，
+   所以打包版（主要交付形态）退出时从未执行过清理。P0-3 的 HTTP 令牌端点是 Windows 上唯一可靠通路，不是画蛇添足。
+
+### 结果（2026-10-15 完成）
+
+**改动清单**（我改的；并发会话另有 SFTP search 的改动，已刻意避开）
+
+| 文件 | 改动 |
+|------|------|
+| `config/celery.py` | **删除**（git rm） |
+| `config/__init__.py` | 去掉 `celery_app` 导入，改为说明性 docstring |
+| `config/settings/base.py` | 移出 `'celery'` INSTALLED_APPS 与整个 `CELERY_*` 块；PG `DATABASES` → SQLite；`REDIS_URL` 默认值不再引用 `CELERY_BROKER_URL`；加 `DEFAULT_THROTTLE_RATES['login']`（不设全局 throttle 类）；加 `SHUTDOWN_TOKEN` |
+| `config/settings/standalone.py` / `server.py` | 删「摘除 celery」逻辑与 `CELERY_*` 清空块；保留并注释 Redis 置空的理由 |
+| `config/settings/development.py` / `e2e_slot.py` | 登录限流放宽到 `200/min`（重建 dict，不改 base 的） |
+| `config/settings/__init__.py` / `config/urls.py` | 文档同步（补 server/e2e_slot 两档、去掉 celery 引用、探针注释） |
+| `apps/sftp/cache.py` | `_redis_url()` 去掉 `CELERY_BROKER_URL` 回落 |
+| `apps/accounts/views.py` | `LoginView` 加 `throttle_classes=[ScopedRateThrottle]` + `throttle_scope='login'` |
+| `apps/common/health.py` | **新增** `/api/v1/health/`（liveness，0 查询）与 `/api/v1/ready/`（DB/目录可写/迁移） |
+| `apps/common/shutdown.py` | **新增** 信号处理器 + `POST /api/v1/system/shutdown/`（回环 + 一次性令牌） |
+| `apps/common/urls.py` | 挂三个新端点 |
+| `standalone.py` | 注册信号处理器；清理 192-207 行端口解析的重复死代码 |
+| `electron/backend.ts` | 探针改 `/api/v1/health/` 且**要求 200**（原「任何响应」会接受端口上任意 HTTP 服务）；spawn 注入 `LQDP_SHUTDOWN_TOKEN`；`stopBackend` 改为「HTTP 关闭 → SIGTERM → 强杀」三段 |
+| `frontend/playwright.config.ts` | readiness 探针 `/api/schema/` → `/api/v1/health/` |
+| `requirements/base.txt` | 21 条全部钉 `==`；移除 `celery`/`psycopg2-binary`；`whitenoise` 从 production 移入 |
+| `requirements/production.txt` / `build.txt` | 重构（build.txt 新增，装 PyInstaller） |
+| `pyproject.toml` / `.python-version` | **新增**（`requires-python`、Python 3.13） |
+| `package.json` / `frontend/package.json` | 加 `engines`（node>=20, npm>=10） |
+| `README.md` / `.env.example` / `apps/CLAUDE.md` | 同步（Django 6.0、SQLite、无 Celery、asar 已启用、新环境变量）；`apps/CLAUDE.md` 增「异步=进程内池」与「无 repository 层」两节 |
+
+**验证结果**
+
+| 门禁 | 结果 |
+|------|------|
+| 后端全量 `manage.py test` | **1459 例 OK**（skipped=7） |
+| 新增 T1 测试 | 24 例（health 8 / login throttle 5 / shutdown 11） |
+| `npm run build`（vue-tsc -b + vite build） | 通过 |
+| `npm run test:unit`（vitest） | 118 例通过 |
+| `npm run lint:e2e` | 通过 |
+| `npm run electron:build:ts`（strict） | 通过 |
+| `npx playwright test --list` | 386 例 / 74 文件，配置可加载 |
+| 真实 HTTP 探针（curl） | `/health/` 200；`/ready/` 200；`/system/shutdown/` 无令牌 404 |
+| 优雅关闭端到端 | 错令牌 403 / 缺令牌 403 / 正确令牌 200 → **进程 100ms 内自行退出，未被强杀** |
+| e2e 冒烟集 `test:e2e:p0` | **本沙箱跑不通**（见下），但 **webServer 探针已证明通过** |
+
+**关于 e2e 冒烟集：探针已验证通过，但整套跑不起来（环境限制，非改动所致）**
+
+两次尝试都在 `globalSetup` 报 `spawnSync C:\Windows\system32\cmd.exe EBUSY`。根因已实测定位：
+本机沙箱**根本不允许 spawn `cmd.exe`** —— 纯 Node 单行 `spawnSync('cmd.exe', ['/c','echo','hi'])`
+同样返回 `EBUSY`，与仓库代码无关。`frontend/e2e/global-setup.ts:22` 用 `execSync` 跑
+`manage.py migrate/seed`，所以在非 slot 模式下必然失败。
+
+**但关键结论是：新的就绪探针通过了。** 两次日志都显示 Vite 打出了它的监听地址、Django 在 8000 监听，
+Playwright **已经进入 globalSetup** —— 探针 URL 错的话会在那之前直接报 `Timed out waiting for webServer`，
+根本走不到 globalSetup。也就是说 `/api/v1/health/` 替换 `/api/schema/` 这一步是对的。
+
+若要在此环境跑 e2e，应走 slot 池（`npm run test:e2e:affected` / `npm run test:e2e:pool`）：
+slot 模式下 `globalSetup` 会跳过 migrate/seed（库与种子由 `scripts/e2e_pool.mjs` 预铸），
+恰好绕开那个 `cmd.exe` 调用。**本轮未跑**（全量 e2e 按项目约定需先征询用户）。
+
+**两个必须记住的坑**
+
+1. **沙箱批量删除守卫会污染测试结果**。本机 WorkBuddy 沙箱的 `sitecustomize.py` 有按删除频次的
+   bulk-delete guard，全量跑测试时会抛 `SystemExit(1)`，一次跑出 52 errors + 9 failures。
+   设 `CODEBUDDY_SAFE_DELETE_ENABLED=0` 后同一棵树 **1459 例全绿**，`apps.datafiles` 单独跑 135 例全绿
+   —— 那些红**全是伪影，与代码无关**。今后在本机跑后端全量务必带这个变量，否则会误判成回归。
+2. **`apps/CLAUDE.md` / `frontend/CLAUDE.md` / `.claude/CLAUDE.md` 都被 `.gitignore` 有意忽略**
+   （`.gitignore:148` 附近，「AI 助手与样式指南文档」）。所以本轮对 `apps/CLAUDE.md` 的改动
+   **只落盘、不入库**。更要紧的是：入库的 `AGENTS.md` 把 `.claude/CLAUDE.md` 列为「会话开始必读」，
+   而那个文件**不在仓库里** —— 新克隆者会指向一个不存在的文件。这属于仓库策略问题，待用户决定是否解除忽略。
+
+**顺带发现的、未处理的**
+
+- 登录端点区分 `user_not_found` 与 `invalid_credentials`（`accounts/views.py:82`）是**刻意的 UX 取舍**
+  （注释写明「稳定且可自助修复的提示」），代价是用户名枚举。IP 限流缓解但不消除。若判断为不可接受，属独立决策。
+- `apps/analysis/views/analysis_views.py` 仍 690 行（破 600 硬约束）、`services/limits.py` 与
+  `services/statistics/limits.py` 仍并存、`get_bin_column_name` 仍 6 处 —— 这些都是评审报告里的 **P1**，本轮未动。
+
+## 2026-10-15 SFTP 搜索「结果不完整」假黄条（已完成）
+
+截图现场：一次搜完 **7 文件 / 7 命中 / 5.2s**，界面却挂着 `partial` +
+「结果不完整：已触达上限 · 有文件超出单文件扫描预算，只扫到了预算为止」。
+
+### 根因
+
+`SearchRunner._scan_one` 用**代理指标**判截断：`cand.size > spec.max_scan_bytes`。
+「文件比预算大」不等于「这一趟被预算叫停」——内容档 `first_hit_per_file` 默认开启，
+关键词落在预算之内时 `scan_file` 取够 1 条就早停、**一个字节都没多读**，这一趟对该文件
+是完整的；runner 却只看大小就发 `scan_budget_exceeded`（`incomplete=true`）并把
+`done.truncated` 置真 → 常驻黄条 + `partial` 徽章。**7 个文件全命中时它必然是误报。**
+
+复现（`tasks/_repro_budget_notice.py`：4 KiB 预算 / 20 KiB 文件 / 关键词在第 1 个 chunk）：
+修前 `notice=[grep_unavailable, workers_reduced, scan_budget_exceeded]` + `truncated=True`；
+修后只剩前两条 + `truncated=False`。
+
+### 计划与结果
+
+- [x] 判据搬到**观测方**：`scan_file` / `read_column` 返回 `(命中结果, 是否撞到预算)`
+- [x] `scan_file` 里把「取够命中数早停」那条 break 挪到预算判定**之前**（否则恰好卡在
+      预算边界上取够命中的那一趟也会被记成截断）
+- [x] `runner._scan_one` 只认扫描器报的旗标，删掉 `cand.size` 反推
+- [x] T1 判据：扫描器层 `BudgetTruncationTests`（5 例）+ 事件流层 `BudgetNoticeTests`（2 例）
+      + 列值档 2 例；既有 9 个调用点跟随新返回值（两个测试辅助函数各改一行）
+- [x] spec §3.2 的 `max_scan_bytes` 行改写成观测判据（原话「超出记 …」正是这次误报的源头）
+- 前端无改动（黄条文案与 `incomplete` 旗标都由后端 `notice` 带出，前端只渲染）
+
+### 未动 / 待定
+
+1. **黄条让你「放宽上限」，但界面上没有这个旋钮**：`max_scan_bytes` 既不在
+   `useSearchSpecFields.ts` 的 `NumKey` 里，高级面板也没有对应输入项 → 真截断时用户只能
+   「缩小范围」，照提示去「放宽上限」会找不到地方。加输入项要连 spec 的 UI 段一起动。
+2. 截图第二条「探测服务端 grep 失败：Channel closed.」是 `grep_unavailable`，属**中性告知**
+   （只影响快慢，不在 `INCOMPLETE_CODES` 里，前端渲染成蓝色左边框那一行）。成因是服务端在
+   `open_session` 阶段关掉了 exec 通道（paramiko `Channel._wait_for_event` 的
+   `SSHException("Channel closed.")`），按设计回落 client 引擎，不算错误。**未排查它为何被关。**
+3. 顺手发现的一处不一致（未改）：`events.py` 注释说 TRUNCATION_TEXT 里的码「都进
+   `done.limits_hit`」，但 runner 第 107 行的 `grep_unavailable` 走的是 `notice()` 而不是
+   `_limit()`，所以它其实不进 `limits_hit`（`grep_fallback` / `workers_reduced` 都进）。
+

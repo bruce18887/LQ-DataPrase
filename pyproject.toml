@@ -1,0 +1,37 @@
+# LQ-DataPrase — project metadata
+#
+# This file is **metadata only**. There is deliberately no ``[build-system]``:
+# the project is a Django application that ships as a PyInstaller bundle inside
+# an Electron installer, not an installable Python package. Do not add one —
+# ``pip install .`` is not a supported way to run this app. Install the pinned
+# dependencies instead:
+#
+#     pip install -r requirements/base.txt -r requirements/build.txt
+#
+# Added 2026-10-15 (architecture review P0-5). The version requirements used to
+# live only as prose in README.md ("Python 3.11+ / Node 20+"), which no tool
+# could enforce and which silently drifted: the venv actually runs Python 3.13
+# and Django 6.0 while the docs said 3.11 and 4.2.
+
+[project]
+name = "lq-dataprase"
+version = "0.7.0"
+description = "半导体 ATE 量产数据分析平台（Vue 3 + Django + Electron）"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+
+# NOTE: ``requires-python`` is the supported floor. The development venv and the
+# PyInstaller build both run 3.13 — see .python-version. The pin that actually
+# matters for reproducibility is requirements/base.txt, not this line.
+
+# The single source of truth for the *application* version is
+# frontend/package.json (electron-builder and the UI both read it from there).
+# ``version`` above is duplicated only because [project] requires it; bump both
+# together — see docs/reference/version-management.md.
+
+[tool.setuptools]
+# No packages are declared on purpose: this project is not distributed as a
+# wheel. Stated explicitly so that a stray ``pip install .`` fails loudly
+# instead of silently packaging nothing.
+py-modules = []

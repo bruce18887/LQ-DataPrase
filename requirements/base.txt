@@ -1,21 +1,65 @@
-django>=4.2,<7.0
-djangorestframework>=3.14
-djangorestframework-simplejwt>=5.3
-django-cors-headers>=4.3
-django-filter>=23.5
-drf-spectacular>=0.27
-psycopg2-binary>=2.9
-celery>=5.3
-redis>=5.0
-pandas>=2.0
-numpy>=1.24
-openpyxl>=3.1
-matplotlib>=3.7
-paramiko>=2.10
-cryptography>=42
-python-pptx>=0.6.21
-Pillow>=10.0
-py7zr>=0.20
-rarfile>=4.0
-excelize>=0.0.9
-lxml>=4.9
+# LQ-DataPrase — runtime dependencies (pinned)
+#
+# POLICY: every entry is pinned with ``==`` to the version that was actually
+# installed in the development venv when this file was written. Ranges were
+# removed on 2026-10-15 (architecture review P0-5) because the project ships as
+# a **PyInstaller binary**: pandas / numpy / matplotlib / Pillow have narrow
+# binary-compatibility windows, so a floating version means "the installer you
+# build in three months is not the installer you tested", and a user-reported
+# bug may be impossible to reproduce. A build that cannot be reproduced is worse
+# than a build that is slightly stale.
+#
+# This also surfaced a real drift: the old line said ``django>=4.2,<7.0`` and
+# the docs said "Django 4.2", while the venv had Django 6.0.5 — two major
+# versions apart, and nothing in the pipeline could tell.
+#
+# TO UPDATE: bump the pin here, run ``python manage.py test`` and
+# ``npm run test:e2e:affected``, and confirm ``npm run dist:win`` still builds.
+# Do not reintroduce ranges.
+#
+# REMOVED here (both were dead):
+#   * ``celery`` — no task was ever defined; see apps/CLAUDE.md. Removed with
+#     the whole Celery integration on 2026-10-15 (P0-1).
+#   * ``psycopg2-binary`` — every settings profile used SQLite; the PostgreSQL
+#     branch was unreachable and the package was not even installed (P0-1b).
+
+# --- Web framework & API -----------------------------------------------------
+Django==6.0.5
+djangorestframework==3.17.1
+djangorestframework-simplejwt==5.5.1
+django-cors-headers==4.9.0
+django-filter==25.2
+drf-spectacular==0.29.0
+
+# --- Static files ------------------------------------------------------------
+# Required by config/settings/standalone.py and config/settings/server.py (both
+# install WhiteNoiseMiddleware), and listed in lq_dataprase.spec hiddenimports.
+# It used to live only in production.txt even though the DESKTOP build needs it,
+# so a clean `pip install -r requirements/base.txt` produced a broken packaged
+# app. Moved here 2026-10-15 (P0-5).
+whitenoise==6.12.0
+
+# --- Data / analysis ---------------------------------------------------------
+pandas==3.0.3
+numpy==2.4.6
+matplotlib==3.10.9
+
+# --- File formats ------------------------------------------------------------
+openpyxl==3.1.5
+python-pptx==1.0.2
+Pillow==12.2.0
+py7zr==1.1.0
+rarfile==4.2
+excelize==0.0.9
+lxml==6.1.1
+
+# --- Remote access / crypto --------------------------------------------------
+paramiko==5.0.0
+cryptography==48.0.0
+
+# --- Optional: shared SFTP session cache -------------------------------------
+# Imported lazily by apps/sftp/cache.py. The cache probes the URL and silently
+# falls back to Django's in-process LocMemCache, so no Redis server is ever
+# required — but the client library is a hard import when a URL is configured,
+# so it stays declared.
+redis==8.0.0

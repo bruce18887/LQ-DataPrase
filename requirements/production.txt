@@ -1,3 +1,23 @@
+# LQ-DataPrase — server profile extras (config.settings.server)
+#
+# The LAN multi-user profile (≈20 users, no nginx) on top of the shared runtime.
+# Everything runtime-related is pinned in base.txt; this file adds only what the
+# server profile needs on top.
+
 -r base.txt
+
+# WSGI server. Linux-only — gunicorn does not run on Windows, so it cannot be
+# installed (and therefore cannot be measured) on the Windows development host.
+# This is the ONE deliberately unpinned entry in the requirements tree: pinning
+# it from here would mean guessing a version, which is worse than admitting the
+# gap. Pin it on the server host and fold the number back into this file:
+#
+#     pip install gunicorn==<version> && pip show gunicorn | grep Version
+#
 gunicorn>=21.2
-whitenoise>=6.6
+
+# NOTE: ``whitenoise`` used to be listed here. It moved to base.txt on
+# 2026-10-15 because the DESKTOP profile needs it too (standalone.py installs
+# WhiteNoiseMiddleware and lq_dataprase.spec lists it in hiddenimports), yet a
+# clean `pip install -r requirements/base.txt` — which is what the README tells
+# users to run — did not pull it in.

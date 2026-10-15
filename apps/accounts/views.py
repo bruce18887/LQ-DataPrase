@@ -7,6 +7,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -58,6 +59,22 @@ class LoginView(APIView):
     # timeout. Keep the server's hard limit tight so the user gets a
     # meaningful "server slow" error rather than the generic timeout.
     authentication_classes: list = []
+    # IP-scoped rate limit — the 'login' scope in
+    # ``REST_FRAMEWORK['DEFAULT_THROTTLE_RATES']`` (config/settings/base.py).
+    #
+    # ``ScopedRateThrottle`` keys on the authenticated user when there is one
+    # and on the client IP otherwise. Login requests are always anonymous here
+    # (``authentication_classes`` is empty), so this is purely an IP throttle.
+    # It is a *complement* to the per-account lockout below (5 failures → 423 +
+    # 15 min): that one defends a single username, this one defends the
+    # endpoint — one host cannot enumerate usernames, nor lock real users out
+    # by spraying failures against them.
+    #
+    # Exceeding it returns 429 with ``code: 'throttled'`` via the global
+    # exception handler (apps/common/exceptions.py), not the local ``_error``
+    # envelope — the front-end maps that code already.
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'login'
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)

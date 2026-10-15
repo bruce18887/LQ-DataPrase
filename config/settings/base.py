@@ -53,7 +53,6 @@ INSTALLED_APPS = [
     'corsheaders',
     'django_filters',
     'drf_spectacular',
-    'celery',
     'apps.common',
     'apps.accounts',
     'apps.datafiles',
@@ -113,23 +112,27 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 
+# ---------------------------------------------------------------------------
+# Database — SQLite
+# ---------------------------------------------------------------------------
+# This used to default to PostgreSQL (with a hardcoded ``ate_password``), but
+# every profile that actually ships overrode it: development.py, standalone.py,
+# server.py and e2e_slot.py all define SQLite. So the PG branch was unreachable
+# dead code carrying a plaintext credential, and ``psycopg2-binary`` was a
+# dependency that was never even installed in the venv. Removed 2026-10-15
+# (architecture review P0-1b). SQLite is the real engine for both shipped
+# profiles — see docs/reference/architecture-review-2026-10-15.md.
+#
+# ``busy_timeout`` is applied per-connection by ``apps/common/db_pragmas.py``
+# via the ``connection_created`` signal, so it is deliberately not duplicated
+# in OPTIONS here.
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'ate_analysis',
-        'USER': 'ate_user',
-        'PASSWORD': 'ate_password',
-        'HOST': 'localhost',
-        'PORT': '5432',
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
+        'OPTIONS': {},
     }
 }
-# SQLite fallback (for local development without PostgreSQL):
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.sqlite3',
-#         'NAME': BASE_DIR / 'db.sqlite3',
-#     }
-# }
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -168,6 +171,23 @@ REST_FRAMEWORK = {
         'rest_framework.filters.OrderingFilter',
     ),
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    # Rate table only — deliberately NO ``DEFAULT_THROTTLE_CLASSES``.
+    #
+    # Scoping the throttle to the login endpoint (via ``ScopedRateThrottle`` +
+    # ``throttle_scope``) rather than globally is intentional: this app has
+    # several high-frequency polling paths (chart dock, SFTP search progress)
+    # and a 376-case e2e suite that hammers the API from a single IP. A global
+    # throttle would start returning 429 to legitimate traffic long before it
+    # inconvenienced an attacker.
+    #
+    # What this complements (not replaces): ``apps/accounts/views.py`` already
+    # locks an ACCOUNT after 5 failures (423 + 15 min). That defends a known
+    # username; it does nothing against one host spraying many usernames, and it
+    # is itself a DoS vector (an attacker can lock real users out). The IP
+    # dimension below closes both.
+    'DEFAULT_THROTTLE_RATES': {
+        'login': os.environ.get('LQDP_LOGIN_THROTTLE_RATE', '20/min'),
+    },
 }
 
 SIMPLE_JWT = {
@@ -199,12 +219,14 @@ MEDIA_URL = 'media/'
 
 MEDIA_ROOT = BASE_DIR / 'media'
 
-CELERY_BROKER_URL = 'redis://localhost:6379/0'
-CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = 'Asia/Shanghai'
+# NOTE: there is deliberately no CELERY_* block here. Celery was removed on
+# 2026-10-15 (architecture review P0-1): the repo never had a single
+# ``@shared_task``, and both shipped profiles already stripped the app from
+# INSTALLED_APPS, so the settings were pure dead weight that made every reader
+# believe a broker was part of the runtime. The real async story is
+# **in-process** pools — ProcessPoolExecutor for export chart rendering
+# (apps/export/export_batch_charts_xlsx.py) and ThreadPoolExecutor for SFTP
+# search (apps/sftp/search/runner.py). See apps/CLAUDE.md.
 
 SPECTACULAR_SETTINGS = {
     'TITLE': 'LQ-DataPrase API',
@@ -216,7 +238,9 @@ SPECTACULAR_SETTINGS = {
 # Whether /api/schema/ and its Swagger UI are routed at all. drf-spectacular's
 # views default to AllowAny, so the shipped build turns the routes off rather
 # than exposing the whole endpoint surface anonymously. See config/urls.py.
-# development.py keeps it on (playwright health-checks /api/schema/).
+# development.py keeps it on. Note this is purely an API-docs decision — the
+# e2e readiness probe uses /api/v1/health/ (apps/common/health.py), not the
+# schema route, precisely so the two concerns stop being coupled.
 API_DOCS_ENABLED = True
 
 # Whether a non-administrator may read ``GET /api/v1/system/paths/`` — the
@@ -267,11 +291,21 @@ if not DEBUG and not SFTP_CONFIG_KEY:
 SFTP_SESSION_TTL = int(os.environ.get('SFTP_SESSION_TTL', '3600'))
 
 # Optional explicit Redis URL for the SFTP session cache. When unset, the
-# SFTP session cache resolves REDIS_URL, then CELERY_BROKER_URL.
+# SFTP session cache falls back to REDIS_URL, then to Django's default cache.
 SFTP_SESSION_REDIS_URL = os.environ.get('SFTP_SESSION_REDIS_URL') or None
 
-# Project-wide Redis URL (used by Celery, the SFTP session cache, and
-# any other shared-Redis consumers). Setting it here keeps Celery and the
-# SFTP cache pointing at the same backend by default, but each consumer
-# can be redirected independently via its own override.
-REDIS_URL = os.environ.get('REDIS_URL') or CELERY_BROKER_URL
+# Project-wide Redis URL — the **only** shared-Redis consumer left is the SFTP
+# session cache (``apps/sftp/cache.py``), which probes it lazily and silently
+# falls back to LocMemCache when it is unreachable. It is therefore optional
+# everywhere: the desktop profile blanks it (standalone.py), and a missing
+# server needs nothing installed. (Celery used to share this setting; it was
+# removed 2026-10-15.)
+REDIS_URL = os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
+
+# Per-launch token that unlocks POST /api/v1/system/shutdown/ (apps/common/shutdown.py).
+# Electron generates it on every start and never persists it, so it is not a
+# durable credential — it exists so that a local process which happens to reach
+# the loopback API cannot kill the backend. Unset means the endpoint is not
+# enabled (the view 404s), which is correct for dev and server installs where
+# nothing stops the backend programmatically.
+SHUTDOWN_TOKEN = os.environ.get('LQDP_SHUTDOWN_TOKEN') or None

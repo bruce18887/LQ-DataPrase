@@ -4,7 +4,7 @@ This module imports everything from ``base.py`` and overrides values that
 are inappropriate for a self-contained executable:
 
 - SQLite instead of PostgreSQL (no external DB server needed)
-- Celery removed (no external broker needed)
+- No Celery / no broker (the project has no background tasks — see apps/CLAUDE.md)
 - WhiteNoise configured to serve static files (no nginx needed)
 - Frontend dist directory registered as a static source
 - SECRET_KEY auto-generated from a file-persisted random value
@@ -132,20 +132,14 @@ WHITENOISE_USE_FINDERS = True
 WHITENOISE_AUTOREFRESH = False
 
 # ---------------------------------------------------------------------------
-# Celery — disabled (no broker required)
+# Redis — optional, blanked
 # ---------------------------------------------------------------------------
-# Remove ``celery`` from INSTALLED_APPS so Django doesn't try to import it.
-INSTALLED_APPS = [app for app in INSTALLED_APPS if app != 'celery']
-
-# Clear broker URLs so any code that lazily references them gets empty strings
-# instead of trying to connect to a non-existent Redis.
-CELERY_BROKER_URL = ''
-CELERY_RESULT_BACKEND = ''
-CELERY_ACCEPT_CONTENT = []
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-
-# Redis URL — empty; SFTP session cache will fall back to Django LocMemCache.
+# The only remaining shared-Redis consumer is the SFTP session cache
+# (``apps/sftp/cache.py``), which probes the URL lazily and falls back to
+# Django's LocMemCache when it is unreachable. A desktop install must not
+# require a Redis server, so both URLs are blanked here — that is what makes
+# the cache fall back. (Celery used to be disabled here too; the app was
+# removed from the project entirely on 2026-10-15, see apps/CLAUDE.md.)
 REDIS_URL = ''
 SFTP_SESSION_REDIS_URL = ''
 

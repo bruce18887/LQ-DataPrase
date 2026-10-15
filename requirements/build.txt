@@ -1,0 +1,11 @@
+# LQ-DataPrase — desktop packaging toolchain
+#
+# Not a runtime dependency: this is what ``npm run pyinstaller`` (which invokes
+# ``.venv\Scripts\python.exe -m PyInstaller lq_dataprase.spec``) needs to turn
+# the Django app into the bundled executable that ships inside the Electron
+# installer. Kept separate from base.txt so the runtime dependency list does not
+# imply the frozen bundle should contain the freezer.
+#
+# Install with:  pip install -r requirements/base.txt -r requirements/build.txt
+
+PyInstaller==6.21.0

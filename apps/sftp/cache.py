@@ -59,12 +59,14 @@ def _redis_url() -> Optional[str]:
     Resolution order:
       1. ``settings.SFTP_SESSION_REDIS_URL`` (explicit override)
       2. ``settings.REDIS_URL`` (the project-wide var, also in .env.example)
-      3. ``settings.CELERY_BROKER_URL`` (Celery already needs a broker)
+
+    Both shipped profiles blank these, which is what selects the LocMemCache
+    fallback. (A third step used to fall back to ``CELERY_BROKER_URL``; Celery
+    was removed from the project on 2026-10-15 — see apps/CLAUDE.md.)
     """
     return (
         getattr(settings, 'SFTP_SESSION_REDIS_URL', None)
         or getattr(settings, 'REDIS_URL', None)
-        or getattr(settings, 'CELERY_BROKER_URL', None)
     )
 
 

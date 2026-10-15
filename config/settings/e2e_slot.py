@@ -27,10 +27,22 @@ _slot = Path(_slot).resolve()
 
 # development 档里属于「开发态」的那三样，逐条显式给出 —— 不导入它，就不触发它的导入期重定向。
 DEBUG = True
-API_DOCS_ENABLED = True  # Playwright 的 webServer readiness 打 /api/schema/，靠这个开关放行
+API_DOCS_ENABLED = True  # 仅开发便利；Playwright 的 readiness 探针打 /api/v1/health/，与本开关无关
 
-# base 档的 DATABASES 是 PostgreSQL 形状（development 才重定义成 sqlite3），
-# 所以这里必须整体给出 sqlite 配置，不能只覆盖 NAME —— 探针实测：只覆盖 NAME 会去连 5432。
+# 放宽登录 IP 限流：同一 slot 里几百条用例共用一个回环 IP，20/min 会让它们互相踩。
+# 与 development 档同一理由、同一取值；standalone / server 档保持 base 的紧值。
+REST_FRAMEWORK = {
+    **REST_FRAMEWORK,  # noqa: F405
+    'DEFAULT_THROTTLE_RATES': {
+        **REST_FRAMEWORK.get('DEFAULT_THROTTLE_RATES', {}),  # noqa: F405
+        'login': os.environ.get('LQDP_LOGIN_THROTTLE_RATE', '200/min'),
+    },
+}
+
+# 这里整体给出 DATABASES，不只覆盖 NAME：库路径、ENGINE 一次说清，避免任何
+# 「继承到别人档的形状」的可能。（历史上 base 档曾是 PostgreSQL 形状，只覆盖 NAME
+# 会去连 5432 —— 探针实测过。base 已于 2026-10-15 改成 SQLite，但整体覆盖的写法
+# 仍然保留：它让本档不依赖 base 的数据库选择。）
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',

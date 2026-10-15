@@ -6,6 +6,10 @@
   "author": "LQ-DataPrase Team",
   "type": "module",
   "main": "electron-dist/main.js",
+  "engines": {
+    "node": ">=20",
+    "npm": ">=10"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
