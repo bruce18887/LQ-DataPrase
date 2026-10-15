@@ -551,3 +551,39 @@ e2e 库里 admin 实测停在 `filename_wrap=False`、`page_size=200`、`cpk_a/b
 
 顺带一条：上面登记的 `analysis/file-list-completeness.spec.ts`「下拉选项数被同批上传/清理踩到」
 正是 slot 隔离要消灭的那一类 —— 每 slot 各持一份库与媒体后，这条应当自然消失，P2 阶段回来核销。
+
+## N=4 四轮实测与红集合稳定性（2026-10-15，slot 池）
+
+口径：384 条业务用例（此前引用的 386/385 含 2 条 `auth.setup`，判据 `sp.projectIds` 在运行期 JSON 里不存在）。
+每轮都是 `--slots=4`、`E2E_SLOTS=4`、模板复用 `C:\lqdp-e2e\template`。
+
+| 轮 | run 目录 | 墙钟 | 单价 | 效率 | unexpected | 判定 |
+|---|---|---|---|---|---|---|
+| A | `034405-9300` | 9.1min | 3.90s | 2.59 | 4 | 2×`outlier-handling` + `view-data` + `serial-overlap` |
+| B | `043534-43196` | **6.2min** | 3.10s | **3.04** | **0** | 全绿 |
+| C | `044315-49440` | 9.2min | 3.30s | 1.21 | 155 | **VOID (infra)**：slot1 61 红/201 refused、slot3 93 红/272 refused；slot0/2 正常 |
+| D | `052326-17992` | 11.1min | 3.01s | 1.62 | 2 | 2×`histogram-multiseries-clip`（attempts=3 全败）+ flaky 2 |
+
+**逐条定性与已做的修复**
+
+- A 的 `outlier-handling` ×2 = **同桶顺序污染**：与 `chart-filter-switches` 同桶可稳定复现（2 红 + 1 flaky），
+  错误是 strict mode 命中 3 个 `.outlier-hint-bar`（账号级 `analysis_chart_state` 被前一个文件留在「QQ/箱线图开」）。
+  已按 `ensureChartToggles` 收敛起点（`14942bf`），修复后该对文件 16 例 0 红。
+- A 的 `view-data` / `serial-overlap` 两条：三文件各占独立 slot 复跑 0 红、slot1 整桶（22 文件 / 112 例）单 slot 复跑也 0 红
+  ⇒ 不是产品问题也不是组合污染，归为**满载下的超时型红**（两条都是等下拉/等 slider 的 15-30s 断言）。
+- C 的 155 条 = **两个 slot 的服务在开跑约 1 分钟后失联**（Django 日志停在 12:44:19，成片 `ERR_CONNECTION_REFUSED` + 守卫把后续用例踢回 `/login`）。
+  真因未定；当时编排器对崩池毫无感知，把 155 当普通红报了出去。已补：`classifySlotHealth` + `roundVerdict`
+  自判 INFRA（退出码 3、现场不清、单价照算但不进时间序列），并用真实留存现场验过判定方向正确。
+  顺带修掉我自己引入的看门狗谎报（150ms connect 在满载下假超时，把活着的 3 个 slot 报成掉线）。
+- D 的 `histogram-multiseries-clip` ×2：单文件独立 slot 复跑 **5 例 0 红** ⇒ 同样是满载相关，不是产品回归。
+  注意 D 轮它们的 3 次 attempt 全失败，形状比 B/A 更硬，值得在阈值定完后专门复看一次。
+
+**可以据此刻死的两件事**
+
+1. **并行度不是靠感觉选的**：干净轮 6.2min、单价 3.10s（串行 2.89s，争用 +7%）、效率 3.04 ≈ 0.76×N。
+   这就是 Task 7 阈值的实测基准（旧的「单价 >3.5s 判退化」在并行下必然误报）。
+2. **每 slot 独立库+独立媒体镜像确实消灭了登记在册的那类组合红**：B 轮 384 例全绿，
+   包含 `file-list-completeness`（此前「与别的 spec 同批跑会红、单跑绿」）—— 上面那条 P2 核销项可以关掉了。
+
+**仍开的两件事**：服务失联的真因（下轮看门狗会给时刻与端口，但没解决「为什么死」）；
+以及满载下 0~2 条负载敏感红与门禁怎么共存（要求 `unexpected==0` 就会周期性误报）。
