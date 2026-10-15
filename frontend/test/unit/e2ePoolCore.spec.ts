@@ -1,10 +1,36 @@
 // frontend/test/unit/e2ePoolCore.spec.ts
 // slot 池纯逻辑的 T2 层单测：无 DOM、无子进程、无 Playwright。
 import { describe, expect, it } from 'vitest'
+import path from 'node:path'
 import {
   SLOT_BACKEND_BASE, SLOT_FRONTEND_BASE, DEFAULT_SLOTS, MAX_SLOTS, SLOT_TARGET_MS,
-  autoSlots, allocatePortBlock, partitionFiles, assertSafeRelPath, buildSlotManifest, slotEnv, mergeRunStats,
+  autoSlots, allocatePortBlock, partitionFiles, assertSafeRelPath, buildSlotManifest, slotEnv, mergeRunStats, parseArgs,
 } from '../../e2e/helpers/pool-core.mjs'
+
+describe('parseArgs', () => {
+  it('认 --k=v 与 --k v 两种写法（只认空格形式时 --slots=1 会被静默吞掉，实测踩过）', () => {
+    expect(parseArgs(['--slots=1']).slots).toBe('1')
+    expect(parseArgs(['--slots', '1']).slots).toBe('1')
+    expect(parseArgs(['--timeout-min=30'])['timeout-min']).toBe('30')
+    expect(parseArgs([]).slots).toBeUndefined()
+  })
+  it('布尔开关与默认值（布尔语义由 defaults 里的类型决定）', () => {
+    expect(parseArgs(['--dry-run'], { 'dry-run': false }).dryRun).toBe(true)
+    expect(parseArgs([], { 'dry-run': false }).dryRun).toBe(false)
+    expect(parseArgs([], { slots: 'auto' }).slots).toBe('auto')
+  })
+  it('`--` 之后的原样进 files，且 -- 本身不算开关', () => {
+    const a = parseArgs(['--slots=2', '--', 'e2e/data/data.spec.ts', 'e2e/auth/auth.spec.ts'], { slots: 'auto' })
+    expect(a.slots).toBe('2')
+    expect(a.files).toEqual(['e2e/data/data.spec.ts', 'e2e/auth/auth.spec.ts'])
+    expect(a.unknown).toEqual([])
+  })
+  it('未知 --x=y 落在 unknown 里而不是被忽略（拼错参数不该静默继续）', () => {
+    const a = parseArgs(['--slot=3'])
+    expect(a.slots).toBeUndefined()
+    expect(a.unknown).toEqual(['--slot=3'])
+  })
+})
 
 describe('常量', () => {
   it('端口基址与并行度上限就是设计里那几个数', () => {
@@ -111,6 +137,22 @@ describe('buildSlotManifest + slotEnv', () => {
   it('绝不注入存储目录重定向相关变量 —— 那是 move 语义通路', () => {
     const env = slotEnv(m, {})
     expect(env.LQDP_SKIP_STORAGE_MIGRATION).toBeUndefined()
+  })
+  it('给了共享 blobRoot 时所有 slot 的 blobDir 指同一目录（merge-reports 只接受一个目录）', () => {
+    const shared = 'C:\\lqdp-e2e\\slots\\r1\\blob'
+    const mk = (index: number) => buildSlotManifest({
+      index, ports: { backend: 8101 + index, frontend: 3101 + index },
+      slotRoot: `C:\\lqdp-e2e\\slots\\r1\\slot${index}`, templateRoot: 'C:\\lqdp-e2e\\template',
+      redisDb: 12 + index, secretKey: 'k', blobRoot: shared,
+    })
+    expect(mk(0).blobDir).toBe(shared)
+    expect(mk(1).blobDir).toBe(shared)
+    // 不给 blobRoot 时退回各自目录
+    const own = buildSlotManifest({
+      index: 5, ports: { backend: 8106, frontend: 3106 }, slotRoot: 'C:\\lqdp-e2e\\slots\\r2\\slot5',
+      templateRoot: 'C:\\lqdp-e2e\\template', redisDb: 17, secretKey: 'k',
+    })
+    expect(own.blobDir).toBe(path.join('C:\\lqdp-e2e\\slots\\r2\\slot5', 'blob'))
   })
 })
 

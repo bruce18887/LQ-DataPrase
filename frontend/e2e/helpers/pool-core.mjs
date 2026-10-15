@@ -15,6 +15,36 @@ export function autoSlots(totalMs, cap = DEFAULT_SLOTS) {
   return Math.max(1, Math.min(cap, Math.ceil((totalMs || 0) / SLOT_TARGET_MS)))
 }
 
+/**
+ * CLI 解析：`--k=v`、`--k v`、布尔 `--k` 三种写法都认。
+ * 只认空格形式的后果实测过：`--slots=1` 被当成没给 ⇒ 静默按默认档跑（等于偷偷改了并行度）。
+ * 未在 defaults 里声明的 `--x` 一律进 `unknown`，供调用方拒绝而不是忽略。
+ */
+export function parseArgs(argv, defaults = {}) {
+  const out = { files: [], unknown: [] }
+  const set = (name, value) => {
+    out[name] = value
+    const camel = name.replace(/-([a-z])/g, (_, c) => c.toUpperCase())
+    if (camel !== name) out[camel] = value
+  }
+  for (const [k, v] of Object.entries(defaults)) set(k, v)
+  const dd = argv.indexOf('--')
+  const head = dd < 0 ? argv : argv.slice(0, dd)
+  out.files = dd < 0 ? [] : argv.slice(dd + 1)
+  for (let i = 0; i < head.length; i++) {
+    const tok = head[i]
+    if (!tok.startsWith('--')) { out.unknown.push(tok); continue }
+    const eq = tok.indexOf('=')
+    const name = eq < 0 ? tok.slice(2) : tok.slice(2, eq)
+    if (!(name in defaults)) out.unknown.push(tok)
+    if (eq >= 0) { set(name, tok.slice(eq + 1)); continue }
+    const next = head[i + 1]
+    if (typeof defaults[name] !== 'boolean' && next !== undefined && !next.startsWith('--')) { set(name, next); i++ }
+    else set(name, true)
+  }
+  return out
+}
+
 /** 连续 n 对端口；扫不到就抛 —— 宁可拒绝启动，也不复用别人在跑的服务 */
 export function allocatePortBlock(n, isTaken, baseBackend = SLOT_BACKEND_BASE, baseFrontend = SLOT_FRONTEND_BASE) {
   for (let shift = 0; shift < 40; shift++) {
@@ -51,7 +81,7 @@ export function assertSafeRelPath(p) {
   return p
 }
 
-export function buildSlotManifest({ index, ports, slotRoot, templateRoot, redisDb, secretKey }) {
+export function buildSlotManifest({ index, ports, slotRoot, templateRoot, redisDb, secretKey, blobRoot }) {
   return {
     index,
     backendPort: ports.backend,
@@ -64,7 +94,8 @@ export function buildSlotManifest({ index, ports, slotRoot, templateRoot, redisD
     slotFile: path.join(slotRoot, 'slot.json'),
     authDir: path.join(slotRoot, '.auth'),
     downloadsDir: path.join(slotRoot, '.downloads'),
-    blobDir: path.join(slotRoot, 'blob'),
+    // merge-reports 只接受**一个**目录 ⇒ 编排器给所有 slot 传同一个 blobRoot（blob 文件名自带随机后缀，不冲突）
+    blobDir: blobRoot ?? path.join(slotRoot, 'blob'),
     jsonOut: path.join(slotRoot, 'results.json'),
     logFile: path.join(slotRoot, 'run.log'),
     templateDbPath: path.join(templateRoot, 'db.sqlite3'),
