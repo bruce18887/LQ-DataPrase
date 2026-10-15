@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url'
 import {
   MAX_SLOTS, SERIAL_REF_PER_SPEC_MS, SLOT_BACKEND_BASE, SLOT_FRONTEND_BASE,
   allocatePortBlock, assertSafeRelPath, autoSlots, buildSlotManifest, mergeRunStats,
-  normalizeTotalMs, parseArgs, partitionFiles, slotEnv,
+  normalizeTotalMs, parseArgs, partitionFiles, roundVerdict, slotEnv,
 } from '../frontend/e2e/helpers/pool-core.mjs'
 
 // Windows 上 npx/npm 是 .cmd，必须经 cmd.exe 起；一律用 argv 数组而不是拼 shell 字符串 ——
@@ -213,22 +213,62 @@ function statsOf(jsonPath) {
   if (!fs.existsSync(jsonPath)) return null
   let j
   try { j = JSON.parse(fs.readFileSync(jsonPath, 'utf-8')) } catch { return null }
-  let specs = 0, passCount = 0, passMs = 0
+  let specs = 0, passCount = 0, passMs = 0, refusedCount = 0
   const files = {}
+  const countRefused = (t) => {
+    for (const r of t.results ?? []) for (const e of r.errors ?? []) {
+      if (/ERR_CONNECTION_REFUSED|ECONNREFUSED|ERR_CONNECTION_RESET/.test(String(e.message || ''))) refusedCount++
+    }
+  }
   const walk = (s) => {
     for (const x of s.suites ?? []) walk(x)
     for (const sp of s.specs ?? []) {
       const tests = realTests(sp)
       if (!tests.length) continue          // 纯 setup project 的 spec 整条不计
       specs++
-      for (const t of tests) for (const r of t.results ?? []) if (r.status === 'passed') {
-        passCount++; passMs += r.duration
-        files[sp.file] = (files[sp.file] ?? 0) + r.duration
+      for (const t of tests) {
+        countRefused(t)
+        for (const r of t.results ?? []) if (r.status === 'passed') {
+          passCount++; passMs += r.duration
+          files[sp.file] = (files[sp.file] ?? 0) + r.duration
+        }
       }
     }
   }
   for (const s of j.suites ?? []) walk(s)
-  return { specs, passCount, passMs, wallMs: j.stats?.duration ?? 0, stats: j.stats ?? {}, files }
+  return { specs, passCount, passMs, wallMs: j.stats?.duration ?? 0, stats: j.stats ?? {}, files, refusedCount }
+}
+
+/**
+ * 服务存活看门狗：崩池轮的教训就是「后端 12:44:19 静音，没人知道，直到读完 155 条红」。
+ * 每 20s 探一次每个 slot 的 backend/preview 端口，掉线就当场记下时刻。
+ */
+function probePortOpen(port) {
+  return new Promise((res) => {
+    const s = net.connect(port, '127.0.0.1')
+    s.setTimeout(150)
+    s.on('connect', () => { s.destroy(); res(true) })
+    s.on('error', () => res(false))
+    s.on('timeout', () => { s.destroy(); res(false) })
+  })
+}
+
+function startLivenessWatch(manifests) {
+  const alive = new Map()
+  for (const m of manifests) { alive.set(`slot${m.index}:backend:${m.backendPort}`, true); alive.set(`slot${m.index}:preview:${m.frontendPort}`, true) }
+  const t0 = Date.now()
+  const timer = setInterval(async () => {
+    for (const [key, was] of alive) {
+      if (!was) continue
+      const port = Number(key.split(':').at(-1))
+      if (!(await probePortOpen(port))) {
+        alive.set(key, false)
+        log(`⏱ ${key.replace(/:\d+$/, '')} 掉线（:${port}），开跑后 ${((Date.now() - t0) / 1000).toFixed(0)}s`)
+      }
+    }
+  }, 20_000)
+  if (timer.unref) timer.unref()
+  return () => clearInterval(timer)
 }
 
 async function main() {
@@ -268,11 +308,18 @@ async function main() {
   const only = ARGS.onlySlot === undefined ? null : Number(ARGS.onlySlot)
   const timeoutMs = Number(ARGS['timeout-min']) * 60_000
   const started = Date.now()
+  const stopWatch = startLivenessWatch(manifests)
   const codes = await Promise.all(manifests.map((m, i) =>
     (only !== null && Number(only) !== i) ? Promise.resolve(0) : runSlot(m, buckets[i], timeoutMs)))
+  stopWatch()
   const spanMs = Date.now() - started
 
-  const reports = manifests.map((m) => statsOf(m.jsonOut)).filter(Boolean)
+  const perSlot = manifests.map((m, i) => ({ slot: i, ...(statsOf(m.jsonOut) ?? { missing: true }) }))
+  const reports = perSlot.filter((r) => !r.missing)
+  const health = perSlot.map((r) => (r.missing
+    ? { slot: r.slot, specs: 0, unexpected: 0, refusedCount: 5 }      // 连 JSON 都没有 = 直接 INFRA
+    : { slot: r.slot, specs: r.specs, unexpected: r.stats?.unexpected ?? 0, refusedCount: r.refusedCount ?? 0 }))
+  const { verdict, infraSlots } = roundVerdict(health)
   const merged = mergeRunStats(reports)
   merged.files = reports.reduce((acc, r) => {
     for (const [f, ms] of Object.entries(r.files)) acc[f] = (acc[f] ?? 0) + ms
@@ -281,6 +328,9 @@ async function main() {
   merged.wallMs = spanMs
   merged.slotsPlanned = buckets.length
   merged.runId = RUN_ID
+  merged.verdict = verdict
+  merged.infraSlots = infraSlots
+  merged.health = health
   if (only !== null) merged.partial = true
   const outDir = process.env.LQDP_E2E_OUTDIR || path.join(ROOT, 'tasks', 'e2e-pool', 'latest')
   fs.mkdirSync(outDir, { recursive: true })
@@ -301,8 +351,13 @@ async function main() {
   log(`用例 ${merged.specs} · 墙钟 ${(spanMs / 60000).toFixed(1)}min · 单价 ${(merged.perSpecMs / 1000).toFixed(2)}s/例`
     + ` · 效率 ${merged.efficiency.toFixed(2)}（目标 ≥${(0.7 * buckets.length).toFixed(1)}）`
     + ` · unexpected ${merged.stats.unexpected} · flaky ${merged.stats.flaky} · skipped ${merged.stats.skipped}`)
+  log(`结论 ${verdict}` + (infraSlots.length
+    ? ` —— slot${infraSlots.join('/slot')} 带连接级错误或红占比过半，指标不可信，别当退化读；现场已保留` : ''))
   log(`merged.json → ${path.join(outDir, 'merged.json')}`)
-  if (!ARGS.keepSlots) manifests.forEach((m) => fs.rmSync(m.dataDir, { recursive: true, force: true }))
+  // INFRA 轮不清现场：崩过一次就知道清掉日志有多误事（证据本身已在 slot 目录之外）
+  if (ARGS.keepSlots || verdict !== 'MEASURED') log(`slot 镜像保留在 ${path.join(SLOTS_ROOT, RUN_ID)}`)
+  else manifests.forEach((m) => fs.rmSync(m.dataDir, { recursive: true, force: true }))
+  if (verdict !== 'MEASURED') return 3
   return codes.some((c) => c !== 0) ? 1 : (merged.stats.unexpected > 0 ? 1 : 0)
 }
 

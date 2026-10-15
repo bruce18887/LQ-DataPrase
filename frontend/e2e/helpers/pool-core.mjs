@@ -146,6 +146,25 @@ export function normalizeTotalMs(rawTotalMs, perSpecMs, refPerSpecMs = SERIAL_RE
 }
 
 /**
+ * 单 slot 健康判定：区分「有用例红」与「服务半路死了导致的成片红」。
+ * 实测依据：一次 N=4 轮里两个 slot 的 preview+后端在开跑约 1 分钟后失联，
+ * 该轮报出 155 unexpected、效率 1.21 —— 当成真实结果发出去就是假信号。
+ * 两条判据任一命中：连接级错误成堆（refused ≥5），或红占该 slot 用例数一半以上且绝对数 ≥20。
+ */
+export function classifySlotHealth({ specs = 0, unexpected = 0, refusedCount = 0 }) {
+  if (refusedCount >= 5) return 'INFRA'
+  const share = specs ? unexpected / specs : 0
+  if (unexpected >= 20 && share >= 0.5) return 'INFRA'
+  return 'OK'
+}
+
+/** 整轮结论：任一 slot 判 INFRA ⇒ 本轮指标不可信（不进时间序列、不参与门禁） */
+export function roundVerdict(slotReports) {
+  const infra = slotReports.filter((r) => classifySlotHealth(r) === 'INFRA').map((r) => r.slot)
+  return { verdict: infra.length ? 'VOID (infra)' : 'MEASURED', infraSlots: infra }
+}
+
+/**
  * N 份 per-slot JSON 的统计合并。
  * 墙钟是并发的 ⇒ 取最长 slot 而不是求和；效率 = Σ通过时长/墙钟 ≈ 实际达到的并行度。
  * 单价只统计通过用例：秒失败的 duration≈0，计入分母会让崩池轮算出比健康轮更好看的数字。
