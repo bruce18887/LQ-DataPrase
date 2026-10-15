@@ -29,9 +29,13 @@ _slot = Path(_slot).resolve()
 DEBUG = True
 API_DOCS_ENABLED = True  # Playwright 的 webServer readiness 打 /api/schema/，靠这个开关放行
 
+# base 档的 DATABASES 是 PostgreSQL 形状（development 才重定义成 sqlite3），
+# 所以这里必须整体给出 sqlite 配置，不能只覆盖 NAME —— 探针实测：只覆盖 NAME 会去连 5432。
 DATABASES = {
-    **DATABASES,  # noqa: F405
-    'default': {**DATABASES['default'], 'NAME': str(_slot / 'db.sqlite3')},  # noqa: F405
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': str(_slot / 'db.sqlite3'),
+    }
 }
 
 MEDIA_ROOT = _slot / 'media'
