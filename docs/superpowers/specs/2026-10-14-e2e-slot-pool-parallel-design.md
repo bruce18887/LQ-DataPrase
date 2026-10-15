@@ -185,9 +185,19 @@ for k in ('TMP', 'TEMP', 'TMPDIR'): os.environ[k] = tempfile.tempdir    # slot �
 
 ## 6. 失败与错误处理
 
-- **端口块不足即 fail fast**：分配前探测 `8101..810N` / `3101..310N`；被占（本机常有其它会话在服务，
-  夜跑历史上因此 SKIPPED 过）就换基址重试一次，仍不行就报错退出，**绝不静默复用别人在跑的服务**
+- **端口块不足即 fail fast**：分配前探测 `SLOT_BACKEND_BASE..` / `SLOT_FRONTEND_BASE..` 各 60 个口
+  （`prefetchPorts` 用 TCP connect，不用 netstat 正则）；被占（本机常有其它会话在服务，
+  夜跑历史上因此 SKIPPED 过）就整块前移重试，最多 40 块，仍不行就报错退出，**绝不静默复用别人在跑的服务**
   （`reuseExistingServer` 复用旧包导致假绿是记过账的）。
+- **slot 端口基址必须落在本机 TCP 动态端口区间之外**（2026-10-15 加）。实测这台机器
+  `netsh int ipv4 show dynamicport tcp` = **起始 1024 / 数量 13977**（即 1024–15000），
+  原基址 `8101/3101` 整个泡在临时端口池里。三轮 N=4 各掉一个 slot 的 preview（120s / 280s / 420s），
+  共同现场是：**preview 的整条 node 链没了、同 slot 的 Django 还活着、stderr 一条异常都没有、
+  掉线端口的 netstat 里挂着上百条客户端端口 1044–14426 的 TIME_WAIT** ——
+  即监听端口被当成临时端口发出去了。基址因此挪到 **21001/22001**（15000 之上、默认区间 49152 之下，
+  且避开该机 `excludedportrange` 的 27339 与 50000-50059）。
+  因果链是**假设**（能解释全部四次现场，但没有抓到任何一次「谁调用了 TerminateProcess」），
+  验证方式就是改基址后连跑 N=4 看掉线是否消失 —— 结果记在 §13。
 - **单 slot 进程非零退出**：其余继续跑完，汇总标 `slot<i> EXIT=<code>` 与其文件清单，支持原地复跑
   `node scripts/e2e_pool.mjs --only-slot=<i>`。
 - **webServer readiness 超时**（`GET /api/schema/`，`playwright.config.ts:135-140`）：该 slot 记 INFRA 失败，

@@ -261,6 +261,32 @@ function probePortOpen(port) {
 }
 
 /**
+ * 掉线时刻的进程现场。
+ *
+ * 崩池轮「为什么死」定不下来，缺的不是时刻（看门狗给得出）而是**那一刻的进程表**：
+ * 事后 tasklist 只能看到幸存者，看不到是谁把 preview 的 node 摘掉的、它的父进程是谁。
+ * 这里在判死的当场落一份 node/python/cmd 的 PID+父 PID+创建时刻，加上该端口的 netstat 状态。
+ * 采集本身不是判据，失败就打一行日志，绝不影响判定与退出码。
+ */
+function captureDeathSnapshot(logFile, label, port) {
+  const file = path.join(path.dirname(logFile), `dead-${label}.txt`)
+  const parts = [`# 掉线现场 ${label} @ ${new Date().toISOString()}`]
+  const ps = "Get-CimInstance Win32_Process -Filter \"Name='node.exe' OR Name='python.exe' OR Name='cmd.exe'\"" +
+    ' | Select-Object ProcessId,ParentProcessId,CreationDate,Name | ConvertTo-Csv -NoTypeInformation'
+  try {
+    parts.push('===== 进程表（node/python/cmd） =====',
+      execFileSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf-8', timeout: 20_000 }).trim())
+  } catch (e) { parts.push(`===== 进程表采集失败: ${e.message} =====`) }
+  try {
+    const all = execFileSync('netstat', ['-ano'], { encoding: 'utf-8', timeout: 20_000 })
+    const hits = all.split('\n').filter((l) => l.includes(`:${port}`))
+    parts.push(`===== netstat 含 :${port} 的行 =====`, hits.join('\n').trim() || `(无任何行 ⇒ 端口连 TIME_WAIT 都没留)`)
+  } catch (e) { parts.push(`===== netstat 采集失败: ${e.message} =====`) }
+  try { fs.writeFileSync(file, parts.join('\n'), 'utf-8') } catch (e) { log(`掉线现场写入失败: ${e.message}`) }
+  return file
+}
+
+/**
  * 服务存活看门狗。两条防误报：单次探测不算数（满载时 150ms 会假超时），
  * 且子进程已经正常退出的 slot 不再判死（端口关闭是收尾不是事故）。
  */
@@ -278,7 +304,11 @@ function startLivenessWatch(manifests, aliveFlags) {
       st.state = nextLivenessState(st.state ?? { misses: 0, dead: false }, await probePortOpen(port), true)
       if (st.state.dead) {
         st.dead = true
-        log(`⏱ slot${st.m.index} 的 ${st.kind}(:${port}) 连续 ${LIVENESS_MISSES} 次探不到，开跑后 ${((Date.now() - t0) / 1000).toFixed(0)}s`)
+        const label = `slot${st.m.index}-${st.kind}-${port}`
+        const childAlive = aliveFlags.get(st.m.index)
+        log(`⏱ ${label} 连续 ${LIVENESS_MISSES} 次探不到，开跑后 ${((Date.now() - t0) / 1000).toFixed(0)}s`
+          + `（该 slot 的 playwright 子进程${childAlive ? '仍在跑 ⇒ 红是环境造成的' : '已退出 ⇒ 端口关闭是收尾'}）`)
+        log(`   现场 → ${captureDeathSnapshot(st.m.logFile, label, port)}`)
       }
     }
   }, 20_000)
@@ -299,7 +329,7 @@ async function runRecheck(redFiles) {
     const tag = `${RUN_ID}-recheck${Math.floor(start / MAX_SLOTS)}`
     const manifests = ports.map((p, i) => buildSlotManifest({
       index: i, ports: p, slotRoot: path.join(SLOTS_ROOT, tag, `slot${i}`), templateRoot: TEMPLATE,
-      redisDb: 30 + i, secretKey: `e2e-recheck-${i}-${RUN_ID}`,
+      redisDb: 30 + i, secretKey: `e2e-recheck-${i}-${RUN_ID}-padded-to-32bytes`,
       blobRoot: path.join(SLOTS_ROOT, tag, 'blob'), evidenceRoot: path.join(SLOTS_ROOT, tag),
     }))
     manifests.forEach(prepareSlot)
@@ -351,9 +381,11 @@ async function main() {
   const ports = allocatePortBlock(buckets.length, taken)
   const blobRoot = path.join(SLOTS_ROOT, RUN_ID, 'blob')   // 共享：merge-reports 只接受一个目录
   const evidenceRoot = path.join(SLOTS_ROOT, RUN_ID)       // 日志与 JSON 住在 slot 目录之外
+  // 密钥要 ≥32 字节：PyJWT 对 HMAC-SHA256 短密钥**每次签发/校验都打一条 InsecureKeyLengthWarning**，
+  // 实测每条用例刷 4 行进 run.log —— 取证日志被噪声淹没（而 run.log 正是崩池轮唯一的现场）。
   const manifests = ports.map((p, i) => buildSlotManifest({
     index: i, ports: p, slotRoot: path.join(SLOTS_ROOT, RUN_ID, `slot${i}`), templateRoot: TEMPLATE,
-    redisDb: 12 + i, secretKey: `e2e-slot-${i}-${RUN_ID}`, blobRoot, evidenceRoot,
+    redisDb: 12 + i, secretKey: `e2e-slot-${i}-${RUN_ID}-padded-to-32bytes`, blobRoot, evidenceRoot,
   }))
   manifests.forEach(prepareSlot)
 
