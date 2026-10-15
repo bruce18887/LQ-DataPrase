@@ -21,7 +21,10 @@ CHILD = (
     "import json,tempfile,django;"
     "django.setup();"
     "from django.conf import settings as s;"
-    "print(json.dumps({'db':str(s.DATABASES['default']['NAME']),"
+    "from django.db import connection;"
+    "connection.ensure_connection();"        # 真的建一次连接：只有覆盖 NAME 而留 postgres ENGINE 会在这里炸
+    "print(json.dumps({'vendor':connection.vendor,"
+    "'db':str(s.DATABASES['default']['NAME']),"
     "'media':str(s.MEDIA_ROOT),'temp':str(tempfile.tempdir)}))"
 )
 
@@ -44,6 +47,7 @@ class E2eSlotSettingsTests(SimpleTestCase):
         out = run_settings('config.settings.e2e_slot', {'LQDP_E2E_SLOT_DIR': str(slot)})
         self.assertEqual(out.returncode, 0, out.stderr)
         parsed = json.loads(out.stdout.strip().splitlines()[-1])
+        self.assertEqual(parsed['vendor'], 'sqlite', 'slot 档必须真的用 sqlite，而不是继承 base 的 postgres')
         self.assertEqual(nc(parsed['db']), nc(str(slot / 'db.sqlite3')), parsed['db'])
         self.assertEqual(nc(parsed['media']), nc(str(slot / 'media')), parsed['media'])
         self.assertEqual(nc(parsed['temp']), nc(str(slot / 'temp')), parsed['temp'])
@@ -74,5 +78,6 @@ class E2eSlotSettingsTests(SimpleTestCase):
         out = run_settings('config.settings.development', {'LQDP_SYSTEM_CONFIG_FILE': str(cfg)})
         self.assertEqual(out.returncode, 0, out.stderr)
         parsed = json.loads(out.stdout.strip().splitlines()[-1])
+        self.assertEqual(parsed['vendor'], 'sqlite')
         self.assertEqual(nc(parsed['db']), nc(str(ROOT / 'db.sqlite3')), parsed['db'])
         self.assertEqual(nc(parsed['media']), nc(str(ROOT / 'media')), parsed['media'])
