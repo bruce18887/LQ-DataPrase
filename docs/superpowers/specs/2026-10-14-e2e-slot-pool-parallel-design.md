@@ -335,6 +335,10 @@ N=2 一档**没测**（§8-1 要求 N=1/2/4 三档加速比，只补上了 N=1 �
 连续三轮（`065710` / `070503` / `083337`，同机同模板同分区）红集合**完全一致**：
 `analysis/histogram-fail-bins.spec.ts` + `exports/html-report.spec.ts`，
 且三条都在独占复跑中**转绿** ⇒ 判为负载抖动（真红 0，不拦门禁，进 flake 账）。
+第四轮 `084954-53536`（7.8min / 单价 3.18s / 效率 2.46 / unexpected 2）红集合**仍是这两条**
+⇒ 一致性与有没有掉线无关，四轮都成立。
+该轮四个 slot 的 `preview-slot<i>.log` **零条 exit 行**、`preview-slot<i>.err.log` 全空
+⇒ 这一轮没有 fastfail；同时也证明健康轮里 stderr 通路是通的（文件建了、没人往里写）。
 逐文件耗时差实测最大 **±8.5s**（`sftp/search` 72.4→63.9），top8 全在 ±10s 内 ⇒ 分桶没有漂移。
 两轮的 `files` 键集差一个 `analysis/correlation-matrix-default-cap.spec.ts` —— 不是漏跑：
 它全文只有 1 条用例，且自带数据条件跳过（`:38` `test.skip(parsed.total <= 12, …)`），
@@ -355,6 +359,21 @@ E 轮选中的文件参数不足 ⇒ 那 1 条跳过 ⇒ 该文件没有一条**
 | `070503` | 21001/22001 | — | — | MEASURED |
 | `073154` | 21001/22001 | **slot1 + slot2 preview** | 60s / 160s | VOID |
 | `083337` | 21001/22001 + **监督器** | slot0 preview **fastfail 后 1.06s 重生** | 235s | **MEASURED（不再作废）** |
+| `084954` | 21001/22001 + 监督器 | — （记账本零条 exit） | — | MEASURED |
+| `090041` | 21001/22001 + 监督器 | slot3 preview **fastfail 后 1.0s 重生** | 89s | **MEASURED**（8.0min / 真红 0） |
+
+第二次抓到 fastfail，两条**负结果**把它收窄了不少：
+
+1. **不是 V8 堆溢出，也不是 JS 异常**：`preview-slot3.err.log` 是 **0 字节** —— 而 stderr 现在是
+   **直接给子进程一个文件 fd**（不再经管道），所以"没刷出来"这个解释已经用尽：
+   V8 的 `FATAL ERROR: Reached heap limit` 与任何未捕获 JS 异常都会先往 stderr 打东西。
+   ⇒ 剩下的是**原生侧的 `abort()` / `__fastfail`，且它不打字**（本项目 vite 带着 rolldown 原生绑定）。
+2. **当场那条用例被重试吸收，重生确实救了整轮**：死亡时在跑的是
+   `analysis/analysis.spec.ts:171`「异常值处理默认为不处理」→ 16.3s 失败，
+   重生后 `retry #1` **2.0s 通过**；该轮 unexpected 只剩那两条一贯的负载敏感文件。
+3. **"重流量打死代理"这个说法也被削弱**：重生后的新实例**接着服务同样形状的 qqplot/histogram 大响应**
+   （27–37KB 连发）毫无异常 ⇒ 大响应本身不是充分条件。死亡时刻的共性只剩「都在分析页图表流量附近」，
+   而 t11-a 那次在跑的其实是 `settings/hidden-columns` —— 共性不够强，不能当线索用。
 
 **掉线时新基址已经在临时端口区间之外 ⇒ 「端口被当临时端口发出去」这个假设被否证**（§6 那条已按实测定性为端口卫生）。
 两次干净没有信息量：改动前的复发率本来就只有约一半，n=2 区分不了修复与运气 —— 这是我的方法错误，已入 lessons。
@@ -365,8 +384,10 @@ preview 的 stderr **一条异常都没有**；本机 `Application` 日志无 10
 ⇒ 当时写的「被外部结束，非自崩」**后来被推翻了**：套上 preview 监督器（直起 vite、不经 npm 壳）之后，
 轮 `083337-964` 的记账本记到 `exit code=3221226505 (0xC0000409)` = `STATUS_STACK_BUFFER_OVERRUN`，
 即进程**自己 fastfail**；而同日探针实测 `taskkill /F` 的形状是 `code=1 (0x1)` —— 两个码分得开。
-「stderr 零异常」之所以骗了我两轮：子进程 stdio 继承给管道时，fastfail 会**连未刷出的缓冲一起带走**，
-遗言根本到不了 `run.log`（改成把 stderr 直接给文件 fd 后，用一次刻意的失败验过能留全文）。
+「stderr 零异常」骗了我两轮，而我给出的**第二个解释也被否证**了：先以为是"stdio 走管道时 fastfail 连未刷出的
+缓冲一起带走"，于是把子进程 stderr 改成**直接给文件 fd**；轮 `090041` 再次 fastfail 时
+`preview-slot3.err.log` 仍是 **0 字节**（同一通路用一次刻意的 `--config does-not-exist.ts` 失败验过能留全文）
+⇒ 它**真的一个字都没打印**，是原生侧不打字的 `abort()`/`__fastfail`，不是 V8 OOM 也不是 JS 异常。
 ⇒ 现在的定性是「**in-process failfast**，具体是哪一种 fatal 待下一轮的 `.err.log` 说话」，
 而不是"外部杀进程"。基址改动仍只作端口卫生保留。
 
@@ -374,7 +395,8 @@ preview 的 stderr **一条异常都没有**；本机 `Application` 日志无 10
 **也与"外部杀进程"无关**（`0xC0000409` vs `taskkill` 的 `code=1`，两个码不同）。
 
 **已拍板并已落地**（用户选「监督器：记录+自动重生」）：`scripts/e2e_preview_supervised.mjs` 直起 vite、
-记退出码与信号、额度内重生；stderr 单独落 `preview-slot<i>.err.log`（管道会吞 fastfail 的遗言）。
+记退出码与信号、额度内重生；stderr 单独落 `preview-slot<i>.err.log`（换文件 fd 是为了能区分"没打印"与"没接住"，
+实测结论是**前者** —— 见 §13.3）。
 效果实测：`083337` 那轮 fastfail 一次仍照常出结论。夜间 cron **暂不注册**（用户定），等 `.err.log`
 抓到具体是哪一种 fatal 再决定"修 vite 的用法"还是"只靠重生兜着"。
 另一条候选方案（掉线时把该 slot 未跑完的文件重新排队）因此**暂不做** —— 重生已经把整轮作废消掉了。
