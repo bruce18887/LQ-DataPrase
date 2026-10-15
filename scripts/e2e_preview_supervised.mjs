@@ -20,6 +20,9 @@ import path from 'node:path'
 
 const CMD = process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe'
 const LOG = process.env.E2E_PREVIEW_LOG || ''
+// vite 自己的 stderr 落这里（默认从记账本名字派生），与"记账本"分开：
+// 记账本是监督器写的结构化行，stderr 是被监督进程的最后遗言 —— 后者才是找病根要的东西。
+const ERR_LOG = process.env.E2E_PREVIEW_ERR_LOG || (LOG ? LOG.replace(/\.log$/, '.err.log') : '')
 const MAX_RESTART = Number(process.env.E2E_PREVIEW_MAX_RESTART ?? 3)
 const RESPAWN_DELAY_MS = Number(process.env.E2E_PREVIEW_RESPAWN_DELAY_MS ?? 1000)
 /**
@@ -50,17 +53,33 @@ function treeKill(pid, why) {
   } catch (e) { note(`treeKill 失败: ${e.message}`) }
 }
 
+const errFd = ERR_LOG ? (() => { try { return fs.openSync(ERR_LOG, 'a') } catch { return null } })() : null
+
+/**
+ * 退出码按十六进制一起记：3221226505 这种十进制没人认得，`0xC0000409` 才看得出是
+ * STATUS_STACK_BUFFER_OVERRUN / `__fastfail`（CRT `abort()`、V8 fatal 都走这条）。
+ * 实测 2026-10-15：轮 `083337-964` 的 slot0 preview 就是这么死的，而 `taskkill /F` 的对照形状是
+ * **code=1**（见 `tasks/e2e-slot-probe/probe-supervisor.mjs`）⇒ 十进制码能直接区分
+ * 「外部终止」与「进程自己 fastfail」，此前我把这两者搞反了。
+ */
+const hexOf = (code) => (code == null ? '' : ` (0x${(code >>> 0).toString(16).toUpperCase()})`)
+
 function start() {
   const t0 = Date.now()
   const n = restarts + 1
-  const child = spawn(process.execPath, [VITE_BIN, ...VITE_ARGS], { cwd: process.cwd(), stdio: 'inherit', env: process.env })
+  // stderr 单独落文件（不跟随 inherit 进 Playwright 的管道）：fastfail 会**绕过管道里未刷出的缓冲**，
+  // 上一轮 `FATAL ERROR/heap limit` 一类字样就是这样丢的 —— run.log 里一个字都没有，
+  // 于是我被"零输出"骗成"被外部终止"。直接给子进程一个文件 fd，最后一行才留得下来。
+  const child = spawn(process.execPath, [VITE_BIN, ...VITE_ARGS], {
+    cwd: process.cwd(), stdio: ['ignore', 'inherit', errFd ?? 'inherit'], env: process.env,
+  })
   childPid = child.pid
   note(`child pid=${childPid} 第 ${n} 次启动 ${process.execPath} ${[VITE_BIN, ...VITE_ARGS].join(' ')}`)
 
   child.on('error', (e) => note(`spawn error pid=${childPid}: ${e.message}`))
   child.on('exit', (code, signal) => {
     const lifeMs = Date.now() - t0
-    note(`exit pid=${childPid} code=${code} signal=${signal} 存活=${lifeMs}ms 第 ${n} 次`)
+    note(`exit pid=${childPid} code=${code}${hexOf(code)} signal=${signal} 存活=${lifeMs}ms 第 ${n} 次`)
     childPid = null
     if (closing) { process.exit(code ?? 0); return }
     // 秒退通常意味着端口/包没准备好，重生只会刷日志 —— 让编排器按 INFRA 处理而不是无限重启

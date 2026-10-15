@@ -593,7 +593,10 @@ e2e 库里 admin 实测停在 `filename_wrap=False`、`page_size=200`、`cpk_a/b
 ## slot preview 掉线：一次否掉的假设 + 仍然成立的端口卫生（2026-10-15）
 
 掉线形状（六轮里四轮出现，每次 1–2 个 slot）：整条 `cmd→npm→vite` 进程链消失、**同 slot 的 Django 仍在服务**、
-preview 的 stderr 一条异常都没有、本机 `Application` 日志无 1000/1001 崩溃记录 ⇒ 是被外部结束的，不是自己崩。
+preview 的 stderr 一条异常都没有、本机 `Application` 日志无 1000/1001 崩溃记录。
+**当时据此说"是被外部结束的，不是自己崩"—— 这条推断错了**，见本节末尾那条管道教训：
+2026-10-15 的监督器记账本给出的是 `code=3221226505 (0xC0000409)`，即进程**自己 fastfail**；
+而 `taskkill /F` 的对照形状是 `code=1`。零异常输出只是因为遗言留在了管道里没刷出来。
 
 **当时据以推断的那条线索**：判死当场抓的 netstat 里，掉线端口挂着上百条**客户端端口 1044–14426** 的 TIME_WAIT；
 而 `netsh int ipv4 show dynamicport tcp` 显示该机临时端口区间 = **起始 1024 / 数量 13977**（覆盖 1024–15000），
@@ -629,13 +632,22 @@ slot 模式下 Playwright 的 preview webServer 不再是 `npm run preview`，�
 | 形状 | 读法 |
 |---|---|
 | 只有启动行、**没有 exit 行** | **正常收尾**。Playwright 结束时对整棵树 `taskkill /F /T`，Windows 下监督器来不及写日志就被带走 —— 缺席本身就是信号 |
-| 有 `exit code=1 signal=null`，且**时刻在跑测中途** | **vite 单独被外部终止**（与探针里我手动 `taskkill /F /PID` 的形状逐字相同）⇒ 掉线是真的被杀，不是崩 |
-| 有 `exit` 且同一时刻 `slot<i>.run.log` 里有 JS 栈 | 自己崩（迄今**从未**观察到，这是排除"崩溃"那条的证据来源） |
+| `exit code=1 (0x1)` 在跑测中途 | **被外部 `taskkill /F`**（探针实测的对照基线） |
+| `exit code=3221226505 (0xC0000409)` | **进程自己 fastfail** —— `STATUS_STACK_BUFFER_OVERRUN`，CRT `abort()` 与 V8 fatal 都走这个码。实测轮 `083337-964` 的 slot0 就是这个（存活 235s） |
+| 有 `exit` 且 `preview-slot<i>.err.log` 里有 `FATAL ERROR/heap limit` 或栈 | 具体死因（该文件是 2026-10-15 之后才有的：见下面那条管道教训） |
 | 多行 `⇒ 重新起 preview` 后仍有 exit | 崩溃循环/端口被占，重生额度（默认 3）用尽后监督器自己退出，该 slot 之后成片拒连 |
 
-重生是**有意的缓解**：一次失联不再让整轮作废（在秒失败 151 条红和"慢一点但出结论"之间选了后者）。
-代价是重生瞬间在跑的那条用例会红 —— 由已有的独占复跑判级吸收成负载抖动。
-存活不足 3s 且不是第一次 ⇒ 不再重生（那是端口/包的问题，重启只会刷日志）。
+⚠ **一条把我骗了两轮的方法教训**：原先"`[WebServer]` 里零异常 ⇒ 它是被外部结束的，不是自己崩"是**错的**。
+`stdio` 继承给 Playwright 的**管道**时，`__fastfail` 会**绕过未刷出的缓冲**，遗言根本到不了 `run.log`。
+所以"零输出"只等于"我没接住"，不等于"没有输出"。修法：监督器把子进程 stderr **直接给一个文件 fd**
+（`preview-slot<i>.err.log`），2026-10-15 用 `--config does-not-exist.ts` 造一次失败验过：
+完整的 `Error: Build failed…` + 调用栈逐字留在文件里，而那种失败在管道形态下是拿不到的。
+
+重生已被证明是**有效的缓解**而不是掩盖：`083337-964` 那一轮 slot0 的 preview 在 235s 时 fastfail，
+监督器 1.06s 内起了新的（`run.log` 里紧接着重新出现 `➜ Local: http://localhost:22001/` 横幅），
+整轮照样出结论 —— **384 例 / 7.4min / 单价 3.14s / 真红 0 / unexpected 2**，
+红文件与上一批 D、E 两轮**逐条相同**（`histogram-fail-bins` + `html-report`，复跑双双转绿）。
+没有监督器时，同一件事的形状是 `073154` 那轮的 **151 条假红 + 整轮 VOID**。
 
 口径两条，读产物时要知道：
 
