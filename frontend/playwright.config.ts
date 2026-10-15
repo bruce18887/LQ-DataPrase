@@ -177,11 +177,15 @@ export default defineConfig({
           // build + preview：dev 每次导航要拉数百模块，~350 次 goto 的累计开销显著，
           // 且 6 workers 曾压垮 dev server，见 lessons）。
           // E2E_SKIP_BUILD=1 由 slot 编排器注入：包已经 build 过一次，N 个进程各 build 一遍是纯浪费。
+          // slot 模式再套一层监督器（`scripts/e2e_preview_supervised.mjs`）：preview 会无声消失，
+          // Playwright 直接起 npm 时**没人记退出码**，而重生一次就能省下整轮（6 轮里 4 轮作废的账）。
           command: USE_DEV_SERVER
             ? 'npm run dev'
-            : process.env.E2E_SKIP_BUILD === '1'
-              ? 'npm run preview'
-              : 'npm run build && npm run preview',
+            : CURRENT_SLOT
+              ? `${process.env.E2E_SKIP_BUILD === '1' ? '' : 'npm run build && '}node ../scripts/e2e_preview_supervised.mjs`
+              : process.env.E2E_SKIP_BUILD === '1'
+                ? 'npm run preview'
+                : 'npm run build && npm run preview',
           cwd: __dirname,
           url: FRONTEND_URL,
           reuseExistingServer: !process.env.CI && !CURRENT_SLOT,

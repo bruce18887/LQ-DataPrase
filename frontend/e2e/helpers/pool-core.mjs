@@ -137,6 +137,9 @@ export function slotEnv(manifest, baseEnv = process.env) {
     SFTP_SESSION_REDIS_URL: `redis://localhost:6379/${manifest.redisDb}`,
     E2E_PORT: String(manifest.backendPort),
     E2E_FRONTEND_PORT: String(manifest.frontendPort),
+    // preview 监督器的记账本，落在证据区（slot 镜像目录之外，收尾 rmSync 不会连证据一起删）：
+    // 每次 preview 结束的 pid/code/signal/存活时长都在里面，掉线那一轮的形状靠它对质。
+    E2E_PREVIEW_LOG: path.join(path.dirname(manifest.logFile), `preview-slot${manifest.index}.log`),
     CI: '1',
   }
 }

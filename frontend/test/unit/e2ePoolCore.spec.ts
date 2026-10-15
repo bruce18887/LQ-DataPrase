@@ -256,6 +256,19 @@ describe('buildSlotManifest + slotEnv', () => {
     const env = slotEnv(m, {})
     expect(env.LQDP_SKIP_STORAGE_MIGRATION).toBeUndefined()
   })
+  it('preview 监督器的日志住在证据区，不在会被收尾 rmSync 的 slot 镜像里', () => {
+    // 同 run.log/results.json 那条教训：最需要日志的那轮，别把证据一起删了。
+    const withEv = buildSlotManifest({
+      index: 1, ports: { backend: 21002, frontend: 22002 },
+      slotRoot: 'C:\\lqdp-e2e\\slots\\r9\\slot1', templateRoot: 'C:\\lqdp-e2e\\template',
+      redisDb: 13, secretKey: 'k', evidenceRoot: 'C:\\lqdp-e2e\\slots\\r9',
+    })
+    const env = slotEnv(withEv, {})
+    const previewLog = env.E2E_PREVIEW_LOG as string
+    expect(previewLog).toBe('C:\\lqdp-e2e\\slots\\r9\\preview-slot1.log')
+    expect(previewLog.startsWith(withEv.dataDir)).toBe(false)
+    expect(path.dirname(previewLog)).toBe(path.dirname(withEv.logFile))
+  })
   it('给了共享 blobRoot 时所有 slot 的 blobDir 指同一目录（merge-reports 只接受一个目录）', () => {
     const shared = 'C:\\lqdp-e2e\\slots\\r1\\blob'
     const mk = (index: number) => buildSlotManifest({

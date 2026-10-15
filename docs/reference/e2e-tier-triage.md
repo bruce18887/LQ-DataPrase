@@ -615,6 +615,28 @@ preview 的 stderr 一条异常都没有、本机 `Application` 日志无 1000/1
 **方法级教训（比结论更值钱的那条）**：改动前的复发率只有约一半时，「改完两轮没复发」的证据强度接近于零 ——
 需要的是 n 足够到能区分运气。这条已经写进 lessons 2026-10-15。
 
+### preview 监督器的记账本怎么读（2026-10-15 加，`scripts/e2e_preview_supervised.mjs`）
+
+slot 模式下 Playwright 的 preview webServer 不再是 `npm run preview`，而是监督器**直起 vite**
+（`node node_modules/vite/bin/vite.js preview`）。理由由探针定的：`cmd /c npm run preview` 这层壳
+**活得比它的 vite 久**（杀掉 vite 之后壳才以 code=1 退出，实测壳存活 152s、壳退出记录 code=1/signal=null），
+拿壳当被监督对象的话，"子进程退出"这个信号既滞后又分不清死的是谁。
+直起 vite 后实测**我的直接子进程 PID == 端口上的监听 PID**（`probe-supervisor.mjs` 逐次核过），
+所以记账本里的 code/signal 就是服务本身的。
+
+`<证据区>/preview-slot<i>.log`（在 slot 镜像之外，收尾不会被 `rmSync` 带走）四种形状：
+
+| 形状 | 读法 |
+|---|---|
+| 只有启动行、**没有 exit 行** | **正常收尾**。Playwright 结束时对整棵树 `taskkill /F /T`，Windows 下监督器来不及写日志就被带走 —— 缺席本身就是信号 |
+| 有 `exit code=1 signal=null`，且**时刻在跑测中途** | **vite 单独被外部终止**（与探针里我手动 `taskkill /F /PID` 的形状逐字相同）⇒ 掉线是真的被杀，不是崩 |
+| 有 `exit` 且同一时刻 `slot<i>.run.log` 里有 JS 栈 | 自己崩（迄今**从未**观察到，这是排除"崩溃"那条的证据来源） |
+| 多行 `⇒ 重新起 preview` 后仍有 exit | 崩溃循环/端口被占，重生额度（默认 3）用尽后监督器自己退出，该 slot 之后成片拒连 |
+
+重生是**有意的缓解**：一次失联不再让整轮作废（在秒失败 151 条红和"慢一点但出结论"之间选了后者）。
+代价是重生瞬间在跑的那条用例会红 —— 由已有的独占复跑判级吸收成负载抖动。
+存活不足 3s 且不是第一次 ⇒ 不再重生（那是端口/包的问题，重启只会刷日志）。
+
 口径两条，读产物时要知道：
 
 1. **`merged.files` 只累加「通过的 attempt」的时长**（`statsOf:234-237`）⇒ 一个文件如果全红/全跳，
