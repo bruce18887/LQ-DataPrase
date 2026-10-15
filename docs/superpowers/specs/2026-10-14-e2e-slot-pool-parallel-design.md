@@ -87,10 +87,15 @@ scripts/e2e_pool.mjs                     ← 新增：池编排器（并行全�
   └─ ⑤ 合并      blob → merge-reports → 单一 results.json + playwright-report
 ```
 
-**slot 目录**（每 slot 独占，`%TEMP%\lqdp-e2e-slot-<i>\`）
+**slot 目录**（每 slot 独占，`C:\lqdp-e2e\<run>\slot<i>\`；`LQDP_E2E_ROOT` 可覆盖）
 
-- `db.sqlite3` ← 模板库**整文件拷贝**（实测 2.95MB）。指给它的是新增的 `config/settings/e2e_slot.py`
-  （`DATABASES['default']['NAME'] = <slot>/db.sqlite3`），**不是** `data_dir` 重定向 —— 理由见 §4.1。
+基址刻意选短路径：**Django 对 sqlite 也执行 63 字符库名检查**，实测
+`%TEMP%\lqdp-e2e-probe-<ISO>\db.sqlite3`（89 字符）会让 `migrate` 直接 `ImproperlyConfigured`。
+短基址同时保证与仓库同卷（C:），硬链才可用。
+
+- `db.sqlite3` ← 模板库**整文件拷贝**（实测 2.94MB / 2ms）。指给它的是新增的 `config/settings/e2e_slot.py`
+  （整体给出 sqlite 配置并把 `NAME` 指向 slot —— `base` 档的 `DATABASES` 是 PostgreSQL 形状，只覆盖 `NAME` 会去连 5432），
+  **不是** `data_dir` 重定向 —— 理由见 §4.1。
 - `media/` ← 对模板 media 做**硬链镜像**（实测 87 文件 / 711MB 种子；元数据操作、不占磁盘、不搬数据；同卷 C:）。
 - `system-config.json` ← 内容固定 `{"data_dir": "<仓库根>"}`，即与今天 e2e 完全相同的**空操作**配置
   （`data_target == orig` ⇒ 不触发迁移）；slot 的真实路径来自 `LQDP_E2E_SLOT_DIR`。
@@ -159,7 +164,7 @@ for k in ('TMP', 'TEMP', 'TMPDIR'): os.environ[k] = tempfile.tempdir    # slot �
 |---|---|---|---|
 | SQLite 库 | 仓库根单库，globalSetup 跑 `migrate`+seed（`e2e/global-setup.ts:40-46`） | 每 slot 一份模板拷贝，路径由新增的 `config/settings/e2e_slot.py` 直接指定（**不经 `data_dir` 重定向**，§4.1）；slot 模式下 globalSetup 跳过 migrate/seed | 新增 settings 档 + `global-setup.ts` 加分支 |
 | 账号持久态 | 全体用例共用一个 admin 行 | 每 slot 是自己的库副本，同名行的**副本**，写回互不可见 | 无 |
-| 上传与删除 | `media/data/admin/…`，只清 `e2e_` 前缀；**删记录会 `os.remove` 盘文件并向上 rmdir 空目录到 MEDIA_ROOT**（`_helpers.py:191-207`，批次走 rmtree） | 硬链镜像 ⇒ 上传写新 inode、删除只摘本 slot 的链，模板与其它 slot 的输入不受影响 | slot 目录构造 |
+| 上传与删除 | `media/data/admin/…`，只清 `e2e_` 前缀；**删记录会 `os.remove` 盘文件并向上 rmdir 空目录到 MEDIA_ROOT**（`_helpers.py:191-207`，批次走 rmtree） | 硬链镜像 ⇒ 上传写新 inode、删除只摘本 slot 的链，模板与其它 slot 的输入不受影响（探针实测三条语义）。**唯一例外**：向镜像里**已存在的种子文件名**覆盖写会经共享 inode 连带改模板（实测 5.3MB→64B）—— 现有套件不可达（上传一律 `e2e_<用途>_<Date.now()>.csv` 唯一名），故列为**不变量**：slot 模式下任何用例不得写入 `media/data/<user>/{single,batch}` 内已存在的种子路径 | slot 目录构造 |
 | storageState / token | 一份 `admin.json` 开跑时铸（`playwright.config.ts:100,109,116,123`） | 每 slot 各自铸；**per-slot `SECRET_KEY` 是必需的**：每份副本里 user PK 都是 1，共用默认密钥时 slot A 的 token 能在 B 认证，端口搞错会从 401 变成**静默写别人的库** | config 4 处路径 + env |
 | `temp_dir` | `apply_system_config` 把 `TMP/TEMP/TMPDIR` 与 `tempfile.tempdir` 统一指向 `%TEMP%\LQ-DataPrase-Temp`（`system_config.py:394-409`）—— 4 个 slot 会同享一个临时区 | 由 settings 档覆写：`tempfile.tempdir` 与三个 env 都指向 `<slot>/temp`（不走配置文件的 `temp_dir` 字段，避免顺带触发 `data_dir` 那条通路） | 新增 settings 档内 3 行 |
 | SFTP 会话缓存 | key `sftp:conn:<user_id>`（`apps/sftp/cache.py:43,116`），URL 解析 `SFTP_SESSION_REDIS_URL`→`REDIS_URL`→`CELERY_BROKER_URL`（`cache.py:64-67`、`base.py:271,277`） | **每 slot 一个 Redis db index**。今天 Redis 没起、降级进程内 LocMem（`cache.py:75`）所以还没炸；一旦 Redis 起来，4 份副本的 `user_id` 相同 ⇒ 直接串号 | env |

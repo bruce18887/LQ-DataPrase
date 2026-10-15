@@ -16,6 +16,15 @@
 - 每个 slot 进程内固定 `--workers=1`：现有 helper 全部按串行调校，一行不改（spec §3）。
 - slot 数默认 4，`E2E_SLOTS`/`--slots` 可调，上限 6；每 slot 预算 ≈1GB RAM（机器 32GB / 28 逻辑核）。
 - 端口对基址：backend `8101+i`、frontend `3101+i`；不足即 fail fast，**绝不静默复用别人在跑的服务**。
+- **slot/模板根必须短**：基址 `C:\lqdp-e2e`（`LQDP_E2E_ROOT` 覆盖）。Django 对 sqlite 也执行 63 字符库名检查，
+  `%TEMP%\lqdp-e2e-probe-<ISO>\db.sqlite3` = 89 字符会让 `migrate` 直接 `ImproperlyConfigured`（P0 实测）。
+  短基址同时保证与仓库同卷（C:），硬链才可用。
+- **路径比较一律用 `fs.realpathSync.native`**：`os.tmpdir()` 返回 8.3 短名（`C:\Users\ADMINI~1\…`）而 Django 解析成
+  长名，普通 `realpathSync` 不展开短名 —— 守卫会假阳性把好路径判成越界（P0 就是这样红过两次）。
+- **`base` 档的 `DATABASES` 是 PostgreSQL**（`config/settings/base.py:116`），sqlite 是 `development` 才改的 ⇒
+  slot 档必须整体给 sqlite 配置；只覆盖 `NAME` 会去连 5432。契约测试里要有 `vendor == 'sqlite'` 且真 `ensure_connection()`。
+- **上传文件名一律唯一前缀**（`e2e_<用途>_<Date.now()>.csv`，R2③ 已有规则）：硬链镜像下覆盖写「已存在的种子路径」
+  会连带改模板（P0 实测 5.3MB→64B），新文件名则是独立 inode 故安全。任何要写回同名种子文件的用例都是违规。
 - **slot 的库/媒体/临时区只由 `config/settings/e2e_slot.py` + `LQDP_E2E_SLOT_DIR` 决定，绝不通过 `data_dir` 重定向**：
   显式配一个不等于锚点的 `data_dir` 就会触发 `_migrate` 的「copy → verify → unlink 源 + rmtree media」（
   `apps/common/system_config.py:385-391,166-212`），而 `LQDP_SKIP_STORAGE_MIGRATION` **挡不住它**（该开关只管
@@ -375,6 +384,12 @@ migrate/seed/拷库/硬链四个耗时、`副本自检: integrity=ok … rows=87
 git add docs/reference/e2e-tier-triage.md docs/superpowers/specs/2026-10-14-e2e-slot-pool-parallel-design.md
 git commit -m "docs(e2e): slot 池 P0 实测数字 —— 模板/硬链/拷库耗时与 WAL sidecar 现状"
 ```
+
+> **Task 1 已于 2026-10-14 执行完成**（`config/settings/e2e_slot.py` + 5 条契约测试见 `88b348f`；实测数字与
+> 三条机制级发现见 `docs/reference/e2e-tier-triage.md`「slot 池 P0 实测」）。与上文代码的三处实际差异，
+> 后续任务按实测版走：① 基址是 `C:\lqdp-e2e\p<base36>` 而不是 `%TEMP%\…`（63 字符库名限制）；
+> ② 路径守卫用 `fs.realpathSync.native` 并先向上找已存在祖先；③ 硬链第三条语义（覆盖写已存在种子路径会连带改模板）
+> 是**如实记录**而不是断言通过，配套不变量见 Global Constraints。
 
 ---
 
@@ -864,8 +879,10 @@ import {
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const FRONTEND = path.join(ROOT, 'frontend')
 const PY = process.env.PYTHON_BIN || path.join(ROOT, '.venv', 'Scripts', 'python.exe')
-const TEMPLATE = process.env.LQDP_E2E_TEMPLATE_DIR || path.join(os.tmpdir(), 'lqdp-e2e-template')
-const SLOTS_ROOT = path.join(os.tmpdir(), 'lqdp-e2e-slots')
+// 短基址是硬要求：Django 对 sqlite 也查 63 字符库名（见 Global Constraints）
+const E2E_BASE = process.env.LQDP_E2E_ROOT || 'C:\\lqdp-e2e'
+const TEMPLATE = path.join(E2E_BASE, 'template')            // C:\lqdp-e2e\template\db.sqlite3 = 36 字符
+const SLOTS_ROOT = path.join(E2E_BASE, 'slots')
 const PORT_SPAN = 60
 const RUN_ID = new Date().toISOString().replace(/[:.]/g, '')   // 每次运行一套全新 slot 目录，绝不复用/预删
 const log = (...a) => console.log('[pool]', ...a)
