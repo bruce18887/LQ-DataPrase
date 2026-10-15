@@ -162,6 +162,19 @@ export function nextLivenessState({ misses = 0, dead = false }, probeOpen, child
 }
 
 /**
+ * 调用方透传给 Playwright 的额外参数（如 `--project=P0 --grep=@p0`）。
+ * 池的文件参数走 `--` 之后，两者混在一起会把开关当成文件分进桶（affected 就是这么拼的），
+ * 所以另开一条通道，并在这里把关 —— 编排器用 shell 起 npx，不安全 token 一律拒绝。
+ */
+export function parsePassthrough(str) {
+  const toks = String(str ?? '').trim().split(/\s+/).filter(Boolean)
+  for (const t of toks) {
+    if (/["'`$&|;<>\\()\n]/.test(t)) throw new Error(`透传参数含不安全字符：${t}`)
+  }
+  return toks
+}
+
+/**
  * 红文件的自动复跑判级（用户 2026-10-15 拍：门禁仍要求零真红，但负载抖动要自动消化）。
  * 输入是第一轮报红的文件清单 + 每个文件「独占一个 slot 复跑」的结果，输出三级：
  *   confirmed   复跑仍红 ⇒ 真红，门禁拦

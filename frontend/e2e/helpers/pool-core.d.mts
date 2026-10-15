@@ -140,6 +140,9 @@ export interface ParsedArgs {
 
 export declare function parseArgs(argv: string[], defaults?: Record<string, unknown>): ParsedArgs
 
+/** 透传给 Playwright 的开关（走 E2E_PW_ARGS，不混进 `--` 后的文件表）；含 shell 元字符就抛 */
+export declare function parsePassthrough(str?: string): string[]
+
 export declare function buildSlotManifest(args: {
   index: number
   ports: SlotPortPair

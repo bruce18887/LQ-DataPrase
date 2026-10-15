@@ -20,7 +20,7 @@ import {
   MAX_SLOTS, SERIAL_REF_PER_SPEC_MS, SLOT_BACKEND_BASE, SLOT_FRONTEND_BASE,
   allocatePortBlock, assertSafeRelPath, autoSlots, buildSlotManifest, classifyReds, classifySlotHealth, mergeRunStats,
   LIVENESS_MISSES, LIVENESS_TIMEOUT_MS, nextLivenessState,
-  normalizeTotalMs, parseArgs, partitionFiles, roundVerdict, slotEnv,
+  normalizeTotalMs, parseArgs, parsePassthrough, partitionFiles, roundVerdict, slotEnv,
 } from '../frontend/e2e/helpers/pool-core.mjs'
 
 // Windows 上 npx/npm 是 .cmd，必须经 cmd.exe 起；一律用 argv 数组而不是拼 shell 字符串 ——
@@ -36,6 +36,7 @@ const PY = process.env.PYTHON_BIN || path.join(ROOT, '.venv', 'Scripts', 'python
 const E2E_BASE = process.env.LQDP_E2E_ROOT || 'C:\\lqdp-e2e'
 const TEMPLATE = path.join(E2E_BASE, 'template')
 const SLOTS_ROOT = path.join(E2E_BASE, 'slots')
+const PW_EXTRA = parsePassthrough(process.env.E2E_PW_ARGS)   // 调用方透传给 Playwright 的开关（走 env，不混进 `--` 后的文件表）
 const RUN_ID = new Date().toISOString().slice(11, 19).replace(/:/g, '') + `-${process.pid}`
 const PORT_SPAN = 60
 // 基址会进 cmd 的 argv 与 Django 的库名：空格/引号/元字符一律拒绝，别让它变成解析歧义
@@ -189,7 +190,7 @@ async function prefetchPorts() {
 function runSlot(m, files, timeoutMs, aliveFlags) {
   const out = fs.openSync(m.logFile, 'w')
   // reporter 与输出路径由 playwright.config 在 slot 模式下给出（blob/json 的目录只能走 reporter 选项）
-  const args = ['playwright', 'test', ...files.map((f) => assertSafeRelPath(`e2e/${f}`)), '--workers=1']
+  const args = ['playwright', 'test', ...files.map((f) => assertSafeRelPath(`e2e/${f}`)), '--workers=1', ...PW_EXTRA]
   fs.writeSync(out, `$ cmd /c npx ${args.join(' ')}\n(cwd=${FRONTEND}) (ports ${m.backendPort}/${m.frontendPort}) (slotDir=${m.dataDir})\n\n`)
   return new Promise((resolve) => {
     const child = spawn(CMD, ['/c', 'npx', ...args], {

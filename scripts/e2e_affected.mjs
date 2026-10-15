@@ -231,24 +231,37 @@ function backendLabels(files) {
   return [...labels]
 }
 
-function run(cmd, printCmd, cwd = FRONTEND) {
+function run(cmd, printCmd, cwd = FRONTEND, env = {}) {
   console.log(`\n$ ${printCmd}`)
   if (DRY) return 0
   // Windows 下 npm/npx 是 .cmd，必须走 shell；Git Bash 里 shell:true 同样可用。
-  const r = spawnSync(cmd, { cwd, stdio: 'inherit', shell: true })
+  const r = spawnSync(cmd, { cwd, stdio: 'inherit', shell: true, env: { ...process.env, ...env } })
   return r.status ?? 1
+}
+
+/**
+ * T3 一律走 slot 池（1 进程 = 1 worker = 1 slot，每 slot 独立库副本 / data_dir / 端口对）。
+ * 文件与目录进 `--` 之后；Playwright 开关经 E2E_PW_ARGS 透传 —— 混在文件表里会被当成
+ * 文件名分进桶（旧写法 `paths.concat(PW_EXTRA)` 就是这么拼的）。
+ * 改动集小时池的 autoSlots 自然退回 1 个 slot ⇒ 快门禁不必自己管并行度，旋钮只有 --slots/E2E_SLOTS。
+ */
+function runPool(filesArg, extraPwArgs = '') {
+  const cmd = 'node scripts/e2e_pool.mjs --slots=auto'
+  const pw = [TAIL, extraPwArgs].filter(Boolean).join(' ')
+  const printCmd = cmd + (filesArg ? ' -- ' + filesArg : '') + (pw ? `   [E2E_PW_ARGS="${pw}"]` : '')
+  return run(cmd, printCmd, ROOT, pw ? { E2E_PW_ARGS: pw } : {})
 }
 
 const changed = FILES ? { base: '--files（虚构改动集，仅判定）', files: FILES } : collectChanged()
 if (!changed) {
   console.log('FULL (reason: 无法确定 base —— 全量是唯一安全选择)')
-  process.exit(run(`npx playwright test ${TAIL}`, `npx playwright test ${TAIL}`) )
+  process.exit(runPool(''))
 }
 
 const d = decide(changed.files)
 const labels = backendLabels(changed.files)
 const selected = d.global ? null : [...d.modules].sort()
-const paths = selected ? selected.map((m) => `e2e/${m}`).concat(PW_EXTRA).join(' ') : ''
+const paths = selected ? selected.map((m) => `e2e/${m}`).join(' ') : ''
 // 附带 P0：只补跑未被模块覆盖的那部分模块，避免同一用例在两条命令里各跑一遍。
 const p0Paths = selected ? MODULES.filter((m) => !selected.includes(m)).map((m) => `e2e/${m}`).join(' ') : ''
 
@@ -293,9 +306,9 @@ if (RUN_BACKEND && labels.length) {
   }
 }
 if (d.global) {
-  code ||= run(`npx playwright test ${TAIL}`, `npx playwright test ${TAIL}`)
+  code ||= runPool('')
 } else if (selected.length) {
-  code ||= run(`npx playwright test ${paths}`, `npx playwright test ${paths}`)
-  if (p0Paths) code ||= run(`npx playwright test --project=P0 ${p0Paths} ${TAIL}`, `npx playwright test --project=P0 ${p0Paths} ${TAIL}`)
+  code ||= runPool(paths)
+  if (p0Paths) code ||= runPool(p0Paths, '--project=P0')
 }
 process.exit(code)

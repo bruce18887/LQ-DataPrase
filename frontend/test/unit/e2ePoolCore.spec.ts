@@ -6,7 +6,7 @@ import {
   SLOT_BACKEND_BASE, SLOT_FRONTEND_BASE, DEFAULT_SLOTS, MAX_SLOTS, SLOT_TARGET_MS,
   autoSlots, allocatePortBlock, partitionFiles, assertSafeRelPath, buildSlotManifest, slotEnv, mergeRunStats, parseArgs,
   normalizeTotalMs, SERIAL_REF_PER_SPEC_MS, classifySlotHealth, roundVerdict,
-  nextLivenessState, LIVENESS_MISSES, LIVENESS_TIMEOUT_MS, classifyReds,
+  nextLivenessState, LIVENESS_MISSES, LIVENESS_TIMEOUT_MS, classifyReds, parsePassthrough,
 } from '../../e2e/helpers/pool-core.mjs'
 
 describe('classifyReds（红文件自动复跑判级）', () => {
@@ -136,6 +136,18 @@ describe('常量', () => {
     expect(DEFAULT_SLOTS).toBe(4)
     expect(MAX_SLOTS).toBe(6)
     expect(SLOT_TARGET_MS).toBe(240_000)
+  })
+})
+
+describe('parsePassthrough（透传给 playwright 的开关，走 env 不混进文件表）', () => {
+  it('认常见开关，多个空格也归一', () => {
+    expect(parsePassthrough('--project=P0  --grep=@p0')).toEqual(['--project=P0', '--grep=@p0'])
+    expect(parsePassthrough(undefined)).toEqual([])
+  })
+  it('带 shell 元字符就抛 —— 编排器用 shell 起 npx，这里必须把关', () => {
+    for (const bad of ['--grep=a;b', '--grep=$(x)', '--grep=`id`', '--project="P0"', '--grep=(a)']) {
+      expect(() => parsePassthrough(bad)).toThrow(/不安全/)
+    }
   })
 })
 
