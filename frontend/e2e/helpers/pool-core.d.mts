@@ -68,6 +68,20 @@ export declare const SERIAL_REF_PER_SPEC_MS: number
 /** 把并发轮测出的总时长折回串行等价量；单价缺失/为 0 时原样返回 */
 export declare function normalizeTotalMs(rawTotalMs: number, perSpecMs?: number, refPerSpecMs?: number): number
 
+export interface SlotHealth {
+  slot: number
+  specs: number
+  unexpected: number
+  refusedCount: number
+}
+
+/** 'INFRA' = 连接级错误成堆，或红占该 slot 用例数过半且绝对数 ≥20 ⇒ 指标不可信 */
+export declare function classifySlotHealth(h: Partial<SlotHealth>): 'INFRA' | 'OK'
+export declare function roundVerdict(reports: Array<Partial<SlotHealth>>): {
+  verdict: 'VOID (infra)' | 'MEASURED'
+  infraSlots: number[]
+}
+
 export declare function autoSlots(totalMs: number, cap?: number): number
 
 export declare function allocatePortBlock(

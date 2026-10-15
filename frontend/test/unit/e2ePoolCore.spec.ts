@@ -5,7 +5,7 @@ import path from 'node:path'
 import {
   SLOT_BACKEND_BASE, SLOT_FRONTEND_BASE, DEFAULT_SLOTS, MAX_SLOTS, SLOT_TARGET_MS,
   autoSlots, allocatePortBlock, partitionFiles, assertSafeRelPath, buildSlotManifest, slotEnv, mergeRunStats, parseArgs,
-  normalizeTotalMs, SERIAL_REF_PER_SPEC_MS,
+  normalizeTotalMs, SERIAL_REF_PER_SPEC_MS, classifySlotHealth, roundVerdict,
 } from '../../e2e/helpers/pool-core.mjs'
 
 describe('normalizeTotalMs', () => {
@@ -49,6 +49,32 @@ describe('parseArgs', () => {
     const a = parseArgs(['--slot=3'])
     expect(a.slots).toBeUndefined()
     expect(a.unknown).toEqual(['--slot=3'])
+  })
+})
+
+describe('classifySlotHealth / roundVerdict', () => {
+  it('服务半路死掉那种成片红判 INFRA（实测：某轮 2 个 slot 掉线，refused 473 次、155 红）', () => {
+    expect(classifySlotHealth({ specs: 96, unexpected: 77, refusedCount: 240 })).toBe('INFRA')
+    expect(classifySlotHealth({ specs: 96, unexpected: 30, refusedCount: 6 })).toBe('INFRA')
+    expect(roundVerdict([
+      { slot: 0, specs: 96, unexpected: 0, refusedCount: 0 },
+      { slot: 1, specs: 96, unexpected: 77, refusedCount: 240 },
+    ])).toEqual({ verdict: 'VOID (infra)', infraSlots: [1] })
+  })
+  it('真回归不能被误判成 INFRA：40 条红但没有连接级错误 ⇒ 照实报成一轮有红的测量', () => {
+    expect(classifySlotHealth({ specs: 96, unexpected: 40, refusedCount: 0 })).toBe('OK')
+    expect(roundVerdict([{ slot: 0, specs: 96, unexpected: 40, refusedCount: 0 }]))
+      .toEqual({ verdict: 'MEASURED', infraSlots: [] })
+  })
+  it('少量偶发红与个别 strict mode 红都算正常轮', () => {
+    expect(classifySlotHealth({ specs: 96, unexpected: 2, refusedCount: 0 })).toBe('OK')
+    expect(roundVerdict([
+      { slot: 0, specs: 96, unexpected: 2, refusedCount: 0 },
+      { slot: 1, specs: 96, unexpected: 0, refusedCount: 0 },
+    ]).verdict).toBe('MEASURED')
+  })
+  it('连 JSON 都没有的 slot 直接算 INFRA（不能因为"没数据"而放行）', () => {
+    expect(roundVerdict([{ slot: 2, specs: 0, unexpected: 0, refusedCount: 5 }]).infraSlots).toEqual([2])
   })
 })
 
