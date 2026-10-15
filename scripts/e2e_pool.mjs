@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url'
 import {
   MAX_SLOTS, SLOT_BACKEND_BASE, SLOT_FRONTEND_BASE,
   allocatePortBlock, assertSafeRelPath, autoSlots, buildSlotManifest, mergeRunStats,
-  partitionFiles, slotEnv,
+  parseArgs, partitionFiles, slotEnv,
 } from '../frontend/e2e/helpers/pool-core.mjs'
 
 // Windows 上 npx/npm 是 .cmd，必须经 cmd.exe 起；一律用 argv 数组而不是拼 shell 字符串 ——
@@ -43,12 +43,15 @@ if (/["'`$&|<>\s]/.test(E2E_BASE) || path.join(E2E_BASE, 'template', 'db.sqlite3
 }
 const log = (...a) => console.log('[pool]', ...a)
 
-const argv = process.argv.slice(2)
-const flag = (name, dflt) => { const i = argv.indexOf(`--${name}`); return i < 0 || i + 1 >= argv.length ? dflt : argv[i + 1] }
-const has = (name) => argv.includes(`--${name}`)
-const dashDash = argv.indexOf('--')
+const ARGS = parseArgs(process.argv.slice(2), {
+  slots: 'auto', 'timeout-min': '25', 'only-slot': undefined, 'dry-run': false, 'keep-slots': false,
+})
+if (ARGS.unknown.length) {
+  console.error(`[pool] 未知参数：${ARGS.unknown.join(' ')} —— 拒绝启动。拼错的开关不能当成没写（--slots=1 被忽略过一次，等于偷偷改了并行度）`)
+  process.exit(2)
+}
 const bare = (p) => p.replace(/^e2e[\\/]/, '')
-const FILES = dashDash < 0 ? [] : argv.slice(dashDash + 1).map(bare)
+const FILES = ARGS.files.map(bare)
 
 const netBlock = {}
 const taken = (port) => netBlock[port] === true
@@ -214,10 +217,10 @@ async function main() {
   const durations = latestDurations()
   const files = FILES.length ? FILES : allFiles()
   const totalMs = files.reduce((a, f) => a + (durations[f] ?? 0), 0)
-  const buckets = partitionFiles(files, durations, parseSlots(flag('slots', 'auto'), totalMs)).filter((b) => b.length)
+  const buckets = partitionFiles(files, durations, parseSlots(ARGS.slots, totalMs)).filter((b) => b.length)
   log(`文件 ${files.length} · 加权总量 ${(totalMs / 1000).toFixed(0)}s · 计划 slot ${buckets.length}`
     + (Object.keys(durations).length ? '' : '（无夜跑 JSON ⇒ 分区未加权）'))
-  if (has('dry-run')) {
+  if (ARGS.dryRun) {
     buckets.forEach((b, i) => log(`slot${i}: ${b.length} 文件 · ${(b.reduce((a, f) => a + (durations[f] ?? 0), 0) / 1000).toFixed(0)}s`))
     return 0
   }
@@ -227,14 +230,15 @@ async function main() {
   if (built.status !== 0) throw new Error(`前端构建失败（exit=${built.status}）：${(built.stderr || built.stdout || '').toString().slice(-800)}`)
 
   const ports = allocatePortBlock(buckets.length, taken)
+  const blobRoot = path.join(SLOTS_ROOT, RUN_ID, 'blob')   // 共享：merge-reports 只接受一个目录
   const manifests = ports.map((p, i) => buildSlotManifest({
     index: i, ports: p, slotRoot: path.join(SLOTS_ROOT, RUN_ID, `slot${i}`), templateRoot: TEMPLATE,
-    redisDb: 12 + i, secretKey: `e2e-slot-${i}-${RUN_ID}`,
+    redisDb: 12 + i, secretKey: `e2e-slot-${i}-${RUN_ID}`, blobRoot,
   }))
   manifests.forEach(prepareSlot)
 
-  const only = flag('only-slot', null)
-  const timeoutMs = Number(flag('timeout-min', '25')) * 60_000
+  const only = ARGS.onlySlot === undefined ? null : Number(ARGS.onlySlot)
+  const timeoutMs = Number(ARGS['timeout-min']) * 60_000
   const started = Date.now()
   const codes = await Promise.all(manifests.map((m, i) =>
     (only !== null && Number(only) !== i) ? Promise.resolve(0) : runSlot(m, buckets[i], timeoutMs)))
@@ -250,23 +254,27 @@ async function main() {
   merged.slotsPlanned = buckets.length
   merged.runId = RUN_ID
   if (only !== null) merged.partial = true
-
   const outDir = process.env.LQDP_E2E_OUTDIR || path.join(ROOT, 'tasks', 'e2e-pool', 'latest')
   fs.mkdirSync(outDir, { recursive: true })
   fs.writeFileSync(path.join(outDir, 'merged.json'), JSON.stringify(merged, null, 2), 'utf-8')
 
   try {
-    const mergedReport = runTool('npx', ['playwright', 'merge-reports', ...manifests.map((m) => m.blobDir), '--reporter=html'],
+    const mergedReport = runTool('npx', ['playwright', 'merge-reports', blobRoot, '--reporter=html'],
       { cwd: FRONTEND, stdio: 'inherit' })
     if (mergedReport.status !== 0) throw new Error(`exit=${mergedReport.status}`)
   } catch (e) { log('HTML 合并失败（统计不受影响）:', e.message) }
 
-  codes.forEach((c, i) => { if (c !== 0) log(`slot${i} EXIT=${c} → ${manifests[i].logFile}`) })
+  codes.forEach((c, i) => {
+    if (c === 0) return
+    // Playwright 有用例失败也是 exit 1 ⇒ 有 JSON 就只是「有红」，没 JSON 才是崩池/INFRA
+    const infra = !fs.existsSync(manifests[i].jsonOut)
+    log(`slot${i} EXIT=${c} ${infra ? 'INFRA：没产出 JSON，看日志' : '（有用例红，JSON 在）'}→ ${manifests[i].logFile}`)
+  })
   log(`用例 ${merged.specs} · 墙钟 ${(spanMs / 60000).toFixed(1)}min · 单价 ${(merged.perSpecMs / 1000).toFixed(2)}s/例`
     + ` · 效率 ${merged.efficiency.toFixed(2)}（目标 ≥${(0.7 * buckets.length).toFixed(1)}）`
     + ` · unexpected ${merged.stats.unexpected} · flaky ${merged.stats.flaky} · skipped ${merged.stats.skipped}`)
   log(`merged.json → ${path.join(outDir, 'merged.json')}`)
-  if (!has('keep-slots')) manifests.forEach((m) => fs.rmSync(m.dataDir, { recursive: true, force: true }))
+  if (!ARGS.keepSlots) manifests.forEach((m) => fs.rmSync(m.dataDir, { recursive: true, force: true }))
   return codes.some((c) => c !== 0) ? 1 : (merged.stats.unexpected > 0 ? 1 : 0)
 }
 

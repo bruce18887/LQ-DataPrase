@@ -80,6 +80,16 @@ export declare function partitionFiles(
 
 export declare function assertSafeRelPath(p: string): string
 
+export interface ParsedArgs {
+  /** `--` 之后的原始参数（文件路径等） */
+  files: string[]
+  /** 未在 defaults 里声明过的 token：调用方应当拒绝而不是忽略 */
+  unknown: string[]
+  [key: string]: string | boolean | undefined | string[] | unknown
+}
+
+export declare function parseArgs(argv: string[], defaults?: Record<string, unknown>): ParsedArgs
+
 export declare function buildSlotManifest(args: {
   index: number
   ports: SlotPortPair
@@ -87,6 +97,8 @@ export declare function buildSlotManifest(args: {
   templateRoot: string
   redisDb: number
   secretKey: string
+  /** 共享 blob 目录：`merge-reports` 只接受一个目录参数 */
+  blobRoot?: string
 }): SlotManifest
 
 export declare function slotEnv(
