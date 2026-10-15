@@ -4,8 +4,17 @@
 // 判据见 docs/superpowers/specs/2026-10-14-e2e-slot-pool-parallel-design.md
 import path from 'node:path'
 
-export const SLOT_BACKEND_BASE = 8101
-export const SLOT_FRONTEND_BASE = 3101
+/**
+ * slot 端口块。基址**必须落在本机 TCP 动态端口区间之外** ——
+ * 实测这台机器 `netsh int ipv4 show dynamicport tcp` 是 **起始 1024、数量 13977**（即 1024–15000），
+ * 而旧基址 8101/3101 正好在这个区间里。掉线三轮的共同现场：preview 的 node 整条链消失、
+ * 同 slot 的 Django 活着、`netstat` 里挂着上百条客户端端口 1044–14426 的 TIME_WAIT。
+ * 也就是说**服务端口会被当成临时端口发出去**，冲突时受害的是我们这个监听进程。
+ * 21001/22001 在 15000 之上、默认区间 49152 之下，且不在 `excludedportrange`（该机只排 27339、50000-50059）。
+ * 换端口不改变并行度与隔离语义，只把监听端口挪出临时端口池。
+ */
+export const SLOT_BACKEND_BASE = 21001
+export const SLOT_FRONTEND_BASE = 22001
 export const DEFAULT_SLOTS = 4
 export const MAX_SLOTS = 6
 export const SLOT_TARGET_MS = 240_000

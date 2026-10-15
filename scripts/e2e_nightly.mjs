@@ -20,13 +20,16 @@ import { fileURLToPath } from 'node:url'
 import {
   THRESHOLDS, blockingReds, evaluateGates, flakeTotal, isVoided,
 } from '../frontend/e2e/helpers/nightly-gates.mjs'
+// 端口基址只有一份来源：池用它分配，夜间轮用它探测占用（两处各写一遍必然漂，
+// 而漂了的后果是「探测永远说端口空闲」—— 见 portsBusy 的注释）。
+import { SLOT_BACKEND_BASE, SLOT_FRONTEND_BASE } from '../frontend/e2e/helpers/pool-core.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const FRONTEND = path.join(ROOT, 'frontend')
 const OUT_ROOT = path.join(ROOT, 'tasks', 'e2e-nightly')
 const LOCK = path.join(OUT_ROOT, 'e2e-nightly.lock')
 // 并行度唯一旋钮：E2E_SLOTS（默认 4，与 pool-core 的 DEFAULT_SLOTS 同值）。
-// slot 池的端口块 8101+/3101+ 也按它探测，避免抢别的会话。
+// slot 池的端口块也从 pool-core 的基址探测，避免抢别的会话。
 const SLOTS = Math.max(1, Number(process.env.E2E_SLOTS || 4))
 
 // 退化阈值住在 frontend/e2e/helpers/nightly-gates.mjs（与池的 merged.json 同处判级，
@@ -83,15 +86,20 @@ function portsBusy() {
   // 要探的是「本轮实际会用到的端口」，不是写死的 8000/3000：
   // playwright.config.ts 与 vite.config.ts 现在同读 E2E_PORT / E2E_FRONTEND_PORT，
   // 端口值的来源只能有一份，否则设了变量的那轮会探错端口（未设时与旧行为逐字一致）。
-  // T3 现在走 slot 池 ⇒ 要探的是 8101..(8100+SLOTS) / 3101..(3100+SLOTS) 这一整块；
-  // 仍带上旧的两个口，因为手工设过 PW_NO_WEBSERVER 的会话可能还在 8000/3000 上服务。
+  // T3 走 slot 池 ⇒ 探的是 SLOT_BACKEND_BASE/SLOT_FRONTEND_BASE 起各 60 个口（与池的 prefetchPorts 同跨度，
+  // 两边口径必须一致，否则一边认为空闲、另一边认为占用）。仍带 8000/3000：手工设过 PW_NO_WEBSERVER 的会话在那上面服务。
   const wanted = new Set(['8000', '3000'])
-  for (let i = 0; i < SLOTS; i++) { wanted.add(String(8101 + i)); wanted.add(String(3101 + i)) }
+  for (let i = 0; i < 60; i++) {
+    wanted.add(String(SLOT_BACKEND_BASE + i))
+    wanted.add(String(SLOT_FRONTEND_BASE + i))
+  }
   try {
     const out = execFileSync('netstat', ['-ano'], { encoding: 'utf-8' })
     const busy = []
     for (const line of out.split('\n')) {
-      const m = /^\s*TCP\s+\S+:(\d{4})\s+\S+\s+(LISTENING)/i.exec(line)
+      // \d{4} 会**漏掉五位端口**：slot 基址挪到 21001/22001 后这条门会永远报「空闲」，
+      // 于是夜间轮去抢一个别的池正在用的端口块 —— 位数上限按 5 写（TCP 端口最多 65535）。
+      const m = /^\s*TCP\s+\S+:(\d{1,5})\s+\S+\s+(LISTENING)/i.exec(line)
       if (m && wanted.has(m[1])) busy.push(`${m[1]}(${m[2].toLowerCase()})`)
     }
     return [...new Set(busy)]

@@ -130,12 +130,18 @@ describe('classifySlotHealth / roundVerdict', () => {
 })
 
 describe('常量', () => {
-  it('端口基址与并行度上限就是设计里那几个数', () => {
-    expect(SLOT_BACKEND_BASE).toBe(8101)
-    expect(SLOT_FRONTEND_BASE).toBe(3101)
+  it('并行度上限与单 slot 墙钟目标就是设计里那几个数', () => {
     expect(DEFAULT_SLOTS).toBe(4)
     expect(MAX_SLOTS).toBe(6)
     expect(SLOT_TARGET_MS).toBe(240_000)
+  })
+  it('端口基址在动态端口区间之外 —— 落在里面时监听端口会被当临时端口发出去，服务会被摘掉', () => {
+    // 本机实测 netsh 动态区间 = 1024..15000（旧基址 8101/3101 就在里面，三轮 preview 掉线）。
+    // 上界取 49152：万一哪天把动态区间改回 Windows 默认值，这两个基址仍然在区间外。
+    for (const base of [SLOT_BACKEND_BASE, SLOT_FRONTEND_BASE]) {
+      expect(base).toBeGreaterThanOrEqual(15_001)
+      expect(base + MAX_SLOTS).toBeLessThan(49_152)
+    }
   })
 })
 
@@ -161,20 +167,22 @@ describe('autoSlots', () => {
 })
 
 describe('allocatePortBlock', () => {
+  const B = SLOT_BACKEND_BASE
+  const F = SLOT_FRONTEND_BASE
   it('全空闲时取基址连续块', () => {
     expect(allocatePortBlock(3, () => false)).toEqual([
-      { backend: 8101, frontend: 3101 }, { backend: 8102, frontend: 3102 }, { backend: 8103, frontend: 3103 },
+      { backend: B, frontend: F }, { backend: B + 1, frontend: F + 1 }, { backend: B + 2, frontend: F + 2 },
     ])
   })
   it('后端被占 → 整块前移', () => {
-    const block = allocatePortBlock(3, (p) => p === 8102)
-    expect(block.map((b) => b.backend)).toEqual([8104, 8105, 8106])
-    expect(block.map((b) => b.frontend)).toEqual([3104, 3105, 3106])
+    const block = allocatePortBlock(3, (p) => p === B + 1)
+    expect(block.map((b) => b.backend)).toEqual([B + 3, B + 4, B + 5])
+    expect(block.map((b) => b.frontend)).toEqual([F + 3, F + 4, F + 5])
   })
   it('前端被占也会整块让开', () => {
-    const block = allocatePortBlock(2, (p) => p === 3102)
-    expect(block.map((b) => b.backend)).toEqual([8103, 8104])
-    expect(block.map((b) => b.frontend)).toEqual([3103, 3104])
+    const block = allocatePortBlock(2, (p) => p === F + 1)
+    expect(block.map((b) => b.backend)).toEqual([B + 2, B + 3])
+    expect(block.map((b) => b.frontend)).toEqual([F + 2, F + 3])
   })
   it('扫不到块就抛，绝不静默复用别人在跑的服务', () => {
     expect(() => allocatePortBlock(4, () => true)).toThrow(/端口块不足/)
