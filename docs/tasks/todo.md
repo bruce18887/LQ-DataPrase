@@ -3416,3 +3416,63 @@ temp_dir/config_file` 披露的是**服务器**的目录结构、库文件与配
     那 26 条一条都没去"改用例让它变绿"。
 - **本改动的收口口径**：各批门禁全绿 + 全量轮 P0/P1 全绿 + P2 段隔离复跑全绿。
   一次完全无干扰的全量绿仍欠着 —— 这正好是 slot 池隔离要解决的场景，等它落地后由无人值守轮补。
+
+---
+
+# 任务：e2e slot 池并行化 —— 全量轮压到 10 分钟级（2026-10-15）✅
+
+用户诉求：「后面功能越加越多，e2e 会越来越久，如何管理？」→「进行改造吧，我其实想把全量时间压到
+10 分钟级」，范围经确认是**夜间全量轮 + 收口全量轮都算**（后端 888 例不在本目标内），
+节奏选「基础设施先行，一次性切并行」，并行带来的负载敏感红用**自动独占复跑判级**处理
+（不降并行度、不吹大超时）。设计 `docs/superpowers/specs/2026-10-14-e2e-slot-pool-parallel-design.md`，
+计划 `docs/superpowers/plans/2026-10-14-e2e-slot-pool-parallel.md`。
+
+## 实施清单
+
+- [x] Task1 `88b348f` `0b89820`：进程级隔离用 **settings 覆写档** `config/settings/e2e_slot.py`
+      （`LQDP_E2E_SLOT_DIR` → 直接指 `DATABASES.NAME`/`MEDIA_ROOT`/`tempfile.tempdir`），
+      配套 5 条后端测试，含「档里出现 `apply_system_config`/`data_dir` 就是设计缺陷」的源码扫描。
+      这条是事故换来的：`data_dir` 重定向是 move 语义，`LQDP_SKIP_STORAGE_MIGRATION` 挡不住（见 lessons 2026-10-14）
+- [x] Task2 `3f335a2`：`frontend/e2e/helpers/pool-core.mjs` 纯函数层（LPT 分区、端口块分配、
+      slot 清单、env 注入、多 slot 统计合并、健康判定、复跑判级）落 T2 层 vitest
+- [x] Task3 `0cf05d6`：slot 清单成为**路径单一来源** `helpers/slot.ts`，`test-data.ts` 改再导出；
+      无 slot 时逐字回落今天的路径 ⇒ 串行那条路的行为零变化
+- [x] Task4 `657a1e8` `1fedeb4` `14942bf` `0145bfc` `fb3ccee`：编排器 `scripts/e2e_pool.mjs`
+      —— 短基址 `C:\lqdp-e2e` 预铸模板 + 每 slot 硬链镜像 + LPT 分区 + N 进程合并 `merged.json`；
+      CLI 认 `--k=v` 并拒绝未知参数；`--blob-report` 不是 1.60 的 CLI 选项，改配置侧 reporter + 共享 blob 目录
+- [x] Task5 `5548d45` `a2a0b6f`：池自判 **INFRA 轮** —— 服务掉线看门狗（连续 2 次探不到才算，
+      子进程退出后冻结）+ 连接级错误分类，崩池轮判 `VOID (infra)`、退出码 3、现场不清
+- [x] Task6 `1e2cf59`：并行红的归因 —— 抓出一条**真实**同桶污染（`chart-filter-switches` 把
+      账号级 `analysis_chart_state` 留在「QQ/箱线图开」，`outlier-handling` 命中 3 个 hint bar），
+      已按前置收敛 `ensureChartToggles`；批次目录/临时区三例断言改为跟随进程（slot 模式下由红转绿）
+- [x] Task7 `ccebf90` `ee79c95` `0d854d7`：红文件自动独占复跑判级（confirmed / loadFlakes / unresolved）
+      + 阈值迁到 `frontend/e2e/helpers/nightly-gates.mjs` 并按并行实测重标定 + 夜间轮改跑池
+- [x] Task8 `5ba19d8`：快门禁 `e2e_affected.mjs` 改走池（`--slots=auto`），开关与文件分家走
+      `E2E_PW_ARGS` 透传并做安全字符校验
+- [x] Task9：文档收口 —— 本节、lessons 两条、`.claude/CLAUDE.md` 门禁节奏行（gitignore，仅本机）
+- [ ] Task10：连续两轮 N=4 一致性 + 端口清场 —— **进行中**，两轮结果与红集合差异回来后补进「验证账目」
+
+## 验证账目
+
+- **串行基线**（spec §2，`tasks/e2e-nightly/LATEST.md` 轮次 `2026-10-14-1108`）：384 例 / **19.7min** / 单价 2.89s。
+- **N=1 等价轮**（`tasks/e2e-slot-probe/pool-n1.log`）：22.8min、效率 0.84、unexpected 3 ——
+  证明改走池没改坏结果，先不谈提速。
+- **N=4 干净轮**（`0a98235` 四轮表，B 轮 `043534-43196`）：**6.2min / 3.10s 例 / 效率 3.04（0.76×N）/ 0 红**
+  ⇒ 目标达成：全量轮从 19.7min 进 10 分钟级（实测 6.2min）。
+- **逐文件对账**：池的 384 例与 `npx playwright test --list` 逐文件计数一致，无集合漂移；
+  口径修正过一次 —— 运行期 JSON 没有 `sp.projectIds`，改用 `test.projectId !== 'setup'` 过滤，
+  此前引用的 386/385 是把 2 条 `auth.setup` 算进去了。
+- **新阈值**（`nightly-gates.mjs` 实测标定）：墙钟 ≤12min、单价 ≤4.5s/例、效率 ≥0.7×N、用例 ≤450、flake ≤5；
+  旧「单价 >3.5s 判退化」在并行下必然误报。
+- 每批提交前的检查集：`npx vitest run`（**115 passed**）、`npm run lint:e2e`、**`npx vue-tsc -b`**。
+  最后一条是补上的：曾有一次没跑它，池自己的构建失败在下一轮才暴露。
+
+## 还欠的（不阻塞）
+
+1. **N=2 没测**。spec §10 第 1 条要 N=1/2/4 三档加速比，实际只有 N=1 与 N=4；
+   N=2 只在 `autoSlots` 的中间档里有理论位置。要补就跑 `node scripts/e2e_pool.mjs --slots=2`。
+2. **C 轮服务失联的真因未解**（两个 slot 的 Django+preview 开跑约 1 分钟后同时没了，155 条连接级红）。
+   看门狗现在会给出时刻与端口，但「为什么死」还没有证据。
+3. 满载下的负载敏感红（A 轮 `view-data`/`serial-overlap`、D 轮 `histogram-multiseries-clip`×2）
+   由复跑判级吸收成 flaky；D 轮那两条是 3 次 attempt 全败，形状比 A 轮硬，阈值定稳后要专门复看一次。
+4. `sftp.spec.ts:44` 在共享账号存有 SFTP 连接记录时会红（上一批登记的，没变）。
