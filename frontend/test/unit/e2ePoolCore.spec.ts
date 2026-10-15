@@ -135,9 +135,10 @@ describe('常量', () => {
     expect(MAX_SLOTS).toBe(6)
     expect(SLOT_TARGET_MS).toBe(240_000)
   })
-  it('端口基址在动态端口区间之外 —— 落在里面时监听端口会被当临时端口发出去，服务会被摘掉', () => {
-    // 本机实测 netsh 动态区间 = 1024..15000（旧基址 8101/3101 就在里面，三轮 preview 掉线）。
+  it('端口基址在动态端口区间之外 —— 监听口不该落在临时端口池里（这是卫生，不是掉线的修法）', () => {
+    // 本机实测 netsh 动态区间 = 1024..15000，旧基址 8101/3101 就在里面。
     // 上界取 49152：万一哪天把动态区间改回 Windows 默认值，这两个基址仍然在区间外。
+    // 注意：preview 掉线与此无关 —— 换到区间外的第三轮照样掉两个（spec §6 的否证记录）。
     for (const base of [SLOT_BACKEND_BASE, SLOT_FRONTEND_BASE]) {
       expect(base).toBeGreaterThanOrEqual(15_001)
       expect(base + MAX_SLOTS).toBeLessThan(49_152)

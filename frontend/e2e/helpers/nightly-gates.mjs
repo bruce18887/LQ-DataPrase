@@ -40,6 +40,21 @@ export function flakeTotal(rep) {
   return (rep?.stats?.flaky ?? 0) + (rep?.recheck?.loadFlakes?.length ?? 0)
 }
 
+/**
+ * 本轮有没有发生过重跑（Playwright 自己重试后过的 flaky，或被拉去独占复跑的红文件）。
+ *
+ * 效率只在**没有重跑**时判，因为效率 = Σ通过时长 / 墙钟，而失败的 attempt 消耗墙钟却不进分子：
+ * 一条负载抖动就够把效率压低一截。实测三轮正好排出这条因果 ——
+ * 零红的 B 轮 3.04、两个红文件重跑的 D 轮 2.73、同样两个红 + flaky 4 的 E 轮 2.34，
+ * 而 floor=0.7×N=2.8 是照 B 那一轮定的 ⇒ 照原样判，D/E 都会报「并行在空转」。
+ * 那两条红已经由独占复跑判成负载抖动（口径来自用户：抖动算 flaky，不为此降并行度、不吹大超时），
+ * 所以这里改的是**判据的适用条件**，不是阈值大小：抖动照样进 flakeTotal 记账，
+ * 只是不再拿它当「并行没起作用」的证据。零红轮仍然按 0.7×N 严判。
+ */
+export function hasRetries(rep) {
+  return (rep?.stats?.flaky ?? 0) > 0 || (rep?.recheck?.redFiles?.length ?? 0) > 0
+}
+
 /** @param {number} slots 本轮实际并行度（N），效率下限按它算 */
 export function evaluateGates(rep, slots) {
   if (isVoided(rep)) return []
@@ -55,7 +70,7 @@ export function evaluateGates(rep, slots) {
   if (flakes > THRESHOLDS.flakes) b.push(`flake ${flakes} > ${THRESHOLDS.flakes}`)
   const floor = THRESHOLDS.efficiencyFloorFactor * slots
   // 效率字段缺失 = 这轮不是并行产物（旧的串行 results.json），缺字段不等于违规
-  if (rep.efficiency != null && rep.efficiency < floor) {
+  if (rep.efficiency != null && !hasRetries(rep) && rep.efficiency < floor) {
     b.push(`效率 ${rep.efficiency.toFixed(2)} < ${floor.toFixed(1)}（0.7×${slots} slot）—— 并行在空转，查拖尾或争用`)
   }
   const red = blockingReds(rep)

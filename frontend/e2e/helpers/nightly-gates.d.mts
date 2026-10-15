@@ -45,4 +45,5 @@ export declare function blockingReds(rep?: GateReport): {
   unresolved: number
 }
 export declare function flakeTotal(rep?: GateReport): number
+export declare function hasRetries(rep?: GateReport): boolean
 export declare function evaluateGates(rep: GateReport, slots?: number): string[]
