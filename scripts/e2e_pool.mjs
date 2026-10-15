@@ -17,9 +17,9 @@ import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  MAX_SLOTS, SLOT_BACKEND_BASE, SLOT_FRONTEND_BASE,
+  MAX_SLOTS, SERIAL_REF_PER_SPEC_MS, SLOT_BACKEND_BASE, SLOT_FRONTEND_BASE,
   allocatePortBlock, assertSafeRelPath, autoSlots, buildSlotManifest, mergeRunStats,
-  parseArgs, partitionFiles, slotEnv,
+  normalizeTotalMs, parseArgs, partitionFiles, slotEnv,
 } from '../frontend/e2e/helpers/pool-core.mjs'
 
 // Windows 上 npx/npm 是 .cmd，必须经 cmd.exe 起；一律用 argv 数组而不是拼 shell 字符串 ——
@@ -97,7 +97,8 @@ function buildTemplate() {
 /** 每 slot：新建自己的目录 → 拷库 → 硬链镜像 media → 写 config → 写 slot.json */
 function prepareSlot(m) {
   fs.rmSync(m.dataDir, { recursive: true, force: true })   // 只删本次 RUN_ID 下自己造的目录
-  for (const dir of [m.tempDir, m.authDir, m.downloadsDir, m.blobDir, path.dirname(m.mediaDir)]) fs.mkdirSync(dir, { recursive: true })
+  for (const dir of [m.tempDir, m.authDir, m.downloadsDir, m.blobDir, path.dirname(m.mediaDir),
+    path.dirname(m.jsonOut), path.dirname(m.logFile)]) fs.mkdirSync(dir, { recursive: true })
   fs.copyFileSync(m.templateDbPath, m.dbPath)
   const mirror = (src, rel = '') => {
     for (const e of fs.readdirSync(src, { withFileTypes: true })) {
@@ -112,10 +113,14 @@ function prepareSlot(m) {
   fs.writeFileSync(m.slotFile, JSON.stringify(m, null, 2), 'utf-8')
 }
 
-/** 最近一轮夜跑的 per-file 通过时长，给 LPT 定权；拿不到就退化为等文件数 */
+/**
+ * 给 LPT 定权的 per-file 通过时长 + 那份数据的单价。
+ * 优先串行 results.json（无争用）；只有 pool 产物时用 merged.json，并把它含争用的单价带回去，
+ * 交给 normalizeTotalMs 折回串行等价量 —— 否则 autoSlots 会顺着「争用抬高单价」越开越多 slot。
+ */
 function latestDurations() {
   const base = path.join(ROOT, 'tasks', 'e2e-nightly')
-  if (!fs.existsSync(base)) return {}
+  if (!fs.existsSync(base)) return { byFile: {}, perSpecMs: 0 }
   const dirs = fs.readdirSync(base).filter((d) => /^\d{4}-\d{2}-\d{2}/.test(d)).sort().reverse()
   for (const d of dirs) {
     for (const name of ['merged.json', 'results.json']) {
@@ -123,22 +128,25 @@ function latestDurations() {
       if (!fs.existsSync(p)) continue
       try {
         const j = JSON.parse(fs.readFileSync(p, 'utf-8'))
-        if (name === 'merged.json' && j.files && Object.keys(j.files).length) return j.files
+        if (name === 'merged.json' && j.files && Object.keys(j.files).length) {
+          return { byFile: j.files, perSpecMs: j.perSpecMs ?? 0 }
+        }
         const out = {}
+        let passMs = 0, passCount = 0
         const walk = (s) => {
           for (const x of s.suites ?? []) walk(x)
           for (const sp of s.specs ?? []) {
             let ms = 0
-            for (const t of realTests(sp)) for (const r of t.results ?? []) if (r.status === 'passed') ms += r.duration
+            for (const t of realTests(sp)) for (const r of t.results ?? []) if (r.status === 'passed') { ms += r.duration; passCount++; passMs += r.duration }
             if (ms) out[sp.file] = (out[sp.file] ?? 0) + ms
           }
         }
         for (const s of j.suites ?? []) walk(s)
-        if (Object.keys(out).length) return out
+        if (Object.keys(out).length) return { byFile: out, perSpecMs: passCount ? passMs / passCount : 0 }
       } catch { /* 坏 JSON 就往下找一轮 */ }
     }
   }
-  return {}
+  return { byFile: {}, perSpecMs: 0 }
 }
 
 function allFiles() {
@@ -148,7 +156,9 @@ function allFiles() {
   const files = new Set()
   const walk = (s) => {
     for (const x of s.suites ?? []) walk(x)
-    for (const sp of s.specs ?? []) if (sp.file) files.add(sp.file)
+    // fixtures/ 下的 auth.setup 属于 setup project，每个 slot 进程自己会跑；
+    // 把它当业务文件分进桶只会污染分区（实测 slot2 因此多摊了一个「文件」）
+    for (const sp of s.specs ?? []) if (sp.file && !sp.file.startsWith('fixtures/')) files.add(sp.file)
   }
   for (const s of j.suites ?? []) walk(s)
   return [...files]
@@ -223,11 +233,15 @@ function statsOf(jsonPath) {
 
 async function main() {
   await prefetchPorts()
-  const durations = latestDurations()
+  const { byFile: durations, perSpecMs: basisPerSpec } = latestDurations()
   const files = FILES.length ? FILES : allFiles()
-  const totalMs = files.reduce((a, f) => a + (durations[f] ?? 0), 0)
+  const rawTotalMs = files.reduce((a, f) => a + (durations[f] ?? 0), 0)
+  // 分桶只看相对权重（缩放不影响），slot 数看折算后的串行等价总量
+  const totalMs = normalizeTotalMs(rawTotalMs, basisPerSpec)
   const buckets = partitionFiles(files, durations, parseSlots(ARGS.slots, totalMs)).filter((b) => b.length)
-  log(`文件 ${files.length} · 加权总量 ${(totalMs / 1000).toFixed(0)}s · 计划 slot ${buckets.length}`
+  log(`文件 ${files.length} · 加权总量 ${(totalMs / 1000).toFixed(0)}s`
+    + (basisPerSpec ? `（原始 ${(rawTotalMs / 1000).toFixed(0)}s ÷ 争用系数 ${(basisPerSpec / SERIAL_REF_PER_SPEC_MS).toFixed(2)}）` : '')
+    + ` · 计划 slot ${buckets.length}`
     + (Object.keys(durations).length ? '' : '（无夜跑 JSON ⇒ 分区未加权）'))
   if (ARGS.dryRun) {
     buckets.forEach((b, i) => log(`slot${i}: ${b.length} 文件 · ${(b.reduce((a, f) => a + (durations[f] ?? 0), 0) / 1000).toFixed(0)}s`))
@@ -240,9 +254,10 @@ async function main() {
 
   const ports = allocatePortBlock(buckets.length, taken)
   const blobRoot = path.join(SLOTS_ROOT, RUN_ID, 'blob')   // 共享：merge-reports 只接受一个目录
+  const evidenceRoot = path.join(SLOTS_ROOT, RUN_ID)       // 日志与 JSON 住在 slot 目录之外
   const manifests = ports.map((p, i) => buildSlotManifest({
     index: i, ports: p, slotRoot: path.join(SLOTS_ROOT, RUN_ID, `slot${i}`), templateRoot: TEMPLATE,
-    redisDb: 12 + i, secretKey: `e2e-slot-${i}-${RUN_ID}`, blobRoot,
+    redisDb: 12 + i, secretKey: `e2e-slot-${i}-${RUN_ID}`, blobRoot, evidenceRoot,
   }))
   manifests.forEach(prepareSlot)
 

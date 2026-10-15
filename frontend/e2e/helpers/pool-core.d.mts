@@ -62,6 +62,11 @@ export declare const SLOT_FRONTEND_BASE: number
 export declare const DEFAULT_SLOTS: number
 export declare const MAX_SLOTS: number
 export declare const SLOT_TARGET_MS: number
+/** 2026-10-14 串行全量实测单价（只计通过用例），用作 autoSlots 的等价参照 */
+export declare const SERIAL_REF_PER_SPEC_MS: number
+
+/** 把并发轮测出的总时长折回串行等价量；单价缺失/为 0 时原样返回 */
+export declare function normalizeTotalMs(rawTotalMs: number, perSpecMs: number, refPerSpecMs?: number): number
 
 export declare function autoSlots(totalMs: number, cap?: number): number
 
@@ -99,6 +104,8 @@ export declare function buildSlotManifest(args: {
   secretKey: string
   /** 共享 blob 目录：`merge-reports` 只接受一个目录参数 */
   blobRoot?: string
+  /** run.log / results.json 的落脚处：必须**在 slot 目录之外**，否则收尾清理会把证据一起删掉 */
+  evidenceRoot?: string
 }): SlotManifest
 
 export declare function slotEnv(
