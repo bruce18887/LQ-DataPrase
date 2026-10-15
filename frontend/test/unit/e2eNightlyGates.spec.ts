@@ -30,6 +30,24 @@ describe('evaluateGates', () => {
     expect(evaluateGates({ ...clean, efficiency: 2.81 }, 4)).toEqual([])
   })
 
+  it('有重跑的轮不判效率：失败 attempt 吃墙钟却不进分子（实测 D 2.73 / E 2.34 均由 2 个红文件造成）', () => {
+    // 这两条就是 2026-10-15 那两轮的原值，当时照 0.7×4=2.8 判会双双报「并行在空转」。
+    const roundD = { ...clean, wallMs: 7.2 * 60_000, efficiency: 2.73,
+      stats: { unexpected: 2, flaky: 1 },
+      recheck: { redFiles: ['analysis/histogram-fail-bins.spec.ts', 'exports/html-report.spec.ts'],
+        confirmed: [], loadFlakes: ['analysis/histogram-fail-bins.spec.ts', 'exports/html-report.spec.ts'],
+        unresolved: [], countsBlock: false } }
+    const roundE = { ...roundD, wallMs: 8.0 * 60_000, efficiency: 2.34, stats: { unexpected: 2, flaky: 4 } }
+    expect(evaluateGates(roundD, 4)).toEqual([])
+    // E 轮不报「效率」，但 flake 仍按老账拦：4 条重试后通过 + 2 个判为抖动的文件 = 6 > 5。
+    // 阈值 5 是串行时代定的，并行轮的常态值还没攒够样本 —— 这里如实保留，不顺手放宽。
+    expect(evaluateGates(roundE, 4).join()).toMatch(/flake 6 > 5/)
+    expect(evaluateGates(roundE, 4).join()).not.toMatch(/效率/)
+    expect(flakeTotal(roundE)).toBe(6)
+    // 零红轮照旧严判 —— 放宽的是适用条件，不是阈值
+    expect(evaluateGates({ ...clean, efficiency: 2.34 }, 4).join()).toMatch(/效率/)
+  })
+
   it('单价阈值随并发放宽，不会把争用误报成退化（实测 3.01~3.90s）', () => {
     expect(evaluateGates({ ...clean, perSpecMs: 3_900 }, 4)).toEqual([])
     expect(evaluateGates({ ...clean, perSpecMs: 4_600 }, 4).join()).toMatch(/单价/)
