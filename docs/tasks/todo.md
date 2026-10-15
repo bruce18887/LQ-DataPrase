@@ -3476,3 +3476,31 @@ temp_dir/config_file` 披露的是**服务器**的目录结构、库文件与配
 3. 满载下的负载敏感红（A 轮 `view-data`/`serial-overlap`、D 轮 `histogram-multiseries-clip`×2）
    由复跑判级吸收成 flaky；D 轮那两条是 3 次 attempt 全败，形状比 A 轮硬，阈值定稳后要专门复看一次。
 4. `sftp.spec.ts:44` 在共享账号存有 SFTP 连接记录时会红（上一批登记的，没变）。
+
+## 2026-10-15 .gitignore 体检与修复（已完成，`9ac28ac`）
+
+### 计划与结果
+
+- [x] 全量审计：8 个 .gitignore（根 + frontend + 6 个工具自生成），逐条用 `git check-ignore` 实测
+- [x] 补漏忽略：`/.superpowers/`、`.qoder-credits/`、`.commandcode/`、`.workbuddy-ai/`
+- [x] 修 frontend/.gitignore 两条**从未生效**的规则：`./qoder` → `qoder/`；`frontend/tasks/` → `tasks/`
+- [x] 去掉根目录重复声明：`/dist/`、`/build/`（Python 段的通用 `dist/`、`build/` 已覆盖）
+- [x] 澄清注释：`docs/superpowers/` 有意入库（CLAUDE.md 以其中 specs 为权威引用），只排除仓库根的 `/docs/plans/`、`/docs/specs/`
+- [x] `git rm --cached` 摘除 9 个误入库条目（`.superpowers/`×4、`.commandcode/`×4、`.lqdp_startup.lock`），磁盘文件保留
+
+### 两个差点做错的地方（判断依据）
+
+1. **`dist/` 不能加前导斜杠**。原计划锚定 `/dist/` 以消除对子目录的误伤，但 `frontend/dist` 正是靠这条未锚定规则兜住的
+   （`frontend/.gitignore` 注释明确写「dist 见根目录」）。`find` 实测树内只有 `./dist`、`./frontend/dist`、`./docs/user-guide/dist`，
+   锚定会让 `frontend/dist` 立刻变成可提交 → **改成加注释说明，不动 pattern**。
+2. **`docs/superpowers/` 不能整体忽略**。原以为「过程文档不入仓库」漏了规则，实为注释与规则表述不符：
+   那 22 个文件是被 `.claude/CLAUDE.md` 第 65 行当作测试分层判据的权威引用 → **改注释，不加规则**。
+
+### 未处理 / 待用户决定
+
+- `*.bak`（184 行附近）与 `db.sqlite3.bak*` **不重复**：前者只匹配以 `.bak` 结尾，`db.sqlite3.bak-e2e-90612` 只有后者能命中（已实测）。
+- 工作区另有 **77 个已跟踪文件处于未暂存删除状态**（`DataPrase-ExcelAddin` 56、`DataPrase-SFTP Searcher` 13、
+  `DataPrase-LightVBA` 7、`frontend/night-diag-fail.png` 1），三个子项目目录磁盘上均已不存在。
+  **与本次改动无关，未提交**，需用户确认是 `git add -A` 提交删除还是 `git restore` 找回。
+- 同期另一会话在改 `docs/tasks/lessons.md`（+26 行未提交）与 e2e/nightly-gates 三件套，本次**未触碰**。
+
