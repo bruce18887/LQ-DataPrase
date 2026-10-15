@@ -12,6 +12,7 @@ frontend/.vscode/
 .idea/
 .codebuddy/
 .commandcode/
+.workbuddy-ai/
 .codegraph/
 .trae/
 *.swp
