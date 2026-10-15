@@ -1079,10 +1079,10 @@ Expected: FAIL —— `aside.sidebar [data-test="app-logo"]` 等不到（现在�
       </div>
 ```
 
-`<script setup>` 的 import 段加：
+`<script setup>` 的 import 段加（**相对路径**，见本节末尾的"import 写法更正"）：
 
 ```ts
-import { AppLogo } from '@/components/common'
+import AppLogo from '../common/AppLogo.vue'
 ```
 
 **`TrendCharts` 的 import 保留** —— 已核实该文件里 `TrendCharts` 出现 3 次（import、`:6` 的 logo、`:90` 的 `menuItems` 数据分析项），删掉 logo 用处后菜单项仍在用，删 import 会让 `npm run build` 的 `vue-tsc -b` 直接红。
@@ -1106,7 +1106,7 @@ import { AppLogo } from '@/components/common'
         </div>
 ```
 
-`<script setup>` 加 `import { AppLogo } from '@/components/common'`，并**删掉 `TrendCharts` 的 import** —— 已核实该文件 `TrendCharts` 只出现 2 次（import + `:8` 的 logo），删 logo 后 import 即无使用者。
+`<script setup>` 加 `import AppLogo from '../../components/common/AppLogo.vue'`，并**删掉 `TrendCharts` 的 import** —— 已核实该文件 `TrendCharts` 只出现 2 次（import + `:8` 的 logo），删 logo 后 import 即无使用者。
 
 `:178-180` 的 `.logo-icon { color: var(--brand); }` **保留**：登录页是"无底板、符号取品牌色"的界面形制（spec §2.2），AppLogo 靠 `currentColor` 上色。
 
@@ -1130,7 +1130,7 @@ import { AppLogo } from '@/components/common'
         </div>
 ```
 
-`<script setup>` 加 `import { AppLogo } from '@/components/common'`，并**删掉 `Connection` 的 import** —— 已核实该文件 `Connection` 只出现 2 次（import + `:6`）。
+`<script setup>` 加 `import AppLogo from '../../components/common/AppLogo.vue'`，并**删掉 `Connection` 的 import** —— 已核实该文件 `Connection` 只出现 2 次（import + `:6`）。
 
 `AppAboutDialog.vue:12` 替换为：
 
@@ -1146,7 +1146,7 @@ import { AppLogo } from '@/components/common'
 }
 ```
 
-并在其 `<script setup>` 加 `import { AppLogo } from '@/components/common'`。
+并在其 `<script setup>` 加 `import AppLogo from './AppLogo.vue'`（同目录）。
 
 - [ ] **Step 6: 跑构建与单测**
 
@@ -1171,6 +1171,12 @@ Expected: 不出现 `NO AFFECTED TESTS`；auth/global/theme 相关用例全绿�
 git add frontend/src/components/layout/Sidebar.vue frontend/src/pages/auth/LoginPage.vue frontend/src/pages/auth/ConnectPage.vue frontend/src/components/common/AppAboutDialog.vue frontend/e2e/global/brand-mark.spec.ts
 git commit -m "feat(ui): 侧栏/登录/连接/关于四处品牌位改用 AppLogo，删掉登录页尺寸双机制"
 ```
+
+---
+
+> **Task 6 的 import 写法更正（Task 5 实现者揪出、控制者已实测确认）** —— 本节原先四处写的 `import { AppLogo } from '@/components/common'` **会直接把构建打挂**：本项目 `frontend/vite.config.ts` 没有 `resolve.alias`、`frontend/tsconfig*.json` 没有 `paths`/`baseUrl`，且 `grep -rn "from '@/" frontend/src` 命中 **0 次**。真实约定是相对路径直导单文件（`App.vue:3-4` 即为一例）。`@/components/common` 这种写法只存在于 `frontend/src/components/common/README.md:103,109` 的**过时示例**里。
+>
+> 连带事实：barrel `common/index.ts` 目前**没有任何 src 文件 import**（那 2 处命中都在 README 里）。Task 5 往里加 `AppLogo` 导出是为了与该文件"列全 common 组件"的既有职责保持一致，不是给 Task 6 用的导入入口 —— 消费方一律相对路径直导 `.vue`。README 的过时示例不在本计划范围内，留作后续。
 
 ---
 
