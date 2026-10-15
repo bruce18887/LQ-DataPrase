@@ -18,7 +18,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   MAX_SLOTS, SERIAL_REF_PER_SPEC_MS, SLOT_BACKEND_BASE, SLOT_FRONTEND_BASE,
-  allocatePortBlock, assertSafeRelPath, autoSlots, buildSlotManifest, mergeRunStats,
+  allocatePortBlock, assertSafeRelPath, autoSlots, buildSlotManifest, classifyReds, classifySlotHealth, mergeRunStats,
   LIVENESS_MISSES, LIVENESS_TIMEOUT_MS, nextLivenessState,
   normalizeTotalMs, parseArgs, partitionFiles, roundVerdict, slotEnv,
 } from '../frontend/e2e/helpers/pool-core.mjs'
@@ -216,6 +216,7 @@ function statsOf(jsonPath) {
   try { j = JSON.parse(fs.readFileSync(jsonPath, 'utf-8')) } catch { return null }
   let specs = 0, passCount = 0, passMs = 0, refusedCount = 0
   const files = {}
+  const redSet = new Set()
   const countRefused = (t) => {
     for (const r of t.results ?? []) for (const e of r.errors ?? []) {
       if (/ERR_CONNECTION_REFUSED|ECONNREFUSED|ERR_CONNECTION_RESET/.test(String(e.message || ''))) refusedCount++
@@ -234,10 +235,14 @@ function statsOf(jsonPath) {
           files[sp.file] = (files[sp.file] ?? 0) + r.duration
         }
       }
+      // 「所有 attempt 都没过」才算红文件（重试后过的算 flaky，交给 stats.flaky）
+      if (tests.some((t) => (t.results ?? []).length
+        && t.results.at(-1).status === 'failed'
+        && !t.results.some((r) => r.status === 'passed'))) redSet.add(sp.file)
     }
   }
   for (const s of j.suites ?? []) walk(s)
-  return { specs, passCount, passMs, wallMs: j.stats?.duration ?? 0, stats: j.stats ?? {}, files, refusedCount }
+  return { specs, passCount, passMs, wallMs: j.stats?.duration ?? 0, stats: j.stats ?? {}, files, refusedCount, redFiles: [...redSet] }
 }
 
 /**
@@ -278,6 +283,43 @@ function startLivenessWatch(manifests, aliveFlags) {
   }, 20_000)
   if (timer.unref) timer.unref()
   return () => clearInterval(timer)
+}
+
+/**
+ * 红文件自动复跑判级：每个红文件独占一个 slot 重跑一遍（一批最多 MAX_SLOTS 个，分批串行）。
+ * 判据与理由见 pool-core.classifyReds —— 门禁仍要求零真红，但「一隔离就绿」的负载抖动不该拦轮子。
+ */
+async function runRecheck(redFiles) {
+  const out = []
+  for (let start = 0; start < redFiles.length; start += MAX_SLOTS) {
+    const batch = redFiles.slice(start, start + MAX_SLOTS)
+    await prefetchPorts()
+    const ports = allocatePortBlock(batch.length, taken)
+    const tag = `${RUN_ID}-recheck${Math.floor(start / MAX_SLOTS)}`
+    const manifests = ports.map((p, i) => buildSlotManifest({
+      index: i, ports: p, slotRoot: path.join(SLOTS_ROOT, tag, `slot${i}`), templateRoot: TEMPLATE,
+      redisDb: 30 + i, secretKey: `e2e-recheck-${i}-${RUN_ID}`,
+      blobRoot: path.join(SLOTS_ROOT, tag, 'blob'), evidenceRoot: path.join(SLOTS_ROOT, tag),
+    }))
+    manifests.forEach(prepareSlot)
+    const aliveFlags = new Map(manifests.map((m) => [m.index, true]))
+    const stopWatch = startLivenessWatch(manifests, aliveFlags)
+    await Promise.all(manifests.map((m, i) => runSlot(m, [batch[i]], 10 * 60_000, aliveFlags)))
+    stopWatch()
+    manifests.forEach((m, i) => {
+      const file = batch[i]
+      const st = statsOf(m.jsonOut)
+      if (!st) { out.push({ file, red: true, infra: true, specs: 0 }); log(`↻ ${file} 复跑没出 JSON ⇒ 悬而未决（保守算红）`); return }
+      const infra = classifySlotHealth({
+        specs: st.specs, unexpected: st.stats?.unexpected ?? 0, refusedCount: st.refusedCount,
+      }) === 'INFRA'
+      const red = st.redFiles.includes(file)
+      out.push({ file, red, infra, specs: st.specs })
+      log(`↻ ${file} 独占 slot${i} 复跑：${infra ? '该轮崩池 ⇒ 悬而未决' : red ? '仍红 ⇒ 真红' : '绿 ⇒ 判为负载抖动'}`)
+    })
+    manifests.forEach((m) => fs.rmSync(m.dataDir, { recursive: true, force: true }))
+  }
+  return out
 }
 
 async function main() {
@@ -331,6 +373,17 @@ async function main() {
     : { slot: r.slot, specs: r.specs, unexpected: r.stats?.unexpected ?? 0, refusedCount: r.refusedCount ?? 0 }))
   const { verdict, infraSlots } = roundVerdict(health)
   const merged = mergeRunStats(reports)
+
+  // 红文件自动复跑判级（只有整轮不是崩池时才做 —— 崩池轮的复跑同样不可信）
+  let recheck = null
+  if (verdict === 'MEASURED') {
+    const redFiles = [...new Set(perSlot.flatMap((r) => (r.missing ? [] : r.redFiles ?? [])))].sort()
+    if (redFiles.length) {
+      log(`${redFiles.length} 个红文件 ⇒ 逐文件独占 slot 复跑判级`)
+      const results = await runRecheck(redFiles)
+      recheck = { redFiles, results, ...classifyReds(redFiles, results) }
+    }
+  }
   merged.files = reports.reduce((acc, r) => {
     for (const [f, ms] of Object.entries(r.files)) acc[f] = (acc[f] ?? 0) + ms
     return acc
@@ -341,6 +394,7 @@ async function main() {
   merged.verdict = verdict
   merged.infraSlots = infraSlots
   merged.health = health
+  merged.recheck = recheck
   if (only !== null) merged.partial = true
   const outDir = process.env.LQDP_E2E_OUTDIR || path.join(ROOT, 'tasks', 'e2e-pool', 'latest')
   fs.mkdirSync(outDir, { recursive: true })
@@ -363,11 +417,18 @@ async function main() {
     + ` · unexpected ${merged.stats.unexpected} · flaky ${merged.stats.flaky} · skipped ${merged.stats.skipped}`)
   log(`结论 ${verdict}` + (infraSlots.length
     ? ` —— slot${infraSlots.join('/slot')} 带连接级错误或红占比过半，指标不可信，别当退化读；现场已保留` : ''))
+  if (recheck) {
+    log(`复跑判级：真红 ${recheck.confirmed.length} · 负载抖动 ${recheck.loadFlakes.length} · 悬而未决 ${recheck.unresolved.length}`)
+    if (recheck.loadFlakes.length) log(`  判为负载抖动（记 flaky，不拦门禁）：${recheck.loadFlakes.join(' ')}`)
+    if (recheck.unresolved.length) log(`  悬而未决（复跑崩池或没跑上，保守算红）：${recheck.unresolved.join(' ')}`)
+  }
   log(`merged.json → ${path.join(outDir, 'merged.json')}`)
   // INFRA 轮不清现场：崩过一次就知道清掉日志有多误事（证据本身已在 slot 目录之外）
   if (ARGS.keepSlots || verdict !== 'MEASURED') log(`slot 镜像保留在 ${path.join(SLOTS_ROOT, RUN_ID)}`)
   else manifests.forEach((m) => fs.rmSync(m.dataDir, { recursive: true, force: true }))
   if (verdict !== 'MEASURED') return 3
+  // 有复跑判级时以它为准：子进程 exit 1 可能只是那些「一隔离就绿」的抖动
+  if (recheck) return recheck.countsBlock ? 1 : 0
   return codes.some((c) => c !== 0) ? 1 : (merged.stats.unexpected > 0 ? 1 : 0)
 }
 
