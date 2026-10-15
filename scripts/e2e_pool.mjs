@@ -128,10 +128,9 @@ function latestDurations() {
         const walk = (s) => {
           for (const x of s.suites ?? []) walk(x)
           for (const sp of s.specs ?? []) {
-            if ((sp.projectIds ?? []).includes('setup')) continue
             let ms = 0
-            for (const t of sp.tests ?? []) for (const r of t.results ?? []) if (r.status === 'passed') ms += r.duration
-            out[sp.file] = (out[sp.file] ?? 0) + ms
+            for (const t of realTests(sp)) for (const r of t.results ?? []) if (r.status === 'passed') ms += r.duration
+            if (ms) out[sp.file] = (out[sp.file] ?? 0) + ms
           }
         }
         for (const s of j.suites ?? []) walk(s)
@@ -191,6 +190,15 @@ function runSlot(m, files, timeoutMs) {
   })
 }
 
+/**
+ * 一条 spec 在本进程里真正跑起来的非 setup 测试。
+ * 注意：运行期 JSON 的 spec 条目**没有** projectIds 字段（那是 --list 才有的），
+ * 用它过滤会一个都不排除 ⇒ 每 slot 多算 2 条 auth.setup（实测把 386 报成 388/392）。
+ */
+function realTests(sp) {
+  return (sp.tests ?? []).filter((t) => t.projectId !== 'setup')
+}
+
 function statsOf(jsonPath) {
   if (!fs.existsSync(jsonPath)) return null
   let j
@@ -200,9 +208,10 @@ function statsOf(jsonPath) {
   const walk = (s) => {
     for (const x of s.suites ?? []) walk(x)
     for (const sp of s.specs ?? []) {
-      if ((sp.projectIds ?? []).includes('setup')) continue
+      const tests = realTests(sp)
+      if (!tests.length) continue          // 纯 setup project 的 spec 整条不计
       specs++
-      for (const t of sp.tests ?? []) for (const r of t.results ?? []) if (r.status === 'passed') {
+      for (const t of tests) for (const r of t.results ?? []) if (r.status === 'passed') {
         passCount++; passMs += r.duration
         files[sp.file] = (files[sp.file] ?? 0) + r.duration
       }
