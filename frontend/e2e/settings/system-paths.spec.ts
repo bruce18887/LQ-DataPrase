@@ -4,6 +4,7 @@ import os from 'node:os'
 import { gotoApp } from '../helpers/nav'
 import { uiLogin } from '../helpers/auth'
 import { ACCOUNTS, PROJECT_ROOT } from '../fixtures/test-data'
+import { CURRENT_SLOT } from '../helpers/slot'
 
 /**
  * 系统存储路径（系统设置 → 📁 存储路径，GET/PUT /api/v1/system/paths/）。
@@ -108,9 +109,11 @@ test.describe('@p2 系统存储路径', { tag: ['@p2', '@settings'] }, () => {
 
     // Windows 路径大小写防御（TEMP 可能展开为短名/大小写差异）
     expect(data.data_dir.toLowerCase()).toBe(PROJECT_ROOT.toLowerCase())
-    expect(
-      data.temp_dir.toLowerCase().endsWith(path.join('LQ-DataPrase-Temp').toLowerCase()),
-    ).toBeTruthy()
+    // 这条断言验的是「API 报的是后端进程实际生效的临时区」，不是某台机器的固定路径：
+    // 非 slot 下未配置 → 内置默认 %TEMP%\LQ-DataPrase-Temp；
+    // slot 下 config.settings.e2e_slot 刻意把它改成 <slot>/temp（每 slot 各用自己的临时区）。
+    const expectedTempSuffix = (CURRENT_SLOT ? CURRENT_SLOT.tempDir : path.join('LQ-DataPrase-Temp')).toLowerCase()
+    expect(data.temp_dir.toLowerCase().endsWith(expectedTempSuffix)).toBeTruthy()
     expect(data.configured).toEqual({ data_dir: PROJECT_ROOT, temp_dir: null })
 
     // UI 展示「默认值」标识（未显式配置）

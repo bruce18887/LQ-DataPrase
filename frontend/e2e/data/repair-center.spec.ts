@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import path from 'node:path'
 import fs from 'node:fs'
 import { execSync } from 'node:child_process'
-import { PROJECT_ROOT, PRIMARY_SAMPLE_FILE, ACCOUNTS } from '../fixtures/test-data'
+import { ACCOUNTS, DATA_DIR, PRIMARY_SAMPLE_FILE, PROJECT_ROOT } from '../fixtures/test-data'
 import { gotoApp } from '../helpers/nav'
 
 /**
@@ -14,7 +14,8 @@ import { gotoApp } from '../helpers/nav'
  * 所有造数统一 REPAIR-E2E-<ts> 批次前缀，afterEach 清理。
  */
 
-const ADMIN_BATCH_DIR = path.join(PROJECT_ROOT, 'media', 'data', ACCOUNTS.admin.username, 'batch')
+// 后端落盘位置跟着进程走：非 slot = 项目根，slot = 该 slot 自己的 data_dir
+const ADMIN_BATCH_DIR = path.join(DATA_DIR, 'media', 'data', ACCOUNTS.admin.username, 'batch')
 const PYTHON = process.env.PYTHON_BIN || path.join(PROJECT_ROOT, '.venv', 'Scripts', 'python.exe')
 
 const ts = Date.now()

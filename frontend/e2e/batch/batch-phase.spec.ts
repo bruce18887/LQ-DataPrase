@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import path from 'node:path'
 import fs from 'node:fs'
-import { PROJECT_ROOT, PRIMARY_SAMPLE_FILE } from '../fixtures/test-data'
+import { DATA_DIR, PRIMARY_SAMPLE_FILE } from '../fixtures/test-data'
 import { gotoApp } from '../helpers/nav'
 
 /**
@@ -24,7 +24,8 @@ import { gotoApp } from '../helpers/nav'
  * 选择批次并「加载批次报表」→ 断言胶囊/树/过滤/回退。
  * 批次名 000_ 开头使其在 list_batches（-batch_name 降序）中排末尾，不影响其它用例。
  */
-const BATCH_BASE_DIR = path.join(PROJECT_ROOT, 'media', 'data', 'admin', 'batch')
+// 后端落盘位置跟着进程走：非 slot = 项目根，slot = 该 slot 自己的 data_dir（MEDIA_ROOT 同源）
+const BATCH_BASE_DIR = path.join(DATA_DIR, 'media', 'data', 'admin', 'batch')
 
 /**
  * 读取 Bin × Site 交叉表「Total」行的 All Site 总数（fixed-right 克隆列）。
