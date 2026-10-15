@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, selectParam, listParams, filterControl, pickOutlierMode } from '../helpers/params'
+import { selectAnalysisFile, selectParam, listParams, filterControl, pickOutlierMode, ensureChartToggles } from '../helpers/params'
 import { waitLoadingGone } from '../helpers/charts'
 import { RECOMMENDED } from '../fixtures/test-data'
 
@@ -52,6 +52,11 @@ async function findParamWithOutliers(page: import('@playwright/test').Page): Pro
   await selectAnalysisFile(page, RECOMMENDED.analysis)
   await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
   await waitLoadingGone(page.locator(SINGLE))
+  // 图表开关是账号级持久态（翻动即写回 analysis_chart_state）：同一个 slot 里前一个文件只要把
+  // QQ图/箱线图留在「开」，`.single-param-tab` 下就会出现多张图各自的 hint bar ⇒ 本文件的
+  // `${SINGLE} .outlier-hint-bar` 会被 strict mode 判成命中 3 个（实测同桶复现 2 红）。
+  // 断言的前提是「只有直方图开着」，所以进来先把起点收敛掉，不给同桶组合左右结果的机会。
+  await ensureChartToggles(page, { hist: true, serial: false, qq: false, box: false })
 
   // Try the initially loaded param first, then iterate if needed.
   const allParams = await listParams(page)

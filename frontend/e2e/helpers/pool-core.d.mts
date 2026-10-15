@@ -66,7 +66,7 @@ export declare const SLOT_TARGET_MS: number
 export declare const SERIAL_REF_PER_SPEC_MS: number
 
 /** 把并发轮测出的总时长折回串行等价量；单价缺失/为 0 时原样返回 */
-export declare function normalizeTotalMs(rawTotalMs: number, perSpecMs: number, refPerSpecMs?: number): number
+export declare function normalizeTotalMs(rawTotalMs: number, perSpecMs?: number, refPerSpecMs?: number): number
 
 export declare function autoSlots(totalMs: number, cap?: number): number
 
