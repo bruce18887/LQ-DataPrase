@@ -503,3 +503,51 @@ e2e 库里 admin 实测停在 `filename_wrap=False`、`page_size=200`、`cpk_a/b
   与别的 spec 同批跑会红、单跑绿 → 用例间数据秩序依赖（下拉选项数被同批上传/清理踩到）。
 
 两条都属于**夜间全量轮该盯的红**，不是本轮删除的后果；登记在此以免下一轮被误当成清理回归。
+
+## slot 池 P0 实测（2026-10-14，探针 `tasks/e2e-slot-probe/probe-template.mjs`）
+
+设计：`docs/superpowers/specs/2026-10-14-e2e-slot-pool-parallel-design.md` §4/§4.1，计划 Task 1。
+探针跑的是最终机制（`config/settings/e2e_slot.py` + `LQDP_E2E_SLOT_DIR`），不是 `data_dir` 重定向。
+
+**耗时与体量**
+
+| 项 | 实测 |
+|---|---|
+| 模板冷构建 `migrate` | 2.2s |
+| `seed_users` | 2.7s |
+| `seed_test_data --refresh` | **11.3s**（87 处理 / 1 跳过）⇒ 模板合计 ≈16.2s，在 20–40s 预算内 |
+| WAL sidecar | 播种后**只剩主文件** 2.94MB，无 `-wal`/`-shm`（每个 dj 子进程干净关闭） |
+| `wal_checkpoint(TRUNCATE)` | 558ms |
+| 拷库（模板 → slot） | **2ms** / 2,945,024 bytes |
+| 副本自检 | `integrity=ok journal=wal datafile_rows=87 users=3` |
+| 硬链镜像 87 文件 | **25ms**（元数据操作，不占磁盘） |
+
+**硬链语义（三条，逐条实测）**
+
+1. 删镜像里的一个文件 → 模板同名文件仍在、大小未变 ⇒ 删除类用例安全（`_delete_datafile_file_only` 的 `os.remove` 只摘本 slot 的链）。
+2. 往镜像写一个**新**文件名 → 模板无同名条目 ⇒ 上传天然隔离（新 inode）。
+3. 往镜像**已存在**的种子路径覆盖写 → **模板内容被连带改动**（实测 5,352,689 → 64 字节）。
+   现有套件不可达：所有上传都是 `e2e_<用途>_<Date.now()>.csv` 唯一名（`large-data-qqplot:56`、
+   `serial-no-column:97-103`、`histogram-first-row-empty:47`、`data.spec:53` 等），只会命中情形 2；
+   移动/解合是改目录项；唯一会就地重写种子路径的写者是 `seed_test_data` 的 `shutil.copy2`
+   （`seed_test_data.py:55`），而它只在**模板构建期**跑，且 `:41-50,176-180` 的 size+mtime 比对本身就是自愈通路。
+   **不变量**：slot 模式下任何用例不得向 `media/data/<user>/{single,batch}` 内**已存在的种子文件名**写入。
+
+**三条机制级发现（都已改代码/计划）**
+
+- **slot 根必须短**：Django 对 sqlite 也执行 63 字符库名检查，`%TEMP%\lqdp-e2e-probe-<ISO>\db.sqlite3` = 89 字符
+  直接 `ImproperlyConfigured` ⇒ 基址定为 `C:\lqdp-e2e`（`LQDP_E2E_ROOT` 可覆盖，与仓库同卷以保证硬链可用）。
+- **`config.settings.base` 的 `DATABASES` 是 PostgreSQL 形状**（`base.py:116`），是 `development` 才改成 sqlite。
+  只导入 base 的 slot 档必须**整体给出** sqlite 配置，只覆盖 `NAME` 会去连 5432（探针实测）⇒
+  已加 `vendor == 'sqlite'` 断言（`test/backend/test_e2e_slot_settings.py`，子进程 `ensure_connection()` 真连一次）。
+- **`os.tmpdir()` 返回 8.3 短名**（`C:\Users\ADMINI~1\...`）而 Django 解析成长名，`fs.realpathSync` **不**展开短名，
+  只有 `fs.realpathSync.native` 会 ⇒ 任何「解析出的路径是否落在 slot 内」的判断必须走 native realpath；
+  否则守卫自己会假阳性地把好路径判成越界（本探针就是这样红过两次）。
+
+**事故与恢复的账**（详见 spec §12）：仓库根 `media/`+`db.sqlite3` 曾被 `_migrate` 搬走并删除，
+已用 `migrate + seed_users + seed_test_data --refresh` 重建（media 87 文件 / 711MB、库 2.95MB），
+并以 `--project=P0` **15/15 绿** + `analysis.spec.ts --project=P1` **18/18 绿（57.8s）** 证明可用。
+探针的「仓库根 media 文件数不变」守卫在后续运行中起点已是 107（P0/analysis 跑测新增 20 个上传），符合预期。
+
+顺带一条：上面登记的 `analysis/file-list-completeness.spec.ts`「下拉选项数被同批上传/清理踩到」
+正是 slot 隔离要消灭的那一类 —— 每 slot 各持一份库与媒体后，这条应当自然消失，P2 阶段回来核销。
