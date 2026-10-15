@@ -18,6 +18,7 @@
     "test:e2e": "playwright test",
     "test:e2e:quick": "playwright test --project=Edge --project=P0 --project=P1",
     "test:e2e:affected": "node ../scripts/e2e_affected.mjs",
+    "test:e2e:pool": "node ../scripts/e2e_pool.mjs",
     "e2e:nightly": "node ../scripts/e2e_nightly.mjs",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",

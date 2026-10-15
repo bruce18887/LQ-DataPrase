@@ -69,7 +69,15 @@ export default defineConfig({
   // 全局前置：seed 用户 + 预植入 SampleData 到 DB（在所有项目之前）
   globalSetup: path.join(__dirname, 'e2e', 'global-setup.ts'),
 
-  reporter: [['html', { open: 'never' }], ['list']],
+  // 非 slot：沿用 html + list。slot：blob（供编排器 merge-reports 出统一 HTML）+ json
+  // （供编排器自算合并）。blob 的输出目录只能经 reporter 选项给，`--blob-report` 在 1.60 不是 CLI 选项。
+  reporter: CURRENT_SLOT
+    ? [
+        ['blob', { outputDir: CURRENT_SLOT.blobDir }],
+        ['json', { outputFile: CURRENT_SLOT.jsonOut }],
+        ['list'],
+      ]
+    : [['html', { open: 'never' }], ['list']],
 
   // 测试产物（含失败截图/视频/trace）与下载文件目录
   outputDir: './test-results',

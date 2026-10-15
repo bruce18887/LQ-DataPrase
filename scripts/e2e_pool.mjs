@@ -1,0 +1,273 @@
+#!/usr/bin/env node
+/**
+ * e2e_pool — 并行全量的唯一入口。
+ *
+ * 流程：预铸 TEMP 模板（库 + 种子 media）→ 按实测时长 LPT 分区 → 起 N 个
+ * 「1 进程 = 1 worker = 1 slot」的 Playwright 子进程 → 自算统计合并 + 官方 merge-reports 出 HTML。
+ *
+ * 每个 slot 的隔离面（全部靠 env，见 pool-core.slotEnv）：
+ *   DJANGO_SETTINGS_MODULE=config.settings.e2e_slot + LQDP_E2E_SLOT_DIR=<slot>
+ *   → 独立的 db.sqlite3（模板拷贝）/ media（模板的硬链镜像）/ temp / .auth / .downloads
+ *   → 独立的 Django 与 preview 端口对、独立的 SECRET_KEY、独立的 Redis db index
+ * 判据：docs/superpowers/specs/2026-10-14-e2e-slot-pool-parallel-design.md
+ */
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
+import fs from 'node:fs'
+import net from 'node:net'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import {
+  MAX_SLOTS, SLOT_BACKEND_BASE, SLOT_FRONTEND_BASE,
+  allocatePortBlock, assertSafeRelPath, autoSlots, buildSlotManifest, mergeRunStats,
+  partitionFiles, slotEnv,
+} from '../frontend/e2e/helpers/pool-core.mjs'
+
+// Windows 上 npx/npm 是 .cmd，必须经 cmd.exe 起；一律用 argv 数组而不是拼 shell 字符串 ——
+// 文件路径来自 CLI，拼字符串就是命令注入面（assertSafeRelPath 是第一道，argv 是第二道）。
+const CMD = process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe'
+const runTool = (tool, args, opts) => spawnSync(CMD, ['/c', tool, ...args], { shell: false, ...opts })
+const captureTool = (tool, args, opts) => execFileSync(CMD, ['/c', tool, ...args], { shell: false, ...opts })
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const FRONTEND = path.join(ROOT, 'frontend')
+const PY = process.env.PYTHON_BIN || path.join(ROOT, '.venv', 'Scripts', 'python.exe')
+// 短基址是硬要求：Django 对 sqlite 也执行 63 字符库名检查（P0 实测 89 字符直接拒绝 migrate）
+const E2E_BASE = process.env.LQDP_E2E_ROOT || 'C:\\lqdp-e2e'
+const TEMPLATE = path.join(E2E_BASE, 'template')
+const SLOTS_ROOT = path.join(E2E_BASE, 'slots')
+const RUN_ID = new Date().toISOString().slice(11, 19).replace(/:/g, '') + `-${process.pid}`
+const PORT_SPAN = 60
+// 基址会进 cmd 的 argv 与 Django 的库名：空格/引号/元字符一律拒绝，别让它变成解析歧义
+if (/["'`$&|<>\s]/.test(E2E_BASE) || path.join(E2E_BASE, 'template', 'db.sqlite3').length > 63) {
+  throw new Error(`LQDP_E2E_ROOT 不可用：需无空格引号且拼出的库名 ≤63 字符（Django 对 sqlite 也查），当前 ${E2E_BASE}`)
+}
+const log = (...a) => console.log('[pool]', ...a)
+
+const argv = process.argv.slice(2)
+const flag = (name, dflt) => { const i = argv.indexOf(`--${name}`); return i < 0 || i + 1 >= argv.length ? dflt : argv[i + 1] }
+const has = (name) => argv.includes(`--${name}`)
+const dashDash = argv.indexOf('--')
+const bare = (p) => p.replace(/^e2e[\\/]/, '')
+const FILES = dashDash < 0 ? [] : argv.slice(dashDash + 1).map(bare)
+
+const netBlock = {}
+const taken = (port) => netBlock[port] === true
+
+/** 仓库根 media 的文件总数 —— 模板/slot 操作前后必须相等（那条重定向通路会整目录搬走） */
+function repoMediaCount() {
+  const root = path.join(ROOT, 'media')
+  if (!fs.existsSync(root)) return -1
+  let n = 0
+  const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) e.isDirectory() ? walk(path.join(d, e.name)) : n++ }
+  walk(root)
+  return n
+}
+
+function dj(args, env) {
+  return execFileSync(PY, ['manage.py', ...args], {
+    cwd: ROOT, env: { ...env, PYTHONIOENCODING: 'utf-8' }, encoding: 'utf-8', timeout: 900_000, maxBuffer: 128e6,
+  })
+}
+
+/** 模板：库 + 种子 media 全在短基址下。配置文件钉的是**仓库根** ⇒ 导入期重定向是空操作 */
+function buildTemplate() {
+  const before = repoMediaCount()
+  fs.mkdirSync(path.join(TEMPLATE, 'temp'), { recursive: true })
+  const cfg = path.join(TEMPLATE, 'system-config.json')
+  fs.writeFileSync(cfg, JSON.stringify({ data_dir: ROOT }), 'utf-8')
+  const env = {
+    ...process.env, DJANGO_SETTINGS_MODULE: 'config.settings.e2e_slot', LQDP_E2E_SLOT_DIR: TEMPLATE,
+    LQDP_SYSTEM_CONFIG_FILE: cfg, SECRET_KEY: 'e2e-template-not-used',
+  }
+  const t0 = Date.now()
+  dj(['migrate', '--noinput'], env)
+  dj(['seed_users'], env)
+  dj(['seed_test_data', '--refresh'], env)
+  // WAL：只拷主文件会丢 -wal 里的内容 ⇒ 先 TRUNCATE checkpoint 落盘，再清 sidecar
+  dj(['shell', '-c', "from django.db import connection as c; c.cursor().execute('PRAGMA wal_checkpoint(TRUNCATE)'); print('ok')"], env)
+  for (const s of ['-wal', '-shm', '-journal']) { const p = path.join(TEMPLATE, 'db.sqlite3' + s); if (fs.existsSync(p)) fs.rmSync(p) }
+  const after = repoMediaCount()
+  if (after !== before) throw new Error(`仓库根 media 文件数变了 ${before}→${after} —— 立即停止，别继续起 slot`)
+  log(`模板就绪 ${((Date.now() - t0) / 1000).toFixed(1)}s → ${TEMPLATE}（仓库根 media 仍为 ${after} 文件）`)
+}
+
+/** 每 slot：新建自己的目录 → 拷库 → 硬链镜像 media → 写 config → 写 slot.json */
+function prepareSlot(m) {
+  fs.rmSync(m.dataDir, { recursive: true, force: true })   // 只删本次 RUN_ID 下自己造的目录
+  for (const dir of [m.tempDir, m.authDir, m.downloadsDir, m.blobDir, path.dirname(m.mediaDir)]) fs.mkdirSync(dir, { recursive: true })
+  fs.copyFileSync(m.templateDbPath, m.dbPath)
+  const mirror = (src, rel = '') => {
+    for (const e of fs.readdirSync(src, { withFileTypes: true })) {
+      const from = path.join(src, e.name), to = path.join(m.mediaDir, rel, e.name)
+      if (e.isDirectory()) { fs.mkdirSync(to, { recursive: true }); mirror(from, path.join(rel, e.name)) }
+      else fs.linkSync(from, to)   // 硬链：不占磁盘、删除只摘本 slot 的目录项
+    }
+  }
+  fs.mkdirSync(m.mediaDir, { recursive: true })
+  if (fs.existsSync(m.templateMediaDir)) mirror(m.templateMediaDir)
+  fs.writeFileSync(m.systemConfigFile, JSON.stringify({ data_dir: ROOT }), 'utf-8')
+  fs.writeFileSync(m.slotFile, JSON.stringify(m, null, 2), 'utf-8')
+}
+
+/** 最近一轮夜跑的 per-file 通过时长，给 LPT 定权；拿不到就退化为等文件数 */
+function latestDurations() {
+  const base = path.join(ROOT, 'tasks', 'e2e-nightly')
+  if (!fs.existsSync(base)) return {}
+  const dirs = fs.readdirSync(base).filter((d) => /^\d{4}-\d{2}-\d{2}/.test(d)).sort().reverse()
+  for (const d of dirs) {
+    for (const name of ['merged.json', 'results.json']) {
+      const p = path.join(base, d, name)
+      if (!fs.existsSync(p)) continue
+      try {
+        const j = JSON.parse(fs.readFileSync(p, 'utf-8'))
+        if (name === 'merged.json' && j.files && Object.keys(j.files).length) return j.files
+        const out = {}
+        const walk = (s) => {
+          for (const x of s.suites ?? []) walk(x)
+          for (const sp of s.specs ?? []) {
+            if ((sp.projectIds ?? []).includes('setup')) continue
+            let ms = 0
+            for (const t of sp.tests ?? []) for (const r of t.results ?? []) if (r.status === 'passed') ms += r.duration
+            out[sp.file] = (out[sp.file] ?? 0) + ms
+          }
+        }
+        for (const s of j.suites ?? []) walk(s)
+        if (Object.keys(out).length) return out
+      } catch { /* 坏 JSON 就往下找一轮 */ }
+    }
+  }
+  return {}
+}
+
+function allFiles() {
+  const out = captureTool('npx', ['playwright', 'test', '--list', '--reporter=json'],
+    { cwd: FRONTEND, encoding: 'utf-8', maxBuffer: 128e6 })
+  const j = JSON.parse(out.slice(out.indexOf('{')))
+  const files = new Set()
+  const walk = (s) => {
+    for (const x of s.suites ?? []) walk(x)
+    for (const sp of s.specs ?? []) if (sp.file) files.add(sp.file)
+  }
+  for (const s of j.suites ?? []) walk(s)
+  return [...files]
+}
+
+function parseSlots(raw, totalMs) {
+  if (raw === undefined || raw === 'auto') return autoSlots(totalMs)
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 1) throw new Error(`--slots 需为 ≥1 整数或 auto，收到 ${raw}`)
+  return Math.min(n, MAX_SLOTS)
+}
+
+async function prefetchPorts() {
+  const ports = []
+  for (let i = 0; i < PORT_SPAN; i++) ports.push(SLOT_BACKEND_BASE + i, SLOT_FRONTEND_BASE + i)
+  await Promise.all([...new Set(ports)].map(async (p) => {
+    netBlock[p] = await new Promise((res) => {
+      const s = net.connect(p, '127.0.0.1')
+      s.setTimeout(150)
+      s.on('connect', () => { s.destroy(); res(true) })
+      s.on('error', () => res(false))
+      s.on('timeout', () => { s.destroy(); res(false) })
+    })
+  }))
+}
+
+function runSlot(m, files, timeoutMs) {
+  const out = fs.openSync(m.logFile, 'w')
+  // reporter 与输出路径由 playwright.config 在 slot 模式下给出（blob/json 的目录只能走 reporter 选项）
+  const args = ['playwright', 'test', ...files.map((f) => assertSafeRelPath(`e2e/${f}`)), '--workers=1']
+  fs.writeSync(out, `$ cmd /c npx ${args.join(' ')}\n(cwd=${FRONTEND}) (ports ${m.backendPort}/${m.frontendPort}) (slotDir=${m.dataDir})\n\n`)
+  return new Promise((resolve) => {
+    const child = spawn(CMD, ['/c', 'npx', ...args], {
+      cwd: FRONTEND, shell: false, stdio: ['ignore', out, out],
+      env: { ...slotEnv(m, process.env), E2E_SKIP_BUILD: '1' },
+    })
+    const killer = setTimeout(() => { try { child.kill('SIGKILL') } catch { /* 已退出 */ } }, timeoutMs)
+    child.on('close', (code) => { clearTimeout(killer); fs.closeSync(out); resolve(code ?? 1) })
+  })
+}
+
+function statsOf(jsonPath) {
+  if (!fs.existsSync(jsonPath)) return null
+  let j
+  try { j = JSON.parse(fs.readFileSync(jsonPath, 'utf-8')) } catch { return null }
+  let specs = 0, passCount = 0, passMs = 0
+  const files = {}
+  const walk = (s) => {
+    for (const x of s.suites ?? []) walk(x)
+    for (const sp of s.specs ?? []) {
+      if ((sp.projectIds ?? []).includes('setup')) continue
+      specs++
+      for (const t of sp.tests ?? []) for (const r of t.results ?? []) if (r.status === 'passed') {
+        passCount++; passMs += r.duration
+        files[sp.file] = (files[sp.file] ?? 0) + r.duration
+      }
+    }
+  }
+  for (const s of j.suites ?? []) walk(s)
+  return { specs, passCount, passMs, wallMs: j.stats?.duration ?? 0, stats: j.stats ?? {}, files }
+}
+
+async function main() {
+  await prefetchPorts()
+  const durations = latestDurations()
+  const files = FILES.length ? FILES : allFiles()
+  const totalMs = files.reduce((a, f) => a + (durations[f] ?? 0), 0)
+  const buckets = partitionFiles(files, durations, parseSlots(flag('slots', 'auto'), totalMs)).filter((b) => b.length)
+  log(`文件 ${files.length} · 加权总量 ${(totalMs / 1000).toFixed(0)}s · 计划 slot ${buckets.length}`
+    + (Object.keys(durations).length ? '' : '（无夜跑 JSON ⇒ 分区未加权）'))
+  if (has('dry-run')) {
+    buckets.forEach((b, i) => log(`slot${i}: ${b.length} 文件 · ${(b.reduce((a, f) => a + (durations[f] ?? 0), 0) / 1000).toFixed(0)}s`))
+    return 0
+  }
+
+  buildTemplate()
+  const built = runTool('npm', ['run', 'build'], { cwd: FRONTEND, stdio: 'ignore' })
+  if (built.status !== 0) throw new Error(`前端构建失败（exit=${built.status}）：${(built.stderr || built.stdout || '').toString().slice(-800)}`)
+
+  const ports = allocatePortBlock(buckets.length, taken)
+  const manifests = ports.map((p, i) => buildSlotManifest({
+    index: i, ports: p, slotRoot: path.join(SLOTS_ROOT, RUN_ID, `slot${i}`), templateRoot: TEMPLATE,
+    redisDb: 12 + i, secretKey: `e2e-slot-${i}-${RUN_ID}`,
+  }))
+  manifests.forEach(prepareSlot)
+
+  const only = flag('only-slot', null)
+  const timeoutMs = Number(flag('timeout-min', '25')) * 60_000
+  const started = Date.now()
+  const codes = await Promise.all(manifests.map((m, i) =>
+    (only !== null && Number(only) !== i) ? Promise.resolve(0) : runSlot(m, buckets[i], timeoutMs)))
+  const spanMs = Date.now() - started
+
+  const reports = manifests.map((m) => statsOf(m.jsonOut)).filter(Boolean)
+  const merged = mergeRunStats(reports)
+  merged.files = reports.reduce((acc, r) => {
+    for (const [f, ms] of Object.entries(r.files)) acc[f] = (acc[f] ?? 0) + ms
+    return acc
+  }, {})
+  merged.wallMs = spanMs
+  merged.slotsPlanned = buckets.length
+  merged.runId = RUN_ID
+  if (only !== null) merged.partial = true
+
+  const outDir = process.env.LQDP_E2E_OUTDIR || path.join(ROOT, 'tasks', 'e2e-pool', 'latest')
+  fs.mkdirSync(outDir, { recursive: true })
+  fs.writeFileSync(path.join(outDir, 'merged.json'), JSON.stringify(merged, null, 2), 'utf-8')
+
+  try {
+    const mergedReport = runTool('npx', ['playwright', 'merge-reports', ...manifests.map((m) => m.blobDir), '--reporter=html'],
+      { cwd: FRONTEND, stdio: 'inherit' })
+    if (mergedReport.status !== 0) throw new Error(`exit=${mergedReport.status}`)
+  } catch (e) { log('HTML 合并失败（统计不受影响）:', e.message) }
+
+  codes.forEach((c, i) => { if (c !== 0) log(`slot${i} EXIT=${c} → ${manifests[i].logFile}`) })
+  log(`用例 ${merged.specs} · 墙钟 ${(spanMs / 60000).toFixed(1)}min · 单价 ${(merged.perSpecMs / 1000).toFixed(2)}s/例`
+    + ` · 效率 ${merged.efficiency.toFixed(2)}（目标 ≥${(0.7 * buckets.length).toFixed(1)}）`
+    + ` · unexpected ${merged.stats.unexpected} · flaky ${merged.stats.flaky} · skipped ${merged.stats.skipped}`)
+  log(`merged.json → ${path.join(outDir, 'merged.json')}`)
+  if (!has('keep-slots')) manifests.forEach((m) => fs.rmSync(m.dataDir, { recursive: true, force: true }))
+  return codes.some((c) => c !== 0) ? 1 : (merged.stats.unexpected > 0 ? 1 : 0)
+}
+
+main().then((code) => process.exit(code)).catch((e) => { console.error('[pool] 失败:', e.message); process.exit(1) })
