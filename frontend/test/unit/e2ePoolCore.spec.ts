@@ -6,8 +6,40 @@ import {
   SLOT_BACKEND_BASE, SLOT_FRONTEND_BASE, DEFAULT_SLOTS, MAX_SLOTS, SLOT_TARGET_MS,
   autoSlots, allocatePortBlock, partitionFiles, assertSafeRelPath, buildSlotManifest, slotEnv, mergeRunStats, parseArgs,
   normalizeTotalMs, SERIAL_REF_PER_SPEC_MS, classifySlotHealth, roundVerdict,
-  nextLivenessState, LIVENESS_MISSES, LIVENESS_TIMEOUT_MS,
+  nextLivenessState, LIVENESS_MISSES, LIVENESS_TIMEOUT_MS, classifyReds,
 } from '../../e2e/helpers/pool-core.mjs'
+
+describe('classifyReds（红文件自动复跑判级）', () => {
+  it('复跑绿 ⇒ 记负载抖动，不算真红；复跑仍红 ⇒ 真红', () => {
+    const r = classifyReds(['a.spec.ts', 'b.spec.ts'], [
+      { file: 'a.spec.ts', red: false, infra: false },
+      { file: 'b.spec.ts', red: true, infra: false },
+    ])
+    expect(r.loadFlakes).toEqual(['a.spec.ts'])
+    expect(r.confirmed).toEqual(['b.spec.ts'])
+    expect(r.unresolved).toEqual([])
+  })
+  it('复跑那一轮本身崩池（服务失联）⇒ 悬而未决，保守算红，不许当成抖动放过', () => {
+    const r = classifyReds(['a.spec.ts'], [{ file: 'a.spec.ts', red: true, infra: true }])
+    expect(r.unresolved).toEqual(['a.spec.ts'])
+    expect(r.confirmed).toEqual([])
+    expect(r.countsBlock).toBe(true)          // 门禁仍然拦
+  })
+  it('复跑时用例整条没跑上（specs=0）也算没验成，不放行', () => {
+    const r = classifyReds(['a.spec.ts'], [{ file: 'a.spec.ts', red: false, infra: false, specs: 0 }])
+    expect(r.unresolved).toEqual(['a.spec.ts'])
+  })
+  it('漏掉某个文件的复跑结果 ⇒ 该文件进 unresolved', () => {
+    const r = classifyReds(['a.spec.ts', 'b.spec.ts'], [{ file: 'a.spec.ts', red: false, infra: false, specs: 5 }])
+    expect(r.loadFlakes).toEqual(['a.spec.ts'])
+    expect(r.unresolved).toEqual(['b.spec.ts'])
+  })
+  it('没有红就不该调用复跑，但被调用时结论是干净放行', () => {
+    const r = classifyReds([], [])
+    expect(r.confirmed).toEqual([])
+    expect(r.countsBlock).toBe(false)
+  })
+})
 
 describe('nextLivenessState（看门狗防谎报）', () => {
   it('单次探测失败不算掉线 —— 满载时 150ms 超时就曾把活着的 4 个 slot 全报死', () => {

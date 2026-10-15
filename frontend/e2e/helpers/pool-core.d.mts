@@ -82,6 +82,23 @@ export declare function nextLivenessState(
   childAlive: boolean,
 ): LivenessState & { done?: boolean }
 
+export interface RecheckResult {
+  file: string
+  red: boolean
+  infra: boolean
+  specs?: number
+}
+
+export interface RedClassification {
+  confirmed: string[]
+  loadFlakes: string[]
+  unresolved: string[]
+  countsBlock: boolean
+}
+
+/** 红文件独占 slot 复跑后的三级判级：真红 / 负载抖动 / 悬而未决（后者保守算红，不因"没验成"放行） */
+export declare function classifyReds(redFiles: string[], results: RecheckResult[]): RedClassification
+
 export interface SlotHealth {
   slot: number
   specs: number

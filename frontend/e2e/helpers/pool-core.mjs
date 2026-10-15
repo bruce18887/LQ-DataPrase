@@ -162,6 +162,25 @@ export function nextLivenessState({ misses = 0, dead = false }, probeOpen, child
 }
 
 /**
+ * 红文件的自动复跑判级（用户 2026-10-15 拍：门禁仍要求零真红，但负载抖动要自动消化）。
+ * 输入是第一轮报红的文件清单 + 每个文件「独占一个 slot 复跑」的结果，输出三级：
+ *   confirmed   复跑仍红 ⇒ 真红，门禁拦
+ *   loadFlakes  复跑绿 ⇒ 判为满载抖动，记 flake 不记真红（台账里可见，不静默丢弃）
+ *   unresolved  复跑本身崩池 / 用例压根没跑上 / 结果缺失 ⇒ 保守算红，绝不因「没验成」而放行
+ */
+export function classifyReds(redFiles, recheckResults) {
+  const byFile = new Map((recheckResults ?? []).map((r) => [r.file, r]))
+  const confirmed = [], loadFlakes = [], unresolved = []
+  for (const f of [...new Set(redFiles ?? [])].sort()) {
+    const r = byFile.get(f)
+    if (!r || r.infra || r.specs === 0) unresolved.push(f)
+    else if (r.red) confirmed.push(f)
+    else loadFlakes.push(f)
+  }
+  return { confirmed, loadFlakes, unresolved, countsBlock: confirmed.length + unresolved.length > 0 }
+}
+
+/**
  * 单 slot 健康判定：区分「有用例红」与「服务半路死了导致的成片红」。
  * 实测依据：一次 N=4 轮里两个 slot 的 preview+后端在开跑约 1 分钟后失联，
  * 该轮报出 155 unexpected、效率 1.21 —— 当成真实结果发出去就是假信号。
