@@ -276,11 +276,14 @@ describe('decodePngRgba + frameStats —— 审的是要写进 .ico 的字节', 
     expect(s).toEqual({ size: 4, tones: 2, bboxW: 4, bboxH: 4 })
   })
 
-  it('半透明像素不计入色阶与剪影（只算 alpha>=240 的实心）', () => {
-    const png = encodePngRgba(2, 2, () => [10, 20, 30, 120])
-    const s = frameStats(png)
-    expect(s.tones).toBe(0)
-    expect(s.bboxW).toBe(0)
+  it('色阶只认 alpha===255，剪影框认 alpha>=8（两者口径不同，实测 >=240 会虚报 4–6 色阶）', () => {
+    // 全图只有半透明像素：有墨、但没有一个不透明像素 → 色阶 0，剪影 2×2
+    const haze = encodePngRgba(2, 2, () => [10, 20, 30, 120])
+    expect(frameStats(haze)).toMatchObject({ tones: 0, bboxW: 2, bboxH: 2 })
+
+    // 同色但一半不透明一半近不透明：不透明侧只有 1 个色阶
+    const core = encodePngRgba(2, 2, (x, y) => [37, 99, 235, x === 0 && y === 0 ? 255 : 250])
+    expect(frameStats(core).tones).toBe(1)
   })
 })
 
@@ -414,7 +417,14 @@ function decodePngRgba(buf) {
   return { width, height, data: out }
 }
 
-/** 只统计实心像素（alpha>=240）：色阶数与剪影框。 */
+/**
+ * 只统计**真正不透明**的像素（alpha === 255）作为色阶来源，剪影框则按"有墨"（alpha >= 8）算。
+ *
+ * 为什么色阶必须卡 ==255 而不是 >=240：实测 Chromium 栅格化这枚单色母版后，
+ * alpha===255 得到 1 个色阶，而 alpha>=240 得到 4–6 个（抗锯齿边缘的预乘残差）。
+ * 用 >=240 配 "≤2" 的阈值会让自检永久报红。同一实测下，旧的模糊母版在 ==255
+ * 仍有 92 个色阶 —— 判别力 92 vs 1，阈值 2 卡在中间，两边都判得开。
+ */
 function frameStats(buf) {
   const { width, height, data } = decodePngRgba(buf)
   const tones = new Set()
@@ -422,8 +432,9 @@ function frameStats(buf) {
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const i = (y * width + x) * 4
-      if (data[i + 3] < 240) continue
-      tones.add(`${data[i]},${data[i + 1]},${data[i + 2]}`)
+      const a = data[i + 3]
+      if (a === 255) tones.add(`${data[i]},${data[i + 1]},${data[i + 2]}`)
+      if (a < 8) continue
       if (x < minX) minX = x
       if (x > maxX) maxX = x
       if (y < minY) minY = y
