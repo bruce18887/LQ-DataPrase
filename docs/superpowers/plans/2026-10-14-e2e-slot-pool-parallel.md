@@ -91,7 +91,7 @@
 - Produces: 数字表（模板构建秒数 / 拷库秒数 / 硬链秒数 / WAL sidecar 现状 / 副本行数与 integrity）
   → 写进 `docs/reference/e2e-tier-triage.md` 文末与 spec §9-P0
 
-- [ ] **Step 0: 确认仓库根现场（只读）**
+- [x] **Step 0: 确认仓库根现场（只读）**
 
 ```bash
 cd /c/Users/Administrator/Desktop/DataPrase/LQ-DataPrase && ls -la db.sqlite3 | head -2 && du -sh media && find media -type f | wc -l
@@ -99,7 +99,7 @@ cd /c/Users/Administrator/Desktop/DataPrase/LQ-DataPrase && ls -la db.sqlite3 | 
 Expected: `db.sqlite3` 存在、`media/` ≈711MB / 87 文件（2026-10-14 事故恢复后的现场）。
 不符合就先停下来查清楚，不要在状态不明时执行任何写命令。
 
-- [ ] **Step 1: 写失败的 Django 测试**
+- [x] **Step 1: 写失败的 Django 测试**
 
 ```python
 # test/backend/test_e2e_slot_settings.py
@@ -175,7 +175,7 @@ Run: `python -m pytest test/backend/test_e2e_slot_settings.py -v`（用带 pytes
 `.venv` 无 pytest，`test_outliers.py` 的 `import pytest` 会伪装成回归 —— 见 memory `project-e2e-run-reliability`）
 Expected: FAIL —— `No module named 'config.settings.e2e_slot'` / 缺变量那条也因档不存在而错
 
-- [ ] **Step 2: 实现 settings 覆写档**
+- [x] **Step 2: 实现 settings 覆写档**
 
 ```python
 # config/settings/e2e_slot.py
@@ -225,19 +225,19 @@ for _key in ('TMP', 'TEMP', 'TMPDIR'):
 （`target == orig`），那一步是**空操作**；编排器必须保证每个 slot 进程的这份配置文件写着仓库根。
 这一点由 Step 5 的探针脚本硬断言，不靠注释。
 
-- [ ] **Step 3: 跑测试确认通过**
+- [x] **Step 3: 跑测试确认通过**
 
 Run: `python -m pytest test/backend/test_e2e_slot_settings.py -v`
 Expected: 4 条全 PASS。
 
-- [ ] **Step 4: 提交档与测试**
+- [x] **Step 4: 提交档与测试**
 
 ```bash
 git add config/settings/e2e_slot.py test/backend/test_e2e_slot_settings.py
 git commit -m "feat(settings): e2e slot 覆写档 —— 用 LQDP_E2E_SLOT_DIR 直接指库/媒体/临时区，不走 data_dir move 通路"
 ```
 
-- [ ] **Step 5: 写探针脚本**
+- [x] **Step 5: 写探针脚本**
 
 ```js
 // tasks/e2e-slot-probe/probe-template.mjs
@@ -365,7 +365,7 @@ say('收尾核对: 仓库根 media 文件数不变 =', before)
 say('DONE')
 ```
 
-- [ ] **Step 6: 跑探针并记录**
+- [x] **Step 6: 跑探针并记录**
 
 Run: `node tasks/e2e-slot-probe/probe-template.mjs`
 Expected: 依次打出 `解析断言 OK`（三条路径都在本次 RUN 目录下）、`仓库根 media 文件数（起点）: 87`、
@@ -374,11 +374,11 @@ migrate/seed/拷库/硬链四个耗时、`副本自检: integrity=ok … rows=87
 **闸门**：任一 `throw` 出现 ⇒ 立刻停止并如实报告，不许「再试一次看看」。
 若 `seed_test_data` 在 slot 档下失败或耗时 >60s ⇒ 停下，把结论写回 spec §10 并重议模板策略，不得继续 Task 4。
 
-- [ ] **Step 7: 数字进台账**
+- [x] **Step 7: 数字进台账**
 
 把耗时四项 + sidecar 现状 + 副本 integrity/rows 追加到 `docs/reference/e2e-tier-triage.md` 文末「slot 池 P0 实测」小节，并在 spec §9-P0 后补一行「已实测：…」。探针脚本留在 `tasks/`（不入库）。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add docs/reference/e2e-tier-triage.md docs/superpowers/specs/2026-10-14-e2e-slot-pool-parallel-design.md
@@ -415,7 +415,7 @@ git commit -m "docs(e2e): slot 池 P0 实测数字 —— 模板/硬链/拷库�
 `SlotManifest` 字段（跨 JS/TS 契约，改一边必须改另一边）：
 `index, backendPort, frontendPort, dataDir, tempDir, dbPath, mediaDir, systemConfigFile, slotFile, authDir, downloadsDir, blobDir, jsonOut, logFile, templateDbPath, templateMediaDir, redisDb, secretKey`
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 ```ts
 // frontend/test/unit/e2ePoolCore.spec.ts
@@ -538,12 +538,12 @@ describe('mergeRunStats', () => {
 })
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `cd frontend && npx vitest run test/unit/e2ePoolCore.spec.ts`
 Expected: FAIL —— `Failed to load …/e2e/helpers/pool-core.mjs`（文件还不存在）
 
-- [ ] **Step 3: 实现 pool-core**
+- [x] **Step 3: 实现 pool-core**
 
 ```js
 // frontend/e2e/helpers/pool-core.mjs
@@ -653,12 +653,12 @@ export function mergeRunStats(reports) {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `cd frontend && npx vitest run test/unit/e2ePoolCore.spec.ts`
 Expected: 全部 PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add frontend/e2e/helpers/pool-core.mjs frontend/test/unit/e2ePoolCore.spec.ts
@@ -678,7 +678,7 @@ git commit -m "test(e2e): slot 池纯逻辑落 T2 层 —— LPT 分区/端口�
 - Consumes: Task 2 的 `SlotManifest` 字段名（逐字）
 - Produces: `CURRENT_SLOT`、`SYSTEM_CONFIG_FILE`、`AUTH_DIR`、`DOWNLOAD_DIR`、`DATA_DIR`、`ADMIN_STATE`、`USER_STATE`、`LEGACY_SYSTEM_CONFIG_FILE`
 
-- [ ] **Step 1: 写 `frontend/e2e/helpers/slot.ts`**
+- [x] **Step 1: 写 `frontend/e2e/helpers/slot.ts`**
 
 ```ts
 // 编排器与 harness 之间唯一的桥：读一份 slot.json，其余路径全部经这里。
@@ -723,7 +723,7 @@ export const USER_STATE = path.join(AUTH_DIR, 'user.json')
 
 `DATA_DIR` 的 legacy 值：`frontend/e2e/helpers/` 上溯 4 级 = 仓库根，与 `fixtures/test-data.ts:8` 的 `PROJECT_ROOT` 同值 —— Step 2 的单测钉住这条等价性。
 
-- [ ] **Step 2: 写失败的路径单测**
+- [x] **Step 2: 写失败的路径单测**
 
 ```ts
 // frontend/test/unit/slotPaths.spec.ts
@@ -746,7 +746,7 @@ describe('slot-aware 路径在无 slot 时等于历史默认', () => {
 Run: `cd frontend && npx vitest run test/unit/slotPaths.spec.ts`
 Expected: FAIL —— `test-data.ts` 还没有从 slot 转出（或 slot.ts 未被引用）
 
-- [ ] **Step 3: test-data.ts 改转出（导出名不变）**
+- [x] **Step 3: test-data.ts 改转出（导出名不变）**
 
 删掉 `E2E_SYSTEM_CONFIG_FILE`（17-20 行）、`AUTH_DIR`/`ADMIN_STATE`/`USER_STATE`（26-28）、`DOWNLOAD_DIR`（31）这几段本地 `path.join`，在原位置换成：
 
@@ -761,7 +761,7 @@ export {
 } from '../helpers/slot'
 ```
 
-- [ ] **Step 4: playwright.config.ts 三处**
+- [x] **Step 4: playwright.config.ts 三处**
 
 ① 顶部（10-22 行那段无条件 `fs.writeFileSync`）换成按 slot 分支：
 
@@ -806,7 +806,7 @@ env: {
 
 （后端那条 `webServer` 的 `reuseExistingServer`/`command` 不变，只有 env 与前端那条的 command 需要动。）
 
-- [ ] **Step 5: global-setup.ts 加 slot 分支**
+- [x] **Step 5: global-setup.ts 加 slot 分支**
 
 ```ts
 import { CURRENT_SLOT } from './helpers/slot'
@@ -830,7 +830,7 @@ async function globalSetup() {
 }
 ```
 
-- [ ] **Step 6: 验证非 slot 路径零行为变化**
+- [x] **Step 6: 验证非 slot 路径零行为变化**
 
 ```bash
 cd frontend && npm run lint:e2e && npx vitest run test/unit/slotPaths.spec.ts
@@ -838,7 +838,7 @@ npx playwright test --list --reporter=json 2>/dev/null | node -e "let s='';proce
 ```
 Expected: `lint:e2e` 0 error；两条单测 PASS；`specs: 386`（收集数不变 ⇒ 只动了路径没动判据）。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add frontend/e2e/helpers/slot.ts frontend/e2e/fixtures/test-data.ts frontend/playwright.config.ts frontend/e2e/global-setup.ts frontend/test/unit/slotPaths.spec.ts
@@ -856,7 +856,7 @@ git commit -m "refactor(e2e): slot 清单成为路径单一来源 —— 无 slo
 - Produces: CLI `node scripts/e2e_pool.mjs [--slots=N|auto] [--only-slot=i] [--dry-run] [--keep-slots] [-- <file...>]`；
   产物 `merged.json` = `MergedStats` + `files: Record<裸路径, number /*通过毫秒*/>` + `partial?: boolean`
 
-- [ ] **Step 1: 写编排器（完整文件，不留半成品）**
+- [x] **Step 1: 写编排器（完整文件，不留半成品）**
 
 ```js
 #!/usr/bin/env node
@@ -1122,18 +1122,18 @@ main().then((code) => process.exit(code)).catch((e) => { console.error('[pool] �
     "test:e2e:pool": "node ../scripts/e2e_pool.mjs",
 ```
 
-- [ ] **Step 2: dry-run 只看分区**
+- [x] **Step 2: dry-run 只看分区**
 
 Run: `cd frontend && npm run test:e2e:pool -- --slots=auto --dry-run`
 Expected: `文件 74 · 加权总量 ≈1000s · 计划 slot 4`，并列出每桶文件数与桶权重秒数。此路径不建模板、不 spawn。
 
-- [ ] **Step 3: N=1 全量等价（本任务的验收线）**
+- [x] **Step 3: N=1 全量等价（本任务的验收线）**
 
 Run: `node scripts/e2e_pool.mjs --slots=1 --keep-slots`
 Expected: `用例 386`；`unexpected ≤1`（今天那条产品侧硬红 `smoke/pages`「数据分析 正常加载」，spec §7）；`flaky ≤5`；
 `tasks/e2e-pool/latest/merged.json` 生成。
 
-- [ ] **Step 4: 与今天的串行对照 per-file 用例数与红集合**
+- [x] **Step 4: 与今天的串行对照 per-file 用例数与红集合**
 
 ```bash
 node -e "
@@ -1153,7 +1153,7 @@ console.log('baseline 有但 pool 没跑到:',Object.keys(base).filter(f=>!a.fil
 Expected: `pool specs: 386` 且两个差集都为空（若非空，必须点名解释是哪次提交带来的文件增减，否则不许继续）。
 红集合差异记到 `docs/reference/e2e-tier-triage.md`（N=1 应只带那条已知产品侧硬红）。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add scripts/e2e_pool.mjs frontend/package.json docs/reference/e2e-tier-triage.md
@@ -1173,7 +1173,7 @@ git commit -m "feat(e2e): slot 池编排器 —— TEMP 预铸模板 + 硬链镜
 **Interfaces:**
 - Consumes: Task 3 的 `DATA_DIR`（经 `fixtures/test-data` 转出）
 
-- [ ] **Step 1: 改两处常量，并把 `DATA_DIR` 加进入口 import**
+- [x] **Step 1: 改两处常量，并把 `DATA_DIR` 加进入口 import**
 
 ```ts
 // batch-phase.spec.ts:27
@@ -1182,13 +1182,13 @@ const BATCH_BASE_DIR = path.join(DATA_DIR, 'media', 'data', 'admin', 'batch')
 const ADMIN_BATCH_DIR = path.join(DATA_DIR, 'media', 'data', ACCOUNTS.admin.username, 'batch')
 ```
 
-- [ ] **Step 2: 单 slot 跑这两个文件，并与今天对照**
+- [x] **Step 2: 单 slot 跑这两个文件，并与今天对照**
 
 Run: `node scripts/e2e_pool.mjs --slots=1 --keep-slots -- e2e/batch/batch-phase.spec.ts e2e/data/repair-center.spec.ts`
 Expected: 两文件全绿，且与 `cd frontend && npx playwright test e2e/batch/batch-phase.spec.ts e2e/data/repair-center.spec.ts --workers=1` 结果一致。
 若池只跑了其中一个文件 ⇒ FILES 透传有 bug，先修再继续。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add frontend/e2e/batch/batch-phase.spec.ts frontend/e2e/data/repair-center.spec.ts
@@ -1203,7 +1203,7 @@ git commit -m "fix(e2e): 批次目录改从 DATA_DIR 推导 —— 为 slot 独�
 **Interfaces:**
 - Consumes: `merged.json`（Task 4 形状）、`--only-slot`（单 slot 原地复跑）
 
-- [ ] **Step 1: 正证——同一对历史互踩文件，分不同 slot 与同 slot 各跑一次**
+- [x] **Step 1: 正证——同一对历史互踩文件，分不同 slot 与同 slot 各跑一次**
 
 `settings/settings.spec.ts` 的「恢复默认」会洗全部 `UserSetting`，历史上把 `fonts.spec` 从 0 红打到 5 红：
 
@@ -1215,23 +1215,23 @@ Expected：前者两个 slot 各持一份库副本 ⇒ 两文件都绿 = **slot 
 后者同 slot：绿 = 现有快照-还原本身够；红 = **同 slot 内跨文件污染**，必须逐条归因（不许靠拆到不同 slot 蒙过去，真实分区里组合会变）。
 两条结论原文写进 `docs/reference/e2e-tier-triage.md`，并注明「正证不依赖改坏源码」。
 
-- [ ] **Step 2: N=2 全量**
+- [x] **Step 2: N=2 全量**
 
 Run: `LQDP_E2E_OUTDIR=tasks/e2e-nightly/<date>-pool2 node scripts/e2e_pool.mjs --slots=2`
 记录：墙钟、单价、效率、unexpected、flaky。
 
-- [ ] **Step 3: N=4 全量**
+- [x] **Step 3: N=4 全量**
 
 Run: `LQDP_E2E_OUTDIR=tasks/e2e-nightly/<date>-pool4 node scripts/e2e_pool.mjs --slots=4`
 **判据**：`效率 ≥ 2.8`（=0.7×4）且墙钟 ≤10min。不达标就分两条查：桶拖尾（看 `merged.json` 的 `files` 分布）
 vs 资源争用（看各 `slot<i>/run.log` 有无超时/OOM/`ERR_CONNECTION_REFUSED`）。
 
-- [ ] **Step 4: 逐条归因并行后新增的红**
+- [x] **Step 4: 逐条归因并行后新增的红**
 
 每个新 unexpected 先做隔离复跑区分顺序污染与真红：`node scripts/e2e_pool.mjs --slots=1 --keep-slots -- e2e/<该文件>`；
 再按 spec §3 的三类形状定性质。**不改产品代码，除非红与产品行为矛盾**（那种情况写进待用户拍板清单）。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add docs/reference/e2e-tier-triage.md
@@ -1253,7 +1253,7 @@ git commit -m "docs(e2e): slot 池 N=2/N=4 实测与隔离性正证 —— 效�
 - Consumes: `merged.json`
 - Produces: `THRESHOLDS`、`evaluateGates(rep, slots): string[]`（返回阻塞原因，空数组=放行）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 // frontend/test/unit/e2eNightlyGates.spec.ts
@@ -1285,7 +1285,7 @@ describe('并行夜跑闸口', () => {
 Run: `cd frontend && npx vitest run test/unit/e2eNightlyGates.spec.ts`
 Expected: FAIL —— `nightly-gates.mjs` 不存在
 
-- [ ] **Step 2: 实现阈值模块**
+- [x] **Step 2: 实现阈值模块**
 
 ```js
 // frontend/e2e/helpers/nightly-gates.mjs
@@ -1310,7 +1310,7 @@ export function evaluateGates(rep, slots) {
 }
 ```
 
-- [ ] **Step 3: 改 `e2e_nightly.mjs`**
+- [x] **Step 3: 改 `e2e_nightly.mjs`**
 
 - 阈值常量删掉，改 `import { THRESHOLDS, evaluateGates } from '../frontend/e2e/helpers/nightly-gates.mjs'`
 - 起跑：`spawnSync('node scripts/e2e_pool.mjs --slots=' + (process.env.E2E_SLOTS ?? 'auto'), { cwd: ROOT, stdio:'inherit', shell:true })`，
@@ -1321,12 +1321,12 @@ export function evaluateGates(rep, slots) {
   若 `merged.specs < 预期` 或有 slot `EXIT≠0` 且其 `results.json` 缺失 ⇒ 本轮记 `VOID (infra)`、
   不进时间序列，并列出这些 slot 的 `run.log` 路径（沿用 `LATEST.md` 里 2026-10-14 那行的处理方式：指标不可信就不许当结论）。
 
-- [ ] **Step 4: 用既有 JSON 验算，不重跑全量**
+- [x] **Step 4: 用既有 JSON 验算，不重跑全量**
 
 Run: `node scripts/e2e_nightly.mjs --report-only tasks/e2e-pool/latest/merged.json`
 Expected: 打印 5 项判定结果（沿用脚本原有 `--report-only` 通路）。若 Task 6 实测单价远低于 6s，就在这里收紧常量并重跑本验算。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add frontend/e2e/helpers/nightly-gates.mjs frontend/test/unit/e2eNightlyGates.spec.ts scripts/e2e_nightly.mjs
@@ -1341,7 +1341,7 @@ git commit -m "feat(e2e): 夜间轮接 slot 池 —— 阈值按并行重标定�
 **Interfaces:**
 - Consumes: `node scripts/e2e_pool.mjs --slots=auto -- <files…>`
 
-- [ ] **Step 1: 替换执行通路，保留选例与兜底逻辑**
+- [x] **Step 1: 替换执行通路，保留选例与兜底逻辑**
 
 ```js
 /** 统一走池：文件少时 autoSlots 自然退回 1（≈今天，无额外启动开销） */
@@ -1355,13 +1355,13 @@ function runPool(filesArg = '', passthrough = '') {
 把 245 / 296 / 298 / 299 行的四处 `run('npx playwright test …')` 换成 `runPool(paths, TAIL)` 形式（`--project=P0` 这类透传参数放 `passthrough`）。
 **不动**：`NO AFFECTED TESTS` 输出、`MAX_MODULES_BEFORE_FULL` 升级全量、`GLOBAL` 兜底、后端 pytest 前置检查（285 行那段）。
 
-- [ ] **Step 2: 验快门禁不退化**
+- [x] **Step 2: 验快门禁不退化**
 
 Run: `cd frontend && npm run lint:e2e && npm run test:e2e:affected`
 Expected: 打印实际走池的秒数且 <5min；无受影响用例时仍打印 `NO AFFECTED TESTS`。
 若模板构建把预算吃掉（>5min）⇒ 加 `--reuse-template`：模板存在且新于 `apps/` 与 `Data/SampleData` 时跳过 `buildTemplate()`，并在 Step 3 补一条对应单测。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add scripts/e2e_affected.mjs
@@ -1373,7 +1373,7 @@ git commit -m "feat(e2e): 快门禁复用 slot 池 —— autoSlots 小集合自
 **Files:**
 - Modify: `docs/tasks/todo.md`、`docs/tasks/lessons.md`、`.claude/CLAUDE.md:70`（后者 gitignore，只对本机生效）
 
-- [ ] **Step 1: lessons 追加两条（现象→根因→规则，压到最短）**
+- [x] **Step 1: lessons 追加两条（现象→根因→规则，压到最短）**
 
 ① `data_dir` 重定向是 **move 语义**（`_migrate`：copy → verify → `unlink` 源 + `rmtree(media)`），
 而 `LQDP_SKIP_STORAGE_MIGRATION` 只管「没配 `data_dir` 时怎么取默认值」，挡不住
@@ -1383,13 +1383,13 @@ git commit -m "feat(e2e): 快门禁复用 slot 池 —— autoSlots 小集合自
 ② 并行化的隔离边界要枚举到「缓存键里的 user_id」：每份库副本 admin 的 PK 都是 1，Redis 一旦起来
 `sftp:conn:<user_id>` 就 4 slot 串号（`apps/sftp/cache.py:43,116`）；降级 LocMem 时不暴露，所以必须在设计期查。
 
-- [ ] **Step 2: 更新门禁口径**
+- [x] **Step 2: 更新门禁口径**
 
 `.claude/CLAUDE.md` 的「门禁节奏」那行改成实测数字（墙钟 ≤12min 判定、单价阈值 6s@≤4 slot、效率 ≥0.7N、
 `E2E_SLOTS`/`--slots` 是唯一并行度旋钮），并记 N=1/2/4 的实测值。
 **不要**把规则正文复制进 `AGENTS.md`（会造成双份漂移，那正是 AGENTS.md 开头明令避免的）。
 
-- [ ] **Step 3: 提交**
+- [x] **Step 3: 提交**
 
 ```bash
 git add docs/tasks/todo.md docs/tasks/lessons.md
