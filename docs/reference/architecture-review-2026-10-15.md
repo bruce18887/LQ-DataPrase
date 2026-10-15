@@ -298,3 +298,32 @@
 3. **生产化最后一公里**：健康检查、graceful shutdown、限流、依赖锁定。桌面分发应用对这几项的要求比 Web 服务更硬——用户机器上的崩溃你无法登上去排查。
 
 **不需要动的**：Electron + PyInstaller 的进程模型、storage v2 的路径收敛、双 settings 目标（standalone/server）、以及整套 e2e 并行池与门禁设计。这些是项目的资产，改动它们只会引入新风险。
+
+---
+
+## 附录：P0 落地记录（2026-10-15 同日完成，提交 `62ac05d`）
+
+本报告 P0 五项已全部实施。**实施期间的侦察推翻了两条原始结论**，在此更正，以免后人按旧版行事：
+
+| 原报告结论 | 实测事实 | 处置 |
+|-----------|---------|------|
+| 「Celery / Redis 依赖链空转」 | **Redis 不是幽灵层** —— `apps/sftp/cache.py:15-22` 真用它做可选共享会话缓存（带 LocMemCache 回落），`REDIS_URL`/`SFTP_SESSION_REDIS_URL` 是活配置 | 只删 Celery；**保留 Redis** 并注明其唯一消费者 |
+| 「登录端点无限流」 | `apps/accounts/views.py:24-25` **已有**账号级锁定（5 次失败 → `423 LOCKED` + 锁 15 分钟，含 `remaining_attempts`/`retry_after_minutes`） | 降级为「补 IP 维度」，非从零开始 |
+
+**新增交付物**
+
+- `apps/common/health.py`（142 行）—— `/api/v1/health/`（liveness，恒 200，零 DB 查询，用 `assertNumQueries(0)` 钉住）与 `/api/v1/ready/`（readiness：DB / 目录可写 / 迁移，失败 503 + 逐项 `ok`，`DEBUG=False` 下抹掉 detail）。两者 `AllowAny` 且**不限流**：宿主必须在任何用户登录前就能轮询，而探针被 429 时调用方分不清「后端没起来」与「被限流」。
+- `apps/common/shutdown.py`（220 行）—— SIGTERM/SIGINT 处理器 + `POST /api/v1/system/shutdown/`（回环来源 + 一次性令牌双闸门，未配令牌返回 404）。
+- `requirements/build.txt`、`pyproject.toml`、`.python-version`；T1 层测试 24 例（`test/backend/test_{health_probes,login_throttle,shutdown}.py`）。
+
+**实施中发现的新问题（原报告未覆盖）**
+
+1. **Windows 上 `child.kill('SIGTERM')` 不触发任何 Python 处理器**（Node 用 `TerminateProcess` 实现）。`backend.ts` 的 `stopBackend()` 读起来像已实现优雅关闭，但后端那半根本不存在 —— 打包版此前退出时**从不关数据库连接**。这是 P0-3 采用 HTTP 令牌端点而非纯信号处理的直接原因。
+2. **`whitenoise` 声明位置错误**：`standalone.py:116` 依赖它、`lq_dataprase.spec:197` 显式列它，但它只在 `production.txt`，而 README 让用户 `pip install -r requirements/base.txt` → 桌面版依赖声明缺失，靠「环境里恰好装了」侥幸通过。已移入 `base.txt`。
+3. **venv 实测 Django 6.0.5**，而 README / `apps/CLAUDE.md` 都写「Django 4.2」，`requirements` 写 `>=4.2,<7.0` —— 差两个大版本，且流水线无从察觉。
+4. **`AGENTS.md` 指向一个不在仓库里的文件**：它把 `.claude/CLAUDE.md` 列为「会话开始必读」，但 `.gitignore:148` 附近有意忽略了 `.claude/CLAUDE.md`、`apps/CLAUDE.md`、`frontend/CLAUDE.md`（注释：「AI 助手与样式指南文档」）。新克隆者会拿到一个指向不存在文件的入口。**属仓库策略问题，未处理，待决策。**
+5. **本机跑后端全量必须带 `CODEBUDDY_SAFE_DELETE_ENABLED=0`**：沙箱的 bulk-delete guard 会抛 `SystemExit`（不继承 `Exception`，各测试的 `except OSError` 接不住），一次跑出 52 errors + 9 failures 且两次跑红数不同。带上后同一棵树 1459 例全绿。已写进 `docs/tasks/lessons.md`。
+
+**验证**：后端全量 1459 例 OK（skipped=7）· 新增 T1 24 例 · `npm run build` ✓ · vitest 118 例 ✓ · `lint:e2e` ✓ · `electron:build:ts`（strict）✓ · 真实 HTTP 探针 200/200/404 ✓ · 优雅关闭端到端 200 → **进程 100ms 内自行退出，未被强杀** ✓。
+
+**未完成**：全量 e2e 未跑（项目约定需先征询；且本沙箱不允许 spawn `cmd.exe`，非 slot 模式必然在 `global-setup.ts` 报 `EBUSY` —— 但 webServer 已成功起 Django+Vite 并进入 globalSetup，**这本身证明新探针通过了**）。P1 各项（`analysis_views.py` 690 行、统计 service 双包、`get_bin_column_name` 6 处、视图错误三套格式、N+1）本轮未动。
