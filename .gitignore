@@ -182,3 +182,7 @@ frontend/build-out.txt
 *.rej
 frontend/tasks/
 db.sqlite3.bak*
+
+# ================== Isolated workspaces ==================
+# superpowers:using-git-worktrees 在此放隔离工作树；不忽略会把整棵树提交进仓库
+/.worktrees/
