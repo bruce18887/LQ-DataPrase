@@ -540,17 +540,20 @@ rm -f build/icon.ico && node scripts/gen-icon.ico.js
 Expected: 六行统计，其中 `16px: 1 色阶 / 剪影 15×15`（或 16×16），末行 `wrote build/icon.ico`，退出码 0。
 若 16px 那行剪影 <15，自检会以非零退出并点名留白 —— 回去调 `padPct`，不要调低阈值。
 
-- [ ] **Step 7: 确认守门真的会拦（对副本，不动真文件）**
+- [ ] **Step 7: 证明自检这条线真的会拦（不动真母版）**
+
+**不要**用"把 `frontend/public/favicon.svg` 临时改坏再跑生成器"来证明 —— 那是原地改真实资产，还原失败就留下一个坏母版，而且这类破坏性反证在本项目会被安全策略拦下。改用两条无副作用的证法：
+
+1. Step 1 的单测已经断言 `auditVerdict({ size: 16, tones: 100, ... })` 返回问题项 —— 判据本身有测试承重。
+2. 再走读确认调用点存在且非零退出：
 
 ```bash
-mkdir -p tasks/_icon-selftest && cp frontend/public/favicon.svg tasks/_icon-selftest/orig.svg
-node -e "const s=require('fs').readFileSync('frontend/public/favicon.svg','utf8');require('fs').writeFileSync('frontend/public/favicon.svg',s.replace('class=\"b\"','fill=\"url(#g)\"'))"
-node scripts/gen-icon.ico.js; echo "exit=$?"
-cp tasks/_icon-selftest/orig.svg frontend/public/favicon.svg && rm -rf tasks/_icon-selftest
-node scripts/gen-icon.ico.js >/dev/null && echo "restored ok"
+grep -n "problems.length" -A 3 scripts/gen-icon.ico.js
+grep -n "process.exit(1)" scripts/gen-icon.ico.js
 ```
-Expected: 第一次 `exit=1` 且日志含"自检未通过"；恢复后重跑成功。
-（这是把**母版临时改坏**来证明守门承重，改完立即从副本还原；若被安全策略拦下，改为在 `tasks/` 下对 icon-lib 的单测断言 `auditVerdict` 即可，不要坚持跑真目录。）
+Expected: 能看到 `if (problems.length) { ... process.exit(1) }`，且它在 `fs.writeFileSync(OUT_ICO, ...)` **之前** —— 顺序错了就等于"自检报了问题但仍然写盘"，那是本次改造的核心目的，必须看到"先 exit 后写盘"。
+
+把这两条的输出贴进报告文件。若第 2 条显示写盘在自检之前，那是实现 bug，按原样修掉再重跑 Step 6。
 
 - [ ] **Step 8: 提交**
 
@@ -806,12 +809,16 @@ git commit -m "feat(electron): 设 AppUserModelID 并把 icon.ico 接到窗口�
 
 - [ ] **Step 3: 跑一次目录式打包（不出安装包，最快）**
 
-前置：Task 3 的 Step 7 已跑过 `npm run electron:build:ts`，且 `build/icon.ico` 是 Task 2 重生成后的版本。
+**必须走 `dist:win:dir` 而不是裸调 electron-builder** —— 新工作树里 `frontend/dist/`（Vite 产物）与 `dist/LQ-DataPrase/`（PyInstaller 产物）都是 gitignore 的，根本不存在，裸调 electron-builder 会因缺文件失败。`dist:win:dir` 一条链把该建的都建了：
 
 ```bash
-scripts/electron-builder.cmd --win --dir
+npm run dist:win:dir
 ```
-Expected: `out/win-unpacked/` 生成，末行无 error。若 `afterPack.js` 打印 rcedit 重试日志（本机杀软锁 exe），等它退避完成，不要跳过、不要 `--no-verify`。
+Expected: 依次跑 `patch-nsis-template.js` → `gen-icon.ico.js` → 前端构建 → electron TS 构建 → PyInstaller → `electron-builder --win --dir`，产出 `out/win-unpacked/`，末行无 error。
+
+耗时以分钟计，属正常。若 `afterPack.js` 打印 rcedit 重试日志（本机杀软锁 exe），等它退避完成，不要跳过、不要 `--no-verify`。
+
+**不要用 `build.bat`** —— 它会 `taskkill` 别的会话的进程；`dist:win:dir` 这条链不经过 build.bat。
 
 - [ ] **Step 4: 核 extraResources 真的落了文件**
 
