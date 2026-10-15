@@ -11,6 +11,7 @@ $RECYCLE.BIN/
 frontend/.vscode/
 .idea/
 .codebuddy/
+.commandcode/
 .codegraph/
 .trae/
 *.swp
@@ -19,6 +20,7 @@ frontend/.vscode/
 Session.vim
 .netrwhist
 .qoder/
+.qoder-credits/
 # ================== Secrets ==================
 .env
 .env.*
@@ -34,6 +36,8 @@ __pycache__/
 *.pyo
 *$py.class
 *.egg-info/
+# 构建产物：**故意不加前导斜杠**，需匹配任意层级
+# （根 dist/ 与 build/、frontend/dist/、子项目自己的 dist/ 都靠这两条兜住）
 dist/
 build/
 *.egg
@@ -121,6 +125,7 @@ debug-*.md
 DEBUG_*.md
 .dbg/
 # 启动迁移应用的临时锁文件（system_config._startup_lock 加锁后不删除）
+# 规则生效需文件未被跟踪；此前已入库，已 git rm --cached 摘除，勿再 git add
 /.lqdp_startup.lock
 # 项目约定不入库目录
 /Data/
@@ -131,8 +136,9 @@ DEBUG_*.md
 /test/type-snapshot/after.json
 /test/type-snapshot/clipping.txt
 /tasks/
-# 过程/设计文档（内部使用，不入仓库）；
+# 过程/设计文档（内部使用，不入仓库）；下面几条只作用于仓库根这一层
 # docs/tasks/ 保留入库（lessons.md/todo.md 需版本保护，可经 git 回退误覆盖），仅排除临时产物
+# docs/superpowers/ 是**有意入库**的：.claude/CLAUDE.md 的测试分层判据以其中的 specs 为权威引用，勿整体忽略
 /docs/plans/
 /docs/specs/
 /docs/tasks/*.bak-*.md
@@ -151,9 +157,8 @@ frontend/e2e/theme/screenshots/
 # 构建日志
 frontend/build-out.txt
 # PyInstaller 打包输出（与 build.bat 配套，保留 lq_dataprase.spec）
+# 注：/dist/ 与 /build/ 已由上方 Python 段的通用 dist/、build/ 覆盖，此处不再重复声明
 /release/
-/dist/
-/build/
 
 # ================== Electron ==================
 # electron-builder output
@@ -180,9 +185,12 @@ frontend/build-out.txt
 *.tmp
 *.orig
 *.rej
-frontend/tasks/
+# frontend/tasks/ 的忽略改由 frontend/.gitignore 就近维护（同处另有 /tasks/ 管仓库根）
 db.sqlite3.bak*
 
 # ================== Isolated workspaces ==================
 # superpowers:using-git-worktrees 在此放隔离工作树；不忽略会把整棵树提交进仓库
 /.worktrees/
+# superpowers 代理自身的运行目录：brainstorm/sdd 会话产物、.last-port/.last-token 等运行时文件。
+# 其 sdd/ 子目录自带 `*` 规则，已表明该工具不打算入库；此处统一忽略（原 brainstorm/ 曾误入库 4 个文件）
+/.superpowers/

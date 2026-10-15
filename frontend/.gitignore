@@ -1,25 +1,20 @@
 # Frontend 专属规则
-# 通用规则（node_modules、dist、.vscode、.DS_Store 等）见根目录 .gitignore
-./qoder
-# Vite 缓存
-.vite/
+#
+# 通用规则（node_modules、dist、build、.vite、coverage、.nyc_output、*.map、.env*、
+# .vscode、.DS_Store 等）见根目录 .gitignore —— 此处不再重复声明，避免两处漂移。
+#
+# 注意：本文件内的路径**相对于 frontend/ 目录**。
+# 写 `frontend/xxx` 会解析成 `frontend/frontend/xxx`，永不命中（历史遗留两处已修正）。
 
+# Qoder 会话目录（原为 `./qoder`，带 ./ 前缀是无效语法，从未生效）
+qoder/
+
+# 前端临时脚本/日志（根 .gitignore 的 /tasks/ 只锚定仓库根，管不到这里）
+tasks/
 
 # 前端 ESLint / Stylelint 缓存
 .eslintcache
 .stylelintcache
-
-# 前端测试覆盖
-coverage/
-.nyc_output/
-frontend/tasks/
-# 前端生产构建源映射
-*.map
-
-# 前端环境变量（示例应保留）
-.env
-.env.*
-!.env.example
 
 # Playwright 浏览器下载（CDN 缓存）
 .playwright-browsers/
