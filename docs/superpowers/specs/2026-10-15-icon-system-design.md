@@ -83,6 +83,7 @@ c.943 0 1.473 1.088.89 1.83L25.946 44.94z
 - **不做描边版**。此标志的识别度全在实心剪影，描边会退化成空心轮廓。
 - 底板圆角率 22%（相对帧边长），与 `--p-radius-xl 16px` 在 64px 档等值，小尺寸下按圆角率而非固定半径。
 - Night 底板墨色定为 `--p-slate-950 #131327`：白压 `#f9a825` 的对比只有约 1.9:1，`--on-brand:#ffffff`（`design-tokens.css:70` 与 `:114` 两处同值）在 night 下不成立。**连带动作**：在 `ui-design-guide.md` §3.3 品牌表加一行注记 —— `--on-brand` 仅适用于 Light 渐变底；Night 底板上的前景色用 `--p-slate-950`。
+- **该缺陷在应用内已有一个现网实例**：`Sidebar.vue:147–157` 的 `.logo-icon` 是 `background: var(--brand); color: #fff` 的 40×40 实色底板，night 下正是"白符号压金黄底"。所以侧栏品牌位**保留底板形制**（它本来就是应用图标语言），但 night 前景改深墨。
 
 ### 2.3 最小尺寸与留白
 
@@ -184,7 +185,7 @@ c.943 0 1.473 1.088.89 1.83L25.946 44.94z
 
 | 位置 | 现在 | 改成 |
 |---|---|---|
-| `Sidebar.vue:5–6` | `TrendCharts` 28 | 母版实心符号 `--icon-logo` |
+| `Sidebar.vue:5–6` | `TrendCharts` 28 | 母版符号，**保留该处既有的 40×40 `var(--brand)` 底板形制**（`.logo-icon` 现状即如此），但 night 下的前景色由 `#fff` 改 `--p-slate-950` —— 见下方"现网实例" |
 | `LoginPage.vue:6–10` | `TrendCharts` 64 | 母版 `--icon-hero` |
 | `ConnectPage.vue:5–6` | `Connection` 56 | 母版 `--icon-hero`（与登录页同一条首屏流程，品牌位应一致） |
 | `AppAboutDialog.vue:12` | `📊` | 母版 `--icon-hero` |
@@ -259,9 +260,9 @@ c.943 0 1.473 1.088.89 1.83L25.946 44.94z
 
 1. **批 1 · 母标志与家族**：替换 `favicon.svg` → 改 `gen-icon.ico.js`（留白注入 + 锁 light + 自检）→ 重生成 `build/icon.ico` → 目视 + 指标复核。
 2. **批 2 · 运行时接入**：Electron 窗口 icon + `setAppUserModelId` + `extraResources`；`lq_dataprase.spec:457` icon；`electron-builder.yml` installer/uninstaller 图标。验收要真打包一次 `npm run dist:win:dir`。
-3. **批 3 · 界面品牌位**：§5.3 五处落位 + `ui-design-guide.md` §3.3 注记与 `:309` 修复。
-4. **批 4 · 注册表与尺寸 token**：§5.1 全量迁移 + T2 守门 3 条。
-5. **批 5 · emoji 治理**：C 类删/换 + D 类归一 + T2 白名单断言。按页分批，每批跑 `npm run test:e2e:affected`。
+3. **批 3 · 界面品牌位**：§5.3 五处落位（含侧栏 night 深墨修正）+ `ui-design-guide.md` §3.3 的 `--on-brand` 注记 + 文档站 favicon。`:309`/`:341`/`:403` 三处**不在本批** —— 按 §5.4 它们必须与 emoji 治理同批，否则文档仍在许可旧写法。
+4. **批 4 · 注册表与尺寸 token**：§5.1 全量迁移 + T2 守门 3 条 + 指南 `:341`/`:403` 与 token 对账。
+5. **批 5 · emoji 治理**：C 类删/换 + D 类归一 + T2 白名单断言 + 指南 `:309` 修复。按页分批，每批跑 `npm run test:e2e:affected`。**前置**：先产出逐处站点清单（本轮只统计到"约 40 种、300+ 次"的量级，没有逐处核实），否则计划里全是占位符。
 6. **批 6 · 死资产清理**：§6 三项（需单独批准）。
 
 批 4 与批 5 会大面积改 `.vue` 模板；按 `project-ui-design-workflow` 的约定，**先收拢选择器契约再动版式** —— 若现有 e2e 有按 emoji 文案定位 tab 的（`SettingsPage.vue:11–34` 的 7 个 emoji tab label 是高风险点），必须先迁移定位器到稳定属性并单独成批，否则批 5 之后"定位器坏了"与"功能坏了"混在一起无法判读。
