@@ -9,11 +9,15 @@ LQ-DataPrase 是一款面向半导体 ATE（自动测试设备）量产数据的
 | 层级 | 技术 |
 |------|------|
 | 前端 | Vue 3.5 + TypeScript + Vite 8 + Element Plus 2 + ECharts 6 + ag-Grid + Pinia |
-| 后端 | Django 4.2 + Django REST Framework + SimpleJWT + Celery |
-| 数据库 | PostgreSQL（生产）/ SQLite（开发） |
-| 缓存/任务队列 | Redis |
+| 后端 | Django 6.0 + Django REST Framework + SimpleJWT |
+| 数据库 | SQLite（桌面版与服务器版均为 SQLite，无外部数据库依赖） |
+| 缓存 | Redis（**可选**，仅 SFTP 会话缓存使用；不可用时自动回落进程内 LocMemCache） |
 | 桌面打包 | Electron 33 + electron-builder + PyInstaller |
 | E2E 测试 | Playwright |
+
+> 后端**不使用任务队列**。批量的图表渲染与 SFTP 搜索走 Web 进程内的
+> `ProcessPoolExecutor` / `ThreadPoolExecutor`，因此既不需要 Redis 也不需要 broker。
+> 详见 [后端架构文档](apps/CLAUDE.md)。
 
 ---
 
@@ -44,8 +48,9 @@ LQ-DataPrase/
 │   ├── buyoff/              # Buyoff 管理
 │   ├── gage/                # Gage R&R 分析
 │   ├── export/              # Excel/PPT/CSV 导出
-│   └── sftp/                # SFTP 配置与浏览
-├── config/                  # Django 配置（settings/urls/celery）
+│   ├── sftp/                # SFTP 配置与浏览
+│   └── common/              # 跨领域工具（统一异常、存储路径、备份、健康检查、优雅关闭）
+├── config/                  # Django 配置（settings/urls/wsgi/asgi）
 ├── frontend/                # Vue 3 前端工程
 │   ├── src/
 │   │   ├── api/             # Axios API 封装
@@ -71,10 +76,14 @@ LQ-DataPrase/
 
 ### 环境要求
 
-- Python 3.11+
-- Node.js 20+
-- Redis 7+（可选，Celery/SFTP 缓存需要）
-- PostgreSQL 14+（可选，开发默认使用 SQLite）
+- Python 3.11+（开发与打包实测环境为 **3.13**，见 `.python-version`）
+- Node.js 20+（实测 v22）
+- Redis 7+（**可选**，仅当需要跨进程共享 SFTP 会话缓存时；不装也能跑，会自动回落进程内缓存）
+
+依赖全部按 `==` 锁定在 `requirements/base.txt`（本项目以 PyInstaller 二进制分发，
+浮动版本会让「三个月后构建出的安装包」与「测试过的安装包」不是同一个东西）。
+升级依赖请改 pin → 跑 `python manage.py test` 与 `npm run test:e2e:affected` → 确认
+`npm run dist:win` 仍能构建，**不要重新引入版本区间**。
 
 ### 1. 克隆仓库
 
@@ -91,8 +100,11 @@ python -m venv .venv
 .venv\Scripts\activate        # Windows
 # source .venv/bin/activate   # macOS/Linux
 
-# 安装依赖
+# 安装依赖（运行时）
 pip install -r requirements/base.txt
+
+# 若要打桌面安装包，再补打包工具链
+# pip install -r requirements/build.txt
 
 # 初始化数据库与测试数据
 copy .env.example .env
@@ -105,13 +117,6 @@ python manage.py runserver
 ```
 
 默认后端地址：`http://localhost:8000`
-
-如需 Celery 异步解析：
-
-```bash
-redis-server                       # 另起终端启动 Redis
-celery -A config worker -l info    # 另起终端启动 Celery
-```
 
 ### 3. 前端启动
 
@@ -175,7 +180,7 @@ LQ-DataPrase 的桌面包是 **Electron 壳 + PyInstaller 后端** 的组合：
 |------|------|------|
 | 前端 UI | Vue 3 SPA | 由 Vite 构建为静态资源 |
 | 桌面宿主 | Electron 33 | 负责窗口、菜单、生命周期 |
-| 业务后端 | Django 4.2 | 由 PyInstaller 打包为独立可执行文件 |
+| 业务后端 | Django 6.0 | 由 PyInstaller 打包为独立可执行文件 |
 | 进程通信 | HTTP | Electron 启动后端并本地 HTTP 轮询 |
 
 构建流程的输入输出：
@@ -196,8 +201,7 @@ Django + apps/     ──PyInstaller──>  dist/LQ-DataPrase/ ──┘
 
 ```
 <安装目录>/
-├─ app.asar（或 unpacked 文件，asar 已禁用）
-│    └─ Vue 前端 + Electron 主进程
+├─ resources/app.asar       ← Vue 前端 + Electron 主进程（asar 已启用）
 └─ resources/
      ├─ LQ-DataPrase.exe      ← PyInstaller 打包的后端
      └─ _internal/             ← Python 运行依赖
@@ -260,12 +264,14 @@ npm run test:e2e:ui        # UI 调试模式
 |------|------|--------|
 | `SECRET_KEY` | Django 安全密钥 | 开发默认（生产必须修改） |
 | `DJANGO_DEBUG` | 调试模式 | `True` |
-| `DJANGO_ALLOWED_HOSTS` | 允许访问的域名 | `*` |
-| `DATABASE_URL` | PostgreSQL 连接字符串 | `postgres://ate_user:ate_password@localhost:5432/ate_analysis` |
-| `REDIS_URL` | Redis 连接地址 | `redis://localhost:6379/0` |
+| `DJANGO_ALLOWED_HOSTS` | 允许访问的域名 | 开发档 `*`；桌面档 `localhost,127.0.0.1,[::1]`；服务器档**必填**且拒绝 `*` |
+| `REDIS_URL` | Redis 连接地址（可选，仅 SFTP 会话缓存） | `redis://localhost:6379/0`；桌面/服务器档置空以强制回落进程内缓存 |
 | `SFTP_CONFIG_KEY` | SFTP 密码加密密钥 | 开发留空 |
+| `LQDP_LOGIN_THROTTLE_RATE` | 登录端点 IP 级限流速率 | `20/min`（开发与 e2e 档放宽为 `200/min`） |
+| `LQDP_SHUTDOWN_TOKEN` | 优雅关闭一次性令牌 | 未设置时关闭端点不挂载 |
 
 生产环境务必将 `DJANGO_DEBUG=False` 并设置真实的 `SECRET_KEY` 与 `SFTP_CONFIG_KEY`。
+数据库固定为 SQLite，**没有** `DATABASE_URL` 这类外部数据库配置。
 
 ---
 

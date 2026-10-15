@@ -141,11 +141,12 @@ WHITENOISE_USE_FINDERS = True
 WHITENOISE_AUTOREFRESH = False
 
 # ---------------------------------------------------------------------------
-# 无 broker / 无 Redis：与桌面档同样处理，装饰性的 Celery 不参与本形态
+# 无 Redis：与桌面档同样处理
 # ---------------------------------------------------------------------------
-INSTALLED_APPS = [app for app in INSTALLED_APPS if app != 'celery']  # noqa: F405
-CELERY_BROKER_URL = ''
-CELERY_RESULT_BACKEND = ''
+# 本形态不要求装 Redis。唯一会用到它的消费者是 SFTP 会话缓存
+# （``apps/sftp/cache.py``），它惰性探测、探不到就回落 Django LocMemCache；
+# 局域网共用场景下若确实要跨 worker 共享会话，用环境变量 REDIS_URL 显式打开即可。
+# （Celery 已于 2026-10-15 从项目整体移除，见 apps/CLAUDE.md。）
 REDIS_URL = ''
 SFTP_SESSION_REDIS_URL = ''
 

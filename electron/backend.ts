@@ -5,10 +5,12 @@
  * - Locate the PyInstaller-built exe (production) or python interpreter (dev)
  * - Spawn the Django backend as a child process with --port 0 (auto-assign)
  * - Detect backend readiness via HTTP polling after parsing stdout for the port
- * - Provide graceful shutdown (SIGTERM → force-kill after timeout)
+ * - Provide graceful shutdown: POST the backend's shutdown endpoint first, then
+ *   fall back to SIGTERM → force-kill after a timeout
  */
 
 import { spawn, ChildProcess } from 'child_process'
+import * as crypto from 'crypto'
 import * as path from 'path'
 import * as fs from 'fs'
 import * as http from 'http'
@@ -20,6 +22,11 @@ export interface BackendInfo {
   process: ChildProcess | null
   /** Whether this process was spawned by Electron and should be stopped on quit. */
   managed: boolean
+  /**
+   * Per-launch token for POST /api/v1/system/shutdown/. Null for an unmanaged
+   * backend (the dev server on :8000), which Electron must not stop anyway.
+   */
+  shutdownToken: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -151,7 +158,8 @@ function getBackendPath(isDev: boolean): { exe: string; args: string[]; cwd: str
 function waitForBackend(port: number, timeoutMs: number = 60000): Promise<void> {
   return new Promise((resolve, reject) => {
     const startTime = Date.now()
-    console.log(`[electron] Polling backend on http://127.0.0.1:${port}/api/v1/ (timeout ${timeoutMs}ms)`)
+    const probeUrl = `http://127.0.0.1:${port}/api/v1/health/`
+    console.log(`[electron] Polling backend at ${probeUrl} (timeout ${timeoutMs}ms)`)
 
     function poll(): void {
       if (Date.now() - startTime > timeoutMs) {
@@ -159,12 +167,19 @@ function waitForBackend(port: number, timeoutMs: number = 60000): Promise<void> 
         return
       }
 
-      const req = http.get(`http://127.0.0.1:${port}/api/v1/`, (res) => {
-        // Any response – even a 401 from the missing JWT – proves the server
-        // is up and running.
-        console.log(`[electron] Backend responded with status ${res.statusCode}`)
+      const req = http.get(probeUrl, (res) => {
         res.resume()
-        resolve()
+        if (res.statusCode === 200) {
+          console.log('[electron] Backend health probe returned 200')
+          resolve()
+          return
+        }
+        // A non-200 means something is listening that is NOT our app (or our
+        // app is broken). Requiring 200 rather than "any response" is the point
+        // of having a dedicated probe: `/api/v1/` used to accept a 404, which
+        // would also have accepted any unrelated HTTP server on that port.
+        console.log(`[electron] Backend health probe returned ${res.statusCode}, retrying`)
+        setTimeout(poll, 250)
       })
 
       req.on('error', (err) => {
@@ -251,7 +266,7 @@ export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
           `Start it with: python manage.py runserver ${DEV_BACKEND_PORT}`
       )
     }
-    return { port: DEV_BACKEND_PORT, pid: null, process: null, managed: false }
+    return { port: DEV_BACKEND_PORT, pid: null, process: null, managed: false, shutdownToken: null }
   }
 
   return new Promise((resolve, reject) => {
@@ -273,12 +288,20 @@ export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
       app.commandLine.hasSwitch('backend-console')
     console.log(`[electron] showBackendConsole=${showBackendConsole} (env=${process.env.LQDP_BACKEND_CONSOLE ?? 'unset'})`)
 
+    // Per-launch shutdown token. The backend only mounts
+    // POST /api/v1/system/shutdown/ when this is set, and requires the token
+    // plus a loopback source. It is generated fresh every start and never
+    // persisted, so it cannot be replayed across launches — the point is that
+    // some *other* local process reaching the loopback API cannot kill us.
+    const shutdownToken = crypto.randomBytes(32).toString('hex')
+
     const child = spawn(exe, args, {
       cwd,
       env: {
         ...process.env,
         PYTHONUNBUFFERED: '1',    // flush stdout line-by-line (not block-buffered)
         LQDP_BASE_DIR: userDataPath,
+        LQDP_SHUTDOWN_TOKEN: shutdownToken,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: !showBackendConsole,
@@ -303,7 +326,13 @@ export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
         waitForBackend(port)
           .then(() => {
             console.log(`[electron] Backend confirmed ready on port ${port}`)
-            resolve({ port: port!, pid: child.pid ?? null, process: child, managed: true })
+            resolve({
+              port: port!,
+              pid: child.pid ?? null,
+              process: child,
+              managed: true,
+              shutdownToken,
+            })
           })
           .catch((err) => {
             console.error(`[electron] waitForBackend failed:`, err)
@@ -360,11 +389,67 @@ export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
 }
 
 /**
+ * Ask the backend to shut itself down via its HTTP endpoint.
+ *
+ * Returns true when the backend acknowledged (HTTP 200), meaning it has already
+ * scheduled its own cleanup + exit.
+ */
+function requestBackendShutdown(info: BackendInfo, timeoutMs = 3000): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (!info.shutdownToken) {
+      resolve(false)
+      return
+    }
+
+    const payload = '{}'
+    const req = http.request(
+      {
+        host: '127.0.0.1',
+        port: info.port,
+        path: '/api/v1/system/shutdown/',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+          'X-LQDP-Shutdown-Token': info.shutdownToken,
+        },
+        timeout: timeoutMs,
+      },
+      (res) => {
+        res.resume()
+        console.log(`[electron] Backend shutdown endpoint returned ${res.statusCode}`)
+        resolve(res.statusCode === 200)
+      }
+    )
+
+    req.on('error', (err) => {
+      console.warn(`[electron] Backend shutdown request failed: ${err.message}`)
+      resolve(false)
+    })
+    req.on('timeout', () => {
+      req.destroy()
+      resolve(false)
+    })
+
+    req.write(payload)
+    req.end()
+  })
+}
+
+/**
  * Gracefully shut down the backend child process.
  *
- * Sends SIGTERM first, then force-kills after a 5-second timeout. On Windows
- * this uses `taskkill /F` because SIGTERM is not reliably delivered to
- * console-free processes.
+ * Three stages, in order:
+ *
+ * 1. **HTTP shutdown endpoint** — the backend runs its cleanup (close DB
+ *    connections so SQLite checkpoints its WAL) and exits 0. This is the only
+ *    stage that actually reaches Python on Windows: Node implements
+ *    `child.kill('SIGTERM')` with `TerminateProcess`, which runs no
+ *    Python-level handler at all. See apps/common/shutdown.py.
+ * 2. **SIGTERM** — if the endpoint is unavailable (older build, already
+ *    unresponsive, or no token). Effective on POSIX.
+ * 3. **Force-kill** after 5 s (`taskkill /F` on Windows), with a 12 s absolute
+ *    safety net so `app.quit()` can never hang forever.
  */
 export function stopBackend(info: BackendInfo): Promise<void> {
   return new Promise((resolve) => {
@@ -406,6 +491,17 @@ export function stopBackend(info: BackendInfo): Promise<void> {
       resolve()
     })
 
-    child.kill('SIGTERM')
+    // Stage 1 → stage 2. The HTTP request is the only path that reaches Python
+    // on Windows; SIGTERM is the POSIX fallback when it is unavailable.
+    requestBackendShutdown(info).then((acknowledged) => {
+      if (acknowledged) {
+        // The backend has scheduled its own exit (~150 ms). Let the 5 s
+        // force-kill timer stand as the backstop in case it does not.
+        return
+      }
+      if (!child.killed && child.exitCode === null) {
+        child.kill('SIGTERM')
+      }
+    })
   })
 }

@@ -151,7 +151,11 @@ export default defineConfig({
           // Django 后端（development 配置 + sqlite）
           command: `"${PYTHON_BIN}" manage.py runserver ${BACKEND_PORT} --noreload`,
           cwd: PROJECT_ROOT,
-          url: `${BACKEND_URL}/api/schema/`,
+          // 专用探针，不再借 /api/schema/：那条路由由 API_DOCS_ENABLED 控制，
+          // 而它存在与否是「要不要暴露 API 文档」的决定，跟「后端起没起来」无关
+          // （standalone/server 档都关掉了它）。/api/v1/health/ 恒 200、无鉴权、
+          // 不限流，见 apps/common/health.py。
+          url: `${BACKEND_URL}/api/v1/health/`,
           // 本地允许复用（UI 模式/手动 dev 场景），CI 必须强制自起自收
           // （lessons R3：复用旧代码进程 → e2e 结果无效）。slot 模式一律自起自收：
           // 端口对是按空闲情况分配的，复用别人在跑的服务等于跨会话串数据。

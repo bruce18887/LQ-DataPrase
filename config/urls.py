@@ -24,8 +24,8 @@ urlpatterns = [
 # API 文档只是开发期便利。drf-spectacular 的两个视图默认 AllowAny，而
 # SPECTACULAR_SETTINGS 未设 SERVE_PERMISSIONS —— 打包版一旦暴露，外人
 # 可匿名下载完整端点/参数结构。故用开关控制：开发态（config.settings.
-# development）保留，standalone 关闭。注意 playwright.config.ts 用
-# /api/schema/ 做后端健康检查，而它跑的是 development 配置，不受影响。
+# development）保留，standalone 关闭。注意健康检查不依赖这个开关：
+# 探针走 /api/v1/health/（apps/common/health.py），各档都挂着。
 if getattr(settings, 'API_DOCS_ENABLED', True):
     urlpatterns += [
         path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
