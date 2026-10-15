@@ -81,7 +81,10 @@ export function assertSafeRelPath(p) {
   return p
 }
 
-export function buildSlotManifest({ index, ports, slotRoot, templateRoot, redisDb, secretKey, blobRoot }) {
+export function buildSlotManifest({ index, ports, slotRoot, templateRoot, redisDb, secretKey, blobRoot, evidenceRoot }) {
+  // 取证文件（run.log / results.json）刻意**不放在 slotRoot 里**：收尾会 rmSync(slotRoot) 回收 1GB 级镜像，
+  // 一起删掉就等于在最需要看日志的那一轮把证据销毁了（实测归因 A/C 两组红时没日志可看）。
+  const ev = evidenceRoot ?? slotRoot
   return {
     index,
     backendPort: ports.backend,
@@ -96,8 +99,8 @@ export function buildSlotManifest({ index, ports, slotRoot, templateRoot, redisD
     downloadsDir: path.join(slotRoot, '.downloads'),
     // merge-reports 只接受**一个**目录 ⇒ 编排器给所有 slot 传同一个 blobRoot（blob 文件名自带随机后缀，不冲突）
     blobDir: blobRoot ?? path.join(slotRoot, 'blob'),
-    jsonOut: path.join(slotRoot, 'results.json'),
-    logFile: path.join(slotRoot, 'run.log'),
+    jsonOut: path.join(ev, `slot${index}.results.json`),
+    logFile: path.join(ev, `slot${index}.run.log`),
     templateDbPath: path.join(templateRoot, 'db.sqlite3'),
     templateMediaDir: path.join(templateRoot, 'media'),
     redisDb,
@@ -127,6 +130,19 @@ export function slotEnv(manifest, baseEnv = process.env) {
     E2E_FRONTEND_PORT: String(manifest.frontendPort),
     CI: '1',
   }
+}
+
+/**
+ * 把「并行轮测出来的总时长」折回串行等价量，只用于 autoSlots。
+ * 为什么需要：LPT 分桶只看相对权重（缩放不影响），但 autoSlots 拿绝对总量反推并行度；
+ * 时长表一旦来自 pool 自己的 merged.json（单价含争用），总量就被系统性抬高 ⇒ 每轮多开一个 slot
+ * ⇒ 争用更重 ⇒ 下一轮总量更高，是个自我强化的反馈环。实测：串行基线 1054s，N=4 轮 merged.json 是 1404s。
+ */
+export const SERIAL_REF_PER_SPEC_MS = 2890   // 2026-10-14 串行全量实测单价（只计通过用例）
+
+export function normalizeTotalMs(rawTotalMs, perSpecMs, refPerSpecMs = SERIAL_REF_PER_SPEC_MS) {
+  if (!perSpecMs || perSpecMs <= 0 || !rawTotalMs) return rawTotalMs
+  return rawTotalMs * (refPerSpecMs / perSpecMs)
 }
 
 /**

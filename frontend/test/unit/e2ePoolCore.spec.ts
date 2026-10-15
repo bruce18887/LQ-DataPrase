@@ -5,7 +5,27 @@ import path from 'node:path'
 import {
   SLOT_BACKEND_BASE, SLOT_FRONTEND_BASE, DEFAULT_SLOTS, MAX_SLOTS, SLOT_TARGET_MS,
   autoSlots, allocatePortBlock, partitionFiles, assertSafeRelPath, buildSlotManifest, slotEnv, mergeRunStats, parseArgs,
+  normalizeTotalMs, SERIAL_REF_PER_SPEC_MS,
 } from '../../e2e/helpers/pool-core.mjs'
+
+describe('normalizeTotalMs', () => {
+  it('串行单价就是参照 ⇒ 不折算', () => {
+    expect(normalizeTotalMs(1_054_000, SERIAL_REF_PER_SPEC_MS)).toBeCloseTo(1_054_000, 0)
+  })
+  it('并发轮单价 3.90s 折回串行等价（否则 autoSlots 会顺着重排反馈环越开越多 slot）', () => {
+    // N=4 实测：原始总量 1404s、单价 3900ms ⇒ 1404000×(2890/3900) = 1040400，autoSlots 仍落在 4
+    expect(normalizeTotalMs(1_404_000, 3900)).toBeCloseTo(1_040_400, 0)
+    expect(autoSlots(normalizeTotalMs(1_404_000, 3900))).toBe(4)
+    // 不折算时，放开上限到 6 就会多要一个 slot（默认 cap=4 时看不出来，但 auto 档上限就是 MAX_SLOTS）
+    expect(autoSlots(1_404_000, 6)).toBe(6)
+    expect(autoSlots(normalizeTotalMs(1_404_000, 3900), 6)).toBe(5)
+  })
+  it('单价缺失或为 0 时原样返回（拿不到参照不猜）', () => {
+    expect(normalizeTotalMs(500_000, 0)).toBe(500_000)
+    expect(normalizeTotalMs(500_000, undefined)).toBe(500_000)
+    expect(normalizeTotalMs(0, 3900)).toBe(0)
+  })
+})
 
 describe('parseArgs', () => {
   it('认 --k=v 与 --k v 两种写法（只认空格形式时 --slots=1 会被静默吞掉，实测踩过）', () => {
