@@ -4,22 +4,31 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { E2E_SYSTEM_CONFIG_FILE } from './e2e/fixtures/test-data'
+import { ADMIN_STATE, CURRENT_SLOT } from './e2e/helpers/slot'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PROJECT_ROOT = path.resolve(__dirname, '..')
 
-// Storage Layout v2：数据目录默认迁移到用户主目录。e2e 必须把配置钉死在
-// 项目根（data_dir == PROJECT_ROOT → apply_system_config 零副作用跳过迁移），
-// 否则 Django 首次启动会把项目根 db/media 搬到 ~/LQ-DataPrase，测试数据全丢。
-// 同步写在 webServer spawn 之前；同时写入 process.env 让 globalSetup 的
-// execSync 子进程（seed_users / seed_test_data）读同一份配置，避免种子进程
-// 与后端各用一套 DB。
-fs.writeFileSync(
-  E2E_SYSTEM_CONFIG_FILE,
-  JSON.stringify({ data_dir: PROJECT_ROOT }),
-  'utf-8',
-)
-process.env.LQDP_SYSTEM_CONFIG_FILE = E2E_SYSTEM_CONFIG_FILE
+// Storage Layout v2：数据目录默认会迁移到用户主目录。e2e 必须把配置钉死在项目根
+// （data_dir == PROJECT_ROOT → 导入期那次重定向判定 target == original → 空操作），
+// 否则 Django 首次启动会把项目根 db/media **搬走并删源**，测试数据全丢。
+// 同步写在 webServer spawn 之前；同时写入 process.env 让 globalSetup 的 execSync 子进程
+// （seed_users / seed_test_data）与 repair-center 用例的 `manage.py shell` 读同一份配置。
+if (CURRENT_SLOT) {
+  // slot 模式：编排器已写好 slot.json 与 system-config.json（内容同样是 data_dir=项目根），
+  // 这里只认不重写。slot 自己的库/媒体/临时区来自 e2e_slot 档 + LQDP_E2E_SLOT_DIR，
+  // 绝不用 data_dir 指到 slot 目录 —— 那条通路是 move 语义（spec §4.1、lessons 2026-10-14）。
+  process.env.LQDP_SYSTEM_CONFIG_FILE = CURRENT_SLOT.systemConfigFile
+  process.env.DJANGO_SETTINGS_MODULE = 'config.settings.e2e_slot'
+  process.env.LQDP_E2E_SLOT_DIR = CURRENT_SLOT.dataDir
+} else {
+  fs.writeFileSync(
+    E2E_SYSTEM_CONFIG_FILE,
+    JSON.stringify({ data_dir: PROJECT_ROOT }),
+    'utf-8',
+  )
+  process.env.LQDP_SYSTEM_CONFIG_FILE = E2E_SYSTEM_CONFIG_FILE
+}
 
 // venv Python（Windows 路径；其它平台用 PYTHON_BIN 覆盖）
 const PYTHON_BIN =
@@ -97,7 +106,7 @@ export default defineConfig({
       use: {
         ...devices['Desktop Edge'],
         channel: 'msedge',
-        storageState: path.join(__dirname, 'e2e', '.auth', 'admin.json'),
+        storageState: ADMIN_STATE,
       },
       dependencies: ['setup'],
       grepInvert: /@p[012]/,
@@ -106,21 +115,21 @@ export default defineConfig({
     // 3) 按优先级选择性运行（在 UI 中用 filter 切，或 CLI: --grep @p0）
     {
       name: 'P0',
-      use: { ...devices['Desktop Edge'], channel: 'msedge', storageState: path.join(__dirname, 'e2e', '.auth', 'admin.json') },
+      use: { ...devices['Desktop Edge'], channel: 'msedge', storageState: ADMIN_STATE },
       grep: /@p0/,
       dependencies: ['setup'],
       testIgnore: /fixtures[\\/]auth\.setup\.ts/,
     },
     {
       name: 'P1',
-      use: { ...devices['Desktop Edge'], channel: 'msedge', storageState: path.join(__dirname, 'e2e', '.auth', 'admin.json') },
+      use: { ...devices['Desktop Edge'], channel: 'msedge', storageState: ADMIN_STATE },
       grep: /@p1/,
       dependencies: ['setup'],
       testIgnore: /fixtures[\\/]auth\.setup\.ts/,
     },
     {
       name: 'P2',
-      use: { ...devices['Desktop Edge'], channel: 'msedge', storageState: path.join(__dirname, 'e2e', '.auth', 'admin.json') },
+      use: { ...devices['Desktop Edge'], channel: 'msedge', storageState: ADMIN_STATE },
       grep: /@p2/,
       dependencies: ['setup'],
       testIgnore: /fixtures[\\/]auth\.setup\.ts/,
@@ -136,8 +145,9 @@ export default defineConfig({
           cwd: PROJECT_ROOT,
           url: `${BACKEND_URL}/api/schema/`,
           // 本地允许复用（UI 模式/手动 dev 场景），CI 必须强制自起自收
-          // （lessons R3：复用旧代码进程 → e2e 结果无效）
-          reuseExistingServer: !process.env.CI,
+          // （lessons R3：复用旧代码进程 → e2e 结果无效）。slot 模式一律自起自收：
+          // 端口对是按空闲情况分配的，复用别人在跑的服务等于跨会话串数据。
+          reuseExistingServer: !process.env.CI && !CURRENT_SLOT,
           timeout: 120_000,
           stdout: 'pipe',
           stderr: 'pipe',
@@ -155,12 +165,19 @@ export default defineConfig({
         },
         {
           // Vite 前端：默认生产构建 + preview（加载快、负载稳）；
-          // PW_DEV_SERVER=1 时退回 dev server（改测试时快速迭代用）
-          command: USE_DEV_SERVER ? 'npm run dev' : 'npm run build && npm run preview',
+          // PW_DEV_SERVER=1 时退回 dev server（改测试时快速迭代用；全量默认走
+          // build + preview：dev 每次导航要拉数百模块，~350 次 goto 的累计开销显著，
+          // 且 6 workers 曾压垮 dev server，见 lessons）。
+          // E2E_SKIP_BUILD=1 由 slot 编排器注入：包已经 build 过一次，N 个进程各 build 一遍是纯浪费。
+          command: USE_DEV_SERVER
+            ? 'npm run dev'
+            : process.env.E2E_SKIP_BUILD === '1'
+              ? 'npm run preview'
+              : 'npm run build && npm run preview',
           cwd: __dirname,
           url: FRONTEND_URL,
-          reuseExistingServer: !process.env.CI,
-          timeout: USE_DEV_SERVER ? 120_000 : 300_000,
+          reuseExistingServer: !process.env.CI && !CURRENT_SLOT,
+          timeout: USE_DEV_SERVER || process.env.E2E_SKIP_BUILD === '1' ? 120_000 : 300_000,
           // 显式把后端端口传给 vite：proxy 目标读的就是它（写死 8000 会在换端口时
           // 让 /api 直接 ECONNREFUSED，登录 setup 全红、383 例不跑 —— 2026-10-14 实测）
           env: { ...process.env, E2E_PORT: BACKEND_PORT, E2E_FRONTEND_PORT: FRONTEND_PORT },

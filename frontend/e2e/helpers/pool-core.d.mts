@@ -1,0 +1,97 @@
+// frontend/e2e/helpers/pool-core.d.mts
+// pool-core.mjs 的类型面。**SlotManifest 的字段就是 slot.json 的形状** ——
+// TS 侧（e2e/helpers/slot.ts）从这里 import type，契约只有一份声明。
+export interface SlotPortPair {
+  backend: number
+  frontend: number
+}
+
+export interface SlotManifest {
+  index: number
+  backendPort: number
+  frontendPort: number
+  dataDir: string
+  tempDir: string
+  dbPath: string
+  mediaDir: string
+  systemConfigFile: string
+  slotFile: string
+  authDir: string
+  downloadsDir: string
+  blobDir: string
+  jsonOut: string
+  logFile: string
+  templateDbPath: string
+  templateMediaDir: string
+  redisDb: number
+  secretKey: string
+}
+
+export interface SlotStats {
+  expected?: number
+  unexpected?: number
+  flaky?: number
+  skipped?: number
+}
+
+/** 单个 slot 的 JSON reporter 统计（由编排器从 results.json 折算而来） */
+export interface SlotReport {
+  specs?: number
+  passCount?: number
+  passMs?: number
+  wallMs?: number
+  stats?: SlotStats
+}
+
+export interface MergedStats {
+  specs: number
+  passCount: number
+  passMs: number
+  /** 并发 ⇒ 最长 slot 的跨度，不是求和 */
+  wallMs: number
+  stats: Required<SlotStats>
+  /** 只计通过用例；秒失败的 duration≈0，计入分母会让崩池轮算出更好看的数字 */
+  perSpecMs: number
+  /** Σ通过时长 / 墙钟 ≈ 实际达到的并行度 */
+  efficiency: number
+  slots: number
+}
+
+export declare const SLOT_BACKEND_BASE: number
+export declare const SLOT_FRONTEND_BASE: number
+export declare const DEFAULT_SLOTS: number
+export declare const MAX_SLOTS: number
+export declare const SLOT_TARGET_MS: number
+
+export declare function autoSlots(totalMs: number, cap?: number): number
+
+export declare function allocatePortBlock(
+  n: number,
+  isTaken: (port: number) => boolean,
+  baseBackend?: number,
+  baseFrontend?: number,
+): SlotPortPair[]
+
+export declare function partitionFiles(
+  files: string[],
+  durationsMs: Record<string, number>,
+  n: number,
+): string[][]
+
+export declare function assertSafeRelPath(p: string): string
+
+export declare function buildSlotManifest(args: {
+  index: number
+  ports: SlotPortPair
+  slotRoot: string
+  templateRoot: string
+  redisDb: number
+  secretKey: string
+}): SlotManifest
+
+export declare function slotEnv(
+  manifest: SlotManifest,
+  baseEnv?: Record<string, string | undefined>,
+): Record<string, string | undefined>
+
+export declare function mergeRunStats(reports: SlotReport[]): MergedStats
