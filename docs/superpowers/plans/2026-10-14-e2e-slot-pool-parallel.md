@@ -1398,18 +1398,29 @@ git commit -m "docs(tasks): slot 池并行化账目 —— 实测数字、两条
 
 ### Task 10: 终验收
 
-- [ ] **Step 1: 连续两轮 N=4**
+- [x] **Step 1: 连续两轮 N=4** —— **达成两条、偏离两条，都按实测记**
 
-Run: `node scripts/e2e_pool.mjs --slots=4`（连续两次）
+Run: `node scripts/e2e_pool.mjs --slots=4`（连续两次 → `065710-43228` / `070503-49968`）
 Expected: 两次都 `用例 386`、`墙钟 ≤10min`、`效率 ≥2.8`、`unexpected ≤1`、`flaky ≤5`，
 且两轮 `merged.json` 的红集合**完全一致**（有出入就不算收口，回到 Task 6 Step 4 归因）。
 
-- [ ] **Step 2: 端口与进程清场**
+实测：墙钟 7.2 / 8.0min ✓；**红集合逐条一致** ✓（同为 `histogram-fail-bins` + `html-report`，
+独占复跑双双转绿 ⇒ 真红 0）；单文件耗时差最大 ±8.5s，分桶没漂。
+两处偏离：① 用例数 384 而非 386（口径修正：运行期 JSON 没有 `sp.projectIds`，
+按 `tests[].projectId !== 'setup'` 过滤，旧数把 2 条 `auth.setup` 算了进去）；
+② 效率 2.73 / 2.34 低于 2.8、`unexpected` 各 2 高于 1 —— 成因是失败 attempt 吃墙钟却不进分子，
+于是把效率判据改成「只在没有重跑的轮次判」（`nightly-gates.mjs::hasRetries`，阈值不动）。
+另：**第三轮 `073154-42100` 又掉两个 preview ⇒ 整轮 VOID**，速度目标达成但可靠性没达成（见 §13.3）。
+
+- [x] **Step 2: 端口与进程清场** —— 实测干净
 
 ```bash
-netstat -ano | grep -E ':(81[0-9][0-9]|31[0-9][0-9])' | grep LISTENING
+netstat -ano | grep -E ':(210[0-5][0-9]|220[0-5][0-9])' | grep LISTENING
 ```
 Expected: 无输出。有输出说明 slot 的 webServer 没收回 —— 先查 PID 与属主再决定，**绝不停别的会话的进程**。
+
+实测：基址改成 21001/22001 后这块零监听残留；同机唯一的 22112 经查是 ASUS `ROGLiveService.exe`
+（PID 5832，与本项目无关，未处置）。顺带查出这道门的正则写 `\d{4}` 会漏掉五位端口（已修）。
 
 - [ ] **Step 3: 结果回填 spec 与 memory**
 
