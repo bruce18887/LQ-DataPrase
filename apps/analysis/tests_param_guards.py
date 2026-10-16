@@ -392,8 +392,10 @@ class StaleParamAcrossFileSwitchTests(SimpleTestCase):
        every file change. This is the primary fix.
     2. As defence in depth, the backend ``histogram`` and ``boxplot``
        views now validate that every requested param exists in the
-       current DataFrame and return 400 ``no_valid_params`` with a
+       current DataFrame and return 400 ``param_not_found`` with a
        structured ``requested``/``missing`` payload instead of 500.
+       （评审 P1-2：这一档统一成 ``param_not_found``，「列存在但全无有效数值」
+       才继续报 ``no_valid_params``，客户端可以按码分支。）
 
     These tests pin the backend guard so a future refactor that
     re-introduces the ``df[param]`` KeyError fails CI loudly.
@@ -464,7 +466,7 @@ class StaleParamAcrossFileSwitchTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 400, response.content)
         body = response.data
-        self.assertEqual(body.get('code'), 'no_valid_params')
+        self.assertEqual(body.get('code'), 'param_not_found')
         self.assertEqual(body.get('missing'), ['__bogus__'])
         self.assertEqual(body.get('requested'), ['__bogus__'])
 
@@ -517,7 +519,11 @@ class StaleParamAcrossFileSwitchTests(SimpleTestCase):
         self.assertEqual(response.data.get('code'), 'param_not_found')
 
     def test_boxplot_view_returns_400_for_unknown_param(self):
-        """GET /statistics/boxplot/ with a param not in the file → 400 no_valid_params."""
+        """GET /statistics/boxplot/ 的参数一个都不在该文件里 → 400 param_not_found。
+
+        评审 P1-2：这条以前报 ``no_valid_params``，与「列存在但全无有效数值」共用一个码，
+        客户端分不出「参数不存在」和「参数没数据」。
+        """
         from apps.analysis.views import StatisticsViewSet
 
         df = pd.DataFrame({'Param0': [1.0, 2.0, 3.0]})
@@ -536,5 +542,5 @@ class StaleParamAcrossFileSwitchTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 400, response.content)
         body = response.data
-        self.assertEqual(body.get('code'), 'no_valid_params')
+        self.assertEqual(body.get('code'), 'param_not_found')
         self.assertEqual(body.get('missing'), ['__bogus__'])

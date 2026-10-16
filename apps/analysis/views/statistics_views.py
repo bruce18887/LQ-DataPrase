@@ -39,6 +39,7 @@ from apps.common.params import get_param, get_param_float, get_param_list
 from apps.common.errors import error_response
 from apps.analysis.services.range_limits import resolve_limits
 
+from ._guards import all_missing_params, split_params
 from ._helpers import (
     clean_data,
     _sanitize_numeric_params,
@@ -293,18 +294,17 @@ class StatisticsViewSet(viewsets.GenericViewSet):
 
         # Filter out invalid params (blank, all-NaN, non-numeric)
         requested_params = list(params)
-        params = _sanitize_numeric_params(df, params)
+        present_params, missing = split_params(df, requested_params)
+        if requested_params and not present_params:
+            return all_missing_params(requested_params, missing)
+        params = _sanitize_numeric_params(df, present_params)
         if not params:
-            # Surface the requested-but-missing list so the front end can
-            # show a clear "param not in file" message (e.g. stale
-            # `R_Kelvin_AGND` after switching from gage_m_S4.csv to an
-            # ETS88 file). Mirrors the same shape as the histogram 400.
-            missing = [p for p in requested_params if p and str(p).strip() and p not in df.columns]
+            # 活到这里的列都「在该文件里但非数值 / 全 NaN / bool」——与 histogram
+            # 计算路径的「均无有效数值数据」同一档，码也统一（评审 P1-2）。
+            # ``missing`` 仍要发且为空：前端靠它区分「切错文件」与「参数不可测」
             return error_response(
-                'no_valid_params',
-                '请求的参数均不在该文件中，请重新选择文件或参数',
-                requested=requested_params,
-                missing=missing)
+                'no_valid_params', '请求的参数均无有效数值数据',
+                requested=requested_params, missing=missing)
 
         # data_only_bin1 narrows the rows before the per-param series
         # extraction so overall / by_site / by_bin stats only cover

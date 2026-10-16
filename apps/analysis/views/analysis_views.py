@@ -40,6 +40,7 @@ from apps.common.errors import error_response
 
 from .file_correlation_views import FileCorrelationActions
 from .param_actions import ParamStatActions
+from ._guards import guard_all_missing
 from ._helpers import (
     clean_data,
     _filter_blank_params,
@@ -185,14 +186,9 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
         # payload lets the front end render a clear "param not in file"
         # message instead of a 500 from `df[param]` KeyError inside
         # `compute_histogram_stats`.
-        valid_params = [p for p in params if p in df.columns]
-        missing_params = [p for p in params if p not in df.columns]
-        if not valid_params:
-            return error_response(
-                'no_valid_params',
-                '请求的参数均不在该文件中，请重新选择文件或参数',
-                requested=params, missing=missing_params)
-        params = valid_params
+        params, all_missing = guard_all_missing(df, params)
+        if all_missing is not None:
+            return all_missing
         skipped_params = []
         for param in params:
             # 计算路径不吞异常：任何意外内部错误直接 500 暴露（param 不在 df

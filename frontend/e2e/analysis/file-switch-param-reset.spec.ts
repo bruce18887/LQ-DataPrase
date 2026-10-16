@@ -18,7 +18,7 @@
  *     persisted store value at the start of every file change.
  *  2. Defence in depth: the backend `histogram` and `boxplot` views
  *     validate every requested param exists in the current DataFrame
- *     and return 400 `no_valid_params` with `requested` / `missing`
+ *     and return 400 `param_not_found` with `requested` / `missing`
  *     payload instead of 500.
  *
  * This e2e locks in the user-visible behaviour: after switching files
