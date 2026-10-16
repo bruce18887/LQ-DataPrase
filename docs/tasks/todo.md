@@ -3813,7 +3813,15 @@ A 不报、B（关键词在预算之外）照旧报。**预算必须取到 `CHUN
       那条靠 review，不靠扫描假装全覆盖
 
 **批 3 — 基础设施与卫生**
-- [ ] **P1-9** 最小 CI（`.github/workflows`）：push 触发 `manage.py test` + `npm run build` + `lint:e2e` + `test:unit`
+- [x] **P1-9** 最小 CI `.github/workflows/ci.yml`（原计划的四件事全落：`manage.py test` +
+      `npm run build` + `lint:e2e` + `test:unit`，仓库确有 GitHub remote 才值得配）。
+      两个刻意的设计：① **后端 job 钉 `windows-latest`** —— 应用只发 Windows 包，且用例里有
+      平台承重件（启动锁走 `msvcrt`、子批次目录按 `os.sep` 拼语义），Linux 跑的是没人验的分支；
+      ② **不配 Playwright 全量** —— 全量轮的判读依赖 slot 池与本机标定的门禁阈值
+      （`nightly-gates.mjs`），CI 上没有那套基线，阈值要么虚设要么天天误报；崩池轮在这台机子上
+      都足以作废整轮。全量仍归本地夜间轮。
+      ⚠ **未验证**：本地跑不了 GitHub Actions，YAML 只做了语法校验、`.github/` 确认未被忽略。
+      首推大概率还要修一两轮（Windows runner 的 pip/编码细节），别把它当已交付。
 - [ ] **P2-2** 前端最大 3 文件拆分（674/582/560），**原样保留 `data-*` / `data-testid` 选择器**
 - [ ] **P2-3** `apps/common` 拆 `apps/storage`（system_config+backup+views+urls）与 `apps/observability`（health+shutdown），约 29 处 import
 - [ ] **P2-4** 主题：给 `element-plus-theme.css` 补 **light 组件级补偿层**（当前 0 处，night 77 处）；`seriesColors` 与 `--chart-*` 偏差对齐

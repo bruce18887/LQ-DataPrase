@@ -1,0 +1,80 @@
+# 最小 CI（架构评审 P1-9）。
+#
+# 只把「本地每次 commit 已经在跑、但目前只有本机在跑」的四件事搬到磁盘上：
+# 后端全量用例、前端类型检查+构建、vitest、e2e 静态体检。
+#
+# **不跑 Playwright 全量**，两个原因：
+#   1. 全量轮的判读依赖 slot 池与按本机实测标定的门禁阈值
+#      （frontend/e2e/helpers/nightly-gates.mjs：墙钟 12min、单价 4.5s/例、效率 0.7×N），
+#      CI 机器上没有这套基线，阈值要么虚设要么天天误报；
+#   2. 崩池轮（0xC0000409 自崩）在这台机子上就足以把整轮指标作废，换台机子只会更糟。
+#      全量仍归本地夜间轮（scripts/e2e_nightly.mjs → tasks/e2e-nightly/LATEST.md）。
+#
+# 后端为什么钉 windows-latest：应用只发 Windows 包，且用例里有平台相关的承重件——
+# 启动锁走 msvcrt（apps/common/system_config.py:292）、子批次目录按 os.sep 拼语义
+# （apps/datafiles/views/_helpers.py:_batch_ctx）。Linux runner 跑的是没人验证过的分支。
+#
+# 已知缺席：test/backend/test_static_assets.py 需要 frontend/dist，
+# 未构建时自带 skipUnless —— 它跟着本地/e2e 收口轮验，不在这里补。
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: 后端全量用例
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements/base.txt
+
+      - name: Install pinned deps
+        run: pip install -r requirements/base.txt
+
+      - name: Django system check
+        run: python manage.py check
+
+      - name: Full backend suite
+        run: python manage.py test --verbosity=1
+
+  frontend:
+    name: 前端类型检查 + 构建 + 单测 + e2e 静态体检
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 与 package.json 的 engines（node >=20）对齐；没有 .nvmrc，版本口径以 engines 为准
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      # 门禁必须用 npm run build（vue-tsc -b + vite build）：根目录
+      # `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是空检查（lessons R8①）
+      - name: Type check & build
+        run: npm run build
+
+      - name: Unit tests (vitest)
+        run: npm run test:unit
+
+      # e2e 不在 tsconfig 的任何 include 覆盖范围内，删用例留下的死 import 只有这条路能发现
+      - name: e2e static check
+        run: npm run lint:e2e
