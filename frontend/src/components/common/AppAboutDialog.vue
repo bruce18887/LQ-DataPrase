@@ -9,7 +9,7 @@
   >
     <div class="about-body">
       <div class="about-title">
-        <span class="about-logo">📊</span>
+        <AppLogo :size="28" class="about-logo" data-test="app-logo" />
         <span>LQ-DataPrase</span>
       </div>
       <div class="about-sub">ATE 量产数据分析平台</div>
@@ -39,6 +39,7 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useAboutDialog } from '../../composables/useAboutDialog'
 import { APP_VERSION, BUILD_COMMIT, BUILD_DATE, getPlatformLabel, isElectronEnv } from '../../utils/version'
+import AppLogo from './AppLogo.vue'
 
 const { visible, close } = useAboutDialog()
 
@@ -75,7 +76,7 @@ onUnmounted(() => {
 }
 
 .about-logo {
-  font-size: var(--p-fs-headline);
+  color: var(--brand);
 }
 
 .about-sub {

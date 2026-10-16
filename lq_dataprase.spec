@@ -1,8 +1,35 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec for LQ-DataPrase standalone build.
 
-Build command (from project root, using the .venv Python):
-    .venv\\Scripts\\python.exe -m PyInstaller lq_dataprase.spec --clean
+Build command — run the tracked npm script, do not hand-assemble a PyInstaller call:
+    npm run pyinstaller
+It expands to (package.json, scripts.pyinstaller):
+    cross-env PYINSTALLER_CONFIG_DIR=build/pyi-cache .venv\\Scripts\\python.exe
+        -m PyInstaller lq_dataprase.spec --noconfirm --clean --workpath build/pyi-work
+    && .venv\\Scripts\\python.exe scripts/prune_bundle.py
+Those flags are what makes it the guarded form; each is load-bearing and they are
+pinned by frontend/test/unit/appIcon.spec.ts (rationale in package.json's
+_pyiWorkpathNote):
+  --clean                  forces a fresh EXE build. PyInstaller's EXE cache check
+                           compares 'icon' by path-string equality only
+                           (building/api.py _GUTS -> _check_guts_eq; no mtime or
+                           byte check on the icon anywhere), so without --clean an
+                           icon-only change ships the PREVIOUS icon bytes while
+                           the log stays green.
+  --workpath build/pyi-work  hygiene, not the fix: keeps PyInstaller's temp tree
+                           out of build/, the directory holding the deliverable
+                           build/icon.ico / icon.png. (--clean's wipe radius is the
+                           CONTENTS of workpath/<specnm>/, so it never reached
+                           build/icon.ico in the first place - see building/build_main.py.)
+  PYINSTALLER_CONFIG_DIR=build/pyi-cache
+                           --clean also wipes CONF['cachedir'], which on Windows
+                           defaults to %LOCALAPPDATA%\\pyinstaller - machine-shared,
+                           so every other PyInstaller project here would pay a cold
+                           start. Configure it inside the repo instead.
+  --noconfirm              replaces dist/ without an interactive prompt.
+  && scripts/prune_bundle.py  trims data files under dist/LQ-DataPrase/_internal;
+                           the tail is part of the shipped bundle, not optional.
+A bare "... -m PyInstaller lq_dataprase.spec --clean" has none of that.
 
 Output: dist\\LQ-DataPrase\\LQ-DataPrase.exe
 """
@@ -443,6 +470,10 @@ pyz = PYZ(a.pure)
 #   2. Double-compression (UPX + 7z) wastes ~7s with negligible size gain.
 #   3. Skipping UPX at COLLECT level avoids the runtime decompression step
 #      when the .pyd/.dll is loaded by the OS (faster cold start).
+# icon: 这个 exe 是后端进程，任务管理器与"打开文件位置"里都能看到它；
+# 不设图标时它显示 PyInstaller 默认飞船。与前端 exe 同一份 build/icon.ico。
+# PyInstaller 把相对 icon 按 .spec 所在目录解析（building/api.py 的 _makeabs），
+# 与调用时的 cwd 无关。
 exe = EXE(
     pyz,
     a.scripts,
@@ -454,7 +485,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=True,
-    icon=None,
+    icon='build/icon.ico',
 )
 
 # ---------------------------------------------------------------------------

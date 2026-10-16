@@ -7,6 +7,10 @@
     "types": ["node"],
     "skipLibCheck": true,
     "moduleResolution": "bundler",
+    // scripts/icon-lib.cjs 是构建脚本（CJS），单测要按 Node 实跑的模块制式引用它；
+    // 没有 allowJs 时 vue-tsc 只会报 TS7016「隐式 any」，而给它配一份 .d.ts
+    // 就是第二条真相来源（签名会跟实现漂移），所以让类型直接从实现里推。
+    "allowJs": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
     "noEmit": true,

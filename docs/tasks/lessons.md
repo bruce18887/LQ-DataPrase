@@ -1859,8 +1859,54 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   测试里要在 `setUp` 用 `override_settings(MEDIA_ROOT=临时目录)` 隔离 ——
   同 2026-09-19「e2e 复用了真实数据目录的后端」是同一类污染。
 
+## 2026-10-15 worktree 里没有 `Data/`，上传类 e2e 会以 ENOENT 被池判成"真红"
+
+- **现象**：在 `.worktrees/feat-icon-family` 跑 `npm run test:e2e:affected`（改动含 `components/layout/`
+  与 `e2e/global/` ⇒ 兜底全量）。386 例 6 个红文件：2 个独占复跑转绿（判负载抖动），
+  **4 个独占复跑仍红 ⇒ 池报"真红 4"**（`data/data`、`exports/exports`、`batch/batch-phase`、`settings/chart-memory`）。
+- **根因（与 UI 改动无关）**：四条报错是同一句
+  `ENOENT: no such file or directory, copyfile '<worktree>\Data\SampleData\...'`。`Data/` 被
+  `.gitignore:132` 的 `/Data/` 忽略 ⇒ **git worktree 天然没有那 715MB 样例库**，只有主检出有；
+  而 `frontend/e2e/fixtures/test-data.ts:28` 的 `SAMPLE_DATA_DIR` 拼的是 `PROJECT_ROOT`＝worktree 根。
+  DB 侧看不出来（池复用 `C:\lqdp-e2e\template` 里已种好的库），所以只有**测试自己在磁盘上读物理 CSV**
+  的那几条红：`PRIMARY_SAMPLE_FILE`（`CTA8290D/BPD60320_C01F40#…csv`，上传副本来源）与
+  `chart-memory` 的 `Buyoff/BPD60320_QA2.csv`。补齐这两个文件后同一批 45 例 **全绿**，
+  skipped 从 31 → 22，逐条比对是**同样 9 条**（chart-memory 4 条分支、combine 2 条合批、
+  repair-center 2 条孤立文件导入/删除、表头筛选产品下拉 1 条）—— 跳过与否全由这几个样例文件在不在
+  磁盘上决定：`repair-center:86,117` / `combine:60,123` 是显式
+  `test.skip(!fs.existsSync(PRIMARY_SAMPLE_FILE))`，chart-memory 是钩子里 `readFileSync(SEED_CSV)`
+  抛错把后续判成跳过，表头筛选那条是间接（前面的上传没跑，账号里就没有产品编码）。
+- **规则**：
+  ① 池的"真红"不等于我的回归：**先读报错类型** —— 断言失败才可能是回归，
+     `ENOENT` / `copyfile` / `open` 是夹具缺席。再核对失败用例有没有引用我改过的选择器（本次 grep 命中 0）。
+  ② 在 worktree 跑 e2e 前先 `ls -d Data`；缺就**只复制用到的那几个 CSV，且用 `cp -p`**
+     （`seed_test_data` 的幂等判据是 size+mtime 相同 ⇒ 保住 mtime 才不会触发整库重解析），别整棵拷。
+  ③ **不要用 junction 把 `Data/` 指回主检出**：`data_dir` 重定向是 move 语义（2026-10-14 那条），
+     链过去等于把另一个会话正在用的样例库放进"可被搬走"的范围。样例目录本身只读（全是
+     `copyFileSync(SRC, tmp)` / `setInputFiles`），所以复制是安全的、链接不是。
+- **顺带一条池自己的坑**：worktree 没有 `tasks/e2e-nightly/` ⇒ `latestDurations()` 返回空，
+  于是 `autoSlots(0)` 给 1 个 slot，而且**显式 `--slots=4` 也会被 `partitionFiles` 折成 1 桶**
+  （零权重下"最轻的桶"永远是桶 0）—— 从 worktree 出的全量轮**必然是 ~20min 串行**，
+  那种墙的 2.87s/例不是并行单价，别拿它当退化读，也别指望调 `--slots` 能提速。
 
 
 
 
 
+
+
+## 2026-10-16 全局常量套在尺寸相关的统计量上必然在一端丢牙：`INK_TONES_MAX=18` 让六个帧里只有两帧兜得住糊边回归
+
+- **结论**：随尺寸单调增长的统计量（色阶数、糊边宽度、描边占比）不许用单一全局阈值去套——一个值只能在一端成立，另一端必然要么误红、要么（更糟）丢牙：被判据挡不住的回归类别里，小帧全部落在"通过"一侧，而测试看起来全绿。
+- **现场实例**：icon 家族 G1「符号糊边」第一版用 `INK_TONES_MAX=18` 单值套 `inkTones`。实测真模糊随帧尺寸是 8/11/15/17/24/24（16/32/48/64/128/256），18 压在四个小帧的模糊值**之上**——模糊帧的色阶数过不了 `>18` 这一关的门槛都不存在，六帧里只有 128/256 两帧真拦得住。改逐帧表 `min(交付+3, 真模糊−1)` 后 16:7/32:10/48:13/64:14/128:18/256:17，逐帧仍低于该帧模糊值（差距 1/1/2/3/6/7 阶），小帧的牙齿才找回来。
+- **可核对数字**：阈值表在 `scripts/icon-audit.cjs` 的 `AUDIT_LIMITS.inkTonesMaxBySize`；交付列 5/8/10/11/15/14 由 `node scripts/gen-icon.ico.js` 每次构建拿真字节重测（2026-10-16 复跑输出逐帧 5/8/10/11/15/14，与表一致）；「真模糊」列是一次性冻结采样，三步重测流程（素材 `git show 5cad1b1^:frontend/public/favicon.svg`）钉在 G1 注释里，并注明 execSync 会把 `^` 吃掉的坑。
+## 2026-10-16 伴侣/原型里被批准的外观形态必须落进生成管线并用产物字节验收：C1 的"底板版"曾只是一个 CSS div，八轮评审全漏
+
+- **结论**：在可视化伴侣/原型里被用户批准的形态，批准那一刻只存在于预览；它不进生成管线就一件也没交付过。验收口径必须落在**交付字节**上而不是预览上——而且字节判据要在形态进管线**之后**重写，否则它会反过来把正确形制判成"不可构建"。
+- **现场实例**：C1——用户批准的"渐变底板+反白符号"是原型里一个 CSS 渐变 `<div>`，`gen-icon.ico.js` 从头到尾只渲过裸符号帧；当时先写的字节判据认的是裸闪电形制，拿批准形态代入预验算直接判不可构建。形制与判据两头都对不上，但每一轮测试都绿，Task 1–8 八轮任务评审没有一轮发现"产物不是被批准的那件东西"。
+- **可核对数字**：底板形制到 Task 9（commit `dda97b3`）才真进管线；字节指纹变化可核——底板占比 `plateRatio` 交付六帧 0.891~0.955 vs 裸闪电旧 .ico 0.293~0.355（区间 `PLATE_RATIO_MIN/MAX`=0.70/0.975，注释留了两组实测）；下游四个消费者（`electron-builder.yml` 的 `win.icon`/`extraResources`/`nsis.installerIcon|uninstallerIcon` + `lq_dataprase.spec` 的 `icon=`）吃的都是 `build/icon.ico` 的字节，没有一个会看预览。
+## 2026-10-16 同一格里 104/106/77 复现不出、可复现的 91 只活在 gitignored 探针里——文档里两个数字互相矛盾时必须说破（Task 11 §E.1）
+
+- **结论**：文档中的数字要么带可复现通路（脚本+口径+素材都在 tracked 范围），要么显式标注"历史证据链、当前通路复现不出"。同一个量在两份记录里给了两个值而没人点名它们不同源，和"散文强于代码"是同一病灶：判据引用了谁、代价账引用了谁，读者无从知道。
+- **现场实例**：§E.1 本来是去核 spec §8 代价账里"实心 91 px"的出处；顺藤发现 §1.2 表「总实心像素 @16px」同格写的 104/106/77 才是复现不出的那组——量它们用的是设计轮的 Python/PIL 临时件，已按 §0 约定清理，仓库里没有任何可重跑通路；现存字节能给的只有交付裸符号帧的 91。一条自称以证据链为命的文档里，两个数字隔两格互相矛盾，直到收口评审才被摸出来。
+- **可核对数字**：91 = 交付进 `build/icon.ico` 的那枚 16px 帧（缓存 `tasks/_task9_bare_frames/16x16.png`）按 `alpha===255` 的像素数；`alpha>=240` 口径 95、`alpha>=8` 口径 146——换口径就不是同一个数。复现脚本 `tasks/_t11_e1_configs.mjs` 2026-10-16 复跑仍得 91（剪影 16×15、尾行 4）。处理记录在 spec §1.2 更正第 3 条与 §8 该行的出处补注：表格原样保留为历史证据链，判据与代价账引用 91，并点名两者不同源。
