@@ -3822,14 +3822,64 @@ A 不报、B（关键词在预算之外）照旧报。**预算必须取到 `CHUN
       都足以作废整轮。全量仍归本地夜间轮。
       ⚠ **未验证**：本地跑不了 GitHub Actions，YAML 只做了语法校验、`.github/` 确认未被忽略。
       首推大概率还要修一两轮（Windows runner 的 pip/编码细节），别把它当已交付。
-- [ ] **P2-2** 前端最大 3 文件拆分（674/582/560），**原样保留 `data-*` / `data-testid` 选择器**
-- [ ] **P2-3** `apps/common` 拆 `apps/storage`（system_config+backup+views+urls）与 `apps/observability`（health+shutdown），约 29 处 import
-- [ ] **P2-4** 主题：给 `element-plus-theme.css` 补 **light 组件级补偿层**（当前 0 处，night 77 处）；`seriesColors` 与 `--chart-*` 偏差对齐
-- [ ] **P2-7** 测试拆分：`apps/datafiles/tests.py` 1965 行优先
-- [ ] **P2-1** 清理（**待用户确认范围**）
+- [ ] **P2-2 / P2-3 / P2-4 / P2-7 —— 本轮未做**（不是遗漏：这四项各是一次独立重构，
+      在本会话剩余预算里做 half 会留下比不做更坏的半成品树；下列是执行时要直接用的判据）
+      * **P2-2** 前端三大文件 674/582/560。拆分必须**原样保留 `data-*` / `data-testid`**，
+        它们是被 e2e 选择器钉住的契约（R2②）；改完先跑 `data-browser` 与 `search-layout` 两条 spec。
+      * **P2-3** `apps/common` 拆出 `apps/storage`（system_config + backup + views + urls）
+        与 `apps/observability`（health + shutdown），约 29 处 import。**注意 `config/urls.py`
+        与 `base.py` 里的字符串路径**（异常处理器 / 探针挂载点）——AST 扫不到的引用会漏。
+        `apps/common` 无 models ⇒ 不产生 migration，这是它比 P2-2 更适合先做的唯一理由。
+      * **P2-4** 先更正两份数字，都别信：报告说「light 30 vs night 57」、上一轮侦察说
+        「各 50 个完全对称」——**本会话逐行实测**：`design-tokens.css` 是
+        `:root` 43 个基础变量 + night 覆盖 **30** + light 覆盖 **29**（差 1，基本对称，
+        所以报告这条**不成立**）。真问题在 `element-plus-theme.css`：
+        全文件 **77 处 `!important`，76 处落在 night 块、1 处不在任何主题选择器内、
+        light 块 0 处** —— light 有普通规则，但**没有一处 `!important` 补偿**。
+        补 light 层要按 R7① 成对写，且**必须有肉眼/像素验收**，不能只靠构建通过。
+      * **P2-7** `apps/datafiles/tests.py` 实测 **1968** 行（报告写 1965，已被 P1-5 加 3 行）。
+        拆成 `tests_<主题>.py` 即可被 Django 默认 `test*.py` 发现，无 import-graph 风险；
+        但要先解决「散落两处」的取向：统一到 `test/backend/` 还是留在 app 内，二选一别两留。
+- [ ] **P2-1** 清理 —— **等用户点范围**（见批 4）。`Data/` 930M 是**用户原始数据**、
+      `media/` 722M 是 `MEDIA_ROOT` 运行时产物、根目录 `db.sqlite3` 可能是 8000 端口的活库，
+      三者**都不能删**。可安全处置的是 `tasks/` 58M 里的一次性探针与日志、
+      `docs/tasks/lessons.bak-2026-08-30.md`、`scripts/generate_icon.py` 与
+      `scripts/gen-icon.ico.js` 的功能重复、`db.sqlite3.bak-e2e-90612`(3.4M) 与
+      根 `system_config.json` 里写死的个人绝对路径（**均已 gitignore，删除不影响仓库**）
 
-**批 4 — 待决策项**
-- [ ] **P1-6** 响应壳/类型：侦察结论是「改壳风险高（前端 6 处强命名壳会全断）→ 只加不改」。可选做 OpenAPI→TS codegen（1 devDep + 1 script），受 SSE 21 个类型与自定义壳限制
-- [ ] **P2-5** token 存 localStorage（Electron + contextIsolation 下风险可控，建议列为「引入 HTML 注入面之前的前置条件」而非立即改）
-- [ ] **P2-6** CORS 全开（已有完整成因与修法记录，但修法需**验证真实安装包**，不宜盲改）
+**批 4 — 待决策项（每条带推荐与代价，等用户点）**
+
+- [ ] **P1-6 响应壳/类型** —— **推荐：不包装壳，只做 interface 收敛 + OpenAPI→TS codegen**。
+      理由：P1-5 已经把错误信封统一成 `{code,message,detail}`，前端剩下的痛点是
+      `api/datafiles.ts` 手写 14 个 interface 与 `types/index.ts` 分散重复（反模式 #18）。
+      代价：加 1 个 devDep + 1 条 script，且 SSE 的 21 个类型与 dashboard 的自定义壳**codegen 覆盖不到**，
+      只能覆盖 REST 那部分——别指望它一次性消灭手写类型。
+      不推荐统一成功壳 `{code,message,data}`：前端有 6 处强命名壳会全断，收益是纯审美。
+- [ ] **P2-5 token 存 localStorage** —— **推荐：本轮不改**，列为硬前置条件：
+      「引入任何 HTML 注入面（富文本渲染 / 外链 iframe / markdown 渲染）之前必须先迁走」。
+      现状风险可控：Electron + `contextIsolation:true` + `nodeIntegration:false` + 无远程内容注入面，
+      且读写已经过 `utils/safeStorage.ts` 包装（防磁盘满白屏）。改成内存态 + `secret.key` 落盘
+      是一次安全性换可用性的改动，值得单独做，不该塞在清账批里。
+- [ ] **P2-6 CORS 全开** —— **推荐：单独立项，先做「Django 同源托管 SPA」再彻底关 CORS**。
+      成因已写死在 `base.py:83` 注释里（Electron `loadFile()` 的 Origin 是 `null`，生产请求必然跨域），
+      残余风险也已评估（恶意网页能打到回环 API，但拿不到 token）。
+      ⚠ 这条**必须验真实安装包**才算做完，而本机验不了：`build.bat` 会 `taskkill /F /IM python.exe /T`
+      并 `rmdir /s /q out`，会杀别的会话、删不可再生的已发布安装包。要么用户在场时单独跑，
+      要么先用「开发形态 + `--noreload` 起服务，从 `file://` 页面发一次带 Origin:null 的请求」近似验证。
+- [ ] **新增：第五种错误形态**（P1-5 收尾）—— `apps/sftp/config_views.py` 的 `save_config`
+      仍直接返回 DRF 序列化器字段错误字典（`{字段: [消息]}`），前端靠 `error.ts` 的字段扫描分支兜。
+      要不要并入 `error_response`？代价：该端点的既有断言与前端展示文案要一起过一遍。
+- [ ] **新增：SFTP 连接侧第四种形态 `{status:'error', message}`** —— 5 处
+      （`apps/sftp/views.py:101,111,144,172,175`），本轮按「不动语义」原则保留。
+      它是「连接状态机的一部分」还是「又一个错误壳」，需要用户判；判成后者就并入 P1-5 收尾。
+- [ ] **新增：`CLAUDE.md` 系列的入库策略**（P0 附录第 4 条至今未决，本轮又撞到同一条）——
+      `.gitignore` 有意忽略 `.claude/CLAUDE.md`、`apps/CLAUDE.md`、`frontend/CLAUDE.md`，
+      而 `AGENTS.md` 把前者列为「会话开始必读」。后果：新克隆者拿到指向不存在文件的入口；
+      本轮修 `frontend/CLAUDE.md` 的 `variables.css`→`design-tokens.css` **也进不了版本库**。
+      三个选项：① 三个文件入库（推荐，代价是把 AI 指令变成公开资产）；
+      ② `AGENTS.md` 改为「若存在则读」；③ 维持现状（每个新环境都会重犯）。
+- [ ] **新增：两条连续两轮同点位的 e2e 红** —— `analysis/histogram-fail-bins.spec.ts` 与
+      `exports/html-report.spec.ts` 在本会话两轮 slot 池里都是同两个文件红、独占复跑即绿。
+      按门禁判级是负载抖动（不拦门禁），但**两轮同点位**不像随机 flake，
+      值得单独查一次是否共享 fixture/DB 状态互踩（R2③ 的老问题）。
 
