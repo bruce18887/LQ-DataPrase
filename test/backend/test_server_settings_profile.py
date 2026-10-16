@@ -43,6 +43,11 @@ def base_env(**overrides):
     env.update({
         'PYTHONPATH': REPO,
         'PYTHONUNBUFFERED': '1',
+        # 子进程的 stdio 编码必须**由本测试钉死**，不能跟着父进程或本机 locale 走：
+        # 本档的报错消息是中文，父进程若带 PYTHONIOENCODING=utf-8（`scripts/e2e_nightly.mjs`
+        # 就注入）而这里用 locale(cp936) 解码，subprocess 的读取线程会抛 UnicodeDecodeError
+        # 并**被线程吞掉**，`result.stderr` 变成 None ⇒ 断言收到空串，稳定假红（2026-10-16 实测）。
+        'PYTHONIOENCODING': 'utf-8',
         'DJANGO_SETTINGS_MODULE': 'config.settings.server',
         'LQDP_SERVER_BASE_DIR': tempfile.mkdtemp(prefix='lqdp_server_profile_'),
         'SECRET_KEY': SECRET_KEY_MATERIAL,
@@ -64,13 +69,14 @@ def base_env(**overrides):
 def run_manage(argv_tail, **overrides):
     result = subprocess.run([PYTHON_BIN, 'manage.py'] + argv_tail,
                             cwd=REPO, env=base_env(**overrides),
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, encoding='utf-8', errors='replace')
     return result.returncode, (result.stdout or '') + (result.stderr or '')
 
 
 def run_python(code, env=None):
     result = subprocess.run([PYTHON_BIN, '-c', code], cwd=REPO,
-                            env=env or base_env(), capture_output=True, text=True)
+                            env=env or base_env(), capture_output=True, text=True,
+                            encoding='utf-8', errors='replace')
     return result.returncode, (result.stdout or '') + (result.stderr or '')
 
 

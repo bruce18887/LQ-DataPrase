@@ -52,8 +52,12 @@ export function slotPaths(manifest: SlotManifest | null): SlotPaths {
     adminState: path.join(authDir, 'admin.json'),
     userState: path.join(authDir, 'user.json'),
     downloadDir: path.join(__dirname, '..', '.downloads'),
+    // 串行（无 slot）跑的落盘根：库 / media / temp 全在这下面，由
+    // config.settings.e2e_slot 按 LQDP_E2E_SLOT_DIR 直接指认。刻意**不是**仓库根 ——
+    // 仓库根 media/ 与 db.sqlite3 是 Storage Layout v2 迁移前的搁浅副本，
+    // 再让测试写回去就等于把 722MB 请回来。
     // helpers 在 frontend/e2e/helpers → 上溯三级即仓库根（与 test-data.ts 的 PROJECT_ROOT 同值）
-    dataDir: path.resolve(__dirname, '..', '..', '..'),
+    dataDir: path.join(path.resolve(__dirname, '..', '..', '..'), 'test', 'e2e-data'),
     backendPort: Number(process.env.E2E_PORT || 8000),
     frontendPort: Number(process.env.E2E_FRONTEND_PORT || 3000),
     frontendOrigin: `http://localhost:${process.env.E2E_FRONTEND_PORT || 3000}`,

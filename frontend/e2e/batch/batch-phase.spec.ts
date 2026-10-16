@@ -24,7 +24,8 @@ import { gotoApp } from '../helpers/nav'
  * 选择批次并「加载批次报表」→ 断言胶囊/树/过滤/回退。
  * 批次名 000_ 开头使其在 list_batches（-batch_name 降序）中排末尾，不影响其它用例。
  */
-// 后端落盘位置跟着进程走：非 slot = 项目根，slot = 该 slot 自己的 data_dir（MEDIA_ROOT 同源）
+// 后端落盘位置跟着进程走：非 slot = `<仓库根>/test/e2e-data`，slot = 该 slot 自己的 data_dir
+// （MEDIA_ROOT 同源）。两处都不再是仓库根。
 const BATCH_BASE_DIR = path.join(DATA_DIR, 'media', 'data', 'admin', 'batch')
 
 /**

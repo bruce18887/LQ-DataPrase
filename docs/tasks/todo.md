@@ -1,3 +1,63 @@
+# 任务：测试落盘数据面从仓库根 media/ 迁到 test/ 下（2026-10-16）
+
+起因：仓库根 `media/` 是 Storage Layout v2 迁移遗留的搁浅副本（722MB，应用侧三档都不读它），
+唯一还在写它的是**无 slot 的串行 e2e**（`data_dir` 钉仓库根）。用户要求测试输出数据改落
+`test/` 下，且 e2e 与后端套件**分目录**（顺带解除「绝不可并跑」这条禁令）。
+
+机制选型：**走薄 settings 覆写层，完全不碰 `data_dir`**。`data_dir` 那条通路是 move 语义
+（copy→verify→删源），正是 2026-10-14 毁掉仓库根 `media/` 与 `db.sqlite3` 的原因；
+`config/settings/e2e_slot.py` 文件头与台账 item 7 都把「直接指 DB/MEDIA_ROOT/temp」定为正确机制。
+
+## 实施清单
+
+- [x] `frontend/test/unit/slotPaths.spec.ts`：非 slot 回落 `dataDir` 判据翻成 `test/e2e-data`（先跑红→6 例绿）
+- [x] `frontend/e2e/settings/system-paths.spec.ts`：临时区判据改为单一公式 `<数据根>/temp`
+- [x] `frontend/e2e/helpers/slot.ts`：非 slot `dataDir` → `<repo>/test/e2e-data`
+- [x] `frontend/playwright.config.ts`：顶层统一设 `DJANGO_SETTINGS_MODULE=config.settings.e2e_slot`
+      + `LQDP_E2E_SLOT_DIR=SLOTS.dataDir`；后端 webServer `reuseExistingServer=false`
+- [x] 新增 `config/settings/unit.py` + `manage.py` 的 `test` 分支默认档改指它
+- [x] 新增 `test/backend/test_unit_settings_profile.py`：6 例（子进程解析自证 + 源码扫描 + manage 路由）
+- [x] `scripts/e2e_pool.mjs`：`repoMediaCount` 改成「仓库根 `media/` 必须不存在」的绊线；`--dry-run` 自证
+- [x] 仓库根 `db.sqlite3` 移入 `test/e2e-data/`；空目录 `media/` 已 `rmdir`
+- [x] 注释跟改动同步：`test-data.ts`、`global-setup.ts`、`repair-center.spec.ts`、`batch-phase.spec.ts`、
+      `auth.setup.ts` 里「非 slot = 项目根」的说法全部改准
+
+## 计划外（验证过程中撞出来的）
+
+- [x] **6 条存量假红的根因与修复**：`text=True` 不给 `encoding=` ⇒ 父进程带 `PYTHONIOENCODING=utf-8`
+      （夜跑 `scripts/e2e_nightly.mjs:236` 就注入）时，子进程的 UTF-8 中文 traceback 被按本机 cp936 解，
+      `UnicodeDecodeError` 在 `_readerthread` 里被吞掉、`result.stderr` 变 `None` ⇒ 断言收到空串。
+      实测：不带该变量 21 例全绿，带上就 5 FAIL + 1 ERROR。**与本轮换档无关**（development 档下一模一样红）。
+      修法：三个测试文件的捕获显式 `encoding='utf-8', errors='replace'` + 子进程 env 钉 `PYTHONIOENCODING=utf-8`。
+      待办：`test/backend/test_sftp_search_integration.py:66` 是同族写法（stderr 走文件），本轮未动。
+- [ ] 文档纠正：`docs/reference/testing-gates.md` §4 那句「`PYTHONIOENCODING=utf-8` 无害，先留着」
+      实测**不成立**，要换成上面这条有因果的写法（并说明旧「坑已填」只覆盖了**读文件**那一半）。
+
+## 验证口径（收口必须全跑，改动命中 `config/`+`playwright.config.ts`+`manage.py`+`scripts/e2e_*` ⇒ 快门禁必然升全量）
+
+- [x] `npx vitest run` **194/194**；`npm run lint:e2e` 干净；`npm run build` ✓（832ms 增量）
+- [x] 后端全量 `manage.py test`（不带 `PYTHONIOENCODING`）：**Ran 1479 / 333.5s，failures=1**
+      —— 那 1 条是 `test_pyproject_matches_package_json`（`0.7.0 ≠ 0.8.0`），来自**另一个会话未同步的
+      `frontend/package.json` 版本号**，与本轮无关，留给它的主人
+- [x] **冷播种实测：`seed_test_data --refresh` 只要 10s**（87 文件 / 711M 全落 `test/e2e-data/media`）
+      ⇒ 我先前预判的「120s 超时不够」被自己的测量**否证**，`global-setup.ts:24` 不改
+- [x] 库盘一致自证（新 MEDIA_ROOT 下）：DB 87 行、磁盘 87 文件、**缺失 0、尺寸不符 0**、
+      `status` 全 `ready`、孤儿 ParseHistory 0
+- [x] 串行 e2e 子集（`E2E_PORT=17001/17002`，不碰本机 8000 那两个服务）：**15 passed / 2 flaky**
+      → 两条 flaky 都在 `data/file-list-sort-filter.spec.ts`，`--workers=1` 复跑 **11 passed / 0 flaky**
+      ⇒ 是同 spec 内并行争用 admin 账号态（`auth.setup.ts` 记的同一类），不是本轮接线
+- [x] 三条落盘自证：`test/e2e-data/media` 长出 87 个种子文件；仓库根**无** `media/`；
+      `~\LQ-DataPrase\media` 跑前跑后均 **110 个文件**（后端全量一次没写进去）
+- [ ] `node scripts/e2e_pool.mjs --slots=4` 全量（在跑）
+
+## 已知不做（留给下一批）
+
+- 29 个 `test/backend/*.py` 里写死 `setdefault('DJANGO_SETTINGS_MODULE','config.settings.development')`：
+  经 runner 跑时惰性，但**直跑单个脚本仍走 development ⇒ 仍写 home media**。
+- `test/e2e-data/db.sqlite3` 与 `test/unit-data/` 的定期回收（现在没有任何脚本清它们）。
+
+---
+
 # 任务：分析页 dock 底部高度滑条进布局记忆（2026-09-09）✅
 
 用户报告：「数据分析页布局记忆不记最底下的高度滑条，一刷新高度就还原」。

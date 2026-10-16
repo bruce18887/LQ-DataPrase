@@ -3,8 +3,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { gotoApp } from '../helpers/nav'
 import { uiLogin } from '../helpers/auth'
-import { ACCOUNTS, PROJECT_ROOT } from '../fixtures/test-data'
-import { CURRENT_SLOT } from '../helpers/slot'
+import { ACCOUNTS, DATA_DIR, PROJECT_ROOT } from '../fixtures/test-data'
 
 /**
  * 系统存储路径（系统设置 → 📁 存储路径，GET/PUT /api/v1/system/paths/）。
@@ -91,12 +90,14 @@ test.describe('@p2 系统存储路径', { tag: ['@p2', '@settings'] }, () => {
     }
   })
 
-  test('管理员：默认值展示（数据目录=项目根、临时目录=LQ-DataPrase-Temp）', async ({ page }) => {
+  test('管理员：默认值展示（数据目录=锚点仓库根、临时区=<数据根>/temp）', async ({ page }) => {
     await gotoApp(page, '/settings')
     await page.getByRole('tab', { name: '📁 存储路径' }).click()
 
-    // e2e 配置钉死 data_dir=PROJECT_ROOT（playwright.config.ts 顶层写入），
-    // temp_dir 未配置 → 内置默认 %TEMP%\LQ-DataPrase-Temp
+    // 后端跑 config.settings.e2e_slot，它不改 BASE_DIR ⇒ API 报的 data_dir 仍是仓库根
+    // （那是锚点，不是数据落盘面 —— 库与 media 的真实位置由同一响应的 db_path/media_path 给出）。
+    // configured 读的是 playwright 顶层写的那份惰性配置（data_dir=项目根、temp_dir 未配）；
+    // temp_dir 的**生效值**与内置默认无关，是 e2e_slot 档按数据根给的 `<数据根>/temp`。
     const resp = await page.request.get(PATHS_API, {
       headers: { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('access_token'))}` },
     })
@@ -110,10 +111,10 @@ test.describe('@p2 系统存储路径', { tag: ['@p2', '@settings'] }, () => {
     // Windows 路径大小写防御（TEMP 可能展开为短名/大小写差异）
     expect(data.data_dir.toLowerCase()).toBe(PROJECT_ROOT.toLowerCase())
     // 这条断言验的是「API 报的是后端进程实际生效的临时区」，不是某台机器的固定路径：
-    // 非 slot 下未配置 → 内置默认 %TEMP%\LQ-DataPrase-Temp；
-    // slot 下 config.settings.e2e_slot 刻意把它改成 <slot>/temp（每 slot 各用自己的临时区）。
-    const expectedTempSuffix = (CURRENT_SLOT ? CURRENT_SLOT.tempDir : path.join('LQ-DataPrase-Temp')).toLowerCase()
-    expect(data.temp_dir.toLowerCase().endsWith(expectedTempSuffix)).toBeTruthy()
+    // 串行与 slot 两种模式现在都跑 config.settings.e2e_slot，它把临时区固定成 `<数据根>/temp`
+    // （数据根 = DATA_DIR：串行是 test/e2e-data，slot 是该 slot 自己的目录），
+    // 所以判据只有一条公式，不再分模式。
+    expect(data.temp_dir.toLowerCase().endsWith(path.join(DATA_DIR, 'temp').toLowerCase())).toBeTruthy()
     expect(data.configured).toEqual({ data_dir: PROJECT_ROOT, temp_dir: null })
 
     // UI 展示「默认值」标识（未显式配置）

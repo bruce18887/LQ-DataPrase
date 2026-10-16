@@ -58,14 +58,18 @@ const FILES = ARGS.files.map(bare)
 const netBlock = {}
 const taken = (port) => netBlock[port] === true
 
-/** 仓库根 media 的文件总数 —— 模板/slot 操作前后必须相等（那条重定向通路会整目录搬走） */
-function repoMediaCount() {
+/** 绊线：仓库根 `media/` 必须不存在。
+ *
+ * 它是 Storage Layout v2 迁移前搁浅在仓库根的副本（722MB）。池里所有 dj() 子进程都走
+ * `config.settings.e2e_slot` + `LQDP_E2E_SLOT_DIR`，`MEDIA_ROOT` 因此只可能落在模板或 slot
+ * 目录下；串行跑同样不落仓库根（数据面 = `test/e2e-data`）。这个目录一旦重新出现，
+ * 就是有进程按 `development` 档解析了 `MEDIA_ROOT` —— 立刻停，别把 722MB 请回来。
+ */
+function assertNoRepoMedia(when) {
   const root = path.join(ROOT, 'media')
-  if (!fs.existsSync(root)) return -1
-  let n = 0
-  const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) e.isDirectory() ? walk(path.join(d, e.name)) : n++ }
-  walk(root)
-  return n
+  if (fs.existsSync(root)) {
+    throw new Error(`${when}：仓库根 media/ 又存在了（${root}）—— 有进程把 MEDIA_ROOT 指回仓库根，停止起 slot 并查那条通路`)
+  }
 }
 
 function dj(args, env) {
@@ -74,9 +78,10 @@ function dj(args, env) {
   })
 }
 
-/** 模板：库 + 种子 media 全在短基址下。配置文件钉的是**仓库根** ⇒ 导入期重定向是空操作 */
+/** 模板：库 + 种子 media 全在短基址下。配置文件里的 data_dir 在 e2e_slot 档下完全惰性
+ *  （该档不调导入期重定向），留着只当「万一被 development 档读到也别搬东西」的防御。 */
 function buildTemplate() {
-  const before = repoMediaCount()
+  assertNoRepoMedia('铸模板前')
   fs.mkdirSync(path.join(TEMPLATE, 'temp'), { recursive: true })
   const cfg = path.join(TEMPLATE, 'system-config.json')
   fs.writeFileSync(cfg, JSON.stringify({ data_dir: ROOT }), 'utf-8')
@@ -91,9 +96,8 @@ function buildTemplate() {
   // WAL：只拷主文件会丢 -wal 里的内容 ⇒ 先 TRUNCATE checkpoint 落盘，再清 sidecar
   dj(['shell', '-c', "from django.db import connection as c; c.cursor().execute('PRAGMA wal_checkpoint(TRUNCATE)'); print('ok')"], env)
   for (const s of ['-wal', '-shm', '-journal']) { const p = path.join(TEMPLATE, 'db.sqlite3' + s); if (fs.existsSync(p)) fs.rmSync(p) }
-  const after = repoMediaCount()
-  if (after !== before) throw new Error(`仓库根 media 文件数变了 ${before}→${after} —— 立即停止，别继续起 slot`)
-  log(`模板就绪 ${((Date.now() - t0) / 1000).toFixed(1)}s → ${TEMPLATE}（仓库根 media 仍为 ${after} 文件）`)
+  assertNoRepoMedia('铸模板后')
+  log(`模板就绪 ${((Date.now() - t0) / 1000).toFixed(1)}s → ${TEMPLATE}（仓库根 media/ 始终不存在）`)
 }
 
 /** 每 slot：新建自己的目录 → 拷库 → 硬链镜像 media → 写 config → 写 slot.json */

@@ -26,8 +26,8 @@ async function persist(role: Role, statePath: string, page: import('@playwright/
 /**
  * e2e 的规范账号态：把「有用例会改、且改了不一定还得回来」的字段在开跑前钉回模型默认值。
  *
- * 为什么必须在开跑前钉：账号设置**跨轮持久**。2026-10-13 在 e2e 库（`data_dir` = 项目根那份，
- * 不是 `~/LQ-DataPrase` 那个人用的库）实测到 admin 停在
+ * 为什么必须在开跑前钉：账号设置**跨轮持久**。2026-10-13 在 e2e 库（当时是仓库根那份，
+ * 现在落 `test/e2e-data/db.sqlite3`；都不是 `~/LQ-DataPrase` 那个人用的库）实测到 admin 停在
  * filename_wrap=False、page_size=200、cpk_a/b/c=3.0/2.99/2.98、analysis_chart_memory=False，
  * 而写它们的地方都没有失败兜底：
  * - `data/file-list-sort-filter.spec.ts:276` 先 PUT false，`:293` 才 PUT true —— 用例在两步之间

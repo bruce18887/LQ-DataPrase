@@ -15,10 +15,10 @@ const PYTHON = process.env.PYTHON_BIN || path.join(PROJECT_ROOT, '.venv', 'Scrip
 function runDjango(cmd: string) {
   const full = `"${PYTHON}" manage.py ${cmd}`
   console.log(`[globalSetup] ${full}`)
-  // 显式注入 LQDP_SYSTEM_CONFIG_FILE（playwright.config.ts 顶层已写入
-  // data_dir=PROJECT_ROOT）：execSync 只继承 process.env，不继承 webServer
-  // 的 env；不加则种子进程读项目根锚点配置，触发默认 data_dir 迁移并操作
-  // 用户主目录 DB，与后端各用一套数据库。
+  // 显式注入 LQDP_SYSTEM_CONFIG_FILE 与档变量（playwright.config.ts 顶层已设
+  // DJANGO_SETTINGS_MODULE=config.settings.e2e_slot + LQDP_E2E_SLOT_DIR=数据根）：
+  // execSync 只继承 process.env，不继承 webServer 的 env，所以这里必须把三个键都点齐，
+  // 否则种子子进程会按默认档解析、落到别的库/media 上，与后端各用一套数据。
   try {
     const out = execSync(full, {
       cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 120_000,
@@ -41,9 +41,9 @@ async function globalSetup() {
     // 既慢又会双重写入 SQLite，故跳过。
     console.log(`[globalSetup] slot=${CURRENT_SLOT.index} 跳过 migrate/seed（模板库已就位：${CURRENT_SLOT.dbPath}）`)
   } else {
-    // e2e 把 data_dir 钉死在项目根（playwright.config.ts），而项目根 db.sqlite3
-    // 可能不存在（Storage Layout v2 默认迁移把开发数据放到了用户主目录）——
-    // 先 migrate 建表，保证 e2e 后端有可用的空库，再播种。
+    // 串行的库在 `<仓库根>/test/e2e-data/db.sqlite3`（DATA_DIR 由 helpers/slot 给）。
+    // 该文件可能不存在（首次运行、或上一批测试残留被清）—— 先 migrate 建表，
+    // 保证 e2e 后端有可用的空库，再播种。
     runDjango('migrate --noinput')
     runDjango('seed_users')
     // --refresh 增量刷新：清理 e2e_* 测试残留 + 仅重灌变化的 SampleData 文件，

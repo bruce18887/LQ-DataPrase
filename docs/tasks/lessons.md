@@ -2008,3 +2008,57 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
      `cmd.exe`，我据此得到的 `error: too many arguments` 是那个包报的，不是 winget/gh）；
      **Qoder 会话的 shell 继承的是应用启动时的 PATH 快照**，装完新 CLI 后本会话仍 `command not found`，
      一律用绝对路径调用，或重启 Qoder。
+
+## 2026-10-16 「media 是不是用不到了」查出分裂态：应用档早搬走了，串行 e2e 还钉在仓库根 —— 测试落盘面迁到 `test/` 下
+
+- **触发**：用户问仓库根 `media/` 是否已无人使用。实测 722MB / 89 文件，87 个与 `Data/SampleData`
+  同名文件**逐字节相同**（md5 全核过），2 个是全仓孤本；应用侧三档都不读它
+  （development/standalone 被 `data_dir` 重定向到 `~\LQ-DataPrase\media`，server 读 `LQDP_SERVER_BASE_DIR`），
+  它之所以搁浅是 `_migrate` 的「目标已存在就跳过并**保留源**」。
+- **但"用不到"差一点判错**：那个目录当天 18:09 还在被写 —— `media/sftp/known_hosts.json`、
+  根 `db.sqlite3`、`frontend/e2e/.auth/*.json` 三个时间戳完全对齐，来源是**无 slot 的串行 e2e**
+  （playwright 把 `data_dir` 钉成仓库根好让重定向空操作，于是 `MEDIA_ROOT` 恰好落在仓库根）。
+  ⇒ 判「某个目录没人用」必须按**每一档 settings 实际解析出的 `MEDIA_ROOT`** 分别验，
+  不能按「应用不用它」一刀切；`grep` 到引用不等于引用生效，时间戳才等于。
+- **迁移动机与选型**：用户要求测试输出数据落 `test/` 且两套分目录。做法是**新增/复用薄 settings
+  覆写层，完全不碰 `data_dir`** —— 后者是 move 语义（见本文件 2026-10-14 条目），
+  `config/settings/e2e_slot.py` 文件头与 spec §4.1 已把「档直接指认 DB/MEDIA_ROOT/temp」定为唯一正确机制，
+  本轮只是把它的消费者从 1 个扩到 2 个（`config.settings.unit` ← `manage.py test`）。
+- **顺带堵掉一条已知泄漏**：后端套件历史上跟着 development 走导入期重定向，而仓库根那份
+  `system_config.json` 写着用户主目录 ⇒ `MEDIA_ROOT` 落在**用户真实数据目录**，跑一次全量多出合成 CSV；
+  `Path.home()` 是机器级的，隔离工作树挡不住它（台账里记为"根修复属另一会话领域"，本轮做掉了）。
+- **规则**：
+  ① **测试落盘面只能由档直接指认，不许由 `data_dir` 重定向决定**。新档必须自带源码扫描
+     （`apply_system_config`、那个键的小写形式、`config.settings.development` 三处都不许出现）
+     **加**子进程打印解析结果 —— `override_settings` 只改已加载的 globals，测不到导入期那一刻。
+  ② **换数据面时先分清「API 报的」与「真实生效的」**：`/api/v1/system/paths/` 的 `data_dir` 字段就是
+     `settings.BASE_DIR`（锚点，本轮不变），真值在 `db_path` / `media_path`。判据若只断 `data_dir`
+     会静默失去承重 —— 这条 spec 现在同时断临时区后缀等于 `<数据根>/temp` 才留住了牙齿。
+  ③ **反例基线要挑对**：那条「不许落进用户目录」的断言最初写 `startswith(Path.home())`，
+     而仓库根本来就在家目录下 ⇒ 必假红。基线是 `~\LQ-DataPrase` 这个真实数据根，不是 home。
+  ④ **串行与 slot 同档后 `reuseExistingServer` 必须关**：本机常挂着一个 development 档的
+     `manage.py runserver 8000`，复用它 = 种子写 `test/e2e-data`、服务读用户主目录的分裂态，
+     比 R3 那条「复用旧代码进程」更难归因。代价：8000 被占时自起会失败，用 `E2E_PORT` 换空闲口。
+  ⑤ **搁浅副本清掉之后要留绊线**：`scripts/e2e_pool.mjs` 的守卫从「数仓库根 `media` 文件数不变」
+     改成「仓库根 `media/` 必须不存在，存在即停」—— 旧写法在目录已消失后 `-1 == -1` 会静默放行。
+
+## 2026-10-16 `text=True` 不给 encoding：解码异常被 `_readerthread` 吞掉，`stderr` 落成 `None`，于是一批断言收到空串
+
+- **触发**：迁移收口要跑后端全量，我按夜跑脚本的习惯带上 `PYTHONIOENCODING=utf-8`，结果 6 条红
+  （`test_server_settings_profile` 5 条 `assertIn(..., '')` + `test_e2e_slot_settings` 1 条
+  `TypeError: argument of type 'NoneType' is not iterable`）。
+- **先证伪自己**：同一批文件在 `--settings=config.settings.development`（换档前的档）下**一模一样红**
+  ⇒ 不是本轮改动。再 `env -u PYTHONIOENCODING` 复跑 ⇒ **21 例全绿**。变量就是开关。
+- **根因（用受控探针一次跑出来，不是读代码猜的）**：子进程带 `PYTHONIOENCODING=utf-8` ⇒ 中文 traceback
+  以 UTF-8 写出；父进程 `subprocess.run(..., text=True)` 没给 `encoding=` ⇒ 按本机 locale（cp936）解，
+  `_readerthread` 抛 `UnicodeDecodeError`；**该异常只打印在那个线程的栈里，不冒到 `run()` 的返回值**，
+  于是 `result.stderr is None`，`(stdout or '') + (stderr or '')` 得到空串。
+  形状记忆：**「not found in ”」+「NoneType is not iterable」= 捕获没给 encoding**，不是产品缺陷，也不是编码本身要"防"。
+- **规则**：
+  ① **子进程捕获一律显式 `encoding='utf-8', errors='replace'`，并在子进程 env 里钉 `PYTHONIOENCODING=utf-8`**
+     —— 两边同时固定才不依赖本机 locale 和调用方习惯；`or ''` 那种兜底只是把 `None` 藏起来，别当修复。
+  ② **一次否证只覆盖它自己的那一半**：本文件与 `docs/reference/testing-gates.md` §4 之前说「坑已填」，
+     依据是那两处已用 `encoding='utf-8'` **读文件** —— 读文件与**捕获子进程**是两条通路，
+     当时没测后者，于是留下「夜跑注入 `PYTHONIOENCODING=utf-8` 无害」这条错判（已撤回并改写）。
+  ③ 归因顺序：改动后出现红，先 `--settings=<旧档>` A/B 一次再动手 —— 这轮 6 条红如果按
+     "我换了档所以是我坏的"去修，就会去改一个根本没坏的东西。

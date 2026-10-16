@@ -24,7 +24,11 @@
 - **并行度只有 `--slots` / `E2E_SLOTS` 一个旋钮**，不要手改 playwright 的 `workers`。
   判据是**打印出来的实际 slot 数与加权总量**，不是命令行写了什么：缺 `tasks/e2e-nightly` 产物时
   分区未加权，`--slots=4` 会静默折成 1 个 slot（墙钟退回 20min 级）。
-- **e2e 与后端套件绝不可并跑**：共用 `media/` 与 `db.sqlite3`，后端会覆盖 e2e 依赖的种子文件。
+- **e2e 与后端套件的落盘面已分开（2026-10-16）**：e2e 的库 / `MEDIA_ROOT` / 临时区由
+  `config.settings.e2e_slot` 指认（串行 = `test/e2e-data`，池 = 各 slot 自己的目录），后端套件由
+  `config.settings.unit` 指认（`test/unit-data`，`manage.py test` 默认走这档）。旧那条「绝不可并跑：
+  共用 `media/` 与 `db.sqlite3`」的**根因**（两边都写仓库根 `media/`）已经消失 —— 但并跑本身
+  还没实测过，真要同批跑请先各自单独跑绿一次，别把「目录分开了」当成「已验证可并发」。
   跑完全量要释放端口。
 
 ## 2. 三层判据（写新断言之前先选层）
@@ -82,12 +86,18 @@ e2e 只断页面渲染出 CPK 且非空）。**不要在浏览器里逐组合点
 - **效率只在「本轮没有重跑」时判**（`hasRetries`）：失败的 attempt 吃墙钟却不进分子，
   实测零红轮 3.04、有两个红文件被复跑的两轮 2.73 / 2.34。
 - 改完阈值用 `--report-only <既有 results.json|merged.json>` 验算，**不要为确认一个公式再跑一轮全量**。
-- ⚠ **别把后端套件的失败默认归因给编码**。历史上「中文 Windows 不带 `PYTHONUTF8=1` 会稳定假红 6 条」
-  （父进程按 GBK 解子进程的 UTF-8 中文输出，`assertIn(..., '')`）**2026-10-16 已被实测否证**：本机
-  `preferred_encoding=cp936`、`utf8_mode=0`、`PYTHONUTF8` 未设，`test_server_settings_profile` +
-  `test_e2e_slot_settings` **21 例全过** —— 因为这两处现在都显式 `encoding='utf-8'` 读文件，坑已填。
-  判据留给将来：红项报 "not found in ''" 才去查子进程解码，**不要靠预先设环境变量来"防"**。
-  （`scripts/e2e_nightly.mjs` 仍给后端那步注入 `PYTHONIOENCODING=utf-8`，无害，先留着。）
+- ⚠ **后端套件的子进程捕获必须显式给 `encoding`**。旧断言在此撤回：本文件先前写「夜跑给后端那步注入
+  `PYTHONIOENCODING=utf-8`，无害，先留着」—— **实测不成立**。那次「中文 Windows 不带 `PYTHONUTF8=1`
+  稳定假红 6 条」被 A/B 否证时只填了**读文件**那一半，另一半在**捕获子进程输出**：
+  `subprocess.run(..., text=True)` 不给 `encoding=` 就按本机 locale（cp936）解码，父进程一带上
+  `PYTHONIOENCODING=utf-8`，子进程那份 UTF-8 中文 traceback 会让 `_readerthread` 抛
+  `UnicodeDecodeError`，而**该异常被读取线程吞掉、`result.stderr` 落成 `None`** ⇒ 断言收到空串。
+  实测因果：`test_server_settings_profile` + `test_e2e_slot_settings` 不带该变量 **21 例全绿**，
+  带上即 **5 FAIL + 1 ERROR**。现已修 —— 三处捕获统一加 `encoding='utf-8', errors='replace'`，
+  并在子进程 env 里钉死 `PYTHONIOENCODING=utf-8`（两种父环境各跑一遍 **27 例 OK**）。
+  留给将来的判据：红项报 `not found in ''` 或 `argument of type 'NoneType' is not iterable`，
+  先查捕获有没有给 encoding，**别靠预设环境变量来"防"**。
+  残留同族写法：`test/backend/test_sftp_search_integration.py:66`（stderr 走文件句柄），本轮未动。
 
 ## 5. 各入口速查（哪个贵、哪个已没人用）
 
