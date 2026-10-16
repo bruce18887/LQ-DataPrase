@@ -19,8 +19,8 @@ def _filename_from_cd(cd: str) -> str:
     plain = re.search(r'filename\s*=\s*"?([^";]+)"?', cd)
     return plain.group(1).strip() if plain else cd
 
-SAMPLE_DATA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'Data', 'SampleData')
-GAGE_S1_PATH = os.path.join(SAMPLE_DATA_DIR, 'Gage', 'gage_m_S1.csv')
+# CI 夹具：虚拟化副本，随仓库走（真实 Data/SampleData/Gage/ 不入库，见 scripts/make_gage_ci_fixture.py）
+GAGE_S1_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'test', 'fixtures', 'gage', 'gage_m_S1.csv')
 
 
 class GenerateSummaryFilenameTests(APITestCase):

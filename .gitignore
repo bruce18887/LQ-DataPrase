@@ -128,9 +128,14 @@ DEBUG_*.md
 # 启动迁移应用的临时锁文件（system_config._startup_lock 加锁后不删除）
 # 规则生效需文件未被跟踪；此前已入库，已 git rm --cached 摘除，勿再 git add
 /.lqdp_startup.lock
-# 项目约定不入库目录
+# 项目约定不入库目录：真实样例库含内部路径/机台主机名/账号，而仓库是公开的。
+# CI 用的那份是**虚拟化夹具**，住在 test/fixtures/gage/（见下面 `!/test/fixtures/`），
+# 由 scripts/make_gage_ci_fixture.py 从这里的真实文件派生。
 /Data/
 /test/*
+# gage CI 夹具（虚拟化副本）必须入库，否则后端 15 例在 CI 上 FileNotFoundError。
+# 一条目录级例外就够：`/test/*` 的 `*` 不跨 `/`，只挡一层（与 `!/test/backend/` 同例）。
+!/test/fixtures/
 # test/__init__.py 必须入库：没有它 `test.backend` 就不是一个可导入的包，
 # CI 检出里会出现「test/backend/ 的 77 个文件在、包标记不在」，
 # 后果是 apps/sftp/tests_search.py:26 直接 ImportError，后端全量永远红。

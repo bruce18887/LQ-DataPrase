@@ -1,0 +1,6 @@
+# CI 夹具必须字节守恒。本机 `core.autocrlf=true` 且仓库此前没有 .gitattributes，
+# 于是 CRLF 文件在入库时被转成 LF、Linux runner 检出后仍是 LF —— 每文件少 534 字节，
+# 而这些 datalog 的行尾形态与 `[Data]` 段的位次是 CTA8290D 解析器的承重条件。
+# `-text` 关掉 EOL 转换，让检出内容与本机跑过验证的字节逐字相同。
+test/fixtures/gage/*.csv -text
+test/fixtures/gage/MANIFEST.txt -text
