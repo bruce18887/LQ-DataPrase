@@ -16,7 +16,7 @@ django.setup()
 
 from django.test import SimpleTestCase  # noqa: E402
 
-from apps.sftp.search import contracts, engine, walker  # noqa: E402
+from apps.sftp.search import contracts, engine, scanners, walker  # noqa: E402
 # 码表按名字取：模块名 events 与这些测试里满地的局部变量 events 同名。
 from apps.sftp.search.events import (SCAN_THREAD_PREFIX, CLAMPED_TEXT, INCOMPLETE_CODES,
                                       NOTICE_TEXT, SPEED_ONLY_CODES, TRUNCATION_TEXT,
@@ -301,6 +301,45 @@ class TruncationTests(SimpleTestCase):
                     self.assertTrue(emitted[code]['message'].strip())
                     self.assertEqual(emitted[code]['incomplete'],
                                      code in INCOMPLETE_CODES, code)
+
+
+class BudgetNoticeTests(SimpleTestCase):
+    """``scan_budget_exceeded`` 必须是「扫描器真撞了预算」，不是「文件比预算大」。
+
+    修前 runner 拿 ``cand.size > spec.max_scan_bytes`` 猜：大文件里关键词落在预算之内
+    时扫描器取够命中数就早停，这一趟对该文件是**完整**的，猜法却把整次搜索标成
+    ``truncated`` —— 用户看到的是「结果不完整：已触达上限」，而结果一条不少。
+    这正是 2026-10-15 截图上那一幕（7 个文件全命中，黄条照挂）。
+
+    判据现在由扫描器自己报（``scan_file``/``read_column`` 的第二个返回值）。
+    """
+
+    BUDGET = scanners.CHUNK_SIZE            # 1 MiB：真扫描就是按这个粒度读的
+    FILLER = b'z' * (scanners.CHUNK_SIZE * 3)
+    HIT = b'[DATA]\r\nSN,ShadowReg2\r\n1,0.42\r\n'
+
+    def _tree(self, hit_first: bool):
+        body = (self.HIT + self.FILLER) if hit_first else (self.FILLER + self.HIT)
+        return {'/data/batch1/RT_001.csv': body}
+
+    def test_early_hit_on_a_big_file_is_not_reported_as_truncated(self):
+        """文件比预算大，但关键词在预算之内就命中了 —— 不许报「结果不完整」。"""
+        events, _ = run(spec(max_scan_bytes=self.BUDGET), self._tree(hit_first=True))
+        self.assertTrue(match_items(events), '前提：这个文件确实命中了')
+        self.assertNotIn('scan_budget_exceeded', codes(events))
+        self.assertNotIn('scan_budget_exceeded', first(events, 'done')['limits_hit'])
+        self.assertFalse(first(events, 'done')['truncated'],
+                         '结果一条不少，不许把这次搜索标成 partial')
+
+    def test_budget_reached_before_any_hit_is_still_reported(self):
+        """真截断（命中在预算之外）照旧要报，并且标成「结果不完整」。"""
+        events, _ = run(spec(max_scan_bytes=self.BUDGET), self._tree(hit_first=False))
+        self.assertFalse(match_items(events))
+        self.assertIn('scan_budget_exceeded', codes(events))
+        self.assertTrue(first(events, 'done')['truncated'])
+        warned = [e for e in events
+                  if e['kind'] == 'notice' and e['code'] == 'scan_budget_exceeded']
+        self.assertTrue(warned[0]['incomplete'], '少结果是黄条那一类')
 
 
 class MatchPayloadTests(SimpleTestCase):
