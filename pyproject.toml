@@ -15,7 +15,7 @@
 
 [project]
 name = "lq-dataprase"
-version = "0.7.0"
+version = "0.8.0"
 description = "半导体 ATE 量产数据分析平台（Vue 3 + Django + Electron）"
 readme = "README.md"
 license = { text = "MIT" }
