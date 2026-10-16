@@ -241,3 +241,16 @@
 :root[data-theme='light'] .dp-analysis-toolbar {
   background: var(--bg-2, #f1f5f9);
 }
+
+/* ========== 分析页左栏参考表的密行工具类 ==========
+ * 左栏三张卡纵向堆叠，视口高度是它们唯一的敌人：实测 1280×690 CSS 视口下末卡
+ * 底边在 1011px，Site统计 整张落在屏外；1920×1080 缩放 120% 下超 81px。
+ * 收紧行内行高（23→18）一次省 80px，且不动字号、不动列宽、不隐藏任何控件 ——
+ * lessons 2026-09-14 定的省高杠杆顺序是「①同值列提表头 ②内边距 ③最后才字号」，
+ * 这条属 ②，字号那步仍然没用上。
+ * 为什么写成具名工具类而不是组件内 :deep()：EP 的 .el-table .cell{line-height:23px}
+ * 是直接命中的声明，:cell-style 设在 td 上会被它盖掉；而指南 §11.1 禁止页面级
+ * :deep(.el-table) 局部覆写，表格样式要走全局样式文件。 */
+.el-table.dp-table-dense .cell {
+  line-height: 18px;
+}

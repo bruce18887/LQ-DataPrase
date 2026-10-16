@@ -6,6 +6,7 @@
       :data="siteStats"
       size="small"
       :border="true"
+      class="dp-table-dense"
       scrollbar-always-on
       :row-class-name="siteRowClass"
       :header-cell-style="{ background: 'var(--bg-3)', fontSize: 'var(--p-fs-micro)', padding: '3px 4px', whiteSpace: 'nowrap' }"
