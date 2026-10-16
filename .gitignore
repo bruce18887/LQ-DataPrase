@@ -131,6 +131,10 @@ DEBUG_*.md
 # 项目约定不入库目录
 /Data/
 /test/*
+# test/__init__.py 必须入库：没有它 `test.backend` 就不是一个可导入的包，
+# CI 检出里会出现「test/backend/ 的 77 个文件在、包标记不在」，
+# 后果是 apps/sftp/tests_search.py:26 直接 ImportError，后端全量永远红。
+!/test/__init__.py
 !/test/backend/
 # 字号计算值基线（e2e/global/type-snapshot.spec.ts 产出，差量核对的对照物，必须入库）
 !/test/type-snapshot/
