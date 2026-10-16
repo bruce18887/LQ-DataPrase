@@ -82,8 +82,12 @@ e2e 只断页面渲染出 CPK 且非空）。**不要在浏览器里逐组合点
 - **效率只在「本轮没有重跑」时判**（`hasRetries`）：失败的 attempt 吃墙钟却不进分子，
   实测零红轮 3.04、有两个红文件被复跑的两轮 2.73 / 2.34。
 - 改完阈值用 `--report-only <既有 results.json|merged.json>` 验算，**不要为确认一个公式再跑一轮全量**。
-- ⚠ **后端全量必须带 `PYTHONUTF8=1`**：中文 Windows 上父进程按 GBK 解子进程的 UTF-8 中文输出，
-  会稳定假红 6 条（红项报 "not found in ''" 就先怀疑解码，别改产品代码）。
+- ⚠ **别把后端套件的失败默认归因给编码**。历史上「中文 Windows 不带 `PYTHONUTF8=1` 会稳定假红 6 条」
+  （父进程按 GBK 解子进程的 UTF-8 中文输出，`assertIn(..., '')`）**2026-10-16 已被实测否证**：本机
+  `preferred_encoding=cp936`、`utf8_mode=0`、`PYTHONUTF8` 未设，`test_server_settings_profile` +
+  `test_e2e_slot_settings` **21 例全过** —— 因为这两处现在都显式 `encoding='utf-8'` 读文件，坑已填。
+  判据留给将来：红项报 "not found in ''" 才去查子进程解码，**不要靠预先设环境变量来"防"**。
+  （`scripts/e2e_nightly.mjs` 仍给后端那步注入 `PYTHONIOENCODING=utf-8`，无害，先留着。）
 
 ## 5. 各入口速查（哪个贵、哪个已没人用）
 
