@@ -93,9 +93,19 @@
 | `--brand` | `#2563eb`（blue-600） | `#f9a825`（amber-500） | 主品牌；night 与 EP `--el-color-primary` 同源 |
 | `--brand-2` | `#1d4ed8` | `#ffd54f` | 品牌渐变终点/悬停 |
 | `--grad-brand` | `135deg(#1d4ed8→#2563eb)` | `135deg(#c17900→#f9a825 55%→#ffd54f)` | 主按钮/标题渐变/Logo |
-| `--on-brand` | `#ffffff` | `#ffffff` | 品牌底上的前景色 |
+| `--on-brand` | `#ffffff` | `#ffffff` | 品牌底上的前景色。**只在 light 渐变底上成立**：night 的 `--grad-brand` 是 amber 系（`#c17900 → #f9a825@55% → #ffd54f`），白字按三档的 WCAG 对比是 **3.50 / 1.97 / 1.41** —— 渐变**末档只有 1.41:1**（本节早先写「约 1.9:1」取的是中档，把最差那一头说轻了）；night 的品牌底前景改用 `--p-slate-950 #131327`（同一三档实测 **5.22 / 9.26 / 12.94**）。侧栏品牌位已按此实现，**其余活代码还没改**，逐处清单见下方「落点口径」 |
 | `--active-bg` | brand 10% | brand 12% | 选中菜单/激活态底（color-mix） |
 | `--focus-ring` | brand 35% | brand 40% | 键盘焦点环 |
+
+> 图标家族的底板规则：Light 底板反白符号，Night 底板深色墨符号，界面内符号一律 `currentColor` 取 `--brand`。见 `docs/superpowers/specs/2026-10-15-icon-system-design.md` §2.2。
+>
+> 落点口径：底板前景读 `var(--on-brand)`（light 解析为 `#ffffff`），night 底板**不经由**该 token —— 同处用一条 `[data-theme="night"]` 覆写直接取 `--p-slate-950`。现场参考 `Sidebar.vue` 的 `.logo-icon`（底色 `var(--brand)` + 前景 `var(--on-brand)` + night 覆写深墨）。
+>
+> **这条口径目前只落地在上面那一个现场。** night 的品牌底（`--grad-brand` 渐变或 `--brand` 实色）上仍在读 `--on-brand`（两主题都解析为 `#ffffff`）的活代码，本轮逐处打开规则块核过：**8 处 / 5 个文件** —— `Button.vue:58`（primary，底 `--grad-brand`）、`LoginPage.vue:254`（登录主按钮，底 `--grad-brand`）、`StageFilterBar.vue:77 / 82 / 103`（激活 chip 及其内文字，底 `--grad-brand`）、`element-plus-theme.css:658`（选择器就是 `:root[data-theme="night"] .el-pager li.is-active`——night 块里自己写白字压 night 渐变，最直白的自相矛盾）、`element-plus-theme.css:904`（主题无关的 `.el-pagination.is-background .el-pager li.is-active`，night 一样中招）、`ChartDock.vue:385`（拖拽幽灵 `color: var(--on-brand, #fff)` 压 `background: var(--brand)`，night = `#f9a825`，白字 1.97:1）。另有两处消费者**不算违例**、常被一起数进来：`Sidebar.vue:156`（同块已有 `[data-theme="night"]` 深墨覆写，即本条口径的实现）、`Button.vue:89`（danger 借该 token 取纯白，底是 `--error` 红，不是品牌底）。
+>
+> 早先按 `grep 'var(--on-brand)'` 字面量数出的「9 处」是另一套口径，别与上面的「8 处违例」混用：它漏掉 `ChartDock.vue:385` 的 `var(--on-brand, #fff)` 带兜底写法，却把上面那两处非违例算了进去（字面消费者 9 + 兜底 1 = 10 处消费点）。
+>
+> **本节只把规则写对，没有替活代码改色。** 把这 8 处换成 night 深墨会重刷全部 night 主按钮/页签/分页，属独立一轮整改，由 owner 另立项。在那之前，`--on-brand` 压在 night 品牌底上是**已知的现网违例**，不是被本节许可的写法——新代码照 §10.2 / §10.6 / §10.8 的条件式表述写。
 
 ### 3.4 状态
 
@@ -288,7 +298,7 @@
 
 | 型 | 规格 |
 |---|---|
-| primary | 品牌渐变 `--grad-brand` + `--on-brand` 文字，`--shadow-sm` |
+| primary | 品牌渐变 `--grad-brand` + **条件式前景**：light 用 `--on-brand`，night 用 `--p-slate-950`（同一变量在 night amber 末档上只有 1.41:1，见 §3.3 与其违例清单），`--shadow-sm` |
 | ghost | `--card` 底 + `--border-2` 边框 + `--text-2`；悬停转品牌色 |
 | danger | **纯红实心** `var(--error)`（弃用红色渐变） |
 | text | 无边框、品牌色，链接式 |
@@ -324,7 +334,7 @@
 ### 10.6 Tabs 与页签（两形态）
 
 - **下划线 Tabs**（页内功能页签）：激活 = 品牌色文字 + 2px 品牌下划线；默认 `--text-2`。
-- **胶囊 Tabs**（顶层视图切换）：激活 = `--grad-brand` 实底 + `--on-brand` 文字；默认卡底描边。
+- **胶囊 Tabs**（顶层视图切换）：激活 = `--grad-brand` 实底 + **条件式前景**（light `--on-brand` / night `--p-slate-950`，理由见 §3.3）；默认卡底描边。
 - 分段控件见 §10.3（视角切换用，不属于 Tabs）。
 
 ### 10.7 浮层（对话框 / 抽屉 / Toast）
@@ -343,7 +353,7 @@
   正文 `--text-2` 12；可展开明细（仪表板现有交互保留）。
 - 空状态：图标（34 半透明）+ 说明（13/600 `--text-2`）+ 主动作（primary 小按钮）。
 - 加载骨架：`--bg-2 → --bg-3` 流光，圆角 6；尊重 `prefers-reduced-motion`。
-- 分页：28×28 圆角 6，激活 = `--grad-brand` + `--on-brand`；悬停品牌描边。
+- 分页：28×28 圆角 6，激活 = `--grad-brand` + **条件式前景**（light `--on-brand` / night `--p-slate-950`，见 §3.3；现行 `element-plus-theme.css:658/:904` 还没按此实现）；悬停品牌描边。
 - Tooltip：`--text` 底 + `--bg` 字（反色），11，圆角 6，`--shadow-md`，悬停 0.15s 淡入。
 - 双主题规则：以上全部只取语义层，禁止页面级 night 覆盖（教训 R7）。
 

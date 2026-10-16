@@ -4,9 +4,7 @@
       <div class="login-card">
         <!-- Logo 区域 -->
         <div class="logo-section">
-          <el-icon :size="64" class="logo-icon">
-            <TrendCharts />
-          </el-icon>
+          <AppLogo :size="64" class="logo-icon" data-test="app-logo" />
         </div>
 
         <!-- 品牌标题 -->
@@ -76,7 +74,7 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
-import { TrendCharts } from '@element-plus/icons-vue'
+import AppLogo from '../../components/common/AppLogo.vue'
 import GridBackground from '../../components/common/GridBackground.vue'
 import { parseLoginError, type LoginFailureCategory } from '../../api/auth'
 import type { FormInstance } from 'element-plus'
@@ -357,10 +355,6 @@ async function handleLogin() {
 
   .login-title {
     font-size: var(--p-fs-display);
-  }
-
-  .logo-icon {
-    font-size: 48px; /* @type-scale-one-off 登录页装饰图标 */
   }
 }
 </style>

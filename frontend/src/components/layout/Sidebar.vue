@@ -3,7 +3,7 @@
     <!-- Logo 区域 -->
     <div class="logo-section">
       <div class="logo-icon">
-        <el-icon :size="28" aria-hidden="true"><TrendCharts /></el-icon>
+        <AppLogo :size="28" data-test="app-logo" />
       </div>
       <transition name="fade">
         <h1 v-show="!isCollapsed" class="logo-text">
@@ -75,6 +75,7 @@ import {
   DArrowLeft,
   DArrowRight,
 } from '@element-plus/icons-vue'
+import AppLogo from '../common/AppLogo.vue'
 
 const route = useRoute()
 const authStore = useAuthStore()
@@ -152,8 +153,13 @@ const toggleCollapse = () => {
   height: 40px;
   background: var(--brand);
   border-radius: 8px;
-  color: #fff;
+  color: var(--on-brand); /* light 解析为 #ffffff，与指南 §3.3 口径一致 */
   flex-shrink: 0;
+}
+
+/* night 的金黄底上白字只有约 1.9:1，改深墨（spec D6）；不走 --on-brand，见指南 §3.3 */
+:root[data-theme="night"] .logo-icon {
+  color: var(--p-slate-950);
 }
 
 .logo-link {

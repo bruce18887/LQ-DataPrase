@@ -3,7 +3,7 @@
     <div class="connect-container" data-test="connect-page">
       <div class="connect-card">
         <div class="logo-section">
-          <el-icon :size="56" class="logo-icon"><Connection /></el-icon>
+          <AppLogo :size="64" class="logo-icon" data-test="app-logo" />
         </div>
         <h1 class="connect-title">选择这台机器的连接方式</h1>
         <p class="connect-subtitle">
@@ -92,7 +92,7 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Connection } from '@element-plus/icons-vue'
+import AppLogo from '../../components/common/AppLogo.vue'
 import GridBackground from '../../components/common/GridBackground.vue'
 
 type Mode = 'local' | 'remote'

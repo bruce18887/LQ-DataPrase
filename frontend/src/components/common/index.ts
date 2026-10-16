@@ -10,6 +10,7 @@ import Loading from './Loading.vue'
 import Empty from './Empty.vue'
 import CircularProgress from './CircularProgress.vue'
 import GridBackground from './GridBackground.vue'
+import AppLogo from './AppLogo.vue'
 
 export {
   Card,
@@ -19,6 +20,7 @@ export {
   Empty,
   CircularProgress,
   GridBackground,
+  AppLogo,
 }
 
 export default {
@@ -29,4 +31,5 @@ export default {
   Empty,
   CircularProgress,
   GridBackground,
+  AppLogo,
 }

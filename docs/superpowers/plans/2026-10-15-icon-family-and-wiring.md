@@ -581,6 +581,16 @@ git commit -m "feat(build): 图标生成器按帧尺寸注入留白，并对 .ic
 > 3. `frameStats` 多返回 `dominant`（`alpha===255` 里出现最多的实心色），`auditVerdict` 多一条主色门（必须等于导出的 `EXPECTED_TONE = '37,99,235'`）。原因：原设计只数色阶，**对颜色瞎** —— 深色主题构建机产出的金色 `#f9a825` 帧同样是 1 个色阶、同样过检，而防它的只有 `gen-icon.ico.js` 里一行 `emulateMedia`，全仓零测试覆盖。刻意**不**用"grep 那行代码"的源码扫描，改判成锁效果。
 > 4. 本文 236 / 336 / 426 行里的 `−27%`、`92 个色阶`、`16×16→14×14` 是未标口径的旧测法，已被带口径的复测取代（有墨 −22.4% / 实心 −26.4%；旧模糊母版 `α==255` 下 16px 为 89 色阶）。准确数字与口径以 `scripts/icon-lib.cjs` 的注释为准。
 > 接口清单相应更正：`frameStats(buf): { size, tones, bboxW, bboxH, dominant }`、`auditVerdict(stats): string[]`、新增导出 `EXPECTED_TONE`。
+>
+> **Task 2 实施期更正·第二轮（2026-10-15，Task 9，C1 修复）** —— 上面本任务正文**从头到尾没有画过底板**：Step 1 的模板、判据、留白三档全部围绕"透明底上的裸符号"设计，而 spec D4/§2.2 批准的是"渐变圆角底板 + 反白符号"。更糟的是本文与 spec §3.1-3 的自检判据（"全帧实心色阶 ≤2、主色 = #2563eb、16px 剪影 ≥15×15"）**把正确形制判死、把错误形制放行**：渐变底板一帧数百色阶必红，裸闪电反而全绿 —— 这就是交付物一直是裸闪电而 8 轮评审没发现的机制（判据与形制互相矛盾时，产出一定服从判据）。Task 9 补上：
+> 1. `frameHtml` 改为底板形制模板：底板 `<rect>` 铺满整帧（outer pad=0，圆角 `round(0.22*size)`，`objectBoundingBox` 对角渐变 = CSS 135deg），符号强制 `#ffffff`（`svg.plate-symbol *{fill:#fff !important}`，能同时压过母版 class 与内联 style），按帧内缩分档（D7 语义由"帧留白"改为"符号内缩"，16px→6%、24–32px→10%、≥48px→19%，选型实测见 spec §1.3）。
+> 2. 品牌色单源化（闭 I4）：新增 `parseBrandGradient(cssText)` 从 `frontend/src/styles/design-tokens.css` 的 **light `:root` 块**解析 `--grad-brand`（含 var→hex 解引用、stop 数量不写死、锚定失败抛错非零退出）；生成器注入模板、审计吃同一对端点。简报说"取第一个 `:root` 块"**不成立**——第一个 `:root {` 是 Primitive 色阶表（:12），里面没有 `--grad-brand`；light 值在 Semantic 块（选择器 `:root, :root[data-theme='light'], .force-light`，:55–69）。
+> 3. 判据重定基线为 G1/G2/G3/G4 四组门（阈值与实测出处在 `scripts/icon-audit.cjs` 原位注释）；文件按"渲染/度量/判据"拆为 `icon-lib.cjs` / `icon-metrics.cjs` / `icon-audit.cjs`（icon-lib 保持唯一门牌转发）。
+> 4. 顺带根因更正（本轮再更正一次，改的是**归因的完整度**不是「谁对谁错」）：旧 16px 剪影 16×15 有两个原因，**两个都真实、各自都独立充分**——裸符号模板时代控制者做过 2×2 实验（16px）：无 `display:block`+ceil16 → 16×15（svg rect y=1）；有 `display:block`+ceil16 → **16×16**；无 block+round15 → 16×15；有 `display:block`+round15 → **16×15**。所以「内联 `<svg>` 进文本流被基线抬高 1px、末行被视口裁掉」是根因（模板加 `svg{display:block}` 后 16px 剪影=16×16），而上面第 2 条把现象归给 `Math.round` **不是错的、是不完整的**：round 那一支在同一张表里也单独把剪影打成 16×15，两个原因谁都不豁免。
+>    **但 ceil 在底板形制下已经不再被任何像素门守着**：把交付模板的内框高从 `Math.ceil` 改回 `Math.round` 重渲（实测 `tasks/_fixr_ctrl_verify.txt` A 段），16px 两版剪影都是 **16×16、`verdict: []`**，64px 两版都过（round 只把 ink 686→702、尾行 3→2）；G3b 判的是铺满整帧的 `<rect>`、不再是符号框，而 `TAIL_MIN_16=1` 恰好压在 round 回归的实测值（尾行 1）上。因此 `scripts/icon-lib.cjs` 里那个 `Math.ceil` 现在**唯一的绊线是单测**：`frontend/test/unit/iconLib.spec.ts` 的内框高断言本轮已从 `>=` 收成 `=== Math.ceil(w*46/48)` 精确等式，改回 round 会红在测试上。尾针门对这一支是刻意留空的（理由与「为什么不抬到 2」写在 `scripts/icon-audit.cjs` 的 G4b 注释）。
+> 5. `padPct` 已随第二轮更正第 2/3 条一并删除（主色红线 `EXPECTED_TONE` 同）：~~Step 6 的补救「若 16px 剪影 <15 就回去调 `padPct`」~~ **对后来的人无效**——现在 16px 剪影不达标要走的是 G3b（底板 `<rect>` 是否铺满整帧）与内缩档位 `insetPct`，判据与阈值出处都在 `scripts/icon-audit.cjs`；调低阈值不是选项（I7）。
+> 接口清单第二轮更正：`frameHtml(svgText, size, brand, opts?)`、`parseBrandGradient(cssText): { stops:[{hex,pct}], first, last, firstHex, lastHex }`、`frameStats(buf, brand?): { …旧字段, inkTones, inkCount, inkBboxW/H, plateRatio, cornerTransp, tailRowW, startPixels, endPixels }`、`auditVerdict(stats, brand): string[]`（brand 缺失抛错）、新增导出 `insetPct/plateRadius/CORNER_RATE/AUDIT_LIMITS`，**移除 `padPct`/`EXPECTED_TONE`**（主色红线由 G2 端点门接替）。
+> 接口清单第二轮·修复轮更正：`AUDIT_LIMITS.INK_TONES_MAX`（单一常量）→ `AUDIT_LIMITS.inkTonesMaxBySize`（逐帧表 16:7 / 32:10 / 48:13 / 64:14 / 128:18 / 256:17）+ 新导出 `inkTonesMax(size): { max, tabulated }`（表外尺寸借「不小于它的第一档」，见 I4）。
 
 ---
 
@@ -639,10 +649,12 @@ describe('resolveIconPath', () => {
       .toMatch(/\/repo\/build\/icon\.ico$/)
   })
 
-  it('resourcesPath 为空时不返回一个裸相对路径', () => {
-    const p = resolveIconPath({ packaged: true, resourcesPath: '', electronDistDir: '/repo/frontend/electron-dist' })
-    expect(p).not.toBe('icon.ico')
-    expect(p.length).toBeGreaterThan(0)
+  it('打包态 resourcesPath 缺失时返回空串——降级到无图标，绝不猜 asar 外层数', () => {
+    // I6 更正（Task 9 收口）：裁定早已写进台账并落在交付代码与已提交用例里，计划原文的
+    // `expect(p.length).toBeGreaterThan(0)` 与代码矛盾（缺 resourcesPath 时 resolveIconPath
+    // 返回 ''，Electron 侧按「无 icon」降级）。这里回写成与代码一致。
+    expect(resolveIconPath({ packaged: true, resourcesPath: '', electronDistDir: '/repo/frontend/electron-dist' }))
+      .toBe('')
   })
 })
 

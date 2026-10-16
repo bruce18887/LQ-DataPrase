@@ -8,12 +8,13 @@
  * 4. Application menu – File/Edit/View/Help with IPC bridge to renderer
  */
 
-import { app, BrowserWindow, Menu, dialog } from 'electron'
+import { app, BrowserWindow, Menu, dialog, nativeImage } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
 import { spawnBackend, stopBackend } from './backend'
 import type { BackendInfo } from './backend'
 import { registerIpcHandlers } from './ipc-handlers'
+import { APP_ID, resolveIconPath, iconFileExists } from './app-icon'
 import { probeBackendUrl } from './net-probe'
 import {
   DEFAULT_CLIENT_CONFIG,
@@ -215,6 +216,43 @@ function createMenu(): void {
 }
 
 // ---------------------------------------------------------------------------
+// 应用身份与窗口图标
+// ---------------------------------------------------------------------------
+/**
+ * Windows 用 AppUserModelID 把任务栏按钮、通知与快捷方式归到同一个应用。
+ * 不设它，打包版的通知与图标会挂到"electron.exe"名下。
+ */
+if (process.platform === 'win32') {
+  app.setAppUserModelId(APP_ID)
+}
+
+/** icon 缺失或解码为空时返回 undefined —— BrowserWindow 会回落默认图标，不抛错（warn 里带原因与路径）。 */
+function windowIcon() {
+  const p = resolveIconPath({
+    packaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    electronDistDir: __dirname,
+  })
+  // 两种「没有图标」必须分得开（M6）：'' 只可能是**路径没推出来**（打包态 process.resourcesPath
+  // 缺席），而「推出了路径但盘上没有这个文件」是另一回事（dev 没跑过 gen-icon、或 extraResources
+  // 漏拷）。合成一条消息时前者会打成一行结尾是光秃秃冒号的日志，读的人无从判断该查哪一边。
+  if (!p) {
+    console.warn('[electron] icon 路径未推出（打包态 process.resourcesPath 为空），窗口将显示默认图标')
+    return undefined
+  }
+  if (!iconFileExists(p)) {
+    console.warn(`[electron] icon 文件不存在，窗口将显示默认图标: ${p}`)
+    return undefined
+  }
+  const img = nativeImage.createFromPath(p)
+  if (img.isEmpty()) {
+    console.warn(`[electron] icon 文件存在但解码为空图片，窗口将显示默认图标: ${p}`)
+    return undefined
+  }
+  return img
+}
+
+// ---------------------------------------------------------------------------
 // Window creation
 // ---------------------------------------------------------------------------
 async function createWindow(): Promise<BrowserWindow> {
@@ -227,6 +265,7 @@ async function createWindow(): Promise<BrowserWindow> {
     minHeight: 700,
     show: false,
     title: 'LQ-DataPrase',
+    icon: windowIcon(),
     // Neutral dark background avoids a white flash before the SPA paints.
     // The SPA's theme system later sets `document.documentElement.dataset.theme`
     // to 'light' or 'night' via localStorage, overriding the visual appearance.
