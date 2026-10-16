@@ -1971,3 +1971,40 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
      `CLAUDE.md` 与 `AGENTS.md` 只留入口 + 本机专属事实（TCP 动态端口区间那种）。
   ⑥ **报数前逐条数一遍，别心算**：我第一轮口头报的「14 个 / 56%」其实数出来是 **13 个 / 52%**（13+9+3=25 才对得上）。
      同一个数在台账、可视化、回复里各写一遍就会分叉，所以先定唯一口径再抄。
+
+## 2026-10-16 GitHub CI 连红两条的真因：仓库不自足（缺包标记 + 夹具不入库），外加一条测试自己写死了 Windows 分隔符
+
+- **触发**：用户说「github cl 如何修复，我运行不了」。实测 `gh` 是**从未安装**（不是坏：`which gh`、
+  `D:\Program Files\GitHub CLI\gh.exe`、`~\.config\gh` 三处皆空），装好后 `gh auth status` 未登录。
+  真正卡住诊断的是**鉴权**：Actions 的 `/actions/runs/<id>/jobs` 公开可读（能拿到失败步骤名），
+  但 `/jobs/<id>/annotations` 与日志端点对公开仓库也返 **404**，`curl` 与 WebFetch 都拿不到 traceback。
+  ⇒ 登录 `gh` 之后 `gh run view <id> --log-failed` 一条就到底。**这台机器以后查 CI 只能走 gh。**
+- **结论（三条根因，全都不在 `ci.yml` 里）**：`FAILED (errors=16, skipped=35)` 里 **16 个全是 ERROR 不是 FAIL**
+  —— 一条断言都没失败，全是导入/夹具层面炸的：
+  ① `.gitignore` 的 `/test/*` 例外只开了 `!/test/backend/` 与 `!/test/type-snapshot/`，**漏了 `test/__init__.py`**
+     ⇒ CI 检出里 77 个后端测试文件都在，但 `test` 不是包，`apps/sftp/tests_search.py:26` 直接
+     `ModuleNotFoundError: No module named 'test.backend'`。**本机全绿正是因为这个未跟踪文件在。**
+  ② `/Data/` 整目录不入库 ⇒ 15 个 ERROR 引用的是**同一个**缺失夹具 `Data/SampleData/Gage/gage_m_S1.csv`
+     （去重后只剩一条路径，这是最快看出「一个文件挡了 15 例」的形状）。
+  ③ 前端那 1 条失败是 `frontend/test/unit/e2ePoolCore.spec.ts:268` 把 **Windows 反斜杠写成期望值字面量**，
+     而实现用 `path.join`；CI 的前端 job 在 ubuntu ⇒ join 出 `/`、字面量原样留着 ⇒ 必挂。**测试的假设，不是产品缺陷。**
+- **规则**：
+  ① **CI 的红优先怀疑「仓库不自足」，而不是流水线定义**。判据形状：ERROR 多于 FAIL、且错误名是
+     `ImportError/ModuleNotFoundError/FileNotFoundError` 而不是断言消息 —— 这是「检出里少东西」，不是「代码算错」。
+  ② **gitignore 对被忽略的目录不会往下找例外**：`/Data/` + `!/Data/SampleData/Gage/` 这个写法**根本不生效**，
+     必须 `/Data/*` → `!/Data/SampleData/` → `/Data/SampleData/*` → `!/Data/SampleData/Gage/` 逐级放开。
+     验收判据是 `git status --porcelain --untracked-files=all` 的**条数恰好等于想放开的文件数**
+     （本次 0 → 4），不是「目标文件出现了」—— 后者看不出我是不是顺手放开了整个 Data。
+  ③ **跨平台断言用两种语义各算一遍**。把实现公式分别喂给 `path.win32` 与 `path.posix`，
+     posix 算出的 `previewLog` 与 CI 报的 Received **逐字相同**才算复现；三条新断言两边都成立才叫修好。
+     这条尤其重要：CI 那次只报到了 268 行，**269/270 从未执行**，不能假设它们本来就会过。
+  ④ **修复本身要用最小模型验证，别只读代码**。缺包标记的机制在临时副本上 A/B 复现成功；
+     而我第一次建的模型（目录叫 `a`/`b`）**没复现**，因为 Python 3 的 namespace package 允许无 `__init__.py` 导入，
+     只有本地 `test/` 与 stdlib/已存在的 regular package 竞争时才输给对方 —— 模型选错名字等于没验。
+  ⑤ **公开仓库放夹具是数据外发决策**。`private:false`，而 gage CSV 头部带内部路径 `E:\AKA-LIQUN\...`、
+     机台主机名 `DESKTOP-U7E8UMH`、账号 `Customer_ID=user0001`。LotID 是合成的 gage R&R 样品名（不是生产批次），
+     但**一旦 push 就进公开历史**。已只在本地提交，push 前必须由用户认这个披露范围。
+  ⑥ 顺带两条本机环境事实：这台机器 `which cmd` 指向 `AppData\Roaming\npm\cmd`（npm 上的同名包挡住了
+     `cmd.exe`，我据此得到的 `error: too many arguments` 是那个包报的，不是 winget/gh）；
+     **Qoder 会话的 shell 继承的是应用启动时的 PATH 快照**，装完新 CLI 后本会话仍 `command not found`，
+     一律用绝对路径调用，或重启 Qoder。
