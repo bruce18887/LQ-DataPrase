@@ -3781,6 +3781,8 @@ A 不报、B（关键词在预算之外）照旧报。**预算必须取到 `CHUN
       （前端靠它区分「切错文件」与「参数不可测」）—— 已改回并写明原因。
       （`file-switch-param-reset.spec.ts` 只在注释里提码，**没断言**，所以 e2e 无需改判）。
       前端 `ERROR_CODE_MAP` 三个码本来都齐，无需增删。
+      **验证**：提交后后端全量 **1473 例 OK（skipped=7，445s）**、聚焦 259 例 OK、
+      `lint:e2e` ✓。（提交 `00d5432` 的信息里写的是「全量跑到一半」，本行是其闭环。）
       （以下是**改造前**的三处分叉，保留作证据）
       ① **列表参数全部不在文件里**：`histogram`（`analysis_views.py:192`）报 `no_valid_params`，
          而 `cpk`（`param_actions.py:136`）对同一条件报 `param_not_found`，两者都带
