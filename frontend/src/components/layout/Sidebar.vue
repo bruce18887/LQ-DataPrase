@@ -30,6 +30,8 @@
           </transition>
         </div>
 
+        <!-- 折叠态下 .menu-label 走 v-show（display:none 会移出无障碍树）、图标 aria-hidden，
+             链接将没有可访问名 —— 故显式给 aria-label，两种状态都成立；title 补悬停提示。 -->
         <!-- v-if 替代原 class="hidden"：管理员菜单项对普通用户不渲染 DOM，
              修复 DevTools 可取消隐藏 + 屏幕阅读器可朗读的安全/可访问性问题 -->
         <router-link
@@ -37,6 +39,8 @@
           class="menu-item"
           :class="{ active: isActive(item.path) }"
           :aria-current="isActive(item.path) ? 'page' : undefined"
+          :aria-label="item.label"
+          :title="isCollapsed ? item.label : undefined"
         >
           <div class="menu-item-content">
             <div class="menu-icon" aria-hidden="true">
@@ -65,6 +69,7 @@
 import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
+import { safeGetItem, safeSetItem } from '../../utils/safeStorage'
 import {
   Odometer,
   Folder,
@@ -80,7 +85,10 @@ import AppLogo from '../common/AppLogo.vue'
 const route = useRoute()
 const authStore = useAuthStore()
 
-const isCollapsed = ref(false)
+/** 与 lqdp-zoom-factor 同族：界面外壳偏好，跨会话保留，不参与数据上下文重置 */
+const COLLAPSE_KEY = 'lqdp-sidebar-collapsed'
+
+const isCollapsed = ref(safeGetItem(COLLAPSE_KEY) === '1')
 
 const isAdmin = computed(() => authStore.user?.role === 'administrator')
 
@@ -113,6 +121,7 @@ const isActive = (path: string) => {
 
 const toggleCollapse = () => {
   isCollapsed.value = !isCollapsed.value
+  safeSetItem(COLLAPSE_KEY, isCollapsed.value ? '1' : '0')
 }
 </script>
 
