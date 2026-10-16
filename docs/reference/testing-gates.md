@@ -102,7 +102,28 @@ e2e 只断页面渲染出 CPK 且非空）。**不要在浏览器里逐组合点
 
 每次提交前的检查集：`npx vitest run` + `npm run lint:e2e` + `npm run build`（含 `vue-tsc -b`）。
 
-## 6. 未闭环（截至 2026-10-16）
+## 6. CI 检出的自足性（2026-10-16 三条根因）
+
+CI 跑的是**干净检出**，本机绿不代表它绿。这三条都是「本机在跑、CI 永远红」的形状：
+
+- **包标记必须入库**。`.gitignore` 的 `/test/*` 曾只例外了 `test/backend/` 与 `test/type-snapshot/`，
+  漏了 `test/__init__.py` ⇒ CI 检出里 77 个测试文件都在、`import test.backend` 却失败
+  （`ModuleNotFoundError` 逐字可复现：只造 `test/backend/__init__.py` 而不造 `test/__init__.py`）。
+- **对被忽略的目录，git 不会往下找例外**。`/Data/` + `!/Data/SampleData/Gage/` 这个组合**不生效**，
+  必须先 `/Data/*` → `!/Data/SampleData/` → `/Data/SampleData/*` → `!/Data/SampleData/Gage/` 逐级放开。
+  验收判据是 `git status --porcelain --untracked-files=all` 的**条数恰好等于放开的文件数**
+  （本次改前 0 → 改后 4），不能只看目标文件出现了。
+- **测试期望值里别写死路径分隔符**。前端 job 在 ubuntu，实现用 `path.join` 产出 `/`，
+  而夹具根路径是字符串字面量 ⇒ 断言整条串必挂。断**basename**或两边都用 `path.join` 构造。
+  跨平台断言的验算办法：把 `path.win32` 与 `path.posix` 各跑一遍同一条公式，
+  posix 下算出的值应当**与 CI 报的 Received 逐字相同**，这才叫复现。
+- 样例夹具缺了要**显式 skip**，别让它 error：`apps/dashboard/tests.py:284`、`apps/export/tests.py:52`
+  对 `SampleData/CTA8280F` 就带 `skipUnless(os.path.exists(...))`，在 CI 上算 skip 不算红。
+
+⚠ 放开 `Data/SampleData/Gage/` 入库等于把机台 datalog 头（内部路径、主机名、账号）放进**公开仓库的历史**。
+推之前先确认这几个字段可见，或先把仓库转 private。
+
+## 7. 未闭环（截至 2026-10-16）
 
 - **夜跑 cron 已注册但 `enabled=false`（manual pause）**，且 automation 的 prompt 仍描述 slot 池之前的
   串行旧形态（「CI=1、workers=1、整轮约 25 分钟」）。历史上 6 条记录 = 3 SKIPPED / 2 FAILED / 1 VOID，
