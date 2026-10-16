@@ -12,7 +12,7 @@
  * 判据表与 decide()/matchRule()/backendLabels() 住在 scripts/affected-rules.mjs
  * （纯函数、被 test/unit/e2eAffectedDecide.spec.ts 钉住）。这里只管取改动集、打印与执行。
  * 三条升级为全量的兜底（任一命中即放弃快档），以及「无受影响用例」必须
- * 显式说出来而不是显示成 0 failed 的假绿 —— 判据正文见 docs/testing-gates.md。
+ * 显式说出来而不是显示成 0 failed 的假绿 —— 判据正文见 docs/reference/testing-gates.md。
  */
 import { spawnSync, execFileSync } from 'node:child_process'
 import path from 'node:path'
