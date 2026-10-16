@@ -32,6 +32,33 @@ test.describe('@p1 侧边栏导航', { tag: ['@p1', '@global'] }, () => {
       await expect(labels.nth(i)).toHaveText(expectedOrder[i])
     }
   })
+
+  test('折叠侧边栏持久化到 localStorage，刷新后仍折叠且链接仍有可访问名', async ({ page }) => {
+    await gotoApp(page, '/dashboard')
+    const sidebar = page.locator('aside.sidebar')
+    const btn = page.locator('button.collapse-btn')
+
+    await expect(sidebar).toHaveCSS('width', '240px')
+    await btn.click()
+    await expect(sidebar).toHaveCSS('width', '64px')
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem('lqdp-sidebar-collapsed')))
+      .toBe('1')
+
+    await page.reload()
+    await expect(sidebar).toHaveCSS('width', '64px')
+    // 折叠态标签走 v-show（display:none 会移出无障碍树）：没有 aria-label 时
+    // 这里会定位不到，而 helpers/nav.ts 的整条 getByRole 通路依赖它
+    await expect(sidebarLink(page, '数据分析')).toBeVisible()
+    await expect(sidebarLink(page, '数据分析')).toHaveAttribute('title', '数据分析')
+
+    // 复原：不污染同批次其它用例对侧栏宽度/标签可见性的预期
+    await btn.click()
+    await expect(sidebar).toHaveCSS('width', '240px')
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem('lqdp-sidebar-collapsed')))
+      .toBe('0')
+  })
 })
 
 test.describe('@p2 主题切换', { tag: ['@p2', '@global'] }, () => {
