@@ -57,23 +57,24 @@
     <!-- 5000 行靠 AG Grid 的行虚拟化吃下（row-buffer 10）：这里既不分页也不截断，
          折叠只是把该目录的行暂时移出 grid 的数据源，不是少给用户数据。
          高度**不写死**（曾是 520px）：由 `.srt` 的 flex 布局给多少长多少，见样式注释。 -->
-    <ag-grid-vue
-      :class="['ag-theme-quartz', isDark ? 'ag-theme-quartz-dark' : '', 'srt-grid']"
-      :theme="'legacy'"
-      style="width: 100%"
-      :column-defs="columnDefs"
-      :default-col-def="defaultColDef"
-      :row-data="gridRows"
-      :row-class-rules="rowClassRules"
-      :row-height="30"
-      :header-height="34"
-      :row-buffer="10"
-      :animate-rows="false"
-      :suppress-field-dot-notation="true"
-      :enable-cell-text-selection="true"
-      overlay-no-rows-template="还没有结果"
-      @row-clicked="onRowClicked"
-    />
+    <div class="srt-gridwrap">
+      <ag-grid-vue
+        :class="['ag-theme-quartz', isDark ? 'ag-theme-quartz-dark' : '', 'srt-grid']"
+        :theme="'legacy'"
+        :column-defs="columnDefs"
+        :default-col-def="defaultColDef"
+        :row-data="gridRows"
+        :row-class-rules="rowClassRules"
+        :row-height="30"
+        :header-height="34"
+        :row-buffer="10"
+        :animate-rows="false"
+        :suppress-field-dot-notation="true"
+        :enable-cell-text-selection="true"
+        overlay-no-rows-template="还没有结果"
+        @row-clicked="onRowClicked"
+      />
+    </div>
   </div>
 </template>
 
@@ -448,10 +449,21 @@ function onRowClicked(e: any): void {
 .srt-actions :deep(.el-button) { font-size: var(--p-fs-dense); }
 .srt-tip-anchor { display: inline-flex; }
 
+/* AG Grid 的 `.ag-root-wrapper` 靠 `height: 100%` 撑开，而百分比高度要祖先有**确定**高度才解得出来。
+   `.srt-grid` 的高度是 flex 算出来的，实测在这条链上（`.sftp-search-page` 只有 `min-height: 100%`）
+   解不出 100% —— 于是 root-wrapper=0、AG Grid 用 `overflow:hidden` 把表头和全部行裁光，
+   界面只剩一个空框，且**不报任何错**（计数条照样显示「表格 7 行」）。
+   绝对定位盒按包含块的实际渲染尺寸算、不走百分比解析，所以中间垫一层 wrap 把「flex 给的高度」
+   转成「确定的包含块」。别改成 `inset-top: <像素>`：`.srt-bar` 是 flex-wrap 的，窄窗口换行会翻倍。 */
+.srt-gridwrap {
+  position: relative;
+  flex: 1 1 auto; min-height: 0;
+}
+
 /* AG Grid 主题接线：与 DataBrowserAgGrid.vue 同款 —— 只把项目语义 token 喂给 --ag-* 变量，
    两套主题靠 token 自己翻转（quartz 内置栈无 CJK 档，字族必须接 --font-sans）。 */
 .srt-grid {
-  flex: 1 1 auto; min-height: 0;
+  position: absolute; inset: 0;
   --ag-background-color: var(--bg);
   --ag-foreground-color: var(--text);
   --ag-data-color: var(--text);
