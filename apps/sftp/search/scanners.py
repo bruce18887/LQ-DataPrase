@@ -310,15 +310,25 @@ def _start_prefetch(remote, size: int) -> None:
 # ------------------------------------------------------------------ 扫描主体
 
 
-def scan_file(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, object]]:
-    """扫一个文件。命中返回结果 dict，不命中（含读不了）返回 ``None``。
+def scan_file(sftp, cand: Candidate,
+              spec: SearchSpec) -> Tuple[Optional[Dict[str, object]], bool]:
+    """扫一个文件，返回 ``(命中结果, 是否撞到单文件预算)``。
+
+    命中时第一个元素是结果 dict，不命中（含读不了）时是 ``None``。
+
+    **第二个元素是「这一趟是不是被预算截断的」的唯一事实来源**，必须由扫描器自己报：
+    只有它知道循环是「取够要求的命中数早停」还是「``scanned`` 到了 ``max_scan_bytes``」。
+    调用方（runner）曾用 ``cand.size > spec.max_scan_bytes`` 去猜，那在「大文件里关键词
+    出现在预算之内」时必错 —— 早停的一趟对这个文件是完整的，猜法却把它报成截断，
+    于是一次完整搜索被标成 partial（黄条说谎）。见
+    ``test_sftp_search_engine_stream.BudgetNoticeTests``。
 
     ``hits`` 是 ``[{line, snippet}]``；顶层 ``line``/``snippet`` 是 ``hits[0]`` 的别名，
     因为 SSE 事件与结果表两个形状都要它，别在下游各写一遍 ``or``。
     """
     needles, fold = build_needles(spec.term, spec.case_sensitive)
     if not needles:
-        return None
+        return None, False
     word = spec.matching == 'whole_word'
     fuzzy = spec.matching == 'fuzzy'
     want = 1 if spec.first_hit_per_file else max(1, spec.matches_per_file)
@@ -335,6 +345,7 @@ def scan_file(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, obj
     encoding: Optional[str] = None
     scanned = 0
     eof = False
+    truncated = False          # 撞到预算而收尾（区别于「取够命中数早停」）
 
     try:
         with sftp.open(cand.path, 'rb') as remote:
@@ -379,6 +390,10 @@ def scan_file(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, obj
 
                 if eof:
                     break      # 上面那一轮已经按 at_eof 判过尾行了
+                if len(hits) >= want:
+                    # 要求的命中数已取够 → 早停。这一趟对这个文件是**完整**的，
+                    # 所以必须先于下面那条预算判定出去，否则会被记成「撞了预算」。
+                    break
                 if len(buf) > keep:
                     consumed = len(buf) - keep
                     newlines_before += buf.count(b'\n', 0, consumed)
@@ -386,18 +401,19 @@ def scan_file(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, obj
                     search_from = max(0, search_from - consumed)
                 # 预算判定放在收缩之后：放前面会被 keep 改变语义
                 if spec.max_scan_bytes and scanned >= spec.max_scan_bytes:
+                    truncated = True
                     break
     except CONNECTION_ERRORS as exc:
         if not _is_file_scoped(exc):
             raise              # 让 SearchSession 把这条脏连接换掉再派下一个文件
         logger.warning('SFTP search could not read %s: %s', cand.path, exc)
-        return None
+        return None, False
     except Exception as exc:  # noqa: BLE001 —— 单文件的意外只丢这个文件，不丢搜索
         logger.warning('Search could not scan %s: %s', cand.path, exc)
-        return None
+        return None, False
 
     if not hits:
-        return None
+        return None, truncated
     test_file, start_time, pts_modify_time = parse_head(head)
     result: Dict[str, object] = {
         'path': cand.path, 'name': cand.name, 'size': cand.size,
@@ -406,7 +422,7 @@ def scan_file(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, obj
         'test_file': test_file, 'start_time': start_time,
         'pts_modify_time': pts_modify_time,
     }
-    return result
+    return result, truncated
 
 
 # 列名档的 glob 元字符集。**不含这三个 = 精确相等**（今天的口径），含了才按通配展开。
@@ -429,8 +445,12 @@ def match_headers(headers: List[str], column: str) -> List[int]:
             if fnmatch.fnmatchcase(header, column)]
 
 
-def read_column(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, object]]:
+def read_column(sftp, cand: Candidate,
+                spec: SearchSpec) -> Tuple[Optional[Dict[str, object]], bool]:
     """取**所有**匹配 ``spec.column_name`` 的列，每列各取前 ``spec.column_rows`` 个非空读数。
+
+    返回 ``(命中结果, 是否撞到单文件预算)``，第二个元素与 :func:`scan_file` 同一契约
+    （由扫描器自己观测，调用方不许拿文件大小去猜，理由见那里）。
 
     列名可以是 fnmatch 通配（判据只有一份，见 :func:`match_headers`）。一条命中带全部匹配列
     （``columns: [{column_name, values}]``）：``*BV*2*`` 在真 datalog 里常常同时命中好几列，
@@ -505,7 +525,7 @@ def read_column(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, o
                     headers = [h.strip() for h in text.split(',')]
                     positions = match_headers(headers, spec.column_name)
                     if not positions:
-                        return None    # 没有匹配列：不是故障，安静地没有结果
+                        return None, False   # 没有匹配列：不是故障，安静地没有结果
                     names = [headers[i] for i in positions]
                     taken = [[] for _ in positions]
                     headers_read = True
@@ -528,13 +548,13 @@ def read_column(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, o
         if not _is_file_scoped(exc):
             raise              # 与 scan_file 同一条判据：脏连接交回 SearchSession
         logger.warning('SFTP search could not read column of %s: %s', cand.path, exc)
-        return None
+        return None, False
     except Exception as exc:  # noqa: BLE001 —— 单文件的意外只丢这个文件，不丢搜索
         logger.warning('Search could not read column of %s: %s', cand.path, exc)
-        return None
+        return None, False
 
     if not headers_read:
-        return None
+        return None, truncated
     # 「no data」是 EOF 才有的资格：截断的那一趟对没取到值的列一无所知，
     # 报 no data 会被读成「这列没有数据」，而真相是「没读到」。这样的列整列不报
     # （runner 另发 scan_budget_exceeded notice 说明这趟不完整）；一列都没观测到 = 无结果。
@@ -542,11 +562,11 @@ def read_column(sftp, cand: Candidate, spec: SearchSpec) -> Optional[Dict[str, o
                for name, values in zip(names, taken)
                if values or not truncated]
     if not columns:
-        return None
+        return None, truncated
     test_file, start_time, pts_modify_time = parse_head(head)
     return {
         'path': cand.path, 'name': cand.name, 'size': cand.size, 'mtime': cand.mtime,
         'columns': columns,
         'test_file': test_file, 'start_time': start_time,
         'pts_modify_time': pts_modify_time,
-    }
+    }, truncated

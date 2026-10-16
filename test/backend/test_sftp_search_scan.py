@@ -28,9 +28,15 @@ def spec(**over):
     return contracts.parse_spec(base)
 
 
-def scan(content: bytes, path: str = PATH, **over):
+def scan_full(content: bytes, path: str = PATH, **over):
+    """原样返回 ``(命中结果, 是否撞到预算)`` —— 只有预算那组测试需要第二个元素。"""
     cand = walker.Candidate(path, os.path.basename(path), len(content), 0)
     return scanners.scan_file(FakeSftp({path: content}), cand, spec(**over))
+
+
+def scan(content: bytes, path: str = PATH, **over):
+    """只取命中结果：绝大多数用例关心的是它。"""
+    return scan_full(content, path, **over)[0]
 
 
 class _SpySftp(FakeSftp):
@@ -206,7 +212,7 @@ class ChunkingTests(SimpleTestCase):
         content = b'q' * (scanners.CHUNK_SIZE + 3) + b'ShadowReg2' + CRLF
         fake = _SpySftp({PATH: content})
         cand = walker.Candidate(PATH, 'a.csv', len(content), 0)
-        self.assertIsNotNone(scanners.scan_file(fake, cand, spec()))
+        self.assertIsNotNone(scanners.scan_file(fake, cand, spec())[0])
         self.assertEqual(len(fake.handles), 1)
         self.assertTrue(fake.handles[0].prefetched)
 
@@ -226,6 +232,52 @@ class HitCountTests(SimpleTestCase):
     def test_all_lines_when_asked(self):
         out = scan(self.THREE, first_hit_per_file=False, matches_per_file=20)
         self.assertEqual([h['line'] for h in out['hits']], [1, 2, 3])
+
+
+class BudgetTruncationTests(SimpleTestCase):
+    """``scan_file`` 的第二个返回值 = 「这一趟是不是被预算截断的」（2026-10-15）。
+
+    它与「取够要求的命中数就早停」必须分开：早停的一趟对这个文件是完整的，
+    混为一谈就会让 runner 把一个完整文件报成不完整（截图上的假黄条）。
+    """
+
+    BUDGET = scanners.CHUNK_SIZE       # 1 MiB，真扫描就是这个读粒度
+
+    def _content(self, hits: int, tail_chunks: int = 3) -> bytes:
+        lines = b''.join(b'ShadowReg2 %d' % i + CRLF for i in range(hits))
+        return lines + b'z' * (self.BUDGET * tail_chunks)
+
+    def test_hit_inside_the_budget_is_not_truncation(self):
+        """命中在预算之内 → 取够 1 条就早停，文件比预算大也不代表截断。"""
+        content = self._content(hits=1)
+        self.assertGreater(len(content), self.BUDGET, '前提：文件确实比预算大')
+        out, truncated = scan_full(content, max_scan_bytes=self.BUDGET)
+        self.assertIsNotNone(out)
+        self.assertFalse(truncated)
+
+    def test_no_hit_inside_the_budget_is_truncation(self):
+        """关键词在预算之外 → 命中可能就在后面，必须报截断。"""
+        out, truncated = scan_full(self._content(hits=0), max_scan_bytes=self.BUDGET)
+        self.assertIsNone(out)
+        self.assertTrue(truncated)
+
+    def test_all_requested_hits_inside_the_budget_is_not_truncation(self):
+        out, truncated = scan_full(self._content(hits=2), max_scan_bytes=self.BUDGET,
+                                   first_hit_per_file=False, matches_per_file=2)
+        self.assertEqual(len(out['hits']), 2)
+        self.assertFalse(truncated)
+
+    def test_short_of_the_requested_hits_is_truncation(self):
+        """要 2 条、预算内只有 1 条 → 这一趟确实没扫完。"""
+        out, truncated = scan_full(self._content(hits=1), max_scan_bytes=self.BUDGET,
+                                   first_hit_per_file=False, matches_per_file=2)
+        self.assertEqual(len(out['hits']), 1)
+        self.assertTrue(truncated)
+
+    def test_small_file_never_reports_truncation(self):
+        out, truncated = scan_full(self._content(hits=1, tail_chunks=0))
+        self.assertIsNotNone(out)
+        self.assertFalse(truncated)
 
 
 class HeadMetadataTests(SimpleTestCase):
@@ -279,7 +331,7 @@ class ErrorPathTests(SimpleTestCase):
     def test_unreadable_file_returns_none_and_logs(self):
         with self.assertLogs('apps.sftp.search.scanners', level='WARNING'):
             cand = walker.Candidate('/d/missing.csv', 'missing.csv', 10, 0)
-            self.assertIsNone(scanners.scan_file(FakeSftp({}), cand, spec()))
+            self.assertIsNone(scanners.scan_file(FakeSftp({}), cand, spec())[0])
 
     def test_connection_error_propagates_for_the_caller_to_replace(self):
         """连接级异常必须上抛，让 SearchSession 换掉脏连接 ——
@@ -293,4 +345,4 @@ class ErrorPathTests(SimpleTestCase):
         content = b'x,ShadowReg2' + CRLF
         cand = walker.Candidate(PATH, 'a.csv', len(content), 0)
         self.assertIsNotNone(scanners.scan_file(
-            FakeSftp({PATH: content}, no_prefetch=True), cand, spec()))
+            FakeSftp({PATH: content}, no_prefetch=True), cand, spec())[0])

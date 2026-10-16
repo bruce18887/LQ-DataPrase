@@ -80,7 +80,8 @@ class ColumnTests(SimpleTestCase):
            'StartTime,2026-09-01 08:00:00,\r\n[DATA]\r\n'
            'SN,ShadowReg2,Vcc\r\n1,0.42,3\r\n2,,3.1\r\n3,0.44,\r\n').encode()
 
-    def read(self, content=None, column='ShadowReg2', rows=10, **over):
+    def read_full(self, content=None, column='ShadowReg2', rows=10, **over):
+        """原样返回 ``(命中结果, 是否撞到预算)`` —— 只有预算那条用例要第二个元素。"""
         raw = self.ATE if content is None else content
         base = {'roots': ['/d'], 'mode': 'column',
                 'column_name': column, 'column_rows': rows}
@@ -88,6 +89,21 @@ class ColumnTests(SimpleTestCase):
         cand = walker.Candidate(PATH, 'a.csv', len(raw), 0)
         return scanners.read_column(FakeSftp({PATH: raw}), cand,
                                     contracts.parse_spec(base))
+
+    def read(self, content=None, column='ShadowReg2', rows=10, **over):
+        return self.read_full(content, column, rows, **over)[0]
+
+    def test_normal_read_is_not_truncation(self):
+        out, truncated = self.read_full()
+        self.assertIsNotNone(out)
+        self.assertFalse(truncated)
+
+    def test_budget_truncation_is_reported(self):
+        """逐行读的这一档也要自报截断：预算内连表头都没读到 = 这一趟一无所知。"""
+        raw = b'x\r\n' * scanners.CHUNK_SIZE        # 逐行读，预算在这里到点
+        out, truncated = self.read_full(content=raw, max_scan_bytes=scanners.CHUNK_SIZE)
+        self.assertIsNone(out)
+        self.assertTrue(truncated)
 
     def test_values_in_row_order_skipping_blanks(self):
         self.assertEqual(values_of(self.read()), ['0.42', '0.44'])
@@ -128,7 +144,7 @@ class ColumnTests(SimpleTestCase):
             self.assertIsNone(scanners.read_column(
                 FakeSftp({}), cand,
                 contracts.parse_spec({'roots': ['/d'], 'mode': 'column',
-                                      'column_name': 'x'})))
+                                      'column_name': 'x'}))[0])
 
     def test_connection_error_propagates(self):
         cand = walker.Candidate(PATH, 'a.csv', 10, 0)
@@ -214,7 +230,7 @@ class ColumnTests(SimpleTestCase):
         out = scanners.read_column(
             FakeSftp({PATH: raw}, no_prefetch=True), cand,
             contracts.parse_spec({'roots': ['/d'], 'mode': 'column',
-                                  'column_name': 'ShadowReg2'}))
+                                  'column_name': 'ShadowReg2'}))[0]
         self.assertEqual(values_of(out), ['0.42'])
 
     # —— 通配匹配与 no data（2026-09-24 语义变更，spec §3.5）——

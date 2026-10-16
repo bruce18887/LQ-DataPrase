@@ -321,7 +321,7 @@ class SearchRunner:
                 return
             try:
                 with channel_timeout(item[1], READ_TIMEOUT_SEC):
-                    result = self._read_one(item[1], cand)
+                    result, truncated = self._read_one(item[1], cand)
             except CONNECTION_ERRORS as exc:
                 self.session.give_back(item, broken=True)
                 if attempt == 1 and not self.cancel_event.is_set():
@@ -343,13 +343,19 @@ class SearchRunner:
             if result:
                 q.put(('match', result))
             q.put(('scanned', cand.size))
-            if cand.size > self.spec.max_scan_bytes:
-                # scan_file 到预算就停，但不会自带「为什么停」——按候选大小判定这一条。
+            if truncated:
+                # 「撞到预算」只能由扫描器报（它才知道循环是取够命中数早停、还是
+                # 到了 max_scan_bytes）。曾经用 `cand.size > max_scan_bytes` 猜，
+                # 那在大文件里关键词落在预算之内时必错：早停的一趟对这个文件是完整的，
+                # 猜法却把整次搜索标成 partial —— 黄条说谎。
                 q.put(('limit', 'scan_budget_exceeded'))
             return
 
     def _read_one(self, sftp, cand):
-        """按模式分派到扫描内核（列值档读值，其余按字节扫）。"""
+        """按模式分派到扫描内核（列值档读值，其余按字节扫）。
+
+        两个内核都返回 ``(命中结果, 是否撞到单文件预算)``。
+        """
         if self.spec.mode == 'column':
             return scanners.read_column(sftp, cand, self.spec)
         return scanners.scan_file(sftp, cand, self.spec)

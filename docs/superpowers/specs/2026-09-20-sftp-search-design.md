@@ -242,7 +242,7 @@ walker 直接调谓词、`shell_grep` 只调这里的 glob 常量，**两档引�
 | `max_candidates` | 5 000 | 50 000 | 达上限即停止列举，转 `scanning` |
 | `max_matches` | 2 000 | 20 000 | 也是「结果驻留在渲染进程内存」的上限依据 |
 | `matches_per_file` | 1 | 20 | |
-| `max_scan_bytes` | 64 MiB | 1 GiB | 单文件扫描预算，超出记 `scan_budget_exceeded` 并跳过该文件剩余 |
+| `max_scan_bytes` | 64 MiB | 1 GiB | 单文件扫描预算。**判据是「这一趟被预算叫停」而不是「文件比预算大」**（2026-10-15 收紧）：扫描器读满预算却还没取够要求的命中数才记 `scan_budget_exceeded` 并跳过该文件剩余；关键词落在预算之内、取够命中数就早停的那一趟对该文件是完整的，不许报截断（否则一次完整的搜索会被标成 `partial`，黄条说谎）。判据由扫描器随结果一起报（`scan_file`/`read_column` 的第二个返回值），runner 不得用 `cand.size` 反推 |
 | `column_rows` | 10 | 50 | 列名档匹配的**每一列**各取前 N 个非空读数（不是「往下找几行表头」）。表头下紧邻的 `Unit`/`Min`/`Max` 三行不计入；一列全无读数仍算命中并标 `no data`（§3.5） |
 | `workers` | 4 | 8 | 与参考工具 `cli_interface.py:324` 的 1–8 钳位一致 |
 | `term` 长度 | — | 200 字符 | |
