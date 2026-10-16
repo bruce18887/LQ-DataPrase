@@ -66,7 +66,8 @@ _KNOWN_KEYS = frozenset({
 
 
 class SearchSpecError(ValueError):
-    """契约校验失败。视图层转 ``400 {"error": msg}``；``.field`` 供前端定位控件。"""
+    """契约校验失败。视图层转 ``error_response(msg)`` 的 ``400 {code, message, detail}``；
+    ``.field`` 供前端定位控件。"""
 
     def __init__(self, field: str, message: str):
         super().__init__(message)

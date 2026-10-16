@@ -311,7 +311,7 @@ class ChartConfigFilterTests(SimpleTestCase):
         resp = AnalysisViewSet.as_view({'post': 'qqplot'})(request)
         resp.render()
         self.assertEqual(resp.status_code, 400, resp.content)
-        self.assertEqual(resp.data.get('error'), 'param_no_valid_data')
+        self.assertEqual(resp.data.get('code'), 'param_no_valid_data')
 
     def test_boxplot_data_only_bin1_overall_count(self):
         """data_only_bin1 narrows the box plot overall stats (count = 8)."""
@@ -526,7 +526,7 @@ class MultiFileCorrelationFilterApiTests(SimpleTestCase):
         resp = AnalysisViewSet.as_view({'post': 'correlation'})(request)
         resp.render()
         self.assertEqual(resp.status_code, 400, resp.content)
-        self.assertEqual(resp.data.get('error'), 'no_valid_params')
+        self.assertEqual(resp.data.get('code'), 'no_valid_params')
 
     # ── correlation_matrix ──────────────────────────────────────────
 
@@ -549,4 +549,4 @@ class MultiFileCorrelationFilterApiTests(SimpleTestCase):
         resp = StatisticsViewSet.as_view({'post': 'correlation_matrix'})(request)
         resp.render()
         self.assertEqual(resp.status_code, 400, resp.content)
-        self.assertEqual(resp.data.get('error'), 'need_at_least_2_params')
+        self.assertEqual(resp.data.get('code'), 'need_at_least_2_params')

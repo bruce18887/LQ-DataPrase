@@ -1,6 +1,6 @@
 import io
 from django.shortcuts import get_object_or_404
-from rest_framework import viewsets, status
+from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -8,6 +8,7 @@ from django.http import FileResponse
 import excelize
 
 from apps.analysis.services.statistics import filter_bin1_rows
+from apps.common.errors import error_response
 from apps.datafiles.models import DataFile
 from apps.datafiles.services import get_cached_parsed_file
 from apps.buyoff.services import compute_buyoff_stats
@@ -23,7 +24,7 @@ class BuyoffViewSet(viewsets.GenericViewSet):
     def identify_common_items(self, request):
         file_ids = request.data.get('file_ids', [])
         if not file_ids or len(file_ids) < 2:
-            return Response({'error': 'need_at_least_2_files'}, status=400)
+            return error_response('need_at_least_2_files')
 
         datasets = {}
         all_cols = []
@@ -37,7 +38,7 @@ class BuyoffViewSet(viewsets.GenericViewSet):
             all_cols.append(set(numeric_cols))
 
         if not datasets:
-            return Response({'error': 'parse_failed'}, status=400)
+            return error_response('parse_failed')
 
         common = all_cols[0]
         for s in all_cols[1:]:
@@ -62,7 +63,7 @@ class BuyoffViewSet(viewsets.GenericViewSet):
         role_map = request.data.get('role_map', {})
 
         if len(file_ids) < 2:
-            return Response({'error': 'need_at_least_2_files'}, status=400)
+            return error_response('need_at_least_2_files')
 
         # Load and parse files
         datasets = {}
@@ -87,7 +88,7 @@ class BuyoffViewSet(viewsets.GenericViewSet):
         # 与兄弟端点 identify_common_items 对齐：全部解析失败时 400，
         # 否则下面的 all_col_sets[0] 会 IndexError → 500。
         if not datasets:
-            return Response({'error': 'parse_failed'}, status=400)
+            return error_response('parse_failed')
 
         # Find common numeric columns
         all_col_sets = [set(d['numeric_cols']) for d in datasets.values()]
@@ -97,7 +98,7 @@ class BuyoffViewSet(viewsets.GenericViewSet):
         common_items = sorted(common)
 
         if not common_items:
-            return Response({'error': 'no_common_items'}, status=400)
+            return error_response('no_common_items')
 
         # Build role mapping
         role_mapping = {}

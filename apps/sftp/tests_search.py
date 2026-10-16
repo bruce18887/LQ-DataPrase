@@ -6,9 +6,9 @@
 阶段机/遍历/扫描的行为在 ``test/backend/test_sftp_search_*.py``，这里不重跑一遍。
 
 两条钉住的契约（spec §3.11）：
-1. 流开始**前**的失败 → ``400 {'error': msg}``，响应绝不能是 SSE 流；
-   未连接复用既有哨兵 ``'not_connected'``（与 ``views.py`` 十余处同形，
-   ``utils/ssePost.ts`` 只读 ``err.error``）。
+1. 流开始**前**的失败 → ``400 {code, message, detail}``（``apps.common.errors.error_response``，
+   评审 P1-5），响应绝不能是 SSE 流；未连接复用既有哨兵 ``'not_connected'``
+   （仍是 ``code`` 的值，与 ``views.py`` 同形）。
 2. 流开始**后**只能是带内 ``error`` 事件，生成器内绝不抛 DRF 异常。
 """
 import gc
@@ -130,7 +130,8 @@ class SearchEndpointTests(APITestCase):
     def test_unknown_key_is_400_before_the_stream(self):
         resp = self.post({'roots': ['/data'], 'mode': 'name', 'recursive': True})
         self.assertEqual(resp.status_code, 400)
-        self.assertIn('error', resp.data)
+        self.assertIn('code', resp.data)
+        self.assertNotIn('error', resp.data)
         self.assertNotIn('text/event-stream', resp.get('Content-Type', ''))
         # 「不是半截 SSE」的可观察形式：响应压根不是流，且一条连接都没开。
         self.assertFalse(resp.streaming)
@@ -147,7 +148,8 @@ class SearchEndpointTests(APITestCase):
         """
         resp = self.post({'roots': None, 'mode': 'name'})
         self.assertEqual(resp.status_code, 400, getattr(resp, 'data', resp))
-        self.assertIn('roots', str(resp.data['error']))
+        self.assertEqual(resp.data['code'], 'invalid_search_spec')
+        self.assertIn('roots', str(resp.data['detail']))
         self.assertFalse(resp.streaming)
         self.assertEqual(self.sessions, [])
 
@@ -155,7 +157,8 @@ class SearchEndpointTests(APITestCase):
         """同族：``term=None`` 而 ``mode=content``（必填）也得是 400。"""
         resp = self.post({'roots': ['/data'], 'mode': 'content', 'term': None})
         self.assertEqual(resp.status_code, 400, getattr(resp, 'data', resp))
-        self.assertIn('term', str(resp.data['error']))
+        self.assertEqual(resp.data['code'], 'invalid_search_spec')
+        self.assertIn('term', str(resp.data['detail']))
 
     def test_not_connected_returns_the_existing_sentinel(self):
         """未连接 → 复用既有哨兵 ``not_connected``（spec §3.11），且绝不开流。"""
@@ -165,7 +168,7 @@ class SearchEndpointTests(APITestCase):
                     'no cached session (not connected) for user 1')))
         resp = self.post({'roots': ['/data'], 'mode': 'name'})
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.data['error'], 'not_connected')
+        self.assertEqual(resp.data['code'], 'not_connected')
         self.assertFalse(resp.streaming)
         self.assertNotIn('text/event-stream', resp.get('Content-Type', ''))
 
@@ -176,7 +179,8 @@ class SearchEndpointTests(APITestCase):
                 search_views.SearchSessionError('无法建立任何 SFTP 连接（user 1）')))
         resp = self.post({'roots': ['/data'], 'mode': 'name'})
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.data['error'], '无法建立任何 SFTP 连接（user 1）')
+        self.assertEqual(resp.data['code'], 'search_connect_failed')
+        self.assertEqual(resp.data['detail'], '无法建立任何 SFTP 连接（user 1）')
 
     def test_host_key_mismatch_is_a_400_not_an_html_500(self):
         """``HostKeyMismatchError`` 不降级、不吞（spec §3.7），但也绝不能变成 500。
@@ -190,7 +194,8 @@ class SearchEndpointTests(APITestCase):
         with self.assertLogs('apps.sftp.search_views', level='WARNING') as cm:
             resp = self.post({'roots': ['/data'], 'mode': 'name'})
         self.assertEqual(resp.status_code, 400, getattr(resp, 'data', resp))
-        self.assertIn('主机密钥', resp.data['error'])
+        self.assertEqual(resp.data['code'], 'search_connect_failed')
+        self.assertIn('主机密钥', resp.data['detail'])
         self.assertFalse(resp.streaming)
         self.assertTrue(cm.output)
 
@@ -220,16 +225,19 @@ class SearchEndpointTests(APITestCase):
         self.assertEqual(events[-1]['kind'], 'done')
 
     def test_validation_failure_with_sse_accept_is_still_a_json_400(self):
-        """同一个头下，流开始**前**的失败仍是 ``400 {'error': msg}``，不能变成 406。
+        """同一个头下，流开始**前**的失败仍是 ``400 {code, message, detail}``，不能变成 406。
 
-        错误体形状比 Content-Type 更要紧：``utils/ssePost.ts`` 读的就是 ``err.error``。
+        错误体形状比 Content-Type 更要紧：客户端读的就是这个 JSON 信封
+        （机器码在 ``code``、门槛文案在 ``detail`` 并镜像进 ``message``）。
         （Content-Type 会跟着客户端要的那个头走 —— DRF 的常规行为，所以这里解析
         ``resp.content`` 而不是 ``resp.json()``，后者会因类型不符直接抛 ValueError。）
         """
         resp = self.client.post(URL, {'roots': [], 'mode': 'content'},
                                 format='json', HTTP_ACCEPT='text/event-stream')
         self.assertEqual(resp.status_code, 400, getattr(resp, 'data', resp))
-        self.assertEqual(json.loads(resp.content)['error'], 'roots 不能为空')
+        body = json.loads(resp.content)
+        self.assertEqual(body['code'], 'invalid_search_spec')
+        self.assertEqual(body['detail'], 'roots 不能为空')
 
     def test_frame_sequence_ends_with_done(self):
         resp = self.post({'roots': ['/data'], 'mode': 'content',

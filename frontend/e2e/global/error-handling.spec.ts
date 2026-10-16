@@ -6,8 +6,9 @@ import { gotoApp } from '../helpers/nav'
  *
  * 用 page.route 模拟后端错误响应，验证三种错误形状都被格式化为
  * 可读中文并弹出全局 ElMessage.error：
- *   - 新统一格式 {"code","message","detail"}（apps/common/exceptions.py）
- *   - 遗留机器码格式 {"error": "parse_failed"}（ERROR_CODE_MAP 映射）
+ *   - 带中文的 {"code","message","detail"}（apps/common/exceptions.py）
+ *   - 只有机器码的 {"code"}，由前端 ERROR_CODE_MAP 查表（apps/common/errors.py
+ *     的 error_response 在 detail 缺失时就是这个形状 —— 后端刻意不复制一份中文表）
  *   - 网络中断（route.abort → 无响应）
  */
 
@@ -27,12 +28,12 @@ test.describe('@p2 通用后端报错提示', { tag: ['@p2', '@global'] }, () =>
     ).toBeVisible()
   })
 
-  test('遗留机器码错误映射为中文提示', async ({ page }) => {
+  test('只有机器码时由前端查表映射为中文提示', async ({ page }) => {
     await page.route('**/api/v1/files/**', (route) =>
       route.fulfill({
         status: 400,
         contentType: 'application/json',
-        body: JSON.stringify({ error: 'parse_failed' }),
+        body: JSON.stringify({ code: 'parse_failed', message: null, detail: null }),
       }),
     )
     await gotoApp(page, '/data')

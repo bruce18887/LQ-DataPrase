@@ -206,7 +206,7 @@ class DownloadFileStreamApiTests(APITestCase):
                 '/api/v1/sftp/download_file_stream/',
                 {'path': '/data/note.txt'}, format='json')
         self.assertEqual(resp.status_code, 400)
-        self.assertIn('仅支持 CSV', resp.data['error'])
+        self.assertIn('仅支持 CSV', resp.data['code'])
 
     def test_not_connected_returns_400(self):
         with mock.patch.object(
@@ -215,7 +215,7 @@ class DownloadFileStreamApiTests(APITestCase):
                 '/api/v1/sftp/download_file_stream/',
                 {'path': '/data/a.csv'}, format='json')
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.data['error'], 'not_connected')
+        self.assertEqual(resp.data['code'], 'not_connected')
 
     def test_streams_progress_and_done_events(self):
         with self._patch_sftp(FakeSftp(b'a,b\n1,2\n')):

@@ -1700,7 +1700,8 @@ class ZipUploadTests(APITestCase):
     def test_zip_upload_no_csv_returns_400_and_cleans_new_dir(self):
         resp = self._upload_zip('EMPTY.zip', {'readme.txt': 'no csv here'})
         self.assertEqual(resp.status_code, 400)
-        self.assertIn('未找到 CSV', resp.data['error'])
+        self.assertEqual(resp.data['code'], 'zip_import_failed')
+        self.assertIn('未找到 CSV', resp.data['detail'])
         # Freshly created destination directory is cleaned up.
         self.assertFalse(os.path.isdir(os.path.join(self.batch_base, 'EMPTY')))
         self.assertEqual(DataFile.objects.filter(owner=self.user, file_type='batch').count(), 0)
@@ -1719,14 +1720,16 @@ class ZipUploadTests(APITestCase):
     def test_zip_upload_corrupt_zip_returns_400(self):
         resp = self._upload_raw('broken.zip', b'this is not a zip archive at all')
         self.assertEqual(resp.status_code, 400)
-        self.assertIn('已损坏', resp.data['error'])
+        self.assertEqual(resp.data['code'], 'zip_import_failed')
+        self.assertIn('已损坏', resp.data['detail'])
         self.assertEqual(DataFile.objects.filter(owner=self.user).count(), 0)
 
     def test_zip_upload_unsupported_ext_400(self):
         for name, content in [('note.txt', b'x'), ('arc.7z', b'PK\x03\x04x'), ('arc.rar', b'x')]:
             resp = self._upload_raw(name, content)
             self.assertEqual(resp.status_code, 400, name)
-            self.assertIn('仅支持 CSV 或 ZIP', resp.data['error'])
+            self.assertEqual(resp.data['code'], 'unsupported_file_type')
+            self.assertIn('仅支持 CSV 或 ZIP', resp.data['detail'])
 
     def test_zip_upload_zip_slip_members_skipped(self):
         resp = self._upload_zip('SLIP.zip', {

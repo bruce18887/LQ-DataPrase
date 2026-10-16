@@ -104,7 +104,7 @@ class CorrelationStrColumnTests(SimpleTestCase):
         response.render()
 
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.data.get('error'), 'no_valid_params')
+        self.assertEqual(response.data.get('code'), 'no_valid_params')
 
     def test_view_still_allows_same_param_both_axes(self):
         # x==y（自相关）在 _sanitize 不去重的前提下必须仍然可用
@@ -162,7 +162,7 @@ class CpkEndpointGuardTests(SimpleTestCase):
     def test_all_stale_params_return_400(self):
         response = self._post_cpk(['__bogus__'])
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.data.get('error'), 'param_not_found')
+        self.assertEqual(response.data.get('code'), 'param_not_found')
         self.assertEqual(response.data.get('missing'), ['__bogus__'])
 
     def test_partial_stale_params_still_compute_valid_ones(self):

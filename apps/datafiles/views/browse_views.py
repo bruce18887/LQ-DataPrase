@@ -8,13 +8,13 @@ import pandas as pd
 from django.db import transaction
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
-from rest_framework import status
 from rest_framework.generics import GenericAPIView, ListAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.common.constants import PAGE_SIZE_MAX
+from apps.common.errors import error_response
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import SYSTEM_COLUMNS
 from apps.datafiles.serializers import DataFileSerializer, ParseHistorySerializer
@@ -186,10 +186,8 @@ class DataBrowserView(APIView):
                 if isinstance(parsed, list):
                     sort_model = parsed
             except ValueError:
-                return Response(
-                    {'error': 'sort_model must be a JSON array'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+                return error_response(
+                    'invalid_sort_model', 'sort_model must be a JSON array')
 
         # 列过滤（ag-grid IRM filterModel → JSON 对象；白名单算子见 _apply_filter_model）
         filter_model_raw = request.query_params.get('filter_model', '')
@@ -200,35 +198,27 @@ class DataBrowserView(APIView):
                 if isinstance(parsed, dict):
                     filter_model = parsed
             except ValueError:
-                return Response(
-                    {'error': 'filter_model must be a JSON object'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+                return error_response(
+                    'invalid_filter_model', 'filter_model must be a JSON object')
 
         if not datafile_id:
-            return Response(
-                {'error': 'datafile_id is required'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return error_response('param_required', 'datafile_id is required')
 
         datafile = get_object_or_404(
             DataFile, pk=datafile_id, owner=request.user
         )
 
         if not os.path.exists(resolve_file_path(datafile.file_path)):
-            return Response(
-                {'error': 'File not found on disk'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            return error_response('file_not_found', 'File not found on disk', 404)
 
         df, metadata, fmt = get_cached_parsed_file(datafile.id, request.user.pk, datafile)
         if df is None:
-            return Response({'error': 'parse_failed'}, status=400)
+            return error_response('parse_failed')
 
         # fail 检测按 (file, mtime) 缓存——文件内容未变时零重算（生产大文件收益明显）
         fail_indices, fail_columns, fail_cells = get_cached_fail_data(datafile.id, request.user.pk, datafile)
         if fail_cells is None:
-            return Response({'error': 'parse_failed'}, status=400)
+            return error_response('parse_failed')
 
         fail_set = set(fail_indices)
 
@@ -422,23 +412,15 @@ class DataConsistencyCheckView(APIView):
         set server-side (not the GET's 50-row display slice)."""
         action = request.data.get('action')
         if action not in _ALL_ACTIONS:
-            return Response(
-                {'error': 'action must be one of: ' + ', '.join(_ALL_ACTIONS)},
-                status=400,
-            )
+            return error_response(
+                'invalid_action', 'action must be one of: ' + ', '.join(_ALL_ACTIONS))
 
         user = request.user
         role = getattr(user, 'role', '')
         if action in _DELETE_ACTIONS and role != 'administrator':
-            return Response(
-                {'error': '仅管理员可执行删除操作'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+            return error_response('forbidden', '仅管理员可执行删除操作', 403)
         if action in _MUTATE_ACTIONS and role not in ('administrator', 'user'):
-            return Response(
-                {'error': '当前角色无权执行该操作'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+            return error_response('forbidden', '当前角色无权执行该操作', 403)
 
         if action == 'delete_orphaned_db':
             return self._delete_orphaned_db(user, action)

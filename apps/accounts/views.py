@@ -11,6 +11,8 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from apps.common.errors import error_response
+
 from .models import User, UserSetting
 from .permissions import FeaturePermission
 from .serializers import (
@@ -47,10 +49,12 @@ def get_tokens_for_user(user):
 
 def _error(code, detail, *, status_code, **extra):
     """Standard error envelope so the front-end can pattern-match
-    on ``code`` without parsing free-form ``detail`` text."""
-    body = {'code': code, 'detail': detail}
-    body.update(extra)
-    return Response(body, status=status_code)
+    on ``code`` without parsing free-form ``detail`` text.
+
+    形态由 apps/common/errors.error_response 统一（评审 P1-5）：这里只是保留
+    登录侧既有的「detail 必填 + 任意附加字段」调用习惯，附加字段原样透传。
+    """
+    return error_response(code, detail, status_code, **extra)
 
 
 class LoginView(APIView):

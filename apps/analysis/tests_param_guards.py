@@ -464,7 +464,7 @@ class StaleParamAcrossFileSwitchTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 400, response.content)
         body = response.data
-        self.assertEqual(body.get('error'), 'no_valid_params')
+        self.assertEqual(body.get('code'), 'no_valid_params')
         self.assertEqual(body.get('missing'), ['__bogus__'])
         self.assertEqual(body.get('requested'), ['__bogus__'])
 
@@ -514,7 +514,7 @@ class StaleParamAcrossFileSwitchTests(SimpleTestCase):
         response.render()
 
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.data.get('error'), 'param_not_found')
+        self.assertEqual(response.data.get('code'), 'param_not_found')
 
     def test_boxplot_view_returns_400_for_unknown_param(self):
         """GET /statistics/boxplot/ with a param not in the file → 400 no_valid_params."""
@@ -536,5 +536,5 @@ class StaleParamAcrossFileSwitchTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 400, response.content)
         body = response.data
-        self.assertEqual(body.get('error'), 'no_valid_params')
+        self.assertEqual(body.get('code'), 'no_valid_params')
         self.assertEqual(body.get('missing'), ['__bogus__'])

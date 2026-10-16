@@ -89,7 +89,7 @@ class EmptyDatasetsGuardTests(_BuyoffApiBase):
         resp = self.client.post(
             URL, {'file_ids': [f.id for f in self.files]}, format='json')
         self.assertEqual(resp.status_code, 400, getattr(resp, 'data', resp))
-        self.assertEqual(resp.data['error'], 'parse_failed')
+        self.assertEqual(resp.data['code'], 'parse_failed')
 
     def test_sibling_endpoint_already_guards(self):
         """对照：identify_common_items 早已有守卫（复制时漏改的是 generate_form）。"""
@@ -98,7 +98,7 @@ class EmptyDatasetsGuardTests(_BuyoffApiBase):
             '/api/v1/buyoff/identify_common_items/',
             {'file_ids': [f.id for f in self.files]}, format='json')
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.data['error'], 'parse_failed')
+        self.assertEqual(resp.data['code'], 'parse_failed')
 
     def test_partial_parse_failure_still_generates(self):
         """只有一个文件解析失败 → 剩余文件不足 2 个也应给出明确 400/200，不 500。"""

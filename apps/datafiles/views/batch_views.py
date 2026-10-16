@@ -10,6 +10,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.common.errors import error_response
 from apps.datafiles.models import DataFile
 from apps.datafiles.serializers import DataFileSerializer
 from apps.datafiles.services import clear_parse_cache
@@ -134,7 +135,7 @@ class BatchDirImportView(APIView):
     def post(self, request):
         dir_name = request.data.get('dir_name')
         if not dir_name:
-            return Response({'error': 'dir_name is required'}, status=400)
+            return error_response('param_required', 'dir_name is required')
 
         batch_base = _user_upload_dir(request.user, 'batch')
         # dir_name arrives in the request body, so it is not constrained by the
@@ -142,12 +143,10 @@ class BatchDirImportView(APIView):
         # registered another user's CSVs as the caller's own.
         dir_path = _safe_batch_dir(batch_base, dir_name)
         if dir_path is None:
-            return Response(
-                {'error': 'dir_name 包含非法字符'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return error_response('invalid_name_chars', 'dir_name 包含非法字符')
         if not os.path.isdir(dir_path):
-            return Response({'error': f'目录 "{dir_name}" 不存在'}, status=404)
+            return error_response(
+                'batch_dir_not_found', f'目录 "{dir_name}" 不存在', 404)
 
         # Get already-registered file paths for this batch (skip duplicates).
         # normpath + resolve_file_path both sides: DB stores relative paths
@@ -199,12 +198,10 @@ class BatchDirDeleteView(APIView):
         # the rmtree below delete the whole per-user upload root (batch + single).
         dir_path = _safe_batch_dir(batch_base, dir_name)
         if dir_path is None:
-            return Response(
-                {'error': 'dir_name 包含非法字符'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return error_response('invalid_name_chars', 'dir_name 包含非法字符')
         if not os.path.isdir(dir_path):
-            return Response({'error': f'目录 "{dir_name}" 不存在'}, status=404)
+            return error_response(
+                'batch_dir_not_found', f'目录 "{dir_name}" 不存在', 404)
 
         # Use transaction to ensure consistency
         with transaction.atomic():
@@ -234,22 +231,18 @@ class SubBatchDeleteView(APIView):
         # rmtree below would then delete wholesale.
         batch_dir = _safe_batch_dir(batch_base, batch_name)
         if batch_dir is None:
-            return Response(
-                {'error': 'batch_name 包含非法字符'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return error_response('invalid_name_chars', 'batch_name 包含非法字符')
         sub_batch_dir = _safe_batch_dir(batch_dir, sub_batch_name)
         if sub_batch_dir is None:
-            return Response(
-                {'error': 'sub_batch_name 包含非法字符'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return error_response('invalid_name_chars', 'sub_batch_name 包含非法字符')
 
         if not os.path.isdir(batch_dir):
-            return Response({'error': f'批次目录 "{batch_name}" 不存在'}, status=404)
+            return error_response(
+                'batch_dir_not_found', f'批次目录 "{batch_name}" 不存在', 404)
 
         if not os.path.isdir(sub_batch_dir):
-            return Response({'error': f'子批次目录 "{sub_batch_name}" 不存在'}, status=404)
+            return error_response(
+                'sub_batch_dir_not_found', f'子批次目录 "{sub_batch_name}" 不存在', 404)
 
         # Use transaction to ensure consistency
         with transaction.atomic():

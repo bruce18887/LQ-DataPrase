@@ -62,10 +62,10 @@ class DashboardErrorDetailLeakTests(TestCase):
 
         self.assertEqual(resp.status_code, 500)
         body = resp.json()
-        self.assertEqual(body.get('error'), 'internal_error')
-        # Must NOT contain the exception detail
-        self.assertNotIn('detail', body)
-        # Double-check: the secret text must not appear anywhere in response
+        self.assertEqual(body.get('code'), 'internal_error')
+        # 统一形状 {code, message, detail} 恒带 detail 键；非 DEBUG 必须是 null，
+        # 且异常文本不得出现在响应体任何位置（下面两条一起守）。
+        self.assertIsNone(body.get('detail'))
         self.assertNotIn('secret', str(body))
 
     @override_settings(DEBUG=True)

@@ -14,7 +14,7 @@ from apps.analysis.services.statistics import (
     site_sort_key,
 )
 from apps.analysis.services.statistics.limits import is_pass_bin
-from apps.analysis.services.limits import resolve_limits
+from apps.analysis.services.range_limits import resolve_limits
 from apps.analysis.services.statistics.outliers import detect_outliers_iqr
 from apps.analysis.services.statistics.downsample import (
     bucket_minmax_indices,

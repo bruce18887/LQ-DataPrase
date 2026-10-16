@@ -36,6 +36,7 @@ from apps.analysis.services.data_services import (
 )
 from apps.datafiles.services import get_cached_parsed_file
 from apps.common.params import get_param, get_param_float, get_param_list
+from apps.common.errors import error_response
 
 from .file_correlation_views import FileCorrelationActions
 from .param_actions import ParamStatActions
@@ -63,7 +64,7 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
     def histogram(self, request):
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
-            return Response({'error': err}, status=400)
+            return error_response(err)
 
         params = get_param_list(request,'params')
         ignore_no_limit = get_bool_param(request, 'ignore_no_limit')
@@ -171,10 +172,7 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
         # CL 模式的自定义区间必须有效：下限 > 上限会产出退化 bin 网格
         if range_type == 'CL' and custom_low is not None and custom_high is not None \
                 and custom_low > custom_high:
-            return Response({
-                'error': 'invalid_custom_limits',
-                'detail': '自定义下限不能大于上限',
-            }, status=400)
+            return error_response('invalid_custom_limits', '自定义下限不能大于上限')
 
         results = {}
         site_col = get_site_column(df)
@@ -190,12 +188,10 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
         valid_params = [p for p in params if p in df.columns]
         missing_params = [p for p in params if p not in df.columns]
         if not valid_params:
-            return Response({
-                'error': 'no_valid_params',
-                'detail': '请求的参数均不在该文件中，请重新选择文件或参数',
-                'requested': params,
-                'missing': missing_params,
-            }, status=400)
+            return error_response(
+                'no_valid_params',
+                '请求的参数均不在该文件中，请重新选择文件或参数',
+                requested=params, missing=missing_params)
         params = valid_params
         skipped_params = []
         for param in params:
@@ -213,12 +209,9 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
                 # 无效对齐 boxplot 的 400 no_valid_params
                 skipped_params.append(param)
         if not results:
-            return Response({
-                'error': 'no_valid_params',
-                'detail': '请求的参数均无有效数值数据',
-                'requested': params,
-                'skipped': skipped_params,
-            }, status=400)
+            return error_response(
+                'no_valid_params', '请求的参数均无有效数值数据',
+                requested=params, skipped=skipped_params)
 
         return Response(clean_data({
             'file_id': datafile.id,
@@ -232,15 +225,14 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
     def wafer_map(self, request):
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
-            return Response({'error': err}, status=400)
+            return error_response(err)
 
         x_col, y_col = get_coord_columns(df)
         if not x_col or not y_col:
             # 400 而非 200：让前端 axios 错误路径弹出提示，避免晶圆图静默空白
-            return Response({
-                'error': 'no_coord_columns',
-                'detail': '该文件没有坐标列（X_COORD/Y_COORD），无法绘制晶圆图',
-            }, status=400)
+            return error_response(
+                'no_coord_columns',
+                '该文件没有坐标列（X_COORD/Y_COORD），无法绘制晶圆图')
 
         param = get_param(request, 'param')
         # 与 zonal_yield 同源同守卫（同一份 compute_wafer_fail_data）：stale
@@ -248,10 +240,7 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
         # 400 param_not_found，这里曾是 200 + 全局判定着色（R3① 守卫不一致）。
         # 空 param 保留「全局判定」语义。
         if param and param not in df.columns:
-            return Response({
-                'error': 'param_not_found',
-                'detail': f'参数 {param!r} 不在该文件中',
-            }, status=400)
+            return error_response('param_not_found', f'参数 {param!r} 不在该文件中')
         color_by = get_param(request, 'color_by', 'result')
 
         wm = compute_wafer_map_data(df, metadata, param, color_by, x_col, y_col)
@@ -277,7 +266,7 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
         file_ids = get_param_list(request, 'file_ids')
         param = get_param(request, 'param')
         if len(file_ids) < 2:
-            return Response({'error': 'need_at_least_2_files'}, status=400)
+            return error_response('need_at_least_2_files')
 
         # Load each selected file once (cached parse + DB row for filename).
         # 一次 in_bulk 取回全部行：逐 fid 查询在 8 个文件时就是 8 次 SELECT，
@@ -296,7 +285,7 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
             loaded.append((int(fid), df, metadata, df_obj))
 
         if len(loaded) < 2:
-            return Response({'error': 'need_at_least_2_files'}, status=400)
+            return error_response('need_at_least_2_files')
 
         # No param → lightweight call: return the common test items + file names
         # so the front-end can populate the param selector before drawing.
@@ -460,15 +449,15 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
         """Return raw data for two selected parameters, organized by Site for scatter plot."""
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
-            return Response({'error': err}, status=400)
+            return error_response(err)
 
         param_x = get_param(request, 'param_x')
         param_y = get_param(request, 'param_y')
         if not param_x or not param_y:
-            return Response({'error': 'param_x_and_param_y_required'}, status=400)
+            return error_response('param_x_and_param_y_required')
 
         if param_x not in df.columns or param_y not in df.columns:
-            return Response({'error': 'param_not_found'}, status=400)
+            return error_response('param_not_found')
 
         # 数据筛选（单文件口径，2026-08-20）：bin1 收窄行；其余开关对
         # param_x/param_y 防御性重放——任一被筛掉（非 fail 项等）→ 400，
@@ -492,11 +481,9 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
         # ValueError → 500，同类入参一个 400 一个 500 的守卫不一致（R3①）。
         # x==y 时 _sanitize 不去重，仍返回两元素，不会误伤同参数自相关。
         if len(_sanitize_numeric_params(df, [param_x, param_y])) < 2:
-            return Response({
-                'error': 'no_valid_params',
-                'detail': '请求的参数不是有效数值列，请重新选择参数',
-                'requested': [param_x, param_y],
-            }, status=400)
+            return error_response(
+                'no_valid_params', '请求的参数不是有效数值列，请重新选择参数',
+                requested=[param_x, param_y])
         keep = filter_test_items(
             df, metadata, [param_x, param_y],
             ignore_no_test_value=flags['ignore_no_test_value'],
@@ -508,10 +495,9 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
             low_cpk_items=low_cpk_items,
         )
         if len(keep) < 2:
-            return Response({
-                'error': 'no_valid_params',
-                'detail': '参数在当前数据筛选下无效（如非 Fail 测试项），请调整筛选或参数',
-            }, status=400)
+            return error_response(
+                'no_valid_params',
+                '参数在当前数据筛选下无效（如非 Fail 测试项），请调整筛选或参数')
 
         # iqr_multiplier 已在上方 flags 里读出（此前只喂给 low_cpk_items），
         # 现在一并贯穿到散点两轴的异常值判定，与直方图同口径。

@@ -11,6 +11,7 @@ from rest_framework.permissions import IsAuthenticated
 from apps.datafiles.models import DataFile
 from apps.datafiles.services import get_cached_parsed_file
 from apps.datafiles.utils import resolve_file_path
+from apps.common.errors import error_response
 from apps.common.user_settings import get_cpk_thresholds
 
 # 计算逻辑已抽到 services.py（供 HTML 报告共用，单一数据源）。这里 re-import
@@ -39,16 +40,19 @@ class DashboardSummaryView(APIView):
             else:
                 datafile = get_object_or_404(DataFile, pk=file_id, owner=request.user)
 
+            # 这三处刻意保持 **HTTP 200**（只统一响应体形状）：DashboardPage 是在
+            # then 分支里按 code 判「部分失败」渲染已有数据的，改成 4xx 会把它推进
+            # catch 路径（整页错误态），属于行为变更，不在 P1-5 形状统一范围内。
             if not datafile:
-                return Response({'error': 'no_data'})
+                return error_response('no_data', status=200)
 
             file_path = resolve_file_path(datafile.file_path)
             if not os.path.exists(file_path):
-                return Response({'error': 'file_not_found'})
+                return error_response('file_not_found', status=200)
 
             df, metadata, fmt = get_cached_parsed_file(datafile.id, request.user.pk, datafile)
             if df is None:
-                return Response({'error': 'parse_failed'})
+                return error_response('parse_failed', status=200)
 
             cpk_thresholds = get_cpk_thresholds(request.user)
             return Response(compute_dashboard_summary(
@@ -58,7 +62,7 @@ class DashboardSummaryView(APIView):
             raise
         except Exception as e:
             logger.exception(f"DashboardSummaryView error: {e}")
-            body = {'error': 'internal_error'}
-            if settings.DEBUG:
-                body['detail'] = str(e)
-            return Response(body, status=500)
+            # 只有 DEBUG 模式才外泄异常文本；统一形状下 detail 键恒在，
+            # 非 DEBUG 时为 null（test_dashboard_error_detail 守这条）。
+            return error_response(
+                'internal_error', str(e) if settings.DEBUG else None, 500)

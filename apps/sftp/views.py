@@ -11,6 +11,7 @@ from django.http import StreamingHttpResponse
 from apps.datafiles.views import _register_file, _is_summary_csv
 logger = logging.getLogger(__name__)
 
+from apps.common.errors import error_response
 from apps.datafiles.views import _user_upload_dir
 from apps.accounts.models import UserSetting
 from . import host_keys
@@ -217,7 +218,7 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
 
         sftp = self._get_connection(request)
         if not sftp:
-            return Response({'error': 'not_connected'}, status=400)
+            return error_response('not_connected')
 
         try:
             items = []
@@ -249,7 +250,7 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
             return Response({'path': path, 'items': items})
         except Exception as e:
             pool.invalidate(request.user.id)
-            return Response({'error': str(e)}, status=400)
+            return error_response('sftp_list_failed', str(e))
 
     # ------------------------------------------------------------------
     # Download single file → save to media
@@ -262,13 +263,13 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
         # 但值为 None 时拿到 None → os.path.splitext(None) TypeError → 500。
         # 与 download_and_parse 的 ``elif remote_path:`` 守卫对齐。
         if not remote_path:
-            return Response({'error': '缺少 path 参数'}, status=400)
+            return error_response('缺少 path 参数')
         if not _is_csv(remote_path):
-            return Response({'error': '仅支持 CSV 文件'}, status=400)
+            return error_response('仅支持 CSV 文件')
 
         sftp = self._get_connection(request)
         if not sftp:
-            return Response({'error': 'not_connected'}, status=400)
+            return error_response('not_connected')
 
         file_path = None
         try:
@@ -293,7 +294,7 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
             pool.invalidate(request.user.id)
             logger.warning('SFTP download failed for %s: %s', remote_path, e,
                            exc_info=True)
-            return Response({'error': str(e)}, status=400)
+            return error_response('sftp_download_failed', str(e))
 
     @action(detail=False, methods=['post'])
     def download_file_stream(self, request):
@@ -306,13 +307,13 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
         """
         remote_path = request.data.get('path')
         if not remote_path:
-            return Response({'error': '缺少 path 参数'}, status=400)
+            return error_response('缺少 path 参数')
         if not _is_csv(remote_path):
-            return Response({'error': '仅支持 CSV 文件'}, status=400)
+            return error_response('仅支持 CSV 文件')
 
         sftp = self._get_connection(request)
         if not sftp:
-            return Response({'error': 'not_connected'}, status=400)
+            return error_response('not_connected')
 
         timeout_sec = request.data.get('timeout')
         if timeout_sec is None:
@@ -330,7 +331,7 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
             pool.invalidate(request.user.id)
             logger.warning('SFTP stream download setup failed for %s: %s',
                            remote_path, e, exc_info=True)
-            return Response({'error': str(e)}, status=400)
+            return error_response('sftp_download_failed', str(e))
 
         response = StreamingHttpResponse(
             download_events_to_sse(events), content_type='text/event-stream')
@@ -351,7 +352,7 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
         """
         remote_path = request.data.get('path')
         if not remote_path:
-            return Response({'error': '缺少 path 参数'}, status=400)
+            return error_response('缺少 path 参数')
         timeout_sec = request.data.get('timeout')
         if timeout_sec is None:
             setting, _ = UserSetting.objects.get_or_create(user=request.user)
@@ -360,14 +361,14 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
 
         sftp = self._get_connection(request)
         if not sftp:
-            return Response({'error': 'not_connected'}, status=400)
+            return error_response('not_connected')
 
         # Collect CSV files only
         file_list = []
         self._collect_files(sftp, remote_path, file_list, '', True)
 
         if not file_list:
-            return Response({'error': '目录为空'}, status=400)
+            return error_response('目录为空')
 
         dir_name = os.path.basename(remote_path.rstrip('/')) or 'download'
         upload_dir = _user_upload_dir(request.user, 'batch')
@@ -391,16 +392,16 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
     def download_batch(self, request):
         paths = request.data.get('paths', [])
         if not paths:
-            return Response({'error': '未选择文件'}, status=400)
+            return error_response('未选择文件')
 
         # Filter to CSV only
         paths = [p for p in paths if _is_csv(p)]
         if not paths:
-            return Response({'error': '未选择文件'}, status=400)
+            return error_response('未选择文件')
 
         sftp = self._get_connection(request)
         if not sftp:
-            return Response({'error': 'not_connected'}, status=400)
+            return error_response('not_connected')
 
         try:
             upload_dir = _user_upload_dir(request.user, 'single')
@@ -431,7 +432,7 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
         except Exception as e:
             pool.invalidate(request.user.id)
             logger.warning('SFTP batch download aborted: %s', e, exc_info=True)
-            return Response({'error': str(e)}, status=400)
+            return error_response('sftp_download_failed', str(e))
 
     # ------------------------------------------------------------------
     # Download and parse (server-side, saves to user's batch dir)
@@ -446,19 +447,19 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
         if paths:
             paths = [p for p in paths if _is_csv(p)]
             if not paths:
-                return Response({'error': '无 CSV 文件'}, status=400)
+                return error_response('无 CSV 文件')
             return self._batch_download_parse(request, paths)
         elif remote_path:
             if not _is_csv(remote_path):
-                return Response({'error': '仅支持 CSV 文件'}, status=400)
+                return error_response('仅支持 CSV 文件')
             return self._single_download_parse(request, remote_path)
         else:
-            return Response({'error': '需要 path 或 paths 参数'}, status=400)
+            return error_response('需要 path 或 paths 参数')
 
     def _single_download_parse(self, request, remote_path):
         sftp = self._get_connection(request)
         if not sftp:
-            return Response({'error': 'not_connected'}, status=400)
+            return error_response('not_connected')
 
         file_path = None
         try:
@@ -482,12 +483,12 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
             pool.invalidate(request.user.id)
             logger.warning('SFTP download-and-parse failed for %s: %s',
                            remote_path, e, exc_info=True)
-            return Response({'error': str(e)}, status=400)
+            return error_response('sftp_parse_failed', str(e))
 
     def _batch_download_parse(self, request, paths):
         sftp = self._get_connection(request)
         if not sftp:
-            return Response({'error': 'not_connected'}, status=400)
+            return error_response('not_connected')
 
         try:
             # Determine batch name from first path's parent dir
@@ -529,7 +530,7 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
         except Exception as e:
             pool.invalidate(request.user.id)
             logger.warning('SFTP batch parse aborted: %s', e, exc_info=True)
-            return Response({'error': str(e)}, status=400)
+            return error_response('sftp_parse_failed', str(e))
 
     # ------------------------------------------------------------------
     # Helpers

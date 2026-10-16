@@ -5,9 +5,9 @@ from django.shortcuts import get_object_or_404
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
 from django.http import FileResponse
 
+from apps.common.errors import error_response
 from apps.datafiles.models import DataFile
 from apps.datafiles.services import get_cached_parsed_file
 from apps.common.export_naming import base_export_context, render_export_filename
@@ -39,21 +39,21 @@ class GageViewSet(viewsets.GenericViewSet):
         ignore_no_limit = request.data.get('ignore_no_limit', False)
 
         if not isinstance(assignments, list) or len(assignments) < 2:
-            return Response({'error': 'need_at_least_2_files'}, status=400)
+            return error_response('need_at_least_2_files')
 
         parsed = []
         for item in assignments:
             if not isinstance(item, dict) or item.get('file_id') is None or item.get('site') is None:
-                return Response({'error': 'invalid_assignment'}, status=400)
+                return error_response('invalid_assignment')
             try:
                 site = int(item['site'])
             except (TypeError, ValueError):
-                return Response({'error': 'invalid_assignment'}, status=400)
+                return error_response('invalid_assignment')
             parsed.append((int(item['file_id']), site))
 
         # 同一文件+工位重复分配会产生同名工作表，直接拒绝。
         if len(set(parsed)) != len(parsed):
-            return Response({'error': 'duplicate_assignment'}, status=400)
+            return error_response('duplicate_assignment')
 
         failures = []
         file_datasets = []
@@ -95,14 +95,13 @@ class GageViewSet(viewsets.GenericViewSet):
             })
 
         if failures:
-            return Response({
-                'error': failures[0]['error'],
-                'message': _failure_message(failures),
-                'details': failures,
-            }, status=400)
+            # details[] 里每项的 error 是「成功载荷内的逐项字段」，不是错误响应体，
+            # 保留原名（前端按项读取）；顶层才是统一错误形状。
+            return error_response(
+                failures[0]['error'], _failure_message(failures), 400, details=failures)
 
         if len(file_datasets) < 2:
-            return Response({'error': 'need_at_least_2_files'}, status=400)
+            return error_response('need_at_least_2_files')
 
         # ── Build Excel workbook using old version's complete logic ──
         from apps.gage.gage_legacy_builder import build_gage_summary_excel

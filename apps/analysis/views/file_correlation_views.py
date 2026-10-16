@@ -25,6 +25,7 @@ from apps.analysis.services.file_correlation import (
     NoCommonParamsError,
 )
 from apps.common.params import get_param, get_param_float
+from apps.common.errors import error_response
 
 from ._helpers import clean_data
 
@@ -46,7 +47,7 @@ class FileCorrelationActions:
         """
         sers, err = _load_fc_serial_series(request)
         if err is not None:
-            return Response(err[0], status=err[1])
+            return err
 
         serials = list_common_serials(sers['ATE'], sers['Bench'])
         return Response({'serials': serials, 'total': len(serials)})
@@ -71,7 +72,7 @@ class FileCorrelationActions:
         """
         payload, err = _load_file_correlation_pair(request)
         if err is not None:
-            return Response(err[0], status=err[1])
+            return err
 
         try:
             result = compute_file_correlation(
@@ -80,9 +81,7 @@ class FileCorrelationActions:
                 _parse_fc_config(request),
                 file1_name=payload['file1_name'], file2_name=payload['file2_name'])
         except NoCommonParamsError:
-            return Response(
-                {'error': 'no_common_params', 'detail': '两个文件没有相同的测试项'},
-                status=400)
+            return error_response('no_common_params', '两个文件没有相同的测试项')
 
         return Response(clean_data(result))
 
@@ -105,7 +104,7 @@ class FileCorrelationActions:
         """
         payload, err = _load_file_correlation_pair(request)
         if err is not None:
-            return Response(err[0], status=err[1])
+            return err
 
         try:
             result = compute_file_correlation(
@@ -114,9 +113,7 @@ class FileCorrelationActions:
                 _parse_fc_config(request),
                 file1_name=payload['file1_name'], file2_name=payload['file2_name'])
         except NoCommonParamsError:
-            return Response(
-                {'error': 'no_common_params', 'detail': '两个文件没有相同的测试项'},
-                status=400)
+            return error_response('no_common_params', '两个文件没有相同的测试项')
 
         # 延迟导入：避免 analysis → export 顶层耦合（export 会 import
         # analysis.services.statistics，已加载无循环风险；但保持轻量）。
@@ -145,8 +142,8 @@ class FileCorrelationActions:
 def _load_file_correlation_pair(request):
     """Load and align two files for file-correlation analysis.
 
-    Returns ``(payload, err)`` where ``err`` is ``None`` on success or a
-    ``(response_dict, http_status)`` tuple the caller returns as-is.
+    Returns ``(payload, err)`` where ``err`` is ``None`` on success or an
+    ``error_response(...)`` response the caller returns as-is.
     ``payload`` keys:
         ate_df / bench_df   — DataFrames carrying the ``__serial__`` column
         metadata_a / metadata_b — parser metadata (mins/maxs/units)
@@ -155,7 +152,7 @@ def _load_file_correlation_pair(request):
     file1_id = request.data.get('file1_id')
     file2_id = request.data.get('file2_id')
     if not file1_id or not file2_id:
-        return None, ({'error': 'need_two_files'}, 400)
+        return None, error_response('need_two_files')
 
     dfs = {}
     names = {}
@@ -176,14 +173,14 @@ def _load_file_correlation_pair(request):
         metas[label] = metadata or {}
 
     if len(dfs) < 2:
-        return None, ({'error': 'parse_failed'}, 400)
+        return None, error_response('parse_failed')
 
     ate_df = dfs['ATE']
     bench_df = dfs['Bench']
     ate_ser = ate_df['__serial__'] if '__serial__' in ate_df.columns else None
     bench_ser = bench_df['__serial__'] if '__serial__' in bench_df.columns else None
     if ate_ser is None or bench_ser is None:
-        return None, ({'error': 'no_serial_column'}, 400)
+        return None, error_response('no_serial_column')
 
     return {
         'ate_df': ate_df, 'bench_df': bench_df,
@@ -203,7 +200,7 @@ def _load_fc_serial_series(request):
     file1_id = request.data.get('file1_id')
     file2_id = request.data.get('file2_id')
     if not file1_id or not file2_id:
-        return None, ({'error': 'need_two_files'}, 400)
+        return None, error_response('need_two_files')
 
     sers = {}
     loaded = 0
@@ -219,9 +216,9 @@ def _load_fc_serial_series(request):
             sers[label] = pd.to_numeric(df[serial_col], errors='coerce')
 
     if loaded < 2:
-        return None, ({'error': 'parse_failed'}, 400)
+        return None, error_response('parse_failed')
     if len(sers) < 2:
-        return None, ({'error': 'no_serial_column'}, 400)
+        return None, error_response('no_serial_column')
 
     return sers, None
 

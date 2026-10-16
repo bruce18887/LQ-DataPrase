@@ -4,6 +4,7 @@ Pins the fix for "缺列时图表静默空白无报错"（serial_distribution +
 wafer_map）：之前缺 Serial_No / 坐标列时后端以 HTTP 200 返回
 ``{'error': '...'}``，前端把它当正常数据渲染出空图/空白（无任何提示）。
 修复后这些错误必须走 400 + detail，前端 axios 错误路径才能弹出提示。
+（统一错误形态后机器码在 ``code`` 键：``{code, message, detail}``。）
 
 Run directly:  python test/backend/test_serial_distribution_api.py
 (Runs against an isolated test DB via DiscoverRunner — dev db.sqlite3 is
@@ -135,7 +136,7 @@ class SerialDistributionApiTests(TestCase):
         df_row = self._register_file('no_serial.csv', _no_serial_csv())
         resp = self._post(df_row)
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.data['error'], 'no_serial_column')
+        self.assertEqual(resp.data['code'], 'no_serial_column')
         self.assertTrue(resp.data.get('detail'))
 
     def test_dut_only_column_falls_back_to_dut_no(self):
@@ -171,7 +172,7 @@ class SerialDistributionApiTests(TestCase):
             format='json',
         )
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.data['error'], 'file_id_required')
+        self.assertEqual(resp.data['code'], 'file_id_required')
 
 
 class WaferMapApiTests(TestCase):
@@ -214,7 +215,7 @@ class WaferMapApiTests(TestCase):
         df_row = self._register_file('no_coord.csv', _no_coord_csv())
         resp = self._post(df_row)
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.data['error'], 'no_coord_columns')
+        self.assertEqual(resp.data['code'], 'no_coord_columns')
         self.assertTrue(resp.data.get('detail'))
 
     def test_with_coord_columns_returns_points(self):

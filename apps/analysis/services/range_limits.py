@@ -1,9 +1,14 @@
-"""
-Limit resolution service for analysis views.
+"""图表「取值区间」解析：把 range_type 映射成一对上下限。
 
-Resolves lower/upper limits from a range_type string and a stats dict.
-This replaces duplicated switch-case logic that previously appeared in
-histogram, serial_distribution, site_stats, etc.
+与 ``services/statistics/limits.py`` 是两件事，别混（两者曾在 ``services/`` 下同名
+并存 ``limits.py``，读代码时无法区分 —— 架构评审 P1-3，本模块因此改名）：
+
+* 本模块从**已算好的 stats** 里按 ``RDL/DR/CL/S3/S4/S6`` 六种取数口径挑一对上下限，
+  喂给直方图 / 序列图的 bin 网格；
+* ``statistics/limits.py`` 管**规格限**：metadata 里 Min/Max 文本的解析、无效占位符
+  判定、失败行检测与 per-bin / per-test-item 失效统计。
+
+它取代了 histogram / serial_distribution / site_stats 等处重复的 switch-case。
 """
 
 

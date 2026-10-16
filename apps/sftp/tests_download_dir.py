@@ -278,7 +278,7 @@ class DownloadDirApiTests(APITestCase):
             resp = self.client.post(
                 '/api/v1/sftp/download_dir/', {'path': '/r'}, format='json')
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.data['error'], 'not_connected')
+        self.assertEqual(resp.data['code'], 'not_connected')
 
     def test_empty_dir_returns_400(self):
         with mock.patch.object(SftpViewSet, '_get_connection',
@@ -289,4 +289,4 @@ class DownloadDirApiTests(APITestCase):
             resp = self.client.post(
                 '/api/v1/sftp/download_dir/', {'path': '/r'}, format='json')
         self.assertEqual(resp.status_code, 400)
-        self.assertIn('目录为空', resp.data['error'])
+        self.assertIn('目录为空', resp.data['code'])

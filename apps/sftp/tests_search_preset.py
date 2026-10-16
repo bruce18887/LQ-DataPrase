@@ -98,10 +98,14 @@ class CreateTests(PresetBase):
         self.assertEqual(SftpSearchPreset.objects.count(), 0)
 
     def test_error_body_shape_matches_search_endpoint(self):
-        """校验失败一律 ``400 {'error': msg}``（spec §3.11），不是 DRF 那套 code/detail。"""
+        """校验失败一律 ``400 {code, message, detail}``（评审 P1-5，``error_response``）。"""
         resp = self.save('x', spec={'mode': 'name'})
-        self.assertEqual(list(resp.data.keys()), ['error'])
-        self.assertIsInstance(resp.data['error'], str)
+        self.assertEqual(list(resp.data.keys()), ['code', 'message', 'detail'])
+        # ``code`` 是稳定机器码，可读文案在 ``detail``（并镜像进 ``message``）：
+        # 把异常文本直接当 code 发出去会让客户端无法按码分支
+        self.assertEqual(resp.data['code'], 'invalid_search_spec')
+        self.assertIn('搜索条件不合法', resp.data['detail'])
+        self.assertEqual(resp.data['message'], resp.data['detail'])
 
 
 class OverwriteTests(PresetBase):
@@ -217,7 +221,7 @@ class DeleteTests(PresetBase):
     def test_delete_missing_id_is_404(self):
         resp = self.client.post(DELETE, {'id': 999999}, format='json')
         self.assertEqual(resp.status_code, 404)
-        self.assertEqual(resp.data['error'], '未找到预设')
+        self.assertEqual(resp.data['code'], '未找到预设')
 
     def test_delete_without_id_is_400(self):
         """缺参数是 400（客户端错），不能和「没有这条预设」的 404 混成一个。"""
