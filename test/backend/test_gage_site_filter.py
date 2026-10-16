@@ -101,7 +101,7 @@ class GageSiteFilterEndpointTests(APITestCase):
         resp = self._post([{'file_id': self.file.id, 'site': 1},
                            {'file_id': self.file.id, 'site': 9}])
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.data['error'], 'site_not_found')
+        self.assertEqual(resp.data['code'], 'site_not_found')
         self.assertIn('Site 9', resp.data['message'])
         self.assertEqual(resp.data['details'][0]['available_sites'], ['1', '2'])
 
@@ -114,21 +114,21 @@ class GageSiteFilterEndpointTests(APITestCase):
                                 {'file_id': self.file.id, 'site': 2}],
                 'only_bin1': False, 'ignore_no_limit': False}, format='json')
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.data['error'], 'no_site_column')
+        self.assertEqual(resp.data['code'], 'no_site_column')
 
     def test_duplicate_assignment_rejected(self):
         resp = self._post([{'file_id': self.file.id, 'site': 1},
                            {'file_id': self.file.id, 'site': 1}])
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.data['error'], 'duplicate_assignment')
+        self.assertEqual(resp.data['code'], 'duplicate_assignment')
 
     def test_fewer_than_two_assignments_rejected(self):
         resp = self._post([{'file_id': self.file.id, 'site': 1}])
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.data['error'], 'need_at_least_2_files')
+        self.assertEqual(resp.data['code'], 'need_at_least_2_files')
 
     def test_invalid_assignment_rejected(self):
         resp = self._post([{'file_id': self.file.id, 'site': 1},
                            {'file_id': self.file.id}])
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.data['error'], 'invalid_assignment')
+        self.assertEqual(resp.data['code'], 'invalid_assignment')

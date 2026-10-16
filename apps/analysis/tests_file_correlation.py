@@ -478,7 +478,7 @@ class FileCorrelationExportTests(TestCase):
         df2 = pd.DataFrame({'Serial_No': [1, 2], 'Other': [1.0, 2.0]})
         resp = self._call_export({1: df1, 2: df2})
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.json()['error'], 'no_common_params')
+        self.assertEqual(resp.json()['code'], 'no_common_params')
 
     def test_export_diff_rule_change_pct_and_tolerance_passthrough(self):
         import io

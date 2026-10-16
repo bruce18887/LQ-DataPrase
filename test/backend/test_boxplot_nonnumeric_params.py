@@ -72,7 +72,7 @@ class BoxplotNonNumericColumnTests(SimpleTestCase):
         response = _call_boxplot(self._df(), ['Dut_Pass'])
 
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.data.get('error'), 'no_valid_params')
+        self.assertEqual(response.data.get('code'), 'no_valid_params')
         self.assertEqual(response.data.get('requested'), ['Dut_Pass'])
         # 列在文件里，只是不可测 —— 不能报成 missing，否则前端会误判成「切错文件」。
         self.assertEqual(response.data.get('missing'), [])
@@ -82,7 +82,7 @@ class BoxplotNonNumericColumnTests(SimpleTestCase):
         response = _call_boxplot(self._df(), ['Site #'])
 
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.data.get('error'), 'no_valid_params')
+        self.assertEqual(response.data.get('code'), 'no_valid_params')
         self.assertEqual(response.data.get('missing'), [])
 
     def test_unknown_param_still_reports_missing(self):
@@ -90,7 +90,7 @@ class BoxplotNonNumericColumnTests(SimpleTestCase):
         response = _call_boxplot(self._df(), ['__bogus__'])
 
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.data.get('error'), 'no_valid_params')
+        self.assertEqual(response.data.get('code'), 'no_valid_params')
         self.assertEqual(response.data.get('missing'), ['__bogus__'])
 
     def test_mixed_params_drop_non_numeric_and_still_succeed(self):

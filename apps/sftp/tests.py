@@ -428,7 +428,7 @@ class SftpConnectionReuseTests(APITestCase):
         with mock.patch.object(pool, 'get_session', return_value=None):
             resp = self.client.get('/api/v1/sftp/list_files/?path=/')
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.json().get('error'), 'not_connected')
+        self.assertEqual(resp.json().get('code'), 'not_connected')
 
     def test_disconnect_closes_pooled_connection(self):
         from apps.sftp import pool

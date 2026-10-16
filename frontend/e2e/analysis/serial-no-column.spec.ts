@@ -152,7 +152,7 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
     const resp = await respPromise
     expect(resp.status(), '无序列号列必须返回 400（此前 200 静默空白）').toBe(400)
     const body = await resp.json()
-    expect(body.error).toBe('no_serial_column')
+    expect(body.code).toBe('no_serial_column')
 
     // 前端展示错误提示，且不渲染序列图容器（SerialChart 未挂载）
     const alert = page.locator(`${SINGLE} .serial-error-alert`)
@@ -458,7 +458,7 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
     const resp = await respPromise
     expect(resp.status(), '无坐标列必须返回 400（此前 200 静默空白）').toBe(400)
     const body = await resp.json()
-    expect(body.error).toBe('no_coord_columns')
+    expect(body.code).toBe('no_coord_columns')
 
     // 前端展示错误提示
     const alert = page.locator('.wafer-error-alert')

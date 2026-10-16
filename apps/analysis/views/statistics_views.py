@@ -36,7 +36,8 @@ from apps.analysis.services.data_services import (
     compute_wafer_zone_stats,
 )
 from apps.common.params import get_param, get_param_float, get_param_list
-from apps.analysis.services.limits import resolve_limits
+from apps.common.errors import error_response
+from apps.analysis.services.range_limits import resolve_limits
 
 from ._helpers import (
     clean_data,
@@ -57,7 +58,7 @@ class StatisticsViewSet(viewsets.GenericViewSet):
     def detect_fail(self, request):
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
-            return Response({'error': err}, status=400)
+            return error_response(err)
 
         fail_indices, fail_columns, fail_cells = detect_fail_data(df, metadata)
         unique_fail_rows = len(set(fail_indices))
@@ -77,7 +78,7 @@ class StatisticsViewSet(viewsets.GenericViewSet):
     def bin_stats(self, request):
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
-            return Response({'error': err}, status=400)
+            return error_response(err)
 
         stats = calculate_fail_bin_statistics(df, metadata)
         result = []
@@ -93,16 +94,13 @@ class StatisticsViewSet(viewsets.GenericViewSet):
     def site_stats(self, request):
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
-            return Response({'error': err}, status=400)
+            return error_response(err)
 
         param = get_param(request, 'param')
         if not param:
-            return Response({'error': 'param_required'}, status=400)
+            return error_response('param_required')
         if param not in df.columns:
-            return Response({
-                'error': 'param_not_found',
-                'detail': f'参数 {param!r} 不在该文件中',
-            }, status=400)
+            return error_response('param_not_found', f'参数 {param!r} 不在该文件中')
 
         range_type = get_param(request, 'range_type', 'RDL')
         # CL 语义三端点统一为「用户自定义限」（与 histogram 同口径）：未提供
@@ -119,10 +117,7 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         site_col = get_site_column(df)
 
         if not site_col:
-            return Response({
-                'error': 'no_site_column',
-                'detail': '该文件没有 Site 列，无法进行站点统计',
-            }, status=400)
+            return error_response('no_site_column', '该文件没有 Site 列，无法进行站点统计')
 
         stats = compute_range_statistics(data_series, metadata, param)
         if range_type == 'CL' and custom_low is not None and custom_high is not None:
@@ -151,21 +146,16 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         """
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
-            return Response({'error': err}, status=400)
+            return error_response(err)
 
         param = get_param(request, 'param')
         if param and param not in df.columns:
-            return Response({
-                'error': 'param_not_found',
-                'detail': f'参数 {param!r} 不在该文件中',
-            }, status=400)
+            return error_response('param_not_found', f'参数 {param!r} 不在该文件中')
 
         x_col, y_col = get_coord_columns(df)
         if not x_col or not y_col:
-            return Response({
-                'error': 'no_coord_columns',
-                'detail': '该文件没有坐标列（X_COORD/Y_COORD），无法分区统计',
-            }, status=400)
+            return error_response(
+                'no_coord_columns', '该文件没有坐标列（X_COORD/Y_COORD），无法分区统计')
 
         xs = pd.to_numeric(get_1d_from(df, x_col), errors='coerce')
         ys = pd.to_numeric(get_1d_from(df, y_col), errors='coerce')
@@ -195,14 +185,15 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         """
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
-            return Response({'error': err}, status=400)
+            return error_response(err)
 
         params = get_param_list(request,'params')
         method = get_param(request, 'method', 'pearson')
 
         # Validate method
         if method not in ['pearson', 'spearman', 'kendall']:
-            return Response({'error': 'invalid_method', 'valid_methods': ['pearson', 'spearman', 'kendall']}, status=400)
+            return error_response(
+                'invalid_method', valid_methods=['pearson', 'spearman', 'kendall'])
 
         # If no params specified, use all columns with limits
         if not params:
@@ -239,12 +230,14 @@ class StatisticsViewSet(viewsets.GenericViewSet):
             )
 
         if not params or len(params) < 2:
-            return Response({'error': 'need_at_least_2_params', 'available_params': get_columns_with_limits(df, metadata)}, status=400)
+            return error_response(
+                'need_at_least_2_params',
+                available_params=get_columns_with_limits(df, metadata))
 
         try:
             result = compute_correlation_matrix(df, params, method)
         except (TypeError, ValueError) as e:
-            return Response({'error': 'correlation_failed', 'detail': str(e)}, status=400)
+            return error_response('correlation_failed', str(e))
 
         return Response(clean_data({
             'file_id': datafile.id,
@@ -264,13 +257,13 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         """
         file_ids = get_param_list(request,'file_ids')
         if not file_ids:
-            return Response({'error': 'file_ids_required'}, status=400)
+            return error_response('file_ids_required')
 
         # Load all files
         file_data_list = _load_files_from_request(request, file_ids)
 
         if not file_data_list:
-            return Response({'error': 'no_valid_files'}, status=400)
+            return error_response('no_valid_files')
 
         result = compute_bin_trend(file_data_list)
 
@@ -290,13 +283,13 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         """
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
-            return Response({'error': err}, status=400)
+            return error_response(err)
 
         params = get_param_list(request,'params')
         group_by = get_param(request, 'group_by')
 
         if not params:
-            return Response({'error': 'params_required'}, status=400)
+            return error_response('params_required')
 
         # Filter out invalid params (blank, all-NaN, non-numeric)
         requested_params = list(params)
@@ -307,12 +300,11 @@ class StatisticsViewSet(viewsets.GenericViewSet):
             # `R_Kelvin_AGND` after switching from gage_m_S4.csv to an
             # ETS88 file). Mirrors the same shape as the histogram 400.
             missing = [p for p in requested_params if p and str(p).strip() and p not in df.columns]
-            return Response({
-                'error': 'no_valid_params',
-                'detail': '请求的参数均不在该文件中，请重新选择文件或参数',
-                'requested': requested_params,
-                'missing': missing,
-            }, status=400)
+            return error_response(
+                'no_valid_params',
+                '请求的参数均不在该文件中，请重新选择文件或参数',
+                requested=requested_params,
+                missing=missing)
 
         # data_only_bin1 narrows the rows before the per-param series
         # extraction so overall / by_site / by_bin stats only cover
@@ -407,16 +399,16 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         param = get_param(request, 'param')
 
         if not file_ids:
-            return Response({'error': 'file_ids_required'}, status=400)
+            return error_response('file_ids_required')
 
         if not param:
-            return Response({'error': 'param_required'}, status=400)
+            return error_response('param_required')
 
         # Load all files
         file_data_list = _load_files_from_request(request, file_ids)
 
         if not file_data_list:
-            return Response({'error': 'no_valid_files'}, status=400)
+            return error_response('no_valid_files')
 
         result = compute_param_trend(file_data_list, param)
 

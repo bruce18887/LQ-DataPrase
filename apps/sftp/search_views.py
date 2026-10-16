@@ -3,15 +3,15 @@
 端点单独成模块，仿 :mod:`apps.sftp.config_views` 的抽离方式：``views.py`` 已 562 行、
 600 行是硬上限，这里再加搜索与预设两组 action 一定会顶穿。
 
-**错误契约（spec §3.11 在这里表态）**：项目里错误体有两套并存（视图手写的
-``{'error': msg}`` 与 ``custom_exception_handler`` 的 ``{code, message, detail}``），
-本模块一律走前者：
+**错误契约（spec §3.11 在这里表态）**：视图主动 return 的错误已统一成
+:func:`apps.common.errors.error_response` 的 ``{code, message, detail}``（评审 P1-5），
+本模块不再手写 ``{'error': msg}``：
 
-* 流开始**前**的失败 → ``400 {'error': msg}``，与 ``views.py`` 现有十余处同形，
-  ``utils/ssePost.ts`` 只读 ``err.error``；未连接复用既有哨兵 ``'not_connected'``。
-* 流开始**后**的错误**只能**是带内 ``error`` 事件。生成器内绝不抛 DRF 异常 ——
-  异常处理器拿不到已经开掉的流，只会留下一截没有收尾的 SSE，前端连「失败了」都
-  判断不出来。
+* 流开始**前**的失败 → ``error_response(...)`` 的 400/404，与 ``views.py`` 同形；
+  未连接仍复用既有哨兵 ``'not_connected'``，它现在是 ``code`` 的值，前端分支不变。
+* 流开始**后**的错误**只能**是带内 ``error`` 事件（``{'kind': 'error', ...}``，
+  不是 HTTP 错误体）。生成器内绝不抛 DRF 异常 —— 异常处理器拿不到已经开掉的流，
+  只会留下一截没有收尾的 SSE，前端连「失败了」都判断不出来。
 """
 
 import json
@@ -22,6 +22,8 @@ from django.http import StreamingHttpResponse
 from rest_framework.decorators import action
 from rest_framework.renderers import BaseRenderer, JSONRenderer
 from rest_framework.response import Response
+
+from apps.common.errors import error_response
 
 from .downloads import download_events_to_sse
 from .models import SftpSearchPreset
@@ -43,7 +45,7 @@ class SSERenderer(BaseRenderer):
     才现形（Task 11 Step 5 抓出来的）。
 
     ``render()`` 因此只会在**非流**的失败响应上被调用，必须回 JSON：
-    ``utils/ssePost.ts`` 读的就是 ``err.error``。
+    ``{code, message, detail}``（:func:`apps.common.errors.error_response` 的响应体）。
     """
 
     media_type = 'text/event-stream'
@@ -144,22 +146,22 @@ class SftpSearchMixin:
         try:
             spec: SearchSpec = parse_spec(request.data)
         except SearchSpecError as exc:
-            return Response({'error': str(exc)}, status=400)
+            return error_response('invalid_search_spec', str(exc))
 
         try:
             session = self._build_session(request.user.id, spec.workers)
         except SearchSessionError as exc:
             if _is_not_connected(exc):
-                return Response({'error': 'not_connected'}, status=400)
+                return error_response('not_connected')
             logger.warning('SFTP search: no connection for user %s: %s',
                            request.user.id, exc)
-            return Response({'error': str(exc)}, status=400)
+            return error_response('search_connect_failed', str(exc))
         except Exception as exc:                      # noqa: BLE001 - 开流之前一律 400
             # 主机密钥不匹配（spec §3.7 的安全边界，不降级不吞）等建连故障都在这一支：
             # 它们必须是一句可读的 400，而不是异常处理器那页 HTML 500。
             logger.warning('SFTP search: connection setup failed for user %s: %s',
                            request.user.id, exc, exc_info=True)
-            return Response({'error': str(exc)}, status=400)
+            return error_response('search_connect_failed', str(exc))
 
         runner = self._runner_class(spec, session)
         response = StreamingHttpResponse(
@@ -197,7 +199,7 @@ class SftpSearchMixin:
 
         **``parse_spec`` 是这道门的门禁**：预设里存一个跑不通的 spec，等于给用户一个
         点了才报错的按钮 —— 搜索端点会拒的条件，保存时必须更早拒（校验失败一律
-        ``400 {'error': msg}``，与 :meth:`search` 同形）。
+        ``400 {code, message, detail}``，与 :meth:`search` 同形）。
 
         同名即覆盖（``overwrite`` 缺省 True，仿 ``save_config``）；显式 ``false`` 时同名
         存在只报 400，绝不悄悄吃掉旧预设。上限只数**本人**的行：``existing`` 命中说明
@@ -205,31 +207,32 @@ class SftpSearchMixin:
         """
         body = _json_object(request)
         if body is None:
-            return Response({'error': '请求体必须是 JSON 对象'}, status=400)
+            return error_response('请求体必须是 JSON 对象')
 
         name = body.get('name')
         if not isinstance(name, str) or not name.strip():
-            return Response({'error': '预设名称不能为空'}, status=400)
+            return error_response('预设名称不能为空')
         name = name.strip()
         if len(name) > _PRESET_NAME_MAX:
-            return Response(
-                {'error': f'预设名称最长 {_PRESET_NAME_MAX} 字符，'
-                          f'收到 {len(name)} 字符'}, status=400)
+            return error_response(
+                f'预设名称最长 {_PRESET_NAME_MAX} 字符，'
+                f'收到 {len(name)} 字符')
 
         raw_spec = body.get('spec')
         try:
             parse_spec(raw_spec)
         except SearchSpecError as exc:
-            return Response({'error': f'搜索条件不合法：{exc}'}, status=400)
+            return error_response('invalid_search_spec', f'搜索条件不合法：{exc}')
 
         mine = SftpSearchPreset.objects.filter(owner=request.user)
         existing = mine.filter(name=name).first()
         if existing is not None and _is_false(body.get('overwrite', True)):
-            return Response({'error': f'预设「{name}」已存在'}, status=400)
+            return error_response('preset_exists', f'预设「{name}」已存在')
         if existing is None and mine.count() >= PRESET_MAX_PER_USER:
-            return Response(
-                {'error': f'预设数量已达上限 {PRESET_MAX_PER_USER} 条，'
-                          f'请先删除不再使用的预设'}, status=400)
+            return error_response(
+                'preset_limit_reached',
+                f'预设数量已达上限 {PRESET_MAX_PER_USER} 条，'
+                f'请先删除不再使用的预设')
 
         # ``owner`` 必须在 kwargs 里显式传：queryset 上的 filter 条件不进 INSERT
         # （``update_or_create`` 只把 kwargs 当创建字段）。少写它就是 owner_id NULL 的
@@ -249,16 +252,16 @@ class SftpSearchMixin:
         """
         body = _json_object(request)
         if body is None:
-            return Response({'error': '请求体必须是 JSON 对象'}, status=400)
+            return error_response('请求体必须是 JSON 对象')
 
         raw_id = body.get('id')
         try:
             preset_id = int(raw_id)
         except (TypeError, ValueError):
-            return Response({'error': f'id 必须是整数，收到 {raw_id!r}'}, status=400)
+            return error_response('invalid_preset_id', f'id 必须是整数，收到 {raw_id!r}')
 
         deleted, _detail = SftpSearchPreset.objects.filter(
             owner=request.user, id=preset_id).delete()
         if not deleted:
-            return Response({'error': '未找到预设'}, status=404)
+            return error_response('未找到预设', status=404)
         return Response({'deleted': True})

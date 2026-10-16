@@ -62,7 +62,7 @@ class SiteStatsParamGuardTests(_PatchedViewMixin, SimpleTestCase):
         response.render()
 
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.data.get('error'), 'param_not_found')
+        self.assertEqual(response.data.get('code'), 'param_not_found')
 
     def test_bool_param_column_does_not_500(self):
         """bool dtype 列：``is_numeric_dtype(True)==True`` 的历史坑（lessons R4①）。
@@ -93,7 +93,7 @@ class SiteStatsParamGuardTests(_PatchedViewMixin, SimpleTestCase):
         response.render()
 
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.data.get('error'), 'no_site_column')
+        self.assertEqual(response.data.get('code'), 'no_site_column')
         # 大文件有 800+ 列，把列名全量塞进错误响应既无用又撑大载荷
         self.assertNotIn('available_columns', response.data)
 
@@ -114,7 +114,7 @@ class FileIdTypeGuardTests(SimpleTestCase):
         response.render()
 
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.data.get('error'), 'file_id_invalid')
+        self.assertEqual(response.data.get('code'), 'file_id_invalid')
 
 
 class ZonalYieldServiceTests(SimpleTestCase):
@@ -235,7 +235,7 @@ class ZonalYieldApiTests(_PatchedViewMixin, SimpleTestCase):
         response.render()
 
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.data.get('error'), 'param_not_found')
+        self.assertEqual(response.data.get('code'), 'param_not_found')
 
     def test_missing_coord_columns_returns_400(self):
         from apps.analysis.views import StatisticsViewSet
@@ -248,7 +248,7 @@ class ZonalYieldApiTests(_PatchedViewMixin, SimpleTestCase):
         response.render()
 
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.data.get('error'), 'no_coord_columns')
+        self.assertEqual(response.data.get('code'), 'no_coord_columns')
 
     def test_single_coordinate_row_still_returns_zones(self):
         """只有 1 个 die（radius 退化）时不崩，点落在中心区。"""

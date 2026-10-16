@@ -4,7 +4,12 @@
  * 从 `api/sftp.ts:210-249` **逐字提取**（计划 Task 12），本文件的函数体与原实现
  * 一字符一字符相同：baseURL 拼接（Electron `file://` 兼容）、`Authorization: Bearer`
  * 头、按 `'\n\n'` 切帧且 `pop()` 保留残段、JSON.parse 失败静默跳过、AbortError 由
- * postSse 自身**不**吞（吞在调用方 catch）、非 2xx 读 `err.error` 抛错。
+ * postSse 自身**不**吞（吞在调用方 catch）、非 2xx 抛错。
+ *
+ * ⚠ 唯一的例外（2026-10-16 评审 P1-5）：非 2xx 的取值口径跟着后端从
+ * `{'error': 机器码}` 改成 `{code, message, detail}`——那是后端统一错误形态的必然连带，
+ * 不是「顺手优化」。抛出的文案刻意保留「只有机器码时原样显示机器码」，因为下载/搜索两条
+ * 路径都有调用方按 `'not_connected'` 这段**文本**做分支。
  *
  * 为什么单独成文件：下载主链路（`sftpApi.downloadFileStream` / `downloadDirStream`）
  * 与新的搜索流（`api/sftpSearch.ts`）要用**同一个** SSE 解析器。放在 `api/sftp.ts`
@@ -44,8 +49,13 @@ export async function postSse(
     signal,
   })
   if (!response.ok) {
-    const err = await response.json().catch(() => ({ error: '请求失败' }))
-    throw new Error(err.error || `HTTP ${response.status}`)
+    // 后端错误体统一为 {code, message, detail}（评审 P1-5，此前是 {'error': 机器码}）。
+    // 保留「只有机器码时就把码当文案」的行为：调用方按文本分支，
+    // 如 stores/sftpSearch.ts → api/sftpSearch.ts::isNotConnectedMessage 认 'not_connected'，
+    // 只换成中文提示会让「请先连接」的引导整条失效。
+    const err = await response.json().catch(() => ({}) as Record<string, unknown>)
+    const text = err.message || err.detail || err.code
+    throw new Error(typeof text === 'string' && text ? text : `HTTP ${response.status}`)
   }
   const reader = response.body!.getReader()
   const decoder = new TextDecoder()

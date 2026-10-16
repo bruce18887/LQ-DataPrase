@@ -73,7 +73,7 @@ class SerialColumnPartIdFallbackTests(SimpleTestCase):
         resp = AnalysisViewSet.as_view({'post': 'serial_distribution'})(request)
         resp.render()
         self.assertEqual(resp.status_code, 400, resp.content)
-        self.assertEqual(resp.data['error'], 'param_is_metadata')
+        self.assertEqual(resp.data['code'], 'param_is_metadata')
 
 
 class SerialColumnCandidatesTests(SimpleTestCase):
@@ -185,7 +185,7 @@ class SerialColumnCandidatesTests(SimpleTestCase):
                                        'serial_col': 'Nope'})
         resp.render()
         self.assertEqual(resp.status_code, 400, resp.content)
-        self.assertEqual(resp.data['error'], 'serial_col_not_found')
+        self.assertEqual(resp.data['code'], 'serial_col_not_found')
 
     def test_serial_distribution_no_candidate_400(self):
         df = pd.DataFrame({'Site_No': [1, 1], 'SW_Bin': [1, 1],
@@ -193,7 +193,7 @@ class SerialColumnCandidatesTests(SimpleTestCase):
         resp = self._patched_post(df, {'param': 'KELVIN_VIN'})
         resp.render()
         self.assertEqual(resp.status_code, 400, resp.content)
-        self.assertEqual(resp.data['error'], 'no_serial_column')
+        self.assertEqual(resp.data['code'], 'no_serial_column')
 
     def test_param_list_excludes_all_serial_candidates(self):
         """_n 形态（Serial_No + Dut_No 并存）：参数列表两者都不能出现。

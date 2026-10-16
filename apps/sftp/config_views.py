@@ -9,6 +9,7 @@ from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from apps.common.errors import error_response
 from .models import SftpConfig
 from .serializers import SftpConfigSerializer
 
@@ -59,14 +60,11 @@ class SftpConfigMixin:
         elif name:
             qs = qs.filter(name=name)
         else:
-            return Response(
-                {'error': '需要 name 或 id 参数'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return error_response('需要 name 或 id 参数')
 
         instance = qs.first()
         if not instance:
-            return Response({'error': '未找到配置'}, status=status.HTTP_404_NOT_FOUND)
+            return error_response('未找到配置', status=status.HTTP_404_NOT_FOUND)
 
         instance.delete()
         return Response({'deleted': True})

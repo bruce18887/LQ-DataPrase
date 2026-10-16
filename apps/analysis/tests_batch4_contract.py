@@ -81,7 +81,7 @@ class WaferMapParamGuardTests(_PatchedDfTest):
         response = view(request)
         response.render()
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.data.get('error'), 'param_not_found')
+        self.assertEqual(response.data.get('code'), 'param_not_found')
 
     def test_empty_param_keeps_global_judgment(self):
         # 空 param = 全局判定语义，不得被守卫误伤
@@ -185,16 +185,16 @@ class SerialChartConfigGuardTests(_PatchedDfTest):
     def test_non_json_string_returns_400(self):
         response = self._post('limit')
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.data.get('error'), 'invalid_chart_config')
+        self.assertEqual(response.data.get('code'), 'invalid_chart_config')
 
     def test_non_array_json_returns_400(self):
         response = self._post({'limit': True})
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.data.get('error'), 'invalid_chart_config')
+        self.assertEqual(response.data.get('code'), 'invalid_chart_config')
 
     def test_valid_list_still_passes_guard(self):
         response = self._post(['limit'])
-        self.assertNotEqual(response.data.get('error'), 'invalid_chart_config',
+        self.assertNotEqual(response.data.get('code'), 'invalid_chart_config',
                             response.content)
 
 
@@ -255,7 +255,7 @@ class HistogramSkippedParamsTests(_PatchedDfTest):
         response = view(request)
         response.render()
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.data.get('error'), 'no_valid_params')
+        self.assertEqual(response.data.get('code'), 'no_valid_params')
 
     def test_median_field_present(self):
         out = compute_histogram_stats(

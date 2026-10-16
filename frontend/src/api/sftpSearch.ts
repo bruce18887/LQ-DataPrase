@@ -197,7 +197,7 @@ export interface SearchPresetItem {
   updated_at: string
 }
 
-/** 未连接哨兵：`search_views` 在会话缺失时回 `400 {"error": "not_connected"}`。 */
+/** 未连接哨兵：`search_views` 在会话缺失时回 `400 {"code": "not_connected"}`。 */
 export const NOT_CONNECTED_SENTINEL = 'not_connected'
 
 /**

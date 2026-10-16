@@ -17,7 +17,7 @@ from apps.analysis.services.statistics import (
 )
 from apps.analysis.services.statistics.helpers import _dense_x_grid
 from apps.analysis.services.statistics.outliers import detect_outliers_iqr
-from apps.analysis.services.limits import resolve_limits
+from apps.analysis.services.range_limits import resolve_limits
 from apps.common.user_settings import DEFAULT_CPK_THRESHOLDS
 
 

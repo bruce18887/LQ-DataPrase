@@ -36,6 +36,7 @@ from apps.analysis.services.data_services import (
 )
 from apps.common.params import get_param, get_param_float, get_param_list
 from apps.common.user_settings import get_cpk_thresholds
+from apps.common.errors import error_response
 
 from ._helpers import (
     clean_data,
@@ -52,30 +53,30 @@ class ParamStatActions:
     def serial_distribution(self, request):
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
-            return Response({'error': err}, status=400)
+            return error_response(err)
 
         param = get_param(request, 'param')
         if not param:
-            return Response({'error': 'param_required'}, status=400)
+            return error_response('param_required')
         if param not in df.columns:
-            return Response({'error': 'param_not_found'}, status=400)
+            return error_response('param_not_found')
         # Reject serial/site columns as data param — they are grouping keys, not values
         # serial_col 可选：前端选择器覆盖自动检测（Serial_No > Dut_No > PART_ID）
         serial_col_req = get_param(request, 'serial_col') or None
         if serial_col_req and serial_col_req not in df.columns:
-            return Response({'error': 'serial_col_not_found',
-                             'detail': f'指定的序列列 {serial_col_req} 不存在'}, status=400)
+            return error_response('serial_col_not_found',
+                                  f'指定的序列列 {serial_col_req} 不存在')
         serial_col = get_serial_column(df, preferred=serial_col_req)
         site_col = get_site_column(df)
         if param == serial_col or param == site_col:
-            return Response({'error': 'param_is_metadata',
-                             'detail': f'{param} 是分组列，不能作为数据参数'}, status=400)
+            return error_response('param_is_metadata',
+                                  f'{param} 是分组列，不能作为数据参数')
         # Validate param has numeric data
         col = get_1d_from(df, param)
         if isinstance(col, pd.DataFrame):
             col = col.iloc[:, 0]
         if col.dropna().empty:
-            return Response({'error': 'param_no_valid_data'}, status=400)
+            return error_response('param_no_valid_data')
 
         chart_config_raw = get_param(request, 'chart_config', '[]')
         # 客户端可控输入：非法 JSON（GET ?chart_config=limit）或非数组类型
@@ -85,10 +86,9 @@ class ParamStatActions:
         except (TypeError, ValueError):
             chart_config = None
         if not isinstance(chart_config, list):
-            return Response({
-                'error': 'invalid_chart_config',
-                'detail': 'chart_config 必须是 JSON 数组（如 ["limit","s3","s6"]）',
-            }, status=400)
+            return error_response(
+                'invalid_chart_config',
+                'chart_config 必须是 JSON 数组（如 ["limit","s3","s6"]）')
         range_type = get_param(request, 'range_type', 'RDL')
         # data_only_bin1 narrows the rows after param validation, so the
         # per-unit serial series only contains pass-bin units.
@@ -105,14 +105,12 @@ class ParamStatActions:
                 custom_low=get_param_float(request, 'custom_low'),
                 custom_high=get_param_float(request, 'custom_high'))
         except TypeError:
-            return Response({'error': 'serial_distribution_failed',
-                             'detail': '数据列存在重复或格式异常'}, status=400)
+            return error_response('serial_distribution_failed', '数据列存在重复或格式异常')
         if result is None:
             # 400 而非 200：让前端 axios 错误路径弹出提示，避免序列图静默空白
-            return Response({
-                'error': 'no_serial_column',
-                'detail': '该文件没有序列列（Serial_No / Dut_No / PART_ID），无法绘制序列分布图；可用 serial_col 参数显式指定',
-            }, status=400)
+            return error_response(
+                'no_serial_column',
+                '该文件没有序列列（Serial_No / Dut_No / PART_ID），无法绘制序列分布图；可用 serial_col 参数显式指定')
 
         return Response(clean_data(result))
 
@@ -120,7 +118,7 @@ class ParamStatActions:
     def cpk(self, request):
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
-            return Response({'error': err}, status=400)
+            return error_response(err)
 
         params = get_param_list(request, 'params')
         if not params:
@@ -132,12 +130,11 @@ class ParamStatActions:
         params = _filter_blank_params(params)
         valid_params = [p for p in params if p in df.columns]
         if params and not valid_params:
-            return Response({
-                'error': 'param_not_found',
-                'detail': '请求的参数均不在该文件中，请重新选择文件或参数',
-                'requested': params,
-                'missing': [p for p in params if p not in df.columns],
-            }, status=400)
+            return error_response(
+                'param_not_found',
+                '请求的参数均不在该文件中，请重新选择文件或参数',
+                requested=params,
+                missing=[p for p in params if p not in df.columns])
         params = valid_params
 
         result = compute_cpk_table_data(
@@ -159,16 +156,13 @@ class ParamStatActions:
         """
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
-            return Response({'error': err}, status=400)
+            return error_response(err)
 
         param = get_param(request, 'param')
         if not param:
-            return Response({'error': 'param_required'}, status=400)
+            return error_response('param_required')
         if param not in df.columns:
-            return Response({
-                'error': 'param_not_found',
-                'detail': f'参数 {param!r} 不在该文件中',
-            }, status=400)
+            return error_response('param_not_found', f'参数 {param!r} 不在该文件中')
 
         # data_only_bin1 narrows the rows before series extraction so the
         # QQ plot (n / outlier stats) only covers pass-bin rows; the
@@ -182,13 +176,13 @@ class ParamStatActions:
             data_series = data_series.iloc[:, 0]
         # Skip if column is all-NaN or non-numeric
         if data_series.dropna().empty:
-            return Response({'error': 'param_no_valid_data'}, status=400)
+            return error_response('param_no_valid_data')
         try:
             result = compute_qqplot(
                 data_series, metadata, param,
                 iqr_multiplier=get_param_float(request, 'iqr_multiplier', 1.5))
         except (TypeError, ValueError) as e:
-            return Response({'error': 'qqplot_failed', 'detail': str(e)}, status=400)
+            return error_response('qqplot_failed', str(e))
 
         return Response(clean_data(result))
 
@@ -206,7 +200,7 @@ class ParamStatActions:
         """
         df, datafile, metadata, err = _load_df_from_request(request)
         if err:
-            return Response({'error': err}, status=400)
+            return error_response(err)
 
         test_time_col = get_param(request, 'test_time_col')
         # 不在视图层做 float()：服务层 compute_uph 对无效的 manual_test_time_sec

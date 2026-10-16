@@ -13,6 +13,7 @@ from django.http import FileResponse
 from apps.export.excelize_helpers import make_header_style, make_data_style, save_excelize
 from apps.export.user_prefs import get_export_dpi
 from apps.export.html_report import build_batch_html_report
+from apps.common.errors import error_response
 from apps.common.export_naming import base_export_context, render_export_filename
 
 from apps.datafiles.models import DataFile
@@ -49,12 +50,12 @@ class BatchReportViewSet(viewsets.GenericViewSet):
         """Return computed yield data for a batch of imported files."""
         batch_name = request.query_params.get('batch_name', '')
         if not batch_name:
-            return Response({'error': 'batch_name required'}, status=400)
+            return error_response('param_required', 'batch_name required')
 
         try:
             payload = compute_batch_yield_data(request.user, batch_name)
         except BatchNotAvailableError as e:
-            return Response({'error': str(e)}, status=404)
+            return error_response('batch_not_available', str(e), 404)
         return Response(payload)
 
     @action(detail=False, methods=['post'])
@@ -62,12 +63,12 @@ class BatchReportViewSet(viewsets.GenericViewSet):
         """批次良率的自包含 HTML 报告（含内联 base64 图表）。"""
         batch_name = request.data.get('batch_name', '')
         if not batch_name:
-            return Response({'error': 'batch_name required'}, status=400)
+            return error_response('param_required', 'batch_name required')
 
         try:
             payload = compute_batch_yield_data(request.user, batch_name)
         except BatchNotAvailableError as e:
-            return Response({'error': str(e)}, status=404)
+            return error_response('batch_not_available', str(e), 404)
 
         html = build_batch_html_report(
             payload,
@@ -89,7 +90,7 @@ class BatchReportViewSet(viewsets.GenericViewSet):
     def generate_report(self, request):
         file_ids = request.data.get('file_ids', [])
         if not file_ids:
-            return Response({'error': 'no_files'}, status=400)
+            return error_response('no_files')
 
         # fid 非整数 → 400（原实现 int(fid) 抛 ValueError → 500）；
         # 文件不存在 / 不属于当前用户 → 404（原实现 objects.get 抛
@@ -100,9 +101,8 @@ class BatchReportViewSet(viewsets.GenericViewSet):
             try:
                 normalized_ids.append(int(fid))
             except (TypeError, ValueError):
-                return Response(
-                    {'error': 'invalid_file_id', 'detail': f'file_id 必须为整数: {fid!r}'},
-                    status=400)
+                return error_response(
+                    'invalid_file_id', f'file_id 必须为整数: {fid!r}')
 
         phases = []
         for fid in normalized_ids:

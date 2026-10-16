@@ -499,17 +499,17 @@ class FileCorrelationSerialsApiTests(TestCase):
         client.force_authenticate(user=self.user)
         resp = client.post('/api/v1/analysis/file_correlation_serials/', {}, format='json')
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.json()['error'], 'need_two_files')
+        self.assertEqual(resp.json()['code'], 'need_two_files')
 
     def test_unparseable_files_returns_parse_failed(self):
         # 两个文件都解析失败（get_cached_parsed_file 返回 None）→ 400 parse_failed
         resp = self._call({}, parsed=(None, None, None))
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.json()['error'], 'parse_failed')
+        self.assertEqual(resp.json()['code'], 'parse_failed')
 
     def test_missing_serial_column_returns_no_serial_column(self):
         # 文件加载成功但序列列缺失 → 400 no_serial_column（区别于 parse_failed）
         df = pd.DataFrame({'ParamA': [1.0, 2.0]})
         resp = self._call({1: df, 2: df}, serial_col=None)
         self.assertEqual(resp.status_code, 400)
-        self.assertEqual(resp.json()['error'], 'no_serial_column')
+        self.assertEqual(resp.json()['code'], 'no_serial_column')

@@ -19,6 +19,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.common.errors import error_response
 from apps.datafiles.models import DataFile
 from apps.datafiles.serializers import (
     DataFileListSerializer,
@@ -202,10 +203,7 @@ class DataFileViewSet(viewsets.ModelViewSet):
         """Delete multiple owned files at once: { "ids": [1, 2, 3] }."""
         ids = request.data.get('ids') or []
         if not isinstance(ids, list) or not ids:
-            return Response(
-                {'error': 'ids must be a non-empty list'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return error_response('file_ids_required', 'ids must be a non-empty list')
         # Owner-scoped: only the requesting user's files are ever touched.
         qs = DataFile.objects.filter(owner=request.user, id__in=ids)
         for datafile in qs:
@@ -261,20 +259,12 @@ class DataFileViewSet(viewsets.ModelViewSet):
         if not isinstance(ids, list) or not ids or not all(
             isinstance(i, int) and not isinstance(i, bool) for i in ids
         ):
-            return Response(
-                {'error': 'ids must be a non-empty list of integers'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return error_response(
+                'file_ids_required', 'ids must be a non-empty list of integers')
         if not batch_name:
-            return Response(
-                {'error': 'batch_name is required'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return error_response('param_required', 'batch_name is required')
         if re.search(r'[<>:"/\\|?*]', batch_name):
-            return Response(
-                {'error': 'batch_name 包含非法字符'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return error_response('invalid_name_chars', 'batch_name 包含非法字符')
 
         # Owner-scoped and single-only: batch rows moving into another batch
         # would leave their original directory behind, breaking batch-dirs.
@@ -282,9 +272,10 @@ class DataFileViewSet(viewsets.ModelViewSet):
             owner=request.user, id__in=ids, file_type='single',
         )
         if qs.count() != len(ids):
-            return Response(
-                {'error': '部分文件不存在、不属于当前用户或不是单文件（仅支持组合单文件）'},
-                status=status.HTTP_404_NOT_FOUND,
+            return error_response(
+                'file_not_found_or_not_single',
+                '部分文件不存在、不属于当前用户或不是单文件（仅支持组合单文件）',
+                404,
             )
 
         batch_base = _user_upload_dir(request.user, 'batch')
@@ -379,19 +370,18 @@ class DataFileViewSet(viewsets.ModelViewSet):
         if not isinstance(ids, list) or not ids or not all(
             isinstance(i, int) and not isinstance(i, bool) for i in ids
         ):
-            return Response(
-                {'error': 'ids must be a non-empty list of integers'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return error_response(
+                'file_ids_required', 'ids must be a non-empty list of integers')
 
         # Owner-scoped and batch-only: singles are already outside any batch.
         qs = DataFile.objects.filter(
             owner=request.user, id__in=ids, file_type='batch',
         )
         if qs.count() != len(ids):
-            return Response(
-                {'error': '部分文件不存在、不属于当前用户或不是批次文件（仅支持批次文件）'},
-                status=status.HTTP_404_NOT_FOUND,
+            return error_response(
+                'file_not_found_or_not_batch',
+                '部分文件不存在、不属于当前用户或不是批次文件（仅支持批次文件）',
+                404,
             )
 
         single_dir = _user_upload_dir(request.user, 'single')
@@ -521,7 +511,7 @@ class FileUploadView(APIView):
         # Support both single 'file' and multiple 'files' keys
         files = request.FILES.getlist('files') or request.FILES.getlist('file')
         if not files:
-            return Response({'error': '未选择文件'}, status=400)
+            return error_response('no_files', '未选择文件')
 
         # CSV files and ZIP archives (containing CSVs) are supported.
         # basename first: a crafted multipart filename like "../../x.csv"
@@ -531,16 +521,13 @@ class FileUploadView(APIView):
         for uploaded_file in files:
             safe_name = os.path.basename(uploaded_file.name or '')
             if not safe_name or _UNSAFE_NAME_CHARS.search(safe_name):
-                return Response(
-                    {'error': f'文件名非法，无法上传 {uploaded_file.name}'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+                return error_response(
+                    'invalid_file_name', f'文件名非法，无法上传 {uploaded_file.name}')
             ext = os.path.splitext(safe_name)[1].lower()
             if ext not in allowed_exts:
-                return Response(
-                    {'error': f'仅支持 CSV 或 ZIP 文件，无法上传 {uploaded_file.name}'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+                return error_response(
+                    'unsupported_file_type',
+                    f'仅支持 CSV 或 ZIP 文件，无法上传 {uploaded_file.name}')
 
         # Optional per-file last_modified (epoch ms), parallel to the files list.
         last_modified_list = request.data.getlist('last_modified')
@@ -560,7 +547,7 @@ class FileUploadView(APIView):
             if ext == '.zip':
                 zip_created, zip_error = _register_zip_batch(request.user, uploaded_file, base_name)
                 if zip_error:
-                    return Response({'error': zip_error}, status=status.HTTP_400_BAD_REQUEST)
+                    return error_response('zip_import_failed', zip_error)
                 created.extend(zip_created)
                 continue
 

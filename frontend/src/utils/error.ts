@@ -1,16 +1,17 @@
 /**
  * formatError — 从任意请求错误中提取可读的错误消息。
  *
- * 后端错误响应有几种并存的历史格式，这里按优先级统一提取：
- *   1. `data.message`    —— 新统一异常格式（apps/common/exceptions.py）+ SFTP 旧格式
+ * 后端错误响应统一为 `{code, message, detail}`（apps/common/exceptions.py 与
+ * apps/common/errors.py::error_response 两条产出路径同形），这里按优先级提取：
+ *   1. `data.message`    —— 后端给出的中文（异常处理器或 error_response 的 detail 回填）
  *   2. `data.detail`     —— DRF 默认格式（字符串时）
- *   3. `data.error`      —— 遗留机器码（含中文直接展示；机器码查 ERROR_CODE_MAP）
+ *   3. `data.code`       —— 机器码查 ERROR_CODE_MAP；查不到就原样显示该码
  *   4. `{字段: [消息]}`   —— 遗留字段校验错误，取第一条
  *   5. 无 response       —— 网络错误（后端未启动 / 超时）
  * 全部不匹配时回退 fallback。
  */
 
-/** 遗留机器码 → 中文提示（代码见 apps/ 下各 views 的 `{'error': 'xxx'}` 字面量） */
+/** 机器码 → 中文提示（码值见 apps/ 下 `error_response('<code>', ...)` 的调用） */
 export const ERROR_CODE_MAP: Record<string, string> = {
   not_connected: '未连接到服务器',
   parse_failed: '文件解析失败，请稍后重试',
@@ -43,13 +44,24 @@ export const ERROR_CODE_MAP: Record<string, string> = {
   internal_error: '服务器内部错误',
 }
 
-function hasCJK(text: string): boolean {
-  return /[一-龥]/.test(text)
-}
-
 interface ErrorLike {
   response?: { data?: unknown }
   message?: string
+}
+
+/**
+ * 错误体的可读文案优先级：后端 message → detail → 机器码查表。
+ *
+ * 后端统一成 `{code, message, detail}` 之后（评审 P1-5），原先那条 `data.error`
+ * 遗留分支就没了用途 —— 它当年既当机器码用又当中文用，还和「成功响应体里的
+ * per-item error 字段」撞名。视图再返回 `{'error': ...}` 会被
+ * test/backend/test_error_shape_contract.py 的源码扫描拦住。
+ */
+function pickMessage(d: Record<string, unknown>): string | null {
+  if (typeof d.message === 'string' && d.message) return d.message
+  if (typeof d.detail === 'string' && d.detail) return d.detail
+  if (typeof d.code === 'string' && d.code) return ERROR_CODE_MAP[d.code] ?? d.code
+  return null
 }
 
 export function formatError(err: unknown, fallback = '请求失败'): string {
@@ -62,11 +74,8 @@ export function formatError(err: unknown, fallback = '请求失败'): string {
   const data = e.response.data
   if (data && typeof data === 'object') {
     const d = data as Record<string, unknown>
-    if (typeof d.message === 'string' && d.message) return d.message
-    if (typeof d.detail === 'string' && d.detail) return d.detail
-    if (typeof d.error === 'string' && d.error) {
-      return hasCJK(d.error) ? d.error : (ERROR_CODE_MAP[d.error] ?? d.error)
-    }
+    const readable = pickMessage(d)
+    if (readable) return readable
     for (const [field, msgs] of Object.entries(d)) {
       if (Array.isArray(msgs) && msgs.length && typeof msgs[0] === 'string') {
         return `${field}: ${msgs[0]}`
@@ -90,12 +99,7 @@ export async function parseBlobError(err: unknown): Promise<string | null> {
   try {
     const parsed = JSON.parse(await data.text())
     if (parsed && typeof parsed === 'object') {
-      const d = parsed as Record<string, unknown>
-      if (typeof d.message === 'string' && d.message) return d.message
-      if (typeof d.detail === 'string' && d.detail) return d.detail
-      if (typeof d.error === 'string' && d.error) {
-        return hasCJK(d.error) ? d.error : (ERROR_CODE_MAP[d.error] ?? d.error)
-      }
+      return pickMessage(parsed as Record<string, unknown>)
     }
   } catch {
     return null

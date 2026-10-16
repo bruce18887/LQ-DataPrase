@@ -16,6 +16,28 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-10-16 架构评审 P1 落地：三条「改结构」才会暴露的约束
+
+- **按 600 行上限把 ViewSet 拆成 mixin，会把 R6③ 的债一次性引爆**：`_load_df_from_request`
+  在每个视图模块里是**各自独立的绑定**，`analysis_views.py` 一拆两半，只 patch 旧模块的测试立刻
+  打真 loader（实测 **25 条**用例从 200/400 变 500）。这不是「测试写错了」，是**结构一变就无人
+  认领的隐式契约**。做法：把 patch 目标从硬写模块名改成**扫包动态收集消费者**
+  （`apps/analysis/test_support.py::patch_df_loader`：`pkgutil.iter_modules(views.__path__)` +
+  `getattr(mod,'_load_df_from_request',None) is not None`），下一次再拆视图不需要谁去记得改测试。
+  推论：**给「一个函数被 N 个模块 import」写测试脚手架时，N 必须由代码算出来，不能由人列。**
+- **判断 DRF 全局配置是不是「空转」，先看它是**类属性绑定**还是每请求读取**：
+  `PageNumberPagination.page_size = api_settings.PAGE_SIZE` 在**类定义时**求值，所以
+  `PAGE_SIZE=20` 会被「显式声明了 pagination_class 的子类」继承走 —— 评审报告据此判它空转，
+  实测删除会让 `DataFilePagination` 一起退化成裸数组（`paginate_queryset` 见 `not page_size` 直接
+  返回 None）。真正空的只有 `SearchFilter`（唯一声明者把 `search_fields` 写死 `[]`）。
+  规则：**删任何全局默认前先问「谁在类定义期把它读进了类属性」**，光 grep 显式声明会漏。
+- **统一错误形态时，「按文案分支」的代码比按字段分支的更危险**：`utils/error.ts` 走
+  `data.error` 兜底是显式契约，好找；而 `ssePost` 抛的 `Error(err.error)` 被
+  `stores/sftpSearch.ts → isNotConnectedMessage('not_connected')` 当**字符串哨兵**用——把键换成
+  `code`、文案换成中文，编译与单测全绿，**只有那条「请先连接」引导会静默失效**。
+  规则：改错误/事件体字段名时，除了 grep 字段名，还要 grep **取值本身的字面量**
+  （这里是 `'not_connected'`），并保留「只有机器码时原样显示机器码」这种看着难看但被人依赖的行为。
+
 ## 2026-09-19 加载项「UI 一直还原不了」的根因不在 UI 代码：Excel 装的是四轮前的旧 xll
 
 - **现象**：用户连续反馈「Exp 里没有控件」「没弹出任何东西」「还原不了原来的 UI」。据此换过四轮方案

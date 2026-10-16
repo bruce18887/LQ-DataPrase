@@ -192,7 +192,9 @@ async function onFileChange() {
     const res = await analysisApi.getDashboard(selectedFileId.value)
     if (mySeq !== _dashSeq) return // 过期响应，丢弃
     const d = res.data as DashboardData
-    if (res.data.error) {
+    // 后端错误形态统一为 {code, message, detail}（评审 P1-5）；/summary/ 这三条
+    // 是「带 HTTP 200 的部分失败」（渲染能拿到的数据 + 标错误态），刻意不改状态码
+    if (res.data.code) {
       // Partial error: render whatever data came along
       data.value = d
       // 兜底：/summary/ 缺 metrics 时保持默认值，避免模板 metrics.yield_pct 抛 TypeError

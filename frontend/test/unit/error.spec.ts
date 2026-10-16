@@ -31,15 +31,17 @@ describe('formatError', () => {
     expect(formatError({ message: 'Network Error' })).toBe('无法连接服务器，请检查网络')
   })
 
-  it('提取优先级 message > detail > error', () => {
-    expect(formatError(resp({ message: '甲', detail: '乙', error: 'no_data' }))).toBe('甲')
-    expect(formatError(resp({ detail: '乙', error: 'no_data' }))).toBe('乙')
-    expect(formatError(resp({ error: 'no_data' }))).toBe('没有数据')
+  it('提取优先级 message > detail > code', () => {
+    expect(formatError(resp({ message: '甲', detail: '乙', code: 'no_data' }))).toBe('甲')
+    expect(formatError(resp({ detail: '乙', code: 'no_data' }))).toBe('乙')
+    expect(formatError(resp({ code: 'no_data' }))).toBe('没有数据')
   })
 
-  it('error 已是中文则原样，未知码原样返回', () => {
-    expect(formatError(resp({ error: '解析失败' }))).toBe('解析失败')
-    expect(formatError(resp({ error: 'brand_new_code' }))).toBe('brand_new_code')
+  it('未知码原样返回；遗留 error 键不再参与取值（后端已统一为 code）', () => {
+    expect(formatError(resp({ code: 'brand_new_code' }))).toBe('brand_new_code')
+    expect(
+      formatError({ message: '上游挂了', response: { data: { error: 'no_data' } } }),
+    ).toBe('上游挂了')
   })
 
   it('字段校验形态取第一条并带上字段名', () => {
@@ -59,7 +61,7 @@ describe('parseBlobError', () => {
   it('blob 包着的 JSON 错误体能解出文案', async () => {
     expect(await parseBlobError(blobResp(JSON.stringify({ message: '磁盘满' })))).toBe('磁盘满')
     expect(
-      await parseBlobError(blobResp(JSON.stringify({ error: 'no_valid_files' }))),
+      await parseBlobError(blobResp(JSON.stringify({ code: 'no_valid_files' }))),
     ).toBe('没有有效文件')
   })
 

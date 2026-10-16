@@ -1,8 +1,9 @@
-"""
-Specification limit parsing and fail-data detection.
+"""规格限解析与失效数据检测（statistics 侧）。
 
-Functions for identifying columns with valid limits, parsing limit strings,
-detecting fail rows, and computing per-bin / per-test-item fail statistics.
+识别有有效规格限的列、解析 Min/Max 文本、检测失败行，并算 per-bin /
+per-test-item 的失效统计。与 ``services/range_limits.py`` 是两件事：那个把
+``RDL/DR/CL/S3/S4/S6`` 六种取数口径映射成一对上下限，这里管的是文件自带的
+规格限（见评审 P1-3 —— 两者曾同名并存为 ``limits.py``）。
 """
 from typing import Optional, Dict, List, Tuple
 import math

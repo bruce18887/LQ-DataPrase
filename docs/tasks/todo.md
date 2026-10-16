@@ -3758,9 +3758,59 @@ A 不报、B（关键词在预算之外）照旧报。**预算必须取到 `CHUN
       钉住两份一致，并把文档里写死当前版本号的那句改成「不复述」（写死一次就永久过期）
 
 **批 2 — 契约统一（中风险，需同步前端与 e2e）**
-- [ ] **P1-2** 抽 `apps/analysis/views/_guards.py` 统一参数守卫，对齐侦察出的 7 处不一致（空 params、全无效、单参数缺失、CPK 阈值两种写法、过滤开关两种写法…）。**不动 URL、不合并 ViewSet**
-- [ ] **P1-3** 消歧：`services/limits.py` → `services/range_limits.py`（4 处 import）；两包各加职责 docstring 并点名重叠函数。**不做全量合并**（11 处 import + 循环 import 风险，功能收益近零）
-- [ ] **P1-5** 统一错误格式：新增 `error_response(code, detail, status)`（产出与全局处理器同形的 `{code,message,detail}`）+ **码表单一来源**（28 个码）；机械转换 141 处；同步前端 2 处直读（`useSiteStats.ts:50`、`ConnectPage.vue:148`）与 e2e 2 处断言（`serial-no-column.spec.ts:155,461`）；登录 `_error` 保留 `code` 字段名（`auth.spec.ts:130` 依赖 `.error-msg--user_not_found`）。补**源码扫描测试**禁止 `{'error':` 复现
+- [ ] **P1-2** **本轮未做**，但已把判据实测清楚（下一段直接照此执行，不必重新发现）：
+      「同一个失败条件报不同码」的三处分叉，逐处 `path:line` 已核——
+      ① **列表参数全部不在文件里**：`histogram`（`analysis_views.py:192`）报 `no_valid_params`，
+         而 `cpk`（`param_actions.py:136`）对同一条件报 `param_not_found`，两者都带
+         `requested`/`missing` → 码该统一，但**改码就是改契约**（前端 `ERROR_CODE_MAP`、
+         已迁移的 T1 断言、e2e 都读它）。
+      ② **列存在但全无有效数值**：`serial_distribution`（`param_actions.py:79`）与
+         `qqplot`（`param_actions.py:185`）报 `param_no_valid_data`，而
+         `boxplot`(`statistics_views.py:219` 起)、`correlation`(`analysis_views.py:485`)、
+         `correlation_matrix`(`statistics_views.py:304`) 都报 `no_valid_params` → 同义两套码。
+      ③ **单参数不在文件里**：码是统一的 `param_not_found`，只差 `detail` 有无
+         （带：`statistics_views.py:103,153`、`analysis_views.py:242`、`param_actions.py:164`；
+         不带：`analysis_views.py:459`、`param_actions.py:61`）→ 这条是纯展示，优先级最低。
+      **因此「只抽 `_guards.py` 不改码」的半吊子做法价值近零**（漂移原样留着），
+      要动就得一次把码统一 + 同步前端映射 + 同步断言；URL 不动（合并 ViewSet 会改
+      `/statistics/*` → `/analysis/*`，打断 `api/analysis.ts:24,27` 等 4 处与 2 条 e2e）。
+- [x] **P1-3** 消歧：`services/limits.py` → `services/range_limits.py`（**3 处** import，不是 4：
+      `data_services/histogram.py`、`data_services/serial_distribution.py`、`views/statistics_views.py`）；
+      两个 `limits.py` 各写职责 docstring 并互相点名（「取值区间」vs「规格限」）。
+      **不做全量合并**（11 处 import + 循环 import 风险，功能收益近零）——与侦察结论一致
+- [x] **P1-5** 统一错误形态。**改判两处原计划**：
+      ① 原计划「码表单一来源（28 个码）」要落到后端 —— **不落**。中文文案的单一来源继续留在
+      前端 `utils/error.ts::ERROR_CODE_MAP`（29 条），后端只在有中文 detail 时把它镜像进
+      `message`；后端再造一份表就是 lessons 2026-09-19 那条「同一数值三份字面量必然漂移」。
+      代价已核：`{code}` 裸码在改造前后都是「查不到就原样显示」，界面行为不变。
+      ② 规模：**守卫正则数出 148 处**（`git show HEAD` 侧、零改动取证），不是报告/侦察说的 141/155。
+      落地：新增 `apps/common/errors.py::error_response(code, detail, status, **extra)`；
+      前端 `error.ts` **删掉** `data.error` 兜底分支、改读 `code`，并把 `formatError`/`parseBlobError`
+      两处重复的取值链合成 `pickMessage`（`hasCJK` 随之变死，删）；
+      `ssePost.ts` 非 2xx 取值跟着改，且**刻意保留「只有机器码时把码当文案」**——
+      `stores/sftpSearch.ts` → `isNotConnectedMessage` 是按这段文本分支的，换成中文会让
+      「请先连接」引导整条失效（这是本轮最容易漏的一处，已验）；
+      登录 `_error` 改成 `error_response` 的薄壳（`code` 键名与附加字段原样保留，
+      `auth.spec.ts` 的 `.error-msg--*` 不受影响）；e2e 改 3 处断言
+      （`serial-no-column.spec.ts:155,461` 加 `body.code`；`global/error-handling.spec.ts`
+      那条「遗留 error 形态」用例的前提整个作废，重写为「只有机器码时前端查表」）。
+      **没碰的三种形态**：SSE 帧 `{'event':'error'}` / `{'kind':'error'}`、200 体内的
+      `details[].error` 与 `level:'error'`、以及 SFTP 连接侧的第四种 `{'status':'error'}`
+      （最后一种由子代理带 `path:line` 报回，待拍板）。
+      护栏 `test/backend/test_error_shape_contract.py`：源码扫描 + 三条真实守卫断言
+      （形态三键齐全 / detail 镜像进 message / `requested`·`missing`·`missing_fields` 原名保留）。
+      **子代理交付后我复核并返工的一处**：sftp 侧 13 个「`except Exception as e` 把 `str(e)`
+      当 error 值」的站点被机械转成了 `error_response(str(e))` —— 于是**异常文本成了机器码**
+      （不稳定、不可分支、`message` 恒 null）。已全部改为稳定码
+      （`sftp_list_failed` / `sftp_download_failed` / `sftp_parse_failed` /
+      `invalid_search_spec` / `search_connect_failed` / `preset_exists` /
+      `preset_limit_reached` / `invalid_preset_id`）并把文本移到 `detail`；
+      跟着改的 6 条用例断言从「code 等于那句话」改成「code 等于稳定码 **且** detail 保留那句话」
+      —— 断言没变弱，只是把「文案」和「分支依据」重新分成两个字段。
+      扫描判据也改写法：从 grep 换成 **AST**（`ast.walk` 找 `Response(dict)` 且键含 `error`），
+      因为 grep 会把 `errors.py` 自己解释历史的 docstring 数成违规 —— 天天假红的护栏最后没人看。
+      **已知盲区如实写明**：先 `body = {'error': ...}` 再 `Response(body)` 的写法 AST 认不出，
+      那条靠 review，不靠扫描假装全覆盖
 
 **批 3 — 基础设施与卫生**
 - [ ] **P1-9** 最小 CI（`.github/workflows`）：push 触发 `manage.py test` + `npm run build` + `lint:e2e` + `test:unit`

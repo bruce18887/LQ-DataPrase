@@ -1,12 +1,12 @@
 import io
 import json
 from django.http import FileResponse
-from rest_framework import viewsets, status
+from rest_framework import viewsets
 from rest_framework.decorators import action
-from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 import excelize
 
+from apps.common.errors import error_response
 from apps.common.file_loading import load_user_file, FileLoadError
 from apps.common.export_naming import base_export_context, render_export_filename
 from apps.analysis.services.statistics import (
@@ -125,7 +125,7 @@ class ExportViewSet(viewsets.GenericViewSet):
         try:
             df, datafile, metadata = load_user_file(request, file_id)
         except FileLoadError as e:
-            return Response({'error': e.error_code}, status=400)
+            return error_response(e.error_code)
 
         # 与表格一致：passfail/site/sort/filter_model 全量应用
         export_df = _apply_export_filters(df, metadata, request.data)
@@ -156,7 +156,7 @@ class ExportViewSet(viewsets.GenericViewSet):
         try:
             df, datafile, metadata = load_user_file(request, file_id)
         except FileLoadError as e:
-            return Response({'error': e.error_code}, status=400)
+            return error_response(e.error_code)
 
         # 与表格一致：passfail/site/sort/filter_model 全量应用
         # （此前走 bin==1 语义，与表格 detect_fail_data 不一致，一并对齐）。
@@ -181,17 +181,15 @@ class ExportViewSet(viewsets.GenericViewSet):
         # 算 sigma 区间时抛 TypeError 变成 500
         sigma_level = parse_sigma_level(request.data.get('sigma', DEFAULT_SIGMA_LEVEL))
         if sigma_level is None:
-            return Response(
-                {'error': 'invalid_sigma',
-                 'detail': f'sigma 必须是 {MIN_SIGMA_LEVEL}~{MAX_SIGMA_LEVEL} 的整数'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return error_response(
+                'invalid_sigma',
+                f'sigma 必须是 {MIN_SIGMA_LEVEL}~{MAX_SIGMA_LEVEL} 的整数')
         only_valid = request.data.get('only_valid_limits', False)
 
         try:
             df, datafile, metadata = load_user_file(request, file_id)
         except FileLoadError as e:
-            return Response({'error': e.error_code}, status=400)
+            return error_response(e.error_code)
 
         # data_only_bin1: export only pass-bin rows (chart-config switch)
         if request.data.get('data_only_bin1', False):
@@ -219,7 +217,7 @@ class ExportViewSet(viewsets.GenericViewSet):
         try:
             df, datafile, metadata = load_user_file(request, file_id)
         except FileLoadError as e:
-            return Response({'error': e.error_code}, status=400)
+            return error_response(e.error_code)
 
         # data_only_bin1：与 sigma_limit / batch_charts 分支同口径（缺陷 #8）。
         # 此前 HTML 报告不应用该开关，良率与 xlsx 图表对不上。
@@ -268,7 +266,7 @@ class ExportViewSet(viewsets.GenericViewSet):
         try:
             df, datafile, metadata = load_user_file(request, file_id)
         except FileLoadError as e:
-            return Response({'error': e.error_code}, status=400)
+            return error_response(e.error_code)
 
         # data_only_bin1: export charts for pass-bin rows only. Applied
         # BEFORE the default params branch so the default column list is
