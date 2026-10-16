@@ -86,11 +86,15 @@ class BoxplotNonNumericColumnTests(SimpleTestCase):
         self.assertEqual(response.data.get('missing'), [])
 
     def test_unknown_param_still_reports_missing(self):
-        """对照组：列真不存在时 missing 必须非空 —— 与上面两条构成两种信号。"""
+        """对照组：列真不存在时 missing 必须非空 —— 与上面两条构成两种信号。
+
+        评审 P1-2 把这一档统一成 ``param_not_found``（此前与「列存在但不可测」共用
+        ``no_valid_params``，客户端分不出「切错文件」和「参数没数据」）。
+        """
         response = _call_boxplot(self._df(), ['__bogus__'])
 
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.data.get('code'), 'no_valid_params')
+        self.assertEqual(response.data.get('code'), 'param_not_found')
         self.assertEqual(response.data.get('missing'), ['__bogus__'])
 
     def test_mixed_params_drop_non_numeric_and_still_succeed(self):

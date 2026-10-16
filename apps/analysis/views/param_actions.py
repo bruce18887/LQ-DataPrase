@@ -38,6 +38,7 @@ from apps.common.params import get_param, get_param_float, get_param_list
 from apps.common.user_settings import get_cpk_thresholds
 from apps.common.errors import error_response
 
+from ._guards import guard_all_missing
 from ._helpers import (
     clean_data,
     _filter_blank_params,
@@ -128,14 +129,9 @@ class ParamStatActions:
         # `df[param]` KeyError → 500（histogram 加 param_not_found 守卫的注释里
         # 记载过同一场景）；CTA8280F 尾逗号空列名同样先滤掉。
         params = _filter_blank_params(params)
-        valid_params = [p for p in params if p in df.columns]
-        if params and not valid_params:
-            return error_response(
-                'param_not_found',
-                '请求的参数均不在该文件中，请重新选择文件或参数',
-                requested=params,
-                missing=[p for p in params if p not in df.columns])
-        params = valid_params
+        params, all_missing = guard_all_missing(df, params)
+        if all_missing is not None:
+            return all_missing
 
         result = compute_cpk_table_data(
             df, metadata, params,

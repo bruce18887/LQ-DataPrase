@@ -3758,8 +3758,30 @@ A 不报、B（关键词在预算之外）照旧报。**预算必须取到 `CHUN
       钉住两份一致，并把文档里写死当前版本号的那句改成「不复述」（写死一次就永久过期）
 
 **批 2 — 契约统一（中风险，需同步前端与 e2e）**
-- [ ] **P1-2** **本轮未做**，但已把判据实测清楚（下一段直接照此执行，不必重新发现）：
-      「同一个失败条件报不同码」的三处分叉，逐处 `path:line` 已核——
+- [x] **P1-2** 守卫码对齐（本会话续做）。新增 `apps/analysis/views/_guards.py`
+      （`split_params` / `all_missing_params` / `guard_all_missing`），把「请求的参数
+      **一个都不在该文件里**」统一成 `param_not_found`：此前 `histogram` 报
+      `no_valid_params`（与「列存在但全无有效数值」**共用一个码**，客户端分不出
+      「参数不存在」和「参数没数据」）、`cpk` 报 `param_not_found`、
+      `boxplot` 报 `no_valid_params` 却带「均不在该文件中」的文案 —— 同条件三套说法。
+      接线三处：`histogram` 与 `cpk` 用 `guard_all_missing`；`boxplot` 直接用底层的
+      `split_params` + `all_missing_params`，因为它**两条分支都要发 `missing`**
+      （原计划以为是 `param_trend`，实测那条 sanitize 分支属于 `boxplot`，
+      `param_trend` 是多文件端点另有守卫）。
+      **刻意保留的两档**（写进 `_guards.py` 头注释，不是漏改）：列表级「存在但都无有效
+      数值」→ `no_valid_params`；单参数「存在但无有效数值」→ `param_no_valid_data`。
+      **未覆盖的一处**：`correlation_matrix`（`statistics_views.py:220` 的 sanitize）把
+      「全部无效」和「有效参数少于 2 个」压在同一个
+      `if not params or len(params) < 2 → need_at_least_2_params` 里，所以它根本不发
+      `no_valid_params`；要给它加分档，得连 `need_at_least_2_params` 的触发面一起重判，
+      留给下一轮单独做。
+      连带更新：3 条 T1 断言 + 1 处类 docstring + 1 处 e2e 注释。**全量跑抓到我自己的
+      一处回归**：boxplot 的「存在但不可测」分支被我改成不发 `missing`，而
+      `test_boxplot_nonnumeric_params` 明确钉着「`missing` 必须是空列表，不能缺席」
+      （前端靠它区分「切错文件」与「参数不可测」）—— 已改回并写明原因。
+      （`file-switch-param-reset.spec.ts` 只在注释里提码，**没断言**，所以 e2e 无需改判）。
+      前端 `ERROR_CODE_MAP` 三个码本来都齐，无需增删。
+      （以下是**改造前**的三处分叉，保留作证据）
       ① **列表参数全部不在文件里**：`histogram`（`analysis_views.py:192`）报 `no_valid_params`，
          而 `cpk`（`param_actions.py:136`）对同一条件报 `param_not_found`，两者都带
          `requested`/`missing` → 码该统一，但**改码就是改契约**（前端 `ERROR_CODE_MAP`、
