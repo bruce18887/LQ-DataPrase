@@ -265,7 +265,11 @@ describe('buildSlotManifest + slotEnv', () => {
     })
     const env = slotEnv(withEv, {})
     const previewLog = env.E2E_PREVIEW_LOG as string
-    expect(previewLog).toBe('C:\\lqdp-e2e\\slots\\r9\\preview-slot1.log')
+    // 实现是 path.join(dirname(logFile), `preview-slot${index}.log`)，所以期望值不能写成
+    // 带 Windows 反斜杠的字面量：CI 的前端 job 跑在 ubuntu 上，join 产出的是 `/`，
+    // 而下面的夹具根路径是**字符串字面量**、不会被转换 —— 两边对不上，必挂（2026-10-16 实测）。
+    // 判据本身一条不减：文件名带 slot 序号 + 落在 run.log 同目录 + 不在会被 rmSync 的镜像里。
+    expect(path.basename(previewLog)).toBe('preview-slot1.log')
     expect(previewLog.startsWith(withEv.dataDir)).toBe(false)
     expect(path.dirname(previewLog)).toBe(path.dirname(withEv.logFile))
   })
