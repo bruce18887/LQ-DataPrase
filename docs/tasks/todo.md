@@ -52,9 +52,25 @@
 
 ## 已知不做（留给下一批）
 
-- 29 个 `test/backend/*.py` 里写死 `setdefault('DJANGO_SETTINGS_MODULE','config.settings.development')`：
+- 29 个 `test/backend/*.py` 里写死 `setdefault('DJANGO_SETTINGS_MODULE','config.settings.development')`
+  （复量：全在 `test/backend`，`apps/` 里 **0** 个）：
   经 runner 跑时惰性，但**直跑单个脚本仍走 development ⇒ 仍写 home media**。
-- `test/e2e-data/db.sqlite3` 与 `test/unit-data/` 的定期回收（现在没有任何脚本清它们）。
+- `test/e2e-data` 与 `test/unit-data` 的定期回收（现在没有任何脚本清它们；`test/e2e-data/media`
+  实测 711M，位置挪了但空间没省回来）。
+
+## 待计划的四项（2026-10-16 收口时点出来、本轮刻意没做）
+
+- [ ] **并跑实测**：两套数据根已分开（`test/e2e-data` / `test/unit-data`），旧「绝不可并跑」的根因消失，
+      但**并发本身还没测过**。`docs/reference/testing-gates.md` §1 现在写的是「别把目录分开当成已验证可并发」——
+      测绿了才允许把它升成正式放行。
+- [ ] **`test/backend/test_sftp_search_integration.py:66`** 是同族捕获写法（`text=True` + stderr 走文件句柄），
+      本轮只修了撞出 6 条假红的那三处，这条留着。
+- [ ] **老两位 flaky**：`analysis/histogram-fail-bins.spec.ts` 与 `exports/html-report.spec.ts` 在池全量里
+      红→独占复跑绿（本轮又是这两位，判负载抖动不拦门禁）；「两轮同点位」不像随机 flake，
+      值得单独查一次是否共享 fixture/DB 状态互踩（R2③）。另注意本轮 2 条 flaky 是
+      `data/file-list-sort-filter.spec.ts` 内并行争用 admin 账号态，`--workers=1` 即 11/11 全绿。
+- [ ] **串行档换端口的体验**：`reuseExistingServer=false` 后，本机 8000 被别人占着就会 120s 超时报错而不是
+      静默复用。要不要给 `E2E_PORT` 加一个「自动挑空闲口」的默认值（端口区间先问 `netsh`，本机 1024–15000）。
 
 ---
 
