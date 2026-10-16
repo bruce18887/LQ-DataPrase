@@ -46,7 +46,10 @@ import ActiveSearchChip from '../components/common/ActiveSearchChip.vue'
   overflow-y: auto;
   overflow-x: hidden;
   background-color: var(--bg);
-  padding: 24px;
+  /* 上 16 / 其余 24：指南 §5 只约束「页面左右 24–28」，上边距无规定。
+     内容区首块此前被 24 留白 + 40 tab 条 + 15 pane 内边距推到 y≈79 才起，
+     分析页的 sticky 工具栏每多 1px 就同时从首屏和滚动后各扣一次。 */
+  padding: 16px 24px 24px;
   scrollbar-width: thin;
   scrollbar-color: var(--border-2) var(--bg);
 }

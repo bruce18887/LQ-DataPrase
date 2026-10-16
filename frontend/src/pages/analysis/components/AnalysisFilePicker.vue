@@ -107,14 +107,23 @@ const popperClass = `dp-file-picker-${props.scope}`
   max-width: 360px;
 }
 
-/* 加载圈槽位：44px 常驻，空闲时内部无内容也不收缩 */
+/* 加载圈槽位：宽度 44px 常驻（选择器宽度不随加载态跳动，popper 定位才稳定），
+   但高度只占 24px 与同排 size="small" 控件齐平 —— 此前 44×44 把整行顶到 62px，
+   而工具栏是 sticky，那 20px 在首屏和滚动后各扣一次。圈用 inset+margin 居中
+   （不能用 transform：组件的 cp-fade-enter-from 就是 transform: scale(.6)，会打架），
+   加载时上下各溢出 10px，落在工具栏 8px 内边距附近；祖先链无 overflow:hidden
+   （.el-tabs__content 的 EP 默认值已由 AnalysisPage 放开）。 */
 .picker-spin {
+  position: relative;
   width: 44px;
-  height: 44px;
+  height: 24px;
   flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+}
+
+.picker-spin :deep(.circular-progress) {
+  position: absolute;
+  inset: 0;
+  margin: auto;
 }
 
 /* 左栏卡片里撑满：label 与选择器上下排 */
