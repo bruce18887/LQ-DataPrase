@@ -1,0 +1,74 @@
+gage CI fixture MANIFEST — 由 scripts/make_gage_ci_fixture.py 生成，请勿手改
+==============================================================================
+
+用途：GitHub CI 用的「虚拟化」gage datalog 夹具。真实样例在 Data/SampleData/Gage/
+      下（本就不该入库：仓库公开，而 datalog 头带内部路径/主机名/账号）。
+      ⚠ 现场核对：.gitignore 目前有 `!/Data/SampleData/Gage/` 把真实 4 个 CSV 放开
+      入库了（本地提交 c6b7bd8，未推送）。改用本夹具后应把这条收回，否则外发的还是
+      真实头信息。本表列出哪些字段是假的。
+
+输入目录：Data/SampleData/Gage/
+输出目录：test/fixtures/gage/
+
+------------------------------------------------------------------------------
+A. 虚拟化的标识符（[GENERAL] 段，按行号定位，只改值字段；4 个文件同值）
+------------------------------------------------------------------------------
+行    键              假值                             （真实值形态）
+3    Tester_Name    DESKTOP-CI-FIXTURE             内部机台主机名
+6    Software_Ver   9.9.9.9FIX                     程序版本
+7    Customer_ID    userfixt                       内部账号
+8    Operator       opfixt                         操作员账号
+9    Op_Type        opfixt(opfixt)                 操作员账号(自身)
+11   Program        E:\CI-FIXTURE\2025-04-23_despiked\BFI99999_FT_YAA_BFI99999XBAD_EN\BFI99999_FT_YAA_BFI99999XBAD_EN.dll 内部绝对路径 + 真实料号
+14   TestFile       E:\CI-FIXTURE\2025-04-23_despiked\BFI99999_FT_YAA_BFI99999XBAD_EN\BFI99999_FT_YAA_BFI99999XBAD_EN_BFI99999_FT.cpts 内部绝对路径 + 真实料号（两处料号）
+21   DUTBox_Type    FIXT8290                       内部 DUTBox 型号
+29   HandlerName    C0Handler                      分选机命名
+
+  假 Program : E:\CI-FIXTURE\2025-04-23_despiked\BFI99999_FT_YAA_BFI99999XBAD_EN\BFI99999_FT_YAA_BFI99999XBAD_EN.dll
+  假 TestFile : E:\CI-FIXTURE\2025-04-23_despiked\BFI99999_FT_YAA_BFI99999XBAD_EN\BFI99999_FT_YAA_BFI99999XBAD_EN_BFI99999_FT.cpts
+  假料号家族  ：BFI99999（真实料号一并换成它；真实值不写进本表，见脚本注释）
+  形状保持    ：3 层目录 + .dll/.cpts + '<料号>_FT_…' token，
+                使 parsers/cta8290d.py 的 program_name 与 utils.extract_product_code()/
+                extract_stage() 仍解析出 product_code=BFI99999、stage=FT。
+
+  原样保留（承重）：Tester_Type=CTA8290DPlus、Software_Name=CTA8290DPlus（identify_format
+  靠小写子串 'cta8290d' 判格式）、LotID=gage_m_S1..S4、Tester_ID=140000（S1 全文出现 15 次、
+  14 次是数据值 1.140000 的巧合，禁止全文替换）、日期时间戳、全部数值。
+
+------------------------------------------------------------------------------
+B. 测试项名：**按位次**虚拟化，共 332 个，形态 PAR0001..PAR0332
+------------------------------------------------------------------------------
+  ⚠ 本 MANIFEST 刻意**不列出真实名 → 假名的映射表**：那等于把刚虚拟化掉的测试项名
+  再公开一遍（夹具进的是公开仓库）。要核对位次就在本机重新导出：
+      python scripts/make_gage_ci_fixture.py --emit-mapping ..\..\Data\ci-fixture-mapping.txt
+  写到 `Data/` 下面正合适 —— 那儿整目录不入库。
+
+  必须按位次替换、不能按字符串全文替换：真实名中存在「一个是另一个的严格前缀」的
+  情况达 48 个，按串替换会互相啃掉（具体名字属于不公开的真实测试项名，此处不列）。
+  同一参数的两处出现：PARAMINFO 第 i 行（i 从 1 起，L97..L428）的第 1 字段，与
+  表头 L431 的第 13+i 个字段（1-based；即第 1 个参数在第 14 列，前 13 列是系统列）。
+
+------------------------------------------------------------------------------
+C. 未虚拟化的段落（原文照抄，审计时知道它们不是假的）
+------------------------------------------------------------------------------
+  [WAFERCONFIG] L57-69 / [SUMMARY] L70-73 / [SWBININFO] L74-91 / [HARDWAREBIN] L92-95
+  —— bin 名是通用失效类别标签（Open/Short/Kelvin/Trim…），全仓零消费者，不构成披露。
+  PARAMINFO 第 2-12 字段、[Data] 的 Unit/Min/Max 三行、100 行数据 × 346 字段、
+  表头前 13 个系统列（Serial_No, Part_No, Dut_No, Site_No, Dut_Pass, SW_Bin, X_COORD, Y_COORD, QR_Code, Start_T, Test_Time, Alarm, Data_Cnt）：全部原样。
+
+------------------------------------------------------------------------------
+D. 每文件替换统计
+------------------------------------------------------------------------------
+文件                     输入字节       输出字节   GENERAL PARAMINFO       表头列
+gage_m_S1.csv        292191     289760         9       332       332
+gage_m_S2.csv        292990     290559         9       332       332
+gage_m_S3.csv        292891     290460         9       332       332
+gage_m_S4.csv        293234     290803         9       332       332
+
+  GENERAL：真实输入时每文件应改 9 行（键：Customer_ID, DUTBox_Type, HandlerName, Op_Type, Operator, Program, Software_Ver, TestFile, Tester_Name）；上表计数即实际改动计数。
+  4 个 CSV 夹具：行尾 CRLF、无 BOM、纯 ASCII；总行数 534；[Data], 仍在 L430。
+  本 MANIFEST.txt 自身为 UTF-8（含中文审计说明）+ CRLF，不是 ASCII。
+  入库前提：`.gitignore` 需有 `!/test/fixtures/`（`/test/*` 的 `*` 不跨 `/`，一条就够）。
+  跨平台：`core.autocrlf=true` 且无 `.gitattributes` 时，git 会把 CRLF 存成 LF，
+  Linux CI 检出即变 LF —— 需要 `.gitattributes` 里 `test/fixtures/gage/*.csv -text` 才字节守恒。
+

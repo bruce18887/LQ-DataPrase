@@ -205,8 +205,12 @@ from apps.datafiles.models import DataFile
 
 User = get_user_model()
 
+# CI 夹具（虚拟化副本，随仓库走）。真实样例在 Data/SampleData/Gage/ 下、按项目约定不入库
+# （仓库是公开的，datalog 头带内部绝对路径/机台主机名/账号），指过去这 11 例在 CI 上
+# 全是 FileNotFoundError。夹具由 `python scripts/make_gage_ci_fixture.py` 从真实文件派生：
+# 332 个测试项名按位次换成 PAR0001..、料号家族与路径换成假值，**数值/行数/列顺序/段落位次原样**。
 SAMPLE_GAGE = os.path.join(
-    os.path.dirname(__file__), '..', '..', 'Data', 'SampleData', 'Gage', 'gage_m_S1.csv',
+    os.path.dirname(__file__), '..', '..', 'test', 'fixtures', 'gage', 'gage_m_S1.csv',
 )
 
 
