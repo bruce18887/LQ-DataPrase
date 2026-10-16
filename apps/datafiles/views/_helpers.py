@@ -279,9 +279,14 @@ def _delete_duplicate_files(user):
     an existing batch directory and its remaining files are untouched.
     """
     deleted_count = 0
-    for group in _group_duplicates(user):
+    groups = _group_duplicates(user)
+    # 一次取回全部待删行：曾是「每个重复文件一次 SELECT」，几十组重复时就是几十次
+    # 往返。owner=user 与 _group_duplicates 同源，是越权防线，不是冗余条件。
+    pending = [item['id'] for group in groups for item in group['files'][1:]]
+    rows = DataFile.objects.filter(owner=user, pk__in=pending).in_bulk()
+    for group in groups:
         for item in group['files'][1:]:
-            df = DataFile.objects.filter(owner=user, pk=item['id']).first()
+            df = rows.get(item['id'])
             if df is None:
                 continue
             with transaction.atomic():

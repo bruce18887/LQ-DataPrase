@@ -163,13 +163,14 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
+    # 全局分页只对「有 list() 的三个视图」生效：/files/（自带 DataFilePagination）、
+    # /auth/users/、/files/history/；其余端点都是 @action，不经过 paginate_queryset。
+    # 别删 PAGE_SIZE：PageNumberPagination.page_size 在类定义时绑定 api_settings.PAGE_SIZE，
+    # 置空会让「显式声明了 pagination_class」的 DataFilePagination 也一起退化成裸数组。
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
-    'DEFAULT_FILTER_BACKENDS': (
-        'django_filters.rest_framework.DjangoFilterBackend',
-        'rest_framework.filters.SearchFilter',
-        'rest_framework.filters.OrderingFilter',
-    ),
+    # 刻意不设 DEFAULT_FILTER_BACKENDS：全仓只有 DataFileViewSet 用到过滤，
+    # 挂在全局只会让读者以为「所有列表都能过滤/搜索」。声明见该视图的 filter_backends。
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     # Rate table only — deliberately NO ``DEFAULT_THROTTLE_CLASSES``.
     #

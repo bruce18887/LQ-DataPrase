@@ -89,7 +89,3 @@ class CTA8290DParser(BaseATEParser):
             **header_meta,
         }
         return df, metadata
-    
-    @staticmethod
-    def get_bin_column_name() -> str:
-        return 'SW_Bin'

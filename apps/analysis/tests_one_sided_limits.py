@@ -79,7 +79,8 @@ class CorrelationStrColumnTests(SimpleTestCase):
 
     def test_view_returns_400_no_valid_params_for_str_param(self):
         from rest_framework.test import APIRequestFactory, force_authenticate
-        from apps.analysis.views import AnalysisViewSet, analysis_views
+        from apps.analysis.views import AnalysisViewSet
+        from apps.analysis.test_support import patch_df_loader
 
         df = pd.DataFrame({
             'Param1': [1.0, 2.0, 3.0],
@@ -89,13 +90,7 @@ class CorrelationStrColumnTests(SimpleTestCase):
             id=1, filename='fake.csv', format_type='CTA8290D')
         metadata = _meta()
 
-        def fake_load(request):
-            return df, datafile, metadata, None
-
-        original = analysis_views._load_df_from_request
-        analysis_views._load_df_from_request = fake_load
-        self.addCleanup(lambda: setattr(analysis_views,
-                                        '_load_df_from_request', original))
+        self.addCleanup(patch_df_loader(df, datafile, metadata))
 
         request = APIRequestFactory().post(
             '/api/v1/analysis/correlation/',
@@ -114,19 +109,14 @@ class CorrelationStrColumnTests(SimpleTestCase):
     def test_view_still_allows_same_param_both_axes(self):
         # x==y（自相关）在 _sanitize 不去重的前提下必须仍然可用
         from rest_framework.test import APIRequestFactory, force_authenticate
-        from apps.analysis.views import AnalysisViewSet, analysis_views
+        from apps.analysis.views import AnalysisViewSet
+        from apps.analysis.test_support import patch_df_loader
 
         df = pd.DataFrame({'Param1': [1.0, 2.0, 3.0, 4.0]})
         datafile = types.SimpleNamespace(
             id=1, filename='fake.csv', format_type='CTA8290D')
 
-        def fake_load(request):
-            return df, datafile, _meta(), None
-
-        original = analysis_views._load_df_from_request
-        analysis_views._load_df_from_request = fake_load
-        self.addCleanup(lambda: setattr(analysis_views,
-                                        '_load_df_from_request', original))
+        self.addCleanup(patch_df_loader(df, datafile, _meta()))
 
         request = APIRequestFactory().post(
             '/api/v1/analysis/correlation/',
@@ -148,20 +138,15 @@ class CpkEndpointGuardTests(SimpleTestCase):
 
     def _post_cpk(self, params):
         from rest_framework.test import APIRequestFactory, force_authenticate
-        from apps.analysis.views import AnalysisViewSet, analysis_views
+        from apps.analysis.views import AnalysisViewSet
+        from apps.analysis.test_support import patch_df_loader
 
         df = pd.DataFrame({'Param0': [1.0, 2.0, 3.0],
                            'Param1': [4.0, 5.0, 6.0]})
         datafile = types.SimpleNamespace(
             id=1, filename='fake.csv', format_type='CTA8290D')
 
-        def fake_load(request):
-            return df, datafile, _meta(), None
-
-        original = analysis_views._load_df_from_request
-        analysis_views._load_df_from_request = fake_load
-        self.addCleanup(lambda: setattr(analysis_views,
-                                        '_load_df_from_request', original))
+        self.addCleanup(patch_df_loader(df, datafile, _meta()))
 
         request = APIRequestFactory().post(
             '/api/v1/analysis/cpk/',

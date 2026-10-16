@@ -43,17 +43,10 @@ class _PatchedDfTest(SimpleTestCase):
 
     @classmethod
     def _patch(cls, df, metadata=None):
-        datafile = types.SimpleNamespace(
-            id=1, filename='fake.csv', format_type='CTA8290D')
-        from apps.analysis.views import analysis_views
+        from apps.analysis.test_support import fake_datafile, patch_df_loader
 
-        def fake_load(request):
-            return df, datafile, metadata or _meta(), None
-
-        original = analysis_views._load_df_from_request
-        analysis_views._load_df_from_request = fake_load
-        cls._restore_target = analysis_views
-        cls._restore_value = original
+        datafile = fake_datafile()
+        cls._restore = patch_df_loader(df, datafile, metadata or _meta())
         return datafile
 
     def setUp(self):
@@ -66,7 +59,7 @@ class _PatchedDfTest(SimpleTestCase):
 
     def tearDown(self):
         if getattr(self, '_patched', False):
-            self._restore_target._load_df_from_request = self._restore_value
+            type(self)._restore()
 
 
 class WaferMapParamGuardTests(_PatchedDfTest):
@@ -277,7 +270,7 @@ class ClCustomLimitsUnificationTests(SimpleTestCase):
 
     def test_site_stats_view_uses_custom_limits(self):
         from apps.analysis.views import StatisticsViewSet
-        from apps.analysis.views import analysis_views  # noqa: F401 (patch target)
+        from apps.analysis.test_support import patch_df_loader
 
         # 值 1.0/4.0：自定义限 [1.5, 3.5] → 两个超限（1.0 < LSL、4.0 > USL）；
         # 若按旧口径回退数据极值（1.0~4.0 当 LSL/USL），Fail 恒 0
@@ -288,14 +281,7 @@ class ClCustomLimitsUnificationTests(SimpleTestCase):
         datafile = types.SimpleNamespace(
             id=1, filename='fake.csv', format_type='CTA8290D')
 
-        def fake_load(request):
-            return df, datafile, _meta(), None
-
-        from apps.analysis.views import statistics_views
-        original = statistics_views._load_df_from_request
-        statistics_views._load_df_from_request = fake_load
-        self.addCleanup(lambda: setattr(statistics_views,
-                                        '_load_df_from_request', original))
+        self.addCleanup(patch_df_loader(df, datafile, _meta()))
 
         factory, force_authenticate = _make_request_factory()
         request = _authed(factory.post('/api/v1/statistics/site_stats/', {

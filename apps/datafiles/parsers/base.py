@@ -27,10 +27,6 @@ class BaseATEParser(ABC):
         return unique
     
     @staticmethod
-    def get_bin_column_name() -> str:
-        return 'SW_Bin'
-    
-    @staticmethod
     def fix_negative_decimal(value):
         if isinstance(value, str):
             if value.endswith('-') and value.rstrip('-').replace('.', '', 1).lstrip('-').replace('E', '').replace('e', '').isdigit():

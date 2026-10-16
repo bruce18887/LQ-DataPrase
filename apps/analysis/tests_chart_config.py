@@ -354,21 +354,31 @@ class MultiFileCorrelationFilterApiTests(SimpleTestCase):
         return ChartConfigFilterTests._frame(self)
 
     @staticmethod
-    def _fake_objects(by_id):
-        """DataFile 查询桩：filter(pk=...) → first() 返回对应 fake 对象。"""
+    def _fake_objects(by_id, calls=None):
+        """DataFile 查询桩：filter(pk__in=..., owner=...) → in_bulk() 返回 {id: obj}。
+
+        owner= 是权限过滤，桩里按「请求的 id 就是给定的这批」放行；id 兼容 str/int
+        两种形态（query_params 传进来是字符串，JSON body 是整数）。``calls`` 记录每次
+        filter 的关键字，供「N 个文件只查一次」的断言使用。
+        """
         class _FakeQS:
-            def __init__(self, obj):
-                self._obj = obj
-            def first(self):
-                return self._obj
+            def __init__(self, objs):
+                self._objs = objs
+
+            def in_bulk(self, id_list=None, *, field_name='pk'):
+                return {obj.id: obj for obj in self._objs}
 
         class _FakeManager:
             def filter(self, **kw):
-                return _FakeQS(by_id.get(kw.get('pk')))
+                if calls is not None:
+                    calls.append(dict(kw))
+                wanted = {str(x) for x in (kw.get('pk__in') or [])}
+                return _FakeQS([obj for key, obj in by_id.items()
+                                if str(key) in wanted])
 
         return _FakeManager()
 
-    def _multi_lot(self, payload, frames):
+    def _multi_lot(self, payload, frames, calls=None):
         """打桩 multi_lot 的 DataFile 查询与文件加载，在 patch 作用域内调用视图。
 
         注意：patch 必须覆盖「构建请求 → 视图执行」全程，不能在请求构建完
@@ -390,7 +400,8 @@ class MultiFileCorrelationFilterApiTests(SimpleTestCase):
             df, meta = frames[fid]
             return df, meta, 'CTA8290D'
 
-        with patch.object(analysis_views.DataFile, 'objects', self._fake_objects(objs)), \
+        with patch.object(analysis_views.DataFile, 'objects',
+                          self._fake_objects(objs, calls)), \
              patch.object(analysis_views, 'get_cached_parsed_file', fake_load):
             factory = APIRequestFactory()
             request = factory.post('/api/v1/analysis/multi_lot/', payload, format='json')
@@ -417,6 +428,27 @@ class MultiFileCorrelationFilterApiTests(SimpleTestCase):
         return request
 
     # ── multi_lot ───────────────────────────────────────────────────
+
+    def test_multi_lot_loads_files_with_a_single_query(self):
+        """N 个文件只查一次 DataFile，且必须带 owner 权限过滤（架构评审 P1-7）。
+
+        曾是「每文件一次 filter(pk=…)」，开「仅低 CPK 项」还要在循环里再查一轮
+        （拿 DataFile 行算 mtime 缓存键）；现在是 filter(pk__in=…, owner=…) +
+        in_bulk() 一次取回、循环内复用同一批行。
+        """
+        f = self._frame()
+        frames = {fid: (f, self.METADATA) for fid in (1, 2, 3)}
+        calls = []
+        resp = self._multi_lot(
+            {'file_ids': [1, 2, 3], 'only_low_cpk': True}, frames, calls=calls)
+
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(
+            len(calls), 1,
+            f'DataFile 应只查一次，实际 {len(calls)} 次：{[sorted(c) for c in calls]}')
+        self.assertEqual(len(calls[0]['pk__in']), 3)
+        # owner 过滤是越权防线（别人的 file_id 混进请求必须查不到），改造时不得丢
+        self.assertEqual(getattr(calls[0]['owner'], 'pk', None), 1)
 
     def test_multi_lot_data_only_bin1_reduces_distribution_count(self):
         """data_only_bin1：首个公共参数分布的 lot count 从 10 收缩到 8。"""

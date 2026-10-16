@@ -70,14 +70,12 @@ class HistogramCpkLevelFollowsSettingsTests(SimpleTestCase):
     URL = '/api/v1/analysis/histogram/'
 
     def _post(self, user):
-        import apps.analysis.views.analysis_views as mod
         from apps.analysis.views import AnalysisViewSet
+        from apps.analysis.test_support import patch_df_loader
 
-        original = mod._load_df_from_request          # 必须在打补丁之前取原值
         datafile = types.SimpleNamespace(id=1, filename='fake.csv',
                                          format_type=SYNTH_META['format'])
-        mod._load_df_from_request = lambda request: (SYNTH_DF, datafile, SYNTH_META, None)
-        self.addCleanup(setattr, mod, '_load_df_from_request', original)
+        self.addCleanup(patch_df_loader(SYNTH_DF, datafile, SYNTH_META))
 
         request = APIRequestFactory().post(
             self.URL, {'file_id': 1, 'params': ['Param0']}, format='json')
@@ -117,14 +115,12 @@ class HistogramCpkLevelFollowsSettingsTests(SimpleTestCase):
 
     def test_custom_limit_cpk_also_follows(self):
         """CL 模式的 custom_cpk_* 走同一份阈值（同函数内第 2 个 compute_cpk 点）。"""
-        import apps.analysis.views.analysis_views as mod
         from apps.analysis.views import AnalysisViewSet
+        from apps.analysis.test_support import patch_df_loader
 
-        original = mod._load_df_from_request
         datafile = types.SimpleNamespace(id=1, filename='fake.csv',
                                          format_type=SYNTH_META['format'])
-        mod._load_df_from_request = lambda request: (SYNTH_DF, datafile, SYNTH_META, None)
-        self.addCleanup(setattr, mod, '_load_df_from_request', original)
+        self.addCleanup(patch_df_loader(SYNTH_DF, datafile, SYNTH_META))
 
         v = self._cpk_value()
         request = APIRequestFactory().post(self.URL, {

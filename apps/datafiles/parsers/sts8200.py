@@ -97,7 +97,3 @@ class STS8200Parser(BaseATEParser):
             **header_meta,
         }
         return df, metadata
-    
-    @staticmethod
-    def get_bin_column_name() -> str:
-        return 'SOFT_BIN'

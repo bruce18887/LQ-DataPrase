@@ -11,6 +11,9 @@ import pandas as pd
 
 from apps.common.constants import NON_NUMERIC_KEYWORDS
 
+# 机台 Bin 列名的唯一来源：解析、统计、导出、看板都查这张表。曾经 parser 各写一份
+# 字面量（共 6 份），跨模块契约多份必漂——由 test/backend/test_bin_column_single_source.py
+# 扫描 parsers/ 并交叉核对 SYSTEM_COLUMNS 钉住。
 BIN_COLUMN_MAPPING = {
     'CTA8290D': 'SW_Bin',
     'CTA8280F': 'SW_Bin',

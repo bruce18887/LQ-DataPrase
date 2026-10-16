@@ -9,8 +9,10 @@ from datetime import datetime, time as dtime
 
 from django.db import transaction
 from django.shortcuts import get_object_or_404
+from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.filters import OrderingFilter
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
@@ -88,10 +90,11 @@ class DataFileViewSet(viewsets.ModelViewSet):
     serializer_class = DataFileSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = DataFilePagination
+    # 过滤器显式声明在视图上：曾在 settings 的 DEFAULT_FILTER_BACKENDS 里全局挂着，
+    # 但全仓只有这个视图用得到，留在全局只会让人以为所有列表都能过滤。
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
     # 搜索完全自管（get_queryset）：DRF SearchFilter 只查 search_fields 列，
     # 会把「仅标签命中」的行过滤掉——标签搜索必须 OR 进查询集后再整集过滤。
-    # search_fields 刻意留空，让 SearchFilter 对该视图变为 no-op。
-    search_fields = []
     filterset_fields = ['product_code', 'format_type', 'file_type']
     ordering_fields = ['id', 'created_at', 'source_mtime', 'filename', 'file_size']
 

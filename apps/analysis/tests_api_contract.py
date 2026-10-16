@@ -29,7 +29,7 @@ class _PatchedViewMixin:
 
     def _patch(self, df, metadata=None, datafile=None):
         from rest_framework.test import APIRequestFactory, force_authenticate
-        from apps.analysis.views import analysis_views, statistics_views
+        from apps.analysis.test_support import patch_df_loader
 
         if metadata is None:
             metadata = {'format': 'CTA8290D', 'mins': {}, 'maxs': {}, 'units': {}}
@@ -37,20 +37,7 @@ class _PatchedViewMixin:
             datafile = types.SimpleNamespace(id=1, filename='fake.csv',
                                              format_type='CTA8290D')
 
-        def fake_load(request):
-            return df, datafile, metadata, None
-
-        originals = [
-            (analysis_views, getattr(analysis_views, '_load_df_from_request')),
-            (statistics_views, getattr(statistics_views, '_load_df_from_request')),
-        ]
-        analysis_views._load_df_from_request = fake_load
-        statistics_views._load_df_from_request = fake_load
-
-        def restore():
-            for module, original in originals:
-                module._load_df_from_request = original
-        self.addCleanup(restore)
+        self.addCleanup(patch_df_loader(df, datafile, metadata))
 
         return APIRequestFactory(), force_authenticate
 
