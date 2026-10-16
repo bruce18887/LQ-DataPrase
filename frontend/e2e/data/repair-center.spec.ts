@@ -14,7 +14,8 @@ import { gotoApp } from '../helpers/nav'
  * 所有造数统一 REPAIR-E2E-<ts> 批次前缀，afterEach 清理。
  */
 
-// 后端落盘位置跟着进程走：非 slot = 项目根，slot = 该 slot 自己的 data_dir
+// 后端落盘位置跟着进程走：非 slot = `<仓库根>/test/e2e-data`，slot = 该 slot 自己的 data_dir。
+// 两处都不再是仓库根 —— 仓库根 media/ 是迁移前的搁浅副本，本轮已把它从测试通路里摘掉。
 const ADMIN_BATCH_DIR = path.join(DATA_DIR, 'media', 'data', ACCOUNTS.admin.username, 'batch')
 const PYTHON = process.env.PYTHON_BIN || path.join(PROJECT_ROOT, '.venv', 'Scripts', 'python.exe')
 

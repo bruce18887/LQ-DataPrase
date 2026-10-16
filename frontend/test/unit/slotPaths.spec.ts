@@ -1,5 +1,6 @@
 // frontend/test/unit/slotPaths.spec.ts
-// 钉住两件事：① 无 slot 时路径与历史上逐字相同（改造不许改变非 slot 行为面）；
+// 钉住两件事：① 无 slot 时 auth/config/downloads 仍在 e2e 目录下（历史形态），
+// 但 **dataDir 落 `test/e2e-data`** —— 串行跑的库/媒体/临时区绝不写仓库根 `media/`；
 // ② 有 slot 清单时四类路径全部改指 slot 目录，且缺字段就硬失败而不是回落。
 import { describe, expect, it } from 'vitest'
 import os from 'node:os'
@@ -11,7 +12,7 @@ const LEGACY = {
   systemConfigFile: path.join(os.tmpdir(), 'lqdp-e2e-system-config.json'),
   authDir: path.join(__dirname, '..', '..', 'e2e', '.auth'),
   downloadsDir: path.join(__dirname, '..', '..', 'e2e', '.downloads'),
-  dataDir: path.resolve(__dirname, '..', '..', '..'),
+  dataDir: path.join(__dirname, '..', '..', '..', 'test', 'e2e-data'),
 }
 
 const manifest = (root: string): SlotManifest => ({
@@ -39,8 +40,14 @@ describe('无 slot：逐字等于今天 test-data.ts 里的写法', () => {
     expect(p.downloadDir).toBe(LEGACY.downloadsDir)
     expect(path.basename(p.downloadDir)).toBe('.downloads')
   })
-  it('DATA_DIR 回落仓库根（两处 media 硬编码用例靠它）', () => {
-    expect(path.resolve(p.dataDir)).toBe(path.resolve(PROJECT_ROOT))
+  it('DATA_DIR 落 test/e2e-data（不再写仓库根 media/）', () => {
+    expect(path.resolve(p.dataDir)).toBe(path.resolve(LEGACY.dataDir))
+    // 下面两条不依赖本机绝对路径，专门钉「形状」：数据根必须是仓库根下的 test/e2e-data。
+    expect(path.relative(path.resolve(PROJECT_ROOT), path.resolve(p.dataDir))).toBe(
+      path.join('test', 'e2e-data'),
+    )
+    expect(path.basename(p.dataDir)).toBe('e2e-data')
+    expect(path.basename(path.dirname(p.dataDir))).toBe('test')
   })
 })
 

@@ -35,9 +35,13 @@ def nc(p: str) -> str:
 
 
 def run_settings(settings_module: str, extra_env: dict):
-    env = {**os.environ, 'DJANGO_SETTINGS_MODULE': settings_module, **extra_env}
+    # 子进程 stdio 编码由这里钉死，父进程的 PYTHONIOENCODING / 本机 locale 都别想参与：
+    # 用 text=True 而不给 encoding 时会按 cp936 解 UTF-8 中文报错，读取线程的
+    # UnicodeDecodeError 被吞、stderr 变 None ⇒ 下面那些断言收到空值（2026-10-16 实测 6 条假红）。
+    env = {**os.environ, 'PYTHONIOENCODING': 'utf-8',
+           'DJANGO_SETTINGS_MODULE': settings_module, **extra_env}
     return subprocess.run([sys.executable, '-c', CHILD], capture_output=True, text=True,
-                          env=env, cwd=str(ROOT))
+                          encoding='utf-8', errors='replace', env=env, cwd=str(ROOT))
 
 
 class E2eSlotSettingsTests(SimpleTestCase):

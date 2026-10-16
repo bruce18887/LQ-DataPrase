@@ -8,11 +8,13 @@ export const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..')
 
 /**
  * 路径全部经 helpers/slot：有 slot 清单（编排器写的 slot.json）时用 slot 自己的目录，
- * 否则逐字等于本文件历史上的写法 —— 导出名保持不变，调用方零改动。
+ * 否则 auth/config/downloads 逐字等于本文件历史上的写法，而 **DATA_DIR = `<仓库根>/test/e2e-data`**
+ * —— 串行跑的库、media、临时区都落在那儿，不再写仓库根 `media/`（导出名不变，调用方零改动）。
  *
- * 其中 E2E_SYSTEM_CONFIG_FILE 的内容仍是「data_dir 钉在项目根」这一空操作配置：
- * 让 Django 后端与 seed 子进程读同一份配置，`target == original` ⇒ 导入期那次
- * 存储目录重定向不会触发。它一旦指向别处就是 move 语义（会搬走并删源），见
+ * E2E_SYSTEM_CONFIG_FILE 的内容仍是「data_dir 钉在项目根」，但它在 e2e_slot 档下完全惰性
+ * （该档不调 apply_system_config）：留着是因为 /api/v1/system/paths/ 的 `configured` 读它，
+ * 且万一有进程按 development 档解析，`target == original` 也不会触发那次存储目录重定向。
+ * 那条重定向一旦指向别处就是 move 语义（搬走并删源），见
  * docs/superpowers/specs/2026-10-14-e2e-slot-pool-parallel-design.md §4.1。
  */
 export {

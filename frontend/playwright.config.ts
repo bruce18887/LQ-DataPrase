@@ -4,24 +4,27 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { E2E_SYSTEM_CONFIG_FILE } from './e2e/fixtures/test-data'
-import { ADMIN_STATE, CURRENT_SLOT } from './e2e/helpers/slot'
+import { ADMIN_STATE, CURRENT_SLOT, SLOTS } from './e2e/helpers/slot'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PROJECT_ROOT = path.resolve(__dirname, '..')
 
-// Storage Layout v2：数据目录默认会迁移到用户主目录。e2e 必须把配置钉死在项目根
-// （data_dir == PROJECT_ROOT → 导入期那次重定向判定 target == original → 空操作），
-// 否则 Django 首次启动会把项目根 db/media **搬走并删源**，测试数据全丢。
-// 同步写在 webServer spawn 之前；同时写入 process.env 让 globalSetup 的 execSync 子进程
-// （seed_users / seed_test_data）与 repair-center 用例的 `manage.py shell` 读同一份配置。
+// e2e 两种模式统一跑 config.settings.e2e_slot：库 / MEDIA_ROOT / 临时区全由
+// LQDP_E2E_SLOT_DIR 这一个变量直接指认（串行 = test/e2e-data，slot = 该 slot 自己的目录）。
+// 刻意**不**走 data_dir 那条导入期重定向 —— 它是 move 语义（copy → verify → 删源），
+// 2026-10-14 就是这样把仓库根 media/ 与 db.sqlite3 搬走并删掉的
+// （docs/superpowers/specs/2026-10-14-e2e-slot-pool-parallel-design.md §4.1、lessons 同日）。
+// 写在 webServer spawn 之前；同时写入 process.env 让 globalSetup 的 execSync 子进程
+// （migrate / seed_users / seed_test_data）与 repair-center 用例的 `manage.py shell` 读同一套配置。
+process.env.DJANGO_SETTINGS_MODULE = 'config.settings.e2e_slot'
+process.env.LQDP_E2E_SLOT_DIR = SLOTS.dataDir
 if (CURRENT_SLOT) {
-  // slot 模式：编排器已写好 slot.json 与 system-config.json（内容同样是 data_dir=项目根），
-  // 这里只认不重写。slot 自己的库/媒体/临时区来自 e2e_slot 档 + LQDP_E2E_SLOT_DIR，
-  // 绝不用 data_dir 指到 slot 目录 —— 那条通路是 move 语义（spec §4.1、lessons 2026-10-14）。
+  // slot 模式：编排器已写好 slot.json 与 system-config.json，这里只认不重写。
   process.env.LQDP_SYSTEM_CONFIG_FILE = CURRENT_SLOT.systemConfigFile
-  process.env.DJANGO_SETTINGS_MODULE = 'config.settings.e2e_slot'
-  process.env.LQDP_E2E_SLOT_DIR = CURRENT_SLOT.dataDir
 } else {
+  // 这份配置在 e2e_slot 档下完全惰性（该档不调 apply_system_config），留着是因为
+  // /api/v1/system/paths/ 的 `configured` 字段读的就是它（settings.system-paths 用例据此断言），
+  // 同时万一某个进程仍按 development 档解析，data_dir=项目根 → target==anchor → 空操作，搬不走东西。
   fs.writeFileSync(
     E2E_SYSTEM_CONFIG_FILE,
     JSON.stringify({ data_dir: PROJECT_ROOT }),
@@ -39,11 +42,12 @@ const PYTHON_BIN =
 // 把对方的前端服务打穿，表现为成片 net::ERR_CONNECTION_REFUSED（lessons 2026-10-14）。
 const FRONTEND_PORT = process.env.E2E_FRONTEND_PORT || '3000'
 const FRONTEND_URL = `http://localhost:${FRONTEND_PORT}`
-// 默认仍是 8000（夜间轮与其它会话的既有约定）。留一个覆盖口：本机常有第二个
-// `manage.py runserver 8000` 挂着，而 reuseExistingServer 会静默复用它 —— 那个进程读的是
-// 仓库根 system_config.json（data_dir = 用户真实数据目录），用例的 PUT /auth/settings/
-// 就会写进真实账号（lessons 2026-09-19 / 2026-10-14 两条同一险情）。
-// 换端口让 Playwright 自起自收，比停掉别人的进程安全。
+// 默认仍是 8000（夜间轮与其它会话的既有约定）。留一个覆盖口：本机常挂着别人起的
+// `manage.py runserver 8000`，那个进程读的是仓库根 system_config.json
+// （data_dir = 用户真实数据目录），用例的 PUT /auth/settings/ 就会写进真实账号
+// （lessons 2026-09-19 / 2026-10-14 两条同一险情）。这条险情现由后端
+// `reuseExistingServer: false` 关闭 —— 不再静默复用，代价是 8000 被占时自起会失败，
+// 所以换端口（E2E_PORT 指空闲口）比停掉别人的进程安全。
 const BACKEND_PORT = process.env.E2E_PORT || '8000'
 const BACKEND_URL = `http://localhost:${BACKEND_PORT}`
 
@@ -156,10 +160,12 @@ export default defineConfig({
           // （standalone/server 档都关掉了它）。/api/v1/health/ 恒 200、无鉴权、
           // 不限流，见 apps/common/health.py。
           url: `${BACKEND_URL}/api/v1/health/`,
-          // 本地允许复用（UI 模式/手动 dev 场景），CI 必须强制自起自收
-          // （lessons R3：复用旧代码进程 → e2e 结果无效）。slot 模式一律自起自收：
-          // 端口对是按空闲情况分配的，复用别人在跑的服务等于跨会话串数据。
-          reuseExistingServer: !process.env.CI && !CURRENT_SLOT,
+          // 一律自起自收，**包括本地**：后端现在跑 config.settings.e2e_slot，数据面由
+          // LQDP_E2E_SLOT_DIR 指认；而本机常挂着一个 development 档的 `manage.py runserver 8000`
+          // （读的是用户主目录那份库与 media）。复用它 = 种子写 test/e2e-data、服务读 home 的
+          // 分裂态，比 lessons R3 的「复用旧代码进程」更难归因。端口被占就该炸出来，
+          // 要留服务自己起：E2E_PORT 换空闲口（先 `netsh int ipv4 show dynamicport tcp` 问区间）。
+          reuseExistingServer: false,
           timeout: 120_000,
           stdout: 'pipe',
           stderr: 'pipe',
