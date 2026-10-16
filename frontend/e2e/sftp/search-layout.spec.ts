@@ -170,6 +170,28 @@ test.describe('@sftp SFTP 搜索页版式', { tag: ['@p1', '@sftp'] }, () => {
     // 这是有意的取舍：不把条件表单压扁去换表格高度。保底值由样式声明，这里只兜住它。
     expect(expanded, '条件展开时表格仍要站住保底高度').toBeGreaterThanOrEqual(300)
 
+    // **上面那条量的是宿主盒子，它挡不住 2026-10-16 那个真机故障**：AG Grid 的
+    // `.ag-root-wrapper` 靠 `height: 100%` 撑开，而百分比高度要祖先有确定高度才解得出来。
+    // 解不出来时 root-wrapper=0，它自带的 `overflow:hidden` 把表头和全部行一起裁光 ——
+    // 宿主仍然有 446px（flex 给的），计数条仍然报「表格 7 行」（DOM 里 7 行真的在），
+    // **且不报任何错**，界面只剩一个空框。所以必须往里量。
+    // 实测判别力：用户真机窗口的坏态 root=0 / viewport=0，加包裹层后 root=445 / viewport=397。
+    // ⚠ **但这个坏态在本仓 Playwright 里复现不出来** —— 同一份没有包裹层的旧代码，在
+    // 1440×900 的 Edge 下 root 照样撑开、七行正常显示（2026-10-16 实测过两遍：dev 与生产包都绿）。
+    // 所以这三条**拦不住用户那台机器上的原始故障**，只拦「在测试环境里也会塌」的同类退化。
+    // 原故障的防线是组件里那条样式不变量：AG Grid 的宿主必须有确定高度。
+    // 而行数与表头高度**没有**判别力（坏态下 `.ag-row` 照样存在、header 靠行内高度仍是 33），
+    // 留行数那条只是为了钉住「画出来的 == 计数条报的」这个契约，别指望它拦塌框。
+    const inner = await grid.evaluate((el) => ({
+      root: el.querySelector<HTMLElement>('.ag-root-wrapper')?.clientHeight ?? -1,
+      body: el.querySelector<HTMLElement>('.ag-body-viewport')?.clientHeight ?? -1,
+      rows: el.querySelectorAll('.ag-center-cols-container .ag-row').length,
+    }))
+    console.log(`[L5] 内层 root=${inner.root} viewport=${inner.body} rows=${inner.rows}`)
+    expect(inner.root, 'root-wrapper 塌成 0 = 百分比高度没解出来，整张表会被 overflow:hidden 裁光').toBeGreaterThan(0)
+    expect(inner.body, 'body-viewport 塌成 0 = 一行都看不见，而宿主盒子仍是正常高度').toBeGreaterThan(0)
+    expect(inner.rows, '渲染出的行数要等于计数条报的表格行数').toBe(2)
+
     await page.getByTestId('sftp-search-criteria-toggle').click()
     const collapsed = await heightOf(grid)
     const scrolled = await pageScroll(page)

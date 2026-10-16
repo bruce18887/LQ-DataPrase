@@ -1929,3 +1929,14 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   ② 删任何 worktree/临时树之前，先 `ls -la` 看有没有 `->`，有链接的目录**绝不 `rm -rf`**；
   ③ 恢复完成的判据不是"命令 exit 0"，而是**跑一条端到端产物比对**（本次是图标字节哈希一致 + 后端一条真实 test 绿）；
   ④ 附带教训：判据/哈希对不上时先怀疑**自己的量法**。本次我第一次报的 sha256 与存档不符，是因为我少算了原脚本的 `"32x32:"` 前缀 —— 定义不同源，不是产物坏了。
+
+## 2026-10-16 AG Grid 的宿主必须有**确定**高度：塌成 0 的 root-wrapper 会静默裁光整张表，而计数条照样报「表格 7 行」
+
+- **结论**：`13f9538` 把搜索结果表写死的 `height: 520px` 删掉、改成纯 flex 填充，留下了一个不报错的故障面。AG Grid 的布局三件套是 `.ag-root-wrapper.ag-layout-normal { content-visibility:auto; height:100% }` + `.ag-root-wrapper-body.ag-layout-normal { flex:1 1 auto; height:0; min-height:0 }` + root-wrapper 自带 `overflow:hidden`。**只要 `height:100%` 解不出来**（宿主的高度只由 flex-grow 给出，而链顶 `.sftp-search-page` 是 `min-height:100%` 不是 `height`），body-wrapper 就停在 0，`overflow:hidden` 把表头和全部行一起裁掉 —— 界面剩一个尺寸正常的空框，**零 console 输出**。
+- **现场实例**：用户真机（Electron + Vite dev，内容档搜 `BV`，已扫描 7·候选 7·命中 7）表格区全白。探针一次读数定死因果：坏态 `root=0 / bodyWrap=0 / viewport=0`，而 `host=[1156,446]`、`headerCells=9`、`rows=14`（7 行 × 钉住列+中央列两份）—— **DOM 全在，只是被裁了**。给宿主一个确定像素高度后立刻 `root=445 / viewport=397`，七行连高亮片段全出来。修法：`.srt` 里垫一层 `.srt-gridwrap`（`position:relative; flex:1 1 auto; min-height:0`），网格改 `position:absolute; inset:0` —— 绝对定位盒按包含块实际渲染尺寸算，不走百分比解析。
+- **规则**：
+  ① **量宿主盒子 ≠ 量渲染**。版式用例 L5 一直断言 `heightOf('.srt-grid') >= 300`，全绿了三周，而框里一行都没有。几何断言必须往里穿一层，量 `.ag-root-wrapper` / `.ag-body-viewport` 的 `clientHeight`。
+  ② **UI 上「N 行 / N 项」的自证读的是数组长度，不是像素**，永远不能拿来当「渲染成功」的证据 —— 本轮「表格 7 行」与「框内零像素」同时为真。
+  ③ **别用 `inset-top: <像素>` 替代包裹层**：`.srt-bar` 是 `flex-wrap: wrap`，窄窗口换行时高度会翻倍，那正是当初删掉写死 520px 的理由，写回魔法数字等于把同一个坑换个位置埋。
+  ④ **复现不出来的故障，测试拦不住**。同一份坏代码在本仓 Playwright（1440×900 / Edge / dev 与生产包各一遍）渲染正常，所以补的三条断言只拦「在测试环境里也塌」的同类退化 —— 这件事**必须写进注释**，否则后来人会把绿灯读成「原故障已防住」。
+  ⑤ 方法论：连着否掉两个自己的假设（「AG Grid 抛异常」「0 高度」）之后，真正的进展来自**设计一个一次能区分三种情况的探针**让用户粘贴（root 有无 / header 高度 / rows 数 / viewport 高度 / `--ag-row-height` 是否解析）。对看不见的现场，好探针比继续读代码快。
