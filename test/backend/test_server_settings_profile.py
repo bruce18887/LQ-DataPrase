@@ -27,6 +27,13 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 PYTHON_BIN = os.path.join(REPO, '.venv', 'Scripts', 'python.exe')
 if not os.path.isfile(PYTHON_BIN):  # 非 Windows 开发机
     PYTHON_BIN = os.path.join(REPO, '.venv', 'bin', 'python')
+if not os.path.isfile(PYTHON_BIN):
+    # 两档候选都指向 `.venv`，而 `.venv/` 不入库 —— 干净检出（GitHub CI 的 windows runner、
+    # 别人的隔离 worktree）里两个都不存在，`subprocess` 直接抛 `FileNotFoundError [WinError 2]`，
+    # 本文件 10 条用例全 ERROR。用**当前跑测试的解释器**起子进程才是无前提的做法：CI 里它就是
+    # setup-python 装了 requirements 的那个 python，本地就是执行 `manage.py test` 的那个。
+    # 这 10 条以前从没在 CI 上红过，是因为 `test/__init__.py` 缺失让整个 `test.backend` 无法被收集。
+    PYTHON_BIN = sys.executable
 
 SECRET_KEY_MATERIAL = 'server-profile-test-key-not-for-production-0000000000'
 FERNET_TEST_KEY = 'M' * 43 + '='  # 长度合法的 url-safe base64 Fernet key
