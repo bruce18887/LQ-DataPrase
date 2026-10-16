@@ -102,12 +102,15 @@ describe('insetPct / plateRadius —— 底板几何与符号内缩（D7 语义�
     expect(bySize).toEqual({ 16: 4, 32: 7, 48: 11, 64: 14, 128: 28, 256: 56 })
   })
 
-  it('内缩分档：16px 最窄、≥48px 最宽（档位数值以实测选型为准，见 icon-lib.cjs 注释）', () => {
+  it('内缩分档：16px 最窄、≥48px 取 12%（档位数值以实测选型为准，见 icon-lib.cjs 注释）', () => {
     expect(insetPct(16)).toBeCloseTo(0.06)
     expect(insetPct(24)).toBeCloseTo(0.1)
     expect(insetPct(32)).toBeCloseTo(0.1)
-    expect(insetPct(48)).toBeCloseTo(0.19)
-    expect(insetPct(256)).toBeCloseTo(0.19)
+    expect(insetPct(48)).toBeCloseTo(0.12)
+    expect(insetPct(256)).toBeCloseTo(0.12)
+    // ≥48px 旧档是 19%，其尾行实测 48px=2 与 16px 同值 —— 那个"大帧尾针站得住"的理由已被否证。
+    // 阈值表随档位一起动（见下方 MEASURED）：只改一边就会让门静默失准。
+    expect(insetPct(48) < 0.19, '内缩若回到 19%，必须同时重测 G1 逐帧阈值表').toBe(true)
   })
 
   it('16px 内缩取整后必须 ≥1px：底板铺满帧时，0 内缩会吃掉符号-底板间隙', () => {
@@ -243,15 +246,16 @@ describe('decodePngRgba + frameStats —— 审的是要写进 .ico 的字节', 
 
 describe('G1 逐帧阈值表（本轮 I4：一档全局常量套在随尺寸增长的统计量上会丢判别力）', () => {
   // 两列实测是这条门的出处，都在 tracked 通路上渲（本机 Playwright Chromium 截 frameHtml →
-  // frameStats）：交付 = frameHtml(现母版)；真模糊 = frameHtml(旧模糊母版) 反白进同一底板。
-  // 复测记录：tasks/_fixr_ctrl_verify.txt B 段（本轮独立复现，非抄评审/简报的数字）。
+  // frameStats）：交付 = frameHtml(现母版)；真模糊 = frameHtml(旧模糊母版) 反白进同一底板，
+  // 旧母版直接从 git 取（`git show 5cad1b1^:frontend/public/favicon.svg`），不依赖任何 gitignored 缓存。
+  // 本表随 ≥48px 内缩档位重测（`tasks/_inset12_rebaseline.cjs`，2026-10-16）：换档位必须换本表。
   const MEASURED: [number, number, number][] = [
     [16, 5, 8],
     [32, 8, 11],
-    [48, 10, 15],
-    [64, 11, 17],
-    [128, 15, 24],
-    [256, 14, 24],
+    [48, 10, 20],
+    [64, 13, 21],
+    [128, 17, 25],
+    [256, 20, 29],
   ]
   it('六个交付帧各有自己的一行：严格高于该帧交付值、且仍低于该帧真模糊值', () => {
     for (const [size, delivered, blurred] of MEASURED) {
@@ -276,8 +280,8 @@ describe('G1 逐帧阈值表（本轮 I4：一档全局常量套在随尺寸增�
 
   it('表外尺寸借「不小于它的第一档」，绝不给没测过的尺寸放行更宽口径', () => {
     expect(inkTonesMax(24)).toEqual({ max: 10, tabulated: false }) // 借 32 档
-    expect(inkTonesMax(200)).toEqual({ max: 17, tabulated: false }) // 借 256 档
-    expect(inkTonesMax(512)).toEqual({ max: 17, tabulated: false }) // 比最大档还大：借最大档，绝不返回 undefined
+    expect(inkTonesMax(200)).toEqual({ max: 23, tabulated: false }) // 借 256 档
+    expect(inkTonesMax(512)).toEqual({ max: 23, tabulated: false }) // 比最大档还大：借最大档，绝不返回 undefined
     expect(inkTonesMax(8)).toEqual({ max: 7, tabulated: false }) // 借 16 档（最严）
     // 未映射尺寸也不能让门失效（undefined 阈值 = 永远不红 = 静默放行）
     const stats = frameStats(
