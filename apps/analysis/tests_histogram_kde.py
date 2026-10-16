@@ -22,24 +22,11 @@ class CustomLimitCpkApiTests(SimpleTestCase):
     @staticmethod
     def _patched_view(df, metadata):
         """Monkey-patch ``_load_df_from_request`` so no DB/DataFile is needed."""
-        import types
         from rest_framework.test import APIRequestFactory, force_authenticate
-        from apps.analysis.views import analysis_views
+        from apps.analysis.test_support import fake_datafile, patch_df_loader
 
-        datafile = types.SimpleNamespace(
-            id=1, filename='fake.csv', format_type=metadata.get('format'),
-        )
-
-        def fake_load(request):
-            return df, datafile, metadata, None
-
-        original = getattr(analysis_views, '_load_df_from_request', None)
-        analysis_views._load_df_from_request = fake_load
-
-        def restore():
-            if original is not None:
-                analysis_views._load_df_from_request = original
-
+        restore = patch_df_loader(
+            df, fake_datafile(format_type=metadata.get('format')), metadata)
         return APIRequestFactory(), force_authenticate, restore
 
     @staticmethod

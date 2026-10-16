@@ -55,7 +55,7 @@
 | 圆角 | `--p-radius-xs/sm/md/lg/xl/full` | 4 / 6 / 8 / 12 / 16 / 999px（卡片默认 `lg`=12，控件 `md`=8，胶囊 `full`） |
 | 字号 | `--p-fs-micro/dense/small/base/lead/title/headline/display/hero` | 11 / 12 / 13 / 14 / 16 / 18 / 22 / 26 / 32（九档；折叠规则「就近归档、平手取小」，组件内不得再写字面 px，守门见 `e2e/global/fonts.spec.ts`。装饰性大字可留字面量但须标 `@type-scale-one-off`） |
 | 字重 | `--p-fw-regular/medium/semibold/bold/extrabold` | 400 / 500 / 600 / 700 / 800 |
-| 字体 | `--font-sans` / `--font-mono` | 与 `variables.css` 同源（拉丁在前 + CJK 回退）；`typography.ts` / `echarts-theme.ts` 必须同步 |
+| 字体 | `--font-sans` / `--font-mono` | 与 `design-tokens.css` 同源（拉丁在前 + CJK 回退）；`typography.ts` / `echarts-theme.ts` 必须同步 |
 
 ---
 
@@ -228,6 +228,9 @@
 ---
 
 ## 9. 迁移映射（现有 → 新）
+
+> 状态（2026-10-16）：§9.2 的 1-3 步已完成，`variables.css` 已于 2026-08-29 删除，
+> 现役 token 文件只有 `design-tokens.css`。本节保留作迁移对照表，不是现状描述。
 
 ### 9.1 `variables.css`
 

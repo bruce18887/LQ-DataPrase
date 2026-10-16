@@ -1,14 +1,15 @@
-"""Single-file analysis views.
+"""单文件分析中带视图层过滤链的四个端点（histogram / wafer_map / multi_lot /
+correlation）。
 
-两文件序列相关性（file_correlation*）三端点在 ``file_correlation_views`` 里以
-mixin 形式合入本 ViewSet（600 行上限）——路由、权限声明与 OpenAPI 分组均不变。
+四个「解析 → 校验 → 调 service → 序列化」的薄壳动作（serial_distribution / cpk /
+qqplot / uph）在 ``param_actions`` 里，两文件序列相关性（file_correlation*）三端点
+在 ``file_correlation_views`` 里，均以 mixin 形式合入本 ViewSet（600 行上限）——
+路由、权限声明与 OpenAPI 分组均不变。
 """
-
-import json
 
 import pandas as pd
 
-from rest_framework import viewsets, status
+from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -16,15 +17,12 @@ from rest_framework.permissions import IsAuthenticated
 from apps.datafiles.models import DataFile
 from apps.analysis.services.statistics import (
     get_site_column,
-    get_serial_column,
     get_serial_candidates,
     get_coord_columns,
     get_columns_with_limits,
     resolve_spec_limits,
     get_1d_from,
     filter_finite,
-    compute_qqplot,
-    compute_uph,
     calculate_fail_test_item_statistics,
     filter_bin1_rows,
     filter_test_items,
@@ -35,14 +33,12 @@ from apps.analysis.services.data_services import (
     compute_multi_lot_distribution,
     compute_common_params,
     compute_correlation_scatter,
-    compute_serial_distribution_data,
-    compute_cpk_table_data,
 )
-from apps.analysis.services.limits import resolve_limits
 from apps.datafiles.services import get_cached_parsed_file
 from apps.common.params import get_param, get_param_float, get_param_list
 
 from .file_correlation_views import FileCorrelationActions
+from .param_actions import ParamStatActions
 from ._helpers import (
     clean_data,
     _filter_blank_params,
@@ -59,7 +55,8 @@ from apps.common.user_settings import get_cpk_thresholds
 _cached_low_cpk_items = cached_low_cpk_items
 
 
-class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
+class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
+                      viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
 
     @action(detail=False, methods=['get', 'post'])
@@ -283,15 +280,20 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
             return Response({'error': 'need_at_least_2_files'}, status=400)
 
         # Load each selected file once (cached parse + DB row for filename).
-        loaded = []  # (file_id, df, metadata, filename)
+        # 一次 in_bulk 取回全部行：逐 fid 查询在 8 个文件时就是 8 次 SELECT，
+        # 而下游低 CPK 缓存还要用同一批 DataFile 行（mtime+size 作缓存键）。
+        # owner=request.user 是权限防线，不是冗余 —— 别人的 file_id 混进请求必须查不到。
+        owned = DataFile.objects.filter(
+            pk__in=file_ids, owner=request.user).in_bulk()
+        loaded = []  # (file_id, df, metadata, DataFile)
         for fid in file_ids:
-            df_obj = DataFile.objects.filter(pk=fid, owner=request.user).first()
+            df_obj = owned.get(int(fid))
             if df_obj is None:
                 continue
             df, metadata, fmt = get_cached_parsed_file(int(fid), request.user.pk, df_obj)
             if df is None:
                 continue
-            loaded.append((int(fid), df, metadata, df_obj.filename))
+            loaded.append((int(fid), df, metadata, df_obj))
 
         if len(loaded) < 2:
             return Response({'error': 'need_at_least_2_files'}, status=400)
@@ -310,8 +312,8 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
             loaded_work = loaded
             if flags['data_only_bin1']:
                 loaded_work = [
-                    (fid, filter_bin1_rows(df, metadata), metadata, fn)
-                    for fid, df, metadata, fn in loaded
+                    (fid, filter_bin1_rows(df, metadata), metadata, datafile)
+                    for fid, df, metadata, datafile in loaded
                 ]
             common_params = compute_common_params(loaded_work, flags['ignore_no_limit'])
             # 其余筛选（忽略无测试值/仅Fail项/仅低CPK）：对交集按每个文件过滤后
@@ -319,15 +321,15 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
             # fail 恒空）；低 CPK 走共享缓存（key 含 mtime+size 自动失效）。
             if flags['ignore_no_test_value'] or flags['only_fail_test_item'] or flags['only_low_cpk']:
                 per_file = []
-                for (fid, df, metadata, _fn), (_fid2, full_df, _, _) in zip(loaded_work, loaded):
+                for (_fid, df, metadata, _datafile), (_fid2, full_df, _, full_datafile) in zip(loaded_work, loaded):
                     fail_items = None
                     if flags['only_fail_test_item']:
                         fail_items = set(calculate_fail_test_item_statistics(full_df, metadata).keys())
                     low_cpk_items = None
                     if flags['only_low_cpk']:
-                        df_obj = DataFile.objects.filter(pk=fid, owner=request.user).first()
+                        # datafile 行随 loaded 一起带回来，不再第二轮按 fid 重查
                         low_cpk_items = _cached_low_cpk_items(
-                            df_obj, request.user.pk, full_df, metadata,
+                            full_datafile, request.user.pk, full_df, metadata,
                             cpk_threshold, iqr_multiplier, flags['data_only_bin1'])
                     per_file.append(set(filter_test_items(
                         df, metadata, common_params,
@@ -343,7 +345,8 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
             response = {
                 'common_params': common_params,
                 'file_names': [
-                    {'file_id': fid, 'filename': fn} for fid, _, _, fn in loaded
+                    {'file_id': fid, 'filename': datafile.filename}
+                    for fid, _, _, datafile in loaded
                 ],
             }
             first = common_params[0] if common_params else None
@@ -354,7 +357,7 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
                 datasets = {}
                 all_series = []
                 # 分布用 loaded_work（bin1 已收窄）——与筛选后的 common_params 口径一致
-                for fid, df, metadata, filename in loaded_work:
+                for fid, df, metadata, datafile in loaded_work:
                     if first in df.columns:
                         # filter_finite 而非 ``abs(s) < inf``：实测真实 CTA8290D
                         # 文件的 Start_T 是 pandas 3.0 str dtype，``abs()`` 直接抛
@@ -365,7 +368,7 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
                         if len(s) > 0:
                             datasets[str(fid)] = {
                                 'df': df, 'metadata': metadata, 'series': s,
-                                'name': filename[:20], 'file_id': fid,
+                                'name': datafile.filename[:20], 'file_id': fid,
                             }
                             all_series.append(s)
                 if all_series:
@@ -393,7 +396,7 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
 
         datasets = {}
         all_series = []
-        for fid, df, metadata, filename in loaded:
+        for fid, df, metadata, datafile in loaded:
             if param not in df.columns:
                 continue
             fail_items = None
@@ -403,9 +406,8 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
                     df, metadata, columns=[param]).keys())
             low_cpk_items = None
             if flags['only_low_cpk']:
-                df_obj = DataFile.objects.filter(pk=fid, owner=request.user).first()
                 low_cpk_items = _cached_low_cpk_items(
-                    df_obj, request.user.pk, df, metadata,
+                    datafile, request.user.pk, df, metadata,
                     cpk_threshold, iqr_multiplier, flags['data_only_bin1'])
             work_df = filter_bin1_rows(df, metadata) if flags['data_only_bin1'] else df
             # 防御性重放：参数在该文件被筛掉（非 fail 项/非低 CPK/无测试值）→
@@ -426,7 +428,7 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
             if len(s) > 0:
                 datasets[str(fid)] = {
                     'df': work_df, 'metadata': metadata, 'series': s,
-                    'name': filename[:20], 'file_id': fid,
+                    'name': datafile.filename[:20], 'file_id': fid,
                 }
                 all_series.append(s)
 
@@ -515,176 +517,5 @@ class AnalysisViewSet(FileCorrelationActions, viewsets.GenericViewSet):
         # 现在一并贯穿到散点两轴的异常值判定，与直方图同口径。
         result = compute_correlation_scatter(
             df, param_x, param_y, metadata, iqr_multiplier=iqr_multiplier)
-
-        return Response(clean_data(result))
-
-    @action(detail=False, methods=['get', 'post'])
-    def serial_distribution(self, request):
-        df, datafile, metadata, err = _load_df_from_request(request)
-        if err:
-            return Response({'error': err}, status=400)
-
-        param = get_param(request, 'param')
-        if not param:
-            return Response({'error': 'param_required'}, status=400)
-        if param not in df.columns:
-            return Response({'error': 'param_not_found'}, status=400)
-        # Reject serial/site columns as data param — they are grouping keys, not values
-        # serial_col 可选：前端选择器覆盖自动检测（Serial_No > Dut_No > PART_ID）
-        serial_col_req = get_param(request, 'serial_col') or None
-        if serial_col_req and serial_col_req not in df.columns:
-            return Response({'error': 'serial_col_not_found',
-                             'detail': f'指定的序列列 {serial_col_req} 不存在'}, status=400)
-        serial_col = get_serial_column(df, preferred=serial_col_req)
-        site_col = get_site_column(df)
-        if param == serial_col or param == site_col:
-            return Response({'error': 'param_is_metadata',
-                             'detail': f'{param} 是分组列，不能作为数据参数'}, status=400)
-        # Validate param has numeric data
-        col = get_1d_from(df, param)
-        if isinstance(col, pd.DataFrame):
-            col = col.iloc[:, 0]
-        if col.dropna().empty:
-            return Response({'error': 'param_no_valid_data'}, status=400)
-
-        chart_config_raw = get_param(request, 'chart_config', '[]')
-        # 客户端可控输入：非法 JSON（GET ?chart_config=limit）或非数组类型
-        # （{"limit":true} / 123）曾直接 json.loads 抛异常 → 500
-        try:
-            chart_config = chart_config_raw if isinstance(chart_config_raw, list) else json.loads(chart_config_raw)
-        except (TypeError, ValueError):
-            chart_config = None
-        if not isinstance(chart_config, list):
-            return Response({
-                'error': 'invalid_chart_config',
-                'detail': 'chart_config 必须是 JSON 数组（如 ["limit","s3","s6"]）',
-            }, status=400)
-        range_type = get_param(request, 'range_type', 'RDL')
-        # data_only_bin1 narrows the rows after param validation, so the
-        # per-unit serial series only contains pass-bin units.
-        if get_bool_param(request, 'data_only_bin1'):
-            df = filter_bin1_rows(df, metadata)
-
-        try:
-            result = compute_serial_distribution_data(
-                df, metadata, param, range_type, chart_config,
-                serial_col=serial_col,
-                # 本端点此前连 parse_filter_flags 都没调，敏感度写死 1.5
-                iqr_multiplier=get_param_float(request, 'iqr_multiplier', 1.5),
-                # CL 语义三端点统一为「用户自定义限」（与 histogram 同口径）
-                custom_low=get_param_float(request, 'custom_low'),
-                custom_high=get_param_float(request, 'custom_high'))
-        except TypeError:
-            return Response({'error': 'serial_distribution_failed',
-                             'detail': '数据列存在重复或格式异常'}, status=400)
-        if result is None:
-            # 400 而非 200：让前端 axios 错误路径弹出提示，避免序列图静默空白
-            return Response({
-                'error': 'no_serial_column',
-                'detail': '该文件没有序列列（Serial_No / Dut_No / PART_ID），无法绘制序列分布图；可用 serial_col 参数显式指定',
-            }, status=400)
-
-        return Response(clean_data(result))
-
-    @action(detail=False, methods=['get', 'post'])
-    def cpk(self, request):
-        df, datafile, metadata, err = _load_df_from_request(request)
-        if err:
-            return Response({'error': err}, status=400)
-
-        params = get_param_list(request,'params')
-        if not params:
-            params = get_columns_with_limits(df, metadata)
-
-        # 与 histogram 同形守卫：切文件后的 stale selectedParam 打到本端点曾是
-        # `df[param]` KeyError → 500（histogram 加 param_not_found 守卫的注释里
-        # 记载过同一场景）；CTA8280F 尾逗号空列名同样先滤掉。
-        params = _filter_blank_params(params)
-        valid_params = [p for p in params if p in df.columns]
-        if params and not valid_params:
-            return Response({
-                'error': 'param_not_found',
-                'detail': '请求的参数均不在该文件中，请重新选择文件或参数',
-                'requested': params,
-                'missing': [p for p in params if p not in df.columns],
-            }, status=400)
-        params = valid_params
-
-        result = compute_cpk_table_data(
-            df, metadata, params,
-            cpk_thresholds=get_cpk_thresholds(request.user))
-
-        return Response(clean_data(result))
-
-
-    @action(detail=False, methods=['get', 'post'])
-    def qqplot(self, request):
-        """
-        Compute QQ plot data for normality testing of a single parameter.
-
-        Request body:
-        {
-            "file_id": 123,
-            "param": "Param1"
-        }
-        """
-        df, datafile, metadata, err = _load_df_from_request(request)
-        if err:
-            return Response({'error': err}, status=400)
-
-        param = get_param(request, 'param')
-        if not param:
-            return Response({'error': 'param_required'}, status=400)
-        if param not in df.columns:
-            return Response({
-                'error': 'param_not_found',
-                'detail': f'参数 {param!r} 不在该文件中',
-            }, status=400)
-
-        # data_only_bin1 narrows the rows before series extraction so the
-        # QQ plot (n / outlier stats) only covers pass-bin rows; the
-        # param_no_valid_data check below then covers the "all-NaN inside
-        # Bin1" case with the existing 400 path.
-        if get_bool_param(request, 'data_only_bin1'):
-            df = filter_bin1_rows(df, metadata)
-
-        data_series = get_1d_from(df, param)
-        if isinstance(data_series, pd.DataFrame):
-            data_series = data_series.iloc[:, 0]
-        # Skip if column is all-NaN or non-numeric
-        if data_series.dropna().empty:
-            return Response({'error': 'param_no_valid_data'}, status=400)
-        try:
-            result = compute_qqplot(
-                data_series, metadata, param,
-                iqr_multiplier=get_param_float(request, 'iqr_multiplier', 1.5))
-        except (TypeError, ValueError) as e:
-            return Response({'error': 'qqplot_failed', 'detail': str(e)}, status=400)
-
-        return Response(clean_data(result))
-
-    @action(detail=False, methods=['get', 'post'])
-    def uph(self, request):
-        """
-        Compute UPH (Units Per Hour) using the parallel-site throughput model.
-
-        Request body:
-        {
-            "file_id": 123,
-            "test_time_col": "Test_Time",      # optional override
-            "manual_test_time_sec": 8.5         # optional per-unit time (seconds)
-        }
-        """
-        df, datafile, metadata, err = _load_df_from_request(request)
-        if err:
-            return Response({'error': err}, status=400)
-
-        test_time_col = get_param(request, 'test_time_col')
-        # 不在视图层做 float()：服务层 compute_uph 对无效的 manual_test_time_sec
-        # 有 try/except 降级告警（"手动测试时间无效，已忽略"），视图层裸转换
-        # 会让 {"manual_test_time_sec": "abc"} 在容错生效前就 500（防御写错了层）
-        manual_test_time_sec = get_param(request, 'manual_test_time_sec')
-        result = compute_uph(df, metadata, test_time_col=test_time_col,
-                             manual_test_time_sec=manual_test_time_sec)
 
         return Response(clean_data(result))

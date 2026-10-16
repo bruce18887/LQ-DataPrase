@@ -16,7 +16,7 @@ from rest_framework.views import APIView
 
 from apps.common.constants import PAGE_SIZE_MAX
 from apps.datafiles.models import DataFile, ParseHistory
-from apps.datafiles.parsers import get_parser, SYSTEM_COLUMNS
+from apps.datafiles.parsers import SYSTEM_COLUMNS
 from apps.datafiles.serializers import DataFileSerializer, ParseHistorySerializer
 from apps.datafiles.services import (
     get_cached_parsed_file,
@@ -24,7 +24,10 @@ from apps.datafiles.services import (
     clear_parse_cache,
 )
 from apps.datafiles.utils import extract_product_code, resolve_file_path
-from apps.analysis.services.statistics import build_col_meta
+from apps.analysis.services.statistics import (
+    build_col_meta,
+    get_bin_column_name,
+)
 from apps.analysis.services.statistics.helpers import get_site_column
 
 from ._helpers import (
@@ -309,8 +312,6 @@ class DataBrowserView(APIView):
             [fail_cells.get(i, []) for i in paged_df.index], ensure_ascii=False
         )
 
-        parser = get_parser(datafile.format_type)
-
         payload = (
             '{"headers":' + json.dumps(list(df.columns), ensure_ascii=False)
             + ',"data":' + data_json
@@ -321,7 +322,7 @@ class DataBrowserView(APIView):
             + ',"total_pages":' + str((total + page_size - 1) // page_size)
             + ',"fail_row_count":' + str(fail_row_count)
             + ',"col_meta":' + json.dumps(build_col_meta(df, metadata), ensure_ascii=False)
-            + ',"bin_column":' + json.dumps(parser.get_bin_column_name(), ensure_ascii=False)
+            + ',"bin_column":' + json.dumps(get_bin_column_name(datafile.format_type), ensure_ascii=False)
             + ((',"site_options":' + json.dumps(site_options, ensure_ascii=False) + ',"numeric_columns":' + json.dumps(numeric_columns, ensure_ascii=False)
                 + ',"system_columns":' + json.dumps(system_columns, ensure_ascii=False)) if page == 1 else '')
             + '}'

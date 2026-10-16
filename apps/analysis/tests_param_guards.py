@@ -411,7 +411,7 @@ class StaleParamAcrossFileSwitchTests(SimpleTestCase):
         """
         import types
         from rest_framework.test import APIRequestFactory, force_authenticate
-        from apps.analysis.views import analysis_views, statistics_views
+        from apps.analysis.test_support import patch_df_loader
 
         if datafile is None:
             datafile = types.SimpleNamespace(
@@ -420,22 +420,8 @@ class StaleParamAcrossFileSwitchTests(SimpleTestCase):
         if metadata is None:
             metadata = {'format': 'CTA8290D', 'mins': {}, 'maxs': {}, 'units': {}}
 
-        def fake_load(request):
-            return df, datafile, metadata, None
-
-        original_analysis = getattr(analysis_views, '_load_df_from_request', None)
-        original_statistics = getattr(statistics_views, '_load_df_from_request', None)
-
-        analysis_views._load_df_from_request = fake_load
-        statistics_views._load_df_from_request = fake_load
-
-        def restore():
-            if original_analysis is not None:
-                analysis_views._load_df_from_request = original_analysis
-            if original_statistics is not None:
-                statistics_views._load_df_from_request = original_statistics
-
-        return APIRequestFactory(), force_authenticate, restore
+        return (APIRequestFactory(), force_authenticate,
+                patch_df_loader(df, datafile, metadata))
 
     @staticmethod
     def _authed_post(factory, force_authenticate, url, payload):

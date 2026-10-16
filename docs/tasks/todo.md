@@ -3670,9 +3670,10 @@ slot 模式下 `globalSetup` 会跳过 migrate/seed（库与种子由 `scripts/e
 是完整的；runner 却只看大小就发 `scan_budget_exceeded`（`incomplete=true`）并把
 `done.truncated` 置真 → 常驻黄条 + `partial` 徽章。**7 个文件全命中时它必然是误报。**
 
-复现（`tasks/_repro_budget_notice.py`：4 KiB 预算 / 20 KiB 文件 / 关键词在第 1 个 chunk）：
-修前 `notice=[grep_unavailable, workers_reduced, scan_budget_exceeded]` + `truncated=True`；
-修后只剩前两条 + `truncated=False`。
+复现/验收（`python tasks/_repro_budget_notice.py`：1 MiB 预算 / 3 MiB 文件，两场景相反断言）：
+修前 A 场景报 `scan_budget_exceeded` + `done.truncated=True`（误报）；修后
+A 不报、B（关键词在预算之外）照旧报。**预算必须取到 `CHUNK_SIZE` 以上才有意义** ——
+比一块还小的文件一次就读到 EOF，预算判定根本走不到。
 
 ### 计划与结果
 
@@ -3697,4 +3698,80 @@ slot 模式下 `globalSetup` 会跳过 migrate/seed（库与种子由 `scripts/e
 3. 顺手发现的一处不一致（未改）：`events.py` 注释说 TRUNCATION_TEXT 里的码「都进
    `done.limits_hit`」，但 runner 第 107 行的 `grep_unavailable` 走的是 `notice()` 而不是
    `_limit()`，所以它其实不进 `limits_hit`（`grep_fallback` / `workers_reduced` 都进）。
+
+## 2026-10-16 架构评审 P1+P2 清账（进行中）
+
+依据 `docs/reference/architecture-review-2026-10-15.md`。**先侦察后动手**：三路 Explore 子代理
+分别摸 P1-1~4 / P1-5~6 / P2 各项的真实改动面，再由主上下文实测核对承重数字。
+
+### 侦察阶段推翻/修正的事实（勿按旧版行事）
+
+| 原报告 | 实测 | 影响 |
+|--------|------|------|
+| `analysis/views/_helpers.py` 469 行 | **202 行**（469 是 `datafiles/views/_helpers.py`，两个不同文件） | P1-1 的拆分空间不在 `_helpers.py` |
+| 视图错误格式 71 处 | **144 处** `{'error': ...}`（141 在生产代码，3 在 sftp 测试） | P1-5 是 141 处规模的机械转换，非小修 |
+| 统计端点「契约无统一来源」 | 合并 ViewSet **会改 URL**（`/statistics/*` → `/analysis/*`），打断 `api/analysis.ts:24,27`、`useSiteStats.ts:33`、`useCorrelationMatrix.ts:19` 与 2 个 e2e | P1-2 **只统一契约、不动 URL** |
+| `services/limits.py` 与 `statistics/limits.py` 重复 | **不重复**：前者 34 行只 `resolve_limits()`，后者 298 行是规格限+失败检测+bin 统计。**仅同名混淆** | P1-3 的「删重复」不成立，改为消歧 |
+| 主题 light/night token 不对称 | `design-tokens.css` light/night **各 50 个，完全对称**。真正不对称在 `element-plus-theme.css`：**77 个 `!important` 全挂在 night 的组件级补偿层，light 组件级覆盖数 0** | P2-4 的真问题在 element-plus 补偿层缺失 |
+| `P2-1 工作区 1.7GB 残骸」 | `tasks/` 58M（484 文件）、`Data/` **930M（用户原始数据）**、`media/` **722M（MEDIA_ROOT 运行时产物）** | `Data/`、`media/`、`secret.key` **绝不能删** |
+
+### 分批计划（可勾选）
+
+**批 1 — 后端结构（安全、高价值，无契约变更）✅ 已完成**
+- [x] **P1-1** 拆 `analysis_views.py` 690→516 行。**改判：没走「histogram 下沉」这条路**。
+      实际接线的是上一轮已起草的 `views/param_actions.py`（`serial_distribution`/`cpk`/`qqplot`/`uph`
+      四个「解析→校验→调 service→序列化」薄壳，整段搬移零行为变更，`get_extra_actions()` 沿 MRO
+      收集，11 个路由名实测一字未变）。原方案的 histogram 建参表/过滤链下沉**未做**——它治的是
+      「视图内联业务链」，与 600 行上限是两件事，留作后端分层项。
+      **踩到并修掉的坑**：拆出 mixin 后 `param_actions` 自持一份 `_load_df_from_request` 绑定，
+      25 条只 patch `analysis_views` 的用例立刻打真库变 500（R6③）。新增
+      `apps/analysis/test_support.py::patch_df_loader`——**扫包动态收集消费者**，以后再拆视图不会
+      重犯；6 处手写 patch 全部改用它
+- [x] **P1-4** `get_bin_column_name` 6 → 1：删 base + 4 个 parser 的静态方法，`browse_views.py`
+      改查 `get_bin_column_name(datafile.format_type)`（`parser = get_parser(...)` 随之变死，一并删）。
+      护栏 `test/backend/test_bin_column_single_source.py` 5 例：parsers 里不得再出现同名方法
+      （改动前 HEAD 的 5 个文件各 1 处命中，红→绿已核）、`PARSER_REGISTRY` 必须被登记表全覆盖、
+      表值与 `SYSTEM_COLUMNS` 交叉一致（两份独立声明互验，不是自证）
+- [x] **P1-7** N+1：`multi_lot` 的 3 处循环内 `.filter(pk=fid, owner=...)` → 一次
+      `filter(pk__in=…, owner=request.user).in_bulk()`，`loaded` 元组改带 `DataFile` 行供下游
+      低 CPK 缓存复用。`owner` 过滤保留并由新用例显式断言（它是越权防线）。
+      报告点名的另一处 `datafiles/views/_helpers.py`（**469 行那个文件**，不是 analysis 的
+      202 行同名文件）同样改了 `in_bulk`：`_delete_duplicate_files` 曾是每个重复文件一次
+      SELECT。该处没加计数断言——`df.delete()` 本身按行发 SELECT，钉死总数会脆；由既有
+      `test_delete_duplicates_keeps_earliest` / `_batch_file_only` 两例维护
+- [x] **P1-8** **原报告的「空转」判断是错的，已按实测改判**：`PAGE_SIZE=20` 是**承重的**——
+      `PageNumberPagination.page_size` 在类定义时绑定 `api_settings.PAGE_SIZE`，删掉它连
+      「显式声明了 `pagination_class`」的 `DataFilePagination` 都会退化成裸数组；
+      `/auth/users/`、`/files/history/` 也一直在吃这个全局值。真正空的只有 `SearchFilter`
+      （唯一声明者把 `search_fields` 写死 `[]`）。处置：`DEFAULT_FILTER_BACKENDS` **整条删除**，
+      把 `DjangoFilterBackend`+`OrderingFilter` 显式声明到 `DataFileViewSet`；分页保留，并在
+      `base.py` 写清「只对 3 个有 list() 的视图生效 + 别删 PAGE_SIZE」
+- [x] **P1-10** 文档漂移 **5 处里 3 处已被 P0 提交 `62ac05d` 修掉**（README 的 asar /
+      PostgreSQL / `ALLOWED_HOSTS`，实测 README:13,204,267 已与代码一致）。本轮补剩下 2 处 +
+      连带 2 处：`version-management.md:5` 改为**不再复述版本号**（写死数字必过期，曾停在 0.2.0
+      而实际 0.7.0）；`frontend/CLAUDE.md:7,50` 的 `variables.css`→`design-tokens.css`
+      （⚠该文件被 `.gitignore` 忽略，改动**进不了版本库**，与 P0 附录第 4 条同一个仓库策略问题）；
+      `ui-design-guide.md:58` 同源文件名、§9 加「已完成的迁移对照表，不是现状」状态注。
+      **顺带查出 P0 自己引入的一处新漂移**：`pyproject.toml` 落了第二份
+      `version = "0.7.0"`，而 `version-management.md` 声明版本**只**在
+      `frontend/package.json` —— 加 `test/backend/test_version_single_source.py`
+      钉住两份一致，并把文档里写死当前版本号的那句改成「不复述」（写死一次就永久过期）
+
+**批 2 — 契约统一（中风险，需同步前端与 e2e）**
+- [ ] **P1-2** 抽 `apps/analysis/views/_guards.py` 统一参数守卫，对齐侦察出的 7 处不一致（空 params、全无效、单参数缺失、CPK 阈值两种写法、过滤开关两种写法…）。**不动 URL、不合并 ViewSet**
+- [ ] **P1-3** 消歧：`services/limits.py` → `services/range_limits.py`（4 处 import）；两包各加职责 docstring 并点名重叠函数。**不做全量合并**（11 处 import + 循环 import 风险，功能收益近零）
+- [ ] **P1-5** 统一错误格式：新增 `error_response(code, detail, status)`（产出与全局处理器同形的 `{code,message,detail}`）+ **码表单一来源**（28 个码）；机械转换 141 处；同步前端 2 处直读（`useSiteStats.ts:50`、`ConnectPage.vue:148`）与 e2e 2 处断言（`serial-no-column.spec.ts:155,461`）；登录 `_error` 保留 `code` 字段名（`auth.spec.ts:130` 依赖 `.error-msg--user_not_found`）。补**源码扫描测试**禁止 `{'error':` 复现
+
+**批 3 — 基础设施与卫生**
+- [ ] **P1-9** 最小 CI（`.github/workflows`）：push 触发 `manage.py test` + `npm run build` + `lint:e2e` + `test:unit`
+- [ ] **P2-2** 前端最大 3 文件拆分（674/582/560），**原样保留 `data-*` / `data-testid` 选择器**
+- [ ] **P2-3** `apps/common` 拆 `apps/storage`（system_config+backup+views+urls）与 `apps/observability`（health+shutdown），约 29 处 import
+- [ ] **P2-4** 主题：给 `element-plus-theme.css` 补 **light 组件级补偿层**（当前 0 处，night 77 处）；`seriesColors` 与 `--chart-*` 偏差对齐
+- [ ] **P2-7** 测试拆分：`apps/datafiles/tests.py` 1965 行优先
+- [ ] **P2-1** 清理（**待用户确认范围**）
+
+**批 4 — 待决策项**
+- [ ] **P1-6** 响应壳/类型：侦察结论是「改壳风险高（前端 6 处强命名壳会全断）→ 只加不改」。可选做 OpenAPI→TS codegen（1 devDep + 1 script），受 SSE 21 个类型与自定义壳限制
+- [ ] **P2-5** token 存 localStorage（Electron + contextIsolation 下风险可控，建议列为「引入 HTML 注入面之前的前置条件」而非立即改）
+- [ ] **P2-6** CORS 全开（已有完整成因与修法记录，但修法需**验证真实安装包**，不宜盲改）
 
