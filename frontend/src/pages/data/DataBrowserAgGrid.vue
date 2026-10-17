@@ -158,10 +158,13 @@ const exportingExcel = ref(false)
 const exportingCsv = ref(false)
 const dataLoaded = ref(false)
 
-// 表格高度随视口自适应。320 → 254：横幅并入操作按钮、全选/清空收进下拉后，
-// 表格上缘实测从 443px 抬到 377px（回收 66px），等量扣减才轮得到表格多吃 66px，
-// 否则省下来的高度只是页面空白，用户看不出这次改过什么。
-const TABLE_TOP_OFFSET = 254
+// 表格高度随视口自适应。历次实测（表格上缘 / 常量）：
+//   320 → 顶部带 443px（批 1 收拢前）
+//   254 → 顶部带 377px（批 1：操作按钮并入横幅、全选/清空收进下拉，回收 66px 全给表格）
+//   290 → 顶部带 413px（批 4：多文件标签条占一行 26px + 10px 下边距 = 36px）
+// 口径是「表格下缘恒为 1023px」：顶部带增减一律由表格吸收，页面总高不变 ——
+// 常量不动的话，加一行 chrome 就等于把整页推高 36px。
+const TABLE_TOP_OFFSET = 290
 const tableHeight = ref(Math.max(320, window.innerHeight - TABLE_TOP_OFFSET))
 function onResize() {
   tableHeight.value = Math.max(320, window.innerHeight - TABLE_TOP_OFFSET)
