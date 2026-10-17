@@ -187,7 +187,7 @@ class ConnectTests(SimpleTestCase):
         s.close_all()
 
     def test_every_connection_goes_through_host_key_verification(self):
-        """参考工具用 AutoAddPolicy，会破坏本项目 TOFU 契约。"""
+        """AutoAddPolicy 会破坏本项目 TOFU 契约。"""
         s = connect.SearchSession(1, 3)
         s.open_all()
         self.assertEqual(len(self.built), 3)   # built 只在 fake_open 里追加

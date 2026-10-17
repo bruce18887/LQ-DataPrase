@@ -1,7 +1,7 @@
 """扫描内核（spec §3.5）：字节级内容匹配 ``scan_file`` 与列值读取 ``read_column``。
 
 两个入口共用一套地基（needle 构造、编码四探、``[DATA]``/文件头解析、异常分层判据），
-移植参考工具 ``csv_content_searcher.py:407`` 与 ``csv_column_reader.py`` 全套。
+两条入口都只依赖这套地基，不各自另写判据。
 
 四条不能写的性质（前两条是「两档引擎给出同一结果集」的前提）：
 
@@ -159,7 +159,7 @@ def _locate(buf: bytes, needles: List[bytes], fold: bool, *, word: bool,
 
 def _fuzzy_locate(buf: bytes, needles: List[bytes], fold: bool, start: int,
                   at_eof: bool) -> int:
-    """子序列是**行级**谓词（参考工具 ``content_searcher.py:100``），所以逐行判。
+    """子序列是**行级**谓词，所以逐行判。
 
     只判完整行：半行的尾巴可能就在下一次读里，判早了 snippet 会缺尾。``at_eof``
     时才判最后一段没有行尾的内容（文件末行常不带 ``\\n``）。
@@ -367,7 +367,7 @@ def scan_file(sftp, cand: Candidate,
                         break
                     if not fuzzy and not eof and buf.find(b'\n', idx) < 0:
                         # 命中行的行尾还没进窗口，snippet 会缺尾巴。补读一次就够
-                        # （CHUNK_SIZE ≫ 参考工具那个 400 字节下限）。
+                        # （CHUNK_SIZE = 1 MiB，远大于单行长度）。
                         more = remote.read(CHUNK_SIZE)
                         if more:
                             buf += more
@@ -465,8 +465,7 @@ def read_column(sftp, cand: Candidate,
     这趟不完整由 runner 的 ``scan_budget_exceeded`` notice 说明。
 
     跳过表头下紧邻的 ``Unit``/``Min``/``Max`` 三行（判据与上限见那两个常量）：那是单位与
-    限值行，不是测量值。**这一条是对参考工具的有意偏离**（``csv_column_reader.py`` 把它们
-    当值取走）。
+    限值行，不是测量值。**这一条是本项目的有意取舍**（照字面取值会把单位与限值当测量值）。
 
     三段状态机：``[DATA]`` 之前只攒 head 字节（元数据交给 :func:`parse_head`，与
     :func:`scan_file` 共用同一套半行保护）→ 定表头取全部匹配列的索引 → 逐行取值，
@@ -478,7 +477,7 @@ def read_column(sftp, cand: Candidate,
     刷日志会淹掉真错误）；读不了 = 文件级故障，必须留 WARNING；预算截断且一值未取到 =
     判不出有没有数据，按无结果处理。
 
-    切分口径是**朴素** ``split(',')``（与参考工具一致，也与 :func:`parse_head` 的
+    切分口径是**朴素** ``split(',')``（与 :func:`parse_head` 的
     ``partition(',')`` 同族）：本域 ``[DATA]`` 段实测无引号字段、无内嵌逗号，与
     ``csv.reader`` 逐行结果一致。带引号逗号的项名会把列索引右移，**而右移的后果现在变严重
     了**：从「静默无结果」变成「正面宣称 no data」。真出现这种 datalog 时要改的是切分方式，

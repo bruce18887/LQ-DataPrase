@@ -1,5 +1,5 @@
-"""扫描内核（spec §3.5）：字节级内容匹配（参考工具 csv_content_searcher.py）
-+ CSV 列值读取（参考工具 csv_column_reader.py）。
+"""扫描内核（spec §3.5）：字节级内容匹配 ``scan_file``
++ CSV 列值读取 ``read_column``。
 
 跑法：python manage.py test test.backend.test_sftp_search_scan
 """
@@ -142,7 +142,7 @@ class FuzzyTests(SimpleTestCase):
                                matching='fuzzy'))
 
     def test_one_hit_per_line_even_with_multiple_matches(self):
-        """fuzzy 是**行级**谓词（参考工具 content_searcher.py:100）：游标必须越过整行。
+        """fuzzy 是**行级**谓词：游标必须越过整行。
 
         若按 idx+1 续扫，第 1 行的尾巴 'N,Shadow_Reg_2_ish' 自己又是 SRe2 的子序列，
         同一行会被报两次。

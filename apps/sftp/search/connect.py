@@ -16,8 +16,8 @@
 「搜索 vs 下载」。
 
 主机密钥：每条连接都经 ``host_keys.open_verified_transport()``（TOFU 契约，
-``test/backend/test_sftp_host_keys.py`` 钉着）。参考工具的 ``AutoAddPolicy``
-**不许移植**；``HostKeyMismatchError`` 不降级、不吞，直接上抛。
+``test/backend/test_sftp_host_keys.py`` 钉着）。``paramiko.AutoAddPolicy``
+**不许采用**；``HostKeyMismatchError`` 不降级、不吞，直接上抛。
 """
 
 from __future__ import annotations

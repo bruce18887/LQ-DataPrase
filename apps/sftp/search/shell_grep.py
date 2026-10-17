@@ -16,7 +16,7 @@
 
 **非 ASCII 查询进不了这一档**（``select_engine`` 已整体排除：这类查询的本域 CSV 常是
 GBK 编码，grep 只按 UTF-8 字节匹配会静默漏结果），所以这里没有、也不许补「再追加一条
-另一编码的 needle」那类写法：参考工具用的是 bash 专有的 ANSI-C 引用语法，在 dash/sh 下
+另一编码的 needle」那类写法：常见写法用 bash 专有的 ANSI-C 引用语法，在 dash/sh 下
 语义不同 —— 那等于把结果是否完整押在远端 shell 是哪个上。
 
 探测分两级（spec §3.6）：``grep`` 级 = ``grep --version`` + **我们拼的那几个选项它认不认**
@@ -329,7 +329,7 @@ def _probe_mapping(chan: Any, roots: Sequence[str]) -> bool:
     不一致还去 grep，就是搜一个不存在的路径、安静返回 0 命中——那是假阴性，
     比慢和报错都恶劣，所以这一条判不过就把整个 grep 档判死。
 
-    **有意偏离参考工具**：``csv_content_searcher.py:213`` 是先 ``sftp.listdir(root)``
+    **一处有意偏离常见做法**：常见 probe 是先 ``sftp.listdir(root)``
     取一个条目、再到 shell 侧 ``[ -e <root>/<条目> ]``。这里直接测 root 本身：
     chroot 下 shell 侧通常连 ``/data`` 都不可见，判别力相同，却省掉一次 SFTP 往返
     （probe 只有一个 transport 可用）。spec §3.6 只要求「映射一致」，未规定粒度。
