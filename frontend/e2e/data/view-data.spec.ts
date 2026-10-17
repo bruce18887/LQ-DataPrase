@@ -530,8 +530,15 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
       timeout: 10_000,
     })
 
-    // 清空 → 恢复全部测试列（列数回到 346，水平滚动容器可滚动）
-    await selector.locator('button').filter({ hasText: '清空' }).click()
+    // 清空 → 恢复全部测试列（列数回到 346，水平滚动容器可滚动）。
+    // 全选/清空收进了下拉 footer（不再常驻控件下方），所以要先展开下拉再点。
+    await selector.locator('.el-select__wrapper').click()
+    await page
+      .locator('.el-select-dropdown:visible button')
+      .filter({ hasText: '清空' })
+      .first()
+      .click()
+    await page.keyboard.press('Escape')
     await expect
       .poll(
         () => page.evaluate(() => {
@@ -924,6 +931,44 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
       .poll(async () => (await binCell.getAttribute('class')) ?? '', { timeout: 3_000 })
       .toContain('ag-cell-data-changed')
     expect(await hScroll.evaluate((el) => el.scrollLeft)).toBe(before)
+  })
+
+  /**
+   * 顶部带高度契约（2026-10-17 把操作按钮并入文件横幅、全选/清空收进下拉之后定的）。
+   *
+   * 两条断言各挡一种回归，缺一不可：
+   * - 表格上缘 377px：谁再往顶部带加一行而没同步 `TABLE_TOP_OFFSET`，这里红。
+   * - 表格高 == innerHeight - 254：常量被改动而没重新量顶部带，这里红。
+   * 两个数都是实测（1280/1440/1920/2560 四档宽度下顶部带同为 377px，不折行）。
+   */
+  test('@p2 顶部带：操作按钮在文件横幅内，表格高度与实测占位对齐', async ({ page }) => {
+    await openViewTab(page, SEEDED_FILES.CTA8280F_FT)
+
+    const banner = page.locator('.active-file-banner:visible').first()
+    await expect(banner).toBeVisible()
+    for (const label of ['加载数据', '导出 Excel', '导出 CSV']) {
+      await expect(
+        banner.locator('button').filter({ hasText: label }).first(),
+        `「${label}」应在文件横幅右端，而不是另占一行`,
+      ).toBeVisible()
+    }
+
+    // 全选/清空只活在下拉 footer 里：常驻控件下方会把筛选行从 54px 撑到 75px
+    await expect(
+      viewScope(page).locator('.test-col-selector .col-actions'),
+    ).toHaveCount(0)
+
+    // 顶部带是异步凑齐的（质量条要等 /summary/、行数提示要等首块），量早了 y 会偏小。
+    // 等它凑齐 + loading 遮罩退场，再量一次定型的几何。
+    await expect(page.locator('.quality-bar:visible')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(/共\s+\d+\s+条数据/).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.el-loading-mask:visible')).toHaveCount(0)
+
+    const band = await page.locator('.ag-grid-wrapper').boundingBox()
+    expect(band, '表格容器无盒模型').not.toBeNull()
+    expect(Math.round(band!.y), '表格上缘位置变了，但 TABLE_TOP_OFFSET 没跟着重量').toBe(377)
+    const innerH = await page.evaluate(() => window.innerHeight)
+    expect(band!.height, '表格高度不再等于 innerHeight - TABLE_TOP_OFFSET(254)').toBe(innerH - 254)
   })
 
   test('@p2 默认隐藏列：记录列默认隐藏，更新隐藏列设置后重新显示', async ({ page }) => {
