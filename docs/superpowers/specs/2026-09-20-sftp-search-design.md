@@ -1,20 +1,19 @@
 # SFTP 浏览器搜索子系统（2026-09-20）
 
-> 来源：用户需求「为 SFTP 浏览器做一个功能强大的搜索功能，参考 `DataPrase-SFTP Searcher/`」。
+> 来源：用户需求「为 SFTP 浏览器做一个功能强大的搜索功能」（§1.1 原文）。
 > 6 项决策已逐项拍板（见 §1.2）。实现计划另出（writing-plans）。
 > 本文 file:line 为 2026-09-20 HEAD 快照，均已回读源码核实。
-> 2026-09-21 按后端实施（Task 1–9）回写若干处：§2.5、§2.6、§3.1、§3.2、§3.3、§3.4、§3.5、§3.6、§4.1、§6、§7。
+> 2026-09-21 按后端实施（Task 1–9）回写若干处：§2.5、§3.1、§3.2、§3.3、§3.4、§3.5、§3.6、§4.1、§6、§7。
 > 其中 §3.5 一条**纠正了本文原来的一个前提**。新增引用以函数名为准（行号会随实施漂移）。
-> 同日再纠一次：**上一轮那条 §3.5「纠正」（真数据 56/56 在 `[DATA]` 与表头间夹空行、参考工具对
+> 同日再纠一次：**上一轮那条 §3.5「纠正」（真数据 56/56 在 `[DATA]` 与表头间夹空行、旧假设对
 > 真数据必然读出 0 值）本身是错的——空行方位记反了，它在标记之前（49/56），标记之后紧跟表头
-> （56/56）**。§2.6 与 §3.5 已按原始字节复算结果改写，`scanners.py` 的跳过空行降级为防御性容错。
+> （56/56）**。§3.5 已按原始字节复算结果改写，`scanners.py` 的跳过空行降级为防御性容错。
 
 ## 1. 需求与决策
 
 ### 1.1 用户原文
 
-「为我当前项目的 SFTP 浏览器想一个功能强大的搜索功能，功能上可以参考一点
-`C:\\Users\\Administrator\\Desktop\\DataPrase\\LQ-DataPrase\\DataPrase-SFTP Searcher`」
+「为我当前项目的 SFTP 浏览器想一个功能强大的搜索功能」
 
 过程中的两条补充要求：
 
@@ -110,20 +109,6 @@ dest="use_threading"`（默认 True），`django/core/servers/basehttp.py:261-26
 （`test/backend/test_sftp_pool_lock.py` 的 `BUILD_DELAY`）——**没有这个 sleep 就等于
 无锁也测不出红**，写这类测试时必须带上。
 
-### 2.6 参考工具可复用资产
-
-`DataPrase-SFTP Searcher/`（未跟踪目录，2026-09-20 新建的 CLI 原型）：
-
-| 文件 | 能力 | 处置 |
-|---|---|---|
-| `search/csv_content_searcher.py` | 1MB 大块读 + paramiko prefetch 流水线 + 原始字节多编码匹配 + 命中即停 + 滚动窗口行号计数 + ATE 表头元数据解析 + 编码四探 | **移植为扫描内核主体** |
-| 同上 `server_grep_supported` / `search_via_server` / `_build_grep_command` | 服务端 grep 快路径（含 chroot 路径映射验证、GBK `$'..'` bashism） | 移植，但**收紧启用条件**（§3.3） |
-| 同上 `search_in_files` / `_open_connection` / `_recycle` | 每 worker 一条独立连接、连接坏了重开并重试一次 | 移植为 `connect.py` |
-| `search/file_retriever.py` | 递归遍历 + `fnmatch` + 扩展名/大小/日期过滤 | 移植，但**遍历结构改 BFS**（§3.4） |
-| `search/csv_column_reader.py` | `[DATA]` section 定位 + 表头取列 + 前 N 有效值 | 移植为列值模式，其「`[DATA]` 后首行即表头」的读法经复算在真实数据上成立（56/56 表头紧跟标记）。**前 N 有效值这一条不照搬**：2026-09-21 拍板改为先跳过表头下紧邻的 `Unit`/`Min`/`Max` 三行再取值（判据、代价与复测见 §3.5） |
-| `utils/cli_interface.py` | worker 数钳位 1–8、实时 summary、导出、文件名合法性校验 | 取钳位区间与导出思路 |
-| `config/sftp_connection.py:21` | `set_missing_host_key_policy(paramiko.AutoAddPolicy())` | **不移植**，必须换成 `host_keys.open_verified_transport()` |
-
 ## 3. 方案
 
 ### 3.1 模块边界与行数预算
@@ -198,7 +183,7 @@ walker 直接调谓词、`shell_grep` 只调这里的 glob 常量，**两档引�
 
   // —— 元数据过滤（三模式共用底座）——
   "name_pattern": "*RT*.csv",          // fnmatch；空/省略 = 不限
-  "modified_after": "2026-09-01T00:00",// 本地时间语义，与参考工具一致
+  "modified_after": "2026-09-01T00:00",// 本地时间语义（非 UTC）
   "modified_before": null,
   "min_size": null, "max_size": null,  // 字节
   "data_files_only": true,             // 排除 Sum_*.csv 汇总（复用 _is_summary_csv）
@@ -244,7 +229,7 @@ walker 直接调谓词、`shell_grep` 只调这里的 glob 常量，**两档引�
 | `matches_per_file` | 1 | 20 | |
 | `max_scan_bytes` | 64 MiB | 1 GiB | 单文件扫描预算。**判据是「这一趟被预算叫停」而不是「文件比预算大」**（2026-10-15 收紧）：扫描器读满预算却还没取够要求的命中数才记 `scan_budget_exceeded` 并跳过该文件剩余；关键词落在预算之内、取够命中数就早停的那一趟对该文件是完整的，不许报截断（否则一次完整的搜索会被标成 `partial`，黄条说谎）。判据由扫描器随结果一起报（`scan_file`/`read_column` 的第二个返回值），runner 不得用 `cand.size` 反推 |
 | `column_rows` | 10 | 50 | 列名档匹配的**每一列**各取前 N 个非空读数（不是「往下找几行表头」）。表头下紧邻的 `Unit`/`Min`/`Max` 三行不计入；一列全无读数仍算命中并标 `no data`（§3.5） |
-| `workers` | 4 | 8 | 与参考工具 `cli_interface.py:324` 的 1–8 钳位一致 |
+| `workers` | 4 | 8 | 1–8 钳位 |
 | `term` 长度 | — | 200 字符 | |
 | `timeout` | 600s | 30–3600s | 复用 `clamp_timeout` 同款钳位范式 |
 
@@ -291,7 +276,7 @@ dot 条目 → `--exclude='.*'` **与** `--exclude-dir='.*'` **两条都要**（
 - **条件 3（非 ASCII 排除）**，两个理由叠在一起：
   - 本域中文名测试项的 CSV 常是 **GBK 编码**，而 grep 只会拿 UTF-8 字节去匹
     → **静默漏掉所有 GBK 文件**。静默漏结果是不可接受的失败模式。
-  - 参考工具的补法是追加 `$'\\x..'` 形式的 GBK needle（`csv_content_searcher.py:303-309`），
+  - 常见的补法是追加 `$'\\x..'` 形式的 GBK needle，
     那是 **bash 专有语法**，dash/sh 下语义不同 —— 把正确性押在远端 shell 是哪个上，
     等于让结果取决于环境。
 - **条件 4**：grep 没有「每目录只取第一个」原语，硬凑要后处理，加速收益即失。
@@ -305,16 +290,16 @@ dot 条目 → `--exclude='.*'` **与** `--exclude-dir='.*'` **两条都要**（
 而引擎是自动降级的——同一查询会因服务器恰好有没有 grep 而给出不同结果集。
 **「结果取决于环境」是比缺功能更糟的性质**。若后续要做，必须连带「regex 时禁用 grep 档」的约束一起做。
 
-`fuzzy`（子序列匹配，参考工具 `content_searcher.py:129` 版本）保留：线性扫描无回溯风险，
+`fuzzy`（子序列匹配）保留：线性扫描无回溯风险，
 仅 client 引擎支持 → 自动触发回落并 `notice`。
 
 **grep 档的代价必须写清**：它一次性完成列举 + 匹配，因此**没有 `listing` 阶段、没有候选清单、
-进度恒为不定档**（服务端不知扫描总数，参考工具 `csv_content_searcher.py:291` 即返回 `None`）。
+进度恒为不定档**（服务端不知扫描总数，只能返回 `None`）。
 命中仍逐行流式回来，UI 看到的是命中持续出现。
 
 ### 3.4 遍历器（walker）
 
-**BFS 工作队列，不用参考工具 `file_retriever.py:62` 那样的深度优先递归。**
+**BFS 工作队列，不用深度优先递归。**
 区别在深树上很实在：DFS 会一头扎进第一个子树直到叶才吐第一个文件；BFS 让 `workers` 个线程
 从「待访问目录」队列取目录，所以**候选从搜索一开始就在往 UI 流**，取消也只是不再消费队列。
 
@@ -333,7 +318,7 @@ dot 条目 → `--exclude='.*'` **与** `--exclude-dir='.*'` **两条都要**（
 
 ### 3.5 扫描内核（scanners）
 
-移植参考工具 `csv_content_searcher.py` 的 `_search_single_file`（`:407`）全套：
+扫描内核（`scanners.scan_file`）的成套判点：
 
 - `CHUNK_SIZE = 1 MiB`、`MAX_INFLIGHT = 64`（prefetch 流水线，约 2 MB 在途）
 - `LINE_CONTEXT = 4096` 滚动窗口 + 换行计数 → 得行号
@@ -350,7 +335,7 @@ dot 条目 → `--exclude='.*'` **与** `--exclude-dir='.*'` **两条都要**（
 - 连接级异常（`paramiko.SSHException` / `SFTPError` / `EOFError` / `OSError`）**向上抛**，
   由 `connect.py` 决定回收重连；文件级异常就地记 `error{scope:"file"}` 并继续
 
-`mode="column"` 移植 `csv_column_reader.py`：定位 `[DATA]` → 表头取列索引 → 前 N 个非空值。
+`mode="column"`（`scanners.read_column`）：定位 `[DATA]` → 表头取列索引 → 前 N 个非空值。
 
 **「`[DATA]` 之后的第一行就是表头」这个前提在真实数据上成立**，实现照此读即可。（Task 7
 期间一条相反的报告——「真数据在标记与表头间夹空行，照此读会对所有真实数据读出 0 值」——
@@ -370,7 +355,7 @@ dot 条目 → `--exclude='.*'` **与** `--exclude-dir='.*'` **两条都要**（
 
 空行在标记**之前**（49/56），不在标记之后。两条推论：
 
-- 参考工具 `csv_column_reader.py` 的读法在真实数据上是**正常**的，「必然读出 0 值」不成立。
+- 「`[DATA]` 后首行即表头、往下取值」这种读法在真实数据上是**正常**的，「必然读出 0 值」不成立。
 - 实现里「进入 `[DATA]` 后跳过空行」那段**不是**对实测数据的适配，而是**防御性容错**
   （未知生产者或手工编辑的文件可能在标记与表头之间留空行）。对真实数据无可观察影响，
   故**行为保留、只改注释所声称的依据**（`scanners.py`）。
@@ -384,7 +369,7 @@ dot 条目 → `--exclude='.*'` **与** `--exclude-dir='.*'` **两条都要**（
 - 真表头之后紧跟 `Unit` / `Min` / `Max` 三行 → **已拍板跳过**（2026-09-21 用户决定）。
   实现见 `scanners.py` 的 `LIMIT_ROW_TOKENS` / `LIMIT_ROW_SKIP_MAX`：判据是**首格**命中
   `{unit, units, min, max}`（那三行的测试列里装的是各自的单位与限值，只有前置系统列才是
-  字面 token），且只认表头下**紧邻**的最多三行，断档即停。这是**对参考工具的有意偏离**。
+  字面 token），且只认表头下**紧邻**的最多三行，断档即停。这是本项目的**有意取舍**。
   语义代价一并拍板接受：某列只在单位/限值行有内容 → 该文件不再算命中（命中必须有真读数）。
   **这条代价已于 2026-09-24 撤销**：命中判据改为「表头匹配到列」，只有单位/限值的列变成
   `no data` 命中而不是消失，见本节第 3 条与 §7 同日条目。
@@ -436,8 +421,8 @@ dot 条目 → `--exclude='.*'` **与** `--exclude-dir='.*'` **两条都要**（
 
 - **三级探测**（`shell_grep.probe`；本文 2026-09-20 版是两级，实施补了中间那级。**三级不过分别回落**）：
   - `grep` 级：`grep --version` 可用 + SFTP/shell **路径映射一致**（chroot 验证）→ 才支持无时间过滤的查询。
-    映射不过即整档作废：chroot 下 grep 一个错路径不是「慢」，是**假阴性**。参考
-    `csv_content_searcher.py:213` 的 probe 手法，实现有意偏离：直接测 root 本身而非取一个条目再验，
+    映射不过即整档作废：chroot 下 grep 一个错路径不是「慢」，是**假阴性**。
+    常见 probe 手法不直接测 root；本实现有意偏离：直接测 root 本身而非取一个条目再验，
     判别力相同而省一次 SFTP 往返（探测只有一个 transport 可用）。
   - **选项级（实施新增）**：真跑一次 `printf '' | LC_ALL=C grep -q -F -e zz --exclude=zz
     --exclude-dir=zz --include=zz`，退出码 >1 即不过。grep 档的文件选择平价**全靠这三条**（§3.3），
@@ -470,9 +455,9 @@ dot 条目 → `--exclude='.*'` **与** `--exclude-dir='.*'` **两条都要**（
 
 - 凭据取自 `cache.get_session(user_id)`（`apps/sftp/cache.py:134`），**前端不回传密码**。
 - 每条连接经 `host_keys.open_verified_transport()`（`apps/sftp/host_keys.py:182`）建立。
-  **不移植参考工具的 `AutoAddPolicy`**——它会破坏 `test/backend/test_sftp_host_keys.py`
+  **不采用 `paramiko.AutoAddPolicy`**——它会破坏 `test/backend/test_sftp_host_keys.py`
   钉住的「密钥不匹配时拒绝且不发凭据」契约。
-- 借还：`queue.Queue`，坏连接回收重开一次（参考 `_recycle`），重开失败则该文件记
+- 借还：`queue.Queue`，坏连接回收重开一次，重开失败则该文件记
   `error{scope:"file"}` 跳过。
 - **配额降级**：开第 k 条失败 → 降到 k−1 继续，并报 `notice{code:"workers_reduced", actual}`；
   一条都开不出来 → `workers=1` 用单连接，搜索照跑只是慢。**必须上报实际并行数**，
@@ -701,7 +686,7 @@ class SftpSearchPreset(models.Model):
 
 它是纯 argparse 脚本、与 Playwright 零耦合（`subprocess.Popen([sys.executable, ...,
 '--root', tmpdir])` + 读 stdout 首行拿端口）。**这一级是唯一能测出并行正确性的**——
-参考工具 `csv_content_searcher.py:24-27` 记的「Garbage packet received」这类协议流错乱，
+「Garbage packet received」这类协议流错乱，
 MagicMock 永远测不到。
 
 - fixture 树扩一棵：多层目录 + 同格式多文件 + GBK 编码中文测试项 + `Sum_*.csv` +

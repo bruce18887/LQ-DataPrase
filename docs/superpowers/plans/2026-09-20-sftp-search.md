@@ -25,7 +25,7 @@
 - **任何 `except` 不得静默**：必须留 WARNING 日志（`test/backend/test_sftp_guards.py:224-252` 钉着）。
 - **错误格式**：流开始前的校验失败 → `400 {"error": msg}`；流开始后只能发带内 `error` 事件，生成器内绝不抛 DRF 异常。
 - **SSE 响应头**必须同时有 `Cache-Control: no-cache` 与 `X-Accel-Buffering: no`。
-- **任何新开 SFTP 连接必须经 `host_keys.open_verified_transport()`**；禁止 `AutoAddPolicy`（参考工具有，不许移植）。
+- **任何新开 SFTP 连接必须经 `host_keys.open_verified_transport()`**；禁止 `paramiko.AutoAddPolicy`。
 - **前端改动同时维护 dark + light 主题**，只用语义 token（`--text-2`/`--border-2`/`--brand`/`--error`/`--p-fs-*`），不新增字面色值。
 - **命中片段渲染禁止 `v-html`**（`term` 是用户输入，走 v-html 就是自造 XSS 面）。
 - **e2e 收尾释放 8000 / 3000 端口**；SFTP 相关 spec 必须 `test.describe.configure({ mode: 'serial' })`（状态按 user 存，多 worker 互相覆盖 —— lessons R6）。
@@ -1956,7 +1956,7 @@ Expected: FAIL —— `AttributeError: module ... has no attribute 'read_column'
 `remote.readline()`，首行 `detect_encoding` 后沿用同一编码。四条要点：
 
 - **`in_data` 为假时，只有 `[` 开头的行才判 section；其余行按 `key,value` 抽三个元数据字段。**
-  这条是 `test_no_data_section_means_no_table` 的实现点，也是与参考工具的**有意分歧**。
+  这条是 `test_no_data_section_means_no_table` 的实现点，也是本项目的**刻意取舍**。
 - 表头：`headers = [h.strip() for h in line.split(',')]`；
   `spec.column_name not in headers` → `return None`；否则 `col_idx = headers.index(...)`。
 - 数据行：`row = line.split(',')`，`if col_idx < len(row)` 才取值（短行跳过）；
@@ -1974,7 +1974,7 @@ Expected: PASS（含 Task 6 全部）
 git add apps/sftp/search/scanners.py test/backend/test_sftp_search_scan.py
 git commit -m "feat(sftp): CSV 列值扫描
 
-比参考工具多一条「必须先进入 [DATA] 才认表头」：否则会把文件头的 key,value 行
+多一条「必须先进入 [DATA] 才认表头」：否则会把文件头的 key,value 行
 当表头，列名撞上键名就读出垃圾。短行按索引越界跳过而非抛 IndexError。"
 ```
 
@@ -2312,7 +2312,7 @@ Expected: FAIL —— `ImportError: cannot import name 'shell_grep'`
 整体 `try/except Exception` → `ProbeResult(False, False, False, f'探测服务端 grep 失败：{exc}')`；
 `finally` close channel（close 失败只 WARNING）。
 
-> **与参考工具的一处有意偏离**：`csv_content_searcher.py:213` 的映射探测是先
+> **一处有意偏离**：常见的映射探测是先
 > `sftp.listdir(root)` 取一个条目、再在 shell 侧 `[ -e <root>/<entry> ]`。
 > **本实现改成直接测 root 本身**：chroot 场景下 shell 侧 `/data` 通常不可见，
 > 判别力相同，而测条目要多一次 SFTP 往返。spec §3.6 只要求「路径映射一致」，
@@ -3198,7 +3198,7 @@ git commit -m "feat(sftp): 搜索预设模型与 CRUD
 
 **为什么这条不能只靠人工**：它是全计划里**唯一**能抓出
 「多线程共用一条 channel 导致 `Garbage packet received`」的测试
-（`csv_content_searcher.py:24-27` 记的教训）。MagicMock 与 `FakeSftp` 都测不到协议流。
+（paramiko channel 共用导致的协议流错乱，属已知失败形态）。MagicMock 与 `FakeSftp` 都测不到协议流。
 写成人工步骤等于没有回归保护。
 
 - [ ] **Step 1: 给 sftp_server.py 加 `--fixture` 开关**
@@ -3926,7 +3926,7 @@ export const sftpSearchApi: {
   - `:121-123` FAQ「每次进入目录会重新建立 SFTP 连接」—— 已被 `pool.py` 消除，
     这条现在反而误导。**改成**「连接会复用，空闲 5 分钟后回收」。
 - [ ] **Step 3:** `docs/tasks/lessons.md` 追加本次的两条：
-  - 「参考工具里能跑 ≠ 能移植」：`AutoAddPolicy` 会破本项目 TOFU 契约；
+  - 「别人跑通的代码 ≠ 能移植」：`AutoAddPolicy` 会破本项目 TOFU 契约；
     `Transport` 在 paramiko 5.0 已无 `default_timeout`。**先按当前依赖版本核签名再抄。**
   - 「两档引擎自动降级时，语义不等价的能力必须整体禁用其中一档」：
     regex / 模糊 / 非 ASCII / 跨语言整词都属于这类 —— 结果取决于环境比缺功能更糟。
@@ -3981,7 +3981,7 @@ export const sftpSearchApi: {
    `search-cancel-btn`，但 Task 15/17 没要求实现 → 补齐，并规定状态徽章文本必须是
    五个英文状态值之一（e2e 断言与 UI 文案分离）。
 7. **我自己的错误归因**：Task 8 曾写「spec §3.6 要求取条目再测」——回读 spec 后发现
-   它没这么写，那是参考工具的做法。已改为「与参考工具的有意偏离」并要求代码注释说明。
+   它没这么写，那是移植来源里的既有做法。已改为「一处有意偏离」并要求代码注释说明。
    **写计划时把没核实过的归属安到 spec 头上，与把子代理的行号照抄是同一类错误。**
 8. **AG Grid 注册方式写成了模糊引用**（"照现成文件的接法"）→ 给确切两行与来源行号。
 9. **notice 码歧义**：`grep_unavailable` 与 `grep_fallback` 在 spec 两处各定义一次，

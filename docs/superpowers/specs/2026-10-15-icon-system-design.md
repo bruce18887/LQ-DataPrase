@@ -267,7 +267,6 @@ c.943 0 1.473 1.088.89 1.83L25.946 44.94z
 ### 5.5 明确不动的
 
 - `theme-color` meta（`index.html:8`、`stores/theme.ts:35–38`）取 `--bg` 是**正确的**：它染的是浏览器 UI 底色，不是品牌位。不改。
-- Excel 加载项 ribbon 图标（`Ribbon.cs:33–45` 的 `imageMso` + `:132–155` 自绘 `⚙`）不动。`lessons.md:916–925` 已记录 `imageMso` 只能实机肉眼看、离线判不出来，属另一条验证通路。
 
 ---
 

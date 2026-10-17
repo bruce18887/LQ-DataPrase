@@ -38,46 +38,6 @@
   规则：改错误/事件体字段名时，除了 grep 字段名，还要 grep **取值本身的字面量**
   （这里是 `'not_connected'`），并保留「只有机器码时原样显示机器码」这种看着难看但被人依赖的行为。
 
-## 2026-09-19 加载项「UI 一直还原不了」的根因不在 UI 代码：Excel 装的是四轮前的旧 xll
-
-- **现象**：用户连续反馈「Exp 里没有控件」「没弹出任何东西」「还原不了原来的 UI」。据此换过四轮方案
-  （v0.2.0 任务窗格 → v0.2.1 无模式浮动窗口 → v0.2.2 可见性兜底 → v0.3.0 表上 Form Control），
-  四轮全部提交在**零实机验证**下（本机 COM 启动曾被权限拦截）。
-- **根因（硬证据）**：`HKCU\Software\Microsoft\Office\16.0\Excel\Options\OPEN` 指向
-  `%APPDATA%\Microsoft\AddIns\DataPrase\DataPrase-AddIn64.xll`，该文件 mtime **09-15 23:26**、
-  md5 `7880dbf9…`；而 `dist\` 与 `bin\Release\` 的 v0.3.0 产物 md5 `17e2e043…`（09-19 22:25）。
-  **两者不是同一个二进制**：`package.cmd` 只刷新 `dist/`，`install.ps1` 9/15 之后从未再跑，
-  所以 Excel 一直在加载 v0.1.5。用户报的「弹出旧的模态选测试项框」正是 v0.1.5 的
-  `ItemPickerDialog` 行为（该文件在 v0.2.1 已删）——**症状与最新源码无关**。
-- **规则**：**报「改了没效果」，先证「跑的是不是新代码」**，再看代码。三条廉价判据：
-  ①比对**装载路径**上的二进制与构建产物的 md5/mtime（不是源码目录的产物，是宿主实际读的那份）；
-  ②读宿主的注册加载项键（Excel = `Options\OPEN*`）确认实际加载的是哪个文件；
-  ③让产物自带**可查询的版本出口**（本例 `=DpPing()` → `DataPrase 0.1.5` 一锤定音）。
-- **版本号别只改一处**：`AddIn.cs` 的 `AddInVersion.Value` 是手写常量，而
-  `Properties/AssemblyInfo.cs` 的 `AssemblyVersion` 一直停在 `0.1.0.0`，xll 文件名也不带版本
-  → 光看文件属性/文件名无法区分四轮，只有 `=DpPing()` 认得出来。**分发物必须能从运行时读出版本**。
-- **顺带纠正一处过度断言**：`Exp-template.xlsm` 实测含 30 个 `xl/activeX/` 部件（15 控件 .xml+.bin）
-  +2 vml +1 ctrlProps，而 `Exp-template.xlsb` **一个都没有**（20 部件）；原始宿主
-  `LiqunData_V0.066.xlsb` 却有 34 个 activeX 部件 → 「.xlsb 存不进 ActiveX」不成立，
-  丢部件的是这一次格式转换。核对部件清单时**注意大小写**：对 `x.lower()` 的集合搜 `'activeX'`
-  恒为 0，会把自己骗成「模板本来就没控件」。
-
-## 2026-09-19 隐藏 COM 实例不处理 Options\OPEN——验证通路必须显式 RegisterXLL
-
-- **实测**：`New-Object -ComObject Excel.Application` + `Visible=$false` 起实例后，
-  `Workbooks` 集合为**空**、`=DpPing()` 返回 `#NAME?`（值 -2146826259）、`Run('DpExpRefresh')`
-  报「无法运行宏」——**注册表 OPEN 槽里的 xll 在自动化实例里根本没装载**。
-  照这个现象判「加载项坏了」会判错：用户交互式 Excel 里是正常的。
-- **规则**：无头自检脚本一律显式 `excel.RegisterXLL(绝对路径)` 再断言；启动路径的正确性用
-  「读注册表 OPEN 值 + 比对目标文件 md5」另证，别指望自动化实例替你复现启动加载。
-- **由此首次验证通过的未知点**：`[ExcelCommand]` 注册的宏名**能被 Excel 按裸名解析**
-  （RegisterXLL 后 `Run('DpExpRefresh')` 无错，v0.1.5 同一调用必报「宏不可用」）——
-  即 lessons:69 记的「Form Control `OnAction` 能否解析 XLL 命令名，本方案最大未知」在
-  **名称解析这一层已通**（`OnAction` 与 `Application.Run` 走同一套宏名查找）。
-  仍**未**验证：真实点击控件时 Excel 是否回调该命令、控件外观/位置是否符合原面板。
-- 脚本：`DataPrase-ExcelAddin/build/verify-installed.ps1`（打印 OPEN 槽 / 启动时 Workbooks /
-  DpPing 版本 / `Run('DpExpRefresh')` / `AddFormControl` 建-读-删往返）。
-
 ## 2026-09-19 设置项接线（批 2/3）四条可复用约束
 
 - **ag-grid IRM 的块大小是「两端共用一个数」**：前端 `getRows` 用 `floor(startRow / 块大小)` 反推页码，
@@ -119,96 +79,6 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   （宿主 div 自身无子节点，Element Plus 图标不会落进来），不要依赖 zrender 内部属性名。
   判别式测试要设计成「一条该红、一条该绿」，两条同红 = 大概率是测试自己的问题。
 
-## 2026-09-15 把 0 基 dump 当 1 基读，凭空造出两个假 bug
-
-- **现象**：route-B 会话用 pyxlsb 导出的 `tasks/_exp_dump.txt` 作为依据，判定 VBA 写 Exp 分布表
-  有「列号整体 +1 偏移（All Site 计数写进了 E=Site1 列）」与「`B3:B27` 是运算符列却被当乘数」
-  两个硬伤，并据此拍板了「修正布局（C=Range / D=All Site / E–L=Site1–8）」。
-- **根因**：该 dump 的**行、列都是 0 基**编号（它的 "A2" 实际是 Excel 的 B3、"C1" 是 D2）。
-  当 1 基读，整张表就被平移一列，于是「模板本来就该在 D/E 的写入」看起来像偏了一格。
-- **事实**：用 openpyxl 读 `Exp-template.xlsm` 的**真实单元格与公式**逐格核对，VBA 的写入位置与
-  模板**完全一致**——`D2='Range'` / `E2='All Site'` / `F2:M2='Site1/N'…`；`D3='=$D$36+B3*$F$36'`
-  （模板自己就用 B3 当乘数）；`D36/E36`=Low/High Limit；`C53:C56`=Range/Mean/STD/CPK；`G36`=Unit。
-  差一点把**正确**的生产代码改成错的。
-- **规则**：拿到 dump / 探针输出，先确认**坐标系**（0 基还是 1 基、列号还是列名、是否跳过表头），
-  再用**权威原件**交叉验证（能读原始文件就别只信中间产物），之后才动生产代码。凭单一中间产物
-  下的「口径修正」结论，须标注为**待原件验证**。
-
-## 2026-09-19 加载项给表上加「能响应的控件」：Form Control + [ExcelCommand]（不是 ActiveX）
-
-- **结论**：加载项要在工作表上放能响应的控件，走 **Form Control**（`Shapes.AddFormControl`）+ 把控件
-  `OnAction` 指向 **Excel-DNA `[ExcelCommand]`** 宏（已确认该特性存在，docs 记作「for macro commands」）。
-  宏里用 `Shape.ControlFormat.Value` 读状态、`Application.Caller` 认是哪个控件。**不需要任何工作簿 VBA**，
-  且 Form Control 能存进 `.xlsx`。
-- **对比真 ActiveX**：ActiveX 的点击事件过程必须活在工作簿**自己的 VBA 工程**里（原工具靠宏格式 `.xlsb`
-  承载 `ComboBox1_Change` / `OptionButtonN_Click` / `CheckBoxN_Click`；拆 `vbaProject.bin` 得到）。加载项
-  没有工作簿 VBA，要对 ActiveX 挂事件得引 MSForms 互操作（`tlbimp` FM20.DLL）做 COM 事件汇。→ 只有「外观
-  必须与 ActiveX 完全一致」时才值得走 ActiveX。
-- **API 坑**：①`Shapes.AddFormControl(Type, Left, Top, Width, Height)` 的坐标是 **int**（传 double 编译不过）；
-  ②下拉取值靠 `ControlFormat.ListFillRange` 指向一段单元格（本实现写到 AZ 列），`ControlFormat.Value` 是
-  **1 基**索引；③复选/单选的 `Value` 为 1(选中) / -1(未选)；④表上**单选按钮的分组不可靠**（按相邻/插入顺序），
-  **互斥必须在处理程序里自行保证**；⑤`ExcelCommandAttribute` 无属性，命令名 = **方法名**。
-- **未验证点**（本机无法实机跑 Excel）：`OnAction` 能否解析 XLL 注册的命令名——是本方案最大未知，标注待验。
-
-## 2026-09-16 表内 ActiveX 控件无法移植到 XLL；兜底要判「事实」而非「异常」
-
-- **原工具的「UI」是 16 个 ActiveX(MSForms) 控件**：拆开 `Exp-template.xlsm` 才确认——
-  `xl/activeX/activeX1..15.bin` + `xl/drawings/vmlDrawing1.vml` 给出控件名
-  （`ComboBox1` / `OptionButton1..5` / `CheckBox1..9` / 按钮），事件代码在 `xl/vbaProject.bin`。
-- **⚠️ 修正（2026-09-19，联网核实）**：先前断言「XLL 结构上无法驱动表内 ActiveX」是**过度断言**。
-  公开先例证明 .NET 侧能对**已存在**的表内 ActiveX 控件挂事件：
-  `var cb = (MSForms.CommandButton)sheet.OLEObjects(name).Object; cb.Click += handler;`
-  （SO 24003113 / Excel-DNA issue #303 / 项目 DBAddin / MSDN「run C# code behind a button on a
-  worksheet without VBA」）。**能挂事件**；真正的难点是 ①从加载项**新建** ActiveX 控件、
-  ②本项目注入的 `.xlsb` **已丢 activeX 部件**。
-- 规则：**断言「某平台结构上做不到」前先联网核实**（Office COM/OLE 这类历史久、先例多的领域尤其），
-  别把「我一时没做到 / 想复杂了」当成「结构上不可能」；措辞不确定时用「本轮未走通」而非「不可能」。
-- **换容器格式会静默丢部件**：`Exp-template.xlsb` 里**根本没有 `xl/activeX/`**——把 .xlsm 转成
-  .xlsb 时这些部件被丢了，所以注入出的 Exp 表**天生没有控件**。用户报「Exp 里没有控件」
-  的根因在此，不是代码没写。规则：**.xlsm↔.xlsb 转换后要逐项核对原始部件清单**。
-- **兜底要判「事实」而不是「异常」**：无模式 `Form.Show()` 后**检查 `_form.Visible` 是否为真**，
-  为假才退到模态路径。这直接补上本日上一条「异常式兜底对静默失败无效」的漏洞——
-  静默失败不抛异常，但「窗口到底有没有出来」是**可读的事实**。
-- **UI 尽量留在 Excel 主线程**：WinForms 窗口跑主线程 → 「应用」回调直接调 COM 合法，
-  **无需跨线程编组**（`ExcelAsyncUtil.QueueAsMacro`）；只有把窗口放独立线程才需要它。
-
-## 2026-09-16 Excel-DNA 任务窗格「静默失败」——异常式兜底因此失效
-
-- **现象**：`CustomTaskPaneFactory.CreateCustomTaskPane(ctrl, title)` **编译通过**（API 用法正确），
-  运行也**不抛异常**，但面板**就是不显示**。于是「创建失败就退回模态对话框」的 catch 兜底
-  **永远不会触发**，用户看到的是「什么都没发生，也没弹窗」。
-- **教训**：**只靠异常判断成败的兜底，遇到「不抛异常但也没生效」的 API 就是无效的。**
-  这类静默失败的 API，要么能验证生效（本机无法启动 Excel 时做不到），
-  要么就别拿它当主路径——换成**已被证实本环境可用**的手段（此处 WinForms 窗口：
-  配置对话框能正常弹出，即证明该加载项的 WinForms 渲染链路是通的）。
-- **顺带**：`CustomTaskPane` 用反射枚举返回空成员，但 `CreateCustomTaskPane`/`DockPosition`/
-  `Width`/`Visible` 全都能编译通过——**编译验证比反射可信**；反射拿不到成员，不代表类型不可用。
-- 决策口径同 2026-09-15 那条：**无复现手段 + 主路径静默失败 → 立刻换确定能成的实现**，
-  不要让用户在「没反应」和「没反应」之间来回试。
-- **⚠️ 根因（2026-09-19 联网核实）**：`CreateCustomTaskPane` 在**控件未 COM 可见**时会失败——
-  .NET Framework 需 `[ComVisible(true)]`（类接口自动生成），.NET 6+ 还需**显式默认接口**
-  （公开 `interface` + `[ComDefaultInterface]` + `[Guid]`），否则报裸 `E_FAIL`（0x80004005）/
-  「Unable to create specified ActiveX control」（Excel-DNA issue #558、docs issue #17、
-  SO 55738903 已采纳答案）。本项目 `ExpPaneControl` 是 `internal` 且无 `[ComVisible(true)]`
-  → 正命中该失败画像。规则：**任务窗格控件必须 `public` + `[ComVisible(true)]`（.NET Core 另加默认接口）**。
-
-## 2026-09-15 两个输入报同一错 = 换方向；无复现手段时别把不确定性连推给用户
-
-- **现象**：Excel-DNA 加载项里 `range.AutoFilter()`（无参）报「类 Range 的 _AutoFilter 方法无效」。
-  换成两种完全不同的区块（数据区上一行 / 列名行）——**报同一个错**。
-- **判读**：两个不同输入得到同一错误，说明**与输入无关**，是**调用方式本身**不被接受。
-  这一步本该更早做：第一次换区块仍同错时，就该停止换输入、转向查调用形式。
-- **根因推断**：`Range.AutoFilter` 在 Excel 类型库里**同时是属性**（返回 `AutoFilter` 对象）
-  **和方法**（5 个可选参数）。PIA/嵌入互操作（`ExcelDna.Interop` 强制 `EmbedInteropTypes`）下
-  这个同名冲突容易绑到错的 DISPID，Excel 便回「方法无效」；VBA 的 `Selection.AutoFilter` 走
-  IDispatch 按名解析，所以同一句在 VBA 里正常。**结论：Office 里「属性/方法同名」的成员
-  （`AutoFilter`、`Range.Hidden` 等）在 .NET 侧要按显式 DISPID 或晚期绑定处理，别指望
-  `obj.Method()` 天然解析对。**
-- **决策教训**：本机无法启动 Excel（权限拦截）时，**不要连续多轮把不确定性推给用户去试**。
-  先问「这个功能是否必需」：本例是纯化妆性步骤，且 VBA 原逻辑本身不成立（拿插入的第 7 个
-  **空行**当筛选头），最终**直接删除 + 说明替代操作（Ctrl+Shift+L）**，比继续盲猜更负责。
-  规则：**无复现手段 + 非必需功能 → 砍掉并说明，而不是让用户当我的调试器。**
-
 ## 2026-09-15 Windows 脚本的行尾与编码（.cmd 必须 CRLF，.ps1 中文必须带 BOM）
 
 - **`.cmd` / `.bat` 必须是 CRLF 行尾**：LF-only 的批处理会被 cmd.exe 拆错——实测报
@@ -222,26 +92,6 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   规则：批处理内一律 ASCII；要中文就交给 `.ps1`（带 BOM）输出。
 - 通用做法：**先做编码/行尾检查再交付脚本**——`ParseFile` 做 .ps1 语法自检、
   对 .cmd 实际跑一次，别等用户双击才发现。
-
-## 2026-09-14 VBA → Excel-DNA 加载项迁移新增教训
-
-- **VBA 的 `=` / `<>` 字符串比较会给较短串补尾空格，C# `==` 不会**：VBA 里
-  `"Report Generated By" = "Report Generated By        "`（常量带尾空格）为 True，
-  移植时直接 `==` 会让机台识别全挂（ETS88 首格判定）。规则：源自 VBA 的字符串判等
-  统一走「两侧 `TrimEnd(' ')` + Ordinal 比较」（本项目 `VbaString.EqualsPadded`），
-  别逐处手写；带尾空格的 VBA 常量存成去空规范值。
-- **VBA `IsEmpty(Range)` 靠默认属性求值才等价于「空单元格」**：`IsEmpty(Cells(i,1))`
-  传的是 Range 对象（`IsEmpty` 对对象本应恒 False），实际靠 VB 默认成员求值成 `.Value`。
-  移植时须显式区分「空白 null」与「空串 ""」——VBA 里 `Empty = ""` 为 True，但
-  `IsEmpty("")` 为 False，这个差异决定「连续空行」终止判定是否触发。
-- **VBA 的 `Double = Empty` 等价于 `= 0`**：`NoLimit = (Lolimit = Empty And Hilimit = Empty)`
-  里 Lolimit/Hilimit 是 Double → 实际语义是「双限值都为 0 即无限制」（限值格为空格时
-  VBA 不赋值、保持默认 0，同落此支）。移植「比较 Empty」的表达式要还原成与 0 比较，
-  别当成 null 判断或「顺手修正」。
-- **Excel-DNA 打包只纳入「被真正引用」的托管依赖**：AddIn 未使用 Core 类型时编译器
-  不生成程序集引用 → packed `.xll` 内不含 `DataPrase.Core.dll`。判据：packed xll 体积
-  增量 ≈ 主 dll 的 LZMA 压缩体积（仅 ~3.4KB）即证依赖没进包；单文件分发须等代码
-  真引用后再复核（删掉旁置 dll 仍能加载才算数）。
 
 ## 2026-09-12 序列分布重叠优化新增教训
 
@@ -884,68 +734,6 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   另外"单元格里显示公式原文"通常是**在编辑态**，不代表存的是文本。
 
 
-## 2026-09-19 加载项 Exp 面板「少控件 + 图全 0」= 一个非法控件值；Form Control 的取值口径别照抄 ActiveX
-
-- **现象**：Exp 表上只出现 3 个控件（下拉 + 2 个单选），分布图全 0.00% 没有柱子。
-- **根因**：`ExpControls.SetValue` 给未选中的单选/复选框写 `Value = -1`（ActiveX/MSForms 的
-  `vbUnchecked` 约定）。**Form Control 不认 -1**，实测必抛「不能设置类 OptionButton 的 Value 属性」。
-  而 `Build()` 的循环是「先 Add 再 SetValue」，所以抛错时该控件已经建出来了——
-  于是现场恰好留下 3 个形状（下拉 + Limit0 + Limit1），看着像「建到一半」，其实是**第二个单选抛的**。
-- **合法取值（隐藏实例逐个试出来的）**：初始值 **-4146**；`1`=选中、`0`=未选中（读回 -4146）；
-  复选框还接受 `2`（混合），**单选按钮不接受 2**；`-1` 与 `-4105` 一律抛。
-  → 规则：**跨控件家族搬「约定」前先在本机实测取值域**，ActiveX 与 Form Control 的
-  `Value` 语义不通用（`lessons:66` 那条「1/-1」就是照抄来的，已纠正）。
-- **连坐**：两个调用点都是 `Build()` 的下一行才 `WriteExpDistribution`（`ProcessRunner.cs`、`Actions.cs`），
-  Build 抛错 → 分布公式没写 → Exp 停在模板的 `[1]Data!` 外部引用 → **图全 0**。
-  一个 bug 同时造出「少控件」和「没柱子」两个看似无关的现象。
-  → 规则：**可选的化妆性步骤不能挡在必需的数据步骤前面**；顺序改成先写公式再建面板。
-- **`ProcessRunner.Append()` 把异常降级成一行警告**，用户几乎看不见 → 破坏性流程里的可选步骤
-  失败要显眼，否则现场只剩「结果不对」而没有任何线索。
-
-## 2026-09-19 控件位置：别按「行号 × 行高」算，Exp 行高实测 10.2pt 不是 15pt
-
-- `ExpControls.Add` 用 `Top = (row - 1) * 15` 假设每行 15pt；Exp 表实际 **10.2pt/行**
-  → 整面板下漂 1.47 倍（本意 37 行落在 53 行），这就是用户说的「错位」。
-- 修法：**按单元格锚定**——`Cells[row, col].Resize[h, w]` 的 `Top/Left/Width/Height` 直接取。
-  原模板的控件本来就是单元格锚定（`Exp-template.xlsm` 的 `xl/drawings/vmlDrawing1.vml`
-  里 `<x:Anchor>` 8 元组，0 基行列）：ComboBox H35 跨 5 列 2 行、OptionButton B36-B40、
-  CheckBox B43-B51、按钮 N35 跨 3 列 2 行。**还原 UI 要先量原件，别自己编行号。**
-- `AddFormControl` 只吃 **int** 坐标，10.2pt 行高必然带小数：`(int)` 强转是向下截断，
-  逐行累积仍显错位 → 用 `Math.Round`；自检的落点判定也要留 **1.5pt 容差**，
-  否则会把取整误差误判成 bug（真 bug 偏 18 行，量级差两个数量级）。
-- `TextFrame2.TextRange.Text` 对 Form Control **必抛**（「在此对象上找不到属性 Text」），
-  只有旧式 `TextFrame.Characters().Text` 可用；`ControlFormat.Link` 在 PowerShell 晚期绑定下
-  报「找不到成员」（与 `AutoFilter`/`Hidden` 同族陷阱），别用晚期绑定判存在性。
-- 表上**裸放的单选按钮 Excel 自己就互斥**（实测：两个都设 1，前一个自动回 -4146），
-  `lessons:67` 说「互斥必须在处理程序里自行保证」不成立——除非放进 GroupBox 才需要分组。
-
-## 2026-09-19 无头自检两条硬坑：MessageBox 会挂死自动化、`$x = Function` 会吞掉标签
-
-- **`MessageBox.Show` 在 COM 自动化实例里会永久阻塞**：给 `DpExpRefresh` 加「说清原因」的提示后，
-  `Run('DpExpRefresh')` 直接把自检脚本挂死（Excel 进程留着标题为「LQ-DataPrase - 分布表控件」的
-  隐形模态框）。→ 产品侧：任何由宏/命令触发的提示都要先判 `Application.Interactive`；
-  脚本侧：`New-Object -ComObject Excel.Application` 之后**显式设 `$excel.Interactive = $false`**
-  （COM 起来的实例默认仍报 Interactive=true，这点反直觉）。
-- **PowerShell 里 `$v = Step "label" { ... }` 会把标签行和值一起捕获**，日志里看不到标签、
-  断言还拿到脏字符串。要单独打印的分支就别走这个包装函数。
-- 自检函数（`DpSelfCheck` / `DpSelfCheckFlow`，`IsHidden=true`）跑的是**生产代码路径**：
-  前者在临时簿上重建面板并回报「16/16 建出、落点行、OnAction 是否挂上」，
-  后者打开真实 datalog 跑 `ProcessRunner.Run` 再回报「panel/allSiteSum/e3 是否已指向本地 Data!/B43 标题」。
-  实测：`controls=16/16 landed=16/16 onaction=16/16`、`tester=CTA8290D items=328 allSiteSum=352`
-  （与该用户截图里 Exp 的 Test Number 352 对得上）、换测试项后 B43 由 `R_Kelvin_VIN` → `R_Kelvin_VDRV`。
-- **`imageMso` 会静默不渲染，且离线判不出来**：`ToolsOptions` 与 `OptionsDialog` 在本机
-  Office 16.0.19127 上都取不到图（按钮只剩文字），而 `FileOpen`/`FilterAutoFilter`/`ChartInsert`/`Help`
-  正常。试过把候选 id 拿去 grep Office 二进制做离线判定——**作废**：`FilterAutoFilter` 明明能渲染，
-  在 `Office16` 下 396 个 dll/exe 里却搜不到明文，说明名字表不是明文资源。
-  → 结论：**imageMso 只能实机肉眼看**；要确定性就别依赖它，用 `getImage` 回调自绘位图。
-- **`getImage` 自绘图标可用**：`public object GetSettingsImage(IRibbonControl)` 里用 GDI+ 画
-  32×32 透明底 + `Segoe UI Symbol` 的 `⚙`，经 `AxHost.GetIPictureDispFromPicture` 转成
-  `IPictureDisp` 返回（派生一个 `AxHost` 子类暴露该受保护静态方法，`base("00000000-...-000000000046")`）。
-  实测 ribbon 上正常出图。两个坑：① 返回类型写 `object`，别引 `stdole`；
-  ② `Image` 在 `System.Drawing` 与 `ExcelDna.Integration` 里**同名**，必须全限定，否则 CS0104；
-  ③ 回调里任何异常都要吞掉返回 null，否则整条 ribbon 可能加载失败。
-  字符用 `"\u2699"` 转义写，别在源码里放非 ASCII 图标字符（Ribbon.cs 无 BOM，靠 Roslyn 猜编码）。
-
 ## 2026-09-20 设置接线轮的 e2e 三条静默陷阱（现象都不是「断言写错」那么简单）
 
 - **e2e「滚不到目标列」的红：真凶是循环形状，不是选错元素**（ag-grid 35.3 实测）。
@@ -1072,8 +860,7 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
 
 ## 2026-09-21 SFTP 搜索子系统：移植、依赖漂移与「测不出来的那一类」
 
-- **参考工具里能跑 ≠ 能移植**：`DataPrase-SFTP Searcher/config/sftp_connection.py:18` 用的是
-  `AutoAddPolicy()`，照搬进本项目会**直接破**主机密钥 TOFU 契约（
+- **别人跑通的代码 ≠ 能移植**：paramiko 的 `AutoAddPolicy()` 在常见写法里默认就用它，照搬进本项目会**直接破**主机密钥 TOFU 契约（
   `test/backend/test_sftp_host_keys.py::test_mismatch_refuses_and_credentials_are_not_sent`
   钉着「密钥不匹配即拒绝、凭据不发往可疑主机」）。**怎么办**：移植前先查「这段代码依赖的性质
   在本项目有没有反向钉桩」，再用真数据/真服务冒烟一次，并核对**当前依赖版本**的 API 签名。

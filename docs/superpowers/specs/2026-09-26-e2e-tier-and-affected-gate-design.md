@@ -99,7 +99,7 @@ e2e 套件已长到全量一轮 ≥20 min，功能继续加就会线性变慢。
   （无 pytest，`test_outliers.py` 的 import 失败会伪装成 `Ran 247 / FAILED (errors=1)`）；
   跑前自检 `import pytest`，失败即拒绝执行而不是静默跑。
 - **反假绿输出契约**：无受影响用例时打印 `NO AFFECTED TESTS (...)` + exit 0，
-  绝不允许显示成「0 failed」的绿；`DataPrase-ExcelAddin/**` 等子项目打印各自的验证通路提示。
+  绝不允许显示成「0 failed」的绿；不承载测试判据的路径（CI 配置、打包期图标工具、门禁编排器自己）打印各自的通路提示。
 
 ## 夜间全量兜底轮（`scripts/e2e_nightly.mjs`）
 
