@@ -170,6 +170,15 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
         range_type = get_param(request, 'range_type', 'RDL')
         custom_low = get_param_float(request, 'custom_low')
         custom_high = get_param_float(request, 'custom_high')
+        # KDE 单价 ~32ms/条而界面只显示一条 ⇒ 前端按图表配置告诉后端要哪条。
+        # 与多文件端点相反：这里**默认算**（批导出与历史用例都按两条曲线的旧口径
+        # 消费），只有显式传 false 才省。缺省即 True，不能用 get_bool_param（它的
+        # default 形参没生效，缺省恒 False）。
+        include_kde = (get_param(request, 'include_kde') is None
+                       or get_bool_param(request, 'include_kde'))
+        kde_variant = get_param(request, 'kde_variant')
+        if kde_variant not in ('all', 'filtered'):
+            kde_variant = None  # 白名单外 = 旧口径两条都算，不改语义
         # CL 模式的自定义区间必须有效：下限 > 上限会产出退化 bin 网格
         if range_type == 'CL' and custom_low is not None and custom_high is not None \
                 and custom_low > custom_high:
@@ -196,7 +205,8 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
             result = compute_histogram_stats(
                 df, metadata, param, site_col,
                 range_type=range_type, custom_low=custom_low, custom_high=custom_high,
-                iqr_multiplier=iqr_multiplier, cpk_thresholds=cpk_thresholds)
+                iqr_multiplier=iqr_multiplier, cpk_thresholds=cpk_thresholds,
+                include_kde=include_kde, kde_variant=kde_variant)
             if result is not None:
                 results[param] = result
             else:

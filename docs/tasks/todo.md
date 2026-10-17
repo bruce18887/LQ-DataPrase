@@ -1,3 +1,91 @@
+# 任务：切测试项提效第一批——KDE 按需算 + 站点表并入直方图响应（2026-10-17）
+
+起因（用户报）：`C01Q_BP01-2605220057_..._FT1-FT1-1_..._ETS083302_05272026.csv` 这类 ETS88 大文件
+（实测 35,246 行 × **1,702** 测试项，288MB）下切换直方图测试项的效率还有没有空间。用户点定先做第 1、2 点。
+
+实测基线（本机对该文件真跑，临时探针已删）：
+- 解析后 460MB < 1536MB 预算 ⇒ 解析缓存命中，切参数**不**重读 CSV；冷解析 3.2s 只付一次。
+- 一次切换 = **2 个请求**：`/analysis/histogram/`（计算 ~90ms）+ `/statistics/site_stats/`（~10ms）。
+- 90ms 里 **64ms 是两条 KDE 曲线**（各 ~32ms）；分箱/CPK/异常值/站点直方图合计才 ~20ms。
+  `filter_finite` 0.2ms、`get_site_column` 0.0ms ⇒ 列级计算不是瓶颈。
+- 而界面**只显示两条 KDE 中的一条**（`HistogramChart.vue:125` 二选一；`outlierHandling` 默认 `off`
+  且纯前端挑选、不发请求）⇒ 每次切换必有一条 ~32ms 白算。
+- `compute_histogram_stats` 响应里的 `site_stats`（RDL 口径）**零生产消费方**：批导出走的是
+  `export_batch_charts_xlsx.py:125` 自己那次 `compute_site_stats`，前端读的是独立端点。
+
+## 实施清单
+
+### 后端
+- [x] `services/data_services/histogram.py`：加 `include_kde=True`、`kde_variant=None`
+      （`None`=两条都算=旧口径；`'all'`=仅全量；`'filtered'`=仅剔除异常值，无异常值时**回退算全量**，
+      保证任何组合下 KDE 最多算一条）。默认值不变 ⇒ 导出与既有 T1 用例零行为变更。
+- [x] `services/range_limits.py`：新增 `site_table_limits(range_type, stats, custom_low, custom_high)`
+      作为站点表判定限的**唯一来源**；`histogram.py` 的 `site_data` 改用它（原恒 RDL）。
+      不用 `bin_min/bin_max`：那对值还要为退化限值（单边缺失/零宽/std==0）回退数据范围，属画图口径。
+- [x] `views/statistics_views.py`：`site_stats` 端点删掉自己的 CL if/else，改调同一 helper
+      （这正是 2026-09-05 契约#4 撞过的「两处各自解释」）。
+- [x] `views/analysis_views.py` histogram：读 `include_kde` / `kde_variant`（**白名单**，非法值→按旧口径
+      两条都算，不静默改变语义）并透传。缺省即 True，不能用 `get_bool_param`（它的 default 形参没生效）。
+
+### T1 断言（先写等价性，再改口径）
+- [x] 承重交叉验证：同一帧同一参数，`histogram.results[p].site_stats` 必须**逐字段等于**
+      `/statistics/site_stats/` 的 `site_data`，RDL / S3 / DR / CL / Bin1 各一条 + 每条带 fail 数非平凡守卫。
+      （新文件 `apps/analysis/tests_param_switch_load.py`，自带 100 行 fixture，不继承 `ChartConfigFilterTests`。）
+- [x] KDE 开关矩阵：`include_kde=false` → 两条均 None 而分箱/CPK 照旧；`variant='all'` → 只有全量且含 fail 峰；
+      `variant='filtered'` 有异常值 → 只有剔除版；无异常值 → 回退成全量那条；非法 variant → 旧口径两条。
+- [x] 默认不传旗标 → 两条都在（钉住旧口径未被偷偷收窄，导出与 `test/backend/test_histogram_kde.py` 依赖它）。
+
+### 前端
+- [x] `composables/useHistogram.ts`：新增入参 `chartConfig`，派生 `showKde`/`kdeIncludeFail` 进请求体，
+      并 `watch` 这**两个派生布尔**（不 watch 整个数组，避免把 2026-09-05 删掉的重复请求请回来）。
+- [x] `composables/useSiteStats.ts`：改为从 `histResult.site_stats` 纯派生，删掉 HTTP 与 seq 守卫
+      （不再有跨请求竞态）；无 Site 列时给出与今天同一句内联提示。
+- [x] `components/SingleParamTab.vue`：传入 `chartConfig`，删 `watch(rangeType)`/`watch(localSelectedParam)`
+      两处 `loadSiteStats()`。
+- [x] T2 `frontend/test/unit/siteStatsDerivation.spec.ts`（5 例）：钉住「站点表数值只来自直方图响应」与
+      「无 Site 列仍出那句提示」。合并前那句来自端点 400，合并后来自 `site_stats == null`——
+      没人断言的退化形状是「卡片安静显示暂无数据」，用户分不清是没 Site 列还是没加载。
+
+### e2e（判据要跟着换，不能只删）
+- [x] `analysis/outlier-handling.spec.ts`「改范围类型应只触发一次 site_stats 请求」→ 改为
+      「一次直方图请求 + **零** site_stats 请求 + 请求体带 `include_kde`/`kde_variant`」（前端出站
+      请求体这条此前无档可落，先挂在这条已有昂贵前置的用例上，不新增用例）。
+- [x] `analysis/histogram-multiseries-clip.spec.ts` 那句「site_stats 口径与直方图 filter 不同」的注释作废。
+- [x] 已失效的因果说明就地更正：`frontend/e2e/README.md` 已知问题#3、`helpers/cleanup.ts`、
+      `data/upload-csv-only.spec.ts`、`data/zip-upload.spec.ts`——无 Site 列文件的那个 400 已随请求合并消失，
+      清理仍要做（残留行抢「最新文件」自动选中，污染的是其它断言）。
+
+## 结果（2026-10-17 实测复跑同一探针，同一文件同一列集合，5 个参数 × 3 次取中位）
+
+| 切换时的 histogram 计算 | 中位 | 响应里的曲线 |
+|---|---|---|
+| 旧口径（不传旗标，两条都算） | **91.7ms** | `kde_curve` + `filtered_kde_curve` |
+| 默认界面（`kde_variant='filtered'`） | **56.9ms**（−38%） | 只有裁剪那条 |
+| 勾了「KDE含超限」（`'all'`） | **47.5ms** | 只有全量那条 |
+| 未勾 KDE（`include_kde=false`） | **12.8ms**（−86%） | 无 |
+
+外加每次切换**少一个 HTTP 往返**（`/statistics/site_stats/` 不再被前端调用）。
+
+验证台账：`apps.analysis` 221 例绿 · `apps.export` + `test.backend.test_export_histogram_grid` /
+`test_histogram_kde` 64 例绿 · `npx vitest run` 239 例绿（含新增 T2 5 例）· `lint:e2e` 绿 · `npm run build` 绿 ·
+`npm run test:e2e:affected` 升成 4-slot 池（391 例 / 7.4min / 真红 0，两个红文件独占复跑判为负载抖动）·
+三个敏感 spec（outlier-handling / kde-curve / histogram-multiseries-clip）另用 `--slots=1` 独占复跑 15 例 0 红。
+踩到的判据坑见 lessons 同日条目。
+
+## 边界（本批刻意不做）
+- **不删** `/statistics/site_stats/` 端点：改完后它零调用方，但它正是上面那条等价性判据的参照实现；
+  要不要连端点一起收掉，等用户点。
+- 第 3 点（AbortController + 防抖）与第 4 点（多文件换缓存预算 / 参数列表 211ms 快路径）不在本批。
+- 无视觉变化 ⇒ 双主题不涉及。
+
+## 事故留痕（本批我自己造的，已修复）
+用一次性 python 脚本批量勾本清单的复选框时，`split('下一个任务的标题')` 那个标题**已被我上一步的
+Edit 吞掉**（Edit 的 new_string 忘了原样带回 old_string 的标题行），split 没命中 → head=整个文件 →
+把全文 113 个未勾项勾成已勾、并把结果段插到了每个「## 边界（本批刻意不做）」处。
+处置：先按 counter 差集证明「相对 HEAD 只少 1 行、多的 76 行全是我的」，再 `git checkout HEAD -- todo.md`
+还原、用 Edit 重新只插我这一段。规则：**共享文档禁止用脚本整文件重写**；勾选项要么用 Edit 逐行、
+要么先在脚本里断言分片标记存在。
+
 # 任务：分析页左栏四张参考表「单元格单行」收口（2026-10-17）
 
 起因（用户报）：同一测试文件下切测试项，📱 Site统计 卡片高度一直跳。理想形态是截图2 那种

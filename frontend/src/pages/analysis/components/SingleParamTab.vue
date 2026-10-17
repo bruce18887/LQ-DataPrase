@@ -333,7 +333,8 @@ const {
   ignoreNoTestValue,
   dataOnlyBin1,
   onlyFailTestItem,
-  onlyLowCpk
+  onlyLowCpk,
+  chartConfig
 )
 
 // 柱宽 slider 上限：随系列数 + 重合度联动（N 系列柱组必须 ≤ bin 宽，否则贴限
@@ -387,19 +388,11 @@ const {
   jitter,
 } = useSerialChartSettings(serialDistData)
 
-// Composable: Site Stats
+// Composable: Site Stats（纯派生自直方图响应，不再有独立请求）
 const {
   siteStats,
   siteStatsError,
-  loadSiteStats,
-} = useSiteStats(
-  () => fileId.value,
-  localSelectedParam,
-  rangeType,
-  dataOnlyBin1,
-  customLow,
-  customHigh,
-)
+} = useSiteStats(histResult)
 
 // Composable: BoxPlot
 const showBoxPlot = ref(false)
@@ -492,16 +485,9 @@ void loadChartMemory().then(({ memoryEnabled, state }) => {
 // 不再需要「本地快照 + watch 回写」这层胶水。
 
 // ========== Cross-composable orchestration ==========
-// site_stats 只依赖 range_type（与图表配置无关）：改 rangeType 触发一次，
-// 切参数由下方 watch(localSelectedParam) 触发 —— 之前 chartConfig 变动和
-// histResult 变化也会连带触发，一次修改产生两次重复请求
-watch([rangeType], () => {
-  loadSiteStats()
-})
-
-watch(localSelectedParam, () => {
-  loadSiteStats()
-})
+// （site_stats 的两个 watch 已删）站点表现在是 histResult 的派生值，改 range_type
+// 或切参数都由 useHistogram 内部那一条 watch 触发同一个请求；后端把 CL 口径收敛成
+// 单一来源 range_limits.site_table_limits（2026-09-05 审查 契约#4 → 2026-10-17 合并）。
 
 // （watch(histResult) 联动已删）切参数/改敏感度时 QQ 图与序列分布各发两次
 // 相同请求：useQQPlot/useSerialDistribution 内部已有同触发的 watch（参数、

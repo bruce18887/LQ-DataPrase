@@ -37,7 +37,7 @@ from apps.analysis.services.data_services import (
 )
 from apps.common.params import get_param, get_param_float, get_param_list
 from apps.common.errors import error_response
-from apps.analysis.services.range_limits import resolve_limits
+from apps.analysis.services.range_limits import site_table_limits
 
 from ._guards import all_missing_params, split_params
 from ._helpers import (
@@ -121,10 +121,8 @@ class StatisticsViewSet(viewsets.GenericViewSet):
             return error_response('no_site_column', '该文件没有 Site 列，无法进行站点统计')
 
         stats = compute_range_statistics(data_series, metadata, param)
-        if range_type == 'CL' and custom_low is not None and custom_high is not None:
-            lower_limit, upper_limit = float(custom_low), float(custom_high)
-        else:
-            lower_limit, upper_limit = resolve_limits(range_type, stats)
+        lower_limit, upper_limit = site_table_limits(
+            range_type, stats, custom_low, custom_high)
 
         site_idx = get_1d_from(df, site_col)
         site_result = compute_site_stats(

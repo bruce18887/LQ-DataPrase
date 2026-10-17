@@ -41,8 +41,8 @@ test.describe('上传限制：仅 CSV 与 ZIP', { tag: ['@p2', '@data'] }, () =>
       await expect(page.getByText(/不是 CSV 或 ZIP/)).not.toBeVisible({ timeout: 5_000 })
     } finally {
       // 只删临时 csv 会把 `col1,col2` 那一行 DataFile 留在共享 DB 里：它没有
-      // Site 列，按 -created_at 排到最前后会被分析页自动选中 → site_stats 400
-      // no_site_column → P0 冒烟「无控制台错误」挂（R2③ 自建/自清）。
+      // Site 列，按 -created_at 排到最前后会被分析页自动选中，污染按文件推进的
+      // 断言（R2③ 自建/自清）。
       await deleteFilesByNameQuiet(page, 'e2e_csv_only_')
       cleanupQuiet(tmpPath)
     }

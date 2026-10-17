@@ -343,13 +343,13 @@ test.describe('@p1 异常值处理', { tag: ['@p1', '@analysis'] }, () => {
     expect(Number(s3Line.xAxis)).toBeCloseTo(captured.filtered_sigma3_min, 4)
   })
 
-  test('切换范围类型只触发一次站点统计请求（回归 #8 重复请求）', async ({ page }) => {
+  test('切换范围类型只发一次重计算请求，站点表不再单独打端点（回归 #8 / 2026-10-17 合并）', async ({ page }) => {
     await gotoApp(page, '/analysis')
     await selectAnalysisFile(page, RECOMMENDED.analysis)
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
     await waitLoadingGone(page.locator(SINGLE))
 
-    // 选中一个参数（site_stats 需要 param 才发请求）
+    // 选中一个参数（直方图请求需要 param 才发）
     const params = await listParams(page)
     expect(params.length).toBeGreaterThan(0)
     await selectParam(page, params[0])
@@ -357,11 +357,16 @@ test.describe('@p1 异常值处理', { tag: ['@p1', '@analysis'] }, () => {
 
     // 只统计携带新 range_type 的请求：初始加载可能在途的旧 range_type
     // 请求即使晚到也不会被计入（精确匹配请求体，避免误计）
+    let histRequests = 0
     let siteStatsRequests = 0
+    const histBodies: string[] = []
     page.on('request', (req) => {
-      if (req.url().includes('/statistics/site_stats/') && req.method() === 'POST') {
-        const body = req.postData() || ''
-        if (body.includes('"range_type":"S3"')) siteStatsRequests++
+      if (req.method() !== 'POST') return
+      const body = req.postData() || ''
+      if (req.url().includes('/statistics/site_stats/')) siteStatsRequests++
+      if (req.url().includes('/analysis/histogram/') && body.includes('"range_type":"S3"')) {
+        histRequests++
+        histBodies.push(body)
       }
     })
 
@@ -373,7 +378,12 @@ test.describe('@p1 异常值处理', { tag: ['@p1', '@analysis'] }, () => {
     // 给修复前 histResult watch 会带来的第二次请求留出窗口
     await page.waitForTimeout(500)
 
-    expect(siteStatsRequests, '改范围类型应只触发一次 site_stats 请求').toBe(1)
+    expect(histRequests, '改范围类型应只触发一次直方图请求').toBe(1)
+    expect(siteStatsRequests, 'Site 统计已并入直方图响应，不该再有独立请求').toBe(0)
+    // 出站请求体带 KDE 旗标：默认图表配置勾了 kde（未勾 kde_full）⇒ 只要裁剪那条，
+    // 后端因此最多算一条曲线。没有这条接线判据，第 1 点优化就只剩后端自证。
+    expect(histBodies[0]).toContain('"include_kde":true')
+    expect(histBodies[0]).toContain('"kde_variant":"filtered"')
   })
 
   test('QQ 图裁剪后 Y 轴锚定可见观测值区间（回归 qq-yaxis-outlier-range）', async ({ page }) => {

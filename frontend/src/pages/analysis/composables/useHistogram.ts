@@ -16,6 +16,8 @@ export function useHistogram(
   dataOnlyBin1: Ref<boolean> = ref(false),
   onlyFailTestItem: Ref<boolean> = ref(false),
   onlyLowCpk: Ref<boolean> = ref(false),
+  /** 图表配置：KDE 曲线要不要算、算哪一条（见下方 showKde/kdeIncludeFail） */
+  chartConfig: Ref<string[]> = ref([]),
 ) {
   const histResult = ref<any>(null)
   const statCards = ref<{ label: string; value: string; color?: string }[]>([])
@@ -33,6 +35,12 @@ export function useHistogram(
   })
 
   // 请求保序由 useAsyncData 内建守卫保证（过期 run() 返回 null 且不落地）
+  // KDE 是切换测试项的单价大头（实测一条 ~32ms / 整个 histogram ~90ms），而图表
+  // 只显示其中一条：「KDE含超限」勾选→全量那条，未勾→裁剪那条（无异常值时后端
+  // 回退成全量那条）。所以把这两件事告诉后端，别每次都算两条。
+  const showKde = computed(() => chartConfig.value.includes('kde'))
+  const kdeIncludeFail = computed(() => chartConfig.value.includes('kde_full'))
+
   async function loadHistogram() {
     const fileId = getSelectedFileId()
     // 未真正发请求的分支也要清错误态，否则切文件/清空参数后旧横幅会一直挂着
@@ -59,6 +67,8 @@ export function useHistogram(
       data_only_bin1: dataOnlyBin1.value,
       only_fail_test_item: onlyFailTestItem.value,
       only_low_cpk: onlyLowCpk.value,
+      include_kde: showKde.value,
+      kde_variant: showKde.value ? (kdeIncludeFail.value ? 'all' : 'filtered') : null,
     }, { silent: true }))
     if (result?.results) histogramUpdateView(result.results as Record<string, any>)
   }
@@ -140,6 +150,10 @@ export function useHistogram(
   })
 
   watch(localSelectedParam, () => loadHistogram())
+  // 只 watch 这两个派生布尔（不是整个 chartConfig 数组）：其它图表配置项
+  // （柱宽/重合度/标记线）都是纯前端渲染，改它们不该发请求——2026-09-05 审查
+  // L1 就是删掉 watch(chartConfig)/watch(histResult) 那两条重复触发的。
+  watch([showKde, kdeIncludeFail], () => loadHistogram())
   watch(ignoreNoLimit, () => loadHistogram())
   watch(ignoreNoTestValue, () => loadHistogram())
   watch(dataOnlyBin1, () => loadHistogram())
