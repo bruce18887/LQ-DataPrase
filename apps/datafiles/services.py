@@ -18,7 +18,39 @@ logger = logging.getLogger(__name__)
 # 解析缓存按**字节预算**限流，不是按条数：单只大文件（10 万行 × 800 列）
 # 解析后约 667MB，历史上 ``maxsize=64`` 的 64 只就足以吃掉数 GB 常驻内存。
 # 可用 LQDP_PARSE_CACHE_MB 覆盖（Electron 内嵌后端与 32 位受限环境需要更小值）。
-PARSE_CACHE_BUDGET_BYTES = int(os.environ.get('LQDP_PARSE_CACHE_MB', '1536')) * 1024 * 1024
+#
+# 为什么不做成「按物理内存自适应」：2026-10-17 实测过一版 clamp(RAM×0.25, 1536, 4096)，
+# 理由是「ETS88 那只 275MB 文件解析后 460MB，而一个批次目录有 9 只同量级文件互相洗掉」。
+# 那个前提被自己的测量否证了：该目录 9 只 CSV 的实际体积是
+# ``[0, 0, 0, 0, 5, 17, 19, 58, 275] MB``（只有 1 只大的），整个
+# ``Data/SampleData`` 里超过 80MB 的 CSV 也只有这 1 只，而 460MB < 1536MB ⇒ 缓存本来就命中，
+# 切文件不会重复解析。举不出被量出来的受益场景，就不改常驻内存策略；
+# 真要更大预算，用 LQDP_PARSE_CACHE_MB 显式给。
+PARSE_CACHE_DEFAULT_MB = 1536
+
+
+def _resolve_cache_budget_bytes() -> int:
+    """env 显式覆盖优先；非法值退回默认值而不是在导入期抛 ValueError。
+
+    这条兜底是要紧的：模块级常量在 ``import`` 时求值，一个写错的
+    ``LQDP_PARSE_CACHE_MB=big`` 会让整只后端起不来，而桌面应用的失败形状是
+    「双击图标没反应」，用户看不到那句 traceback。
+    """
+    raw = os.environ.get('LQDP_PARSE_CACHE_MB')
+    if not raw:
+        return PARSE_CACHE_DEFAULT_MB * 1024 * 1024
+    try:
+        mb = int(raw)
+    except ValueError:
+        logger.warning('LQDP_PARSE_CACHE_MB=%r 不是整数，按默认 %dMB 起用',
+                       raw, PARSE_CACHE_DEFAULT_MB)
+        return PARSE_CACHE_DEFAULT_MB * 1024 * 1024
+    return max(0, mb) * 1024 * 1024
+
+
+PARSE_CACHE_BUDGET_BYTES = _resolve_cache_budget_bytes()
+logger.info('解析缓存预算 = %dMB（可用 LQDP_PARSE_CACHE_MB 覆盖）',
+            PARSE_CACHE_BUDGET_BYTES // (1024 * 1024))
 
 
 def _frame_bytes(df) -> int:

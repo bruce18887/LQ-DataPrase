@@ -1,3 +1,120 @@
+# 任务：切测试项提效第二批——连切不浪费算力 + 换文件的大文件成本（2026-10-17）
+
+第一批（KDE 按需、站点表并入）见下一节。用户点定继续做第 3、4 点。
+
+第二批开工前又量了一轮，**两条原判断被实测否掉，先写在这里**：
+- 我上一轮把 `ets88.py:21 f.readlines()` 列为「量级改善」候选之一。实测：整读 288MB 只花
+  **0.31s**，有界流式扫描 0.24s ⇒ 时间上只差 0.07s。3.17s 冷解析里 **pandas C 解析占 2.68s（85%）**，
+  它才是主成本，而 `memory_map=True`（2.78s）、`float_precision='high'`（2.73s）都不省，
+  `dtype=float64` 直接 `ValueError: could not convert string to float: 'Data Collection Start Date'`
+  （尾部那两行元数据）。所以第 4 点的真杠杆是**别重复解析**（缓存容量），不是把单次解析抠快。
+  readlines 仍然改，但理由换成「削掉 ~275MB 字符串驻留的峰值」——预算抬到 4096MB 后，
+  解析期峰值 = 已驻留 4096 + 新帧 460 + lines 500 ≈ 5GB，这条峰值才是要紧的。
+- 「↑↓ 切换」这个标签（`ParamSelector.vue:3`）**没有对应实现**，但也不是假的：EP 在收起态把
+  ArrowUp/Down 用于展开下拉（`element-plus/es/components/select/src/useSelect.mjs:436-440`），
+  展开后才是选项间移动。所以**不加全局 keydown**（会与 EP 抢同一对键）。
+
+## 实施清单
+
+### 第 3 点：连切（扫测试项）不再把算力喂给已被放弃的请求
+- [x] `composables/useAsyncData.ts`：`run()` 内建 AbortController —— 新 run 起来时
+      **中止上一个在途请求**（今天只丢后到的响应，服务端照算，实测一次 histogram 57ms 白烧）。
+      `fetcher` 签名改成 `(signal?: AbortSignal) => Promise<any>`，忽略该参数的旧调用方行为不变。
+      被中止的请求：不写 data/error、不弹 toast、不把 loading 判给过期那一趟。
+- [x] `api/index.ts` 响应拦截器：`axios.isCancel(error)` 早退——**不 `console.error`、不 toast、
+      不进 401 刷新管线**。两条硬理由：① 中止不是错误，`formatError` 会把它映射成
+      「无法连接服务器，请检查网络」（`utils/error.ts:72`，被 `test/unit/error.spec.ts:30-31` 钉着）；
+      ② 拦截器现在对任何失败都 `console.error`，而 P0 冒烟有「/analysis 无控制台错误」判据。
+- [x] 合并窗口做在新文件 `composables/useCoalescedCall.ts`（leading + trailing），包在
+      **各 lane 自己的加载函数**外面：histogram / boxplot / qqplot / serial 四条 = 150ms。
+      第一版做进 `run()` 里是错的——trailing 那发在定时器里直接 dispatch，调用方
+      `const r = await run(...); paint(r)` 的续接会丢（见 lessons ②）。
+      单次点击走 leading ⇒ 不加延迟。
+- [x] `analysisApi.getBoxPlot` 补一个可选 `config` 形参，把 signal 递进 axios。
+- [x] 修「点一次跳两项」：删 `SingleParamTab` 那份 `prevParam/nextParam` 副本与
+      `@prev/@next` 绑定；`ParamSelector` 也不再 `emit('prev'/'next')`（推进逻辑只剩一处）。
+      `MultiFileTab` 本来就没接这两个事件 ⇒ 它一直是单格前进，未受影响。
+- [x] T2 `frontend/test/unit/asyncDataAbortCoalesce.spec.ts`（10 例）：`useAsyncData` 的
+      **第一份测试**。三组断言以旧实现作对照组（旧实现只丢响应不丢请求 ⇒
+      「signal 被 abort」「CanceledError 不写 error」在旧代码下必红）；合并那组钉
+      leading 立即、窗口内 5 发只落 2 发、补发用的是最后一次的参数、窗口会重新武装。
+- [x] e2e 判据跟着换：`serial-no-column.spec.ts` 那条已经在点「下一个 ▶」的用例，补上
+      「点一次恰好前进一项」的断言（不新增用例，冷启动才是单价）。
+- [ ] **不做**：全局 ↑↓ 快切。EP 在收起态把 ArrowUp/Down 用于展开下拉
+      （`element-plus/es/components/select/src/useSelect.mjs:436-440`），自建监听会与它抢同一对键。
+
+## 结果（第二批）
+
+实测（同一只文件、同一列集合）：
+- 参数列表快路径 **205ms → 91ms**（`df[cols].notna().any()`，逐列结果与列序实测相同，判据里
+  用旧公式现算期望值作对照）。这条打在换文件/改筛选上。
+- ETS88 冷解析 3.17s 的构成量出来了：`readlines` 0.31s、`read_csv` **2.68s（85%）**；
+  `memory_map=True` 2.78s、`float_precision='high'` 2.73s、`dtype=float64` 直接报错 ⇒
+  单次解析没有可观的抠法，这条改写省的是**峰值内存**（不再整读 288MB 成 35,339 条字符串）。
+- 自适应缓存预算**撤回**（前提被测量否证，见下一节）。
+- 连切的收益是请求**条数**：一次点击 1 发（leading），连点 2s ≈ 60 发降到 2 发；
+  被放弃那发的服务端计算由 abort 取消。这里不给「省了几毫秒」的数——它取决于连点节奏，
+  我能证明的是条数与被中止的请求（T2 那 10 例），不是端到端墙钟。
+
+验证台账：后端定向 **Ran 391 / OK**（apps.analysis + apps.datafiles + ETS88 尾部 +
+参数列表 + 导出网格）· `npx vitest run` 249 例绿（17 文件）· `lint:e2e` 绿 · `npm run build` 绿 ·
+`npm run test:e2e:affected` 那轮被一条**既有 flaky** 拦在后端步（见下），改跑
+`node scripts/e2e_pool.mjs --slots=4`：391 例 / 6.6min / 单价 3.04s / 效率 2.82（≥2.8）/
+**真红 0、悬而未决 0**，两条红文件独占复跑判为负载抖动。
+新加的「点一次前进一项」断言在 slot2 实测 **passed**。
+
+## 遗留地雷（本批查出来、没动它）
+
+`analysis/histogram-multiseries-clip.spec.ts:89/154` 用不限定的
+`${SINGLE} .chart-container`，而页面上箱线图也叫 `.chart-container`
+（错误原文：resolved to 2 elements，第二个 aka `locator('.box-chart-host > .chart-container')`）
+⇒ 只要「显示箱线图」在场就撞 Playwright strict mode。
+那条勾是**账号级图表记忆**带进来的：`e2e/settings/chart-memory.spec.ts` 会把
+`analysis_chart_memory` 置 true，靠 finally 复位；一旦它中途失败或被并发挤掉，
+同 slot 后续文件就会带着上次保存的勾选进分析页。
+为什么现在才见：历史 6 轮池（t10-c…t11-c）红文件恒为 `histogram-fail-bins + exports/html-report`，
+这个文件从未进过 redFiles；本批两轮都进了 —— 我的改动确实改变了每文件耗时（少一个请求），
+会重排 slot 分桶，但 DOM 里多出的那个容器不是我能造出来的（我没碰任何图表勾选/渲染路径）。
+两条处置供点定：① 把该 spec 的两处 locator 收到直方图宿主上；② 让 chart-memory 那条用例
+无论成败都复位账号开关（finally 已有，需确认中途失败路径与并发账号归属）。
+另记：`apps/datafiles/tests_parse_cache.test_concurrent_miss_for_same_key_parses_once`
+是本批门禁里第一次红的后端用例，独占复跑 5 次 = **1 红 4 绿** ⇒ 它自己
+`time.sleep(0.05)`「让 t1 进入解析中」的假设在抖（我改的只有预算求值路径，没碰单飞逻辑）。
+
+## 边界（本批刻意不做）
+
+- [ ] ~~解析缓存预算按物理内存自适应 `clamp(RAM×0.25, 1536, 4096)`~~ → **写了又撤回**，见下面「撤回」一节。
+      保留的只有两条：非法 `LQDP_PARSE_CACHE_MB` 不再在 import 期抛 ValueError（后端起不来
+      的失败形状是「双击图标没反应」），以及启动记一行实际预算。
+- [x] 参数列表快路径向量化：`analysis_views.py:116` 逐列 `df[c].dropna().empty`（实测 **205ms** /
+      1702 列）→ `df[cols].notna().any()`（**91ms**），逐列结果与列序实测相同；这条打在换文件/
+      改筛选上，不在切参数上。
+- [x] ETS88 `readlines()` → 有界扫描：头部读到 marker（且至少 HEADER_KEEP=80 行）+ 尾部 20 行环形缓冲。
+      时间只省 0.07s，省的是**峰值**（288MB 不再整读成 35,339 条 Python 字符串 ≈275MB 驻留）。
+      另 3 个 parser 同写法但不在本次工作负载里，不为 0.07s 去动 4 条解析通路。
+- [x] T1：`apps/analysis/tests_param_list_scan.py`（2 例，用旧公式在测试里现算期望值做对照，
+      含列序与 P2/P4/P5/Site/Serial 的排除点名）；`apps/datafiles/tests_parse_cache.py` 新增
+      `CacheBudgetPolicyTests`（5 例：默认值没被动、env 覆盖、非法值不炸、0 与负值、常量与函数一致）；
+      `test/backend/test_ets88_tail_metadata.py` 新增「marker 很靠前时头部扫描范围不能缩」1 例。
+
+### 撤回：自适应缓存预算（我用自己的测量否掉了自己的理由）
+第一批我给第 4 点的定性是「跨大文件时 3.2s 冷解析才是真凶」，理由是「一个批次目录 9 只同量级
+大文件，1536MB 预算只住 3 只，换到第 4 只就把第 1 只洗掉」。代码写完并测过之后才去核对那个前提，
+实测把它打穿了：
+- `R2605230015/` 那 9 只 CSV 的体积是 `[0, 0, 0, 0, 5, 17, 19, 58, 275] MB` ⇒ 只有 1 只大的；
+- 整个 `Data/SampleData` 里超过 80MB 的 CSV **只有这 1 只**；
+- 这只的帧 460MB < 1536MB ⇒ **缓存本来就命中**，切文件根本不重复解析。
+于是「抬预算」在这份数据上没有任何可测的受益场景，而它改的是常驻内存策略
+（本机读数 32577MB ⇒ 会真的抬到 4096MB）。按「举不出被量出来的好处就不改内存策略」撤掉，
+需要更大预算的人用 `LQDP_PARSE_CACHE_MB` 显式给。教训进 lessons 同日条目：**先验算前提，
+再验算收益，最后才写代码**——这次顺序反了，代码写完才发现理由不成立。
+
+### 范围外（写完理由，别下次再捡）
+- parquet/pickle sidecar：能把 2.7s 变成一次读盘，但引入磁盘资产生命周期、失效判定与仓库卫生
+  （本仓刚为仓库根 `media/` 残留做过绊线）。不做。
+- 预取相邻文件：与 4096MB 预算抢同一份内存，且解析是单飞线程，收益不稳。不做。
+- 全局 ↑↓ 快切：见本节开头，EP 已占用这对键。不做。
+
 # 任务：切测试项提效第一批——KDE 按需算 + 站点表并入直方图响应（2026-10-17）
 
 起因（用户报）：`C01Q_BP01-2605220057_..._FT1-FT1-1_..._ETS083302_05272026.csv` 这类 ETS88 大文件

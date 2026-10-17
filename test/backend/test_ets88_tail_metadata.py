@@ -124,6 +124,34 @@ class Ets88TailMetadataParserTests(TestCase):
         self.assertEqual(meta['start_time'], '05/24/2026 16:53:46')
         self.assertEqual(meta['end_time'], '05/24/2026 16:59:06')
 
+    def test_header_metadata_after_early_marker_still_scanned(self):
+        """marker 很靠前时，头部元数据扫描范围**不能**跟着 marker 一起截断。
+
+        2026-10-17 把 `f.readlines()` 换成有界读取（头部到 marker + 尾部 20 行）时，
+        这条是唯一的语义风险点：本夹具的 marker 在第 6 行（index 5），而
+        `extract_header_metadata` 的口径是「看前 80 行」。若实现成「只收到 marker 行」，
+        写在 marker **之后**的 `Datalog for Lot Number` 就扫不到了 —— 整读旧写法能扫到。
+        所以实现里 marker 之后仍要继续收到第 80 行为止（ets88.py 的 HEADER_KEEP）。
+        """
+        lines = _make_ets88_csv().rstrip('\n').split('\n')
+        # 插在 marker(5) 与数据行之间：只有「marker 后继续收」才看得见它
+        lines.insert(7, 'Datalog for Lot Number,LOT9_FROM_AFTER_MARKER')
+        path = os.path.join(self.tmpdir, 'ets88_early_marker.csv')
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines) + '\n')
+
+        df, meta = ETS88Parser().parse(path)
+        self.assertIsNotNone(df)
+        self.assertEqual(meta.get('lot_id'), 'LOT9_FROM_AFTER_MARKER',
+                         'marker 之后的头部元数据仍须被扫到（等价于整读旧行为）')
+        # 同一次读取里尾部时间戳也不能丢（tail 环形缓冲那条路）
+        self.assertEqual(meta['start_time'], '05/24/2026 16:53:46')
+        self.assertEqual(meta['end_time'], '05/24/2026 16:59:06')
+        # 落在 marker 之后的任何行**本身就是数据行**（ETS88 的数据区从 marker+1 开始读，
+        # 与这次改动无关，整读旧写法同样如此）⇒ 5 行真实数据 + 这 1 行 = 6 行。
+        # 写在这里是为了让下一个人知道：验「头部扫描范围」不能往数据区插行。
+        self.assertEqual(df.shape[0], 6)
+
 
 class Ets88TailMetadataBrowseApiTests(TestCase):
     """API 层：/browse/ 响应不含 Data Collection 行，total 为真实数据行数。"""

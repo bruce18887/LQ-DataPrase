@@ -16,6 +16,41 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-10-17 我把没核过的数字写进代码注释当理由；合并逻辑放错层会吞掉后续处理
+
+- **①（本批最贵的一条）前提没验就先写代码，理由是编的。** 第一批我给了「跨大文件时 3.2s 冷解析
+  才是真凶」的定性，理由是「一个批次目录 9 只同量级大文件，1536MB 预算只住 3 只，互相洗掉」。
+  第二批照这条写了 clamp(RAM×0.25, 1536, 4096) 的自适应预算 + 注释 + 计划，**写完才去 `ls` 那个目录**：
+  9 只 CSV 实测是 `[0, 0, 0, 0, 5, 17, 19, 58, 275] MB`，整个 `Data/SampleData` 超 80MB 的只有那 1 只，
+  而它的帧 460MB < 1536MB ⇒ 缓存本来就命中、切文件不重复解析 ⇒ 收益场景根本不存在。已撤回。
+  **规则：写进代码注释/计划里的每个数字，必须有一条命令产出过它**；「我记得/大概是」不算，
+  哪怕它是我上一轮自己说的。顺序必须是 前提→收益→代码，反过来就是白做一遍还要改掉。
+- **②合并/防抖这类逻辑要包在「调用方的加载函数」外面，不要塞进通用 `run()`。** 第一版把
+  `coalesceMs` 做进 `useAsyncData.run()`，trailing 那一发是在定时器里直接 `dispatch()` 的——
+  调用方 `const r = await run(...); if (r) paint(r)` 的续接**拿不到这次结果**，
+  形状是「连点后停在最后一个参数时图表不更新」，测试里不容易出现（要正好卡在窗口边界）。
+  挪到 `useCoalescedCall(loadHistogramNow, 150)` 之后，被合并的是整个加载函数，后续处理天然在内。
+- **③中止（abort）不是错误，两处都要静音。** `api/index.ts` 的响应拦截器对任何失败都
+  `console.error` + `toastError(formatError(...))`，而 `formatError` 把「没有 response 的错误」映射成
+  「无法连接服务器，请检查网络」。所以只加 `axios.isCancel(error)` 早退（不 log、不 toast、不进 401
+  刷新管线）是不够的——`useAsyncData` 里那条 `error.value = formatError(e)` 同样要把取消判成
+  「无结果」。另一半是判据形状：P0 冒烟有「/analysis 无控制台错误」，中止如果不静音就是**自己造红**。
+  另外只有真正把 `signal` 交给 axios 的那几条 lane 才会被取消；`run()` 里无条件 `controller.abort()`
+  对付了旧请求，对忽略 signal 的新调用方是无副作用的（promise 照常走完、由 seq 丢弃）。
+- **④「点一次跳两项」这类重复动作，来自双向绑定与事件监听重叠。** `ParamSelector.onPrev/onNext`
+  自己 `emit('update:selectedParam')`（已经改过参数）**又** `emit('prev'/'next')`，而单文件 tab
+  把这两个事件接到一份同逻辑的 `prevParam/nextParam` 上 ⇒ 一次点击改两次；多文件 tab 没接这两个事件，
+  所以只有它坏。检查口径：**组件内部已经改过状态，就不该再对外广播「请再改一次」**；
+  同一逻辑在两处各存一份是这种 bug 的温床，删副本而不是加 flag。
+- **⑤夹具/用例的 flake 与断言错位，都要先量再断。**
+  - `apps/datafiles/tests_parse_cache.test_concurrent_miss_for_same_key_parses_once` 在本批门禁里红过一次，
+    独占复跑 5 次是 1 红 4 绿 ⇒ 是它自己 `time.sleep(0.05)`「让 t1 进入解析中」的假设在抖，
+    不是本批回归（我改的只有预算求值路径，没碰单飞）。**后端用例也一样要先独占复跑再归因**，
+    别把「这轮红」读成「这批坏」。
+  - 我给 ETS88 有界读取写判据时，往 marker **之后**插了一行元数据来验头部扫描范围，顺手断言
+    「数据还是 5 行」——但 ETS88 的数据区就是从 marker+1 开始读的，插进去那行**本身就是数据行**
+    （实测 6 行）。断言要从被测路径的真实产物出发，不能从意图倒推。
+
 ## 2026-10-17 等价性判据会退化成空断言：10 行夹具在数学上分不出 ±3σ 与 RDL
 
 - **现象**：给「站点表并入直方图响应」写等价性断言（`histogram.site_stats == /statistics/site_stats/`），

@@ -1,10 +1,17 @@
 from .base import BaseATEParser, DATA_FORMAT_CONFIG, NON_NUMERIC_COLUMNS
 import pandas as pd
 import os
+from collections import deque
 from typing import Optional, Tuple, Dict
 import logging
 
 logger = logging.getLogger(__name__)
+
+# 有界读取的两个保留量（见 parse() 里的注释）：
+# HEADER_KEEP 对齐 base.extract_header_metadata 的 scan_limit=80；
+# TAIL_KEEP 对齐「时间字段在文件尾，扫最后 20 行」的既有口径。
+HEADER_KEEP = 80
+TAIL_KEEP = 20
 
 class ETS88Parser(BaseATEParser):
     format_type = 'ETS88'
@@ -17,14 +24,25 @@ class ETS88Parser(BaseATEParser):
         if not config:
             return None, None
         
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = f.readlines()
-        
+        # 只保留解析真正会读的行：头部（读到 marker 行为止，且至少 HEADER_KEEP 行，
+        # 让下面 `head[:80]`/`head[:50]` 看到的与整读时逐字一致）+ 尾部 TAIL_KEEP 行
+        # （ETS88 的时间字段在文件尾）。旧写法 `f.readlines()` 把整只 288MB 文件读成
+        # 35,339 条 Python 字符串（实测驻留 ≈275MB）；时间只省 0.07s（0.31s→0.24s），
+        # 省的是**峰值**——解析缓存预算抬到 4096MB 后，这种瞬时叠加才是要紧的。
+        marker = config['marker']
+        head = []
+        tail = deque(maxlen=TAIL_KEEP)
         marker_idx = None
-        for i, line in enumerate(lines):
-            if config['marker'] in line:
-                marker_idx = i
-                break
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            for i, line in enumerate(f):
+                if marker_idx is None:
+                    head.append(line)
+                    if marker in line:
+                        marker_idx = i
+                elif len(head) < HEADER_KEEP:
+                    # marker 很靠前时仍要把前 80 行收齐，否则头部元数据扫描范围会变
+                    head.append(line)
+                tail.append(line)
         if marker_idx is None:
             return None, None
         
@@ -41,11 +59,11 @@ class ETS88Parser(BaseATEParser):
         unit_line_idx = None
         
         for i in range(max(0, marker_idx - 20), marker_idx):
-            line_lower = lines[i].lower()
+            line_lower = head[i].lower()
             
             if header_line_idx is None:
                 if any(kw.lower() in line_lower for kw in search_keywords['header']):
-                    parts = lines[i].split(',')
+                    parts = head[i].split(',')
                     if len(parts) > 50:
                         header_line_idx = i
                         continue
@@ -71,10 +89,10 @@ class ETS88Parser(BaseATEParser):
         if unit_line_idx is None:
             unit_line_idx = config.get('unit_line', marker_idx - 1)
         
-        header_line = lines[header_line_idx].strip()
-        min_line = lines[min_line_idx].strip()
-        max_line = lines[max_line_idx].strip()
-        unit_line = lines[unit_line_idx].strip()
+        header_line = head[header_line_idx].strip()
+        min_line = head[min_line_idx].strip()
+        max_line = head[max_line_idx].strip()
+        unit_line = head[unit_line_idx].strip()
         
         header_columns = [col.strip().strip('"') for col in header_line.split(',')]
         ets88_meta_cols = ['Site #', 'Serial #', 'Bin', 'XCoord', 'YCoord']
@@ -127,7 +145,7 @@ class ETS88Parser(BaseATEParser):
                 df[col] = self.convert_to_numeric(df[col])
         
         program_name = ''
-        for line in lines[:50]:
+        for line in head[:50]:
             if 'Data Sheet File' in line:
                 parts = line.strip().split(',', 1)
                 if len(parts) >= 2:
@@ -135,7 +153,7 @@ class ETS88Parser(BaseATEParser):
                 break
         
         # Extract header metadata (ETS88 header ~70 lines, time fields at file tail)
-        header_meta = self.extract_header_metadata(lines, {
+        header_meta = self.extract_header_metadata(head, {
             'start_time': ['Data Collection Start Date', 'On'],
             'end_time': ['Data Collection Stop  Date', 'Data Collection Stop Date'],
             'lot_id': ['Datalog for Lot Number'],
@@ -147,7 +165,7 @@ class ETS88Parser(BaseATEParser):
             'handler': ['Handler/Prober ID', 'Handler_ID'],
         }, scan_limit=80)
         # ETS88 puts time fields at file tail — scan last 20 lines too (higher priority)
-        tail_meta = self.extract_header_metadata(lines[-20:], {
+        tail_meta = self.extract_header_metadata(list(tail), {
             'start_time': ['Data Collection Start Date'],
             'end_time': ['Data Collection Stop  Date', 'Data Collection Stop Date'],
         })
