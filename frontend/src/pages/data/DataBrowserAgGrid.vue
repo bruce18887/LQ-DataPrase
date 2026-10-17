@@ -1,6 +1,25 @@
 <template>
   <div>
-    <!-- 控制栏（DataBrowserToolbar：筛选控件 + 操作按钮） -->
+    <!-- 当前文件横幅（与导出工具 tab 同款）：文件级操作挂在右端，不再单独占一行 -->
+    <ActiveFileBanner
+      :model-value="props.fileId"
+      :files="props.files"
+      @update:model-value="emit('update:fileId', $event)"
+    >
+      <template #actions>
+        <el-button type="primary" :loading="loading" @click="reload">
+          <el-icon><Refresh /></el-icon> 加载数据
+        </el-button>
+        <el-button :loading="exportingExcel" :disabled="!props.fileId" @click="exportExcel">
+          <el-icon><Download /></el-icon> 导出 Excel
+        </el-button>
+        <el-button :loading="exportingCsv" :disabled="!props.fileId" @click="exportCsv">
+          <el-icon><Document /></el-icon> 导出 CSV
+        </el-button>
+      </template>
+    </ActiveFileBanner>
+
+    <!-- 控制栏（DataBrowserToolbar：筛选控件） -->
     <DataBrowserToolbar
       :test-cols="testCols"
       :selected-test-cols="selectedTestCols"
@@ -11,18 +30,11 @@
       :autosize-mode="autosizeMode"
       :pinned-col="pinnedCol"
       :all-cols="allCols"
-      :loading="loading"
-      :exporting-excel="exportingExcel"
-      :exporting-csv="exportingCsv"
-      :export-disabled="!fileId"
       @update:selected-test-cols="selectedTestCols = $event"
       @update:passfail="passfail = $event"
       @update:site-filter="siteFilter = $event"
       @update:autosize-mode="autosizeMode = $event"
       @update:pinned-col="pinnedCol = $event"
-      @load="reload"
-      @export-excel="exportExcel"
-      @export-csv="exportCsv"
     />
 
     <!-- 质量概览条（复用 /summary/ 接口，失败静默隐藏） -->
@@ -96,11 +108,14 @@
 import { ref, computed, watch, onMounted, onUnmounted, markRaw } from 'vue'
 import { AgGridVue } from 'ag-grid-vue3'
 import { ElMessage } from 'element-plus'
+import { Refresh, Download, Document } from '@element-plus/icons-vue'
 import api from '../../api'
 import { datafilesApi } from '../../api/datafiles'
 import { authApi } from '../../api/auth'
 import { useThemeStore } from '../../stores/theme'
 import { useFilesStore } from '../../stores/files'
+import type { DataFile } from '../../types'
+import ActiveFileBanner from './components/browser/ActiveFileBanner.vue'
 import DataBrowserToolbar from './components/browser/DataBrowserToolbar.vue'
 import HistogramColumnDialog from './components/browser/HistogramColumnDialog.vue'
 import DataQualityBar from './components/browser/DataQualityBar.vue'
@@ -113,8 +128,16 @@ import { getExportTimeoutMs } from '../../utils/exportTimeout'
 import { ModuleRegistry, AllCommunityModule, type IDatasource } from 'ag-grid-community'
 ModuleRegistry.registerModules([AllCommunityModule])
 
-const props = defineProps<{ fileId: number | null; fileName?: string }>()
-const emit = defineEmits<{ 'file-missing': []; 'goto-files': [] }>()
+const props = defineProps<{
+  fileId: number | null
+  /** 全量文件列表：横幅的文件下拉要用，导出文件名也从这里按 id 反查 */
+  files: DataFile[]
+}>()
+const emit = defineEmits<{
+  'update:fileId': [number | null]
+  'file-missing': []
+  'goto-files': []
+}>()
 const themeStore = useThemeStore()
 const filesStore = useFilesStore()
 const isDark = computed(() => themeStore.currentTheme === 'night')
@@ -130,8 +153,10 @@ const exportingExcel = ref(false)
 const exportingCsv = ref(false)
 const dataLoaded = ref(false)
 
-// 表格高度随视口自适应（页头 + tab + 横幅 + 控制栏约 320px 固定占位）
-const TABLE_TOP_OFFSET = 320
+// 表格高度随视口自适应。320 → 254：横幅并入操作按钮、全选/清空收进下拉后，
+// 表格上缘实测从 443px 抬到 377px（回收 66px），等量扣减才轮得到表格多吃 66px，
+// 否则省下来的高度只是页面空白，用户看不出这次改过什么。
+const TABLE_TOP_OFFSET = 254
 const tableHeight = ref(Math.max(320, window.innerHeight - TABLE_TOP_OFFSET))
 function onResize() {
   tableHeight.value = Math.max(320, window.innerHeight - TABLE_TOP_OFFSET)
@@ -577,8 +602,9 @@ function currentGridModels(): { sort_model: string; filter_model: string } {
 function resolveExportName(headers: Record<string, string>, fallback: string, suffix: string): string {
   const parsed = extractFilenameFromContentDisposition(headers['content-disposition'])
   if (parsed) return parsed
-  if (props.fileName) {
-    const base = props.fileName.replace(/\.csv$/i, '')
+  const fileName = props.files.find((f) => f.id === props.fileId)?.filename
+  if (fileName) {
+    const base = fileName.replace(/\.csv$/i, '')
     return sanitizeFilename(`${base}${suffix}`)
   }
   return fallback

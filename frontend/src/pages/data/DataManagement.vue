@@ -39,25 +39,11 @@
         />
       </div>
 
-      <!-- 查看文件数据 -->
+      <!-- 查看文件数据（当前文件横幅由组件自己渲染：横幅右端要挂它的加载/导出按钮） -->
       <div v-show="activeTab === 'view'" role="tabpanel" class="content-section fade-in">
-        <div class="active-file-banner">
-          <span class="banner-icon">📄</span>
-          <span class="banner-label">当前文件</span>
-          <FileSelect
-            v-model="activeFileId"
-            :files="files"
-            placeholder="请选择一个文件"
-            clearable
-            show-meta
-            aria-label="当前文件"
-            class="banner-file-select"
-            @update:model-value="onActiveFileSelect"
-          />
-        </div>
         <DataBrowserAgGrid
-          :file-id="activeFileId"
-          :file-name="activeFileName"
+          v-model:file-id="activeFileId"
+          :files="files"
           @file-missing="onFileMissing"
           @goto-files="activeTab = 'files'"
         />
@@ -65,20 +51,7 @@
 
       <!-- 导出工具 -->
       <div v-show="activeTab === 'export'" role="tabpanel" class="content-section fade-in">
-        <div class="active-file-banner">
-          <span class="banner-icon">📄</span>
-          <span class="banner-label">当前文件</span>
-          <FileSelect
-            v-model="activeFileId"
-            :files="files"
-            placeholder="请选择一个文件"
-            clearable
-            show-meta
-            aria-label="当前文件"
-            class="banner-file-select"
-            @update:model-value="onActiveFileSelect"
-          />
-        </div>
+        <ActiveFileBanner v-model="activeFileId" :files="files" />
         <ExportToolsTab :files="files" :file-id="activeFileId" />
       </div>
 
@@ -102,10 +75,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onActivated, watch } from 'vue'
+import { ref, onMounted, onActivated, watch } from 'vue'
 import api from '../../api'
 import { useFilesStore } from '../../stores/files'
-import FileSelect from '../../components/common/FileSelect.vue'
+import ActiveFileBanner from './components/browser/ActiveFileBanner.vue'
 import FileListTab from './components/FileListTab.vue'
 import BatchDataTab from './components/BatchDataTab.vue'
 import DataBrowserAgGrid from './DataBrowserAgGrid.vue'
@@ -147,20 +120,8 @@ function viewFile(id: number, _filename?: string) {
   activeTab.value = 'view'
 }
 
-// 当前查看文件的文件名（供导出文件名兜底解析）
-const activeFileName = computed(() => {
-  const f = files.value.find((f: any) => f.id === activeFileId.value)
-  return f?.filename ?? undefined
-})
-
 function onRowClick(id: number, _filename?: string) {
   activeFileId.value = id
-}
-
-// 查看数据 / 导出工具 顶部下拉框选择文件（FileSelect 单选 emit 类型为
-// number | number[] | null，实际单选只会是 number|null）
-function onActiveFileSelect(id: number | number[] | null | undefined) {
-  activeFileId.value = typeof id === 'number' ? id : null
 }
 
 function onFileManagerSelect(fileId: number) {
@@ -269,36 +230,6 @@ onActivated(loadFiles)
   min-height: 400px;
 }
 
-/* Active file banner */
-.active-file-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  margin-bottom: 16px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--brand);
-  border-radius: 8px;
-  font-size: var(--p-fs-small);
-}
-
-.banner-icon {
-  font-size: var(--p-fs-base);
-  flex-shrink: 0;
-}
-
-.banner-label {
-  color: var(--text-3);
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.banner-file-select {
-  width: 320px;
-  max-width: 100%;
-}
-
 /* Fade-in animation */
 .fade-in {
   animation: fadeIn 0.25s ease-out;
@@ -319,10 +250,5 @@ onActivated(loadFiles)
 :root[data-theme="night"] .tab-badge {
   background: var(--brand);
   color: var(--text-inverse);
-}
-
-:root[data-theme="night"] .active-file-banner {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.08);
 }
 </style>

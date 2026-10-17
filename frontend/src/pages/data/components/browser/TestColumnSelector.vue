@@ -20,19 +20,23 @@
         <div class="empty-hint">无匹配测试列</div>
       </template>
       <template #footer>
-        <div v-if="matches.length > 0" class="match-hint">
-          匹配 {{ matches.length }} 项，按 Enter 全选
+        <!-- 全选/清空收进下拉底部：挂在控件下面会多撑出一行（实测筛选行 75px → 54px），
+             而这两个动作只在看列表时才用得到 -->
+        <div class="col-footer">
+          <div class="col-actions">
+            <el-button size="small" link type="primary" :disabled="cols.length === 0" @click="selectAll">
+              全选
+            </el-button>
+            <el-button size="small" link type="primary" :disabled="modelValue.length === 0" @click="clearAll">
+              清空
+            </el-button>
+          </div>
+          <div v-if="matches.length > 0" class="match-hint">
+            匹配 {{ matches.length }} 项，按 Enter 全选
+          </div>
         </div>
       </template>
     </el-select>
-    <div class="col-actions">
-      <el-button size="small" link type="primary" :disabled="cols.length === 0" @click="selectAll">
-        全选
-      </el-button>
-      <el-button size="small" link type="primary" :disabled="modelValue.length === 0" @click="clearAll">
-        清空
-      </el-button>
-    </div>
   </div>
 </template>
 
@@ -122,15 +126,16 @@ function selectMatches() {
 </script>
 
 <style scoped>
-.test-col-selector {
+.col-footer {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 12px;
 }
 
 .col-actions {
   display: flex;
-  justify-content: flex-end;
   gap: 2px;
 }
 
@@ -139,10 +144,9 @@ function selectMatches() {
 }
 
 .match-hint {
-  padding: 6px 12px;
   font-size: var(--p-fs-dense);
   color: var(--text-2);
-  border-top: 1px solid var(--border);
+  margin-left: auto;
 }
 
 .empty-hint {

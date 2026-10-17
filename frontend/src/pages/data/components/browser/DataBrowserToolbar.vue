@@ -64,26 +64,10 @@
         </el-select>
       </el-col>
     </el-row>
-
-    <!-- 操作按钮 -->
-    <el-row style="margin-bottom: 12px">
-      <el-col style="text-align: right">
-        <el-button type="primary" :loading="loading" @click="emit('load')">
-          <el-icon><Refresh /></el-icon> 加载数据
-        </el-button>
-        <el-button :loading="exportingExcel" :disabled="exportDisabled" @click="emit('export-excel')">
-          <el-icon><Download /></el-icon> 导出 Excel
-        </el-button>
-        <el-button :loading="exportingCsv" :disabled="exportDisabled" @click="emit('export-csv')">
-          <el-icon><Document /></el-icon> 导出 CSV
-        </el-button>
-      </el-col>
-    </el-row>
   </div>
 </template>
 
 <script setup lang="ts">
-import { Refresh, Download, Document } from '@element-plus/icons-vue'
 import TestColumnSelector from './TestColumnSelector.vue'
 
 interface Props {
@@ -96,10 +80,6 @@ interface Props {
   autosizeMode: string
   pinnedCol: string
   allCols: string[]
-  loading: boolean
-  exportingExcel: boolean
-  exportingCsv: boolean
-  exportDisabled: boolean
 }
 
 interface Emits {
@@ -108,9 +88,6 @@ interface Emits {
   (e: 'update:siteFilter', v: string): void
   (e: 'update:autosizeMode', v: string): void
   (e: 'update:pinnedCol', v: string): void
-  (e: 'load'): void
-  (e: 'export-excel'): void
-  (e: 'export-csv'): void
 }
 
 defineProps<Props>()
