@@ -109,6 +109,7 @@
             :symbol-size="effSize"
             :opacity="effOpacity"
             :range-type="rangeType"
+            :jitter="jitter"
           />
           <el-empty v-else description="当前参数无序列分布数据，请选择其他参数" />
         </template>
@@ -174,11 +175,13 @@
             <SerialSettingsForm
               :can-split="canSplit"
               :split-by-site="splitBySite"
+              :jitter="jitter"
               :eff-size="effSize"
               :size-auto-hint="sizeAutoHint"
               :eff-opacity-pct="effOpacityPct"
               :opacity-auto-hint="opacityAutoHint"
               @update:split-by-site="(v: boolean) => { splitBySite = v }"
+              @update:jitter="(v: boolean) => { jitter = v }"
               @update:point-size="(v: number) => { pointSizeOverride = v }"
               @update:opacity-pct="(v: number) => { opacityOverridePct = v }"
             />
@@ -381,6 +384,7 @@ const {
   sizeAutoHint,
   opacityAutoHint,
   canSplit,
+  jitter,
 } = useSerialChartSettings(serialDistData)
 
 // Composable: Site Stats

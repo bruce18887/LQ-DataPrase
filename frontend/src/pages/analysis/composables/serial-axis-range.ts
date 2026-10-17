@@ -106,3 +106,49 @@ function iqrFenceRange(input: SerialYBoundsInput): [number, number] | null {
 export function resolveSerialYBounds(input: SerialYBoundsInput): [number, number] {
   return iqrFenceRange(input) ?? frameByLimits(dataAdaptiveRange(input), input)
 }
+
+/* ————————————— 纵向抖动（齿轮开关，默认关）————————————— */
+
+/**
+ * 抖动幅度占该 lane 可见 Y 跨度的比例。
+ *
+ * 取 3% 的理由（拿 EN_F 那组量化数据验算过）：值被量化到 0.01 V 时 8876 个点压成
+ * 7 条横线，可见跨度 0.0696 → 抖动 ±0.0021，连 symbol 半径（点径 4 ≈ ±0.0006）
+ * 一共 0.0054，仍小于相邻电平间距 0.01 的一半 ⇒ 层内摊开、层间不粘连。
+ *
+ * 不做成「按数据量化步长自适应」：那要求先排序取最小非零间隔，而真实日志里混着
+ * 浮点噪声时最小间隔会退化到 1e-9，开关一开等于没开，比固定比例更难解释。
+ */
+export const JITTER_SPAN_RATIO = 0.03
+
+/** 轴位置 → 确定性伪随机 [-1,1]（同一颗 die 永远抖到同一处：重绘/缩放/切参数不跳点） */
+function jitterUnit(seed: number): number {
+  const x = Math.sin(seed * 12.9898) * 43758.5453
+  return (x - Math.floor(x)) * 2 - 1
+}
+
+/** 字符串序列号没有数值轴下标，按字符码折成同一个意义上的 seed */
+function jitterSeed(x: number | string): number {
+  if (typeof x === 'number') return x
+  let h = 0
+  for (let i = 0; i < x.length; i++) h = (h * 31 + x.charCodeAt(i)) | 0
+  return Math.abs(h)
+}
+
+/**
+ * 该点要抖多少（数据单位）。只有 anchor==0 的正常点参与：
+ * anchor=1 不绘制、anchor=2/3 本就该贴在轴边上，抖开会让「超出显示范围」读成
+ * 一个具体刻度。抖动量 |≤ span×3%| 恒小于数据自适应那侧的 8% padding，
+ * 所以抖完仍落在本 lane 可见范围内，不会被裁掉。
+ */
+export function jitterForPoint(
+  axisValue: number | string,
+  anchor: number,
+  value: unknown,
+  span: number,
+  enabled: boolean,
+): number {
+  if (!enabled || anchor !== 0) return 0
+  if (!isFiniteNumber(value) || !(span > 0)) return 0
+  return jitterUnit(jitterSeed(axisValue)) * span * JITTER_SPAN_RATIO
+}

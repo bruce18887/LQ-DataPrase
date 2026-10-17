@@ -93,6 +93,27 @@ async function toggleSplitBySite(page: Page) {
   await expect(pop).toBeHidden()
 }
 
+/** 同上，切换「纵向抖动」 */
+async function toggleJitter(page: Page) {
+  const pop = await openSerialSettings(page)
+  await pop.getByText('纵向抖动').click()
+  await serialGear(page).click()
+  await expect(pop).toBeHidden()
+}
+
+/**
+ * 合并模式下全部 site 系列的「绘制 y / 真实 y / anchor」三元组。
+ * 抖动只动 value[1]（绘制坐标），realY 是真值 —— 两条分开取才分得清「画得散」与
+ * 「数据被改」，这是本用例唯一的判别式。
+ */
+function drawnYs(opt: any): Array<{ y: number; realY: number; anchor: number }> {
+  return (opt?.series ?? [])
+    .filter((s: any) => /^Site /.test(s.name))
+    .flatMap((s: any) => (s.data ?? []).map((d: any) => ({
+      y: d.value[1], realY: d.realY, anchor: d.anchor ?? 0,
+    })))
+}
+
 test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analysis'] }, () => {
   test('自动档：分级表一致 + 最密垫底 + fail 随 Site 着色 + 图例 Site 升序', async ({ page }) => {
     const { canvas, resp } = await enterSerial(page, RECOMMENDED.analysis)
@@ -247,6 +268,50 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
     // 取消勾选恢复单面板
     await toggleSplitBySite(page)
     await expect.poll(async () => (await readOption(canvas))?.grid?.length).toBe(1)
+  })
+
+  test('纵向抖动：默认逐点等于真值 → 勾上后绘制坐标离开真值而真值一字不变 → 取消即恢复', async ({ page }) => {
+    const { canvas } = await enterSerial(page, RECOMMENDED.analysis)
+    const before = drawnYs(await readOption(canvas))
+    expect(before.length, 'fixture 应有绘制点').toBeGreaterThan(0)
+    expect(before.some((p) => typeof p.realY === 'number'), '点须带 realY 字段（tooltip 的真值来源）').toBe(true)
+    expect(
+      before.filter((p) => p.anchor === 0).every((p) => p.y === p.realY),
+      '默认档：绘制 y 必须逐点等于真值（开关没碰过 = 逐字节不抖）',
+    ).toBe(true)
+
+    await toggleJitter(page)
+    // 等重绘落地再取快照，否则读到的是抖动前的 option
+    await expect
+      .poll(async () => drawnYs(await readOption(canvas))
+        .filter((p) => p.anchor === 0 && p.y !== p.realY).length)
+      .toBeGreaterThan(0)
+
+    const opt = await readOption(canvas)
+    const on = drawnYs(opt)
+    const y = opt.yAxis[0]
+    const span = y.max - y.min
+    expect(on.map((p) => p.realY), '真值序列不许被抖动改动静毫（tooltip / 导出读的是它）')
+      .toEqual(before.map((p) => p.realY))
+
+    const diffs = on.filter((p) => p.anchor === 0).map((p) => Math.abs(p.y - p.realY))
+    expect(diffs.filter((d) => d > 0).length / diffs.length, '多数点要真的散布开').toBeGreaterThan(0.5)
+    expect(Math.max(...diffs), '幅度 ≤ 该轴跨度的 3%').toBeLessThanOrEqual(span * 0.031)
+    for (const p of on) {
+      expect(p.y, '抖完不许越出可见范围').toBeGreaterThanOrEqual(y.min - 1e-9)
+      expect(p.y, '抖完不许越出可见范围').toBeLessThanOrEqual(y.max + 1e-9)
+    }
+    for (const p of on.filter((q) => q.anchor === 2 || q.anchor === 3)) {
+      expect(p.y, '超界点不抖，仍精确贴在轴边上')
+        .toBeCloseTo(p.anchor === 2 ? y.max : y.min, 9)
+    }
+
+    await toggleJitter(page)
+    const off = drawnYs(await readOption(canvas))
+    expect(
+      off.filter((p) => p.anchor === 0).every((p) => p.y === p.realY),
+      '取消勾选后逐点回到真值（同时证明 seed 是确定性的，不是 Math.random）',
+    ).toBe(true)
   })
 
   test('视觉快照：合并/拆分 × 双主题存 .qoder/verify_serial_*.png', async ({ page }) => {

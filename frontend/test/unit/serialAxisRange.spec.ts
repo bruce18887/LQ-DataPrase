@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 
 import {
   DATA_PAD,
+  JITTER_SPAN_RATIO,
   LIMIT_PAD,
+  jitterForPoint,
   resolveSerialYBounds,
   type SerialPoint,
   type SerialYBoundsInput,
@@ -128,5 +130,77 @@ describe('resolveSerialYBounds · 异常值处理档优先且不受入框影响'
       resolveSerialYBounds(input({ outlierHandling: 'clip', outlierInfo: { has_outliers: true, lower_bound: 5, upper_bound: 5 } })),
       -1, 11,
     )
+  })
+})
+
+describe('jitterForPoint · 纵向抖动', () => {
+  const SPAN = 12.3664
+
+  it('关闭时恒为 0（默认档必须逐字节等于不抖）', () => {
+    for (let i = 0; i < 50; i++) {
+      expect(jitterForPoint(i, 0, 1.25, SPAN, false)).toBe(0)
+    }
+  })
+
+  it('确定性：同一轴位置重复求值一字不差（重绘/缩放/切参数不许让点跳）', () => {
+    const first = Array.from({ length: 40 }, (_, i) => jitterForPoint(i, 0, 1.25, SPAN, true))
+    const again = Array.from({ length: 40 }, (_, i) => jitterForPoint(i, 0, 1.25, SPAN, true))
+    expect(first).toEqual(again)
+    expect(new Set(first).size, '40 个点应散布在多个偏移上，而不是全挤一处').toBeGreaterThan(20)
+    expect(Math.min(...first), '散布要有正负两侧').toBeLessThan(0)
+    expect(Math.max(...first)).toBeGreaterThan(0)
+  })
+
+  it('幅度受 |span|×3% 约束', () => {
+    for (let i = 0; i < 200; i++) {
+      expect(Math.abs(jitterForPoint(i, 0, 1.25, SPAN, true)))
+        .toBeLessThanOrEqual(SPAN * JITTER_SPAN_RATIO + 1e-12)
+    }
+  })
+
+  it('只有 anchor==0 参与：无值/超界点仍贴在原位（贴边点抖开会被读成一个具体刻度）', () => {
+    for (const anchor of [1, 2, 3]) {
+      expect(jitterForPoint(7, anchor, 1.25, SPAN, true), `anchor=${anchor}`).toBe(0)
+    }
+  })
+
+  it('值非数值 / 跨度非正 / 跨度 NaN：一律不抖', () => {
+    expect(jitterForPoint(7, 0, null, SPAN, true)).toBe(0)
+    expect(jitterForPoint(7, 0, '1.25', SPAN, true)).toBe(0)
+    expect(jitterForPoint(7, 0, 1.25, 0, true)).toBe(0)
+    expect(jitterForPoint(7, 0, 1.25, Number.NaN, true)).toBe(0)
+  })
+
+  it('字符串序列号：同串稳定、不同串散布', () => {
+    expect(jitterForPoint('A0012', 0, 1.25, SPAN, true))
+      .toBe(jitterForPoint('A0012', 0, 1.25, SPAN, true))
+    const many = ['A1', 'A2', 'A3', 'B1', 'B2', 'C7', 'D9'].map(
+      (s) => jitterForPoint(s, 0, 1.25, SPAN, true))
+    expect(new Set(many).size).toBeGreaterThan(4)
+  })
+
+  /**
+   * 承重不变量：抖完仍落在本 lane 可见范围内。
+   * 最坏位置是数据极值点——它离边界只剩数据自适应那 8% padding，
+   * 而抖动上界是可见跨度的 3%，可见跨度 ≥ 数据跨度 ⇒ 3% < 8%，不该越界。
+   * 三种形状各测一遍（限值入框 / 数据远宽于限值 / 单值退化）。
+   */
+  it('抖动后不被裁出可见范围：取数据极值点验算', () => {
+    const cases: Array<{ name: string; bounds: [number, number]; extremes: number[] }> = [
+      { name: 'RDL 限值入框', bounds: resolveSerialYBounds(input({ points: pts([1, 0.75], [2, 10.58]) })), extremes: [0.75, 10.58] },
+      { name: '数据远宽于限值', bounds: resolveSerialYBounds(input({ points: pts([1, -50], [2, 300]) })), extremes: [-50, 300] },
+      { name: '高 CP 窄数据带', bounds: resolveSerialYBounds(input({ points: pts([1, 0.95], [2, 1.05]) })), extremes: [0.95, 1.05] },
+      { name: '单值退化', bounds: resolveSerialYBounds(input({ rangeType: 'DR', points: pts([1, 8]) })), extremes: [8] },
+    ]
+    for (const c of cases) {
+      const span = c.bounds[1] - c.bounds[0]
+      for (const v of c.extremes) {
+        for (let i = 0; i < 300; i++) {
+          const y = v + jitterForPoint(i, 0, v, span, true)
+          expect(y, `${c.name} 值 ${v} 抖到 ${y} 越出 [${c.bounds}]`).toBeGreaterThanOrEqual(c.bounds[0])
+          expect(y, `${c.name} 值 ${v} 抖到 ${y} 越出 [${c.bounds}]`).toBeLessThanOrEqual(c.bounds[1])
+        }
+      }
+    }
   })
 })
