@@ -28,13 +28,13 @@
       :site-options="siteOptions"
       :site-col-disabled="siteColDisabled"
       :autosize-mode="autosizeMode"
-      :pinned-col="pinnedCol"
+      :pinned-cols="pinnedCols"
       :all-cols="allCols"
       @update:selected-test-cols="selectedTestCols = $event"
       @update:passfail="passfail = $event"
       @update:site-filter="siteFilter = $event"
       @update:autosize-mode="autosizeMode = $event"
-      @update:pinned-col="pinnedCol = $event"
+      @update:pinned-cols="pinnedCols = $event"
     />
 
     <!-- 质量概览条（复用 /summary/ 接口，失败静默隐藏） -->
@@ -145,7 +145,12 @@ const isDark = computed(() => themeStore.currentTheme === 'night')
 const passfail = ref('')
 const siteFilter = ref('')
 const autosizeMode = ref('none')
-const pinnedCol = ref('')
+// 固定列可多选（ag-grid 社区版原生支持多列 pinned:'left'）；顺序由 displayCols
+// 的列序决定，系统列本就前置，所以 Bin 与序列列天然挨在一起。
+const pinnedCols = ref<string[]>([])
+// 用户是否已经「表过态」：没表过态时由 applyMeta 灌默认值（Bin + 序列列），
+// 表过态（含主动清空）之后只按列是否还存在做裁剪，不回灌。
+const pinsReady = ref(false)
 // 显示测试列：选中集非空 = 表格仅显示这些测试列（系统列恒显）；空集 = 显示全部
 const selectedTestCols = ref<string[]>([])
 const loading = ref(false)
@@ -178,6 +183,11 @@ const allCols = ref<string[]>([])
 const colMeta = ref<Record<string, { unit: string; min: string; max: string }>>({})
 const numericColumns = ref<string[]>([])
 const siteOptions = ref<string[]>([])
+// Bin 列与序列列由后端 page==1 权威下发（bin_column / serial_column）。
+// binCol 必须单独存：右键菜单只对 Bin 列的 fail 单元格生效，不能再拿
+// 「谁是固定列」去反推它是 Bin 列 —— 固定列现在是多个了。
+const binCol = ref('')
+const serialCol = ref('')
 const rowCount = ref(0)
 const failRowCount = ref(0)
 
@@ -294,7 +304,7 @@ const {
   close: closeBinMenu,
   handleBodyContextMenu,
   goToFailCell,
-} = useBinCellMenu({ pinnedCol, displayCols })
+} = useBinCellMenu({ binCol, displayCols })
 
 // ── Site 筛选（服务端）：选项来自 page==1 响应的 site_options，过滤走 reload ──
 const siteColDisabled = computed(() => {
@@ -331,7 +341,7 @@ const columnDefs = computed<any[]>(() => {
       colDef.hide = true
     }
 
-    if (pinnedCol.value && col === pinnedCol.value) {
+    if (pinnedCols.value.includes(col)) {
       colDef.pinned = 'left'
     }
 
@@ -445,6 +455,11 @@ function clearGrid() {
   numericColumns.value = []
   siteOptions.value = []
   systemCols.value = []
+  binCol.value = ''
+  serialCol.value = ''
+  pinnedCols.value = []
+  // 文件没了（被删）→ 下次拿到元信息要重新灌默认固定列
+  pinsReady.value = false
   rowCount.value = 0
   failRowCount.value = 0
   dataLoaded.value = false
@@ -521,15 +536,24 @@ function applyMeta(d: any) {
   // 系统列（记录级列）仅 page==1 响应携带（page>1 不覆盖、不置空）
   if (d.system_columns) systemCols.value = d.system_columns
 
-  const binCol = d.bin_column as string
-  if (!pinnedCol.value) {
-    // 首次加载：自动固定 Bin 列
-    if (binCol && allCols.value.includes(binCol)) {
-      pinnedCol.value = binCol
+  const binColName = d.bin_column as string
+  binCol.value = typeof binColName === 'string' ? binColName : ''
+  const serial = d.serial_column as string | null
+  serialCol.value = typeof serial === 'string' ? serial : ''
+
+  const defaultPins = () => [binCol.value, serialCol.value].filter((c) => c && allCols.value.includes(c))
+  if (!pinsReady.value) {
+    // 首次拿到列元信息：默认钉住 Bin + 序列列（每种格式的序列列名不同，
+    // Serial_No / Serial # / PART_ID，由后端解析，前端不猜）
+    pinnedCols.value = defaultPins()
+    pinsReady.value = true
+  } else {
+    const kept = pinnedCols.value.filter((c) => allCols.value.includes(c))
+    // 只有「列真的从数据里消失了」（换文件）才回落到默认。用户主动清空过
+    // （kept 为空但没发生消失）不回灌，否则下一次换筛选就把他的清空撤销了。
+    if (kept.length !== pinnedCols.value.length) {
+      pinnedCols.value = kept.length ? kept : defaultPins()
     }
-  } else if (!allCols.value.includes(pinnedCol.value)) {
-    // 切换文件后旧固定列失效：回退到 Bin 列
-    pinnedCol.value = binCol && allCols.value.includes(binCol) ? binCol : ''
   }
 }
 
