@@ -17,6 +17,12 @@ import { registerIpcHandlers } from './ipc-handlers'
 import { APP_ID, resolveIconPath, iconFileExists } from './app-icon'
 import { probeBackendUrl } from './net-probe'
 import {
+  buildLoadFailureUrl,
+  isAbsoluteBaseIndexHtml,
+  loadFailureHints,
+  shouldShowLoadFailure,
+} from './load-failure'
+import {
   DEFAULT_CLIENT_CONFIG,
   hasClientConfig,
   normalizeServerUrl,
@@ -281,6 +287,25 @@ async function createWindow(): Promise<BrowserWindow> {
     },
   })
 
+  // 导航失败时把窗口交给一张自解释的诊断页，而不是留一个空窗口对着 `backgroundColor`。
+  // 判据在 load-failure.ts（T2 钉住）；这里只负责「能不能动这个窗口」和「动完写日志」。
+  const showLoadFailure = (attemptedUrl: string, reason: string): void => {
+    if (win.isDestroyed()) return
+    console.error(`[electron] Showing load-failure page: ${reason} (URL: ${attemptedUrl})`)
+    win
+      .loadURL(
+        buildLoadFailureUrl({
+          attemptedUrl,
+          reason,
+          hints: loadFailureHints({ isDev, attemptedUrl }),
+          logPath: LOG_FILE,
+        }),
+      )
+      .catch((err) => {
+        console.error('[electron] Failed to show load-failure page:', err)
+      })
+  }
+
   // Diagnostic lifecycle logging – helps distinguish "window never shows"
   // from "renderer crashed / page failed to load".
   win.once('ready-to-show', () => {
@@ -302,12 +327,20 @@ async function createWindow(): Promise<BrowserWindow> {
     }
   })
 
-  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
-    console.error(
-      `[electron] Renderer did-fail-load: ${errorCode} ${errorDescription} ` +
-        `(URL: ${validatedURL})`
-    )
-  })
+  win.webContents.on(
+    'did-fail-load',
+    (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      console.error(
+        `[electron] Renderer did-fail-load: ${errorCode} ${errorDescription} ` +
+          `(URL: ${validatedURL} mainFrame=${isMainFrame})`
+      )
+      // 兜底页自己也会被 did-finish-load 的保底逻辑 show 出来 —— 这正是想要的效果：
+      // 以前是「加载失败仍然开窗，用户看到一个空窗口」，现在是「开窗并告诉他为什么空」。
+      if (shouldShowLoadFailure({ errorCode, validatedURL, isMainFrame })) {
+        showLoadFailure(validatedURL, `${errorCode} ${errorDescription}`)
+      }
+    },
+  )
 
   win.webContents.on('render-process-gone', (_event, details) => {
     console.error(
@@ -329,7 +362,13 @@ async function createWindow(): Promise<BrowserWindow> {
     // In dev the Vite server is running on :3000
     const devUrl = 'http://localhost:3000' + (startupRoute ?? '')
     console.log(`[electron] Loading dev URL ${devUrl}`)
-    await win.loadURL(devUrl)
+    // 和远端分支一样吞掉导航异常：不吞的话 createWindow 抛出 → `mainWindow = await createWindow()`
+    // 永远不赋值，菜单与 second-instance 全对着 null 窗口静默失效，而兜底页已经显示出来了。
+    try {
+      await win.loadURL(devUrl)
+    } catch (err) {
+      console.error(`[electron] Failed to load dev URL ${devUrl}:`, err)
+    }
     // Only open DevTools on demand. Auto-opening it floods the terminal with
     // benign Chromium-internal noise (Unknown VE context: language-mismatch,
     // Autofill.enable / Autofill.setAddresses not found, etc.).
@@ -356,6 +395,22 @@ async function createWindow(): Promise<BrowserWindow> {
     const indexPath = path.join(__dirname, '..', 'dist', 'index.html')
     console.log(`[electron] Loading production file: ${indexPath} route=${startupRoute ?? '-'}`)
     console.log(`[electron] __dirname: ${__dirname}`)
+    // 绝对 base 的产物在 file:// 下是「整页空白 + 零报错」：文档本身加载成功了，只有 chunk
+    // 打到文件系统根，所以 did-fail-load 抓不到 —— 判据必须放在加载**前**。
+    let indexHtml = ''
+    try {
+      indexHtml = fs.readFileSync(indexPath, 'utf-8')
+    } catch (err) {
+      // 读不到就按原路径继续，真正的缺失会由 did-fail-load 接住并出诊断页。
+      console.warn('[electron] index.html 预检跳过（读不到）:', err)
+    }
+    if (isAbsoluteBaseIndexHtml(indexHtml)) {
+      showLoadFailure(
+        `file:///${indexPath.replace(/\\/g, '/')}`,
+        'index.html 引用了绝对路径 /assets/，这份 dist 不是 Electron 构建',
+      )
+      return win
+    }
     try {
       if (startupRoute) {
         await win.loadFile(indexPath, { hash: startupRoute.replace(/^#/, '') })
