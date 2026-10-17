@@ -115,8 +115,18 @@
 ## 遗留（四批都不含的动作）
 
 - **不 push**。四笔提交都在本地 master（批 3 `a751d7e`、批 1 `31b3a9c`、批 2 `86521be`、批 4 待提交）。
-- 未做收口档全量池（`node scripts/e2e_pool.mjs --slots=4` 全套 + 后端全套）——
-  四批各自跑的是 affected 模块档。要并入/推送前先补这一档。
+- 收口档全量池**已补跑（2026-10-17 22:27 起，两档串行，未并发）**：
+  - `node scripts/e2e_pool.mjs --slots=4` 全套：**396 例 / 墙钟 7.7min / 单价 3.31s/例 / 真红 0 /
+    悬而未决 0**，结论 MEASURED。三个红文件（`analysis/histogram-fail-bins`、
+    `analysis/histogram-multiseries-clip`、`analysis/serial-no-column`）逐文件独占复跑全绿
+    ⇒ 判为负载抖动。效率 2.68 低于 2.8 这条**不判** —— §4 明示有重跑时不计效率
+    （失败的 attempt 吃墙钟却不进分子）。日志 `tasks/e2e-pool-full.log`。
+  - `python manage.py test test.backend apps.*`（与夜跑同一份 label 算法）：
+    **Ran 1518 tests / 410.1s / OK (skipped=7)**，0 FAILED、0 ERROR。
+    日志 `tasks/backend-full.log`。
+  - 跑前确认 slot 端口基址无残留、跑后回查 21001–22004 已释放。
+    :8000/:3000 全程被另一会话的 dev server 占着，没动它们（池走自己的 21001/22001 基址，
+    `allocatePortBlock(n, isTaken, …)` 自带避让）。
 - 固定列多选后，钉住一个「默认隐藏列」里的列在界面上没有可见结果（列仍 hide）。
   本批只在 e2e 选材时绕开，没改产品行为 —— 要不要在列被固定时自动取消隐藏，待拍板。
 
