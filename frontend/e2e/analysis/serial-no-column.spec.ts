@@ -7,7 +7,7 @@ import { uploadFile } from '../helpers/upload'
 import { cleanupQuiet, deleteFilesByNameQuiet } from '../helpers/cleanup'
 import { loginAs } from '../helpers/auth'
 import { expectChartRendered, waitLoadingGone } from '../helpers/charts'
-import { selectAnalysisFile, selectParam } from '../helpers/params'
+import { selectAnalysisFile, selectParam, listParams } from '../helpers/params'
 
 /**
  * 序列分布：无 Serial_No 列文件的错误提示 + Dut_No 回退 + Site12358 样本文件
@@ -425,12 +425,27 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
     await wrapper.locator('svg text').filter({ hasText: /^Site 1$/ }).first().click()
     await expect.poll(readSelected).toMatchObject({ 'Site 1': false })
 
-    // 切换参数（下一个 ▶ → KELVIN_SW），图例隐藏状态应保持
+    // 切换参数（下一个 ▶），图例隐藏状态应保持
+    //
+    // 顺带钉住「点一次只前进一格」：2026-10-17 实测发现 ◀上一个/下一个▶ 在单文件 tab 上
+    // 会**跳两项**——ParamSelector.onPrev/onNext 自己 emit 了 update:selectedParam，
+    // 又 emit prev/next，而 SingleParamTab 还有一份同逻辑的 prevParam/nextParam 接在这两个
+    // 事件上（同一次点击改两次参数）。1,702 个测试项的文件上等于每次浏览漏掉一项。
+    const paramNames = await listParams(page)
+    const before = await page.locator(`${SINGLE} .param-selector .el-select__placeholder`).innerText()
+    const idxBefore = paramNames.findIndex((n) => n.trim() === before.trim())
+    expect(idxBefore, `当前参数应能在列表里定位（before=${before}，列表 ${paramNames.length} 项）`)
+      .toBeGreaterThanOrEqual(0)
+    if (idxBefore >= paramNames.length - 1) test.skip(true, '当前参数已是末项，无法验「前进一格」')
+
     await page.locator('.param-selector button').filter({ hasText: '下一个' }).first().click()
     await expect(wrapper).toBeVisible({ timeout: 15_000 })
     await waitLoadingGone(page.locator(SINGLE))
-    const after = await readSelected()
-    expect(after['Site 1'], `切参数后图例隐藏状态应保持，实际 selected=${JSON.stringify(after)}`).toBe(false)
+    const after = await page.locator(`${SINGLE} .param-selector .el-select__placeholder`).innerText()
+    expect(after.trim(), '点一次「下一个」应恰好前进一项（旧行为是两项）')
+      .toBe(paramNames[idxBefore + 1].trim())
+    const legendSelected = await readSelected()
+    expect(legendSelected['Site 1'], `切参数后图例隐藏状态应保持，实际 selected=${JSON.stringify(legendSelected)}`).toBe(false)
   })
 
   test('无坐标列文件：晶圆图显示错误提示而非静默空白（同类裸200回归）', async ({ page }) => {

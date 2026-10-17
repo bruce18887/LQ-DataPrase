@@ -1,6 +1,7 @@
 import { type Ref, ref, watch } from 'vue'
 import api from '../../../api'
 import { useAsyncData } from '../../../composables/useAsyncData'
+import { useCoalescedCall } from '../../../composables/useCoalescedCall'
 
 export function useQQPlot(
   getFileId: () => number | null,
@@ -14,7 +15,7 @@ export function useQQPlot(
     silent: true,
   })
 
-  async function loadQQPlot() {
+  async function loadQQPlotNow() {
     const fileId = getFileId()
     // 未真正发请求的分支也要清错误态，避免旧错误文案残留在占位区
     qqError.value = null
@@ -27,7 +28,7 @@ export function useQQPlot(
       return
     }
 
-    await run(() => api.post('/analysis/qqplot/', {
+    await run((signal) => api.post('/analysis/qqplot/', {
       file_id: fileId,
       param: selectedParam.value,
       data_only_bin1: dataOnlyBin1.value,
@@ -35,8 +36,11 @@ export function useQQPlot(
       // 批次 3 修的就是「快照导致改了敏感度仍按 1.5 发请求」。后端
       // qqplot 此前忽略该字段（写死 1.5），现已贯穿到 detect_outliers_iqr。
       iqr_multiplier: iqrMultiplier.value,
-    }))
+    }, { signal }))
   }
+
+  // 连切测试项时只发第一次与最后一次（与 useHistogram 同档；理由见 useCoalescedCall）
+  const loadQQPlot = useCoalescedCall(loadQQPlotNow, 150)
 
   // Auto-load when the selected parameter changes
   watch(selectedParam, () => loadQQPlot())

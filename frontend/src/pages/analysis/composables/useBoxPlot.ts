@@ -1,6 +1,7 @@
 import { type Ref, ref, watch, computed } from 'vue'
 import { analysisApi } from '../../../api/analysis'
 import { useAsyncData } from '../../../composables/useAsyncData'
+import { useCoalescedCall } from '../../../composables/useCoalescedCall'
 
 export function useBoxPlot(
   getFileId: () => number | null,
@@ -16,7 +17,7 @@ export function useBoxPlot(
     silent: true,
   })
 
-  async function loadBoxPlot() {
+  async function loadBoxPlotNow() {
     const fileId = getFileId()
     // 未真正发请求的分支也要清错误态，避免旧错误文案残留在占位区
     boxPlotError.value = null
@@ -24,8 +25,8 @@ export function useBoxPlot(
     if (enabled && !enabled.value) return
     await run(
       // 敏感度在**发请求时**实时读 ref（不是挂载时快照，参 2026-09-02 批次 3）
-      () => analysisApi.getBoxPlot(fileId, [selectedParam.value], groupBy.value || undefined,
-                                   dataOnlyBin1.value, iqrMultiplier.value),
+      (signal) => analysisApi.getBoxPlot(fileId, [selectedParam.value], groupBy.value || undefined,
+                                         dataOnlyBin1.value, iqrMultiplier.value, { signal }),
       (d: any) => d.results ?? d,
     )
   }
@@ -36,6 +37,9 @@ export function useBoxPlot(
     const paramData = boxPlotData.value[selectedParam.value]
     return paramData?.overall ?? null
   })
+
+  // 连切测试项时只发第一次与最后一次（与 useHistogram 同档；理由见 useCoalescedCall）
+  const loadBoxPlot = useCoalescedCall(loadBoxPlotNow, 150)
 
   // Auto-load on dependency change (same pattern as useHistogram)
   watch(selectedParam, () => loadBoxPlot())
