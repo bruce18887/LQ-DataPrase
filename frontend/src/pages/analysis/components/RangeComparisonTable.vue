@@ -14,8 +14,8 @@
       class="dp-table-dense"
       scrollbar-always-on
       :row-class-name="rangeRowClass"
-      :header-cell-style="{ background: 'var(--bg-3)', fontSize: 'var(--p-fs-micro)', padding: '3px 4px', whiteSpace: 'nowrap' }"
-      :cell-style="{ fontSize: 'var(--p-fs-micro)', padding: '3px 4px', whiteSpace: 'nowrap' }"
+      :header-cell-style="{ background: 'var(--bg-3)', fontSize: 'var(--p-fs-micro)', padding: '3px 4px' }"
+      :cell-style="{ fontSize: 'var(--p-fs-micro)', padding: '3px 4px' }"
       table-layout="auto"
     >
       <el-table-column prop="label" label="" align="left" min-width="95" />

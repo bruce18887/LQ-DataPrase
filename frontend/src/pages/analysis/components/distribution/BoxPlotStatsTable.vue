@@ -6,8 +6,9 @@
       :data="rows"
       size="small"
       :border="true"
-      :header-cell-style="{ background: 'var(--bg-3)', fontSize: 'var(--p-fs-micro)', padding: '3px 6px', whiteSpace: 'nowrap' }"
-      :cell-style="{ fontSize: 'var(--p-fs-micro)', padding: '3px 6px', whiteSpace: 'nowrap' }"
+      class="dp-table-dense"
+      :header-cell-style="{ background: 'var(--bg-3)', fontSize: 'var(--p-fs-micro)', padding: '3px 4px' }"
+      :cell-style="{ fontSize: 'var(--p-fs-micro)', padding: '3px 4px' }"
       table-layout="auto"
     >
       <el-table-column prop="grp" label="组" align="center" />

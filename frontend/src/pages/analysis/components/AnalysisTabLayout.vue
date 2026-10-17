@@ -66,12 +66,14 @@ withDefaults(defineProps<{
   display: flex;
   flex-direction: column;
   gap: 10px;
-  /* 左栏宽度下限（2026-09-14）。el-col 的 25% 在 1920 视口 125% 缩放（→1536 CSS px）
-     下只剩 307px，而栏内两张表的列宽由内容决定（实测内在宽：范围对比 275px、
-     Site统计 319px）→ Gap/Unit、>Max 列在视口里直接看不到（见 table-zoom-fit.spec）。
-     取 385 = 最宽表 319 + 卡片内边距 30 + 余量 36（Yield 单元格随样本量变长）。
+  /* 左栏宽度下限。el-col 的 25% 在 1920 视口 125% 缩放（→1536 CSS px）下只剩 307px，
+     而栏内四张参考表的列宽由内容决定 → 列在视口里直接看不到（见 table-zoom-fit.spec）。
+     2026-10-17 起单元格一律单行（.dp-table-dense .cell{white-space:nowrap}），下限按
+     「最宽表的单行内在宽」定：Site统计 389px（11px 字号、Fail>0 行的 700 粗体口径）。
+     取 420 = 389 + 卡片内边距 18 + 余量 13（样本量到 6 位、Fail 到 4 位时还要再长）。
+     旧值 385 是按「允许换行」定的，那次实测内在宽 319 是 10px 字号时代的数。
      min-width 优先于 el-col 的内联 max-width:25%：窄视口保住下限，宽视口仍按 25% 走。 */
-  min-width: 385px;
+  min-width: 420px;
 }
 
 /* 视口窄到「左栏下限 + 图表」都放不下时改纵向堆叠（左栏整行、图表在下）。
