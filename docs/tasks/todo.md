@@ -4033,3 +4033,105 @@ EN_F 那组：跨度 0.0696 → 抖动 ±0.0021，连 symbol 半径（点径 4 �
   `data/view-data.spec.ts` 独占 slot 复跑转绿 ⇒ 判负载抖动；该文件本就有存量失败记录）；
   另 P0 跨其余模块 13 例全绿。⚠ 墙钟 12.3min 已过 §4 的 >12min 退化线，本轮含一次重试，
   记一笔但不据此改判据。
+
+---
+
+# 任务：dev 下「保存连接方式后黑屏」根因修复（2026-10-17）
+
+## 根因（三条独立证据，非推测）
+
+`restart-app` 是 `app.relaunch(); app.quit()`（`electron/ipc-handlers.ts:52`），而 `electron:dev` 用
+`concurrently -k` 起 vite + electron —— concurrently 9.2.4 文档原话「all commands are killed if one dies」，
+于是 **Electron 一退，vite 同组被杀**；relaunch 起来的新实例仍是 `ELECTRON_DEV=true`，照旧去加载
+`http://localhost:3000`（`electron/main.ts:330`），端口已无人监听 → `did-fail-load -102` →
+Chromium 错误页停在窗口底色 `#1a1a2e` 上 = 黑屏，且 `did-finish-load` 那段「保底 show」反而把它显示出来。
+
+1. `userData/logs/main.log`：14:58:51.480 `Client config saved` → .855 `App ready` → 54.504
+   `did-fail-load: -102 ERR_CONNECTION_REFUSED (URL: http://localhost:3000/)`；同签名 10-14/10-15 各现过。
+2. `netstat`：事发时 `:3000` 零监听。
+3. 进程树：黑屏 Electron 主进程的父进程已不存在，系统里无任何 vite/concurrently 残留。
+
+**影响面**：`restartApp()` 全仓两个调用点都会中招 —— `ConnectPage.vue:154`（连接方式）与
+`SystemPathsSettings.vue:192`（存储路径）。**只影响 dev**：打包版 `isDev=false` 走 `file://`，不依赖 3000。
+**当初批 4 冒烟没抓到**：那次是 `npx electron . --remote-debugging-port=9223` 手起，不在 `concurrently -k` 组里。
+
+## 实施清单
+
+- [x] **A** `frontend/package.json` 的 `electron:dev`：`-k` → `--kill-others-on-fail`
+      （quit 退出码 0 不再杀 vite）。**已确认的代价**：正常关窗后 vite 残留，要手动 Ctrl-C。
+      已跑 A/B 对照（两条命令只差这个开关，慢命令 1.5s 后写 marker）：`-k` 打印
+      `--> Sending SIGTERM to other processes..`、慢命令退出码 **1**、无 marker；
+      `--kill-others-on-fail` 下慢命令退出码 **0**、marker 落盘。**机制已实测，不是读文档推的。**
+- [x] **C1** 新建纯模块 `electron/load-failure.ts`（不 import electron，理由同 `net-probe.ts`：
+      拖 electron 类型进前端 tsconfig 会当场红）：`shouldShowLoadFailure` / `isAbsoluteBaseIndexHtml` /
+      `loadFailureHints` / `escapeHtml` / `buildLoadFailurePage` / `buildLoadFailureUrl`。
+      判据三条：只接主框架、放过 `ERR_ABORTED(-3)`、放过自家 `data:` 页。
+- [x] **C2** `main.ts`：`did-fail-load` 从「只写日志」改为按判据加载兜底页；`file://` 分支加载前先读
+      `index.html`，命中绝对 base 构建（`="/assets/`）就直接出诊断页 —— 那种形态是**静默黑屏零报错**
+      （lessons.md:1405-1408 记过），`did-fail-load` 抓不到它，必须前置判。
+      **顺带修一条相邻缺陷**：dev 分支的 `await win.loadURL(devUrl)` 没有 try/catch，加载失败会让
+      `createWindow()` 抛出 → `mainWindow` 永远是 null → 菜单与 `second-instance` 对着空窗口静默失效。
+      远端分支本来就有 try/catch，dev 分支补齐。**同类残留未动**：`file://` 分支末尾那句 `throw err`
+      还是原样（打包路径、且那句是刻意写的），本轮范围外，记在这里。
+- [x] **C3** T2 `frontend/test/unit/loadFailure.spec.ts` **23 例**：判据三拦截三放行（每条带单变量反向对照）、
+      错构建判据对两种真实产物形态各验一次 + 「只有绝对 `/favicon.svg` 不算坏」、转义承重（最坏输入）、
+      双主题两条 token、data: URL 无裸 `#`/换行/空格且解码可还原。
+- [x] 兜底页**真渲染看过**：`prefers-color-scheme` 两支各截一张（深色默认对齐 `#1a1a2e`、light 走媒体查询），
+      恶意输入页在真实浏览器里 `document.querySelectorAll('script').length === 0`、`img` 同为 0、
+      CSP `default-src 'none'` 在位、攻击串只作为文本出现在 `<code>` 里。
+- [x] 顺手把 `frontend/dist` 修回 Electron 正确形态：门禁要求跑 `npm run build`（绝对 base），
+      跑完立刻用 `VITE_ELECTRON=true npm run build` 刷回相对 base（实测 `src="./assets/..."`）。
+      **盘上原本是 13:24 那次普通构建留下的绝对 base**，即 lessons.md:1405 那个潜伏项当场成立的状态。
+- [x] 门禁：`npx vitest run` **234 例全绿**；`npx tsc -p ../electron/tsconfig.json --noEmit` 退出 0；
+      `npm run electron:build:ts` 产物含 `electron-dist/load-failure.js` 且被 `main.js` require；
+      `npm run build` 绿；`lint:e2e` 干净；`test:e2e:affected` → 判 GLOBAL → 全量池（结果见 Review）。
+
+## Review（2026-10-17 收盘）
+
+### 门禁账目
+
+| 门禁 | 实测 |
+|---|---|
+| vitest（T2） | **234 例全绿 / 15 文件 / 0.5s**（新增 `loadFailure.spec.ts` 23 例） |
+| Electron 编译 | `tsc -p ../electron/tsconfig.json --noEmit` 退出 0；`electron:build:ts` 产出 `load-failure.js`，`main.js:52` 已 require |
+| `npm run build` | 绿 906ms；随后 `VITE_ELECTRON=true npm run build` 835ms 刷回相对 base |
+| `lint:e2e` | 0 输出 |
+| `test:e2e:affected` | 判 **GLOBAL**（`frontend/package` 命中全量清单）→ 走 `e2e_pool --slots=auto` |
+| 全量池（干净那轮） | **391 例 · 墙钟 7.6min · 单价 3.24s/例 · 效率 2.61 · unexpected 3 · flaky 3 · skipped 22 · 真红 0 · 悬而未决 0 · 结论 MEASURED · EXIT=0** |
+| 端口释放 | 跑完 `21xxx/22xxx` 仅剩 `:22112` = ASUS `ROGLiveService.exe`（系统服务，非池进程） |
+
+- 两个红文件 `analysis/histogram-fail-bins` / `analysis/histogram-multiseries-clip` 独占 slot 复跑双双转绿，
+  **与本批无关且是登记在案的存量**：`todo.md:177`「老两位 flaky」、`todo.md:3986` 上一轮收口红的就是同两个。
+- 效率 2.61 低于 §4 的 ≥2.8 目标，但**本轮含复跑** —— 按「效率只在本轮没有重跑时判」这条，不作退化读。
+
+### 我自己造的一次污染（记下来，别学）
+
+第一次跑门禁时我以为它挂了（后台通知报了个 127），于是**又起了第二轮**，结果两轮池从 15:19 起并跑了约 9 分钟：
+第一轮实际是跑完了的，被污染的那轮数字是 `墙钟 11.6min · 效率 1.95 · flaky 8`，
+干净那轮是 `7.6min · 2.61 · flaky 3` —— **同一份代码，墙钟差 4min、flaky 差 5 个**。
+如果照第一次的结果收口，就会把「负载抖动」的账算到本批头上。
+被杀的第二轮还留下三个孤儿（`vite preview`、slot 后端 python、slot 的 playwright worker）占着
+`:21007/:22007`，是 `TaskStop` 只杀了 bash 外壳、没管它 spawn 的子孙 —— **停池类后台任务后要回查端口**。
+
+### 修完之后的行为差异
+
+- dev 下保存连接方式/存储路径 → 重启 → vite 活着 → 正常加载（A 档）。
+- 万一还是加载不上（vite 真没起、远端中途死掉、`dist` 缺文件）→ 窗口显示一张写明「尝试加载 / 原因 / 怎么办 / 日志路径」的诊断页，
+  而不是对着 `#1a1a2e` 的空窗口（C 档）。
+- 打包版误用绝对 base 的 `dist` → 加载前就拦下并给出 `VITE_ELECTRON=true` 的处置，不再是静默空白零报错。
+- **代价（用户已点定）**：dev 下正常关窗后 vite 不再自动退出，要手动 Ctrl-C。
+
+### 范围外、故意没动
+
+- `main.ts` `file://` 分支末尾那句 `throw err`：加载失败仍会让 `mainWindow` 为 null（与 dev 分支刚修的那条同形）。
+  打包路径、且那句是前人刻意写的，本批不越界；已在 lessons 与本节留痕。
+- `restart-app` 之后运行时镜像（`backendUrl` / `remoteUrlToLoad` / `startupRoute`）不刷新 —— 那正是「必须重启」的理由本身。
+- 主进程仍无驱动通路：本批把判据抽进 T2，但「保存→重启→真的连上」这条端到端只能靠 dev 手跑，
+  而**下一次给这类判据做验证时，必须在真实 `electron:dev` 组合下跑**（见 lessons 同日条目 ②）。
+
+## 边界（本轮刻意不做）
+
+- 兜底页用 `data:` URL 而不是新增打包资产：`electron-builder` 文件清单不用动（同批 4 选 `#/connect`
+  而不是 `mode-picker.html` 的理由）。
+- 不改 `remoteUrlToLoad` 等运行时镜像的陈旧问题（那是「为什么必须重启」的理由，不是缺陷）。
+- 不给 `restart-app` 加测试通路（主进程仍无驱动通路，判据已尽量抽进 T2）。
