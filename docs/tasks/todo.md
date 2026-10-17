@@ -90,7 +90,15 @@
 
 **共享工作区**：本轮期间另一会话在改 `SerialChart.vue` / `SingleParamTab.vue` /
 `serial-axis-range.ts`（未跟踪），它一度让 `npm run build` 红（`serialAxisRange.spec.ts` TS2322），
-我没有代它改、也没有 stash；它自行转绿后我才跑通构建。提交时**只逐文件 add 我这 8 个文件**。
+我没有代它改、也没有 stash；它自行转绿后我才跑通构建。提交时**只逐文件 add 我这 9 个文件**
+（`7f1539e`：7 个代码/用例 + 这两份台账）。
+
+**本轮刻意没 push（用户 2026-10-17 点定）**：`7f1539e` 的父提交正是那会话 11:12 提的
+`377263b`（序列分布 Y 轴），而它此刻仍在改 `SerialChart.vue`、还留着一个未跟踪的
+`_probe-serial-top.spec.ts` —— 那笔可能仍是半成品。`git push` 推的是整条链、摘不掉单挑，
+所以等 `377263b` 收口后两笔一起推。**下次推之前先 `git log --oneline origin/master..HEAD`
+逐笔确认**（口径见 `docs/reference/testing-gates.md` §6.5；通路走 `ssh.github.com:443`，
+`github.com:443` 本机仍是阻断的，别拿它的探测失败当「推不动」的结论）。
 
 ## 已知不做
 
