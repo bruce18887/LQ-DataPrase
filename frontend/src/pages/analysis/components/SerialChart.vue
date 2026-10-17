@@ -19,7 +19,7 @@ import { computed } from 'vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
 import { formatAxisValue, getSiteColors8, buildChartToolbox } from '../../../utils/chart-bar'
-import { resolveSerialYBounds } from '../composables/serial-axis-range'
+import { resolveSerialYBounds, jitterForPoint } from '../composables/serial-axis-range'
 import OutlierHintBar from './OutlierHintBar.vue'
 
 const props = withDefaults(defineProps<{
@@ -33,7 +33,9 @@ const props = withDefaults(defineProps<{
   opacity?: number
   /** 取值区间档位：决定规格限窗是否参与 Y 轴范围（见 serial-axis-range.ts） */
   rangeType?: string
-}>(), { splitBySite: false, symbolSize: 6, opacity: 0.85, rangeType: '' })
+  /** 纵向抖动：把同一量化电平上的点上下微移以显出层内密度（默认关） */
+  jitter?: boolean
+}>(), { splitBySite: false, symbolSize: 6, opacity: 0.85, rangeType: '', jitter: false })
 const { colors, isDark } = useEChartsTheme()
 
 // 大数据量（≥5000 点）启用 ECharts 官方 large 模式：每个系列只渲染 1 个
@@ -106,8 +108,10 @@ function buildOption() {
     if (a === 1) return null
     const y = a === 2 ? hi : (a === 3 ? lo : v)
     const x = typeof s === 'number' ? (serialIndex.get(s) ?? s) : s
+    // 抖动只加在绘制坐标上，realY 仍是真值 → tooltip / 导出读到的都是原始测量值
+    const jy = jitterForPoint(x, a, v, hi - lo, props.jitter)
     return {
-      value: [x, y, isFail ?? 0, a],
+      value: [x, typeof y === 'number' ? y + jy : y, isFail ?? 0, a],
       realY: v,
       realSerial: s,
       isFail: fail,
@@ -301,7 +305,7 @@ function buildOption() {
 // canvas 无 DOM 节点，官方推荐大数据散点必用 canvas）；小数据量跟随用户全局设置
 const { chartRef } = useChart(
   buildOption,
-  [() => props.data, () => props.outlierHandling, () => props.symbolSize, () => props.opacity, () => props.splitBySite, () => props.rangeType],
+  [() => props.data, () => props.outlierHandling, () => props.symbolSize, () => props.opacity, () => props.splitBySite, () => props.rangeType, () => props.jitter],
   'chartRef',
   () => (isLarge.value ? 'canvas' : getChartRenderer()),
 )

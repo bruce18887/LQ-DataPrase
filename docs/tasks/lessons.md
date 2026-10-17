@@ -16,6 +16,24 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-10-17 序列分布「点压成横线」定性：量化 + large 模式不累加透明度
+
+- **散点图变成一条条横线，先怀疑数据而不是图**：EN_F 那屏统计条是 Min 1.2200 / Max 1.2800 /
+  Mean 1.2468 / **Median 1.2500** / STD 0.0093 —— 全是 0.01 的整数倍，8876 颗落在 7 个离散
+  电平上（量程 0.06 V 只有 6 个 LSB）。判据就在界面上：`Median` 恰好等于某个刻度、
+  `Range` 是步长的整数倍。别去改渲染去"救"一张画对了的图。
+- **ECharts large 模式的密度可读性卡在 `BOOST_SIZE_THRESHOLD = 4` 这条边界上**
+  （`node_modules/echarts/lib/chart/helper/LargeSymbolDraw.js:51`，分支是 `size[0] < 4`）：
+  点径 **4** ⇒ 条件为假 ⇒ 整个系列 `buildPath` 成**一条 path 一次填充**，重叠点**不累加
+  透明度**；点径 **3** ⇒ 走 `afterBrush` 的逐点 `ctx.fillRect`，重叠**才会**加深。
+  本项目自动档恰好是「<5000→6 / ≤20000→4 / >20000→3」，于是**中等规模文件（5000–20000 点）
+  正是唯一看不出疏密的那一档**，而更大反而更小的文件能看出来。
+  规则：凡"调了透明度却看不出深浅"先查这里，别去怀疑 opacity 没生效。
+- **抖动幅度别做成"按数据量化步长自适应"**：想法是量出最小非零相邻间隔再取其 30%，
+  但真实日志混浮点噪声时最小间隔会退化到 1e-9 ⇒ 开关一开等于没开，且比固定值更难解释。
+  最终取**该 lane 可见跨度的固定 3%**，并用「相邻电平间距 > 带宽」反验算过不粘连；
+  代价是连续分布的数据也会糊 3% —— 所以默认关、由用户勾。
+
 ## 2026-10-17 序列分布顶部留白回收：一笔留白不能算两次
 
 - **报「省 N px」前先代入恒等式 `plotH = canvasH − grid.top − grid.bottom`**：我按
