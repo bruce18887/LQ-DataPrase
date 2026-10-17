@@ -2089,3 +2089,40 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   **只换后端端口是半个修复** —— 前端在非 slot 下 `reuseExistingServer`，会复用别人挂着的 vite，
   而那个 vite 的 proxy 指向别人的后端，于是用例种子写 `test/e2e-data`、服务读用户真实库，
   比 R3 那条「复用旧代码进程」更难归因。
+
+## 2026-10-16 深夜 真实样例被无关的 push 带上公开仓库：前向修复挡不住历史 blob，而"网络通了"不等于"能推"
+
+- **事故形状**：白天为修 CI 加的 `!/Data/SampleData/Gage/`（把 4 个真实 gage datalog 放开入库）本地提交后，
+  用户/另一会话在 23:00 推了一条**与它无关**的版本号提交，于是那笔真实数据被**连带公开**。
+  我随后做的 `43a5610`（改虚拟化夹具、把真实文件从树里摘掉）是**前向修复**——它改不了历史。
+  实测确认：强推重写后，分支链里 `c6b7bd8` 已不可达、新 master 上该路径 404，
+  但 `gh api .../contents/Data/SampleData/Gage/gage_m_S1.csv?ref=c6b7bd8` **仍返回 size 291657**。
+- **规则**：
+  ① **push 前必须 `git log --oneline origin/master..HEAD` 逐条看**。我此前只在本地核到"我这笔干不干净"，
+     没核"这条链会被推出去什么"。含他人未推送提交时，你的 push 会把它们一起公开。
+  ② 动过「本该不入库的目录」（`Data/`、`tasks/`、`.venv/`、密钥）的提交，要么别提交，要么 push 前重写历史摘掉。
+     绊线写进入库正文：`git log --diff-filter=A --name-only origin/master | grep -E '^Data/'` 应为空。
+  ③ **强推的安全流程**（本次跑通）：先 `git branch backup/<日期> master` → rebase 摘提交 →
+     **`git diff --stat backup/<日期> master` 必须 0 字节**（只动历史不动内容，这条比再跑一遍测试更强）→
+     `git push --force-with-lease=refs/heads/master:<服务端旧值>`。本次 12 条重写，内容差异 0。
+  ④ **强推 ≠ 撤回公开**。GitHub 上旧 blob 在 GC 前仍按 SHA 可达（本仓已实测）。要立刻抹除得提支持工单；
+     在工单生效前，按「已泄露」处理，不要对外说「已修复」。
+- **另一条方法论：重写过程一定会撞冲突，冲突解法要看"最终态"不是"这一笔"**。
+  `43a5610` 对 `.gitignore` 的改动是**删掉 `c6b7bd8` 加的那几行**，而重写里那些行压根没存在过 ⇒ 必冲突。
+  解法是取"该提交想要的最终内容"：`git checkout 43a5610 -- .gitignore`；
+  夹具 4 个 CSV 被 git 报成 `DU`（HEAD 里没有、提交里有改动），**留在树里的正是虚拟化版**
+  （按字节数与 `PAR0001`/无 `BPC86750` 实测确认），`git add` 保留即可。判据一律是实测字节，不是猜。
+- **诊断链：一次"网络不通"要分三层验，我前两层都判错过**。
+  ① TLS 层：`github.com` 出示的证书签发者是 `CN=SteamTools Certificate`（加速器本地中间人），
+     于是 Schannel 报 `CRYPT_E_NO_REVOCATION_CHECK`，而 Git 的 OpenSSL 后端报「取不到签发者证书」
+     —— 两条错误合起来才是"有人在中间人 + 本机装了它的根证书"的证据，单看一条会误判成证书坏了。
+  ② 关掉加速器后证书回到真 `Sectigo ... CA DV E36`，但 `github.com:443` **整机连不上**
+     （裸 TCP `/dev/tcp` 与 curl 同时失败）⇒ 说明加速器一直是唯一的通路。
+  ③ 应用层：`api.github.com` 通（`gh api` 正常）、`ssh.github.com:443` 通 ⇒ 最后走 SSH over 443 推成功。
+  **否证掉的两个假设**（都实测过，别重写一遍）：不是 git 配了死代理（`git config --list --show-origin` 与 env 里
+  根本没有 proxy，禁用后现象不变）；不是按程序放的防火墙规则（换成非 git 非 curl 的第三个进程做裸 TCP 一样连不上）。
+- **工具层小坑，本机专属**：`which cmd` 指向 `AppData\Roaming\npm\cmd`（npm 上同名包挡住了 `cmd.exe`），
+  我据此拿到的 `error: too many arguments` 是那个包报的，不是 winget/gh；
+  `git rev-parse --short A B` 多 rev 会报 `Needed a single revision`，要分开取；
+  PowerShell 内联命令里的 `$c[0]` 会被 bash 吃掉，凡是带 `$` 的 PS 一律写成 .ps1 文件再跑；
+  **python 探针在 cp936 控制台打 `✓` 会 `UnicodeEncodeError`** —— 这正是 `3694b86` 修的那类问题的镜像版。
