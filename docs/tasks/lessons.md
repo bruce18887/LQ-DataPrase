@@ -1963,3 +1963,41 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   动它之前整目录备份，动完跑 `pragma integrity_check`。
 - **密文字段是手工清除的边界**：`wiki_repo.current_document_structure`/`catalogue_think_content` 存的是
   `WikiEncrypted:` 串，改不了，只能靠重新生成覆盖 —— 报告里要把它单列成「没清掉的部分」，不能算已完成。
+
+## 2026-10-17 分析页表格「单元格单行」：一条写了两年从没生效的 CSS，和两次「绿的但不承重」
+
+- **EP 表格的 `:cell-style` / `:header-cell-style` 设在 `<td>` 上，文字装在内层 `<div class="cell">` 里**
+  （`table-column/render-helper.mjs` 用 `h("div",{class:"cell"},…)` 包一层）。EP 对 `.el-table .cell`
+  **直接命中**地声明了 `white-space:normal; overflow-wrap:break-word; line-height:23px; padding:0 8px`，
+  而「继承来的内联值」输给「任何直接命中的声明」⇒ 这四个组件里写了很久的
+  `:cell-style="{whiteSpace:'nowrap'}"` **一直是空转**，单元格照样换行、卡片高度随数据跳。
+  根因链：`table-layout="auto"` 只给 `min-width` ⇒ 列宽按每次的数据内容重分配，同样 15 字符的
+  Yield 在两个测试项下分别拿到 103px（拆两行）和 115px（单行）。
+  规则：**凡 `.cell` 自己声明过的属性（white-space / line-height / padding）都不能靠 cell-style 覆盖**，
+  要走具名工具类命中 `.el-table.dp-table-dense .cell`；`fontSize`/`td padding` 不在其列（实测生效）。
+  本文件 2026-09-14 段已为 `line-height` 记过一次同族坑 —— 同一条因果换个属性就会再踩，
+  沉淀时要把「哪一类属性」写全，不能只写那个属性名。
+- **反查截图建宽度模型，比读代码更能定死根因**：把两张截图按 1.25 缩放折算成 CSS px，用
+  「文本宽（按 Fail>0 行的 700 粗体）+ `.cell` 16 + td 8 + 边框 1」逐格算需要宽 vs 实得分宽，
+  **10 个格子的换行行为全部预测命中**（含唯一单行的 `99.767%(430)`）。规则：布局类归因先建
+  可算的模型、拿现场图反查命中，再动手；「内在宽」的算法要把粗体行算进去（`site-fail-row` 是 700）。
+- **「断言全绿」和「断言承重」是两件事，这轮差点被骗两次**：① 种子夹具样本量只有 4 位数，
+  **旧 CSS 下它同样不换行**，所以新加的单行断言全绿却零承重；② 只把 Yield 一列撑宽也测不出来 ——
+  auto 布局会让其余四列退回各自 `min-width` 让位，旧口径仍 1 行，**必须整行同时变宽**。
+  规则：布局/样式类断言必须自带**对照组**（运行时注入旧 CSS 再量一次）+ **合成最宽内容**，
+  并把「这一档没触发」如实写进 `test.info().annotations`（沿用 (cut) 覆盖率注解那套口径）。
+  做对照用运行时 `<style>` 注入 + 复原，**不要去改坏源码来证明承重**（见 2026-10-16 相关条目）。
+- **`style.zoom` 下别用像素常量做阈值**：给 `<html>` 设 `zoom=1.25` 时 `getBoundingClientRect()`
+  返回缩放后的值、`getComputedStyle().lineHeight` 不返回 ⇒ 单行实测 23px（=18×1.25）。写死
+  「≤27px 算单行」在 150% 档就会假失败。规则：判「几行」用 `高 ÷ computed line-height` 的**比值**。
+- **覆盖面不能交给环境状态，「扫到 ≥N 张」这种守卫会静默漏测**：sweep 遍历「左栏所有挂了
+  工具类的表」，但 QQ图/箱线图两张卡是 `v-if` + **账号级图表记忆**（`loadChartMemory` 恢复勾选）
+  决定的 —— 单跑文件时它们不存在，两张就满足 `>=2`，等于这条 sweep 没测；全量池里同 slot 的
+  前一条用例开过，它才扫到箱线图并抓出真红。规则：要钉住覆盖面就在用例里 `ensureChartToggles`
+  显式开，并**按标题点名要求**（缺一张就红），收尾只还原本用例自己翻动过的 key。
+- **池的「独占 slot 复跑判级」对状态依赖型用例会洗白确定性红**：上面那条真红在全量轮 3 次
+  retry 都是同一个数（12px），独占复跑却绿了 ⇒ 被判「负载抖动」放行。规则：红项**逐次数值完全
+  一致**就是确定性信号，别接受抖动判定；复跑判级前先想「复跑环境丢了什么状态」。
+- **共享工作区里别人的在飞改动会挡住你的构建**：本轮 `npm run build` 红在另一会话未跟踪的
+  `test/unit/serialAxisRange.spec.ts`（TS2322）。规则：不代它改、不 stash、不动它的文件；
+  `git status` 先分清哪些是我的（本轮 8 个），等它自绿再跑；提交逐文件 add。
