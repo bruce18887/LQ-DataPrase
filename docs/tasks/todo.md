@@ -3710,3 +3710,48 @@ A 不报、B（关键词在预算之外）照旧报。**预算必须取到 `CHUN
   跑完 slot 端口无 LISTENING 残留
 - 未 push：本机 master 领先 `origin/master` 11 笔（含另一会话的 2 笔）
 
+---
+
+# 任务：清除三个已外迁子项目在本仓库里的残留引用（2026-10-17）✅
+
+用户指令：「清除当前项目里关于 DataPrase-ExcelAddin、DataPrase-SFTP Searcher、DataPrase-LightVBA 的内容」。
+三个目录早已移到仓库同级（`Desktop\DataPrase\`），源码在 `9f9e67e` 就已从 git 摘除，本次清的是**引用痕迹**。
+范围经用户点定为 T1-T4 全清，另加两项中途扩面（见下）。
+
+## 实施清单
+
+- [x] **T1 门禁解耦**：`scripts/affected-rules.mjs` 删三条子项目前缀 + 说明注释；
+      `e2eAffectedDecide.spec.ts` 删两个专用用例与假阳性数组第 3 例（7→6）。
+      验证：`npx vitest run` 该 spec 17 例 + 前端单测全套 192 例全绿；编排器 `--dry-run` 两条自证打印判定正确。
+- [x] **T2 入库文档**：todo.md 删两段实录（约 510 行）与一条失效账目；lessons.md 删 11 条加载项/VBA 条目（212 行）；
+      评审范例改引仍存在的「删代码五条取证规则」；SFTP 搜索 spec/plan 只摘外部归属，本项目取舍一句没删。
+- [x] **中途扩面 1**：SFTP 搜索 spec/plan 的「参考工具」引用实测 23 处（原估 3 处），逐条改写为中性表述。
+- [x] **中途扩面 2**：活代码注释里还有 19 处外部归属（`apps/sftp/search/` 九处 + `test/backend/` 十处）+ plan 三段示例
+      docstring，经用户点头一并改成中性说法；判据文本一条没删。
+      验证：`test_sftp_*` 等 14 个后端模块 **349 例 OK（16.5s）**；`py_compile` 九个文件全过。
+- [x] **T3 未跟踪杂物**：`tasks/` 下 15 个加载项专属文件（xll 备份 697KB + 探针脚本与输出 + MSBuild 日志）移出库外隔离。
+- [x] **T4 知识面**：`.qoder/repowiki/` 删 3 个模块卡目录 + 3 张整页 + 混合页引用与专属章节，
+      `_index.yaml`/`_module.yaml`/父卡摘除三个模块，4MB `repowiki-metadata.json` 过滤后重解析通过。
+- [x] **T5 真正的检索源**（用户点定直改 SQLite）：`~/.qoder-cn/qoder-knowledge/knowledge-LQ-DataPrase-*/` 下
+      cards 删 2 module + 10 card + 10 module_card + 1 relation，wiki 删 3 section + 洗 4 个混合页，
+      vectors 删 137 unit_text + 19 条孤儿向量；`~/.qoder-cn/knowledges/` 镜像同步删 3 张卡并修 index/README。
+
+## 验证账目
+
+- 仓库内：三个专名 + 「加载项 / 参考工具」等别名 + 外部原型文件名 全文检索 **0 命中**。
+- 知识面：四个面（两个文件树 + 三个库）用同一宽松式复查 **0 命中**；三库 `pragma integrity_check` 均 `ok`；
+  规模 module 11 / card 54 / section 182 / unit_text 4364 / vector 4303。
+- `SearchKnowledge` 复验：同一查询词只回本项目模块，不再注入「Excel 加载项 / LightVBA」——这才是判定标准。
+- 误伤反查：拿备份逐行比对被删内容，确认每一行都真含专名（`AddIn`+`i` 会命中 adding、`dataprase\.` 会命中
+  `lq_dataprase.spec`，这两条正则都改过才敢下手）。
+
+## 仍开着的（都不阻塞，且刻意没动）
+
+- `wiki_repo.current_document_structure` 与 `catalogue_think_content` 两个字段是 `WikiEncrypted:` 密文，
+  手工改不了；里面的旧页面标题要靠**重新生成 Repo Wiki** 才会消失。
+- **本机 Excel 仍注册着那个 xll**（只读实测）：`HKCU\...\Excel\Options\OPEN = /R "%APPDATA%\Microsoft\AddIns\DataPrase\DataPrase-AddIn64.xll"`，
+  该目录下 xll 711,680B + DataPrase.Core.dll 25,088B。它在项目外，未动。
+- `.codegraph/` 索引仍挂着已删目录的监视路径，会自动重建，未动。
+- 隔离目录 `Desktop\DataPrase\purged-from-LQ-DataPrase-2026-10-17\`：`tasks/` 15 个文件、
+  `repowiki-before-T4/`（8.8MB 导出快照）、`qoder-knowledge-before-T5/`（30MB 三个库的备份）。
+  确认无误后整目录 `rm -rf` 即可彻底了断；未 push。
