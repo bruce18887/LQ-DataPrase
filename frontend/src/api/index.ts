@@ -179,6 +179,13 @@ api.interceptors.response.use(
       | (AxiosRequestConfig & { _retry?: boolean })
       | undefined
 
+    // 自己中止的请求**不是错误**：既不提示，也不写 console.error。
+    // 少了这一早退，「连切测试项把上一个在途请求 abort 掉」这个正常动作会被
+    // formatError 映射成「无法连接服务器，请检查网络」（utils/error.ts:72 那条，
+    // 被 test/unit/error.spec.ts:30-31 钉着）——而无 console.error 是 P0 冒烟
+    // 「/analysis 无控制台错误」判据的前提（见 frontend/e2e/README.md 已知问题#3 同族）。
+    if (axios.isCancel(error)) return Promise.reject(error)
+
     console.error(
       `[api] Request failed: ${error.config?.method?.toUpperCase() ?? 'GET'} ` +
         `${error.config?.url ?? '(unknown url)'} - ` +

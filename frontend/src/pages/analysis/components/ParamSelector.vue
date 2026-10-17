@@ -73,8 +73,6 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   'update:selectedParam': [value: string]
-  prev: []
-  next: []
 }>()
 
 const filterText = ref('')
@@ -162,6 +160,8 @@ function onParamChange(val: string) {
   emit('update:selectedParam', val)
 }
 
+/** ◀上一个/下一个▶：推进逻辑只有这一份（父组件曾经还有一份同逻辑副本，
+ *  与这里的 emit 叠成「点一次跳两项」，2026-10-17 删掉）。 */
 function onPrev() {
   const idx = props.params.indexOf(props.selectedParam)
   if (idx > 0) {
@@ -169,7 +169,6 @@ function onPrev() {
   } else if (props.params.length > 0) {
     emit('update:selectedParam', props.params[props.params.length - 1])
   }
-  emit('prev')
 }
 
 function onNext() {
@@ -179,7 +178,6 @@ function onNext() {
   } else if (props.params.length > 0) {
     emit('update:selectedParam', props.params[0])
   }
-  emit('next')
 }
 </script>
 

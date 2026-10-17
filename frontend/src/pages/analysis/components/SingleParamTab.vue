@@ -14,8 +14,6 @@
           v-model:selected-param="localSelectedParam"
           popper-class="dp-param-popper-single"
           inline
-          @prev="prevParam"
-          @next="nextParam"
         />
         <div class="chart-toggles">
           <el-checkbox v-model="showHistogram" size="small">显示直方图</el-checkbox>
@@ -501,23 +499,11 @@ watch(fileId, () => {
 })
 
 // ========== Param navigation ==========
-function prevParam() {
-  const idx = params.value.indexOf(localSelectedParam.value)
-  if (idx > 0) {
-    localSelectedParam.value = params.value[idx - 1]
-  } else if (params.value.length > 0) {
-    localSelectedParam.value = params.value[params.value.length - 1]
-  }
-}
-
-function nextParam() {
-  const idx = params.value.indexOf(localSelectedParam.value)
-  if (idx < params.value.length - 1) {
-    localSelectedParam.value = params.value[idx + 1]
-  } else if (params.value.length > 0) {
-    localSelectedParam.value = params.value[0]
-  }
-}
+// ◀上一个/下一个▶ 的推进逻辑**只在 ParamSelector.onPrev/onNext 里有一份**。
+// 这里此前还有一份同逻辑的 prevParam/nextParam，并通过 @prev/@next 接上——
+// 而子组件在同一次点击里既 emit 了 `update:selectedParam`（已经改过参数）
+// 又 emit 了 `prev`/`next`（父组件再改一次）⇒ **点一次跳两项**，在 1,702 个
+// 测试项的文件上等于每次浏览都漏掉一项。删掉父组件这份副本。
 </script>
 
 <style scoped>

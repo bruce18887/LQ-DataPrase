@@ -1,6 +1,7 @@
 import { watch, ref, type Ref } from 'vue'
 import api from '../../../api'
 import { useAsyncData } from '../../../composables/useAsyncData'
+import { useCoalescedCall } from '../../../composables/useCoalescedCall'
 
 export function useSerialDistribution(
   getSelectedFileId: () => number | null,
@@ -23,7 +24,7 @@ export function useSerialDistribution(
 ) {
   const { data: serialDistData, error: serialError, run } = useAsyncData<any>({ silent: true })
 
-  async function loadSerialDistribution() {
+  async function loadSerialDistributionNow() {
     const fileId = getSelectedFileId()
     // 未真正发请求的分支也要清错误态，否则旧 serialError 横幅会一直挂着
     serialError.value = null
@@ -38,7 +39,7 @@ export function useSerialDistribution(
       serialDistData.value = null
       return
     }
-    await run(() => api.post('/analysis/serial_distribution/', {
+    await run((signal) => api.post('/analysis/serial_distribution/', {
       file_id: fileId,
       param: localSelectedParam.value,
       chart_config: chartConfig.value,
@@ -52,8 +53,11 @@ export function useSerialDistribution(
       // 敏感度在**发请求时**实时读 ref（不是挂载时快照）。后端本端点
       // 此前连 parse_filter_flags 都没调，异常值栅栏写死 1.5，现已贯穿。
       iqr_multiplier: iqrMultiplier.value,
-    }))
+    }, { signal }))
   }
+
+  // 连切测试项时只发第一次与最后一次（与 useHistogram 同档；理由见 useCoalescedCall）
+  const loadSerialDistribution = useCoalescedCall(loadSerialDistributionNow, 150)
 
   // 「显示序列分布」勾选 → 立即拉取；取消勾选不主动清空（组件不渲染即隐藏），
   // 再勾回时若数据已在则复用，避免重复请求（与 useQQPlot enabled 口径一致）

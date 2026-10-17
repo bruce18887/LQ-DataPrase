@@ -1,6 +1,7 @@
 import { ref, watch, computed, type Ref } from 'vue'
 import api from '../../../api'
 import { useAsyncData } from '../../../composables/useAsyncData'
+import { useCoalescedCall } from '../../../composables/useCoalescedCall'
 import { useThemeStore } from '../../../stores/theme'
 
 export function useHistogram(
@@ -41,7 +42,7 @@ export function useHistogram(
   const showKde = computed(() => chartConfig.value.includes('kde'))
   const kdeIncludeFail = computed(() => chartConfig.value.includes('kde_full'))
 
-  async function loadHistogram() {
+  async function loadHistogramNow() {
     const fileId = getSelectedFileId()
     // 未真正发请求的分支也要清错误态，否则切文件/清空参数后旧横幅会一直挂着
     histError.value = null
@@ -55,7 +56,7 @@ export function useHistogram(
       lastResults = null
       return
     }
-    const result = await run(() => api.post('/analysis/histogram/', {
+    const result = await run((signal) => api.post('/analysis/histogram/', {
       file_id: fileId,
       params: [localSelectedParam.value],
       ignore_no_limit: ignoreNoLimit.value,
@@ -69,7 +70,7 @@ export function useHistogram(
       only_low_cpk: onlyLowCpk.value,
       include_kde: showKde.value,
       kde_variant: showKde.value ? (kdeIncludeFail.value ? 'all' : 'filtered') : null,
-    }, { silent: true }))
+    }, { silent: true, signal }))
     if (result?.results) histogramUpdateView(result.results as Record<string, any>)
   }
 
@@ -144,6 +145,11 @@ export function useHistogram(
       { label: `6 Sigma${cutSuffix}`, low: s6min?.toFixed(5) ?? '-', high: s6max?.toFixed(5) ?? '-', gap: s6Gap, unit },
     ]
   }
+
+  // 连点「下一个」/连切参数时只发第一次与最后一次（策略与理由见 useCoalescedCall）。
+  // 包在**这个函数**外面而不是 useAsyncData 里：上面那句 `histogramUpdateView` 是
+  // 响应落地的唯一入口，合并到 run() 那一层会让补发那一趟的图表更新丢掉。
+  const loadHistogram = useCoalescedCall(loadHistogramNow, 150)
 
   watch(isDark, () => {
     if (lastResults) histogramUpdateView(lastResults)
