@@ -120,18 +120,63 @@ CI 跑的是**干净检出**，本机绿不代表它绿。这三条都是「本�
   漏了 `test/__init__.py` ⇒ CI 检出里 77 个测试文件都在、`import test.backend` 却失败
   （`ModuleNotFoundError` 逐字可复现：只造 `test/backend/__init__.py` 而不造 `test/__init__.py`）。
 - **对被忽略的目录，git 不会往下找例外**。`/Data/` + `!/Data/SampleData/Gage/` 这个组合**不生效**，
-  必须先 `/Data/*` → `!/Data/SampleData/` → `/Data/SampleData/*` → `!/Data/SampleData/Gage/` 逐级放开。
-  验收判据是 `git status --porcelain --untracked-files=all` 的**条数恰好等于放开的文件数**
-  （本次改前 0 → 改后 4），不能只看目标文件出现了。
+  必须逐级 `/Data/*` → `!/Data/SampleData/` → `/Data/SampleData/*` → `!/Data/SampleData/Gage/`。
+  （本仓**最终没走这条路**，见下面「夹具虚拟化」——但这条 gitignore 语义本身是成立的事实，
+  将来真要放开某个子树时用得上。）验收判据是 `git status --porcelain --untracked-files=all` 的
+  **条数恰好等于放开的文件数**，不能只看目标文件出现了。
+  ⚠ 与之相对，`!/test/fixtures/` **一条就够**：`/test/*` 里的 `*` 不跨 `/`，只挡一层
+  （本仓 `!/test/backend/` 能跟踪 76 个文件即同例）。两种情形易混，判据是实测条数，不是感觉。
 - **测试期望值里别写死路径分隔符**。前端 job 在 ubuntu，实现用 `path.join` 产出 `/`，
   而夹具根路径是字符串字面量 ⇒ 断言整条串必挂。断**basename**或两边都用 `path.join` 构造。
   跨平台断言的验算办法：把 `path.win32` 与 `path.posix` 各跑一遍同一条公式，
   posix 下算出的值应当**与 CI 报的 Received 逐字相同**，这才叫复现。
-- 样例夹具缺了要**显式 skip**，别让它 error：`apps/dashboard/tests.py:284`、`apps/export/tests.py:52`
-  对 `SampleData/CTA8280F` 就带 `skipUnless(os.path.exists(...))`，在 CI 上算 skip 不算红。
+- **子目录没有 `__init__.py` 就不被收集**。`test/backend/batch_report/` 缺包标记，
+  那 160 例从来没进过「后端全量」的账（`DiscoverRunner` 不递归非包目录，Python 3.11+ 起尤严）。
+  想让它进账就补 `__init__.py`——注意那文件 `import pytest`，而 `requirements/base.txt` 没有 pytest，
+  补了就是新的 CI 红。
+- 样例夹具缺了要**显式 skip**，别让它 error：`apps/dashboard/tests.py:165`、
+  `apps/export/tests.py:182/269/397`、`apps/export/tests_chart_dpi.py:94` 对 `SampleData/*`
+  带 `skipUnless(os.path.exists(...))`，在 CI 上算 skip 不算红。
+- **起子进程的解释器别写死 `.venv`**。`.venv/` 不入库 ⇒ 干净检出（含 GitHub runner）里两档候选
+  都不存在，`subprocess` 在 `Popen` 处 `FileNotFoundError: [WinError 2]`。
+  正确做法是最后回退 `sys.executable`（`test_server_settings_profile.py:27-35`）。
+  这 10 条以前不红只是因为 `test/__init__.py` 缺失让整个 `test.backend` 没被收集 —— **解禁旧遮蔽会带出新红，属正常，不是回归**。
 
-⚠ 放开 `Data/SampleData/Gage/` 入库等于把机台 datalog 头（内部路径、主机名、账号）放进**公开仓库的历史**。
-推之前先确认这几个字段可见，或先把仓库转 private。
+### 虚拟化夹具（真实 datalog 不入库的正解）
+
+真实 `Data/SampleData/Gage/` 含内部绝对路径、机台主机名、内部账号与产品代号，而仓库是**公开**的。
+所以不给它开入库口子，而是用 `scripts/make_gage_ci_fixture.py` 派生 `test/fixtures/gage/`：
+332 个测试项名**按位次**换 `PAR0001..PAR0332`（真实名中 48 个互为前缀，按串替换会互啃）、
+料号家族与路径换假值但保住 `B<字母><数字>` 整词 + `_FT` token 与同样的目录层级/扩展名
+（`parsers/cta8290d.py` 从 `TestFile` 的 basename 推 product_code/stage）。
+**原样保留**：全部数值、行数、`[Data],` 位次、13 个系统列名、`Unit/Min/Max` 三行、
+`CTA8290DPlus`（`base.py:70` 靠小写子串 `cta8290d` 判格式）、`LotID`、`Tester_ID=140000`
+（S1 出现 15 次、14 次是数据值 `1.140000` 的巧合，禁止全文替换）。
+
+- 两个无守卫的模块（`apps/batch_report/tests.py`、`apps/buyoff/tests.py`、`apps/gage/tests.py`，共 15 例）改指夹具；
+  带 `skipUnless` 的仍指真实样例，CI 上继续 skip。
+- 夹具入库必须配 `.gitattributes` 的 `test/fixtures/gage/*.csv -text`：
+  本仓只有 `core.autocrlf=true` 这一半，Linux 检出会把 CRLF 变 LF、每文件少 534 字节，而行尾形态是解析承重项。
+- **派生脚本与 MANIFEST 里禁止出现真实标识符字面量**：第一版把料号/主机名/内部路径写成「禁止残留串」常量表、
+  又把 332 条真实名→假名映射写进 `MANIFEST.txt`，而这两者都要入库 —— 等于把刚虚拟化掉的东西再发布一遍。
+  现在禁止串运行时从真实输入现取，映射只按需 `--emit-mapping <Data/ 下的路径>` 导出（那儿不入库）。
+
+## 6.5 push 之前的历史自检（2026-10-16 事故）
+
+真实 gage CSV 曾被一笔「放开 `/Data/` 入库」的提交带进历史，随后**被一条无关的 `git push` 一起推上公开仓库**。
+前向修复（把文件从树里摘掉）**挡不住这个**：blob 还在历史里，按 commit SHA 可直接取。
+
+1. **push 推的是整条链，不是「我这一笔」。** 提交前要跑 `git log --oneline origin/master..HEAD`
+   逐条看会被带出去什么——里面常有别人未推送的提交。
+2. 凡动过「本该不入库的目录」（`Data/`、`tasks/`、`.venv/`、密钥类）的提交，
+   **要么别提交，要么在 push 前重写历史摘掉**，不能指望后续删除补救。
+   绊线：`git log --diff-filter=A --name-only origin/master | grep -E '^Data/'` 应为空。
+3. **重写后强推要先验内容、再带 lease**：`git diff --stat <备份ref> master` 必须 0 字节（只动历史不动内容）；
+   `git push --force-with-lease=refs/heads/master:<服务端旧值>`。本仓 12 条重写后内容差异为 0。
+4. **强推不等于撤回公开。** 已核实：分支链里 `c6b7bd8` 已不可达、新 master 上该路径 404，
+   但按旧 SHA 请求 `Data/SampleData/Gage/gage_m_S1.csv` **仍返回 size 291657**（游离提交未被 GC）。
+   服务端只剩 `refs/heads/master` 一个引用，没有分支/PR 钉住它，所以 GC 后会自动消失；
+   在此之前按「已泄露」处理，不要按「已修复」处理。要立刻抹除得提 GitHub 支持工单。
 
 ## 7. 未闭环（截至 2026-10-16）
 
