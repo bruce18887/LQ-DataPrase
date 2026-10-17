@@ -62,7 +62,6 @@ export interface BrowseParams {
   datafile_id: number
   page?: number
   page_size?: number
-  search?: string
   pass_filter?: string
   site_filter?: string
   /** ag-grid sortModel JSON 字符串（IRM 服务端排序） */
@@ -87,7 +86,7 @@ export interface BrowseResponse {
   page: number
   page_size: number
   total_pages: number
-  /** 当前筛选集（search/pass/site）内的 fail 行数（IRM 下前端无法本地计算） */
+  /** 当前筛选集（pass/site/filter_model）内的 fail 行数（IRM 下前端无法本地计算） */
   fail_row_count: number
   col_meta: Record<string, BrowseColMeta>
   bin_column: string

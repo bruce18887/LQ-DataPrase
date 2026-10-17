@@ -186,11 +186,26 @@ class BrowseApiTests(TestCase):
         resp = self._browse(page_size=99999, pass_filter='FAIL')
         self.assertEqual(resp.json()['total'], 5)
 
-    def test_search_filters_rows(self):
-        """search 全文过滤：'5000' 只命中 row5（KELVIN_VIN=5000.0）。"""
+    def test_search_param_rejected(self):
+        """``search`` 全文过滤已从本端点删除（2026-10-17 P1-5）。
+
+        删它的原因：275MB 文件上实测 16.2s，且全仓没有调用方——查看数据的真实
+        筛选走 ag-grid IRM 的 ``filter_model``（逐列，实测 152ms/块）。
+        必须回 400 而不是静默忽略：静默会让直连调用方以为筛过了，实际拿到的是全表。
+        """
         resp = self._browse(page_size=99999, search='5000')
-        self.assertEqual(resp.json()['total'], 1)
-        self.assertEqual(resp.json()['data'][0][0], 5)
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()['code'], 'unsupported_param')
+
+    def test_empty_search_param_also_rejected(self):
+        """判据是「参数存在」而不是「参数非空」：``?search=`` 同样 400。
+
+        钉住这条是因为两种写法都能让上一条绿，但语义不同 —— 按存在拒绝才是
+        「这个参数在本端点上不存在」；前端 ``cleanParams`` 会剥掉空串，所以
+        真正的 UI 调用方不受这条规则影响。
+        """
+        resp = self._browse(page_size=99999, search='')
+        self.assertEqual(resp.status_code, 400)
 
     def test_pagination_slice(self):
         resp = self._browse(page=2, page_size=3)
@@ -277,7 +292,8 @@ class BrowseApiTests(TestCase):
         self.assertEqual(self._browse(**base, site_filter='2').json()['fail_row_count'], 1)
         self.assertEqual(self._browse(**base, pass_filter='PASS').json()['fail_row_count'], 0)
         self.assertEqual(self._browse(**base, pass_filter='FAIL').json()['fail_row_count'], 5)
-        self.assertEqual(self._browse(**base, search='5000').json()['fail_row_count'], 1)
+        # 原第五条用 ``search='5000'`` 表达「fail_row_count 在筛选集内算」，
+        # search 删除后这三条组合已足够表达同一语义，不再另加素材。
 
     def test_page1_carries_site_options_and_numeric_columns(self):
         body = self._browse(page_size=100).json()
