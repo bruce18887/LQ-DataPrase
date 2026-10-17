@@ -105,13 +105,10 @@
             v-else-if="serialDistData"
             :data="serialDistData"
             :outlier-handling="outlierHandling"
-            :serial-col="serialCol"
-            :serial-candidates="serialDistData.serial_candidates || []"
             :split-by-site="splitBySite"
             :symbol-size="effSize"
             :opacity="effOpacity"
             :range-type="rangeType"
-            @update:serial-col="(v: string) => { serialCol = v }"
           />
           <el-empty v-else description="当前参数无序列分布数据，请选择其他参数" />
         </template>
@@ -146,8 +143,29 @@
           </div>
         </template>
 
-        <!-- 序列分布专属控件（齿轮）：按 Site 拆分 / 点径 / 透明度 -->
+        <!-- 序列分布专属控件（序列列选择器 + 齿轮）：按 Site 拆分 / 点径 / 透明度在齿轮里。
+             选择器 2026-10-17 从图体内上提到这里：它原先独占一行 32px，而面板头才是
+             一图专属控件的既定位置（直方图柱宽、箱线控件都在这儿）。 -->
         <template #controls-serial>
+          <div
+            v-if="showSerialColSelector"
+            class="serial-col-selector"
+          >
+            <span class="serial-col-selector__label">序列列</span>
+            <el-select
+              :model-value="activeSerialCol"
+              size="small"
+              class="serial-col-selector__select"
+              @update:model-value="(v: string) => { serialCol = v }"
+            >
+              <el-option
+                v-for="c in serialDistData?.serial_candidates || []"
+                :key="c"
+                :label="c"
+                :value="c"
+              />
+            </el-select>
+          </div>
           <ChartSettingsPopover
             popper-class="dp-serial-settings-popper"
             testid="serial-settings-btn"
@@ -286,7 +304,7 @@ useTabFileParams({
 // 直方图勾选（默认勾选；取消即关闭面板，2026-09-13 由常驻改为可关闭）
 const showHistogram = ref(true)
 // 序列列手动选择（空串 = 自动检测）；多候选文件（Serial_No + Dut_No）由
-// SerialChart 选择器写入，文件切换时重置回自动检测
+// 面板头的选择器写入，文件切换时重置回自动检测
 const serialCol = ref('')
 // 序列分布由「显示序列分布」勾选驱动（原 chartMode==='serial' 互斥模式已移除），
 // 勾选后序列图叠加显示在直方图下方，与 QQ/箱线共存
@@ -344,6 +362,13 @@ const {
   customLow,
   customHigh,
 )
+
+// 面板头的序列列选择器：多候选（Serial_No 与 Dut_No 并存等）才出现，
+// 显示值 = 显式选择优先，否则回退后端自动检测结果
+const showSerialColSelector = computed(
+  () => (serialDistData.value?.serial_candidates?.length ?? 0) > 1)
+const activeSerialCol = computed(
+  () => serialCol.value || serialDistData.value?.serial_col || '')
 
 // 序列图设置（点径/透明度/按 Site 拆分）：状态由本组件持有，齿轮面板与图表共用同一份
 const {
@@ -544,6 +569,26 @@ function nextParam() {
   align-self: start;
   margin: 16px;
   height: auto;
+}
+
+/* 面板头的序列列选择器：slot 内容带本组件 scope，样式留在本文件。
+   原在 SerialChart 图体内独占一行（24+8=32px），2026-10-17 上提到 .chart-h__controls。
+   宽度从 200 收到 150 让位给齿轮；面板头挤不下时先缩 .chart-h__title（它有
+   overflow:hidden + ellipsis，自动最小尺寸=0），控件与被裁的按钮顺序不受影响。 */
+.serial-col-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.serial-col-selector__label {
+  font-size: var(--p-fs-dense);
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+}
+.serial-col-selector__select {
+  width: 150px;
+  max-width: 100%;
 }
 
 /* 箱线图宿主：为加载骨架提供定位上下文，并铺满面板 */

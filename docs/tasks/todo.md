@@ -3932,3 +3932,57 @@ lane 从此共享同一对最小限值，跨 Site 的纵向刻度第一次可比
 - ⚠ 复跑时 `npm run lint:e2e` 报 `e2e/analysis/table-zoom-fit.spec.ts(267,9) TS2552
   Cannot find name 'expectWidestYieldStaysSingleLine'` —— 同工作区另一会话的未提交中间态，
   不属本批；本批改动在 10:52 与 10:53 两次 `lint:e2e` 均 0 输出。
+
+# 任务：序列分布顶部留白回收（2026-10-17 第二批）
+
+> 用户第二张截图圈出「序列分布上方一大片空间没利用」。先量后改：临时 DOM 探针实测
+> 面板头底 → 绘图区顶 = **90px**，构成 选择器行 32（24+8 margin）+ `title.top` 15
+> （ECharts 默认，拆分模式已显式写 4、合并模式漏写）+ 标题/副标题 ≈42；
+> 画布净高 320、`grid.top 58 + grid.bottom 68` ⇒ **绘图区只有 194px（占画布 61%）**。
+
+## 改动（三处，不丢信息）
+
+- 序列列选择器从 `SerialChart` 图体内上提到 `ChartPanel` 的 `controls-serial` 槽，
+  与齿轮同排（直方图柱宽、箱线控件本来都在那儿）→ 画布长高 32px。
+  `SerialChart` 随之删掉 `serialCol`/`serialCandidates` 两个 prop 与 `update:serialCol`
+  事件（选择器状态本就在父级），`.serial-header` 那行 DOM 与其样式一并搬走。
+- 合并模式补 `title.top: 4`（对齐拆分模式已有的 4）。
+- `grid.top` 58 → 48（标题块实测占 4+17+10+15 ≈ 46，留 2px）。
+
+## 实测差值（探针复跑，同一 fixture / 同一 dock 布局）
+
+| | before | after |
+|---|---|---|
+| 面板头底 → 绘图区顶 | 90px | **48px** |
+| 绘图区净高 | 194px | **236px（+21.6%）** |
+| 画布高 | 320px | 352px |
+| `grid.top` / `title.top` | 58 / 15 | 48 / 4 |
+| 选择器在面板头 / 旧 `.serial-header` 残留 | — | 1 / 0 |
+
+1600 / 1440 / 1280 三档：`controls.scrollWidth − clientWidth = 0`（无横向溢出）、
+关闭按钮右缘距面板右缘 9px（未被 `overflow:hidden` 裁掉）、纵向数字三档一致。
+
+## 我报错过一次
+
+方案段承诺「省 53px」，实际 42px —— 把 `title.top` 的 11px 与 `grid.top` 的 10px 当两笔
+独立收益加了，而 `grid.top: 58` 本来就含 `title.top: 15`。因果与恒等式已写进
+`lessons.md` 同日段。
+
+## 这轮明确没动
+
+`grid.bottom: 68` 装 45° 序列号标签 + 轴名（`nameGap: 30`）+ 图例（`bottom: 5`），
+压它容易裁标签，且用户问的是上方。要压得单独一轮量。
+标题文本（`<param> Serial分布`）与面板头「序列分布」有语义重复，去掉 ECharts 标题可再省
+约 20px，但那是改信息展示，留给用户点。
+
+## 验证账目
+
+- `npm run build`（vue-tsc -b + vite）通过；`npx vitest run` 14 文件 204 例全绿。
+- `npm run lint:e2e` 0 输出。
+- `analysis/serial-no-column.spec.ts` 全 10 例绿（含「多候选序列列选择器：Serial_No 切到
+  Dut_No」——选择器换宿主后的直接回归）。
+- 探针 spec 跑完当场删除，未留在 `frontend/e2e/`。
+- `npm run test:e2e:affected`：判为 analysis 模块档 → `e2e_pool --slots=auto -- e2e/analysis`
+  **390 例 · 墙钟 8.1min · 单价 3.36s/例 · 真红 0**（2 个红文件 `histogram-fail-bins` /
+  `histogram-multiseries-clip` 独占 slot 复跑全绿，判负载抖动，与本批无关）；
+  另跑一轮 P0 跨其余模块 13 例全绿。
