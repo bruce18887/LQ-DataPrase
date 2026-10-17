@@ -16,6 +16,27 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-10-17 序列分布顶部留白回收：一笔留白不能算两次
+
+- **报「省 N px」前先代入恒等式 `plotH = canvasH − grid.top − grid.bottom`**：我按
+  「选择器行 32 + title.top 11 + grid.top 10 = 53px」向用户承诺，实测只有 **42px**。
+  根因是 `grid.top: 58` 里**本来就含着** `title.top: 15` 那笔偏移——把 title 提到 4 只是
+  让 `grid.top` 有得收缩，它是 grid.top 那 10px 的**理由**，不是第二笔收益。
+  规则：纵向收益只有两个来源（画布长高 / 边距变小），任何第三项都要先问「它是不是已经被
+  前两项计过」；承诺值要在动手前用这条恒等式自己加一遍。
+- **布局归因先跑一次性 DOM 探针，别从缩放过的截图估**：我从截图估的是「选择器下面约
+  65px 纯空白」，实测构成是 选择器行 24+8=32 / `title.top` 15（ECharts 默认值，拆分模式
+  已显式写 4、合并模式漏写）/ 标题+副标题 ≈42。三条都是可数的，而估出来的形状是错的。
+  做法：临时 spec 走 `e2e_pool --slots=1`，读 `getBoundingClientRect()` + `getOption()`，
+  把数字打成一行 JSON 落 run.log，**用完当场删**（探针留在 `frontend/e2e/` 会被下一次
+  affected 选例收进套件）。
+- **控件从图体内上提到面板头，验收判据取「溢出」而不是「看起来放得下」**：`.chart-h` 只有
+  28px 高、`.chart-panel` 是 `overflow:hidden`，横向挤不动时会静默裁掉右侧按钮。
+  实测的收缩顺序：`.chart-h__grow`（`flex:1`，先塌到 0）→ `.chart-h__title`（带
+  `overflow:hidden` ⇒ flex 自动最小尺寸为 0，走省略号）→ 控件与最大化/关闭按钮不受影响。
+  判据两条：`controls.scrollWidth − clientWidth === 0`、关闭按钮右缘距面板右缘 > 0，
+  并且 1600/1440/1280 三档各测一次（本项目 1280/1440 是已知压力档）。
+
 ## 2026-10-17 序列分布 Y 轴改为「限值入框」新增教训
 
 - **复刻组件公式的 e2e 是口径变更的一次性负债**：`serial-adaptive-range.spec.ts` 与

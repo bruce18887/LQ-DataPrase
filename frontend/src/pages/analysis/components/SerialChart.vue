@@ -1,29 +1,10 @@
 <template>
   <div class="serial-chart-wrapper">
-    <!-- 序列列选择器保留内联（点径/透明度/按 Site 拆分已移入标题栏齿轮面板，2026-09-13） -->
-    <div v-if="showSelector" class="serial-header">
-      <!-- 多候选序列列（Serial_No 与 Dut_No 并存等）：显示选择器供用户手动切换，
-           单选 = 自动检测（优先级 Serial_No > Dut_No > PART_ID） -->
-      <div class="serial-col-selector">
-        <span class="serial-col-selector__label">序列列</span>
-        <el-select
-          :model-value="activeSerialCol"
-          size="small"
-          style="width: 200px"
-          @update:model-value="(v: string) => emit('update:serialCol', v)"
-        >
-          <el-option
-            v-for="c in serialCandidates"
-            :key="c"
-            :label="c"
-            :value="c"
-          />
-        </el-select>
-      </div>
-    </div>
-    <!-- 高度由外层 .chart-wrapper--serial（单文件 440px）决定；本容器 flex 列，
-         画布 flex:1 吃掉选择器/离群条以外的空间。底部三层需容纳 轴名+图例+滑块
-         （grid.bottom≈150），过矮会挤压绘图区 -->
+    <!-- 序列列选择器已上提到面板头 controls 槽（SingleParamTab #controls-serial，与齿轮同排）：
+         它原先独占一行 24+8=32px，而面板头本就是「一图专属控件」的既定位置。
+         高度由 dock 行占比决定（.chart-b 是 minmax(0,1fr) 网格），本容器 flex 列，
+         画布 flex:1 吃掉离群条以外的空间。底部 grid.bottom=68 需容纳
+         45° 序列号标签 + 轴名 + 图例，过矮会挤压绘图区。 -->
     <div ref="chartRef" class="serial-canvas" />
     <OutlierHintBar
       :mode="outlierHandling || 'off'"
@@ -44,10 +25,6 @@ import OutlierHintBar from './OutlierHintBar.vue'
 const props = withDefaults(defineProps<{
   data: any
   outlierHandling?: 'clip' | 'exclude' | 'off'
-  /** 用户显式选择的序列列（空串 = 自动检测） */
-  serialCol?: string
-  /** 后端返回的候选列（>1 时显示选择器） */
-  serialCandidates?: string[]
   /** 按 Site 拆分小多图（状态由父级 useSerialChartSettings 持有） */
   splitBySite?: boolean
   /** 生效点径（自动档或手动覆盖后） */
@@ -56,13 +33,8 @@ const props = withDefaults(defineProps<{
   opacity?: number
   /** 取值区间档位：决定规格限窗是否参与 Y 轴范围（见 serial-axis-range.ts） */
   rangeType?: string
-}>(), { serialCol: '', serialCandidates: () => [], splitBySite: false, symbolSize: 6, opacity: 0.85, rangeType: '' })
-const emit = defineEmits<{ (e: 'update:serialCol', value: string): void }>()
+}>(), { splitBySite: false, symbolSize: 6, opacity: 0.85, rangeType: '' })
 const { colors, isDark } = useEChartsTheme()
-
-// 选择器显示当前生效的列：显式选择优先，否则回退到后端自动检测结果
-const activeSerialCol = computed(() => props.serialCol || props.data?.serial_col || '')
-const showSelector = computed(() => (props.serialCandidates?.length ?? 0) > 1)
 
 // 大数据量（≥5000 点）启用 ECharts 官方 large 模式：每个系列只渲染 1 个
 // path 元素（类型化数组 + 单次绘制），SVG/canvas 渲染器下均生效，避免
@@ -193,8 +165,10 @@ function buildOption() {
     dataZoom = [{ type: 'inside', xAxisIndex: siteSeriesRaw.map((_, i) => i) }]
   } else {
     // 合并单面板：显式收紧四边留白（旧实现 left/right 走 ECharts 默认 10%，
-    // 超宽屏下左右各浪费上百像素）；right 留出 markLine 的 end 位置标签
-    grids = [{ left: 60, right: 48, top: 58, bottom: 68 }]
+    // 超宽屏下左右各浪费上百像素）；right 留出 markLine 的 end 位置标签；
+    // top 48 = 标题块实测高（top 4 + 标题 17 + itemGap 10 + 副标题 15 ≈ 46）+ 2 余量，
+    // 旧值 58 是在 title 走 ECharts 默认 top:15 的前提下配的，那 15px 已经还给绘图区
+    grids = [{ left: 60, right: 48, top: 48, bottom: 68 }]
     xAxes = [xAxisDef(0, true)]
     yAxes = [yAxisDef(0, laneBounds[0], null)]
     dataZoom = [{ type: 'inside', xAxisIndex: [0] }]
@@ -292,9 +266,10 @@ function buildOption() {
   return {
     // large 模式下上万 symbol 的入场/更新动画是纯开销，直接关闭
     animation: !isLarge.value,
-    // split 模式 grid 从 top 10% 起（lane 区 ≈74%），首 lane 顶距标题块仍有富余；
-    // 仅拆分态把标题块上移收紧（top 4 / itemGap 6），合并模式保持默认
-    title: { text: `${param} Serial分布`, subtext, left: 'center', textStyle: { fontSize: chartFontSize.base, fontWeight: 'bold', color: tc }, subtextStyle: { fontSize: chartFontSize.dense }, ...(split ? { top: 4, itemGap: 6 } : {}) },
+    // 标题块两种模式都贴顶（top 4）：合并模式此前不写 top，吃 ECharts 默认 15，
+    // 那 15px 是白给的；拆分模式本来就写 4。itemGap 仅拆分态收紧到 6（lane 区从
+    // top 10% 起，首 lane 顶与标题块的富余量本来就不多）
+    title: { text: `${param} Serial分布`, subtext, top: 4, left: 'center', textStyle: { fontSize: chartFontSize.base, fontWeight: 'bold', color: tc }, subtextStyle: { fontSize: chartFontSize.dense }, ...(split ? { itemGap: 6 } : {}) },
     tooltip: {
       trigger: 'item',
       backgroundColor: colors.value.tooltipBg,
@@ -334,7 +309,8 @@ void chartRef // bound to <div ref="chartRef"> in template
 </script>
 
 <style scoped>
-/* 填满外层 .chart-wrapper--serial；选择器与离群条为固定高度，画布 flex:1 占剩余 */
+/* 外层是 ChartPanel 的 .chart-b（minmax(0,1fr) 网格），本容器 flex 列：
+   画布 flex:1 吃掉离群条以外的空间 */
 .serial-chart-wrapper {
   display: flex;
   flex-direction: column;
@@ -345,23 +321,5 @@ void chartRef // bound to <div ref="chartRef"> in template
   flex: 1;
   min-height: 0;
   width: 100%;
-}
-.serial-col-selector {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-}
-.serial-col-selector__label {
-  font-size: var(--p-fs-dense);
-  color: var(--el-text-color-secondary);
-}
-.serial-header {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
 }
 </style>
