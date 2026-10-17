@@ -1913,3 +1913,19 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   `git rev-parse --short A B` 多 rev 会报 `Needed a single revision`，要分开取；
   PowerShell 内联命令里的 `$c[0]` 会被 bash 吃掉，凡是带 `$` 的 PS 一律写成 .ps1 文件再跑；
   **python 探针在 cp936 控制台打 `✓` 会 `UnicodeEncodeError`** —— 这正是 `3694b86` 修的那类问题的镜像版。
+
+## 2026-10-17 清除外迁子项目残留：删除面必须自己复核，知识面不能只删导出
+
+- **子代理给的行段直接照删会削到自己**：它报「todo.md 1652-2045 整段是加载项任务」，实读发现 1861 起是挂在同一个
+  `#` 标题下的**本项目** Gage/Buyoff 导出账目；它列的 5 个「MSBuild 日志」有 4 个其实是前端 vite 构建日志。
+  规则：按行段删除前先把该区间内所有标题与首行打出来逐段定性，删完把被删行原样列一遍回看。
+- **清除用的正则只能放专名**：`AddIn` 带 `i` 标志命中 `adding`，`dataprase\.` 命中本项目自己的 `lq_dataprase.spec`，
+  而只盯可见专名又会漏掉 mermaid 节点标签里的外部原型文件名。规则：**删除正则**与**复核正则**必须是两把不同的尺，
+  删完再用另一把尺扫一遍；对备份做「被删行是否真含专名」的反查才算闭环。
+- **知识卡的正文不在仓库里**：`.qoder/repowiki/` 只是导出镜像，真正的检索源是
+  `~/.qoder-cn/qoder-knowledge/knowledge-<repo>-<hash>/{cards,wiki,vectors}.v1.db`（另有一份
+  `~/.qoder-cn/knowledges/…` 的 md 镜像）。只删导出层文件，`SearchKnowledge` 照样把旧模块树注入回新会话。
+  规则：改完知识面要**用检索本身复验**，而不是拿 grep 归零当完成；库带 `-wal/-shm` 说明进程正开着，
+  动它之前整目录备份，动完跑 `pragma integrity_check`。
+- **密文字段是手工清除的边界**：`wiki_repo.current_document_structure`/`catalogue_think_content` 存的是
+  `WikiEncrypted:` 串，改不了，只能靠重新生成覆盖 —— 报告里要把它单列成「没清掉的部分」，不能算已完成。
