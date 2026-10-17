@@ -28,6 +28,41 @@ function viewScope(page: Page) {
 }
 
 /**
+ * 在**同一页面内**从文件列表再开一个文件到标签页。
+ *
+ * 不能用 gotoApp：整页重载会把标签列表重置回一个空白页，那就根本测不到多标签。
+ */
+async function openFileInViewTab(page: Page, filename: string) {
+  await page.locator('.tab-btn').filter({ hasText: '文件列表' }).first().click()
+  const searchInput = page.locator('input[placeholder="按文件名/程序名/标签搜索"]')
+  await searchInput.fill(filename.slice(0, 15))
+  const row = page
+    .locator('.el-table .el-table__row')
+    .filter({ hasText: filename.slice(0, 12) })
+    .first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  await row.locator('button').filter({ hasText: '查看' }).click()
+  await expect(page.locator('.tab-btn.active')).toContainText('查看数据')
+}
+
+/** 某文件的总行数（走后端 API 取基准，不把种子的行数写死进用例） */
+async function browseTotal(page: Page, filename: string) {
+  return page.evaluate(async (filename) => {
+    const token = localStorage.getItem('access_token')
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
+    const files = await fetch(`/api/v1/files/?search=${encodeURIComponent(filename)}`, { headers }).then((r) => r.json())
+    const file = ((files.results ?? files) as any[]).find((f: any) => f.filename === filename)
+    const d = await fetch(`/api/v1/browse/?datafile_id=${file.id}&page_size=1`, { headers }).then((r) => r.json())
+    return d.total as number
+  }, filename)
+}
+
+/** 当前活动标签页那份表格的「共 N 条数据」行（隐藏实例仍在 DOM 里，必须 :visible） */
+function visibleCountLine(page: Page) {
+  return viewScope(page).locator('p:visible').filter({ hasText: '共 ' }).first()
+}
+
+/**
  * 从 /browse/ API 拿全量行，定位测试所需的确定性行：
  * - failIdx/failCols/binValue：首个 bin != 1 的行及其 __fail_cells__
  * - passIdx：首个 bin == 1 的行
@@ -892,7 +927,7 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     expect(prevented).toBe(false)
   })
 
-  test('@p2 菜单「定位到 Fail 单元格」：横向滚动到 fail 列 + flash，垂直不甩动', async ({ page }) => {
+  test('@p2 菜单「定位到 Fail 单元格」：横向滚动到 fail 列 + flash，垂直不甩回正中', async ({ page }) => {
     await openViewTab(page, SEEDED_FILES.CTA8280F_FT)
     const info = await fetchBinFailInfo(page, SEEDED_FILES.CTA8280F_FT)
     if (info.farIdx === -1) test.skip(true, '无远列 fail 行')
@@ -936,15 +971,22 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     expect(vpBox, '垂直视口无盒模型').not.toBeNull()
     const centerOffset = (vpBox!.height - 30) / 2
     // 承重前置之一：居中位本身要有可测位移。视口矮到 centerOffset≈0 时，
-    // 'middle' 与不传 position 算出的滚动量相同，下面的等值断言会永远全绿。
-    expect(centerOffset, `视口可用高仅 ${vpBox!.height}px，居中位移不可辨 → 垂直断言会哑`).toBeGreaterThan(30)
+    // 'middle' 与不传 position 算出的滚动量相同，下面的判据会永远全绿。
+    expect(centerOffset, `视口可用高仅 ${vpBox!.height}px，居中位移不可辨 → 垂直判据会哑`).toBeGreaterThan(30)
     // 承重前置之二：滚动量必须大于居中位。行贴着数据开头时 scrollTop 已经是最小的 0，
     // 'middle' 的目标值算出来是负数、被 clamp 回 0 —— 实测 farIdx=0 时两种实现同样不动。
     const vBefore = await vScroll.evaluate((el) => el.scrollTop)
     expect(
       vBefore,
-      `滚动量 ${vBefore} 不大于居中位 ${Math.round(centerOffset)}px，'middle' 会被 clamp → 垂直断言会哑`,
+      `滚动量 ${vBefore} 不大于居中位 ${Math.round(centerOffset)}px，'middle' 会被 clamp → 垂直判据会哑`,
     ).toBeGreaterThan(centerOffset)
+    // 承重前置之三：跳之前行就不在正中附近，否则「没被甩到正中」这句是白说的
+    const offBefore = await rowOffset()
+    expect(offBefore, '跳转前行未钉在可判位置').not.toBeNull()
+    expect(
+      Math.abs(offBefore! - centerOffset),
+      `跳转前偏移 ${Math.round(offBefore!)} 已接近居中位 ${Math.round(centerOffset)} → 判据会哑`,
+    ).toBeGreaterThan(30)
 
     // 前置：farCol 在屏幕外（列虚拟化 → 无此 header 元素）
     await expect(page.locator(`.ag-header-cell[col-id="${info.farCol}"]`)).not.toBeVisible()
@@ -964,12 +1006,31 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
       .poll(async () => hScroll.evaluate((el) => el.scrollLeft), { timeout: 5_000 })
       .toBeGreaterThan(before)
 
-    // 垂直一动不动：滚动量分毫未变（旧实现传 'middle' 会把它拉回正中，实测甩掉 166px）。
-    // 只量 scrollTop、不再量行的盒模型：IRM 的 rowTop 会随分块加载漂移，行会在 scrollTop
-    // 不变的情况下自己挪几像素 —— 那不是本用例要管的甩动，量它只会招来偶发红（实测 flaky）。
+    /**
+     * 垂直判据：跳完之后行**不许落在视口正中**。
+     *
+     * 为什么不判「scrollTop 一动不动」（第一版的写法）：深行的 rowTop 会随 IRM 分块加载
+     * 漂移，实测同一 scrollTop 下行 y 在 481/652 之间跳过，也实测到行被漂出视口后
+     * ag-grid 做一次最小滚动把它拉回边缘 —— 那是**正确行为**，判它红就是自己造 flaky。
+     *
+     * 用户抱怨的形状是「行被甩回正中」，所以判的是三种合法落位之外的东西：
+     * 原地（滚动量未变）、贴顶、贴底。'middle' 的落位是居中，与这三条都差半屏。
+     */
+    const vpH = vpBox!.height
     await expect
-      .poll(async () => vScroll.evaluate((el) => el.scrollTop), { timeout: 5_000 })
-      .toBe(vBefore)
+      .poll(
+        async () => {
+          const off = await rowOffset()
+          if (off === null) return 'unrendered'
+          const nowTop = await vScroll.evaluate((el) => el.scrollTop)
+          const atTop = off <= 2
+          const atBottom = off >= vpH - 32
+          const unmoved = nowTop === vBefore
+          return atTop || atBottom || unmoved ? 'ok' : `off=${Math.round(off)} center=${Math.round(centerOffset)} scrollTop ${vBefore}→${nowTop}`
+        },
+        { timeout: 5_000 },
+      )
+      .toBe('ok')
 
     // farCol 列头与 fail 单元格已滚入视图
     await expect(page.locator(`.ag-header-cell[col-id="${info.farCol}"]`)).toBeVisible({
@@ -1011,12 +1072,13 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
   })
 
   /**
-   * 顶部带高度契约（2026-10-17 把操作按钮并入文件横幅、全选/清空收进下拉之后定的）。
+   * 顶部带高度契约（2026-10-17 把操作按钮并入文件横幅、全选/清空收进下拉、
+   * 加上多文件标签条之后定的）。
    *
    * 两条断言各挡一种回归，缺一不可：
-   * - 表格上缘 377px：谁再往顶部带加一行而没同步 `TABLE_TOP_OFFSET`，这里红。
-   * - 表格高 == innerHeight - 254：常量被改动而没重新量顶部带，这里红。
-   * 两个数都是实测（1280/1440/1920/2560 四档宽度下顶部带同为 377px，不折行）。
+   * - 表格上缘 413px：谁再往顶部带加一行而没同步 `TABLE_TOP_OFFSET`，这里红。
+   * - 表格高 == innerHeight - 290：常量被改动而没重新量顶部带，这里红。
+   * 两个数都是实测（1280/1440/1920/2560 四档宽度下顶部带同为 413px，不折行）。
    */
   test('@p2 顶部带：操作按钮在文件横幅内，表格高度与实测占位对齐', async ({ page }) => {
     await openViewTab(page, SEEDED_FILES.CTA8280F_FT)
@@ -1043,9 +1105,89 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
 
     const band = await page.locator('.ag-grid-wrapper').boundingBox()
     expect(band, '表格容器无盒模型').not.toBeNull()
-    expect(Math.round(band!.y), '表格上缘位置变了，但 TABLE_TOP_OFFSET 没跟着重量').toBe(377)
+    expect(Math.round(band!.y), '表格上缘位置变了，但 TABLE_TOP_OFFSET 没跟着重量').toBe(413)
     const innerH = await page.evaluate(() => window.innerHeight)
-    expect(band!.height, '表格高度不再等于 innerHeight - TABLE_TOP_OFFSET(254)').toBe(innerH - 254)
+    expect(band!.height, '表格高度不再等于 innerHeight - TABLE_TOP_OFFSET(290)').toBe(innerH - 290)
+  })
+
+  test('@p1 多标签：两个文件各占一个标签，后开的不覆盖先开的', async ({ page }) => {
+    // 两份都用小文件：后端是单进程，多标签用例本来就要多解析一次，
+    // 拿 10000 行那份做素材会把同文件里其它用例的 30s 搜索等待挤爆（实测 flaky）
+    await openViewTab(page, SEEDED_FILES.GAGE_S1)
+    await openFileInViewTab(page, SEEDED_FILES.GAGE_S2)
+
+    const chips = viewScope(page).locator('.vf-tab:not(.vf-tab--add)')
+    await expect(chips).toHaveCount(2)
+    await expect(chips.nth(1)).toHaveClass(/is-active/)
+    // 活动标签的横幅显示 S2，标签 1 的横幅（隐藏实例里）仍是 S1 ——
+    // 两份 ag-grid 实例并存，后开的没把先开的顶掉
+    const banners = viewScope(page).locator('.active-file-banner')
+    await expect(banners.nth(1)).toContainText(SEEDED_FILES.GAGE_S2.slice(0, 11))
+    await expect(banners.nth(0)).toContainText(SEEDED_FILES.GAGE_S1.slice(0, 11))
+
+    await chips.nth(0).click()
+    await expect(banners.nth(0)).toBeVisible()
+    await expect(banners.nth(1)).not.toBeVisible()
+  })
+
+  test('@p2 多标签：切走再切回，自己的筛选与固定列状态不丢', async ({ page }) => {
+    await openViewTab(page, SEEDED_FILES.CTA8280F_FT)
+    const totalA = await browseTotal(page, SEEDED_FILES.CTA8280F_FT)
+    const failA = await page.evaluate(async (filename) => {
+      const token = localStorage.getItem('access_token')
+      const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
+      const files = await fetch(`/api/v1/files/?search=${encodeURIComponent(filename)}`, { headers }).then((r) => r.json())
+      const file = ((files.results ?? files) as any[]).find((f: any) => f.filename === filename)
+      const d = await fetch(
+        `/api/v1/browse/?datafile_id=${file.id}&page_size=1&pass_filter=Fail`,
+        { headers },
+      ).then((r) => r.json())
+      return d.total as number
+    }, SEEDED_FILES.CTA8280F_FT)
+    expect(failA).toBeGreaterThan(0)
+    expect(failA).toBeLessThan(totalA)
+
+    // 在标签 1 上把 Pass/Fail 切到 Fail
+    const pfInput = page.locator('input[aria-label="Pass/Fail筛选"]:visible').first()
+    await pfInput.evaluate((el) => el.closest('.el-select')!.querySelector<HTMLElement>('.el-select__wrapper')!.click())
+    await page.locator('.el-select-dropdown:visible .el-select-dropdown__item').filter({ hasText: 'Fail' }).first().click()
+    await expect(visibleCountLine(page)).toContainText(`共 ${failA}`, { timeout: 30_000 })
+
+    // 开第二个标签：它是全新的状态，不能继承标签 1 的 Fail 筛选
+    await openFileInViewTab(page, SEEDED_FILES.GAGE_S1)
+    await expect(visibleCountLine(page)).not.toContainText('Fail:', { timeout: 30_000 })
+
+    // 切回标签 1：Fail 筛选必须还在（这就是「同时打开多个文件来看」的全部意义）
+    await viewScope(page).locator('.vf-tab:not(.vf-tab--add)').nth(0).click()
+    await expect(visibleCountLine(page)).toContainText(`共 ${failA}`, { timeout: 30_000 })
+    // 读选中的文本而不是 input.value：Pass/Fail 这个 el-select 不是 filterable，
+    // EP 把选中项渲染成 .el-select__selected-item，input 恒为空串
+    await expect(
+      page.locator('.el-select:visible').filter({ has: page.locator('input[aria-label="Pass/Fail筛选"]') }).first(),
+      '切回来的标签应保留它自己的 Pass/Fail 选择',
+    ).toContainText('Fail')
+  })
+
+  test('@p2 多标签：关闭激活邻居、只剩一个时不给关、「+」开空白页出空态', async ({ page }) => {
+    await openViewTab(page, SEEDED_FILES.GAGE_S1)
+    await openFileInViewTab(page, SEEDED_FILES.GAGE_S2)
+
+    const chips = viewScope(page).locator('.vf-tab:not(.vf-tab--add)')
+    const banners = viewScope(page).locator('.active-file-banner')
+    await expect(chips).toHaveCount(2)
+    // 关掉活动的标签 2 → 激活邻居（标签 1），显示 S1
+    await chips.nth(1).locator('.vf-tab__close').click()
+    await expect(chips).toHaveCount(1)
+    await expect(chips.nth(0)).toHaveClass(/is-active/)
+    await expect(banners.nth(0)).toContainText(SEEDED_FILES.GAGE_S1.slice(0, 11))
+    // 只剩一个标签时不提供关闭入口（防止把页面关没）
+    await expect(chips.locator('.vf-tab__close')).toHaveCount(0)
+
+    // 「+」开一个空白标签 → 空态引导，而不是残留上一个文件
+    await viewScope(page).locator('.vf-tab--add').click()
+    await expect(chips).toHaveCount(2)
+    await expect(chips.nth(1)).toHaveClass(/is-active/)
+    await expect(viewScope(page).locator('.el-empty:visible')).toContainText('请先在上方选择文件')
   })
 
   test('@p2 默认隐藏列：记录列默认隐藏，更新隐藏列设置后重新显示', async ({ page }) => {

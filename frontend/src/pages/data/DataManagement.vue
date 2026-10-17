@@ -39,14 +39,29 @@
         />
       </div>
 
-      <!-- 查看文件数据（当前文件横幅由组件自己渲染：横幅右端要挂它的加载/导出按钮） -->
+      <!-- 查看文件数据（多标签：一个标签一份独立表格实例，各自的筛选/固定列/滚动位置互不影响） -->
       <div v-show="activeTab === 'view'" role="tabpanel" class="content-section fade-in">
-        <DataBrowserAgGrid
-          v-model:file-id="activeFileId"
-          :files="files"
-          @file-missing="onFileMissing"
-          @goto-files="activeTab = 'files'"
+        <ViewFileTabs
+          :tabs="viewTabsWithLabel"
+          :active-id="activeViewTabId"
+          :max="VIEW_TAB_MAX"
+          @activate="activateViewTab"
+          @close="closeViewTab"
+          @add="addViewTab"
         />
+        <!-- everActive 门控挂载：没被点开过的标签不发请求（每实例会拉一次账号设置 +
+             一次 /summary/，四个标签首挂就是 8 发）；v-show 切换保住各实例的滚动位置 -->
+        <template v-for="t in viewTabs" :key="t.id">
+          <DataBrowserAgGrid
+            v-if="t.everActive"
+            v-show="t.id === activeViewTabId"
+            :file-id="t.fileId"
+            :files="files"
+            @update:file-id="t.fileId = $event"
+            @file-missing="onFileMissing(t)"
+            @goto-files="activeTab = 'files'"
+          />
+        </template>
       </div>
 
       <!-- 导出工具 -->
@@ -75,10 +90,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onActivated, watch } from 'vue'
+import { ref, computed, onMounted, onActivated, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import api from '../../api'
 import { useFilesStore } from '../../stores/files'
 import ActiveFileBanner from './components/browser/ActiveFileBanner.vue'
+import ViewFileTabs, { type ViewFileTab } from './components/browser/ViewFileTabs.vue'
 import FileListTab from './components/FileListTab.vue'
 import BatchDataTab from './components/BatchDataTab.vue'
 import DataBrowserAgGrid from './DataBrowserAgGrid.vue'
@@ -92,8 +109,66 @@ const files = ref<any[]>([])
 const fileTotal = ref(0)
 const batchTotal = ref(0)
 const activeTab = ref('files')
-const activeFileId = ref<number | null>(null)
 const filesStore = useFilesStore()
+
+// ── 查看数据的多文件标签页 ──
+// 上限 4：每份表格实例是一个 ag-grid（IRM 缓存 maxBlocksInCache=20 × blockSize）
+// + 一次账号设置请求 + 一次 /summary/。再往上加收益递减、内存与请求数线性涨。
+const VIEW_TAB_MAX = 4
+let viewTabSeq = 0
+function newViewTab(fileId: number | null): ViewFileTab {
+  return { id: ++viewTabSeq, fileId, label: '', everActive: true }
+}
+const viewTabs = ref<ViewFileTab[]>([newViewTab(null)])
+const activeViewTabId = ref(viewTabs.value[0].id)
+
+const viewTabsWithLabel = computed(() =>
+  viewTabs.value.map((t) => ({
+    ...t,
+    label: t.fileId === null ? '' : (files.value.find((f) => f.id === t.fileId)?.filename ?? ''),
+  })),
+)
+
+/**
+ * 「当前文件」= 活动标签页的文件。
+ *
+ * 保留 get/set 双向是因为有三条既有通路把它当可写状态用：文件列表点行（预览）、
+ * 导出工具横幅选文件、批次数据里选文件 —— 它们都应当改的是**当前那个标签**，
+ * 而不是新开一个。改成 computed 写入即让这些通路一行都不用动。
+ */
+const activeFileId = computed<number | null>({
+  get: () => viewTabs.value.find((t) => t.id === activeViewTabId.value)?.fileId ?? null,
+  set: (v) => {
+    const t = viewTabs.value.find((x) => x.id === activeViewTabId.value)
+    if (t) t.fileId = v
+  },
+})
+
+function activateViewTab(id: number) {
+  const t = viewTabs.value.find((x) => x.id === id)
+  if (!t) return
+  t.everActive = true
+  activeViewTabId.value = id
+}
+
+function addViewTab() {
+  if (viewTabs.value.length >= VIEW_TAB_MAX) return
+  const t = newViewTab(null)
+  viewTabs.value.push(t)
+  activeViewTabId.value = t.id
+}
+
+function closeViewTab(id: number) {
+  if (viewTabs.value.length <= 1) return
+  const idx = viewTabs.value.findIndex((t) => t.id === id)
+  if (idx < 0) return
+  const wasActive = activeViewTabId.value === id
+  viewTabs.value.splice(idx, 1)
+  if (wasActive) {
+    // 优先落在右边邻居（像浏览器关标签），关的是最后一个则回落一格
+    activateViewTab(viewTabs.value[Math.min(idx, viewTabs.value.length - 1)].id)
+  }
+}
 
 const tabs = [
   { key: 'files', label: '文件列表', icon: '📋' },
@@ -115,11 +190,33 @@ async function loadFiles() {
   }
 }
 
+/**
+ * 「查看」按钮：该文件已在某个标签页里就激活它，否则占一个空白标签或新开一个。
+ * 空白标签优先就地填入 —— 刚点过「+」的人要的就是「在这儿打开」，不该留一个空坑。
+ */
 function viewFile(id: number, _filename?: string) {
-  activeFileId.value = id
   activeTab.value = 'view'
+  const existing = viewTabs.value.find((t) => t.fileId === id)
+  if (existing) {
+    activateViewTab(existing.id)
+    return
+  }
+  const blank = viewTabs.value.find((t) => t.fileId === null)
+  if (blank) {
+    blank.fileId = id
+    activateViewTab(blank.id)
+    return
+  }
+  if (viewTabs.value.length >= VIEW_TAB_MAX) {
+    ElMessage.warning(`最多同时打开 ${VIEW_TAB_MAX} 个文件，请先关闭一个标签页`)
+    return
+  }
+  const t = newViewTab(id)
+  viewTabs.value.push(t)
+  activeViewTabId.value = t.id
 }
 
+// 点行 = 在**当前标签页**里预览这个文件（不新开标签，也不动导出工具的选择）
 function onRowClick(id: number, _filename?: string) {
   activeFileId.value = id
 }
@@ -130,10 +227,10 @@ function onFileManagerSelect(fileId: number) {
   loadFiles()
 }
 
-// 当前查看的文件被删除时（DataBrowserAgGrid 收到后端 404）重置选择，
+// 某个标签页正在看的文件被删除（DataBrowserAgGrid 收到后端 404）→ 只清那一个标签，
 // 避免「查看数据 / 导出」页残留已删除文件的状态。
-function onFileMissing() {
-  activeFileId.value = null
+function onFileMissing(tab: ViewFileTab) {
+  tab.fileId = null
 }
 
 onMounted(loadFiles)
