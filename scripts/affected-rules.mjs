@@ -116,11 +116,6 @@ export const RULES = [
   ['scripts/e2e_', ['unit',
     'none:门禁编排器无单测（IO 重）；改完必自证 `node scripts/e2e_affected.mjs --dry-run` 与 `e2e_pool.mjs --slots=2 --dry-run`，看打印的判定与 slot 数对不对']],
 
-  // —— 子项目自带验证通路，不由 e2e 承载（打印提示，避免静默无门禁）
-  ['DataPrase-ExcelAddin/', ['none:ExcelAddin 走 DataPrase-ExcelAddin/verify-installed.ps1']],
-  ['DataPrase-LightVBA/', ['none:LightVBA 无自动化测试']],
-  ['DataPrase-SFTP Searcher/', ['none:SFTP Searcher 独立于 Django 后端']],
-
   // —— 代理与工具的落盘物：不是被测对象，也不改任何被测对象的行为
   ['.gitignore', ['none:.gitignore 只改忽略规则，无测试判据受影响']],
   ['.lqdp_startup.lock', ['none:启动锁文件的清理动作，无测试判据受影响']],
@@ -220,7 +215,7 @@ export function decide(files) {
     out.global = true
     out.reasons.push(`命中 ${out.modules.size} 个模块 > ${MAX_MODULES_BEFORE_FULL} 阈值`)
   }
-  // note 去重：一条前缀被多个文件命中时会重复推（例：一次提交删掉 10 个 ExcelAddin 文件）
+  // note 去重：一条规则被多个文件命中时会重复推（例：一次提交动 10 个 `scripts/e2e_*` 会推 10 条同一提示）
   out.notes = [...new Set(out.notes)]
   return out
 }

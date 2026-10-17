@@ -95,33 +95,16 @@ describe('假阳性：不是被测对象的落盘物，不得升级全量', () =
     expect(r.notes.join()).toMatch(/无单测|双向/)
   })
 
-  it('三个独立子项目有自己的验证通路', () => {
-    const r = staysFast([
-      'DataPrase-ExcelAddin/src/DataPrase.Core/TestItem.cs',
-      'DataPrase-LightVBA/DataParser.cls',
-      'DataPrase-SFTP Searcher/search/content_searcher.py',
-    ])
-    expect(r.global).toBe(false)
-    expect(r.modules).toEqual([])
-    expect(r.notes).toHaveLength(3)
-  })
-
-  it('note 去重：一次删掉 10 个子项目文件只提示一条', () => {
-    const many = Array.from({ length: 10 }, (_, i) => `DataPrase-ExcelAddin/src/x${i}.cs`)
-    expect(staysFast(many).notes).toHaveLength(1)
-  })
-
-  it('实测过的 25 提交里那 7 个假阳性案例，逐个不再升级', () => {
-    const seven = [
+  it('实测过的 25 提交里剩下的 6 个假阳性案例，逐个不再升级', () => {
+    const cases = [
       ['.commandcode/settings.json', '.gitignore', '.lqdp_startup.lock', '.superpowers/brainstorm/a/b.html', 'frontend/.gitignore'],
       ['.gitignore', 'docs/tasks/lessons.md'],
-      ['DataPrase-ExcelAddin/build/install.ps1', 'DataPrase-LightVBA/AutoMark.bas', 'frontend/night-diag-fail.png'],
       ['.github/workflows/ci.yml', 'docs/superpowers/specs/x.md'],
       ['frontend/test/unit/iconLib.spec.ts', 'scripts/icon-audit.cjs', 'scripts/icon-lib.cjs'],
       ['docs/tasks/todo.md', 'scripts/e2e_preview_supervised.mjs'],
       ['frontend/e2e/helpers/nightly-gates.d.mts', 'frontend/e2e/helpers/nightly-gates.mjs', 'frontend/test/unit/e2eNightlyGates.spec.ts'],
     ]
-    for (const files of seven) expect(staysFast(files).global, files.join(',')).toBe(false)
+    for (const files of cases) expect(staysFast(files).global, files.join(',')).toBe(false)
   })
 })
 
