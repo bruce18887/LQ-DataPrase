@@ -27,6 +27,7 @@ from apps.export.export_xlsx_optimized import (
     export_to_xlsx_optimized, _vectorized_native_rows,
 )
 from apps.export.export_csv import _convert_to_native_type
+from apps.export.views import _apply_export_filters
 
 User = get_user_model()
 
@@ -45,6 +46,30 @@ def _empty_metadata():
 def _assert_plain_cell(cell, msg=''):
     """默认风格单元格 = 无实底填充（excelize 白底=不写 fill，openpyxl 读为 patternType None）。"""
     assert cell.fill.patternType is None, f'{msg} 应为无填充（白底），实际 {cell.fill.patternType}'
+
+
+class ApplyExportFiltersTests(TestCase):
+    """_apply_export_filters：无筛选参数时也必须交出独立副本。"""
+
+    def test_no_filter_returns_own_copy(self):
+        """df 是解析缓存的共享只读对象——无过滤时不能把它的引用交给下游。
+
+        惰性复制（export_df = df 起步 + 返回前兜底 copy）后，下游拿到的必须是
+        新对象，且共享 df 的内容/结构保持不变（不能被下游原地改污染）。
+        """
+        df = pd.DataFrame({
+            'Serial_No': [1, 2, 3],
+            'V1': [1.0, 2.0, 3.0],
+            'SW_Bin': [1, 9, 1],
+        })
+        metadata = {
+            'units': {}, 'mins': {'V1': '0'}, 'maxs': {'V1': '4'},
+            'format': 'CTA8290D',
+        }
+        before = df.copy()
+        out = _apply_export_filters(df, metadata, {})
+        self.assertIsNot(out, df, '无筛选时下游也必须拿到自有对象')
+        self.assertTrue(df.equals(before), '共享 df 内容不应被改动')
 
 
 @unittest.skipUnless(

@@ -237,6 +237,35 @@ class DataFileViewSet(viewsets.ModelViewSet):
         )
         return Response({'format_types': list(formats)})
 
+    @action(detail=False, methods=['get'], url_path='options')
+    def options(self, request):
+        """下拉框用的轻量文件清单：只返回标量列，不算 stage/data_date、不 join owner。
+
+        列表序列化器逐行跑正则算 stage/data_date 并 join owner，文件多时是纯浪费；
+        下拉只需要标量字段。默认只返回 status='ready'（解析失败的行选中也无数据），
+        但既有前端下拉未过滤状态，保留 ``?include_error=1`` 兼容开关（ready + error）。
+        ``?limit=`` 默认 5000、上限 20000，避免响应无限膨胀。
+        """
+        queryset = DataFile.objects.filter(owner=request.user)
+        if request.query_params.get('include_error') == '1':
+            queryset = queryset.filter(status__in=['ready', 'error'])
+        else:
+            queryset = queryset.filter(status='ready')
+        try:
+            limit = int(request.query_params.get('limit', 5000))
+        except (TypeError, ValueError):
+            limit = 5000
+        limit = max(1, min(limit, 20000))
+        # 排序与模型 Meta.ordering 一致；.values() 一把取完，避免序列化器逐行计算。
+        rows = list(
+            queryset.order_by('-created_at').values(
+                'id', 'filename', 'file_type', 'batch_name', 'sub_batch',
+                'format_type', 'program_name', 'product_code', 'row_count',
+                'col_count', 'file_size', 'source_mtime', 'created_at', 'status',
+            )[:limit]
+        )
+        return Response({'results': rows})
+
     @action(detail=False, methods=['post'])
     def combine(self, request):
         """Combine multiple owned single files into a batch.

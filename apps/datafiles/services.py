@@ -129,6 +129,20 @@ class _BytesLRUCache:
             self._store(key, value, size_of(value))
             return value
 
+    def put(self, key, value, size_of=_parse_value_bytes) -> None:
+        """直接写入一条缓存（不做单飞，也不返回结果）。
+
+        上传链路已经把文件解析成 DataFrame，这里把结果写透进缓存，
+        省掉用户首次打开时的第二次解析。
+
+        ``notify_all`` 是必须的：同一 key 可能已有别的线程正在
+        ``get_or_compute`` 里 ``self._cv.wait()`` 等这个 key 的结果，
+        只写不唤醒的话它们会一直等到超时后重算，写透就白做了。
+        """
+        with self._cv:
+            self._store(key, value, size_of(value))
+            self._cv.notify_all()
+
     def _store(self, key, value, nbytes) -> None:
         with self._cv:
             if nbytes > self._budget:
@@ -225,6 +239,29 @@ def get_cached_parsed_file(file_id: int, owner_id: int, datafile=None) -> Tuple[
     abs_path = resolve_file_path(datafile.file_path)
     path_key = _disk_mtime_ns(abs_path)
     return _cached_parse(file_id, owner_id, path_key, abs_path, datafile.format_type)
+
+
+def put_cached_parsed_file(file_id: int, owner_id: int, datafile,
+                           df, metadata, fmt) -> None:
+    """把上传时已经解析出的结果写透进解析缓存。
+
+    上传链路 ``_register_file`` 为了拿 row_count/col_count 已经调用过一次
+    ``parser.parse``（实测单次 3.2s、df 常驻 460MB），随后把 df 丢掉；
+    不写透的话用户首次打开该文件会再解析一遍，同一只 275MB 文件被解析两次。
+
+    key 的算法与 ``get_cached_parsed_file`` 完全一致（同一个
+    ``resolve_file_path`` + 同一个 ``_disk_mtime_ns``），否则写进去也命不中。
+    因此 ``datafile`` 必须在 ``DataFile.objects.create`` 之后传入——那时
+    ``file_path`` 已是入库后的相对路径，解析出的绝对路径与读侧逐字节一致。
+
+    ``df`` / ``metadata`` 为 None 时不写：失败结果不缓存，下次访问仍会重试，
+    与 ``_parse_file_uncached`` 的失败语义保持一致。
+    """
+    if datafile is None or df is None or metadata is None:
+        return
+    abs_path = resolve_file_path(datafile.file_path)
+    path_key = _disk_mtime_ns(abs_path)
+    _parse_cache.put((file_id, owner_id, path_key, abs_path), (df, metadata, fmt))
 
 
 @lru_cache(maxsize=32)

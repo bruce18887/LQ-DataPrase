@@ -4427,3 +4427,25 @@ Chromium 错误页停在窗口底色 `#1a1a2e` 上 = 黑屏，且 `did-finish-lo
   而不是 `mode-picker.html` 的理由）。
 - 不改 `remoteUrlToLoad` 等运行时镜像的陈旧问题（那是「为什么必须重启」的理由，不是缺陷）。
 - 不给 `restart-app` 加测试通路（主进程仍无驱动通路，判据已尽量抽进 T2）。
+
+## 2026-10-17 20 人并发性能修复（批 1–3 已入库，P3 待实施）
+
+方案正文：`docs/plans/2026-10-17-performance-remediation.md`（含实测基线与验收线）。
+决策已拍板：D1=单进程+常驻进程池、D2=写透缓存（保留上传即解析，见下）、D3=SFTP 下载作业化。
+
+- [ ] 批 0 基线固化：把 `tasks/perf_probe_*_2026-10-17.py` 合并成 `scripts/perf_baseline.py`；新增 20 并发压测脚本，落 `docs/reference/perf-baseline-2026-10-17.md`
+- [x] P1-1 上传写透解析缓存：`_BytesLRUCache.put` + `put_cached_parsed_file` + `_register_file` 调用；`tests_parse_cache` 加 2 例
+- [x] P1-2 看板汇总加缓存（614ms → <20ms）：`get_dashboard_summary` + key 含 thresholds/mtime；`tests_cache.py` 4 例
+- [x] P1-3 导出去掉无条件 `df.copy()`：改为惰性复制 + 返回前兜底
+- [x] P1-4 新增 `/files/options/` 轻量端点；分析页与看板页改用它（DataManagement 未动，它的列表就是表格本身）；`max_page_size` **未收**（DataManagement 仍依赖 9999）
+- [ ] P1-5 处理 browse `search` 潜在路径（16.2s，UI 未接线）：**本轮跳过**——`browse_views.py` 当时带着固定列批次的未提交改动，避免混 diff；`test_browse_api.py` 有 `search='5000'` 契约，只能修不能删
+- [x] P2 写事务与解析解耦：新增 `parse_file_meta`，`_register_file(parsed=...)`；ZIP 与目录导入改「事务外解析 + 每文件短事务」；`tests_import_tx.py` 3 例（`TransactionTestCase`，`TestCase` 的外层 atomic 会让 `in_atomic_block` 恒真）
+- [ ] P3 重活作业化：设计稿已出 `docs/specs/2026-10-17-heavy-job-offload-design.md`，**未实施**
+- [ ] P4 部署与容量：`deploy/gunicorn.conf.py` 入库；关 `WHITENOISE_USE_FINDERS`；media 配额 + 内容去重；`/api/v1/metrics/`
+- [ ] P5（触发式）Postgres 立项判据：`database is locked` >10 次/天 或 写 P95 >1s 或 改判多 worker
+
+**D2 的落地口径与方案原文有差异**：没有改成「上传只登记、首次打开才解析」，而是
+「上传仍解析一次 + 写透缓存」。理由：`row_count/col_count` 是文件列表的可见字段，
+延迟解析会让它们在上传后到首次打开前显示为空；而两条路的**总 CPU 完全相同**（都是一次全量解析），
+延迟只是把成本从上传请求挪到首次打开请求，收益仅「上传接口早返回」。真要那条收益，
+得给 4 个 parser 各加一条 header-only 路径，属独立批次。

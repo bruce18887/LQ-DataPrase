@@ -22,6 +22,7 @@ from .services import (  # noqa: F401
     _derive_param_stats,
     compute_quality_alerts,
     compute_dashboard_summary,
+    get_dashboard_summary,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,8 +56,10 @@ class DashboardSummaryView(APIView):
                 return error_response('parse_failed', status=200)
 
             cpk_thresholds = get_cpk_thresholds(request.user)
-            return Response(compute_dashboard_summary(
-                df, datafile, fmt, metadata, thresholds=cpk_thresholds))
+            # 走缓存层：同一文件 + 同一阈值 + 未变更的 mtime 时直接返回上次结果，
+            # 避免切 Tab 重复付出 ~600ms 的整表计算。
+            return Response(get_dashboard_summary(
+                datafile, df, fmt, metadata, cpk_thresholds))
         except Http404:
             # get_object_or_404 的 404 语义不能被兜底吞掉
             raise
