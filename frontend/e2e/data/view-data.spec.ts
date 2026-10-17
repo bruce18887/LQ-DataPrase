@@ -31,7 +31,14 @@ function viewScope(page: Page) {
  * 从 /browse/ API 拿全量行，定位测试所需的确定性行：
  * - failIdx/failCols/binValue：首个 bin != 1 的行及其 __fail_cells__
  * - passIdx：首个 bin == 1 的行
- * - farIdx/farCol：首个「含非 bin fail 列且该列在 headers 中 index >= 50」的行（346 列文件必在屏幕外）
+ * - farIdx/farCol：首个「index >= 10 且 __fail_cells__ 首列即远列（headers index >= 50）」的行（346 列文件必在屏幕外）。
+ *   必须是首列：goToFailCell 跳的是第一个可见 fail 列，素材若只「含」远列而首列是近列，
+ *   横向滚动落在近列上，farCol 永远滚不进视图。必须 >= 10：贴着数据开头的行会让 ag-grid
+ *   'middle' 的滚动量被 clamp 成 0，「居中」与「不居中」表现一致 → 垂直断言退化成空断言
+ *   （实测取第 0 行时传 'middle' 照样全绿）。
+ *   取最后一个而不是首个：首个这种行往往贴着数据开头，行在视口里的落点让 ag-grid 的 'middle'
+ *   滚动量被 clamp 掉，「居中」与「不居中」表现一致 → 垂直断言退化成空断言
+ *   （实测传 'middle' 也全绿，故改为取末位）。
  * - binOnlyIdx：首个 __fail_cells__ 恰为 [bin] 的行（仅 bin fail，无测试列越限）
  */
 /**
@@ -92,11 +99,15 @@ async function fetchBinFailInfo(page: Page, filename: string) {
           info.binValue = String(v)
           info.failCols = fc
         }
-        if (info.farIdx === -1 && fc.length > 1) {
-          const far = fc.find((c) => c !== bin && colHeaders.indexOf(c) >= 50)
-          if (far) {
+        if (fc.length > 1 && i >= 10) {
+          // goToFailCell 跳的是 __fail_cells__ 里第一个可见 fail 列（测试列在前、bin 最后），
+          // 所以素材必须让**首列**就是远列，否则横向滚动会落到近列、farCol 永远滚不进视图。
+          // i >= 10：行要离顶够远，否则 'middle' 的滚动量被 clamp 成 0，居中与不居中同表现；
+          // 同时留在首个 IRM 块（100 行）内，避免深行触发分块加载把 rowTop 挪动造成 flaky。
+          const first = fc[0]
+          if (info.farIdx === -1 && first && first !== bin && colHeaders.indexOf(first) >= 50) {
             info.farIdx = i
-            info.farCol = far
+            info.farCol = first
           }
         }
         if (info.binOnlyIdx === -1 && fc.length === 1 && fc[0] === bin) {
@@ -797,12 +808,59 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     expect(prevented).toBe(false)
   })
 
-  test('@p2 菜单「定位到 Fail 单元格」：横向滚动到 fail 列 + flash', async ({ page }) => {
+  test('@p2 菜单「定位到 Fail 单元格」：横向滚动到 fail 列 + flash，垂直不甩动', async ({ page }) => {
     await openViewTab(page, SEEDED_FILES.CTA8280F_FT)
     const info = await fetchBinFailInfo(page, SEEDED_FILES.CTA8280F_FT)
     if (info.farIdx === -1) test.skip(true, '无远列 fail 行')
 
     const farRow = await ensureRowRendered(page, info.farIdx)
+    const vScroll = page.locator('.ag-body-vertical-scroll-viewport')
+
+    /**
+     * 目标行顶缘相对垂直视口顶缘的偏移（px）；行未渲染时返回 null。
+     *
+     * 返回 null 而不是抛错：滚动后 ag-grid 会重排行 DOM，读盒模型的瞬间正好处在
+     * 「旧行已卸载、新行还没挂上」的窗口里，抛错会让重钉循环变成偶发红。
+     */
+    const rowOffset = async (): Promise<number | null> => {
+      const vpBox = await vScroll.boundingBox()
+      const rowBox = await farRow.boundingBox()
+      if (!vpBox || !rowBox) return null
+      return rowBox.y - vpBox.y
+    }
+    /**
+     * 把目标行**钉**在视口顶部并等它钉住（偏移 ≤1px 才放行）。
+     *
+     * 必须迭代而不是「写一次 scrollTop 就算数」：深行的 rowTop 会随 IRM 分块加载漂移，
+     * 写完 scrollTop 之后的重排会把行推到别处。实测过一次性写法让行正好漂到居中位，
+     * 于是 'middle' 算出的目标滚动量与当前位置相等 → 甩动不发生 → 垂直断言当场变空。
+     */
+    async function pinRowToViewportTop() {
+      for (let i = 0; i < 12; i++) {
+        const off = await rowOffset()
+        if (off !== null && Math.abs(off) <= 1) return off
+        if (off !== null) {
+          await vScroll.evaluate((el, d) => { (el as HTMLElement).scrollTop += d }, off)
+        }
+        await page.waitForTimeout(200)
+      }
+      throw new Error(`目标行钉不到视口顶部（rowTop 持续漂移），farIdx=${info.farIdx}`)
+    }
+
+    await pinRowToViewportTop()
+    const vpBox = await vScroll.boundingBox()
+    expect(vpBox, '垂直视口无盒模型').not.toBeNull()
+    const centerOffset = (vpBox!.height - 30) / 2
+    // 承重前置之一：居中位本身要有可测位移。视口矮到 centerOffset≈0 时，
+    // 'middle' 与不传 position 算出的滚动量相同，下面的等值断言会永远全绿。
+    expect(centerOffset, `视口可用高仅 ${vpBox!.height}px，居中位移不可辨 → 垂直断言会哑`).toBeGreaterThan(30)
+    // 承重前置之二：滚动量必须大于居中位。行贴着数据开头时 scrollTop 已经是最小的 0，
+    // 'middle' 的目标值算出来是负数、被 clamp 回 0 —— 实测 farIdx=0 时两种实现同样不动。
+    const vBefore = await vScroll.evaluate((el) => el.scrollTop)
+    expect(
+      vBefore,
+      `滚动量 ${vBefore} 不大于居中位 ${Math.round(centerOffset)}px，'middle' 会被 clamp → 垂直断言会哑`,
+    ).toBeGreaterThan(centerOffset)
 
     // 前置：farCol 在屏幕外（列虚拟化 → 无此 header 元素）
     await expect(page.locator(`.ag-header-cell[col-id="${info.farCol}"]`)).not.toBeVisible()
@@ -821,6 +879,13 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     await expect
       .poll(async () => hScroll.evaluate((el) => el.scrollLeft), { timeout: 5_000 })
       .toBeGreaterThan(before)
+
+    // 垂直一动不动：滚动量分毫未变（旧实现传 'middle' 会把它拉回正中，实测甩掉 166px）。
+    // 只量 scrollTop、不再量行的盒模型：IRM 的 rowTop 会随分块加载漂移，行会在 scrollTop
+    // 不变的情况下自己挪几像素 —— 那不是本用例要管的甩动，量它只会招来偶发红（实测 flaky）。
+    await expect
+      .poll(async () => vScroll.evaluate((el) => el.scrollTop), { timeout: 5_000 })
+      .toBe(vBefore)
 
     // farCol 列头与 fail 单元格已滚入视图
     await expect(page.locator(`.ag-header-cell[col-id="${info.farCol}"]`)).toBeVisible({

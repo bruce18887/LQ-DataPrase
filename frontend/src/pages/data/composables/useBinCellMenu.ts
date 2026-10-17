@@ -67,6 +67,12 @@ export function useBinCellMenu(opts: {
    * 定位到该行第一个可见的 fail 列并 flash 高亮。
    * 顺序不可反：先垂直再水平滚动（同步渲染目标行/列），随后 flashCells 才能拿到已渲染的 cell ctrl。
    * 仅 bin fail 的行目标列即 bin 列本身 → ensureColumnVisible 是 no-op，只 flash pinned 单元格。
+   *
+   * 垂直不传 position：菜单是在这一行上右键点出来的，它必然已在视口内，而 ag-grid 传
+   * 'middle' 时无条件拉回居中（position 为空才只在行出视口时最小滚动，见
+   * ag-grid GridBodyScrollFeature.ensureIndexVisible）。传了就等于每次跳转都把用户
+   * 攒的滚动位置甩掉；水平仍用 'middle'——目标 fail 列在数百列文件里通常在屏幕外，
+   * 居中才有上下文。
    */
   function goToFailCell(rowIdx: number) {
     const api = gridApi.value
@@ -79,7 +85,7 @@ export function useBinCellMenu(opts: {
     const visibleFailCols = all.filter((c) => displayCols.value.includes(c))
     const failCol = visibleFailCols[0] ?? pinnedCol.value
 
-    api.ensureNodeVisible(node, 'middle')
+    api.ensureNodeVisible(node)
     api.ensureColumnVisible(failCol, 'middle')
     if (visibleFailCols.length) {
       // 同一 tick 内 ensure* 已同步渲染目标单元格

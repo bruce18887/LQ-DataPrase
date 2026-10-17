@@ -1,3 +1,59 @@
+# 任务：查看数据页四项（2026-10-17，用户点定顺序 3→1→2→4）
+
+用户在「查看数据」页截图提了四项，我逐条评估后他回「按 3→1→2→4 依次推」＝整批授权、分批提交、不含 push。
+
+## 批 3：右键跳转 fail 单元格不再把该行甩回正中 —— 已完成
+
+- 根因一句话：`useBinCellMenu.goToFailCell` 给 `ensureNodeVisible` 传了 `'middle'`。
+  这一行是用户右键点出来的、必然已在视口内，而 ag-grid 的 `GridBodyScrollFeature.ensureIndexVisible`
+  只在 position 为 top/bottom/middle 三者之外才走「出了视口才最小滚动」那一支
+  （`ag-grid-community.js:24099-24113`，v35.3.0）。去掉 position 即一动不动。
+- 水平方向**保留** `'middle'`：目标 fail 列在数百列文件里通常在屏幕外，居中才有上下文。
+- 判据改造的三条实测教训（都写进了 spec 注释，别改回去）：
+  1. 素材不能取「首个含远列的行」——那往往是第 0 行，`'middle'` 的目标滚动量算出来是负数、
+     被 clamp 回 0，旧实现照样全绿。改成「首个 index>=10 且 `__fail_cells__` **首列**即远列」，
+     并加两条承重前置：居中位 >30px、滚动量 > 居中位。
+  2. 首列必须是远列：`goToFailCell` 跳的是第一个可见 fail 列，素材若只「含」远列而首列是近列，
+     横向滚动落在近列上，farCol 永远滚不进视图（实测红在 `.ag-header-cell[col-id=CON_VIN_Post]`）。
+  3. 只量 `scrollTop`，不量行的盒模型：深行的 rowTop 随 IRM 分块加载漂移，实测同一
+     scrollTop=4334 下行 y 在 481/652 之间跳 ⇒ 量它是招 flaky，不是加覆盖。
+- 验证：A/B 对照 —— 旧实现独占复跑**稳定真红**（`Expected: 4500 / Received: 4334`，甩 166px，
+  负载抖动 0）；新实现两轮 22 例 0 红 0 flaky（skipped 1 是既有的「仅 Bin fail 行」素材缺口）。
+  `npx vitest run` 249 绿 · `lint:e2e` 绿 · `npm run build` 绿。
+
+## 批 1：三个操作按钮并入「当前文件」横幅 + 筛选行压高 —— 待做
+
+- 只搬按钮不搬筛选：5 个筛选控件实测要 1030–1400px，1440/1280 必折行，一折行省的高全吐回去；
+  3 个按钮约 370px，任何宽度都放得下。
+- 另一半收益：`TestColumnSelector` 的「全选/清空」挂在控件下面成独立一行，挪进下拉 footer。
+- ⚠ 必须同批改 `DataBrowserAgGrid.vue:134` 的 `TABLE_TOP_OFFSET = 320`，否则省出来的高度
+  不会变成表格行数，这次改动等于白做。**动手前先实测顶部占位**（别沿用我上一轮口算的 68px）。
+- 测试通路：e2e 用 `viewScope()` = `.content-section:visible` 定位、按钮按文案找，搬位置不破坏选择器。
+
+## 批 2：固定列支持 serial 列（改多选）—— 待做
+
+- 后端已有全项目唯一的序列列解析器 `SERIAL_COLUMN_PRIORITY` / `get_serial_candidates()`
+  （`apps/analysis/services/statistics/helpers.py:52-74`），四种格式的名字确实不同
+  （`Serial_No` / `Serial #` / `PART_ID`，见 `parsers/base.py:138-147`）。前端**不要**再用名称启发式。
+- 三处改动：`/browse/` page==1 多下发 `serial_column`（挨着 `system_columns` 那段）；
+  `pinnedCol: string` → `pinnedCols: string[]` + 固定列下拉 `multiple`（ag-grid 社区版原生支持多列
+  `pinned:'left'`）；`applyMeta` 像自动 pin Bin 一样自动 pin serial。
+- 真正的活是解耦：`useBinCellMenu` 现在拿「谁是固定列」当「谁是 Bin 列」（`handleBodyContextMenu`
+  判 `colId !== pinnedCol`、`goToFailCell` 回退 `pinnedCol.value`）。多固定列后右键 Serial 会弹 Bin
+  菜单 ⇒ 必须把 Bin 列名单独传进去。
+- 测试通路：`view-data.spec.ts` 的 `@p1 固定列` 那条按单选写（「选中后占位文本消失」），要重做。
+
+## 批 4：查看数据同时打开多个文件 —— 待做
+
+- 形态选「查看数据内部的文件标签页」，不做左右分屏（346 列文件各剩 ~950px，两边都在横向滚），
+  不做多 Electron 窗口（要动窗口管理 + 每窗口路由，且把 CDP 验证通路搞复杂）。
+- 状态袋照 `stores/analysisTabs.ts` 的 `useStateBag` 工厂（reset 与初始值不分叉）。
+- 挂载策略：`DataBrowserAgGrid` 已经把 `fileId` 当 prop、切换时整体重置，所以最省的是
+  `v-for` 挂 N 个实例 + `v-show` 切活动 tab，组件内部逻辑不动；但要**首次激活才挂载**，
+  否则 N 个 tab 首挂就是 2N 个请求（每实例 `authApi.getSettings()` + `DataQualityBar` 的 `/summary/`）。
+- 前置阻塞：`DataManagement.vue:122` 的 `activeFileId` 被「查看数据」和「导出工具」共用，必须先拆开。
+- 内存可控：IRM `maxBlocksInCache=20 × blockSize(≤500)`、行对象已 `markRaw`。上限建议 4 个 tab。
+
 # 任务：切测试项提效第二批——连切不浪费算力 + 换文件的大文件成本（2026-10-17）
 
 第一批（KDE 按需、站点表并入）见下一节。用户点定继续做第 3、4 点。
