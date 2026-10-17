@@ -110,6 +110,7 @@
             :split-by-site="splitBySite"
             :symbol-size="effSize"
             :opacity="effOpacity"
+            :range-type="rangeType"
             @update:serial-col="(v: string) => { serialCol = v }"
           />
           <el-empty v-else description="当前参数无序列分布数据，请选择其他参数" />

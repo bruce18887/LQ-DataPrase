@@ -67,23 +67,11 @@ function seriesCountByName(opt: any, name: string): number {
   return (opt?.series ?? []).filter((s: any) => s.name === name).length
 }
 
-/**
- * 复刻组件的每 lane 数据自适应范围规则（SerialChart.rangeOfPoints，2026-09-13）：
- * anchor==0 值的 min/max ±8% pad（单值退化用 |v|·5%）。测试侧重写一份算法 =
- * 回归钉（旧行为共享完整规格限范围时会不等）。
- */
-function expectedLaneRange(points: any[]): { min: number; max: number } | null {
-  const vals: number[] = []
-  for (const p of points) {
-    if ((p[3] ?? 0) !== 0) continue
-    if (typeof p[1] === 'number' && Number.isFinite(p[1])) vals.push(p[1])
-  }
-  if (!vals.length) return null
-  const mn = Math.min(...vals)
-  const mx = Math.max(...vals)
-  if (mx > mn) { const pad = (mx - mn) * 0.08; return { min: mn - pad, max: mx + pad } }
-  const dlt = Math.max(Math.abs(mx) * 0.05, 1e-9)
-  return { min: mn - dlt, max: mx + dlt }
+/** 某 lane 里「会被绘制」的点值（anchor==0；anchor=1 不画、2/3 贴边画） */
+function laneDrawableValues(laneData: any[]): number[] {
+  return (laneData || [])
+    .filter((p: any[]) => (p[3] ?? 0) === 0 && typeof p[1] === 'number' && Number.isFinite(p[1]))
+    .map((p: any[]) => p[1])
 }
 
 /** 序列图齿轮设置按钮（点径/透明度/按 Site 拆分都在弹层里，2026-09-13 齿轮化） */
@@ -209,7 +197,7 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
     await expect.poll(siteOpacity).toBe(tier.opacity)
   })
 
-  test('按 Site 拆分：每 lane 贴合自身数据范围 + 联动缩放 + 图例去 Site', async ({ page }) => {
+  test('按 Site 拆分：每 lane 覆盖自身数据且共享规格限窗 + 联动缩放 + 图例去 Site', async ({ page }) => {
     const { canvas, resp } = await enterSerial(page, RECOMMENDED.analysis)
     const body = await resp.json()
     const n = (body.series_data || []).length
@@ -219,12 +207,18 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
     const opt = await readOption(canvas)
     expect(opt.xAxis.length).toBe(n)
     expect(opt.yAxis.length).toBe(n)
-    // 每 lane 各自贴合其数据范围（2026-09-13：不再共享完整规格限范围，减少 lane 内空白）
+    // 每 lane = 自身数据 ∪ 共享限值窗（2026-10-17）：两限在每条 lane 里都可见且外侧
+    // 留余量，同时该 lane 的正常点不被裁。公式细节由 T2 钉，此处只证接线。
+    const lo = body.lower_limit
+    const hi = body.upper_limit
     opt.yAxis.forEach((y: any, i: number) => {
-      const exp = expectedLaneRange(body.series_data[i].data || [])
-      if (!exp) return
-      expect(y.min, `lane ${i} y 下限贴该 lane 数据`).toBeCloseTo(exp.min, 6)
-      expect(y.max, `lane ${i} y 上限贴该 lane 数据`).toBeCloseTo(exp.max, 6)
+      const vals = laneDrawableValues(body.series_data[i].data)
+      if (!vals.length || !Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return
+      const margin = (hi - lo) * 0.09 // 断 9% 而非实现的 10%：系数微调不该让本用例误红
+      expect(y.min, `lane ${i} LSL 外侧余量`).toBeLessThan(lo - margin)
+      expect(y.max, `lane ${i} USL 外侧余量`).toBeGreaterThan(hi + margin)
+      expect(y.min, `lane ${i} 覆盖自身数据`).toBeLessThan(Math.min(...vals))
+      expect(y.max, `lane ${i} 覆盖自身数据`).toBeGreaterThan(Math.max(...vals))
     })
     // 仅末 lane 显示 X 标签
     opt.xAxis.forEach((x: any, i: number) => {

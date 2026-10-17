@@ -38,6 +38,7 @@ import { computed } from 'vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
 import { formatAxisValue, getSiteColors8, buildChartToolbox } from '../../../utils/chart-bar'
+import { resolveSerialYBounds } from '../composables/serial-axis-range'
 import OutlierHintBar from './OutlierHintBar.vue'
 
 const props = withDefaults(defineProps<{
@@ -53,7 +54,9 @@ const props = withDefaults(defineProps<{
   symbolSize?: number
   /** 生效透明度 0-1 */
   opacity?: number
-}>(), { serialCol: '', serialCandidates: () => [], splitBySite: false, symbolSize: 6, opacity: 0.85 })
+  /** 取值区间档位：决定规格限窗是否参与 Y 轴范围（见 serial-axis-range.ts） */
+  rangeType?: string
+}>(), { serialCol: '', serialCandidates: () => [], splitBySite: false, symbolSize: 6, opacity: 0.85, rangeType: '' })
 const emit = defineEmits<{ (e: 'update:serialCol', value: string): void }>()
 const { colors, isDark } = useEChartsTheme()
 
@@ -92,61 +95,36 @@ function buildOption() {
     if (typeof s === 'number') serialIndex.set(s, i)
   })
 
-  // —— Y 轴范围：默认按数据自适应（2026-09-13）——
-  // 后端 y_min/y_max = 规格限 ±10% padding；规格限离数据很远时（如某参数 USL/LSL
-  // 远于数据带），整个绘图区被撑成「数据窄带 + 大片空白」。改为由 anchor==0 点的
-  // 实际值算紧凑范围，规格限/σ 线超出视野时在 markLine 层贴边钳制并加 ↑/↓。
-  //
-  // 不变量（勿破坏）：后端 _anchor() 以 [spec_lower, spec_upper]±10% 标记 anchor，
-  // 而 anchor==0 的定义就是落在该范围内 → 前端自适应范围必是后端范围的**子集**。
-  // 因此 anchor=2/3 点仍必落在自适应范围之外、贴边钳制继续正确；anchor=0 点永不
-  // 被裁掉。若把 marks（规格限/σ）的绝对值并入范围，此性质即被破坏。
+  // —— Y 轴范围：数据自适应 ∪ 规格限窗 ——
+  // 规则与不变量（正常点永不被裁 / RDL·CL 两限同时可见且外侧留余量）抽在
+  // serial-axis-range.ts，由 T2 跑全组合；此处只按 lane 各调一次：合并 = 全体点集，
+  // 拆分 = 各 lane 自身点集，而限值窗对所有 lane 相同（拆分后跨 Site 的纵向刻度
+  // 因此第一次可比 —— 旧实现每 lane 各自贴合自身数据，刻度互不可比）。
   const outlierInfo = d.outlier_info
-  const handlingMode = props.outlierHandling || 'off'
-
-  /** 一组原始点（[serial, value, is_fail, anchor]）→ 该组 anchor==0 值的紧凑范围 */
-  function rangeOfPoints(points: number[][], fbLo: number, fbHi: number): [number, number] {
-    let mn = Infinity
-    let mx = -Infinity
-    for (const p of points) {
-      if ((p[3] ?? 0) !== 0) continue // 超界点锚到轴边，不参与范围计算（否则极值炸开）
-      const v = p[1]
-      if (typeof v !== 'number' || !Number.isFinite(v)) continue
-      if (v < mn) mn = v
-      if (v > mx) mx = v
-    }
-    if (mn === Infinity) return [fbLo, fbHi] // 无有效值 → 回退后端范围
-    if (mx > mn) {
-      const pad = (mx - mn) * 0.08
-      return [mn - pad, mx + pad]
-    }
-    const dlt = Math.max(Math.abs(mx) * 0.05, 1e-9) // 单值/全等退化
-    return [mn - dlt, mx + dlt]
-  }
-
   const siteSeriesRaw: { name: string; data: number[][] }[] = d.series_data || []
   const siteColors = getSiteColors8(isDark.value)
   const split = props.splitBySite && siteSeriesRaw.length >= 2
   const laneCount = split ? siteSeriesRaw.length : 1
 
-  // 离群处理开启且确有异常值：沿用 IQR 栅栏范围（有意的裁剪口径，不改成数据自适应，
-  // 否则「异常值处理」的视觉语义丢失）。否则按数据自适应。
-  const useIqrRange = handlingMode !== 'off' && outlierInfo?.has_outliers
-  let iqrBounds: [number, number] | null = null
-  if (useIqrRange) {
-    const pad = (outlierInfo.upper_bound - outlierInfo.lower_bound) * 0.1
-    iqrBounds = [outlierInfo.lower_bound - pad, outlierInfo.upper_bound + pad]
-  }
-  // 合并：全体 anchor=0 值并集；拆分：每 lane 各自贴合其数据范围
-  const laneBounds: [number, number][] = laneCount === 1
-    ? [iqrBounds ?? rangeOfPoints(siteSeriesRaw.flatMap((sd) => sd.data || []), d.y_min, d.y_max)]
-    : siteSeriesRaw.map((sd) => iqrBounds ?? rangeOfPoints(sd.data || [], d.y_min, d.y_max))
+  const laneBounds: [number, number][] = (laneCount === 1
+    ? [siteSeriesRaw.flatMap((sd) => sd.data || [])]
+    : siteSeriesRaw.map((sd) => sd.data || [])
+  ).map((points) => resolveSerialYBounds({
+    points,
+    fallback: [d.y_min, d.y_max],
+    lowerLimit: d.lower_limit,
+    upperLimit: d.upper_limit,
+    rangeType: props.rangeType,
+    outlierInfo,
+    outlierHandling: props.outlierHandling || 'off',
+  }))
 
   /**
    * 点格式 [serial, value|null, is_fail, anchor]（无 bin 列的文件为 [serial, value]）。
    * anchor: 0=正常 1=无测量值 2=值>后端 y_max 3=值<后端 y_min。超界点锚定到**可见**
-   * 轴边缘——自适应 yAxis min/max 不随数据扩展，不锚定的话巨大的 fail 值（如 Kelvin
-   * 10000）会被整段裁切，图上根本看不到 fail 点。无测量值（anchor=1）不绘制：画在
+   * 轴边缘——轴范围只由 anchor==0 的点与规格限窗决定，绝不因超界点的绝对值而扩展，
+   * 不锚定的话巨大的 fail 值（如 Kelvin 10000）会被整段裁切，图上根本看不到 fail 点。
+   * 无测量值（anchor=1）不绘制：画在
    * X 轴底部会被误读成 0 值数据点（其颗数仍计入副标题 Pass/Fail）。
    */
   function toPoint(p: number[], lo: number, hi: number) {
@@ -197,7 +175,7 @@ function buildOption() {
   let xAxes: any[]
   let yAxes: any[]
   let dataZoom: any[]
-  // —— 轴/网格：合并单面板；拆分 N 条 lane（每 lane 贴合自身数据范围，2026-09-13）——
+  // —— 轴/网格：合并单面板；拆分 N 条 lane（每 lane = 自身数据 ∪ 共享限值窗）——
   if (split) {
     // 拆分小多图：纵向可用区从旧的 60% 提到 68%（lane 更高）；bottom 22% 需容纳
     // 末 lane 的 45° X 标签 + 轴名(nameGap 30) + 图例(绝对 bottom:5，否则会压轴名)
@@ -223,7 +201,9 @@ function buildOption() {
   }
 
   /** markLine 贴边钳制：超出该 lane 可见范围的参考线钉到轴边并加 ↑/↓（副标题
-      已显示数值 LSL/USL，箭头只提示「贴边且真实值更外」）。不改 d.marks 本体。 */
+      已显示数值 LSL/USL，箭头只提示「贴边且真实值更外」）。不改 d.marks 本体。
+      RDL/CL 档的规格限已被轴范围盖住、走不到这里；仍会命中的是 σ 档的限值与
+      其余档位下的 3σ/4σ/6σ 线（其绝对值可达数据带宽的数十倍）。 */
   function clampMarkLine(ml: any, lo: number, hi: number) {
     if (!ml?.data) return ml
     return {
@@ -346,7 +326,7 @@ function buildOption() {
 // canvas 无 DOM 节点，官方推荐大数据散点必用 canvas）；小数据量跟随用户全局设置
 const { chartRef } = useChart(
   buildOption,
-  [() => props.data, () => props.outlierHandling, () => props.symbolSize, () => props.opacity, () => props.splitBySite],
+  [() => props.data, () => props.outlierHandling, () => props.symbolSize, () => props.opacity, () => props.splitBySite, () => props.rangeType],
   'chartRef',
   () => (isLarge.value ? 'canvas' : getChartRenderer()),
 )
