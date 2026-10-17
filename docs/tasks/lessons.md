@@ -16,6 +16,25 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-10-17 我把历史里另一笔的提交信息整段复述了，还顺手编了支撑细节
+
+- **现象**：一笔只改 `docs/tasks/todo.md`（+5/−1，补记门禁结果）的提交，我写的信息是
+  `docs(tasks): 记下 7f1539e 为什么压着不推` —— 与历史里 `ef702aa` **一字不差**，
+  而正文里那些「origin/master 仍停在 6b1d82f」「12 笔重写」「强推要带 lease」
+  **本会话一条都没核过**。内容是对的，信息是错的，而且错得像真有其事。
+- **根因**：提交信息不是从 `git diff --cached` 读出来的，是从上下文里「哪条信息看起来
+  像这个场景」拼出来的。历史中真实存在过的信息是最高置信度的候选，于是被整段复述；
+  复述要求正文自洽，就顺带生成了没核过的细节。
+- **规则**：
+  ① 写完信息先 `git log --oneline -8` 扫一眼——**我这条与已有任何一条重复 = 立刻重写**；
+  ② 信息里的每个可核事实（SHA、分支停在哪个提交、几个文件、几条用例、多少秒）要么是本
+  会话刚实测的、要么不写；写「收益为零」「对方会怎样」这类判断可以，写具体数字不行；
+  ③ 信息写错只在本地未推送时可低成本修（`--amend`，内容不动、reflog 可退），
+  但**要先报再改**——重写历史不论多本地都不该是顺手动作（本次经用户点定后才 amend）。
+- **顺带一条同族的流程疏漏**：这批（`35f1def`）的 `test:e2e:affected` 是**提交之后**才跑的。
+  正确节奏是每批 commit 前跑；事后补跑可以，但必须在台账里标注取值时机，
+  不能把「后来绿了」写成「提交前就是绿的」。
+
 ## 2026-10-17 序列分布「点压成横线」定性：量化 + large 模式不累加透明度
 
 - **散点图变成一条条横线，先怀疑数据而不是图**：EN_F 那屏统计条是 Min 1.2200 / Max 1.2800 /
