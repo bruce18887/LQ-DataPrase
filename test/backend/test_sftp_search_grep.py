@@ -465,7 +465,7 @@ class ShellSurfaceTests(SimpleTestCase):
                     f'{rel} 自己开了 exec channel 却不把命令交给 shell_grep 构造')
 
     def test_bash_only_gbk_needle_trick_is_not_ported(self):
-        """参考工具用 ANSI-C 引用（dollar-quote + 逐字节 hex 逃逸）追加 GBK needle。
+        """ANSI-C 引用（dollar-quote + 逐字节 hex 逃逸）追加 GBK needle 的写法不移植。
 
         本设计里非 ASCII 已被 select_engine 整体挡在 grep 档外，这里钉住「没被顺手
         移植回来」——那会把结果是否完整押在远端是 bash 还是 dash 上。钉的是**写法**

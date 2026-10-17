@@ -1,4 +1,4 @@
-"""列值读取 ``scanners.read_column``（spec §3.5 末段，参考工具 csv_column_reader.py）。
+"""列值读取 ``scanners.read_column``（spec §3.5 末段）。
 
 跑法：python manage.py test test.backend.test_sftp_search_column
 
@@ -124,7 +124,7 @@ class ColumnTests(SimpleTestCase):
         self.assertEqual(out['start_time'], '2026-09-01 08:00:00')
 
     def test_no_data_section_means_no_table(self):
-        """[DATA] 之前的 key,value 行不是数据表。参考工具缺这条约束，
+        """[DATA] 之前的 key,value 行不是数据表，
         列名撞上文件头键名就会读出垃圾 —— 这里钉住它。"""
         self.assertIsNone(self.read(
             content=b'TestFile,a\r\nSN,ShadowReg2\r\n1,0.5\r\n'))
@@ -172,8 +172,8 @@ class ColumnTests(SimpleTestCase):
             ['0.42'])
 
     def test_unit_and_limit_rows_are_skipped(self):
-        """表头下紧邻的 Unit/Min/Max 三行**不是**读数（2026-09-21 产品拍板跳过；此前与
-        参考工具一致地把它们当值取走）。真数据 56/56 个含 ``[DATA]`` 的 datalog 都在表头
+        """表头下紧邻的 Unit/Min/Max 三行**不是**读数（2026-09-21 产品拍板跳过；
+        此前按字面取值会把它们当读数）。真数据 56/56 个含 ``[DATA]`` 的 datalog 都在表头
         下方写这三行（``Data/`` 全量比对每行首格），不跳的话结果前几格是单位与限值。
         位置判据的另一个来源是 ``apps/datafiles/parsers/base.py:154-155``
         （CTA8290D/CTA8280F：header +1 / unit +2 / min +3 / max +4 / data +5）。"""
@@ -204,7 +204,7 @@ class ColumnTests(SimpleTestCase):
     def test_naive_comma_split_matches_quoted_field_free_data(self):
         """切分口径：本域 ``[DATA]`` 段实测**没有**引号字段也没有内嵌逗号
         （Data/ 全量比对 naive ``split(',')`` 与 ``csv.reader`` 逐行结果一致，含 342 列的
-        表头），所以沿用参考工具的朴素切分。这条钉住「表头里没有带引号的项名」这个前提。"""
+        表头），所以沿用朴素切分。这条钉住「表头里没有带引号的项名」这个前提。"""
         out = self.read(content=b'[DATA]' + CRLF + b'SN,LKG_VIN,Vcc' + CRLF
                         + b'1,7.49,3' + CRLF, column='Vcc')
         self.assertEqual(values_of(out), ['3'])

@@ -1,7 +1,7 @@
 """真 paramiko SFTP 服务器上的并行一致性集成测试（spec §4.3）。
 
-全计划里**唯一**能抓出「多线程共用一条 channel 把协议流写乱」（参考工具
-``csv_content_searcher.py:24-27`` 记的 ``Garbage packet received``）的一级：
+全计划里**唯一**能抓出「多线程共用一条 channel 把协议流写乱」（``Garbage packet
+received`` 就是这种失败的真面目）的一级：
 ``FakeSftp`` 与 ``MagicMock`` 都不走协议，只有真客户端对真服务器才会现形。
 所以这里跑的是真 ``paramiko.SFTPClient`` 对真 ``paramiko.SFTPServer`` 子进程。
 

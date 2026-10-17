@@ -920,7 +920,7 @@ class ConnectTests(SimpleTestCase):
         self.assertTrue(all(tr.closed for tr in self.built))
 
     def test_every_connection_goes_through_host_key_verification(self):
-        """参考工具用 AutoAddPolicy，会破坏本项目 TOFU 契约。"""
+        """AutoAddPolicy 会破坏本项目 TOFU 契约。"""
         s = connect.SearchSession(1, 3)
         s.open_all()
         self.assertEqual(len(self.built), 3)   # built 只在 fake_open 里追加
@@ -1529,7 +1529,7 @@ BFS 而非 DFS：宽树下候选从一开始就在往 UI 流，不是一头扎�
 `test/backend/test_sftp_search_scan.py`。四轴笛卡尔积：**编码 × 大小写 × 整词 × 跨 chunk**。
 
 ```python
-"""字节级内容扫描内核（spec §3.5，移植自参考工具 csv_content_searcher.py）。
+"""字节级内容扫描内核（spec §3.5）。
 
 跑法：python manage.py test test.backend.test_sftp_search_scan
 """
@@ -1910,7 +1910,7 @@ class ColumnTests(SimpleTestCase):
         self.assertEqual(out['start_time'], '2026-09-01 08:00:00')
 
     def test_no_data_section_means_no_table(self):
-        """[DATA] 之前的 key,value 行不是数据表。参考工具缺这条约束，
+        """[DATA] 之前的 key,value 行不是数据表，
         列名撞上文件头键名就会读出垃圾 —— 这里钉住它。"""
         self.assertIsNone(self.read(
             content=b'TestFile,a\r\nSN,ShadowReg2\r\n1,0.5\r\n'))
