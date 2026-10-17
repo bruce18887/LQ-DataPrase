@@ -49,18 +49,30 @@
 - 文件下拉从固定 320px 改成 `flex: 0 1 320px`（只许收缩不许增长）。中途写成 `1 1` 时
   1920 下下拉被撑到约 1100px，属超出需求的视觉变更，已收回。
 
-## 批 2：固定列支持 serial 列（改多选）—— 待做
+## 批 2：固定列支持 serial 列（改多选）—— 已完成
 
-- 后端已有全项目唯一的序列列解析器 `SERIAL_COLUMN_PRIORITY` / `get_serial_candidates()`
-  （`apps/analysis/services/statistics/helpers.py:52-74`），四种格式的名字确实不同
-  （`Serial_No` / `Serial #` / `PART_ID`，见 `parsers/base.py:138-147`）。前端**不要**再用名称启发式。
-- 三处改动：`/browse/` page==1 多下发 `serial_column`（挨着 `system_columns` 那段）；
-  `pinnedCol: string` → `pinnedCols: string[]` + 固定列下拉 `multiple`（ag-grid 社区版原生支持多列
-  `pinned:'left'`）；`applyMeta` 像自动 pin Bin 一样自动 pin serial。
-- 真正的活是解耦：`useBinCellMenu` 现在拿「谁是固定列」当「谁是 Bin 列」（`handleBodyContextMenu`
-  判 `colId !== pinnedCol`、`goToFailCell` 回退 `pinnedCol.value`）。多固定列后右键 Serial 会弹 Bin
-  菜单 ⇒ 必须把 Bin 列名单独传进去。
-- 测试通路：`view-data.spec.ts` 的 `@p1 固定列` 那条按单选写（「选中后占位文本消失」），要重做。
+- 后端 `/browse/` page==1 多下发 `serial_column`，取值走 `get_serial_column(df)`
+  （`SERIAL_COLUMN_PRIORITY`：serial 子串 → dut 分词精确 → part+id 双子串），与
+  `system_columns` 同段、同样只在 page==1 出现。前端不再按名称猜。
+  四种格式实测各不同：CTA8290D/8280F=`Serial_No`、ETS88=`Serial #`、STS8200=`PART_ID`。
+- 前端 `pinnedCol: string` → `pinnedCols: string[]`，固定列下拉改 `multiple`
+  （ag-grid 社区版原生支持多列 `pinned:'left'`）。默认钉 [Bin, 序列列]；
+  `pinsReady` 区分「没表过态」与「用户主动清空」——清空后换筛选不许回灌默认值，
+  只有「列真的从数据里消失了」（换文件）才回落。
+- 解耦完成：`useBinCellMenu` 不再拿「谁是固定列」反推「谁是 Bin 列」，改收后端 `binCol`。
+  这是本批唯一有真实坏味道的一处 —— 不解耦的话右键序列列会弹 Bin 菜单。
+- **连带打红 3 条既有用例**，都是同一类假设失效：`.ag-pinned-left-cols-container
+  .ag-cell.first()` 被当成 Bin 单元格，而多数格式里序列列的列序在 Bin 之前。
+  新增 `binCell(row, bin)` 按 col-id 取，5 处调用点全部改掉。
+  第 4 条（ETS88 末行断言）是 Serial # 进了固定区后 `.ag-center-cols-container` 里读不到它，
+  改成跨两个容器取行文本。
+- 顺带修一条与本次无关的判据缺陷：`@p1 Fail 筛选` 用「`Fail:` 出现」当等待条件，
+  而未过滤时 fail_row_count 也是 1289 > 0、那一段本来就渲染着 —— 等于什么都没等，
+  实测约 1/4 概率读到 total=10000 / fail=1289 的旧渲染。改成轮询到「行数 == 响应 total」，
+  并把期望值从响应体取（不写死 1289）。改后 3 轮 0 flaky。
+- 判据：后端 4 例（优先级不按列序、无候选下发 null 而非缺键/空串、Dut_No 优先于 PART_ID、
+  page>1 不带该键）；前端 2 条 e2e（默认钉 Bin+序列、多选叠加不顶掉原有的）。
+  多选那条的素材必须挑**非系统列** —— Part_No 等在「默认隐藏列」里，钉一个隐藏列没有可见结果。
 
 ## 批 4：查看数据同时打开多个文件 —— 待做
 

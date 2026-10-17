@@ -2,20 +2,24 @@ import { ref, type Ref, type ComputedRef } from 'vue'
 import type { GridApi, GridReadyEvent } from 'ag-grid-community'
 
 /**
- * 固定 Bin 列 fail 单元格的右键菜单逻辑。
+ * 固定 Bin 列 fail 单元的右键菜单逻辑。
  *
  * 触发条件（与后端 fail 语义 `pd.to_numeric(bin) != 1` 镜像）：
- * 右键落在固定列容器中、列名 == pinnedCol、且单元格值 Number() != 1。
+ * 右键落在固定列容器中、列名 == **Bin 列**、且单元格值 Number() != 1。
  * 其余右键路径（表头 / 其他单元格）一律放行，保留浏览器复制菜单。
  *
- * @param pinnedCol - 当前固定（第一列）的列名，菜单只对它的 fail 单元格生效
+ * ⚠ Bin 列名必须由调用方显式给（后端 page==1 的 bin_column），不能用
+ * 「哪个列被固定了」反推 —— 固定列支持多选后，右键序列列会弹到 Bin 菜单上。
+ *
+ * @param binCol - 后端权威下发的 Bin 列名（菜单只对它的 fail 单元格生效；它没被固定时
+ *                 右键落不进固定列容器，自然不弹）
  * @param displayCols - 当前可见列（排除「隐藏列」与列搜索过滤），决定 fail 列能否被滚动定位
  */
 export function useBinCellMenu(opts: {
-  pinnedCol: Ref<string>
+  binCol: Ref<string>
   displayCols: ComputedRef<string[]>
 }) {
-  const { pinnedCol, displayCols } = opts
+  const { binCol, displayCols } = opts
 
   const gridApi = ref<GridApi | null>(null)
 
@@ -46,7 +50,7 @@ export function useBinCellMenu(opts: {
     ) as HTMLElement | null
     if (!cell) return false
     const colId = cell.getAttribute('col-id')
-    if (!colId || colId !== pinnedCol.value) return false
+    if (!colId || colId !== binCol.value) return false
     const idx = Number(cell.closest('.ag-row')?.getAttribute('row-index'))
     if (!Number.isInteger(idx) || idx < 0) return false
     const node = gridApi.value?.getDisplayedRowAtIndex(idx)
@@ -83,7 +87,7 @@ export function useBinCellMenu(opts: {
     const all = (node.data.__fail_cells__ ?? []) as string[]
     // __fail_cells__ 顺序：测试列在前、bin 列最后 → 第一个可见项即「第一个 fail 测试列」
     const visibleFailCols = all.filter((c) => displayCols.value.includes(c))
-    const failCol = visibleFailCols[0] ?? pinnedCol.value
+    const failCol = visibleFailCols[0] ?? binCol.value
 
     api.ensureNodeVisible(node)
     api.ensureColumnVisible(failCol, 'middle')

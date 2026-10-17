@@ -52,13 +52,16 @@
       <el-col :span="4">
         <span class="ctl-label">固定列</span>
         <el-select
-          :model-value="pinnedCol"
+          :model-value="pinnedCols"
+          multiple
+          collapse-tags
+          collapse-tags-tooltip
           placeholder="搜索选择"
           clearable
           filterable
           aria-label="固定列"
           :disabled="!testCols.length"
-          @update:model-value="emit('update:pinnedCol', $event)"
+          @update:model-value="emit('update:pinnedCols', $event)"
         >
           <el-option v-for="c in allCols" :key="c" :label="c" :value="c" />
         </el-select>
@@ -78,7 +81,7 @@ interface Props {
   siteOptions: string[]
   siteColDisabled: boolean
   autosizeMode: string
-  pinnedCol: string
+  pinnedCols: string[]
   allCols: string[]
 }
 
@@ -87,7 +90,7 @@ interface Emits {
   (e: 'update:passfail', v: string): void
   (e: 'update:siteFilter', v: string): void
   (e: 'update:autosizeMode', v: string): void
-  (e: 'update:pinnedCol', v: string): void
+  (e: 'update:pinnedCols', v: string[]): void
 }
 
 defineProps<Props>()

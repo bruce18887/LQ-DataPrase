@@ -99,6 +99,19 @@ class BrowseApiTests(TestCase):
         params.setdefault('datafile_id', self.datafile.id)
         return self.client.get('/api/v1/browse/', params)
 
+    def _rewrite_fixture(self, table: str, format_type: str = 'CTA8280F') -> None:
+        """用给定表体覆盖 setUp 写好的那份文件，并把 datafile 指过去。
+
+        覆盖同一路径（而不是新建）与 ``test_system_columns_not_name_based`` 一致：
+        filename 不参与本次判定，而解析缓存 key 含文件 mtime，覆盖即失效。
+        """
+        path = os.path.join(self.tmpdir, f'browse_{self._testMethodName}.csv')
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(META_HEADER + '[Data]\n' + table)
+        self.datafile.file_path = path
+        self.datafile.format_type = format_type
+        self.datafile.save(update_fields=['file_path', 'format_type'])
+
     @staticmethod
     def _zip(body):
         """把新契约 headers+data+fail_cells 还原为行对象（前端 zip 逻辑镜像）。"""
@@ -324,7 +337,61 @@ class BrowseApiTests(TestCase):
         self.assertNotIn('site_options', body)
         self.assertNotIn('numeric_columns', body)
         self.assertNotIn('system_columns', body)
+        self.assertNotIn('serial_column', body)
         self.assertEqual([vals[0] for vals in body['data']], [4, 5, 6])
+
+    # ── 序列列下发（2026-10-17 固定列支持 serial） ──
+
+    def test_page1_carries_serial_column_by_priority_not_column_order(self):
+        """serial_column 必须走 get_serial_column 的优先级，不能按列序取第一个。
+
+        本 fixture 的列序是 Index_No, Dut_No, Serial_No —— 按列序会返回 Dut_No。
+        四种格式的序列列名各不相同（CTA8290D/8280F=Serial_No、ETS88='Serial #'、
+        STS8200=PART_ID），前端固定列要直接拿到权威答案，不许再按名称猜。
+        """
+        body = self._browse(page_size=100).json()
+        self.assertEqual(body['serial_column'], 'Serial_No')
+
+    def test_page1_serial_column_null_when_no_candidate(self):
+        """无序列列时下发 null（不是缺键、不是空串）——前端按 falsy 判断，
+        拿到 '' 与 null 的行为不同，契约必须钉死。"""
+        self._rewrite_fixture(
+            'Index_No,Site_No,Dut_Pass,SW_Bin,KELVIN_VIN,\n'
+            'Unit,Unit,Unit,Unit,ohm,\n'
+            'Min,Min,Min,Min,0,\n'
+            'Max,Max,Max,Max,2,\n'
+            '1,1,TRUE,1,1.0,\n'
+        )
+        body = self._browse(page_size=100).json()
+        self.assertIsNone(body['serial_column'])
+
+    def test_page1_serial_column_prefers_dut_over_part_id(self):
+        """没有 Serial_* 时按优先级回退：dut 分词精确匹配排在 part_id 之前。
+
+        列序故意把 PART_ID 放前面 —— 按列序会返回 PART_ID，按优先级必须返回 Dut_No。
+        （Dut_Pass 不能当序列列：_dut_column_match 显式排除 pass/fail 布尔列。）
+        """
+        self._rewrite_fixture(
+            'PART_ID,Dut_No,Dut_Pass,Site_No,SW_Bin,KELVIN_VIN,\n'
+            'Unit,Unit,Unit,Unit,Unit,ohm,\n'
+            'Min,Min,Min,Min,Min,0,\n'
+            'Max,Max,Max,Max,Max,2,\n'
+            '9001,7,TRUE,1,1,1.0,\n'
+        )
+        body = self._browse(page_size=100).json()
+        self.assertEqual(body['serial_column'], 'Dut_No')
+
+    def test_page1_serial_column_falls_back_to_part_id(self):
+        """既无 Serial_* 也无 Dut_No 时，按 part+id 双子串回退（STS8200 的形状）。"""
+        self._rewrite_fixture(
+            'SITE_NUM,PART_ID,PASSFG,SOFT_BIN,KELVIN_VIN,\n'
+            'Unit,Unit,Unit,Unit,ohm,\n'
+            'Min,Min,Min,Min,0,\n'
+            'Max,Max,Max,Max,2,\n'
+            '1,9001,1,1,1.0,\n'
+        )
+        body = self._browse(page_size=100).json()
+        self.assertEqual(body['serial_column'], 'PART_ID')
 
     # ── 服务端列过滤（2026-08-12，方案 A：filter_model 白名单算子） ──
 

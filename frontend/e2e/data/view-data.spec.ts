@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 import { SEEDED_FILES } from '../fixtures/test-data'
 import { gotoApp } from '../helpers/nav'
 import { captureDownload } from '../helpers/download'
@@ -141,6 +141,22 @@ async function fetchFirstTestCols(page: Page, filename: string) {
   }, filename)
 }
 
+/** 后端 page==1 下发的两个权威列名：Bin 列与序列列（四种格式序列列名各不相同） */
+async function fetchPinDefaults(page: Page, filename: string) {
+  return page.evaluate(async (filename) => {
+    const token = localStorage.getItem('access_token')
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
+    const files = await fetch(`/api/v1/files/?search=${encodeURIComponent(filename)}`, { headers }).then((r) => r.json())
+    const file = ((files.results ?? files) as any[]).find((f: any) => f.filename === filename)
+    const d = await fetch(`/api/v1/browse/?datafile_id=${file.id}&page_size=1`, { headers }).then((r) => r.json())
+    return {
+      bin: (d.bin_column ?? '') as string,
+      serial: (d.serial_column ?? '') as string,
+      systemColumns: (d.system_columns ?? []) as string[],
+    }
+  }, filename)
+}
+
 /** 目标行若未渲染（rowBuffer=10 外的行），滚动垂直视口使其渲染（v33+ 垂直滚动在 ag-body-vertical-scroll-viewport） */
 async function ensureRowRendered(page: Page, rowIndex: number) {
   const row = page.locator(`.ag-pinned-left-cols-container .ag-row[row-index="${rowIndex}"]`)
@@ -151,6 +167,17 @@ async function ensureRowRendered(page: Page, rowIndex: number) {
   }
   await expect(row).toBeVisible({ timeout: 10_000 })
   return row
+}
+
+/**
+ * 固定列容器里某一行的 **Bin 列**单元格。
+ *
+ * 不能用 `.ag-cell.first()`：固定列支持多选后，默认同时钉住 Bin 与序列列，
+ * 而序列列在多数格式的列序里排在 Bin 之前 → 第一个固定单元格是序列列，
+ * 右键它不弹 Bin 菜单、也没有红色高亮（2026-10-17 实测连带打红 3 条既有用例）。
+ */
+function binCell(row: Locator, bin: string) {
+  return row.locator(`.ag-cell[col-id="${bin}"]`)
 }
 
 /**
@@ -198,35 +225,73 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     await expect(page.locator('.tab-btn.active')).toContainText('文件列表')
   })
 
-  test('@p1 固定列：下拉选择列后固定到左侧', async ({ page }) => {
+  test('@p1 固定列：默认钉住 Bin + 序列列（后端 serial_column 下发，前端不按名称猜）', async ({ page }) => {
+    await openViewTab(page, SEEDED_FILES.GAGE_S1)
+    const { bin, serial } = await fetchPinDefaults(page, SEEDED_FILES.GAGE_S1)
+    expect(bin, '应下发 bin_column').toBeTruthy()
+    expect(serial, 'CTA8290D 应解析出序列列（Serial_No）').toBeTruthy()
+
+    // 固定列表头里两列都在
+    const pinnedHeader = page.locator('.ag-pinned-left-header')
+    await expect(pinnedHeader).toContainText(bin, { timeout: 10_000 })
+    await expect(pinnedHeader).toContainText(serial)
+    // 光看表头不够 —— 下拉里显示两个 tag 也会让表头文本命中。要的是真的落在
+    // 固定列容器里的单元格。
+    for (const c of [bin, serial]) {
+      await expect(
+        page.locator(`.ag-pinned-left-cols-container .ag-cell[col-id="${c}"]`).first(),
+        `${c} 应在固定列容器内`,
+      ).toBeVisible()
+    }
+  })
+
+  test('@p1 固定列：多选，后选的列叠加而不是替换已钉住的列', async ({ page }) => {
     // gage 文件 346 列足够验证列固定，且远小于 CTA8280F（10000 行）降低 dev 环境压力
     await openViewTab(page, SEEDED_FILES.GAGE_S1)
     await expect(page.locator('.ag-root').first()).toBeVisible({ timeout: 30_000 })
 
-    // 当前默认固定列（后端 bin_column）
-    const pinnedBefore = (await page.locator('.ag-pinned-left-header').first().textContent()) ?? ''
+    const { bin, serial, systemColumns } = await fetchPinDefaults(page, SEEDED_FILES.GAGE_S1)
+    const skip = new Set([bin, serial, ...systemColumns])
 
-    // 打开固定列下拉：选中后占位文本消失，用 aria-label 定位输入框所在 select，点击 wrapper 打开
+    // 打开固定列下拉（多选）：用 aria-label 定位输入框所在 select，点击 wrapper 打开
     const pinSelect = viewScope(page).locator('.el-select:has(input[aria-label="固定列"])').first()
     await pinSelect.locator('.el-select__wrapper').click()
     // 等待下拉动画完成、选项渲染（选项依赖 numericColumns 就位，负载下 5s 不够）
     const options = page.locator('.el-select-dropdown:visible .el-select-dropdown__item')
     await expect(options.first()).toBeVisible({ timeout: 15_000 })
     const count = await options.count()
-    expect(count).toBeGreaterThan(1)
+    expect(count).toBeGreaterThan(2)
 
-    let target = ''
-    for (let i = 0; i < count; i++) {
+    // 取两个「未固定且非系统列」的列作素材：系统列里的 Part_No/Dut_Pass/X_COORD 等
+    // 被「默认隐藏列」设置 hide 掉了，钉一个隐藏列在界面上没有任何可见结果。
+    const targets: string[] = []
+    for (let i = 0; i < count && targets.length < 2; i++) {
       const t = (await options.nth(i).textContent())?.trim() ?? ''
-      if (t && !pinnedBefore.includes(t)) {
-        target = t
-        break
+      if (t && !skip.has(t)) {
+        targets.push(t)
+        await options.nth(i).click()
       }
     }
-    expect(target, '应存在非当前固定列的选项').not.toBe('')
-    await options.filter({ hasText: target }).first().click()
+    expect(targets, '应存在两个未固定的列可作素材').toHaveLength(2)
+    // 多选下拉点选项不收起，Escape 收回后再看表格
+    await page.keyboard.press('Escape')
 
-    await expect(page.locator('.ag-pinned-left-header')).toContainText(target, { timeout: 10_000 })
+    const pinnedHeader = page.locator('.ag-pinned-left-header')
+    for (const t of targets) {
+      await expect(pinnedHeader, `后选的 ${t} 应进固定列`).toContainText(t, { timeout: 10_000 })
+    }
+    // 承重的一半：原有的 Bin / 序列列不能被后选挤掉（单选语义才会这样，那正是本次改掉的）
+    for (const c of [bin, serial]) {
+      await expect(
+        page.locator(`.ag-pinned-left-cols-container .ag-cell[col-id="${c}"]`).first(),
+        `多选后原有的 ${c} 不该被顶掉`,
+      ).toBeVisible()
+    }
+    for (const t of targets) {
+      await expect(
+        page.locator(`.ag-pinned-left-cols-container .ag-cell[col-id="${t}"]`).first(),
+      ).toBeVisible()
+    }
   })
 
   test('@p1 Pass/Fail 筛选：未选文件时预选，切文件后筛选重置（契约升级）', async ({ page }) => {
@@ -437,14 +502,28 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
       { timeout: 15_000 },
     )
     await page.locator('.el-select-dropdown__item:visible').filter({ hasText: 'Fail' }).first().click()
-    expect((await failResp).status()).toBe(200)
+    const failBody = await (await failResp).json()
 
     const summary = viewScope(page).locator('p').filter({ hasText: '共 ' })
-    await expect(summary).toContainText('Fail:', { timeout: 10_000 })
-    const text = (await summary.textContent()) ?? ''
-    const total = Number(text.match(/共\s*(\d+)/)?.[1] ?? 0)
-    const fail = Number(text.match(/Fail:\s*(\d+)/)?.[1] ?? 0)
+    /**
+     * 轮询到「行数列 == 服务端筛选集行数」为止 —— 不能只等 `Fail:` 出现：
+     * 未过滤时 fail_row_count 也是 1289 > 0，那一段本来就渲染着，「等它出现」等于
+     * 什么都没等，于是会读到 total=10000 / fail=1289 的旧渲染
+     * （实测约 1/4 概率红，是这条判据自己的形状问题，不是本批改出来的）。
+     */
+    const readCounts = async () => {
+      const text = (await summary.textContent()) ?? ''
+      return {
+        total: Number(text.match(/共\s*(\d+)/)?.[1] ?? 0),
+        fail: Number(text.match(/Fail:\s*(\d+)/)?.[1] ?? 0),
+      }
+    }
+    await expect
+      .poll(async () => (await readCounts()).total, { timeout: 10_000 })
+      .toBe(failBody.total)
+    const { total, fail } = await readCounts()
     expect(total).toBeGreaterThan(0)
+    expect(fail, '界面 Fail 行数应与后端 fail_row_count 一致').toBe(failBody.fail_row_count)
     expect(fail, 'FAIL 筛选集内 fail 行数 == total').toBe(total)
   })
 
@@ -746,9 +825,10 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     const info = await fetchBinFailInfo(page, SEEDED_FILES.CTA8280F_FT)
     if (info.failIdx === -1) test.skip(true, '种子文件无 fail 行')
 
-    const failCell = page
-      .locator(`.ag-pinned-left-cols-container .ag-row[row-index="${info.failIdx}"] .ag-cell`)
-      .first()
+    const failCell = binCell(
+      page.locator(`.ag-pinned-left-cols-container .ag-row[row-index="${info.failIdx}"]`),
+      info.bin,
+    )
     await expect(failCell).toBeVisible({ timeout: 30_000 })
     // fail 单元格红色高亮（light 主题 #dc2626）
     await expect(failCell).toHaveCSS('background-color', 'rgb(220, 38, 38)')
@@ -781,7 +861,7 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     await failCell.click({ button: 'right' })
     await expect(menu).toBeVisible({ timeout: 5_000 })
     const passRow = await ensureRowRendered(page, info.passIdx)
-    await passRow.locator('.ag-cell').first().click({ button: 'right' })
+    await binCell(passRow, info.bin).click({ button: 'right' })
     await expect(menu).not.toBeVisible({ timeout: 3_000 })
     await page.waitForTimeout(500)
     await expect(page.locator('.bin-cell-menu')).toHaveCount(0)
@@ -793,16 +873,13 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     const info = await fetchBinFailInfo(page, SEEDED_FILES.CTA8280F_FT)
 
     const passRow = await ensureRowRendered(page, info.passIdx)
-    await passRow.locator('.ag-cell').first().click({ button: 'right' })
+    await binCell(passRow, info.bin).click({ button: 'right' })
     await page.waitForTimeout(600)
     await expect(page.locator('.bin-cell-menu')).toHaveCount(0)
     await expect(page.locator('.el-dialog')).not.toBeVisible()
 
     // 合成事件精确验证：未 preventDefault（浏览器复制菜单放行）
-    const prevented = await passRow
-      .locator('.ag-cell')
-      .first()
-      .evaluate((el) => {
+    const prevented = await binCell(passRow, info.bin).evaluate((el) => {
         const ev = new MouseEvent('contextmenu', {
           bubbles: true,
           cancelable: true,
@@ -876,7 +953,7 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     const before = await hScroll.evaluate((el) => el.scrollLeft)
 
     // 右键该行 pinned bin 单元格 → 点菜单项
-    await farRow.locator('.ag-cell').first().click({ button: 'right' })
+    await binCell(farRow, info.bin).click({ button: 'right' })
     const menu = page.locator('.bin-cell-menu')
     await expect(menu).toBeVisible({ timeout: 5_000 })
     await menu.locator('.bin-cell-menu__item').click()
@@ -919,8 +996,8 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     const hScroll = page.locator('.ag-body-horizontal-scroll-viewport')
     const before = await hScroll.evaluate((el) => el.scrollLeft)
 
-    const binCell = binRow.locator('.ag-cell').first()
-    await binCell.click({ button: 'right' })
+    const binTargetCell = binCell(binRow, info.bin)
+    await binTargetCell.click({ button: 'right' })
     const menu = page.locator('.bin-cell-menu')
     await expect(menu).toBeVisible({ timeout: 5_000 })
     await menu.locator('.bin-cell-menu__item').click()
@@ -928,7 +1005,7 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
 
     // pinned bin 单元格 flash（目标列即 bin 列本身，无需横向滚动）
     await expect
-      .poll(async () => (await binCell.getAttribute('class')) ?? '', { timeout: 3_000 })
+      .poll(async () => (await binTargetCell.getAttribute('class')) ?? '', { timeout: 3_000 })
       .toContain('ag-cell-data-changed')
     expect(await hScroll.evaluate((el) => el.scrollLeft)).toBe(before)
   })
@@ -1057,7 +1134,8 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
       { timeout: 15_000 },
     )
 
-    // 垂直滚动到最后一行 → 渲染的是真实数据（Serial #），而不是 Data Collection
+    // 垂直滚动到最后一行 → 渲染的是真实数据（Serial #），而不是 Data Collection。
+    // 行文本要跨两个容器取：Serial # 现在默认被钉进固定列，只看 center 会漏掉它。
     const lastRow = page.locator(`.ag-center-cols-container .ag-row[row-index="${ref.total - 1}"]`)
     if ((await lastRow.count()) === 0) {
       await page
@@ -1065,7 +1143,17 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
         .evaluate((el, top) => { (el as HTMLElement).scrollTop = top }, (ref.total - 1) * 30)
     }
     await expect(lastRow).toBeVisible({ timeout: 15_000 })
-    await expect(lastRow).toContainText(ref.lastSerial)
-    await expect(lastRow).not.toContainText('Data Collection')
+    const idx = ref.total - 1
+    const lastRowText = async () =>
+      (
+        await page
+          .locator(
+            `.ag-pinned-left-cols-container .ag-row[row-index="${idx}"], ` +
+              `.ag-center-cols-container .ag-row[row-index="${idx}"]`,
+          )
+          .allTextContents()
+      ).join('|')
+    await expect.poll(lastRowText, { timeout: 15_000 }).toContain(ref.lastSerial)
+    expect(await lastRowText()).not.toContain('Data Collection')
   })
 })

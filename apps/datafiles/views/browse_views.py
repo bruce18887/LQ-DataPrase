@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+from typing import Optional
 
 import pandas as pd
 from django.db import transaction
@@ -28,7 +29,7 @@ from apps.analysis.services.statistics import (
     build_col_meta,
     get_bin_column_name,
 )
-from apps.analysis.services.statistics.helpers import get_site_column
+from apps.analysis.services.statistics.helpers import get_serial_column, get_site_column
 
 from ._helpers import (
     _register_file,
@@ -226,6 +227,7 @@ class DataBrowserView(APIView):
         site_options: list = []
         numeric_columns: list = []
         system_columns: list = []
+        serial_column: Optional[str] = None
         if page == 1:
             site_col_full = get_site_column(df)
             if site_col_full:
@@ -249,6 +251,11 @@ class DataBrowserView(APIView):
             # （Device_Fused_Flag1/2、SITE_CHECK 等测试项与记录列同名前缀，2026-08-25）。
             sys_set = set(SYSTEM_COLUMNS.get(datafile.format_type, []))
             system_columns = [c for c in df.columns if c in sys_set]
+            # 序列列：四种格式名字各不相同（Serial_No / Serial # / PART_ID），且 Dut_No
+            # 也是每只 DUT 一个号 —— 前端不许再用名称猜，统一由后端权威解析下发。
+            # get_serial_candidates 是全项目唯一的序列列优先级（serial_distribution /
+            # wafer_map / file_correlation 共用），这里只是多消费一次。
+            serial_column = get_serial_column(df)
 
         # Apply filters at DataFrame level (fast pandas ops) before paginating
         if search:
@@ -314,7 +321,8 @@ class DataBrowserView(APIView):
             + ',"col_meta":' + json.dumps(build_col_meta(df, metadata), ensure_ascii=False)
             + ',"bin_column":' + json.dumps(get_bin_column_name(datafile.format_type), ensure_ascii=False)
             + ((',"site_options":' + json.dumps(site_options, ensure_ascii=False) + ',"numeric_columns":' + json.dumps(numeric_columns, ensure_ascii=False)
-                + ',"system_columns":' + json.dumps(system_columns, ensure_ascii=False)) if page == 1 else '')
+                + ',"system_columns":' + json.dumps(system_columns, ensure_ascii=False)
+                + ',"serial_column":' + json.dumps(serial_column, ensure_ascii=False)) if page == 1 else '')
             + '}'
         )
         return HttpResponse(payload, content_type='application/json; charset=utf-8')
