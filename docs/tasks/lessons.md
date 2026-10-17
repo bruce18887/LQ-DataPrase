@@ -16,6 +16,31 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-10-17 dev 下「保存连接方式后黑屏」：死的是 vite，而冒烟当初不在真实启动器组合里跑
+
+- **现象**：改「连接方式」或「存储路径」→ 保存后整窗黑（就是窗口底色 `#1a1a2e`），DevTools 里
+  只剩一条 CSP 警告、零 JS 报错，关掉重开才好。看着像后端连不上，**跟 Django 一点关系没有**。
+- **根因**：`restart-app` 是 `app.relaunch(); app.quit()`，而 `electron:dev` 用 `concurrently -k`
+  起 vite + electron。Electron 以退出码 0 正常退出**同样**触发「杀同组全部」→ vite 被带走；
+  relaunch 的新实例仍带 `ELECTRON_DEV=true`，照旧去连 `http://localhost:3000` → `-102
+  ERR_CONNECTION_REFUSED`，而 `did-fail-load` 只写日志、`did-finish-load` 那段「保底 show」照样开窗
+  —— 于是交给用户一个空窗口。
+- **规则**：
+  ① **「X 坏了」先查 X 的兄弟进程还在不在**：日志里 `Loading dev URL` 紧跟 `-102` 就是 dev server
+  缺席，不是后端、不是壳。三条独立证据（日志时序 / `netstat` 零监听 / 进程树里父进程已消失）
+  比任何一句「我猜是」都便宜。
+  ② **凡是「重启、退出、进程生命周期」类判据，手起进程冒烟等于没测**：批 4 那四条「保存后重启」
+  是 `npx electron . --remote-debugging-port=9223` 跑的，**不在 `concurrently -k` 组里**，所以这个
+  必现缺陷当时全绿通过并写进了台账。验证通路必须和被测的**装配方式**同构，不只是和被测代码同构。
+  ③ `concurrently -k` 与任何自带 relaunch 的进程互斥。已实测 A/B：`-k` 下慢命令收 SIGTERM、退出码 1；
+  `--kill-others-on-fail` 下活到写完 marker。代价是正常关窗后 vite 残留，要手动 Ctrl-C。
+  ④ **加载失败要有可见出口**：`did-fail-load` 只 log 等于把用户关在黑盒里。判据（只接主框架、
+  放过 `ERR_ABORTED`、放过自家 `data:` 页）抽进 `electron/load-failure.ts` 走 T2 —— 主进程没有驱动
+  通路，判据不抽出来就只能靠手跑，而手跑正是 ② 里翻车的那种验证。
+  ⑤ 同族潜伏项一条：`npm run build` 会把 `frontend/dist` 刷成**绝对 base**，`file://` 下静默空白且
+  **零报错**（文档本身加载成功，只有 chunk 打到文件系统根，所以 `did-fail-load` 抓不到）。
+  这类「失败点不在导航层」的空白只能**加载前置判**。
+
 ## 2026-10-17 我把历史里另一笔的提交信息整段复述了，还顺手编了支撑细节
 
 - **现象**：一笔只改 `docs/tasks/todo.md`（+5/−1，补记门禁结果）的提交，我写的信息是
