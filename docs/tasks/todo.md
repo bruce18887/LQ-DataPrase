@@ -3755,3 +3755,71 @@ A 不报、B（关键词在预算之外）照旧报。**预算必须取到 `CHUN
 - 隔离目录 `Desktop\DataPrase\purged-from-LQ-DataPrase-2026-10-17\`：`tasks/` 15 个文件、
   `repowiki-before-T4/`（8.8MB 导出快照）、`qoder-knowledge-before-T5/`（30MB 三个库的备份）。
   确认无误后整目录 `rm -rf` 即可彻底了断；未 push。
+
+# 任务：序列分布 Y 轴改为「限值入框」（2026-10-17）
+
+> 用户报缺陷（带截图）：范围类型 = RowDataLimit 时序列分布图的 LSL 压在 X 轴上、与
+> `6σ下限 ↓` 标签叠在一起，两限不能同时展现；要求「和直方图一样」并在限值外侧留余量，
+> 但 Y 轴像素高度有限，余量不必等于直方图。
+> 设计闸门：给出 A（永远框住两限，与直方图对齐）/ B（只保证已入框限值有外沿余量）两档，
+> 用户点 **A**。
+
+## 根因（实测，非推测）
+
+`SerialChart.vue` 的 Y 范围只由 anchor==0 的点算（数据极值 ±8%），规格限根本不参与。
+截图那组数：限 [0,10]、数据 0.7508~10.576 → 下边界 = 0.7508 − 0.7864 ≈ **−0.036**，
+LSL=0 离轴底只有 0.3% 高度（<1px）。直方图同参数实测 X 范围 **[−1.7175, 11.7175]**
+（= 规格窗 ±3 个 bin ±柱组偏移，两限外侧各 17.2%），所以两限永远在框里 —— 同屏两图
+口径不一致才是「画错了」的读感来源。
+
+## 新口径
+
+`rangeType ∈ {RDL, CL}` 且两限齐备且 USL>LSL 时：
+`[min(数据自适应 lo, LSL − m), max(数据自适应 hi, USL + m)]`，`m = (USL−LSL) × 10%`。
+DR / S3 / S4 / S6 与「异常值处理」的 IQR 栅栏路径一行不动。
+截图场景改完 → Y = **[−1, 11.36]**：LSL 离底 25px、USL 离顶 34px。
+
+## 落点
+
+- 新建 `frontend/src/pages/analysis/composables/serial-axis-range.ts`：原埋在
+  `buildOption` 里的 `rangeOfPoints` + IQR 分支 + 新入框规则收成纯函数，文件头写两条
+  现行不变量（⊇ 全部 anchor==0 值；RDL/CL 两限外侧各留 m）。
+- `SerialChart.vue`：删内联算法改调 helper（合并 = 全体点集一次、拆分 = 每 lane 一次），
+  加 `rangeType` prop 并入 `useChart` 依赖；`clampMarkLine` / `toPoint` / lane 三处注释
+  按新口径改写。
+- `SingleParamTab.vue`：`:range-type="rangeType"` 一行。
+- 新建 T2 `frontend/test/unit/serialAxisRange.spec.ts` 12 例跑全组合。
+- 重写 `frontend/e2e/analysis/serial-adaptive-range.spec.ts`：删两处逐字复刻公式的
+  `toBeCloseTo(exp, 6)`，改成三条不变量性质断言（两限外侧留 9% 容差 / 轴覆盖全部
+  anchor==0 值 / 规格限 markLine 未被钉到轴边），钳制分支改由注入的「σ范围夹具」mark
+  走（RDL 档下规格限已不再命中该分支）。
+- `frontend/e2e/analysis/serial-overlap.spec.ts`：拆分 lane 的 `expectedLaneRange` 抄本
+  删除，换成同一组性质断言；测试标题「每 lane 贴合自身数据范围」→「覆盖自身数据且共享
+  规格限窗」。
+- 文档：`lessons.md` 2026-09-13 三条旧判据打作废/限定标记 + 新增 2026-10-17 四条；
+  `user-guide/04-analysis.md` 的 Limit 条目写明哪两档框住两限、哪几档仍贴边 ↑/↓。
+
+## 已确认接受的代价
+
+高 CP 参数（数据带远窄于规格窗）散点会被压成贴着底部的一条 —— 这正是 2026-09-13
+「空间利用率优化」换来的东西，用户看过两档取舍后选 A。附带一条正向变化：拆分小多图各
+lane 从此共享同一对最小限值，跨 Site 的纵向刻度第一次可比。
+
+## 验证账目
+
+- `npx vitest run`：14 文件 **204 例全绿**（含新增 12 例 / 4ms）。
+- `npm run lint:e2e`（`tsc -p tsconfig.e2e.json`）：0 输出。
+- `npm run build`（`vue-tsc -b && vite build`）：通过，871ms。
+- `E2E_PORT=23507 npm run test:e2e:affected`：因同工作区另一会话未提交的
+  `frontend/src/styles/utilities.css` 命中「全局清单」，快门禁自动升级成**全量池**
+  → 74 文件 · 4 slot · **391 例 · 墙钟 8.1min · 单价 3.16s/例 · 真红 0**（6 个 unexpected
+  落在 3 个文件，独占 slot 复跑全绿 ⇒ 判负载抖动）· 结论 MEASURED · EXIT=0。
+- 那轮的用例收集发生在我合并 spec 之前，故按磁盘现状复跑
+  `--slots=1 -- analysis/serial-adaptive-range.spec.ts analysis/serial-overlap.spec.ts`
+  → **7 例 · unexpected 0 · flaky 0**（2.1min）。
+- 首跑该 spec flaky 过一次：`route.fetch: read ECONNRESET` 加一次 `page.goto` 重置，
+  两次红都不是断言。把「限值入框」与「σ 仍钳边」两条 route 注入合并成一条后消失，
+  顺带让新口径的分界线在同一份响应里对照成立。
+- ⚠ 复跑时 `npm run lint:e2e` 报 `e2e/analysis/table-zoom-fit.spec.ts(267,9) TS2552
+  Cannot find name 'expectWidestYieldStaysSingleLine'` —— 同工作区另一会话的未提交中间态，
+  不属本批；本批改动在 10:52 与 10:53 两次 `lint:e2e` 均 0 输出。
