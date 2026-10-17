@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import BaseATEParser, get_parser
-from apps.datafiles.services import clear_parse_cache
+from apps.datafiles.services import clear_parse_cache, put_cached_parsed_file
 from apps.datafiles.utils import extract_product_code, resolve_file_path, store_file_path
 
 logger = logging.getLogger(__name__)
@@ -76,20 +76,16 @@ def _is_data_csv(filename):
     return filename.lower().endswith('.csv') and not _is_summary_csv(filename)
 
 
-def _register_file(user, file_path, file_type='single', batch_name='', sub_batch='', source_mtime=None):
-    """Parse a file and create DataFile + ParseHistory records.
+def parse_file_meta(file_path):
+    """解析文件，返回 (format_type, df, metadata, row_count, col_count, program_name)。
 
-    source_mtime: optional aware datetime of the original source file's
-    modification time. When None for archive-extracted/disk files, the
-    on-disk mtime is used; for direct uploads it stays None unless provided.
-    sub_batch: optional sub-batch name (subdirectory name within the batch).
+    纯计算、不碰数据库——调用方可以在事务外先跑它，再进短事务落库。
+    解析失败不抛异常（与 _register_file 既有语义一致）：返回 'Unknown' 与 0/''。
     """
-    filename = os.path.basename(file_path)
-    file_size = os.path.getsize(file_path)
-
     format_type = 'Unknown'
     program_name = ''
     row_count, col_count = 0, 0
+    df, metadata = None, None
 
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -107,6 +103,27 @@ def _register_file(user, file_path, file_type='single', batch_name='', sub_batch
             '_register_file: parse failed for %s, recording as error',
             file_path, exc_info=True,
         )
+
+    return format_type, df, metadata, row_count, col_count, program_name
+
+
+def _register_file(user, file_path, file_type='single', batch_name='', sub_batch='',
+                   source_mtime=None, parsed=None):
+    """Parse a file and create DataFile + ParseHistory records.
+
+    source_mtime: optional aware datetime of the original source file's
+    modification time. When None for archive-extracted/disk files, the
+    on-disk mtime is used; for direct uploads it stays None unless provided.
+    sub_batch: optional sub-batch name (subdirectory name within the batch).
+    parsed: 可选的 parse_file_meta() 结果。批量导入在事务外先解析好再传进来，
+    避免全量解析期间持有 SQLite 全局写锁；为 None 时自行解析（单文件上传路径）。
+    """
+    filename = os.path.basename(file_path)
+    file_size = os.path.getsize(file_path)
+
+    if parsed is None:
+        parsed = parse_file_meta(file_path)
+    format_type, df, metadata, row_count, col_count, program_name = parsed
 
     # 相对化存储：MEDIA_ROOT 之下存相对路径，数据目录迁移时无需重写 DB。
     stored_path = store_file_path(file_path)
@@ -130,6 +147,13 @@ def _register_file(user, file_path, file_type='single', batch_name='', sub_batch
         source_mtime=source_mtime,
         status='ready' if format_type != 'Unknown' else 'error',
     )
+
+    # 上传这次已经解析过一次，把结果写透进缓存：否则用户首次打开该文件会
+    # 再解析一遍。必须在 create 之后调用——此时 file_path 已是入库后的
+    # 相对路径，resolve_file_path 解析出的绝对路径才与后续读侧完全一致。
+    # fmt 用 datafile.format_type（而非局部 format_type），与读侧返回值同源。
+    put_cached_parsed_file(datafile.id, user.pk, datafile, df, metadata,
+                           datafile.format_type)
 
     ParseHistory.objects.create(
         user=user,
@@ -397,19 +421,25 @@ def _register_zip_batch(user, zip_file, filename):
     )
     batch_base = _user_upload_dir(user, 'batch')
     created = []
-    with transaction.atomic():
-        for fp in csv_paths:
-            if os.path.normpath(fp) in existing_paths:
-                continue  # already registered (re-upload of the same zip)
-            _, sub_batch = _batch_ctx(fp, batch_base)
-            try:
-                created.append(_register_file(user, fp, 'batch', batch_name, sub_batch))
-            except Exception:
-                logger.warning(
-                    '_register_zip_batch: failed to register %s', fp,
-                    exc_info=True,
+    for fp in csv_paths:
+        if os.path.normpath(fp) in existing_paths:
+            continue  # already registered (re-upload of the same zip)
+        _, sub_batch = _batch_ctx(fp, batch_base)
+        # 解析（全量，实测 3.2s/275MB）必须在事务外：SQLite 的写事务是全局
+        # 单写锁，整批包一个事务会让其他人的写请求一起等十几秒。
+        parsed = parse_file_meta(fp)
+        try:
+            with transaction.atomic():  # 只包 INSERT，毫秒级
+                created.append(
+                    _register_file(user, fp, 'batch', batch_name, sub_batch,
+                                   parsed=parsed)
                 )
-                continue
+        except Exception:
+            logger.warning(
+                '_register_zip_batch: failed to register %s', fp,
+                exc_info=True,
+            )
+            continue
     return created, None
 
 

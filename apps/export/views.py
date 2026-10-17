@@ -84,7 +84,11 @@ def _apply_export_filters(df, metadata, request_data):
     Filter order mirrors DataBrowserView: site → filter_model → passfail →
     sort (search is grid-local and intentionally not exported).
     """
-    export_df = df.copy()
+    # 惰性复制：df 是解析缓存里的共享只读对象，但下面每个分支都会产出新对象
+    # （df[mask] / sort_values / reset_index），有过滤时先整表 copy 纯属浪费
+    # （275MB 文件实测 328ms）。无过滤时由返回前的兜底补上复制，下游永远
+    # 拿到自有对象，语义与「进门就 copy」完全等价。
+    export_df = df
 
     site_filter = request_data.get('site_filter') or ''
     if site_filter and site_filter != '全部':
@@ -109,6 +113,11 @@ def _apply_export_filters(df, metadata, request_data):
     sort_model = _parse_grid_model(request_data.get('sort_model'), list)
     if sort_model:
         export_df = _apply_sort(export_df, sort_model)
+
+    # 兜底：所有分支都因参数缺失/不生效而没产出新对象时，这里才真正复制。
+    # 绝不能把共享缓存的引用交给下游（下游一旦原地改列会污染缓存）。
+    if export_df is df:
+        export_df = df.copy()
 
     return export_df
 

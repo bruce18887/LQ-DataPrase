@@ -87,6 +87,7 @@
 import { ref, onMounted, onActivated, watch } from 'vue'
 import { useFilesStore } from '../../stores/files'
 import api from '../../api'
+import { datafilesApi } from '../../api/datafiles'
 import { analysisApi } from '../../api/analysis'
 import UphCard from './components/UphCard.vue'
 import BatchYieldTab from './components/BatchYieldTab.vue'
@@ -164,7 +165,9 @@ async function loadFileMeta(fileId: number) {
 async function loadFiles() {
   filesLoading.value = true
   try {
-    const { data } = await api.get('/files/', { params: { page_size: 9999 } })
+    // 下拉只需要标量列：走轻量 options 端点（不算 stage/data_date、不 join owner）。
+    // include_error 保持旧下拉的可见范围（此前未按 status 过滤）。
+    const { data } = await datafilesApi.getOptions({ include_error: 1 })
     files.value = Array.isArray(data) ? data : data.results || []
   } catch {
     files.value = []

@@ -21,6 +21,7 @@ from ._helpers import (
     _register_file,
     _safe_batch_dir,
     _user_upload_dir,
+    parse_file_meta,
 )
 
 logger = logging.getLogger(__name__)
@@ -161,26 +162,30 @@ class BatchDirImportView(APIView):
         )
 
         created = []
-        with transaction.atomic():
-            for root, _dirs, files in os.walk(dir_path):
-                for f in files:
-                    if not _is_data_csv(f):
-                        continue
-                    fp = os.path.join(root, f)
-                    if os.path.normpath(fp) in existing_paths:
-                        continue  # already registered
-                    # 提取子批次名（相对路径的第一级目录）
-                    rel_path = os.path.relpath(root, dir_path)
-                    sub_batch = rel_path if rel_path != '.' else ''
-                    try:
-                        df = _register_file(request.user, fp, 'batch', dir_name, sub_batch)
+        for root, _dirs, files in os.walk(dir_path):
+            for f in files:
+                if not _is_data_csv(f):
+                    continue
+                fp = os.path.join(root, f)
+                if os.path.normpath(fp) in existing_paths:
+                    continue  # already registered
+                # 提取子批次名（相对路径的第一级目录）
+                rel_path = os.path.relpath(root, dir_path)
+                sub_batch = rel_path if rel_path != '.' else ''
+                # 全量解析放在事务外：解析一只 275MB 文件实测 3.2s，若整批
+                # 包在同一个 atomic 里，SQLite 全局写锁会被持有十几秒。
+                parsed = parse_file_meta(fp)
+                try:
+                    with transaction.atomic():  # 只包 INSERT，毫秒级
+                        df = _register_file(request.user, fp, 'batch', dir_name,
+                                            sub_batch, parsed=parsed)
                         created.append(df)
-                    except Exception:
-                        logger.warning(
-                            'BatchDirImportView: failed to register %s', fp,
-                            exc_info=True,
-                        )
-                        continue
+                except Exception:
+                    logger.warning(
+                        'BatchDirImportView: failed to register %s', fp,
+                        exc_info=True,
+                    )
+                    continue
 
         return Response(
             DataFileSerializer(created, many=True).data,

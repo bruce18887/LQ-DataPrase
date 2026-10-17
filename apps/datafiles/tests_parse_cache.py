@@ -6,15 +6,18 @@ DataFrame（实测 10 万行 × 826 列 ≈ 667MB）——几张大表同时驻�
 各解析一遍（单次解析实测约 4s）。
 """
 import os
+import shutil
 import tempfile
 import threading
 import time
 import types
 
 import pandas as pd
-from django.test import SimpleTestCase
+from django.contrib.auth import get_user_model
+from django.test import SimpleTestCase, TestCase, override_settings
 
 from apps.datafiles import services
+from apps.datafiles.views import _helpers
 
 
 def _frame(rows=2000, cols=6):
@@ -161,6 +164,73 @@ class BytesLRUCacheTests(_CacheCaseBase):
 
         self.assertEqual(out, (None, None, 'CTA8290D'))
         self.assertEqual(parser.calls, 0)
+
+
+class PutCachedParsedFileTests(_CacheCaseBase):
+    """上传写透：put 之后读侧必须直接命中，不能再解析一次。"""
+
+    def test_put_then_get_does_not_reparse(self):
+        frame = _frame()
+        parser = self.patch_parser(frame)
+
+        # 模拟上传链路的那次解析（df/metadata/fmt 由此得到）
+        df, metadata, fmt = self.cached_parse()
+        self.assertEqual(parser.calls, 1)
+
+        # 换一只空缓存，确保是 put 而不是刚才的 _cached_parse 填的条目
+        self.use_budget(services.PARSE_CACHE_BUDGET_BYTES)
+        fake = types.SimpleNamespace(file_path=self.path, format_type='CTA8290D')
+        services.put_cached_parsed_file(1, 1, fake, df, metadata, fmt)
+
+        out_df, _out_meta, out_fmt = services.get_cached_parsed_file(1, 1, fake)
+
+        self.assertIs(out_df, df, '写透后首次读取必须拿到同一只 DataFrame')
+        self.assertEqual(out_fmt, fmt)
+        self.assertEqual(parser.calls, 1, '写透后首次读取不应再解析')
+
+
+class RegisterFileWriteThroughTests(TestCase):
+    """_register_file 上传时的解析结果要写进缓存（需要真实 User 与 DB）。"""
+
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.media_root, ignore_errors=True)
+        override = override_settings(MEDIA_ROOT=self.media_root)
+        override.enable()
+        self.addCleanup(override.disable)
+        # 模块级缓存是进程共享的，换掉以免被其它用例的条目污染
+        self.original_cache = services._parse_cache
+        self.addCleanup(setattr, services, '_parse_cache', self.original_cache)
+        services._parse_cache = services._BytesLRUCache(
+            services.PARSE_CACHE_BUDGET_BYTES)
+
+    def test_register_file_writes_through_cache(self):
+        user = get_user_model().objects.create_user(
+            username='cache_user', password='x')
+        parser = _CountingParser(_frame())
+        # _register_file 消费的是 _helpers 上的 get_parser；services 上的同名
+        # 函数只在缓存未命中的兜底解析时才会用到。两处都打桩，任何一次真实
+        # 解析都会记到 parser.calls 上。
+        for module in (services, _helpers):
+            original = module.get_parser
+            module.get_parser = lambda fmt: parser
+            self.addCleanup(setattr, module, 'get_parser', original)
+
+        abs_path = os.path.join(
+            self.media_root, 'data', user.username, 'single', 'demo.csv')
+        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+        with open(abs_path, 'w', encoding='utf-8') as f:
+            f.write('CTA8290D\nA,B\n1,2\n')
+
+        datafile = _helpers._register_file(user, abs_path)
+        self.assertEqual(parser.calls, 1, '上传链路应只解析一次')
+
+        df, _metadata, fmt = services.get_cached_parsed_file(
+            datafile.id, user.pk, datafile)
+
+        self.assertIsNotNone(df, '写透后首次读取应命中缓存')
+        self.assertEqual(fmt, datafile.format_type)
+        self.assertEqual(parser.calls, 1, '首次读取不应再解析')
 
 
 class FrameBytesTests(SimpleTestCase):

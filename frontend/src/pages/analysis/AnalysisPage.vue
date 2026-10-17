@@ -37,7 +37,7 @@
  * `selectedFileId` 会让任一 tab 改选择时静默换掉其他 tab 的数据源。
  */
 import { ref, onMounted, onActivated, watch } from 'vue'
-import api from '../../api'
+import { datafilesApi } from '../../api/datafiles'
 import { useAnalysisStore } from '../../stores/analysis'
 import SingleParamTab from './components/SingleParamTab.vue'
 import WaferMapPanel from './components/WaferMapPanel.vue'
@@ -60,8 +60,9 @@ onActivated(async () => {
 
 async function loadFiles() {
   try {
-    // 分页会静默截断文件列表（默认 PAGE_SIZE=20），下拉将选不到旧文件
-    const { data } = await api.get('/files/', { params: { page_size: 9999 } })
+    // 下拉只需要标量列：走轻量 options 端点（不算 stage/data_date、不 join owner），
+    // 避免 page_size=9999 的全量列表序列化开销。include_error 保持旧下拉的可见范围。
+    const { data } = await datafilesApi.getOptions({ include_error: 1 })
     files.value = Array.isArray(data) ? data : data.results || []
   } catch {
     // silently fail

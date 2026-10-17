@@ -33,6 +33,31 @@ export interface ListFilesParams {
   file_size__lte?: number
 }
 
+/** 下拉框用的轻量文件行（/files/options/ 契约：仅标量列，无 stage/data_date/owner） */
+export interface FileOption {
+  id: number
+  filename: string
+  file_type: string
+  batch_name: string
+  sub_batch: string
+  format_type: string
+  program_name: string
+  product_code: string
+  row_count: number | null
+  col_count: number | null
+  file_size: number
+  source_mtime: string | null
+  created_at: string
+  status: string
+}
+
+export interface FileOptionsParams {
+  /** 返回上限（后端默认 5000，最大 20000） */
+  limit?: number
+  /** 兼容旧下拉行为：同时返回解析失败（status='error'）的行 */
+  include_error?: number
+}
+
 export interface BrowseParams {
   datafile_id: number
   page?: number
@@ -123,6 +148,10 @@ export const datafilesApi = {
   },
   getFormatTypes() {
     return api.get<{ format_types: string[] }>('/files/format_types/')
+  },
+  /** 下拉框专用轻量清单：不计算 stage/data_date、不 join owner（默认仅 ready 行） */
+  getOptions(params: FileOptionsParams = {}) {
+    return api.get<{ results: FileOption[] }>('/files/options/', { params: cleanParams(params) })
   },
   /** 组合/追加多个单文件到批次（服务端物理移动到 batch/<name>/ 并更新记录；批次可已存在） */
   combineFiles(ids: number[], batchName: string) {

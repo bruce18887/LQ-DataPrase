@@ -6,6 +6,9 @@
 
 import logging
 import math
+import os
+import threading
+from collections import OrderedDict
 
 import pandas as pd
 
@@ -18,8 +21,16 @@ from apps.analysis.services.statistics import (
     get_bin_column_name,
     compute_pass_yield,
 )
+from apps.datafiles.utils import resolve_file_path
 
 logger = logging.getLogger(__name__)
+
+# 汇总结果缓存：进程内 LRU（容量 32 条）。
+# 不用 functools.lru_cache —— df 不可 hash，且这里需要按条数淘汰与整体清空。
+# 多线程并发访问（Django 线程池）下由锁保护；值本身是只读 payload。
+_SUMMARY_CACHE_MAX_SIZE = 32
+_summary_cache = OrderedDict()
+_summary_cache_lock = threading.Lock()
 
 
 def compute_bin_site_table(df, format_type, site_col):
@@ -320,3 +331,59 @@ def compute_dashboard_summary(df, datafile, fmt, metadata, thresholds=None):
         'test_item_overview': test_item_overview,
         'quality_alerts': quality_alerts,
     }
+
+
+def _summary_cache_key(datafile, fmt, thresholds):
+    """构造汇总缓存 key：文件身份 + 内容 mtime + CPK 阈值 + 展示字段。
+
+    必须包含 mtime_ns：同一 file_id 重新上传/覆盖后内容会变，仅靠 id 会返回
+    旧数字。os.stat 失败（文件被删/不可读）回落 0，仍可命中「无文件」口径。
+    """
+    from apps.common.user_settings import DEFAULT_CPK_THRESHOLDS
+
+    th = thresholds or DEFAULT_CPK_THRESHOLDS
+    try:
+        mtime_ns = os.stat(resolve_file_path(datafile.file_path)).st_mtime_ns
+    except OSError:
+        mtime_ns = 0
+    return (
+        datafile.id,
+        getattr(datafile, 'owner_id', 0),
+        mtime_ns,
+        th.cpk_a, th.cpk_b, th.cpk_c,
+        datafile.filename,
+        datafile.program_name,
+        fmt,
+    )
+
+
+def get_dashboard_summary(datafile, df, fmt, metadata, thresholds=None):
+    """``compute_dashboard_summary`` 的进程内 LRU 缓存包装（计算实现仍只有一份）。
+
+    命中直接返回缓存对象；未命中先算再存入，超 32 条淘汰最久未用的一项。
+    **返回值是共享只读对象，调用方不得修改**（现有调用方只读取/序列化）。
+    """
+    key = _summary_cache_key(datafile, fmt, thresholds)
+
+    with _summary_cache_lock:
+        cached = _summary_cache.get(key)
+        if cached is not None:
+            _summary_cache.move_to_end(key)  # 命中即刷新为最近使用
+            return cached
+
+    payload = compute_dashboard_summary(
+        df, datafile, fmt, metadata, thresholds=thresholds)
+
+    with _summary_cache_lock:
+        _summary_cache[key] = payload
+        _summary_cache.move_to_end(key)
+        while len(_summary_cache) > _SUMMARY_CACHE_MAX_SIZE:
+            _summary_cache.popitem(last=False)
+    return payload
+
+
+def clear_dashboard_summary_cache():
+    """清空汇总缓存（供测试隔离；将来删除文件路径时也可复用）。"""
+    with _summary_cache_lock:
+        _summary_cache.clear()
+
