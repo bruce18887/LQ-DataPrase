@@ -174,7 +174,14 @@ class DataBrowserView(APIView):
         # 对端点而言小页只是更小的载荷，不是风险；把它抬到 50 会静默改变调用方要的块大小，
         # 也让按小页验证切片/越界的用例无法表达。勿「对齐」成对称区间。
         page_size = max(1, min(page_size, PAGE_SIZE_MAX))
-        search = request.query_params.get('search', '')
+        # ``search``（全表全文过滤，旧实测 16.2s）已删除，查看数据一律走 filter_model。
+        # 存在即拒、空串也拒：静默忽略会让直连调用方以为筛过了，实际拿到全表。
+        if 'search' in request.query_params:
+            return error_response(
+                'unsupported_param',
+                'search is not supported on /browse/; filter per column with filter_model',
+                param='search',
+            )
         pass_filter = request.query_params.get('pass_filter', '')
         site_filter = request.query_params.get('site_filter', '')
 
@@ -258,22 +265,13 @@ class DataBrowserView(APIView):
             serial_column = get_serial_column(df)
 
         # Apply filters at DataFrame level (fast pandas ops) before paginating
-        if search:
-            search_lower = search.lower()
-            # 向量化全文搜索：逐列 str.contains（原实现逐行逐值 Python 调用，
-            # 10000×188 需 188 万次；regex=False 防搜索词含正则字符被当正则）
-            mask = df.astype(str).apply(
-                lambda col: col.str.lower().str.contains(search_lower, na=False, regex=False)
-            ).any(axis=1)
-            df = df[mask]
-
         if site_filter:
             site_col = get_site_column(df)
             if site_col:
                 # 字符串比较（与 export_csv site_filter 语义一致；Site_No 是数字字符串 object 列）
                 df = df[df[site_col].astype(str) == str(site_filter)]
 
-        # 列过滤（白名单算子，逐列 AND；与 search/site/pass 组合）
+        # 列过滤（白名单算子，逐列 AND；与 site/pass 组合）
         if filter_model:
             df = _apply_filter_model(df, filter_model)
 

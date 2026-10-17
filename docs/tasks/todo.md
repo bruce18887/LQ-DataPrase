@@ -4483,7 +4483,7 @@ Chromium 错误页停在窗口底色 `#1a1a2e` 上 = 黑屏，且 `did-finish-lo
 - [x] P1-2 看板汇总加缓存（614ms → <20ms）：`get_dashboard_summary` + key 含 thresholds/mtime；`tests_cache.py` 4 例
 - [x] P1-3 导出去掉无条件 `df.copy()`：改为惰性复制 + 返回前兜底
 - [x] P1-4 新增 `/files/options/` 轻量端点；分析页与看板页改用它（DataManagement 未动，它的列表就是表格本身）；`max_page_size` **未收**（DataManagement 仍依赖 9999）
-- [ ] P1-5 处理 browse `search` 潜在路径（16.2s，UI 未接线）：**本轮跳过**——`browse_views.py` 当时带着固定列批次的未提交改动，避免混 diff；`test_browse_api.py` 有 `search='5000'` 契约，只能修不能删
+- [x] P1-5 处理 browse `search` 潜在路径（16.2s，UI 未接线）：**已选 A 删 + 存在即拒 400**（理由与证据见文末「P1-5 补做」；本条原先写的「只能修不能删」已撤回）
 - [x] P2 写事务与解析解耦：新增 `parse_file_meta`，`_register_file(parsed=...)`；ZIP 与目录导入改「事务外解析 + 每文件短事务」；`tests_import_tx.py` 3 例（`TransactionTestCase`，`TestCase` 的外层 atomic 会让 `in_atomic_block` 恒真）
 - [ ] P3 重活作业化：设计稿已出 `docs/specs/2026-10-17-heavy-job-offload-design.md`，**未实施**
 - [ ] P4 部署与容量：`deploy/gunicorn.conf.py` 入库；关 `WHITENOISE_USE_FINDERS`；media 配额 + 内容去重；`/api/v1/metrics/`
@@ -4494,3 +4494,43 @@ Chromium 错误页停在窗口底色 `#1a1a2e` 上 = 黑屏，且 `did-finish-lo
 延迟解析会让它们在上传后到首次打开前显示为空；而两条路的**总 CPU 完全相同**（都是一次全量解析），
 延迟只是把成本从上传请求挪到首次打开请求，收益仅「上传接口早返回」。真要那条收益，
 得给 4 个 parser 各加一条 header-only 路径，属独立批次。
+
+## P1-5 补做（2026-10-17 晚）：browse `search` 选 A 删
+
+**先撤回上面批 3 写下的那条理由**：「`test_browse_api.py` 有 `search='5000'` 契约，只能修不能删」——**不成立**。
+契约测试不是调用方，它钉的正是本次要删的那个行为，拿它反对删除是循环论证。当时真正拦住动手的是
+`browse_views.py` 带着固定列批次的未提交改动（这条现在已随 `86521be`/`f607c10` 落库，工作树干净）。
+
+**删（而非修）的调用方普查**，按形态逐个查过，不是只 grep 可见文案：
+
+- 唯一调用点 `frontend/src/pages/data/DataBrowserAgGrid.vue:484` 的 `browse()` 不传 `search`；
+  `BrowseParams.search` 是纯类型字段，全仓无写入方 ⇒ 已删。
+- 查看数据**根本没有搜索框**（`DataBrowserAgGrid.vue` 里 `搜索|search` 零命中），真实筛选是 IRM 逐列
+  `filter_model`（实测 152ms/块）—— 这条是「功能重复」判据，不是「没人调用」判据。
+- `frontend/e2e/` 的 21 处 `/browse/` 直连（都在 `data/view-data.spec.ts`）都不带 `search`；
+  `scripts/`、Electron 主进程、CI 无引用；
+  Excel 加载项不在仓内（`docs/tasks/todo.md:4163` 记了出仓），VBA/C#/xlam glob 零命中；无 OpenAPI 文件。
+- `docs/user-guide/02-data-management.md:61` 那个「搜索」是**文件列表**（`/files/?search=`，
+  `file_views.py:106` 自管 tags/filename，活着），与表格全文无关 —— 别把两条 `search` 混成一条。
+- 唯一的书面承诺是 `.qoder/repowiki/` 里三条生成文本，该目录 gitignored，不构成契约。
+
+**为什么不选 B**（只扫文本列 + 数值等值）：要把 16.2s 降下来就必须放弃「子串匹配」——
+对 1702 个数值列做子串命中的前提，正是 `df.astype(str)` 再生成一份全表字符串副本，那就是成本本身。
+所以 B 不是修好，是给一个零调用方的功能换一套语义（`500` 不再命中 `5000.0`），
+而逐列精确/区间过滤 `filter_model` 已经更强。
+
+**判据：存在即拒**（`?search=` 空串也 400），不静默忽略 —— 静默会让直连调用方以为筛过了、实际拿到全表。
+`cleanParams`（`datafiles.ts:103`）剥掉空值，所以这条规则对 UI 通路无影响。
+
+- 产品代码：`browse_views.py` 删 `search` 读取与整个 `astype(str).apply` 分支（删 10 行、加拒绝 8 行，
+  文件 572→570），
+  新增 `unsupported_param` 拒绝；顺带清掉 `export/views.py:85` 那句「search is grid-local」陈旧注释。
+- 测试：`test_search_filters_rows` → `test_search_param_rejected` + `test_empty_search_param_also_rejected`
+  （两条都先红在 `200 != 400` 才动手实现）；`test_fail_row_count_is_filtered_semantics` 去掉 search 那条组合，
+  同一语义仍由 site/pass 三条钉着。
+- 验证：后端 7 个模块（browse/分页/page_size/ets88 尾元信息 + `apps.datafiles`/`apps.export`/`apps.dashboard`）
+  **Ran 264 / OK / 144s**；`npx vitest run` **249 绿**；`npm run lint:e2e` 干净；`npm run build` ✓ 849ms。
+  快门禁 `npm run test:e2e:affected` 判定 `e2e 模块 [data, exports] + vitest`，实跑收口档全量池
+  **396 例 · 8.1min · 单价 3.50s/例 · 复跑判级真红 0**（负载抖动 2：`histogram-fail-bins`、
+  `histogram-multiseries-clip`，不拦门禁）+ P0 池 13 例 0 红 0 flaky。日志 `tasks/_p15_e2e_affected.log`。
+  ⚠ 效率 2.68 低于打印的目标 2.8 —— 本轮没有重跑承重失败，判红以复跑判级为准，效率这一项不动用例。

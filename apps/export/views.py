@@ -81,8 +81,7 @@ def _apply_export_filters(df, metadata, request_data):
     """Apply passfail/site/sort/filter_model to ``df`` like /browse/ does.
 
     Shared by to_excel/to_csv so both exports match what the grid shows.
-    Filter order mirrors DataBrowserView: site → filter_model → passfail →
-    sort (search is grid-local and intentionally not exported).
+    Filter order mirrors DataBrowserView: site → filter_model → passfail → sort.
     """
     # 惰性复制：df 是解析缓存里的共享只读对象，但下面每个分支都会产出新对象
     # （df[mask] / sort_values / reset_index），有过滤时先整表 copy 纯属浪费
