@@ -202,12 +202,15 @@ python manage.py seed_test_data --clear
 1. **登录错误被吞**：`api/index.ts` 全局响应拦截器对任何 401 都 `window.location.href='/login'`，
    导致登录接口 401 时 `LoginPage` 内联 `error-msg` 来不及显示。测试改为断言“停留登录页 + 未获 token”。
 2. **刷新丢失身份**：App 启动不重新拉取 `/auth/profile/`，刷新后 `user=null`、管理员菜单消失（见“角色相关用例”约定）。
-3. **无 Site 列的文件让分析页必发一个 400**：`useSiteStats.ts` 的早退只看 `file_id`/`param`，
+3. **无 Site 列的文件让分析页必发一个 400**（2026-10-17 起已不成立，见下）：`useSiteStats.ts` 的早退只看 `file_id`/`param`，
    不看文件有没有 Site 列，而后端 `statistics_views.py` 对无 Site 列直接 400 `no_site_column`。
    Chrome 把 4xx 记成 console error → P0 冒烟「/analysis 无控制台错误」必红。
+   **现状**：站点表已并入直方图响应（`histogram` 的 `site_stats` 为 null ⇒ 卡片内联提示，
+   不再有那个 400 请求），所以这一条命中路径已消失；下面的清理**仍然必须做**——
+   残留行会按 -created_at 抢走「最新文件」的自动选中，污染的是其它断言（R2③）。
    **为什么会命中**：分析页/仪表板自动选「最新 ready 文件」，而 zip 用例造的 `a.csv`/`b.csv`/
    `below.csv`（2 行 2 列、无 Site 列）在 `deleteBatchQuiet` 静默失败后就常驻库里
    （2026-09-20 实测：清理确实发了 `DELETE /api/v1/batch-dirs/e2e_zip_dup_*/` → 404，
    而目录在磁盘上存在 → 行没被删；库里同类残留自 09-08 起共 4 行）。
-   临时处置：手工清掉 `batch_name LIKE 'e2e%'` 的行；根治要么后端 200 + `has_site_column:false`
-   （动 `apps/analysis/tests_api_contract.py` 的守卫契约），要么前端无 Site 列时不发请求。
+   临时处置：手工清掉 `batch_name LIKE 'e2e%'` 的行；根治原本二选一（后端 200 + `has_site_column:false`，
+   或前端无 Site 列时不发请求）——2026-10-17 的站点表合并走了后者。

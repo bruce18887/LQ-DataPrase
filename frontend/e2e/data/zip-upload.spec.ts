@@ -63,8 +63,8 @@ test.describe('ZIP 压缩包上传：自动解析为批次数据', { tag: ['@p2'
     } finally {
       // 必须同时清掉上传产生的批次：只删临时 zip 会把 root.csv/below.csv
       // 的 DataFile 行留在共享 DB 里（它们只有 col1/col2、无 Site 列），
-      // 按 -created_at 排到最前后会被分析页自动选中 → site_stats 400 →
-      // P0 冒烟「无控制台错误」挂。详见 helpers/cleanup.deleteBatchQuiet。
+      // 按 -created_at 排到最前后会被分析页自动选中，污染按文件推进的断言。
+      // 详见 helpers/cleanup.deleteBatchQuiet。
       await deleteBatchQuiet(page, zipBase)
       cleanupQuiet(zipPath)
     }

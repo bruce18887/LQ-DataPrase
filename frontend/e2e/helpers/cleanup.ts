@@ -19,9 +19,8 @@ export function cleanupQuiet(p: string): void {
  *
  * 为什么必须做：批次/文件行按 -created_at 排序，分析页与仪表板会自动选中
  * 「最新文件」。zip-upload 造的 root.csv / below.csv / a.csv / b.csv 只有
- * 2 行 2 列（col1/col2）且**无 Site 列**，一旦被自动选中，
- * POST /statistics/site_stats/ 就返回 400 no_site_column，P0 冒烟的
- * 「无控制台错误」断言随之失败；而且每跑一轮 e2e 就累积一批（实测
+ * 2 行 2 列（col1/col2）且**无 Site 列**，一旦被自动选中就污染按文件推进的断言；
+ * 而且每跑一轮 e2e 就累积一批（实测
  * db.sqlite3 从 88 行涨到 120 行）。属 lessons R2③「跨套件共享 DB 状态
  * 要自建/自清」的典型场景。
  *

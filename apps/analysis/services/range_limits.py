@@ -37,3 +37,20 @@ def resolve_limits(range_type: str, stats: dict) -> tuple:
     elif range_type == 'S6':
         return stats['s6'][0], stats['s6'][1]
     return None, None
+
+
+def site_table_limits(range_type: str, stats: dict,
+                      custom_low=None, custom_high=None) -> tuple:
+    """Site 统计表的判定限：与分箱用的 bin 区间**不是**一件事，别共用。
+
+    CL 且用户两侧都填了 → 用用户输入；否则按 ``range_type`` 取 stats 里那一对。
+    这是 histogram 与 ``/statistics/site_stats/`` 的唯一口径来源：2026-09-05 审查
+    契约#4 撞过「CL 各自解释 → Site 表 Fail 恒 0、Yield 恒 100%」，同一屏两个数字
+    互相矛盾，所以宁可单列一个函数也不要再抄一遍 if/else。
+
+    与 ``resolve_limits`` 的差别只在 CL 那一支；分箱区间另外还要为退化限值
+    （单边缺失、零宽、std==0）回退到数据范围——那是画图的事，不该动 fail 判定。
+    """
+    if range_type == 'CL' and custom_low is not None and custom_high is not None:
+        return float(custom_low), float(custom_high)
+    return resolve_limits(range_type, stats)

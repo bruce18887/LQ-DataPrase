@@ -17,7 +17,7 @@ from apps.analysis.services.statistics import (
 )
 from apps.analysis.services.statistics.helpers import _dense_x_grid
 from apps.analysis.services.statistics.outliers import detect_outliers_iqr
-from apps.analysis.services.range_limits import resolve_limits
+from apps.analysis.services.range_limits import resolve_limits, site_table_limits
 from apps.common.user_settings import DEFAULT_CPK_THRESHOLDS
 
 
@@ -48,7 +48,8 @@ def compute_kde_curve(data_series, bin_min, bin_max, n_points=200):
 
 def compute_histogram_stats(df, metadata, param, site_col,
                             range_type='RDL', custom_low=None, custom_high=None,
-                            iqr_multiplier=1.5, cpk_thresholds=None):
+                            iqr_multiplier=1.5, cpk_thresholds=None,
+                            include_kde=True, kde_variant=None):
     """Compute histogram binning, CPK stats, and per-site histograms.
 
     ``cpk_thresholds`` 是 ``apps.common.user_settings.CpkThresholds``：账号在系统设置
@@ -59,15 +60,27 @@ def compute_histogram_stats(df, metadata, param, site_col,
 
     ``range_type`` selects which range drives the histogram binning (and thus
     the X-axis span): ``'RDL'`` (spec limits), ``'DR'``/``'CL'`` (data range),
-    ``'S3'``/``'S4'``/``'S6'`` (±3/4/6 sigma).  CPK and per-site yield always
-    stay anchored to the spec limits (RDL) regardless of ``range_type``,
-    except in ``'CL'`` mode: when ``custom_low``/``custom_high`` are both
-    provided they are treated as user-supplied spec limits, so an extra
-    ``custom_cpk`` (with level/color) is computed against them while the
-    RDL-anchored ``cpk`` is kept so the UI can show before/after values.
-    ``custom_low``/``custom_high`` override the binning range when
-    ``range_type == 'CL'`` and both are provided.
+    ``'S3'``/``'S4'``/``'S6'`` (±3/4/6 sigma).  CPK always stays anchored to
+    the spec limits (RDL) regardless of ``range_type``, except in ``'CL'`` mode:
+    when ``custom_low``/``custom_high`` are both provided they are treated as
+    user-supplied spec limits, so an extra ``custom_cpk`` (with level/color) is
+    computed against them while the RDL-anchored ``cpk`` is kept so the UI can
+    show before/after values.  ``custom_low``/``custom_high`` override the
+    binning range when ``range_type == 'CL'`` and both are provided.
     ``iqr_multiplier`` controls outlier detection sensitivity (default 1.5).
+
+    ``include_kde``/``kde_variant`` 是切测试项的单价开关（实测一条 KDE 曲线 ~32ms，
+    而界面只显示一条，见 ``HistogramChart.vue`` 的「KDE含超限」二选一）：
+      - 两者都不传（默认）= 旧口径，两条曲线都算 —— 导出与历史用例依赖这个默认值；
+      - ``include_kde=False`` = 一条都不算（前端没勾 KDE 曲线时）；
+      - ``kde_variant='all'`` = 只算全量那条（勾了「KDE含超限」）；
+      - ``kde_variant='filtered'`` = 只算剔除异常值那条；该参数没有异常值时界面
+        本来就读全量曲线，所以回退成只算全量那条 —— 任何组合下 KDE 最多算一条。
+    响应仍用原来那两个键（``kde_curve`` / ``filtered_kde_curve``），前端无需改选取逻辑。
+
+    ``site_stats`` 的判定限跟随 ``range_type``（CL 时跟用户自定义限），与 Site 统计
+    表原本单独调的 ``/statistics/site_stats/`` 同口径 —— 两者共用
+    ``range_limits.site_table_limits``，前端因此不必为同一张表再发一个请求。
     """
     th = cpk_thresholds or DEFAULT_CPK_THRESHOLDS
     data_series = filter_finite(get_1d_from(df, param))
@@ -156,11 +169,16 @@ def compute_histogram_stats(df, metadata, param, site_col,
         # site_idx_aligned = site_idx[data_series.index] 同源——否则 NaN/inf 行
         # 不进直方图分母却进 site 分母，同一响应里 ALL Site 良率与
         # site_histograms 互相矛盾。
+        # 判定限跟随 range_type（CPK 不跟随，恒锚 RDL）：与独立端点
+        # /statistics/site_stats/ 共用 site_table_limits，前端因此不必为
+        # 同一张 Site 统计表再发一个请求（2026-10-17 切测试项提效）。
+        site_lo, site_hi = site_table_limits(range_type, stats,
+                                             custom_low, custom_high)
         site_series = data_series
         site_idx = get_1d_from(df, site_col)
         site_data = compute_site_stats(
             site_series, site_idx.loc[data_series.index],
-            stats['rdl'][0], stats['rdl'][1],
+            site_lo, site_hi,
             None, None, False
         )
 
@@ -209,11 +227,24 @@ def compute_histogram_stats(df, metadata, param, site_col,
     # normal curve pair: ``kde_curve`` covers ALL data (so out-of-spec / fail
     # values surface as their own bump, and off-mode bars stay consistent),
     # ``filtered_kde_curve`` drops IQR outliers (main peak stays faithful).
-    # The front-end picks by its「KDE含超限」toggle — no extra request.
-    kde_curve = compute_kde_curve(data_series, bin_centers[0], bin_centers[-1])
+    # The front-end picks by its「KDE含超限」toggle (``filtered`` 为 None 时回退
+    # 全量那条)，且裁剪口径由 ``outlierHandling`` 在前端挑选、不额外发请求。
+    # 一条 KDE ≈32ms（实测 ETS88 35k 行 × 200 采样网格），而界面只显示一条，
+    # 所以 ``kde_variant`` 只算要用的那条；默认（两个键都可能出值）保持旧口径。
+    kde_curve = None
     filtered_kde_curve = None
-    if normal_data is not None and len(normal_data) > 1:
-        filtered_kde_curve = compute_kde_curve(normal_data, bin_centers[0], bin_centers[-1])
+    if include_kde:
+        x_lo, x_hi = bin_centers[0], bin_centers[-1]
+        has_filtered_source = normal_data is not None and len(normal_data) > 1
+        want_filtered = (kde_variant in (None, 'filtered')) and has_filtered_source
+        # 'filtered' 但没异常值 → 界面本来就读全量曲线，回退的那一条必须算出来
+        want_raw = (kde_variant in (None, 'all')) or (
+            kde_variant == 'filtered' and not want_filtered)
+        if want_raw:
+            kde_curve = compute_kde_curve(data_series, x_lo, x_hi)
+        if want_filtered:
+            filtered_kde_curve = compute_kde_curve(
+                normal_data, x_lo, x_hi)
 
     # 正态 PDF 曲线（与 KDE 同采样区间，覆盖整个可见 X 轴）：raw 与裁剪口径
     # 各一份，前端按异常值处理开关选择——公式单一来源 normal_pdf_curve

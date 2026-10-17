@@ -16,6 +16,31 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-10-17 等价性判据会退化成空断言：10 行夹具在数学上分不出 ±3σ 与 RDL
+
+- **现象**：给「站点表并入直方图响应」写等价性断言（`histogram.site_stats == /statistics/site_stats/`），
+  第一版 12 例里只有 CL 那条判红，S3/DR 两条**改动前就绿**——看着像口径本来就一致，其实是判据是空的。
+- **根因（三条各不同形）**：
+  ① S3：夹具只有 10 行。n≤10 时任何点离均值不超过 `(n-1)/√n ≈ 2.85` 个样本 σ ⇒ **±3σ 永远框住全部数据**，
+     S3 与 RDL 的 fail 数恒等，等号两边都是 0。换成 100 行 + 一个 13.9 的尾部点（在 RDL 内、3σ 外）才分得开。
+  ② DR：紧贴值全在 RDL 内时 DR 与 RDL 同样 0 fail；要它分岔必须让数据**超出规格限**（14.4 > USL 14.3）。
+  ③ CL：自定义限写成 10.40~10.50，而样本值恰好就是 10.40/10.45/10.50 —— 两侧都取不等号，
+     于是 CL 与 RDL 同报 6 fail。改成 10.42~10.48 后 1/3 的点落到限外（35 fail vs 3）才真的判红。
+- **规则**：
+  ① **写「A 等于 B」之前先给 B 加一条非平凡守卫**（这里：endpoint 那侧 fail 数必须 `>0`，
+     或口径应当 `==0`）。等号两边同时为 0/同时为空表，判据就哑了，而它永远全绿。
+  ② **同一套判据要能区分它声称区分的每一对口径**，靠代入边界值验算，不靠「我覆盖了 RDL/S3/DR/CL 四种」的条数。
+  ③ `patch_df_loader` 这类「扫遍所有消费模块」的桩，**一个用例只能有一个持有者**：第二次打桩的 restore
+     若被丢弃，tearDown 会把 loader 还原成**上一个假桩**——跨用例污染且不报错。要换帧就显式
+     `self.tearDown()` 后重新打，别在 helper 里再打一次。
+  ④ `get_bool_param(request, key, default=False)` 的 `default` 形参**没生效**（实现是
+     `str(get_param(...)).lower() in ('true','1','yes')`，缺省恒 False）。要「默认 True」的开关
+     必须先 `get_param(request, key) is None` 判存在（本批 `include_kde` 就这么写）。
+     当前全仓没人传 `default=True`，是潜伏坑不是活 bug——将来谁传了就会静默收到 False。
+- **验证**：`apps/analysis/tests_param_switch_load.py` 12 例；改动前 6 红（3 条 KDE 旗标 + S3/DR/CL 等价），
+  实现后全绿；受影响面 `apps.analysis` 221 例 + `test.backend.test_export_histogram_grid`/`test_histogram_kde`/`apps.export` 64 例绿；
+  三个敏感 spec（`outlier-handling`/`kde-curve`/`histogram-multiseries-clip`）`--slots=1` 独占 15 例 0 红。
+
 ## 2026-10-17 dev 下「保存连接方式后黑屏」：死的是 vite，而冒烟当初不在真实启动器组合里跑
 
 - **现象**：改「连接方式」或「存储路径」→ 保存后整窗黑（就是窗口底色 `#1a1a2e`），DevTools 里
