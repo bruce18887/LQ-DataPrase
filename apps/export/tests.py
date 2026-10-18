@@ -27,7 +27,7 @@ from apps.export.export_xlsx_optimized import (
     export_to_xlsx_optimized, _vectorized_native_rows,
 )
 from apps.export.export_csv import _convert_to_native_type
-from apps.export.views import _apply_export_filters
+from apps.export.filters import apply_export_filters
 
 User = get_user_model()
 
@@ -49,7 +49,7 @@ def _assert_plain_cell(cell, msg=''):
 
 
 class ApplyExportFiltersTests(TestCase):
-    """_apply_export_filters：无筛选参数时也必须交出独立副本。"""
+    """``apply_export_filters``：无筛选参数时也必须交出独立副本。"""
 
     def test_no_filter_returns_own_copy(self):
         """df 是解析缓存的共享只读对象——无过滤时不能把它的引用交给下游。
@@ -67,7 +67,7 @@ class ApplyExportFiltersTests(TestCase):
             'format': 'CTA8290D',
         }
         before = df.copy()
-        out = _apply_export_filters(df, metadata, {})
+        out = apply_export_filters(df, metadata, {})
         self.assertIsNot(out, df, '无筛选时下游也必须拿到自有对象')
         self.assertTrue(df.equals(before), '共享 df 内容不应被改动')
 

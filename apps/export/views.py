@@ -1,5 +1,4 @@
 import io
-import json
 from django.http import FileResponse
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -10,11 +9,11 @@ from apps.common.errors import error_response
 from apps.common.file_loading import load_user_file, FileLoadError
 from apps.common.export_naming import base_export_context, render_export_filename
 from apps.analysis.services.statistics import (
-    detect_fail_data, get_site_column,
+    get_site_column,
     filter_bin1_rows,
 )
 from apps.datafiles.parsers.base import SYSTEM_COLUMNS
-from apps.datafiles.views.browse_views import _apply_filter_model, _apply_sort
+from .filters import apply_export_filters
 from .columns import measurable_numeric_columns
 from .excelize_helpers import save_excelize
 from .excel_builders import (
@@ -60,67 +59,6 @@ def parse_sigma_level(raw):
     return level if MIN_SIGMA_LEVEL <= level <= MAX_SIGMA_LEVEL else None
 
 
-def _parse_grid_model(raw, expect):
-    """Parse ag-grid sort/filter model from an export request.
-
-    Frontend sends JSON-encoded ``sort_model`` (array) / ``filter_model``
-    (object) identical to /browse/ IRM params. Malformed or mistyped values
-    degrade to empty (no sorting/filtering) instead of 400 — export must not
-    fail because a filter widget sent something odd.
-    """
-    if not raw:
-        return [] if expect == list else {}
-    try:
-        parsed = json.loads(raw) if isinstance(raw, str) else raw
-    except (ValueError, TypeError):
-        return [] if expect == list else {}
-    return parsed if isinstance(parsed, expect) else ([] if expect == list else {})
-
-
-def _apply_export_filters(df, metadata, request_data):
-    """Apply passfail/site/sort/filter_model to ``df`` like /browse/ does.
-
-    Shared by to_excel/to_csv so both exports match what the grid shows.
-    Filter order mirrors DataBrowserView: site → filter_model → passfail → sort.
-    """
-    # 惰性复制：df 是解析缓存里的共享只读对象，但下面每个分支都会产出新对象
-    # （df[mask] / sort_values / reset_index），有过滤时先整表 copy 纯属浪费
-    # （275MB 文件实测 328ms）。无过滤时由返回前的兜底补上复制，下游永远
-    # 拿到自有对象，语义与「进门就 copy」完全等价。
-    export_df = df
-
-    site_filter = request_data.get('site_filter') or ''
-    if site_filter and site_filter != '全部':
-        site_col = get_site_column(export_df)
-        if site_col:
-            export_df = export_df[export_df[site_col].astype(str) == str(site_filter)]
-
-    filter_model = _parse_grid_model(request_data.get('filter_model'), dict)
-    if filter_model:
-        export_df = _apply_filter_model(export_df, filter_model)
-
-    passfail = request_data.get('passfail') or ''
-    if passfail and passfail != '全部':
-        fail_indices, _, _ = detect_fail_data(export_df, metadata)
-        fail_set = set(fail_indices)
-        if str(passfail).lower() == 'fail':
-            export_df = export_df.loc[export_df.index.isin(fail_set)]
-        elif str(passfail).lower() == 'pass':
-            export_df = export_df.loc[~export_df.index.isin(fail_set)]
-        export_df = export_df.reset_index(drop=True)
-
-    sort_model = _parse_grid_model(request_data.get('sort_model'), list)
-    if sort_model:
-        export_df = _apply_sort(export_df, sort_model)
-
-    # 兜底：所有分支都因参数缺失/不生效而没产出新对象时，这里才真正复制。
-    # 绝不能把共享缓存的引用交给下游（下游一旦原地改列会污染缓存）。
-    if export_df is df:
-        export_df = df.copy()
-
-    return export_df
-
-
 class ExportViewSet(viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
 
@@ -136,7 +74,7 @@ class ExportViewSet(viewsets.GenericViewSet):
             return error_response(e.error_code)
 
         # 与表格一致：passfail/site/sort/filter_model 全量应用
-        export_df = _apply_export_filters(df, metadata, request.data)
+        export_df = apply_export_filters(df, metadata, request.data)
 
         # Use old version's complete implementation
         # 默认隐藏列（系统设置 → 表格设置）：列保留在导出文件中但设为 Excel 隐藏列
@@ -168,7 +106,7 @@ class ExportViewSet(viewsets.GenericViewSet):
 
         # 与表格一致：passfail/site/sort/filter_model 全量应用
         # （此前走 bin==1 语义，与表格 detect_fail_data 不一致，一并对齐）。
-        export_df = _apply_export_filters(df, metadata, request.data)
+        export_df = apply_export_filters(df, metadata, request.data)
 
         csv_content = export_to_csv(export_df, metadata)
 
