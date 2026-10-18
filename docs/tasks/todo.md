@@ -4478,7 +4478,7 @@ Chromium 错误页停在窗口底色 `#1a1a2e` 上 = 黑屏，且 `did-finish-lo
 方案正文：`docs/plans/2026-10-17-performance-remediation.md`（含实测基线与验收线）。
 决策已拍板：D1=单进程+常驻进程池、D2=写透缓存（保留上传即解析，见下）、D3=SFTP 下载作业化。
 
-- [ ] 批 0 基线固化：把 `tasks/perf_probe_*_2026-10-17.py` 合并成 `scripts/perf_baseline.py`；新增 20 并发压测脚本，落 `docs/reference/perf-baseline-2026-10-17.md`
+- [x] 批 0 基线固化：六个 `tasks/perf_probe_*_2026-10-17.py` 合并成 `scripts/perf_baseline.py`；新增 `scripts/perf_load20.py`（20 人 HTTP 负载）；数据落 `docs/reference/perf-baseline-2026-10-17.md`（顺带否证了方案里「spawn 8 进程 ≈5.7s 纯启动」那条，见该文档 §4）
 - [x] P1-1 上传写透解析缓存：`_BytesLRUCache.put` + `put_cached_parsed_file` + `_register_file` 调用；`tests_parse_cache` 加 2 例
 - [x] P1-2 看板汇总加缓存（614ms → <20ms）：`get_dashboard_summary` + key 含 thresholds/mtime；`tests_cache.py` 4 例
 - [x] P1-3 导出去掉无条件 `df.copy()`：改为惰性复制 + 返回前兜底
@@ -4534,3 +4534,81 @@ Chromium 错误页停在窗口底色 `#1a1a2e` 上 = 黑屏，且 `did-finish-lo
   **396 例 · 8.1min · 单价 3.50s/例 · 复跑判级真红 0**（负载抖动 2：`histogram-fail-bins`、
   `histogram-multiseries-clip`，不拦门禁）+ P0 池 13 例 0 红 0 flaky。日志 `tasks/_p15_e2e_affected.log`。
   ⚠ 效率 2.68 低于打印的目标 2.8 —— 本轮没有重跑承重失败，判红以复跑判级为准，效率这一项不动用例。
+
+## 批 0 基线固化（2026-10-18）：两个脚本 + 一份数据文档
+
+- `scripts/perf_baseline.py`：合并 6 个临时探针为 7 组（big/screen/analysis/batch/irm/startup/auth），
+  **只读**（不建用户不写库），缺样例大文件时相关组打 SKIP；`--json` 落 `tasks/*.json` 便于两轮对比。
+  旧的 `tasks/perf_probe_*` **保留不删** —— 它们是 10-17 那批数字的出处。
+- `scripts/perf_load20.py`：20 人 HTTP 负载，`--heavy upload|export` 在负载中插一条重活做对照。
+  落盘面全在 `LQDP_E2E_SLOT_DIR`（本次用 `test/perf-data`，跑完已删）；缺该变量直接拒绝启动。
+- 数据文档：`docs/reference/perf-baseline-2026-10-17.md`。
+
+**三条被实测改掉的说法**（都是我自己或上一版文档写下的）：
+
+1. **「导出 spawn 8 进程 ≈5.7s 纯启动」不成立** —— `715ms × 8` 是串行乘法，worker 实际并发启动：
+   池冷启实测 635–692ms，含 `chart_workers` 也才 1032–1151ms。⇒ 已改方案 §2 表、§6 第 2 条、
+   spec §9 验收项（那条「启动开销从 5.7s 降到 <0.5s」作废）。P3 的收益只剩「不占请求线程」。
+2. **`tracemalloc` 会把 parse 拖慢一倍**（3.6s → 7.8s 实测）⇒ 峰值内存独立成默认不跑的 `peak` 组。
+3. **跨轮比 P95 必须先同冷热**：首版没预热，算出过 summary `×0.09` 这种荒谬比值
+   （冷轮 summary P95 22.5s vs 热轮 2.2s）⇒ 脚本加 `--warmup`（默认 1 轮）并在预热后清零统计账。
+
+**压测实测结论**（`runserver --noreload` 多线程档，因此是**乐观值**）：
+
+- 20 用户 × 3 轮 + 一人上传 275MB：**0 错误、0 次 `database is locked`**，写请求 P95 倍数 ×0.96
+  ⇒ P2「拆开长写事务」的方向已被证实；
+- 但 §3 的目标线全部没达到：browse 首页 P95 **6288ms**（目标 <400ms）、他人写 P95 **1903ms**（目标 <200ms）；
+- browse 首页贵的不是解析：`page_size=50` 的响应体实测 **700451 字节**（50 行 × 1702 列），
+  `to_json` 只要 18ms ⇒ 载荷与每请求 260ms 元信息循环才是大头；
+- 解析缓存按 (file, owner) 分键 ⇒ 20 人打开**同一个物理文件**也要各解析一遍，这是尾部主导项。
+
+**踩坑记录（本批自己的）**：脚本头两版各有 3 处「以为对」的错 —— `User` 模型没有 `owner` 字段、
+`/api/v1/dashboard/summary/` 其实挂在 `/api/v1/summary/`（dashboard 只是 app 名）、
+`/auth/settings/` 只有 PUT 没有 PATCH。三条都靠**先跑 5 用户小档**才暴露；
+报表最初只遍历「有样本的端点」，把「整段 404」的端点直接从表里吞掉了 ——
+**压测/统计类脚本的报表必须遍历 样本 ∪ 错误 的并集**，否则漏项长得像「没有这一项」。
+
+## P3 重活作业化：实施计划（设计稿 `docs/specs/2026-10-17-heavy-job-offload-design.md`）
+
+### 动手前先验掉的两个前提（都验过，不是推测）
+
+1. **worker 能不能不碰 Django 就把活干完？能。** `grep` 实测这些模块零 Django import：
+   `apps/datafiles/parsers/*`、`apps/export/{export_xlsx_optimized,export_complete,export_csv,
+   charts,export_batch_charts_xlsx,histogram_grid,html_report/*}`、`apps/dashboard/services.py`、
+   `apps/analysis/services/*`。唯一带 Django 的是 `apps/datafiles/utils.py:4`（`resolve_file_path`）
+   ⇒ **主进程把绝对路径算好再进 task dict**，worker 只吃字符串。
+   `compute_dashboard_summary` 对 `datafile` 只读 `.id/.filename/.program_name`
+   （`apps/dashboard/services.py:308-310`）⇒ 传 `SimpleNamespace` 即可，可 pickle。
+2. **原设想「把 df 传给 worker」是错的**：460MB 的帧跨 spawn 边界序列化，成本高于渲染本身。
+   正解是**worker 自己 parse（3.6s，但在别的进程里）** ⇒ 主进程对导出**一次都不解析**，
+   这比原方案更省。P3 的收益全部记在「不占请求线程」，不记在启动开销（见批 0 §4 的 5.7s 否证）。
+
+### 切片（每片单独提交）
+
+- [ ] **S1 作业核**：`apps/jobs/`（models/apps/urls/views/executor/management/commands/prune_jobs.py）
+      + `0001_initial` + `INSTALLED_APPS`（`config/settings/base.py:40-66` 用点号串形式）。
+      状态机 pending→running→done/error/cancelled；`ready()` 把 `running` 全标 `error`
+      （同 `apps/common/apps.py:7-16` 的 `dispatch_uid` 写法）。
+      越权一律 **404**（仓内通例 `get_object_or_404(..., owner=request.user)`，403 只有 accounts 一处）。
+- [ ] **S2 执行器**：模块级常驻 `ProcessPoolExecutor`（lazy 创建 + 启动 warmup）
+      与 `ThreadPoolExecutor(2)`（SFTP 用**临时连接**，走 `apps/sftp/search/connect.py:89`
+      `open_verified_transport` 那条，不碰 `pool.py` 的 per-user 常驻连接）。
+      进度：worker 不写库，主进程单线程轮询器 500ms 一跳、限频 1 次/秒/作业。
+      **池创建失败 ⇒ 同步降级**（返回 200 + 文件流，响应头 `X-Job-Fallback: 1`），这条必须有测试。
+- [ ] **S3 端点**：`POST /jobs/{export_excel,export_batch_charts,export_html_report}/` → 202+job_id，
+      `GET /jobs/<id>/`、`GET /jobs/<id>/download/`（未 done→404）、`POST /jobs/<id>/cancel/`
+      （仅 pending，running→409）、`GET /jobs/`（本人最近 50）。旧同步端点**不删**。
+- [ ] **S4 前端**：`useExport.ts` 由「await blob」改「POST→轮询→download」；
+      进度 UI 复用 SFTP 现有条；双主题只认 CSS token；失败态给 error 文案 + 重试（同 params 重 POST）。
+- [ ] **S5 SFTP 批量下载作业化**（D3 已拍板要做）：`download_dir_events` 的事件流
+      （`progress/error/done`，`apps/sftp/downloads.py:229-325`）映射成 `Job.progress`，
+      完成后照旧 `_register_file(user, path, 'batch', dir_name)`。
+
+### 判据（T1 先红后绿）
+
+状态机逐条、owner 隔离（他人 job_id→404）、未 done 的 download→404、cancel 的 409、
+重启 `running`→`error`、池失败同步降级、**极小导出（10 行 CSV）产出可读 xlsx**、
+params 快照原样进 worker。T3 只留一条接线证明（点导出→进度→下载到文件）。
+测试写法照 `apps/buyoff/tests.py`（APITestCase + `force_authenticate`）；
+断 `in_atomic_block` 那类才用 `TransactionTestCase`（`apps/datafiles/tests_import_tx.py:11-13` 的理由）。
+**不测**真实 275MB 导出耗时（那是 `scripts/perf_load20.py --heavy export` 的验收，不进 CI）。
