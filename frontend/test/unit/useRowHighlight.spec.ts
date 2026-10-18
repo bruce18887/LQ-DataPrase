@@ -43,4 +43,27 @@ describe('useRowHighlight', () => {
     expect(h.toggle(Number.NaN)).toBe(false)
     expect(h.count.value).toBe(0)
   })
+
+  it('右键菜单：打开时带行号/序列号，菜单项可切换并关闭', () => {
+    const h = useRowHighlight()
+    h.openMenu(4, 'SN-004', 120, 80)
+    expect(h.menuVisible.value).toBe(true)
+    expect(h.menuRowIndex.value).toBe(4)
+    expect(h.menuSerialValue.value).toBe('SN-004')
+    expect(h.toggleMenuRow()).toBe(true)
+    expect(h.isHighlighted(4)).toBe(true)
+    expect(h.menuVisible.value).toBe(false)
+    // 再开再点 → 取消
+    h.openMenu(4, 'SN-004', 120, 80)
+    expect(h.toggleMenuRow()).toBe(false)
+    expect(h.isHighlighted(4)).toBe(false)
+  })
+
+  it('clear 同时关闭右键菜单', () => {
+    const h = useRowHighlight()
+    h.openMenu(2, 'SN-002', 0, 0)
+    h.clear()
+    expect(h.menuVisible.value).toBe(false)
+    expect(h.count.value).toBe(0)
+  })
 })

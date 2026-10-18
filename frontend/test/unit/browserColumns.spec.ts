@@ -11,6 +11,7 @@ import {
   browserCellStyle,
   buildBrowserColumnDefs,
   headerMenuCopyLabel,
+  resolveDisplayCols,
 } from '../../src/pages/data/components/browser/browserColumns'
 
 const LIGHT_RED = { backgroundColor: 'var(--error-2)', color: '#ffffff', fontWeight: 'bold' }
@@ -59,7 +60,6 @@ describe('buildBrowserColumnDefs', () => {
     defaultHiddenCols: ['B'],
     pinnedCols: ['SERIAL'],
     highlightTriggerCol: 'SERIAL',
-    highlightTriggerKind: 'serial' as 'serial' | 'bin',
     isSystemCol: (c: string) => c === 'SERIAL',
     isDark: false,
   }
@@ -87,20 +87,20 @@ describe('buildBrowserColumnDefs', () => {
     expect(byField.SERIAL.pinned).toBe('left')
   })
 
-  it('只有高亮触发列带手型类与表头提示', () => {
+  it('只有高亮触发列带触发类与右键提示', () => {
     const byField = Object.fromEntries(defs().map((d: any) => [d.field, d]))
     expect(byField.SERIAL.cellClass).toBe('row-highlight-trigger')
-    expect(byField.SERIAL.headerTooltip).toContain('点击序列号')
+    expect(byField.SERIAL.headerTooltip).toContain('右键序列号')
     expect(byField.A.cellClass).toBeUndefined()
     expect(byField.A.headerTooltip).toBeUndefined()
   })
 
-  it('无序列列退回 Bin 时提示文案随触发列变化', () => {
+  it('无序列列（触发列为空）时没有触发类', () => {
     const byField = Object.fromEntries(
-      defs({ highlightTriggerCol: 'A', highlightTriggerKind: 'bin' }).map((d: any) => [d.field, d]),
+      defs({ highlightTriggerCol: '' }).map((d: any) => [d.field, d]),
     )
-    expect(byField.A.headerTooltip).toContain('点击 Bin')
     expect(byField.SERIAL.cellClass).toBeUndefined()
+    expect(byField.SERIAL.headerTooltip).toBeUndefined()
   })
 
   it('保留隐藏的 __fail_cells__ 占位列', () => {
@@ -113,5 +113,24 @@ describe('headerMenuCopyLabel', () => {
   it('测试项与系统列使用不同文案', () => {
     expect(headerMenuCopyLabel(false)).toBe('复制测试项名字')
     expect(headerMenuCopyLabel(true)).toBe('复制列名')
+  })
+})
+
+describe('resolveDisplayCols', () => {
+  const all = ['S1', 'T1', 'S2', 'T2', 'T3']
+  const sys = ['S1', 'S2']
+
+  it('系统列恒显示且前置，测试列保持文件序', () => {
+    expect(resolveDisplayCols(all, sys, [])).toEqual({
+      systemCols: ['S1', 'S2'],
+      testCols: ['T1', 'T2', 'T3'],
+      displayCols: ['S1', 'S2', 'T1', 'T2', 'T3'],
+    })
+  })
+
+  it('选中测试列非空时只显示选中的（系统列不裁）', () => {
+    expect(resolveDisplayCols(all, sys, ['T3', 'T1']).displayCols).toEqual([
+      'S1', 'S2', 'T1', 'T3',
+    ])
   })
 })
