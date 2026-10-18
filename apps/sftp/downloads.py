@@ -27,6 +27,42 @@ from .local_paths import remove_partial as _remove_partial
 
 logger = logging.getLogger(__name__)
 
+
+def collect_files(sftp, remote_dir, result, rel_prefix, only_data, depth=0):
+    """递归收集远端文件（原地 append 到 `result`）。
+
+    从 `SftpViewSet._collect_files` 搬成模块函数：SSE 端点与 SFTP 下载作业
+    （`apps/jobs/sftp_job.py`）要用同一份「什么算可下载的数据文件」判定，
+    抄第二份必然漂移。跳过规则一条没动：
+    隐藏文件、非 `.csv`、以及 `Sum_*.csv` 这类汇总导出（不是逐件 ATE 数据）。
+
+    远端列目录失败只 warn 后跳过该层（与既有语义一致）—— 一层读不到不该让整次下载失败。
+    """
+    from stat import S_ISDIR                      # 局部导入：与 views 原实现一致
+    from apps.datafiles.views import _is_summary_csv
+
+    remote_dir = remote_dir.rstrip('/')
+    try:
+        attrs = sftp.listdir_attr(remote_dir)
+    except Exception as e:
+        logger.warning(f"SFTP listdir failed for {remote_dir}: {e}")
+        return
+
+    for attr in attrs:
+        name = attr.filename
+        if name.startswith('.'):
+            continue
+        remote_path = f"{remote_dir}/{name}"
+        rel_path = f"{rel_prefix}{name}" if rel_prefix else name
+
+        if S_ISDIR(attr.st_mode):
+            collect_files(sftp, remote_path, result, f"{rel_path}/", only_data, depth + 1)
+        else:
+            ext = os.path.splitext(name)[1].lower()
+            if only_data and (ext != '.csv' or _is_summary_csv(name)):
+                continue
+            result.append((remote_path, rel_path, attr.st_size, attr.st_mtime))
+
 # 分块大小：256KB —— 与 paramiko 内部读缓冲兼容，SSE 事件节流到 ~10/s，避免
 # 小文件催出一堆 99% 的事件（见下方 PROGRESS_EVENT_INTERVAL）。
 DOWNLOAD_CHUNK_SIZE = 256 * 1024

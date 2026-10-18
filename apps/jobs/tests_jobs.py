@@ -645,11 +645,25 @@ class BatchChartsAndHtmlReportTests(TestCase):
 class ExecutorRegistryTests(unittest.TestCase):
     """三类作业都必须在注册表里，且各自的超时不同（spec §4.3）。"""
 
-    def test_all_three_export_kinds_registered(self):
+    def test_all_kinds_registered(self):
+        """四类重活都在注册表里（S1 那条断「恰好三类导出」，S3 加下载后由这条接替）。
+
+        断的是「该有的都有」，不是「只有这些」—— 后者会在每加一类作业时假红一次，
+        而它想防的其实是「某类被漏掉」。
+        """
         from apps.jobs import executor
         self.assertEqual(
             set(executor.KIND_RUNNERS),
-            {'export_excel', 'export_batch_charts', 'export_html_report'})
+            {'export_excel', 'export_batch_charts', 'export_html_report',
+             'sftp_download'})
+
+    def test_every_kind_has_a_complete_spec(self):
+        """每类作业都必须给齐 entry / lane / timeout —— 漏一个就是运行时 KeyError。"""
+        from apps.jobs import executor
+        for kind, spec in executor.KIND_RUNNERS.items():
+            self.assertTrue(callable(spec['entry']), kind)
+            self.assertIn(spec['lane'], ('process', 'thread'), kind)
+            self.assertGreater(spec['timeout'], 0, kind)
 
     def test_worker_modules_for_all_kinds_are_django_free(self):
         """新增两类不能把 Django 又拽回 worker。"""

@@ -4601,9 +4601,9 @@ Chromium 错误页停在窗口底色 `#1a1a2e` 上 = 黑屏，且 `did-finish-lo
       （仅 pending，running→409）、`GET /jobs/`（本人最近 50）。旧同步端点**不删**。
 - [ ] **S4 前端**：`useExport.ts` 由「await blob」改「POST→轮询→download」；
       进度 UI 复用 SFTP 现有条；双主题只认 CSS token；失败态给 error 文案 + 重试（同 params 重 POST）。
-- [ ] **S5 SFTP 批量下载作业化**（D3 已拍板要做）：`download_dir_events` 的事件流
+- [x] **S5 SFTP 批量下载作业化**（D3 已拍板要做）：`download_dir_events` 的事件流
       （`progress/error/done`，`apps/sftp/downloads.py:229-325`）映射成 `Job.progress`，
-      完成后照旧 `_register_file(user, path, 'batch', dir_name)`。
+      完成后照旧 `_register_file(user, path, 'batch', dir_name)`。—— 见文末「S3 实施结果」。
 
 ### 判据（T1 先红后绿）
 
@@ -4661,6 +4661,57 @@ apps.dashboard + test.backend.{test_browse_api,test_page_size_bounds}` = **Ran 4
 
 **降级路径有测试**：`executor_available()` 返回 False 时同步算完，返回
 `200 + 文件流 + X-Job-Fallback: 1`（spec §7 要求必须有测试的那条）。
+
+### S3 实施结果（2026-10-18）：SFTP 批量下载作业化（线程 lane）
+
+作业判据 **47 例 / OK**（新增 `apps/jobs/tests_jobs_sftp.py` 14 例）。
+
+**为什么走线程而不是进程池**：SFTP 传输是 IO-bound，不占 CPU；而下载过程中要**在主进程里**
+注册 DataFile、写进度 —— 那些都要 Django。所以 `KIND_RUNNERS` 的值从「元组」改成
+`{entry, timeout, lane}`，lane=process 给三个导出，lane=thread 给下载。
+`MAX_DOWNLOAD_WORKERS = 2` 是硬上限：每条作业连接都是一条独立 SSH 会话，
+不设限 20 人一起下载会撞 `sshd MaxStartups`（方案 §7-D1 的原始顾虑之一）。
+
+**每作业一条临时连接，绝不碰 per-user 常驻池**：paramiko 的 `SFTPClient` 不是线程安全的，
+作业后台跑几分钟还攥着用户那条交互连接 = 前端一点 SFTP 就互踩。
+做法沿用 `apps/sftp/search/connect.py`（`cache.get_session` + `host_keys.open_verified_transport`）。
+判据里用 `mock.patch.object(executor.pool_module, 'get_connection', side_effect=AssertionError)`
+把它钉成「一旦有人用常驻连接就直接红」。
+
+**产物语义刻意没有 invent 新东西**：批量下载的文件**当场注册进用户库**（这是 SSE 通路
+既有行为），所以作业的 `result_path` 是那个批次目录、`result_name` 是目录名，
+而 `GET /jobs/<id>/download/` 对这类作业返回 **409 `not_a_file_result`** ——
+它没有一个「可再下载的单文件」，伪造一个 zip 只是把刚落盘的东西再打包一遍。
+spec §5 那张表在这里不成立，已按实测语义落地并在代码注释写明。
+
+**提交那一刻就把「即时可知的错误」答掉**：未连接 → 400 `not_connected`；
+目录里没有可下载 CSV → 400 `no_data`。这两件事建一行 pending 再让它几分钟后 error，
+等于把即时错误伪装成异步进度。清单在提交时列好放进 task（不进 `Job.params`：
+大目录几千条，那是把内部结构当用户意图存起来），params 只存 path/dir_name/file_count。
+
+**部分失败仍是 done**：生成器的既有语义是「清半截 + error 事件 + 继续下一只」，
+作业化后成功过的作业仍 done，失败清单写进 `error` 字段；**全部失败**才 error。
+全失败时**不再抛异常** —— 抛了会让 done-callback 用 `SftpJobError: download_failed`
+覆盖掉「哪几只失败」这句更有用的话（第一版就因此把判据 `全部失败` 冲掉了）。
+
+**`_collect_files` 从视图搬成 `downloads.collect_files`**：SSE 端点与下载作业必须共用
+同一份「什么算可下载的数据 CSV」（跳过隐藏/非 csv/`Sum_*.csv`），抄第二份必然漂移。
+判据复用 `apps/sftp/tests_download_dir.FakeSftp`（同一个替身，改接口时两套一起红），
+只在本文件子类化补 `close()`/`listdir_attr()`，不动那个共享替身。
+
+**判据写法上纠了两次错**：
+① 进度限频最初是去 mock `Job.objects.filter` 数写入次数 —— 那个 spy 把 Manager 喂进了
+Django 的 filter 解析，`cannot unpack non-iterable Manager object`；即便能跑，测的也是
+「我拦到调用没有」而非「该不该写」。抽成 `progress_should_write(now, last_write,
+percent, last_percent)` 后代边界值验算（含「正好等于间隔算到点」这条边界）。
+② 两个测试类最初用 `unittest.TestCase` 却建用户 → `no such table: accounts_user`，改 Django `TestCase`。
+
+**一处红与我无关，但记下来**：`apps.datafiles.tests.ZipUploadTests
+.test_zip_upload_reupload_refreshes_disk_content` 在第一次合并跑（sftp+jobs+export+
+datafiles+browse）时红在 `np.int64(2) != 6`。判据链：**单条独占复跑必红、整类复跑全绿、
+原组合重跑 387 例全绿** ⇒ 该测试依赖同类前序用例留下的状态（既有隔离缺陷），
+且 `git log 3beb861~1..HEAD -- apps/datafiles/tests.py apps/datafiles/views/_helpers.py` 为空
+⇒ 本会话四笔都没碰过 zip 上传路径。留作后续单独修（判据应自建前置，不靠邻居）。
 
 ### S2 实施结果（2026-10-18）：三类导出作业齐了，进度侧车落地
 
