@@ -41,6 +41,7 @@
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { DocumentCopy, TrendCharts } from '@element-plus/icons-vue'
 import { headerMenuCopyLabel } from './browserColumns'
+import { measureContextMenu } from './contextMenuPosition'
 
 const props = defineProps<{
   visible: boolean
@@ -80,17 +81,13 @@ function cleanup() {
 /**
  * 按当前 props.x/y 定位并在视口内夹紧。
  * 菜单开着时换列右键：visible 仍是 true，必须靠 x/y watcher 重新定位。
+ * 坐标空间换算（页面缩放档下 clientX 与 fixed 元素不同源）住在 contextMenuPosition。
  */
 function positionMenu(focusItem = false) {
-  pos.value = { x: props.x, y: props.y }
+  // 首帧量不到宽高，先只换算空间；下一帧按实测尺寸夹紧
+  pos.value = measureContextMenu(null, props.x, props.y)
   nextTick(() => {
-    const el = menuEl.value
-    if (!el) return
-    const rect = el.getBoundingClientRect()
-    pos.value = {
-      x: Math.max(8, Math.min(props.x, window.innerWidth - rect.width - 8)),
-      y: Math.max(8, Math.min(props.y, window.innerHeight - rect.height - 8)),
-    }
+    pos.value = measureContextMenu(menuEl.value, props.x, props.y)
     if (focusItem) copyEl.value?.focus()
   })
 }
