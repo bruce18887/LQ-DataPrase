@@ -77,21 +77,29 @@ function cleanup() {
   window.removeEventListener('resize', onResizeGlobal)
 }
 
+/**
+ * 按当前 props.x/y 定位并在视口内夹紧。
+ * 菜单开着时换列右键：visible 仍是 true，必须靠 x/y watcher 重新定位。
+ */
+function positionMenu(focusItem = false) {
+  pos.value = { x: props.x, y: props.y }
+  nextTick(() => {
+    const el = menuEl.value
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    pos.value = {
+      x: Math.max(8, Math.min(props.x, window.innerWidth - rect.width - 8)),
+      y: Math.max(8, Math.min(props.y, window.innerHeight - rect.height - 8)),
+    }
+    if (focusItem) copyEl.value?.focus()
+  })
+}
+
 watch(
   () => props.visible,
   (v) => {
     if (v) {
-      pos.value = { x: props.x, y: props.y }
-      nextTick(() => {
-        const el = menuEl.value
-        if (!el) return
-        const rect = el.getBoundingClientRect()
-        pos.value = {
-          x: Math.max(8, Math.min(props.x, window.innerWidth - rect.width - 8)),
-          y: Math.max(8, Math.min(props.y, window.innerHeight - rect.height - 8)),
-        }
-        copyEl.value?.focus()
-      })
+      positionMenu(true)
       document.addEventListener('mousedown', onDocMouseDown, true)
       document.addEventListener('keydown', onKeydownGlobal)
       document.addEventListener('wheel', onWheelGlobal, { capture: true, passive: true })
@@ -99,6 +107,13 @@ watch(
     } else {
       cleanup()
     }
+  },
+)
+
+watch(
+  () => [props.x, props.y],
+  () => {
+    if (props.visible) positionMenu(false)
   },
 )
 

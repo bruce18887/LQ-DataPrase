@@ -130,7 +130,13 @@ async function fetchBinFailInfo(page: Page, filename: string) {
       borderlineRowIdx: -1,
       borderlineCol: '',
       borderlineCount: 0,
+      // 同一视口内相邻的两个 fail 行（菜单定位跟随点击点的素材）
+      pairAIdx: -1,
+      pairBIdx: -1,
+      pairAValue: '',
+      pairBValue: '',
     }
+    const failSeen: { idx: number; value: string }[] = []
     for (let i = 0; i < rows.length; i++) {
       const v = rows[i][bin]
       const isFail = v !== null && v !== undefined && v !== '' && Number(v) !== 1
@@ -141,6 +147,18 @@ async function fetchBinFailInfo(page: Page, filename: string) {
           info.binValue = String(v)
           info.failCols = fc
         }
+        if (info.pairAIdx === -1) {
+          for (const prev of failSeen) {
+            if (i - prev.idx <= 5) {
+              info.pairAIdx = prev.idx
+              info.pairBIdx = i
+              info.pairAValue = prev.value
+              info.pairBValue = String(v)
+              break
+            }
+          }
+        }
+        failSeen.push({ idx: i, value: String(v) })
         if (fc.length > 1 && i >= 10) {
           // goToFailCell 跳的是 __fail_cells__ 里第一个可见 fail 列（测试列在前、bin 最后），
           // 所以素材必须让**首列**就是远列，否则横向滚动会落到近列、farCol 永远滚不进视图。
@@ -1031,6 +1049,48 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     await page.waitForTimeout(500)
     await expect(page.locator('.bin-cell-menu')).toHaveCount(0)
     await expect(page.locator('.el-dialog')).not.toBeVisible()
+  })
+
+  test('@p2 Bin 右键菜单：菜单开着时换行右键仍跟随新坐标', async ({ page }) => {
+    await openViewTab(page, SEEDED_FILES.CTA8280F_FT)
+    const info = await fetchBinFailInfo(page, SEEDED_FILES.CTA8280F_FT)
+    if (info.pairAIdx === -1) test.skip(true, '无相邻 fail 行')
+
+    const rowA = await ensureRowRendered(page, info.pairAIdx)
+    const rowB = await ensureRowRendered(page, info.pairBIdx)
+    const cellA = binCell(rowA, info.bin)
+    const cellB = binCell(rowB, info.bin)
+    await expect(cellA).toBeVisible({ timeout: 10_000 })
+    await expect(cellB).toBeVisible({ timeout: 10_000 })
+
+    const menu = page.locator('.bin-cell-menu')
+    const expectAt = async (point: { x: number; y: number }) => {
+      const box = await menu.boundingBox()
+      expect(box).not.toBeNull()
+      expect(Math.abs(box!.x - point.x), `menu x=${box!.x} click x=${point.x}`).toBeLessThan(6)
+      expect(Math.abs(box!.y - point.y), `menu y=${box!.y} click y=${point.y}`).toBeLessThan(6)
+    }
+    // 直接派发 contextmenu：不经过 pointer/mousedown，复现「菜单已开着时再次右键」
+    // 时 visible 一直为 true 的路径（旧实现只监听 visible，坐标会停在上一次点击处）。
+    const dispatchContextMenu = (loc: Locator) =>
+      loc.evaluate((el) => {
+        const r = el.getBoundingClientRect()
+        const x = r.left + r.width / 2
+        const y = r.top + r.height / 2
+        el.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y,
+        }))
+        return { x, y }
+      })
+
+    const pA = await dispatchContextMenu(cellA)
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    await expect(menu).toContainText(`第 ${info.pairAIdx + 1} 行`)
+    await expectAt(pA)
+
+    const pB = await dispatchContextMenu(cellB)
+    await expect(menu).toContainText(`第 ${info.pairBIdx + 1} 行`)
+    await expectAt(pB)
   })
 
   test('@p2 右键 Pass Bin 单元格不弹菜单（放行浏览器菜单）', async ({ page }) => {
