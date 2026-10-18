@@ -27,6 +27,14 @@ from apps.jobs.models import Job
 
 LIST_LIMIT = 50
 
+# kind → (export_naming 的类型键, 扩展名)。文件名的模板与占位符全走
+# `apps/common/export_naming.py` 那一套（用户可在系统设置里改模板），这里只给键。
+KIND_EXPORT_TYPE = {
+    'export_excel': ('to_excel', 'xlsx'),
+    'export_batch_charts': ('batch_charts', 'xlsx'),
+    'export_html_report': ('html_report', 'html'),
+}
+
 
 def _job_payload(job: Job) -> dict:
     return {
@@ -38,6 +46,62 @@ def _job_payload(job: Job) -> dict:
         'result_name': job.result_name,
         'created_at': job.created_at.isoformat() if job.created_at else None,
     }
+
+
+def _flatten_prefs(user, params, datafile, kind) -> dict:
+    """把只有主进程才读得到的东西压成纯标量：文件名、DPI、CPK 阈值、隐藏列、时间戳。
+
+    worker 禁 Django ⇒ 拿不到 `request.user.settings`。这些值必须在**提交那一刻**定死：
+    用户排队期间改了 DPI 或阈值，作业不该据此出一份他没要求的产物
+    （这也是 `params` 存快照而不是引用的同一个理由）。
+    """
+    from apps.common.user_settings import get_cpk_thresholds
+    from apps.export.user_prefs import get_export_dpi
+    from django.utils import timezone
+
+    export_type, ext = KIND_EXPORT_TYPE[kind]
+    # pptx 是 batch_charts 的一种 format：产物扩展名跟着走
+    if kind == 'export_batch_charts' and str(params.get('format', 'xlsx')) == 'pptx':
+        ext = 'pptx'
+    settings_obj = getattr(user, 'settings', None)
+
+    prefs = {
+        'result_name': render_export_filename(
+            user, export_type, ext,
+            {**base_export_context(user),
+             'filename': datafile.filename.rsplit('.', 1)[0]}),
+        'hidden_columns': list(settings_obj.default_hidden_columns or [])
+        if settings_obj else [],
+    }
+    if kind in ('export_batch_charts', 'export_html_report'):
+        prefs['dpi'] = get_export_dpi(user)
+        prefs['cpk_thresholds'] = tuple(get_cpk_thresholds(user))
+    if kind == 'export_html_report':
+        # 报告上的时间戳钉在提交那一刻，不随队列长度漂移
+        prefs['generated_at'] = timezone.localtime(timezone.now()).strftime(
+            '%Y-%m-%d %H:%M:%S')
+    return prefs
+
+
+def _build_task(kind, *, params, abs_path, fmt, job_id, owner_id, datafile, prefs):
+    """按类型拼 task。只吃 `params` + `prefs`，不碰 request。"""
+    if kind == 'export_excel':
+        return executor.build_export_excel_task(
+            params={**params, 'result_name': prefs['result_name']},
+            abs_path=abs_path, fmt=fmt, hidden_columns=prefs['hidden_columns'],
+            job_id=job_id, owner_id=owner_id)
+    if kind == 'export_batch_charts':
+        return executor.build_batch_charts_task(
+            params={**params, 'result_name': prefs['result_name']},
+            abs_path=abs_path, fmt=fmt,
+            job_id=job_id, owner_id=owner_id,
+            dpi=prefs['dpi'], cpk_thresholds=prefs['cpk_thresholds'],
+            chart_format='pptx' if str(params.get('format', 'xlsx')) == 'pptx' else 'xlsx')
+    return executor.build_html_report_task(
+        params={**params, 'result_name': prefs['result_name']},
+        abs_path=abs_path, fmt=fmt, job_id=job_id, owner_id=owner_id,
+        dpi=prefs['dpi'], cpk_thresholds=prefs['cpk_thresholds'],
+        datafile=datafile, generated_at=prefs['generated_at'])
 
 
 class JobSubmitView(APIView):
@@ -54,21 +118,15 @@ class JobSubmitView(APIView):
         if not os.path.exists(abs_path):
             return error_response('file_not_found', '源文件已不在磁盘上', 404)
 
-        # 名字与隐藏列都在主进程定死：worker 读不到 request.user。
-        result_name = render_export_filename(
-            request.user, 'to_excel', 'xlsx',
-            {**base_export_context(request.user),
-             'filename': datafile.filename.rsplit('.', 1)[0]})
-        user_settings = getattr(request.user, 'settings', None)
-        hidden_columns = list(user_settings.default_hidden_columns or []) if user_settings else []
-
+        # params 存**用户的请求参数**本身；文件名/DPI/阈值等主进程偏好走 prefs，
+        # 不进快照 —— 否则 GET /jobs/ 会把内部钳位值当作用户意图回显出去。
         params = {k: v for k, v in request.data.items() if k != 'result_name'}
-        params['result_name'] = result_name
+        prefs = _flatten_prefs(request.user, params, datafile, kind)
         job = Job.objects.create(owner=request.user, kind=kind,
                                  status='pending', params=params)
-        task = executor.build_export_excel_task(
-            params=params, abs_path=abs_path, fmt=datafile.format_type,
-            hidden_columns=hidden_columns, job_id=job.id, owner_id=request.user.pk)
+        task = _build_task(kind, params=params, abs_path=abs_path,
+                           fmt=datafile.format_type, job_id=job.id,
+                           owner_id=request.user.pk, datafile=datafile, prefs=prefs)
 
         if not executor.executor_available():
             return self._sync_fallback(job, task)
