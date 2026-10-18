@@ -14,7 +14,7 @@ import logging
 import os
 import threading
 import time
-from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 
 from django.conf import settings
 from django.db import connections
@@ -26,25 +26,41 @@ from apps.jobs.runner import (
     PROGRESS_FILENAME, progress_path_for, read_progress,
     run_export_batch_charts, run_export_excel,
     run_export_html_report, warmup_imports)
+from apps.jobs.sftp_job import run_sftp_download
+# 别名导出给判据用：测试要证明 SFTP 作业**没有**走 per-user 常驻连接
+# （apps/jobs/tests_jobs_sftp.py 里 mock 的就是 executor.pool_module.get_connection）
+from apps.sftp import pool as pool_module
 
 logger = logging.getLogger(__name__)
 
 # CPU 核数少时别把机器占满：这是给 20 人档留余量的旋钮，不是越大多好。
 MAX_POOL_WORKERS = min(4, max(2, (os.cpu_count() or 4) // 2))
+# 并发下载硬上限：每条作业连接都是一条独立 SSH 会话，不设限会撞 sshd MaxStartups。
+MAX_DOWNLOAD_WORKERS = 2
 EXPORT_TIMEOUT_SECONDS = 30 * 60          # 单作业超时（spec §4.3）
 CHARTS_TIMEOUT_SECONDS = 60 * 60          # 批量图表串行渲染，比单表慢一个量级
+SFTP_DOWNLOAD_TIMEOUT_SECONDS = 2 * 60 * 60   # 下载看链路，给到 2 小时
 MONITOR_INTERVAL = 5.0
-# 作业类型 → (worker 入口, 超时秒)。加一类作业就是加一行 + 一个 runner 函数。
-# 并行度只在这一层给：runner 内部**不许**再开进程池（见 run_export_batch_charts 的 workers=1）。
+
+# 作业类型 → {entry, timeout, lane}。加一类作业 = 加一行 + 一个入口函数。
+# lane=process ⇒ 跑在进程池子进程里，entry 必须 Django-free（apps/jobs/runner.py）；
+# lane=thread  ⇒ 跑在主进程线程里，entry 可以用 Django（下载要注册 DataFile）。
 KIND_RUNNERS = {
-    'export_excel': (run_export_excel, EXPORT_TIMEOUT_SECONDS),
-    'export_batch_charts': (run_export_batch_charts, CHARTS_TIMEOUT_SECONDS),
-    'export_html_report': (run_export_html_report, EXPORT_TIMEOUT_SECONDS),
+    'export_excel': {'entry': run_export_excel, 'lane': 'process',
+                     'timeout': EXPORT_TIMEOUT_SECONDS},
+    'export_batch_charts': {'entry': run_export_batch_charts, 'lane': 'process',
+                            'timeout': CHARTS_TIMEOUT_SECONDS},
+    'export_html_report': {'entry': run_export_html_report, 'lane': 'process',
+                           'timeout': EXPORT_TIMEOUT_SECONDS},
+    'sftp_download': {'entry': run_sftp_download, 'lane': 'thread',
+                      'timeout': SFTP_DOWNLOAD_TIMEOUT_SECONDS},
 }
 
 _pool = None
 _pool_lock = threading.Lock()
 _pool_failed = False
+_download_pool = None
+_download_lock = threading.Lock()
 _in_flight: dict[int, 'tuple[Future, float, int, str]'] = {}
 _monitor_thread = None
 _monitor_lock = threading.Lock()
@@ -143,14 +159,28 @@ def _base_task(*, params, abs_path, fmt, job_id, owner_id) -> dict:
     }
 
 
+def _get_download_pool():
+    """IO-bound 作业用的线程池（懒建，上限 MAX_DOWNLOAD_WORKERS）。"""
+    global _download_pool
+    if _download_pool is None:
+        with _download_lock:
+            if _download_pool is None:
+                _download_pool = ThreadPoolExecutor(
+                    max_workers=MAX_DOWNLOAD_WORKERS, thread_name_prefix='jobs-dl')
+    return _download_pool
+
+
 def submit(job: Job, task: dict) -> None:
-    """投入进程池并把状态推到 running。
+    """按 lane 投进对应的池，并把状态推到 running。
 
     调用方（视图）已经存好 Job 行；这里失败就抛，由视图决定降级方式。
     """
-    entry, timeout = KIND_RUNNERS[job.kind]
-    future = _get_pool().submit(entry, task)
-    # 第 4 个元素是进度侧车路径：worker 没有 Django 写不了 DB，轮询器代它读回来
+    spec = KIND_RUNNERS[job.kind]
+    entry, timeout = spec['entry'], spec['timeout']
+    pool = _get_pool() if spec['lane'] == 'process' else _get_download_pool()
+    future = pool.submit(entry, task)
+    # 第 4 个元素是进度侧车路径：进程 lane 的 worker 没有 Django 写不了 DB，
+    # 由轮询器代读；thread lane 自己写 DB，这里就是空串。
     _in_flight[job.id] = (future, time.monotonic(), timeout,
                           task.get('progress_path') or '')
     Job.objects.filter(pk=job.id).update(status='running', started_at=timezone.now())
@@ -159,18 +189,25 @@ def submit(job: Job, task: dict) -> None:
 
 
 def _write_back(job_id: int, future: 'Future') -> None:
-    """把结果写回 Job 行。跑在线程池的管理线程里 ⇒ 用完必须还连接。"""
+    """把结果写回 Job 行。跑在线程池的管理线程里 ⇒ 用完必须还连接。
+
+    只回填**还没进终态**的行：thread lane 的下载作业会自己边跑边写
+    （partial failure 时它把「哪几只失败」写进 error），这里无脑覆盖会把那句人话抹掉。
+    """
     try:
         _in_flight.pop(job_id, None)
+        pending = Job.objects.filter(pk=job_id).exclude(
+            status__in=('done', 'error', 'cancelled'))
         try:
             result = future.result()
         except Exception as exc:
             logger.exception('job %s failed', job_id)
-            Job.objects.filter(pk=job_id).update(
-                status='error', error=f'{type(exc).__name__}: {exc}',
-                finished_at=timezone.now())
+            pending.update(status='error', error=f'{type(exc).__name__}: {exc}',
+                           finished_at=timezone.now())
             return
-        Job.objects.filter(pk=job_id).update(
+        if result.get('downloadable') is False:
+            return          # entry 自己已经把 result_path/name 写好了
+        pending.update(
             status='done', progress=100,
             result_path=_relativize(result.get('out_path', '')),
             result_name=os.path.basename(result.get('out_path', '')),
@@ -237,13 +274,17 @@ def _monitor() -> None:
 
 
 def reset_for_tests() -> None:
-    """关掉进程池与看门狗，让测试用例之间不共享子进程状态。"""
-    global _pool, _pool_failed, _monitor_thread
+    """关掉两条池与看门狗，让测试用例之间不共享子进程/线程状态。"""
+    global _pool, _pool_failed, _monitor_thread, _download_pool
     with _pool_lock:
         if _pool is not None:
             _pool.shutdown(wait=False, cancel_futures=True)
         _pool = None
         _pool_failed = False
+    with _download_lock:
+        if _download_pool is not None:
+            _download_pool.shutdown(wait=False, cancel_futures=True)
+        _download_pool = None
     _in_flight.clear()
     with _monitor_lock:
         _monitor_thread = None

@@ -22,6 +22,7 @@ from .models import SftpConfig
 from . import pool
 from .local_paths import remove_partial, resolve_local_path
 from .downloads import (
+    collect_files,
     clamp_timeout,
     download_dir_events,
     download_events_to_sse,
@@ -537,27 +538,5 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
     # ------------------------------------------------------------------
 
     def _collect_files(self, sftp, remote_dir, result, rel_prefix, only_data):
-        """Recursively collect files from a remote directory."""
-        remote_dir = remote_dir.rstrip('/')
-        try:
-            attrs = sftp.listdir_attr(remote_dir)
-        except Exception as e:
-            logger.warning(f"SFTP listdir failed for {remote_dir}: {e}")
-            return
-
-        for attr in attrs:
-            name = attr.filename
-            if name.startswith('.'):
-                continue
-            remote_path = f"{remote_dir}/{name}"
-            rel_path = f"{rel_prefix}{name}" if rel_prefix else name
-
-            if S_ISDIR(attr.st_mode):
-                self._collect_files(sftp, remote_path, result, f"{rel_path}/", only_data)
-            else:
-                ext = os.path.splitext(name)[1].lower()
-                if only_data and (ext != '.csv' or _is_summary_csv(name)):
-                    # Skip non-CSV and summary dumps (Sum_*.csv): they are not
-                    # per-unit ATE data and must not be downloaded/registered.
-                    continue
-                result.append((remote_path, rel_path, attr.st_size, attr.st_mtime))
+        """委托给 `downloads.collect_files`：SSE 端点与下载作业共用同一份跳过规则。"""
+        collect_files(sftp, remote_dir, result, rel_prefix, only_data)

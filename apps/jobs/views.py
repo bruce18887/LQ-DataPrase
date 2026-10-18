@@ -18,12 +18,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.models import UserSetting
 from apps.common.errors import error_response
 from apps.common.export_naming import base_export_context, render_export_filename
 from apps.datafiles.models import DataFile
 from apps.datafiles.utils import resolve_file_path
 from apps.jobs import executor
 from apps.jobs.models import Job
+from apps.sftp.downloads import clamp_timeout as sftp_clamp_timeout
 
 LIST_LIMIT = 50
 
@@ -108,10 +110,16 @@ class JobSubmitView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, kind):
-        if kind not in executor.KIND_RUNNERS:
+        spec = executor.KIND_RUNNERS.get(kind)
+        if not spec:
             return error_response('unsupported_kind',
                                   f'{kind} 还不是可提交的作业类型', 400)
+        if kind == 'sftp_download':
+            return self._submit_sftp(request, spec)
+        return self._submit_export(request, kind)
 
+    # ── 导出类（输入是本库里的一个文件）────────────────────────────
+    def _submit_export(self, request, kind):
         datafile = get_object_or_404(DataFile, pk=request.data.get('file_id'),
                                      owner=request.user)
         abs_path = resolve_file_path(datafile.file_path)
@@ -127,23 +135,77 @@ class JobSubmitView(APIView):
         task = _build_task(kind, params=params, abs_path=abs_path,
                            fmt=datafile.format_type, job_id=job.id,
                            owner_id=request.user.pk, datafile=datafile, prefs=prefs)
+        return self._dispatch(job, task)
 
+    # ── SFTP 批量下载（输入是远端一个目录）─────────────────────────
+    def _submit_sftp(self, request, spec):
+        from apps.jobs import sftp_job
+
+        remote_path = request.data.get('path')
+        if not remote_path:
+            return error_response('param_required', '缺少 path 参数')
+
+        timeout_sec = request.data.get('timeout')
+        if timeout_sec is None:
+            setting, _ = UserSetting.objects.get_or_create(user=request.user)
+            timeout_sec = setting.sftp_download_timeout
+        timeout_sec = sftp_clamp_timeout(timeout_sec)
+
+        # 「没连接」和「目录是空的」都是提交那一刻就能知道的事 —— 建一行 pending
+        # 再让它在几分钟后 error，等于把即时错误伪装成异步进度。
+        try:
+            sftp = sftp_job._open_temp_sftp(request.user.pk)
+        except sftp_job.SftpJobError as exc:
+            return error_response(exc.code, 'SFTP 未连接，无法提交下载作业', 400)
+        try:
+            file_list = sftp_job.collect_remote_files(sftp, remote_path)
+        finally:
+            sftp.close()
+        if not file_list:
+            return error_response('no_data', '该目录下没有可下载的数据 CSV')
+
+        dir_name = os.path.basename(str(remote_path).rstrip('/')) or 'download'
+        job = Job.objects.create(
+            owner=request.user, kind='sftp_download', status='pending',
+            params={'path': remote_path, 'dir_name': dir_name,
+                    'file_count': len(file_list), 'timeout_sec': timeout_sec})
+        task = sftp_job.build_sftp_task(
+            job_id=job.id, owner_id=request.user.pk, remote_path=remote_path,
+            dir_name=dir_name, file_list=file_list, timeout_sec=timeout_sec)
+        return self._dispatch(job, task)
+
+    def _dispatch(self, job: Job, task: dict):
         if not executor.executor_available():
             return self._sync_fallback(job, task)
-
         executor.submit(job, task)
         job.refresh_from_db()
         return Response({'job_id': job.id, 'status': job.status},
                         status=http_status.HTTP_202_ACCEPTED)
 
     def _sync_fallback(self, job: Job, task: dict):
-        entry, _timeout = executor.KIND_RUNNERS[job.kind]
+        """池建不起来时同步跑完 —— 行为退回作业化之前的今天，别 500。"""
+        entry = executor.KIND_RUNNERS[job.kind]['entry']
         try:
             result = entry(task)
         except Exception as exc:
+            job.refresh_from_db()
+            if job.status in ('done', 'error'):
+                # entry 自己已经把终态与人话写好了（下载类就是这样）：别覆盖
+                return error_response('download_failed', str(exc), 500)
             job.status, job.error, job.finished_at = 'error', str(exc), timezone.now()
             job.save(update_fields=['status', 'error', 'finished_at'])
             return error_response('export_failed', f'导出失败：{exc}', 500)
+        if result.get('downloadable') is False:
+            # 下载类没有「一个可回传的文件」：同步跑完就报统计。
+            # entry 不靠异常表达失败（全失败时它把「哪几只失败」写进了 error 字段），
+            # 所以这里读行里的终态，别把它当成功返回。
+            job.refresh_from_db()
+            if job.status == 'error':
+                return error_response('download_failed', job.error, 500)
+            return Response({'job_id': job.id, 'status': job.status,
+                             'file_count': result.get('file_count', 0),
+                             'result_name': job.result_name,
+                             'fallback': True})
         job.status, job.progress = 'done', 100
         job.result_path = executor._relativize(result['out_path'])
         job.result_name = os.path.basename(result['out_path'])
@@ -171,6 +233,11 @@ class JobDownloadView(APIView):
         job = get_object_or_404(Job, pk=pk, owner=request.user)
         if job.status != 'done' or not job.result_path:
             return error_response('job_not_ready', '作业还没产出结果', 404)
+        if job.kind == 'sftp_download':
+            # 批量下载的产物已经**当场注册进用户库**了，没有「一个可再下载的文件」。
+            # 这里返回 409 而不是伪造一个 zip：那只是把刚落盘的东西再打包一遍。
+            return error_response('not_a_file_result',
+                                  '该作业的产物已注册进数据库，请到批次数据查看', 409)
         abs_path = resolve_file_path(job.result_path)
         if not os.path.exists(abs_path):
             return error_response('result_missing', '结果文件已不在磁盘上', 404)
