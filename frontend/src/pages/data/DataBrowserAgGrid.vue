@@ -13,6 +13,8 @@
         <el-button :loading="exportingExcel" :disabled="!props.fileId" @click="exportExcel">
           <el-icon><Download /></el-icon> 导出 Excel
         </el-button>
+        <!-- 导出改成作业后请求会立刻返回，进度条是用户唯一的「它还在跑」凭据 -->
+        <JobProgressChip :percent="excelProgress" :active="exportingExcel" />
         <el-button :loading="exportingCsv" :disabled="!props.fileId" @click="exportCsv">
           <el-icon><Document /></el-icon> 导出 CSV
         </el-button>
@@ -107,9 +109,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, markRaw } from 'vue'
 import { AgGridVue } from 'ag-grid-vue3'
-import { ElMessage } from 'element-plus'
 import { Refresh, Download, Document } from '@element-plus/icons-vue'
-import api from '../../api'
 import { datafilesApi } from '../../api/datafiles'
 import { authApi } from '../../api/auth'
 import { useThemeStore } from '../../stores/theme'
@@ -120,9 +120,9 @@ import DataBrowserToolbar from './components/browser/DataBrowserToolbar.vue'
 import HistogramColumnDialog from './components/browser/HistogramColumnDialog.vue'
 import DataQualityBar from './components/browser/DataQualityBar.vue'
 import BinCellContextMenu from './components/browser/BinCellContextMenu.vue'
+import JobProgressChip from './components/browser/JobProgressChip.vue'
 import { useBinCellMenu } from './composables/useBinCellMenu'
-import { downloadBlob, sanitizeFilename, extractFilenameFromContentDisposition } from '../../utils/download'
-import { getExportTimeoutMs } from '../../utils/exportTimeout'
+import { useBrowserExport } from './composables/useBrowserExport'
 
 // Register ag-grid modules (required since v33+)
 import { ModuleRegistry, AllCommunityModule, type IDatasource } from 'ag-grid-community'
@@ -154,8 +154,7 @@ const pinsReady = ref(false)
 // 显示测试列：选中集非空 = 表格仅显示这些测试列（系统列恒显）；空集 = 显示全部
 const selectedTestCols = ref<string[]>([])
 const loading = ref(false)
-const exportingExcel = ref(false)
-const exportingCsv = ref(false)
+// 导出的两个状态住在 useBrowserExport 里（Excel=作业、CSV=同步），这里不再各挂一个 ref
 const dataLoaded = ref(false)
 
 // 表格高度随视口自适应。历次实测（表格上缘 / 常量）：
@@ -570,44 +569,6 @@ function reload() {
   gridApi.value?.ensureIndexVisible(0)
 }
 
-async function exportExcel() {
-  if (!props.fileId) return
-  exportingExcel.value = true
-  try {
-    const resp = await api.post(
-      '/export/to_excel/',
-      { file_id: props.fileId, passfail: passfail.value, site_filter: siteFilter.value, ...currentGridModels() },
-      // 大文件（万行×百列）excelize 导出可达数十秒，必须放宽超时（全局 30s 会 abort → Broken pipe）；
-      // 超时秒数由系统设置「导出超时」控制（默认 600s）
-      { responseType: 'blob', timeout: await getExportTimeoutMs() }
-    )
-    downloadBlob(resp.data as Blob, resolveExportName(resp.headers as Record<string, string>, 'export.xlsx', '_analysis.xlsx'))
-    ElMessage.success('下载完成')
-  } catch {
-    // 错误 toast 由 axios 拦截器统一弹出
-  } finally {
-    exportingExcel.value = false
-  }
-}
-
-async function exportCsv() {
-  if (!props.fileId) return
-  exportingCsv.value = true
-  try {
-    const resp = await api.post(
-      '/export/to_csv/',
-      { file_id: props.fileId, passfail: passfail.value, site_filter: siteFilter.value, ...currentGridModels() },
-      { responseType: 'blob', timeout: await getExportTimeoutMs() }
-    )
-    downloadBlob(resp.data as Blob, resolveExportName(resp.headers as Record<string, string>, 'export.csv', '_data.csv'))
-    ElMessage.success('下载完成')
-  } catch {
-    // 错误 toast 由 axios 拦截器统一弹出
-  } finally {
-    exportingCsv.value = false
-  }
-}
-
 /**
  * 当前表格的排序/列过滤模型（与 IRM getRows 同语义），供导出透传后端：
  * 看到的行 == 导出的行。grid 未就绪时返回空模型（= 不筛选不排序）。
@@ -625,17 +586,15 @@ function currentGridModels(): { sort_model: string; filter_model: string } {
   }
 }
 
-/** 导出文件名：优先解析后端 Content-Disposition，其次用文件名兜底，最后默认名 */
-function resolveExportName(headers: Record<string, string>, fallback: string, suffix: string): string {
-  const parsed = extractFilenameFromContentDisposition(headers['content-disposition'])
-  if (parsed) return parsed
-  const fileName = props.files.find((f) => f.id === props.fileId)?.filename
-  if (fileName) {
-    const base = fileName.replace(/\.csv$/i, '')
-    return sanitizeFilename(`${base}${suffix}`)
-  }
-  return fallback
-}
+const {
+  exportingExcel, exportingCsv, excelProgress, exportExcel, exportCsv,
+} = useBrowserExport({
+  fileId: () => props.fileId,
+  passfail: () => passfail.value,
+  siteFilter: () => siteFilter.value,
+  gridModels: currentGridModels,
+  filenameOf: (id) => props.files.find((f) => f.id === id)?.filename,
+})
 </script>
 
 <style scoped>
