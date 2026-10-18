@@ -191,6 +191,24 @@ async function prefetchPorts() {
   }))
 }
 
+/**
+ * 到点必须**树杀**。Windows 上 `child` 是 `cmd /c npx playwright test …`，
+ * `child.kill('SIGKILL')` 只掀掉 cmd 自己：Playwright runner、它起的 vite、
+ * `manage.py runserver`（每个 commit ~876 MB）全部继续活着 —— 实测一轮 25min 超时池
+ * 留下 4 个 runserver + 6 个 node ≈ 5 GB，下一轮的 Node 在启动 250ms 就
+ * `JavaScript heap out of memory`（撞的是 Commit Limit，不是空闲物理内存）。
+ * 崩池轮的现场于是变成下一轮的负载源，是个自我强化的坑。
+ */
+function killSlotTree(child) {
+  try {
+    if (process.platform === 'win32') {
+      spawnSync(CMD, ['/c', 'taskkill', '/PID', String(child.pid), '/T', '/F'], { shell: false })
+    } else {
+      child.kill('SIGKILL')
+    }
+  } catch { /* 已退出 */ }
+}
+
 function runSlot(m, files, timeoutMs, aliveFlags) {
   const out = fs.openSync(m.logFile, 'w')
   // reporter 与输出路径由 playwright.config 在 slot 模式下给出（blob/json 的目录只能走 reporter 选项）
@@ -201,7 +219,7 @@ function runSlot(m, files, timeoutMs, aliveFlags) {
       cwd: FRONTEND, shell: false, stdio: ['ignore', out, out],
       env: { ...slotEnv(m, process.env), E2E_SKIP_BUILD: '1' },
     })
-    const killer = setTimeout(() => { try { child.kill('SIGKILL') } catch { /* 已退出 */ } }, timeoutMs)
+    const killer = setTimeout(() => { killSlotTree(child) }, timeoutMs)
     child.on('close', (code) => { clearTimeout(killer); fs.closeSync(out); if (aliveFlags) aliveFlags.set(m.index, false); resolve(code ?? 1) })
   })
 }
