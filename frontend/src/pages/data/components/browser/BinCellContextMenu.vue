@@ -60,22 +60,32 @@ const onKeydownGlobal = (e: KeyboardEvent) => {
 const onWheelGlobal = () => onClose() // 菜单开着滚表格 → 关闭
 const onResizeGlobal = () => onClose()
 
+/**
+ * 按当前 props.x/y 定位并在视口内夹紧。
+ *
+ * 不能只在 visible 的 false→true 时算坐标：菜单开着时再右键另一行，
+ * visible 仍是 true，watcher 不触发，位置会停在上一次点击处。
+ */
+function positionMenu(focusItem = false) {
+  pos.value = { x: props.x, y: props.y }
+  nextTick(() => {
+    const el = menuEl.value
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    pos.value = {
+      x: Math.max(8, Math.min(props.x, window.innerWidth - rect.width - 8)),
+      y: Math.max(8, Math.min(props.y, window.innerHeight - rect.height - 8)),
+    }
+    // 键盘可达：打开时聚焦菜单项，Enter/Space 触发
+    if (focusItem) itemEl.value?.focus()
+  })
+}
+
 watch(
   () => props.visible,
   (v) => {
     if (v) {
-      pos.value = { x: props.x, y: props.y }
-      nextTick(() => {
-        const el = menuEl.value
-        if (!el) return
-        const rect = el.getBoundingClientRect()
-        pos.value = {
-          x: Math.max(8, Math.min(props.x, window.innerWidth - rect.width - 8)),
-          y: Math.max(8, Math.min(props.y, window.innerHeight - rect.height - 8)),
-        }
-        // 键盘可达：打开时聚焦菜单项，Enter/Space 触发
-        itemEl.value?.focus()
-      })
+      positionMenu(true)
       document.addEventListener('mousedown', onDocMouseDown, true)
       document.addEventListener('keydown', onKeydownGlobal)
       document.addEventListener('wheel', onWheelGlobal, { capture: true, passive: true })
@@ -86,6 +96,14 @@ watch(
       document.removeEventListener('wheel', onWheelGlobal, { capture: true })
       window.removeEventListener('resize', onResizeGlobal)
     }
+  },
+)
+
+// 菜单已打开时换行/换单元格：visible 不变，但坐标必须跟着新右键点走
+watch(
+  () => [props.x, props.y],
+  () => {
+    if (props.visible) positionMenu(false)
   },
 )
 
