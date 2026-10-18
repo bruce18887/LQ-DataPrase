@@ -382,6 +382,17 @@ def get_dashboard_summary(datafile, df, fmt, metadata, thresholds=None):
     return payload
 
 
+def summary_cache_stats() -> dict:
+    """汇总缓存的条目读数，给 `/api/v1/metrics/`（apps/common/metrics.py）。
+
+    只有条目数与上限：这个缓存按 key 计件（payload 几十 KB 量级），不像解析缓存那样
+    按字节预算，所以这里报 `entries/max_entries` 就够 —— 编一个不存在的「字节数」
+    只会让运维页显示一个假指标。
+    """
+    with _summary_cache_lock:
+        return {'entries': len(_summary_cache), 'max_entries': _SUMMARY_CACHE_MAX_SIZE}
+
+
 def clear_dashboard_summary_cache():
     """清空汇总缓存（供测试隔离；将来删除文件路径时也可复用）。"""
     with _summary_cache_lock:
