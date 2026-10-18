@@ -6,10 +6,13 @@ import { captureDownload } from '../helpers/download'
 
 /**
  * HTML 报表导出（含图 · 自包含单文件）。
- * - 单文件：仪表板单文件 Tab → 「📥 保存 HTML 报表」（POST /export/html_report/）
- * - 批次：仪表板批次良率 Tab → 「📥 导出 HTML」（POST /batch-report/batch_html_report/）
+ * - 单文件：仪表板单文件 Tab → 「📥 保存 HTML 报表」，现在走作业
+ *   （`POST /jobs/export_html_report/` → 轮询 → `/jobs/<id>/download/`）
+ * - 批次：仪表板批次良率 Tab → 「📥 导出 HTML」（`POST /batch-report/batch_html_report/`，仍是同步）
  *
  * 断言下载文件非空 + 文件名 .html + 内容含内联 base64 图表与关键区块。
+ * 本文件的 `captureDownload` 预算是 120s，要覆盖「提交 + 轮询 + 下载」整条链，
+ * 不只是过去那一个 blob 请求。
  */
 test.describe('HTML 报表导出', { tag: ['@dashboard'] }, () => {
   test('@p1 单文件报告含内联图表', async ({ page }) => {

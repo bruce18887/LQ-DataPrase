@@ -15,7 +15,9 @@
             @update:model-value="onTimeoutChange"
           />
           <span class="export-timeout-note">
-            导出请求最长等待秒数，超过则中断；默认 600 秒（大数据量导出耗时较长时请调大）
+            导出请求最长等待秒数，超过则中断；默认 600 秒（大数据量导出耗时较长时请调大）。
+            仅作用于仍为同步的导出（CSV、Sigma Limit、批次报告 HTML 等）；
+            Excel、批量图表、HTML 报表已改为后台作业，不受此值限制
           </span>
         </div>
       </el-form-item>

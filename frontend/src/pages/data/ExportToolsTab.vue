@@ -22,6 +22,8 @@
           <ExportActions
             v-model:sigma="localSigma"
             :exporting="exporting"
+            :batch-active="batchActive"
+            :batch-progress="batchProgress"
             :has-params="localParams.length > 0"
             @export-sigma="onExportSigma"
             @export-batch="onExportBatch"
@@ -37,6 +39,7 @@ import { ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../../api'
 import { useExport } from '../analysis/composables/useExport'
+import { jobFailureView } from '../../composables/jobPolling'
 import { useSingleTabStore } from '../../stores/analysisTabs'
 import ExportEmptyState from './components/export/ExportEmptyState.vue'
 import ExportParamSelector from './components/export/ExportParamSelector.vue'
@@ -64,7 +67,7 @@ const currentFileName = computed(() => {
   return f?.filename ?? ''
 })
 
-const { exporting, exportSigmaLimit, exportBatchCharts } = useExport(() => props.fileId ?? null)
+const { exporting, batchActive, batchProgress, exportSigmaLimit, exportBatchCharts } = useExport(() => props.fileId ?? null)
 
 // Load params when file changes
 watch(() => props.fileId, async (fileId) => {
@@ -99,11 +102,15 @@ function onExportBatch(format: string) {
     show_normal: chartConfig.value.includes('normal'),
     show_kde: chartConfig.value.includes('kde'),
   }
-  exportBatchCharts(localParams.value, format, options, { silent: true }).catch((err: any) => {
-    const msg = err?.code === 'ECONNABORTED' || err?.message?.includes('timeout')
-      ? '导出超时，请减少参数数量后重试'
-      : '批量导出失败，请稍后重试'
-    ElMessage.error(msg)
+  // 走作业后 Promise 不会 reject（失败以 reason 返回），旧的 `.catch()` + 「导出超时」
+  // 分支就成了死代码。文案统一由 `jobFailureView` 决定：gave-up 是 info，不是红条。
+  exportBatchCharts(localParams.value, format, options, { silent: true }).then((res) => {
+    if (res.ok) {
+      ElMessage.success('下载完成')
+      return
+    }
+    const view = jobFailureView(res.reason ?? 'job-failed', res.message)
+    ElMessage[view.level](view.text)
   })
 }
 </script>

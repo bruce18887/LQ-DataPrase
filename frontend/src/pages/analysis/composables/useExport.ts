@@ -1,14 +1,21 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { AxiosRequestConfig } from 'axios'
 
 import api from '../../../api'
 import { downloadBlob, extractFilenameFromContentDisposition } from '../../../utils/download'
 import { getExportTimeoutMs } from '../../../utils/exportTimeout'
+import { useJobExport, type JobRunResult } from '../../../composables/useJobExport'
 
 export function useExport(
   getSelectedFileId: () => number | null
 ) {
-  const exporting = ref(false)
+  /** 同步导出（sigma_limit）自己的在飞标记；`exporting` 是给界面的合并值。 */
+  const exportingSync = ref(false)
+  const job = useJobExport()
+  // 界面上「导出中」要同时盖住两条路径：sigma_limit 仍是同步 blob，
+  // batch_charts 已改成提交-轮询（它的在飞时间是轮询时长，不再是单个请求时长）。
+  const exporting = computed(() => exportingSync.value || job.exporting.value)
+  const batchProgress = job.progress
 
   async function exportSigmaLimit(
     sigma: number,
@@ -17,7 +24,7 @@ export function useExport(
   ) {
     const fileId = getSelectedFileId()
     if (!fileId) return
-    exporting.value = true
+    exportingSync.value = true
     try {
       const resp = await api.post('/export/sigma_limit/', {
         file_id: fileId,
@@ -31,7 +38,7 @@ export function useExport(
       console.error('[useExport] sigma_limit failed:', err)
       throw err
     } finally {
-      exporting.value = false
+      exportingSync.value = false
     }
   }
 
@@ -39,36 +46,28 @@ export function useExport(
     params: string[],
     format: string,
     options?: Record<string, any>,
-    requestConfig?: AxiosRequestConfig,
-  ) {
+    callOptions?: { silent?: boolean },
+  ): Promise<JobRunResult> {
     const fileId = getSelectedFileId()
-    if (!fileId) return
-    exporting.value = true
-    try {
-      const resp = await api.post('/export/batch_charts/', {
-        file_id: fileId,
-        params,
-        format,
-        ...(options || {}),
-      }, {
-        responseType: 'blob',
-        // 超时秒数由系统设置「导出超时」控制；...requestConfig 保持在后，
-        // 调用方可按需覆盖（如 silent 标记）
-        timeout: await getExportTimeoutMs(),
-        ...requestConfig,
-      })
-      const fname = extractFilenameFromContentDisposition(resp.headers?.['content-disposition']) || `batch_charts.${format === 'pptx' ? 'pptx' : 'xlsx'}`
-      downloadBlob(resp.data as Blob, fname)
-    } catch (err) {
-      console.error('[useExport] batch_charts failed:', err)
-      throw err
-    } finally {
-      exporting.value = false
-    }
+    if (!fileId) return { ok: false, reason: 'submit-error', message: '未选择文件' }
+    // 走作业：请求线程只付「提交」这一发，渲染在常驻进程池的子进程里跑，
+    // 界面靠 batchProgress 显示进度。旧的 `timeout: getExportTimeoutMs()` 在这里
+    // 已经没有意义（不再有长 blob 请求），所以「导出超时」这条文案改由
+    // reason==='gave-up' 承担 —— 调用方必须跟着改，否则那个分支是死代码。
+    return job.run('export_batch_charts', {
+      file_id: fileId,
+      params,
+      format,
+      ...(options || {}),
+    }, { silent: callOptions?.silent })
   }
 
   return {
     exporting,
+    /** 只有 batch_charts 这条作业路径为真；界面用它决定进度条显示与否
+     *  （不能用 `exporting` —— sigma_limit 仍是同步在飞，那时显示的是上一次作业的残留值）。 */
+    batchActive: job.exporting,
+    batchProgress,
     exportSigmaLimit,
     exportBatchCharts,
   }

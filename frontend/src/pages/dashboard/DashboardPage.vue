@@ -70,7 +70,6 @@
       <!-- 导出 -->
       <ExportFooter
         :file-id="data?.file_id || null"
-        :filename="data?.filename || ''"
         :update-time="updateTime"
       />
     </template>
