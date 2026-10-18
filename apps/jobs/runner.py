@@ -9,8 +9,11 @@
  而「主进程一次都不解析」正是作业化想要的效果。
 """
 
+import logging
 import os
 from types import SimpleNamespace
+
+logger = logging.getLogger(__name__)
 
 from apps.analysis.services.statistics import (
     compute_uph, filter_bin1_rows, get_site_column)
@@ -41,10 +44,20 @@ def progress_path_for(out_path: str) -> str:
 
 
 def write_progress(path: str, done: int, total: int) -> int:
-    """把 `done/total` 折成 1–100 写进侧车文件，返回写入的百分比。"""
+    """把 `done/total` 折成 1–100 写进侧车文件，返回写入的百分比。
+
+    两条都是被 e2e 逼出来的，不是预防性铺陈：
+    * **目录得自己建** —— 作业目录原本只在写结果时才创建，而进度从第一秒就要写，
+      于是第一次写就 FileNotFoundError ⇒ worker 死掉、前端永远等不到下载事件。
+    * **写失败要吞掉** —— 进度是装饰性的，只读盘/被锁这类故障不该让一次导出失败。
+    """
     percent = max(1, min(100, int(round(done * 100 / max(1, total)))))
-    with open(path, 'w', encoding='utf-8') as fh:
-        fh.write(str(percent))
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as fh:
+            fh.write(str(percent))
+    except OSError:
+        logger.warning('jobs progress write failed: %s', path, exc_info=True)
     return percent
 
 

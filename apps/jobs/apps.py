@@ -15,11 +15,16 @@ import sys
 
 from django.apps import AppConfig
 
-# 这些命令跑在开发/CI 的批处理里，没有「进程重启留下的僵尸」这回事。
+# 这些命令跑在开发/CI/运维的批处理里，没有「进程重启留下的僵尸」这回事。
+# 名单来自 `ls apps/*/management/commands/`，**不是凭印象列的**；
+# 认不出来的命令一律照清（fail-safe：宁可多做一次无害 UPDATE，也不留永远 running 的作业）。
 OFFLINE_COMMANDS = frozenset({
     'check', 'test', 'migrate', 'makemigrations', 'showmigrations', 'shell',
-    'dbshell', 'collectstatic', 'createadmin', 'seed_test_data', 'backup_db',
-    'prune_jobs', 'dumpdata', 'loaddata',
+    'dbshell', 'collectstatic', 'createadmin', 'dumpdata', 'loaddata',
+    'backup_db', 'prune_jobs',
+    'seed_test_data', 'seed_users',
+    'backfill_product_code', 'consolidate_uploads',
+    'migrate_user_paths', 'fix_moved_project_paths',
 })
 
 

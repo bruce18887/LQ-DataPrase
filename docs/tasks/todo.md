@@ -4591,15 +4591,63 @@ Chromium 错误页停在窗口底色 `#1a1a2e` 上 = 黑屏，且 `did-finish-lo
       （同 `apps/common/apps.py:7-16` 的 `dispatch_uid` 写法）。
       越权一律 **404**（仓内通例 `get_object_or_404(..., owner=request.user)`，403 只有 accounts 一处）。
       —— 实际落地范围比清单更宽：S1 顺带把 `export_excel` 端到端跑通了（含进程池与降级）。
-- [ ] **S2 执行器**：模块级常驻 `ProcessPoolExecutor`（lazy 创建 + 启动 warmup）
-      与 `ThreadPoolExecutor(2)`（SFTP 用**临时连接**，走 `apps/sftp/search/connect.py:89`
-      `open_verified_transport` 那条，不碰 `pool.py` 的 per-user 常驻连接）。
-      进度：worker 不写库，主进程单线程轮询器 500ms 一跳、限频 1 次/秒/作业。
-      **池创建失败 ⇒ 同步降级**（返回 200 + 文件流，响应头 `X-Job-Fallback: 1`），这条必须有测试。
-- [ ] **S3 端点**：`POST /jobs/{export_excel,export_batch_charts,export_html_report}/` → 202+job_id，
-      `GET /jobs/<id>/`、`GET /jobs/<id>/download/`（未 done→404）、`POST /jobs/<id>/cancel/`
-      （仅 pending，running→409）、`GET /jobs/`（本人最近 50）。旧同步端点**不删**。
-- [ ] **S4 前端**：`useExport.ts` 由「await blob」改「POST→轮询→download」；
+- [x] **S2 执行器**（实做于 S1/S2/S3 三批，非一次到位）：模块级常驻 `ProcessPoolExecutor`
+      （lazy 创建 + 启动 warmup）与 `ThreadPoolExecutor(2)` 两条 lane；SFTP 用**临时连接**
+      （`apps/sftp/search/connect.py:89` 的 `open_verified_transport`），不碰 `pool.py` 的
+      per-user 常驻连接。进度：CPU lane 的 worker 不写库、落 `.progress` 侧车由轮询器读回
+      （**5s 一跳，不是 spec 的 1 次/秒** —— 更省 SQLite 写，见「S2 实施结果」的理由）；
+      线程 lane 自己限频写库。**池创建失败 ⇒ 同步降级**（200 + 文件流 +
+      `X-Job-Fallback: 1`）有测试。
+- [x] **S3 端点**：`POST /jobs/{export_excel,export_batch_charts,export_html_report,sftp_download}/`
+      → 202+job_id；`GET /jobs/<id>/`、`GET /jobs/<id>/download/`（未 done→404、
+      目录型结果→409 `not_a_file_result`）、`POST /jobs/<id>/cancel/`
+      （仅 pending，running→409）、`GET /jobs/`（本人最近 50）。旧同步端点全部保留未删。
+- [ ] **S4b 前端剩余导出迁作业**：`batch_charts`（`pages/analysis/composables/useExport.ts`；
+      e2e `exports/exports.spec.ts:457-468` 等的是 `/export/batch_charts/` 的响应，迁移时一起改）
+      与 `html_report`（`pages/dashboard/components/ExportFooter.vue:27`；
+      `dashboard.spec.ts:73-89` 与 `html-report.spec.ts:20-28` 的 120s 预算要覆盖轮询）。
+      两条都迁完再同步改设置页「导出请求最长等待秒数」的文案（见本节末）。
+- [x] **S4a 前端接线（查看数据 Excel）落地**：新增 `api/jobs.ts`、`composables/jobPolling.ts`
+      （纯决策）、`composables/useJobExport.ts`（循环）、`pages/data/composables/useBrowserExport.ts`、
+      `pages/data/components/browser/JobProgressChip.vue`；`view-data.spec.ts` 的导出用例
+      改成断「POST /jobs/export_excel/=202 → 轮询 → /download/=200」三跳 + 文件名不变。
+      CSV / sigma_limit / batch_charts / html_report **仍是同步**，未动。
+
+### S4a 的三次踩坑（都是「绿的但没承重」的形状）
+
+1. **e2e 抓出一个单测永远抓不到的必现崩溃**：`write_progress` 往
+   `MEDIA_ROOT/jobs/<owner>/<job>/.progress` 写，而作业目录要到写结果时才创建 ⇒
+   第一次写进度就 `FileNotFoundError` → worker 死 → 前端 `waitForEvent('download')` 超时。
+   单测全绿的原因很朴素：**所有夹具的 `out_path` 父目录本来就存在**。已把它拉回 T1
+   （`test_progress_write_works_before_the_result_dir_exists`，用不存在的嵌套目录复现），
+   并加 `test_progress_failure_does_not_kill_the_export` —— 进度是装饰性的，
+   只读盘/被锁不该让导出失败。规则：**新代码第一次触碰的路径，判据里必须让它不存在。**
+2. **`npx vue-tsc --noEmit -p tsconfig.app.json` 是一次假绿**：它不检 `test/unit/**`，
+   而 webServer 跑的是 `vue-tsc -b`（连测试一起检），于是我在 T2 里对联合类型直接取
+   分支属性（`d.delay`）的三处错误全被放过、e2e 起服务时才炸。
+   口径：**类型检查只认 `npm run build`**，`-p tsconfig.app.json` 那种单档检不算验证
+   （和 R8① 「根目录 `npx vue-tsc --noEmit` 是空检查」同族，这次多了「不含 test」这一半）。
+3. **`--project=P1` 跑 `@p2` 用例 = 「No tests found」而不是「没跑」**：project 与标签是
+   `grep: /@p2/` 绑死的（`playwright.config.ts:143-145`），选错档就一条都不匹配。
+   另外 `-g "导出"` 在 cp936 终端里会被吞掉，**grep 参数用 ASCII 片段**（这次用
+   `"Content-Disposition"` 才跑起来）。
+
+### 一个按证据推翻的设计稿口径
+
+spec §6 写「进度 UI 复用 SFTP 现有进度条组件」。查了 `SftpDownloadProgress.vue` 的 props：
+`speed / eta / bytes_done / total_bytes` —— 那是**字节传输**语义，导出作业只有「完成百分之几」，
+套上去会显示「0 B/s、ETA —」这种看着精确的假话。仓里已有同判断的先例：`SearchProgress.vue`
+文件注释里明确写了它为什么**不**复用那张卡。所以新建 `JobProgressChip.vue`
+（`el-progress` + 百分比，样式只认 token，无写死颜色，日/夜由 design-tokens 与
+element-plus-theme 切换）。
+
+`DataBrowserAgGrid.vue` 727 → 686 行（搬出三个导出函数，仍然超 600 上限 —— 这次是净减，
+没清完旧债，后续批继续拆）。
+
+**尚未处理的连带项**：系统设置「导出请求最长等待秒数」的文案与
+`e2e/settings/export-timeout.spec.ts:36-42` 目前仍真（CSV/sigma_limit/html/batch 四条还在用它），
+等 batch_charts / html_report 也迁到作业后，这条文案要同步改 —— 别等到只剩一条同步导出时
+还写着「所有导出请求」。
       进度 UI 复用 SFTP 现有条；双主题只认 CSS token；失败态给 error 文案 + 重试（同 params 重 POST）。
 - [x] **S5 SFTP 批量下载作业化**（D3 已拍板要做）：`download_dir_events` 的事件流
       （`progress/error/done`，`apps/sftp/downloads.py:229-325`）映射成 `Job.progress`，

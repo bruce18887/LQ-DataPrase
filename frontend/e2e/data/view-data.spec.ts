@@ -385,9 +385,16 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
 
     const base = SEEDED_FILES.GAGE_S1.replace(/\.csv$/i, '')
 
-    const xlsxResp = page.waitForResponse((r) => r.url().includes('/export/to_excel/'), {
-      timeout: 180_000,
-    })
+    // 导出改成作业之后，这一发点击的链路是 POST /jobs/export_excel/ → 轮询 → download。
+    // 断「三个端点都真的被用到」才是本批的接线证明：只断能下载到文件，
+    // 那连旧的同步实现也能过，改了等于没测。
+    const submitted = page.waitForResponse(
+      (r) => r.url().includes('/jobs/export_excel/'), { timeout: 180_000 })
+    const polled = page.waitForResponse(
+      (r) => /\/jobs\/\d+\/$/.test(new URL(r.url()).pathname), { timeout: 180_000 })
+    const served = page.waitForResponse(
+      (r) => r.url().includes('/download/'), { timeout: 180_000 })
+
     const xlsx = await captureDownload(
       page,
       async () => {
@@ -396,7 +403,11 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
       'view-data',
       180_000,
     )
-    expect((await xlsxResp).status(), 'to_excel 应 200').toBe(200)
+    // 202 才是「提交完就走」；退回 200 说明后端走了同步降级（进程池没建起来），
+    // 那种情况下这条用例应该红，让我们知道服务器档的池挂了，而不是悄悄放过。
+    expect((await submitted).status(), '提交作业应 202（200=退回同步降级）').toBe(202)
+    expect((await polled).status(), '轮询作业状态应 200').toBe(200)
+    expect((await served).status(), '作业结果下载应 200').toBe(200)
     expect(xlsx.suggestedName).toBe(`${base}_analysis.xlsx`)
 
     const csvResp = page.waitForResponse((r) => r.url().includes('/export/to_csv/'), {

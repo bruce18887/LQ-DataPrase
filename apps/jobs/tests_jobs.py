@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 
 from django.conf import settings
@@ -400,6 +401,40 @@ class RunnerPureFunctionTests(TestCase):
         self.assertLess(rows_fail, rows_all, 'FAIL 筛选没减少行 = filters 被忽略')
         self.assertLess(rows_site2, rows_all, 'site 筛选没减少行 = filters 被忽略')
         self.assertGreater(rows_fail, 1, 'FAIL 筛成空表说明 worker 侧的 fail 判定不工作')
+
+    def test_progress_write_works_before_the_result_dir_exists(self):
+        """作业目录是**跑完才创建**的，而进度从第一秒就要写。
+
+        e2e 第一次跑作业化导出时就是红在这里：`write_progress` 直接 open(...,'w')
+        一个还不存在的目录 → FileNotFoundError → worker 死 → 前端永远等不到下载事件。
+        单测先前漏掉，是因为所有夹具的 out_path 父目录本来就存在。
+        """
+        deep = os.path.join(self.tmpdir, 'fresh', 'nested', 'out.xlsx')
+        self.assertFalse(os.path.isdir(os.path.dirname(deep)))
+        task, _out = self._task()
+        task['out_path'] = deep
+        task['progress_path'] = os.path.join(os.path.dirname(deep), '.progress')
+        result = run_export_excel(task)
+        self.assertTrue(os.path.exists(result['out_path']))
+        with open(task['progress_path'], encoding='utf-8') as f:
+            self.assertEqual(f.read().strip(), '100')
+
+    def test_progress_failure_does_not_kill_the_export(self):
+        """进度是装饰性的：写不进去（只读盘、被别的进程锁住）也不能让导出失败。"""
+        task, out = self._task()
+        task['progress_path'] = os.path.join(self.tmpdir, 'nope', '.progress')
+        original = os.makedirs
+
+        def explode(path, *a, **kw):
+            if str(path).endswith('nope'):
+                raise OSError('read-only filesystem')
+            return original(path, *a, **kw)
+
+        with mock.patch('os.makedirs', side_effect=explode):
+            # 第一次写进度就会抛：实现必须吞掉它，继续把 xlsx 写出来
+            result = run_export_excel(task)
+        self.assertTrue(os.path.exists(result['out_path']))
+        self.assertGreater(result['bytes_written'], 0)
 
     def test_task_dict_is_picklable(self):
         """Windows 是 spawn：task 必须能 pickle，否则进不了进程池。"""
