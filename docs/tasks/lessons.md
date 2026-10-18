@@ -51,6 +51,61 @@
     「数据还是 5 行」——但 ETS88 的数据区就是从 marker+1 开始读的，插进去那行**本身就是数据行**
     （实测 6 行）。断言要从被测路径的真实产物出发，不能从意图倒推。
 
+## 2026-10-18 「与门禁并跑任何事」都会造出崩池轮；崩池轮的 25min 墙钟本身就是证据
+
+- **现象**：S4b 的全量池判 `VOID (infra)` —— slot1 没产出 JSON，墙钟 **25.0min**（同档历史 8.1–11.7min）、
+  效率 0.63（目标 ≥2.8）、用例数 289 而非 396。看着像「批量图表改作业把套件压垮了」。
+- **根因（是我制造的，不是改动本身）**：门禁在后台跑的同时，我另开了一次
+  `manage.py test apps.common.tests_metrics` 去验新写的 metrics 判据。两件事都要起 Django、
+  都要 CPU、都要 SQLite 连接，池里每个 slot 又在跑真浏览器。
+- **规则**：仓规「门禁在跑时别改产品代码」只挡住了**写文件**这一半；**跑任何另一套测试**
+  同样是污染，而且更隐蔽——它不改内容，只改时序，于是产出的是「看起来像回归」的基础设施垃圾。
+  门禁在跑时的合法动作只有两类：读代码、写文档/台账。
+- **怎么认出崩池轮**：墙钟与用例数一起看。289≠396 说明有 slot 中途死掉，
+  这时任何「红/绿」都不作数，**重跑才是结论**（本条与 `docs/reference/testing-gates.md` §4 同口径，
+  这里补的是「先自查我是不是那个负载源」）。
+
+## 2026-10-18 崩池轮的第二种成因：提交内存（commit）不够时，Node 在启动 250ms 就 OOM
+
+- **现象**：第二轮全量池**没有与任何东西并跑**，仍然 `VOID (infra)` —— slot2/slot3 EXIT=134、
+  没产出 JSON，两句一模一样的
+  `FATAL ERROR: MarkCompactCollector: young object promotion failed / Allocation failed - JavaScript heap out of memory`，
+  时间是 **246–268ms、堆只有 ~120 MB**。这不像「某个用例吃内存」：那种要涨到几百 MB 才崩，
+  而且崩在用例中间，不是 runner 进程刚起来。
+- **取证三件套（可复用）**：
+  ①`Get-Counter '\Memory\Committed Bytes','\Memory\Commit Limit'` → **28.1 / 36.7 GB**；
+  ②`Get-CimInstance Win32_Process -Filter "Name='python.exe'"` 里 `manage.py runserver 210xx` 有 **6 个**，
+  每个 commit ~876 MB；③413 个进程 private bytes 合计 22 GB（QQ/微信/Steam/Edge/IDE 都在跑）。
+  空闲物理内存 16 GB 但**空闲 commit 只剩 ~5 GB** ⇒ 4 个 slot（各一套 Vite+Playwright+Django）
+  撞的是**提交上限**，不是 RAM。光看「可用内存 16GB」会得出完全相反的结论。
+- **已确认的一半**：21002 那对孤儿来自我 12:28 被 `TaskStop` 掉的那轮 —— 它杀了 runner，
+  没杀 `WebServer` 子进程；本轮崩掉的 slot2/3 又自己留下 4 个。
+  **规则：池每结束一次（正常结束与被杀都算）回查 `runserver` 进程与 21xxx/22xxx 监听，清完再重跑**，
+  否则崩池轮的现场会持续吃下一轮的内存，变成自我污染。
+- **没确认的一半（不写成结论）**：我不能证明「清掉孤儿就不会崩」——那 4 个是崩溃的**结果**之一，
+  不全是原因，而这台机器没法在同一状态下做对照。诚实口径是：此刻 `--slots=auto`（=4）不稳，
+  重跑降档到 `--slots=2`。要降档只能直接 `node scripts/e2e_pool.mjs --slots=2`：
+  `autoSlots` 的上限是 `DEFAULT_SLOTS`，`E2E_SLOTS` 只管 nightly，affected 里那句 `--slots=auto` 是写死的。
+
+## 2026-10-18 池的 25min 到点杀只掀掉 `cmd` 一层：崩池轮的用例在下一轮起跑时还在跑
+
+- **现象**：`--slots=2` 那轮到 25min 被 kill，池本身正常收尾、判 `VOID (infra)`、报「用例 0」。
+  但两分钟以后回查进程：那一轮（16:28 创建）的 **4 个 `manage.py runserver 210xx` + 2 个
+  Playwright runner + 2 个 vite 全都还活着，而且还在往日志里写用例**（slot0 已经打到 `ok 204`）。
+  也就是说池报「0 用例」的那一刻，真实负载一点没少 ——**下一轮是在叠加负载上起跑的**。
+- **根因**：`runSlot()` 的 `child` 是 `cmd /c npx playwright test …`，
+  `child.kill('SIGKILL')` 只掀 `cmd` 这一层；npx→node→(vite / `.venv` python) 全是它的子孙，
+  Windows 上没有进程组语义，SIGKILL 不会往下传。
+- **修法**：`killSlotTree()` —— win32 走 `taskkill /PID <pid> /T /F`（树杀），
+  其它平台保持原来的 `child.kill('SIGKILL')`。**没做进程组就不假装修好 POSIX 侧**。
+- **对照（整轮唯一变量就是这条 kill 路径）**：
+  `node scripts/e2e_pool.mjs --slots=1 --timeout-min=1 -- e2e/data/view-data.spec.ts e2e/analysis/analysis.spec.ts`
+  让 killer 在 60s 触发，之后 12 秒内 slot0 日志字节 **37230 → 37230（不再增长）**，
+  回查 `runserver` / `playwright` / `vite` 各 **0 个**。改之前同一条路径留下的是 4+6 个进程。
+- **顺带纠正上一条里的措辞**：那里写的是「TaskStop 杀了 runner，没杀 WebServer 子进程」，
+  更准确的口径是**任何**结束 slot 的路径（池自己的超时、TaskStop 杀父）都不往下杀树，
+  所以「崩池轮的现场会吃下一轮的内存」不是特例而是默认行为。
+
 ## 2026-10-18 「断言去 grep 源码文本」不是行为判据；一行死 import 能让整条功能无法作业化
 
 - **①（本批最该记住的一条）我先把「不许嵌套进程池」写成 `inspect.getsource()` 里必须出现
@@ -2185,3 +2240,20 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
 - **共享工作区里别人的在飞改动会挡住你的构建**：本轮 `npm run build` 红在另一会话未跟踪的
   `test/unit/serialAxisRange.spec.ts`（TS2322）。规则：不代它改、不 stash、不动它的文件；
   `git status` 先分清哪些是我的（本轮 8 个），等它自绿再跑；提交逐文件 add。
+
+## 2026-10-18 复跑判级的「独占 slot」不独占：一批并开 6 个，机器紧时把负载红误判成真红
+
+- **现象**：`--slots=2` 那轮判 `MEASURED`，但 `复跑判级：真红 1`（`analysis/histogram-fail-bins.spec.ts`）。
+  看现场才发现这轮有 **7 个红文件**，而复跑阶段是「每批最多 `MAX_SLOTS`=6 个 slot **并开**」——
+  所谓独占只是「一个 slot 只装一个文件」，不是「整台机器只有这一个 slot 在跑」。
+  被误判真红的那个复跑 slot 自己的日志里就有 `worker process exited unexpectedly (code=134 / 3221226505)`
+  和 `JavaScript heap out of memory`（auth.setup 连炸两次才重试成功），业务用例报的是
+  `locator.click: Timeout 15000ms`（等参数下拉里的 `Igss_3V`）——**典型的争用形状，不是断言形状**。
+- **反证（唯一变量=并发度）**：`node scripts/e2e_pool.mjs --slots=1 --timeout-min=12 -- e2e/analysis/histogram-fail-bins.spec.ts`
+  ⇒ `用例 1 · unexpected 0 · flaky 0`，**墙钟 0.2min（12 秒）** 绿。
+  再往回查历史：同一条用例标题在 10-15 / 10-17 / 10-18 的主轮里反复出现过 `x`，
+  而 S1/S2/S3/S4a 各轮 `真红 0` —— 说明它一直是「负载红」，只是以前红文件少（2~4 个）、
+  复跑批没并开到 6 个，所以每次都翻绿了。
+- **规则**：读 `真红 N` 之前先看**这一轮有多少红文件**。>6 个时复跑阶段本身就是满负荷，
+  判出的真红要先用 `--slots=1 -- <单个文件>` 单独复跑一次再定性；这条与
+  「独占复跑会洗白状态依赖的确定性红」是一对反向陷阱：前者放过真红，后者制造假真红。

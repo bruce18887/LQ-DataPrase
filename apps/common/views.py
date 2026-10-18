@@ -21,6 +21,26 @@ from apps.accounts.permissions import FeaturePermission
 from apps.common import system_config
 
 
+class MetricsView(APIView):
+    """`GET /api/v1/metrics/` —— 运维可见性（方案 §9-4）。
+
+    **无条件管理员**：不像 `SystemPathsView` 那样按 `SYSTEM_PATHS_VISIBLE_TO_ALL` 放宽。
+    理由是这个载荷会说出接口耗时、路径形态、作业量与内存占用 —— 桌面单机形态下这些信息
+    对普通账号也没有收益，只有泄漏面。闸门仍然在 API 上（`FeaturePermission` +
+    `required_feature='system_config'`，复用现有权限键，不新造一个只有它用的 feature）。
+
+    端点自身不进延迟采样池（`apps/common/metrics.is_worth_recording`），
+    否则运维页开久了最慢路径 Top-1 永远是它自己。
+    """
+
+    permission_classes = [IsAuthenticated, FeaturePermission]
+    required_feature = 'system_config'
+
+    def get(self, request):
+        from apps.common import metrics
+        return Response(metrics.snapshot())
+
+
 def _validate_or_error(value: str | None) -> str | None:
     """None passes through (means 'clear the key'); bad paths become DRF
     validation errors (400 with a Chinese message)."""

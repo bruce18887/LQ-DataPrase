@@ -4648,6 +4648,67 @@ element-plus-theme 切换）。
 `e2e/settings/export-timeout.spec.ts:36-42` 目前仍真（CSV/sigma_limit/html/batch 四条还在用它），
 等 batch_charts / html_report 也迁到作业后，这条文案要同步改 —— 别等到只剩一条同步导出时
 还写着「所有导出请求」。
+
+### S4b 实施结果（2026-10-18）：batch_charts 与 html_report 都改提交-轮询-下载
+
+- `useExport.exportBatchCharts` 与 `ExportFooter.exportHtml` 走 `useJobExport.run()`；
+  `exportSigmaLimit` / `to_csv` / 批次报告 HTML **仍同步**（不是作业类型）。
+- `run()` 的返回从 `boolean` 改成 `{ok, reason, message}`（`JobFailureReason`）。
+  理由是调用方 `ExportToolsTab.onExportBatch` 原先靠 `.catch(err.code === 'ECONNABORTED')`
+  判「导出超时」—— 作业版 Promise 不会 reject，那条分支直接成了死代码，
+  不改就是把一个永远不会出现的提示留在界面上。超时语义现在由 `reason === 'gave-up'` 承担。
+- 进度 chip 不能用合并后的 `exporting`：sigma_limit 仍是同步在飞，那时 `job.progress`
+  留着上一次作业的残留值，进度条会显示一个没在跑的数。补了 `batchActive`（= 作业自己的在飞标记）。
+- 用户可见文案跟着语义改（界面 help + 用户指南，不是只写 spec 注释）：
+  设置项说明加了作用范围；`docs/user-guide/05-export.md` 与 `09-faq.md` 里那条
+  「导出超时，请减少参数数量后重试」换成新提示及其真实含义（**不是失败**，后端仍在算）。
+  ⚠ `docs/user-guide/` 整个目录不入库（`git ls-files` 零命中）⇒ 这两处修改只在本机生效。
+- `JobProgressChip.vue` 从 `pages/data/components/browser/` 提到 `components/common/`
+  （三个页面共用），没登记进 `components/common/index.ts` —— 那个 barrel 本来就只列部分组件，
+  `CpkBadge` 等同源组件也是直接路径导入。
+- 实测：`exports.spec.ts` 10 passed、`html-report.spec.ts` 3 passed（P1+P2 档）、
+  vitest 265、lint:e2e、build 全绿。
+  ⚠ 用例标题带 `@p1/@p2` 时 `--project=Edge` 会因 `grepInvert` 报 **「No tests found」而不是失败** ——
+  选错档的表现是「找不到用例」，别读成「用例没问题」。
+
+## P4-4 metrics 端点（2026-10-18）：`GET /api/v1/metrics/`，管理员
+
+方案 §9-4 要的是一双眼睛。载荷 = 运行时长 / pid / **RSS** / 解析缓存
+（`entries·bytes·budget_bytes·in_flight`）/ 汇总缓存 `entries·max_entries` /
+作业按状态计数 / 近 5 分钟请求 `p50·p95·max` + 最慢路径 Top-5。
+
+**三条刻意的设计**：
+
+1. **不持久化、不写盘**：纯进程内有界环形（`MAX_SAMPLES=5000`、窗口 300s），重启即清零。
+   加一层持久化只会新增失败模式（写盘、权限、清理），而运维问的从来是「现在这一分钟谁在慢」。
+2. **观测者不改变被观测值**：`/api/v1/metrics/` 自己不进样本池，否则运维页开久了
+   最慢路径 Top-1 永远是它自己（有判据 `test_metrics_own_call_adds_no_sample`）。
+3. **「取不到」一律显式化**：psutil 缺失 ⇒ `rss_bytes: null` + `rss_available: false`
+   （psutil 只是 `py7zr` 的传递依赖、没进 requirements，干净检出里 import 失败是预期分支；
+   写成 0 会让运维页显示「RSS 0 MB」，比没有这个数字更危险）；
+   `jobs` 表还没建 ⇒ `{'available': false}` 而不是 500；窗口空 ⇒ 分位数 `None`。
+   路径归一（`/jobs/12/download/ → /jobs/<id>/`）也在这里：不折 id，统计基数无界，
+   Top-N 会退化成「最近点了哪些 id」。
+
+权限**复用**现有 `system_config` feature（`FEATURE_PERMISSIONS` 里已是 `['administrator']`），
+不新造只有它用的键；与 `SystemPathsView` 不同的是这里**无条件**管理员
+（耗时/路径/负载对普通账号没有收益，只有泄漏面）。中间件放在 `MIDDLEWARE` 首位 = 最外层，
+量到的是整个请求的耗时。
+
+**实测**：`apps.common` **64 例 / OK**（含 17 条 metrics 判据）；
+后端 `common/jobs/dashboard/datafiles/export` **320 例 / OK / 273s**；`manage.py check` 无 issue。
+真读数：RSS 57 MB（不是 0）、`budget_bytes` 1610612736 = 1536 MB、
+未建表时 `jobs = {'available': False}`、无样本时 `p50/p95 = None`。
+
+### 本批我制造的一次假象（记下来防再犯）
+
+`npm run test:e2e:affected` **会按改动所在 app 跑后端步骤**（日志里那行
+`$ python manage.py test apps.common`）。我先写了 `apps/common/tests_metrics.py` 却没注册端点，
+以为「文件没接进 MIDDLEWARE/URL 就是惰性、不影响门禁」—— 错：affected 会把 apps.common 的
+新测试直接收进去跑，于是 S4b 那一档被我自己写的 7 条红判据打断，池都没起跑
+（日志停在 backend 的 `FAILED (failures=3, errors=4)`，25min 墙钟那次则是并跑污染，见 lessons）。
+**规则**：半成品的新 app/新测试文件不要留在待验的工作树里；要么先注册到自洽，
+要么这一档跑完再落盘。
       进度 UI 复用 SFTP 现有条；双主题只认 CSS token；失败态给 error 文案 + 重试（同 params 重 POST）。
 - [x] **S5 SFTP 批量下载作业化**（D3 已拍板要做）：`download_dir_events` 的事件流
       （`progress/error/done`，`apps/sftp/downloads.py:229-325`）映射成 `Job.progress`，
@@ -4807,3 +4868,52 @@ pptx 分支经查不嵌池，因此可以安全作业化。
 **过程中自己写坏又改回的两次**（记下来免得再犯）：一次是把 request.user 塞进
 一个凭空的模块级 `_request_user_cache`；一次是写出 `job.id if False else job_id`。
 两次都是「helper 边界没想清楚就先动手」的形状 —— 都靠 `ast.parse` + 跑测试当场撞出来。
+
+## P3-S4b 收尾：gave-up 的提示不许指向一个没有的页面（2026-10-18）
+
+自查 `frontend/src` 时抓到一处**空头承诺**：`run()` 与 `ExportToolsTab` 在放弃等待时说
+「可稍后在导出中心查看结果」，而前端**没有任何页面**读 `GET /api/v1/jobs/`
+（`grep -rn 导出中心 frontend/src` 只命中这两处文案和一句注释）。
+spec 的接口表里那行本来就标着「可选，前端『导出中心』用」⇒ 这片 UI 从没排进任何 slice，
+不是我漏做的收尾 —— 所以本轮不补页面，只把话说回此刻能兑现的部分。
+
+- 文案改为只讲事实：`GIVE_UP_TEXT = '导出仍在进行，本页已停止等待；作业没有被取消，可稍后重新导出'`。
+  等待上限（5min）这个**行为**没动，动的是提示口径。
+- reason → 呈现 收进 `jobPolling.ts` 的纯函数 `jobFailureView()`：`gave-up` 走 **info**，
+  `submit-error`/`job-failed`/`download-failed` 走 **error**，`ExportToolsTab` 不再自己分支。
+  放这里而不是 `useJobExport.ts` 的理由是硬的：后者 import 了 element-plus，
+  而 T2 的 vitest 是 `environment: 'node'`（「只跑零 DOM 的纯函数」），判据写在带 DOM 的文件里就等于测不了。
+- T2 从 16 → **22 条**（全量 vitest **271 passed**）。承重的三条：
+  `not.toMatch(/减少参数|参数数量/)`（旧句「导出超时，请减少参数数量后重试」把前端自己的等待上限
+  说成用户选多了）、`not.toContain('导出中心')`、`toMatch(/仍在进行/)`。
+  反证没改坏源码：另建一个一次性 spec 对两句旧文案跑同样的判据 —— 旧句 1 只被「怪参数」拒、
+  旧句 2 只被「没有的页面」拒 ⇒ **两条判据各承重一种回归**，删任何一条就漏一种。跑完即删。
+- 待拍板：要不要补「导出中心」。后端已经齐（`GET /jobs/` 最近 50 条 + `/jobs/<id>/download/`），
+  缺的只是列表页 + 进度 chip 的双主题。补上之后这句文案才能改回「稍后在导出中心查看」。
+
+## e2e 池的到点杀改成树杀（2026-10-18，测试基建）
+
+`runSlot()` 原来 `child.kill('SIGKILL')`，而 `child` 是 `cmd /c npx playwright test …` ——
+只掀掉 `cmd` 一层。实测一轮 25min 超时池收尾后 2 分钟回查：那轮的 4 个
+`manage.py runserver 210xx`（各 commit ~876 MB）+ 2 个 Playwright runner + 2 个 vite
+都还活着**并且还在跑用例**（slot0 日志已到 `ok 204`）。所以「崩池轮」除了指标不可信，
+还会把上一轮的真实负载带进下一轮 —— 下一轮起跑时机器上跑的是两轮。
+
+- 修法：`killSlotTree()`，win32 用 `taskkill /PID <pid> /T /F`；非 win32 保持旧行为
+  （没做进程组，不假装修好那一侧）。
+- 对照：`--slots=1 --timeout-min=1 -- e2e/data/view-data.spec.ts e2e/analysis/analysis.spec.ts`
+  触发 killer 后，slot0 日志 12 秒内 37230 → 37230 字节（不再增长），
+  `runserver`/`playwright`/`vite` 回查各 0 个。
+- 影响面：只改 `scripts/e2e_pool.mjs`，`pool-core.mjs` 的纯判据与
+  `e2ePoolCore.spec.ts`/`e2eAffectedDecide.spec.ts` 都没动（kill 路径本来就不在纯函数里）。
+
+## P4 与 S4 遗留：现在欠的是三个「要人拍板」而不是三条代码
+
+1. **进程模型**（P4-1/P4-2）：`gunicorn` 在 Windows 上跑不了（`--preload`/`--workers` 依赖 `fork`），
+   所以「服务器形态用几进程」必须先定 server 的 OS 与进程模型；`CompressedManifestStaticFilesStorage`
+   则撞本项目的「静态文件名不带 hash」不变量，不是配置一改就能上。
+2. **媒体内容哈希共享**（P4-3）：会把存储语义从 move 改成内容寻址，
+   与 [[storage-path-migration-hazard]] 那套「move + SKIP 挡不住」的现状直接冲突。
+3. **「导出中心」页面**：后端已经齐（`GET /api/v1/jobs/` 最近 50 条 + `/jobs/<id>/download/`），
+   前端没有读它的页面。补上才能把 gave-up 文案改回「稍后在导出中心查看」；
+   不补就维持现在这句只讲事实的文案。

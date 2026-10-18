@@ -67,6 +67,10 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    # 放最外层：Django 对请求方向自上而下执行，所以这一层量到的是「整个请求」的耗时，
+    # 与其它中间件的开销无关 —— 运维要归因的正是用户感知的那段时间。
+    # 纯内存采样（有界环形 + 一把锁），不写盘不打库；见 apps/common/metrics.py。
+    'apps.common.metrics.MetricsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     # GZipMiddleware 已于 2026-08-11 移除：大 JSON（browse 68MB）压缩 CPU
     # 实测 3.6s，而打包版/开发版 Django 直连 localhost 传输仅 ~0.2s，净损失。

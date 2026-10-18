@@ -308,6 +308,22 @@ def get_cached_fail_data(file_id: int, owner_id: int, datafile=None) -> Tuple[Op
     return _cached_fail_data(file_id, owner_id, path_key, abs_path, datafile.format_type)
 
 
+def get_parse_cache_stats() -> dict:
+    """给 `/api/v1/metrics/` 读的解析缓存读数（apps/common/metrics.py）。
+
+    `in_flight` 是这一眼里最值钱的部分：它 >0 且持续不掉，就说明「同一只文件正在被重复解析」
+    （P1-1 之前是常态）。四个键都是整数，没有「取不到就当 0」的模糊空间 ——
+    空缓存的真 0 和读失败的可不是一回事，所以这里不返回 None。
+    """
+    with _parse_cache._cv:
+        return {
+            'entries': len(_parse_cache._data),
+            'bytes': _parse_cache._total,
+            'budget_bytes': _parse_cache._budget,
+            'in_flight': len(_parse_cache._pending),
+        }
+
+
 def clear_parse_cache() -> None:
     """Drop the in-memory parsed-file caches.
 
