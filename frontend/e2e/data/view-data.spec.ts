@@ -1093,6 +1093,117 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     await expectAt(pB)
   })
 
+  /**
+   * 页面缩放档下，右键菜单必须仍然出现在右键的那个点上。
+   *
+   * 浏览器档的缩放是 useZoom 往 `<html>` 上写 CSS `zoom`：它把整棵文档（含 Teleport 到
+   * body 的 `position: fixed` 菜单）一起放大，而 `MouseEvent.clientX/Y` 与
+   * `getBoundingClientRect()` 仍是**未缩放的视口 px**。把 clientX 直接写进 `left`
+   * 等于再乘一次 zoom ⇒ 偏移量随「距视口左上角的距离」线性增长（2026-10-18 探针实测：
+   * 1.25 档偏 163×113px，1.5 档整块菜单被推出视口）。Electron 档走
+   * `webContents.setZoomFactor`，两套坐标同源，实测偏移 0–1px ⇒ zoom 读回来恒为 1。
+   *
+   * 判据只比较 `getBoundingClientRect()` 与事件 clientX/Y —— 两者都是视口 px，同一
+   * 坐标空间；不混 offsetWidth/clientWidth（lessons 2026-09-06「zoom 缩放下的尺寸
+   * 测量陷阱」），也不用 `locator.boundingBox()`（实测它与 DOM 不同源，见下面 measure()）。
+   * zoom=1 那档是对照组：改前改后都必须绿，用来证明失败不是夹具或夹紧造成的。
+   */
+  test('@p2 右键菜单在页面缩放下跟随右键点（CSS zoom 坐标空间）', async ({ page }) => {
+    /**
+     * 视口拉高到 1400：查看数据页的工具栏 + 标签 + 表头把表体顶边压到 local y≈400，
+     * 默认 720 高的视口里，1.5 档连「渲染窗口最上一行」都会越过底边（实测 639+109>720），
+     * 夹紧必然介入 ⇒ 那条档位在 720 高下根本测不到空间换算。
+     */
+    await page.setViewportSize({ width: 1280, height: 1400 })
+    await openViewTab(page, SEEDED_FILES.CTA8280F_FT)
+    const info = await fetchBinFailInfo(page, SEEDED_FILES.CTA8280F_FT)
+    if (info.failIdx === -1) test.skip(true, '无 fail 行')
+
+    // 记下产品真正收到的 clientX/Y，而不是「我以为点在哪」
+    await page.evaluate(() => {
+      ;(window as any).__ctxPoint = null
+      document.addEventListener(
+        'contextmenu',
+        (e: MouseEvent) => { (window as any).__ctxPoint = { x: e.clientX, y: e.clientY } },
+        true,
+      )
+    })
+
+    const menu = page.locator('.bin-cell-menu')
+    /**
+     * 量位置一律走 page.evaluate 里的 getBoundingClientRect()。
+     *
+     * 刻意不用 `locator.boundingBox()`：2026-10-18 探针实测它与 DOM 不同源，而且差值
+     * **不是** zoom 倍率（同一格 zoom=1 时 PW 报 (558.5,348.5)、DOM rect 与事件 clientX
+     * 都是 (605,363)），拿它去比 clientX 就是拿两套空间互比。DOM rect 与 clientX 逐档
+     * 完全相等，所以两者互比才成立。
+     */
+    const measure = () =>
+      page.evaluate(() => {
+        const el = document.querySelector('.bin-cell-menu')
+        const r = el?.getBoundingClientRect()
+        return {
+          click: (window as any).__ctxPoint as { x: number; y: number },
+          menu: r ? { x: r.left, y: r.top, right: r.right, bottom: r.bottom } : null,
+          vp: { w: window.innerWidth, h: window.innerHeight },
+        }
+      })
+
+    try {
+      for (const zoom of [1, 1.25, 1.5]) {
+        // 与 useZoom 浏览器档完全同构的那一步
+        await page.evaluate((z) => {
+          document.documentElement.style.zoom = String(z)
+        }, zoom)
+
+        /**
+         * 把目标行滚到渲染窗口的最上一行，让右键点尽量远离视口底边。
+         *
+         * 不这么做的话，靠下的行在高倍档会让「右键点 + 菜单高」越过视口底边，夹紧合法地
+         * 把菜单往上挪 —— 判据就退化成「夹紧对不对」，量不到空间换算（实测 1.25 档挪 55px）。
+         * 下面那条「夹紧不参与」是硬前置，滚不到位就直接红并报出坐标，不会静默退化。
+         */
+        await page.locator('.ag-body-vertical-scroll-viewport').evaluate((el, idx) => {
+          ;(el as HTMLElement).scrollTop = idx * 30
+        }, info.failIdx)
+        const row = await ensureRowRendered(page, info.failIdx)
+        const cell = binCell(row, info.bin)
+        await expect(cell).toBeVisible({ timeout: 10_000 })
+
+        await cell.click({ button: 'right' })
+        await expect(menu).toBeVisible({ timeout: 5_000 })
+        // 菜单确实是为这一行弹的 ⇒ 右键真的落在了目标格子上
+        await expect(menu).toContainText(`第 ${info.failIdx + 1} 行`)
+
+        const m = await measure()
+        expect(m.menu, `zoom=${zoom} 量不到菜单`).not.toBeNull()
+        const menuW = m.menu!.right - m.menu!.x
+        const menuH = m.menu!.bottom - m.menu!.y
+        const edge = 8 * zoom // 留白是 local px，画出来占 8*zoom 视口 px
+        // 硬前置而不是可跳过的分支：夹紧一旦介入，下面的恒等式量的就不是空间换算了
+        expect(
+          m.click.y + menuH,
+          `zoom=${zoom} 右键点 ${m.click.y}+菜单高 ${menuH} 越过视口底边 ${m.vp.h}，夹紧会介入`,
+        ).toBeLessThanOrEqual(m.vp.h - edge)
+        expect(
+          m.click.x + menuW,
+          `zoom=${zoom} 右键点 ${m.click.x}+菜单宽 ${menuW} 越过视口右缘 ${m.vp.w}，夹紧会介入`,
+        ).toBeLessThanOrEqual(m.vp.w - edge)
+
+        expect(Math.abs(m.menu!.x - m.click.x), `zoom=${zoom} menu.x=${m.menu!.x} click.x=${m.click.x}`).toBeLessThan(6)
+        expect(Math.abs(m.menu!.y - m.click.y), `zoom=${zoom} menu.y=${m.menu!.y} click.y=${m.click.y}`).toBeLessThan(6)
+        // 夹紧的边界也得算在同一套空间里：菜单整体不得被推出视口
+        expect(m.menu!.right, `zoom=${zoom} 菜单右缘出视口`).toBeLessThanOrEqual(m.vp.w + 1)
+        expect(m.menu!.bottom, `zoom=${zoom} 菜单下缘出视口`).toBeLessThanOrEqual(m.vp.h + 1)
+
+        await page.keyboard.press('Escape')
+        await expect(menu).not.toBeVisible({ timeout: 3_000 })
+      }
+    } finally {
+      await page.evaluate(() => document.documentElement.style.removeProperty('zoom'))
+    }
+  })
+
   test('@p2 右键 Pass Bin 单元格不弹菜单（放行浏览器菜单）', async ({ page }) => {
     await openViewTab(page, SEEDED_FILES.CTA8280F_FT)
     const info = await fetchBinFailInfo(page, SEEDED_FILES.CTA8280F_FT)

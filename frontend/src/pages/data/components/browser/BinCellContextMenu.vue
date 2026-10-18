@@ -31,6 +31,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onUnmounted } from 'vue'
 import { WarningFilled } from '@element-plus/icons-vue'
+import { measureContextMenu } from './contextMenuPosition'
 
 const props = defineProps<{
   visible: boolean
@@ -65,17 +66,15 @@ const onResizeGlobal = () => onClose()
  *
  * 不能只在 visible 的 false→true 时算坐标：菜单开着时再右键另一行，
  * visible 仍是 true，watcher 不触发，位置会停在上一次点击处。
+ *
+ * 坐标空间换算（页面缩放档下 clientX 与 fixed 元素不同源）统一住在
+ * contextMenuPosition 里，三个右键菜单共用一份判据。
  */
 function positionMenu(focusItem = false) {
-  pos.value = { x: props.x, y: props.y }
+  // 首帧量不到宽高，先只换算空间；下一帧按实测尺寸夹紧
+  pos.value = measureContextMenu(null, props.x, props.y)
   nextTick(() => {
-    const el = menuEl.value
-    if (!el) return
-    const rect = el.getBoundingClientRect()
-    pos.value = {
-      x: Math.max(8, Math.min(props.x, window.innerWidth - rect.width - 8)),
-      y: Math.max(8, Math.min(props.y, window.innerHeight - rect.height - 8)),
-    }
+    pos.value = measureContextMenu(menuEl.value, props.x, props.y)
     // 键盘可达：打开时聚焦菜单项，Enter/Space 触发
     if (focusItem) itemEl.value?.focus()
   })
