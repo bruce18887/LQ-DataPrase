@@ -4585,11 +4585,12 @@ Chromium 错误页停在窗口底色 `#1a1a2e` 上 = 黑屏，且 `did-finish-lo
 
 ### 切片（每片单独提交）
 
-- [ ] **S1 作业核**：`apps/jobs/`（models/apps/urls/views/executor/management/commands/prune_jobs.py）
+- [x] **S1 作业核**：`apps/jobs/`（models/apps/urls/views/executor/runner/management/commands/prune_jobs.py）
       + `0001_initial` + `INSTALLED_APPS`（`config/settings/base.py:40-66` 用点号串形式）。
-      状态机 pending→running→done/error/cancelled；`ready()` 把 `running` 全标 `error`
+      状态机 pending→running→done/error/cancelled；启动钩子把 `running` 全标 `error`
       （同 `apps/common/apps.py:7-16` 的 `dispatch_uid` 写法）。
       越权一律 **404**（仓内通例 `get_object_or_404(..., owner=request.user)`，403 只有 accounts 一处）。
+      —— 实际落地范围比清单更宽：S1 顺带把 `export_excel` 端到端跑通了（含进程池与降级）。
 - [ ] **S2 执行器**：模块级常驻 `ProcessPoolExecutor`（lazy 创建 + 启动 warmup）
       与 `ThreadPoolExecutor(2)`（SFTP 用**临时连接**，走 `apps/sftp/search/connect.py:89`
       `open_verified_transport` 那条，不碰 `pool.py` 的 per-user 常驻连接）。
@@ -4612,3 +4613,51 @@ params 快照原样进 worker。T3 只留一条接线证明（点导出→进度
 测试写法照 `apps/buyoff/tests.py`（APITestCase + `force_authenticate`）；
 断 `in_atomic_block` 那类才用 `TransactionTestCase`（`apps/datafiles/tests_import_tx.py:11-13` 的理由）。
 **不测**真实 275MB 导出耗时（那是 `scripts/perf_load20.py --heavy export` 的验收，不进 CI）。
+
+### S1 实施结果（2026-10-18）：作业核 + export_excel 端到端
+
+判据 21 例（`apps/jobs/tests_jobs.py`），先红后绿：首跑红在
+`ModuleNotFoundError: No module named 'apps.jobs.models'`（缺实现），中间 6 红 1 错全是实现问题，
+最终 `Ran 21 / OK`。受影响后端档 `apps.jobs apps.export apps.datafiles apps.analysis
+apps.dashboard + test.backend.{test_browse_api,test_page_size_bounds}` = **Ran 493 / OK / 239s**，
+`manage.py check` 无 issue。产品代码净减 140 行（搬走而非复制）。
+
+**新模块与被搬动的代码**
+
+- `apps/common/grid_filters.py`：ag-grid IRM 的 `apply_filter_model` / `apply_sort`
+  从 `browse_views.py` 搬出（原处只留 import 别名）。
+- `apps/export/filters.py`：`apply_export_filters` / `parse_grid_model` / `grid_filters_from`
+  从 `export/views.py` 搬出；`apps/export/tests.py` 的导入跟着改到新模块。
+- `apps/jobs/`：models / runner（**Django-free**）/ executor / views / urls / apps /
+  `migrations/0001_initial` / `management/commands/prune_jobs.py`。
+- 注册：`base.py` 加 `apps.jobs`，`config/urls.py` 挂 `api/v1/jobs/`。
+
+**两条只有跑起来才会暴露的坑（都已在代码注释里留钉）**
+
+1. **门面模块会把 Django 拽进 worker。** `from apps.export.export_complete import
+   export_to_xlsx_optimized` 看着最自然，但那门面会带上
+   `export_batch_charts_xlsx → apps.common.user_settings → apps.accounts.models`，
+   子进程 import 期就 `ImproperlyConfigured`。改成直接 import 具体模块才干净。
+   这条不是我推出来的 —— 是 `WorkerModuleIsolationTests` 第一次跑就抓的，
+   它用 `_worker_probe()` 起子进程并**显式清掉 `DJANGO_SETTINGS_MODULE`**
+   （不清的话父进程的环境变量会让子进程悄悄有 Django，判据恒假绿）。
+   判据自带对照组 `test_django_import_would_have_been_caught`，另用 argv 换法实测过：
+   服务路径 argv 会炸出 `RuntimeWarning`、离线路径干净。
+2. **结果回填跑在别的连接上 ⇒ 必须 `TransactionTestCase`。** 进程池的 done-callback 在
+   执行器线程里用**另一条 DB 连接** `update()`，而 `TestCase` 把用例包在未提交事务里 ⇒
+   那条线程看不见这行 Job，状态永远停 `running`（实测红在 `'running' != 'done'`，
+   还伴随 `database table is locked`）。同仓先例 `apps/datafiles/tests_import_tx.py:11-13`。
+
+**启动钩子没有直接放进 `ready()` 查库**：Django 会对「app 初始化期访问 DB」发 RuntimeWarning，
+且 `makemigrations`/`test` 根本没有僵尸要收。改成 `ready()` 里按 `sys.argv` 判定
+（`OFFLINE_COMMANDS` 点名跳过，**认不出来的命令照清** —— 方向是 fail-safe，
+宁可多做一次无害 UPDATE 也不留永远 running 的作业）。
+
+**判据里刻意留的一个「不钉死」**：`_sheet_rows()` 实测这份 10 行夹具导出后是 21 个 `<row `，
+且 FAIL(12)+PASS(20) > 全量 —— 那是导出器自己的行布局，我解释不了构成，
+所以只断关系（FAIL < 全量、site < 全量、FAIL > 1），不把看不懂的常数钉进 CI。
+同时这里也**不能用 `openpyxl.max_row`**：手写数据区 XML 没写 `dimension`，`max_row` 恒报 1，
+用它当判据等于什么都不判（实测红在 `1 not greater than 1`）。
+
+**降级路径有测试**：`executor_available()` 返回 False 时同步算完，返回
+`200 + 文件流 + X-Job-Fallback: 1`（spec §7 要求必须有测试的那条）。

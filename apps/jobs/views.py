@@ -1,0 +1,142 @@
+"""`/api/v1/jobs/` —— 提交、轮询、下载、取消。
+
+三条硬口径：
+
+* **提交只拿号**：202 + `job_id`，请求线程不碰计算（这是本片存在的唯一理由）。
+* **越权一律 404**，不是 403 —— 作业 id 是自增的，403 等于告诉别人「这个 id 真的存在」。
+* **进程池建不起来时降级成今天的同步导出**（200 + 文件流 + `X-Job-Fallback: 1`），
+  而不是 500、也不是排队等一个永远不会有 worker 来领的作业。
+"""
+
+import os
+
+from django.http import FileResponse
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from rest_framework import status as http_status
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from apps.common.errors import error_response
+from apps.common.export_naming import base_export_context, render_export_filename
+from apps.datafiles.models import DataFile
+from apps.datafiles.utils import resolve_file_path
+from apps.jobs import executor
+from apps.jobs.models import Job
+
+LIST_LIMIT = 50
+
+
+def _job_payload(job: Job) -> dict:
+    return {
+        'id': job.id,
+        'kind': job.kind,
+        'status': job.status,
+        'progress': job.progress,
+        'error': job.error,
+        'result_name': job.result_name,
+        'created_at': job.created_at.isoformat() if job.created_at else None,
+    }
+
+
+class JobSubmitView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, kind):
+        if kind not in executor.KIND_RUNNERS:
+            return error_response('unsupported_kind',
+                                  f'{kind} 还不是可提交的作业类型', 400)
+
+        datafile = get_object_or_404(DataFile, pk=request.data.get('file_id'),
+                                     owner=request.user)
+        abs_path = resolve_file_path(datafile.file_path)
+        if not os.path.exists(abs_path):
+            return error_response('file_not_found', '源文件已不在磁盘上', 404)
+
+        # 名字与隐藏列都在主进程定死：worker 读不到 request.user。
+        result_name = render_export_filename(
+            request.user, 'to_excel', 'xlsx',
+            {**base_export_context(request.user),
+             'filename': datafile.filename.rsplit('.', 1)[0]})
+        user_settings = getattr(request.user, 'settings', None)
+        hidden_columns = list(user_settings.default_hidden_columns or []) if user_settings else []
+
+        params = {k: v for k, v in request.data.items() if k != 'result_name'}
+        params['result_name'] = result_name
+        job = Job.objects.create(owner=request.user, kind=kind,
+                                 status='pending', params=params)
+        task = executor.build_export_excel_task(
+            params=params, abs_path=abs_path, fmt=datafile.format_type,
+            hidden_columns=hidden_columns, job_id=job.id, owner_id=request.user.pk)
+
+        if not executor.executor_available():
+            return self._sync_fallback(job, task)
+
+        executor.submit(job, task)
+        job.refresh_from_db()
+        return Response({'job_id': job.id, 'status': job.status},
+                        status=http_status.HTTP_202_ACCEPTED)
+
+    def _sync_fallback(self, job: Job, task: dict):
+        entry, _timeout = executor.KIND_RUNNERS[job.kind]
+        try:
+            result = entry(task)
+        except Exception as exc:
+            job.status, job.error, job.finished_at = 'error', str(exc), timezone.now()
+            job.save(update_fields=['status', 'error', 'finished_at'])
+            return error_response('export_failed', f'导出失败：{exc}', 500)
+        job.status, job.progress = 'done', 100
+        job.result_path = executor._relativize(result['out_path'])
+        job.result_name = os.path.basename(result['out_path'])
+        job.started_at = job.finished_at = timezone.now()
+        job.save(update_fields=['status', 'progress', 'result_path',
+                                'result_name', 'started_at', 'finished_at'])
+        response = FileResponse(open(result['out_path'], 'rb'),
+                                filename=job.result_name, as_attachment=True)
+        response['X-Job-Fallback'] = '1'
+        return response
+
+
+class JobDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        job = get_object_or_404(Job, pk=pk, owner=request.user)
+        return Response(_job_payload(job))
+
+
+class JobDownloadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        job = get_object_or_404(Job, pk=pk, owner=request.user)
+        if job.status != 'done' or not job.result_path:
+            return error_response('job_not_ready', '作业还没产出结果', 404)
+        abs_path = resolve_file_path(job.result_path)
+        if not os.path.exists(abs_path):
+            return error_response('result_missing', '结果文件已不在磁盘上', 404)
+        return FileResponse(open(abs_path, 'rb'), filename=job.result_name,
+                            as_attachment=True)
+
+
+class JobCancelView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        job = get_object_or_404(Job, pk=pk, owner=request.user)
+        if job.status != 'pending':
+            # running 的作业已经在别的进程里算，杀掉它只会留下一半个文件
+            return error_response('not_cancellable',
+                                  f'{job.status} 的作业不能取消', 409)
+        job.status, job.finished_at = 'cancelled', timezone.now()
+        job.save(update_fields=['status', 'finished_at'])
+        return Response(_job_payload(job))
+
+
+class JobListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        rows = Job.objects.filter(owner=request.user)[:LIST_LIMIT]
+        return Response({'results': [_job_payload(job) for job in rows]})

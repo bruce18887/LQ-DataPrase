@@ -63,6 +63,7 @@ INSTALLED_APPS = [
     'apps.gage',
     'apps.export',
     'apps.sftp',
+    'apps.jobs',
 ]
 
 MIDDLEWARE = [
