@@ -12,6 +12,7 @@
       <div class="bin-cell-menu__header">
         第 {{ rowIndex + 1 }} 行 · Bin = <span class="bin-cell-menu__bin">{{ binValue }}</span>
         <template v-if="failCols.length > 1"> · {{ failCols.length }} 个 Fail</template>
+        <template v-if="borderlineCols.length"> · {{ borderlineCols.length }} 个临界</template>
       </div>
       <div
         ref="itemEl"
@@ -38,6 +39,7 @@ const props = defineProps<{
   rowIndex: number
   binValue: string | number | null
   failCols: string[]
+  borderlineCols: string[]
 }>()
 
 const emit = defineEmits<{ close: []; 'goto-fail': [rowIndex: number] }>()

@@ -74,7 +74,8 @@ function visibleCountLine(page: Page) {
  *   取最后一个而不是首个：首个这种行往往贴着数据开头，行在视口里的落点让 ag-grid 的 'middle'
  *   滚动量被 clamp 掉，「居中」与「不居中」表现一致 → 垂直断言退化成空断言
  *   （实测传 'middle' 也全绿，故改为取末位）。
- * - binOnlyIdx：首个 __fail_cells__ 恰为 [bin] 的行（仅 bin fail，无测试列越限）
+ * - borderlineRowIdx/borderlineCol：首个「__fail_cells__ 恰为 [bin] 且带临界橙格」的行
+ *   （bin26 形状：没有严格越限测试列，靠临界项解释 fail）
  */
 /**
  * 负载下大响应体可能截断（Unexpected end of JSON input）——重试逻辑必须
@@ -101,13 +102,17 @@ async function fetchBinFailInfo(page: Page, filename: string) {
     const files = await fetchJsonRetry(`/api/v1/files/?search=${encodeURIComponent(filename)}`, headers)
     const file = ((files.results ?? files) as any[]).find((f: any) => f.filename === filename)
     const d = await fetchJsonRetry(`/api/v1/browse/?datafile_id=${file.id}&page_size=99999`, headers)
-    // 传输格式压缩：headers + data（行值数组）+ fail_cells 并行数组 → zip 成行对象
+    // 传输格式压缩：headers + data（行值数组）+ fail_cells/borderline_cells 并行数组 → zip
     const colHeaders = (d.headers ?? []) as string[]
     const data = (d.data ?? []) as unknown[][]
     const failCells = (d.fail_cells ?? []) as string[][]
+    const borderlineCells = (d.borderline_cells ?? []) as string[][]
     const rows: Record<string, any>[] = []
     for (let i = 0; i < data.length; i++) {
-      const o: Record<string, any> = { __fail_cells__: failCells[i] ?? [] }
+      const o: Record<string, any> = {
+        __fail_cells__: failCells[i] ?? [],
+        __borderline_cells__: borderlineCells[i] ?? [],
+      }
       for (let j = 0; j < colHeaders.length; j++) o[colHeaders[j]] = data[i][j]
       rows.push(o)
     }
@@ -122,7 +127,9 @@ async function fetchBinFailInfo(page: Page, filename: string) {
       passIdx: -1,
       farIdx: -1,
       farCol: '',
-      binOnlyIdx: -1,
+      borderlineRowIdx: -1,
+      borderlineCol: '',
+      borderlineCount: 0,
     }
     for (let i = 0; i < rows.length; i++) {
       const v = rows[i][bin]
@@ -145,8 +152,13 @@ async function fetchBinFailInfo(page: Page, filename: string) {
             info.farCol = first
           }
         }
-        if (info.binOnlyIdx === -1 && fc.length === 1 && fc[0] === bin) {
-          info.binOnlyIdx = i
+        if (info.borderlineRowIdx === -1 && fc.length === 1 && fc[0] === bin) {
+          const bc = (rows[i].__borderline_cells__ ?? []) as string[]
+          if (bc.length) {
+            info.borderlineRowIdx = i
+            info.borderlineCol = bc[0]
+            info.borderlineCount = bc.length
+          }
         }
       } else if (info.passIdx === -1 && v !== null && v !== undefined && v !== '' && Number(v) === 1) {
         info.passIdx = i
@@ -793,13 +805,20 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     }
   })
 
-  test('@p2 列直方图：右键列头打开分布对话框（直方图 + CPK），右键数据区不弹', async ({ page }) => {
+  test('@p2 列直方图：右键列头先出菜单，点「展示分布图」打开对话框，右键数据区不弹', async ({ page }) => {
     await openViewTab(page, SEEDED_FILES.GAGE_S1)
 
-    // 右键一个数值列的表头（如 SW_Bin）→ 直方图对话框打开
+    // 右键一个数值列的表头（如 SW_Bin）→ 先出菜单，不再直接开图
     const headerCell = page.locator('.ag-header-cell').filter({ hasText: 'SW_Bin' }).first()
     await expect(headerCell).toBeVisible({ timeout: 10_000 })
     await headerCell.click({ button: 'right' })
+
+    const menu = page.locator('.header-context-menu')
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    await expect(menu).toContainText('复制列名')
+    await expect(menu).toContainText('展示分布图')
+    await menu.locator('.header-context-menu__item').filter({ hasText: '展示分布图' }).click()
+    await expect(menu).not.toBeVisible({ timeout: 3_000 })
 
     const dialog = page.locator('.el-dialog')
     await expect(dialog).toBeVisible({ timeout: 10_000 })
@@ -820,12 +839,95 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     await dialog.locator('.el-dialog__headerbtn').click()
     await expect(dialog).not.toBeVisible({ timeout: 5_000 })
 
-    // 右键数据区单元格不弹窗（body 右键放行，保留浏览器菜单）
+    // 右键数据区单元格不弹窗/不弹菜单（body 右键放行，保留浏览器菜单）
     const cell = page.locator('.ag-center-cols-container .ag-row').first().locator('.ag-cell').first()
     await expect(cell).toBeVisible({ timeout: 10_000 })
     await cell.click({ button: 'right' })
     await page.waitForTimeout(1_000)
     await expect(page.locator('.el-dialog')).not.toBeVisible({ timeout: 3_000 })
+    await expect(page.locator('.header-context-menu')).toHaveCount(0)
+    await expect(page.locator('.bin-cell-menu')).toHaveCount(0)
+  })
+
+  test('@p2 表头菜单：复制列名写入剪贴板并给成功提示', async ({ page }) => {
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+    await openViewTab(page, SEEDED_FILES.GAGE_S1)
+
+    const headerCell = page.locator('.ag-header-cell').filter({ hasText: 'SW_Bin' }).first()
+    await expect(headerCell).toBeVisible({ timeout: 10_000 })
+    await headerCell.click({ button: 'right' })
+
+    const menu = page.locator('.header-context-menu')
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    await menu.locator('.header-context-menu__item').filter({ hasText: '复制列名' }).click()
+    await expect(menu).not.toBeVisible({ timeout: 3_000 })
+    await expect(page.locator('.el-message').filter({ hasText: '已复制' })).toBeVisible({ timeout: 3_000 })
+    const copied = await page.evaluate(() => navigator.clipboard.readText())
+    expect(copied).toBe('SW_Bin')
+  })
+
+  test('@p2 表头菜单：非数值列分布图置灰且不打开对话框', async ({ page }) => {
+    await openViewTab(page, SEEDED_FILES.GAGE_S1)
+
+    // 取首个「测试列且非数值」的列（系统列里的 QR_Code 默认隐藏，不能拿来测）。
+    // 这类列通常是全空测试项，但仍在 headers/表头里。
+    const nonNumericCol = await page.evaluate(async (filename) => {
+      const token = localStorage.getItem('access_token')
+      const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
+      const files = await fetch(`/api/v1/files/?search=${encodeURIComponent(filename)}`, { headers }).then((r) => r.json())
+      const file = ((files.results ?? files) as any[]).find((f: any) => f.filename === filename)
+      const d = await fetch(`/api/v1/browse/?datafile_id=${file.id}&page_size=1`, { headers }).then((r) => r.json())
+      const sys = new Set((d.system_columns ?? []) as string[])
+      const num = new Set((d.numeric_columns ?? []) as string[])
+      return ((d.headers ?? []) as string[]).find((c) => !sys.has(c) && !num.has(c)) ?? ''
+    }, SEEDED_FILES.GAGE_S1)
+    expect(nonNumericCol, 'GAGE 文件应有非数值测试列').not.toBe('')
+
+    const colSel = `.ag-header-cell[col-id="${nonNumericCol}"]`
+    await scrollGridUntil(page, colSel)
+    const headerCell = page.locator(colSel).first()
+    await expect(headerCell).toBeVisible({ timeout: 10_000 })
+    await headerCell.click({ button: 'right' })
+
+    const menu = page.locator('.header-context-menu')
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    await expect(menu).toContainText('复制测试项名字')
+    const histItem = menu.locator('.header-context-menu__item').filter({ hasText: '展示分布图' })
+    await expect(histItem).toHaveClass(/is-disabled/)
+    await expect(histItem).toContainText('非数值列')
+    await histItem.click({ force: true })
+    await page.waitForTimeout(500)
+    await expect(page.locator('.el-dialog')).not.toBeVisible()
+  })
+
+  test('@p2 行高亮：左键点序列号切换，右键不切换且不弹自定义菜单', async ({ page }) => {
+    await openViewTab(page, SEEDED_FILES.GAGE_S1)
+    const { serial } = await fetchPinDefaults(page, SEEDED_FILES.GAGE_S1)
+    expect(serial, 'GAGE 文件应有序列列').not.toBe('')
+
+    const row0 = page.locator('.ag-pinned-left-cols-container .ag-row[row-index="0"]')
+    await expect(row0).toBeVisible({ timeout: 10_000 })
+    const serialCell = row0.locator(`.ag-cell[col-id="${serial}"]`)
+    await expect(serialCell).toHaveClass(/row-highlight-trigger/)
+
+    await serialCell.click()
+    await expect(row0).toHaveClass(/row-highlight/)
+    // 多行同时高亮
+    const row1 = page.locator('.ag-pinned-left-cols-container .ag-row[row-index="1"]')
+    await expect(row1).toBeVisible({ timeout: 10_000 })
+    await row1.locator(`.ag-cell[col-id="${serial}"]`).click()
+    await expect(row0).toHaveClass(/row-highlight/)
+    await expect(row1).toHaveClass(/row-highlight/)
+    // 再点取消
+    await serialCell.click()
+    await expect(row0).not.toHaveClass(/row-highlight/)
+    await expect(row1).toHaveClass(/row-highlight/)
+
+    // 右键不切高亮、也不弹自定义菜单
+    await serialCell.click({ button: 'right' })
+    await expect(row0).not.toHaveClass(/row-highlight/)
+    await expect(page.locator('.bin-cell-menu')).toHaveCount(0)
+    await expect(page.locator('.header-context-menu')).toHaveCount(0)
   })
 
   test('@p3 质量概览条：Total/Pass/Fail/Yield 与 /summary/ API 一致', async ({ page }) => {
@@ -1058,28 +1160,41 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
       .toContain('ag-cell-data-changed')
   })
 
-  test('@p2 仅 Bin fail 行：定位只 flash 不横向滚动', async ({ page }) => {
-    // CTA8290D 含仅 bin fail 行（无测试列越限）；CTA8280F 的 fail 行均带越限测试列
-    await openViewTab(page, SEEDED_FILES.CTA8290D_FT)
-    const info = await fetchBinFailInfo(page, SEEDED_FILES.CTA8290D_FT)
-    if (info.binOnlyIdx === -1) test.skip(true, '无仅 bin fail 行')
+  test('@p2 临界橙格：bin-only fail 行标橙，右键定位跳到第一个临界列', async ({ page }) => {
+    // ETS88 真实文件：bin26 行没有任何严格越限测试列，只有 4 个卡在规格窗端点的临界项
+    await openViewTab(page, SEEDED_FILES.ETS88_FT)
+    const info = await fetchBinFailInfo(page, SEEDED_FILES.ETS88_FT)
+    if (info.borderlineRowIdx === -1) test.skip(true, '无 bin-only + 临界行')
 
-    const binRow = await ensureRowRendered(page, info.binOnlyIdx)
-    const hScroll = page.locator('.ag-body-horizontal-scroll-viewport')
-    const before = await hScroll.evaluate((el) => el.scrollLeft)
+    const row = await ensureRowRendered(page, info.borderlineRowIdx)
+    const binTargetCell = binCell(row, info.bin)
+    await expect(binTargetCell).toBeVisible({ timeout: 30_000 })
 
-    const binTargetCell = binCell(binRow, info.bin)
+    // 横向滚到第一个临界列，确认渲染为橙色（light：amber-600 #f59e0b）
+    const orangeSel =
+      `.ag-center-cols-container .ag-row[row-index="${info.borderlineRowIdx}"] ` +
+      `.ag-cell[col-id="${info.borderlineCol}"]`
+    await scrollGridUntil(page, orangeSel)
+    const orangeCell = page.locator(orangeSel)
+    await expect(orangeCell).toBeVisible({ timeout: 15_000 })
+    await expect(orangeCell).toHaveCSS('background-color', 'rgb(245, 158, 11)')
+
+    // 固定列里的 Bin 单元格始终可见：右键 → 菜单显示临界数 → 定位
     await binTargetCell.click({ button: 'right' })
     const menu = page.locator('.bin-cell-menu')
     await expect(menu).toBeVisible({ timeout: 5_000 })
+    await expect(menu).toContainText(`${info.borderlineCount} 个临界`)
     await menu.locator('.bin-cell-menu__item').click()
     await expect(menu).not.toBeVisible({ timeout: 3_000 })
 
-    // pinned bin 单元格 flash（目标列即 bin 列本身，无需横向滚动）
+    // flash 只持续约 1s；等它结束后底色必须仍是橙色
     await expect
-      .poll(async () => (await binTargetCell.getAttribute('class')) ?? '', { timeout: 3_000 })
+      .poll(async () => (await orangeCell.getAttribute('class')) ?? '', { timeout: 3_000 })
       .toContain('ag-cell-data-changed')
-    expect(await hScroll.evaluate((el) => el.scrollLeft)).toBe(before)
+    await expect
+      .poll(async () => (await orangeCell.getAttribute('class')) ?? '', { timeout: 5_000 })
+      .not.toContain('ag-cell-data-changed')
+    await expect(orangeCell).toHaveCSS('background-color', 'rgb(245, 158, 11)')
   })
 
   /**

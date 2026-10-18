@@ -1,5 +1,6 @@
 import { ref, type Ref, type ComputedRef } from 'vue'
 import type { GridApi, GridReadyEvent } from 'ag-grid-community'
+import { firstVisibleJumpTarget } from '../components/browser/binMenuTargets'
 
 /**
  * 固定 Bin 列 fail 单元的右键菜单逻辑。
@@ -10,6 +11,9 @@ import type { GridApi, GridReadyEvent } from 'ag-grid-community'
  *
  * ⚠ Bin 列名必须由调用方显式给（后端 page==1 的 bin_column），不能用
  * 「哪个列被固定了」反推 —— 固定列支持多选后，右键序列列会弹到 Bin 菜单上。
+ *
+ * 定位目标 = 红格测试列 → 临界橙格列 → Bin。橙格只解释 fail 原因，
+ * 不改 fail_cells 语义；把两者合并只发生在「跳转」这一件事上。
  *
  * @param binCol - 后端权威下发的 Bin 列名（菜单只对它的 fail 单元格生效；它没被固定时
  *                 右键落不进固定列容器，自然不弹）
@@ -30,6 +34,7 @@ export function useBinCellMenu(opts: {
   const rowIndex = ref(-1)
   const binValue = ref<string | number | null>(null)
   const failCols = ref<string[]>([])
+  const borderlineCols = ref<string[]>([])
 
   function onGridReady(e: GridReadyEvent) {
     gridApi.value = e.api
@@ -63,14 +68,16 @@ export function useBinCellMenu(opts: {
     rowIndex.value = idx
     binValue.value = value ?? null
     failCols.value = (node.data.__fail_cells__ ?? []) as string[]
+    borderlineCols.value = (node.data.__borderline_cells__ ?? []) as string[]
     visible.value = true
     return true
   }
 
   /**
-   * 定位到该行第一个可见的 fail 列并 flash 高亮。
+   * 定位到该行第一个可见的异常列并 flash 高亮。
+   * 目标顺序：红格测试列 → 临界橙格列 → Bin（都没有可见项时）。
    * 顺序不可反：先垂直再水平滚动（同步渲染目标行/列），随后 flashCells 才能拿到已渲染的 cell ctrl。
-   * 仅 bin fail 的行目标列即 bin 列本身 → ensureColumnVisible 是 no-op，只 flash pinned 单元格。
+   * 仅 bin fail 且无临界项的行目标列即 bin 列本身 → ensureColumnVisible 是 no-op，只 flash pinned 单元格。
    *
    * 垂直不传 position：菜单是在这一行上右键点出来的，它必然已在视口内，而 ag-grid 传
    * 'middle' 时无条件拉回居中（position 为空才只在行出视口时最小滚动，见
@@ -84,18 +91,20 @@ export function useBinCellMenu(opts: {
     const node = api.getDisplayedRowAtIndex(rowIdx)
     if (!node) return
     close()
-    const all = (node.data.__fail_cells__ ?? []) as string[]
-    // __fail_cells__ 顺序：测试列在前、bin 列最后 → 第一个可见项即「第一个 fail 测试列」
-    const visibleFailCols = all.filter((c) => displayCols.value.includes(c))
-    const failCol = visibleFailCols[0] ?? binCol.value
+    const target = firstVisibleJumpTarget({
+      failCols: (node.data.__fail_cells__ ?? []) as string[],
+      borderlineCols: (node.data.__borderline_cells__ ?? []) as string[],
+      binCol: binCol.value,
+      displayCols: displayCols.value,
+    })
 
     api.ensureNodeVisible(node)
-    api.ensureColumnVisible(failCol, 'middle')
-    if (visibleFailCols.length) {
+    api.ensureColumnVisible(target ?? binCol.value, 'middle')
+    if (target) {
       // 同一 tick 内 ensure* 已同步渲染目标单元格
-      api.flashCells({ rowNodes: [node], columns: [failCol] })
+      api.flashCells({ rowNodes: [node], columns: [target] })
     } else {
-      // 所有 fail 列都被隐藏 → 整行 flash（传隐藏列会 warning 且不闪）
+      // 所有 fail/临界列都被隐藏 → 整行 flash（传隐藏列会 warning 且不闪）
       api.flashCells({ rowNodes: [node] })
     }
   }
@@ -108,6 +117,7 @@ export function useBinCellMenu(opts: {
     rowIndex,
     binValue,
     failCols,
+    borderlineCols,
     onGridReady,
     close,
     handleBodyContextMenu,

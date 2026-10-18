@@ -144,8 +144,9 @@ class DataBrowserView(APIView):
             return error_response('parse_failed')
 
         # fail 检测按 (file, mtime) 缓存——文件内容未变时零重算（生产大文件收益明显）
-        fail_indices, fail_columns, fail_cells = get_cached_fail_data(datafile.id, request.user.pk, datafile)
-        if fail_cells is None:
+        fail_indices, fail_columns, fail_cells, borderline_cells = get_cached_fail_data(
+            datafile.id, request.user.pk, datafile)
+        if fail_cells is None or borderline_cells is None:
             return error_response('parse_failed')
 
         fail_set = set(fail_indices)
@@ -226,11 +227,17 @@ class DataBrowserView(APIView):
         fail_cells_json = json.dumps(
             [fail_cells.get(i, []) for i in paged_df.index], ensure_ascii=False
         )
+        # 临界橙格：与 data 并行的原生数组（pass/无临界行 []）。
+        # fail_cells 语义不变，Excel 导出/分析页继续只认红格。
+        borderline_cells_json = json.dumps(
+            [borderline_cells.get(i, []) for i in paged_df.index], ensure_ascii=False
+        )
 
         payload = (
             '{"headers":' + json.dumps(list(df.columns), ensure_ascii=False)
             + ',"data":' + data_json
             + ',"fail_cells":' + fail_cells_json
+            + ',"borderline_cells":' + borderline_cells_json
             + ',"total":' + str(total)
             + ',"page":' + str(page)
             + ',"page_size":' + str(page_size)

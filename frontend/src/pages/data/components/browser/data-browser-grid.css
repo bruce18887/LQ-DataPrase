@@ -1,0 +1,100 @@
+/* ----- Grid wrapper: CSS containment prevents repaint propagation on theme switch ----- */
+.ag-grid-wrapper {
+  contain: layout style paint;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 700px;
+}
+
+/* ================================================================
+   AG Grid light-theme baseline (scoped — only applies inside this component)
+   ================================================================ */
+:deep(.ag-custom-theme.ag-theme-quartz) {
+  --ag-background-color: var(--bg);
+  --ag-foreground-color: var(--text);
+  --ag-data-color: var(--text);
+  --ag-header-background-color: var(--bg-2);
+  --ag-header-foreground-color: var(--text);
+  --ag-odd-row-background-color: var(--bg-2);
+  --ag-row-hover-color: var(--bg-3);
+  --ag-selected-row-background-color: rgba(37, 99, 235, 0.08);
+  --ag-row-border-color: var(--border-2);
+  --ag-border-color: var(--border-2);
+  --ag-secondary-border-color: var(--border);
+  --ag-cell-horizontal-padding: 8px;
+  --ag-font-size: var(--p-fs-dense);
+  /* quartz 主题内置栈没有 CJK 档，中文一直在按浏览器默认回退；接上全局栈。
+     拉丁字符不变（两边都解析到 Segoe UI）。 */
+  --ag-font-family: var(--font-sans);
+  --ag-header-column-separator-display: block;
+  --ag-header-column-separator-color: var(--border-2);
+  --ag-input-focus-border-color: var(--brand);
+  --ag-range-selection-border-color: var(--brand);
+  /* flashCells 定位反馈色（light：品牌蓝） */
+  --ag-value-change-value-highlight-background-color: rgba(37, 99, 235, 0.35);
+}
+
+:deep(.ag-custom-theme.ag-theme-quartz .ag-row.row-odd) {
+  background-color: var(--bg-2) !important;
+}
+
+:deep(.ag-custom-theme.ag-theme-quartz .ag-row.row-even) {
+  background-color: var(--bg) !important;
+}
+
+/* 行高亮：左键点序列号切换。放在奇偶行之后并提高特异性，
+   否则会被上面两条 !important 的斑马纹覆盖。 */
+:deep(.ag-custom-theme.ag-theme-quartz .ag-row.row-highlight) {
+  background-color: color-mix(in srgb, var(--info) 14%, var(--bg)) !important;
+}
+
+:deep(.ag-custom-theme.ag-theme-quartz .ag-pinned-left-cols-container .ag-row.row-highlight .ag-cell:first-child) {
+  box-shadow: inset 3px 0 0 var(--info);
+}
+
+/* 序列号（或兜底 Bin）单元格可点：只加手型，不改变选字行为 */
+:deep(.ag-custom-theme.ag-theme-quartz .ag-cell.row-highlight-trigger) {
+  cursor: pointer;
+}
+
+:deep(.ag-custom-theme.ag-theme-quartz .ag-cell) {
+  border-right: 1px solid var(--border-2);
+  border-bottom: 1px solid var(--border-2);
+}
+
+:deep(.ag-custom-theme.ag-theme-quartz .ag-header) {
+  background-color: var(--bg-2) !important;
+}
+
+:deep(.ag-custom-theme.ag-theme-quartz .ag-header-cell) {
+  border-right: 1px solid var(--border-2);
+  background-color: var(--bg-2) !important;
+}
+
+:deep(.ag-custom-theme.ag-theme-quartz .ag-header-cell-label) {
+  font-size: var(--p-fs-dense);
+  color: var(--text);
+}
+
+:deep(.ag-custom-theme.ag-theme-quartz .ag-pinned-left-cols-container) {
+  border-right: 2px solid var(--text-3);
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
+}
+
+:deep(.ag-custom-theme.ag-theme-quartz .ag-pinned-left-header) {
+  border-right: 2px solid var(--text-3);
+  background-color: var(--bg-2) !important;
+}
+
+:deep(.ag-custom-theme.ag-theme-quartz .ag-cell-first-left-pinned) {
+  border-right: 1px solid var(--border-2);
+}
+
+:deep(.ag-custom-theme.ag-theme-quartz .ag-header-cell-resize::after) {
+  background-color: var(--border-2);
+}
+
+/* sorting icons */
+:deep(.ag-custom-theme.ag-theme-quartz .ag-header-cell-sorted-asc .ag-header-cell-label,
+      .ag-custom-theme.ag-theme-quartz .ag-header-cell-sorted-desc .ag-header-cell-label) {
+  color: var(--text);
+}
