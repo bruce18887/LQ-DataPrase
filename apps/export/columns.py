@@ -1,5 +1,9 @@
 """导出侧「可分析数值列」的唯一判定口径。
 
+`DEFAULT_CHART_PARAMS`（批量图表未指定参数时默认取前 N 个）也住在这里：
+视图与作业 worker（`apps/jobs/runner.py`，禁 Django）都要用同一个数，
+放 views 里 worker 就导不了。
+
 缺陷背景（此前散落在 views / export_xlsx_optimized / excel_builders 三处）::
 
     numeric_cols = [c for c in df.columns if df[c].dtype in ('int64', 'float64')]
@@ -16,6 +20,9 @@
 from typing import Iterable, List, Optional
 
 import pandas as pd
+
+# 批量图表在请求没带 params 时默认取前 N 个可分析参数（views 与作业 worker 共用）。
+DEFAULT_CHART_PARAMS = 10
 
 
 def _as_series(df: pd.DataFrame, col) -> Optional[pd.Series]:

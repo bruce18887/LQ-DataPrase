@@ -9,7 +9,11 @@
 """
 from typing import NamedTuple
 
-from apps.accounts.models import UserSetting  # noqa: F401  (类型与 DoesNotExist 来源)
+# 这里**不许** import apps.accounts.models：本模块要能被 worker 侧链路
+# （export_batch_charts_xlsx → jobs.runner）在无 Django 的 spawn 子进程里导入。
+# 原先有一行 `from apps.accounts.models import UserSetting  # noqa: F401`，
+# 全文件没人用它，却把整个 export 批量图表链路变成 Django 依赖。
+# 钉子：apps/jobs/tests_jobs.py 的 test_batch_charts_chain_imports_without_django。
 
 
 class CpkThresholds(NamedTuple):

@@ -46,11 +46,21 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
                                          show_4sigma=False, show_6sigma=True,
                                          show_normal=False, show_kde=False,
                                          dpi=EXPORT_DPI_DEFAULT,
-                                         cpk_thresholds=None):
+                                         cpk_thresholds=None,
+                                         workers=None, progress_cb=None):
     """Build batch charts Excel with embedded histogram images.
 
     ``cpk_thresholds``（CpkThresholds）= 当前账号的 CPK 分级阈值，决定总览 CPK 单元格
     的等级色；None 时用默认 1.67/1.33/1.0。必须在主进程用（worker 只收渲染标量）。
+
+    ``workers``：渲染用的进程数，缺省沿用今天的 ``min(8, …)``。
+    **作业化时必须传 1** —— 作业本身已经跑在常驻作业池的子进程里，
+    这里再开一层就是「作业池 4 × 渲染池 8 = 32 个 Python 进程」，
+    每个常驻 150–250MB，20 人档会直接把机器打爆。传 1 时整段并行块跳过，
+    走下面已有的逐参数串行渲染兜底（同一条渲染函数，产出不受影响，只是慢）。
+
+    ``progress_cb(percent:int)``：每装配完一个参数回调一次，供作业把进度落进侧车文件。
+    只在**调用方进程**里执行，绝不跨进程传（lambda 不可 pickle）。
 
     Ported from old project's export_batch_distribution_chart_excel + _export_charts_to_xlsx.
     Returns bytes of the .xlsx file.
@@ -217,42 +227,49 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
 
     # 多进程并行渲染全部参数图表（瓶颈在 matplotlib 渲染；worker 见 chart_workers.py）
     png_results = {}
-    try:
-        workers = min(8, max(2, os.cpu_count() or 4))
-        with ProcessPoolExecutor(max_workers=workers) as ex:
-            futures = {}
-            for title, entry in zip(processed_params, summary_data_list):
-                chart_data = entry['chart_data']
-                futures[title] = ex.submit(
-                    render_histogram_worker,
-                    {
-                        'param': title,
-                        'data_series': chart_data['data_series'].to_numpy(),
-                        'site_values': site_values,
-                        'site_series': site_series,
-                        'mean_val': chart_data['mean_val'],
-                        'std_val': chart_data['std_val'],
-                        'rdl_min': chart_data['rdl_min'],
-                        'rdl_max': chart_data['rdl_max'],
-                        'show_limit': show_limit,
-                        'show_3sigma': show_3sigma,
-                        'show_4sigma': show_4sigma,
-                        'show_6sigma': show_6sigma,
-                        'show_normal': show_normal,
-                        'show_kde': show_kde,
-                        # DPI 必须是已钳位的纯标量：worker 进程禁读 Django/DB
-                        'dpi': dpi,
-                    },
-                )
-            for title in processed_params:
-                try:
-                    png_results[title] = futures[title].result()
-                except Exception:
-                    png_results[title] = None  # 单参数失败 → 串行兜底
-    except Exception:
-        png_results = {}  # 并行整体失败 → 全量串行兜底（与现状等价）
+    # workers=1 是作业化路径：这里**不许**再开一层进程池（作业已经在常驻池的子进程里，
+    # 嵌套就是 4×8=32 个 Python 进程）。留空 png_results，装配循环会逐参数串行渲染。
+    n_workers = min(8, max(2, os.cpu_count() or 4)) if workers is None else workers
+    if n_workers > 1:
+        try:
+            with ProcessPoolExecutor(max_workers=n_workers) as ex:
+                futures = {}
+                for title, entry in zip(processed_params, summary_data_list):
+                    chart_data = entry['chart_data']
+                    futures[title] = ex.submit(
+                        render_histogram_worker,
+                        {
+                            'param': title,
+                            'data_series': chart_data['data_series'].to_numpy(),
+                            'site_values': site_values,
+                            'site_series': site_series,
+                            'mean_val': chart_data['mean_val'],
+                            'std_val': chart_data['std_val'],
+                            'rdl_min': chart_data['rdl_min'],
+                            'rdl_max': chart_data['rdl_max'],
+                            'show_limit': show_limit,
+                            'show_3sigma': show_3sigma,
+                            'show_4sigma': show_4sigma,
+                            'show_6sigma': show_6sigma,
+                            'show_normal': show_normal,
+                            'show_kde': show_kde,
+                            # DPI 必须是已钳位的纯标量：worker 进程禁读 Django/DB
+                            'dpi': dpi,
+                        },
+                    )
+                for title in processed_params:
+                    try:
+                        png_results[title] = futures[title].result()
+                    except Exception:
+                        png_results[title] = None  # 单参数失败 → 串行兜底
+        except Exception:
+            png_results = {}  # 并行整体失败 → 全量串行兜底（与现状等价）
 
     for idx, (title, entry) in enumerate(zip(processed_params, summary_data_list)):
+        if progress_cb:
+            # 报的是「已装配到第几个」，总人数由调用方持有 —— 这里不猜百分比语义。
+            # 放在循环体第一行：下面 `img_buffer` 为空时会 continue，放后面就漏报。
+            progress_cb(idx + 1)
         stats_data = entry.get('stats_data', {})
         site_stats_list = entry.get('site_stats', [])
         chart_data = entry.get('chart_data', {})

@@ -14,7 +14,7 @@ from apps.analysis.services.statistics import (
 )
 from apps.datafiles.parsers.base import SYSTEM_COLUMNS
 from .filters import apply_export_filters
-from .columns import measurable_numeric_columns
+from .columns import DEFAULT_CHART_PARAMS, measurable_numeric_columns
 from .excelize_helpers import save_excelize
 from .excel_builders import (
     build_sigma_limit_sheet,
@@ -36,7 +36,6 @@ from .html_report.styles import REPORT_CSS as ATE_REPORT_CSS  # noqa: F401
 MIN_SIGMA_LEVEL = 1
 MAX_SIGMA_LEVEL = 10
 DEFAULT_SIGMA_LEVEL = 3
-DEFAULT_CHART_PARAMS = 10
 
 
 def parse_sigma_level(raw):

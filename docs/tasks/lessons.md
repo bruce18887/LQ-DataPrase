@@ -51,6 +51,30 @@
     「数据还是 5 行」——但 ETS88 的数据区就是从 marker+1 开始读的，插进去那行**本身就是数据行**
     （实测 6 行）。断言要从被测路径的真实产物出发，不能从意图倒推。
 
+## 2026-10-18 「断言去 grep 源码文本」不是行为判据；一行死 import 能让整条功能无法作业化
+
+- **①（本批最该记住的一条）我先把「不许嵌套进程池」写成 `inspect.getsource()` 里必须出现
+  `workers=1` 这串字，然后立刻换成哨兵才敢提交。** 文本断言只证明代码长这样：改写成
+  `workers=int(1)`、或「传了 1 但分支仍走并行」，它都恒绿。改成把 builder 模块内的
+  `ProcessPoolExecutor` 换成「一被构造就抛」的类，作业路径能跑完 ⇒ 池确实没被建；
+  再配一条对照组（不传 workers 时必须记录到构造 1 次），否则这条判据可能只是证明
+  **我把并行删掉了**。规则：判「有没有发生 X」要拦住 X 的构造函数或数它的产物，
+  不要读实现文本；哨兵类判据必须带「它没把正常路径一起废掉」的对照组。
+- **②作业化的真正阻塞是一行没人用的 import。** `apps/common/user_settings.py` 里
+  `from apps.accounts.models import UserSetting  # noqa: F401` 全文件没用到它，
+  却把 `export_batch_charts_xlsx`（只是取一个纯 NamedTuple 默认值）变成 Django 依赖，
+  于是批量图表在 spawn 子进程里 import 就炸。规则：给「某模块必须能脱离 Django 导入」
+  做判据时，**探针子进程必须显式清掉 `DJANGO_SETTINGS_MODULE`**（父进程带着它 ⇒ 判据恒假绿），
+  且这条判据要在动手写功能之前先跑一次 —— 它是先红在此的，不是事后补的。
+- **③门面模块（re-export 汇总）是 worker 路径的陷阱。** `export_complete` 把批量图表
+  一起带出来，看着是「更正确的导入方式」，实际把 Django 拽进来了。规则：跨进程边界的
+  入口只许 import 具体实现模块；搬常量时把常量搬到**无依赖的那一层**
+  （`DEFAULT_CHART_PARAMS` 从 views 进 `export/columns.py`），不要抄第二份。
+- **④我自己写坏的两处**：把 `request.user` 塞进一个凭空的模块级 `_request_user_cache`；
+  以及写出 `job_id=job.id if False else job_id` 这种半截重构残渣。两处都是「先跑起来再说」
+  的产物，靠语法检查 + 跑测试当场暴露。规则：helper 的输入一律显式传参，别发明共享状态；
+  改签名后立刻跑一次判据，别攒着。
+
 ## 2026-10-17 深夜 「只能修不能删」是循环论证：契约测试不是调用方
 
 - **现象**：P1-5（browse `search` 全表 16.2s）上一轮被判成「只能修不能删」，理由写的就是

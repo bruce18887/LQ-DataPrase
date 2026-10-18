@@ -4661,3 +4661,50 @@ apps.dashboard + test.backend.{test_browse_api,test_page_size_bounds}` = **Ran 4
 
 **降级路径有测试**：`executor_available()` 返回 False 时同步算完，返回
 `200 + 文件流 + X-Job-Fallback: 1`（spec §7 要求必须有测试的那条）。
+
+### S2 实施结果（2026-10-18）：三类导出作业齐了，进度侧车落地
+
+作业判据 **31 例 / OK**；受影响后端档（jobs/export/analysis/dashboard/datafiles +
+test_browse_api）**Ran 497 / OK / 157s**。
+
+**先拆掉一颗哑雷**：`apps/common/user_settings.py:12` 那行
+`from apps.accounts.models import UserSetting  # noqa: F401` 全文件没人用，
+但它让 `export_batch_charts_xlsx`（只取 `DEFAULT_CPK_THRESHOLDS` 这个纯 NamedTuple）
+在 spawn 子进程里 import 就 `ImproperlyConfigured` —— 也就是**批量图表根本无法作业化**，
+而原因是一行死 import。删掉后新增判据
+`test_batch_charts_chain_imports_without_django` 把它钉住（先红在此，红得正确）。
+`DEFAULT_CHART_PARAMS` 也顺势从 `export/views.py` 搬进 `export/columns.py`
+（views 带 Django，worker 导不了；这个数不能抄第二份）。
+
+**不许嵌套进程池**（本批最重要的一个决定）：`build_batch_charts_xlsx_with_charts`
+自己就开 `ProcessPoolExecutor(8)`。作业已经跑在常驻池（最多 4）的子进程里，
+再开一层就是 **4×8=32 个 Python 进程**，每个常驻 150–250MB ⇒ 20 人档直接把机器打爆。
+解法：builder 加 `workers` 形参，作业路径传 `workers=1` ⇒ 跳过整段并行块，
+走它**本来就有**的逐参数串行兜底（同一个渲染函数，产出不受影响，只是慢）；
+并行度只在作业池那一层给。
+
+判据写法上我纠了一次错：第一条是用 `inspect.getsource(...)` 断源码里有 `workers=1`
+这串字 —— 那只能证明代码长这样，改写成 `workers=int(1)` 就假绿，也挡不住
+「传了 1 但分支仍走并行」的真 bug。换成哨兵：把 builder 模块内的
+`ProcessPoolExecutor` 换成「一被构造就抛」的类，作业路径能跑完 ⇒ 池确实没被建。
+并配一条**对照组**（不传 workers 时 spy 必须记录到构造 1 次），
+否则这条判据可能只是证明了我把并行删掉了。
+
+**进度走侧车文件而不是 Manager**：worker 没有 Django、写不了 DB。spec §4.3 给的是
+`Manager().dict()` 或 futures 轮询；实际做成 worker 往作业目录写 `.progress`，
+主进程轮询器读它再 `update(progress=...)`。理由：不必为每个池再起一个 manager 进程，
+且 worker 崩了文件还在 —— 天然就是「最后已知进度」。节奏取 5s 一跳（spec 写 1 次/秒），
+SQLite 写得更少，进度条对人依然可读；只推进不回退，100 由 done-callback 统一置。
+
+**prefs 不进 params 快照**：文件名/DPI/CPK 阈值/报告时间戳在提交那一刻由主进程钳成标量
+（`_flatten_prefs`），但 `Job.params` 只存用户请求参数 —— 否则 `GET /jobs/`
+会把内部钳位值当作用户意图回显出去。报告的 `generated_at` 也钉在提交时刻，
+不随队列长度漂移。
+
+新增两类作业：`export_batch_charts`（xlsx 与 pptx 都覆盖，超时 60min）与
+`export_html_report`（复用 `/summary/` 同一份 `compute_dashboard_summary`，杜绝数字漂移）。
+pptx 分支经查不嵌池，因此可以安全作业化。
+
+**过程中自己写坏又改回的两次**（记下来免得再犯）：一次是把 request.user 塞进
+一个凭空的模块级 `_request_user_cache`；一次是写出 `job.id if False else job_id`。
+两次都是「helper 边界没想清楚就先动手」的形状 —— 都靠 `ast.parse` + 跑测试当场撞出来。

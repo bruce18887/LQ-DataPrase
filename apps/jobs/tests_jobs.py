@@ -103,6 +103,28 @@ class WorkerModuleIsolationTests(unittest.TestCase):
             msg=f'worker 侧模块在无 Django 的子进程里导入失败：\n{proc.stderr[-1500:]}')
         self.assertIn('ok', proc.stdout)
 
+    def test_batch_charts_chain_imports_without_django(self):
+        """S2 的前提：批量图表与 HTML 报告要能整条搬进 worker。
+
+        这条第一次跑就红了 —— `apps/common/user_settings.py` 有一行
+        `from apps.accounts.models import UserSetting` 带着 `# noqa: F401`，
+        全文件实际没人用它，但它让 `export_batch_charts_xlsx`（只取
+        `DEFAULT_CPK_THRESHOLDS` 这个纯 NamedTuple）在 spawn 子进程里 import 就炸。
+        """
+        code = (
+            'import apps.export.export_batch_charts_xlsx;'
+            'import apps.export.html_report;'
+            'from apps.common.user_settings import DEFAULT_CPK_THRESHOLDS, CpkThresholds;'
+            'assert DEFAULT_CPK_THRESHOLDS.cpk_a == 1.67;'
+            'print("ok")'
+        )
+        proc = _worker_probe(code)
+        self.assertEqual(
+            proc.returncode, 0,
+            msg=f'批量图表/HTML 报告链路带 Django 依赖，worker 起不来：\n'
+                f'{proc.stderr[-1500:]}')
+        self.assertIn('ok', proc.stdout)
+
     def test_django_import_would_have_been_caught(self):
         """上一条的对照组：同一个探针确实能抓到 Django 依赖。
 
@@ -469,6 +491,174 @@ class RealPoolEndToEndTests(TransactionTestCase):
         self.assertEqual(blob, open(os.path.join(
             str(settings.MEDIA_ROOT), job.result_path), 'rb').read(),
             '下载内容与 worker 落盘的文件必须逐字节一致')
+
+
+class BatchChartsAndHtmlReportTests(TestCase):
+    """S2：另两类重活也搬进 worker，且**不许嵌套进程池**。
+
+    `build_batch_charts_xlsx_with_charts` 自己就开 `ProcessPoolExecutor(8)`。
+    作业已经跑在常驻池（`MAX_POOL_WORKERS` 最多 4）的子进程里，再开一层就是
+    4×8=32 个 Python 进程 —— 每个常驻 150–250MB，20 人档会把机器打爆。
+    所以作业侧必须请求串行渲染，并行度只在常驻池那一层给。
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix='jobs_s2_')
+        self.path = os.path.join(self.tmpdir, 'tiny.csv')
+        with open(self.path, 'w', encoding='utf-8') as f:
+            f.write(TINY_CSV)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _base_task(self, name):
+        out = os.path.join(self.tmpdir, name)
+        return {'abs_path': self.path, 'fmt': 'CTA8280F', 'out_path': out,
+                'result_name': os.path.basename(out),
+                'datafile': {'id': 1, 'filename': 'tiny.csv',
+                             'program_name': 'PROG'},
+                'params': ['VOLT'], 'filters': {}, 'data_only_bin1': False,
+                'show_limit': True, 'show_3sigma': False, 'show_4sigma': False,
+                'show_6sigma': True, 'show_normal': False, 'show_kde': False,
+                'dpi': 100, 'cpk_thresholds': (1.67, 1.33, 1.0),
+                'generated_at': '2026-10-18 12:00:00'}
+
+    def test_batch_charts_job_produces_xlsx(self):
+        from apps.jobs.runner import run_export_batch_charts
+        task = self._base_task('charts.xlsx')
+        result = run_export_batch_charts(task)
+        self.assertTrue(_sheet_names(result['out_path']),
+                        '批量图表作业产出不是能打开的工作簿')
+        self.assertGreater(result['bytes_written'], 0)
+
+    def test_workers_one_does_not_construct_a_render_pool(self):
+        """嵌套的 proof 必须是行为，不是源码里有没有 `workers=1` 这串字。
+
+        把 builder 模块内的 `ProcessPoolExecutor` 换成一个「一旦被构造就抛」的哨兵，
+        再按作业路径（workers=1）调用：能跑完 ⇒ 内层池确实没被构造。
+        源码 grep 那种判据改个写法（如 `workers=int(1)`）就假绿，且挡不住
+        「传了 1 但代码里仍走并行分支」的真 bug。
+        """
+        import apps.export.export_batch_charts_xlsx as builder
+
+        class Boom:
+            def __init__(self, *a, **kw):
+                raise AssertionError('workers=1 时不该构造渲染进程池')
+
+        original = builder.ProcessPoolExecutor
+        builder.ProcessPoolExecutor = Boom
+        self.addCleanup(setattr, builder, 'ProcessPoolExecutor', original)
+
+        from apps.common.user_settings import CpkThresholds
+        from apps.datafiles.parsers import get_parser
+        df, metadata = get_parser('CTA8280F').parse(self.path)
+        payload = builder.build_batch_charts_xlsx_with_charts(
+            df, metadata, ['VOLT'], workers=1,
+            cpk_thresholds=CpkThresholds(1.67, 1.33, 1.0))
+        self.assertGreater(len(payload), 0)
+
+    def test_default_call_still_uses_the_pool(self):
+        """上一条的对照：不传 workers 时池必须照旧被构造，否则我是把并行改没了。"""
+        import apps.export.export_batch_charts_xlsx as builder
+
+        built = []
+
+        class Spy(builder.ProcessPoolExecutor):
+            def __init__(self, *a, **kw):
+                built.append(kw.get('max_workers'))
+                super().__init__(*a, **kw)
+
+        original = builder.ProcessPoolExecutor
+        builder.ProcessPoolExecutor = Spy
+        self.addCleanup(setattr, builder, 'ProcessPoolExecutor', original)
+
+        from apps.common.user_settings import CpkThresholds
+        from apps.datafiles.parsers import get_parser
+        df, metadata = get_parser('CTA8280F').parse(self.path)
+        builder.build_batch_charts_xlsx_with_charts(
+            df, metadata, ['VOLT'], cpk_thresholds=CpkThresholds(1.67, 1.33, 1.0))
+        self.assertEqual(len(built), 1, f'缺省路径应当构造一次渲染池，实际 {built}')
+
+    def test_progress_sidecar_reports_intermediate_percent(self):
+        """进度侧车：worker 没有 Django、写不了 DB，就落一个文件让主进程轮询器读。
+
+        断的是**中间值**（3 个参数时第 1、2 个必须落在 1..99 之间且递增），
+        只断「最终 == 100」的判据恒绿：什么都不写的实现也能给出 100。
+        """
+        from apps.jobs.runner import write_progress
+        path = os.path.join(self.tmpdir, '.progress')
+        seen = []
+        for done in range(1, 4):
+            write_progress(path, done, total=3)
+            with open(path, encoding='utf-8') as f:
+                seen.append(int(f.read().strip()))
+        self.assertEqual(len(seen), 3)
+        self.assertTrue(all(0 < v <= 100 for v in seen), seen)
+        self.assertEqual(seen, sorted(seen), f'进度不许回退：{seen}')
+        self.assertLess(seen[0], 100, '第一个参数完成时就该 <100，否则进度条永远空转')
+        self.assertEqual(seen[-1], 100)
+
+    def test_batch_charts_job_writes_sidecar_while_rendering(self):
+        from apps.jobs.runner import run_export_batch_charts
+        task = self._base_task('charts2.xlsx')
+        task['params'] = ['VOLT', 'Data_Num', 'Test_Time']
+        task['progress_path'] = os.path.join(self.tmpdir, '.progress')
+        result = run_export_batch_charts(task)
+        self.assertEqual(result['progress_percent'], 100)
+
+    def test_batch_charts_pptx_branch_produces_a_deck(self):
+        """我在 runner 里写了 pptx 分支，不测就不能说它可用。
+
+        顺带钉住一件事：`build_batch_charts_pptx` 自己不嵌池（不像 xlsx builder），
+        所以作业化它不需要 `workers=1` 那层保护 —— 若将来它也开池，这条用例
+        的产物仍对，但嵌套判据要照 xlsx 那条补上。
+        """
+        from apps.jobs.runner import run_export_batch_charts
+        task = self._base_task('deck.pptx')
+        task['chart_format'] = 'pptx'
+        result = run_export_batch_charts(task)
+        self.assertGreater(result['bytes_written'], 0)
+        with zipfile.ZipFile(result['out_path']) as zf:
+            self.assertIn('ppt/presentation.xml', zf.namelist())
+
+    def test_html_report_job_produces_self_contained_html(self):
+        from apps.jobs.runner import run_export_html_report
+        task = self._base_task('report.html')
+        result = run_export_html_report(task)
+        with open(result['out_path'], 'r', encoding='utf-8') as f:
+            html = f.read()
+        self.assertIn('<html', html.lower())
+        self.assertIn('data:image/png;base64', html,
+                      'HTML 报告的图表是内联 base64；丢了它就等于报告没有图')
+        self.assertEqual(result['bytes_written'], os.path.getsize(result['out_path']))
+
+    def test_both_new_tasks_are_picklable(self):
+        import pickle
+        from apps.jobs.runner import run_export_batch_charts  # noqa: F401
+        from apps.jobs.runner import run_export_html_report  # noqa: F401
+        for name in ('charts.xlsx', 'report.html'):
+            task = self._base_task(name)
+            self.assertEqual(pickle.loads(pickle.dumps(task)), task)
+
+
+class ExecutorRegistryTests(unittest.TestCase):
+    """三类作业都必须在注册表里，且各自的超时不同（spec §4.3）。"""
+
+    def test_all_three_export_kinds_registered(self):
+        from apps.jobs import executor
+        self.assertEqual(
+            set(executor.KIND_RUNNERS),
+            {'export_excel', 'export_batch_charts', 'export_html_report'})
+
+    def test_worker_modules_for_all_kinds_are_django_free(self):
+        """新增两类不能把 Django 又拽回 worker。"""
+        code = ('import apps.jobs.runner as r;'
+                'assert callable(r.run_export_batch_charts) and '
+                'callable(r.run_export_html_report); print("ok")')
+        proc = _worker_probe(code)
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr[-1500:])
+        self.assertIn('ok', proc.stdout)
 
 
 if __name__ == '__main__':
