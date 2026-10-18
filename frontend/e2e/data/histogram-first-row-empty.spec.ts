@@ -38,6 +38,17 @@ async function openViewTab(page: Page, filename: string) {
   await expect(page.locator('.ag-root').first()).toBeVisible({ timeout: 30_000 })
 }
 
+/** 右键列头 → 菜单 → 点「展示分布图」（2026-10-18 起不再直接弹图） */
+async function openHistogramFromHeader(page: Page, colId: string) {
+  const header = page.locator(`.ag-header-cell[col-id="${colId}"]`)
+  await expect(header).toBeVisible({ timeout: 15_000 })
+  await header.click({ button: 'right' })
+  const menu = page.locator('.header-context-menu')
+  await expect(menu).toBeVisible({ timeout: 5_000 })
+  await menu.locator('.header-context-menu__item').filter({ hasText: '展示分布图' }).click()
+  await expect(menu).not.toBeVisible({ timeout: 3_000 })
+}
+
 test.describe('右键列头分布图：首行 fail 空数据 + 弹窗尺寸', { tag: ['@p2', '@data'] }, () => {
   let filename = ''
   let csvPath = ''
@@ -60,10 +71,8 @@ test.describe('右键列头分布图：首行 fail 空数据 + 弹窗尺寸', { 
 
     await openViewTab(page, filename)
 
-    // 右键 col1 表头（首行该列为空）→ 分布图必须弹出
-    const colHeader = page.locator('.ag-header-cell[col-id="col1"]')
-    await expect(colHeader).toBeVisible({ timeout: 15_000 })
-    await colHeader.click({ button: 'right' })
+    // 右键 col1 表头（首行该列为空）→ 菜单 → 分布图必须弹出
+    await openHistogramFromHeader(page, 'col1')
 
     const dialog = page.locator('.el-dialog')
     await expect(dialog).toBeVisible({ timeout: 10_000 })
@@ -90,9 +99,7 @@ test.describe('右键列头分布图：首行 fail 空数据 + 弹窗尺寸', { 
     await gotoApp(page, '/data')
     await openViewTab(page, filename)
 
-    const binHeader = page.locator('.ag-header-cell[col-id="SW_Bin"]')
-    await expect(binHeader).toBeVisible({ timeout: 15_000 })
-    await binHeader.click({ button: 'right' })
+    await openHistogramFromHeader(page, 'SW_Bin')
 
     const dialog = page.locator('.el-dialog')
     await expect(dialog).toBeVisible({ timeout: 10_000 })
@@ -100,14 +107,19 @@ test.describe('右键列头分布图：首行 fail 空数据 + 弹窗尺寸', { 
     await dialog.locator('.el-dialog__headerbtn').click()
   })
 
-  test('纯文本列（Serial）右键不弹出分布图', async ({ page }) => {
+  test('纯文本列（Serial）右键：菜单出现但分布图置灰、不弹窗', async ({ page }) => {
     await gotoApp(page, '/data')
     await openViewTab(page, filename)
 
     const serialHeader = page.locator('.ag-header-cell[col-id="Serial"]')
     await expect(serialHeader).toBeVisible({ timeout: 15_000 })
     await serialHeader.click({ button: 'right' })
-    await page.waitForTimeout(800)
+    const menu = page.locator('.header-context-menu')
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    const histItem = menu.locator('.header-context-menu__item').filter({ hasText: '展示分布图' })
+    await expect(histItem).toHaveClass(/is-disabled/)
+    await expect(histItem).toContainText('非数值列')
+    await page.waitForTimeout(500)
     await expect(page.locator('.el-dialog')).not.toBeVisible({ timeout: 3_000 })
   })
 })

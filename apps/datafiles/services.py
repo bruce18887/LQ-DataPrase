@@ -8,7 +8,7 @@ from typing import Optional, Tuple
 
 import pandas as pd
 
-from apps.analysis.services.statistics import detect_fail_data
+from apps.analysis.services.statistics import detect_fail_data_with_borderline
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import get_parser, BaseATEParser
 from apps.datafiles.utils import resolve_file_path
@@ -266,8 +266,8 @@ def put_cached_parsed_file(file_id: int, owner_id: int, datafile,
 
 @lru_cache(maxsize=32)
 def _cached_fail_data(file_id: int, owner_id: int, path_key: int,
-                      file_path: str, format_type: str) -> Tuple[Optional[list], Optional[list], Optional[dict]]:
-    """Cache the full-file fail detection on top of the parsed file.
+                      file_path: str, format_type: str) -> Tuple[Optional[list], Optional[list], Optional[dict], Optional[dict]]:
+    """Cache the full-file fail + borderline detection on top of the parsed file.
 
     Mirrors ``_cached_parse``: the key includes the on-disk mtime, so
     replacing the underlying file auto-invalidates. ``detect_fail_data``
@@ -275,34 +275,35 @@ def _cached_fail_data(file_id: int, owner_id: int, path_key: int,
     change when the file changes — so caching the whole-file default
     result (no per-column narrowing) is safe for hot browse requests.
 
-    Callers must treat ``fail_cells`` as read-only — it is shared across
-    requests. Never mutate it (e.g. no in-place column removal).
+    Callers must treat ``fail_cells`` / ``borderline_cells`` as read-only —
+    they are shared across requests. Never mutate them (e.g. no in-place
+    column removal).
 
-    Returns ``(fail_indices, fail_columns, fail_cells)`` — any element
-    may be ``None`` when the underlying file failed to parse.
+    Returns ``(fail_indices, fail_columns, fail_cells, borderline_cells)`` —
+    any element may be ``None`` when the underlying file failed to parse.
     """
     df, metadata, fmt = _cached_parse(file_id, owner_id, path_key, file_path, format_type)
     if df is None:
-        return None, None, None
+        return None, None, None, None
     try:
-        return detect_fail_data(df, metadata)
+        return detect_fail_data_with_borderline(df, metadata)
     except Exception as exc:
         logger.warning("_cached_fail_data(%s, %s, %s) failed: %s", file_id, owner_id, path_key, exc)
-        return None, None, None
+        return None, None, None, None
 
 
-def get_cached_fail_data(file_id: int, owner_id: int, datafile=None) -> Tuple[Optional[list], Optional[list], Optional[dict]]:
+def get_cached_fail_data(file_id: int, owner_id: int, datafile=None) -> Tuple[Optional[list], Optional[list], Optional[dict], Optional[dict]]:
     """Public wrapper around ``_cached_fail_data`` — same resolution
     pattern as ``get_cached_parsed_file`` (mtime-based auto invalidation,
     ``datafile`` param skips one DB query on hot paths).
 
-    Returns ``(fail_indices, fail_columns, fail_cells)``; elements may be
-    ``None`` on failure (missing file, parse error, etc.).
+    Returns ``(fail_indices, fail_columns, fail_cells, borderline_cells)``;
+    elements may be ``None`` on failure (missing file, parse error, etc.).
     """
     if datafile is None:
         datafile = DataFile.objects.filter(pk=file_id, owner_id=owner_id).first()
     if datafile is None:
-        return None, None, None
+        return None, None, None, None
     abs_path = resolve_file_path(datafile.file_path)
     path_key = _disk_mtime_ns(abs_path)
     return _cached_fail_data(file_id, owner_id, path_key, abs_path, datafile.format_type)

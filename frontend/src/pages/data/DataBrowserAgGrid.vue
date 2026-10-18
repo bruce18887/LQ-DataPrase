@@ -79,11 +79,14 @@
           :animateRows="true"
           :rowClassRules="rowClassRules"
           @grid-ready="onGridReady"
+          @cell-clicked="onCellClicked"
+          @sort-changed="clearRowHighlights"
+          @filter-changed="clearRowHighlights"
         />
       </div>
     </div>
 
-    <!-- 列直方图对话框（右键列名打开，复用分析页 HistogramChart + StatsSummary） -->
+    <!-- 列直方图对话框（表头右键菜单 → 展示分布图，复用分析页 HistogramChart + StatsSummary） -->
     <HistogramColumnDialog
       :visible="histDialogVisible"
       :file-id="props.fileId"
@@ -92,7 +95,20 @@
       @close="histDialogVisible = false"
     />
 
-    <!-- 固定 Bin 列 fail 单元格右键菜单（定位到该行 Fail 单元格） -->
+    <!-- 表头右键菜单：复制测试项名字 / 展示分布图 -->
+    <HeaderContextMenu
+      :visible="headerMenuVisible"
+      :x="headerMenuX"
+      :y="headerMenuY"
+      :col-name="headerMenuCol"
+      :is-system="headerMenuIsSystem"
+      :is-numeric="headerMenuIsNumeric"
+      @close="closeHeaderMenu"
+      @copy="onHeaderMenuCopy"
+      @show-histogram="onHeaderMenuShowHistogram"
+    />
+
+    <!-- 固定 Bin 列 fail 单元格右键菜单（定位到该行第一个异常单元格） -->
     <BinCellContextMenu
       :visible="binMenuVisible"
       :x="binMenuX"
@@ -100,6 +116,7 @@
       :row-index="binMenuRowIndex"
       :bin-value="binMenuBinValue"
       :fail-cols="binMenuFailCols"
+      :borderline-cols="binMenuBorderlineCols"
       @close="closeBinMenu"
       @goto-fail="goToFailCell"
     />
@@ -107,7 +124,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, markRaw } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { AgGridVue } from 'ag-grid-vue3'
 import { Refresh, Download, Document } from '@element-plus/icons-vue'
 import { datafilesApi } from '../../api/datafiles'
@@ -120,9 +137,15 @@ import DataBrowserToolbar from './components/browser/DataBrowserToolbar.vue'
 import HistogramColumnDialog from './components/browser/HistogramColumnDialog.vue'
 import DataQualityBar from './components/browser/DataQualityBar.vue'
 import BinCellContextMenu from './components/browser/BinCellContextMenu.vue'
+import HeaderContextMenu from './components/browser/HeaderContextMenu.vue'
 import JobProgressChip from '../../components/common/JobProgressChip.vue'
 import { useBinCellMenu } from './composables/useBinCellMenu'
 import { useBrowserExport } from './composables/useBrowserExport'
+import { useGridHeight } from './composables/useGridHeight'
+import { useHeaderMenu } from './composables/useHeaderMenu'
+import { useRowHighlight } from './composables/useRowHighlight'
+import { browserCellStyle, buildBrowserColumnDefs } from './components/browser/browserColumns'
+import { zipBrowserRows } from './components/browser/browserRows'
 
 // Register ag-grid modules (required since v33+)
 import { ModuleRegistry, AllCommunityModule, type IDatasource } from 'ag-grid-community'
@@ -157,29 +180,17 @@ const loading = ref(false)
 // 导出的两个状态住在 useBrowserExport 里（Excel=作业、CSV=同步），这里不再各挂一个 ref
 const dataLoaded = ref(false)
 
-// 表格高度随视口自适应。历次实测（表格上缘 / 常量）：
-//   320 → 顶部带 443px（批 1 收拢前）
-//   254 → 顶部带 377px（批 1：操作按钮并入横幅、全选/清空收进下拉，回收 66px 全给表格）
-//   290 → 顶部带 413px（批 4：多文件标签条占一行 26px + 10px 下边距 = 36px）
+// 表格高度随视口自适应；顶部带常量历次实测为 320/254/290。
 // 口径是「表格下缘恒为 1023px」：顶部带增减一律由表格吸收，页面总高不变 ——
 // 常量不动的话，加一行 chrome 就等于把整页推高 36px。
-const TABLE_TOP_OFFSET = 290
-const tableHeight = ref(Math.max(320, window.innerHeight - TABLE_TOP_OFFSET))
-function onResize() {
-  tableHeight.value = Math.max(320, window.innerHeight - TABLE_TOP_OFFSET)
-}
-onMounted(() => window.addEventListener('resize', onResize))
+const { tableHeight, gridWrapperStyle } = useGridHeight(290)
+
 onUnmounted(() => {
-  window.removeEventListener('resize', onResize)
   if (passfailTimer) clearTimeout(passfailTimer)
   // siteFilterTimer 也必须清：watcher 随组件作用域自动停止，但已排期的
   // setTimeout 仍会在卸载后触发 reload() → 对已销毁的 grid 发幽灵请求。
   if (siteFilterTimer) clearTimeout(siteFilterTimer)
 })
-
-const gridWrapperStyle = computed(() => ({
-  containIntrinsicSize: `auto ${tableHeight.value}px`,
-}))
 
 const allCols = ref<string[]>([])
 const colMeta = ref<Record<string, { unit: string; min: string; max: string }>>({})
@@ -201,28 +212,42 @@ let loadSeq = 0
 const PAGE_SIZE_DEFAULT = 100
 const blockSize = ref(PAGE_SIZE_DEFAULT)
 
-// ── 列直方图（右键列名打开） ──
-const histDialogVisible = ref(false)
-const analyzeParam = ref('')
+// ── 列直方图 + 表头右键菜单（状态与复制/打开逻辑见 composable） ──
+const {
+  visible: headerMenuVisible,
+  x: headerMenuX,
+  y: headerMenuY,
+  col: headerMenuCol,
+  isSystem: headerMenuIsSystem,
+  isNumeric: headerMenuIsNumeric,
+  histDialogVisible,
+  analyzeParam,
+  open: openHeaderMenu,
+  close: closeHeaderMenu,
+  copyName: onHeaderMenuCopy,
+  showHistogram: onHeaderMenuShowHistogram,
+} = useHeaderMenu({
+  numericColumns,
+  isSystemCol: (c) => systemCols.value.includes(c),
+  closeOtherMenu: () => closeBinMenu(),
+})
 
 /**
- * 右键列头 → 打开该列分布直方图。
+ * 右键列头 → 打开「复制测试项名字 / 展示分布图」菜单。
  * ag-grid 表头单元格渲染 col-id 属性，事件委托无需自定义 headerComponent；
  * 右键固定 Bin 列 fail 单元格 → 弹定位菜单（handleBodyContextMenu 内部 preventDefault）；
  * 其余 body 单元格右键放行（保留浏览器复制菜单）。
+ * 序列号列左键切换行高亮，右键仍走浏览器原生菜单。
  */
 function onGridContextMenu(e: MouseEvent) {
   closeBinMenu() // 任何右键先关旧菜单
+  closeHeaderMenu()
   const header = (e.target as HTMLElement).closest('.ag-header-cell')
   if (header) {
     e.preventDefault()
     const col = header.getAttribute('col-id')
     if (!col || !allCols.value.includes(col)) return
-    // 非数值列不弹。IRM 下无法全行扫描——后端 page==1 返回 numeric_columns
-    // （dtype + object 列值级判定，镜像旧前端 Number.isFinite 语义）
-    if (!numericColumns.value.includes(col)) return
-    analyzeParam.value = col
-    histDialogVisible.value = true
+    openHeaderMenu(col, e)
     return
   }
   handleBodyContextMenu(e)
@@ -302,11 +327,37 @@ const {
   rowIndex: binMenuRowIndex,
   binValue: binMenuBinValue,
   failCols: binMenuFailCols,
+  borderlineCols: binMenuBorderlineCols,
   onGridReady,
   close: closeBinMenu,
   handleBodyContextMenu,
   goToFailCell,
 } = useBinCellMenu({ binCol, displayCols })
+
+// ── 行高亮：左键点序列号单元格切换（序列列缺失时退回 Bin 列） ──
+const { isHighlighted, toggle: toggleRowHighlight, clear: clearRowHighlights } = useRowHighlight()
+
+/** 高亮触发列：优先序列列（可见时）；无序列列/被默认隐藏时退回 Bin 列 */
+const highlightTriggerCol = computed(() => {
+  const serial = serialCol.value
+  if (serial && allCols.value.includes(serial) && !defaultHiddenCols.value.includes(serial)) {
+    return serial
+  }
+  return binCol.value
+})
+const highlightTriggerKind = computed<'serial' | 'bin'>(() =>
+  serialCol.value && highlightTriggerCol.value === serialCol.value ? 'serial' : 'bin',
+)
+
+function onCellClicked(e: any) {
+  const colId = e?.column?.getColId?.() ?? e?.colDef?.field
+  const rowIndex = e?.node?.rowIndex
+  if (!colId || colId !== highlightTriggerCol.value) return
+  if (!Number.isInteger(rowIndex)) return
+  toggleRowHighlight(rowIndex)
+  // rowClassRules 的闭包读 highlightedRows ref；改完必须重绘该行才会重新求值
+  gridApi.value?.redrawRows({ rowNodes: [e.node] })
+}
 
 // ── Site 筛选（服务端）：选项来自 page==1 响应的 site_options，过滤走 reload ──
 const siteColDisabled = computed(() => {
@@ -314,50 +365,17 @@ const siteColDisabled = computed(() => {
   return !allCols.value.some((c) => /site/i.test(c) && isSystemCol(c))
 })
 
-const columnDefs = computed<any[]>(() => {
-  const defs: any[] = []
-  for (const col of displayCols.value) {
-    const meta = colMeta.value[col]
-    let header = col
-    if (meta) {
-      const parts = [col]
-      if (meta.unit && meta.unit !== '-' && meta.unit !== 'None') {
-        parts.push(` (${meta.unit})`)
-      }
-      if (meta.min !== '' || meta.max !== '') {
-        parts.push(` [${meta.min || '-'}, ${meta.max || '-'}]`)
-      }
-      header = parts.join('')
-    }
-
-    const colDef: any = {
-      field: col,
-      headerName: header,
-      // 服务端列过滤（方案 A）：数值列挂 number filter（等/不等/大于/小于/区间），
-      // 其余挂 text filter（包含/开头/结尾）——IRM 下 filter 类型必须显式指定
-      filter: numericColumns.value.includes(col) ? 'agNumberColumnFilter' : 'agTextColumnFilter',
-    }
-
-    // 默认隐藏列（系统设置）：列仍解析/保留，仅默认不可见（列菜单可重新显示）
-    if (defaultHiddenCols.value.includes(col)) {
-      colDef.hide = true
-    }
-
-    if (pinnedCols.value.includes(col)) {
-      colDef.pinned = 'left'
-    }
-
-    defs.push(colDef)
-  }
-
-  defs.push({
-    field: '__fail_cells__',
-    headerName: '',
-    hide: true,
-  })
-
-  return defs
-})
+const columnDefs = computed<any[]>(() =>
+  buildBrowserColumnDefs({
+    displayCols: displayCols.value,
+    colMeta: colMeta.value,
+    numericColumns: numericColumns.value,
+    defaultHiddenCols: defaultHiddenCols.value,
+    pinnedCols: pinnedCols.value,
+    highlightTriggerCol: highlightTriggerCol.value,
+    highlightTriggerKind: highlightTriggerKind.value,
+  }),
+)
 
 const defaultColDef = {
   editable: false,
@@ -367,19 +385,8 @@ const defaultColDef = {
   filterParams: { buttons: ['apply', 'reset'] },
   wrapHeaderText: true,
   autoHeaderHeight: true,
-  // __fail_cells__ 是原生数组（不再逐格 JSON.parse——ag-grid 每渲染一个可见单元格都会调用 cellStyle）
-  cellStyle: (params: any) => {
-    if (params.data && params.data.__fail_cells__) {
-      const failCols: string[] = params.data.__fail_cells__
-      if (failCols.includes(params.colDef.field)) {
-        if (isDark.value) {
-          return { backgroundColor: '#b91c1c', color: '#fecaca', fontWeight: 'bold' }
-        }
-        return { backgroundColor: 'var(--error-2)', color: '#ffffff', fontWeight: 'bold' }
-      }
-    }
-    return null
-  },
+  // 红/橙规则住在 browserColumns.ts（T2 纯函数）；此处只注入主题
+  cellStyle: (params: any) => browserCellStyle(params, isDark.value),
 }
 
 const autoSizeStrategy = computed(() => {
@@ -395,6 +402,7 @@ const autoSizeStrategy = computed(() => {
 const rowClassRules = {
   'row-even': (params: any) => params.node.rowIndex % 2 === 0,
   'row-odd': (params: any) => params.node.rowIndex % 2 !== 0,
+  'row-highlight': (params: any) => isHighlighted(params.node.rowIndex),
 }
 
 watch(
@@ -448,10 +456,15 @@ watch(() => filesStore.filesVersion, () => {
 })
 
 // 筛选/行数变化触发行重排 → 右键菜单索引失效，关闭
-watch([rowCount, siteFilter], () => closeBinMenu())
+watch([rowCount, siteFilter], () => {
+  closeBinMenu()
+  closeHeaderMenu()
+})
 
 function clearGrid() {
   closeBinMenu()
+  closeHeaderMenu()
+  clearRowHighlights()
   allCols.value = []
   colMeta.value = {}
   numericColumns.value = []
@@ -491,7 +504,7 @@ const datasource: IDatasource = {
       })
       const d = resp.data
       // 新旧响应都喂 grid（IRM 有块版本号守卫丢弃过期块数据）；块数据 zip 成行对象
-      params.successCallback(zipRows(d), d.total)
+      params.successCallback(zipBrowserRows(d), d.total)
       if (seq !== loadSeq) return // 旧代响应只喂 grid，不更新 refs
       applyMeta(d)
     } catch (e: any) {
@@ -503,22 +516,6 @@ const datasource: IDatasource = {
       if (seq === loadSeq) loading.value = false
     }
   },
-}
-
-/** 传输格式 zip：headers + data（行值数组）+ fail_cells（并行数组）→ markRaw 行对象。
- *  markRaw 跳过 Vue 深响应式（68k×142 依赖追踪实测 +1.3GB 堆 + 5s 阻塞；块 ≤100 行成本已低）。 */
-function zipRows(d: { headers?: string[]; data?: unknown[][]; fail_cells?: string[][] }): Record<string, any>[] {
-  const cols = d.headers ?? []
-  const vals = d.data ?? []
-  const fails = d.fail_cells ?? []
-  const rows = new Array<Record<string, any>>(vals.length)
-  for (let i = 0; i < vals.length; i++) {
-    const v = vals[i]
-    const o: Record<string, any> = { __fail_cells__: fails[i] ?? [] }
-    for (let j = 0; j < cols.length; j++) o[cols[j]] = v[j]
-    rows[i] = markRaw(o)
-  }
-  return rows
 }
 
 /** 首块（或代次最新块）响应的元信息落地；每块响应都带 headers/col_meta/bin_column */
@@ -563,6 +560,9 @@ function applyMeta(d: any) {
 function reload() {
   if (!props.fileId) return
   closeBinMenu()
+  closeHeaderMenu()
+  // 行序/筛选已变，旧的显示行索引不再指向原行
+  clearRowHighlights()
   loading.value = true
   loadSeq++ // 新代次：旧在途响应不再更新 refs
   gridApi.value?.purgeInfiniteCache()
@@ -597,90 +597,4 @@ const {
 })
 </script>
 
-<style scoped>
-/* ----- Grid wrapper: CSS containment prevents repaint propagation on theme switch ----- */
-.ag-grid-wrapper {
-  contain: layout style paint;
-  content-visibility: auto;
-  contain-intrinsic-size: auto 700px;
-}
-
-/* ================================================================
-   AG Grid light-theme baseline (scoped — only applies inside this component)
-   ================================================================ */
-:deep(.ag-custom-theme.ag-theme-quartz) {
-  --ag-background-color: var(--bg);
-  --ag-foreground-color: var(--text);
-  --ag-data-color: var(--text);
-  --ag-header-background-color: var(--bg-2);
-  --ag-header-foreground-color: var(--text);
-  --ag-odd-row-background-color: var(--bg-2);
-  --ag-row-hover-color: var(--bg-3);
-  --ag-selected-row-background-color: rgba(37, 99, 235, 0.08);
-  --ag-row-border-color: var(--border-2);
-  --ag-border-color: var(--border-2);
-  --ag-secondary-border-color: var(--border);
-  --ag-cell-horizontal-padding: 8px;
-  --ag-font-size: var(--p-fs-dense);
-  /* quartz 主题内置栈没有 CJK 档，中文一直在按浏览器默认回退；接上全局栈。
-     拉丁字符不变（两边都解析到 Segoe UI）。 */
-  --ag-font-family: var(--font-sans);
-  --ag-header-column-separator-display: block;
-  --ag-header-column-separator-color: var(--border-2);
-  --ag-input-focus-border-color: var(--brand);
-  --ag-range-selection-border-color: var(--brand);
-  /* flashCells 定位反馈色（light：品牌蓝） */
-  --ag-value-change-value-highlight-background-color: rgba(37, 99, 235, 0.35);
-}
-
-:deep(.ag-custom-theme.ag-theme-quartz .ag-row.row-odd) {
-  background-color: var(--bg-2) !important;
-}
-
-:deep(.ag-custom-theme.ag-theme-quartz .ag-row.row-even) {
-  background-color: var(--bg) !important;
-}
-
-:deep(.ag-custom-theme.ag-theme-quartz .ag-cell) {
-  border-right: 1px solid var(--border-2);
-  border-bottom: 1px solid var(--border-2);
-}
-
-:deep(.ag-custom-theme.ag-theme-quartz .ag-header) {
-  background-color: var(--bg-2) !important;
-}
-
-:deep(.ag-custom-theme.ag-theme-quartz .ag-header-cell) {
-  border-right: 1px solid var(--border-2);
-  background-color: var(--bg-2) !important;
-}
-
-:deep(.ag-custom-theme.ag-theme-quartz .ag-header-cell-label) {
-  font-size: var(--p-fs-dense);
-  color: var(--text);
-}
-
-:deep(.ag-custom-theme.ag-theme-quartz .ag-pinned-left-cols-container) {
-  border-right: 2px solid var(--text-3);
-  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
-}
-
-:deep(.ag-custom-theme.ag-theme-quartz .ag-pinned-left-header) {
-  border-right: 2px solid var(--text-3);
-  background-color: var(--bg-2) !important;
-}
-
-:deep(.ag-custom-theme.ag-theme-quartz .ag-cell-first-left-pinned) {
-  border-right: 1px solid var(--border-2);
-}
-
-:deep(.ag-custom-theme.ag-theme-quartz .ag-header-cell-resize::after) {
-  background-color: var(--border-2);
-}
-
-/* sorting icons */
-:deep(.ag-custom-theme.ag-theme-quartz .ag-header-cell-sorted-asc .ag-header-cell-label,
-      .ag-custom-theme.ag-theme-quartz .ag-header-cell-sorted-desc .ag-header-cell-label) {
-  color: var(--text);
-}
-</style>
+<style scoped src="./components/browser/data-browser-grid.css"></style>

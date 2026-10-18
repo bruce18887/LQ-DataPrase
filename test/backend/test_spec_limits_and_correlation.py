@@ -34,6 +34,7 @@ from apps.analysis.services.statistics import (
     compute_cpk,
     compute_range_statistics,
     detect_fail_data,
+    detect_fail_data_with_borderline,
     detect_outliers_iqr,
     parse_limit_string,
     resolve_spec_limit,
@@ -264,6 +265,73 @@ class DetectFailDataExplicitColumnsTests(SimpleTestCase):
         _idx, fail_columns, _cells = detect_fail_data(df, meta)
         self.assertIn('Good', fail_columns)
         self.assertNotIn('Test_Time', fail_columns)
+
+
+class BorderlineCellsTests(SimpleTestCase):
+    """临界橙色单元格的判定（/browse/ 用于区分红格与橙格）。
+
+    红格 = bin!=1 且严格越限；橙格 = bin!=1 且值**恰好等于**真规格窗
+    （min<max）的端点。两类互斥；min==max 的固定值测试等值不算临界。
+    """
+
+    def _fixture(self):
+        df = pd.DataFrame({
+            'SW_Bin': [1.0, 1.0, 7.0, 7.0, 7.0],
+            'WINDOW': [0.0, 2.0, 2.0, 0.0, 1.0],
+            'FIXED': [1.0, 1.0, 1.0, 2.0, 1.0],
+            'STRICT': [0.5, 0.5, 2.5, 0.5, 1.0],
+        })
+        meta = {
+            'format': 'CTA8290D',
+            'mins': {'WINDOW': '0', 'FIXED': '1', 'STRICT': '0'},
+            'maxs': {'WINDOW': '2', 'FIXED': '1', 'STRICT': '2'},
+        }
+        return df, meta
+
+    def test_true_window_equality_on_fail_rows_only(self):
+        df, meta = self._fixture()
+        fail_idx, _fail_columns, fail_cells, borderline = detect_fail_data_with_borderline(df, meta)
+        # pass 行（0/1）的边界等值不进入临界
+        self.assertNotIn(0, borderline)
+        self.assertNotIn(1, borderline)
+        # fail 行 2（严格越限 + 边界等值）与 3（Fixed 越限 + 边界等值）
+        self.assertEqual(borderline, {2: ['WINDOW'], 3: ['WINDOW']})
+        # 红格语义不受影响
+        self.assertEqual(fail_cells[2], ['STRICT', 'SW_Bin'])
+        self.assertEqual(fail_cells[3], ['FIXED', 'SW_Bin'])
+        self.assertEqual(fail_cells[4], ['SW_Bin'])
+        # 行号是原始 df index（browse 用它查表）
+        self.assertEqual(sorted(fail_idx), [2, 3, 4])
+
+    def test_min_equals_max_is_not_borderline(self):
+        """固定值测试（min==max）的等值是常态；失败时已由严格越限判红。"""
+        df, meta = self._fixture()
+        _idx, _cols, _cells, borderline = detect_fail_data_with_borderline(df, meta)
+        self.assertNotIn('FIXED', borderline.get(0, []))
+        self.assertNotIn('FIXED', borderline.get(2, []))
+        self.assertNotIn('FIXED', borderline.get(4, []))
+
+    def test_detect_fail_data_contract_unchanged(self):
+        """旧入口仍返回三元组，分析/导出侧零影响。"""
+        df, meta = self._fixture()
+        out = detect_fail_data(df, meta)
+        self.assertEqual(len(out), 3)
+        self.assertEqual(out[2][2], ['STRICT', 'SW_Bin'])
+
+    def test_placeholder_limits_are_not_borderline(self):
+        """'Min'/'Max'/缺失限值不得参与临界判定（与红格同一套 resolve 口径）。"""
+        df = pd.DataFrame({
+            'SW_Bin': [7.0],
+            'PLACEHOLDER': [1.0],
+            'MISSING': [2.0],
+        })
+        meta = {
+            'format': 'CTA8290D',
+            'mins': {'PLACEHOLDER': 'Min', 'MISSING': ''},
+            'maxs': {'PLACEHOLDER': 'Max', 'MISSING': ''},
+        }
+        _idx, _cols, _cells, borderline = detect_fail_data_with_borderline(df, meta)
+        self.assertEqual(borderline, {})
 
 
 class BoxplotSensitivityAndSpecLimitTests(SimpleTestCase):

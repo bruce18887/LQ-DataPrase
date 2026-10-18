@@ -82,6 +82,8 @@ export interface BrowseResponse {
   data: unknown[][]
   /** 与 data 行并行：每行的 fail 列名列表（原生数组，pass 行为 []） */
   fail_cells: string[][]
+  /** 与 data 行并行：每行 bin!=1 且值恰好等于真规格窗端点的临界列（亮橙） */
+  borderline_cells: string[][]
   total: number
   page: number
   page_size: number

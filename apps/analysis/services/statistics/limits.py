@@ -102,11 +102,18 @@ def parse_limit_string(limit_str: str, data_series: pd.Series = None,
     return default_min if value is None else value
 
 
-def detect_fail_data(df: pd.DataFrame, metadata: Dict, ignore_no_limit: bool = True,
-                     columns: Optional[List[str]] = None) -> Tuple[List[int], List[str], Dict[int, List[str]]]:
+def _scan_limit_cells(df: pd.DataFrame, metadata: Dict, columns: Optional[List[str]],
+                      want_borderline: bool):
+    """红格与临界橙格共用的一次列扫描。
+
+    ``fail_cells`` 与 ``borderline_cells`` 的键都是原始 df index；
+    ``borderline_cells`` 只在 ``want_borderline`` 时计算，避免分析/导出
+    等不需要橙格的调用方多付一次等值比较。
+    """
     fail_indices = []
     fail_columns = []
     fail_cells = {}
+    borderline_cells = {}
 
     format_type = metadata.get('format', 'CTA8290D')
     target_bin_col = get_bin_column_name(format_type)
@@ -149,6 +156,14 @@ def detect_fail_data(df: pd.DataFrame, metadata: Dict, ignore_no_limit: bool = T
                 fail_cells[idx] = []
             fail_cells[idx].append(col)
 
+        # 临界橙格：真规格窗（min<max）端点的精确等值 —— 只对 fail 行。
+        # min==max 的固定值测试等值是常态（通过态），其失败已由上面的严格
+        # 越限判红；把它们标橙会在真实 ETS88 文件里造出 4000+ 个橙格。
+        if want_borderline and col != target_bin_col and min_val < max_val:
+            edge_mask = fail_row_mask & ((col_data == min_val) | (col_data == max_val))
+            for idx in df.index[edge_mask].tolist():
+                borderline_cells.setdefault(idx, []).append(col)
+
     if target_bin_col in df.columns:
         fail_bin_indices = df.index[fail_row_mask].tolist()
         # 用集合做去重：每行都重建 set(fail_indices) 是 O(n²)，
@@ -163,7 +178,27 @@ def detect_fail_data(df: pd.DataFrame, metadata: Dict, ignore_no_limit: bool = T
                 seen_fail_indices.add(idx)
                 fail_indices.append(idx)
 
+    return fail_indices, fail_columns, fail_cells, borderline_cells
+
+
+def detect_fail_data(df: pd.DataFrame, metadata: Dict, ignore_no_limit: bool = True,
+                     columns: Optional[List[str]] = None) -> Tuple[List[int], List[str], Dict[int, List[str]]]:
+    """红格判定（旧契约，三元组）——分析/导出侧继续用它。"""
+    fail_indices, fail_columns, fail_cells, _ = _scan_limit_cells(
+        df, metadata, columns, want_borderline=False)
     return fail_indices, fail_columns, fail_cells
+
+
+def detect_fail_data_with_borderline(
+    df: pd.DataFrame, metadata: Dict, ignore_no_limit: bool = True,
+    columns: Optional[List[str]] = None,
+) -> Tuple[List[int], List[str], Dict[int, List[str]], Dict[int, List[str]]]:
+    """红格 + 临界橙格（/browse/ 使用）。
+
+    ``borderline_cells`` 语义：``bin`` 有值且 != 1、``min < max``、值恰好等于
+    min 或 max。与 ``fail_cells`` 互斥（严格越限优先），且只对 fail 行计算。
+    """
+    return _scan_limit_cells(df, metadata, columns, want_borderline=True)
 
 
 def calculate_fail_bin_statistics(df: pd.DataFrame, metadata: Dict) -> Dict:

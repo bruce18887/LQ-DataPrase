@@ -43,21 +43,26 @@ META_HEADER = 'CTA8280F\nDevice Name,TEST_DEVICE\nTestFileName,C:\\x\\prog.dll\n
 #  fail 行（SW_Bin != 1）：row2(3.0 超限)、row5(5000 超限)、row6(2.5 超限)、
 #  row7(1.0 在限内，仅 bin fail)、row8(空值，仅 bin fail)；pass 行 1/3/4。
 #  Site_No 分布（站点筛选测试素材）：1,1,2,1,3,2,1,3。
+#
+# 临界橙色（borderline_cells）素材：
+#  EDGE_HI/EDGE_LO 限值 [0,2]，FIXED_EQ 限值 [1,1]。
+#  pass 行 1/3 的值也恰好落在 EDGE_* 的边界上 —— 必须被 bin!=1 条件排除；
+#  fail 行 5/6/7/8 落在 EDGE_* 边界 → 橙色；FIXED_EQ 的等值任何行都不橙。
 FAIL_CSV = (
     META_HEADER
     + '[Data]\n'
-    + 'Index_No,Dut_No,Serial_No,Site_No,Dut_Pass,SW_Bin,X_COORD,Y_COORD,QR_Code,Test_Time,Data_Num,KELVIN_VIN,\n'
-    + 'Unit,Unit,Unit,Unit,Unit,Unit,Unit,Unit,Unit,Unit,Unit,ohm,\n'
-    + 'Min,Min,Min,Min,Min,Min,Min,Min,Min,Min,Min,0,\n'
-    + 'Max,Max,Max,Max,Max,Max,Max,Max,Max,Max,Max,2,\n'
-    + '1,1,1,1,TRUE,1,0,0,None,4.1,10,1.0,\n'
-    + '2,1,2,1,TRUE,5,0,0,None,4.1,10,3.0,\n'
-    + '3,1,2,2,TRUE,1,0,0,None,4.2,10,1.5,\n'
-    + '4,1,3,1,TRUE,1,0,0,None,4.1,10,0.5,\n'
-    + '5,1,3,3,TRUE,7,0,0,None,4.1,10,5000.0,\n'
-    + '6,1,4,2,TRUE,5,0,0,None,4.1,10,2.5,\n'
-    + '7,1,5,1,TRUE,5,0,0,None,4.1,10,1.0,\n'
-    + '8,1,6,3,TRUE,5,0,0,None,4.3,10,,\n'
+    + 'Index_No,Dut_No,Serial_No,Site_No,Dut_Pass,SW_Bin,X_COORD,Y_COORD,QR_Code,Test_Time,Data_Num,KELVIN_VIN,EDGE_HI,EDGE_LO,FIXED_EQ,\n'
+    + 'Unit,Unit,Unit,Unit,Unit,Unit,Unit,Unit,Unit,Unit,Unit,ohm,Unit,Unit,Unit,\n'
+    + 'Min,Min,Min,Min,Min,Min,Min,Min,Min,Min,Min,0,0,0,1,\n'
+    + 'Max,Max,Max,Max,Max,Max,Max,Max,Max,Max,Max,2,2,2,1,\n'
+    + '1,1,1,1,TRUE,1,0,0,None,4.1,10,1.0,2,0,1,\n'
+    + '2,1,2,1,TRUE,5,0,0,None,4.1,10,3.0,1,1,1,\n'
+    + '3,1,2,2,TRUE,1,0,0,None,4.2,10,1.5,0,2,1,\n'
+    + '4,1,3,1,TRUE,1,0,0,None,4.1,10,0.5,1,1,1,\n'
+    + '5,1,3,3,TRUE,7,0,0,None,4.1,10,5000.0,0,0,1,\n'
+    + '6,1,4,2,TRUE,5,0,0,None,4.1,10,2.5,2,0,1,\n'
+    + '7,1,5,1,TRUE,5,0,0,None,4.1,10,1.0,2,0,1,\n'
+    + '8,1,6,3,TRUE,5,0,0,None,4.3,10,,2,0,1,\n'
 )
 
 
@@ -114,10 +119,14 @@ class BrowseApiTests(TestCase):
 
     @staticmethod
     def _zip(body):
-        """把新契约 headers+data+fail_cells 还原为行对象（前端 zip 逻辑镜像）。"""
+        """把新契约 headers+data+fail_cells+borderline_cells 还原为行对象（前端 zip 逻辑镜像）。"""
         cols = body['headers']
         return [
-            {**{cols[j]: vals[j] for j in range(len(cols))}, '__fail_cells__': body['fail_cells'][i]}
+            {
+                **{cols[j]: vals[j] for j in range(len(cols))},
+                '__fail_cells__': body['fail_cells'][i],
+                '__borderline_cells__': body.get('borderline_cells', [[]] * len(body['data']))[i],
+            }
             for i, vals in enumerate(body['data'])
         ]
 
@@ -139,6 +148,11 @@ class BrowseApiTests(TestCase):
         self.assertIsInstance(body['data'][0], list)
         self.assertIsInstance(body['fail_cells'], list)
         self.assertEqual(len(body['data']), len(body['fail_cells']), 'fail_cells 必须与 data 行并行')
+        self.assertIsInstance(body['borderline_cells'], list)
+        self.assertEqual(
+            len(body['data']), len(body['borderline_cells']),
+            'borderline_cells 必须与 data 行并行',
+        )
         self.assertEqual(len(body['data']), 8)
         # headers 不含内部 fail 列
         self.assertNotIn('__fail_cells__', body['headers'])
@@ -170,6 +184,39 @@ class BrowseApiTests(TestCase):
         # 仅 bin fail（值在限内 / 空值）：只列 bin 列
         self.assertEqual(by_idx[7]['__fail_cells__'], [bin_col])
         self.assertEqual(by_idx[8]['__fail_cells__'], [bin_col])
+
+    def test_borderline_cells_are_parallel_and_window_only(self):
+        """临界单元格：只标 bin!=1 且值恰好等于 min/max 的「真规格窗」列。
+
+        - pass 行即使值等于 limit 也不标（row1 EDGE_HI=2 / EDGE_LO=0，row3 反向）；
+        - min==max 的 FIXED_EQ 在 fail 行等值也不标（等值是固定值测试的通过态）；
+        - fail 行 5/6/7/8 的 EDGE_HI/EDGE_LO 边界值标橙；
+        - Bin 列本身永远不进临界列表。
+        """
+        body = self._browse(page_size=99999).json()
+        self.assertEqual(len(body['borderline_cells']), len(body['data']))
+        rows = self._zip(body)
+        by_idx = {r['Index_No']: r for r in rows}
+        bin_col = body['bin_column']
+        # pass 行：边界等值不算临界
+        self.assertEqual(by_idx[1]['__borderline_cells__'], [])
+        self.assertEqual(by_idx[3]['__borderline_cells__'], [])
+        # 严格越限行（row2 的 KELVIN_VIN）没有边界等值
+        self.assertEqual(by_idx[2]['__borderline_cells__'], [])
+        # fail 行边界等值 → 橙色候选，且保持文件列序
+        for idx in (5, 6, 7, 8):
+            self.assertEqual(by_idx[idx]['__borderline_cells__'], ['EDGE_HI', 'EDGE_LO'])
+            self.assertNotIn('FIXED_EQ', by_idx[idx]['__borderline_cells__'])
+            self.assertNotIn(bin_col, by_idx[idx]['__borderline_cells__'])
+        # 临界列表不改变 fail_cells 语义
+        self.assertEqual(by_idx[7]['__fail_cells__'], [bin_col])
+        self.assertEqual(by_idx[8]['__fail_cells__'], [bin_col])
+
+    def test_borderline_cells_present_on_page_gt1(self):
+        """IRM 翻页也要拿到与 data 并行的临界数组（不能只给 page==1）。"""
+        body = self._browse(page=3, page_size=3).json()
+        self.assertIn('borderline_cells', body)
+        self.assertEqual(len(body['borderline_cells']), len(body['data']))
 
     def test_empty_value_serializes_as_null(self):
         """row8 KELVIN_VIN 为空 → data 中 null（pandas to_json 与旧 replace 语义一致）。"""
