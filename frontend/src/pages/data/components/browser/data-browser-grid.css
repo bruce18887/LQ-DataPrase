@@ -51,9 +51,9 @@
   box-shadow: inset 3px 0 0 var(--info);
 }
 
-/* 序列号（或兜底 Bin）单元格可点：只加手型，不改变选字行为 */
+/* 序列号单元格：右键出高亮菜单（不是左键切换） */
 :deep(.ag-custom-theme.ag-theme-quartz .ag-cell.row-highlight-trigger) {
-  cursor: pointer;
+  cursor: context-menu;
 }
 
 :deep(.ag-custom-theme.ag-theme-quartz .ag-cell) {

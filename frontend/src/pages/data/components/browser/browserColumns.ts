@@ -68,7 +68,6 @@ export interface BuildBrowserColumnDefsOptions {
   defaultHiddenCols: string[]
   pinnedCols: string[]
   highlightTriggerCol: string
-  highlightTriggerKind?: 'serial' | 'bin'
 }
 
 export function buildBrowserColumnDefs(opts: BuildBrowserColumnDefsOptions): any[] {
@@ -100,11 +99,9 @@ export function buildBrowserColumnDefs(opts: BuildBrowserColumnDefsOptions): any
     if (opts.pinnedCols.includes(col)) {
       colDef.pinned = 'left'
     }
-    if (col === opts.highlightTriggerCol) {
+    if (opts.highlightTriggerCol && col === opts.highlightTriggerCol) {
       colDef.cellClass = 'row-highlight-trigger'
-      colDef.headerTooltip = opts.highlightTriggerKind === 'bin'
-        ? '点击 Bin 单元格可高亮/取消高亮该行'
-        : '点击序列号可高亮/取消高亮该行'
+      colDef.headerTooltip = '右键序列号可高亮/取消高亮该行'
     }
     defs.push(colDef)
   }
@@ -120,4 +117,31 @@ export function buildBrowserColumnDefs(opts: BuildBrowserColumnDefsOptions): any
 
 export function headerMenuCopyLabel(isSystemCol: boolean): string {
   return isSystemCol ? '复制列名' : '复制测试项名字'
+}
+
+export interface BrowserDisplayCols {
+  systemCols: string[]
+  testCols: string[]
+  displayCols: string[]
+}
+
+/**
+ * 显示列：系统列恒显示且前置；选中测试列非空时只显示选中的，
+ * 空集 = 全部测试列。列序保持文件序。
+ */
+export function resolveDisplayCols(
+  allCols: string[],
+  systemCols: string[],
+  selectedTestCols: string[],
+): BrowserDisplayCols {
+  const sys: string[] = []
+  const tests: string[] = []
+  for (const c of allCols) {
+    if (systemCols.includes(c)) sys.push(c)
+    else tests.push(c)
+  }
+  const shown = selectedTestCols.length
+    ? tests.filter((c) => selectedTestCols.includes(c))
+    : tests
+  return { systemCols: sys, testCols: tests, displayCols: [...sys, ...shown] }
 }

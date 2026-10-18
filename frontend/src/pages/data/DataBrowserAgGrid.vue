@@ -79,7 +79,6 @@
           :animateRows="true"
           :rowClassRules="rowClassRules"
           @grid-ready="onGridReady"
-          @cell-clicked="onCellClicked"
           @sort-changed="clearRowHighlights"
           @filter-changed="clearRowHighlights"
         />
@@ -120,6 +119,18 @@
       @close="closeBinMenu"
       @goto-fail="goToFailCell"
     />
+
+    <!-- 行高亮右键菜单（右键序列号单元格打开） -->
+    <RowHighlightMenu
+      :visible="rowHighlightMenuVisible"
+      :x="rowHighlightMenuX"
+      :y="rowHighlightMenuY"
+      :row-index="rowHighlightMenuRowIndex"
+      :serial-value="rowHighlightMenuSerialValue"
+      :highlighted="isHighlighted(rowHighlightMenuRowIndex)"
+      @close="closeRowHighlightMenu"
+      @toggle="onRowHighlightToggle"
+    />
   </div>
 </template>
 
@@ -138,13 +149,15 @@ import HistogramColumnDialog from './components/browser/HistogramColumnDialog.vu
 import DataQualityBar from './components/browser/DataQualityBar.vue'
 import BinCellContextMenu from './components/browser/BinCellContextMenu.vue'
 import HeaderContextMenu from './components/browser/HeaderContextMenu.vue'
+import RowHighlightMenu from './components/browser/RowHighlightMenu.vue'
 import JobProgressChip from '../../components/common/JobProgressChip.vue'
 import { useBinCellMenu } from './composables/useBinCellMenu'
 import { useBrowserExport } from './composables/useBrowserExport'
+import { useGridContextMenus } from './composables/useGridContextMenus'
 import { useGridHeight } from './composables/useGridHeight'
 import { useHeaderMenu } from './composables/useHeaderMenu'
 import { useRowHighlight } from './composables/useRowHighlight'
-import { browserCellStyle, buildBrowserColumnDefs } from './components/browser/browserColumns'
+import { browserCellStyle, buildBrowserColumnDefs, resolveDisplayCols } from './components/browser/browserColumns'
 import { zipBrowserRows } from './components/browser/browserRows'
 
 // Register ag-grid modules (required since v33+)
@@ -232,26 +245,7 @@ const {
   closeOtherMenu: () => closeBinMenu(),
 })
 
-/**
- * 右键列头 → 打开「复制测试项名字 / 展示分布图」菜单。
- * ag-grid 表头单元格渲染 col-id 属性，事件委托无需自定义 headerComponent；
- * 右键固定 Bin 列 fail 单元格 → 弹定位菜单（handleBodyContextMenu 内部 preventDefault）；
- * 其余 body 单元格右键放行（保留浏览器复制菜单）。
- * 序列号列左键切换行高亮，右键仍走浏览器原生菜单。
- */
-function onGridContextMenu(e: MouseEvent) {
-  closeBinMenu() // 任何右键先关旧菜单
-  closeHeaderMenu()
-  const header = (e.target as HTMLElement).closest('.ag-header-cell')
-  if (header) {
-    e.preventDefault()
-    const col = header.getAttribute('col-id')
-    if (!col || !allCols.value.includes(col)) return
-    openHeaderMenu(col, e)
-    return
-  }
-  handleBodyContextMenu(e)
-}
+// 统一右键路由（表头 / 序列号行菜单 / Bin fail 菜单 / 浏览器原生）
 
 // 系统列（记录级列）：恒显示且排在测试列之前，由后端按文件格式权威下发
 // （/browse/ page==1 的 system_columns，来源 apps.datafiles.parsers.SYSTEM_COLUMNS）。
@@ -297,26 +291,12 @@ function isSystemCol(name: string): boolean {
   return systemCols.value.includes(name)
 }
 
-// 全部测试列（系统列排除，供「显示测试列」选择器使用）
-const testCols = computed(() => allCols.value.filter((c) => !isSystemCol(c)))
-
-// 显示列：系统列始终显示；选中测试列非空时仅显示选中测试列（空集 = 全部显示）
-const displayCols = computed(() => {
-  const sysCols: string[] = []
-  const testCols: string[] = []
-  for (const c of allCols.value) {
-    if (isSystemCol(c)) {
-      sysCols.push(c)
-    } else {
-      testCols.push(c)
-    }
-  }
-  let shown = testCols
-  if (selectedTestCols.value.length) {
-    shown = testCols.filter((c) => selectedTestCols.value.includes(c))
-  }
-  return [...sysCols, ...shown]
-})
+// 显示列：系统列恒显示且前置；选中测试列非空时仅显示选中测试列（空集 = 全部）
+const colSelection = computed(() =>
+  resolveDisplayCols(allCols.value, systemCols.value, selectedTestCols.value),
+)
+const testCols = computed(() => colSelection.value.testCols)
+const displayCols = computed(() => colSelection.value.displayCols)
 
 // ── 固定 Bin 列 fail 单元格右键菜单（判定链 + 定位逻辑见 composable） ──
 const {
@@ -334,30 +314,48 @@ const {
   goToFailCell,
 } = useBinCellMenu({ binCol, displayCols })
 
-// ── 行高亮：左键点序列号单元格切换（序列列缺失时退回 Bin 列） ──
-const { isHighlighted, toggle: toggleRowHighlight, clear: clearRowHighlights } = useRowHighlight()
+// ── 行高亮：右键序列号单元格 → 菜单 → 高亮/取消 ──
+const {
+  isHighlighted,
+  clear: clearRowHighlights,
+  menuVisible: rowHighlightMenuVisible,
+  menuX: rowHighlightMenuX,
+  menuY: rowHighlightMenuY,
+  menuRowIndex: rowHighlightMenuRowIndex,
+  menuSerialValue: rowHighlightMenuSerialValue,
+  openMenu: openRowHighlightMenu,
+  closeMenu: closeRowHighlightMenu,
+  toggleMenuRow: toggleRowHighlightMenu,
+} = useRowHighlight()
 
-/** 高亮触发列：优先序列列（可见时）；无序列列/被默认隐藏时退回 Bin 列 */
+/** 高亮触发列：序列列（可见时）；无序列列/被默认隐藏时没有触发点 */
 const highlightTriggerCol = computed(() => {
   const serial = serialCol.value
   if (serial && allCols.value.includes(serial) && !defaultHiddenCols.value.includes(serial)) {
     return serial
   }
-  return binCol.value
+  return ''
 })
-const highlightTriggerKind = computed<'serial' | 'bin'>(() =>
-  serialCol.value && highlightTriggerCol.value === serialCol.value ? 'serial' : 'bin',
-)
 
-function onCellClicked(e: any) {
-  const colId = e?.column?.getColId?.() ?? e?.colDef?.field
-  const rowIndex = e?.node?.rowIndex
-  if (!colId || colId !== highlightTriggerCol.value) return
-  if (!Number.isInteger(rowIndex)) return
-  toggleRowHighlight(rowIndex)
+function onRowHighlightToggle() {
+  const idx = rowHighlightMenuRowIndex.value
+  toggleRowHighlightMenu()
   // rowClassRules 的闭包读 highlightedRows ref；改完必须重绘该行才会重新求值
-  gridApi.value?.redrawRows({ rowNodes: [e.node] })
+  const node = gridApi.value?.getDisplayedRowAtIndex(idx)
+  if (node) gridApi.value?.redrawRows({ rowNodes: [node] })
 }
+
+const { onGridContextMenu } = useGridContextMenus({
+  allCols,
+  highlightTriggerCol,
+  gridApi,
+  closeBinMenu,
+  closeHeaderMenu,
+  closeRowHighlightMenu,
+  openHeaderMenu,
+  openRowHighlightMenu,
+  handleBodyContextMenu,
+})
 
 // ── Site 筛选（服务端）：选项来自 page==1 响应的 site_options，过滤走 reload ──
 const siteColDisabled = computed(() => {
@@ -373,7 +371,6 @@ const columnDefs = computed<any[]>(() =>
     defaultHiddenCols: defaultHiddenCols.value,
     pinnedCols: pinnedCols.value,
     highlightTriggerCol: highlightTriggerCol.value,
-    highlightTriggerKind: highlightTriggerKind.value,
   }),
 )
 
@@ -459,6 +456,7 @@ watch(() => filesStore.filesVersion, () => {
 watch([rowCount, siteFilter], () => {
   closeBinMenu()
   closeHeaderMenu()
+  closeRowHighlightMenu()
 })
 
 function clearGrid() {

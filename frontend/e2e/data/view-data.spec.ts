@@ -900,7 +900,7 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     await expect(page.locator('.el-dialog')).not.toBeVisible()
   })
 
-  test('@p2 行高亮：左键点序列号切换，右键不切换且不弹自定义菜单', async ({ page }) => {
+  test('@p2 行高亮：右键序列号出菜单，点菜单项高亮/取消', async ({ page }) => {
     await openViewTab(page, SEEDED_FILES.GAGE_S1)
     const { serial } = await fetchPinDefaults(page, SEEDED_FILES.GAGE_S1)
     expect(serial, 'GAGE 文件应有序列列').not.toBe('')
@@ -910,22 +910,39 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     const serialCell = row0.locator(`.ag-cell[col-id="${serial}"]`)
     await expect(serialCell).toHaveClass(/row-highlight-trigger/)
 
-    await serialCell.click()
+    const menu = page.locator('.row-highlight-menu')
+    const menuItem = menu.locator('.row-highlight-menu__item')
+
+    // 右键只出菜单，不直接切换高亮
+    await serialCell.click({ button: 'right' })
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    await expect(menu).toContainText('第 1 行')
+    await expect(menuItem).toContainText('高亮此行')
+    await expect(row0).not.toHaveClass(/row-highlight/)
+    await menuItem.click()
+    await expect(menu).not.toBeVisible({ timeout: 3_000 })
     await expect(row0).toHaveClass(/row-highlight/)
-    // 多行同时高亮
+
+    // 第二行同样通过菜单高亮，两行可同时高亮
     const row1 = page.locator('.ag-pinned-left-cols-container .ag-row[row-index="1"]')
     await expect(row1).toBeVisible({ timeout: 10_000 })
-    await row1.locator(`.ag-cell[col-id="${serial}"]`).click()
+    const row1Serial = row1.locator(`.ag-cell[col-id="${serial}"]`)
+    await row1Serial.click({ button: 'right' })
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    await expect(menu).toContainText('第 2 行')
+    await menuItem.click()
     await expect(row0).toHaveClass(/row-highlight/)
     await expect(row1).toHaveClass(/row-highlight/)
-    // 再点取消
-    await serialCell.click()
+
+    // 再右键第一行 → 菜单项变为取消高亮
+    await serialCell.click({ button: 'right' })
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    await expect(menuItem).toContainText('取消高亮')
+    await menuItem.click()
     await expect(row0).not.toHaveClass(/row-highlight/)
     await expect(row1).toHaveClass(/row-highlight/)
 
-    // 右键不切高亮、也不弹自定义菜单
-    await serialCell.click({ button: 'right' })
-    await expect(row0).not.toHaveClass(/row-highlight/)
+    // 序列号右键不会被 Bin/表头菜单截走
     await expect(page.locator('.bin-cell-menu')).toHaveCount(0)
     await expect(page.locator('.header-context-menu')).toHaveCount(0)
   })
