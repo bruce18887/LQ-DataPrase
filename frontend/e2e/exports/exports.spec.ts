@@ -453,9 +453,14 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     // 确认已选计数
     await expect(panel.locator('.step-count')).toContainText(`已选 ${selectLimit}`)
 
-    // 批量导出 Excel：后端大图生成可能较慢，给 180 秒超时
-    const respPromise = page.waitForResponse(
-      (r) => /\/export\/batch_charts\/?$/.test(new URL(r.url()).pathname),
+    // 批量导出 Excel 已改走作业（提交 202 → 轮询 → 下载），这里等的是作业端点。
+    // 大图渲染仍可能慢，保留 180s。
+    const submitPromise = page.waitForResponse(
+      (r) => r.url().includes('/jobs/export_batch_charts/'),
+      { timeout: 180_000 },
+    )
+    const pollPromise = page.waitForResponse(
+      (r) => /\/jobs\/\d+\/$/.test(new URL(r.url()).pathname),
       { timeout: 180_000 },
     )
     const dlPromise = page.waitForEvent('download', { timeout: 180_000 }).catch(() => null)
@@ -464,15 +469,21 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     await expect(xlsxBtn).toBeEnabled()
     await xlsxBtn.click()
 
-    const [resp, dl] = await Promise.all([respPromise, dlPromise])
-    expect(resp.status(), 'batch_charts 不应 5xx/超时').toBeLessThan(500)
+    const [submit, poll, dl] = await Promise.all([submitPromise, pollPromise, dlPromise])
+    // 202 = 「拿号就走」；退回 200 说明进程池没建起来、后端走了同步降级，
+    // 那正是本片要防的形态，必须红给我们看。
+    expect(submit.status(), '提交批量导出作业应 202').toBe(202)
+    expect(poll.status(), '轮询作业状态应 200').toBe(200)
+    expect(submit.status(), '提交作业不应 5xx').toBeLessThan(500)
 
     if (dl) {
       const name = dl.suggestedFilename()
       console.log(`[export-tools] downloaded ${name}`)
       expect(name.toLowerCase()).toMatch(/\.xlsx$/)
     } else {
-      console.log(`[export-tools] 未捕获下载，响应状态=${resp.status()}`)
+      // 保留既有宽松语义（没捕到下载只记日志）—— 收紧它属于另一件事，
+      // 不在本次迁移里顺手改，否则红了分不清是迁移坏了还是本来就没下载。
+      console.log(`[export-tools] 未捕获下载，提交状态=${submit.status()}`)
     }
 
     const offendingErrors = consoleErrors.filter((e) =>

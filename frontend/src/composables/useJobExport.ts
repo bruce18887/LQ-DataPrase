@@ -12,17 +12,30 @@ import { onScopeDispose, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import { downloadJob, getJob, submitJob, type JobKind } from '../api/jobs'
-import { classifySubmit, formatJobFailure, pollDecision } from './jobPolling'
+import { classifySubmit, formatJobFailure, jobFailureView, pollDecision, type JobFailureReason } from './jobPolling'
 import {
   downloadBlob,
   extractFilenameFromContentDisposition,
 } from '../utils/download'
 
 export interface RunJobOptions {
-  /** 提交失败/作业失败时的额外回调（调用方据此恢复按钮态或提示重选文件）。 */
-  onError?: (message: string) => void
+  /** 失败时不弹全局 toast（调用方自己给文案，沿用旧 axios `silent` 的语义）。 */
+  silent?: boolean
+  /** 提交失败/作业失败时的额外回调（调用方据此给定制文案）。 */
+  onError?: (message: string, reason: JobFailureReason) => void
   /** 轮询到 done 之后、真正下载之前的提示位（批量导出用来计数）。 */
   onDone?: (fileName: string) => void
+}
+
+/**
+ * 失败原因必须可区分：旧的同步导出只有一种「请求失败」，作业化之后至少三种
+ * ——提交就被拒（参数/权限）、作业跑到一半失败、以及前端不再等了（后端还在跑）。
+ * 类型定义与「怎么显示」都在 `jobPolling.ts`（纯函数，T2 测得到）。
+ */
+export interface JobRunResult {
+  ok: boolean
+  reason?: JobFailureReason
+  message?: string
 }
 
 export function useJobExport() {
@@ -41,19 +54,25 @@ export function useJobExport() {
   }
 
   async function run(kind: JobKind, payload: Record<string, unknown>,
-                     options: RunJobOptions = {}): Promise<boolean> {
+                     options: RunJobOptions = {}): Promise<JobRunResult> {
     exporting.value = true
     progress.value = 0
     phase.value = 'pending'
+
+    /** 统一的失败出口：`silent` 时不弹默认 toast，文案交给调用方（它同样走 `jobFailureView`）。 */
+    const fail = (reason: JobFailureReason, message = ''): JobRunResult => {
+      const view = jobFailureView(reason, message)
+      if (!options.silent) ElMessage[view.level](view.text)
+      options.onError?.(view.text, reason)
+      return { ok: false, reason, message: view.text }
+    }
+
     try {
       const submit = await submitJob(kind, payload)
       const verdict = classifySubmit(submit)
 
       if (verdict.kind === 'error') {
-        const message = formatJobFailure(verdict as Record<string, unknown>)
-        ElMessage.error(message)
-        options.onError?.(message)
-        return false
+        return fail('submit-error', formatJobFailure(verdict as Record<string, unknown>))
       }
 
       if (verdict.kind === 'sync-fallback') {
@@ -64,7 +83,7 @@ export function useJobExport() {
         downloadBlob(blob, fname)
         progress.value = 100
         options.onDone?.(fname)
-        return true
+        return { ok: true }
       }
 
       const jobId = verdict.jobId
@@ -73,7 +92,7 @@ export function useJobExport() {
       let streak = 0
 
       for (;;) {
-        if (stopped) return false
+        if (stopped) return { ok: false, reason: 'gave-up', message: '页面已切换，停止等待' }
         const now = Date.now()
         const decision = pollDecision(await getJob(jobId), {
           lastProgress, unchangedStreak: streak, startedAt, now,
@@ -81,14 +100,12 @@ export function useJobExport() {
 
         if (decision.kind === 'giveup') {
           phase.value = 'gaveup'
-          // 不是失败：后端还在跑，只是前端不该 indefinitely 转圈
-          ElMessage.info('导出仍在进行，可稍后在导出中心查看结果')
-          return false
+          // 不是失败：后端还在跑，只是前端不该无限转圈。文案用默认那句（不提「导出中心」，
+          // 前端现在没有那个页面）
+          return fail('gave-up')
         }
         if (decision.kind === 'failed') {
-          ElMessage.error(decision.error || formatJobFailure())
-          options.onError?.(decision.error)
-          return false
+          return fail('job-failed', decision.error || formatJobFailure())
         }
         if (decision.kind === 'ready') {
           const file = await downloadJob(jobId)
@@ -98,7 +115,7 @@ export function useJobExport() {
           downloadBlob(file.data, fname)
           progress.value = 100
           options.onDone?.(fname)
-          return true
+          return { ok: true }
         }
 
         progress.value = decision.progress
@@ -108,10 +125,9 @@ export function useJobExport() {
         await sleep(decision.delay)
       }
     } catch (err: any) {
-      // 4xx/5xx 的错误 toast 由 axios 拦截器统一弹，这里只保证不卡住按钮态
-      const message = err?.message ?? '导出失败'
-      options.onError?.(message)
-      return false
+      // 传输层错误：4xx/5xx 的全局 toast 由 axios 拦截器负责（silent 时它也不弹），
+      // 这里只保证不卡住按钮态，并把原因交回调用方。
+      return fail('download-failed', err?.message ?? '导出失败')
     } finally {
       exporting.value = false
       phase.value = 'idle'

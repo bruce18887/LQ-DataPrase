@@ -120,7 +120,7 @@ import DataBrowserToolbar from './components/browser/DataBrowserToolbar.vue'
 import HistogramColumnDialog from './components/browser/HistogramColumnDialog.vue'
 import DataQualityBar from './components/browser/DataQualityBar.vue'
 import BinCellContextMenu from './components/browser/BinCellContextMenu.vue'
-import JobProgressChip from './components/browser/JobProgressChip.vue'
+import JobProgressChip from '../../components/common/JobProgressChip.vue'
 import { useBinCellMenu } from './composables/useBinCellMenu'
 import { useBrowserExport } from './composables/useBrowserExport'
 

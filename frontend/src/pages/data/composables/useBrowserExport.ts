@@ -54,13 +54,13 @@ export function useBrowserExport(ctx: BrowserExportContext) {
   async function exportExcel(): Promise<void> {
     const id = ctx.fileId()
     if (!id) return
-    const ok = await job.run('export_excel', {
+    const result = await job.run('export_excel', {
       file_id: id,
       passfail: ctx.passfail(),
       site_filter: ctx.siteFilter(),
       ...ctx.gridModels(),
     })
-    if (ok) ElMessage.success('下载完成')
+    if (result.ok) ElMessage.success('下载完成')
   }
 
   async function exportCsv(): Promise<void> {

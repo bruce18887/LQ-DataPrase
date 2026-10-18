@@ -15,12 +15,15 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  GIVE_UP_TEXT,
   POLL_BASE_MS,
   POLL_MAX_MS,
   classifySubmit,
   formatJobFailure,
+  jobFailureView,
   nextPollDelay,
   pollDecision,
+  type JobFailureReason,
 } from '../../src/composables/jobPolling'
 
 describe('nextPollDelay：1s 起，连续 3 次无变化才降到 2s', () => {
@@ -138,5 +141,48 @@ describe('formatJobFailure：把后端 error 变成能看的一句话', () => {
     const text = formatJobFailure({ error: '' })
     expect(text).toBeTruthy()
     expect(text).not.toContain('undefined')
+  })
+})
+
+/**
+ * 作业化之后「失败」分成四种，界面必须分清哪一种：
+ * 旧同步导出只有一条 `err.code === 'ECONNABORTED'` 判「导出超时，请减少参数数量后重试」，
+ * 走作业后那条判断永远不可达，而这句文案本身是错的 —— 前端到点是它自己的 5 分钟上限，
+ * 跟用户选了几个参数无关；后端还在跑，作业也没被取消。
+ *
+ * 反证口径：把 GIVE_UP_TEXT 换回旧的「导出超时，请减少参数数量后重试」或
+ * 「…可稍后在导出中心查看结果」，下面三条里至少有两条会红 —— 前者撞「不许怪参数」，
+ * 后者撞「不许指一个前端没有的页面」（`GET /api/v1/jobs/` 有，读它的页面还没有）。
+ */
+describe('jobFailureView：gave-up 不是失败，其余都算失败', () => {
+  const ERROR_REASONS: JobFailureReason[] = ['submit-error', 'job-failed', 'download-failed']
+
+  it('gave-up 用 info，且不把前端的等待上限说成用户选多了', () => {
+    const view = jobFailureView('gave-up')
+    expect(view.level).toBe('info')
+    expect(view.text).toBe(GIVE_UP_TEXT)
+    expect(view.text).not.toMatch(/减少参数|参数数量/)
+    expect(view.text).not.toContain('导出中心')
+    expect(view.text).toMatch(/仍在进行/)
+  })
+
+  it('gave-up 带具体原因时用那句，不退化成默认文案', () => {
+    // 组件卸载那条走的是同一个 reason，但原因不同：那种情况下说「可稍后重新导出」是噪声
+    const view = jobFailureView('gave-up', '页面已切换，停止等待')
+    expect(view.level).toBe('info')
+    expect(view.text).toBe('页面已切换，停止等待')
+  })
+
+  it.each(ERROR_REASONS)('%s 是红色错误，且后端那句话原样交出去', (reason) => {
+    expect(jobFailureView(reason, '内存不足，渲染失败')).toEqual({
+      level: 'error',
+      text: '内存不足，渲染失败',
+    })
+  })
+
+  it('错误类文案缺失时兜底成通用失败句，不给空字符串', () => {
+    const view = jobFailureView('job-failed', '')
+    expect(view.level).toBe('error')
+    expect(view.text).toBe('导出失败，请稍后重试')
   })
 })

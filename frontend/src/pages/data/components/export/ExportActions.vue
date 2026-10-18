@@ -30,15 +30,21 @@
           📽️ 批量导出 PPT
         </el-button>
       </el-tooltip>
+      <JobProgressChip :percent="batchProgress ?? 0" :active="!!batchActive" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import JobProgressChip from '../../../../components/common/JobProgressChip.vue'
+
 interface Props {
   sigma: number
   exporting: boolean
   hasParams: boolean
+  /** 批量导出走作业：只有这条路径在飞时才显示进度条 */
+  batchActive?: boolean
+  batchProgress?: number
 }
 
 defineProps<Props>()
