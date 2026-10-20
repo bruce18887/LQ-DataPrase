@@ -11,8 +11,9 @@
  * - 「真承重必须升级」防的是把兜底改松过头 —— 那会把漏测换成省时间，是净损失。
  *   默认方向必须是保守：未知路径仍然 GLOBAL。
  *
- * 2026-10-20 起还钉**编排内核**（`planStages` / `executePlan` / `gateVerdict`）：
- * 「一档红不得吃掉后面的档」只能这样测——故障形状是「某一档根本没出现在日志里」，
+ * 2026-10-20 起还钉**编排内核**（`planStages` / `executePlan` / `gateVerdict`），
+ * 2026-10-21 再补 `poolCmd` / `expandPoolFiles`：这类判据只能这样测——
+ * 故障形状是「某一档根本没出现在日志里」或「门禁打印了 narrowed 命令、池自己却说跑了 75 个文件」，
  * 看退出码永远看不出来。
  *
  * 跑：npm run test:unit
@@ -26,9 +27,11 @@ import {
   backendLabels,
   decide,
   executePlan,
+  expandPoolFiles,
   gateVerdict,
   matchRule,
   planStages,
+  poolCmd,
 } from '../../../scripts/affected-rules.mjs'
 
 /** 判定结果的速记：既不升级全量、也没选中 e2e 模块（可能只落 vitest 或纯 note） */
@@ -252,6 +255,48 @@ describe('编排内核：一档红不得吃掉后面的档', () => {
   it('计划是改动集的纯函数：同一改动集重复求计划，结果逐字相同（退出码无处影响它）', () => {
     const files = ['apps/sftp/views/search.py', 'frontend/src/pages/sftp/SearchPage.vue']
     expect(JSON.stringify(plan(files))).toBe(JSON.stringify(plan(files)))
+  })
+})
+
+describe('池的命令构造：打印与执行必须同源', () => {
+  const POOL = 'node scripts/e2e_pool.mjs --slots=auto'
+
+  it('模块档的文件表必须进**执行**命令（旧写法只拼进 printCmd ⇒ 模块档偷偷跑全量）', () => {
+    const { cmd, printCmd } = poolCmd({ files: 'e2e/analysis' })
+    expect(cmd).toBe(`${POOL} -- e2e/analysis`)
+    expect(printCmd.startsWith(cmd), 'printCmd 只能是 cmd 加注解，不能多于 cmd').toBe(true)
+    // 多目录档也一样整串带上（空格分隔不是分隔符）
+    expect(poolCmd({ files: 'e2e/admin e2e/auth' }).cmd).toBe(`${POOL} -- e2e/admin e2e/auth`)
+  })
+
+  it('全量档不带 `--`：给池留一个空文件表会让后面的 Playwright 开关被当成文件名', () => {
+    const { cmd } = poolCmd({ files: '' })
+    expect(cmd).toBe(POOL)
+    // 注意判 `' -- '`（带尾空格）：`--slots=auto` 里也含 `--`，判前缀会误红
+    expect(cmd.includes(' -- ')).toBe(false)
+  })
+
+  it('Playwright 开关只走 printCmd 的注解（真值是 E2E_PW_ARGS 环境变量），不进命令行', () => {
+    const { cmd, printCmd } = poolCmd({ files: 'e2e/sftp', pw: '--project=P0' })
+    expect(cmd).toBe(`${POOL} -- e2e/sftp`)
+    expect(cmd).not.toContain('--project=P0')
+    expect(printCmd).toContain('--project=P0')
+  })
+
+  it('模块目录必须先摊成 spec 文件：给池目录时权重查不到，autoSlots 会退回 1 slot 串行', () => {
+    const list = (d: string) => (d === 'e2e/analysis' ? ['e2e/analysis/a.spec.ts', 'e2e/analysis/b.spec.ts'] : [])
+    expect(expandPoolFiles(['e2e/analysis'], list)).toEqual(['e2e/analysis/a.spec.ts', 'e2e/analysis/b.spec.ts'])
+    // 已经是文件的原样通过，不重复展开
+    expect(expandPoolFiles(['e2e/sftp/x.spec.ts'], list)).toEqual(['e2e/sftp/x.spec.ts'])
+    // 读不到的目录与空串给空数组 —— 调用方据此拒绝执行，而不是留个空文件表去跑全量
+    expect(expandPoolFiles(['e2e/nope', ''], list)).toEqual([])
+  })
+
+  it('展开出来的文件表整串进**执行**命令（两条判据接起来才闭环）', () => {
+    const list = (d: string) => [`${d}/a.spec.ts`, `${d}/b.spec.ts`]
+    const files = expandPoolFiles(['e2e/analysis', 'e2e/theme'], list).join(' ')
+    expect(files.split(' ')).toHaveLength(4)
+    expect(poolCmd({ files }).cmd).toBe(`${POOL} -- ${files}`)
   })
 })
 

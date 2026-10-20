@@ -209,11 +209,18 @@ export function classifyReds(redFiles, recheckResults) {
  * 单 slot 健康判定：区分「有用例红」与「服务半路死了导致的成片红」。
  * 实测依据：一次 N=4 轮里两个 slot 的 preview+后端在开跑约 1 分钟后失联，
  * 该轮报出 155 unexpected、效率 1.21 —— 当成真实结果发出去就是假信号。
- * 两条判据任一命中：连接级错误成堆（refused ≥5），或红占该 slot 用例数一半以上且绝对数 ≥20。
+ * 三条判据任一命中：连接级错误成堆（refused ≥5）、红占该 slot 用例数一半以上且绝对数 ≥20、
+ * **一条用例都没跑成（specs = 0）**。
+ *
+ * 第三条是 2026-10-21 补的：那一轮 3 个 slot 的 Django 都在启动期死于
+ * `OpenBLAS error: Memory allocation still failed` ⇒ `webServer was not able to start`，
+ * 池汇总出「用例 0 · 单价 0.00s/例 · unexpected 0」，而旧判据看的是红率与拒连数 ——
+ * 两者都是 0 ⇒ 判成 `MEASURED`。一轮什么都没测不能算一次测量。
  */
 export function classifySlotHealth({ specs = 0, unexpected = 0, refusedCount = 0 }) {
+  if (specs === 0) return 'INFRA'
   if (refusedCount >= 5) return 'INFRA'
-  const share = specs ? unexpected / specs : 0
+  const share = unexpected / specs
   if (unexpected >= 20 && share >= 0.5) return 'INFRA'
   return 'OK'
 }

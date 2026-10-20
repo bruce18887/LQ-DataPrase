@@ -9,8 +9,8 @@
  *   node scripts/e2e_affected.mjs --files a,b,c   # 核判定本身（不碰工作区，等价 --dry-run）
  *   node scripts/e2e_affected.mjs -- --project=P1 # -- 之后的参数转给 playwright
  *
- * 判据表与 decide()/matchRule()/backendLabels()、编排三兄弟 planStages()/executePlan()/
- * gateVerdict() 都住在 scripts/affected-rules.mjs（纯函数、零 IO，被
+ * 判据表与 decide()/matchRule()/backendLabels()、编排判据 planStages()/executePlan()/
+ * gateVerdict()/poolCmd()/expandPoolFiles() 都住在 scripts/affected-rules.mjs（纯函数、零 IO，被
  * frontend/test/unit/e2eAffectedDecide.spec.ts 钉住）。这里只管取改动集、探测解释器、执行与打印。
  * 三条升级为全量的兜底（任一命中即放弃快档），以及「无受影响用例」必须
  * 显式说出来而不是显示成 0 failed 的假绿 —— 判据正文见 docs/reference/testing-gates.md。
@@ -19,9 +19,18 @@
  *   `npm run test:e2e:affected | tail -N` 的退出码是 tail 的，历史上当场骗过一次（2026-10-20）。
  */
 import { spawnSync, execFileSync } from 'node:child_process'
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { backendLabels, decide, executePlan, gateVerdict, planStages } from './affected-rules.mjs'
+import {
+  backendLabels,
+  decide,
+  executePlan,
+  expandPoolFiles,
+  gateVerdict,
+  planStages,
+  poolCmd,
+} from './affected-rules.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const FRONTEND = path.join(ROOT, 'frontend')
@@ -80,14 +89,30 @@ function run(cmd, printCmd, cwd = FRONTEND, env = {}) {
 
 /**
  * T3 一律走 slot 池（1 进程 = 1 worker = 1 slot，每 slot 独立库副本 / data_dir / 端口对）。
- * 文件与目录进 `--` 之后；Playwright 开关经 E2E_PW_ARGS 透传 —— 混在文件表里会被当成
- * 文件名分进桶（旧写法 `paths.concat(PW_EXTRA)` 就是这么拼的）。
+ * 命令由 `poolCmd()` 构造（纯函数、被 vitest 钉住：打印与执行必须同源，文件表不能只出现在打印里）；
+ * 选中的模块目录先经 `expandPoolFiles()` 摊成 spec 文件，池的 LPT 分区与 autoSlots 才有权重可查。
  * 改动集小时池的 autoSlots 自然退回 1 个 slot ⇒ 快门禁不必自己管并行度，旋钮只有 --slots/E2E_SLOTS。
  */
+function listSpecs(dir) {
+  try {
+    return fs
+      .readdirSync(path.join(FRONTEND, dir))
+      .filter((f) => f.endsWith('.spec.ts'))
+      .map((f) => `${dir}/${f}`)
+  } catch {
+    return [] // 目录不存在/读不到 ⇒ 交给调用方判「选例为空」，不静默回落到全量
+  }
+}
+
 function runPool(filesArg, extraPwArgs = '') {
-  const cmd = 'node scripts/e2e_pool.mjs --slots=auto'
+  const entries = filesArg ? filesArg.split(' ').filter(Boolean) : []
+  const files = expandPoolFiles(entries, listSpecs)
+  if (entries.length && !files.length) {
+    console.error(`POOL ABORTED: ${entries.join(' ')} 里一个 .spec.ts 都没有 —— 空文件表等于跑全量，拒绝执行`)
+    return 1
+  }
   const pw = [TAIL, extraPwArgs].filter(Boolean).join(' ')
-  const printCmd = cmd + (filesArg ? ' -- ' + filesArg : '') + (pw ? `   [E2E_PW_ARGS="${pw}"]` : '')
+  const { cmd, printCmd } = poolCmd({ files: files.join(' '), pw })
   return run(cmd, printCmd, ROOT, pw ? { E2E_PW_ARGS: pw } : {})
 }
 

@@ -339,3 +339,49 @@ export function gateVerdict(results) {
   const skipped = results.filter((r) => r.skipped).map((r) => `${r.name}(${r.skipped})`)
   return { ok: failed.length === 0, failed, skipped }
 }
+
+/**
+ * 池那一档的命令构造 —— **打印与执行必须同源**。
+ *
+ * 旧写法把文件表只拼进 `printCmd`，`cmd` 永远是裸的 `--slots=auto`：于是「命中模块档」
+ * 一直在偷偷跑全量（2026-10-20 23:53 实测：打印 `$ node scripts/e2e_pool.mjs --slots=auto
+ * -- e2e/analysis`，池自己的日志却是 `文件 75 · 计划 slot 4`，slot0 分到跨 6 个模块的 18 个
+ * spec）。后果不只是慢几倍 —— 分层节奏表里「模块档 1–3min」这条成本口径、以及
+ * 「改一个页面只测那个页面」的选例判据，全都只存在于打印里。
+ *
+ * `pw`（透给 Playwright 的开关）刻意**不进** `cmd`：它走 `E2E_PW_ARGS` 环境变量，
+ * 混进 `--` 之后会被池当成文件名分进桶（旧写法 `paths.concat(PW_EXTRA)` 就是这么翻车的）。
+ *
+ * @param {{files?: string, pw?: string, slots?: string}} o
+ * @returns {{cmd: string, printCmd: string}}
+ */
+export function poolCmd({ files = '', pw = '', slots = 'auto' }) {
+  const cmd = `node scripts/e2e_pool.mjs --slots=${slots}` + (files ? ` -- ${files}` : '')
+  return { cmd, printCmd: cmd + (pw ? `   [E2E_PW_ARGS="${pw}"]` : '') }
+}
+
+/**
+ * 把选例结果摊成**具体 spec 文件**再交给池。
+ *
+ * 池按「文件的夜跑耗时表」做 LPT 分桶并据此决定 autoSlots；给它 `e2e/analysis` 这种
+ * 目录时权重查不到（`durations[dir]` 是 undefined）⇒ 加权总量算 0s ⇒ 退回 1 个 slot 串行，
+ * 「快门禁 1–3min」在选例真的生效后反而变成整模块串行。展开成文件后分区才有意义。
+ *
+ * `listDir` 由调用方注入（fs 留在脚本里），所以这条纯函数可测。
+ *
+ * @param {string[]} entries `e2e/<模块>` 目录或 `e2e/<模块>/<文件>.spec.ts`
+ * @param {(dir: string) => string[]} listDir 返回该目录下的 spec 相对路径
+ * @returns {string[]}
+ */
+export function expandPoolFiles(entries, listDir) {
+  const out = []
+  for (const entry of entries) {
+    if (!entry) continue
+    if (entry.endsWith('.spec.ts')) {
+      out.push(entry)
+      continue
+    }
+    for (const f of listDir(entry)) out.push(f)
+  }
+  return out
+}
