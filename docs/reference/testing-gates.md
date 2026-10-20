@@ -11,7 +11,7 @@
 
 | 时机 | 命令 | 实测成本 |
 |---|---|---|
-| 每批 commit 前 | `cd frontend && npm run test:e2e:affected` | 命中模块档 1–3min；无门禁 ~3s |
+| 每批 commit 前 | `cd frontend && npm run test:e2e:affected` | 模块档 = 该模块的 spec 数（2026-10-21 实测 analysis 档 36 文件 / 加权 588s / 计划 3 slot）；无门禁 ~3s |
 | 改门禁判据 / 阈值 / 图标判据 | `npx vitest run` | 0.6s |
 | 功能收口、FF 并入本地 master 前 | `node scripts/e2e_pool.mjs --slots=4` + 后端全套 | 6–8min + 后端 |
 | 每日兜底 | `node scripts/e2e_nightly.mjs` | 同上（前置不过则 SKIPPED） |
@@ -30,6 +30,14 @@
   整条 T3 根本没启动，日志只剩一个非零码，读起来像「跑到浏览器那档才失败」）。
   该跑的档**跑不了**（如 `python` 无 pytest）判 `ABORTED` → `RESULT: FAIL`，不再 print 完就退 0；
   只有显式 `--no-backend` 记成 `SKIP` 且不拦绿，但它必须出现在结论行里。
+- **门禁打印的命令必须就是执行的命令**（2026-10-21 修）：旧 `runPool()` 把文件表只拼进
+  `printCmd`，`cmd` 永远是裸的 `--slots=auto` ⇒ 「命中模块档」其实一直在跑 75 文件全量
+  （实测：打印 `-- e2e/analysis`，池自己却说 `文件 75 · 计划 slot 4`）。分层节奏表里的成本口径
+  与「改一个页面只测那个页面」的选例判据，那时全都只存在于打印里。现在命令由纯函数
+  `poolCmd()` 构造、目录由 `expandPoolFiles()` 先摊成 spec 文件（给池目录它查不到权重，
+  `autoSlots` 会退回 1 slot 串行），两者都由 vitest 钉住。
+  **验这一步的判据是池自己打印的「文件 N」**（N 应等于选中模块的 spec 数），不是门禁的命令行；
+  展开后为空（目录改名/读不到）判 `POOL ABORTED` 退 1，绝不留空文件表去静默跑全量。
 - **并行度只有 `--slots` / `E2E_SLOTS` 一个旋钮**，不要手改 playwright 的 `workers`。
   判据是**打印出来的实际 slot 数与加权总量**，不是命令行写了什么：缺 `tasks/e2e-nightly` 产物时
   分区未加权，`--slots=4` 会静默折成 1 个 slot（墙钟退回 20min 级）。
@@ -94,7 +102,9 @@ e2e 只断页面渲染出 CPK 且非空）。**不要在浏览器里逐组合点
 墙钟 >12min、单价 >4.5s/例、效率 <0.7×N、用例 >450、flake >5。
 
 - **崩池轮什么都不判**：池自判 `verdict=VOID (infra)`（退出码 3、现场不清），那种轮的单价/红数不可信，
-  **重跑才是结论**，别当退化读、更别去改用例。
+  **重跑才是结论**，别当退化读、更别去改用例。判据三条任一：拒连 ≥5、红占比 ≥50% 且绝对数 ≥20、
+  **`specs === 0`**（2026-10-21 补：slot 的 Django 在启动期死于 `OpenBLAS error: Memory allocation
+  still failed`（提交内存耗尽）时红数与拒连都是 0，旧判据把「一条用例都没跑成」判成了 `MEASURED`）。
 - **效率只在「本轮没有重跑」时判**（`hasRetries`）：失败的 attempt 吃墙钟却不进分子，
   实测零红轮 3.04、有两个红文件被复跑的两轮 2.73 / 2.34。
 - 改完阈值用 `--report-only <既有 results.json|merged.json>` 验算，**不要为确认一个公式再跑一轮全量**。

@@ -127,6 +127,16 @@ describe('classifySlotHealth / roundVerdict', () => {
   it('连 JSON 都没有的 slot 直接算 INFRA（不能因为"没数据"而放行）', () => {
     expect(roundVerdict([{ slot: 2, specs: 0, unexpected: 0, refusedCount: 5 }]).infraSlots).toEqual([2])
   })
+  it('一条用例都没跑成 = 这轮没有测量（webServer 死于 OpenBLAS 那种），不许判 MEASURED', () => {
+    // 实测：2026-10-21 那一轮 3 个 slot 全在启动期 OOM，池汇总「用例 0 · unexpected 0」却判 MEASURED
+    expect(classifySlotHealth({ specs: 0, unexpected: 0, refusedCount: 0 })).toBe('INFRA')
+    expect(roundVerdict([
+      { slot: 0, specs: 0, unexpected: 0, refusedCount: 0 },
+      { slot: 1, specs: 0, unexpected: 0, refusedCount: 0 },
+    ])).toEqual({ verdict: 'VOID (infra)', infraSlots: [0, 1] })
+    // 对照组：跑成了 1 条且全绿，仍是一次有效测量（别把"小"当成"没跑"）
+    expect(classifySlotHealth({ specs: 1, unexpected: 0, refusedCount: 0 })).toBe('OK')
+  })
 })
 
 describe('常量', () => {

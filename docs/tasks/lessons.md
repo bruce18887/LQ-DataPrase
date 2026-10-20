@@ -16,6 +16,34 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-10-21 修完两处假绿，同一条门禁又露出第三处：打印的命令不是执行的命令
+
+- **现象**：`planStages` 修好后跑第一次真门禁，日志打印
+  `$ node scripts/e2e_pool.mjs --slots=auto -- e2e/analysis`，而池自己下一行说
+  `文件 75 · 加权总量 1061s · 计划 slot 4`；打开 slot0 的命令行，分到的是跨
+  analysis/auth/data/global/settings/sftp 的 18 个 spec。⇒ **「命中模块档」从来没窄过**：
+  `runPool()` 只把文件表拼进 `printCmd`，`cmd` 永远是裸的 `--slots=auto`。
+- **根因形状**：打印与执行两处各拼一遍字符串，其中一处漏了参数。这类 bug 不会被红抓出来，
+  因为**跑的全量本来就绿**——代价是分层节奏表里「模块档 1–3min」这条成本口径、以及
+  「改一个页面只测那个页面」的选例判据，全都只存在于打印里。
+- **修**：命令构造搬进纯函数 `poolCmd()`（vitest 钉「`printCmd` 必须是 `cmd` 加注解」）；
+  模块目录先经 `expandPoolFiles()` 摊成 spec 文件再交给池 —— 给它目录时它查不到夜跑权重，
+  加权总量算 0s，`autoSlots` 退回 1 slot 串行，窄了反而更慢；展开后为空则 `POOL ABORTED` 退 1，
+  不留空文件表去静默跑全量。实测修后：analysis 档 `文件 36 · 加权 588s · 计划 slot 3`。
+- **第四条同族**：那一轮 3 个 slot 的 Django 全在启动期死于 `OpenBLAS error: Memory allocation
+  still failed`（`cmd /c npx playwright test` 报 `config.webServer was not able to start`），
+  池汇总「用例 0 · unexpected 0 · 单价 0.00s/例」却判 **MEASURED** —— 旧 `classifySlotHealth`
+  只看拒连数与红占比，两者都是 0 就放行。已补第三判据 `specs === 0 ⇒ INFRA`（对照组：
+  `specs:1` 仍算 OK，别把"跑少了"当"没跑"）。门禁那层的 `RESULT: FAIL` 这次兜住了，
+  但**结论词本身在说谎**，夜跑时间序列会把它记成一次有效测量。
+- **本机环境事实**：今晚 free **提交内存**在 0.3–9.5GB 之间大幅波动（物理内存还有 12–15GB）。
+  两次 4-slot 全量轮都撞 25min 到点杀且 slot 无 JSON，唯一一次 3-slot 轮 12.7min 跑完 404 例。
+  ⇒ 收口档现在**先探 `FreeVirtualMemory` 再定 slots，默认 3**；跑前还要确认上一轮没留
+  孤儿 `runserver`/`vite preview`/`e2e_pool`（本次就查到 4 个 slot 端口上的残留）。
+- **可复用口径**：**判据取被检者自己的输出**——池的「文件 N」、Django 的 `Ran X`、vitest 的
+  `Tests N`、门禁末尾的 `RESULT:`。三处假绿的共同形状都是**沉默的缺席**：档没跑、例没跑、
+  或参数没传，日志里都没有一行专门说这件事。
+
 ## 2026-10-20 affected 门禁把「一档红」当成「整轮结论」，又把结论交给退出码保管
 
 - **现象**：第二批验证时 `npm run test:e2e:affected 2>&1 | tail -45` 回 `exit 0`，而日志本体是
