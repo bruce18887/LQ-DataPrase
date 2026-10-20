@@ -3,7 +3,7 @@
 
 2026-10-20 版式（用户提供截图）：
 - 4 条原始曲线：细线 + 小圆点（circle, size 4，圆点填成线色），保留组基色与组内线型；
-- 均值线：深灰 1.5pt **细虚线**、无圆点 + 每个点的数值标签（6 位小数）；虚线是为了不盖住
+- 均值线：深灰 1.5pt **细虚线**、无圆点 + 每个点的数值标签（5 位小数）；虚线是为了不盖住
   贴在它上面的 4 条原始线（用户实测：2.5pt 实线会把它们整条遮住）；
 - 每张图 x 轴到本组最长系列 - 1，y 轴 auto；图例在右侧（底部会挤掉 x 轴刻度）。
 
@@ -160,7 +160,7 @@ class MarkerAndLabelTests(TestCase):
             self.assertFalse(labels.showSerName)
             self.assertFalse(labels.showCatName)
             self.assertFalse(labels.showLegendKey)
-            self.assertEqual(labels.numFmt, '0.000000')
+            self.assertEqual(labels.numFmt, '0.00000')
             self.assertEqual(labels.position, 't')
         self.assertEqual(self.xml_mean.count('<dLbls>'), 14)
 

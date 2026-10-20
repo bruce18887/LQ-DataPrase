@@ -81,8 +81,8 @@ class ParseRealFixtureTests(TestCase):
         self.assertEqual(len(g.mean.values), max(len(s.values) for s in g.series))
         self.assertEqual(len(g.mean.values), 16)
         # 全精度承重（spec §7.4）：上面两点（index 0 = -4.5e-05、index 15 = 0.003405）在
-        # `round(x, MEAN_DECIMALS)` 下**不变值**，所以「均值一律四舍五入到 6 位」的实现照样能过前三条
-        # —— 必须再挑一个「6 位小数会改值」的点做精确 assertEqual。候选点由成员自己算出来，
+        # `round(x, MEAN_DECIMALS)` 下**不变值**，所以「均值一律四舍五入到 5 位」的实现照样能过前三条
+        # —— 必须再挑一个「5 位小数会改值」的点做精确 assertEqual。候选点由成员自己算出来，
         # 不写死下标：夹具重排也不会静默失焦。
         tight = None
         for i in range(len(g.mean.values)):
@@ -93,7 +93,7 @@ class ParseRealFixtureTests(TestCase):
             if expect != round(expect, MEAN_DECIMALS):     # 该点被四舍五入会改值
                 tight = (i, expect, len(col))
                 break
-        self.assertIsNotNone(tight, '本组没有任何 6 位小数敏感点 ⇒ 这条判据空转，先查夹具')
+        self.assertIsNotNone(tight, '本组没有任何 5 位小数敏感点 ⇒ 这条判据空转，先查夹具')
         i, expect, n = tight
         self.assertEqual(n, 4)                            # 前置：仍是 4 个成员共同求平均
         self.assertEqual(g.mean.values[i], expect)         # 未 round 的全精度
@@ -174,20 +174,21 @@ class NamingAndMeanTests(TestCase):
         members = [WeightSeries('A_1', 1, 2, 3, (1.0, 3.0)),
                    WeightSeries('A_2', 2, 2, 4, (5.0, 7.0))]
         m = compute_mean(members, 'A_Avg')
-        self.assertEqual(m.decimals, MEAN_DECIMALS)       # Task 4 靠它挑 '0.000000' 格式
+        self.assertEqual(MEAN_DECIMALS, 5)                # 2026-10-20 用户点定：页面与导出统一 5 位
+        self.assertEqual(m.decimals, MEAN_DECIMALS)       # Task 4 靠它挑 '0.00000' 格式
         self.assertNotEqual(m.decimals, max(x.decimals for x in members))   # 对照：不是继承来的
         self.assertEqual(m.source_index, 0)               # 0 = 不是真声明，Task 5 用它区分均值行
         self.assertEqual(m.values, (3.0, 5.0))
 
     def test_mean_rounding_is_display_only_values_stay_full_precision(self):
         # spec §7.4：MEAN_DECIMALS 是显示口径，单元格/载荷里的 float 不得被四舍五入截断。
-        # 操作数得选「均值在 6 位小数上会变值」的一对：原先用 1.0 与 2.0（均值 1.5）时，
-        # `round(1.5, 6) == 1.5`，任何「一律 round(..., MEAN_DECIMALS)」的实现这条也是绿的 ——
-        # 也就是说不承重。换 1/3 与 0 之后均值 0.16666666666666666 ≠ round(…, 6)=0.166667。
+        # 操作数得选「均值在 5 位小数上会变值」的一对：原先用 1.0 与 2.0（均值 1.5）时，
+        # `round(1.5, 5) == 1.5`，任何「一律 round(..., MEAN_DECIMALS)」的实现这条也是绿的 ——
+        # 也就是说不承重。换 1/3 与 0 之后均值 0.16666666666666666 ≠ round(…, 5)=0.16667。
         a, b = 1.0 / 3.0, 0.0
         expect = (a + b) / 2
         self.assertNotEqual(expect, round(expect, MEAN_DECIMALS))   # 前置：操作数真有区分度
-        self.assertEqual(round(expect, MEAN_DECIMALS), 0.166667)    # 对照：坏实现会交出的值
+        self.assertEqual(round(expect, MEAN_DECIMALS), 0.16667)     # 对照：坏实现会交出的值
         m = compute_mean(_mean_series(('A_1', [a]), ('A_2', [b])), 'A_Avg')
         self.assertEqual(m.values, (expect,))
         self.assertEqual(m.decimals, MEAN_DECIMALS)

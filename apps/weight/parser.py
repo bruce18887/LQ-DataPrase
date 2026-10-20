@@ -28,7 +28,7 @@ from typing import Sequence
 TEXT_LIMIT = 2_000_000
 DECLARATION_LIMIT = 2000
 LENGTH_LIMIT = 1024
-MEAN_DECIMALS = 6
+MEAN_DECIMALS = 5
 
 DECL_RE = re.compile(
     r'double\s+(?P<name>[A-Za-z_]\w*)\s*\[\s*(?P<length>\d+)\s*\]\s*=\s*\{(?P<body>[^}]*)\}\s*;'

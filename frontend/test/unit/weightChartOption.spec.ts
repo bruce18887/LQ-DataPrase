@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildWeightOption, groupColor, groupCodeMax, DASH_BY_WITHIN_GROUP,
   MEAN_DASH, MEAN_WIDTH, LINE_WIDTH, MARKER_SIZE,
+  PAGE_MAX_DECIMALS, formatWeightCell, formatWeightLabel, legendLabel,
 } from '../../src/pages/weight/weightChartOption'
 import type { BuildOptions, WeightGroupDto, WeightSeriesDto } from '../../src/pages/weight/weightChartOption'
 
@@ -76,8 +77,10 @@ describe('一个测试项一张图', () => {
     expect(mean.label.show).toBe(true)
     expect(mean.label.position).toBe('top')
     expect(mean.labelLayout.hideOverlap).toBe(true)
-    expect(mean.label.formatter({ value: [3, 1.234567] })).toBe('1.234567')
+    // 2026-10-20 用户点定：页面与导出均值都最多 5 位小数（MEAN_DECIMALS=5，见后端 T1）。
+    expect(mean.label.formatter({ value: [3, 1.234567] })).toBe('1.23457')
     expect(mean.label.formatter({ value: [3, null] })).toBe('')
+    expect(mean.label.formatter({ value: [3, undefined] })).toBe('')
     expect(o.series.slice(0, -1).every((s: any) => s.label === undefined)).toBe(true)
   })
 
@@ -149,8 +152,18 @@ describe('图例：每图自带，只列本组系列', () => {
     expect(o.legend.textStyle.color).toBe(base.textColor)
   })
 
-  it('标题是测试项名，不是文件名', () => {
+  it('图例只显示组内序号 / 均值 / 原始，长组名不把图例挤成两页', () => {
+    const o = opt(G0, true)
+    expect(o.legend.formatter('WT0001_1')).toBe('1')
+    expect(o.legend.formatter('WT0001_4')).toBe('4')
+    expect(o.legend.formatter('WT0001_Avg')).toBe('均值')
+    expect(o.legend.formatter('WT0001')).toBe('原始')
+    expect(legendLabel('A_very_long_unrelated_series_name', 'WT0001')).toBe('A_very_long_unr…')
+  })
+
+  it('标题文本是测试项名；可见标题已移到图表卡头，画布内不再重复渲染', () => {
     expect(opt(G3).title.text).toBe('WT0004')
+    expect(opt(G3).title.show).toBe(false)
   })
 })
 
@@ -254,6 +267,22 @@ describe('双主题：颜色只走调用方给的 JS 值', () => {
     const o = buildWeightOption(G0, { showMean: true, colors: NIGHT, ...NIGHT_BASE, titleText: G0.name })
     const hit = stringsOf(o).filter((s) => s.includes('var(') || s.includes('color-mix('))
     expect(hit).toEqual([])
+  })
+})
+
+describe('显示精度：页面最多 5 位小数', () => {
+  it('图上标签去尾零、null 留空；表格按源位数与 5 位取小', () => {
+    expect(PAGE_MAX_DECIMALS).toBe(5)                    // 对照组：下限不是随手写的 6
+    expect(formatWeightLabel(1.234567)).toBe('1.23457')
+    expect(formatWeightLabel(1.2)).toBe('1.2')
+    expect(formatWeightLabel(28788.589088)).toBe('28788.58909')
+    expect(formatWeightLabel(null)).toBe('')
+    expect(formatWeightLabel(undefined)).toBe('')
+    expect(formatWeightCell(1.234567, 8)).toBe('1.23457')
+    expect(formatWeightCell(1.234567, 5)).toBe('1.23457')
+    expect(formatWeightCell(2, 0)).toBe('2')
+    expect(formatWeightCell(null, 6)).toBe('')
+    expect(formatWeightCell(-0.000004, 6)).toBe('0.00000')  // 负零归一，别显示 -0.00000
   })
 })
 

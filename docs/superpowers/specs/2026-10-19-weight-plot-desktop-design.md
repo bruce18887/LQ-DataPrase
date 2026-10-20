@@ -130,7 +130,11 @@
   **不得带 `groupStart`**，否则「SFTP 浏览器」下面会多一道分隔线；图标同步加进该文件 73-82 行的 import；
 - 不照「SFTP 搜索」那条 `meta.parent` 写法（它压根不在侧栏）。
 
-### 5.2 布局（继承源稿「左图右表」，几何换为页面自适应）
+### 5.2 布局与图表口径（2026-10-19 初版；版式部分已被 §5.3 取代）
+
+> **2026-10-20 用户看过实机后要求「连版式一起重排」**：下表的「左图右表」几何与顶部条不再采用，
+> 现行版式见 §5.3。本节其余工程口径（`useChart`、`el-table`、按 `visible` 渲染图列表、
+> 每图自带组内图例、均值默认打开）继续有效。
 
 | 区块 | 内容 |
 |---|---|
@@ -158,6 +162,32 @@
   Excel 导出侧仍全量写。
 - 源稿 §3.4「点按钮时才计算均值」**有意改为**：一次算完、按钮只切显示。数据量 56×64，
   源稿那条是为 Excel 写单元格省的，这里成本不存在，用户可见行为完全一致。
+
+### 5.3 2026-10-20 版式重设计（已实施）
+
+用户批复「连版式一起重排」，并追加「小数点位数限制到 5 位」；评审板见
+`docs/plans/weight-redesign-preview.html`（gitignore，本机原型）与 `tasks/weight-redesign-shots/`。
+现行结构：
+
+| 区块 | 内容与几何 |
+|---|---|
+| 工作区卡 | 文件身份（图标 + 文件名 +「已载入」+ 项/系列/Code 规模 + 隐私提示）与操作（重新选择 / 显示均值 switch / 数值明细 + 行数 / 导出 Excel）同一张卡；下方是「测试项」chip 云 + 全选/清空 + 线型说明 |
+| 图表画廊 | `repeat(auto-fill, minmax(460px, 1fr))`；1280 画布下每卡 609×336（图表区 300）；卡头承载测试项名、系列数、Code 数，ECharts 内标题 `show:false` |
+| 图表口径 | 4 条原始线 + 均值细虚线不变；图例只显示组内 `1 / 2 / 3 / 4 / 均值`（组名已在卡头，长名不再分页）；画布内不画轴名（609px 卡宽下会被卡头/右缘裁切）；grid 右留 34 给最右点标签 |
+| 数值明细 | 右侧 `el-drawer` 780px、全高；原序号/系列名前两列 `fixed="left"`；组底色交替只染系列名单格（与 xlsx 同口径）；均值行加粗、品牌色左标线 +「均值」徽标；表格始终显示全部测试项，组开关不影响行 |
+| 空态 | 独立卡片：真实格式样例 + 主按钮 + 规模限制；未载入文件时不渲染工作区卡/画廊 |
+| 交互 | 均值是 `role="switch"`、文案固定「显示均值」；解析失败仍保留现图并显示顶部错误条；切页（keep-alive）时关闭抽屉 |
+
+**页面显示精度**：新增 `PAGE_MAX_DECIMALS = 5`。图上均值标签与明细表最多 5 位小数
+（图上标签去尾零，表格按源小数位与 5 取小，并把 `-0.00000` 归一为 `0.00000`）。
+**§7.4 的 xlsx 导出也同步为 5 位均值小数**（`parser.MEAN_DECIMALS = 5`，用户 2026-10-20 追加要求）；
+原始值仍按各自原文小数位写 number_format。
+
+实测（原型 1280 画布，真实夹具 14 组 / 56 系列 / Code 0–63）：工作区卡短名 173.5px、长名压力 239.5px；
+图表卡 609×336；明细 70 行、抽屉 780px。真实应用 1440 视口的内容区更窄，卡片按
+`minmax(460px, 1fr)` 自动收缩；双主题与长名压力截图在 `tasks/weight-redesign-shots/`。
+T2 计 25 例（`weightChartOption.spec.ts`，含 5 位精度与短图例）；T3 用例同步覆盖抽屉打开/关闭、
+均值 switch、全选/清空，并保留「隐藏组不删表行」的对照。
 
 ## 6. 配色（本稿唯一一处与源稿的实质冲突，附实测依据）
 
@@ -209,7 +239,7 @@
 
 - `ScatterChart(scatterStyle='lineMarker')`；4 条原始线：细线 1.25pt + 圆点（size 4），
   线型按组内序（实/虚/点/点划）、组基色；
-- 均值线（`show_mean`）：深灰 1.5pt 细虚线、**无圆点** + **每点数值标签**（6 位小数、顶部）；
+- 均值线（`show_mean`）：深灰 1.5pt 细虚线、**无圆点** + **每点数值标签**（5 位小数、顶部）；
 - 图内只含本组系列；x 轴 `0..本组最长系列长度-1`（组内独立缩放），y 轴 auto；
 - **X 轴在底部、Y 轴在左侧、刻度标签可见**：openpyxl 默认把两条 `valAx` 都写成 `axPos="l"`，
   两轴叠在左侧会把刻度/标题挤没；这里显式 `X=bottom / Y=left`、`crosses=min`（X 轴落在 y 最小值处，
@@ -221,8 +251,9 @@
 
 - 原始值：按该声明原文里的最大小数位 `d` 写 number_format（`d=0` → `0`，否则 `0.` + `0`×`d`），
   落实源稿「数值保留原始精度」且不假造位数；
-- 均值：固定 6 位小数。**这是本稿自定的显示口径**，不援引 `apps/export/formatting.py` 的
-  `format_percent_value`（那是百分比→字符串，语义不同；只是它 `PERCENT_DECIMALS = 6`，数值上恰好同位）。
+- 均值：固定 5 位小数（2026-10-20 用户点定，页面与导出一致）。**这是本稿自定的显示口径**，不援引
+  `apps/export/formatting.py` 的 `format_percent_value`（那是百分比→字符串，语义不同；它的
+  `PERCENT_DECIMALS = 6` 只是数值上曾与均值同位，现已不一致）。
   显示口径不影响数值：单元格里存的仍是全精度 float，不做四舍五入截断。
 
 ## 8. 安全与夹具（公开仓库的硬约束）
@@ -293,6 +324,7 @@
 
 - `frontend/src/pages/weight/WeightPlotPage.vue`
 - `frontend/src/pages/weight/components/WeightChartPanel.vue`、`WeightGroupChips.vue`、`WeightSeriesTable.vue`
+- `frontend/src/pages/weight/components/WeightWorkspaceCard.vue`、`WeightSeriesDrawer.vue`、`WeightEmptyState.vue`、`WeightActionButton.vue`（2026-10-20 版式重设计）
 - `frontend/src/pages/weight/weightChartOption.ts`（纯模块，T2 目标）
 - `frontend/src/pages/weight/composables/useWeightPlot.ts`
 - `frontend/src/api/weight.ts`
@@ -362,8 +394,10 @@
 - `python manage.py test test.backend.test_weight_parser test.backend.test_weight_api` 通过，
   且报错类用例各自断到行号；
 - `cd frontend && npx vitest run` 通过，`weightChartOption.spec.ts` 断的是每组图的系列集合、
-  独立 x 上限、圆点与均值标签，而非「渲染没报错」；
+  独立 x 上限、圆点与均值标签、5 位小数与短图例，而非「渲染没报错」；
 - `npm run build`（含 `vue-tsc -b`）+ `npm run lint:e2e` 通过；
+- `frontend/e2e/weight/weight-plot.spec.ts`（@p1）通过：14 张图、整组开关不删表行、
+  均值 switch 70↔56、明细抽屉、全选/清空、导出下载、坏文件保留现图；字体与夜间主题回归同批绿；
 - `node scripts/e2e_pool.mjs --slots=4` 全量池绿，且跑完端口释放、无孤儿 `runserver`；
 - `node tasks/cvd_verify.mjs` 对最终选定的组间基色方案跑过（或明确停在 §6 第 1、2 条不引入新色板）；
 - `git log --diff-filter=A --name-only origin/master..HEAD | grep -E '^Data/|Trim_Weight'` **为空**；

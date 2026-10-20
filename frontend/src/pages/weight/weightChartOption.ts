@@ -55,6 +55,10 @@ export interface BuildOptions {
   meanColor: string
   textColor: string
   axisLineColor: string
+  /** 横向网格线色；缺省回退 axisLineColor（T2 的既有调用方不必补字段）。 */
+  splitLineColor?: string
+  /** 均值数值标签色；缺省回退 textColor。页面传 titleColor 以拉开与轴标签的层级。 */
+  labelColor?: string
   /** 图标题：页面与导出都用测试项名（不是文件名）。 */
   titleText: string
 }
@@ -67,6 +71,29 @@ export const MEAN_DASH = 'dashed'
 export const MEAN_WIDTH = 1.5
 export const LINE_WIDTH = 1.25
 export const MARKER_SIZE = 4
+/** 页面显示上限（2026-10-20 用户点定）：最多 5 位小数；xlsx 导出的均值格式也统一为 5 位（parser.MEAN_DECIMALS=5）。 */
+export const PAGE_MAX_DECIMALS = 5
+
+/** 图上数值标签 / tooltip：最多 5 位、去掉尾零；null 留空。 */
+export function formatWeightLabel(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return ''
+  return String(Number(value.toFixed(PAGE_MAX_DECIMALS)))
+}
+
+/** 明细表单元格：按源小数位与 5 位取小；把 `-0.00000` 归一成 `0.00000`。 */
+export function formatWeightCell(value: number | null | undefined, decimals: number): string {
+  if (value == null || !Number.isFinite(value)) return ''
+  const fixed = value.toFixed(Math.min(Math.max(decimals, 0), PAGE_MAX_DECIMALS))
+  return /^-0(\.0+)?$/.test(fixed) ? fixed.slice(1) : fixed
+}
+
+/** 图例只显示组内序号：组名已在卡头，5 条长名会把图例挤成两页。 */
+export function legendLabel(name: string, groupName: string): string {
+  if (name === `${groupName}_Avg`) return '均值'
+  if (name === groupName) return '原始'
+  if (name.startsWith(`${groupName}_`)) return name.slice(groupName.length + 1)
+  return name.length > 16 ? `${name.slice(0, 15)}…` : name
+}
 
 export function groupColor(colors: string[], groupIndex: number): string {
   return colors[groupIndex % colors.length]
@@ -93,7 +120,8 @@ interface SeriesExtras {
   symbolSize?: number
   /** 均值线才开：每个点的数值标签（截图口径）。 */
   labels?: boolean
-  textColor?: string
+  /** 数值标签色；缺省回退 textColor。 */
+  labelColor?: string
 }
 
 function lineSeries(
@@ -122,10 +150,9 @@ function lineSeries(
     label: {
       show: true,
       position: 'top',
-      color: extra.textColor,
+      color: extra.labelColor ?? style.color,
       fontSize: chartFontSize.micro,
-      formatter: (p: { value?: (number | null)[] }) =>
-        p.value?.[1] == null ? '' : String(p.value[1]),
+      formatter: (p: { value?: (number | null)[] }) => formatWeightLabel(p.value?.[1]),
     },
     // 64 点的组标签会互相压住；页面上隐藏重叠标签，Excel 导出侧仍全量写。
     labelLayout: { hideOverlap: true },
@@ -143,28 +170,31 @@ export function buildWeightOption(group: WeightGroupDto, o: BuildOptions): EChar
   if (o.showMean) {
     series.push(lineSeries(group.mean.name, group.mean.values, {
       type: MEAN_DASH, width: MEAN_WIDTH, color: o.meanColor,
-    }, { symbolSize: 0, labels: true, textColor: o.textColor }))
+    }, { symbolSize: 0, labels: true, labelColor: o.labelColor ?? o.textColor }))
   }
 
-  const axis = (name: string) => ({
+  // 轴名不画：卡头已有测试项名与 Code 数，画布里的 Weight/Code 名在 609px 卡宽下会被
+  // 卡头或右缘裁掉（2026-10-20 实机截图实证），也让图更干净。
+  const axis = () => ({
     type: 'value' as const,
-    name,
     axisLine: { lineStyle: { color: o.axisLineColor } },
-    splitLine: { lineStyle: { color: o.axisLineColor } },
+    axisTick: { show: false },
+    splitLine: { lineStyle: { color: o.splitLineColor ?? o.axisLineColor } },
     axisLabel: { color: o.textColor, fontSize: chartFontSize.micro },
-    nameTextStyle: { color: o.textColor },
   })
 
   return {
     backgroundColor: 'transparent',
     animation: false,
-    title: { text: o.titleText, textStyle: { color: o.textColor, fontSize: chartFontSize.dense } },
+    // 可见标题由图表卡头承载；保留 text 供 T2/导出语义对照，但不再在画布内重复渲染。
+    title: { show: false, text: o.titleText, textStyle: { color: o.textColor, fontSize: chartFontSize.dense } },
     // 分组后图例只剩本组 4/5 条：它成了「组内线型」的对照载体（导出侧同口径）。
     legend: {
       show: true,
       bottom: 0,
       type: 'scroll',
       textStyle: { color: o.textColor, fontSize: chartFontSize.micro },
+      formatter: (name: string) => legendLabel(name, group.name),
       itemWidth: 24,
       itemHeight: 10,
     },
@@ -172,12 +202,13 @@ export function buildWeightOption(group: WeightGroupDto, o: BuildOptions): EChar
       trigger: 'item',
       // 点到哪条报哪条：系列名 + code + 值（只显示组名会丢「是组内哪一条」）。
       formatter: (p: { seriesName?: string; value?: (number | null)[] }) =>
-        `${p.seriesName ?? ''}<br/>code ${p.value?.[0] ?? '-'} · ${p.value?.[1] ?? '-'}`,
+        `${p.seriesName ?? ''}<br/>code ${p.value?.[0] ?? '-'} · ${formatWeightLabel(p.value?.[1])}`,
     },
-    grid: { left: 56, right: 20, top: 34, bottom: 48, containLabel: false },
+    // 右侧 34 给最右点的均值标签留位（14 在 609px 卡宽下会把末位标签裁掉）。
+    grid: { left: 8, right: 34, top: 20, bottom: 40, containLabel: true },
     // x 只到本组最长系列：每个测试项独立缩放，短组不会被最长组拖成一根竖线。
-    xAxis: [{ ...axis('Code'), min: 0, max: groupCodeMax(group) }],
-    yAxis: [{ ...axis('Weight'), scale: true }],
+    xAxis: [{ ...axis(), min: 0, max: groupCodeMax(group), splitLine: { show: false } }],
+    yAxis: [{ ...axis(), scale: true, axisLine: { show: false } }],
     series,
   } as EChartsOption
 }
