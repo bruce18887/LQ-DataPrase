@@ -1,25 +1,16 @@
 <template>
-  <el-card v-if="count > 0" class="repair-card" data-testid="orphaned-disk-card">
-    <template #header>
-      <div class="card-header">
-        <span class="card-title">孤立磁盘文件</span>
-        <el-tag type="warning" size="small">数据库中无记录</el-tag>
-      </div>
-    </template>
-    <el-alert
-      title="这些文件在数据库中没有记录。推荐先导入到数据库，确认无用后再删除。"
-      type="warning"
-      :closable="false"
-      show-icon
-      style="margin-bottom: 12px"
-    />
-    <el-alert
-      v-if="count > items.length"
-      :title="`共 ${count} 个孤立文件，仅显示前 ${items.length} 个，操作将作用于全部。`"
-      type="info"
-      :closable="false"
-      style="margin-bottom: 12px"
-    />
+  <MaintenanceCard
+    test-id="orphaned-disk-card"
+    :visible="count > 0"
+    title="孤立磁盘文件"
+    tag-text="数据库中无记录"
+    tag-type="warning"
+    :alert="{
+      title: '这些文件在数据库中没有记录。推荐先导入到数据库，确认无用后再删除。',
+      type: 'warning',
+    }"
+    :truncated-note="truncatedNote"
+  >
     <el-table :data="items" max-height="200" size="small">
       <el-table-column prop="batch_name" label="批次" width="140">
         <template #default="{ row }">
@@ -33,12 +24,14 @@
       </el-table-column>
       <el-table-column prop="filename" label="文件名" min-width="180" />
     </el-table>
-    <div class="card-footer">
+    <template #footer-left>
       <el-checkbox v-model="importConfirmed">
         <span style="color: var(--success); font-weight: 600">
           我已确认要导入这 {{ count }} 个文件
         </span>
       </el-checkbox>
+    </template>
+    <template #footer-right>
       <div class="action-row">
         <el-button
           type="primary"
@@ -63,14 +56,15 @@
           <el-icon><Delete /></el-icon> 删除孤立文件
         </el-button>
       </div>
-    </div>
-  </el-card>
+    </template>
+  </MaintenanceCard>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Delete, Download } from '@element-plus/icons-vue'
 import type { OrphanedDiskFile } from '../../../api/datafiles'
+import MaintenanceCard from './MaintenanceCard.vue'
 
 const props = defineProps<{
   items: OrphanedDiskFile[]
@@ -90,32 +84,15 @@ watch(() => [props.items, props.count], () => {
   importConfirmed.value = false
   deleteConfirmed.value = false
 })
+
+const truncatedNote = computed(() =>
+  props.count > props.items.length
+    ? `共 ${props.count} 个孤立文件，仅显示前 ${props.items.length} 个，操作将作用于全部。`
+    : '',
+)
 </script>
 
 <style scoped>
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.card-title {
-  font-weight: 600;
-  color: var(--text);
-}
-
-.card-footer {
-  margin-top: 12px;
-  padding: 12px;
-  background: var(--bg-2);
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
 .action-row {
   display: flex;
   align-items: center;

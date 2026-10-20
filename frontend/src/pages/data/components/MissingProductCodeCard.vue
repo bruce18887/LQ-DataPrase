@@ -1,25 +1,16 @@
 <template>
-  <el-card v-if="count > 0" class="repair-card" data-testid="missing-product-code-card">
-    <template #header>
-      <div class="card-header">
-        <span class="card-title">产品名缺失</span>
-        <el-tag type="info" size="small">product_code 为空</el-tag>
-      </div>
-    </template>
-    <el-alert
-      title="这些文件未能识别产品名。系统会先从文件名或已保存的程序名提取，必要时重新解析文件头。"
-      type="info"
-      :closable="false"
-      show-icon
-      style="margin-bottom: 12px"
-    />
-    <el-alert
-      v-if="count > items.length"
-      :title="`共 ${count} 个文件缺失产品名，仅显示前 ${items.length} 个，操作将作用于全部。`"
-      type="info"
-      :closable="false"
-      style="margin-bottom: 12px"
-    />
+  <MaintenanceCard
+    test-id="missing-product-code-card"
+    :visible="count > 0"
+    title="产品名缺失"
+    tag-text="product_code 为空"
+    tag-type="info"
+    :alert="{
+      title: '这些文件未能识别产品名。系统会先从文件名或已保存的程序名提取，必要时重新解析文件头。',
+      type: 'info',
+    }"
+    :truncated-note="truncatedNote"
+  >
     <el-table :data="items" max-height="200" size="small">
       <el-table-column prop="filename" label="文件名" min-width="180" />
       <el-table-column prop="batch_name" label="批次" width="120">
@@ -43,12 +34,14 @@
         </template>
       </el-table-column>
     </el-table>
-    <div class="card-footer">
+    <template #footer-left>
       <el-checkbox v-model="confirmed">
         <span style="color: var(--brand); font-weight: 600">
           我已确认要修复这 {{ count }} 个文件的产品名
         </span>
       </el-checkbox>
+    </template>
+    <template #footer-right>
       <el-button
         type="primary"
         :disabled="!confirmed"
@@ -57,14 +50,15 @@
       >
         <el-icon><MagicStick /></el-icon> 修复缺失产品名
       </el-button>
-    </div>
-  </el-card>
+    </template>
+  </MaintenanceCard>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { MagicStick } from '@element-plus/icons-vue'
 import type { MissingProductCodeFile } from '../../../api/datafiles'
+import MaintenanceCard from './MaintenanceCard.vue'
 
 const props = defineProps<{
   items: MissingProductCodeFile[]
@@ -81,32 +75,15 @@ const confirmed = ref(false)
 watch(() => [props.items, props.count], () => {
   confirmed.value = false
 })
+
+const truncatedNote = computed(() =>
+  props.count > props.items.length
+    ? `共 ${props.count} 个文件缺失产品名，仅显示前 ${props.items.length} 个，操作将作用于全部。`
+    : '',
+)
 </script>
 
 <style scoped>
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.card-title {
-  font-weight: 600;
-  color: var(--text);
-}
-
-.card-footer {
-  margin-top: 12px;
-  padding: 12px;
-  background: var(--bg-2);
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
 .empty-text {
   color: var(--text-3);
 }

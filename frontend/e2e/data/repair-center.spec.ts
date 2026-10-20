@@ -97,6 +97,33 @@ test.describe.serial('数据修复中心', { tag: ['@p2', '@data'] }, () => {
     await expect(card).toContainText(BATCH)
     await expect(card).toContainText(srcName)
 
+    // 卡片外壳（MaintenanceCard）的 scoped 样式确实还在生效：操作栏靠 --bg-2 上色、
+    // 12px 内边距、标题行两端对齐。四张卡的这段规则此前各存一份，收拢成一个外壳后
+    // 「元素归哪个组件的 scope」是会变的 —— 丢了规则这里 padding 就是 0px、背景透明。
+    // 断言用计算样式而非 class 名：class 在但规则没匹配上也会红。
+    const footerBox = await card.locator('.card-footer').evaluate((el) => {
+      const s = getComputedStyle(el)
+      return { pad: s.paddingTop, justify: s.justifyContent, bg: s.backgroundColor }
+    })
+    expect(footerBox.pad, '操作栏内边距').toBe('12px')
+    expect(footerBox.justify, '操作栏左右对齐').toBe('space-between')
+    expect(footerBox.bg).not.toBe('rgba(0, 0, 0, 0)')
+    await expect(card.locator('.card-header .card-title')).toHaveText('孤立磁盘文件')
+
+    // 双主题（R7）：卡片外壳只认 CSS token，night 下同一批规则必须照样生效。
+    // 夹具文件在磁盘上留到 afterEach，reload 后重新检查仍会列出这张卡。
+    await page.addInitScript(() => localStorage.setItem('theme', 'night'))
+    await page.reload()
+    await openRepairCenter(page)
+    await expect(card).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'night')
+    const nightFooterBox = await card.locator('.card-footer').evaluate((el) => {
+      const s = getComputedStyle(el)
+      return { pad: s.paddingTop, bg: s.backgroundColor }
+    })
+    expect(nightFooterBox.pad, 'night: 操作栏内边距').toBe('12px')
+    expect(nightFooterBox.bg, 'night: 操作栏仍有底色').not.toBe('rgba(0, 0, 0, 0)')
+
     await card.locator('.el-checkbox').first().click() // 导入确认
     await card.locator('button').filter({ hasText: '导入到数据库' }).click()
     await expect(page.getByText(/已导入 \d+ 个孤立文件/).first()).toBeVisible({ timeout: 15_000 })
