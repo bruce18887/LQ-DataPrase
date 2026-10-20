@@ -3,12 +3,12 @@
 import numpy as np
 import pandas as pd
 
+from apps.analysis.services.binning import build_bin_grid
 from apps.analysis.services.statistics import (
     compute_cpk,
     filter_finite,
     get_columns_with_limits,
     resolve_spec_limits,
-    safe_gap,
 )
 from apps.analysis.services.data_services.histogram import compute_kde_curve
 from apps.common.user_settings import DEFAULT_CPK_THRESHOLDS
@@ -233,28 +233,15 @@ def compute_multi_lot_distribution(datasets, all_series, param,
     if bin_min == bin_max:
         bin_min -= 0.5
         bin_max += 0.5
-    data_gap = safe_gap(bin_min, bin_max)
-    # bin 网格以 [bin_min, bin_max] 为中心对称（两侧各 2 个细分 bin），与
-    # 单文件 histogram 同构（回归：bin-grid-asymmetry，2.5 使左 3.5gap/右
-    # 2.5gap 不对称且与单文件不一致，X 轴对齐断言依赖此统一）
-    bin_start = bin_min - 2 * data_gap
-
-    # Build bin edges with underflow (-inf) and overflow (+inf) bins
+    # Build bin edges with underflow (-inf) and overflow (+inf) bins.
     # Same pattern as single-file: [underflow] [bin1]..[bin24] [overflow]
-    # 25 inner edges → 24 normal bins（eedeceb 重构时误写 range(26) 多出 1 个
-    # normal bin，X 轴 27 个坐标与单文件直方图 26 个不一致——回归修复）
-    inner_edges = [bin_start + j * data_gap for j in range(25)]
-    all_bins = np.array([-np.inf] + inner_edges + [np.inf])
-    # 27 edges → 26 bins: 1 underflow + 24 normal + 1 overflow
-
-    # Bin centers: underflow/overflow use edge values, normal bins use midpoint.
     # 在构造处就 round 到 6 位（而不是只在输出字段上 round）：下面
     # bar_data = [[bin_centers[i], pcts[i]] …] 也用同一个数组，两处必须同源，
     # 否则前端拿 bin_centers 对齐/去重 bar_data 时会因浮点尾数失配。
-    # 精度与 histogram.py 的 [round(c, 6) for c in bin_centers] 对齐。
-    bin_centers = [round(inner_edges[0] - data_gap, 6)]  # underflow center
-    bin_centers += [round((inner_edges[i] + inner_edges[i + 1]) / 2, 6) for i in range(24)]
-    bin_centers.append(round(inner_edges[-1] + data_gap, 6))  # overflow center
+    # 精度与 histogram.py 的输出舍入对齐。
+    inner_edges, bin_centers, _ = build_bin_grid(
+        bin_min, bin_max, round_centers=True)
+    all_bins = np.array([-np.inf] + inner_edges + [np.inf])
     bin_count = len(bin_centers)
 
     # Second pass: compute histograms and assemble lot_data

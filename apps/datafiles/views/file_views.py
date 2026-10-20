@@ -27,7 +27,7 @@ from apps.datafiles.serializers import (
     normalize_tags,
 )
 from apps.datafiles.services import clear_parse_cache
-from apps.datafiles.utils import resolve_file_path, store_file_path
+from apps.datafiles.utils import store_file_path
 
 from ._helpers import (
     _register_file,
@@ -36,6 +36,7 @@ from ._helpers import (
     _parse_last_modified,
     _delete_datafile_file_only,
     _remove_empty_dirs_up_to,
+    _plan_file_moves,
     _UNSAFE_NAME_CHARS,
 )
 
@@ -59,6 +60,16 @@ def _parse_date_bound(raw: str):
             continue
         return parsed if has_time else parsed.date()
     return None
+
+
+def _validated_move_ids(raw):
+    """Return the id list shared by combine/uncombine, or None when invalid."""
+    ids = raw or []
+    if not isinstance(ids, list) or not ids or not all(
+        isinstance(i, int) and not isinstance(i, bool) for i in ids
+    ):
+        return None
+    return ids
 
 
 def _date_bound(raw: str, end_of_day: bool):
@@ -283,11 +294,9 @@ class DataFileViewSet(viewsets.ModelViewSet):
         Ordering guarantee: DB changes commit first, file moves execute after.
         If the DB transaction fails, no file is touched on disk.
         """
-        ids = request.data.get('ids') or []
+        ids = _validated_move_ids(request.data.get('ids'))
         batch_name = (request.data.get('batch_name') or '').strip()
-        if not isinstance(ids, list) or not ids or not all(
-            isinstance(i, int) and not isinstance(i, bool) for i in ids
-        ):
+        if ids is None:
             return error_response(
                 'file_ids_required', 'ids must be a non-empty list of integers')
         if not batch_name:
@@ -311,33 +320,9 @@ class DataFileViewSet(viewsets.ModelViewSet):
         batch_dir = os.path.join(batch_base, batch_name)
         os.makedirs(batch_dir, exist_ok=True)
 
-        # Phase 1: plan moves — compute (src, target, new_filename) for each row.
-        plans = []  # [(df, src, target, new_filename), ...]
-        used_targets = set()  # targets claimed by earlier plans in this batch
-        for df in qs.order_by('id'):
-            src = resolve_file_path(df.file_path)
-            if not os.path.exists(src):
-                continue  # cannot move a missing file; skip it
-            # Defence-in-depth: basename strips any directory traversal that
-            # might have crept into the DB filename field historically.
-            safe_name = os.path.basename(df.filename)
-            if not safe_name or _UNSAFE_NAME_CHARS.search(safe_name):
-                logger.warning(
-                    'combine: skipping df id=%s with unsafe filename %r',
-                    df.pk, df.filename,
-                )
-                continue
-            target = os.path.join(batch_dir, safe_name)
-            # Collision vs disk OR vs an earlier plan in this same request:
-            # two same-named singles would otherwise resolve to one target
-            # and the later move would overwrite the earlier file.
-            while target in used_targets or os.path.exists(target):
-                ts = int(time.time())
-                name, ext = os.path.splitext(safe_name)
-                safe_name = f'{name}_{ts}_{df.pk}{ext}'
-                target = os.path.join(batch_dir, safe_name)
-            used_targets.add(target)
-            plans.append((df, src, target, safe_name))
+        # Phase 1: plan moves — basename/unsafe/collision rules live in
+        # _plan_file_moves (shared with uncombine).
+        plans = _plan_file_moves(qs.order_by('id'), batch_dir, 'combine')
 
         if not plans:
             return Response({
@@ -349,7 +334,7 @@ class DataFileViewSet(viewsets.ModelViewSet):
         # Phase 2: DB changes inside transaction (no file I/O here).
         updated = []
         with transaction.atomic():
-            for df, _src, target, new_filename in plans:
+            for df, _src, target, new_filename, _src_dir in plans:
                 df.filename = new_filename
                 df.file_path = store_file_path(target)
                 df.file_type = 'batch'
@@ -362,7 +347,7 @@ class DataFileViewSet(viewsets.ModelViewSet):
                 updated.append(df)
 
         # Phase 3: file moves after successful commit.
-        for df, src, target, _ in plans:
+        for df, src, target, _, _src_dir in plans:
             try:
                 shutil.move(src, target)
             except OSError:
@@ -395,10 +380,8 @@ class DataFileViewSet(viewsets.ModelViewSet):
         Ordering guarantee: DB changes commit first, file moves execute after.
         If the DB transaction fails, no file is touched on disk.
         """
-        ids = request.data.get('ids') or []
-        if not isinstance(ids, list) or not ids or not all(
-            isinstance(i, int) and not isinstance(i, bool) for i in ids
-        ):
+        ids = _validated_move_ids(request.data.get('ids'))
+        if ids is None:
             return error_response(
                 'file_ids_required', 'ids must be a non-empty list of integers')
 
@@ -416,28 +399,8 @@ class DataFileViewSet(viewsets.ModelViewSet):
         single_dir = _user_upload_dir(request.user, 'single')
         batch_base = _user_upload_dir(request.user, 'batch')
 
-        # Phase 1: plan moves.
-        plans = []  # [(df, src, target, new_filename, src_dirname), ...]
-        used_targets = set()
-        for df in qs.order_by('id'):
-            src = resolve_file_path(df.file_path)
-            if not os.path.exists(src):
-                continue  # missing on disk: cannot move; skip it
-            safe_name = os.path.basename(df.filename)
-            if not safe_name or _UNSAFE_NAME_CHARS.search(safe_name):
-                logger.warning(
-                    'uncombine: skipping df id=%s with unsafe filename %r',
-                    df.pk, df.filename,
-                )
-                continue
-            target = os.path.join(single_dir, safe_name)
-            while target in used_targets or os.path.exists(target):
-                ts = int(time.time())
-                name, ext = os.path.splitext(safe_name)
-                safe_name = f'{name}_{ts}_{df.pk}{ext}'
-                target = os.path.join(single_dir, safe_name)
-            used_targets.add(target)
-            plans.append((df, src, target, safe_name, os.path.dirname(src)))
+        # Phase 1: plan moves (same basename/unsafe/collision rules as combine).
+        plans = _plan_file_moves(qs.order_by('id'), single_dir, 'uncombine')
 
         if not plans:
             return Response({'moved': 0, 'files': []})
