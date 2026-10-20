@@ -12,15 +12,24 @@
 | 时机 | 命令 | 实测成本 |
 |---|---|---|
 | 每批 commit 前 | `cd frontend && npm run test:e2e:affected` | 命中模块档 1–3min；无门禁 ~3s |
-| 改门禁判据 / 阈值 / 图标判据 | `npx vitest run` | 0.4s |
+| 改门禁判据 / 阈值 / 图标判据 | `npx vitest run` | 0.6s |
 | 功能收口、FF 并入本地 master 前 | `node scripts/e2e_pool.mjs --slots=4` + 后端全套 | 6–8min + 后端 |
 | 每日兜底 | `node scripts/e2e_nightly.mjs` | 同上（前置不过则 SKIPPED） |
 | GitHub CI | 自动 | 后端全套 + build + vitest + lint:e2e，**刻意不跑 Playwright** |
 
-三条硬口径：
+硬口径：
 
 - **看到 `NO AFFECTED TESTS` 不等于绿灯**，它表示本轮没有测试承重；快门禁会同时打印 `note:`
   说明那部分改动由哪条通路验证（CI、打包期图标工具、门禁编排器各有各的通路）。
+- **判绿/红取日志末尾的 `RESULT:` 行，不取 `$?`**（2026-10-20 实测：`… 2>&1 | tail -45`
+  的退出码是 `tail` 的，于是「exit 0」与「FAILED (failures=1)」出自同一条命令）。
+  affected 门禁把每档结果打成 `档: <name> ok|FAIL|SKIP|ABORTED` + 末行 `RESULT:`，
+  故意放最后 —— 任何 `tail -N` 的窗口都盖不住它。非要读退出码就 `| tee` 或 `set -o pipefail`。
+- **每一档都会执行**：`planStages()` 只由改动集决定，签名里没有退出码，所以一档红改不了
+  后面跑什么（旧写法 `code ||= runPool('')` 在 code 已非零时连右值都不求值，后端一红
+  整条 T3 根本没启动，日志只剩一个非零码，读起来像「跑到浏览器那档才失败」）。
+  该跑的档**跑不了**（如 `python` 无 pytest）判 `ABORTED` → `RESULT: FAIL`，不再 print 完就退 0；
+  只有显式 `--no-backend` 记成 `SKIP` 且不拦绿，但它必须出现在结论行里。
 - **并行度只有 `--slots` / `E2E_SLOTS` 一个旋钮**，不要手改 playwright 的 `workers`。
   判据是**打印出来的实际 slot 数与加权总量**，不是命令行写了什么：缺 `tasks/e2e-nightly` 产物时
   分区未加权，`--slots=4` 会静默折成 1 个 slot（墙钟退回 20min 级）。
@@ -36,7 +45,7 @@
 | 层 | 位置 | 判据 | 实测规模与单价 |
 |---|---|---|---|
 | **T1 后端契约** | `test/backend/`、`apps/*/tests_*.py` | 响应体 / service 返回值就能表达：数值、状态码、错误码、字段存在性 | `def test_` 计数 1561（test/backend 935 + apps/* 626）；2026-10-16 实跑 `Ran 1427`；≈3.6 例/秒 |
-| **T2 前端纯函数** | `frontend/test/unit/`（vitest，node 环境，不装 jsdom） | 入参→出参，无 DOM 无网络 | 194 例 / 13 文件 / 0.42s |
+| **T2 前端纯函数** | `frontend/test/unit/`（vitest，node 环境，不装 jsdom） | 入参→出参，无 DOM 无网络 | 353 例 / 26 文件 / 0.60s（2026-10-20 实跑） |
 | **T3 浏览器不可替代** | `frontend/e2e/`（Playwright） | 只有五类：真实渲染（canvas / ag-grid 虚拟化 / 轴像素）、双主题对比度、跨页跨 tab 状态与路由守卫、上传下载与 Electron IPC、`data-*` 契约本身 | 390 次展开 / 75 文件（P1 232 · P2 133 · P0 13 · Edge 10 · setup 2）；单价 2.9–3.1 s/例 |
 
 **冲突裁决**：同一判据 T1 与 T3 都能表达时，T1 写全组合，T3 只留一条「接线证明」（例：CPK 八组边界进后端，
@@ -67,7 +76,10 @@ e2e 只断页面渲染出 CPK 且非空）。**不要在浏览器里逐组合点
   `icon-audit.cjs`、`icon-metrics.cjs`、`gen-icon.ico.js`、`generate_icon.py`；
 - 门禁自己的判据与编排器：`nightly-gates.mjs`（`e2eNightlyGates.spec.ts`）、`pool-core.mjs`
   （`e2ePoolCore.spec.ts` 42 例）、`scripts/e2e_*`。
-  ⚠ **编排器本身没有单测**（IO 重），改完必须自证 `--dry-run` 并核对打印的判定与 slot 数——
+  2026-10-20 起编排**判据**（`planStages` / `executePlan` / `gateVerdict`）已从 `e2e_affected.mjs`
+  搬进 `affected-rules.mjs`、由 `e2eAffectedDecide.spec.ts` 钉住；脚本里只剩 IO 壳
+  （取改动集、探测解释器、spawn）。⚠ **IO 壳仍没有单测**，改完必须自证 `--dry-run` 并核对打印的
+  判定、slot 数与末尾 `RESULT:` 行 ——
   「门禁坏了但没人知道」不能被判成绿灯（2026-10-13 就撞过一次：后端分支 cwd 拼错，那条快门禁从没跑通过）。
 - `apps/<app>/tests*` 只出后端测试标签，**不牵动 e2e 选例**。这 11 条规则此前写在 `apps/<app>/` 之后，
   而判据表是「首条命中即生效」，于是它们全是死规则；2026-10-16 调整顺序后由

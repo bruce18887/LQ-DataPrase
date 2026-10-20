@@ -9,15 +9,19 @@
  *   node scripts/e2e_affected.mjs --files a,b,c   # 核判定本身（不碰工作区，等价 --dry-run）
  *   node scripts/e2e_affected.mjs -- --project=P1 # -- 之后的参数转给 playwright
  *
- * 判据表与 decide()/matchRule()/backendLabels() 住在 scripts/affected-rules.mjs
- * （纯函数、被 test/unit/e2eAffectedDecide.spec.ts 钉住）。这里只管取改动集、打印与执行。
+ * 判据表与 decide()/matchRule()/backendLabels()、编排三兄弟 planStages()/executePlan()/
+ * gateVerdict() 都住在 scripts/affected-rules.mjs（纯函数、零 IO，被
+ * frontend/test/unit/e2eAffectedDecide.spec.ts 钉住）。这里只管取改动集、探测解释器、执行与打印。
  * 三条升级为全量的兜底（任一命中即放弃快档），以及「无受影响用例」必须
  * 显式说出来而不是显示成 0 failed 的假绿 —— 判据正文见 docs/reference/testing-gates.md。
+ *
+ * ⚠ 判这一轮的绿/红，取日志最后的 `RESULT:` 行，不要取 `$?`：
+ *   `npm run test:e2e:affected | tail -N` 的退出码是 tail 的，历史上当场骗过一次（2026-10-20）。
  */
 import { spawnSync, execFileSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { MODULES, backendLabels, decide } from './affected-rules.mjs'
+import { backendLabels, decide, executePlan, gateVerdict, planStages } from './affected-rules.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const FRONTEND = path.join(ROOT, 'frontend')
@@ -87,65 +91,81 @@ function runPool(filesArg, extraPwArgs = '') {
   return run(cmd, printCmd, ROOT, pw ? { E2E_PW_ARGS: pw } : {})
 }
 
+/**
+ * 结论一律打成日志的**最后**几行：退出码会被 `| tail` 这类管道吃掉（2026-10-20 实测
+ * 「exit 0」与「FAILED (failures=1)」同时出自一条命令），而末尾的 RESULT 行落在任何
+ * `tail -N` 的窗口里。**判这一轮的绿/红取 RESULT 行，不取 `$?`。**
+ */
+function report(results, planned) {
+  console.log('')
+  for (const r of results) {
+    const tag = r.aborted
+      ? `ABORTED: ${r.aborted}`
+      : r.skipped
+        ? `SKIP (${r.skipped})`
+        : r.status === 0
+          ? 'ok'
+          : `FAIL (exit=${r.status})`
+    console.log(`档:       ${r.name.padEnd(14)} ${tag}`)
+  }
+  const v = gateVerdict(results)
+  console.log(
+    `RESULT:   ${v.ok ? 'PASS' : 'FAIL'} · 计划 ${planned} 档` +
+      (planned === results.length ? '全部执行' : `，只执行了 ${results.length} 档`) +
+      (v.failed.length ? ` · 失败 [${v.failed.join(', ')}]` : '') +
+      (v.skipped.length ? ` · 跳档 [${v.skipped.join(', ')}]` : '') +
+      (DRY ? ' · dry-run（未真正执行）' : ''),
+  )
+  process.exit(v.ok ? 0 : 1)
+}
+
+/** 没有档可跑：绿灯之外的第三种状态，必须自己说清，别让人当成「测过了」。 */
+function reportNoTests(reason) {
+  console.log(`RESULT:   NO AFFECTED TESTS —— ${reason}（本轮没有档执行，不等于绿灯）`)
+  process.exit(0)
+}
+
 const changed = FILES ? { base: '--files（虚构改动集，仅判定）', files: FILES } : collectChanged()
 if (!changed) {
   console.log('FULL (reason: 无法确定 base —— 全量是唯一安全选择)')
-  process.exit(runPool(''))
+  report([{ name: 'e2e:全量', status: runPool('') }], 1)
 }
 
 const d = decide(changed.files)
 const labels = backendLabels(changed.files)
-const selected = d.global ? null : [...d.modules].sort()
-const paths = selected ? selected.map((m) => `e2e/${m}`).join(' ') : ''
-// 附带 P0：只补跑未被模块覆盖的那部分模块，避免同一用例在两条命令里各跑一遍。
-const p0Paths = selected
-  ? MODULES.filter((m) => !selected.includes(m)).map((m) => `e2e/${m}`).join(' ')
-  : ''
 
 console.log(`base:     ${changed.base}`)
 console.log(`changed:  ${changed.files.length} 个文件`)
 for (const n of d.notes) console.log(`note:     ${n}`)
 if (d.reasons.length) for (const r of d.reasons.slice(0, 8)) console.log(`why:      ${r}`)
 
-if (!changed.files.length) {
-  console.log('NO AFFECTED TESTS (工作区无改动)')
-  process.exit(0)
-}
+if (!changed.files.length) reportNoTests('工作区无改动')
 if (!d.global && !d.modules.size && !d.unit && !labels.length) {
-  console.log(
-    `NO AFFECTED TESTS (${changed.files.length} files${d.notes.length ? ' —— 那部分改动不由 e2e 承载，验证通路见上方 note' : ''})`,
+  reportNoTests(
+    `${changed.files.length} files${d.notes.length ? ' —— 那部分改动不由 e2e 承载，验证通路见上方 note' : ''}`,
   )
-  process.exit(0)
 }
 
 console.log(
   d.global
     ? 'decide:   全量 e2e（兜底命中，见上 why）'
-    : `decide:   e2e 模块 [${selected.join(', ') || '（仅 T2/后端）'}] + vitest`,
+    : `decide:   e2e 模块 [${[...d.modules].sort().join(', ') || '（仅 T2/后端）'}] + vitest`,
 )
+if (d.modules.has('electron')) console.log('note:     e2e/electron 需要 `npm run electron:build:ts` 产物，缺则该模块会红')
 
-let code = 0
-// e2e 静态体检放在最前（约 3 s）：删掉用例后残留的失效 import、失去调用者的助手要在这里
-// 出声，而不是等几分钟的浏览器跑完才发现，也不用等下轮有人读文件。
-code ||= run('npm run lint:e2e', 'npm run lint:e2e')
-// T2 永远跑（实测 175 例 / 408 ms），全量分支也不例外。
-code ||= run('npm run test:unit', 'npm run test:unit')
-if (selected?.includes('electron')) console.log('note:     e2e/electron 需要 `npm run electron:build:ts` 产物，缺则该模块会红')
-if (RUN_BACKEND && labels.length) {
-  const py = spawnSync('python', ['-c', 'import pytest'], { cwd: ROOT, encoding: 'utf-8' })
-  if (py.status !== 0) {
-    console.error('BACKEND SKIPPED: 当前 `python` 无 pytest —— 用 .venv 跑会把 test_outliers 的 import 失败伪装成回归，故拒绝执行')
-  } else {
+// 解释器探测留在脚本里（IO），计划本身是纯函数 —— 见 affected-rules.mjs 的 planStages()。
+const pytest = RUN_BACKEND && labels.length ? spawnSync('python', ['-c', 'import pytest'], { cwd: ROOT, encoding: 'utf-8' }).status === 0 : true
+
+const plan = planStages({ decision: d, labels, runBackend: RUN_BACKEND, pytest })
+report(executePlan(plan, (s) => {
+  if (s.kind === 'lint') return run('npm run lint:e2e', 'npm run lint:e2e')
+  if (s.kind === 'unit') return run('npm run test:unit', 'npm run test:unit')
+  if (s.kind === 'backend') {
     // manage.py 在仓库根，而 npm 脚本挂在 frontend/ —— cwd 必须跟着切，
     // 否则 python 会在 frontend/ 下找不到 manage.py（2026-10-13 实测：后端步骤
     // 只要被选中就必断，这条快门禁从没跑通过）。
-    code ||= run(`python manage.py test ${labels.join(' ')}`, `python manage.py test ${labels.join(' ')}`, ROOT)
+    const cmd = `python manage.py test ${s.labels.join(' ')}`
+    return run(cmd, cmd, ROOT)
   }
-}
-if (d.global) {
-  code ||= runPool('')
-} else if (selected.length) {
-  code ||= runPool(paths)
-  if (p0Paths) code ||= runPool(p0Paths, '--project=P0')
-}
-process.exit(code)
+  return runPool(s.files ?? '', s.pw ?? '')
+}), plan.length)
