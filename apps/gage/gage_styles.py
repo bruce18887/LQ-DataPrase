@@ -1,13 +1,37 @@
 """Gage Summary 工作簿的样式工厂。
 
 配色全部取自 `apps/export/excel_theme`（与 buyoff 共用同一套素雅配色）。
-本模块只负责把这些通用样式组合成 Gage 需要的两组固定顺序元组，
+本模块只负责把这些通用样式组合成 Gage 需要的两组样式，
 不含任何布局或统计逻辑。
 """
+from typing import NamedTuple
+
 import excelize
 
 from apps.export import excel_theme as theme
 from apps.export.fonts import EXCEL_FONT_FAMILY as _FONT
+
+
+class SummaryStyles(NamedTuple):
+    """Summary 工作表用到的样式 id（命名字段，顺序与旧元组一致）。"""
+
+    header: int
+    title: int
+    info_label: int
+    info_value: int
+    warning: int
+    data: int
+    thick_top: int
+    thick_top_mid: int
+    thick_top_right: int
+    thick_left: int
+    thick_right: int
+    thick_bottom: int
+    thick_bottom_mid: int
+    thick_bottom_right: int
+    rr_pct: int
+    bad1_ok: int
+    bad1_fail: int
 
 
 def _grid_style(f, strong):
@@ -39,14 +63,9 @@ def _text_style(f, color, size, bold=True, align="left"):
 
 
 def create_summary_styles(f):
-    """创建 Summary 工作表所需样式（固定顺序，返回元组）。
+    """创建 Summary 工作表所需样式，返回 ``SummaryStyles``。
 
-    调用方按下面的顺序解包：
-        header_style, title_style, info_label_style, info_value_style,
-        warning_style, data_style, thick_top_style, thick_top_mid_style,
-        thick_top_right_style, thick_left_style, thick_right_style,
-        thick_bottom_style, thick_bottom_mid_style, thick_bottom_right_style,
-        r_r_pct_style, bad1_ok_style, bad1_fail_style
+    ``SummaryStyles`` 是元组子类：按旧顺序解包仍然可用，新代码按字段名取。
     """
     header_style = theme.make_header_style(f, 10)
     title_style = theme.make_title_style(f, 16)
@@ -77,7 +96,7 @@ def create_summary_styles(f):
     bad1_ok_style = _text_style(f, theme.FONT_PASS, 11)
     bad1_fail_style = _text_style(f, theme.FONT_FAIL, 11)
 
-    return (
+    return SummaryStyles(
         header_style, title_style, info_label_style, info_value_style,
         warning_style, data_style, thick_top_style, thick_top_mid_style,
         thick_top_right_style, thick_left_style, thick_right_style,

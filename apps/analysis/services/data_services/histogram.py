@@ -46,6 +46,39 @@ def compute_kde_curve(data_series, bin_min, bin_max, n_points=200):
     return [[round(float(xi), 6), round(float(yi), 6)] for xi, yi in zip(x, y)]
 
 
+def resolve_bin_range(range_type, stats, custom_low, custom_high, data_series):
+    """选出 ``range_type`` 对应的分箱区间，并保证 X 轴宽度恒 > 0。
+
+    Binning range follows the selected range_type so the X-axis zooms to the
+    region of interest (e.g. selecting "3 Sigma" spreads a tight distribution
+    across the bins instead of collapsing it into a single RDL-width bin).
+    """
+    if range_type == 'CL' and custom_low is not None and custom_high is not None:
+        bin_min, bin_max = float(custom_low), float(custom_high)
+    else:
+        bin_min, bin_max = resolve_limits(range_type, stats)
+        # 单边限值（如 LSL='0'、USL='MAX'/'Min' 占位 → resolve_spec_limits 对该侧
+        # 返回 None）：旧兜底 `= stats['rdl'][0], stats['rdl'][1]` 把同一对值原样
+        # 赋回，是空操作 —— None 一路活到 safe_gap(None, x) 抛 TypeError → 500，
+        # 而 range_type 默认就是 'RDL'。改为逐侧回退数据范围（与
+        # multi_lot._resolve_multi_range 的单侧回退同语义）。
+        if bin_min is None:
+            bin_min = float(data_series.min())
+        if bin_max is None:
+            bin_max = float(data_series.max())
+
+    # Degenerate range (missing/zero-width limits, or std==0 for sigma ranges):
+    # fall back to the actual data range, then to a ±0.5 window, so ECharts
+    # never receives a zero-width axis.
+    if bin_min == bin_max:
+        bin_min = float(data_series.min())
+        bin_max = float(data_series.max())
+    if bin_min == bin_max:
+        bin_min -= 0.5
+        bin_max += 0.5
+    return bin_min, bin_max
+
+
 def compute_histogram_stats(df, metadata, param, site_col,
                             range_type='RDL', custom_low=None, custom_high=None,
                             iqr_multiplier=1.5, cpk_thresholds=None,
@@ -182,32 +215,9 @@ def compute_histogram_stats(df, metadata, param, site_col,
             None, None, False
         )
 
-    # Binning range follows the selected range_type so the X-axis zooms to the
-    # region of interest (e.g. selecting "3 Sigma" spreads a tight distribution
-    # across the bins instead of collapsing it into a single RDL-width bin).
-    if range_type == 'CL' and custom_low is not None and custom_high is not None:
-        bin_min, bin_max = float(custom_low), float(custom_high)
-    else:
-        bin_min, bin_max = resolve_limits(range_type, stats)
-        # 单边限值（如 LSL='0'、USL='MAX'/'Min' 占位 → resolve_spec_limits 对该侧
-        # 返回 None）：旧兜底 `= stats['rdl'][0], stats['rdl'][1]` 把同一对值原样
-        # 赋回，是空操作 —— None 一路活到 safe_gap(None, x) 抛 TypeError → 500，
-        # 而 range_type 默认就是 'RDL'。改为逐侧回退数据范围（与
-        # multi_lot._resolve_multi_range 的单侧回退同语义）。
-        if bin_min is None:
-            bin_min = float(data_series.min())
-        if bin_max is None:
-            bin_max = float(data_series.max())
-
-    # Degenerate range (missing/zero-width limits, or std==0 for sigma ranges):
-    # fall back to the actual data range, then to a ±0.5 window, so ECharts
-    # never receives a zero-width axis.
-    if bin_min == bin_max:
-        bin_min = float(data_series.min())
-        bin_max = float(data_series.max())
-    if bin_min == bin_max:
-        bin_min -= 0.5
-        bin_max += 0.5
+    # Binning range + 退化区间的兜底见 resolve_bin_range
+    bin_min, bin_max = resolve_bin_range(range_type, stats, custom_low,
+                                         custom_high, data_series)
     # Bin edges & centers must exist before the density curves: the curves
     # sample over the full visible X-axis — bin_centers[0..-1], which extend
     # one gap past the underflow/overflow bin centres — so they fill the
