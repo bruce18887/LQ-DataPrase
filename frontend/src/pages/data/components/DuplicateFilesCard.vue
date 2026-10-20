@@ -1,25 +1,16 @@
 <template>
-  <el-card v-if="groups.length > 0" class="repair-card" data-testid="duplicate-files-card">
-    <template #header>
-      <div class="card-header">
-        <span class="card-title">重复文件</span>
-        <el-tag type="danger" size="small">文件名与大小完全相同</el-tag>
-      </div>
-    </template>
-    <el-alert
-      title="以下文件按「文件名 + 大小」判定重复。删除重复项时保留最早导入的一条（其余文件将从数据库与磁盘移除）。"
-      type="warning"
-      :closable="false"
-      show-icon
-      style="margin-bottom: 12px"
-    />
-    <el-alert
-      v-if="totalCount > groups.length"
-      :title="`共 ${totalCount} 组重复，仅显示前 ${groups.length} 组，删除操作将作用于全部。`"
-      type="info"
-      :closable="false"
-      style="margin-bottom: 12px"
-    />
+  <MaintenanceCard
+    test-id="duplicate-files-card"
+    :visible="groups.length > 0"
+    title="重复文件"
+    tag-text="文件名与大小完全相同"
+    tag-type="danger"
+    :alert="{
+      title: '以下文件按「文件名 + 大小」判定重复。删除重复项时保留最早导入的一条（其余文件将从数据库与磁盘移除）。',
+      type: 'warning',
+    }"
+    :truncated-note="truncatedNote"
+  >
     <div v-for="group in groups" :key="group.filename + '-' + group.file_size" class="dup-group">
       <div class="dup-group-header">
         <span class="dup-group-key mono">{{ group.filename }}</span>
@@ -38,12 +29,14 @@
         {{ i === 0 ? '✓ 保留' : '删除' }} {{ f.file_type === 'batch' ? `[${f.batch_name}]` : '[单文件]' }} · #{{ f.id }}
       </el-tag>
     </div>
-    <div class="card-footer">
+    <template #footer-left>
       <el-checkbox v-model="deleteConfirmed" :disabled="!canDelete">
         <span :style="{ color: canDelete ? 'var(--error)' : 'var(--text-3)', fontWeight: 600 }">
           {{ canDelete ? '我已确认要删除全部重复项' : '仅管理员可删除重复文件' }}
         </span>
       </el-checkbox>
+    </template>
+    <template #footer-right>
       <el-button
         type="danger"
         plain
@@ -53,15 +46,16 @@
       >
         <el-icon><Delete /></el-icon> 删除重复文件
       </el-button>
-    </div>
-  </el-card>
+    </template>
+  </MaintenanceCard>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Delete } from '@element-plus/icons-vue'
 import type { DuplicateGroup, DuplicateGroupFile } from '../../../api/datafiles'
 import { formatSize } from '../../../utils/format'
+import MaintenanceCard from './MaintenanceCard.vue'
 
 const props = defineProps<{
   groups: DuplicateGroup[]
@@ -82,6 +76,12 @@ watch(() => [props.groups, props.totalCount], () => {
   deleteConfirmed.value = false
 })
 
+const truncatedNote = computed(() =>
+  props.totalCount > props.groups.length
+    ? `共 ${props.totalCount} 组重复，仅显示前 ${props.groups.length} 组，删除操作将作用于全部。`
+    : '',
+)
+
 function dupFileTitle(f: DuplicateGroupFile) {
   const loc = f.file_type === 'batch' ? `批次：${f.batch_name || '—'} / 子批次：${f.sub_batch || '—'}` : '单文件'
   return `ID ${f.id}｜${loc}｜大小 ${f.file_size} B`
@@ -89,17 +89,6 @@ function dupFileTitle(f: DuplicateGroupFile) {
 </script>
 
 <style scoped>
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.card-title {
-  font-weight: 600;
-  color: var(--text);
-}
-
 .dup-group {
   padding: 10px 12px;
   margin-bottom: 8px;
@@ -144,18 +133,6 @@ function dupFileTitle(f: DuplicateGroupFile) {
 
 .dup-file-tag {
   margin: 0;
-}
-
-.card-footer {
-  margin-top: 12px;
-  padding: 12px;
-  background: var(--bg-2);
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
 }
 
 .mono {
