@@ -327,11 +327,15 @@ class UserSettingsApiTests(APITestCase):
         resp = self.client.get(self.url)
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         templates = resp.data['export_filename_templates']
+        # 这份清单**故意写死**：serializer 是 `{**EXPORT_TEMPLATE_DEFAULTS, **templates}`，
+        # 拿同一张表比就恒真了。新增导出类型时必须在这里补一项，同时补
+        # apps/common/export_naming.py 的两张表 + frontend/src/constants/export-templates.ts
+        # （前端 `Record<ExportTypeKey, ExportTemplateMeta>` 少一项会 TS2741）。
         self.assertEqual(
             set(templates.keys()),
             {'to_excel', 'to_csv', 'sigma_limit', 'html_report',
              'batch_charts', 'batch_report', 'buyoff', 'gage',
-             'file_correlation'},
+             'file_correlation', 'weight_plot'},
         )
         # Defaults match the built-in templates
         self.assertEqual(templates['to_excel'], '{filename}_analysis')

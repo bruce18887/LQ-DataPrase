@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory, createWebHashHistory } from 'vue-router'
 import {
-  Connection, Folder, Odometer, Search, Setting, TrendCharts, User,
+  Connection, DataAnalysis, Folder, Odometer, Search, Setting, TrendCharts, User,
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '../stores/auth'
 import { ensureChartRenderer } from '../utils/echarts-theme'
@@ -68,6 +68,12 @@ const routes = [
           desc: '范围 → 过滤 → 命中；结果与运行状态跨页面驻留',
           parent: { label: 'SFTP 浏览器', to: '/sftp' },
         },
+      },
+      {
+        path: 'weight',
+        name: 'WeightPlot',
+        component: () => import('../pages/weight/WeightPlotPage.vue'),
+        meta: { title: '权重画图', icon: DataAnalysis, desc: '本地权重 CSV 的逐点曲线与同名均值' },
       },
       {
         path: 'batch',

@@ -4,3 +4,4 @@
 # `-text` 关掉 EOL 转换，让检出内容与本机跑过验证的字节逐字相同。
 test/fixtures/gage/*.csv -text
 test/fixtures/gage/MANIFEST.txt -text
+test/fixtures/weight/*.csv -text

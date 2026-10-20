@@ -12,7 +12,7 @@ import { SEEDED_FILES } from '../fixtures/test-data'
 
 const TEMPLATE_KEYS = [
   'to_excel', 'to_csv', 'sigma_limit', 'html_report',
-  'batch_charts', 'batch_report', 'buyoff', 'gage',
+  'batch_charts', 'batch_report', 'buyoff', 'gage', 'file_correlation', 'weight_plot',
 ]
 
 /**
@@ -35,6 +35,8 @@ async function restoreTemplates(page: import('@playwright/test').Page) {
       batch_report: 'Batch_Report_{datetime}',
       buyoff: 'Buyoff_Form_{datetime}',
       gage: 'Gage_Summary_{datetime}',
+      file_correlation: '{file1}_vs_{file2}_correlation',
+      weight_plot: 'Weight_Plot_{filename}_{date}',
     }
     await fetch('/api/v1/auth/settings/', {
       method: 'PUT',
@@ -48,7 +50,7 @@ async function restoreTemplates(page: import('@playwright/test').Page) {
 }
 
 test.describe('@p1 导出文件名模板', { tag: ['@p1', '@settings'] }, () => {
-  test('渲染：卡片 + 8 行模板输入 + 插入变量/恢复默认可见', async ({ page }) => {
+  test('渲染：卡片 + 10 行模板输入 + 插入变量/恢复默认可见', async ({ page }) => {
     await gotoExportTab(page)
     await expect(page.getByText('📄 导出文件名')).toBeVisible()
 

@@ -64,6 +64,7 @@ INSTALLED_APPS = [
     'apps.export',
     'apps.sftp',
     'apps.jobs',
+    'apps.weight',
 ]
 
 MIDDLEWARE = [

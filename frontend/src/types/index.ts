@@ -9,6 +9,7 @@ export interface User {
 export type ExportTypeKey =
   | 'to_excel' | 'to_csv' | 'sigma_limit' | 'html_report'
   | 'batch_charts' | 'batch_report' | 'buyoff' | 'gage' | 'file_correlation'
+  | 'weight_plot'
 
 export interface UserSettings {
   page_size: number
