@@ -3,10 +3,10 @@
 </template>
 
 <script setup lang="ts">
-import { chartFontSize } from '../../../theme/typography'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
-import { clampBarValue, formatPercent, formatAxisValue, getBarGroupPad, getMaxBarWidthPercent, mapLotColorToTheme, buildChartToolbox } from '../../../utils/chart-bar'
+import { buildMultiFileOption } from '../multiFileChartOption'
+import type { MultiLotResponse, MultiLotTheme } from '../multiFileChartOption'
 
 const props = defineProps<{
   /** /analysis/multi_lot/ 带 param 的响应 */
@@ -20,261 +20,28 @@ const props = defineProps<{
 
 const { colors, isDark } = useEChartsTheme()
 
-/** 后端 lot.color（浅色板固定）→ 当前主题色（图例/柱/线同一来源） */
-function lotThemeColor(lot: any): string {
-  return mapLotColorToTheme(lot.color, isDark.value)
-}
-
-function displayName(lot: any): string {
-  return props.fileNames[lot.file_id] || lot.name || `File ${lot.file_id}`
-}
-
-/** 计算正态分布概率密度函数 */
-function normalPDF(x: number, mean: number, std: number): number {
-  if (std === 0) return 0
-  return (1 / (std * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * ((x - mean) / std) ** 2)
-}
-
+/**
+ * option 构造本身是纯函数（`pages/analysis/multiFileChartOption.ts`，判据住在 T2 的
+ * `multiFileChartOption.spec.ts`）；这里只负责把主题色从 store 取出来传进去 ——
+ * 纯模块一旦 import vue/pinia，T2 的 `environment: 'node'` 就起不来。
+ */
 function buildOption() {
-  const r = props.lotData
-  if (!r || !Array.isArray(r.lot_data) || r.lot_data.length === 0) return {}
-  const tc = colors.value.textColor
-  // 轴辅助色（2026-08-26 夜晚可视度修复）：light 保持直方图基准常量，
-  // night 提亮——#1E88E5 在深底对比度不足
-  const AXIS = isDark.value
-    ? { left: '#64B5F6', normal: '#FFA726' }
-    : { left: '#1E88E5', normal: '#F57F17' }
-  const lots: any[] = r.lot_data
-  const showLimit = props.chartConfig.includes('limit')
-  const showNormal = props.chartConfig.includes('normal')
-  const binCenters: number[] = r.bin_centers || []
-
-  const series: any[] = []
-  const legendData: string[] = []
-  // 柱宽上限：N 系列并排柱组总宽必须 ≤ bin 宽，否则柱组横跨 bin 边界、
-  // 贴限 bin（右边界=USL）的 pass 柱会被画到 USL 右侧（回归：limit-line-cross）
-  const effectiveBarWidth = Math.min(props.barWidthPercent, getMaxBarWidthPercent(lots.length))
-
-  // 添加柱状图系列（每个文件独立颜色，显示百分比标签）
-  for (const lot of lots) {
-    const dn = displayName(lot)
-    const lc = lotThemeColor(lot)
-    legendData.push(dn)
-    series.push({
-      name: dn,
-      type: 'bar',
-      // 小百分比（如 0.002%）钳制到最小可见柱高，真实值存 data[2] 供 tooltip/标签
-      data: lot.bar_data.map((d: number[]) => [d[0], clampBarValue(d[1]), d[1]]),
-      itemStyle: { color: lc },
-      barWidth: `${effectiveBarWidth}%`,
-      barGap: '10%',
-      label: {
-        show: true,
-        position: 'top',
-        formatter: (params: any) => {
-          const real = params.data?.[2] ?? params.data?.[1]
-          return real > 0 ? `${formatPercent(real)}%` : ''
-        },
-        fontSize: chartFontSize.micro,
-        color: lc,
-        fontWeight: 'bold',
-      },
-    })
+  const theme: MultiLotTheme = {
+    textColor: colors.value.textColor,
+    axisLineColor: colors.value.axisLineColor,
+    tooltipBg: colors.value.tooltipBg,
+    tooltipBorder: colors.value.tooltipBorder,
+    tooltipText: colors.value.tooltipText,
+    isDark: isDark.value,
   }
-
-  // Limit 线：每个文件独立图例
-  if (showLimit) {
-    for (const lot of lots) {
-      const dn = displayName(lot)
-      const lc = lotThemeColor(lot)
-      const mk: any[] = []
-      const upperLimit = lot.display_upper ?? lot.upper_limit
-      const lowerLimit = lot.display_lower ?? lot.lower_limit
-      if (upperLimit != null) {
-        mk.push({
-          xAxis: upperLimit,
-          lineStyle: { color: lc, width: 3, type: 'dashed' },
-          label: {
-            show: true,
-            formatter: `${dn} USL`,
-            position: 'end',
-            color: lc,
-            fontSize: chartFontSize.micro,
-            fontWeight: 'bold',
-          },
-        })
-      }
-      if (lowerLimit != null) {
-        mk.push({
-          xAxis: lowerLimit,
-          lineStyle: { color: lc, width: 3, type: 'dashed' },
-          label: {
-            show: true,
-            formatter: `${dn} LSL`,
-            position: 'end',
-            color: lc,
-            fontSize: chartFontSize.micro,
-            fontWeight: 'bold',
-          },
-        })
-      }
-      if (mk.length) {
-        const limitX = upperLimit ?? lowerLimit ?? binCenters[0]
-        series.push({
-          name: `${dn} 规格限`,
-          type: 'scatter',
-          data: [[limitX, 0]],
-          symbol: 'circle',
-          symbolSize: 0,
-          itemStyle: { color: lc },
-          markLine: { symbol: 'none', precision: 4, data: mk },
-        })
-        legendData.push(`${dn} 规格限`)
-      }
-    }
-  }
-
-  // 正态分布曲线：每个文件独立颜色
-  if (showNormal) {
-    for (const lot of lots) {
-      const dn = displayName(lot)
-      const lc = lotThemeColor(lot)
-      if (lot.std > 0 && binCenters.length > 0) {
-        // 生成平滑的正态分布曲线
-        const xMin = binCenters[0]
-        const xMax = binCenters[binCenters.length - 1]
-        const step = (xMax - xMin) / 100
-        const normalData: [number, number][] = []
-        for (let x = xMin; x <= xMax; x += step) {
-          normalData.push([x, normalPDF(x, lot.mean, lot.std)])
-        }
-        series.push({
-          name: `${dn} 正态分布`,
-          type: 'line',
-          data: normalData,
-          smooth: true,
-          lineStyle: { color: lc, width: 3, type: 'dotted' },
-          itemStyle: { color: lc },
-          symbol: 'none',
-          yAxisIndex: 1, // 使用独立的概率密度Y轴
-          z: 10,
-        })
-        legendData.push(`${dn} 正态分布`)
-      }
-    }
-  }
-
-  // KDE 曲线：每个文件独立颜色
-  const showKde = props.chartConfig.includes('kde')
-  if (showKde) {
-    for (const lot of lots) {
-      const dn = displayName(lot)
-      const lc = lotThemeColor(lot)
-      if (lot.kde_curve && lot.kde_curve.length > 0) {
-        series.push({
-          name: `${dn} KDE`,
-          type: 'line',
-          data: lot.kde_curve,
-          smooth: true,
-          lineStyle: { color: lc, width: 2.5 },
-          itemStyle: { color: lc },
-          symbol: 'none',
-          yAxisIndex: 1,
-          z: 10,
-        })
-        legendData.push(`${dn} KDE`)
-      }
-    }
-  }
-
-  const titleText = `${props.selectedParam}  ${r.global_mean != null ? `(μ=${r.global_mean})` : ''}`
-
-  // 多系列 bar 分组偏移的边缘 pad（见下方 xAxis 注释）：N = 文件数；无 bin_centers
-  // 的 fallback 场景从 bar_data 相邻 x 推导 binGap，推导失败则 pad=0。
-  const binGap = binCenters.length >= 2
-    ? binCenters[1] - binCenters[0]
-    : (lots[0]?.bar_data?.[1]?.[0] != null ? lots[0].bar_data[1][0] - lots[0].bar_data[0][0] : 0)
-  const axisPad = getBarGroupPad(lots.length, binGap, effectiveBarWidth)
-
-  // 构建Y轴配置（左/右轴色与直方图同源：light 常量 / night 提亮，2026-08-26）
-  const yAxisConfig: any[] = [
-    {
-      type: 'value',
-      name: '百分比 (%)',
-      nameTextStyle: { color: AXIS.left, fontWeight: 'bold' },
-      position: 'left',
-      min: 0,
-      axisLabel: { formatter: '{value}%', color: AXIS.left },
-      axisLine: { show: true, lineStyle: { color: AXIS.left } },
-    },
-  ]
-
-  // 如果显示正态分布曲线或 KDE 曲线，添加概率密度Y轴
-  if (showNormal || showKde) {
-    yAxisConfig.push({
-      type: 'value',
-      name: '概率密度',
-      nameTextStyle: { color: AXIS.normal, fontWeight: 'bold' },
-      position: 'right',
-      min: 0,
-      axisLabel: { formatter: (v: number) => v.toExponential(2), color: AXIS.normal },
-      axisLine: { show: true, lineStyle: { color: AXIS.normal } },
-      splitLine: { show: false },
-    })
-  }
-
-  return {
-    title: {
-      text: titleText,
-      left: 'center',
-      top: 6,
-      textStyle: { fontSize: chartFontSize.base, fontWeight: 'bold', color: tc },
-    },
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'shadow' },
-      backgroundColor: colors.value.tooltipBg,
-      borderColor: colors.value.tooltipBorder,
-      textStyle: { color: colors.value.tooltipText },
-      formatter: (params: any) => {
-        const items = Array.isArray(params) ? params : [params]
-        if (!items.length) return ''
-        let html = `值: ${Number(items[0].data?.[0]).toFixed(4)}<br/>`
-        for (const p of items) {
-          if (p.data && p.data[1] != null && p.seriesType === 'bar') {
-            // data[1] 是钳制后的渲染值，data[2] 才是真实百分比
-            const real = p.data[2] ?? p.data[1]
-            html += `${p.seriesName}: ${formatPercent(Number(real))}%<br/>`
-          }
-        }
-        return html
-      },
-    },
-    legend: { data: legendData, top: 'bottom', type: 'scroll', textStyle: { color: tc } },
-    toolbox: buildChartToolbox({ name: `${props.selectedParam}_多文件对比` }),
-    grid: { top: 55, bottom: 70, left: 55, right: (showNormal || showKde) ? 80 : 55 },
-    // 轴 min/max 向两端扩展多系列 bar 分组偏移量（getBarGroupPad）：N 个文件系列
-    // 在同一 value 轴上分组错位，最左系列第 0 点柱体（x=bin_centers[0]）与最右系列
-    // 最后点柱体（x=bin_centers[-1]）会被挤出绘图区整根裁剪（回归：edge-clip，
-    // 与 HistogramChart 同构）。扩展仅两端多出空边距；正态曲线仍按未扩展 span 生成
-    xAxis: {
-      type: 'value',
-      min: binCenters.length > 0 ? binCenters[0] - axisPad : r.chart_min,
-      max: binCenters.length > 0 ? binCenters[binCenters.length - 1] + axisPad : r.chart_max,
-      axisLine: { lineStyle: { color: colors.value.axisLineColor } },
-      axisLabel: {
-        rotate: 45,
-        show: true,
-        interval: 0,
-        fontSize: chartFontSize.micro,
-        formatter: formatAxisValue,
-        color: tc,
-      },
-      splitNumber: 24,
-    },
-    yAxis: yAxisConfig,
-    series,
-  }
+  return buildMultiFileOption({
+    lotData: props.lotData as MultiLotResponse,
+    chartConfig: props.chartConfig,
+    barWidthPercent: props.barWidthPercent,
+    fileNames: props.fileNames,
+    selectedParam: props.selectedParam,
+    theme,
+  })
 }
 
 const { chartRef } = useChart(buildOption, [
