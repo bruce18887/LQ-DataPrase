@@ -11,7 +11,7 @@
 - 每个可见测试项一张 sheet（sheet 名 = 测试项名，非法字符替换、31 字符上限、重名加 `_2`）：
   - 图锚 `A1`（16 × 11cm），标题 = 测试项名，x 轴到本组最长系列 - 1，y 轴 auto，图例在底部；
   - 4 条原始曲线：细线 + 小圆点，保留组基色与组内线型；
-  - 均值线（show_mean 时）：深灰粗线 + 圆点 + **每个点的数值标签**（与表格一致的 6 位小数）；
+  - 均值线（show_mean 时）：深灰粗线 + 圆点 + **每个点的数值标签**（与表格一致的 5 位小数）；
   - 数据表在 `DETAIL_HEADER_ROW` 起（原序号 / 系列名 / code 0..本组最长），均值行紧跟组末；
   - `A23` 放「← 返回总览」超链接。
 
@@ -313,7 +313,7 @@ def _build_group_chart(ws, g: WeightGroup,
             labels.showSerName = False
             labels.showCatName = False
             labels.showLegendKey = False
-            labels.numFmt = _fmt(s.decimals)       # 均值 6 位，与表格一致
+            labels.numFmt = _fmt(s.decimals)       # 均值 5 位，与表格一致
             labels.position = 't'
             ser.dLbls = labels
         chart.series.append(ser)

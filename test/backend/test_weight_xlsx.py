@@ -6,7 +6,7 @@
 图本身的圆点/标签/坐标轴在 `test_weight_xlsx_chart.py`；本文件只断结构、数据与表名。
 
 夹具形状：56 声明 = 14 组 × 4、长度 {4,8,16,32,64}、小数位全 5。
-「按原文小数位写 number_format」「均值 6 位」仍用合成/手工文档断（夹具写死 5 位也绿）。
+「按原文小数位写 number_format」「均值 5 位」仍用合成/手工文档断（夹具写死 5 位也绿）。
 """
 import io
 import os
@@ -200,7 +200,7 @@ class DetailSheetTests(TestCase):
         self.assertEqual(ws.cell(row, DETAIL_COL_NAME).value, 'WT0001_Avg')
         self.assertIsNone(ws.cell(row, DETAIL_COL_SOURCE_INDEX).value)
         self.assertTrue(ws.cell(row, DETAIL_COL_NAME).font.bold)
-        self.assertEqual(ws.cell(row, DETAIL_COL_VALUE0 + 3).number_format, '0.000000')
+        self.assertEqual(ws.cell(row, DETAIL_COL_VALUE0 + 3).number_format, '0.00000')
         self.assertEqual(ws.cell(row, DETAIL_COL_VALUE0 + 3).value, -0.0119525)
 
     def test_mean_rows_absent_by_default(self):
