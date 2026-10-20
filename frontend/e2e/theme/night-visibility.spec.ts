@@ -169,6 +169,7 @@ test.describe('@theme 主题视觉回归', { tag: ['@p2', '@theme'] }, () => {
       { name: '数据管理-文件列表', url: '/data', ready: '.el-table' },
       { name: '系统设置', url: '/settings', ready: '.el-tabs' },
       { name: 'SFTP 浏览器', url: '/sftp', ready: '.connect-card' },
+      { name: '权重画图', url: '/weight', ready: '[data-testid="weight-empty-hint"]' },
     ]
     for (const p of pages) {
       await gotoApp(page, p.url)

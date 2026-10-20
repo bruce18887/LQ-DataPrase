@@ -42,6 +42,10 @@ export const ERROR_CODE_MAP: Record<string, string> = {
   invalid_method: '不支持的分析方法',
   correlation_failed: '相关性分析失败',
   internal_error: '服务器内部错误',
+  no_declaration: '文件里没有找到 double 权重声明',
+  weight_length_mismatch: '声明长度与实际数值个数不一致',
+  weight_bad_number: '权重数值里有无法解析的项',
+  weight_too_large: '权重文件超出可处理范围',
 }
 
 interface ErrorLike {

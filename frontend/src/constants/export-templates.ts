@@ -87,6 +87,12 @@ export const EXPORT_TEMPLATE_META: Record<ExportTypeKey, ExportTemplateMeta> = {
     extension: 'xlsx',
     variables: ['file1', 'file2', 'date', 'time', 'datetime', 'user'],
   },
+  weight_plot: {
+    label: '权重画图导出',
+    default: 'Weight_Plot_{filename}_{date}',
+    extension: 'xlsx',
+    variables: ['filename', 'date', 'time', 'datetime', 'user'],
+  },
 }
 
 export const EXPORT_TEMPLATE_KEYS = Object.keys(EXPORT_TEMPLATE_META) as ExportTypeKey[]

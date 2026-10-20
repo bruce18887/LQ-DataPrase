@@ -137,6 +137,13 @@ _hiddenimports += [
     'apps.sftp.pool',
     'apps.sftp.cache',
     'apps.sftp.crypto',
+    # 权重画图：INSTALLED_APPS / urls 里都是字符串引用，PyInstaller 静态分析看不见
+    'apps.weight',
+    'apps.weight.apps',
+    'apps.weight.views',
+    'apps.weight.urls',
+    'apps.weight.parser',
+    'apps.weight.xlsx',
     'apps.common',
     'apps.common.file_loading',
     'apps.common.params',

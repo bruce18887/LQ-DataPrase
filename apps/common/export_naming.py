@@ -26,6 +26,7 @@ EXPORT_TEMPLATE_DEFAULTS: dict[str, str] = {
     'buyoff': 'Buyoff_Form_{datetime}',
     'gage': 'Gage_Summary_{datetime}',
     'file_correlation': '{file1}_vs_{file2}_correlation',
+    'weight_plot': 'Weight_Plot_{filename}_{date}',
 }
 
 # Variables available per export type (mirrored in frontend/src/constants/export-templates.ts)
@@ -39,6 +40,7 @@ EXPORT_TEMPLATE_VARIABLES: dict[str, tuple[str, ...]] = {
     'buyoff': ('file_count', 'date', 'time', 'datetime', 'user'),
     'gage': ('file_count', 'date', 'time', 'datetime', 'user'),
     'file_correlation': ('file1', 'file2', 'date', 'time', 'datetime', 'user'),
+    'weight_plot': ('filename', 'date', 'time', 'datetime', 'user'),
 }
 
 MAX_TEMPLATE_LENGTH = 200

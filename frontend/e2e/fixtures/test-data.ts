@@ -114,5 +114,6 @@ export const ROUTES = [
   { path: '/data', title: '数据管理', menu: '数据管理' },
   { path: '/analysis', title: '数据分析', menu: '数据分析' },
   { path: '/sftp', title: 'SFTP 浏览器', menu: 'SFTP 浏览器' },
+  { path: '/weight', title: '权重画图', menu: '权重画图' },
   { path: '/settings', title: '系统设置', menu: '系统设置' },
 ] as const

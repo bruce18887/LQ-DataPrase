@@ -18,6 +18,7 @@ urlpatterns = [
     path('api/v1/', include('apps.gage.urls')),
     path('api/v1/', include('apps.export.urls')),
     path('api/v1/', include('apps.sftp.urls')),
+    path('api/v1/', include('apps.weight.urls')),
     path('api/v1/jobs/', include('apps.jobs.urls')),
     path('api/v1/', include('apps.common.urls')),
 ]
