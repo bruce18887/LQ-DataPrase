@@ -22,6 +22,156 @@ from apps.analysis.services.statistics.downsample import (
 )
 
 
+def anchor_for(value, y_min, y_max):
+    """点在该 X 轴上的落位方式：0=正常, 1=无测量值, 2=高于 y_max, 3=低于 y_min。"""
+    if pd.isna(value):
+        return 1
+    if y_max is not None and value > y_max:
+        return 2
+    if y_min is not None and value < y_min:
+        return 3
+    return 0
+
+
+def build_serial_points(sdf, serial_col, value_col, continuous_serials,
+                        fail_by_serial, y_min, y_max):
+    """一个系列（全量或单个 Site）的散点 [serial, value|null, is_fail, anchor]。
+
+    ``fail_by_serial`` 为 None（文件无 Bin 列）时退化成旧的两元组形状，前端
+    据此不画 fail 标记。
+    """
+    sv = dict(zip(sdf[serial_col].tolist(), sdf[value_col].tolist()))
+    fail_d = None
+    if fail_by_serial is not None:
+        fail_d = dict(zip(
+            sdf[serial_col].tolist(),
+            [fail_by_serial.get(s, 0) for s in sdf[serial_col].tolist()]))
+    pts = []
+    for s in continuous_serials:
+        if s in sv:
+            v = sv[s]
+            if fail_d is None:
+                pts.append([s, v])
+            else:
+                pts.append([s, None if pd.isna(v) else v,
+                            fail_d[s], anchor_for(v, y_min, y_max)])
+    return pts
+
+
+def downsample_points(pts):
+    """大数据量保形降采样（仅影响传输/绘制点集）：
+
+    - 按 serial 分桶 M4/MinMax 保 value 极值轮廓（value 为 y 轴）；
+    - **anchor ≠ 0 的点强制保留**（超界值被锚定到轴边，视觉信息
+      不能丢）；无测量值点（value 为 None/NaN）不参与极值选择；
+    - pass/fail_count、均值/限值等统计字段由调用方在全量数据上
+      计算，不受采样影响。
+    """
+    if len(pts) <= DOWN_SAMPLE_THRESHOLD:
+        return pts
+    serials = np.array([p[0] for p in pts], dtype=float)
+    values = np.array(
+        [np.nan if p[1] is None else float(p[1]) for p in pts],
+        dtype=float)
+    keep = bucket_minmax_indices(serials, values)
+    anchors = [i for i, p in enumerate(pts)
+               if len(p) > 3 and p[3] != 0]
+    if anchors:
+        keep = np.union1d(keep, np.array(anchors, dtype=int))
+    return [pts[i] for i in keep]
+
+
+def build_mark_lines(spec_lower, spec_upper, mean_val, std_val, chart_config):
+    """规格限与 ±3/4/6σ 的 markLine 系列（每项一个空数据 scatter 系列承载线）。"""
+    marks = []
+    if 'limit' in chart_config and spec_lower is not None and spec_upper is not None:
+        marks.append({
+            'name': '规格限',
+            'type': 'scatter',
+            'data': [],
+            'markLine': {
+                'symbol': 'none',
+                'precision': 4,
+                'data': [
+                    {'yAxis': spec_lower,
+                     'lineStyle': {'color': '#FF6384', 'width': 3,
+                                   'type': 'dashed'},
+                     'label': {'show': True, 'formatter': 'LSL',
+                               'position': 'end'}},
+                    {'yAxis': spec_upper,
+                     'lineStyle': {'color': '#FF6384', 'width': 3,
+                                   'type': 'dashed'},
+                     'label': {'show': True, 'formatter': 'USL',
+                               'position': 'end'}},
+                ],
+            },
+        })
+    for sigma, color in [('3', '#5470c6'), ('4', '#91cc75'), ('6', '#fac858')]:
+        if f's{sigma}' not in chart_config:
+            continue
+        lower = mean_val - int(sigma) * std_val
+        upper = mean_val + int(sigma) * std_val
+        marks.append({
+            'name': f'{sigma}σ范围',
+            'type': 'scatter',
+            'data': [],
+            'markLine': {
+                'symbol': 'none',
+                'precision': 4,
+                'data': [
+                    {'yAxis': lower,
+                     'lineStyle': {'color': color, 'width': 3,
+                                   'type': 'dotted'},
+                     'label': {'show': True,
+                               'formatter': f'{sigma}σ下限',
+                               'position': 'insideEndTop'}},
+                    {'yAxis': upper,
+                     'lineStyle': {'color': color, 'width': 3,
+                                   'type': 'dotted'},
+                     'label': {'show': True,
+                               'formatter': f'{sigma}σ上限',
+                               'position': 'insideEndTop'}},
+                ],
+            },
+        })
+    return marks
+
+
+def _group_final_rows(df, param, serial_col, site_col, bin_col):
+    """每个 (site, serial)（无 site 时每个 serial）取**最后一行**。
+
+    重测行追加在后面，所以 ``.last()`` 拿到的就是这颗 die 的最终结果；
+    param 为 NaN 的行要保留 —— 没测到值的 die 仍有 Bin，必须继续可见，
+    而 inf/非数值经 ``to_numeric`` 变 NaN 后同样留下。
+    返回列序 ``[site?, serial, param, bin?]`` 的扁平 DataFrame。
+    """
+    key_cols = ([site_col] if site_col else []) + [serial_col]
+    group_cols = [param] + ([bin_col] if bin_col else [])
+    cols = key_cols + [c for c in group_cols if c not in key_cols]
+
+    frame = df[cols].copy()
+    for key in key_cols:
+        frame[key] = get_1d_from(frame, key)
+    frame[param] = pd.to_numeric(frame[param], errors='coerce')
+    frame = frame[np.isfinite(frame[param].values) | frame[param].isna().values]
+    frame = frame.reset_index(drop=True)
+    frame[serial_col] = pd.to_numeric(frame[serial_col], errors='coerce')
+
+    keys = [get_1d_from(frame, key) for key in key_cols]
+    grouped = frame.groupby(
+        keys if len(keys) > 1 else keys[0])[group_cols].last()
+    if len(keys) > 1:
+        grouped.index.names = ['__idx_0__', '__idx_1__']
+    else:
+        grouped.index.name = '__idx_0__'
+    grouped = grouped.reset_index()
+
+    expected = list(dict.fromkeys(key_cols + group_cols))
+    grouped = grouped.iloc[:, :len(expected)]
+    grouped.columns = expected
+    return grouped
+
+
 def compute_serial_distribution_data(df, metadata, param, range_type,
                                      chart_config, serial_col=None,
                                      iqr_multiplier: float = 1.5,
@@ -63,65 +213,8 @@ def compute_serial_distribution_data(df, metadata, param, range_type,
 
     bin_col = get_bin_column(df, metadata)
 
-    # -- Build grouped data (with / without site) -------------------------
-    # One point per (site, serial) carrying the *final* test row (.last():
-    # retest rows append later attempts, so the last row is the die's final
-    # result).  NaN param rows are kept — a die without a measurement for
-    # this param still has a Bin result and must remain visible.
-    if site_col:
-        cols = [serial_col, site_col, param]
-        if bin_col and bin_col not in cols:
-            cols.append(bin_col)
-        sws = df[cols].copy()
-        sws[site_col] = get_1d_from(sws, site_col)
-        sws[param] = pd.to_numeric(sws[param], errors='coerce')
-        sws = sws[np.isfinite(sws[param].values) | sws[param].isna().values]
-        sws = sws.reset_index(drop=True)
-        sws[serial_col] = pd.to_numeric(sws[serial_col], errors='coerce')
-        site_key = get_1d_from(sws, site_col)
-        serial_key = get_1d_from(sws, serial_col)
-        group_cols = [param] + ([bin_col] if bin_col else [])
-        serial_grouped = sws.groupby([site_key, serial_key])[group_cols].last()
-        serial_grouped.index.names = ['__idx_0__', '__idx_1__']
-        serial_grouped = serial_grouped.reset_index()
-        expected = []
-        seen = set()
-        for name in [site_col, serial_col, param]:
-            if name not in seen:
-                seen.add(name)
-                expected.append(name)
-        if bin_col and bin_col not in seen:
-            expected.append(bin_col)
-        serial_grouped = serial_grouped.iloc[:, :len(expected)]
-        serial_grouped.columns = expected
-    else:
-        cols = [serial_col, param]
-        if bin_col and bin_col not in cols:
-            cols.append(bin_col)
-        serial_site_data = df[cols].copy()
-        serial_site_data[param] = pd.to_numeric(
-            serial_site_data[param], errors='coerce')
-        serial_site_data = serial_site_data[
-            np.isfinite(serial_site_data[param].values)
-            | serial_site_data[param].isna().values]
-        serial_site_data = serial_site_data.reset_index(drop=True)
-        serial_site_data[serial_col] = pd.to_numeric(
-            serial_site_data[serial_col], errors='coerce')
-        serial_key = get_1d_from(serial_site_data, serial_col)
-        group_cols = [param] + ([bin_col] if bin_col else [])
-        serial_grouped = serial_site_data.groupby(serial_key)[group_cols].last()
-        serial_grouped.index.name = '__idx_0__'
-        serial_grouped = serial_grouped.reset_index()
-        expected = []
-        seen = set()
-        for name in [serial_col, param]:
-            if name not in seen:
-                seen.add(name)
-                expected.append(name)
-        if bin_col and bin_col not in seen:
-            expected.append(bin_col)
-        serial_grouped = serial_grouped.iloc[:, :len(expected)]
-        serial_grouped.columns = expected
+    # One point per (site, serial) — 分组口径见 _group_final_rows
+    serial_grouped = _group_final_rows(df, param, serial_col, site_col, bin_col)
 
     # -- Final-bin fail judgement (die level, matches the file's bin summary) --
     # A die is a fail when its FINAL row's bin is not pass — regardless of
@@ -196,57 +289,13 @@ def compute_serial_distribution_data(df, metadata, param, range_type,
         y_min = y_min - pad
         y_max = y_max + pad
 
-    def _anchor(value):
-        """0=normal, 1=no value, 2=above y_max, 3=below y_min."""
-        if pd.isna(value):
-            return 1
-        if y_max is not None and value > y_max:
-            return 2
-        if y_min is not None and value < y_min:
-            return 3
-        return 0
-
     # -- Build series_data ------------------------------------------------
-    def _build_points(sdf):
-        sv_col = param if param in serial_grouped.columns else serial_col
-        sv = dict(zip(sdf[serial_col].tolist(), sdf[sv_col].tolist()))
-        fail_d = None
-        if fail_by_serial is not None:
-            fail_d = dict(zip(
-                sdf[serial_col].tolist(),
-                [fail_by_serial.get(s, 0) for s in sdf[serial_col].tolist()]))
-        pts = []
-        for s in continuous_serials:
-            if s in sv:
-                v = sv[s]
-                if fail_d is None:
-                    pts.append([s, v])
-                else:
-                    pts.append([s, None if pd.isna(v) else v,
-                                fail_d[s], _anchor(v)])
-        return pts
+    value_col = param if param in serial_grouped.columns else serial_col
 
-    def _downsample_points(pts):
-        """大数据量保形降采样（仅影响传输/绘制点集）：
-
-        - 按 serial 分桶 M4/MinMax 保 value 极值轮廓（value 为 y 轴）；
-        - **anchor ≠ 0 的点强制保留**（超界值被锚定到轴边，视觉信息
-          不能丢）；无测量值点（value 为 None/NaN）不参与极值选择；
-        - pass/fail_count、均值/限值等统计字段由调用方在全量数据上
-          计算，不受采样影响。
-        """
-        if len(pts) <= DOWN_SAMPLE_THRESHOLD:
-            return pts
-        serials = np.array([p[0] for p in pts], dtype=float)
-        values = np.array(
-            [np.nan if p[1] is None else float(p[1]) for p in pts],
-            dtype=float)
-        keep = bucket_minmax_indices(serials, values)
-        anchors = [i for i, p in enumerate(pts)
-                   if len(p) > 3 and p[3] != 0]
-        if anchors:
-            keep = np.union1d(keep, np.array(anchors, dtype=int))
-        return [pts[i] for i in keep]
+    def _points(sdf):
+        return downsample_points(build_serial_points(
+            sdf, serial_col, value_col, continuous_serials,
+            fail_by_serial, y_min, y_max))
 
     series_data = []
     if site_col:
@@ -259,76 +308,19 @@ def compute_serial_distribution_data(df, metadata, param, range_type,
             series_data.append({
                 'name': f'Site {site}',
                 'type': 'scatter',
-                'data': _downsample_points(_build_points(sdf)),
+                'data': _points(sdf),
                 'symbolSize': 6,
             })
     else:
         series_data.append({
             'name': param,
             'type': 'scatter',
-            'data': _downsample_points(_build_points(serial_grouped)),
+            'data': _points(serial_grouped),
             'symbolSize': 6,
         })
 
-    # -- Build marks ------------------------------------------------------
-    show_limit = 'limit' in chart_config
-    show_3sigma = 's3' in chart_config
-    show_4sigma = 's4' in chart_config
-    show_6sigma = 's6' in chart_config
-
-    marks = []
-    if show_limit and spec_lower is not None and spec_upper is not None:
-        marks.append({
-            'name': '规格限',
-            'type': 'scatter',
-            'data': [],
-            'markLine': {
-                'symbol': 'none',
-                'precision': 4,
-                'data': [
-                    {'yAxis': spec_lower,
-                     'lineStyle': {'color': '#FF6384', 'width': 3,
-                                   'type': 'dashed'},
-                     'label': {'show': True, 'formatter': 'LSL',
-                               'position': 'end'}},
-                    {'yAxis': spec_upper,
-                     'lineStyle': {'color': '#FF6384', 'width': 3,
-                                   'type': 'dashed'},
-                     'label': {'show': True, 'formatter': 'USL',
-                               'position': 'end'}},
-                ],
-            },
-        })
-    for sigma, flag, color in [
-            (3, show_3sigma, '#5470c6'),
-            (4, show_4sigma, '#91cc75'),
-            (6, show_6sigma, '#fac858')]:
-        if flag:
-            lower = mean_val - sigma * std_val
-            upper = mean_val + sigma * std_val
-            marks.append({
-                'name': f'{sigma}σ范围',
-                'type': 'scatter',
-                'data': [],
-                'markLine': {
-                    'symbol': 'none',
-                    'precision': 4,
-                    'data': [
-                        {'yAxis': lower,
-                         'lineStyle': {'color': color, 'width': 3,
-                                       'type': 'dotted'},
-                         'label': {'show': True,
-                                   'formatter': f'{sigma}σ下限',
-                                   'position': 'insideEndTop'}},
-                        {'yAxis': upper,
-                         'lineStyle': {'color': color, 'width': 3,
-                                       'type': 'dotted'},
-                         'label': {'show': True,
-                                   'formatter': f'{sigma}σ上限',
-                                   'position': 'insideEndTop'}},
-                    ],
-                },
-            })
+    marks = build_mark_lines(spec_lower, spec_upper, mean_val, std_val,
+                             chart_config)
 
     return {
         'param': param,
