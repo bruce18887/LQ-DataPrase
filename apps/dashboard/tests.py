@@ -1,6 +1,9 @@
 """Dashboard 测试：测试项总览（CPK 参数表 ∪ Fail 测试项明细）与 summary API。"""
 
+import json
+import math
 import os
+import types
 import unittest
 
 import pandas as pd
@@ -14,6 +17,7 @@ from apps.analysis.services.statistics import (
 )
 from apps.datafiles.models import DataFile
 from apps.datafiles.services import clear_parse_cache
+from apps.dashboard.services import clear_dashboard_summary_cache
 from apps.dashboard.views import compute_test_item_overview, _derive_param_stats
 
 User = get_user_model()
@@ -129,6 +133,34 @@ class TestItemOverviewUnitTests(SimpleTestCase):
         self.assertEqual(rows[0]['data_count'], 0)
         self.assertIsNone(rows[0]['cpk'])
         self.assertIsNone(rows[0]['mean'])
+
+    def test_inf_cells_excluded_from_stats(self):
+        """±inf 单元格不得进统计（回归 /summary/ 500）。
+
+        成因（真实文件 BPD96079 / ETS88 / PG_RES 列，全文件仅 1 格）：ATE 把超量程
+        读数写成字面文本 ``inf``，``pd.to_numeric(errors='coerce')`` 认它是合法浮点
+        而非 NaN；旧写法只 ``.dropna()``（滤 NaN 不滤 ±inf），于是 mean→inf、
+        std(ddof=0)→nan（并打 pandas nanops 的 invalid-value 警告），DRF 严格渲染器
+        随后抛 ``ValueError: Out of range float values are not JSON compliant: inf``。
+        """
+        df = pd.DataFrame({'P': ['1.0', '2.0', 'inf', '3.0']})
+        meta = {'format': 'ETS88', 'units': {'P': 'Kohm'},
+                'mins': {'P': '765.0'}, 'maxs': {'P': '935.0'}}
+
+        # 对照组：夹具本身确实带毒 —— 旧写法（只 dropna）在这一列上算出 inf。
+        # 没有这一句，本用例可能只是在验证一只干净的 df，改了实现也不会变红。
+        raw = pd.to_numeric(df['P'], errors='coerce').dropna()
+        self.assertTrue(math.isinf(float(raw.mean())))
+        self.assertTrue(math.isnan(float(raw.std(ddof=0))))
+
+        row = compute_test_item_overview(df, meta, {})[0]
+        self.assertEqual(row['data_count'], 3, 'inf 那一格应被排除在计数外')
+        self.assertEqual(row['mean'], 2.0)
+        self.assertEqual(row['min'], 1.0)
+        self.assertEqual(row['max'], 3.0)
+        self.assertTrue(math.isfinite(row['std']))
+        # 出口判据：整行必须能被严格 JSON 序列化（DRF 用的就是 allow_nan=False）
+        json.dumps(row, allow_nan=False)
 
     def test_duplicate_column_guard(self):
         """重复列名兜底：不崩溃（df[col] 返回 DataFrame，取第一列），每列各一行。"""
@@ -315,3 +347,81 @@ class SummaryApiCta8280fTests(APITestCase):
         first_fail = next(iter(fails))
         self.assertIsInstance(overview_by_name[first_fail]['mean'], float)
         self.assertIsInstance(overview_by_name[first_fail]['cpk'], float)
+
+
+class SummaryInfApiTests(APITestCase):
+    """GET /api/v1/summary/ 对含 ±inf 的数据必须返回 200 且为合法 JSON（回归 500）。
+
+    走完整 view → DRF 渲染 通路：``rest_framework.response.Response`` 是
+    SimpleTemplateResponse，测试客户端会触发 ``render()``，所以 allow_nan 违规在这里
+    同样暴露（生产里它在 handler 层炸成 500，视图自己的 except 根本接不到）。
+    """
+
+    def setUp(self):
+        from apps.dashboard import views as dash_views
+
+        self.user = User.objects.create_user(username='dashinf', password='pw')
+        self.client.force_authenticate(self.user)
+        clear_parse_cache()
+        clear_dashboard_summary_cache()
+        self.datafile = DataFile.objects.create(
+            owner=self.user,
+            filename='pg_res_inf.csv',
+            file_path='pg_res_inf.csv',
+            file_size=1,
+            format_type='ETS88',
+            status='ready',
+        )
+        # 与真实脏文件同形状：文本 'inf' 混在数值列里，且该列有规格限（会进 overview）
+        self.df = pd.DataFrame({
+            'PG_RES': ['770.0', '800.0', 'inf', '810.0'],
+            'Site #': ['1', '1', '2', '2'],
+            'Bin': [1, 1, 1, 2],
+        })
+        self.meta = {
+            'format': 'ETS88',
+            'units': {'PG_RES': 'Kohm'},
+            'mins': {'PG_RES': '765.0000'},
+            'maxs': {'PG_RES': '935.0000'},
+        }
+
+        self._orig = (dash_views.resolve_file_path, dash_views.get_cached_parsed_file)
+        dash_views.resolve_file_path = lambda p: __file__
+        dash_views.get_cached_parsed_file = lambda *a, **k: (self.df, self.meta, 'ETS88')
+        self.addCleanup(setattr, dash_views, 'resolve_file_path', self._orig[0])
+        self.addCleanup(setattr, dash_views, 'get_cached_parsed_file', self._orig[1])
+
+    def test_inf_cell_returns_200_and_strict_json(self):
+        resp = self.client.get('/api/v1/summary/', {'file_id': self.datafile.id})
+        self.assertEqual(resp.status_code, 200)
+        payload = json.loads(resp.content)  # 前端 JSON.parse 的同一条判据
+        row = next(r for r in payload['test_item_overview'] if r['name'] == 'PG_RES')
+        self.assertEqual(row['data_count'], 3, 'inf 那一格不参与统计')
+        self.assertEqual(row['mean'], round((770.0 + 800.0 + 810.0) / 3, 4))
+        self.assertTrue(math.isfinite(row['std']))
+        json.dumps(payload, allow_nan=False)
+
+    def test_nonfinite_from_any_source_is_neutralized_at_exit(self):
+        """出口防线：payload 里混进 ±inf/nan 时，Response 仍必须序列化成功。
+
+        与上一条各挡一种变异 —— 这条只钉 ``clean_data`` 兜底（直接喂脏 payload，
+        不经过统计层），统计层哪天换了算法也不会把 500 放回来。
+        """
+        from apps.dashboard import views as dash_views
+
+        orig = dash_views.get_dashboard_summary
+        dash_views.get_dashboard_summary = lambda *a, **k: {
+            'file_id': 1,
+            'filename': 'f.csv',
+            'metrics': {'total_rows': 4, 'yield_pct': float('nan')},
+            'test_item_overview': [{'name': 'P', 'mean': float('inf'),
+                                    'std': float('nan'), 'cpk': float('-inf')}],
+        }
+        self.addCleanup(setattr, dash_views, 'get_dashboard_summary', orig)
+
+        resp = self.client.get('/api/v1/summary/', {'file_id': self.datafile.id})
+        self.assertEqual(resp.status_code, 200)
+        payload = json.loads(resp.content)
+        self.assertIsNone(payload['metrics']['yield_pct'])
+        for key in ('mean', 'std', 'cpk'):
+            self.assertIsNone(payload['test_item_overview'][0][key], key)

@@ -2280,3 +2280,31 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
 - **反证拿合成页跑旧字面量，不改坏源码**：把旧公式抄进一次性探针，喂进新判据那条恒等式
   （`画出来的位置 == 右键点`）⇒ 15/18 组红（3 组绿正是 zoom=1 对照组）。这比「改坏 src 再跑
   真目录」便宜且零风险。
+
+## 2026-10-19 `dropna()` 不等于「清脏」：字面 `inf` 是合法浮点，而 500 炸在视图 except 够不着的地方
+
+真实文件 `BPD96079`（ETS88，4575 列）让 `/api/v1/summary/` 整页 500，日志两条：pandas
+`nanops invalid value encountered in subtract` + `Out of range float values ... inf`。定性到根因用了四步：
+读全 traceback（`nanops.py:1027` 的 `avg - values` 就是 std 的表达式 ⇒ **进 std 的列里已经有 inf**，
+`inf - inf = nan`）→ 按这个猜测去 `pd.to_numeric` 试文本（实测 `inf`/`INF`/`-inf`/`Infinity`/`1E999`
+**全部解析成真 ±inf**，只有 `OVER`/空串/`1,5` 才是 NaN）→ 用项目自己的解析器扫真实文件，定位到
+`PG_RES` 列仅 1 格文本 `inf` → 复现出与生产逐字相同的 ValueError。
+
+- **`.dropna()` 只滤 NaN 不滤 ±inf，而 ±inf 会让 `mean` 变 inf、`std(ddof=0)` 变 nan**：仓内已有
+  `filter_finite`（`to_numeric().astype(float)` + `np.isfinite`）住在 25 个统计站点，仪表板是唯一没接的
+  热路径；出口侧同理，`clean_data` 住 23 个 DRF 端点，仪表板是唯一没接的。**先普查「同类防线别人怎么写」
+  再补自己的**，别在字段级打补丁 —— `services.py:160` 那个 `math.isfinite(cpk)` 只包了 cpk 一个键，
+  mean/std/min/max 照样裸奔，就是「按哪个字段炸了补哪个」的后果。
+- **渲染发生在视图 `except` 够不着的地方**：`Response` 是 SimpleTemplateResponse，序列化在
+  `base.py:221 response.render()`（handler 层），视图里的兜底 except 接不到 ⇒ 日志是 Django 的
+  `Internal Server Error` 而不是那条 `logger.exception`。测试客户端同理会**直接把 ValueError 抛出来**，
+  所以回归用例该断「200 + 严格 JSON」，不是断 500。
+- **带对照组的夹具必须按生产形状取数**：我第一版往一列里塞 `+inf` 和 `-inf` 各一格，两者相加
+  `mean` 变 **nan** 而不是 inf，前置对照断言当场挂掉 —— 真实文件只有 1 格 `+inf`。写「旧写法在这列上
+  必然算出 inf」这类承重前置时，先确认脏的**形态**和现场一致，否则对照组会替你把夹具证伪。
+- **崩池轮里的红要先归因再动手**：这轮 `e2e_pool` 自判 `VOID (infra)`（slot2 EXIT=3221226505），
+  5 条红全在 `[P1] e2e/analysis/histogram-*` 的 `strict mode violation: .single-param-tab
+  .chart-container 命中 2 个元素`（多出的是 `.box-chart-host > .chart-container`）。取证方式不是改用例：
+  `git diff --stat HEAD -- frontend/` **为空** ⇒ 前端与 HEAD 逐字一致，而我改的是纯后端 Python，
+  不可能新增 DOM 节点 ⇒ 该盲点选择器在 HEAD 上就会命中两个元素（CI 刻意不跑 Playwright，所以没人拦）。
+  同轮单独定向跑 `--project=P1 --workers=1 e2e/dashboard` 10 例全绿，才是这批改动该看的账。
