@@ -11,6 +11,10 @@
  * - 「真承重必须升级」防的是把兜底改松过头 —— 那会把漏测换成省时间，是净损失。
  *   默认方向必须是保守：未知路径仍然 GLOBAL。
  *
+ * 2026-10-20 起还钉**编排内核**（`planStages` / `executePlan` / `gateVerdict`）：
+ * 「一档红不得吃掉后面的档」只能这样测——故障形状是「某一档根本没出现在日志里」，
+ * 看退出码永远看不出来。
+ *
  * 跑：npm run test:unit
  */
 import { describe, expect, it } from 'vitest'
@@ -18,9 +22,13 @@ import { describe, expect, it } from 'vitest'
 import {
   GLOBAL,
   MAX_MODULES_BEFORE_FULL,
+  MODULES,
   backendLabels,
   decide,
+  executePlan,
+  gateVerdict,
   matchRule,
+  planStages,
 } from '../../../scripts/affected-rules.mjs'
 
 /** 判定结果的速记：既不升级全量、也没选中 e2e 模块（可能只落 vitest 或纯 note） */
@@ -92,7 +100,8 @@ describe('假阳性：不是被测对象的落盘物，不得升级全量', () =
     ])
     expect(r.global).toBe(false)
     expect(r.unit).toBe(true)
-    expect(r.notes.join()).toMatch(/无单测|双向/)
+    // 判据层有单测、IO 壳只剩 dry-run —— note 必须同时说清这两件事
+    expect(r.notes.join()).toMatch(/IO 壳无单测.*dry-run/)
   })
 
   it('实测过的 25 提交里剩下的 6 个假阳性案例，逐个不再升级', () => {
@@ -166,6 +175,83 @@ describe('后端标签与 e2e 选例正交', () => {
     const r = staysFast(['apps/analysis/tests_histogram.py'])
     expect(r.global).toBe(false)
     expect(r.modules).toEqual([])
+  })
+})
+
+describe('编排内核：一档红不得吃掉后面的档', () => {
+  /**
+   * 假 runner：记下**实际被调用**的档名并返回预设退出码。
+   * `seen` 是本文件唯一的承重项 —— 旧写法 `code ||= runPool('')` 的故障形状是
+   * 「日志里根本没有 pool 那一档」，光看返回码永远测不出来。
+   */
+  function fakeRun(failsOn: string[] = []) {
+    const seen: string[] = []
+    const run = (s: { name: string }) => {
+      seen.push(s.name)
+      return failsOn.includes(s.name) ? 1 : 0
+    }
+    return { seen, run }
+  }
+
+  const plan = (files: string[], opts: { runBackend?: boolean; pytest?: boolean } = {}) =>
+    planStages({ decision: decide(files), labels: backendLabels(files), pytest: true, ...opts })
+
+  it('后端那档失败，T3 仍被排进计划并被执行（旧 ||= 短路的直接反证）', () => {
+    const files = ['frontend/playwright.config.ts', 'apps/gage/gage_views.py']
+    const stages = plan(files)
+    expect(stages.map((s) => s.kind)).toEqual(['lint', 'unit', 'backend', 'pool'])
+    const f = fakeRun(['backend'])
+    const v = gateVerdict(executePlan(stages, f.run))
+    expect(f.seen).toEqual(['lint:e2e', 'vitest', 'backend', 'e2e:全量'])
+    expect(v).toEqual({ ok: false, failed: ['backend'], skipped: [] })
+  })
+
+  it('对照组：只改后端测试文件时计划里没有 pool 档（修法没把快档改成恒跑全量）', () => {
+    const stages = plan(['test/backend/test_bin_grid_consistency.py'])
+    expect(stages.map((s) => s.kind)).toEqual(['lint', 'unit', 'backend'])
+    expect(gateVerdict(executePlan(stages, fakeRun().run)).ok).toBe(true)
+  })
+
+  it('兜底升级全量时只有一条 pool，不再叠 P0（同一批用例不得跑两遍）', () => {
+    const pools = plan(['config/settings/base.py']).filter((s) => s.kind === 'pool')
+    expect(pools).toHaveLength(1)
+    expect(pools[0].name).toBe('e2e:全量')
+    expect(pools[0].files).toBe('')
+  })
+
+  it('模块档与附带 P0 互不重叠，且合起来恰好覆盖全部 e2e 模块', () => {
+    const pools = plan(['frontend/src/pages/sftp/SearchPage.vue']).filter((s) => s.kind === 'pool')
+    expect(pools.map((s) => s.name)).toEqual(['e2e:sftp', 'e2e:附带P0'])
+    expect(pools[1].pw).toBe('--project=P0')
+    const dirs = pools.flatMap((s) => (s.files ?? '').split(' ').filter(Boolean))
+    expect(new Set(dirs).size, dirs.join(',')).toBe(dirs.length)
+    expect(dirs.length).toBe(MODULES.length)
+  })
+
+  it('该跑的档跑不了 = 本轮没结论：无 pytest 判 FAIL（旧写法只 print 就退 0）', () => {
+    const stages = plan(['test/backend/test_bin_grid_consistency.py'], { pytest: false })
+    const f = fakeRun()
+    const results = executePlan(stages, f.run)
+    expect(f.seen).toEqual(['lint:e2e', 'vitest']) // 后端档没有可执行的命令，但不能记成通过
+    expect(gateVerdict(results).ok).toBe(false)
+    expect(gateVerdict(results).failed).toEqual(['backend'])
+    expect(results.find((r) => r.name === 'backend')?.aborted).toMatch(/pytest/)
+  })
+
+  it('显式 --no-backend 可以退 0，但必须进结论表的「跳档」，不能与跑过且绿长成一样', () => {
+    const stages = plan(['test/backend/test_bin_grid_consistency.py'], { runBackend: false })
+    const f = fakeRun()
+    expect(gateVerdict(executePlan(stages, f.run))).toEqual({
+      ok: true,
+      failed: [],
+      skipped: ['backend(--no-backend)'],
+    })
+    expect(f.seen).toEqual(['lint:e2e', 'vitest'])
+  })
+
+  it('计划是改动集的纯函数：同一改动集重复求计划，结果逐字相同（退出码无处影响它）', () => {
+    const files = ['apps/sftp/views/search.py', 'frontend/src/pages/sftp/SearchPage.vue']
+    expect(JSON.stringify(plan(files))).toBe(JSON.stringify(plan(files)))
   })
 })
 

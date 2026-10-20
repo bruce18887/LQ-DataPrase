@@ -16,6 +16,36 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-10-20 affected 门禁把「一档红」当成「整轮结论」，又把结论交给退出码保管
+
+- **现象**：第二批验证时 `npm run test:e2e:affected 2>&1 | tail -45` 回 `exit 0`，而日志本体是
+  `Ran 1309 tests … FAILED (failures=1, skipped=7)`（现场留底 `tasks/affected-gate-masked-exit-2026-10-20.log`）。
+  更贵的是那一轮**整条 T3 根本没启动**。
+- **根因两条，互相独立**：
+  1. `scripts/e2e_affected.mjs` 用 `code ||= runPool('')` 串档。`||=` 在 `code` 已非零时**连右值都不求值**，
+     后端一红，后面的 pool 档就没被调用（`node -e` 复核：实际执行到的档是 `["lint","unit","backend"]`）。
+     故障形状是「日志里根本没有那一档」，而它和「那一档跑完且绿」读起来一模一样 ⇒ 看退出码永远测不出来。
+  2. 绿/红只活在退出码里，管道把它换成了 `tail` 的 0 —— 违反了仓规「判据只取日志本体」。
+- **修复**：
+  - 计划与执行分离：编排判据 `planStages()` / `executePlan()` / `gateVerdict()` 搬进零 IO 的
+    `scripts/affected-rules.mjs`，由 `frontend/test/unit/e2eAffectedDecide.spec.ts` 钉住。
+    `planStages()` 的**入参里没有退出码** —— 这就是「一档红不吃掉后面的档」在结构上的保证。
+  - 结论打成日志**最后**几行（逐档 `档: <name> ok|FAIL|SKIP|ABORTED` + 末行 `RESULT:`）：任何
+    `tail -N` 的窗口都盖不住末尾。判据取 `RESULT:` 行，不取 `$?`；非要读退出码就 `| tee` 或 `set -o pipefail`。
+  - 「该跑的档跑不了」（如 `python` 无 pytest）从 print 一句就退 0 改成 `ABORTED` → `RESULT: FAIL`；
+    只有显式 `--no-backend` 记 `SKIP`、不拦绿，但它必须出现在结论行里。
+- **可复用口径**：门禁里每一档都必须**要么执行、要么出声**，沉默的缺席就是假绿。写「按序跑几档」的
+  编排别用 `||=` / `&&` 串退出码（`e2e_nightly.mjs` 一直是顺序跑、每档都跑，所以没这个洞）。
+- **断言怎么承重**：假 runner 记下**实际被调用**的档名，断它等于
+  `['lint:e2e','vitest','backend','e2e:全量']` —— 旧写法下必然少最后一档，这就是红绿对照。
+  变异刀复核：把 `executePlan` 改回「遇非零即 break」→ 该断言立刻转红（`Received` 正是少
+  `'e2e:全量'`），复原后 24 例复绿（`tasks/gate_fix_mutation.log` / `tasks/gate_fix_vitest_full.log`）。
+- **顺带撞出来的一条**：`.mjs` 里的 JSDoc 是**会被 `vue-tsc -b` 当类型用的** —— 给纯函数补返回值
+  形状时必须显式 `@typedef`/`@returns`，否则 `const stages = [{...}]` 推出来的是
+  `{kind:string,name:string}[]`，后面 `push({files, pw})` 的字段在 `.ts` 侧访问直接 TS2339。
+  这次是**真跑一遍快门禁**把它揪出来的（`RESULT: FAIL · 失败 [e2e:analysis+exports, e2e:附带P0]`，
+  池那两档红在 `npm run build` 的 `vue-tsc -b` 上）—— 只跑 vitest 会一路绿到底。
+
 ## 2026-10-17 我把没核过的数字写进代码注释当理由；合并逻辑放错层会吞掉后续处理
 
 - **①（本批最贵的一条）前提没验就先写代码，理由是编的。** 第一批我给了「跨大文件时 3.2s 冷解析

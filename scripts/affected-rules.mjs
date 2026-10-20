@@ -4,6 +4,8 @@
 // 一 import 就真跑，vitest 压不住它 —— 而「哪些路径算承重」恰恰是最该被钉住的判据；
 // ② 本表是分层节奏里「批内该跑哪一档」的**实现**，判据正文（为什么这么判）在
 //    `docs/reference/testing-gates.md`；改判据只需 `npx vitest run`，不开浏览器。
+// ③ 2026-10-20 又搬进编排三函数 planStages()/executePlan()/gateVerdict()：「一档红不得
+//    吃掉后面的档」「结论不能只活在退出码里」这两条只能这样被测（脚本本体一 import 就真跑）。
 //
 // 判据方向（不变的安全边界）：**未知路径一律 GLOBAL，宁可多跑也不漏**。下面新增的每一条
 // 放行类目都必须写清「它为什么不由浏览器承载」，且不能反过来把默认值改成放行。
@@ -110,11 +112,12 @@ export const RULES = [
 
   // —— 门禁编排器自身（跑测试的脚本，不是被测产品）。产品代码一行没动时，
   // 跑整轮浏览器**验不出编排器的对错**，只会把没变的被测对象再测一遍。
-  // ⚠ 编排器自己没有单测（IO 重），自检通路就是它自己的 dry-run —— note 必须喊出来，
-  // 否则「门禁坏了但没人知道」会被当成绿灯（lessons 2026-10-13：后端分支 cwd 拼错，
+  // 编排判据（planStages / executePlan / gateVerdict）已搬进本模块、由 e2eAffectedDecide.spec.ts 钉住；
+  // 留在脚本里的只剩 IO 壳（取改动集、探测解释器、spawn），那部分没有单测、自检通路是 dry-run。
+  // ⚠ note 必须喊出来，否则「门禁坏了但没人知道」会被当成绿灯（lessons 2026-10-13：后端分支 cwd 拼错，
   // 那条快门禁从没跑通过，因为没人制造过一次真命中它的改动）。
   ['scripts/e2e_', ['unit',
-    'none:门禁编排器无单测（IO 重）；改完必自证 `node scripts/e2e_affected.mjs --dry-run` 与 `e2e_pool.mjs --slots=2 --dry-run`，看打印的判定与 slot 数对不对']],
+    'none:编排判据已由 e2eAffectedDecide.spec.ts 钉住；IO 壳无单测，改完必自证 `node scripts/e2e_affected.mjs --dry-run` 与 `e2e_pool.mjs --slots=2 --dry-run`，核对档位计划、slot 数与末尾 RESULT 行']],
 
   // —— 代理与工具的落盘物：不是被测对象，也不改任何被测对象的行为
   ['.gitignore', ['none:.gitignore 只改忽略规则，无测试判据受影响']],
@@ -229,4 +232,110 @@ export function backendLabels(files) {
     if (f.startsWith('test/backend/')) labels.add('test.backend')
   }
   return [...labels]
+}
+
+// ————— 编排内核（计划 / 执行 / 结论）———————————————————————————————
+// 这三只函数从 `scripts/e2e_affected.mjs` 搬进来，为的是让「一次改动该跑哪几档、
+// 跑完该怎么报」第一次**能被 vitest 压住**（编排器脚本本身 IO 重，只能靠 dry-run 自证）。
+// 起因是 2026-10-20 两条实测：
+// ① `code ||= runPool('')` —— `||=` 在 code 已非零时连右值都不求值，后端一红
+//    整条 T3 根本没启动，日志末尾只剩一个非零码，读起来像「跑到浏览器那档才失败」：
+//    A 档失败被当成了 B 档通过（那一轮 1309 例后端 1 红，浏览器 0 例）。
+// ② 结论只活在退出码里，`… 2>&1 | tail -45` 把管道尾（tail）的 0 当成了门禁的 0。
+//    修法是把逐档结论打成**日志最后的几行**：`tail -N` 无论 N 多小都截不到它前面。
+
+/**
+ * 一档的执行计划。字段按 `kind` 生效：
+ * - `lint` / `unit`：无额外字段；
+ * - `backend`：带 `labels`；
+ * - `pool`：带 `files`（空串 = 全量）与可选 `pw`；
+ * - `skip`：带 `skipped`（原因）；`abort`：带 `aborted`（原因，判红）。
+ *
+ * @typedef {Object} GateStage
+ * @property {string} kind
+ * @property {string} name
+ * @property {string} [files]
+ * @property {string} [pw]
+ * @property {string[]} [labels]
+ * @property {string} [skipped]
+ * @property {string} [aborted]
+ */
+
+/**
+ * @typedef {Object} GateResult
+ * @property {string} name
+ * @property {number} status
+ * @property {string} [skipped]
+ * @property {string} [aborted]
+ */
+
+/**
+ * 该按序执行哪几档 —— **入参里没有退出码**，这是「一档失败不吃掉后面的档」在结构上的保证：
+ * 计划只由改动集（decide 结果 + 后端标签）与「解释器/开关」这两类静态事实决定。
+ *
+ * @param {{decision: {global: boolean, modules: Set<string>}, labels?: string[], runBackend?: boolean, pytest?: boolean}} o
+ * @returns {GateStage[]}
+ */
+export function planStages({ decision, labels = [], runBackend = true, pytest = true }) {
+  /** @type {GateStage[]} */
+  const stages = [
+    // 静态体检放最前（约 3 s）：删用例残留的死 import 要早出声，不等几分钟浏览器跑完。
+    { kind: 'lint', name: 'lint:e2e' },
+    // T2 永远跑（2026-10-20 实跑 353 例 / 0.6s），全量档也不例外。
+    { kind: 'unit', name: 'vitest' },
+  ]
+  if (labels.length) {
+    if (!runBackend) {
+      // 显式跳档可以不算红，但必须进结论表（`skipped`），否则「没跑」长得和「跑过且绿」一样。
+      stages.push({ kind: 'skip', name: 'backend', skipped: '--no-backend' })
+    } else if (!pytest) {
+      // 该跑的档跑不了 = 这一轮没结论，不是绿灯。
+      stages.push({ kind: 'abort', name: 'backend', aborted: '当前 `python` 无 pytest；用 .venv 跑会把 test_outliers 的 import 失败伪装成回归，故拒绝执行' })
+    } else {
+      stages.push({ kind: 'backend', name: 'backend', labels })
+    }
+  }
+  const selected = decision.global ? [] : [...decision.modules].sort()
+  if (decision.global) {
+    stages.push({ kind: 'pool', name: 'e2e:全量', files: '' })
+  } else if (selected.length) {
+    stages.push({ kind: 'pool', name: `e2e:${selected.join('+')}`, files: selected.map((m) => `e2e/${m}`).join(' ') })
+    // 附带 P0：只补未被模块档覆盖的那部分，同一用例不得在两条命令里各跑一遍。
+    const rest = MODULES.filter((m) => !selected.includes(m))
+    if (rest.length) {
+      stages.push({ kind: 'pool', name: 'e2e:附带P0', files: rest.map((m) => `e2e/${m}`).join(' '), pw: '--project=P0' })
+    }
+  }
+  return stages
+}
+
+/**
+ * 逐档执行：每档都跑，失败的档只记账，**不改变后续计划**。
+ * `run(stage)` 由调用方注入（真正的 IO 留在脚本里），所以这条循环在单测里用假 runner 就能压住。
+ *
+ * @param {GateStage[]} stages
+ * @param {(stage: GateStage) => number} run
+ * @returns {GateResult[]}
+ */
+export function executePlan(stages, run) {
+  /** @type {GateResult[]} */
+  const results = []
+  for (const s of stages) {
+    if (s.kind === 'skip') results.push({ name: s.name, status: 0, skipped: s.skipped })
+    else if (s.kind === 'abort') results.push({ name: s.name, status: 1, aborted: s.aborted })
+    else results.push({ name: s.name, status: run(s) ?? 0 })
+  }
+  return results
+}
+
+/**
+ * 各档结果 → 结论。`skipped` 不影响 `ok`（那是人自己点的跳档），但必须被打印出来。
+ *
+ * @param {GateResult[]} results
+ * @returns {{ok: boolean, failed: string[], skipped: string[]}}
+ */
+export function gateVerdict(results) {
+  const failed = results.filter((r) => r.status !== 0).map((r) => r.name)
+  const skipped = results.filter((r) => r.skipped).map((r) => `${r.name}(${r.skipped})`)
+  return { ok: failed.length === 0, failed, skipped }
 }
