@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import shutil
+import time
 import zipfile
 
 from django.conf import settings
@@ -249,6 +250,38 @@ def _remove_empty_dirs_up_to(start_dir, root):
         except OSError:
             break
         parent = os.path.dirname(parent)
+
+
+def _plan_file_moves(files, target_dir, action):
+    """Plan moves into ``target_dir`` without touching any file.
+
+    Returns ``[(df, src, target, new_filename, src_dirname), ...]``. Missing
+    files and unsafe names are skipped. A collision with the disk or with an
+    earlier plan gets a ``_<ts>_<pk>`` suffix; ``action`` only shapes the log
+    message so combine/uncombine keep their existing warnings.
+    """
+    plans = []
+    used_targets = set()
+    for df in files:
+        src = resolve_file_path(df.file_path)
+        if not os.path.exists(src):
+            continue
+        safe_name = os.path.basename(df.filename)
+        if not safe_name or _UNSAFE_NAME_CHARS.search(safe_name):
+            logger.warning(
+                '%s: skipping df id=%s with unsafe filename %r',
+                action, df.pk, df.filename,
+            )
+            continue
+        target = os.path.join(target_dir, safe_name)
+        while target in used_targets or os.path.exists(target):
+            ts = int(time.time())
+            name, ext = os.path.splitext(safe_name)
+            safe_name = f'{name}_{ts}_{df.pk}{ext}'
+            target = os.path.join(target_dir, safe_name)
+        used_targets.add(target)
+        plans.append((df, src, target, safe_name, os.path.dirname(src)))
+    return plans
 
 
 def _group_duplicates(user):

@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Optional, Tuple, Dict, List
+import os
 import pandas as pd
 import re
 
@@ -152,3 +153,91 @@ DATA_FORMAT_CONFIG = {
     'ETS88': {'marker': 'Site #,Serial #,Bin,XCoord,YCoord', 'header_offset': 0, 'unit_offset': 3, 'min_offset': 1, 'max_offset': 2, 'data_offset': 2, 'special_headers': True, 'header_line': 68, 'min_line': 70, 'max_line': 71, 'unit_line': 72},
     'STS8200': {'marker': 'SITE_NUM,PART_ID,PASSFG,SOFT_BIN', 'header_offset': 0, 'unit_offset': 1, 'min_offset': 2, 'max_offset': 3, 'data_offset': 5},
 }
+
+
+class BaseAteCsvParser(BaseATEParser):
+    """Template for ATE CSVs whose header/unit/min/max sit on fixed lines.
+
+    Subclasses declare the program-name label and header-label mapping; the
+    marker scan, CSV read, column alignment and numeric coercion stay here.
+    """
+
+    program_label: str = ''
+    program_sep: str = ','
+    header_mapping: Dict[str, List[str]] = {}
+
+    def parse(self, file_path: str) -> Tuple[Optional[pd.DataFrame], Optional[Dict]]:
+        config = DATA_FORMAT_CONFIG.get(self.format_type)
+        if not config:
+            return None, None
+
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            lines = f.readlines()
+
+        data_start = None
+        for i, line in enumerate(lines):
+            if config['marker'] in line:
+                data_start = i
+                break
+        if data_start is None:
+            return None, None
+
+        header_line = lines[data_start + config['header_offset']].strip()
+        unit_line = lines[data_start + config['unit_offset']].strip()
+        min_line = lines[data_start + config['min_offset']].strip()
+        max_line = lines[data_start + config['max_offset']].strip()
+        data_start_row = data_start + config['data_offset']
+
+        columns = self.make_column_names_unique(
+            [col.strip().strip('"') for col in header_line.split(',')]
+        )
+        units = [unit.strip().strip('"') for unit in unit_line.split(',')]
+        mins = [min_val.strip().strip('"') for min_val in min_line.split(',')]
+        maxs = [max_val.strip().strip('"') for max_val in max_line.split(',')]
+
+        df = pd.read_csv(file_path, skiprows=data_start_row, header=None,
+                         on_bad_lines='skip', encoding='utf-8')
+        if len(df.columns) == len(columns):
+            df.columns = columns
+        elif len(df.columns) > len(columns):
+            df = df.iloc[:, :len(columns)]
+            df.columns = columns
+        else:
+            for _ in range(len(columns) - len(df.columns)):
+                df[len(df.columns)] = None
+            df.columns = columns
+
+        non_numeric = NON_NUMERIC_COLUMNS.get(self.format_type, [])
+        for col in df.columns:
+            if col not in non_numeric and df[col].dtype == object:
+                df[col] = self.convert_to_numeric(df[col])
+
+        program_name = self._extract_program_name(lines)
+        header_meta = self.extract_header_metadata(lines, self.header_mapping)
+        header_meta = self.postprocess_header_meta(lines, program_name, header_meta)
+
+        metadata = {
+            'format': self.format_type,
+            'units': dict(zip(columns, units)),
+            'mins': dict(zip(columns, mins)),
+            'maxs': dict(zip(columns, maxs)),
+            'program_name': program_name,
+            'file_path': file_path,
+            **header_meta,
+        }
+        return df, metadata
+
+    def _extract_program_name(self, lines: List[str]) -> str:
+        if not self.program_label:
+            return ''
+        for line in lines[:50]:
+            if self.program_label in line:
+                parts = line.strip().split(self.program_sep, 1)
+                if len(parts) >= 2:
+                    return os.path.basename(parts[1].strip(' ,"'))
+                break
+        return ''
+
+    def postprocess_header_meta(self, lines: List[str], program_name: str,
+                                header_meta: Dict[str, str]) -> Dict[str, str]:
+        return header_meta
