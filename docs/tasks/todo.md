@@ -4917,3 +4917,65 @@ spec 的接口表里那行本来就标着「可选，前端『导出中心』用
 3. **「导出中心」页面**：后端已经齐（`GET /api/v1/jobs/` 最近 50 条 + `/jobs/<id>/download/`），
    前端没有读它的页面。补上才能把 gave-up 文案改回「稍后在导出中心查看」；
    不补就维持现在这句只讲事实的文案。
+
+---
+
+# 修复：含 `inf` 单元格的文件让仪表板整页 500（2026-10-19）
+
+## 现象与根因
+
+用户报 `C01Q_..._BPD96079_..._ETS085741_10172026.csv` 打不开，后端 `/api/v1/summary/?file_id=40830` 500，
+日志两条：pandas `nanops.py:1027 invalid value encountered in subtract` 与
+`ValueError: Out of range float values are not JSON compliant: inf`。
+
+真实文件扫描（`tasks/diag_inf_scan.py`，只读）给出唯一脏源：**`PG_RES` 列（Kohm，限 765–935）
+df 第 648 行一格，原文就是字面文本 `inf`**，全文件 4575 列仅此一处。链条：
+
+1. `parsers/base.py:44 convert_to_numeric` → `pd.to_numeric(errors='coerce')` **认 `inf` 是合法浮点**
+   （实测 `inf`/`INF`/`-inf`/`Infinity`/`1E999` 五个写法都得 `+/-inf`，只有 `OVER`/空串/`1,5` 才是 NaN）；
+2. `dashboard/services.py:135` 用 `.dropna()` 清脏 —— **只滤 NaN 不滤 ±inf**；
+3. 于是 `mean()→inf`、`std(ddof=0)→nan`（nanops 那条警告就在这里，`inf - inf`），
+   `min/max` 亦可 `inf`；`services.py:160` 的 `math.isfinite` 守卫**只包了 cpk 一个字段**；
+4. `dashboard/views.py:61` 的 `Response(...)` 没套 `clean_data`，DRF `JSONRenderer(strict=True)`
+   以 `allow_nan=False` 序列化 → 抛 ValueError。
+
+⚠ 定性纠正（我一开始也说错了）：这 **不是视图 `except Exception` 转的 500**。渲染发生在
+`base.py:221 response.render()`，已在视图函数返回之后，视图里的 except 根本接不到 ——
+所以日志是 Django handler 层的 `Internal Server Error`，测试客户端同样把 ValueError 直接抛出来。
+
+## 范围决定
+
+用户点定**只修仪表板**：解析层不动。理由是拦在 `convert_to_numeric` 会让四种格式的该格在
+「查看数据」表格里从 `inf` 变空白，并连带改掉 Fail 计数与良率口径 —— 那是数据语义变更，
+不在本次范围。顺带核实：查看数据页走 `df.to_json()`，pandas 把 inf 写成 `null`（实测），
+分析页/导出的 25 个统计站点全部先过 `filter_finite` ⇒ **只有仪表板这一条通路受影响**。
+
+## 改动（两处，各挡一种变异）
+
+- `apps/dashboard/services.py:135` → `filter_finite(series)`（仓内 25 个统计站点的既有标准入口）。
+  仪表板是全仓唯一不接它的热路径。
+- `apps/dashboard/views.py:61` → 出口套 `clean_data`（analysis 侧 23 个端点的既有写法）。
+  仪表板同样是唯一不接它的 DRF 出口。
+
+## 测试（T1，`apps/dashboard/tests.py`）
+
+先红后绿，三条各自拒一种变异：
+
+1. `TestItemOverviewUnitTests.test_inf_cells_excluded_from_stats` —— 夹具带**对照组**：
+   同列先断言旧写法（只 dropna）确实算出 `isinf(mean)` 与 `isnan(std)`，证明夹具本身带毒，
+   否则这条用例可能在验证一只干净的 df、改实现也不会红。
+   ⚠ 第一版夹具我放了 `+inf` 和 `-inf` 各一格，两者相加 mean 变 **nan** 而非 inf，
+   对照组断言当场挂掉；真实文件只有一格 `+inf`，按它改回才对。
+2. `SummaryInfApiTests.test_inf_cell_returns_200_and_strict_json` —— 走完整 view→DRF 渲染，
+   修复前报的就是生产那句 `Out of range float values are not JSON compliant: inf`。
+3. `...test_nonfinite_from_any_source_is_neutralized_at_exit` —— 直接喂脏 payload，
+   只钉第 2 处的 `clean_data` 兜底（统计层将来换算法也不会把 500 放回来）。
+
+## 验证
+
+- 后端全量 `manage.py test --settings=config.settings.unit`：**Ran 1594 OK (skipped=7)**。
+- `apps.dashboard` 单跑：24 例全绿；生产通路不再打 nanops 警告（残余那条来自用例内的对照组，属预期）。
+- 真实文件端到端（`tasks/verify_real_file.py`）：解析 1766×4575，严格 JSON 序列化通过
+  （响应体 1,371,455 字节），递归扫描**响应体内 0 条非有限 float**。PG_RES 修复后
+  `data_count=1748`（inf 那格除外）、mean 842.151、std 9.7703、min 823.0118、max 884.6246、
+  cpk 2.632 → A 级；`fail_count` 仍是 1 ⇒ 超量程读数照常判 FAIL，只是不再污染统计量。

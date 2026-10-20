@@ -20,6 +20,7 @@ from apps.analysis.services.statistics import (
     compute_site_yield_data,
     get_bin_column_name,
     compute_pass_yield,
+    filter_finite,
 )
 from apps.datafiles.utils import resolve_file_path
 
@@ -132,7 +133,12 @@ def compute_test_item_overview(df, metadata, fail_stats, thresholds=None):
                 series = df[param]
                 if isinstance(series, pd.DataFrame):  # 重复列名兜底，取第一列
                     series = series.iloc[:, 0]
-                data_series = pd.to_numeric(series, errors='coerce').dropna()
+                # filter_finite 而非 to_numeric().dropna()：dropna 只滤 NaN 不滤 ±inf，
+                # 而 ATE 把超量程读数写成字面 `inf` 时 pd.to_numeric 认它是合法浮点
+                # （真实案例 BPD96079 / ETS88 / PG_RES 一列一格）—— mean 变 inf、
+                # std(ddof=0) 变 nan，DRF 严格渲染器随后 500 整个仪表板。
+                # 与分析页 25 个统计站点同源：非有限读数不参与统计。
+                data_series = filter_finite(series)
                 if len(data_series) > 0:
                     row['data_count'] = int(len(data_series))
                     row['mean'] = round(float(data_series.mean()), 4)
