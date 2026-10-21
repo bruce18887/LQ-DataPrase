@@ -70,6 +70,11 @@
 
 ## 批 1：预算 + 指标 + 自愈 + KDE
 
+> **批 1 已实施（2026-10-21）**：`apps/common/memory.py`、`apps/datafiles/services.py`、
+> `apps/common/metrics.py`、`apps/analysis/services/statistics/kde.py`、
+> `apps/common/exceptions.py`、`scripts/memory_profile.py` 是唯一事实来源。下面代码块
+> 已与入库版本对齐；两者若再不一致，以入库文件为准，并回来更新本计划。
+
 ### Task 1: 内存预算内核
 
 **Files:**
@@ -314,10 +319,12 @@ class MemoryBudget:
     def level(self, rss_bytes):
         if rss_bytes is None or self.web_budget_bytes <= 0:
             return None
-        ratio = rss_bytes / self.web_budget_bytes
-        if ratio >= HARD_RATIO:
+        # 阈值先取整到字节：0.90 不是二进制小数，int(web * 0.90) 实际是
+        # 0.8999999999 × web，直接比原始比值会把「90% 水位」误判成 soft。
+        # 用与调用方相同的算式取整，边界值与 spec 的「≥ 90%」对齐。
+        if rss_bytes >= int(self.web_budget_bytes * HARD_RATIO):
             return 'hard'
-        if ratio >= SOFT_RATIO:
+        if rss_bytes >= int(self.web_budget_bytes * SOFT_RATIO):
             return 'soft'
         return 'normal'
 
@@ -543,14 +550,16 @@ git commit -m "feat(memory): 新增预算内核与水位/commit 快照"
 **Interfaces:**
 - Consumes: `apps.common.memory.get_budget()`（Task 1）
 - Produces:
-  - `PARSE_CACHE_BUDGET_BYTES = get_budget().cache_budget_bytes`
+  - `_resolve_cache_budget_bytes() -> int`（`get_budget().cache_budget_bytes`）
+  - `PARSE_CACHE_BUDGET_BYTES = _resolve_cache_budget_bytes()`
   - `_BytesLRUCache.evict_to(target_bytes: int) -> None`
   - `evict_parse_cache_to(fraction: float) -> None`
   - `get_parse_cache_stats()` 新增 `hits / misses / evictions / clears`
 
 - [ ] **Step 1: 写失败测试**
 
-把 `apps/datafiles/tests_parse_cache.py` 的 `CacheBudgetPolicyTests` 替换为：
+把 `apps/datafiles/tests_parse_cache.py` 的 `CacheBudgetPolicyTests` 替换为（文件顶补
+`from unittest import mock`）：
 
 ```python
 class CacheBudgetWiringTests(SimpleTestCase):
@@ -566,6 +575,25 @@ class CacheBudgetWiringTests(SimpleTestCase):
         from apps.common import memory
         self.assertEqual(services.PARSE_CACHE_BUDGET_BYTES,
                          memory.get_budget().cache_budget_bytes)
+
+    def test_resolver_reads_cache_budget_from_consuming_binding(self):
+        """预算必须来自 get_budget()，而不是本模块里另写死的 1536MB。
+
+        patch 的是 ``apps.datafiles.services.get_budget``（消费方绑定，R6③），
+        不是 ``apps.common.memory.get_budget`` —— 后者证明不了本模块用的是它。
+        """
+        from apps.common.memory import MemoryBudget
+        plan = MemoryBudget(
+            total_ram_bytes=16 * 1024 ** 3,
+            budget_bytes=8 * 1024 ** 3,
+            jobs_budget_bytes=2 * 1024 ** 3,
+            web_budget_bytes=6 * 1024 ** 3,
+            cache_budget_bytes=123456,
+        )
+        with mock.patch('apps.datafiles.services.get_budget',
+                        return_value=plan) as get_budget:
+            self.assertEqual(services._resolve_cache_budget_bytes(), 123456)
+        get_budget.assert_called_once_with()
 
     def test_stats_expose_counters(self):
         stats = services.get_parse_cache_stats()
@@ -604,7 +632,9 @@ class CacheBudgetWiringTests(SimpleTestCase):
     def test_evict_parse_cache_to_fraction(self):
         frame = _frame()
         one = services._frame_bytes(frame)
-        self.use_budget(one * 10)
+        # 3 条 ≈ 3×one，预算必须 < 6×one 才会让「淘汰到预算一半」真的发生
+        # （10×one 时 3 条连一半预算都不到，evict_to 无事可做）。
+        self.use_budget(one * 4)
         self.patch_parser(frame)
         for file_id in (1, 2, 3):
             self.cached_parse(file_id=file_id)
@@ -613,7 +643,9 @@ class CacheBudgetWiringTests(SimpleTestCase):
         self.assertLessEqual(services._parse_cache.bytes_cached(), before / 2)
 ```
 
-同时删除 `services._resolve_cache_budget_bytes()`、`PARSE_CACHE_DEFAULT_MB` 的旧断言（预算公式已搬到 `memory.py`，Task 1 已钉住）。
+同时删除 `PARSE_CACHE_DEFAULT_MB` 的旧断言；预算派生保留为
+`_resolve_cache_budget_bytes()` 并由上面的 resolver 测试钉住（patch 消费方绑定
+`apps.datafiles.services.get_budget`）。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -626,16 +658,20 @@ Expected: FAIL，`_BytesLRUCache` 无 `evict_to` / stats 缺计数器。
 
 ```python
 from apps.common.memory import get_budget
-```
 
-删除 `_resolve_cache_budget_bytes()` 与 `PARSE_CACHE_DEFAULT_MB`，改为：
 
-```python
+def _resolve_cache_budget_bytes() -> int:
+    """解析缓存预算 = 预算内核的 cache_budget_bytes（导入期读一次）。"""
+    return get_budget().cache_budget_bytes
+
+
 # 预算来源统一在 apps/common/memory.py：web 预算的 60%，上限 1536MB。
 # LQDP_PARSE_CACHE_MB 的覆盖也在那边解析（0 = 关闭缓存）。
-PARSE_CACHE_BUDGET_BYTES = get_budget().cache_budget_bytes
+PARSE_CACHE_BUDGET_BYTES = _resolve_cache_budget_bytes()
 logger.info('解析缓存预算 = %dMB', PARSE_CACHE_BUDGET_BYTES // (1024 * 1024))
 ```
+
+`PARSE_CACHE_DEFAULT_MB` 的旧常量/断言删除（预算公式已搬到 `memory.py`，Task 1 已钉住）。
 
 `_BytesLRUCache.__init__` 增加：
 
@@ -922,6 +958,46 @@ class MemoryErrorHandlerTests(SimpleTestCase):
         clear.assert_called_once()
         self.assertEqual(memory.oom_events(), before + 1)
 
+    def test_clear_cache_failure_still_returns_503_and_counts_oom(self):
+        """清缓存自身再抛 MemoryError 时，503 信封与 OOM 记账都必须保住。"""
+        before = memory.oom_events()
+        with mock.patch(
+                'apps.datafiles.services.clear_parse_cache',
+                side_effect=MemoryError('again')) as clear, \
+                self.assertLogs('apps.common.exceptions', level='ERROR') as logs:
+            response = self._payload(MemoryError('boom'))
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.data, {
+            'code': 'out_of_memory',
+            'message': '服务器内存不足，请关闭其他任务后重试',
+            'detail': {'path': '/api/v1/analysis/histogram/'},
+        })
+        self.assertEqual(response['Retry-After'], '5')
+        clear.assert_called_once()
+        self.assertEqual(memory.oom_events(), before + 1)
+        self.assertTrue(any('clear_parse_cache' in line for line in logs.output))
+
+    def test_memory_error_survives_side_effect_import_failure(self):
+        """懒导入自身失败时跳过副作用，503 信封仍必须返回。"""
+        import builtins
+        real_import = builtins.__import__
+
+        def failing_import(name, *args, **kwargs):
+            if name == 'apps.datafiles.services':
+                raise ImportError('simulated import failure')
+            return real_import(name, *args, **kwargs)
+
+        before = memory.oom_events()
+        with mock.patch('builtins.__import__', side_effect=failing_import), \
+                self.assertLogs('apps.common.exceptions', level='ERROR') as logs:
+            response = self._payload(MemoryError('boom'))
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.data['code'], 'out_of_memory')
+        self.assertEqual(response['Retry-After'], '5')
+        self.assertEqual(memory.oom_events(), before)
+        self.assertTrue(any('imports failed' in line for line in logs.output),
+                        logs.output)
+
     def test_other_exceptions_still_500(self):
         response = self._payload(ValueError('boom'))
         self.assertEqual(response.status_code, 500)
@@ -935,19 +1011,54 @@ Expected: FAIL，`MemoryError` 当前返回 500 `internal_error`。
 
 - [ ] **Step 3: 实现**
 
-`apps/common/exceptions.py` 顶部 `custom_exception_handler` 开头加：
+`apps/common/exceptions.py` 顶部 `custom_exception_handler` 开头加（与入库版本一致）：
 
 ```python
+def _safe_error_log(message, *args, **kwargs):
+    """写 ERROR 日志；日志设施自身失效时保持静默——此刻已无处可写。"""
+    try:
+        logger.error(message, *args, **kwargs)
+    except Exception:
+        pass
+
+
+def _run_best_effort(name, action):
+    """执行 MemoryError 分支的兜底动作（清缓存 / 记 OOM）。
+
+    极端内存压力下动作自身也可能失败（例如清缓存时再次抛 MemoryError），
+    因此逐个包裹：失败只留日志证据，绝不逸出 handler，且不影响后续动作
+    （清缓存失败时 record_oom 仍必须入账）。
+    """
+    try:
+        action()
+    except Exception:
+        _safe_error_log(
+            'MemoryError handler side effect failed: %s', name, exc_info=True)
+
+
 def custom_exception_handler(exc, context):
     if isinstance(exc, MemoryError):
-        from apps.common import memory
-        from apps.datafiles.services import clear_parse_cache
+        memory_mod = None
+        clear_cache = None
+        # 懒导入是为了避开配置加载期的循环；极端内存压力下导入自身也可能失败
+        # （例如再次触发 MemoryError）。此时跳过副作用，503 信封仍必须返回。
+        try:
+            from apps.common import memory as memory_mod
+            from apps.datafiles.services import clear_parse_cache as clear_cache
+        except Exception:
+            memory_mod = None
+            clear_cache = None
+            _safe_error_log(
+                'MemoryError handler imports failed; '
+                'returning 503 without side effects', exc_info=True)
 
-        clear_parse_cache()
-        memory.record_oom()
+        if clear_cache is not None:
+            _run_best_effort('clear_parse_cache', clear_cache)
+        if memory_mod is not None:
+            _run_best_effort('record_oom', memory_mod.record_oom)
         request = (context or {}).get('request')
         path = getattr(request, 'path', '') or ''
-        logger.error(
+        _safe_error_log(
             'MemoryError in %s', path or 'unknown',
             exc_info=(type(exc), exc, exc.__traceback__),
         )
@@ -995,6 +1106,21 @@ git commit -m "fix(memory): MemoryError 统一 503 out_of_memory 并清解析缓
 
 跑法：
     .venv/Scripts/python.exe scripts/memory_profile.py --rows 20000 --params 100
+
+只读测量：本脚本只量 RSS，不写库、不落盘。为了让「不写库」成为结构性保证而不是
+自觉，`django.setup()` 前面上了两道闸：
+
+1. 设置档固定用 `config.settings.unit`（测试档），不用 `development`。unit 档把库 /
+   MEDIA_ROOT / 临时区都指到 `test/unit-data`（`LQDP_UNIT_DATA_DIR`），与真实数据根
+   无关。**刻意不用 `setdefault`**：外部环境里预置的 `DJANGO_SETTINGS_MODULE`
+   若是 development，`setdefault` 会原样保留，闸门就形同虚设。
+2. `django.setup()` 前后把 `sys.argv` 临时换成离线命令 `check`。`JobsConfig.ready()`
+   在服务启动路径上会调 `mark_interrupted_jobs()`，把库里 `running` 的作业 UPDATE 成
+   `error`（见 `apps/jobs/apps.py`）；一个量内存的脚本跑一次就把用户的作业判死，代价
+   远大于这次测量。`check` 在 `OFFLINE_COMMANDS` 里，`ready()` 会走「无僵尸可收」分支。
+
+两道闸任一单独都够拦，叠起来是纵深防御。跑完 `git status` 只应看到本脚本，
+输出日志按约定放 `tasks/`（gitignored）。
 """
 import argparse
 import gc
@@ -1008,11 +1134,16 @@ import pandas as pd
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.development')
+os.environ['DJANGO_SETTINGS_MODULE'] = 'config.settings.unit'
 
 import django  # noqa: E402
 
-django.setup()
+_argv = sys.argv
+sys.argv = ['memory_profile.py', 'check']   # OFFLINE_COMMANDS includes 'check'
+try:
+    django.setup()
+finally:
+    sys.argv = _argv
 
 import psutil  # noqa: E402
 
@@ -1027,7 +1158,10 @@ def _rss():
 
 
 class _Sampler:
-    def __init__(self, interval=0.02):
+    # 1ms 而非 20ms：KDE 一次调用只有 ~17ms，20ms 采样几乎必然整段错过（实测同一
+    # 操作在 20ms 下读 0.0MiB、5ms 读 4–5MiB、1ms 读 5–7MiB），那样的峰值表会把
+    # 「有峰值」写成「没峰值」。psutil.memory_info 本身 ~0.1ms，1ms 采样不吃掉测量对象。
+    def __init__(self, interval=0.001):
         self.interval = interval
         self.peak = 0
         self._stop = threading.Event()
@@ -1110,7 +1244,10 @@ if __name__ == '__main__':
 - [ ] **Step 2: 跑脚本**
 
 Run: `.venv/Scripts/python.exe scripts/memory_profile.py --rows 20000 --params 100`
-Expected: 打印 5 行表；`GaussianKDE call` 的 delta 明显小于 75 MiB（应约 5–15 MiB）。把输出留在 `tasks/memory-profile-2026-10-21.log`（不入库），并把 baseline 与 KDE 峰值写进 spec 的 §4/§9 备注（若与初始值偏差大，在同一提交里调整并跑 Task 1 测试）。
+Expected: 打印 5 行表；`GaussianKDE call` 的 delta 明显小于 75 MiB（2026-10-21 实测
+4.9–7.4 MiB / 17.4 ms）。把输出留在 `tasks/memory-profile-2026-10-21.log`（不入库），
+并把 baseline 与 KDE 峰值写进 spec 的 §9（若与初始值偏差大，在同一提交里调整并跑
+Task 1 测试）。
 
 - [ ] **Step 3: 提交**
 
@@ -1122,12 +1259,19 @@ git commit -m "chore(memory): 新增峰值清单脚本（baseline/KDE/直方图�
 **批 1 收口检查**
 
 ```bash
+# 定向
 .venv/Scripts/python.exe manage.py test test.backend.test_memory_budget apps.common.tests_metrics apps.datafiles.tests_parse_cache -v 2
 .venv/Scripts/python.exe test/backend/test_kde_numpy.py
+# 后端全套（判日志末尾 Ran N tests + OK/FAILED）
+.venv/Scripts/python.exe manage.py test
+# affected e2e 门禁（判末尾 RESULT: 行，不取 $?）
+(cd frontend && npm run test:e2e:affected)
+# 前端静态三件套
 (cd frontend && npx vitest run && npm run lint:e2e && npm run build)
 ```
 
-Expected: 全绿；`git status` 只剩预期改动。
+Expected: 后端日志末尾 `Ran N tests` + `OK`；affected 门禁日志末尾 `RESULT:` 为通过；
+vitest / lint:e2e / build 通过；`git status` 只剩预期改动。
 
 ---
 
@@ -1269,6 +1413,7 @@ Expected: FAIL / ImportError，`admission` 不存在。
 ```python
 """重活端点准入：soft 淘汰缓存、有界等待、hard 拒绝、MemoryError 由异常处理器兜底。"""
 import logging
+import sys
 import threading
 from contextlib import contextmanager
 
@@ -1404,16 +1549,46 @@ def reset_for_tests():
 
 
 class HeavyActionMixin:
-    """ViewSet 在类顶声明 heavy_actions，dispatch 时按 self.action 取槽。"""
+    """ViewSet 在类顶声明 heavy_actions，在 initial() 取槽、finalize_response() 释放。
+
+    不能覆写 ``dispatch()``：
+
+    1. DRF 在 ``ViewSetMixin.initialize_request()`` 里才设置 ``self.action``，而它在
+       ``APIView.dispatch()`` 内部执行；mixin 的 ``dispatch()`` 覆写体运行时
+       ``self.action`` 还是 ``None``，任何重活都不会真正取槽（静默失效）。
+    2. ``ServerBusy`` 若在 ``dispatch()`` 覆写里、``APIView.dispatch()`` 的
+       try/except 之外抛出，就不会进 ``handle_exception``，最终变成 500 而不是
+       503 ``server_busy`` 信封。
+
+    ``initial()`` 在 ``initialize_request()`` 之后执行，``self.action`` 已就绪；
+    它本身位于 ``APIView.dispatch()`` 的 try 内，``ServerBusy`` 能走统一异常处理。
+    """
 
     heavy_actions = frozenset()
+    _heavy_ctx = None
 
-    def dispatch(self, request, *args, **kwargs):
+    def initial(self, request, *args, **kwargs):
+        # ViewSetMixin.initialize_request has already set self.action here.
         action = getattr(self, 'action', None)
+        self._heavy_ctx = None
         if action in self.heavy_actions:
-            with heavy_slot(action):
-                return super().dispatch(request, *args, **kwargs)
-        return super().dispatch(request, *args, **kwargs)
+            self._heavy_ctx = heavy_slot(action)
+            self._heavy_ctx.__enter__()      # ServerBusy is now inside APIView.dispatch's try
+        try:
+            return super().initial(request, *args, **kwargs)
+        except Exception:
+            if self._heavy_ctx is not None:
+                self._heavy_ctx.__exit__(*sys.exc_info())
+                self._heavy_ctx = None
+            raise
+
+    def finalize_response(self, request, response, *args, **kwargs):
+        try:
+            return super().finalize_response(request, response, *args, **kwargs)
+        finally:
+            if self._heavy_ctx is not None:
+                self._heavy_ctx.__exit__(None, None, None)
+                self._heavy_ctx = None
 ```
 
 `apps/common/metrics.py` 的 `snapshot()` 加：
@@ -1511,12 +1686,111 @@ class HeavyActionCoverageTests(SimpleTestCase):
                             f'{cls.__name__} 未登记任何重活 action')
             actual |= set(cls.heavy_actions)
         self.assertEqual(actual, HEAVY_EXPECTED)
+
+
+class HeavyMixinViewLevelTests(SimpleTestCase):
+    """视图级证明：mixin 真在 DRF 生命周期里取槽，且 ServerBusy 走 503 信封。"""
+
+    def setUp(self):
+        admission.reset_for_tests()
+        self.addCleanup(admission.reset_for_tests)
+
+    def test_registered_action_returns_503_when_slot_is_held(self):
+        import pandas as pd
+        from apps.analysis.tests_param_guards import (
+            StaleParamAcrossFileSwitchTests,
+        )
+        from apps.analysis.views import AnalysisViewSet
+
+        df = pd.DataFrame({'Param0': [1.0, 2.0, 3.0]})
+        factory, force_authenticate, restore = \
+            StaleParamAcrossFileSwitchTests._patched_view(df)
+        self.addCleanup(restore)
+        request = StaleParamAcrossFileSwitchTests._authed_post(
+            factory, force_authenticate, '/api/v1/analysis/histogram/',
+            {'file_id': 1, 'params': ['Param0']})
+
+        with mock.patch.dict(os.environ, {
+                'LQDP_HEAVY_CONCURRENCY': '1',
+                'LQDP_HEAVY_WAIT_S': '0'}):
+            admission.reset_for_tests()
+            ready = threading.Event()
+            release = threading.Event()
+
+            def hold():
+                with admission.heavy_slot('holder'):
+                    ready.set()
+                    release.wait(timeout=3)
+
+            thread = threading.Thread(target=hold)
+            thread.start()
+            self.assertTrue(ready.wait(timeout=2))
+            try:
+                response = AnalysisViewSet.as_view(
+                    {'post': 'histogram'})(request)
+                response.render()
+            finally:
+                release.set()
+                thread.join(timeout=3)
+
+        self.assertEqual(response.status_code, 503, response.content)
+        self.assertEqual(response.data['code'], 'server_busy')
+        self.assertEqual(response['Retry-After'], '5')
+
+
+class HeavyMixinWiringTests(SimpleTestCase):
+    """重活名单之外的动作不得取槽——证明 mixin 不是静默失效的摆设。"""
+
+    def test_slot_entered_only_for_registered_action(self):
+        from rest_framework import viewsets
+        from rest_framework.decorators import action
+        from rest_framework.permissions import AllowAny
+        from rest_framework.response import Response
+        from rest_framework.test import APIRequestFactory
+        from apps.common.admission import HeavyActionMixin
+
+        entered = []
+
+        class SpySlot:
+            def __init__(self, name):
+                self.name = name
+
+            def __enter__(self):
+                entered.append(self.name)
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        class DummyViewSet(HeavyActionMixin, viewsets.GenericViewSet):
+            permission_classes = [AllowAny]
+            heavy_actions = frozenset({'heavy'})
+
+            @action(detail=False, methods=['post'])
+            def heavy(self, request):
+                return Response({'ok': True})
+
+            @action(detail=False, methods=['post'])
+            def light(self, request):
+                return Response({'ok': True})
+
+        factory = APIRequestFactory()
+        with mock.patch('apps.common.admission.heavy_slot',
+                        side_effect=lambda name='': SpySlot(name)):
+            for name in ('heavy', 'light'):
+                response = DummyViewSet.as_view({'post': name})(
+                    factory.post(f'/dummy/{name}/'))
+                response.render()
+                self.assertEqual(response.status_code, 200)
+
+        self.assertEqual(entered, ['heavy'])
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `.venv/Scripts/python.exe manage.py test test.backend.test_admission.HeavyActionCoverageTests -v 2`
-Expected: FAIL，`heavy_actions` 为空。
+Run: `.venv/Scripts/python.exe manage.py test test.backend.test_admission.HeavyActionCoverageTests test.backend.test_admission.HeavyMixinViewLevelTests test.backend.test_admission.HeavyMixinWiringTests -v 2`
+Expected: FAIL，`heavy_actions` 为空 / mixin 不取槽（若用旧 `dispatch()` 实现，
+`HeavyMixinWiringTests` 会因 `self.action` 仍为 `None` 而记录为空）。
 
 - [ ] **Step 3: 实现**
 

@@ -98,6 +98,8 @@ budget    = LQDP_MEMORY_BUDGET_MB
 - 50% 是默认留白：服务器上的 OS 文件缓存、SQLite、桌面端 Electron 与其它应用
   都要留空间。服务器实测后可经 env 上调。
 - 8 GB 上限是默认值，不是硬限制；需要更大预算时显式配置，并重跑峰值清单与压测。
+- 显式 `LQDP_MEMORY_BUDGET_MB` 低于 1.5 GB 时按 1.5 GB 地板起用
+  （`max(MIN_BUDGET_BYTES, ...)`）；当前**不为此打 warning**，配置者需自行确认。
 - 取不到 psutil 时 budget 仍需可用：用 env 兜底并 **warning 一次**，不静默按
   4 GB 假装准确。
 
@@ -122,6 +124,8 @@ working_budget = web_budget - cache_budget   # 只用于读数/阈值，不是�
   并接受对应压测。
 - 作业预留（40% / 2 GB 封顶）是给并发导出留的余量：导出与交互请求同时跑时，
   不能让 worker 把 Web 预算也吃掉。
+- 显式 `LQDP_PARSE_CACHE_MB` 超过 `web_budget` 时夹到 `web_budget`；当前**不为此
+  打 warning**。`0` 仍表示关闭解析缓存。
 
 ### 4.3 水位
 
@@ -196,6 +200,10 @@ hits, misses, evictions, clears
 
 - 空闲 commit < budget：warning 一行，直接暴露「机器已被别的进程压住」的形态。
 - 日志只打一次，不随请求刷。
+- `config/settings/base.py` 为 `apps.common.memory` 配 INFO 级控制台 handler
+  （`propagate=False`、`disable_existing_loggers=False`）：Django 默认只给
+  `django.*` 挂 handler，不显式配置的话这行会被直接丢掉（批 1 已修，并有
+  「logger 有效级别 = INFO + `_log_plan` 产出记录」的测试钉住）。
 
 ### 5.3 依赖
 
@@ -207,8 +215,44 @@ hits, misses, evictions, clears
 
 ### 6.1 登记
 
-- `HeavyActionMixin`：ViewSet 类顶声明 `heavy_actions = frozenset({...})`，
-  `dispatch` 按 `self.action` 取信号量。
+- `HeavyActionMixin`：ViewSet 类顶声明 `heavy_actions = frozenset({...})`；
+  在 `initial()` 里按 `self.action` 取槽，在 `finalize_response()` 的 `finally`
+  释放；`initial()` 自身抛异常（含 `ServerBusy`）时先退出上下文再上抛。
+  **不要覆写 `dispatch()`**：DRF 在 `ViewSetMixin.initialize_request()` 里才设置
+  `self.action`，而它在 `APIView.dispatch()` 内部执行 —— mixin 的 `dispatch()`
+  覆写体运行时 `self.action` 仍是 `None`，名单里的动作永远不会取槽；且在那里
+  抛出的 `ServerBusy` 位于 `APIView.dispatch()` 的 try/except 之外，会变成 500
+  而不是 503 信封。（`apps/common/admission.py` 需 `import sys`。）
+
+  ```python
+  class HeavyActionMixin:
+      heavy_actions = frozenset()
+      _heavy_ctx = None
+
+      def initial(self, request, *args, **kwargs):
+          # ViewSetMixin.initialize_request has already set self.action here.
+          action = getattr(self, 'action', None)
+          self._heavy_ctx = None
+          if action in self.heavy_actions:
+              self._heavy_ctx = heavy_slot(action)
+              self._heavy_ctx.__enter__()      # ServerBusy is now inside APIView.dispatch's try
+          try:
+              return super().initial(request, *args, **kwargs)
+          except Exception:
+              if self._heavy_ctx is not None:
+                  self._heavy_ctx.__exit__(*sys.exc_info())
+                  self._heavy_ctx = None
+              raise
+
+      def finalize_response(self, request, response, *args, **kwargs):
+          try:
+              return super().finalize_response(request, response, *args, **kwargs)
+          finally:
+              if self._heavy_ctx is not None:
+                  self._heavy_ctx.__exit__(None, None, None)
+                  self._heavy_ctx = None
+  ```
+
 - 加 mixin 的类：`AnalysisViewSet`、`StatisticsViewSet`、`GageViewSet`、
   `BuyoffViewSet`、`BatchReportViewSet`。
 - 初版登记（峰值清单后增删，覆盖测试跟着改）：
@@ -223,7 +267,9 @@ hits, misses, evictions, clears
 - 同步导出的降级路径（`apps/jobs/views.py` 的 `_sync_fallback`，由
   `executor_available() == False` 触发）也取同一信号量，避免作业池不可用时绕开准入。
 - T1 覆盖测试：`heavy_actions` 必须是该 ViewSet 真实 action 的子集，且 §6.1 的
-  端点清单在测试里逐项钉住；新增重活端点忘登记会被测出来。
+  端点清单在测试里逐项钉住；新增重活端点忘登记会被测出来。视图级再钉两条：
+  持槽时重活 action 返回 503 `server_busy` + `Retry-After: 5`；未登记动作不得
+  进入 `heavy_slot`（证明 mixin 不是静默失效）。
 
 ### 6.2 时序
 
@@ -240,6 +286,11 @@ execute
 
 - 默认容量 2（`LQDP_HEAVY_CONCURRENCY`，夹取 1–8），等待 10s
   （`LQDP_HEAVY_WAIT_S`，夹取 0–60）。
+- mixin 生命周期：槽在 `initial()` 取得 —— `ServerBusy` 因此位于
+  `APIView.dispatch()` 的 try 内，走 §6.3 的 503 信封；成功或失败都由
+  `finalize_response()` 的 `finally` 释放，异常路径不会泄漏信号量。
+- 时序图里的「清缓存 + count」是 **best-effort**：动作自身失败不改变 503 结果
+  （详见 §6.3）。
 - 只拦重活，登录 / 列表 / 浏览不受影响。
 - 线程内嵌套用 depth 计数器；跨进程不共享（当前单进程形态成立；若未来多 worker，
   预算与信号量都要按进程拆分，见 §11）。
@@ -255,6 +306,9 @@ execute
 
 - 两个码都加入 `frontend/src/utils/error.ts` 的 `ERROR_CODE_MAP` 兜底；后端
   `message` 优先，现有 toast 管线不改。
+- `MemoryError` 分支的清缓存与 OOM 计数都是 **best-effort**（`_run_best_effort`）：
+  清缓存自身再抛 `MemoryError` 时只留 ERROR 日志，`record_oom` 仍入账；懒导入
+  失败时两项副作用都跳过。任何情况下 503 `out_of_memory` 信封都优先返回。
 - 不吞其它异常：非 `MemoryError` 的未捕获异常仍按现状 500。
 
 ## 7. 降级契约（批 2）
@@ -314,6 +368,11 @@ execute
 
 - 峰值清单：`scripts/memory_profile.py`，人工运行，不进 CI。批 1 先做
   baseline + KDE + 直方图，批 3 扩展到全部重活端点与导出。
+- 批 1 实测（2026-10-21，`config.settings.unit`，`scripts/memory_profile.py`）：
+  baseline ≈ 96 MiB；`GaussianKDE.__call__`（16384 样本 × 200 网格）
+  4.9–7.4 MiB / 17.4 ms；直方图含 KDE 6.7–8.7 MiB / 22 ms。
+  **75/90（水位）、60%（缓存占比）与批 2 的 2 并发 / 批 3 的 384 MB 初始值
+  均保持不变** —— 实测没有给出需要调整它们的证据。
 - 压测：`scripts/memory_load20.py`（或给 `perf_load20.py` 加 `--memory`），
   20 并发直方图，记录峰值 RSS、503 数、P95。
 - 验收：
