@@ -98,7 +98,7 @@ class MiddlewareSamplingTests(TestCase):
 
 class RssDegradationTests(TestCase):
     def test_missing_psutil_yields_none_not_zero(self):
-        """psutil 只是 py7zr 的传递依赖、没进 requirements ⇒ 干净检出里必须能优雅降级。"""
+        """缺 psutil 的精简打包/损坏环境必须优雅降级，而不是拿 0 冒充 RSS。"""
         with mock.patch.dict(sys.modules, {'psutil': None}):
             self.assertIsNone(metrics.process_rss_bytes())
 
@@ -113,6 +113,12 @@ class RssDegradationTests(TestCase):
             snap = metrics.snapshot()
         self.assertTrue(snap['rss_available'])
         self.assertEqual(snap['rss_bytes'], 123456789)
+
+    def test_memory_unavailable_is_null_not_zero(self):
+        with mock.patch.object(metrics, 'process_rss_bytes', return_value=None):
+            snap = metrics.snapshot()
+        self.assertIsNone(snap['memory']['used_ratio'])
+        self.assertIsNone(snap['memory']['level'])
 
 
 class MetricsEndpointTests(TestCase):
@@ -144,7 +150,17 @@ class MetricsEndpointTests(TestCase):
         body = resp.json()
         self.assertEqual(
             set(body), {'uptime_seconds', 'pid', 'rss_bytes', 'rss_available',
-                        'parse_cache', 'summary_cache', 'jobs', 'requests'})
+                        'memory', 'parse_cache', 'summary_cache', 'jobs',
+                        'requests'})
+        self.assertEqual(set(body['memory']), {
+            'budget_bytes', 'jobs_budget_bytes', 'web_budget_bytes',
+            'cache_budget_bytes', 'private_bytes', 'used_ratio', 'level',
+            'system',
+        })
+        self.assertEqual(set(body['memory']['system']), {
+            'total_bytes', 'available_bytes',
+            'commit_used_bytes', 'commit_limit_bytes',
+        })
         self.assertEqual(set(body['requests']),
                          {'samples', 'window_seconds', 'p50_ms', 'p95_ms',
                           'max_ms', 'slowest'})
@@ -154,7 +170,10 @@ class MetricsEndpointTests(TestCase):
         """预算与实际占用是「命中率接近 0」那条论点的直接读数，必须都在。"""
         body = self._get(self.admin).json()
         cache = body['parse_cache']
-        self.assertEqual(set(cache), {'entries', 'bytes', 'budget_bytes', 'in_flight'})
+        self.assertEqual(set(cache), {
+            'entries', 'bytes', 'budget_bytes', 'in_flight',
+            'hits', 'misses', 'evictions', 'clears',
+        })
         self.assertGreater(cache['budget_bytes'], 0)
 
     def test_jobs_section_survives_missing_table(self):
