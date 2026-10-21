@@ -122,8 +122,9 @@ def latency_summary(now=None):
 def process_rss_bytes():
     """当前进程 RSS（字节）。没有 psutil 时返回 None，**不返回 0**。
 
-    psutil 只是 `py7zr` 的传递依赖、没进 requirements —— 干净检出（含 CI）里 import 失败是
-    预期分支。把「取不到」写成 0 会让运维页显示「RSS 0 MB」，那比没有这个数字更糟。
+    psutil 已在 `requirements/base.txt` 显式声明（内存水位与 commit 快照都靠它）；
+    这里仍保留 ImportError 分支 —— 精简打包或环境损坏时「取不到」是合法状态。
+    把「取不到」写成 0 会让运维页显示「RSS 0 MB」，那比没有这个数字更糟。
     """
     try:
         import psutil
@@ -163,11 +164,13 @@ def _job_counts():
 def snapshot():
     """组装指标载荷。全部来自进程内状态，一次调用不写盘不打 DB 之外的网络。"""
     rss = process_rss_bytes()
+    from apps.common import memory as memory_mod
     return {
         'uptime_seconds': round(time.time() - _started_at),
         'pid': os.getpid(),
         'rss_bytes': rss,
         'rss_available': rss is not None,
+        'memory': memory_mod.memory_snapshot(rss),
         'parse_cache': _parse_cache_stats(),
         'summary_cache': _summary_cache_stats(),
         'jobs': _job_counts(),
