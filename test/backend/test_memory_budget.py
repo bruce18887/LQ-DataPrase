@@ -110,3 +110,34 @@ class SnapshotTests(SimpleTestCase):
         before = memory.oom_events()
         memory.record_oom()
         self.assertEqual(memory.oom_events(), before + 1)
+
+
+class MemoryErrorHandlerTests(SimpleTestCase):
+    def _payload(self, exc, path='/api/v1/analysis/histogram/'):
+        from types import SimpleNamespace
+        from apps.common.exceptions import custom_exception_handler
+        return custom_exception_handler(exc, {
+            'request': SimpleNamespace(path=path),
+        })
+
+    def test_memory_error_maps_to_503_and_clears_cache(self):
+        from unittest import mock
+        before = memory.oom_events()
+        with mock.patch(
+                'apps.datafiles.services.clear_parse_cache') as clear, \
+                self.assertLogs('apps.common.exceptions', level='ERROR'):
+            response = self._payload(MemoryError('boom'))
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.data['code'], 'out_of_memory')
+        self.assertIn('内存不足', response.data['message'])
+        self.assertEqual(response['Retry-After'], '5')
+        self.assertEqual(response.data['detail']['path'],
+                         '/api/v1/analysis/histogram/')
+        clear.assert_called_once()
+        self.assertEqual(memory.oom_events(), before + 1)
+
+    def test_other_exceptions_still_500(self):
+        with self.assertLogs('apps.common.exceptions', level='ERROR'):
+            response = self._payload(ValueError('boom'))
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data['code'], 'internal_error')

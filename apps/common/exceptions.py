@@ -94,6 +94,28 @@ def _extract_message(exc, response_status):
 
 
 def custom_exception_handler(exc, context):
+    if isinstance(exc, MemoryError):
+        from apps.common import memory
+        from apps.datafiles.services import clear_parse_cache
+
+        clear_parse_cache()
+        memory.record_oom()
+        request = (context or {}).get('request')
+        path = getattr(request, 'path', '') or ''
+        logger.error(
+            'MemoryError in %s', path or 'unknown',
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+        return Response(
+            {
+                'code': 'out_of_memory',
+                'message': '服务器内存不足，请关闭其他任务后重试',
+                'detail': {'path': path},
+            },
+            status=503,
+            headers={'Retry-After': '5'},
+        )
+
     response = exception_handler(exc, context)
 
     if response is None:
