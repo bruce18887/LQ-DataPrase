@@ -175,6 +175,10 @@ class MetricsEndpointTests(TestCase):
             'hits', 'misses', 'evictions', 'clears',
         })
         self.assertGreater(cache['budget_bytes'], 0)
+        # 缓存预算必须就是 memory 对象里那份派生值：两个读数各写一遍公式
+        # 就会出现「/metrics/ 显示 1.5GB、实际生效另一值」的静默漂移。
+        self.assertEqual(cache['budget_bytes'],
+                         body['memory']['cache_budget_bytes'])
 
     def test_jobs_section_survives_missing_table(self):
         """表不存在（未 migrate）时报 available:false，而不是 500 掉整个端点。"""
