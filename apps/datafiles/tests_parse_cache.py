@@ -165,6 +165,42 @@ class BytesLRUCacheTests(_CacheCaseBase):
         self.assertEqual(out, (None, None, 'CTA8290D'))
         self.assertEqual(parser.calls, 0)
 
+    def test_hits_misses_and_clears_are_counted(self):
+        self.patch_parser(_frame())
+        self.cached_parse()
+        self.cached_parse()
+        stats = services.get_parse_cache_stats()
+        self.assertEqual((stats['misses'], stats['hits'], stats['clears']),
+                         (1, 1, 0))
+        services.clear_parse_cache()
+        self.assertEqual(services.get_parse_cache_stats()['clears'], 1)
+
+    def test_evict_to_zero_keeps_last_entry_and_counts(self):
+        frame = _frame()
+        self.use_budget(services._frame_bytes(frame) * 10)
+        self.patch_parser(frame)
+        self.cached_parse(file_id=1)
+        self.cached_parse(file_id=2)
+        self.assertEqual(len(services._parse_cache), 2)
+        services._parse_cache.evict_to(0)
+        self.assertEqual(len(services._parse_cache), 1,
+                         'evict_to 保留最后一条，与 _store 的 len>1 语义一致')
+        self.assertGreaterEqual(
+            services.get_parse_cache_stats()['evictions'], 1)
+
+    def test_evict_parse_cache_to_fraction(self):
+        frame = _frame()
+        one = services._frame_bytes(frame)
+        # 3 条 ≈ 3×one，预算必须 < 6×one 才会让「淘汰到预算一半」真的发生
+        # （10×one 时 3 条连一半预算都不到，evict_to 无事可做）。
+        self.use_budget(one * 4)
+        self.patch_parser(frame)
+        for file_id in (1, 2, 3):
+            self.cached_parse(file_id=file_id)
+        before = services._parse_cache.bytes_cached()
+        services.evict_parse_cache_to(0.5)
+        self.assertLessEqual(services._parse_cache.bytes_cached(), before / 2)
+
 
 class PutCachedParsedFileTests(_CacheCaseBase):
     """上传写透：put 之后读侧必须直接命中，不能再解析一次。"""
@@ -266,45 +302,23 @@ class ModuleShapeTests(SimpleTestCase):
         self.assertIsNotNone(fake)
 
 
-class CacheBudgetPolicyTests(SimpleTestCase):
-    """预算取值：默认仍是 1536MB（**这次不改常驻内存策略**），env 覆盖优先且非法值不炸。
+class CacheBudgetWiringTests(SimpleTestCase):
+    def setUp(self):
+        from apps.common import memory
+        memory.reset_budget_for_tests()
 
-    自适应方案（clamp(RAM×0.25, 1536, 4096)）实测后撤回，理由写在 services.py 顶部注释：
-    它的前提「一个批次目录 9 只同量级大文件互相洗掉」被测量否证——那只目录只有 1 只 275MB，
-    而 460MB 的帧本来就住得下 1536MB 预算。这里保留的判据因此只钉两件事：
-    默认值没被动过、以及 env 写错时后端还能起来。
-    """
+    def tearDown(self):
+        from apps.common import memory
+        memory.reset_budget_for_tests()
 
-    MB = 1024 * 1024
-    _NO_ENV = object()
+    def test_module_budget_matches_memory_plan(self):
+        from apps.common import memory
+        self.assertEqual(services.PARSE_CACHE_BUDGET_BYTES,
+                         memory.get_budget().cache_budget_bytes)
 
-    def _budget(self, env=_NO_ENV):
-        """清掉 env 后跑公式，保证「有没有 LQDP_PARSE_CACHE_MB」由参数决定而不是继承本机。"""
-        import unittest.mock as mock
-        with mock.patch.dict('os.environ', {}, clear=True):
-            if env is not self._NO_ENV:
-                os.environ['LQDP_PARSE_CACHE_MB'] = str(env)
-            return services._resolve_cache_budget_bytes() // self.MB
-
-    def test_default_is_the_pre_change_fixed_value(self):
-        self.assertEqual(self._budget(), 1536)
-        self.assertEqual(services.PARSE_CACHE_DEFAULT_MB, 1536)
-
-    def test_env_override_wins(self):
-        self.assertEqual(self._budget(700), 700)
-        self.assertEqual(self._budget(0), 0, '0 = 显式关掉缓存，这条逃生口要留着')
-
-    def test_illegal_env_falls_back_instead_of_raising(self):
-        """模块级常量在 import 时求值：这里抛异常等于后端起不来、用户只看到「双击没反应」。"""
-        self.assertEqual(self._budget('big'), 1536)
-        self.assertEqual(self._budget(''), 1536, '空值走「未设置」那条，同样取默认')
-
-    def test_negative_env_clamped_to_zero(self):
-        self.assertEqual(self._budget(-5), 0)
-
-    def test_module_level_budget_matches_resolver(self):
-        """常量必须由这条函数算出（缓存用的是常量，两处不一致就等于覆盖没生效）。"""
-        import unittest.mock as mock
-        with mock.patch.dict('os.environ', {}, clear=True):
-            expected = services._resolve_cache_budget_bytes()
-        self.assertEqual(services.PARSE_CACHE_BUDGET_BYTES, expected)
+    def test_stats_expose_counters(self):
+        stats = services.get_parse_cache_stats()
+        self.assertEqual(set(stats), {
+            'entries', 'bytes', 'budget_bytes', 'in_flight',
+            'hits', 'misses', 'evictions', 'clears',
+        })
