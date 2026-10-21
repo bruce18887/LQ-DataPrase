@@ -93,16 +93,38 @@ def _extract_message(exc, response_status):
     return '请求失败', _code_for_status(response_status)
 
 
+def _safe_error_log(message, *args, **kwargs):
+    """写 ERROR 日志；日志设施自身失效时保持静默——此刻已无处可写。"""
+    try:
+        logger.error(message, *args, **kwargs)
+    except Exception:  # 环境级故障；信封优先，且此刻已无处可写
+        pass
+
+
+def _run_best_effort(name, action):
+    """执行 MemoryError 分支的兜底动作（清缓存 / 记 OOM）。
+
+    极端内存压力下动作自身也可能失败（例如清缓存时再次抛 MemoryError），
+    因此逐个包裹：失败只留日志证据，绝不逸出 handler，且不影响后续动作
+    （清缓存失败时 record_oom 仍必须入账）。
+    """
+    try:
+        action()
+    except Exception:
+        _safe_error_log(
+            'MemoryError handler side effect failed: %s', name, exc_info=True)
+
+
 def custom_exception_handler(exc, context):
     if isinstance(exc, MemoryError):
         from apps.common import memory
         from apps.datafiles.services import clear_parse_cache
 
-        clear_parse_cache()
-        memory.record_oom()
+        _run_best_effort('clear_parse_cache', clear_parse_cache)
+        _run_best_effort('record_oom', memory.record_oom)
         request = (context or {}).get('request')
         path = getattr(request, 'path', '') or ''
-        logger.error(
+        _safe_error_log(
             'MemoryError in %s', path or 'unknown',
             exc_info=(type(exc), exc, exc.__traceback__),
         )
