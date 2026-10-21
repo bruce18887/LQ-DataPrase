@@ -28,6 +28,11 @@ _SQRT_2PI = np.sqrt(2.0 * np.pi)
 # 小数据（≤ 上限）完全不走采样路径，输出逐点一致（零变更）。
 MAX_KDE_SAMPLES = 16384
 
+# 网格分块：每个临时矩阵最多 _CHUNK_ROWS × n 个 float64。
+# 200×16384 未分块时同时存在 diff/diff²/exp 三个 ~26MB 临时矩阵；
+# 分 32 行后单块 ~4MiB，形状与逐点结果不变（逐行 reduction 顺序不变）。
+_CHUNK_ROWS = 32
+
 
 class GaussianKDE:
     """One-dimensional Gaussian kernel density estimate.
@@ -75,6 +80,14 @@ class GaussianKDE:
             return np.empty((0,), dtype=float)
         stdev = np.sqrt(self.covariance)
         data = self.dataset[0]
-        diff = (pts[:, None] - data[None, :]) / stdev
-        pdf = np.exp(-0.5 * diff * diff).mean(axis=1) / (stdev * _SQRT_2PI)
-        return pdf
+        pdf = np.empty(pts.size, dtype=float)
+        step = max(1, min(pts.size, _CHUNK_ROWS))
+        for start in range(0, pts.size, step):
+            block = pts[start:start + step]
+            diff = block[:, None] - data[None, :]
+            diff /= stdev
+            np.square(diff, out=diff)
+            diff *= -0.5
+            np.exp(diff, out=diff)
+            pdf[start:start + step] = diff.mean(axis=1)
+        return pdf / (stdev * _SQRT_2PI)

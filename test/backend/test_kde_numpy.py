@@ -9,6 +9,7 @@ Run directly:  python test/backend/test_kde_numpy.py
 """
 import os
 import sys
+import tracemalloc
 
 # test/backend/ → project root (for `import config` / `from apps...`)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -157,6 +158,19 @@ def test_kde_live_comparison_with_scipy():
         theirs = gaussian_kde(data, bw_method='silverman')(x)
         assert np.max(np.abs(mine - theirs)) < 1e-9, f'n={n}'
     print('  live scipy comparison OK')
+
+
+def test_kde_call_peak_memory_is_bounded():
+    """16384 样本 × 200 网格：分块后峰值应远低于未分块的 75 MiB。"""
+    vals = np.random.default_rng(5).normal(0.0, 1.0, MAX_KDE_SAMPLES)
+    grid = np.linspace(-5.0, 5.0, 200)
+    kde = GaussianKDE(vals, bw_method='silverman')
+    tracemalloc.start()
+    pdf = kde(grid)
+    _current, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    assert pdf.shape == (200,)
+    assert peak < 30 * 1024 * 1024, f'peak {peak / 1048576:.1f}MiB'
 
 
 if __name__ == '__main__':
