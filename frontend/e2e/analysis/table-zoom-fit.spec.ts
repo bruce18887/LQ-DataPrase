@@ -348,7 +348,9 @@ test.describe('@p2 表格随缩放完整显示每一列', { tag: ['@p2', '@analy
     // 1) 100%
     await expectNoClippedColumns(page, '100% 视口 1920：')
 
-    // 2) 125%：useZoom 的浏览器分支就是给 <html> 设 style.zoom（Ctrl+滚轮/`+`）
+    // 2) 125%：这里直接给 <html> 设 style.zoom 只是**模拟**「有效视口被压小」的布局形态
+    //    （原生页面缩放同样把 1920 压成 1536 CSS px）。应用自己不再产生这个写法——
+    //    useZoom 现在只在 Electron 档经 setZoomFactor 生效，浏览器档整个交给浏览器原生缩放。
     await page.evaluate(() => { document.documentElement.style.zoom = '1.25' })
     await expectNoClippedColumns(page, '应用缩放 125%：')
 

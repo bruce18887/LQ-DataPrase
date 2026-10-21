@@ -1,11 +1,12 @@
 /**
- * useZoom — 全局 Ctrl+滚轮页面缩放
+ * useZoom — 应用内页面缩放（**仅 Electron 档**）
  *
- * 支持 Electron 与浏览器两种运行环境：
  * - Electron：调用主进程 webContents.setZoomFactor，缩放原生且与系统菜单一致
- * - 浏览器：通过 CSS zoom 属性缩放 <html> 元素
+ * - 浏览器：整个 composable 不工作 —— 不拦 Ctrl+滚轮/Ctrl+0、不给 `<html>` 写 CSS
+ *   zoom，手势交给浏览器原生缩放。判据与理由在 `zoomMode.ts`（一句话：CSS zoom 会把
+ *   teleport 到 body 的下拉/popover 再乘一次 zoom，越靠右下偏得越多）
  *
- * 缩放范围 0.5 ~ 2.0，步进 0.1，持久化到 localStorage。
+ * 缩放范围 0.5 ~ 2.0，步进 0.1，持久化到 localStorage（Electron 自己的存储分区）。
  * Ctrl+0 可快速恢复 100%。
  *
  * 缩放时通过 showIndicator 显示当前百分比气泡（停止缩放后自动隐藏），
@@ -14,6 +15,7 @@
  */
 import { ref, onMounted, onUnmounted } from 'vue'
 import { safeGetItem, safeSetItem } from '../utils/safeStorage'
+import { detectZoomRuntime, shouldOwnZoom } from './zoomMode'
 
 const STORAGE_KEY = 'lqdp-zoom-factor'
 const MIN_ZOOM = 0.5
@@ -39,6 +41,9 @@ function isElectron(): boolean {
   return typeof window !== 'undefined' && typeof window.electronAPI !== 'undefined'
 }
 
+/** 应用是否接管缩放。浏览器档为 false：手势与缩放值都交给浏览器原生缩放 */
+const zoomOwned = shouldOwnZoom(detectZoomRuntime(isElectron()))
+
 export function useZoom() {
   async function applyZoomFactor(value: number, silent = false): Promise<void> {
     const clamped = clampZoom(value)
@@ -46,11 +51,7 @@ export function useZoom() {
     // 统一走 safeSetItem（此前同文件 setItem 有 try/catch 而 getItem 无——不一致）
     safeSetItem(STORAGE_KEY, String(zoom.value))
 
-    if (isElectron()) {
-      await window.electronAPI?.setZoomFactor(zoom.value)
-    } else {
-      document.documentElement.style.zoom = String(zoom.value)
-    }
+    await window.electronAPI?.setZoomFactor(zoom.value)
 
     // 用户缩放（非初始化静默应用）时显示百分比指示器，防抖后自动隐藏
     if (!silent) {
@@ -76,12 +77,10 @@ export function useZoom() {
 
   async function initZoom(): Promise<void> {
     let initial = 1
-    if (isElectron()) {
-      try {
-        initial = (await window.electronAPI?.getZoomFactor()) ?? 1
-      } catch {
-        initial = 1
-      }
+    try {
+      initial = (await window.electronAPI?.getZoomFactor()) ?? 1
+    } catch {
+      initial = 1
     }
 
     // 统一走 safeGetItem（此前裸调 localStorage.getItem 无 try/catch，
@@ -123,6 +122,8 @@ export function useZoom() {
     // （ZoomIndicator 等）只消费单例状态，避免 wheel 监听重复导致一次
     // 滚动缩放两次
     if (refCount++ > 0) return
+    // 浏览器档一个监听都不绑：拦了 Ctrl+滚轮又不缩放，等于把原生缩放也一起废掉
+    if (!zoomOwned) return
     initZoom()
     window.addEventListener('wheel', onWheel, { passive: false })
     window.addEventListener('keydown', onKeyDown)

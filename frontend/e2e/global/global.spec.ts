@@ -79,104 +79,42 @@ test.describe('@p2 主题切换', { tag: ['@p2', '@global'] }, () => {
   })
 })
 
-test.describe('@p2 Ctrl+滚轮页面缩放', { tag: ['@p2', '@global'] }, () => {
-  test('Ctrl+滚轮放大/缩小页面并持久化到 localStorage', async ({ page }) => {
+test.describe('@p2 浏览器档不接管页面缩放', { tag: ['@p2', '@global'] }, () => {
+  /**
+   * 回归（2026-10-21）：浏览器档曾往 `<html>` 写 CSS `zoom`，而 Element Plus 的下拉是
+   * teleport 到 body 的 `position:absolute` 浮层 —— floating-ui 把「已放大的视觉坐标」
+   * 原样写进 left/top，浮层于是**再乘一次 zoom**，偏移 = 坐标 ×(zoom−1)，用户看到的就是
+   * 「测试项选择框 / 文件选择框的下拉跑到右下方」。现在浏览器档一个监听都不绑，
+   * 缩放整个交给浏览器原生（桌面版仍走 webContents.setZoomFactor，见 zoomMode.ts）。
+   *
+   * 判据取「应用没动过 inline zoom」而不是「缩放量等于几」：浏览器原生缩放不落在
+   * inline style 上，派发合成 WheelEvent 之后它必须恒为空串。
+   */
+  test('Ctrl+滚轮不写 CSS zoom、不出百分比气泡、不落 localStorage', async ({ page }) => {
     await gotoApp(page, '/dashboard')
 
-    const getZoom = () => page.evaluate(() => document.documentElement.style.zoom || '1')
-    const getStoredZoom = () => page.evaluate(() => localStorage.getItem('lqdp-zoom-factor'))
+    const htmlZoom = () => page.evaluate(() => document.documentElement.style.zoom)
+    const storedZoom = () => page.evaluate(() => localStorage.getItem('lqdp-zoom-factor'))
+    const wheel = (deltaY: number) =>
+      page.evaluate((dy) => {
+        window.dispatchEvent(new WheelEvent('wheel', { deltaY: dy, ctrlKey: true, bubbles: true }))
+      }, deltaY)
 
-    await expect.poll(getZoom).toBe('1')
+    await expect.poll(htmlZoom).toBe('')
 
-    // 模拟 Ctrl+向上滚轮放大
-    await page.evaluate(() => {
-      const event = new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, bubbles: true })
-      window.dispatchEvent(event)
-    })
-    await expect.poll(getZoom).not.toBe('1')
-    const zoomedIn = parseFloat(await getZoom())
-    expect(zoomedIn).toBeGreaterThan(1)
-    expect(parseFloat((await getStoredZoom()) ?? '1')).toBe(zoomedIn)
-
-    // 模拟 Ctrl+向下滚轮缩小
-    await page.evaluate(() => {
-      const event = new WheelEvent('wheel', { deltaY: 100, ctrlKey: true, bubbles: true })
-      window.dispatchEvent(event)
-    })
-    await expect.poll(async () => parseFloat(await getZoom())).toBeLessThan(zoomedIn)
-
-    // Ctrl+0 恢复 100%
+    // 放大三步 + 缩小一步 + Ctrl+0：应用若接管，这三样会留下 zoom、气泡与存储
+    for (const dy of [-100, -100, -100, 100]) await wheel(dy)
     await page.keyboard.down('Control')
     await page.keyboard.press('0')
     await page.keyboard.up('Control')
-    await expect.poll(getZoom).toBe('1')
-    expect(await getStoredZoom()).toBe('1')
-  })
 
-  test('缩放时右下角显示当前百分比指示器，停止后自动消失', async ({ page }) => {
-    await gotoApp(page, '/dashboard')
+    await expect.poll(htmlZoom).toBe('')
+    await expect(page.locator('.zoom-indicator')).toHaveCount(0)
+    expect(await storedZoom()).toBeNull()
 
-    const indicator = page.locator('.zoom-indicator')
-    await expect(indicator).toHaveCount(0)
-
-    // 连续放大到 150%（5 步 × 0.1）
-    for (let i = 0; i < 5; i++) {
-      await page.evaluate(() => {
-        const event = new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, bubbles: true })
-        window.dispatchEvent(event)
-      })
-    }
-
-    await expect(indicator).toBeVisible()
-    await expect(indicator).toHaveText('缩放 150%')
-
-    // 缩小一步 → 百分比实时更新
-    await page.evaluate(() => {
-      const event = new WheelEvent('wheel', { deltaY: 100, ctrlKey: true, bubbles: true })
-      window.dispatchEvent(event)
-    })
-    await expect(indicator).toHaveText('缩放 140%')
-
-    // 停止滚动 → 指示器自动隐藏（防抖 800ms + 过渡动画）
-    await expect(indicator).not.toBeVisible({ timeout: 5_000 })
-
-    // Ctrl+0 重置也会短暂提示 100%
-    await page.keyboard.down('Control')
-    await page.keyboard.press('0')
-    await page.keyboard.up('Control')
-    await expect(indicator).toHaveText('缩放 100%')
-  })
-
-  test('指示器消失（组件卸载）后 Ctrl+滚轮缩放仍有效（回归：useZoom 引用计数）', async ({ page }) => {
-    await gotoApp(page, '/dashboard')
-
-    const getZoom = () => page.evaluate(() => document.documentElement.style.zoom || '1')
-    const indicator = page.locator('.zoom-indicator')
-
-    // 第一次缩放：指示器挂载 → 防抖 800ms 后 v-if 移除（组件真正卸载）
-    await page.evaluate(() => {
-      const event = new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, bubbles: true })
-      window.dispatchEvent(event)
-    })
-    await expect(indicator).toBeVisible()
-    await expect(indicator).not.toBeVisible({ timeout: 5_000 })
-    // toHaveCount(0) = 元素已从 DOM 移除 = onUnmounted 已执行（旧实现此时误删全局监听）
-    await expect(indicator).toHaveCount(0)
-    const afterFirst = parseFloat(await getZoom())
-    expect(afterFirst).toBeGreaterThan(1)
-
-    // 指示器卸载后再次缩放：引用计数修复前全局监听已被移除，此步缩放失效
-    await page.evaluate(() => {
-      const event = new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, bubbles: true })
-      window.dispatchEvent(event)
-    })
-    await expect.poll(getZoom).not.toBe(String(afterFirst))
-
-    // 恢复 100%，避免污染其他用例的缩放预期
-    await page.keyboard.down('Control')
-    await page.keyboard.press('0')
-    await page.keyboard.up('Control')
-    await expect.poll(getZoom).toBe('1')
+    // 探针自证：同一读法看得见 CSS zoom，否则上面那条「恒为空」是瞎判据
+    await page.evaluate(() => { document.documentElement.style.zoom = '1.25' })
+    await expect.poll(htmlZoom).toBe('1.25')
   })
 })
 

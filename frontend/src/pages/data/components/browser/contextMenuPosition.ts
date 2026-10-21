@@ -1,12 +1,14 @@
 /**
  * 右键菜单落位：把「视口 px 的右键点」换算进菜单自己的坐标空间，再在视口内夹紧。
  *
- * 为什么要换算：浏览器档的页面缩放是 useZoom 往 `<html>` 上写 CSS `zoom`，它会连同
- * Teleport 到 body 的 `position: fixed` 菜单一起放大；而 `MouseEvent.clientX/Y` 与
- * `getBoundingClientRect()` 始终是**不缩放的视口 px**。把 clientX 原样写进 `left`
- * 等于让菜单再乘一次 zoom —— 偏移随「距视口左上角的距离」线性增长，1.5 档整块菜单被推出视口。
- * Electron 档走 `webContents.setZoomFactor`（页面缩放，两套坐标同源），`<html>` 上没有
- * CSS zoom ⇒ 这里读回来恒为 1，行为与换算前逐字一致。
+ * 为什么要换算：CSS `zoom` 写在 `<html>` 上时，它会连同 Teleport 到 body 的
+ * `position: fixed` 菜单一起放大；而 `MouseEvent.clientX/Y` 与 `getBoundingClientRect()`
+ * 给的是**已放大的视觉 px**。把 clientX 原样写进 `left` 等于让菜单再乘一次 zoom ——
+ * 偏移随「距视口左上角的距离」线性增长，1.5 档整块菜单被推出视口（2026-10-18 实测）。
+ * 同一个裂缝也打偏 Element Plus 的下拉/popover，所以 2026-10-21 起浏览器档不再写 CSS zoom
+ * （见 `composables/zoomMode.ts`），Electron 档走 `webContents.setZoomFactor`（坐标同源）
+ * ⇒ 两档这里都读回 1，换算退化成空操作。保留它只为兜住「将来又有人往 `<html>` 写 zoom」，
+ * 那条恒等式（画出来的位置 == 右键点）在两档下都成立。
  *
  * 空间约定（全部视口 px，除标注 local 者）：clientX/Y、rect 宽高、innerWidth/Height。
  * 返回值是 local px，即 `left`/`top` 该写进去的那个数。
