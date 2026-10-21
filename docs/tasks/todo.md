@@ -4979,3 +4979,65 @@ df 第 648 行一格，原文就是字面文本 `inf`**，全文件 4575 列仅�
   （响应体 1,371,455 字节），递归扫描**响应体内 0 条非有限 float**。PG_RES 修复后
   `data_count=1748`（inf 那格除外）、mean 842.151、std 9.7703、min 823.0118、max 884.6246、
   cpk 2.632 → A 级；`fail_count` 仍是 1 ⇒ 超量程读数照常判 FAIL，只是不再污染统计量。
+
+---
+
+# 任务：浏览器档不再用 CSS zoom —— 修 teleport 浮层跑位（2026-10-21）
+
+用户报「分析页测试项选择框 / 文件选择框的下拉错位」，并提示「像是 serial/bin 右键菜单那个特性之后坏的，0.6 版验证是好的」。
+
+## 根因（探针实测，非推测）
+
+`useZoom` 浏览器档往 `<html>` 写 CSS `zoom`；Element Plus 的下拉是 teleport 到 body 的
+`position:absolute` 浮层，floating-ui（@floating-ui/dom 1.7.6，无 CSS zoom 支持）用
+`getBoundingClientRect()` 读到的是**已放大的视觉坐标**，写回 `left/top` 时落在 zoom 的局部坐标系里
+⇒ 再乘一次 z。偏移 = reference 坐标 ×(z−1)。
+
+| 缩放 | select x | popper x | 关系 |
+| --- | --- | --- | --- |
+| 1 | 655.5 | 656 | 对齐 |
+| 1.25 | 1006.1 | 1257.5 | =1006×1.25 |
+| 1.5 | 585.1 | 877.5 | =585×1.5 |
+| 文件框@1.25 | 465.8 | 582.5 | =466×1.25 |
+
+右键菜单那批提交（3364982/240ab33/d2a6398/c9c066b）改的全是 `pages/data/components/browser/` +
+scoped 样式，没碰 useZoom、没碰全局 CSS；EP/floating-ui 版本自首提交未升。真正的关联是
+**c9c066b 修的就是「缩放下右键菜单跑位」**——为复现它把浏览器里的应用缩放按到了 ~1.4，
+而 `lqdp-zoom-factor` 会持久化，从此该源每次加载都带着 CSS zoom。0.6 是打包 Electron 版，
+缩放走 `webContents.setZoomFactor`（坐标同源，实测偏 0–1px），且 localStorage 按源隔离，所以看着「以前是好的」。
+
+## 已定方案（用户点 A）
+
+浏览器档不再接管缩放：不写 CSS zoom、不拦 Ctrl+滚轮/Ctrl+0，交给浏览器原生缩放；Electron 档不变。
+
+## 实施清单
+
+- [x] 新增 `frontend/src/composables/zoomMode.ts`：纯函数 `detectZoomRuntime` / `shouldOwnZoom`（判据住这里，便于 T2 钉）
+- [x] `useZoom.ts`：浏览器档不绑监听、不 initZoom、不写 `documentElement.style.zoom`；文件头口径同步
+- [x] T2 `frontend/test/unit/zoomMode.spec.ts`：两档判据 + 对照组
+- [x] T3 `frontend/e2e/global/global.spec.ts`：三条 zoom 用例换成一条「浏览器档不给 `<html>` 写 zoom、不出指示器、不落 localStorage」的回归钉
+- [x] 同步两处失效注释：`e2e/analysis/table-zoom-fit.spec.ts`（说 useZoom 浏览器档写 style.zoom）、`pages/data/components/browser/contextMenuPosition.ts`（同）
+- [x] `docs/user-guide/09-faq.md` 补一条：桌面版应用内缩放 / 浏览器版用浏览器原生缩放（该目录不入库，本机生效）
+- [x] `docs/tasks/lessons.md` 记这条：用户说「某特性之后坏的」→ 既查该特性改了什么，也查该特性**验证过程留下的状态**
+- [x] 验证：`npx vitest run` + `npm run lint:e2e` + `npm run build` + `npm run test:e2e:affected`（composables 属全局清单，预期判全量）
+
+## 边界（本批刻意不做）
+
+- 不给 `.el-popper` 做全局坐标补偿（flip/溢出仍按错坐标算，脆弱）。
+- 不动 Electron 档缩放、不动右键菜单那套补偿（`documentCssZoom()` 在浏览器档恒为 1，换算自动退化成空操作）。
+- 不删 `lqdp-zoom-factor` 的读写（Electron 仍在用）。
+- 覆盖率净变化：删掉的「指示器显示/隐藏」「指示器卸载后仍可缩放（引用计数回归）」两条只有 Electron 档才成立，
+  当前 e2e 跑在浏览器里，测不到；引用计数逻辑保留但**暂无自动化承重**——这条要写进提交信息，别当成还在护着。
+
+## 结果（2026-10-21 实测）
+
+- `npx vitest run` **28 文件 / 387 例全绿**（含新增 `zoomMode.spec.ts` 5 例）；`npm run lint:e2e` 绿；`npm run build` 绿。
+- 快门禁判**全量**（改了 `src/composables/` 落在全局清单里）：`node scripts/e2e_pool.mjs --slots=auto`
+  → 文件 75 · 计划 slot 4 · **用例 402 · 墙钟 9.9min · 单价 3.09s/例 · unexpected 5 · flaky 3 · skipped 21**，
+  池自判 `MEASURED`；复跑判级 **真红 1**（`settings/export-timeout.spec.ts`）· 负载抖动 2（两条 histogram）。
+  ⇒ 档结论 `RESULT: FAIL · 失败 [e2e:全量]`。
+- 那条真红**不是本批引入**：症状与 `e2e-view-data-305-zip-upload-db` 记录的存量红逐字相同
+  （`getByTestId('export-timeout-input').locator('input')` 存在、`aria-valuenow=600`、`Received: hidden`，
+  该文件两条一起红），且本批没碰 settings / tab 激活逻辑。两条 histogram 是
+  `.single-param-tab .chart-container` 盲点选择器 + 负载的形状（lessons 2026-10-18/10-19 已记）。
+- 浏览器档缩放语义变化已同步进 FAQ（`docs/user-guide` 不入库，本机 dist 已重建）。

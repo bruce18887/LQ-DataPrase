@@ -16,6 +16,31 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-10-21 「某特性之后坏的」要问两件事：那批提交改了什么，以及那批提交的**验证过程留下了什么状态**
+
+- **现象**：用户报分析页「测试项选择框 / 文件选择框的下拉跑到输入框右下方」，并提示像是
+  serial/bin 右键菜单那个特性之后坏的、0.6 版验证是好的。
+- **那批代码是清白的**：右键菜单四笔（3364982 / 240ab33 / d2a6398 / c9c066b）改的文件全在
+  `pages/data/components/browser/` + scoped 样式，没碰 `useZoom`、没碰全局 CSS，
+  element-plus 2.14.0 与 @floating-ui/dom 1.7.6 **自首提交未升版**（package-lock 查过）。
+  有罪的是**验证那批代码时按下的缩放**：`c9c066b` 修的就是「缩放下右键菜单跑位」，
+  复现要在浏览器里 Ctrl+滚轮把应用按到 ~1.4，而 `lqdp-zoom-factor` 会持久化 ⇒ 该源之后每次加载都带 CSS zoom。
+- **根因（实测公式）**：teleport 到 body 的 `position:absolute` 浮层，floating-ui 读到的 rect 是
+  **已放大的视觉坐标**，原样写进 `left/top` 又落在 zoom 的局部坐标系里 ⇒ 再乘一次 zoom，
+  偏移 = 坐标 ×(zoom−1)。1600×900 探针：1.25 档 select x=1006.1 → popper x=1257.5（=1006×1.25）、
+  1.5 档 585.1→877.5、zoom=1 时 655.5→656（像素级对齐）。同一条裂缝 10-18 只修了右键菜单自己的换算，
+  **没修浮层这一类**——修一个症状而不问「还有谁走这条坐标系」，就会以新症状再回来。
+- **规则①**：用户给的时间线当证据查，不当结论接受。先查那批 diff 的**影响面**（全局样式？依赖版本？
+  构建产物？），再查那批工作**留下的状态**（缩放档位、localStorage、seed 数据、系统设置、临时端口）。
+- **规则②**：「旧版本是好的」先问是不是**同一个运行形态**。0.6 是打包 Electron，缩放走
+  `webContents.setZoomFactor`（坐标同源，实测偏 0–1px）；浏览器档才是 CSS zoom，且两个形态的
+  localStorage 按源隔离。跨形态比版本 = 同时在比两件事，结论不成立。
+- **规则③**：本项目一个「缩放」有**三套坐标语义**（Electron setZoomFactor / `<html>` CSS zoom /
+  Playwright `boundingBox()`）。写浮层位置判据前必须先声明是哪一套。处置：应用内缩放**只留 Electron 档**，
+  浏览器档一个监听都不绑、交给浏览器原生缩放（判据 `composables/zoomMode.ts`）。
+- **顺带**：负向断言（「应用没写过 zoom」）必须配一条**探针自证**（手动设 1.25 后同一读法要读到），
+  否则那条断言是瞎的（见 `e2e/global/global.spec.ts`）。
+
 ## 2026-10-21 修完两处假绿，同一条门禁又露出第三处：打印的命令不是执行的命令
 
 - **现象**：`planStages` 修好后跑第一次真门禁，日志打印
