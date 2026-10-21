@@ -9,48 +9,17 @@ from typing import Optional, Tuple
 import pandas as pd
 
 from apps.analysis.services.statistics import detect_fail_data_with_borderline
+from apps.common.memory import get_budget
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import get_parser, BaseATEParser
 from apps.datafiles.utils import resolve_file_path
 
 logger = logging.getLogger(__name__)
 
-# 解析缓存按**字节预算**限流，不是按条数：单只大文件（10 万行 × 800 列）
-# 解析后约 667MB，历史上 ``maxsize=64`` 的 64 只就足以吃掉数 GB 常驻内存。
-# 可用 LQDP_PARSE_CACHE_MB 覆盖（Electron 内嵌后端与 32 位受限环境需要更小值）。
-#
-# 为什么不做成「按物理内存自适应」：2026-10-17 实测过一版 clamp(RAM×0.25, 1536, 4096)，
-# 理由是「ETS88 那只 275MB 文件解析后 460MB，而一个批次目录有 9 只同量级文件互相洗掉」。
-# 那个前提被自己的测量否证了：该目录 9 只 CSV 的实际体积是
-# ``[0, 0, 0, 0, 5, 17, 19, 58, 275] MB``（只有 1 只大的），整个
-# ``Data/SampleData`` 里超过 80MB 的 CSV 也只有这 1 只，而 460MB < 1536MB ⇒ 缓存本来就命中，
-# 切文件不会重复解析。举不出被量出来的受益场景，就不改常驻内存策略；
-# 真要更大预算，用 LQDP_PARSE_CACHE_MB 显式给。
-PARSE_CACHE_DEFAULT_MB = 1536
-
-
-def _resolve_cache_budget_bytes() -> int:
-    """env 显式覆盖优先；非法值退回默认值而不是在导入期抛 ValueError。
-
-    这条兜底是要紧的：模块级常量在 ``import`` 时求值，一个写错的
-    ``LQDP_PARSE_CACHE_MB=big`` 会让整只后端起不来，而桌面应用的失败形状是
-    「双击图标没反应」，用户看不到那句 traceback。
-    """
-    raw = os.environ.get('LQDP_PARSE_CACHE_MB')
-    if not raw:
-        return PARSE_CACHE_DEFAULT_MB * 1024 * 1024
-    try:
-        mb = int(raw)
-    except ValueError:
-        logger.warning('LQDP_PARSE_CACHE_MB=%r 不是整数，按默认 %dMB 起用',
-                       raw, PARSE_CACHE_DEFAULT_MB)
-        return PARSE_CACHE_DEFAULT_MB * 1024 * 1024
-    return max(0, mb) * 1024 * 1024
-
-
-PARSE_CACHE_BUDGET_BYTES = _resolve_cache_budget_bytes()
-logger.info('解析缓存预算 = %dMB（可用 LQDP_PARSE_CACHE_MB 覆盖）',
-            PARSE_CACHE_BUDGET_BYTES // (1024 * 1024))
+# 预算来源统一在 apps/common/memory.py：web 预算的 60%，上限 1536MB。
+# LQDP_PARSE_CACHE_MB 的覆盖也在那边解析（0 = 关闭缓存）。
+PARSE_CACHE_BUDGET_BYTES = get_budget().cache_budget_bytes
+logger.info('解析缓存预算 = %dMB', PARSE_CACHE_BUDGET_BYTES // (1024 * 1024))
 
 
 def _frame_bytes(df) -> int:
@@ -93,6 +62,10 @@ class _BytesLRUCache:
         self._pending: set = set()
         self._total = 0
         self._cv = threading.Condition()
+        self._hits = 0
+        self._misses = 0
+        self._evictions = 0
+        self._clears = 0
 
     def __len__(self) -> int:
         with self._cv:
@@ -106,6 +79,16 @@ class _BytesLRUCache:
         with self._cv:
             self._data.clear()
             self._total = 0
+            self._clears += 1
+
+    def evict_to(self, target_bytes: int) -> None:
+        """淘汰最旧条目直到总量 ≤ target；至少保留一条（与 _store 一致）。"""
+        with self._cv:
+            target = max(0, int(target_bytes))
+            while self._total > target and len(self._data) > 1:
+                _, (_, freed) = self._data.popitem(last=False)
+                self._total -= freed
+                self._evictions += 1
 
     def get_or_compute(self, key, compute, size_of=_parse_value_bytes):
         """返回 key 对应的值，必要时由当前线程计算并放入缓存。"""
@@ -114,11 +97,13 @@ class _BytesLRUCache:
                 entry = self._data.get(key)
                 if entry is not None:
                     self._data.move_to_end(key)
+                    self._hits += 1
                     return entry[0]
                 if key in self._pending:
                     # 另一个线程正在算：等它发布结果或失败后重来一轮
                     self._cv.wait()
                     continue
+                self._misses += 1
                 self._pending.add(key)
             try:
                 value = compute()
@@ -153,6 +138,7 @@ class _BytesLRUCache:
             while self._total > self._budget and len(self._data) > 1:
                 _, (_, freed) = self._data.popitem(last=False)
                 self._total -= freed
+                self._evictions += 1
 
 
 _parse_cache = _BytesLRUCache(PARSE_CACHE_BUDGET_BYTES)
@@ -313,8 +299,11 @@ def get_parse_cache_stats() -> dict:
     """给 `/api/v1/metrics/` 读的解析缓存读数（apps/common/metrics.py）。
 
     `in_flight` 是这一眼里最值钱的部分：它 >0 且持续不掉，就说明「同一只文件正在被重复解析」
-    （P1-1 之前是常态）。四个键都是整数，没有「取不到就当 0」的模糊空间 ——
+    （P1-1 之前是常态）。八个键都是整数，没有「取不到就当 0」的模糊空间 ——
     空缓存的真 0 和读失败的可不是一回事，所以这里不返回 None。
+
+    `hits` / `misses` 算命中率；`evictions` 是预算或水位淘汰掉的，`clears` 是显式
+    清空（删文件/上传覆盖）——两者混在一起会把「内存吃紧自愈」读成「用户删了文件」。
     """
     with _parse_cache._cv:
         return {
@@ -322,7 +311,17 @@ def get_parse_cache_stats() -> dict:
             'bytes': _parse_cache._total,
             'budget_bytes': _parse_cache._budget,
             'in_flight': len(_parse_cache._pending),
+            'hits': _parse_cache._hits,
+            'misses': _parse_cache._misses,
+            'evictions': _parse_cache._evictions,
+            'clears': _parse_cache._clears,
         }
+
+
+def evict_parse_cache_to(fraction: float) -> None:
+    """内存水位到 soft/hard 时把缓存淘汰到预算的 fraction。"""
+    ratio = max(0.0, min(1.0, float(fraction)))
+    _parse_cache.evict_to(int(_parse_cache._budget * ratio))
 
 
 def clear_parse_cache() -> None:
