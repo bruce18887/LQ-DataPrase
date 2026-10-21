@@ -136,6 +136,25 @@ class MemoryErrorHandlerTests(SimpleTestCase):
         clear.assert_called_once()
         self.assertEqual(memory.oom_events(), before + 1)
 
+    def test_clear_cache_failure_still_returns_503_and_counts_oom(self):
+        """清缓存自身再抛 MemoryError 时，503 信封与 OOM 记账都必须保住。"""
+        before = memory.oom_events()
+        with mock.patch(
+                'apps.datafiles.services.clear_parse_cache',
+                side_effect=MemoryError('again')) as clear, \
+                self.assertLogs('apps.common.exceptions', level='ERROR') as logs:
+            response = self._payload(MemoryError('boom'))
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.data, {
+            'code': 'out_of_memory',
+            'message': '服务器内存不足，请关闭其他任务后重试',
+            'detail': {'path': '/api/v1/analysis/histogram/'},
+        })
+        self.assertEqual(response['Retry-After'], '5')
+        clear.assert_called_once()
+        self.assertEqual(memory.oom_events(), before + 1)
+        self.assertTrue(any('clear_parse_cache' in line for line in logs.output))
+
     def test_other_exceptions_still_500(self):
         with self.assertLogs('apps.common.exceptions', level='ERROR'):
             response = self._payload(ValueError('boom'))
