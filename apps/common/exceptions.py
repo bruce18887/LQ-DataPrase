@@ -117,11 +117,24 @@ def _run_best_effort(name, action):
 
 def custom_exception_handler(exc, context):
     if isinstance(exc, MemoryError):
-        from apps.common import memory
-        from apps.datafiles.services import clear_parse_cache
+        memory_mod = None
+        clear_cache = None
+        # 懒导入是为了避开配置加载期的循环；极端内存压力下导入自身也可能失败
+        # （例如再次触发 MemoryError）。此时跳过副作用，503 信封仍必须返回。
+        try:
+            from apps.common import memory as memory_mod
+            from apps.datafiles.services import clear_parse_cache as clear_cache
+        except Exception:
+            memory_mod = None
+            clear_cache = None
+            _safe_error_log(
+                'MemoryError handler imports failed; '
+                'returning 503 without side effects', exc_info=True)
 
-        _run_best_effort('clear_parse_cache', clear_parse_cache)
-        _run_best_effort('record_oom', memory.record_oom)
+        if clear_cache is not None:
+            _run_best_effort('clear_parse_cache', clear_cache)
+        if memory_mod is not None:
+            _run_best_effort('record_oom', memory_mod.record_oom)
         request = (context or {}).get('request')
         path = getattr(request, 'path', '') or ''
         _safe_error_log(

@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import types
+from unittest import mock
 
 import pandas as pd
 from django.contrib.auth import get_user_model
@@ -315,6 +316,21 @@ class CacheBudgetWiringTests(SimpleTestCase):
         from apps.common import memory
         self.assertEqual(services.PARSE_CACHE_BUDGET_BYTES,
                          memory.get_budget().cache_budget_bytes)
+
+    def test_resolver_reads_cache_budget_from_consuming_binding(self):
+        """预算必须来自 get_budget()，而不是本模块里另写死的 1536MB。"""
+        from apps.common.memory import MemoryBudget
+        plan = MemoryBudget(
+            total_ram_bytes=16 * 1024 ** 3,
+            budget_bytes=8 * 1024 ** 3,
+            jobs_budget_bytes=2 * 1024 ** 3,
+            web_budget_bytes=6 * 1024 ** 3,
+            cache_budget_bytes=123456,
+        )
+        with mock.patch('apps.datafiles.services.get_budget',
+                        return_value=plan) as get_budget:
+            self.assertEqual(services._resolve_cache_budget_bytes(), 123456)
+        get_budget.assert_called_once_with()
 
     def test_stats_expose_counters(self):
         stats = services.get_parse_cache_stats()

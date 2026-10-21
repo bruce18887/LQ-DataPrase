@@ -16,9 +16,19 @@ from apps.datafiles.utils import resolve_file_path
 
 logger = logging.getLogger(__name__)
 
+
+def _resolve_cache_budget_bytes() -> int:
+    """解析缓存预算 = 预算内核的 ``cache_budget_bytes``（导入期读一次）。
+
+    单独成函数是为了让测试能 patch 本模块消费的 ``get_budget`` 绑定（R6③），
+    证明预算确实来自内核，而不是本模块里另写死的 1536MB。
+    """
+    return get_budget().cache_budget_bytes
+
+
 # 预算来源统一在 apps/common/memory.py：web 预算的 60%，上限 1536MB。
 # LQDP_PARSE_CACHE_MB 的覆盖也在那边解析（0 = 关闭缓存）。
-PARSE_CACHE_BUDGET_BYTES = get_budget().cache_budget_bytes
+PARSE_CACHE_BUDGET_BYTES = _resolve_cache_budget_bytes()
 logger.info('解析缓存预算 = %dMB', PARSE_CACHE_BUDGET_BYTES // (1024 * 1024))
 
 
@@ -215,7 +225,8 @@ def get_cached_parsed_file(file_id: int, owner_id: int, datafile=None) -> Tuple[
     可省去一次 DB 查询——热路径（导出/浏览）一次请求只查一次库。
 
     Returns ``(df, metadata, format_type)`` — same semantics as
-    ``parser.parse()`` but backed by a 64-entry LRU cache.
+    ``parser.parse()`` but backed by a byte-budgeted LRU cache
+    (``PARSE_CACHE_BUDGET_BYTES``).
     """
     if datafile is None:
         datafile = DataFile.objects.filter(pk=file_id, owner_id=owner_id).first()
@@ -319,7 +330,7 @@ def get_parse_cache_stats() -> dict:
 
 
 def evict_parse_cache_to(fraction: float) -> None:
-    """内存水位到 soft/hard 时把缓存淘汰到预算的 fraction。"""
+    """把缓存淘汰到预算的 fraction；best effort，至少保留 MRU 一条。"""
     ratio = max(0.0, min(1.0, float(fraction)))
     _parse_cache.evict_to(int(_parse_cache._budget * ratio))
 

@@ -1,6 +1,9 @@
+import copy
 from datetime import timedelta
 from pathlib import Path
 import os
+
+from django.utils.log import DEFAULT_LOGGING
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -36,6 +39,33 @@ if not DEBUG and (SECRET_KEY == _SECRET_KEY_DEFAULT or 'django-insecure' in SECR
         'SECRET_KEY must be set to a real value in production '
         '(DJANGO_DEBUG=False). Generate one with `python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"`.'
     )
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+# ``apps.common.memory`` 在首次取预算时打一行 INFO（``内存预算: ...``），这是运维
+# 判断「本机预算是否已被别的进程压住」的唯一入口。Django 默认配置只给 ``django``
+# 命名空间挂了控制台 handler，``apps.*`` 的 INFO 会被直接丢弃 —— 不显式配置，
+# 这行日志在开发档与服务器档都看不见。
+#
+# 以 Django 的 DEFAULT_LOGGING 为底再挂一个 scoped logger（而不是整份重写）：
+# 保留 runserver 的请求日志与 mail_admins 行为。memory 用独立的 handler，刻意
+# 不带 ``require_debug_true`` —— 生产档（DEBUG=False）同样要看到预算行。
+LOGGING = copy.deepcopy(DEFAULT_LOGGING)
+LOGGING['disable_existing_loggers'] = False
+LOGGING['formatters']['memory'] = {
+    'format': '{asctime} {levelname} {name}: {message}',
+    'style': '{',
+}
+LOGGING['handlers']['memory_console'] = {
+    'class': 'logging.StreamHandler',
+    'formatter': 'memory',
+}
+LOGGING['loggers']['apps.common.memory'] = {
+    'handlers': ['memory_console'],
+    'level': 'INFO',
+    'propagate': False,
+}
 
 INSTALLED_APPS = [
     'django.contrib.admin',
