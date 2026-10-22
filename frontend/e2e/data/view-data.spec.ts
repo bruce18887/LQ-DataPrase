@@ -240,6 +240,37 @@ async function scrollGridUntil(page: Page, probe: string) {
   }, probe)
 }
 
+/**
+ * 账号「默认每页行数」的读 / 写（与 `e2e/settings/page-size.spec.ts`、
+ * `e2e/data/renderer-memory.spec.ts` 同形，本仓这条通路一直是各 spec 自带一份）。
+ *
+ * 收尾必须写回**原值**而不是硬编码默认：admin storageState 是共享账号（lessons 2026-09-19）。
+ */
+async function readPageSize(page: Page): Promise<number | null> {
+  return page.evaluate(async () => {
+    const resp = await fetch('/api/v1/auth/settings/', {
+      headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` },
+    })
+    const data = await resp.json()
+    return typeof data?.page_size === 'number' ? data.page_size : null
+  })
+}
+
+async function putPageSize(page: Page, value: number): Promise<void> {
+  const status = await page.evaluate(async (v) => {
+    const resp = await fetch('/api/v1/auth/settings/', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('access_token')}`,
+      },
+      body: JSON.stringify({ page_size: v }),
+    })
+    return resp.status
+  }, value)
+  expect(status, `PUT page_size=${value}`).toBe(200)
+}
+
 test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () => {
   test('@p0 未选文件：空态引导 + 去文件列表按钮', async ({ page }) => {
     await gotoApp(page, '/data')
@@ -1467,6 +1498,83 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     await expect(chips).toHaveCount(2)
     await expect(chips.nth(1)).toHaveClass(/is-active/)
     await expect(viewScope(page).locator('.el-empty:visible')).toContainText('请先在上方选择文件')
+  })
+
+  /**
+   * 生命周期回归（生产实测 2026-10-22 06:45:39 两条 `AG Grid: warning #26`）。
+   *
+   * 形状：`gridApi` 由 `onGridReady` 赋值（composables/useBinCellMenu.ts:39-41）**且从不置空**，
+   * 而「账号设置 → 默认每页行数」是在 `onMounted` 里 await 回来后才套用的
+   * （applyBlockSize → purgeInfiniteCache）。标签在设置响应落地**之前**被关掉，续体就会打在
+   * 已销毁的 grid 上 ⇒ 控制台一条 #26。行没被销毁时它只是个多余 purge，看不出来。
+   *
+   * 两个前置不是可选的（缺任一条本用例在未修复代码上**必绿＝假绿**，实测记录见
+   * tasks/ 报告）：① page_size 必须 ≠ 初值 100 —— 相等时 applyBlockSize 提前 return，
+   * 根本走不到 purge；② 必须把那条 GET 拖住（route stall），否则「挂载→关标签」的窗口
+   * 只有几十毫秒，靠 Playwright 的手速撞它 = flaky。
+   */
+  test('@p1 关闭标签时不触发已销毁 grid 的 AG Grid #26 警告', async ({ page }) => {
+    const warns: string[] = []
+    page.on('console', (m) => {
+      if (m.type() === 'warning') warns.push(m.text())
+    })
+
+    // 设置必须在挂载之前落库（网格是 onMounted 才读它），所以先 goto 再 PUT 再装 stall
+    await gotoApp(page, '/dashboard')
+    const original = await readPageSize(page)
+    await putPageSize(page, 200)
+    try {
+      await page.route(/\/auth\/settings\/?$/, async (route) => {
+        await new Promise((r) => setTimeout(r, 3_000))
+        await route.continue()
+      })
+
+      await openViewTab(page, SEEDED_FILES.GAGE_S1)
+      // 关掉标签需要场上有两个标签（closeViewTab 在只剩一个时直接 return）
+      await viewScope(page).locator('.vf-tab--add').click()
+      await expect(viewScope(page).locator('.vf-tab:not(.vf-tab--add)')).toHaveCount(2)
+      await viewScope(page).locator('.vf-tab:not(.vf-tab--add)').nth(0).locator('.vf-tab__close').click()
+      await expect(viewScope(page).locator('.vf-tab:not(.vf-tab--add)')).toHaveCount(1)
+
+      // 等被拖住的设置续体落地（3s stall + 余量）；不等到它就没断言承重
+      await page.waitForTimeout(4_000)
+      expect(
+        warns.filter((w) => /#26|has been destroyed/.test(w)),
+        `不该再有已销毁 grid 的调用，实测警告：\n${warns.join('\n')}`,
+      ).toEqual([])
+    } finally {
+      await page.unroute(/\/auth\/settings\/?$/)
+      await putPageSize(page, original ?? 100)
+    }
+  })
+
+  /**
+   * 块预算接线（D3：口径变更必须可见）。
+   *
+   * 判据是可观察的出站请求，不是内部 ref：1,728 列那份 ETS88 在设置 500 时，
+   * 实际请求必须带上钳位后的 `page_size=205`（`floor(355029/1728)`，常数推导见
+   * docs/reference/renderer-memory-baseline-2026-10-22.md §6），并且页面上要能读出
+   * 「从 500 降为 205」这句提示。设置回写走 finally（共享账号）。
+   */
+  test('@p1 千列文件：每页行数按列数预算压低且提示可见', async ({ page }) => {
+    await gotoApp(page, '/dashboard')
+    const original = await readPageSize(page)
+    try {
+      await putPageSize(page, 500)
+      const firstBrowse = page.waitForRequest(
+        (req) => /\/api\/v1\/browse\//.test(req.url()) && req.method() === 'GET',
+      )
+      await openViewTab(page, SEEDED_FILES.ETS88_FT)
+      const url = new URL((await firstBrowse).url())
+      expect(url.searchParams.get('page_size'), '1,728 列 × 500 行超单块格数预算，必须被钳到 205').toBe('205')
+
+      const hint = viewScope(page).locator('[title*="每页行数"]').first()
+      await expect(hint).toBeVisible({ timeout: 30_000 })
+      await expect(hint).toContainText('205')
+      await expect(hint).toHaveAttribute('title', /1728.*500.*205/)
+    } finally {
+      await putPageSize(page, original ?? 100)
+    }
   })
 
   test('@p2 默认隐藏列：记录列默认隐藏，更新隐藏列设置后重新显示', async ({ page }) => {

@@ -50,9 +50,12 @@ const TAB_KEYS = (process.env.LQDP_PROBE_TABS ?? 'CTA8290D_FT,BUYOFF_FT,CTA8280F
  */
 const PROBE_PAGE_SIZE = Number(process.env.LQDP_PROBE_PAGE_SIZE ?? 50)
 /**
- * 必须翻满的块数 = `maxBlocksInCache`（DataBrowserAgGrid.vue:69 现在写死 20）。
- * 留 env 口：Task 4 把 cap 换成按格数预算算出来之后，同一个形状要用新的 cap 重量一次，
- * 不该为此改代码（也不该让「20 块满缓存」这个标签在 cap 变了之后继续骗人）。
+ * 必须翻满的块数。**Task 4 之后 `maxBlocksInCache` 不再是常量 20**，而是
+ * `blockCap.maxBlocksInCache(每块行数, 列数)`：ETS88（1,728 列）@50 行 = 16，
+ * 窄文件（≤142 列）@100 行仍 = 20（验收锚点，见 baseline 文档 §6 那张表）。
+ * 留 env 口：cap 变了要用新的块数重量同一个形状，不该为此改代码，也不该让
+ * 「20 块满缓存」这个标签在 cap 之后继续骗人。注意 IRM 是**请求**每一块、只**驱逐**超额的块，
+ * 所以翻 20 块仍能拿到 20 个不同页（下面的承重判据不受 cap 影响），但驻留量已经是 cap 那份。
  */
 const BLOCKS = Number(process.env.LQDP_PROBE_BLOCKS ?? 20)
 /** 行高 30px（同文件 `:rowHeight="30"`），滚动步长按它换算 */
@@ -277,6 +280,18 @@ test(`@p2 [${PROBE_KEY}] 1 块 / 满缓存 / 4 标签的堆与 long task`, async
 
   const m = await startRendererMetrics(page)
   const rows: MetricRow[] = []
+  /**
+   * Task 4 的生命周期守卫：`gridApi` 由 onGridReady 赋值后从不置空，卸载后的异步续体
+   * （账号设置那条 GET）就会打在已销毁的 grid 上（生产实测两条 `AG Grid: warning #26`）。
+   * 探针正好在制造这个形状：开 4 个标签 + 切走切回，非激活那份要 purge 缓存。
+   * 监听装在动作之前（lessons R2④）。
+   */
+  const destroyedWarnings: string[] = []
+  page.on('console', (msg) => {
+    if (msg.type() === 'warning' && /#26|has been destroyed/.test(msg.text())) {
+      destroyedWarnings.push(msg.text())
+    }
+  })
   let originalPageSize: number | null = null
   let restore: { putStatus: number | null; restored: number | null } = { putStatus: null, restored: null }
   let outFile = ''
@@ -300,7 +315,18 @@ test(`@p2 [${PROBE_KEY}] 1 块 / 满缓存 / 4 标签的堆与 long task`, async
       await loaded
     }
     await expect(page.locator('.vf-tab:not(.vf-tab--add)')).toHaveCount(1 + TAB_KEYS.length)
-    rows.push(await m.snapshot(`${1 + TAB_KEYS.length} 个标签（各 1 块）`))
+    // 标签名里的「各 1 块」在 Task 4 之后不成立了：非激活那份会被交掉缓存 ⇒ 只有激活那份有块
+    rows.push(await m.snapshot(`${1 + TAB_KEYS.length} 个标签（仅激活那份留缓存）`))
+
+    // 切走再切回：非激活那份交缓存、切回来 IRM 按视口重新取块，全程不许出现 #26。
+    // 选择器必须限定在**可见的那份**网格里（lessons R2②：4 个标签常驻 DOM，
+    // 裸 `.ag-row` 的 first() 会解到隐藏标签那份的行 ⇒ 永远 not visible，实测假红一次）。
+    const chips = page.locator('.vf-tab:not(.vf-tab--add)')
+    const visibleRows = page.locator('.ag-grid-wrapper:visible .ag-row')
+    await chips.first().click()
+    await expect(visibleRows.first()).toBeVisible({ timeout: 30_000 })
+    await chips.last().click()
+    await expect(visibleRows.first()).toBeVisible({ timeout: 30_000 })
 
     // 分母放在三次 snapshot 之后取：这一次额外的 /browse/ 请求不会污染任何一行产物。
     const datafileId = rows[0].requests
@@ -341,6 +367,12 @@ test(`@p2 [${PROBE_KEY}] 1 块 / 满缓存 / 4 标签的堆与 long task`, async
     restore.restored,
     `收尾必须把 page_size 写回 ${expectedPageSize}（PUT=${restore.putStatus}，读回=${restore.restored}）`,
   ).toBe(expectedPageSize)
+
+  // 生命周期：开 4 个标签 + 切走切回之后，不许有打在已销毁 grid 上的调用（AG Grid #26）
+  expect(
+    destroyedWarnings,
+    `已销毁 grid 仍被调用（#26）：\n${destroyedWarnings.join('\n')}`,
+  ).toEqual([])
 
   // 承重前置①：块大小真的被钉住了（没接上时形状就不是「20 块」而是「15 块」）
   const firstBrowse = rows[0].requests.find((r) => /\/browse\//.test(r.url))

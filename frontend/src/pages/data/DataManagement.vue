@@ -57,6 +57,7 @@
             v-show="t.id === activeViewTabId"
             :file-id="t.fileId"
             :files="files"
+            :active="activeTab === 'view' && t.id === activeViewTabId"
             @update:file-id="t.fileId = $event"
             @file-missing="onFileMissing(t)"
             @goto-files="activeTab = 'files'"
