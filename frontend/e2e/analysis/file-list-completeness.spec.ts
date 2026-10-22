@@ -106,3 +106,51 @@ test.describe('文件列表完整性：分析页下拉与数据管理页数量�
     expect(api.total, '全量应不小于单文件数').toBeGreaterThanOrEqual(api.singles)
   })
 })
+
+/**
+ * 进分析页的 `files/options` 计数判据（Task 5 复审补齐 · 裁定 R19）。
+ *
+ * **为什么必须落在 `analysis` 档**：`scripts/affected-rules.mjs:33` 把
+ * `frontend/src/pages/analysis/` 映射到 `['analysis']`。`AnalysisPage.vue:56` 已把
+ * 「进入即拉」收成 `onActivated` 单挂，但此前钉这条的请求数只在别的档里
+ * （`e2e/data/data.spec.ts:908-924` 量 `/data` 的 `page_size=9999`；
+ * `e2e/dashboard/dashboard.spec.ts:573-596` 量 `/dashboard` 的 `files/options/`）
+ * ⇒ 有人把 `onMounted(loadFiles)` 加回 `AnalysisPage.vue`，快门禁跑 `analysis` 档
+ * **什么都抓不到**：本文件 :87 那条只断言下拉「≥ 21 个选项」，翻倍请求照样过
+ * （数到 2 条仍是 ≥21），它只能抓「一条没发」不能抓「发了两条」。守卫放错档 = 无门禁。
+ *
+ * 判据口径与 dashboard 那条同源（lessons R2④）：计数器装在 `gotoApp` **之前**；
+ * 用精确长度 `toHaveLength(1)` 而非 `≤1` ⇒ 回归成 0 条（首拉整个丢失）同样红。
+ * 谓词 `/\/files\/options\/(\?|$)/` 锚住路径结尾，只吃 `/files/options/` 这一形状
+ * （`/files/?…` 全量列表、`/files/product_codes/`、`/files/format_types/` 都不同形）。
+ * 发起方唯一性先 grep 再断言：`frontend/src` 里 `getOptions` 只命中
+ * `AnalysisPage.vue:68` 与 `DashboardPage.vue:169` 两处，而 `gotoApp` 走 `page.goto`
+ * 整页加载，进 `/analysis` 不会挂载 DashboardPage ⇒ 计数只可能来自本页 `loadFiles`；
+ * `api/datafiles.ts:154-156` 是裸 `api.get`（无缓存、无单飞）⇒ 钩子翻倍 ⇒ 请求必然翻倍。
+ *
+ * 落地信号用**响应本身**而不是 tab 可见：`files.length === 0` 时模板只渲染 el-empty
+ * （`AnalysisPage.vue:3`，没有任何 tab），UI 判据会把「请求已发出但列表恰好为空」
+ * 误读成超时；`waitForResponse` 只证明「首拉已返回」，随后 2s 静置让同帧的
+ * mounted→activated 那第二条有机会被计数器抓到（两条都在同一帧发出，2s 远够）。
+ */
+test.describe('进分析页：导航期文件选项只拉一次', { tag: ['@p1', '@analysis'] }, () => {
+  test('@p1 进分析页只发一次 files/options', async ({ page }) => {
+    const hits: string[] = []
+    page.on('request', (r) => {
+      if (/\/files\/options\/(\?|$)/.test(r.url())) hits.push(r.url())
+    })
+    const first = page.waitForResponse(
+      (r) => /\/files\/options\/(\?|$)/.test(r.url()),
+      { timeout: 30_000 },
+    )
+
+    await gotoApp(page, '/analysis')
+    await first
+    await page.waitForTimeout(2_000)
+
+    expect(
+      hits,
+      `一次导航到 /analysis 发出了 ${hits.length} 条 files/options，应为 1 条：${JSON.stringify(hits)}`,
+    ).toHaveLength(1)
+  })
+})

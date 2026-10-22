@@ -895,8 +895,15 @@ test.describe('数据管理 /data 已导入批次展开/折叠', { tag: ['@data'
  * 发起方唯一性由全仓 grep 保证 —— `frontend/src` 里 `page_size: 9999` 只出现在
  * `DataManagement.vue:187` 一处；`/browse/?…page_size=99999` 与本正则不同形（`(&|$)`
  * 卡住位数），`helpers/cleanup.ts` 走 `page.request`（API 上下文，不经 frame，
- * 不产生 `page` 的 request 事件）。行选择器沿用本文件 :26 的
- * `.content-section:visible .el-table__row`（默认「文件列表」tab 才可见）。
+ * 不产生 `page` 的 request 事件）。行选择器沿用本文件 :29 的
+ * `.content-section:visible .el-table .el-table__row`（默认「文件列表」tab 才可见）。
+ *
+ * ⚠ 谓词刻意把**参数位序**也锚住（`?page_size=9999` 紧跟问号），别为了「让它绿」而
+ * 放宽：若哪天参数顺序变了，计数掉到 0，下方 `toHaveLength(1)` 会直接变红 —— 这是
+ * 刻意的「宁可红也不静默」。红时先读失败消息里的实际 URL 数组再改，不要改成
+ * `/files/.*page_size=9999` 那种不带锚点的形状：`page_size=99999` 含 `page_size=9999`
+ * 子串，放宽后 `/browse/?…` 的分页请求会被一起计进来，判据量的就不再是本页那条
+ * 全量列表了。
  */
 test.describe('进数据管理：导航期全量文件列表只拉一次', { tag: ['@p1', '@data'] }, () => {
   test('@p1 进数据管理页只发一次全量文件列表', async ({ page }) => {
@@ -906,7 +913,7 @@ test.describe('进数据管理：导航期全量文件列表只拉一次', { tag
     })
 
     await gotoApp(page, '/data')
-    await expect(page.locator('.content-section:visible .el-table__row').first())
+    await expect(page.locator('.content-section:visible .el-table .el-table__row').first())
       .toBeVisible({ timeout: 30_000 })
     // 两条请求在同一帧发出（mounted → activated），2s 足够让第二条落地；
     // 修好后这里不存在「稍后才补发」的路径，等待只会让判据更严不会更松。
