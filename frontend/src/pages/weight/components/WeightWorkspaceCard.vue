@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { WeightGroupDto } from '../weightChartOption'
 import WeightActionButton from './WeightActionButton.vue'
-import WeightGroupChips from './WeightGroupChips.vue'
+import WeightFilterChips from './WeightFilterChips.vue'
 
 defineProps<{
   filename: string
@@ -13,6 +13,8 @@ defineProps<{
   busy: boolean
   groups: WeightGroupDto[]
   visible: number[]
+  slotTotal: number
+  visibleSlots: number[]
   colors: string[]
 }>()
 
@@ -22,6 +24,7 @@ const emit = defineEmits<{
   (e: 'toggle-legend'): void
   (e: 'export'): void
   (e: 'update:visible', value: number[]): void
+  (e: 'update:visibleSlots', value: number[]): void
 }>()
 </script>
 
@@ -100,11 +103,14 @@ const emit = defineEmits<{
       </div>
     </div>
 
-    <WeightGroupChips
+    <WeightFilterChips
       :groups="groups"
       :visible="visible"
+      :slot-total="slotTotal"
+      :visible-slots="visibleSlots"
       :colors="colors"
       @update:visible="(value) => emit('update:visible', value)"
+      @update:visible-slots="(value) => emit('update:visibleSlots', value)"
     />
   </section>
 </template>

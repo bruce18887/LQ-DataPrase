@@ -9,14 +9,16 @@
  * ③ 组色按 `group.index` 取：第 1 组必须是 COLORS[1]（按调用顺序取第 0 项会红）。
  * ④ 图例从 `{show:false}` 改为每图自带（只列本组 4/5 条），但仍不按系列名查表。
  * ⑤ 素材前置：夹具真的不等宽、真的含 null、色板真的 8 色且不含均值灰 —— 否则对应判据恒真。
+ * ⑥ 逐槽开关（2026-10-22）：线型按**原槽位**取、x 上界按**全组**算、缺省全显与 `[]` 全关分开钉 ——
+ *    这三条各挡一种写错的实现（顶位换型 / 轴随隐藏收缩 / 把缺省读成全关）。
  */
 import { describe, expect, it } from 'vitest'
 import {
-  buildWeightOption, groupColor, groupCodeMax, DASH_BY_WITHIN_GROUP,
+  buildWeightOption, groupColor, groupCodeMax, slotCount, DASH_BY_WITHIN_GROUP,
   MEAN_DASH, MEAN_WIDTH, LINE_WIDTH, MARKER_SIZE,
   PAGE_MAX_DECIMALS, formatWeightCell, formatWeightLabel, legendLabel,
 } from '../../src/pages/weight/weightChartOption'
-import type { BuildOptions, WeightGroupDto, WeightSeriesDto } from '../../src/pages/weight/weightChartOption'
+import type { BuildOptions, WeightDocDto, WeightGroupDto, WeightSeriesDto } from '../../src/pages/weight/weightChartOption'
 
 // 与 frontend/src/utils/echarts-theme.ts:162-171（light seriesColors）逐字同值。
 // 色板真源在那边、本模块只收调用方传入的数组（spec §6 第 1 条：Python 侧不存色板）。
@@ -182,6 +184,59 @@ describe('图例：每图自带，只列本组系列', () => {
   it('标题文本是测试项名；可见标题已移到图表卡头，画布内不再重复渲染', () => {
     expect(opt(G3).title.text).toBe('WT0004')
     expect(opt(G3).title.show).toBe(false)
+  })
+})
+
+describe('组内曲线逐槽开关', () => {
+  // 三条语义裁定都要承重：① 线型按**原槽位**固定（隐藏槽 0 后 2/3/4 不许顶成实线）
+  // ② x 上界按全组算（隐藏最长那条不许收缩，14 张图在勾选过程中保持可横向对齐）
+  // ③ 缺省 = 全显、传 [] = 全关 —— 两种写法在实现里极易混用，各钉一条。
+  it('隐藏槽 0：剩 _2/_3/_4，线型仍是 DASH[1..3]（改用过滤后下标就会红）', () => {
+    const o = opt(G0, false, { visibleSlots: [1, 2, 3] })
+    expect(o.series.map((s: any) => s.name)).toEqual(['WT0001_2', 'WT0001_3', 'WT0001_4'])
+    expect(o.series.map((s: any) => s.lineStyle.type)).toEqual([
+      DASH_BY_WITHIN_GROUP[1], DASH_BY_WITHIN_GROUP[2], DASH_BY_WITHIN_GROUP[3],
+    ])
+    // 组色不随槽位变：剩下的还是本组基色
+    expect(o.series.map((s: any) => s.lineStyle.color)).toEqual([COLORS[0], COLORS[0], COLORS[0]])
+  })
+
+  it('不传 visibleSlots = 全显；传 [] = 全关（只剩轴，均值仍按 showMean 决定）', () => {
+    expect(opt(G0).series).toHaveLength(4)
+    expect(opt(G0, false, { visibleSlots: [] })).toEqual(expect.objectContaining({ series: [] }))
+    const allOffWithMean = opt(G0, true, { visibleSlots: [] })
+    expect(allOffWithMean.series.map((s: any) => s.name)).toEqual(['WT0001_Avg'])
+  })
+
+  it('隐藏最长那条后 x 上界不变（轴不收缩）', () => {
+    const g = mkGroup(0, [64, 8, 8, 8])
+    expect(opt(g).xAxis[0].max).toBe(63)
+    expect(opt(g, false, { visibleSlots: [1, 2, 3] }).xAxis[0].max).toBe(63)
+  })
+
+  it('槽数多于线型数（5 条组）时隐藏任一槽，其余线型与颜色不串位', () => {
+    const five = mkGroup(0, [4, 4, 4, 4, 4])
+    expect(opt(five).series.map((s: any) => JSON.stringify(s.lineStyle.type))).toEqual(
+      [0, 1, 2, 3, 0].map((i) => JSON.stringify(DASH_BY_WITHIN_GROUP[i])))
+    const hidden = opt(five, false, { visibleSlots: [0, 1, 2, 3] })
+    expect(hidden.series.map((s: any) => s.name)).toEqual(['WT0001_1', 'WT0001_2', 'WT0001_3', 'WT0001_4'])
+    expect(hidden.series.map((s: any) => JSON.stringify(s.lineStyle.type))).toEqual(
+      [0, 1, 2, 3].map((i) => JSON.stringify(DASH_BY_WITHIN_GROUP[i])))
+  })
+
+  it('槽号越界（该组没那么条）不影响其余槽', () => {
+    const three = mkGroup(0, [4, 4, 4])
+    const o = opt(three, false, { visibleSlots: [0, 1, 2, 3, 4] })
+    expect(o.series).toHaveLength(3)
+  })
+
+  it('slotCount 取各组成员数的最大值（chip 排按它生成，写死 4 就会漏掉第 5 条）', () => {
+    const doc: WeightDocDto = {
+      filename: 'x.c', code_max: 63, group_count: 3, series_count: 11,
+      groups: [mkGroup(0, [4, 4]), mkGroup(1, [4, 4, 4, 4, 4]), mkGroup(2, [4, 4, 4])],
+    }
+    expect(slotCount(doc)).toBe(5)
+    expect(slotCount({ ...doc, groups: [] })).toBe(0)
   })
 })
 

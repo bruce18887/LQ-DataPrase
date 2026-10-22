@@ -5087,3 +5087,46 @@ scoped 样式，没碰 useZoom、没碰全局 CSS；EP/floating-ui 版本自首�
   （`export-timeout-input` 的 `input` 存在、`aria-valuenow=600`、`Received: hidden`），本批没碰 settings，
   新样式全在 weight 各组件的 scoped 块内。⚠ 本轮**没有**再跑一次父检出对照 —— 定性靠
   「两轮既有记录 + 零代码交集」，不是靠本轮实测。
+
+## 2026-10-22 权重画图：组内曲线逐槽开关（给每个图例项一个）
+
+### 已定口径（用户点定两条）
+
+① 开关粒度 = **按图例项 1/2/3/4**（不是每张子图各一个图例开关）；`均值` 沿用已有「显示均值」，不重复加控件。
+② **导出不跟**：xlsx 仍画全部曲线，`apps/weight` 的请求契约不扩字段 ⇒ 页面与导出有意分歧，必须给可见提示。
+
+### 三条语义裁定（各有 T2 断言）
+
+1. 线型按**原槽位**固定：隐藏槽 0 后 `_2/_3/_4` 仍是虚线/点线/点划，不顶位换实线。
+2. x 上界按**全组**算：隐藏最长那条时轴不收缩，14 张图在勾选过程中保持可横向对齐。
+3. 明细表与 xlsx **都不跟**：与既有「勾选只影响画廊」同口径；chip 行尾常驻提示 + 用户指南 §3 改口径。
+
+边界也定死：`visibleSlots` 缺省 = 全显、传 `[]` = 全关（只剩轴，不设保护）—— 两种写法各钉一条，
+防实现里 `slots?.includes(i)` 与 `!slots || includes(i)` 混用。
+
+### 实施清单
+
+- [x] T2 先红后绿 +6 例：线型不顶位、缺省全显、`[]` 全关、x 上界不收缩、5 条组不串位、越界槽、`slotCount`
+- [x] `weightChartOption.ts`：`visibleSlots?: number[]`（先带原始 `within` 下标再过滤）+ 导出 `slotCount(doc)`
+- [x] `stores/weight.ts`：`visibleSlots`（`setDoc` 按 `slotCount` 全开、`reset` 归零，仍不落 localStorage）
+- [x] `WeightGroupChips.vue` → **`WeightFilterChips.vue`**（`git mv`）：加「组内曲线」一排，chip 上直接画本槽线型
+- [x] `WeightChartPanel.vue`：`visibleSlots` prop + watcher + **`data-series="画出/总数"`** + 卡头系列数改 `n/N`
+- [x] `WeightPlotPage.vue` / `WeightWorkspaceCard.vue`：下发与回写 `update:visibleSlots`
+- [x] `WeightTableView.vue` 脚注：两排勾选都不删表行
+- [x] T3：点掉槽 2 ⇒ 14 张卡 `data-series` 齐变 `3/4`、`.weight-chip--slot.is-checked` 变 3、明细仍 70 行。
+  ⚠ 两排 chip 共用基类 `.weight-chip` ⇒ 裸选择器会命中 18 个，旧断言一律加 `--group` 修饰类
+- [x] 文档：spec 新增 §5.5、回填 §5.4/§10/§15；用户指南 §2 步骤 2 与 §3「导出的是当前所见」改口径 + 重建 dist
+
+### 版式返工一次
+
+第一版把「组内曲线」做成**标题行 + chip 行两排** ⇒ 工作区卡 1280 从 204→**242**（+38px），
+超出我给的 ≤12px 目标。合并成单排（标题 + 4 颗 chip + 说明同行）后 **217px（+13px）**，
+1440 从 172→185（同样 +13px）；chip 块 231px、槽行 27px、两档 `documentElement` 横向溢出 0。
+截图 4+ 张在 `tasks/weight-slot-shots/`（明暗 × 关槽前后）。
+
+### 结果（2026-10-22 实测）
+
+- `npx vitest run` **395 例全绿**（上一批 389，本批 +6）；`npm run lint:e2e` 绿；`npm run build` 绿。
+- 权重 e2e **2/2**（含逐槽那一轮）；`smoke/pages` + `global/fonts` + `theme/night-visibility` **19/19 · 0 红**。
+- **全量池本轮未跑**：用户点定「定向已够，直接提交」。weight 目录仍不在 affected 规则里 ⇒ 快门禁判全量，
+  这笔欠账是**显式取舍**，不是漏跑；补规则要同步 `e2eAffectedDecide.spec.ts`，仍未做。

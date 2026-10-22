@@ -3,13 +3,14 @@ import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useWeightPlot } from './composables/useWeightPlot'
 import { useEChartsTheme } from '../../utils/echarts-theme'
+import { slotCount } from './weightChartOption'
 import WeightChartPanel from './components/WeightChartPanel.vue'
 import WeightEmptyState from './components/WeightEmptyState.vue'
 import WeightTableView from './components/WeightTableView.vue'
 import WeightWorkspaceCard from './components/WeightWorkspaceCard.vue'
 
 const { store, loadFile, exportXlsx, toggleMean, toggleLegend } = useWeightPlot()
-const { doc, visible, showMean, showLegend, errorText, busy, filename } = storeToRefs(store)
+const { doc, visible, visibleSlots, showMean, showLegend, errorText, busy, filename } = storeToRefs(store)
 const { colors } = useEChartsTheme()
 
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -18,6 +19,9 @@ const view = ref<'chart' | 'table'>('chart')
 /** 每个可见测试项一张图（顺序跟文件里的组序，不跟勾选顺序）。 */
 const visibleGroups = computed(() =>
   doc.value ? doc.value.groups.filter((g) => visible.value.includes(g.index)) : [])
+
+/** 「组内曲线」那排的个数：该文件最长组有几条就几个 chip。 */
+const slotTotal = computed(() => (doc.value ? slotCount(doc.value) : 0))
 
 const rowCount = computed(() =>
   doc.value ? doc.value.series_count + (showMean.value ? doc.value.group_count : 0) : 0)
@@ -66,12 +70,15 @@ async function onFileChange(e: Event) {
         :busy="busy"
         :groups="doc.groups"
         :visible="visible"
+        :slot-total="slotTotal"
+        :visible-slots="visibleSlots"
         :colors="colors.seriesColors"
         @pick="pickFile"
         @toggle-mean="toggleMean"
         @toggle-legend="toggleLegend"
         @export="exportXlsx"
         @update:visible="(value) => (store.visible = value)"
+        @update:visible-slots="(value) => (store.visibleSlots = value)"
       />
 
       <!-- 页签只做导航，内容由下面两块按 view 自己渲染（同 BinSiteCrossTable 的写法）：
@@ -97,6 +104,7 @@ async function onFileChange(e: Event) {
           :group="g"
           :show-mean="showMean"
           :show-legend="showLegend"
+          :visible-slots="visibleSlots"
         />
 
         <div v-if="!visibleGroups.length" class="weight-gallery-empty">

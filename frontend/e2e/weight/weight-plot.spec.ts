@@ -1,7 +1,7 @@
 /**
- * 权重画图的 T3 接线证明：选文件 → 真实渲染出图 → 整组开关 → 均值开关 → 图例总开关 → 明细页签 → 全选/清空 → 导出。
- * 系列数、轴范围、线型、5 位小数格式、`legend.show` 这些「纯函数算得出来」的判据在 T2（weightChartOption.spec.ts），
- * 这里一律不重复（testing-gates §2 冲突裁决：T1/T2 能表达的不在浏览器里点）。
+ * 权重画图的 T3 接线证明：选文件 → 真实渲染出图 → 整组开关 → 均值开关 → 图例总开关 → 逐槽开关 → 明细页签 → 全选/清空 → 导出。
+ * 系列数、轴范围、线型、5 位小数格式、`legend.show` 与「隐藏槽位后线型不顶位」这些「纯函数算得出来」的判据在
+ * T2（weightChartOption.spec.ts），这里一律不重复（testing-gates §2 冲突裁决：T1/T2 能表达的不在浏览器里点）。
  * 也不戳 ECharts 实例：页面只暴露 data-* 契约，测试按 DOM 断言。
  * 图例文本在 canvas 渲染器下不进 DOM（chart_renderer 是账号设置），所以这里只断 `data-legend` 这个自有契约，
  * 不去数图例文字。
@@ -42,7 +42,7 @@ test.describe('@p1 权重画图', { tag: ['@p1'] }, () => {
     // 真实渲染证据：容器里有 canvas **或** svg 且可见 —— canvas 档下没有 svg，只找 svg 会假绿（R2⑤）
     const painted = page.locator('[data-testid="weight-chart"] canvas, [data-testid="weight-chart"] svg').first()
     await expect(painted).toBeVisible()
-    await expect(page.locator('.weight-chip')).toHaveCount(14)
+    await expect(page.locator('.weight-chip--group')).toHaveCount(14)
 
     // 图例总开关：14 张图一起翻（只翻一张说明 prop 没发到面板），且只关图例不关曲线
     const legendSwitch = page.getByTestId('weight-legend-switch')
@@ -55,7 +55,19 @@ test.describe('@p1 权重画图', { tag: ['@p1'] }, () => {
     await legendSwitch.click()
     await expect(page.locator('[data-testid="weight-chart"][data-legend="off"]')).toHaveCount(0)
 
-    // 数值明细改成第二个页签：默认 70 行（56 系列 + 14 均值），前两列与均值徽标存在
+    // 组内曲线（图例项）逐槽开关：点掉第 2 条 ⇒ 14 张卡一起变 3/4（只变一张说明没下发）
+    const slotTwo = page.locator('.weight-chip--slot').filter({ hasText: '2' })
+    await expect(page.locator('.weight-chip--group')).toHaveCount(14)
+    await expect(page.locator('.weight-chip--slot')).toHaveCount(4)
+    await expect(page.getByTestId('weight-chart').first()).toHaveAttribute('data-series', '4/4')
+    await expect(page.locator('.weight-chip--slot.is-checked')).toHaveCount(4)
+    await slotTwo.click()
+    await expect(page.locator('[data-testid="weight-chart"][data-series="3/4"]')).toHaveCount(14)
+    await expect(page.locator('.weight-chip--slot.is-checked')).toHaveCount(3)
+    await expect(painted).toBeVisible()
+
+    // 数值明细改成第二个页签：默认 70 行（56 系列 + 14 均值），前两列与均值徽标存在。
+    // 此刻槽 2 还关着 ⇒ 70 行本身就是「逐槽开关不删表行」的对照。
     await expect(tableTab).toContainText('70')
     await tableTab.click()
     await expect(page.getByTestId('weight-table-view')).toBeVisible()
@@ -71,21 +83,24 @@ test.describe('@p1 权重画图', { tag: ['@p1'] }, () => {
     await expect(page.getByTestId('weight-chart').first()).toBeVisible()
     await expect(painted).toBeVisible()
 
-    await page.locator('.weight-chip').first().click()
+    await slotTwo.click()
+    await expect(page.locator('[data-testid="weight-chart"][data-series="4/4"]')).toHaveCount(14)
+
+    await page.locator('.weight-chip--group').first().click()
     // 源稿 §6 规则：未勾选组的**表格行保留**，只是不进图 ⇒ 图表徽标 13、明细仍是 70 行
     await expect(page.getByTestId('weight-chart')).toHaveCount(13)
     await expect(chartTab).toContainText('13')
     await expect(page.getByTestId('weight-chart').first()).toHaveAttribute('data-group', 'WT0002')
     // 选中态按本仓既有写法断 class（e2e/analysis/kde-curve.spec.ts:54 同形）
-    await expect(page.locator('.weight-chip').first()).not.toHaveClass(/is-checked/)
+    await expect(page.locator('.weight-chip--group').first()).not.toHaveClass(/is-checked/)
     await expect(painted).toBeVisible()
 
     await tableTab.click()
     await expect(rows).toHaveCount(70)
     await chartTab.click()
 
-    await page.locator('.weight-chip').first().click()
-    await expect(page.locator('.weight-chip').first()).toHaveClass(/is-checked/)
+    await page.locator('.weight-chip--group').first().click()
+    await expect(page.locator('.weight-chip--group').first()).toHaveClass(/is-checked/)
     await expect(page.getByTestId('weight-chart')).toHaveCount(14)
 
     const meanSwitch = page.getByTestId('weight-mean-switch')
@@ -121,10 +136,10 @@ test.describe('@p1 权重画图', { tag: ['@p1'] }, () => {
   test('解析失败保留现图，并把行号显示出来', async ({ page }) => {
     await gotoApp(page, '/weight')
     await page.locator('input[type="file"]').first().setInputFiles(FIXTURE)
-    await expect(page.locator('.weight-chip')).toHaveCount(14)
+    await expect(page.locator('.weight-chip--group')).toHaveCount(14)
     await page.locator('input[type="file"]').first().setInputFiles(BAD)
     await expect(page.getByTestId('weight-error')).toContainText('第 2 行')
-    await expect(page.locator('.weight-chip')).toHaveCount(14)           // 现图与状态没被清掉
+    await expect(page.locator('.weight-chip--group')).toHaveCount(14)           // 现图与状态没被清掉
     await expect(page.getByTestId('weight-chart')).toHaveCount(14)
   })
 })
