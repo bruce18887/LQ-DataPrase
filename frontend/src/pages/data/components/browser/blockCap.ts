@@ -8,9 +8,10 @@
  */
 
 /**
- * 50/500 与 `DataBrowserAgGrid.vue:273-274` 的同名本地常量重复是**刻意的**，别"去重"：
+ * 50/500 与 `composables/useIrmSizing.ts:31-32` 的同名本地常量重复是**刻意的**，别"去重"：
  * 那边是设置页可取域（TableSettingsForm 下拉端点），这边是内存钳位域，两者语义不同、
  * 各自独立变化（Task 4 只 import 下面两个函数，不 import 这两个常数）。
+ * 这两处同名常数由 `test/backend/test_page_size_bounds.py` 的并集扫描钉住（必须等于后端钳位区间）。
  */
 export const BLOCK_SIZE_MIN = 50
 export const BLOCK_SIZE_MAX = 500
