@@ -83,7 +83,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onActivated, watch } from 'vue'
+import { ref, onActivated, watch } from 'vue'
 import { useFilesStore } from '../../stores/files'
 import api from '../../api'
 import { datafilesApi } from '../../api/datafiles'
@@ -244,17 +244,16 @@ async function reconcileSelection() {
   }
 }
 
-onMounted(async () => {
-  await loadFiles()
-  await reconcileSelection()
-})
-
 // SFTP 导入 / 删除等外部操作后刷新文件列表并复核选择
 watch(() => filesStore.filesVersion, async () => {
   await loadFiles()
   await reconcileSelection()
 })
-// keep-alive 页面激活时刷新文件列表并复核选择
+// 「进入即拉」只挂 onActivated（同 `DataManagement.vue` 的口径）：被
+// `MainLayout.vue:12` 的 `<keep-alive :max="10">` 缓存后，首次进入 mounted 与 activated
+// **都**触发，而旧 onMounted 与这里的 activated 干的是**同一件事**（loadFiles +
+// reconcileSelection）⇒ 一次导航两条 `/files/options/`（服务端 access log 实测：改前
+// 每次进入 2 发、改后 1 发）。刻意不再 onMounted。
 onActivated(async () => {
   await loadFiles()
   await reconcileSelection()

@@ -222,7 +222,7 @@ test.describe('仪表板', { tag: ['@dashboard'] }, () => {
     await batchTab.click()
     await expect(page.locator('.batch-yield-tab')).toBeVisible()
 
-    // 2) 等待 /batch-report/list_batches/ 响应（BatchYieldTab onMounted 触发）
+    // 2) 等待 /batch-report/list_batches/ 响应（BatchYieldTab 的「进入即拉」，Task 5 后挂 onActivated）
     const listResp = page.waitForResponse(
       (r) => r.url().includes('/batch-report/list_batches/'),
       { timeout: 15_000 },
@@ -545,5 +545,52 @@ test.describe('仪表板', { tag: ['@dashboard'] }, () => {
     }
     // 直方图渲染（至少 1 个图表）
     await waitForCharts(page, 1)
+  })
+})
+
+/**
+ * 进仪表板的导航期请求计数（Task 5 / R17）。
+ *
+ * 缺陷形态（两处同型，都在「进一次仪表板」这条导航上）：
+ *  - `DashboardPage.vue` 旧写法 `onMounted` 与 `onActivated` 各调一次 `loadFiles()`
+ *    ⇒ 每次进入 2 条 `GET /files/options/`；
+ *  - 子组件 `components/BatchYieldTab.vue` 旧写法 `onMounted(loadBatches + addEventListener)`
+ *    配 `onActivated(loadBatches)` ⇒ 每次进入 2 条 `GET /batch-report/list_batches/`
+ *    （2026-10-22 生产日志 06:15:19 / 06:44:01 / 06:45:27 / 06:46:04 每段都是 ×2）。
+ * 根因同 `/data`：`MainLayout.vue:12` 的 `<keep-alive :max="10">` 无 include/exclude，
+ * 首次进入 mounted 与 activated **都**触发。
+ *
+ * 落点必须在 `dashboard` 档：`scripts/affected-rules.mjs:34` 把 `frontend/src/pages/dashboard/`
+ * 映射到 `['dashboard']`，而 `BatchYieldTab.vue` 就在那个目录下 —— 写在别的档里等于无门禁。
+ *
+ * 判据口径（lessons R2④）：计数器装在 `goto` **之前**。发起方唯一性先 grep 再断言：
+ * `frontend/src` 里 `listBatches` 只有 `BatchYieldTab.vue:273`、`getOptions` 只有
+ * `DashboardPage.vue:169` 与 `AnalysisPage.vue:68` 两处（后者属 /analysis，不在本页触发），
+ * 两个端点都是裸 `api.get`（无缓存、无单飞），故「钩子翻倍 ⇒ 请求必然翻倍」。
+ * `overview-strip` 可见 = `data` 已到位（即 mounted 与 activated 那两条都已落地），
+ * 再加 2s 静置只让「多发」更容易被抓到。
+ */
+test.describe('进仪表板：导航期批次列表与文件选项各只拉一次', { tag: ['@p1', '@dashboard'] }, () => {
+  test('@p1 进仪表板只发一次 list_batches 与 files/options', async ({ page }) => {
+    const batches: string[] = []
+    const options: string[] = []
+    page.on('request', (r) => {
+      const url = r.url()
+      if (/\/batch-report\/list_batches\/(\?|$)/.test(url)) batches.push(url)
+      if (/\/files\/options\/(\?|$)/.test(url)) options.push(url)
+    })
+
+    await gotoApp(page, '/dashboard')
+    await expect(page.getByTestId('overview-strip')).toBeVisible({ timeout: 30_000 })
+    await page.waitForTimeout(2_000)
+
+    expect(
+      batches,
+      `一次导航到 /dashboard 发出了 ${batches.length} 条 list_batches，应为 1 条：${JSON.stringify(batches)}`,
+    ).toHaveLength(1)
+    expect(
+      options,
+      `一次导航到 /dashboard 发出了 ${options.length} 条 files/options，应为 1 条：${JSON.stringify(options)}`,
+    ).toHaveLength(1)
   })
 })

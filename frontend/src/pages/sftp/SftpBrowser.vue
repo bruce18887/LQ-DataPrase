@@ -84,7 +84,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onActivated, onBeforeUnmount } from 'vue'
+import { ref, computed, onActivated, onBeforeUnmount } from 'vue'
 import { CircleCheck, CircleClose } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { sftpApi, type SftpLastVisit } from '../../api/sftp'
@@ -250,7 +250,11 @@ function joinPath(dir: string, name: string): string {
  * 断线续连：进入页面时检查上次访问信息。
  * - 上次用保存配置连接（can_auto_connect）→ 服务端自动重连，直接恢复路径；
  * - 否则（手动连接/配置被删）→ 预填表单 + 路径提示，用户输密码后跳回。
- * keep-alive 缓存页面：onMounted 只在 SPA 会话首次触发，须配合 onActivated。
+ * 「进页面才知道」的状态初始化全部只挂 onActivated（Task 5 统一口径）：本页被
+ * `MainLayout.vue:12` 的 `<keep-alive :max="10">` 缓存，首次进入 mounted 与 activated
+ * **都**触发，旧写法两处各调 `checkLastVisit() + loadTimeout()` ⇒ 一次导航两条
+ * `GET /sftp/last_visit/`。（`loadTimeout()` 那条不翻倍：`utils/sftpTimeout.ts:42-55`
+ * 有模块级缓存 + 单飞，两处同帧各调一次也只发一条 `/auth/settings/`。）
  * allowAuto=false（用户主动断开后）：只刷新预填信息，绝不立即自动重连。
  */
 async function checkLastVisit(allowAuto = true) {
@@ -282,10 +286,8 @@ async function checkLastVisit(allowAuto = true) {
   }
 }
 
-onMounted(() => {
-  checkLastVisit()
-  loadTimeout()
-})
+// 两者都是「进页面才知道」的状态初始化，一起进 onActivated、整体不再 onMounted
+// （理由见 checkLastVisit 的头注释；同 brief 对 :285/:289 的处置口径）。
 onActivated(() => {
   checkLastVisit()
   loadTimeout()

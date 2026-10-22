@@ -91,7 +91,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onActivated, watch } from 'vue'
+import { ref, computed, onActivated, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../../api'
 import { useFilesStore } from '../../stores/files'
@@ -234,12 +234,16 @@ function onFileMissing(tab: ViewFileTab) {
   tab.fileId = null
 }
 
-onMounted(loadFiles)
-
 // SFTP 导入等外部操作后自动刷新文件列表
 watch(() => filesStore.filesVersion, () => { loadFiles() })
 
-// keep-alive 页面激活时刷新文件列表
+// 「进入即拉」只挂 onActivated —— 这里刻意**不写** onMounted，是承重的而不是漏的：
+// `MainLayout.vue:12` 用 `<keep-alive :max="10">` 包本页，首次进入 mounted 与 activated
+// **都**触发，两处各调一次 loadFiles ⇒ 一次导航发两条 `GET /files/?page_size=9999`
+// （生产实测 2026-10-22：每条导航到数据管理都翻倍，正撞在渲染进程最忙的那几百毫秒上）。
+// activated 在 mounted 之后的同一帧 post-flush 里跑，首屏不因此多等一个 tick。
+// 判据：`e2e/data/data.spec.ts`「进数据管理页只发一次全量文件列表」（放 data 档是因为
+// `affected-rules.mjs:35` 把 `pages/data/` 只映射到 data+exports，换档就抓不到本改）。
 onActivated(loadFiles)
 </script>
 
