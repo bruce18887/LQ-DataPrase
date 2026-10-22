@@ -9,12 +9,13 @@ import type { User } from '../types'
 
 /**
  * 账号级 /auth/settings/ 缓存的失效点（登录与登出各一次）。
- * - store.reset() 覆盖四个 scalar 设置（chart_renderer / export_timeout /
- *   sftp_download_timeout / filename_wrap）——它们自 Task 6a 起由
- *   stores/userSettings.ts 唯一持有，不再有各自的模块缓存可清。
- * - resetChartMemoryCache() 暂留：useChartMemory 的私有缓存在 Task 6b 才并进
- *   store（它自己的分析页防抖/pagehide 生命周期留在原处），现在摘掉调用就是
- *   给 analysis_chart_memory 留一个跨账号串值的窗口。
+ * - store.reset() 覆盖**所有**账号设置本身（四个 scalar + analysis_chart_* + 网格读的
+ *   page_size/default_hidden_columns）——自 Task 6a 起由 stores/userSettings.ts 唯一持有，
+ *   6b 起网格与 useChartMemory 也不再各自缓存，没有第二份设置可清。
+ * - resetChartMemoryCache() 清的是 useChartMemory **自己的运行时态**（不是设置）：
+ *   analysis_chart_memory 的三态 memoryEnabled、800ms 防抖窗口里待冲刷的 latest + timer、
+ *   以及 loadChartMemory 的结果 memo loadPromise（useChartMemory.ts:38-42,152-160）。
+ *   这三样 store 管不到，摘掉这次调用就给图表记忆留一个 SPA 内跨账号串值的窗口，故保留。
  * - resetChartDockMemoryState() 与本项无关：纯 localStorage 会话态，从不请求
  *   /auth/settings/（pages/analysis/composables/useChartDock.ts:337），保持原样。
  */

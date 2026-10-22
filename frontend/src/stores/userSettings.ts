@@ -34,13 +34,28 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   let settled = false
   let inflight: Promise<void> | null = null
   /**
-   * 纪元计数（6b 评审 R24 0a）。reset() 只能把 inflight 置 null，**拦不住已经派发出去的
-   * .then/.finally**：没有它时，那两条续体会把上一个账号的 payload 写进 raw 并把 settled
-   * 置真（此后整页不再取数），还会顺手把 reset 之后新发起的那次 inflight 也清成 null。
-   * 可达链路：登录时 stores/auth.ts 的 reset / axios 401 的 forceLogout（api/index.ts:226 附近）
-   * 正好撞在路由守卫那次 GET 在飞上。每次 ensure 捕获自己的 gen，续体开头比对，不等就整段跳过。
+   * 纪元计数（6b 评审 R24 0a，修复轮补 Important 1/2 的两处缺口）。**每次写 raw 的发起点**都 +1：
+   * `ensure()` 发 GET 前、`patch()`、`save()` 发 PUT 前，以及 `reset()`。每条续体开头比对
+   * `gen !== generation` 就整段跳过 —— 缺它时 `reset()` 只能把 `inflight` 置 null，**拦不住已经
+   * 派发出去的 .then/.catch/.finally**，于是三族串值/回滚都可达：
+   * ① 切账号后旧账号的 GET **或 PUT** 响应照样写 `raw` 并把 `settled` 置真（此后整页不再取数）；
+   *    桌面版是同一文档 —— `forceLogout()`（api/index.ts:149，401 分支调用点 :215/:221）只
+   *    `window.location.hash = '#/login'`，登录时 `stores/auth.ts:33` 才再 reset 一次，store 实例不换；
+   * ② 本地 `patch()`/`save()` 之后，**更早**派发的那次 GET 用「写之前」的服务端快照整份覆盖 `raw`
+   *    （本地写被静默回滚），或它失败时 `.catch` 把 `raw` 清成 null 而 `settled` 仍为真
+   *    ⇒ 每个消费方各自回退默认值、且整页不再重取；
+   * ③ 陈旧 `.finally` 把 reset/新 `ensure()` 之后那条 `inflight` 清成 null ⇒ 单飞被破、同页重复发 GET。
+   * ②③ 经 `useChartMemory.ts:102-115` 那个跨导航存活的 800ms 防抖真能撞上（它能在新一轮守卫 GET
+   * 的窗口里 fire）。`patch()`/`save()` 顺带把被作废的那条 `inflight` 清掉，否则 `ensure()` 会一直
+   * 返回一条「永远不会有人写 raw」的旧 promise。
    */
   let generation = 0
+
+  /** 纪元 +1 并清掉被作废的那条在飞 GET：见 `generation` 注释里的 ②③。 */
+  function invalidate(): void {
+    generation++
+    if (inflight) inflight = null
+  }
 
   /** 幂等：取过就不再取；失败也算取过（与 echarts-theme.ts:44-51 的降级口径一致，防请求风暴）。 */
   function ensure(): Promise<void> {
@@ -69,6 +84,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
 
   /** 本地即时生效，不等 PUT 往返。同时记为已取过（等同今天 setChartRenderer 的 _rendererFetched=true）。 */
   function patch(p: Partial<UserSettings>) {
+    invalidate()  // 作废更早派发的 GET：否则它会把这次本地写整份回滚（见 generation 注释 ②）
     raw.value = { ...(raw.value ?? {}), ...p }
     settled = true
   }
@@ -80,7 +96,18 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
    * raw 可证明完整 ⇒ 保存后不该再补一次 GET（R24 0b，砍掉本任务要消灭的每导航多一次 GET 中的一次）。
    */
   async function save(p: Partial<UserSettings>): Promise<void> {
+    // 纪元取在**这次 PUT 自己**上：invalidate() 先把更早的 GET 作废（②），再把 PUT 派出去；
+    // 响应回来时若期间发生过 reset()/patch()/又一次 save()，这次续体整段跳过（①②）。
+    // 副作用：作废 GET 后到 PUT 落地之间存在「raw 还没人写」的瞬时（ensure() 的 promise 已 resolve
+    // 但 raw 仍为 null）。今天打不出这个形状 —— PUT 的四个发起点（SettingsPage.vue:161、
+    // useChartMemory.ts:112 防抖冲刷、:134 clearChartMemoryState（调用方含设置页
+    // pages/settings/components/AnalysisLayoutSettings.vue:25））都在 await 过 ensure 之后才跑，
+    // 那之后 settled 已真、不会再有并发 GET。若将来出现「守卫链之前先 PUT」，读它的人要按
+    // raw===null 走各消费方自己的回退值（与失败同口径），不会读到半份。
+    invalidate()
+    const gen = generation
     const { data } = await authApi.updateSettings(p as Record<string, unknown>)
+    if (gen !== generation) return
     raw.value = (data ?? null) as UserSettings | null
     settled = true
   }

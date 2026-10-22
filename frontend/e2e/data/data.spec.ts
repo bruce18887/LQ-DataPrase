@@ -931,7 +931,8 @@ test.describe('进数据管理：导航期全量文件列表只拉一次', { tag
  *
  * 缺陷形态（2026-10-22 生产实测，真实用户机）：一次导航 2–6 条 GET /auth/settings/
  * —— 6 个互不相干的模块各自单飞（四个 scalar util + useChartMemory + 本网格）。
- * 收敛后**唯一**发起点是 stores/userSettings.ts:53，由路由守卫的
+ * 收敛后**唯一**发起点是 stores/userSettings.ts 的 `ensure()`（当前 :68，行号随注释漂移，
+ * 认函数名别认行号），由路由守卫的
  * `await ensureChartRenderer()`（router/index.ts:178）在任何页面组件挂载前取一次；
  * 网格的 onMounted 只 `ensure()`（已结算 ⇒ 0 请求）后读 `store.raw`。
  *
@@ -939,6 +940,8 @@ test.describe('进数据管理：导航期全量文件列表只拉一次', { tag
  * 谓词只算 GET（PUT 是保存/防抖冲刷，条数与「导航期读设置」无关，同仓
  * `e2e/analysis/dock-resize.spec.ts:181` 也是按 method 分开的）。多出来的必然是某个
  * 仍在自取的模块 ⇒ 顺着 initiator 找它，**不许**把断言改成 toBeLessThanOrEqual(N)。
+ * ⚠ 精确长度判据的已知假红：axios 401 拦截器会**重放**原 GET（api/index.ts:226-231），
+ *   长夜跑里 access token 一过期这条就变 2 条 ⇒ 先查 LQDP_ACCESS_TOKEN_MINUTES 再判回归。
  */
 test.describe('进数据管理：账号设置只拉一次', { tag: ['@p1', '@data'] }, () => {
   test('@p1 进数据管理页只发一次 GET /auth/settings/', async ({ page }) => {

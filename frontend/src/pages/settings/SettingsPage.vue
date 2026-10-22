@@ -94,7 +94,7 @@ const store = useUserSettingsStore()
 
 /**
  * 载入时的快照。`saveSettings` 只 PUT 与它不同的键（脏追踪）—— 今天生产实测一次会话
- * 32 次整对象 PUT（11 个键全量 spread），改后一次点击只发真正改过的那几个。
+ * 32 次整对象 PUT（`defaults` 的 12 个键全量 spread），改后一次点击只发真正改过的那几个。
  * 必须是**深拷贝**：各子表单是就地改 `settings` 对象的属性（含数组/对象键），
  * 与 merged 共享引用的话「改动」会被同时写进快照，脏判定就永远不成立。
  */

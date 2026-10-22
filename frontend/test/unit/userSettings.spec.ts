@@ -8,6 +8,10 @@
  * ④ save 只 PUT 脏字段（后端 serializer partial=True，apps/accounts/views.py:218-225）。
  * 另加 reset（登录/登出串账号防线）与 patch 的「等同已取过」语义（旧 setChartRenderer
  * 会连带把 _rendererFetched 置 true）。
+ *
+ * 6b 修复轮再加五条，全部**逐条变异证明**过（去掉对应守卫就红，见 task-6-report.md §13）：
+ * 纪元守卫要覆盖三条通道（ensure 的 GET、save 的 PUT、以及 patch/save 作废在飞 GET），
+ * 外加陈旧 `.finally` 不得让新 ensure 提前 resolve。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
@@ -100,9 +104,9 @@ describe('userSettings store', () => {
 
   /**
    * R24 0a —— 纪元守卫：reset 之后**已经派发出去**的 .then/.finally 不能再写 raw、
-   * 不能再把 settled 置真。缺它时的可达链路：axios 401 拦截器 forceLogout（api/index.ts:226
-   * 附近）或登录时 stores/auth.ts 的 reset，正好撞在路由守卫那次 GET 在飞上 ⇒ 上一个账号的
-   * payload 落进 raw 且 settled=true ⇒ 本页生命周期内不再重取（串账号 + 永久少取）。
+   * 不能再把 settled 置真。缺它时的可达链路：axios 401 拦截器 forceLogout（api/index.ts:149，
+   * 401 分支调用点 :215/:221）或登录时 stores/auth.ts 的 reset，正好撞在路由守卫那次 GET 在飞上
+   * ⇒ 上一个账号的 payload 落进 raw 且 settled=true ⇒ 本页生命周期内不再重取（串账号 + 永久少取）。
    */
   it('reset 期间在飞的 GET 返回后既不写 raw 也不记已结算（R24 纪元守卫）', async () => {
     let resolveFirst!: (v: { data: Record<string, unknown> }) => void
@@ -139,6 +143,118 @@ describe('userSettings store', () => {
     getSettings.mockResolvedValue({ data: { page_size: 100 } })
     await s.ensure()
     expect(getSettings).toHaveBeenCalledTimes(1)
+    expect(s.raw).toEqual({ page_size: 100 })
+  })
+
+  /**
+   * 修复轮 Important 1 —— `save()` 也纳入纪元守卫（0a 当时只裁了 `ensure()`）。
+   * 缺它时的形状：PUT 在飞时切账号（登录 reset / 401 forceLogout，桌面版只换 hash ⇒ 同一文档
+   * 同一个 store 实例），旧账号的**全量**响应照样写进 raw 并把 settled 置真
+   * ⇒ 新账号整页读上一个账号的设置、且守卫级 ensure() 因 settled 直接早退不再重取。
+   */
+  it('reset 期间在飞的 PUT 返回后既不写 raw 也不记已结算（Important 1：save 的纪元守卫）', async () => {
+    let resolvePut!: (v: { data: Record<string, unknown> }) => void
+    updateSettings.mockImplementation(() => new Promise((r) => { resolvePut = r }))
+    const s = useUserSettingsStore()
+    const inFlight = s.save({ page_size: 999 })
+    await Promise.resolve()
+    expect(typeof resolvePut, 'PUT 应已派发（在飞）').toBe('function')
+    s.reset()
+    resolvePut({ data: { page_size: 999, chart_renderer: 'canvas' } })
+    await inFlight
+
+    expect(s.raw, '旧账号的 PUT 响应不得写进 raw').toBeNull()
+    getSettings.mockResolvedValue({ data: { page_size: 100 } })
+    await s.ensure()
+    expect(getSettings, '旧 PUT 响应不得把 settled 置真（新账号必须能重取）').toHaveBeenCalledTimes(1)
+    expect(s.raw).toEqual({ page_size: 100 })
+  })
+
+  /**
+   * 修复轮 Important 2 —— 本地写（patch/save）必须作废**更早派发**的那次 GET，
+   * 否则旧响应回来时是「整份替换 raw」，把刚写进去的值静默回滚掉（两种结局都坏：
+   * ① 落地成功 → 恢复成写之前的服务端快照，整页剩余时间都是旧值；
+   * ② 落地失败 → .catch 把 raw 清成 null 而 settled 仍为真 → 每个消费方各自回退默认值且不再重取）。
+   * 真实入口：`useChartMemory.ts:102-115` 的模块级 800ms 防抖跨导航存活，能在新一轮守卫 GET
+   * 的窗口里 fire（`analysis_chart_state` 走 store.save）。
+   */
+  it('ensure 在飞时 patch 不被更早派发的 GET 整份回滚（Important 2①）', async () => {
+    let resolveGet!: (v: { data: Record<string, unknown> }) => void
+    getSettings.mockImplementation(() => new Promise((r) => { resolveGet = r }))
+    const s = useUserSettingsStore()
+    const inFlight = s.ensure()
+    await Promise.resolve()
+    s.patch({ analysis_chart_state: { layout: null, toggles: null } })
+    resolveGet({ data: { page_size: 100, analysis_chart_state: { stale: true } } })
+    await inFlight
+
+    expect(s.raw, '旧 GET 的全量 payload 不得覆盖本地写').toEqual({ analysis_chart_state: { layout: null, toggles: null } })
+  })
+
+  it('ensure 在飞时 patch 后那次 GET 失败也不得把 raw 清成 null（Important 2②）', async () => {
+    let rejectGet!: (e: unknown) => void
+    getSettings.mockImplementation(() => new Promise((_r, j) => { rejectGet = j }))
+    const s = useUserSettingsStore()
+    const inFlight = s.ensure()
+    await Promise.resolve()
+    s.patch({ page_size: 200 })
+    rejectGet(new Error('boom'))
+    await inFlight
+
+    expect(s.raw, '失败续体不得清 raw —— 清了就是全页静默回退默认值').toEqual({ page_size: 200 })
+    await s.ensure()
+    expect(getSettings, 'patch 仍算已取过（口径未放宽）').toHaveBeenCalledTimes(1)
+  })
+
+  it('ensure 在飞时 save 的 PUT 响应不被更早派发的 GET 换回去（Important 2 的 save 侧）', async () => {
+    let resolveGet!: (v: { data: Record<string, unknown> }) => void
+    getSettings.mockImplementation(() => new Promise((r) => { resolveGet = r }))
+    updateSettings.mockResolvedValue({ data: { page_size: 200, chart_renderer: 'svg' } })
+    const s = useUserSettingsStore()
+    const get = s.ensure()
+    await Promise.resolve()
+    await s.save({ page_size: 200 })
+    resolveGet({ data: { page_size: 100, chart_renderer: 'canvas' } })  // 那次 GET 的旧快照后到
+    await get
+
+    expect(s.raw, 'PUT 之后 raw 必须是 PUT 响应，不得被更早的 GET 换回旧值').toEqual({ page_size: 200, chart_renderer: 'svg' })
+  })
+
+  /**
+   * 修复轮 Minor（store 里 generation 注释的第 ③ 条危害，此前零用例覆盖）——
+   * 陈旧续体的 `.finally` 不得动 **reset 之后新发起**的那次状态：它会把新 inflight 清成 null
+   * 并把 settled 提前置真 ⇒ 后来者 `await ensure()` 会**提前 resolve**、在第二次 GET 还没落地时
+   * 读到 raw===null，按「拉取失败」回退默认值并 memo 一整个文档（useChartMemory 就 memo 这个）。
+   * ⚠ 断言不能用 promise 身份：Pinia 的 dev 档 action wrapper 会把返回的 promise 再 `.then` 一层
+   *   （实测 `s.ensure() === 上一次返回的那条` 恒 false），只有「是否提前 resolve」是干净判据。
+   */
+  it('陈旧 .finally 不得让 reset 后新发起的 ensure 提前 resolve（单飞/结算守恒）', async () => {
+    let resolveFirst!: (v: { data: Record<string, unknown> }) => void
+    let resolveSecond!: (v: { data: Record<string, unknown> }) => void
+    getSettings
+      .mockImplementationOnce(() => new Promise((r) => { resolveFirst = r }))
+      .mockImplementationOnce(() => new Promise((r) => { resolveSecond = r }))
+    const s = useUserSettingsStore()
+    const first = s.ensure()
+    await Promise.resolve()
+    s.reset()
+    const second = s.ensure()
+    await Promise.resolve()
+    expect(getSettings, '两次 ensure 各发一条 GET').toHaveBeenCalledTimes(2)
+
+    resolveFirst({ data: { page_size: 999 } })   // 旧账号响应在第二次仍 in 飞时落地
+    await first
+
+    let earlyResolve = false
+    void s.ensure().then(() => { earlyResolve = true })
+    await new Promise((r) => setTimeout(r, 0))   // 冲掉所有微任务：陈旧续体若作乱，这里就翻true
+    expect(earlyResolve, '陈旧续体不得清掉新 inflight / 提前置 settled').toBe(false)
+    expect(getSettings, '单飞未破 ⇒ 不该冒出第三条 GET').toHaveBeenCalledTimes(2)
+
+    resolveSecond({ data: { page_size: 100 } })
+    await second
+    await new Promise((r) => setTimeout(r, 0))
+    expect(earlyResolve, '第二次落地后 ensure 才算取过').toBe(true)
     expect(s.raw).toEqual({ page_size: 100 })
   })
 

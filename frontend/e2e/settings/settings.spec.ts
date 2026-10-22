@@ -81,10 +81,13 @@ test.describe('@p1 系统设置页', { tag: ['@p1', '@settings'] }, () => {
   /**
    * Task 6b Step 7 的计数判据（设置页这一侧）。档位选择依据 `scripts/affected-rules.mjs:36`：
    * `frontend/src/pages/settings/` → `['settings']`，本批被保护的站点正是 SettingsPage.vue
-   * （今天 `:90` 自己裸 GET、`:122` 无脏追踪地整对象 PUT 11 个键 ⇒ 生产实测一次会话 32 次 PUT）。
+   * （改前 @74cc4c6 的 `:90` 自己裸 GET、`:122` 无脏追踪地把 defaults 的 **12 个键**整对象 PUT
+   * ⇒ 生产实测一次会话 32 次 PUT；行号只在那一版成立，认函数名 loadSettings/saveSettings 别认行号）。
    * 收敛后设置页不再自己 GET：守卫那次（router/index.ts:178 → store.ensure()）就是唯一一次，
    * `loadSettings()` 里的 `ensure()` 命中「已结算」直接返回。
    * ⚠ 计数器同样必须装在 goto 之前（lessons R2④）；只算 GET，PUT 由下面两条交互用例自证。
+   * ⚠ 精确长度判据的已知假红：axios 401 拦截器会**重放**原 GET（api/index.ts:226-231），
+   *   长夜跑里 access token 一过期这条就变 2 条 ⇒ 先查 LQDP_ACCESS_TOKEN_MINUTES 再判回归。
    */
   test('@p1 进设置页只发一次 GET /auth/settings/（读设置走单一 store）', async ({ page }) => {
     const hits: string[] = []
