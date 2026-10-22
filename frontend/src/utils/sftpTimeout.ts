@@ -1,15 +1,16 @@
 /**
- * SFTP 下载超时（秒）的模块级缓存。
+ * SFTP 下载超时（秒）的读取入口。
  *
  * 值来自用户设置 UserSetting.sftp_download_timeout（GET /auth/settings/），
  * 与 exportTimeout 同构：
  * - SFTP 浏览器下载参数（SSE 请求体 timeout + 批量下载 axios timeout）统一
  *   await getSftpTimeoutSec()，不再各自硬编码；
  * - SftpBrowser 工具栏可自由调整并持久化（PUT /auth/settings/）；
- * - auth store 在登录/登出时 reset，防止跨用户串值。
+ * - 缓存由 stores/userSettings.ts 唯一持有（本模块只保留键位、钳位与回退默认值），
+ *   登录/登出的失效由 auth store 调 store.reset() 统一负责。
  */
 
-import { authApi } from '../api/auth'
+import { useUserSettingsStore } from '../stores/userSettings'
 
 export const DEFAULT_SFTP_TIMEOUT_SEC = 600
 export const MIN_SFTP_TIMEOUT_SEC = 30
@@ -21,38 +22,21 @@ export function clampSftpTimeoutSec(sec: number): number {
   return Math.min(MAX_SFTP_TIMEOUT_SEC, Math.max(MIN_SFTP_TIMEOUT_SEC, Math.round(sec)))
 }
 
-let cachedSec: number | null = null
-let fetchPromise: Promise<number> | null = null
-
-/** 本地写入缓存（不触发网络请求）。 */
+/** 本地写入账号设置（不触发网络请求）。 */
 export function setSftpTimeoutSec(sec: number): void {
-  cachedSec = clampSftpTimeoutSec(sec)
-}
-
-/** 清空缓存（auth store 登录/登出时调用，防跨用户串值）。 */
-export function resetSftpTimeoutCache(): void {
-  cachedSec = null
-  fetchPromise = null
+  useUserSettingsStore().patch({ sftp_download_timeout: clampSftpTimeoutSec(sec) })
 }
 
 /**
- * SFTP 下载超时秒数。缓存未命中时单飞拉取一次 /auth/settings/，
- * 失败回退默认 600 秒。
+ * SFTP 下载超时秒数。签名保持不变（调用点一律 await），值取自唯一持有者：
+ * 未取过时由 store 单飞拉一次 /auth/settings/，取不到（未设/失败）回退默认 600 秒，
+ * 且失败后整页不再重试。
  */
 export function getSftpTimeoutSec(): Promise<number> {
-  if (cachedSec !== null) return Promise.resolve(cachedSec)
-  if (!fetchPromise) {
-    fetchPromise = (async () => {
-      try {
-        const { data } = await authApi.getSettings()
-        cachedSec = clampSftpTimeoutSec(Number(data?.sftp_download_timeout))
-      } catch {
-        cachedSec = DEFAULT_SFTP_TIMEOUT_SEC
-      }
-      return cachedSec
-    })()
-  }
-  return fetchPromise
+  const store = useUserSettingsStore()
+  return store
+    .ensure()
+    .then(() => clampSftpTimeoutSec(Number(store.raw?.sftp_download_timeout)))
 }
 
 /** 批量下载等 axios 调用使用的毫秒值。 */

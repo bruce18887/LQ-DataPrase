@@ -4,7 +4,11 @@
     "target": "es2023",
     "lib": ["ES2023"],
     "module": "esnext",
-    "types": ["node"],
+    // types 含 vite/client：本批新增的 store 单测会经 src/api/auth → src/api/index
+    // （axios 封装，用 import.meta.env 与 window.__backendUrl__/electronAPI）拉进 src 侧模块，
+    // 这些是 vite 注入的环境；只留 ["node"] 会让 vue-tsc -b 报 TS2339 Property 'env' 等 9 条。
+    // app 档（tsconfig.app.json）本就声明 vite/client，此处与它对齐。
+    "types": ["node", "vite/client"],
     "skipLibCheck": true,
     "moduleResolution": "bundler",
     // scripts/icon-lib.cjs 是构建脚本（CJS），单测要按 Node 实跑的模块制式引用它；
@@ -18,5 +22,8 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["test/unit/**/*.ts"]
+  // src/**/*.d.ts 是环境声明（electron 桥接的 Window 字段、router 的 RouteMeta 扩展），
+  // 单测经 store 拉进 src 侧模块时必须有它们，否则 Window 上的自定义字段报 TS2339。
+  // 两份 .d.ts 无运行时代码，且本就在 app 档 include 内，这里只是同源复用。
+  "include": ["test/unit/**/*.ts", "src/**/*.d.ts"]
 }

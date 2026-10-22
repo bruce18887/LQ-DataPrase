@@ -1,16 +1,16 @@
 /**
- * 导出请求超时（秒）的模块级缓存。
+ * 导出请求超时（秒）的读取入口。
  *
  * 值来自系统设置 UserSetting.export_timeout（GET /auth/settings/）。导出调用点
- * （DataBrowserAgGrid / useExport / ExportFooter）统一 await getExportTimeoutMs()
- * 获取超时毫秒值，不再各自硬编码。
+ * （DataBrowserAgGrid / useExport / useBrowserExport / useFileCorrelation /
+ * useBatchExport）统一 await getExportTimeoutMs() 获取超时毫秒值，不再各自硬编码。
  *
- * 缓存为模块单例（仿 useZoom / echarts-theme 先例）：首次导出时单飞拉取一次
- * 设置，失败回退默认值；SettingsPage 加载/保存后通过 setExportTimeoutSec 同步，
- * auth store 在登录/登出时 reset，防止跨用户串值。
+ * 缓存不再是本模块的私有物：账号设置的唯一持有者是 stores/userSettings.ts
+ * （今天 6 个模块各自单飞同一端点，一次导航实测 2–6 次 GET）。本模块只保留
+ * 键位、钳位与回退默认值；登录/登出的失效由 auth store 调 store.reset() 统一负责。
  */
 
-import { authApi } from '../api/auth'
+import { useUserSettingsStore } from '../stores/userSettings'
 
 export const DEFAULT_EXPORT_TIMEOUT_SEC = 600
 export const MIN_EXPORT_TIMEOUT_SEC = 30
@@ -22,36 +22,19 @@ export function clampExportTimeoutSec(sec: number): number {
   return Math.min(MAX_EXPORT_TIMEOUT_SEC, Math.max(MIN_EXPORT_TIMEOUT_SEC, Math.round(sec)))
 }
 
-let cachedSec: number | null = null
-let fetchPromise: Promise<number> | null = null
-
-/** 本地写入缓存（SettingsPage 加载/保存后调用，不触发网络请求）。 */
+/** 本地写入账号设置（SettingsPage 加载/保存后调用，不触发网络请求）。 */
 export function setExportTimeoutSec(sec: number): void {
-  cachedSec = clampExportTimeoutSec(sec)
-}
-
-/** 清空缓存（auth store 登录/登出时调用，防跨用户串值）。 */
-export function resetExportTimeoutCache(): void {
-  cachedSec = null
-  fetchPromise = null
+  useUserSettingsStore().patch({ export_timeout: clampExportTimeoutSec(sec) })
 }
 
 /**
- * 导出请求超时毫秒值。缓存未命中时单飞拉取一次 /auth/settings/，
- * 失败回退默认值（等效此前 DataBrowser 的硬编码 600s）。
+ * 导出请求超时毫秒值。签名保持不变（调用点一律 await），值取自唯一持有者：
+ * 未取过时由 store 单飞拉一次 /auth/settings/，取不到（未设/失败）回退默认值
+ * （等效此前 DataBrowser 的硬编码 600s），且失败后整页不再重试。
  */
 export function getExportTimeoutMs(): Promise<number> {
-  if (cachedSec !== null) return Promise.resolve(cachedSec * 1000)
-  if (!fetchPromise) {
-    fetchPromise = (async () => {
-      try {
-        const { data } = await authApi.getSettings()
-        cachedSec = clampExportTimeoutSec(Number(data?.export_timeout))
-      } catch {
-        cachedSec = DEFAULT_EXPORT_TIMEOUT_SEC
-      }
-      return cachedSec * 1000
-    })()
-  }
-  return fetchPromise
+  const store = useUserSettingsStore()
+  return store
+    .ensure()
+    .then(() => clampExportTimeoutSec(Number(store.raw?.export_timeout)) * 1000)
 }
