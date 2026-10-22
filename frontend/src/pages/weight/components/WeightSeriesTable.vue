@@ -74,7 +74,7 @@ function cellClassName({ row, column }: { row: Row; column: { property?: string 
       :data="rows"
       row-key="key"
       size="small"
-      height="100%"
+      :max-height="560"
       class="dp-table-dense"
       :row-class-name="rowClassName"
       :cell-class-name="cellClassName"
@@ -109,8 +109,7 @@ function cellClassName({ row, column }: { row: Row; column: { property?: string 
 <style scoped>
 .weight-table {
   width: 100%;
-  height: 100%;
-  min-height: 0;
+  /* 滚动高度由 el-table 自己的 max-height 承载（仓内表格一律 max-height，不靠父级给高） */
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--p-radius-md);

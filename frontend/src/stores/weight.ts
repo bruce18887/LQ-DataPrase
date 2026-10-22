@@ -9,6 +9,7 @@ export const useWeightStore = defineStore('weight', () => {
   const filename = ref('')
   const visible = ref<number[]>([])
   const showMean = ref(true)          // 默认打开均值（2026-10-20 用户点定）
+  const showLegend = ref(true)        // 图例总开关：只管底部那行标签画不画，不影响任何曲线
   const errorText = ref('')
   const busy = ref(false)
 
@@ -16,7 +17,7 @@ export const useWeightStore = defineStore('weight', () => {
 
   function reset() {
     doc.value = null; rawText.value = ''; filename.value = ''
-    visible.value = []; showMean.value = true
+    visible.value = []; showMean.value = true; showLegend.value = true
     errorText.value = ''; busy.value = false
   }
   function setDoc(next: WeightDocDto, text: string) {
@@ -25,6 +26,7 @@ export const useWeightStore = defineStore('weight', () => {
     filename.value = next.filename
     visible.value = next.groups.map((g) => g.index)   // 换文件全量复位
     showMean.value = true
+    showLegend.value = true
     errorText.value = ''
   }
   function toggleGroup(index: number, on: boolean) {
@@ -32,5 +34,5 @@ export const useWeightStore = defineStore('weight', () => {
     on ? set.add(index) : set.delete(index)
     visible.value = [...set].sort((a, b) => a - b)
   }
-  return { doc, rawText, filename, visible, showMean, errorText, busy, allVisible, reset, setDoc, toggleGroup }
+  return { doc, rawText, filename, visible, showMean, showLegend, errorText, busy, allVisible, reset, setDoc, toggleGroup }
 })

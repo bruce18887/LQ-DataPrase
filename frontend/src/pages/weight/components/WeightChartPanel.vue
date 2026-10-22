@@ -6,7 +6,7 @@ import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
 import { buildWeightOption } from '../weightChartOption'
 
-const props = defineProps<{ group: WeightGroupDto; showMean: boolean }>()
+const props = defineProps<{ group: WeightGroupDto; showMean: boolean; showLegend: boolean }>()
 // useEChartsTheme() 只返回 { isDark, colors, getBaseOption }：取色一律走 colors.value.*（lessons R7②）。
 const { colors, isDark } = useEChartsTheme()
 
@@ -15,6 +15,7 @@ const codeCount = computed(() => groupCodeMax(props.group) + 1)
 
 const buildOption = () => buildWeightOption(props.group, {
   showMean: props.showMean,
+  showLegend: props.showLegend,
   colors: colors.value.seriesColors,
   meanColor: colors.value.textColor,
   textColor: colors.value.textColor,
@@ -26,7 +27,7 @@ const buildOption = () => buildWeightOption(props.group, {
 
 const { chartRef } = useChart(
   buildOption,
-  [() => props.group, () => props.showMean, isDark],
+  [() => props.group, () => props.showMean, () => props.showLegend, isDark],
 )
 void chartRef // bound to <div ref="chartRef"> in template
 </script>
@@ -36,6 +37,7 @@ void chartRef // bound to <div ref="chartRef"> in template
     class="weight-chart-card"
     data-testid="weight-chart"
     :data-group="group.name"
+    :data-legend="showLegend ? 'on' : 'off'"
   >
     <header class="weight-chart-head">
       <span class="group-dot" :style="{ backgroundColor: color }" aria-hidden="true" />

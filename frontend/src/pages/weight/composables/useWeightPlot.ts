@@ -45,5 +45,9 @@ export function useWeightPlot() {
     }
   }
 
-  return { store, loadFile, exportXlsx, toggleMean: () => { store.showMean = !store.showMean } }
+  return {
+    store, loadFile, exportXlsx,
+    toggleMean: () => { store.showMean = !store.showMean },
+    toggleLegend: () => { store.showLegend = !store.showLegend },
+  }
 }

@@ -49,6 +49,9 @@ export interface WeightDocDto {
 
 export interface BuildOptions {
   showMean: boolean
+  /** 图例总开关（页面级）：只决定底部那行 `1/2/3/4/均值` 画不画，不影响任何曲线。
+   *  可选且缺省为显示 —— 关掉时把图例占的底部留白一并让给画布，所以缺省值不能翻成隐藏。 */
+  showLegend?: boolean
   /** 当前主题的 8 色板，即 `echarts-theme.ts` 的 `colors.seriesColors`。 */
   colors: string[]
   /** 均值线色，由调用方给（Task 8 传 `colors.textColor`）。 */
@@ -183,6 +186,8 @@ export function buildWeightOption(group: WeightGroupDto, o: BuildOptions): EChar
     axisLabel: { color: o.textColor, fontSize: chartFontSize.micro },
   })
 
+  const showLegend = o.showLegend !== false
+
   return {
     backgroundColor: 'transparent',
     animation: false,
@@ -190,7 +195,7 @@ export function buildWeightOption(group: WeightGroupDto, o: BuildOptions): EChar
     title: { show: false, text: o.titleText, textStyle: { color: o.textColor, fontSize: chartFontSize.dense } },
     // 分组后图例只剩本组 4/5 条：它成了「组内线型」的对照载体（导出侧同口径）。
     legend: {
-      show: true,
+      show: showLegend,
       bottom: 0,
       type: 'scroll',
       textStyle: { color: o.textColor, fontSize: chartFontSize.micro },
@@ -205,7 +210,8 @@ export function buildWeightOption(group: WeightGroupDto, o: BuildOptions): EChar
         `${p.seriesName ?? ''}<br/>code ${p.value?.[0] ?? '-'} · ${formatWeightLabel(p.value?.[1])}`,
     },
     // 右侧 34 给最右点的均值标签留位（14 在 609px 卡宽下会把末位标签裁掉）。
-    grid: { left: 8, right: 34, top: 20, bottom: 40, containLabel: true },
+    // bottom 40 是给底部图例行留的（containLabel 已把轴标签算进网格），图例隐藏就收回到 16。
+    grid: { left: 8, right: 34, top: 20, bottom: showLegend ? 40 : 16, containLabel: true },
     // x 只到本组最长系列：每个测试项独立缩放，短组不会被最长组拖成一根竖线。
     xAxis: [{ ...axis(), min: 0, max: groupCodeMax(group), splitLine: { show: false } }],
     yAxis: [{ ...axis(), scale: true, axisLine: { show: false } }],

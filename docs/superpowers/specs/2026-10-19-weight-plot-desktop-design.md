@@ -153,6 +153,7 @@
 - 开关与均值的实现：页面按 `visible` **渲染图列表**，每张图只构建本组 series（`buildOption(group, …)`）。
   不用 ECharts 原生 legend 做跨组开关 —— 原生 legend 是逐系列的，做不到「14 项按测试项开关」；
   分组后每图自带的 legend 只列本组 4/5 条，用作组内线型对照（与导出侧同口径）。
+  **2026-10-22 起这行 legend 由页面级总开关控制显隐**（§5.4），`showMean` 与 `visible` 的语义不变。
   `buildOption` 必须住纯模块以便 T2 覆盖（§9）。
 - **2026-10-20 改版原因（用户实测反馈）**：14 组共用一张图时，WT0004 那种数万量级的值把 y 轴
   压到只剩顶部一根尖峰，其余组全成底部平线，图不可读。⇒ 每个测试项独立成图、独立缩放。
@@ -164,6 +165,9 @@
   源稿那条是为 Excel 写单元格省的，这里成本不存在，用户可见行为完全一致。
 
 ### 5.3 2026-10-20 版式重设计（已实施）
+
+> ⚠ 本节里「数值明细 = 右侧 `el-drawer`」「切页关闭抽屉」「操作条含数值明细按钮」三条已被
+> §5.4（2026-10-22）取代，其余（卡头承载测试项名、画廊列宽、精度口径）仍是现行口径。
 
 用户批复「连版式一起重排」，并追加「小数点位数限制到 5 位」；评审板见
 `docs/plans/weight-redesign-preview.html`（gitignore，本机原型）与 `tasks/weight-redesign-shots/`。
@@ -188,6 +192,30 @@
 `minmax(460px, 1fr)` 自动收缩；双主题与长名压力截图在 `tasks/weight-redesign-shots/`。
 T2 计 25 例（`weightChartOption.spec.ts`，含 5 位精度与短图例）；T3 用例同步覆盖抽屉打开/关闭、
 均值 switch、全选/清空，并保留「隐藏组不删表行」的对照。
+
+### 5.4 2026-10-22 图例总开关 + 数值明细改页签（已实施）
+
+用户两条点定：① 图例要一个**页面级总开关**，一键把 14 张图底部那行 `1 / 2 / 3 / 4 / 均值` 整行关掉；
+② 数值明细**不要抽屉**，改成第二个页签。澄清后的口径：总开关关的是**图例本身**（曲线照画），
+不是「按图例项全局关系列」；工作区卡（文件身份 + 测试项 chip + 开关 + 导出）**常驻在页签之上**，
+只有下方视图区分「图表 / 数值明细」两页。
+
+| 项 | 现行口径 |
+|---|---|
+| 图例开关 | `stores/weight.ts` 的 `showLegend`，默认 `true`，换文件与 `reset()` 复位，仍不落 localStorage（§11 不变）；卡片上是第二个 `role="switch"`「显示图例」，与「显示均值」共用 `.ws-switch` 样式 |
+| 语义边界 | 只翻 `legend.show`，**series 一条不少**（T2 钉：关图例后仍是 4 成员 + 1 均值）；`grid.bottom` 随图例 `40 ↔ 16`，隐藏时把那 24px 还给绘图区 —— 不省高就等于白关 |
+| 关掉后失去什么 | 点图例单独藏某条线的能力、组内线型的静态对照。后者由「测试项」区常驻的线型说明行承载（`WeightGroupChips.vue` 末行），完整系列名仍在 tooltip 与明细表 |
+| 导出 | **不受影响**：xlsx 的 Excel 图例照旧在右侧。导出请求契约仍是 `visible_group_indexes` / `show_mean` / `palette` / `mean_color`，本轮没扩字段 |
+| 页签 | `el-tabs` 只做导航（两个空 `el-tab-pane`），内容由页面按 `view` 自己渲染 —— 沿用 `BinSiteCrossTable.vue` 的既有写法。画廊 `v-show`（14 个 ECharts 实例不销毁，切回只 resize）、明细 `v-if`（进入才构建 70 行 × 66 列） |
+| 明细视图 | `WeightSeriesDrawer.vue` → `WeightTableView.vue`：`el-drawer` / teleport / 关闭按钮与页面的 `onDeactivated` 一并删除；表格高度不再依赖抽屉，改 `el-table :max-height="560"`（仓内表格一律 max-height，不靠父级给高） |
+| 契约变化 | 行数徽标从「数值明细」按钮搬到页签标签（`数值明细 70`）；`weight-open-table` / `weight-drawer` / `weight-close-table` 退役，新增 `weight-legend-switch`、`weight-table-view` 与图表卡上的 `data-legend="on\|off"` |
+
+实测（一次性版式探针 + 截图，`tasks/weight-tab-shots/`，夹具 14 组 / 56 系列 / Code 0–63）：
+1280 视口下工作区卡 992×204、页签条 39px、图表卡 489×336、明细表 992×562（表体 533）；
+1440 下卡 1152×172（chip 收成单行）、明细表 1152×562。操作条（重新选择 + 两个 switch + 导出）
+1280 下 389×32 **仍是单行**，两档文档横向溢出均为 0。明细表宽度从抽屉的 780px 变成整幅 992/1152px。
+T2 增至 27 例（图例两分支 + `grid.bottom` 与缺省值）；T3 改为点页签进出明细，并断 14 张图的
+`data-legend` 一起翻（只翻一张说明 prop 没发到面板）。
 
 ## 6. 配色（本稿唯一一处与源稿的实质冲突，附实测依据）
 
@@ -324,7 +352,7 @@ T2 计 25 例（`weightChartOption.spec.ts`，含 5 位精度与短图例）；T
 
 - `frontend/src/pages/weight/WeightPlotPage.vue`
 - `frontend/src/pages/weight/components/WeightChartPanel.vue`、`WeightGroupChips.vue`、`WeightSeriesTable.vue`
-- `frontend/src/pages/weight/components/WeightWorkspaceCard.vue`、`WeightSeriesDrawer.vue`、`WeightEmptyState.vue`、`WeightActionButton.vue`（2026-10-20 版式重设计）
+- `frontend/src/pages/weight/components/WeightWorkspaceCard.vue`、`WeightTableView.vue`（原 `WeightSeriesDrawer.vue`，§5.4）、`WeightEmptyState.vue`、`WeightActionButton.vue`（2026-10-20 版式重设计）
 - `frontend/src/pages/weight/weightChartOption.ts`（纯模块，T2 目标）
 - `frontend/src/pages/weight/composables/useWeightPlot.ts`
 - `frontend/src/api/weight.ts`
@@ -357,7 +385,9 @@ T2 计 25 例（`weightChartOption.spec.ts`，含 5 位精度与短图例）；T
 
 - 解析结果只存 Pinia（`stores/weight.ts`），**不写 localStorage**：刷新即丢，符合「次抛」；
   切页回来还在（与「SFTP 搜索」结果跨页驻留同族，但那页用了持久层，这里刻意不跟）；
-- 换文件 = 全量复位（组全开、**均值默认打开**、图重建），对应源稿 §4.1「重新画图后状态复位」；
+- 换文件 = 全量复位（组全开、**均值默认打开**、**图例默认打开**、图重建），对应源稿 §4.1「重新画图后状态复位」；
+- 「图表 / 数值明细」当前页签是**页面局部状态**（`WeightPlotPage.vue` 的 `view`），不进 store：
+  keep-alive 内切页回来仍是上次那页，但它不是数据状态，没必要进 store 增加契约面；
 - 不落库 ⇒ **没有导出历史**，也不进「导出中心」那套待拍板议题；
 - 解析失败：保留当前已画的图与表，只在顶部条显示错误 —— 对应源稿 §3.2「解析失败不创建/不修改任何产物」。
 
@@ -394,10 +424,12 @@ T2 计 25 例（`weightChartOption.spec.ts`，含 5 位精度与短图例）；T
 - `python manage.py test test.backend.test_weight_parser test.backend.test_weight_api` 通过，
   且报错类用例各自断到行号；
 - `cd frontend && npx vitest run` 通过，`weightChartOption.spec.ts` 断的是每组图的系列集合、
-  独立 x 上限、圆点与均值标签、5 位小数与短图例，而非「渲染没报错」；
+  独立 x 上限、圆点与均值标签、5 位小数与短图例、图例总开关的两分支（`legend.show` 与
+  `grid.bottom` 40/16），而非「渲染没报错」（§5.4）；
 - `npm run build`（含 `vue-tsc -b`）+ `npm run lint:e2e` 通过；
 - `frontend/e2e/weight/weight-plot.spec.ts`（@p1）通过：14 张图、整组开关不删表行、
-  均值 switch 70↔56、明细抽屉、全选/清空、导出下载、坏文件保留现图；字体与夜间主题回归同批绿；
+  均值 switch 70↔56、图例总开关 14 张齐翻、明细页签进出、全选/清空、导出下载、坏文件保留现图；
+  字体与夜间主题回归同批绿；
 - `node scripts/e2e_pool.mjs --slots=4` 全量池绿，且跑完端口释放、无孤儿 `runserver`；
 - `node tasks/cvd_verify.mjs` 对最终选定的组间基色方案跑过（或明确停在 §6 第 1、2 条不引入新色板）；
 - `git log --diff-filter=A --name-only origin/master..HEAD | grep -E '^Data/|Trim_Weight'` **为空**；
