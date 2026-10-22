@@ -145,7 +145,7 @@ import { ref, computed, watch, onMounted, onUnmounted, onDeactivated } from 'vue
 import { AgGridVue } from 'ag-grid-vue3'
 import { Refresh, Download, Document } from '@element-plus/icons-vue'
 import { datafilesApi } from '../../api/datafiles'
-import { authApi } from '../../api/auth'
+import { useUserSettingsStore } from '../../stores/userSettings'
 import { useThemeStore } from '../../stores/theme'
 import { useFilesStore } from '../../stores/files'
 import type { DataFile } from '../../types'
@@ -263,18 +263,18 @@ const systemCols = ref<string[]>([])
 
 // 默认隐藏列（系统设置 → 表格设置）：命中列 hide=true，列仍存在，用户可通过
 // ag-grid 表头列菜单重新显示；与导出 Excel 的隐藏列共用同一份设置。
-// 同一次拉取顺带套「默认每页行数」→ IRM 块大小（见 applyBlockSize），不额外发请求。
+// 每页行数顺带套进 IRM 块大小（见 applyBlockSize）。Task 6b：这两个值读 stores/userSettings
+// 的缓存，那次 GET 由路由守卫的 ensureChartRenderer() 单飞 ⇒ 本页不再自己发请求。
 const defaultHiddenCols = ref<string[]>([])
 onMounted(async () => {
-  try {
-    const { data } = await authApi.getSettings()
-    defaultHiddenCols.value = Array.isArray(data?.default_hidden_columns)
-      ? data.default_hidden_columns
-      : []
-    applyBlockSize(data?.page_size)
-  } catch {
-    // 设置加载失败：隐藏列保持全部可见、块大小用默认 100（静默降级）
-  }
+  const s = useUserSettingsStore()
+  await s.ensure()
+  // ensure() 自己吞掉失败并记为已取过（防请求风暴），raw=null 即本处要的静默降级：
+  // 隐藏列全部可见、块大小用默认 100。不套 gridAlive/withLiveGrid —— 这段只写组件
+  // 自己的 ref，从不碰 grid api（那两个守卫是给 purge/滚动用的，见 useIrmSizing）。
+  const hidden = s.raw?.default_hidden_columns
+  defaultHiddenCols.value = Array.isArray(hidden) ? hidden : []
+  applyBlockSize(s.raw?.page_size)
 })
 
 function isSystemCol(name: string): boolean {
