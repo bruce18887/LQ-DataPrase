@@ -1512,6 +1512,12 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
    * tasks/ 报告）：① page_size 必须 ≠ 初值 100 —— 相等时 applyBlockSize 提前 return，
    * 根本走不到 purge；② 必须把那条 GET 拖住（route stall），否则「挂载→关标签」的窗口
    * 只有几十毫秒，靠 Playwright 的手速撞它 = flaky。
+   *
+   * ⚠ 分工（别把本用例读成「生命周期守卫都靠 e2e」）：本条钉的是**时序**（异步续体在卸载后
+   * 落地），下面那条「窄→宽」钉的是**purge 删除**（换文件只留一发 page=1）。而
+   * `liveGridApi()` 里 `isDestroyed()` 那道闸（grid 先于组件销毁：清横幅 / 404）在本文件里
+   * **没有射程** —— 那种情形下不存在会被它挡住的未销毁调用，删掉守卫这两条仍全绿，
+   * 只有 T2 `test/unit/useIrmSizing.spec.ts` 钉得住。
    */
   test('@p1 关闭标签时不触发已销毁 grid 的 AG Grid #26 警告', async ({ page }) => {
     const warns: string[] = []
@@ -1575,6 +1581,99 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     } finally {
       await putPageSize(page, original ?? 100)
     }
+  })
+
+  /**
+   * 同标签「窄 → 宽」：驻留块数的新快照必须真的换上（Important 2，这是生产主路径）。
+   *
+   * 形状为什么必须是这两个文件、这个设置：`page_size=100`（出厂默认）下
+   * GAGE_S1（142 列）⇒ 块大小 100、cap 20；换成 ETS88（1,728 列）⇒ **块大小仍是 100**
+   * （100×1728=172,800 未超单块格数预算 355,029，钳位不介入），只有 cap 20 → 8
+   * （`floor(1,420,118 / 172,800)`）。而 ag-grid 只给 `datasource` / `cacheBlockSize` 挂了
+   * resetCache 监听（`main.esm.mjs:55682-55683`），块大小没变 ⇒ 修复前这条路上没有任何
+   * 重建入口，活的 cache 一直按窄文件那份 20 块快照驱逐（≈117 MiB 照旧驻留）。
+   *
+   * 判据是**出站 `/browse/` 的 page 参数**，两条都在同一个标签内、都不可省：
+   * ① 横幅切过去之后 `page=1` 恰好一次 —— 钉的是「换文件分支删掉 `reload()` 里的 purge」。
+   *    留着 purge 的话 `purgeCache → onCacheUpdated → storeUpdated`（`:55585-55593`）会把
+   *    可见块再打一遍，叠上新 datasource 那次 reset ⇒ 同一块两发 page=1（本用例的 `toHaveLength(1)` 红）。
+   * ② 向下翻过新 cap（8 块）再滚回顶部，必须**再来一发 `page=1`** —— 块 0 被驱逐过才会重取；
+   *    仍按 20 块驱逐（未修复）时它还在缓存里，滚回去零请求 ⇒ `toBeGreaterThan` 红。
+   *
+   * ②只能在这里测：驱逐是 ag-grid `InfiniteCache.purgeBlocksIfNeeded` 的行为
+   * （`:55477-55496`，读 `this.params.maxBlocksInCache`），T2 只钉得住「两个数算得对」。
+   * ⚠ 反过来，本次补的 `isDestroyed()` 守卫**不在本文件的射程里**：它挡的是「grid 已销毁而
+   * 组件仍挂载」（清横幅 / 404），那种情形下 e2e 里没有会被它挡住的调用，删掉守卫这三条用例
+   * 仍全绿 ⇒ 只有 T2（`test/unit/useIrmSizing.spec.ts` 的「grid 先于组件销毁」）钉得住。
+   *
+   * page_size 是共享账号的设置：finally 无条件写回原值，末尾把写回结果读回来核对。
+   */
+  test('@p1 同标签窄→宽：cap 换了快照就看得见驱逐（滚回顶部要重取 page=1）', async ({ page }) => {
+    // 1,728 列 × 100 行的块要渲染 9 次，60s 的默认额度不够（同 renderer-memory 的处理）
+    test.setTimeout(180_000)
+    /** 只看 `page=1` 的出站请求：块 0 有没有被驱逐，就问它会不会再取一次 */
+    const page1: string[] = []
+    page.on('request', (req) => {
+      const u = new URL(req.url())
+      if (u.pathname.endsWith('/api/v1/browse/') && u.searchParams.get('page') === '1') {
+        page1.push(`${u.searchParams.get('datafile_id')}@${u.searchParams.get('page_size')}`)
+      }
+    })
+
+    await gotoApp(page, '/dashboard')
+    const original = await readPageSize(page)
+    let restored: number | null = null
+    try {
+      await putPageSize(page, 100)
+      await openViewTab(page, SEEDED_FILES.GAGE_S1)
+      // 窄文件的首块到位（`共 N 条数据` 只在 dataLoaded 后渲染）：那份 cache 的快照就是 cap 20
+      await expect(
+        viewScope(page).locator('p').filter({ hasText: '共 ' }).first(),
+      ).toBeVisible({ timeout: 30_000 })
+
+      // 同一标签内用横幅换文件（新开标签是另一条通路：那份 cache 天生就是新快照，测不到这个缺口）
+      page1.length = 0
+      const banner = page.locator('.active-file-banner:visible .banner-file-select').first()
+      await banner.click()
+      await page
+        .locator('.el-select-dropdown:visible .el-select-dropdown__item')
+        .filter({ hasText: SEEDED_FILES.ETS88_FT.slice(0, 12) })
+        .first()
+        .click()
+
+      // ① 首块恰好一发 page=1（等一拍再判：多余的那发是同 tick 的 purge 造成的，晚不到哪儿去）
+      await expect.poll(() => page1.length, '切到宽文件后必须取到首块').toBeGreaterThan(0)
+      await page.waitForTimeout(2_000)
+      expect(page1, `换文件只需 datasource 换身份那一次取数，实测 page=1：${page1.join(', ')}`).toHaveLength(1)
+
+      // 向下逐块翻过新 cap（8 块）：块大小 100 行 × 行高 30px，必须按块位递进（滚到底=一步跳到末块）
+      const vp = page.locator('.ag-body-vertical-scroll-viewport').first()
+      for (let block = 1; block <= 9; block++) {
+        const got = page
+          .waitForResponse((r) => /\/browse\//.test(r.url()), { timeout: 30_000 })
+          .then(() => true)
+          .catch(() => false)
+        await vp.evaluate((el, top) => {
+          ;(el as HTMLElement).scrollTop = top
+        }, block * 100 * 30)
+        await got
+      }
+
+      // ② 滚回顶部：块 0 已被按新 cap 驱逐 ⇒ 必须重新取 page=1
+      const before = page1.length
+      await vp.evaluate((el) => {
+        ;(el as HTMLElement).scrollTop = 0
+      })
+      await expect
+        .poll(() => page1.length, '滚回顶部必须重新取 page=1：说明驻留块数用的是新快照')
+        .toBeGreaterThan(before)
+    } finally {
+      // finally 里不抛（`renderer-memory.spec.ts:129-133` 同口径）：PUT 抛会盖掉 try 里的原始失败，
+      // 所以把结果留到末尾用读回值判红。共享账号，绝不把 100 之外的值留在场上。
+      await putPageSize(page, original ?? 100).catch(() => undefined)
+      restored = await readPageSize(page).catch(() => null)
+    }
+    expect(restored, '收尾必须把共享账号的 page_size 写回原值').toBe(original ?? 100)
   })
 
   test('@p2 默认隐藏列：记录列默认隐藏，更新隐藏列设置后重新显示', async ({ page }) => {
