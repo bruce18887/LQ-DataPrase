@@ -54,7 +54,10 @@ export interface DataFile {
   batch_name: string
   sub_batch?: string
   row_count: number
-  col_count: number
+  /** 解析前/解析失败为 null（`apps/datafiles/models.py:38` 是 `IntegerField(null=True)`，
+   *  `/files/options/` 的 DTO 也写的是 `number | null`）⇒ 这里必须允许 null，
+   *  否则「列数未知 ⇒ 内存预算不介入」那条分支在编译器眼里不存在（useIrmSizing.colCount） */
+  col_count: number | null
   program_name: string
   product_code?: string
   status: string

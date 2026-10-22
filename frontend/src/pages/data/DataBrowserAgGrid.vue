@@ -7,7 +7,7 @@
       @update:model-value="emit('update:fileId', $event)"
     >
       <template #actions>
-        <el-button type="primary" :loading="loading" @click="reload">
+        <el-button type="primary" :loading="loading" @click="reload()">
           <el-icon><Refresh /></el-icon> 加载数据
         </el-button>
         <el-button :loading="exportingExcel" :disabled="!props.fileId" @click="exportExcel">
@@ -44,12 +44,12 @@
 
     <!-- 数据表格 -->
     <div v-loading="loading">
-      <p v-if="dataLoaded" style="margin-bottom: 8px; font-size: var(--p-fs-base)">
-        共 <b>{{ rowCount }}</b> 条数据
+      <p v-if="dataLoaded || (colCount && blockSize !== settingsPageSize)" style="margin-bottom: 8px; font-size: var(--p-fs-base)">
+        <template v-if="dataLoaded">共 <b>{{ rowCount }}</b> 条数据
         <span v-if="failRowCount > 0" style="color: var(--error); margin-left: 12px; font-weight: bold">
           （Fail: {{ failRowCount }} 行<template v-if="siteFilter">，Site {{ siteFilter }} 过滤后</template>）
-        </span>
-        <!-- D3 口径变更必须可见：压低过用户设的每页行数就当场写明（class 用双主题各带取值的 .text-secondary，不新增 CSS） -->
+        </span></template>
+        <!-- D3 口径变更必须可见；刻意不嵌进 v-if="dataLoaded"：首块失败/为空时 dataLoaded 为假，而那一刻最需要这句「每页怎么只有这么多行」的解释（class 用双主题各带取值的 .text-secondary，不新增 CSS） -->
         <span
           v-if="colCount && blockSize !== settingsPageSize" class="text-secondary"
           :title="`该文件 ${colCount} 列：每页行数已从 ${settingsPageSize} 降为 ${blockSize} 以控制内存`"
@@ -305,8 +305,8 @@ const {
 } = useBinCellMenu({ binCol, displayCols })
 
 const {
-  blockSize, settingsPageSize, colCount, maxBlocks, gridAlive,
-  applyBlockSize, purgeCacheIfAlive, markGridAlive, markGridDead,
+  blockSize, settingsPageSize, colCount, maxBlocks, withLiveGrid,
+  applyBlockSize, purgeCacheIfAlive, keyedDatasource, markGridAlive, markGridDead,
 } = useIrmSizing({ props, gridApi })
 
 function handleGridReady(e: GridReadyEvent) {
@@ -419,7 +419,7 @@ watch(
     dataLoaded.value = false
     if (props.fileId) {
       loadSeq++ // 递增代次：旧文件在途响应全部丢弃
-      reload()
+      reload(false) // 换文件不 purge：上面那条 datasource 换身份已经把块和快照一起换掉了
     } else {
       clearGrid()
     }
@@ -478,12 +478,9 @@ function clearGrid() {
   dataLoaded.value = false
 }
 
-/**
- * IRM datasource（单例）：闭包读当前 ref 值（不快照）——purge 复用同一 datasource
- * 与 sortModel 快照，pass_filter/site_filter/sort 变化都必须取最新值。
- * 排序变更由 ag-grid 自动触发（sortChanged → reset → getRows 带新 sortModel）。
- */
-const datasource: IDatasource = {
+/** IRM 取数闭包：getRows 读当前 ref 值（不快照）⇒ pass_filter / site_filter / sort 一律取最新值；
+ *  交给网格的不是这个内容恒定的对象，而是下面那层按预算换身份的 computed。 */
+const browseSource: IDatasource = {
   getRows: async (params) => {
     if (!props.fileId) {
       params.failCallback()
@@ -515,6 +512,9 @@ const datasource: IDatasource = {
     }
   },
 }
+
+/** 身份随 (fileId, blockSize, maxBlocks) 更换 ⇒ 逼 ag-grid `setDatasource → resetCache` 重取 cacheParams 快照（为什么必须换身份：useIrmSizing.keyedDatasource） */
+const datasource = computed(() => keyedDatasource(browseSource))
 
 /** 首块（或代次最新块）响应的元信息落地；每块响应都带 headers/col_meta/bin_column */
 function applyMeta(d: any) {
@@ -554,17 +554,18 @@ function applyMeta(d: any) {
   }
 }
 
-/** 重新加载：清空 IRM 缓存全部块 + 回顶部（purge 不重置滚动位置） */
-function reload() {
+/** 重新加载：回顶部 +（除换文件外）清 IRM 全部块（purge 本身不重置滚动位置）。
+ *  换文件走 `reload(false)`：datasource 换身份已经把块和 `cacheParams` 一起重建了，
+ *  再 purge 就是对首块多打一次 `/browse/`（那条重复的 page=1 就是这么来的）。 */
+function reload(purgeBlocks = true) {
   if (!props.fileId) return
   closeBinMenu()
   closeHeaderMenu()
-  // 行序/筛选已变，旧的显示行索引不再指向原行
-  clearRowHighlights()
+  clearRowHighlights() // 行序/筛选已变，旧的显示行索引不再指向原行
   loading.value = true
   loadSeq++ // 新代次：旧在途响应不再更新 refs
-  purgeCacheIfAlive()
-  if (gridAlive.value) gridApi.value?.ensureIndexVisible(0)
+  if (purgeBlocks) purgeCacheIfAlive()
+  withLiveGrid((api) => api.ensureIndexVisible(0))
 }
 
 /**

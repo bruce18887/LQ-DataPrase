@@ -4,8 +4,11 @@
  * `blockCap.spec.ts` 已经钉过两个纯函数本身，这里只钉**接线**：
  * ① 窄文件的验收锚点（今天的行为不许被「优化」掉）；
  * ② 列数→块大小→块数这条链在组件侧真的连上了（205 / 4 是用发货常数验算过的组合值）；
- * ③ purge 的销毁守卫 —— 生产那条 `AG Grid: warning #26 … has been destroyed` 就是缺它，
- *    e2e 侧的承重用例是 `frontend/e2e/data/view-data.spec.ts` 的「关闭标签时不触发…#26」。
+ * ③ purge / 滚动的销毁守卫 —— 生产那条 `AG Grid: warning #26 … has been destroyed` 就是缺它。
+ *    **分工要说清**：e2e 那两条（`frontend/e2e/data/view-data.spec.ts`）钉的是
+ *    「换文件不再 purge」与「同标签窄→宽真的换了快照」，它们钉不了 `isDestroyed()` 这道闸
+ *    （未销毁的 grid 上没人调它，删掉守卫 e2e 仍是绿的）；**只有本文件这两条钉住守卫**
+ *    （一条 `markGridDead`、一条 `isDestroyed()`，各挡一种死法）。
  * ④ colCount 变化必须**实时**反映到 blockSize/maxBlocks（用 ref 快照就会把上一份文件的
  *    大块尺寸带进千列文件，那正是 oom 的形状）。
  *
@@ -27,10 +30,21 @@ function file(id: number, colCount: number | null): DataFile {
   return { id, col_count: colCount } as unknown as DataFile
 }
 
-/** 造一个只记录 purge 次数的假 GridApi（`gridAlive` 守卫的全部职责就是挡这个调用） */
-function fakeGridApi() {
+/**
+ * 造一个只记录调用次数的假 GridApi（`liveGridApi()` 三道闸的全部职责就是挡这两个调用）。
+ *
+ * `destroyed` 是对照组要用的开关：`isDestroyed()` 是 ag-grid 自己给的事实源
+ * （`main.esm.mjs:38391` → `gridDestroySvc.destroyCalled` `:14757`），
+ * 「grid 先于组件销毁」（清横幅 / 404）这一半只有它能挡，`gridAlive` 挡不住。
+ */
+function fakeGridApi(opts: { destroyed?: boolean } = {}) {
   const purgeInfiniteCache = vi.fn()
-  return { api: { purgeInfiniteCache } as unknown as GridApi, purgeInfiniteCache }
+  const ensureIndexVisible = vi.fn()
+  return {
+    api: { purgeInfiniteCache, ensureIndexVisible, isDestroyed: () => !!opts.destroyed } as unknown as GridApi,
+    purgeInfiniteCache,
+    ensureIndexVisible,
+  }
 }
 
 /** 一条接线场景：给定文件列表与 grid 引用，取回 composable 与 props */
@@ -105,6 +119,23 @@ describe('useIrmSizing 的分块尺寸', () => {
     s.applyBlockSize(500)
     expect(s.maxBlocks.value).toBeGreaterThanOrEqual(1)
   })
+
+  /**
+   * 同标签窄→宽、设置 100（默认就中招）：**块大小一点不变、只有 maxBlocks 变** 20 → 8。
+   * 这条是「datasource 必须按 (fileId, blockSize, maxBlocks) 换身份」的输入侧依据 ——
+   * ag-grid 只监听 `cacheBlockSize`（`main.esm.mjs:55683`），块大小不变就没有任何重建入口，
+   * 活的 cache 会一直按窄文件那份 20 块快照驱逐（1,728 列 × 100 行 × 20 块 ≈ 117 MiB）。
+   */
+  it('窄→宽（设置 100）：blockSize 不变而 maxBlocks 必须变 ⇒ 单靠 cacheBlockSize 换不来重建', () => {
+    const files = [file(1, 142), file(2, 1728)]
+    const s = setup(files, 1)
+    s.applyBlockSize(100)
+    expect(s.blockSize.value).toBe(100)
+    expect(s.maxBlocks.value).toBe(MAX_BLOCKS)
+    s.props.fileId = 2
+    expect(s.blockSize.value, '钳位不介入（100×1728 未超单块格数预算），块大小恒为 100').toBe(100)
+    expect(s.maxBlocks.value, '驻留块数必须从 20 降到 8，否则封顶对宽文件形同虚设').toBe(8)
+  })
 })
 
 describe('useIrmSizing 的 purge 销毁守卫', () => {
@@ -124,12 +155,44 @@ describe('useIrmSizing 的 purge 销毁守卫', () => {
     expect(s.purgeInfiniteCache).toHaveBeenCalledTimes(1)
   })
 
+  /**
+   * `gridAlive` 挡不住的那一半（Important 1）：`DataBrowserAgGrid.vue:60,65-66` 是
+   * `v-if="!fileId"` / `v-else` ⇒ 清空横幅（`ActiveFileBanner.vue:9` 的 `clearable`）与
+   * 404（`DataManagement.vue:233-235` `onFileMissing`）只销毁 grid、组件仍挂载，
+   * `gridAlive` 留 true、`gridApi` 非 null 且 `markGridDead` 永远不会被叫到。
+   * 少了 `isDestroyed()` 这一道闸，下一次 `reload()` 就是 #26（purge 与
+   * `ensureIndexVisible` 两个调用点都在 #26 的影响面里）。
+   */
+  it('grid 先于组件销毁（组件仍挂载、gridAlive 仍为真）⇒ purge 与滚动调用都不打', () => {
+    const dead = fakeGridApi({ destroyed: true })
+    const s = setup([file(1, 142)], 1, dead)
+    s.markGridAlive() // 组件没卸载 ⇒ 第一道闸为真，只有 isDestroyed() 能挡
+    expect(s.gridApi.value).not.toBeNull()
+
+    s.purgeCacheIfAlive()
+    expect(s.purgeInfiniteCache).not.toHaveBeenCalled()
+    // 同一个谓词也得挡住 ensureIndexVisible：它同样在 #26 的告警注册表里（任意 api 调用）
+    s.withLiveGrid((api) => api.ensureIndexVisible(0))
+    expect(s.ensureIndexVisible).not.toHaveBeenCalled()
+  })
+
+  it('活的 grid（isDestroyed=false）⇒ withLiveGrid 真的把 api 交给回调（对照组：只写 return 不写调用会红）', () => {
+    const s = setup([file(1, 142)], 1)
+    s.withLiveGrid(() => undefined) // 未就绪：一次都不进
+    expect(s.ensureIndexVisible).not.toHaveBeenCalled()
+    s.markGridAlive()
+    s.withLiveGrid((api) => api.ensureIndexVisible(0))
+    expect(s.ensureIndexVisible).toHaveBeenCalledTimes(1)
+    expect(s.purgeInfiniteCache).not.toHaveBeenCalled() // withLiveGrid 本身不附带 purge
+  })
+
   it('gridApi 为 null（空态标签，ag-grid 压根没挂载）时不 purge、不抛', () => {
     const props = reactive({ fileId: null as number | null, files: [] as DataFile[] })
     const gridApi = ref<GridApi | null>(null)
     const s = useIrmSizing({ props, gridApi })
     s.markGridAlive()
     expect(() => s.purgeCacheIfAlive()).not.toThrow()
+    expect(() => s.withLiveGrid((api) => api.ensureIndexVisible(0))).not.toThrow()
     expect(s.colCount.value).toBeNull()
     expect(s.blockSize.value).toBe(100)
   })
