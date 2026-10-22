@@ -49,8 +49,10 @@
           @close="closeViewTab"
           @add="addViewTab"
         />
-        <!-- everActive 门控挂载：没被点开过的标签不发请求（每实例会拉一次账号设置 +
-             一次 /summary/，四个标签首挂就是 8 发）；v-show 切换保住各实例的滚动位置 -->
+        <!-- everActive 门控挂载：没被点开过的标签不发请求（每实例一次 /summary/，由
+             DataQualityBar 发；账号设置在 Task 6b 后走 stores/userSettings，整个文档只由
+             路由守卫拉一次 ⇒ 四个标签首挂是 4 发 /summary/（ag-grid 块请求另计），不是改前的 8 发）；
+             v-show 切换保住各实例的滚动位置 -->
         <template v-for="t in viewTabs" :key="t.id">
           <DataBrowserAgGrid
             v-if="t.everActive"
@@ -114,7 +116,9 @@ const filesStore = useFilesStore()
 
 // ── 查看数据的多文件标签页 ──
 // 上限 4：每份表格实例是一个 ag-grid（IRM 缓存 maxBlocksInCache=20 × blockSize）
-// + 一次账号设置请求 + 一次 /summary/。再往上加收益递减、内存与请求数线性涨。
+// + 一次 /summary/（DataQualityBar）。账号设置自 Task 6b 起不再是每实例一发 ——
+// 全文档只有路由守卫那一次 GET（stores/userSettings），与标签数无关。
+// 再往上加收益递减、内存与请求数线性涨。
 const VIEW_TAB_MAX = 4
 let viewTabSeq = 0
 function newViewTab(fileId: number | null): ViewFileTab {
