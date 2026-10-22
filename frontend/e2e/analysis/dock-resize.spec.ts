@@ -233,8 +233,11 @@ test.describe('@p1 dock 面板缩放自适应', { tag: ['@p1', '@analysis'] }, (
 
     const histBefore = await panelHeight(page, 'hist')
     const serialBefore = await panelHeight(page, 'serial')
-    // 第一行的行间拖拽条（index 0）：向下拖 → 直方图行变矮、辅助行变高
-    await dragBar(page, '.chart-dock__rowbar', 0, 120)
+    // 第一行的行间拖拽条（index 0）：**向上**拖 → 上行（直方图）变矮、下行变高。
+    // 旧写法往 +120（向下）却断 hist 变小，方向本来就是反的——向下拖是让上行变大。
+    // 它当时能绿纯属蒙对：200px 夹紧把下行钉在 minPct，顺带把上行的涨幅压到
+    // 比起点还小 4px（790.6 vs 794.6）。行间隔条不再触发那条夹紧后它就露馅了。
+    await dragBar(page, '.chart-dock__rowbar', 0, -120)
     await expect
       .poll(async () => await panelHeight(page, 'hist'), { timeout: 8_000 })
       .toBeLessThan(histBefore)
@@ -249,13 +252,29 @@ test.describe('@p1 dock 面板缩放自适应', { tag: ['@p1', '@analysis'] }, (
     // 默认 4 行 [[hist],[serial],[qq],[box]]。把 box 的 ⠿ 手柄拖到 QQ 图左半
     // （drop dir=left 合并为一行）→ moveTo 删掉 box 空行。
     const grip = page.locator('.chart-panel[data-chart-key="box"] .chart-h__grip')
-    await grip.scrollIntoViewIfNeeded()
+    const qqPanel = page.locator('.chart-panel[data-chart-key="qq"]')
+    await page.waitForTimeout(300)
+    // 行高改成像素目标后 dock 总高从 1400 涨到 2190：只把 box 手柄滚进视口的话，
+    // QQ 面板的垂直中线会顶到 720 视口上沿、被 sticky 工具栏压住，hitTest 的
+    // elementFromPoint 命中的就不是 QQ 面板 ⇒ 拖拽没有落点，用例红成「行数没变」，
+    // 根因完全看不出来。改成把**目标**滚到视口正中：box 手柄在 QQ 正下方 10px，
+    // 两者同时在屏内。
+    await qqPanel.evaluate((el) => el.scrollIntoView({ block: 'center' }))
     await page.waitForTimeout(300)
     const gb = (await grip.boundingBox())!
     // QQ 面板在 box 行正上方一行：drop 点取其左 15%、垂直居中（rx<0.3 → dir=left）
-    const qb = (await page.locator('.chart-panel[data-chart-key="qq"]').boundingBox())!
+    const qb = (await qqPanel.boundingBox())!
     const tx = qb.x + qb.width * 0.15
     const ty = qb.y + qb.height / 2
+    // 前置自证：落点必须真的命中 QQ 面板（hitTest 走的就是同一条 closest('[data-key]')）。
+    // 没有这条，视口/遮挡问题会以「4 行没变」的形态红，得再跑一轮才知道为什么。
+    expect(
+      await page.evaluate(({ x, y }) => {
+        const el = document.elementFromPoint(x, y)
+        return el?.closest('[data-key]')?.getAttribute('data-key') ?? null
+      }, { x: tx, y: ty }),
+      `落点 (${Math.round(tx)},${Math.round(ty)}) 应命中 QQ 面板而不是 sticky 工具栏`,
+    ).toBe('qq')
     await page.mouse.move(gb.x + gb.width / 2, gb.y + gb.height / 2)
     await page.mouse.down()
     await page.mouse.move(tx, ty, { steps: 12 })
@@ -297,5 +316,30 @@ test.describe('@p1 dock 面板缩放自适应', { tag: ['@p1', '@analysis'] }, (
     await page.locator('.chart-panel[data-chart-key="serial"] .chart-h__btn[title="还原"]').click()
     await expect(panels).toHaveCount(4)
     await expectAllCanvasFit(page)
+  })
+
+  test('勾选新增图表：已有辅助行不缩水，新行与它等高', async ({ page }) => {
+    // 用户报的形态：勾一张新图，整排图被重新切分挤得很小。行高改成像素目标后
+    // 「新增行 == 已有辅助行」是构造保证，这里按用户真实路径（一张张勾）验证。
+    // 记忆关掉：本文件前面的用例会拖底部横条留下 bodyH，不关掉就不是在测默认布局。
+    await putChartSettings(page, { analysis_chart_memory: false, analysis_chart_state: {} })
+    await gotoApp(page, '/analysis')
+    await selectAnalysisFile(page, RECOMMENDED.analysis)
+    await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
+    await waitLoadingGone(page.locator(SINGLE))
+    await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
+    await ensureChartToggles(page, { serial: true, qq: false, box: false })
+    await expect(page.locator('.chart-dock__row')).toHaveCount(2)
+
+    const serialBefore = await panelHeight(page, 'serial')
+    await ensureChartToggles(page, { qq: true })
+    await expect(page.locator('.chart-dock__row')).toHaveCount(3)
+    const serialAfter = await panelHeight(page, 'serial')
+    const qqAfter = await panelHeight(page, 'qq')
+
+    // 旧实现：2 行→3 行会把 rowPcts 整表抹回 [58, 21, 21]，serial 从 42% 掉到 21%
+    expect(Math.abs(serialAfter - serialBefore), '新增图表不得压缩已存在的行').toBeLessThan(8)
+    expect(Math.abs(qqAfter - serialAfter), '新行应与上一个已存在的图表等高').toBeLessThan(8)
+    await expectCanvasFits(page, 'qq')
   })
 })

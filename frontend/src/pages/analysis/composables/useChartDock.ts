@@ -4,9 +4,11 @@
  * 交互模型：rows: ChartKey[][] —— 行上下堆叠，行内元素左右并排。
  *   1 图 [[hist]] 铺满；2 图上下 [[a],[b]]；2 图左右 [[a,b]]；
  *   4 图 2×2 [[a,b],[c,d]]；任意组合由此表达。
- * 尺寸：rowPcts / colPcts 为百分比（0-100，同层相加≈100），仅在结构变化时重置为
- *   均分、在 splitter resize-end 时按最终像素折算回写并持久化。
- *   bodyH 为底部横条拖出的整体高度覆盖（px，null=按行数自动），同链路持久化。
+ * 尺寸：rowPcts / colPcts 为百分比（0-100，同层相加≈100），在 splitter resize-end 时
+ *   按最终像素折算回写并持久化。**默认值由 dockGeometry.ts 的行高像素目标反推**，
+ *   增删勾选时按「未手调→跟随目标 / 手调过→保留比值」重算，不再整表抹回模板。
+ *   bodyH 为底部横条拖出的整体高度覆盖（px，null=按行数自动），同链路持久化；
+ *   渲染期还会被 dockGeometry 的每行最低高度兜底抬高（只作用于渲染，不回写 bodyH）。
  * 持久化：safeStorage（Electron 下防 DOMException），键 lqdp-analysis-chart-layout。
  * 单例：module 级 ref（仿 useZoom.ts 的 refCount 模式），避免面板 v-if/重排丢态。
  * 纯模型 + 变换 + 存储，不碰 DOM —— 拖拽指针逻辑在 ChartDock.vue。
@@ -14,6 +16,7 @@
 import { nextTick, ref, type Ref } from 'vue'
 import { safeGetItem, safeSetItem, safeRemoveItem } from '../../../utils/safeStorage'
 import { loadChartMemory, saveChartState, isMemoryEnabled } from '../../../composables/useChartMemory'
+import { MAX_BODY_H, defaultRowPcts, reconcileRowPcts, reconcileRows } from './dockGeometry'
 
 export type ChartKey = 'hist' | 'serial' | 'qq' | 'box'
 const ALL_KEYS: ChartKey[] = ['hist', 'serial', 'qq', 'box']
@@ -22,10 +25,7 @@ const VERSION = 1
 
 /** 底部横条拖拽的整体高度上下限（px）——持久化回填时同限夹取 */
 export const DOCK_BODY_MIN_H = 480
-export const DOCK_BODY_MAX_H = 2600
-
-/** hist 首行占比、辅助行均分剩余（首屏默认，直方图明显更高） */
-const HIST_FIRST_PCT = 58
+export const DOCK_BODY_MAX_H = MAX_BODY_H
 
 export interface DockLayout {
   rows: ChartKey[][]
@@ -58,28 +58,16 @@ function chunk<T>(arr: T[], size: number): T[][] {
 export function defaultLayout(active: ChartKey[]): DockLayout {
   const rows: ChartKey[][] = []
   if (active.includes('hist')) rows.push(['hist'])
-  const aux = active.filter((k) => k !== 'hist')
-  rows.push(...chunk(aux, 2))
+  rows.push(...chunk(active.filter((k) => k !== 'hist'), 2))
   if (rows.length === 0) rows.push([])
   return {
     rows,
-    // 有 hist 时首行更高（HIST_FIRST_PCT）；无 hist（用户取消勾选）则各行均分，
-    // 否则无 hist 时首行仍白占 58%
-    rowPcts: rows.length === 1
-      ? [100]
-      : (active.includes('hist') ? defaultRowPcts(rows.length) : equalPct(rows.length)),
+    // 占比由 dockGeometry 的像素目标反推：hist 所在行更高，无 hist 时自然均分。
+    //（旧实现把 58% 写死在第 0 行，hist 被拖到非首行时它会白占一格）
+    rowPcts: defaultRowPcts(rows),
     colPcts: rows.map((r) => equalPct(r.length)),
     bodyH: null,
   }
-}
-
-function defaultRowPcts(n: number): number[] {
-  // 首行 hist 更高，其余均分剩余
-  if (n === 1) return [100]
-  const rest = 100 - HIST_FIRST_PCT
-  const out = [HIST_FIRST_PCT]
-  for (let i = 1; i < n; i++) out.push(rest / (n - 1))
-  return out
 }
 
 export function isValidLayout(parsed: unknown): parsed is DockLayout {
@@ -162,7 +150,7 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
 
     const normalizeSizes = () => {
       if (rowPcts.value.length !== rows.value.length || rowPcts.value.some((n) => !Number.isFinite(n))) {
-        rowPcts.value = defaultRowPcts(rows.value.length)
+        rowPcts.value = defaultRowPcts(rows.value)
       } else if (rows.value.length > 0) {
         // 删行路径（moveTo 删空源行 / 旧版本持久化残留）只把该项占比从数组移除、
         // 长度不变，剩余占比之和会 ≠100 → 末行下方留出等量空白（底部横条贴不到
@@ -199,17 +187,13 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
     }
 
     const reconcile: ChartDockApi['reconcile'] = (active, opts) => {
-      const activeSet = new Set(active)
-      // 去掉不再可见的
-      let next = rows.value.map((r) => r.filter((k) => activeSet.has(k))).filter((r) => r.length)
-      // 补新勾选的：追加到底部（与已存在的同新 key 一起每行 2 张分块）
-      const placed = new Set(next.flat())
-      const missing = active.filter((k) => !placed.has(k))
-      if (missing.length) next = [...next, ...chunk(missing, 2)]
-      // 空态兜底
-      if (next.length === 0) next = [[]]
+      const prevRows = rows.value.map((r) => [...r])
+      const prevPcts = [...rowPcts.value]
+      const { rows: next, srcIdx } = reconcileRows(prevRows, active)
       rows.value = next
-      // 结构变了 → 重算尺寸长度（尽量保留）
+      // 增删勾选不得把 rowPcts 整表抹回模板：未手调时跟随像素目标（新行正好拿到
+      // 辅助行目标高度、已有行一格不掉），手调过则保留存活行之间的比值。
+      rowPcts.value = reconcileRowPcts(prevRows, prevPcts, next, srcIdx)
       normalizeSizes()
       if (opts?.persist !== false) persist()
     }

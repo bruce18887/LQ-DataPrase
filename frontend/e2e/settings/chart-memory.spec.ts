@@ -107,8 +107,12 @@ function histToggle(page: Page) {
   return page.locator(`${SINGLE} .chart-toggles .el-checkbox`).filter({ hasText: '显示直方图' })
 }
 
-async function histRowHeight(page: Page): Promise<number> {
-  return page.evaluate(() => document.querySelector('.chart-dock__row')!.getBoundingClientRect().height)
+/** dock 第 index 行的渲染高度。行不保证是 hist 那一行，所以按序号取、不叫 histRowHeight */
+async function dockRowHeight(page: Page, index = 0): Promise<number> {
+  return page.evaluate(
+    (i) => document.querySelectorAll('.chart-dock__row')[i]?.getBoundingClientRect().height ?? 0,
+    index,
+  )
 }
 
 async function openAnalysis(page: Page, fileLabel: string) {
@@ -150,7 +154,7 @@ test.describe('@p1 图表布局账号记忆', { tag: ['@p1', '@settings'] }, () 
       // 方向：rowbar 拖拽语义是「条随手走」——向上拖 → 条上移 → 直方图行变矮
       // （onRowDown: a = a0 + dPct，向下拖则首行变高）；默认 58/42，上拖 120px
       // 后 ≈45/55，远离 200px 单行下限，无 clamp 干扰。
-      const beforeDrag = await histRowHeight(page)
+      const beforeDrag = await dockRowHeight(page)
       const bar = page.locator('.chart-dock__rowbar').first()
       await bar.scrollIntoViewIfNeeded()
       const b = (await bar.boundingBox())!
@@ -160,8 +164,8 @@ test.describe('@p1 图表布局账号记忆', { tag: ['@p1', '@settings'] }, () 
       await page.mouse.down()
       await page.mouse.move(cx, cy - 120, { steps: 8 })
       await page.mouse.up()
-      await expect.poll(async () => histRowHeight(page), { timeout: 8_000 }).toBeLessThan(beforeDrag)
-      const afterDrag = await histRowHeight(page)
+      await expect.poll(async () => dockRowHeight(page), { timeout: 8_000 }).toBeLessThan(beforeDrag)
+      const afterDrag = await dockRowHeight(page)
 
       // 等最后一次改动的防抖 PUT（≤800ms）落库后再刷新：pagehide 冲刷与新页面
       // 的 GET /auth/settings/ 存在到达顺序竞态，先落库让「刷新恢复」可确定断言
@@ -182,7 +186,7 @@ test.describe('@p1 图表布局账号记忆', { tag: ['@p1', '@settings'] }, () 
       await expect(page.locator('.chart-dock__row')).toHaveCount(2)
       await expect(page.locator('.chart-dock__rowbar')).toHaveCount(1)
       await expect
-        .poll(async () => Math.abs((await histRowHeight(page)) - afterDrag), { timeout: 8_000 })
+        .poll(async () => Math.abs((await dockRowHeight(page)) - afterDrag), { timeout: 8_000 })
         .toBeLessThanOrEqual(12)
     } finally {
       await putSettings(page, { analysis_chart_memory: false, analysis_chart_state: {} })
@@ -278,15 +282,16 @@ test.describe('@p1 图表布局账号记忆', { tag: ['@p1', '@settings'] }, () 
       await page.reload()
       await openAnalysis(page, seedName)
 
-      // 勾选由 layout keys 反推恢复；布局 2 行、首行 ≈ 920×32% − 10×32% ≈ 291px
-      // （默认单行 640 / 默认 58% 两行 ≈528 均落不进 ±15 容差，钉死非默认占比）
+      // 勾选由 layout keys 反推恢复；布局 2 行、1 条行间隔条，且**两行高度之比必须
+      // 等于种进去的占比 32:68**。默认占比是 62.9:37.1（比值 1.7），所以这条钉的是
+      // 「套用了非默认占比」这个语义本身——行高目标以后再改，比值不受影响。
       await expect(serialToggle(page)).toHaveClass(/is-checked/, { timeout: 20_000 })
       await expect(page.locator('.chart-panel[data-chart-key="serial"]')).toBeVisible({ timeout: 20_000 })
       await expect(page.locator('.chart-dock__row')).toHaveCount(2)
       await expect(page.locator('.chart-dock__rowbar')).toHaveCount(1)
       await expect
-        .poll(async () => Math.abs((await histRowHeight(page)) - 291), { timeout: 8_000 })
-        .toBeLessThanOrEqual(15)
+        .poll(async () => (await dockRowHeight(page, 0)) / (await dockRowHeight(page, 1)), { timeout: 8_000 })
+        .toBeCloseTo(32 / 68, 2)
 
       // 服务端 state 不被挂载裁剪降级：serial 行仍在
       const state = await getSettingsState(page)
