@@ -1,8 +1,10 @@
 /**
- * 权重画图的 T3 接线证明：选文件 → 真实渲染出图 → 整组开关 → 均值开关 → 明细抽屉 → 全选/清空 → 导出。
- * 系列数、轴范围、线型、5 位小数格式这些「纯函数算得出来」的判据在 T2（weightChartOption.spec.ts），
+ * 权重画图的 T3 接线证明：选文件 → 真实渲染出图 → 整组开关 → 均值开关 → 图例总开关 → 明细页签 → 全选/清空 → 导出。
+ * 系列数、轴范围、线型、5 位小数格式、`legend.show` 这些「纯函数算得出来」的判据在 T2（weightChartOption.spec.ts），
  * 这里一律不重复（testing-gates §2 冲突裁决：T1/T2 能表达的不在浏览器里点）。
  * 也不戳 ECharts 实例：页面只暴露 data-* 契约，测试按 DOM 断言。
+ * 图例文本在 canvas 渲染器下不进 DOM（chart_renderer 是账号设置），所以这里只断 `data-legend` 这个自有契约，
+ * 不去数图例文字。
  */
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,18 +19,23 @@ const FIXTURE = path.join(__dirname, '..', '..', '..', 'test', 'fixtures', 'weig
 const BAD = path.join(__dirname, 'fixtures', 'bad-length.csv')
 
 test.describe('@p1 权重画图', { tag: ['@p1'] }, () => {
-  test('14 组渲染、整组开关不删表行、均值开关、明细抽屉、全选清空、xlsx 能下载', async ({ page }) => {
+  test('14 组渲染、图例总开关、整组开关不删表行、均值开关、明细页签、全选清空、xlsx 能下载', async ({ page }) => {
     // 收集而不是在事件回调里抛：回调里的 throw 会变成 unhandled，测不出「无控制台错误」。
     const consoleErrors: string[] = []
     page.on('console', (m) => {
       if (m.type() === 'error') consoleErrors.push(m.text())
     })
 
+    const chartTab = page.getByRole('tab', { name: /^图表/ })
+    const tableTab = page.getByRole('tab', { name: /^数值明细/ })
+    const rows = page.locator('[data-testid="weight-rows"] .el-table__row')
+
     await gotoApp(page, '/weight')
     await expect(page.getByTestId('weight-empty-hint')).toBeVisible()   // 空态真实存在
 
     await page.locator('input[type="file"]').first().setInputFiles(FIXTURE)
     // 每个测试项一张图：14 组 = 14 个容器，第一张的标题属于 WT0001
+    await expect(chartTab).toContainText('14')
     await expect(page.getByTestId('weight-chart')).toHaveCount(14)
     await expect(page.getByTestId('weight-chart').first()).toBeVisible()
     await expect(page.getByTestId('weight-chart').first()).toHaveAttribute('data-group', 'WT0001')
@@ -37,10 +44,21 @@ test.describe('@p1 权重画图', { tag: ['@p1'] }, () => {
     await expect(painted).toBeVisible()
     await expect(page.locator('.weight-chip')).toHaveCount(14)
 
-    // 明细从常驻右栏改为抽屉：默认 70 行（56 系列 + 14 均值），前两列与均值徽标存在
-    await page.getByTestId('weight-open-table').click()
-    await expect(page.getByTestId('weight-drawer')).toBeVisible()
-    const rows = page.locator('[data-testid="weight-rows"] .el-table__row')
+    // 图例总开关：14 张图一起翻（只翻一张说明 prop 没发到面板），且只关图例不关曲线
+    const legendSwitch = page.getByTestId('weight-legend-switch')
+    await expect(legendSwitch).toHaveAttribute('aria-checked', 'true')
+    await expect(page.locator('[data-testid="weight-chart"][data-legend="off"]')).toHaveCount(0)
+    await legendSwitch.click()
+    await expect(legendSwitch).toHaveAttribute('aria-checked', 'false')
+    await expect(page.locator('[data-testid="weight-chart"][data-legend="off"]')).toHaveCount(14)
+    await expect(painted).toBeVisible()
+    await legendSwitch.click()
+    await expect(page.locator('[data-testid="weight-chart"][data-legend="off"]')).toHaveCount(0)
+
+    // 数值明细改成第二个页签：默认 70 行（56 系列 + 14 均值），前两列与均值徽标存在
+    await expect(tableTab).toContainText('70')
+    await tableTab.click()
+    await expect(page.getByTestId('weight-table-view')).toBeVisible()
     await expect(rows).toHaveCount(70)
     // 文本断言必须收窄到表格：图例里也有同名文本（SVG 渲染时进 DOM），全局 getByText 会 strict 冲突。
     await expect(rows.getByText('WT0001_1', { exact: true })).toBeVisible()
@@ -48,20 +66,23 @@ test.describe('@p1 权重画图', { tag: ['@p1'] }, () => {
     await expect(page.locator('[data-testid="weight-rows"] .mean-tag').first()).toBeVisible()
     // 均值行（第 5 行）的 code 0 单元格：最多 5 位小数（用户 2026-10-20 点定的页面口径）
     await expect(rows.nth(4).locator('td').nth(2)).toHaveText(/^-?\d+(\.\d{1,5})?$/)
-    await page.getByTestId('weight-close-table').click()
-    await expect(page.getByTestId('weight-drawer')).toBeHidden()
+    // 切回图表：画廊是被 v-show 藏起来的，回来必须还看得见画好的图
+    await chartTab.click()
+    await expect(page.getByTestId('weight-chart').first()).toBeVisible()
+    await expect(painted).toBeVisible()
 
     await page.locator('.weight-chip').first().click()
-    // 源稿 §6 规则：未勾选组的**表格行保留**，只是不进图 —— 所以行数仍 70、图少一张
+    // 源稿 §6 规则：未勾选组的**表格行保留**，只是不进图 ⇒ 图表徽标 13、明细仍是 70 行
     await expect(page.getByTestId('weight-chart')).toHaveCount(13)
+    await expect(chartTab).toContainText('13')
     await expect(page.getByTestId('weight-chart').first()).toHaveAttribute('data-group', 'WT0002')
     // 选中态按本仓既有写法断 class（e2e/analysis/kde-curve.spec.ts:54 同形）
     await expect(page.locator('.weight-chip').first()).not.toHaveClass(/is-checked/)
     await expect(painted).toBeVisible()
 
-    await page.getByTestId('weight-open-table').click()
+    await tableTab.click()
     await expect(rows).toHaveCount(70)
-    await page.getByTestId('weight-close-table').click()
+    await chartTab.click()
 
     await page.locator('.weight-chip').first().click()
     await expect(page.locator('.weight-chip').first()).toHaveClass(/is-checked/)
@@ -71,17 +92,17 @@ test.describe('@p1 权重画图', { tag: ['@p1'] }, () => {
     await expect(meanSwitch).toHaveAttribute('aria-checked', 'true')
     await meanSwitch.click()
     await expect(meanSwitch).toHaveAttribute('aria-checked', 'false')
-    await expect(page.getByTestId('weight-open-table')).toContainText('56')
-    await page.getByTestId('weight-open-table').click()
+    await expect(tableTab).toContainText('56')
+    await tableTab.click()
     await expect(rows).toHaveCount(56)                     // 70 → 56：收回 14 条均值行
     await expect(rows.getByText('WT0001_Avg', { exact: true })).toHaveCount(0)
-    await page.getByTestId('weight-close-table').click()
+    await chartTab.click()
 
     await meanSwitch.click()
     await expect(meanSwitch).toHaveAttribute('aria-checked', 'true')
-    await page.getByTestId('weight-open-table').click()
+    await tableTab.click()
     await expect(rows).toHaveCount(70)                     // 真能加回
-    await page.getByTestId('weight-close-table').click()
+    await chartTab.click()
 
     await page.getByRole('button', { name: '清空' }).click()
     await expect(page.getByTestId('weight-chart')).toHaveCount(0)

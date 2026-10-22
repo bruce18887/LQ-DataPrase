@@ -152,6 +152,24 @@ describe('图例：每图自带，只列本组系列', () => {
     expect(o.legend.textStyle.color).toBe(base.textColor)
   })
 
+  it('总开关关掉图例：show=false 且把图例那行的底部留白还给画布', () => {
+    const on = opt(G0, true, { showLegend: true })
+    const off = opt(G0, true, { showLegend: false })
+    expect(on.legend.show).toBe(true)
+    expect(off.legend.show).toBe(false)
+    expect(on.grid.bottom).toBe(40)
+    expect(off.grid.bottom).toBe(16)
+    expect(off.grid.bottom).toBeLessThan(on.grid.bottom)
+    // 只关图例，不动曲线：4 条成员 + 1 条均值都还在（关图例 ≠ 关系列）
+    expect(off.series).toHaveLength(5)
+  })
+
+  it('showLegend 是可选字段：旧调用方不传就维持显示（缺省不能翻成隐藏）', () => {
+    const o = opt(G0, true)
+    expect(o.legend.show).toBe(true)
+    expect(o.grid.bottom).toBe(40)
+  })
+
   it('图例只显示组内序号 / 均值 / 原始，长组名不把图例挤成两页', () => {
     const o = opt(G0, true)
     expect(o.legend.formatter('WT0001_1')).toBe('1')

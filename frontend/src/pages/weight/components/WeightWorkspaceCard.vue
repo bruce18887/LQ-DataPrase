@@ -8,8 +8,8 @@ defineProps<{
   groupCount: number
   seriesCount: number
   codeMax: number
-  rowCount: number
   showMean: boolean
+  showLegend: boolean
   busy: boolean
   groups: WeightGroupDto[]
   visible: number[]
@@ -19,7 +19,7 @@ defineProps<{
 const emit = defineEmits<{
   (e: 'pick'): void
   (e: 'toggle-mean'): void
-  (e: 'open-table'): void
+  (e: 'toggle-legend'): void
   (e: 'export'): void
   (e: 'update:visible', value: number[]): void
 }>()
@@ -65,7 +65,7 @@ const emit = defineEmits<{
 
         <button
           type="button"
-          class="mean-switch"
+          class="ws-switch"
           :class="{ on: showMean }"
           role="switch"
           :aria-checked="showMean"
@@ -76,17 +76,18 @@ const emit = defineEmits<{
           <i aria-hidden="true" />
         </button>
 
-        <WeightActionButton
-          :disabled="busy"
-          data-testid="weight-open-table"
-          @click="emit('open-table')"
+        <button
+          type="button"
+          class="ws-switch"
+          :class="{ on: showLegend }"
+          role="switch"
+          :aria-checked="showLegend"
+          data-testid="weight-legend-switch"
+          @click="emit('toggle-legend')"
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="4" width="18" height="16" rx="2" />
-            <path d="M3 10h18M9 10v10" />
-          </svg>
-          数值明细 <span class="row-badge">{{ rowCount }}</span>
-        </WeightActionButton>
+          <span>显示图例</span>
+          <i aria-hidden="true" />
+        </button>
 
         <WeightActionButton variant="primary" :disabled="busy" @click="emit('export')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -234,7 +235,7 @@ const emit = defineEmits<{
   color: var(--text-2);
 }
 
-.mean-switch {
+.ws-switch {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -247,7 +248,7 @@ const emit = defineEmits<{
   cursor: pointer;
 }
 
-.mean-switch i {
+.ws-switch i {
   position: relative;
   width: 32px;
   height: 18px;
@@ -257,7 +258,7 @@ const emit = defineEmits<{
   transition: background 0.18s;
 }
 
-.mean-switch i::after {
+.ws-switch i::after {
   content: '';
   position: absolute;
   top: 1px;
@@ -270,37 +271,22 @@ const emit = defineEmits<{
   transition: transform 0.18s;
 }
 
-.mean-switch.on i {
+.ws-switch.on i {
   border-color: transparent;
   background: var(--grad-brand);
 }
 
-.mean-switch.on i::after {
+.ws-switch.on i::after {
   transform: translateX(14px);
 }
 
-:global([data-theme='night']) .mean-switch.on i::after {
+:global([data-theme='night']) .ws-switch.on i::after {
   background: var(--p-slate-950);
 }
 
-.mean-switch:focus-visible {
+.ws-switch:focus-visible {
   outline: 2px solid var(--brand);
   outline-offset: 2px;
-}
-
-.row-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: var(--p-radius-full);
-  background: color-mix(in srgb, var(--brand) 14%, transparent);
-  color: var(--brand);
-  font-size: var(--p-fs-micro);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
 }
 
 @media (max-width: 900px) {

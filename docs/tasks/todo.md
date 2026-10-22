@@ -5041,3 +5041,49 @@ scoped 样式，没碰 useZoom、没碰全局 CSS；EP/floating-ui 版本自首�
   该文件两条一起红），且本批没碰 settings / tab 激活逻辑。两条 histogram 是
   `.single-param-tab .chart-container` 盲点选择器 + 负载的形状（lessons 2026-10-18/10-19 已记）。
 - 浏览器档缩放语义变化已同步进 FAQ（`docs/user-guide` 不入库，本机 dist 已重建）。
+
+## 2026-10-22 权重画图：图例总开关 + 数值明细改页签
+
+### 已定口径（用户点定两条 + 一条澄清）
+
+① 图例总开关 = **隐藏图例本身**（曲线照画），不是「按图例项全局关系列」；
+② 数值明细不要抽屉，改成**第二个页签**；工作区卡常驻在页签之上，只有下方视图分「图表 / 数值明细」。
+
+### 实施清单
+
+- [x] `weightChartOption.ts`：`BuildOptions.showLegend?`（可选、缺省显示）⇒ `legend.show` 与 `grid.bottom 40↔16`
+- [x] T2 `weightChartOption.spec.ts` +2 例：两分支 `legend.show`、`grid.bottom` 40/16、关图例后 `series` 仍 5 条、缺省不许翻成隐藏
+- [x] `stores/weight.ts`：`showLegend`（默认 true，`setDoc`/`reset` 一并复位）；`useWeightPlot.ts` 出 `toggleLegend`
+- [x] `WeightChartPanel.vue`：`showLegend` prop + watcher + 卡上 `data-legend="on|off"` 契约
+- [x] `WeightWorkspaceCard.vue`：`.mean-switch` → `.ws-switch`（两个开关共用）、加「显示图例」switch、删「数值明细」按钮与 `rowCount` prop
+- [x] `WeightSeriesDrawer.vue` → `WeightTableView.vue`（`git mv`）：删 `el-drawer`/teleport/关闭按钮，表格改 `:max-height="560"`
+- [x] `WeightPlotPage.vue`：`el-tabs` 空 pane 只做导航（`BinSiteCrossTable.vue` 同形），画廊 `v-show`、明细 `v-if`，删 `onDeactivated` 关抽屉那套 hack；行数徽标搬进页签标签
+- [x] T3 `e2e/weight/weight-plot.spec.ts`：抽屉四段改点页签；新增图例开关一轮（断 14 张 `data-legend` **齐翻**）；70/56/13 的计数断言搬到页签徽标
+- [x] 文档：spec 新增 §5.4，并回填 §5.2/§5.3/§10/§11/§15；`docs/user-guide/06c-weight-plot.md` §2 步骤 4–6 重写 + 重建 dist（该目录不入库）
+- [x] 一次性版式探针 `e2e/weight/_probe-layout.spec.ts`（跑完当场删）⇒ 实测像素 + 9 张截图在 `tasks/weight-tab-shots/`
+
+### 边界（本批刻意不做）
+
+- 导出 xlsx 的图例不动：Excel 那份仍常驻，导出请求契约不扩字段（要同步显隐得动 `apps/weight` 端点与前端四处联动清单）。
+- 不给 `showLegend` 落 localStorage（§11「次抛」口径不变）；「图表 / 数值明细」当前页签是页面局部状态，不进 store。
+- 不补 `frontend/src/pages/weight/` 的 affected 规则：改判据必须同步 `e2eAffectedDecide.spec.ts`，本批不夹带门禁改动。
+  ⇒ 代价是权重页每轮都被判全量（用户点定本轮付 `--slots=4`）。这条长期缺口留在此处，不另开台账。
+
+### 结果（2026-10-22 实测）
+
+- `npx vitest run` **389 例全绿**（`weightChartOption.spec.ts` 25 → 27 例）；`npm run lint:e2e` 绿；
+  `npm run build`（含 `vue-tsc -b`）绿。
+- 定向 T3：`node scripts/e2e_pool.mjs --slots=1 -- weight/weight-plot.spec.ts` → **用例 2 · unexpected 0**；
+  同法跑 `smoke/pages.spec.ts global/fonts.spec.ts theme/night-visibility.spec.ts` → **用例 19 · unexpected 0**。
+- 版式探针实测：1280 下工作区卡 992×204、页签条 39px、图表卡 489×336、明细表 992×562（表体 533）；
+  1440 下卡 1152×172（chip 收单行）、明细表 1152×562。操作条（重新选择 + 两个 switch + 导出）
+  1280 下 389×32 **仍是单行**，两档 `documentElement` 横向溢出均 0；明细表宽度从抽屉 780px 变整幅。
+  截图 9 张在 `tasks/weight-tab-shots/`（明暗两档 × 图例开关 × 明细页签）。
+- 快门禁判**全量**（weight 目录不在 affected 规则里，落兜底）：`node scripts/e2e_pool.mjs --slots=4`
+  → 文件 75 · 加权 1061s · 计划 slot 4 · **用例 402 · 墙钟 10.0min · 单价 3.20s/例 · unexpected 5 · flaky 3 · skipped 21**，
+  池自判 `MEASURED`；复跑判级 **真红 1**（`settings/export-timeout.spec.ts:36`）· 负载抖动 2（两条 histogram）。
+  本轮有重跑 ⇒ 按 testing-gates §4 **不判效率退化**（打印的 2.00 < 2.8 就是这个原因）。
+- 那条真红**不是本批引入**：症状与 2026-10-19 / 10-21 两轮记录的存量红逐字相同
+  （`export-timeout-input` 的 `input` 存在、`aria-valuenow=600`、`Received: hidden`），本批没碰 settings，
+  新样式全在 weight 各组件的 scoped 块内。⚠ 本轮**没有**再跑一次父检出对照 —— 定性靠
+  「两轮既有记录 + 零代码交集」，不是靠本轮实测。

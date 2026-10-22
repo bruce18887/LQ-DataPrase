@@ -1,19 +1,19 @@
 <script setup lang="ts">
-import { computed, onDeactivated, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useWeightPlot } from './composables/useWeightPlot'
 import { useEChartsTheme } from '../../utils/echarts-theme'
 import WeightChartPanel from './components/WeightChartPanel.vue'
 import WeightEmptyState from './components/WeightEmptyState.vue'
-import WeightSeriesDrawer from './components/WeightSeriesDrawer.vue'
+import WeightTableView from './components/WeightTableView.vue'
 import WeightWorkspaceCard from './components/WeightWorkspaceCard.vue'
 
-const { store, loadFile, exportXlsx, toggleMean } = useWeightPlot()
-const { doc, visible, showMean, errorText, busy, filename } = storeToRefs(store)
+const { store, loadFile, exportXlsx, toggleMean, toggleLegend } = useWeightPlot()
+const { doc, visible, showMean, showLegend, errorText, busy, filename } = storeToRefs(store)
 const { colors } = useEChartsTheme()
 
 const fileInput = ref<HTMLInputElement | null>(null)
-const drawerOpen = ref(false)
+const view = ref<'chart' | 'table'>('chart')
 
 /** 每个可见测试项一张图（顺序跟文件里的组序，不跟勾选顺序）。 */
 const visibleGroups = computed(() =>
@@ -29,15 +29,9 @@ function pickFile() {
 async function onFileChange(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
-  if (file) {
-    drawerOpen.value = false
-    await loadFile(file)
-  }
+  if (file) await loadFile(file)
   input.value = ''            // 允许再次选择同一个文件
 }
-
-// keep-alive：抽屉会 teleport 到 body，切页前不关会盖在别的页面上。
-onDeactivated(() => { drawerOpen.value = false })
 </script>
 
 <template>
@@ -67,25 +61,42 @@ onDeactivated(() => { drawerOpen.value = false })
         :group-count="doc.group_count"
         :series-count="doc.series_count"
         :code-max="doc.code_max"
-        :row-count="rowCount"
         :show-mean="showMean"
+        :show-legend="showLegend"
         :busy="busy"
         :groups="doc.groups"
         :visible="visible"
         :colors="colors.seriesColors"
         @pick="pickFile"
         @toggle-mean="toggleMean"
-        @open-table="drawerOpen = true"
+        @toggle-legend="toggleLegend"
         @export="exportXlsx"
         @update:visible="(value) => (store.visible = value)"
       />
 
-      <main class="weight-gallery" aria-label="每个测试项一张图">
+      <!-- 页签只做导航，内容由下面两块按 view 自己渲染（同 BinSiteCrossTable 的写法）：
+           画廊用 v-show 保住 14 个 ECharts 实例（切回来只 resize，不重新 init），
+           明细表用 v-if，70 行 × 全 Code 列只在进入该页签时才构建。 -->
+      <el-tabs v-model="view" class="weight-tabs">
+        <el-tab-pane label="图表" name="chart">
+          <template #label>
+            图表<span class="tab-badge">{{ visibleGroups.length }}</span>
+          </template>
+        </el-tab-pane>
+        <el-tab-pane label="数值明细" name="table">
+          <template #label>
+            数值明细<span class="tab-badge">{{ rowCount }}</span>
+          </template>
+        </el-tab-pane>
+      </el-tabs>
+
+      <main v-show="view === 'chart'" class="weight-gallery" aria-label="每个测试项一张图">
         <WeightChartPanel
           v-for="g in visibleGroups"
           :key="g.index"
           :group="g"
           :show-mean="showMean"
+          :show-legend="showLegend"
         />
 
         <div v-if="!visibleGroups.length" class="weight-gallery-empty">
@@ -98,8 +109,8 @@ onDeactivated(() => { drawerOpen.value = false })
         </div>
       </main>
 
-      <WeightSeriesDrawer
-        v-model="drawerOpen"
+      <WeightTableView
+        v-if="view === 'table'"
         :doc="doc"
         :show-mean="showMean"
         :colors="colors.seriesColors"
@@ -120,6 +131,36 @@ onDeactivated(() => { drawerOpen.value = false })
 
 .weight-error {
   flex: 0 0 auto;
+}
+
+.weight-tabs :deep(.el-tabs__header) {
+  margin-bottom: 0;
+}
+
+.weight-tabs :deep(.el-tabs__item) {
+  font-size: var(--p-fs-small);
+  font-weight: 600;
+}
+
+/* 空 pane 只当导航用，别留 EP 默认的内容盒高度 */
+.weight-tabs :deep(.el-tabs__content) {
+  padding: 0;
+}
+
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: var(--p-radius-full);
+  background: color-mix(in srgb, var(--brand) 14%, transparent);
+  color: var(--brand);
+  font-size: var(--p-fs-micro);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .weight-gallery {
