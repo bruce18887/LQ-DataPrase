@@ -146,7 +146,13 @@ def _group_final_rows(df, param, serial_col, site_col, bin_col):
     返回列序 ``[site?, serial, param, bin?]`` 的扁平 DataFrame。
     """
     key_cols = ([site_col] if site_col else []) + [serial_col]
-    group_cols = [param] + ([bin_col] if bin_col else [])
+    # 查看的参数**可以就是** Bin 列（用户切到 SW_Bin 看每颗 die 的最终 bin），
+    # 此时 param 与 bin_col 同名，必须去重：否则 df[cols] 选出两个同名列，
+    # frame[param] 返回 DataFrame 而 pd.to_numeric 只收 1 维 → TypeError，
+    # 被视图的 except TypeError 报成 400「数据列存在重复或格式异常」——
+    # 重复的正是本函数自己造的列。34d09d1 合并两段分组时丢了这条守卫，
+    # 由 test/backend/test_serial_fail_count.py 钉住。
+    group_cols = list(dict.fromkeys([param] + ([bin_col] if bin_col else [])))
     cols = key_cols + [c for c in group_cols if c not in key_cols]
 
     frame = df[cols].copy()
