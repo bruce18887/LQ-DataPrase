@@ -63,6 +63,30 @@ BROWSER_GRID_VUE = os.path.join(
     REPO_ROOT, 'frontend', 'src', 'pages', 'data', 'DataBrowserAgGrid.vue')
 SETTINGS_PAGE_VUE = os.path.join(
     REPO_ROOT, 'frontend', 'src', 'pages', 'settings', 'SettingsPage.vue')
+# 2026-10-22「渲染进程块预算」批把 IRM 的块大小三件（初值与上下界）从 `DataBrowserAgGrid.vue`
+# 搬进了 `composables/useIrmSizing.ts`，另按列数封顶的两个同名常数住在 `blockCap.ts`。
+# **载体搬了，不变量没搬**：设置域 == 前端块大小 == 后端钳位区间。所以下面两条结构用例扫的是
+# 这一组载体的**并集**，并且要求「一个都没命中」也判红 —— 只盯单个文件的写法在搬家后会因为
+# 正则零命中而得到空集，把哨兵变成假绿（lessons 那条「搬载体层级要补接线哨兵」）。
+IRM_SIZING_TS = os.path.join(
+    REPO_ROOT, 'frontend', 'src', 'pages', 'data', 'composables', 'useIrmSizing.ts')
+BLOCK_CAP_TS = os.path.join(
+    REPO_ROOT, 'frontend', 'src', 'pages', 'data', 'components', 'browser', 'blockCap.ts')
+IRM_CARRIERS = (BROWSER_GRID_VUE, IRM_SIZING_TS, BLOCK_CAP_TS)
+
+
+def literal_sets_by_carrier(pattern: str, carriers) -> dict:
+    """按 `pattern` 扫每个载体，返回 {文件名: 命中的数字集合}，只收有命中的载体。
+
+    返回空 dict = 没有任何载体定义这组字面量 ⇒ 调用方必须判红（搬家后漏指新载体的形状）。
+    """
+    found = {}
+    for path in carriers:
+        nums = {int(v) for v in re.findall(pattern, read(path))}
+        if nums:
+            found[os.path.basename(path)] = nums
+    return found
+
 
 
 def read(path: str) -> str:
@@ -168,10 +192,12 @@ class ConstantsSingleSourceTests(SimpleTestCase):
         self.assertTrue(page_defaults, 'SettingsPage.vue 应保留 page_size 默认值')
         self.assertEqual({int(v) for v in page_defaults}, {model_default})
 
-        grid_src = read(BROWSER_GRID_VUE)
-        block_default = re.search(r'PAGE_SIZE_DEFAULT\s*=\s*(\d+)', grid_src)
-        self.assertIsNotNone(block_default, 'DataBrowserAgGrid.vue 应保留块大小初值')
-        self.assertEqual(int(block_default.group(1)), model_default)
+        block_defaults = literal_sets_by_carrier(r'PAGE_SIZE_DEFAULT\s*=\s*(\d+)', IRM_CARRIERS)
+        self.assertTrue(block_defaults,
+                        '块大小初值没有任何载体在定义（载体搬走时要同步把扫描指过去，不能空集放过）')
+        for name, nums in block_defaults.items():
+            self.assertEqual(nums, {model_default},
+                             f'{name} 的块大小初值必须与模型默认 {model_default} 相等')
 
 
 class FrontendLiteralScanTests(SimpleTestCase):
@@ -187,10 +213,12 @@ class FrontendLiteralScanTests(SimpleTestCase):
         self.assertEqual(max(values), CLAMPED_MAX)
 
     def test_grid_block_size_bounds_match_bounds(self):
-        src = read(BROWSER_GRID_VUE)
-        nums = {int(v) for v in re.findall(r'BLOCK_SIZE_(?:MIN|MAX)\s*=\s*(\d+)', src)}
-        self.assertEqual(nums, {CLAMPED_MIN, CLAMPED_MAX},
-                         '前端 IRM 块大小上下界必须与后端钳位区间一致')
+        bounds = literal_sets_by_carrier(r'BLOCK_SIZE_(?:MIN|MAX)\s*=\s*(\d+)', IRM_CARRIERS)
+        self.assertTrue(bounds,
+                        '前端 IRM 块大小上下界没有任何载体在定义（载体搬走时要同步把扫描指过去）')
+        for name, nums in bounds.items():
+            self.assertEqual(nums, {CLAMPED_MIN, CLAMPED_MAX},
+                             f'{name} 的 IRM 块大小上下界必须与后端钳位区间一致')
 
 
 if __name__ == '__main__':
