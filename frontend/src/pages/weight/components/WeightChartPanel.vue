@@ -6,16 +6,25 @@ import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
 import { buildWeightOption } from '../weightChartOption'
 
-const props = defineProps<{ group: WeightGroupDto; showMean: boolean; showLegend: boolean }>()
+const props = defineProps<{
+  group: WeightGroupDto
+  showMean: boolean
+  showLegend: boolean
+  visibleSlots: number[]
+}>()
 // useEChartsTheme() 只返回 { isDark, colors, getBaseOption }：取色一律走 colors.value.*（lessons R7②）。
 const { colors, isDark } = useEChartsTheme()
 
 const color = computed(() => groupColor(colors.value.seriesColors, props.group.index))
 const codeCount = computed(() => groupCodeMax(props.group) + 1)
+/** 画出的条数（卡头与 `data-series` 都用它）：槽位开关只关图，不动明细表与导出。 */
+const drawnCount = computed(() =>
+  props.group.series.filter((_, within) => props.visibleSlots.includes(within)).length)
 
 const buildOption = () => buildWeightOption(props.group, {
   showMean: props.showMean,
   showLegend: props.showLegend,
+  visibleSlots: props.visibleSlots,
   colors: colors.value.seriesColors,
   meanColor: colors.value.textColor,
   textColor: colors.value.textColor,
@@ -27,7 +36,7 @@ const buildOption = () => buildWeightOption(props.group, {
 
 const { chartRef } = useChart(
   buildOption,
-  [() => props.group, () => props.showMean, () => props.showLegend, isDark],
+  [() => props.group, () => props.showMean, () => props.showLegend, () => props.visibleSlots, isDark],
 )
 void chartRef // bound to <div ref="chartRef"> in template
 </script>
@@ -38,12 +47,13 @@ void chartRef // bound to <div ref="chartRef"> in template
     data-testid="weight-chart"
     :data-group="group.name"
     :data-legend="showLegend ? 'on' : 'off'"
+    :data-series="`${drawnCount}/${group.series.length}`"
   >
     <header class="weight-chart-head">
       <span class="group-dot" :style="{ backgroundColor: color }" aria-hidden="true" />
       <span class="group-name" :title="group.name">{{ group.name }}</span>
       <span class="group-meta">
-        {{ group.series.length }} 系列{{ showMean ? ' + 均值' : '' }} · {{ codeCount }} Code
+        {{ drawnCount }}/{{ group.series.length }} 系列{{ showMean ? ' + 均值' : '' }} · {{ codeCount }} Code
       </span>
     </header>
     <div ref="chartRef" class="weight-chart-body" />

@@ -204,7 +204,7 @@ T2 计 25 例（`weightChartOption.spec.ts`，含 5 位精度与短图例）；T
 |---|---|
 | 图例开关 | `stores/weight.ts` 的 `showLegend`，默认 `true`，换文件与 `reset()` 复位，仍不落 localStorage（§11 不变）；卡片上是第二个 `role="switch"`「显示图例」，与「显示均值」共用 `.ws-switch` 样式 |
 | 语义边界 | 只翻 `legend.show`，**series 一条不少**（T2 钉：关图例后仍是 4 成员 + 1 均值）；`grid.bottom` 随图例 `40 ↔ 16`，隐藏时把那 24px 还给绘图区 —— 不省高就等于白关 |
-| 关掉后失去什么 | 点图例单独藏某条线的能力、组内线型的静态对照。后者由「测试项」区常驻的线型说明行承载（`WeightGroupChips.vue` 末行），完整系列名仍在 tooltip 与明细表 |
+| 关掉后失去什么 | 点图例单独藏某条线的能力、组内线型的静态对照。后者由「组内曲线」那排的线型说明承载（`WeightFilterChips.vue`，原名 `WeightGroupChips.vue`，见 §5.5），完整系列名仍在 tooltip 与明细表 |
 | 导出 | **不受影响**：xlsx 的 Excel 图例照旧在右侧。导出请求契约仍是 `visible_group_indexes` / `show_mean` / `palette` / `mean_color`，本轮没扩字段 |
 | 页签 | `el-tabs` 只做导航（两个空 `el-tab-pane`），内容由页面按 `view` 自己渲染 —— 沿用 `BinSiteCrossTable.vue` 的既有写法。画廊 `v-show`（14 个 ECharts 实例不销毁，切回只 resize）、明细 `v-if`（进入才构建 70 行 × 66 列） |
 | 明细视图 | `WeightSeriesDrawer.vue` → `WeightTableView.vue`：`el-drawer` / teleport / 关闭按钮与页面的 `onDeactivated` 一并删除；表格高度不再依赖抽屉，改 `el-table :max-height="560"`（仓内表格一律 max-height，不靠父级给高） |
@@ -216,6 +216,33 @@ T2 计 25 例（`weightChartOption.spec.ts`，含 5 位精度与短图例）；T
 1280 下 389×32 **仍是单行**，两档文档横向溢出均为 0。明细表宽度从抽屉的 780px 变成整幅 992/1152px。
 T2 增至 27 例（图例两分支 + `grid.bottom` 与缺省值）；T3 改为点页签进出明细，并断 14 张图的
 `data-legend` 一起翻（只翻一张说明 prop 没发到面板）。
+
+### 5.5 2026-10-22 组内曲线逐槽开关（已实施）
+
+§5.4 的总开关只管「图例那行画不画」；本轮补另一半 —— **每个图例项各一个开关**。用户点定两条：
+开关粒度 = **按图例项 1/2/3/4**（不是每张子图各一个图例开关）；**导出不跟**（xlsx 仍画全部曲线）。
+
+控件放在筛选区第二行「组内曲线」，chip 上直接画本槽用的线型（实线 / 虚线 / 点线 / 点划线），
+不再只写数字。chip 个数 = `slotCount(doc)` = 各组成员数的最大值（解析器不封顶，同名出现 6 次就有第 6 槽），
+所以不是写死的四颗。`均值` 不在这排里 —— 它已有「显示均值」，一个状态两个控件迟早漂。
+
+三条语义裁定（各有 T2 断言，都是会写错的地方）：
+
+1. **线型按原槽位固定**：隐藏槽 0 后 `_2/_3/_4` 仍是虚线/点线/点划，不顶位换成实线。
+   实现上先带原始 `within` 下标再过滤；T2 那条断言就是挡「改用过滤后的下标」。
+2. **x 轴上界按全组算**：`groupCodeMax` 不看槽位可见性 ⇒ 隐藏最长那条时轴不收缩，
+   14 张图在勾选过程中保持可横向对齐。
+3. **明细表与 xlsx 都不跟**：与既有「勾选只影响画廊」同口径。⇒ 导出与页面**有意分歧**，
+   必须可见提示：chip 行尾常驻「这里只关图表，明细表与导出的 xlsx 仍含全部曲线」，
+   用户指南 §3 那句「导出的是当前所见」也改成明确区分「测试项跟、组内曲线不跟」。
+
+边界口径一并定死：`visibleSlots` **缺省 = 全显**（旧调用方零改动），传 `[]` = 全关（只剩轴，不报错、不设保护）；
+两种写法在 T2 各钉一条，防实现里 `slots?.includes(i)` 与 `!slots || includes(i)` 混用。
+
+契约变化：`WeightGroupChips.vue` → `WeightFilterChips.vue`（现在渲染两行筛选）；chip 类名分
+`.weight-chip--group` / `.weight-chip--slot`（裸 `.weight-chip` 会同时命中两排，T3 的计数断言必须带修饰类）；
+图表卡新增 **`data-series="画出/总数"`**（如 `3/4`），卡头系列数同口径。
+store 加 `visibleSlots`（`setDoc` 按 `slotCount` 全开、`reset` 归零，仍不落 localStorage）。
 
 ## 6. 配色（本稿唯一一处与源稿的实质冲突，附实测依据）
 
@@ -351,7 +378,7 @@ T2 增至 27 例（图例两分支 + `grid.bottom` 与缺省值）；T3 改为�
 ### 新增（前端）
 
 - `frontend/src/pages/weight/WeightPlotPage.vue`
-- `frontend/src/pages/weight/components/WeightChartPanel.vue`、`WeightGroupChips.vue`、`WeightSeriesTable.vue`
+- `frontend/src/pages/weight/components/WeightChartPanel.vue`、`WeightFilterChips.vue`（原名 `WeightGroupChips.vue`，§5.5）、`WeightSeriesTable.vue`
 - `frontend/src/pages/weight/components/WeightWorkspaceCard.vue`、`WeightTableView.vue`（原 `WeightSeriesDrawer.vue`，§5.4）、`WeightEmptyState.vue`、`WeightActionButton.vue`（2026-10-20 版式重设计）
 - `frontend/src/pages/weight/weightChartOption.ts`（纯模块，T2 目标）
 - `frontend/src/pages/weight/composables/useWeightPlot.ts`
@@ -425,11 +452,12 @@ T2 增至 27 例（图例两分支 + `grid.bottom` 与缺省值）；T3 改为�
   且报错类用例各自断到行号；
 - `cd frontend && npx vitest run` 通过，`weightChartOption.spec.ts` 断的是每组图的系列集合、
   独立 x 上限、圆点与均值标签、5 位小数与短图例、图例总开关的两分支（`legend.show` 与
-  `grid.bottom` 40/16），而非「渲染没报错」（§5.4）；
+  `grid.bottom` 40/16）、逐槽开关的三条裁定（线型不顶位 / x 上界不收缩 / 缺省全显与 `[]` 全关分开钉），
+  而非「渲染没报错」（§5.4、§5.5）；
 - `npm run build`（含 `vue-tsc -b`）+ `npm run lint:e2e` 通过；
 - `frontend/e2e/weight/weight-plot.spec.ts`（@p1）通过：14 张图、整组开关不删表行、
-  均值 switch 70↔56、图例总开关 14 张齐翻、明细页签进出、全选/清空、导出下载、坏文件保留现图；
-  字体与夜间主题回归同批绿；
+  均值 switch 70↔56、图例总开关 14 张齐翻、逐槽开关 14 张卡 `data-series` 齐翻且明细仍 70 行、
+  明细页签进出、全选/清空、导出下载、坏文件保留现图；字体与夜间主题回归同批绿；
 - `node scripts/e2e_pool.mjs --slots=4` 全量池绿，且跑完端口释放、无孤儿 `runserver`；
 - `node tasks/cvd_verify.mjs` 对最终选定的组间基色方案跑过（或明确停在 §6 第 1、2 条不引入新色板）；
 - `git log --diff-filter=A --name-only origin/master..HEAD | grep -E '^Data/|Trim_Weight'` **为空**；

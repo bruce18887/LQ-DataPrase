@@ -52,6 +52,10 @@ export interface BuildOptions {
   /** 图例总开关（页面级）：只决定底部那行 `1/2/3/4/均值` 画不画，不影响任何曲线。
    *  可选且缺省为显示 —— 关掉时把图例占的底部留白一并让给画布，所以缺省值不能翻成隐藏。 */
   showLegend?: boolean
+  /** 组内槽位（图例项 1/2/3/4）的可见集合，**按原始组内下标**判定。
+   *  缺省 = 全显（旧调用方零改动）；传 `[]` = 全关（只剩轴，均值另说）。
+   *  线型与组色都跟着原下标走 ⇒ 隐藏槽 0 后 `_2/_3/_4` 仍是虚线/点线/点划，不顶位换型。 */
+  visibleSlots?: number[]
   /** 当前主题的 8 色板，即 `echarts-theme.ts` 的 `colors.seriesColors`。 */
   colors: string[]
   /** 均值线色，由调用方给（Task 8 传 `colors.textColor`）。 */
@@ -106,6 +110,12 @@ export function groupColor(colors: string[], groupIndex: number): string {
 export function groupCodeMax(group: WeightGroupDto): number {
   const longest = Math.max(0, ...group.series.map((s) => s.values.length))
   return Math.max(longest - 1, 0)
+}
+
+/** 整份文档的组内槽位数 = 各组成员数的最大值（解析器不封顶：同名出现 6 次就有第 6 槽）。
+ *  「组内曲线」那排 chip 的个数由它决定，别按「一组四条」写死。 */
+export function slotCount(doc: WeightDocDto): number {
+  return doc.groups.reduce((m, g) => Math.max(m, g.series.length), 0)
 }
 
 /** `[code, value]`：code 就是点上标，长度只到该系列自己的长度（绝不补到组最长）。 */
@@ -164,11 +174,15 @@ function lineSeries(
 
 export function buildWeightOption(group: WeightGroupDto, o: BuildOptions): EChartsOption {
   const color = groupColor(o.colors, group.index)
-  const series = group.series.map((s, within) => lineSeries(s.name, s.values, {
-    type: DASH_BY_WITHIN_GROUP[within % DASH_BY_WITHIN_GROUP.length],
-    width: LINE_WIDTH,
-    color,
-  }))
+  // 先带上原始组内下标再过滤：线型/颜色按下标取，隐藏任一槽都不会让剩下的顶位换型。
+  const series = group.series
+    .map((s, within) => ({ s, within }))
+    .filter(({ within }) => o.visibleSlots === undefined || o.visibleSlots.includes(within))
+    .map(({ s, within }) => lineSeries(s.name, s.values, {
+      type: DASH_BY_WITHIN_GROUP[within % DASH_BY_WITHIN_GROUP.length],
+      width: LINE_WIDTH,
+      color,
+    }))
   // 关掉均值就是不加这一条（不是「加了再藏」）：spec §5.2「按可见组重建 series」。
   if (o.showMean) {
     series.push(lineSeries(group.mean.name, group.mean.values, {
@@ -212,7 +226,8 @@ export function buildWeightOption(group: WeightGroupDto, o: BuildOptions): EChar
     // 右侧 34 给最右点的均值标签留位（14 在 609px 卡宽下会把末位标签裁掉）。
     // bottom 40 是给底部图例行留的（containLabel 已把轴标签算进网格），图例隐藏就收回到 16。
     grid: { left: 8, right: 34, top: 20, bottom: showLegend ? 40 : 16, containLabel: true },
-    // x 只到本组最长系列：每个测试项独立缩放，短组不会被最长组拖成一根竖线。
+    // x 只到**全组**最长系列（不看槽位可见性）：每个测试项独立缩放，短组不会被最长组拖成一根竖线；
+    // 隐藏最长那条时轴也不收缩，14 张图在勾选过程中保持可横向对齐。
     xAxis: [{ ...axis(), min: 0, max: groupCodeMax(group), splitLine: { show: false } }],
     yAxis: [{ ...axis(), scale: true, axisLine: { show: false } }],
     series,

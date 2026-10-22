@@ -26,7 +26,8 @@ const rowCount = computed(() =>
     <WeightSeriesTable :doc="doc" :show-mean="showMean" :colors="colors" />
 
     <footer class="table-note">
-      表格始终显示全部测试项的数值；「测试项」里的勾选只影响图表画廊，不影响这里的行。均值行随「显示均值」开关增减。
+      表格始终列出全部测试项的全部曲线：「测试项」与「组内曲线」的勾选只影响图表画廊，不删这里的行。
+      均值行随「显示均值」开关增减。
     </footer>
   </section>
 </template>
