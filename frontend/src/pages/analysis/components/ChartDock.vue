@@ -110,6 +110,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import ChartPanel from './ChartPanel.vue'
 import { useChartDock, pctFromPx, DOCK_BODY_MIN_H, DOCK_BODY_MAX_H, type ChartKey } from '../composables/useChartDock'
+import { MIN_ROW_H, defaultRowPcts, effBodyH, rowBars } from '../composables/dockGeometry'
 
 const props = defineProps<{ activeKeys: ChartKey[] }>()
 const emit = defineEmits<{ (e: 'close', key: ChartKey): void }>()
@@ -147,11 +148,13 @@ const displayRows = computed<ChartKey[][]>(() => {
   return visibleRows.value
 })
 
-/* ── 整体高度：按行数自适应，底部横条可覆盖（bodyH 持久化于布局记忆）── */
-// 行数越多默认越高（2 行→920、4 图 2×2 每行 ~460，Y 轴初始不被挤没）；null=自动
-// 每行默认 460px（序列图/QQ/箱线的 Y 轴初始不被挤没），单行下限 640、总上限 1400
-const autoH = computed(() => Math.max(640, Math.min(displayRows.value.length * 460, 1400)))
-const effH = computed(() => bodyH.value ?? autoH.value)
+/* ── 整体高度：行有像素目标，容器由目标之和反推；底部横条可覆盖（bodyH 持久化）──
+   旧实现是「容器 = max(640, min(行数×460, 1400))」+ 占比模板 [58, 42/(n−1)]，
+   辅助行随图数增多被 42% 持续摊薄（3 行 286px、4 行 192px，已低于自家 200px 拖拽
+   下限），且 bodyH 一旦拖出就固定，再加图只是重新切分同一坨像素。现在每行有目标
+   高度、容器随行数线性增长（页面滚动而非挤压），并保留 MIN_ROW_H 渲染兜底。
+   兜底只作用于渲染期，不回写 bodyH —— 用户拖出的整体高度不得被悄悄改掉。 */
+const effH = computed(() => effBodyH(bodyH.value, displayRows.value, rowPcts.value))
 
 const heightResize = ref(false)
 function onHeightDown(ev: PointerEvent) {
@@ -181,13 +184,12 @@ function resetHeight() {
   dock.setBodyH(null)
 }
 
-// 行高：占比% 减去「行间拖拽条」占位（rowbar 10px × (行数-1)），使各行 + 分隔条
+// 行高：占比% 减去「行间拖拽条」占位（ROWBAR_H × (行数−1)），使各行 + 分隔条
 // 正好铺满 dock body、且随 body 变高按占比等比缩放。flex-grow 置 0 以免被均分覆盖。
-const ROWBAR_H = 10
 const rowHeightCss = (ri: number) => {
-  const pct = Number.isFinite(rowPcts.value[ri]) ? rowPcts.value[ri] : 100 / displayRows.value.length
-  const bars = Math.max(0, displayRows.value.length - 1) * ROWBAR_H
-  return `calc(${pct}% - ${(bars * pct) / 100}px)`
+  const fallback = defaultRowPcts(displayRows.value)[ri] ?? 100
+  const pct = Number.isFinite(rowPcts.value[ri]) ? rowPcts.value[ri] : fallback
+  return `calc(${pct}% - ${(rowBars(displayRows.value.length) * pct) / 100}px)`
 }
 
 const colPctStr = (ri: number, ci: number) => {
@@ -195,7 +197,8 @@ const colPctStr = (ri: number, ci: number) => {
   return Number.isFinite(c) ? `${c}%` : undefined
 }
 
-// 行间自定义拖拽条：按住上下拖，把两行的高度占比此消彼长（受单行最小 200px 约束）
+// 行间自定义拖拽条：按住上下拖，把两行的高度占比此消彼长（受单行最低 MIN_ROW_H 约束，
+// 与渲染期兜底 effBodyH 同一个常量，不再各写一份 200）
 const rowResize = ref(false)
 function onRowDown(ri: number, ev: PointerEvent) {
   if (ev.button !== 0 || maxKey.value) return
@@ -204,7 +207,7 @@ function onRowDown(ri: number, ev: PointerEvent) {
   const a0 = rowPcts.value[ri] ?? 50
   const b0 = rowPcts.value[ri + 1] ?? 50
   const bodyPx = effH.value
-  const minPct = (200 / bodyPx) * 100
+  const minPct = (MIN_ROW_H / bodyPx) * 100
   rowResize.value = true
   document.body.style.userSelect = 'none'
   const onMove = (e: PointerEvent) => {
