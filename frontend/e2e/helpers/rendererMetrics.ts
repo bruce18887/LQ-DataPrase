@@ -6,11 +6,22 @@ export interface MetricRequest {
   durationMs: number
   transferMiB: number
 }
+/** 一条 long task 的原始窗口（起点 = 导航时间轴上的 ms，与 `MetricRequest.responseEndMs` 同轴） */
+export interface MetricLongTask {
+  startMs: number
+  durMs: number
+}
 export interface MetricRow {
   label: string
   jsHeapUsedMiB: number
   longTasksMsTotal: number
   longestTaskMs: number
+  /**
+   * 原始 `{startMs, durMs}` 列表 —— 上面两个聚合量不能替代它。
+   * spec §5 Q3 的判据是「`responseEnd` vs 同窗 longtask 区间」，只有带时间戳的区间才判得出来；
+   * `requests[].durationMs` 是**网络 + 服务端**耗时，不是「JS 处理完」，两者不能互相推算。
+   */
+  longTasks: MetricLongTask[]
   requests: MetricRequest[]
 }
 export interface RendererMetrics {
@@ -25,9 +36,10 @@ const HEAVY = /\/(browse|summary)\//
  * 三条通路都不依赖产品代码里的任何埋点。
  *
  * ⚠ 两个口径必须知道再读数：
- * - `longTasksMsTotal` / `longestTaskMs` 与 `requests` 都是**自上次整页导航起的累计量**
+ * - `longTasksMsTotal` / `longestTaskMs` / `longTasks` 与 `requests` 都是**自上次整页导航起的累计量**
  *   （`addInitScript` 每次导航重装 → 累计归零；同页内开标签不导航 → 一路累加）。
- *   要的是「某个形状贡献了多少」，取相邻两次 snapshot 的差。
+ *   要的是「某个形状贡献了多少」，取相邻两次 snapshot 的差；`longTasks` 要按
+ *   `startMs` 落在哪个 snapshot 窗口里筛，别把累计列表当单形状列表读。
  * - 堆是 `Runtime.getHeapUsage` 的 usedSize，**不是** RSS，也不等于 Chromium 的提交内存；
  *   每次取样前先 `HeapProfiler.collectGarbage`，所以读到的 = 「GC 之后仍驻留」的那部分。
  *
@@ -86,6 +98,9 @@ export async function startRendererMetrics(page: Page): Promise<RendererMetrics>
         jsHeapUsedMiB: +heap.toFixed(1),
         longTasksMsTotal: Math.round(lt.reduce((a: number, x: any) => a + x.dur, 0)),
         longestTaskMs: Math.round(lt.reduce((a: number, x: any) => Math.max(a, x.dur), 0)),
+        // 时间戳留在产物里（Q3 要拿它和 requests[].responseEndMs 对窗口）；
+        // 这两个聚合量继续留着，因为它们就是 §5 Q1/Q2 表格里读的那两列。
+        longTasks: lt.map((x: any) => ({ startMs: Math.round(x.start), durMs: Math.round(x.dur) })),
         requests: reqs,
       }
     },
