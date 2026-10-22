@@ -1,20 +1,27 @@
 /**
  * 单文件分析图表账号级记忆（/auth/settings/ 的 analysis_chart_* 两字段）。
  * ────────────────────────────────────────────────
- * - load() 单飞：分析页多个消费方（useChartDock / SingleParamTab）共享一次拉取。
+ * - 取数走 stores/userSettings（Task 6b）：本模块**不再**自己 GET，分析页多个消费方
+ *   （useChartDock / SingleParamTab）共享的是 store 的单飞 + 自己这份已解析结果的 memo。
  * - save() 防抖合并：layout（useChartDock 各 persist 点）与 toggles（勾选 watch）
  *   各自上报，800ms 内合并为一次部分 PUT；pagehide 立即冲刷防丢最后一次改动。
+ *   两条 PUT 通道都经 store（save / saveKeepalive），raw 随之更新，不再有「模块知道但
+ *   store 是旧的」这种分叉。
  * - 开关三态：null=settings 未返回或拉取失败（localStorage 照写、后端不写——
  *   与「用户关开关」区分开，避免一次网络抖动被当成主动关闭而清掉本机布局）/
  *   true=正常同步 / false=用户已关闭（两层都阻断）。
+ *   口径搬自今天的 catch 分支，判据换成 `store.raw === null`：ensure() 失败会把它置 null，
+ *   之后整页生命周期不再重取（防请求风暴，见 store 文件头）。
+ *   ⚠ 一处收紧：200 但响应体为 null 这种形状（后端 serializer 不会出现，纯防御）今天算
+ *   「成功且视为开」，现在算「拿不到设置」⇒ 本会话不写后端、只写本机。
  * - 结构校验在本模块；后端哑 JSON 存储同 export_filename_templates 模式。
- * - 登录/登出必须调 resetChartMemoryCache()（auth store 已接），否则 SPA 内
- *   换账号会复用上一账号的设置缓存。
+ * - 登录/登出必须调 resetChartMemoryCache()（auth store 已接）：它清的是本模块自己的
+ *   三态/待冲刷内容/memo（store.reset() 管不到），store 侧由 auth store 另调一次。
  * 放 src/composables 而非 pages/analysis/composables：设置页恢复按钮也复用。
  * 注意：与 useChartDock 运行时互相 import（ESM 活绑定，调用时解析安全），
  * 任何一侧都不得在模块顶层调用对方的导出。
  */
-import { authApi } from '../api/auth'
+import { useUserSettingsStore } from '../stores/userSettings'
 import { safeRemoveItem } from '../utils/safeStorage'
 import { DOCK_LAYOUT_STORAGE_KEY, isValidLayout, type DockLayout } from '../pages/analysis/composables/useChartDock'
 
@@ -28,7 +35,8 @@ export interface ChartMemoryLoadResult {
   state: ChartMemorySnapshot
 }
 
-let settingsPromise: Promise<ChartMemoryLoadResult> | null = null
+/** load() 结果的 memo：请求的单飞在 store 里，这里只是「同一份解析结果只算一次」。 */
+let loadPromise: Promise<ChartMemoryLoadResult> | null = null
 let memoryEnabled: boolean | null = null
 let latest: { layout?: DockLayout; toggles?: ChartToggles } | null = null
 let timer: ReturnType<typeof setTimeout> | null = null
@@ -58,39 +66,37 @@ function parseState(raw: unknown): ChartMemorySnapshot {
 }
 
 export function loadChartMemory(): Promise<ChartMemoryLoadResult> {
-  if (!settingsPromise) {
-    settingsPromise = authApi
-      .getSettings()
-      .then(({ data }) => {
-        const d = (data ?? {}) as Record<string, unknown>
-        memoryEnabled = d.analysis_chart_memory !== false
-        const state = parseState(d.analysis_chart_state)
-        // 快速 F5 会丢掉防抖窗口里的勾选上报（pagehide 请求在 unload 中被浏览器
-        // 取消），服务端可能只剩 layout 没有 toggles。布局里的 key 就是「当时勾着」
-        // 的事实记录，由它反推勾选——否则勾选缺省全 false → active 收缩 →
-        // reconcile 把已存布局裁剪掉（两层同时降级，之后每次刷新都复现）。
-        if (memoryEnabled && state.layout && !state.toggles) {
-          const keys = new Set(state.layout.rows.flat())
-          state.toggles = {
-            hist: keys.has('hist'),
-            serial: keys.has('serial'),
-            qq: keys.has('qq'),
-            box: keys.has('box'),
-          }
-        }
-        if (memoryEnabled && latest) scheduleFlush()
-        else if (memoryEnabled === false) latest = null
-        return { memoryEnabled, fetchFailed: false, state }
-      })
-      .catch(() => {
-        // 拉取失败 ≠ 用户关开关：后端本会话不写；本机门控保持开启，
-        // 避免下游「关=复位布局」分支把一次网络抖动误清成默认布局
+  if (!loadPromise) {
+    const store = useUserSettingsStore()
+    loadPromise = store.ensure().then(() => {
+      // store.raw === null ⇒ 那次 GET 失败（或被 reset 后尚未重取）：与今天 catch 分支同口径
+      if (store.raw === null) {
         memoryEnabled = null
         latest = null
         return { memoryEnabled, fetchFailed: true, state: { layout: null, toggles: null } }
-      })
+      }
+      const d = store.raw as Record<string, unknown>
+      memoryEnabled = d.analysis_chart_memory !== false
+      const state = parseState(d.analysis_chart_state)
+      // 快速 F5 会丢掉防抖窗口里的勾选上报（pagehide 请求在 unload 中被浏览器
+      // 取消），服务端可能只剩 layout 没有 toggles。布局里的 key 就是「当时勾着」
+      // 的事实记录，由它反推勾选——否则勾选缺省全 false → active 收缩 →
+      // reconcile 把已存布局裁剪掉（两层同时降级，之后每次刷新都复现）。
+      if (memoryEnabled && state.layout && !state.toggles) {
+        const keys = new Set(state.layout.rows.flat())
+        state.toggles = {
+          hist: keys.has('hist'),
+          serial: keys.has('serial'),
+          qq: keys.has('qq'),
+          box: keys.has('box'),
+        }
+      }
+      if (memoryEnabled && latest) scheduleFlush()
+      else if (memoryEnabled === false) latest = null
+      return { memoryEnabled, fetchFailed: false, state }
+    })
   }
-  return settingsPromise
+  return loadPromise
 }
 
 function scheduleFlush() {
@@ -103,7 +109,7 @@ function flush() {
   if (memoryEnabled !== true || !latest) return
   const payload = latest
   latest = null
-  authApi.updateSettings({ analysis_chart_state: { ...payload } }).catch(() => {
+  useUserSettingsStore().save({ analysis_chart_state: { ...payload } }).catch(() => {
     /* 后台静默同步：失败不打扰用户 */
   })
 }
@@ -125,7 +131,7 @@ export async function clearChartMemoryState(opts: { disableMemory?: boolean } = 
   safeRemoveItem(DOCK_LAYOUT_STORAGE_KEY)
   if (opts.disableMemory) memoryEnabled = false
   try {
-    await authApi.updateSettings({ analysis_chart_state: {} })
+    await useUserSettingsStore().save({ analysis_chart_state: {} })
     return true
   } catch {
     return false
@@ -137,9 +143,14 @@ export function setChartMemoryEnabled(enabled: boolean) {
   memoryEnabled = enabled
 }
 
-/** 登录/登出/账号切换时重置全部模块态（auth store 的 reset*Cache 同款先例） */
+/**
+ * 登录/登出/账号切换时重置本模块态。⚠ 它**不**负责 store —— store.reset() 由
+ * stores/auth.ts 的 resetUserSettingsCaches() 另调一次；本模块留下的三样
+ * （memoryEnabled 三态 / 待冲刷的 latest / loadPromise memo）都不是账号设置本身，
+ * 是分析页自己的运行时状态，store 治不到。
+ */
 export function resetChartMemoryCache() {
-  settingsPromise = null
+  loadPromise = null
   memoryEnabled = null
   latest = null
   if (timer) {
@@ -161,6 +172,6 @@ if (typeof document !== 'undefined') {
     if (memoryEnabled !== true || !latest) return
     const payload = latest
     latest = null
-    authApi.updateSettingsKeepalive({ analysis_chart_state: { ...payload } })
+    useUserSettingsStore().saveKeepalive({ analysis_chart_state: { ...payload } })
   })
 }

@@ -922,3 +922,38 @@ test.describe('进数据管理：导航期全量文件列表只拉一次', { tag
     expect(hits, `一次导航到 /data 发出了 ${hits.length} 条 page_size=9999，应为 1 条`).toHaveLength(1)
   })
 })
+
+/**
+ * `/auth/settings/` 单一 store 的计数判据（Task 6b Step 7）—— 与上面那条同档、同形：
+ * `scripts/affected-rules.mjs:35` 把 `frontend/src/pages/data/` 映射到 `['data','exports']`，
+ * 本批被保护的站点 `DataBrowserAgGrid.vue`（onMounted 里那次裸 GET）正落在这个前缀下，
+ * 判据放 data 档才命中快门禁。
+ *
+ * 缺陷形态（2026-10-22 生产实测，真实用户机）：一次导航 2–6 条 GET /auth/settings/
+ * —— 6 个互不相干的模块各自单飞（四个 scalar util + useChartMemory + 本网格）。
+ * 收敛后**唯一**发起点是 stores/userSettings.ts:53，由路由守卫的
+ * `await ensureChartRenderer()`（router/index.ts:178）在任何页面组件挂载前取一次；
+ * 网格的 onMounted 只 `ensure()`（已结算 ⇒ 0 请求）后读 `store.raw`。
+ *
+ * 口径：计数器必须装在 goto **之前**（lessons R2④：响应早于注册就永远漏计）；
+ * 谓词只算 GET（PUT 是保存/防抖冲刷，条数与「导航期读设置」无关，同仓
+ * `e2e/analysis/dock-resize.spec.ts:181` 也是按 method 分开的）。多出来的必然是某个
+ * 仍在自取的模块 ⇒ 顺着 initiator 找它，**不许**把断言改成 toBeLessThanOrEqual(N)。
+ */
+test.describe('进数据管理：账号设置只拉一次', { tag: ['@p1', '@data'] }, () => {
+  test('@p1 进数据管理页只发一次 GET /auth/settings/', async ({ page }) => {
+    const hits: string[] = []
+    page.on('request', (r) => {
+      if (r.method() === 'GET' && /\/auth\/settings\//.test(r.url())) hits.push(r.url())
+    })
+
+    await gotoApp(page, '/data')
+    await expect(page.locator('.content-section:visible .el-table .el-table__row').first())
+      .toBeVisible({ timeout: 30_000 })
+    // 给「稍后才补发」的站点（网格 onMounted 那次 ensure）留时间：它若还在自取，
+    // 这里就会计到第 2 条 —— 等待只让判据更严，不会更松。
+    await page.waitForTimeout(2_000)
+
+    expect(hits, `一次导航到 /data 发出了 ${hits.length} 条 GET /auth/settings/，应为 1 条`).toHaveLength(1)
+  })
+})

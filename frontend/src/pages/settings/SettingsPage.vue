@@ -27,21 +27,27 @@
     </el-tabs>
 
     <div class="settings-actions">
-      <el-button type="primary" size="large" @click="saveSettings">
+      <!-- 脏追踪（Task 6b）：没有改动就不发 PUT，按钮同时置灰。
+           disabled 视觉走 Element Plus 自己的 --el-button-disabled-*（本仓 light/night
+           两块都定义了 --el-color-primary-light-5/7，见 styles/element-plus-theme.css:35-38
+           与 :189-192），提示文案复用已主题化的 .text-secondary ⇒ 不加一行 CSS。 -->
+      <el-button type="primary" size="large" :disabled="!hasChanges" @click="saveSettings">
         💾 保存设置
       </el-button>
       <el-button size="large" @click="resetDefaults">
         🔄 恢复默认
       </el-button>
+      <span v-if="!hasChanges" class="text-secondary">没有需要保存的改动</span>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { authApi } from '../../api/auth'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { setChartRenderer } from '../../utils/echarts-theme'
+import { useUserSettingsStore } from '../../stores/userSettings'
+import type { UserSettings } from '../../stores/userSettings'
 import type { ExportTypeKey, SettingsData } from '../../types'
 import { EXPORT_TEMPLATE_META, EXPORT_TEMPLATE_KEYS } from '../../constants/export-templates'
 import ChartSettingsForm from './components/ChartSettingsForm.vue'
@@ -84,42 +90,78 @@ const defaults: SettingsData = {
 
 const activeTab = ref('display')
 const settings = ref<SettingsData>({ ...defaults })
+const store = useUserSettingsStore()
 
-async function loadSettings() {
+/**
+ * 载入时的快照。`saveSettings` 只 PUT 与它不同的键（脏追踪）—— 今天生产实测一次会话
+ * 32 次整对象 PUT（11 个键全量 spread），改后一次点击只发真正改过的那几个。
+ * 必须是**深拷贝**：各子表单是就地改 `settings` 对象的属性（含数组/对象键），
+ * 与 merged 共享引用的话「改动」会被同时写进快照，脏判定就永远不成立。
+ */
+let loaded: SettingsData = { ...defaults }
+
+/** 值比较：基本类型比身份，数组/对象比 JSON（同一形状来源固定，顺序差异只会多 PUT 一个键，不会漏） */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true
   try {
-    const { data } = await authApi.getSettings()
-    const merged = { ...defaults }
-    if (data && typeof data === 'object') {
-      Object.keys(defaults).forEach((key) => {
-        if (key in data) {
-          ;(merged as Record<string, unknown>)[key] = data[key]
-        }
-      })
-    }
-    // 导出文件名模板逐 key 合并：后端返回的完整表缺 key 时补默认
-    const remoteTemplates = (data as Record<string, unknown>)?.export_filename_templates
-    if (remoteTemplates && typeof remoteTemplates === 'object') {
-      const mergedTemplates = { ...defaultTemplates() }
-      EXPORT_TEMPLATE_KEYS.forEach((key) => {
-        const v = (remoteTemplates as Record<string, unknown>)[key]
-        if (typeof v === 'string') mergedTemplates[key] = v
-      })
-      merged.export_filename_templates = mergedTemplates
-    }
-    settings.value = merged as SettingsData
-    setChartRenderer(merged.chart_renderer as 'svg' | 'canvas')
-    // 导出超时同步到模块缓存，使导出调用点无需访问本页即可使用最新值
-    setExportTimeoutSec(merged.export_timeout)
-    // SFTP 下载超时同步到模块缓存（SFTP 浏览器读取此值）
-    setSftpTimeoutSec(merged.sftp_download_timeout)
+    return JSON.stringify(a) === JSON.stringify(b)
   } catch {
-    // silently fall back to defaults
+    return false
   }
 }
 
+const dirtyKeys = computed<(keyof SettingsData)[]>(() =>
+  (Object.keys(defaults) as (keyof SettingsData)[]).filter((k) => !sameValue(settings.value[k], loaded[k])),
+)
+const hasChanges = computed(() => dirtyKeys.value.length > 0)
+
+function snapshot(v: SettingsData): SettingsData {
+  return JSON.parse(JSON.stringify(v)) as SettingsData
+}
+
+async function loadSettings() {
+  // Task 6b：不再自己 GET。store.ensure() 的单飞通常已被路由守卫的
+  // ensureChartRenderer() 用掉（⇒ 本页 0 请求）；守卫那次失败时 raw=null，
+  // 下面按 defaults 兜底，与今天 catch 分支同形（失败即默认值，不重试）。
+  await store.ensure()
+  const data = store.raw
+  const merged = { ...defaults }
+  if (data && typeof data === 'object') {
+    Object.keys(defaults).forEach((key) => {
+      if (key in data) {
+        ;(merged as Record<string, unknown>)[key] = data[key]
+      }
+    })
+  }
+  // 导出文件名模板逐 key 合并：后端返回的完整表缺 key 时补默认
+  const remoteTemplates = (data as Record<string, unknown> | null)?.export_filename_templates
+  if (remoteTemplates && typeof remoteTemplates === 'object') {
+    const mergedTemplates = { ...defaultTemplates() }
+    EXPORT_TEMPLATE_KEYS.forEach((key) => {
+      const v = (remoteTemplates as Record<string, unknown>)[key]
+      if (typeof v === 'string') mergedTemplates[key] = v
+    })
+    merged.export_filename_templates = mergedTemplates
+  }
+  settings.value = merged as SettingsData
+  loaded = snapshot(merged)
+  setChartRenderer(merged.chart_renderer as 'svg' | 'canvas')
+  // 导出超时同步到模块缓存，使导出调用点无需访问本页即可使用最新值
+  setExportTimeoutSec(merged.export_timeout)
+  // SFTP 下载超时同步到模块缓存（SFTP 浏览器读取此值）
+  setSftpTimeoutSec(merged.sftp_download_timeout)
+}
+
 async function saveSettings() {
+  const dirty = dirtyKeys.value
+  if (dirty.length === 0) return // 无改动：不发 PUT（按钮此时已置灰，这里是第二道闸）
+  const payload = {} as Record<string, unknown>
+  dirty.forEach((k) => { payload[k] = settings.value[k] })
   try {
-    await authApi.updateSettings({ ...settings.value })
+    await store.save(payload as UserSettings)
+    // PUT 的响应就是全量（apps/accounts/views.py:218-225），store.save 已把它写进 raw
+    // 并记为已取过 ⇒ 保存后不会再补一次 GET（R24 0b）。
+    loaded = snapshot(settings.value)
     setChartRenderer(settings.value.chart_renderer)
     setExportTimeoutSec(settings.value.export_timeout)
     setSftpTimeoutSec(settings.value.sftp_download_timeout)

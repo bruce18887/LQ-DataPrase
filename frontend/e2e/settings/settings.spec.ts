@@ -78,6 +78,29 @@ async function snapshotSettings(page: import('@playwright/test').Page): Promise<
 }
 
 test.describe('@p1 系统设置页', { tag: ['@p1', '@settings'] }, () => {
+  /**
+   * Task 6b Step 7 的计数判据（设置页这一侧）。档位选择依据 `scripts/affected-rules.mjs:36`：
+   * `frontend/src/pages/settings/` → `['settings']`，本批被保护的站点正是 SettingsPage.vue
+   * （今天 `:90` 自己裸 GET、`:122` 无脏追踪地整对象 PUT 11 个键 ⇒ 生产实测一次会话 32 次 PUT）。
+   * 收敛后设置页不再自己 GET：守卫那次（router/index.ts:178 → store.ensure()）就是唯一一次，
+   * `loadSettings()` 里的 `ensure()` 命中「已结算」直接返回。
+   * ⚠ 计数器同样必须装在 goto 之前（lessons R2④）；只算 GET，PUT 由下面两条交互用例自证。
+   */
+  test('@p1 进设置页只发一次 GET /auth/settings/（读设置走单一 store）', async ({ page }) => {
+    const hits: string[] = []
+    page.on('request', (r) => {
+      if (r.method() === 'GET' && /\/auth\/settings\//.test(r.url())) hits.push(r.url())
+    })
+
+    await gotoApp(page, '/settings')
+    await expect(page.getByTestId('page-identity')).toContainText('系统设置')
+    await expect(page.getByRole('button', { name: '💾 保存设置' })).toBeVisible()
+    // 留 2s：loadSettings 若仍在自取，第 2 条会在这段时间落地
+    await page.waitForTimeout(2_000)
+
+    expect(hits, `一次导航到 /settings 发出了 ${hits.length} 条 GET /auth/settings/，应为 1 条`).toHaveLength(1)
+  })
+
   test('页面渲染：各标签页与关键设置区块可见', async ({ page }) => {
     await gotoApp(page, '/settings')
 
