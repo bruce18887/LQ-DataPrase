@@ -49,6 +49,12 @@
         <span v-if="failRowCount > 0" style="color: var(--error); margin-left: 12px; font-weight: bold">
           （Fail: {{ failRowCount }} 行<template v-if="siteFilter">，Site {{ siteFilter }} 过滤后</template>）
         </span>
+        <!-- D3 口径变更必须可见：压低过用户设的每页行数就当场写明（class 用双主题各带取值的 .text-secondary，不新增 CSS） -->
+        <span
+          v-if="colCount && blockSize !== settingsPageSize" class="text-secondary"
+          :title="`该文件 ${colCount} 列：每页行数已从 ${settingsPageSize} 降为 ${blockSize} 以控制内存`"
+          style="margin-left: 12px; cursor: help"
+        >每页 {{ blockSize }} 行</span>
       </p>
       <div class="ag-grid-wrapper" :style="gridWrapperStyle" @contextmenu="onGridContextMenu">
         <el-empty v-if="!fileId" description="请先在上方选择文件" :image-size="80">
@@ -66,7 +72,7 @@
           :datasource="datasource"
           :infiniteInitialRowCount="blockSize"
           :cacheBlockSize="blockSize"
-          :maxBlocksInCache="20"
+          :maxBlocksInCache="maxBlocks"
           :overlayNoRowsTemplate="'没有匹配的数据'"
           :defaultColDef="defaultColDef"
           :autoSizeStrategy="autoSizeStrategy"
@@ -78,7 +84,7 @@
           :suppressFieldDotNotation="true"
           :animateRows="true"
           :rowClassRules="rowClassRules"
-          @grid-ready="onGridReady"
+          @grid-ready="handleGridReady"
           @sort-changed="clearRowHighlights"
           @filter-changed="clearRowHighlights"
         />
@@ -135,7 +141,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, onDeactivated } from 'vue'
 import { AgGridVue } from 'ag-grid-vue3'
 import { Refresh, Download, Document } from '@element-plus/icons-vue'
 import { datafilesApi } from '../../api/datafiles'
@@ -156,18 +162,20 @@ import { useBrowserExport } from './composables/useBrowserExport'
 import { useGridContextMenus } from './composables/useGridContextMenus'
 import { useGridHeight } from './composables/useGridHeight'
 import { useHeaderMenu } from './composables/useHeaderMenu'
+import { useIrmSizing } from './composables/useIrmSizing'
 import { useRowHighlight } from './composables/useRowHighlight'
 import { browserCellStyle, buildBrowserColumnDefs, resolveDisplayCols } from './components/browser/browserColumns'
 import { zipBrowserRows } from './components/browser/browserRows'
 
 // Register ag-grid modules (required since v33+)
-import { ModuleRegistry, AllCommunityModule, type IDatasource } from 'ag-grid-community'
+import { ModuleRegistry, AllCommunityModule, type IDatasource, type GridReadyEvent } from 'ag-grid-community'
 ModuleRegistry.registerModules([AllCommunityModule])
 
 const props = defineProps<{
   fileId: number | null
   /** 全量文件列表：横幅的文件下拉要用，导出文件名也从这里按 id 反查 */
   files: DataFile[]
+  active?: boolean // v-show 下隐藏实例仍挂载 ⇒ 靠它决定要不要清块缓存（非激活标签释放）
 }>()
 const emit = defineEmits<{
   'update:fileId': [number | null]
@@ -203,7 +211,12 @@ onUnmounted(() => {
   // siteFilterTimer 也必须清：watcher 随组件作用域自动停止，但已排期的
   // setTimeout 仍会在卸载后触发 reload() → 对已销毁的 grid 发幽灵请求。
   if (siteFilterTimer) clearTimeout(siteFilterTimer)
+  markGridDead() // grid 随组件一起销毁：此后任何 purge/滚动都不许再打到它（AG Grid #26）
 })
+
+// 非激活就交出块缓存：v-show 的隐藏标签/隐藏 section 仍保持挂载（DataManagement.vue:43,57），千列文件的整叠驻留块常驻就是生产那次 oom 的体积
+onDeactivated(() => purgeCacheIfAlive()) // 整页离开走这条（MainLayout.vue:12 keep-alive）
+watch(() => props.active, (v) => { if (v === false) purgeCacheIfAlive() }) // 标签间切换走这条
 
 const allCols = ref<string[]>([])
 const colMeta = ref<Record<string, { unit: string; min: string; max: string }>>({})
@@ -219,11 +232,6 @@ const failRowCount = ref(0)
 
 // 请求竞态防护：快速切换筛选时丢弃过期响应（只丢弃 refs 更新，grid 本身有块版本号守卫）
 let loadSeq = 0
-
-// 服务端分页块大小（IRM cacheBlockSize）= 系统设置 → 表格设置 → 默认每页行数。
-// 初值取设置页同款默认 100；onMounted 拉到账号设置后覆盖（见下方 settings 拉取）。
-const PAGE_SIZE_DEFAULT = 100
-const blockSize = ref(PAGE_SIZE_DEFAULT)
 
 // ── 列直方图 + 表头右键菜单（状态与复制/打开逻辑见 composable） ──
 const {
@@ -269,24 +277,6 @@ onMounted(async () => {
   }
 })
 
-/** 设置页「默认每页行数」的可取范围（= TableSettingsForm 下拉的端点）。 */
-const BLOCK_SIZE_MIN = 50
-const BLOCK_SIZE_MAX = 500
-
-/**
- * 套用账号的每页行数作为 IRM 块大小；越界/非数字忽略，留默认。
- *
- * 块大小变了必须 purge 已缓存块：否则旧块仍按 100 行边界排列，续滚时
- * getRows 用新块大小反推页码 → 页边界错位、行重复或缺失。
- */
-function applyBlockSize(raw: unknown) {
-  const n = Number(raw)
-  if (!Number.isInteger(n) || n < BLOCK_SIZE_MIN || n > BLOCK_SIZE_MAX) return
-  if (n === blockSize.value) return
-  blockSize.value = n
-  gridApi.value?.purgeInfiniteCache()
-}
-
 function isSystemCol(name: string): boolean {
   return systemCols.value.includes(name)
 }
@@ -313,6 +303,16 @@ const {
   handleBodyContextMenu,
   goToFailCell,
 } = useBinCellMenu({ binCol, displayCols })
+
+const {
+  blockSize, settingsPageSize, colCount, maxBlocks, gridAlive,
+  applyBlockSize, purgeCacheIfAlive, markGridAlive, markGridDead,
+} = useIrmSizing({ props, gridApi })
+
+function handleGridReady(e: GridReadyEvent) {
+  onGridReady(e)
+  markGridAlive() // #26 守卫的置位点：只有从这里之后 purge/滚动才允许打这个 api
+}
 
 // ── 行高亮：右键序列号单元格 → 菜单 → 高亮/取消 ──
 const {
@@ -563,8 +563,8 @@ function reload() {
   clearRowHighlights()
   loading.value = true
   loadSeq++ // 新代次：旧在途响应不再更新 refs
-  gridApi.value?.purgeInfiniteCache()
-  gridApi.value?.ensureIndexVisible(0)
+  purgeCacheIfAlive()
+  if (gridAlive.value) gridApi.value?.ensureIndexVisible(0)
 }
 
 /**
