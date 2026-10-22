@@ -1,14 +1,28 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authApi } from '../api/auth'
-import { resetExportTimeoutCache } from '../utils/exportTimeout'
-import { resetSftpTimeoutCache } from '../utils/sftpTimeout'
-import { resetFilenameWrapCache } from '../utils/filenameWrap'
+import { useUserSettingsStore } from './userSettings'
 import { resetChartMemoryCache } from '../composables/useChartMemory'
 import { resetChartDockMemoryState } from '../pages/analysis/composables/useChartDock'
-import { resetChartRendererCache } from '../utils/echarts-theme'
 import { safeGetItem, safeSetItem, safeRemoveItem } from '../utils/safeStorage'
 import type { User } from '../types'
+
+/**
+ * 账号级 /auth/settings/ 缓存的失效点（登录与登出各一次）。
+ * - store.reset() 覆盖四个 scalar 设置（chart_renderer / export_timeout /
+ *   sftp_download_timeout / filename_wrap）——它们自 Task 6a 起由
+ *   stores/userSettings.ts 唯一持有，不再有各自的模块缓存可清。
+ * - resetChartMemoryCache() 暂留：useChartMemory 的私有缓存在 Task 6b 才并进
+ *   store（它自己的分析页防抖/pagehide 生命周期留在原处），现在摘掉调用就是
+ *   给 analysis_chart_memory 留一个跨账号串值的窗口。
+ * - resetChartDockMemoryState() 与本项无关：纯 localStorage 会话态，从不请求
+ *   /auth/settings/（pages/analysis/composables/useChartDock.ts:337），保持原样。
+ */
+function resetUserSettingsCaches(): void {
+  useUserSettingsStore().reset()
+  resetChartMemoryCache()
+  resetChartDockMemoryState()
+}
 
 export const useAuthStore = defineStore('auth', () => {
   // safeGetItem 替代裸 localStorage.getItem：Electron 磁盘满/权限异常时不白屏
@@ -20,12 +34,7 @@ export const useAuthStore = defineStore('auth', () => {
   const isAdmin = computed(() => user.value?.role === 'administrator')
 
   async function login(username: string, password: string) {
-    resetExportTimeoutCache()
-    resetSftpTimeoutCache()
-    resetFilenameWrapCache()
-    resetChartRendererCache()
-    resetChartMemoryCache()
-    resetChartDockMemoryState()
+    resetUserSettingsCaches()
     const { data } = await authApi.login(username, password)
     token.value = data.token
     refreshToken.value = data.refresh
@@ -74,12 +83,7 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null
     safeRemoveItem('access_token')
     safeRemoveItem('refresh_token')
-    resetExportTimeoutCache()
-    resetSftpTimeoutCache()
-    resetFilenameWrapCache()
-    resetChartRendererCache()
-    resetChartMemoryCache()
-    resetChartDockMemoryState()
+    resetUserSettingsCaches()
   }
 
   function logout() {
