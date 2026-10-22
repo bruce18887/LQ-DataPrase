@@ -7,9 +7,19 @@
  * 无副作用，供 DataBrowserAgGrid（Task 4）接入。
  */
 
+/**
+ * 50/500 与 `DataBrowserAgGrid.vue:273-274` 的同名本地常量重复是**刻意的**，别"去重"：
+ * 那边是设置页可取域（TableSettingsForm 下拉端点），这边是内存钳位域，两者语义不同、
+ * 各自独立变化（Task 4 只 import 下面两个函数，不 import 这两个常数）。
+ */
 export const BLOCK_SIZE_MIN = 50
 export const BLOCK_SIZE_MAX = 500
-/** 列数未知时按历史基线宽度处理（142 列，见 docs/reference/perf-baseline-2026-10-17.md） */
+/**
+ * 142 是**窄文件的参考宽度**（历史基线形状，见 docs/reference/perf-baseline-2026-10-17.md），
+ * 只给单测当「窄文件代表」用。**列数未知时预算完全不介入**（`cols()` 返回 0 ⇒ 两个函数各自
+ * 提前返回设置值 / `MAX_BLOCKS`），这里不提供任何按 142 估算的回退 —— 回退会在 `col_count`
+ * 还没加载时静默压低所有文件的分页大小。
+ */
 export const DEFAULT_COL_COUNT = 142
 /** 驻留块数上限：今天 DataBrowserAgGrid 写死的值，窄文件必须保持不变 */
 export const MAX_BLOCKS = 20
