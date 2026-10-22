@@ -2391,3 +2391,60 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   `git diff --stat HEAD -- frontend/` **为空** ⇒ 前端与 HEAD 逐字一致，而我改的是纯后端 Python，
   不可能新增 DOM 节点 ⇒ 该盲点选择器在 HEAD 上就会命中两个元素（CI 刻意不跑 Playwright，所以没人拦）。
   同轮单独定向跑 `--project=P1 --workers=1 e2e/dashboard` 10 例全绿，才是这批改动该看的账。
+
+## 2026-10-21 合并两段近重复分支时，「两边都有」的守卫会在统一版本里双双消失
+
+`/api/v1/analysis/serial_distribution/` 在参数切到 `SW_Bin`（或任何 Bin 测试项）时必 400，
+页面红条「数据列存在重复或格式异常」。根因是 `34d09d1`（2026-10-20，拆巨型函数）把有/无 Site
+两段分组并成 `_group_final_rows`，而旧代码**两个分支各有一行** `if bin_col and bin_col not in cols`
+（`:73` 与 `:99`）——合并后两处一起没了。于是 `param == bin_col` 时
+`group_cols = ['SW_Bin','SW_Bin']` → `df[cols]` 选出两个同名列 → `frame[param]` 是 DataFrame →
+`pd.to_numeric` 只收 1 维，抛 `TypeError: arg must be a list, tuple, 1-d array, or Series`。
+
+**判别点不是「有没有拆函数」**：同一批把 histogram 的分箱区间**纯搬移**成 `resolve_bin_range`，
+守卫一条没丢（逐字核对过）；出事的是**把两段相似代码并成一段**的 `_group_final_rows`。
+要复查的从来不是新写的函数体，而是「合并前两边各自有什么、合并后还剩什么」。
+
+- **响应体字节数是定位「哪个守卫」的硬证据，不用猜**：日志只给 `400 134`，而
+  `JSONRenderer().render(error_response(...).data)` 实测各候选长度为
+  `serial_distribution_failed`=**134** / `param_no_valid_data`=59 / `param_required`=54 /
+  `invalid_chart_config`=96 —— 134 唯一命中，一步锁死分支。DRF 这里是紧凑分隔符 +
+  `ensure_ascii=False`（中文按 UTF-8 3 字节算），所以**别用心算字符数**。
+- **报错文案会自证凶手**：「数据列存在重复」重复的正是本函数自己 `df[cols]` 造出来的同名列。
+  凡是「用户数据脏」类文案，先怀疑**我们自己拼出来的**那个结构，再去要用户的文件。
+- **`except TypeError → 400 + 中文` 是把编程错误藏起来的机器**：500 会带完整 traceback，
+  400 只留一句人话。这条 bug 因此安静活了一整天。兜底 except 至少要 `logger.exception`，
+  否则等于把内部异常降级成用户可见的猜测。
+- **同批补的单测不覆盖被搬走的守卫 = 没补**：`34d09d1` 自带「新增 test/backend 两文件 31 例」，
+  但没有一条把 param 选成 Bin 列——测试数涨了，回归照发。**搬移一个分支时，该分支的每条守卫
+  要落成一条同名用例**，否则守卫消失得无声无息。
+- **对照必须跑旧实现本体**：把 `git show 34d09d1^:...serial_distribution.py` 拷到 `tasks/` 用
+  `importlib` 真跑，才拿到「OLD 对 SW_Bin 返回 100 点 / HEAD 抛 TypeError」的成对证据；
+  凭读代码断言「旧写法应该没事」不算对照。真实文件 `gage_m_S4.csv` 上修复后与 OLD 逐字相同
+  （100 点、fail=0、pass=100、值全 1），且 histogram/cpk/qqplot/boxplot 四个同族服务对 `SW_Bin`
+  本就全 OK —— 与用户日志里「只有这一个端点 400」互相印证。
+
+## 2026-10-22 统一页面外壳时踩的五条：token 身兼两职、skip 冒充绿灯、class 搬上组件根后的特异性打平
+
+- **改共享层之前，先把要占用的 token 的全部消费点按用途计数**：`--bg-2` 在本仓**身兼两职**
+  ——既是页面底色又是「面板/内陷表面」色（`pages/` 下 69 处 / 46 文件，`data/` 独占 51）。
+  PageShell 照抄数据分析页吃 `--bg-2`，那些面板就与框底同色「消失」。实测 `/data` light 有 20 个
+  具名表面同色、`/admin/users` 两张 el-card 与框都是 `rgb(22,33,62)`。
+  ⇒ 共享层选色前先 `grep -rn "background\(-color\)\?: var(--X)" | 按目录计数`，一眼就能看出它是否已被占用。
+- **「全绿」不等于承重：`test.skip(condition)` 会把哨兵变成常绿**：`e2e/analysis/toolbar-sticky.spec.ts`
+  前两条长期以 **skip** 形态混过全量池——根因不是页面短，是 `scrollRoom()` 在 ECharts 异步撑高**之前**
+  读一次就判 `skip(room < 120)`，实测同一份代码第一次读到 0、重试读到 175。而它是「框用 overflow 截住
+  sticky」这种**不报错失效**的唯一哨兵。⇒ 凡主断言外面包着 `test.skip`，报告里必须写清它**实际跑没跑**；
+  判据是池的 `skipped` 计数变化（修后 21→19，正好少那两条），不是「这条用例是绿的」。
+- **把 class 从页面 div 搬到共享组件根上，会把布局规则变成特异性彩票**：`<PageShell class="weight-page">`
+  让 `.weight-page{min-height:0}` 与框自己的 `.dp-page-shell--fill{min-height:100%}` **同特异性打平**，
+  谁赢取决于 Vite 的 CSS 发射顺序；而 `flex:1` 在非 flex 的 `.content-area` 里根本是空操作。
+  ⇒ class 可以留（`admin.spec.ts:12` 这类 e2e scope 依赖它），但**页面侧的布局属性必须清空**，只留
+  框给不了的（`gap`、`> * { flex-shrink }`）。
+- **加 CSS 覆写前先 grep 同名选择器**：我给 UserManagement 加了 `:deep(.el-card){border:none}`，
+  之后才发现该文件 `:388` **本来就有一条**同名规则排在后面，把我那条压成死代码——`borderTopWidth`
+  实测仍是 1px。发现方式不是读代码，是「遍历 `document.styleSheets` 打印真正 `matches()` 的选择器」
+  这个浏览器探针。⇒ 覆写不生效时先证明**哪条规则赢了**，别在错的层继续加 `!important`。
+- **一次性截图 = 一次性验证盲区**：批 1 只截了仪表板「单文件分析」页签就报「双主题核对通过」，
+  而带 el-card 的「批次良率」页签根本没进视野（且 e2e 夹具 `list_batches/` 返回 14 字节空列表，
+  想补测也量不到）。⇒ 多页签页面的「双主题 × 双宽度」要按**页签**乘一遍，不是按页面。

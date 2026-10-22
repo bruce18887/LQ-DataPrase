@@ -132,6 +132,26 @@ class SerialFailCountServiceTests(TestCase):
         self.assertEqual(result['fail_count'], 0)
         self.assertEqual(result['pass_count'], len(_points(result)))
 
+    def test_param_that_is_the_bin_column_plots_final_bin(self):
+        """查看参数**就是** Bin 列（SW_Bin）时不得崩。
+
+        2026-10-21 回归：34d09d1 把有/无 Site 两段分组合并成 _group_final_rows 时
+        丢了旧代码的 `if bin_col and bin_col not in cols` 去重守卫，于是
+        group_cols=['SW_Bin','SW_Bin'] → df[cols] 选出两个同名列 → frame[param]
+        是 DataFrame → pd.to_numeric 抛 TypeError → 视图 except TypeError 回
+        400 serial_distribution_failed（「数据列存在重复或格式异常」——而重复的
+        正是本函数自己造的列）。
+        """
+        result = compute_serial_distribution_data(_build_df(), META, 'SW_Bin', 'RDL', [])
+        # 每颗 die 取最后一行的 bin：serial 2 复测后=1、serial 3 复测后=7
+        self.assertEqual(
+            [_point_by_serial(result, s)[1] for s in (1, 2, 3, 4, 5, 6)],
+            [1, 1, 7, 5, 5, 5])
+        # die 级 fail 判定与查看 KELVIN_VIN 时同口径（同一批最终 bin）
+        self.assertEqual(result['fail_count'], 4)
+        self.assertEqual(result['pass_count'], 2)
+        self.assertEqual(len(_points(result)), 6, '6 颗 die 各一个点，无自重复丢点')
+
 
 META_HEADER = 'CTA8280F\nDevice Name,TEST_DEVICE\nTestFileName,C:\\x\\prog.dll\n'
 
@@ -198,6 +218,22 @@ class SerialFailCountApiTests(TestCase):
         self.assertEqual(by_serial[2], [2, 1.5, 0, 0])
         self.assertEqual(by_serial[3], [3, 5000.0, 1, 2])
         self.assertEqual(by_serial[6], [6, None, 1, 1])
+
+    def test_bin_column_as_param_returns_200_not_400(self):
+        """端点契约：切到 SW_Bin 是合法选择，不是 400。
+
+        钉住用户可见的那条失败路径（页面红条「数据列存在重复或格式异常」）。
+        """
+        resp = self.client.post(
+            '/api/v1/analysis/serial_distribution/',
+            {'file_id': self.datafile.id, 'param': 'SW_Bin'},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        pts = [pt for s in resp.data['series_data'] for pt in s['data']]
+        by_serial = {p[0]: p for p in pts}
+        self.assertEqual(by_serial[3], [3, 7, 1, 0], '复测后的最终 bin 7')
+        self.assertEqual(resp.data['fail_count'], 4)
 
 
 if __name__ == '__main__':
