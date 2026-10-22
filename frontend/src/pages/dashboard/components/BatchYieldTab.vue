@@ -301,12 +301,18 @@ function handleResize() {
 }
 
 onMounted(() => {
-  loadBatches()
+  // 刻意**不**在这里调 `loadBatches()`：本组件位于 `DashboardPage` 之内，而
+  // `MainLayout.vue:12` 用 `<keep-alive :max="10">` 包该页 ⇒ 首次进入 mounted 与 activated
+  // **都**触发，两处各拉一遍就是「进一次仪表板发两条 `GET /batch-report/list_batches/`」
+  //（`api/batch.ts` 裸 `api.get`，无缓存无单飞）。2026-10-22 生产日志每段导航都是 ×2
+  //（06:15:19 / 06:44:01 / 06:45:27 / 06:46:04）。进入即拉统一收进下面的 onActivated。
+  // resize 监听是正当的 mounted-only 副作用（与取数无关），留在这一处。
   window.addEventListener('resize', handleResize)
 })
 
 // keep-alive 页面激活 / 文件变更（SFTP 下载、导入、删除）后刷新批次列表，
 // 否则新下载的批次不会出现在选择器里（DashboardPage 被 keep-alive 缓存）。
+// 这条是本页唯一的「进入即拉」入口（Task 5 口径，同 `DashboardPage.vue` 的 onActivated）。
 onActivated(() => {
   loadBatches()
 })

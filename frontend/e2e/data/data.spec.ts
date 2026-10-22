@@ -878,3 +878,40 @@ test.describe('数据管理 /data 已导入批次展开/折叠', { tag: ['@data'
     await expect(filesArea).toBeHidden({ timeout: 5_000 })
   })
 })
+
+/**
+ * 导航期重复请求去重（Task 5）—— 计数断言必须落在 `data` 档。
+ * `scripts/affected-rules.mjs:35` 把 `frontend/src/pages/data/` 映射到 `['data','exports']`：
+ * 这条判据若放进 `e2e/analysis/`，今后「只改 DataManagement.vue」的那一批快门禁**跑不到它**，
+ * 等于给本页最贵的那条全量请求放了无门禁的口子。
+ *
+ * 缺陷形态（2026-10-22 生产实测，真实用户机）：每次导航到 `/data` 都发出 **2 条**
+ * `GET /files/?page_size=9999`。根因：`MainLayout.vue:12` 用 `<keep-alive :max="10">`
+ * 包所有页面，而 `DataManagement.vue` 在 `onMounted` 与 `onActivated` 里**各调一次**
+ * `loadFiles()`；首次进入两个钩子都会触发 ⇒ 一次导航拉两遍全量列表，
+ * 在后端与渲染进程同时最忙的那几百毫秒里把 JSON 解析开销也翻倍。
+ *
+ * 判据口径（lessons R2④）：计数器必须装在 `goto` **之前**（响应早于注册就永远漏计）。
+ * 发起方唯一性由全仓 grep 保证 —— `frontend/src` 里 `page_size: 9999` 只出现在
+ * `DataManagement.vue:187` 一处；`/browse/?…page_size=99999` 与本正则不同形（`(&|$)`
+ * 卡住位数），`helpers/cleanup.ts` 走 `page.request`（API 上下文，不经 frame，
+ * 不产生 `page` 的 request 事件）。行选择器沿用本文件 :26 的
+ * `.content-section:visible .el-table__row`（默认「文件列表」tab 才可见）。
+ */
+test.describe('进数据管理：导航期全量文件列表只拉一次', { tag: ['@p1', '@data'] }, () => {
+  test('@p1 进数据管理页只发一次全量文件列表', async ({ page }) => {
+    const hits: string[] = []
+    page.on('request', (r) => {
+      if (/\/files\/\?page_size=9999(&|$)/.test(r.url())) hits.push(r.url())
+    })
+
+    await gotoApp(page, '/data')
+    await expect(page.locator('.content-section:visible .el-table__row').first())
+      .toBeVisible({ timeout: 30_000 })
+    // 两条请求在同一帧发出（mounted → activated），2s 足够让第二条落地；
+    // 修好后这里不存在「稍后才补发」的路径，等待只会让判据更严不会更松。
+    await page.waitForTimeout(2_000)
+
+    expect(hits, `一次导航到 /data 发出了 ${hits.length} 条 page_size=9999，应为 1 条`).toHaveLength(1)
+  })
+})

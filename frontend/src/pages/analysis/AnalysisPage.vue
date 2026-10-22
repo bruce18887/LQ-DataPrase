@@ -36,7 +36,7 @@
  * （`stores/analysisTabs.ts`），互不影响 —— 旧结构里页头那一份
  * `selectedFileId` 会让任一 tab 改选择时静默换掉其他 tab 的数据源。
  */
-import { ref, onMounted, onActivated, watch } from 'vue'
+import { ref, onActivated, watch } from 'vue'
 import { datafilesApi } from '../../api/datafiles'
 import { useAnalysisStore } from '../../stores/analysis'
 import SingleParamTab from './components/SingleParamTab.vue'
@@ -49,7 +49,10 @@ const analysisStore = useAnalysisStore()
 const files = ref<any[]>([])
 const activeTab = ref(analysisStore.activeTab)
 
-onMounted(loadFiles)
+// 「进入即拉」只挂 onActivated（同 `DataManagement.vue` 的口径）：本页被
+// `MainLayout.vue:12` 的 `<keep-alive :max="10">` 缓存，首次进入 mounted 与 activated
+// **都**触发 —— 旧写法 `onMounted(loadFiles)` 加上 activated 里那一次，
+// 一次导航发两条 `/files/options/`。刻意不再 onMounted。
 onActivated(async () => {
   // keep-alive 回来时文件列表可能已变（数据管理页新增/删除）：重新拉一次，
   // 各 tab 的 useTabFileParams 会据此校验自己已选文件的有效性

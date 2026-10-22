@@ -143,8 +143,11 @@ function goConnect(): void { router.push({ name: 'SftpBrowser' }) }
 /**
  * `query.root` 是「高级搜索」按钮与目录行右键菜单带进来的目录（Step 5.1/5.2）：
  * 填进 roots，同时留作 `currentPath`，「使用当前目录」按钮才有东西可用。
- * keep-alive 会缓存本页，所以 `onMounted` 之外还要 `onActivated` —— 第二次从浏览器
- * 进来时组件不重新挂载，只靠 onMounted 的话新目录根本不会填进来。
+ * 本页被 `MainLayout.vue:12` 的 `<keep-alive :max="10">` 缓存 ⇒ **首次进入也会**触发
+ * `activated`（旧写法 mounted + activated 各调一次，等于每次进入白跑一遍纯本地状态），
+ * 而第二次从浏览器进来时组件不重新挂载，只靠 mounted 的话新目录根本不会填进来。
+ * ⇒ 这个函数只挂 `onActivated`（Task 5 口径：keep-alive 页的「进入即拉」归 activated）。
+ * 纯本地、无请求，且 `if (!have.includes(raw))` 幂等，重复激活只会跟着新 query 走。
  */
 function applyQueryRoot(): void {
   const raw = typeof route.query.root === 'string' ? route.query.root.trim() : ''
@@ -271,8 +274,12 @@ async function onDeletePreset(id: number): Promise<void> {
   } catch { /* 同上 */ }
 }
 
+// 唯一真重复的是 `applyQueryRoot()`：旧写法 mounted 与 activated 各调一次（纯本地状态，
+// 无请求），按 Task 5 口径收进 `onActivated` 单挂 —— 首次进入 activated 必发，不丢首拉。
+// 下面三条**刻意留在 onMounted**：它们是「本会话读一次」的连接期快照，搬进 onActivated
+// 会把每次进入的 0 条额外请求变成 +3 条（last_visit / presets / 账号设置各一条），
+// 与本任务的目标反向；留在 mounted 时首次进入由 mounted 发、重进不再发，与改前逐字相同。
 onMounted(() => {
-  applyQueryRoot()
   void checkVisit()
   void loadPresets()
   void (async () => {
