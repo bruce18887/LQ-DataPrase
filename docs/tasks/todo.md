@@ -5228,3 +5228,90 @@ scoped 样式，没碰 useZoom、没碰全局 CSS；EP/floating-ui 版本自首�
   本次刻意未动（不在需求范围），如要一并治，改法与规则2 同构。
 - [ ] `HIST_ROW_PX=780` 让直方图行高度恒定 ⇒ 图少时反而变高（单图 640→780、两图 528→780），
   代价是首屏更早开始滚动。已如实报给用户，如嫌过头只调这一个常量。
+
+---
+
+# 任务：桌面端卡顿整改（2026-10-22，用户点定 E→A）
+
+生产机（`C:\Users\bpsemi`）搬来的 `test/logs/{main.log,backend.log}` 定性：**卡顿在渲染进程，不在后端**。
+同一 `GET /summary/?file_id=179`、同一 1,124,780 字节：渲染进程刚重启空闲时 51 ms，7 秒后挂上查看标签
+变成 10,064 ms（后端只 550 ms）；同会话 06:47:30 `Renderer process gone: oom (exitCode=-536870904)`。
+机侧同时报「可用提交内存 7.4GB 低于预算 8.0GB」。
+
+- 设计（实测表 + AG Grid 35.3.0 包体语义核对 + D1–D6 决策）：
+  `docs/superpowers/specs/2026-10-22-desktop-lag-renderer-memory-design.md`
+- 计划（7 任务，E→A）：`docs/superpowers/plans/2026-10-22-renderer-memory-and-request-dedupe.md`
+
+## 阶段闸门
+
+- [x] E：Task 1 探针骨架（`e2e/data/renderer-memory.spec.ts`，`LQDP_PERF_PROBE=1` 才跑）
+- [x] E：Task 2 三形状实测 + 常数反推（窄文件必须仍算出 20 块，否则阈值错）
+- [x] A：Task 3 `blockCap.ts` 纯函数 + vitest（带对照组）
+- [x] A：Task 4 接预算 + `onDeactivated` 释放 + 修 AG Grid #26 + 「降页」可见提示（双主题）
+  - 接线在 `pages/data/composables/useIrmSizing.ts`（.vue 受 600 行上限，实测 598）；
+    块大小的生效路径是响应式 `:cacheBlockSize`（ag-grid 自己 `resetCache`），不是 purge；
+    非激活释放同时挂 `onDeactivated`（整页离开）与 `props.active`（标签间切换，v-show 不触发 deactivated）。
+- [x] A：Task 5 五页 `onMounted`/`onActivated` 去重（外加第 6 处同型 `BatchYieldTab`，裁定 R16）
+- [x] A：Task 6 `/auth/settings/` 单一 store（⚠ 命中 settings 档会被存量红 `export-timeout.spec.ts` 拦 FAIL）
+- [x] 收口：Task 7 探针复跑对照 + `--slots=4` + 后端全套 + baseline/todo/lessons 回填
+
+## 结果（2026-10-23 实测，Task 7 收口）
+
+**整改前后对照**（完整表与来源在 `docs/reference/renderer-memory-baseline-2026-10-22.md` §11）：
+
+| 形状 | 生效 cap / 驻留块数（前 → 后） | Δ(1 块 → 翻满)（前 → 后） | 每格单价（前 → 后） |
+|---|---|---|---|
+| 宽 ETS88 50 行 × 1,728 列 | 20 → **16** | 55.5 → **44.5 MiB**（−19.8%） | 3.38e-5 → 3.43e-5（**+1.6%，没变便宜**） |
+| 窄控制组 STS8200 500 行 × 45 列 | 20 → **20**（cap 不介入） | 21.8 → **21.8 MiB**（逐字相同） | 5.0994e-5 → **5.0994e-5** |
+
+⇒ 本轮省的是**驻留量**（宽文件单表少驻留 4 块 = −345,600 格，单表峰值 149.6 → 138.8 MiB），
+每格成本一个字节都没变便宜 —— 两栏都带当时的 cap，因为「翻 20 块」在 cap 生效后不再等于「驻留 20 块」。
+第 3 行「4 个标签」两栏**不是同一形状**（Task 4 起非激活那份交缓存），176.7 → 119.5 只作 D4 生效的定性证据。
+
+**四个常数**（`frontend/src/pages/data/components/browser/blockCap.ts`）：`RETAIN_MIB_TARGET=48` MiB、
+`mib_per_cell=3.38e-5`、`CELL_RETAIN_BUDGET=1,420,118` 格、`CELL_PER_BLOCK_MAX=355,029` 格；
+窄文件（142 列 @100）`maxBlocksInCache` 仍 = 20，实测也证实窄档 Δ 逐字不变。
+
+**因档位判据而重排的 e2e**：三条「同一次导航只发一条」的计数守卫按 **目录进档**落点，不是按被改的组件落点 ——
+`data.spec.ts`（R15：`pages/data` 映射 data+exports 两档，原先放 analysis 档永远跑不到）、
+analysis 档补一条（R19：`AnalysisPage` 的去重原本无守卫）、dashboard 档补一条（R17：`list_batches`/`/files/options/`）。
+判据表 `scripts/affected-rules.mjs` 未改（改它要另钉 `e2eAffectedDecide.spec.ts`，超本计划边界）。
+
+**修掉的东西**（提交序 `351771d..e997d87`）：块缓存按单元格数封顶、非激活标签释放缓存、同标签换文件重快照身份
+（datasource 改 computed，R11/R14）、`#26` 销毁守卫补 `isDestroyed`（R12）、超宽文件「每页 N 行」可见降页提示、
+6 处 keep-alive 首进双发（R16 含 `BatchYieldTab`）、`/auth/settings/` 发起点 4 → 1 + 世代守卫（R23/R24/R25）。
+
+**门禁（收口档）**：全量池 `node scripts/e2e_pool.mjs --slots=4` → `[pool] 结论 MEASURED` ·
+`复跑判级：真红 1 · 负载抖动 2 · 悬而未决 0`（412 例 / 10.3min / 计划 slot 4 未折叠 / 文件 76 = 树里 spec 数）；
+唯一真红仍是存量 `settings/export-timeout.spec.ts`（独占 slot 复跑仍红，签名与 `:5037-5041`/`:5086-5087` 逐字一致，按 R21 不修不删）。
+后端全套首跑 `Ran 1811 · FAILED (failures=2)` —— 两条都属**本分支搬家造成的哨兵失效**，不是行为回归：
+`test/backend/test_page_size_bounds.py` 用正则扫 `DataBrowserAgGrid.vue` 里的 `PAGE_SIZE_DEFAULT` 与 `BLOCK_SIZE_MIN|MAX`，
+而 Task 4 把这些常数搬进了 `composables/useIrmSizing.ts`（按列数封顶的两个同名常数在 `blockCap.ts`），
+**单文件扫描零命中 ⇒ 空集**（旧写法在搬家后甚至会因空集而"相等"假绿）。已把两条结构用例改成扫**载体并集**、
+且「一个载体都没命中」也判红；复跑该模块 `Ran 9 · OK`，全套复跑结果见提交信息；
+`blockCap.ts` 那条仍指向 `.vue` 的 stale 注释一并纠正。
+
+## 遗留
+
+- [ ] **B 后端载荷**、**C `2026-10-21` 内存治理三批**、**D Electron 日志分级/乱码/轮转**：本轮刻意不做，见上一节。
+- [ ] 存量红 `e2e/settings/export-timeout.spec.ts` 的**处置仍等用户拍**（修 tab 激活判据 or 进快门禁已知红豁免表）；
+      它命中 settings 模块档 ⇒ 任何改 store/util 的批次门禁都不可能 `RESULT: PASS`。
+- [ ] 体验代价：切走的标签切回来要**重新取数**（D4 用 `purgeInfiniteCache` 换内存，深滚位置不保留）。
+- [ ] `docs/user-guide/07-settings.md`（**未入库、只在父检出**）里「默认每页行数」的文案同步**没做**：
+      建议文字已写在 baseline §12 附录，落不落由用户决定（本分支不得写父检出）。
+- [ ] deferred Minor 汇总（台账 `.superpowers/sdd/…/progress.md` 末节在册，逐条要么修要么写明理由）：
+      注释与行号指针 stale 四条（`data.spec.ts:903-906` 举例不成立、`file-list-completeness.spec.ts:127` 只数调用点、
+      `view-data.spec.ts:1506-1509` 仍写 applyBlockSize→purge、`weightChartOption.spec.ts:23/26` 行号漂移）、
+      `UserSettings` 与 `types/index.ts` 同名异构带 index signature（丢键名检查）、
+      sftp 档缺 `last_visit` 计数守卫（R20 留给收口）、`/summary/` 请求数收益无守卫、
+      三条计数守卫继承 401 重放的假红风险（夜跑归因先查 `LQDP_ACCESS_TOKEN_MINUTES`）、
+      Task 4 交的三种请求形态（purge 后回取一块 / pre-flush `ensureIndexVisible(0)` 多一发 page=1 /
+      窄→宽同 tick 两次 `resetCache`）本轮仍未断言。
+- [ ] 生产机侧未复跑：本轮全部数字来自本机浏览器档（`vite preview` + Chromium），
+      Electron 档与生产提交内存压力不在证据范围内（baseline §8 的口径裁定仍生效）。
+
+## 本轮刻意不做（别顺手改）
+
+B 后端 `/browse/` 每页重发 headers+col_meta、`/summary/` 命中仍 clean_data 重序列化；
+C `2026-10-21` 内存治理三批；D Electron 日志把 backend-stderr 一律记 ERROR + GBK 乱码 + 无轮转；
+生产机页面文件偏小属运维。
