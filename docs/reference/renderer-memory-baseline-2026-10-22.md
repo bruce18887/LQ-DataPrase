@@ -15,8 +15,9 @@
 「Task 1 报告」= `.superpowers/sdd/2026-10-22-renderer-memory-and-request-dedupe/task-1-report.md`
 （`.gitignore:206 /.superpowers/`）。
 ⚠ 本文还引 `docs/superpowers/specs/2026-10-22-desktop-lag-renderer-memory-design.md` 与
-`docs/superpowers/plans/2026-10-22-…-dedupe.md`，**这两份截至本任务提交时是未跟踪文件**（`git status` 里是 `??`）
-⇒ 单独 checkout 本文的机器按行号取不到它们，要么收口时把那两份一起入库，要么把 §4/§5/§7 的引用改成落地路径。
+`docs/superpowers/plans/2026-10-22-…-dedupe.md`。**Task 2 提交时那两份是未跟踪文件**（`??`），
+本文当时的写法是「按行号取不到」；Task 7 收口时已把它们随 `docs/` 一起入库（`docs/superpowers/` 本来就是跟踪目录，27 个文件），
+所以 §4/§5/§7 的行号引用现在可寻址。
 
 ## 1. 复跑方式
 
@@ -40,7 +41,7 @@ LQDP_PERF_PROBE=1 LQDP_PROBE_FILE=STS8200_CP LQDP_PROBE_PAGE_SIZE=500 PYTHON_BIN
 |---|---|---|
 | `LQDP_PROBE_FILE` | `ETS88_FT` | 被测文件键（`frontend/e2e/fixtures/test-data.ts:50-68`） |
 | `LQDP_PROBE_PAGE_SIZE` | `50` | 每块行数 = 探针自己钉的账号设置（50..500）。**分母就是它 × 列数** |
-| `LQDP_PROBE_BLOCKS` | `20` | 翻满的块数 = 今天 `DataBrowserAgGrid.vue:69` 写死的 `maxBlocksInCache` |
+| `LQDP_PROBE_BLOCKS` | `20` | 翻满的**请求**块数。整改前 = `DataBrowserAgGrid.vue:69` 写死的 `maxBlocksInCache=20`；Task 4 之后驻留上限是动态的（ETS88@50 = 16，见 §11），**翻 20 块不再等于驻留 20 块** |
 | `LQDP_PROBE_TABS` | `CTA8290D_FT,BUYOFF_FT,CTA8280F_FT` | 标签 2..4 的文件（同一 fileId 开不出两个标签，Task 1 报告 §4.4） |
 
 产物里的 `shape` 段自带分母（`probeKey/rowsPerBlock/blocks/colCount/totalRows/cellsPerBlock/tabs`），
@@ -339,6 +340,113 @@ ETS88 因为只有 1,436 行，100 行/页时整表就 15 页 ⇒ 1,436 × 1,728
   两者都远低于今天的 149.6）。
   生产那一档宽形状 `LQDP_PROBE_PAGE_SIZE=100 LQDP_PROBE_BLOCKS=8`（ETS88 1,436 行够 800 行 ✅）；
   4 标签那一行**不能**用格数模型预测（§5 末尾那条 ⚠）。
+
+## 11. 整改后复跑对照（Task 7，2026-10-23，HEAD `e997d87`）
+
+两条命令都是 §1 那两条原样（**形状不换、env 不换**，只有代码换了），从 worktree 根跑：
+
+```bash
+# 宽形状（默认 env：ETS88_FT / 每块 50 行 / BLOCKS=20 / 4 标签）
+LQDP_PERF_PROBE=1 PYTHON_BIN='C:\Users\Administrator\Desktop\DataPrase\LQ-DataPrase\.venv\Scripts\python.exe' \
+  node scripts/e2e_pool.mjs --slots=1 -- data/renderer-memory.spec.ts
+# 窄控制组（cap 不该介入那一档）
+LQDP_PERF_PROBE=1 LQDP_PROBE_FILE=STS8200_CP LQDP_PROBE_PAGE_SIZE=500 PYTHON_BIN='…' \
+  node scripts/e2e_pool.mjs --slots=1 -- data/renderer-memory.spec.ts
+```
+
+两轮末行逐字（`tasks/t7-probe-wide.log` / `tasks/t7-narrow-ps500-r1.log`）：
+
+```
+[pool] 用例 1 · 墙钟 0.3min · 单价 8.41s/例 · 效率 0.55（目标 ≥0.7） · unexpected 0 · flaky 0 · skipped 0
+[pool] 结论 MEASURED
+[pool] 用例 1 · 墙钟 0.2min · 单价 5.26s/例 · 效率 0.43（目标 ≥0.7） · unexpected 0 · flaky 0 · skipped 0
+[pool] 结论 MEASURED
+```
+
+卫生核对（`C:\lqdp-e2e\slots\174148-36940\slot0.run.log:101`，宽形状那一轮）：
+`[probe] page_size 写回：目标 100（读到的原值 100） PUT=200 写回后读回 100`；同轮日志内**无 `#26`**。
+
+### 11.1 宽形状（ETS88_FT）
+
+⚠ **生效 `maxBlocksInCache` 不在产物的 `shape` 段里**（Task 2 的产物形状只有
+`probeKey/rowsPerBlock/blocks/colCount/totalRows/cellsPerBlock/tabs` 七个键）。两栏的 cap 各取其源：
+「前」= 产生它的那棵树的字面量（`git show cd1af05:frontend/src/pages/data/DataBrowserAgGrid.vue` 第 69 行
+`:maxBlocksInCache="20"`，写死）；「后」= 入库公式 `blockCap.maxBlocksInCache(50, 1728)`
+= `min(20, floor(1,420,118 / 86,400))` = **16**（`frontend/src/pages/data/components/browser/blockCap.ts:54-62`）。
+驻留块数按 ag-grid 自己的 `blocksToKeep = maxBlocksInCache − 1` + 当前块（`main.cjs.js:55995`）
+⇒ 前 20 块、后 16 块，Δ 分别是 19 次与 15 次增量。
+
+| 字段 | 整改前（`tasks/t7-keep/t2-wide-ets88-r4.json`） | 整改后（`tasks/t7-wide-after-r1.json`） | 性质 |
+|---|---|---|---|
+| rowsPerBlock / colCount | 50 / 1,728 | 50 / 1,728 | 产物自带（两栏同一个数） |
+| 请求的 `BLOCKS` | 20（默认 env） | 20（默认 env，未改） | 槽日志「去重后实翻 20 页」 |
+| **生效 maxBlocks** | **20** | **16** | 见上面的来源，**不在产物里** |
+| **驻留块数** | **20**（Δ 恰为 19 次增量 ⇒ 与该数自洽） | **16**（Δ 按 15 次增量摊） | 算式用的那个数 |
+| heap 1 块 | 94.1 MiB | 94.3 MiB | 实测 |
+| heap 20 块（1 标签） | 149.6 MiB | 138.8 MiB | 实测 |
+| Δ | **55.5** | **44.5**（−11.0 MiB = **−19.8%**） | 实测相减 |
+| Δ / 增量次数 | 2.921 MiB/块 | 2.967 MiB/块 | 推导 |
+| 反推 `mib_per_cell` | 3.3808e-5 | 3.4336e-5（**+1.6%**） | 推导 |
+| 驻留格数 | 1,728,000 格 | 1,382,400 格（**−345,600 格 = −20.0%**） | 推导（块数 × 86,400） |
+| 第 3 行「4 个标签」 | 176.7 MiB，标签文案「各 1 块」 | 119.5 MiB，标签文案「仅激活那份留缓存」 | 实测，但**两行不是同一形状**（见 11.3） |
+
+§10 那条单价外推预测「16 块 ⇒ `94.1 + 15 × 2.921 ≈ 137.9`」，实测 **138.8**（差 0.9 MiB = 0.7%）
+⇒ 外推方向对，驻留块数确实是 16 那一档，而不是 20。
+
+**这张表的正确读法**：每格单价 3.38e-5 → 3.43e-5，**没有变便宜**（1.6% 在重跑噪声内，见下面控制组）；
+省下的是**驻留量**（20 块 → 16 块）。把 44.5 与 55.5 直接比就说「每格降两成」是把驻留收益误记成单价收益。
+
+### 11.2 窄控制组（STS8200_CP，500 行 × 45 列 = 22,500 格/块）
+
+`maxBlocksInCache(500,45) = min(20, floor(1,420,118/22,500)=63) =` **20** ⇒ cap 不介入，两栏驻留都是 20 块、Δ 都是 19 次增量。
+
+| 量 | 整改前（§3 行 5/6，两轮） | 整改后（`tasks/t7-narrow-after-ps500-r1.json`） |
+|---|---|---|
+| heap 1 块 | 40.8 / 40.8 | 40.7 |
+| heap 20 块 | 62.6 / 62.6 | 62.5 |
+| Δ | **21.8 / 21.8** | **21.8** |
+| `mib_per_cell` | 5.0994e-5 | **5.0994e-5（逐字相同）** |
+| 第 3 行「4 个标签」 | 123.3 / 123.3 | 93.2（形状同样变了，见 11.3） |
+
+⇒ **cap 没介入的那一档，单价一位小数都没动** —— 这既是「窄文件行为不变」的实测版（D1/§7 那条验收锚点），
+也说明宽形状那 +1.6% 是重跑噪声而不是回归。
+
+### 11.3 三行里唯一不能横着比的是第 3 行
+
+`renderer-memory.spec.ts:318-319` 自己在 Task 4 改过文案：「4 个标签（各 1 块）」⇒「4 个标签（仅激活那份留缓存）」。
+整改前那一行量的是「4 份网格同时留缓存」（宽 176.7、窄·深 123.3），整改后同一行量的是「只有激活那份留缓存」
+（宽 119.5、窄·深 93.2）⇒ 相对值 **−57.2 / −30.1 MiB** 是 **D4（`onDeactivated` + `props.active` 触发 `purgeInfiniteCache`）
+生效的证据，但不是同形状对照**，不要写进「整改前后同一形状」那类结论。
+
+产物里第 3 行的请求明细把这件事说得更直白（宽形状，browse 条数 前 23 → 后 26）：
+
+- 前：`82` 的 p1..p20 各 1 条 + 另三份网格各 1 条（`81`/`75`/`78`）⇒ 四份都带块驻留，与「各 1 块」文案一致。
+- 后：`82` 的 p1..p20 **再加 p19、p20 各重取一次**（激活那份被交掉缓存后 IRM 回取当前视口块，
+  就是 Task 4 交给 Task 5 的形态①），`81`/`75` 各 **2** 条 p1，而 `78` 那份在本轮取样时刻
+  **还没进 Resource Timing 缓冲**（`/summary/` 也只有 3 条：82/81/75）。
+  ⇒ 后一栏第 3 行取样的瞬间并不是「4 份网格都装好了」，119.5 与 176.7 之间**连"几份网格"都不等**，
+  只能当定性证据。请求条数（27 → 29）随形状变，不能当回归读。
+
+### 11.4 证据边界
+
+槽日志与 JSON 都在 gitignored 的 `tasks/` 与 `C:\lqdp-e2e\slots\` 下，本文引用的槽号
+（`174148-36940`）只作当期取证；换机复现请按 11 开头那两条命令重跑，产物名 `renderer-probe-<键>.json`
+会被覆盖，留底请自己改名（本轮留底：`tasks/t7-wide-after-r1.json`、`tasks/t7-narrow-after-ps500-r1.json`、
+Task 2 原件整套在 `tasks/t7-keep/`）。**本轮没有**在生产机 / Electron 档复跑（§8 那条口径裁定仍生效）。
+
+## 12. 附录：待落进未入库 `docs/user-guide/07-settings.md` 的建议文案（由用户决定）
+
+`docs/user-guide/` **不在 git 里**（只存在于父检出），所以本轮没有、也不能改它；下面是给那份指南里
+「默认每页行数」那一节的建议替换文字，**是否落到用户那份由用户点头**。落点与代码事实：
+钳位在 `blockCap.effectiveBlockSize`，可见提示在 `DataBrowserAgGrid.vue:52-57`（正文「每页 {{ blockSize }} 行」，
+`cursor: help`，鼠标悬停出 tooltip；文案用的是双主题都有取值的 `.text-secondary`，没新增 CSS）。
+
+> **默认每页行数**：这是**上限**而不是实际值。当文件的列数很多时，系统会按内存预算自动压低实际每页行数
+> （一页最多约 35.5 万单元格）。例如 1,728 列的文件，设置 500 行时实际只取 **205** 行；设置 100 行时不变。
+> 压低时表格上方会显示实际值「每页 205 行」，鼠标悬停可看到「该文件 1,728 列：每页行数已从 500 降为 205 以控制内存」。
+> 该设置本身不会被改写，只是这一张表的取数被压低。列数未知时不压低。
+> 同时，驻留的历史块数也按列数封顶（最多 20 块，宽文件更少），所以上下滚动的可回看范围在超宽文件上会比以前小。
+
 
 ---
 
