@@ -5294,8 +5294,20 @@ analysis 档补一条（R19：`AnalysisPage` 的去重原本无守卫）、dashb
 ## 遗留
 
 - [ ] **B 后端载荷**、**C `2026-10-21` 内存治理三批**、**D Electron 日志分级/乱码/轮转**：本轮刻意不做，见上一节。
-- [ ] 存量红 `e2e/settings/export-timeout.spec.ts` 的**处置仍等用户拍**（修 tab 激活判据 or 进快门禁已知红豁免表）；
-      它命中 settings 模块档 ⇒ 任何改 store/util 的批次门禁都不可能 `RESULT: PASS`。
+- [x] 存量红 `e2e/settings/export-timeout.spec.ts`：**已修，且根因不是测试**（用户 2026-10-23 点定「修这条存量红用例」）。
+      实测（1280×720 探针）：`el-input-number` 与长说明文案同在一个 flex 行，控件默认 `flex: 0 1 auto`
+      被压到 84px、内部 `<input>` 宽 **0px** ⇒ 数值看不见也点不着；回归点是 master 的 `73c4791`
+      把该行文案从一行加到三行。**同缺陷在 SFTP 那行只压到 25.9px ⇒ `toBeVisible` 全绿 = 假绿**。
+      修：两行都锁控件宽度、让文案换行；两条 spec 各加实测宽度阈值（控件 ≥140 / 内部 input ≥40）。
+      ⇒ 命中 settings 模块的快门禁不再被它拦住（提交 `88fe226`）。
+- [x] 顺带查出并修掉两条**同族的假绿/漏账**（提交 `b4d3591`）：
+      ① 本分支新加的「保存后脏基线复位」那条走产品保存通路把 `chart_dpi=200` **真落库**却没 finally 复位
+      ⇒ 同文件「恢复默认」稳定红；② 「恢复默认」原先按**后端**断「被洗成 100」，而产品的恢复默认只改本地
+      （提示文案明写「请点击保存以持久化」）⇒ 它只在账号恰好停在出厂值时空转绿。现按三段重写并自建前置。
+- [ ] **同型缺陷待普查**（本轮只量了 settings 的两行）：另有 7 个组件同时出现 `el-input-number` 与
+      note/hint 类文案（`ChartConfigPanel` / `ChartSettingsForm` / `CpkSettingsForm` /
+      `SftpConnectionPanel` / `SearchCriteria` / `FileCorrelationControls` / `CorrelationScatterAxisCard`）。
+      犯病的前提是「控件与长文案同在一个 flex 行」，得逐个量盒宽才判得准 —— 别照 class 名猜。
 - [ ] 体验代价：切走的标签切回来要**重新取数**（D4 用 `purgeInfiniteCache` 换内存，深滚位置不保留）。
 - [ ] `docs/user-guide/07-settings.md`（**未入库、只在父检出**）里「默认每页行数」的文案同步**没做**：
       建议文字已写在 baseline §12 附录，落不落由用户决定（本分支不得写父检出）。
