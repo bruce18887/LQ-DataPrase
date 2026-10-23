@@ -53,9 +53,21 @@ function onTimeoutChange(value: number | undefined) {
   display: flex;
   align-items: center;
   gap: 12px;
+  /* 窄窗口下的兜底：整段文案落到第二行，而不是和控件抢同一行把对方挤没 */
+  flex-wrap: wrap;
+}
+
+/* 控件宽度是锁死的（`flex: 0 0 auto`），换行让给文案：el-input-number 默认
+   `flex: 0 1 auto` ⇒ 会被长说明文案压缩，而它的收缩下限只有 wrapper 的 42+42px 内边距。
+   2026-10-23 在 1280×720 实测：本行控件 150→84px、内部 `<input>` 宽 **0px**
+   ⇒ 数值既看不见也点不着（e2e 那条 `toBeVisible` 存量红的真因，回归点是 73c4791 加长文案）。 */
+:deep(.el-input-number) {
+  flex: 0 0 auto;
 }
 
 .export-timeout-note {
+  flex: 1 1 260px;
+  min-width: 0;
   font-size: var(--p-fs-dense);
   color: var(--text-2);
 }

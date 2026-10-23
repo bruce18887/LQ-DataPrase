@@ -39,6 +39,13 @@ test.describe('@p1 SFTP 下载超时设置', { tag: ['@p1', '@settings'] }, () =
     await expect(input).toBeVisible()
     await expect(input).toHaveValue('600')
     await expect(page.getByText(/SFTP 单文件\/批量下载最长等待秒数/)).toBeVisible()
+
+    // 宽度判据：这一行历史上只被压到 109.9 / 25.9px，`toBeVisible` 挡不住（一直是假绿）。
+    // 缺陷机制、实测数字与阈值出处见 export-timeout.spec.ts:43-52 那段注释。
+    const numberBox = await page.getByTestId('sftp-timeout-input').boundingBox()
+    const inputBox = await input.boundingBox()
+    expect(numberBox?.width, 'el-input-number 被说明文案挤扁（历史实测 109.9px）').toBeGreaterThanOrEqual(140)
+    expect(inputBox?.width, '内部 <input> 只剩一条缝，数值显示不全（历史实测 25.9px）').toBeGreaterThanOrEqual(40)
   })
 
   test('保存并持久化：改为 900 → 保存 → reload 保留；结束后恢复默认', async ({ page }) => {
