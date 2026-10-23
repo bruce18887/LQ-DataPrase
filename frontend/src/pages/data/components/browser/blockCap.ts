@@ -16,17 +16,17 @@
 export const BLOCK_SIZE_MIN = 50
 export const BLOCK_SIZE_MAX = 500
 /**
- * 142 是**窄文件的参考宽度**（历史基线形状，见 docs/reference/perf-baseline-2026-10-17.md），
- * 只给单测当「窄文件代表」用。**列数未知时本文件两个函数都完全不介入**（`cols()` 返回 0 ⇒
- * 各自提前返回设置值 / `MAX_BLOCKS`），这里不提供任何按 142 估算的回退 —— 对
- * `effectiveBlockSize` 而言回退会在 `col_count` 还没加载时静默压低所有文件的分页大小。
+ * ⚠ 「列数未知时本文件两个函数都完全不介入」（`cols()` 返回 0 ⇒ 各自提前返回设置值 /
+ * `MAX_BLOCKS`）：这里不提供任何按某个默认列数估算的回退 —— 对 `effectiveBlockSize`
+ * 而言回退会在 `col_count` 还没加载时静默压低所有文件的分页大小。
  *
- * ⚠ 别把这句读成「列数未知就永远不会封顶」：**驻留**那一半的回退住在调用方
+ * 但也**别把这句读成「列数未知就永远不会封顶」**：驻留那一半的回退住在调用方
  * `composables/useIrmSizing.ts` 的 `retentionColCount`（col_count 未知 ⇒ 用首块 `/browse/`
  * 实际返回的列宽），那是缓存尺寸决策、不改分页语义（2026-10-23 收口评审 A-2）。
  * 两层各由 `test/unit/blockCap.spec.ts` 与 `test/unit/useIrmSizing.spec.ts` 分开钉。
+ * 窄文件的参考宽度 142（历史基线形状，见 docs/reference/perf-baseline-2026-10-17.md）
+ * 只是单测素材，已从本文件移回 `blockCap.spec.ts` —— 生产源码里不留「注释写着别接线」的夹具。
  */
-export const DEFAULT_COL_COUNT = 142
 /** 驻留块数上限：今天 DataBrowserAgGrid 写死的值，窄文件必须保持不变 */
 export const MAX_BLOCKS = 20
 /** 单块格数上限 = 驻留预算 / 4 ⇒ 最坏情况仍驻留 4 块；推导见 baseline 文档 */

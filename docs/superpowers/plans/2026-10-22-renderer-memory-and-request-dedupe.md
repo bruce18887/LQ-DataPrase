@@ -994,6 +994,16 @@ Run: `node scripts/e2e_pool.mjs --slots=4`
 Expected: 日志末尾 `RESULT: PASS`（判据取 `RESULT:` 行，不取 `$?`）。存量红按
 `docs/reference/testing-gates.md` 的定性流程走父检出 master 对照，别当场归因给本批。
 
+> **实跑与原稿不一致（2026-10-23 收口评审 E 项就地标注，别只留一个勾）**：那一轮**没有**打印
+> `RESULT: PASS`。池的结论行是 `[pool] 结论 MEASURED`，复跑判级 **真红 1 · 负载抖动 2 · 悬而未决 0**
+> （412 例 / 10.3min / 计划 slot 4 未折叠 / 文件 76 = 树里 spec 数）。唯一真红是存量
+> `e2e/settings/export-timeout.spec.ts`：独占 slot 复跑仍红、签名与台账逐字一致，按 R21 **只记账不修**
+> （处置等用户拍）。后端全套首跑 `Ran 1811 · FAILED (failures=2)`，两条都是本分支搬家造成的
+> 哨兵失效（已改扫载体并集并复跑 `Ran 9 · OK`）。
+> 逐条数字与处置的落点：`docs/tasks/todo.md` 的「门禁（收口档）」一段与文末「整改后遗留清单」
+> （存量红那条 + R21），以及 `docs/reference/renderer-memory-baseline-2026-10-22.md` 的复跑表。
+> 所以这个勾代表「这一档跑完了、红项已定性并有在册处置」，**不**代表出现过绿色结论行。
+
 - [x] **Step 3: 回填与教训**
 
 `docs/tasks/todo.md` 追加一节：实测表、四个常数、哪些 e2e 因 GLOBAL 档重排、遗留（B/C/D 三项仍未做，

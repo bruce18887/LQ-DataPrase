@@ -5300,10 +5300,16 @@ analysis 档补一条（R19：`AnalysisPage` 的去重原本无守卫）、dashb
 - [ ] `docs/user-guide/07-settings.md`（**未入库、只在父检出**）里「默认每页行数」的文案同步**没做**：
       建议文字已写在 baseline §12 附录，落不落由用户决定（本分支不得写父检出）。
 - [ ] deferred Minor 汇总（台账 `.superpowers/sdd/…/progress.md` 末节在册，逐条要么修要么写明理由）：
-      **收口评审轮已把台账里全部在册项搬进文末「整改后遗留清单」并逐条给出处置** —— 台账在 gitignored 目录，
+      **收口评审轮已把台账里在册项搬进文末「整改后遗留清单」并逐条给出处置**（原文写「全部」，
+      2026-10-23 收口评审 E 项复核对账发现**漏搬了一条**（下面第 3 项），措辞已收为「在册项」）——
+      台账在 gitignored 目录，
       `git worktree remove --force` 就没了，那份清单才是唯一事实来源。仍开的条目：
-      注释与行号指针 stale 四条（`data.spec.ts:903-906` 举例不成立、`file-list-completeness.spec.ts:127` 只数调用点、
-      `view-data.spec.ts:1506-1509` 仍写 applyBlockSize→purge、`weightChartOption.spec.ts:23/26` 行号漂移）、
+      注释与行号指针 stale 四条（`data.spec.ts:903-906` 举例不成立、
+      `file-list-completeness.spec.ts:127`「`getOptions` 只命中两处」数的其实是**调用点**
+      （定义 `api/datafiles.ts:154-156` 也是同一条 grep 的命中，⇒「两处」少一处；该用例正文
+      下一句本来就在讲它，2026-10-23 已把措辞改成「两个调用点 + 一处定义」）、
+      `view-data.spec.ts:1506-1509` 仍写 applyBlockSize→purge（**定性错了**：那条用例丢的不是措辞而是护栏，
+      2026-10-23 收口评审 B 项已把它重写成 404→切 section 的真射程形状）、`weightChartOption.spec.ts:23/26` 行号漂移）、
       `UserSettings` 与 `types/index.ts` 同名异构带 index signature（丢键名检查）、
       sftp 档缺 `last_visit` 计数守卫（R20 留给收口）、`/summary/` 请求数收益无守卫、
       三条计数守卫继承 401 重放的假红风险（夜跑归因先查 `LQDP_ACCESS_TOKEN_MINUTES`）、
@@ -5348,7 +5354,10 @@ C `2026-10-21` 内存治理三批；D Electron 日志把 backend-stderr 一律�
    （收口前就已漂移，本轮注释一改又漂；这类跨文件行号指针一律改符号）。
 7. `docs/reference/server-deployment.md` §5.3 与 `renderer-memory-baseline-2026-10-22.md` §6/§12 的
    「单块最多约 35.5 万格」→ 纠正为「**目标** ≤ 约 35.5 万格，但每块不低于 50 行 ⇒ 列数超过约 **7,100**
-   （`355,029 ÷ 50 = 7,100.58`）时该下限让位，单块格数可超预算（10,000 列 ⇒ 500,000 格）」；
+   （`355,029 ÷ 50 = 7,100.58`）时**该下限生效（赢）**、让位的是预算 ⇒ 单块格数可超预算（10,000 列 ⇒ 500,000 格）」；
+   ⚠ 这条当时按「该下限让位」落进了 `server-deployment.md` §5.3 与 baseline §12 两处（同一轮在
+   baseline §6/`:198` 写对了「下限赢」）—— 2026-10-23 收口评审 E 项已把这两处措辞纠正为
+   「该下限生效（赢）」，让位的对象是单元格预算而不是 50 行下限。
    同文档 §5.2 的 `standalone.py:170-173` 指针纠正为 `config/settings/standalone.py` 的
    `SFTP_CONFIG_KEY` PBKDF2 派生块（真正写 `sftp-config`/100k 的那份）。
 
@@ -5366,7 +5375,13 @@ C `2026-10-21` 内存治理三批；D Electron 日志把 backend-stderr 一律�
   `types/index.ts` 的 `UserSettings`（:14-27）**同名异构** ⇒ 索引签名吃掉键名拼写错误与枚举检查。
   **处置＝留**：改成 `Partial<SettingsData> & …` 或改名 `SettingsBag` 要过类型面 ——
   实测消费面是 8 个文件 import 这个 store（`grep -rl useUserSettingsStore frontend/src` 去掉 store 自身），
-  其中真正 import 该**类型**的只有 `pages/settings/SettingsPage.vue`，其余七处只读 `raw?.xxx`；
+  其中真正 import 该**类型**的只有 `pages/settings/SettingsPage.vue`；其余七处按 2026-10-23 收口评审
+  E 项复核对账（原文「其余七处只读 `raw?.xxx`」把两类非只读站点算进了只读）：
+  **只读 `raw?.xxx` 的确实只有五处**（`DataBrowserAgGrid.vue`、`utils/echarts-theme.ts`、
+  `utils/exportTimeout.ts`、`utils/filenameWrap.ts`、`utils/sftpTimeout.ts`），
+  另两处不同形 —— `stores/auth.ts` **一次都不读 `raw`**（只经 `resetUserSettingsCaches()` :22
+  调 `reset()`），`composables/useChartMemory.ts` 读的是**整个** `store.raw`（:73/:78 判 null 后
+  整体取用）**并会写**（`save()` 防抖冲刷 :112、`saveKeepalive` :175）。
   属类型面改造，不该混进文档/注释轮。
 - **store 返回值的 `as {…}` 断言**与 Pinia SetupStore 的解包规则不一致（今天无害：`raw` 仍是 `Ref`，
   解包只在返回值不是函数/ref 时才不同）。**处置＝留**，与上一条同批（一次改类型面）。
@@ -5386,7 +5401,34 @@ C `2026-10-21` 内存治理三批；D Electron 日志把 backend-stderr 一律�
 - **两条 e2e 注释的机制描述过时**：`e2e/data/data.spec.ts` 的「放宽谓词会误抓 `/browse/`」举例不成立
   （放宽式 `/files/.*page_size=9999` 需要字面 `/files/` 在前的那一段说明要改成形状中立表述）；
   `e2e/data/view-data.spec.ts` 生命周期那条仍写 `applyBlockSize → purgeInfiniteCache`
-  （Task 4 之后是 datasource 身份变化走 `resetCache`，不再 purge）。**处置＝留**：这两处的措辞连着各自判据的
-  成立条件，只改注释容易把假说法换成另一种假说法，另开一小批配合重读用例。
+  （Task 4 之后是 datasource 身份变化走 `resetCache`，不再 purge）。**处置（2026-10-23 收口评审 B 项）**：
+  后半条**不是措辞问题**——那次 stall→关标签的形状已经一个 grid 调用都不发，用例失去射程（护栏丢失），
+  已整条重写成「404 销毁 grid → 切走 section → `purgeCacheIfAlive()`」并做了变异反证；
+  前半条（`data.spec.ts` 的谓词举例）仍是注释级问题，另开一小批配合重读用例。
+- **文件数超过约 9,999 时封顶整个消失**（收口评审 E-i）：`DataManagement.vue` 的 `loadFiles()` 只取
+  `page_size=9999` **一页**，而 `apps/datafiles/views/file_views.py` 的 `DataFilePagination.max_page_size=10000`
+  把上限钳在 10,000 ⇒ 第 1 页之后的文件根本不在 `files` 里 ⇒ 它们的 `col_count` 永远未知，
+  驻留上限只能靠 A-2 那条「已加载列宽」回退兜底（分页侧仍是「未知 ⇒ 不介入」）。
+  **处置＝留**：根治要么翻页取全（多发请求、正是本轮在收的东西），要么让 `/browse/` 首块自己带列数。
+  今天没有任何断言钉「>9,999 文件」这个形状（种子集 22 个文件，撞不到）。
+- **D4 的 purge 触发面比「切标签」宽得多**（收口评审 E-ii）：`:active` 的表达式是
+  `activeTab === 'view' && t.id === activeViewTabId`（`DataManagement.vue:65`）⇒
+  **文件列表 ↔ 查看数据 这两大 section 之间来回切**也会让每个挂载中的实例 `active=false` 而清缓存，
+  而这条路比标签间切换频繁得多（每次上传、每次改批次都要回列表）。
+  上面「体验代价＝切走的标签切回来要重新取数」那句因此是**低估**：真实代价包含 section 来回。
+  **处置＝留**（要不要把 section 切换与标签切换分档，是产品决定，不是缺陷）。
+- **在设置页改「默认每页行数」不会到达已经挂载的 grid**（收口评审 E-iii）：`applyBlockSize()` 只在
+  组件 `onMounted` 里被调一次（`DataBrowserAgGrid.vue` 的 `onMounted` → `store.ensure()` → `applyBlockSize(s.raw?.page_size)`），
+  之后既没有 `watch` 设置值、`onActivated` 也不重读 ⇒ 已开着的标签继续按旧块大小翻页。
+  **已核实属存量、不是本分支引入**（`git show cd1af05:...DataBrowserAgGrid.vue` 的 `:260-266` 同样是 onMounted 单次套用），
+  但本分支把影响面**放大**了：现在冻结的不只是 `cacheBlockSize`，还有跟着列数算出来的 `maxBlocksInCache`
+  ——而这两个值同时是 datasource 的身份，所以「改设置后想要新预算」必须换文件或重挂载才行。
+  **处置＝留**：修法是 `watch` 设置 store 的 `page_size`（要同时想清楚「用户正滚到第 20 块时被打回顶部」能不能接受）。
+- **守卫 GET 失败 + 本地 `patch()` 之后 `raw.page_size` 可以缺席**（收口评审 E-iv）：`ensure()` 失败时
+  `raw=null`（各消费方按默认 100 降级），随后 `patch()` 会写出一份**只含被改键**的 `raw` ⇒ 读 `raw?.page_size`
+  得到 `undefined` ⇒ `applyBlockSize(undefined)` 走「设置域外一律忽略」那一支、静默留默认 100；
+  同时那句「每页 N 行」降页提示的显示条件是 `colCount && blockSize !== settingsPageSize`，
+  两边都是 100 ⇒ **提示也不出现**，用户看不到「其实账号设的是 500」。
+  **处置＝留**：与 `save()` 作废在飞 GET 的第二面（本文上面第 3 条）同族，等真出现该形状再改 `patch()` 语义。
 - **存量红 `e2e/settings/export-timeout.spec.ts` 的处置**（修 tab 激活判据 or 进快门禁已知红豁免表）仍等用户拍 ——
   见上一节「遗留」。
