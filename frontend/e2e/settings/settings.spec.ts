@@ -178,6 +178,75 @@ test.describe('@p1 系统设置页', { tag: ['@p1', '@settings'] }, () => {
     }
   })
 
+  /**
+   * 脏基线在保存后必须复位（2026-10-23 收口评审 D 项）。
+   *
+   * 缺陷形状：`SettingsPage.vue` 的 `loaded`（脏判定读的快照）原先是**非响应式**的
+   * `let loaded: SettingsData`，而读它的是 computed（`dirtyKeys`）⇒ 保存成功后那句
+   * `loaded = snapshot(...)` 重赋值不进依赖表，computed 不失效 ⇒ 脏键列表停在保存前那一份：
+   * 按钮继续可用、「没有需要保存的改动」永不出现、再点一次把同一批键再 PUT 一遍
+   * （PUT 载荷本身是对的，坏的是判定，所以只有请求条数与 UI 状态能看出来）。
+   *
+   * 判据是四段转移，缺任一段都退化成空断言：
+   * ① 进页面＝干净 ⇒ 置灰 + 提示在；② 改一个字段＝脏 ⇒ 可用 + 提示消失；
+   * ③ 保存成功 ⇒ 回到 ①；④ 全程 PUT 只有一发（第二次点击在置灰的按钮上根本发不出去）。
+   * ① 同时是 Task 6b 脏追踪的入口锚点：若某个子表单在挂载时就规范化出一个不等的值，
+   * 这条会先红在 ①，那才是它该报的事。
+   *
+   * ⚠ 精确长度判据的已知假红同本文件上面那条 GET 计数（axios 401 拦截器重放原请求，
+   *   见 docs/tasks/todo.md「三条计数守卫继承 401 重放的假红风险」）⇒ 变红先查
+   *   LQDP_ACCESS_TOKEN_MINUTES，别先改判据。
+   */
+  test('@p1 保存后脏基线复位 dirty：按钮置灰、提示回来且只 PUT 一次', async ({ page }) => {
+    const puts: string[] = []
+    page.on('request', (r) => {
+      if (r.method() === 'PUT' && /\/auth\/settings\//.test(r.url())) puts.push(r.postData() ?? '')
+    })
+
+    await gotoApp(page, '/settings')
+    const saveBtn = page.getByRole('button', { name: '💾 保存设置' })
+    const hint = page.getByText('没有需要保存的改动')
+    await expect(saveBtn).toBeVisible()
+
+    // ① 进页面：settings 与 loaded 同一份 ⇒ 干净
+    await expect(saveBtn, '无改动时保存按钮应置灰（Task 6b 脏追踪）').toBeDisabled()
+    await expect(hint).toBeVisible()
+
+    // ② 改一个字段 ⇒ 脏（DPI 是本文件其它用例同款的安全数值字段）
+    await clickTab(page, '📊 显示设置')
+    const dpiInput = page
+      .getByText('图表 DPI')
+      .locator('xpath=ancestor::*[contains(@class,"el-form-item")]')
+      .getByRole('spinbutton')
+    await expect(dpiInput).toBeVisible()
+    await dpiInput.fill('200')
+    await dpiInput.blur()
+    await expect(saveBtn, '改过之后按钮必须可用').toBeEnabled()
+    await expect(hint, '脏状态下不该再显示「没有需要保存的改动」').toHaveCount(0)
+
+    // ③ 保存成功后回到干净
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (resp) =>
+          /\/auth\/settings\//.test(resp.url()) &&
+          resp.request().method() === 'PUT' &&
+          /"chart_dpi":\s*200/.test(resp.request().postData() ?? ''),
+      ),
+      saveBtn.click(),
+    ])
+    expect(response.status(), '保存应返回 200').toBe(200)
+    await expect(page.locator('.el-message').filter({ hasText: /保存|成功/ })).toBeVisible()
+    await expect(
+      saveBtn,
+      '保存后脏基线没复位 ⇒ 按钮仍可用（旧写法 loaded 非响应式，computed 不失效）',
+    ).toBeDisabled({ timeout: 5_000 })
+    await expect(hint, '保存后应重新出现「没有需要保存的改动」').toBeVisible()
+
+    // ④ 整段只发过一发 PUT（再点一次就发第二发）
+    await page.waitForTimeout(1_000)
+    expect(puts, `本次交互发出了 ${puts.length} 发 PUT /auth/settings/，应为 1 条`).toHaveLength(1)
+  })
+
   test('渲染器保存持久化：改为 Canvas → 保存 → 后端回显 canvas；结束后恢复 SVG', async ({ page }) => {
     try {
       // 先注册 GET 等待再导航，确保 loadSettings 完成后才交互（避免慢响应覆盖点击）

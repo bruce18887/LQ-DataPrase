@@ -97,8 +97,15 @@ const store = useUserSettingsStore()
  * 32 次整对象 PUT（`defaults` 的 12 个键全量 spread），改后一次点击只发真正改过的那几个。
  * 必须是**深拷贝**：各子表单是就地改 `settings` 对象的属性（含数组/对象键），
  * 与 merged 共享引用的话「改动」会被同时写进快照，脏判定就永远不成立。
+ *
+ * ⚠ 也必须是 **ref**（2026-10-23 收口评审 D 项）：`dirtyKeys` 是个 computed，它只跟踪
+ * 读到的响应式来源。这里原先写 `let loaded: SettingsData = {...defaults}` —— 普通变量
+ * 不进依赖表 ⇒ `saveSettings` 成功后那句 `loaded = snapshot(...)` 重赋值**不会**让
+ * computed 失效：脏键列表停在保存前那一份，按钮继续可用、「没有需要保存的改动」永不出现、
+ * 再点一次就把同一批键再 PUT 一遍（载荷本身仍正确，坏的是判定）。`snapshot()` 是函数声明、
+ * 已提升，所以在下面定义之前就能用。
  */
-let loaded: SettingsData = { ...defaults }
+const loaded = ref<SettingsData>(snapshot(defaults))
 
 /** 值比较：基本类型比身份，数组/对象比 JSON（同一形状来源固定，顺序差异只会多 PUT 一个键，不会漏） */
 function sameValue(a: unknown, b: unknown): boolean {
@@ -111,7 +118,9 @@ function sameValue(a: unknown, b: unknown): boolean {
 }
 
 const dirtyKeys = computed<(keyof SettingsData)[]>(() =>
-  (Object.keys(defaults) as (keyof SettingsData)[]).filter((k) => !sameValue(settings.value[k], loaded[k])),
+  (Object.keys(defaults) as (keyof SettingsData)[]).filter(
+    (k) => !sameValue(settings.value[k], loaded.value[k]),
+  ),
 )
 const hasChanges = computed(() => dirtyKeys.value.length > 0)
 
@@ -144,7 +153,7 @@ async function loadSettings() {
     merged.export_filename_templates = mergedTemplates
   }
   settings.value = merged as SettingsData
-  loaded = snapshot(merged)
+  loaded.value = snapshot(merged)
   setChartRenderer(merged.chart_renderer as 'svg' | 'canvas')
   // 导出超时同步到模块缓存，使导出调用点无需访问本页即可使用最新值
   setExportTimeoutSec(merged.export_timeout)
@@ -161,7 +170,8 @@ async function saveSettings() {
     await store.save(payload as UserSettings)
     // PUT 的响应就是全量（apps/accounts/views.py:218-225），store.save 已把它写进 raw
     // 并记为已取过 ⇒ 保存后不会再补一次 GET（R24 0b）。
-    loaded = snapshot(settings.value)
+    // 响应写回脏基线：这一步**必须**让 `dirtyKeys` 失效（loaded 是 ref 才做得到，见其声明处）
+    loaded.value = snapshot(settings.value)
     setChartRenderer(settings.value.chart_renderer)
     setExportTimeoutSec(settings.value.export_timeout)
     setSftpTimeoutSec(settings.value.sftp_download_timeout)
