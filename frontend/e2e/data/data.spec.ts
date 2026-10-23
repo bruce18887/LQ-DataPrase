@@ -933,7 +933,8 @@ test.describe('进数据管理：导航期全量文件列表只拉一次', { tag
    *
    * 判据两条，各挡一种回退：
    * ① 横幅里当前文件**还是那份文件**（旧写法列表被清空 ⇒ 下拉里没有这个条目，只能显示裸 id）；
-   * ② 出现错误 toast（旧写法 `catch {}` 静默吞掉，用户完全不知道列表没刷新）。
+   * ② 出现**且只出现一条**错误 toast（旧写法 `catch {}` 静默吞掉 ⇒ 0 条；
+   *    页面那句若绕开 `toastError` 直调 `ElMessage.error` ⇒ 与拦截器那份并成 2 条）。
    * 触发通路刻意用「离开页面再回来」⇒ `onActivated(loadFiles)`，与生产每次导航同形，
    * keep-alive（`MainLayout.vue:12`）保住组件状态 ⇒ 回来时用的还是那一份上一轮的列表。
    *
@@ -962,10 +963,14 @@ test.describe('进数据管理：导航期全量文件列表只拉一次', { tag
       // 回来的还是那个 keep-alive 实例：tab 停在「查看数据」上（组件状态没被重建）
       await expect(page.locator('.tab-btn.active')).toContainText('查看数据', { timeout: 15_000 })
 
-      await expect(
-        page.locator('.el-message').filter({ hasText: /文件列表刷新失败|无法连接服务器/ }),
-        '刷新失败必须出声（旧写法 catch {} 静默清空）',
-      ).toBeVisible({ timeout: 10_000 })
+      // 出声道**恰好一条**：`loadFiles()` 把这条请求标成 `silent`、自己走 `toastError` 补一句
+      // 页面专属提示（少一条＝静默吞掉，旧写法 `catch {}`）。多一条的形状收口全量池实测到过：
+      // 页面那句若直调 `ElMessage.error`，就绕开了拦截器「同一消息 2s 只响一次」那道闸，
+      // 与其余四条 `/files/**` 失败的全局提示并成两条同族 toast，把
+      // `e2e/global/error-handling.spec.ts` 那两条按文案取 toast 的用例顶成 strict mode 歧义。
+      const errToast = page.locator('.el-message--error').filter({ hasText: /文件列表刷新失败|无法连接服务器/ })
+      await expect(errToast, '刷新失败必须出声，且只出声一次').toHaveCount(1)
+      await expect(errToast.first()).toBeVisible({ timeout: 10_000 })
       await expect(
         selectedLabel,
         `列表拉不到时应保留上一份（当前文件仍显示「${filename}」）`,

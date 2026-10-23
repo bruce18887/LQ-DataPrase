@@ -17,7 +17,12 @@ declare module 'axios' {
 let lastToastMessage = ''
 let lastToastAt = 0
 
-function toastError(message: string) {
+/**
+ * 错误 toast 的**唯一出口**：拦截器与「自己标了 `silent` 的调用方」都只走这里，
+ * 于是同一消息 2 秒内只响一次 —— 页面补的那句和全局那句不会叠成两条
+ * （两条同族 `.el-message--error` 会让按文案取 toast 的用例撞上 strict mode 歧义）。
+ */
+export function toastError(message: string) {
   const now = Date.now()
   if (message === lastToastMessage && now - lastToastAt < 2000) return
   lastToastMessage = message

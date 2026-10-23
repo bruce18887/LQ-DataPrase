@@ -98,7 +98,7 @@
 <script setup lang="ts">
 import { ref, computed, onActivated, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import api from '../../api'
+import api, { toastError } from '../../api'
 import { useFilesStore } from '../../stores/files'
 import { formatError } from '../../utils/error'
 import ActiveFileBanner from './components/browser/ActiveFileBanner.vue'
@@ -198,8 +198,10 @@ let filesLoadFailedNotified = false
 
 async function loadFiles() {
   try {
-    // 查看数据/导出工具顶部的文件下拉需能选任意文件，不能受默认分页（20 条）限制
-    const { data } = await api.get('/files/', { params: { page_size: 9999 } })
+    // 查看数据/导出工具顶部的文件下拉需能选任意文件，不能受默认分页（20 条）限制。
+    // `silent: true`：这条请求的错误归下面的 catch 自己报（它带「列表已保留」的页面语境），
+    // 不要拦截器那条通用提示再叠一遍。
+    const { data } = await api.get('/files/', { params: { page_size: 9999 }, silent: true })
     files.value = data.results || data
     filesLoadFailedNotified = false
   } catch (err) {
@@ -210,11 +212,18 @@ async function loadFiles() {
     // 这种压力形状下**，保留量比整改前更大（500 行 × 1,728 列 × 20 块）。
     // 所以：保留上一份好列表（宁可下拉里的条目旧一次），并把失败原因报出来；
     // 真正 col_count 拿不到的新文件由 useIrmSizing.retentionColCount 用已加载列宽兜底。
-    // 报错沿用本页既有通路（ElMessage，见 viewFile 的上限提示），不新造 UI。
-    // onActivated 每次进入都会调这里 ⇒ 同一段失败只提示一次，别刷一屏 toast。
+    //
+    // ⚠ 报出来必须走 `toastError`，不能直调 `ElMessage.error`（2026-10-23 收口池实测修正）：
+    // `silent` 只挡**这一条**请求的全局提示，而进 /data 一次会发 5 条 `/files/**`
+    // （列表 ×2、product_codes、format_types、list_tags），后端整段缺席时它们一起失败 ⇒
+    // 拦截器为其余四条响一次，直调又把本页这句排在它外面 = 两条同族 `.el-message--error`，
+    // 按文案取 toast 的 `e2e/global/error-handling.spec.ts` 随即撞 strict mode 歧义。
+    // `toastError` 与拦截器共用「同一消息 2 秒内只响一次」那道闸 ⇒ 一段失败只剩一句。
+    // 文案仍走 `formatError`（拦截器用的同一个格式化器）⇒ 有响应体时用户看到的字与全局一致，
+    // 读不出后端消息时才落到本句兜底。onActivated 每次进入都调这里 ⇒ 另设一次性闸门。
     if (!filesLoadFailedNotified) {
       filesLoadFailedNotified = true
-      ElMessage.error(formatError(err, '文件列表刷新失败，已保留上一次的列表'))
+      toastError(formatError(err, '文件列表刷新失败，已保留上一次的列表'))
     }
   }
 }
