@@ -307,7 +307,12 @@ const {
 const {
   blockSize, settingsPageSize, colCount, maxBlocks, withLiveGrid,
   applyBlockSize, purgeCacheIfAlive, keyedDatasource, markGridAlive, markGridDead,
-} = useIrmSizing({ props, gridApi })
+} = useIrmSizing({
+  props,
+  gridApi,
+  // 列数未知时的驻留兜底：首块 /browse/ 的 headers 数（零新增请求，就是组件已有的 allCols）
+  loadedColCount: computed(() => allCols.value.length),
+})
 
 function handleGridReady(e: GridReadyEvent) {
   onGridReady(e)
