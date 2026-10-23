@@ -1,5 +1,11 @@
 # 渲染进程内存与重复请求整改 实施计划
 
+> **执行状态（2026-10-23 收口）**：7 个任务全部实施并逐任务过评审，分支 `feat/renderer-mem-cap`（基线 `cd1af05`）。
+> 复选框按实际执行勾选；**与本文原稿不一致处以台账裁定为准**：R8（Task 2 不回写尚不存在的 `blockCap.ts`）、R9（单块上限取预算/4）、
+> R10（ETS88@100 实测 cap=8，非原稿预期区间）、R15/R19（计数守卫按所属档位分放）、R21（存量红 `export-timeout` 只记账不修）、
+> R22（Task 6 拆 6a/6b 两批）、R23（三个 getter 本就是 `Promise`，原稿"必须同步"有误）、R25（store 世代守卫补到 PUT 与本地写）。
+> 逐批实测数字、变异/还原证据与遗留清单见 `docs/reference/renderer-memory-baseline-2026-10-22.md` 与 `docs/tasks/todo.md` 的「整改后遗留清单」。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 用实测复现取代拍脑袋，消除桌面端「查看数据」页因 20 块 × 千列行对象驻留导致的秒级冻结与渲染进程 OOM，并去掉每次导航的重复请求风暴。
@@ -59,7 +65,7 @@
     `RendererMetrics = { snapshot(label: string): Promise<MetricRow>; stop(): Promise<void> }`
     `MetricRow = { label: string; jsHeapUsedMiB: number; longTasksMsTotal: number; longestTaskMs: number; requests: Array<{ url: string; responseEndMs: number; durationMs: number; transferMiB: number }> }`
 
-- [ ] **Step 1: 抽出两个 tab helper（不是只抽一个）**
+- [x] **Step 1: 抽出两个 tab helper（不是只抽一个）**
 
 `view-data.spec.ts` 里有两个函数都要搬：`openViewTab`（`:11-23`，内含 `gotoApp` ⇒ 整页重载，
 **会把标签列表重置回一个空白页**）与 `openFileInViewTab`（`:34+`，注释明确「不能用 gotoApp」）。
@@ -95,7 +101,7 @@ export async function openViewTab(page: Page, filename: string) {
 它依赖「同一页面内不重载」的语义，一行都不许改）。`view-data.spec.ts` 删掉这两个本地定义，改为
 `import { openViewTab, openFileInViewTab } from '../helpers/viewTab'`。
 
-- [ ] **Step 2: 写取样 helper**
+- [x] **Step 2: 写取样 helper**
 
 关键约束：`longtask` 观察器必须在**首次导航之前**装进页面，所以 `addInitScript` 不能放在 `gotoApp` 之后；
 堆与计时指标走 CDP，不依赖产品代码里任何埋点。
@@ -179,7 +185,7 @@ export async function startRendererMetrics(page: Page): Promise<RendererMetrics>
 }
 ```
 
-- [ ] **Step 3: 写探针 spec（env 门控，默认跳过）**
+- [x] **Step 3: 写探针 spec（env 门控，默认跳过）**
 
 ```typescript
 // frontend/e2e/data/renderer-memory.spec.ts
@@ -249,7 +255,7 @@ test(`@p2 [${PROBE_KEY}] 1 块 / 满缓存 / 4 标签的堆与 long task`, async
 })
 ```
 
-- [ ] **Step 4: 跑通探针（无阈值，只看能否出数）**
+- [x] **Step 4: 跑通探针（无阈值，只看能否出数）**
 
 Run: `cd frontend && node ../scripts/e2e_pool.mjs --slots=1 -- data/renderer-memory.spec.ts`
 （先 `LQDP_PERF_PROBE=1`；判据取日志末尾 `RESULT:` 行）
@@ -257,7 +263,7 @@ Expected: PASS 且打印三行 `heap=… longTask=… reqs=…`，`tasks/rendere
 若 `reqs < 20`：说明滚动没触发取数（多半是 `.ag-center-cols-viewport` 选择器在这个主题下不对），
 先修探针再进 Task 2，**不要**把阈值改成迁就它。
 
-- [ ] **Step 5: 确认没把既有 spec 改坏，提交**
+- [x] **Step 5: 确认没把既有 spec 改坏，提交**
 
 Run: `cd frontend && npx playwright test --project=P1 e2e/data/view-data.spec.ts 2>&1 | tail -30`
 Expected: 全绿（证明抽 helper 没动行为）
@@ -280,7 +286,7 @@ git commit -m "test(e2e): 加渲染进程内存探针，openViewTab 抽成 helpe
 - Produces: 三个常数的**实测值**，Task 3 直接抄进 `blockCap.ts`：
   `CELL_PER_BLOCK_MAX`、`CELL_RETAIN_BUDGET`、`RETAIN_MIB_TARGET`
 
-- [ ] **Step 1: 采集两组列宽差异大的形状**
+- [x] **Step 1: 采集两组列宽差异大的形状**
 
 ETS88（1,728 列）之外再跑一只窄文件做对照，用来验算「窄文件行为必须不变」。**不改代码，只换 env**：
 先 `grep -n 'export const SEEDED_FILES' -A 24 e2e/fixtures/test-data.ts` 取一个列数最少（≤200 列）的键名，
@@ -288,7 +294,7 @@ ETS88（1,728 列）之外再跑一只窄文件做对照，用来验算「窄文
 Run: `LQDP_PERF_PROBE=1 LQDP_PROBE_FILE=<那个键> node ../scripts/e2e_pool.mjs --slots=1 -- data/renderer-memory.spec.ts`
 产物落在 `tasks/renderer-probe-<键名>.json`（Task 1 用 PROJECT_ROOT 拼路径，不会写到父检出）。
 
-- [ ] **Step 2: 把数字算成「每单元格堆字节」**
+- [x] **Step 2: 把数字算成「每单元格堆字节」**
 
 单元格数 = `行数 × 列数`。每块 100 行 × 1,728 列 = **172,800 格**。
 
@@ -301,7 +307,7 @@ CELL_RETAIN_BUDGET = floor(RETAIN_MIB_TARGET / mib_per_cell) ← 驻留总格数
 `RETAIN_MIB_TARGET` 起点 48 MiB，按 Q2 校准：**4 个标签同时驻留**必须让堆峰值低于生产机可用提交内存的
 十分之一（今天该机 commit 只剩 7.4 GB；4 × 48 = 192 MiB 远低于该量级，若实测远超预期就下调目标）。
 
-- [ ] **Step 3: 验算阈值能不能过（判据不许事后补）**
+- [x] **Step 3: 验算阈值能不能过（判据不许事后补）**
 
 把算出的 `CELL_RETAIN_BUDGET` 代进 Task 3 的公式，手算两行写进文档：
 
@@ -313,12 +319,12 @@ CELL_RETAIN_BUDGET = floor(RETAIN_MIB_TARGET / mib_per_cell) ← 驻留总格数
 
 窄文件算出来不是 20 ⇒ 阈值定错，回 Step 2 重算，**不许**放宽断言迁就它。
 
-- [ ] **Step 4: 写 baseline 文档**
+- [x] **Step 4: 写 baseline 文档**
 
 结构照 `docs/reference/perf-baseline-2026-10-17.md`：**只写有命令产出过的数字**，附复跑命令、
 原始 `tasks/renderer-probe.json` 摘录、上面三行的代入过程与最终常数。
 
-- [ ] **Step 5: 把两个常数写进 baseline 文档的「交付值」小节（本任务不改代码）**
+- [x] **Step 5: 把两个常数写进 baseline 文档的「交付值」小节（本任务不改代码）**
 
 `blockCap.ts` 是 Task 3 才创建的文件 ⇒ Task 2 **没有文件可回填**（原计划这一步写反了顺序）。
 本任务只交付数值与推导，Task 3 直接照抄：
@@ -331,7 +337,7 @@ CELL_RETAIN_BUDGET = floor(RETAIN_MIB_TARGET / mib_per_cell) ← 驻留总格数
 
 Run: `cd frontend && npx vitest run`（此步应无变化，仅确认文档没混进代码改动）
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add docs/reference/renderer-memory-baseline-2026-10-22.md
@@ -355,7 +361,7 @@ git commit -m "docs(reference): 渲染进程内存基线实测与块预算常数
   - `maxBlocksInCache(blockSize: number, colCount: number | null | undefined): number`
   - `BLOCK_SIZE_MIN`、`BLOCK_SIZE_MAX`、`DEFAULT_COL_COUNT`
 
-- [ ] **Step 1: 先写断言关系的单测（不钉死常数）**
+- [x] **Step 1: 先写断言关系的单测（不钉死常数）**
 
 断言只写「单调性、钳位、窄文件不变」，常数由 Task 2 决定 —— 这样 Task 2 改数不会让这里红。
 每条都带对照组（照 lessons「断言必须承重而不是全绿」）：
@@ -412,12 +418,12 @@ describe('maxBlocksInCache', () => {
 })
 ```
 
-- [ ] **Step 2: 跑到失败**
+- [x] **Step 2: 跑到失败**
 
 Run: `cd frontend && npx vitest run test/unit/blockCap.spec.ts`
 Expected: FAIL — `Failed to resolve import ".../blockCap"`
 
-- [ ] **Step 3: 写实现（常数取 Task 2 交付值；下面按实测 `mib_per_cell = 3.38e-5` 与 48 MiB 目标算好）**
+- [x] **Step 3: 写实现（常数取 Task 2 交付值；下面按实测 `mib_per_cell = 3.38e-5` 与 48 MiB 目标算好）**
 
 `CELL_RETAIN_BUDGET = floor(48 / 3.38e-5) = 1,420,118`；`CELL_PER_BLOCK_MAX = floor(预算 / 4) = 355,029`
 （**除以 4 是刻意的**：定成等于预算会让「一块吃满预算」，翻页退化成请求风暴）。
@@ -469,12 +475,12 @@ export function maxBlocksInCache(
 }
 ```
 
-- [ ] **Step 4: 跑到通过**
+- [x] **Step 4: 跑到通过**
 
 Run: `cd frontend && npx vitest run test/unit/blockCap.spec.ts`
 Expected: PASS 7 条。若「窄文件仍是 20 块」红 ⇒ Task 2 的常数偏小，回 Task 2 重算，别改断言。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add frontend/src/pages/data/components/browser/blockCap.ts frontend/test/unit/blockCap.spec.ts
@@ -501,7 +507,7 @@ git commit -m "feat(view-data): 块缓存预算纯函数（按单元格数封顶
 - Consumes: `effectiveBlockSize`、`maxBlocksInCache`（Task 3）、`props.files`（已存在，`DataManagement.vue:59` 传入，元素带 `col_count`，`src/api/datafiles.ts:47`）
 - Produces: 组件内 `blockSize`、`maxBlocks` 两个 computed/ref；无对外新导出
 
-- [ ] **Step 1: 先写会红的 e2e 断言**
+- [x] **Step 1: 先写会红的 e2e 断言**
 
 `DataBrowserAgGrid.vue` 目前**没有** `onActivated/onDeactivated`（只在 `:201` 有 `onUnmounted`、`:260` `onMounted`），
 且生产日志实测 `AG Grid: warning #26 ... grid has been destroyed` 两条。加断言：
@@ -524,7 +530,7 @@ test('@p1 切换文件标签不触发已销毁 grid 的 AG Grid #26 警告', asy
 同时给 `nav.ts` 加与 `collectConsoleErrors` 同形的 `collectConsoleWarnings`（若上面的内联监听已够，就不加，
 避免无人使用的导出）。
 
-- [ ] **Step 2: 跑到失败**
+- [x] **Step 2: 跑到失败**
 
 Run: `cd frontend && npx playwright test --project=P1 e2e/data/view-data.spec.ts -g '#26' 2>&1 | tail -20`
 Expected: FAIL，数组里含 `purgeInfiniteCache() cannot be called as the grid has been destroyed`
@@ -532,7 +538,7 @@ Expected: FAIL，数组里含 `purgeInfiniteCache() cannot be called as the grid
 **这一步绿了就不许往下走**：断言必须先在未改动的代码上真红，才证明它承重（照 lessons
 「基线绿≠断言承重」）。红不出来就换触发动作（切 fileId → 关标签 → 立刻再开），直到它红。
 
-- [ ] **Step 3: 接线**
+- [x] **Step 3: 接线**
 
 `DataBrowserAgGrid.vue` 五处改动，逐处给旧→新。
 
@@ -606,14 +612,14 @@ onDeactivated(() => {
 >降页</span>
 ```
 
-- [ ] **Step 4: 跑到通过 + 全量目检**
+- [x] **Step 4: 跑到通过 + 全量目检**
 
 Run: `cd frontend && npx vitest run && npx playwright test --project=P1 e2e/data/view-data.spec.ts 2>&1 | tail -25`
 Expected: vitest 全绿；view-data 档全绿（含新的 #26 断言）。
 再手工起 `npm run electron:dev`，在 dark 与 light 主题各开一次千列表，确认提示文案可读、
 滚动仍能连续取数（cap 生效后翻到第 5 页不该卡住）。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add frontend/src/pages/data/DataBrowserAgGrid.vue frontend/e2e/data/view-data.spec.ts
@@ -640,7 +646,7 @@ git commit -m "fix(view-data): 块缓存按列数封顶、非激活标签释放�
 - Consumes: 无新依赖
 - Produces: 约定「keep-alive 路由页只用 `onActivated` 做首拉」，Task 6 沿用
 
-- [ ] **Step 1: 写计数断言（红）**
+- [x] **Step 1: 写计数断言（红）**
 
 `MainLayout.vue:12` 是 `keep-alive :max="10"`，首次进入 `mounted` 与 `activated` **都**触发 ⇒ 生产实测
 `files/?page_size=9999` 一次导航 2 条。新增断言钉死为 1 条：
@@ -658,12 +664,12 @@ test('@p1 进数据管理页只发一次全量文件列表', async ({ page }) =>
 })
 ```
 
-- [ ] **Step 2: 跑到失败**
+- [x] **Step 2: 跑到失败**
 
 Run: `cd frontend && npx playwright test --project=P1 e2e/data/file-list-completeness.spec.ts -g '只发一次' 2>&1 | tail -15`
 Expected: FAIL — `Received length: 2`
 
-- [ ] **Step 3: 只留 `onActivated`（5 个页面同法）**
+- [x] **Step 3: 只留 `onActivated`（5 个页面同法）**
 
 ```typescript
 // DataManagement.vue：删掉 :236 的 onMounted(loadFiles)
@@ -675,13 +681,13 @@ onActivated(loadFiles)
 （例如 `SftpBrowser.vue:285` 的 `checkLastVisit()` 与 `loadTimeout()` 要一起进 `onActivated`，
 因为两者都是「进页面才知道」的状态初始化；逐个读一遍再删，别机械删半边）。
 
-- [ ] **Step 4: 跑到通过**
+- [x] **Step 4: 跑到通过**
 
 Run: `cd frontend && npx playwright test --project=P1 e2e/data/file-list-completeness.spec.ts e2e/data/view-data.spec.ts 2>&1 | tail -25`
 Expected: 全绿。若某页首次进入空白 ⇒ 说明那页在 keep-alive 之外渲染，回退该页为
 `onMounted` 单用并把断言改成该页专属计数（**逐个页面判断，不许一把梭**）。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add frontend/src/pages/data/DataManagement.vue frontend/src/pages/analysis/AnalysisPage.vue frontend/src/pages/dashboard/DashboardPage.vue frontend/src/pages/sftp/SftpBrowser.vue frontend/src/pages/sftp/SftpSearchPage.vue frontend/e2e/data/file-list-completeness.spec.ts
@@ -711,7 +717,7 @@ git commit -m "perf(pages): keep-alive 页去重首屏请求，导航期不再�
   - 取不到设置时的回退值与今天逐个模块的初值一致（renderer 回 `'svg'` 等），且**失败后不再重试**——
     今天 `echarts-theme.ts:44-51` 的注释写死了这个口径，丢了它就会退化成每次导航都重试的请求风暴。
 
-- [ ] **Step 1: store 的单测（T2，mock 掉 api 模块）**
+- [x] **Step 1: store 的单测（T2，mock 掉 api 模块）**
 
 承重设计：断言「N 个并发 `ensure()` 只发 1 次 GET」「reset 后确实重发」「GET 失败后**不**再重试」
 「save 只 PUT 脏字段」——四条都是今天日志的反面或今天的既有语义，缺任何一条都算不承重。
@@ -784,12 +790,12 @@ describe('userSettings store', () => {
 })
 ```
 
-- [ ] **Step 2: 跑到失败**
+- [x] **Step 2: 跑到失败**
 
 Run: `cd frontend && npx vitest run test/unit/userSettings.spec.ts`
 Expected: FAIL — 模块不存在
 
-- [ ] **Step 3: 写 store**
+- [x] **Step 3: 写 store**
 
 ```typescript
 // frontend/src/stores/userSettings.ts
@@ -886,7 +892,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   })
 ```
 
-- [ ] **Step 4: 四个 scalar util 改为读 store（对外签名一字不改）**
+- [x] **Step 4: 四个 scalar util 改为读 store（对外签名一字不改）**
 
 以 `echarts-theme.ts` 为模板。现状是模块级 `_chartRenderer` + `_rendererFetched` + `_rendererPromise`
 三个变量（`:17-19`）与 `ensureChartRenderer`（`:53-67`）；改后：
@@ -918,7 +924,7 @@ export function setChartRenderer(renderer: 'svg' | 'canvas'): void {
 `stores/auth.ts`：删掉 `:4-9` 里 5 个 `resetXxxCache` 的 import 与 `:23-27`、`:77-81` 的调用，
 换成一次 `useUserSettingsStore().reset()`。
 
-- [ ] **Step 5: `useChartMemory.ts`、网格、设置页走 store**
+- [x] **Step 5: `useChartMemory.ts`、网格、设置页走 store**
 
 - `useChartMemory.ts`：只把 `:60-94` 里那次 `getSettings()` 换成 `store.ensure()` + 读 `store.raw`；
   它自己的 debounce 定时器（`:96-109`）、`pagehide` keepalive 冲刷（`:155-166`）、
@@ -931,7 +937,7 @@ export function setChartRenderer(renderer: 'svg' | 'canvas'): void {
   改为 `onMounted` 载入后存一份 `loaded` 快照，`saveSettings` 只把 `!== loaded` 的键交给 `store.save()`；
   一个键都没变就**不发** PUT，并把保存按钮在该状态下置 disabled（语义变化要可见）。
 
-- [ ] **Step 6: 跑到通过**
+- [x] **Step 6: 跑到通过**
 
 Run: `cd frontend && npx vitest run 2>&1 | tail -12`
 Expected: 全绿。
@@ -944,7 +950,7 @@ Expected: 全绿。
 预计还要一起维护的 spec：`settings/{page-size,chart-memory,export-timeout,sftp-timeout,hidden-columns,
 cpk-thresholds,export-templates,settings}.spec.ts`（各自 seed 或断言 settings 读写）。
 
-- [ ] **Step 7: 实测「一次导航只发一次 settings」**
+- [x] **Step 7: 实测「一次导航只发一次 settings」**
 
 在 Task 5 Step 1 那条 spec 里加同形计数：
 
@@ -960,7 +966,7 @@ cpk-thresholds,export-templates,settings}.spec.ts`（各自 seed 或断言 setti
 Expected: 首屏 GET 恰 1 次（今天生产实测 2–6 次）。多出来的一定是某个仍在自取的模块，顺着请求 initiator
 找它，别把断言改成 `toBeLessThanOrEqual(6)`。
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add frontend/src/stores/userSettings.ts frontend/test/unit/userSettings.spec.ts frontend/src/utils/ frontend/src/composables/useChartMemory.ts frontend/src/pages/data/DataBrowserAgGrid.vue frontend/src/pages/settings/SettingsPage.vue frontend/src/stores/auth.ts
@@ -976,26 +982,26 @@ git commit -m "refactor(frontend): /auth/settings/ 收敛为单一 store，导�
 - Modify: `docs/tasks/todo.md`（本批结论与遗留）
 - Modify: `docs/tasks/lessons.md`（追加当日条目）
 
-- [ ] **Step 1: 探针复跑（整改后）**
+- [x] **Step 1: 探针复跑（整改后）**
 
 Run: `LQDP_PERF_PROBE=1 node scripts/e2e_pool.mjs --slots=1 -- data/renderer-memory.spec.ts`
 Expected: PASS；把三行数字与 Task 2 的「整改前」并排写进 baseline 文档，**两栏都标 cap 生效后的实际块数**
 （cap 变了，`reqs.length` 也会变，不标注就等于换了两个变量还叫「对照」）。
 
-- [ ] **Step 2: 全量池 + 后端全套**
+- [x] **Step 2: 全量池 + 后端全套**
 
 Run: `node scripts/e2e_pool.mjs --slots=4`
 Expected: 日志末尾 `RESULT: PASS`（判据取 `RESULT:` 行，不取 `$?`）。存量红按
 `docs/reference/testing-gates.md` 的定性流程走父检出 master 对照，别当场归因给本批。
 
-- [ ] **Step 3: 回填与教训**
+- [x] **Step 3: 回填与教训**
 
 `docs/tasks/todo.md` 追加一节：实测表、四个常数、哪些 e2e 因 GLOBAL 档重排、遗留（B/C/D 三项仍未做，
 以及「切走的标签切回来要重新取数」这一体验代价）。`docs/tasks/lessons.md` 只记**教训形状**，
 不抄数字：本轮值得写的是「同一 URL 同一体积在空闲/挂载后差 200 倍 ⇒ 归因前先拆后端段与渲染段」
 与「AG Grid 的 maxBlocksInCache 是 cache 创建时的快照，改 prop 不重建 cache 就不生效」。
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```bash
 git add docs/reference/renderer-memory-baseline-2026-10-22.md docs/tasks/todo.md docs/tasks/lessons.md
