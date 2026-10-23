@@ -157,10 +157,9 @@ DEBUG_*.md
 /docs/specs/
 /docs/tasks/*.bak-*.md
 /docs/user-guide/
-# AI 助手与样式指南文档
-# apps/CLAUDE.md、frontend/CLAUDE.md 是模块架构与命名约定正文，README「项目文档」直接链到它们，已改入库
-frontend/LIGHT_THEME_STYLE_GUIDE.md
-frontend/NIGHT_THEME_STYLE_GUIDE.md
+# AI 助手与样式指南文档：apps/CLAUDE.md、frontend/CLAUDE.md 与两份 THEME_STYLE_GUIDE 已改入库——
+# 前者被 README「项目文档」直接链到，后者被入库的 docs/reference/ui-design-guide.md:473
+# 按路径引为「已被取代的历史理念」，整段忽略就让这些引用在 clone 后指向不存在的文件
 # 前端模板占位文件与未使用资源
 frontend/README.md
 frontend/src/assets/vite.svg
