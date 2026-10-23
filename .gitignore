@@ -112,7 +112,11 @@ frontend/e2e/.downloads/
 
 # ================== Project artifacts ==================
 # 工具/IDE 配置
-.claude/
+# .claude/* 是本机产物（settings.local.json、do-tasks、worktrees、agent-memory），继续忽略；
+# 但 .claude/CLAUDE.md 是代理工作流规则的唯一正文、AGENTS.md「会话开始必读」第 1 条指它，
+# 整目录忽略会让换机器 clone 后那条路径不存在（testing-gates 入库时就是同一个根因），故单独放行。
+.claude/*
+!.claude/CLAUDE.md
 .skills/
 .trae/documents/
 .data/
@@ -154,8 +158,7 @@ DEBUG_*.md
 /docs/tasks/*.bak-*.md
 /docs/user-guide/
 # AI 助手与样式指南文档
-apps/CLAUDE.md
-frontend/CLAUDE.md
+# apps/CLAUDE.md、frontend/CLAUDE.md 是模块架构与命名约定正文，README「项目文档」直接链到它们，已改入库
 frontend/LIGHT_THEME_STYLE_GUIDE.md
 frontend/NIGHT_THEME_STYLE_GUIDE.md
 # 前端模板占位文件与未使用资源
