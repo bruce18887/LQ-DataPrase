@@ -41,7 +41,7 @@ LQDP_PERF_PROBE=1 LQDP_PROBE_FILE=STS8200_CP LQDP_PROBE_PAGE_SIZE=500 PYTHON_BIN
 |---|---|---|
 | `LQDP_PROBE_FILE` | `ETS88_FT` | 被测文件键（`frontend/e2e/fixtures/test-data.ts:50-68`） |
 | `LQDP_PROBE_PAGE_SIZE` | `50` | 每块行数 = 探针自己钉的账号设置（50..500）。**分母就是它 × 列数** |
-| `LQDP_PROBE_BLOCKS` | `20` | 翻满的**请求**块数。整改前 = `DataBrowserAgGrid.vue:69` 写死的 `maxBlocksInCache=20`；Task 4 之后驻留上限是动态的（ETS88@50 = 16，见 §11），**翻 20 块不再等于驻留 20 块** |
+| `LQDP_PROBE_BLOCKS` | `20` | 翻满的**请求**块数。整改前 = `cd1af05` 那棵树里 `DataBrowserAgGrid.vue` 写死的 `:maxBlocksInCache="20"`（该行当时在 :69）；Task 4 之后驻留上限是动态的（ETS88@50 = 16，见 §11），**翻 20 块不再等于驻留 20 块** |
 | `LQDP_PROBE_TABS` | `CTA8290D_FT,BUYOFF_FT,CTA8280F_FT` | 标签 2..4 的文件（同一 fileId 开不出两个标签，Task 1 报告 §4.4） |
 
 产物里的 `shape` 段自带分母（`probeKey/rowsPerBlock/blocks/colCount/totalRows/cellsPerBlock/tabs`），
@@ -61,7 +61,8 @@ brief Step 1 要求「列数最少（≤200 列）的种子文件」。种子清
 | | | | `ETS88_FT` | 1,728 | 1,436 |
 
 选 `STS8200_CP`（最窄 45 列），且它 14,174 行 ⇒ **`BLOCKS` 不用降**：形状可行性判据是探针自己的
-承重前置③ `totalRows ≥ BLOCKS × rowsPerBlock`（`renderer-memory.spec.ts:373-376`），
+承重前置③ `totalRows ≥ BLOCKS × rowsPerBlock`（`renderer-memory.spec.ts` 里消息为
+「文件只有 … 行，装不下 … 块 × … 行」那条 `expect`），
 20×50=1,000 与 20×500=10,000 都装得下，所以既没改 spec 也没放宽任何东西。
 对照：宽形状那只 `ETS88_FT` 只有 1,436 行 ⇒ 生产 `page_size=100` 时整表只有 15 页（末页 36 行），
 「20 块满缓存」这个形状在生产设置下**不存在**，所以探针把块大小钉在 50（Task 1 报告 §4.5，收尾写回原值）。
@@ -194,7 +195,7 @@ budget=1420118  budget//4=355029  budget//(100*142)=100  budget//(100*1728)=8
 | `RETAIN_MIB_TARGET` | 初值，按 §5 校准 | **48**（MiB） | 单表驻留目标 |
 | `mib_per_cell` | §4 | **3.38e-5** MiB/格（≈35 B/格） | 宽形状实测单价 |
 | `CELL_RETAIN_BUDGET` | `floor(48 / 3.38e-5)` | **1,420,118** 格 | 驻留总格数上限 |
-| `CELL_PER_BLOCK_MAX` | `floor(1,420,118 / 4)` | **355,029** 格（≈12.0 MiB） | 单块格数上限 |
+| `CELL_PER_BLOCK_MAX` | `floor(1,420,118 / 4)` | **355,029** 格（≈12.0 MiB） | 单块格数**目标**；`effectiveBlockSize` 另有 50 行下限 ⇒ 列数 > 约 7,100（`355,029 ÷ 50 = 7,100.58`）时下限赢，实际格数可超此值（10,000 列 ⇒ 500,000 格） |
 
 **为什么除以 4**：若 `CELL_PER_BLOCK_MAX = CELL_RETAIN_BUDGET`，一块就吃满预算 ⇒ ETS88 在
 `page_size=500` 时 `cap=1`，每翻一页都要发请求 —— 与 `apps/datafiles/views/browse_views.py:93`
@@ -372,7 +373,8 @@ LQDP_PERF_PROBE=1 LQDP_PROBE_FILE=STS8200_CP LQDP_PROBE_PAGE_SIZE=500 PYTHON_BIN
 `probeKey/rowsPerBlock/blocks/colCount/totalRows/cellsPerBlock/tabs` 七个键）。两栏的 cap 各取其源：
 「前」= 产生它的那棵树的字面量（`git show cd1af05:frontend/src/pages/data/DataBrowserAgGrid.vue` 第 69 行
 `:maxBlocksInCache="20"`，写死）；「后」= 入库公式 `blockCap.maxBlocksInCache(50, 1728)`
-= `min(20, floor(1,420,118 / 86,400))` = **16**（`frontend/src/pages/data/components/browser/blockCap.ts:54-62`）。
+= `min(20, floor(1,420,118 / 86,400))` = **16**（函数在 `frontend/src/pages/data/components/browser/blockCap.ts`，
+以符号名为准 —— 该文件本轮又被加过注释行，行号会漂）。
 驻留块数按 ag-grid 自己的 `blocksToKeep = maxBlocksInCache − 1` + 当前块（`main.cjs.js:55995`）
 ⇒ 前 20 块、后 16 块，Δ 分别是 19 次与 15 次增量。
 
@@ -442,7 +444,8 @@ Task 2 原件整套在 `tasks/t7-keep/`）。**本轮没有**在生产机 / Elec
 `cursor: help`，鼠标悬停出 tooltip；文案用的是双主题都有取值的 `.text-secondary`，没新增 CSS）。
 
 > **默认每页行数**：这是**上限**而不是实际值。当文件的列数很多时，系统会按内存预算自动压低实际每页行数
-> （一页最多约 35.5 万单元格）。例如 1,728 列的文件，设置 500 行时实际只取 **205** 行；设置 100 行时不变。
+> （单块**目标** ≤ 约 35.5 万格，但每块不低于 50 行 ⇒ 列数超过约 7,100 时该下限让位，单块格数可超预算）。
+> 例如 1,728 列的文件，设置 500 行时实际只取 **205** 行；设置 100 行时不变。
 > 压低时表格上方会显示实际值「每页 205 行」，鼠标悬停可看到「该文件 1,728 列：每页行数已从 500 降为 205 以控制内存」。
 > 该设置本身不会被改写，只是这一张表的取数被压低。列数未知时不压低。
 > 同时，驻留的历史块数也按列数封顶（最多 20 块，宽文件更少），所以上下滚动的可回看范围在超宽文件上会比以前小。

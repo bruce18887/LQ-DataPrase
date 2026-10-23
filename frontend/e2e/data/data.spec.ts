@@ -893,8 +893,8 @@ test.describe('数据管理 /data 已导入批次展开/折叠', { tag: ['@data'
  *
  * 判据口径（lessons R2④）：计数器必须装在 `goto` **之前**（响应早于注册就永远漏计）。
  * 发起方唯一性由全仓 grep 保证 —— `frontend/src` 里 `page_size: 9999` 只出现在
- * `DataManagement.vue:187` 一处；`/browse/?…page_size=99999` 与本正则不同形（`(&|$)`
- * 卡住位数），`helpers/cleanup.ts` 走 `page.request`（API 上下文，不经 frame，
+ * `DataManagement.vue` 的 `loadFiles()` 那一处（按符号名定位，那个文件注释一改行号就漂）；
+ * `/browse/?…page_size=99999` 与本正则不同形（`(&|$)` 卡住位数），`helpers/cleanup.ts` 走 `page.request`（API 上下文，不经 frame，
  * 不产生 `page` 的 request 事件）。行选择器沿用本文件 :29 的
  * `.content-section:visible .el-table .el-table__row`（默认「文件列表」tab 才可见）。
  *

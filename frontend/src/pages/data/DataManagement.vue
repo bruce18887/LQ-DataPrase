@@ -49,9 +49,12 @@
           @close="closeViewTab"
           @add="addViewTab"
         />
-        <!-- everActive 门控挂载：没被点开过的标签不发请求（每实例一次 /summary/，由
-             DataQualityBar 发；账号设置在 Task 6b 后走 stores/userSettings，整个文档只由
-             路由守卫拉一次 ⇒ 四个标签首挂是 4 发 /summary/（ag-grid 块请求另计），不是改前的 8 发）；
+        <!-- everActive 门控挂载：没被点开过的标签**一个请求都不发**（v-if 挡在组件之前）；
+             每份挂起来的实例 = 一次 /summary/（由 DataQualityBar 发）+ 它自己的 ag-grid 块请求。
+             账号设置在 Task 6b 后走 stores/userSettings，全文档只由路由守卫拉一次，与标签数无关。
+             ⇒ 标签开满时 /summary/ 的上限是 VIEW_TAB_MAX(=4) 发。这是**上限口径、不是实测**：
+             本轮没数过单次导航的 /summary/ 条数，也没有守卫钉它
+             （在册：docs/tasks/todo.md「整改后遗留清单」的「/summary/ 请求数无守卫」那条）。
              v-show 切换保住各实例的滚动位置 -->
         <template v-for="t in viewTabs" :key="t.id">
           <DataBrowserAgGrid
@@ -115,7 +118,8 @@ const activeTab = ref('files')
 const filesStore = useFilesStore()
 
 // ── 查看数据的多文件标签页 ──
-// 上限 4：每份表格实例是一个 ag-grid（IRM 缓存 maxBlocksInCache=20 × blockSize）
+// 上限 4：每份表格实例是一个 ag-grid（IRM 驻留上限按列数动态：窄文件仍是 20 块，
+// 宽文件由 blockCap.maxBlocksInCache 压低，× blockSize）
 // + 一次 /summary/（DataQualityBar）。账号设置自 Task 6b 起不再是每实例一发 ——
 // 全文档只有路由守卫那一次 GET（stores/userSettings），与标签数无关。
 // 再往上加收益递减、内存与请求数线性涨。

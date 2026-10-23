@@ -88,7 +88,6 @@ def literal_sets_by_carrier(pattern: str, carriers) -> dict:
     return found
 
 
-
 def read(path: str) -> str:
     with open(path, encoding='utf-8') as fh:
         return fh.read()
