@@ -1501,56 +1501,71 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
   })
 
   /**
-   * 生命周期回归（生产实测 2026-10-22 06:45:39 两条 `AG Grid: warning #26`）。
+   * 生命周期回归（生产实测 2026-10-22 06:45:39 两条 `AG Grid: warning #26`）——
+   * **本条钉的是 `liveGridApi()` 里 `isDestroyed()` 那道闸**（2026-10-23 收口评审 B 项重写）。
    *
-   * 形状：`gridApi` 由 `onGridReady` 赋值（composables/useBinCellMenu.ts:39-41）**且从不置空**，
-   * 而「账号设置 → 默认每页行数」是在 `onMounted` 里 await 回来后才套用的
-   * （applyBlockSize → purgeInfiniteCache）。标签在设置响应落地**之前**被关掉，续体就会打在
-   * 已销毁的 grid 上 ⇒ 控制台一条 #26。行没被销毁时它只是个多余 purge，看不出来。
+   * 为什么要重写（旧写法已经**不可能失败**）：它靠「`onMounted` 里被 route stall 拖住的设置
+   * 续体在标签关闭之后落地 ⇒ applyBlockSize → purgeInfiniteCache 打在已销毁实例上」构造那一发
+   * 调用，而 Task 4 刻意删掉了 applyBlockSize 里的 purge（块大小变化改由 ag-grid 按
+   * `cacheBlockSize` 属性自己 `resetCache`，见 `useIrmSizing.applyBlockSize` 的注释）⇒
+   * 那条续体现在**一个 grid 调用都不发**，`warns` 恒空，把守卫整段删掉本用例照样绿。
+   * 台账（`docs/tasks/todo.md`「整改后遗留清单」）此前把它记成「注释过时」，定性错了：丢的是护栏。
    *
-   * 两个前置不是可选的（缺任一条本用例在未修复代码上**必绿＝假绿**，实测记录见
-   * tasks/ 报告）：① page_size 必须 ≠ 初值 100 —— 相等时 applyBlockSize 提前 return，
-   * 根本走不到 purge；② 必须把那条 GET 拖住（route stall），否则「挂载→关标签」的窗口
-   * 只有几十毫秒，靠 Playwright 的手速撞它 = flaky。
+   * 现在的形状走同一族里真正会打已销毁实例的那条（= `isDestroyed()` 当初被加进来的理由）：
+   * `DataBrowserAgGrid.vue` 用 `v-if="!fileId"` / `v-else` 挂 grid，所以「`/browse/` 404 ⇒
+   * `clearGrid()` + `emit('file-missing')` ⇒ `DataManagement.onFileMissing` 把该标签 fileId
+   * 置空」只销毁 grid、组件仍挂载 ⇒ `gridAlive` 留 true、`gridApi` 是非 null 的陈旧引用
+   * （`useBinCellMenu.ts` 从不置空）。之后把 section 切走 = `watch(() => props.active)` 为
+   * false → `purgeCacheIfAlive()`，这一发正是没有那道闸时会打到销毁实例上的调用
+   * （ag-grid 的 `apiFunctionSvc` 在 destroy 后把 `fns` 换成只含 `isDestroyed` 等的
+   * `defaultFns` ⇒ 其它 api 函数一律走 `apiNotFound` → `_warn(26)`）。
    *
-   * ⚠ 分工（别把本用例读成「生命周期守卫都靠 e2e」）：本条钉的是**时序**（异步续体在卸载后
-   * 落地），下面那条「窄→宽」钉的是**purge 删除**（换文件只留一发 page=1）。而
-   * `liveGridApi()` 里 `isDestroyed()` 那道闸（grid 先于组件销毁：清横幅 / 404）在本文件里
-   * **没有射程** —— 那种情形下不存在会被它挡住的未销毁调用，删掉守卫这两条仍全绿，
-   * 只有 T2 `test/unit/useIrmSizing.spec.ts` 钉得住。
+   * 两条前置都承重，缺任一条本用例退化成空断言：
+   * ① 先证 grid **真的没了**（`.el-empty` 出现 + `.ag-root` 归零），组件还活着；
+   * ② 真的把 section 切走一次 —— 那是这个形状里唯一会打到陈旧 api 的入口。
+   *
+   * ⚠ 分工（别把本用例读成「生命周期守卫都靠 e2e」）：`markGridDead`（组件卸载）那一半仍只由
+   * T2 `test/unit/useIrmSizing.spec.ts` 钉；下面那条「窄→宽」钉的是 purge 删除（换文件只留
+   * 一发 page=1）。本条补的是第三半，也是 e2e 唯一有射程的那半。
    */
-  test('@p1 关闭标签时不触发已销毁 grid 的 AG Grid #26 警告', async ({ page }) => {
+  test('@p1 404 销毁 grid 后切走 section，不触发 AG Grid #26 警告', async ({ page }) => {
     const warns: string[] = []
     page.on('console', (m) => {
       if (m.type() === 'warning') warns.push(m.text())
     })
 
-    // 设置必须在挂载之前落库（网格是 onMounted 才读它），所以先 goto 再 PUT 再装 stall
-    await gotoApp(page, '/dashboard')
-    const original = await readPageSize(page)
-    await putPageSize(page, 200)
+    await openViewTab(page, SEEDED_FILES.GAGE_S1)
+    const scope = viewScope(page)
+    await expect(scope.locator('.ag-root').first()).toBeVisible({ timeout: 30_000 })
+
+    // 下一发 /browse/ 一律 404（reload 会 purge 后重新取首块，所以一定打出去）
+    await page.route(/\/api\/v1\/browse\//, (route) =>
+      route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: '{"detail":"not found"}',
+      }),
+    )
     try {
-      await page.route(/\/auth\/settings\/?$/, async (route) => {
-        await new Promise((r) => setTimeout(r, 3_000))
-        await route.continue()
+      await scope.getByRole('button', { name: /加载数据/ }).click()
+
+      // 前置①：grid 已销毁、组件仍挂载（没有这一段，下面的断言量的就是「什么都没发生」）
+      await expect(scope.locator('.el-empty:visible')).toContainText('请先在上方选择文件', {
+        timeout: 15_000,
       })
+      await expect(scope.locator('.ag-root')).toHaveCount(0)
 
-      await openViewTab(page, SEEDED_FILES.GAGE_S1)
-      // 关掉标签需要场上有两个标签（closeViewTab 在只剩一个时直接 return）
-      await viewScope(page).locator('.vf-tab--add').click()
-      await expect(viewScope(page).locator('.vf-tab:not(.vf-tab--add)')).toHaveCount(2)
-      await viewScope(page).locator('.vf-tab:not(.vf-tab--add)').nth(0).locator('.vf-tab__close').click()
-      await expect(viewScope(page).locator('.vf-tab:not(.vf-tab--add)')).toHaveCount(1)
+      // 前置②：切走 section ⇒ props.active 变 false ⇒ purgeCacheIfAlive()
+      await page.locator('.tab-btn').filter({ hasText: '文件列表' }).click()
+      await expect(page.locator('.tab-btn.active')).toContainText('文件列表')
+      await page.waitForTimeout(1_000) // 给 console 事件一点投递时间（守卫缺席时 #26 就在这一下）
 
-      // 等被拖住的设置续体落地（3s stall + 余量）；不等到它就没断言承重
-      await page.waitForTimeout(4_000)
       expect(
         warns.filter((w) => /#26|has been destroyed/.test(w)),
         `不该再有已销毁 grid 的调用，实测警告：\n${warns.join('\n')}`,
       ).toEqual([])
     } finally {
-      await page.unroute(/\/auth\/settings\/?$/)
-      await putPageSize(page, original ?? 100)
+      await page.unroute(/\/api\/v1\/browse\//)
     }
   })
 
