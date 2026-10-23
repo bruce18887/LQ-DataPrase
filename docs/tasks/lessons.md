@@ -2539,3 +2539,37 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   ② 评审必须用**显式路径**跑 grep 并报告**命中条数** —— 坏 pathspec 的 "No files found" 不是干净，
      `-q` 的零退出也不是干净，只有「扫了哪些文件 + 命中 0」才算；
   ③ 主控在**每次提交后**自己再数一遍（评审的计数不能代替提交后的复核），同时复核提交身份没被改写。
+
+## 2026-10-23 OS 从「未定」拍成 Linux：三处静默退化，和一条「断言值」挡不住「删实参」的判据
+
+- **现象**：逐项核查后，Linux 上会退化但**不报错**的有三处 ——
+  ① `apps/jobs/executor.py` 建池不传 `mp_context`，Windows 默认 spawn、Linux 默认 fork
+  （CPython 3.13 文档；3.14 起 Linux 默认还要改成 forkserver）⇒「子进程里没有 `django.setup()`」
+  这条整片作业化设计的地基，从运行时保证降级成口头约定；
+  ② `apps/export/fonts.py` 的 matplotlib 候选里 SimHei/雅黑/宋体都是 Windows 随附字族，
+  Linux 上全落空只剩 DejaVu Sans（无中文字形）⇒ 导出图的中文标题变豆腐块，**文件照样生成成功**；
+  ③ 托管形态：`runserver` 无守护、无请求超时、无 TLS。
+- **根因形状**：三处同源 —— **默认值换台机器就不是同一个值**，而仓里的注释（`chart_workers.py`、
+  `histogram_grid.py` 直接写「Windows spawn」）、判据与部署文档都按开发机那一份默认写
+  （指南 §3/§4 一路是 cmd 的 `set X=…` 和 `D:\bak`，没人跑得动也没人报）。
+- **规则 1：判据要断「实参存在」，不是「值正确」**。
+  `assertEqual(pool._mp_context.get_start_method(), 'spawn')` 在 Windows 上
+  **删掉 `mp_context=` 也照样绿**（默认本来就是 spawn）⇒ 那是条空判据。改成截住构造函数、
+  断言 `captured` 里有没有 `mp_context` 这个键，两个平台都能红
+  （`apps/jobs/tests_jobs.py::test_pool_mp_context_is_pinned_not_left_to_default`）。
+  同族第二刀：老判据「DejaVu 之前必须有中文字族」在纯 Windows 候选下恒绿，
+  补一条「DejaVu 之前必须有 Linux 装得到的字族」才有承重（`test_non_windows_cjk_candidate_exists`）。
+- **规则 2：部署文档每条命令都要真跑一遍**。把 §3/§4 换成 bash + systemd 后实跑才暴露：
+  systemd `EnvironmentFile` **不剥行内注释**（`KEY=v # 注` 会把「# 注」读进值）；
+  服务器档 `backup_db` 固定打一条「未携带 secret.key…」警告（是预期，不是失败）；
+  首启必有一条 `Accessing the database during app initialization` RuntimeWarning ——
+  它来自 `apps/jobs/apps.py:ready()`：`_is_offline_command()` 取 `sys.argv[1]` 去撞离线名单，
+  而 `python standalone.py --host …` 的第二个词是 `--host`（或干脆没有），名单里都没有
+  ⇒ 判不出离线命令 ⇒ 开机一定查一次库收僵尸作业（这方向是模块头明写的 fail-safe）。
+  同轮补了一条原来只在文档里「断言」的权限判据：`viewer` 读 `/api/v1/system/paths/` 得 403 ——
+  但 403 单独不说明闸门生效（认证失效也长同一个样），必须带对照：**同一个 viewer 的 token
+  读 `/api/v1/auth/profile/` 返回 200**，才把「权限闸门命中」和「根本没登录」分开。
+- **规则 3：「装了字体」不等于「matplotlib 认得」**。Linux 侧它靠 `fc-list` 枚举系统字体，
+  且把 `.ttc` 当**单个**字体读（`FontEntry` 里没有 face_index 概念，读 3.10.9 源码确认）
+  ⇒ 集合第一面之外的字族名注册不到。所以指南把「用服务账号打印 `fontManager.ttflist`」写成
+  必做自检，而不是往候选列表里堆名字 —— 列表里加一个装不存在的族名，只是把失败推迟到出图那一刻。
