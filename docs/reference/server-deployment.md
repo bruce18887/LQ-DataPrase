@@ -90,13 +90,16 @@ python manage.py backup_db --dest D:\bak --keep 30
    / 找一台反代 / 其它。这是一个安全姿态决定，需要负责人拍板，不由代码默认替您决定。
 2. **已存的 SFTP 口令不会跟着库走**。2026-10-14 实测：既有那条存密是用 `base.py` 里写死的
    **开发期默认密钥**加密的；而且开发档与打包档的 KDF 参数不同
-   （`crypto.py:32-33` 的 `dataphrase.sftp.config`/390k vs `standalone.py:170-173` 的 `sftp-config`/100k），
+   （`apps/sftp/crypto.py:32-33` 的 `dataphrase.sftp.config`/390k vs 打包档
+   `config/settings/standalone.py` 里 `SFTP_CONFIG_KEY` 的 PBKDF2 派生块：`sftp-config`/100k），
    **换档即解不开**。服务器档因此要求显式给定 `SFTP_CONFIG_KEY`、不给回落。
    后果：从桌面/dev 搬过来的 `sftp_sftpconfig` 行在新档下解不开 → **请在服务器上重新录入 SFTP 配置**
    （与"服务器从头开始"的既定口径一致）。若要保留旧 token，需要单独做一次 re-key（旧 key 解、新 key 存）。
 3. **单次 browse 一块最多 500 行**（与账号设置「默认每页行数」的上限同源）。直连接口要更多会被钳回 500。
-   2026-10-23 起还要**再按列数钳一次**：一块最多约 35.5 万个单元格（渲染进程内存预算，见
-   `docs/reference/renderer-memory-baseline-2026-10-22.md` §6/§11），所以 4,000 列的文件即使设置 500 行
+   2026-10-23 起还要**再按列数钳一次**：单块**目标** ≤ 约 35.5 万个单元格（渲染进程内存预算，见
+   `docs/reference/renderer-memory-baseline-2026-10-22.md` §6/§11），但 `blockCap.effectiveBlockSize`
+   同时保证**每块不低于 50 行** ⇒ 列数超过约 **7,100**（`355,029 ÷ 50 = 7,100.58`）时该下限让位，
+   单块格数**可以超预算**（10,000 列就是 50 × 10,000 = 500,000 格）。所以 4,000 列的文件即使设置 500 行
    也只取 88 行一块；窄文件（列数少）不受影响，仍是纯的行上限。驻留的历史块数同样按单元格预算封顶（最多 20 块）。
    百兆链路下前端默认块 100 行 ≈1.2MB ≈0.1–0.2s，够用；大文件的导出下载才是真流量，导出侧的
    定向压缩尚未做（见 spec §5）。

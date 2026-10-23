@@ -40,7 +40,8 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
    * 派发出去的 .then/.catch/.finally**，于是三族串值/回滚都可达：
    * ① 切账号后旧账号的 GET **或 PUT** 响应照样写 `raw` 并把 `settled` 置真（此后整页不再取数）；
    *    桌面版是同一文档 —— `forceLogout()`（api/index.ts:149，401 分支调用点 :215/:221）只
-   *    `window.location.hash = '#/login'`，登录时 `stores/auth.ts:33` 才再 reset 一次，store 实例不换；
+   *    `window.location.hash = '#/login'`，登录时 `stores/auth.ts` 的 `login()` 第一句
+   *    `resetUserSettingsCaches()`（该调用在 :38，`logout()` 另在 :87）才再 reset 一次，store 实例不换；
    * ② 本地 `patch()`/`save()` 之后，**更早**派发的那次 GET 用「写之前」的服务端快照整份覆盖 `raw`
    *    （本地写被静默回滚），或它失败时 `.catch` 把 `raw` 清成 null 而 `settled` 仍为真
    *    ⇒ 每个消费方各自回退默认值、且整页不再重取；
@@ -98,12 +99,17 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
   async function save(p: Partial<UserSettings>): Promise<void> {
     // 纪元取在**这次 PUT 自己**上：invalidate() 先把更早的 GET 作废（②），再把 PUT 派出去；
     // 响应回来时若期间发生过 reset()/patch()/又一次 save()，这次续体整段跳过（①②）。
-    // 副作用：作废 GET 后到 PUT 落地之间存在「raw 还没人写」的瞬时（ensure() 的 promise 已 resolve
-    // 但 raw 仍为 null）。今天打不出这个形状 —— PUT 的四个发起点（SettingsPage.vue:161、
-    // useChartMemory.ts:112 防抖冲刷、:134 clearChartMemoryState（调用方含设置页
-    // pages/settings/components/AnalysisLayoutSettings.vue:25））都在 await 过 ensure 之后才跑，
-    // 那之后 settled 已真、不会再有并发 GET。若将来出现「守卫链之前先 PUT」，读它的人要按
-    // raw===null 走各消费方自己的回退值（与失败同口径），不会读到半份。
+    // 副作用：invalidate() 之后到 PUT 落地之间存在「raw 还没人写」的瞬时，两个面都要写明：
+    // ① 常规形状（调用方都 await 过 ensure）：settled 已真 ⇒ ensure() 直接 resolve、不会再发 GET，
+    //    瞬时只影响「此刻读 raw」的人，按 raw===null 走各消费方自己的回退值（与失败同口径），读不到半份。
+    // ② 若 PUT 早于任何成功的 GET（settled 仍为 false，而 invalidate() 已把 inflight 清成 null）：
+    //    并发的 ensure() 会发**第二次 GET**，它自增的纪元高于这次 PUT ⇒ PUT 的续体整段被跳过、
+    //    raw 改由那条 GET 的服务端快照写。保存仍在服务端生效，但本地要等那次 GET 回来才看得见。
+    //    今天打不出 ②：save() 只有三个发起点 —— SettingsPage.vue:161、useChartMemory.ts:112（防抖冲刷）、
+    //    :134 clearChartMemoryState（调用方含 AnalysisLayoutSettings.vue:25 与 SettingsPage.vue:174），
+    //    它们都跑在路由守卫 await 过 ensure 之后。第四条 PUT 通道 saveKeepalive
+    //    （useChartMemory.ts:175，pagehide 专用）先 patch() 再发 keepalive 请求，patch 已把 settled 置真
+    //    ⇒ 也不落在 ② 里（它是 keepalive 直发，不经 save()）。
     invalidate()
     const gen = generation
     const { data } = await authApi.updateSettings(p as Record<string, unknown>)

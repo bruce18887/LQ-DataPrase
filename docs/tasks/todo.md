@@ -5300,6 +5300,8 @@ analysis 档补一条（R19：`AnalysisPage` 的去重原本无守卫）、dashb
 - [ ] `docs/user-guide/07-settings.md`（**未入库、只在父检出**）里「默认每页行数」的文案同步**没做**：
       建议文字已写在 baseline §12 附录，落不落由用户决定（本分支不得写父检出）。
 - [ ] deferred Minor 汇总（台账 `.superpowers/sdd/…/progress.md` 末节在册，逐条要么修要么写明理由）：
+      **收口评审轮已把台账里全部在册项搬进文末「整改后遗留清单」并逐条给出处置** —— 台账在 gitignored 目录，
+      `git worktree remove --force` 就没了，那份清单才是唯一事实来源。仍开的条目：
       注释与行号指针 stale 四条（`data.spec.ts:903-906` 举例不成立、`file-list-completeness.spec.ts:127` 只数调用点、
       `view-data.spec.ts:1506-1509` 仍写 applyBlockSize→purge、`weightChartOption.spec.ts:23/26` 行号漂移）、
       `UserSettings` 与 `types/index.ts` 同名异构带 index signature（丢键名检查）、
@@ -5315,3 +5317,74 @@ analysis 档补一条（R19：`AnalysisPage` 的去重原本无守卫）、dashb
 B 后端 `/browse/` 每页重发 headers+col_meta、`/summary/` 命中仍 clean_data 重序列化；
 C `2026-10-21` 内存治理三批；D Electron 日志把 backend-stderr 一律记 ERROR + GBK 乱码 + 无轮转；
 生产机页面文件偏小属运维。
+
+## 整改后遗留清单（2026-10-23 收口评审轮，逐条带处置）
+
+**为什么要搬进跟踪文档**：本轮的 deferred Minor 台账在 `.superpowers/sdd/2026-10-22-renderer-memory-and-request-dedupe/progress.md`，
+而 `.superpowers/` 与 `tasks/` 都被 gitignore ⇒ `git worktree remove --force` 之后无处回查。下面这份是**唯一事实来源**，台账只算当期证据。
+**证据边界（同一条纪律）**：各批次的槽日志与探针 JSON 都落在 gitignored 的 `tasks/` 与 `C:\lqdp-e2e\slots\` 下 ⇒
+入库文档只能引用**复跑命令**（`node scripts/e2e_pool.mjs --slots=N -- <spec>`、
+`C:/Users/…/.venv/Scripts/python.exe manage.py test <label>`、`cd frontend && npx vitest run`）；
+槽号（例如 `174400-54928`）只作当期取证，**不得**当成持久证明写进任何判据。
+
+### 本轮已在代码里处置（都是注释/措辞精度，无行为改动）
+
+1. `frontend/src/stores/userSettings.ts` 纪元注释里 `stores/auth.ts:33` 的假指针 → 改成「`login()` 的第一句
+   `resetUserSettingsCaches()`（该调用在 :38，`logout()` 另在 :87）」。
+2. 同文件 `save()` 注释的「PUT 的四个发起点」→ 写清 `save()` 只有**三个**发起点
+   （`SettingsPage.vue:161`、`useChartMemory.ts:112` 防抖冲刷、`:134 clearChartMemoryState`，后者调用方含
+   `AnalysisLayoutSettings.vue:25` 与 `SettingsPage.vue:174`），第四条 PUT 通道是 `saveKeepalive`
+   （`useChartMemory.ts:175`：先 `patch()` 再 keepalive 直发，不经 `save()`）。
+3. `save()` 作废在飞 GET 的**第二面**（此前只在台账、代码里没有）：`invalidate()` 令 `inflight=null` 而 `settled`
+   仍为 false 时，并发 `ensure()` 会发**第二次 GET**，它自增的纪元高于那次 PUT ⇒ PUT 续体整段被跳过、`raw` 由 GET 写。
+   处置＝**写明而非加守卫**：今天四个 PUT 入口都在 `await ensure()` 之后，形状打不出；要拦得改 `save()` 语义，
+   等真出现「守卫链之前先 PUT」再说。
+4. `frontend/src/pages/data/DataManagement.vue` 模板注释「四个标签首挂是 4 发 /summary/」→ 改成**上限口径**
+   （未点开的标签被 `v-if="t.everActive"` 挡在组件之前 ⇒ 一发都不发；开满时 ≤ `VIEW_TAB_MAX`=4 发），
+   并注明本轮未实测、无守卫。同文件另一处「IRM 缓存 `maxBlocksInCache=20`」改成「按列数动态（窄文件仍 20）」。
+5. `frontend/test/unit/weightChartOption.spec.ts` 指 `echarts-theme.ts:162-171` / `:127-136` 的色板行号 → 改为按
+   `seriesColors` 符号定位（该文件本轮 −22 行，两处行号都已漂到别的内容上）。
+6. `frontend/e2e/data/data.spec.ts` 的 `DataManagement.vue:187` 发起方指针 → 改为 `loadFiles()` 符号定位
+   （收口前就已漂移，本轮注释一改又漂；这类跨文件行号指针一律改符号）。
+7. `docs/reference/server-deployment.md` §5.3 与 `renderer-memory-baseline-2026-10-22.md` §6/§12 的
+   「单块最多约 35.5 万格」→ 纠正为「**目标** ≤ 约 35.5 万格，但每块不低于 50 行 ⇒ 列数超过约 **7,100**
+   （`355,029 ÷ 50 = 7,100.58`）时该下限让位，单块格数可超预算（10,000 列 ⇒ 500,000 格）」；
+   同文档 §5.2 的 `standalone.py:170-173` 指针纠正为 `config/settings/standalone.py` 的
+   `SFTP_CONFIG_KEY` PBKDF2 派生块（真正写 `sftp-config`/100k 的那份）。
+
+### 仍未处置（下批做，或由用户拍）
+
+- **`withLiveGrid` 未收敛的 `gridApi` 调用点**（Task 4 明确交收口裁决）：`DataBrowserAgGrid.vue` 的
+  `onRowHighlightToggle()`（`getDisplayedRowAtIndex` + `redrawRows`）与 `currentGridModels()`（`getColumnState`）、
+  `useBinCellMenu.ts` 的 `handleBodyContextMenu()`（`getDisplayedRowAtIndex`）与 `goToFailCell()`
+  （`ensureNodeVisible` / `ensureColumnVisible` / `flashCells`）、`useGridContextMenus.ts` 的行高亮入口
+  （`getDisplayedRowAtIndex`）。**处置＝不收敛**：这些都由鼠标事件驱动，grid 销毁时根本没有可点的
+  `.ag-row`/`col-id` ⇒ 销毁态不可达，套 `withLiveGrid` 只是把「不可能」再判一次；#26 那一族真正的风险是
+  **异步续体**，由 `test/unit/useIrmSizing.spec.ts` 与 `renderer-memory.spec.ts` 的生命周期断言钉。
+  真要统一风格是独立一批（改的是可读性不是缺陷）。
+- **`UserSettings` 类型契约**：`stores/userSettings.ts` 的同名接口带 `[k: string]: unknown`，与
+  `types/index.ts` 的 `UserSettings`（:14-27）**同名异构** ⇒ 索引签名吃掉键名拼写错误与枚举检查。
+  **处置＝留**：改成 `Partial<SettingsData> & …` 或改名 `SettingsBag` 会牵动 6 个消费方的读点，
+  属类型面改造，不该混进文档/注释轮。
+- **store 返回值的 `as {…}` 断言**与 Pinia SetupStore 的解包规则不一致（今天无害：`raw` 仍是 `Ref`，
+  解包只在返回值不是函数/ref 时才不同）。**处置＝留**，与上一条同批（一次改类型面）。
+- **sftp 档缺 `last_visit` 计数守卫**（R20 当时刻意留给收口）。**处置＝留给下一批**：补它是**新增断言**，
+  要同时过 T2/T3 两层并给「不承重」设对照组，文档轮不带新判据。
+- **`/summary/` 的请求数收益无守卫**（Task 5 关注项 2 的延续）：本轮只把注释改成上限口径，
+  「收敛后每次导航少几发」仍未被任何断言钉住。**处置＝与上一条同批**（同一族计数守卫）。
+- **三条计数守卫继承 401 重放的假红风险**：拦截器在 401 分支给原请求打 `_retry` 后**重放**
+  （`api/index.ts` 的 `originalRequest._retry = true` → `return api(originalRequest)`），token 恰好到期时
+  一次业务请求会在 `page.on('request')` 里计成两条 ⇒ 精确长度断言假红。
+  **处置＝留**：夜跑归因先查 `LQDP_ACCESS_TOKEN_MINUTES`；根治要守卫侧识别重放标记，属判据改造。
+- **三种网格请求形态仍未断言**（Task 4 交、Task 5 量）：① `onDeactivate` purge 后 IRM 立刻回取 1 块
+  （切走的标签切回来多发一条 `/browse/`，也是「体验代价」那条的度量面）；② `reload(false)` 在 pre-flush 里对
+  旧 cache 调 `ensureIndexVisible(0)`，深滚后换文件可能多一发 `page=1`；③ `page_size=500` 且窄→宽时
+  `cacheBlockSize` 与 datasource 同 tick 变化 ⇒ 两次 `resetCache`。**处置＝留**：三条都要新的探针形状，
+  且「期望条数」得先按 cap 生效后的稳定值定下来才能钉，凭读代码写断言正是本轮 lesson 要避免的那种事。
+- **两条 e2e 注释的机制描述过时**：`e2e/data/data.spec.ts` 的「放宽谓词会误抓 `/browse/`」举例不成立
+  （放宽式 `/files/.*page_size=9999` 需要字面 `/files/` 在前的那一段说明要改成形状中立表述）；
+  `e2e/data/view-data.spec.ts` 生命周期那条仍写 `applyBlockSize → purgeInfiniteCache`
+  （Task 4 之后是 datasource 身份变化走 `resetCache`，不再 purge）。**处置＝留**：这两处的措辞连着各自判据的
+  成立条件，只改注释容易把假说法换成另一种假说法，另开一小批配合重读用例。
+- **存量红 `e2e/settings/export-timeout.spec.ts` 的处置**（修 tab 激活判据 or 进快门禁已知红豁免表）仍等用户拍 ——
+  见上一节「遗留」。
