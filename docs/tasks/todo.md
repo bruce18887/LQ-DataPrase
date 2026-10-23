@@ -5314,9 +5314,12 @@ analysis 档补一条（R19：`AnalysisPage` 的去重原本无守卫）、dashb
       ① 本分支新加的「保存后脏基线复位」那条走产品保存通路把 `chart_dpi=200` **真落库**却没 finally 复位
       ⇒ 同文件「恢复默认」稳定红；② 「恢复默认」原先按**后端**断「被洗成 100」，而产品的恢复默认只改本地
       （提示文案明写「请点击保存以持久化」）⇒ 它只在账号恰好停在出厂值时空转绿。现按三段重写并自建前置。
-- [ ] **同型缺陷待普查**（本轮只量了 settings 的两行）：另有 7 个组件同时出现 `el-input-number` 与
-      note/hint 类文案（`ChartConfigPanel` / `ChartSettingsForm` / `CpkSettingsForm` /
-      `SftpConnectionPanel` / `SearchCriteria` / `FileCorrelationControls` / `CorrelationScatterAxisCard`）。
+- [ ] **同型缺陷待普查**（本轮只量了 settings 的两行）：**5 个**组件同时出现 `<el-input-number>` 标签与
+      note/hint 类文案 —— `ChartConfigPanel`(2 标签/1 文案) / `FileCorrelationControls`(2/1) /
+      `ChartSettingsForm`(1/1) / `CpkSettingsForm`(3/3) / `SftpConnectionPanel`(1/1)；
+      另有 `CorrelationScatterAxisCard`(4/0) 只有控件、按 class 代理没抓到文案，一并看一眼。
+      （`SearchCriteria` 是**字面 grep 的误报**：它 `:318` 注释写明刻意改用 `el-input type=number`，
+      `<el-input-number` 标签计数为 0。）
       犯病的前提是「控件与长文案同在一个 flex 行」，得逐个量盒宽才判得准 —— 别照 class 名猜。
 - [ ] 体验代价：切走的标签切回来要**重新取数**（D4 用 `purgeInfiniteCache` 换内存，深滚位置不保留）。
 - [ ] `docs/user-guide/07-settings.md`（**未入库、只在父检出**）里「默认每页行数」的文案同步**没做**：
