@@ -1015,6 +1015,14 @@ Expected: 日志末尾 `RESULT: PASS`（判据取 `RESULT:` 行，不取 `$?`）
 > ② 这一档的 `backend` 跑的是**按改动标签选出的后端子集**且用 **PATH python**
 > （`e2e_affected.mjs:182/192` 硬编码 `python`）→ 本轮 `Ran 1067 · OK (skipped=7)`；
 > 全套 1811 例（`.venv`）的读数仍以第一轮那条为准。
+>
+> **第三轮（并入前，终审 Minor 收口之后）**：复审判 4 条发现全部 addressed、无新增 Critical/Important，
+> 两条 Minor 我照做，其中一条是**撤掉自己上一轮的半个修复**（`silent` + 一次性闸门会让同类失败
+> 从第二次起彻底静音 ⇒ 交回拦截器单声源，提交 `8e6629c` / `9d02275`）。在**最终这棵树**上重跑
+> 同一条门禁 ⇒ **`RESULT: PASS · 计划 4 档全部执行`**（414 例 / 8.5min / 效率 2.27 ·
+> 真红 0 · 负载抖动 2 · 悬而未决 0 · `Ran 1067 · OK (skipped=7)` · vitest 470 · lint:e2e ok）。
+> 随后 `master` 以 **fast-forward** 指到 `9d02275`：无合并提交 ⇒ 被并的树与被验的树是同一棵，
+> 另在父检出跑 `vitest 470 绿` + `vue-tsc -b` 干净作二次确认。
 
 - [x] **Step 3: 回填与教训**
 
