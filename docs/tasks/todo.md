@@ -5364,7 +5364,9 @@ C `2026-10-21` 内存治理三批；D Electron 日志把 backend-stderr 一律�
   真要统一风格是独立一批（改的是可读性不是缺陷）。
 - **`UserSettings` 类型契约**：`stores/userSettings.ts` 的同名接口带 `[k: string]: unknown`，与
   `types/index.ts` 的 `UserSettings`（:14-27）**同名异构** ⇒ 索引签名吃掉键名拼写错误与枚举检查。
-  **处置＝留**：改成 `Partial<SettingsData> & …` 或改名 `SettingsBag` 会牵动 6 个消费方的读点，
+  **处置＝留**：改成 `Partial<SettingsData> & …` 或改名 `SettingsBag` 要过类型面 ——
+  实测消费面是 8 个文件 import 这个 store（`grep -rl useUserSettingsStore frontend/src` 去掉 store 自身），
+  其中真正 import 该**类型**的只有 `pages/settings/SettingsPage.vue`，其余七处只读 `raw?.xxx`；
   属类型面改造，不该混进文档/注释轮。
 - **store 返回值的 `as {…}` 断言**与 Pinia SetupStore 的解包规则不一致（今天无害：`raw` 仍是 `Ref`，
   解包只在返回值不是函数/ref 时才不同）。**处置＝留**，与上一条同批（一次改类型面）。
