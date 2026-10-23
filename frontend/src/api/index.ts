@@ -14,15 +14,15 @@ declare module 'axios' {
 }
 
 // 同一错误消息 2 秒内只弹一次，避免图表联动等并发场景的 toast 轰炸。
+// ⚠ 这道闸只护得住**走拦截器**的提示：调用方自己 `ElMessage.error(...)` 绕开它，
+// 而请求级 `silent` 也只是让**这一条**请求不响（同页其它请求照样各响一次）。
+// ⇒ 「页面再补一句」在这个仓库里没有好形状：2026-10-23 收口池实测，两条同族
+// `.el-message--error` 会把按文案取 toast 的 e2e/global/error-handling.spec.ts
+// 顶成 strict mode 歧义。失败要出声就交回这里（单声源），别另开一条通路。
 let lastToastMessage = ''
 let lastToastAt = 0
 
-/**
- * 错误 toast 的**唯一出口**：拦截器与「自己标了 `silent` 的调用方」都只走这里，
- * 于是同一消息 2 秒内只响一次 —— 页面补的那句和全局那句不会叠成两条
- * （两条同族 `.el-message--error` 会让按文案取 toast 的用例撞上 strict mode 歧义）。
- */
-export function toastError(message: string) {
+function toastError(message: string) {
   const now = Date.now()
   if (message === lastToastMessage && now - lastToastAt < 2000) return
   lastToastMessage = message
