@@ -289,8 +289,10 @@ cd /srv/lqdp-src && .venv/bin/python manage.py migrate --run-syncdb
    自己的磁盘）；服务器形态这几个字段披露的是**服务器**的目录结构、库文件与配置文件位置，
    所以 `SYSTEM_PATHS_VISIBLE_TO_ALL=False` 让 `GET /api/v1/system/paths/` 对非管理员返回 403，
    该页只显示「存储路径仅管理员可见」。连带影响：用户指南里「去设置页找落盘目录」这条路径
-   在服务器形态只对管理员成立。（2026-10-23 实测：管理员带 token `GET` 返回 200 且 `data_dir`
-   就是 `LQDP_SERVER_BASE_DIR`；未认证 `GET` 返回 401。）
+   在服务器形态只对管理员成立。（2026-10-23 本机实跑：管理员带 token `GET` 返回 200 且 `data_dir`
+   就是 `LQDP_SERVER_BASE_DIR`；未认证 `GET` 返回 401；`viewer` 角色 `GET` 返回
+   **403 `code:"forbidden"`**，而同一个 viewer 的 token 读 `/api/v1/auth/profile/` 是 200
+   —— 有这条对照，403 才只能是权限闸门，不是账号失效。）
 6. **`media/` 没有自动回收通路**。全仓唯一的清理命令是
    `apps/jobs/management/commands/prune_jobs.py`，它只删 7 天前处于 done/error/cancelled
    的**作业产物**，不动 SFTP 取回的数据文件；`requirements/*.txt` 与 `config/settings/server.py`
@@ -358,7 +360,11 @@ TOK=$(curl -s -X POST $BASE/api/v1/auth/login/ -H 'Content-Type: application/jso
   | .venv/bin/python -c 'import sys,json;print(json.load(sys.stdin)["token"])')
 curl -s -w '\nHTTP %{http_code}\n' $BASE/api/v1/system/paths/ \
   -H "Authorization: Bearer $TOK"                                          # 期望 200，data_dir == LQDP_SERVER_BASE_DIR
-#    未认证同一请求应 401（本机实测）；非管理员 403 是 §5.5 的既有判据，本机没建普通账号所以未测。
+#    未认证同一请求应 401；viewer 角色应 403（本机已实跑，含对照：同一 viewer 的 token
+#    读 /api/v1/auth/profile/ 返回 200，所以 403 确实出自权限闸门）。建探针账号：
+#    curl -s -X POST $BASE/api/v1/auth/users/ -H "Authorization: Bearer $TOK" \
+#      -H 'Content-Type: application/json' \
+#      -d '{"username":"probe_viewer","password":"<够长的口令>","role":"viewer"}'      # 期望 201
 
 # 6) 优雅停止：SIGTERM 会先关 DB 连接（WAL checkpoint）再退出
 systemctl stop lqdp && journalctl -u lqdp -n 20 --no-pager
