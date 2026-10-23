@@ -144,6 +144,11 @@ test.describe('@p1 系统设置页', { tag: ['@p1', '@settings'] }, () => {
   test('修改设置项并保存 → PUT 请求体带上改动字段且出现成功提示', async ({ page }) => {
     try {
       await gotoApp(page, '/settings')
+      // 前置自建：不先把账号钉在 100，下面填 200 就可能是「填了个当前值」⇒ 不脏、不发 PUT，
+      // 这条会红在 waitForResponse 上，看着像保存通路坏了（2026-10-23 实测：账号被
+      // 同文件 :200 漏下的 200 踩中过一次）。finally 洗回 100，两边对称。
+      await putSetting(page, { chart_dpi: 100 })
+      await page.reload()
 
       // 进入「显示设置」标签页，修改一个安全的数值字段：图表 DPI
       await clickTab(page, '📊 显示设置')
@@ -152,6 +157,8 @@ test.describe('@p1 系统设置页', { tag: ['@p1', '@settings'] }, () => {
         .locator('xpath=ancestor::*[contains(@class,"el-form-item")]')
         .getByRole('spinbutton')
       await expect(dpiInput).toBeVisible()
+      // 前置可见证据：填的 200 与账号当前值不同（红在这里＝前置没落，别去查保存通路）
+      await expect(dpiInput, '前置：reload 后 UI 应显示账号值 100').toHaveValue('100', { timeout: 15_000 })
       await dpiInput.fill('200')
       // 触发 el-input-number 的 change（失焦提交值）
       await dpiInput.blur()
@@ -204,47 +211,63 @@ test.describe('@p1 系统设置页', { tag: ['@p1', '@settings'] }, () => {
     })
 
     await gotoApp(page, '/settings')
-    const saveBtn = page.getByRole('button', { name: '💾 保存设置' })
-    const hint = page.getByText('没有需要保存的改动')
-    await expect(saveBtn).toBeVisible()
+    try {
+      // 前置自建（与 :144 同因）：② 填的 200 必须**不等于**账号当前值，否则脏判定不成立。
+      await putSetting(page, { chart_dpi: 100 })
+      await page.reload()
+      // 上面那发自建的 PUT 也算进 `puts`（监听器装在 goto 之前）⇒ 清零，
+      // 让 ④ 量的仍是「本次交互期间产品发出的 PUT 条数」，判据不被前置污染。
+      puts.length = 0
+      const saveBtn = page.getByRole('button', { name: '💾 保存设置' })
+      const hint = page.getByText('没有需要保存的改动')
+      await expect(saveBtn).toBeVisible()
 
-    // ① 进页面：settings 与 loaded 同一份 ⇒ 干净
-    await expect(saveBtn, '无改动时保存按钮应置灰（Task 6b 脏追踪）').toBeDisabled()
-    await expect(hint).toBeVisible()
+      // ① 进页面：settings 与 loaded 同一份 ⇒ 干净
+      await expect(saveBtn, '无改动时保存按钮应置灰（Task 6b 脏追踪）').toBeDisabled()
+      await expect(hint).toBeVisible()
 
-    // ② 改一个字段 ⇒ 脏（DPI 是本文件其它用例同款的安全数值字段）
-    await clickTab(page, '📊 显示设置')
-    const dpiInput = page
-      .getByText('图表 DPI')
-      .locator('xpath=ancestor::*[contains(@class,"el-form-item")]')
-      .getByRole('spinbutton')
-    await expect(dpiInput).toBeVisible()
-    await dpiInput.fill('200')
-    await dpiInput.blur()
-    await expect(saveBtn, '改过之后按钮必须可用').toBeEnabled()
-    await expect(hint, '脏状态下不该再显示「没有需要保存的改动」').toHaveCount(0)
+      // ② 改一个字段 ⇒ 脏（DPI 是本文件其它用例同款的安全数值字段）
+      await clickTab(page, '📊 显示设置')
+      const dpiInput = page
+        .getByText('图表 DPI')
+        .locator('xpath=ancestor::*[contains(@class,"el-form-item")]')
+        .getByRole('spinbutton')
+      await expect(dpiInput).toBeVisible()
+      // 前置可见证据（与 :144 同款）：② 要填的 200 必须不等于账号当前值
+      await expect(dpiInput, '前置：reload 后 UI 应显示账号值 100').toHaveValue('100', { timeout: 15_000 })
+      await dpiInput.fill('200')
+      await dpiInput.blur()
+      await expect(saveBtn, '改过之后按钮必须可用').toBeEnabled()
+      await expect(hint, '脏状态下不该再显示「没有需要保存的改动」').toHaveCount(0)
 
-    // ③ 保存成功后回到干净
-    const [response] = await Promise.all([
-      page.waitForResponse(
-        (resp) =>
-          /\/auth\/settings\//.test(resp.url()) &&
-          resp.request().method() === 'PUT' &&
-          /"chart_dpi":\s*200/.test(resp.request().postData() ?? ''),
-      ),
-      saveBtn.click(),
-    ])
-    expect(response.status(), '保存应返回 200').toBe(200)
-    await expect(page.locator('.el-message').filter({ hasText: /保存|成功/ })).toBeVisible()
-    await expect(
-      saveBtn,
-      '保存后脏基线没复位 ⇒ 按钮仍可用（旧写法 loaded 非响应式，computed 不失效）',
-    ).toBeDisabled({ timeout: 5_000 })
-    await expect(hint, '保存后应重新出现「没有需要保存的改动」').toBeVisible()
+      // ③ 保存成功后回到干净
+      const [response] = await Promise.all([
+        page.waitForResponse(
+          (resp) =>
+            /\/auth\/settings\//.test(resp.url()) &&
+            resp.request().method() === 'PUT' &&
+            /"chart_dpi":\s*200/.test(resp.request().postData() ?? ''),
+        ),
+        saveBtn.click(),
+      ])
+      expect(response.status(), '保存应返回 200').toBe(200)
+      await expect(page.locator('.el-message').filter({ hasText: /保存|成功/ })).toBeVisible()
+      await expect(
+        saveBtn,
+        '保存后脏基线没复位 ⇒ 按钮仍可用（旧写法 loaded 非响应式，computed 不失效）',
+      ).toBeDisabled({ timeout: 5_000 })
+      await expect(hint, '保存后应重新出现「没有需要保存的改动」').toBeVisible()
 
-    // ④ 整段只发过一发 PUT（再点一次就发第二发）
-    await page.waitForTimeout(1_000)
-    expect(puts, `本次交互发出了 ${puts.length} 发 PUT /auth/settings/，应为 1 条`).toHaveLength(1)
+      // ④ 整段只发过一发 PUT（再点一次就发第二发）
+      await page.waitForTimeout(1_000)
+      expect(puts, `本次交互发出了 ${puts.length} 发 PUT /auth/settings/，应为 1 条`).toHaveLength(1)
+    } finally {
+      // ③ 那发 PUT 走的是产品保存通路，`chart_dpi=200` 是**真存进共享 admin 账号**的
+      // （不像 :144 那条可以只断请求体）⇒ 必须复位，否则漏给后续用例。
+      // 实测踩掉的就是同文件下面的「恢复默认」：它按「账号停在出厂值」这个空转前提成立，
+      // 200 一漏就稳定红（2026-10-23 收口池 :200 先跑、:288 后红）。
+      await putSetting(page, { chart_dpi: 100 })
+    }
   })
 
   test('渲染器保存持久化：改为 Canvas → 保存 → 后端回显 canvas；结束后恢复 SVG', async ({ page }) => {
@@ -285,35 +308,56 @@ test.describe('@p1 系统设置页', { tag: ['@p1', '@settings'] }, () => {
 })
 
 test.describe('@p2 恢复默认', { tag: ['@p2', '@settings'] }, () => {
-  test('点击恢复默认 → 确认对话框 → 提示已恢复，随后把账号设置原样还回', async ({ page }) => {
+  /**
+   * 「恢复默认」只改本地，落库要再点一次保存 —— 产品文案写的就是这个
+   * （`SettingsPage.vue` 的 `resetDefaults()`：`settings.value = {...defaults}` + 提示
+   * 「已恢复默认设置（请点击保存以持久化）」，全程不发请求）。
+   *
+   * 2026-10-23 重写。旧写法点完「确定」直接按**后端**断 `chart_dpi === 100`，而产品根本不 PUT
+   * ⇒ 它只在「账号此刻恰好是出厂值」时成立（前一条 DPI 用例的 finally 刚洗回 100 ⇒ 空转绿）；
+   * 一旦别的用例漏下 200 就稳定红 —— 那次的正确归因是**漏值的那条没自清**，不是这条断到了回归。
+   *
+   * 现在的三段各自承重：
+   * ① 前置自己把账号推离出厂值（200）并 reload ⇒ 「恢复后显示 100」不再是空转；
+   * ② 确认后 UI 回 100 且**后端仍是 200** ⇒ 钉住「不落库」这半边契约；
+   * ③ 再点保存，后端才变 100 ⇒ 钉住「保存才落库」那半边。
+   * finally 原样还回 `before`：这条会把账号的**全部**设置洗成出厂值，不还原就踩后续读设置的 spec
+   * （实测：settings.spec 跑完紧接 fonts.spec，fonts 从 0 红变 5 红，2026-10-13 夜间轮
+   * 73 条稳定红的元凶之一，见 docs/reference/e2e-tier-triage.md）。
+   */
+  test('恢复默认只改本地，点保存才落库；结束后把账号设置原样还回', async ({ page }) => {
     await gotoApp(page, '/settings')
-    // 这条会把共享 admin 账号的**全部**设置洗成出厂值。不还原就会踩掉后面所有读设置的 spec ——
-    // 实测：settings.spec 跑完紧接 fonts.spec，fonts 从 0 红变 5 红（2026-10-13 夜间轮
-    // 73 条稳定红的元凶之一，见 docs/reference/e2e-tier-triage.md）。
     const before = await snapshotSettings(page)
     try {
-      // 触发 ElMessageBox.confirm
-      await page.getByRole('button', { name: '🔄 恢复默认' }).click()
+      await putSetting(page, { chart_dpi: 200 })
+      await page.reload()
+      await clickTab(page, '📊 显示设置')
+      const dpiInput = page
+        .getByText('图表 DPI')
+        .locator('xpath=ancestor::*[contains(@class,"el-form-item")]')
+        .getByRole('spinbutton')
+      await expect(dpiInput, '前置：账号应先停在非默认值 200').toHaveValue('200', { timeout: 15_000 })
 
-      // 确认框 teleport 到 body（.el-message-box）
+      // 触发 ElMessageBox.confirm（teleport 到 body，.el-message-box）
+      await page.getByRole('button', { name: '🔄 恢复默认' }).click()
       const messageBox = page.locator('.el-message-box')
       await expect(messageBox).toBeVisible()
       await expect(messageBox.getByText('确定恢复所有设置为默认值吗？')).toBeVisible()
-
-      // 点击「确定」
       await messageBox.getByRole('button', { name: '确定' }).click()
+      await expect(page.locator('.el-message').filter({ hasText: /已恢复默认/ })).toBeVisible()
 
-      // 成功 ElMessage
-      await expect(page.locator('.el-message').filter({ hasText: /已恢复默认|恢复/ })).toBeVisible()
+      // ② UI 回到出厂值，后端没动
+      await expect(dpiInput, '确认后输入框应显示默认 100').toHaveValue('100')
+      expect(
+        (await snapshotSettings(page)).chart_dpi,
+        '没点保存就落库 ⇒ 与提示文案「请点击保存以持久化」矛盾',
+      ).toBe(200)
 
-      // 先证「真的被洗过」，否则后面的还原会把这条断言变成摆设
-      await expect.poll(
-        async () => {
-          const s = await snapshotSettings(page)
-          return s.chart_dpi
-        },
-        { timeout: 10_000 },
-      ).toBe(100)
+      // ③ 保存才落库
+      await page.getByRole('button', { name: '💾 保存设置' }).click()
+      await expect
+        .poll(async () => (await snapshotSettings(page)).chart_dpi, { timeout: 10_000 })
+        .toBe(100)
     } finally {
       await putSetting(page, before)
     }
