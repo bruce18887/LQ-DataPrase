@@ -119,6 +119,58 @@ export function headerMenuCopyLabel(isSystemCol: boolean): string {
   return isSystemCol ? '复制列名' : '复制测试项名字'
 }
 
+/**
+ * ── ag-grid 的三块自包含选项（2026-10-23 收口评审 C 项从 `DataBrowserAgGrid.vue` 搬来）──
+ * 搬动理由只有容量：那个 .vue 贴在 600 行硬上限上（项目约定），这里已经是网格列/样式配置的
+ * 归属地。**纯搬迁，一个字节的行为都没改**：`defaultColDef` 与 `rowClassRules` 在组件里仍然
+ * 只构造一次（身份稳定是承重的 —— ag-grid 对这两块 prop 的变化会重算列/重绘行），
+ * 主题与高亮状态一律用 getter/回调现读，闭包语义与搬迁前逐字相同。
+ */
+
+/**
+ * `defaultColDef`：`isDark` 传取值函数而不是布尔，`cellStyle` 每次求值时现读主题
+ * （红/橙两档各有一套 light/night 取值，见上面那四个常量）。
+ */
+export function buildBrowserDefaultColDef(isDark: () => boolean) {
+  return {
+    editable: false,
+    sortable: true,
+    resizable: true,
+    // 服务端列过滤（方案 A）：apply/reset 按钮——避免每敲一键就触发整页重载（官方推荐服务端场景）
+    filterParams: { buttons: ['apply', 'reset'] },
+    wrapHeaderText: true,
+    autoHeaderHeight: true,
+    // 红/橙规则住在本文件（T2 纯函数）；这里只注入主题
+    cellStyle: (params: any) => browserCellStyle(params, isDark()),
+  }
+}
+
+/** 工具栏「列宽」下拉 → ag-grid `autoSizeStrategy`（`none` = undefined，交给列自带宽） */
+export function buildBrowserAutoSizeStrategy(mode: string) {
+  if (mode === 'fitCellContents') {
+    return { type: 'fitCellContents', skipHeader: false } as any
+  }
+  if (mode === 'fitGridWidth') {
+    return { type: 'fitGridWidth' } as any
+  }
+  return undefined
+}
+
+/**
+ * 斑马行 + 右键高亮行；`isHighlighted` 由组件的 `useRowHighlight` 传入（状态不搬，只搬规则表）。
+ * 参数类型沿用 `useRowHighlight.isHighlighted(rowIndex: number | null | undefined)` ——
+ * IRM 滚动窗口外的行 `node.rowIndex` 会是 undefined，收窄成 `number` 就是改行为。
+ */
+export function buildBrowserRowClassRules(
+  isHighlighted: (rowIndex: number | null | undefined) => boolean,
+) {
+  return {
+    'row-even': (params: any) => params.node.rowIndex % 2 === 0,
+    'row-odd': (params: any) => params.node.rowIndex % 2 !== 0,
+    'row-highlight': (params: any) => isHighlighted(params.node.rowIndex),
+  }
+}
+
 export interface BrowserDisplayCols {
   systemCols: string[]
   testCols: string[]

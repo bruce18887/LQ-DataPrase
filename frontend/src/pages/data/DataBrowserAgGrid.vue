@@ -164,7 +164,13 @@ import { useGridHeight } from './composables/useGridHeight'
 import { useHeaderMenu } from './composables/useHeaderMenu'
 import { useIrmSizing } from './composables/useIrmSizing'
 import { useRowHighlight } from './composables/useRowHighlight'
-import { browserCellStyle, buildBrowserColumnDefs, resolveDisplayCols } from './components/browser/browserColumns'
+import {
+  buildBrowserAutoSizeStrategy,
+  buildBrowserColumnDefs,
+  buildBrowserDefaultColDef,
+  buildBrowserRowClassRules,
+  resolveDisplayCols,
+} from './components/browser/browserColumns'
 import { zipBrowserRows } from './components/browser/browserRows'
 
 // Register ag-grid modules (required since v33+)
@@ -379,33 +385,13 @@ const columnDefs = computed<any[]>(() =>
   }),
 )
 
-const defaultColDef = {
-  editable: false,
-  sortable: true,
-  resizable: true,
-  // 服务端列过滤（方案 A）：apply/reset 按钮——避免每敲一键就触发整页重载（官方推荐服务端场景）
-  filterParams: { buttons: ['apply', 'reset'] },
-  wrapHeaderText: true,
-  autoHeaderHeight: true,
-  // 红/橙规则住在 browserColumns.ts（T2 纯函数）；此处只注入主题
-  cellStyle: (params: any) => browserCellStyle(params, isDark.value),
-}
+// 三块自包含选项住在本目录的 browserColumns.ts（容量搬迁，行为不变）：
+// defaultColDef / rowClassRules 各只构造一次 ⇒ 对象身份稳定（ag-grid 会因这两块 prop
+// 的变化重算列、重绘行），主题与高亮状态由闭包现读，语义与搬迁前逐字相同。
+const defaultColDef = buildBrowserDefaultColDef(() => isDark.value)
+const rowClassRules = buildBrowserRowClassRules(isHighlighted)
 
-const autoSizeStrategy = computed(() => {
-  if (autosizeMode.value === 'fitCellContents') {
-    return { type: 'fitCellContents', skipHeader: false } as any
-  }
-  if (autosizeMode.value === 'fitGridWidth') {
-    return { type: 'fitGridWidth' } as any
-  }
-  return undefined
-})
-
-const rowClassRules = {
-  'row-even': (params: any) => params.node.rowIndex % 2 === 0,
-  'row-odd': (params: any) => params.node.rowIndex % 2 !== 0,
-  'row-highlight': (params: any) => isHighlighted(params.node.rowIndex),
-}
+const autoSizeStrategy = computed(() => buildBrowserAutoSizeStrategy(autosizeMode.value))
 
 watch(
   () => props.fileId,
