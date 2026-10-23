@@ -19,10 +19,10 @@
     LQDP_E2E_SLOT_DIR=test/perf-data DJANGO_SETTINGS_MODULE=config.settings.e2e_slot \
         .venv/Scripts/python.exe scripts/perf_load20.py --base http://127.0.0.1:21099
 
-⚠ 进程模型口径：`runserver --noreload` 是**多线程**dev server，而 20 人正式档是单进程同步
-worker（`docs/reference/server-deployment.md:60-72` 里进程模型还没拍板）。所以这一档量到的是
-「DB 写锁 + 解析排队」的真实代价，量不到「单 worker 被一个请求占满」那一种停摆；
-换 waitress/gunicorn-sync 再跑同一份脚本，才会把后者也压出来。脚本本身与服务器形态无关。
+⚠ 进程模型口径：正式档**已拍板 = 方案 A**（systemd 跑 `standalone.py`，本质仍是单进程
+`runserver --noreload` 多线程，见 `docs/reference/server-deployment.md` §3）。所以这份脚本量的
+形态与生产一致；压不出的是「一个请求把单 worker 占满」那种停摆 —— 那要等换成方案 B
+（gunicorn 同步 worker）再跑同一份脚本才会出现。脚本本身与服务器形态无关。
 
 ⚠ 压测会写库（建 20 个用户 + DataFile 行）与写 media（--heavy upload 会把大文件落盘）。
 落盘面全在 `LQDP_E2E_SLOT_DIR` 下，跑完删那个目录即可；缺该环境变量时脚本直接拒绝启动。
