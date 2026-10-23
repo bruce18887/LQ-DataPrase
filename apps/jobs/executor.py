@@ -11,6 +11,7 @@
 """
 
 import logging
+import multiprocessing
 import os
 import threading
 import time
@@ -35,6 +36,14 @@ logger = logging.getLogger(__name__)
 
 # CPU 核数少时别把机器占满：这是给 20 人档留余量的旋钮，不是越大多好。
 MAX_POOL_WORKERS = min(4, max(2, (os.cpu_count() or 4) // 2))
+# 显式钉 spawn，不靠平台默认：Windows 默认就是 spawn，Linux 默认是 fork。
+# fork 会把主进程的 Django 状态和已打开的 DB 连接带进子进程，而 lane=process 的
+# 全部契约是「子进程里没有 django.setup()」（见 apps/jobs/runner.py 模块头）；
+# fork 自多线程进程还带来 BrokenProcessPool 家族。
+# Linux 服务器形态（2026-10-23 拍板）上线后，这条契约就只剩这一行在守：
+# 判据 `test_worker_modules_import_without_django_setup` 只保证「不 import Django」，
+# 保证不了「子进程是干净的」。
+_MP_CONTEXT = multiprocessing.get_context('spawn')
 # 并发下载硬上限：每条作业连接都是一条独立 SSH 会话，不设限会撞 sshd MaxStartups。
 MAX_DOWNLOAD_WORKERS = 2
 EXPORT_TIMEOUT_SECONDS = 30 * 60          # 单作业超时（spec §4.3）
@@ -86,7 +95,8 @@ def _get_pool():
         return _pool
     with _pool_lock:
         if _pool is None:
-            _pool = ProcessPoolExecutor(max_workers=MAX_POOL_WORKERS)
+            _pool = ProcessPoolExecutor(max_workers=MAX_POOL_WORKERS,
+                                        mp_context=_MP_CONTEXT)
             # 预热：把 pandas/matplotlib 的 import 成本从「第一个用户的导出」
             # 挪到进程启动期。实测收益只有亚秒级（见 perf-baseline §4），
             # 留着是因为它免费，别把它当 P3 的主要收益。
