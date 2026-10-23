@@ -98,9 +98,8 @@
 <script setup lang="ts">
 import { ref, computed, onActivated, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import api, { toastError } from '../../api'
+import api from '../../api'
 import { useFilesStore } from '../../stores/files'
-import { formatError } from '../../utils/error'
 import ActiveFileBanner from './components/browser/ActiveFileBanner.vue'
 import ViewFileTabs, { type ViewFileTab } from './components/browser/ViewFileTabs.vue'
 import FileListTab from './components/FileListTab.vue'
@@ -190,41 +189,29 @@ const tabs = [
   { key: 'buyoff', label: 'Buyoff Form', icon: '📝' },
 ]
 
-/**
- * 「同一段失败只提示一次」的闸门：`loadFiles()` 由 onActivated 与 filesVersion 两处驱动，
- * 后端缺席时每次进入都会失败 ⇒ 不清这个标记就是一屏叠一屏的 toast。成功后复位。
- */
-let filesLoadFailedNotified = false
-
 async function loadFiles() {
   try {
-    // 查看数据/导出工具顶部的文件下拉需能选任意文件，不能受默认分页（20 条）限制。
-    // `silent: true`：这条请求的错误归下面的 catch 自己报（它带「列表已保留」的页面语境），
-    // 不要拦截器那条通用提示再叠一遍。
-    const { data } = await api.get('/files/', { params: { page_size: 9999 }, silent: true })
+    // 查看数据/导出工具顶部的文件下拉需能选任意文件，不能受默认分页（20 条）限制
+    const { data } = await api.get('/files/', { params: { page_size: 9999 } })
     files.value = data.results || data
-    filesLoadFailedNotified = false
-  } catch (err) {
+  } catch {
     // ⚠ 这里**不能**清成 []（评审 A-1，2026-10-23 收口）：`files` 是每份表格实例
     // `col_count` 的唯一来源（useIrmSizing → blockCap），清空 = 「列数未知」= 驻留上限
     // 从算出来的值弹回 20 块；而它同时是 datasource 的身份之一 ⇒ 场上每个仍挂载的 grid
     // （v-show 下最多 4 个）各丢一次缓存、各重发 `page=1`。也就是说**恰恰在列表拉不到
     // 这种压力形状下**，保留量比整改前更大（500 行 × 1,728 列 × 20 块）。
-    // 所以：保留上一份好列表（宁可下拉里的条目旧一次），并把失败原因报出来；
-    // 真正 col_count 拿不到的新文件由 useIrmSizing.retentionColCount 用已加载列宽兜底。
+    // 所以：宁可下拉里的条目旧一次，也不清列表；真正 col_count 拿不到的新文件由
+    // useIrmSizing.retentionColCount 用已加载列宽兜底。
     //
-    // ⚠ 报出来必须走 `toastError`，不能直调 `ElMessage.error`（2026-10-23 收口池实测修正）：
-    // `silent` 只挡**这一条**请求的全局提示，而进 /data 一次会发 5 条 `/files/**`
-    // （列表 ×2、product_codes、format_types、list_tags），后端整段缺席时它们一起失败 ⇒
-    // 拦截器为其余四条响一次，直调又把本页这句排在它外面 = 两条同族 `.el-message--error`，
-    // 按文案取 toast 的 `e2e/global/error-handling.spec.ts` 随即撞 strict mode 歧义。
-    // `toastError` 与拦截器共用「同一消息 2 秒内只响一次」那道闸 ⇒ 一段失败只剩一句。
-    // 文案仍走 `formatError`（拦截器用的同一个格式化器）⇒ 有响应体时用户看到的字与全局一致，
-    // 读不出后端消息时才落到本句兜底。onActivated 每次进入都调这里 ⇒ 另设一次性闸门。
-    if (!filesLoadFailedNotified) {
-      filesLoadFailedNotified = true
-      toastError(formatError(err, '文件列表刷新失败，已保留上一次的列表'))
-    }
+    // 空 catch 是**有意的**（与 SettingsPage.saveSettings 同一条约定）：出声交给 axios 拦截器。
+    // 本页既不自造 toast 也不标 `silent`，两条理由都在 2026-10-23 收口池里实测过：
+    // ① 进 /data 一次会发 5 条 `/files/**`（列表 ×2、product_codes、format_types、list_tags），
+    //    拦截器已经响了一次，页面再补一句就是两条同族 `.el-message--error`，按文案取 toast 的
+    //    `e2e/global/error-handling.spec.ts` 随即撞 strict mode 歧义；
+    // ② 页面那句本来也只是重复 —— `formatError` 对无响应恒返回「无法连接服务器，请检查网络」、
+    //    对有响应取后端 message（`utils/error.ts:76/89`），我们的兜底串实际到不了；
+    //    而给它配一次性闸门会让第二次以后的同类失败**彻底静音**（`silent` 挡掉拦截器那句，
+    //    闸门又挡掉自己那句 ⇒ 零条提示，比整改前更糟）。
   }
 }
 

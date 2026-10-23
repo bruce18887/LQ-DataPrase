@@ -931,10 +931,13 @@ test.describe('进数据管理：导航期全量文件列表只拉一次', { tag
    * （v-show 下最多 4 个）各丢一次缓存、各重发 `page=1`：恰恰在「后端正忙到列表拉不到」
    * 这种压力形状下，保留量比整改前更大。修法 = 保留上一份好列表 + 把失败报出来。
    *
-   * 判据两条，各挡一种回退：
+   * 判据三条，各挡一种回退：
    * ① 横幅里当前文件**还是那份文件**（旧写法列表被清空 ⇒ 下拉里没有这个条目，只能显示裸 id）；
-   * ② 出现**且只出现一条**错误 toast（旧写法 `catch {}` 静默吞掉 ⇒ 0 条；
-   *    页面那句若绕开 `toastError` 直调 `ElMessage.error` ⇒ 与拦截器那份并成 2 条）。
+   * ② 出现**且只出现一条**错误 toast。出声的是 axios 拦截器（本页 catch 是**有意空着**的）：
+   *    少一条 ⇒ 这条请求被标 `silent` 或被塞进 `NO_TOAST_ENDPOINTS` 而没人补声；
+   *    多一条 ⇒ 页面又自己补了一句（2026-10-23 收口池实测过，两条同族 toast 会撞 strict mode）；
+   * ③ **第二次进入仍然出声**（挡「`silent` + 一次性闸门」那个组合：首航响过以后永久静音，
+   *    ①② 都抓不到它 —— 本轮自己引入又自己撤掉的形状，见文末那段注释）。
    * 触发通路刻意用「离开页面再回来」⇒ `onActivated(loadFiles)`，与生产每次导航同形，
    * keep-alive（`MainLayout.vue:12`）保住组件状态 ⇒ 回来时用的还是那一份上一轮的列表。
    *
@@ -963,18 +966,37 @@ test.describe('进数据管理：导航期全量文件列表只拉一次', { tag
       // 回来的还是那个 keep-alive 实例：tab 停在「查看数据」上（组件状态没被重建）
       await expect(page.locator('.tab-btn.active')).toContainText('查看数据', { timeout: 15_000 })
 
-      // 出声道**恰好一条**：`loadFiles()` 把这条请求标成 `silent`、自己走 `toastError` 补一句
-      // 页面专属提示（少一条＝静默吞掉，旧写法 `catch {}`）。多一条的形状收口全量池实测到过：
-      // 页面那句若直调 `ElMessage.error`，就绕开了拦截器「同一消息 2s 只响一次」那道闸，
-      // 与其余四条 `/files/**` 失败的全局提示并成两条同族 toast，把
-      // `e2e/global/error-handling.spec.ts` 那两条按文案取 toast 的用例顶成 strict mode 歧义。
-      const errToast = page.locator('.el-message--error').filter({ hasText: /文件列表刷新失败|无法连接服务器/ })
-      await expect(errToast, '刷新失败必须出声，且只出声一次').toHaveCount(1)
-      await expect(errToast.first()).toBeVisible({ timeout: 10_000 })
+      // 出声道**恰好一条**且说清了原因。出声的是 axios 拦截器（本页 catch 有意空着）：
+      // 0 条 ⇒ 这条请求被标 silent / 进了 NO_TOAST_ENDPOINTS 而没人补声；
+      // 2 条 ⇒ 页面又自己补了一句 —— 那个形状在 2026-10-23 收口池实测过，会把
+      // 按文案取 toast 的 `e2e/global/error-handling.spec.ts` 顶成 strict mode 歧义。
+      // 计数不限 class 过滤后的子集：绕开拦截器的重复提示用文案是筛不掉的。
+      const errToasts = page.locator('.el-message--error')
+      await expect(errToasts, '刷新失败必须出声，且只出声一次').toHaveCount(1)
+      await expect(errToasts.first(), '出声的必须是本次失败的原因').toContainText('无法连接服务器', {
+        timeout: 10_000,
+      })
       await expect(
         selectedLabel,
         `列表拉不到时应保留上一份（当前文件仍显示「${filename}」）`,
       ).toContainText(filename.slice(0, 10), { timeout: 10_000 })
+
+      /*
+       * 第二次进入**仍然要出声**。这一小段是本轮自己踩出来的缺陷形状：
+       * 请求标了 `silent`（拦截器不响）+ 页面自造提示配一次性闸门（第二次起不响）
+       * ⇒ 只有首航有声音，之后每次刷新失败都**彻底静音**，比整改前更糟且不会红。
+       * 先等第一声自己收掉（ElMessage 默认 3s）再走第二轮：toast 寿命 3s > 拦截器
+       * 「同一消息 2s 只响一次」那道闸，所以计数归零那一刻必然已经越过抑制窗口，
+       * 这里不需要拍任何等待常数。
+       */
+      await expect(errToasts, '前置：第一声应自己收掉，否则下面的计数不可判').toHaveCount(0, {
+        timeout: 8_000,
+      })
+      await navByMenu(page, '仪表板')
+      await expect(page.getByTestId('page-identity')).toContainText('仪表板')
+      await navByMenu(page, '数据管理')
+      await expect(page.locator('.tab-btn.active')).toContainText('查看数据', { timeout: 15_000 })
+      await expect(errToasts, '第二次进入仍要出声（一次性闸门会让它静音）').toHaveCount(1)
     } finally {
       await page.unroute(/\/files\/\?page_size=9999(&|$)/)
     }
