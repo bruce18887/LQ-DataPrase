@@ -41,7 +41,8 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
    * ① 切账号后旧账号的 GET **或 PUT** 响应照样写 `raw` 并把 `settled` 置真（此后整页不再取数）；
    *    桌面版是同一文档 —— `forceLogout()`（api/index.ts:149，401 分支调用点 :215/:221）只
    *    `window.location.hash = '#/login'`，登录时 `stores/auth.ts` 的 `login()` 第一句
-   *    `resetUserSettingsCaches()`（该调用在 :38，`logout()` 另在 :87）才再 reset 一次，store 实例不换；
+   *    `resetUserSettingsCaches()`（该调用在 :38；另一处 :87 住在 `clearSession()` 里，
+ *    `logout()` :90 经 `clearSession()` 间接到达 —— 别说成「logout() 在 :87」）才再 reset 一次，store 实例不换；
    * ② 本地 `patch()`/`save()` 之后，**更早**派发的那次 GET 用「写之前」的服务端快照整份覆盖 `raw`
    *    （本地写被静默回滚），或它失败时 `.catch` 把 `raw` 清成 null 而 `settled` 仍为真
    *    ⇒ 每个消费方各自回退默认值、且整页不再重取；

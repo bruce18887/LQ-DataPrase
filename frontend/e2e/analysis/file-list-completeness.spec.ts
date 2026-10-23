@@ -123,8 +123,10 @@ test.describe('文件列表完整性：分析页下拉与数据管理页数量�
  * 用精确长度 `toHaveLength(1)` 而非 `≤1` ⇒ 回归成 0 条（首拉整个丢失）同样红。
  * 谓词 `/\/files\/options\/(\?|$)/` 锚住路径结尾，只吃 `/files/options/` 这一形状
  * （`/files/?…` 全量列表、`/files/product_codes/`、`/files/format_types/` 都不同形）。
- * 发起方唯一性先 grep 再断言：`frontend/src` 里 `getOptions` 只命中
- * `AnalysisPage.vue:68` 与 `DashboardPage.vue:169` 两处，而 `gotoApp` 走 `page.goto`
+ * 发起方唯一性先 grep 再断言：`frontend/src` 里 `getOptions` 命中**两个调用点**
+ * （`AnalysisPage.vue:68` 与 `DashboardPage.vue:169`）再加**一处定义**
+ * （`api/datafiles.ts:154-156`，本句下面那条讲的就是它）—— 别说成「只命中两处」，
+ * 那条 grep 一直是三行，写成两处会让人以为谓词少看了一个文件。而 `gotoApp` 走 `page.goto`
  * 整页加载，进 `/analysis` 不会挂载 DashboardPage ⇒ 计数只可能来自本页 `loadFiles`；
  * `api/datafiles.ts:154-156` 是裸 `api.get`（无缓存、无单飞）⇒ 钩子翻倍 ⇒ 请求必然翻倍。
  *

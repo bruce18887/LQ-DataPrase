@@ -13,11 +13,18 @@ import {
   maxBlocksInCache,
   BLOCK_SIZE_MIN,
   BLOCK_SIZE_MAX,
-  DEFAULT_COL_COUNT,
   MAX_BLOCKS,
   CELL_PER_BLOCK_MAX,
   CELL_RETAIN_BUDGET,
 } from '../../src/pages/data/components/browser/blockCap'
+
+/**
+ * 「窄文件代表宽度」= 142 列（历史基线形状，docs/reference/perf-baseline-2026-10-17.md）。
+ * 它**只是本文件的测试素材**：2026-10-23 收口评审 E 项把它从 `blockCap.ts` 移回来，
+ * 生产源码里不该留一个「注释写着只给单测用、还特意声明不要接线」的导出常数。
+ * （`useIrmSizing.spec.ts` 里那条窄文件锚点用的是同一个数，那里也是就地写死的测试素材。）
+ */
+const NARROW_COLS = 142
 
 describe('effectiveBlockSize', () => {
   it('列数未知/为 0 时完全不动用户设置（对照组）', () => {
@@ -37,7 +44,7 @@ describe('effectiveBlockSize', () => {
     expect(effectiveBlockSize(Number.NaN, 100)).toBe(BLOCK_SIZE_MIN)
   })
   it('窄文件不降（对照组：必须等于设置值）', () => {
-    expect(effectiveBlockSize(500, DEFAULT_COL_COUNT)).toBe(500)
+    expect(effectiveBlockSize(500, NARROW_COLS)).toBe(500)
     expect(effectiveBlockSize(100, 60)).toBe(100)
   })
   it('千列文件必须被压到单块预算内，且不低于下限', () => {
@@ -70,9 +77,9 @@ describe('effectiveBlockSize', () => {
 describe('maxBlocksInCache', () => {
   it('窄文件仍是 20 块（对照组，与今天一致）', () => {
     // 窗口断言：min(20, floor(预算 / 100×142)) 要等于 20，需 CELL_RETAIN_BUDGET ≥ 20×14,200 = 284,000
-    expect(maxBlocksInCache(100, DEFAULT_COL_COUNT)).toBe(20)
+    expect(maxBlocksInCache(100, NARROW_COLS)).toBe(20)
     expect(maxBlocksInCache(100, null)).toBe(20)
-    // 列数未知 ⇒ 预算完全不介入，也不按 DEFAULT_COL_COUNT 估宽度。600 > BLOCK_SIZE_MAX 是
+    // 列数未知 ⇒ 预算完全不介入，也不按窄文件参考宽度（142）估。600 > BLOCK_SIZE_MAX 是
     // 刻意取的：它是本函数唯一能看出「有没有偷偷按 142 估」的输入（估了会读 floor(预算/85,200)=16）
     expect(maxBlocksInCache(600, null)).toBe(MAX_BLOCKS)
   })
@@ -88,7 +95,7 @@ describe('maxBlocksInCache', () => {
     // 承重：Math.floor→round 让 100×800 读 18、500×1728 读 2；→ceil 让 100×1728 读 9；
     // 预算常数误用 CELL_PER_BLOCK_MAX 让 100×1728 读 2（加一块 518,400 其实还没到真预算）—— 全在这里红
     const pairs: ReadonlyArray<readonly [number, number]> = [
-      [100, DEFAULT_COL_COUNT],
+      [100, NARROW_COLS],
       [100, 800],
       [100, 1728],
       [200, 600],
