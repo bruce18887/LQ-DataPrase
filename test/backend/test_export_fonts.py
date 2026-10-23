@@ -147,6 +147,20 @@ class MatplotlibFontsTests(SimpleTestCase):
                       if n in ('SimHei', 'Microsoft YaHei', 'SimSun')]
         self.assertTrue(cjk_before, f'DejaVu 之前没有中文字体候选：{stack}')
 
+    def test_non_windows_cjk_candidate_exists(self):
+        """候选里必须有一族是 Linux 上真装得到的，否则服务器形态只剩 DejaVu。
+
+        SimHei/雅黑/宋体是 Windows 随附字族，上一那条用例在纯 Windows 候选下也照样绿；
+        这条专门钉「换台机器还有中文可用」，装机名要与部署指南 §1.1/§1.2 的前置件一致。
+        """
+        stack = list(fonts.MATPLOTLIB_SANS_SERIF)
+        before = stack[:stack.index('DejaVu Sans')]
+        portable = [n for n in before
+                    if n in ('Noto Sans CJK SC', 'Source Han Sans SC',
+                             'WenQuanYi Zen Hei')]
+        self.assertTrue(portable,
+                        f'DejaVu 之前只有 Windows 字族，Linux 上中文会变方块：{stack}')
+
     def test_first_candidate_keeps_legacy_look(self):
         """SimHei 居首是刻意的：换优先级会让既有报告的 PNG 字形从黑体变雅黑。"""
         self.assertEqual(fonts.MATPLOTLIB_SANS_SERIF[0], 'SimHei')

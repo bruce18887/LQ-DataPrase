@@ -12,7 +12,15 @@ EXCEL_FONT_FAMILY = "Calibri"
 # 按**可用性**排序，不按设计偏好：SimHei 居首是为了让已生成的 PNG 观感不变
 # （提到雅黑前面会改变既有报告的字形）。SimSun 垫在 DejaVu 之前兜底 ——
 # Win10/11 把黑体改成了「按需功能」，缺字时至少还有宋体，不至于渲染成方块。
-MATPLOTLIB_SANS_SERIF = ['SimHei', 'Microsoft YaHei', 'SimSun', 'DejaVu Sans']
+# Noto 那两项是服务器形态（2026-10-23 拍板 Linux）的那一格：那台机器上
+# SimHei/雅黑/宋体都不存在，全落空就只剩 DejaVu Sans（无中文字形）＝
+# 直方图与箱线图的轴标题全变豆腐块。它们只在前三者都缺席时才生效，Windows 观感不变。
+# JP 排在 SC 之后不是审美而是源码结论：发行版的 Noto CJK 常打成 .ttc 集合，而
+# matplotlib 把 .ttc 当单个字体读（`FontEntry` 里没有 face_index 概念，3.10.9）
+# ⇒ 集合第一面之外的字族名可能注册不到，而第一面是哪个语言变体要装机后跑自检才知道。
+# 装完字体要在服务器上跑部署指南 §1.2 的自检看真注册到了哪些名字，别照抄这里。
+MATPLOTLIB_SANS_SERIF = ['SimHei', 'Microsoft YaHei', 'SimSun',
+                         'Noto Sans CJK SC', 'Noto Sans CJK JP', 'DejaVu Sans']
 
 # 与 frontend/src/styles/design-tokens.css 的 --font-sans 同值（那份是唯一事实
 # 来源，改那边要同步这边；e2e 的 fonts.spec.ts 断言的是前端那份）。
