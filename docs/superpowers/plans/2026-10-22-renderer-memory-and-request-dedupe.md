@@ -994,7 +994,7 @@ Run: `node scripts/e2e_pool.mjs --slots=4`
 Expected: 日志末尾 `RESULT: PASS`（判据取 `RESULT:` 行，不取 `$?`）。存量红按
 `docs/reference/testing-gates.md` 的定性流程走父检出 master 对照，别当场归因给本批。
 
-> **实跑与原稿不一致（2026-10-23 收口评审 E 项就地标注，别只留一个勾）**：那一轮**没有**打印
+> **实跑与原稿不一致（2026-10-23 收口评审 E 项就地标注，别只留一个勾）**：第一轮**没有**打印
 > `RESULT: PASS`。池的结论行是 `[pool] 结论 MEASURED`，复跑判级 **真红 1 · 负载抖动 2 · 悬而未决 0**
 > （412 例 / 10.3min / 计划 slot 4 未折叠 / 文件 76 = 树里 spec 数）。唯一真红是存量
 > `e2e/settings/export-timeout.spec.ts`：独占 slot 复跑仍红、签名与台账逐字一致，按 R21 **只记账不修**
@@ -1002,7 +1002,19 @@ Expected: 日志末尾 `RESULT: PASS`（判据取 `RESULT:` 行，不取 `$?`）
 > 哨兵失效（已改扫载体并集并复跑 `Ran 9 · OK`）。
 > 逐条数字与处置的落点：`docs/tasks/todo.md` 的「门禁（收口档）」一段与文末「整改后遗留清单」
 > （存量红那条 + R21），以及 `docs/reference/renderer-memory-baseline-2026-10-22.md` 的复跑表。
-> 所以这个勾代表「这一档跑完了、红项已定性并有在册处置」，**不**代表出现过绿色结论行。
+> 当时这个勾只代表「这一档跑完了、红项已定性并有在册处置」，**不**代表出现过绿色结论行。
+>
+> **第二轮（2026-10-23，用户点定「修这条存量红用例」之后）拿到了字面绿灯**：
+> `node scripts/e2e_affected.mjs --base cd1af05` →
+> `档: lint:e2e ok / vitest ok / backend ok / e2e:全量 ok` → **`RESULT: PASS · 计划 4 档全部执行`**。
+> 池账：414 例 / 8.6min / 单价 3.00s/例 / 效率 2.26（目标 ≥2.8，仍未达）/ skipped 22 ·
+> `[pool] 结论 MEASURED` · 复跑判级 **真红 0 · 负载抖动 2 · 悬而未决 0**（抖动的两条仍是
+> `analysis/histogram-{fail-bins,multiseries-clip}.spec.ts`，与前几轮同形）。
+> ⚠ 两点口径：① 存量红那条**不是测试写错**，是产品把输入框挤没了（实测内部 `<input>` 宽 0px），
+> 修在产品侧并补了宽度判据（提交 `88fe226`，机制见 `docs/tasks/lessons.md` 同日第一条）；
+> ② 这一档的 `backend` 跑的是**按改动标签选出的后端子集**且用 **PATH python**
+> （`e2e_affected.mjs:182/192` 硬编码 `python`）→ 本轮 `Ran 1067 · OK (skipped=7)`；
+> 全套 1811 例（`.venv`）的读数仍以第一轮那条为准。
 
 - [x] **Step 3: 回填与教训**
 

@@ -5291,6 +5291,16 @@ analysis 档补一条（R19：`AnalysisPage` 的去重原本无守卫）、dashb
 且「一个载体都没命中」也判红；复跑该模块 `Ran 9 · OK`，全套复跑结果见提交信息；
 `blockCap.ts` 那条仍指向 `.vue` 的 stale 注释一并纠正。
 
+**门禁第二轮（2026-10-23，修完存量红之后）**：`node scripts/e2e_affected.mjs --base cd1af05` →
+`档: lint:e2e ok / vitest ok / backend ok / e2e:全量 ok` ⇒ **`RESULT: PASS · 计划 4 档全部执行`**（判据取这一行）。
+池账：414 例 / 8.6min / 单价 3.00s/例 / 效率 2.26（目标 ≥2.8，**仍未达**）/ skipped 22 ·
+`[pool] 结论 MEASURED` · 复跑判级 **真红 0 · 负载抖动 2 · 悬而未决 0**（抖动的两条仍是
+`analysis/histogram-{fail-bins,multiseries-clip}.spec.ts`，独占 slot 复跑即绿，与前几轮同形）。
+⚠ 两点口径别读混：① 这一档的 `backend` 是按改动标签选出的**后端子集**、且用 **PATH python**
+（`scripts/e2e_affected.mjs:182/192` 硬编码 `python`）⇒ 本轮 `Ran 1067 · OK (skipped=7)`，
+不是上面那套 1811 例（`.venv`）的全套；② 存量红那条的结论是**产品缺陷**（输入框内部 `<input>` 实测宽 0px），
+不是判据太挑 —— 见下面「遗留」里已勾掉的 `export-timeout` 那条与 `docs/tasks/lessons.md` 2026-10-23 三条。
+
 ## 遗留
 
 - [ ] **B 后端载荷**、**C `2026-10-21` 内存治理三批**、**D Electron 日志分级/乱码/轮转**：本轮刻意不做，见上一节。
