@@ -39,6 +39,21 @@ test.describe('@p1 导出超时设置', { tag: ['@p1', '@settings'] }, () => {
     await expect(input).toBeVisible()
     await expect(input).toHaveValue('600')
     await expect(page.getByText(/导出请求最长等待秒数/)).toBeVisible()
+
+    /*
+     * 宽度判据（承重，别删）。这一行的说明文案与 el-input-number 同在一个 flex 行里，
+     * 控件默认 `flex: 0 1 auto` ⇒ 会被文案压缩，下限只有 `.el-input__wrapper` 的 42+42px 内边距。
+     * 2026-10-23 在 1280×720（本用例的默认视口）实测：
+     *   导出超时行  控件 150→84px，内部 <input> **0px**  ⇒ 只有 toBeVisible 的用例能红（真红 1 条）
+     *   SFTP 超时行 控件 150→109.9px，内部 <input> 25.9px ⇒ 同一个缺陷，但「可见」所以全绿
+     * 回归点是 73c4791（把导出这行的文案从一行加到三行），不是测试写错。
+     * 阈值取自修复后的实测值：控件 = Element Plus 声明的 150px；
+     * 内部 <input> = 150 − 42 − 42 = 66px。取 140 / 40 留余量，同时稳稳压住 0 与 25.9。
+     */
+    const numberBox = await page.getByTestId('export-timeout-input').boundingBox()
+    expect(numberBox?.width, 'el-input-number 被说明文案挤扁（历史实测 84px）').toBeGreaterThanOrEqual(140)
+    const inputBox = await input.boundingBox()
+    expect(inputBox?.width, '内部 <input> 宽度归零，用户看不到也点不着（历史实测 0px）').toBeGreaterThanOrEqual(40)
   })
 
   test('保存并持久化：改为 900 → 保存 → reload 保留；结束后恢复默认', async ({ page }) => {
