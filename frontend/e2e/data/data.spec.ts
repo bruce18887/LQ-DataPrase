@@ -3,7 +3,7 @@ import path from 'node:path'
 import os from 'node:os'
 import fs from 'node:fs'
 import { SEEDED_FILE_COUNT, PRIMARY_SAMPLE_FILE, SEEDED_FILES } from '../fixtures/test-data'
-import { gotoApp } from '../helpers/nav'
+import { gotoApp, navByMenu } from '../helpers/nav'
 import { uploadFile, uploadMultipleFiles, expectUploadSuccess } from '../helpers/upload'
 import { openHeaderFilter, selectHeaderFilterOption } from '../helpers/colfilter'
 
@@ -920,6 +920,59 @@ test.describe('进数据管理：导航期全量文件列表只拉一次', { tag
     await page.waitForTimeout(2_000)
 
     expect(hits, `一次导航到 /data 发出了 ${hits.length} 条 page_size=9999，应为 1 条`).toHaveLength(1)
+  })
+
+  /**
+   * 那条全量列表**刷新失败**时的形状（2026-10-23 收口评审 A-1）。
+   *
+   * 缺陷：`DataManagement.vue` 的 `loadFiles()` catch 里写的是 `files.value = []`。这份列表
+   * 是每份表格实例 `col_count` 的唯一来源（`useIrmSizing` → `blockCap`），清空 = 「列数未知」
+   * ⇒ 驻留上限弹回 20 块，而它同时是 datasource 的身份之一 ⇒ 场上每个仍挂载的 grid
+   * （v-show 下最多 4 个）各丢一次缓存、各重发 `page=1`：恰恰在「后端正忙到列表拉不到」
+   * 这种压力形状下，保留量比整改前更大。修法 = 保留上一份好列表 + 把失败报出来。
+   *
+   * 判据两条，各挡一种回退：
+   * ① 横幅里当前文件**还是那份文件**（旧写法列表被清空 ⇒ 下拉里没有这个条目，只能显示裸 id）；
+   * ② 出现错误 toast（旧写法 `catch {}` 静默吞掉，用户完全不知道列表没刷新）。
+   * 触发通路刻意用「离开页面再回来」⇒ `onActivated(loadFiles)`，与生产每次导航同形，
+   * keep-alive（`MainLayout.vue:12`）保住组件状态 ⇒ 回来时用的还是那一份上一轮的列表。
+   *
+   * ⚠ 谓词与上面那条计数判据同形（`?page_size=9999` 紧跟问号）：放宽成 `/files/.*page_size=9999`
+   *   会把 `/browse/?…page_size=99999` 也 abort 掉，那条路测的就不是列表刷新了。
+   */
+  test('@p1 全量列表 page_size=9999 刷新失败：保留上一份并给出错误提示', async ({ page }) => {
+    await gotoApp(page, '/data')
+    const firstRow = page.locator('.content-section:visible .el-table .el-table__row').first()
+    await expect(firstRow).toBeVisible({ timeout: 30_000 })
+    await firstRow.locator('button').filter({ hasText: '查看' }).click()
+    await expect(page.locator('.tab-btn.active')).toContainText('查看数据')
+
+    const banner = page.locator('.content-section:visible .banner-file-select').first()
+    const selectedLabel = banner.locator('.el-select__placeholder')
+    await expect(selectedLabel).not.toHaveText('', { timeout: 10_000 })
+    const filename = (await selectedLabel.textContent()) ?? ''
+    expect(filename.length, '前置：横幅应已显示当前文件名').toBeGreaterThan(3)
+
+    // 让下一次全量刷新失败（abort ⇒ 无响应 ⇒ axios 走 catch）
+    await page.route(/\/files\/\?page_size=9999(&|$)/, (route) => route.abort())
+    try {
+      await navByMenu(page, '仪表板')
+      await expect(page.getByTestId('page-identity')).toContainText('仪表板')
+      await navByMenu(page, '数据管理')
+      // 回来的还是那个 keep-alive 实例：tab 停在「查看数据」上（组件状态没被重建）
+      await expect(page.locator('.tab-btn.active')).toContainText('查看数据', { timeout: 15_000 })
+
+      await expect(
+        page.locator('.el-message').filter({ hasText: /文件列表刷新失败|无法连接服务器/ }),
+        '刷新失败必须出声（旧写法 catch {} 静默清空）',
+      ).toBeVisible({ timeout: 10_000 })
+      await expect(
+        selectedLabel,
+        `列表拉不到时应保留上一份（当前文件仍显示「${filename}」）`,
+      ).toContainText(filename.slice(0, 10), { timeout: 10_000 })
+    } finally {
+      await page.unroute(/\/files\/\?page_size=9999(&|$)/)
+    }
   })
 })
 
