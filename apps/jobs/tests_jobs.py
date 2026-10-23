@@ -467,6 +467,33 @@ class ExecutorDispatchTests(unittest.TestCase):
             import shutil
             shutil.rmtree(tmpdir, ignore_errors=True)
 
+    def test_pool_mp_context_is_pinned_not_left_to_default(self):
+        """建池必须**显式**传 spawn，断言的是「参数存在」而不是「值是 spawn」。
+
+        本机 Windows 的默认 start method 本来就是 spawn（实测），所以「删掉
+        mp_context 实参」这种改法在这台机器上照样全绿；而 Linux 的默认是 fork，
+        删掉就把本文件判据 1 那条「子进程里没有 django.setup()」的契约静默打掉。
+        截住构造函数断言实参本身，两个平台都能红。
+        """
+        import apps.jobs.executor as executor_module
+        captured = {}
+        real_cls = executor_module.ProcessPoolExecutor
+
+        def spy(*args, **kwargs):
+            captured.update(kwargs)
+            return real_cls(*args, **kwargs)
+
+        self.addCleanup(executor_module.reset_for_tests)
+        executor_module.reset_for_tests()
+        # 预热那一条 submit 会真的拉起 worker：本用例只验证接线，把它换成空函数。
+        with mock.patch.object(executor_module, 'warmup_imports', lambda: None), \
+                mock.patch.object(executor_module, 'ProcessPoolExecutor', spy):
+            pool = executor_module._get_pool()
+        self.assertIsNotNone(pool)
+        self.assertIn('mp_context', captured,
+                      '建池没有显式传 mp_context：Windows 蒙对，Linux 会退化成 fork')
+        self.assertEqual(captured['mp_context'].get_start_method(), 'spawn')
+
 
 class RealPoolEndToEndTests(TransactionTestCase):
     """真进程池跑通一次：提交 → 子进程算 → 状态回填 → 下载。
