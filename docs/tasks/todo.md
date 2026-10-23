@@ -5469,3 +5469,34 @@ C `2026-10-21` 内存治理三批；D Electron 日志把 backend-stderr 一律�
   **处置＝留**：与 `save()` 作废在飞 GET 的第二面（本文上面第 3 条）同族，等真出现该形状再改 `patch()` 语义。
 - **存量红 `e2e/settings/export-timeout.spec.ts` 的处置**（修 tab 激活判据 or 进快门禁已知红豁免表）仍等用户拍 ——
   见上一节「遗留」。
+
+## 2026-10-23 部署整改批5：OS 拍板 Linux + 进程模型走方案 A（standalone + systemd）
+
+用户 2026-10-23 确认部署环境是 Linux，`docs/reference/server-deployment.md` §6 那条「等 OS 拍板」随之关闭；
+进程模型在 A（systemd 跑 `standalone.py`）与 B（systemd + gunicorn）之间点了 **A，先跑通 standalone**。
+
+- [x] `apps/jobs/executor.py`：作业进程池显式钉 `mp_context=spawn`。Linux 默认是 fork
+      （CPython 3.13 文档，3.14 起改 forkserver），不钉就把「子进程无 Django」降级成约定。
+      判据 `test_pool_mp_context_is_pinned_not_left_to_default` 断「实参存在」而非「值」——
+      Windows 默认也是 spawn，断值的那条删掉实参照样绿。
+- [x] `apps/export/fonts.py`：matplotlib 候选里补 `Noto Sans CJK SC` / `Noto Sans CJK JP`（SimHei
+      仍居首，Windows 观感不变）。Linux 上前三个都不存在，不补就落到 DejaVu Sans ⇒ 导出图中文全豆腐块。
+      配套判据 `test_non_windows_cjk_candidate_exists`。
+- [x] `docs/reference/server-deployment.md` 全面 Linux 化：§1.1 系统前置件、§1.2 中文字体自检
+      （`fc-list` 枚举 + `.ttc` 只读第一面 ⇒ 装完必须打印 `fontManager.ttflist` 验）、
+      §3 环境文件 + `lqdp.service`（`Restart=always` 兜 runserver 没有的守护）、
+      §4 `backup_db` 的 systemd timer、§5.6 新增「media 无自动回收」这条上线前必须接受的限制、
+      §6 改写成「已定 / 还等 / 方案 B 的先决实验」、§7 首启验收 6 条。
+- [x] 本机（Windows + 同一份 server 档 + 一次性 `LQDP_SERVER_BASE_DIR`）实跑一遍方案 A 的命令序列：
+      bootstrap 建库建管理员 → `/` 200（1719B）→ `/pages/analysis` 200 → 错 Host 400 →
+      登录返回 `token` → 管理员 `system/paths` 200 → `/api/v1/system/shutdown/` 200 且进程 exit 0、
+      端口释放 → `backup_db --keep 2` 出快照并打预期的「未携带 secret.key」警告。
+      补测的一条既有文档断言：`viewer` 读 `system/paths` **403**，对照是同 token 读
+      `auth/profile` **200**（否则 403 分不清是闸门还是没登录）。夹具目录已删。
+- [ ] **真机（Linux）待做**：§1.2 的字体自检、§7 第 6 条（SIGTERM 路径，Windows 复现不了）、
+      一次批量图表导出看中文、Electron 客户端把后端地址填成这台服务器再走登录（D1 通路）。
+- [ ] 方案 B 的两件先决实验（换 gunicorn 之前）：spawn 子进程在 gunicorn 作父进程时会不会重跑
+      `__main__`（其控制台脚本无 `if __name__` 保护，**未实测**）；`config/wsgi.py` 不装信号处理器
+      也不跑 bootstrap。`requirements/production.txt` 里 gunicorn 的未钉版本本轮**不动**（方案 A 用不到）。
+- **待拍板的两件没变**：无 TLS 的安全姿态（§5.1）、自助找回密码入口。
+
