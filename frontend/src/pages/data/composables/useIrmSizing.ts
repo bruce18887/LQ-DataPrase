@@ -13,6 +13,10 @@
  * `props.files`（元素带 `col_count`，`DataManagement.vue:59` 就传了 ⇒ **就 col_count 这一处**
  * 零新增请求、零新增 prop；`active` 那条 prop 是 D4「非激活标签释放」在 v-show 结构下
  * 唯一的信号来源，与本句无关，别把它读成「本文件没加过 prop」）。
+ *
+ * ⚠ 2026-10-23 收口评审 A 项之后，「零新增 prop」只对**分页**那条链成立：驻留上限多了一个
+ * 入参 `loadedColCount`（组件已有的 `allCols.length`，同样零请求），因为「列表拉不到 ⇒
+ * col_count 未知 ⇒ 封顶整个失效」这条路径在生产压力形状下会把保留量放大到比整改前更多。
  */
 import { computed, ref, type Ref } from 'vue'
 import type { GridApi, IDatasource } from 'ag-grid-community'
@@ -35,12 +39,16 @@ const BLOCK_SIZE_MAX = 500
  * @param props 组件的 props（响应式对象，直接透传即可 —— computed 会按 `props.fileId`
  *              / `props.files` 建依赖，不需要额外传 getter）
  * @param gridApi 由 `useBinCellMenu` 的 onGridReady 赋值的 api 引用
+ * @param loadedColCount 实际加载出来的列宽（首块 `/browse/` 的 `headers` 数，组件侧就是
+ *                       `allCols.length`）。**只**给驻留上限当 col_count 未知时的兜底，
+ *                       不参与分页 —— 理由见 `retentionColCount`。
  */
 export function useIrmSizing(opts: {
   props: { fileId: number | null; files: DataFile[] }
   gridApi: Ref<GridApi | null>
+  loadedColCount: Ref<number>
 }) {
-  const { props, gridApi } = opts
+  const { props, gridApi, loadedColCount } = opts
 
   /**
    * grid 是否还是活的。**唯一**置位点是 onGridReady（`markGridAlive`），清除点是 onUnmounted
@@ -62,8 +70,10 @@ export function useIrmSizing(opts: {
 
   /**
    * 当前文件的列数：来自已传入的文件列表，零新增请求、零新增 prop。
-   * 未知（文件还没解析出 col_count，或列表里查不到这个 id）时**预算完全不介入** ——
-   * 按某个默认列数估算会在 col_count 还没到位时静默压低所有文件的分页大小。
+   * 未知（文件还没解析出 col_count，或列表里查不到这个 id）时**分页不介入** ——
+   * 按某个默认列数估算会在 col_count 还没到位时静默压低所有文件的分页大小
+   * （`blockCap.effectiveBlockSize` 的那条理由，评审 A-2 明确不许动它）。
+   * 驻留上限不走这条路，见下面 `retentionColCount`。
    */
   const colCount = computed<number | null>(
     () => props.files.find((f) => f.id === props.fileId)?.col_count ?? null,
@@ -79,7 +89,29 @@ export function useIrmSizing(opts: {
   const blockSize = computed(() => effectiveBlockSize(settingsPageSize.value, colCount.value))
 
   /**
-   * 驻留块数上限。和 blockSize 一样是 computed：它由 `blockSize × colCount` 反推，
+   * 驻留上限用的列数：`col_count` 优先，未知时退回**实际加载出来的列宽**（首块 `/browse/`
+   * 的 headers 数 = 组件的 `allCols.length`）。
+   *
+   * 为什么只有这一条允许回退（评审 A-2）：「驻留多少块」是一次**缓存尺寸**决策，
+   * 猜宽一点只会少留几块，猜错不会改变用户看到的分页语义；而 `blockCap.ts:19-23` 拒绝
+   * 在列数未知时钳 `effectiveBlockSize`，理由正是「压低会静默改掉分页」。两者不冲突，
+   * 所以这里补回退、`effectiveBlockSize` 保持「未知 ⇒ 不介入」，单测也按这两条分开钉。
+   *
+   * 没有它会发生什么（评审 A-1 的压力形状）：`loadFiles()` 失败 / 列表里查不到这个文件 ⇒
+   * `col_count` 未知 ⇒ 上限从 8 弹回 20，而 8→20 同时是 datasource 的身份变化 ⇒
+   * 场上每个挂载中的 grid（v-show 下最多 4 个）各丢一次缓存、各重发 `page=1`，
+   * 千列文件按 500 行设置能驻留到 500×1728×20，比整改前更糟。
+   *
+   * ⚠ 回退本身也换身份：首块落地那一刻 `allCols` 从 0 变成真实列宽，若因此改变上限，
+   * datasource 会 `resetCache` 重取一次 `page=1`。这是**有意的代价**（宁可多发一次也要封顶），
+   * 且只在「col_count 未知 + 列宽真的宽到要压」时发生；窄文件（142 列）算出来仍是 20 ⇒ 不换身份。
+   */
+  const retentionColCount = computed<number | null>(
+    () => colCount.value ?? (loadedColCount.value > 0 ? loadedColCount.value : null),
+  )
+
+  /**
+   * 驻留块数上限。和 blockSize 一样是 computed：它由 `blockSize × retentionColCount` 反推，
    * 所以「块更大 ↔ 块更少」始终让总驻留格数留在预算内。
    * 返回值恒 ≥1：ag-grid 把 0 当「不限制」（`maxBlocksProvided = maxBlocksInCache > 0`）。
    *
@@ -97,7 +129,7 @@ export function useIrmSizing(opts: {
    * 顺带把整叠块丢掉 ⇒ `reload()` 的换文件分支不再需要 purge（多留一次就是多一次 page=1）。
    * 端到端判据：`e2e/data/view-data.spec.ts` 的「窄→宽同标签切换…能看见驱逐」。
    */
-  const maxBlocks = computed(() => maxBlocksInCache(blockSize.value, colCount.value))
+  const maxBlocks = computed(() => maxBlocksInCache(blockSize.value, retentionColCount.value))
 
   function markGridAlive() {
     gridAlive.value = true
@@ -196,6 +228,8 @@ export function useIrmSizing(opts: {
 
   return {
     colCount,
+    /** 驻留上限实际用的列数（col_count 优先，未知时退回已加载列宽）；只出现在这里，不参与分页 */
+    retentionColCount,
     settingsPageSize,
     blockSize,
     maxBlocks,

@@ -100,6 +100,7 @@ import { ref, computed, onActivated, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../../api'
 import { useFilesStore } from '../../stores/files'
+import { formatError } from '../../utils/error'
 import ActiveFileBanner from './components/browser/ActiveFileBanner.vue'
 import ViewFileTabs, { type ViewFileTab } from './components/browser/ViewFileTabs.vue'
 import FileListTab from './components/FileListTab.vue'
@@ -189,13 +190,32 @@ const tabs = [
   { key: 'buyoff', label: 'Buyoff Form', icon: '📝' },
 ]
 
+/**
+ * 「同一段失败只提示一次」的闸门：`loadFiles()` 由 onActivated 与 filesVersion 两处驱动，
+ * 后端缺席时每次进入都会失败 ⇒ 不清这个标记就是一屏叠一屏的 toast。成功后复位。
+ */
+let filesLoadFailedNotified = false
+
 async function loadFiles() {
   try {
     // 查看数据/导出工具顶部的文件下拉需能选任意文件，不能受默认分页（20 条）限制
     const { data } = await api.get('/files/', { params: { page_size: 9999 } })
     files.value = data.results || data
-  } catch {
-    files.value = []
+    filesLoadFailedNotified = false
+  } catch (err) {
+    // ⚠ 这里**不能**清成 []（评审 A-1，2026-10-23 收口）：`files` 是每份表格实例
+    // `col_count` 的唯一来源（useIrmSizing → blockCap），清空 = 「列数未知」= 驻留上限
+    // 从算出来的值弹回 20 块；而它同时是 datasource 的身份之一 ⇒ 场上每个仍挂载的 grid
+    // （v-show 下最多 4 个）各丢一次缓存、各重发 `page=1`。也就是说**恰恰在列表拉不到
+    // 这种压力形状下**，保留量比整改前更大（500 行 × 1,728 列 × 20 块）。
+    // 所以：保留上一份好列表（宁可下拉里的条目旧一次），并把失败原因报出来；
+    // 真正 col_count 拿不到的新文件由 useIrmSizing.retentionColCount 用已加载列宽兜底。
+    // 报错沿用本页既有通路（ElMessage，见 viewFile 的上限提示），不新造 UI。
+    // onActivated 每次进入都会调这里 ⇒ 同一段失败只提示一次，别刷一屏 toast。
+    if (!filesLoadFailedNotified) {
+      filesLoadFailedNotified = true
+      ElMessage.error(formatError(err, '文件列表刷新失败，已保留上一次的列表'))
+    }
   }
 }
 
