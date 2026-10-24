@@ -5,3 +5,8 @@
 test/fixtures/gage/*.csv -text
 test/fixtures/gage/MANIFEST.txt -text
 test/fixtures/weight/*.csv -text
+# 部署模板必须保持 LF：本机 autocrlf=true 会让 Windows 检出变成 CRLF，
+# 从工作区直接拷到 Linux 时 systemd 可能把 \r 算进 unit 值里。
+deploy/*.service text eol=lf
+deploy/*.timer text eol=lf
+deploy/*.example text eol=lf

@@ -1,0 +1,20 @@
+[Unit]
+Description=LQ-DataPrase 后端（服务器形态 · 方案 A：单进程 standalone）
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lqdp
+Group=lqdp
+WorkingDirectory=/srv/lqdp-src
+EnvironmentFile=/etc/lqdp/server.env
+ExecStart=/srv/lqdp-src/.venv/bin/python standalone.py --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
