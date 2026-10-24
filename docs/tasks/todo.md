@@ -4485,7 +4485,13 @@ Chromium 错误页停在窗口底色 `#1a1a2e` 上 = 黑屏，且 `did-finish-lo
 - [x] P1-4 新增 `/files/options/` 轻量端点；分析页与看板页改用它（DataManagement 未动，它的列表就是表格本身）；`max_page_size` **未收**（DataManagement 仍依赖 9999）
 - [x] P1-5 处理 browse `search` 潜在路径（16.2s，UI 未接线）：**已选 A 删 + 存在即拒 400**（理由与证据见文末「P1-5 补做」；本条原先写的「只能修不能删」已撤回）
 - [x] P2 写事务与解析解耦：新增 `parse_file_meta`，`_register_file(parsed=...)`；ZIP 与目录导入改「事务外解析 + 每文件短事务」；`tests_import_tx.py` 3 例（`TransactionTestCase`，`TestCase` 的外层 atomic 会让 `in_atomic_block` 恒真）
-- [ ] P3 重活作业化：设计稿已出 `docs/specs/2026-10-17-heavy-job-offload-design.md`，**未实施**
+- [x] P3 重活作业化：设计稿 `docs/specs/2026-10-17-heavy-job-offload-design.md` —— **本条原写「未实施」是 stale**，
+      2026-10-24 复核实现点：四 kind 齐（`apps/jobs/executor.py:58`）、202+轮询+下载+取消
+      （`apps/jobs/views.py:109` 起）、常驻池与启动预热（`apps/jobs/executor.py:132`）、
+      下载 lane（`apps/jobs/executor.py:201`）、重启清僵尸（`apps/jobs/apps.py:43`）、前端 batch_charts/html_report/excel 均已迁（见 S4b/S4a）。
+      **它欠的只是自己那两条 P95 验收，现已取证**：`docs/reference/perf-baseline-2026-10-24-dual-profile.md` §3
+      —— 无并发提交 12–48ms（达标），20 人并发中位 1.7s（不达标，超判据 8 倍），
+      轻请求劣化 0.9–1.5×（达标）。⇒ 瓶颈是同进程争抢，不是提交路径，也不是进程形态。
 - [ ] P4 部署与容量：`deploy/gunicorn.conf.py` 入库；关 `WHITENOISE_USE_FINDERS`；media 配额 + 内容去重；`/api/v1/metrics/`
 - [ ] P5（触发式）Postgres 立项判据：`database is locked` >10 次/天 或 写 P95 >1s 或 改判多 worker
 
@@ -4602,11 +4608,15 @@ Chromium 错误页停在窗口底色 `#1a1a2e` 上 = 黑屏，且 `did-finish-lo
       → 202+job_id；`GET /jobs/<id>/`、`GET /jobs/<id>/download/`（未 done→404、
       目录型结果→409 `not_a_file_result`）、`POST /jobs/<id>/cancel/`
       （仅 pending，running→409）、`GET /jobs/`（本人最近 50）。旧同步端点全部保留未删。
-- [ ] **S4b 前端剩余导出迁作业**：`batch_charts`（`pages/analysis/composables/useExport.ts`；
+- [x] **S4b 前端剩余导出迁作业**：`batch_charts`（`pages/analysis/composables/useExport.ts`；
       e2e `exports/exports.spec.ts:457-468` 等的是 `/export/batch_charts/` 的响应，迁移时一起改）
       与 `html_report`（`pages/dashboard/components/ExportFooter.vue:27`；
       `dashboard.spec.ts:73-89` 与 `html-report.spec.ts:20-28` 的 120s 预算要覆盖轮询）。
       两条都迁完再同步改设置页「导出请求最长等待秒数」的文案（见本节末）。
+      **2026-10-24 复核：本条其实早已完成**（实施结果就记在本节「S4b 实施结果（2026-10-18）」，
+      复选框忘了勾）——`useExport.ts:57` 走 `job.run('export_batch_charts', …)`、
+      `ExportFooter.vue:28` 走 `job.run('export_html_report', …)`；
+      仍同步的是 `sigma_limit`（`useExport.ts:29`）与 `to_csv`（`useBrowserExport.ts:72`），它们不是作业类型。
 - [x] **S4a 前端接线（查看数据 Excel）落地**：新增 `api/jobs.ts`、`composables/jobPolling.ts`
       （纯决策）、`composables/useJobExport.ts`（循环）、`pages/data/composables/useBrowserExport.ts`、
       `pages/data/components/browser/JobProgressChip.vue`；`view-data.spec.ts` 的导出用例
@@ -5315,7 +5325,20 @@ analysis 档补一条（R19：`AnalysisPage` 的去重原本无守卫）、dashb
 
 ## 遗留
 
-- [ ] **B 后端载荷**、**C `2026-10-21` 内存治理三批**、**D Electron 日志分级/乱码/轮转**：本轮刻意不做，见上一节。
+- [ ] **B 后端载荷**：**未做，且没有设计稿**。2026-10-24 双形态测量把它提到下一刀首位——
+      20 人档提交跳中位 1.7s 而提交路径本身只要 12–48ms，两档形态差值 ≤1.3×，
+      说明瓶颈是同进程争抢而非进程模型；三个落点见
+      `docs/reference/perf-baseline-2026-10-24-dual-profile.md` §6。
+- [ ] **C `2026-10-21` 内存治理三批**：**批 1 已落地**（预算与水位在 `apps/common/memory.py`，
+      每次起服务打一条 `INFO apps.common.memory: 内存预算`，本轮压测日志里可证），
+      **批 2（准入）与批 3（每-worker 硬上限）零代码**；批 1 的收口门禁那轮是 VOID，
+      崩池成因 2026-10-24 已归因（同一份基线文档 §4：OpenBLAS 分配失败 ×8 →
+      BrokenProcessPool ×6 → 500 ×5，看 commit 不看 available 内存）。
+      崩池**之后**的永久 500 已修（`87fbc9c`），崩池**本身**仍未修。
+- [ ] **D Electron 日志分级/乱码/轮转**：**三件全未做**（复核点：
+      `electron/backend.ts:345-347` 把子进程 stderr 一律 `console.error`、
+      `:314,346` 用默认 utf8 `data.toString()` 解 GBK 输出、
+      `electron/backend.ts:70` 与 `electron/main.ts:94` 是 `appendFileSync` 无轮转）。
 - [x] 存量红 `e2e/settings/export-timeout.spec.ts`：**已修，且根因不是测试**（用户 2026-10-23 点定「修这条存量红用例」）。
       实测（1280×720 探针）：`el-input-number` 与长说明文案同在一个 flex 行，控件默认 `flex: 0 1 auto`
       被压到 84px、内部 `<input>` 宽 **0px** ⇒ 数值看不见也点不着；回归点是 master 的 `73c4791`
@@ -5559,4 +5582,37 @@ Playwright / Element Plus / AG Grid patch（批 4）、Pinia 4 / Vue Router 5 / 
 **未纳入并已知的残留**：Electron 33 EOL、`gunicorn>=21.2` 未钉、`pyproject.toml` 的
 `requires-python>=3.11` 与实际 Django 6.0/6.1 要求 `>=3.12` 不一致 —— 前两条随批 2/服务器装机处理，
 第三条本轮只记录，避免把元数据修正混进依赖升级 diff。
+
+## 2026-10-24 性能线 R1–R4：双形态测量、崩池归因、永久 500 修复
+
+用户把主线改判为「性能与内存」，第一批定为**测量收口**（先定靶再动刀），
+形态选「两档都跑并对照」。产物全部落在 `docs/reference/perf-baseline-2026-10-24-dual-profile.md`。
+
+- **协议**：每轮**冷启动独立进程 + 独立数据根**、warmup 1 轮后清零统计账、与 10-17 同一夹具、
+  每端点 n=120；提交判据分「首跳（含池懒建）」与「稳态」，并**必配无并发对照**。
+  协议本身是被迫改的：同进程连跑两轮时第二轮吃第一轮的解析缓存
+  （browse 首页 P95 7116ms → 3429ms，那是缓存不是优化）。
+- **结论 1｜形态不是矛盾**：两档 P95 互有胜负、幅度 ≤1.3×，都卡在 browse 首页 3.2–4.2s。
+- **结论 2｜P3 两条判据一达标一不达标**：轻请求劣化 0.9–1.5×（判据 ≤2×，达标）；
+  提交跳无并发 12–48ms（判据 <200ms，达标）、20 人并发中位 1.7s（**不达标，超 8 倍**），
+  两档中位数几乎相同 ⇒ 瓶颈是**同进程争抢**，不是提交路径也不是进程形态 ⇒ 下一刀 = B 后端载荷。
+- **结论 3｜崩池归因（未重跑，靠既有现场）**：OpenBLAS 分配失败 ×8 → `BrokenProcessPool` ×6 →
+  提交端点 500 ×5，当时 commit 33.2/36.7GB（只剩 3.5GB）；**2-slot 复跑也掉了 slot1**
+  ⇒ 不是并行度问题。判读口径：**看 commit，不看 available 内存**。
+- **顺带查出并修掉的缺陷（`87fbc9c`）**：`executor_available()` 只判「池建不建得起来」，
+  看不见「池里的子进程刚死」，而 `_dispatch` 不接标准库异常 ⇒ 一次内存尖峰后该进程
+  **所有导出永久 500**，进程活着所以 `Restart=always` 救不回来。现在崩池丢弃坏池、
+  只让紧接着那一条走同步。三条 T1 判据修复前分别红在 `AttributeError` /
+  `500 internal_error` / 孤儿 `pending`（开机自愈只清 `running`）。
+- **验证**：`apps.jobs` 53 例 OK、vitest 470 例 OK、e2e affected 池 414 例
+  `RESULT: PASS · 计划 4 档全部执行`（墙钟 8.6min、unexpected 3、flaky 6、skipped 22）。
+- **本轮纠的三处 stale**：`:4488` P3「未实施」（早已实施，只欠那两条 P95）、
+  `:4605` S4b 未勾（10-18 就实施完，实施结果就在同一节里）、
+  `:5318` B/C/D 一句带过（拆成三条各记现状）。
+- **未做**：B 的设计稿；内存批 2（准入）与批 3（每-worker 硬上限）；崩池**本身**；
+  稳态提交只 n=6（当门禁基线要 ≥20 单）；真机复跑；Electron 日志三件；`requires-python` 下限。
+- **测量工具改动**：`scripts/perf_load20.py` 新增 `--heavy job` 与 `--job-submits`，
+  首跳/稳态分记、轮询单独成行、拿不到 `job_id` 时显式作废读数（防同步回落混进 P95）。
+  ⚠ 在 WSL 里改 `scripts/` 后必须重新 rsync 到 `/srv/lqdp-src/scripts/`，否则跑的是旧版
+  （本轮就这么翻过一次车：`exit=2` 是 argparse 不认新参数）。
 
