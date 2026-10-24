@@ -3,13 +3,13 @@
     <el-upload
       drag
       :http-request="handleUpload"
-      accept=".csv,.txt,.dat,.zip,.7z,.rar"
+      accept=".csv,.zip"
       :show-file-list="false"
       multiple
     >
       <el-icon :size="48"><UploadFilled /></el-icon>
       <div class="upload-text">拖拽文件到此处 或 <em>点击上传</em></div>
-      <div class="upload-hint">支持多文件上传，ZIP/7z/RAR 压缩包会自动解压</div>
+      <div class="upload-hint">支持多文件上传，ZIP 压缩包会自动解压</div>
     </el-upload>
     <el-progress
       v-if="uploadProgress > 0 && uploadProgress < 100"

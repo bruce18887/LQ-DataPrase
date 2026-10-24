@@ -24,8 +24,8 @@
 #     branch was unreachable and the package was not even installed (P0-1b).
 
 # --- Web framework & API -----------------------------------------------------
-Django==6.0.5
-djangorestframework==3.17.1
+Django==6.0.9
+djangorestframework==3.18.3
 djangorestframework-simplejwt==5.5.1
 django-cors-headers==4.9.0
 django-filter==25.2
@@ -48,18 +48,15 @@ matplotlib==3.10.9
 openpyxl==3.1.5
 python-pptx==1.0.2
 Pillow==12.2.0
-py7zr==1.1.0
-rarfile==4.2
 excelize==0.0.9
 lxml==6.1.1
 
-# psutil：内存 / commit 指标与预算兜底。py7zr 虽已传递依赖，仍显式声明，
-# 避免干净检出或将来 py7zr 换依赖时指标静默变 null。
+# psutil：内存 / commit 指标与预算兜底，由 apps/common/metrics.py 直接导入。
 psutil==7.2.2
 
 # --- Remote access / crypto --------------------------------------------------
 paramiko==5.0.0
-cryptography==48.0.0
+cryptography==50.0.2
 
 # --- Optional: shared SFTP session cache -------------------------------------
 # Imported lazily by apps/sftp/cache.py. The cache probes the URL and silently
