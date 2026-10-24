@@ -16,6 +16,32 @@
 - **R7 主题与图表**：① 任何前端改动维护 dark+light 双主题：组件只认 CSS token（scoped 内 `var(--xxx)`），禁止页面级全局 night 覆盖（曾 47 条非 scoped 覆盖是主题不一致根因）；选择器统一 `:root[data-theme="night"]`；element-plus 主题 css 的 night/light 块必须对称（否则 light 显示出厂 #409eff 而非品牌色）。② ECharts 不认 CSS 变量：setOption 颜色取 `useChartTheme()` 的 JS 语义色；DOM（模板 style/进度条）里才用 `var(--token)`。③ 新图表组件禁止裸调 `echarts.init`，必须走 `initEchartsWhenReady`（零尺寸保护，容器高度未定会报 "Can't get DOM width or height"+空白）；共享 chart composable 必须支持容器被 v-if 销毁后重建（复用前校验 `getDom() === 当前 ref && isConnected`，不符 dispose 重建）。
 - **R8 构建验证与回归判定**：① 根目录 `npx vue-tsc --noEmit` 在 solution-style tsconfig 下是「空检查」（仅 references，直接退出不查文件）——门禁必须 `npm run build`（vue-tsc -b + vite build）；`] as any[]` 括号配对陷阱类型错误 vue-tsc -b 报 TS1005/TS1128，目录级 --noEmit 却静默放过。② 判断「是否我引入的回归」：grep 自己改的文件名，勿被既有 build 噪音误导，可疑时 `git stash` 对照。③ Windows 编辑文件偶发 `ReplaceFileW EIO(1175)`：等 2–8s 重试，勿原地反复重试、勿用 shell 重写中文文件（编码规则不变）。
 
+## 2026-10-24 体积数字要先问「按什么记账」：`os.DirEntry.stat()` 在 Windows 上不填 `st_dev/st_ino`，硬链接让表观加总虚报 5 倍
+
+- **现象**：给测试落盘面写回收脚本，同一棵树三个数互相打脸 —— 我第一版算出 **25.4GB**、
+  `du -sh` 报 **5.0GB**、改成按 inode 去重后一度只剩 **0.07MB**。三个都"跑通了"，
+  只有一个是真的（4.8GB 唯一 / 其中 4.07GB 删完即掉）。
+- **根因①**（25.4 vs 5.0）：`e2e_pool.mjs:113` 用 `fs.linkSync` 把夹具硬链接进每个 slot，
+  注释原话就是「硬链：不占磁盘」。实测同一 inode 最多被 **34** 轮共享、
+  7,032 个文件里 2,958 个 `st_nlink > 1` ⇒ 按 `st_size` 逐文件加总必然重复计数。
+- **根因②**（0.07MB）：Python 的 `os.DirEntry.stat()` 在本机不返回真实 `st_dev/st_ino`
+  （恒为 `0`），所以"去重"把整棵树压成了一个 key。`os.lstat()` 才有真值；
+  而 `st_size` 走 `DirEntry` 是**对的** —— 这个组合最阴：错误只污染去重口径，
+  表观口径看着完全合理，交叉核对才发现。
+- **规则①：报体积前先说明口径，并做一次独立交叉核对。** 我这次靠 `du -sh` 当场抓住自己，
+  等价动作是「用第二种机制算同一个量」。写「省 N GB」这类收益时同理（见 [[feedback-prescribe-buildable-criteria]]）。
+- **规则②：涉及删除的脚本，默认必须是 dry-run，且"禁区"要在计划形成之前生效。**
+  护栏写成「单条跳过」等于承认"有时候会删到真实数据"；本仓的写法是候选落进
+  `~/LQ-DataPrase` / `system_config.data_dir` 时**整棵树清零**，
+  并用一条用例断言"禁区里的文件跑完 `--apply` 仍原样存在"。
+  龄限（`--older-than-days`）同时是在跑守卫，所以它不许设成 0 —— 设 0 就是关闸，直接拒绝启动。
+- **规则③：台账里的计数一律现跑再引用。** 「29 个 `test/backend/*.py` 硬编码 development」
+  实测是 **36 个**（`grep -rl` 现数），照着 29 去改会漏 7 个文件、绊线当场报红才发现自己数错。
+  同一条还纠正了 `testing-gates.md` §4 的一处高估：那处「残留」只有一半成立
+  （stderr 早已显式 decode，缺的是 stdout 管道），**旧结论写「未动」时没人真的打开那两行看**。
+- **附**：`scripts/*.py` 属 affected 判据的未知路径 ⇒ 按 §3 兜底升全量（本轮为此多跑一次 9min 池）。
+  放宽它得单独说清"为什么不由浏览器承载"，不是顺手加白名单。
+
 ## 2026-10-23 挂了 4 天的「存量红」真因是产品把输入框挤没了：`toBeVisible` 不挡几何
 
 - **现象**：`e2e/settings/export-timeout.spec.ts` 自 2026-10-19 起被记成存量红，两轮定性（独占 slot

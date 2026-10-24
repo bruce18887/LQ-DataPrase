@@ -498,11 +498,16 @@ Edit 吞掉**（Edit 的 new_string 忘了原样带回 old_string 的标题行�
 
 ## 已知不做（留给下一批）
 
-- 29 个 `test/backend/*.py` 里写死 `setdefault('DJANGO_SETTINGS_MODULE','config.settings.development')`
-  （复量：全在 `test/backend`，`apps/` 里 **0** 个）：
-  经 runner 跑时惰性，但**直跑单个脚本仍走 development ⇒ 仍写 home media**。
-- `test/e2e-data` 与 `test/unit-data` 的定期回收（现在没有任何脚本清它们；`test/e2e-data/media`
-  实测 711M，位置挪了但空间没省回来）。
+- ~~29 个 `test/backend/*.py` 里写死 `setdefault('DJANGO_SETTINGS_MODULE','config.settings.development')`
+  （复量：全在 `test/backend`，`apps/` 里 **0** 个）：经 runner 跑时惰性，但**直跑单个脚本仍走
+  development ⇒ 仍写 home media**。~~ → **2026-10-24 已做**（`01e3c79`）：实为 **36 个**而非 29 个，
+  全部改指 `config.settings.unit`，并加两条源码扫描绊线。`scripts/` 里另有 2 处刻意保留
+  （`perf_baseline.py` 读真实样例、`update_sub_batch.py` 本来就是改真实库的运维脚本）。见文末
+  「第 4 类卫生/运维整改」。
+- ~~`test/e2e-data` 与 `test/unit-data` 的定期回收（现在没有任何脚本清它们；`test/e2e-data/media`
+  实测 711M，位置挪了但空间没省回来）。~~ → **2026-10-24 已做**（`940d453`）：
+  `scripts/test_data_gc.py`，默认 dry-run。但**大头从来不在仓库内** ——
+  `C:\lqdp-e2e\slots` 实测 185 轮孤儿、唯一字节 4.8GB，当时只 `du` 了仓库内所以看不见它。
 
 ## 待计划的四项（2026-10-16 收口时点出来、本轮刻意没做）
 
@@ -5616,3 +5621,62 @@ Playwright / Element Plus / AG Grid patch（批 4）、Pinia 4 / Vue Router 5 / 
   ⚠ 在 WSL 里改 `scripts/` 后必须重新 rsync 到 `/srv/lqdp-src/scripts/`，否则跑的是旧版
   （本轮就这么翻过一次车：`exit=2` 是 argparse 不认新参数）。
 
+
+# 任务：第 4 类卫生/运维整改（2026-10-24，用户点「先做 4」）
+
+盘点「还有什么没做完」时把卫生/运维归成四条：落盘面回收、测试直跑档硬编码、子进程捕获残留、
+SFTP 存密换档失效。用户点第 4 类，分四批做完，批内不请示、不 push。
+
+## 结果（三批代码 + 一批文档，全部已提交）
+
+- **批 1 = `01e3c79`**：36 个 `test/backend/*.py` 的直跑档 `development → unit`，
+  两条源码扫描绊线进 `test_unit_settings_profile.py`（一条禁 development 直跑档，
+  一条把 standalone 锁成 `test_static_assets.py` 一处白名单 —— 它需要那档把
+  `frontend/dist` 注册进 `TEMPLATES`，换档就 404、回归测不出来）。
+  承重证据：直跑前后真实目录同为 **118 个文件**；直跑通路本身没被打坏
+  （`test_analysis_filters.py` 纯函数那条与走 `DiscoverRunner` 的
+  `test_accounts_bootstrap.py` 各跑一遍，都绿）。
+- **批 2 = `8851d83`**：`test_sftp_search_integration.py` 的 `Popen(stdout=PIPE, text=True)`
+  补 `encoding='utf-8', errors='replace'` + 子进程 `PYTHONIOENCODING=utf-8`；
+  新增 `test_subprocess_capture_hygiene.py`，**四条自证先钉扫描器本身**
+  （单行形状、跨行形状、正确写法不冤枉、不带 `text=True` 的二进制捕获不算违规），
+  再对 `test/` + `scripts/` 全仓下断言。反证：拿 `git show HEAD:` 的旧源码喂它命中 1、
+  喂当前版本命中 0。
+- **批 3 = `940d453`**：`scripts/test_data_gc.py`（默认 dry-run）+ 16 例 T1。
+  账面：`C:\lqdp-e2e\slots` **185 轮孤儿**、`test/e2e-data/media` 712MB、`test/unit-data` 此刻 0MB
+  （它的两项都太新，被龄限挡下 —— 龄限就是「正在跑的那轮别动」那道闸，所以
+  `--older-than-days 0` 直接拒绝启动而不是放行）。
+- **批 4（本条）**：台账纠正 —— 见下「纠正」。
+
+## 纠正（本轮量出来的四处 stale，别再去原处找）
+
+1. **`:501` 那条「29 个」实为 36 个。** 复量口径：`grep -rl "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.development')" test/`
+   → 36 个文件、`apps/` 里仍是 0 个；另有 2 处**刻意保留**在 `scripts/`
+   （`perf_baseline.py` 要读真实样例、`update_sub_batch.py` 本来就是改真实库的运维脚本）。
+   写这条时只数了当时想改的那批，没跑计数 —— 计数一律现跑，别引用记忆。
+2. **`testing-gates.md` §4 的「残留同族写法：`test_sftp_search_integration.py:66`」只有一半成立。**
+   那处 `stderr` 走文件句柄、`_drain_stderr()` 早就显式 `.decode('utf-8', errors='replace')`（`:99-101`），
+   真正缺的是 `stdout=PIPE` 那一半。现在两处都齐，全仓只剩的同类形状由新绊线盯着。
+3. **「SFTP 存密换档即失效」在服务器档已经不是待办**：`config/settings/server.py:95-104`
+   是 fail-closed（`SECRET_KEY` 含 `django-insecure` 直接拒、`SFTP_CONFIG_KEY` 必须环境给定、无派生回落），
+   `docs/reference/server-deployment.md:224-225` 也已经写了「请在服务器上重新录入 SFTP 配置」。
+   仍开放的是**另一件事**：dev/桌面档之间换档依旧解不开（要不要做 re-key 通路，没拍板）。
+4. **落盘面的大头从来不是 `test/e2e-data`（712MB），而是槽池孤儿（4.8GB 唯一字节）。**
+   之前所有台账只写了前者，因为 `du` 只看了仓库内。表观 25.4GB 与唯一 4.8GB 差 5 倍，
+   机制见 lessons 2026-10-24（硬链接 + `os.DirEntry.stat()` 在 Windows 上不填 `st_dev/st_ino`）。
+
+## 门禁
+
+- 批 1 / 批 2：`test/backend/` 命中「仅 T2/后端」判定，三档（lint:e2e / vitest / backend）`RESULT: PASS`。
+- 批 3：新脚本属未知路径 ⇒ 按 §3 兜底升全量，四档 `RESULT: PASS`
+  （414 例 / 墙钟 9.0min / 单价 3.19s/例 / 真红 0 / 负载抖动 2 = 老两位 histogram spec /
+  flaky 4 / skipped 22；效率 2.31 低于 2.8 但本轮有复跑，按 §4 不判效率）。
+- 未 push（本批没被点名）。
+
+## 本轮刻意不做
+
+- **不给 `test_data_gc.py` 挂自动触发**（cron / 池启动前 sweep）：池启动时清孤儿会撞上
+  别的会话正在用的槽，共享工作区里这条代价比收益大；先让人手动跑，看一轮真实回收量再谈自动化。
+- 不改 `scripts/affected-rules.mjs` 给 `scripts/*.py` 加放行类目：本轮确实为此多跑了一次全量池，
+  但「未知路径一律全量」是 §3 明写不许反着改的兜底方向，放宽要单独说清它为什么不由浏览器承载。
+- `test/e2e-data/db.sqlite3`（3.1MB）不进回收名单：它是串行档的库，删了下一轮要重播种，省不了什么。

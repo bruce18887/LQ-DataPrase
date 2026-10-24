@@ -47,6 +47,12 @@
   共用 `media/` 与 `db.sqlite3`」的**根因**（两边都写仓库根 `media/`）已经消失 —— 但并跑本身
   还没实测过，真要同批跑请先各自单独跑绿一次，别把「目录分开了」当成「已验证可并发」。
   跑完全量要释放端口。
+- **落盘面要定期回收，但大头在仓库外**：`scripts/test_data_gc.py`（默认 dry-run，`--apply` 才删）
+  管三棵树 —— `C:\lqdp-e2e\slots`（池的孤儿轮，2026-10-24 实测 185 轮 / 唯一字节 4.8GB）、
+  `test/e2e-data`、`test/unit-data`。池自己只在**正常退出**时 `rmSync` 本轮目录
+  （`e2e_pool.mjs:105,373,483`），崩池轮与被杀的会话必然留下孤儿。
+  体积别按 `st_size` 加总：夹具是**硬链接**进每个 slot 的（`e2e_pool.mjs:113`），
+  同一 inode 实测最多被 34 轮共享 ⇒ 表观 25.4GB 里只有 4.8GB 真占着磁盘（`du -sh` 可交叉核对）。
 
 ## 2. 三层判据（写新断言之前先选层）
 
@@ -119,7 +125,12 @@ e2e 只断页面渲染出 CPK 且非空）。**不要在浏览器里逐组合点
   并在子进程 env 里钉死 `PYTHONIOENCODING=utf-8`（两种父环境各跑一遍 **27 例 OK**）。
   留给将来的判据：红项报 `not found in ''` 或 `argument of type 'NoneType' is not iterable`，
   先查捕获有没有给 encoding，**别靠预设环境变量来"防"**。
-  残留同族写法：`test/backend/test_sftp_search_integration.py:66`（stderr 走文件句柄），本轮未动。
+  ~~残留同族写法：`test/backend/test_sftp_search_integration.py:66`（stderr 走文件句柄），本轮未动。~~
+  → 2026-10-24 收口（`8851d83`）：那条「残留」**只有一半成立** —— 该文件的 stderr 走文件句柄、
+  `_drain_stderr()` 早就是显式 `.decode('utf-8', errors='replace')`，缺的是 `stdout=PIPE` 那一半。
+  现已补齐，并由 `test/backend/test_subprocess_capture_hygiene.py` 盯着全仓
+  （`test/` + `scripts/` 里任何 `subprocess.*` 文本捕获带 `text=True` 却不给 `encoding=` 就报红；
+  该测试先自证扫描器抓得住单行与跨行两种形状，才对全仓下断言）。
 
 ## 5. 各入口速查（哪个贵、哪个已没人用）
 
