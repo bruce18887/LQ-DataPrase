@@ -2,6 +2,8 @@
 
 适用：把 LQ-DataPrase 后端部署到一台局域网服务器上，约 20 人用浏览器访问。
 形态依据见 `docs/specs/2026-10-14-server-deployment-first-run-design.md`（单进程 + Django 同源服务 SPA）。
+可直接安装的环境文件与 systemd 模板在仓库 `deploy/`（入库跟踪），**配置正文只在那里维护**，
+本文只写判断依据、安装顺序与验收。
 
 **服务器 OS 已拍板：Linux（2026-10-23）。** 进程模型走**方案 A**：systemd 直接跑
 `standalone.py`（单进程、`runserver --noreload`、Django 自己对外发静态与 SPA）。
@@ -83,16 +85,14 @@ fontconfig 没索引到，**继续往列表里加名字是没用的**。
 
 ### 3.1 环境文件
 
-`/etc/lqdp/server.env`（`chown root:lqdp`、`chmod 640`，服务账号可读即可）：
+`/etc/lqdp/server.env`（`chown root:lqdp`、`chmod 640`，服务账号可读即可）。模板是仓库里的
+`deploy/server.env.example`：
 
 ```
-DJANGO_SETTINGS_MODULE=config.settings.server
-LQDP_SERVER_BASE_DIR=/srv/lqdp
-DJANGO_ALLOWED_HOSTS=10.0.0.9,server01
-SECRET_KEY=...
-SFTP_CONFIG_KEY=...
-LQDP_BOOTSTRAP_ADMIN_PASSWORD=...
-MPLCONFIGDIR=/srv/lqdp/.mpl
+install -d -o root -g lqdp -m 750 /etc/lqdp
+install -o root -g lqdp -m 640 deploy/server.env.example /etc/lqdp/server.env
+$EDITOR /etc/lqdp/server.env
+grep -n CHANGE_ME /etc/lqdp/server.env      # 应无输出，有输出说明还有占位值没填
 ```
 
 systemd 的 `EnvironmentFile` 不做 shell 展开、也不剥行内注释，所以每行只写 `KEY=值`，
@@ -101,34 +101,10 @@ systemd 的 `EnvironmentFile` 不做 shell 展开、也不剥行内注释，所�
 
 ### 3.2 systemd unit
 
-`/etc/systemd/system/lqdp.service`：
+模板：`deploy/lqdp.service`。安装并第一次拉起：
 
 ```
-[Unit]
-Description=LQ-DataPrase 后端（服务器形态 · 方案 A：单进程 standalone）
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=lqdp
-Group=lqdp
-WorkingDirectory=/srv/lqdp-src
-EnvironmentFile=/etc/lqdp/server.env
-ExecStart=/srv/lqdp-src/.venv/bin/python standalone.py --host 0.0.0.0 --port 8000
-Restart=always
-RestartSec=5
-TimeoutStopSec=20
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-```
-
-第一次拉起：
-
-```
+install -m 644 deploy/lqdp.service /etc/systemd/system/lqdp.service
 systemctl daemon-reload
 systemctl enable --now lqdp
 journalctl -u lqdp -f          # 看 bootstrap 与访问日志，见 §7 验收
@@ -212,38 +188,11 @@ LQDP_BACKUP_KEEP=30 .venv/bin/python manage.py backup_db     # 保留份数也�
 - 备份目录同样必须是本地盘。
 - 定时调度用 systemd timer（OS 已拍板 Linux，2026-10-23）。**不要**直接写 cron ——
   cron 拿不到 §3.1 那个环境文件，`backup_db` 会因为缺 `LQDP_SERVER_BASE_DIR` 直接拒跑。
-
-`/etc/systemd/system/lqdp-backup.service`：
-
-```
-[Unit]
-Description=LQ-DataPrase 库备份（一次性）
-
-[Service]
-Type=oneshot
-User=lqdp
-Group=lqdp
-WorkingDirectory=/srv/lqdp-src
-EnvironmentFile=/etc/lqdp/server.env
-ExecStart=/srv/lqdp-src/.venv/bin/python manage.py backup_db --dest /srv/lqdp-backup
-```
-
-`/etc/systemd/system/lqdp-backup.timer`：
+  模板是 `deploy/lqdp-backup.service` 与 `deploy/lqdp-backup.timer`：
 
 ```
-[Unit]
-Description=每天 03:30 备份 LQ-DataPrase 库
-
-[Timer]
-OnCalendar=*-*-* 03:30:00
-RandomizedDelaySec=600
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-```
+install -m 644 deploy/lqdp-backup.service /etc/systemd/system/lqdp-backup.service
+install -m 644 deploy/lqdp-backup.timer /etc/systemd/system/lqdp-backup.timer
 mkdir -p /srv/lqdp-backup && chown lqdp:lqdp /srv/lqdp-backup
 systemctl daemon-reload
 systemctl enable --now lqdp-backup.timer
@@ -252,7 +201,7 @@ systemctl start lqdp-backup.service              # 先手跑一次，别等第�
 journalctl -u lqdp-backup.service --no-pager     # 看到 [backup] ok 才算数
 ```
 
-`RandomizedDelaySec` 避开整点、`Persistent=true` 让关机错过的日子在开机后补跑。
+`RandomizedDelaySec` 避开整点、`Persistent=true` 让关机错过的日子在开机后补跑（两条都在 timer 模板里）。
 
 - **没做过恢复演练的备份等于没有备份**。
 
