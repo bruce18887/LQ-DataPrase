@@ -6,8 +6,9 @@
 
     mixed   —— 20 个用户各发若干轮 {browse 首页, browse IRM 块, dashboard summary,
                files 列表, 写一次账号设置}，按端点报 P50/P95/max 与错误数。
-    --heavy —— 在 mixed 正在跑的同时，另起一条重活（上传大文件 / 导出），
+    --heavy —— 在 mixed 正在跑的同时，另起一条重活（上传大文件 / 同步导出 / 作业提交），
                看 P95 被抬到几倍。这就是 P2「拆开长写事务」和 P3「重活作业化」的验收形状。
+               其中 ``--heavy job`` 才是 P3 的那两条：提交跳 P95 与同期轻请求的劣化倍数。
 
 跑法（两步，服务与压测用**同一个**隔离档，绝不碰真实库与真实 media）：
 
@@ -238,6 +239,65 @@ def heavy_export(base, token, file_id):
     print(f'  heavy export 完成：{ms:.0f} ms', flush=True)
 
 
+def _job_status(base, token, job_id):
+    """轮询作业终态 —— 刻意不走 ``Client``：几十次 GET 一旦进 ``_samples``，
+    就会把「提交」这一跳的 P95 冲淡，而提交跳才是 P3 判据（<200ms）真正量的东西。"""
+    req = urllib.request.Request(f'{base}/api/v1/jobs/{job_id}/')
+    req.add_header('Authorization', f'Bearer {token}')
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode('utf-8')).get('status')
+    except Exception:
+        return None
+
+
+def heavy_job(base, token, file_id, kind='export_excel', budget_sec=900, steady_submits=2):
+    """P3 形状：把「懒建池的首跳」与「稳态提交」分开记，作业总时长单独成行。
+
+    与 ``heavy_export`` 的区别就是这条分支存在的理由 —— 后者打的是同步端点
+    ``/export/to_excel/``，量的是「重活把请求线程占多久」；作业化之后要量的是
+    「提交这一跳还快不快」。而 ``_get_pool()`` 是懒建的（提交时才调
+    ``executor_available()``，启动期没有预热入口），Windows 又钉了 ``spawn`` ⇒
+    进程内第一次提交要把子进程连 Python 带 pandas 一起起来。只提一次就把它当
+    「提交 P95」，等于把池构造算进用户等待，判据会假红。
+    """
+    client = Client(base, token)
+
+    def _submit(label):
+        payload, ms = client.post(f'/api/v1/jobs/{kind}/', {'file_id': file_id},
+                                  endpoint=label)
+        job_id = (payload or {}).get('job_id')
+        if not job_id:
+            # 池建不起来时 _sync_fallback 会同步跑完并返回结果体 —— 那说明量的不是提交跳，
+            # 而是整条导出，读数必须显式作废，不能让它混进 P95。
+            print(f'  ⚠ {label} 未取得 job_id，可能走了同步回落：{str(payload)[:160]}', flush=True)
+        return payload, job_id, ms
+
+    payload, job_id, ms_first = _submit(f'POST jobs/{kind}（提交·首跳含池懒建）')
+    print(f'  heavy job 首跳：{ms_first:.0f} ms · job_id={job_id}', flush=True)
+    if not job_id:
+        return
+
+    tracked_job = job_id
+    for i in range(steady_submits):
+        _p, sid, ms_steady = _submit(f'POST jobs/{kind}（提交·稳态）')
+        print(f'  heavy job 稳跳{i + 1}：{ms_steady:.0f} ms · job_id={sid}', flush=True)
+        if sid and i == 0:
+            tracked_job = sid  # 总时长跟稳态那一单走，首跳已在池构造里付过钱
+
+    status = payload.get('status')
+    t0 = time.perf_counter()
+    while status not in ('done', 'error', 'cancelled'):
+        time.sleep(0.5)
+        status = _job_status(base, token, tracked_job) or status
+        if time.perf_counter() - t0 > budget_sec:
+            status = f'{status}(超时)'
+            break
+    total_ms = (time.perf_counter() - t0) * 1000
+    record(f'POST jobs/{kind}（作业总时长，含轮询）', total_ms)
+    print(f'  heavy job 完成：总时长 {total_ms:.0f} ms · 终态 {status}', flush=True)
+
+
 def report(base_label, compare_path):
     print(f'\n=== {base_label}')
     print(f'{"endpoint":<40} {"n":>5} {"P50":>9} {"P95":>9} {"max":>9}  errors')
@@ -297,8 +357,12 @@ def main(argv=None):
     ap.add_argument('--base', required=True, help='如 http://127.0.0.1:21099')
     ap.add_argument('--users', type=int, default=20)
     ap.add_argument('--rounds', type=int, default=6, help='每用户跑几轮 mixed 请求')
-    ap.add_argument('--heavy', choices=['none', 'upload', 'export'], default='none',
-                    help='upload=大文件上传（P2 形状），export=导出（P3 形状）')
+    ap.add_argument('--heavy', choices=['none', 'upload', 'export', 'job'], default='none',
+                    help='upload=大文件上传（P2 形状），export=同步导出（旧 P2/P3 形状），'
+                         'job=作业提交跳 + 轮询总时长（P3 形状）')
+    ap.add_argument('--job-submits', type=int, default=2,
+                    help='--heavy job 时提几单：1 单首跳（含池懒建）+ N 单稳态。'
+                         '稳态只取 2 单时 P95≈max，不承重，判据要 6 单以上')
     ap.add_argument('--compare', default='', help='上一轮的 JSON 输出，用于报 P95 倍数')
     ap.add_argument('--warmup', type=int, default=1,
                     help='每用户先跑几轮不计账（缓存冷会污染 P95 比值）；0=关掉')
@@ -351,6 +415,14 @@ def main(argv=None):
             sys.exit('--heavy export 需要基线文件')
         heavy_thread = threading.Thread(
             target=_delayed, args=(1.0, heavy_export, (args.base, pairs[0][0], pairs[0][1])),
+            daemon=True)
+    elif args.heavy == 'job':
+        if not pairs[0][1]:
+            sys.exit('--heavy job 需要基线文件（作业提交要有 datafile 可导）')
+        heavy_thread = threading.Thread(
+            target=_delayed,
+            args=(1.0, heavy_job,
+                  (args.base, pairs[0][0], pairs[0][1], 'export_excel', 900, args.job_submits)),
             daemon=True)
     if heavy_thread:
         heavy_thread.start()
