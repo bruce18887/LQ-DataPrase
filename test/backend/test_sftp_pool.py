@@ -14,7 +14,7 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.development')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.unit')
 
 import django  # noqa: E402
 

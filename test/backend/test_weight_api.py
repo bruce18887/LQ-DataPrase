@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.development')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.unit')
 import django  # noqa: E402
 django.setup()
 from django.test import TestCase  # noqa: E402
