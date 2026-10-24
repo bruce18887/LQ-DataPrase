@@ -289,6 +289,65 @@ class JobsApiTests(APITestCase):
         self.assertEqual(resp.get('X-Job-Fallback'), '1')
         self.assertTrue(resp.get('Content-Disposition'), '降级响应必须带下载文件名')
 
+    def test_broken_pool_falls_back_to_sync_instead_of_500(self):
+        """池里的子进程死过一次之后，下一次提交必须降级，不能永久 500。
+
+        2026-10-24 实测成因链（e2e slot 池现场，`C:/lqdp-e2e/slots/022212-54444`）：
+        OpenBLAS 分配失败 → worker 被杀 → `pool.submit` 抛 BrokenProcessPool →
+        视图不接 → 该进程**此后每次提交都 500**，而 `executor_available()` 因为
+        「池对象还在」照样返回 True，所以永远走不到同步回落。服务器上等于
+        一次内存尖峰永久废掉所有导出，而 `Restart=always` 救不了（进程没死）。
+        """
+        import apps.jobs.executor as executor_module
+        from concurrent.futures.process import BrokenProcessPool
+
+        class DeadPool:
+            def submit(self, *args, **kwargs):
+                raise BrokenProcessPool('A child process terminated abruptly')
+
+            def shutdown(self, *args, **kwargs):
+                pass
+
+        executor_module.reset_for_tests()
+        self.addCleanup(executor_module.reset_for_tests)
+        executor_module._pool = DeadPool()
+        # 本类的 setUp 把 submit 换成了记录器；这条用例要量的正是真实 submit 与
+        # 视图之间的异常契约，所以装回真身。
+        executor_module.submit = self._original_submit
+
+        resp = self._submit()
+        self.assertEqual(resp.status_code, 200,
+                         f'崩过一次的池必须走同步回落，实际 {resp.status_code}：'
+                         f'{getattr(resp, "data", None)}')
+        self.assertEqual(resp.get('X-Job-Fallback'), '1')
+        # 换池：坏池不能被留着，否则下一条提交还要再废一次
+        self.assertIsNone(executor_module._pool,
+                          'BrokenProcessPool 之后没有丢弃坏池，下一次提交仍会失败')
+
+    def test_broken_pool_leaves_no_pending_job(self):
+        """降级路径不能留下永远 `pending` 的行 —— 开机自愈只清 `running`。"""
+        import apps.jobs.executor as executor_module
+        from concurrent.futures.process import BrokenProcessPool
+
+        class DeadPool:
+            def submit(self, *args, **kwargs):
+                raise BrokenProcessPool('boom')
+
+            def shutdown(self, *args, **kwargs):
+                pass
+
+        executor_module.reset_for_tests()
+        self.addCleanup(executor_module.reset_for_tests)
+        executor_module._pool = DeadPool()
+        executor_module.submit = self._original_submit
+
+        before = {j.id: j.status for j in Job.objects.filter(owner=self.user)}
+        self._submit()
+        after = list(Job.objects.filter(owner=self.user).exclude(id__in=before))
+        self.assertEqual(len(after), 1, '降级路径应当仍然只建一行作业')
+        self.assertIn(after[0].status, ('done', 'error'),
+                      f'作业卡在 {after[0].status}：没人会再来改它')
+
     # ── 启动钩子 ────────────────────────────────────────────────────
 
     def test_running_jobs_are_marked_error_on_boot(self):
@@ -493,6 +552,52 @@ class ExecutorDispatchTests(unittest.TestCase):
         self.assertIn('mp_context', captured,
                       '建池没有显式传 mp_context：Windows 蒙对，Linux 会退化成 fork')
         self.assertEqual(captured['mp_context'].get_start_method(), 'spawn')
+
+
+    def test_submit_on_broken_pool_raises_domain_error_and_discards_pool(self):
+        """`submit` 必须把 `BrokenProcessPool` 换成本模块的语义异常，并把坏池扔掉。
+
+        断言的是两件事，缺一就退回原缺陷：
+        ① 抛出的异常类型是视图**认得**的（`executor.PoolBroken`），不是标准库异常 ——
+           否则视图要么漏接（500），要么用 `except Exception` 把它和真业务失败混掉；
+        ② 池对象被置空，下一次 `_get_pool()` 会重建 —— 否则「永久废池」原样保留。
+        """
+        import apps.jobs.executor as ex
+        from concurrent.futures.process import BrokenProcessPool
+
+        class DeadPool:
+            def submit(self, *args, **kwargs):
+                raise BrokenProcessPool('boom')
+
+            def shutdown(self, *args, **kwargs):
+                pass
+
+        self.addCleanup(ex.reset_for_tests)
+        ex.reset_for_tests()
+        ex._pool = DeadPool()
+
+        job = mock.Mock(id=99, kind='export_excel')
+        with self.assertRaises(ex.PoolBroken):
+            ex.submit(job, {})
+        self.assertIsNone(ex._pool, '坏池没有被丢弃')
+
+        built = {}
+
+        class StubPool:
+            def __init__(self, *args, **kwargs):
+                built['ok'] = True
+
+            def submit(self, *args, **kwargs):
+                return mock.Mock()
+
+            def shutdown(self, *args, **kwargs):
+                pass
+
+        with mock.patch.object(ex, 'ProcessPoolExecutor', StubPool), \
+                mock.patch.object(ex, 'warmup_imports', lambda *a, **k: None):
+            fresh = ex._get_pool()
+        self.assertTrue(built.get('ok'), '丢弃之后下一次取池没有重建')
+        self.assertIsInstance(fresh, StubPool)
 
 
 class RealPoolEndToEndTests(TransactionTestCase):

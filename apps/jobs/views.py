@@ -177,7 +177,13 @@ class JobSubmitView(APIView):
     def _dispatch(self, job: Job, task: dict):
         if not executor.executor_available():
             return self._sync_fallback(job, task)
-        executor.submit(job, task)
+        try:
+            executor.submit(job, task)
+        except executor.PoolBroken:
+            # `executor_available()` 判的是「池建不建得起来」，看不见「池里的子进程
+            # 刚刚死掉」。少这一条，一次崩池会让此后每次提交都 500（2026-10-21 e2e
+            # 现场实测），而进程活着 ⇒ systemd 的 Restart=always 也救不回来。
+            return self._sync_fallback(job, task)
         job.refresh_from_db()
         return Response({'job_id': job.id, 'status': job.status},
                         status=http_status.HTTP_202_ACCEPTED)

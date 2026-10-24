@@ -16,6 +16,7 @@ import os
 import threading
 import time
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 
 from django.conf import settings
 from django.db import connections
@@ -73,6 +74,34 @@ _download_lock = threading.Lock()
 _in_flight: dict[int, 'tuple[Future, float, int, str]'] = {}
 _monitor_thread = None
 _monitor_lock = threading.Lock()
+
+
+class PoolBroken(RuntimeError):
+    """池里的子进程已经死了，这个池不再可用。
+
+    刻意定义成**本模块的**异常而不是让 `BrokenProcessPool` 冒到视图层：
+    视图只认得「该降级」这件事。原缺陷就是把标准库异常直接抛出去，
+    `_dispatch` 不接 ⇒ 500，而 `executor_available()` 因为「池对象还在」照样
+    返回 True ⇒ 此后的每一次提交都 500，直到有人重启进程。
+    """
+
+
+def _discard_pool() -> None:
+    """丢掉坏池，让下一次 `_get_pool()` 重建。
+
+    不置 `_pool_failed`：那是「这台机器建不起池」的永久判定，而崩池通常是
+    一次性的（实测成因是 OpenBLAS 在 commit 逼近上限时分配失败并放弃），
+    压力过去后重建就能恢复。代价可控：每次崩池只有**紧接着的那一条**请求走同步。
+    """
+    global _pool
+    with _pool_lock:
+        broken, _pool = _pool, None
+    if broken is not None:
+        try:
+            broken.shutdown(wait=False, cancel_futures=True)
+        except Exception:  # noqa: BLE001 — 池已经坏了，关不掉不是新问题
+            logger.debug('broken pool shutdown failed', exc_info=True)
+    logger.warning('jobs pool broke; discarding it so the next submit rebuilds')
 
 
 def executor_available() -> bool:
@@ -183,12 +212,18 @@ def _get_download_pool():
 def submit(job: Job, task: dict) -> None:
     """按 lane 投进对应的池，并把状态推到 running。
 
-    调用方（视图）已经存好 Job 行；这里失败就抛，由视图决定降级方式。
+    调用方（视图）已经存好 Job 行；这里失败就抛，由视图决定降级方式 ——
+    池已断的情况抛 `PoolBroken`（视图据此走同步回落），别让它以标准库异常的形状
+    漏到 DRF 变成 500。
     """
     spec = KIND_RUNNERS[job.kind]
     entry, timeout = spec['entry'], spec['timeout']
     pool = _get_pool() if spec['lane'] == 'process' else _get_download_pool()
-    future = pool.submit(entry, task)
+    try:
+        future = pool.submit(entry, task)
+    except BrokenProcessPool as exc:
+        _discard_pool()
+        raise PoolBroken(str(exc)) from exc
     # 第 4 个元素是进度侧车路径：进程 lane 的 worker 没有 Django 写不了 DB，
     # 由轮询器代读；thread lane 自己写 DB，这里就是空串。
     _in_flight[job.id] = (future, time.monotonic(), timeout,
