@@ -63,7 +63,12 @@ class _Server:
         try:
             self.proc = subprocess.Popen(
                 [sys.executable, SERVER, '--root', self.root, '--fixture'],
-                stdout=subprocess.PIPE, stderr=self._stderr, text=True)
+                stdout=subprocess.PIPE, stderr=self._stderr, text=True,
+                # 父进程一侧显式给 encoding，本机的 cp936 就别想参与解码；子进程那侧同时
+                # 钉死 PYTHONIOENCODING，两边口径一致。与 test_unit_settings_profile.py:53
+                # 那三处同一个写法（详见 docs/reference/testing-gates.md §4）。
+                encoding='utf-8', errors='replace',
+                env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
             info = json.loads(self._read_hello_line())
             self.host, self.port = info['host'], info['port']
         except Exception as exc:              # noqa: BLE001 - 起不来就地收尾再抛，别留孤儿
