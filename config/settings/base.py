@@ -53,6 +53,13 @@ if not DEBUG and (SECRET_KEY == _SECRET_KEY_DEFAULT or 'django-insecure' in SECR
 # 不带 ``require_debug_true`` —— 生产档（DEBUG=False）同样要看到预算行。
 LOGGING = copy.deepcopy(DEFAULT_LOGGING)
 LOGGING['disable_existing_loggers'] = False
+# 两个 console handler 都显式指向 **stdout**。默认的 StreamHandler 落在 stderr，
+# 于是打包版里 Django 的正常日志（runserver 请求行、apps.* 的 INFO/WARNING）全从
+# stderr 出来，而 Electron 对子进程 stderr 一律记 ERROR（electron/backend.ts:345-347）
+# —— 日志级别因此整体失真，真正的崩溃混在一堆「ERROR」里看不出来。
+# 改到 stdout 后 stderr 只剩 traceback 与 C 层错误，那个 ERROR 标签才是对的。
+# 判据在 test/backend/test_logging_streams.py（子进程实跑，看哨兵行落在哪条流）。
+LOGGING['handlers']['console']['stream'] = 'ext://sys.stdout'
 LOGGING['formatters']['memory'] = {
     'format': '{asctime} {levelname} {name}: {message}',
     'style': '{',
@@ -60,6 +67,7 @@ LOGGING['formatters']['memory'] = {
 LOGGING['handlers']['memory_console'] = {
     'class': 'logging.StreamHandler',
     'formatter': 'memory',
+    'stream': 'ext://sys.stdout',
 }
 LOGGING['loggers']['apps.common.memory'] = {
     'handlers': ['memory_console'],
