@@ -19,11 +19,17 @@ version = "0.8.0"
 description = "半导体 ATE 量产数据分析平台（Vue 3 + Django + Electron）"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 
-# NOTE: ``requires-python`` is the supported floor. The development venv and the
-# PyInstaller build both run 3.13 — see .python-version. The pin that actually
-# matters for reproducibility is requirements/base.txt, not this line.
+# NOTE: ``requires-python`` is the supported floor, and 3.12 is not a style
+# choice — it is Django's own floor. Django 6.0.x ships ``Requires-Python:
+# >=3.12`` in its wheel metadata, so declaring >=3.11 here advertised an
+# interpreter that pip would refuse to install on (found 2026-10-24, after the
+# Django 6.0.9 pin in the dependency batch). The floor is pinned by
+# test/backend/test_python_floor_metadata.py, which compares this line against
+# Django's metadata AND README.md, so the three cannot drift again.
+# The development venv and the PyInstaller build both run 3.13 — see .python-version.
+# The pin that actually matters for reproducibility is requirements/base.txt, not this line.
 
 # The single source of truth for the *application* version is
 # frontend/package.json (electron-builder and the UI both read it from there).

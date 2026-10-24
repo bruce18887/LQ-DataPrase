@@ -65,7 +65,9 @@ export function registerIpcHandlers(
       const result = await dialog.showOpenDialog(win, {
         properties: ['openFile', 'multiSelections'],
         filters: filters ?? [
-          { name: 'Data Files', extensions: ['csv', 'txt', 'std', 'std.gz', 'xlsx', 'xls', '7z', 'rar'] },
+          // 7z / rar 已随依赖批 1 一起从 py7zr + rarfile 里删掉，后端只认 CSV/ZIP
+          // （apps/datafiles/views/file_views.py:512），这里再列就是给用户一个必然失败的选项。
+          { name: 'Data Files', extensions: ['csv', 'txt', 'std', 'std.gz', 'xlsx', 'xls'] },
           { name: 'All Files', extensions: ['*'] },
         ],
       })
