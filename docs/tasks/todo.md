@@ -5680,3 +5680,113 @@ SFTP 存密换档失效。用户点第 4 类，分四批做完，批内不请示
 - 不改 `scripts/affected-rules.mjs` 给 `scripts/*.py` 加放行类目：本轮确实为此多跑了一次全量池，
   但「未知路径一律全量」是 §3 明写不许反着改的兜底方向，放宽要单独说清它为什么不由浏览器承载。
 - `test/e2e-data/db.sqlite3`（3.1MB）不进回收名单：它是串行档的库，删了下一轮要重播种，省不了什么。
+
+# 任务：第 1 类净差距里「不需要拍板」的部分（2026-10-24，用户点「把你能确定不需要我拍板的都做完」）
+
+上一轮盘点把未了项分成四类，第 4 类（卫生/运维）已在前一节收口。这次用户把划线权交给我：
+**只做法向明确的**，需要他选的（B 载荷设计、内存批 2/批 3 阈值、Electron 大版本、cron 重启、
+回收脚本自动化、`root`/`apps` 日志挂不挂 stdout）一律不动，逐条列在文末「留给拍板」。
+
+分五批，A–D 已提交，E 见下一节。
+
+## 批 A = `f50edaf`：api 层 4 处裸 `localStorage.getItem` 接上 safeStorage
+
+`api/index.ts` 的请求拦截器（每个请求读 access_token）、`refreshAccessToken`、401 重试判据，
+加 `api/auth.ts` 的卸载期 keepalive 冲刷。磁盘满/userData 权限异常时 `getItem` 抛 DOMException，
+裸调等于全站请求失败；封装 `utils/safeStorage.ts` 早就有，是 api 层没接。
+keepalive 那处顺带去掉 `typeof localStorage !== 'undefined'` 手卫 —— 封装的 try/catch
+连「全局压根不存在」一起护住（非浏览器环境 ReferenceError 被吞、返回 null）。
+`test/unit/localStorageHygiene.spec.ts`（7 例）三条先自证扫描器（抓得住代码行裸调、
+不冤枉整行注释、不冤枉含 `//` 的 URL 字符串），再对 `src/` 下除封装外裸调计数为 0 下断言。
+
+## 批 B = `77beb23`：盒宽同型缺陷普查 —— **结论是没有复发**，于是把数变成判据
+
+六个载体全部用临时探针推进 1280×720 视口逐个量 `boundingBox`（隐藏 tabpane 里的控件一律报 0，
+那不是挤扁而是没渲染，所以必须真点进去）：
+
+| 载体 | 声明宽 | 外层实测 | 内部 `<input>` | 判定 |
+| --- | --- | --- | --- | --- |
+| 设置 图表 DPI | 150 | 150 | 66 | 恒等式 `150−42−42=66` 原样命中，健康 |
+| 设置 CPK A/B/C（各带 `.threshold-hint`） | 150 | 150 | 66 | 同上 |
+| SFTP 连接面板 端口 | `width:100%` | 367 | 283 | 不参与挤压 |
+| CL 自定义范围 ×2（`flex:1` + `~` 分隔符同行） | flex | 176.8 | 146.8 | 健康 |
+| 相关性轴卡 自定义 ×4（`:controls=false`） | 100 | 100 | 70 | **没有 42+42 内边距，恒等式与 150 档不同** |
+| 文件对比 误差阈值 / 变化容差 | 92 | 92 | 30 | 外层等于声明 ⇒ 不是被挤；内部 30 是设计值本身窄 |
+
+所以本批**一行产品样式都没改**：把量到的数落成常驻判据（新 `e2e/settings/control-widths.spec.ts`
+两例 + `file-correlation` / `custom-limit-cpk` / `analysis` 三处各加一段），
+阈值按载体分开设、注释写明恒等式不同；误差阈值那两条只防它退化成挤没（外层 ≥90、内部 ≥20），
+**要不要把 92px 加宽留给用户拍板**。
+探针踩到一条老坑并已在正式判据里避开：`visibleSelectOptions` 全局命中会捞到隐藏 tabpane
+遗留的下拉面板（reference 尺寸零 ⇒ `element is not stable`），改用组件的实例级 `popper-class`。
+
+## 批 C = `c30fed7`：日志落 stdout + 子进程 stdio 编码
+
+`DEFAULT_LOGGING` 的 console handler 与自建的 `memory_console` 都是裸 `StreamHandler`（默认流 = stderr），
+而 Electron 对子进程 stderr 一律记 ERROR（`electron/backend.ts:345-347`）⇒ Django 正常日志全被标成 ERROR，
+真崩溃混在里面；同时 Windows 上那条流按 cp936 编码、Electron 按 UTF-8 解 ⇒ 中文乱码。
+两处改：`base.py` 两个 handler 显式 `ext://sys.stdout`；spawn env 抽成 `electron/backend-env.ts`
+纯函数并补 `PYTHONIOENCODING=utf-8`（仓内其它 spawn 早就是这个写法，只有这里漏了）。
+**刻意不设 `PYTHONUTF8`**：它会连 `open()` 的默认文本编码一起改，实测 `apps/` 下有 25 处测试
+用不带 `encoding=` 的文本模式 `open` 写夹具 —— 犯不上为了 stdio 动这个范围（`backendEnv.spec.ts` 钉住）。
+
+顺带查明一条**没修的残留**并钉成明账（`test_logging_streams.py::test_unconfigured_logger_falls_to_stderr_lastresort`）：
+`DEFAULT_LOGGING` 不配 `root`，所以除 `django*` 与 `apps.common.memory` 之外的 logger（含其余 `apps.*`）
+在 WARNING+ 时走 logging 的 `lastResort`，仍直写 stderr、仍被记成 ERROR。
+要不要给 `root`/`apps` 挂 stdout handler 属日志噪声取向（`base.py:55-57` 注释说明「apps.* 的 INFO 被丢弃」
+当初是有意的）⇒ 待拍板。
+
+## 批 D = `f1f5d36`：Python 下限三处同源 + 对话框去掉后端不收的格式
+
+`pyproject` 的 `>=3.11` 与 README 的「Python 3.11+」都低于实测硬下限（Django 6.0.9 与 contourpy 的
+wheel 元数据都是 `Requires-Python: >=3.12`）⇒ 声明了一个 pip 装不上来的解释器。两处改 3.12，
+`test_python_floor_metadata.py`（7 例，三条比较器自证先行）钉住「pyproject 不严于已安装依赖下限 +
+README 与 pyproject 逐字相等 + `.python-version`（CI 实际读的）不低于声明」。
+`ipc-handlers.ts:68` 的默认 extensions 去掉 7z/rar（py7zr/rarfile 已随依赖批 1 删除，
+后端只认 `.csv/.zip`）。⚠ 顺带查明：**这条通路渲染进程没有调用方**（只有 preload 桥与类型声明），
+所以它不是用户可见缺陷；要不要整条撤掉是另一回事。
+
+## 门禁
+
+- 批 A：三档 `RESULT: PASS`（`src/api` 触发全量池）。
+- 批 C + 批 D：合跑一次四档 `RESULT: PASS`（`config/` 与 `electron/` 都升全量，合跑省一轮）。
+- 批 B：四档 `RESULT: PASS`（`e2e:analysis+data+settings` + 附带 P0，本 slot 82 passed），
+  四条新宽度判据逐条从 slot 日志确认**执行过**，不是静默跳过。
+
+## 批 E：e2e 与后端套件并跑实测 —— **放行**（`testing-gates.md` §1 已升）
+
+`§1` 原来写的是「根因消失，但并跑本身还没实测过」。这轮补上，协议是同树、同命令、先 solo 再并发：
+
+| | solo | 并发 | 差 |
+| --- | --- | --- | --- |
+| 后端 `manage.py test test.backend apps.<13>` | `Ran 1851 … OK (skipped=8)` 368.6s | 1851 例逐字相同、OK，417.2s | **+13% 墙钟，正确性 0 差** |
+| e2e `--slots=2 -- e2e/settings e2e/analysis` | 190 例 / 12.8min / 3.57s/例 / MEASURED / 真红 `{cpk-thresholds}` / 抖动 2 | 190 例 / 12.8min / 3.56s/例 / MEASURED / 真红与抖动**同两个文件** | **同构** |
+
+判据口径写成「**红集合相等 + 例数相同**」而不是「必须零红」——solo 基线自己就带一条红（见下），
+要求零红会让这条放行永远达不到，也判不出并跑到底有没有影响。零 `ERR_CONNECTION_REFUSED`、零崩池。
+两条边界也写进了正文：并跑墙钟取 max（别顺手抬 `--slots`，崩池判据照旧），
+且实测只覆盖「后端套件 + 池」，不含 dev server 占着 `:8000/:3000` 那形态。
+
+## 顺带查出的新红（**未修**，等你点名）：`settings/cpk-thresholds.spec.ts` 是分桶依赖真红
+
+现象：`:109` 「重进后应仍锁定同一行」期望 `KELVIN_VIN`、实到 `CON_VIN`。
+证据链（都是同一棵树）：
+
+- 11:16 UTC（`77beb23` 那批的门禁）：`--slots=auto`、294 例、含这个文件 ⇒ **真红 0**（它是绿的）。
+- 11:37 UTC solo：`--slots=2`、190 例 ⇒ 红；**独占 slot 单文件复跑（3 例、0.4min）仍红** ⇒ 不是负载抖动。
+- 11:56 UTC 并发：同上，红集合不变。
+
+⇒ 定性：**分桶/组成依赖的确定性红**，不是本轮任何改动引入的行为变化（批 A–D 没动仪表板排序、
+CPK 计算或这条 spec；批 B 只在别的文件加了宽度断言）。两个候选机制我还没证伪：
+① 同一桶里其它 spec 对**同一个 admin 账号** PUT 设置（`settings.spec` / `export-timeout` /
+`chart-memory` 都改过再复位），改变了 CPK 阈值从而改了行序；② 模板库/夹具镜像的态随组成不同。
+它正落在记忆里「试点簇 #3 `settings/cpk-thresholds` 未做」那一簇上，修它要先做归因
+（换父检出对照 + 桶组成二分），是独立一批工作。
+
+## 留给拍板（本轮刻意不动）
+
+B 后端载荷的设计稿；内存治理批 2（准入）与批 3（每-worker 硬上限）与崩池本身；
+Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `root`/`apps` 要不要挂 stdout；
+文件对比那两个控件的 `92px` 是否加宽（内部实测 30px）；`open-file-dialog` 这条无调用方的通道
+要不要整条撤掉；`test_data_gc.py` 要不要挂自动触发；要不要给 `scripts/*.py` 开 affected 放行类目；
+夜跑 cron 重启；依赖批 2/3/4（Electron 45 等大版本）；`e2e/settings/cpk-thresholds` 这条红的修法。
