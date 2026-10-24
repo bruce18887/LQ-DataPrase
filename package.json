@@ -5,7 +5,7 @@
   "_pyiWorkpathNote": "为什么这条命令长这样（Task 13 fix round 1 校正了旧注的三处超出证据的表述）。① 陈旧图标的承重机理：PyInstaller 的 EXE 缓存判据把 icon 只按**路径字符串**相等比较（.venv/Lib/site-packages/PyInstaller/building/api.py:683 的 _GUTS 配 building/utils.py:47 _check_guts_eq；icon 没有任何 mtime/字节检查），所以 workpath 跨 run 存活时换掉的 icon 字节不会被察觉、日志照样全绿。修陈旧靠的是 --clean：task-13 S2 在**已隔离**的 workpath 上不带 --clean 交出与上一代 md5 一字不差的 exe（报告 §4.3），只搬目录修不了。② --workpath build/pyi-work 是卫生而非修复手段：--clean 的清圈是 workpath/<specnm>/ 的**内容**（building/build_main.py:1147-1150 先把 spec 名拼进 workpath，:1162-1170 只 glob 该目录），本来就够不到 build/icon.ico；把它移出放交付图标的目录只是不把 PyInstaller 的临时树堆在交付资产旁边，不是防删——防删这件事本来就不需要，清理圈根本够不到 icon.ico（「清理语义随版本变化」这种说法没有任何记录支撑，已从本注移除）。③ --clean 的副作用外溢：同一轮还清 CONF['cachedir']，Windows 默认即 %LOCALAPPDATA%\\pyinstaller，是**机器共享**的用户级缓存（E2/E3/S3 日志第 5 行 Removing temporary files and cleaning cache in ... 打的就是这个路径），同机其它 PyInstaller 项目下一轮会跟着冷启动。故命令用 cross-env PYINSTALLER_CONFIG_DIR=build/pyi-cache 把缓存目录关进仓库（configure.py:55-56 读取；控制方 2026-10-16 跑 `npm run pyinstaller` 整条实测：日志第 149 行只打 `Removing temporary files and cleaning cache in build/pyi-cache\\pyinstaller`，全文出现 LOCALAPPDATA 次数 = 0，cross-env 起相对路径 .venv python 正常，产物 exe 抽出的 32×32 帧 pixel sha256 与 build/icon.ico 一致）。回归守卫在 frontend/test/unit/appIcon.spec.ts。",
   "private": true,
   "engines": {
-    "node": ">=20",
+    "node": ">=22.12",
     "npm": ">=10"
   },
   "scripts": {

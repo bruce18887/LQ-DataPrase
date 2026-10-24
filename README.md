@@ -77,7 +77,7 @@ LQ-DataPrase/
 ### 环境要求
 
 - Python 3.11+（开发与打包实测环境为 **3.13**，见 `.python-version`）
-- Node.js 20+（实测 v22）
+- Node.js 22.12+（实测 v24）
 - Redis 7+（**可选**，仅当需要跨进程共享 SFTP 会话缓存时；不装也能跑，会自动回落进程内缓存）
 
 依赖全部按 `==` 锁定在 `requirements/base.txt`（本项目以 PyInstaller 二进制分发，

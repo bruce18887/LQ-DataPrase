@@ -255,8 +255,6 @@ _hiddenimports += [
     'bcrypt',
 
     # Archive
-    'py7zr',
-    'rarfile',
     'zipfile',
 
     # XML / Excel helpers
@@ -300,7 +298,6 @@ _full_collect = [
     'openpyxl',                # templates
     'lxml',                    # data files
     'pptx',                    # templates
-    'py7zr',
     'excelize',
 ]
 

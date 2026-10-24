@@ -5500,3 +5500,63 @@ C `2026-10-21` 内存治理三批；D Electron 日志把 backend-stderr 一律�
       也不跑 bootstrap。`requirements/production.txt` 里 gunicorn 的未钉版本本轮**不动**（方案 A 用不到）。
 - **待拍板的两件没变**：无 TLS 的安全姿态（§5.1）、自助找回密码入口。
 
+## 2026-10-24 依赖升级批 1：安全修复 + 死依赖清理
+
+用户 2026-10-24 让「评估各种包是否需要升级」，评估结论是本批只做**有安全驱动或可直接删除**的项，大版本与数据栈另批。
+依据：`npm outdated`（21/24 直依赖落后，lock 停在 `1d18ba2`）、`npm audit --registry=https://registry.npmjs.org`
+（34 条：3 critical / 28 high / 3 moderate，多数是 dev/build 传递依赖）、OSV 对照当前 venv 64 个包（11 个命中）。
+**范围外**：Electron 45 / electron-builder 26（EOL + 打包链，批 2）、Pillow 13 / PyInstaller 6.22（批 3）、
+Playwright / Element Plus / AG Grid patch（批 4）、Pinia 4 / Vue Router 5 / TS 7 / AG Grid 36 / pandas 3.1 / numpy 2.5（暂缓）。
+
+- [x] 前端 lock 定向升级（全部在 `^` 范围内，不改大版本）：`axios 1.20.0`、`vite 8.3.5`、
+      `@vitejs/plugin-vue 6.0.10`、`vitest 5.0.5`、`concurrently 9.2.5`、`vue 3.5.44`。
+      判据：`npm ls` 显示目标版本，且这几项从 `npm outdated` 消失。实测：lock 与 node_modules 均为目标版；
+      `npm audit` 的直依赖只剩 `electron` / `electron-builder`（批 2）。
+- [x] 后端 pins：`Django==6.0.9`、`djangorestframework==3.18.3`、`cryptography==50.0.2`。
+      Django 走 6.0 分支补丁而非 6.1（6.0 仍在安全支持期，行为变更最小）。实测：`pip check` 无破损。
+- [x] 删除死依赖 `py7zr==1.1.0` / `rarfile==4.2`：
+      ① `requirements/base.txt` 删两行并改 `psutil` 注释（不能再写「py7zr 传递依赖」）；
+      ② `lq_dataprase.spec` 删 hiddenimports 的 `py7zr`/`rarfile` 与 `_full_collect` 里的 `py7zr`；
+      ③ 卸载 venv 中仅由 py7zr 引用的传递依赖：`brotli`、`pycryptodomex`、`texttable`、`pyppmd`、
+      `pybcj`、`multivolumefile`、`inflate64`、`backports.zstd`（`pip show` 已确认 Required-by 只有 py7zr）。
+      依据：`apps/` 无运行时导入点；`/upload/` 只收 CSV/ZIP（`file_views.py:521`）；
+      `docs/reference/server-deployment.md:37` 已有同一结论。实测：venv 64→54 包；
+      PyInstaller 日志无 `py7zr`/`rarfile` 漏模块告警。
+- [x] Node 运行时口径：root/frontend `engines.node` 改 `>=22.12`（Node 20 已于 2026-04-30 EOL，
+      且 vitest 5 的 engines 是 `^22.12 || ^24 || >=26`）；CI `node-version` 改 `'24'`；README 同步。
+- [x] 顺带修正文案：`FileManager.vue` 的 `accept`（`.csv,.zip`）与提示去掉 7z/RAR/txt/dat（后端实际只收 CSV/ZIP）。
+      残留：`electron/ipc-handlers.ts:68` 原生文件对话框仍列 7z/rar，留到批 2 与 Electron 一起改。
+- [x] 验证（依赖清单命中全量档，按 `testing-gates.md` 执行）：
+      `python manage.py check`（0 issues）→ 后端全量首轮 1813 例 1 红（见下）→ `npx vitest run` 470 例绿
+      → `npm run lint:e2e` 绿 → `npm run build` 绿 → `npm run test:e2e:affected` **RESULT: PASS**
+      → `npm run dist:win` 成功。
+
+### Review（2026-10-24）
+
+- **后端那条红是 Windows 文件锁，不是升级回归**：首轮 `test_forget_removes_entry` 红在
+  `host_keys._save` 的 `os.replace` → `PermissionError: [WinError 5]`；该文件与本批改动无关，
+  单独跑 `test.backend.test_sftp_host_keys` 17/17 绿；第二轮全量 `Ran 1813 tests … OK (skipped=7)`。
+  可复用口径：`_save` 的失败被设计成「只记日志返回 False」，测试又没断 `pin()` 成功，
+  所以负载/杀软/索引器造成的瞬态写失败会以「forget 返回 False」的形状出现。
+- **全量 e2e 的 3 条红经独占复跑判为负载抖动**：池汇总 414 例 / 墙钟 8.2min / 3.12s/例 /
+  unexpected 3 / flaky 4 / skipped 22；`recheck` 把两个红文件各自独占 slot 复跑均绿
+  （`confirmed: []`、`unresolved: []`、`loadFlakes` 两个 histogram spec），门禁据此 PASS。
+  效率 2.48 低于 2.8 目标，但本轮有复跑（`hasRetries`），按口径不判效率。
+- **打包链**：PyInstaller 产物 `_internal` 179.9→160.1MB（删 py7zr 链的直接收益），
+  rcedit 首次失败后重试成功，`out/LQ-DataPrase-0.8.0-Setup.exe` 与 `-win.zip` 各 171MB。
+- **冻结后端冒烟**：用「临时锚目录 + `LQDP_SKIP_STORAGE_MIGRATION=1`」启动 `dist/LQ-DataPrase/LQ-DataPrase.exe`，
+  `GET /` 200；DB/media/staticfiles/secret.key 全在临时目录，跑完已删。
+  **踩坑记录**：只给 `LQDP_BASE_DIR` 不够 —— `apply_system_config` 会在缺 `data_dir` 时默认 `~/LQ-DataPrase`，
+  第一次冒烟因此指向了真实目录。已核：真实 `db.sqlite3` mtime 仍是 2026-10-23 14:09、`integrity_check=ok`、
+  无 WAL/journal 残留，未产生持久写入。以后做二进制冒烟必须同时给 skip 或自带 `system_config.json`。
+- **树状态**：本批只改 9 个文件（`.github/workflows/ci.yml`、`README.md`、`docs/tasks/todo.md`、
+  `frontend/package-lock.json`、`frontend/package.json`、`frontend/src/pages/data/FileManager.vue`、
+  `lq_dataprase.spec`、`package.json`、`requirements/base.txt`）。
+  验证开始时这 10 个文件的 mtime 已冻结；期间并发的另一条工作是 `docs/reference/server-deployment.md`
+  与未跟踪的 `deploy/`，**不属于本批**，提交时必须逐文件 add 排除。
+- **未提交**：按会话约定，提交前需用户点名；本批尚未 commit/push。
+
+**未纳入并已知的残留**：Electron 33 EOL、`gunicorn>=21.2` 未钉、`pyproject.toml` 的
+`requires-python>=3.11` 与实际 Django 6.0/6.1 要求 `>=3.12` 不一致 —— 前两条随批 2/服务器装机处理，
+第三条本轮只记录，避免把元数据修正混进依赖升级 diff。
+
