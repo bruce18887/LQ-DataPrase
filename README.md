@@ -76,7 +76,9 @@ LQ-DataPrase/
 
 ### 环境要求
 
-- Python 3.11+（开发与打包实测环境为 **3.13**，见 `.python-version`）
+- Python 3.12+（下限由 Django 6.0 自身决定：它的 wheel 元数据写 `Requires-Python: >=3.12`；
+  开发与打包实测环境为 **3.13**，见 `.python-version`。`pyproject.toml` 与本行由
+  `test/backend/test_python_floor_metadata.py` 钉成同一份口径）
 - Node.js 22.12+（实测 v24）
 - Redis 7+（**可选**，仅当需要跨进程共享 SFTP 会话缓存时；不装也能跑，会自动回落进程内缓存）
 
