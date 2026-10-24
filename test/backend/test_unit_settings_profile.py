@@ -115,6 +115,39 @@ class UnitSettingsProfileTests(SimpleTestCase):
         self.assertNotIn('data_dir', src)                      # 那个键的小写形式也不许出现
         self.assertNotIn('config.settings.development', src)   # 导入它 = 把重定向请回来
 
+    def test_direct_run_files_do_not_select_the_development_profile(self):
+        """源码扫描：``test/`` 下每个 ``setdefault(DJANGO_SETTINGS_MODULE, ...)`` 都不许指向 development。
+
+        这行在经 runner 跑时是惰性的（``manage.py`` 已设过档），只在**直跑单个文件**时生效。
+        而 development 导入期会按系统存储路径解析 BASE_DIR，``MEDIA_ROOT`` 跟着走 ——
+        2026-10-16 实测：隔离工作树里直跑会把合成 CSV 写进 ``~/LQ-DataPrase/media/data/``
+        （``Path.home()`` 是机器级的，工作树隔离不了它）。落盘面因此必须留在 ``test/unit-data``。
+
+        只匹配那一行的完整形态，不匹配注释/文档里的提及 —— 本文件自己就写着那个模块名。
+        """
+        needle = ("os.environ.setdefault('DJANGO_SETTINGS_MODULE', "
+                  "'config.settings.development')")
+        offenders = [
+            str(p.relative_to(REPO).as_posix())
+            for p in sorted((REPO / 'test').rglob('*.py'))
+            if '__pycache__' not in p.parts and needle in p.read_text(encoding='utf-8')
+        ]
+        self.assertEqual([], offenders, '这些文件直跑时会写用户真实数据目录')
+
+    def test_standalone_is_only_selected_by_the_asset_regression_it_needs_it_for(self):
+        """``config.settings.standalone`` 在白名单里：它把 ``frontend/dist`` 注册进
+        ``TEMPLATES[0]['DIRS']``，换档会让资产视图 404、回归测不出来。
+        新增文件想用这一档必须先说清为什么不是 ``unit``。
+        """
+        needle = ("os.environ.setdefault('DJANGO_SETTINGS_MODULE', "
+                  "'config.settings.standalone')")
+        users = [
+            str(p.relative_to(REPO).as_posix())
+            for p in sorted((REPO / 'test').rglob('*.py'))
+            if '__pycache__' not in p.parts and needle in p.read_text(encoding='utf-8')
+        ]
+        self.assertEqual(['test/backend/test_static_assets.py'], users)
+
 
 class ManagePyProfileRoutingTests(SimpleTestCase):
     """``manage.py`` 的位置判断：只有 ``test`` 命令换档，其余命令行为不变。"""

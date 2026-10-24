@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 # ETS88 fixture 需要识别为 ETS88（identify_format 要求 'ETS Datalog Reporter'）
 import django  # noqa: E402
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.development')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.unit')
 django.setup()
 
 from django.test import TestCase  # noqa: E402
