@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { authApi } from './auth'
 import { useAuthStore } from '../stores/auth'
 import { formatError } from '../utils/error'
+import { safeGetItem } from '../utils/safeStorage'
 
 // 请求级逃生口：设为 true 时该请求的错误不弹全局提示（调用方自行处理，
 // 如表单行内校验、静默轮询）。
@@ -88,7 +89,7 @@ if (typeof window !== 'undefined' && window.electronAPI?.onBackendUrlChange) {
 }
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token')
+  const token = safeGetItem('access_token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
@@ -111,7 +112,7 @@ let refreshPromise: Promise<string | null> | null = null
 async function refreshAccessToken(): Promise<string | null> {
   if (refreshPromise) return refreshPromise
 
-  const refresh = localStorage.getItem('refresh_token')
+  const refresh = safeGetItem('refresh_token')
   if (!refresh) return null
 
   refreshPromise = (async () => {
@@ -215,7 +216,7 @@ api.interceptors.response.use(
       !originalRequest
       || originalRequest._retry
       || NON_RETRY_AUTH_ENDPOINTS.some((endpoint) => (originalRequest.url ?? '').includes(endpoint))
-      || !localStorage.getItem('refresh_token')
+      || !safeGetItem('refresh_token')
     ) {
       forceLogout()
       return Promise.reject(error)

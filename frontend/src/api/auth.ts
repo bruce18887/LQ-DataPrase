@@ -1,5 +1,6 @@
 import axios, { AxiosError, isAxiosError } from 'axios'
 import api from './index'
+import { safeGetItem } from '../utils/safeStorage'
 
 /**
  * Refresh tokens are NOT routed through the shared `api` instance.
@@ -173,8 +174,9 @@ export const authApi = {
    */
   updateSettingsKeepalive(data: Record<string, unknown>): void {
     const base = (api.defaults.baseURL ?? '/api/v1').replace(/\/$/, '')
-    const token =
-      typeof localStorage !== 'undefined' ? localStorage.getItem('access_token') : null
+    // safeGetItem 内部 try/catch 已经护住「localStorage 这个全局压根不存在」
+    // （非浏览器环境）与「磁盘满/权限异常抛 DOMException」两种，不必再套一层 typeof。
+    const token = safeGetItem('access_token')
     try {
       void fetch(`${base}/auth/settings/`, {
         method: 'PUT',
