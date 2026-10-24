@@ -30,6 +30,11 @@ Session.vim
 secret.key
 *.key
 !*.pubkey
+# 服务器形态的真实环境文件（模板是 deploy/server.env.example，真实文件应装在 /etc/lqdp）
+server.env
+# PEM 私钥与库快照（backup_db 产出 lqdp-*.sqlite3；若将来要在 test/fixtures/ 放 sqlite 夹具需就近写例外）
+*.pem
+*.sqlite3
 
 # ================== Python ==================
 __pycache__/

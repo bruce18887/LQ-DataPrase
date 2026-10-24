@@ -1,0 +1,10 @@
+[Unit]
+Description=每天 03:30 备份 LQ-DataPrase 库
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

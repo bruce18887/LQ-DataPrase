@@ -1,0 +1,10 @@
+[Unit]
+Description=LQ-DataPrase 库备份（一次性）
+
+[Service]
+Type=oneshot
+User=lqdp
+Group=lqdp
+WorkingDirectory=/srv/lqdp-src
+EnvironmentFile=/etc/lqdp/server.env
+ExecStart=/srv/lqdp-src/.venv/bin/python manage.py backup_db --dest /srv/lqdp-backup
