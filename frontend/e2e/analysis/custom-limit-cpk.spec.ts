@@ -73,6 +73,22 @@ test.describe('@p1 自定义限值重算 CPK', { tag: ['@p1', '@analysis'] }, ()
 
     // 2) 填下限（fill + blur 才发射 change；此时上限仍为 null）
     const inputs = page.locator(`${SINGLE} .custom-limit-inputs .el-input-number input`)
+
+    /*
+     * 盒宽判据（2026-10-24 普查）：这两个控件是 `size="small"` + `:controls="false"` +
+     * `style="flex: 1"`，同一行里还有一个 `~` 分隔符 —— 「同行有其它内容」正是
+     * export-timeout 那类缺陷的结构前提（区别是它们靠 flex 增长而不是被压缩）。
+     * 1280×720 实测 **外层 176.8 / 内部 146.8**；下限取 120 / 100：
+     * 要显示 6 位小数的限值（`precision=6`），窄到 100 以下就等于用户读不到自己填的数。
+     */
+    for (const i of [0, 1]) {
+      const outer = await page.locator(`${SINGLE} .custom-limit-inputs .el-input-number`)
+        .nth(i).boundingBox()
+      expect(outer?.width, `自定义范围控件 #${i} 外层被挤扁（普查实测 176.8px）`).toBeGreaterThanOrEqual(120)
+      const inner = await inputs.nth(i).boundingBox()
+      expect(inner?.width, `自定义范围控件 #${i} 内部 <input> 太窄（实测 146.8px）`).toBeGreaterThanOrEqual(100)
+    }
+
     respPromise = page.waitForResponse(
       (r) =>
         r.url().includes('/analysis/histogram/') &&

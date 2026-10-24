@@ -418,6 +418,22 @@ test.describe('@p1 测试项相关性分析', { tag: ['@p1', '@analysis'] }, () 
     await page.locator('.el-select-dropdown__item:visible').filter({ hasText: '自定义' }).first().click()
     const yInputs = axisBody.locator('.axis-item').nth(1).locator('.el-input-number input')
     await expect.poll(() => yInputs.count(), { timeout: 5000 }).toBeGreaterThanOrEqual(2)
+
+    /*
+     * 宽度判据（2026-10-24 普查，承重）。这两个控件写的是 `style="width: 100px"` +
+     * `:controls="false"`，1280×720 实测 **外层 100 / 内部 input 70**。
+     * ⚠ 恒等式与「带控制按钮的 150 档」不同（那边内部 = 150 − 42 − 42 = 66，
+     * 见 settings/export-timeout.spec.ts:51），别复用同一个数 —— 没有 42+42 内边距时
+     * 可收缩下限由内容决定。外层阈值挡「被同级文案挤过」（export-timeout 的同型形状），
+     * 内部阈值挡「窄到看不见也点不着」。
+     */
+    for (const i of [0, 1]) {
+      const outer = await axisBody.locator('.axis-item').nth(1)
+        .locator('.el-input-number').nth(i).boundingBox()
+      expect(outer?.width, `轴卡自定义控件 #${i} 外层被挤扁（普查实测 100px）`).toBeGreaterThanOrEqual(98)
+      const inner = await yInputs.nth(i).boundingBox()
+      expect(inner?.width, `轴卡自定义控件 #${i} 内部 <input> 太窄（实测 70px）`).toBeGreaterThanOrEqual(40)
+    }
   })
 })
 

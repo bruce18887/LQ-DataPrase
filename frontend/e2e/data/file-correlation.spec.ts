@@ -63,6 +63,23 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
     const tol = section.locator('.fc-opt').filter({ hasText: '变化容差' }).locator('.el-input-number input')
     await expect(tol).toBeVisible()
     await expect(tol).toHaveValue('30.0', { timeout: 5000 })
+
+    /*
+     * 盒宽判据（2026-10-24 普查）。这两个控件写了显式 `style="width: 92px"`，
+     * 1280×720 实测 **外层 92 / 内部 <input> 30** —— 外层等于声明值 ⇒ **没有**被同级
+     * 文案挤过（export-timeout 那个同型缺陷的形状是外层 150→84、内部→0），所以外层阈值
+     * 按「不得小于声明宽」取 90。
+     * ⚠ 内部 30px 是这版设计自己的取舍（`.fc-opt` 是 label 在上的列布局，控件窄不是挤压）；
+     *   要不要把 92px 加宽属视觉取向，**待拍板**，本用例不替它决定，只防它退化成挤没。
+     */
+    for (const opt of ['误差阈值', '变化容差']) {
+      const box = section.locator('.fc-opt').filter({ hasText: opt }).locator('.el-input-number').first()
+      const outer = await box.boundingBox()
+      expect(outer?.width, `${opt}：外层小于声明的 92px，说明被同级内容挤过`).toBeGreaterThanOrEqual(90)
+      const inner = await box.locator('input').first().boundingBox()
+      expect(inner?.width, `${opt}：内部 <input> 归零，用户看不见也点不着`).toBeGreaterThanOrEqual(20)
+    }
+
     await ruleGroup.locator('.el-radio-button').filter({ hasText: 'A：Diff 必须为 0' }).click()
     await expect(tol).toHaveCount(0)
 
