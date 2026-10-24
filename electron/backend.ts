@@ -15,6 +15,7 @@ import * as path from 'path'
 import * as fs from 'fs'
 import * as http from 'http'
 import { app } from 'electron'
+import { buildBackendEnv } from './backend-env'
 
 export interface BackendInfo {
   port: number
@@ -297,12 +298,7 @@ export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
 
     const child = spawn(exe, args, {
       cwd,
-      env: {
-        ...process.env,
-        PYTHONUNBUFFERED: '1',    // flush stdout line-by-line (not block-buffered)
-        LQDP_BASE_DIR: userDataPath,
-        LQDP_SHUTDOWN_TOKEN: shutdownToken,
-      },
+      env: buildBackendEnv(process.env, { userDataPath, shutdownToken }),
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: !showBackendConsole,
     })
