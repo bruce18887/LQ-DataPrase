@@ -10,7 +10,9 @@
 
 跑法：python manage.py test test.backend.test_test_data_gc
 """
+import contextlib
 import importlib.util
+import io
 import os
 import shutil
 import tempfile
@@ -234,7 +236,10 @@ class ApplyPathTests(SimpleTestCase):
         self.addCleanup(lambda: (os.environ.__setitem__('LQDP_E2E_ROOT', env_backup)
                                  if env_backup is not None
                                  else os.environ.pop('LQDP_E2E_ROOT', None)))
-        self.assertEqual(0, GC.main(['--only', 'slots', '--apply']))
+        # 脚本的报告是给人看的，跑测试时别把它喷进套件输出（后端全量日志里混进表格会干扰判读）
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = GC.main(['--only', 'slots', '--apply'])
+        self.assertEqual(0, rc)
         self.assertFalse((slots / '021306-14928').exists(), '超龄的孤儿轮该没了')
         self.assertTrue((slots / '075407-43428').is_dir(), '正在跑的那轮必须原样留着')
 
@@ -257,8 +262,10 @@ class CliGuardTests(SimpleTestCase):
     """这两条只验「拒绝启动」，不会走到删除。"""
 
     def test_unknown_root_name_exits_2(self):
-        self.assertEqual(2, GC.main(['--only', 'slots,typo']))
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(2, GC.main(['--only', 'slots,typo']))
 
     def test_zero_age_limit_is_refused(self):
         """`--older-than-days 0` 等于关掉在跑守卫，`--apply` 会删掉别的会话正在用的槽。"""
-        self.assertEqual(2, GC.main(['--older-than-days', '0', '--apply']))
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(2, GC.main(['--older-than-days', '0', '--apply']))

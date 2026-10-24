@@ -44,9 +44,20 @@
 - **e2e 与后端套件的落盘面已分开（2026-10-16）**：e2e 的库 / `MEDIA_ROOT` / 临时区由
   `config.settings.e2e_slot` 指认（串行 = `test/e2e-data`，池 = 各 slot 自己的目录），后端套件由
   `config.settings.unit` 指认（`test/unit-data`，`manage.py test` 默认走这档）。旧那条「绝不可并跑：
-  共用 `media/` 与 `db.sqlite3`」的**根因**（两边都写仓库根 `media/`）已经消失 —— 但并跑本身
-  还没实测过，真要同批跑请先各自单独跑绿一次，别把「目录分开了」当成「已验证可并发」。
+  共用 `media/` 与 `db.sqlite3`」的**根因**（两边都写仓库根 `media/`）已经消失，并**并跑已实测**
+  （2026-10-24，同一棵树先 solo 再并发、两条命令逐字相同）：
+  后端 `manage.py test test.backend apps.<13 个目录>` solo `Ran 1851 … OK (skipped=8) / 368.6s`，
+  并发侧 **1851 例逐字相同、OK**，墙钟 417.2s（**+13%**）；
+  e2e `--slots=2 -- e2e/settings e2e/analysis` solo 与并发**完全同构**（190 例 / 12.8min /
+  3.57 vs 3.56 s/例 / `verdict=MEASURED` / 真红集合相同 / 负载抖动文件相同 / 零拒连 / 零崩池）
+  ⇒ **并跑的验收判据是「红集合相等 + 例数相同」，不是「必须零红」**；这句从此算正式放行。
+  ⚠ 两个别越过的边界：① 并跑只省「串起来等」的时间（墙钟取 max），别顺手把 `--slots` 一起抬高 ——
+  崩池判据照旧（**看 commit，不看 available 内存**，见 §4）；② 实测覆盖的是「后端套件 + 池」，
+  **不含** dev server 占着 `:8000/:3000` 的形态。
   跑完全量要释放端口。
+  ⚠ 后端全量的 label **别手打 `apps.*`**：那不是合法标签，会当成模块名去 import，
+  实测只跑 1104 例并带一条 `ModuleNotFoundError: No module named 'apps.*'` 的 error（看着像回归）。
+  取法与夜跑同源：`scripts/e2e_nightly.mjs:129-136` 枚举 `apps/` 下每个目录成 `apps.<name>`。
 - **落盘面要定期回收，但大头在仓库外**：`scripts/test_data_gc.py`（默认 dry-run，`--apply` 才删）
   管三棵树 —— `C:\lqdp-e2e\slots`（池的孤儿轮，2026-10-24 实测 185 轮 / 唯一字节 4.8GB）、
   `test/e2e-data`、`test/unit-data`。池自己只在**正常退出**时 `rmSync` 本轮目录
