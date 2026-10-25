@@ -4059,6 +4059,10 @@ A 不报、B（关键词在预算之外）照旧报。**预算必须取到 `CHUN
       首推大概率还要修一两轮（Windows runner 的 pip/编码细节），别把它当已交付。
 - [ ] **P2-2 / P2-3 / P2-4 / P2-7 —— 本轮未做**（不是遗漏：这四项各是一次独立重构，
       在本会话剩余预算里做 half 会留下比不做更坏的半成品树；下列是执行时要直接用的判据）
+      ⚠ **2026-10-25 午后实测：下面三处数字已过期**，动手前先读文末「其它未完成汇总」A 档第 3 条（那里
+      连命令一起给了）—— P2-2 的 `674` 现为 **590**（前端已无 >600 行的文件，这条的驱动前提变了）；
+      P2-3 的「约 29 处」现为 **47 个引用文件 / 56 条 import 行**；P2-7 现为**三处**破线
+      （1968 / 846 / 642）。P2-4 的 **77 处 `!important`** 仍成立，未受影响。
       * **P2-2** 前端三大文件 674/582/560。拆分必须**原样保留 `data-*` / `data-testid`**，
         它们是被 e2e 选择器钉住的契约（R2②）；改完先跑 `data-browser` 与 `search-layout` 两条 spec。
       * **P2-3** `apps/common` 拆出 `apps/storage`（system_config + backup + views + urls）
@@ -5923,11 +5927,34 @@ Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `roo
    旧行留在 DOM，等待谓词被上一个文件满足；见文末「已修」一节，含承重对照与两段验证）。
 2. **盲点持久化开关 22 处收敛**（见上文复测块）。新用例已一律走助手，存量这 22 处是纯体力活，
    但每处要判「是有意翻动」还是「盲点」，不能批量替换。
-3. **P2-2/P2-3/P2-4/P2-7 四项独立重构**（判据已在文中原样写好）：前端三大文件 674/582/560 拆分
-   （须原样保留 `data-*`/`data-testid`）、`apps/common` 拆 `apps/storage`+`apps/observability`
-   （约 29 处 import，注意 `config/urls.py`/`base.py` 的字符串路径 AST 扫不到）、
-   `element-plus-theme.css` 77 处 `!important` 里 light 侧 0 处补偿（补了必须肉眼/像素验收）、
-   `apps/datafiles/tests.py` 1968 行按主题拆（要先定「散落两处」的取向）。
+3. **P2-2/P2-3/P2-4/P2-7 四项独立重构**（原判据写在 `:4060` 起那块，**里面三个数今天实测已过期**，
+   逐项按下面这份走；两处的**前提**也变了，不是只改数字）：
+   * **P2-2 前提已变** —— 原写「前端三大文件 674/582/560」，`wc -l` 实测
+     `pages/data/DataBrowserAgGrid.vue` 现 **590**（`7ce7175` 等几笔拆下去的），**前端已无 >600 行的文件**，
+     所以「唯一破 600」这条驱动理由没了；剩下 `SearchCriteria.vue` 582、`WaferMapPanel.vue` 560 只违反
+     「超 300 行」的自定规范 ⇒ **要不要仍按重构做，需要重述目标**（拆仍须原样保留 `data-*`/`data-testid`，
+     它们是 e2e 选择器钉住的契约，改完先跑 `data-browser` 与 `search-layout` 两条 spec）。
+   * **P2-3 的量要重取** —— 原写「约 29 处 import」，现数分**两套口径，别混**：
+     **47 个引用文件**（不含 `apps/common` 自身）＝
+     `git grep -lE "apps\.common|from \.\.?common" -- apps config standalone.py | grep -v ^apps/common/ | wc -l`；
+     **顶层 import/from 语句 56 行**＝
+     `git grep -nE "^(from|import) .*apps\.common|^\s*from \.\.?common" -- apps config standalone.py | grep -v ^apps/common/ | wc -l`。
+     同一 pattern 不带行首锚点会数到 **87 行**，那是**含注释与文档串的提及数**，不能当 import 面用
+     —— 原记的 29 大概是某个子集，照着它去改会漏一半。config 侧那 10 行里 **5 处是字符串形态、AST 扫不到**：`base.py:94`
+     `'apps.common'`、`:72` LOGGING key、`:112` `MetricsMiddleware`、`:199` `custom_exception_handler`、
+     `config/urls.py:23` `include('apps.common.urls')`；另 5 处是普通 import/注释（`development.py:14`、
+     `server.py:63`、`settings/standalone.py:57`、`config/settings/base.py:46`、根 `standalone.py:194`）。
+     拆 `apps/storage`（system_config + backup + views + urls）与 `apps/observability`（health + shutdown）
+     本身不变，`apps/common` 无 models ⇒ 仍不产生 migration。
+     ⚠ 但那份分解**少列了一个同族件**：`apps/common/metrics.py`（连同 `tests_metrics.py`）——
+     `base.py:112` 按字符串引的正是它的 `MetricsMiddleware`，语义上属 observability，
+     原判据只写 health + shutdown，照抄会把这件留在 `apps/common` 里当孤儿。文件存在性今天已 `git ls-files` 核过。
+   * **P2-4 数字仍成立** —— `element-plus-theme.css` 现测 **77 处 `!important`**，light 侧 0 处补偿；
+     补了必须肉眼/像素验收，不能只靠构建通过。
+   * **P2-7 现在实为三处破线，不止原记的那一处** —— 按 C2 第 6 条那条普查命令，
+     `apps/datafiles/tests.py` 1968（原文记的就是它）、`apps/jobs/tests_jobs.py` 846、
+     `test/backend/test_sftp_search_engine_stream.py` 642。仍要先定「散落两处」的取向（统一 `test/backend/`
+     还是留 app 内），且拆出来的新文件不得 `import pytest`（CI 只装 `requirements/base.txt`，里面没有 pytest）。
 4. **2026-10-23 收口评审那张「仍未处置」表**：`UserSettings` 同名异构带 index signature、
    store 返回值 `as {…}` 断言、sftp 档 `last_visit` 计数守卫、`/summary/` 请求数收益无守卫、
    三种网格请求形态未断言、两条 e2e 注释机制描述过时 —— 全部是「类型面/判据面单独一批」。
@@ -5998,9 +6025,20 @@ Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `roo
 4. **分析页下限 420→432**（**要拍板**）：正文早写在 `:414`（「分析页左栏四张参考表单行收口」那节的 Review 里，
    明标「备选（未做，等拍板）」），只是没被收进上一节的 B 档。代价＝图表区在 125% 下再窄 12px，
    收益＝箱线图也不再横向滚（实测溢出 10px）。
-5. **夜跑定时任务确实还没注册**（**要拍板**，运维动作）：`schtasks /query /fo LIST /v` 里查不到
-   nightly / lq / dataprase / e2e 任何一条任务名，`scripts/e2e_nightly.mjs` 存在但没人按时叫它。
-   这条只把 B 档那句「夜跑 cron 重启」从「等拍板」补成「等拍板，且已确认这台机器上没挂」。
+5. **夜跑根本没注册 —— 而且「重启」这个词本身是过期的**（**要拍板**，运维动作）：这台机器上两个注册处都查不到：
+   `schtasks /query /fo LIST /v` 里没有任何 nightly / lq / dataprase / e2e 任务名，Qoder 侧
+   `qoder_cron list` 返回**空数组**。而 `docs/reference/testing-gates.md` §7 那条写的是
+   「**已注册但 `enabled=false`**（manual pause）」—— 那是 2026-10-16 在另一台机器/另一份会话配置上看到的
+   状态，本机现在连任务定义都没有。⇒ B 档那句「夜跑 cron 重启」要改成「**新建**一条夜跑 automation」，
+   动作量不同：没有旧 prompt 可改，得从零写。
+   §7 里另外两句今天也核了：那条「工作区必须干净」的门**有逃生口** ——
+   `scripts/e2e_nightly.mjs:8` 就写着 `--allow-dirty`（新建 automation 时要把这旗显式带进 prompt，
+   10-15 那轮就是这么 SKIPPED 的：「工作区有 1 项未提交改动」）；
+   而「历史上 6 条记录……**没有一次成功真跑**」现在不成立 ——
+   夜跑记录是**只留最近 7 轮**的滚动窗口（`tasks/e2e-nightly/latest.json` 现 7 条，`LATEST.md` 同表）：
+   3 SKIPPED / 2 FAILED / 1 VOID / **1 ⚠ DEGRADED PASSED**，
+   即 2026-10-17-0330：8.6min / 389 例 / flaky 6 / 4-slot 效率 2.24。**注意它是 DEGRADED 通过的**，
+   所以「兜底层不存在」这个结论仍然成立，只是理由从「从没跑成」变成「跑成过一次但判级降级、之后再没跑」。
 6. **600 行硬约束现在有三处破线，台账只记了一处**（**要拍板**：拆不拆那两个，以及要不要给这条约束挂绊线）：
    普查命令（只数入库文件，`.venv` 里的第三方包不算）
    `git ls-files '*.py' '*.vue' | xargs wc -l | awk '$1>600 && $2!="total"'` 实测三行 ——
