@@ -5853,6 +5853,18 @@ README 与 pyproject 逐字相等 + `.python-version`（CI 实际读的）不低
    本用例测的是盖住而不是清空）；③ 两个主题下遮罩 alpha ≥ 0.5。
 外加对照组：空闲态 `.dash-data` 内遮罩数 = 0（防"恒有遮罩"蒙过 ①）。
 
+**同日补的夜间视觉回归**（用户指令「补一条夜间模式遮罩位置的视觉回归」）：
+`dashboard-loading.spec.ts` 加第二条 @p1 —— 按本仓库既有口径走**几何 + 计算值**，不是像素基线
+（否掉 `toHaveScreenshot` 的原文理由在 `e2e/global/type-snapshot.spec.ts:8-12`）。四条判据：
+① spinner 落在首屏内；② 恒等式「距数据区顶 × 2 < 数据区高」（处在容器 50% 时左边 == 右边）；
+③ night 遮罩底色亮度 < 128 且 alpha ≥ 0.5；④ 遮罩顶边与底边包住整张总览表。
+主题走应用自己的引导（`addInitScript` 写 `localStorage.theme='night'`）并断言
+`html[data-theme=night]` 真的生效，否则量的可能是同一个主题两次；测试 1 的主题循环补了同款守卫。
+实测（`--slots=1`，视口高 720）：`maskTop=203 · maskH=1915 · fromTop=120（=CSS 声明值）·
+spinner 底边=398` ⇒ ① 余量 322px；若那条 CSS 被删回 EP 默认中点，`fromTop` 会变 958 ⇒
+顶边 1161 出界 441px，② 同时不成立（958×2=1916 > 1915）。这条退化的形状是
+**页面仍全绿、遮罩仍在**，只有这两何判据会红——所以 ①② 都留着，互为冗余。
+
 **验证**：`npm run build`（vue-tsc -b + vite）✓；单文件独占该 spec 绿；
 `npm run test:e2e:affected` → `RESULT: PASS · 计划 4 档全部执行`
 （`e2e:dashboard+settings` 全绿，附带 P0 13 例 = 全部 P0 用例减去 dashboard 档已覆盖的那 1 条）。
