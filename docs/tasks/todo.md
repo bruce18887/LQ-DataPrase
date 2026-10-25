@@ -5836,6 +5836,34 @@ README 与 pyproject 逐字相等 + `.python-version`（CI 实际读的）不低
 「总项数 > 100」——默认文件 37 项满足不了 ⇒ 天然不会张冠李戴。**只有仪表板这族没遮罩**，
 而用它当等待条件的就是刚修的这一处。
 
+## 顺带修掉的门禁缺陷：`e2e:附带P0` 按模块目录塞文件 ⇒ 空桶被判红（这条 FAIL 不是产品回归）
+
+触发：本批改完 `e2e/settings/cpk-thresholds.spec.ts` 后跑 `npm run test:e2e:affected`，
+四档里 `e2e:附带P0` FAIL——`unexpected 0 · flaky 0` 但池判 `VOID (infra)`。
+现场：那一档把 **58 个文件**按权重切成 4 桶，slot0 里一个 `@p0` 用例都没有 ⇒
+Playwright `Error: No tests found.` 退 1 ⇒ 该档记成红档。**77 个 spec 只有 6 个带 `@p0`**
+（地面真值 `npx playwright test --project=P0 --list` = 16 tests / 7 files，含 2 条 setup），
+所以这种空桶不是偶发而是必现；此前没撞到只是因为改 e2e spec 的那几轮没走到这条组合。
+
+修在 `scripts/affected-rules.mjs`：新增 `P0_SPEC_FILES` 常量（6 项），附带档改为
+**按文件列**并且只列「模块档没覆盖到的那些」；未覆盖部分没有 P0 用例时推一条显式 `skip`
+（空 `files` 交给池会被当全量档跑掉整轮，这条边界不能靠运气）。
+顺带补上一个静默漏洞：`smoke` 从来不是 `MODULES` 的成员 ⇒ `e2e/smoke/pages.spec.ts` 的
+6 条页面可达冒烟一直没进快门禁，按文件列之后才真正进来了。
+
+判据（`frontend/test/unit/e2eAffectedDecide.spec.ts`，只 vitest、不开浏览器）：
+① 附带档 == `P0_SPEC_FILES` 全集（改的是 sftp 时），且与模块档不重叠；
+② 改动模块自己带 @p0 时那个文件**只归模块档**、`smoke` 必须在场（钉住前提 `MODULES` 不含 smoke）；
+③ 空集 ⇒ `kind==='skip'` 且**不得带 files**（用可注入的 `p0Files` 压这条分支，与既有
+   `pytest`/`runBackend` 同一接缝）；④ 扫描器自证（注释里的 `@p0` 不算、tag 数组里的算）；
+⑤ `P0_SPEC_FILES` 与磁盘上真带 `@p0` 的文件集合**逐字相等**（新增 P0 用例不改常量就会红）。
+③ 这条第一次跑就抓到我自己把 fixture 写错（塞了 settings 的文件，导致那一支根本没进 skip）。
+
+结果：`npm run test:unit` 486 例全绿；`npm run test:e2e:affected` →
+`RESULT: PASS · 计划 4 档全部执行`，附带档从「4 桶 58 文件」缩成 14 例 / 0.4min。
+入库口径同时更新在 `docs/reference/testing-gates.md`（T2/T3 规模按今日实测重写：
+486 例/34 文件、418 展开/78 文件，旧账 353/26 与 390/75·P0 13 都过期了）。
+
 ## 留给拍板（本轮刻意不动）
 
 B 后端载荷的设计稿；内存治理批 2（准入）与批 3（每-worker 硬上限）与崩池本身；

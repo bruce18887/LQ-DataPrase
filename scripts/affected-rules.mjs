@@ -22,6 +22,27 @@ export const MODULES = [
 ]
 
 /**
+ * 带 `@p0` 用例的 spec 文件（相对 `frontend/`）。`e2e:附带P0` 档只塞这些。
+ *
+ * 为什么不能按模块目录塞（2026-10-25 的实测教训）：77 个 spec 里只有 6 个带 `@p0`，
+ * 而 `--project=P0` 配上一份**没有 P0 用例**的文件时，Playwright 报
+ * `Error: No tests found.` 并以退出码 1 结束 —— 池把这种桶记成红档，门禁 FAIL，
+ * 而它既不是产品回归也不是用例问题。按权重切 4 桶时这种空桶必然出现（本轮 4 桶里 1 桶空）。
+ * 地面真值来自 `npx playwright test --project=P0 --list`：16 tests in 7 files
+ * （其中 `fixtures/auth.setup.ts` 是 setup，不在此列）。
+ * 由 `e2eAffectedDecide.spec.ts` 钉住「这份常量 == 磁盘上真带 @p0 的文件集合」，
+ * 新增/改标签时它会红，而不是等到门禁里冒出一个说不清的红。
+ */
+export const P0_SPEC_FILES = [
+  'e2e/analysis/analysis.spec.ts',
+  'e2e/auth/auth.spec.ts',
+  'e2e/dashboard/dashboard.spec.ts',
+  'e2e/data/data.spec.ts',
+  'e2e/data/view-data.spec.ts',
+  'e2e/smoke/pages.spec.ts',
+]
+
+/**
  * 前缀 → 处置令牌。首条命中即生效，故**长前缀必须写在前**。
  * 令牌四种：模块名（进 e2e 模块档）｜`GLOBAL`（升级全量）｜`unit`（只跑 vitest）｜
  * `none:说明`（不由 e2e 承载，把说明打进 note，避免静默无门禁）。
@@ -273,10 +294,11 @@ export function backendLabels(files) {
  * 该按序执行哪几档 —— **入参里没有退出码**，这是「一档失败不吃掉后面的档」在结构上的保证：
  * 计划只由改动集（decide 结果 + 后端标签）与「解释器/开关」这两类静态事实决定。
  *
- * @param {{decision: {global: boolean, modules: Set<string>}, labels?: string[], runBackend?: boolean, pytest?: boolean}} o
+ * @param {{decision: {global: boolean, modules: Set<string>}, labels?: string[], runBackend?: boolean, pytest?: boolean, p0Files?: string[]}} o
+ *   `p0Files` 是「哪些文件带 @p0」的可注入事实（默认取 P0_SPEC_FILES），单测用它压住空档分支。
  * @returns {GateStage[]}
  */
-export function planStages({ decision, labels = [], runBackend = true, pytest = true }) {
+export function planStages({ decision, labels = [], runBackend = true, pytest = true, p0Files = P0_SPEC_FILES }) {
   /** @type {GateStage[]} */
   const stages = [
     // 静态体检放最前（约 3 s）：删用例残留的死 import 要早出声，不等几分钟浏览器跑完。
@@ -301,9 +323,14 @@ export function planStages({ decision, labels = [], runBackend = true, pytest = 
   } else if (selected.length) {
     stages.push({ kind: 'pool', name: `e2e:${selected.join('+')}`, files: selected.map((m) => `e2e/${m}`).join(' ') })
     // 附带 P0：只补未被模块档覆盖的那部分，同一用例不得在两条命令里各跑一遍。
-    const rest = MODULES.filter((m) => !selected.includes(m))
-    if (rest.length) {
-      stages.push({ kind: 'pool', name: 'e2e:附带P0', files: rest.map((m) => `e2e/${m}`).join(' '), pw: '--project=P0' })
+    // 按**文件**选，不按模块目录选：见 P0_SPEC_FILES 的注释——`--project=P0` 遇到
+    // 不含 P0 用例的文件会 `No tests found` 退 1，池把它记成红档（2026-10-25 实测 4 桶 1 空）。
+    const p0Rest = p0Files.filter((f) => !selected.includes(f.split('/')[1]))
+    if (p0Rest.length) {
+      stages.push({ kind: 'pool', name: 'e2e:附带P0', files: p0Rest.join(' '), pw: '--project=P0' })
+    } else {
+      // 空档既不能与「跑过且绿」同形，更不能把 `files=''` 交给池 —— 那会被当全量档跑掉整轮。
+      stages.push({ kind: 'skip', name: 'e2e:附带P0', skipped: '未覆盖的部分里没有 @p0 用例' })
     }
   }
   return stages
