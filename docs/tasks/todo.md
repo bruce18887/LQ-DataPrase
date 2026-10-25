@@ -5946,3 +5946,90 @@ Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `roo
 - **夜跑 cron 重启**、**依赖批 2/3/4**（Electron 45 / Pillow 13 / Playwright patch）。
 - 部署侧两件旧等项：**无 TLS 的安全姿态**、**自助找回密码入口**；以及 P4/S4 那三个
   （进程模型、媒体内容哈希共享、「导出中心」页面补不补）。
+
+## 2026-10-25 午后复核：上一节漏了六条，另有两条已经过期（C1 是纠正，C2 是补档）
+
+同一棵树现跑命令，命令写进条目里，下轮可直接重放。分档沿用上一节的口径（按「要不要你拍板」切）。
+
+### C1 上一节写错的，别再按原文去找
+
+1. **CI 那条「未验证……首推大概率还要修一两轮，别把它当已交付」**（原文 `:4058`，挂在 `- [x] P1-9` 里）
+   **已闭环**：`gh run list --limit 5` 实测 `18d393e`（今日 06:48Z push master）run `40170412163`
+   **success 3m32s**、`34494ad`（01:40Z）run `40151577233` success 4m42s。中间只有 10-24 的
+   `40085755700` 红，`gh run view --json jobs` 定性到 job 级：**后端全量用例 failure、前端那档 success**，
+   之后两笔转绿 ⇒ 门禁表 §1 那行「CI 自动跑后端全套 + build + vitest + lint:e2e」算被真实运行验证过。
+   ⚠ 边界：我**没查**那条后端红是哪一笔修掉的，也没重跑它。「CI 绿」的证据只到「连续两轮绿」，
+   不等于那批 YAML 细节从此不用管。
+2. **SFTP 搜索预设的 `0003_sftpsearchpreset` 已应用**：`python manage.py showmigrations sftp` 三条全 `[X]`。
+   这条纠正的是**上一轮会话的记忆**（那里记着「dev 库缺 0003 ⇒ 保存/加载预设端点 500」），
+   台账正文本来没记 ⇒ 在台账里找不到它是正常的。看到「预设报错」仍先 `showmigrations`，别改代码。
+
+### C2 上一节没收的开放项
+
+1. **图标家族还欠两件**：
+   ① **「计划 2」= spec §9 批 4–6**（图标注册表 + 7 档尺寸 token、emoji C/D 类治理、死资产清理
+   `icons.svg` + `config/urls.py` 路由 + 对应测试 + `scripts/generate_icon.py`）—— **要拍板要不要立项**，
+   立项后是纯工时（其中「死资产清理」是删除动作，单独点头）。出处
+   `docs/superpowers/plans/2026-10-15-icon-family-and-wiring.md:11`，那节自己写明「本计划只覆盖 §9 批 1–3，
+   批 4–6 另出计划 2」，而计划 2 从没写。
+   ⚠ 那份计划文件里还有 **51 个未勾的 `- [ ]`，别当工作量读**——计划 1 早已 squash 并入 master，只是没回头打勾。
+   ② **Setup.exe 的肉眼验收**：产物**已重建**（`out/LQ-DataPrase-0.8.0-Setup.exe` 171MB，mtime 2026-10-24 10:20），
+   但**从没真装过一次**，所以 AUMID 任务栏分组/通知、卸载程序最终图标、spec §7-10 那四处肉眼**全部仍未验**
+   —— 这条别因为「exe 已经有了」就判成关闭，它要的是**改本机状态**，需你点头才跑。
+2. **SFTP 右键菜单不吃缩放**（**要拍板**，与查看数据页同缺陷，当时明确留着）：换算器
+   `frontend/src/pages/data/components/browser/contextMenuPosition.ts` 只在数据浏览器下，
+   `frontend/src/pages/sftp/components/SftpFileTable.vue:159` 仍是 `ctxMenu.x = event.clientX`
+   （`:110` 直接写进 `left/top`）。现状两档都不该犯：浏览器档 2026-10-21 起不往 `<html>` 写 CSS zoom
+   （`composables/zoomMode.ts`），Electron 档走 `webContents.setZoomFactor`（坐标同源）⇒
+   **这条只在「将来又有人往 `<html>` 写 zoom」时才咬人**，这正是当初只修查看数据页的理由，不是新发现。
+3. **数据控制带的代码不在 master 上**（**要拍板**，等的还是版式 B）：
+   `git ls-tree -r --name-only backup/master-f5efdd1 -- frontend/src/pages/analysis` 命中 `DataControlBar.vue`，
+   同一命令对 `HEAD` **零命中**；仓里只剩两份文档
+   `docs/plans/2026-09-02-analysis-data-controls.md`、`docs/specs/2026-09-02-analysis-data-controls-design.md`。
+   ⚠ `backup/master-f5efdd1` 是它**唯一的 git 副本**，别当临时分支删。
+4. **分析页下限 420→432**（**要拍板**）：正文早写在 `:414`（「分析页左栏四张参考表单行收口」那节的 Review 里，
+   明标「备选（未做，等拍板）」），只是没被收进上一节的 B 档。代价＝图表区在 125% 下再窄 12px，
+   收益＝箱线图也不再横向滚（实测溢出 10px）。
+5. **夜跑定时任务确实还没注册**（**要拍板**，运维动作）：`schtasks /query /fo LIST /v` 里查不到
+   nightly / lq / dataprase / e2e 任何一条任务名，`scripts/e2e_nightly.mjs` 存在但没人按时叫它。
+   这条只把 B 档那句「夜跑 cron 重启」从「等拍板」补成「等拍板，且已确认这台机器上没挂」。
+6. **600 行硬约束现在有三处破线，台账只记了一处**（**要拍板**：拆不拆那两个，以及要不要给这条约束挂绊线）：
+   普查命令（只数入库文件，`.venv` 里的第三方包不算）
+   `git ls-files '*.py' '*.vue' | xargs wc -l | awk '$1>600 && $2!="total"'` 实测三行 ——
+   `apps/datafiles/tests.py` **1968**（P2-7 已收）、`apps/jobs/tests_jobs.py` **846**、
+   `test/backend/test_sftp_search_engine_stream.py` **642**（后两条从没进过任何待办，前端反倒一处没有）。
+   两处漏网的成因不同，别混着讲：
+   ① `tests_jobs.py` 是 **2026-10-18**（`9c05ea5`）才新建的，2026-10-15 那份架构评审根本看不见它，
+      之后作业化一直往里加例（`:4761` 那轮记的是 21 例；`:4809` 那轮的「47 例」是作业判据合计，
+      含同轮新增的 `apps/jobs/tests_jobs_sftp.py` 14 例 —— 那件现在 303 行，没破线），
+      **长到 846 没人量过**；
+   ② `test_sftp_search_engine_stream.py` 是 **2026-09-21**（`1e26839`）进来的，**评审当时就能扫到** ——
+      它 P2-7 只点名 `apps/datafiles/tests.py` 和四个 5xx 的 analysis 测试文件，`test/backend/` 整棵没逐个量
+      （它写「68 个」、`testing-gates.md` §6 写「76 个」，`git ls-files 'test/backend/*.py'` 现数 **94** ——
+      两处引用都比现状小，按现数走）。
+   顺带按今日实测纠正那份评审的两处：`apps/analysis/views/analysis_views.py` 它记 **690**（还写「本体仍超限」），
+   现测 **518** ⇒ 评审 P1「拆 analysis_views（histogram 下沉 service）」**已经做完了**；
+   而它 `:46` 那句「超 600 硬约束的业务文件 2（后端 1 + 前端 1）」今天应是**业务侧 0**
+   （`DataBrowserAgGrid.vue` 674→590，见本节末尾那条 ⚠）+ **测试侧 3**。
+   ⚠ **这条约束一条绊线都没有**：`grep -rn "600" scripts/*.mjs` 命中的全是 `60000` 毫秒换算，
+   用 `splitlines()` 的那几处是版本单源/配置档的**内容**断言，不是行数 lint ⇒ 越界只靠 review 肉眼，
+   这就是 846/642 能安静长起来的原因。**要拍的是取向**：只拆这两个文件（现成的接缝就是 class ——
+   `tests_jobs.py` 846 行 / **8 个 class** / 39 个 `def test_`，`test_sftp_search_engine_stream.py` 642 行 /
+   **15 个 class** / 51 个法，按主题拆成 `tests_jobs_<主题>.py` 与 `test_sftp_search_<主题>.py` 即可，
+   都属于 P2-7 那一族「测试文件同样受 600 约束」），
+   还是顺手挂一条静态判据 —— 挂进纯 vitest / 后端静态测试最便宜，但它会把「任何加行」变成门禁红，
+   阈值与豁免名单得单独定，别混在拆分那一批里做。
+   ⚠ 真要动 `test/backend/` 那件，拆出来的新文件**不得 `import pytest`**：CI 只装 `requirements/base.txt`
+   （里面没有 pytest，`test/backend/test_outliers.py` 文件头就是把这条当注释钉着的）。
+   今天唯一真带这句的是 `test/backend/batch_report/test_phase_parsing.py:12`，而那棵子树**缺 `__init__.py`**
+   ⇒ `DiscoverRunner` 从不收集它，于是那句 import 一直没咬人（`test/__init__.py` 与 `test/backend/__init__.py`
+   都在，只有 batch_report 这层没有）—— 这条与 `docs/reference/testing-gates.md` §6「补包标记会带出新红」同因，
+   拆分时顺手补包标记＝把别人的旧红点着。
+
+> **这六条全都要拍板，但拍的是三种东西**：第 1 条①（图标批 4–6）拍「要不要立项」，定下来就是纯工时；
+> 第 1 条②拍「允不允许为了验收真装一次包」（会改本机状态）；第 2–5 条拍具体取向（改不改、删不删、挂不挂）；
+> 第 6 条拍「只拆文件，还是连绊线一起挂」——绊线一挂，以后加行就变成门禁红。
+> ⚠ 还有一处上一节的数字我没动：A 档第 3 条写「前端三大文件 **674**/582/560」，
+> `wc -l` 实测 `pages/data/DataBrowserAgGrid.vue` 已是 **590**（`7ce7175` 等几笔拆下去的），
+> 前端已无 >600 行的文件 ⇒ 674 是 2026-10-15 那份架构评审的数，P2-2 的前提（「唯一破 600」）已经不成立，
+> 要不要仍按重构做需要重述，不能只改数字。
