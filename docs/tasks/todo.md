@@ -5954,12 +5954,19 @@ Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `roo
 ### C1 上一节写错的，别再按原文去找
 
 1. **CI 那条「未验证……首推大概率还要修一两轮，别把它当已交付」**（原文 `:4058`，挂在 `- [x] P1-9` 里）
-   **已闭环**：`gh run list --limit 5` 实测 `18d393e`（今日 06:48Z push master）run `40170412163`
-   **success 3m32s**、`34494ad`（01:40Z）run `40151577233` success 4m42s。中间只有 10-24 的
-   `40085755700` 红，`gh run view --json jobs` 定性到 job 级：**后端全量用例 failure、前端那档 success**，
-   之后两笔转绿 ⇒ 门禁表 §1 那行「CI 自动跑后端全套 + build + vitest + lint:e2e」算被真实运行验证过。
-   ⚠ 边界：我**没查**那条后端红是哪一笔修掉的，也没重跑它。「CI 绿」的证据只到「连续两轮绿」，
+   **已闭环**：`gh run list --workflow=ci.yml --limit 4` 实测**自 10-24 那次红之后连续四轮绿**
+   （午后复核写这条时只有两轮，之后 `1a86bb9`、`3957a63` 两笔补上）——
+   `34494ad` run `40151577233` 01:40:45Z→01:45:27Z、`18d393e` run `40170412163` 06:48:23Z→06:51:55Z、
+   `1a86bb9` run `40175066760` 08:02:30Z→08:08:22Z、`3957a63` run `40176741158` 08:28:17Z→08:32:04Z，
+   四轮都是 `conclusion=success` ⇒ 门禁表 §1 那行「CI 自动跑后端全套 + build + vitest + lint:e2e」
+   算被真实运行验证过。中间只有 10-24 的 `40085755700` 红，`gh run view --json jobs` 定性到 job 级：
+   **后端全量用例 failure、前端那档 success**。
+   ⚠ 边界没变：我**没查**那条后端红是哪一笔修掉的，也没重跑它 —— 「绿」的证据是**四轮的 conclusion**，
    不等于那批 YAML 细节从此不用管。
+   ⚠ 顺带一条读法（已升进 `docs/reference/testing-gates.md` §1 硬口径）：`1a86bb9` 那轮的
+   `gh run watch` 末尾打了 `X read-only filesystem` 与 `X boom`，**那是两条通过的用例里故意抛的模拟异常**
+   （`apps/jobs/tests_jobs.py:489`、`test/backend/test_sftp_guards.py:167`）被 problem matcher 抓成注解，
+   那轮本身 success —— 判 CI 只认 conclusion，别拿 `watch` 的尾巴当结论。
 2. **SFTP 搜索预设的 `0003_sftpsearchpreset` 已应用**：`python manage.py showmigrations sftp` 三条全 `[X]`。
    这条纠正的是**上一轮会话的记忆**（那里记着「dev 库缺 0003 ⇒ 保存/加载预设端点 500」），
    台账正文本来没记 ⇒ 在台账里找不到它是正常的。看到「预设报错」仍先 `showmigrations`，别改代码。
