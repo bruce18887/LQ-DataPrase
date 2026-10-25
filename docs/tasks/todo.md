@@ -1532,7 +1532,10 @@ Site 矩阵表头撑满 / Bin×Site·Site 良率·GAP·UPH 随阶段切换 / GAP
       —— 注意后端 `lower_limit`/`upper_limit` 现在**会**返回 null 了，这条从「防御性」升级为「必需」
 - [ ] SSE 可取消：`api/sftp.ts` `postSse()` 加 `signal`；`SftpBrowser.vue` 加 AbortController + `onBeforeUnmount`
 - [ ] 定时器清理：`DataBrowserAgGrid.vue` `siteFilterTimer`、`MultiFileTab.vue` `fileDebounce`、`SftpBrowser.vue` 两处 setTimeout
-- [ ] localStorage 统一 `safeGetItem`/`safeSetItem`（`stores/auth.ts`、`stores/theme.ts`、`api/sftp.ts`、`useZoom.ts`）
+- [x] localStorage 统一 `safeGetItem`/`safeSetItem`（`stores/auth.ts`、`stores/theme.ts`、`api/sftp.ts`、`useZoom.ts`）
+      —— **2026-10-25 结案**：那四处早已合规，缺的只有 `api/` 层 4 处裸调，已由 `f50edaf` 改掉，
+      并由 `frontend/test/unit/localStorageHygiene.spec.ts` 把判据扩到**整个 `src/`**（`.ts`+`.vue`，
+      白名单只剩 `utils/safeStorage.ts`）。现测 `grep` 全 src 裸调 = **0**。
 - [ ] `DashboardPage.vue onFileChange` 竞态守卫（注：`useAsyncData` 已内置请求序号守卫，先确认该页是否走它）
 - [ ] `styles/common-components-theme.css` 全局非 scoped `[class*="toolbar"]` 通配 + night-only `!important`（R7①）
 - [ ] `Sidebar.vue` 管理员菜单 `hidden` class → `v-if`
@@ -3201,6 +3204,15 @@ F7 实测：`legend-color:27` 由红转绿（19.4s），证实 3 个 echarts 实
 
 ## 遗留地雷清单：仍在「盲点持久化开关」的 22 处（2026-10-13 夜扫出，**本轮未改**）
 
+> **2026-10-25 复测：一处没少，仍是 22**（逐文件 `grep -c "getByText('显示…').click|check"`：
+> serial-no-column 8 / gage-qqbox-repro 6 / file-switch-param-reset 4 / outlier-handling 1 /
+> large-data-qqplot 1 / sw-bin-qqplot-repro 1 / serial-fail-count 1 = 22）。
+> ⚠ 记下这次差点写错的检索：我先只 grep 了台账点名的那一个标签 `显示序列分布`，
+> 于是 5 个文件返回 0、看起来「12 处已收敛」——**它们只是改用 `显示QQ图`/`显示箱线图`，
+> 形状一模一样**。判「某族站点还在不在」必须按形状（`getByText('显示…').click`）而不是按某个文案。
+> 唯一变化：`outlier-handling.spec.ts` 现在同时用了 `ensureChartToggles`（那 1 处裸点仍有，但前置被收敛）；
+> `multi-file.spec.ts` 另有 3 处同形状命中，即下文「已排除的假阳性」。
+
 F10 只改了全量夜跑**实际报错**的 13 处。下面是同一形状但目前是绿的站点——没证据就动它们是净
 风险（本轮已因擅自扩大改动面吃过一次：见 lessons「归因要用撤掉嫌疑改动再跑一次来证」）。
 新写用例一律走 `ensureChartToggles` / `enableChartAndWait`；下轮夜跑若在这些文件出现
@@ -4065,7 +4077,13 @@ A 不报、B（关键词在预算之外）照旧报。**预算必须取到 `CHUN
         但要先解决「散落两处」的取向：统一到 `test/backend/` 还是留在 app 内，二选一别两留。
 - [ ] **P2-1** 清理 —— **等用户点范围**（见批 4）。`Data/` 930M 是**用户原始数据**、
       `media/` 722M 是 `MEDIA_ROOT` 运行时产物、根目录 `db.sqlite3` 可能是 8000 端口的活库，
-      三者**都不能删**。可安全处置的是 `tasks/` 58M 里的一次性探针与日志、
+      三者**都不能删**。⚠ **2026-10-25 实测，这条里的两个数字已过期**：仓库根 `media/` **已不存在**
+      （`du -sh media` 无输出；2026-10 那轮存储路径迁移把它挪进了 `test/e2e-data`、`test/unit-data`
+      与用户数据目录），根 `db.sqlite3` 现在 **4.0K、mtime 2026-10-16**（只有 SQLite 首页，不是那种
+      还在被人写的活库；判「能不能删」仍按原条结论——先问）。
+      今天还躺在根目录的体积是 `Data/` 930M（用户原始数据，不能删）与 `tasks/` **86M**
+      （比这条写的 58M 又长了 28M，全是当期日志与探针）。
+      可安全处置的是 `tasks/` 86M 里的一次性探针与日志、
       `docs/tasks/lessons.bak-2026-08-30.md`、`scripts/generate_icon.py` 与
       `scripts/gen-icon.ico.js` 的功能重复、`db.sqlite3.bak-e2e-90612`(3.4M) 与
       根 `system_config.json` 里写死的个人绝对路径（**均已 gitignore，删除不影响仓库**）
@@ -5790,3 +5808,38 @@ Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `roo
 文件对比那两个控件的 `92px` 是否加宽（内部实测 30px）；`open-file-dialog` 这条无调用方的通道
 要不要整条撤掉；`test_data_gc.py` 要不要挂自动触发；要不要给 `scripts/*.py` 开 affected 放行类目；
 夜跑 cron 重启；依赖批 2/3/4（Electron 45 等大版本）；`e2e/settings/cpk-thresholds` 这条红的修法。
+
+## 其它未完成汇总（2026-10-25 晨，五笔已 push 到 `origin/master=34494ad` 之后盘点）
+
+分类按「要不要你拍板」切，不按主题切——同一主题可能两边都有。
+
+### A. 不需要拍板、随时可以开做的（缺的是工时，不是决策）
+
+1. **`e2e/settings/cpk-thresholds:109` 分桶依赖真红**（本轮查出，见上文）。
+   修法第一步是归因：换父检出对照 + 桶组成二分，判到底是①同桶 spec 对同一 admin 账号 PUT 设置
+   改了 CPK 阈值，还是②模板库/夹具镜像态。**这条一旦修好，快门禁的组成敏感性会降一档**。
+2. **盲点持久化开关 22 处收敛**（见上文复测块）。新用例已一律走助手，存量这 22 处是纯体力活，
+   但每处要判「是有意翻动」还是「盲点」，不能批量替换。
+3. **P2-2/P2-3/P2-4/P2-7 四项独立重构**（判据已在文中原样写好）：前端三大文件 674/582/560 拆分
+   （须原样保留 `data-*`/`data-testid`）、`apps/common` 拆 `apps/storage`+`apps/observability`
+   （约 29 处 import，注意 `config/urls.py`/`base.py` 的字符串路径 AST 扫不到）、
+   `element-plus-theme.css` 77 处 `!important` 里 light 侧 0 处补偿（补了必须肉眼/像素验收）、
+   `apps/datafiles/tests.py` 1968 行按主题拆（要先定「散落两处」的取向）。
+4. **2026-10-23 收口评审那张「仍未处置」表**：`UserSettings` 同名异构带 index signature、
+   store 返回值 `as {…}` 断言、sftp 档 `last_visit` 计数守卫、`/summary/` 请求数收益无守卫、
+   三种网格请求形态未断言、两条 e2e 注释机制描述过时 —— 全部是「类型面/判据面单独一批」。
+5. **真机（Linux）四条**：§1.2 字体自检、§7 第 6 条 SIGTERM 路径、一次批量图表导出看中文、
+   Electron 客户端把后端地址填成服务器再走登录（D1 通路）。缺的是那台机器。
+
+### B. 要你拍板的（原文见「留给拍板」，此处只补代价）
+
+- **B 后端载荷设计稿**：测量已把它顶到下一刀首位（20 人档提交跳中位 1.7s vs 提交本身 12–48ms）。
+- **内存治理批 2（准入）/ 批 3（每-worker 硬上限）/ 崩池本身**：批 1 已落地且被 2026-10-24 全量池覆盖。
+- **Electron 日志轮转参数**（分级+UTF-8 本轮已修 `c30fed7`，轮转与 `root`/`apps` 挂 stdout 仍未定）。
+- **文件对比那两个 92px 控件是否加宽**（内部实测 30px，宽度判据已常驻，改不改是审美+版式）。
+- **`open-file-dialog` 无调用方通道要不要整条撤**。
+- **`test_data_gc.py` 要不要挂自动触发**（脚本默认 dry-run，加不加定时是运维决定）。
+- **`scripts/*.py` 要不要进 affected 放行类目**。
+- **夜跑 cron 重启**、**依赖批 2/3/4**（Electron 45 / Pillow 13 / Playwright patch）。
+- 部署侧两件旧等项：**无 TLS 的安全姿态**、**自助找回密码入口**；以及 P4/S4 那三个
+  （进程模型、媒体内容哈希共享、「导出中心」页面补不补）。
