@@ -69,15 +69,71 @@ function rowByName(page: Page, name: string) {
   return page.locator('.overview-table .el-table__row').filter({ hasText: name }).first()
 }
 
-/** 选中带限值参数的种子文件，并等到总览真出现可判定的 CPK 行。 */
+/** 选中带限值参数的种子文件，并等到总览**真属于这个文件**。
+ *
+ * 为什么不能只等「表里出现带 CPK 的行」（原写法，2026-10-25 定性为这条红的根因）：
+ * `DashboardPage.vue:29` 的数据面板是独立的 `v-if="data"`，与 :22 那条加载态
+ * `v-else-if="loading"` **不在同一条 v-if 链里** ⇒ 换文件时旧行整段留在 DOM 上，
+ * 直到这个文件自己的 `/summary/` 回来才替换；而 `waitLoadingGone` 找的是
+ * `.el-loading-mask`，这种「有数据、在后台刷新」的形状**根本没有遮罩**，它是个空等。
+ * 于是旧谓词被**上一个文件的行**满足：探针实测（`--slots=1` 独占跑）选择框已经是
+ * `DA35_BPC50338_…csv`，表格却还是自动选中的那个 36 项文件、首行 `CONT_GATE`；
+ * 同一次运行的 retry #1 反过来读到目标文件的 165 项 ⇒ base 与 moved 读到不同文件，
+ * 「重进后应仍锁定同一行」必红，且红哪一行取决于槽库里有谁（分桶敏感的来源）。
+ *
+ * 现在等两件事：① 点击之前注册、点完之后收到这个文件的 `/summary/`（已选中同一文件时
+ * el-select 不发 change，不会有新响应，硬等会挂死 ⇒ 走 :30s 的行存在性守卫）；
+ * ② 渲染出来的行确实来自这份响应（首个带 CPK 行的「名字+两位小数」必须在响应里逐字存在，
+ * 且页面所有行名都是响应行名的子集）。两道都不镜像产品的行过滤逻辑。
+ */
+const SUMMARY_RE = /\/api\/v1\/summary\/?\?/
+
+async function selectedFileName(page: Page): Promise<string> {
+  return (await page.locator('.dash-file-select').innerText().catch(() => '')).replace(/\s+/g, ' ')
+}
+
 async function pickCpkFile(page: Page) {
   const keyword = SEEDED_FILES.CTA8280F_FT.slice(0, 12)
   const select = page.locator('.dash-file-select')
+  const option = page.locator('.dp-file-select-dropdown .el-select-dropdown__item')
+    .filter({ hasText: keyword }).first()
   await select.click()
   await select.locator('input').fill(keyword)
-  await page.locator('.dp-file-select-dropdown .el-select-dropdown__item')
-    .filter({ hasText: keyword }).first().click()
-  await expect(async () => { await firstCpkRow(page) }).toPass({ timeout: 30_000 })
+
+  const sameFileAlreadySelected = (await selectedFileName(page)).includes(keyword)
+  const responseArrived = sameFileAlreadySelected
+    ? Promise.resolve(null)
+    : page.waitForResponse(
+        (r) => SUMMARY_RE.test(r.url()) && r.request().method() === 'GET' && r.status() === 200,
+        { timeout: 20_000 },
+      )
+  await option.click()
+  const resp = await responseArrived
+
+  if (!resp) {
+    await expect(async () => { await firstCpkRow(page) }).toPass({ timeout: 30_000 })
+    return
+  }
+
+  const items = ((await resp.json())?.test_item_overview ?? []) as
+    Array<{ name: string; cpk: number | null }>
+  expect(items.length, '/summary/ 响应必须带 test_item_overview（形状变了别继续自欺）')
+    .toBeGreaterThan(0)
+  const responseNames = new Set(items.map((i) => i.name))
+  const responseCpkKeys = new Set(
+    items.filter((i) => typeof i.cpk === 'number').map((i) => `${i.name}|${i.cpk!.toFixed(2)}`),
+  )
+
+  await expect(async () => {
+    const shown = await firstCpkRow(page)
+    if (!responseCpkKeys.has(`${shown.name}|${shown.cpk.toFixed(2)}`)) {
+      throw new Error(`首个带 CPK 的行 ${shown.name}=${shown.row} 不在这份响应里（总览还是上一个文件）`)
+    }
+    const names = await page.locator('.overview-table .cell-param').allInnerTexts()
+    if (names.length === 0 || names.some((n) => !responseNames.has(n.trim()))) {
+      throw new Error(`渲染了 ${names.length} 行，但不是这份响应的行子集`)
+    }
+  }).toPass({ timeout: 30_000 })
 }
 
 /** 进仪表板 → 选文件 → 返回首个可判定行（reload 后必须再来一次：选中文件会被重置）。 */
