@@ -25,6 +25,18 @@
   的退出码是 `tail` 的，于是「exit 0」与「FAILED (failures=1)」出自同一条命令）。
   affected 门禁把每档结果打成 `档: <name> ok|FAIL|SKIP|ABORTED` + 末行 `RESULT:`，
   故意放最后 —— 任何 `tail -N` 的窗口都盖不住它。非要读退出码就 `| tee` 或 `set -o pipefail`。
+- **CI 侧同一个口径：判绿取 run/job 的 `conclusion`，不取 `gh run watch` 末尾的 `X` 行**（2026-10-25 实测）。
+  `watch` 结尾会把 problem matcher 抓到的每条 `::error::` 注解打成一个两行块
+  （第一行 `X <消息>`，第二行 `<job 名>: <文件路径>#<行号>`），
+  而**后端用例里有故意抛的模拟异常**，它们在通过的用例里照样生成注解：
+  `apps/jobs/tests_jobs.py:489` 让 `os.makedirs` 抛 `OSError('read-only filesystem')`
+  （那条断言的是「进度写不进去也不能让导出失败」）、`test/backend/test_sftp_guards.py:167`
+  抛 `OSError('boom')`（批量下载里坏掉那一个）。这两处所在的那轮 run `40175066760`
+  真实结论是 `conclusion=success`、两个 job 全绿 —— 看着却像红。
+  取法只认结论：`gh run view <id> --json status,conclusion,jobs --jq '.jobs[] | "\(.name): \(.conclusion)"'`。
+  **分辨真假**：注解指的那行如果是 `raise`（模拟外部失效）就是噪音，如果是断言失败/traceback 终点才算红。
+  ⚠ 这坑还有第二层：`gh run watch … | tail -N` 的退出码是 `tail` 的，上面那条 `$?` 口径在这里原样复现，
+  于是「打完 `X` 又退 0」= 两个假信号叠成一次误判，别拿它当结论。
 - **每一档都会执行**：`planStages()` 只由改动集决定，签名里没有退出码，所以一档红改不了
   后面跑什么（旧写法 `code ||= runPool('')` 在 code 已非零时连右值都不求值，后端一红
   整条 T3 根本没启动，日志只剩一个非零码，读起来像「跑到浏览器那档才失败」）。
