@@ -5916,6 +5916,8 @@ Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `roo
 要不要整条撤掉；`test_data_gc.py` 要不要挂自动触发；要不要给 `scripts/*.py` 开 affected 放行类目；
 夜跑 cron 重启；依赖批 2/3/4（Electron 45 等大版本）。
 （原列的「仪表板切文件时旧行不消失、无加载指示」**已按用户指令于 2026-10-25 实施**，见上节。）
+> ⚠ 这一串是那一轮的原文，**以文末两节为准**（B 档九条已逐条改成今日实测 + 坐标）。
+> 这里唯一措辞过期的一项是「夜跑 cron 重启」—— 本机两个注册处都空，动作是**从零新建**，不是重启（见 C2 第 5 条）。
 
 ## 其它未完成汇总（2026-10-25 晨，五笔已 push 到 `origin/master=34494ad` 之后盘点）
 
@@ -5961,18 +5963,59 @@ Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `roo
 5. **真机（Linux）四条**：§1.2 字体自检、§7 第 6 条 SIGTERM 路径、一次批量图表导出看中文、
    Electron 客户端把后端地址填成服务器再走登录（D1 通路）。缺的是那台机器。
 
-### B. 要你拍板的（原文见「留给拍板」，此处只补代价）
+### B. 要你拍板的（9 条）—— 2026-10-25 逐条现跑，每条后面是**当前状态与坐标**，不是转抄
 
-- **B 后端载荷设计稿**：测量已把它顶到下一刀首位（20 人档提交跳中位 1.7s vs 提交本身 12–48ms）。
-- **内存治理批 2（准入）/ 批 3（每-worker 硬上限）/ 崩池本身**：批 1 已落地且被 2026-10-24 全量池覆盖。
-- **Electron 日志轮转参数**（分级+UTF-8 本轮已修 `c30fed7`，轮转与 `root`/`apps` 挂 stdout 仍未定）。
-- **文件对比那两个 92px 控件是否加宽**（内部实测 30px，宽度判据已常驻，改不改是审美+版式）。
-- **`open-file-dialog` 无调用方通道要不要整条撤**。
-- **`test_data_gc.py` 要不要挂自动触发**（脚本默认 dry-run，加不加定时是运维决定）。
-- **`scripts/*.py` 要不要进 affected 放行类目**。
-- **夜跑 cron 重启**、**依赖批 2/3/4**（Electron 45 / Pillow 13 / Playwright patch）。
-- 部署侧两件旧等项：**无 TLS 的安全姿态**、**自助找回密码入口**；以及 P4/S4 那三个
-  （进程模型、媒体内容哈希共享、「导出中心」页面补不补）。
+1. **B 后端载荷设计稿** —— **仍是下一刀首位，缺的是设计稿不是测量**。
+   `docs/reference/perf-baseline-2026-10-24-dual-profile.md:58-73`：提交跳无并发稳态 **12–48ms**
+   （浏览器档中位 19.5 / 方案 A 档 36），20 人并发稳态**中位 1698 / 1657ms**、首跳 3486 / 3750ms。
+   两档中位几乎相同 ⇒ 慢的不是提交代码，是**同进程里 20 人争抢同一个 GIL 与同一把写锁**；
+   该文件 §2 已写明「进程形态不是当前矛盾」⇒ 别拿这一刀去换进程形态。
+2. **内存治理批 2（准入）/ 批 3（每-worker 硬上限）/ 崩池本身** —— 三条**至今零代码**：
+   `grep -nE "acquire|admit|per_worker|硬上限" apps/common/memory.py` **零命中**；正文那两句（`:5361`、`:5639`）
+   原样有效。批 1 已落地且被 2026-10-24 全量池覆盖 ✓，所以这三条是在**批 1 之上**再拍，不是重来。
+3. **Electron 日志轮转 + `root`/`apps` 挂 stdout** —— **轮转仍未动**：落点是两处裸追加写
+   `electron/main.ts:94`（`fs.appendFileSync(LOG_FILE, …)`）与 `electron/backend.ts:71`，
+   整个 `electron/` 目录 `grep -nE "rotat|backupCount|maxBytes"` **零命中** ⇒ 日志只增不删。
+   分级+UTF-8 那半确实已修（`c30fed7`）。份数/尺寸/天数**一个都没定过**，stdout 那问也没定。
+4. **文件对比那两个 92px 控件加不加宽** —— 声明宽在
+   `frontend/src/pages/data/components/correlation/FileCorrelationControls.vue:30`（`style="width: 92px"`），
+   判据常驻在 `frontend/e2e/data/file-correlation.spec.ts:68-78`：它只断**外层 ≥90**、注释 `:73` 明写
+   「加宽属视觉取向，**待拍板**，本用例不替它决定」⇒ 现状不会被任何测试推着走，「内部实测 30px」仍成立。
+5. **`open-file-dialog` 要不要整条撤** —— 仍是**三件在、消费方 0**：handler `electron/ipc-handlers.ts:59-78`、
+   bridge `electron/preload.ts:45-46`、类型 `frontend/src/electron.d.ts:41`；
+   `git grep -nE "openFileDialog|open-file-dialog" -- frontend/src` 除那份 `.d.ts` 声明外没有一处调用。
+   权重画图那支明确选了不走它（`docs/superpowers/specs/2026-10-19-weight-plot-desktop-design.md:146`：
+   只回路径字符串）。**撤的话三处一起撤**，handler 里那份扩展名清单还挡着「后端不收的格式」那条回归。
+6. **`test_data_gc.py` 挂不挂自动触发** —— 仍是**纯手动**：`git grep -n test_data_gc` 的命中面是
+   脚本自身 + **一份 T1 判据**（`test/backend/test_test_data_gc.py`，用 `importlib` 直接加载脚本文件，
+   在 `manage.py test` 里跑 ⇒ 它进 CI 账）+ 四处文档（`docs/reference/testing-gates.md:73`、
+   本文件 `:509`、`:5667`、`:5700`）——**没有任何 cron / automation / 池启动引用它**。
+   当初「不挂」的理由还挂在 `:5700`（池启动时清孤儿会撞上在跑的轮）。所以这条拍的是「加调度」这一个动作，
+   脚本本身已有判据，不用担心它没人测。
+7. **`scripts/*.py` 进不进 affected 放行类目** —— **具名件已逐条放行、通配仍未开**：
+   `scripts/affected-rules.mjs:106-132` 是按文件的规则（`icon-lib.cjs`、`icon-audit.cjs`、`gen-icon.ico.js`、
+   `generate_icon.py` 等），所以 `scripts/test_data_gc.py` 这类**没点名的**仍按 §3 兜底升全量
+   （2026-10-24 那条 lessons 就是为它多跑了一轮 9min 池）。
+8. **夜跑** + **依赖批 2/3/4** —— 夜跑那句「重启」**措辞已过期**，本机两个注册处都空（见文末 C2 第 5 条），
+   动作是**从零新建一条 automation**。依赖三条**都还没动**，现版本实测：
+   `electron ^33.4.11`、`electron-builder ^25.1.0`、`@playwright/test ^1.60.0`、`Pillow==12.2.0`
+   （⇒ 与目标之间 Electron 差 **12 个大版本**，是这三批里最重的一刀）。
+9. 部署侧 —— 逐条核过，**其中一条已经拍过了**：
+   * **无 TLS 的内网明文姿态**：仍开放，正文在 `docs/reference/server-deployment.md:218`
+     （「没有 nginx 就没有 TLS，口令与 JWT 在局域网上是明文」），`:268` 仍列待拍板。
+   * **自助找回密码入口**：仍没有。`git grep` 只命中管理员动作
+     `frontend/src/pages/admin/UserManagement.vue:75/235`（管理员重置**别人**的密码），无自助通路。
+   * ~~进程模型~~ —— **这条不该再在 B 档**：2026-10-23 已拍 **方案 A（systemd 跑 `standalone.py`）**并入库，
+     unit 文件 `deploy/lqdp.service` 与 `deploy/lqdp-backup.service` 都在 `git ls-files` 里。
+     真正还开着的是**方案 B 的两件先决实验**（`:5548`：gunicorn 作父进程时 spawn 会不会重跑 `__main__`、
+     `config/wsgi.py` 的信号处理器），那是「要不要换 B」的前置，不是「A 还没定」。
+   * **媒体内容哈希共享（P4-3）**：仍开放，且与既有不变量正面冲突 ——
+     `config/settings/server.py:138` 与 `standalone.py:125` 都是 `whitenoise.…CompressedStaticFilesStorage`
+     （**非 manifest**，注释 `standalone.py:120-123` 就写着为什么不用 manifest）；
+     改成内容寻址会撞上「move + SKIP 挡不住」那套存储语义（`:4952`）。
+   * **「导出中心」页面**：仍不存在 —— 证据是代码自己的注释
+     `frontend/src/composables/jobPolling.ts:101`「`GET /api/v1/jobs/` 已经有了，但前端没有任何页面读它」。
+     补它才能把 gave-up 文案改回「稍后在导出中心查看」；不补就维持现在这句只讲事实的文案。
 
 ## 2026-10-25 午后复核：上一节漏了六条，另有两条已经过期（C1 是纠正，C2 是补档）
 
