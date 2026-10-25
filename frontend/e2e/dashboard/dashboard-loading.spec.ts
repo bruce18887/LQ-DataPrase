@@ -69,6 +69,8 @@ test.describe('@p1 切文件时加载态覆盖数据区', { tag: ['@p1', '@dashb
     //    所以同一条件在两个主题成立；哪天有人把遮罩调成半透明到看不见，这里会红。
     for (const theme of ['night', 'light']) {
       await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme)
+      // 前提守卫：主题真的切过去了才谈"两个主题都判"，否则这条循环量两遍的是同一个主题。
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
       const read = await page.locator(MASK).first().evaluate((el) => {
         const parts = getComputedStyle(el).backgroundColor.match(/[\d.]+/g) ?? []
         return { color: getComputedStyle(el).backgroundColor, alpha: parts.length >= 4 ? Number(parts[3]) : 0 }
@@ -94,6 +96,87 @@ test.describe('@p1 切文件时加载态覆盖数据区', { tag: ['@p1', '@dashb
     }).toPass({ timeout: 30_000 })
     await expect(page.locator(MASK)).toHaveCount(0)
 
+    await page.unroute(SUMMARY_ROUTE)
+  })
+
+  /**
+   * 夜间模式下**遮罩与 spinner 的落点**回归。
+   *
+   * 口径说明：这条不是像素基线。本仓库明确不用 `toHaveScreenshot`
+   * （理由原文在 `e2e/global/type-snapshot.spec.ts:8-12`：桌面端字体 hinting / 滚动条 /
+   * 子像素渲染逐台不同，基线长期飘），走的是同一套「计算值 + 几何」判据。
+   *
+   * 钉的是这次产品改动里最容易无声退化的一件事：`.dash-data :deep(.el-loading-spinner)`
+   * 的 `top: 120px`。EP 默认把 spinner 放在容器垂直 50% 处，而这块数据区两三千 px 高 ⇒
+   * 修前用户只看到"整屏变暗"、看不到任何转圈。那条 CSS 一旦被删，页面**仍是绿的、遮罩仍在**，
+   * 所以必须用几何判据把它按住：
+   * ① spinner 落在首屏内（`window.scrollTo(0,0)` 后 bottom ≤ 视口高）；
+   * ② 恒等式「距数据区顶 × 2 < 数据区高」——处在容器中点时左边 == 右边，必然不过；
+   * ③ night 的遮罩底色必须是**深色**半透明（走 `element-plus-theme.css:454` 的
+   *    rgba(26,26,46,.9)），亮度过半说明夜间规则没生效、等于用白纱糊黑底。
+   * ④ 遮罩整块盖住总览表（覆盖关系，不是只盖住首屏）。
+   */
+  test('夜间模式：遮罩压住数据区、spinner 落在首屏内', async ({ page }) => {
+    test.slow()
+    await page.addInitScript(() => localStorage.setItem('theme', 'night'))
+    await gotoApp(page, '/dashboard')
+    await expect(async () => {
+      expect(await shownItemCount(page), '夜模式首屏应已渲染总览').toBeGreaterThan(0)
+    }).toPass({ timeout: 30_000 })
+    // 前提守卫：主题没切成就无从谈"夜间"，这里先出声
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'night')
+    expect(await page.locator('.dash-file-select').innerText(),
+      '默认文件已是目标 ⇒ 这次切换不发请求').not.toContain(keyword)
+
+    await page.route(SUMMARY_ROUTE, async (route) => {
+      await new Promise((r) => setTimeout(r, HOLD_MS))
+      await route.continue()
+    })
+    const select = page.locator('.dash-file-select')
+    await select.click()
+    await select.locator('input').fill(keyword)
+    await page.locator('.dp-file-select-dropdown .el-select-dropdown__item')
+      .filter({ hasText: keyword }).first().click()
+
+    const mask = page.locator(MASK)
+    await expect(mask, '夜模式换文件后应出现覆盖数据区的遮罩').toBeVisible({ timeout: 5_000 })
+    await page.evaluate(() => window.scrollTo(0, 0))
+
+    const maskBox = await mask.first().boundingBox()
+    const spinner = mask.locator('.el-loading-spinner')
+    const spinnerBox = await spinner.boundingBox()
+    const vp = page.viewportSize()
+    expect(maskBox, '遮罩量不到盒子').not.toBeNull()
+    expect(spinnerBox, 'spinner 量不到盒子（被 CSS 移走了？）').not.toBeNull()
+    expect(vp, '用例需要固定视口').not.toBeNull()
+
+    // ① 首屏内看得见（容器 50% 的位置在这里必然出界）
+    expect(spinnerBox!.y + spinnerBox!.height, 'spinner 掉到首屏之外，用户看不到"在加载"')
+      .toBeLessThanOrEqual(vp!.height)
+    // ② 恒等式：距数据区顶的两倍仍要小于整区高度 ⇒ 严格高于中点
+    const fromTop = spinnerBox!.y - maskBox!.y
+    expect(fromTop, 'spinner 贴到容器顶了（负偏移）').toBeGreaterThanOrEqual(40)
+    expect(fromTop * 2, `spinner 在容器 ${Math.round((fromTop / maskBox!.height) * 100)}% 处，等于回了 EP 默认中点`)
+      .toBeLessThan(maskBox!.height)
+    // ③ 夜模式遮罩底色要够暗
+    const bg = await mask.first().evaluate((el) => getComputedStyle(el).backgroundColor)
+    const nums = (bg.match(/[\d.]+/g) ?? []).map(Number)
+    expect(nums.length, `夜模式遮罩背景解析失败：${bg}`).toBeGreaterThanOrEqual(4)
+    const luma = 0.299 * nums[0] + 0.587 * nums[1] + 0.114 * nums[2]
+    expect(luma, `夜模式遮罩背景=${bg}，亮度 ${luma.toFixed(0)} 偏白（夜间规则没生效？）`).toBeLessThan(128)
+    expect(nums[3], `夜模式遮罩背景=${bg} 太透明`).toBeGreaterThanOrEqual(0.5)
+    // ④ 覆盖关系：总览表整块在遮罩之下
+    const table = page.locator('.dash-data .overview-table')
+    const tableBox = await table.boundingBox()
+    expect(tableBox, '总览表应仍在 DOM 里').not.toBeNull()
+    expect(maskBox!.y, '遮罩顶边没盖住总览表').toBeLessThanOrEqual(tableBox!.y)
+    expect(maskBox!.y + maskBox!.height, '遮罩底边没盖住总览表')
+      .toBeGreaterThanOrEqual(tableBox!.y + tableBox!.height)
+
+    await expect(async () => {
+      const n = await shownItemCount(page)
+      expect(n).toBeGreaterThan(0)
+    }).toPass({ timeout: 30_000 })
     await page.unroute(SUMMARY_ROUTE)
   })
 })
