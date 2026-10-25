@@ -5827,9 +5827,37 @@ README 与 pyproject 逐字相等 + `.python-version`（CI 实际读的）不低
   首次红 3 条 = 基线 4 条**减去 `cpk-thresholds:92`**、新增 0；池判级 `真红 0 · 负载抖动 2`
   （仍是 `settings/chart-renderer` 与 `settings/settings` 那两条已知抖动）。
 
-**顺带查出、属产品侧的可见行为（等你拍，本批没动）**：切文件时仪表板继续显示**上一个文件**的表格、
-且没有任何加载指示（根因即上面第 1 条的 v-if 链形状）。要改就得让加载态覆盖数据面板
-（或切文件先清 `data`），是可见行为变更 + 双主题验收，不属测试整改。
+**顺带查出、已按用户指令改掉的产品侧行为（2026-10-25 同日）**：切文件时仪表板继续显示**上一个文件**的表格、
+且没有任何有效加载指示。修法见下一节「产品侧：仪表板的加载态改成覆盖数据区」。
+
+## 产品侧：仪表板加载态改成**覆盖数据区**（不再另起一条兄弟占位）
+
+用户指令「顺便把产品侧的逻辑也改掉」。改动只在 `frontend/src/pages/dashboard/DashboardPage.vue`：
+
+- 兄弟占位那条从 `v-else-if="loading"` 收紧成 `v-else-if="loading && !data"`（首屏还没有数据时仍是原来的空占位）；
+- 数据面板的容器由 `<template v-if="data">` 改成 `<div v-if="data" v-loading="loading" class="dash-data">`
+  ⇒ 换文件时旧内容被遮罩压住，**并且遮罩顺带挡住指针**：修前 `.overview-table` 的 `@row-click`
+  在加载期间仍可点，会用**新** fileId 配**旧**参数名跳分析页（这是比"看着别扭"更硬的危害）。
+- 配套一条 CSS：`.dash-data :deep(.el-loading-spinner) { top: 120px }`。EP 默认把 spinner 放在容器
+  垂直 50% 处，而这块数据区可达两三千 px 高 ⇒ 视口里根本看不到 spinner，只剩"变暗"。
+- 双主题：night 的 `.el-loading-mask` 覆盖早已存在（`element-plus-theme.css:454`，rgba(26,26,46,.9)），
+  light 走 EP 默认 `--el-mask-color`（rgba(255,255,255,.9)），故本次不改色板；新用例按 alpha ≥ 0.5
+  的形状判两个主题，而不是钉某个颜色。
+- 结构安全性：`.dashboard-page` 是块级流（无 flex/grid 父子选择器依赖），包一层 div 不改变版式；
+  EP 的 loading 指令会给宿主补 `el-loading-parent--relative`，无需手写 `position`。
+
+**新判据**（`frontend/e2e/dashboard/dashboard-loading.spec.ts`，@p1）：不赌时序——用 `page.route`
+把 `/summary/` 挂 3s（先例 `settings/chart-memory.spec.ts:277`），于是"加载中"必然出现。三条缺一不可：
+① 遮罩在 `.dash-data` **里面**（挂在兄弟占位上就抓不到 ⇒ 修前必红，因为 `.dash-data` 这个类修前不存在）；
+② 命中测试：旧行中心点上真正收到指针事件的是遮罩（同时证明"旧行确实还在 DOM 里被盖着"，
+   本用例测的是盖住而不是清空）；③ 两个主题下遮罩 alpha ≥ 0.5。
+外加对照组：空闲态 `.dash-data` 内遮罩数 = 0（防"恒有遮罩"蒙过 ①）。
+
+**验证**：`npm run build`（vue-tsc -b + vite）✓；单文件独占该 spec 绿；
+`npm run test:e2e:affected` → `RESULT: PASS · 计划 4 档全部执行`
+（`e2e:dashboard+settings` 全绿，附带 P0 13 例 = 全部 P0 用例减去 dashboard 档已覆盖的那 1 条）。
+修前的形状不是靠"改坏源码再跑"证的，用的是同日探针的现场读数（选择框已是 DA35、表格仍是 36 行旧数据、
+页面上没有遮罩）——`docs/tasks/lessons.md` 2026-10-25 那条。
 
 **同型风险已普查（不用开新批）**：e2e 里「选完文件再等」的站点 21 处，分析页那族
 `AnalysisTabLayout.vue:24` 有真 `v-loading` 遮罩可等，`dashboard.spec.ts:483` 的等待谓词是
@@ -5870,8 +5898,8 @@ B 后端载荷的设计稿；内存治理批 2（准入）与批 3（每-worker 
 Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `root`/`apps` 要不要挂 stdout；
 文件对比那两个控件的 `92px` 是否加宽（内部实测 30px）；`open-file-dialog` 这条无调用方的通道
 要不要整条撤掉；`test_data_gc.py` 要不要挂自动触发；要不要给 `scripts/*.py` 开 affected 放行类目；
-夜跑 cron 重启；依赖批 2/3/4（Electron 45 等大版本）；
-**仪表板切文件时旧行不消失、无加载指示**要不要改（`2026-10-25` 定性见上，属可见行为 + 双主题验收）。
+夜跑 cron 重启；依赖批 2/3/4（Electron 45 等大版本）。
+（原列的「仪表板切文件时旧行不消失、无加载指示」**已按用户指令于 2026-10-25 实施**，见上节。）
 
 ## 其它未完成汇总（2026-10-25 晨，五笔已 push 到 `origin/master=34494ad` 之后盘点）
 

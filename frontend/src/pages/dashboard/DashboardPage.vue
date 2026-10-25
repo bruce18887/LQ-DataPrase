@@ -19,14 +19,17 @@
     <!-- 空态 / 加载态 / 错误态 -->
     <el-empty v-if="!filesLoading && files.length === 0" description="暂无数据文件，请先在数据管理页面上传 ATE 数据文件" />
     <div v-else-if="filesLoading && !data" v-loading="true" element-loading-text="加载文件列表..." style="min-height:200px" />
-    <div v-else-if="loading" v-loading="loading" element-loading-text="加载仪表板数据..." style="min-height:200px" />
+    <div v-else-if="loading && !data" v-loading="loading" element-loading-text="加载仪表板数据..." style="min-height:200px" />
     <el-empty v-else-if="error && !data" description="未选择数据文件或该文件暂无数据" />
 
     <!-- 部分错误提示 -->
     <el-alert v-if="error && data" type="warning" title="部分数据加载失败，已显示缓存内容" :closable="false" show-icon style="margin-bottom: 16px" />
 
     <!-- ==================== 数据态 ==================== -->
-    <template v-if="data">
+    <!-- 加载态**覆盖**在数据区之上，而不是另起一条兄弟占位（本行之前是兄弟占位的形状）：
+         切文件时 `data` 还挂着上一个文件的结果，兄弟占位等于「一个转圈的空条 + 下面整屏旧数字」，
+         而且旧行仍可点 ⇒ `goToAnalysis` 会拿新 fileId 配旧参数名。遮罩顺带挡住指针。 -->
+    <div v-if="data" v-loading="loading" element-loading-text="正在加载所选文件的数据..." class="dash-data">
       <!-- 总览条（信息记录中枢，取代 KPI 大卡） -->
       <OverviewStrip
         :metrics="metrics"
@@ -72,7 +75,7 @@
         :file-id="data?.file_id || null"
         :update-time="updateTime"
       />
-    </template>
+    </div>
       </el-tab-pane>
 
       <el-tab-pane label="📦 批次良率" name="batch">
@@ -270,6 +273,13 @@ onActivated(async () => {
   padding: 20px 24px 28px;
   background: var(--bg);
   min-height: 100%;
+}
+
+/* 遮罩盖的是整块数据区（可达两三千 px 高），EP 默认把 spinner 放在容器 50% 处 ⇒ 用户视口里
+   根本看不到它。钉进首屏，「正在加载所选文件」这件事才真的可见（遮罩本身只有变暗）。 */
+.dash-data :deep(.el-loading-spinner) {
+  top: 120px;
+  margin-top: 0;
 }
 
 /* ----- Tabs ----- */
