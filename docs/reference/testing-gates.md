@@ -243,14 +243,25 @@ CI 跑的是**干净检出**，本机绿不代表它绿。这三条都是「本�
    服务端只剩 `refs/heads/master` 一个引用，没有分支/PR 钉住它，所以 GC 后会自动消失；
    在此之前按「已泄露」处理，不要按「已修复」处理。要立刻抹除得提 GitHub 支持工单。
 
-## 7. 未闭环（截至 2026-10-16）
+## 7. 未闭环（2026-10-16 记，2026-10-25 在本机逐条复核）
 
-- **夜跑 cron 已注册但 `enabled=false`（manual pause）**，且 automation 的 prompt 仍描述 slot 池之前的
-  串行旧形态（「CI=1、workers=1、整轮约 25 分钟」）。历史上 6 条记录 = 3 SKIPPED / 2 FAILED / 1 VOID，
-  **没有一次成功真跑** ⇒ 兜底层实际不存在，全量都落在开发会话里手动跑。
-  重启前要先处置：`e2e_nightly.mjs` 的工作区必须干净这条门会被别的会话留下的一项删除永久挡死。
+- **夜跑兜底层不存在** —— 但形态和当年记的不同：**这台机器上根本没有这条 automation**。
+  `schtasks /query /fo LIST /v` 查不到 nightly / e2e 相关任务名，`qoder_cron list` 返回**空数组**。
+  2026-10-16 写的「已注册但 `enabled=false`（manual pause）、prompt 仍是 slot 池之前的串行旧形态」
+  是**另一台机器 / 另一份会话配置**的状态 ⇒ 别按「重启」估工，要按「**从零新建**」估。
+  两条前置今天核过：① 那个「工作区必须干净」的门**有逃生口** —— `scripts/e2e_nightly.mjs:8` 就写着
+  `--allow-dirty`，新建 prompt 里得显式带上（`2026-10-15-0346` 那轮正是被它 SKIPPED 的：「工作区有 1 项
+  未提交改动 —— 全量结果会算到本不归属它的会话头上」）；② 记录是**只留最近 7 轮**的滚动窗口
+  （`tasks/e2e-nightly/latest.json` 现为 7 条，`LATEST.md` 同表）＝
+  3 SKIPPED / 2 FAILED / 1 VOID / **1 ⚠ DEGRADED PASSED**（`2026-10-17-0330`：8.6min / 389 例 /
+  flaky 6 / 4-slot 效率 2.24）⇒「没有一次成功真跑」这句已过期，但**结论不变**：
+  唯一跑成的那次是**降级通过**，且此后再没跑过。
 - 32 例（分诊的 8%）无处可落：缺「ECharts option 层断言 / 前端出站请求体 / 组件内联逻辑」这一档，
   而当初明确选了「不做组件/DOM 层」，这个矛盾待重新拍板。
-- 试点簇 #2 `custom-limit-cpk`、#3 `settings/cpk-thresholds` 未做。
-- 套件里仍有点同一个图表开关的盲点写法（已收敛 13 处，其余目前绿所以没动），
+- ~~试点簇 #2 `custom-limit-cpk`、#3 `settings/cpk-thresholds` 未做~~ —— **2026-10-25 结案：两件都在**。
+  `frontend/e2e/analysis/custom-limit-cpk.spec.ts`（落在 analysis，不在 settings）与
+  `frontend/e2e/settings/cpk-thresholds.spec.ts`（223 行）。后者 `:109` 那条今天改成「等这个文件自己的响应」，
+  定性与验证见 `docs/tasks/todo.md` 文末「已修：`settings/cpk-thresholds.spec.ts:109`」一节。
+- 套件里仍有点同一个图表开关的盲点写法（已收敛 13 处，其余目前绿所以没动；
+  **2026-10-25 逐文件复量仍是 22 处未收敛**），
   清单见 `docs/tasks/todo.md`「遗留地雷清单」。
