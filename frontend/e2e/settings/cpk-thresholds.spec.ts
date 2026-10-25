@@ -72,10 +72,11 @@ function rowByName(page: Page, name: string) {
 /** 选中带限值参数的种子文件，并等到总览**真属于这个文件**。
  *
  * 为什么不能只等「表里出现带 CPK 的行」（原写法，2026-10-25 定性为这条红的根因）：
- * `DashboardPage.vue:29` 的数据面板是独立的 `v-if="data"`，与 :22 那条加载态
- * `v-else-if="loading"` **不在同一条 v-if 链里** ⇒ 换文件时旧行整段留在 DOM 上，
- * 直到这个文件自己的 `/summary/` 回来才替换；而 `waitLoadingGone` 找的是
- * `.el-loading-mask`，这种「有数据、在后台刷新」的形状**根本没有遮罩**，它是个空等。
+ * 数据面板是独立的 `v-if="data"`，换文件时 `data` 还挂着上一个文件的结果 ⇒ 旧行整段留在 DOM 上，
+ * 直到这个文件自己的 `/summary/` 回来才替换（当天连遮罩都没有：加载态是另一条 `v-else-if` 兄弟占位。
+ * 同日产品侧已改成**遮罩覆盖数据区**，见 `DashboardPage.vue` 的 `.dash-data` —— 但这条等待
+ * **不能因此改回等遮罩**：`waitLoadingGone` 找 `.el-loading-mask` 且 `.catch(() => {})` 吞自己的
+ * 超时（`helpers/charts.ts:64-68`）= 恒过，而缓存命中的 `/summary/` 可以在它两次轮询之间回来。
  * 于是旧谓词被**上一个文件的行**满足：探针实测（`--slots=1` 独占跑）选择框已经是
  * `DA35_BPC50338_…csv`，表格却还是自动选中的那个 36 项文件、首行 `CONT_GATE`；
  * 同一次运行的 retry #1 反过来读到目标文件的 165 项 ⇒ base 与 moved 读到不同文件，
