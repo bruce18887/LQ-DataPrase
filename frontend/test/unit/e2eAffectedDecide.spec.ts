@@ -18,12 +18,15 @@
  *
  * 跑：npm run test:unit
  */
+import { readFileSync, readdirSync } from 'node:fs'
+
 import { describe, expect, it } from 'vitest'
 
 import {
   GLOBAL,
   MAX_MODULES_BEFORE_FULL,
   MODULES,
+  P0_SPEC_FILES,
   backendLabels,
   decide,
   executePlan,
@@ -33,6 +36,35 @@ import {
   planStages,
   poolCmd,
 } from '../../../scripts/affected-rules.mjs'
+
+/**
+ * 磁盘上「代码行里出现 @p0」的 spec 文件（相对 frontend/，已排序）。
+ *
+ * 只认代码行：整行注释里提一句 `@p0` 不算用例标签 —— 若把它算进来，这份文件会被塞进
+ * `--project=P0` 而它没有 P0 用例，正好复现要修的那个空桶假红。
+ */
+function p0SpecFilesOnDisk(): string[] {
+  const root = new URL('../../e2e/', import.meta.url)
+  const found: string[] = []
+  const walk = (dir: URL, base: string) => {
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      const rel = base ? `${base}/${ent.name}` : ent.name
+      if (ent.isDirectory()) walk(new URL(`${ent.name}/`, dir), rel)
+      else if (ent.name.endsWith('.spec.ts')) {
+        const code = readFileSync(new URL(ent.name, dir), 'utf8')
+          .split('\n')
+          .filter((l) => {
+            const t = l.trim()
+            return !(t.startsWith('//') || t.startsWith('*') || t.startsWith('/*'))
+          })
+          .join('\n')
+        if (code.includes('@p0')) found.push(`e2e/${rel}`)
+      }
+    }
+  }
+  walk(root, '')
+  return found.sort()
+}
 
 /** 判定结果的速记：既不升级全量、也没选中 e2e 模块（可能只落 vitest 或纯 note） */
 function staysFast(files: string[]) {
@@ -222,13 +254,53 @@ describe('编排内核：一档红不得吃掉后面的档', () => {
     expect(pools[0].files).toBe('')
   })
 
-  it('模块档与附带 P0 互不重叠，且合起来恰好覆盖全部 e2e 模块', () => {
+  it('附带 P0 只带真含 @p0 的文件：按模块目录塞会出「No tests found」的空桶判红', () => {
+    // sftp 模块里一个 @p0 用例都没有 ⇒ 附带档应当是那 6 个文件本身，而不是 11 个模块目录
     const pools = plan(['frontend/src/pages/sftp/SearchPage.vue']).filter((s) => s.kind === 'pool')
     expect(pools.map((s) => s.name)).toEqual(['e2e:sftp', 'e2e:附带P0'])
     expect(pools[1].pw).toBe('--project=P0')
+    expect((pools[1].files ?? '').split(' ')).toEqual(P0_SPEC_FILES)
     const dirs = pools.flatMap((s) => (s.files ?? '').split(' ').filter(Boolean))
     expect(new Set(dirs).size, dirs.join(',')).toBe(dirs.length)
-    expect(dirs.length).toBe(MODULES.length)
+  })
+
+  it('改动模块自己带 @p0 时该文件只归模块档，P0 档不得重列；不在 MODULES 里的 smoke 仍要覆盖到', () => {
+    // smoke 从来不是 MODULES 的成员 ⇒ 旧的「按模块目录塞」写法根本覆盖不到 e2e/smoke 的 P0 用例。
+    // 改成按文件塞之后它必须在场，否则这份常量清单就退化成了 MODULES 的影子。
+    expect(MODULES, 'smoke 不在模块目录清单里（本例的前提）').not.toContain('smoke')
+    const pools = plan(['frontend/src/pages/dashboard/DashboardPage.vue']).filter((s) => s.kind === 'pool')
+    expect(pools[0].files, '模块档按目录跑，含该目录的全部标签').toContain('e2e/dashboard')
+    const p0 = (pools[1].files ?? '').split(' ')
+    expect(p0).not.toContain('e2e/dashboard/dashboard.spec.ts')
+    expect(p0).toContain('e2e/smoke/pages.spec.ts')
+  })
+
+  it('未覆盖部分里没有 @p0 用例 ⇒ 显式跳档；绝不把空 files 交给池（空=全量档，会白跑整轮）', () => {
+    const stages = planStages({
+      decision: decide(['frontend/src/pages/sftp/SearchPage.vue']),
+      labels: [], pytest: true,
+      p0Files: ['e2e/sftp/sftp.spec.ts'],
+    })
+    const p0 = stages.filter((s) => s.name === 'e2e:附带P0')
+    expect(p0).toHaveLength(1)
+    expect(p0[0].kind).toBe('skip')
+    expect(p0[0].skipped).toContain('@p0')
+    expect(p0[0].files, '跳档不能带 files，否则 executePlan 会把它当全量池启动').toBeUndefined()
+  })
+
+  it('扫描器自己先得当用：注释里的 @p0 不算，tag 数组与标题里的算', () => {
+    expect(p0SpecFilesOnDisk().length, '磁盘扫描必须抓得到东西（否则这条判据在比一个空集合）')
+      .toBeGreaterThan(0)
+    const inComment = "// 这条原本按 @p0 跑\nconst a = 1\n"
+    const inTag = "test.describe('x', { tag: ['@p0'] }, () => {})\n"
+    expect(inComment.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n').includes('@p0'))
+      .toBe(false)
+    expect(inTag.includes('@p0')).toBe(true)
+  })
+
+  it('P0_SPEC_FILES 必须逐字等于磁盘上真带 @p0 的文件集合（改标签、新增 P0 用例时的哨兵）', () => {
+    const disk = p0SpecFilesOnDisk()
+    expect([...P0_SPEC_FILES].sort(), `常量与磁盘不符；磁盘上现在是 ${disk.join(', ')}`).toEqual(disk)
   })
 
   it('该跑的档跑不了 = 本轮没结论：无 pytest 判 FAIL（旧写法只 print 就退 0）', () => {
