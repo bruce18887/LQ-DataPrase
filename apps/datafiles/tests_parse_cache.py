@@ -6,11 +6,13 @@ DataFrame（实测 10 万行 × 826 列 ≈ 667MB）——几张大表同时驻�
 各解析一遍（单次解析实测约 4s）。
 """
 import os
+import re
 import shutil
 import tempfile
 import threading
 import time
 import types
+from pathlib import Path
 from unittest import mock
 
 import pandas as pd
@@ -67,6 +69,14 @@ class _CacheCaseBase(SimpleTestCase):
     def cached_parse(self, file_id=1, owner_id=1):
         return services._cached_parse(file_id, owner_id, 12345, self.path, 'CTA8290D')
 
+    def second_path(self):
+        """坐标化之后，**换 key 的唯一手段是换内容坐标**（路径/mtime/格式），
+        `file_id` 与 `owner_id` 都不再进键 —— 造第二只物理文件供需要两个 key 的用例使用。"""
+        fd, path = tempfile.mkstemp(suffix='.csv')
+        os.close(fd)
+        self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
+        return path
+
 
 class BytesLRUCacheTests(_CacheCaseBase):
     def test_second_request_for_same_file_is_not_reparsed(self):
@@ -79,6 +89,41 @@ class BytesLRUCacheTests(_CacheCaseBase):
         self.assertEqual(parser.calls, 1, f'解析被调用 {parser.calls} 次，应命中缓存')
         self.assertIs(second[0], first[0])
 
+    def test_two_owners_of_one_physical_file_share_one_entry(self):
+        """J1：键去 owner 化之后，同一路径的第二个调用方必须复用同一只帧。
+
+        旧代码在这里必然红（键含 owner_id ⇒ 两个 key ⇒ parser 解析两次），
+        所以这条先红后绿本身就是对照组。
+        """
+        frame = _frame()
+        parser = self.patch_parser(frame)
+
+        first = services._cached_parse(11, 1, 12345, self.path, 'CTA8290D')
+        second = services._cached_parse(22, 2, 12345, self.path, 'CTA8290D')
+
+        self.assertIs(first[0], second[0])
+        self.assertEqual(len(services._parse_cache), 1, '同一路径只该有一条缓存')
+        self.assertEqual(parser.calls, 1, f'实际解析 {parser.calls} 次')
+
+    def test_get_or_compute_without_store_if_stores_unconditionally(self):
+        """`store_if` 缺省（None）＝无条件存——钉住 spec §2.2「与今天逐字一致」那条承诺。
+
+        这条不走 `_cached_parse`，直接打 `get_or_compute`：今天「不传就照存」只是读代码
+        得到的担保，没有任何断言。用一只 `_parse_succeeded` 会判 False 的失败值来存，
+        这样一旦缺省分支被改成「默认套用成功判据」，条目数就会从 1 掉到 0、当场红。
+        """
+        cache = self.use_budget(services.PARSE_CACHE_BUDGET_BYTES)
+        failure = (None, None, 'CTA8290D')
+        self.assertFalse(services._parse_succeeded(failure), '前提：这是 store_if 会拒绝的值')
+
+        key = ('/tmp/unconditional.csv', 1, 'CTA8290D')
+        out = cache.get_or_compute(key, lambda: failure)
+
+        self.assertIs(out, failure)
+        self.assertEqual(len(cache), 1, '不传 store_if 时条目必须照存（无条件）')
+        self.assertIs(cache.get_or_compute(key, lambda: _frame())[0], None,
+                      '第二次必须命中第一条存下的值，而不是重新计算')
+
     def test_entries_evict_by_byte_budget_not_by_count(self):
         frame = _frame()
         one = services._frame_bytes(frame)
@@ -86,14 +131,14 @@ class BytesLRUCacheTests(_CacheCaseBase):
         self.use_budget(budget)
         parser = self.patch_parser(frame)
 
-        self.cached_parse(file_id=1)
-        self.cached_parse(file_id=2)   # 换 file_id → 新 key，必须挤掉旧的
+        self.cached_parse()
+        services._cached_parse(2, 2, 12345, self.second_path(), 'CTA8290D')
 
         cache = services._parse_cache
         self.assertLessEqual(cache.bytes_cached(), budget,
                              '缓存总量必须始终不超过预算')
         self.assertEqual(len(cache), 1)
-        self.cached_parse(file_id=1)   # 旧条目已被挤掉 → 重新解析
+        self.cached_parse()   # 旧条目已被挤掉 → 重新解析
         self.assertEqual(parser.calls, 3)
 
     def test_single_oversized_value_is_returned_but_not_cached(self):
@@ -137,6 +182,27 @@ class BytesLRUCacheTests(_CacheCaseBase):
 
         self.assertEqual(parser.calls, 1,
                          f'并发 miss 应单飞，实际解析 {parser.calls} 次')
+        self.assertIs(results['a'][0], results['b'][0])
+
+    def test_concurrent_miss_from_two_owners_parses_once(self):
+        """J3：跨 owner 的单飞才是这一刀的收益——20 人首开同一文件该只解析一次。"""
+        parser = self.patch_parser(_frame(), delay=0.3)
+        results = {}
+
+        def worker(name, file_id, owner_id):
+            results[name] = services._cached_parse(file_id, owner_id, 12345,
+                                                   self.path, 'CTA8290D')
+
+        t1 = threading.Thread(target=worker, args=('a', 11, 1))
+        t2 = threading.Thread(target=worker, args=('b', 22, 2))
+        t1.start()
+        time.sleep(0.05)
+        t2.start()
+        t1.join(timeout=10)
+        t2.join(timeout=10)
+
+        self.assertEqual(parser.calls, 1,
+                         f'两个 owner 并发 miss 应共用一次解析，实际 {parser.calls} 次')
         self.assertIs(results['a'][0], results['b'][0])
 
     def test_failed_parse_is_not_stuck_as_pending(self):
@@ -209,8 +275,8 @@ class BytesLRUCacheTests(_CacheCaseBase):
         frame = _frame()
         self.use_budget(services._frame_bytes(frame) * 10)
         self.patch_parser(frame)
-        self.cached_parse(file_id=1)
-        self.cached_parse(file_id=2)
+        self.cached_parse()
+        services._cached_parse(2, 2, 12345, self.second_path(), 'CTA8290D')
         self.assertEqual(len(services._parse_cache), 2)
         services._parse_cache.evict_to(0)
         self.assertEqual(len(services._parse_cache), 1,
@@ -225,8 +291,9 @@ class BytesLRUCacheTests(_CacheCaseBase):
         # （10×one 时 3 条连一半预算都不到，evict_to 无事可做）。
         self.use_budget(one * 4)
         self.patch_parser(frame)
-        for file_id in (1, 2, 3):
-            self.cached_parse(file_id=file_id)
+        paths = [self.path, self.second_path(), self.second_path()]
+        for idx, path in enumerate(paths):
+            services._cached_parse(idx + 1, 1, 12345, path, 'CTA8290D')
         before = services._parse_cache.bytes_cached()
         services.evict_parse_cache_to(0.5)
         self.assertLessEqual(services._parse_cache.bytes_cached(), before / 2)
@@ -378,3 +445,73 @@ class CacheBudgetWiringTests(SimpleTestCase):
             'entries', 'bytes', 'budget_bytes', 'in_flight',
             'hits', 'misses', 'evictions', 'clears',
         })
+
+
+class SharedFrameSafetyTests(SimpleTestCase):
+    """缓存帧跨请求共享 ⇒ 消费者要改它必须先 copy。这条扫描把口头约定钉住。
+
+    三个刻意的形状：
+    ① **只在含 `get_cached_parsed_file` 的函数块里找原地写**，且写之前出现过
+       `df = df.<method>(...)` 这种重新绑定（copy/astype/head…）就放行。朴素正则会在
+       `apps/analysis/views/file_correlation_views.py:169-170` 那处「先 copy 再加辅助列」的
+       **合规写法**上假红 —— 2026-10-26 预检实测就是这样，而假红的护栏最后没人看。
+    ② 按**载体并集**扫，且「某个载体读不到」直接判红：2026-10-23 那次常量搬家后单文件扫描
+       零命中、空集反而"相等"，就是假绿（见 docs/tasks/todo.md:5325-5329）。
+    ③ 模式串用拼接构造，否则这条测试文件自己含住模式，会被自己抓到。
+
+    已知局限（别当成完整防线）：放行规则是"同一函数块里先前有过重新绑定"，所以一个函数
+    先 copy、之后再往**原对象**上写会漏；把缓存帧当参数传给别处去改也扫不到。
+    这两类由 J1/J3 的行为断言兜（共享身份 + 并发同源），静态扫描只是第一道。
+    """
+
+    CARRIERS = [
+        'apps/analysis/views/_helpers.py',
+        'apps/analysis/views/analysis_views.py',
+        'apps/analysis/views/file_correlation_views.py',
+        'apps/batch_report/services.py',
+        'apps/batch_report/views.py',
+        'apps/buyoff/views.py',
+        'apps/common/file_loading.py',
+        'apps/dashboard/views.py',
+        'apps/datafiles/views/browse_views.py',
+        'apps/gage/views.py',
+    ]
+    CALL = 'get_cached_parsed_file'
+    WRITE = re.compile('(' + r'\bdf\[[^\]]+\]\s*=[^=]'
+                       + '|' + r'\bdf\.(?:loc|iloc)\[[^\]]+\]\s*=[^=]'
+                       + '|' + r'\bdf\.drop\([^)]*inplace=True'
+                       + '|' + r'del df\[)')
+    REBIND = re.compile(r'\bdf\s*=\s*df\.\w+\(')
+
+    @staticmethod
+    def _func_blocks(text):
+        block, blocks = [], []
+        for line in text.split('\n'):
+            if re.match(r'^(async )?def ', line) and block:
+                blocks.append(block)
+                block = []
+            block.append(line)
+        if block:
+            blocks.append(block)
+        return blocks
+
+    def test_no_caller_mutates_the_shared_frame(self):
+        root = Path(services.__file__).resolve().parents[2]
+        scanned = 0
+        for rel in self.CARRIERS:
+            path = root / rel
+            self.assertTrue(path.is_file(), f'载体清单过期：{rel} 读不到（假绿源头）')
+            for block in self._func_blocks(path.read_text(encoding='utf-8')):
+                if self.CALL not in '\n'.join(block):
+                    continue
+                rebound = False
+                for line in block:
+                    if self.REBIND.search(line):
+                        rebound = True
+                        continue
+                    hit = self.WRITE.search(line)
+                    if hit and not rebound:
+                        self.fail(f'{rel} 在共享的缓存帧上原地写：{hit.group(0)}')
+            scanned += 1
+        self.assertEqual(scanned, len(self.CARRIERS),
+                         '每个载体都必须真的被扫到，扫描数与清单数必须相等')

@@ -179,6 +179,13 @@ def _cached_parse(file_id: int, owner_id: int, path_key: int,
                   file_path: str, format_type: str) -> Tuple[Optional[pd.DataFrame], Optional[dict], Optional[str]]:
     """Parse a DataFile and cache the result in memory (byte-budgeted LRU).
 
+    Key = (绝对路径, 盘上 mtime_ns, format_type) —— 内容坐标。
+    `file_id` / `owner_id` 不进键：`_parse_file_uncached` 只消费路径与格式，
+    那两个参数在这条链上只用于鉴权与日志。把 owner 放进键会让 20 个用户各解析
+    一遍同一只物理文件（夹具见 scripts/perf_load20.py:192-195），且每-key 单飞
+    在跨 owner 场景完全失效。`format_type` 必须留在键里：同一路径被两行标成不同
+    格式时用的是不同 parser，合并会返回错数据。
+
     ``path_key`` is the on-disk mtime in nanoseconds of the file at the
     time the caller resolved it. Including it in the cache key ensures
     the cache auto-invalidates whenever the file's path or content
@@ -193,11 +200,13 @@ def _cached_parse(file_id: int, owner_id: int, path_key: int,
 
     Callers must NOT mutate the returned DataFrame — treat it as
     read-only. If you need a mutable copy, call ``.copy()`` yourself.
+    坐标化之后这只帧的消费者从「一个 owner 的几个请求」变成「同一路径的所有
+    请求」，共享范围更大，只读约定见 SharedFrameSafetyTests 的静态扫描。
 
     Returns ``(df, metadata, format_type)``.  Any element may be
     ``None`` on failure (missing file, parse error, etc.).
     """
-    key = (file_id, owner_id, path_key, file_path)
+    key = (file_path, path_key, format_type)
     return _parse_cache.get_or_compute(
         key, lambda: _parse_file_uncached(file_id, owner_id, path_key,
                                          file_path, format_type),
@@ -248,7 +257,8 @@ def get_cached_parsed_file(file_id: int, owner_id: int, datafile=None) -> Tuple[
         datafile = DataFile.objects.filter(pk=file_id, owner_id=owner_id).first()
     if datafile is None:
         return None, None, None
-    # 缓存 key 基于解析后的绝对路径 mtime，相对/绝对混存天然兼容
+    # 缓存 key 是内容坐标（解析后的绝对路径 + 盘上 mtime_ns + format_type），
+    # 相对/绝对混存天然兼容；file_id / owner_id 只用于鉴权查询与日志，不进键
     abs_path = resolve_file_path(datafile.file_path)
     path_key = _disk_mtime_ns(abs_path)
     return _cached_parse(file_id, owner_id, path_key, abs_path, datafile.format_type)
@@ -262,19 +272,26 @@ def put_cached_parsed_file(file_id: int, owner_id: int, datafile,
     ``parser.parse``（实测单次 3.2s、df 常驻 460MB），随后把 df 丢掉；
     不写透的话用户首次打开该文件会再解析一遍，同一只 275MB 文件被解析两次。
 
-    key 的算法与 ``get_cached_parsed_file`` 完全一致（同一个
-    ``resolve_file_path`` + 同一个 ``_disk_mtime_ns``），否则写进去也命不中。
+    key 的算法与 ``get_cached_parsed_file`` 完全同源（同一个
+    ``resolve_file_path`` + 同一个 ``_disk_mtime_ns`` + 同一个
+    ``(绝对路径, mtime_ns, format_type)`` 三元组），否则写进去也命不中。
     因此 ``datafile`` 必须在 ``DataFile.objects.create`` 之后传入——那时
     ``file_path`` 已是入库后的相对路径，解析出的绝对路径与读侧逐字节一致。
 
     ``df`` / ``metadata`` 为 None 时不写：失败结果不缓存，下次访问仍会重试，
-    与 ``_parse_file_uncached`` 的失败语义保持一致。
+    与 ``_parse_file_uncached`` 的失败语义保持一致。这也是这里不需要给
+    ``put`` 传 ``store_if`` 的原因——写透侧早就只写成功值，同一道闸已经写在
+    那句守卫里；``put`` 也没有 ``store_if`` 形参，等出现第二个写透调用方再
+    考虑加同名同默认值的形参，现在加就是给一条没人走的路预留参数。
+
+    ``file_id`` / ``owner_id`` 坐标化之后不再进键，形参保留是为了与
+    ``get_cached_parsed_file`` 对称、不动调用点（``_helpers._register_file``）。
     """
     if datafile is None or df is None or metadata is None:
         return
     abs_path = resolve_file_path(datafile.file_path)
     path_key = _disk_mtime_ns(abs_path)
-    _parse_cache.put((file_id, owner_id, path_key, abs_path), (df, metadata, fmt))
+    _parse_cache.put((abs_path, path_key, datafile.format_type), (df, metadata, fmt))
 
 
 @lru_cache(maxsize=32)
