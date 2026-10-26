@@ -100,8 +100,11 @@ class _BytesLRUCache:
                 self._total -= freed
                 self._evictions += 1
 
-    def get_or_compute(self, key, compute, size_of=_parse_value_bytes):
-        """返回 key 对应的值，必要时由当前线程计算并放入缓存。"""
+    def get_or_compute(self, key, compute, size_of=_parse_value_bytes, store_if=None):
+        """返回 key 对应的值，必要时由当前线程计算并放入缓存。
+
+        ``store_if`` 由调用方定义什么值值得占位；默认 None＝无条件存。
+        """
         while True:
             with self._cv:
                 entry = self._data.get(key)
@@ -121,7 +124,8 @@ class _BytesLRUCache:
                 with self._cv:
                     self._pending.discard(key)
                     self._cv.notify_all()
-            self._store(key, value, size_of(value))
+            if store_if is None or store_if(value):
+                self._store(key, value, size_of(value))
             return value
 
     def put(self, key, value, size_of=_parse_value_bytes) -> None:
@@ -196,7 +200,8 @@ def _cached_parse(file_id: int, owner_id: int, path_key: int,
     key = (file_id, owner_id, path_key, file_path)
     return _parse_cache.get_or_compute(
         key, lambda: _parse_file_uncached(file_id, owner_id, path_key,
-                                         file_path, format_type))
+                                         file_path, format_type),
+        store_if=_parse_succeeded)
 
 
 def _parse_file_uncached(file_id: int, owner_id: int, path_key: int,
@@ -212,6 +217,17 @@ def _parse_file_uncached(file_id: int, owner_id: int, path_key: int,
     except Exception as exc:
         logger.warning("_cached_parse(%s, %s, %s) failed: %s", file_id, owner_id, path_key, exc)
         return None, None, None
+
+
+def _parse_succeeded(value) -> bool:
+    """「这条值值得占缓存位」的唯一判据。
+
+    三种失败形状（路径不存在 / parser 返回 df=None / 抛异常兜成 (None, None, None)）都不该存：
+    `_parse_value_bytes` 给它们算 0 字节，而 `_store` 的淘汰循环只在**总量超预算**时逐条，
+    0 字节条目既不占预算也永远不会被逐出 ⇒ 一次瞬时失败会永久化到该文件 mtime 变化。
+    与写透路径 `put_cached_parsed_file`（df/metadata 为 None 时不写）是同一条规则。
+    """
+    return bool(isinstance(value, tuple) and value[0] is not None)
 
 
 def get_cached_parsed_file(file_id: int, owner_id: int, datafile=None) -> Tuple[Optional[pd.DataFrame], Optional[dict], Optional[str]]:

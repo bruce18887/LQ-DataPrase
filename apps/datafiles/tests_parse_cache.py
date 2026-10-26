@@ -156,15 +156,44 @@ class BytesLRUCacheTests(_CacheCaseBase):
         df2, _m2, _f2 = services._cached_parse(1, 1, 1, self.path, 'CTA8290D')
         self.assertIsNone(df2)
 
+    def test_failed_parse_does_not_occupy_a_cache_entry(self):
+        """失败结果不许占位：它算出 0 字节，而 0 字节条目连 LRU 都淘汰不动。
+
+        旧行为是「永久化到那只文件 mtime 变化为止」；坐标化之后爆炸半径会从
+        一个人放大到同一路径的所有人，所以这条必须在改键之前就绿。
+        """
+        class Boom:
+            def parse(self, path):
+                raise RuntimeError('disk on fire')
+
+        original = services.get_parser
+        services.get_parser = lambda fmt: Boom()
+        self.addCleanup(setattr, services, 'get_parser', original)
+        self.use_budget(64 * 1024 * 1024)
+
+        first = services._cached_parse(1, 1, 1, self.path, 'CTA8290D')
+        second = services._cached_parse(1, 1, 1, self.path, 'CTA8290D')
+
+        self.assertIsNone(first[0])
+        self.assertIsNone(second[0])
+        self.assertEqual(len(services._parse_cache), 0, '失败结果不许进缓存')
+        self.assertEqual(services.get_parse_cache_stats()['misses'], 2,
+                         '第二次必须真的重试，而不是命中那条 0 字节的失败记录')
+
     def test_missing_file_hint_preserved(self):
-        """文件不在磁盘上时返回 (None, None, format_type) 的既有契约不变。"""
+        """文件不在磁盘上时返回 (None, None, format_type) 的既有契约不变，且不占缓存。"""
         parser = self.patch_parser(_frame())
         missing = os.path.join(tempfile.gettempdir(), 'nope_does_not_exist.csv')
 
         out = services._cached_parse(9, 1, 1, missing, 'CTA8290D')
+        again = services._cached_parse(9, 1, 1, missing, 'CTA8290D')
 
         self.assertEqual(out, (None, None, 'CTA8290D'))
         self.assertEqual(parser.calls, 0)
+        self.assertEqual(len(services._parse_cache), 0,
+                         '缺文件的失败同样不许入缓存')
+        self.assertEqual(again, (None, None, 'CTA8290D'),
+                         '重试必须返回同一条契约，而不是被缓存改写成别的形状')
 
     def test_hits_misses_and_clears_are_counted(self):
         self.patch_parser(_frame())
@@ -286,6 +315,17 @@ class FrameBytesTests(SimpleTestCase):
         strings = services._frame_bytes(
             pd.DataFrame({'P': ['x' * 200] * 2000}))
         self.assertGreater(strings, numeric * 5)
+
+
+class ParseSucceededTests(SimpleTestCase):
+    """`_parse_succeeded` 是「什么值值得进缓存」的唯一判据，三种失败形状都得判 False。"""
+
+    def test_only_a_real_frame_is_worth_caching(self):
+        frame = _frame(rows=10)
+        self.assertTrue(services._parse_succeeded((frame, {'format': 'CTA8290D'}, 'CTA8290D')))
+        self.assertFalse(services._parse_succeeded((None, None, 'CTA8290D')))
+        self.assertFalse(services._parse_succeeded((None, {'format': 'CTA8290D'}, 'CTA8290D')))
+        self.assertFalse(services._parse_succeeded((None, None, None)))
 
 
 class ModuleShapeTests(SimpleTestCase):
