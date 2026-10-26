@@ -6230,3 +6230,10 @@ Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `roo
    ⚠ `tasks/premerge-2026-10-23/` 下那份是冻结归档，**绝对不要改**。
    坐标：B 档第 1 条「已知偶红的本轮账」段（本文件 `:6021-6027`，行号会漂，按语义找）；
    归因与两次结论行原文见 `.superpowers/sdd/2026-10-25-backend-payload-dedup/task-5-report.md` §5。
+   **再一例（2026-10-26，合并后）**：FF 并入 master 之后跑
+   `python manage.py test apps.datafiles.tests_parse_cache apps.datafiles.tests_parse_cache_scan apps.dashboard`
+   首跑 `Ran 60 tests … FAILED (failures=2)`，同命令立即复跑 `Ran 60 tests in 6.686s / OK` ⇒ 归为负载抖动，
+   不改变本节结论（同一棵树的后端全套 1867 例在前一分钟是 OK 的）。
+   ⚠ 诚实边界：**首跑那两个红项的名字没进日志** —— 我当时给命令接了 `| tail -3`，把 `FAIL:` 行截掉了。
+   这是本分支第三次同一个取证错误（前两次记在 `task-5-report.md` §5 与终评 re-review），
+   工单的修法里请连带写上一条：**窄标签取证一律先落文件再读，别接 `tail`**。
