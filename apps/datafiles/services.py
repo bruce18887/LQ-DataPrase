@@ -272,8 +272,9 @@ def _parse_succeeded(value) -> bool:
     **方向一致但不等价**：本谓词只判 `value[0]`（df）。
     这里只判 df 就够，因为 `(df, None, fmt)` 这个形状在本链上今天不可达——
     `_parse_file_uncached` 在 df 非 None 后立刻对 metadata 做 `dict(metadata)`
-    （`:247-252`），metadata 为 None 会在那里抛 TypeError、落进异常分支返回
-    `(None, None, None)`，所以走到这里时「df 非 None」已蕴含「metadata 非 None」。
+    （那句起至 `except` 兜底的 `(None, None, None)`，行号会漂、按语义找），metadata 为 None
+    会在那里抛 TypeError、落进异常分支返回 `(None, None, None)`，
+    所以走到这里时「df 非 None」已蕴含「metadata 非 None」。
     （写透侧不收 df 非 None 而 metadata 为 None 的入参，是它自己守卫更严一分；
     两边刻意不必写成同一句谓词——读侧的形状由 `_parse_file_uncached` 兜死。）
     """
