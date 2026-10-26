@@ -34,6 +34,21 @@ _summary_cache = OrderedDict()
 _summary_cache_lock = threading.Lock()
 
 
+def clean_data(data):
+    """`apps.analysis.views._helpers.clean_data` 的**本模块绑定**（NaN/±inf → None）。
+
+    为什么不写成文件头那句 `from apps.analysis.views._helpers import clean_data`：
+    `apps.analysis.views.__init__` 会连带拉起 DRF 视图与模型，而 `apps/jobs/runner.py`
+    要在**没有 Django 的子进程**里 import 本模块（`apps.jobs` 有两条用例钉死
+    「worker 侧模块必须脱离 Django 可导入」）——模块级 import 直接把 worker 炸掉。
+    所以这里把 import 延迟到调用点，但名字**仍绑在本模块上**：写入侧的清洗调用与
+    测试的 `mock.patch.object(dash_services, 'clean_data', …)` 都走这只绑定（R6③）。
+    纯转发、无副作用，与 `_helpers` 那份逐字同语义。
+    """
+    from apps.analysis.views._helpers import clean_data as _helpers_clean_data
+    return _helpers_clean_data(data)
+
+
 def compute_bin_site_table(df, format_type, site_col):
     """计算Bin×Site交叉表"""
     if not site_col or site_col not in df.columns:
@@ -367,6 +382,9 @@ def get_dashboard_summary(datafile, df, fmt, metadata, thresholds=None):
     """``compute_dashboard_summary`` 的进程内 LRU 缓存包装（计算实现仍只有一份）。
 
     命中直接返回缓存对象；未命中先算再存入，超 32 条淘汰最久未用的一项。
+    存入的是**已清洗**结果，命中直接返回；出口侧不再过 `clean_data`。
+    （`clean_data` 是纯函数、递归新建 list/dict —— 放在视图出口就是「每次命中都把整份
+    几十 KB 的 payload 重建一遍」，挪到写入侧后每只 key 只付一次，且缓存里不再有 NaN/±inf。）
     **返回值是共享只读对象，调用方不得修改**（现有调用方只读取/序列化）。
     """
     key = _summary_cache_key(datafile, fmt, thresholds)
@@ -377,8 +395,8 @@ def get_dashboard_summary(datafile, df, fmt, metadata, thresholds=None):
             _summary_cache.move_to_end(key)  # 命中即刷新为最近使用
             return cached
 
-    payload = compute_dashboard_summary(
-        df, datafile, fmt, metadata, thresholds=thresholds)
+    payload = clean_data(compute_dashboard_summary(
+        df, datafile, fmt, metadata, thresholds=thresholds))
 
     with _summary_cache_lock:
         _summary_cache[key] = payload

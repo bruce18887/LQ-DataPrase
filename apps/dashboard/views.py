@@ -8,7 +8,6 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
-from apps.analysis.views._helpers import clean_data
 from apps.datafiles.models import DataFile
 from apps.datafiles.services import get_cached_parsed_file
 from apps.datafiles.utils import resolve_file_path
@@ -57,13 +56,11 @@ class DashboardSummaryView(APIView):
                 return error_response('parse_failed', status=200)
 
             cpk_thresholds = get_cpk_thresholds(request.user)
-            # 走缓存层：同一文件 + 同一阈值 + 未变更的 mtime 时直接返回上次结果，
-            # 避免切 Tab 重复付出 ~600ms 的整表计算。
-            # clean_data 是出口兜底（与 analysis 侧 23 个端点同写法）：非有限值一旦
-            # 漏进 payload，DRF 严格渲染器是在 handler 层抛 ValueError 的（视图自己的
-            # except 接不到），整页 500；过一遍则退化成前端本就按 N/A 渲染的 null。
-            return Response(clean_data(get_dashboard_summary(
-                datafile, df, fmt, metadata, cpk_thresholds)))
+            # 走缓存层：同一文件 + 同一阈值 + mtime 未变时直接返回上次结果。
+            # 非有限值已在写入侧过完 clean_data（见 services.get_dashboard_summary）——
+            # 漏进 payload 的话 DRF 严格渲染器会在 handler 层抛 ValueError，整页 500。
+            return Response(get_dashboard_summary(
+                datafile, df, fmt, metadata, cpk_thresholds))
         except Http404:
             # get_object_or_404 的 404 语义不能被兜底吞掉
             raise

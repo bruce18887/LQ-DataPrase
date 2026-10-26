@@ -8,7 +8,7 @@ import unittest
 
 import pandas as pd
 from django.contrib.auth import get_user_model
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APITestCase
 
 from apps.analysis.services.statistics import (
@@ -401,27 +401,105 @@ class SummaryInfApiTests(APITestCase):
         self.assertTrue(math.isfinite(row['std']))
         json.dumps(payload, allow_nan=False)
 
-    def test_nonfinite_from_any_source_is_neutralized_at_exit(self):
-        """出口防线：payload 里混进 ±inf/nan 时，Response 仍必须序列化成功。
+    def test_nonfinite_from_any_source_is_neutralized_before_response(self):
+        """防线：payload 里混进 ±inf/nan 时，Response 仍必须序列化成功。
 
-        与上一条各挡一种变异 —— 这条只钉 ``clean_data`` 兜底（直接喂脏 payload，
-        不经过统计层），统计层哪天换了算法也不会把 500 放回来。
+        与上一条各挡一种变异 —— 这条不经过统计层，直接把脏 payload 喂给
+        ``compute_dashboard_summary``（J5 起清洗住在**写入侧**，视图出口不再兜第二遍），
+        统计层哪天换了算法也不会把 500 放回来。断的是「用户拿到 200 + 合法 JSON」，
+        不关心中间哪一层动的手；写法按 R6③ patch 消费方绑定 ``apps.dashboard.services``。
         """
-        from apps.dashboard import views as dash_views
+        from unittest import mock
 
-        orig = dash_views.get_dashboard_summary
-        dash_views.get_dashboard_summary = lambda *a, **k: {
+        from apps.analysis.views._helpers import clean_data
+        from apps.dashboard import services as dash_services
+
+        raw = {
             'file_id': 1,
             'filename': 'f.csv',
             'metrics': {'total_rows': 4, 'yield_pct': float('nan')},
             'test_item_overview': [{'name': 'P', 'mean': float('inf'),
                                     'std': float('nan'), 'cpk': float('-inf')}],
         }
-        self.addCleanup(setattr, dash_views, 'get_dashboard_summary', orig)
+        dash_services._summary_cache.clear()
+        self.addCleanup(dash_services._summary_cache.clear)
+        with mock.patch.object(dash_services, 'compute_dashboard_summary', return_value=raw):
+            resp = self.client.get('/api/v1/summary/', {'file_id': self.datafile.id})
 
-        resp = self.client.get('/api/v1/summary/', {'file_id': self.datafile.id})
         self.assertEqual(resp.status_code, 200)
         payload = json.loads(resp.content)
         self.assertIsNone(payload['metrics']['yield_pct'])
         for key in ('mean', 'std', 'cpk'):
             self.assertIsNone(payload['test_item_overview'][0][key], key)
+        # 逐字节等价（J5「响应字节不变」的另一面）：与旧「出口清洗」写法同形
+        self.assertEqual(payload, clean_data(raw))
+
+
+class SummaryCleanOnceTests(TestCase):
+    """J5：命中缓存的第二次请求不该再把整份 payload 重建一遍（clean_data 是纯函数）。"""
+
+    def test_cache_hit_does_not_reclean(self):
+        from unittest import mock
+
+        from apps.analysis.views._helpers import clean_data
+        from apps.dashboard import services as dash_services
+
+        user = User.objects.create_user(username='clean_once', password='pw')
+        datafile = DataFile.objects.create(
+            owner=user, filename='a.csv', file_path='a.csv',
+            file_size=1, format_type='CTA8290D', status='ready')
+        raw = {'rows': [{'v': float('nan'), 'ok': 1.0}]}
+        dash_services._summary_cache.clear()
+        self.addCleanup(dash_services._summary_cache.clear)
+        with mock.patch.object(dash_services, 'compute_dashboard_summary',
+                               return_value=raw), \
+             mock.patch.object(dash_services, 'clean_data', wraps=clean_data) as spy:
+            first = dash_services.get_dashboard_summary(datafile, None, 'CTA8290D', {}, None)
+            second = dash_services.get_dashboard_summary(datafile, None, 'CTA8290D', {}, None)
+
+        self.assertEqual(spy.call_count, 1, '第二次是缓存命中，不该再清洗')
+        self.assertIs(second, first, '命中必须返回同一只对象')
+        self.assertIsNone(first['rows'][0]['v'], 'NaN 必须在缓存里就已经是 None')
+
+    def test_cached_payload_matches_old_exit_clean_bytes(self):
+        """J5 的「响应字节不变」对照：写入侧清洗的输出 == 旧出口写法的输出（逐字节）。
+
+        旧写法是 ``clean_data(get_dashboard_summary(...))``（视图出口），新写法是
+        ``get_dashboard_summary(...)`` 自己在写入侧清洗一次。两者都是同一只纯函数
+        作用在同一只 raw payload 上，所以序列化结果必须逐字节相同 —— 这里按
+        DRF 严格渲染器的同口径（``allow_nan=False``）比对，防止哪天「顺手」把
+        清洗换成别的实现（丢键 / 改舍入 / 只清洗部分子树）而没人拦。
+        """
+        from unittest import mock
+
+        from apps.analysis.views._helpers import clean_data
+        from apps.dashboard import services as dash_services
+
+        user = User.objects.create_user(username='clean_bytes', password='pw')
+        datafile = DataFile.objects.create(
+            owner=user, filename='b.csv', file_path='b.csv',
+            file_size=1, format_type='CTA8290D', status='ready')
+        raw = {
+            'file_id': datafile.id,
+            'metrics': {'yield_pct': float('nan'), 'total_rows': 4,
+                        'ratio': float('inf'), 'neg': float('-inf')},
+            'test_item_overview': [
+                {'name': 'P1', 'mean': 1.5, 'cpk': None, 'lsl': float('nan')},
+                {'name': 'P2', 'mean': [float('nan'), {'deep': float('inf')}]},
+            ],
+            'strings': ['x', None, 3],
+        }
+        dash_services._summary_cache.clear()
+        self.addCleanup(dash_services._summary_cache.clear)
+        with mock.patch.object(dash_services, 'compute_dashboard_summary',
+                               return_value=raw):
+            cached = dash_services.get_dashboard_summary(
+                datafile, None, 'CTA8290D', {}, None)
+
+        dumped = json.dumps(cached, allow_nan=False, sort_keys=True)
+        # 旧写法（出口清洗）产出的字节
+        old_way = json.dumps(clean_data(raw), allow_nan=False, sort_keys=True)
+        self.assertEqual(dumped, old_way, '清洗挪侧不得改变响应字节')
+        self.assertEqual(json.loads(dumped), clean_data(raw))
+        self.assertNotIn('NaN', dumped)
+        self.assertNotIn('Infinity', dumped)
