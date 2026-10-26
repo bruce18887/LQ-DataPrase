@@ -8,7 +8,10 @@ from typing import Optional, Tuple
 
 import pandas as pd
 
-from apps.analysis.services.statistics import detect_fail_data_with_borderline
+from apps.analysis.services.statistics import (
+    build_col_meta,
+    detect_fail_data_with_borderline,
+)
 from apps.common.memory import get_budget
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import get_parser, BaseATEParser
@@ -46,12 +49,31 @@ def _frame_bytes(df) -> int:
         return 0
 
 
+def _col_meta_bytes(metadata) -> int:
+    """`col_meta` 的真实量级：列名 + 每列三个字符串。
+
+    1702 列那档是几十 KB 量级。`_parse_value_bytes` 若继续按 `64 × len(metadata)` 算，
+    它会被估成 64 字节，1536MB 那条预算就成了自欺的数字（判据 J7）。
+    """
+    col_meta = metadata.get('col_meta') if isinstance(metadata, dict) else None
+    if not isinstance(col_meta, dict):
+        return 0
+    total = 0
+    for name, entry in col_meta.items():
+        total += len(str(name))
+        if isinstance(entry, dict):
+            total += sum(len(str(v)) for v in entry.values())
+    return total
+
+
 def _parse_value_bytes(value) -> int:
-    """``(df, metadata, format_type)`` 三元组的缓存占用（metadata 只算量级）。"""
+    """``(df, metadata, format_type)`` 三元组的缓存占用（metadata 按真实量级）。"""
     df = value[0] if isinstance(value, tuple) else None
     total = _frame_bytes(df)
     if isinstance(value, tuple) and isinstance(value[1], dict):
-        total += 64 * len(value[1])
+        meta = value[1]
+        total += 64 * (len(meta) - (1 if 'col_meta' in meta else 0))
+        total += _col_meta_bytes(meta)
     return total
 
 
@@ -100,8 +122,11 @@ class _BytesLRUCache:
                 self._total -= freed
                 self._evictions += 1
 
-    def get_or_compute(self, key, compute, size_of=_parse_value_bytes):
-        """返回 key 对应的值，必要时由当前线程计算并放入缓存。"""
+    def get_or_compute(self, key, compute, size_of=_parse_value_bytes, store_if=None):
+        """返回 key 对应的值，必要时由当前线程计算并放入缓存。
+
+        ``store_if`` 由调用方定义什么值值得占位；默认 None＝无条件存。
+        """
         while True:
             with self._cv:
                 entry = self._data.get(key)
@@ -121,7 +146,8 @@ class _BytesLRUCache:
                 with self._cv:
                     self._pending.discard(key)
                     self._cv.notify_all()
-            self._store(key, value, size_of(value))
+            if store_if is None or store_if(value):
+                self._store(key, value, size_of(value))
             return value
 
     def put(self, key, value, size_of=_parse_value_bytes) -> None:
@@ -157,13 +183,23 @@ _parse_cache = _BytesLRUCache(PARSE_CACHE_BUDGET_BYTES)
 def _disk_mtime_ns(file_path: str) -> int:
     """Return the on-disk mtime in nanoseconds, or 0 if the file is gone.
 
-    Used as a cache key suffix so that re-pointing a DataFile's
-    ``file_path`` (e.g. after the project is moved on disk) or replacing
-    the underlying file automatically invalidates the in-memory cache.
-    Without this, ``_cached_parse`` would happily hand back a cached
-    ``(None, None, fmt)`` from the previous (broken) path and the
-    analysis endpoints would 400 with
-    ``file_not_found_or_parse_failed`` even after the DB row was fixed.
+    Used as a cache key suffix: entries are keyed by the content
+    coordinates ``(resolved absolute path, this mtime, format_type)``.
+    Keying on the **resolved** absolute path is what keeps relative and
+    absolute ``file_path`` variants of the same physical file sharing
+    one entry; mtime is what makes a **successful** entry self-
+    invalidate when the underlying file is re-uploaded, overwritten or
+    otherwise replaced (including the project being moved on disk and
+    ``file_path`` re-pointed): the next read lands on a new key and
+    re-parses, instead of serving the old content's frame forever.
+
+    Old rationale retired: this docstring once justified the mtime with
+    "a cached ``(None, None, fmt)`` from a broken path would be served
+    even after the DB row was fixed" — since the 2026-10-25 payload
+    dedup work failure values never enter the cache at all
+    (``store_if=_parse_succeeded``), so that example can no longer
+    occur. The conclusion is unchanged — mtime stays in the key, now
+    argued by the success-entry invalidation above.
     """
     try:
         return os.stat(file_path).st_mtime_ns
@@ -174,6 +210,13 @@ def _disk_mtime_ns(file_path: str) -> int:
 def _cached_parse(file_id: int, owner_id: int, path_key: int,
                   file_path: str, format_type: str) -> Tuple[Optional[pd.DataFrame], Optional[dict], Optional[str]]:
     """Parse a DataFile and cache the result in memory (byte-budgeted LRU).
+
+    Key = (绝对路径, 盘上 mtime_ns, format_type) —— 内容坐标。
+    `file_id` / `owner_id` 不进键：`_parse_file_uncached` 只消费路径与格式，
+    那两个参数在这条链上只用于鉴权与日志。把 owner 放进键会让 20 个用户各解析
+    一遍同一只物理文件（夹具见 scripts/perf_load20.py:192-195），且每-key 单飞
+    在跨 owner 场景完全失效。`format_type` 必须留在键里：同一路径被两行标成不同
+    格式时用的是不同 parser，合并会返回错数据。
 
     ``path_key`` is the on-disk mtime in nanoseconds of the file at the
     time the caller resolved it. Including it in the cache key ensures
@@ -189,14 +232,17 @@ def _cached_parse(file_id: int, owner_id: int, path_key: int,
 
     Callers must NOT mutate the returned DataFrame — treat it as
     read-only. If you need a mutable copy, call ``.copy()`` yourself.
+    坐标化之后这只帧的消费者从「一个 owner 的几个请求」变成「同一路径的所有
+    请求」，共享范围更大，只读约定见 SharedFrameSafetyTests 的静态扫描。
 
     Returns ``(df, metadata, format_type)``.  Any element may be
     ``None`` on failure (missing file, parse error, etc.).
     """
-    key = (file_id, owner_id, path_key, file_path)
+    key = (file_path, path_key, format_type)
     return _parse_cache.get_or_compute(
         key, lambda: _parse_file_uncached(file_id, owner_id, path_key,
-                                         file_path, format_type))
+                                         file_path, format_type),
+        store_if=_parse_succeeded)
 
 
 def _parse_file_uncached(file_id: int, owner_id: int, path_key: int,
@@ -208,10 +254,31 @@ def _parse_file_uncached(file_id: int, owner_id: int, path_key: int,
         df, metadata = parser.parse(file_path)
         if df is None:
             return None, metadata, format_type
+        metadata = dict(metadata)
+        metadata['col_meta'] = build_col_meta(df, metadata)
         return df, metadata, format_type
     except Exception as exc:
         logger.warning("_cached_parse(%s, %s, %s) failed: %s", file_id, owner_id, path_key, exc)
         return None, None, None
+
+
+def _parse_succeeded(value) -> bool:
+    """「这条值值得占缓存位」的唯一判据。
+
+    三种失败形状（路径不存在 / parser 返回 df=None / 抛异常兜成 (None, None, None)）都不该存：
+    `_parse_value_bytes` 给它们算 0 字节，而 `_store` 的淘汰循环只在**总量超预算**时逐条，
+    0 字节条目既不占预算也永远不会被逐出 ⇒ 一次瞬时失败会永久化到该文件 mtime 变化。
+    与写透路径 `put_cached_parsed_file`（开头的守卫判 **df 与 metadata 双双非 None** 才写）
+    **方向一致但不等价**：本谓词只判 `value[0]`（df）。
+    这里只判 df 就够，因为 `(df, None, fmt)` 这个形状在本链上今天不可达——
+    `_parse_file_uncached` 在 df 非 None 后立刻对 metadata 做 `dict(metadata)`
+    （那句起至 `except` 兜底的 `(None, None, None)`，行号会漂、按语义找），metadata 为 None
+    会在那里抛 TypeError、落进异常分支返回 `(None, None, None)`，
+    所以走到这里时「df 非 None」已蕴含「metadata 非 None」。
+    （写透侧不收 df 非 None 而 metadata 为 None 的入参，是它自己守卫更严一分；
+    两边刻意不必写成同一句谓词——读侧的形状由 `_parse_file_uncached` 兜死。）
+    """
+    return bool(isinstance(value, tuple) and value[0] is not None)
 
 
 def get_cached_parsed_file(file_id: int, owner_id: int, datafile=None) -> Tuple[Optional[pd.DataFrame], Optional[dict], Optional[str]]:
@@ -232,7 +299,8 @@ def get_cached_parsed_file(file_id: int, owner_id: int, datafile=None) -> Tuple[
         datafile = DataFile.objects.filter(pk=file_id, owner_id=owner_id).first()
     if datafile is None:
         return None, None, None
-    # 缓存 key 基于解析后的绝对路径 mtime，相对/绝对混存天然兼容
+    # 缓存 key 是内容坐标（解析后的绝对路径 + 盘上 mtime_ns + format_type），
+    # 相对/绝对混存天然兼容；file_id / owner_id 只用于鉴权查询与日志，不进键
     abs_path = resolve_file_path(datafile.file_path)
     path_key = _disk_mtime_ns(abs_path)
     return _cached_parse(file_id, owner_id, path_key, abs_path, datafile.format_type)
@@ -246,19 +314,36 @@ def put_cached_parsed_file(file_id: int, owner_id: int, datafile,
     ``parser.parse``（实测单次 3.2s、df 常驻 460MB），随后把 df 丢掉；
     不写透的话用户首次打开该文件会再解析一遍，同一只 275MB 文件被解析两次。
 
-    key 的算法与 ``get_cached_parsed_file`` 完全一致（同一个
-    ``resolve_file_path`` + 同一个 ``_disk_mtime_ns``），否则写进去也命不中。
+    key 的算法与 ``get_cached_parsed_file`` 完全同源（同一个
+    ``resolve_file_path`` + 同一个 ``_disk_mtime_ns`` + 同一个
+    ``(绝对路径, mtime_ns, format_type)`` 三元组），否则写进去也命不中。
     因此 ``datafile`` 必须在 ``DataFile.objects.create`` 之后传入——那时
     ``file_path`` 已是入库后的相对路径，解析出的绝对路径与读侧逐字节一致。
 
     ``df`` / ``metadata`` 为 None 时不写：失败结果不缓存，下次访问仍会重试，
-    与 ``_parse_file_uncached`` 的失败语义保持一致。
+    与 ``_parse_file_uncached`` 的失败语义保持一致。这也是这里不需要给
+    ``put`` 传 ``store_if`` 的原因——写透侧早就只写成功值，同一道闸已经写在
+    那句守卫里；``put`` 也没有 ``store_if`` 形参，等出现第二个写透调用方再
+    考虑加同名同默认值的形参，现在加就是给一条没人走的路预留参数。
+
+    ``file_id`` / ``owner_id`` 坐标化之后不再进键，形参保留是为了与
+    ``get_cached_parsed_file`` 对称、不动调用点（``_helpers._register_file``）。
     """
     if datafile is None or df is None or metadata is None:
         return
     abs_path = resolve_file_path(datafile.file_path)
     path_key = _disk_mtime_ns(abs_path)
-    _parse_cache.put((file_id, owner_id, path_key, abs_path), (df, metadata, fmt))
+    # 上传链路的 metadata 来自 ``_helpers.parse_file_meta`` 的直接 ``parser.parse``，
+    # 不经过 ``_parse_file_uncached``，所以它**没有** ``col_meta``。不在这里补上，
+    # 这条条目此后每一次读都要走消费侧的
+    # ``metadata.get('col_meta') or build_col_meta(df, metadata)`` 回落，
+    # 「每文件只算一次」（J4）就只在回放路径兑现，而上传/导入才是主入库路径。
+    # 与 ``_parse_file_uncached`` 同形：先复制一份再挂键，且
+    # ``build_col_meta`` 的入参是**尚未带 col_meta 的那份**。
+    if 'col_meta' not in metadata:
+        metadata = dict(metadata)
+        metadata['col_meta'] = build_col_meta(df, metadata)
+    _parse_cache.put((abs_path, path_key, datafile.format_type), (df, metadata, fmt))
 
 
 @lru_cache(maxsize=32)

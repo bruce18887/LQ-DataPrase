@@ -65,7 +65,7 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         unique_fail_rows = len(set(fail_indices))
 
         fail_mask = build_fail_mask(fail_cells)
-        col_meta = build_col_meta(df, metadata)
+        col_meta = metadata.get('col_meta') or build_col_meta(df, metadata)
 
         return Response(clean_data({
             'fail_row_count': unique_fail_rows,

@@ -13,7 +13,7 @@
 | 条件 | 取值 | 为什么是承重的 |
 |---|---|---|
 | 每轮进程 | **冷启动独立进程 + 独立数据根** | 同进程连跑两轮时，第二轮吃第一轮的解析缓存：实测 browse 首页 P95 从 7116ms 掉到 3429ms，那是缓存不是优化 |
-| 预热 | `--warmup 1` 后**清零统计账** | 解析/汇总缓存按 `(file, owner)` 分键，冷轮的首次未命中会把 summary P95 抬到几十秒（脚本自述实测 26.0s vs 1.9s） |
+| 预热 | `--warmup 1` 后**清零统计账** | 解析/汇总缓存按 `(file, owner)` 分键，冷轮的首次未命中会把 summary P95 抬到几十秒（脚本自述实测 26.0s vs 1.9s）。⚠ 2026-10-26 注：B 刀 Task 2 后**解析**缓存已改内容坐标（不再按 owner 分键），汇总缓存仍按 `(datafile, fmt, thresholds)`——预热协议本身照用，理由半边变了，见 §6 |
 | 夹具 | 与 10-17 同一只 `$BIG`（275MB / 35,246 行 × 1,702 列）与 20 只 `$MID`（各 20MB） | 换素材就等于换瓶颈；`$MID` 的 20MB 是刻意的，用 `$BIG` 会让 20 人工作集 9.2GB 互相洗缓存 |
 | 样本量 | 每端点 n=120（20 用户 × 6 轮） | n 小的时候 P95≈max，报表连 n 一起出 |
 | 提交判据 | 分「**首跳（含池懒建）**」与「**稳态**」，且必配**无并发对照** | `_get_pool()` 是懒建的，Windows 又钉 spawn ⇒ 首跳要付子进程启动的钱；只提一次就当「提交 P95」会让判据假红 |
@@ -106,18 +106,47 @@ OpenBLAS error: Memory allocation still failed after 10 retries, giving up.   ×
 - ⚠ 附带缺口：e2e 池的掉线现场文件只有进程表与 netstat，**没有后端 stderr**；
   本节的归因靠的是 `slot*.run.log` 与 `blob/report.jsonl`，下次崩池建议把后端日志尾部也收进现场。
 
-## 6. 下一刀（定靶结论）
+## 6. 下一刀（定靶结论）—— 2026-10-26 已落地收口，逐条状态如下
 
-争抢是主因 ⇒ 要降的是**同进程里的载荷**，即桌面卡顿线里那条「B 后端载荷」（`docs/tasks/todo.md:5318`）：
+争抢是主因 ⇒ 要降的是**同进程里的载荷**，即桌面卡顿线里那条「B 后端载荷」
+（`docs/tasks/todo.md`「遗留」的 B 条 + 文末 B 档第 1 条；本节初稿写的指针 `:5318` 已漂，
+现行位置在 5355 区段，账以文末那条为准）。
+spec `docs/superpowers/specs/2026-10-25-backend-payload-dedup-design.md`（`f2bce68`）、
+plan `docs/superpowers/plans/2026-10-25-backend-payload-dedup.md`（`d6ce7eb`），
+五任务全部落在分支 `feat/backend-payload-dedup`：Task 1 `027b530`、Task 2 `ab43e58`、
+Task 3 `c74cdb3`+修复轮 `2cca97d`、Task 4 `b45fdfa`+修复轮 `1543c11`、Task 5 收口文档一笔。
 
-1. `browse` 每页重发 headers/col_meta（`apps/datafiles/views/browse_views.py:237,246`）；
-2. 缓存命中后仍跑 `clean_data`（`apps/dashboard/views.py:65`，出口兜底那一条）；
-3. 解析缓存按 `(file, owner)` 分键 ⇒ 20 人各解析一遍同一物理文件
-   （`get_cached_parsed_file(datafile.id, request.user.pk, ...)`，见
-   `apps/datafiles/views/browse_views.py:142` 与 `apps/dashboard/views.py:55`）。
+1. `browse` 每页重发 headers/col_meta —— **已落地（Task 3）**：`col_meta` 随解析产出进缓存 metadata
+   （回放路径 `_parse_file_uncached` 与主入库写透路径 `put_cached_parsed_file` 两处都产出），
+   消费侧读缓存那份、只有没走缓存的路径才现场回落（`browse_views.py:246`、`statistics_views.py:68`
+   的 `or build_col_meta(...)`）。响应**字节刻意不变**——降的是每请求 O(列) 重算，不是响应内容。
+2. 缓存命中后仍跑 `clean_data` —— **已落地（Task 4）**：清洗挪到汇总缓存的**写入侧**
+   （`apps/dashboard/services.py:398`，存入即已清洗、命中直接返回），视图出口不再过一遍；
+   出口侧有守卫用例钉着（真实端点两次请求只清洗一次、且响应体必须就是缓存里那一只对象）。
+3. 解析缓存按 `(file, owner)` 分键 —— **已落地（Task 2 本体 + Task 1 前置）**：键改内容坐标
+   （解析路径 + 磁盘 mtime），同一路径跨 owner 共用一条目；解析失败值不再入缓存
+   （0 字节条目永久占位先摘——不摘的话坐标化会把失败永久化放大）。
+4. **第四条落点（计划外、收口评审浮出）**：检测层 `_cached_fail_data` 的 `@lru_cache(maxsize=32)`
+   仍按含 `file_id`/`owner_id` 的键 memo（`apps/datafiles/services.py:331-333`）⇒ 解析层去重之后，
+   同一路径 20 个 owner 的红格/橙格检测仍各跑一遍并各 memo 一份。
+   **未做**，已立成 `docs/tasks/todo.md` 文末 B 档①（带坐标与「全仓 0 条用例覆盖」事实），待拍板。
 
-**B 目前没有设计稿**，开工前要先出 spec。三条判据的验收就用本文件的协议与夹具，
-不新建口径。
+**读数注脚（复测前必读）**：解析层已按内容坐标去重，但检测层（落点 4）仍按 owner 重复 ⇒
+之后 20 人档复测里 browse 的降幅**偏小是已知原因**，不能读成「B 载荷收益本来就有限」。
+
+**复测状态（2026-10-26）**：20 人档复测**未跑**——控制器裁定收口轮不在本机跑，门禁只取三档
+（后端全套 / 快门禁 / 全量池，读数在 todo 文末 B 档）。⚠ 如实记：派工单写的「夹具 $BIG/$MID 都不存在」
+这条理由当日复测**不成立**——两只都在盘上、体积与本文件 §1 口径一致（$BIG 288,588,974 字节、
+$MID 20,438,765 字节）。要跑缺的不是夹具，是**一个独占测量窗口**（浏览器档三轮 + 无并发对照一轮，
+每轮独立 `LQDP_E2E_SLOT_DIR`，夹具与冷热口径按 §1 不许动）加控制器/用户点头；方案 A 档另需 WSL
+且夹具放 ext4。**门禁阈值因此未定**——原口径是「拿复测读数对着 12–48ms 那条线定」，读数没来不设线。
+
+⚠ **归因位移（Task 4 引入，影响一切历史对照）**：`clean_data` 从汇总缓存的**命中路径**（视图出口）
+挪到了**未命中/写入路径**（`apps/dashboard/services.py:398`），于是 `scripts/perf_baseline.py:182/:184`
+那两格「`get_dashboard_summary()` 首次（未命中）/二次（应命中缓存）」**量出来的含义变了**——
+首次现在多含一次清洗、二次不再重建 payload。**`docs/reference/perf-baseline-2026-10-17.md`
+的旧行（`:43-44` 两格与 `:118` 的同口径读数）不可再当对照基线**：不是数字作废，是两格各自测的
+东西已经不是同一件事；要对照就在本文件协议下重跑。
 
 ## 7. 局限（不许外推的部分）
 
