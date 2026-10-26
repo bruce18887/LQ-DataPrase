@@ -42,7 +42,8 @@ Django unittest（T1 为主）、Playwright 仅作既有契约回归（不新增
   （`(None, None, fmt)` 缺路径 / `(None, metadata, fmt)` parser 返 None / `(None, None, None)` 抛异常）。
 - Produces: `services._parse_succeeded(value) -> bool`（Task 2/3 的键改造复用同一条谓词，不许另立判据）；
   `_BytesLRUCache.get_or_compute(self, key, compute, size_of=_parse_value_bytes, store_if=None)`
-  —— `store_if=None` 时行为与今天逐字一致（`_cache_failures` 等其它使用者零影响）。
+  —— `store_if=None` 时行为与今天逐字一致（`get_or_compute` 的生产调用点只有 `_cached_parse` 一处，
+  2026-10-26 预检 `git grep` 确认）。
 
 - [ ] **Step 1: 写失败用例（两条新增 + 一条扩展）**
 
@@ -790,16 +791,23 @@ git commit -m "docs(perf): B 后端载荷收口——读数入账，阈值按本
 
 ## 计划外发现（**需用户点头才进本刀，默认不做**）
 
-写计划时按 spec 的三条落点核对代码，发现同一族里还有**第四条、而且大概率是最贵的一条**：
+> ⚠ **2026-10-26 更正**：本节第一次起草时说 `_cached_fail_data`「没有缓存检测结果、每次请求重跑全表扫描」——
+> **那是错的**。它带着 `@lru_cache(maxsize=32)`（`apps/datafiles/services.py:280`），我第一次从 265 行起读函数、
+> 漏看了上面那行装饰器。`browse_views.py:146` 那句注释基本属实。以下按核实后的事实重写。
 
-`apps/datafiles/views/browse_views.py:146` 的注释写着「fail 检测按 (file, mtime) 缓存——文件内容未变时零重算」，
-但 `services._cached_fail_data`（`apps/datafiles/services.py:265-289`）**没有缓存检测结果**——
-它每次调用 `_cached_parse` 之后现场跑 `detect_fail_data_with_borderline(df, metadata)`（`:286`），
-也就是每次 browse 请求都对全表做一次列扫描建 `fail_cells`/`borderline_cells`
-（`limits.py:105` 的 `_scan_limit_cells`，夹具那档是 35,246 行 × 1,702 列）。
-函数名、docstring、调用侧三处都在说"缓存过了"，全仓没有任何用例覆盖 `get_cached_fail_data`。
+核实后剩下的是一条**较小但真实**的遗留，形状与落点 1 同族：
 
-形状与落点 3 完全同构（结果只依赖 `(df, metadata)`，同文件每页相同 ⇒ 可以搭同一套键与预算），
-所以技术上并进本刀很容易；但它是**spec §1 里没有的靶子**，并进同一刀会让「B 后端载荷」的验收范围
-悄悄变大。要做的话说一声，我按同样形状加一个 Task 3.5（含「注释说谎」那条纠正与一条 J8 计数判据），
-或者单独立一条待拍板项进 B 档。
+1. **它的 memo 键也含 `file_id` / `owner_id`** —— `get_cached_fail_data(datafile.id, request.user.pk, datafile)`
+   （`browse_views.py:147`）→ `_cached_fail_data(file_id, owner_id, path_key, file_path, format_type)`，
+   而 `:298` 之后跑的 `detect_fail_data_with_borderline(df, metadata)` 只吃 `(df, metadata)`。
+   ⇒ 同一路径 20 个 owner 会 memo 出 20 份**完全相同**的红格/橙格结果，而 `maxsize=32` 是按条数算的：
+   两只文件 × 20 人就把这层挤空了。这与本刀在 `_parse_cache` 上修掉的是同一个病，只是它那份不占 460MB。
+2. **检测自身抛错时那个 `(None, None, None, None)` 会被 memo 住**（`:301-305`），只能等 `clear_parse_cache`
+   或 mtime 变化才走 —— Task 1 把 `_parse_cache` 那侧的失败永久化摘掉了，这一侧还在。
+   注意它**不会**在解析失败时被 poison：`browse_views.py:143` 在 `df is None` 处已经先 400 返回，
+   根本走不到 `:147`（Task 1 的评审专门核过这条链路）。
+3. **全仓 0 条用例覆盖它**（`git grep -l "get_cached_fail_data\|_cached_fail_data" -- 'apps/*/tests*' 'test/**'` 空返回）。
+
+并进本刀的技术代价很低（同一个内容坐标、同一套放行判据，加一条计数判据 J8 与一条失败不 memo 的判据），
+但它是 **spec §1 三条落点之外的第四条**，并进来会让「B 后端载荷」的验收范围悄悄变大。
+要做就说一声，我加一个 Task 2.5；不做的话我把上面三条按「已核实的遗留」立成一条 B 档待拍板项。
