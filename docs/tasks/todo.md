@@ -5005,8 +5005,12 @@ df 第 648 行一格，原文就是字面文本 `inf`**，全文件 4575 列仅�
    对照组断言当场挂掉；真实文件只有一格 `+inf`，按它改回才对。
 2. `SummaryInfApiTests.test_inf_cell_returns_200_and_strict_json` —— 走完整 view→DRF 渲染，
    修复前报的就是生产那句 `Out of range float values are not JSON compliant: inf`。
-3. `...test_nonfinite_from_any_source_is_neutralized_at_exit` —— 直接喂脏 payload，
-   只钉第 2 处的 `clean_data` 兜底（统计层将来换算法也不会把 500 放回来）。
+3. `...test_nonfinite_from_any_source_is_neutralized_before_response` —— 直接喂脏 payload，
+   钉 `clean_data` 兜底（统计层将来换算法也不会把 500 放回来）。
+   ⚠ 2026-10-26 更名：原名 `..._at_exit`，B 后端载荷刀 Task 4（`b45fdfa`）把桩位从**出口层**挪到
+   **缓存写入侧**后改名并改判到写入层（`apps/dashboard/tests.py:404`）；本节上文第 2 处
+   「`dashboard/views.py` 出口套 `clean_data`」同批撤销。`tasks/premerge-2026-10-23/` 里那份同名
+   历史快照是冻结归档，按原样留着不回改。
 
 ## 验证
 
@@ -5352,10 +5356,19 @@ analysis 档补一条（R19：`AnalysisPage` 的去重原本无守卫）、dashb
 
 ## 遗留
 
-- [ ] **B 后端载荷**：**未做，且没有设计稿**。2026-10-24 双形态测量把它提到下一刀首位——
-      20 人档提交跳中位 1.7s 而提交路径本身只要 12–48ms，两档形态差值 ≤1.3×，
-      说明瓶颈是同进程争抢而非进程模型；三个落点见
-      `docs/reference/perf-baseline-2026-10-24-dual-profile.md` §6。
+- [x] **B 后端载荷**：**已落地并收口（2026-10-26，分支 `feat/backend-payload-dedup`）**。
+      2026-10-24 双形态测量把它提到下一刀首位——20 人档提交跳中位 1.7s 而提交路径本身只要 12–48ms，
+      两档形态差值 ≤1.3×，说明瓶颈是同进程争抢而非进程模型；三个落点见
+      `docs/reference/perf-baseline-2026-10-24-dual-profile.md` §6（2026-10-26 已逐条标状态）。
+      spec `docs/superpowers/specs/2026-10-25-backend-payload-dedup-design.md`（`f2bce68`）、
+      plan `docs/superpowers/plans/2026-10-25-backend-payload-dedup.md`（`d6ce7eb`）；
+      五任务提交区间 Task 1 `027b530` → Task 4 修复轮 `1543c11`。**当前状态的唯一事实来源是文末
+      「其它未完成汇总」B 档第 1 条**（逐任务提交对照、J1-J7 用例落点、三档门禁读数、复测未跑的
+      原因与条件、新开的三条待拍板都在那里）。
+      已知偶红先登记在这：`apps/datafiles/tests_parse_cache.py` 两条 `delay=0.3`/`sleep(0.05)` 编排的
+      单飞用例（`test_concurrent_miss_for_same_key_parses_once` / `test_concurrent_miss_from_two_owners_parses_once`）
+      窄标签 + 负载高会红（洁净 HEAD 实测 5/6 红）；收口轮窄标签第一次跑红、按裁定只重跑一次转绿，
+      两次的结论行都在文末那笔账里——**不许读成「从未红过」**。
 - [ ] **C `2026-10-21` 内存治理三批**：**批 1 已落地**（预算与水位在 `apps/common/memory.py`，
       每次起服务打一条 `INFO apps.common.memory: 内存预算`，本轮压测日志里可证），
       **批 2（准入）与批 3（每-worker 硬上限）零代码**；批 1 的收口门禁那轮是 VOID，
@@ -5407,7 +5420,10 @@ analysis 档补一条（R19：`AnalysisPage` 的去重原本无守卫）、dashb
 
 ## 本轮刻意不做（别顺手改）
 
-B 后端 `/browse/` 每页重发 headers+col_meta、`/summary/` 命中仍 clean_data 重序列化；
+~~B 后端 `/browse/` 每页重发 headers+col_meta、`/summary/` 命中仍 clean_data 重序列化；~~
+（**2026-10-26 更正**：被划的这两句已由 B 后端载荷刀落地——`col_meta` 随解析产出、`clean_data` 挪到缓存
+写入侧，见文末 B 档第 1 条与 `docs/reference/perf-baseline-2026-10-24-dual-profile.md` §6 状态列；
+响应**字节**刻意不变，降的是每请求重算。其余仍有效：）
 C `2026-10-21` 内存治理三批；D Electron 日志把 backend-stderr 一律记 ERROR + GBK 乱码 + 无轮转；
 生产机页面文件偏小属运维。
 
@@ -5965,11 +5981,85 @@ Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `roo
 
 ### B. 要你拍板的（9 条）—— 2026-10-25 逐条现跑，每条后面是**当前状态与坐标**，不是转抄
 
-1. **B 后端载荷设计稿** —— **仍是下一刀首位，缺的是设计稿不是测量**。
-   `docs/reference/perf-baseline-2026-10-24-dual-profile.md:58-73`：提交跳无并发稳态 **12–48ms**
-   （浏览器档中位 19.5 / 方案 A 档 36），20 人并发稳态**中位 1698 / 1657ms**、首跳 3486 / 3750ms。
-   两档中位几乎相同 ⇒ 慢的不是提交代码，是**同进程里 20 人争抢同一个 GIL 与同一把写锁**；
-   该文件 §2 已写明「进程形态不是当前矛盾」⇒ 别拿这一刀去换进程形态。
+1. **B 后端载荷** —— ~~设计稿~~ **已落地并收口（2026-10-26，分支 `feat/backend-payload-dedup`）**；
+   本条现在是**闭环账 + 三条新开的待拍板（①②③）**。
+   spec `docs/superpowers/specs/2026-10-25-backend-payload-dedup-design.md`（`f2bce68`）·
+   plan `docs/superpowers/plans/2026-10-25-backend-payload-dedup.md`（`d6ce7eb`）。
+   定靶读数不变（`docs/reference/perf-baseline-2026-10-24-dual-profile.md:58-73`）：提交跳无并发稳态
+   **12–48ms**、20 人并发稳态中位 1698/1657ms、首跳 3486/3750ms，两档几乎相同 ⇒ 瓶颈是同进程争抢；
+   该文件 §2「进程形态不是当前矛盾」仍成立。
+   * **五任务提交区间**：Task 1 `027b530`（失败值不入缓存）· Task 2 `ab43e58`（键改内容坐标）·
+     Task 3 `c74cdb3` + 修复轮 `2cca97d`（col_meta 随解析产出；写透路径补键）·
+     Task 4 `b45fdfa` + 修复轮 `1543c11`（clean_data 挪到缓存写入侧；补出口守卫）·
+     Task 5 ＝本笔收口文档。计划/评审文案笔 `d3f1d06`、`4b1b307`、`8fbe096` 穿插其间。
+   * **J1-J7 用例落点**（除注明外全在 `apps/datafiles/tests_parse_cache.py`）：
+     J1 `test_two_owners_of_one_physical_file_share_one_entry`（Task 2）·
+     J2 `test_failed_parse_does_not_occupy_a_cache_entry` + `ParseSucceededTests.test_only_a_real_frame_is_worth_caching`（Task 1）·
+     J3 `test_concurrent_miss_from_two_owners_parses_once`（Task 2）·
+     J4 `test_col_meta_is_built_once_per_file_not_per_request` / `test_col_meta_value_matches_the_per_request_builder`（Task 3）
+     + 写透侧 `test_write_through_metadata_carries_col_meta`（修复轮）·
+     J5 `apps/dashboard/tests.py`：`SummaryCleanOnceTests.test_cache_hit_does_not_reclean` /
+     逐字节对照 `test_cached_payload_matches_old_exit_clean_bytes` / 出口守卫
+     `test_real_endpoint_cleans_exactly_once_across_cache_hit` + 改判改名的
+     `SummaryInfApiTests.test_nonfinite_from_any_source_is_neutralized_before_response`（Task 4）·
+     J6 `test_missing_file_hint_preserved`（Task 1 扩展版）· J7 `test_budget_counts_col_meta_real_bytes`（Task 3）。
+     配套：`test_get_or_compute_without_store_if_stores_unconditionally`（store_if 兼容条款，Task 2 裁定新增）
+     与静态扫描类 `apps/datafiles/tests_parse_cache_scan.py::SharedFrameSafetyTests`（3 条，含 2 条防空集）。
+   * **三档门禁读数（2026-10-26 现跑，判绿取结论行本体、不读 `$?`）**：
+     ① 后端全套 13 条 label（`test.backend` + `apps/` 下全部非 `__` 目录，与 `scripts/e2e_nightly.mjs`
+     `backendLabels()` 同集合）⇒ `Ran 1866 tests in 366.177s` / **`OK (skipped=8)`**；
+     ② 快门禁 `cd frontend && npm run test:e2e:affected` ⇒ `RESULT: PASS · 计划 3 档全部执行`
+     （lint:e2e ok / vitest `Tests 486 passed` / backend 子集 `apps.dashboard` `Ran 27 OK`；
+     **e2e 档未排**——改动集全在后端产品代码与后端测试，`decide:` 打的是「e2e 模块 [（仅 T2/后端）] + vitest」，
+     这不是 `NO AFFECTED TESTS`，浏览器契约的证据由 ③ 全量池承担）；
+     ③ 收口全量池 `node scripts/e2e_pool.mjs --slots=4` ⇒ `[pool] 结论 MEASURED`、复跑判级
+     **真红 0 · 负载抖动 2 · 悬而未决 0**（抖动的两条仍是 `analysis/histogram-*` 旧账，独占复跑即绿）；
+     418 例 / 墙钟 10.7min / 单价 3.09s/例 / 效率 1.90（本轮有复跑，效率不判退化）；
+     infraSlots 空、refusedCount 0 ⇒ 无掉线无崩池，不需按 testing-gates §4 提交内存定性
+     （跑前空闲提交 8.97GB 贴 8.0GB 预算线，属边界态，如实记）。
+     这档池是本刀唯一「响应字节没变」的通路：browse/summary/analysis 既有 e2e 全绿 ⇒ 契约未动。
+   * **已知偶红的本轮账**：收口后补跑窄标签 `apps.datafiles.tests_parse_cache` + `_scan`
+     第一次 ⇒ `Ran 32 tests in 1.605s` / **`FAILED (failures=2)`**；按裁定**只重跑一次** ⇒
+     `Ran 32 tests in 1.005s` / **`OK`**。两次的结论行都在这里；红项具体名没进第一次的日志窗口
+     （只 tail 了尾部），两次之间其余 30 条恒绿、形状与既往记录一致（两条 `delay=0.3`/`sleep(0.05)`
+     编排的单飞用例，洁净 HEAD 实测 5/6 红，比本树更差）。**不许读成「从未红过」**；睡眠参数、
+     skip、断言都没动，也不许把它读成产品回归；另立工单（Task 3 台账建议）**已落**——见文末
+     「2026-10-26 终评残留落账」第 1 条（2026-10-26 之前的版本写着「仍未落」，那是流程欠账本身）。
+   * **20 人档复测：未跑**。控制器裁定本轮不在本机跑。⚠ 如实记：派工单写的理由
+     （`scripts/perf_load20.py` 的 $BIG/$MID 两只夹具不存在）**当日复测不成立**——两只都在盘上、
+     体积与基线口径一致（$BIG 288,588,974 字节、$MID 20,438,765 字节；`Data/` 930MB、小写 .csv 113 只）。
+     所以「要跑需要谁给什么」的答案不是夹具，而是：**控制器/用户点头一个独占测量窗口**
+     （浏览器档三轮 + 无并发对照一轮，每轮独立 `LQDP_E2E_SLOT_DIR`，夹具与冷热口径不许动，基线 §1）；
+     方案 A 档另需 WSL 且夹具放 ext4。**阈值因此未定**（原口径「等读数出来再定」——读数没来不设线）。
+     ⚠ 指针（2026-10-26 终评 Minor 落账）：收口笔 `1ab8d79` 的提交信息写着「阈值按本次对照定」——那句文案是
+     计划模板带出的，**以本条为准：阈值未定，复测未跑**（不缺夹具，缺一个独占测量窗口）。历史提交不改写；
+     只读 `git log` 的人经此指针回到本条，别按提交信息误读。
+   * **600 行新账**（2026-10-26 终评修复波之后由控制器重跑 `wc -l` 刷新；本行第一次入账时是 414/545/29，
+     是那条修复波自己给 `services.py` 加了两处 docstring、给测试补了 J6 的后半句把数顶上去的）：
+     `apps/datafiles/services.py` **432** ·
+     `apps/datafiles/tests_parse_cache.py` **584**（30 条 `def test_`）· `apps/datafiles/tests_parse_cache_scan.py`
+     **112**（3 条）· `apps/dashboard/services.py` **424** · `apps/dashboard/tests.py` **584**（23 条 `def test_`）——
+     ⚠ `apps/dashboard/tests.py` 与 `tests_parse_cache.py` 都贴着 600 上限，**下一次编辑必须先拆文件**（Task 4 台账的 minor 在册）。
+   * **新开的三条待拍板**：
+     ① **检测层仍按 owner 重复**：`apps/datafiles/services.py:349` 的 `@lru_cache(maxsize=32)`
+     `_cached_fail_data` 键含 `file_id`/`owner_id`（`:350-351`；调用点 `apps/datafiles/views/browse_views.py:147-148`），
+     而检测本体 `detect_fail_data_with_borderline(df, metadata)` 只吃内容坐标 ⇒ 同一路径 20 个 owner
+     memo 出 20 份**完全相同**的红格/橙格结果，且 `maxsize=32` 按条数计会被挤空；检测自身抛错时
+     `(None, None, None, None)` 会被 memo 住到 `clear_parse_cache` 为止（`:368-369` 走 `df is None` 那条、
+     `:374` 走检测自己抛错那条；解析失败不 poison 它，
+     `browse_views.py:143` 先行 400）。全仓 **0 条用例覆盖**（`git grep -l "get_cached_fail_data\|_cached_fail_data"
+     -- 'apps/*/tests*' 'test/**'` 空返回）。修法与本刀 `_parse_cache` 同族（同一内容坐标 + 失败不 memo，
+     加计数判据 J8），要不要开刀由用户拍。
+     ② **`_BytesLRUCache._store` 覆盖已有键不扣旧值**：`apps/datafiles/services.py:167-177` 对活键替换只
+     `self._total += nbytes` 而不减旧条目字节 ⇒ `bytes_cached()`/`_total` **高估**，写透替换活键时提前触发淘汰。
+     既有缺陷（本刀评审抓到、spec §8 明写「淘汰与预算算法不动」⇒ 未顺手修）；偏高是保守方向——不会 OOM，
+     但低估「还能装几只」。单独立一条还是并进内存治理批 2/3 由用户拍。
+     ③ **`clean_data` 的根治**：Task 4 现用「模块级薄封装 + 函数内延迟 import」
+     （`apps/dashboard/services.py:37-49`）绕开 `apps/jobs/runner.py` 的 worker 隔离红线（模块级 import 实测
+     红 3 条 `apps.jobs`）。根治＝把只依赖 `math` 的 `clean_data` 上移到无 Django 依赖模块、由
+     `apps/analysis/views/_helpers.py` re-export 给其余调用点（`git grep -n "clean_data(" -- apps | grep -v tests`
+     今日现数 24 行，**含定义与转发行**；台账原话「约 18 处」是量级不是断言）——要动 `_helpers.py`，
+     超出本刀白名单，**另立一条**做不做由用户拍。
 2. **内存治理批 2（准入）/ 批 3（每-worker 硬上限）/ 崩池本身** —— 三条**至今零代码**：
    `grep -nE "acquire|admit|per_worker|硬上限" apps/common/memory.py` **零命中**；正文那两句（`:5361`、`:5639`）
    原样有效。批 1 已落地且被 2026-10-24 全量池覆盖 ✓，所以这三条是在**批 1 之上**再拍，不是重来。
@@ -6122,3 +6212,28 @@ Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `roo
 > `wc -l` 实测 `pages/data/DataBrowserAgGrid.vue` 已是 **590**（`7ce7175` 等几笔拆下去的），
 > 前端已无 >600 行的文件 ⇒ 674 是 2026-10-15 那份架构评审的数，P2-2 的前提（「唯一破 600」）已经不成立，
 > 要不要仍按重构做需要重述，不能只改数字。
+
+## 2026-10-26 终评残留落账（B 后端载荷收尾 · 具名工单）
+
+来源：`feat/backend-payload-dedup` 最终评审列出的**流程欠账**——台账 Task 3/Task 5 两次建议
+「另立工单、不是每轮重跑」，承诺一直没落。本节即落地（只落账，不动行为）。
+
+1. **工单：把 `apps/datafiles/tests_parse_cache.py` 里两条 delay 编排的单飞用例换成可等待的同步原语**
+   （待办，处置已由裁定给定、不缺决策只缺工时）。
+   对象：既有的 `test_concurrent_miss_for_same_key_parses_once` 与本刀新增的
+   `test_concurrent_miss_from_two_owners_parses_once`——两条都靠 `delay=0.3` + `time.sleep(0.05)`
+   编排线程先后，在窄标签 + 负载下会偶红：**洁净 HEAD 实测 5/6 也红**（比本树更差），
+   本刀把这条红面从 1 条翻倍到 2 条。
+   处置＝**把时序编排换成可等待的同步原语**（例如让假 parser 自己发布「已进入解析」的事件、
+   第二个线程等到该事件再起跑），**不是调睡眠参数**；不许 skip、不许放宽断言。
+   动的是测试编排，不碰 `services.py` 的单飞实现。
+   ⚠ `tasks/premerge-2026-10-23/` 下那份是冻结归档，**绝对不要改**。
+   坐标：B 档第 1 条「已知偶红的本轮账」段（本文件 `:6021-6027`，行号会漂，按语义找）；
+   归因与两次结论行原文见 `.superpowers/sdd/2026-10-25-backend-payload-dedup/task-5-report.md` §5。
+   **再一例（2026-10-26，合并后）**：FF 并入 master 之后跑
+   `python manage.py test apps.datafiles.tests_parse_cache apps.datafiles.tests_parse_cache_scan apps.dashboard`
+   首跑 `Ran 60 tests … FAILED (failures=2)`，同命令立即复跑 `Ran 60 tests in 6.686s / OK` ⇒ 归为负载抖动，
+   不改变本节结论（同一棵树的后端全套 1867 例在前一分钟是 OK 的）。
+   ⚠ 诚实边界：**首跑那两个红项的名字没进日志** —— 我当时给命令接了 `| tail -3`，把 `FAIL:` 行截掉了。
+   这是本分支第三次同一个取证错误（前两次记在 `task-5-report.md` §5 与终评 re-review），
+   工单的修法里请连带写上一条：**窄标签取证一律先落文件再读，别接 `tail`**。
