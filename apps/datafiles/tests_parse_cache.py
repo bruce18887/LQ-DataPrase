@@ -4,15 +4,16 @@
 DataFrame（实测 10 万行 × 826 列 ≈ 667MB）——几张大表同时驻留就是数 GB
 常驻内存；且 ``lru_cache`` 不合并并发 miss，首屏 3 个请求会把同一只文件
 各解析一遍（单次解析实测约 4s）。
+
+``SharedFrameSafetyTests``（缓存帧只读的静态扫描）自成一体，2026-10-26 搬到
+``apps/datafiles/tests_parse_cache_scan.py``——为的是这条硬线：单文件 ≤600 行。
 """
 import os
-import re
 import shutil
 import tempfile
 import threading
 import time
 import types
-from pathlib import Path
 from unittest import mock
 
 import pandas as pd
@@ -374,6 +375,50 @@ class PutCachedParsedFileTests(_CacheCaseBase):
         self.assertEqual(out_fmt, fmt)
         self.assertEqual(parser.calls, 1, '写透后首次读取不应再解析')
 
+    def test_write_through_metadata_carries_col_meta(self):
+        """写透那侧也要自带 `col_meta`，否则缓存条目每次读都让消费侧现场重算。
+
+        上传/导入才是主入库路径：``_helpers.parse_file_meta`` 直接
+        ``parser.parse`` 拿到的 metadata **不含 col_meta**，写透时不补的话，
+        这条条目此后每一次 browse/analysis 读都要走
+        ``metadata.get('col_meta') or build_col_meta(df, metadata)`` 的回落，
+        即「每文件一次」的收益在主入库路径上根本没兑现（J4 只覆盖了回放路径）。
+
+        ⚠ 打桩目标是 ``apps.datafiles.services.build_col_meta``——按 R6③ 必须 patch
+        消费方绑定，patch `limits` 那份不生效（会静默假绿）。
+        """
+        frame = _frame(rows=200, cols=8)
+        md = {
+            'format': 'CTA8290D',
+            'units': {c: 'um' for c in frame.columns},
+            'mins': {c: '-999.9999' for c in frame.columns},
+            'maxs': {c: '999.9999' for c in frame.columns},
+        }
+        parser = self.patch_parser(frame, metadata=md)
+        # 上传链路的真实入参形状：parser.parse 的原始产出，没有 col_meta。
+        df, metadata = parser.parse(self.path)
+        self.assertNotIn('col_meta', metadata, '前提：写透侧拿到的就是没算过的 metadata')
+        self.assertEqual(parser.calls, 1)
+
+        fake = types.SimpleNamespace(file_path=self.path, format_type='CTA8290D')
+        real = services.build_col_meta
+        with mock.patch('apps.datafiles.services.build_col_meta',
+                        wraps=real) as spy:
+            services.put_cached_parsed_file(1, 1, fake, df, metadata, 'CTA8290D')
+            _df1, first_meta, _fmt1 = services.get_cached_parsed_file(1, 1, fake)
+            # 第二个 owner 命中同一条目（键是内容坐标），也不该再算一遍
+            _df2, second_meta, _fmt2 = services.get_cached_parsed_file(2, 2, fake)
+
+        self.assertIn('col_meta', first_meta,
+                      '写透进缓存的 metadata 必须自带 col_meta，否则每次读都走回落')
+        self.assertEqual(first_meta['col_meta'], second_meta['col_meta'])
+        self.assertEqual(sorted(first_meta['col_meta']), sorted(frame.columns))
+        self.assertEqual(spy.call_count, 1,
+                         f'写透 + 两次读取共触发 {spy.call_count} 次，'
+                         '应只在写透时算一次，第二次读不得再多调')
+        self.assertNotIn('col_meta', metadata,
+                         '写透不得原地改调用方那份 metadata（它正被上传链路继续读）')
+
 
 class RegisterFileWriteThroughTests(TestCase):
     """_register_file 上传时的解析结果要写进缓存（需要真实 User 与 DB）。"""
@@ -498,99 +543,3 @@ class CacheBudgetWiringTests(SimpleTestCase):
             'entries', 'bytes', 'budget_bytes', 'in_flight',
             'hits', 'misses', 'evictions', 'clears',
         })
-
-
-class SharedFrameSafetyTests(SimpleTestCase):
-    """缓存帧跨请求共享 ⇒ 消费者要改它必须先 copy。这条扫描把口头约定钉住。
-
-    三个刻意的形状：
-    ① **只在含 `get_cached_parsed_file` 的函数块里找原地写**，且写之前出现过
-       `df = df.<method>(...)` 这种重新绑定（copy/astype/head…）就放行。朴素正则会在
-       `apps/analysis/views/file_correlation_views.py:169-170` 那处「先 copy 再加辅助列」的
-       **合规写法**上假红 —— 2026-10-26 预检实测就是这样，而假红的护栏最后没人看。
-    ② 按**载体并集**扫，且「某个载体读不到」直接判红：2026-10-23 那次常量搬家后单文件扫描
-       零命中、空集反而"相等"，就是假绿（见 docs/tasks/todo.md:5325-5329）。
-    ③ 模式串用拼接构造，否则这条测试文件自己含住模式，会被自己抓到。
-
-    已知局限（别当成完整防线）：放行规则是"同一函数块里先前有过重新绑定"，所以一个函数
-    先 copy、之后再往**原对象**上写会漏；把缓存帧当参数传给别处去改也扫不到。
-    这两类由 J1/J3 的行为断言兜（共享身份 + 并发同源），静态扫描只是第一道。
-    """
-
-    CARRIERS = [
-        'apps/analysis/views/_helpers.py',
-        'apps/analysis/views/analysis_views.py',
-        'apps/analysis/views/file_correlation_views.py',
-        'apps/batch_report/services.py',
-        'apps/batch_report/views.py',
-        'apps/buyoff/views.py',
-        'apps/common/file_loading.py',
-        'apps/dashboard/views.py',
-        'apps/datafiles/views/browse_views.py',
-        'apps/gage/views.py',
-    ]
-    CALL = 'get_cached_parsed_file'
-    DEFINITION_SITE = 'apps/datafiles/services.py'   # 定义处，不是调用处
-    WRITE = re.compile('(' + r'\bdf\[[^\]]+\]\s*=[^=]'
-                       + '|' + r'\bdf\.(?:loc|iloc)\[[^\]]+\]\s*=[^=]'
-                       + '|' + r'\bdf\.drop\([^)]*inplace=True'
-                       + '|' + r'del df\[)')
-    REBIND = re.compile(r'\bdf\s*=\s*df\.\w+\(')
-
-    @staticmethod
-    def _func_blocks(text):
-        block, blocks = [], []
-        for line in text.split('\n'):
-            if re.match(r'^(async )?def ', line) and block:
-                blocks.append(block)
-                block = []
-            block.append(line)
-        if block:
-            blocks.append(block)
-        return blocks
-
-    def test_no_caller_mutates_the_shared_frame(self):
-        root = Path(services.__file__).resolve().parents[2]
-        scanned = 0
-        for rel in self.CARRIERS:
-            path = root / rel
-            self.assertTrue(path.is_file(), f'载体清单过期：{rel} 读不到（假绿源头）')
-            for block in self._func_blocks(path.read_text(encoding='utf-8')):
-                if self.CALL not in '\n'.join(block):
-                    continue
-                rebound = False
-                for line in block:
-                    if self.REBIND.search(line):
-                        rebound = True
-                        continue
-                    hit = self.WRITE.search(line)
-                    if hit and not rebound:
-                        self.fail(f'{rel} 在共享的缓存帧上原地写：{hit.group(0)}')
-            scanned += 1
-        self.assertEqual(scanned, len(self.CARRIERS),
-                         '每个载体都必须真的被扫到，扫描数与清单数必须相等')
-
-    def test_carriers_actually_contain_call_sites(self):
-        """每个载体都必须真的有调用点，否则上面那条扫描是空跑。"""
-        root = Path(services.__file__).resolve().parents[2]
-        for rel in self.CARRIERS:
-            text = (root / rel).read_text(encoding='utf-8')
-            hits = [ln for ln in text.split('\n')
-                    if self.CALL in ln and not ln.strip().startswith('#')]
-            self.assertTrue(hits, f'{rel} 里一个 {self.CALL} 调用点都没有 —— 清单该更新了')
-
-    def test_no_call_site_lives_outside_the_carrier_list(self):
-        """新调用点必须显式进清单，不能悄悄长在扫描之外。"""
-        root = Path(services.__file__).resolve().parents[2]
-        listed = set(self.CARRIERS) | {self.DEFINITION_SITE}
-        # 与 CARRIERS/DEFINITION_SITE 一样用「相对 root 的 posix 路径」比较：
-        # root.glob 返回的是绝对路径（services.__file__ 已 resolve），直接
-        # p.as_posix() 与相对清单永不相等 ⇒ 十个载体全被误判为「stray」。
-        # 断言本体（stray==[]）不变：真长出清单外的调用点仍会以其相对路径出现并判红。
-        stray = sorted(
-            p.relative_to(root).as_posix() for p in root.glob('apps/**/*.py')
-            if '__pycache__' not in p.as_posix()
-            and 'test' not in p.name.lower()
-            and self.CALL in p.read_text(encoding='utf-8', errors='ignore')
-            and p.relative_to(root).as_posix() not in listed)
-        self.assertEqual(stray, [], f'这些文件有调用点却不在 CARRIERS 里：{stray}')

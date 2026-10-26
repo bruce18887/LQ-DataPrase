@@ -315,6 +315,16 @@ def put_cached_parsed_file(file_id: int, owner_id: int, datafile,
         return
     abs_path = resolve_file_path(datafile.file_path)
     path_key = _disk_mtime_ns(abs_path)
+    # 上传链路的 metadata 来自 ``_helpers.parse_file_meta`` 的直接 ``parser.parse``，
+    # 不经过 ``_parse_file_uncached``，所以它**没有** ``col_meta``。不在这里补上，
+    # 这条条目此后每一次读都要走消费侧的
+    # ``metadata.get('col_meta') or build_col_meta(df, metadata)`` 回落，
+    # 「每文件只算一次」（J4）就只在回放路径兑现，而上传/导入才是主入库路径。
+    # 与 ``_parse_file_uncached`` 同形：先复制一份再挂键，且
+    # ``build_col_meta`` 的入参是**尚未带 col_meta 的那份**。
+    if 'col_meta' not in metadata:
+        metadata = dict(metadata)
+        metadata['col_meta'] = build_col_meta(df, metadata)
     _parse_cache.put((abs_path, path_key, datafile.format_type), (df, metadata, fmt))
 
 
