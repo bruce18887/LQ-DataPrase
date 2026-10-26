@@ -331,11 +331,16 @@ Expected: FAIL —— J1 红在 `len(...)==2` 与 `parser.calls==2`，J3 红在 
 
 ```python
 class SharedFrameSafetyTests(SimpleTestCase):
-    """缓存帧跨请求共享 ⇒ 任何调用方原地改它就是并发写。这条扫描把它钉住。
+    """缓存帧跨请求共享 ⇒ 消费者要改它必须先 copy。这条扫描把口头约定钉住。
 
-    两个刻意的形状：① 按**载体并集**扫，且「某个载体读不到」直接判红——2026-10-23 那次
-    常量搬家后单文件扫描零命中、空集反而"相等"，就是假绿（见 docs/tasks/todo.md:5325-5329）。
-    ② 正则用拼接构造，否则这条测试文件自己会含住模式串、被自己抓到。
+    三个刻意的形状：
+    ① **只在含 `get_cached_parsed_file` 的函数块里找原地写**，且写之前出现过
+       `df = df.<method>(...)` 这种重新绑定（copy/astype/head…）就放行。朴素正则会在
+       `apps/analysis/views/file_correlation_views.py:169-170` 那处「先 copy 再加辅助列」的
+       **合规写法**上假红 —— 2026-10-26 预检实测就是这样，而假红的护栏最后没人看。
+    ② 按**载体并集**扫，且「某个载体读不到」直接判红：2026-10-23 那次常量搬家后单文件扫描
+       零命中、空集反而"相等"，就是假绿（见 docs/tasks/todo.md:5325-5329）。
+    ③ 模式串用拼接构造，否则这条测试文件自己含住模式，会被自己抓到。
     """
 
     CARRIERS = [
@@ -350,10 +355,24 @@ class SharedFrameSafetyTests(SimpleTestCase):
         'apps/datafiles/views/browse_views.py',
         'apps/gage/views.py',
     ]
-    MUTATION = re.compile('(' + r'\bdf\.drop\([^)]*inplace=True'
-                          + r'|' + r'\bdf\[[^\]]+\]\s*=[^=]'
-                          + r'|' + r'\bdf\.(loc|iloc)\[[^\]]+\]\s*=[^=]'
-                          + r'|' + r'del df\[)')
+    CALL = 'get_cached_parsed_file'
+    WRITE = re.compile('(' + r'\bdf\[[^\]]+\]\s*=[^=]'
+                       + '|' + r'\bdf\.(?:loc|iloc)\[[^\]]+\]\s*=[^=]'
+                       + '|' + r'\bdf\.drop\([^)]*inplace=True'
+                       + '|' + r'del df\[)')
+    REBIND = re.compile(r'\bdf\s*=\s*df\.\w+\(')
+
+    @staticmethod
+    def _func_blocks(text):
+        block, blocks = [], []
+        for line in text.split('\n'):
+            if re.match(r'^(async )?def ', line) and block:
+                blocks.append(block)
+                block = []
+            block.append(line)
+        if block:
+            blocks.append(block)
+        return blocks
 
     def test_no_caller_mutates_the_shared_frame(self):
         root = Path(services.__file__).resolve().parents[2]
@@ -361,10 +380,17 @@ class SharedFrameSafetyTests(SimpleTestCase):
         for rel in self.CARRIERS:
             path = root / rel
             self.assertTrue(path.is_file(), f'载体清单过期：{rel} 读不到（假绿源头）')
-            text = path.read_text(encoding='utf-8')
-            match = self.MUTATION.search(text)
-            self.assertIsNone(match,
-                              f'{rel} 在原地改共享的 df：{match and match.group(0)}')
+            for block in self._func_blocks(path.read_text(encoding='utf-8')):
+                if self.CALL not in '\n'.join(block):
+                    continue
+                rebound = False
+                for line in block:
+                    if self.REBIND.search(line):
+                        rebound = True
+                        continue
+                    hit = self.WRITE.search(line)
+                    if hit and not rebound:
+                        self.fail(f'{rel} 在共享的缓存帧上原地写：{hit.group(0)}')
             scanned += 1
         self.assertEqual(scanned, len(self.CARRIERS),
                          '每个载体都必须真的被扫到，扫描数与清单数必须相等')
@@ -372,9 +398,15 @@ class SharedFrameSafetyTests(SimpleTestCase):
 
 顶部补两行 import：`import re` 与 `from pathlib import Path`。
 
+**已知局限（如实写，别当成完整防线）**：放行规则是"同一函数块里先前有过重新绑定"，所以一个函数
+先 copy、之后再往**原对象**上写会漏；把缓存帧当参数传给别处去改也扫不到。这两类由 J1/J3 的
+行为断言兜（共享身份 + 并发同源），静态扫描只是第一道。
+
 Run: `python manage.py test apps.datafiles.tests_parse_cache.SharedFrameSafetyTests -v 2`
-Expected: PASS（今天 10 个载体都不含原地写）。**它必须一次就绿**——这条不是"新功能红转绿"，
-而是把既有约定变成判据；如果它红，说明撞到了真问题，停下来报，不许改正则放行。
+Expected: PASS（2026-10-26 预检已用同一份逻辑在 10 个载体上跑过：唯一命中是
+`file_correlation_views.py:170` 的 `df['__serial__'] =`，它前面 `:169` 有 `df = df.copy()` ⇒ 放行）。
+**它必须一次就绿**——这条不是"新功能红转绿"，而是把既有约定变成判据。如果它红，说明撞到了真问题，
+停下来报，不许改正则放行。
 
 - [ ] **Step 7: 跑，确认全类绿**
 
@@ -693,9 +725,12 @@ git commit -m "perf(dashboard): clean_data 挪到缓存写入侧，命中不再�
 
 - [ ] **Step 1: 后端全套**
 
-Run: `python manage.py test test.backend apps.accounts apps.analysis apps.buyoff apps.common apps.dashboard apps.datafiles apps.export apps.gage apps.jobs apps.report apps settings apps.sftp -v 1`
-（labels 与 `scripts/e2e_nightly.mjs:129-136` 同源枚举 `apps/` 每个目录；**别手打 `apps.*`**，那是非法标签，
-实测只跑 1104 例并带一条 ModuleNotFoundError，看着像回归。）
+Run: `python manage.py test test.backend apps.accounts apps.analysis apps.batch_report apps.buyoff apps.common apps.dashboard apps.datafiles apps.export apps.gage apps.jobs apps.sftp apps.weight -v 1`
+（这 13 条 label 与 `scripts/e2e_nightly.mjs:131-136` 的 `backendLabels()` 一一对应
+＝ `test.backend` + `apps/` 下每个不以 `__` 开头的目录。**别手打 `apps.*`**：那不是合法标签，
+会被当模块名去 import，实测只跑 1104 例并带一条 `ModuleNotFoundError: No module named 'apps.*'`，
+看着像回归。也别凭记忆列目录名 —— 本条第一次起草时就漏了 `batch_report`/`weight`、
+编出了根本不存在的 `apps.report` 与 `apps settings`。）
 Expected: `Ran NNNN tests ... OK`（基线例数见提交信息，逐条对账）
 
 - [ ] **Step 2: 快门禁**
