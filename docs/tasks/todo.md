@@ -6034,16 +6034,19 @@ Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `roo
      ⚠ 指针（2026-10-26 终评 Minor 落账）：收口笔 `1ab8d79` 的提交信息写着「阈值按本次对照定」——那句文案是
      计划模板带出的，**以本条为准：阈值未定，复测未跑**（不缺夹具，缺一个独占测量窗口）。历史提交不改写；
      只读 `git log` 的人经此指针回到本条，别按提交信息误读。
-   * **600 行新账**（2026-10-26 `wc -l` 现数）：`apps/datafiles/services.py` **414** ·
-     `apps/datafiles/tests_parse_cache.py` **545**（29 条 `def test_`）· `apps/datafiles/tests_parse_cache_scan.py`
+   * **600 行新账**（2026-10-26 终评修复波之后由控制器重跑 `wc -l` 刷新；本行第一次入账时是 414/545/29，
+     是那条修复波自己给 `services.py` 加了两处 docstring、给测试补了 J6 的后半句把数顶上去的）：
+     `apps/datafiles/services.py` **432** ·
+     `apps/datafiles/tests_parse_cache.py` **584**（30 条 `def test_`）· `apps/datafiles/tests_parse_cache_scan.py`
      **112**（3 条）· `apps/dashboard/services.py` **424** · `apps/dashboard/tests.py` **584**（23 条 `def test_`）——
-     ⚠ `apps/dashboard/tests.py` 已贴着 600 上限，**下一次编辑必须先拆文件**（Task 4 台账的 minor 在册）。
+     ⚠ `apps/dashboard/tests.py` 与 `tests_parse_cache.py` 都贴着 600 上限，**下一次编辑必须先拆文件**（Task 4 台账的 minor 在册）。
    * **新开的三条待拍板**：
-     ① **检测层仍按 owner 重复**：`apps/datafiles/services.py:331` 的 `@lru_cache(maxsize=32)`
-     `_cached_fail_data` 键含 `file_id`/`owner_id`（`:332-333`；调用点 `apps/datafiles/views/browse_views.py:147-148`），
+     ① **检测层仍按 owner 重复**：`apps/datafiles/services.py:349` 的 `@lru_cache(maxsize=32)`
+     `_cached_fail_data` 键含 `file_id`/`owner_id`（`:350-351`；调用点 `apps/datafiles/views/browse_views.py:147-148`），
      而检测本体 `detect_fail_data_with_borderline(df, metadata)` 只吃内容坐标 ⇒ 同一路径 20 个 owner
      memo 出 20 份**完全相同**的红格/橙格结果，且 `maxsize=32` 按条数计会被挤空；检测自身抛错时
-     `(None, None, None, None)` 会被 memo 住到 `clear_parse_cache` 为止（`:354-356`；解析失败不 poison 它，
+     `(None, None, None, None)` 会被 memo 住到 `clear_parse_cache` 为止（`:368-369` 走 `df is None` 那条、
+     `:374` 走检测自己抛错那条；解析失败不 poison 它，
      `browse_views.py:143` 先行 400）。全仓 **0 条用例覆盖**（`git grep -l "get_cached_fail_data\|_cached_fail_data"
      -- 'apps/*/tests*' 'test/**'` 空返回）。修法与本刀 `_parse_cache` 同族（同一内容坐标 + 失败不 memo，
      加计数判据 J8），要不要开刀由用户拍。
