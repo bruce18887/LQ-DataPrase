@@ -32,16 +32,19 @@ def _frame(rows=2000, cols=6):
 class _CountingParser:
     """假解析器：统计被真正解析的次数，可注入耗时。"""
 
-    def __init__(self, frame, delay=0.0):
+    def __init__(self, frame, delay=0.0, metadata=None):
         self.frame = frame
         self.delay = delay
         self.calls = 0
+        # 默认沿用旧形状 {'format': 'CTA8290D'}（所有既有调用点行为不变）；
+        # J7 用例需要一份带真实 units/mins/maxs 的 metadata 来体现 col_meta 的量级。
+        self.metadata = metadata if metadata is not None else {'format': 'CTA8290D'}
 
     def parse(self, path):
         self.calls += 1
         if self.delay:
             time.sleep(self.delay)
-        return self.frame, {'format': 'CTA8290D'}
+        return self.frame, dict(self.metadata)
 
 
 class _CacheCaseBase(SimpleTestCase):
@@ -59,8 +62,8 @@ class _CacheCaseBase(SimpleTestCase):
         services._parse_cache = services._BytesLRUCache(budget_bytes)
         return services._parse_cache
 
-    def patch_parser(self, frame, delay=0.0):
-        parser = _CountingParser(frame, delay)
+    def patch_parser(self, frame, delay=0.0, metadata=None):
+        parser = _CountingParser(frame, delay, metadata)
         original = services.get_parser
         services.get_parser = lambda fmt: parser
         self.addCleanup(setattr, services, 'get_parser', original)
@@ -298,6 +301,56 @@ class BytesLRUCacheTests(_CacheCaseBase):
         services.evict_parse_cache_to(0.5)
         self.assertLessEqual(services._parse_cache.bytes_cached(), before / 2)
 
+    def test_col_meta_is_built_once_per_file_not_per_request(self):
+        """J4：翻页不该再付每请求的 O(列) 循环（1702 列那档实测 260ms）。"""
+        frame = _frame()
+        parser = self.patch_parser(frame)
+        real = services.build_col_meta
+        with mock.patch('apps.datafiles.services.build_col_meta',
+                        wraps=real) as spy:
+            first = services._cached_parse(11, 1, 12345, self.path, 'CTA8290D')
+            second = services._cached_parse(22, 2, 12345, self.path, 'CTA8290D')
+
+        self.assertEqual(spy.call_count, 1,
+                         f'build_col_meta 被调 {spy.call_count} 次，应随解析只算一次')
+        self.assertEqual(first[1]['col_meta'], second[1]['col_meta'])
+
+    def test_col_meta_value_matches_the_per_request_builder(self):
+        """缓存里那份必须与「每请求现场算」逐字段相等——响应形状不许动。"""
+        frame = _frame()
+        parser = self.patch_parser(frame)
+        df, metadata, _fmt = services._cached_parse(1, 1, 12345, self.path, 'CTA8290D')
+        cached_meta = metadata['col_meta']
+
+        fresh_input = {k: v for k, v in metadata.items() if k != 'col_meta'}
+        self.assertEqual(cached_meta, services.build_col_meta(df, fresh_input))
+        self.assertEqual(sorted(cached_meta), sorted(df.columns))
+
+    def test_budget_counts_col_meta_real_bytes(self):
+        """J7：`64 × len(metadata)` 会把几十 KB 的 col_meta 估成 64 字节。"""
+        frame = _frame(rows=200, cols=8)
+        # 真实解析的 metadata 每列都带 unit/min/max 字符串；col_meta 由这些值拼出。
+        # 夹具若返回空 units（值全是 ''），col_meta 只剩列名那点长度，量级到不了
+        # 「几十 KB」，J7 断言也就无从体现——这里喂一份与真实文件同形的 metadata。
+        md = {
+            'format': 'CTA8290D',
+            'units': {c: 'um' for c in frame.columns},
+            'mins': {c: '-999.9999' for c in frame.columns},
+            'maxs': {c: '999.9999' for c in frame.columns},
+        }
+        parser = self.patch_parser(frame, metadata=md)
+        df, metadata, fmt = services._cached_parse(1, 1, 12345, self.path, 'CTA8290D')
+
+        value_bytes = services._parse_value_bytes((df, metadata, fmt))
+        self.assertGreaterEqual(
+            value_bytes,
+            services._frame_bytes(df) + services._col_meta_bytes(metadata),
+            '体积估算必须包含 col_meta 的真实量级')
+        self.assertGreater(
+            value_bytes,
+            services._frame_bytes(df) + 64 * len(metadata),
+            '沿用「metadata 一律按 64 字节/键」会低估')
+
 
 class PutCachedParsedFileTests(_CacheCaseBase):
     """上传写透：put 之后读侧必须直接命中，不能再解析一次。"""
@@ -477,6 +530,7 @@ class SharedFrameSafetyTests(SimpleTestCase):
         'apps/gage/views.py',
     ]
     CALL = 'get_cached_parsed_file'
+    DEFINITION_SITE = 'apps/datafiles/services.py'   # 定义处，不是调用处
     WRITE = re.compile('(' + r'\bdf\[[^\]]+\]\s*=[^=]'
                        + '|' + r'\bdf\.(?:loc|iloc)\[[^\]]+\]\s*=[^=]'
                        + '|' + r'\bdf\.drop\([^)]*inplace=True'
@@ -515,3 +569,28 @@ class SharedFrameSafetyTests(SimpleTestCase):
             scanned += 1
         self.assertEqual(scanned, len(self.CARRIERS),
                          '每个载体都必须真的被扫到，扫描数与清单数必须相等')
+
+    def test_carriers_actually_contain_call_sites(self):
+        """每个载体都必须真的有调用点，否则上面那条扫描是空跑。"""
+        root = Path(services.__file__).resolve().parents[2]
+        for rel in self.CARRIERS:
+            text = (root / rel).read_text(encoding='utf-8')
+            hits = [ln for ln in text.split('\n')
+                    if self.CALL in ln and not ln.strip().startswith('#')]
+            self.assertTrue(hits, f'{rel} 里一个 {self.CALL} 调用点都没有 —— 清单该更新了')
+
+    def test_no_call_site_lives_outside_the_carrier_list(self):
+        """新调用点必须显式进清单，不能悄悄长在扫描之外。"""
+        root = Path(services.__file__).resolve().parents[2]
+        listed = set(self.CARRIERS) | {self.DEFINITION_SITE}
+        # 与 CARRIERS/DEFINITION_SITE 一样用「相对 root 的 posix 路径」比较：
+        # root.glob 返回的是绝对路径（services.__file__ 已 resolve），直接
+        # p.as_posix() 与相对清单永不相等 ⇒ 十个载体全被误判为「stray」。
+        # 断言本体（stray==[]）不变：真长出清单外的调用点仍会以其相对路径出现并判红。
+        stray = sorted(
+            p.relative_to(root).as_posix() for p in root.glob('apps/**/*.py')
+            if '__pycache__' not in p.as_posix()
+            and 'test' not in p.name.lower()
+            and self.CALL in p.read_text(encoding='utf-8', errors='ignore')
+            and p.relative_to(root).as_posix() not in listed)
+        self.assertEqual(stray, [], f'这些文件有调用点却不在 CARRIERS 里：{stray}')

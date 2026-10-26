@@ -8,7 +8,10 @@ from typing import Optional, Tuple
 
 import pandas as pd
 
-from apps.analysis.services.statistics import detect_fail_data_with_borderline
+from apps.analysis.services.statistics import (
+    build_col_meta,
+    detect_fail_data_with_borderline,
+)
 from apps.common.memory import get_budget
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import get_parser, BaseATEParser
@@ -46,12 +49,31 @@ def _frame_bytes(df) -> int:
         return 0
 
 
+def _col_meta_bytes(metadata) -> int:
+    """`col_meta` 的真实量级：列名 + 每列三个字符串。
+
+    1702 列那档是几十 KB 量级。`_parse_value_bytes` 若继续按 `64 × len(metadata)` 算，
+    它会被估成 64 字节，1536MB 那条预算就成了自欺的数字（判据 J7）。
+    """
+    col_meta = metadata.get('col_meta') if isinstance(metadata, dict) else None
+    if not isinstance(col_meta, dict):
+        return 0
+    total = 0
+    for name, entry in col_meta.items():
+        total += len(str(name))
+        if isinstance(entry, dict):
+            total += sum(len(str(v)) for v in entry.values())
+    return total
+
+
 def _parse_value_bytes(value) -> int:
-    """``(df, metadata, format_type)`` 三元组的缓存占用（metadata 只算量级）。"""
+    """``(df, metadata, format_type)`` 三元组的缓存占用（metadata 按真实量级）。"""
     df = value[0] if isinstance(value, tuple) else None
     total = _frame_bytes(df)
     if isinstance(value, tuple) and isinstance(value[1], dict):
-        total += 64 * len(value[1])
+        meta = value[1]
+        total += 64 * (len(meta) - (1 if 'col_meta' in meta else 0))
+        total += _col_meta_bytes(meta)
     return total
 
 
@@ -222,6 +244,8 @@ def _parse_file_uncached(file_id: int, owner_id: int, path_key: int,
         df, metadata = parser.parse(file_path)
         if df is None:
             return None, metadata, format_type
+        metadata = dict(metadata)
+        metadata['col_meta'] = build_col_meta(df, metadata)
         return df, metadata, format_type
     except Exception as exc:
         logger.warning("_cached_parse(%s, %s, %s) failed: %s", file_id, owner_id, path_key, exc)
