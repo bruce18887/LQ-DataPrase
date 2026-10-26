@@ -6237,3 +6237,12 @@ Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `roo
    ⚠ 诚实边界：**首跑那两个红项的名字没进日志** —— 我当时给命令接了 `| tail -3`，把 `FAIL:` 行截掉了。
    这是本分支第三次同一个取证错误（前两次记在 `task-5-report.md` §5 与终评 re-review），
    工单的修法里请连带写上一条：**窄标签取证一律先落文件再读，别接 `tail`**。
+   **第四例，且第一次拿到名字（2026-10-26，squash 合并并对回 `origin/master` 之后）**：
+   `python manage.py test apps.datafiles.tests_parse_cache apps.datafiles.tests_parse_cache_scan apps.dashboard`
+   首跑 `Ran 60 tests … FAILED (failures=2)`，两条红项**都在工单点名的那两条上** ——
+   `FAIL: test_concurrent_miss_for_same_key_parses_once`、
+   `FAIL: test_concurrent_miss_from_two_owners_parses_once`（`apps.datafiles.tests_parse_cache.BytesLRUCacheTests`）。
+   同模块**独占**复跑 `Ran 30 tests in 0.978s / OK` ⇒ 判负载抖动，与本节结论一致。
+   这次的取证是按上面那条做的（`> /tmp/….log 2>&1` 之后再 grep），所以名字进得了账。
+   ⇒ 给修法多一条实测依据：**三条红只在"多模块并跑 + 机器上另有会话"时出现，单模块必绿**，
+   所以换同步原语之后要补一条"与相邻模块并跑"的验证，别只在独占档里验。
