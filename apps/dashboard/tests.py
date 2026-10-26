@@ -503,3 +503,82 @@ class SummaryCleanOnceTests(TestCase):
         self.assertEqual(json.loads(dumped), clean_data(raw))
         self.assertNotIn('NaN', dumped)
         self.assertNotIn('Infinity', dumped)
+
+    def test_real_endpoint_cleans_exactly_once_across_cache_hit(self):
+        """J5 的另一半：清洗不许「再回到出口」—— 走真实端点，两道互补判据。
+
+        `test_cache_hit_does_not_reclean` 的 spy 打在 `apps.dashboard.services.clean_data`
+        这只绑定上，它钉得住「清洗发生在 services」，**钉不住「清洗不再发生在出口」**：
+        有人把视图响应重新包成 `clean_data(get_dashboard_summary(...))`（本仓其余约 18 个
+        端点正是这个写法，顺手会写，合并冲突时也会被自动「解」回来），上面那两条与
+        `SummaryInfApiTests` 那族照样全绿 —— 提交信息里「命中不再重建整份 payload」只守住
+        了半边。这里补两条方向相反、盲区互补的判据：
+
+        ① spy 装在唯一源头 `apps.analysis.views._helpers.clean_data`（`mock.patch.object` +
+           `wraps=`，行为不动只记次数）。`services.py:48-49` 的薄封装是**函数内**
+           `from ... import clean_data`，每次调用都重新解析 `_helpers` 的那个属性 ⇒ patch 它
+           写入侧一定看得见（R6③ 在这里的消费方就是 `_helpers.clean_data` 本身）。
+           两次真实请求之间不清缓存 ⇒ 第二次必须命中，全程只该有「首次未命中」那一次：
+             清洗丢了 → 0（红，`SummaryInfApiTests` 那条 ValueError 用例同时红）；
+             缓存没建起来 → 2（红）；出口以「延迟 import / 属性调用」的形状加回来 → 3（红）。
+        ② 但 ①有一处**实测过的盲区**：视图若按本仓惯例在文件头 `from _helpers import clean_data`
+           （就是被本刀删掉的那行），那只绑定在 import 时就抓走了**真函数**，patch 模块属性
+           看不见它 —— 把出口清洗原样加回去，①照样绿（Fix round 1 的对照组实测）。所以再断
+           **响应体就是缓存里那一只对象**：`clean_data` 永远新建容器，出口只要再过一遍，
+           `response.data` 就不是缓存对象了 → 红。这条不依赖任何人怎么 import。
+
+        `compute_dashboard_summary` 桩成 `{}` 是刻意的：`clean_data` 递归调用的是**本模块全局
+        同名函数**（`_helpers.py:84-94`），patch 后每递归到一个节点就多计一次，非空 payload 的
+        `call_count` 是「遍历节点数」不是「清洗次数」，断不到 1。顶层次数与对象身份都跟
+        payload 大小无关，所以空 payload 不削弱这两条的方向性。
+        """
+        from unittest import mock
+
+        from rest_framework.test import APIClient
+
+        from apps.analysis.views import _helpers
+        from apps.dashboard import services as dash_services
+        from apps.dashboard import views as dash_views
+
+        user = User.objects.create_user(username='clean_once_api', password='pw')
+        datafile = DataFile.objects.create(
+            owner=user, filename='c.csv', file_path='c.csv',
+            file_size=1, format_type='ETS88', status='ready')
+
+        # 夹具沿用 SummaryInfApiTests.setUp（:360-392）的形状：视图侧两只函数按消费方
+        # 绑定替换，请求才真能走到 compute 之前，而不是被「盘上没有这个文件」提前弹回。
+        df = pd.DataFrame({'PG_RES': ['770.0', '800.0']})
+        meta = {'format': 'ETS88', 'mins': {'PG_RES': '765.0000'},
+                'maxs': {'PG_RES': '935.0000'}}
+        orig = (dash_views.resolve_file_path, dash_views.get_cached_parsed_file)
+        dash_views.resolve_file_path = lambda p: __file__
+        dash_views.get_cached_parsed_file = lambda *a, **k: (df, meta, 'ETS88')
+        self.addCleanup(setattr, dash_views, 'resolve_file_path', orig[0])
+        self.addCleanup(setattr, dash_views, 'get_cached_parsed_file', orig[1])
+
+        client = APIClient()
+        client.force_authenticate(user)
+
+        raw = {}
+        dash_services._summary_cache.clear()
+        self.addCleanup(dash_services._summary_cache.clear)
+        with mock.patch.object(dash_services, 'compute_dashboard_summary', return_value=raw), \
+             mock.patch.object(_helpers, 'clean_data', wraps=_helpers.clean_data) as spy:
+            first = client.get('/api/v1/summary/', {'file_id': datafile.id})
+            calls_after_first = spy.call_count
+            self.assertEqual(len(dash_services._summary_cache), 1, '首次未命中必须写入缓存')
+            cached = next(iter(dash_services._summary_cache.values()))
+            self.assertIs(first.data, cached, '出口不该重建 payload：响应体就得是缓存那一只')
+            # 两次请求之间不许清缓存：第二次必须命中，才谈得上「出口不再清洗」
+            second = client.get('/api/v1/summary/', {'file_id': datafile.id})
+            calls_after_second = spy.call_count
+            self.assertIs(second.data, cached, '命中返回同一只对象，且出口没有再过一遍')
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(calls_after_first, 1, '首次未命中只该有写入侧那一次清洗')
+        self.assertEqual(calls_after_second, 1,
+                         '第二次命中缓存且出口不再清洗 ⇒ 全程仍只有那 1 次；'
+                         '变成 3 就是有人把 clean_data 加回了视图出口')
+        self.assertEqual(spy.call_count, 1, '两次请求合计只清洗一次')
+
