@@ -589,11 +589,48 @@ def _parse_value_bytes(value) -> int:
 
 - [ ] **Step 7: 跑，确认绿 + 后端 browse/analysis 面不红**
 
-Run: `python manage.py test apps.datafiles.tests_parse_cache apps.datafiles apps/analysis -v 1`
+Run: `python manage.py test apps.datafiles.tests_parse_cache apps.datafiles apps.analysis -v 1`
+（label 用点号，`apps/analysis` 不是合法标签）
 Expected: `Ran N tests ... OK`。若某条既有断言写死了 `metadata` 的**键集合**（等值比较整个 dict），
 按新语义补上 `col_meta` 并写明这是刻意的形状变化；不要把它改成 `assertIn` 之类的弱断言。
 
-- [ ] **Step 8: 提交**
+- [ ] **Step 8: 给 Task 2 的静态扫描补防空集断言（控制器裁定，属本任务）**
+
+Task 2 的评审抓到一条 plan-mandated 覆盖缺口：`SharedFrameSafetyTests` 里
+`assertEqual(scanned, len(self.CARRIERS))` **永远成立**（`scanned` 就是逐载体 +1 得来的），
+而真正能假绿的形状没人挡 ——「10 个文件都读到了，但里面**一个调用点都没有**」（调用点整体搬家）
+⇒ 扫描空跑变绿。这正是该测试自己要防的那类假绿。补两条断言，加在同一个类里：
+
+```python
+    DEFINITION_SITE = 'apps/datafiles/services.py'   # 定义处，不是调用处
+
+    def test_carriers_actually_contain_call_sites(self):
+        """每个载体都必须真的有调用点，否则上面那条扫描是空跑。"""
+        root = Path(services.__file__).resolve().parents[2]
+        for rel in self.CARRIERS:
+            text = (root / rel).read_text(encoding='utf-8')
+            hits = [ln for ln in text.split('\n')
+                    if self.CALL in ln and not ln.strip().startswith('#')]
+            self.assertTrue(hits, f'{rel} 里一个 {self.CALL} 调用点都没有 —— 清单该更新了')
+
+    def test_no_call_site_lives_outside_the_carrier_list(self):
+        """新调用点必须显式进清单，不能悄悄长在扫描之外。"""
+        root = Path(services.__file__).resolve().parents[2]
+        listed = set(self.CARRIERS) | {self.DEFINITION_SITE}
+        stray = sorted(
+            p.as_posix() for p in root.glob('apps/**/*.py')
+            if '__pycache__' not in p.as_posix()
+            and 'test' not in p.name.lower()
+            and self.CALL in p.read_text(encoding='utf-8', errors='ignore')
+            and p.as_posix() not in listed)
+        self.assertEqual(stray, [], f'这些文件有调用点却不在 CARRIERS 里：{stray}')
+```
+
+预检读数（2026-10-26 控制器实跑同一份逻辑）：10 个载体各自命中 2–3 行调用点（**没有 0 命中的**），
+清单外唯一提到这个名字的文件是定义处 `apps/datafiles/services.py` ⇒ 两条都该**一次就绿**。
+它红了就是真有新调用点，补进 `CARRIERS`，不许放宽断言。
+
+- [ ] **Step 9: 提交**
 
 ```bash
 git add apps/datafiles/services.py apps/datafiles/views/browse_views.py apps/analysis/views/statistics_views.py apps/datafiles/tests_parse_cache.py
