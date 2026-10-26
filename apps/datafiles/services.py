@@ -183,13 +183,23 @@ _parse_cache = _BytesLRUCache(PARSE_CACHE_BUDGET_BYTES)
 def _disk_mtime_ns(file_path: str) -> int:
     """Return the on-disk mtime in nanoseconds, or 0 if the file is gone.
 
-    Used as a cache key suffix so that re-pointing a DataFile's
-    ``file_path`` (e.g. after the project is moved on disk) or replacing
-    the underlying file automatically invalidates the in-memory cache.
-    Without this, ``_cached_parse`` would happily hand back a cached
-    ``(None, None, fmt)`` from the previous (broken) path and the
-    analysis endpoints would 400 with
-    ``file_not_found_or_parse_failed`` even after the DB row was fixed.
+    Used as a cache key suffix: entries are keyed by the content
+    coordinates ``(resolved absolute path, this mtime, format_type)``.
+    Keying on the **resolved** absolute path is what keeps relative and
+    absolute ``file_path`` variants of the same physical file sharing
+    one entry; mtime is what makes a **successful** entry self-
+    invalidate when the underlying file is re-uploaded, overwritten or
+    otherwise replaced (including the project being moved on disk and
+    ``file_path`` re-pointed): the next read lands on a new key and
+    re-parses, instead of serving the old content's frame forever.
+
+    Old rationale retired: this docstring once justified the mtime with
+    "a cached ``(None, None, fmt)`` from a broken path would be served
+    even after the DB row was fixed" — since the 2026-10-25 payload
+    dedup work failure values never enter the cache at all
+    (``store_if=_parse_succeeded``), so that example can no longer
+    occur. The conclusion is unchanged — mtime stays in the key, now
+    argued by the success-entry invalidation above.
     """
     try:
         return os.stat(file_path).st_mtime_ns
@@ -258,7 +268,14 @@ def _parse_succeeded(value) -> bool:
     三种失败形状（路径不存在 / parser 返回 df=None / 抛异常兜成 (None, None, None)）都不该存：
     `_parse_value_bytes` 给它们算 0 字节，而 `_store` 的淘汰循环只在**总量超预算**时逐条，
     0 字节条目既不占预算也永远不会被逐出 ⇒ 一次瞬时失败会永久化到该文件 mtime 变化。
-    与写透路径 `put_cached_parsed_file`（df/metadata 为 None 时不写）是同一条规则。
+    与写透路径 `put_cached_parsed_file`（开头的守卫判 **df 与 metadata 双双非 None** 才写）
+    **方向一致但不等价**：本谓词只判 `value[0]`（df）。
+    这里只判 df 就够，因为 `(df, None, fmt)` 这个形状在本链上今天不可达——
+    `_parse_file_uncached` 在 df 非 None 后立刻对 metadata 做 `dict(metadata)`
+    （`:247-252`），metadata 为 None 会在那里抛 TypeError、落进异常分支返回
+    `(None, None, None)`，所以走到这里时「df 非 None」已蕴含「metadata 非 None」。
+    （写透侧不收 df 非 None 而 metadata 为 None 的入参，是它自己守卫更严一分；
+    两边刻意不必写成同一句谓词——读侧的形状由 `_parse_file_uncached` 兜死。）
     """
     return bool(isinstance(value, tuple) and value[0] is not None)
 

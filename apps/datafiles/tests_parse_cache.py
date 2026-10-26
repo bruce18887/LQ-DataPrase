@@ -265,6 +265,45 @@ class BytesLRUCacheTests(_CacheCaseBase):
         self.assertEqual(again, (None, None, 'CTA8290D'),
                          '重试必须返回同一条契约，而不是被缓存改写成别的形状')
 
+    def test_missing_file_recovers_and_hits_cache_after_appears(self):
+        """J6 的后半句「恢复后可正常命中」——上一条只证了「不缓存」。
+
+        `test_missing_file_hint_preserved` 守的是前一半（缺文件返回既有契约、不占缓存、
+        重试同形状）；「**不缓存**」的价值要在这条才闭合：同一坐标，等文件真的回来后
+        必须能解析成功、入缓存，且后续读取直接命中。
+        若有人把 `store_if` 闸拆掉（恢复「失败入缓存」的旧行为），第一条失败值就会占位，
+        这条在「文件回来后」当场红（命中那条 0 字节失败记录 ⇒ assertIsNotNone(df) 失败）。
+        """
+        frame = _frame()
+        parser = self.patch_parser(frame)
+        # 复用本文件的 mkstemp + addCleanup 写法：先造出来再删掉，
+        # 拿到一个「此刻保证不存在、结束时由 addCleanup 收」的路径字符串。
+        fd, path = tempfile.mkstemp(suffix='.csv')
+        os.close(fd)
+        os.remove(path)
+        self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
+
+        out = services._cached_parse(9, 1, 1, path, 'CTA8290D')
+        self.assertEqual(out, (None, None, 'CTA8290D'))
+        self.assertEqual(len(services._parse_cache), 0,
+                         '前提：文件缺失时什么都没缓存（含失败值）')
+        self.assertEqual(parser.calls, 0)
+
+        # 把那只路径「真的建出来」（假 parser 只依赖 os.path.exists，不看内容）。
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('CTA8290D\nA,B\n1,2\n')
+
+        df, _meta, fmt = services._cached_parse(9, 1, 1, path, 'CTA8290D')
+        self.assertIsNotNone(df, '文件恢复后同一坐标必须能正常解析')
+        self.assertEqual(fmt, 'CTA8290D')
+        self.assertEqual(len(services._parse_cache), 1, '恢复后的成功值应入缓存')
+        self.assertEqual(parser.calls, 1, f'实际解析 {parser.calls} 次，恢复只该 +1')
+
+        # 「可正常命中」的字面证据：再读一次不再解析，返回同一只帧。
+        again = services._cached_parse(9, 1, 1, path, 'CTA8290D')
+        self.assertIs(again[0], frame, '恢复后的第二次读取应命中缓存里同一只帧')
+        self.assertEqual(parser.calls, 1, '命中不得再触发解析')
+
     def test_hits_misses_and_clears_are_counted(self):
         self.patch_parser(_frame())
         self.cached_parse()
