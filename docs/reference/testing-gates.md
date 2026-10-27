@@ -83,7 +83,7 @@
 |---|---|---|---|
 | **T1 后端契约** | `test/backend/`、`apps/*/tests_*.py` | 响应体 / service 返回值就能表达：数值、状态码、错误码、字段存在性 | `def test_` 计数 1561（test/backend 935 + apps/* 626）；2026-10-16 实跑 `Ran 1427`；≈3.6 例/秒 |
 | **T2 前端纯函数** | `frontend/test/unit/`（vitest，node 环境，不装 jsdom） | 入参→出参，无 DOM 无网络 | 486 例 / 34 文件 / 0.53s（2026-10-25 实跑 `npm run test:unit`） |
-| **T3 浏览器不可替代** | `frontend/e2e/`（Playwright） | 只有五类：真实渲染（canvas / ag-grid 虚拟化 / 轴像素）、双主题对比度、跨页跨 tab 状态与路由守卫、上传下载与 Electron IPC、`data-*` 契约本身 | 418 次展开 / 78 文件（P1 251 · P2 141 · P0 14 · Edge 10 · setup 2；2026-10-25 `npx playwright test --list` 实测，旧账 390/75 与 P0 13 已过期）；单价 2.9–3.1 s/例 |
+| **T3 浏览器不可替代** | `frontend/e2e/`（Playwright） | 只有五类：真实渲染（canvas / ag-grid 虚拟化 / 轴像素）、双主题对比度、跨页跨 tab 状态与路由守卫、上传下载与 Electron IPC、`data-*` 契约本身 | 420 次展开 / 79 文件（P1 253 · P2 141 · P0 14 · Edge 10 · setup 2；逐 project 的 `--list` 各含 setup 那 2 条，取净数要减；2026-10-27 `npx playwright test --list` 实测，旧账 418/78、390/75 与 P0 13 已过期）；单价 2.9–3.1 s/例 |
 
 **冲突裁决**：同一判据 T1 与 T3 都能表达时，T1 写全组合，T3 只留一条「接线证明」（例：CPK 八组边界进后端，
 e2e 只断页面渲染出 CPK 且非空）。**不要在浏览器里逐组合点按钮。**
@@ -178,8 +178,8 @@ e2e 只断页面渲染出 CPK 且非空）。**不要在浏览器里逐组合点
 | `npm run test:e2e:affected` | **默认该用的**，按改动选例 |
 | `node scripts/e2e_pool.mjs --slots=N -- <files>` | 并行全量/小集合的唯一入口；`--slots=1` 用于同桶顺序污染复现 |
 | `npx playwright test --project=P1 --workers=1` | 单模块定向；SFTP 用例**必须**带 `--project=P1`，否则被 Edge project 的 `grepInvert` 静默跳过（假绿） |
-| `npm run test:e2e` | 裸跑 390 次全量，且 `workers=6` 打单进程 Django 会造出与改动无关的硬红——**不要用** |
-| `npm run test:e2e:quick` | 名义 quick，实为 Edge+P0+P1 = 255/390 ≈ **65% 套件**；不在本节奏表里、无人认领，别当快档用 |
+| `npm run test:e2e` | 裸跑 420 次全量（§2 同一轮 2026-10-27 `--list`），且 `workers=6` 打单进程 Django 会造出与改动无关的硬红——**不要用** |
+| `npm run test:e2e:quick` | 名义 quick，实为 Edge+P0+P1 = 279/420 ≈ **66% 套件**；不在本节奏表里、无人认领，别当快档用 |
 | `npm run lint:e2e` | e2e 静态体检（`tsconfig.e2e.json`）。**e2e 不在 `npm run build` 的 include 覆盖内**，删用例留下的死 import 只有这条通路能发现 |
 
 每次提交前的检查集：`npx vitest run` + `npm run lint:e2e` + `npm run build`（含 `vue-tsc -b`）。
