@@ -1,0 +1,15 @@
+#!/bin/sh
+# testing-gates.md §6.5「push 前历史自检」的执行载体。
+#
+# 这里一个判断都没有：判据全在 scripts/prepush-history-check.mjs，手跑与钩子共用同一份。
+# 生效前提是这台机器跑过 `git config core.hooksPath githooks` —— 没装的话 git 静默不跑
+# 任何东西（2026-10-27 在本机实测：hooksPath 指向不存在的目录时 push 照样 exit 0，零告警）。
+# 核对本机接线：node scripts/prepush-history-check.mjs --self-check
+
+if ! command -v node >/dev/null 2>&1; then
+    echo "pre-push 自检跑不了：PATH 里没有 node，判据本体是 scripts/prepush-history-check.mjs。" >&2
+    echo "要么把 node 加进这个环境的 PATH，要么明知故犯地 git push --no-verify。" >&2
+    exit 1
+fi
+
+exec node "$(git rev-parse --show-toplevel)/scripts/prepush-history-check.mjs" --from-stdin "$@"
