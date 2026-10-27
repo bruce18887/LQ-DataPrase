@@ -82,7 +82,7 @@
 | 层 | 位置 | 判据 | 实测规模与单价 |
 |---|---|---|---|
 | **T1 后端契约** | `test/backend/`、`apps/*/tests_*.py` | 响应体 / service 返回值就能表达：数值、状态码、错误码、字段存在性 | `def test_` 计数 1561（test/backend 935 + apps/* 626）；2026-10-16 实跑 `Ran 1427`；≈3.6 例/秒 |
-| **T2 前端纯函数** | `frontend/test/unit/`（vitest，node 环境，不装 jsdom） | 入参→出参，无 DOM 无网络 | 486 例 / 34 文件 / 0.53s（2026-10-25 实跑 `npm run test:unit`） |
+| **T2 前端纯函数** | `frontend/test/unit/`（vitest，node 环境，不装 jsdom） | 入参→出参，无 DOM 无网络 | 523 例 / 36 文件 / ≈1.0s（2026-10-27 实跑 `npm run test:unit`；同日上一账 501 例 / 35 文件的差值就是 §6.5.1 那颗 `prepushHistoryCheck.spec.ts`（22 例）；再上一账 486 例 / 34 文件是 2026-10-25，档间差值都在 run-to-run 噪音内） |
 | **T3 浏览器不可替代** | `frontend/e2e/`（Playwright） | 只有五类：真实渲染（canvas / ag-grid 虚拟化 / 轴像素）、双主题对比度、跨页跨 tab 状态与路由守卫、上传下载与 Electron IPC、`data-*` 契约本身 | 420 次展开 / 79 文件（P1 253 · P2 141 · P0 14 · Edge 10 · setup 2；逐 project 的 `--list` 各含 setup 那 2 条，取净数要减；2026-10-27 `npx playwright test --list` 实测，旧账 418/78、390/75 与 P0 13 已过期）；单价 2.9–3.1 s/例 |
 
 **冲突裁决**：同一判据 T1 与 T3 都能表达时，T1 写全组合，T3 只留一条「接线证明」（例：CPK 八组边界进后端，
@@ -239,16 +239,59 @@ CI 跑的是**干净检出**，本机绿不代表它绿。这三条都是「本�
 前向修复（把文件从树里摘掉）**挡不住这个**：blob 还在历史里，按 commit SHA 可直接取。
 
 1. **push 推的是整条链，不是「我这一笔」。** 提交前要跑 `git log --oneline origin/master..HEAD`
-   逐条看会被带出去什么——里面常有别人未推送的提交。
+   逐条看会被带出去什么——里面常有别人未推送的提交（2026-10-27 实测：本仓一次待推的 4 笔里，
+   有一笔是会话进行中新出现的）。现在这条由 `prepush-history-check.mjs` 打印，见 §6.5.1。
 2. 凡动过「本该不入库的目录」（`Data/`、`tasks/`、`.venv/`、密钥类）的提交，
    **要么别提交，要么在 push 前重写历史摘掉**，不能指望后续删除补救。
-   绊线：`git log --diff-filter=A --name-only origin/master | grep -E '^Data/'` 应为空。
+   绊线：`git log --diff-filter=A --name-only origin/master | grep -E '^Data/'` 应为空
+   （现在这条绊线在脚本里有对应断言，为空也打印出来，见 §6.5.1）。
 3. **重写后强推要先验内容、再带 lease**：`git diff --stat <备份ref> master` 必须 0 字节（只动历史不动内容）；
    `git push --force-with-lease=refs/heads/master:<服务端旧值>`。本仓 12 条重写后内容差异为 0。
 4. **强推不等于撤回公开。** 已核实：分支链里 `c6b7bd8` 已不可达、新 master 上该路径 404，
    但按旧 SHA 请求 `Data/SampleData/Gage/gage_m_S1.csv` **仍返回 size 291657**（游离提交未被 GC）。
    服务端只剩 `refs/heads/master` 一个引用，没有分支/PR 钉住它，所以 GC 后会自动消失；
    在此之前按「已泄露」处理，不要按「已修复」处理。要立刻抹除得提 GitHub 支持工单。
+
+### 6.5.1 这四步现在由谁执行（2026-10-27 落码）
+
+判据只有一份：`scripts/prepush-history-check.mjs`（纯函数内核 + IO 壳；T2 档钉在
+`frontend/test/unit/prepushHistoryCheck.spec.ts`，22 例，`npx vitest run` 毫秒级、不开浏览器）。
+它覆盖**能机器判定的步骤 1–2**：打印本次会被带出去的提交清单（步 1）、守卫根 / 密钥形状 /
+`.gitignore` 漂移（步 2），以及步 2 那条绊线的代码化结果。末行是 `RESULT: PASS|FAIL`
+——按 §1 的口径取结论行，不取 `$?`。步骤 3–4 仍是人的动作：脚本把它们打印成「下一步」，不代做，
+自动重写历史不是这道门的职责。
+
+| 通路 | 命令 | 什么时候算数 |
+|---|---|---|
+| **手跑（权威）** | `node scripts/prepush-history-check.mjs` | 任何一台检出都能跑，不依赖钩子装没装 |
+| 复核某条链 | `node scripts/prepush-history-check.mjs --range <base>..HEAD` | 想看某一笔起头会带出去什么 |
+| 钩子（便利） | `git push` 自动触发 `githooks/pre-push` | 只对装过的那台机器生效 |
+| 接线自检 | `node scripts/prepush-history-check.mjs --self-check` | 想知道这道门此刻**到底会不会响** |
+
+命中即退 1 拦住 push，并把下一步打成可复制的命令。放行表（`ALLOWED_EXCEPTIONS`）里登记过的文件
+打印成 `allow` 而不是拦——当下那笔只放行 `tasks/e2e-nightly/LATEST.md` 的改动就是靠这个过的；
+一道天天误报的门禁，第一次使用就会被 `--no-verify` 绕过，那等于没有门禁。
+
+**装钩子只有一条命令，而它是仓库本地配置**：`git config core.hooksPath githooks`。
+必须这样写清的原因：`core.hooksPath` 住在 `.git/config` 里，既不在库中也不在 `.git/hooks`，
+换机器、重新 clone、新开 worktree 都会丢。**本机实测的失效形状**（2026-10-27）：这条配置指向一个
+**已被删除的兄弟工程** `…\DataPrase\DataPhrase_Django\.git\hooks`，于是 git 静默跳过所有钩子——
+`git push --dry-run` 退 0、零告警，上面四步一次都没执行过。钩子失效从来不报错，
+所以**别把「装了」当「在跑」**，先跑 `--self-check`（它打印主机名、解析到的目录、以及该目录是否存在）。
+`.git/hooks/` 下另有两只 10 字节的 `post-checkout` / `post-commit`，内容只有 `#!/bin/sh`，
+本来就是空壳，换指向前后都不跑，行为无变化。
+`githooks/*` 在 `.gitattributes` 里钉了 `text eol=lf`：本机 `core.autocrlf=true`，一旦检出成 CRLF，
+`sh` 会把行尾的 `\r` 算进命令名，这道门就又静默消失一次（fresh clone 实测 CR=0、LF=15）。
+
+⚠ **生效范围＝本机一台**（别写成项目事实）：主机 `nathan` 已于 2026-10-27 装好，`--self-check` 报
+「本次 push 会触发自检」；其它任何检出——第二台机器、CI、别人的 worktree——**默认未装**，
+push 不会自动跑这道门，在那边只有上面「手跑」那一行算数。
+
+**为什么不放 CI**：CI 在 push **之后**才跑，一条红色的作业救不回已经公开的 blob——这次事故正是
+「被一条无关的 `git push` 一起推上公开仓库」。写进 `ci.yml` 只会制造「已经兜住了」的错觉。
+**验证通路 = 沙箱桩**（不拿本仓做反证，也不拿真实 push 或重写历史当验证）：临时仓库装同一个载体，
+干净的链退 0 放行、加一笔 `Data/x.csv` 退 1 拦住、摘掉 `/Data/` 那条忽略规则也退 1；
+`PATH` 里没有 node 时载体退 1（fail-closed，宁可挡住也不静默放过）。
 
 ## 7. 未闭环（2026-10-16 记，2026-10-25 在本机逐条复核）
 

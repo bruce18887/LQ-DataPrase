@@ -6365,3 +6365,40 @@ Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `roo
 承重取证没改坏任何被跟踪文件：① `git init` 一次性仓库 + 同一份内核跑出 `new`/`grew`/陈旧三种形状与红字；
 ② 只对本批自己新增的 `EXEMPT` 做变异（1968→1967、把一条 path 改成树上不存在的名字）跑真实 spec，
 该红的两条各红一次，再 `cp` 回原文件用 `cmp` 证字节相同。
+
+# 任务：§6.5 四步落成 push 前真会跑的一道门（2026-10-27，钩子指向已删除的目录）
+
+- **改前只读核清，现状比散文更糟**：`git config --get core.hooksPath` 指到
+  `…\DataPrase\DataPhrase_Django\.git\hooks`——**那个工程已经不在了**（`ls` 同级目录里没有
+  `DataPhrase_Django`，只有 `DataPrase-ExcelAddin`/`-LightVBA`/`-SFTP Searcher`/`LQ-DataPrase` 等）。
+  失效是**静默**的：在临时仓库里用 git 2.52.0.windows.1 复现，`core.hooksPath` 指向不存在目录时
+  `git push` **退 0、零告警**，所以 §6.5 那四步（2026-10-16 事故后写下的）一次都没执行过。
+  `.git/hooks/` 里另有两只 10 字节的 `post-checkout`/`post-commit`，正文只有 `#!/bin/sh`，本来就是空壳。
+- **落法**：判据一份 `scripts/prepush-history-check.mjs`（覆盖机器能判的步 1–2：待推清单 /
+  守卫根 / 密钥形状 / `.gitignore` 漂移 / 步 2 那条绊线的代码化），`githooks/pre-push` 只是不含判断的载体，
+  手跑与钩子调同一个脚本；步 3–4（重写历史带 lease、已泄露≠已修复）打印成「下一步」不代做。
+  钉在 `frontend/test/unit/prepushHistoryCheck.spec.ts`（22 例，双向：事故形状必拦 + 当下真实待推那笔必过）。
+  `scripts/affected-rules.mjs` 登记 `scripts/prepush-history-check.mjs` 与 `githooks/` 走 unit 档，
+  免得改这道门本身被 `['scripts/', GLOBAL]` 兜底拉去开浏览器。
+- **`tasks/` 不能进全历史绊线**（这条是实测逼出来的，不是设计偏好）：`git log --diff-filter=A --name-only
+  origin/master -- tasks/` 出 6 条 2026-10-16 之前误入库的添加记录（`tasks/lessons.md` 等，今天已不被跟踪），
+  一律拦等于每次 push 都红 ⇒ 拆成 `HARD_ROOTS`（查全历史）与 `RANGE_ROOTS`（只查待推范围 + 放行表）。
+- **验证（不拿真实 push、也不拿重写历史当验证）**：① 本机 `git config core.hooksPath githooks` 后
+  `git push --dry-run origin master` **真的触发**钩子，stdin 解出 `cc2198e..e418320` 4 笔并打印清单，
+  末行 `RESULT: PASS`，远端一字未动；② 沙箱桩三个方向都验：干净链退 0 放行、加一笔 `Data/x.csv` 退 1 拦住、
+  只摘 `/Data/` 那条忽略规则也退 1（`[BLOCK] /Data/ —— 摘掉了守卫根…`）；③ `PATH` 去掉 node 目录后载体
+  退 1（fail-closed，退出码取管道头不取 `tail`）；④ `githooks/* text eol=lf` 生效：fresh clone 的载体
+  **CR=0 / LF=15**（第一版我用 `grep -c $'\r'` 读数得到 15，那是行数不是 CR 数，字节级重量才算数）。
+- **写进文档的边界**：钩子生效=**本机一台**（主机 `nathan`，2026-10-27 装好，`--self-check` 报「会触发」），
+  其它检出/CI/别人的 worktree 默认未装 ⇒ 那里只有「手跑」那一行算数；`.claude/CLAUDE.md` 加的是命令入口，
+  正文仍在 `testing-gates.md` §6.5.1。**不加 CI**：CI 在 push 之后跑，红作业救不回已公开的 blob。
+- **提交与门禁（2026-10-27 当场收口）**：机制一笔 `9d3aa41`（5 文件 / 569 行，载体按 **100755** 入库），
+  文档随后一笔。本批 affected 门禁 `RESULT: PASS · 计划 3 档全部执行`（lint:e2e ok / vitest ok / e2e 全量 ok；
+  池 418 例 / 9.3min / 单价 3.24s / unexpected 3 复跑后**真红 0**、2 条判负载抖动 / `verdict=MEASURED`；
+  效率 2.30 低于 ≥2.8 那一档，但本轮有复跑，按 §4「效率只在没有重跑时判」不据此改阈值）。
+  后端档没被规划（本批零 Python 改动）。**未 push**：`git log origin/master..HEAD` 当时 6 笔，其中 5 笔属并行批次。
+- **共享 index 的坑（本批现场撞到，写法照此）**：并行会话在同一个 `.git/index` 里 staged 过
+  `docs/reference/testing-gates.md` 的 T3/§5 改写，此时任何一次裸 `git commit` 都会把对方 staged 的内容
+  带进我的提交信息名下。做法：提交只按 **pathspec 逐文件** `git commit -- <我的 5 个路径>`（绕开 index 里
+  别人那段），提交前用 `git diff HEAD -- <path>` 数清被删的那几行是不是我改写的原句——**删除行的内容
+  才是归属证据**，比看新增行可靠。

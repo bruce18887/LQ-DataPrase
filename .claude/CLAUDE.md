@@ -96,6 +96,10 @@ IO 壳与全仓断言 `frontend/test/unit/lineLimit.spec.ts`（T2 档，`cd fron
 
 - 一句话口径（详见上面那份文档）：每批 commit 前 `npm run test:e2e:affected`；功能收口 / FF 并入本地 master 前
   `node scripts/e2e_pool.mjs --slots=4` + 后端全套；`NO AFFECTED TESTS` 不是绿灯；并行度只有 `--slots` 一个旋钮；跑完释放端口。
+- **push 前一条命令**（§6.5 那四步的执行体，判据在 `scripts/prepush-history-check.mjs`、钉在 `prepushHistoryCheck.spec.ts`）：
+  `node scripts/prepush-history-check.mjs` —— 打印本次会被带出去的提交清单与守卫根/密钥/`.gitignore` 漂移，末行 `RESULT:`。
+  `githooks/pre-push` 只是载体，**装了才响，而「装」是仓库本地配置**（`git config core.hooksPath githooks`，换机器就没了）；
+  想知道本机此刻到底会不会响：`node scripts/prepush-history-check.mjs --self-check`。别把「写了钩子」当「在跑门禁」。
 - **本机实测值，不是通用结论**（本文件已入库，换机器先重跑下面这条命令再套用）：给服务选监听端口前先问临时端口区间 `netsh int ipv4 show dynamicport tcp`，本机是 **1024–15000**
   （非默认），slot 基址因此从 8101/3101 挪到 **21001/22001**，这是**端口卫生**；扫占用的正则必须 1–5 位
   （`\d{4}` 会漏掉五位端口，于是永远报「空闲」，两个池就会抢同一组口）。
