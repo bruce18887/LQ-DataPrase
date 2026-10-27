@@ -175,6 +175,10 @@ import { zipBrowserRows } from './components/browser/browserRows'
 
 // Register ag-grid modules (required since v33+)
 import { ModuleRegistry, AllCommunityModule, type IDatasource, type GridReadyEvent } from 'ag-grid-community'
+// 主题 CSS 跟着真实消费者走，不写在 main.ts：入口一旦 import 它，manualChunks 就把这两个
+// CSS 模块归进 ag-grid-vendor，于是登录页也要 modulepreload 1.19MB 的网格 chunk。
+import 'ag-grid-community/styles/ag-grid.css'
+import 'ag-grid-community/styles/ag-theme-quartz.css'
 ModuleRegistry.registerModules([AllCommunityModule])
 
 const props = defineProps<{

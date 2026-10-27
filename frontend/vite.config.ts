@@ -85,20 +85,34 @@ export default defineConfig({
         defaultHandler(warning)
       },
       output: {
-        // Split vendor libs into separate chunks for better caching.
-        // Rolldown's manualChunks only accepts a function form.
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            if (id.includes('echarts') || id.includes('vue-echarts') || id.includes('zrender')) {
-              return 'echarts-vendor'
-            }
-            if (id.includes('ag-grid')) {
-              return 'ag-grid-vendor'
-            }
-            if (id.includes('element-plus') || id.includes('@element-plus')) {
-              return 'element-vendor'
-            }
-          }
+        // 分块走 codeSplitting + priority，不用函数式 manualChunks。
+        // 根因（2026-10-27 用 hidden sourcemap 取证）：函数返回值在 rolldown 合并阶段只是
+        // 建议，@vue/{shared,reactivity,runtime-core,runtime-dom} 被塞回 ag-grid-vendor，
+        // 于是每个 chunk 都要先下载 1.19MB 才拿到 createApp —— 登录页也一样。
+        // priority 大的组先认领模块，Vue 才能与网格分开。
+        codeSplitting: {
+          groups: [
+            {
+              name: 'vue-vendor',
+              test: /[\\/]node_modules[\\/](vue|@vue|vue-router|pinia)[\\/]/,
+              priority: 100,
+            },
+            {
+              name: 'echarts-vendor',
+              test: /[\\/]node_modules[\\/](echarts|vue-echarts|zrender)[\\/]/,
+              priority: 90,
+            },
+            {
+              name: 'ag-grid-vendor',
+              test: /[\\/]node_modules[\\/]ag-grid-/,
+              priority: 80,
+            },
+            {
+              name: 'element-vendor',
+              test: /[\\/]node_modules[\\/](@element-plus|element-plus)[\\/]/,
+              priority: 70,
+            },
+          ],
         },
       },
     },

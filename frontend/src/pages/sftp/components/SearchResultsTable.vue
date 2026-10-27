@@ -163,6 +163,8 @@ function isGroupRow(row: unknown): row is SearchGroupRow {
 import { computed, defineComponent, h, markRaw, ref, watch, type VNode } from 'vue'
 import { AgGridVue } from 'ag-grid-vue3'
 import { ModuleRegistry, AllCommunityModule, type ColDef } from 'ag-grid-community'
+import 'ag-grid-community/styles/ag-grid.css'
+import 'ag-grid-community/styles/ag-theme-quartz.css'
 import { useThemeStore } from '../../../stores/theme'
 import { NO_DATA_LABEL } from '../../../api/sftpSearch'
 
