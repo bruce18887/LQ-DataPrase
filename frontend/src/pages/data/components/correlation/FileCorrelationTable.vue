@@ -38,6 +38,8 @@
 import { computed, ref } from 'vue'
 import { AgGridVue } from 'ag-grid-vue3'
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community'
+import 'ag-grid-community/styles/ag-grid.css'
+import 'ag-grid-community/styles/ag-theme-quartz.css'
 import { useThemeStore } from '../../../../stores/theme'
 import { type DiffRule, type FileCorrelationResult, diffRuleLabel } from '../../../../types'
 
