@@ -15,13 +15,19 @@ CSS 变量 + `data-theme` 属性。light（白底灰字/蓝色品牌色）/ nigh
 
 ## E2E 测试 (Playwright)
 
+跑哪一档的判据只有一份：`docs/reference/testing-gates.md`（§1 该跑哪一档 / §5 各入口速查）。
+本节只留默认入口，不复制判据表。
+
 ```bash
 cd frontend
-npm run test:e2e           # 全量运行（自动拉起 Django:8000 + Vite:3000）
+npm run test:e2e:affected  # 默认档：每批 commit 前，按本次改动选例
 npm run test:e2e:p0        # 冒烟
 npm run test:e2e:ui        # UI 模式
-npx playwright test e2e/analysis  # 按模块
 ```
+
+`frontend/package.json` 里其余 e2e 脚本不要按名字猜档位：`npm run test:e2e`（裸 `playwright test`）
+已被那份文档 §5 明令**不要用**；全量与并行、按模块定向（含 SFTP 用例该归哪个 project）都以 §5 为准。
+
 e2e测试需要跑全量或者预估时间大于10分钟时需要询问我的意见
 
 环境变量: `PW_NO_WEBSERVER=1`（不自动拉起前后端）, `PYTHON_BIN`（默认 `.venv/Scripts/python.exe`）, `PARAM_SAMPLE_COUNT`（默认 5）
