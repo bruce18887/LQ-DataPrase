@@ -239,6 +239,10 @@ LQ-DataPrase.exe --backend-console
 
 ## 测试
 
+「这次改动该跑哪一档」的判据只有一份：
+[docs/reference/testing-gates.md](docs/reference/testing-gates.md)（§1 该跑哪一档、§2 三层判据、§5 各入口速查）。
+本节只列常用入口，不复述判据表。
+
 ### 后端测试
 
 ```bash
@@ -251,10 +255,13 @@ python manage.py test apps.analysis
 
 ```bash
 cd frontend
-npm run test:e2e           # 全量运行
+npm run test:e2e:affected  # 默认档：每批 commit 前，按本次改动选例
 npm run test:e2e:p0        # 冒烟测试
 npm run test:e2e:ui        # UI 调试模式
 ```
+
+`frontend/package.json` 里其余 e2e 脚本不要按名字猜档位：`npm run test:e2e`（裸 `playwright test`）
+已被那份文档 §5 明令**不要用**，全量与并行一律走 §5 认定的池入口。
 
 ---
 
@@ -306,6 +313,7 @@ http://localhost:8000/api/schema/swagger/
 
 - [前端架构文档](frontend/CLAUDE.md)
 - [后端架构文档](apps/CLAUDE.md)
+- [测试分层与门禁节奏](docs/reference/testing-gates.md)
 - [用户操作指南](docs/user-guide/README.md)
 - [ATE 量产测试关键指标](docs/reference/ATE_量产测试关键指标.md)
 - [ATE 指标实现指南](docs/reference/ATE_指标实现指南.md)

@@ -6290,3 +6290,25 @@ Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `roo
      该头由既有 `ValueError` 用例兜住）。
    - **下一次编辑先拆**：`apps/datafiles/tests_parse_cache.py` 与 `apps/dashboard/tests.py` 现都 **584/600**
      （只剩 16 行余量），属 P2-7 那一族「测试文件同样受 600 约束」。
+
+# 任务：README 测试小节与 testing-gates.md 对齐（2026-10-27，文档对同一条命令判定相反）
+
+- **改前先读两份，差异实测**：`README.md:254` 把 `npm run test:e2e` 当「全量运行」推荐，而
+  `docs/reference/testing-gates.md:174` 对同一条命令写「**不要用**」（`workers=6` 打单进程 Django，造出与改动无关的硬红；
+  配置侧证据 `frontend/playwright.config.ts:67-69`）。且 README 全篇不指向那份权威文档，
+  默认档 `test:e2e:affected`（gates:171「默认该用的」）在 e2e 小节缺席——只在 `README.md:87` 依赖升级那句出现过，两份文档 + README 内部各矛盾一次。
+- **改法（只动 README，权威文档一字未改）**：e2e 小节默认档换成 `npm run test:e2e:affected`；
+  `test:e2e` 从可跑清单里删掉，另起一行说「其余脚本别按名字猜档位——§5 已明令它不要用，全量与并行走 §5 认定的池入口」；
+  「## 测试」顶部加一句判据归属（§1 选档 / §2 三层 / §5 入口），「相关文档」补 testing-gates.md 入口。
+  **没有把 §5 的成本与覆盖数字搬进 README**（双份漂移就是这次要修的东西）。
+- **档位语义零变化的证据**（不是「大概不用改指南」，是现跑的）：`node scripts/e2e_affected.mjs --files README.md`
+  → `RESULT: NO AFFECTED TESTS`；判据本身没动（`scripts/affected-rules.mjs:206` 任何 `.md` 返回空档），
+  所以 help 提示与用户指南无需同步；`docs/user-guide/` 里 grep `test:e2e|playwright|manage.py test` 零命中。
+- **本批没开池的原因**：干跑时门禁对整棵工作区判 GLOBAL，`why` 指向另一个会话刚落盘的未跟踪
+  `scripts/line-limit.mjs`（命中全局清单）——与本批无关。按「跑全量或预估 >10min 需先问」和「不动别人 WIP」两条都没开池；
+  提交只逐个文件 `git add README.md docs/tasks/todo.md`，别人的 `AGENTS.md` 改动留在工作区。
+- **两条同形遗留（未动，等拍板）**：
+  1. `frontend/CLAUDE.md:20-22` 原样抄了 README 那三行（含 `test:e2e  # 全量运行（自动拉起 Django:8000 + Vite:3000）`）
+     ⇒ 与 gates:174 仍相反。没顺手改的理由：该文件 `:25` 是用户手写规则（跑全量要先问），入口文件怎么改由他点。
+  2. `testing-gates.md:174` 的「裸跑 390 次全量」与同文件 §2 `:86` 的 2026-10-25 实测「418 次展开 / 78 文件，旧账 390/75 已过期」
+     对不上 ⇒ 权威文档内部自己漂了一处；改它要先现跑 `--list` 取数，不放在只改 README 的这一批里。
