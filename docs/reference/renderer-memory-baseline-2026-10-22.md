@@ -9,11 +9,14 @@
 **证据文件对照**（本文引用的现场，全部只在本机、不入库）：
 产物 `tasks/renderer-probe-{ETS88_FT,STS8200_CP}.json` 与逐轮留底
 `tasks/t2-{wide-ets88-task1copy,wide-ets88-r4,narrow-ps50-r1,narrow-ps50-r2,narrow-ps500-r1,narrow-ps500-r2}.json`
-（`.gitignore:148 /tasks/`）；池日志 `tasks/t2-*.log`；slot 现场 `C:\lqdp-e2e\slots\<RUN_ID>\slot0.run.log`；
+（`.gitignore` 里的 `/tasks/` 一条，原写 `:148`、2026-10-27 实测在 `:157` ⇒ 按语义找）；池日志 `tasks/t2-*.log`；slot 现场 `C:\lqdp-e2e\slots\<RUN_ID>\slot0.run.log`；
 推导脚本 `tasks/t2-derive.py`（§4/§6/§7/§9.3 的每个商都是它的输出；输出留底 `tasks/t2-derive.out`，
 本机控制台默认 GBK，复跑要 `PYTHONIOENCODING=utf-8` 前缀才不落乱码）。
 「Task 1 报告」= `.superpowers/sdd/2026-10-22-renderer-memory-and-request-dedupe/task-1-report.md`
-（`.gitignore:206 /.superpowers/`）。
+（`.gitignore` 里的 `/.superpowers/` 一条，原写 `:206`、2026-10-27 实测在 `:213`）。
+⚠ **2026-10-27 实测：那期 SDD 工作区已不在本机**（SDD 目录按收尾清理删除，`.superpowers/sdd/` 下只剩 icon-family
+与 memory-governance 两期）⇒ 本文凡引用它的路径都只是**历史出处、不可回查**，读数与推导以本文为准；
+`tasks/` 下那批 JSON/日志同理（gitignored，是否还在按当次实测，别当作保证）。
 ⚠ 本文还引 `docs/superpowers/specs/2026-10-22-desktop-lag-renderer-memory-design.md` 与
 `docs/superpowers/plans/2026-10-22-…-dedupe.md`。**Task 2 提交时那两份是未跟踪文件**（`??`），
 本文当时的写法是「按行号取不到」；Task 7 收口时已把它们随 `docs/` 一起入库（`docs/superpowers/` 本来就是跟踪目录，27 个文件），
@@ -133,7 +136,7 @@ mib_per_cell = Δheap / ((BLOCKS−1) × cellsPerBlock) = 55.5 / (19 × 86,400) 
 生产一次 `/browse/` 单次最大 **2,968 KB / 100 行**（spec:47）= 2.90 MiB；本文的 5.84 MiB/块
 = 传输字节的 **2.0 倍**，同量级 ✅。本地 ETS88 一块传输 0.63 MiB / 50 行 = 1.26 MiB / 100 行，
 与生产的 2.90 MiB / 100 行同量级（差 2.3 倍，数据密度不同）。
-**与初稿估算的对照**：SDD 台账 `.superpowers/sdd/2026-10-22-…/progress.md:26`（不入库）用占位
+**与初稿估算的对照**：SDD 台账 `.superpowers/sdd/2026-10-22-…/progress.md:26`（不入库，已随那期工作区删除，见文首 ⚠）用占位
 `CELL_PER_BLOCK_MAX / CELL_RETAIN_BUDGET = 200k / 400k` 验算过 Task 3，那档隐含单价
 `48 / 400,000 = 1.2e-4`（≈126 B/格）= 实测的 **3.6 倍**；若把 200k 那一档当驻留预算则是
 `2.4e-4`（≈250 B/格）= 实测的 **7.1 倍** —— Task 1 报告 §5.1（第 183 行）写的是后者并把它归给 plan，

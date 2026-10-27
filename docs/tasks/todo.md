@@ -5403,7 +5403,8 @@ analysis 档补一条（R19：`AnalysisPage` 的去重原本无守卫）、dashb
       **收口评审轮已把台账里在册项搬进文末「整改后遗留清单」并逐条给出处置**（原文写「全部」，
       2026-10-23 收口评审 E 项复核对账发现**漏搬了一条**（下面第 3 项），措辞已收为「在册项」）——
       台账在 gitignored 目录，
-      `git worktree remove --force` 就没了，那份清单才是唯一事实来源。仍开的条目：
+      `git worktree remove --force` 就没了，那份清单才是唯一事实来源（2026-10-27 实测：那期已不在本机，
+      `.superpowers/sdd/` 下只剩 icon-family 与 memory-governance 两期 ⇒ 这不是假设，是已发生）。仍开的条目：
       注释与行号指针 stale 四条（`data.spec.ts:903-906` 举例不成立、
       `file-list-completeness.spec.ts:127`「`getOptions` 只命中两处」数的其实是**调用点**
       （定义 `api/datafiles.ts:154-156` 也是同一条 grep 的命中，⇒「两处」少一处；该用例正文
@@ -5431,6 +5432,7 @@ C `2026-10-21` 内存治理三批；D Electron 日志把 backend-stderr 一律�
 
 **为什么要搬进跟踪文档**：本轮的 deferred Minor 台账在 `.superpowers/sdd/2026-10-22-renderer-memory-and-request-dedupe/progress.md`，
 而 `.superpowers/` 与 `tasks/` 都被 gitignore ⇒ `git worktree remove --force` 之后无处回查。下面这份是**唯一事实来源**，台账只算当期证据。
+（2026-10-27 实测：那期工作区**已不在本机**，`.superpowers/sdd/` 下只剩 icon-family 与 memory-governance 两期 ⇒ 上面那句不是假设，是已发生。）
 **证据边界（同一条纪律）**：各批次的槽日志与探针 JSON 都落在 gitignored 的 `tasks/` 与 `C:\lqdp-e2e\slots\` 下 ⇒
 入库文档只能引用**复跑命令**（`node scripts/e2e_pool.mjs --slots=N -- <spec>`、
 `C:/Users/…/.venv/Scripts/python.exe manage.py test <label>`、`cd frontend && npx vitest run`）；
@@ -6228,14 +6230,29 @@ Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `roo
    第二个线程等到该事件再起跑），**不是调睡眠参数**；不许 skip、不许放宽断言。
    动的是测试编排，不碰 `services.py` 的单飞实现。
    ⚠ `tasks/premerge-2026-10-23/` 下那份是冻结归档，**绝对不要改**。
-   坐标：B 档第 1 条「已知偶红的本轮账」段（本文件 `:6021-6027`，行号会漂，按语义找）；
-   归因与两次结论行原文见 `.superpowers/sdd/2026-10-25-backend-payload-dedup/task-5-report.md` §5。
+   坐标：B 档第 1 条「已知偶红的本轮账」段（就在本文件上方，行号会漂 ⇒ 按语义找，别取数字）。
+   归因用的两轮结论行原文（收口提交前补跑的窄标签，命令 =
+   `PYTHONIOENCODING=utf-8 python manage.py test apps.datafiles.tests_parse_cache apps.datafiles.tests_parse_cache_scan`）：
+   首跑 `Ran 32 tests in 1.605s` → **`FAILED (failures=2)`**，按裁定**只复跑一次**
+   `Ran 32 tests in 1.005s` → **`OK`**。首跑那两条红项的名字没进日志（取证被 `tail` 截走，见下面第 ① 例）；
+   旁证是同一次其余 30 条全过（32−2）且形状与上面点名的两条 `delay` 编排用例的历史一致 ——
+   严格说那一轮**没有直接证据**点名是哪两条，别把它读成「已确认就是那两条」。
+   处置纪律核对（原文照搬）：**没调睡眠参数、没 skip、没改断言、没说它「从未红过」**。
    **再一例（2026-10-26，合并后）**：FF 并入 master 之后跑
    `python manage.py test apps.datafiles.tests_parse_cache apps.datafiles.tests_parse_cache_scan apps.dashboard`
    首跑 `Ran 60 tests … FAILED (failures=2)`，同命令立即复跑 `Ran 60 tests in 6.686s / OK` ⇒ 归为负载抖动，
    不改变本节结论（同一棵树的后端全套 1867 例在前一分钟是 OK 的）。
    ⚠ 诚实边界：**首跑那两个红项的名字没进日志** —— 我当时给命令接了 `| tail -3`，把 `FAIL:` 行截掉了。
-   这是本分支第三次同一个取证错误（前两次记在 `task-5-report.md` §5 与终评 re-review），
+   这是本分支第三次同一个取证错误，三次的原文一并落在本节（前两次当时只记在本期 SDD 工作区的实现者报告里，
+   那是 gitignored 的当期证据、已随收尾清理删除 ⇒ **以本节为准**）：
+   ① 就是上面「归因用的两轮结论行」那次首跑，接的是 `| tail -6`；
+   ② 收尾之后同一对窄标签：`Ran 33 tests in 1.308s` → **`FAILED (failures=1)`**，按裁定唯一复跑
+      `Ran 33 tests in 1.015s` → `OK`，那次接的是 `| tail -4`，红项名字同样没进日志窗口。
+      ⚠ 该例当时给的依据「唯一改动是纯 docstring、无一行代码」**只对最后一笔成立**：清理时复查
+      `git show --stat` ⇒ `4cd6930` 确是 `services.py` 单文件 docstring（3 增 2 删），但它前面的 `cd5ec2c`
+      改了 `services.py`（25 增 8 删）并新增一条用例（`def test_` 计数 +1，正是例数 32→33 的来源）。
+      依据削掉一半后归因不变（红项形状与已知 `delay` 偶红一致 + 独占复跑即绿），但账按复查后的写；
+   ③ 就是本条这次（合并后 60 例首跑），接 `| tail -3`。
    工单的修法里请连带写上一条：**窄标签取证一律先落文件再读，别接 `tail`**。
    **第四例，且第一次拿到名字（2026-10-26，squash 合并并对回 `origin/master` 之后）**：
    `python manage.py test apps.datafiles.tests_parse_cache apps.datafiles.tests_parse_cache_scan apps.dashboard`
@@ -6246,3 +6263,30 @@ Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `roo
    这次的取证是按上面那条做的（`> /tmp/….log 2>&1` 之后再 grep），所以名字进得了账。
    ⇒ 给修法多一条实测依据：**三条红只在"多模块并跑 + 机器上另有会话"时出现，单模块必绿**，
    所以换同步原语之后要补一条"与相邻模块并跑"的验证，别只在独占档里验。
+2. **本刀接受的 Minor 账**（原文只记在本机 SDD 台账 `2026-10-25-backend-payload-dedup` 那期工作区里，
+   那目录已随收尾清理删除 ⇒ **以本节为准**）。都是「下一刀顺手」级、不单独立项；行号按 2026-10-27 现数。
+   - **已闭环（列在这里只为别被当成仍开着）**：`_parse_succeeded` 的 docstring 原写「与写透侧是同一条规则」不严
+     （谓词只看 `value[0]`，读侧 `(df, None, fmt)` 会被存、写透侧拒存）⇒ `apps/datafiles/services.py:272`
+     已收成「**方向一致但不等价**」，行为未动（改谓词会连带改 J2 的期望形状，代价大于收益）；
+     `get_or_compute(store_if=None)` 默认分支曾无断言 ⇒ 已补
+     `test_get_or_compute_without_store_if_stores_unconditionally`。
+   - `apps/datafiles/services.py:281`：传入空元组会 IndexError 且逃出 `get_or_compute`（今天无该形状）。
+     裁定＝**不加防御** —— 加了就是给假想场景写代码。
+   - `apps/datafiles/services.py:343` 的 `if 'col_meta' not in metadata` 只判键在不在，不校验它与 df 是否一致
+     （今天无 parser 产出该键）。
+   - `_col_meta_bytes` 是**下界**估算：只数字符、不含每列 entry dict 的对象开销，units/mins/maxs 三只大 dict
+     仍按 64 元/键 ⇒ J7 兑现的是「不再说 64」，不是「接近真实」。
+   - 失败不入缓存的**代价账**：等待者醒来会各自重解析，同一个坏文件 N 并发可付 N 次解析（收口读数里判可接受）。
+   - `apps/datafiles/tests_parse_cache.py:214` 与 `:235` 的 `class Boom` 重复（brief 原样要求）。
+   - `apps/datafiles/tests_parse_cache.py:338` 里 `idx + 1` 占的是 `file_id` 位，而新键已不含该位 ⇒ 参数无语义（brief 原样）。
+   - `apps/datafiles/tests_parse_cache_scan.py` 的 `_func_blocks` 只按列 0 的 `def` 切块 ⇒ 同类内多个方法会被并进一块、
+     `rebound` 标记会跨方法粘住，比它 docstring 写的「同一函数块」更宽。现 10 个载体无假阴性；
+     风险是将来同文件多方法时可能**放过**真违规。同文件 `:109` 的防空集断言按 `'test' not in p.name.lower()`
+     子串匹配，且按裸名匹配（只剩 import 行也算命中）。
+   - `apps/dashboard/tests.py:571` 的 `assertIs(first.data, cached)` 依赖「DRF `Response.data` 就是视图传入那只对象」，
+     这条依赖当时只写在报告里 ⇒ 应在该处补一行注释指路，否则将来误红没人知道该复核什么；同文件 `:523` 的 docstring
+     把延迟-import 形状标成「→ 3（红）」是末端总数，实际先红在 `:571`。
+   - 上面那条身份断言之外的方向「清洗整个丢了」只有推理、无第二次临时对照（制造它要改本刀禁改的 `services.py`，
+     该头由既有 `ValueError` 用例兜住）。
+   - **下一次编辑先拆**：`apps/datafiles/tests_parse_cache.py` 与 `apps/dashboard/tests.py` 现都 **584/600**
+     （只剩 16 行余量），属 P2-7 那一族「测试文件同样受 600 约束」。
