@@ -207,11 +207,13 @@ function waitForBackend(port: number, timeoutMs: number = 60000): Promise<void> 
 // Dev backend detection
 // ---------------------------------------------------------------------------
 
-const DEV_BACKEND_PORT = 8000
+// 后端口与 `frontend/vite.config.ts:50` 的 `/api` 代理目标读同一个 `E2E_PORT`，兜底 8000。
+// 四家读者同源这件事由 `frontend/test/unit/portWiring.spec.ts` 钉住；不用它时行为与写死 8000 逐字一致。
+const DEV_BACKEND_PORT = Number(process.env.E2E_PORT || 8000)
 const DEV_BACKEND_URL = `http://127.0.0.1:${DEV_BACKEND_PORT}`
 
 /**
- * Probe the browser development backend on localhost:8000.
+ * Probe the browser development backend on the port `E2E_PORT` names (default 8000).
  *
  * In dev mode we want Electron to share the same Django process as the
  * browser so both use the same SQLite database (project root db.sqlite3).

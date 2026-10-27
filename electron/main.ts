@@ -359,8 +359,10 @@ async function createWindow(): Promise<BrowserWindow> {
   })
 
   if (isDev) {
-    // In dev the Vite server is running on :3000
-    const devUrl = 'http://localhost:3000' + (startupRoute ?? '')
+    // Vite 的监听口来自 `E2E_FRONTEND_PORT`（`frontend/vite.config.ts:44` 读的是同一个变量），
+    // 写死 3000 会让自定义口下的 Electron 去加载一个没人听的地址。兜底仍是 3000。
+    const devFrontendPort = Number(process.env.E2E_FRONTEND_PORT || 3000)
+    const devUrl = `http://localhost:${devFrontendPort}` + (startupRoute ?? '')
     console.log(`[electron] Loading dev URL ${devUrl}`)
     // 和远端分支一样吞掉导航异常：不吞的话 createWindow 抛出 → `mainWindow = await createWindow()`
     // 永远不赋值，菜单与 second-instance 全对着 null 窗口静默失效，而兜底页已经显示出来了。

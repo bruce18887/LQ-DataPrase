@@ -54,7 +54,7 @@ export function loadFailureHints(opts: {
   const hints: string[] = []
   if (opts.isDev) {
     hints.push(
-      '开发模式：前端开发服务器（Vite :3000）已经不在了。' +
+      `开发模式：前端开发服务器（Vite）在 ${opts.attemptedUrl} 上没有响应。` +
         '关掉这个窗口，重新运行 npm run electron:dev 即可恢复。',
     )
   }
