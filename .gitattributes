@@ -10,3 +10,6 @@ test/fixtures/weight/*.csv -text
 deploy/*.service text eol=lf
 deploy/*.timer text eol=lf
 deploy/*.example text eol=lf
+# 钩子载体也必须保持 LF：sh 会把行尾的 \r 当成命令的一部分，本机 autocrlf=true 一检出就
+# 报 bad interpreter，于是 §6.5 那道 push 前自检又静默消失一次（钩子失效从来不报错，正是它的故障形状）。
+githooks/* text eol=lf

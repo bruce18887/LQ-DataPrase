@@ -105,6 +105,10 @@ export const RULES = [
     'none:端口/分区/崩池判定已由 e2ePoolCore.spec.ts 钉住；改完请另跑一次 `--slots=2 --dry-run` 与小集合真跑，端口抢占只有实跑才现形']],
   ['scripts/affected-rules.mjs', ['unit',
     'none:本判定内核由 e2eAffectedDecide.spec.ts 钉住（双向：假阳性降级 + 真承重仍升级）']],
+  ['scripts/prepush-history-check.mjs', ['unit',
+    'none:§6.5 push 前自检的判据由 prepushHistoryCheck.spec.ts 钉住；IO 壳与钩子接线没有单测，改完自证 `node scripts/prepush-history-check.mjs` 与 `--self-check`']],
+  ['githooks/', ['unit',
+    'none:载体里不含判据（判断全在 prepush-history-check.mjs）；改完自证 `git push --dry-run` 确认真的触发，并跑 `.gitattributes` 的 LF 检查']],
 
   // —— e2e 资产：helpers/fixtures/config 一动等于全量
   ['frontend/e2e/helpers/', [GLOBAL]],
