@@ -154,7 +154,13 @@ DEBUG_*.md
 !/test/type-snapshot/
 /test/type-snapshot/after.json
 /test/type-snapshot/clipping.txt
-/tasks/
+# 全量兜底轮的**结论表**要能被另一台检出读到（滚动 30 轮的墙钟/单价/flaky/VOID），
+# 所以只放行 LATEST.md 这一个文件；latest.json、各轮明细目录、锁继续不入库。
+# 顺序承重：父目录被排除时 `!` 无法重新纳入其中的文件，必须先放行目录、再排除内容、最后例外那一个。
+/tasks/*
+!/tasks/e2e-nightly/
+/tasks/e2e-nightly/*
+!/tasks/e2e-nightly/LATEST.md
 # 过程/设计文档（内部使用，不入仓库）；下面几条只作用于仓库根这一层
 # docs/tasks/ 保留入库（lessons.md/todo.md 需版本保护，可经 git 回退误覆盖），仅排除临时产物
 # docs/superpowers/ 是**有意入库**的：.claude/CLAUDE.md 的测试分层判据以其中的 specs 为权威引用，勿整体忽略

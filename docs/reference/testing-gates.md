@@ -14,7 +14,7 @@
 | 每批 commit 前 | `cd frontend && npm run test:e2e:affected` | 模块档 = 该模块的 spec 数（2026-10-21 实测 analysis 档 36 文件 / 加权 588s / 计划 3 slot）；无门禁 ~3s |
 | 改门禁判据 / 阈值 / 图标判据 | `npx vitest run` | 0.6s |
 | 功能收口、FF 并入本地 master 前 | `node scripts/e2e_pool.mjs --slots=4` + 后端全套 | 6–8min + 后端 |
-| 每日兜底 | `node scripts/e2e_nightly.mjs` | 同上（前置不过则 SKIPPED） |
+| 全量兜底轮（**手动，未注册 automation**） | `node scripts/e2e_nightly.mjs` | 同上（前置不过则 SKIPPED；触发者与产物落点见 §8） |
 | GitHub CI | 自动 | 后端全套 + build + vitest + lint:e2e，**刻意不跑 Playwright** |
 
 硬口径：
@@ -256,6 +256,11 @@ CI 跑的是**干净检出**，本机绿不代表它绿。这三条都是「本�
   3 SKIPPED / 2 FAILED / 1 VOID / **1 ⚠ DEGRADED PASSED**（`2026-10-17-0330`：8.6min / 389 例 /
   flaky 6 / 4-slot 效率 2.24）⇒「没有一次成功真跑」这句已过期，但**结论不变**：
   唯一跑成的那次是**降级通过**，且此后再没跑过。
+  **2026-10-27 复核 + 更正**：「只留最近 7 轮」这句要改 —— 保留条数由代码定（`e2e_nightly.mjs`
+  末尾的 `history.slice(-30)` = 最近 **30** 轮），当时记的 7 只是**已经跑过的条数**，
+  `LATEST.md` 表头的「最近 N 轮」打印的就是 `history.length`。
+  同一天把这一档定为**手动触发 + 结论表入库**（见 §8）；注册 automation 仍受
+  slot 池设计 §13.3 那道「暂不注册」的闸口拦着，解锁条件也写在 §8。
 - 32 例（分诊的 8%）无处可落：缺「ECharts option 层断言 / 前端出站请求体 / 组件内联逻辑」这一档，
   而当初明确选了「不做组件/DOM 层」，这个矛盾待重新拍板。
 - ~~试点簇 #2 `custom-limit-cpk`、#3 `settings/cpk-thresholds` 未做~~ —— **2026-10-25 结案：两件都在**。
@@ -265,3 +270,49 @@ CI 跑的是**干净检出**，本机绿不代表它绿。这三条都是「本�
 - 套件里仍有点同一个图表开关的盲点写法（已收敛 13 处，其余目前绿所以没动；
   **2026-10-25 逐文件复量仍是 22 处未收敛**），
   清单见 `docs/tasks/todo.md`「遗留地雷清单」。
+
+## 8. 全量兜底轮：触发者、前置门、结论落点（2026-10-27 定）
+
+**触发者 = 人（或一个显式起它的代理会话），不注册 automation。** 这不是漏建，两道闸口都在库里：
+`docs/superpowers/specs/2026-10-14-e2e-slot-pool-parallel-design.md:400` 记着用户定的「夜间 cron **暂不注册**」，
+要等 `preview-slot<i>.err.log` 抓到具体是哪一种 fatal —— 而 `:389` 实测那条仍是 **0 字节**
+（「没打印」还是「没接住」已用一次刻意的坏 `--config` 验过通路，问题是那一轮根本没产生 fatal 文本）；
+`docs/reference/e2e-tier-triage.md:469` 那道「绿了才建」的三条虽已于 10-14 全部结案，
+但唯一跑成的 `2026-10-17-0330` 那轮带 breach（`flake 6 > 5`，见 `LATEST.md`）。
+⇒ 解锁注册的线：**崩池本身修掉**（`docs/tasks/todo.md` 记内存治理批2/批3 与崩池「三条至今零代码」）
+**且出现一次零 breach 的 PASSED 轮**。到线才谈 `schtasks`，届时 prompt 里必须显式处理
+`--allow-dirty` 与解释器这两条（§7 已核过的前置）。
+
+确切命令只有这四个入口，别在别处拼：
+
+| 目的 | 命令 |
+|---|---|
+| 看计划、什么都不跑 | `node scripts/e2e_nightly.mjs --dry-run`（不写 `latest.json`/`LATEST.md`，也不碰前置门） |
+| 真跑一轮 | `node scripts/e2e_nightly.mjs`（并行度只有 `E2E_SLOTS` 一个旋钮，默认 4） |
+| 只复盘既有产物 | `node scripts/e2e_nightly.mjs --report-only tasks/e2e-nightly/<stamp>/merged.json` |
+| 明知有别人的在制品仍要跑 | 加 `--allow-dirty`，并在结论里写明这轮跳过了脏门 |
+
+**四道前置门**（`precheck()`，任一命中即打印 `SKIPPED: <原因>` 并**退 0** —— 跳过不是失败，
+把跳过报成失败会让兜底轮失去可信度）：① 端口 —— 8000/3000 加上从 `pool-core.mjs:16-17` 的 slot 基址起各 60 个口。
+跨度住在 `scripts/e2e_pool.mjs:41` 的 `PORT_SPAN = 60`，而夜跑那份探测把 60 写死在 `e2e_nightly.mjs:92` ——
+**改跨度必须两处同改**，否则一边报空闲、另一边报占用；② 锁 —— `e2e-nightly.lock` 4 小时内视为已有轮在跑，
+超 4 小时当上一轮的崩溃残留摘掉；③ 脏门 —— `git status --porcelain --untracked-files=no`，
+只拦被跟踪文件的未提交改动；④ 解释器 —— `python -c "import pytest"` 不成立就拒跑，
+免得 .venv 缺 pytest 把导入失败伪装成回归。
+
+**判级**：判绿取末尾结论行（同 §1 的 `RESULT:` 纪律）；崩池轮 `verdict=VOID (infra)` 不计退化、不比单价，
+**重跑才是结论**。退化阈值只住在 `frontend/e2e/helpers/nightly-gates.mjs` 一份，
+`LATEST.md` 表头那行数字是它打印出来的 —— **不要在第三处写这些数**。
+
+**结论落点与谁读它**：`tasks/e2e-nightly/LATEST.md` 自 2026-10-27 起**入库跟踪**
+（`.gitignore` 只放行这一个文件，`/tasks/*` 其余照旧），于是 `.github/workflows/ci.yml:11`
+所指的「全量结论权威」在任何一台检出里都读得到 —— 功能收口 / FF 并入本地 master 前必读最近一轮，
+它与 §1 的收口档是同一条纪律。明细（`latest.json`、各轮目录里的 `merged.json`、`slot<i>.run.log`、
+合并 HTML、锁）**仍不入库** ⇒ `LATEST.md` 里「最近一轮明细：`tasks/e2e-nightly/<stamp>/`」那行
+只在跑这轮的机器上存在，换检出要按名去那台机器上取，别把它当成仓库里该有的路径。
+
+**跟踪带来的新副作用（不自查一定会撞）**：`LATEST.md` 现在是被跟踪文件，跑完一轮必然留下 1 项未提交改动
+⇒ **下一轮的脏门会把自己上一轮的产物判成「别人的在制品」而 SKIPPED**。出路只有两条，选一条并写明：
+跑完把 `tasks/e2e-nightly/LATEST.md` 带进当次提交；或显式带 `--allow-dirty`。
+**别为了让门过去改脏门的口径** —— 它是 2026-10-14 为「另一会话在夜跑中途改测试文件、
+制造一条自相矛盾的假失败」建的。
