@@ -139,6 +139,20 @@ describe('假阳性：不是被测对象的落盘物，不得升级全量', () =
     expect(r.notes.join()).toMatch(/IO 壳无单测.*dry-run/)
   })
 
+  it('600 行绊线内核走 unit 档，但这条放行不许顺带吞掉同目录里没人钉的脚本', () => {
+    const r = staysFast(['scripts/line-limit.mjs'])
+    expect(r.global).toBe(false)
+    expect(r.unit).toBe(true)
+    // note 必须点名钉住它的那条 spec，否则「放行了一条没人验的脚本」看不出来
+    expect(r.notes.join()).toMatch(/lineLimit\.spec\.ts/)
+    // 反向（承重方向）：同目录下一个新出现的、还没有单测的脚本仍按未知路径 → 全量。
+    // 这条是整张表的安全边界（§3「未知路径一律全量，方向不许改」），不能因为我加了一条精确规则就松掉。
+    expect(matchRule('scripts/brand-new-check.mjs')).toEqual([GLOBAL])
+    // ⚠ 本表按**前缀**匹配（这条是探针跑出来的，不是推的）：`scripts/line-limit.mjs` 同样会吃掉
+    // `…mjs.bak` 这类同前缀文件。与既有的 `scripts/icon-lib.cjs`、`scripts/e2e_` 两条同形，
+    // 属本表既有语义，不在这里收紧 —— 但别把这条精确规则当成「只匹配那一个字节级路径」。
+  })
+
   it('实测过的 25 提交里剩下的 6 个假阳性案例，逐个不再升级', () => {
     const cases = [
       ['.commandcode/settings.json', '.gitignore', '.lqdp_startup.lock', '.superpowers/brainstorm/a/b.html', 'frontend/.gitignore'],

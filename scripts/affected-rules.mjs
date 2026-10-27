@@ -140,6 +140,12 @@ export const RULES = [
   ['scripts/e2e_', ['unit',
     'none:编排判据已由 e2eAffectedDecide.spec.ts 钉住；IO 壳无单测，改完必自证 `node scripts/e2e_affected.mjs --dry-run` 与 `e2e_pool.mjs --slots=2 --dry-run`，核对档位计划、slot 数与末尾 RESULT 行']],
 
+  // —— 600 行绊线（2026-10-27 挂）。它只数被跟踪文件的行数，不 import 产品代码、不碰 DOM；
+  // 判据与**全仓实测**都由 lineLimit.spec.ts 跑出来 —— 那条 spec 自己就是取改动集的 IO 壳，
+  // 且跑在真树上，所以这里不像 e2e_ 那族还要留一句「壳没有单测」。
+  ['scripts/line-limit.mjs', ['unit',
+    'none:阈值、豁免账（精确行数）、new/grew/陈旧三种形状与全仓基线都由 lineLimit.spec.ts 钉住；改它由 vitest 验收，不开浏览器']],
+
   // —— 代理与工具的落盘物：不是被测对象，也不改任何被测对象的行为
   ['.gitignore', ['none:.gitignore 只改忽略规则，无测试判据受影响']],
   ['.lqdp_startup.lock', ['none:启动锁文件的清理动作，无测试判据受影响']],

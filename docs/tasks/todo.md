@@ -6312,3 +6312,56 @@ Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `roo
      ⇒ 与 gates:174 仍相反。没顺手改的理由：该文件 `:25` 是用户手写规则（跑全量要先问），入口文件怎么改由他点。
   2. `testing-gates.md:174` 的「裸跑 390 次全量」与同文件 §2 `:86` 的 2026-10-25 实测「418 次展开 / 78 文件，旧账 390/75 已过期」
      对不上 ⇒ 权威文档内部自己漂了一处；改它要先现跑 `--list` 取数，不放在只改 README 的这一批里。
+
+## 2026-10-27 「留给拍板」第 6 条落了一半：600 行硬约束的机械 owner 挂上了，拆那五个文件仍未做
+
+用户点名要的是第 6 条两个取向里的**挂绊线**那半（取向二「把超限文件拆掉」没做，仍待拍板）。
+
+**做了什么**
+- 判据内核 `scripts/line-limit.mjs`（纯函数、零 IO，230 行）+ T2 断言 `frontend/test/unit/lineLimit.spec.ts`
+  （15 例）。选 T2 是因为 `npm run test:unit` 已在 `.github/workflows/ci.yml:75-76`，不需要新流水线、
+  不引入 lint/format 工具链（仓内至今没有 ruff/flake8/ESLint/Prettier/stylelint，这条按现状继续）。
+- **适用面界定**写在 `.claude/CLAUDE.md`「600 行约束的适用面」（spec 钉了这个标题，改标题会红）：
+  数 `git ls-files '*.py' '*.ts' '*.vue'`；行数按 `\n` 切、末尾换行不算一行（实测与 `wc -l` 在 778 个
+  in-scope 文件上逐字相同，CRLF/LF 同值）；**`.vue` 数整个 SFC**（template+script+style，实测最大
+  style 273 / script 445 / 整文件 590，没有单块占大头，且只数 script 需要 SFC 解析＝新工具链）；
+  **测试文件在约束内**。
+- 基线是**精确计数**不是 `>0`：2026-10-27 现算超阈 **5 件** —— `apps/datafiles/tests.py` 1968、
+  `frontend/e2e/data/view-data.spec.ts` 1802、`frontend/e2e/data/data.spec.ts` 1042、
+  `apps/jobs/tests_jobs.py` 846、`test/backend/test_sftp_search_engine_stream.py` 642；
+  **五件全在「测试」这一类，业务件 0**（逐件按行数冻进 `EXEMPT`，理由各写在 `reason` 上）。
+  两个方向都拦：新增超限件 ⇒ `new`；豁免件比登记值多一行 ⇒ `grew`；拆小/删除后名单没销 ⇒ 陈旧断言拦。
+- `testing-gates.md` §2 的 T2 账：本批先把 486 例 / 34 文件改成 **501 例 / 35 文件**（差值 = 本批的 15 例 1 件），
+  随后另一会话把同一行改到 **523 例 / 36 文件** —— 那两个数不矛盾，差的就是他还没提交的
+  `prepushHistoryCheck.spec.ts`（22 例 / 1 件）。当前工作树走的是后一版。
+
+**第 6 条那句话要纠正**：它写「前端反倒一处没有」——那是普查命令 `git ls-files '*.py' '*.vue'` 漏了
+`*.ts` 造出来的盲区，加上 `*.ts` 立刻多抓两件而且都在前端。**第 6 条正文我没动**（它同时是另一会话的账），
+取证与规则落在 `docs/tasks/lessons.md`「2026-10-27 给「600 行硬约束」挂绊线」那条。
+
+**仍待拍板（取向二）**：拆这五个文件。后端两件接缝是 class（`tests_jobs.py` 8 class / 39 例，
+`test_sftp_search_engine_stream.py` 15 class / 51 法），但第 6 条自带两条硬约束照旧有效 ——
+拆出来的新文件**不得 `import pytest`**（CI 只装 `requirements/base.txt`），往 `test/backend/` 新子目录放文件
+要补 `__init__.py`（否则 `DiscoverRunner` 不收集 = 用例静默消失而门禁全绿）。前端两件要连着改定位器。
+验收口径 = 拆分前后唯一用例 ID 集合逐条 diff 为空且总数不变（2026-09-02 批次 3）。
+
+**门禁类目已放行（2026-10-27 用户点）**：`scripts/line-limit.mjs` 原本不在 `affected-rules.mjs` 的放行类目里
+⇒ 命中「未知路径一律全量」兜底，本批因此烧了一轮 9.1min 的池轮。现按 §3 的规矩办：类目写进 `RULES`
+（紧跟 `scripts/e2e_` 那条，与 `nightly-gates.mjs` / `pool-core.mjs` 同族），并在 `e2eAffectedDecide.spec.ts`
+钉**双向**判据 —— 放行方向（改内核只跑 2 档）+ 承重方向（`scripts/brand-new-check.mjs` 仍判 GLOBAL）。
+⚠ 加这条时探针跑出一条本表既有语义：**RULES 按前缀匹配**，所以这条精确规则会一并吃掉 `…line-limit.mjs.bak`
+这类同前缀文件（与 `scripts/icon-lib.cjs`、`scripts/e2e_` 同形，不在本批收紧，只写进注释免得后人意外）。
+放行后的判定：`decide: e2e 模块 [（仅 T2/后端）] + vitest`、`RESULT: PASS · 计划 2 档全部执行`。
+
+**本批验证读数**（产品代码零改动）：`npx vitest run test/unit/lineLimit.spec.ts` 15 例全绿，
+`e2eAffectedDecide.spec.ts` 34 例全绿（含新钉的那条双向）；整档（含另一会话未提交的那颗 spec）
+**524 例 / 36 文件 / 0.56s**，扣掉它的 22 例即本批落盘的 502 例 / 35 文件；`npm run build`
+（vue-tsc -b，本档在 `tsconfig.unit.json` 的 include 内）与 `npm run lint:e2e` 均过。
+**收口档真跑过一轮**：当时内核还没放行 ⇒ `decide 全量`，78 文件 / 4 slot / 用例 418 / 墙钟 9.1min /
+单价 3.12s/例 / `verdict=MEASURED` / **真红 0**（2 个红文件独占 slot 复跑转绿，判负载抖动）/ `RESULT: PASS`。
+⚠ 两条如实记下：① 效率 2.27 低于 ≥2.8 的档标，那是崩池之外的退化信号，本批不因此动阈值；
+② 那一轮的工作树里同时有另一会话的 `.gitattributes` / `affected-rules.mjs` / `githooks/`，
+结论按两批共担读，别单独算成我这批的账。
+承重取证没改坏任何被跟踪文件：① `git init` 一次性仓库 + 同一份内核跑出 `new`/`grew`/陈旧三种形状与红字；
+② 只对本批自己新增的 `EXEMPT` 做变异（1968→1967、把一条 path 改成树上不存在的名字）跑真实 spec，
+该红的两条各红一次，再 `cp` 回原文件用 `cmp` 证字节相同。
