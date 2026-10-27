@@ -2725,3 +2725,22 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   为了拼消息把数组压成字符串，等于把 diff 一起丢掉。
 - **顺带确认的两件**：`.claude/CLAUDE.md` 是被跟踪的（那条「正文与适用面在这里」的锚点断言在 CI 干净检出里
   同样读得到）；`npm run test:unit` 已在 `.github/workflows/ci.yml:75-76`，所以挂在 T2 的这条 owner 不需要新流水线。
+
+## 2026-10-27 `git commit -- <pathspec>` 的第二例：这次吃掉的是**可执行位**，而且我先在提交信息里声称了它
+
+- **现象**：给 §6.5 落 pre-push 检查那批，`git add --chmod=+x -- githooks/pre-push` 之后
+  `git ls-files -s` 明明显示 `100755`，提交信息也就照着写了「按 100755 入库」。下一笔提交前
+  例行看 `git status` 发现同一文件又变成 `M `（暂存态改动），一查 `git ls-tree HEAD` 是 **100644**。
+  也就是说钩子载体在 HEAD 里没有可执行位，Linux/WSL 检出拿到一个不可执行的 `pre-push` 时
+  git 静默不跑——正是这一批要消灭的那个失效形状，却被我自己再制造了一次。
+- **根因**：与 `## 2026-10-13 git commit -- <pathspec> 会把先前 git rm --cached 的删除还原成跟踪`
+  **同一条**：pathspec 形态的 `git commit -- <path>` 走 --only 语义，按**工作区**重建这些路径的树，
+  索引里暂存的 `--chmod=+x` 一并被绕过；本机 `core.fileMode=false` 时工作区读出的 mode 就是 644。
+  10-13 那条只举了「删除被还原」这一种表现，漏了 mode 这一种——同一个洞的第二出口。
+- **规则**：① 凡提交信息里出现「按 X 入库 / 已置 Y 位 / 字节相同」这类**可核断言**，
+  落笔前先跑那条核对命令（这里是 `git ls-tree HEAD -- <path>`），别从 `git ls-files -s`（索引）
+  或自己的意图里挑一个最像的写；② 要提交索引里的**属性**改动（mode、删除、改名）就用**不带
+  pathspec** 的 `git commit`，提交前先确认 `git diff --cached --stat` 里只有你要带的那几条——
+  本仓此刻是多个会话共用一个 `.git/index`，别人 staged 的内容会跟着走；③ 事后发现信息写了
+  HEAD 里没有的东西，**向前补一笔**并在新一笔里点名上一笔的错误声称，不改未推送的历史
+  （要改也得先报再动）。
