@@ -60,6 +60,32 @@
 <br />
 
 单个前端Vue代码或后端Django代码的行数不能超过600行，否则需要拆分组件或模块
+
+## 600 行约束的适用面
+
+这条从写下起只有散文，2026-10-27 起有机械 owner：判据内核 `scripts/line-limit.mjs`，
+IO 壳与全仓断言 `frontend/test/unit/lineLimit.spec.ts`（T2 档，`cd frontend && npm run test:unit`，
+约 0.6s、不开浏览器，**CI 的 vitest 步骤已经在跑它**）。以下为适用面界定，红字与豁免都以它为准。
+
+- **计数对象**：`git ls-files '*.py' '*.ts' '*.vue'` 命中的**被跟踪**文件。未跟踪的、被 `.gitignore`
+  掉的（含 `.venv/` 第三方包）一律不算——普查必须走 `git ls-files`，不走目录递归。
+- **行数口径**：按 `\n` 切分后去掉末尾空串（末尾换行不算一行）。实测与 `wc -l` 在本仓 778 个
+  in-scope 文件上**逐字相同**，所以 Windows 工作树（CRLF）与 Linux CI（LF）同值。
+- **`.vue` 怎么数**：**整个文件**算一份，即 `<template>` + `<script>` + `<style>` 全部计数，
+  不单独放行 style 块。理由（均为 2026-10-27 实测）：最大 style 块 273 行、最大 script 块 445 行、
+  最大整文件 590 行——没有哪一块占大头，而「评审时要.scroll 的那个单位」就是 SFC 本身；
+  改成只数 script 需要解析 SFC，那是新工具链，本条约束明确不为它引入。
+- **测试文件覆盖在内**。这是本条最容易读漏的地方：2026-10-27 实测超阈的**全部**是测试文件
+  （`apps/datafiles/tests.py` 1968、`frontend/e2e/data/view-data.spec.ts` 1802、
+  `frontend/e2e/data/data.spec.ts` 1042、`apps/jobs/tests_jobs.py` 846、
+  `test/backend/test_sftp_search_engine_stream.py` 642），业务代码 0 件。
+  五件按**精确行数**冻在 `EXEMPT` 里：豁免只免到登记的那个数，**多一行即红**；
+  真拆小或删掉了，必须同时把 `EXEMPT` 条目销掉（spec 里有反向断言拦陈旧豁免）。
+  豁免理由写在 `EXEMPT` 每条的 `reason` 上，别在本文复制那份表。
+- **不在适用面**：`*.js` / `*.mjs` / `*.cjs`（打包期与门禁工具，规则原文只点名「前端 Vue 代码」与
+  「后端 Django 代码」）、`*.md` 与 `docs/**`。这条边界不是遮掩：上述类别 2026-10-27 实测 0 件超 600。
+- **要豁免一个新文件**：往 `EXEMPT` 写精确行数 + 理由（哪一次工单、为什么不该由本闸拦当下改动）。
+  只拆文件的工单与挂这条绊线是 `docs/tasks/todo.md`「留给拍板」第 6 条的两个取向，别混着做。
 测试用的文件必须放在test目录下
 非指南和Claude.md文件需要放在tasks目录下（临时脚本/日志），正式文档放在docs目录下
 所有新完成开发或修改的功能都要添加或维护测试用例，但**先选层再写断言**：
