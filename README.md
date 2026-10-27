@@ -130,6 +130,47 @@ npm run dev
 
 默认前端地址：`http://localhost:3000`
 
+### 单独启动后端（浏览器直接访问，不用 Electron）
+
+后端一个进程就能把网页发出去，不需要 Vite、不需要 Electron 壳：
+
+```bash
+cd frontend && npm run build          # 产出 frontend/dist，standalone 档从这里发 SPA
+cd ..
+.venv\Scripts\python.exe standalone.py --host 127.0.0.1 --port 8124
+```
+
+然后浏览器开 `http://127.0.0.1:8124/`，客户端路由（`/dashboard` 等）由 Django 的 SPA 兜底接住。
+停：Ctrl+C（`apps/common/shutdown.py` 同时挂了 SIGINT 与 SIGTERM，会走清理并关库）。
+
+两个入口档的区别容易踩：
+
+- `manage.py runserver` 走 `config.settings.development`，那份 settings **没注册** `frontend_dist`，
+  根路径会 500 `TemplateDoesNotExist: index.html`。只有 `standalone.py` 读 `frontend/dist` 并挂上
+  SPA 兜底（`config/urls.py` 末尾那条 catch-all 的注释写明了这事）。
+  要改代码看效果就另开 `npm run dev`（Vite :3000），那时页面归 Vite，后端只出 `/api`。
+- `LQDP_BASE_DIR` 只是**锚点**（`secret.key` 落在那），`data_dir` 由锚点下的 `system_config.json` 决定，
+  没配则用内建默认 `~\LQ-DataPrase`（`apps/common/system_config.py` 的 `apply_system_config`）。
+  仓库根那份 `system_config.json` 指的也是这里，所以**开发态与打包态共用同一个 `db.sqlite3`** ——
+  别把两个后端同开。`electron-builder.yml` 顶部注释里的 `%APPDATA%/lq-dataprase` 只有 Electron 的
+  profile 文件，库不在那儿。
+
+### 自定义端口
+
+`E2E_PORT`（后端）与 `E2E_FRONTEND_PORT`（前端）是四个读者共用的同一对变量：`frontend/vite.config.ts`
+的监听口与 `/api` 代理目标、`electron/backend.ts` 找后端的路、`electron/main.ts` 加载 Vite 的路。
+这个同源关系由 `frontend/test/unit/portWiring.spec.ts` 钉住，改名字或退回写死常量都会红。
+
+```bash
+E2E_PORT=8124 npm run dev --prefix frontend      # 页面 :3000，但 /api 打到 8124
+E2E_PORT=8124 npm run electron:dev --prefix frontend   # Electron 连 8124 的后端
+```
+
+注意 `electron:dev` 里的 `wait-on http://localhost:3000` 是写死的：**换前端口**时它会一直等下去。
+那种情况下先自己起 Vite（`E2E_FRONTEND_PORT=5273 npm run dev`），再
+`cd frontend && ELECTRON_DEV=true E2E_PORT=8124 E2E_FRONTEND_PORT=5273 npx electron .`。
+`ELECTRON_DEV=true` 是必须的，不加会走打包分支去找 `resources/LQ-DataPrase.exe` 然后 ENOENT。
+
 开发账号（由 `seed_users` 生成）：
 
 | 角色 | 用户名 | 密码 |
@@ -223,7 +264,7 @@ Django + apps/     ──PyInstaller──>  dist/LQ-DataPrase/ ──┘
 - `system_config.json` 与 `secret.key` 固定在锚点目录（打包版 = `%APPDATA%\lq-dataprase\`，开发版 = 项目根），不随数据目录迁移——密钥迁移风险大于目录整洁收益。
 - 打包版通过 `LQDP_BASE_DIR` 环境变量在 Electron 启动 Python 后端时传入锚点目录；`DataFile.file_path` 以相对 `media/` 的路径存储，数据目录整体迁移时无需重写数据库记录。
 
-开发模式下，Electron 不会自己启动后端，而是检测并复用 `localhost:8000` 的 Django 开发服务器，保证浏览器与 Electron 使用同一个 SQLite 数据库。
+开发模式下，Electron 不会自己启动后端，而是检测并复用本机那个 Django 开发服务器，保证浏览器与 Electron 使用同一个 SQLite 数据库。复用哪个口由 `E2E_PORT` 决定，**不设就是 8000**（见上文「自定义端口」）。
 
 ### 后端调试窗口
 
