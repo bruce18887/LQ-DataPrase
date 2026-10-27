@@ -6291,7 +6291,7 @@ Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `roo
    - **下一次编辑先拆**：`apps/datafiles/tests_parse_cache.py` 与 `apps/dashboard/tests.py` 现都 **584/600**
      （只剩 16 行余量），属 P2-7 那一族「测试文件同样受 600 约束」。
 
-# 任务：README 测试小节与 testing-gates.md 对齐（2026-10-27，文档对同一条命令判定相反）
+# 任务：README 测试小节与 testing-gates.md 对齐（2026-10-27，文档对同一条命令判定相反）—— 已完成
 
 - **改前先读两份，差异实测**：`README.md:254` 把 `npm run test:e2e` 当「全量运行」推荐，而
   `docs/reference/testing-gates.md:174` 对同一条命令写「**不要用**」（`workers=6` 打单进程 Django，造出与改动无关的硬红；
@@ -6307,11 +6307,39 @@ Electron 日志**轮转**（保留份数/尺寸/天数量都没定过）与 `roo
 - **本批没开池的原因**：干跑时门禁对整棵工作区判 GLOBAL，`why` 指向另一个会话刚落盘的未跟踪
   `scripts/line-limit.mjs`（命中全局清单）——与本批无关。按「跑全量或预估 >10min 需先问」和「不动别人 WIP」两条都没开池；
   提交只逐个文件 `git add README.md docs/tasks/todo.md`，别人的 `AGENTS.md` 改动留在工作区。
-- **两条同形遗留（未动，等拍板）**：
-  1. `frontend/CLAUDE.md:20-22` 原样抄了 README 那三行（含 `test:e2e  # 全量运行（自动拉起 Django:8000 + Vite:3000）`）
-     ⇒ 与 gates:174 仍相反。没顺手改的理由：该文件 `:25` 是用户手写规则（跑全量要先问），入口文件怎么改由他点。
-  2. `testing-gates.md:174` 的「裸跑 390 次全量」与同文件 §2 `:86` 的 2026-10-25 实测「418 次展开 / 78 文件，旧账 390/75 已过期」
-     对不上 ⇒ 权威文档内部自己漂了一处；改它要先现跑 `--list` 取数，不放在只改 README 的这一批里。
+- **两条同形遗留 → 已闭环（同日续批，用户回「都按你推荐的来」＝两件事都做）**：
+  1. [x] `frontend/CLAUDE.md` 的 E2E 小节抄了 README 那三行、与 gates §5 相反 ⇒ **`b0a3fbd`**。默认档改
+     `npm run test:e2e:affected`；被 §5 明令不要用的 `test:e2e` 从可跑清单删掉、另起一句「其余脚本别按名字猜档位」；
+     一并删掉 `npx playwright test e2e/analysis  # 按模块`——§5 给的定向写法带 project 归属判据（SFTP 用例不带
+     `--project` 会被 Edge project 的 `grepInvert` 静默跳过 = 假绿），裸按目录跑正是那个形状。
+     用户手写规则「跑全量或预估 >10min 要先问」原样保留，现落在 `frontend/CLAUDE.md:31`。
+  2. [x] 权威文档自己两处账对不上（§5 写 390、§2 写 418/78）⇒ **`24e756d`**，按现跑取齐：
+     `npx playwright test --list` = **420 tests / 79 files**；
+     `--project=Edge --project=P0 --project=P1 --list` = **279 / 61 files** ⇒ quick 实为 ≈66%。
+     §2 的 T3 行（`:86`）随之抬到 420/79、P1 251→253（P2 141·P0 14·Edge 10·setup 2 未动），§5 两行（`:181`/`:182`）
+     改成 420 与 279/420。⚠ 顺带把一条口径写进 §2 括号：**逐 project 的 `--list` 各含 setup 那 2 条依赖，取净数要减**
+     ——不减会加出 428，而 428 ≠ 全量行；减完 2+10+14+253+141 = 420 与全量行严丝合缝，
+     这条同时复核了 §3 早先那句「14 条 P0 = `--project=P0 --list` 去掉 setup」。
+- **续批的验证账**（都是现跑的，不是引用上一批）：`--files frontend/CLAUDE.md` 与
+  `--files docs/reference/testing-gates.md` 都判 `RESULT: NO AFFECTED TESTS`（`.md` 在 `affected-rules.mjs`
+  返回空档 ⇒ 档位语义零变化，help 提示与用户指南无需同步）；提交进去的那棵树上 `npx vitest run` =
+  **36 文件 / 524 例全绿 / 562ms**；从 HEAD 取文，三份文档对同一条命令的判定已一致
+  （README `:258`/`:264`、frontend/CLAUDE.md `:23`/`:29`、gates §5 `:178`/`:181`）。本批没开浏览器档。
+- ⚠ **这两笔为什么走「临时索引 + `commit-tree` + 带旧值的 `update-ref`」，而不是 `git add` 直接提交**：
+  同一工作区另一个会话当时正把它的 prepush 批次停在「实现文件已 staged、文档正文未 staged」的形状上
+  （那批由它自己随后提交：`9d3aa41`/`74c0896`/`b925ef7`）。而 **pathspec 提交拿的是工作区内容** ⇒
+  `git commit -- docs/reference/testing-gates.md` 会把别人那 569 行连同 §6.5.1 正文一起写进我的提交信息下。
+  做法：`git show HEAD:<file>` 出底本 → 只改自己那几行 → `git diff --no-index` 出补丁 → 改补丁路径 →
+  `read-tree HEAD` 到临时 `GIT_INDEX_FILE` → `git apply --cached` → `write-tree` → `commit-tree -p HEAD` →
+  `update-ref refs/heads/master <新提交> <期望旧值>`（带旧值＝CAS，HEAD 被别的会话抢先把头推走时我会失败而不是覆盖它）。
+  **验收判据只有一个**：`git show --stat HEAD` 必须是「1 file changed, 3 insertions(+), 3 deletions(-)」——
+  行数对得上才证明没把别人的东西吃进去或吐出来。工作区那侧同步用 Edit 落同一段文本，再用
+  `git diff -- <file>` 复核「剩下的差异只有别人的 hunk」，这就是磁盘与索引同文的证据。
+- **同一批里踩过的一次真事故（别再现学）**：做 `b0a3fbd` 那一笔时我先 `git add frontend/CLAUDE.md`、再裸 `git commit`，
+  结果把别人刚 staged 的 6 个文件（含 230 行的 `scripts/line-limit.mjs`）卷进了我的提交信息下（那笔是 `a579608`）。
+  当场 `git reset --soft HEAD~1`（`--soft` 不动 index 也不动工作区，别人的 staged 状态原样回来）+
+  `git commit -- frontend/CLAUDE.md` 重做，用 `git diff --cached --stat` 逐文件比对行数确认没丢东西。
+  ⇒ **`git add <我的文件>` 挡不住别人的 staged 内容：提交那一侧也必须点名。**
 
 ## 2026-10-27 「留给拍板」第 6 条落了一半：600 行硬约束的机械 owner 挂上了，拆那五个文件仍未做
 
