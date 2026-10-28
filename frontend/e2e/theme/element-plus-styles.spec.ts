@@ -6,13 +6,15 @@
  * 的等价物：样式没落地时，DOM 里的 `el-*` class 在**已加载样式表里没有任何规则指向它** ——
  * 这是「漏了某件 style/css」唯一的机器可读形状，比肉眼比对像素更早、也更便宜。
  *
- * 五层判据：
+ * 判据分六层：
  *   1) 遍历五个路由，收集 DOM 出现过的全部 `el-*` class token → 没有任何规则指向它的那些，
  *      必须逐个落在下面的冻结名单里；名单外的新面孔 = 某件的样式没进来
  *      （EP 自己就会发一批「只在复合选择器里出现」或「按列号动态生成」的类，见
  *      KNOWN_UNCOVERED 与 FAMILY_PATTERNS 上的说明）
  *   2) 交互件（loading 遮罩、message、message-box、dialog 遮罩、popper）在自动化里不一定要
  *      点得到，但它们的规则必须在表里 —— 按名字逐个查
+ *   2b) console 里不得出现 `Failed to resolve component`：逐件注册漏掉一件时 Vue 打的是
+ *      **warn**，P0 的「无控制台错误」抓不到，这层专门收它（并按一条假 warn 自证这条路通）
  *   3) 逐件**样式指纹**：清单里每件自己那份 theme-chalk/el-<name>.css 的首个 el- 类名必须在
  *      页面上出现 —— 不问渲染状态，删掉一行 style/css 就会红（见 ownStyleFingerprints）
  *   4) 计算样式抽查（按钮圆角/内距/边框与高度、表头底色、select wrapper 的
@@ -207,8 +209,29 @@ function probeBody(arg: ProbeArg): ProbeOut {
   }
 }
 
+/**
+ * 漏注册的形状在 console 里是 **warn**（Vue 的 `Failed to resolve component: el-xxx`），
+ * 不是 error —— P0 的「无控制台错误」判据抓不到它，所以这层自己收。
+ * 返回读数函数而不是数组：同一份监听器还能在自证里按一次假 warn 验证这条路是通的。
+ */
+function watchUnresolved(page: Page): () => string[] {
+  const hits: string[] = []
+  page.on('console', (m) => {
+    const t = m.text()
+    if ((m.type() === 'warning' || m.type() === 'error') && t.includes('Failed to resolve component')) {
+      hits.push(t)
+    }
+  })
+  return () => [...new Set(hits)].sort()
+}
+
 /** 遍历五个路由并累积 probe（每页各跑一次，最后取并集）。 */
-async function tourProbe(page: Page): Promise<{ uncovered: string[]; seenMusts: string[]; rules: number; sheets: number }> {
+async function tourProbe(page: Page): Promise<{
+  uncovered: string[]
+  seenMusts: string[]
+  rules: number
+  sheets: number
+}> {
   const uncovered = new Set<string>()
   const seenMusts = new Set<string>()
   let rules = 0
@@ -226,6 +249,7 @@ async function tourProbe(page: Page): Promise<{ uncovered: string[]; seenMusts: 
 
 test.describe('@theme Element Plus 样式落地回归网', { tag: ['@p2', '@theme'] }, () => {
   test('@p2 日模式：DOM 里每个 el-* class 都有样式规则兜着，交互件规则齐全', async ({ page }) => {
+    const unresolved = watchUnresolved(page)
     const out = await tourProbe(page)
     expect(out.sheets, '样式表必须已加载').toBeGreaterThan(0)
     expect(out.rules, '规则总量为 0 说明探针取不到 cssRules').toBeGreaterThan(2000)
@@ -234,15 +258,22 @@ test.describe('@theme Element Plus 样式落地回归网', { tag: ['@p2', '@them
       `这些 el-* class 没有任何样式规则，且不在冻结名单里：${novelUncovered(out.uncovered).join(', ')}`
     ).toEqual([])
     expect(out.seenMusts).toEqual([...MUST_SEE].sort())
+    expect(unresolved(), '漏注册的件会在这里现形（Vue 打的是 warn 不是 error）').toEqual([])
+    // 反证：监听与过滤这条路真的通（按一条假 warn，必须被收上来）
+    await page.evaluate(() => console.warn('Failed to resolve component: el-sentinel'))
+    await expect.poll(() => unresolved().length).toBe(1)
+    expect(unresolved()).toEqual(['Failed to resolve component: el-sentinel'])
     const single = await page.evaluate(probeBody, { ruleChecks: RULE_CHECKS, mustSee: MUST_SEE })
     expect(single.missingRules).toEqual([])
   })
 
   test('@p2 夜模式：同一套判据（主题覆盖层不得把 EP 本体样式换掉）', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('theme', 'night'))
+    const unresolved = watchUnresolved(page)
     const out = await tourProbe(page)
     expect(novelUncovered(out.uncovered)).toEqual([])
     expect(out.seenMusts).toEqual([...MUST_SEE].sort())
+    expect(unresolved(), '漏注册的件会在这里现形（Vue 打的是 warn 不是 error）').toEqual([])
     const single = await page.evaluate(probeBody, { ruleChecks: RULE_CHECKS, mustSee: MUST_SEE })
     expect(single.missingRules).toEqual([])
   })
