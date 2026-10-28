@@ -51,7 +51,10 @@ export async function submitJob(kind: JobKind, payload: Record<string, unknown>)
 
 export async function getJob(id: number): Promise<{ status: number; data: unknown }> {
   try {
-    const resp = await api.get<JobStatus>(`/jobs/${id}/`)
+    // silent：轮询失败必须只有一条 toast。不标的话拦截器先弹 formatError 那句，
+    // pollDecision 判 failed 后 useJobExport 再弹 jobFailureView 那句 —— 两条文案
+    // 不同，index.ts 的 2 秒同名去重闸拦不住这种「同义不同字」。
+    const resp = await api.get<JobStatus>(`/jobs/${id}/`, { silent: true })
     return { status: resp.status, data: resp.data }
   } catch (err: any) {
     // 轮询期间拿到错误码也要交给判定函数（404 = 作业没了，属于终态，不能继续转）

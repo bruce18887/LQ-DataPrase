@@ -152,7 +152,10 @@ export const authApi = {
     return axios.post<RefreshResponse>(
       `${getBaseURL()}/auth/refresh/`,
       { refresh },
-      { headers: { 'Content-Type': 'application/json' } }
+      // 必须带超时：这条走裸 axios 是为了不再进 401 管线，但连带丢了实例的 30s 默认值。
+      // 一次挂起会让 api/index.ts 的 refreshPromise 永不 settle ⇒ 之后每个 401 请求都
+      // 卡在 await 上（表现为「界面还在转，但再也不发请求」）。
+      { headers: { 'Content-Type': 'application/json' }, timeout: 10_000 }
     )
   },
   getProfile() {

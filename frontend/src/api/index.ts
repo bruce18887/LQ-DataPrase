@@ -93,7 +93,10 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
-  if (config.url) {
+  if (import.meta.env.DEV && config.url) {
+    // 打包档不打：这两条 per-request 日志在 Electron 里会被主进程 console-message
+    // 接走再同步写盘（见 electron/main.ts 的 console 转接），一次 API 调用就是四次
+    // appendFileSync —— 而本 app 有 1s 轮询与 IRM 分块这类高频路径。
     console.log(`[api] Request: ${config.method?.toUpperCase() ?? 'GET'} ${config.url}`)
   }
   return config
@@ -176,7 +179,9 @@ function forceLogout() {
 
 api.interceptors.response.use(
   (response) => {
-    console.log(`[api] Response: ${response.status} ${response.config.url ?? ''}`)
+    if (import.meta.env.DEV) {
+      console.log(`[api] Response: ${response.status} ${response.config.url ?? ''}`)
+    }
     return response
   },
   async (error: AxiosError) => {
