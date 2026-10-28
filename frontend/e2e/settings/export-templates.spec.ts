@@ -24,6 +24,14 @@ async function gotoExportTab(page: import('@playwright/test').Page) {
   await page.getByRole('tab', { name: '📄 导出模板' }).click()
 }
 
+/** 点页级「🔄 恢复默认」并在确认框里确定：只改本地表单态，不发 PUT ⇒ 不污染远端设置。 */
+async function resetViaPageButton(page: import('@playwright/test').Page) {
+  await page.getByRole('button', { name: '🔄 恢复默认' }).click()
+  const box = page.locator('.el-message-box')
+  await expect(box).toBeVisible()
+  await box.locator('.el-message-box__btns .el-button--primary').click()
+}
+
 async function restoreTemplates(page: import('@playwright/test').Page) {
   await page.evaluate(async () => {
     const defaults: Record<string, string> = {
@@ -157,5 +165,25 @@ test.describe('@p2 导出文件名模板交互', { tag: ['@p2', '@settings'] }, 
     } finally {
       await restoreTemplates(page)
     }
+  })
+
+  test('页级「恢复默认」后再敲模板，不会把模块级 defaults 改写脏', async ({ page }) => {
+    // 回归：SettingsPage 的 loadSettings/resetDefaults 曾用 `{ ...defaults }` 浅拷贝，
+    // 而本组件的输入框当时是 `v-model="templates[key]"`（就地改 props 对象）⇒
+    // 点一次「🔄 恢复默认」后 settings 的内层 templates 与模块级 defaults 是**同一个对象**，
+    // 此后每敲一次输入框都在改写 defaults 本身 ⇒ 再点「恢复默认」恢复的是上一次敲进去的值。
+    // 判据不硬编码默认串：该输入的 placeholder 就是 metaOf(key).default，
+    // 「值 = placeholder」即「恢复到了真默认」。
+    await gotoExportTab(page)
+    const input = page.getByTestId('template-input-sigma_limit')
+    const placeholder = await input.getAttribute('placeholder')
+    expect(placeholder, 'placeholder 应给出默认模板串').toBeTruthy()
+
+    await resetViaPageButton(page)
+    await input.fill('POLLUTED_{filename}')
+    await expect(input).toHaveValue('POLLUTED_{filename}')
+
+    await resetViaPageButton(page)
+    await expect(input, '恢复默认必须回到真默认，而不是上一次输入的值').toHaveValue(placeholder!)
   })
 })

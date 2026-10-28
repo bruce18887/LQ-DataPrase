@@ -13,12 +13,13 @@
         <el-form-item :label="metaOf(key).label" class="template-form-item">
           <div class="template-controls">
             <el-input
-              v-model="templates[key]"
+              :model-value="templates[key]"
               :data-testid="`template-input-${key}`"
               :placeholder="metaOf(key).default"
               maxlength="200"
               show-word-limit
               class="template-input"
+              @update:model-value="(v: string) => update(key, v)"
             />
             <el-select
               :data-testid="`template-insert-${key}`"

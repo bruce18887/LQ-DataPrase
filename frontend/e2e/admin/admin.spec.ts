@@ -50,7 +50,8 @@ test.describe('用户管理 / 权限', { tag: ['@admin'] }, () => {
       const body = await list.json()
       const users: Array<{ id: number; username: string }> = Array.isArray(body) ? body : body.results || []
       for (const u of users) {
-        if (u.username?.startsWith('e2e_toggle_')) {
+        // e2e_toggle_ 是禁用/启用用例的临时账号，e2e_reset_ 是重置密码用例的
+        if (/^e2e_(toggle|reset)_/.test(u.username ?? '')) {
           await ctx.request.delete(`/api/v1/auth/users/${u.id}/`, { headers, failOnStatusCode: false })
         }
       }
@@ -215,5 +216,72 @@ test.describe('用户管理 / 权限', { tag: ['@admin'] }, () => {
     await expect(dialog).toBeVisible()
     await dialog.locator('.el-message-box__btns .el-button--primary').click()
     await expect(page.getByText('已删除')).toBeVisible({ timeout: 15_000 })
+  })
+
+  test('@p1 重置密码：短密码就地拦住，≥8 位才提交并被后端接受', async ({ page, browser }) => {
+    // 这条钉的是一个「按钮点了必失败」的缺陷：旧实现发硬编码 '123456'（6 位），
+    // 而后端 apps/accounts/views.py:300 对 len(new_password) < 8 一律 400 ⇒
+    // 重置密码功能从来没有成功过一次。既有覆盖只断过「按钮可点」（:126-129），
+    // 没人真点过 —— 所以这条必须走到 POST 的响应码。
+    const username = `e2e_reset_${Date.now()}`
+    const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
+    let userId: number | null = null
+    try {
+      const login = await ctx.request.post('/api/v1/auth/login/', {
+        data: { username: 'admin', password: 'admin123' },
+      })
+      expect(login.ok(), '种子 admin 登录失败，无法建临时用户').toBe(true)
+      const headers = { Authorization: `Bearer ${(await login.json()).token}` }
+      const created = await ctx.request.post('/api/v1/auth/users/', {
+        headers,
+        data: { username, password: 'e2e-initial-password', role: 'viewer' },
+      })
+      expect(created.ok(), `临时用户创建失败：${await created.text()}`).toBe(true)
+      userId = (await created.json()).id
+
+      await loginAs(page, 'admin')
+      await sidebarLink(page, '用户管理').click()
+      const row = page
+        .locator('.el-table tbody tr')
+        .filter({ has: page.getByText(username, { exact: true }) })
+      await expect(row).toHaveCount(1)
+
+      await row.getByRole('button', { name: '重置密码', exact: true }).click()
+      const box = page.locator('.el-message-box')
+      await expect(box).toBeVisible()
+      const input = box.locator('.el-message-box__input input')
+
+      // 1) 短密码：前置校验拦住，**不发请求**，提示就地出现
+      await input.fill('12345')
+      await box.getByRole('button', { name: '重置' }).click()
+      await expect(box.locator('.el-message-box__errormsg')).toContainText('至少 8 位')
+      await expect(box, '校验失败时弹窗必须还在（旧实现是直接发出去吃 400）').toBeVisible()
+
+      // 2) ≥8 位：waitForResponse 注册在点击之前（R2①），断真实状态码
+      const newPassword = 'e2e-new-password-8'
+      await input.fill(newPassword)
+      const [resp] = await Promise.all([
+        page.waitForResponse(
+          (r) => r.url().includes(`/auth/users/${userId}/reset_password/`) && r.request().method() === 'POST',
+          { timeout: 20_000 },
+        ),
+        box.getByRole('button', { name: '重置' }).click(),
+      ])
+      expect(resp.status(), `≥8 位的新密码必须被接受，实际 ${resp.status()}：${await resp.text()}`).toBe(200)
+      await expect(page.getByText(`已重置 ${username} 的密码`)).toBeVisible({ timeout: 15_000 })
+    } finally {
+      // 失败路径也不留尸体（afterAll 还有一道按前缀的兜底）
+      if (userId != null) {
+        const login = await ctx.request.post('/api/v1/auth/login/', {
+          data: { username: 'admin', password: 'admin123' },
+          failOnStatusCode: false,
+        })
+        if (login.ok()) {
+          const headers = { Authorization: `Bearer ${(await login.json()).token}` }
+          await ctx.request.delete(`/api/v1/auth/users/${userId}/`, { headers, failOnStatusCode: false })
+        }
+      }
+      await ctx.close()
+    }
   })
 })

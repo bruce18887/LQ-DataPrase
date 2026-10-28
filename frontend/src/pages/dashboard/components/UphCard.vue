@@ -30,10 +30,9 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, h, ref, computed, watch, type PropType } from 'vue'
+import { defineComponent, h, computed, type PropType } from 'vue'
 import { QuestionFilled } from '@element-plus/icons-vue'
 import { ElTooltip, ElIcon, ElEmpty } from 'element-plus'
-import { analysisApi } from '../../../api/analysis'
 import type { UphData } from '../../../types'
 
 /** 紧凑明细行内容（单文件卡内与批次 embedded 共用） */
@@ -124,20 +123,24 @@ const UphDetail = defineComponent({
 
 <script setup lang="ts">
 const props = withDefaults(defineProps<{
-  fileId?: number | null
-  /** Direct UPH data — when provided, skips API fetch (batch mode) */
+  /** 页面统一下传的 UPH —— 唯一数据源（单文件模式与批次内嵌模式都走这里） */
   uphData?: UphData | null
+  /** 页面正在拉 UPH：骨架态由页面持有，卡片不再自己发请求 */
+  uphLoading?: boolean
+  /** 页面那次拉取失败（且没有可用数据时才落错误态） */
+  uphError?: boolean
   /** 内嵌模式（批次 Bin 分布卡内）：去掉卡片壳，标题由父级分区提供 */
   embedded?: boolean
 }>(), {
-  fileId: null,
   uphData: null,
+  uphLoading: false,
+  uphError: false,
   embedded: false,
 })
 
-const loading = ref(false)
-const error = ref(false)
-const data = ref<UphData | null>(null)
+const loading = computed(() => props.uphLoading)
+const error = computed(() => props.uphError && !props.uphData)
+const data = computed<UphData | null>(() => props.uphData ?? null)
 
 // Source-aware tag: batch=批次汇总, manual*=手动输入, 其余非空=自动检测列
 // （后端实际取值 'Test_Time (ms→s)' / 'Test_Time' / 'manual (1.2s)' / 'unavailable' / 'batch'，
@@ -150,37 +153,6 @@ const sourceTag = computed<{ tone: 'success' | 'brand' | 'warn' | 'neutral'; lab
   return { tone: 'neutral', label: '无测试时间' }
 })
 
-async function fetchUph() {
-  if (!props.fileId) {
-    error.value = true
-    data.value = null
-    return
-  }
-  loading.value = true
-  error.value = false
-  data.value = null
-  try {
-    const resp = await analysisApi.getUph(props.fileId)
-    data.value = resp.data as UphData
-  } catch {
-    error.value = true
-  } finally {
-    loading.value = false
-  }
-}
-
-// When uphData is provided directly (batch mode / 页面统一下传), use it
-watch(() => props.uphData, (val) => {
-  if (val) {
-    data.value = val
-    error.value = false
-  }
-}, { immediate: true })
-
-// When fileId changes (single-file mode), fetch from API（uphData 优先）
-watch(() => props.fileId, () => {
-  if (props.fileId && !props.uphData) fetchUph()
-}, { immediate: true })
 </script>
 
 <style scoped>

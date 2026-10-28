@@ -12,7 +12,7 @@ import { onScopeDispose, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import { downloadJob, getJob, submitJob, type JobKind } from '../api/jobs'
-import { classifySubmit, formatJobFailure, jobFailureView, pollDecision, type JobFailureReason } from './jobPolling'
+import { classifySubmit, formatJobFailure, jobFailureView, pollDecision, submitFailureMessage, type JobFailureReason } from './jobPolling'
 import {
   downloadBlob,
   extractFilenameFromContentDisposition,
@@ -72,7 +72,12 @@ export function useJobExport() {
       const verdict = classifySubmit(submit)
 
       if (verdict.kind === 'error') {
-        return fail('submit-error', formatJobFailure(verdict as Record<string, unknown>))
+        // verdict.message 已是成品文案（classifySubmit 里 202 无 job_id 与
+        // formatJobFailure(resp.data) 两条都组好了）。这里原先再套一层
+        // formatJobFailure(verdict)，而它只读 verdict.error / verdict.code 两个键 ——
+        // SubmitVerdict 的 error 分支根本没这两个键 ⇒ 恒落「导出失败」，后端那句
+        // 人话（400 的具体原因）被吞掉。
+        return fail('submit-error', submitFailureMessage(verdict))
       }
 
       if (verdict.kind === 'sync-fallback') {

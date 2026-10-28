@@ -89,7 +89,10 @@ const defaults: SettingsData = {
 }
 
 const activeTab = ref('display')
-const settings = ref<SettingsData>({ ...defaults })
+// 必须深拷贝：defaults 里的 export_filename_templates / default_hidden_columns 是嵌套对象与
+// 数组，浅 spread 会让 settings 与模块级 defaults **共享同一个内层对象**（下面 :108 的 loaded
+// 早就用 snapshot() 防同一件事，只是这三处漏了）。
+const settings = ref<SettingsData>(snapshot(defaults))
 const store = useUserSettingsStore()
 
 /**
@@ -134,11 +137,11 @@ async function loadSettings() {
   // 下面按 defaults 兜底，与今天 catch 分支同形（失败即默认值，不重试）。
   await store.ensure()
   const data = store.raw
-  const merged = { ...defaults }
+  const merged = snapshot(defaults)
   if (data && typeof data === 'object') {
     Object.keys(defaults).forEach((key) => {
       if (key in data) {
-        ;(merged as Record<string, unknown>)[key] = data[key]
+        ;(merged as unknown as Record<string, unknown>)[key] = data[key]
       }
     })
   }
@@ -196,7 +199,9 @@ async function resetDefaults() {
       '恢复默认',
       { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
     )
-    settings.value = { ...defaults }
+    // 同 :92：浅 spread 会把 defaults 的内层对象直接交给 settings，此后每敲一次
+    // 输入框都在改写模块级 defaults ⇒「恢复默认」不再恢复真默认。
+    settings.value = snapshot(defaults)
     ElMessage.success('已恢复默认设置（请点击保存以持久化）')
   } catch {
     // cancelled

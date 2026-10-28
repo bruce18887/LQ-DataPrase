@@ -125,6 +125,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../../api'
+import { collectAllPages } from '../../utils/paging'
 import { useAuthStore } from '../../stores/auth'
 
 interface User {
@@ -198,16 +199,35 @@ function formatDate(dateStr: string | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+/**
+ * 分页取全。DRF 默认 PAGE_SIZE=20（config/settings/base.py:214-215，本 ViewSet 未覆写
+ * pagination_class），而本页**没有翻页控件**：只读第一页的话，第 21 个用户起在页面上
+ * 不可达，而下面 kpi 的 total/active/locked/admins 全按 `users` 统计 ⇒ 数字静默失真。
+ * 跟着 `next` 取完；50 页护栏只为防坏响应自指成死循环，正常账号规模远不到。
+ */
 async function loadUsers() {
   try {
-    const { data } = await api.get('/auth/users/')
-    users.value = Array.isArray(data) ? data : data.results || []
+    // 判据内核与三种响应形态的单测在 utils/paging.ts（T2，秒级、不开浏览器）
+    const { rows, truncated } = await collectAllPages<User>(
+      async (url) => (await api.get(url)).data,
+      '/auth/users/',
+    )
+    users.value = rows
+    if (truncated) {
+      ElMessage.warning(`用户多于 ${rows.length} 条，本次只取到前若干页，统计可能偏小`)
+    }
   } catch {
     // 错误 toast 由 axios 拦截器统一弹出（utils/error.ts formatError）
   }
 }
 
 async function addUser() {
+  // 后端 apps/accounts/serializers.py:60 是 password = CharField(min_length=8)：
+  // 不前置检查，短密码要跑到后端被 400 再弹一句英文 detail。
+  if (newUser.value.password.length < 8) {
+    ElMessage.warning('密码至少 8 位')
+    return
+  }
   try {
     await api.post('/auth/users/', newUser.value)
     ElMessage.success('用户已添加')
@@ -229,18 +249,29 @@ async function toggleUser(user: User) {
 }
 
 async function resetPassword(user: User) {
+  // 旧实现发的是硬编码 '123456'（6 位），而后端 apps/accounts/views.py:300 对
+  // len<8 一律 400 ⇒ 「重置密码」这个按钮从来没成功过一次。改成管理员当场输入新密码，
+  // 长度门槛与后端同值（views.py:300 与 serializers.py:173 都是 8）。
+  let value: string
   try {
-    await ElMessageBox.confirm(
-      `确定将用户 ${user.username} 的密码重置为 123456 吗？`,
-      '确认重置密码',
-      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
-    )
-    await api.post(`/auth/users/${user.id}/reset_password/`, {
-      new_password: '123456',
-    })
-    ElMessage.success('密码已重置')
+    ({ value } = await ElMessageBox.prompt(
+      `为 ${user.username} 设置新密码（至少 8 位）`,
+      '重置密码',
+      {
+        confirmButtonText: '重置',
+        cancelButtonText: '取消',
+        inputPattern: /^.{8,}$/,
+        inputErrorMessage: '密码至少 8 位',
+      },
+    ))
   } catch {
-    // ElMessageBox.confirm 取消会 reject "cancel"；真实错误 toast 由拦截器弹出
+    return // 取消：prompt 关闭时 reject 'cancel'
+  }
+  try {
+    await api.post(`/auth/users/${user.id}/reset_password/`, { new_password: value })
+    ElMessage.success(`已重置 ${user.username} 的密码`)
+  } catch {
+    // 真实错误 toast 由拦截器弹出
   }
 }
 

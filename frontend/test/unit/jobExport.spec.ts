@@ -23,6 +23,7 @@ import {
   jobFailureView,
   nextPollDelay,
   pollDecision,
+  submitFailureMessage,
   type JobFailureReason,
 } from '../../src/composables/jobPolling'
 
@@ -184,5 +185,34 @@ describe('jobFailureView：gave-up 不是失败，其余都算失败', () => {
     const view = jobFailureView('job-failed', '')
     expect(view.level).toBe('error')
     expect(view.text).toBe('导出失败，请稍后重试')
+  })
+})
+
+describe('submitFailureMessage：交出 classifySubmit 组好的那句，不再二次格式化', () => {
+  it('error 分支原样交出 message', () => {
+    expect(submitFailureMessage({ kind: 'error', message: '测试项过多，请缩减选择' })).toBe(
+      '测试项过多，请缩减选择',
+    )
+  })
+
+  it('非 error 分支返回空串（调用方的 fail() 会落默认文案）', () => {
+    expect(submitFailureMessage({ kind: 'sync-fallback' })).toBe('')
+    expect(submitFailureMessage({ kind: 'poll', jobId: 7 })).toBe('')
+  })
+
+  // A/B 对照组：钉住这次修的那个具体缺陷。useJobExport 曾把整个 verdict 再喂给
+  // formatJobFailure，而它只认 `error`/`code` 两个键 —— SubmitVerdict 的 error 分支
+  // 上两个都没有 ⇒ 后端那句具体原因恒被换成「导出失败」。
+  it('对照组：后端给了具体原因时，旧写法（formatJobFailure(verdict))必然吞成「导出失败」', () => {
+    const verdict = classifySubmit({ status: 400, data: { error: '测试项过多，请缩减选择' } })
+    expect(verdict).toEqual({ kind: 'error', message: '测试项过多，请缩减选择' })
+    if (verdict.kind !== 'error') throw new Error('分支应为 error')
+    expect(submitFailureMessage(verdict)).toBe('测试项过多，请缩减选择')
+    expect(formatJobFailure(verdict as unknown as Record<string, unknown>)).toBe('导出失败')
+  })
+
+  it('202 却无 job_id 的契约破坏句也照样交出', () => {
+    const verdict = classifySubmit({ status: 202, data: {} })
+    expect(submitFailureMessage(verdict)).toBe('作业已提交但没拿到作业号')
   })
 })
