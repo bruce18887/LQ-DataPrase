@@ -96,7 +96,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onActivated, watch } from 'vue'
+import { ref, shallowRef, computed, onActivated, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../../api'
 import { useFilesStore } from '../../stores/files'
@@ -110,8 +110,10 @@ import GageSummary from './GageSummary.vue'
 import BuyoffForm from './BuyoffForm.vue'
 import FileCorrelationSection from './components/correlation/FileCorrelationSection.vue'
 
-// 用于导出下拉与当前文件名解析的轻量全量列表（FileListTab 自管分页列表）
-const files = ref<any[]>([])
+// 用于导出下拉与当前文件名解析的轻量全量列表（FileListTab 自管分页列表）。
+// shallowRef：page_size=9999 时这是全仓最大的一份列表（实测 9999 条 ≈ 51.8KB），
+// 它只在 loadFiles 里整体替换（:196），六个消费组件全部只读或先拷贝再 sort。
+const files = shallowRef<any[]>([])
 const fileTotal = ref(0)
 const batchTotal = ref(0)
 const activeTab = ref('files')

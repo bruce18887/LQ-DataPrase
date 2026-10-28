@@ -86,7 +86,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onActivated, watch } from 'vue'
+import { ref, shallowRef, onActivated, watch } from 'vue'
 import { useFilesStore } from '../../stores/files'
 import api from '../../api'
 import { datafilesApi } from '../../api/datafiles'
@@ -133,13 +133,16 @@ const selectedFileId = ref<number | null>(null)
 const loading = ref(false)
 const error = ref(false)
 const activeTab = ref('single')
-const data = ref<DashboardData | null>(null)
+// 下面这份 /summary/ 响应是全页最重的对象（phases[].bin_info[] / site_total / uph 整包），
+// 且只会整体替换、从不就地改字段（TestItemOverviewSection:165 排序前也先 [...] 拷贝）
+// ⇒ 一律 shallowRef：只有引用变化进依赖表，代理层不再给每个内层对象建 Proxy。
+const data = shallowRef<DashboardData | null>(null)
 const metrics = ref({ total_rows: 0, pass_count: 0, fail_count: 0, yield_pct: 0, format: 'N/A' })
-const binTableData = ref<any[]>([])
-const binSiteColumns = ref<string[]>([])
+const binTableData = shallowRef<any[]>([])
+const binSiteColumns = shallowRef<string[]>([])
 const updateTime = ref('')
-const testItemOverview = ref<TestItemOverview[]>([])
-const qualityAlerts = ref<any[]>([])
+const testItemOverview = shallowRef<TestItemOverview[]>([])
+const qualityAlerts = shallowRef<any[]>([])
 // 页面级 UPH 拉取：总览条与 UPH 明细共用同一份数据（避免重复请求）
 const uphData = ref<UphData | null>(null)
 // 拉取态一并由页面持有：UphCard 原先在 uphData 还没落地时自己再发一次同样的请求

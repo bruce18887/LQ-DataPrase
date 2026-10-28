@@ -171,7 +171,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onActivated, onBeforeUnmount, watch } from 'vue'
+import { ref, shallowRef, computed, onMounted, onActivated, onBeforeUnmount, watch } from 'vue'
 import { batchApi } from '../../../api/batch'
 import { useBatchExport } from '../composables/useBatchExport'
 import { useFilesStore } from '../../../stores/files'
@@ -186,7 +186,7 @@ import YieldBadge from '../../../components/common/YieldBadge.vue'
 const batches = ref<any[]>([])
 const selectedBatch = ref('')
 const loading = ref(false)
-const batchData = ref<any>(null)
+const batchData = shallowRef<any>(null)
 const stageFilter = ref('')
 const updateTime = ref('')
 

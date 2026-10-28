@@ -72,6 +72,11 @@ export interface BuildBrowserColumnDefsOptions {
 
 export function buildBrowserColumnDefs(opts: BuildBrowserColumnDefsOptions): any[] {
   const defs: any[] = []
+  // 三个成员判据原本是「每列一次 .includes」：本函数挂在 columnDefs computed 上，
+  // 每勾一次测试列就整体重跑一遍，千列文件上就是百万级字符串比较 ⇒ 一次建 Set 查 Set。
+  const numericSet = new Set(opts.numericColumns)
+  const hiddenSet = new Set(opts.defaultHiddenCols)
+  const pinnedSet = new Set(opts.pinnedCols)
   for (const col of opts.displayCols) {
     const meta = opts.colMeta[col]
     let header = col
@@ -91,12 +96,12 @@ export function buildBrowserColumnDefs(opts: BuildBrowserColumnDefsOptions): any
       headerName: header,
       // 服务端列过滤（方案 A）：数值列挂 number filter（等/不等/大于/小于/区间），
       // 其余挂 text filter（包含/开头/结尾）——IRM 下 filter 类型必须显式指定
-      filter: opts.numericColumns.includes(col) ? 'agNumberColumnFilter' : 'agTextColumnFilter',
+      filter: numericSet.has(col) ? 'agNumberColumnFilter' : 'agTextColumnFilter',
     }
-    if (opts.defaultHiddenCols.includes(col)) {
+    if (hiddenSet.has(col)) {
       colDef.hide = true
     }
-    if (opts.pinnedCols.includes(col)) {
+    if (pinnedSet.has(col)) {
       colDef.pinned = 'left'
     }
     if (opts.highlightTriggerCol && col === opts.highlightTriggerCol) {
@@ -188,12 +193,16 @@ export function resolveDisplayCols(
 ): BrowserDisplayCols {
   const sys: string[] = []
   const tests: string[] = []
+  // 同上：这里是「每列 × systemCols.includes」再叠一层「每列 × selectedTestCols.includes」，
+  // 千列 + 勾选上千测试列时是平方级 ⇒ 换成 Set 成员判定，输出顺序不变（仍按文件序）。
+  const sysSet = new Set(systemCols)
+  const selSet = new Set(selectedTestCols)
   for (const c of allCols) {
-    if (systemCols.includes(c)) sys.push(c)
+    if (sysSet.has(c)) sys.push(c)
     else tests.push(c)
   }
   const shown = selectedTestCols.length
-    ? tests.filter((c) => selectedTestCols.includes(c))
+    ? tests.filter((c) => selSet.has(c))
     : tests
   return { systemCols: sys, testCols: tests, displayCols: [...sys, ...shown] }
 }
