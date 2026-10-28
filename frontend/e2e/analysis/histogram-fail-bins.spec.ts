@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, selectParam, pickOutlierMode } from '../helpers/params'
+import { selectAnalysisFile, selectParam, pickOutlierMode, ensureChartToggles } from '../helpers/params'
 import { waitLoadingGone } from '../helpers/charts'
 import { SEEDED_FILES } from '../fixtures/test-data'
 
@@ -51,8 +51,13 @@ test.describe('@p1 柱状图 Fail Bin 可视化', { tag: ['@p1', '@analysis'] },
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
     await waitLoadingGone(page.locator(SINGLE))
 
-    // Ensure Igss_3V is selected; if the file auto-loads another first param,
-    // explicitly switch to Igss_3V.
+    // 自己收敛账号级图表开关：本用例后面用 `${SINGLE} .chart-container` 取直方图容器，
+    // 而箱线图容器也在同一层（`.box-chart-host > .chart-container`）—— 开关是账号级
+    // 持久化的，不收敛就会在「上一轮把箱线图留着了」的全量批次里撞 strict mode
+    //（同判据见 chart-filter-switches.spec.ts:328-331，它已经收敛、所以它不红）。
+    await ensureChartToggles(page, { serial: false, qq: false, box: false })
+
+    // 确保选中的是 Igss_3V；文件自动加载的可能是另一个首参数，那就显式切过去。
     const paramSelectWrapper = page.locator('.param-selector .el-select')
     const currentParam = await paramSelectWrapper.locator('.el-select__placeholder').textContent()
     if (!currentParam?.includes('Igss_3V')) {

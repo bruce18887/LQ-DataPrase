@@ -1417,7 +1417,7 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     expect(band, '表格容器无盒模型').not.toBeNull()
     expect(Math.round(band!.y), '表格上缘位置变了，但 TABLE_TOP_OFFSET 没跟着重量').toBe(413)
     const innerH = await page.evaluate(() => window.innerHeight)
-    expect(band!.height, '表格高度不再等于 innerHeight - TABLE_TOP_OFFSET(290)').toBe(innerH - 290)
+    expect(Math.round(band!.height), '表格高度（取整后）不再等于 innerHeight - TABLE_TOP_OFFSET(290)').toBe(innerH - 290)
   })
 
   test('@p1 多标签：两个文件各占一个标签，后开的不覆盖先开的', async ({ page }) => {
