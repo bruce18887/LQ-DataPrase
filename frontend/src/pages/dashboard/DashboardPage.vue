@@ -68,7 +68,7 @@
       />
 
       <!-- UPH 效率明细（紧凑信息带，页面最底部） -->
-      <UphCard :file-id="data?.file_id || null" :uph-data="uphData" />
+      <UphCard :uph-data="uphData" :uph-loading="uphLoading" :uph-error="uphError" />
 
       <!-- 导出 -->
       <ExportFooter
@@ -142,15 +142,25 @@ const testItemOverview = ref<TestItemOverview[]>([])
 const qualityAlerts = ref<any[]>([])
 // 页面级 UPH 拉取：总览条与 UPH 明细共用同一份数据（避免重复请求）
 const uphData = ref<UphData | null>(null)
+// 拉取态一并由页面持有：UphCard 原先在 uphData 还没落地时自己再发一次同样的请求
+// （:215 先写 data ⇒ 它的 fileId 立刻变化，而此刻 uphData 仍为 null ⇒ 条件成立），
+// 于是一次切文件打两份 UPH。现在卡片只消费页面这一份。
+const uphLoading = ref(false)
+const uphError = ref(false)
 // 测试开始：文件元数据 metadata.start_time（列表接口不带 metadata，走详情接口，去时区后缀保留到分钟）
 const testStartTime = ref('')
 
 async function loadUph(fileId: number) {
+  uphLoading.value = true
+  uphError.value = false
   try {
     const resp = await analysisApi.getUph(fileId)
     uphData.value = resp.data as UphData
   } catch {
     uphData.value = null
+    uphError.value = true
+  } finally {
+    uphLoading.value = false
   }
 }
 
@@ -188,6 +198,8 @@ async function onFileChange() {
     data.value = null
     error.value = false
     uphData.value = null
+    uphLoading.value = false
+    uphError.value = false
     return
   }
   const mySeq = ++_dashSeq

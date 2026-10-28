@@ -51,6 +51,18 @@ export function classifySubmit(resp: { status: number; data: unknown }): SubmitV
   return { kind: 'error', message: formatJobFailure(resp.data as Record<string, unknown>) }
 }
 
+/**
+ * 提交失败时要给用户的那句话。
+ *
+ * `classifySubmit` 的 error 分支已经把文案组好（202 无 job_id 是固定句子，其它状态码
+ * 走 formatJobFailure(resp.data) ⇒ 内含后端 detail）。这里**只**交出 verdict.message：
+ * 曾经调用方又套了一层 formatJobFailure(verdict)，而 SubmitVerdict 的 error 分支上
+ * 没有 `error`/`code` 两个键 ⇒ 恒落「导出失败」，后端那句具体原因被吞掉。
+ */
+export function submitFailureMessage(verdict: SubmitVerdict): string {
+  return verdict.kind === 'error' ? verdict.message : ''
+}
+
 /** 一次轮询响应怎么解读。 */
 export function pollDecision(
   resp: { status: number; data: unknown },

@@ -179,4 +179,23 @@ test.describe('@p1 切文件时加载态覆盖数据区', { tag: ['@p1', '@dashb
     }).toPass({ timeout: 30_000 })
     await page.unroute(SUMMARY_ROUTE)
   })
+
+  test('@p1 一次进页只发一份 UPH（卡片不再自取）', async ({ page }) => {
+    // 回归：UphCard 曾在 uphData 还没落地时自己再 GET 同一个 file_id 的 UPH ——
+    // DashboardPage 先写 data（:215）⇒ 卡片的 fileId 立刻变化，而那一刻 uphData 仍是
+    // null ⇒ 它的 `if (fileId && !uphData) fetchUph()` 成立，于是一次进页打两份。
+    // 现在数据与 loading/error 态都由页面单一持有，卡片只消费 props。
+    // 计数器必须装在 goto 之前（lessons R2④：goto 之后再装会漏计前置阶段）。
+    const uph: string[] = []
+    page.on('request', (r) => {
+      const url = r.url()
+      if (/\/analysis\/uph\/(\?|$)/.test(url)) uph.push(url)
+    })
+
+    await gotoApp(page, '/dashboard')
+    await expect(page.getByText('UPH 效率明细').first()).toBeVisible({ timeout: 30_000 })
+    await page.waitForTimeout(2_000)
+
+    expect(uph, `发出了 ${uph.length} 条 UPH 请求，应为 1 条：${JSON.stringify(uph)}`).toHaveLength(1)
+  })
 })
