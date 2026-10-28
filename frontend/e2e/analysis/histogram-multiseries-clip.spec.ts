@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, selectParam, filePicker } from '../helpers/params'
+import { selectAnalysisFile, selectParam, filePicker, ensureChartToggles } from '../helpers/params'
 import { waitLoadingGone } from '../helpers/charts'
 import { SEEDED_FILES, RECOMMENDED } from '../fixtures/test-data'
 
@@ -79,6 +79,11 @@ test.describe('@p1 多系列直方图边缘柱体不被裁剪', { tag: ['@p1', '
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
     await waitLoadingGone(page.locator(SINGLE))
 
+    // 图表开关是账号级持久化的，而 `${SINGLE} .chart-container` 会把箱线图容器
+    // （`.box-chart-host > .chart-container`）一起算进来 ⇒ 不收敛就在全量批次里撞
+    // strict mode（同判据见 chart-filter-switches.spec.ts:328-331）。
+    await ensureChartToggles(page, { serial: false, qq: false, box: false })
+
     // 文件自动加载首个参数；显式切到 Vth_Post（8 颗 fail：5 超 USL → overflow bin）
     const paramSelectWrapper = page.locator('.param-selector .el-select')
     const currentParam = await paramSelectWrapper.locator('.el-select__placeholder').textContent()
@@ -142,6 +147,9 @@ test.describe('@p1 多系列直方图边缘柱体不被裁剪', { tag: ['@p1', '
     await selectAnalysisFile(page, SEEDED_FILES.STS8200_CP)
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
     await waitLoadingGone(page.locator(SINGLE))
+
+    // 同上一条用例：先收敛开关，后面 `${SINGLE} .chart-container` 的单一性才成立。
+    await ensureChartToggles(page, { serial: false, qq: false, box: false })
 
     // Vth：超 USL 0 颗，bin 20（[1.08,1.10)，右边界=USL）含 1 颗贴限值 1.0898。
     // 修复前：9 系列并排柱组宽 0.04 单位 > bin 宽，AllSite 柱体右缘越过 USL ~4.7px
