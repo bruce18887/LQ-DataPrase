@@ -2744,3 +2744,42 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   本仓此刻是多个会话共用一个 `.git/index`，别人 staged 的内容会跟着走；③ 事后发现信息写了
   HEAD 里没有的东西，**向前补一笔**并在新一笔里点名上一笔的错误声称，不改未推送的历史
   （要改也得先报再动）。
+
+## 2026-10-28 性能整改四批：三个红是我自己制造的，外加一条「配置注释与产物相反」的旧账
+
+- **现象**：首屏压完字节后给 `vite.config.ts` 加 `vue|@vue|vue-router|pinia` 分支想拆出
+  vue-vendor，chunk 名字确实生成了（31,001B，只装到 pinia/vue-router），但入口照旧
+  `modulepreload` ag-grid-vendor 1.19MB。
+- **根因**：rolldown（Vite 8）的**函数式 `manualChunks` 返回值在合并阶段只是建议**——
+  `@vue/{shared,reactivity,runtime-core,runtime-dom}` 被并进 ag-grid-vendor（用
+  `vite build --sourcemap hidden` 读 `sources[]` 才看得见：那 6 个模块里 4 个是 Vue 本体）。
+  而原注释「Rolldown's manualChunks only accepts a function form / 拆更细会伤运行时性能」
+  让我一开始把「产物里首屏拉网格」归因成入口 import 了 CSS，只修了 CSS 那一半。
+- **规则**：① 凡改分块/首屏，判据取 **hidden sourcemap 的模块归属 + `dist/index.html` 的
+  preload 清单 + 产物字节**，不取「配置里写了什么」；② 这类事别留在注释里，挂机械 owner
+  （本轮落 `frontend/test/unit/firstScreenChunks.spec.ts`：首屏不得出现重型 vendor、
+  必须有唯一 vue-vendor、首屏 JS ≤1.3MB，且探针自证正则不失配；**对照组**跑改动前的
+  产物必须是红的——旧写法下 heavy=ag-grid-vendor、2,201,841B）；③ 分块改用
+  `output.codeSplitting.groups` + `priority`（`advancedChunks` 已弃用，构建会 WARN）。
+- **现象**：图表渲染改成「连发只渲一次」用了现成的 `useCoalescedCall(150ms)`，全量门禁
+  当场把 `multi-file.spec.ts` 判成**真红**（独占复跑仍红）。
+- **根因**：该用例第 144 行是一次性 `allTextContents()` 读 SVG 文本、**不 poll**；跨帧
+  延迟让它读到上一次渲染的图例。渲染路径上的合并窗口不是免费的，代价由既有断言的形状决定。
+- **规则**：渲染/绘图侧的失效合并不超过一帧（rAF），要跨帧先 grep 目标用例是
+  `expect.poll`/自动等待还是一次性读取；改共享渲染 composable 时，把「谁会立刻读它」列出来。
+- **现象**：给大下拉封顶（`DROPDOWN_RENDER_CAP=300`）之后 `exports.spec.ts` 红——它用
+  **渲染出来的 option 列表**反推参数全集 P，于是「已选 2 / 共 ${P.length} 个」里 P=300
+  而应用正确显示 369。
+- **规则**：凡是收窄渲染面（封顶、虚拟化、截断+提示），同批必须把所有「从渲染 DOM 反推
+  集合」的断言改到**数据源**（本轮改为取 `/analysis/histogram/` 响应的 `results` 键，
+  即 `ExportToolsTab.vue:78` 自己那份）；判据要顺势变强而不是变弱——被测契约本来就是
+  「过滤/计数/Enter 全选作用于完整集合，只有渲染截断」。
+- **现象**：新的一条 UPH 用例先放进 `dashboard.spec.ts`（596 行），加了 20 行就破 600 闸，
+  `lineLimit.spec.ts` 一次报红 4 条（含「超阈集合逐字等于豁免账」）。
+- **规则**：往既有 spec 里加用例前**先量目标文件行数余量**，落点选语义同类且有余量的文件
+  （本轮落到 `dashboard-loading.spec.ts`，182 行）；不要为了通过去挂 `EXEMPT`——豁免只免
+  登记值，新破闸挂账等于把闸改松。
+- **自报操作失误**：一次 `Edit` 的 `old_string` 少包了被删块的收尾三行（`return` / `}` /
+  `const mySeq = ++_dashSeq`），把 `onFileChange` 改残且构建未必立刻暴露。
+  **规则**：替换块的 `old_string` 必须完整覆盖将被移除的每一行；改完马上 `git diff` 读那一段
+  （本轮就是靠逐文件读 diff 抓到并当场补回）。
