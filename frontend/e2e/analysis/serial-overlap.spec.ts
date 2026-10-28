@@ -212,10 +212,21 @@ test.describe('@p1 序列分布多 Site 重叠可读性', { tag: ['@p1', '@analy
     await filterControl(page, 'data-only-bin1').click()
     await expect(filterControl(page, 'data-only-bin1')).toHaveClass(/is-checked/)
     await respPromise
-    const opt = await readOption(canvas)
-    const tier = expectedTier(drawnSiteTotals(opt))
-    await expect.poll(siteSymbol).toBe(tier.size)
-    await expect.poll(siteOpacity).toBe(tier.opacity)
+    // 期望档位与实际值必须出自**同一次** option 读数。旧写法先读一次算 tier，再另起
+    // 两次 readOption 去等 symbol/opacity —— 中间只要落地一次重渲染，就是「拿第 N 帧的
+    // 期望等第 N+1 帧的值」，全量批次里偶发必红、retry 必绿（本文件的 flaky 形状）。
+    await expect
+      .poll(async () => {
+        const o: any = await readOption(canvas)
+        const t = expectedTier(drawnSiteTotals(o))
+        const s = (o?.series ?? []).find((x: any) => /^Site /.test(x.name))
+        const size = s?.symbolSize
+        const opacity = s?.itemStyle?.opacity
+        return size === t.size && opacity === t.opacity
+          ? 'ok'
+          : `size=${size}(want ${t.size}) opacity=${opacity}(want ${t.opacity})`
+      }, { timeout: 15_000 })
+      .toBe('ok')
   })
 
   test('按 Site 拆分：每 lane 覆盖自身数据且共享规格限窗 + 联动缩放 + 图例去 Site', async ({ page }) => {
