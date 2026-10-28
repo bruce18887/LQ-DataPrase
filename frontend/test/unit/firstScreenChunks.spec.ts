@@ -59,8 +59,11 @@ describe.skipIf(!built)('首屏 chunk 清单（依赖 npm run build 产物）', 
     expect(vue.length, `首屏应有且仅有一个 vue-vendor，实际: ${vue.join(', ')}`).toBe(1)
   })
 
-  it('首屏字节不超过预算 1,300,000B（2026-10-27 实测 1,094,781B JS）', () => {
+  it('首屏字节不超过预算 900,000B（2026-10-28 逐件注册 EP 后实测 747,109B JS）', () => {
     // 预算而非精确值：依赖升级会移动几 KB，但并一个 1MB 级 vendor 进来必然越过它。
-    expect(screen.jsBytes).toBeLessThanOrEqual(1_300_000)
+    // 2026-10-28 从 1,300,000 收到 900,000 的理由是硬的：EP 整包注册（`app.use(ElementPlus)`）
+    // 复活会把 element-vendor 从 548,846B 顶回 896,954B ⇒ 首屏 JS 回到 1,094,600B。
+    // 旧预算挡不住这种复活，新预算挡得住。
+    expect(screen.jsBytes).toBeLessThanOrEqual(900_000)
   })
 })

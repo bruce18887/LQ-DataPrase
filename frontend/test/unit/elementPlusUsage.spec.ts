@@ -167,7 +167,60 @@ describe('element-plus 用量绊线', () => {
   it('动态 :is 挂 el-* 的写法全仓没有（有就必须进清单，否则按需注册静默缺件）', () => {
     expect(collect(realFiles()).dynamicIs).toEqual([])
   })
+
+  it('注册名单逐字等于清单：installables = 模板 49 件 + 提供 v-loading 的 ElLoading', () => {
+    const p = pluginLists()
+    expect(p.installed.length).toBe(new Set(p.installed).size)
+    expect(p.installed.sort()).toEqual(
+      [...EP_TEMPLATE_COMPONENTS, 'loading'].map(toPascal).sort()
+    )
+    // 装进去的每一件都必须在 import 名单里（TS 也会红，但这条给的是「哪个名字漂了」）
+    const notImported = p.installed.filter((n) => !p.imported.has(n))
+    expect(notImported, `installables 里有没 import 的名字: ${notImported.join(', ')}`).toEqual([])
+  })
+
+  it('样式入口逐字等于清单全集（52 件），且没有重复行', () => {
+    const p = pluginLists()
+    const expectStyled = [...EP_TEMPLATE_COMPONENTS, ...EP_PROGRAMMATIC, ...EP_DIRECTIVES].sort()
+    expect(p.styled.length).toBe(new Set(p.styled).size)
+    expect(p.styled.sort()).toEqual(expectStyled)
+  })
+
+  it('main.ts 里整包注册不许复活，且 EP 样式必须排在自有主题覆盖之前', () => {
+    const main = readFileSync(fileURLToPath(MAIN), 'utf-8')
+    expect(main).not.toMatch(/import ElementPlus from 'element-plus'/)
+    expect(main).not.toMatch(/element-plus\/dist\/index\.css/)
+    expect(main).toMatch(/setupElementPlus\(app\)/)
+    // 层叠顺序：EP 的样式在前，我们对 .el-* 的夜晚覆盖才能按老顺序赢
+    const ep = main.indexOf('./plugins/element-plus')
+    const theme = main.indexOf('./styles/element-plus-theme.css')
+    expect(ep).toBeGreaterThanOrEqual(0)
+    expect(theme).toBeGreaterThanOrEqual(0)
+    expect(ep, 'EP 样式必须在自有主题 CSS 之前引入').toBeLessThan(theme)
+  })
 })
+
+const PLUGIN = new URL('../../src/plugins/element-plus.ts', import.meta.url)
+const MAIN = new URL('../../src/main.ts', import.meta.url)
+
+/** kebab ↔ EP 导出名：`breadcrumb-item` → `ElBreadcrumbItem`。 */
+function toPascal(kebab: string): string {
+  return 'El' + kebab.split('-').map((s) => s[0].toUpperCase() + s.slice(1)).join('')
+}
+
+function pluginLists() {
+  const text = readFileSync(fileURLToPath(PLUGIN), 'utf-8')
+  const installBlock = /const installables = \[([\s\S]*?)\n\]/.exec(text)
+  const importBlock = /import \{([\s\S]*?)\} from 'element-plus'/.exec(text)
+  const installed = installBlock
+    ? [...installBlock[1].matchAll(/^\s+(El[A-Z][A-Za-z]*),$/gm)].map((m) => m[1])
+    : []
+  const imported = new Set(
+    importBlock ? [...importBlock[1].matchAll(/\b(El[A-Z][A-Za-z]*)\b/g)].map((m) => m[1]) : []
+  )
+  const styled = [...text.matchAll(/es\/components\/([a-z0-9-]+)\/style\/css'/g)].map((m) => m[1])
+  return { installed, imported, styled }
+}
 
 function statSyncExists(url: string): boolean {
   try {
