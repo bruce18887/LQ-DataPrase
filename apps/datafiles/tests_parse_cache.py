@@ -323,7 +323,7 @@ class BytesLRUCacheTests(_CacheCaseBase):
         self.assertEqual(len(services._parse_cache), 2)
         services._parse_cache.evict_to(0)
         self.assertEqual(len(services._parse_cache), 1,
-                         'evict_to 保留最后一条，与 _store 的 len>1 语义一致')
+                         'evict_to 保留最后一条，与 _store_locked 的 len>1 语义一致')
         self.assertGreaterEqual(
             services.get_parse_cache_stats()['evictions'], 1)
 

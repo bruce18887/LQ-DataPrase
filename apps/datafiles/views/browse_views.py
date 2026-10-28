@@ -5,7 +5,6 @@ import logging
 import os
 from typing import Optional
 
-import pandas as pd
 from django.db import transaction
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
@@ -20,8 +19,8 @@ from apps.common.grid_filters import (
     apply_filter_model as _apply_filter_model,
     apply_sort as _apply_sort,
 )
+from apps.datafiles.column_profile import COLUMN_PROFILE_KEYS, build_column_profile
 from apps.datafiles.models import DataFile, ParseHistory
-from apps.datafiles.parsers import SYSTEM_COLUMNS
 from apps.datafiles.serializers import DataFileSerializer, ParseHistorySerializer
 from apps.datafiles.services import (
     get_cached_parsed_file,
@@ -33,7 +32,7 @@ from apps.analysis.services.statistics import (
     build_col_meta,
     get_bin_column_name,
 )
-from apps.analysis.services.statistics.helpers import get_serial_column, get_site_column
+from apps.analysis.services.statistics.helpers import get_site_column
 
 from ._helpers import (
     _register_file,
@@ -151,39 +150,26 @@ class DataBrowserView(APIView):
 
         fail_set = set(fail_indices)
 
-        # page==1 时预计算前端所需的全文件元信息（基于过滤前全量 df）
+        # page==1 时下发前端所需的全文件元信息（口径 = 解析时算好的 column_profile）
         site_options: list = []
         numeric_columns: list = []
         system_columns: list = []
         serial_column: Optional[str] = None
         if page == 1:
-            site_col_full = get_site_column(df)
-            if site_col_full:
-                site_options = [
-                    str(v) for v in df[site_col_full].dropna().astype(str).unique()
-                    if str(v) not in ('', 'nan')
-                ]
-            for col in df.columns:
-                if df[col].dtype == object:
-                    # 值级判定（镜像旧前端 Number.isFinite 语义）：SW_Bin/X_COORD 等
-                    # 数字字符串列保持 object dtype（NON_NUMERIC_COLUMNS），纯 dtype 判定会漏
-                    if pd.to_numeric(df[col], errors='coerce').notna().any():
-                        numeric_columns.append(col)
-                elif (pd.api.types.is_numeric_dtype(df[col])
-                      and not pd.api.types.is_bool_dtype(df[col])
-                      and df[col].notna().any()):
-                    # 排除 bool（Dut_Pass，TRUE/FALSE 非数值）与全 NaN 列（QR_Code 解析后）
-                    numeric_columns.append(col)
-            # 记录级列（系统列）：按格式权威列表（SYSTEM_COLUMNS）∩ 文件列，
-            # 保持文件列序——前端据此恒显+前置，不再用名称前缀启发式
-            # （Device_Fused_Flag1/2、SITE_CHECK 等测试项与记录列同名前缀，2026-08-25）。
-            sys_set = set(SYSTEM_COLUMNS.get(datafile.format_type, []))
-            system_columns = [c for c in df.columns if c in sys_set]
-            # 序列列：四种格式名字各不相同（Serial_No / Serial # / PART_ID），且 Dut_No
-            # 也是每只 DUT 一个号 —— 前端不许再用名称猜，统一由后端权威解析下发。
-            # get_serial_candidates 是全项目唯一的序列列优先级（serial_distribution /
-            # wafer_map / file_correlation 共用），这里只是多消费一次。
-            serial_column = get_serial_column(df)
+            # 列级元信息随解析只算一次（口径本体在 `apps.datafiles.column_profile`，与 col_meta 同址）：
+            # 合成 $BIG 同形帧（1702 列、全 float64）本机实测 ~0.11–0.13s/次（best-of-3、rows 200–20000 三档；
+            # 脚本在 gitignored 的 tasks/ 下，属本机事实、换机器/换 pandas 需重测），旧写法每一次 page==1 都要付。
+            # 缺键＝这一只帧算不出四件套（重复列名那类极端入参）或写透时没带：
+            # 必须回落现算，**绝不下发空元信息**
+            # （下发空集会让前端的站点下拉与可选参数集凭空变空，用户看到的是「数据没了」）。
+            profile = metadata.get('column_profile') if isinstance(metadata, dict) else None
+            if not (isinstance(profile, dict)
+                    and all(k in profile for k in COLUMN_PROFILE_KEYS)):
+                profile = build_column_profile(df, datafile.format_type)
+            site_options = profile['site_options']
+            numeric_columns = profile['numeric_columns']
+            system_columns = profile['system_columns']
+            serial_column = profile['serial_column']
 
         # Apply filters at DataFrame level (fast pandas ops) before paginating
         if site_filter:

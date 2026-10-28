@@ -13,6 +13,7 @@ from apps.analysis.services.statistics import (
     detect_fail_data_with_borderline,
 )
 from apps.common.memory import get_budget
+from apps.datafiles.column_profile import build_column_profile
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import get_parser, BaseATEParser
 from apps.datafiles.utils import resolve_file_path
@@ -66,14 +67,71 @@ def _col_meta_bytes(metadata) -> int:
     return total
 
 
+# 首屏列级元信息的四键与口径本体在 `apps/datafiles/column_profile.py`（Django-free 模块）；
+# 这里只留「挂载」与「体积记账」——那是解析缓存的职责，不是口径的职责。
+_PARSE_MOUNT_PARSE_SIDE = 'parse(_parse_file_uncached)'
+_PARSE_MOUNT_WRITE_THROUGH = 'write-through(put_cached_parsed_file)'
+
+
+def _column_profile_for_storage(df, format_type, *, source, file_path):
+    """解析/写透侧的挂载外壳：算不出就**不挂键**，别把整只文件判成解析失败。
+
+    已知的「算不出」形状是重复列名（`df[col]` 会返回 DataFrame 而没有 `.dtype`；
+    `_load_df_from_request` 的去重守卫就是防它——真解析器先用 `make_column_names_unique`
+    把 `P1` 变成 `P1.1`，所以那是极端入参而非常态）。旧写法在**视图里**现算：抛错只让
+    page==1 那一页 500，page>1 照旧可用。若让它从解析期抛出，`_parse_file_uncached`
+    的兜底会把整只文件变成 parse_failed（连 page>1 都打不开）——那是行为变更，不是这一刀
+    的目的；写透侧抛出更会把上传链路带崩。
+    不挂键的后果只是「视图侧每次首屏回落现算」，与今天逐字一致；正常帧两只键都有，
+    「col_meta 与 column_profile 同址」这条常规因此仍然成立。
+
+    这条 WARNING 吞掉的是**故意**吞掉的异常，所以必须可归因：`source` 说是哪条挂载路径
+    （解析侧 / 写透侧该修的地方不同）、`file_path`+`format_type` 说是哪只文件的哪种格式、
+    `exc_info=True` 留完整栈（写法对齐 `apps/datafiles/views/_helpers.py` 的 `_register_file`）。
+    少任何一样，这条 WARNING 在生产日志里就查不到头——等于没留痕。
+    """
+    try:
+        return build_column_profile(df, format_type)
+    except Exception as exc:
+        logger.warning(
+            'column_profile 现算失败（mount=%s file_path=%s format_type=%s）：%s，'
+            '本次不挂键，交由消费侧回落',
+            source, file_path, format_type, exc,
+            exc_info=True,
+        )
+        return None
+
+
+def _column_profile_bytes(profile) -> int:
+    """`column_profile` 的真实量级：与 `col_meta` 同理，按字符串实际长度计。
+
+    1702 列那档 `numeric_columns` 就把上千个列名整份存着（十几 KB 级），
+    继续按「metadata 每键 64 字节」估会让预算再次失真（判据 J7 的同族）。
+    """
+    if not isinstance(profile, dict):
+        return 0
+    total = 0
+    for name, value in profile.items():
+        total += len(str(name))
+        if isinstance(value, (list, tuple)):
+            total += sum(len(str(v)) for v in value)
+        elif value is not None:
+            total += len(str(value))
+    return total
+
+
 def _parse_value_bytes(value) -> int:
     """``(df, metadata, format_type)`` 三元组的缓存占用（metadata 按真实量级）。"""
     df = value[0] if isinstance(value, tuple) else None
     total = _frame_bytes(df)
     if isinstance(value, tuple) and isinstance(value[1], dict):
         meta = value[1]
-        total += 64 * (len(meta) - (1 if 'col_meta' in meta else 0))
+        # `col_meta` 与 `column_profile` 各有自己的真实量级函数，先从「每键 64 字节」
+        # 的粗估里剔掉，否则两只 dict 各只算 64 字节（判据 J7 同因）。
+        real_sized = sum(1 for k in ('col_meta', 'column_profile') if k in meta)
+        total += 64 * (len(meta) - real_sized)
         total += _col_meta_bytes(meta)
+        total += _column_profile_bytes(meta.get('column_profile'))
     return total
 
 
@@ -114,7 +172,7 @@ class _BytesLRUCache:
             self._clears += 1
 
     def evict_to(self, target_bytes: int) -> None:
-        """淘汰最旧条目直到总量 ≤ target；至少保留一条（与 _store 一致）。"""
+        """淘汰最旧条目直到总量 ≤ target；至少保留一条（与 _store_locked 一致）。"""
         with self._cv:
             target = max(0, int(target_bytes))
             while self._total > target and len(self._data) > 1:
@@ -126,6 +184,23 @@ class _BytesLRUCache:
         """返回 key 对应的值，必要时由当前线程计算并放入缓存。
 
         ``store_if`` 由调用方定义什么值值得占位；默认 None＝无条件存。
+
+        **发布顺序是这条承诺的一部分**（2026-10-28 修，判据见
+        ``test/backend/test_parse_cache_single_flight.py``）：``compute`` 结束后，
+        被判据钉住的**只是**一条不变量：唤醒后重新拿锁时不得出现「条目还没进 ``_data``、
+        key 已离开 ``_pending``」的空窗（步序不是判据——拆两次持锁、锁内先 notify 后 store 均仍绿）。
+        旧写法把这两步留在锁外，等待者被唤醒后重新拿锁时条目还没进 ``_data``、
+        key 已不在 ``_pending`` ⇒ 它判定「没人正在算」，自己再算一遍，
+        「每文件只算一次」在并发下就不成立了（A4 让 ``_parse_value_bytes`` 变贵后，
+        这段锁外窗口翻倍，既有并发例从 12 轮红 2 次升到红 10 次）。
+        写条目与放开 pending 目前在同一次持锁内做完，但 ``size_of``/``store_if`` 的求值留在锁外——
+        那条由 ``PublishLockWindowTests`` 的两条**次序**判据钉着（get 侧与写透侧各一条）。
+
+        异常与 ``store_if`` 拒绝这两条路径**仍然必须**释放 pending 并 notify：
+        前者由 ``test_failed_parse_is_not_stuck_as_pending`` 钉着，
+        后者是「瞬时失败不永久化」（失败值不入缓存，等待者醒来后自己重算）；
+        ``size_of``/``store_if`` 自身抛错也走同一条释放路径（判据
+        ``test_publish_side_exception_still_releases_pending``）。
         """
         while True:
             with self._cv:
@@ -142,12 +217,25 @@ class _BytesLRUCache:
                 self._pending.add(key)
             try:
                 value = compute()
-            finally:
+                # 纯计算在锁外：这把 Condition 是全站解析缓存的**读锁**，任何线程查任何 key
+                # 的命中都要拿它，而 1702 列那档的 size_of 是几十毫秒量级，进锁就变成
+                # 「一个文件解析完」阻塞「所有文件的首屏命中查询」。先 store_if 后 size_of 是
+                # HEAD 的短路次序：被拒的失败值不该再付一遍体积的钱、也不该要求体积函数容它。
+                keep = store_if is None or store_if(value)
+                nbytes = size_of(value) if keep else 0
+                # 只有变异与发布进锁，且在同一次持锁内完成（先条目、后放开 pending）。
+                with self._cv:
+                    if keep:
+                        self._store_locked(key, value, nbytes)
+                    self._pending.discard(key)
+                    self._cv.notify_all()
+            except BaseException:
+                # 算不出来、或 ``size_of``/``store_if`` 自身抛错：只放开 pending，
+                # 没有任何值已发布，等待者醒来自己重算（绝不把该 key 永久挂在 pending 上）。
                 with self._cv:
                     self._pending.discard(key)
                     self._cv.notify_all()
-            if store_if is None or store_if(value):
-                self._store(key, value, size_of(value))
+                raise
             return value
 
     def put(self, key, value, size_of=_parse_value_bytes) -> None:
@@ -156,25 +244,28 @@ class _BytesLRUCache:
         上传链路已经把文件解析成 DataFrame，这里把结果写透进缓存，
         省掉用户首次打开时的第二次解析。
 
-        ``notify_all`` 是必须的：同一 key 可能已有别的线程正在
-        ``get_or_compute`` 里 ``self._cv.wait()`` 等这个 key 的结果，
-        只写不唤醒的话它们会一直等到超时后重算，写透就白做了。
+        ``notify_all`` 是承重的、一次都不能丢：``get_or_compute`` 里那句 ``self._cv.wait()``
+        没有超时——别的线程若正挂在同一 key 上等结果，这里只写不唤醒就是死等，写透白做。
         """
+        nbytes = size_of(value)   # 与发布段同口径：体积在锁外量，锁内只剩「写条目 + notify」
         with self._cv:
-            self._store(key, value, size_of(value))
+            self._store_locked(key, value, nbytes)
             self._cv.notify_all()
 
-    def _store(self, key, value, nbytes) -> None:
-        with self._cv:
-            if nbytes > self._budget:
-                return
-            self._data[key] = (value, nbytes)
-            self._data.move_to_end(key)
-            self._total += nbytes
-            while self._total > self._budget and len(self._data) > 1:
-                _, (_, freed) = self._data.popitem(last=False)
-                self._total -= freed
-                self._evictions += 1
+    def _store_locked(self, key, value, nbytes) -> None:
+        """写入条目并按累计字节淘汰。**调用方必须已持有 ``self._cv``**——
+        本方法不再自己加锁，全仓只有这一个写入口径（``get_or_compute`` 的发布段与
+        ``put`` 都在锁内调它），免得「锁内/锁外」两份实现各漂一次。
+        """
+        if nbytes > self._budget:
+            return
+        self._data[key] = (value, nbytes)
+        self._data.move_to_end(key)
+        self._total += nbytes
+        while self._total > self._budget and len(self._data) > 1:
+            _, (_, freed) = self._data.popitem(last=False)
+            self._total -= freed
+            self._evictions += 1
 
 
 _parse_cache = _BytesLRUCache(PARSE_CACHE_BUDGET_BYTES)
@@ -256,6 +347,13 @@ def _parse_file_uncached(file_id: int, owner_id: int, path_key: int,
             return None, metadata, format_type
         metadata = dict(metadata)
         metadata['col_meta'] = build_col_meta(df, metadata)
+        # 首屏列级元信息与 col_meta 同址：都是「每文件一次」的 O(列) 现算，
+        # 挂在解析刚结束的**过滤前全量帧**上，之后每一次 page==1 首屏直接读。
+        profile = _column_profile_for_storage(
+            df, format_type,
+            source=_PARSE_MOUNT_PARSE_SIDE, file_path=file_path)
+        if profile is not None:
+            metadata['column_profile'] = profile
         return df, metadata, format_type
     except Exception as exc:
         logger.warning("_cached_parse(%s, %s, %s) failed: %s", file_id, owner_id, path_key, exc)
@@ -266,7 +364,7 @@ def _parse_succeeded(value) -> bool:
     """「这条值值得占缓存位」的唯一判据。
 
     三种失败形状（路径不存在 / parser 返回 df=None / 抛异常兜成 (None, None, None)）都不该存：
-    `_parse_value_bytes` 给它们算 0 字节，而 `_store` 的淘汰循环只在**总量超预算**时逐条，
+    `_parse_value_bytes` 给它们算 0 字节，而 `_store_locked` 的淘汰循环只在**总量超预算**时逐条，
     0 字节条目既不占预算也永远不会被逐出 ⇒ 一次瞬时失败会永久化到该文件 mtime 变化。
     与写透路径 `put_cached_parsed_file`（开头的守卫判 **df 与 metadata 双双非 None** 才写）
     **方向一致但不等价**：本谓词只判 `value[0]`（df）。
@@ -340,9 +438,20 @@ def put_cached_parsed_file(file_id: int, owner_id: int, datafile,
     # 「每文件只算一次」（J4）就只在回放路径兑现，而上传/导入才是主入库路径。
     # 与 ``_parse_file_uncached`` 同形：先复制一份再挂键，且
     # ``build_col_meta`` 的入参是**尚未带 col_meta 的那份**。
-    if 'col_meta' not in metadata:
+    # ``column_profile`` 必须同址一起补：只补 col_meta 的话条目就永久停在
+    # 「有 col_meta、无 profile」的半吊子形状，首屏每一次读都要走视图侧回落，
+    # 这一刀在主入库路径上等于没做。格式取 ``datafile.format_type``——它与缓存键、
+    # 与视图侧回落用的是同一个值，否则「命中缓存」与「回落现算」会给出不同的系统列集合。
+    if 'col_meta' not in metadata or 'column_profile' not in metadata:
         metadata = dict(metadata)
-        metadata['col_meta'] = build_col_meta(df, metadata)
+        if 'col_meta' not in metadata:
+            metadata['col_meta'] = build_col_meta(df, metadata)
+        if 'column_profile' not in metadata:
+            profile = _column_profile_for_storage(
+                df, datafile.format_type,
+                source=_PARSE_MOUNT_WRITE_THROUGH, file_path=abs_path)
+            if profile is not None:
+                metadata['column_profile'] = profile
     _parse_cache.put((abs_path, path_key, datafile.format_type), (df, metadata, fmt))
 
 
