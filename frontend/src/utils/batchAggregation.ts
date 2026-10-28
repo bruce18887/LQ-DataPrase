@@ -5,7 +5,10 @@
  * 算法与后端 apps/batch_report/aggregation.py 保持一致（纯函数，便于测试）：
  * - aggregateSiteYield → site_pass_data 同构（Site/Yield/Total/PassCount）
  * - aggregateBinSiteTable → { bin_table_data, bin_site_columns } 同构
- * - aggregateUph → UphData 同构（UphCard.vue 消费）
+ * - aggregateUph → UphData 同构
+ *   （**注意：当前没有生产消费方** —— UphCard.vue 走 analysisApi 拿单文件 UPH，
+ *   批次汇总另有后端数据源。此函数连同 batchAggregation.spec.ts 的断言一起，
+ *   是「后端 aggregation.py 的前端同构参考实现」，改它等于改那份规格，不是删了就完事。）
  *
  * 仅当 stageFilter 非空时使用（未过滤时直接用后端批次级数据，避免双源漂移）。
  */

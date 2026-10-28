@@ -175,9 +175,6 @@ export const datafilesApi = {
   browse(params: BrowseParams) {
     return api.get<BrowseResponse>('/browse/', { params: cleanParams(params) })
   },
-  history() {
-    return api.get('/history/')
-  },
 
   // Batch directory management
   listBatchDirs() {

@@ -158,9 +158,6 @@ export const authApi = {
   getProfile() {
     return api.get('/auth/profile/')
   },
-  updateProfile(data: Record<string, unknown>) {
-    return api.put('/auth/profile/', data)
-  },
   getSettings() {
     return api.get('/auth/settings/')
   },
