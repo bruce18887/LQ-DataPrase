@@ -42,6 +42,7 @@ export function useChart<T = echarts.EChartsOption>(
   let pollTimeout: ReturnType<typeof setTimeout> | null = null
   let resizeObserver: ResizeObserver | null = null
   let resizeRaf: ReturnType<typeof requestAnimationFrame> | null = null
+  let renderRaf: ReturnType<typeof requestAnimationFrame> | null = null
   let disposed = false
   // 上一次观测到的容器尺寸；0 表示当时不可见（display:none / 未布局）。
   // 用于区分「尺寸变化（只需 resize）」与「从隐藏恢复（需补一次 renderOption）」，
@@ -83,7 +84,25 @@ export function useChart<T = echarts.EChartsOption>(
     return true
   }
 
-  function renderOption() {
+  /**
+   * 用户点图例隐藏的 series 名（name → false）。
+   * 旧实现在每次重建前调 `chartInstance.getOption()` 读 legend.selected —— getOption 会
+   * 深克隆**含全部 series 数据**的旧 option（单系列可达数万点对象），只为取几个布尔；
+   * 改由 legendselectchanged 事件维护映射，构建 option 时注入 legend.selected。
+   */
+  let legendSelected: Record<string, boolean> | null = null
+
+  /** 实例到手/复用后绑定图例监听（先 off 防同一实例重复挂） */
+  function bindLegendCache(chart: echarts.ECharts) {
+    chart.off('legendselectchanged')
+    // ECharts 对字符串事件名的回调参数是 unknown，这里只取 selected 映射
+    chart.on('legendselectchanged', (params: unknown) => {
+      const selected = (params as { selected?: Record<string, boolean> } | undefined)?.selected
+      if (selected) legendSelected = { ...selected }
+    })
+  }
+
+  function renderOptionNow() {
     if (disposed || !chartInstance.value) return
     if (!ensureRenderer()) {
       // 渲染器切换：init 内部会 setOption（同步就绪时），异步路径由轮询补渲染
@@ -93,17 +112,15 @@ export function useChart<T = echarts.EChartsOption>(
     try {
       const option = buildOption() as unknown as echarts.EChartsOption
       // notMerge 全量替换会清掉用户点击图例的交互状态（legend.selected）——
-      // 从旧 option 读「用户隐藏的 series 名」，按仍存在于新 legend.data 的名字回填
-      // selected（只注入 false 项，缺省即显示；名字消失/新增自动按名字匹配，语义与
-      // ECharts merge 一致）。无图例或用户未交互时 prevSelected 为空，行为零变化。
-      const prevLegend = chartInstance.value.getOption()?.legend
-      const prevSelected = (Array.isArray(prevLegend) ? prevLegend[0] : prevLegend)?.selected
+      // 把 legendselectchanged 记下的「用户隐藏的 series 名」按仍存在于新 legend.data
+      // 的名字回填 selected（只注入 false 项，缺省即显示；名字消失/新增自动按名字匹配，
+      // 语义与 ECharts merge 一致）。无图例或用户未交互时映射为空，行为零变化。
       const legend = option.legend as { data?: unknown[]; selected?: Record<string, boolean> } | undefined
-      if (prevSelected && legend && Array.isArray(legend.data)) {
+      if (legendSelected && legend && Array.isArray(legend.data)) {
         const names = new Set(
           legend.data.map((d: any) => (typeof d === 'string' ? d : d?.name)).filter(Boolean),
         )
-        const hidden = Object.entries(prevSelected as Record<string, boolean>)
+        const hidden = Object.entries(legendSelected)
           .filter(([name, v]) => v === false && names.has(name))
           .map(([name]) => name)
         if (hidden.length) legend.selected = Object.fromEntries(hidden.map((n) => [n, false]))
@@ -122,6 +139,22 @@ export function useChart<T = echarts.EChartsOption>(
         console.warn('[useChart] setOption failed:', err)
       }
     }
+  }
+
+  /**
+   * 对外统一入口：同一帧内的多次失效只渲染一次。
+   * 用 rAF 而不是定时器 —— 图表必须在下一帧就画出来，跨帧延迟会和「点完立刻读
+   * SVG 文本」的既有用例抢跑（实测 150ms 合并窗口把 multi-file.spec.ts:144 那次
+   * 一次性 allTextContents 读成陈旧渲染）。
+   * 合并掉的是：同一 flush 里 watcher 写回自己依赖造成的二次全量重建
+   * （相关性自定义轴范围、柱宽 clamp）与拖动/缩放期间的连续失效。
+   */
+  function renderOption() {
+    if (disposed || renderRaf != null) return
+    renderRaf = requestAnimationFrame(() => {
+      renderRaf = null
+      renderOptionNow()
+    })
   }
 
   function ensureInit(): boolean {
@@ -164,6 +197,7 @@ export function useChart<T = echarts.EChartsOption>(
         option, reuse: true, timeout: 5_000, renderer: desiredRenderer(),
       })
       chartInstance.value = handle.chart
+      if (handle.chart) bindLegendCache(handle.chart)
     } catch (err) {
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
@@ -181,6 +215,7 @@ export function useChart<T = echarts.EChartsOption>(
         if (disposed) { clearPollTimers(); return }
         if (handle?.chart) {
           chartInstance.value = handle.chart
+          bindLegendCache(handle.chart)
           clearPollTimers()
           renderOption()
         }
@@ -310,6 +345,10 @@ export function useChart<T = echarts.EChartsOption>(
     disposed = true
     clearPollTimers()
     clearResizeRaf()
+    if (renderRaf != null) {
+      cancelAnimationFrame(renderRaf)
+      renderRaf = null
+    }
     resizeObserver?.disconnect()
     resizeObserver = null
     window.removeEventListener('resize', resize)

@@ -95,6 +95,7 @@ import { analysisApi } from '../../../api/analysis'
 import AnalysisFilePicker from './AnalysisFilePicker.vue'
 import ErrorBanner from '../../../components/common/ErrorBanner.vue'
 import WaferStatTables from './WaferStatTables.vue'
+import { minMax } from '../../../utils/minmax'
 
 const props = defineProps<{ files: DataFile[] }>()
 const { colors, isDark } = useEChartsTheme()
@@ -190,8 +191,11 @@ const paramScale = computed(() => {
   let hi: number | null = d.spec_high ?? null
   const bySpec = lo != null && hi != null && hi > lo
   if (!bySpec) {
-    lo = Math.min(...vals)
-    hi = Math.max(...vals)
+    // 不能展开传参：vals 是整片晶圆的逐 die 值，本仓 minmax.ts 记实测约 11 万元素即抛
+    // RangeError（同教训在 QQPlotChart.vue:98 已修过一处），这里单趟取 min/max。
+    const [mn, mx] = minMax(vals)
+    lo = mn
+    hi = mx
     if (hi <= lo) return null
   }
   const label = bySpec
@@ -462,7 +466,7 @@ function buildOption() {
 
 const { chartRef } = useChart(
   buildOption,
-  [waferData, localShowEdge, localColorBy, localZoneMode, zonalData],
+  [waferData, localShowEdge, localColorBy, localZoneMode],
   'chartRef',
   () => (isLarge.value ? 'canvas' : getChartRenderer()),
 )

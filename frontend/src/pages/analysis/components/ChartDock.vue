@@ -219,11 +219,14 @@ function onRowDown(ri: number, ev: PointerEvent) {
     const next = [...rowPcts.value]
     next[ri] = a
     next[ri + 1] = b
-    dock.setRowPcts(next)
+    // 拖拽中只改内存，松手落盘 —— 与下方整体高度条（onHeightDown）同一口径。
+    // 走 dock.setRowPcts 会每帧 JSON.stringify + localStorage + 账号级状态上报（约 60Hz）。
+    rowPcts.value = next
   }
   const onUp = () => {
     rowResize.value = false
     document.body.style.userSelect = ''
+    dock.setRowPcts(rowPcts.value)
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
     window.removeEventListener('pointercancel', onUp)
