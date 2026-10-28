@@ -110,25 +110,22 @@ def _filter_blank_params(params):
 def _sanitize_numeric_params(df, params):
     """Filter params to only those that are valid numeric columns with data.
 
-    Removes: blank names, all-NaN columns, non-numeric columns, duplicate names.
+    Removes: blank names, all-NaN columns, non-numeric columns, duplicate columns.
     """
     # Deduplicate columns first
-    df = df.loc[:, ~df.columns.duplicated()]
-    valid = []
-    for p in params:
-        if not p or not str(p).strip():
-            continue
-        if p not in df.columns:
-            continue
-        col = df[p]
-        # If duplicate columns were collapsed, get_1d_from style extraction
-        if isinstance(col, pd.DataFrame):
-            col = col.iloc[:, 0]
+    duplicated = df.columns.duplicated()
+    if duplicated.any():
+        df = df.loc[:, ~duplicated]
+    present = [p for p in params if p and str(p).strip() and p in df.columns]
+    candidates = df.iloc[:, df.columns.get_indexer(list(dict.fromkeys(present)))]
+    has_data = candidates.notna().any()
+    valid = set()
+    for p, dtype in candidates.dtypes.items():
         # Skip all-NaN columns
-        if col.dropna().empty:
+        if not has_data[p]:
             continue
         # Skip non-numeric
-        if not pd.api.types.is_numeric_dtype(col):
+        if not pd.api.types.is_numeric_dtype(dtype):
             continue
         # Skip bool columns (real data has ``Dut_Pass``): ``is_numeric_dtype``
         # returns True for bool, but a pass/fail flag is not a measurable
@@ -139,10 +136,10 @@ def _sanitize_numeric_params(df, params):
         # SW_Bin、数字 trim code）画箱线图是合法的，而相关矩阵的对角线/
         # NaN 已在 compute_correlation_matrix 里从根上修好（fill_diagonal(1.0)
         # + 非对角 NaN → None），不需要在这里靠剔列规避。
-        if pd.api.types.is_bool_dtype(col):
+        if pd.api.types.is_bool_dtype(dtype):
             continue
-        valid.append(p)
-    return valid
+        valid.add(p)
+    return [p for p in present if p in valid]
 
 
 def _load_df_from_request(request):
