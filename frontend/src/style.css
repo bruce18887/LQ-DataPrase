@@ -40,11 +40,6 @@ h2 {
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-/* 主题切换过渡：仅 body 级别继承，避免 O(n) 性能损耗 */
-body {
-  transition: background-color 0.3s ease, color 0.3s ease;
-}
-
 /* Focus visible styles for keyboard navigation */
 :focus-visible {
   outline: 2px solid var(--brand);

@@ -38,8 +38,3 @@ export function getSftpTimeoutSec(): Promise<number> {
     .ensure()
     .then(() => clampSftpTimeoutSec(Number(store.raw?.sftp_download_timeout)))
 }
-
-/** 批量下载等 axios 调用使用的毫秒值。 */
-export function getSftpTimeoutMs(): Promise<number> {
-  return getSftpTimeoutSec().then((sec) => sec * 1000)
-}

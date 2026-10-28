@@ -68,8 +68,3 @@ export async function downloadJob(id: number): Promise<{
   })
   return { data: resp.data as Blob, headers: resp.headers as Record<string, string> }
 }
-
-export async function cancelJob(id: number): Promise<JobStatus> {
-  const resp = await api.post<JobStatus>(`/jobs/${id}/cancel/`)
-  return resp.data
-}

@@ -1,150 +1,52 @@
-# LQ-DataPrase 通用组件库
+# 通用组件（`frontend/src/components/common`）
 
-工业技术风格的 Vue 3 组件库，采用深色主题和霓虹效果。
+跨页复用的展示型组件，共 19 个。**props 一律以各 SFC 的 `defineProps` 为准**，
+本文件不再抄一遍参数表——上一版在这里写着 `Card variant="neon"`、
+`Button variant="secondary"` 和一份 `#58a6ff` 硬编码色板，而 `Card.vue:24` 的注释记着
+neon 变体早已随双主题 token 化移除：文档复述代码 = 必然漂移。
 
-## 组件列表
+## 没有 barrel 文件
 
-### 1. Card 卡片组件
+原先这里有 `index.ts` 桶文件，示例写着 `import { Card } from '@/components/common'`。
+**两者都已删除**：全仓普查 0 个调用方走桶路径，全部按单文件 import。桶文件让
+「谁在用哪个组件」从一次 grep 变成两次检索，也让「删掉某个组件」看起来比实际危险。
 
-**Props:**
-- `variant`: 'default' | 'elevated' | 'bordered' | 'neon' (默认: 'default')
+实际写法：
 
-**Slots:**
-- `header`: 卡片头部
-- `default`: 卡片内容
-- `footer`: 卡片底部
-
-**使用示例:**
-```vue
-<Card variant="neon">
-  <template #header>
-    <h3>标题</h3>
-  </template>
-  
-  <p>这是卡片内容区域</p>
-  
-  <template #footer>
-    <span>底部信息</span>
-  </template>
-</Card>
-```
-
----
-
-### 2. Button 按钮组件
-
-**Props:**
-- `variant`: 'primary' | 'secondary' | 'neon' (默认: 'primary')
-- 继承所有 Element Plus Button 的 props
-
-**使用示例:**
-```vue
-<Button variant="primary">主要按钮</Button>
-<Button variant="secondary">次要按钮</Button>
-<Button variant="neon">霓虹按钮</Button>
-```
-
----
-
-### 3. Badge 徽章组件
-
-**Props:**
-- `value`: string | number (必填)
-- `type`: 'success' | 'warning' | 'error' | 'info' (默认: 'info')
-
-**使用示例:**
-```vue
-<Badge value="成功" type="success" />
-<Badge value="99+" type="error" />
-<Badge value="警告" type="warning" />
-<Badge value="信息" type="info" />
-```
-
----
-
-### 4. Loading 加载动画组件
-
-**Props:**
-- `size`: string (默认: '50px')
-- `color`: string (默认: '#58a6ff')
-
-**使用示例:**
-```vue
-<Loading />
-<Loading size="60px" color="#3fb950" />
-<Loading size="40px" color="#f85149" />
-```
-
----
-
-### 5. Empty 空状态组件
-
-**Props:**
-- `description`: string (默认: '暂无数据')
-
-**Slots:**
-- `default`: 额外操作区域
-
-**使用示例:**
-```vue
-<Empty description="暂无数据" />
-
-<Empty description="没有找到相关内容">
-  <Button variant="primary">刷新</Button>
-</Empty>
-```
-
----
-
-## 导入方式
-
-### 单个导入
 ```typescript
-import { Card, Button, Badge, Loading, Empty } from '@/components/common'
+import Card from '@/components/common/Card.vue'
+import { Search } from '@element-plus/icons-vue'   // 图标同理：谁用谁 import
 ```
 
-### 全局注册（可选）
-```typescript
-// main.ts
-import CommonComponents from '@/components/common'
+入口不再全局注册 EP 图标——`main.ts` 里那个把该包 586 个导出注册成全局组件的循环已删
+（实测 37 个用 `<el-icon>` 的 `.vue` 逐个自带显式 import，模板里 6 处 `<component :is>`
+传的都是组件对象，0 处依赖全局图标名）。
 
-app.component('Card', CommonComponents.Card)
-app.component('DpButton', CommonComponents.Button)
-app.component('Badge', CommonComponents.Badge)
-app.component('Loading', CommonComponents.Loading)
-app.component('Empty', CommonComponents.Empty)
-```
+## 主题
 
----
+- 组件内只写 CSS 变量（`var(--text)` / `var(--brand)` / `var(--p-fs-dense)` …），
+  **禁止硬编码色值**。light/night 两份由 `src/styles/design-tokens.css` 提供。
+- 设计口径的唯一事实来源：[`docs/reference/ui-design-guide.md`](../../../docs/reference/ui-design-guide.md)。
+- ECharts 不认 CSS 变量：图表配色取 `useEChartsTheme()` 的 JS 语义色，别在这里拿 `var(--x)`。
 
-## 设计规范
+## 组件清单
 
-### 颜色系统
-- **背景色**: #21262d (卡片背景)
-- **边框色**: #30363d (默认边框)
-- **主色调**: #58a6ff (霓虹蓝)
-- **成功色**: #3fb950
-- **警告色**: #d29922
-- **错误色**: #f85149
-- **文字色**: #c9d1d9 (主要文字), #8b949e (次要文字)
-
-### 霓虹效果
-所有 `neon` 变体都包含：
-- 发光边框
-- 悬停时增强的光晕效果
-- 内部微光效果
-
-### 动画
-- 过渡时间: 0.3s
-- 缓动函数: ease
-- 悬停提升: translateY(-1px ~ -2px)
-
----
-
-## 注意事项
-
-1. 所有组件都使用 Vue 3 Composition API
-2. 使用 TypeScript 定义 Props
-3. 样式使用 scoped CSS，不会污染全局
-4. Button 组件基于 Element Plus，需要确保已安装 Element Plus
-5. 所有组件都支持深色主题，适配工业技术风格
+| 组件 | 用途 | 需要知道的坑 |
+|---|---|---|
+| `ActiveSearchChip` | SFTP 搜索运行中的常驻芯片 | 挂在 `MainLayout` 层，切到任何页面都还在 |
+| `AppAboutDialog` | 「关于」对话框 | 兼作 Electron 菜单 `menu-about` 的监听者（仅挂载期间） |
+| `AppLogo` | 品牌标 | 登录页与侧栏共用 |
+| `Badge` | 通用小徽章 | |
+| `Button` | 按钮 | `variant` 见 `Button.vue:24` |
+| `Card` | 卡片壳 | `variant` 见 `Card.vue:34`；neon/elevated 那批旧变体已移除 |
+| `CircularProgress` | 环形进度 | 内部定时器在 stop / 卸载 / 重入三条路径都清 |
+| `CollapsibleSection` | 可折叠分区 | 收起 = 卸载重挂，是文档化的有意设计（不是 bug） |
+| `CpkBadge` | CPK 等级徽章 | 阈值来自用户设置；A>B>C 的约束目前只在前端 |
+| `Empty` | 空态 | |
+| `ErrorBanner` | 错误横幅 | 文案由 `utils/error.ts` 的 `formatError` 归一 |
+| `FileSelect` | 文件下拉：搜索 / 高亮 / 分组 / 元信息行 | 数据源上限 5,000 行（`api/datafiles.ts` 的 options limit）；高亮正则按查询词编译一次，`formatTime` 是 Intl 单例 |
+| `JobProgressChip` | 导出作业进度芯片 | 与 `composables/useJobExport` + `jobPolling` 配套 |
+| `Loading` | 加载态 | |
+| `ThemeToggle` | 明/夜切换 | 样式只保留一层语义化规则，别再叠第二段 `:hover` |
+| `YieldBadge` | 良率徽章 | |
+| `ZoomIndicator` | 缩放指示 | 与 `composables/useZoom` 配套；CSS zoom 下 EP 浮层坐标要乘 (zoom−1) |
