@@ -327,8 +327,11 @@ export function useChart<T = echarts.EChartsOption>(
   onMounted(() => {
     disposed = false
     if (chartRef.value) ensureInit()
+    // 不再另挂 window 'resize'：容器级 ResizeObserver（setupResizeObserver）本来就覆盖
+    // 窗口缩放，且它带按帧合并 + 「只有从隐藏恢复才重渲染」的判据。双轨时每扇一次窗口，
+    // 11+ 个实例各多跑一次未节流的 resize()；更要紧的是 keep-alive 缓存页的组件走
+    // deactivated 不Unmounted，这个 window 监听在页面停用期间仍会替隐藏图表各跑一次。
     setupResizeObserver()
-    window.addEventListener('resize', resize)
   })
 
   // keep-alive 重新激活时：DOM 可能从 detached 恢复，实例需要重新校验/resize
@@ -351,7 +354,6 @@ export function useChart<T = echarts.EChartsOption>(
     }
     resizeObserver?.disconnect()
     resizeObserver = null
-    window.removeEventListener('resize', resize)
     handle?.dispose()
     handle = null
     chartInstance.value = null

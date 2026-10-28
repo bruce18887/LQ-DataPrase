@@ -513,8 +513,14 @@ const datasource = computed(() => keyedDatasource(browseSource))
 
 /** 首块（或代次最新块）响应的元信息落地；每块响应都带 headers/col_meta/bin_column */
 function applyMeta(d: any) {
-  allCols.value = d.headers ?? []
-  colMeta.value = (d.col_meta ?? {}) as Record<string, { unit: string; min: string; max: string }>
+  // headers/col_meta 是**文件级**元信息：IRM 每滚一块都重传一份内容相同、引用不同的对象，
+  // 无条件赋值 ⇒ columnDefs computed 每块重算、ag-grid 重建整套列（本仓真实文件列数达
+  // 1,728，见 useIrmSizing.ts:7）。换文件时上面两处清理已把它们置空，所以
+  // 「空 = 还没落地」就是精确的「每文件只写一次」判据，不需要额外标志位。
+  if (!allCols.value.length) {
+    allCols.value = d.headers ?? []
+    colMeta.value = (d.col_meta ?? {}) as Record<string, { unit: string; min: string; max: string }>
+  }
   rowCount.value = d.total ?? 0
   failRowCount.value = d.fail_row_count ?? 0
   dataLoaded.value = true

@@ -1,10 +1,16 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { ref, shallowRef } from 'vue'
 import { slotCount, type WeightDocDto } from '../pages/weight/weightChartOption'
 
 /** 只活在本会话：刷新即丢（spec §11，不落 localStorage）。 */
 export const useWeightStore = defineStore('weight', () => {
-  const doc = ref<WeightDocDto | null>(null)
+  /**
+   * 解析产物：最坏 2000 条系列 × 1024 点（`apps/weight/parser.py` 的
+   * DECLARATION_LIMIT / LENGTH_LIMIT）。它整体替换、从不就地改字段，所以用 shallowRef
+   * 只让「换文件」这件事进依赖表 —— 深度代理会给每个点对象建一层 Proxy，读一遍就是
+   * 上百万次代理跳转，而这份数据每次重绘都要被完整遍历。
+   */
+  const doc = shallowRef<WeightDocDto | null>(null)
   const rawText = ref('')            // 导出要把原文再交回同一个解析器（spec §2 第 4 条）
   const filename = ref('')
   const visible = ref<number[]>([])
@@ -15,13 +21,6 @@ export const useWeightStore = defineStore('weight', () => {
   const errorText = ref('')
   const busy = ref(false)
 
-  const allVisible = computed(() => doc.value !== null && visible.value.length === doc.value.group_count)
-
-  function reset() {
-    doc.value = null; rawText.value = ''; filename.value = ''
-    visible.value = []; visibleSlots.value = []; showMean.value = true; showLegend.value = true
-    errorText.value = ''; busy.value = false
-  }
   function setDoc(next: WeightDocDto, text: string) {
     doc.value = next
     rawText.value = text
@@ -33,13 +32,10 @@ export const useWeightStore = defineStore('weight', () => {
     showLegend.value = true
     errorText.value = ''
   }
-  function toggleGroup(index: number, on: boolean) {
-    const set = new Set(visible.value)
-    on ? set.add(index) : set.delete(index)
-    visible.value = [...set].sort((a, b) => a - b)
-  }
+  // 组/槽位的可见性改动走组件自己的 `update:visible` emit（WeightFilterChips:22-32），
+  // 这里不再放第三份 toggle 实现。
   return {
     doc, rawText, filename, visible, visibleSlots, showMean, showLegend, errorText, busy,
-    allVisible, reset, setDoc, toggleGroup,
+    setDoc,
   }
 })
