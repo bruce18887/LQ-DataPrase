@@ -5,6 +5,7 @@ import os
 from typing import Dict, Set
 
 import pandas as pd
+from django.db import connections
 
 from apps.datafiles.models import DataFile
 from apps.datafiles.services import get_cached_parsed_file
@@ -151,7 +152,10 @@ def _load_df_from_request(request):
     except (TypeError, ValueError):
         # 直连 API / 被篡改的 URL 可绕过前端下拉，非数字 id 是客户端错误不是 500
         return None, None, None, 'file_id_invalid'
-    df, metadata, fmt = get_cached_parsed_file(file_id, request.user.pk)
+    datafile = DataFile.objects.filter(pk=file_id, owner=request.user).first()
+    if datafile is None:
+        return None, None, None, 'file_not_found'
+    df, metadata, fmt = get_cached_parsed_file(file_id, request.user.pk, datafile)
     if df is None and fmt is not None:
         # file_id valid but file not on disk or parse failed
         return None, None, None, 'file_not_found_or_parse_failed'
@@ -163,10 +167,6 @@ def _load_df_from_request(request):
     # the analysis views never mutate the returned frame in place.
     if df.columns.duplicated().any():
         df = df.loc[:, ~df.columns.duplicated()]
-    # Reconstruct datafile for the return contract (callers access .id etc.)
-    datafile = DataFile.objects.filter(pk=file_id, owner=request.user).first()
-    if datafile is None:
-        return None, None, None, 'file_not_found'
     return df, datafile, metadata, None
 
 
@@ -175,15 +175,36 @@ def _load_files_from_request(request, file_ids):
 
     Returns list of dicts with df, metadata, file_id, filename, timestamp.
     """
-    file_data_list = []
+    normalized_ids = []
     for file_id in file_ids:
         try:
-            from django.shortcuts import get_object_or_404
-            datafile = get_object_or_404(DataFile, pk=file_id, owner=request.user)
-            if not os.path.exists(resolve_file_path(datafile.file_path)):
+            file_id = int(file_id)
+            # Exact PK lookups reject out-of-range integers, but IN does not.
+            # Keep one bad ID from aborting the whole batch at the DB adapter.
+            DataFile._meta.pk.run_validators(file_id)
+            normalized_ids.append(file_id)
+        except Exception:
+            continue
+    if not normalized_ids:
+        return []
+    queryset = DataFile.objects.filter(owner=request.user)
+    unique_ids = list(dict.fromkeys(normalized_ids))
+    max_params = connections[queryset.db].features.max_query_params
+    # in_bulk budgets only the IDs; reserve one parameter for the owner filter.
+    batch_size = max_params - 1 if max_params else len(unique_ids)
+    datafiles = {}
+    for offset in range(0, len(unique_ids), batch_size):
+        chunk = unique_ids[offset:offset + batch_size]
+        datafiles.update(queryset.in_bulk(id_list=chunk))
+    file_data_list = []
+    # Bulk lookup deduplicates rows; iterate the IDs to preserve order and repeats.
+    for file_id in normalized_ids:
+        try:
+            datafile = datafiles.get(file_id)
+            if datafile is None:
                 continue
 
-            df, metadata, fmt = get_cached_parsed_file(int(file_id), request.user.pk, datafile)
+            df, metadata, fmt = get_cached_parsed_file(file_id, request.user.pk, datafile)
             if df is None:
                 continue
 
@@ -194,6 +215,6 @@ def _load_files_from_request(request, file_ids):
                 'filename': datafile.filename,
                 'timestamp': datafile.created_at.strftime('%Y-%m-%d %H:%M:%S') if datafile.created_at else ''
             })
-        except Exception as e:
+        except Exception:
             continue
     return file_data_list
