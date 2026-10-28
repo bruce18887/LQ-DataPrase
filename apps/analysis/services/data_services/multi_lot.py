@@ -41,7 +41,8 @@ def compute_common_params(loaded, ignore_no_limit=False):
             and not pd.api.types.is_bool_dtype(df[c])
         ]
         if ignore_no_limit:
-            numeric_cols = [c for c in numeric_cols if c in set(get_columns_with_limits(df, metadata))]
+            limited = set(get_columns_with_limits(df, metadata))
+            numeric_cols = [c for c in numeric_cols if c in limited]
         param_sets.append(set(numeric_cols))
         param_orders.append(numeric_cols)
     if not param_sets:
