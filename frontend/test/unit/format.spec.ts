@@ -43,4 +43,19 @@ describe('formatTime', () => {
   it('输出 MM-DD HH:mm 形态', () => {
     expect(formatTime('2026-09-26T03:07:00')).toMatch(/\d{2}\D\d{2}\s*\d{1,2}:\d{2}/)
   })
+
+  // 改成模块级 Intl 单例后，钉住「与旧的逐次 toLocaleString 同参同串」——
+  // 单例只该省下每次新建 formatter 的开销，不该改一个字。四个时段边界各测一次，
+  // 防 hour cycle 被 locale 默认值带跑（00:00 与 23:59 最容易露馅）。
+  it('与旧的逐次 toLocaleString 输出逐字相同（含 00:00 / 23:59 边界）', () => {
+    const opts = { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' } as const
+    for (const iso of [
+      '2026-09-26T03:07:00',
+      '2026-09-26T15:07:00',
+      '2026-01-05T00:00:00',
+      '2026-07-01T23:59:59',
+    ]) {
+      expect(formatTime(iso), iso).toBe(new Date(iso).toLocaleString('zh-CN', opts))
+    }
+  })
 })

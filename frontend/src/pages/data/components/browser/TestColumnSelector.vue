@@ -32,7 +32,10 @@
             </el-button>
           </div>
           <div v-if="matches.length > 0" class="match-hint">
-            匹配 {{ matches.length }} 项，按 Enter 全选
+            匹配 {{ matches.length }} 项，按 Enter 全选<span v-if="matches.length > DROPDOWN_RENDER_CAP">（共匹配更多，仅显示前 {{ DROPDOWN_RENDER_CAP }}，可继续输入缩小范围）</span>
+          </div>
+          <div v-else-if="!kw && cols.length > DROPDOWN_RENDER_CAP" class="match-hint">
+            共 {{ cols.length }} 列，仅显示前 {{ DROPDOWN_RENDER_CAP }}，可输入关键词缩小范围
           </div>
         </div>
       </template>
@@ -42,6 +45,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { DROPDOWN_RENDER_CAP } from '../../../../constants/dropdown'
 
 /**
  * 显示测试列选择器：复用导出工具「选择参数」的交互模式——
@@ -70,8 +74,10 @@ const matches = computed(() =>
   kw.value ? props.cols.filter((c) => c.toLowerCase().includes(kw.value)) : [],
 )
 
-/** 下拉选项：有关键字显示过滤结果，否则全量 */
-const filteredItems = computed(() => (kw.value ? matches.value : props.cols))
+/** 下拉选项：有关键字显示过滤结果，否则全量；渲染层一律截断到前 N。
+ *  截断只作用于渲染——全选走 props.cols、Enter 走 matches，都是完整集合。 */
+const filteredItems = computed(() =>
+  (kw.value ? matches.value : props.cols).slice(0, DROPDOWN_RENDER_CAP))
 
 /** 接管 EP 内置过滤（el-select filterable 模式下 query 变化回调） */
 function filterMethod(query: string) {

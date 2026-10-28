@@ -529,24 +529,27 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
 
     const panel = page.locator('.export-tools')
 
-    // 打开参数下拉：读取全部参数名，并点选第 2 个（合并语义基线：已选 1，下拉保持打开）
+    // 打开参数下拉：点选第 2 个（合并语义基线：已选 1，下拉保持打开）
     const paramSelect = panel.locator('.el-select').filter({ hasText: '点击选择要导出的参数' }).first()
     await paramSelect.click()
-    let paramDropdown = page.locator('.el-select-dropdown:visible')
+    const paramDropdown = page.locator('.el-select-dropdown:visible')
     await paramDropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
-    let paramOptions = paramDropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
+    const paramOptions = paramDropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
     await waitForOptions(paramOptions)
-    let P = (await paramOptions.allTextContents()).map((n) => n.trim()).filter(Boolean)
+
+    // 参数全集取**响应的 results 键**（= ExportToolsTab.vue:78 自己用的那份），
+    // 不取渲染出来的 option：下拉渲染封顶到 DROPDOWN_RENDER_CAP=300
+    // （constants/dropdown.ts），从 DOM 数出来的是截断后的列表，会让「共 M 个」的 M
+    // 和 Enter 全选的预期集合一起失真。被测契约恰恰是：过滤/计数/Enter 全选
+    // 作用于完整集合，只有渲染被截断。
+    const histResp = await histogramResp
+    const P: string[] = histResp
+      ? Object.keys((((await histResp.json()) as Record<string, unknown>)?.results ?? {}) as Record<string, unknown>)
+      : []
     if (P.length < 2) {
-      // 重试一次：参数列表请求可能未完成
       await page.keyboard.press('Escape')
-      await paramDropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
-      await paramSelect.click()
-      paramDropdown = page.locator('.el-select-dropdown:visible')
-      await paramDropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
-      paramOptions = paramDropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
-      await waitForOptions(paramOptions)
-      P = (await paramOptions.allTextContents()).map((n) => n.trim()).filter(Boolean)
+      test.skip(true, '该文件参数不足 2 个')
+      return
     }
     if (P.length < 2) {
       await page.keyboard.press('Escape')
