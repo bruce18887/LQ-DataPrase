@@ -10,12 +10,17 @@ Replaces the remaining scipy.stats entry points used by the packaged app
   - ``t.cdf``        -> ``t_cdf`` (regularised incomplete beta, series /
                         Lentz continued fraction)
 
+Theoretical quantiles of a normal probability plot depend only on the sample
+size, so they are memoised per ``n`` (see ``_osm_for_n`` below); ``norm_ppf``
+itself stays a plain element-wise function of ``q``.
+
 ``t.cdf`` in scipy is ``scipy.special.stdtr`` — the same incomplete-beta
 relation implemented here; golden fixtures pin the equivalence.
 """
 
 import math
 import statistics
+from functools import lru_cache
 
 import numpy as np
 
@@ -31,7 +36,13 @@ _SERIES_MAXIT = 2000
 # ---------------------------------------------------------------------------
 
 def norm_ppf(q):
-    """Quantile function of the standard normal distribution (vectorised)."""
+    """Quantile function of the standard normal distribution.
+
+    Element-wise over ``q`` (``n`` Python ``inv_cdf`` calls for ``n``
+    elements) — the shape and semantics are the public contract; callers that
+    only ever ask for the Filliben grid should go through ``_osm_for_n``
+    instead of re-deriving it per request.
+    """
     arr = np.asarray(q, dtype=float)
     flat = arr.reshape(-1)
     if flat.size == 0:
@@ -55,6 +66,79 @@ def _filliben_medians(n):
     return v
 
 
+# ---------------------------------------------------------------------------
+# Theoretical quantiles memoised per sample size
+# ---------------------------------------------------------------------------
+#
+# Why this exists: ``_filliben_medians(n)`` and the ``norm_ppf`` of it depend
+# only on the sample size ``n`` — never on the data — yet every QQ request
+# recomputed them with ``n`` Python ``inv_cdf`` calls *per parameter column*.
+# One file's columns all share the same ``n``, so a request over N columns did
+# the identical work N times (``$BIG``: 35,246 rows x 1,702 columns).
+#
+# Value shape — float64 bytes, not an ndarray and not a tuple of floats:
+#   * caching an ndarray and returning it hands a *mutable* array to every
+#     request; this repo treats shared cached values as read-only by policy
+#     (apps/datafiles/tests_parse_cache_scan.py :: SharedFrameSafetyTests).
+#   * a tuple of Python floats costs ~32 B/element (24 B object + 8 B pointer)
+#     and still needs re-boxing into an array on each fetch.
+#   ``bytes`` is a compact immutable value: ``np.frombuffer`` returns a
+#     **read-only view** of it (numpy clears WRITEABLE for immutable buffers),
+#     so "shared across requests" and "nobody can edit it" hold at once,
+#     zero-copy, at 8 B/element.
+#
+# Worst-case memory — the arithmetic, and the budget it must stay under.
+# Pinning test: test/backend/test_norm_ppf_memo.py :: MemoMemoryBudgetTests.
+# Changing any constant below means redoing this sum, not just the test.
+#
+#   OSM_MEMO_MAXSIZE (32) * OSM_MEMO_MAX_N (100,000) * sizeof(float64) (8 B)
+#     = 25,600,000 B ≈ 24.4 MiB  <=  OSM_MEMO_BUDGET_BYTES (32 MiB)
+#
+# The plan's ``maxsize=512`` + tuple shape would be 512 * 100,000 * 32 B
+# ≈ 1.6 GB (still 409.6 MB with bytes), so both the value shape and the
+# maxsize were changed together.  ``OSM_MEMO_MAX_N`` covers the largest
+# single-parameter column observed in this repo (68k rows, see the note in
+# computations.py) with headroom; above it a column is computed uncached.
+OSM_MEMO_MAXSIZE = 32
+OSM_MEMO_MAX_N = 100_000
+OSM_MEMO_BUDGET_BYTES = 32 * 1024 * 1024
+_OSM_DTYPE = np.dtype(np.float64)
+
+
+@lru_cache(maxsize=OSM_MEMO_MAXSIZE)
+def _osm_for_n(n):
+    """Return the length-``n`` theoretical quantiles as float64 ``bytes``.
+
+    Key is the bare ``int n`` (``values.size`` in ``norm_probplot``); the value
+    is exactly ``norm_ppf(_filliben_medians(n))`` flattened, so it is
+    bit-identical to computing it — pure function, no rounding, no new
+    approximation.  Bypassing the cache is done by the caller, never here.
+
+    Two threads that miss on the same ``n`` may each compute it (a benign
+    duplicate); ``lru_cache`` keeps one result and, because the value is an
+    immutable ``bytes`` built in full before it is returned, no caller can ever
+    observe a half-written osm — which is exactly what caching a mutable
+    ndarray would have allowed.
+    """
+    return norm_ppf(_filliben_medians(n)).tobytes()
+
+
+def _theoretical_quantiles(n):
+    """Read-only length-``n`` theoretical quantiles, memoised when worthwhile.
+
+    Both branches return a ``np.frombuffer`` view, so the result is read-only
+    either way — a caller can never get "mutable for small n, frozen for big
+    n".  ``n`` above ``OSM_MEMO_MAX_N`` is computed into a transient buffer and
+    never enters the cache, so one enormous column cannot evict the hot small
+    ``n`` entries that actually get reused.
+    """
+    if n <= OSM_MEMO_MAX_N:
+        buf = _osm_for_n(n)
+    else:
+        buf = norm_ppf(_filliben_medians(n)).tobytes()
+    return np.frombuffer(buf, dtype=_OSM_DTYPE)
+
+
 def norm_probplot(x):
     """Normal probability plot, mirroring ``scipy.stats.probplot(x, dist='norm', fit=True)``.
 
@@ -67,7 +151,7 @@ def norm_probplot(x):
     if values.size == 0:
         return ((values, values), (np.nan, np.nan, 0.0))
     n = values.size
-    osm = norm_ppf(_filliben_medians(n))
+    osm = _theoretical_quantiles(n)
     osr = np.sort(values)
 
     # Least-squares fit (equivalent to scipy's linregress on (osm, osr)).
