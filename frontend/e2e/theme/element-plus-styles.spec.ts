@@ -6,26 +6,42 @@
  * 的等价物：样式没落地时，DOM 里的 `el-*` class 在**已加载样式表里没有任何规则指向它** ——
  * 这是「漏了某件 style/css」唯一的机器可读形状，比肉眼比对像素更早、也更便宜。
  *
- * 三层判据：
+ * 五层判据：
  *   1) 遍历五个路由，收集 DOM 出现过的全部 `el-*` class token → 没有任何规则指向它的那些，
  *      必须逐个落在下面的冻结名单里；名单外的新面孔 = 某件的样式没进来
  *      （EP 自己就会发一批「只在复合选择器里出现」或「按列号动态生成」的类，见
  *      KNOWN_UNCOVERED 与 FAMILY_PATTERNS 上的说明）
  *   2) 交互件（loading 遮罩、message、message-box、dialog 遮罩、popper）在自动化里不一定要
  *      点得到，但它们的规则必须在表里 —— 按名字逐个查
- *   3) 计算样式抽查（按钮圆角/内距/边框与高度、表头底色、select wrapper 的 padding/圆角/min-height）：
- *      规则在表里但**没落到元素上**（例如被更高优先级的覆盖层打掉）也能抓到
- *   4) 反空自证：把语料换成一条**哨兵规则**再跑同一谓词，覆盖必须整体转红 —— 证明这条绊线
- *      不是恒绿。（不能用 `sheet.disabled` 做这件事：它只让规则不生效，`cssRules` 里的
+ *   3) 逐件**样式指纹**：清单里每件自己那份 theme-chalk/el-<name>.css 的首个 el- 类名必须在
+ *      页面上出现 —— 不问渲染状态，删掉一行 style/css 就会红（见 ownStyleFingerprints）
+ *   4) 计算样式抽查（按钮圆角/内距/边框与高度、表头底色、select wrapper 的
+ *      padding/圆角/min-height）：规则在表里但**没落到元素上**也能抓到
+ *   5) 反空自证：把语料换成一条**哨兵规则**再跑同一谓词，覆盖与指纹必须整体转红 —— 证明
+ *      这些绊线不是恒绿。（不能用 `sheet.disabled`：它只让规则不生效，`cssRules` 里的
  *      selector 一条不少，文本匹配照样全绿。）
  *
  * 跑（本轮实测口径）：
  *   cd frontend && E2E_PW_ARGS="--project=P2" node ../scripts/e2e_pool.mjs --slots=1 -- \
  *     e2e/theme/element-plus-styles.spec.ts
  */
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
 import { expect, test, type Page } from '@playwright/test'
 
-import { gotoApp } from '../helpers/nav'
+import { EP_DIRECTIVES, EP_PROGRAMMATIC, EP_TEMPLATE_COMPONENTS } from '../../src/constants/element-plus-usage'
+
+/**
+ * 本文件自己的进页等待：判据与 `helpers/nav.ts:gotoApp` 一致（`.main-layout` 可见），
+ * 但把上限从 15s 放到 30s —— 这条网一次要连走五个路由，而 slot 的**首跳**要等冷起来的
+ * Django 把会话与用户设置查完（实测：15s 那档本文件出现过「retry 才绿」，重试时全程只花
+ * 2.2s ⇒ 慢的是首跳而不是路由本身）。放大等待不改变判据的方向，只去掉这层负载税。
+ */
+async function openRoute(page: Page, route: string): Promise<void> {
+  await page.goto(route)
+  await expect(page.locator('.main-layout')).toBeVisible({ timeout: 30_000 })
+}
 
 /** 交互件的规则名（点不点得到都要在表里）。 */
 const RULE_CHECKS = [
@@ -90,9 +106,39 @@ function novelUncovered(uncovered: string[]): string[] {
   )
 }
 
+/** 清单全集：模板 49 + 服务式 2 + 指令 1。 */
+const ALL_NAMES = [...EP_TEMPLATE_COMPONENTS, ...EP_PROGRAMMATIC, ...EP_DIRECTIVES]
+
+/**
+ * 逐件样式指纹：`theme-chalk/el-<name>.css` 里出现的**第一个 el- 类名**。
+ * 为什么需要它：DOM 侧的覆盖检查依赖「那个组件今天正好被渲染出来」，而删掉一行
+ * `es/components/<name>/style/css` 未必会让任何已渲染组件的类失去规则（依赖件会把它
+ * 顺带拉回来）。指纹直接问「这一件自己的样式文件进没进页面」，与渲染状态无关。
+ *
+ * 5 件自己的 css 文件是空的（date-picker / dropdown-item / dropdown-menu / tab-pane /
+ * tooltip —— 它们的样式全在依赖件里），见 NO_OWN_STYLE。
+ */
+function ownStyleFingerprints(): { fingerprints: string[]; noOwnStyle: string[] } {
+  const fingerprints: string[] = []
+  const noOwnStyle: string[] = []
+  for (const name of ALL_NAMES) {
+    const p = fileURLToPath(
+      new URL(`../../node_modules/element-plus/theme-chalk/el-${name}.css`, import.meta.url)
+    )
+    const m = /\.(el-[\w-]+)/.exec(readFileSync(p, 'utf-8'))
+    if (!m) noOwnStyle.push(name)
+    else fingerprints.push(m[1])
+  }
+  return { fingerprints: [...new Set(fingerprints)], noOwnStyle }
+}
+
+const NO_OWN_STYLE = ['date-picker', 'dropdown-item', 'dropdown-menu', 'tab-pane', 'tooltip']
+
 interface ProbeArg {
   ruleChecks: string[]
   mustSee: string[]
+  /** 每件自己的 theme-chalk 首个类名 —— 逐件的样式指纹（Node 侧算好传进来）。 */
+  fingerprints?: string[]
   /** 反空自证：不看真的样式表，只喂一条必然对不上的哨兵规则。 */
   synthesizeEmptyCorpus?: boolean
 }
@@ -103,6 +149,7 @@ interface ProbeOut {
   rules: number
   uncovered: string[]
   missingRules: string[]
+  missingFingerprints: string[]
   seenMusts: string[]
 }
 
@@ -155,6 +202,7 @@ function probeBody(arg: ProbeArg): ProbeOut {
       .filter((t) => !hit(t))
       .sort(),
     missingRules: arg.ruleChecks.map((c) => c.slice(1)).filter((c) => !hit(c)),
+    missingFingerprints: (arg.fingerprints || []).filter((c) => !hit(c)),
     seenMusts: arg.mustSee.filter((m) => tokens.has(m)),
   }
 }
@@ -166,7 +214,7 @@ async function tourProbe(page: Page): Promise<{ uncovered: string[]; seenMusts: 
   let rules = 0
   let sheets = 0
   for (const route of TOUR) {
-    await gotoApp(page, route)
+    await openRoute(page, route)
     const one = await page.evaluate(probeBody, { ruleChecks: RULE_CHECKS, mustSee: MUST_SEE })
     rules += one.rules
     sheets = Math.max(sheets, one.sheets)
@@ -200,7 +248,7 @@ test.describe('@theme Element Plus 样式落地回归网', { tag: ['@p2', '@them
   })
 
   test('@p2 计算样式抽查：按钮/表头/下拉真的拿到了盒模型', async ({ page }) => {
-    await gotoApp(page, '/data')
+    await openRoute(page, '/data')
     // /data 第一个 `.el-button` 是 text 型（EP 给它的边框就是 0），盒模型判据要挑实心那颗
     const btn = page.locator('.el-button:visible:not(.is-text):not(.is-link)').first()
     await expect(btn).toBeVisible({ timeout: 15_000 })
@@ -228,7 +276,7 @@ test.describe('@theme Element Plus 样式落地回归网', { tag: ['@p2', '@them
 
     // 下拉换到分析页：/data 上的 el-select 只有 banner 里收起态那几颗（DOM 在、没画出来）。
     // 判据打在 EP 自己给的 wrapper 三个声明上，避免被控件 size（分析页是 small=24px）带偏。
-    await gotoApp(page, '/analysis')
+    await openRoute(page, '/analysis')
     const wrap = page.locator('.el-select[data-file-picker="single"] .el-select__wrapper')
     await expect(wrap).toBeVisible({ timeout: 15_000 })
     const box2 = await wrap.evaluate((el) => {
@@ -241,14 +289,34 @@ test.describe('@theme Element Plus 样式落地回归网', { tag: ['@p2', '@them
     expect(['40px', '32px', '24px']).toContain(box2.minH)
   })
 
+  test('@p2 每件自己的 theme-chalk 样式都在页面上（与渲染状态无关的指纹判据）', async ({ page }) => {
+    const { fingerprints, noOwnStyle } = ownStyleFingerprints()
+    expect(noOwnStyle.sort()).toEqual([...NO_OWN_STYLE].sort())
+    // 52 件里 47 件有自有样式，去重后 46 个指纹（dialog 与 message-box 共用
+    // el-popup-parent--hidden）—— 数字变了说明 EP 换了文件结构，要重新看这条
+    expect(fingerprints.length).toBe(46)
+    await openRoute(page, '/data')
+    const out = await page.evaluate(probeBody, {
+      ruleChecks: RULE_CHECKS,
+      mustSee: MUST_SEE,
+      fingerprints,
+    })
+    expect(
+      out.missingFingerprints,
+      `这些件的自有样式没进页面：${out.missingFingerprints.join(', ')}`
+    ).toEqual([])
+  })
+
   test('@p2 反空自证：换成一条哨兵规则，同一谓词必须立刻报出全部没兜住的 class', async ({ page }) => {
-    await gotoApp(page, '/data')
+    const { fingerprints } = ownStyleFingerprints()
+    await openRoute(page, '/data')
     const clean = await page.evaluate(probeBody, { ruleChecks: RULE_CHECKS, mustSee: MUST_SEE })
     expect(novelUncovered(clean.uncovered)).toEqual([])
     expect(clean.tokens, 'DOM 里一个 el-* 都没有 ⇒ 下面的判据会比一个空集合').toBeGreaterThan(20)
     const off = await page.evaluate(probeBody, {
       ruleChecks: RULE_CHECKS,
       mustSee: MUST_SEE,
+      fingerprints,
       synthesizeEmptyCorpus: true,
     })
     // 哨兵 corpus 下 rules 只有 1 条：证明语料真的来自样式表，而不是写死的字符串
@@ -257,5 +325,7 @@ test.describe('@theme Element Plus 样式落地回归网', { tag: ['@p2', '@them
     expect(off.uncovered.length, '换成空语料仍然满覆盖 ⇒ 这条绊线是恒绿的').toBeGreaterThan(0)
     expect(off.uncovered).toContain('el-button')
     expect(off.missingRules.sort()).toEqual([...RULE_CHECKS.map((c) => c.slice(1))].sort())
+    // 指纹判据同样要能被空语料打红（否则它就是恒绿的装饰）
+    expect(off.missingFingerprints.sort()).toEqual(fingerprints.sort())
   })
 })
