@@ -2783,3 +2783,33 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   `const mySeq = ++_dashSeq`），把 `onFileChange` 改残且构建未必立刻暴露。
   **规则**：替换块的 `old_string` 必须完整覆盖将被移除的每一行；改完马上 `git diff` 读那一段
   （本轮就是靠逐文件读 diff 抓到并当场补回）。
+
+## 2026-10-28 主进程批次与 EP 回归网：四条「机器事实」，全都不是推出来的
+
+- **现象**：给 `electron/app-shutdown.ts` 写 T2 时，spec 里一句 `import type { BackendInfo } from './backend'`
+  让 `test:e2e:affected` 的构建步红在 `../electron/backend.ts(17,21): TS2307 Cannot find module 'electron'`。
+- **根因**：`import type` **也是模块图上的边** —— `vue-tsc -b` 会把被引用的 backend.ts 拉进前端 program，
+  而 frontend 的 tsconfig 没有 electron 的 `paths` 映射（只有 `electron/tsconfig.json` 有）。
+- **规则**：判断「这个模块能不能被前端/测试引用」只看**运行期依赖**，不看引用形式；共享的句柄形状要单独
+  成纯类型模块（本轮 `electron/backend-info.ts`）。同类事实：`electron/main.ts` 被本批新增的退出逻辑顶到
+  623 行破 600 闸 —— 正解是抽可注入模块（顺带第一次让主进程退出路径有了 T2），不是挂 EXEMPT。
+- **现象**：dev 档 `spawnBackend(isDev=true)` **恒返回 `managed:false`**（它只探测 :8000 复用外部后端，
+  从不 spawn）。所以「退出不留托管 python」这条真路径在开发机上跑一万遍也验不到。
+- **规则**：这类只有打包态才走的分支，把判据做成注入式纯模块（本轮注入 `app`/`stop`/`log`/`killSync`），
+  用 T2 真的按下去；真跑只用来验接线（本轮起了一次真实例：三行生命周期日志只落 main.log、
+  backend.log 一字节没涨，证明日志归属与拦住退出都活着）。
+- **现象**：写 EP 样式覆盖探针时，第一版反证想用 `sheet.disabled = true` 让判据转红 —— 它没红。
+- **根因**：`disabled` 只让规则**不生效**，`cssRules` 里的 selector 一条不少；按文本匹配的存在性判据
+  照样满覆盖。
+- **规则**：反证要切断的是**判据的取数来源**，不是效果的生效来源（本轮改成「换一条哨兵语料」：
+  语料只剩 `.el-sentinel-not-a-real-component`，覆盖必须整体转红）。
+- **现象**：同一探针首版要求「DOM 里每个 `el-*` class 都得有规则」，一次报出 44 条。
+- **根因**：EP 自己就发一批结构性没有独立规则的类 —— `.el-table_1_column_N`（按列号动态生成）、
+  `*-enter-to/-leave-from`（Vue 过渡相位，同一页两次跑集合都不一样）、`.el-tag--light` 这类默认态修饰符
+  （只在复合选择器里出现）。逐个对 `element-plus/dist/index.css` 正则核过，命中数确实是 0。
+- **规则**：覆盖型判据分两层 —— **随时机变的按家族排除**（进冻结名单就是 flake 生成器），
+  **稳定残差进冻结名单**；方向取「名单外新面孔 == 空」而不是「未命中 == 空」，并配 MUST_SEE 与
+  「哨兵语料」两条防空集合恒绿。
+- **自报操作失误**：变异自证的驱动脚本只在 `finally` 里全量复位，轮内只写回**本轮那个文件**的原文 ——
+  第一轮改的是清单文件、后面几轮改的是 spec，于是 M2–M6 的红集合里一直挂着 M1 造成的两条。
+  **规则**：驱动脚本每轮开头把所有被改文件从初值整体复位一遍；红集合对不上预期时先怀疑驱动，别先改判据。
