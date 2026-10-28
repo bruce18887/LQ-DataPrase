@@ -9,26 +9,14 @@
  *   fall back to SIGTERM → force-kill after a timeout
  */
 
-import { spawn, ChildProcess } from 'child_process'
+import { spawn } from 'child_process'
 import * as crypto from 'crypto'
 import * as path from 'path'
 import * as fs from 'fs'
 import * as http from 'http'
 import { app } from 'electron'
 import { buildBackendEnv } from './backend-env'
-
-export interface BackendInfo {
-  port: number
-  pid: number | null
-  process: ChildProcess | null
-  /** Whether this process was spawned by Electron and should be stopped on quit. */
-  managed: boolean
-  /**
-   * Per-launch token for POST /api/v1/system/shutdown/. Null for an unmanaged
-   * backend (the dev server on :8000), which Electron must not stop anyway.
-   */
-  shutdownToken: string | null
-}
+import type { BackendInfo } from './backend-info'
 
 // ---------------------------------------------------------------------------
 // Logging (mirrors the logger in main.ts so backend.ts can also be tested
@@ -74,21 +62,34 @@ function writeBackendLog(level: string, args: unknown[]): void {
   }
 }
 
-const mainLog = console.log
-const mainError = console.error
-const mainWarn = console.warn
+/**
+ * 本模块的日志出口 —— **不改全局 console**。
+ *
+ * 旧写法在这里把 console.log/error/warn 换成了「写 backend.log + 转原生」，而 main.ts
+ * 之后又包了一层（main.ts 的 originalLog 因此捕获到的是本模块的壳）。两层的后果是
+ * 主进程每打一行日志都 `appendFileSync` 两次、且 main.log 与 backend.log 互相抄全，
+ * 而后端 stdout/stderr 与渲染层 console-message 都在这条热路径上（每 chunk 一次）。
+ *
+ * 取原生引用发生在模块求值时（main.ts:14 先 import 本模块，main.ts 的补丁在其之后），
+ * 所以 native* 就是未被包装的那一份：后端生命周期的行只写 backend.log 一次 + 落终端。
+ */
+const nativeLog = console.log.bind(console)
+const nativeError = console.error.bind(console)
+const nativeWarn = console.warn.bind(console)
 
-console.log = (...args: unknown[]) => {
-  writeBackendLog('INFO', args)
-  mainLog(...args)
-}
-console.error = (...args: unknown[]) => {
-  writeBackendLog('ERROR', args)
-  mainError(...args)
-}
-console.warn = (...args: unknown[]) => {
-  writeBackendLog('WARN', args)
-  mainWarn(...args)
+const blog = {
+  log: (...args: unknown[]) => {
+    writeBackendLog('INFO', args)
+    nativeLog(...args)
+  },
+  error: (...args: unknown[]) => {
+    writeBackendLog('ERROR', args)
+    nativeError(...args)
+  },
+  warn: (...args: unknown[]) => {
+    writeBackendLog('WARN', args)
+    nativeWarn(...args)
+  },
 }
 
 // ---------------------------------------------------------------------------
@@ -143,8 +144,8 @@ function getBackendPath(isDev: boolean): { exe: string; args: string[]; cwd: str
   // Production: the backend exe lives in extraResources (process.resourcesPath).
   const resourcesPath = process.resourcesPath
   const exePath = path.join(resourcesPath, 'LQ-DataPrase.exe')
-  console.log(`[electron] Resolved backend exe: ${exePath}`)
-  console.log(`[electron] Backend exe exists: ${fs.existsSync(exePath)}`)
+  blog.log(`[electron] Resolved backend exe: ${exePath}`)
+  blog.log(`[electron] Backend exe exists: ${fs.existsSync(exePath)}`)
   return {
     exe: exePath,
     args: ['--port', '0', '--host', '127.0.0.1'],
@@ -160,7 +161,7 @@ function waitForBackend(port: number, timeoutMs: number = 60000): Promise<void> 
   return new Promise((resolve, reject) => {
     const startTime = Date.now()
     const probeUrl = `http://127.0.0.1:${port}/api/v1/health/`
-    console.log(`[electron] Polling backend at ${probeUrl} (timeout ${timeoutMs}ms)`)
+    blog.log(`[electron] Polling backend at ${probeUrl} (timeout ${timeoutMs}ms)`)
 
     function poll(): void {
       if (Date.now() - startTime > timeoutMs) {
@@ -171,7 +172,7 @@ function waitForBackend(port: number, timeoutMs: number = 60000): Promise<void> 
       const req = http.get(probeUrl, (res) => {
         res.resume()
         if (res.statusCode === 200) {
-          console.log('[electron] Backend health probe returned 200')
+          blog.log('[electron] Backend health probe returned 200')
           resolve()
           return
         }
@@ -179,7 +180,7 @@ function waitForBackend(port: number, timeoutMs: number = 60000): Promise<void> 
         // app is broken). Requiring 200 rather than "any response" is the point
         // of having a dedicated probe: `/api/v1/` used to accept a 404, which
         // would also have accepted any unrelated HTTP server on that port.
-        console.log(`[electron] Backend health probe returned ${res.statusCode}, retrying`)
+        blog.log(`[electron] Backend health probe returned ${res.statusCode}, retrying`)
         setTimeout(poll, 250)
       })
 
@@ -188,7 +189,7 @@ function waitForBackend(port: number, timeoutMs: number = 60000): Promise<void> 
         const elapsed = Date.now() - startTime
         const delay = Math.min(100 * Math.pow(2, Math.floor(elapsed / 1000)), 1000)
         if (elapsed % 5000 < 1000) {
-          console.log(`[electron] Backend poll error after ${elapsed}ms: ${err.message}`)
+          blog.log(`[electron] Backend poll error after ${elapsed}ms: ${err.message}`)
         }
         setTimeout(poll, delay)
       })
@@ -262,9 +263,9 @@ export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
   if (isDev) {
     const hasDevBackend = await detectDevBackend()
     if (hasDevBackend) {
-      console.log(`[electron] Reusing dev backend at ${DEV_BACKEND_URL}`)
+      blog.log(`[electron] Reusing dev backend at ${DEV_BACKEND_URL}`)
     } else {
-      console.warn(
+      blog.warn(
         `[electron] No dev backend found at ${DEV_BACKEND_URL}. ` +
           `Start it with: python manage.py runserver ${DEV_BACKEND_PORT}`
       )
@@ -276,8 +277,8 @@ export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
     const { exe, args, cwd } = getBackendPath(isDev)
     const userDataPath = app.getPath('userData')
 
-    console.log(`[electron] Spawning backend: ${exe} ${args.join(' ')} (cwd: ${cwd})`)
-    console.log(`[electron] Backend userData (LQDP_BASE_DIR): ${userDataPath}`)
+    blog.log(`[electron] Spawning backend: ${exe} ${args.join(' ')} (cwd: ${cwd})`)
+    blog.log(`[electron] Backend userData (LQDP_BASE_DIR): ${userDataPath}`)
 
     // Ensure the userData directory exists before the backend tries to write into it.
     fs.mkdirSync(userDataPath, { recursive: true })
@@ -289,7 +290,7 @@ export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
       process.env.LQDP_BACKEND_CONSOLE === '1' ||
       process.env.LQDP_BACKEND_CONSOLE === 'true' ||
       app.commandLine.hasSwitch('backend-console')
-    console.log(`[electron] showBackendConsole=${showBackendConsole} (env=${process.env.LQDP_BACKEND_CONSOLE ?? 'unset'})`)
+    blog.log(`[electron] showBackendConsole=${showBackendConsole} (env=${process.env.LQDP_BACKEND_CONSOLE ?? 'unset'})`)
 
     // Per-launch shutdown token. The backend only mounts
     // POST /api/v1/system/shutdown/ when this is set, and requires the token
@@ -310,20 +311,25 @@ export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
 
     child.stdout?.on('data', (data: Buffer) => {
       const text = data.toString()
-      startupOutput += text
-      console.log(`[backend-stdout] ${text}`)
+      blog.log(`[backend-stdout] ${text}`)
+      // 端口一旦解析出来，这份缓冲就没有别的用途了（两处消费都是 `slice(-1000)` 的
+      // 崩溃摘要）。旧写法每来一个 chunk 都无上限 append，再对**整段历史**重跑一次
+      // 正则 ⇒ 启动期 O(n²) 的主线程 CPU + 全程只增不减的字符串。
+      if (port !== null) return
+      // 跨 chunk 拼接只需要相邻几个包：留尾部 8KB，崩溃摘要也够诊断。
+      startupOutput = (startupOutput + text).slice(-8192)
 
       // Parse "[server] Starting LQ-DataPrase on http://0.0.0.0:{port}"
       // from the accumulated output (not individual chunks) because Node
       // may split the startup banner line across multiple data events.
       const match = startupOutput.match(/Starting LQ-DataPrase on http:\/\/[\d.]+:(\d+)/)
-      if (match && port === null) {
+      if (match) {
         port = parseInt(match[1], 10)
-        console.log(`[electron] Parsed backend port: ${port}`)
+        blog.log(`[electron] Parsed backend port: ${port}`)
 
         waitForBackend(port)
           .then(() => {
-            console.log(`[electron] Backend confirmed ready on port ${port}`)
+            blog.log(`[electron] Backend confirmed ready on port ${port}`)
             resolve({
               port: port!,
               pid: child.pid ?? null,
@@ -333,7 +339,7 @@ export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
             })
           })
           .catch((err) => {
-            console.error(`[electron] waitForBackend failed:`, err)
+            blog.error(`[electron] waitForBackend failed:`, err)
             child.kill()
             reject(err)
           })
@@ -342,11 +348,11 @@ export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
 
     child.stderr?.on('data', (data: Buffer) => {
       const text = data.toString()
-      console.error(`[backend-stderr] ${text}`)
+      blog.error(`[backend-stderr] ${text}`)
     })
 
     child.on('error', (err) => {
-      console.error(`[electron] Failed to spawn backend process (${exe}):`, err)
+      blog.error(`[electron] Failed to spawn backend process (${exe}):`, err)
       reject(new Error(`Failed to spawn backend process (${exe}): ${err.message}`))
     })
 
@@ -356,13 +362,13 @@ export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
           `Backend exited before becoming ready (code=${code}, signal=${signal}). ` +
             `Last output: ${startupOutput.slice(-1000)}`
         )
-        console.error('[electron]', err)
+        blog.error('[electron]', err)
         reject(err)
         return
       }
       // Backend crashed after successful startup. Log and let the UI
       // show connection errors. The main process does not auto-restart.
-      console.error(
+      blog.error(
         `[electron] Backend process exited unexpectedly (code=${code}, signal=${signal}). ` +
           `It was listening on port ${port}.`
       )
@@ -378,7 +384,7 @@ export async function spawnBackend(isDev: boolean): Promise<BackendInfo> {
           `Backend did not output port within 600 s. ` +
             `Output so far: ${startupOutput.slice(-1000)}`
         )
-        console.error('[electron]', err)
+        blog.error('[electron]', err)
         reject(err)
         child.kill()
       }
@@ -415,13 +421,13 @@ function requestBackendShutdown(info: BackendInfo, timeoutMs = 3000): Promise<bo
       },
       (res) => {
         res.resume()
-        console.log(`[electron] Backend shutdown endpoint returned ${res.statusCode}`)
+        blog.log(`[electron] Backend shutdown endpoint returned ${res.statusCode}`)
         resolve(res.statusCode === 200)
       }
     )
 
     req.on('error', (err) => {
-      console.warn(`[electron] Backend shutdown request failed: ${err.message}`)
+      blog.warn(`[electron] Backend shutdown request failed: ${err.message}`)
       resolve(false)
     })
     req.on('timeout', () => {
@@ -474,12 +480,16 @@ export function stopBackend(info: BackendInfo): Promise<void> {
           child.kill('SIGKILL')
         }
       }
+      // 强杀已经发出就不再等 12s 保险：留着它会在几秒后对已停的后端补一条
+      // 「did not stop within timeout, giving up」的假警告（且 resolve 早跑过一次）。
+      clearTimeout(safetyTimeout)
     }, 5000)
 
     // Absolute safety net: resolve after 12 seconds even if the process
     // is somehow unkillable. Prevents app.quit() from hanging forever.
     const safetyTimeout = setTimeout(() => {
-      console.warn(`[electron] Backend process ${pid} did not stop within timeout, giving up.`)
+      blog.warn(`[electron] Backend process ${pid} did not stop within timeout, giving up.`)
+      clearTimeout(forceKillTimeout)
       resolve()
     }, 12000)
 

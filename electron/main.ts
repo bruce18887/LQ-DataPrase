@@ -12,7 +12,8 @@ import { app, BrowserWindow, Menu, dialog, nativeImage } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
 import { spawnBackend, stopBackend } from './backend'
-import type { BackendInfo } from './backend'
+import type { BackendInfo } from './backend-info'
+import { killBackendOnExit, stopBackendBeforeQuit } from './app-shutdown'
 import { registerIpcHandlers } from './ipc-handlers'
 import { APP_ID, resolveIconPath, iconFileExists } from './app-icon'
 import { probeBackendUrl } from './net-probe'
@@ -582,9 +583,16 @@ app.on('window-all-closed', () => {
   }
 })
 
-app.on('before-quit', async () => {
-  console.log('[electron] before-quit, stopping backend')
-  if (backendInfo) {
-    await stopBackend(backendInfo)
-  }
+// 退出路径的判据在 app-shutdown.ts（T2 钉住）；这里只接线。
+// log 走本文件的 console，所以这些行落在 main.log 而不是 backend.log。
+stopBackendBeforeQuit({
+  app,
+  getInfo: () => backendInfo,
+  setInfo: (info) => {
+    backendInfo = info
+  },
+  stop: stopBackend,
+  log: (level, message) => (level === 'error' ? console.error(message) : console.log(message)),
 })
+
+process.on('exit', () => killBackendOnExit(backendInfo))
