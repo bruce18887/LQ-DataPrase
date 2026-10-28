@@ -24,7 +24,10 @@
         <el-option v-for="p in filteredItems" :key="p" :label="p" :value="p" />
         <template #footer>
           <div v-if="matches.length > 0" class="match-hint">
-            匹配 {{ matches.length }} 项，按 Enter 全选
+            匹配 {{ matches.length }} 项，按 Enter 全选<span v-if="matches.length > DROPDOWN_RENDER_CAP">（共匹配更多，仅显示前 {{ DROPDOWN_RENDER_CAP }}，可继续输入缩小范围）</span>
+          </div>
+          <div v-else-if="!kw && params.length > DROPDOWN_RENDER_CAP" class="match-hint">
+            共 {{ params.length }} 项，仅显示前 {{ DROPDOWN_RENDER_CAP }}，可输入关键词缩小范围
           </div>
         </template>
       </el-select>
@@ -36,6 +39,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { DROPDOWN_RENDER_CAP } from '../../../../constants/dropdown'
 
 interface Props {
   params: string[]
@@ -57,8 +61,10 @@ const matches = computed(() =>
   kw.value ? props.params.filter((p) => p.toLowerCase().includes(kw.value)) : [],
 )
 
-/** 下拉选项：有关键字显示过滤结果，否则全量 */
-const filteredItems = computed(() => (kw.value ? matches.value : props.params))
+/** 下拉选项：有关键字显示过滤结果，否则全量；渲染层一律截断到前 N。
+ *  截断只作用于渲染——全选走 props.params、Enter 走 matches，都是完整集合。 */
+const filteredItems = computed(() =>
+  (kw.value ? matches.value : props.params).slice(0, DROPDOWN_RENDER_CAP))
 
 /** 接管 EP 内置过滤（el-select filterable 模式下 query 变化回调） */
 function filterMethod(query: string) {

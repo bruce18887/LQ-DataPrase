@@ -9,7 +9,6 @@
       size="small"
       :style="inline ? 'width: 260px' : 'width: 100%'"
       :filter-method="filterMethod"
-      :virtual="filteredItems.length > 50"
       @change="onParamChange"
       @visible-change="onVisibleChange"
       :popper-class="popperClass"
@@ -35,6 +34,12 @@
           <!-- <span v-if="item.hint" class="param-hint">{{ item.hint }}</span> -->
         </div>
       </el-option>
+      <template #footer>
+        <!-- 渲染封顶必须说出来：用户看到的不是全量，靠输入缩小范围 -->
+        <div v-if="capped" class="param-cap-hint">
+          共 {{ listView.total }} 项，仅显示前 {{ DROPDOWN_RENDER_CAP }}，继续输入可缩小范围
+        </div>
+      </template>
     </el-select>
     <div class="nav-buttons">
       <el-button :disabled="params.length === 0" size="small" @click="onPrev">
@@ -49,6 +54,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { DROPDOWN_RENDER_CAP } from '../../../constants/dropdown'
 
 interface ParamSegment { text: string; mark: boolean }
 
@@ -85,17 +91,22 @@ const allItems = computed<ParamItem[]>(() =>
   }))
 )
 
-/** 过滤后的列表 */
-const filteredItems = computed<ParamItem[]>(() => {
-  if (!filterText.value) return allItems.value
-
-  const query = filterText.value.toLowerCase()
-  return allItems.value
+/**
+ * 列表视图：items = 实际渲染的选项（截断到 DROPDOWN_RENDER_CAP），total = 截断前条数。
+ *
+ * 顺序改成「过滤 → 排序 → 截断 → 高亮」。原写法是「过滤 → 高亮 → 排序」，即给每个
+ * 匹配项都建一份 segments 数组（1,702 项的文件上每次击键建 1,702 份），而真正渲染的
+ * 只有前 N 项。排序必须留在截断之前，否则截到的是错的 N 项。
+ */
+const listView = computed<{ items: ParamItem[]; total: number }>(() => {
+  const raw = filterText.value
+  if (!raw) {
+    const all = allItems.value
+    return { items: all.slice(0, DROPDOWN_RENDER_CAP), total: all.length }
+  }
+  const query = raw.toLowerCase()
+  const matched = allItems.value
     .filter((item) => item.value.toLowerCase().includes(query))
-    .map((item) => ({
-      ...item,
-      segments: highlightSegments(item.value, filterText.value),
-    }))
     .sort((a, b) => {
       // 前缀匹配优先
       const aStarts = a.value.toLowerCase().startsWith(query)
@@ -104,7 +115,18 @@ const filteredItems = computed<ParamItem[]>(() => {
       if (!aStarts && bStarts) return 1
       return a.value.localeCompare(b.value)
     })
+  return {
+    items: matched
+      .slice(0, DROPDOWN_RENDER_CAP)
+      .map((item) => ({ ...item, segments: highlightSegments(item.value, raw) })),
+    total: matched.length,
+  }
 })
+
+/** 渲染中的选项（已封顶） */
+const filteredItems = computed(() => listView.value.items)
+/** 是否发生截断：决定 footer 提示是否出现 */
+const capped = computed(() => listView.value.total > DROPDOWN_RENDER_CAP)
 
 /** 根据参数名推断分类提示 */
 function getParamHint(param: string): string {
@@ -248,5 +270,12 @@ function onNext() {
   color: var(--text-2);
   margin-left: 12px;
   flex-shrink: 0;
+}
+
+/* 截断提示（footer 槽）：两主题都走 token，不写死颜色 */
+.param-cap-hint {
+  font-size: var(--p-fs-micro);
+  color: var(--text-2);
+  text-align: center;
 }
 </style>

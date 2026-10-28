@@ -184,12 +184,20 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/** 高亮匹配段：原文 HTML 转义后注入 <mark>（大小写不敏感） */
-function highlightMatch(text: string, query: string): string {
+/** 高亮匹配段：原文 HTML 转义后注入 <mark>（大小写不敏感）。
+ *  正则由调用方按查询词编译一次传进来 —— 本函数对整表逐行调用（下拉上限 5000 行），
+ *  写在函数体内等于每次输入编译几千个 RegExp。`String.replace` 对 /g 正则会归零
+ *  lastIndex，因此同一实例跨行复用安全。 */
+function highlightMatch(text: string, re: RegExp | null): string {
   const safe = escapeHtml(text)
-  if (!query) return safe
-  const esc = escapeRegex(escapeHtml(query))
-  return safe.replace(new RegExp(`(${esc})`, 'gi'), '<mark>$1</mark>')
+  if (!re) return safe
+  return safe.replace(re, '<mark>$1</mark>')
+}
+
+/** 编译高亮正则：先转义 HTML 再转义正则元字符（与旧内联写法同语义） */
+function buildHighlightRegex(query: string): RegExp | null {
+  if (!query) return null
+  return new RegExp(`(${escapeRegex(escapeHtml(query))})`, 'gi')
 }
 
 /** 匹配：filename / program_name / batch_name 任一包含（对齐后端 search_fields） */
@@ -239,7 +247,8 @@ interface DisplayFile extends DataFile {
   filenameHtml: string
 }
 function toDisplay(list: DataFile[], query: string): DisplayFile[] {
-  return list.map((f) => ({ ...f, filenameHtml: highlightMatch(f.filename ?? '', query) }))
+  const re = buildHighlightRegex(query)
+  return list.map((f) => ({ ...f, filenameHtml: highlightMatch(f.filename ?? '', re) }))
 }
 
 /** 富信息行文本：program · format · N 行 · 大小 · 上传时间 */

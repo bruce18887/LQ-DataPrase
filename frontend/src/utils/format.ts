@@ -24,14 +24,24 @@ export function formatSize(val: number): string {
 }
 
 /**
+ * MM-DD HH:mm 的格式化器（模块级单例）。
+ *
+ * `Date.prototype.toLocaleString(locale, options)` 每次调用都在内部新建一个
+ * `Intl.DateTimeFormat`，而本函数被文件下拉**逐行**调用（FileSelect.vue 的 metaText，
+ * 上限 5000 行/次输入）——旧写法因此每次输入要构造上千个 formatter。
+ */
+const TIME_FMT = new Intl.DateTimeFormat('zh-CN', {
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+})
+
+/**
  * Format an ISO date string as a short locale datetime (MM-DD HH:mm).
  */
 export function formatTime(val: string): string {
   if (!val) return ''
-  return new Date(val).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return TIME_FMT.format(new Date(val))
 }
