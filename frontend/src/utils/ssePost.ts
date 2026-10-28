@@ -60,17 +60,24 @@ export async function postSse(
   const reader = response.body!.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const events = buffer.split('\n\n')
-    buffer = events.pop()!
-    for (const evt of events) {
-      if (!evt.startsWith('data: ')) continue
-      try {
-        onData(JSON.parse(evt.slice(6)))
-      } catch { /* skip malformed events */ }
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const events = buffer.split('\n\n')
+      buffer = events.pop()!
+      for (const evt of events) {
+        if (!evt.startsWith('data: ')) continue
+        try {
+          onData(JSON.parse(evt.slice(6)))
+        } catch { /* skip malformed events */ }
+      }
     }
+  } finally {
+    // 循环里任何一处抛出（含调用方 onData 抛错）都要把流关掉：不关的话这条 SSE
+    // 一直挂到 GC，桌面档里它占着的不只是一个 socket —— 后端那条响应也不会提前收尾。
+    // 正常收尾时 cancel() 对已 done 的流是无害 no-op。
+    await reader.cancel().catch(() => {})
   }
 }

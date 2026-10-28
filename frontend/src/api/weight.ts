@@ -1,4 +1,5 @@
 import api from './index'
+import { getExportTimeoutMs } from '../utils/exportTimeout'
 import type { WeightDocDto } from '../pages/weight/weightChartOption'
 
 export interface WeightParseRequest { filename: string; text: string }
@@ -14,7 +15,9 @@ export const weightApi = {
     return api.post<WeightDocDto>('/weight/parse/', body)
   },
   /** silent：解析失败比通用提示更具体（行号在 detail 里），由调用方组织文案。 */
-  export(body: WeightExportRequest) {
-    return api.post('/weight/export/', body, { responseType: 'blob', silent: true })
+  async export(body: WeightExportRequest) {
+    // 这条也是同步出片的接口 ⇒ 归「导出超时」设置管，不走 30s 默认值。
+    const timeout = await getExportTimeoutMs()
+    return api.post('/weight/export/', body, { responseType: 'blob', silent: true, timeout })
   },
 }

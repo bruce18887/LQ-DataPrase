@@ -103,8 +103,12 @@ export const sftpApi = {
   listFiles(path: string, sortBy = 'name', sortOrder = 'asc') {
     return api.get('/sftp/list_files/', { params: { path, sort_by: sortBy, sort_order: sortOrder } })
   },
-  download(path: string) {
-    return api.post('/sftp/download/', { path })
+  async download(path: string) {
+    // 单文件下载走 axios，上限归「SFTP 下载超时」设置管：不传就是 api/index.ts 的
+    // 30s 默认值，而大 .datalog 经 Django 中转常常远超 30 秒（流式那两条已经把
+    // 同一个设置传给后端了，这条是漏网的）。
+    const timeout = (await getSftpTimeoutSec()) * 1000
+    return api.post('/sftp/download/', { path }, { timeout })
   },
   downloadDir(path: string, onlyData = false) {
     return api.post('/sftp/download_dir/', { path, only_data: onlyData })
