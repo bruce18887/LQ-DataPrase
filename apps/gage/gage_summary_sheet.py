@@ -241,10 +241,12 @@ def format_summary_sheet(f, group_info, last_data_row, styles):
         # Group borders
         f.set_cell_style(SUMMARY_SHEET, f"A{group_start}", f"A{group_start}",
                          styles.thick_top)
-        for col_num in range(2, SUMMARY_HEADER_COUNT):
-            cl = excelize.column_number_to_name(col_num)
-            f.set_cell_style(SUMMARY_SHEET, f"{cl}{group_start}", f"{cl}{group_start}",
-                             styles.thick_top_mid)
+        # 组首的中间列（B..Z）是同一个 id 的连续列 ⇒ 一次区间下发（原来 25 次逐格）。
+        # 覆盖集合与次序都没变：R&R%（Y 列）的基样式仍在**同一个分组循环的末尾**单独覆盖
+        # 那一格（见下面 rr_pct 那一条），「最后一写生效」的那一写还是它 ⇒ 与逐格写法同值。
+        # A / AA 各自 id 不同（粗左边框 / 粗右边框），保持逐格，绝不框进这段区间。
+        f.set_cell_style(SUMMARY_SHEET, f"{MID_FIRST_COL}{group_start}",
+                         f"{MID_LAST_COL}{group_start}", styles.thick_top_mid)
         f.set_cell_style(SUMMARY_SHEET, f"{LAST_COL}{group_start}",
                          f"{LAST_COL}{group_start}", styles.thick_top_right)
 
@@ -261,10 +263,9 @@ def format_summary_sheet(f, group_info, last_data_row, styles):
 
         f.set_cell_style(SUMMARY_SHEET, f"A{group_end}", f"A{group_end}",
                          styles.thick_bottom)
-        for col_num in range(2, SUMMARY_HEADER_COUNT):
-            cl = excelize.column_number_to_name(col_num)
-            f.set_cell_style(SUMMARY_SHEET, f"{cl}{group_end}", f"{cl}{group_end}",
-                             styles.thick_bottom_mid)
+        # 组末同组首：中间列一次区间，A / AA 保持逐格（粗下左边框 / 粗下右边框）。
+        f.set_cell_style(SUMMARY_SHEET, f"{MID_FIRST_COL}{group_end}",
+                         f"{MID_LAST_COL}{group_end}", styles.thick_bottom_mid)
         f.set_cell_style(SUMMARY_SHEET, f"{LAST_COL}{group_end}",
                          f"{LAST_COL}{group_end}", styles.thick_bottom_right)
 

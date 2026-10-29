@@ -3,7 +3,7 @@
 钉的是 **FFI 下发形状**，不是某一行实现：
 
 ① 产物 xlsx 的 sha256 与**改前基线**逐字节相等。可复现性在钉住的依赖版本下成立
-   （``excelize==0.0.9``、``numpy==2.4.6``，见 ``requirements/base.txt:51,44``）：同进程两次 /
+   （``requirements/base.txt`` 里钉的 ``excelize==0.0.9``、``numpy==2.4.6``）：同进程两次 /
    跨进程两次 / 换构建顺序全部相等；zip 成员的 ``date_time`` 恒为 ``(1980,0,0,0,0,0)``
    （月份/日都为 0，不是 ``(1980,1,1,...)``），**成员数随形状变**（本文件两份形状是
    4 文件 14 个 / 2 文件 12 个，别把具体成员数当常量），``docProps/core.xml`` 的时间是
@@ -15,20 +15,17 @@
    top-left / bottom-right 传区间是同一件事的批量写法；``set_col_style`` 是整列语义、
    会把样式写到 ``<col>`` 级、不等价 ⇒ 另有一条「全程零次 set_col_style」守着）。
 
-读回口径为什么在本文件里重写一份而不 import ``tasks/a5_readback.py``：``tasks/`` 不入库
-（``.gitignore`` 的 ``/tasks/*``），CI 的干净检出里那个路径根本不存在，判据必须能独立跑。
-单元格的存在集合一律以 sheet XML 里真实出现的 ``<c r=".." s="..">`` 为准 —— excelize 写的
-``<dimension ref="A1">`` 是错的，信它就会漏掉「有样式但空值」的格子，而那些格子正是
-「整行刷样式」的落点，漏读等于没有判据。
+读回实现在 ``sheet_readback.py`` —— 与 buyoff 段共用那一份（原先两边各写一份，78 行逐字
+重复且已漂移：一份用 sheet XML 的 ``r=`` 属性、另一份由坐标反推 ref）。「为什么以 sheet
+XML 为准 / 为什么不信 ``<dimension>`` / 为什么样式取内容不取 id / 为什么列宽自己展开
+``<col min max>``」四条口径都写在那份模块文档里。为什么它落在 ``test/backend/`` 而不是
+import ``tasks/a5_readback.py``：``tasks/`` 不入库（``.gitignore`` 的 ``/tasks/*``），CI 的
+干净检出里那个路径根本不存在，判据必须能独立跑。
 
 runner: ``python -X utf8 manage.py test test.backend.test_gage_sheet_shape``
 """
-import dataclasses
 import hashlib
-import io
 import json
-import re
-import zipfile
 from functools import partial
 from unittest import mock
 
@@ -45,6 +42,7 @@ from apps.gage.gage_summary_sheet import (
     COL_RR_PCT, DATA_FIRST_ROW, SUMMARY_HEADER_COUNT, SUMMARY_SHEET,
     write_cell,
 )
+from test.backend.sheet_readback import readback
 
 # ────────────────────────── 数据形状（固定 seed，自足，不读真实样例） ──────────────────────────
 
@@ -102,139 +100,11 @@ def _build(shape):
     return _BUILD_CACHE[shape]
 
 
-# ────────────────────────── 读回（以 sheet XML 为准，同 a5_readback 口径） ──────────────────────────
-
-_C_TAG = re.compile(r'<c\b[^>]*?(?:/>|>.*?</c>)', re.S)
-_ATTR = re.compile(r'([\w:]+)="([^"]*)"')
-_COL_TAG = re.compile(r'<col\b[^>]*?/?>')
+# ────────────────────────── 版式常量（读回实现见 sheet_readback.py） ──────────────────────────
 
 #: Summary 组框的「中间列」区间与最后一列的列号（都从版式常量推，不写魔法数）
 MID_COL_FROM, MID_COL_TO = 2, SUMMARY_HEADER_COUNT - 1
 LAST_COL_IDX = SUMMARY_HEADER_COUNT
-
-
-def _canonical(obj):
-    return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
-
-
-def _sha(text):
-    return hashlib.sha256(text.encode('utf-8')).hexdigest()
-
-
-def _plain(value):
-    if dataclasses.is_dataclass(value):
-        return {k: _plain(v) for k, v in dataclasses.asdict(value).items()}
-    if isinstance(value, (list, tuple)):
-        return [_plain(v) for v in value]
-    return value
-
-
-def _sheet_cells(xml_text):
-    """``[(row, col_idx, style_id, nonempty)]``，只认 XML，不认 ``<dimension>``。"""
-    out = []
-    for tag in _C_TAG.finditer(xml_text):
-        text = tag.group(0)
-        attrs = dict(_ATTR.findall(text.split('>', 1)[0]))
-        ref = attrs.get('r')
-        if not ref:
-            continue
-        # cell_name_to_coordinates 返回 (列号, 行号)，顺序搞反会让行列域整体错位。
-        col_idx, row = excelize.cell_name_to_coordinates(ref)
-        nonempty = (bool(re.search(r'<v>.*?</v>', text, re.S))
-                    or bool(re.search(r'<f[ >]', text)))
-        out.append((row, col_idx, int(attrs.get('s', 0) or 0), nonempty))
-    return out
-
-
-def _sheet_parts(data):
-    """``{sheet 名: '/xl/worksheets/sheetN.xml'}``，走 workbook.xml + rels 显式映射。"""
-    with zipfile.ZipFile(io.BytesIO(data)) as z:
-        wb_xml = z.read('xl/workbook.xml').decode('utf-8')
-        rels = z.read('xl/_rels/workbook.xml.rels').decode('utf-8')
-    targets = {}
-    for tag in re.finditer(r'<Relationship\b[^>]*?>', rels):
-        attrs = dict(_ATTR.findall(tag.group(0)))
-        targets[attrs.get('Id')] = '/xl/' + attrs.get('Target', '').lstrip('/')
-    parts = {}
-    for tag in re.finditer(r'<sheet\b[^>]*?/?>', wb_xml):
-        attrs = dict(_ATTR.findall(tag.group(0)))
-        rid = (attrs.get('{http://schemas.openxmlformats.org/officeDocument/2006/'
-                         'relationships}id') or attrs.get('r:id'))
-        if attrs.get('name') and rid in targets:
-            parts[attrs['name']] = targets[rid]
-    return parts
-
-
-def _col_widths_from_xml(xml_text):
-    """展开 ``<col min max width>`` 区间为 ``{列字母: 宽度}``（openpyxl 读区间不可靠）。"""
-    widths = {}
-    for tag in _COL_TAG.finditer(xml_text):
-        attrs = dict(_ATTR.findall(tag.group(0)))
-        width, low, high = attrs.get('width'), attrs.get('min'), attrs.get('max')
-        if not (width and low and high):
-            continue
-        for idx in range(int(low), int(high) + 1):
-            widths[excelize.column_number_to_name(idx)] = float(width)
-    return widths
-
-
-def readback(data):
-    """工作簿字节 → ``{'digest', 'body': {sheet: {runs, widths, merges, ...}}}``。
-
-    样式一律取**内容**（``get_style`` 解析后哈希）而不是样式 id：id 会随 ``new_style``
-    调用顺序平移，内容平移不了，判据要的是「每格长什么样」。
-    """
-    handle = excelize.open_reader(data)
-    parts = _sheet_parts(data)
-    with zipfile.ZipFile(io.BytesIO(data)) as z:
-        xml_by_part = {'/' + name: z.read(name).decode('utf-8')
-                       for name in z.namelist()
-                       if re.fullmatch(r'xl/worksheets/sheet\d+\.xml', name)}
-    key_cache = {}
-    sheets = {}
-    try:
-        for name, part in parts.items():
-            xml_text = xml_by_part.get(part)
-            if not xml_text:
-                raise RuntimeError(f'工作表 {name!r} 没映射到 sheet xml，读回会静默变空表')
-            per_row = {}
-            nonempty_seq = []
-            cells = _sheet_cells(xml_text)
-            for row, col_idx, _xml_style, nonempty in cells:
-                ref = f'{excelize.column_number_to_name(col_idx)}{row}'
-                style_id = handle.get_cell_style(name, ref)
-                if style_id not in key_cache:
-                    key_cache[style_id] = _sha(
-                        _canonical(_plain(handle.get_style(style_id))))[:12]
-                key = key_cache[style_id]
-                per_row.setdefault(row, {})[col_idx] = key
-                if nonempty:
-                    nonempty_seq.append((row, col_idx, ref, key))
-            runs = {}
-            for row, mapping in sorted(per_row.items()):
-                segments = []
-                prev_col = prev_key = None
-                for col_idx in sorted(mapping):
-                    key = mapping[col_idx]
-                    if segments and prev_key == key and col_idx == prev_col + 1:
-                        segments[-1][1] = col_idx
-                    else:
-                        segments.append([col_idx, col_idx, key])
-                    prev_col, prev_key = col_idx, key
-                runs[str(row)] = segments
-            sheets[name] = {
-                'cells': len(cells),
-                # 非空格子按 (行, 列) 升序的「列字母 + 样式内容」序列 —— ② 的主判据
-                'nonempty_styles': [[r[2], r[3]] for r in sorted(nonempty_seq)],
-                'runs': runs,
-                'widths': _col_widths_from_xml(xml_text),
-                'merges': sorted([m.get_start_axis(), m.get_end_axis()]
-                                 for m in handle.get_merge_cells(name)),
-            }
-    finally:
-        handle.close()
-    body = {'sheet_order': list(sheets), 'sheets': sheets}
-    return {'digest': _sha(_canonical(body)), 'body': body}
 
 
 # ────────────────────────── 钉住的基线值（改前实测；在钉住的 excelize/numpy 版本下由改前态重建即得） ──────────────────────────
@@ -472,6 +342,59 @@ class GageStyleBatchingTests(SimpleTestCase):
                                   and MID_COL_FROM <= s[0] <= MID_COL_TO], [],
                                  f'第 {row} 行仍在逐格重刷数据带样式')
                 # A / AA 保留逐格：它们的样式与中间列不同，框进区间会被覆盖
+                self.assertIn((1, 1), span)
+                self.assertIn((LAST_COL_IDX, LAST_COL_IDX), span)
+
+    def test_summary_group_edge_rows_get_one_mid_range_delivery(self):
+        """组首/组末行的中间列（B..Z）：一次区间下发覆盖，且除「整行带」与组首的 R&R%
+        这两次既有合法覆盖外，这些格子在整张表里只被下发一次。
+
+        这条补的是 A5 buyoff 段的复审缺口：那一轮把 gage 组首的中间列
+        （``gage_summary_sheet.py`` 里 ``thick_top_mid`` 那一条）与组末的中间列
+        （``thick_bottom_mid`` 那一条）各收成一次 B..Z 区间，但**没有任何判据钉住这个
+        下发形状** —— 区间与逐格在 ``set_cell_style`` 覆盖写下是同一件事，所以把它退回逐格
+        时产物字节 ①、逐格读回 ②、③ 与中间行那条判据全绿、digest 不变（M-e/M-f 实测零红）；
+        而删掉这一整段会让组末掉回带原色（M-g 有连带红），证站点确在被测路径上、改写等价。
+        ⇒ 只能对**下发调用本身的形状**下断言，与判据 ④「同行同 id 不许多次单格下发」同形。
+
+        行域换成组首/组末（中间行由 ``test_summary_middle_rows_get_one_range_and_no_restamp``
+        钉），断三件事：① B..Z 恰有一次整段区间（退回逐格 ⇒ 没有那条区间，红）；
+        ② 除整行带与组首 R&R% 外，中间列内不许出现单格下发（退回逐格 ⇒ 25 个单格，红）；
+        ③ 去掉整行带后每个中间列只被下发一次（删掉 ⇒ 少一次，红）。A / AA 保持逐格。
+        """
+        cell_calls, _ = self._record('narrow')
+        starts, ends, _middles = _group_rows('narrow')
+        self.assertTrue(starts and ends, '形状里没有组首/组末行，判据会空转')
+        self.assertTrue(starts.isdisjoint(ends), '窄表每组须 >1 行，否则首末重合判据失真')
+        for row in sorted(starts | ends):
+            is_first = row in starts
+            span = self._span(cell_calls, SUMMARY_SHEET, row)
+            band = (1, LAST_COL_IDX)               # 整行带：A..AA 一次覆盖，既有的合法写法
+            rr_pct = (COL_RR_PCT, COL_RR_PCT)      # 组首 R&R% 基样式，同循环末尾再覆盖一次
+            with self.subTest(row=row, kind='组首' if is_first else '组末'):
+                # ① 中间列恰好一次整段区间（B..Z）：不是 25 次逐格（M-e/M-f），也不是删掉不写（M-g）
+                self.assertEqual([s for s in span if s == (MID_COL_FROM, MID_COL_TO)],
+                                 [(MID_COL_FROM, MID_COL_TO)],
+                                 f'第 {row} 行中间列的区间下发形状 = {span}')
+                # ② 除整行带与组首 R&R% 外，中间列内不许出现单格重刷
+                singles = [s for s in span if s[0] == s[1]
+                           and MID_COL_FROM <= s[0] <= MID_COL_TO and s != band]
+                if is_first:
+                    self.assertEqual(singles, [rr_pct],
+                                     f'组首行 {row} 只应有一次 R&R% 单格覆盖，实得 {singles}')
+                else:
+                    self.assertEqual(singles, [], f'组末行 {row} 仍在逐格下发中间列：{singles}')
+                # ③ 去掉整行带后，每个中间列被覆盖的次数（组首的 R&R% 那格另有既有的第二次）
+                cover = {col: 0 for col in range(MID_COL_FROM, MID_COL_TO + 1)}
+                for lo, hi in span:
+                    if (lo, hi) == band:
+                        continue
+                    for col in range(max(lo, MID_COL_FROM), min(hi, MID_COL_TO) + 1):
+                        cover[col] += 1
+                for col, n in cover.items():
+                    want = 2 if (is_first and col == COL_RR_PCT) else 1
+                    self.assertEqual(n, want, f'第 {row} 行第 {col} 列去带后被下发 {n} 次（应 {want}）')
+                # A / AA 各自样式与中间列不同（粗左边框 / 粗右边框），保持逐格、绝不框进区间
                 self.assertIn((1, 1), span)
                 self.assertIn((LAST_COL_IDX, LAST_COL_IDX), span)
 
