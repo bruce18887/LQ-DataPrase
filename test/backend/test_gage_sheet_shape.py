@@ -1,0 +1,518 @@
+"""A5 第二段：gage 工作表「下发形状」回归（产物字节 / 逐格读回 / 跨界调用上界 / 冗余样式）。
+
+钉的是 **FFI 下发形状**，不是某一行实现：
+
+① 产物 xlsx 的 sha256 与**改前基线**逐字节相等。可复现性在钉住的依赖版本下成立
+   （``excelize==0.0.9``、``numpy==2.4.6``，见 ``requirements/base.txt:51,44``）：同进程两次 /
+   跨进程两次 / 换构建顺序全部相等；zip 成员的 ``date_time`` 恒为 ``(1980,0,0,0,0,0)``
+   （月份/日都为 0，不是 ``(1980,1,1,...)``），**成员数随形状变**（本文件两份形状是
+   4 文件 14 个 / 2 文件 12 个，别把具体成员数当常量），``docProps/core.xml`` 的时间是
+   excelize 硬编码值 ⇒ 无易变成员。**换 excelize/numpy 版本要先重测这条再改本文件的钉值**。
+② 逐格读回（非空格子的样式内容序列、按行样式游程、列宽、合并区）与基线一致 ——
+   ①红时用这条定位「版式真变了」还是「只是样式编号平移了」；
+③ 列字母换算（每次都要跨 Go 边界）只随**列数**增长，不随行数增长；
+④ 同一行内同一样式的**逐格重复下发**必须收成区间调用（``set_cell_style`` 的
+   top-left / bottom-right 传区间是同一件事的批量写法；``set_col_style`` 是整列语义、
+   会把样式写到 ``<col>`` 级、不等价 ⇒ 另有一条「全程零次 set_col_style」守着）。
+
+读回口径为什么在本文件里重写一份而不 import ``tasks/a5_readback.py``：``tasks/`` 不入库
+（``.gitignore`` 的 ``/tasks/*``），CI 的干净检出里那个路径根本不存在，判据必须能独立跑。
+单元格的存在集合一律以 sheet XML 里真实出现的 ``<c r=".." s="..">`` 为准 —— excelize 写的
+``<dimension ref="A1">`` 是错的，信它就会漏掉「有样式但空值」的格子，而那些格子正是
+「整行刷样式」的落点，漏读等于没有判据。
+
+runner: ``python -X utf8 manage.py test test.backend.test_gage_sheet_shape``
+"""
+import dataclasses
+import hashlib
+import io
+import json
+import re
+import zipfile
+from functools import partial
+from unittest import mock
+
+import excelize
+import numpy as np
+import pandas as pd
+from django.test import SimpleTestCase
+
+from apps.common.constants import NON_NUMERIC_KEYWORDS
+from apps.gage.gage_file_sheet import write_file_sheet
+from apps.gage.gage_legacy_builder import build_gage_summary_excel
+from apps.gage.gage_styles import create_file_sheet_styles
+from apps.gage.gage_summary_sheet import (
+    COL_RR_PCT, DATA_FIRST_ROW, SUMMARY_HEADER_COUNT, SUMMARY_SHEET,
+    write_cell,
+)
+
+# ────────────────────────── 数据形状（固定 seed，自足，不读真实样例） ──────────────────────────
+
+SHAPES = {
+    # 窄表：4 文件 ⇒ 每组 4 行、组内**有中间行**（②④ 的靶形），列号留在单字母区
+    'narrow': dict(n_params=6, n_rows=12, n_files=4, seed=20261028),
+    # 宽表：40 参数 + 3 系统列 = 43 列 ⇒ 文件表列区间 1..51（A..AY），双字母区从
+    # 第 27 列（AA）起、占 27..51；100 行 ⇒ 触达数据行写入上限（last_col = 列数 + 8）
+    'wide': dict(n_params=40, n_rows=100, n_files=2, seed=20261029),
+}
+
+
+def _frame_and_meta(seed, n_params, n_rows):
+    rng = np.random.default_rng(seed)
+    cols = {
+        'Site_No': ['1'] * n_rows,
+        'SW_Bin': [1] * n_rows,
+        'Serial_No': [str(i) for i in range(n_rows)],
+    }
+    params = [f'PAR{ci:04d}' for ci in range(1, n_params + 1)]
+    for ci, name in enumerate(params, start=1):
+        cols[name] = rng.normal(5 + ci, 1.0, n_rows).round(4)
+    meta = {
+        'format': 'CTA8290D', 'tester_id': 'T-PIN', 'program_name': 'pin.dll',
+        'start_time': '2026-01-01 00:00:00',
+        'units': {name: 'V' for name in params},
+        'mins': {name: '0' for name in params},
+        'maxs': {name: str(6 * (ci + 1)) for ci, name in enumerate(params)},
+    }
+    return pd.DataFrame(cols), meta
+
+
+def _file_info(shape, idx=1, n_rows=None, n_params=None):
+    cfg = SHAPES[shape]
+    df, meta = _frame_and_meta(
+        cfg['seed'] + idx,
+        cfg['n_params'] if n_params is None else n_params,
+        cfg['n_rows'] if n_rows is None else n_rows)
+    return {'filename': f'pin{idx}.csv_S{idx}', 'sheet_name': f'pin{idx}_S{idx}',
+            'df': df, 'metadata': meta}
+
+
+def _datasets(shape):
+    cfg = SHAPES[shape]
+    return [_file_info(shape, idx) for idx in range(1, cfg['n_files'] + 1)]
+
+
+_BUILD_CACHE = {}
+
+
+def _build(shape):
+    """同一形状只建一次（产物字节只由输入决定；缓存与逐例重建由 ① 自己钉住等价）。"""
+    if shape not in _BUILD_CACHE:
+        _BUILD_CACHE[shape] = build_gage_summary_excel(_datasets(shape))
+    return _BUILD_CACHE[shape]
+
+
+# ────────────────────────── 读回（以 sheet XML 为准，同 a5_readback 口径） ──────────────────────────
+
+_C_TAG = re.compile(r'<c\b[^>]*?(?:/>|>.*?</c>)', re.S)
+_ATTR = re.compile(r'([\w:]+)="([^"]*)"')
+_COL_TAG = re.compile(r'<col\b[^>]*?/?>')
+
+#: Summary 组框的「中间列」区间与最后一列的列号（都从版式常量推，不写魔法数）
+MID_COL_FROM, MID_COL_TO = 2, SUMMARY_HEADER_COUNT - 1
+LAST_COL_IDX = SUMMARY_HEADER_COUNT
+
+
+def _canonical(obj):
+    return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+
+
+def _sha(text):
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+def _plain(value):
+    if dataclasses.is_dataclass(value):
+        return {k: _plain(v) for k, v in dataclasses.asdict(value).items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
+    return value
+
+
+def _sheet_cells(xml_text):
+    """``[(row, col_idx, style_id, nonempty)]``，只认 XML，不认 ``<dimension>``。"""
+    out = []
+    for tag in _C_TAG.finditer(xml_text):
+        text = tag.group(0)
+        attrs = dict(_ATTR.findall(text.split('>', 1)[0]))
+        ref = attrs.get('r')
+        if not ref:
+            continue
+        # cell_name_to_coordinates 返回 (列号, 行号)，顺序搞反会让行列域整体错位。
+        col_idx, row = excelize.cell_name_to_coordinates(ref)
+        nonempty = (bool(re.search(r'<v>.*?</v>', text, re.S))
+                    or bool(re.search(r'<f[ >]', text)))
+        out.append((row, col_idx, int(attrs.get('s', 0) or 0), nonempty))
+    return out
+
+
+def _sheet_parts(data):
+    """``{sheet 名: '/xl/worksheets/sheetN.xml'}``，走 workbook.xml + rels 显式映射。"""
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        wb_xml = z.read('xl/workbook.xml').decode('utf-8')
+        rels = z.read('xl/_rels/workbook.xml.rels').decode('utf-8')
+    targets = {}
+    for tag in re.finditer(r'<Relationship\b[^>]*?>', rels):
+        attrs = dict(_ATTR.findall(tag.group(0)))
+        targets[attrs.get('Id')] = '/xl/' + attrs.get('Target', '').lstrip('/')
+    parts = {}
+    for tag in re.finditer(r'<sheet\b[^>]*?/?>', wb_xml):
+        attrs = dict(_ATTR.findall(tag.group(0)))
+        rid = (attrs.get('{http://schemas.openxmlformats.org/officeDocument/2006/'
+                         'relationships}id') or attrs.get('r:id'))
+        if attrs.get('name') and rid in targets:
+            parts[attrs['name']] = targets[rid]
+    return parts
+
+
+def _col_widths_from_xml(xml_text):
+    """展开 ``<col min max width>`` 区间为 ``{列字母: 宽度}``（openpyxl 读区间不可靠）。"""
+    widths = {}
+    for tag in _COL_TAG.finditer(xml_text):
+        attrs = dict(_ATTR.findall(tag.group(0)))
+        width, low, high = attrs.get('width'), attrs.get('min'), attrs.get('max')
+        if not (width and low and high):
+            continue
+        for idx in range(int(low), int(high) + 1):
+            widths[excelize.column_number_to_name(idx)] = float(width)
+    return widths
+
+
+def readback(data):
+    """工作簿字节 → ``{'digest', 'body': {sheet: {runs, widths, merges, ...}}}``。
+
+    样式一律取**内容**（``get_style`` 解析后哈希）而不是样式 id：id 会随 ``new_style``
+    调用顺序平移，内容平移不了，判据要的是「每格长什么样」。
+    """
+    handle = excelize.open_reader(data)
+    parts = _sheet_parts(data)
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        xml_by_part = {'/' + name: z.read(name).decode('utf-8')
+                       for name in z.namelist()
+                       if re.fullmatch(r'xl/worksheets/sheet\d+\.xml', name)}
+    key_cache = {}
+    sheets = {}
+    try:
+        for name, part in parts.items():
+            xml_text = xml_by_part.get(part)
+            if not xml_text:
+                raise RuntimeError(f'工作表 {name!r} 没映射到 sheet xml，读回会静默变空表')
+            per_row = {}
+            nonempty_seq = []
+            cells = _sheet_cells(xml_text)
+            for row, col_idx, _xml_style, nonempty in cells:
+                ref = f'{excelize.column_number_to_name(col_idx)}{row}'
+                style_id = handle.get_cell_style(name, ref)
+                if style_id not in key_cache:
+                    key_cache[style_id] = _sha(
+                        _canonical(_plain(handle.get_style(style_id))))[:12]
+                key = key_cache[style_id]
+                per_row.setdefault(row, {})[col_idx] = key
+                if nonempty:
+                    nonempty_seq.append((row, col_idx, ref, key))
+            runs = {}
+            for row, mapping in sorted(per_row.items()):
+                segments = []
+                prev_col = prev_key = None
+                for col_idx in sorted(mapping):
+                    key = mapping[col_idx]
+                    if segments and prev_key == key and col_idx == prev_col + 1:
+                        segments[-1][1] = col_idx
+                    else:
+                        segments.append([col_idx, col_idx, key])
+                    prev_col, prev_key = col_idx, key
+                runs[str(row)] = segments
+            sheets[name] = {
+                'cells': len(cells),
+                # 非空格子按 (行, 列) 升序的「列字母 + 样式内容」序列 —— ② 的主判据
+                'nonempty_styles': [[r[2], r[3]] for r in sorted(nonempty_seq)],
+                'runs': runs,
+                'widths': _col_widths_from_xml(xml_text),
+                'merges': sorted([m.get_start_axis(), m.get_end_axis()]
+                                 for m in handle.get_merge_cells(name)),
+            }
+    finally:
+        handle.close()
+    body = {'sheet_order': list(sheets), 'sheets': sheets}
+    return {'digest': _sha(_canonical(body)), 'body': body}
+
+
+# ────────────────────────── 钉住的基线值（改前实测；在钉住的 excelize/numpy 版本下由改前态重建即得） ──────────────────────────
+
+PIN_SHA256 = {
+    'narrow': '543d2b4fcbfdfe03453e0bbe4dece56ad0f0d6ba34da9d383c7e75523ca22627',
+    'wide': 'eacd2e546736523e2388bd2c519653839732c0366f7e27aa226e5f4d9db21991',
+}
+PIN_READBACK_DIGEST = {
+    'narrow': '3ec1576ac4840bb0329201af3ef916bc112d57eef65667e4916569f89c4c97ed',
+    'wide': '926eb895446bdd9851423165fdd660bc1270126bfb8541151a102a3137ef1fa7',
+}
+# Summary 的列宽（XML 口径，autofit 的落点）：N 列没有表头文字，故不在表里
+PIN_SUMMARY_WIDTHS = {
+    'A': 13.5, 'AA': 10.5, 'B': 11.5, 'C': 11.5, 'D': 8.0, 'E': 10.5, 'F': 11.5,
+    'G': 8.0, 'H': 9.5, 'I': 8.5, 'J': 9.5, 'K': 9.5, 'L': 8.5, 'M': 9.5, 'O': 9.5,
+    'P': 8.5, 'Q': 8.5, 'R': 9.5, 'S': 9.5, 'T': 10.5, 'U': 11.5, 'V': 15.5,
+    'W': 17.5, 'X': 8.0, 'Y': 8.0, 'Z': 12.5,
+}
+# 按行样式游程：组首（被 R&R% 打断）/ 组中（数据带原色）/ 组末 / Average 行
+PIN_SUMMARY_RUNS = {
+    '12': [[1, 1, '7c769b4d36f2'], [2, 24, 'c81a9ffb185d'], [25, 25, '7e7eb6488e04'],
+           [26, 26, 'c81a9ffb185d'], [27, 27, '18bbe182e247']],
+    '13': [[1, 1, 'cdafd1863e46'], [2, 26, '753007a5dbf4'], [27, 27, 'a6aa7cace69d']],
+    '15': [[1, 1, '7b2c3d093d58'], [2, 26, 'c4b82a7556f8'], [27, 27, 'bdec6f9bacd8']],
+    '36': [[1, 1, 'cdafd1863e46'], [22, 23, '55561a4462a0']],
+}
+# 第一张文件表（narrow，last_col=17）的表头带（8）、灰带（13）、统计带首行（115）逐行游程。
+# 统计带这一批从逐格收成两段区间下发（B..G 灰底 / H..last_col 边框），读回游程与改前**逐字
+# 相同** ⇒ 钉值不变。这张表本身不是承重判据（它的红必然连带 ② 的 digest 红），用途是
+# ①②红时把偏差定位到具体行；真正钉「同行同 id 不许多次下发」的是判据 ④。
+PIN_FILE_RUNS = {
+    '8': [[1, 1, '55561a4462a0'], [8, 17, '7cad170b9655']],
+    '13': [[2, 17, '2efcffe74a11']],
+    '115': [[1, 1, '55561a4462a0'], [2, 7, '419b4773c5fb'], [8, 17, 'e50acb36f53a']],
+}
+
+
+def _group_rows(shape):
+    """``(组首行集合, 组末行集合, 组内中间行集合)``；每组 n_files 行，自 DATA_FIRST_ROW 起。"""
+    cfg = SHAPES[shape]
+    n_files, n_params = cfg['n_files'], cfg['n_params']
+    starts, ends, middles = set(), set(), set()
+    for gi in range(n_params):
+        start = DATA_FIRST_ROW + gi * n_files
+        end = start + n_files - 1
+        starts.add(start)
+        ends.add(end)
+        middles.update(range(start + 1, end))
+    return starts, ends, middles
+
+
+# ────────────────────────── ① 产物字节 ──────────────────────────
+
+
+class GageArtifactBytesTests(SimpleTestCase):
+    """产物 xlsx 逐字节等于改前基线：区间化与预计算不许动一个字节。"""
+
+    def test_bytes_equal_pinned_baseline(self):
+        for shape in SHAPES:
+            with self.subTest(shape=shape):
+                first = hashlib.sha256(_build(shape)).hexdigest()
+                again = hashlib.sha256(
+                    build_gage_summary_excel(_datasets(shape))).hexdigest()
+                # 判据自己先要可复现：同一输入、同进程内两次构建必须同串
+                self.assertEqual(first, again, f'{shape} 两次构建字节不同')
+                self.assertEqual(first, PIN_SHA256[shape],
+                                 f'{shape} 产物偏离改前基线 ⇒ 版式真变了')
+
+
+# ────────────────────────── ② 逐格读回 ──────────────────────────
+
+
+class GageReadbackEquivalenceTests(SimpleTestCase):
+    """逐格读回与基线一致：非空格样式序列、按行游程、列宽、合并区。"""
+
+    def test_full_readback_digest(self):
+        for shape in SHAPES:
+            with self.subTest(shape=shape):
+                self.assertEqual(readback(_build(shape))['digest'],
+                                 PIN_READBACK_DIGEST[shape])
+
+    def test_summary_row_style_runs_are_the_pinned_runs(self):
+        rb = readback(_build('narrow'))
+        runs = rb['body']['sheets'][SUMMARY_SHEET]['runs']
+        for row in PIN_SUMMARY_RUNS:
+            with self.subTest(row=row):
+                self.assertEqual(runs[row], PIN_SUMMARY_RUNS[row])
+
+    def test_file_sheet_row_style_runs_are_the_pinned_runs(self):
+        """PIN_FILE_RUNS 从「只被自检扫过形状」变成真判据：逐行比对实测读回游程。"""
+        sheet = _datasets('narrow')[0]['sheet_name']
+        runs = readback(_build('narrow'))['body']['sheets'][sheet]['runs']
+        for row in PIN_FILE_RUNS:
+            with self.subTest(row=row):
+                self.assertEqual(runs[row], PIN_FILE_RUNS[row])
+
+    def test_group_first_row_run_is_split_by_rr_pct(self):
+        """组首行：A 粗左边 / 中间列粗顶边 / Y 是 R&R% 基样式 / Z 粗顶边 / AA 粗右边 = 5 段。
+
+        这条钉住「按游程切段、别整行框」——把 A 或 AA 也框进区间会把粗边框覆盖掉。
+        """
+        rb = readback(_build('narrow'))
+        runs = rb['body']['sheets'][SUMMARY_SHEET]['runs']
+        starts, _ends, _middles = _group_rows('narrow')
+        first = str(min(starts))
+        seg = runs[first]
+        self.assertEqual(len(seg), 5, f'组首行 {first} 的游程 = {seg}')
+        self.assertEqual(seg[0][:2], [1, 1])                     # A 单独一段
+        self.assertEqual(seg[1][0], MID_COL_FROM)                 # 中间列起
+        self.assertEqual(seg[2][0], COL_RR_PCT)                   # 被 R&R% 打断
+        self.assertEqual(seg[3], [COL_RR_PCT + 1, COL_RR_PCT + 1, seg[1][2]])
+        self.assertEqual(seg[4][:2], [LAST_COL_IDX, LAST_COL_IDX])
+        self.assertNotEqual(seg[2][2], seg[1][2], 'R&R% 格的样式必须与中间列不同')
+
+    def test_middle_group_row_runs_keep_side_borders_out_of_the_range(self):
+        """组内中间行：A 粗左边 + 中间列一整段（数据带原色）+ AA 粗右边 = 3 段游程。"""
+        rb = readback(_build('narrow'))
+        runs = rb['body']['sheets'][SUMMARY_SHEET]['runs']
+        _starts, _ends, middles = _group_rows('narrow')
+        for row in sorted(middles)[:3]:
+            seg = runs[str(row)]
+            self.assertEqual(len(seg), 3, f'第 {row} 行游程 = {seg}')
+            self.assertEqual(seg[0][:2], [1, 1])
+            self.assertEqual(seg[1][:2], [MID_COL_FROM, MID_COL_TO])
+            self.assertEqual(seg[2][:2], [LAST_COL_IDX, LAST_COL_IDX])
+
+    def test_summary_column_widths(self):
+        rb = readback(_build('narrow'))
+        self.assertEqual(rb['body']['sheets'][SUMMARY_SHEET]['widths'],
+                         PIN_SUMMARY_WIDTHS)
+
+
+# ────────────────────────── ③ 跨界调用上界 ──────────────────────────
+
+#: 每一列被换算字母的次数上界：一张表 + 列头 + 统计行，全是**按列**的常数趟数。
+#: 数据带最多 100 行 × 每列一次的那条通路绝不能进这个式子（它才是本次要消掉的）。
+LETTER_CALL_BOUND_PER_COLUMN = 5
+
+
+class GageColumnLetterBoundaryTests(SimpleTestCase):
+    """列字母换算只随列数增长：只要它随行数×列数增长就必须红。"""
+
+    def _count(self, shape, n_rows, n_params=None):
+        f = excelize.new_file()
+        seen = []
+        origin = excelize.column_number_to_name
+
+        def spy(col):
+            seen.append(col)
+            return origin(col)
+
+        try:
+            styles = create_file_sheet_styles(f)
+            info = _file_info(shape, n_rows=n_rows, n_params=n_params)
+            with mock.patch.object(excelize, 'column_number_to_name', spy):
+                write_file_sheet(f, info, False, NON_NUMERIC_KEYWORDS,
+                                 styles, partial(write_cell, f))
+            return len(info['df'].columns), len(seen)
+        finally:
+            f.close()
+
+    def test_calls_are_bounded_by_column_count(self):
+        ncols, _ = self._count('wide', 8)
+        for n_rows in (8, SHAPES['wide']['n_rows'], 100):
+            count_ncols, calls = self._count('wide', n_rows)
+            self.assertEqual(count_ncols, ncols)
+            with self.subTest(n_rows=n_rows, ncols=ncols):
+                self.assertLessEqual(
+                    calls, LETTER_CALL_BOUND_PER_COLUMN * ncols,
+                    f'{n_rows} 行 × {ncols} 列换算了 {calls} 次字母 ⇒ 表没建在循环外')
+
+    def test_row_count_does_not_add_calls(self):
+        _ncols, few = self._count('wide', 8)
+        _ncols2, many = self._count('wide', SHAPES['wide']['n_rows'])
+        self.assertEqual(few, many, '行数从 8 涨到 100 就多算了列字母 ⇒ 仍是逐格换算')
+
+
+# ────────────────────────── ④ 冗余逐格样式 ──────────────────────────
+
+
+class GageStyleBatchingTests(SimpleTestCase):
+    """同一行内同一样式的逐格重复下发必须收成区间调用（覆盖相对次序不变）。"""
+
+    def _record(self, shape):
+        """跑一次完整生成，录下所有 ``set_cell_style`` / ``set_col_style`` 下发。"""
+        cell_calls, col_calls = [], []
+        origin_cell = excelize.File.set_cell_style
+        origin_col = excelize.File.set_col_style
+
+        def spy_cell(self, sheet, top_left, bottom_right, style_id):
+            cell_calls.append((sheet, top_left, bottom_right, style_id))
+            return origin_cell(self, sheet, top_left, bottom_right, style_id)
+
+        def spy_col(self, sheet, columns, style_id):
+            col_calls.append((sheet, columns, style_id))
+            return origin_col(self, sheet, columns, style_id)
+
+        with mock.patch.object(excelize.File, 'set_cell_style', spy_cell), \
+                mock.patch.object(excelize.File, 'set_col_style', spy_col):
+            build_gage_summary_excel(_datasets(shape))
+        return cell_calls, col_calls
+
+    @staticmethod
+    def _span(calls, sheet, row):
+        """该 sheet 上覆盖了 ``row`` 的调用，摊成 ``(首列, 末列)`` 列表。"""
+        out = []
+        for name, top, bottom, _style in calls:
+            if name != sheet:
+                continue
+            col_top, row_top = excelize.cell_name_to_coordinates(top)
+            col_bot, row_bot = excelize.cell_name_to_coordinates(bottom)
+            if row_top <= row <= row_bot:
+                out.append((col_top, col_bot))
+        return out
+
+    def test_whole_build_never_falls_back_to_whole_column_style(self):
+        """``set_col_style`` 是整列语义（写 ``<col>`` 级样式），与区间下发不等价。"""
+        _cells, cols = self._record('narrow')
+        self.assertEqual(cols, [], f'出现了整列样式下发：{cols}')
+
+    def test_summary_middle_rows_get_one_range_and_no_restamp(self):
+        cell_calls, _ = self._record('narrow')
+        _starts, _ends, middles = _group_rows('narrow')
+        self.assertTrue(middles, '形状里没有组内中间行，这条判据会是空的')
+        for row in sorted(middles):
+            span = self._span(cell_calls, SUMMARY_SHEET, row)
+            with self.subTest(row=row):
+                # 中间列（B..Z）恰好一次整段区间下发：既不是 25 次逐格，也不是删掉不写
+                self.assertEqual([s for s in span if s == (MID_COL_FROM, MID_COL_TO)],
+                                 [(MID_COL_FROM, MID_COL_TO)],
+                                 f'第 {row} 行的中间列下发形状 = {span}')
+                # 与数据带同 id 的逐格重复下发必须为 0（带本身是 1..27 的整行区间）
+                self.assertEqual([s for s in span if s[0] == s[1]
+                                  and MID_COL_FROM <= s[0] <= MID_COL_TO], [],
+                                 f'第 {row} 行仍在逐格重刷数据带样式')
+                # A / AA 保留逐格：它们的样式与中间列不同，框进区间会被覆盖
+                self.assertIn((1, 1), span)
+                self.assertIn((LAST_COL_IDX, LAST_COL_IDX), span)
+
+    def test_file_sheet_style_bands_are_ranges(self):
+        """表头带（8-12）、灰带（13）、统计带（115-128）都零逐格，且分段与读回游程同形。"""
+        cell_calls, _ = self._record('narrow')
+        sheet = _datasets('narrow')[0]['sheet_name']
+        last_col = len(_datasets('narrow')[0]['df'].columns) + 8
+        singles = []
+        for row in list(range(8, 13)) + [13] + list(range(115, 129)):
+            singles.extend([s for s in self._span(cell_calls, sheet, row)
+                            if s[0] == s[1] and s[0] >= 2])
+        self.assertEqual(singles, [], f'{sheet} 的表头带/灰带/统计带仍在逐格下发：{singles}')
+        for row in range(8, 13):
+            self.assertIn((8, last_col), self._span(cell_calls, sheet, row), row)
+        self.assertIn((2, last_col), self._span(cell_calls, sheet, 13))
+        # 统计带每行恰好两段：灰底 B..G、边框 H..last_col。两段的样式内容不同（读回
+        # PIN_FILE_RUNS['115'] 的三个游程即证）⇒ 不许并成一段，并了就把灰底覆盖了。
+        for row in range(115, 129):
+            span = self._span(cell_calls, sheet, row)
+            self.assertIn((2, 7), span, f'第 {row} 行的灰底段没收成区间：{span}')
+            self.assertIn((8, last_col), span, f'第 {row} 行的边框段没收成区间：{span}')
+
+
+# ────────────────────────── 钉值自检（防基线表退化成永真） ──────────────────────────
+
+
+class GagePinsLookRealTests(SimpleTestCase):
+    """基线常量表本身不许是空的或占位值 —— 否则上面几条判据全都恒绿。"""
+
+    def test_pins_are_filled(self):
+        for table in (PIN_SHA256, PIN_READBACK_DIGEST):
+            self.assertNotIn('PLACEHOLDER', json.dumps(table))
+            for shape in SHAPES:
+                self.assertRegex(table[shape], r'^[0-9a-f]{64}$')
+        self.assertGreaterEqual(len(PIN_SUMMARY_WIDTHS), LAST_COL_IDX - 5)
+        self.assertTrue(all(v > 0 for v in PIN_SUMMARY_WIDTHS.values()))
+        self.assertNotIn('PLACEHOLDER', json.dumps(PIN_SUMMARY_WIDTHS))
+        for table in (PIN_SUMMARY_RUNS, PIN_FILE_RUNS):
+            for row, segs in table.items():
+                self.assertTrue(segs, f'第 {row} 行的游程基线是空的')
+                for seg in segs:
+                    self.assertLessEqual(seg[0], seg[1])
+                    self.assertRegex(seg[2], r'^[0-9a-f]{12}$')
