@@ -66,14 +66,27 @@ def write_file_sheet(f, file_info, ignore_no_limit, non_numeric_keywords,
     set_cell(sheet_name, "A12", "High Limits")
     set_cell(sheet_name, "H8", "Data_Cnt")
 
+    # `excelize.column_number_to_name` 本身也是一次跨 Go 边界的调用，而下面几个循环的
+    # 形状是「样式带行数 × 列数」与「数据行数 × 列数」——逐格换算会把调用数乘到
+    # 「行数 × 列数」的量级。承重的是 `test/backend/test_gage_sheet_shape.py` 里
+    # `GageColumnLetterBoundaryTests` 那条 spy（判据在库内、换机器可重跑），本注释不写
+    # 某个夹具的本机实测次数。本表用到的列区间是连续的 1..last_col，进循环前
+    # 一次算好一张表、循环内按下标取（下标 = 列号，0 位留空）。表只活在本函数的栈上：
+    # 不做模块级缓存、不引入 LRU —— 列区间由 data_header 决定，缓存在调用方反而是错的。
+    last_col = len(data_header) + 8
+    col_letters = [None] + [excelize.column_number_to_name(col)
+                            for col in range(1, last_col + 1)]
+
+    # 行 8-12 × 列 8..last_col 是同一个 header_block_style 的实心矩形 ⇒ 每行一次区间下发。
+    # 原先除逐格外还对 H8 又刷了一次同一个样式，而 H8 本来就被这个区间盖住 ⇒ 删。
+    band_first, band_last = col_letters[8], col_letters[last_col]
     for row in range(8, 13):
-        for col in range(8, len(data_header) + 9):
-            cl = excelize.column_number_to_name(col)
-            f.set_cell_style(sheet_name, f"{cl}{row}", f"{cl}{row}", header_block_style)
-    f.set_cell_style(sheet_name, "H8", "H8", header_block_style)
+        f.set_cell_style(sheet_name, f"{band_first}{row}", f"{band_last}{row}",
+                         header_block_style)
 
     # Write test item headers (columns 9+)
-    cl_h = excelize.column_number_to_name(8)
+    # 这里与下面「统计值」那一处都是每列一次、不是行数乘出来的热点，保留直调，
+    # 不为了「统一」去改它们的形状（表已经建好，改了也不省跨边界的趟数量级）。
     for test_idx, col_name in enumerate(data_header):
         col_letter = excelize.column_number_to_name(test_idx + 9)
         set_cell(sheet_name, f"{col_letter}8", col_name)
@@ -85,12 +98,8 @@ def write_file_sheet(f, file_info, ignore_no_limit, non_numeric_keywords,
         set_cell(sheet_name, f"{col_letter}12", high_raw if high_raw not in (None, '') else 'N/A')
 
     # Data header row 13 (gray fill)
-    for col in range(2, 8):
-        cl = excelize.column_number_to_name(col)
-        f.set_cell_style(sheet_name, f"{cl}13", f"{cl}13", gray_style)
-    for col in range(8, len(data_header) + 9):
-        cl = excelize.column_number_to_name(col)
-        f.set_cell_style(sheet_name, f"{cl}13", f"{cl}13", gray_style)
+    # 列 2..7 与 8..last_col 用的是同一个 gray_style 且相邻无缺口 ⇒ 一行一次区间。
+    f.set_cell_style(sheet_name, f"{col_letters[2]}13", f"{band_last}13", gray_style)
 
     set_cell(sheet_name, "B13", "Site #")
     set_cell(sheet_name, "C13", "Serial #")
@@ -136,7 +145,7 @@ def write_file_sheet(f, file_info, ignore_no_limit, non_numeric_keywords,
             try:
                 val = row_data[col_name]
                 if pd.notna(val):
-                    col_letter = excelize.column_number_to_name(test_idx + 9)
+                    col_letter = col_letters[test_idx + 9]
                     set_cell(sheet_name, f"{col_letter}{excel_row}", float(val))
             except (ValueError, TypeError):
                 pass
@@ -145,13 +154,16 @@ def write_file_sheet(f, file_info, ignore_no_limit, non_numeric_keywords,
 
     # Pre-calculated statistics rows (115-128) instead of formulas
 
+    # 统计带（115–128）：段数照**读回快照**定 —— 这 14 行的游程是「B..G 灰底 / H..last_col
+    # 边框」两段实心矩形（A 列两版都不下发）⇒ 每行两次区间下发替代 6+(last_col-7) 次逐格。
+    # 两段格子集合互不相交、样式 id 不同（所以不许并成一段），下发相对次序（先灰底后边框）与
+    # 原逐格一致 ⇒ 没有一格被后写的段盖到。判据：test_gage_sheet_shape 的 ②（逐行游程）与 ④（分段）。
+    stats_gray_first, stats_gray_last = col_letters[2], col_letters[7]
     for row in range(115, 129):
-        for col in range(2, 8):
-            cl = excelize.column_number_to_name(col)
-            f.set_cell_style(sheet_name, f"{cl}{row}", f"{cl}{row}", stats_gray_style)
-        for col in range(8, len(data_header) + 9):
-            cl = excelize.column_number_to_name(col)
-            f.set_cell_style(sheet_name, f"{cl}{row}", f"{cl}{row}", stats_border_style)
+        f.set_cell_style(sheet_name, f"{stats_gray_first}{row}",
+                         f"{stats_gray_last}{row}", stats_gray_style)
+        f.set_cell_style(sheet_name, f"{band_first}{row}", f"{band_last}{row}",
+                         stats_border_style)
 
     stat_labels = [
         (115, "Low Limit"), (116, "High Limit"), (117, "Min"), (118, "Max"),

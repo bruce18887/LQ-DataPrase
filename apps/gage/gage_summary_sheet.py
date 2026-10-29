@@ -29,6 +29,10 @@ SUMMARY_HEADER_COUNT = len(SUMMARY_HEADERS)
 
 # Cache last column letter for merge operations
 LAST_COL = excelize.column_number_to_name(SUMMARY_HEADER_COUNT)
+# 组框的「中间列」区间端点（B..Z，即 2 .. SUMMARY_HEADER_COUNT-1）：区间下发要在行循环
+# 之外就有这两个字母，别把 25 次跨 Go 边界的换算留在每行里。
+MID_FIRST_COL = excelize.column_number_to_name(2)
+MID_LAST_COL = excelize.column_number_to_name(SUMMARY_HEADER_COUNT - 1)
 
 COL_V = 22
 COL_W = 23
@@ -245,12 +249,13 @@ def format_summary_sheet(f, group_info, last_data_row, styles):
                          f"{LAST_COL}{group_start}", styles.thick_top_right)
 
         for row_idx in range(group_start + 1, group_end):
+            # 覆盖次序仍是「带 → A → 中间列 → AA」，只是中间列的 25 次逐格下发（写的
+            # 就是上面那条整行带已经写过的 styles.data）收成一次区间：同一行同一样式、
+            # 同一批格子，最后写生效的那一格都没变。A / AA 各自样式不同，保持逐格。
             f.set_cell_style(SUMMARY_SHEET, f"A{row_idx}", f"A{row_idx}",
                              styles.thick_left)
-            for col_num in range(2, SUMMARY_HEADER_COUNT):
-                cl = excelize.column_number_to_name(col_num)
-                f.set_cell_style(SUMMARY_SHEET, f"{cl}{row_idx}", f"{cl}{row_idx}",
-                                 styles.data)
+            f.set_cell_style(SUMMARY_SHEET, f"{MID_FIRST_COL}{row_idx}",
+                             f"{MID_LAST_COL}{row_idx}", styles.data)
             f.set_cell_style(SUMMARY_SHEET, f"{LAST_COL}{row_idx}",
                              f"{LAST_COL}{row_idx}", styles.thick_right)
 
