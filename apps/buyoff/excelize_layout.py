@@ -114,6 +114,12 @@ def build_buyoff_form(f, role_mapping, common_items, all_stats, datasets, ordere
     # ── Layout setup ──
     test_col_start = 3  # A=section header, B=stat label, C+=test items
     last_col_letter = excelize.column_number_to_name(test_col_start - 1 + len(common_items))
+    # 统计带的列字母表：`column_number_to_name` 每调一次都要跨一次 Go 边界
+    # （实测实现见 excelize.py:6736），而统计带是「角色 × 14 行 × 参数」的三重循环。
+    # 进循环前一次算表、循环内按下标取 ⇒ 换算次数只随**列数**增长，不再随行数增长。
+    # 取值与原逐格换算逐字相同（同一个函数、同一批列号，从 test_col_start 起）。
+    col_letters = [excelize.column_number_to_name(test_col_start + off)
+                   for off in range(len(common_items))]
 
     # Get units
     test_units = {}
@@ -176,32 +182,66 @@ def build_buyoff_form(f, role_mapping, common_items, all_stats, datasets, ordere
             f.set_cell_style(sheet_name, f"B{row_idx}", f"B{row_idx}", stat_label_style)
 
             # Cols C+: data for each test item
-            for c_num, param in enumerate(common_items, start=test_col_start):
-                cl = excelize.column_number_to_name(c_num)
+            # 样式按「连续同 id 的游程」成段下发。`set_cell_style(左上, 右下, id)` 是
+            # **覆盖写**、不 append/merge（excelize.py:5432-5434），所以一段区间与这段里
+            # 逐格同 id 调用是同一件事。等价性三条（由 test/backend/test_buyoff_sheet_shape.py
+            # 逐条钉住：读回游程 / 下发区间 / 值-样式先后次序）：
+            #   集合 —— 游程划分恰好覆盖本行的每个数据格，一格不多一格不少；
+            #   id   —— 段内 id 全相同（段就是按 id 变化切的），单格段仍与现状同一调用；
+            #   次序 —— 先只判定这一格的「值 + 样式」，不落 FFI；游程在**下一格的值写下去
+            #           之前**收尾 ⇒ 某段的下发时机正是「段末那格的值之后、下一格的值之前」，
+            #           与原「值(c)→样式(c)→值(c+1)」逐字同一相对次序（拆成「先写完值再写
+            #           样式」两趟遍历就会破坏这一条，测试里有对应的次序判据）。
+            #           本行 C.. 列域之后没有第二次样式写：B 列的行名（stat_label_style）在本段
+            #           之上单独下发、A 列的分区名（section_style）在合并区段时单独下发，两者都
+            #           不在这个列域内；Result 区又是另外一批行 ⇒ 「最后一写生效」的那一写
+            #           没有被挪到别处。
+            run_start = None   # 未下发游程的起始下标（common_items 的 enumerate 下标）
+            run_style = None
+            for idx, param in enumerate(common_items):
+                cl = col_letters[idx]
                 cell = f"{cl}{row_idx}"
 
+                # 先只判定「这一格写什么值 + 用哪个样式」，一次 FFI 都不发；
+                # 值的落盘挪到游程收尾之后（见上面「次序」那条等价性）。
                 if is_limit:
                     table = 'mins' if stat_name == "Lower Limit" else 'maxs'
                     meta = ds.get('metadata') or {}
                     raw = meta.get(table, {}).get(param)
                     if raw is None or (isinstance(raw, str) and not raw.strip()):
-                        _write_na(f, sheet_name, cell, na_style)
+                        # 「无法判定」＝ 静态 'N/A' + 浅灰底（与 _write_na 同一语义，
+                        # 只是样式改由游程统一下发）
+                        value, style_id = NA, na_style
                     else:
                         # 数值限值写成 float（而非原字符串）：Result 公式要对这两格做算术。
                         parsed = parse_limit(raw)
-                        f.set_cell_value(sheet_name, cell, parsed if parsed is not None else raw)
-                        f.set_cell_style(sheet_name, cell, cell, data_style)
+                        value, style_id = (parsed if parsed is not None else raw), data_style
                 elif param in all_stats.get(role_name, {}):
                     val = all_stats[role_name][param].get(stat_key)
                     if val is None or val == NA:
-                        _write_na(f, sheet_name, cell, na_style)
+                        value, style_id = NA, na_style
                     else:
                         if isinstance(val, float):
                             val = round(val, 6)
-                        f.set_cell_value(sheet_name, cell, val)
-                        f.set_cell_style(sheet_name, cell, cell, data_style)
+                        value, style_id = val, data_style
                 else:
-                    f.set_cell_style(sheet_name, cell, cell, data_style)
+                    # 三分支的最后一条（else：该角色没有这个参数的 stats）：只有样式、不写值。
+                    # 三个分支可能写出的值里没有 None
+                    # （val is None 已在上面归成 'N/A'；parsed is None 时写的是 raw），
+                    # 所以 None 可以安全地当「这一格不写值」的哨兵。
+                    value, style_id = None, data_style
+
+                if run_start is None:
+                    run_start, run_style = idx, style_id
+                elif style_id != run_style:
+                    f.set_cell_style(sheet_name, f"{col_letters[run_start]}{row_idx}",
+                                     f"{col_letters[idx - 1]}{row_idx}", run_style)
+                    run_start, run_style = idx, style_id
+                if value is not None:
+                    f.set_cell_value(sheet_name, cell, value)
+            if run_start is not None:
+                f.set_cell_style(sheet_name, f"{col_letters[run_start]}{row_idx}",
+                                 f"{col_letters[-1]}{row_idx}", run_style)
 
             row_idx += 1
 
