@@ -256,13 +256,28 @@ class JobCancelView(APIView):
 
     def post(self, request, pk):
         job = get_object_or_404(Job, pk=pk, owner=request.user)
-        if job.status != 'pending':
-            # running 的作业已经在别的进程里算，杀掉它只会留下一半个文件
-            return error_response('not_cancellable',
-                                  f'{job.status} 的作业不能取消', 409)
-        job.status, job.finished_at = 'cancelled', timezone.now()
-        job.save(update_fields=['status', 'finished_at'])
-        return Response(_job_payload(job))
+        if job.status == 'running':
+            # 「排队中」在库里就是 running（`submit()` 在同一次请求里推的状态），
+            # 所以旧那版只认 pending 的口径等于「凡走 API 提交的作业都取消不了」。
+            # 可取消判据在 executor 那边，而且**窗口很窄**，别在注释里把它写成「排队中
+            # 一律可取消」：`ProcessPoolExecutor` 在把工作项推进 bounded call queue
+            # （容量 `MAX_POOL_WORKERS + EXTRA_QUEUED_CALLS`，本机 4+1=5）那一刻就把父
+            # future 翻成 RUNNING，而 RUNNING 不可取消 ⇒ 并发 ≤5 条时这里仍是恒 409，
+            # 只有排在第 6 条以后的（future 仍 PENDING、从未进过任何 worker）才走 200。
+            # 判 False / 缺席就 409 不许改：那两种形态里作业要么已进 worker（杀掉留半个
+            # 文件），要么压根不在本进程的池里（同步降级、别的机器）—— 提前判死是骗用户。
+            if executor.cancel_queued(job.pk):
+                job.refresh_from_db()
+                return Response(_job_payload(job))
+        elif job.status == 'pending':
+            # 没进过池的行（别的进程建的、或建完还没提交）：直接终态，不看 `_in_flight`。
+            job.status, job.finished_at = 'cancelled', timezone.now()
+            job.save(update_fields=['status', 'finished_at'])
+            return Response(_job_payload(job))
+        # 409 只这一处：`cancel_queued` 判 False 与「行已是终态」说的是同一句话，
+        # 写两份就会有一份漂移（文案取自库里那行，不落库、不改状态）。
+        return error_response('not_cancellable',
+                              f'{job.status} 的作业不能取消', 409)
 
 
 class JobListView(APIView):
