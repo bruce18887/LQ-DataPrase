@@ -24,7 +24,7 @@ from django.db import connections
 from django.utils import timezone
 
 from apps.export.filters import grid_filters_from
-from apps.jobs.models import Job
+from apps.jobs.models import TERMINAL_STATUSES, Job
 from apps.jobs.runner import (
     PROGRESS_FILENAME, progress_path_for, read_progress,
     run_export_batch_charts, run_export_excel,
@@ -411,7 +411,7 @@ def _write_back(job_id: int, future: 'Future') -> None:
         if future.cancelled():
             return          # 终态由取消的发起方写，这里连 error 都不该碰
         pending = Job.objects.filter(pk=job_id).exclude(
-            status__in=('done', 'error', 'cancelled'))
+            status__in=TERMINAL_STATUSES)
         try:
             result = future.result()
         except Exception as exc:
