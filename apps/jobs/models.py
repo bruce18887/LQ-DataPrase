@@ -19,6 +19,20 @@ STATUS_CHOICES = [
     ('error', '失败'),
     ('cancelled', '已取消'),
 ]
+# 终态名单的唯一归属点。**终态三元组的生产消费者有两处**，各自硬编码过同一个三元组
+# （`prune_jobs` 的选行与 `executor.py::_write_back` 的 exclude），加状态时漏一处就是「行永远
+# prune 不掉」或「回填把别人写的终态覆盖掉」—— 2026-10-29 评审点的名，两处现在都 import 这个常量。
+# 名单之外还有两份**同一份词表**的手抄，都是**刻意**保留的：`test/backend/test_job_cancel.py::
+# test_cancel_still_rejects_every_terminal_row` 自己写一份同样的词表，判据硬编码期望值才是
+# 独立对照（让它 import 常量 = 加错状态时两处一起错、互相圆场）；`scripts/perf_load20.py:290`
+# 只走 HTTP、不 import 本应用，让压测脚本挂上 Django 依赖属另一条账。**都不许「去重」。**
+# 这两份账**不含** `views.py::_sync_fallback` 里那个 `('done', 'error')` 二元组：它不是终态词表
+# 的消费者，问的是另一件事 ——「entry 自己有没有把这一行结算掉并写好那道人话」（只有下载类会，
+# 见 `sftp_job.py` 那三条 update）。换成 import 本常量会把 `cancelled` 也认成「entry 已结算」，
+# 那是语义变更，不是去重；grep 手抄时别把它算进上面这两份账。
+# 回收侧的判据在 `test/backend/test_prune_jobs_dir.py`（`pending`/`running` 各钉了一条
+# 「不许 prune」）。
+TERMINAL_STATUSES = ('done', 'error', 'cancelled')
 
 
 class Job(models.Model):
