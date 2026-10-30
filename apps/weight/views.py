@@ -3,8 +3,9 @@
 
 不落库、不落盘、不用 multipart（spec §4）。同步 FileResponse —— 作业化那条路要求 DataFile 行。
 （导出口径下「不落库」= 不碰 DataFile/ParseHistory、**不写 MEDIA_ROOT**；但「零写入」这话别说满：
-`render_export_filename` 内部是 `UserSetting.objects.get_or_create(user=…)`
-（`apps/common/export_naming.py:97`），它会**发 SQL**，并给「从没存过设置的账号」**INSERT 一行
+`render_export_filename`（`apps/common/export_naming.py::render_export_filename`）内部是
+`apps/accounts/services.py::get_user_setting(user, create=True)`（「缺失即建」，落到
+`UserSetting.objects.get_or_create`），它会**发 SQL**，并给「从没存过设置的账号」**INSERT 一行
 UserSetting**。那是本仓**全部既有导出通路共同**的形态、写的是账号设置而不是权重数据（spec §4），
 任何人后续要写「零 SQL / 零写入」的断言必须以「除这一行设置外」为前提。）
 

@@ -1,6 +1,9 @@
 """跨 app 共用的「用户系统设置」读取入口。
 
-先例：`apps/common/export_naming.py` 同样在请求上下文里读 `request.user.settings`。
+先例：`apps/common/export_naming.py` 也在请求上下文里读用户设置，但它走的是
+`apps/accounts/services.py::get_user_setting` 这个单一入口；本模块**不能**照它做
+（见下面「不许 import apps.accounts.models」那条），所以这里仍然是直读 `user.settings`
+描述符 —— D1 把三条通路收敛到单一入口时，刻意把本模块留在描述符那一侧。
 放在 common 是因为 CPK 阈值同时被 analysis（直方图/多批次/CPK 表）、dashboard（总览
 与低 CPK 警报）、export（批量图表等级色）三条链路消费，任何一条都不该 owns 它。
 
