@@ -11,7 +11,8 @@
 只有成功作业才会写 —— 写它的四处是 `executor.py::_write_back`、`sftp_job.py` 里那两条
 update（全成功 / 部分失败）、`views.py::JobSubmitView` 的同步回落分支，`error` 行恒为空 ⇒
 按它推目录对每个失败作业都推出空串，行删了、目录留下，而行一没就再没有任何东西来收它。
-C1 之后落 `error` 的行只会更多（见 `executor.py::_timed_out` 与 `_reap_discarded` 的注释与
+C1 之后落 `error` 的行只会更多（见 `apps/jobs/monitor.py::_timed_out` 与
+`executor.py::_reap_discarded` 的注释与
 provenance），这条泄漏更常踩中。（`cancelled` 行不在这条账上：能取消成功的工作项从未进过
 worker，而 `jobs/<owner>/<id>/` 是 worker 进来才建的 —— `runner.py::write_progress` 的进度
 侧车目录与 `runner.py::_write_out` 的产物目录，见 `executor.py::cancel_queued` 与
@@ -34,7 +35,7 @@ worker，而 `jobs/<owner>/<id>/` 是 worker 进来才建的 —— `runner.py::
 * **收不回来的孤儿目录**：行先被 prune、worker 之后继续写出来的那种，以及本次修复之前已经
   泄漏在盘上的那些 —— 没有任何一行还留着 `result_path` 指得过去，兼容分支就够不着它，而
   没有行也推不出 owner/id，那要按盘扫，属独立工单。
-* **`_timed_out` 留下的窗口**（`executor.py`，判据在 `test/backend/test_job_cancel.py`）：
+* **`_timed_out` 留下的窗口**（`apps/jobs/monitor.py`，判据在 `test/backend/test_job_cancel.py`）：
   看门狗把行翻成 `error` 之后，RUNNING 的 future **取消不了**，worker 还在往那个目录里写，
   而行此刻已经是终态。今天只有 `--days=0` 够得着这种行（默认 7 天保留期把它冲掉了）。
   两个平台不对称，而且**POSIX 更糟**：Windows 上打开的句柄让 `os.unlink` 失败 ⇒ 目录清不掉
