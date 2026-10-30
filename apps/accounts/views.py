@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from django.contrib.auth import authenticate
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -23,6 +24,7 @@ from .serializers import (
     UserSerializer,
     UserSettingSerializer,
 )
+from .services import get_user_setting
 
 MAX_LOGIN_ATTEMPTS = 5
 LOCKOUT_DURATION = timedelta(minutes=15)
@@ -97,9 +99,10 @@ class LoginView(APIView):
         username = serializer.validated_data['username']
         password = serializer.validated_data['password']
 
-        try:
-            user = User.objects.get(username=username)
-        except User.DoesNotExist:
+        # `filter().first()` 而非 `get()`：两条路径的语句数实测相同（各 1 条 SELECT，
+        # 见 test_accounts_write_paths.py 模块注释），差异只在 SQL 形状与不走异常控制流。
+        user = User.objects.filter(username=username).first()
+        if user is None:
             return _error(
                 LOGIN_ERROR_CODES['USER_NOT_FOUND'],
                 f'用户名「{username}」不存在，请确认后重试',
@@ -154,9 +157,24 @@ class LoginView(APIView):
                 remaining_attempts=remaining,
             )
 
-        user.login_attempts = 0
-        user.lockout_until = None
-        user.save()
+        # 成功即清零计数，但只在**确有东西要清**时写：干净账号（attempts=0、无 lockout）
+        # 原来那句无条件 `user.save()` 是把库里已有的默认值再 UPDATE 一遍（no-op 写，
+        # 成功路径实测 4 条里的第 3 条）。收敛后干净账号 3 条、需重置的仍 4 条。
+        # `or user.lockout_until is not None` 这半句不许跟着删。锁定期**已过期**的账号
+        # `login_attempts` 也是 0，只靠前半句就永远不清它，而过期之后**没有任何通路会自我修复**：
+        # 本视图的锁定判定看 `> timezone.now()`（上面第 122 行，过期即放行、不写回）；DRF 两条
+        # 序列化通路把 `lockout_until` 钉成 read_only（`serializers.py:31`/`:55`），API 写不掉；
+        # 前端管理页的 `isLocked()` 同样按 `> now` 判（`UserManagement.vue` 里的状态 chip 与
+        # `kpi.locked` 都走它）⇒ 过期值不渲染成锁定，连「解锁」按钮
+        # （`v-if="isLocked(row)"`）都不出现，`unlock` 那条唯一的清除通路从页面上到不了。
+        # 于是它的实际代价是：**这条过期值永久留在库里，并随 `UserSerializer` 的载荷
+        # （用户列表接口）一次次下发**；今天唯一真看得见它的界面是 Django admin
+        # （`admin.py:17` 的 `list_display` 与 `:23` 的 fieldset 都列了这列）。
+        # 判据 `test/backend/test_login_path_statements.py::LoginPathTests`。
+        if user.login_attempts or user.lockout_until is not None:
+            user.login_attempts = 0
+            user.lockout_until = None
+            user.save()
 
         tokens = get_tokens_for_user(user)
 
@@ -211,17 +229,51 @@ class UserSettingsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        settings, _ = UserSetting.objects.get_or_create(user=request.user)
+        """只读：缺行时**不建行**，交出内存默认实例（D2）。
+
+        读走 D1 的单一入口 `get_user_setting`（只读分支，`apps/accounts/services.py`）：
+        行缺失 ⇒ None ⇒ 构造 `UserSetting(user_id=request.user.pk)` 交给序列化器。
+        为什么不是计划正文那句 `UserSetting(user=request.user)`：传 `user` 对象会让
+        Django 的 `Model.__init__` 把这条**未落库**实例挂进 `request.user` 的反向缓存
+        （D1 的毒缓存，`test_user_setting_reads.py::UnsavedCacheGuardTests` 钉着可达性），
+        同请求内直读 `user.settings` 的通路（`apps/common/user_settings.py` 的
+        `get_cpk_thresholds`、`apps/export/views.py` 的 `to_excel`）就会把它当真实设置；
+        `user_id=` 形状实测（Django 6.0.9，本机 2026-10-30 量出）不碰那份缓存，判据在
+        `test/backend/test_accounts_write_paths.py::SettingsGetCacheShapeTests`。
+        序列化器不暴露 `id`/`user`，内存默认实例与 HEAD「先建行再序列化」的 JSON 逐字段
+        等价（同文件 `test_get_without_row_serializes_the_head_row_body` 现场比对）。
+        """
+        settings = get_user_setting(request.user)
+        if settings is None:
+            settings = UserSetting(user_id=request.user.pk)
         serializer = UserSettingSerializer(settings)
         return Response(serializer.data)
 
     def put(self, request):
-        settings, _ = UserSetting.objects.get_or_create(user=request.user)
-        serializer = UserSettingSerializer(
-            settings, data=request.data, partial=True
-        )
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
+        """写通路：缺行仍建行（走 helper 的 `create=True`），但 UPDATE 只写本次变更的列 ——
+        不带 `update_fields` 的全行写实测 SET 里 **26 列**（`user_id` + 25 个设置列，含 5 个
+        `sftp_last_*`；`UserSettingSerializer` 只暴露 20 个字段，那是字段数不是列数，
+        两个数别混 —— 出处是现量：同文件 `SettingsPutWriteShapeTests
+        .test_head_full_row_update_sets_26_columns_not_the_20_serializer_fields`）。
+        空变更集 ⇒ `update_fields=[]` ⇒ Django 6.0.9 在 `db/models/base.py:843` 直接早退，
+        一条 UPDATE 都不发，因此这里**不需要**额外的 `if changed:` 守卫（守卫是死码，复评审
+        Minor 1 已删）。别把 `test_put_empty_body_writes_nothing` 读成「视图里没有守卫」的判据 ——
+        它钉的是零写与语句形状；守卫加回去本批照样 `Ran 20 / OK`（2026-10-30 两轮各量一次）。
+        整块包在 `transaction.atomic()` 里：建行与补写同生同灭 —— 失败或校验不过时
+        库里不留一条只有默认值的行。这层包裹是**新增**保证，不是找回丢掉的东西：
+        本仓 DRF 3.18.3 的 `serializer.save()` 自己不带原子块（`ATOMIC_REQUESTS` 也没开），
+        代价是一对 SAVEPOINT/RELEASE，账面钉在 `SettingsPutAtomicityTests`。
+        """
+        with transaction.atomic():
+            settings = get_user_setting(request.user, create=True)
+            serializer = UserSettingSerializer(
+                settings, data=request.data, partial=True
+            )
+            serializer.is_valid(raise_exception=True)
+            changed = serializer.validated_data
+            for attr, value in changed.items():
+                setattr(settings, attr, value)
+            settings.save(update_fields=list(changed))
         return Response(serializer.data)
 
 
