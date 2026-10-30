@@ -92,10 +92,14 @@ def render_export_filename(user, export_type: str, extension: str,
                            context: dict[str, object]) -> str:
     """Single entry point: user template (or default) rendered + sanitized,
     with extension appended (deduped if the template already ends with it)."""
-    from apps.accounts.models import UserSetting  # local import avoids cycles
+    from apps.accounts.services import get_user_setting  # local import avoids cycles
 
-    settings, _ = UserSetting.objects.get_or_create(user=user)
-    templates = settings.export_filename_templates or {}
+    # `create=True` 是这里刻意保留的既有契约：本函数的「没行就建一行」被
+    # apps/common/tests.py 直接调用（改成只读会让它拿不到行），也被
+    # test/backend/test_weight_export_api.py 当成「导出通路不是零写入」的依据钉着。
+    # 其它只读通路走同一个 helper 但不许带这个开关，见 apps/accounts/services.py 的文首。
+    setting = get_user_setting(user, create=True)
+    templates = (setting.export_filename_templates if setting else None) or {}
     template = templates.get(export_type) or EXPORT_TEMPLATE_DEFAULTS.get(export_type, 'export')
 
     allowed = EXPORT_TEMPLATE_VARIABLES.get(export_type, ())

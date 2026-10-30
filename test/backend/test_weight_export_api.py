@@ -18,8 +18,10 @@
 `test_guard_body_has_no_message_and_no_detail` 钉住。
 
 两条如实记账（Task 5 修复轮）：
-④ 导出 lane **不是**「零写入」：`render_export_filename` 内部是 `UserSetting.objects.get_or_create`
-   （`apps/common/export_naming.py:97`），会给「从没存过设置的账号」**INSERT 一行 UserSetting**
+④ 导出 lane **不是**「零写入」：`render_export_filename`
+   （`apps/common/export_naming.py::render_export_filename`）内部是
+   `apps/accounts/services.py::get_user_setting(user, create=True)`（「缺失即建」，落到
+   `UserSetting.objects.get_or_create`），会给「从没存过设置的账号」**INSERT 一行 UserSetting**
    —— 那是本仓每条既有导出通路共有的形态。所以这里从不写 `assertNumQueries(0)`，只断
    「不碰 DataFile/ParseHistory、不写 MEDIA_ROOT」，而这条落盘探测器有对照组
    （`media_probe.MediaProbeControlMixin`，本模块自己带一份，不靠 `test_weight_api` 那条）；
@@ -333,8 +335,9 @@ class ExportEndpointTests(EndpointFixtureMixin, MediaProbeControlMixin, TestCase
 
     def test_export_writes_nothing_to_media_root_or_data_tables(self):
         # 承诺同 parse（spec §4）。这里**不能**用 assertNumQueries(0)：
-        # `render_export_filename` 内部是 `UserSetting.objects.get_or_create(user=…)`
-        # （`apps/common/export_naming.py:97`）⇒ 它会**发 SQL**，并且对「从没存过设置的账号」
+        # `render_export_filename`（`apps/common/export_naming.py::render_export_filename`）内部是
+        # `apps/accounts/services.py::get_user_setting(user, create=True)`（「缺失即建」，落到
+        # `UserSetting.objects.get_or_create`）⇒ 它会**发 SQL**，并且对「从没存过设置的账号」
         # **INSERT 一行 UserSetting**。那是本仓每条既有导出通路共有的形态、写的是账号设置而不是
         # 权重数据 ⇒ 承诺只能写成下面这样（不碰 DataFile/ParseHistory、不写 MEDIA_ROOT），
         # **任何人别在它上面搭「零写入 / 零 SQL」**。落盘探测器的对照组见 `media_probe`。
@@ -422,7 +425,9 @@ class ExportNamingRegisteredTests(TestCase):
     # （硬编码含 weight_plot 的完整键集合，故意不同源 ⇒ 漏登记必红）。
 
     def test_filename_is_not_the_silent_export_default(self):
-        # `export_naming.py:99` 的 `.get(export_type, 'export')` 会静默给出 export.xlsx
+        # `apps/common/export_naming.py::render_export_filename` 里那句
+        # `templates.get(export_type) or EXPORT_TEMPLATE_DEFAULTS.get(export_type, 'export')`
+        # 会静默给出 export.xlsx
         # ⇒ 这条同时是「DEFAULTS 里有 weight_plot」的下界证据（缺键就会拿到 export.xlsx）
         name = render_export_filename(self.user, 'weight_plot', 'xlsx',
                                       {'filename': 'trim_weight_ci', 'date': '20261019'})

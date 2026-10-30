@@ -38,11 +38,22 @@ GAGE_S1_PATH = os.path.join(
 
 
 def set_user_chart_dpi(user, value: int):
-    """UserSetting 不随 create_user 自动建行（无 post_save 信号），显式 get_or_create。"""
-    settings, _ = UserSetting.objects.get_or_create(user=user)
-    settings.chart_dpi = value
-    settings.save()
-    return settings
+    """把某个账号的 chart_dpi 写成 value，没有行就补一行（UserSetting 不随 create_user
+    自动建行，全仓没有 post_save 信号）。
+
+    **写走 manager，不经 `user` 实例上那份反向缓存** —— 生产里 `chart_dpi` 的写手都是
+    「另一个请求里的另一个对象」（`UserSettingsView.put` 经 serializer 保存、
+    `_record_last_visit` 自己 save），它们不会去同步当前 `request.user` 挂着的缓存。
+    改成 `user.settings.save()` 看着也能过，但它用写侧补齐了读侧的缓存，等于把
+    「一次写能不能到达下一次读」这张端到端网删掉（D1 评审实测到的形状是同实例连改两次
+    设置后 `989 not greater than 989` 的假绿，网一断就再也抓不到）。配套的读侧见
+    `DpiReachesRenderedPngTests._authenticate_fresh`：每个请求重新取实例，两边合起来
+    才是生产的读→写→读。阶段 2 若给 `UserSetting` 加进程内 TTL 缓存，这两条用例就是
+    负责当场变红的东西。
+    """
+    if UserSetting.objects.filter(user=user).update(chart_dpi=value):
+        return
+    UserSetting.objects.create(user=user, chart_dpi=value)
 
 
 def png_size(blob: bytes):
@@ -82,8 +93,20 @@ class GetExportDpiFromUserTests(TestCase):
         self.assertEqual(get_export_dpi(self.user), EXPORT_DPI_MAX)
 
     def test_missing_settings_row_falls_back_to_default(self):
+        """「没有行」得在**新实例**上验：D1 之后通路 2 先看 `user` 上的那份反向缓存。
+
+        同一实例上「写 300 → 读（缓存装上）→ 用 manager 删行 → 再读」拿到的是缓存里那份
+        stale 300 —— 那是 Django 反向缓存的既有语义（manager 侧的 DELETE 不会通知实例缓存），
+        不是 helper 的 bug，本条把它一起钉住，免得后人把「读到 300」当成读路径缺陷去改
+        `get_user_setting`。真实请求的起点是每请求新建的 `User`（同
+        `DpiReachesRenderedPngTests._authenticate_fresh`），所以「无行 → 默认值」用新实例断。
+        """
+        set_user_chart_dpi(self.user, 300)
+        self.assertEqual(get_export_dpi(self.user), 300)
         UserSetting.objects.filter(user=self.user).delete()
-        self.assertEqual(get_export_dpi(self.user), EXPORT_DPI_DEFAULT)
+        self.assertEqual(get_export_dpi(self.user), 300,
+                         '库里已无行但实例缓存没被通知 ⇒ 仍是 300（Django 语义，别改读路径）')
+        self.assertEqual(get_export_dpi(User.objects.get(pk=self.user.pk)), EXPORT_DPI_DEFAULT)
 
     def test_none_user_falls_back_to_default(self):
         self.assertEqual(get_export_dpi(None), EXPORT_DPI_DEFAULT)
@@ -112,7 +135,16 @@ class DpiReachesRenderedPngTests(APITestCase):
             c for c in df_parsed.columns if df_parsed[c].dtype in ('int64', 'float64')
         )
 
+    def _authenticate_fresh(self):
+        """每次发请求前重新取一份 `User` 实例：真实请求里认证中间件都是新建的
+        `request.user`，挂在实例上的反向缓存必然是空的。直接复用 `setUp` 里
+        `force_authenticate(self.user)` 那个对象，等于把两个请求钉在同一个实例上，
+        「上一次写能不能被下一次读到」就再也没有人验了（见 `set_user_chart_dpi` 的说明）。
+        """
+        self.client.force_authenticate(User.objects.get(pk=self.user.pk))
+
     def _export_one_chart(self, fmt: str) -> bytes:
+        self._authenticate_fresh()
         resp = self.client.post('/api/v1/export/batch_charts/', {
             'file_id': self.datafile.id,
             'params': [self.param],
