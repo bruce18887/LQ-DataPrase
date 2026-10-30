@@ -17,14 +17,17 @@ from apps.batch_report.services import (
     compute_batch_yield_data, BatchNotAvailableError,
 )
 from apps.datafiles.models import DataFile
+from test.backend.batch_report_fixtures import JSON_KEYS, PARTITION_HISTORY
 
 User = get_user_model()
 
-EXPECTED_KEYS = {
-    'batch_name', 'kpi', 'phases', 'phase_summary', 'stage_yields',
-    'trend_data', 'site_pass_data', 'bin_distribution', 'sorted_sites',
-    'site_matrix', 'bin_table_data', 'bin_site_columns', 'uph', 'qa_checks',
-}
+# 2026-10-30 D3：JSON 分支不再带只有 HTML 报告读的四段分区（``trend_data`` /
+# ``bin_distribution`` / ``bin_table_data`` / ``bin_site_columns``），``site_pass_data``
+# 因为谁都不读而整个消失。这里钉的是**默认（JSON）分支**的键集合；HTML 分支那份
+# 由 ``test_batch_report_payload.py`` 钉，两份差集 = 四把 key。
+# 键集合常量不再本地复制一份（两份会各自漂）—— 用的就是
+# ``test/backend/batch_report_fixtures.py`` 的 ``JSON_KEYS`` 那一份。
+EXPECTED_KEYS = JSON_KEYS
 
 
 def _df():
@@ -59,7 +62,7 @@ class ComputeBatchYieldDataTests(APITestCase):
     def test_payload_key_set_locked(self):
         self._patch_parse((_df(), _meta(), 'CTA8290D'))
         out = compute_batch_yield_data(self.user, 'B1')
-        self.assertEqual(set(out.keys()), EXPECTED_KEYS)
+        self.assertEqual(set(out.keys()), EXPECTED_KEYS, msg=PARTITION_HISTORY)
         self.assertEqual(out['batch_name'], 'B1')
         self.assertEqual(out['kpi']['total'], 4)
         self.assertEqual(out['kpi']['pass'], 3)

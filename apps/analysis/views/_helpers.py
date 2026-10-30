@@ -5,8 +5,8 @@ import os
 from typing import Dict, Set
 
 import pandas as pd
-from django.db import connections
 
+from apps.datafiles.lookup import owned_files_by_pk, valid_file_ids
 from apps.datafiles.models import DataFile
 from apps.datafiles.services import get_cached_parsed_file
 from apps.datafiles.utils import resolve_file_path
@@ -174,28 +174,16 @@ def _load_files_from_request(request, file_ids):
     """Load multiple files from request for cross-file analysis.
 
     Returns list of dicts with df, metadata, file_id, filename, timestamp.
+
+    取数（按 owner 批量、按 PK 分块、坏 id 拦在查询之外）的口径住在
+    ``apps/datafiles/lookup.py`` —— 批次报表那边是同一条取数的**另一个**消费者。
+    这里留的是 analysis 自己的语义：**坏 / 缺 / 解析失败的 id 静默跳过**
+    （那边判 404），并按输入序回放 ⇒ 重复 id 出多条。
     """
-    normalized_ids = []
-    for file_id in file_ids:
-        try:
-            file_id = int(file_id)
-            # Exact PK lookups reject out-of-range integers, but IN does not.
-            # Keep one bad ID from aborting the whole batch at the DB adapter.
-            DataFile._meta.pk.run_validators(file_id)
-            normalized_ids.append(file_id)
-        except Exception:
-            continue
+    normalized_ids = valid_file_ids(file_ids)
     if not normalized_ids:
         return []
-    queryset = DataFile.objects.filter(owner=request.user)
-    unique_ids = list(dict.fromkeys(normalized_ids))
-    max_params = connections[queryset.db].features.max_query_params
-    # in_bulk budgets only the IDs; reserve one parameter for the owner filter.
-    batch_size = max_params - 1 if max_params else len(unique_ids)
-    datafiles = {}
-    for offset in range(0, len(unique_ids), batch_size):
-        chunk = unique_ids[offset:offset + batch_size]
-        datafiles.update(queryset.in_bulk(id_list=chunk))
+    datafiles = owned_files_by_pk(request.user, normalized_ids)
     file_data_list = []
     # Bulk lookup deduplicates rows; iterate the IDs to preserve order and repeats.
     for file_id in normalized_ids:

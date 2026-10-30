@@ -88,7 +88,23 @@ def _site_matrix_table(site_matrix, sorted_sites):
 
 
 def build_batch_html_report(payload, *, dpi, generated_at):
-    """payload = compute_batch_yield_data(user, batch_name)。"""
+    """payload = ``compute_batch_yield_data(user, batch_name, for_html_report=True)``。
+
+    入口先验载荷形状，**不是**防御式编程的仪式：下面那四段分区（趋势 / Bin 分布 /
+    Bin×Site）读的全是 ``payload.get(...) or {}`` / ``or []`` ⇒ 漏掉
+    ``for_html_report=True`` 时函数**正常返回**，报告只是静默少三块，
+    HTTP 200、文件名照常，用户与日志都看不出差别（2026-10-30 审查 Important 2）。
+    那四把 key 同生同灭，所以验 ``bin_site_columns`` 一把就够 —— 它是四者里唯一由
+    ``aggregate_bin_site_table`` 现算的那把，也最能说明「这份载荷不是给 HTML 造的」。
+    判据：``test/backend/test_html_report_batch.py`` 的
+    ``test_json_shaped_payload_is_refused_not_rendered_empty``。
+    """
+    if 'bin_site_columns' not in payload:
+        raise ValueError(
+            '批次 HTML 报告的载荷缺少 "bin_site_columns"：'
+            '必须用 compute_batch_yield_data(user, batch_name, for_html_report=True) '
+            '生成载荷；用默认（JSON）分支那份渲染会静默丢掉良率趋势 / Bin 分布 / '
+            'Bin×Site 三块')
     batch_name = payload.get('batch_name') or ''
     parts = [
         sections.report_header(f'批次良率报告 - {batch_name}',

@@ -8,7 +8,7 @@ from apps.datafiles.services import get_cached_parsed_file
 from apps.analysis.services.statistics import (
     calculate_fail_bin_statistics, get_site_column,
     get_bin_column_name, compute_site_yield_data, compute_uph,
-    compute_pass_yield,
+    compute_pass_yield, compute_yield_trend,
 )
 from apps.batch_report.aggregation import aggregate_bin_site_table, aggregate_uph
 from apps.batch_report.phase_parsing import (
@@ -55,10 +55,35 @@ def build_phase_summary(phases):
 _build_phase_summary = build_phase_summary
 
 
-def compute_batch_yield_data(user, batch_name):
+def compute_batch_yield_data(user, batch_name, *, for_html_report=False):
     """组装批次良率 payload（`/batch-report/batch_yield_data/` 响应体同形）。
 
     批次无文件 / 全部无法解析时抛 BatchNotAvailableError。
+
+    ``for_html_report`` 决定要不要带那四段**只有 HTML 报告读**的分区
+    （``trend_data`` / ``bin_distribution`` / ``bin_table_data`` /
+    ``bin_site_columns``，读点见 ``apps/export/html_report/batch.py`` 的
+    ``payload.get(...)``）。JSON 分支默认不带：一个前端读者都没有。
+    这四把 key **只在本函数末尾那一处** ``if for_html_report:`` 里构造并写入，
+    所以「绑定制」与「消费制」不可能分叉（先前分在两块、另配两行兜底默认值的那个
+    形状已随 2026-10-30 审查 Minor 3 合并掉）。HTML 那侧另有一道入口守卫：
+    ``build_batch_html_report`` 见到没有 ``bin_site_columns`` 的载荷直接报错，
+    不放它渲染出一份只是少三块的报告。
+
+    **这两段的账现在两分支都不付**（计划 Step 3 的完整口径，2026-10-30 补齐）：
+    趋势输入 ``file_data_list`` 带的是循环里**已经算好的** ``bin_stats``/``total``，
+    不带 ``df`` ⇒「每文件第二遍全量 bin 统计」（``apps/analysis/services/statistics/``
+    ``trends.py`` 的 ``_bin_stats_and_total`` 先前那句按 ``df`` 现算的 fallback）与
+    「批次内每个文件的 DataFrame 同时驻留」一起消失，JSON 分支与 HTML 分支同界。
+    于是 ``for_html_report=False`` 省的**只是那四把 key 本身的构造与体积**
+    （``aggregate_bin_site_table`` + ``bin_agg`` 累计 + SPC 那趟 O(文件数) 的均值/标准差），
+    别再写成「省一趟全量统计」或「省一批帧」。
+    消费方核对口径、键集合钉值与上面那三处判据都在
+    ``test/backend/test_batch_report_payload.py``；HTML 产物字节另有
+    ``test/backend/test_batch_report_html_artifact.py``。
+
+    ``site_pass_data`` 不在此列 —— 它**任何分支都没有读者**（前端那两处命中是
+    ``batchAggregation.ts`` 里描述「同构」的注释文字），所以两边一律不再产出。
     """
     files = DataFile.objects.filter(
         owner=user, file_type='batch', batch_name=batch_name
@@ -70,7 +95,6 @@ def compute_batch_yield_data(user, batch_name):
     phases = []
     file_data_list = []
     bin_agg = defaultdict(int)
-    site_agg = defaultdict(lambda: {'pass': 0, 'total': 0})
     all_sites = set()
 
     for idx, df_obj in enumerate(files):
@@ -90,7 +114,9 @@ def compute_batch_yield_data(user, batch_name):
             count = binfo.get('count', 0)
             pct = binfo.get('percentage', 0)
             bn = str(bin_name)
-            bin_agg[bn] += count
+            if for_html_report:
+                # bin_agg 只喂 bin_distribution（HTML 的 Pareto 图）。
+                bin_agg[bn] += count
             bin_info.append({
                 'name': bn,
                 'value': count,
@@ -112,8 +138,6 @@ def compute_batch_yield_data(user, batch_name):
                     site_yields[site] = d['Yield']
                     site_total_map[site] = d.get('Total', 0)
                     site_pass_map[site] = d.get('PassCount', 0)
-                    site_agg[site]['pass'] += d.get('PassCount', 0)
-                    site_agg[site]['total'] += d.get('Total', 0)
                     all_sites.add(site)
 
                 # Populate per-bin site data
@@ -162,13 +186,28 @@ def compute_batch_yield_data(user, batch_name):
             'uph': uph_data,
         })
 
-        file_data_list.append({
-            'df': df,
-            'metadata': metadata,
-            'file_id': df_obj.id,
-            'filename': df_obj.filename,
-            'timestamp': str(getattr(df_obj, 'created_at', '')),
-        })
+        if for_html_report:
+            # 趋势图的输入：把循环里**已经算好的** ``bin_stats``/``total`` 带下去，
+            # 不带 ``df``/``metadata``。``compute_yield_trend`` **只**认这份形状
+            # （``apps/analysis/services/statistics/trends.py`` 的 ``_bin_stats_and_total``
+            # 直接按 ``file_data['bin_stats']``/``['total']`` 取，没有按 ``df`` 现算的
+            # fallback 可走）⇒ 这里少带一趟全量 bin 统计，也就没有理由把批次里
+            # 每个文件的 DataFrame 攒在一份列表里 ——「同时驻留整批帧」这条账在
+            # **两个分支都不存在**（绊线：JSON 分支
+            # ``test_json_branch_retains_no_dataframe_as_performance_tripwire``、
+            # HTML 分支 ``test_html_branch_retains_no_dataframe_as_performance_tripwire``，
+            # 两分支的「每文件只一趟 bin 统计」由
+            # ``test_both_branches_run_one_bin_statistics_pass_per_file_as_performance_tripwire``
+            # 钉；入参形状本身由 ``test_html_trend_input_carries_precomputed_bin_stats_and_no_frame``
+            # 与 ``test/backend/test_bin_trend_yield.py`` 的反垫片用例两头夹）。
+            # JSON 分支连这份列表都不构造（省的是那四把 key 本身）。
+            file_data_list.append({
+                'bin_stats': bin_stats,
+                'total': total,
+                'file_id': df_obj.id,
+                'filename': df_obj.filename,
+                'timestamp': str(getattr(df_obj, 'created_at', '')),
+            })
 
     if not phases:
         raise BatchNotAvailableError('无法解析批次文件')
@@ -186,25 +225,11 @@ def compute_batch_yield_data(user, batch_name):
     pass_all = sum(p['pass_count'] for p in phases)
     fail_all = total_all - pass_all
 
-    # Yield trend via SPC
-    from apps.analysis.services.statistics import compute_yield_trend
-    trend = compute_yield_trend(file_data_list)
-
-    # Site pass data for chart
-    site_pass_data = []
-    for site in sorted(all_sites):
-        d = site_agg[site]
-        site_pass_data.append({
-            'site': site,
-            'pass': d['pass'],
-            'total': d['total'],
-            'yield': round(d['pass'] / d['total'] * 100, 2) if d['total'] > 0 else 0,
-        })
-
-    # Bin distribution for pie chart
-    bin_distribution = []
-    for bn in sorted(bin_agg.keys(), key=lambda x: (x not in ('1', 'Bin1'), x)):
-        bin_distribution.append({'name': bn, 'value': bin_agg[bn]})
+    # 良率趋势（SPC）/ Bin 分布这两把 key 现在**只**在函数末尾那**一处**
+    # ``if for_html_report:`` 里构造并写入 payload —— 见那儿。这里曾经有一处独立的
+    # ``if`` 加两行兜底默认值（``trend = {}`` / ``bin_distribution = []``），因为绑定与
+    # 消费分在两块里、两处判据漂开就是 ``UnboundLocalError``。合并成一处之后那个形状
+    # 不存在了，默认值与钉它的源码改写用例一起删（2026-10-30 审查 Minor 3）。
 
     # Site matrix table data
     sorted_sites = sorted(all_sites)
@@ -266,10 +291,15 @@ def compute_batch_yield_data(user, batch_name):
 
     # Batch-level Bin×Site cross table + aggregated UPH (reuse single-file
     # analysis components in the batch report). Pure helpers in aggregation.py.
-    bin_table_data, bin_site_columns = aggregate_bin_site_table(phases, sorted_sites)
+    #
+    # ``bin_table_data``/``bin_site_columns`` 这两把只有 HTML 报告读：批次页那张
+    # Bin×Site 表是前端自己按当前阶段现算的（``frontend/src/utils/batchAggregation.ts``
+    # 的 ``aggregateBinSiteTable``，吃 ``phases[].bin_info[].sites`` —— 所以那些不能被删，
+    # 判据在 ``test_phases_still_carry_per_bin_site_data``）。批级交叉表是它的同构物，
+    # 不是它的输入。
     batch_uph = aggregate_uph(phases)
 
-    return {
+    payload = {
         'batch_name': batch_name,
         'kpi': {
             'file_count': len(phases),
@@ -283,13 +313,25 @@ def compute_batch_yield_data(user, batch_name):
         'phases': phases,
         'phase_summary': _build_phase_summary(phases),
         'stage_yields': stage_yields,
-        'trend_data': trend,
-        'site_pass_data': site_pass_data,
-        'bin_distribution': bin_distribution,
         'sorted_sites': sorted_sites,
         'site_matrix': site_matrix,
-        'bin_table_data': bin_table_data,
-        'bin_site_columns': bin_site_columns,
         'uph': batch_uph,
         'qa_checks': qa_checks,
     }
+    if for_html_report:
+        # HTML 那四段分区的**唯一**一处判据：绑定与消费同块 ⇒ 不存在「两处判据分叉 ⇒
+        # ``UnboundLocalError``」这个形状，也就不需要 ``trend`` / ``bin_distribution``
+        # 的兜底默认值。只有 HTML 报告读这四把 key（``apps/export/html_report/batch.py``
+        # 的 ``payload.get(...)``，那边还有一条入口守卫拦「忘了开开关」的载荷）；
+        # JSON 分支省掉的就是这四把 key 本身的构造与体积 ——「每文件第二趟全量 bin
+        # 统计」与「整批 DataFrame 驻留」两分支都已经不存在（趋势输入带的是算好的
+        # bin_stats，见循环里那段注释）。
+        payload['trend_data'] = compute_yield_trend(file_data_list)
+        # Bin 分布（HTML 的 Pareto 图）；bin_agg 只喂这一把 key。
+        payload['bin_distribution'] = [
+            {'name': bn, 'value': bin_agg[bn]}
+            for bn in sorted(bin_agg.keys(), key=lambda x: (x not in ('1', 'Bin1'), x))
+        ]
+        payload['bin_table_data'], payload['bin_site_columns'] = \
+            aggregate_bin_site_table(phases, sorted_sites)
+    return payload
