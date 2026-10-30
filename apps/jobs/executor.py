@@ -1,9 +1,13 @@
-"""作业执行器：常驻进程池 + 状态回填 + 超时看门狗 + 降级判定。
+"""作业执行器：常驻进程池 + 状态回填 + 降级判定。
 
 跑在**主进程**里（可以 import Django）。它负责两件事，边界很清楚：
 
 * 主进程侧：读 settings / DataFile / 用户设置，把任务拼成**纯数据 dict**（`build_*_task`）；
 * 子进程侧：只调 `apps.jobs.runner` 里的顶层函数（那里禁止 Django）。
+
+超时看门狗在 2026-10-30 拆进了 `apps/jobs/monitor.py`（拆因：本文件顶到 600 行闸，
+退出路径的修复需要这里的行数；拆分是纯搬运，语义与判据不变）。本文件保留
+`_ensure_monitor` / `_monitor_pass` 两个薄接缝：`submit()` 与测试接缝都按名字认它们。
 
 为什么是进程池而不是线程池：导出是 CPU-bound，`futures.result()` 在主线程里等
 和直接在主线程里算，对其它用户没有区别 —— 只有把活交给另一个进程，
@@ -24,9 +28,10 @@ from django.db import connections
 from django.utils import timezone
 
 from apps.export.filters import grid_filters_from
+from apps.jobs import monitor
 from apps.jobs.models import TERMINAL_STATUSES, Job
 from apps.jobs.runner import (
-    PROGRESS_FILENAME, progress_path_for, read_progress,
+    PROGRESS_FILENAME, progress_path_for,
     run_export_batch_charts, run_export_excel,
     run_export_html_report, warmup_imports)
 from apps.jobs.sftp_job import run_sftp_download
@@ -51,7 +56,6 @@ MAX_DOWNLOAD_WORKERS = 2
 EXPORT_TIMEOUT_SECONDS = 30 * 60          # 单作业超时（spec §4.3）
 CHARTS_TIMEOUT_SECONDS = 60 * 60          # 批量图表串行渲染，比单表慢一个量级
 SFTP_DOWNLOAD_TIMEOUT_SECONDS = 2 * 60 * 60   # 下载看链路，给到 2 小时
-MONITOR_INTERVAL = 5.0
 
 # 作业类型 → {entry, timeout, lane}。加一类作业 = 加一行 + 一个入口函数。
 # lane=process ⇒ 跑在进程池子进程里，entry 必须 Django-free（apps/jobs/runner.py）；
@@ -81,7 +85,7 @@ class _Flight(NamedTuple):
       **执行**预算）。但它不等于没有上限 ——
     * `deadline = 提交时刻 + timeout` 在 `submit()` 那刻就定死，进度始终见不到的作业
       到点一样判死 —— 为什么必须有这道闸（含「少了它就是永久 running + 永久在飞」）
-      只在 `_monitor_pass` 讲一处，这里只给字段口径。
+      只在 `monitor.py::_monitor_pass` 讲一处，这里只给字段口径。
     * `pool` 是这条作业提交进去的那条池（进程 lane ⇒ `_pool`，thread lane ⇒
       `_download_pool`）。`_discard_pool()` 只按它认领「随这次丢弃一起没掉的作业」，
       不按 lane 猜：崩池与下载池互不相干，判错池就是把还在产出的作业标成失败。
@@ -95,8 +99,6 @@ class _Flight(NamedTuple):
 
 
 _in_flight: 'dict[int, _Flight]' = {}
-_monitor_thread = None
-_monitor_lock = threading.Lock()
 
 
 class PoolBroken(RuntimeError):
@@ -169,6 +171,43 @@ def _reap_discarded(pool) -> int:
             status='error', error='进程池已重建，作业被丢弃，请重试',
             finished_at=timezone.now())
     return len(dropped)
+
+
+def shutdown_pools_for_exit():
+    """优雅退出时关掉两条池（由 `apps/common/shutdown.py::_close_job_pools` 调用）。
+
+    与 `_discard_pool()` 同族、同一条不变量：**先 `_reap_discarded` 再 `shutdown`**（被
+    `cancel_futures=True` 取消掉的作业只有发起方会落终态，后果见那里的说明），而收尸要写库
+    ⇒ 调用点必须早于 `shutdown._close_database_connections()`。两道 try 各钉一条判据：一条
+    池坏了不许扔下另一条（孤儿子进程正是这么留下的），异常不许改退出码。`wait=False` 不等
+    还在跑的 child（实测也关不掉它），那条残留在 `apps/common/shutdown.py` 模块头讲结论、
+    在 `docs/reference/c3-exit-pool-orphan-forensics-2026-10-29.md` 讲测量。
+    文案沿用崩池那句：thread lane 读到「进程池已重建」略错位，但终态与「请重试」都对。
+    """
+    global _pool, _download_pool, _pool_failed
+    with _pool_lock:
+        proc, _pool = _pool, None
+    with _download_lock:
+        down, _download_pool = _download_pool, None
+    # 退出是 `_pool_failed`「永久建不起池」判定**唯一一次正确的场合**：摘成 None 而不置
+    # 永久位，等于给退出窗口（~`_EXIT_DELAY_SECONDS`+两次有界 join，DB 锁下最坏 30 s，
+    # 口径见 `shutdown.py` 模块头与取证文档）里还在被服务的请求留着 `_get_pool()` 重建
+    # 通路 —— `os._exit(0)` 紧随其后把新池孤儿掉，退出路径重造它要防的泄漏（评审
+    # 2026-10-30 截构造器实证；判据 `test/backend/test_exit_pool_shutdown.py::
+    # ExitBlindsPoolRebuildTests`）。这与 `_discard_pool()` **刻意不置**它不矛盾：
+    # 崩池是一次性的、要为下一个用户重建；这里没有下一个用户。
+    _pool_failed = True
+    for pool in (proc, down):
+        if pool is None:
+            continue
+        try:                        # 收尸要写库；写不进也得把池关掉
+            _reap_discarded(pool)
+        except Exception as exc:    # noqa: BLE001 — 退出路径上不许改退出码
+            logger.warning('exit-time job reap failed: %r', exc)
+        try:
+            pool.shutdown(wait=False, cancel_futures=True)
+        except Exception as exc:    # noqa: BLE001
+            logger.warning('exit-time pool shutdown failed: %r', exc)
 
 
 def executor_available() -> bool:
@@ -329,7 +368,7 @@ def _start_clock(progress_path: str, submitted_at: float):
     `run_export_html_report`（`:181` 解析 → `:182`）都是**先解析后写侧车** ⇒
     「侧车出现第一个 >0 的值」才是开跑证据，起点由看门狗在那一刻按下。
     别概括成「worker 一进来就写侧车」，那句只对 `:119` 成立；解析阶段卡死会怎样、
-    为什么绝对上限一步都不能少，只在 `_monitor_pass` 讲一处。
+    为什么绝对上限一步都不能少，只在 `monitor.py::_monitor_pass` 讲一处。
 
     thread lane（SFTP 批量下载）拿不到这个证据：`sftp_job.build_sftp_task()` 不往 task
     里放 `progress_path`（`apps/jobs/sftp_job.py::build_sftp_task`），它的进度是 worker
@@ -440,123 +479,31 @@ def _relativize(abs_path: str) -> str:
 
 
 def _ensure_monitor() -> None:
-    """超时看门狗：只在有作业在飞时活着，空闲若干轮后自己退出。
+    """接缝：拉起超时看门狗（实现在 `apps/jobs/monitor.py::_ensure_monitor`）。
 
-    不留常驻线程 —— 桌面档里那是白占的一个线程和一条 DB 连接。
+    这个名字必须留在本模块全局：`submit()` 按全局查找调它，测试接缝按名字 patch 它
+    （`test/backend/job_cancel_fixtures.py::_patch_seams`）。`_in_flight` 的所有权在
+    本模块，每次调用**显式传给** monitor —— monitor 不 import 本模块，方向不成环
+    （口径见 `monitor.py` 模块头）。
     """
-    global _monitor_thread
-    with _monitor_lock:
-        if _monitor_thread and _monitor_thread.is_alive():
-            return
-        _monitor_thread = threading.Thread(target=_monitor, daemon=True,
-                                           name='jobs-monitor')
-        _monitor_thread.start()
-
-
-def _timed_out(job_id: int, future: 'Future', timeout: int) -> None:
-    """到点判死的唯一动作：摘出在飞表 → 出声 → 写终态 error → 试取消。
-
-    承重的只有一件事：**这里必须摘条目**，别指望 `future.cancel()` 那次回调替它摘 ——
-    RUNNING（已进 call queue）的 future `cancel()` 返回 False ⇒ 不会触发 `_write_back`
-    ⇒ 条目留下就每轮重判一次，而看门狗收不了工的后果见 `_monitor_pass` 末段。
-    变异自证（2026-10-29 本机）：删掉这一行 ⇒
-    `test_job_cancel.py::TimeoutClockOriginTests` 的四条判据与本文件的
-    `test_expired_deadline_reaps_a_leaked_entry_without_touching_a_done_row` 同时红。
-
-    三句之间的**先后不承重**（同一变异批实测：把 `future.cancel()` 挪到写行之前、或把
-    摘条目挪到最后一句，两个文件 23 条判据全绿）—— 因为回填见 `future.cancelled()` 就
-    收手（`_write_back`），且下面这句 UPDATE 带 `status='running'` 守卫。仍保持现在这个
-    顺序只是取向：让「超时 N 分钟，已中止」先落库，不把正确性押在那道收手上。
-    **别把它写成守卫** —— 上一版注释那句「两处顺序都是承重的…别调换」是过度声称，
-    2026-10-29 评审抓的正是它。
-    """
-    _in_flight.pop(job_id, None)
-    logger.warning('job %s timed out after %s s, killed as error', job_id, timeout)
-    Job.objects.filter(pk=job_id, status='running').update(
-        status='error', error=f'超时 {timeout // 60} 分钟，已中止',
-        finished_at=timezone.now())
-    future.cancel()
+    monitor._ensure_monitor(_in_flight)
 
 
 def _monitor_pass(now: float) -> None:
-    """看门狗的一轮：判超时（两套时钟）→ 读侧车 → 首次见到进度时按下执行起点。
+    """接缝：看门狗的一轮（实现与「两套时钟/收工」那段的唯一叙述在
+    `apps/jobs/monitor.py::_monitor_pass`，这里不重复它）。
 
-    从 `_monitor()` 的循环体里抽出来是**为了可测**：C1 的判据要能造出
-    「在队列里等过一整段预算、之后又被推进了一次」这种时钟，真线程里既等不起
-    也不该等。循环本身只管节奏与收工，语义全在这一函数里。
-
-    两套时钟的分工：`started`（执行预算，首次进度才按下）与 `deadline`（绝对上限，
-    submit 那刻定死，两者都是 `_Flight` 的字段）。**每一次 `_monitor_pass` 至少有
-    一个时钟在管**，不存在「永远不超时」的分支（判据 `test_job_cancel.py::TimeoutClockOriginTests`）。
-
-    这条不变量同时是看门狗**收得了工**的凭据，也是「永久 running」那个形状的唯一解，
-    所以下面这段只在这里讲一遍（`_Flight`、`_start_clock`、`_timed_out` 与判据文件
-    都只留指针）：`run_export_batch_charts`、`run_export_html_report` 把解析放在第一次
-    `write_progress` **之前** ⇒ 解析卡死的作业侧车永远是 0 ⇒ `started` 永远是 None；
-    少了 `deadline` 就是永久 running + 永久在飞，而条目躺在 `_in_flight` 里判不死，
-    `_monitor()` 的空闲退出（`idle > 2`）就永远走不掉，那条 5s 轮询线程连着它每轮的
-    DB 连接一起永生 —— 只能等下次进程启动的 `mark_interrupted_jobs`
-    （`apps/jobs/apps.py::mark_interrupted_jobs`）擦屁股。旧实现的 30/60 分钟超时
-    拦住的正是它，所以绝对上限一步都不能少。
+    留名理由同 `_ensure_monitor`；C1 判据（`test/backend/test_job_cancel.py`、
+    `test/backend/test_job_terminal_ownership.py`）继续以 `executor._monitor_pass(now)`
+    单参调用，测试怎么摆 `_in_flight`（原地改或 `mock.patch.object` 换对象）都吃到
+    本模块的**当前绑定**——接缝在调用时才取这个全局。
     """
-    for job_id, flight in list(_in_flight.items()):
-        if flight.started is None:
-            # 执行预算还没按下 ⇒ 由绝对上限兜底。**这一支不许省**，为什么只能在
-            # 本函数 docstring 里读。口径与旧实现一致：判死看的是「看门狗有没有见过
-            # 进度」，同一轮里即便侧车已经有值也先判死（旧那版从 submit 起算，
-            # 本就没有「晚到进度」这回事）。
-            if now > flight.deadline:
-                _timed_out(job_id, flight.future, flight.timeout)
-                continue
-            # 没越线就继续往下读侧车：这一轮可能就是「首次见到进度」，执行预算要在
-            # 这里按下 —— 早退（`continue`）等于把所有作业退回旧口径（submit+timeout）。
-        elif now - flight.started > flight.timeout:
-            _timed_out(job_id, flight.future, flight.timeout)
-            continue
-        percent = read_progress(flight.progress_path) if flight.progress_path else 0
-        if percent > 0 and flight.started is None:
-            # 首次读到进度 > 0 ⇒ 作业真的开跑了，执行预算从这一刻起算，**每作业只钉一次**
-            # （每见到新进度都重置起点，等于让长作业永远超不了时）。
-            # `is flight` 不是「防不可能发生的事」—— 这条竞态真的走得到（回填线程与本
-            # 线程之间没有任何同步），诚实的口径是：后果只到「把已结束的条目塞回在飞表
-            # ⇒ 一条泄漏条目 + 看门狗多活几轮」，写不出错行（下面的 UPDATE 都带
-            # `status='running'` 守卫，终态行不匹配）；且泄漏条目最迟在绝对上限那轮被
-            # `_timed_out` 摘掉，走不到上面那段永生。两件事都由
-            # `test_job_terminal_ownership.py::TimedOutOwnershipTests` 的
-            # `test_expired_deadline_reaps_a_leaked_entry_without_touching_a_done_row`
-            # 钉着（条目摘掉 + 终态行原样不动），别再把它当成散文。
-            if _in_flight.get(job_id) is flight:
-                _in_flight[job_id] = flight._replace(started=now)
-        if 0 < percent < 100:
-            # 只推进、不回退：worker 崩在半路时这里读到的是最后已知值，
-            # 而 done 由 _write_back 统一置 100，轮询器不许抢跑。
-            Job.objects.filter(pk=job_id, status='running').exclude(
-                progress__gte=percent).update(progress=percent)
-
-
-def _monitor() -> None:
-    """在飞作业的看门狗：读进度侧车 + 判超时（每一轮见 `_monitor_pass`）。
-
-    周期是 `MONITOR_INTERVAL`=5s，比 spec §4.3 说的「1 次/秒/作业」更省 ——
-    SQLite 每 5 秒一次单字段 UPDATE，20 人 × 3 类作业也不会写放大；
-    进度条 5 秒一跳对人是可读的。改这个节奏只改常量，别改循环。
-    """
-    idle = 0
-    while True:
-        if not _in_flight:
-            idle += 1
-            if idle > 2:
-                return                      # 空闲就收工，下次 submit 再拉起
-        else:
-            idle = 0
-            _monitor_pass(time.monotonic())
-        connections.close_all()
-        time.sleep(MONITOR_INTERVAL)
+    monitor._monitor_pass(now, _in_flight)
 
 
 def reset_for_tests() -> None:
     """关掉两条池与看门狗，让测试用例之间不共享子进程/线程状态。"""
-    global _pool, _pool_failed, _monitor_thread, _download_pool
+    global _pool, _pool_failed, _download_pool
     with _pool_lock:
         if _pool is not None:
             _pool.shutdown(wait=False, cancel_futures=True)
@@ -567,5 +514,4 @@ def reset_for_tests() -> None:
             _download_pool.shutdown(wait=False, cancel_futures=True)
         _download_pool = None
     _in_flight.clear()
-    with _monitor_lock:
-        _monitor_thread = None
+    monitor.reset_for_tests()
