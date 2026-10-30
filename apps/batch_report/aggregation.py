@@ -5,8 +5,14 @@ These pure functions take the already-computed per-phase structures produced by
 batch report can reuse the single-file analysis components:
 
 - ``aggregate_bin_site_table`` → ``bin_table_data`` + ``bin_site_columns``
-  (matches ``apps.dashboard.views.compute_bin_site_table`` output shape, consumed
-  by ``frontend/.../dashboard/components/BinSiteCrossTable.vue``).
+  (matches ``apps.dashboard.services.compute_bin_site_table`` output shape, consumed
+  by ``frontend/.../dashboard/components/BinSiteCrossTable.vue``). In the *batch*
+  payload the only reader of these two keys is the HTML report
+  (``apps/export/html_report/batch.py``); the batch page re-implements this same
+  shape per selected phase in ``frontend/src/utils/batchAggregation.ts``
+  (``aggregateBinSiteTable``), fed by ``phases[].bin_info[].sites`` — which is
+  therefore NOT the same thing and must stay even when the batch-level table is
+  skipped.
 - ``aggregate_uph`` → a single ``UphData``-shaped dict (matches
   ``apps.analysis.services.statistics.compute_uph`` output, consumed by
   ``frontend/.../dashboard/components/UphCard.vue``).

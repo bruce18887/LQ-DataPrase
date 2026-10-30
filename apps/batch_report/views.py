@@ -5,7 +5,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Count
-from django.shortcuts import get_object_or_404
+from django.http import Http404
 from django.utils import timezone
 import excelize
 from django.http import FileResponse
@@ -16,6 +16,7 @@ from apps.export.html_report import build_batch_html_report
 from apps.common.errors import error_response
 from apps.common.export_naming import base_export_context, render_export_filename
 
+from apps.datafiles.lookup import owned_files_by_pk
 from apps.datafiles.models import DataFile
 from apps.datafiles.services import get_cached_parsed_file
 from apps.analysis.services.statistics import (
@@ -53,6 +54,9 @@ class BatchReportViewSet(viewsets.GenericViewSet):
             return error_response('param_required', 'batch_name required')
 
         try:
+            # 默认 ``for_html_report=False``：JSON 分支不凑趋势/Bin 分布/Bin×Site 交叉表
+            # ——前端一个都不读（判据与核对口径见
+            # ``test/backend/test_batch_report_payload.py`` 模块 docstring）。
             payload = compute_batch_yield_data(request.user, batch_name)
         except BatchNotAvailableError as e:
             return error_response('batch_not_available', str(e), 404)
@@ -66,7 +70,13 @@ class BatchReportViewSet(viewsets.GenericViewSet):
             return error_response('param_required', 'batch_name required')
 
         try:
-            payload = compute_batch_yield_data(request.user, batch_name)
+            # HTML 是这四段分区（趋势 / Bin 分布 / Bin×Site 批级交叉表）唯一的读方，
+            # 所以只有这条分支付它们的账 —— 付的是**那四把 key 的构造与体积**。
+            # 「每文件第二趟全量 bin 统计」与「整批 DataFrame 驻留」不在这笔账里：
+            # 趋势输入带的是算好的 bin_stats，两个分支都已经不付（判据见
+            # test/backend/test_batch_report_payload.py 的三条绊线）。
+            payload = compute_batch_yield_data(
+                request.user, batch_name, for_html_report=True)
         except BatchNotAvailableError as e:
             return error_response('batch_not_available', str(e), 404)
 
@@ -104,9 +114,22 @@ class BatchReportViewSet(viewsets.GenericViewSet):
                 return error_response(
                     'invalid_file_id', f'file_id 必须为整数: {fid!r}')
 
-        phases = []
+        # 一次取全（取数口径在 ``apps/datafiles/lookup.py`` 的 ``owned_files_by_pk``，
+        # analysis 那边共用它），缺失者在下一次解析**之前**按输入顺序判 404：
+        # 改前 SELECT 与解析在循环里交错，``[有效, 缺失]`` 会先把有效那个解析掉（挤解析
+        # 缓存）再抛 404。抛的话术与 ``get_object_or_404`` 逐字一致，信封不变。
+        # 「坏 id ⇒ 404」是**本视图**的语义（那边 analysis 是静默跳过）⇒ 这句判断留在
+        # 调用点，不下沉进公共取数。
+        found = owned_files_by_pk(request.user, normalized_ids)
         for fid in normalized_ids:
-            df_obj = get_object_or_404(DataFile, pk=fid, owner=request.user)
+            if fid not in found:
+                raise Http404(
+                    f'No {DataFile._meta.object_name} matches the given query.')
+
+        phases = []
+        # 按输入顺序回放**含重复**：``[a, a]`` 出两行，去重就是改产物。
+        for fid in normalized_ids:
+            df_obj = found[fid]
             df, metadata, fmt = get_cached_parsed_file(fid, request.user.pk, df_obj)
             if df is None:
                 continue

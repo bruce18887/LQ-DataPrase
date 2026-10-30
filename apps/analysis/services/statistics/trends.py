@@ -116,12 +116,50 @@ def compute_bin_trend(file_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def _bin_stats_and_total(file_data):
+    """取该文件的 ``(bin_stats, total_count)`` —— **只**认调用方已经算好的那一份。
+
+    ``calculate_fail_bin_statistics`` 是逐帧全量扫描。批次报告
+    （``apps/batch_report/services.py``，本模块这条的唯一生产调用方）在自己的循环里
+    已经为每个文件跑过一次，把它带下来 ⇒ 趋势这条不再算第二趟，也就不需要 ``df``
+    ——「每文件第二趟全量 bin 统计」与「批次内每个文件的 DataFrame 同时驻留」是同一条账的两面。
+
+    **这里曾经有过一条 ``df`` 兼容 fallback，2026-10-30 审查 Important 1 删掉了**，理由是
+    它一个生产调用方都没有：``compute_yield_trend`` 只被 ``apps/batch_report/services.py``
+    调用（带的就是 ``bin_stats``+``total``），而 ``_load_files_from_request`` 那份
+    ``df``+``metadata`` 形状只喂 ``compute_bin_trend`` / ``compute_param_trend`` ——
+    本函数自己的 docstring 当时拿它给 fallback 背书，说的是一条到不了这里的生产者。
+    两种方言并存还有个静默危害：同一份入参里 ``bin_stats`` 与 ``df`` 都在时，
+    代码**悄悄**偏好 ``bin_stats``，两份算得不一样也没人报。
+    本仓规则：能直接改代码就别留兼容垫片。判据
+    ``test/backend/test_bin_trend_yield.py`` 的
+    ``test_frame_shape_is_rejected_there_is_no_second_dialect``。
+
+    ``total_count`` 口径与改前逐字相同：bin 计数之和为 0（文件没有 bin 列 ⇒
+    ``calculate_fail_bin_statistics`` 整块返回 ``{}``，但行数不是 0 —— 生产里真会出现的一格）
+    时用调用方带的 ``total``；批次报告给的是 ``df.shape[0]``，与旧那句 ``... or len(df)``
+    同一个数。
+    """
+    bin_stats = file_data['bin_stats']
+    reported_total = file_data['total']
+    total_count = sum(info.get('count', 0) for info in bin_stats.values())
+    if not total_count:
+        total_count = reported_total
+    return bin_stats, total_count
+
+
 def compute_yield_trend(file_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Compute yield trend across multiple files with SPC control limits.
 
     Args:
-        file_data_list: List of dicts with 'df', 'metadata', 'file_id', 'filename', 'timestamp'
+        file_data_list: List of dicts with 'file_id', 'filename', 'timestamp' and
+            precomputed 'bin_stats' + 'total' -- the caller is expected to have
+            already run ``calculate_fail_bin_statistics`` once per file (that is
+            exactly what the batch report does, and the whole point of this
+            signature: no second full bin pass, no DataFrame kept alive).
+            A raw 'df' + 'metadata' pair is **not** accepted; see
+            ``_bin_stats_and_total`` for why the old fallback is gone.
 
     Returns:
         Dictionary with files, trend_data, spc_limits, anomalies
@@ -139,15 +177,12 @@ def compute_yield_trend(file_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
     yield_values = []
 
     for file_data in file_data_list:
-        df = file_data['df']
-        metadata = file_data.get('metadata', {})
         file_id = file_data.get('file_id')
         filename = file_data.get('filename', 'unknown')
         timestamp = file_data.get('timestamp', '')
 
         # Get bin statistics to compute pass/fail counts
-        bin_stats = calculate_fail_bin_statistics(df, metadata)
-        total_count = sum(info.get('count', 0) for info in bin_stats.values()) or len(df)
+        bin_stats, total_count = _bin_stats_and_total(file_data)
         yield_result = compute_pass_yield(bin_stats, total_count)
         pass_count = yield_result['pass_count']
         yield_pct = yield_result['yield_pct']
