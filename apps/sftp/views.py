@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 from apps.common.errors import error_response
 from apps.datafiles.views import _user_upload_dir
 from apps.accounts.models import UserSetting
+from apps.accounts.services import provision_user_setting
 from . import host_keys
 from .cache import set_session, delete_session, SftpSessionCacheError
 from .config_views import SftpConfigMixin
@@ -65,28 +66,80 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
     def _record_last_visit(self, user, *, path=None, config_name=None, host=None, port=None, username=None):
         """Persist last SFTP visit metadata for 断线续连 (per-user).
 
-        只更新传入的字段（update_fields），避免无谓写库。调用方必须 try/except
-        静默包裹——记录失败（如路径超长）绝不能影响浏览/连接主流程。
+        只更新传入的字段（update_fields），**并且只更新真变了的那几个**：值与库里相同就一条
+        SQL 都不发。这五列没有 updated_at 之类的账，「值未变的那次写」在任何消费方眼里都不存在
+        —— 而 SQLite 是单写者，用户反复点同一个目录时那是纯热路径上的重复写放大。
+
+        读的代价（实测；逐分支形状表在 ``test/backend/test_sftp_last_visit_writes.py`` 的模块
+        文档）：**有行** 1 SELECT、**缺行** 1 SELECT + 1 INSERT —— 两支的读侧都与收敛前同数
+        （收敛前：有行 1 SELECT + 1 UPDATE，缺行 1 SELECT + 2 写），缺行一支少 1 条写（值直接
+        进 INSERT）。同实例本请求里已读过 settings（D1 的正缓存）时那次读是**零 SQL**；但描述符
+        对「没有行」的负缓存不算命中，``get_or_create`` 仍会发它自己那 1 条 SELECT。
+
+        零 SQL 让步的是**新鲜度**：比较基准可能是本请求早些时候读到的那个缓存对象，那之后别的请求若
+        改过这几列，「与缓存相等」会跳过库确实需要的那次写（这几列上的一次丢失更新）。这条在
+        ``auto_connect`` 上**是活的**，不是理论：缺行时它先自己 ``get_or_create`` 建行、把那份默认行
+        挂进 ``request.user`` 的缓存，再经 ``_connect_impl`` 走到这里 ⇒ 实测记录段 ``['UPDATE']``、
+        零读（判据 ``AutoConnectWarmCacheTests``；那行若已存在，``.get()`` 不挂缓存，回到
+        ``SELECT + UPDATE``）。``list_files`` 与手动 ``connect`` 两条路进来时缓存必冷。
+
+        **缺失即建**保留，但**不等于**收敛前那句 ``get_or_create``：``defaults`` 只在 create 分支
+        生效，并发下（本请求的缓存咨询看到「没有行」、别的请求抢先建行）走 manager 的 ``.get()``
+        —— 那一支继续往下走 diff+save 收敛，本请求的值不会被静默丢掉；建行统一走
+        ``provision_user_setting``，两个分支都把行钉回 ``user`` 的反向缓存，不让「没有行」的负
+        缓存活完整个请求（判据 ``test_sftp_last_visit_writes.py::MissingRowRaceTests``）。
+
+        ``fields`` 为空（一个值都没传）时整条早退，不读不写也不建。**这一支在生产里不可达**：
+        两个调用点永远至少传一个非 ``None`` 值（``list_files`` 成功分支带 ``path``，
+        ``_connect_impl`` 带 ``config_name``/``host``/``port``/``username``，其中 ``config_name``
+        最差是 ``''``），所以它是给未来调用方定的规矩，不是在跑的策略。真出现那种行也只装默认值，
+        对 断线续连 没有信息量；读这五列的通路只有 ``auto_connect`` 与 ``last_visit``，
+        它们自己就带 ``get_or_create``，不会扑空（两个下载端点读的是 ``sftp_download_timeout``，
+        **不在**这五列里，别把它算进「这五列的读者」）。
+
+        写仍走 ``save(update_fields=…)`` 而**不是** ``QuerySet.update()``：后者不会同步 D1 挂在
+        ``user`` 实例上的那份反向缓存，同请求内后续 ``user.settings`` 会读到旧路径。调用方必须
+        try/except 静默包裹：真会抛的是**库层面**的错（SQLite 单写者下的 ``database is locked``、
+        磁盘/IO 故障 —— 判据 ``RecordingFailureContractTests`` 注入的 ``DatabaseError`` 就是从
+        ``save()`` 一路传到调用点的）。「路径超过 ``max_length=1024``」**不是**失败模式：SQLite
+        不执行 ``max_length``（那是 Django 表单层的口径），实测 4002 字符原样落库、零异常。
+        一处已知、今天不可达的副作用：``save()`` 抛时，这次未提交的值就留在已经挂进缓存的那个
+        对象上（实测：缓存里是新值、库里还是旧值，同实例第二次读零 SQL 且读到那个未提交值），
+        而两个调用点在记录之后都不再读 settings，所以它是潜在项，本批不加防御性 try/except。
+
+        上面凡是「收敛前」的数字都可重新取出来对：
+        ``git show 9cf1a0a:apps/sftp/views.py`` 的 ``_record_last_visit`` —— 本批之外最后一次
+        改动这个文件的提交就是它（复核：``git log --format=%h -- apps/sftp/views.py`` 去掉本批
+        那一笔后的头一条），所以它那一份正文 == 本批收敛前的正文。写提交号而不是 ``HEAD``：
+        本批落地后 ``HEAD`` 就不再是收敛前那一份了。
         """
-        setting, _ = UserSetting.objects.get_or_create(user=user)
-        updates = []
+        fields = {}
         if path is not None:
-            setting.sftp_last_path = path
-            updates.append('sftp_last_path')
+            fields['sftp_last_path'] = path
         if config_name is not None:
-            setting.sftp_last_config = config_name
-            updates.append('sftp_last_config')
+            fields['sftp_last_config'] = config_name
         if host is not None:
-            setting.sftp_last_host = host
-            updates.append('sftp_last_host')
+            fields['sftp_last_host'] = host
         if port is not None:
-            setting.sftp_last_port = port
-            updates.append('sftp_last_port')
+            fields['sftp_last_port'] = port
         if username is not None:
-            setting.sftp_last_username = username
-            updates.append('sftp_last_username')
-        if updates:
-            setting.save(update_fields=updates)
+            fields['sftp_last_username'] = username
+        if not fields:
+            return
+
+        setting, created = provision_user_setting(user, fields)
+        if created:
+            return
+
+        # created=False（含并发抢建那支：`defaults` 被 manager 的 `.get()` 吞了）⇒ 必须继续
+        # 走下面的 diff+save 收敛，本请求的值才落得了地。
+        changed = {name: value for name, value in fields.items()
+                   if getattr(setting, name) != value}
+        if not changed:
+            return
+        for name, value in changed.items():
+            setattr(setting, name, value)
+        setting.save(update_fields=list(changed))
 
     def _connect_impl(self, request, *, host, port, username, password, config_name=''):
         """Shared connect logic: handshake → persist session → record last visit."""
