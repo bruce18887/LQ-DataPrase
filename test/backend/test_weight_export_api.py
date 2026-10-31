@@ -8,7 +8,8 @@
 ① 可见性既不能多画也不能少画 ⇒ 单组可见时同时断**系列名 + y 区域的表内行号与列跨度**
    （只断「4 条」的话，「永远画前 4 行」这种实现也能绿）；
 ② `palette` 的长度守卫是「空色板静默换板」的唯一屏障 —— builder 那侧 `palette=[]` 是**合法**的，
-   会静默退回 `DEFAULT_PALETTE`（`test_weight_xlsx.py:563` 就钉着那个行为），所以这里断 400；
+   会静默退回 `DEFAULT_PALETTE`（`test/backend/test_weight_xlsx_chart.py::PaletteArgumentTests::
+   test_empty_palette_falls_back_to_default_palette` 钉着那个行为），所以这里断 400；
 ③ 下载名必须由 `render_export_filename(user, 'weight_plot', …)` 派生 ⇒ 除默认值外还要断
    「用户改过的模板真的生效」（只断默认值时，视图里硬编码同一个串也能绿）。
 
@@ -251,8 +252,9 @@ class ExportEndpointTests(EndpointFixtureMixin, MediaProbeControlMixin, TestCase
 
     def test_palette_wrong_length_or_type_is_param_required(self):
         # 与上一条配对：长度不对必须拒。空表尤其危险 —— 它到了 builder 会静默换成
-        # DEFAULT_PALETTE（`test_weight_xlsx.py::test_empty_palette_falls_back_to_default`），
-        # 这条守卫是「用户色板不被悄悄替换」的唯一屏障。
+        # DEFAULT_PALETTE（`test/backend/test_weight_xlsx_chart.py::PaletteArgumentTests::
+        # test_empty_palette_falls_back_to_default_palette`），这条守卫是「用户色板不被
+        # 悄悄替换」的唯一屏障。
         for bad in ([], ['2563eb'] * 7, ['2563eb'] * 9, '2563eb', None, {'a': 1}, 8):
             r = self._post(palette=bad)
             self.assertEqual(r.status_code, 400, bad)

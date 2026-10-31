@@ -45,7 +45,8 @@ def _str_list(value, expected: int) -> list[str] | None:
     """必须是**恰好** expected 项的列表，否则 None（= 守卫拒绝）。
 
     长度守卫不是洁癖：`xlsx._series_color` 取 `palette[组序 % len(palette)]`，而 builder 里
-    `tuple(...) or DEFAULT_PALETTE` 会让空表**静默**换成后端那份默认板（`test_weight_xlsx.py:563`
+    `tuple(...) or DEFAULT_PALETTE` 会让空表**静默**换成后端那份默认板（
+    `test/backend/test_weight_xlsx_chart.py::PaletteArgumentTests::test_empty_palette_falls_back_to_default_palette`
     把这个行为钉成了契约）⇒ 少一项就是整份色板错位或替换，用户看到的图色和主题不一致，
     却没有任何错误报出来。值本身畸形（非字符串/非 16 进制）才交给 builder 逐项回退。
     """

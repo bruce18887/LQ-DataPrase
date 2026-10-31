@@ -220,6 +220,11 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
         Body 可选 ``{config_name}`` 覆盖存储的记录；缺省用上次记录。
         无记录 / 配置被删 / 缺少密码 → 400，前端降级为手动预填。
         """
+        # 这里刻意**不**用 ``provision_user_setting``：那个 helper 会把行（**包括已存在的**）
+        # 重新钉进 ``request.user`` 的反向缓存，而 ``_record_last_visit`` 的「行已存在」分支
+        # 要求冷缓存进来（有行 = 1 SELECT + UPDATE）；换回 helper 会把那次读变成零读，把写的
+        # 新鲜度缺口暴露在这条路上。该形状/新鲜度契约由 ``test_sftp_last_visit_writes``
+        # 钉住（AutoConnectWarmCacheTests）。
         setting, _ = UserSetting.objects.get_or_create(user=request.user)
         config_name = request.data.get('config_name') or setting.sftp_last_config
         if not config_name:
@@ -241,7 +246,7 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
         ``can_auto_connect`` 需要同时满足：上次用保存配置连接 + 配置仍存在 + 有加密密码。
         host/port/username 始终返回（供手动预填）；密码永不回传。
         """
-        setting, _ = UserSetting.objects.get_or_create(user=request.user)
+        setting, _ = provision_user_setting(request.user)
         cfg = None
         if setting.sftp_last_config:
             cfg = SftpConfig.objects.filter(owner=request.user, name=setting.sftp_last_config).first()
@@ -371,7 +376,7 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
 
         timeout_sec = request.data.get('timeout')
         if timeout_sec is None:
-            setting, _ = UserSetting.objects.get_or_create(user=request.user)
+            setting, _ = provision_user_setting(request.user)
             timeout_sec = setting.sftp_download_timeout
         timeout_sec = clamp_timeout(timeout_sec)
 
@@ -409,7 +414,7 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
             return error_response('缺少 path 参数')
         timeout_sec = request.data.get('timeout')
         if timeout_sec is None:
-            setting, _ = UserSetting.objects.get_or_create(user=request.user)
+            setting, _ = provision_user_setting(request.user)
             timeout_sec = setting.sftp_download_timeout
         timeout_sec = clamp_timeout(timeout_sec)
 

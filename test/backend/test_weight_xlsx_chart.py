@@ -318,3 +318,27 @@ class PaletteArgumentTests(TestCase):
         with self.assertRaisesRegex(TypeError, 'palette'):
             build_weight_workbook(doc)
         self.assertTrue(build_weight_workbook(doc, palette=DEFAULT_PALETTE))
+
+    def test_empty_palette_falls_back_to_default_palette(self):
+        """空表（``[]`` 与 ``()``）在 builder 那一层静默换成默认板。
+
+        这是**直接调用 builder** 才走得到的支路：API 的 ``_str_list`` 守卫先拒掉空表
+        （``test_weight_export_api`` 的 ``param_required`` 用例），所以它只是一层兜底。
+        回退实现是 ``tuple(...) or DEFAULT_PALETTE`` —— 逐组取色仍按 ``组序 % 8``。
+        """
+        doc = _doc()
+        for empty in ([], ()):
+            charts = _charts(doc, palette=empty)
+            self.assertEqual(len(charts), 14, empty)
+            for index, (_, chart) in enumerate(charts):
+                want = DEFAULT_PALETTE[index % len(DEFAULT_PALETTE)]
+                for ser in chart.series:
+                    self.assertEqual(
+                        ser.graphicalProperties.line.solidFill.srgbClr, want,
+                        (empty, index, ser.tx.v))
+
+    def test_explicit_none_palette_is_not_silently_replaced(self):
+        # None 不是「空表」：builder 不解引用 `or` 之前就先迭代，直接 TypeError
+        # （'NoneType' object is not iterable）。只钉异常类型，不钉文案。
+        with self.assertRaises(TypeError):
+            build_weight_workbook(_doc(), palette=None)
