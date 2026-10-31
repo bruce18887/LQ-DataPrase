@@ -180,6 +180,30 @@ class _BytesLRUCache:
                 self._total -= freed
                 self._evictions += 1
 
+    def evict_keys(self, pred) -> int:
+        """逐出 ``pred(key)`` 为真的条目，返回逐出条数。
+
+        与 ``evict_to``/``_store_locked`` 的三点区别都是刻意的：
+        1. 那两条按**预算**淘汰、且「至少保留一条」（防热点文件刚存就自逐）；本方法按
+           **内容坐标**点名淘汰，点到的全走 —— 没人再读它时留下的字节就是白占的预算
+           （脏不脏由键管，两半论证见 ``evict_parse_cache_for_paths`` 的 docstring）。
+        2. 谓词只在**扫描**阶段求值、弹出在扫描之后 ⇒ 谓词抛错时一条都没动过，
+           不会出现「条目没了但计费没扣」的错开。
+        3. 不碰 ``_pending``、也不 notify：唤醒等待者的只有三处 ``notify_all``（``get_or_compute``
+           的发布段与异常释放段、``put`` 的写透；这三处的**位置与数目**由
+           ``test_parse_cache_invariant_scan.py::NotifyAllSourceScanTests`` 守着），
+           定点淘汰不在其列 ⇒ 它插在中间也不会把挂在同一 key 上等待的人丢下（不会丢唤醒）。
+        整段一次持锁 ⇒ 与发布段互斥，看不到「条目写了一半」的中间态。
+        入账进 ``_evictions``（``/metrics`` 里预算淘汰与定点淘汰同账），不进 ``_clears``。
+        """
+        with self._cv:
+            doomed = [key for key in self._data if pred(key)]
+            for key in doomed:
+                _, freed = self._data.pop(key)
+                self._total -= freed
+            self._evictions += len(doomed)
+            return len(doomed)
+
     def get_or_compute(self, key, compute, size_of=_parse_value_bytes, store_if=None):
         """返回 key 对应的值，必要时由当前线程计算并放入缓存。
 
@@ -259,6 +283,8 @@ class _BytesLRUCache:
         """
         if nbytes > self._budget:
             return
+        if key in self._data:          # 同键覆盖先退旧账：``_data[key] = ...`` 是原地替换，
+            self._total -= self._data[key][1]   # 旧那份不会自己从 _total 里扣 ⇒ 一只条目占两笔预算
         self._data[key] = (value, nbytes)
         self._data.move_to_end(key)
         self._total += nbytes
@@ -507,8 +533,10 @@ def get_parse_cache_stats() -> dict:
     （P1-1 之前是常态）。八个键都是整数，没有「取不到就当 0」的模糊空间 ——
     空缓存的真 0 和读失败的可不是一回事，所以这里不返回 None。
 
-    `hits` / `misses` 算命中率；`evictions` 是预算或水位淘汰掉的，`clears` 是显式
-    清空（删文件/上传覆盖）——两者混在一起会把「内存吃紧自愈」读成「用户删了文件」。
+    `hits` / `misses` 算命中率；`evictions` 是预算/水位淘汰**加**按路径定点淘汰的，
+    `clears` 是显式全清（MemoryError 兜底与整体改路径的管理命令；G1（2026-10-28 波次）
+    之后删文件/合并只走定点淘汰，不再进 `clears`）——两者混在一起会把「内存吃紧自愈」
+    读成「用户删了文件」。
     """
     with _parse_cache._cv:
         return {
@@ -529,13 +557,43 @@ def evict_parse_cache_to(fraction: float) -> None:
     _parse_cache.evict_to(int(_parse_cache._budget * ratio))
 
 
-def clear_parse_cache() -> None:
-    """Drop the in-memory parsed-file caches.
+def evict_parse_cache_for_paths(paths) -> int:
+    """只淘汰「本次操作真的动过的那些路径」的条目，返回逐出条数（低频操作专用）。
 
-    Neither cache evicts by key, so we clear them wholesale. Call this after
-    deleting DataFile rows so a deleted (or replaced) file can never be
-    served from a stale cache entry. Entries re-populate lazily on the next
-    access, so the only cost is a re-parse on demand.
+    ``paths`` 是调用点交出来的磁盘路径：``resolve_file_path(row.file_path)`` 的结果，
+    或 ``_plan_file_moves`` 的 ``src``/``target``（移动的两端都算「动过」）。
+    键的第一元同样出自 ``resolve_file_path``，但那个函数对**绝对**入库值是原样透传、
+    只对相对值做 ``normpath`` ⇒ 比对前两边各过一次 ``normcase(normpath(...))``，否则
+    ``media\\data\\x`` 与 ``media/data/./x`` 这种同文件不同写法会各留一条（不脏，同 ①）。
+    Windows 上 ``normcase`` 还折大小写：盘上大小写不敏感、两条写法本就是同一只文件，
+    多逐一条只多付一次重解析 —— 归一化只会**多**逐，**少**逐才可能留脏，方向是安全的。
+
+    为什么定点淘汰足够、不必全清（判据见 ``test/backend/test_parse_cache_eviction.py``、
+    ``test/backend/test_parse_cache_scoped_invalidation.py``，而「哪些调用点在交路径」这个
+    集合本身由 ``test/backend/test_parse_cache_invariant_scan.py`` 钉住）：键是内容坐标
+    ``(绝对路径, 盘上 mtime_ns, format_type)``，「行没了」有两种形状、两种都不脏 ——
+    ① 另有行指向同一坐标（``file_path`` 无唯一约束，``consolidate_uploads`` 的 db_only
+    分支就把行改写到已存在的同名目标上）：留下的条目是**同一份正确内容**，逐它只为回收预算；
+    ② 文件真被删时 ``_disk_mtime_ns`` 走 OSError 分支读回 **0** ⇒ 下一次读换了键、必然 miss
+    后自行重解析。两半各一条判据：``SharedPhysicalPathTests``、``RemovedFileRereadsUnderANewKeyTests``。
+    全清对②**没有**额外保护：在途那条发布它同样收不回 —— 挡脏的是键，不是清的半径。
+
+    ``_cached_fail_data`` 不随本函数清理：``functools.lru_cache`` 没有按谓词丢弃的 API，
+    而它的 key 里带着同一组内容坐标 ⇒ 上面那两半对它同样成立，``maxsize=32`` 自己封顶。
+    """
+    wanted = {os.path.normcase(os.path.normpath(p)) for p in paths if p}
+    return _parse_cache.evict_keys(
+        lambda key: os.path.normcase(os.path.normpath(key[0])) in wanted)
+
+
+def clear_parse_cache() -> None:
+    """Drop **everything** from both in-memory parsed-file caches.
+
+    全站清空只留给「此刻没有『哪些路径安全』这回事」的场合：MemoryError 兜底
+    （``apps/common/exceptions.py``）与整体重写路径的管理命令
+    （``consolidate_uploads`` / ``fix_moved_project_paths``，理由见各自的调用点）。
+    删文件/移动文件那类只动几条的操作改用 ``evict_parse_cache_for_paths(...)``：
+    这里一把清掉的是**全站**的帧，别的用户下一次请求就得从盘上重解析。
     """
     _parse_cache.clear()
     _cached_fail_data.cache_clear()

@@ -25,7 +25,7 @@ from apps.datafiles.serializers import DataFileSerializer, ParseHistorySerialize
 from apps.datafiles.services import (
     get_cached_parsed_file,
     get_cached_fail_data,
-    clear_parse_cache,
+    evict_parse_cache_for_paths,
 )
 from apps.datafiles.utils import extract_product_code, resolve_file_path
 from apps.analysis.services.statistics import (
@@ -364,12 +364,17 @@ class DataConsistencyCheckView(APIView):
         ).values_list('id', 'file_path')
 
         deleted_ids = []
+        deleted_paths = []
         for f_id, f_path in db_files:
-            if not os.path.exists(resolve_file_path(f_path)):
+            abs_path = resolve_file_path(f_path)
+            if not os.path.exists(abs_path):
                 deleted_ids.append(f_id)
+                deleted_paths.append(abs_path)
 
         deleted_count = DataFile.objects.filter(id__in=deleted_ids).delete()[0]
-        clear_parse_cache()
+        # 键的第一元就是上面那个 resolve 结果：孤儿行有哪些就淘汰哪些，
+        # 还活着的行（包括别的用户的）不该为这次清理重解析。
+        evict_parse_cache_for_paths(deleted_paths)
 
         return Response({
             'status': 'ok',

@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import BaseATEParser, get_parser
-from apps.datafiles.services import clear_parse_cache, put_cached_parsed_file
+from apps.datafiles.services import evict_parse_cache_for_paths, put_cached_parsed_file
 from apps.datafiles.utils import extract_product_code, resolve_file_path, store_file_path
 
 logger = logging.getLogger(__name__)
@@ -212,11 +212,23 @@ def _delete_datafile_file_only(datafile):
     (``/batch-dirs/<name>/``) which owns the rmtree semantics. Empty parent
     directories are cleaned upward, stopping at MEDIA_ROOT; ``_user_upload_dir``
     recreates its own dirs on demand, so this is safe.
+
+    Returns the ``resolve_file_path`` result **only when this call really
+    unlinked the file**, otherwise ``None`` (file already gone, or ``os.remove``
+    raised and the ``OSError`` was swallowed). Callers feed that value straight
+    into ``evict_parse_cache_for_paths`` instead of re-deriving the path
+    themselves: the eviction set is then "what was actually deleted" and never
+    claims a deletion that did not happen. ``None`` is dropped by that
+    function's ``if p`` filter, and not evicting it is safe for the same reason
+    argument ② there gives — with no file on disk ``_disk_mtime_ns`` reads 0,
+    so no read can rebuild the stale key any more.
     """
     file_path = resolve_file_path(datafile.file_path)
+    unlinked = False
     try:
         if os.path.exists(file_path):
             os.remove(file_path)
+            unlinked = True
         parent = os.path.dirname(file_path)
         root = os.path.normpath(settings.MEDIA_ROOT)
         while parent and os.path.normpath(parent) != root:
@@ -230,6 +242,7 @@ def _delete_datafile_file_only(datafile):
             parent = os.path.dirname(parent)
     except OSError:
         pass
+    return file_path if unlinked else None
 
 
 def _remove_empty_dirs_up_to(start_dir, root):
@@ -336,6 +349,7 @@ def _delete_duplicate_files(user):
     an existing batch directory and its remaining files are untouched.
     """
     deleted_count = 0
+    deleted_paths = []
     groups = _group_duplicates(user)
     # 一次取回全部待删行：曾是「每个重复文件一次 SELECT」，几十组重复时就是几十次
     # 往返。owner=user 与 _group_duplicates 同源，是越权防线，不是冗余条件。
@@ -347,10 +361,11 @@ def _delete_duplicate_files(user):
             if df is None:
                 continue
             with transaction.atomic():
-                _delete_datafile_file_only(df)
+                unlinked = _delete_datafile_file_only(df)
                 df.delete()
+            deleted_paths.append(unlinked)
             deleted_count += 1
-    clear_parse_cache()
+    evict_parse_cache_for_paths(deleted_paths)
     return deleted_count
 
 

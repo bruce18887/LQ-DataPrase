@@ -26,7 +26,7 @@ from apps.datafiles.serializers import (
     DataFileSerializer,
     normalize_tags,
 )
-from apps.datafiles.services import clear_parse_cache
+from apps.datafiles.services import evict_parse_cache_for_paths
 from apps.datafiles.utils import store_file_path
 
 from ._helpers import (
@@ -204,9 +204,13 @@ class DataFileViewSet(viewsets.ModelViewSet):
         # 只删该文件（批次行也一样）——整批删除由 /batch-dirs/<name>/ 语义承担，
         # 历史实现（_delete_datafile_on_disk）对批次行 rmtree 整个批次目录，
         # 任何"删单个文件"的操作都可能误删整批。
-        _delete_datafile_file_only(datafile)
+        # 淘汰集合直接交**它真 unlink 掉的那条路径**：helper 内部用的就是读侧那同一个
+        # `resolve_file_path` ⇒ 键的第一元逐字命中，不必在这儿再算一遍；盘上本来没文件时
+        # 返回 None、被 `evict_parse_cache_for_paths` 的 `if p` 滤掉（那种键 mtime 读回 0，
+        # 任何读也组不出来）。只动这一条，别再全站清一次让别人的帧重解析。
+        touched_path = _delete_datafile_file_only(datafile)
         datafile.delete()
-        clear_parse_cache()
+        evict_parse_cache_for_paths([touched_path])
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=False, methods=['post'])
@@ -217,11 +221,24 @@ class DataFileViewSet(viewsets.ModelViewSet):
             return error_response('file_ids_required', 'ids must be a non-empty list')
         # Owner-scoped: only the requesting user's files are ever touched.
         qs = DataFile.objects.filter(owner=request.user, id__in=ids)
+        touched_paths = []
         for datafile in qs:
-            _delete_datafile_file_only(datafile)
+            # 同上：交回的是**真 unlink 掉的那条路径**，盘上没文件时是 None（淘汰函数滤掉）
+            touched_paths.append(_delete_datafile_file_only(datafile))
         deleted_count = qs.count()
         qs.delete()
-        clear_parse_cache()
+        # 残留（刻意不防，只点名）：淘汰集合来自遍历 `qs` 那一遍，而 `qs.delete()` 先
+        # `_chain()` 出一份**新** queryset、再让 Collector 重新 SELECT 一遍要删哪些行
+        # （Django `db/models/query.py` 的 `delete()`，实测 6.0.5：遍历只看到 1 行时
+        # `delete()` 仍报 2）⇒ 只在删除那一刻才匹配上的行会被删掉、却没人替它淘汰。
+        # 它不脏，靠的是 `services.evict_parse_cache_for_paths` 两半论证里的 ①：循环没轮到它
+        # ⇒ unlink 也没轮到它 ⇒ 盘上文件与 mtime 原样，条目还是那只文件的**正确内容**；
+        # 同坐标还有存活行时它照样被**命中**（旧注释猜的「unlink 后 mtime 读回 0、任何读都
+        # 组不出那条键」实测为假），没人读它才只是等预算回收的一条。
+        # 「行没了、盘上文件留下」这半个形状是本刀之前就有的（HEAD 的循环同样只 unlink 遍历
+        # 到的那几行），本刀只让条目也跟着留下 —— HEAD 那句无条件全清把两半一起盖住了。
+        # 为此再查一遍库换不来任何正确性。
+        evict_parse_cache_for_paths(touched_paths)
         return Response({'deleted': deleted_count})
 
     @action(detail=False, methods=['get'])
@@ -288,8 +305,8 @@ class DataFileViewSet(viewsets.ModelViewSet):
         'batch', batch_name set, sub_batch cleared). The batch may be new or
         already exist (append): a target-name collision gets a ``_<ts>`` suffix
         and the row's filename is updated. ParseHistory rows are audit history
-        and are left untouched. The parse cache is cleared so browse uses new
-        paths.
+        are left untouched. Only the moved rows' own cache entries are evicted
+        (both ends of each move), so other users' parsed frames stay warm.
 
         Ordering guarantee: DB changes commit first, file moves execute after.
         If the DB transaction fails, no file is touched on disk.
@@ -358,7 +375,10 @@ class DataFileViewSet(viewsets.ModelViewSet):
                 )
 
         if updated:
-            clear_parse_cache()
+            # 移动的两端都算「动过的路径」：src 是旧条目键的第一元，target 是新入库值
+            # 解析出来那条路径（读侧下一个键就是它）。两端一起交给定点淘汰。
+            evict_parse_cache_for_paths(
+                [p for _df, src, target, _name, _dir in plans for p in (src, target)])
 
         return Response({
             'combined': len(updated),
@@ -375,7 +395,8 @@ class DataFileViewSet(viewsets.ModelViewSet):
         with batch_name/sub_batch cleared. A target-name collision gets a
         ``_<ts>`` suffix. Once-empty sub-batch / batch directories are removed
         (an emptied batch disappears from the batch listing). ParseHistory rows
-        are audit history and are left untouched. Parse cache is cleared.
+        are audit history and are left untouched. Only the moved rows' own
+        cache entries are evicted (both ends of each move).
 
         Ordering guarantee: DB changes commit first, file moves execute after.
         If the DB transaction fails, no file is touched on disk.
@@ -434,7 +455,8 @@ class DataFileViewSet(viewsets.ModelViewSet):
                 )
 
         if moved:
-            clear_parse_cache()
+            evict_parse_cache_for_paths(
+                [p for _df, src, target, _name, _dir in plans for p in (src, target)])
 
         return Response({
             'moved': len(moved),
