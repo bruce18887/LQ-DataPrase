@@ -41,9 +41,11 @@ def set_user_chart_dpi(user, value: int):
     """把某个账号的 chart_dpi 写成 value，没有行就补一行（UserSetting 不随 create_user
     自动建行，全仓没有 post_save 信号）。
 
-    **写走 manager，不经 `user` 实例上那份反向缓存** —— 生产里 `chart_dpi` 的写手都是
-    「另一个请求里的另一个对象」（`UserSettingsView.put` 经 serializer 保存、
-    `_record_last_visit` 自己 save），它们不会去同步当前 `request.user` 挂着的缓存。
+    **写走 manager，不经 `user` 实例上那份反向缓存** —— 生产里 `chart_dpi` 的写手是
+    「另一个请求里的另一个对象」（`UserSettingsView.put` 经 serializer 保存**它自己那个请求**
+    的 `request.user` 挂着的行），它同步不了**本请求**实例上的那份缓存。D4 之后的
+    `_record_last_visit` **不是**这种形状、别再拿它当例子：它就在同一个请求里 save 挂在
+    `request.user` 缓存上的那个对象（第二轮实测：调用后缓存与库里是同一个值）。
     改成 `user.settings.save()` 看着也能过，但它用写侧补齐了读侧的缓存，等于把
     「一次写能不能到达下一次读」这张端到端网删掉（D1 评审实测到的形状是同实例连改两次
     设置后 `989 not greater than 989` 的假绿，网一断就再也抓不到）。配套的读侧见
