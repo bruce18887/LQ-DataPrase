@@ -17,6 +17,7 @@ from apps.analysis.services.statistics.helpers import (
     get_site_column,
 )
 from apps.datafiles import column_profile, services
+from apps.datafiles import parse_cache_sizing as sizing
 
 
 # ───────────────────────────── 夹具（与主文件同形的原样副本） ─────────────────────────────
@@ -114,25 +115,25 @@ class ColumnProfileBytesTests(SimpleTestCase):
         metadata = _md_of(frame)
         col_meta = services.build_col_meta(frame, metadata)
         profile = column_profile.build_column_profile(frame, 'CTA8290D')
-        profile_bytes = services._column_profile_bytes(profile)
+        profile_bytes = sizing._column_profile_bytes(profile)
 
         self.assertEqual(len(profile['numeric_columns']), 1702)
         self.assertGreater(profile_bytes, 8 * 1024,
                            f'1702 个列名的真实量级是十几 KB，实测只算出 {profile_bytes}')
         entry = dict(metadata, col_meta=col_meta, column_profile=profile)
-        value_bytes = services._parse_value_bytes((frame, entry, 'CTA8290D'))
+        value_bytes = sizing._parse_value_bytes((frame, entry, 'CTA8290D'))
         self.assertGreaterEqual(
             value_bytes,
-            services._frame_bytes(frame) + services._col_meta_bytes(entry) + profile_bytes,
+            sizing._frame_bytes(frame) + sizing._col_meta_bytes(entry) + profile_bytes,
             '体积账必须同时覆盖帧、col_meta 与 column_profile 三块真实量级')
         self.assertGreater(
-            value_bytes, services._frame_bytes(frame) + 64 * len(entry),
+            value_bytes, sizing._frame_bytes(frame) + 64 * len(entry),
             '沿用「metadata 每键 64 字节」会低估')
 
     def test_absent_or_malformed_profile_counts_as_zero(self):
-        self.assertEqual(services._column_profile_bytes(None), 0)
-        self.assertEqual(services._column_profile_bytes('x'), 0)
-        self.assertEqual(services._column_profile_bytes({}), 0)
+        self.assertEqual(sizing._column_profile_bytes(None), 0)
+        self.assertEqual(sizing._column_profile_bytes('x'), 0)
+        self.assertEqual(sizing._column_profile_bytes({}), 0)
 
     def test_parse_without_profile_key_still_accounts_for_frame_and_col_meta(self):
         frame = pd.DataFrame({'P1': [1.0, 2.0], 'P2': [3.0, 4.0]})
@@ -140,5 +141,5 @@ class ColumnProfileBytesTests(SimpleTestCase):
         without = (frame, dict(metadata, col_meta=services.build_col_meta(frame, metadata)),
                    'CTA8290D')
         self.assertGreaterEqual(
-            services._parse_value_bytes(without),
-            services._frame_bytes(without[0]) + services._col_meta_bytes(without[1]))
+            sizing._parse_value_bytes(without),
+            sizing._frame_bytes(without[0]) + sizing._col_meta_bytes(without[1]))

@@ -39,6 +39,7 @@ from apps.analysis.services.statistics.helpers import (
     get_site_column,
 )
 from apps.datafiles import column_profile, services
+from apps.datafiles import parse_cache_sizing
 from apps.datafiles.models import DataFile
 from apps.datafiles.parsers import SYSTEM_COLUMNS
 from apps.datafiles.views import browse_views
@@ -141,9 +142,11 @@ class _CountingParser:
 def _spy_column_profile(case):
     """把 ``build_column_profile`` 的**两个消费绑定**都换成同一个计数器（R6③）。
 
-    patch 的是 `services` / `browse_views` 各自那份绑定（`from … import` 造独立绑定，只
-    patch 口径本体等于没 patch），计数跨两侧 ⇒ 「视图又现算一次」也会红。`case` 只用来
-    挂 `addCleanup`，故缓存侧基座与端到端基座共用这一份实现。
+    patch 的是 `parse_cache_sizing` / `browse_views` 各自那份绑定（`from … import` 造独立
+    绑定，只 patch 口径本体等于没 patch），计数跨两侧 ⇒ 「视图又现算一次」也会红。
+    G2 把挂载外壳（`_column_profile_for_storage`）连同它的 `build_column_profile` 绑定
+    搬到了 `apps/datafiles/parse_cache_sizing.py`，所以消费侧那只绑定跟着搬。
+    `case` 只用来挂 `addCleanup`，故缓存侧基座与端到端基座共用这一份实现。
     """
     state = {'calls': 0}
     real = column_profile.build_column_profile
@@ -152,7 +155,7 @@ def _spy_column_profile(case):
         state['calls'] += 1
         return real(df, format_type)
 
-    for module in (services, browse_views):
+    for module in (parse_cache_sizing, browse_views):
         case.addCleanup(setattr, module, 'build_column_profile', real)
         module.build_column_profile = wrapper
     return state
@@ -339,7 +342,7 @@ class DuplicateColumnFrameGuardTests(_CacheCaseBase):
         frame = self._dup_frame()
         self.parser.frame = frame
         self.parser.metadata = _md_of(frame)
-        with self.assertLogs('apps.datafiles.services', level='WARNING') as logs:
+        with self.assertLogs('apps.datafiles.parse_cache_sizing', level='WARNING') as logs:
             df, metadata, _fmt = self.cached_parse()
         self.assertIsNotNone(df, '重复列名不得让整只文件变成 parse_failed')
         self.assertIn('col_meta', metadata)
@@ -363,7 +366,7 @@ class DuplicateColumnFrameGuardTests(_CacheCaseBase):
         self.parser.metadata = _md_of(frame)
         fake = SimpleNamespace(file_path=self.path, format_type='CTA8290D')
         df, metadata = self.parser.parse(self.path)
-        with self.assertLogs('apps.datafiles.services', level='WARNING') as logs:
+        with self.assertLogs('apps.datafiles.parse_cache_sizing', level='WARNING') as logs:
             services.put_cached_parsed_file(1, 1, fake, df, metadata, 'CTA8290D')
         out_df, cached, _fmt = services.get_cached_parsed_file(1, 1, fake)
         self.assertIsNotNone(out_df, '写透侧抛错会直接把上传链路带崩')

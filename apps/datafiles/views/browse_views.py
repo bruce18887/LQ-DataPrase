@@ -142,7 +142,8 @@ class DataBrowserView(APIView):
         if df is None:
             return error_response('parse_failed')
 
-        # fail 检测按 (file, mtime) 缓存——文件内容未变时零重算（生产大文件收益明显）
+        # fail 检测按内容坐标 (绝对路径, mtime_ns, 格式) 缓存（G2，键不含 owner）：
+        # 文件内容未变时零重算，两行/两个 owner 指向同一只物理文件也只检测一次。
         fail_indices, fail_columns, fail_cells, borderline_cells = get_cached_fail_data(
             datafile.id, request.user.pk, datafile)
         if fail_cells is None or borderline_cells is None:

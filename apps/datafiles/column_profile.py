@@ -8,8 +8,10 @@ helpers.py` 同一条前提：导出/作业的 CPU worker 跑在 spawn 子进程
 `apps/jobs/tests_jobs.py` 的 `WorkerModuleIsolationTests`，规则原文在
 `.claude/CLAUDE.md`「CPU worker 侧禁 Django」）。
 
-「挂载与体积记账」（`_column_profile_for_storage` / `_column_profile_bytes`）仍在
-`apps/datafiles/services.py`：那是解析缓存的职责，不是口径的职责。
+「挂载与体积记账」（`_column_profile_for_storage` / `_column_profile_bytes`）在
+`apps/datafiles/parse_cache_sizing.py`：那是解析缓存的职责，不是口径的职责。
+（2026-10-28 波次 G2 前它们在 `services.py`；为给 fail 检测缓存腾 600 行额度搬走，
+一句断言没改。）
 """
 from typing import Optional
 

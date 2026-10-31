@@ -63,6 +63,7 @@ import pandas as pd
 from django.test import SimpleTestCase
 
 from apps.datafiles import services
+from apps.datafiles import parse_cache_sizing
 
 _WINDOW_SECONDS = 0.2   # 注入的慢 size_of/store_if：把「纯计算正在跑」这段窗口撑开（判据不靠它赌时序）
 # 命中路径的时长上限**随注入窗口自缩放**（不是裸常数：CI 满载 / GC 抖动下裸 0.05 会假红）。
@@ -530,7 +531,7 @@ class _CountingGateParser:
 class CachedParseChainTests(SimpleTestCase):
     """⑥ 接线证明：真实 ``_cached_parse`` 链路上，publish 窗口已经消失。
 
-    把 ``services._frame_bytes``（``_parse_value_bytes`` 消费的那只，按 R6③ patch 消费方绑定）
+    把 ``parse_cache_sizing._frame_bytes``（``_parse_value_bytes`` 消费的那只；G2 搬家后按 R6③ 改打新 binding）
     钉在 gate 上：它正好落在被测窗口里 —— **旧写法与新写法都是在锁外调它**（旧写法调完才
     放开 pending + notify，新写法在进锁发布之前调完），所以这条钉的**不是**锁内/锁外，而是
     「owner 还在这段窗口里时 ``key`` 必须仍挂在 ``_pending`` 上」：waiter 在「owner 已进
@@ -559,7 +560,7 @@ class CachedParseChainTests(SimpleTestCase):
         frame = pd.DataFrame({f'P{i}': [float(r * i + r) for r in range(500)]
                               for i in range(4)})
         parser = self.patch_parser(frame)
-        original_frame_bytes = services._frame_bytes
+        original_frame_bytes = parse_cache_sizing._frame_bytes
         publish_entered = threading.Event()
         release = threading.Event()
         publish_calls = []
@@ -579,7 +580,7 @@ class CachedParseChainTests(SimpleTestCase):
                 11 if name == 'a' else 22, 1 if name == 'a' else 2,
                 12345, self.path, 'CTA8290D')
 
-        with mock.patch.object(services, '_frame_bytes', gated_frame_bytes):
+        with mock.patch.object(parse_cache_sizing, '_frame_bytes', gated_frame_bytes):
             t1 = threading.Thread(target=worker, args=('a',))
             t1.start()
             self.assertTrue(publish_entered.wait(_TIMEOUT),
