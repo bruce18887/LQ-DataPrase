@@ -2,7 +2,6 @@ import logging
 import os
 import threading
 from collections import OrderedDict
-from functools import lru_cache
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -13,8 +12,13 @@ from apps.analysis.services.statistics import (
     detect_fail_data_with_borderline,
 )
 from apps.common.memory import get_budget
-from apps.datafiles.column_profile import build_column_profile
 from apps.datafiles.models import DataFile, ParseHistory
+from apps.datafiles.parse_cache_sizing import (
+    _PARSE_MOUNT_PARSE_SIDE,
+    _PARSE_MOUNT_WRITE_THROUGH,
+    _column_profile_for_storage,
+    _parse_value_bytes,
+)
 from apps.datafiles.parsers import get_parser, BaseATEParser
 from apps.datafiles.utils import resolve_file_path
 
@@ -35,104 +39,13 @@ def _resolve_cache_budget_bytes() -> int:
 PARSE_CACHE_BUDGET_BYTES = _resolve_cache_budget_bytes()
 logger.info('解析缓存预算 = %dMB', PARSE_CACHE_BUDGET_BYTES // (1024 * 1024))
 
-
-def _frame_bytes(df) -> int:
-    """估算一只 DataFrame 的常驻字节数。
-
-    ``deep=True`` 才会把 object 列的真实字符串大小算进来——ATE 数据里
-    这类列很多，浅估算会让预算形同虚设。
-    """
-    if df is None:
-        return 0
-    try:
-        return int(df.memory_usage(deep=True).sum())
-    except Exception:
-        return 0
-
-
-def _col_meta_bytes(metadata) -> int:
-    """`col_meta` 的真实量级：列名 + 每列三个字符串。
-
-    1702 列那档是几十 KB 量级。`_parse_value_bytes` 若继续按 `64 × len(metadata)` 算，
-    它会被估成 64 字节，1536MB 那条预算就成了自欺的数字（判据 J7）。
-    """
-    col_meta = metadata.get('col_meta') if isinstance(metadata, dict) else None
-    if not isinstance(col_meta, dict):
-        return 0
-    total = 0
-    for name, entry in col_meta.items():
-        total += len(str(name))
-        if isinstance(entry, dict):
-            total += sum(len(str(v)) for v in entry.values())
-    return total
-
-
-# 首屏列级元信息的四键与口径本体在 `apps/datafiles/column_profile.py`（Django-free 模块）；
-# 这里只留「挂载」与「体积记账」——那是解析缓存的职责，不是口径的职责。
-_PARSE_MOUNT_PARSE_SIDE = 'parse(_parse_file_uncached)'
-_PARSE_MOUNT_WRITE_THROUGH = 'write-through(put_cached_parsed_file)'
-
-
-def _column_profile_for_storage(df, format_type, *, source, file_path):
-    """解析/写透侧的挂载外壳：算不出就**不挂键**，别把整只文件判成解析失败。
-
-    已知的「算不出」形状是重复列名（`df[col]` 会返回 DataFrame 而没有 `.dtype`；
-    `_load_df_from_request` 的去重守卫就是防它——真解析器先用 `make_column_names_unique`
-    把 `P1` 变成 `P1.1`，所以那是极端入参而非常态）。旧写法在**视图里**现算：抛错只让
-    page==1 那一页 500，page>1 照旧可用。若让它从解析期抛出，`_parse_file_uncached`
-    的兜底会把整只文件变成 parse_failed（连 page>1 都打不开）——那是行为变更，不是这一刀
-    的目的；写透侧抛出更会把上传链路带崩。
-    不挂键的后果只是「视图侧每次首屏回落现算」，与今天逐字一致；正常帧两只键都有，
-    「col_meta 与 column_profile 同址」这条常规因此仍然成立。
-
-    这条 WARNING 吞掉的是**故意**吞掉的异常，所以必须可归因：`source` 说是哪条挂载路径
-    （解析侧 / 写透侧该修的地方不同）、`file_path`+`format_type` 说是哪只文件的哪种格式、
-    `exc_info=True` 留完整栈（写法对齐 `apps/datafiles/views/_helpers.py` 的 `_register_file`）。
-    少任何一样，这条 WARNING 在生产日志里就查不到头——等于没留痕。
-    """
-    try:
-        return build_column_profile(df, format_type)
-    except Exception as exc:
-        logger.warning(
-            'column_profile 现算失败（mount=%s file_path=%s format_type=%s）：%s，'
-            '本次不挂键，交由消费侧回落',
-            source, file_path, format_type, exc,
-            exc_info=True,
-        )
-        return None
-
-
-def _column_profile_bytes(profile) -> int:
-    """`column_profile` 的真实量级：与 `col_meta` 同理，按字符串实际长度计。
-
-    1702 列那档 `numeric_columns` 就把上千个列名整份存着（十几 KB 级），
-    继续按「metadata 每键 64 字节」估会让预算再次失真（判据 J7 的同族）。
-    """
-    if not isinstance(profile, dict):
-        return 0
-    total = 0
-    for name, value in profile.items():
-        total += len(str(name))
-        if isinstance(value, (list, tuple)):
-            total += sum(len(str(v)) for v in value)
-        elif value is not None:
-            total += len(str(value))
-    return total
-
-
-def _parse_value_bytes(value) -> int:
-    """``(df, metadata, format_type)`` 三元组的缓存占用（metadata 按真实量级）。"""
-    df = value[0] if isinstance(value, tuple) else None
-    total = _frame_bytes(df)
-    if isinstance(value, tuple) and isinstance(value[1], dict):
-        meta = value[1]
-        # `col_meta` 与 `column_profile` 各有自己的真实量级函数，先从「每键 64 字节」
-        # 的粗估里剔掉，否则两只 dict 各只算 64 字节（判据 J7 同因）。
-        real_sized = sum(1 for k in ('col_meta', 'column_profile') if k in meta)
-        total += 64 * (len(meta) - real_sized)
-        total += _col_meta_bytes(meta)
-        total += _column_profile_bytes(meta.get('column_profile'))
-    return total
+# fail/临界格检测结果的缓存预算：解析预算的 1/8，上限 64MB。
+# 检测值只装 fail 行（``fail_cells`` 是 ``{行号: [列名]}``），同一只文件通常远小于帧；
+# 但「全 fail 的宽表」可以到几十 MB，所以仍按字节封顶，而不是旧实现的 ``maxsize=32``。
+# 失败四元组也占位（固定成本见 ``_FAILED_VALUE_BYTES``），与成功值共用这一条预算。
+# 跟着解析预算走：``LQDP_PARSE_CACHE_MB=0`` 关掉解析缓存时这里也一并关掉
+# （同一条开关不该只关一半）。
+FAIL_CACHE_BUDGET_BYTES = min(PARSE_CACHE_BUDGET_BYTES // 8, 64 * 1024 * 1024)
 
 
 class _BytesLRUCache:
@@ -313,10 +226,11 @@ def _disk_mtime_ns(file_path: str) -> int:
     Old rationale retired: this docstring once justified the mtime with
     "a cached ``(None, None, fmt)`` from a broken path would be served
     even after the DB row was fixed" — since the 2026-10-25 payload
-    dedup work failure values never enter the cache at all
+    dedup work failure values never enter the **parse** cache at all
     (``store_if=_parse_succeeded``), so that example can no longer
-    occur. The conclusion is unchanged — mtime stays in the key, now
-    argued by the success-entry invalidation above.
+    occur there. The conclusion is unchanged — mtime stays in the key,
+    now argued by the success-entry invalidation above (the fail/
+    borderline cache also stores failures, and relies on the same mtime).
     """
     try:
         return os.stat(file_path).st_mtime_ns
@@ -382,7 +296,7 @@ def _parse_file_uncached(file_id: int, owner_id: int, path_key: int,
             metadata['column_profile'] = profile
         return df, metadata, format_type
     except Exception as exc:
-        logger.warning("_cached_parse(%s, %s, %s) failed: %s", file_id, owner_id, path_key, exc)
+        logger.warning("_parse_file_uncached(%s, %s, %s) failed: %s", file_id, owner_id, path_key, exc)
         return None, None, None
 
 
@@ -481,31 +395,104 @@ def put_cached_parsed_file(file_id: int, owner_id: int, datafile,
     _parse_cache.put((abs_path, path_key, datafile.format_type), (df, metadata, fmt))
 
 
-@lru_cache(maxsize=32)
+_fail_cache = _BytesLRUCache(FAIL_CACHE_BUDGET_BYTES)
+
+# 每条结果先记一笔固定开销：空结果 ``([], [], {}, {})`` 在「没有 fail 行」的文件上是最常见
+# 的形状，若按内容算成 0 字节，``_store_locked`` 的预算淘汰永远逐不到它（无界容器）。
+_FAIL_ENTRY_OVERHEAD_BYTES = 256
+
+# 失败四元组的占位成本。失败值**也要缓存**：解析缓存拒收失败帧，这里若也拒收，坏文件每刷新
+# 一次都要重解析一遍（HEAD 的 ``@lru_cache(maxsize=32)`` 正是把失败值 memo 住的）。固定成本
+# 把「能缓存多少条失败」折成条数上界：预算 B、每条 ceil(B/64) ⇒ 第 65 条时 65·ceil(B/64) > B，
+# ``_store_locked`` 必逐最旧一条 ⇒ 至多 64 条（与 HEAD 的 32 条同量级）。取 ceil 而非 B//64：
+# 后者在 B 非 64 倍数时可能放过 65 条以上（B=127 ⇒ 127 条）；B=0（关缓存）时取 1 ⇒ 超预算不存。
+_FAILED_VALUE_BYTES = max(1, (FAIL_CACHE_BUDGET_BYTES + 63) // 64)
+
+
+def _fail_value_bytes(value) -> int:
+    """``(fail_indices, fail_columns, fail_cells, borderline_cells)`` 的缓存占用估算。
+
+    失败四元组（``value[0] is None``，``_detect_fail_data_uncached`` 的两条失败出口都返回
+    这个形状）按 ``_FAILED_VALUE_BYTES`` 固定计费，分支必须**非 0**：0 字节条目不占预算、
+    也永远逐不到（``_store_locked`` 只在总量超预算时逐条）⇒ 失败值会永久占着这个 key ——
+    与 ``_parse_succeeded`` 拒收失败帧同一条理由，只是这里选择「缓存但按条数上界封顶」。
+    成功值沿用 ``_parse_value_bytes`` 的纪律：不许给真实结果算 0 字节。字符串按**出现次数**
+    计 —— 列名对象被同一文件的所有行共享，所以这里是高估：宁可提前淘汰，也不低估到让
+    ``{行号: [列名]}`` 的真实体量隐身穿透。
+    """
+    if not isinstance(value, tuple) or not value or value[0] is None:
+        return _FAILED_VALUE_BYTES
+    total = _FAIL_ENTRY_OVERHEAD_BYTES
+    indices, columns, fail_cells, borderline_cells = value
+    if isinstance(indices, (list, tuple)):
+        total += 8 * len(indices)
+    if isinstance(columns, (list, tuple)):
+        total += sum(8 + len(str(col)) for col in columns)
+    for cell_map in (fail_cells, borderline_cells):
+        if not isinstance(cell_map, dict):
+            continue
+        for cols in cell_map.values():
+            total += 32                    # dict 一项 + list 头
+            if isinstance(cols, (list, tuple)):
+                total += sum(8 + len(str(col)) for col in cols)
+    return total
+
+
 def _cached_fail_data(file_id: int, owner_id: int, path_key: int,
                       file_path: str, format_type: str) -> Tuple[Optional[list], Optional[list], Optional[dict], Optional[dict]]:
     """Cache the full-file fail + borderline detection on top of the parsed file.
 
-    Mirrors ``_cached_parse``: the key includes the on-disk mtime, so
-    replacing the underlying file auto-invalidates. ``detect_fail_data``
-    is a pure function of ``(df, metadata)`` — which themselves only
-    change when the file changes — so caching the whole-file default
-    result (no per-column narrowing) is safe for hot browse requests.
+    Key = **与 ``_cached_parse`` 逐字相同**的内容坐标
+    ``(绝对路径, 盘上 mtime_ns, format_type)``。检测值是帧的纯函数
+    （``detect_fail_data`` 只读 ``(df, metadata)``），所以「跟着帧一起失效」只需
+    一条论证：同一坐标 ⇒ 同一份内容 ⇒ 同一份检测结果。
+    `file_id` / `owner_id` **不进键**：它们在这条链上只用于日志，把 owner 放进键会让
+    同一只物理文件的第二个 owner 再检测一遍（夹具见 scripts/perf_load20.py:192-195）。
+    ``format_type`` 必须留在键里：同一路径被两行标成不同格式时 parser 不同、检测面也不同。
+
+    ``path_key`` 由调用方现读（``get_cached_fail_data`` 每次都重算 ``_disk_mtime_ns``）：
+    盘上文件被替换 ⇒ 换键重新检测；文件被删 ⇒ ``_disk_mtime_ns`` 读回 0 ⇒ 也换键。
+
+    淘汰与并发口径与解析缓存同源（``_BytesLRUCache``）：按**累计字节**（``FAIL_CACHE_BUDGET_BYTES``）
+    而不是旧实现的 ``maxsize=32`` 条数，同一 key 的并发 miss 只检测一次。
+
+    失败四元组 ``(None, None, None, None)`` **也缓存**（固定按 ``_FAILED_VALUE_BYTES``
+    计费，见 ``_fail_value_bytes``）：解析缓存拒收失败帧，这里若也拒收，坏文件每刷新一次
+    就重解析一遍。代价与 HEAD 的 ``@lru_cache(maxsize=32)`` 相同 —— 盘上 mtime 不变的
+    失败值会一直命中（瞬时失败会被记住），直到预算淘汰或 ``clear_parse_cache()``；
+    HEAD 的上界是 32 条（按键），这里是预算 B 下至多 64 条（算术见 ``_FAILED_VALUE_BYTES``）。
+    文件被替换 ⇒ mtime 换键、重新解析；``clear_parse_cache()`` 全清。
 
     Callers must treat ``fail_cells`` / ``borderline_cells`` as read-only —
-    they are shared across requests. Never mutate them (e.g. no in-place
-    column removal).
+    they are shared across requests **and across owners**. Never mutate them
+    (e.g. no in-place column removal). 静态扫描见
+    ``apps/datafiles/tests_parse_cache_scan.py::SharedFailCellsSafetyTests``。
 
     Returns ``(fail_indices, fail_columns, fail_cells, borderline_cells)`` —
     any element may be ``None`` when the underlying file failed to parse.
+
+    ``file_id`` / ``owner_id`` 形参保留是为了与 ``_cached_parse`` 对称、给 WARNING 留可归因
+    上下文；它们不参与任何缓存判定。
     """
-    df, metadata, fmt = _cached_parse(file_id, owner_id, path_key, file_path, format_type)
+    key = (file_path, path_key, format_type)
+    return _fail_cache.get_or_compute(
+        key,
+        lambda: _detect_fail_data_uncached(file_id, owner_id, path_key,
+                                           file_path, format_type),
+        size_of=_fail_value_bytes,
+    )
+
+
+def _detect_fail_data_uncached(file_id: int, owner_id: int, path_key: int,
+                               file_path: str, format_type: str):
+    """``_cached_fail_data`` 的未缓存实现（与 ``_parse_file_uncached`` 同形）。"""
+    df, metadata, _fmt = _cached_parse(file_id, owner_id, path_key, file_path, format_type)
     if df is None:
         return None, None, None, None
     try:
         return detect_fail_data_with_borderline(df, metadata)
     except Exception as exc:
-        logger.warning("_cached_fail_data(%s, %s, %s) failed: %s", file_id, owner_id, path_key, exc)
+        logger.warning("_detect_fail_data_uncached(%s, %s, %s) failed: %s", file_id, owner_id, path_key, exc)
         return None, None, None, None
 
 
@@ -578,8 +565,13 @@ def evict_parse_cache_for_paths(paths) -> int:
     后自行重解析。两半各一条判据：``SharedPhysicalPathTests``、``RemovedFileRereadsUnderANewKeyTests``。
     全清对②**没有**额外保护：在途那条发布它同样收不回 —— 挡脏的是键，不是清的半径。
 
-    ``_cached_fail_data`` 不随本函数清理：``functools.lru_cache`` 没有按谓词丢弃的 API，
-    而它的 key 里带着同一组内容坐标 ⇒ 上面那两半对它同样成立，``maxsize=32`` 自己封顶。
+    ``_cached_fail_data`` 不随本函数清理 —— 设计决定，不是遗漏（G2 之后理由换了，判据
+    仍是 ``FailDataCacheIsNotPathScopedTests``）：那只缓存现在是 ``_BytesLRUCache``，完全
+    有能力按同一个谓词逐（它的键与本函数比对的键**逐字相同**），但**不该**逐 ——
+    键去 owner 之后一条检测值可能被多行、多个 owner 共享，「某一行被删」不等于
+    「这条检测值不再被读」。留下的代价与帧缓存那两半逐字同源：① 另有行指向同一坐标时
+    它仍是**同一份正确内容**；② 文件真被删时下一次读换了键（mtime 读回 0）必然 miss；
+    而它自己有 ``FAIL_CACHE_BUDGET_BYTES`` 封顶，路径数不是它的上界。
     """
     wanted = {os.path.normcase(os.path.normpath(p)) for p in paths if p}
     return _parse_cache.evict_keys(
@@ -587,13 +579,15 @@ def evict_parse_cache_for_paths(paths) -> int:
 
 
 def clear_parse_cache() -> None:
-    """Drop **everything** from both in-memory parsed-file caches.
+    """Drop **everything** from both in-memory caches（帧缓存 + fail/临界格检测缓存）。
 
     全站清空只留给「此刻没有『哪些路径安全』这回事」的场合：MemoryError 兜底
     （``apps/common/exceptions.py``）与整体重写路径的管理命令
     （``consolidate_uploads`` / ``fix_moved_project_paths``，理由见各自的调用点）。
     删文件/移动文件那类只动几条的操作改用 ``evict_parse_cache_for_paths(...)``：
     这里一把清掉的是**全站**的帧，别的用户下一次请求就得从盘上重解析。
+    检测缓存必须一起清：它是同一个内容坐标上的派生结果，帧清了它却留着会让
+    「MemoryError 之后自愈」只自愈一半（判据 ``GlobalClearStillClearsEverythingTests``）。
     """
     _parse_cache.clear()
-    _cached_fail_data.cache_clear()
+    _fail_cache.clear()

@@ -95,7 +95,7 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
             low_cpk_items = None
             if only_low_cpk:
                 low_cpk_items = _cached_low_cpk_items(
-                    datafile, request.user.pk, df, metadata,
+                    datafile, df, metadata,
                     cpk_threshold, iqr_multiplier, data_only_bin1)
             # data_only_bin1 narrows the frame before the base param list is
             # derived, so the list is consistent with the histogram stats.
@@ -329,7 +329,7 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
                     if flags['only_low_cpk']:
                         # datafile 行随 loaded 一起带回来，不再第二轮按 fid 重查
                         low_cpk_items = _cached_low_cpk_items(
-                            full_datafile, request.user.pk, full_df, metadata,
+                            full_datafile, full_df, metadata,
                             cpk_threshold, iqr_multiplier, flags['data_only_bin1'])
                     per_file.append(set(filter_test_items(
                         df, metadata, common_params,
@@ -407,7 +407,7 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
             low_cpk_items = None
             if flags['only_low_cpk']:
                 low_cpk_items = _cached_low_cpk_items(
-                    datafile, request.user.pk, df, metadata,
+                    datafile, df, metadata,
                     cpk_threshold, iqr_multiplier, flags['data_only_bin1'])
             work_df = filter_bin1_rows(df, metadata) if flags['data_only_bin1'] else df
             # 防御性重放：参数在该文件被筛掉（非 fail 项/非低 CPK/无测试值）→
@@ -483,7 +483,7 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
         low_cpk_items = None
         if flags['only_low_cpk']:
             low_cpk_items = _cached_low_cpk_items(
-                datafile, request.user.pk, df, metadata,
+                datafile, df, metadata,
                 cpk_threshold, iqr_multiplier, flags['data_only_bin1'])
         if flags['data_only_bin1']:
             df = filter_bin1_rows(df, metadata)

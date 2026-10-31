@@ -209,7 +209,7 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         low_cpk_items = None
         if flags['only_low_cpk']:
             low_cpk_items = cached_low_cpk_items(
-                datafile, request.user.pk, df, metadata,
+                datafile, df, metadata,
                 cpk_threshold, iqr_multiplier, flags['data_only_bin1'])
         if flags['data_only_bin1']:
             df = filter_bin1_rows(df, metadata)

@@ -98,9 +98,8 @@ class _CallSiteBase(TestCase):
         self.addCleanup(setattr, services, 'get_parser', original_parser)
         services.get_parser = lambda fmt: self.parser
 
-        fail_cache = services._cached_fail_data
-        self.addCleanup(fail_cache.cache_clear)
-        fail_cache.cache_clear()
+        services._fail_cache.clear()
+        self.addCleanup(services._fail_cache.clear)
 
     # --- 造盘上行 ---
     def make_row(self, user, name, file_type='single', batch_name='',

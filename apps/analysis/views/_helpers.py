@@ -2,49 +2,87 @@
 
 import math
 import os
-from typing import Dict, Set
+from typing import Set
 
 import pandas as pd
 
+from apps.common.keyed_lru import KeyedLRU
+from apps.common.params import get_param
 from apps.datafiles.lookup import owned_files_by_pk, valid_file_ids
 from apps.datafiles.models import DataFile
 from apps.datafiles.services import get_cached_parsed_file
 from apps.datafiles.utils import resolve_file_path
-from apps.common.params import get_param
 
 # Low-CPK set cache for the fast path: evaluating every column (IQR + CPK)
 # is the dominant cost of the filter chain (~100-200 ms on a 10k-row file),
-# and the fast path runs on every config toggle / file switch.  The key
-# carries the file's mtime+size so a re-parsed file invalidates the entry.
-_low_cpk_cache: Dict[tuple, Set[str]] = {}
+# and the fast path runs on every config toggle / file switch.  The key is
+# the content coordinates (resolved path + mtime + size), so the same
+# physical file's rows share one entry and a re-parsed file invalidates it.
+#
+# 形状复用 `apps/common/keyed_lru.py`（与仪表板汇总缓存同一份实现）：按条数封顶的 LRU +
+# 每 key 单飞。旧写法是 plain dict + 「超 500 条 wholesale clear」——一次清空会把所有
+# 还活着的文件一起打回冷启动，而且并发 miss 各算一遍。
+_LOW_CPK_CACHE_MAX_ENTRIES = 500
+_low_cpk_cache = KeyedLRU(_LOW_CPK_CACHE_MAX_ENTRIES)
 
 
-def cached_low_cpk_items(datafile, user_id: int, df, metadata,
+def _low_cpk_cache_key(datafile, threshold, iqr_multiplier, data_only_bin1):
+    """低 CPK 集合的内容坐标键：``(路径或行号, mtime_ns, size, format_type, threshold, iqr, bin1)``。
+
+    路径族的第一元是 ``resolve_file_path(datafile.file_path)`` —— 盘上同一只文件的两行、
+    两个 owner 解析出同一个字符串，因此共享一条；``datafile.id`` 不在键里，按行号做键
+    会把同一只物理文件拆成两条（与解析/检测缓存同一条论证）。
+    ``format_type`` 必须在键里，理由与解析缓存逐字相同：``df``/``metadata`` 是
+    ``get_parser(datafile.format_type)`` 的产物，而 ``DataFile.file_path`` 没有唯一约束
+    ⇒ 同一路径的两行可以标成不同格式、走不同 parser、bin 列也不同，漏掉它会让一行
+    命中另一行那套列的集合（判据：本文件的同路径双格式用例）。
+    路径读不出来时（测试替身没有 ``file_path``、文件已被删、路径为空）退回
+    ``(datafile.id, 0, 0, format_type, ...)``：真实族第一元是 ``str``、退回族是 ``int``
+    行号，两只键族不可能相等 ⇒ 退回不会与真实路径串味。
+    """
+    format_type = datafile.format_type
+    try:
+        path = resolve_file_path(datafile.file_path)
+        if path:
+            st = os.stat(path)
+            return (path, st.st_mtime_ns, st.st_size, format_type,
+                    threshold, iqr_multiplier, data_only_bin1)
+    except (OSError, AttributeError):
+        pass
+    return (datafile.id, 0, 0, format_type, threshold, iqr_multiplier, data_only_bin1)
+
+
+def cached_low_cpk_items(datafile, df, metadata,
                          threshold: float, iqr_multiplier: float,
                          data_only_bin1: bool) -> Set[str]:
     """低 CPK 参数集合（跨 histogram/multi_lot/correlation 端点共享缓存）。
 
-    key 含 (user, file, threshold, iqr, bin1) + mtime+size，文件重解析自动失效。
+    key 是**内容坐标** ``(解析后的绝对路径, mtime_ns, size, format_type, threshold,
+    iqr_multiplier, data_only_bin1)``（形状见 ``_low_cpk_cache_key``）：集合是
+    ``(df, metadata, threshold, iqr_multiplier, data_only_bin1)`` 的纯函数。df/metadata
+    不是「只随盘上文件变」：它们由 ``get_parser(datafile.format_type)`` 产出，同一路径
+    的两行可以标成不同格式（``DataFile.file_path`` 无唯一约束）⇒ ``format_type`` 与
+    内容坐标一起进键，同一坐标才必然同一份结果。``datafile.id`` 与请求用户都**不进键**：
+    行号会把同一只物理文件的两行（两个 owner）拆成两条；``threshold`` 已经把「用户设置」
+    这唯一一条用户输入折成了实参，两用户同阈值共享同一只 set 是正确行为（判据见
+    ``apps/analysis/tests_low_cpk_cache.py``）。
+
+    函数内 import 是承重的（不是防环）：``_helpers`` 经 ``apps.datafiles.services`` 本来
+    就在导入期加载了 statistics 包，所以搬到模块级不会成环；但搬上去会把名字**冻在导入期**，
+    ``mock.patch('apps.analysis.services.statistics.compute_low_cpk_test_items')``
+    （R6③ patch 消费方绑定）就静默失效了。每调用一次的 dict 查找成本可忽略。
     """
-    key = (user_id, datafile.id, threshold, iqr_multiplier, data_only_bin1)
-    try:
-        st = os.stat(resolve_file_path(datafile.file_path))
-        key += (st.st_mtime_ns, st.st_size)
-    except (OSError, AttributeError):
-        # file missing / test fakes without file_path → no mtime guard
-        key += (0, 0)
-    cached = _low_cpk_cache.get(key)
-    if cached is not None:
-        return cached
-    from apps.analysis.services.statistics import filter_bin1_rows, compute_low_cpk_test_items
-    work_df = filter_bin1_rows(df, metadata) if data_only_bin1 else df
-    result = set(compute_low_cpk_test_items(
-        work_df, metadata, threshold, iqr_multiplier=iqr_multiplier))
-    if len(_low_cpk_cache) > 500:
-        # 简单上限：key 含 mtime+size 天然随文件重解析失效，全清成本低
-        _low_cpk_cache.clear()
-    _low_cpk_cache[key] = result
-    return result
+    key = _low_cpk_cache_key(
+        datafile, threshold, iqr_multiplier, data_only_bin1)
+
+    def compute():
+        from apps.analysis.services.statistics import (
+            filter_bin1_rows, compute_low_cpk_test_items)
+        work_df = filter_bin1_rows(df, metadata) if data_only_bin1 else df
+        return set(compute_low_cpk_test_items(
+            work_df, metadata, threshold, iqr_multiplier=iqr_multiplier))
+
+    return _low_cpk_cache.get_or_compute(key, compute)
 
 
 def get_bool_param(request, key, default=False):

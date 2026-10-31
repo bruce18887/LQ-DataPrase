@@ -21,6 +21,7 @@ from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, override_settings
 
 from apps.datafiles import services
+from apps.datafiles import parse_cache_sizing as sizing
 from apps.datafiles.views import _helpers
 
 
@@ -130,7 +131,7 @@ class BytesLRUCacheTests(_CacheCaseBase):
 
     def test_entries_evict_by_byte_budget_not_by_count(self):
         frame = _frame()
-        one = services._frame_bytes(frame)
+        one = sizing._frame_bytes(frame)
         budget = int(one * 1.6)   # 只装得下一只
         self.use_budget(budget)
         parser = self.patch_parser(frame)
@@ -147,7 +148,7 @@ class BytesLRUCacheTests(_CacheCaseBase):
 
     def test_single_oversized_value_is_returned_but_not_cached(self):
         frame = _frame()
-        self.use_budget(int(services._frame_bytes(frame) * 0.5))
+        self.use_budget(int(sizing._frame_bytes(frame) * 0.5))
         parser = self.patch_parser(frame)
 
         df_a, _meta_a, _fmt_a = self.cached_parse()
@@ -316,7 +317,7 @@ class BytesLRUCacheTests(_CacheCaseBase):
 
     def test_evict_to_zero_keeps_last_entry_and_counts(self):
         frame = _frame()
-        self.use_budget(services._frame_bytes(frame) * 10)
+        self.use_budget(sizing._frame_bytes(frame) * 10)
         self.patch_parser(frame)
         self.cached_parse()
         services._cached_parse(2, 2, 12345, self.second_path(), 'CTA8290D')
@@ -329,7 +330,7 @@ class BytesLRUCacheTests(_CacheCaseBase):
 
     def test_evict_parse_cache_to_fraction(self):
         frame = _frame()
-        one = services._frame_bytes(frame)
+        one = sizing._frame_bytes(frame)
         # 3 条 ≈ 3×one，预算必须 < 6×one 才会让「淘汰到预算一半」真的发生
         # （10×one 时 3 条连一半预算都不到，evict_to 无事可做）。
         self.use_budget(one * 4)
@@ -381,14 +382,14 @@ class BytesLRUCacheTests(_CacheCaseBase):
         parser = self.patch_parser(frame, metadata=md)
         df, metadata, fmt = services._cached_parse(1, 1, 12345, self.path, 'CTA8290D')
 
-        value_bytes = services._parse_value_bytes((df, metadata, fmt))
+        value_bytes = sizing._parse_value_bytes((df, metadata, fmt))
         self.assertGreaterEqual(
             value_bytes,
-            services._frame_bytes(df) + services._col_meta_bytes(metadata),
+            sizing._frame_bytes(df) + sizing._col_meta_bytes(metadata),
             '体积估算必须包含 col_meta 的真实量级')
         self.assertGreater(
             value_bytes,
-            services._frame_bytes(df) + 64 * len(metadata),
+            sizing._frame_bytes(df) + 64 * len(metadata),
             '沿用「metadata 一律按 64 字节/键」会低估')
 
 
@@ -505,18 +506,18 @@ class RegisterFileWriteThroughTests(TestCase):
 
 class FrameBytesTests(SimpleTestCase):
     def test_byte_estimate_grows_with_size(self):
-        small = services._frame_bytes(_frame(rows=100))
-        big = services._frame_bytes(_frame(rows=5000))
+        small = sizing._frame_bytes(_frame(rows=100))
+        big = sizing._frame_bytes(_frame(rows=5000))
         self.assertGreater(big, small)
 
     def test_none_frame_costs_nothing(self):
-        self.assertEqual(services._frame_bytes(None), 0)
+        self.assertEqual(sizing._frame_bytes(None), 0)
 
     def test_object_columns_counted_deeply(self):
         """object 列必须按真实字符串大小计入，否则预算形同虚设。"""
-        numeric = services._frame_bytes(
+        numeric = sizing._frame_bytes(
             pd.DataFrame({'P': [1.0] * 2000}))
-        strings = services._frame_bytes(
+        strings = sizing._frame_bytes(
             pd.DataFrame({'P': ['x' * 200] * 2000}))
         self.assertGreater(strings, numeric * 5)
 

@@ -7,8 +7,6 @@
 import logging
 import math
 import os
-import threading
-from collections import OrderedDict
 
 import pandas as pd
 
@@ -22,16 +20,17 @@ from apps.analysis.services.statistics import (
     compute_pass_yield,
     filter_finite,
 )
+from apps.common.keyed_lru import KeyedLRU
 from apps.datafiles.utils import resolve_file_path
 
 logger = logging.getLogger(__name__)
 
-# 汇总结果缓存：进程内 LRU（容量 32 条）。
+# 汇总结果缓存：进程内 LRU（容量 32 条），实现复用 `apps/common/keyed_lru.py`。
 # 不用 functools.lru_cache —— df 不可 hash，且这里需要按条数淘汰与整体清空。
-# 多线程并发访问（Django 线程池）下由锁保护；值本身是只读 payload。
+# 多线程并发访问（Django 线程池）下由 `KeyedLRU` 的 Condition 保护：命中即刷新顺序、
+# 超 32 条逐最久未用的一项、同 key 的并发 miss 只算一次；值本身是只读 payload。
 _SUMMARY_CACHE_MAX_SIZE = 32
-_summary_cache = OrderedDict()
-_summary_cache_lock = threading.Lock()
+_summary_cache = KeyedLRU(_SUMMARY_CACHE_MAX_SIZE)
 
 
 def clean_data(data):
@@ -388,22 +387,10 @@ def get_dashboard_summary(datafile, df, fmt, metadata, thresholds=None):
     **返回值是共享只读对象，调用方不得修改**（现有调用方只读取/序列化）。
     """
     key = _summary_cache_key(datafile, fmt, thresholds)
-
-    with _summary_cache_lock:
-        cached = _summary_cache.get(key)
-        if cached is not None:
-            _summary_cache.move_to_end(key)  # 命中即刷新为最近使用
-            return cached
-
-    payload = clean_data(compute_dashboard_summary(
-        df, datafile, fmt, metadata, thresholds=thresholds))
-
-    with _summary_cache_lock:
-        _summary_cache[key] = payload
-        _summary_cache.move_to_end(key)
-        while len(_summary_cache) > _SUMMARY_CACHE_MAX_SIZE:
-            _summary_cache.popitem(last=False)
-    return payload
+    return _summary_cache.get_or_compute(
+        key,
+        lambda: clean_data(compute_dashboard_summary(
+            df, datafile, fmt, metadata, thresholds=thresholds)))
 
 
 def summary_cache_stats() -> dict:
@@ -413,12 +400,11 @@ def summary_cache_stats() -> dict:
     按字节预算，所以这里报 `entries/max_entries` 就够 —— 编一个不存在的「字节数」
     只会让运维页显示一个假指标。
     """
-    with _summary_cache_lock:
-        return {'entries': len(_summary_cache), 'max_entries': _SUMMARY_CACHE_MAX_SIZE}
+    return {'entries': len(_summary_cache),
+            'max_entries': _summary_cache.max_entries}
 
 
 def clear_dashboard_summary_cache():
     """清空汇总缓存（供测试隔离；将来删除文件路径时也可复用）。"""
-    with _summary_cache_lock:
-        _summary_cache.clear()
+    _summary_cache.clear()
 

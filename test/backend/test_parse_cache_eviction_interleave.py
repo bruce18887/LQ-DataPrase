@@ -7,8 +7,11 @@
 ③ 定点淘汰与单飞发布的交错（**收不回在途发布 / 原子 / 不丢唤醒**）——承重判据。
    真正的结论是「定点淘汰不比全清弱」：两条方向相反的交错各钉一半，而全清自己也收不回
    在途那条发布（第 2 例钉这件既有事实）。
-④ ``_cached_fail_data``（``functools.lru_cache``）**不**随定点淘汰清理 —— 设计决定而不是
-   遗漏：lru_cache 没有按谓词丢弃的 API，而它的 key 同样带内容坐标，两半论证对它照样成立。
+④ fail 检测缓存**不**随定点淘汰清理 —— 设计决定而不是遗漏：G2 把它从
+   ``functools.lru_cache`` 换成与帧缓存同形的 ``_BytesLRUCache``（键逐字相同，按谓词逐
+   完全做得到），但一条检测值可能被同一坐标的多行/多 owner 共享 ⇒「某一行被删」不等于
+   「这条检测值不再被读」；它自己有字节预算封顶。判据形状随实现换（``len(_fail_cache)``
+   取代 ``.cache_info().currsize``），**钉的东西没变**：定点淘汰后条目还在。
 ⑤ 全站清空那条路没被削弱：``clear_parse_cache()`` 仍一次清掉两只缓存，且 MemoryError
    分支走的是**真**清空（不是 mock）；管理命令那两条「仍然全清」的反向判据在
    ``test_parse_cache_scoped_invalidation.py::GlobalClearKeptForWholeTreeRewritesTests``。
@@ -142,36 +145,40 @@ class EvictionVsPublishInterleaveTests(_CacheSwapBase):
 
 
 class FailDataCacheIsNotPathScopedTests(_CacheSwapBase):
-    """④ 设计决定：定点淘汰**不**顺手 ``cache_clear()`` 那只 ``_cached_fail_data``。
+    """④ 设计决定：定点淘汰**不**顺手清那只 ``_cached_fail_data`` 缓存。
 
-    ``functools.lru_cache`` 没有按谓词丢弃的 API，而它的 key 里同样带
-    ``(file_id, owner_id, mtime_ns, 绝对路径, 格式)`` ⇒ ⑥ 那两半对它同样成立：还在按这组
-    坐标读它的行拿到的是**同一份内容**的检测结果（不脏），文件真被删则 ``mtime_ns`` 读回 0、
-    下一次组出的 key 不再是它 ⇒ 留着的代价只有 ``maxsize=32`` 之内的内存。
+    G2 之后它是 ``_BytesLRUCache``（键与本函数比对的键逐字相同，完全有能力按谓词逐），
+    但**不该**逐：键去 owner 之后一条检测值可能被多行、多个 owner 共享，「某一行被删」
+    不等于「这条检测值不再被读」。留下的代价与帧缓存那两半同源：① 另有行指向同一坐标时
+    它仍是**同一份正确内容**；② 文件真被删时下一次读换了键（mtime 读回 0）必然 miss；
+    而它自己有 ``FAIL_CACHE_BUDGET_BYTES`` 封顶。
     本例钉的是「没把定点淘汰写成又一次全清」。
+
+    G2 改打新形状：旧实现是 ``_cached_fail_data``（``functools.lru_cache``）自身的
+    ``.cache_info()/.cache_clear()``；现在是模块级 ``_fail_cache`` 的 ``len``/``clear``。
+    判据不变 —— 定点淘汰后条目还在。
     """
 
     def setUp(self):
         super().setUp()
-        fail_cache = services._cached_fail_data
-        self.addCleanup(fail_cache.cache_clear)
-        fail_cache.cache_clear()
+        services._fail_cache.clear()
+        self.addCleanup(services._fail_cache.clear)
 
     def test_path_eviction_leaves_fail_data_cache_entries_in_place(self):
         frame = _frame()
         path = _tmp_path('g1-faildata.csv')
         with open(path, 'w', encoding='utf-8') as f:
             f.write('a,b\n1,2\n')
-        # 先把整条链走一遍：帧缓存命中（已 prime）→ 失败检测真算一次并挂进 lru_cache
+        # 先把整条链走一遍：帧缓存命中（已 prime）→ 失败检测真算一次并挂进 _fail_cache
         self.prime(path, frame, mtime=5)
         services._cached_fail_data(1, 1, 5, path, 'CTA8290D')
-        before = services._cached_fail_data.cache_info().currsize
+        before = len(services._fail_cache)
         self.assertGreaterEqual(before, 1, '前提：整文件失败检测已占过位')
 
         self.assertEqual(services.evict_parse_cache_for_paths([path]), 1)
 
-        self.assertEqual(services._cached_fail_data.cache_info().currsize, before,
-                         '定点淘汰不得把那只 lru_cache 一把清空')
+        self.assertEqual(len(services._fail_cache), before,
+                         '定点淘汰不得把那只 fail 缓存一把清空')
         self.assertEqual(len(self.cache), 0, '而帧缓存那一条确实走了')
 
 
@@ -180,27 +187,28 @@ class GlobalClearStillClearsEverythingTests(_CacheSwapBase):
 
     def setUp(self):
         super().setUp()
-        fail_cache = services._cached_fail_data
-        self.addCleanup(fail_cache.cache_clear)
-        fail_cache.cache_clear()
+        services._fail_cache.clear()
+        self.addCleanup(services._fail_cache.clear)
 
     def test_clear_parse_cache_drops_both_caches(self):
         frame = _frame()
         path = _tmp_path('g1-clearall.csv')
         with open(path, 'w', encoding='utf-8') as f:
             f.write('a,b\n1,2\n')
-        self.prime(path, frame)
+        # 帧按 mtime=9 prime，下面 _cached_fail_data 也传 9 ⇒ 命中这只假帧，
+        # 不依赖真 parser 能不能读那只一行 CSV（G2 顺手去掉了这个隐含前提）。
+        self.prime(path, frame, mtime=9)
         self.prime(_tmp_path('g1-other.csv'), frame)
         services._cached_fail_data(2, 1, 9, path, 'CTA8290D')
         self.assertEqual(len(self.cache), 2)
-        self.assertGreaterEqual(services._cached_fail_data.cache_info().currsize, 1)
+        self.assertGreaterEqual(len(services._fail_cache), 1)
 
         services.clear_parse_cache()
 
         self.assertEqual(len(self.cache), 0)
         self.assertEqual(self.cache.bytes_cached(), 0)
-        self.assertEqual(services._cached_fail_data.cache_info().currsize, 0,
-                         '全清仍然一并清掉 _cached_fail_data（与今天逐字一致）')
+        self.assertEqual(len(services._fail_cache), 0,
+                         '全清仍然一并清掉 fail 缓存（与今天逐字一致）')
 
     def test_memory_error_handler_clears_every_path_not_just_the_offending_one(self):
         """内存压力下没有「哪些路径安全」这回事：一条都不留。"""
