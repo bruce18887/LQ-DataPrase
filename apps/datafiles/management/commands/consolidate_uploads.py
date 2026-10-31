@@ -176,6 +176,16 @@ class Command(BaseCommand):
 
         if stats['moved'] or stats['db_only']:
             if not dry_run:
+                # 全站清空，与 fix_moved_project_paths 同一个决定（理由正文在那边）。
+                # 本命令把 uploads/ 整棵搬进 data/<user>/，「动过的路径」≈整只缓存；
+                # 且各分支的「动过」不同形：moved 同时动了盘与行、db_only（源缺失或
+                # 目标已有同尺寸文件）只改行不动盘、conflicts 里**只有尺寸不符**那条
+                # 什么都不改 —— 复制校验失败那条（copy2 之后 getsize 不等，回滚时
+                # os.remove(target)）净效果为零但盘确实动过。逐分支算准定点淘汰的集合，
+                # 算漏的方向只是白占预算（键是内容坐标，脏不了），带外一步全清兜住。
+                # 反向判据（谁改成定点淘汰谁红）：
+                #   test/backend/test_parse_cache_scoped_invalidation.py
+                #     ::GlobalClearKeptForWholeTreeRewritesTests
                 clear_parse_cache()
                 stats['parse_cache_cleared'] = True
 

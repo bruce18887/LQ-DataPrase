@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 from apps.common.errors import error_response
 from apps.datafiles.models import DataFile
 from apps.datafiles.serializers import DataFileSerializer
-from apps.datafiles.services import clear_parse_cache
+from apps.datafiles.services import evict_parse_cache_for_paths
 from apps.datafiles.utils import extract_data_date, extract_stage, resolve_file_path
 
 from ._helpers import (
@@ -209,15 +209,22 @@ class BatchDirDeleteView(APIView):
                 'batch_dir_not_found', f'目录 "{dir_name}" 不存在', 404)
 
         # Use transaction to ensure consistency
+        rows = DataFile.objects.filter(
+            owner=request.user, file_type='batch', batch_name=dir_name
+        )
+        # 先按**同一个 filter** 取一遍路径：行删掉就拿不到 file_path 了，
+        # 而淘汰要的正是这些行解析出来的绝对路径（缓存键的第一元）。
+        # 同一档残留：`values_list` 那一遍之后才匹配上的行会被 `rows.delete()` 删掉（它重新
+        # SELECT 一遍），却没人替它淘汰 —— 后果与理由见 `file_views.py` 的 `bulk_delete`
+        # 注释，本处与下面的子批删除（SubBatchDeleteView）同形，两处都刻意不防。
+        touched_paths = [resolve_file_path(p)
+                         for p in rows.values_list('file_path', flat=True)]
         with transaction.atomic():
-            # Delete DataFile records for this batch
-            deleted_count, _ = DataFile.objects.filter(
-                owner=request.user, file_type='batch', batch_name=dir_name
-            ).delete()
+            deleted_count, _ = rows.delete()
 
         # Delete directory from disk (outside transaction to avoid long locks)
         shutil.rmtree(dir_path, ignore_errors=True)
-        clear_parse_cache()
+        evict_parse_cache_for_paths(touched_paths)
 
         return Response({
             'status': 'ok',
@@ -250,18 +257,22 @@ class SubBatchDeleteView(APIView):
                 'sub_batch_dir_not_found', f'子批次目录 "{sub_batch_name}" 不存在', 404)
 
         # Use transaction to ensure consistency
+        rows = DataFile.objects.filter(
+            owner=request.user,
+            file_type='batch',
+            batch_name=batch_name,
+            sub_batch=sub_batch_name,
+        )
+        # 同上：淘汰集合来自**这个 filter 命中的那些行**，不是 rmtree 的那个目录
+        # （目录路径与入库路径可能因 realpath 不同写法而对不上键）。
+        touched_paths = [resolve_file_path(p)
+                         for p in rows.values_list('file_path', flat=True)]
         with transaction.atomic():
-            # Delete DataFile records for this sub-batch
-            deleted_count, _ = DataFile.objects.filter(
-                owner=request.user,
-                file_type='batch',
-                batch_name=batch_name,
-                sub_batch=sub_batch_name,
-            ).delete()
+            deleted_count, _ = rows.delete()
 
         # Delete sub-batch directory from disk
         shutil.rmtree(sub_batch_dir, ignore_errors=True)
-        clear_parse_cache()
+        evict_parse_cache_for_paths(touched_paths)
 
         return Response({
             'status': 'ok',

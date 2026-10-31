@@ -122,9 +122,23 @@ class Command(BaseCommand):
                 f'skipped {missing_after} (target missing on disk).'
             ))
 
-        # Bust the in-process parse cache so the next /analysis/* call
-        # re-reads the new file_path instead of returning a cached
-        # ``(None, None, fmt)`` tuple from the previous (broken) path.
+        # 全站清空——**刻意不**跟着「删文件 / 移动文件」那条路改成定点淘汰。两条理由：
+        # 1. 收益≈0：本命令的输入面就是「旧项目根之下的全部行」，迁移场景里那≈整个
+        #    数据集，定点淘汰逐到的也就是几乎整只缓存；而它跑在带外（人工迁移/修路径），
+        #    此刻没别人热着帧，全清的代价同样≈0。
+        # 2. 判据成本 > 收益：三类分支的「动过」并不同形 —— 重写分支换了行（旧 key
+        #    **通常**就此没人指向它，但那不是结构保证：file_path 上没有唯一约束，同一个
+        #    坐标可以有别的行还在读 —— 判据见 test_parse_cache_scoped_invalidation.py
+        #    ::SharedPhysicalPathTests；新 key 那侧本来就还没有条目）、skip 分支（target
+        #    不在盘上）**行与盘都不动**、unchanged 分支压根没进 update。要定点就得逐分支
+        #    算准集合，算漏的方向是白占预算（条目脏不了，理由同上那两条判据）；
+        #    全清把三类一次性兜住，而代价只是「下一次读重解析」——带外没人付这个。
+        # 顺带删掉旧注释那句失效论证（「否则会返回上一次坏路径的 ``(None, None, fmt)``」）：
+        # 2026-10-25 载荷去重之后失败值根本不入缓存（``store_if=_parse_succeeded``）。
+        # 如今真正挡脏的是键的内容坐标 ``(绝对路径, mtime_ns, 格式)``，这一步全清是保险带。
+        # 反向判据（谁改成定点淘汰谁红）：
+        #   test/backend/test_parse_cache_scoped_invalidation.py
+        #     ::GlobalClearKeptForWholeTreeRewritesTests
         if updated and not dry_run:
             clear_parse_cache()
             self.stdout.write(self.style.SUCCESS('Cleared the in-process parse cache.'))
