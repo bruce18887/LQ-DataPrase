@@ -1,4 +1,7 @@
 import io
+import logging
+import tempfile
+
 from django.http import FileResponse
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -23,7 +26,7 @@ from .export_ppt import build_batch_charts_pptx
 from .user_prefs import get_export_dpi
 from apps.common.user_settings import get_cpk_thresholds
 from .export_complete import export_to_xlsx_optimized
-from .export_csv import export_to_csv
+from .export_csv import export_to_csv_file
 from apps.dashboard.services import compute_dashboard_summary
 from apps.analysis.services.statistics import compute_uph
 from django.utils import timezone
@@ -36,6 +39,11 @@ from .html_report.styles import REPORT_CSS as ATE_REPORT_CSS  # noqa: F401
 MIN_SIGMA_LEVEL = 1
 MAX_SIGMA_LEVEL = 10
 DEFAULT_SIGMA_LEVEL = 3
+
+logger = logging.getLogger(__name__)
+
+# to_csv 的临时文件前缀：便于测试与运维识别残留（正常路径由 OS 在句柄关闭时删除）
+CSV_TEMP_PREFIX = 'lqdp_export_'
 
 
 def parse_sigma_level(raw):
@@ -107,15 +115,31 @@ class ExportViewSet(viewsets.GenericViewSet):
         # （此前走 bin==1 语义，与表格 detect_fail_data 不一致，一并对齐）。
         export_df = apply_export_filters(df, metadata, request.data)
 
-        csv_content = export_to_csv(export_df, metadata)
-
         fname = render_export_filename(
             request.user, 'to_csv', 'csv',
             {**base_export_context(request.user),
              'filename': datafile.filename.rsplit('.', 1)[0]},
         )
-        return FileResponse(io.BytesIO(csv_content), as_attachment=True,
-                            filename=fname, content_type='text/csv')
+        # 直下改临时文件：旧实现 to_csv().encode() + BytesIO 会让整份 CSV
+        # 以 str / bytes / BytesIO 三份同时驻留。文件名模板先渲染，避免它抛错
+        # 时临时文件已创建却没人清理。
+        #
+        # Windows 事实：TemporaryFile 用 O_TEMPORARY 打开，句柄一关就由 OS
+        # 删除（进程崩溃同样回收），所以既没有「先关句柄再 unlink」的竞态，
+        # 也不需要记录/清理路径；FileResponse 把 close 登记为 resource closer。
+        handle = tempfile.TemporaryFile(prefix=CSV_TEMP_PREFIX, suffix='.csv')
+        try:
+            export_to_csv_file(export_df, metadata, handle)
+            handle.seek(0)
+            return FileResponse(handle, as_attachment=True, filename=fname,
+                                content_type='text/csv')
+        except BaseException:
+            # 关闭失败只记 warning，绝不让它盖住原始异常。
+            try:
+                handle.close()
+            except Exception:
+                logger.warning('临时 CSV 句柄关闭失败', exc_info=True)
+            raise
 
     # ── sigma_limit ─────────────────────────────────────────────────
 
