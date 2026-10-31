@@ -4,15 +4,15 @@ from typing import Optional, Dict, List, Tuple, Any
 
 import pandas as pd
 
-from .helpers import ensure_numeric, get_1d_from, site_sort_key
+from .helpers import ensure_numeric, false_mask, get_1d_from, site_sort_key
 from .limits import resolve_spec_limits
 
 from pandas.api.types import is_bool_dtype, is_numeric_dtype
 
 
 def _no_mask(site_series: pd.Series) -> pd.Series:
-    """全 False 掩码（缺失的规格限侧不参与比较）。"""
-    return pd.Series([False] * len(site_series), index=site_series.index)
+    """全 False 掩码（缺失的规格限侧不参与比较）；构造走 ``helpers.false_mask``。"""
+    return false_mask(site_series.index)
 
 
 def compute_site_stats(site_series: pd.Series, site_index, lower_limit: Optional[float], upper_limit: Optional[float],
@@ -181,7 +181,7 @@ def _limit_fail_mask(data_series: pd.Series, lower_limit: Optional[float],
     例如真限 min=''(→0.0)、max=5.5，参数值分布在 −3~−1 时全判 fail，
     晶圆图整片红。NaN 与限值比较为 False，不会被当成 fail。
     """
-    mask = pd.Series([False] * len(data_series), index=data_series.index)
+    mask = false_mask(data_series.index)
     if lower_limit is not None:
         mask = mask | (data_series < lower_limit)
     if upper_limit is not None:
@@ -191,7 +191,7 @@ def _limit_fail_mask(data_series: pd.Series, lower_limit: Optional[float],
 
 def compute_wafer_fail_data(df: pd.DataFrame, metadata: Optional[Dict] = None,
                             selected_param: Optional[str] = None) -> Tuple[pd.Series, Dict]:
-    fail_mask = pd.Series([False] * len(df), index=df.index)
+    fail_mask = false_mask(df.index)
     if selected_param and selected_param in df.columns and metadata:
         # ensure_numeric（不 dropna）保留全长与原索引，同时把 bool 转 float、
         # 无法转换的转 NaN；filter_finite 会掉行，不能用于构造全长掩码。

@@ -182,6 +182,17 @@ def ensure_numeric(df: pd.DataFrame, col: str) -> pd.Series:
     return pd.to_numeric(get_1d_from(df, col), errors='coerce').astype(float)
 
 
+def false_mask(index) -> pd.Series:
+    """与 ``index`` 等长、全 False 的掩码（索引逐元素保留）—— 全 False 掩码的唯一构造点。
+
+    函数体刻意保留列表写法而不用 ``pd.Series(False, index=index, dtype=bool)``：它是四处
+    内联字面量的逐字替代品，**空索引**上前者沿用其 object dtype（非空为 bool），换写法会
+    静默改变空掩码的 dtype（判据 ``test/backend/test_false_mask_single_source.py``）。
+    传 ``index`` 而不是 Series：调用点既有 ``df.index`` 也有 ``data_series.index``。
+    """
+    return pd.Series([False] * len(index), index=index)
+
+
 def safe_gap(min_val: float, max_val: float) -> float:
     gap = (max_val - min_val) / 20
     return max(gap, 1e-9)

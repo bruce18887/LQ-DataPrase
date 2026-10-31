@@ -18,7 +18,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.models import UserSetting
+from apps.accounts.services import provision_user_setting
 from apps.common.errors import error_response
 from apps.common.export_naming import base_export_context, render_export_filename
 from apps.datafiles.models import DataFile
@@ -147,7 +147,10 @@ class JobSubmitView(APIView):
 
         timeout_sec = request.data.get('timeout')
         if timeout_sec is None:
-            setting, _ = UserSetting.objects.get_or_create(user=request.user)
+            # 「缺失即建」走 provision_user_setting（与 sftp 下载端点同一入口）：
+            # 建行仍是模型默认值，只是把行钉回 request.user 的反向缓存。
+            # created 可丢：defaults=None 时没有值要往那一行收敛。
+            setting, _ = provision_user_setting(request.user)
             timeout_sec = setting.sftp_download_timeout
         timeout_sec = sftp_clamp_timeout(timeout_sec)
 

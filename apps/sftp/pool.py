@@ -156,6 +156,10 @@ def invalidate(user_id) -> None:
 
 
 def close(user_id) -> None:
-    """Close and remove the user's connection (used on explicit disconnect)."""
-    with _lock_for(user_id):
-        _close_entry(_pool.pop(user_id, None))
+    """Close and remove the user's connection (used on explicit disconnect).
+
+    Semantically distinct from ``invalidate`` — there the connection state can no
+    longer be trusted and the next call rebuilds it; here the user asked to
+    disconnect — but the resulting pool mutation is identical, so it delegates.
+    """
+    invalidate(user_id)

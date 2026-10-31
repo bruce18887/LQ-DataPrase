@@ -11,6 +11,7 @@ import pandas as pd
 
 from .helpers import (
     NON_NUMERIC_KEYWORDS,
+    false_mask,
     get_bin_column_name,
     ensure_numeric,
     get_1d_from,
@@ -118,7 +119,7 @@ def _scan_limit_cells(df: pd.DataFrame, metadata: Dict, columns: Optional[List[s
     format_type = metadata.get('format', 'CTA8290D')
     target_bin_col = get_bin_column_name(format_type)
 
-    fail_row_mask = pd.Series([False] * len(df), index=df.index)
+    fail_row_mask = false_mask(df.index)
     if target_bin_col in df.columns:
         bin_num = ensure_numeric(df, target_bin_col)
         # bin 缺失（NaN）的行不是 fail：`!= 1` 利用 NaN 比较恒 False 的语义把
