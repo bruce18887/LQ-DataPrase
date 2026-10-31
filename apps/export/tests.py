@@ -454,6 +454,7 @@ class ExportFilenameTemplateApiTests(APITestCase):
         self.assertEqual(resp.status_code, 200)
         name = _parse_content_disposition(resp['Content-Disposition'])
         self.assertEqual(name, 'gage_m_S1_data.csv')
+        resp.close()
 
     def test_sigma_limit_sigma_variable(self):
         self._set_template('sigma_limit', '{filename}_{sigma}sigma')

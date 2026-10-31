@@ -80,7 +80,11 @@ class _ExportViewTests(TestCase):
         self.addCleanup(setattr, export_views, 'load_user_file', original)
 
     def body(self, resp):
-        return b''.join(resp.streaming_content)
+        body = b''.join(resp.streaming_content)
+        # 关闭响应：to_csv 的临时文件句柄登记为 resource closer，不关就到
+        # 测试结束才由 GC/客户端回收。
+        resp.close()
+        return body
 
 
 class SigmaLevelValidationTests(_ExportViewTests):

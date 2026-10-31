@@ -4,6 +4,14 @@ import os
 import pandas as pd
 import re
 
+# 头部有界读取的保留行数：前 HEADER_KEEP 个物理行交给头部元数据助手
+# （extract_header_metadata 的 scan_limit 默认值就是 HEADER_KEEP；
+# _extract_program_name 另只扫前 50 行）。80 是助手历史上的扫描窗口，
+# 有界读取保留的内容与旧实现「整文件 readlines 后各自切片」逐字一致——
+# 不能缩成「marker 之前的行」，marker 之前不足 80 行时窗口会变窄。
+HEADER_KEEP = 80
+
+
 class BaseATEParser(ABC):
     format_type: str = ''
     
@@ -80,7 +88,7 @@ class BaseATEParser(ABC):
         return 'Unknown'
 
     @staticmethod
-    def extract_header_metadata(lines: List[str], mapping: Dict[str, List[str]], scan_limit: int = 80) -> Dict[str, str]:
+    def extract_header_metadata(lines: List[str], mapping: Dict[str, List[str]], scan_limit: int = HEADER_KEEP) -> Dict[str, str]:
         """Extract key-value metadata from header lines using flexible matching.
 
         ``mapping`` maps canonical keys (e.g. 'start_time') to a list of
@@ -171,22 +179,36 @@ class BaseAteCsvParser(BaseATEParser):
         if not config:
             return None, None
 
+        # 有界读取：只留头部前 HEADER_KEEP 行（给元数据助手）与 marker 行及其后
+        # max(offset) 行（给 header/unit/min/max）。旧写法 readlines() 把整文件
+        # 读成字符串列表，随后 read_csv 再整读一遍；大文件上两份全量同时驻留。
+        marker = config['marker']
+        max_offset = max(config['header_offset'], config['unit_offset'],
+                         config['min_offset'], config['max_offset'])
+        head = []
+        block = []
+        marker_idx = None
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = f.readlines()
-
-        data_start = None
-        for i, line in enumerate(lines):
-            if config['marker'] in line:
-                data_start = i
-                break
-        if data_start is None:
+            for i, line in enumerate(f):
+                if len(head) < HEADER_KEEP:
+                    head.append(line)
+                if marker_idx is None:
+                    if marker in line:
+                        marker_idx = i
+                        block.append(line)
+                elif len(block) <= max_offset:
+                    block.append(line)
+                if (marker_idx is not None and len(head) >= HEADER_KEEP
+                        and len(block) > max_offset):
+                    break
+        if marker_idx is None:
             return None, None
 
-        header_line = lines[data_start + config['header_offset']].strip()
-        unit_line = lines[data_start + config['unit_offset']].strip()
-        min_line = lines[data_start + config['min_offset']].strip()
-        max_line = lines[data_start + config['max_offset']].strip()
-        data_start_row = data_start + config['data_offset']
+        header_line = block[config['header_offset']].strip()
+        unit_line = block[config['unit_offset']].strip()
+        min_line = block[config['min_offset']].strip()
+        max_line = block[config['max_offset']].strip()
+        data_start_row = marker_idx + config['data_offset']
 
         columns = self.make_column_names_unique(
             [col.strip().strip('"') for col in header_line.split(',')]
@@ -212,9 +234,9 @@ class BaseAteCsvParser(BaseATEParser):
             if col not in non_numeric and df[col].dtype == object:
                 df[col] = self.convert_to_numeric(df[col])
 
-        program_name = self._extract_program_name(lines)
-        header_meta = self.extract_header_metadata(lines, self.header_mapping)
-        header_meta = self.postprocess_header_meta(lines, program_name, header_meta)
+        program_name = self._extract_program_name(head)
+        header_meta = self.extract_header_metadata(head, self.header_mapping)
+        header_meta = self.postprocess_header_meta(head, program_name, header_meta)
 
         metadata = {
             'format': self.format_type,
@@ -240,4 +262,6 @@ class BaseAteCsvParser(BaseATEParser):
 
     def postprocess_header_meta(self, lines: List[str], program_name: str,
                                 header_meta: Dict[str, str]) -> Dict[str, str]:
+        """钩子：``lines`` 至多 HEADER_KEEP 个物理行（旧实现是整文件），覆写方
+        不得假设能拿到更多；STS8200 只用 ``lines[0]``。"""
         return header_meta
