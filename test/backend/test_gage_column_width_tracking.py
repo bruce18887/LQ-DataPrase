@@ -381,14 +381,17 @@ class SummaryWriteSeamTests(SimpleTestCase):
         """表头行及其下每一格：账上不但**有**，而且记的就是产物最终读回那串的宽度。
 
         只钉「记没记」抓不到**过期**：将来若有人加一条「先经 ``write_cell`` 记一笔、再直接
-        ``set_cell_value`` 覆盖成更长的串」的通路（今天 A3/B3 就是这个形状，只是行 3 落在
-        ``min_row`` 之上不参与算宽），成员判据照样绿，列宽已经悄悄错了。对照物用 Go 自己的
-        ``get_cell_value``，不是 ``cell_display_text`` 的第二份副本 ⇒「两边一起改错」也红。
+        ``set_cell_value`` 覆盖成更长的串」的通路（今天 A3 就是这个形状，只是行 3 落在
+        ``min_row`` 之上不参与算宽；B3 是另一头 —— 只裸写、从没记过账），成员判据照样绿，
+        列宽已经悄悄错了。对照物用 Go 自己的 ``get_cell_value``，不是 ``cell_display_text``
+        的第二份副本 ⇒「两边一起改错」也红。
         这条判据今天的判别力见 ``test_width_check_catches_a_raw_overwrite_of_a_recorded_cell``
-        （那条把「将来要抓的形状」现在就造出来，证明它不是装饰）。
+        （那条把 A3 那个形状原样搬到会算宽的行上造出来，证明它不是装饰）。
 
-        ``write_bad1_count`` / ``mark_failed_label`` 直接 ``f.set_cell_value`` 写 B3/A3：
-        行 3 在 ``min_row`` 之上，旧扫描本来就不计 ⇒ 不进账才是正确形状。
+        ``write_bad1_count`` / ``mark_failed_label`` 直接 ``f.set_cell_value`` 写 B3 / A3：B3
+        因此压根没进账，A3 进的是 ``write_summary_intro`` 那一次的账、被这次裸写写成过期 ——
+        两者都在行 3、在 ``min_row`` 之上，旧扫描本来就不计 ⇒ ``stale_ledger_entries`` 按
+        ``min_row`` 切顶把它们放过（切掉那道闸就红，因为这两种正确形状会被冤成问题）。
         """
         written = []
         origin = excelize.File.set_cell_value
@@ -420,10 +423,11 @@ class SummaryWriteSeamTests(SimpleTestCase):
     def test_width_check_catches_a_raw_overwrite_of_a_recorded_cell(self):
         """判据自身的判别力：记完账再裸写覆盖 ⇒ ``stale_ledger_entries`` 必须报出来。
 
-        真实产物今天没有这种通路（唯一的裸写 A3/B3 都在 ``min_row`` 之上），所以产品级那条
-        判据此刻只验到「缺席」那一半。这里手工造出「过期」那一半：同一格先经 ``write_cell``
-        记账（短串），再直接 ``set_cell_value`` 写成短→长，判据必须红着指出来 —— 否则那条
-        产品级判据就只是成员检查的换了个写法。
+        产品级那条判据今天只验到「缺席」那一半：真实产物里就有「先记账再裸写」的通路（A3），
+        只是它落在 ``min_row`` 之上、被切顶那道闸正当放过，所以「过期」那一半在产品级判据上
+        暂时看不到。这里把同一形状搬到会算宽的行上：C12 先经 ``write_cell`` 记短串，再直接
+        ``set_cell_value`` 写成更长的串，判据必须红着指出来 —— 否则产品级那条就只是成员检查
+        换了个写法。
         """
         f = _new_file()
         try:
