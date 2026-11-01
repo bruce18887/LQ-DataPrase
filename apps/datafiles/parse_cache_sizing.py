@@ -122,8 +122,13 @@ def _parse_value_bytes(value) -> int:
         meta = value[1]
         # `col_meta` 与 `column_profile` 各有自己的真实量级函数，先从「每键 64 字节」
         # 的粗估里剔掉，否则两只 dict 各只算 64 字节（判据 J7 同因）。
-        real_sized = sum(1 for k in ('col_meta', 'column_profile') if k in meta)
+        real_sized = sum(
+            1 for k in ('col_meta', 'column_profile', 'col_meta_json') if k in meta)
         total += 64 * (len(meta) - real_sized)
         total += _col_meta_bytes(meta)
         total += _column_profile_bytes(meta.get('column_profile'))
+        # B5 的预序列化串与 col_meta 字典同量级（几十 KB）；按 64 字节估会让预算失真。
+        col_meta_json = meta.get('col_meta_json')
+        if isinstance(col_meta_json, str):
+            total += len(col_meta_json)
     return total
