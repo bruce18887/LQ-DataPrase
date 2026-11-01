@@ -12,6 +12,7 @@ from functools import partial
 import excelize
 
 from apps.common.constants import NON_NUMERIC_KEYWORDS
+from apps.export.excel_theme import ColumnWidthTracker
 from apps.gage.gage_file_sheet import write_file_sheet
 from apps.gage.gage_styles import create_file_sheet_styles, create_summary_styles
 from apps.gage.gage_summary_sheet import (
@@ -44,9 +45,16 @@ def build_gage_summary_excel(file_datasets, ignore_no_limit=False):
     num_files = len(file_datasets)
     non_numeric_keywords = NON_NUMERIC_KEYWORDS
     styles = create_summary_styles(f)
-    set_cell = partial(write_cell, f)
+    # 两个 partial 的名字刻意不对称：`set_file_cell` 明确是「文件表用、不记账」，
+    # 通用的 `set_cell` 才是那个会让人顺手拿去写 Summary 的坑。Summary 必须走
+    # `set_summary_cell`；账上只有 Summary 这一张表由
+    # `test_gage_column_width_tracking.SummaryWriteSeamTests.test_every_summary_cell_written_by_the_builder_is_recorded`
+    # 逐格核对（写进 Summary 却没记账 ⇒ 红），记账纯度另由 `test_other_sheets_are_not_recorded` 钉。
+    set_file_cell = partial(write_cell, f)
+    summary_widths = ColumnWidthTracker(SUMMARY_SHEET)
+    set_summary_cell = partial(write_cell, f, widths=summary_widths)
 
-    write_summary_intro(f, num_files, styles, set_cell)
+    write_summary_intro(f, num_files, styles, set_summary_cell)
 
     # 测试项筛选（系统列/非数值列恒排除，defect #7）口径见 gage_summary_stats
     all_test_cols = select_test_columns(file_datasets, ignore_no_limit)
@@ -67,7 +75,7 @@ def build_gage_summary_excel(file_datasets, ignore_no_limit=False):
             bad1_count += 1
 
         current_row, group_start, group_end = write_test_item_rows(
-            f, item, current_row, set_cell)
+            f, item, current_row, set_summary_cell)
         group_info.append((group_start, group_end, item.is_bad_group))
 
     last_data_row = current_row - 1
@@ -75,7 +83,7 @@ def build_gage_summary_excel(file_datasets, ignore_no_limit=False):
     # Average row 取自内存里的 6σ 序列（defect #6），绝不回读单元格。
     if num_files >= 2:
         write_average_row(f, repeatability_series, reproducibility_series,
-                          current_row, styles, set_cell)
+                          current_row, styles, set_summary_cell)
 
     write_bad1_count(f, bad1_count, styles)
     format_summary_sheet(f, group_info, last_data_row, styles)
@@ -83,7 +91,7 @@ def build_gage_summary_excel(file_datasets, ignore_no_limit=False):
     fold_good_groups(f, group_info)
     mark_failed_label(f, bad1_count, styles)
     hide_helper_columns(f)
-    finalize_summary_sheet(f)
+    finalize_summary_sheet(f, summary_widths)
 
     # Pre-create styles for individual file sheets
     file_styles = create_file_sheet_styles(f)
@@ -91,7 +99,7 @@ def build_gage_summary_excel(file_datasets, ignore_no_limit=False):
     # === INDIVIDUAL FILE SHEETS ===
     for file_info in file_datasets:
         write_file_sheet(f, file_info, ignore_no_limit, non_numeric_keywords,
-                         file_styles, set_cell)
+                         file_styles, set_file_cell)
 
     # Save to bytes — try/finally guarantees the temp file and the excelize
     # handle are released even if save_as / read raises (defect #10). Mirrors
