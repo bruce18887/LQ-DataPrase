@@ -26,6 +26,9 @@ from ._helpers import (
 
 logger = logging.getLogger(__name__)
 
+# 每批明细封顶（2026-11-01 拍板）：超出部分不进响应，`files_truncated` 报省略条数。
+BATCH_FILES_LIMIT = 500
+
 
 class BatchDirListView(APIView):
     """List batch directories on disk that may or may not have DataFile records."""
@@ -52,7 +55,9 @@ class BatchDirListView(APIView):
         # batch grouping no longer depends on the paginated /files/ page (which
         # dropped older batches once newer files filled page 1).
         batch_file_rows = {}
-        for df in DataFile.objects.filter(owner=request.user, file_type='batch').values(
+        for df in DataFile.objects.filter(
+            owner=request.user, file_type='batch',
+        ).order_by('-created_at', '-id').values(
             'id', 'filename', 'tags', 'batch_name', 'sub_batch', 'file_path',
             'format_type', 'row_count', 'col_count', 'program_name',
             'file_size', 'product_code', 'status', 'created_at',
@@ -114,13 +119,17 @@ class BatchDirListView(APIView):
             batch_registered_paths = registered_files.get(dir_name, set())
             unregistered_count = len(disk_paths - batch_registered_paths)
             is_fully_registered = dir_name in registered and unregistered_count == 0
+            all_files = batch_file_rows.get(dir_name, [])
+            files = all_files[:BATCH_FILES_LIMIT]
             result.append({
                 'name': dir_name,
                 'path': entry.path,
                 'file_count': file_count,
                 'total_size': total_size,
                 'registered': is_fully_registered,
-                'files': batch_file_rows.get(dir_name, []),
+                'files': files,
+                # 被省略的条数（0 = 全量）；前端计数用 len(files) + files_truncated
+                'files_truncated': len(all_files) - len(files),
                 'preview_files': preview_files,
             })
 
