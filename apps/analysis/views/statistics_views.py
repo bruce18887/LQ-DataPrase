@@ -51,6 +51,10 @@ from ._helpers import (
     cached_low_cpk_items,
 )
 
+#: B2 载荷封顶（用户 2026-11-01 拍板）：默认参数集是「全部带规格限列」，矩阵随参数个数
+#: 平方膨胀（50×50 = 2500 格）；超出的按列序截断，响应里带 truncated/total_params。
+CORRELATION_PARAM_LIMIT = 50
+
 
 class StatisticsViewSet(viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
@@ -228,6 +232,13 @@ class StatisticsViewSet(viewsets.GenericViewSet):
                 low_cpk_items=low_cpk_items,
             )
 
+        # 截断放在所有筛选之后、进计算之前：total_params 是「本来会算的全部」，truncated
+        # 只在真丢掉参数时为真；顺序保持 params 现有次序（默认列序 / 请求顺序）。
+        total_params = len(params)
+        truncated = total_params > CORRELATION_PARAM_LIMIT
+        if truncated:
+            params = params[:CORRELATION_PARAM_LIMIT]
+
         if not params or len(params) < 2:
             return error_response(
                 'need_at_least_2_params',
@@ -241,6 +252,8 @@ class StatisticsViewSet(viewsets.GenericViewSet):
         return Response(clean_data({
             'file_id': datafile.id,
             'filename': datafile.filename,
+            'total_params': total_params,
+            'truncated': truncated,
             **result
         }))
 
