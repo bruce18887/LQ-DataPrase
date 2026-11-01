@@ -12,11 +12,14 @@ from apps.datafiles.models import DataFile
 from apps.datafiles.services import get_cached_parsed_file
 from apps.datafiles.utils import resolve_file_path
 from apps.common.errors import error_response
+from apps.common.params import get_param
 from apps.common.user_settings import get_cpk_thresholds
 
 # 计算逻辑已抽到 services.py（供 HTML 报告共用，单一数据源）。这里 re-import
 # 既有名字，保持 `apps.dashboard.views.compute_*` 的历史导入路径不破。
 from .services import (  # noqa: F401
+    TOP_N_DEFAULT,
+    TOP_N_MAX,
     compute_bin_site_table,
     compute_test_item_overview,
     _derive_param_stats,
@@ -33,6 +36,15 @@ class DashboardSummaryView(APIView):
 
     def get(self, request):
         try:
+            try:
+                top_n = int(get_param(request, 'top_n', TOP_N_DEFAULT))
+            except (TypeError, ValueError):
+                return error_response('invalid_top_n',
+                                      f'top_n 需为 1..{TOP_N_MAX} 的整数')
+            if not 1 <= top_n <= TOP_N_MAX:
+                return error_response('invalid_top_n',
+                                      f'top_n 需在 1..{TOP_N_MAX}')
+
             file_id = request.query_params.get('file_id')
             if not file_id:
                 datafile = DataFile.objects.filter(
@@ -56,11 +68,12 @@ class DashboardSummaryView(APIView):
                 return error_response('parse_failed', status=200)
 
             cpk_thresholds = get_cpk_thresholds(request.user)
-            # 走缓存层：同一文件 + 同一阈值 + mtime 未变时直接返回上次结果。
+            # 走缓存层：同一文件 + 同一阈值 + 同一 top_n + mtime 未变时直接返回上次结果。
             # 非有限值已在写入侧过完 clean_data（见 services.get_dashboard_summary）——
             # 漏进 payload 的话 DRF 严格渲染器会在 handler 层抛 ValueError，整页 500。
+            # B4 的截断也在写入侧（services._cap_overview）：出口仍是同一只缓存对象。
             return Response(get_dashboard_summary(
-                datafile, df, fmt, metadata, cpk_thresholds))
+                datafile, df, fmt, metadata, cpk_thresholds, top_n=top_n))
         except Http404:
             # get_object_or_404 的 404 语义不能被兜底吞掉
             raise
