@@ -7,13 +7,16 @@
 import io
 import os
 import re
+import shutil
 import struct
+import tempfile
 import unittest
 import zipfile
+from unittest import mock
 
 import pandas as pd
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APITestCase
 
 from apps.accounts.models import UserSetting
@@ -122,6 +125,12 @@ class DpiReachesRenderedPngTests(APITestCase):
     """端到端：改设置 → 导出文件里嵌入的 PNG 像素真的变。"""
 
     def setUp(self):
+        # 作业产物落在 MEDIA_ROOT/jobs/… 下：重定向到临时目录，别污染真实 media/
+        self.media = tempfile.mkdtemp(prefix='lqdp-dpi-')
+        self.addCleanup(shutil.rmtree, self.media, True)
+        override = override_settings(MEDIA_ROOT=self.media)
+        override.enable()
+        self.addCleanup(override.disable)
         self.user = User.objects.create_user(username='dpi-exporter', password='pw')
         self.client.force_authenticate(self.user)
         self.datafile = DataFile.objects.create(
@@ -147,11 +156,14 @@ class DpiReachesRenderedPngTests(APITestCase):
 
     def _export_one_chart(self, fmt: str) -> bytes:
         self._authenticate_fresh()
-        resp = self.client.post('/api/v1/export/batch_charts/', {
-            'file_id': self.datafile.id,
-            'params': [self.param],
-            'format': fmt,
-        }, format='json')
+        # 同步重活端点已删（B8）：走作业池，并强制走「池不可用」的同步回落分支
+        # ——判据只关心 DPI 设置能不能穿到产物，不该在这里等异步队列。
+        with mock.patch('apps.jobs.executor.executor_available', return_value=False):
+            resp = self.client.post('/api/v1/jobs/export_batch_charts/', {
+                'file_id': self.datafile.id,
+                'params': [self.param],
+                'format': fmt,
+            }, format='json')
         self.assertEqual(resp.status_code, 200)
         return b''.join(resp.streaming_content)
 

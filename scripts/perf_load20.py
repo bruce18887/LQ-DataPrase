@@ -232,11 +232,11 @@ def heavy_upload(base, token, path):
 
 def heavy_export(base, token, file_id):
     client = Client(base, token)
-    _payload, ms = client.post('/api/v1/export/to_excel/',
+    _payload, ms = client.post('/api/v1/jobs/export_excel/',
                                {'file_id': file_id, 'passfail': 'all'},
-                               endpoint='POST export to_excel（重活占位）',
+                               endpoint='POST jobs export_excel（重活提交）',
                                expect_json=False)
-    print(f'  heavy export 完成：{ms:.0f} ms', flush=True)
+    print(f'  heavy export 提交完成：{ms:.0f} ms', flush=True)
 
 
 def _job_status(base, token, job_id):
@@ -254,9 +254,9 @@ def _job_status(base, token, job_id):
 def heavy_job(base, token, file_id, kind='export_excel', budget_sec=900, steady_submits=2):
     """P3 形状：把「懒建池的首跳」与「稳态提交」分开记，作业总时长单独成行。
 
-    与 ``heavy_export`` 的区别就是这条分支存在的理由 —— 后者打的是同步端点
-    ``/export/to_excel/``，量的是「重活把请求线程占多久」；作业化之后要量的是
-    「提交这一跳还快不快」。而 ``_get_pool()`` 是懒建的（提交时才调
+    与 ``heavy_export`` 的区别是这条分支要的是**拆分后的三段数字**：后者只发
+    一跳提交（不轮询），这里分开记懒建池的首跳、稳态提交与作业总时长。两处都打
+    ``/jobs/export_excel/`` —— 同步端点已删，重活只走作业池。而 ``_get_pool()`` 是懒建的（提交时才调
     ``executor_available()``，启动期没有预热入口），Windows 又钉了 ``spawn`` ⇒
     进程内第一次提交要把子进程连 Python 带 pandas 一起起来。只提一次就把它当
     「提交 P95」，等于把池构造算进用户等待，判据会假红。
