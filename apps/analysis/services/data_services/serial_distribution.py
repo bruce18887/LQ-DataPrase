@@ -21,6 +21,10 @@ from apps.analysis.services.statistics.downsample import (
     DOWN_SAMPLE_THRESHOLD,
 )
 
+#: B3 连续轴跨度上限系数（用户 2026-11-01 拍板 k=2）：跨度 > k×实有序列数时，
+#: 整数序列号不走 `range(min, max+1)` 展开，退回原值集合路径（点按原值匹配）。
+SERIAL_AXIS_SPAN_FACTOR = 2
+
 
 def anchor_for(value, y_min, y_max):
     """点在该 X 轴上的落位方式：0=正常, 1=无测量值, 2=高于 y_max, 3=低于 y_min。"""
@@ -249,8 +253,12 @@ def compute_serial_distribution_data(df, metadata, param, range_type,
         # 不展开 range、不截断，点按原值匹配（前端数值 x 按值映射类别下标）。
         if (as_int == all_serials).all():
             all_serials = as_int
-            continuous_serials = list(
-                range(int(all_serials.min()), int(all_serials.max()) + 1))
+            lo, hi = int(all_serials.min()), int(all_serials.max())
+            # 稀疏编号（1 与 1,000,000 这种）逐值展开会造出百万长度的轴；跨度超过
+            # 实有序列数的 k 倍就退回下面的原值集合路径（该路径本来就有，语义不变）。
+            if hi - lo + 1 > SERIAL_AXIS_SPAN_FACTOR * all_serials.nunique():
+                raise ValueError
+            continuous_serials = list(range(lo, hi + 1))
         else:
             raise ValueError
     except (ValueError, TypeError):
