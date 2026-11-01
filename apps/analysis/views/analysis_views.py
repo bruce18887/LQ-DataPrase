@@ -7,8 +7,6 @@ qqplot / uph）在 ``param_actions`` 里，两文件序列相关性（file_corre
 路由、权限声明与 OpenAPI 分组均不变。
 """
 
-import pandas as pd
-
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -17,7 +15,6 @@ from rest_framework.permissions import IsAuthenticated
 from apps.datafiles.models import DataFile
 from apps.analysis.services.statistics import (
     get_site_column,
-    get_serial_candidates,
     get_coord_columns,
     get_columns_with_limits,
     resolve_spec_limits,
@@ -27,6 +24,7 @@ from apps.analysis.services.statistics import (
     filter_bin1_rows,
     filter_test_items,
 )
+from apps.datafiles.column_profile import resolve_histogram_candidates
 from apps.analysis.services.data_services import (
     compute_histogram_stats,
     compute_wafer_map_data,
@@ -101,29 +99,18 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
             # derived, so the list is consistent with the histogram stats.
             if data_only_bin1:
                 df = filter_bin1_rows(df, metadata)
-            # Exclude serial/site columns — they are metadata, not data params.
-            # 排除全部候选列：Serial_No 与 Dut_No 并存时两者都不能当参数
-            _meta_cols = set(get_serial_candidates(df))
-            _stc = get_site_column(df)
-            if _stc: _meta_cols.add(_stc)
-            # dtype 白名单 ('int64','float64') 漏掉 int32/float32/UInt8，且
-            # pandas 3.0 下字符串列是 str dtype 而不是 object（== object 恒 False）。
-            # 改用 is_numeric_dtype 后 bool（真实数据的 Dut_Pass）**会被纳入**，
-            # 所以必须显式排除 —— pass/fail 标志不是可测量的参数。
-            numeric_cols = [c for c in df.columns
-                           if pd.api.types.is_numeric_dtype(df[c])
-                           and not pd.api.types.is_bool_dtype(df[c])
-                           and c not in _meta_cols]
-            # 「哪些列整列为空」一次向量化算，别逐列 dropna().empty：实测这只 1,702 列的
-            # ETS88 文件，逐列写法 205ms（每列都新建一次 dropna 的 Series 再判空），
-            # ``notna().any()`` 一遍 91ms，逐列结果实测相同。这条打在换文件/改筛选上。
-            if numeric_cols:
-                _has_value = df[numeric_cols].notna().any().to_numpy()
-                numeric_cols = [c for c, ok in zip(numeric_cols, _has_value) if ok]
             if ignore_no_limit:
+                # 有 Limits 口径就轮不到候选：旧实现算了 numeric_cols 却不消费，
+                # A4b 后直接不算——结果逐字不变（判据见 fast path 测试第⑤⑨条）。
                 params = get_columns_with_limits(df, metadata)
             else:
-                params = numeric_cols
+                # 候选列的口径、缓存取数与回落规则全在 `apps.datafiles.column_profile`
+                # （那边存的 histogram_numeric_columns 是内部键，与 browse 响应四键里的
+                # numeric_columns 是两套集合，不许混用）。规则逐条见
+                # `resolve_histogram_candidates` 的 docstring 与
+                # `test/backend/test_histogram_candidates_fastpath.py`。
+                params = resolve_histogram_candidates(
+                    df, metadata, rows_filtered=data_only_bin1)
             params = filter_test_items(
                 df, metadata, params,
                 ignore_no_test_value=ignore_no_test_value,
