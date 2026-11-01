@@ -94,17 +94,31 @@ def build_batch_html_report(payload, *, dpi, generated_at):
     Bin×Site）读的全是 ``payload.get(...) or {}`` / ``or []`` ⇒ 漏掉
     ``for_html_report=True`` 时函数**正常返回**，报告只是静默少三块，
     HTTP 200、文件名照常，用户与日志都看不出差别（2026-10-30 审查 Important 2）。
-    那四把 key 同生同灭，所以验 ``bin_site_columns`` 一把就够 —— 它是四者里唯一由
-    ``aggregate_bin_site_table`` 现算的那把，也最能说明「这份载荷不是给 HTML 造的」。
+
+    认门的依据 2026-10-31 换过一次：原先「那四把 key 同生同灭，验 ``bin_site_columns``
+    一把就够」成立，因为 JSON 分支根本不带那四把。现在 JSON 端点为了把响应键集合恢复到
+    D3 之前那 14 把，把五把**空占位**也带了回来（``trend_data={}``、其余四把 ``[]``），
+    键在不在已分不出两形状 —— 于是改看 ``site_pass_data``：它**只有 JSON 形状才带**
+    （HTML 报告不读它，``for_html_report=True`` 那份连这个键都没有；两半各由
+    ``test/backend/test_batch_report_payload.py`` 的
+    ``test_html_payload_carries_report_partitions_and_drops_site_pass_data`` 与
+    ``test_json_compat_keys_are_empty_placeholders_not_computed_data`` 钉住）。
+    「``bin_site_columns`` 都不存在」那一半**保留** ⇒ 连服务产物都不是的手搓载荷照样进不来。
+    这里不能改用「四把分区是否为空」认门：``aggregate_bin_site_table`` 对**没有 Site 列**
+    的批次合法地返回 ``([], [])``（见 ``apps/batch_report/aggregation.py`` 的提前返回），
+    那种报告今天能出，拿空当标记就会把它打成 500。
     判据：``test/backend/test_html_report_batch.py`` 的
-    ``test_json_shaped_payload_is_refused_not_rendered_empty``。
+    ``test_json_shaped_payload_is_refused_not_rendered_empty``、
+    ``test_hand_built_payload_missing_the_partitions_is_still_refused`` 与
+    ``test_html_shaped_payload_with_empty_site_partitions_passes_the_guard``。
     """
-    if 'bin_site_columns' not in payload:
+    if 'site_pass_data' in payload or 'bin_site_columns' not in payload:
         raise ValueError(
-            '批次 HTML 报告的载荷缺少 "bin_site_columns"：'
+            '批次 HTML 报告的载荷不是 for_html_report=True 那一份：'
+            '带 "site_pass_data" ⇒ 这是 JSON 形状（或至少不是 HTML 分支）的载荷；'
+            '缺 "bin_site_columns" ⇒ 压根不是 compute_batch_yield_data 的产物。'
             '必须用 compute_batch_yield_data(user, batch_name, for_html_report=True) '
-            '生成载荷；用默认（JSON）分支那份渲染会静默丢掉良率趋势 / Bin 分布 / '
-            'Bin×Site 三块')
+            '生成载荷')
     batch_name = payload.get('batch_name') or ''
     parts = [
         sections.report_header(f'批次良率报告 - {batch_name}',

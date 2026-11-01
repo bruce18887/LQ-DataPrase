@@ -138,8 +138,9 @@ class BatchHtmlReportArtifactTests(APITestCase):
 
         这一条防的是「scrub 把要抓的东西一起洗掉了」：如果区块标题/表格文本不在 digest
         里，摘掉一块图不会改变它，那 ``test_scrubbed_artifact_matches_pinned_digest``
-        就退化成一台机器上的字节回声。这里刻意**不删** ``bin_site_columns`` ⇒
-        ``build_batch_html_report`` 的入口守卫放行，走到渲染里去。
+        就退化成一台机器上的字节回声。这里刻意**不删** ``bin_site_columns``、也**不补**
+        ``site_pass_data`` ⇒ ``build_batch_html_report`` 的入口守卫仍按 HTML 形状放行，
+        走到渲染里去。
         """
         scrubbed, alts, titles = self._render(drop=('trend_data',))
         self.assertNotIn('良率趋势', titles,

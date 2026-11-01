@@ -54,9 +54,11 @@ class BatchReportViewSet(viewsets.GenericViewSet):
             return error_response('param_required', 'batch_name required')
 
         try:
-            # 默认 ``for_html_report=False``：JSON 分支不凑趋势/Bin 分布/Bin×Site 交叉表
-            # ——前端一个都不读（判据与核对口径见
+            # 默认 ``for_html_report=False``：JSON 分支不凑趋势/Bin 分布/Bin×Site 交叉表的
+            # **计算** ——前端一个都不读（判据与核对口径见
             # ``test/backend/test_batch_report_payload.py`` 模块 docstring）。
+            # 但**键**照 D3 之前那 14 把全带：响应键集合属契约，删键要前端同批改，而那批没改
+            # ⇒ 这五把是类型正确的空占位（``trend_data={}``、其余 ``[]``），不是旧数据。
             payload = compute_batch_yield_data(request.user, batch_name)
         except BatchNotAvailableError as e:
             return error_response('batch_not_available', str(e), 404)
