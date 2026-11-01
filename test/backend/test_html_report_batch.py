@@ -80,22 +80,42 @@ class BatchHtmlReportTests(TestCase):
         """入口守卫（2026-10-30 审查 Important 2）：漏掉 ``for_html_report=True`` 必须炸。
 
         ``apps/export/html_report/batch.py`` 里那四段分区一律 ``payload.get(...) or {}`` /
-        ``or []`` ⇒ 拿 JSON 分支的载荷（默认 ``for_html_report=False``，一个分区都不带）去
-        渲染，良率趋势、Bin Pareto、Bin×Site 交叉表**整块静默消失**，而函数正常返回、
-        HTTP 200、文件名照常 —— 用户拿到的是一份看着没问题、少了三块的报告。
-        所以入口先验载荷形状再往下走：那四把 key 同生同灭，验 ``bin_site_columns``
-        一把就够（它是四者里唯一由 ``aggregate_bin_site_table`` 现算的那把，
-        也最能说明「这份载荷不是给 HTML 造的」）。错误文案必须指名开关本身，
-        否则下一个人只会看到一句 ``ValueError``。
+        ``or []`` ⇒ 拿 JSON 分支的载荷去渲染，良率趋势、Bin Pareto、Bin×Site 交叉表
+        **整块静默消失**，而函数正常返回、HTTP 200、文件名照常 —— 用户拿到的是一份看着
+        没问题、少了三块的报告。
+
+        **认门的依据换过一次**（2026-10-31 兼容回包批）：原先验「缺 ``bin_site_columns``」
+        就够，因为那四把 key 只在 HTML 分支存在。现在 JSON 分支也带这四把（**空占位**，
+        恢复 HEAD 那 14 把键集合），键在不在已经分不出两形状，改用只有 JSON 形状才带的
+        ``site_pass_data`` 认门（HTML 报告不读它、故 HTML 载荷不带它 —— 判据
+        ``test_batch_report_payload.py`` 的
+        ``test_html_payload_carries_report_partitions_and_drops_site_pass_data``）。
+        保留「缺 ``bin_site_columns`` 也拒」那一半 ⇒ 连服务产物都不是的手搓载荷仍进不来。
+        错误文案必须指名开关本身，否则下一个人只会看到一句 ``ValueError``。
         """
         json_payload = compute_batch_yield_data(self.user, 'B1')
-        self.assertNotIn('bin_site_columns', json_payload,
-                         '前置：JSON 分支不带那四段分区（判据见 test_batch_report_payload.py）')
+        self.assertEqual(json_payload.get('site_pass_data'), [],
+                         '前置：JSON 分支带 site_pass_data 兼容空键（判据见 '
+                         'test_batch_report_payload.py 的 JSON_COMPAT_KEYS 那组）')
+        self.assertEqual(json_payload.get('bin_site_columns'), [],
+                         '前置：JSON 分支那四把都是空占位，不是算出来的分区')
         with self.assertRaises(ValueError) as ctx:
             build_batch_html_report(json_payload, dpi=100,
                                     generated_at='2026-01-01 00:00:00')
         self.assertIn('for_html_report=True', str(ctx.exception),
                       '守卫报错没指名该补哪个开关 ⇒ 读到异常的人不知道往哪改')
+
+    def test_hand_built_payload_missing_the_partitions_is_still_refused(self):
+        """认门的两半都要各自咬得住：只有 9 把真实键的手搓载荷（既无 ``site_pass_data``
+        也无 ``bin_site_columns``）仍然必须被拒 —— 否则守卫被改成「只认 site_pass_data」
+        后，这一类漏带分区就静默少三块。"""
+        bare = compute_batch_yield_data(self.user, 'B1')
+        for key in ('site_pass_data', 'trend_data', 'bin_distribution',
+                    'bin_table_data', 'bin_site_columns'):
+            bare.pop(key)
+        with self.assertRaises(ValueError):
+            build_batch_html_report(bare, dpi=100,
+                                    generated_at='2026-01-01 00:00:00')
 
     def test_html_shaped_payload_passes_the_guard(self):
         """正向对照（防守卫写成「一律拒绝」的假绿）：带开关那份必须渲染出三块。"""
@@ -107,3 +127,25 @@ class BatchHtmlReportTests(TestCase):
             # 所以它是「Bin×Site 交叉表真的渲染了」的标记，不是别处的通用词。
             self.assertIn(marker, doc, f'HTML 分支的载荷少了分区块：{marker}')
         self.assertIn('data:image/png;base64,', doc)
+
+    def test_html_shaped_payload_with_empty_site_partitions_passes_the_guard(self):
+        """无 Site 批次的合法 HTML 载荷不能被守卫误杀：分区为空 ≠ 载荷形状是 JSON。
+
+        ``aggregate_bin_site_table`` 对没有 Site 列的批次合法地返回 ``([], [])``，
+        ``build_batch_html_report`` 的入口守卫只能看「键在不在」、不能看「值空不空」：
+        这里保留 HTML 形状（没有 JSON 兼容键 ``site_pass_data``，但
+        ``bin_table_data`` / ``bin_site_columns`` 两把 key 仍在），只是把值置空。
+        若守卫被改成 ``not payload.get('bin_site_columns')``，本用例必须红。
+        """
+        html_payload = compute_batch_yield_data(self.user, 'B1', for_html_report=True)
+        self.assertNotIn('site_pass_data', html_payload,
+                         '前置：这是 HTML 分支载荷，不该带 JSON 形状兼容键')
+        html_payload['bin_table_data'] = []
+        html_payload['bin_site_columns'] = []
+        html_payload['sorted_sites'] = []
+
+        doc = build_batch_html_report(html_payload, dpi=100,
+                                      generated_at='2026-01-01 00:00:00')
+
+        self.assertIn('批次良率报告', doc)
+        self.assertNotIn('合计', doc)

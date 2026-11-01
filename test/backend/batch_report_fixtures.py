@@ -7,8 +7,8 @@
 * `test/backend/test_batch_report_payload.py` —— `compute_batch_yield_data` 的分支裁剪。
 
 写法照 `test/backend/job_cancel_fixtures.py`：夹具只有这一份，**不许**复制假帧。
-理由就是它自己 —— 两份会各自漂，而漂出来的那份会替「JSON 分支到底带不带那四把 key」
-撒谎，那正是本批判据的判据本身。
+理由就是它自己 —— 两份会各自漂，而漂出来的那份会替「JSON 分支带的那几把 key 是空占位
+还是实值、HTML 分支到底带不带 `site_pass_data`」撒谎，那正是本批判据的判据本身。
 
 `sqlite_parameter_limit` 的**唯一一份**也在这里（2026-10-30 审查 Important 3 的尾款：
 它先前在本仓出现两次，一次在 `test_analysis_load_db_count.py`、一次在批次载荷测试里）。
@@ -34,31 +34,54 @@ User = get_user_model()
 
 URL_GEN = '/api/v1/batch-report/generate_report/'
 
-# JSON 端点（``batch_yield_data``）的键集合。前端 BatchYieldTab.vue 逐键读的就是这一组：
+# ── 键集合分四组，别混成一个名字（判据用哪一组，红的含义就完全不同）─────────────
+# ① 两分支都算的**真实业务键**（9 把）。前端 BatchYieldTab.vue 逐键读的就是这一组：
 # kpi / stage_yields / phase_summary / phases / site_matrix / sorted_sites / qa_checks /
 # uph / batch_name。
 JSON_KEYS = {
     'batch_name', 'kpi', 'phases', 'phase_summary', 'stage_yields',
     'sorted_sites', 'site_matrix', 'uph', 'qa_checks',
 }
-# HTML 报告分支额外带回的四把 key。
+# ② JSON 端点的**形状兼容占位**（5 把）：D3（`d203ca1`）把它们整个删掉过 —— 那是契约
+# 变更；2026-10-31 这批按计划的「响应 JSON 键集合不变」把它们补回，但 JSON 分支**一把
+# 都不计算**，值恒为 `JSON_COMPAT_EMPTY_VALUES` 那一组空容器。
+JSON_COMPAT_KEYS = {
+    'trend_data', 'site_pass_data', 'bin_distribution', 'bin_table_data',
+    'bin_site_columns',
+}
+# ③ JSON 端点的**完整响应键集合**（14 把）= ① ∪ ②，与 D3 之前（`d203ca1^`）那份逐键相同。
+JSON_RESPONSE_KEYS = JSON_KEYS | JSON_COMPAT_KEYS
+# 兼容占位的期望值：类型与 HEAD 那份实值的类型一致（trend_data 是 dict，其余四把是 list），
+# 内容一律为空 ⇒ 这是**形状**兼容，不是旧数据逐值兼容。
+JSON_COMPAT_EMPTY_VALUES = {
+    'trend_data': {},
+    'site_pass_data': [],
+    'bin_distribution': [],
+    'bin_table_data': [],
+    'bin_site_columns': [],
+}
+# ④ HTML 报告分支**额外真算**的四把分区（不含 ``site_pass_data``：报告不读它，
+# 所以 HTML 载荷不带这一把，别为 JSON 的形状兼容给它加无消费者的计算）。
 HTML_EXTRA_KEYS = {
     'trend_data', 'bin_distribution', 'bin_table_data', 'bin_site_columns',
 }
 
-#: 键集合判据的 ``msg=``：这几把断言红了，下一件事必须是「谁读它」，不是「把它加回来」。
-#: 三条断言各钉一层，缺一层就会有人把它当成漏带：
+#: 键集合判据的 ``msg=``：这几条红了，第一件事是**分清红的是哪一组**，不是「把 key 加回来」。
 PARTITION_HISTORY = (
-    '这五把 key 是 2026-10-30 D3 **刻意**删掉的，不是漏带：'
-    '(a) 没有任何消费者读 JSON 里的那几份拷贝 —— trend_data / bin_distribution / '
-    'bin_table_data / bin_site_columns 的唯一读方是 apps/export/html_report/batch.py，'
-    'site_pass_data 连 HTML 都不读（核对口径见 test_batch_report_payload.py 模块 '
-    'docstring 的「消费方」段）；'
-    '(b) 前端那张 Bin×Site 表是它自己按当前阶段现算的 —— '
-    'frontend/src/utils/batchAggregation.ts 的 aggregateBinSiteTable 吃 '
-    'phases[].bin_info[].sites，批级那两把同名 key 不是它的输入；'
-    '(c) 前四把仍然由 HTML 分支带回（for_html_report=True，见 HTML_EXTRA_KEYS），'
-    '删的只是 JSON 那一份。要恢复任何一把：先给出读它的那个人。'
+    '键集合分四组，别混：'
+    '(a) JSON_KEYS（9 把）= 两分支都算的真实业务键，前端 BatchYieldTab.vue 逐键读的就是这组；'
+    '(b) JSON_COMPAT_KEYS（5 把：trend_data / site_pass_data / bin_distribution / '
+    'bin_table_data / bin_site_columns）= JSON 端点的**形状兼容占位**，JSON 分支一把都不计算，'
+    '值恒为空（trend_data={}，其余四把=[]）—— 补回它们只为把响应键集合恢复到 D3（d203ca1）'
+    '之前那 14 把，**不是**恢复旧数据；两条 spy 判据（compute_yield_trend / '
+    'aggregate_bin_site_table not_called）仍然必须成立；'
+    '(c) JSON_RESPONSE_KEYS = JSON_KEYS ∪ JSON_COMPAT_KEYS（14 把）= JSON 端点完整响应键集合；'
+    '(d) HTML_EXTRA_KEYS（4 把，不含 site_pass_data）= for_html_report=True 才算的真实分区，'
+    '唯一读方是 apps/export/html_report/batch.py；site_pass_data **任何分支都没有读者**'
+    '（前端那两处命中是 batchAggregation.ts 描述「同构」的注释文字），所以 HTML 载荷不带它。'
+    '想恢复 JSON 那五把的**实值**：先给出读它的那个人，并单开一条契约/性能任务 —— '
+    '把它们重新接上计算就是把 D3 消掉的那笔账再付一遍。'
+    '（消费方核对口径见 test_batch_report_payload.py 模块 docstring 的「消费方」段。）'
 )
 
 # 改前 ``get_object_or_404`` 抛出的正是这句话，DRF 把它塞进 ``detail.detail``。

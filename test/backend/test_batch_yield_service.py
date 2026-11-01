@@ -17,17 +17,20 @@ from apps.batch_report.services import (
     compute_batch_yield_data, BatchNotAvailableError,
 )
 from apps.datafiles.models import DataFile
-from test.backend.batch_report_fixtures import JSON_KEYS, PARTITION_HISTORY
+from test.backend.batch_report_fixtures import (
+    JSON_RESPONSE_KEYS, PARTITION_HISTORY,
+)
 
 User = get_user_model()
 
-# 2026-10-30 D3：JSON 分支不再带只有 HTML 报告读的四段分区（``trend_data`` /
-# ``bin_distribution`` / ``bin_table_data`` / ``bin_site_columns``），``site_pass_data``
-# 因为谁都不读而整个消失。这里钉的是**默认（JSON）分支**的键集合；HTML 分支那份
-# 由 ``test_batch_report_payload.py`` 钉，两份差集 = 四把 key。
+# JSON 端点的**完整**响应键集合（14 把）。形状历史：D3（`d203ca1`）一度把它删成 9 把
+# —— 那是契约变更；2026-10-31 这批补回 5 把**形状兼容空键**（`trend_data` /
+# `site_pass_data` / `bin_distribution` / `bin_table_data` / `bin_site_columns`），
+# 键回来了、值恒为空，JSON 分支一把都不计算。HTML 分支那份由
+# `test_batch_report_payload.py` 钉（13 把 = 9 真实 + 4 真算分区，不带 site_pass_data）。
 # 键集合常量不再本地复制一份（两份会各自漂）—— 用的就是
-# ``test/backend/batch_report_fixtures.py`` 的 ``JSON_KEYS`` 那一份。
-EXPECTED_KEYS = JSON_KEYS
+# ``test/backend/batch_report_fixtures.py`` 的 ``JSON_RESPONSE_KEYS`` 那一份。
+EXPECTED_KEYS = JSON_RESPONSE_KEYS
 
 
 def _df():

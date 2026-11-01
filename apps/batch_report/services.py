@@ -60,30 +60,42 @@ def compute_batch_yield_data(user, batch_name, *, for_html_report=False):
 
     批次无文件 / 全部无法解析时抛 BatchNotAvailableError。
 
-    ``for_html_report`` 决定要不要带那四段**只有 HTML 报告读**的分区
+    ``for_html_report`` 决定那四段**只有 HTML 报告读**的分区
     （``trend_data`` / ``bin_distribution`` / ``bin_table_data`` /
     ``bin_site_columns``，读点见 ``apps/export/html_report/batch.py`` 的
-    ``payload.get(...)``）。JSON 分支默认不带：一个前端读者都没有。
-    这四把 key **只在本函数末尾那一处** ``if for_html_report:`` 里构造并写入，
-    所以「绑定制」与「消费制」不可能分叉（先前分在两块、另配两行兜底默认值的那个
-    形状已随 2026-10-30 审查 Minor 3 合并掉）。HTML 那侧另有一道入口守卫：
-    ``build_batch_html_report`` 见到没有 ``bin_site_columns`` 的载荷直接报错，
-    不放它渲染出一份只是少三块的报告。
+    ``payload.get(...)``）是**算出来**还是**留空**：
+    ``True`` ⇒ 四把都在函数末尾那唯一一处 ``if for_html_report:`` 里计算并写入，
+    「绑定制」与「消费制」同块、不可能分叉（先前分在两块、另配两行兜底默认值的那个
+    形状已随 2026-10-30 审查 Minor 3 合并掉）；``False`` ⇒ 同一处 ``else`` 只写
+    **空占位**（``{}`` / ``[]``），一条计算都不跑。
+
+    为什么 JSON 分支还带着这五把 key（2026-10-31 修正批）：D3（``d203ca1``）把 JSON
+    响应从 14 把删成 9 把，而计划 Task D3 Step 2 的硬口径是「响应 JSON 键集合不变」、
+    Global Constraints 又写着「改响应字段属契约变更、必须与前端同批改」—— 那批没动前端
+    ⇒ 键集合先恢复。**恢复的是键，不是数据**：``trend_data={}``、
+    ``site_pass_data`` / ``bin_distribution`` / ``bin_table_data`` / ``bin_site_columns``
+    四把 ``[]``，任何按实值用它们的调用方拿到的都是空。判据（键集合 14 把、空值与类型、
+    两条 ``not_called`` spy、占位每次新建）在
+    ``test/backend/test_batch_report_payload.py``；HTML 产物字节另有
+    ``test/backend/test_batch_report_html_artifact.py``。
+
+    HTML 那侧另有一道入口守卫：``build_batch_html_report`` 认 ``site_pass_data`` 这把
+    **只有 JSON 形状才带**的键来拦「忘了开开关」的载荷（键在不在已分不出两形状，因为
+    JSON 那侧现在也带那四把空占位），外加「连 ``bin_site_columns`` 都没有 ⇒ 不是本函数
+    产物」那一半；不放它渲染出一份只是少三块的报告。
 
     **这两段的账现在两分支都不付**（计划 Step 3 的完整口径，2026-10-30 补齐）：
     趋势输入 ``file_data_list`` 带的是循环里**已经算好的** ``bin_stats``/``total``，
     不带 ``df`` ⇒「每文件第二遍全量 bin 统计」（``apps/analysis/services/statistics/``
     ``trends.py`` 的 ``_bin_stats_and_total`` 先前那句按 ``df`` 现算的 fallback）与
     「批次内每个文件的 DataFrame 同时驻留」一起消失，JSON 分支与 HTML 分支同界。
-    于是 ``for_html_report=False`` 省的**只是那四把 key 本身的构造与体积**
+    于是 ``for_html_report=False`` 省的**只是那四把分区本身的构造与体积**
     （``aggregate_bin_site_table`` + ``bin_agg`` 累计 + SPC 那趟 O(文件数) 的均值/标准差），
     别再写成「省一趟全量统计」或「省一批帧」。
-    消费方核对口径、键集合钉值与上面那三处判据都在
-    ``test/backend/test_batch_report_payload.py``；HTML 产物字节另有
-    ``test/backend/test_batch_report_html_artifact.py``。
 
-    ``site_pass_data`` 不在此列 —— 它**任何分支都没有读者**（前端那两处命中是
-    ``batchAggregation.ts`` 里描述「同构」的注释文字），所以两边一律不再产出。
+    ``site_pass_data`` 是**纯形状兼容**：它**两分支都没有读者**（前端那两处命中是
+    ``batchAggregation.ts`` 里描述「同构」的注释文字），所以 JSON 那侧只给空占位，
+    HTML 那侧连键都不带 —— 报告不读它，就不为它加一笔无消费者的字段。
     """
     files = DataFile.objects.filter(
         owner=user, file_type='batch', batch_name=batch_name
@@ -200,7 +212,8 @@ def compute_batch_yield_data(user, batch_name, *, for_html_report=False):
             # ``test_both_branches_run_one_bin_statistics_pass_per_file_as_performance_tripwire``
             # 钉；入参形状本身由 ``test_html_trend_input_carries_precomputed_bin_stats_and_no_frame``
             # 与 ``test/backend/test_bin_trend_yield.py`` 的反垫片用例两头夹）。
-            # JSON 分支连这份列表都不构造（省的是那四把 key 本身）。
+            # JSON 分支不往这份列表里 append 任何东西（那四把分区在它那边只是空占位，
+            # 见函数末尾的 else）：留在上面的只是一只空 list / 空 defaultdict，没有内容。
             file_data_list.append({
                 'bin_stats': bin_stats,
                 'total': total,
@@ -225,9 +238,9 @@ def compute_batch_yield_data(user, batch_name, *, for_html_report=False):
     pass_all = sum(p['pass_count'] for p in phases)
     fail_all = total_all - pass_all
 
-    # 良率趋势（SPC）/ Bin 分布这两把 key 现在**只**在函数末尾那**一处**
-    # ``if for_html_report:`` 里构造并写入 payload —— 见那儿。这里曾经有一处独立的
-    # ``if`` 加两行兜底默认值（``trend = {}`` / ``bin_distribution = []``），因为绑定与
+    # 良率趋势（SPC）/ Bin 分布这几把 key 的**全部**写入都在函数末尾那一对互斥的
+    # ``if for_html_report:`` / ``else:`` 里（HTML 算实值、JSON 写空占位）—— 这里曾经有一处
+    # 独立的 ``if`` 加两行兜底默认值（``trend = {}`` / ``bin_distribution = []``），因为绑定与
     # 消费分在两块里、两处判据漂开就是 ``UnboundLocalError``。合并成一处之后那个形状
     # 不存在了，默认值与钉它的源码改写用例一起删（2026-10-30 审查 Minor 3）。
 
@@ -319,13 +332,12 @@ def compute_batch_yield_data(user, batch_name, *, for_html_report=False):
         'qa_checks': qa_checks,
     }
     if for_html_report:
-        # HTML 那四段分区的**唯一**一处判据：绑定与消费同块 ⇒ 不存在「两处判据分叉 ⇒
+        # HTML 那四段分区的**唯一**一处计算与写入：绑定与消费同块 ⇒ 不存在「两处判据分叉 ⇒
         # ``UnboundLocalError``」这个形状，也就不需要 ``trend`` / ``bin_distribution``
         # 的兜底默认值。只有 HTML 报告读这四把 key（``apps/export/html_report/batch.py``
         # 的 ``payload.get(...)``，那边还有一条入口守卫拦「忘了开开关」的载荷）；
-        # JSON 分支省掉的就是这四把 key 本身的构造与体积 ——「每文件第二趟全量 bin
-        # 统计」与「整批 DataFrame 驻留」两分支都已经不存在（趋势输入带的是算好的
-        # bin_stats，见循环里那段注释）。
+        # 「每文件第二趟全量 bin 统计」与「整批 DataFrame 驻留」两分支都已经不存在（趋势输入
+        # 带的是算好的 bin_stats，见循环里那段注释），HTML 这侧多付的只是那四把 key 的构造与体积。
         payload['trend_data'] = compute_yield_trend(file_data_list)
         # Bin 分布（HTML 的 Pareto 图）；bin_agg 只喂这一把 key。
         payload['bin_distribution'] = [
@@ -334,4 +346,23 @@ def compute_batch_yield_data(user, batch_name, *, for_html_report=False):
         ]
         payload['bin_table_data'], payload['bin_site_columns'] = \
             aggregate_bin_site_table(phases, sorted_sites)
+    else:
+        # **形状兼容空键**（2026-10-31 修正批）：这五把在 HEAD（``d203ca1`` 之前）的响应里
+        # 一直存在，D3 把它们整个删掉属契约变更（计划的 Task D3 Step 2 写的就是「响应 JSON
+        # 键集合不变」），前端那批又没跟着改 ⇒ 键补回来。
+        # 诚实口径：**只补键，不补账**。这里一个计算都没接回来 —— ``trend_data`` 恒 ``{}``、
+        # 其余四把恒 ``[]``（类型与 HEAD 那五把实值的类型一致），``compute_yield_trend`` 与
+        # ``aggregate_bin_site_table`` 在这条分支一次都没被调用，``file_data_list``/``bin_agg``
+        # 也停在空容器上没有被填过。所以这不是「恢复了旧的 trend/partition 内容」，任何人把它们
+        # 当实值用都会拿到空。要恢复**值**：先给出 JSON 那侧的读者，并单开一条契约/性能任务。
+        # 每调用各建一份（都是可变容器，共用一份模块级常量会让一个调用方写脏全站）。
+        # HTML 那侧**不带** ``site_pass_data``：报告不读它，不为 JSON 的形状兼容加无消费者的
+        # 字段 —— 也正因为它只有 JSON 形状才有，``build_batch_html_report`` 拿它认门。
+        # 判据：test/backend/test_batch_report_payload.py 的 JSON_COMPAT_KEYS 那组
+        # （键集合 14 把 + 空值与类型 + 两条 not_called spy + 每次新建）。
+        payload['trend_data'] = {}
+        payload['site_pass_data'] = []
+        payload['bin_distribution'] = []
+        payload['bin_table_data'] = []
+        payload['bin_site_columns'] = []
     return payload
