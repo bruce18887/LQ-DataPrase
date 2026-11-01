@@ -353,11 +353,12 @@ def compute_dashboard_summary(df, datafile, fmt, metadata, thresholds=None):
     }
 
 
-def _summary_cache_key(datafile, fmt, thresholds):
-    """构造汇总缓存 key：文件身份 + 内容 mtime + CPK 阈值 + 展示字段。
+def _summary_cache_key(datafile, fmt, thresholds, top_n):
+    """构造汇总缓存 key：文件身份 + 内容 mtime + CPK 阈值 + 展示字段 + top_n。
 
     必须包含 mtime_ns：同一 file_id 重新上传/覆盖后内容会变，仅靠 id 会返回
     旧数字。os.stat 失败（文件被删/不可读）回落 0，仍可命中「无文件」口径。
+    top_n 也必须进 key：总览行数不同的两份 payload 不能互相串（B4）。
     """
     from apps.common.user_settings import DEFAULT_CPK_THRESHOLDS
 
@@ -374,23 +375,53 @@ def _summary_cache_key(datafile, fmt, thresholds):
         datafile.filename,
         datafile.program_name,
         fmt,
+        top_n,
     )
 
 
-def get_dashboard_summary(datafile, df, fmt, metadata, thresholds=None):
+#: B4 载荷封顶（用户 2026-11-01 拍板，后按仪表板 e2e 契约改为「默认=上限 200」）：
+#: 前端仍按 100 条/页本地分页、且 `/summary/` 调用不带 top_n；默认 50 会让
+#: 「高列数文件总项数 > 100」判据真红。默认 200 既保住前端契约，又把 1728 列的
+#: 文件从 1728 行压到 200 行。
+TOP_N_DEFAULT = 200
+TOP_N_MAX = 200
+
+
+def _cap_overview(payload, top_n):
+    """把逐参数总览截到前 ``top_n`` 行，并记下总量与实际生效值。
+
+    ``top_n=None`` 表示不封顶（供测试与服务层调用方取全量）。截在**写入侧**
+    （清洗之后、进缓存之前）：`get_dashboard_summary` 的返回值仍是同一只对象
+    （视图出口不重建 payload 的既有契约不改），不同 top_n 各有自己的缓存条目。
+    ``quality_alerts`` / ``quality_overview`` 用的是截断前的全量，不受影响。
+    """
+    rows = payload.get('test_item_overview')
+    stats = payload.get('param_stats')
+    payload['param_total'] = len(rows) if rows is not None else 0
+    if rows is not None:
+        payload['test_item_overview'] = rows[:top_n]
+    if stats is not None:
+        payload['param_stats'] = stats[:top_n]
+    payload['top_n'] = top_n
+    return payload
+
+
+def get_dashboard_summary(datafile, df, fmt, metadata, thresholds=None,
+                          top_n=TOP_N_DEFAULT):
     """``compute_dashboard_summary`` 的进程内 LRU 缓存包装（计算实现仍只有一份）。
 
     命中直接返回缓存对象；未命中先算再存入，超 32 条淘汰最久未用的一项。
-    存入的是**已清洗**结果，命中直接返回；出口侧不再过 `clean_data`。
+    存入的是**已清洗、已按 top_n 截断**的结果，命中直接返回；出口侧不再过 `clean_data`。
     （`clean_data` 是纯函数、递归新建 list/dict —— 放在视图出口就是「每次命中都把整份
     几十 KB 的 payload 重建一遍」，挪到写入侧后每只 key 只付一次，且缓存里不再有 NaN/±inf。）
+    ``top_n`` 进缓存 key：总览行数不同的两份 payload 各有条目，不会互相串。
     **返回值是共享只读对象，调用方不得修改**（现有调用方只读取/序列化）。
     """
-    key = _summary_cache_key(datafile, fmt, thresholds)
+    key = _summary_cache_key(datafile, fmt, thresholds, top_n)
     return _summary_cache.get_or_compute(
         key,
-        lambda: clean_data(compute_dashboard_summary(
-            df, datafile, fmt, metadata, thresholds=thresholds)))
+        lambda: _cap_overview(clean_data(compute_dashboard_summary(
+            df, datafile, fmt, metadata, thresholds=thresholds)), top_n))
 
 
 def summary_cache_stats() -> dict:
