@@ -90,13 +90,17 @@ def compute_wafer_zone_stats(xs, ys, fail_flags, wafer):
     return zones
 
 
-def _str_column(df, col):
+def _str_column(df, col, positions=None):
     """按位取列并逐元素 str 化（NaN→'nan'、bool→'True'/'False'）。
 
     与历史逐行 ``str(df.loc[idx, col])`` 保持一致；重名列走 get_1d_from
-    的「取首列」语义，而不是整行被丢弃。
+    的「取首列」语义，而不是整行被丢弃。``positions`` 给定时先按位置切片：
+    晶圆图只对有效坐标行转串，无效行的标签根本不下发。
     """
-    return get_1d_from(df, col).astype(str).tolist()
+    values = get_1d_from(df, col)
+    if positions is not None:
+        values = values.iloc[positions]
+    return values.astype(str).tolist()
 
 
 def compute_wafer_map_data(df, metadata, param, color_by, x_col, y_col):
@@ -105,8 +109,8 @@ def compute_wafer_map_data(df, metadata, param, color_by, x_col, y_col):
     Returns a dict with ``points``, ``stats`` (from
     :func:`~statistics.compute_wafer_fail_data`) and ``wafer`` info.
 
-    坐标与标签列都按**整列**取一次（历史上每行做 5–6 次 ``df.loc``，
-    10 万行实测 4.7s），非有限坐标用掩码剔除。
+    坐标按**整列**取一次（历史上每行做 5–6 次 ``df.loc``，10 万行实测 4.7s）；
+    标签列只对有效坐标行 str 化。非有限坐标用掩码剔除。
     """
     fail_mask, wafer_stats = compute_wafer_fail_data(df, metadata, param)
     site_col = get_site_column(df)
@@ -123,22 +127,25 @@ def compute_wafer_map_data(df, metadata, param, color_by, x_col, y_col):
     ys = pd.to_numeric(get_1d_from(df, y_col), errors='coerce').to_numpy(dtype='float64', copy=False)
     valid = np.isfinite(xs) & np.isfinite(ys)
 
-    serial_vals = _str_column(df, serial_col) if serial_col else None
-    bin_vals = _str_column(df, bin_col) if bin_col else None
-    site_vals = _str_column(df, site_col) if site_col else None
+    valid_idx = np.flatnonzero(valid)
+    serial_vals = _str_column(df, serial_col, valid_idx) if serial_col else None
+    bin_vals = _str_column(df, bin_col, valid_idx) if bin_col else None
+    site_vals = _str_column(df, site_col, valid_idx) if site_col else None
     statuses = np.where(fail_mask.to_numpy(dtype=bool, copy=False), 'Fail', 'Pass')
+    site_labels = (['Site ' + s for s in site_vals]
+                   if site_vals is not None and color_by == 'site' else None)
 
     points = []
-    for i in np.flatnonzero(valid):
+    for pos, i in enumerate(valid_idx):
         point = {'x': float(xs[i]), 'y': float(ys[i]), 'status': statuses[i]}
         if serial_vals is not None:
-            point['serial'] = serial_vals[i]
+            point['serial'] = serial_vals[pos]
         if bin_vals is not None:
-            point['bin'] = bin_vals[i]
+            point['bin'] = bin_vals[pos]
         if site_vals is not None:
-            point['site'] = site_vals[i]
-            if color_by == 'site':
-                point['color_group'] = f'Site {site_vals[i]}'
+            point['site'] = site_vals[pos]
+            if site_labels is not None:
+                point['color_group'] = site_labels[pos]
         if param_vals is not None:
             v = param_vals[i]
             if math.isfinite(v):

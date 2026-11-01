@@ -157,6 +157,36 @@ class WaferMapPointsShapeTests(SimpleTestCase):
         out = compute_wafer_map_data(df, _meta(), 'P1', 'result', 'X_COORD', 'Y_COORD')
         self.assertEqual([p['value'] for p in out['points']], [1.0, 3.0])
 
+    def test_label_columns_are_cast_only_for_valid_rows(self):
+        """B7：标签列的 str 化只对有效坐标行发生（无效行不再整列转串）。
+
+        列值用会记账的 ``__str__`` 对象：旧实现整列 ``astype(str)`` ⇒ 每列 100 次；
+        新实现按 valid 切片 ⇒ 每列 1 次。三列合计 300 → 3。
+        """
+        calls = []
+
+        class _Tracked:
+            def __init__(self, text):
+                self.text = text
+
+            def __str__(self):
+                calls.append(self.text)
+                return self.text
+
+        n = 100
+        df = pd.DataFrame({
+            'X_COORD': [0.0] + [np.nan] * (n - 1),
+            'Y_COORD': [0.0] * n,
+            'Serial_No': [_Tracked(f'S{i}') for i in range(n)],
+            'SW_Bin': [_Tracked('1') for _ in range(n)],
+            'Site': [_Tracked('2') for _ in range(n)],
+            'P1': [1.0] * n,
+        })
+        out = compute_wafer_map_data(df, _meta(), 'P1', 'site', 'X_COORD', 'Y_COORD')
+        self.assertEqual([p['serial'] for p in out['points']], ['S0'])
+        self.assertEqual(calls, ['S0', '1', '2'],
+                         f'标签列被 str 化 {len(calls)} 次，应只转有效行（3 列 × 1 行）')
+
 
 class WaferMapBuildSpeedGuardTests(SimpleTestCase):
     """量级守卫：向量化前 50k 行约 2.3s，向量化后应远低于该量级。
