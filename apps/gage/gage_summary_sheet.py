@@ -8,14 +8,15 @@ import numpy as np
 import excelize
 
 from apps.export.excel_theme import (
-    add_threshold_verdict_rules, autofit_columns, set_formula, enable_full_recalc,
+    add_threshold_verdict_rules, set_formula, enable_full_recalc,
 )
 from apps.gage.gage_summary_stats import RR_PCT_BAD1, RR_PCT_BAD2
 
 SUMMARY_SHEET = "Summary"
 
 # 第 11 行是表头，数据从第 12 行起；隐藏列 R-U(18-21) 是组级中间量。
-DATA_FIRST_ROW = 12
+SUMMARY_HEADER_ROW = 11
+DATA_FIRST_ROW = SUMMARY_HEADER_ROW + 1
 HIDDEN_COL_FROM = 18
 HIDDEN_COL_TO = 21
 
@@ -53,17 +54,22 @@ def calc_d2(n):
     return d2_map.get(n, 1.0)
 
 
-def write_cell(f, sheet, cell, value):
+def write_cell(f, sheet, cell, value, widths=None):
     """写单元格：numpy 标量降为原生类型，空值留真空格。
 
     空串会被写成**文本**单元格（t="s"）。Excel 里文本恒大于任何数值，
     所以数值型条件格式（如 R&R% >= 30%）会把空白格也判中 → 整列标红。
     留真空格才是正确的「没有值」表示。
+
+    ``widths`` 是 ``excel_theme.ColumnWidthTracker``：给了就在**真正落盘的那一格**上记账
+    （所以必须放在空值早退之后 —— 没写的格子旧通路也不计数）。
     """
     if isinstance(value, np.generic):
         value = value.item()
     if value is None or value == '':
         return
+    if widths is not None:
+        widths.note(sheet, cell, value)
     f.set_cell_value(sheet, cell, value)
 
 
@@ -316,11 +322,23 @@ def hide_helper_columns(f):
         f.set_col_outline_level(SUMMARY_SHEET, cl, 1)
 
 
-def finalize_summary_sheet(f):
-    """列宽自适应、冻结 E12，并要求 Excel 打开时全量重算。"""
-    # 列宽按显示内容自适应（表头 "Repeatability"/"Reproducibility" 等否则会被截断）。
-    # 从表头行（11）起算，免得上面那行 "Failed Items (...)" 标签把 A 列撑宽。
-    autofit_columns(f, SUMMARY_SHEET, min_row=11)
+def finalize_summary_sheet(f, widths):
+    """列宽一次下发（写格子时记的账）、冻结 E12，并要求 Excel 打开时全量重算。
+
+    ``widths`` 是这张表的列宽账本（``excel_theme.ColumnWidthTracker``，由 builder 建好并随
+    ``write_cell`` 一路记过来），`min_row` 取表头行：上面那几行标签（如
+    "Failed Items (R&R% >= 30%):  3"）不该把 A 列撑宽，而表头本身
+    （``Repeatability``/``Reproducibility``）必须算进来，否则会被截断。
+
+    原先这里走的是 excel_theme 那条整表回读通路（当时的 ``autofit_columns``，`min_row` 传 11；
+    那条包装函数已删，本体是 ``scan_column_widths`` + ``apply_column_widths``）：为了给
+    每列找一个最大显示宽度，把整张 Summary 从 Go 侧读回 Python —— 本机实测 425 参数 × 4 文件
+    × 500 行那一趟要读回 46,220 个格子，整次导出 5,011ms → 改后 4,005ms（best-of-3、两棵树
+    各跑一遍、产物 sha256 逐字节不变）。本模块不再
+    引用那条通路 —— 收尾路径悄悄退回整表回读是这条优化的头号退化方式，由
+    ``test_gage_column_width_tracking`` 的 AST 扫描钉住。
+    """
+    widths.apply(f, min_row=SUMMARY_HEADER_ROW)
 
     f.set_panes(SUMMARY_SHEET, excelize.Panes(
         freeze=True,

@@ -22,6 +22,10 @@ XML 为准 / 为什么不信 ``<dimension>`` / 为什么样式取内容不取 id
 import ``tasks/a5_readback.py``：``tasks/`` 不入库（``.gitignore`` 的 ``/tasks/*``），CI 的
 干净检出里那个路径根本不存在，判据必须能独立跑。
 
+输入形状（两份钉死的 shape 与它的合成帧）住在 ``gage_shape_fixtures.py``，被本文件与
+「列宽 = 整表回读」的平价判据 ``test_gage_column_width_parity.py`` 共用：两组判据必须跑在
+同一批形状上，各自造数据就等于各算各的列宽。
+
 runner: ``python -X utf8 manage.py test test.backend.test_gage_sheet_shape``
 """
 import hashlib
@@ -30,8 +34,6 @@ from functools import partial
 from unittest import mock
 
 import excelize
-import numpy as np
-import pandas as pd
 from django.test import SimpleTestCase
 
 from apps.common.constants import NON_NUMERIC_KEYWORDS
@@ -39,66 +41,13 @@ from apps.gage.gage_file_sheet import write_file_sheet
 from apps.gage.gage_legacy_builder import build_gage_summary_excel
 from apps.gage.gage_styles import create_file_sheet_styles
 from apps.gage.gage_summary_sheet import (
-    COL_RR_PCT, DATA_FIRST_ROW, SUMMARY_HEADER_COUNT, SUMMARY_SHEET,
+    COL_RR_PCT, SUMMARY_HEADER_COUNT, SUMMARY_SHEET,
     write_cell,
 )
+from test.backend.gage_shape_fixtures import (
+    SHAPES, build_shape, datasets, file_info, group_rows,
+)
 from test.backend.sheet_readback import readback
-
-# ────────────────────────── 数据形状（固定 seed，自足，不读真实样例） ──────────────────────────
-
-SHAPES = {
-    # 窄表：4 文件 ⇒ 每组 4 行、组内**有中间行**（②④ 的靶形），列号留在单字母区
-    'narrow': dict(n_params=6, n_rows=12, n_files=4, seed=20261028),
-    # 宽表：40 参数 + 3 系统列 = 43 列 ⇒ 文件表列区间 1..51（A..AY），双字母区从
-    # 第 27 列（AA）起、占 27..51；100 行 ⇒ 触达数据行写入上限（last_col = 列数 + 8）
-    'wide': dict(n_params=40, n_rows=100, n_files=2, seed=20261029),
-}
-
-
-def _frame_and_meta(seed, n_params, n_rows):
-    rng = np.random.default_rng(seed)
-    cols = {
-        'Site_No': ['1'] * n_rows,
-        'SW_Bin': [1] * n_rows,
-        'Serial_No': [str(i) for i in range(n_rows)],
-    }
-    params = [f'PAR{ci:04d}' for ci in range(1, n_params + 1)]
-    for ci, name in enumerate(params, start=1):
-        cols[name] = rng.normal(5 + ci, 1.0, n_rows).round(4)
-    meta = {
-        'format': 'CTA8290D', 'tester_id': 'T-PIN', 'program_name': 'pin.dll',
-        'start_time': '2026-01-01 00:00:00',
-        'units': {name: 'V' for name in params},
-        'mins': {name: '0' for name in params},
-        'maxs': {name: str(6 * (ci + 1)) for ci, name in enumerate(params)},
-    }
-    return pd.DataFrame(cols), meta
-
-
-def _file_info(shape, idx=1, n_rows=None, n_params=None):
-    cfg = SHAPES[shape]
-    df, meta = _frame_and_meta(
-        cfg['seed'] + idx,
-        cfg['n_params'] if n_params is None else n_params,
-        cfg['n_rows'] if n_rows is None else n_rows)
-    return {'filename': f'pin{idx}.csv_S{idx}', 'sheet_name': f'pin{idx}_S{idx}',
-            'df': df, 'metadata': meta}
-
-
-def _datasets(shape):
-    cfg = SHAPES[shape]
-    return [_file_info(shape, idx) for idx in range(1, cfg['n_files'] + 1)]
-
-
-_BUILD_CACHE = {}
-
-
-def _build(shape):
-    """同一形状只建一次（产物字节只由输入决定；缓存与逐例重建由 ① 自己钉住等价）。"""
-    if shape not in _BUILD_CACHE:
-        _BUILD_CACHE[shape] = build_gage_summary_excel(_datasets(shape))
-    return _BUILD_CACHE[shape]
-
 
 # ────────────────────────── 版式常量（读回实现见 sheet_readback.py） ──────────────────────────
 
@@ -143,20 +92,6 @@ PIN_FILE_RUNS = {
 }
 
 
-def _group_rows(shape):
-    """``(组首行集合, 组末行集合, 组内中间行集合)``；每组 n_files 行，自 DATA_FIRST_ROW 起。"""
-    cfg = SHAPES[shape]
-    n_files, n_params = cfg['n_files'], cfg['n_params']
-    starts, ends, middles = set(), set(), set()
-    for gi in range(n_params):
-        start = DATA_FIRST_ROW + gi * n_files
-        end = start + n_files - 1
-        starts.add(start)
-        ends.add(end)
-        middles.update(range(start + 1, end))
-    return starts, ends, middles
-
-
 # ────────────────────────── ① 产物字节 ──────────────────────────
 
 
@@ -166,9 +101,9 @@ class GageArtifactBytesTests(SimpleTestCase):
     def test_bytes_equal_pinned_baseline(self):
         for shape in SHAPES:
             with self.subTest(shape=shape):
-                first = hashlib.sha256(_build(shape)).hexdigest()
+                first = hashlib.sha256(build_shape(shape)).hexdigest()
                 again = hashlib.sha256(
-                    build_gage_summary_excel(_datasets(shape))).hexdigest()
+                    build_gage_summary_excel(datasets(shape))).hexdigest()
                 # 判据自己先要可复现：同一输入、同进程内两次构建必须同串
                 self.assertEqual(first, again, f'{shape} 两次构建字节不同')
                 self.assertEqual(first, PIN_SHA256[shape],
@@ -184,11 +119,11 @@ class GageReadbackEquivalenceTests(SimpleTestCase):
     def test_full_readback_digest(self):
         for shape in SHAPES:
             with self.subTest(shape=shape):
-                self.assertEqual(readback(_build(shape))['digest'],
+                self.assertEqual(readback(build_shape(shape))['digest'],
                                  PIN_READBACK_DIGEST[shape])
 
     def test_summary_row_style_runs_are_the_pinned_runs(self):
-        rb = readback(_build('narrow'))
+        rb = readback(build_shape('narrow'))
         runs = rb['body']['sheets'][SUMMARY_SHEET]['runs']
         for row in PIN_SUMMARY_RUNS:
             with self.subTest(row=row):
@@ -196,8 +131,8 @@ class GageReadbackEquivalenceTests(SimpleTestCase):
 
     def test_file_sheet_row_style_runs_are_the_pinned_runs(self):
         """PIN_FILE_RUNS 从「只被自检扫过形状」变成真判据：逐行比对实测读回游程。"""
-        sheet = _datasets('narrow')[0]['sheet_name']
-        runs = readback(_build('narrow'))['body']['sheets'][sheet]['runs']
+        sheet = datasets('narrow')[0]['sheet_name']
+        runs = readback(build_shape('narrow'))['body']['sheets'][sheet]['runs']
         for row in PIN_FILE_RUNS:
             with self.subTest(row=row):
                 self.assertEqual(runs[row], PIN_FILE_RUNS[row])
@@ -207,9 +142,9 @@ class GageReadbackEquivalenceTests(SimpleTestCase):
 
         这条钉住「按游程切段、别整行框」——把 A 或 AA 也框进区间会把粗边框覆盖掉。
         """
-        rb = readback(_build('narrow'))
+        rb = readback(build_shape('narrow'))
         runs = rb['body']['sheets'][SUMMARY_SHEET]['runs']
-        starts, _ends, _middles = _group_rows('narrow')
+        starts, _ends, _middles = group_rows('narrow')
         first = str(min(starts))
         seg = runs[first]
         self.assertEqual(len(seg), 5, f'组首行 {first} 的游程 = {seg}')
@@ -222,9 +157,9 @@ class GageReadbackEquivalenceTests(SimpleTestCase):
 
     def test_middle_group_row_runs_keep_side_borders_out_of_the_range(self):
         """组内中间行：A 粗左边 + 中间列一整段（数据带原色）+ AA 粗右边 = 3 段游程。"""
-        rb = readback(_build('narrow'))
+        rb = readback(build_shape('narrow'))
         runs = rb['body']['sheets'][SUMMARY_SHEET]['runs']
-        _starts, _ends, middles = _group_rows('narrow')
+        _starts, _ends, middles = group_rows('narrow')
         for row in sorted(middles)[:3]:
             seg = runs[str(row)]
             self.assertEqual(len(seg), 3, f'第 {row} 行游程 = {seg}')
@@ -233,7 +168,7 @@ class GageReadbackEquivalenceTests(SimpleTestCase):
             self.assertEqual(seg[2][:2], [LAST_COL_IDX, LAST_COL_IDX])
 
     def test_summary_column_widths(self):
-        rb = readback(_build('narrow'))
+        rb = readback(build_shape('narrow'))
         self.assertEqual(rb['body']['sheets'][SUMMARY_SHEET]['widths'],
                          PIN_SUMMARY_WIDTHS)
 
@@ -259,7 +194,7 @@ class GageColumnLetterBoundaryTests(SimpleTestCase):
 
         try:
             styles = create_file_sheet_styles(f)
-            info = _file_info(shape, n_rows=n_rows, n_params=n_params)
+            info = file_info(shape, n_rows=n_rows, n_params=n_params)
             with mock.patch.object(excelize, 'column_number_to_name', spy):
                 write_file_sheet(f, info, False, NON_NUMERIC_KEYWORDS,
                                  styles, partial(write_cell, f))
@@ -305,7 +240,7 @@ class GageStyleBatchingTests(SimpleTestCase):
 
         with mock.patch.object(excelize.File, 'set_cell_style', spy_cell), \
                 mock.patch.object(excelize.File, 'set_col_style', spy_col):
-            build_gage_summary_excel(_datasets(shape))
+            build_gage_summary_excel(datasets(shape))
         return cell_calls, col_calls
 
     @staticmethod
@@ -328,7 +263,7 @@ class GageStyleBatchingTests(SimpleTestCase):
 
     def test_summary_middle_rows_get_one_range_and_no_restamp(self):
         cell_calls, _ = self._record('narrow')
-        _starts, _ends, middles = _group_rows('narrow')
+        _starts, _ends, middles = group_rows('narrow')
         self.assertTrue(middles, '形状里没有组内中间行，这条判据会是空的')
         for row in sorted(middles):
             span = self._span(cell_calls, SUMMARY_SHEET, row)
@@ -363,7 +298,7 @@ class GageStyleBatchingTests(SimpleTestCase):
         ③ 去掉整行带后每个中间列只被下发一次（删掉 ⇒ 少一次，红）。A / AA 保持逐格。
         """
         cell_calls, _ = self._record('narrow')
-        starts, ends, _middles = _group_rows('narrow')
+        starts, ends, _middles = group_rows('narrow')
         self.assertTrue(starts and ends, '形状里没有组首/组末行，判据会空转')
         self.assertTrue(starts.isdisjoint(ends), '窄表每组须 >1 行，否则首末重合判据失真')
         for row in sorted(starts | ends):
@@ -401,8 +336,8 @@ class GageStyleBatchingTests(SimpleTestCase):
     def test_file_sheet_style_bands_are_ranges(self):
         """表头带（8-12）、灰带（13）、统计带（115-128）都零逐格，且分段与读回游程同形。"""
         cell_calls, _ = self._record('narrow')
-        sheet = _datasets('narrow')[0]['sheet_name']
-        last_col = len(_datasets('narrow')[0]['df'].columns) + 8
+        sheet = datasets('narrow')[0]['sheet_name']
+        last_col = len(datasets('narrow')[0]['df'].columns) + 8
         singles = []
         for row in list(range(8, 13)) + [13] + list(range(115, 129)):
             singles.extend([s for s in self._span(cell_calls, sheet, row)
