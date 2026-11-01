@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import threading
@@ -286,7 +287,9 @@ def _parse_file_uncached(file_id: int, owner_id: int, path_key: int,
         if df is None:
             return None, metadata, format_type
         metadata = dict(metadata)
+        # 串供 browse 每页直接拼接；dict 仍留给 detect_fail 等按 dict 读的消费方
         metadata['col_meta'] = build_col_meta(df, metadata)
+        metadata['col_meta_json'] = json.dumps(metadata['col_meta'], ensure_ascii=False)
         # 首屏列级元信息与 col_meta 同址：都是「每文件一次」的 O(列) 现算，
         # 挂在解析刚结束的**过滤前全量帧**上，之后每一次 page==1 首屏直接读。
         profile = _column_profile_for_storage(
@@ -382,10 +385,13 @@ def put_cached_parsed_file(file_id: int, owner_id: int, datafile,
     # 「有 col_meta、无 profile」的半吊子形状，首屏每一次读都要走视图侧回落，
     # 这一刀在主入库路径上等于没做。格式取 ``datafile.format_type``——它与缓存键、
     # 与视图侧回落用的是同一个值，否则「命中缓存」与「回落现算」会给出不同的系统列集合。
-    if 'col_meta' not in metadata or 'column_profile' not in metadata:
+    if not all(k in metadata for k in ('col_meta', 'col_meta_json', 'column_profile')):
         metadata = dict(metadata)
         if 'col_meta' not in metadata:
             metadata['col_meta'] = build_col_meta(df, metadata)
+        if 'col_meta_json' not in metadata:
+            metadata['col_meta_json'] = json.dumps(
+                metadata['col_meta'], ensure_ascii=False)
         if 'column_profile' not in metadata:
             profile = _column_profile_for_storage(
                 df, datafile.format_type,
