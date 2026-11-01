@@ -6,7 +6,8 @@
 - fail 行标红 / 数据完整性 / 样式完整性（header/数据区/冻结/筛选）
 - 手写 XML 的边界（空 df、纯字符串列、XML 转义、全 fail）
 - 向量化值转换与逐值转换逐格等价
-- API 端点（to_excel / batch_charts）
+- API 端点（to_csv / sigma_limit / html_report；to_excel 与 batch_charts
+  已改为只走作业池，见 test_export_legacy_endpoints_removed）
 """
 
 import io
@@ -308,39 +309,6 @@ class ExportApiTests(APITestCase):
             status='ready',
         )
 
-    def test_to_excel_api(self):
-        """POST /export/to_excel/：200 + xlsx 可解析 + 行数列数正确。"""
-        resp = self.client.post('/api/v1/export/to_excel/', {'file_id': self.datafile.id})
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(
-            resp['Content-Type'],
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        )
-        self.assertIn('attachment', resp['Content-Disposition'])
-        df_parsed, _ = get_parser('CTA8290D').parse(GAGE_S1_PATH)
-        buf = b''.join(resp.streaming_content)
-        ws = openpyxl.load_workbook(io.BytesIO(buf))['Data']
-        self.assertEqual(ws.max_row, 11 + len(df_parsed), '数据行数 = 文件行数')
-        self.assertEqual(ws.max_column, len(df_parsed.columns))
-
-    def test_batch_charts_api(self):
-        """POST /export/batch_charts/：200 + 总览 sheet 行数 = 参数数 + 1。"""
-        df_parsed, _ = get_parser('CTA8290D').parse(GAGE_S1_PATH)
-        numeric_cols = [c for c in df_parsed.columns if df_parsed[c].dtype in ('int64', 'float64')][:2]
-        self.assertGreaterEqual(len(numeric_cols), 2, 'GAGE 数据应至少 2 个数值列')
-        resp = self.client.post('/api/v1/export/batch_charts/', {
-            'file_id': self.datafile.id,
-            'params': numeric_cols,
-        }, format='json')
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(
-            resp['Content-Type'],
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        )
-        buf = b''.join(resp.streaming_content)
-        wb = openpyxl.load_workbook(io.BytesIO(buf))
-        self.assertEqual(wb['总览'].max_row, 1 + len(numeric_cols), '总览表头 + 每参数一行')
-
     def test_batch_charts_site_stats_string_failcount(self):
         """站点统计 FailCount 是展示字符串（`3(0.181%)`）时 batch_charts 不抛 TypeError。
 
@@ -372,24 +340,6 @@ class ExportApiTests(APITestCase):
         # 总览第 2 行（参数 Vth）第 10 列（ALL Site Yield）应为 fail 红底
         cell = wb['总览'].cell(row=2, column=10)
         self.assertEqual(cell.fill.start_color.rgb, '00F54927', '有 fail 的 ALL Site 行应为红色填充')
-
-    def test_batch_charts_data_only_bin1(self):
-        """POST /export/batch_charts/ + data_only_bin1：200，图表仍按过滤后数据生成。"""
-        df_parsed, _ = get_parser('CTA8290D').parse(GAGE_S1_PATH)
-        numeric_cols = [c for c in df_parsed.columns if df_parsed[c].dtype in ('int64', 'float64')][:2]
-        resp = self.client.post('/api/v1/export/batch_charts/', {
-            'file_id': self.datafile.id,
-            'params': numeric_cols,
-            'data_only_bin1': True,
-        }, format='json')
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(
-            resp['Content-Type'],
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        )
-        buf = b''.join(resp.streaming_content)
-        wb = openpyxl.load_workbook(io.BytesIO(buf))
-        self.assertEqual(wb['总览'].max_row, 1 + len(numeric_cols), '总览表头 + 每参数一行')
 
     def test_sigma_limit_data_only_bin1(self):
         """POST /export/sigma_limit/ + data_only_bin1：200 xlsx，不因行过滤崩溃。"""
@@ -442,12 +392,13 @@ class ExportFilenameTemplateApiTests(APITestCase):
                                format='json')
         self.assertEqual(resp.status_code, 200, resp.data)
 
-    def test_to_excel_custom_template_with_datetime(self):
-        self._set_template('to_excel', '{filename}_{datetime}')
-        resp = self.client.post('/api/v1/export/to_excel/', {'file_id': self.datafile.id})
+    def test_to_csv_custom_template_with_datetime(self):
+        self._set_template('to_csv', '{filename}_{datetime}')
+        resp = self.client.post('/api/v1/export/to_csv/', {'file_id': self.datafile.id})
         self.assertEqual(resp.status_code, 200)
         name = _parse_content_disposition(resp['Content-Disposition'])
-        self.assertRegex(name, r'^gage_m_S1_\d{8}_\d{6}\.xlsx$')
+        self.assertRegex(name, r'^gage_m_S1_\d{8}_\d{6}\.csv$')
+        resp.close()
 
     def test_to_csv_default_template(self):
         resp = self.client.post('/api/v1/export/to_csv/', {'file_id': self.datafile.id})
@@ -463,16 +414,6 @@ class ExportFilenameTemplateApiTests(APITestCase):
         self.assertEqual(resp.status_code, 200)
         name = _parse_content_disposition(resp['Content-Disposition'])
         self.assertEqual(name, 'gage_m_S1_6sigma.xlsx')
-
-    def test_batch_charts_both_formats(self):
-        self._set_template('batch_charts', '{filename}_charts')
-        for fmt in ('xlsx', 'pptx'):
-            resp = self.client.post('/api/v1/export/batch_charts/',
-                                    {'file_id': self.datafile.id, 'params': [],
-                                     'format': fmt}, format='json')
-            self.assertEqual(resp.status_code, 200, fmt)
-            name = _parse_content_disposition(resp['Content-Disposition'])
-            self.assertEqual(name, f'gage_m_S1_charts.{fmt}')
 
     def test_html_report_chinese_filename_encoded(self):
         """中文源文件名 → FileResponse 自动 RFC 5987 编码（回归：手写 header 会
@@ -490,8 +431,9 @@ class ExportFilenameTemplateApiTests(APITestCase):
         self.assertEqual(decoded, '测试_文件_report.html')
 
     def test_sanitize_applied_in_response(self):
-        self._set_template('to_excel', '{filename}:bad?')
-        resp = self.client.post('/api/v1/export/to_excel/', {'file_id': self.datafile.id})
+        self._set_template('to_csv', '{filename}:bad?')
+        resp = self.client.post('/api/v1/export/to_csv/', {'file_id': self.datafile.id})
         self.assertEqual(resp.status_code, 200)
         name = _parse_content_disposition(resp['Content-Disposition'])
-        self.assertEqual(name, 'gage_m_S1_bad_.xlsx')
+        self.assertEqual(name, 'gage_m_S1_bad_.csv')
+        resp.close()

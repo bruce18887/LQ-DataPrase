@@ -11,21 +11,14 @@ import excelize
 from apps.common.errors import error_response
 from apps.common.file_loading import load_user_file, FileLoadError
 from apps.common.export_naming import base_export_context, render_export_filename
-from apps.analysis.services.statistics import (
-    get_site_column,
-    filter_bin1_rows,
-)
-from apps.datafiles.parsers.base import SYSTEM_COLUMNS
+from apps.analysis.services.statistics import filter_bin1_rows
 from .filters import apply_export_filters
-from .columns import DEFAULT_CHART_PARAMS, measurable_numeric_columns
 from .excelize_helpers import save_excelize
 from .excel_builders import (
     build_sigma_limit_sheet,
 )
-from .export_ppt import build_batch_charts_pptx
 from .user_prefs import get_export_dpi
 from apps.common.user_settings import get_cpk_thresholds
-from .export_complete import export_to_xlsx_optimized
 from .export_csv import export_to_csv_file
 from apps.dashboard.services import compute_dashboard_summary
 from apps.analysis.services.statistics import compute_uph
@@ -68,37 +61,6 @@ def parse_sigma_level(raw):
 
 class ExportViewSet(viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
-
-    # ── to_excel ────────────────────────────────────────────────────
-
-    @action(detail=False, methods=['post'])
-    def to_excel(self, request):
-        file_id = request.data.get('file_id')
-
-        try:
-            df, datafile, metadata = load_user_file(request, file_id)
-        except FileLoadError as e:
-            return error_response(e.error_code)
-
-        # 与表格一致：passfail/site/sort/filter_model 全量应用
-        export_df = apply_export_filters(df, metadata, request.data)
-
-        # Use old version's complete implementation
-        # 默认隐藏列（系统设置 → 表格设置）：列保留在导出文件中但设为 Excel 隐藏列
-        user_settings = getattr(request.user, 'settings', None)
-        hidden_columns = []
-        if user_settings is not None:
-            hidden_columns = user_settings.default_hidden_columns or []
-        buffer = export_to_xlsx_optimized(export_df, metadata, hidden_columns=hidden_columns)
-
-        fname = render_export_filename(
-            request.user, 'to_excel', 'xlsx',
-            {**base_export_context(request.user),
-             'filename': datafile.filename.rsplit('.', 1)[0]},
-        )
-        return FileResponse(io.BytesIO(buffer), as_attachment=True,
-                            filename=fname,
-                            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
     # ── to_csv ──────────────────────────────────────────────────────
 
@@ -215,76 +177,3 @@ class ExportViewSet(viewsets.GenericViewSet):
         )
         return FileResponse(io.BytesIO(html.encode('utf-8')), as_attachment=True,
                             filename=fname, content_type='text/html; charset=utf-8')
-
-    # ── batch_charts ────────────────────────────────────────────────
-
-    @action(detail=False, methods=['post'])
-    def batch_charts(self, request):
-        file_id = request.data.get('file_id')
-        params = request.data.get('params', [])
-        fmt = request.data.get('format', 'xlsx')
-
-        # Chart config from frontend
-        show_limit = request.data.get('show_limit', True)
-        show_3sigma = request.data.get('show_3sigma', False)
-        show_4sigma = request.data.get('show_4sigma', False)
-        show_6sigma = request.data.get('show_6sigma', True)
-        show_normal = request.data.get('show_normal', False)
-        show_kde = request.data.get('show_kde', False)
-
-        try:
-            df, datafile, metadata = load_user_file(request, file_id)
-        except FileLoadError as e:
-            return error_response(e.error_code)
-
-        # data_only_bin1: export charts for pass-bin rows only. Applied
-        # BEFORE the default params branch so the default column list is
-        # also derived from the filtered frame.
-        if request.data.get('data_only_bin1', False):
-            df = filter_bin1_rows(df, metadata)
-
-        if not params:
-            # 缺陷 #11：旧白名单 ``dtype in ('int64','float64')`` 漏掉 float32/int32
-            # 等窄 dtype，并把 bool / 系统记录列（SW_Bin）当成可分析测量值
-            params = measurable_numeric_columns(
-                df, exclude=SYSTEM_COLUMNS.get(metadata.get('format', 'CTA8290D'), []),
-            )[:DEFAULT_CHART_PARAMS]
-
-        site_col = get_site_column(df)
-
-        # 导出图表 DPI 取用户系统设置（已钳到设置页合法区间）。必须是纯标量：
-        # xlsx 分支会把图形渲染提交到 ProcessPoolExecutor worker，worker 禁读 Django/DB。
-        dpi = get_export_dpi(request.user)
-        # CPK 分级阈值同理：主进程算好等级色，穿进两个分支（与分析页/仪表板同一份设置）
-        cpk_thresholds = get_cpk_thresholds(request.user)
-
-        base_ctx = {**base_export_context(request.user),
-                    'filename': datafile.filename.rsplit('.', 1)[0]}
-
-        if fmt == 'pptx':
-            # 缺陷 #6：pptx 分支必须收到与 xlsx 分支完全相同的图形开关，
-            # 否则同一份配置导出的 pptx 与 xlsx 图形内容不一致
-            pptx_bytes = build_batch_charts_pptx(
-                datafile, df, metadata, params,
-                show_limit=show_limit, show_3sigma=show_3sigma,
-                show_4sigma=show_4sigma, show_6sigma=show_6sigma,
-                show_normal=show_normal, show_kde=show_kde,
-                dpi=dpi, cpk_thresholds=cpk_thresholds,
-            )
-            fname = render_export_filename(request.user, 'batch_charts', 'pptx', base_ctx)
-            return FileResponse(io.BytesIO(pptx_bytes), as_attachment=True,
-                                filename=fname,
-                                content_type='application/vnd.openxmlformats-officedocument.presentationml.presentation')
-        else:
-            from .export_complete import build_batch_charts_xlsx_with_charts
-            xlsx_bytes = build_batch_charts_xlsx_with_charts(
-                df, metadata, params, site_col=site_col,
-                show_limit=show_limit, show_3sigma=show_3sigma,
-                show_4sigma=show_4sigma, show_6sigma=show_6sigma,
-                show_normal=show_normal, show_kde=show_kde,
-                dpi=dpi, cpk_thresholds=cpk_thresholds,
-            )
-            fname = render_export_filename(request.user, 'batch_charts', 'xlsx', base_ctx)
-            return FileResponse(io.BytesIO(xlsx_bytes), as_attachment=True,
-                                filename=fname,
-                                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')

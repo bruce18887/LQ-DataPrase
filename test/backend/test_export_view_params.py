@@ -2,15 +2,15 @@
 
 覆盖缺陷：
 
-* **#6 pptx 开关透传**：视图读出 show_limit/show_3sigma/show_4sigma/
-  show_6sigma/show_normal/show_kde 却只传给 xlsx 分支，pptx 一个都不传
-  → 同配置导出的 pptx 与 xlsx 图形内容不同。
+* **#6 pptx 开关透传**：视图侧判据随同步端点一起删除（B8）；「两分支收到同一组
+  图形配置」现由 ``test_jobs_chart_params`` 在作业 runner 层钉住。
 * **#7 sigma 类型/范围校验**：``request.data.get('sigma', 3)`` 不转 int，
   前端传 ``"3"`` 时 ``mean - "3" * std`` 抛 TypeError → 500；非法值也应 400。
 * **#8 html_report 未应用 data_only_bin1**：sigma_limit 与 batch_charts 都应用，
   HTML 报告不应用 → 良率口径与 xlsx 图表不一致。
 * **#9 死代码**：``keep_header`` 读出后从未使用（export_to_csv 已删除该参数）。
-* **#11 默认参数列表**：``dtype in ('int64','float64')`` 漏掉 float32/int32。
+* **#11 默认参数列表**：白名单本体由 ``test_export_stats_consistency`` 钉，
+  runner 侧采用由 ``test_jobs_chart_params`` 钉（原视图判据随端点删除）。
 * **#12 百分比精度**：HTML 报告良率 ``{yield_pct:.2f}`` 把 99.998% 显示成 100.00%。
 
 运行：``manage.py test test.backend.test_export_view_params``
@@ -27,10 +27,7 @@ from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APIClient
 
-from apps.common.user_settings import DEFAULT_CPK_THRESHOLDS
-from apps.export import export_complete
 from apps.export import views as export_views
-from apps.export.charts import EXPORT_DPI_DEFAULT
 from apps.export.export_csv import export_to_csv
 from apps.export.export_ppt import build_batch_charts_pptx
 
@@ -38,11 +35,7 @@ User = get_user_model()
 
 SIGMA_URL = '/api/v1/export/sigma_limit/'
 HTML_URL = '/api/v1/export/html_report/'
-CHARTS_URL = '/api/v1/export/batch_charts/'
 CSV_URL = '/api/v1/export/to_csv/'
-
-SWITCHES = ('show_limit', 'show_3sigma', 'show_4sigma',
-            'show_6sigma', 'show_normal', 'show_kde')
 
 
 class _ExportViewTests(TestCase):
@@ -168,79 +161,6 @@ class HtmlReportYieldPrecisionTests(_ExportViewTests):
                          '0.002% 的 fail 不得被 2 位小数吞掉')
 
 
-class PptxSwitchPassThroughTests(_ExportViewTests):
-    """缺陷 #6：pptx 分支必须收到与 xlsx 分支相同的图形配置。
-
-    「图形配置」自 2026-09-19 起含 6 个叠加开关 + DPI + CPK 分级阈值
-    （系统设置失效项整改批 2），两分支同样必须一一致。
-    """
-
-    GRAPH_KEYS = set(SWITCHES) | {'dpi', 'cpk_thresholds'}
-
-    def _graph_config(self, kwargs):
-        """取出视图透传给导出分支的图形配置键（xlsx 另有 site_col，不参与比较）。"""
-        return {k: v for k, v in kwargs.items() if k in self.GRAPH_KEYS}
-
-    def _spy(self):
-        calls = {}
-        original = export_views.build_batch_charts_pptx
-
-        def spy(*args, **kwargs):
-            calls['args'] = args
-            calls['kwargs'] = kwargs
-            return b'fake-pptx-bytes'
-
-        export_views.build_batch_charts_pptx = spy
-        self.addCleanup(setattr, export_views, 'build_batch_charts_pptx', original)
-        return calls
-
-    def test_all_switches_forwarded_to_pptx_builder(self):
-        calls = self._spy()
-        payload = {'file_id': 1, 'params': ['V1'], 'format': 'pptx',
-                   'show_limit': False, 'show_3sigma': True, 'show_4sigma': True,
-                   'show_6sigma': False, 'show_normal': True, 'show_kde': True}
-        resp = self.client.post(CHARTS_URL, payload, format='json')
-        self.assertEqual(resp.status_code, 200)
-        expected = {name: payload[name] for name in SWITCHES}
-        # 测试用户没有 UserSetting 行 → 两项图形设置都取代码默认值
-        expected.update({'dpi': EXPORT_DPI_DEFAULT,
-                         'cpk_thresholds': DEFAULT_CPK_THRESHOLDS})
-        self.assertEqual(self._graph_config(calls['kwargs']), expected,
-                         'pptx 分支必须把 6 个图形开关 + DPI + CPK 阈值原样透传')
-
-    def test_switch_defaults_forwarded_to_pptx_builder(self):
-        calls = self._spy()
-        resp = self.client.post(CHARTS_URL,
-                                {'file_id': 1, 'params': ['V1'], 'format': 'pptx'},
-                                format='json')
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(set(self._graph_config(calls['kwargs'])), self.GRAPH_KEYS)
-        self.assertTrue(calls['kwargs']['show_limit'])
-        self.assertTrue(calls['kwargs']['show_6sigma'])
-
-    def test_pptx_and_xlsx_branches_receive_same_switches(self):
-        pptx_calls = self._spy()
-        xlsx_calls = {}
-        original = export_complete.build_batch_charts_xlsx_with_charts
-
-        def xlsx_spy(*args, **kwargs):
-            xlsx_calls['kwargs'] = kwargs
-            return b'fake-xlsx-bytes'
-
-        export_complete.build_batch_charts_xlsx_with_charts = xlsx_spy
-        self.addCleanup(setattr, export_complete,
-                        'build_batch_charts_xlsx_with_charts', original)
-
-        base = {'file_id': 1, 'params': ['V1'], 'show_limit': False,
-                'show_3sigma': True, 'show_4sigma': False, 'show_6sigma': False,
-                'show_normal': True, 'show_kde': True}
-        self.client.post(CHARTS_URL, {**base, 'format': 'pptx'}, format='json')
-        self.client.post(CHARTS_URL, {**base, 'format': 'xlsx'}, format='json')
-        self.assertEqual(self._graph_config(pptx_calls['kwargs']),
-                         self._graph_config(xlsx_calls['kwargs']),
-                         '同一份配置导出的 pptx 与 xlsx 图形配置（开关+DPI+CPK 阈值）必须一致')
-
-
 class PptxBuilderHonorsSwitchesTests(SimpleTestCase):
     """builder 层：开关不只是「收下」，还要真的改变渲染结果。"""
 
@@ -269,49 +189,6 @@ class PptxBuilderHonorsSwitchesTests(SimpleTestCase):
 
     def test_show_3sigma_changes_render(self):
         self.assertNotEqual(self._png(show_3sigma=True), self._png(show_3sigma=False))
-
-
-class BatchChartsDefaultParamsTests(_ExportViewTests):
-    """缺陷 #11：默认参数列表必须包含窄 dtype 数值列、排除 bool 列。"""
-
-    def build_df(self):
-        return pd.DataFrame({
-            'SW_Bin': [1, 1, 1, 1],
-            'F32': np.array([1.0, 2.0, 3.0, 4.0], dtype='float32'),
-            'I32': np.array([1, 2, 3, 4], dtype='int32'),
-            'Flag': [True, False, True, True],
-            'Text': pd.Series(['a', 'b', 'c', 'd'], dtype='str'),
-        })
-
-    def _spy(self):
-        calls = {}
-        original = export_complete.build_batch_charts_xlsx_with_charts
-
-        def spy(*args, **kwargs):
-            calls['args'] = args
-            calls['kwargs'] = kwargs
-            return b'fake-xlsx-bytes'
-
-        export_complete.build_batch_charts_xlsx_with_charts = spy
-        self.addCleanup(setattr, export_complete,
-                        'build_batch_charts_xlsx_with_charts', original)
-        return calls
-
-    def test_default_params_include_narrow_dtypes(self):
-        calls = self._spy()
-        resp = self.client.post(CHARTS_URL, {'file_id': 1, 'params': []}, format='json')
-        self.assertEqual(resp.status_code, 200)
-        params = calls['args'][2]
-        self.assertIn('F32', params, 'float32 测量列不得被白名单漏掉')
-        self.assertIn('I32', params, 'int32 测量列不得被白名单漏掉')
-
-    def test_default_params_exclude_bool_and_text(self):
-        calls = self._spy()
-        self.client.post(CHARTS_URL, {'file_id': 1, 'params': []}, format='json')
-        params = calls['args'][2]
-        self.assertNotIn('Flag', params, 'bool 是 Pass/Fail 标记，不是可分析测量值')
-        self.assertNotIn('Text', params)
-        self.assertNotIn('SW_Bin', params)
 
 
 class DeadCodeRemovedTests(SimpleTestCase):
