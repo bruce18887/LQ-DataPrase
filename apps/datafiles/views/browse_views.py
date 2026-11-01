@@ -158,8 +158,8 @@ class DataBrowserView(APIView):
         serial_column: Optional[str] = None
         if page == 1:
             # 列级元信息随解析只算一次（口径本体在 `apps.datafiles.column_profile`，与 col_meta 同址）：
-            # 合成 $BIG 同形帧（1702 列、全 float64）本机实测 ~0.14–0.18s/次（best-of-3、rows 200–20000 三档；
-            # 脚本在 gitignored 的 tasks/ 下，属本机事实、换机器/换 pandas 需重测），旧写法每一次 page==1 都要付。
+            # 合成 $BIG 同形帧（1702 列、全 float64）本机实测 ~0.14–0.18s/次（best-of-3、rows 200–20000
+            # 三档；属本机事实、换机器/换 pandas 需重测），旧写法每一次 page==1 都要付。
             # A4b 起这只 profile 还多算 histogram 专用候选（~0.03–0.06s/次），所以这个量级比 A4 当时变大：
             # 它一次算完随缓存走，换掉的是每一次直方图请求的同一笔现算。
             # 缺键＝这一只帧算不出四件套（重复列名那类极端入参）或写透时没带：
