@@ -98,6 +98,9 @@ def _column_profile_bytes(profile) -> int:
 
     1702 列那档 `numeric_columns` 就把上千个列名整份存着（十几 KB 级），
     继续按「metadata 每键 64 字节」估会让预算再次失真（判据 J7 的同族）。
+    A4b 起 profile 里还有第五只列表 `histogram_numeric_columns`（同为列名清单）——
+    本函数遍历 `profile.items()` 天然覆盖，点名判据在
+    `test.backend.test_column_profile_caliber.HistogramCandidatesSizingTests`。
     """
     if not isinstance(profile, dict):
         return 0

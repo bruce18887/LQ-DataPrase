@@ -84,6 +84,16 @@ def _baseline_profile(df, format_type):
     }
 
 
+def _browse_keys(profile):
+    """存储 profile 只取响应四键再与 ``_baseline_profile`` 比。
+
+    A4b 起存储的是五键（多一只 histogram 内部键 ``histogram_numeric_columns``），
+    四键基线是「改动前 browse 现算」的原样搬运，不许为此改写基线本身；
+    「多出来的键绝不进 browse 响应」由视图显式取键 + 首屏键集合用例钉住。
+    """
+    return {k: profile[k] for k in column_profile.COLUMN_PROFILE_KEYS}
+
+
 # ───────────────────────────── 夹具 ─────────────────────────────
 
 def _fragile_frame():
@@ -195,11 +205,14 @@ class ColumnProfileEquivalenceTests(_CacheCaseBase):
         for fmt in FOUR_FORMATS + ('NOT_A_FORMAT',):
             with self.subTest(format_type=fmt):
                 self.assertEqual(
-                    column_profile.build_column_profile(self.frame, fmt),
+                    _browse_keys(column_profile.build_column_profile(self.frame, fmt)),
                     _baseline_profile(self.frame, fmt))
 
     def test_profile_shape_is_exactly_the_four_keys(self):
-        """四键：多一键就是往响应里塞新东西（契约变更），少一键则回落判定永远为真。
+        """响应四键不许多不许少；A4b 后存储 profile 恰为五键（响应四键 + histogram 内部键）。
+
+        多一键进**响应**就是契约变更，少一键则回落判定永远为真。直方图专用候选是存储侧
+        内部键：browse 视图逐键显式取值，它不会被下发（首屏键集合用例另钉）。
 
         顺手钉「归属点」这一刀：口径本体只有一份（`apps/datafiles.column_profile`，
         视图与 services 都从那里取），且该模块必须 **Django-free**——CPU worker 的 spawn
@@ -207,9 +220,15 @@ class ColumnProfileEquivalenceTests(_CacheCaseBase):
         （同 `apps/jobs/runner.py` 头注、`.claude/CLAUDE.md`「CPU worker 侧禁 Django」）。
         """
         profile = column_profile.build_column_profile(self.frame, 'CTA8290D')
-        self.assertEqual(set(profile), set(column_profile.COLUMN_PROFILE_KEYS))
+        # 字面量五键：成员与**顺序**一起钉。原先写的是
+        # `STORAGE_KEYS == COLUMN_PROFILE_KEYS + (HISTOGRAM_PROFILE_KEY,)`——那是把
+        # 生产端的定义式再抄一遍，两边一起改也永远绿（质量复审 Minor：同义反复断言）。
+        self.assertEqual(
+            list(profile),
+            ['site_options', 'numeric_columns', 'system_columns', 'serial_column',
+             'histogram_numeric_columns'])
         self.assertEqual(len(column_profile.COLUMN_PROFILE_KEYS), 4)
-        self.assertEqual(sorted(profile), sorted(
+        self.assertEqual(sorted(_browse_keys(profile)), sorted(
             ['site_options', 'numeric_columns', 'system_columns', 'serial_column']))
         tree = ast.parse(Path(column_profile.__file__).read_text(encoding='utf-8'))
         imported = {a.name for n in tree.body if isinstance(n, ast.Import) for a in n.names}
@@ -254,9 +273,11 @@ class ColumnProfileEquivalenceTests(_CacheCaseBase):
         """无 site/序列/数值列的帧：四件套合法地全空，与「键缺失」是两件事。"""
         frame = _no_meta_frame()
         profile = column_profile.build_column_profile(frame, 'CTA8290D')
-        self.assertEqual(profile, _baseline_profile(frame, 'CTA8290D'))
+        self.assertEqual(_browse_keys(profile), _baseline_profile(frame, 'CTA8290D'))
         self.assertEqual(profile['site_options'], [])
         self.assertEqual(profile['numeric_columns'], [])
+        self.assertEqual(profile[column_profile.HISTOGRAM_PROFILE_KEY], [],
+                         'A4b：histogram 候选同样合法为空（空列表≠缺键，消费侧不许回落）')
         self.assertIsNone(profile['serial_column'])
 
 
@@ -268,8 +289,11 @@ class ColumnProfileWriteThroughTests(_CacheCaseBase):
         df, metadata, _fmt = self.cached_parse()
         self.assertIn('col_meta', metadata)
         self.assertIn('column_profile', metadata, '与 col_meta 同址：只挂一条就是半吊子')
-        self.assertEqual(metadata['column_profile'],
+        self.assertEqual(_browse_keys(metadata['column_profile']),
                          _baseline_profile(df, 'CTA8290D'))
+        self.assertEqual(metadata['column_profile'][column_profile.HISTOGRAM_PROFILE_KEY],
+                         column_profile.build_histogram_param_candidates(df),
+                         'A4b：histogram 专用候选随同一只 profile 进缓存条目')
 
     def test_write_through_adds_both_keys_when_both_are_missing(self):
         fake = SimpleNamespace(file_path=self.path, format_type='CTA8290D')
@@ -283,7 +307,8 @@ class ColumnProfileWriteThroughTests(_CacheCaseBase):
 
         self.assertIn('col_meta', cached_meta)
         self.assertIn('column_profile', cached_meta)
-        self.assertEqual(cached_meta['column_profile'], _baseline_profile(df, 'CTA8290D'))
+        self.assertEqual(_browse_keys(cached_meta['column_profile']),
+                         _baseline_profile(df, 'CTA8290D'))
         self.assertEqual(state['calls'], 1,
                          f'写透 + 两次读取共现算 {state["calls"]} 次，应只随写透算一次')
         self.assertEqual(build_spy.calls, 1, 'col_meta 的既有「只算一次」不许被这次改动带回回落')
@@ -305,7 +330,8 @@ class ColumnProfileWriteThroughTests(_CacheCaseBase):
         self.assertIn('column_profile', cached_meta)
         self.assertEqual(build_spy.calls, 0, 'col_meta 已在 ⇒ 不许再算一遍')
         self.assertEqual(state['calls'], 1)
-        self.assertEqual(cached_meta['column_profile'], _baseline_profile(df, 'CTA8290D'))
+        self.assertEqual(_browse_keys(cached_meta['column_profile']),
+                         _baseline_profile(df, 'CTA8290D'))
 
     def test_write_through_profile_uses_the_datafile_format_type(self):
         """口径参数取 ``datafile.format_type``——它与缓存键、与视图回落用的是同一个值。
@@ -319,7 +345,8 @@ class ColumnProfileWriteThroughTests(_CacheCaseBase):
         services.put_cached_parsed_file(1, 1, fake, df, metadata, 'CTA8290D')
         _df, cached_meta, _fmt = services.get_cached_parsed_file(1, 1, fake)
 
-        self.assertEqual(cached_meta['column_profile'], _baseline_profile(df, 'ETS88'))
+        self.assertEqual(_browse_keys(cached_meta['column_profile']),
+                         _baseline_profile(df, 'ETS88'))
         self.assertEqual(cached_meta['column_profile']['system_columns'], [],
                          '前提：ETS88 的权威列名与本夹具不相交')
         self.assertTrue(_baseline_profile(df, 'CTA8290D')['system_columns'],
@@ -470,12 +497,16 @@ class ColumnProfileFirstScreenTests(TestCase):
         df, metadata, _fmt = services.get_cached_parsed_file(
             self.datafile.id, self.user.pk, self.datafile)
         self.assertIn('column_profile', metadata)
-        self.assertEqual(metadata['column_profile'],
+        self.assertIn(column_profile.HISTOGRAM_PROFILE_KEY, metadata['column_profile'],
+                      '前提：真实解析条目挂的是五键存储 profile（含 histogram 内部键）')
+        self.assertEqual(_browse_keys(metadata['column_profile']),
                          _baseline_profile(df, self.datafile.format_type))
         body = self._browse(page=1).json()
         for key in ('site_options', 'numeric_columns', 'system_columns', 'serial_column'):
             self.assertEqual(body[key], metadata['column_profile'][key],
                              f'{key} 必须逐字来自缓存条目里那份')
+        self.assertNotIn(column_profile.HISTOGRAM_PROFILE_KEY, body,
+                         'A4b：内部键绝不许渗进 browse 响应（下发给前端 = 契约变更）')
 
     def test_mtime_change_recomputes_exactly_once_more(self):
         state = self.spy_profile()

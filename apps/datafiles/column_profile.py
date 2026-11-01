@@ -17,16 +17,99 @@ from typing import Optional
 
 import pandas as pd
 
-from apps.analysis.services.statistics.helpers import get_serial_column, get_site_column
+from apps.analysis.services.statistics.helpers import (
+    get_serial_candidates,
+    get_serial_column,
+    get_site_column,
+)
 from apps.datafiles.parsers.base import SYSTEM_COLUMNS
 
 # 首屏列级元信息的四个响应键：视图侧的回落判定与体积核算都读这张表，
 # 别在第二处再写一遍键名清单（写第二份必漂）。
 COLUMN_PROFILE_KEYS = ('site_options', 'numeric_columns', 'system_columns', 'serial_column')
 
+# histogram 专用候选列（A4b）：随解析写透缓存的**内部键**，不在 `COLUMN_PROFILE_KEYS` 里
+# ——那是 browse 响应四键契约，page==1 才下发；这一只只给 histogram fast path 消费
+# （`resolve_histogram_candidates`），绝不能渗进响应。
+HISTOGRAM_PROFILE_KEY = 'histogram_numeric_columns'
+
+
+def keep_columns_with_values(df, cols) -> list:
+    """`cols` 里在 `df` 上至少有一个非空值的那些列，按 `cols` 原序返回**新列表**。
+
+    向量化口径（本机实测 1,702 列那档）：逐列 `dropna().empty` 要 205ms（每列都新建
+    一次 dropna 的 Series 再判空），`notna().any()` 一遍 91ms，逐列结果实测相同——
+    等价性由 `apps/analysis/tests_param_list_scan.py` 的逐列对照钉住，不是口头承诺。
+
+    范围限定（别把这句话读大）：本函数是**候选池判空**的唯一归属点。全仓还有别的
+    `.notna().any()`，形态与口径都不同——`build_column_profile` 里 browse 那份是逐列
+    循环里的单列判定（值级口径，要和 `pd.to_numeric` 分流），`analysis/views/_helpers.py`
+    的 `_sanitize_numeric_params` 要把判空结果留成 Series 继续和 dtype 一起逐列用。
+    后两者与本函数合并属于 I 波「重复实现合并」的面，不在本刀。
+    """
+    has_value = df[list(cols)].notna().any().to_numpy()
+    return [c for c, ok in zip(cols, has_value) if ok]
+
+
+def build_histogram_param_candidates(df) -> list:
+    """histogram fast path 的候选参数列口径（A4b 前它是视图里的现算代码）。
+
+    口径是**逐字**从改动前 `analysis_views.py` 那段（``data_only_bin1`` 为假时的形状）
+    搬来的（等价性钉在 `test/backend/test_histogram_candidates_fastpath.py`，基线是那段
+    代码的原样副本；与 browse 口径的差异钉在 `HistogramCaliberDivergenceTests`）：
+
+    * 排除 `get_serial_candidates(df)` 的**全部**候选（Serial_No 与 Dut_No 并存时两者
+      都不能当参数）与 `get_site_column(df)` 命中的站点列——它们是元信息不是数据参数；
+    * 纯 dtype 口径：`is_numeric_dtype` 且非 bool（`Dut_Pass` 的 TRUE/FALSE 不可测）；
+      object 数字串列（`SW_Bin`）**不收**——这与 browse 的值级判定是两套集合；
+    * 列序 = `df.columns`；候选非空时经 `keep_columns_with_values` 一次向量化剔掉全空列。
+
+    两个序列/site 判定与 dtype 判定都只看**列名/列 dtype**，与行内容无关——所以
+    `data_only_bin1` 收窄行后复用全帧候选做池是安全的：行过滤不会让 object/bool 列
+    变可测数值（不新增），但可能让原本非空的列变全空（消费侧要在过滤后帧上再筛一次，
+    判据见 fast path 测试的第④条）。
+    """
+    meta_cols = set(get_serial_candidates(df))
+    site_col = get_site_column(df)
+    if site_col:
+        meta_cols.add(site_col)
+    numeric_cols = [c for c in df.columns
+                    if pd.api.types.is_numeric_dtype(df[c])
+                    and not pd.api.types.is_bool_dtype(df[c])
+                    and c not in meta_cols]
+    return keep_columns_with_values(df, numeric_cols)
+
+
+def resolve_histogram_candidates(df, metadata, *, rows_filtered=False) -> list:
+    """histogram fast path 的取数：缓存优先，名单不描述当前帧就整只现算。
+
+    三条规则都是这只 profile 自己的知识，所以住在口径模块里，不给视图抄一遍：
+
+    * **缺席才回落**：`None`（没 profile / 没该键）走现算；**空列表是合法值**，
+      按真值判回落会让每请求白扫一遍帧（判据 fast path ③）。
+    * **名单必须落在当前帧上**：缓存条目按内容坐标键存，正常不可能对不上；一旦对不上
+      （条目与帧不同源），`df[名单]` 会 KeyError 变成 500 —— 那种条目不可信，整只重算。
+      判据 fast path ⑧。
+    * **交出去的必须是副本**：缓存列表是跨请求共享对象，下游谁就地一改就传染到后续所有
+      请求（判据 fast path ⑥）。
+
+    `rows_filtered` 表示消费方已经把行收窄过（`data_only_bin1`）：缓存名单出自全帧，
+    行过滤不新增可测数值列，但会让原本非空的列变全空 ⇒ 在过滤后的帧上再筛一次判空，
+    保住「过滤后全空的列不进参数集」的旧语义（判据 fast path ④）。
+    """
+    profile = metadata.get('column_profile') if isinstance(metadata, dict) else None
+    cached = profile.get(HISTOGRAM_PROFILE_KEY) if isinstance(profile, dict) else None
+    if cached is None or not set(cached) <= set(df.columns):
+        return build_histogram_param_candidates(df)
+    candidates = list(cached)
+    if rows_filtered:
+        candidates = keep_columns_with_values(df, candidates)
+    return candidates
+
 
 def build_column_profile(df, format_type) -> dict:
-    """随解析只算一次的列级元信息（四键见 `COLUMN_PROFILE_KEYS`）。
+    """随解析只算一次的列级元信息（响应四键见 `COLUMN_PROFILE_KEYS`，另随存一只
+    histogram 内部键 `HISTOGRAM_PROFILE_KEY`——五键存储、四键下发）。
 
     口径是**逐字**从 `browse_views` 首屏那段现算搬来的（等价性钉在
     `test/backend/test_column_profile_cache.py`，基线是那段代码的原样副本）：
@@ -49,8 +132,9 @@ def build_column_profile(df, format_type) -> dict:
     ② 必须在**过滤前的全量帧**上算（调用点就是解析刚结束的那一刻），
        与旧写法「筛选前先算」的语义一致。
 
-    与直方图的参数候选（`analysis_views` 那份纯 dtype 口径 + 排除序列/site 列 +
-    行收窄后再判空）**不是同一个集合**，所以那边不许复用这只 profile；
+    与直方图的参数候选**不是同一个集合**（纯 dtype 口径 + 排除序列/site 列 + 行收窄后
+    再判空），所以那边**不许**消费 `numeric_columns`；A4b 给它随解析多算一只内部键
+    （`HISTOGRAM_PROFILE_KEY`，口径见 `build_histogram_param_candidates`），
     差异本身钉在 `HistogramCaliberDivergenceTests`。
     """
     site_options: list = []
@@ -89,4 +173,7 @@ def build_column_profile(df, format_type) -> dict:
         'numeric_columns': numeric_columns,
         'system_columns': system_columns,
         'serial_column': serial_column,
+        # histogram 专用候选（内部键，不进 browse 响应）：随同一只 profile 写透缓存，
+        # 消费侧缺键必须回落现算（挂载外壳算不出时整只 profile 都不挂，键缺失即回落信号）。
+        HISTOGRAM_PROFILE_KEY: build_histogram_param_candidates(df),
     }
