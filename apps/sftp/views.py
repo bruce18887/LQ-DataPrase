@@ -2,7 +2,6 @@ import os, time, logging
 # 保留 paramiko 绑定：主机密钥校验已下沉到 apps/sftp/host_keys.py，它通过
 # ``paramiko.Transport`` 建连（同一模块属性，既有测试的 patch 目标仍然生效）。
 import paramiko
-from stat import S_ISDIR
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -22,6 +21,7 @@ from .search_views import SftpSearchMixin
 from .models import SftpConfig
 from . import pool
 from .local_paths import remove_partial, resolve_local_path
+from .listing import page_entries, parse_pagination
 from .downloads import (
     collect_files,
     clamp_timeout,
@@ -36,12 +36,6 @@ CSV_EXTENSIONS = {'.csv'}
 def _is_csv(filename):
     return os.path.splitext(filename)[1].lower() in CSV_EXTENSIONS
 
-SORT_KEYS = {
-    'name': lambda x: x['name'].lower(),
-    'mtime': lambda x: x.get('mtime', 0) or 0,
-    'size': lambda x: x.get('size', 0) or 0,
-    'type': lambda x: os.path.splitext(x['name'])[1].lower(),
-}
 
 
 class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
@@ -275,28 +269,20 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
         sort_by = request.query_params.get('sort_by', 'name')
         sort_order = request.query_params.get('sort_order', 'asc')
 
+        # 分页参数先验后退：坏参数不该换来一次握手，也不该写 last_visit。
+        page_args, page_error = parse_pagination(request.query_params)
+        if page_error:
+            return error_response('invalid_pagination', page_error)
+        limit, offset = page_args
+
         sftp = self._get_connection(request)
         if not sftp:
             return error_response('not_connected')
 
         try:
-            items = []
-            for entry in sftp.listdir_attr(path):
-                is_dir = S_ISDIR(entry.st_mode)
-                items.append({
-                    'name': entry.filename,
-                    'is_dir': is_dir,
-                    'size': entry.st_size if not is_dir else 0,
-                    'mtime': entry.st_mtime,
-                })
-
-            # Sort: directories first (except when sorting by time, which is pure chronological)
-            key_fn = SORT_KEYS.get(sort_by, SORT_KEYS['name'])
-            reverse = sort_order == 'desc'
-            if sort_by == 'mtime':
-                items.sort(key=key_fn, reverse=reverse)
-            else:
-                items.sort(key=lambda x: (not x['is_dir'], key_fn(x)), reverse=reverse)
+            page, total, truncated = page_entries(
+                sftp.listdir_attr(path), sort_by=sort_by, sort_order=sort_order,
+                limit=limit, offset=offset)
 
             # 断线续连：每次成功浏览都更新上次路径（即使不点断开、直接刷新也记录）。
             # 记录失败绝不影响浏览，但必须留痕，否则排查时无从下手。
@@ -306,7 +292,8 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
                 logger.warning('Failed to record last SFTP path %s', path,
                                exc_info=True)
 
-            return Response({'path': path, 'items': items})
+            return Response({'path': path, 'items': page, 'total': total,
+                             'truncated': truncated})
         except Exception as e:
             pool.invalidate(request.user.id)
             return error_response('sftp_list_failed', str(e))

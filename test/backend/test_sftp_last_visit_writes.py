@@ -115,7 +115,12 @@ class BrowseStatementShapeTests(RecordBase):
         self.assertEqual(self.reload().sftp_last_path, '/sub')
 
     def test_browse_response_contract_is_unchanged(self):
-        """响应体仍是 `{'path', 'items'}`，item 的键一个不少（写收窄不许动契约）。"""
+        """响应体键集逐字钉住：D4 的写收窄不许动契约，B1 的分页只能**加**两键。
+
+        2026-11-01 B1 按用户拍板给目录列表加帽：`total` / `truncated` 是新增的加性键
+        （前端不读也安全），`path` / `items` 与 item 内部形状一字未动 —— 这里把新形状
+        一起钉死，防的不是这次，是下一次顺手改。
+        """
         sftp = mock.MagicMock(name='SFTPClient')
         entry = mock.MagicMock()
         entry.filename = 'a.csv'
@@ -126,8 +131,10 @@ class BrowseStatementShapeTests(RecordBase):
         with mock.patch.object(SftpViewSet, '_get_connection', return_value=sftp):
             data = _client_for(_fresh(self.user.pk)).get(
                 '/api/v1/sftp/list_files/?path=/sub').json()
-        self.assertEqual(sorted(data), ['items', 'path'])
+        self.assertEqual(sorted(data), ['items', 'path', 'total', 'truncated'])
         self.assertEqual(data['path'], '/sub')
+        self.assertEqual(data['total'], 1)
+        self.assertIs(data['truncated'], False)
         self.assertEqual(data['items'], [{'name': 'a.csv', 'is_dir': False,
                                          'size': 7, 'mtime': 111}])
 
