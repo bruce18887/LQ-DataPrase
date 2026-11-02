@@ -78,6 +78,11 @@
         :file-count="fileCount"
         :total-size="totalSize"
         :total-count="typeFilteredItems.length"
+        :has-more="listState.hasMore"
+        :remote-total="listState.total"
+        :loaded-count="items.length"
+        :loading-more="loadingMore"
+        @load-more="loadMoreFiles"
       />
     </div>
   </div>
@@ -97,12 +102,17 @@ import SftpBatchActions from './components/SftpBatchActions.vue'
 import SftpDownloadProgress from './components/SftpDownloadProgress.vue'
 import SftpFileTable from './components/SftpFileTable.vue'
 import SftpStatsBar from './components/SftpStatsBar.vue'
+import { applyListPage, emptyListState, nextOffset, type ListState } from './listPaging'
 
 const filesStore = useFilesStore()
 
 const connected = ref(false)
 const currentPath = ref('/')
-const items = ref<any[]>([])
+// 目录列表的后端分页状态（B1）：一次最多 500 条，`total`/`truncated` 由后端给。
+// items 派生自它，避免「已加载条目」与「分页游标」两处真相漂移。
+const listState = ref<ListState>(emptyListState())
+const items = computed(() => listState.value.rows)
+const loadingMore = ref(false)
 const searchQuery = ref('')
 /** 文件名浏览过滤：默认仅 CSV，其它文件隐藏 */
 const fileType = ref<'csv' | 'all'>('csv')
@@ -311,7 +321,7 @@ async function disconnect() {
   // silent：断连失败静默处理，不弹全局错误提示（保持原有行为）
   try { await sftpApi.disconnect({ silent: true }) } catch {}
   connected.value = false
-  items.value = []
+  listState.value = emptyListState()
   currentPath.value = '/'
   // 断开后刷新预填（后端 list_files 已记录最后浏览路径）；不允许自动重连，
   // 否则用户刚点「断开」就立刻被重连回来。
@@ -324,9 +334,26 @@ async function listFiles(path: string) {
   try {
     const { data } = await sftpApi.listFiles(path, sortBy.value, sortOrder.value)
     currentPath.value = data.path
-    items.value = (data.items || []).map((item: any) => ({ ...item, _selected: false }))
+    listState.value = applyListPage(emptyListState(), decorate(data), true)
   } catch { /* 错误 toast 由 axios 拦截器统一弹出 */ }
   finally { listLoading.value = false }
+}
+
+/** 后端每页最多 500 条，「加载更多」按已加载条数要下一页（排序在后端，前端只拼接） */
+async function loadMoreFiles() {
+  if (loadingMore.value || listLoading.value || !listState.value.hasMore) return
+  loadingMore.value = true
+  try {
+    const { data } = await sftpApi.listFiles(
+      currentPath.value, sortBy.value, sortOrder.value, nextOffset(listState.value))
+    listState.value = applyListPage(listState.value, decorate(data), false)
+  } catch { /* 拦截器已提示，保留已加载条目 */ }
+  finally { loadingMore.value = false }
+}
+
+/** 给每页条目补上本地勾选态（跨页选择要能延续） */
+function decorate(data: any) {
+  return { ...data, items: (data.items || []).map((item: any) => ({ ...item, _selected: false })) }
 }
 
 function navigateTo(path: string) { listFiles(path) }
