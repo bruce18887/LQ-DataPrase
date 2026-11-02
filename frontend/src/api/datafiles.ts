@@ -8,6 +8,11 @@ export interface BatchDirInfo {
   total_size: number
   registered: boolean
   files: DataFile[]
+  /**
+   * 已导入批次的明细后端每批只给前 500 条，这里是**被省略的条数**
+   * （0 或缺省 = 明细已全量）。真实总数 = files.length + files_truncated。
+   */
+  files_truncated?: number
   /** 未注册目录的文件预览（文件名+大小，服务端最多 200 条） */
   preview_files?: Array<{ name: string; size: number }>
 }

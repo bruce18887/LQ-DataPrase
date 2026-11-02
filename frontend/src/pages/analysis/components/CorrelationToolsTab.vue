@@ -92,6 +92,10 @@
           <span>相关系数矩阵</span>
           <span class="grow"></span>
           <span v-if="matrixData" class="matrix-meta-inline">{{ matrixMeta }}</span>
+          <!-- data-corr-truncated：后端把参数集封顶 50 时的如实说明（e2e 契约选择器） -->
+          <span v-if="matrixCapSuffix" class="matrix-meta-inline" data-corr-truncated>
+            {{ matrixCapSuffix }}
+          </span>
         </div>
         <div class="inline-card-b">
           <div v-if="matrixData" ref="matrixChartRef" class="matrix-chart-inner" />
@@ -151,6 +155,7 @@ import DataFilterSection from './DataFilterSection.vue'
 import MatrixParamPicker from './MatrixParamPicker.vue'
 import { useCorrelation } from '../composables/useCorrelation'
 import { useCorrelationMatrix } from '../composables/useCorrelationMatrix'
+import { matrixCapSuffix as buildMatrixCapSuffix } from '../composables/matrixCapHint'
 import { useTabFileParams } from '../composables/useTabFileParams'
 import { buildCorrelationMatrixOption, formatPValue, getSignificanceStars } from '../composables/matrix-option'
 import { buildCorrelationScatterOption, linearRegression } from '../composables/scatter-option'
@@ -387,6 +392,9 @@ function onCalculateMatrix() {
     method.value,
   )
 }
+
+// 后端封顶说明（用户全选 >50 项时后端只算前 50 项）
+const matrixCapSuffix = computed(() => buildMatrixCapSuffix(matrixData.value))
 
 // 矩阵 meta 行（照原型 cMxMeta）：方法 · n · 星标口径 · 色相语义
 const matrixMeta = computed(() => {

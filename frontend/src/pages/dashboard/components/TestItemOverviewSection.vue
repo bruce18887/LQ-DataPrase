@@ -101,7 +101,10 @@
       </el-table-column>
     </el-table>
     <div class="overview-footer">
-      <span class="overview-total">共 {{ filteredRows.length }} 项 · 点击参数行跳转数据分析页</span>
+      <span class="overview-total">共 {{ filteredRows.length }} 项 · 点击参数行跳转数据分析页
+        <!-- 后端封顶说明：与前面「共 N 项」（卡头复选框过滤后的行数）是两回事 -->
+        <span v-if="capHint" class="overview-cap-hint" data-overview-cap>{{ capHint }}</span>
+      </span>
       <el-pagination
         v-model:current-page="page"
         :page-size="pageSize"
@@ -136,10 +139,15 @@ import { useSingleTabStore } from '../../../stores/analysisTabs'
 import type { TestItemOverview } from '../../../types'
 import CpkBadge from '../../../components/common/CpkBadge.vue'
 import { formatPercent } from '../../../utils/chart-bar'
+import { overviewCapHint } from '../utils/overviewCap'
 
 const props = defineProps<{
   items: TestItemOverview[]
   fileId: number | null
+  /** 截断前的参数数（后端 param_total） */
+  paramTotal?: number
+  /** 本次生效的显示上限（后端 top_n，默认 200） */
+  topN?: number
 }>()
 
 const router = useRouter()
@@ -160,6 +168,13 @@ const filteredRows = computed(() => {
   if (ignoreNoValue.value) list = list.filter((r) => r.mean !== null)
   return list
 })
+
+/** 后端封顶说明（param_total > 实际下发行数时才非空） */
+const capHint = computed(() => overviewCapHint({
+  paramTotal: props.paramTotal,
+  itemsCount: props.items.length,
+  topN: props.topN,
+}))
 
 const sortedRows = computed(() => {
   const list = [...filteredRows.value]  // 默认保持后端原始测试项顺序
@@ -414,6 +429,13 @@ function getCpkTagType(cpkColor: string | null): 'success' | 'warning' | 'danger
 .overview-total {
   font-size: var(--p-fs-dense);
   color: var(--text-2);
+}
+
+/* 封顶说明（与 .param-cap-hint / .preview-more 同族）：两主题都只走语义 token */
+.overview-cap-hint {
+  margin-left: 8px;
+  font-size: var(--p-fs-micro);
+  color: var(--text-3);
 }
 
 /* ================================================================

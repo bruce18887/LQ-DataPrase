@@ -72,7 +72,11 @@
             <ArrowRight />
           </el-icon>
           <span class="batch-name">📦 {{ group.name }}</span>
-          <span class="batch-count">{{ group.files.length }} 个文件</span>
+          <span class="batch-count">{{ groupFileCount(group) }} 个文件</span>
+          <!-- 明细封顶 500 条时的如实说明（大小/行数只覆盖已列出的明细，不冒充全量） -->
+          <span v-if="group.truncated" class="batch-cap-hint" data-batch-files-cap>
+            {{ groupFilesCapHint(group) }}
+          </span>
           <span class="batch-size" :title="`总大小 ${formatSize(groupStats(group).totalSize)}`">
             {{ formatSize(groupStats(group).totalSize) }}
           </span>
@@ -150,7 +154,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { datafilesApi, type BatchDirInfo } from '../../../api/datafiles'
 import { useFilesStore } from '../../../stores/files'
 import { formatSize } from '../../../utils/format'
-import { groupStats, groupFilesBySub, filterBatchGroups, type BatchGroup } from '../composables/useBatchGroupStats'
+import { groupStats, groupFilesBySub, filterBatchGroups, groupFileCount, groupFilesCapHint, sumFileCount, type BatchGroup } from '../composables/useBatchGroupStats'
 import BatchFilesTable from './BatchFilesTable.vue'
 import BatchSummaryBar from './BatchSummaryBar.vue'
 import UnregisteredDirCard from './UnregisteredDirCard.vue'
@@ -185,7 +189,7 @@ const batchGroups = computed<BatchGroup[]>(() =>
     for (const f of d.files) {
       if (f.sub_batch) subs.add(f.sub_batch)
     }
-    return { name: d.name, files: d.files, subBatchNames: [...subs].sort() }
+    return { name: d.name, files: d.files, subBatchNames: [...subs].sort(), truncated: d.files_truncated ?? 0 }
   }),
 )
 
@@ -197,9 +201,7 @@ const filteredUnregisteredDirs = computed(() => {
   return unregisteredDirs.value.filter((d) => d.name.toLowerCase().includes(kw))
 })
 
-const totalFileCount = computed(() =>
-  batchGroups.value.reduce((acc, g) => acc + g.files.length, 0),
-)
+const totalFileCount = computed(() => sumFileCount(batchGroups.value))
 // 汇总条总大小只统计已导入批次行（file_size 求和），不含未导入目录的
 // 磁盘 total_size——否则待导入目录会污染“已导入批次”汇总。
 const totalByteSize = computed(() =>
@@ -246,7 +248,7 @@ async function loadBatchDirs() {
     batchDirs.value = Array.isArray(data) ? data : []
     // tab 角标 = 已导入批次文件总数（与汇总条口径一致；未导入目录另有
     // pending-dirs 警示数，不混入此处）。
-    emit('total-change', batchGroups.value.reduce((acc, g) => acc + g.files.length, 0))
+    emit('total-change', sumFileCount(batchGroups.value))
     // 清理已不存在的批次（用户可能在别的 tab 删了批次）
     const valid = new Set(batchGroups.value.map((g) => g.name))
     const filtered = new Set([...expandedBatches.value].filter((n) => valid.has(n)))
@@ -297,10 +299,10 @@ async function deleteDir(dir: BatchDirInfo) {
   }
 }
 
-async function deleteBatch(group: { name: string; files: any[] }) {
+async function deleteBatch(group: BatchGroup) {
   try {
     await ElMessageBox.confirm(
-      `确定删除批次 "${group.name}" 及其 ${group.files.length} 个文件吗？此操作不可恢复。`,
+      `确定删除批次 "${group.name}" 及其 ${groupFileCount(group)} 个文件吗？此操作不可恢复。`,
       '确认删除批次',
       { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
     )
@@ -472,6 +474,12 @@ defineExpose({ loadBatchDirs })
   padding: 2px 8px;
   background: var(--bg);
   border-radius: 10px;
+}
+
+/* 明细截断说明：与 .param-cap-hint / .preview-more 同族，两主题都只走语义 token */
+.batch-cap-hint {
+  font-size: var(--p-fs-micro);
+  color: var(--text-2);
 }
 
 .batch-size {
