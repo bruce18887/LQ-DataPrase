@@ -65,6 +65,8 @@
       <TestItemOverviewSection
         :items="testItemOverview"
         :file-id="data?.file_id || null"
+        :param-total="data?.param_total"
+        :top-n="data?.top_n"
       />
 
       <!-- UPH 效率明细（紧凑信息带，页面最底部） -->
@@ -123,6 +125,9 @@ interface DashboardData {
   bin_table_data?: any[]
   bin_site_columns?: string[]
   param_stats?: any[]
+  /** 后端封顶前的参数数与本次生效上限（B4）；缺省 = 这份响应没截断 */
+  param_total?: number
+  top_n?: number
   test_item_overview?: TestItemOverview[]
   quality_alerts?: any[]
 }

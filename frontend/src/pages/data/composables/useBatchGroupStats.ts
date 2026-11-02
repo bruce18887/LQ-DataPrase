@@ -5,6 +5,12 @@ export interface BatchGroup {
   name: string
   files: any[]
   subBatchNames: string[]
+  /**
+   * 后端 `/batch-dirs/` 每批 `files` 封顶 500，这里记**被省略的条数**
+   * （`files_truncated`，缺省/0 = 明细已全量）。省略行的 file_size/row_count 后端
+   * 没下发，所以只有**条数**能补成真实总数，大小/行数仍只覆盖已列出的明细。
+   */
+  truncated?: number
 }
 
 export interface BatchStats {
@@ -47,4 +53,22 @@ export function filterBatchGroups(groups: ComputedRef<BatchGroup[]>, keyword: st
   const kw = keyword.trim().toLowerCase()
   if (!kw) return groups.value
   return groups.value.filter((g) => g.name.toLowerCase().includes(kw))
+}
+
+/** 批次真实文件数 = 已列出的明细 + 后端省略的条数 */
+export function groupFileCount(group: BatchGroup): number {
+  return group.files.length + (group.truncated || 0)
+}
+
+/** 跨批次求和（汇总条与 tab 角标用同一口径，别各算各的） */
+export function sumFileCount(groups: BatchGroup[]): number {
+  return groups.reduce((acc, g) => acc + groupFileCount(g), 0)
+}
+
+/** 明细被截断时的行内提示；未截断返回空串（模板据此不渲染） */
+export function groupFilesCapHint(group: BatchGroup): string {
+  const omitted = group.truncated || 0
+  if (omitted <= 0) return ''
+  return `共 ${groupFileCount(group)} 个文件，明细仅列出前 ${group.files.length} 个，`
+    + `另有 ${omitted} 个未列出`
 }
