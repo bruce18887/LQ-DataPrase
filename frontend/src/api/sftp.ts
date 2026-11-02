@@ -100,8 +100,11 @@ export const sftpApi = {
   autoConnect(configName?: string) {
     return api.post('/sftp/auto_connect/', configName ? { config_name: configName } : {})
   },
-  listFiles(path: string, sortBy = 'name', sortOrder = 'asc') {
-    return api.get('/sftp/list_files/', { params: { path, sort_by: sortBy, sort_order: sortOrder } })
+  listFiles(path: string, sortBy = 'name', sortOrder = 'asc', offset = 0) {
+    const params: Record<string, string | number> = { path, sort_by: sortBy, sort_order: sortOrder }
+    // 首页不带 offset：保持与后端默认页完全相同的请求形状，「加载更多」才只加一个游标
+    if (offset > 0) params.offset = offset
+    return api.get('/sftp/list_files/', { params })
   },
   async download(path: string) {
     // 单文件下载走 axios，上限归「SFTP 下载超时」设置管：不传就是 api/index.ts 的

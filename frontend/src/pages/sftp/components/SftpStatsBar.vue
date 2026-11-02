@@ -12,18 +12,42 @@
     <el-tag effect="plain" size="small">
       共 {{ totalCount }} 项
     </el-tag>
+    <!-- 目录被后端分页（默认 500 条/页）时的真实进度 + 原位「加载更多」 -->
+    <template v-if="hasMore && remoteTotal">
+      <el-tag type="warning" effect="plain" size="small" data-sftp-list-paging>
+        已加载 {{ loadedCount }} / {{ remoteTotal }} 项
+      </el-tag>
+      <el-button
+        link
+        type="primary"
+        size="small"
+        :icon="ArrowDown"
+        :loading="loadingMore"
+        data-sftp-load-more
+        @click="emit('load-more')"
+      >加载更多</el-button>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { Folder, Document, PieChart } from '@element-plus/icons-vue'
+import { Folder, Document, PieChart, ArrowDown } from '@element-plus/icons-vue'
 
 defineProps<{
   dirCount: number
   fileCount: number
   totalSize: number
   totalCount: number
+  /** 本页之外还有没给的条目（后端 `truncated`） */
+  hasMore?: boolean
+  /** 目录真实条目数（后端 `total`） */
+  remoteTotal?: number
+  /** 已加载条数（跨页累加，含文件夹） */
+  loadedCount?: number
+  loadingMore?: boolean
 }>()
+
+const emit = defineEmits<{ 'load-more': [] }>()
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return bytes + ' B'
