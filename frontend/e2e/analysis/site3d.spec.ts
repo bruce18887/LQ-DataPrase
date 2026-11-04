@@ -22,8 +22,8 @@ async function enter3D(page: import('@playwright/test').Page) {
   await selectAnalysisFile(page, SEEDED_FILES.STS8200_CP)
   await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
   await waitLoadingGone(page.locator(SINGLE))
-  // 自己收敛五个勾选：其余图开着会改变 dock 的行数/布局，且勾选账号级持久，用例自己声明要什么状态
-  await ensureChartToggles(page, { hist: true, serial: false, qq: false, box: false, site3d: true })
+  // 只收敛本图自己要的键：账号级勾选被并行用例共享，翻别人的键会和 dock-resize 等互相踩
+  await ensureChartToggles(page, { hist: true, site3d: true })
   const paramSelect = page.locator('.param-selector .el-select')
   const current = await paramSelect.locator('.el-select__placeholder').textContent()
   if (!current?.includes('Vth')) {
@@ -60,8 +60,8 @@ test.describe('@p1 3D 站点柱阵', { tag: ['@p1', '@analysis'] }, () => {
   test.describe.configure({ timeout: 120_000 })
 
   test('勾选后 dock 出真 WebGL 画布且实测有尺寸', async ({ page }) => {
-    await enter3D(page)
     try {
+      await enter3D(page)
       const host = page.locator(HOST)
       // R2⑤：boundingBox 对空 locator 不是返回 null 而是等满超时后抛错，必须先 count()
       await expect.poll(async () => (await host.locator('canvas').count()), { timeout: 20_000 })
@@ -90,8 +90,8 @@ test.describe('@p1 3D 站点柱阵', { tag: ['@p1', '@analysis'] }, () => {
   })
 
   test('night 主题：grid3D 轴线与标签取 night token', async ({ page }) => {
-    await enter3D(page)
     try {
+      await enter3D(page)
       await page.locator('button.theme-toggle').click()
       await expect(page.locator('html')).toHaveAttribute('data-theme', 'night')
       // 主题切换 → useChart 的 theme watcher 重渲染，轮询到 night 那把值落地

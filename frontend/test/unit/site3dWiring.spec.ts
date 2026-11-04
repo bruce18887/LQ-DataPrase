@@ -131,3 +131,16 @@ describe('SingleParamTab.vue 的五图接线', () => {
     expect(site).toMatch(/watch\(\s*\(\)\s*=>\s*props\.resetEpoch\b/)
   })
 })
+
+describe('HistogramChart.vue 的 bin 显隐走共享纯函数（2D 半边不能是第二份口径）', () => {
+  const code = codeOf(read('pages/analysis/components/HistogramChart.vue'))
+
+  it('导入并调用 activeBinIndices（§8 同屏口径的结构保证）', () => {
+    expect(code).toContain("from '../composables/histogramBins'")
+    expect(code).toMatch(/activeBinIndices\(/)
+  })
+
+  it('没有内联裁剪变量（回退成 clipMin/clipMax 就是第二份口径）', () => {
+    expect(code).not.toMatch(/clipMin|clipMax/)
+  })
+})

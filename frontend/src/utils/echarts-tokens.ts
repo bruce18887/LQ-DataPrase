@@ -75,8 +75,9 @@ export const ECHARTS_COLORS_NIGHT: EChartsColors = {
   brandColorSoft: 'rgba(249, 168, 37, 0.45)',
 
   // 系列颜色：2026-08-29 拿 --chart-1..8 做过一次 CVD 复验，未通过（protan/deutan ΔE 达不到
-  // 指南要求的 ≥15），故按 docs/reference/ui-design-guide.md:193-196 维持现状；那次复验是临时的，
-  // 仓内既没留脚本也没留判据，所以这几个数无法在本仓重跑——要换色板就得重做一遍复验。
+  // 指南要求的 ≥15），故按 docs/reference/ui-design-guide.md:193-196 维持现状；复验脚本在本机
+  // tasks/cvd_verify.mjs（`/tasks/*` 已 gitignore，不入库），判据是 protan/deutan ΔE ≥15；
+  // 别人 clone 到的新机器既没脚本也没判据，要换色板就得重做一遍复验。
   // 轴系/文本/tooltip 已对齐。
   seriesColors: [
     '#fdd835', // 金色
