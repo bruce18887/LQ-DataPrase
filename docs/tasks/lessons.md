@@ -2843,3 +2843,13 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
 - **规则三**：变异撞到编译器**不算判据拦住**，驱动要单列成 `build-broken`（与 CAUGHT 分开），并把变异
   改成**类型可用的等价坏法**再判（本轮把「不传游标」改成「传一个恒为 0 的游标」）。否则「红」来自 tsc，
   而「这条 e2e 到底管不管用」这件事一次都没被验过。
+## 2026-11-04 3D 站点柱阵（echarts-gl）：getOption 归一形状、相机实时态与收口门禁基线
+
+- **现象一**：给 `grid3D.axisLabel` 按旧 ECharts 4 写法套了 `textStyle: { color, fontSize, fontFamily }`，图能出、T2 对**输入 option** 的断言全绿；但真机 `getOption()` 里 `axisLabel.textStyle` 是 `null`，三件被提到 `axisLabel` 本级。ECharts 6 只把嵌套 `textStyle` 当兼容层拆平，而 echarts-gl 的 Grid3DAxis 直接读 `axisLabelModel.get('color'|'fontSize'|'fontFamily')`。
+- **规则一**：3D 轴标签/文本样式一律**平铺**在本级；量 `getOption()` 的判据按平铺读。嵌套写法不是立刻坏，而是「输入断言绿、运行时读数 undefined」——T2 最容易放过的一种半绿。
+- **现象二**：T3 想量旋转/缩放/复位，读 `getOption().grid3D[0].viewControl.alpha/beta/distance`，拖拽后值不变，看起来像「3D 不能转」的假红。相机实时态只在 OrbitControl 上，交互不回写 option；正交投影（本项目 `projection:'orthographic'`）的滚轮改的是 `getOrthographicSize()`，不是 `distance`。
+- **规则二**：真机量机位走 `inst.getViewOfComponentModel(inst.getModel().getComponent('grid3D'))._control` 的 `getAlpha()/getBeta()/getDistance()/getOrthographicSize()`；`getOption()` 只代表最后一次 setOption。另：3D 宿主里有**两张 canvas**（zrender 一层 + gl 的 WebGL 层），判据写 `count >= 1`，别 `toHaveCount(1)`。
+- **现象三**：加第 5 个账号级持久勾选（`site3d`）后，并行跑时 `dock-resize.spec.ts` 的 `enterAll()` 数到 5 张 `.chart-panel` 会硬红（它 `toHaveCount(4)` 三处）。同族于 2026-10-13 的勾选持久 flake 谱系。
+- **规则三**：新增图表开关的任务必须扫 `grep -rn "toHaveCount(" e2e/analysis e2e/settings`，给按面板/行数断言的 enter 函数补该键为 `false`；只收敛自己用到的键不够。
+- **现象四**：逐任务提交后跑收口门禁，worktree 干净时 `scripts/e2e_affected.mjs` 自动基线只剩 `HEAD~1..HEAD`，打 `RESULT: NO AFFECTED TESTS —— 本轮没有档执行，不等于绿灯`。
+- **规则四**：收口轮显式 `--base master` 取整条分支并集；`NO AFFECTED TESTS` 不是绿。本次 31 文件命中 GLOBAL 清单 ⇒ 兜底升全量池 429 例（基线 427 + 本批 2）。
