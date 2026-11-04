@@ -19,7 +19,7 @@
 （[histogram.py:294-299](../../../apps/analysis/services/data_services/histogram.py)），所以柱子的**绝对高低就是量**、
 **左右错位就是形状**。因此本设计**不引入任何归一化模式**，实现时不要再加一个 mode 参数。
 
-验收判据（可执行）：8 Site × 24 bin 的样例下，峰位偏移的 Site 在**不旋转**的默认视角即可一眼辨出；
+验收判据（可执行）：8 Site × 26 bin 的样例下，峰位偏移的 Site 在**不旋转**的默认视角即可一眼辨出；
 旋转与缩放过程中控制台零报错。
 
 ## 2. 技术选型
@@ -41,8 +41,10 @@
 | --- | --- |
 | `site_histograms` | `{ [site]: number[26] }`，每 Site 一套 26 格占比，与 `bin_centers` 严格同网格 |
 | `bin_centers` | 26 个中心值 = underflow + 24 正常 + overflow（[binning.py:12-27](../../../apps/analysis/services/binning.py)） |
-| `bin_counts` | tooltip 里的 `n=` |
+| `bin_counts` | tooltip 里的 `n=`，**它是该 bin 的全站点计数**（后端按 `total_count` 分母给占比，逐 Site 的原始计数不下发）⇒ 文案必须写「全站点该 bin n=」，不能缩成看着像 Site 级计数的 `n=`。⚠ 两者口径不等：`bin_counts` 之和是非空值数，`total_count` 含 NaN，所以别在界面上承诺「各 bin 相加 = N」 |
 | `outlier_info` | §8 的 clip 过滤 |
+
+- **`bin_counts` 别承诺「各 bin 相加 = N」**：它是该 bin 的**全站点计数**，`bin_counts` 之和 = 非空值数，而 `total_count` 含 NaN，两者口径不等 ⇒ 界面上不写「各 bin 相加 = N」，逐 Site 的原始计数也不下发（本条与 §3 表格 `bin_counts` 行同一结论，落到正文以免只活在格子里）。
 
 `lower_limit` / `upper_limit` 本图**不消费**（§7）。
 
@@ -53,15 +55,20 @@
 | 文件 | 改动 | 要点 |
 | --- | --- | --- |
 | `frontend/package.json`、`package-lock.json` | 新增依赖 | 见 §2 |
-| `pages/analysis/composables/site3dOption.ts` | **新增**（纯函数，无 DOM） | `buildSite3DOption(result, theme, mode)`：轴、色键、`barSize` 换算、clip 过滤全在此。照 `dockGeometry.ts` 的先例——纯模型放 `composables/`，便于 T2 直测 |
+| `pages/analysis/composables/site3dOption.ts` | **新增**（纯函数，无 DOM） | `buildSite3DOption(result, theme, mode)`：轴、色键、`barSize` 换算、clip 过滤全在此。导出单一来源常量/纯函数：`SITE3D_BOX`、`SITE3D_VIEW`（含 `zoom`）、`SITE3D_BAR_FILL`、`SITE3D_LIGHT_SLOT7`、`site3dPalette()`、`site3dBarSize()`、`defaultViewControl()`、`applyDefaultView()`。照 `dockGeometry.ts` 的先例——纯模型放 `composables/`，便于 T2 直测 |
 | `pages/analysis/composables/histogramBins.ts` | **新增**（纯函数） | 从 [HistogramChart.vue:105-112](../../../frontend/src/pages/analysis/components/HistogramChart.vue) 原样抽出「按 clip 边界算 activeIndices」，2D 与 3D 共用（§8） |
 | `pages/analysis/components/Site3DChart.vue` | **新增**（薄壳，目标 <200 行） | 容器 + `useChart` + 图下提示条 + 降级 `el-alert`；不写业务计算 |
 | `pages/analysis/components/HistogramChart.vue` | 内联 clip 过滤改调 `histogramBins.ts` | 行为逐字节不变，由 T2 钉住（§8） |
-| `utils/echarts-theme.ts` | 新增 `grid3DTheme` computed | 与 `getBaseOption` 同一个 `colors` 源，不散写（§5） |
-| `pages/analysis/composables/useChartDock.ts` | `ChartKey` 加 `'site3d'`、`ALL_KEYS`、`defaultLayout`、`isValidLayout`，**并升 `VERSION`** | 不升 `VERSION` 的话，用户存过的 4 图布局会被 `isValidLayout` 判非法整表丢弃（[useChartDock.ts:73-83](../../../frontend/src/pages/analysis/composables/useChartDock.ts)） |
-| `pages/analysis/components/ChartDock.vue` | `TITLES` 加 `site3d` | 标题「3D柱状图」（[ChartDock.vue:124](../../../frontend/src/pages/analysis/components/ChartDock.vue)） |
-| `pages/analysis/components/SingleParamTab.vue` | 复选框「显示3D柱状图」+ `#site3d` slot + 异步组件 | 前缀「显示」沿用现有四个复选框的写法（[SingleParamTab.vue:19-22](../../../frontend/src/pages/analysis/components/SingleParamTab.vue)）；**默认不勾**，避免 dock 从 4 格挤成 6 格 |
-| 同上，`#controls-site3d` slot | 「回到默认视角」**图标**（不是文字按钮） | 走 `ChartDock.vue:38-40` 已有的 `controls-<key>` 透传，`ChartPanel` 已有 `controls` 槽，无需改 dock。视角常量从 `site3dOption.ts` 导出单一来源，初始 option 与复位按钮共用（§10 T2 ⑧ 钉住） |
+| `utils/echarts-tokens.ts` | **新增** | 两套色（light/night 字面量）提成可导出的纯数据常量 + `grid3DStyle()` 纯函数，零 Vue、零 pinia ⇒ 双主题对称（键集逐字相等）可由 T2 直接量真值（§5、§10 ④） |
+| `utils/echarts-theme.ts` | 两套色字面量搬出、只留 store 接线 | `grid3DTheme = computed(() => grid3DStyle(colors))`，与 `getBaseOption` 同一个 `colors` 源，不散写（§5） |
+| `pages/analysis/composables/useChartDock.ts` | `ChartKey` 加 `'site3d'`、`ALL_KEYS`、`defaultLayout` 消费面，**+ `dockGeometry.ts` 的 `DockRow`**（第二处穷尽类型，少一处 `vue-tsc -b` 就红），**`VERSION` 保持 1**（硬结论见下方 bullet） | `isValidLayout` 只校验 `v === VERSION` 且「每个 key ∈ `ALL_KEYS`」（[useChartDock.ts:73-87](../../../frontend/src/pages/analysis/composables/useChartDock.ts)）⇒ **加一个 key 是让旧 4 图存档继续合法**，旧存档原样留下、由 `reconcile` 在需要时追加新格；反方向提醒：将来若从 `ALL_KEYS` **删** key，同一道门会把带那个 key 的存量整表作废。回归由 T2 `chartLayout.spec.ts` 钉住 |
+| `pages/analysis/components/ChartDock.vue` | `TITLES` 加 `site3d` | 标题「3D柱状图」（[ChartDock.vue:121-123](../../../frontend/src/pages/analysis/components/ChartDock.vue)） |
+| `composables/useChartMemory.ts` | `ChartToggles` 加 `site3d` 字段 | `parseToggles` 缺该 key 时默认 `false`（旧账号 toggles 缺 `site3d` ⇒ 默认关）；由布局反推勾选那段同步加 key（§10 布局存档回归） |
+| `pages/analysis/composables/useChartToggles.ts` | **新增** | 五个勾选 + 记忆接线，从 `SingleParamTab.vue` 抽出，为 600 行硬约束让位（§10） |
+| `pages/analysis/components/SingleParamTab.vue` | 复选框「显示3D柱状图」+ `#site3d` slot + 异步组件 | 前缀「显示」沿用现有四个复选框的写法（[SingleParamTab.vue:19-22](../../../frontend/src/pages/analysis/components/SingleParamTab.vue)）；**默认不勾**，避免 dock 从 4 格挤成 5 格（勾上后 `defaultLayout` 会产出 `[[hist],[serial,qq],[box,site3d]]` 三行） |
+| 同上，`#controls-site3d` slot | 「回到默认视角」**图标**（不是文字按钮） | 走 `ChartDock.vue:38-40` 已有的 `controls-<key>` 透传，`ChartPanel` 已有 `controls` 槽，无需改 dock。视角常量从 `site3dOption.ts` 导出单一来源（`SITE3D_VIEW`），初始 option 与复位图标共用（§10 T2 ⑧ 钉住） |
+
+- **不升 `VERSION`**（升档 = 让 `v !== VERSION` 命中，把每个用户存过的布局——含本机 localStorage 与账号记忆两条路——整表丢弃）；钉法见 §10「布局存档回归」。
 
 ## 5. 风格：逐项映射回项目 token
 
@@ -73,16 +80,18 @@
 | --- | --- | --- |
 | `bar3D.shading: 'color'`（默认即此，**是示例改成了 `lambert`**） | 保持 `'color'` | 不打光 ⇒ `#0077BB` 渲染出来就是 `#0077BB`，`getSiteColors8` 的色盲校验才有效 |
 | `viewControl.projection: 'perspective'` | `'orthographic'` | 去掉近大远小，柱高才可跨 Site 比 |
-| `axisLine.lineStyle.color: '#333'`、宽 2 | `colors.splitLineColor`（极淡底色）、宽 1，**且不能 `show:false`**（§6 坑 2）、**也不提供加深档**（§6.6） | light `#eef0f3` / night `rgba(255,255,255,.05)`；加深后转到斜方位角，后壁轴线会在空中拼成一个「悬浮矩形」 |
+| `axisLine.lineStyle.color: '#333'`、宽 2 | `colors.splitLineColor`（极淡底色）、宽 1，**且不能 `show:false`**（§6 坑 2）、**也不提供加深档**（§6.6） | light `#eef0f3` / night `rgba(255, 255, 255, 0.04)`（这两个数就是 `echarts-theme.ts` 里 `splitLineColor` 两分支的现值，写 `.05` 是当时手抖取整，T3 断言按 `0.04` 逐字比）；加深后转到斜方位角，后壁轴线会在空中拼成一个「悬浮矩形」 |
 | `splitLine.lineStyle.color: ['#ccc']` | `colors.splitLineColor` | 深底上 `#ccc` 会糊成一片 |
 | `axisLabel.textStyle.fontSize: 12`（无字色） | `chartFontSize.micro` + `colors.axisLabelColor` + `fontFamily.sans` | 字号/字族/字色三件都要归 token |
-| `axisPointer.label.textStyle`：14px 白字黑胶囊 | `colors.tooltipBg / tooltipBorder / tooltipText` | gl 的黑胶囊与项目 tooltip 的玻璃底不同源 |
+| `axisPointer.label.textStyle`：14px 白字黑胶囊 | `colors.tooltipBg / tooltipBorder / tooltipText`；**本图不适用**——`bar3D` 的 tooltip 走默认 `item` 触发（没有 `trigger:'axis'`），gl 不画 axisPointer 胶囊，所以实现里不写 `grid3D.axisPointer`（写了就是无人消费的死配置）。留这一句是给下一个读 §5 的人：不是漏做，是用不上 | gl 的黑胶囊与项目 tooltip 的玻璃底不同源 |
 | 示例里的 `light.main.shadow: true` | 不写 | 阴影是「demo 感」主要来源，且 `shading:'color'` 下根本不吃光 |
 | `visualMap` 按 z 上色的蓝→红色阶 | 按 **Site 维度**上色，喂 `getSiteColors8(isDark)` | 要的是「Site 颜色和直方图对得上」 |
-| `itemStyle.opacity: 1` | **默认不动**（渐隐关掉） | 见 §6.5：按行降 opacity 会吃掉 Site 色的饱和度，而 Site 身份在这张图里就靠颜色 |
+| `itemStyle.opacity: 1` | **显式写 `opacity: 1`**（原型非渐隐态给 0.92，产品不沿用） | 见 §6.5：按行降 opacity 会吃掉 Site 色的饱和度，而 Site 身份在这张图里就靠颜色 |
 
 - **GL 图层本身是 `transparent: true` 创建的**（`lib/component/grid3D/Grid3DView.js:35`）⇒ 场景不铺自己的底色，
   `ChartPanel` 的 CSS 背景直接透出，双主题不必为 3D 单开背景处理。
+- **不写 `grid3D.axisPointer`**：`bar3D` 的 tooltip 走默认 `item` 触发（没有 `trigger:'axis'`），gl 不画 axisPointer 胶囊，
+  写了就是无人消费的死配置——不是漏做，是用不上（本条与 §5 表格 `axisPointer.label.textStyle` 行同一结论，落到正文以免只活在格子里）。
 - 主题切换不必自己挂：`useChart` 已 watch `themeStore.currentTheme` 重渲染（[useChart.ts:321](../../../frontend/src/composables/useChart.ts)）。
 - 默认机位与箱体：`alpha 28 / beta 30 / distance 245`，`boxWidth 132 / boxHeight 74 / boxDepth 120`。
   这组数是「Site 分辨度」实测出来的（§6.5）：`beta` 取负值会把值轴甩到左后方；`alpha` 低于 25 时后排被前排整根挡住；
@@ -90,7 +99,7 @@
 
 ## 6. 实测踩到的六个坑（实现时必撞，先写死）
 
-1. **`visualMap` 用 `categories` + `inRange.color` 时，192 根柱一根都不画。** 必须写成
+1. **`visualMap` 用 `categories` + `inRange.color` 时，192 根柱一根都不画（原型 24 格口径；产品满矩阵 8×26 = 208）。** 必须写成
    `pieces: [{ value: i, label: siteName, color: pal[i % 8] }]`。副作用是好的：piecewise 的 `label` 正好显示成
    Site 名，而 **gl 系列不进 ECharts legend**，所以这个 visualMap 就是本图唯一的色键。
 2. **`grid3D.axisLine.show = false` 会让 `_updateAxisLabelAlign` 读到 `null.axisLineCoords`，每次相机更新抛一次
@@ -102,7 +111,7 @@
    - x 方向 band 只有 `132/24 = 5.5`、y 方向有 `120/8 = 15`，所以**自动值本身就是「3.85 宽 × 10.5 厚」的板状**，
      在 `beta 30` 的方位角下每根柱斜着摊开、相邻 bin 糊成一条斜带 ⇒ 用户反馈「看着歪」。**与机位无关、
      与倒角无关**（`bevelSize` 归 0 做过对照，画面无变化）。
-   本设计因此**分开给两个分量**：宽取 `bandX × 0.62`（≈3.4）、厚取 `bandY × 0.30`（≈4.5）。
+   本设计因此**分开给两个分量**：宽取 `bandX × 0.62`（≈3.4）、厚取 `bandY × 0.30`（≈4.5）。（上面 `132/24 = 5.5`、≈3.4 是原型 24 格口径；产品 x 轴 26 格 ⇒ band 132/26≈5.08、宽 ≈3.15——`0.62` 是**占格比例**，随 bin 数重算，不是定值）
    宽度一度取过 0.85，在 `beta 30` 的正机位下没问题，但**转到斜方位角（`alpha 35 / beta -25`）时相邻 bin
    沿 x 方向粘成一条斜脊，「歪」又回来了**——0.62 才在任意角度都保持单根可辨（§6.6）。
    箱体尺寸取 §5 那一组（`132 / 74 / 120`）；两个 fill 只有和这组尺寸绑在一起才等价，换尺寸必须同步重算。
@@ -117,8 +126,8 @@
    - **截面宽度 0.85 在斜方位角下沿 x 粘成斜脊**。四格对照（同坏角度，只换 `wFill` 与轴线色）：
      0.85 的前排糊成一条斜带，收到 **0.62 后单根恢复可辨**，且默认角度下不掉质量。
    - **后壁轴线在斜角度下于空中拼成一个「悬浮矩形」**。触发条件是原型上那个「弱化轴线」开关被关掉
-     （关掉即取 `colors.axisLineColor` = `#6b7280`，够深就看得见）。
-     ⇒ 产品**不提供加深档**，`axisLine` 恒取极淡底色（light `#eef0f3` / night `rgba(255,255,255,.05)`）；
+     （关掉即取原型自己的深灰 `#6b7280`——对应项目里的 `axisLabelColor`，**不是** `axisLineColor`（light `#e5e7eb` / night `rgba(255, 255, 255, 0.10)`），够深就看得见）。
+     ⇒ 产品**不提供加深档**，`axisLine` 恒取极淡底色（light `#eef0f3` / night `rgba(255, 255, 255, 0.04)`，与 §5 同一组真值）；
      顺带实测：**保持 `show: true` 只把颜色给成全透明是安全的**，不会触发坑 2 的崩溃——
      这是「想彻底抹掉轴线」时的正确写法，而不是 `show:false`。
    对照截图另附：`bad-angle.html`（原型同目录，四格 A/B/C/D）。
@@ -157,26 +166,26 @@
 按 `docs/reference/testing-gates.md` 选层。
 
 - **T1（后端）**：无。后端零改动。
-- **T2（vitest，`frontend/test/unit/`）**：新增 `site3dOption.spec.ts`，断言
+- **T2（vitest，`frontend/test/unit/`）**：新增 `site3dOption.spec.ts`，断言 ①②③⑤⑥⑦⑧（④ 由 `echarts-tokens.ts` 对真值断言，`site3dOption.spec.ts` 只验颜色来自传入 theme）
   ① 轴型 `category/category/value` 与 `bin_centers` 逐格对齐；
-  ② `shading === 'color'`、`projection === 'orthographic'`；
+  ② `shading === 'color'`、`projection === 'orthographic'`、`itemStyle.opacity === 1`（钉 §5「显式写 `opacity: 1`」行）；
   ③ 色键取 `getSiteColors8(isDark)`，且第 7 格被 3D 专用值覆盖、其余 7 格逐字相等；
-  ④ light/night 两个分支的 token 键集对称（R7①）；
-  ⑤ `barSize` 两个分量分别等于 `boxWidth/NB × 0.62` 与 `boxDepth/NS × 0.30`，且**断言两者不相等**
+  ④ light/night 两套 token 的**键集逐字相等**，且 3D 用到的那把键两边都有——由 `echarts-tokens.ts` 把两套色提成可导出的纯数据常量后，T2 `echartsTokens.spec.ts` 直接对真值断言（`useEChartsTheme()` 里的 computed 要过 pinia，而 `stores/theme` 的 watch 一初始化就摸 `document`，node 环境量不到）。
+  ⑤ `site3dBarSize()` 两个分量分别等于 `SITE3D_BOX.width / NB × SITE3D_BAR_FILL.width`（0.62）与 `SITE3D_BOX.depth / NS × SITE3D_BAR_FILL.depth`（0.30），且**断言两者不相等**
   （钉住 §6.3：写成单一 `fill` 同时乘两个方向，就会退回板状截面，用户看到的「歪」会复现）；
   ⑥ 无 Site 列返回 `null` 而非空 option；
   ⑦ **同一 `result` 下 3D 取用的 bin 集合 === `histogramBins.ts` 给 2D 的 `activeIndices`**（钉 §8）。
-  ⑧ 导出的视角常量（`alpha 28 / beta 30 / distance 245`）既是初始 `viewControl` 也是「回到默认视角」
-  的复位目标——断言两处读同一个导出值，防止复位按钮和初始机位各写一份而漂移（§4）。
+  ⑧ 导出的视角常量 `SITE3D_VIEW`（`alpha 28 / beta 30 / distance 245 / zoom 1`）既是初始 `viewControl`（`defaultViewControl()`）也是「回到默认视角」`applyDefaultView()` 的
+  复位目标——断言两处读同一个导出值，防止复位图标和初始机位各写一份而漂移（§4）。组件半边由新增 `site3dWiring.spec.ts` 承担（静态读 `.vue`：源码不得出现机位/箱体字面量、必须走 `applyDefaultView`、`data-site3d-canvas` 契约属性存在）。
   另加 `histogramBins.spec.ts` 覆盖 clip/exclude/off 三档与「边界病态导致全排除时回退全部 bin」的守卫。
+  布局存档回归：T2 `chartLayout.spec.ts` 断言「旧 `v:1` 四图存档在新代码下 `isValidLayout` 仍判合法」与「旧账号 toggles 缺 `site3d` ⇒ 默认关」。**不升 `VERSION`**（§4），所以这条钉的是「不丢」而不是「迁移」。
 - **T3（Playwright，`frontend/e2e/analysis/site3d.spec.ts`）** 只留两条不可替代的，标 `@p1`：
   ① 勾选后 dock 内出现 `data-site3d-canvas`，且 canvas 实测盒宽/盒高非零（真 WebGL 出图，按 R2⑤ 先 `count()` 再取 `boundingBox()`）；
-  ② night 主题下轴线与标签取 night token（双主题对比度）。
-  布局存档回归：勾上再取消后，`lqdp-analysis-chart-layout` 里用户原有的 4 图布局不丢（钉 `VERSION` 升档）。
+  ② night 主题下轴线与标签取 night token（night 轴线 `rgba(255, 255, 255, 0.04)`、标签 `rgba(255, 255, 255, 0.76)`，双主题对比度）。
 - **门禁**：`package.json` / `package-lock.json` 与 `frontend/src/utils/` 都是 GLOBAL
   （[affected-rules.mjs:177](../../../scripts/affected-rules.mjs)、194-195）⇒ **这批必然升级全量池**，
   实测 6–8min + 后端全套，不是可选项。收口按 `node scripts/e2e_pool.mjs --slots=4` 跑。
-- **600 行约束**：新文件都在限内；`echarts-theme.ts` 现 258 行，加 `grid3DTheme` 后约 300。
+- **600 行约束**：新文件都在限内；`echarts-theme.ts` 现 257 行，把两套色字面量（约 92 行，`:61-152`）搬出到新增的 `echarts-tokens.ts`（约 170 行）后自身缩到约 180，两份都在 600 限内。
   `lineLimit.spec.ts` 会把新文件自动纳入断言，无需登记豁免。
 
 ## 11. 不做的事
@@ -195,6 +204,6 @@
 | 风险 | 处置 |
 | --- | --- |
 | 遮挡：前排柱挡住后排，转到低角度时读数困难 | 已用机位几何解决（`alpha 28` + `boxDepth 120`，§6.5），**不用渐隐**——降 opacity 会吃掉 Site 色饱和。用户把视角转到低处时仍会遮挡，这是 3D 形态的固有代价，不是可修的缺陷；读数兜底是同屏 2D 直方图与 Site 统计表 |
-| **任意角度不可保证**：参数是在「默认机位 + 一个坏角度」两档实测出来的，用户继续转仍可能落到第三种难看形状 | 已把 `wFill` 收到 0.62 让单根柱在斜方位角下不粘连（§6.6），但**不承诺全角度可读**。兜底两条：`回到默认视角` 按钮（toolbox 旁，图标形态，不加文字按钮）+ 同屏 2D 直方图。若后续实测证明用户高频落在坏角度上，再回来重估形态（届时山脊稿 §1 的第 ① 条理由就是现成的论据） |
+| **任意角度不可保证**：参数是在「默认机位 + 一个坏角度」两档实测出来的，用户继续转仍可能落到第三种难看形状 | 已把 `wFill` 收到 0.62 让单根柱在斜方位角下不粘连（§6.6），但**不承诺全角度可读**。兜底两条：`回到默认视角` 图标（`SingleParamTab.vue` 的 `#controls-site3d` 槽 ⇒ `ChartPanel` 标题栏右上角，与既有 `⤢`/`×` 同排，非 ECharts `toolbox`，不加文字按钮）+ 同屏 2D 直方图。若后续实测证明用户高频落在坏角度上，再回来重估形态（届时山脊稿 §1 的第 1 条理由就是现成的论据） |
 | 低配机器 WebGL 退到 SwiftShader 软件渲染 | 192 根柱的量级可承受；上线后按 §9 的探测分支观察是否真有人走到提示分支 |
 | `echarts-gl` 2.1.0 发布不足半年 | 原型已用本项目实际 `echarts 6.1.0` 构建产物跑通、控制台零报错；升级 echarts 时把该页回归纳入 T2 |
