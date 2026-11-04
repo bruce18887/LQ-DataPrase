@@ -831,6 +831,7 @@ import { activeBinIndices } from '../../src/pages/analysis/composables/histogram
 import {
   ECHARTS_COLORS_LIGHT,
   ECHARTS_COLORS_NIGHT,
+  echartsColorsFor,
   grid3DStyle,
 } from '../../src/utils/echarts-tokens'
 import { SITE_COLORS_8_LIGHT, SITE_COLORS_8_NIGHT } from '../../src/utils/chart-bar'
@@ -839,7 +840,9 @@ const NB = 26          // 后端 binning.build_bin_grid：1 underflow + 24 正�
 const NS = 8
 
 function theme(isDark = false): Site3DTheme {
-  const colors = isDark ? ECHARTS_COLORS_NIGHT : ECHARTS_COLORS_LIGHT
+  // 用 echartsColorsFor 而不是自己写 `isDark ? NIGHT : LIGHT`：后者是 Task 4 刚清掉的
+  // 第二份事实来源（照抄旧正文会把它回种进测试助手）
+  const colors = echartsColorsFor(isDark)
   return { isDark, colors, grid3D: grid3DStyle(colors) }
 }
 
@@ -1239,7 +1242,7 @@ export function buildSite3DOption(
       const v = hists[bi] ?? 0
       // 零占比不生成柱体：8 Site × 26 bin 的满矩阵有三分之二是空的，
       // 全画会让 GL 侧的拾取射线命中零高柱、tooltip 弹出一堆 0%
-      if (!(v > 0)) continue
+      if (!(v > 0)) return
       rows.push({ value: [x, s, v] })
     })
   })
@@ -1295,7 +1298,7 @@ export function buildSite3DOption(
       data: binLabels,
       name: `${opts.param}${unit ? ` (${unit})` : ''}`,
       nameLocation: 'middle',
-      nameGap: 26,
+      nameGap: 30,   // 原型实测值（specs/…-proto.html:206）；正文此前写 26 是无出处的漂移
       nameTextStyle: nameStyle,
     },
     yAxis3D: { type: 'category', data: siteLabels, name: 'Site', nameTextStyle: nameStyle },
@@ -1326,6 +1329,11 @@ export function buildSite3DOption(
 }
 ```
 
+- [ ] **Step 3.5：正文示例代码的实测更正（Task 5 实施时发现，往后的任务照此办）**
+
+上面这块**从没被机器验过**：`:1242` 原写 `if (!(v > 0)) continue`，而它在 `forEach` 的回调里 ⇒ esbuild 直接 `SyntaxError: Illegal continue statement`，spec 加载即崩，照抄正文不可能「Step 4 跑到绿」。已改成等价的 `return`（树里搜 `if (!(v > 0)) return` 就是——行号会随注释漂，别记数字）。
+⇒ 往后任务（6/7/8）的示例代码**照抄前先单独跑一遍**；跑不通就是正文缺陷，按本条格式记在这里，别默默改掉。
+
 - [ ] **Step 4：跑到它绿**
 
 ```bash
@@ -1333,12 +1341,27 @@ npx vitest run test/unit/site3dOption.spec.ts
 ```
 Expected：全部通过。若「⑤」的 `not.toBeCloseTo(d, 6)` 红，说明 `barSize` 被写成了单一 `fill`（正是 §6.3 要挡的那个形状），按两个分量分开给。
 
-- [ ] **Step 5：全量 vitest + 类型**
+- [ ] **Step 5：全量 vitest + 类型（两条类型检都要跑，它们覆盖面不同）**
 
 ```bash
-npx vue-tsc -p tsconfig.app.json --noEmit && npx vitest run test/unit
+npx vue-tsc -p tsconfig.app.json --noEmit && npx vue-tsc -b && npx vitest run test/unit
 ```
-Expected：无 TS 输出、全量 vitest 绿。
+Expected：三条都无 TS 输出、全量 vitest 绿。
+⚠ **`-p tsconfig.app.json` 不检 `test/`，`vue-tsc -b` 才检**（本任务实测：`site3dOption.spec.ts` 里
+`new Set(any[])` 推成 `Set<unknown>`，`Math.max(...xs)` 在构建档报 TS2345，而 app-config 那条一路
+exit 0；是 Task 5 的门禁跑到「前端构建失败」才露出来）。⇒ 只要这一批新增/改动了 `test/**`，
+收尾必须额外跑 `npx vue-tsc -b`（或直接 `npm run build`），别拿 app-config 那条当全绿。
+
+- [ ] **Step 5.5：规格复审后的收尾（控制器 2026-11-04，往后的任务以树为准）**
+
+1. **spec 的根因错误**：`bin_counts` 行与 §4 那条曾写「`bin_counts` 之和 = 非空值数，而 `total_count` 含 NaN，两者口径不等」——**实测为假**：`histogram.py:119` 在任何计数之前就 `filter_finite`，`total_count` 与 `Σ bin_counts` 是同一个数。界面仍不写「各 bin 相加 = N」，但真正的理由是**裁剪档位下可见柱是子集**，不是因为 NaN。已同时勘误 spec §3 表格与 §4 正文（Task 1 那轮勘误把这条留在了规格里，Task 5 的注释只是把它传下来）。
+2. **⑦ 有洞**：原来只钉「标签长度」与「柱的 x 值域」，`active.map((_, x) => binCenters[x])` 这种**整体错位**（长度对、值域对、每根柱顶刻度全是隔壁 bin 的）一条都不红 ⇒ 补 `xAxis3D.data` 与 `active.map(i => formatAxisValue(binCenters[i]))` 的**逐元素等值**。变异 N1 实测 CAUGHT。
+3. **三件「刻意不画」原本无人钉**：补 `tooltip` 不含 `axisPointer`、option 不含 `legend`、系列不含 `markLine` 三条负向判据；变异 N2/N3/N4 各红对应那条。
+4. **零占比不生成的判据从「少于 208」升级成独立 oracle 比值**（逐 Site 数 `>0` 的格求和），只断言上界会放过「多生成/少生成」两类写错的实现。
+5. **`nameGap` 正文写 26 无出处**（原型 `specs/…-proto.html:206` 是 30，spec 无此数），与文件头「每一个数都来自原型实测」矛盾 ⇒ 改成 30。
+6. **注释里两处数没根据**：「满矩阵有三分之二是空的」（全仓无出处）改成不写比例、只由判据钉行为；「它还服务箱线图与站点表色点」按 `grep -rln "getSiteColors8\|SITE_COLORS_8_LIGHT" src` 改成直方图/序列图/晶圆图/相关性散点/多文件图这五处（`BoxPlotChart.vue`、`SiteStatsTable.vue` 实测 0 引用）。
+7. **反向探针的两条别当牙齿**：P2（`%8` → `%pal.length`）与 P3（`SITE3D_BOX` 键序）挡不住任何真错误——`pal.length ≡ 8`、`toEqual` 天生无序，属排版等价写法，留着只证明判据不误报；P1（formatter 改字符串拼接）是真探针。
+8. **采集面第四坑（进 lessons）**：vitest 的 × 被 ANSI 转义包裹，而**测试标题里也会自带 ×**（本任务那条 `宽 = boxWidth/NB × 0.62…`）。用「行内含 ×」滤红名单会把绿行切成幻影红名单 ⇒ 必须剥 ANSI 后按 `trimStart` 的**行首**匹配。
 
 - [ ] **Step 6：提交**
 

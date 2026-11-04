@@ -41,10 +41,15 @@
 | --- | --- |
 | `site_histograms` | `{ [site]: number[26] }`，每 Site 一套 26 格占比，与 `bin_centers` 严格同网格 |
 | `bin_centers` | 26 个中心值 = underflow + 24 正常 + overflow（[binning.py:12-27](../../../apps/analysis/services/binning.py)） |
-| `bin_counts` | tooltip 里的 `n=`，**它是该 bin 的全站点计数**（后端按 `total_count` 分母给占比，逐 Site 的原始计数不下发）⇒ 文案必须写「全站点该 bin n=」，不能缩成看着像 Site 级计数的 `n=`。⚠ 两者口径不等：`bin_counts` 之和是非空值数，`total_count` 含 NaN，所以别在界面上承诺「各 bin 相加 = N」 |
+| `bin_counts` | tooltip 里的 `n=`，**它是该 bin 的全站点计数**（后端按 `total_count` 分母给占比，逐 Site 的原始计数不下发）⇒ 文案必须写「全站点该 bin n=」，不能缩成看着像 Site 级计数的 `n=`。⚠ 分母口径实测：`histogram.py:119` 先 `filter_finite` 再取 `total_count`（:263/:335），而 26 个 bin 含 ±inf 兜底档 ⇒ **Σ `bin_counts` ≡ `total_count`**，两者**不是**两个数；界面上仍不写「各 bin 相加 = N」，因为裁剪档位下可见柱只是子集，那时相加就不等于 N |
 | `outlier_info` | §8 的 clip 过滤 |
 
-- **`bin_counts` 别承诺「各 bin 相加 = N」**：它是该 bin 的**全站点计数**，`bin_counts` 之和 = 非空值数，而 `total_count` 含 NaN，两者口径不等 ⇒ 界面上不写「各 bin 相加 = N」，逐 Site 的原始计数也不下发（本条与 §3 表格 `bin_counts` 行同一结论，落到正文以免只活在格子里）。
+- **`bin_counts` 别承诺「各 bin 相加 = N」**：它是该 bin 的**全站点计数**。分母口径：后端
+  `filter_finite` 在任何计数之前就把 NaN 与 ±Inf 剔掉了（`histogram.py:119`），所以
+  Σ `bin_counts` 与 `total_count` 是同一个数（有限非空值数），**不存在「一个含 NaN 一个不含」的
+  差**（本条此前写的是那种差，Task 5 复审实测否证，现已改）。界面仍不写「各 bin 相加 = N」的真正
+  理由是：裁剪档位只画边界内的柱，那时可见柱之和小于 N。逐 Site 的原始计数也不下发（本条与
+  §3 表格 `bin_counts` 行同一结论，落到正文以免只活在格子里）。
 
 `lower_limit` / `upper_limit` 本图**不消费**（§7）。
 
