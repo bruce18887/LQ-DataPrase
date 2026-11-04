@@ -191,7 +191,9 @@
 | `seriesColors[0..7]` | `--chart-1..8` | 见 §3.5 | 见 §3.5 |
 
 > ⚠️ 迁移注意：当前 `seriesColors` 已通过 CVD 色盲模拟验证（protan/deutan ΔE≥15，
-> 注释见 `echarts-theme.ts:69`），其中 `#d97706/#86198f/#475569/#b45309/#ff9f43` 等
+> 注释见 `frontend/src/utils/echarts-tokens.ts` 里 `ECHARTS_COLORS_LIGHT.seriesColors` 上方；
+> 2026-11-04 色板从 `echarts-theme.ts` 的 computed 提成该纯数据模块，旧行号指针随之作废），
+> 其中 `#d97706/#86198f/#475569/#b45309/#ff9f43` 等
 > 是为色盲可分辨**特意替换过的**。§3.5 的目标色板在正式切换前必须重跑同样的
 > CVD 验证；验证通过前，**ECharts 序列色维持现状**，仅轴系/文本/tooltip 颜色按上表对齐。
 

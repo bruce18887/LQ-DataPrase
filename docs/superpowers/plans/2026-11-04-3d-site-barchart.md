@@ -765,7 +765,7 @@ npx vue-tsc -p tsconfig.app.json --noEmit
 npx vitest run test/unit/echartsTokens.spec.ts
 npx vitest run test/unit
 ```
-Expected：`vue-tsc` 无输出；新 spec 全绿；全量 vitest 全绿（14 个消费 `useEChartsTheme()` 的组件不受影响，它们只取 `colors`/`getBaseOption`）。
+Expected：`vue-tsc` 无输出；新 spec 全绿；全量 vitest 全绿（所有消费 `useEChartsTheme()` 的组件不受影响，它们只取 `colors`/`getBaseOption`——消费点数量按 `grep -rn "useEChartsTheme()" frontend/src` 现量，别照抄任何写死的数字，本计划原先写的「14 个」实测是 19 个文件 / 23 处命中，其中还含定义文件与 README）。
 
 - [ ] **Step 6：确认 token 单一来源没被抄成第二份**
 
@@ -774,10 +774,19 @@ grep -rn "#eef0f3" src | grep -v echarts-tokens
 ```
 Expected：只剩 `src/styles/` 下的 CSS 定义（design tokens 本体）。若某个 `.vue` 里冒出 `#eef0f3` 硬编码，说明那处本该取 token，本任务顺手改掉或记录到 lessons。
 
+- [ ] **Step 6.5：收尾实测校正（控制器 2026-11-04，规格复审后落，往后的任务以树为准）**
+
+1. **Step 4 那句 `isDark.value ? ECHARTS_COLORS_NIGHT : ECHARTS_COLORS_LIGHT` 留在 theme 里是计划自带的缺口**：实施方按原样落完之后，「委托时取反」这条变异（M10b）实测 SURVIVED（新 spec 全绿 + 全量 test/unit 全绿 + `vue-tsc` exit 0）。根因是 pinia 在 node 不可测，不是漏写断言。修法：映射本身搬进 tokens 成为 `echartsColorsFor(isDark: boolean)`（唯一一份），theme 只委托；T2 加两条——按**引用相等**断言两分支，以及对 `echarts-theme.ts` 源码形状的委托断言（实参容忍改名/内联，但不许字面量、不许取反、色板名不许重新出现）。第二轮变异表 5 红 1 绿（等价内联写法 `echartsColorsFor(themeStore.currentTheme === 'night')` 必须保持不红，否则这判据会在下次重排时被当噪声删掉）。
+2. **gl 版本措辞**：清单里是 `^2.1.0`（`package.json:40` 与 `package-lock.json` 都是 caret 区间，**没钉**），只有 `node_modules/echarts-gl/package.json` 是 2.1.0。所以「`axisLine.show` 必须为 true」那条库坑的可重跑依据是那条 grep，不是版本号；脱离 lockfile 重装后要先重跑。
+3. **「夹具与真源逐字同值」从注释升级成判据**：`weightChartOption.spec.ts` 顶部的 `COLORS`/`NIGHT`/`base`/`NIGHT_BASE` 是从色板抄来的，Task 4 把真源搬走之后只剩注释在说「同值」。收尾补一条 describe 做等值断言（实测四对值当时全等，所以是绿的），并把那句「由 xxx 盯」改成指向本文件自己的判据。M11 变异（夹具首色改一位）红在该条。
+4. **Step 7 的 `git add` 少列三个被本任务连带改到的文件**（`src/stores/userSettings.ts`、`test/unit/userSettings.spec.ts`、`test/unit/weightChartOption.spec.ts`：都只是为了把 `echarts-theme.ts:44-51` 这种行号指针换成符号名），照旧命令提交会把它们留在工作树里。已改成下面这条。
+5. 数字更正：改动前的 `echarts-theme.ts` 是 **257** 行不是 258，本任务删了 **78** 行（257→179）；`useEChartsTheme()` 的消费点是 19 个文件 / 23 处调用（`grep -rn "useEChartsTheme()" src`），不是 Step 5 说的 14——树里没有注释复读 14，所以不构成假注释，只是别再拿它当依据。
+
 - [ ] **Step 7：提交**
 
 ```bash
-git add src/utils/echarts-tokens.ts src/utils/echarts-theme.ts test/unit/echartsTokens.spec.ts
+git add src/utils/echarts-tokens.ts src/utils/echarts-theme.ts test/unit/echartsTokens.spec.ts \
+  src/stores/userSettings.ts test/unit/userSettings.spec.ts test/unit/weightChartOption.spec.ts
 git commit -m "refactor(theme): ECharts 色 token 提成纯数据模块并补 grid3DStyle（双主题对称可由 T2 量真值）"
 ```
 
