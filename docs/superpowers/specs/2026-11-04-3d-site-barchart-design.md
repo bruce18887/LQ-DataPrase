@@ -72,7 +72,7 @@
 | --- | --- | --- |
 | `bar3D.shading: 'color'`（默认即此，**是示例改成了 `lambert`**） | 保持 `'color'` | 不打光 ⇒ `#0077BB` 渲染出来就是 `#0077BB`，`getSiteColors8` 的色盲校验才有效 |
 | `viewControl.projection: 'perspective'` | `'orthographic'` | 去掉近大远小，柱高才可跨 Site 比 |
-| `axisLine.lineStyle.color: '#333'`、宽 2 | `colors.axisLineColor`、宽 1，**且不能 `show:false`**（§6 坑 2） | light `#e5e7eb` / night `rgba(255,255,255,.10)` |
+| `axisLine.lineStyle.color: '#333'`、宽 2 | `colors.splitLineColor`（极淡底色）、宽 1，**且不能 `show:false`**（§6 坑 2）、**也不提供加深档**（§6.6） | light `#eef0f3` / night `rgba(255,255,255,.05)`；加深后转到斜方位角，后壁轴线会在空中拼成一个「悬浮矩形」 |
 | `splitLine.lineStyle.color: ['#ccc']` | `colors.splitLineColor` | 深底上 `#ccc` 会糊成一片 |
 | `axisLabel.textStyle.fontSize: 12`（无字色） | `chartFontSize.micro` + `colors.axisLabelColor` + `fontFamily.sans` | 字号/字族/字色三件都要归 token |
 | `axisPointer.label.textStyle`：14px 白字黑胶囊 | `colors.tooltipBg / tooltipBorder / tooltipText` | gl 的黑胶囊与项目 tooltip 的玻璃底不同源 |
@@ -87,7 +87,7 @@
   这组数是「Site 分辨度」实测出来的（§6.5）：`beta` 取负值会把值轴甩到左后方；`alpha` 低于 25 时后排被前排整根挡住；
   `boxDepth` 从 64 拉到 120 才让 8 个 Site 各自成一条可辨的色带。
 
-## 6. 实测踩到的五个坑（实现时必撞，先写死）
+## 6. 实测踩到的六个坑（实现时必撞，先写死）
 
 1. **`visualMap` 用 `categories` + `inRange.color` 时，192 根柱一根都不画。** 必须写成
    `pieces: [{ value: i, label: siteName, color: pal[i % 8] }]`。副作用是好的：piecewise 的 `label` 正好显示成
@@ -101,9 +101,10 @@
    - x 方向 band 只有 `132/24 = 5.5`、y 方向有 `120/8 = 15`，所以**自动值本身就是「3.85 宽 × 10.5 厚」的板状**，
      在 `beta 30` 的方位角下每根柱斜着摊开、相邻 bin 糊成一条斜带 ⇒ 用户反馈「看着歪」。**与机位无关、
      与倒角无关**（`bevelSize` 归 0 做过对照，画面无变化）。
-   本设计因此**分开给两个分量**：宽取 `bandX × 0.85`（≈4.7）、厚取 `bandY × 0.30`（≈4.5），截面近正方，
-   柱子立起来且行间距留白最大。箱体尺寸取 §5 那一组（`132 / 74 / 120`）——两个 fill 只有和这组尺寸绑在一起
-   才等价，换尺寸必须同步重算。
+   本设计因此**分开给两个分量**：宽取 `bandX × 0.62`（≈3.4）、厚取 `bandY × 0.30`（≈4.5）。
+   宽度一度取过 0.85，在 `beta 30` 的正机位下没问题，但**转到斜方位角（`alpha 35 / beta -25`）时相邻 bin
+   沿 x 方向粘成一条斜脊，「歪」又回来了**——0.62 才在任意角度都保持单根可辨（§6.6）。
+   箱体尺寸取 §5 那一组（`132 / 74 / 120`）；两个 fill 只有和这组尺寸绑在一起才等价，换尺寸必须同步重算。
 4. **平涂下色板第 7 格 `#BBBBBB` 在白底几乎不可辨**（截图里 S7 那排）。用户 2026-11-04 拍板：
    **只在 `site3dOption.ts` 的取色函数里把这一格换成深灰，不动 `SITE_COLORS_8_LIGHT`**，注释写明原因与影响面。
 5. **「纵深渐隐」是 Site 分辨度的减分项，不是加分项。** 它原本是照 `transparent-bar3d` 抄来解遮挡的
@@ -111,6 +112,15 @@
    四档对照实测（渐隐 / alpha / boxDepth 各切一刀）结论：**遮挡要靠机位几何解决**——
    `alpha 14 → 28` 让前排不再整根盖住后排，`boxDepth 64 → 120` 让 8 行各自成带，两者到位后
    **关掉渐隐反而最清楚**。所以渐隐默认关，只作为可选项保留在原型上，不进产品开关。
+6. **用户转到 `alpha 35 / beta -25` 后报「还是有问题」，实测是两个独立成因叠在一起：**
+   - **截面宽度 0.85 在斜方位角下沿 x 粘成斜脊**。四格对照（同坏角度，只换 `wFill` 与轴线色）：
+     0.85 的前排糊成一条斜带，收到 **0.62 后单根恢复可辨**，且默认角度下不掉质量。
+   - **后壁轴线在斜角度下于空中拼成一个「悬浮矩形」**。触发条件是原型上那个「弱化轴线」开关被关掉
+     （关掉即取 `colors.axisLineColor` = `#6b7280`，够深就看得见）。
+     ⇒ 产品**不提供加深档**，`axisLine` 恒取极淡底色（light `#eef0f3` / night `rgba(255,255,255,.05)`）；
+     顺带实测：**保持 `show: true` 只把颜色给成全透明是安全的**，不会触发坑 2 的崩溃——
+     这是「想彻底抹掉轴线」时的正确写法，而不是 `show:false`。
+   对照截图另附：`bad-angle.html`（原型同目录，四格 A/B/C/D）。
 
 ## 7. LSL/USL：3D 图不画（已收口）
 
@@ -151,7 +161,7 @@
   ② `shading === 'color'`、`projection === 'orthographic'`；
   ③ 色键取 `getSiteColors8(isDark)`，且第 7 格被 3D 专用值覆盖、其余 7 格逐字相等；
   ④ light/night 两个分支的 token 键集对称（R7①）；
-  ⑤ `barSize` 两个分量分别等于 `boxWidth/NB × 0.85` 与 `boxDepth/NS × 0.30`，且**断言两者不相等**
+  ⑤ `barSize` 两个分量分别等于 `boxWidth/NB × 0.62` 与 `boxDepth/NS × 0.30`，且**断言两者不相等**
   （钉住 §6.3：写成单一 `fill` 同时乘两个方向，就会退回板状截面，用户看到的「歪」会复现）；
   ⑥ 无 Site 列返回 `null` 而非空 option；
   ⑦ **同一 `result` 下 3D 取用的 bin 集合 === `histogramBins.ts` 给 2D 的 `activeIndices`**（钉 §8）。
@@ -180,5 +190,6 @@
 | 风险 | 处置 |
 | --- | --- |
 | 遮挡：前排柱挡住后排，转到低角度时读数困难 | 已用机位几何解决（`alpha 28` + `boxDepth 120`，§6.5），**不用渐隐**——降 opacity 会吃掉 Site 色饱和。用户把视角转到低处时仍会遮挡，这是 3D 形态的固有代价，不是可修的缺陷；读数兜底是同屏 2D 直方图与 Site 统计表 |
+| **任意角度不可保证**：参数是在「默认机位 + 一个坏角度」两档实测出来的，用户继续转仍可能落到第三种难看形状 | 已把 `wFill` 收到 0.62 让单根柱在斜方位角下不粘连（§6.6），但**不承诺全角度可读**。兜底两条：`回到默认视角` 按钮（toolbox 旁，图标形态，不加文字按钮）+ 同屏 2D 直方图。若后续实测证明用户高频落在坏角度上，再回来重估形态（届时山脊稿 §1 的第 ① 条理由就是现成的论据） |
 | 低配机器 WebGL 退到 SwiftShader 软件渲染 | 192 根柱的量级可承受；上线后按 §9 的探测分支观察是否真有人走到提示分支 |
 | `echarts-gl` 2.1.0 发布不足半年 | 原型已用本项目实际 `echarts 6.1.0` 构建产物跑通、控制台零报错；升级 echarts 时把该页回归纳入 T2 |
