@@ -14,11 +14,11 @@
  * 纯算术，不碰 DOM、不碰存储；持久化与指针拖拽各在 useChartDock.ts / ChartDock.vue。
  */
 
-export type DockRow = 'hist' | 'serial' | 'qq' | 'box'
+export type DockRow = 'hist' | 'serial' | 'qq' | 'box' | 'site3d'
 
 /** 直方图行目标高度：沿用旧默认布局下它的实测渲染高（1380×58% − 11.6 ≈ 789）取整 */
 export const HIST_ROW_PX = 780
-/** 辅助行（序列分布 / QQ / 箱线）目标高度：旧 autoH 每行 460 的既有意图 */
+/** 辅助行（序列分布 / QQ / 箱线 / 3D 柱阵）目标高度：旧 autoH 每行 460 的既有意图 */
 export const AUX_ROW_PX = 460
 /** 单行最低高度：旧实现只写在行间隔条拖拽路径里，默认布局能绕过它 */
 export const MIN_ROW_H = 200
