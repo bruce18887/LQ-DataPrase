@@ -13,6 +13,7 @@ import { chartFontSize } from '../../../theme/typography'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
 import { clampBarValue, formatPercent, formatAxisValue, getBarGroupPad, getMaxBarWidthPercent, getSiteColors8, buildChartToolbox } from '../../../utils/chart-bar'
+import { activeBinIndices } from '../composables/histogramBins'
 import OutlierHintBar from './OutlierHintBar.vue'
 
 const props = withDefaults(defineProps<{
@@ -66,9 +67,6 @@ function buildOption() {
   const siteHists = r.site_histograms
   const siteKeys = siteHists ? Object.keys(siteHists) : []
   const hasSiteData = siteKeys.length >= 1
-  // Outlier clipping: keep the X-axis range locked to the original bin_centers
-  // span (driven by range_type) so bar widths and Limit lines stay stable.
-  // Hide bins whose center falls outside the IQR bounds instead of zooming.
   const outlierInfo = r.outlier_info
   const handlingMode = props.outlierHandling || 'off'
   // 轴 min/max 向两端扩展多系列 bar 分组偏移量（getBarGroupPad）：8 个 Site 系列 +
@@ -83,33 +81,26 @@ function buildOption() {
   // 重合度越高（barGap 负值）柱组越窄，柱宽上限越高。
   const effectiveBarWidth = Math.min(props.barWidthPercent, getMaxBarWidthPercent(seriesCount, props.barOverlapPercent))
   const axisPad = getBarGroupPad(seriesCount, binGap, effectiveBarWidth)
+  // 轴两端恒用**全量** binCenters（不是下面 activeIndices 的子集）：clip 只藏柱体、
+  // 不缩轴，否则 RDL 档一勾裁剪就会把 Limit 线挤出可视区
+  // （可执行形式：e2e/analysis/outlier-handling.spec.ts:245）。
   const xAxisMin = binCenters[0] - axisPad
   const xAxisMax = binCenters[binCenters.length - 1] + axisPad
 
-  const shouldClip = handlingMode === 'clip' && outlierInfo?.has_outliers
   // 统计口径启用：clip 与 exclude 都切到后端 filtered 统计（与统计卡 useHistogram
   // 的 useFiltered 同判断）——此前只认 clip，exclude 下卡片用 filtered 而 σ 线/
   // 正态曲线用全量，同界面口径矛盾
   const useFilteredStats = handlingMode !== 'off' && outlierInfo?.has_outliers
-  let clipMin = shouldClip ? outlierInfo.lower_bound : -Infinity
-  let clipMax = shouldClip ? outlierInfo.upper_bound : Infinity
-
-  // RDL 模式下，原始 Limit 线内的数据不应被当作异常值隐藏。
-  // 将裁剪边界扩展到规格限，保证 LSL/USL 内部的 bin 始终可见，
-  // 同时让 X 轴范围保持与未裁剪时一致。
-  if (shouldClip && props.rangeType === 'RDL' && r.lower_limit != null && r.upper_limit != null) {
-    clipMin = Math.min(clipMin, r.lower_limit)
-    clipMax = Math.max(clipMax, r.upper_limit)
-  }
-
-  let activeIndices = binCenters
-    .map((c: number, i: number) => (c >= clipMin && c <= clipMax ? i : -1))
-    .filter((i: number) => i >= 0)
-
-  // Guard against pathological bounds that exclude every bin.
-  if (activeIndices.length === 0) {
-    activeIndices = binCenters.map((_: number, i: number) => i)
-  }
+  // 柱体显隐口径与 3D 图同源（composables/histogramBins.ts）。useFilteredStats 留在
+  // 这里：它管的是 σ 线/正态曲线取全量还是 filtered，不是柱体显隐，别一起搬走。
+  const activeIndices = activeBinIndices({
+    binCenters,
+    handlingMode,
+    outlierInfo,
+    rangeType: props.rangeType,
+    lowerLimit: r.lower_limit,
+    upperLimit: r.upper_limit,
+  })
 
   const series: any[] = []
   const showNormal = props.chartConfig.includes('normal')
