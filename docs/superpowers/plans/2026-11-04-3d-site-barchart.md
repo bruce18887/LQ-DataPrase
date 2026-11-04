@@ -448,7 +448,7 @@ import { activeBinIndices } from '../composables/histogramBins'
   })
 ```
 
-同时**保留** `:90-92` 那条中文注释（「clip 与 exclude 都切到后端 filtered 统计…此前只认 clip」），它讲的是 `useFilteredStats` 的来历，与新函数无关；只删 `:69-71` 那三行英文的「Outlier clipping: keep the X-axis range locked…」——裁剪口径的解释已搬进新模块的头注释，留着就是两处事实来源。
+同时**保留** `:90-92` 那条中文注释（「clip 与 exclude 都切到后端 filtered 统计…此前只认 clip」），它讲的是 `useFilteredStats` 的来历，与新函数无关；`HistogramChart.vue:69-71` 那三行英文「Outlier clipping: keep the X-axis range locked…」在删之前先要在**原位**留一条轴范围注释（收尾实测：`:84` 上方，指向 `outlier-handling.spec.ts:245`）——那句话里其实有两件事：「哪些 bin 被藏」搬进了新模块头注释，但「轴两端恒用**全量** binCenters」是 2D 自己的性质、新模块管不着，直接删掉就是把这个已上线的回归从注释里弄丢了。
 
 - [ ] **Step 6：类型 + 现有 2D 判据都没坏**
 
@@ -457,6 +457,13 @@ npx vue-tsc -p tsconfig.app.json --noEmit
 npx vitest run test/unit
 ```
 Expected：`vue-tsc` 无输出；vitest 全绿（`histogramBins.spec.ts` 新计入）。若报 `'shouldClip' is declared but never read`（`noUnusedLocals`），说明 Step 5 没删干净，回去删。
+
+- [ ] **Step 6.5：收尾实测校正（控制器 2026-11-04，规格复审后落的 4 处偏离；往后的任务以树为准，别照本任务正文回退）**
+
+1. 头注释里「有意偏离的一处」说法不准：偏离是 `finiteOr` **这一道机制**，覆盖 null / undefined / NaN / ±Inf / 非数字五种；其中只有 `null` 在线上可达（`_helpers.py:126-129 clean_data` 把 NaN 与 ±Inf 都换成 `None`，DRF `allow_nan=False`）。正文那句「bound 为 null 时按那一侧不裁」是同一件事的窄口径。
+2. `BinClipSource.rangeType` 的取值是 `RDL / DR / CL / S3 / S4 / S6`（`ChartConfigPanel.vue:28-33` 的 `value`），正文那个类型的注释写成 `'3σ' | '4σ' | '6σ' | 'Data Range'` —— 那是 el-option 的 label，不是 value。
+3. RDL 放宽在真实载荷上是**恒等**：`histogram.py:126-128` 无条件把 rdl 传给 `detect_outliers_iqr`，`outliers.py:78-83` 对**每个档位**都并上规格限，而响应里的 `lower_limit/upper_limit` 就是同一对（`histogram.py:310-311`）。这一支保留是为了让本口径不依赖那条后端不变量、并维持抽出前的逐字语义；`histogramBins.spec.ts` 那三条放宽用例测的是**纯函数契约**（夹具造的是「只含 IQR 的窄边界」，生产不给那个形状），用例上方已写明。
+4. 判据补两条：空 `binCenters` → `[]`（③ 的回退分支不由它生效）、bound 字段缺失（undefined）与 null 同义；非放宽档从只有 `CL` 扩成 `it.each(['CL','DR','S3','S4','S6'])`。
 
 - [ ] **Step 7：提交**
 
@@ -1984,7 +1991,7 @@ npm run dev
 5. 面板头点 `↺` → 视角回到默认机位；
 6. 点标题栏 `⤢` 最大化再还原，画布尺寸跟随（`useChart` 的 ResizeObserver 在承担）；
 7. 切到 night 主题：柱色按 night 色板、轴线/标签不刺眼，`#6b7280` 那格换成 night 的 `#b45309`；
-8. 异常值处理选「裁剪范围」：3D 与同屏直方图**消失的 bin 一致**（两边 x 轴范围同步收窄）；
+8. 异常值处理选「裁剪范围」：3D 与同屏直方图**消失的 bin 一致**（同一把 `activeBinIndices`）。注意两边轴的行为**有意不同**，别当成口径矛盾去「修」：2D 的数值轴恒按全量 `binCenters` 定 min/max（Limit 线必须留在框内，`outlier-handling.spec.ts:245` 钉着），3D 是 category 轴、被裁的档不进标签，轴宽随可见柱收窄。
 9. 取消勾选再勾上：图重建且正常（容器被 v-if 销毁后重挂，R7③）。
 
 任何一条与预期不符 → 先按 `systematic-debugging` 定位再改代码，改完重跑 T2 + 本步。
