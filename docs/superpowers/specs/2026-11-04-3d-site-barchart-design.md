@@ -94,12 +94,16 @@
    Site 名，而 **gl 系列不进 ECharts legend**，所以这个 visualMap 就是本图唯一的色键。
 2. **`grid3D.axisLine.show = false` 会让 `_updateAxisLabelAlign` 读到 `null.axisLineCoords`，每次相机更新抛一次
    `TypeError`**（原型页修前实测一次渲染 194 条）。⇒「收掉 gl 那套 #333 硬轴线」只能做成**弱化到接近底色**，不能真隐藏。
-3. **`barSize` 是绝对世界单位，不是「占一格的百分比」。** 源码
+3. **`barSize` 是绝对世界单位，两个分量各管一个方向——「太细」和「看着歪」都出在这里。** 源码
    [`lib/chart/bar3D/cartesian3DLayout.js:19-39`](https://cdn.jsdelivr.net/npm/echarts-gl@2.1.0/lib/chart/bar3D/cartesian3DLayout.js)
-   写明：不传时自动取 `bandWidth × 0.7`；传了就直接当尺寸用。原型第一版按分数填 `0.88`，柱子被缩到自动值的
-   四分之一（用户反馈「太细」的真因）。本设计按 `boxWidth/NB × fill` 与 `boxDepth/NS × fill` 换算，
-   `fill` 默认 0.62；箱体尺寸取 §5 那一组（`132 / 74 / 120`）——
-   `fill` 只有和这组尺寸绑在一起才等价，换尺寸必须同步重算。
+   写明：不传时自动取 `bandWidth × 0.7`；传了就直接当尺寸用（不是「占一格的百分比」）。两个坑各踩一次：
+   - 原型第一版按分数填 `0.88`，柱子缩到自动值的四分之一 ⇒ 用户反馈「太细」。
+   - x 方向 band 只有 `132/24 = 5.5`、y 方向有 `120/8 = 15`，所以**自动值本身就是「3.85 宽 × 10.5 厚」的板状**，
+     在 `beta 30` 的方位角下每根柱斜着摊开、相邻 bin 糊成一条斜带 ⇒ 用户反馈「看着歪」。**与机位无关、
+     与倒角无关**（`bevelSize` 归 0 做过对照，画面无变化）。
+   本设计因此**分开给两个分量**：宽取 `bandX × 0.85`（≈4.7）、厚取 `bandY × 0.30`（≈4.5），截面近正方，
+   柱子立起来且行间距留白最大。箱体尺寸取 §5 那一组（`132 / 74 / 120`）——两个 fill 只有和这组尺寸绑在一起
+   才等价，换尺寸必须同步重算。
 4. **平涂下色板第 7 格 `#BBBBBB` 在白底几乎不可辨**（截图里 S7 那排）。用户 2026-11-04 拍板：
    **只在 `site3dOption.ts` 的取色函数里把这一格换成深灰，不动 `SITE_COLORS_8_LIGHT`**，注释写明原因与影响面。
 5. **「纵深渐隐」是 Site 分辨度的减分项，不是加分项。** 它原本是照 `transparent-bar3d` 抄来解遮挡的
@@ -147,7 +151,8 @@
   ② `shading === 'color'`、`projection === 'orthographic'`；
   ③ 色键取 `getSiteColors8(isDark)`，且第 7 格被 3D 专用值覆盖、其余 7 格逐字相等；
   ④ light/night 两个分支的 token 键集对称（R7①）；
-  ⑤ `barSize` 等于 `boxWidth/NB × fill` 与 `boxDepth/NS × fill`（钉住坑 3，防止再按分数写）；
+  ⑤ `barSize` 两个分量分别等于 `boxWidth/NB × 0.85` 与 `boxDepth/NS × 0.30`，且**断言两者不相等**
+  （钉住 §6.3：写成单一 `fill` 同时乘两个方向，就会退回板状截面，用户看到的「歪」会复现）；
   ⑥ 无 Site 列返回 `null` 而非空 option；
   ⑦ **同一 `result` 下 3D 取用的 bin 集合 === `histogramBins.ts` 给 2D 的 `activeIndices`**（钉 §8）。
   另加 `histogramBins.spec.ts` 覆盖 clip/exclude/off 三档与「边界病态导致全排除时回退全部 bin」的守卫。

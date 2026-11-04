@@ -68,7 +68,7 @@
   <p class="sub">真的 <code>echarts-gl bar3D</code>，不是画的图。按住左键拖动转视角，滚轮缩放。最后一格「gl 示例默认风」可切回未美化的样子做对照。</p>
   <div class="bar">
     <label><input type="checkbox" id="c-bevel" checked /> 柱顶倒角 <code>bevelSize</code></label>
-    <label><input type="checkbox" id="c-gutter" checked /> 柱间留白 <code>barSize</code></label>
+    <label><input type="checkbox" id="c-gutter" checked /> 截面比例 <code>barSize</code></label>
     <label><input type="checkbox" id="c-fade" /> 纵深渐隐（默认关：会吃掉 Site 色饱和）</label>
     <label><input type="checkbox" id="c-soft" checked /> 弱化轴线与刻度（<b>不能隐藏</b>，见下方实测）</label>
     <label><input type="checkbox" id="c-ortho" checked /> 正交投影（无近大远小）</label>
@@ -156,8 +156,11 @@
     // 源码 cartesian3DLayout.js:19-39 —— 不写时自动取 bandWidth×0.7，
     // 写了 0.88 就等于把柱子缩到自动值的 1/4（这就是「太细」的真因）。
     var BW = demo ? 200 : 132, BH = demo ? 100 : 74, BD = demo ? 80 : 120;
-    var fill = demo ? 0.7 : (st.gutter ? 0.62 : 0.95);
-    var barSize = [BW / NB * fill, BD / NS * fill];
+    // 实测（§6.6）：纵深分量大于宽度时，柱子在斜方位角下看像「歪的板状」——
+    // 与机位、倒角无关。宽度取满、厚度收到 0.30 后立刻立起来。
+    var wFill = demo ? 0.7 : (st.gutter ? 0.85 : 0.98);
+    var dFill = demo ? 0.7 : (st.gutter ? 0.30 : 0.72);
+    var barSize = [BW / NB * wFill, BD / NS * dFill];
     return {
       backgroundColor: 'transparent',
       tooltip: {
@@ -233,7 +236,7 @@
     + '<br>柱体 <b>' + NS + ' Site × ' + NB + ' bin = ' + NS * NB + ' 根</b>，z 轴分母 = 全站总数 ' + TOTAL.toLocaleString() + ' die（与后端 <code>site_histograms</code> 同口径，所以绝对高低就是量、左右错位就是形状）'
     + '<br>已验：<b>gl 系列不进 ECharts legend</b> ⇒ 色键只能靠右侧 piecewise <code>visualMap</code>；且它必须写成 <code>pieces:[{value,label,color}]</code>——<b class="bad">用 <code>categories</code> + <code>inRange.color</code> 时 192 根柱一根都不画</b>（本页修前就是这一种，截图已留证）。'
     + '<br><b class="bad">踩到的坑：</b><code>grid3D.axisLine.show = false</code> 会让 <code>_updateAxisLabelAlign</code> 读到 <code>null.axisLineCoords</code>，<b>每次相机更新抛一次 TypeError</b>（拖动一次就上百条，实测本页修前 194 条）。⇒ 设计里「收掉 gl 那套 #333 硬轴线」只能做成<b>弱化到接近底色</b>，不能真隐藏。'
-    + '<br><b>「太细」的真因（已修正）：</b><code>barSize</code> 是<b>绝对世界单位</b>，不是「占一格的百分比」。源码 <code>cartesian3DLayout.js:19-39</code> 写明不传时自动取 <code>bandWidth × 0.7</code>；我按分数填了 0.88，等于缩到自动值的四分之一。现在按 <code>boxWidth/NB × fill</code> 换算，fill 由「柱间留白」开关在 0.62 / 0.95 之间切。';
+    + '<br><b>「太细」与「看着歪」都出在 <code>barSize</code>：</b>它是<b>绝对世界单位</b>，且<b>两个分量各管一个方向</b>。源码 <code>cartesian3DLayout.js:19-39</code> 不传时自动取 <code>bandWidth × 0.7</code>——x 方向 band 只有 5.5、y 方向有 15，所以自动值就是「3.85 宽 × 10.5 厚」的<b>板状</b>，斜方位角下看着像歪。现在按 <code>宽 band×0.85 / 厚 band×0.30</code> 分开给，柱子立刻立起来；<code>bevelSize</code> 归 0 对照过，与倒角无关。';
 
   function refresh() { chart.setOption(buildOption(), { notMerge: true }); }
   [['c-bevel', 'bevel'], ['c-gutter', 'gutter'], ['c-fade', 'fade'], ['c-soft', 'soft'], ['c-ortho', 'ortho'], ['c-demo', 'demo']]
