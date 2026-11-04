@@ -5,7 +5,7 @@
      - 「重置布局」+ 标题栏「×关闭 / ⤢最大化」
      模型与持久化在 useChartDock.ts；本组件只管渲染 + 指针命中。
      内容通过按 key 命名的 slot 注入：图体 hist/serial/qq/box/site3d，专属控件 controls-serial/hist/box/site3d
-     （site3d 的复位入口在 SingleParamTab 的 #controls-site3d 槽；dock 本身按 controls-<key> 透传，加图不用改本组件）。 -->
+     （专属控件按 controls-<key> 透传；新增一张图仍要改本组件的 TITLES 与 useChartDock 的 ChartKey/ALL_KEYS）。 -->
 <template>
   <div class="chart-dock" :class="{ 'is-dragging': !!drag }">
     <div class="chart-dock__bar">
