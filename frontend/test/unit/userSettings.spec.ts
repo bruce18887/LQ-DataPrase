@@ -4,7 +4,7 @@
  * 承重四条（缺任何一条都不算数）：
  * ① N 个并发 ensure() 只发 1 次 GET（单飞）——今天 6 个模块各自单飞，一次导航实测 2–6 次；
  * ② 已取过后不再发（幂等）；
- * ③ **GET 失败后不再重试**（对照组 = 防请求风暴回归：今天 echarts-theme.ts:44-51 的降级口径）；
+ * ③ **GET 失败后不再重试**（对照组 = 防请求风暴回归：今天 echarts-theme.ts 的 ensureChartRenderer 的降级口径）；
  * ④ save 只 PUT 脏字段（后端 serializer partial=True，apps/accounts/views.py:218-225）。
  * 另加 reset（登录/登出串账号防线）与 patch 的「等同已取过」语义（旧 setChartRenderer
  * 会连带把 _rendererFetched 置 true）。

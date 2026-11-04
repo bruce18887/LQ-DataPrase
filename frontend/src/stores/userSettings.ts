@@ -21,7 +21,7 @@ export interface UserSettings {
  * （生产日志 2026-10-22 06:47:47 三条 auth/settings）。
  *
  * 两条不可放宽的口径（改动前请重读 `docs/tasks/lessons.md` 与 task-6-brief 的契约段）：
- * - **失败也算取过**：与今天 echarts-theme.ts:44-51 的降级口径一致，取不到就用各模块自己的
+ * - **失败也算取过**：与今天 echarts-theme.ts 的 ensureChartRenderer 的降级口径一致，取不到就用各模块自己的
  *   回退值，整页生命周期内不再重试。若失败后重取，就是每次导航都重试的请求风暴。
  * - **patch 也算取过**：等同今天 setChartRenderer 连带把 _rendererFetched 置 true。
  *   ⚠ 由此带来的口径（6b 评审 R24 纠的原文错处）：raw **可能只含部分键**。正常链路
@@ -59,7 +59,7 @@ export const useUserSettingsStore = defineStore('userSettings', () => {
     if (inflight) inflight = null
   }
 
-  /** 幂等：取过就不再取；失败也算取过（与 echarts-theme.ts:44-51 的降级口径一致，防请求风暴）。 */
+  /** 幂等：取过就不再取；失败也算取过（与 echarts-theme.ts 的 ensureChartRenderer 的降级口径一致，防请求风暴）。 */
   function ensure(): Promise<void> {
     if (inflight) return inflight
     if (settled) return Promise.resolve()

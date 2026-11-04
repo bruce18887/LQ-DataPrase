@@ -19,12 +19,15 @@ import {
   PAGE_MAX_DECIMALS, formatWeightCell, formatWeightLabel, legendLabel,
 } from '../../src/pages/weight/weightChartOption'
 import type { BuildOptions, WeightDocDto, WeightGroupDto, WeightSeriesDto } from '../../src/pages/weight/weightChartOption'
+import { ECHARTS_COLORS_LIGHT, ECHARTS_COLORS_NIGHT } from '../../src/utils/echarts-tokens'
 
-// 与 frontend/src/utils/echarts-theme.ts 里 light 分支的 `seriesColors` 逐字同值
-// （按符号名定位，别记行号 —— 该文件本轮已被删过二十几行，行号会漂）。
+// 与 frontend/src/utils/echarts-tokens.ts 的 `ECHARTS_COLORS_LIGHT.seriesColors` 逐字同值
+// （按符号名定位，别记行号——行号会漂；2026-11-04 色板从 echarts-theme.ts 的 computed 提成了
+//  这个纯数据模块，真源随之迁过去。两边是否仍逐字同值由本文件末尾那条「夹具色板与真源逐字
+//  同值」的判据盯着，不靠这句注释）。
 // 色板真源在那边、本模块只收调用方传入的数组（spec §6 第 1 条：Python 侧不存色板）。
 const COLORS = ['#2563eb', '#047857', '#d97706', '#b91c1c', '#0284c7', '#86198f', '#475569', '#0d9488']
-// 同文件 night 分支的 `seriesColors`；夜主题文本/轴线是真 rgba，不是 var(--x)（lessons R7②）。
+// 同文件 `ECHARTS_COLORS_NIGHT.seriesColors`；夜主题文本/轴线是真 rgba，不是 var(--x)（lessons R7②）。
 const NIGHT = ['#fdd835', '#14b8a6', '#4facfe', '#fb7185', '#38ef7d', '#b45309', '#00f2fe', '#ff9f43']
 const NIGHT_BASE = {
   textColor: 'rgba(255, 255, 255, 0.76)', axisLineColor: 'rgba(255, 255, 255, 0.10)',
@@ -390,5 +393,24 @@ describe('色板前提（不成立则 %8 判据变恒真）', () => {
     expect(new Set(COLORS).size).toBe(8)
     expect(COLORS).not.toContain(base.meanColor)
     expect(NIGHT).not.toContain(NIGHT_BASE.meanColor)
+  })
+})
+
+/**
+ * 上面那几组字面量是从真源**抄**来的。2026-11-04 色板从 echarts-theme.ts 的 computed 提成
+ * utils/echarts-tokens.ts 之后，「抄来的等于真源」这件事只剩注释在说——注释会假，所以把它
+ * 做成等值断言：真源改了值而夹具没跟上，本文件的线色/图例判据就测在一份生产不存在的色板上。
+ */
+describe('夹具色板与 utils/echarts-tokens 真源逐字同值', () => {
+  it('light：seriesColors / textColor / axisLineColor', () => {
+    expect(COLORS).toEqual([...ECHARTS_COLORS_LIGHT.seriesColors])
+    expect(base.textColor).toBe(ECHARTS_COLORS_LIGHT.textColor)
+    expect(base.axisLineColor).toBe(ECHARTS_COLORS_LIGHT.axisLineColor)
+  })
+
+  it('night：seriesColors / textColor / axisLineColor', () => {
+    expect(NIGHT).toEqual([...ECHARTS_COLORS_NIGHT.seriesColors])
+    expect(NIGHT_BASE.textColor).toBe(ECHARTS_COLORS_NIGHT.textColor)
+    expect(NIGHT_BASE.axisLineColor).toBe(ECHARTS_COLORS_NIGHT.axisLineColor)
   })
 })
