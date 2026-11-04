@@ -158,9 +158,11 @@ Expected：`package.json` 的 `dependencies` 多出 `"echarts-gl": "^2.1.0"`，`
 - [ ] **Step 2：核实际落下的版本与入口字段**
 
 ```bash
-node -e "const p=require('./node_modules/echarts-gl/package.json');console.log(p.version,p.main,p.module,JSON.stringify(p.peerDependencies))"
+node -e "const p=require('./node_modules/echarts-gl/package.json');console.log(p.version,p.main,p.module,JSON.stringify(p.peerDependencies),p.types||'NO-TYPES')"
+node -e "console.log('claygl',require('./node_modules/claygl/package.json').version,'zrender',require('./node_modules/zrender/package.json').version)"
+wc -c node_modules/echarts-gl/dist/echarts-gl.min.js
 ```
-Expected：`2.1.0 dist/echarts-gl.js index.js {"echarts":"^5.1.2 || ^6.0.0"}`（无 `types` 输出 = 确实不带声明文件）。
+Expected：`2.1.0 dist/echarts-gl.js index.js {"echarts":"^5.1.2 || ^6.0.0"} NO-TYPES`（无 `types` = 确实不带声明文件）；`claygl 1.3.0`、`zrender 6.1.0` 且 **zrender 不嵌套第二份**（`npm ls` 里是 deduped）；min.js **639,846 B**——与 spec §2 记的字节逐字吻合（整包 `dist.unpackedSize` 是 7,041,402 B / 387 文件，含未压缩 bundle 与 .map，**别拿它当分包预期**）。
 
 - [ ] **Step 3：写一次性探针文件，量裸导入的类型行为**
 
@@ -174,7 +176,9 @@ export const probe = 1
 ```bash
 npx vue-tsc -p tsconfig.app.json --noEmit
 ```
-Expected：**无输出、退出码 0**（`import 'x'` 无绑定 ⇒ TS 不给隐式 any 报错）。
+Expected：**无输出、退出码 0**（`import 'x'` 无绑定 ⇒ TS 不给隐式 any 报错）。2026-11-04 实测：EXIT=0 / 6.26s，且**必须做两条反证**证明这不是 lessons R8① 那种空检查——① `--listFiles` 里探针在程序内（`echarts-gl` 自身不在文件列表：无 .d.ts + `allowJs` 关 ⇒ TS 只解析不加载）；② 往探针塞一句 `export const falsify: number = 'not-a-number'` 必须报 TS2322 / EXIT=2。
+
+**顺带量到的四种导入形态**（决定 Task 7 怎么写，别改回动态）：静态 `import 'echarts-gl'` 在 `.ts` 与 `.vue` 里都干净；`import * as gl from 'echarts-gl'` 与 `import('echarts-gl')` / `await import('echarts-gl')` 都报 **TS7016**。放行前提是本机 `noUncheckedSideEffectImports` 未开启（`@vue/tsconfig` 与 `tsconfig.app.json` 都没有它）——将来升 `@vue/tsconfig` 打开它要重量一遍。TS 解析落点是 CJS `dist/echarts-gl.js`（该包无 `exports` 字段），打包器走 `module: index.js`；日后想按模块粒度引 gl 瘦包会撞上那份 2.1 MB CJS bundle。
 
 - [ ] **Step 4：只有 Step 3 报了 TS7016/TS2307 才加 shim，内容照抄**
 
@@ -186,20 +190,25 @@ declare module 'echarts-gl'
 ```
 加完再跑一次 Step 3 的命令，Expected：无输出。
 
+> 实测结论：**静态形态不报错 ⇒ 不建这个文件**（不需要 shim 却建 shim 是留死文件）。它确实能治好动态形态的 TS7016（临时建过一次量完删掉了），但本批按 Step 3 的结论走静态形态。
+
 - [ ] **Step 5：删掉探针**
 
 ```bash
 rm src/__gl_probe.ts
 ls src/types/echarts-gl.d.ts 2>/dev/null || echo "无 shim（裸导入本就能过）"
+git status --porcelain
 ```
+Expected：只剩 ` M frontend/package.json`、` M frontend/package-lock.json`，外加本会话之外的存量（`?? docs/superpowers/specs/2026-11-03-site-ridgeline-design.md`、` M docs/tasks/todo.md`——都不碰不加）。
 
-- [ ] **Step 6：提交**
+- [ ] **Step 6：提交（改动面要说清那一条删除的归属）**
 
 ```bash
+git diff -- package-lock.json | grep -E '^[-+].*"node":'
 git add package.json package-lock.json
-# 若 Step 4 触发过，还要 git add src/types/echarts-gl.d.ts
 git commit -m "build(frontend): 引入 echarts-gl 2.1.0（bar3D/grid3D，peer 与 echarts 6.1 匹配）"
 ```
+Expected：lockfile 只有 20 增 1 删，新增路径只有 `node_modules/echarts-gl` 与 `node_modules/claygl`（`zrender` 已在树里、deduped）；**没有任何既有包的 `version`/`resolved` 被改写**。那 1 条删除是 lockfile 根条目的 `engines.node`：`>=20` → `>=22.12`——`frontend/package.json` 的 `engines.node` 早在 `e384420` 就改成了 `>=22.12` 但当时没重跑 install，这次安装顺手把 lockfile 同步成 package.json 的真值，**不是本批改的语义**，提交说明里带上归属，别让下一个人以为依赖被偷偷升级过。
 
 ---
 
@@ -1597,6 +1606,12 @@ describe('Site3DChart.vue 不自己抄机位与箱体', () => {
     expect(vue).toMatch(/\(\s*\)\s*=>\s*'canvas'/)
   })
 
+  it('有 echarts-gl 的**静态**副作用导入（缺这行 bar3D/grid3D 从未注册，图会静默空白）', () => {
+    expect(vue).toContain("import 'echarts-gl'")
+    // 动态形态实测撞 TS7016（该包无 .d.ts，动态 import 要推返回值类型），不许换写法
+    expect(vue).not.toMatch(/import\(\s*['"]echarts-gl['"]\s*\)/)
+  })
+
   it('降级分支存在且不建图（WebGL 缺失与无 Site 列各一条 el-alert）', () => {
     expect(vue).toMatch(/webglAvailable/)
     expect(vue).toMatch(/hasSites/)
@@ -1677,6 +1692,14 @@ Expected：FAIL（`Site3DChart.vue` 还不存在；`SingleParamTab` 的三条都
 
 <script setup lang="ts">
 import { computed, watch } from 'vue'
+// 副作用式注册：echarts-gl 只有被 import 进来才会把 bar3D/grid3D 注册到同一个 echarts
+// 实例上。**少了这一行，option 里写 `type: 'bar3D'` 会静默画不出任何东西**（容器在、
+// canvas 在、系列不存在）。必须是**静态**副作用导入：实测 `import('echarts-gl')`/
+// `await import('echarts-gl')` 这种动态形态会被 vue-tsc 判 TS7016（该包无 .d.ts，
+// 动态导入要推返回值类型），而静态 `import 'x'` 不消费绑定所以干净。
+// 本组件自身已经是 defineAsyncComponent 的异步块 ⇒ 这行天然落在同一异步 chunk 里，
+// spec §2「冷启动字节不变」仍然成立（分包实测 639,846 B）。
+import 'echarts-gl'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
 import { applyDefaultView, buildSite3DOption, type Site3DTheme } from '../composables/site3dOption'
