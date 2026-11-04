@@ -75,7 +75,7 @@
       <StatsSummary :stat-cards="statCards" />
 
       <!-- 图表：可停靠拼格区（el-splitter 拖分隔条改高宽 + 标题栏手柄拖拽换布局 + 持久化） -->
-      <ChartDock v-if="dockVisible" :active-keys="activeChartKeys" @close="onDockClose">
+      <ChartDock v-if="dockVisible" :active-keys="activeChartKeys" @close="closeChart">
         <template #hist>
           <HistogramChart
             v-if="histResult"
@@ -141,6 +141,18 @@
               :group-kind="groupBy === 'bin' ? 'bin' : 'site'"
             />
           </div>
+        </template>
+
+        <template #site3d>
+          <Site3DChart
+            v-if="histResult"
+            :result="histResult"
+            :param="localSelectedParam"
+            :outlier-handling="outlierHandling"
+            :range-type="rangeType"
+            :reset-epoch="site3dResetEpoch"
+          />
+          <el-empty v-else description="3D 柱阵数据加载中" />
         </template>
 
         <!-- 序列分布专属控件（序列列选择器 + 齿轮）：按 Site 拆分 / 点径 / 透明度在齿轮里。
@@ -214,6 +226,17 @@
           </el-select>
           <el-checkbox v-model="showJitter" size="small">离群点</el-checkbox>
         </template>
+
+        <!-- 3D 专属控件：只有「回到默认视角」。视角常量单一来源在 site3dOption.ts -->
+        <template #controls-site3d>
+          <button
+            type="button"
+            class="site3d-view-reset"
+            title="回到默认视角"
+            aria-label="回到默认视角"
+            @click="site3dResetEpoch++"
+          >↺</button>
+        </template>
       </ChartDock>
       <el-empty
         v-else-if="!anyChartVisible"
@@ -225,7 +248,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useSingleTabStore } from '../../../stores/analysisTabs'
 import type { DataFile } from '../../../types'
@@ -256,8 +279,8 @@ import { useBoxPlot } from '../composables/useBoxPlot'
 import { useQQPlot } from '../composables/useQQPlot'
 import { useTabFileParams } from '../composables/useTabFileParams'
 import { useSerialChartSettings } from '../composables/useSerialChartSettings'
-import type { ChartKey } from '../composables/useChartDock'
-import { loadChartMemory, saveChartState } from '../../../composables/useChartMemory'
+import { useChartToggles } from '../composables/useChartToggles'
+const Site3DChart = defineAsyncComponent(() => import('./Site3DChart.vue'))
 
 const props = defineProps<{
   /** 文件列表（页面统一拉一次给 4 个 tab；本 tab 自己的选择存在单文件 store） */
@@ -303,14 +326,17 @@ useTabFileParams({
     iqr_multiplier: iqrMultiplier.value,
   }),
 })
-// 直方图勾选（默认勾选；取消即关闭面板，2026-09-13 由常驻改为可关闭）
-const showHistogram = ref(true)
 // 序列列手动选择（空串 = 自动检测）；多候选文件（Serial_No + Dut_No）由
 // 面板头的选择器写入，文件切换时重置回自动检测
 const serialCol = ref('')
-// 序列分布由「显示序列分布」勾选驱动（原 chartMode==='serial' 互斥模式已移除），
-// 勾选后序列图叠加显示在直方图下方，与 QQ/箱线共存
-const showSerial = ref(false)
+// 五个图表勾选 + 账号记忆都在 useChartToggles（勾选集 → dock 的 active keys，
+// 以及「面板 × 关闭 = 取消对应勾选」的纯逻辑都在那边）
+const {
+  showHistogram, showSerial, showQQPlot, showBoxPlot, showSite3D,
+  activeChartKeys, anyChartVisible, closeChart,
+} = useChartToggles()
+// 面板头「回到默认视角」图标每点一次 +1，Site3DChart watch 它做合并式 viewControl 复位
+const site3dResetEpoch = ref(0)
 
 // Composable: Histogram
 const {
@@ -393,8 +419,7 @@ const {
   siteStatsError,
 } = useSiteStats(histResult)
 
-// Composable: BoxPlot
-const showBoxPlot = ref(false)
+// Composable: BoxPlot（showBoxPlot 来自 useChartToggles）
 const showJitter = ref(false)
 const groupBy = ref('site')
 const groupByOptions = [
@@ -421,10 +446,7 @@ const currentBoxPlotData = computed(() => {
   return { ...paramData, param: localSelectedParam.value }
 })
 
-// Composable: QQ Plot
-const showQQPlot = ref(false)
-// 3D 站点柱阵：默认不勾（勾上即把 dock 从 4 格挤到 5 格，且要下载 gl 分包）
-const showSite3D = ref(false)
+// Composable: QQ Plot（showQQPlot / showSite3D 来自 useChartToggles）
 const {
   qqLoading,
   qqResult,
@@ -438,51 +460,10 @@ const {
 )
 
 // ========== Chart dock（可停靠拼格布局）==========
-// 当前可见图表 key 列表：直方图恒在，序列/QQ/箱线随勾选增删。
-// 顺序即 ChartDock 的 reconcile 依据（新增图追加、取消勾选移除，保留其余相对顺序）。
-const activeChartKeys = computed<ChartKey[]>(() => {
-  const keys: ChartKey[] = []
-  if (showHistogram.value) keys.push('hist')
-  if (showSerial.value) keys.push('serial')
-  if (showQQPlot.value) keys.push('qq')
-  if (showBoxPlot.value) keys.push('box')
-  if (showSite3D.value) keys.push('site3d')
-  return keys
-})
-// 至少一个图表勾选 = 有内容可渲染
-const anyChartVisible = computed(() => activeChartKeys.value.length > 0)
+// 勾选 key 列表与「× 关闭」都在 useChartToggles（顺序即 ChartDock 的 reconcile 依据）。
 // dock 显隐：其余图由各自 showX 决定挂载，唯直方图需要数据才渲染有意义——
 // 当直方图是唯一选中项且数据未到时先不挂 dock，避免空图
 const dockVisible = computed(() => anyChartVisible.value && (!showHistogram.value || !!histResult.value))
-// 面板「×」关闭 → 复位对应勾选（与顶部五个显示勾选同源）
-function onDockClose(key: ChartKey) {
-  if (key === 'hist') showHistogram.value = false
-  else if (key === 'serial') showSerial.value = false
-  else if (key === 'qq') showQQPlot.value = false
-  else if (key === 'box') showBoxPlot.value = false
-  else if (key === 'site3d') showSite3D.value = false
-}
-
-// ========== 图表勾选账号记忆 ==========
-// 套用与上报互斥：套用期间 watcher 不回写（避免把「恢复」当「用户改动」再存一遍）
-let togglesApplying = false
-let togglesTouched = false
-watch([showHistogram, showSerial, showQQPlot, showBoxPlot, showSite3D], ([h, s, q, b, d]) => {
-  if (togglesApplying) return
-  togglesTouched = true
-  saveChartState({ toggles: { hist: h, serial: s, qq: q, box: b, site3d: d } })
-})
-void loadChartMemory().then(({ memoryEnabled, state }) => {
-  // 开关关/未加载（null）一律不套用：记忆功能只在明确开启时生效
-  if (memoryEnabled !== true || !state.toggles || togglesTouched) return
-  togglesApplying = true
-  showHistogram.value = state.toggles.hist
-  showSerial.value = state.toggles.serial
-  showQQPlot.value = state.toggles.qq
-  showBoxPlot.value = state.toggles.box
-  showSite3D.value = state.toggles.site3d
-  nextTick(() => { togglesApplying = false })
-})
 
 // ========== Store sync ==========
 // 无：图表配置全部经 storeToRefs 直接读写 store（见上方 state 声明），
@@ -572,6 +553,20 @@ watch(fileId, () => {
   width: 150px;
   max-width: 100%;
 }
+
+/* 面板头的「回到默认视角」：与 ChartPanel 自带 ⤢/× 同尺寸族（slot 内容带本组件
+   scope，样式写在这里而不是 Site3DChart 内） */
+.site3d-view-reset {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-3, #9ca3af);
+  font-size: var(--p-fs-base);
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.site3d-view-reset:hover { color: var(--brand); background: color-mix(in srgb, var(--brand) 10%, transparent); }
 
 /* 箱线图宿主：为加载骨架提供定位上下文，并铺满面板 */
 .box-chart-host {

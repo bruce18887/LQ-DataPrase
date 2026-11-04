@@ -154,7 +154,9 @@ export interface Grid3DStyle {
   axisLabel: {
     show: true
     margin: number
-    textStyle: { color: string; fontSize: number; fontFamily: string }
+    color: string
+    fontSize: number
+    fontFamily: string
   }
   nameTextStyle: { color: string; fontSize: number }
   light: { main: { intensity: number }; ambient: { intensity: number } }
@@ -185,12 +187,13 @@ export function grid3DStyle(colors: EChartsColors): Grid3DStyle {
     axisLabel: {
       show: true,
       margin: 6,
-      // 字号/字族/字色三件都归 token（§5），gl 默认只有 12px 且没有字色
-      textStyle: {
-        color: colors.axisLabelColor,
-        fontSize: chartFontSize.micro,
-        fontFamily: fontFamily.sans,
-      },
+      // 字号/字族/字色三件都归 token（§5），gl 默认只有 12px 且没有字色。
+      // 必须是**平铺**属性：ECharts 6 对旧的 `axisLabel.textStyle` 只做兼容拆平
+      // （setOption 后 getOption 里 `textStyle:null`、三件被提到 axisLabel 本级），
+      // 而 gl 的 Grid3DAxis 直接读 `axisLabelModel.get('color'|'fontSize'|'fontFamily')`。
+      color: colors.axisLabelColor,
+      fontSize: chartFontSize.micro,
+      fontFamily: fontFamily.sans,
     },
     nameTextStyle: { color: colors.textColor, fontSize: chartFontSize.micro },
     // 平涂不吃光，也不写 shadow：阴影是「demo 感」的主要来源。前提是 series 侧

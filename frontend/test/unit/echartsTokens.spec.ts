@@ -57,16 +57,23 @@ describe('grid3DStyle — 逐项取 token，不写死', () => {
   it('键集与轴型结构两边一致', () => {
     expect(keys(night)).toEqual(keys(light))
     expect(keys(night.axisLine)).toEqual(keys(light.axisLine))
-    expect(keys(night.axisLabel.textStyle)).toEqual(keys(light.axisLabel.textStyle))
+    expect(keys(night.axisLabel)).toEqual(keys(light.axisLabel))
   })
 
   it('颜色确实随主题变化，且等于该主题的 token 值', () => {
     expect(light.axisLine.lineStyle.color).toBe(ECHARTS_COLORS_LIGHT.splitLineColor)
     expect(night.axisLine.lineStyle.color).toBe(ECHARTS_COLORS_NIGHT.splitLineColor)
     expect(night.axisLine.lineStyle.color).not.toBe(light.axisLine.lineStyle.color)
-    expect(light.axisLabel.textStyle.color).toBe(ECHARTS_COLORS_LIGHT.axisLabelColor)
-    expect(night.axisLabel.textStyle.color).toBe(ECHARTS_COLORS_NIGHT.axisLabelColor)
+    expect(light.axisLabel.color).toBe(ECHARTS_COLORS_LIGHT.axisLabelColor)
+    expect(night.axisLabel.color).toBe(ECHARTS_COLORS_NIGHT.axisLabelColor)
     expect(light.nameTextStyle.color).toBe(ECHARTS_COLORS_LIGHT.textColor)
+  })
+
+  it('axisLabel 三件平铺在本级（嵌套 textStyle 只靠 ECharts 6 兼容层拆平，getOption 里 textStyle 为 null）', () => {
+    for (const s of [light, night]) {
+      expect(s.axisLabel).not.toHaveProperty('textStyle')
+      expect(Object.keys(s.axisLabel).sort()).toEqual(['color', 'fontFamily', 'fontSize', 'margin', 'show'])
+    }
   })
 
   it('没有任何 CSS 变量混进 setOption（R7②：ECharts 不解析 var(--x)）', () => {

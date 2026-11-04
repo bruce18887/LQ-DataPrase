@@ -531,15 +531,15 @@ describe('grid3DStyle — 逐项取 token，不写死', () => {
   it('键集与轴型结构两边一致', () => {
     expect(keys(night)).toEqual(keys(light))
     expect(keys(night.axisLine)).toEqual(keys(light.axisLine))
-    expect(keys(night.axisLabel.textStyle)).toEqual(keys(light.axisLabel.textStyle))
+    expect(keys(night.axisLabel)).toEqual(keys(light.axisLabel))
   })
 
   it('颜色确实随主题变化，且等于该主题的 token 值', () => {
     expect(light.axisLine.lineStyle.color).toBe(ECHARTS_COLORS_LIGHT.splitLineColor)
     expect(night.axisLine.lineStyle.color).toBe(ECHARTS_COLORS_NIGHT.splitLineColor)
     expect(night.axisLine.lineStyle.color).not.toBe(light.axisLine.lineStyle.color)
-    expect(light.axisLabel.textStyle.color).toBe(ECHARTS_COLORS_LIGHT.axisLabelColor)
-    expect(night.axisLabel.textStyle.color).toBe(ECHARTS_COLORS_NIGHT.axisLabelColor)
+    expect(light.axisLabel.color).toBe(ECHARTS_COLORS_LIGHT.axisLabelColor)
+    expect(night.axisLabel.color).toBe(ECHARTS_COLORS_NIGHT.axisLabelColor)
     expect(light.nameTextStyle.color).toBe(ECHARTS_COLORS_LIGHT.textColor)
   })
 
@@ -680,7 +680,9 @@ export interface Grid3DStyle {
   axisLabel: {
     show: true
     margin: number
-    textStyle: { color: string; fontSize: number; fontFamily: string }
+    color: string
+    fontSize: number
+    fontFamily: string
   }
   nameTextStyle: { color: string; fontSize: number }
   light: { main: { intensity: number }; ambient: { intensity: number } }
@@ -703,12 +705,13 @@ export function grid3DStyle(colors: EChartsColors): Grid3DStyle {
     axisLabel: {
       show: true,
       margin: 6,
-      // 字号/字族/字色三件都归 token（§5），gl 默认只有 12px 且没有字色
-      textStyle: {
-        color: colors.axisLabelColor,
-        fontSize: chartFontSize.micro,
-        fontFamily: fontFamily.sans,
-      },
+      // 字号/字族/字色三件都归 token（§5），gl 默认只有 12px 且没有字色。
+      // 必须平铺：ECharts 6 对旧的 `axisLabel.textStyle` 只做兼容拆平（setOption 后
+      // getOption 里 `textStyle:null`、三件被提到本级），而 gl 的 Grid3DAxis 直接读
+      // `axisLabelModel.get('color'|'fontSize'|'fontFamily')`。
+      color: colors.axisLabelColor,
+      fontSize: chartFontSize.micro,
+      fontFamily: fontFamily.sans,
     },
     nameTextStyle: { color: colors.textColor, fontSize: chartFontSize.micro },
     // 平涂（shading:'color'）不吃光，也不写 shadow：阴影是「demo 感」的主要来源
@@ -2015,9 +2018,10 @@ Expected：绿。新组件只用了 `<el-alert>`（清单里已有）。**别在
 ```bash
 git add src/pages/analysis/components/Site3DChart.vue src/pages/analysis/composables/useChartToggles.ts src/pages/analysis/components/SingleParamTab.vue test/unit/site3dWiring.spec.ts
 wc -l src/pages/analysis/components/SingleParamTab.vue src/pages/analysis/components/Site3DChart.vue
-npx vue-tsc -p tsconfig.app.json --noEmit && npx vitest run test/unit
+npx vue-tsc -p tsconfig.app.json --noEmit && npx vue-tsc -b && npx vitest run test/unit
 ```
 Expected：`SingleParamTab.vue` ≤ 600、`Site3DChart.vue` ≤ 200；TS 无输出；vitest 全绿——`site3dWiring.spec.ts` 从 Step 1 的红转绿，`lineLimit.spec.ts` 也过（它按 `git ls-files` 扫，所以这条 `git add` 必须在跑它之前）。
+`vue-tsc -b` 不能省：`-p tsconfig.app.json` 不检 `test/`（Task 5 的 TS2345 就是这么漏到 BUILD 档的）。
 
 - [ ] **Step 7：真机走一遍（本批的核心判据，不看单测就宣称渲染 OK 是假的）**
 
