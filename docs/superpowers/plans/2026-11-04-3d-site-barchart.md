@@ -2253,10 +2253,12 @@ Expected：`Test Files  N passed`、无 FAIL。`firstScreenChunks.spec.ts` 只�
 - [ ] **Step 4：affected 门禁（后台跑，输出落文件不用管道）**
 
 ```bash
-cd frontend && npm --prefix . run test:e2e:affected > ../tasks/3d-site-barchart/gate.log 2>&1
+cd frontend && node ../scripts/e2e_affected.mjs --base master > ../tasks/3d-site-barchart/gate.log 2>&1
 grep -a "FAIL:\|^Ran \|^OK\|^FAILED\|档: \|RESULT: " ../tasks/3d-site-barchart/gate.log
 ```
 Expected：末行 `RESULT: PASS · 计划 N 档全部执行`，各 `档: … ok`。backend 档要求 PATH 上那个 `python` 能 `import pytest`（本机系统 Python 3.13 可以，项目 `.venv` **不行**）⇒ 不要把 `.venv/Scripts` 前置，也不要为它装依赖；`ABORTED` 是门禁坏、不是产品红。
+
+⚠ **收口轮必须显式给 `--base master`**：本计划是逐任务提交的，走到这一步 worktree 已经干净，脚本自动基线只剩 `HEAD~1..HEAD`（Task 8 那四个文件），会打 `RESULT: NO AFFECTED TESTS —— 2 files（本轮没有档执行，不等于绿灯）`。`--base master` 取整条分支并集（本次 31 文件，命中 GLOBAL 清单 ⇒ 兜底升全量池）；不给 base 的 `NO AFFECTED TESTS` 不是绿，别当收口证据。
 
 - [ ] **Step 5：收口跑全量并行池（独占机器，跑前查提交内存预算线 8.0GB）**
 
