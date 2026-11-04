@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<!-- 需先 npm i echarts-gl（设计稿 2026-11-04-3d-site-barchart-design.md §3）；用仓库根起静态服务后打开本文件 -->
+<!-- 需先 npm i echarts-gl（见 2026-11-04-3d-site-barchart-design.md §2）；用仓库根起静态服务后打开本文件 -->
 <title>3D 站点柱阵 · 风格原型（真 echarts-gl）</title>
 <style>
   :root {
@@ -69,7 +69,7 @@
   <div class="bar">
     <label><input type="checkbox" id="c-bevel" checked /> 柱顶倒角 <code>bevelSize</code></label>
     <label><input type="checkbox" id="c-gutter" checked /> 柱间留白 <code>barSize</code></label>
-    <label><input type="checkbox" id="c-fade" checked /> 纵深渐隐（按行降 opacity）</label>
+    <label><input type="checkbox" id="c-fade" /> 纵深渐隐（默认关：会吃掉 Site 色饱和）</label>
     <label><input type="checkbox" id="c-soft" checked /> 弱化轴线与刻度（<b>不能隐藏</b>，见下方实测）</label>
     <label><input type="checkbox" id="c-ortho" checked /> 正交投影（无近大远小）</label>
     <span class="sep"></span>
@@ -129,7 +129,7 @@
   var BIN_LABELS = CENTERS.map(function (c) { return c.toFixed(2); });
 
   // ---- 状态 ----
-  var st = { theme: 'light', bevel: true, gutter: true, fade: true, soft: true, ortho: true, demo: false };
+  var st = { theme: 'light', bevel: true, gutter: true, fade: false, soft: true, ortho: true, demo: false };
 
   function fmtPct(v) {
     if (v <= 0) return '0';
@@ -155,7 +155,7 @@
     // 实测：barSize 是【绝对世界单位】，不是「占一格的百分比」。
     // 源码 cartesian3DLayout.js:19-39 —— 不写时自动取 bandWidth×0.7，
     // 写了 0.88 就等于把柱子缩到自动值的 1/4（这就是「太细」的真因）。
-    var BW = demo ? 200 : 132, BH = demo ? 100 : 46, BD = demo ? 80 : 64;
+    var BW = demo ? 200 : 132, BH = demo ? 100 : 74, BD = demo ? 80 : 120;
     var fill = demo ? 0.7 : (st.gutter ? 0.62 : 0.95);
     var barSize = [BW / NB * fill, BD / NS * fill];
     return {
@@ -182,7 +182,7 @@
         boxWidth: BW, boxHeight: BH, boxDepth: BD,
         viewControl: {
           projection: (demo || !st.ortho) ? 'perspective' : 'orthographic',
-          alpha: demo ? 20 : 14, beta: demo ? 40 : 30, distance: demo ? 220 : 178,
+          alpha: demo ? 20 : 28, beta: demo ? 40 : 30, distance: demo ? 220 : 245,
           rotateSensitivity: 0.8, zoomSensitivity: 0.7
         },
         // 实测：axisLine.show=false 会让 _updateAxisLabelAlign 读到 null.axisLineCoords，
@@ -245,7 +245,7 @@
       });
     });
   document.getElementById('b-reset').addEventListener('click', function () {
-    chart.setOption({ grid3D: { viewControl: { alpha: st.demo ? 20 : 14, beta: st.demo ? 40 : 30, distance: st.demo ? 220 : 178, zoom: 1 } } });
+    chart.setOption({ grid3D: { viewControl: { alpha: st.demo ? 20 : 28, beta: st.demo ? 40 : 30, distance: st.demo ? 220 : 245, zoom: 1 } } });
   });
   document.getElementById('b-theme').addEventListener('click', function () {
     st.theme = st.theme === 'light' ? 'night' : 'light';

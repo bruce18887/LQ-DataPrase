@@ -78,14 +78,16 @@
 | `axisPointer.label.textStyle`：14px 白字黑胶囊 | `colors.tooltipBg / tooltipBorder / tooltipText` | gl 的黑胶囊与项目 tooltip 的玻璃底不同源 |
 | 示例里的 `light.main.shadow: true` | 不写 | 阴影是「demo 感」主要来源，且 `shading:'color'` 下根本不吃光 |
 | `visualMap` 按 z 上色的蓝→红色阶 | 按 **Site 维度**上色，喂 `getSiteColors8(isDark)` | 要的是「Site 颜色和直方图对得上」 |
-| `itemStyle.opacity: 1` | 按行 0.82 → 0.50 渐隐 | 抄 `transparent-bar3d`：前排透出后排，解遮挡 |
+| `itemStyle.opacity: 1` | **默认不动**（渐隐关掉） | 见 §6.5：按行降 opacity 会吃掉 Site 色的饱和度，而 Site 身份在这张图里就靠颜色 |
 
 - **GL 图层本身是 `transparent: true` 创建的**（`lib/component/grid3D/Grid3DView.js:35`）⇒ 场景不铺自己的底色，
   `ChartPanel` 的 CSS 背景直接透出，双主题不必为 3D 单开背景处理。
 - 主题切换不必自己挂：`useChart` 已 watch `themeStore.currentTheme` 重渲染（[useChart.ts:321](../../../frontend/src/composables/useChart.ts)）。
-- 默认机位 `alpha 14 / beta 30`：值轴从左到右扫、Site 往右后方退。`beta` 取负值会把值轴甩到左后方，读起来不像直方图。
+- 默认机位与箱体：`alpha 28 / beta 30 / distance 245`，`boxWidth 132 / boxHeight 74 / boxDepth 120`。
+  这组数是「Site 分辨度」实测出来的（§6.5）：`beta` 取负值会把值轴甩到左后方；`alpha` 低于 25 时后排被前排整根挡住；
+  `boxDepth` 从 64 拉到 120 才让 8 个 Site 各自成一条可辨的色带。
 
-## 6. 实测踩到的四个坑（实现时必撞，先写死）
+## 6. 实测踩到的五个坑（实现时必撞，先写死）
 
 1. **`visualMap` 用 `categories` + `inRange.color` 时，192 根柱一根都不画。** 必须写成
    `pieces: [{ value: i, label: siteName, color: pal[i % 8] }]`。副作用是好的：piecewise 的 `label` 正好显示成
@@ -96,10 +98,15 @@
    [`lib/chart/bar3D/cartesian3DLayout.js:19-39`](https://cdn.jsdelivr.net/npm/echarts-gl@2.1.0/lib/chart/bar3D/cartesian3DLayout.js)
    写明：不传时自动取 `bandWidth × 0.7`；传了就直接当尺寸用。原型第一版按分数填 `0.88`，柱子被缩到自动值的
    四分之一（用户反馈「太细」的真因）。本设计按 `boxWidth/NB × fill` 与 `boxDepth/NS × fill` 换算，
-   `fill` 默认 0.62；箱体尺寸与原型一致取 `boxWidth 132 / boxHeight 46 / boxDepth 64`——
+   `fill` 默认 0.62；箱体尺寸取 §5 那一组（`132 / 74 / 120`）——
    `fill` 只有和这组尺寸绑在一起才等价，换尺寸必须同步重算。
 4. **平涂下色板第 7 格 `#BBBBBB` 在白底几乎不可辨**（截图里 S7 那排）。用户 2026-11-04 拍板：
    **只在 `site3dOption.ts` 的取色函数里把这一格换成深灰，不动 `SITE_COLORS_8_LIGHT`**，注释写明原因与影响面。
+5. **「纵深渐隐」是 Site 分辨度的减分项，不是加分项。** 它原本是照 `transparent-bar3d` 抄来解遮挡的
+   （按行 0.82→0.50），但平涂配色 + 降 opacity 直接把 Site 之间唯一的身份通道（色相饱和度）吃掉了。
+   四档对照实测（渐隐 / alpha / boxDepth 各切一刀）结论：**遮挡要靠机位几何解决**——
+   `alpha 14 → 28` 让前排不再整根盖住后排，`boxDepth 64 → 120` 让 8 行各自成带，两者到位后
+   **关掉渐隐反而最清楚**。所以渐隐默认关，只作为可选项保留在原型上，不进产品开关。
 
 ## 7. LSL/USL：3D 图不画（已收口）
 
@@ -167,6 +174,6 @@
 
 | 风险 | 处置 |
 | --- | --- |
-| 遮挡：前排柱挡住后排，转到低角度时读数困难 | 已用按行渐隐（0.82→0.50）缓解；若实测仍不够，优先调 `fill` 与机位，而不是打开光 |
+| 遮挡：前排柱挡住后排，转到低角度时读数困难 | 已用机位几何解决（`alpha 28` + `boxDepth 120`，§6.5），**不用渐隐**——降 opacity 会吃掉 Site 色饱和。用户把视角转到低处时仍会遮挡，这是 3D 形态的固有代价，不是可修的缺陷；读数兜底是同屏 2D 直方图与 Site 统计表 |
 | 低配机器 WebGL 退到 SwiftShader 软件渲染 | 192 根柱的量级可承受；上线后按 §9 的探测分支观察是否真有人走到提示分支 |
 | `echarts-gl` 2.1.0 发布不足半年 | 原型已用本项目实际 `echarts 6.1.0` 构建产物跑通、控制台零报错；升级 echarts 时把该页回归纳入 T2 |
