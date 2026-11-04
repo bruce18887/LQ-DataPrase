@@ -8,7 +8,7 @@
 
 **Tech Stack:** Vue 3.5 + Vite 8 + Element Plus 2.14 + Pinia 3、ECharts 6.1 + echarts-gl 2.1.0、vitest 5（node 环境 T2）、Playwright 1.60（T3）。
 
-**Spec:** [docs/superpowers/specs/2026-11-04-3d-site-barchart-design.md](../specs/2026-11-04-3d-site-barchart-design.md)（含原型实测截图与六个已踩实的库坑）。本计划相对 spec 有 **4 处收口改动**，全部写在 Task 1 里并同步回 spec 正文。
+**Spec:** [docs/superpowers/specs/2026-11-04-3d-site-barchart-design.md](../specs/2026-11-04-3d-site-barchart-design.md)（含原型实测截图与六个已踩实的库坑）。本计划相对 spec 有 **5 处收口改动**（共 7 行），全部写在 Task 1 里并同步回 spec 正文。
 
 ---
 
@@ -49,28 +49,32 @@
 
 ---
 
-## Task 1：先把 spec 里四处会被照抄执行的错处改掉
+## Task 1：先把 spec 里五处会被照抄执行的错处改掉（7 行）
 
-> 为什么第一个任务改文档：本计划下面每个任务都以 spec 为判据源。spec 里「升 `VERSION`」那条**因果写反了**，照它做会让所有用户已存的布局整表丢弃；另两处（`bin_counts` 的 tooltip 语义、night 轴线色的具体值）会在实现时误导读数。
+> 为什么第一个任务改文档：本计划下面每个任务都以 spec 为判据源。spec 里「升 `VERSION`」那条**因果写反了**，照它做会让所有用户已存的布局整表丢弃；另几处（`bin_counts` 的 tooltip 语义、night 轴线色的具体值**在两处各写了一份**、§5 的 `axisPointer` 对本图不适用）会在实现时误导读数。
 
 - [ ] **Step 1：改掉 §4 里「升 VERSION」那一行（因果反了）**
 
 打开 [docs/superpowers/specs/2026-11-04-3d-site-barchart-design.md](../specs/2026-11-04-3d-site-barchart-design.md)，把第 61 行整行替换：
 
 ```markdown
-| `pages/analysis/composables/useChartDock.ts` | `ChartKey` 加 `'site3d'`、`ALL_KEYS`、`defaultLayout` 消费面，**`VERSION` 保持 1** | `isValidLayout` 只校验 `v === VERSION` 且「每个 key ∈ `ALL_KEYS`」（[useChartDock.ts:73-87](../../../frontend/src/pages/analysis/composables/useChartDock.ts)）⇒ **加一个 key 是让旧存档继续合法**，旧 4 图存档原样留下、由 `reconcile` 在需要时追加新格；反过来升档会让 `v !== VERSION` 命中，把**每个用户存过的布局（含本机 localStorage 与账号记忆两条路）整表丢弃**，正是这次要避免的。回归由 T2 `chartLayout.spec.ts` 钉住 |
+| `pages/analysis/composables/useChartDock.ts` | `ChartKey` 加 `'site3d'`、`ALL_KEYS`、`defaultLayout` 消费面，**`VERSION` 保持 1** | `isValidLayout` 只校验 `v === VERSION` 且「每个 key ∈ `ALL_KEYS`」（[useChartDock.ts:73-87](../../../frontend/src/pages/analysis/composables/useChartDock.ts)）⇒ **加一个 key 是让旧存档继续合法**，旧 4 图存档原样留下、由 `reconcile` 在需要时追加新格；反过来升档会让 `v !== VERSION` 命中，把**每个用户存过的布局（含本机 localStorage 与账号记忆两条路）整表丢弃**，正是这次要避免的。反方向也提醒一句：将来若从 `ALL_KEYS` **删** key，同一道门会把带那个 key 的存量整表作废。回归由 T2 `chartLayout.spec.ts` 钉住 |
 ```
 
 - [ ] **Step 2：把 §10 里两条被同时改动的判据改到实际落点**
 
-同一文件，把 §10 的这两处（第 175 行与第 164 行）分别替换：
+同一文件，把 §10 的这两处（第 175 行与第 164 行）分别替换。
+
+> ⚠ 这一行**原本**在文件里不是 `- ` 列表项，而是 T3 那条 bullet 下**两个空格缩进**的续行（2026-11-04 勘误轮实测：`git show HEAD:…` 与工作树都是 `  布局存档回归：…`）。替换串必须同样以两个空格开头，否则要么 Edit 不命中、要么把列表形状改掉。动手前先 `sed -n '175p'` 看真实前缀，别照抄本计划里的引文。
+>
+> ⚠ 复审轮的后续位移：这条判据自称 T2 `chartLayout.spec.ts`，挂在 T3 名下与上面「T3 只留两条」自相矛盾，**已把它整体移到 T2 块末尾**（紧跟「另加 `histogramBins.spec.ts` …」那行之后），两个空格缩进保持不变，T3 块恢复只剩 ①②。所以下一轮再读这份 spec，行号已经不是 175（现约 181），别拿这个号当锚点，用 `grep -n "布局存档回归"` 定位。
 
 ```markdown
-- 布局存档回归：T2 `chartLayout.spec.ts` 断言「旧 `v:1` 四图存档在新代码下 `isValidLayout` 仍判合法」与「旧账号 toggles 缺 `site3d` ⇒ 默认关」。**不升 `VERSION`**（§4），所以这条钉的是「不丢」而不是「迁移」。
+  布局存档回归：T2 `chartLayout.spec.ts` 断言「旧 `v:1` 四图存档在新代码下 `isValidLayout` 仍判合法」与「旧账号 toggles 缺 `site3d` ⇒ 默认关」。**不升 `VERSION`**（§4），所以这条钉的是「不丢」而不是「迁移」。
 ```
 
 ```markdown
-  ④ light/night 两套 token 的**键集逐字相等**，且 3D 用到的那把键两边都有——由 `echarts-tokens.ts` 把两套色提成可导出的纯数据常量后，T2 `echartsTokens.spec.ts` 直接对真值断言（`useEChartsTheme()` 里的 computed 要过 pinia，node 环境量不到）。
+  ④ light/night 两套 token 的**键集逐字相等**，且 3D 用到的那把键两边都有——由 `echarts-tokens.ts` 把两套色提成可导出的纯数据常量后，T2 `echartsTokens.spec.ts` 直接对真值断言（`useEChartsTheme()` 里的 computed 要过 pinia，而 `stores/theme` 的 watch 一初始化就摸 `document`，node 环境量不到）。
 ```
 
 - [ ] **Step 3：把 §3 的 `bin_counts` 语义写准（后端只给全站点计数）**
@@ -78,16 +82,31 @@
 §3 表格那行 `bin_counts` 的「用途」列，从 `tooltip 里的 n=` 改为：
 
 ```markdown
-| `bin_counts` | tooltip 里的 `n=`，**它是该 bin 的全站点计数**（后端按 `total_count` 分母给占比，逐 Site 的原始计数不下发）⇒ 文案必须写「全站点该 bin n=」，不能缩成看着像 Site 级计数的 `n=` |
+| `bin_counts` | tooltip 里的 `n=`，**它是该 bin 的全站点计数**（后端按 `total_count` 分母给占比，逐 Site 的原始计数不下发）⇒ 文案必须写「全站点该 bin n=」，不能缩成看着像 Site 级计数的 `n=`。⚠ 两者口径不等：`bin_counts` 之和是非空值数，`total_count` 含 NaN，所以别在界面上承诺「各 bin 相加 = N」 |
 ```
 
-- [ ] **Step 4：把 §5 的 night 轴线色改成实测 token 值**
+- [ ] **Step 4：把 night 轴线色的两处同值写法一起改成实测 token 值**
+
+这个数在 spec 里写了**两遍**（§5 表格与 §6.6 的坑 6 正文），只改一处会让稿子自相矛盾——2026-11-04 勘误轮就是靠复审抓到第二处。
 
 §5 表格里 `axisLine.lineStyle.color` 那行的「改成」列尾（现为「light `#eef0f3` / night `rgba(255,255,255,.05)`」）改为：
 
 ```markdown
 ；light `#eef0f3` / night `rgba(255, 255, 255, 0.04)`（这两个数就是 `echarts-theme.ts` 里 `splitLineColor` 两分支的现值，写 `.05` 是当时手抖取整，T3 断言按 `0.04` 逐字比）
 ```
+
+§6.6 里那句「`axisLine` 恒取极淡底色（light `#eef0f3` / night `rgba(255,255,255,.05)`）」改为：
+
+```markdown
+（light `#eef0f3` / night `rgba(255, 255, 255, 0.04)`，与 §5 同一组真值）
+```
+
+改完必须验证稿子里再没有旧值：
+
+```bash
+grep -n "255,255,255,\.05\|255, 255, 255, 0\.05" docs/superpowers/specs/2026-11-04-3d-site-barchart-design.md
+```
+Expected：**零命中**（无输出）。
 
 同表 `axisPointer.label.textStyle` 那一行的「改成」列尾追加一句（本图不会渲染那枚胶囊，照抄会写成死配置）：
 
@@ -98,16 +117,29 @@
 - [ ] **Step 5：确认改动只是这几段，没顺手加戏**
 
 ```bash
-git diff --stat docs/superpowers/specs/2026-11-04-3d-site-barchart-design.md
-git diff docs/superpowers/specs/2026-11-04-3d-site-barchart-design.md | grep -c "^[+-]"
+git diff --stat docs/superpowers/
+git status --porcelain
+grep -nE "toolbox 旁|[^0-9]6 格|第 ① 条|约 300|255,255,255,\.05" docs/superpowers/specs/2026-11-04-3d-site-barchart-design.md
+grep -nE "echarts-tokens|useChartToggles|site3dWiring|DockRow" docs/superpowers/specs/2026-11-04-3d-site-barchart-design.md
+node -e "const t=require('fs').readFileSync('docs/superpowers/specs/2026-11-04-3d-site-barchart-design.md','utf8');console.log('lines',t.split('\n').length,'CR',t.split('\r').length-1)"
 ```
-Expected：`1 file changed`，增删行数同量级（约 4 增 4 删），且 `git status --porcelain` 里**没有** `docs/superpowers/specs/2026-11-03-site-ridgeline-design.md` 的改动（那是另一个会话的待做稿，本批不碰、不提交）。
+Expected：
+- 只动两份文档（spec 与 plan），`git status --porcelain` 里**没有** `docs/superpowers/specs/2026-11-03-site-ridgeline-design.md` 的改动（那是另一个会话的待做稿，本批不碰、不提交），`docs/tasks/todo.md` 保持他人那份未提交原样；
+- 第一条 grep **零命中**（`toolbox 旁`/`第 ① 条`/`约 300`/`.05` 全改净；`6 格` 用了锚定式，否则会子串命中 §3 的「26 格」——那是正当的分箱口径）；
+- 第二条 grep 显示 §4 已登记 `echarts-tokens.ts` / `useChartToggles.ts` / `DockRow`，§10 已登记 `site3dWiring.spec.ts`；
+- `CR 0`（这份 spec 在盘上是纯 LF）。行数从 201 涨到 209 属正常——勘误轮之后还有复审轮的补写。
 
-- [ ] **Step 6：提交**
+> 勘误轮的 7 行是**第一批**改动；两道复审又暴露出 17 处「改了这行、周边就打架」的裂缝（§12 把复位图标写成「toolbox 旁」而本图禁 toolbox、§6 坑 6 拿原型色冒充 `axisLineColor`、24/26 两套 bin 数并存、布局存档回归那行挂在 T3 名下、§4 漏登记 4 个新建/被改文件、`echarts-theme.ts` 行数写反方向…），一并在 Step 1–4 的同一批里改掉，所以 `git diff --stat` 的规模比 7 行大。**判据是上面那组 grep 零命中 + 只动两份文档，不是某个特定的增删行数。**
+
+> 换行制式的本机事实（2026-11-04 实测，别照印象写）：这份 spec 在盘上是**纯 LF**（0 个 CR），所以小 diff 天然成立；而 `docs/tasks/lessons.md`（2845 个 CRLF）、`docs/tasks/todo.md`（537）、`docs/reference/testing-gates.md`（368）是 **CRLF**——往那几份跟踪 `.md` 追加整节时必须按 CRLF 写，否则 diff 变成整文件重写（lessons 里的老判例仍然有效，只是**不适用于这份 LF 的 spec**）。`core.autocrlf=true` 只让 git 在下次 checkout 时改写工作树，不等于当前盘上就是 CRLF。
+
+- [ ] **Step 6：提交（两份文档分两个 commit，别让计划里的注记混进勘误 commit）**
 
 ```bash
 git add docs/superpowers/specs/2026-11-04-3d-site-barchart-design.md
-git commit -m "docs(specs): 3D 柱阵稿收口——VERSION 不升档（升档会丢弃存量布局）、bin_counts 是全站点计数、night 轴线色取实测 0.04"
+git commit -m "docs(specs): 3D 柱阵稿收口——VERSION 不升档（升档会丢弃存量布局）、bin_counts 是全站点计数、night 轴线色两处统一 0.04、复位图标归面板头而非 toolbox"
+git add docs/superpowers/plans/2026-11-04-3d-site-barchart.md
+git commit -m "docs(plans): 实现计划随 spec 勘误同步（换行制式与 175 行落位的实测更正、Task5 补 tooltip 口径注）"
 ```
 
 ---
