@@ -70,7 +70,8 @@
     <label><input type="checkbox" id="c-bevel" checked /> 柱顶倒角 <code>bevelSize</code></label>
     <label><input type="checkbox" id="c-gutter" checked /> 截面比例 <code>barSize</code></label>
     <label><input type="checkbox" id="c-fade" /> 纵深渐隐（默认关：会吃掉 Site 色饱和）</label>
-    <label><input type="checkbox" id="c-soft" checked /> 弱化轴线与刻度（<b>不能隐藏</b>，见下方实测）</label>
+    <span class="sep"></span>
+    <span style="color:#9ca3af">轴线恒为极淡底色（加深会转出「悬浮矩形」，产品不提供该档）</span>
     <label><input type="checkbox" id="c-ortho" checked /> 正交投影（无近大远小）</label>
     <span class="sep"></span>
     <label><input type="checkbox" id="c-demo" /> gl 示例默认风（对照）</label>
@@ -129,7 +130,7 @@
   var BIN_LABELS = CENTERS.map(function (c) { return c.toFixed(2); });
 
   // ---- 状态 ----
-  var st = { theme: 'light', bevel: true, gutter: true, fade: false, soft: true, ortho: true, demo: false };
+  var st = { theme: 'light', bevel: true, gutter: true, fade: false, ortho: true, demo: false };
 
   function fmtPct(v) {
     if (v <= 0) return '0';
@@ -158,7 +159,9 @@
     var BW = demo ? 200 : 132, BH = demo ? 100 : 74, BD = demo ? 80 : 120;
     // 实测（§6.6）：纵深分量大于宽度时，柱子在斜方位角下看像「歪的板状」——
     // 与机位、倒角无关。宽度取满、厚度收到 0.30 后立刻立起来。
-    var wFill = demo ? 0.7 : (st.gutter ? 0.85 : 0.98);
+    // 实测（§6.3/§6.6）：wFill 0.85 在斜方位角下会让相邻 bin 沿 x 方向粘成一条斜脊，
+    // 读起来又「歪」了；0.62 才在任意角度都保持单根可辨。
+    var wFill = demo ? 0.7 : (st.gutter ? 0.62 : 0.95);
     var dFill = demo ? 0.7 : (st.gutter ? 0.30 : 0.72);
     var barSize = [BW / NB * wFill, BD / NS * dFill];
     return {
@@ -190,8 +193,10 @@
         },
         // 实测：axisLine.show=false 会让 _updateAxisLabelAlign 读到 null.axisLineCoords，
         // 每次相机更新抛一次 TypeError ⇒ 轴线只能弱化到接近底色，不能隐藏。
-        axisLine: { show: true, lineStyle: { color: demo ? '#333' : (st.soft ? t.split : t.axis), width: demo ? 2 : 1 } },
-        axisTick: { show: demo ? true : !st.soft },
+        // show 必须保持 true（false 会抛 TypeError）；产品里颜色恒为极淡底色，
+        // 不提供加深档——加深后转到斜方位角时，后壁轴线会在空中拼成一个「悬浮矩形」。
+        axisLine: { show: true, lineStyle: { color: demo ? '#333' : t.split, width: demo ? 2 : 1 } },
+        axisTick: { show: demo },
         splitLine: { show: true, lineStyle: { color: demo ? '#ccc' : t.split, width: 1 } },
         axisLabel: { show: true, textStyle: axisText, margin: demo ? 8 : 6 },
         light: demo
@@ -236,10 +241,10 @@
     + '<br>柱体 <b>' + NS + ' Site × ' + NB + ' bin = ' + NS * NB + ' 根</b>，z 轴分母 = 全站总数 ' + TOTAL.toLocaleString() + ' die（与后端 <code>site_histograms</code> 同口径，所以绝对高低就是量、左右错位就是形状）'
     + '<br>已验：<b>gl 系列不进 ECharts legend</b> ⇒ 色键只能靠右侧 piecewise <code>visualMap</code>；且它必须写成 <code>pieces:[{value,label,color}]</code>——<b class="bad">用 <code>categories</code> + <code>inRange.color</code> 时 192 根柱一根都不画</b>（本页修前就是这一种，截图已留证）。'
     + '<br><b class="bad">踩到的坑：</b><code>grid3D.axisLine.show = false</code> 会让 <code>_updateAxisLabelAlign</code> 读到 <code>null.axisLineCoords</code>，<b>每次相机更新抛一次 TypeError</b>（拖动一次就上百条，实测本页修前 194 条）。⇒ 设计里「收掉 gl 那套 #333 硬轴线」只能做成<b>弱化到接近底色</b>，不能真隐藏。'
-    + '<br><b>「太细」与「看着歪」都出在 <code>barSize</code>：</b>它是<b>绝对世界单位</b>，且<b>两个分量各管一个方向</b>。源码 <code>cartesian3DLayout.js:19-39</code> 不传时自动取 <code>bandWidth × 0.7</code>——x 方向 band 只有 5.5、y 方向有 15，所以自动值就是「3.85 宽 × 10.5 厚」的<b>板状</b>，斜方位角下看着像歪。现在按 <code>宽 band×0.85 / 厚 band×0.30</code> 分开给，柱子立刻立起来；<code>bevelSize</code> 归 0 对照过，与倒角无关。';
+    + '<br><b>「太细」与「看着歪」都出在 <code>barSize</code>：</b>它是<b>绝对世界单位</b>，且<b>两个分量各管一个方向</b>。源码 <code>cartesian3DLayout.js:19-39</code> 不传时自动取 <code>bandWidth × 0.7</code>——x 方向 band 只有 5.5、y 方向有 15，所以自动值就是「3.85 宽 × 10.5 厚」的<b>板状</b>，斜方位角下看着像歪。现在按 <code>宽 band×0.62 / 厚 band×0.30</code> 分开给（0.85 在斜方位角下会沿 x 粘成斜脊），柱子立起来；<code>bevelSize</code> 归 0 对照过，与倒角无关。';
 
   function refresh() { chart.setOption(buildOption(), { notMerge: true }); }
-  [['c-bevel', 'bevel'], ['c-gutter', 'gutter'], ['c-fade', 'fade'], ['c-soft', 'soft'], ['c-ortho', 'ortho'], ['c-demo', 'demo']]
+  [['c-bevel', 'bevel'], ['c-gutter', 'gutter'], ['c-fade', 'fade'], ['c-ortho', 'ortho'], ['c-demo', 'demo']]
     .forEach(function (p) {
       document.getElementById(p[0]).addEventListener('change', function (e) {
         st[p[1]] = e.target.checked;

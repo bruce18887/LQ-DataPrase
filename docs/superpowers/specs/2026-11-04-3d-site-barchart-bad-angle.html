@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<title>坏角度复现 · 轴线悬浮矩形与截面宽度</title>
+<style>
+  body { margin: 0; background: #f3f4f6; font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; }
+  h1 { font-size: 15px; margin: 12px 16px 2px; }
+  p.sub { font-size: 12px; color: #6b7280; margin: 0 16px 10px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 16px 16px; }
+  .cell { background: #fff; border: 1px solid #d1d5db; border-radius: 8px; overflow: hidden; }
+  .cell .t { padding: 6px 10px; font-size: 12px; font-weight: 600; color: #374151; border-bottom: 1px solid #e5e7eb; }
+  .cell .d { width: 100%; height: 360px; }
+</style>
+</head>
+<body>
+<h1>复现「坏角度」：轴线悬浮矩形能不能抹掉 + 截面宽度哪档站得住</h1>
+<p class="sub">A/B 同角度同截面，只差 <code>axisLine.lineStyle.color</code>（弱化底色 vs 全透明）——验「透明色」能否绕开 <code>show:false</code> 的崩溃。C/D 在坏角度下收截面宽度。</p>
+<div class="grid">
+  <div class="cell"><div class="t" id="t1"></div><div class="d" id="c1"></div></div>
+  <div class="cell"><div class="t" id="t2"></div><div class="d" id="c2"></div></div>
+  <div class="cell"><div class="t" id="t3"></div><div class="d" id="c3"></div></div>
+  <div class="cell"><div class="t" id="t4"></div><div class="d" id="c4"></div></div>
+</div>
+<script src="../../../frontend/node_modules/echarts/dist/echarts.min.js"></script>
+<script src="../../../frontend/node_modules/echarts-gl/dist/echarts-gl.min.js"></script>
+<script>
+(function () {
+  var NB = 24, NS = 8, LO = -0.65, HI = 1.65;
+  var PAL = ['#0077BB', '#EE7733', '#009988', '#CC3311', '#33BBEE', '#EE3377', '#BBBBBB', '#648FFF'];
+  var SITES = [
+    { n: 1800, mu: 0.86, sd: 0.16 }, { n: 1750, mu: 0.89, sd: 0.15 },
+    { n: 1820, mu: 0.84, sd: 0.19 }, { n: 1790, mu: 0.88, sd: 0.14 },
+    { n: 1760, mu: 0.91, sd: 0.17 }, { n: 1610, mu: 0.42, sd: 0.13 },
+    { n: 1700, mu: 0.88, sd: 0.11, bi: true }, { n: 420, mu: 0.86, sd: 0.16 }
+  ];
+  var CENTERS = []; for (var i = 0; i < NB; i++) CENTERS.push(LO + (HI - LO) * i / (NB - 1));
+  var TOTAL = SITES.reduce(function (a, s) { return a + s.n; }, 0);
+  var PCT = [];
+  SITES.forEach(function (s) {
+    var shape = CENTERS.map(function (c) {
+      var g = function (mu, sd) { return Math.exp(-0.5 * Math.pow((c - mu) / sd, 2)); };
+      var v = g(s.mu, s.sd);
+      if (s.bi) v = Math.max(v, 0.78 * g(s.mu + 0.34, s.sd * 1.1));
+      return v;
+    });
+    var sum = shape.reduce(function (a, b) { return a + b; }, 0);
+    PCT.push(shape.map(function (v) { return v / sum * s.n / TOTAL * 100; }));
+  });
+  var ZMAX = Math.ceil(Math.max.apply(null, PCT.map(function (r) { return Math.max.apply(null, r); })) / 2) * 2 + 1;
+  var NAMES = SITES.map(function (_, i) { return 'S' + (i + 1); });
+
+  var BW = 132, BH = 74, BD = 120;
+  var X_BAND = BW / NB, Y_BAND = BD / NS;
+
+  function build(cfg) {
+    var rows = [];
+    for (var s = 0; s < NS; s++) {
+      for (var b = 0; b < NB; b++) { if (PCT[s][b] > 0) rows.push({ value: [b, s, PCT[s][b]] }); }
+    }
+    return {
+      backgroundColor: 'transparent',
+      visualMap: {
+        show: true, type: 'piecewise', dimension: 1, orient: 'vertical', right: 4, top: 'middle',
+        itemWidth: 9, itemHeight: 9, itemGap: 4,
+        pieces: NAMES.map(function (nm, i) { return { value: i, label: nm, color: PAL[i % 8] }; }),
+        textStyle: { color: '#6b7280', fontSize: 10 }
+      },
+      grid3D: {
+        boxWidth: BW, boxHeight: BH, boxDepth: BD,
+        viewControl: { projection: 'orthographic', alpha: cfg.alpha, beta: cfg.beta, distance: cfg.dist },
+        // 关键实验：show 必须保持 true（show:false 会抛 TypeError），只把颜色给成全透明
+        axisLine: { show: true, lineStyle: { color: cfg.axisColor, width: 1 } },
+        axisTick: { show: cfg.ticks },
+        splitLine: { show: true, lineStyle: { color: '#eef0f3', width: 1 } },
+        axisLabel: { show: true, textStyle: { color: '#6b7280', fontSize: 9 }, margin: 5 },
+        light: { main: { intensity: 0 }, ambient: { intensity: 1 } }
+      },
+      xAxis3D: { type: 'category', data: CENTERS.map(function (c) { return c.toFixed(2); }) },
+      yAxis3D: { type: 'category', data: NAMES },
+      zAxis3D: { type: 'value', max: ZMAX },
+      series: [{
+        type: 'bar3D', data: rows, shading: 'color',
+        bevelSize: 0.22, bevelSmoothness: 2,
+        barSize: [X_BAND * cfg.wFill, Y_BAND * 0.30]
+      }]
+    };
+  }
+
+  var cases = [
+    { alpha: 35, beta: -25, dist: 190, wFill: 0.85, axisColor: '#eef0f3', ticks: false,
+      t: 'A 复现你的角度（alpha35 / beta-25）· 轴线=弱化底色 · wFill 0.85' },
+    { alpha: 35, beta: -25, dist: 190, wFill: 0.85, axisColor: 'rgba(0,0,0,0)', ticks: false,
+      t: 'B 同 A，但轴线颜色给全透明（show 仍为 true，避开崩溃）' },
+    { alpha: 35, beta: -25, dist: 190, wFill: 0.62, axisColor: 'rgba(0,0,0,0)', ticks: false,
+      t: 'C 坏角度 + 透明轴线 + wFill 收到 0.62（bin 间重新留缝）' },
+    { alpha: 28, beta: 30, dist: 245, wFill: 0.62, axisColor: 'rgba(0,0,0,0)', ticks: false,
+      t: 'D 定版角度 + 透明轴线 + wFill 0.62（看默认视角是否仍好）' }
+  ];
+  cases.forEach(function (c, i) {
+    document.getElementById('t' + (i + 1)).textContent = c.t;
+    echarts.init(document.getElementById('c' + (i + 1)), null, { renderer: 'canvas' }).setOption(build(c));
+  });
+})();
+</script>
+</body>
+</html>
