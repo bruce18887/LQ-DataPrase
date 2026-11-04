@@ -251,7 +251,7 @@ export async function selectParamWithSpecLimits(page: Page, maxTries = 20): Prom
 const SERIAL_CANVAS = '.single-param-tab .serial-chart-wrapper div[_echarts_instance_]'
 
 /**
- * 单文件分析页的四个图表开关。标签是**固定文案**（不随勾选状态变），所以
+ * 单文件分析页的五个图表开关。标签是**固定文案**（不随勾选状态变），所以
  * `getByText('显示QQ图').click()` 是「翻」而不是「开」；而它们**账号级持久**
  * （`analysis_chart_memory` 默认 true，组件 watch 到变化就写回 `analysis_chart_state`），
  * 于是「上一条用例把它点开了」会让本条的点击变成关掉 → 不发请求 → `waitForResponse` 超时。
@@ -264,6 +264,7 @@ const CHART_TOGGLE_LABELS = {
   serial: '显示序列分布',
   qq: '显示QQ图',
   box: '显示箱线图',
+  site3d: '显示3D柱状图',
 } as const
 
 export type ChartToggleKey = keyof typeof CHART_TOGGLE_LABELS

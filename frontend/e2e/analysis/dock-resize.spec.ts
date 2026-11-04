@@ -89,7 +89,7 @@ async function enterAll(page: import('@playwright/test').Page) {
   await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
   // 盲点这三个 toggle 假定它们都关着，但 toggle 是**账号级持久**的：上一条用例可能
   // 已经开过，于是这里变成「关掉」，serial panel 永远不出现（2026-10-13 retries=0 实测）。
-  await ensureChartToggles(page, { serial: true, qq: true, box: true })
+  await ensureChartToggles(page, { serial: true, qq: true, box: true, site3d: false })
   for (const k of KEYS) {
     await expect(page.locator(`.chart-panel[data-chart-key="${k}"]`)).toBeVisible({ timeout: 20_000 })
   }
