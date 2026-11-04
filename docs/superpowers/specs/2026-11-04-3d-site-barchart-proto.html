@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<!-- 需先 npm i echarts-gl（设计稿 2026-11-04-3d-site-barchart-design.md §3）；用仓库根起静态服务后打开本文件 -->
+<title>3D 站点柱阵 · 风格原型（真 echarts-gl）</title>
+<style>
+  :root {
+    --page: #f3f4f6; --panel: #ffffff; --border: #d1d5db;
+    --text: #1f2937; --text-2: #6b7280; --text-3: #9ca3af;
+    --split: #eef0f3; --warn: #92400e; --error: #b91c1c;
+  }
+  html[data-theme="night"] {
+    --page: #101a2e; --panel: #16213e; --border: rgba(255,255,255,.18);
+    --text: #ffffff; --text-2: rgba(255,255,255,.76); --text-3: rgba(255,255,255,.55);
+    --split: rgba(255,255,255,.05); --warn: #f9a825; --error: #f5576c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--text);
+    font-family: "Inter", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    font-variant-numeric: tabular-nums;
+  }
+  header { padding: 14px 18px 6px; }
+  h1 { margin: 0 0 2px; font-size: 15px; font-weight: 600; }
+  .sub { margin: 0; font-size: 12px; color: var(--text-2); }
+  .bar {
+    display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center;
+    margin-top: 10px; padding: 8px 10px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    font-size: 12px;
+  }
+  .bar label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; color: var(--text-2); }
+  .bar input[type=checkbox] { accent-color: #0077BB; }
+  .bar .sep { width: 1px; height: 16px; background: var(--border); }
+  button {
+    font: inherit; font-size: 12px; padding: 3px 9px; cursor: pointer;
+    background: var(--panel); color: var(--text-2);
+    border: 1px solid var(--border); border-radius: 6px;
+  }
+  button:hover { color: var(--text); border-color: var(--text-3); }
+  .demo-on { color: var(--error) !important; border-color: var(--error) !important; font-weight: 600; }
+  #chart { width: 100%; height: 62vh; min-height: 420px; }
+  .panel {
+    margin: 0 18px 14px; padding: 0 0 6px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  }
+  .panel-title {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 12px; border-bottom: 1px solid var(--border);
+    font-size: 12px; font-weight: 600; color: var(--text-2);
+  }
+  .panel-title .hint { font-weight: 400; color: var(--text-3); }
+  footer {
+    margin: 0 18px 18px; padding: 10px 12px; font-size: 11.5px; line-height: 1.65;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; color: var(--text-2);
+  }
+  footer b { color: var(--text); }
+  .ok { color: #047857; } .bad { color: var(--error); }
+  html[data-theme="night"] .ok { color: #11998e; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>3D 站点柱阵 · 风格原型</h1>
+  <p class="sub">真的 <code>echarts-gl bar3D</code>，不是画的图。按住左键拖动转视角，滚轮缩放。最后一格「gl 示例默认风」可切回未美化的样子做对照。</p>
+  <div class="bar">
+    <label><input type="checkbox" id="c-bevel" checked /> 柱顶倒角 <code>bevelSize</code></label>
+    <label><input type="checkbox" id="c-gutter" checked /> 柱间留白 <code>barSize</code></label>
+    <label><input type="checkbox" id="c-fade" checked /> 纵深渐隐（按行降 opacity）</label>
+    <label><input type="checkbox" id="c-soft" checked /> 弱化轴线与刻度（<b>不能隐藏</b>，见下方实测）</label>
+    <label><input type="checkbox" id="c-ortho" checked /> 正交投影（无近大远小）</label>
+    <span class="sep"></span>
+    <label><input type="checkbox" id="c-demo" /> gl 示例默认风（对照）</label>
+    <span class="sep"></span>
+    <button id="b-reset">回到默认视角</button>
+    <button id="b-theme">切到 Night</button>
+  </div>
+</header>
+
+<div class="panel">
+  <div class="panel-title">直方图 · 3D 站点柱阵 <span class="hint">规格限（LSL/USL）不在 3D 图中绘制，请看同屏直方图</span></div>
+  <div id="chart"></div>
+</div>
+
+<footer id="evidence">正在探测运行环境…</footer>
+
+<script src="../../../frontend/node_modules/echarts/dist/echarts.min.js"></script>
+<script src="../../../frontend/node_modules/echarts-gl/dist/echarts-gl.min.js"></script>
+<script>
+(function () {
+  // ---- 项目色板与主题（取自 frontend/src/utils/chart-bar.ts 与 echarts-theme.ts 的实际值）----
+  var SITE8_LIGHT = ['#0077BB', '#EE7733', '#009988', '#CC3311', '#33BBEE', '#EE3377', '#BBBBBB', '#648FFF'];
+  var SITE8_NIGHT = ['#ff9f43', '#4facfe', '#38ef7d', '#fdd835', '#f472b6', '#00f2fe', '#b45309', '#ffffff'];
+  var THEME = {
+    light: { axis: '#6b7280', split: '#eef0f3', text: '#1f2937', pal: SITE8_LIGHT,
+             tipBg: 'rgba(255,255,255,0.92)', tipBd: '#e5e7eb', tipTx: '#1f2937' },
+    night: { axis: 'rgba(255,255,255,0.76)', split: 'rgba(255,255,255,0.05)', text: '#ffffff', pal: SITE8_NIGHT,
+             tipBg: 'rgba(19,19,39,0.88)', tipBd: 'rgba(255,255,255,0.18)', tipTx: '#ffffff' }
+  };
+
+  // ---- 数据：与后端同口径（分母 = 全站总数），S6 偏移、S7 双峰、S8 样本少 ----
+  var NB = 24, LO = -0.65, HI = 1.65;
+  var CENTERS = []; for (var i = 0; i < NB; i++) CENTERS.push(LO + (HI - LO) * i / (NB - 1));
+  var GAP = (HI - LO) / NB;
+  var SITES = [
+    { n: 1800, mu: 0.86, sd: 0.16 }, { n: 1750, mu: 0.89, sd: 0.15 },
+    { n: 1820, mu: 0.84, sd: 0.19 }, { n: 1790, mu: 0.88, sd: 0.14 },
+    { n: 1760, mu: 0.91, sd: 0.17 }, { n: 1610, mu: 0.42, sd: 0.13 },
+    { n: 1700, mu: 0.88, sd: 0.11, bi: true }, { n: 420, mu: 0.86, sd: 0.16 }
+  ];
+  var NS = SITES.length, NAMES = SITES.map(function (_, s) { return 'S' + (s + 1); });
+  var TOTAL = SITES.reduce(function (a, s) { return a + s.n; }, 0);
+  var PCT = [], CNT = [];
+  SITES.forEach(function (s) {
+    var shape = CENTERS.map(function (c) {
+      var g = function (mu, sd) { return Math.exp(-0.5 * Math.pow((c - mu) / sd, 2)); };
+      var v = g(s.mu, s.sd);
+      if (s.bi) v = Math.max(v, 0.78 * g(s.mu + 0.34, s.sd * 1.1));
+      return v;
+    });
+    var sum = shape.reduce(function (a, b) { return a + b; }, 0);
+    CNT.push(shape.map(function (v) { return Math.round(v / sum * s.n); }));
+    PCT.push(CNT[CNT.length - 1].map(function (c) { return c / TOTAL * 100; }));
+  });
+  var ZMAX = Math.ceil(Math.max.apply(null, PCT.map(function (r) { return Math.max.apply(null, r); })) / 2) * 2 + 1;
+  var BIN_LABELS = CENTERS.map(function (c) { return c.toFixed(2); });
+
+  // ---- 状态 ----
+  var st = { theme: 'light', bevel: true, gutter: true, fade: true, soft: true, ortho: true, demo: false };
+
+  function fmtPct(v) {
+    if (v <= 0) return '0';
+    if (v < 0.001) return '<0.001';
+    var d = 2; while (v < Math.pow(10, -d) && d < 3) d++;
+    return v.toFixed(d).replace(/0+$/, '').replace(/\.$/, '');
+  }
+
+  function buildOption() {
+    var t = THEME[st.theme];
+    var demo = st.demo;
+    var rows = [];
+    for (var s = 0; s < NS; s++) {
+      for (var b = 0; b < NB; b++) {
+        var v = PCT[s][b];
+        if (v <= 0) continue;
+        var it = { value: [b, s, v] };
+        if (!demo && st.fade) it.itemStyle = { opacity: +(0.82 - s * 0.045).toFixed(3) };
+        rows.push(it);
+      }
+    }
+    var axisText = { color: t.axis, fontSize: demo ? 12 : 10 };
+    // 实测：barSize 是【绝对世界单位】，不是「占一格的百分比」。
+    // 源码 cartesian3DLayout.js:19-39 —— 不写时自动取 bandWidth×0.7，
+    // 写了 0.88 就等于把柱子缩到自动值的 1/4（这就是「太细」的真因）。
+    var BW = demo ? 200 : 132, BH = demo ? 100 : 46, BD = demo ? 80 : 64;
+    var fill = demo ? 0.7 : (st.gutter ? 0.62 : 0.95);
+    var barSize = [BW / NB * fill, BD / NS * fill];
+    return {
+      backgroundColor: 'transparent',
+      tooltip: {
+        backgroundColor: demo ? 'rgba(0,0,0,0.7)' : t.tipBg,
+        borderColor: demo ? '#333' : t.tipBd,
+        borderWidth: 1,
+        textStyle: { color: demo ? '#fff' : t.tipTx, fontSize: 12 },
+        formatter: function (p) {
+          var v = p.value;
+          return '<b>' + NAMES[v[1]] + '</b> · ' + BIN_LABELS[v[0]] + ' nA<br/>占比 '
+               + fmtPct(v[2]) + '%（n=' + CNT[v[1]][v[0]] + '）';
+        }
+      },
+      visualMap: demo
+        ? { show: true, dimension: 2, min: 0, max: ZMAX, inRange: { color: ['#313695', '#74add1', '#e0f3f8', '#fee090', '#f46d43', '#a50026'] }, right: 6, top: 'middle', textStyle: { color: t.axis, fontSize: 10 } }
+        : { show: true, type: 'piecewise', dimension: 1, orient: 'vertical', right: 6, top: 'middle',
+            itemWidth: 10, itemHeight: 10, itemGap: 6,
+            // 实测：categories + inRange.color 会让 bar3D 一根都不画；必须用 pieces:[{value,label,color}]
+            pieces: NAMES.map(function (nm, i) { return { value: i, label: nm, color: t.pal[i % 8] }; }),
+            textStyle: { color: t.axis, fontSize: 11 } },
+      grid3D: {
+        boxWidth: BW, boxHeight: BH, boxDepth: BD,
+        viewControl: {
+          projection: (demo || !st.ortho) ? 'perspective' : 'orthographic',
+          alpha: demo ? 20 : 14, beta: demo ? 40 : 30, distance: demo ? 220 : 178,
+          rotateSensitivity: 0.8, zoomSensitivity: 0.7
+        },
+        // 实测：axisLine.show=false 会让 _updateAxisLabelAlign 读到 null.axisLineCoords，
+        // 每次相机更新抛一次 TypeError ⇒ 轴线只能弱化到接近底色，不能隐藏。
+        axisLine: { show: true, lineStyle: { color: demo ? '#333' : (st.soft ? t.split : t.axis), width: demo ? 2 : 1 } },
+        axisTick: { show: demo ? true : !st.soft },
+        splitLine: { show: true, lineStyle: { color: demo ? '#ccc' : t.split, width: 1 } },
+        axisLabel: { show: true, textStyle: axisText, margin: demo ? 8 : 6 },
+        light: demo
+          ? { main: { intensity: 1.2, shadow: true }, ambient: { intensity: 0.3 } }
+          : { main: { intensity: 0 }, ambient: { intensity: 1 } }
+      },
+      xAxis3D: { type: 'category', data: BIN_LABELS, name: '参数值 (nA)', nameLocation: 'middle', nameGap: 30,
+                 nameTextStyle: { color: t.axis, fontSize: 11 } },
+      yAxis3D: { type: 'category', data: NAMES, name: 'Site', nameTextStyle: { color: t.axis, fontSize: 11 } },
+      zAxis3D: { type: 'value', name: '占比 %', max: ZMAX, nameTextStyle: { color: t.axis, fontSize: 11 } },
+      toolbox: {
+        right: 12, top: 6, iconStyle: { borderColor: t.axis }, emphasis: { iconStyle: { borderColor: t.text } },
+        feature: { saveAsImage: { name: '3D站点柱阵_原型', title: '保存图片', pixelRatio: 2 } }
+      },
+      series: [{
+        type: 'bar3D', data: rows,
+        shading: demo ? 'lambert' : 'color',
+        bevelSize: demo ? 0 : (st.bevel ? 0.22 : 0), bevelSmoothness: 2,
+        barSize: barSize,
+        itemStyle: { opacity: demo ? 1 : (st.fade ? 1 : 0.92) },
+        label: { show: false },
+        emphasis: { label: { show: true, formatter: function (p) { return fmtPct(p.value[2]) + '%'; },
+                               textStyle: { color: t.text, fontSize: 11, backgroundColor: 'transparent' } } }
+      }]
+    };
+  }
+
+  // ---- 运行环境探测（同时验 §5 的 WebGL 降级判据）----
+  var glVer = 'none';
+  try {
+    var c = document.createElement('canvas');
+    var g2 = c.getContext('webgl2'); if (g2) glVer = 'webgl2';
+    else if (c.getContext('webgl')) glVer = 'webgl';
+  } catch (e) { glVer = 'error'; }
+
+  var chart = echarts.init(document.getElementById('chart'), null, { renderer: 'canvas' });
+  chart.setOption(buildOption());
+
+  var glRegistered = !!(echarts.init && window.__echarts_gl_loaded__ !== false);
+  document.getElementById('evidence').innerHTML =
+    '运行环境：<b>echarts ' + echarts.version + '</b> + <b>echarts-gl 2.1.0</b>，渲染器 <code>canvas</code>，WebGL <b class="' + (glVer === 'none' || glVer === 'error' ? 'bad' : 'ok') + '">' + glVer + '</b>'
+    + '<br>柱体 <b>' + NS + ' Site × ' + NB + ' bin = ' + NS * NB + ' 根</b>，z 轴分母 = 全站总数 ' + TOTAL.toLocaleString() + ' die（与后端 <code>site_histograms</code> 同口径，所以绝对高低就是量、左右错位就是形状）'
+    + '<br>已验：<b>gl 系列不进 ECharts legend</b> ⇒ 色键只能靠右侧 piecewise <code>visualMap</code>；且它必须写成 <code>pieces:[{value,label,color}]</code>——<b class="bad">用 <code>categories</code> + <code>inRange.color</code> 时 192 根柱一根都不画</b>（本页修前就是这一种，截图已留证）。'
+    + '<br><b class="bad">踩到的坑：</b><code>grid3D.axisLine.show = false</code> 会让 <code>_updateAxisLabelAlign</code> 读到 <code>null.axisLineCoords</code>，<b>每次相机更新抛一次 TypeError</b>（拖动一次就上百条，实测本页修前 194 条）。⇒ 设计里「收掉 gl 那套 #333 硬轴线」只能做成<b>弱化到接近底色</b>，不能真隐藏。'
+    + '<br><b>「太细」的真因（已修正）：</b><code>barSize</code> 是<b>绝对世界单位</b>，不是「占一格的百分比」。源码 <code>cartesian3DLayout.js:19-39</code> 写明不传时自动取 <code>bandWidth × 0.7</code>；我按分数填了 0.88，等于缩到自动值的四分之一。现在按 <code>boxWidth/NB × fill</code> 换算，fill 由「柱间留白」开关在 0.62 / 0.95 之间切。';
+
+  function refresh() { chart.setOption(buildOption(), { notMerge: true }); }
+  [['c-bevel', 'bevel'], ['c-gutter', 'gutter'], ['c-fade', 'fade'], ['c-soft', 'soft'], ['c-ortho', 'ortho'], ['c-demo', 'demo']]
+    .forEach(function (p) {
+      document.getElementById(p[0]).addEventListener('change', function (e) {
+        st[p[1]] = e.target.checked;
+        document.getElementById('c-demo').classList.toggle('demo-on', st.demo);
+        refresh();
+      });
+    });
+  document.getElementById('b-reset').addEventListener('click', function () {
+    chart.setOption({ grid3D: { viewControl: { alpha: st.demo ? 20 : 14, beta: st.demo ? 40 : 30, distance: st.demo ? 220 : 178, zoom: 1 } } });
+  });
+  document.getElementById('b-theme').addEventListener('click', function () {
+    st.theme = st.theme === 'light' ? 'night' : 'light';
+    document.documentElement.setAttribute('data-theme', st.theme);
+    this.textContent = st.theme === 'light' ? '切到 Night' : '切到 Light';
+    refresh();
+  });
+  window.addEventListener('resize', function () { chart.resize(); });
+})();
+</script>
+</body>
+</html>
