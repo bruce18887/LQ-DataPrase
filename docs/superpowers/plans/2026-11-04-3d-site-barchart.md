@@ -1584,6 +1584,16 @@ npx vue-tsc -p tsconfig.app.json --noEmit
 ```
 Expected：新 spec 全绿；无 TS 输出。
 
+- [ ] **Step 6.5：规格 + 质量复审后的收尾（控制器 2026-11-04，往后的任务以树为准）**
+
+1. **「勾选框留到 Task 7」是假的**：本任务 Step 5 就要加勾选与记忆接线，否则 `ChartToggles` 加宽后 `saveChartState({toggles})` 直接 TS 红。实施方按计划做了，这一点以树为准。
+2. **`loadLayout` 已导出**（原先私有）：`isValidLayout` 只回答合法与否，答不了「读出来还是不是原来那份」。T2 现在用 mock 过的 `safeStorage` 喂一份 `v:1` 四图存档做**真回读**，断言 `rows/rowPcts/colPcts/bodyH` 值相等；mock 里校验键名，读错键会拿到 null 而红。变异「读档时补一行 site3d」「丢 bodyH」「rowPcts 重建」三条实测各红该条。
+3. **`bodyH` 夹具从 null 改成 900**：null 进 null 出的回读断言是空断言（质量复审指出）。
+4. **判据缺口（留给 Task 7）**：删掉 `SingleParamTab.vue` 里 `onDockClose` 的 `site3d` 分支，全量 vitest 664 例仍绿——面板「×」关闭 3D 却不取消勾选这条行为在 T2 层无人钉。Task 7 要把勾选块抽成 `useChartToggles.ts`，**抽出时必须给「关闭即取消对应勾选」补一条 T2**（五键逐一，别只测 histogram）。同理 `HIST_ROW_PX 780→781` 全绿，该常量目前无判据（风险低，记录在案）。
+5. **中间态与 reconcile 的已知差异**：老用户存的是 4 图布局、勾上 site3d 时，`reconcileRows` 会**追加一整行**（4 行），而不是走 `defaultLayout` 的 3 行——这是「保留用户手调形状」的预期结果，不是缺陷；本任务 Step 7 的浏览器核对并入 Task 7 一起做（那时图体才存在）。
+6. **e2e helper 的键清单漂了**：`frontend/e2e/helpers/params.ts:254,262` 仍写「四个图表开关」且 `CHART_TOGGLE_LABELS` 缺 `site3d` ⇒ Task 8 必须补（否则新勾选框的定位器契约是缺的）。
+7. 前向注释（`ChartDock.vue` 的 `#site3d` slot、`SingleParamTab.vue` 的 gl 分包）当前都还没发生，Task 7 落地后这些话才成立——若 Task 7 改道，记得回来改这两处。
+
 - [ ] **Step 7：确认第 5 格不会吃掉存量布局（真实浏览器一眼，别只看单测）**
 
 ```bash
