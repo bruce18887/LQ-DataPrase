@@ -20,6 +20,7 @@
           <el-checkbox v-model="showSerial" size="small">显示序列分布</el-checkbox>
           <el-checkbox v-model="showQQPlot" size="small">显示QQ图</el-checkbox>
           <el-checkbox v-model="showBoxPlot" size="small">显示箱线图</el-checkbox>
+          <el-checkbox v-model="showSite3D" size="small">显示3D柱状图</el-checkbox>
         </div>
       </div>
     </template>
@@ -422,6 +423,8 @@ const currentBoxPlotData = computed(() => {
 
 // Composable: QQ Plot
 const showQQPlot = ref(false)
+// 3D 站点柱阵：默认不勾（勾上即把 dock 从 4 格挤到 5 格，且要下载 gl 分包）
+const showSite3D = ref(false)
 const {
   qqLoading,
   qqResult,
@@ -443,6 +446,7 @@ const activeChartKeys = computed<ChartKey[]>(() => {
   if (showSerial.value) keys.push('serial')
   if (showQQPlot.value) keys.push('qq')
   if (showBoxPlot.value) keys.push('box')
+  if (showSite3D.value) keys.push('site3d')
   return keys
 })
 // 至少一个图表勾选 = 有内容可渲染
@@ -450,22 +454,23 @@ const anyChartVisible = computed(() => activeChartKeys.value.length > 0)
 // dock 显隐：其余图由各自 showX 决定挂载，唯直方图需要数据才渲染有意义——
 // 当直方图是唯一选中项且数据未到时先不挂 dock，避免空图
 const dockVisible = computed(() => anyChartVisible.value && (!showHistogram.value || !!histResult.value))
-// 面板「×」关闭 → 复位对应勾选（与顶部四个显示勾选同源）
+// 面板「×」关闭 → 复位对应勾选（与顶部五个显示勾选同源）
 function onDockClose(key: ChartKey) {
   if (key === 'hist') showHistogram.value = false
   else if (key === 'serial') showSerial.value = false
   else if (key === 'qq') showQQPlot.value = false
   else if (key === 'box') showBoxPlot.value = false
+  else if (key === 'site3d') showSite3D.value = false
 }
 
 // ========== 图表勾选账号记忆 ==========
 // 套用与上报互斥：套用期间 watcher 不回写（避免把「恢复」当「用户改动」再存一遍）
 let togglesApplying = false
 let togglesTouched = false
-watch([showHistogram, showSerial, showQQPlot, showBoxPlot], ([h, s, q, b]) => {
+watch([showHistogram, showSerial, showQQPlot, showBoxPlot, showSite3D], ([h, s, q, b, d]) => {
   if (togglesApplying) return
   togglesTouched = true
-  saveChartState({ toggles: { hist: h, serial: s, qq: q, box: b } })
+  saveChartState({ toggles: { hist: h, serial: s, qq: q, box: b, site3d: d } })
 })
 void loadChartMemory().then(({ memoryEnabled, state }) => {
   // 开关关/未加载（null）一律不套用：记忆功能只在明确开启时生效
@@ -475,6 +480,7 @@ void loadChartMemory().then(({ memoryEnabled, state }) => {
   showSerial.value = state.toggles.serial
   showQQPlot.value = state.toggles.qq
   showBoxPlot.value = state.toggles.box
+  showSite3D.value = state.toggles.site3d
   nextTick(() => { togglesApplying = false })
 })
 

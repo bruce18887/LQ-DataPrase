@@ -4,7 +4,7 @@
      - 每张图标题栏手柄 ⠿ 触发指针拖拽，拖到别图的 上/下/左/右/中 分别：新行 / 新列 / 交换
      - 「重置布局」+ 标题栏「×关闭 / ⤢最大化」
      模型与持久化在 useChartDock.ts；本组件只管渲染 + 指针命中。
-     内容通过按 key 命名的 slot 注入：hist/serial/qq/box（图体）与 controls-box（箱线控件）。 -->
+     内容通过按 key 命名的 slot 注入：图体 hist/serial/qq/box/site3d，专属控件 controls-serial/hist/box（site3d 的复位入口在本批 Task 7 随图体一起接；dock 本身已有 controls-<key> 透传，加图不用改本组件）。 -->
 <template>
   <div class="chart-dock" :class="{ 'is-dragging': !!drag }">
     <div class="chart-dock__bar">
@@ -119,7 +119,7 @@ const dock = useChartDock(() => props.activeKeys)
 const { rows, rowPcts, colPcts, bodyH } = dock
 
 const TITLES: Record<ChartKey, string> = {
-  hist: '直方图', serial: '序列分布', qq: 'QQ 图', box: '箱线图',
+  hist: '直方图', serial: '序列分布', qq: 'QQ 图', box: '箱线图', site3d: '3D柱状图',
 }
 const titleOf = (k: ChartKey) => TITLES[k] ?? k
 

@@ -18,9 +18,12 @@ import { safeGetItem, safeSetItem, safeRemoveItem } from '../../../utils/safeSto
 import { loadChartMemory, saveChartState, isMemoryEnabled } from '../../../composables/useChartMemory'
 import { MAX_BODY_H, defaultRowPcts, reconcileRowPcts, reconcileRows } from './dockGeometry'
 
-export type ChartKey = 'hist' | 'serial' | 'qq' | 'box'
-const ALL_KEYS: ChartKey[] = ['hist', 'serial', 'qq', 'box']
+export type ChartKey = 'hist' | 'serial' | 'qq' | 'box' | 'site3d'
+const ALL_KEYS: ChartKey[] = ['hist', 'serial', 'qq', 'box', 'site3d']
 export const DOCK_LAYOUT_STORAGE_KEY = 'lqdp-analysis-chart-layout'
+// 存档版本：加一个 ChartKey 是**向后兼容**的变换（isValidLayout 只要求 key ∈ ALL_KEYS），
+// 所以不升档。升档会让 `p.v !== VERSION` 命中，把每个用户存过的布局（本机 localStorage
+// 与账号记忆两条路）整表丢弃——2026-11-04 的 spec 初稿把这条因果写反了，已勘误。
 const VERSION = 1
 
 /** 底部横条拖拽的整体高度上下限（px）——持久化回填时同限夹取 */
@@ -86,7 +89,11 @@ export function isValidLayout(parsed: unknown): parsed is DockLayout {
   return true
 }
 
-function loadLayout(): DockLayout | null {
+/**
+ * 读本机 localStorage 里的布局存档（导出供 test/unit/chartLayout.spec.ts 做「旧 v:1
+ * 四图存档回读后字段逐字不丢」的真回读；`isValidLayout` 只回答合法与否，答不了保留性）。
+ */
+export function loadLayout(): DockLayout | null {
   const raw = safeGetItem(DOCK_LAYOUT_STORAGE_KEY)
   if (!raw) return null
   try {

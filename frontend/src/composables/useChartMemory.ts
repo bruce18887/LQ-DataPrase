@@ -27,7 +27,7 @@ import { DOCK_LAYOUT_STORAGE_KEY, isValidLayout, type DockLayout } from '../page
 
 const DEBOUNCE_MS = 800
 
-export interface ChartToggles { hist: boolean; serial: boolean; qq: boolean; box: boolean }
+export interface ChartToggles { hist: boolean; serial: boolean; qq: boolean; box: boolean; site3d: boolean }
 export interface ChartMemorySnapshot { layout: DockLayout | null; toggles: ChartToggles | null }
 export interface ChartMemoryLoadResult {
   memoryEnabled: boolean | null
@@ -46,16 +46,19 @@ export function isMemoryEnabled(): boolean | null {
   return memoryEnabled
 }
 
-function parseToggles(raw: unknown): ChartToggles | null {
+/** 账号记忆里的勾选集（导出供 test/unit/chartLayout.spec.ts 量向后兼容） */
+export function parseToggles(raw: unknown): ChartToggles | null {
   if (!raw || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
   if (typeof o.serial !== 'boolean' || typeof o.qq !== 'boolean' || typeof o.box !== 'boolean') return null
   // hist 为 2026-09-13 新增字段：旧账号数据缺它 → 默认 true（直方图原为常驻不可关）
+  // site3d 为 2026-11-04 新增字段：缺它 → 默认 false（新图默认不勾，别把 dock 从 4 格挤成 5 格）
   return {
     hist: typeof o.hist === 'boolean' ? o.hist : true,
     serial: o.serial,
     qq: o.qq,
     box: o.box,
+    site3d: typeof o.site3d === 'boolean' ? o.site3d : false,
   }
 }
 
@@ -89,6 +92,7 @@ export function loadChartMemory(): Promise<ChartMemoryLoadResult> {
           serial: keys.has('serial'),
           qq: keys.has('qq'),
           box: keys.has('box'),
+          site3d: keys.has('site3d'),
         }
       }
       if (memoryEnabled && latest) scheduleFlush()
