@@ -2203,6 +2203,16 @@ Expected：`lint:e2e` 无输出；两条 passed。
 
 如果 ①红在「面板与宿主都在、但 `canvas` 数恒为 0」，先在同一页执行 `document.createElement('canvas').getContext('webgl2') || document.createElement('canvas').getContext('webgl')` 看是否为 `null`：非 `null` 才是实现问题（多半是渲染器没被强制成 canvas，或 `echarts-gl` 没被真正加载进这一页）；`null` 说明这台机器的测试浏览器走到了 §9 的「不建图 + 提示」分支——**那是产品行为被量出来了，如实报上去，不许为了让用例绿就删断言**。
 
+- [ ] **Step 3.5：第五个勾选会污染按面板数断言的既有用例（2026-11-04 复审实测）**
+
+勾选是账号级持久的，`fullyParallel` 下本文件开 site3d 的同时，`dock-resize.spec.ts` 的 `enterAll()` 正好在数 `.chart-panel`（`toHaveCount(4)` 三处）——它会看到 5 张图硬红。给 `enterAll()` 的收敛补 `site3d: false`（一行），让每个用例自己声明要的勾选集合：
+
+```ts
+await ensureChartToggles(page, { serial: true, qq: true, box: true, site3d: false })
+```
+
+同类扫描口径：`grep -rn "toHaveCount(" e2e/analysis e2e/settings`，凡是数 `.chart-panel` / `.chart-dock__row` 的文件都要过一眼（`chart-memory.spec.ts` 自己 seed `analysis_chart_state: {}`，默认 site3d 关，不用改）。
+
 - [ ] **Step 4：提交**
 
 ```bash
