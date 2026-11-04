@@ -61,6 +61,7 @@
 | `pages/analysis/composables/useChartDock.ts` | `ChartKey` 加 `'site3d'`、`ALL_KEYS`、`defaultLayout`、`isValidLayout`，**并升 `VERSION`** | 不升 `VERSION` 的话，用户存过的 4 图布局会被 `isValidLayout` 判非法整表丢弃（[useChartDock.ts:73-83](../../../frontend/src/pages/analysis/composables/useChartDock.ts)） |
 | `pages/analysis/components/ChartDock.vue` | `TITLES` 加 `site3d` | 标题「3D柱状图」（[ChartDock.vue:124](../../../frontend/src/pages/analysis/components/ChartDock.vue)） |
 | `pages/analysis/components/SingleParamTab.vue` | 复选框「显示3D柱状图」+ `#site3d` slot + 异步组件 | 前缀「显示」沿用现有四个复选框的写法（[SingleParamTab.vue:19-22](../../../frontend/src/pages/analysis/components/SingleParamTab.vue)）；**默认不勾**，避免 dock 从 4 格挤成 6 格 |
+| 同上，`#controls-site3d` slot | 「回到默认视角」**图标**（不是文字按钮） | 走 `ChartDock.vue:38-40` 已有的 `controls-<key>` 透传，`ChartPanel` 已有 `controls` 槽，无需改 dock。视角常量从 `site3dOption.ts` 导出单一来源，初始 option 与复位按钮共用（§10 T2 ⑧ 钉住） |
 
 ## 5. 风格：逐项映射回项目 token
 
@@ -165,6 +166,8 @@
   （钉住 §6.3：写成单一 `fill` 同时乘两个方向，就会退回板状截面，用户看到的「歪」会复现）；
   ⑥ 无 Site 列返回 `null` 而非空 option；
   ⑦ **同一 `result` 下 3D 取用的 bin 集合 === `histogramBins.ts` 给 2D 的 `activeIndices`**（钉 §8）。
+  ⑧ 导出的视角常量（`alpha 28 / beta 30 / distance 245`）既是初始 `viewControl` 也是「回到默认视角」
+  的复位目标——断言两处读同一个导出值，防止复位按钮和初始机位各写一份而漂移（§4）。
   另加 `histogramBins.spec.ts` 覆盖 clip/exclude/off 三档与「边界病态导致全排除时回退全部 bin」的守卫。
 - **T3（Playwright，`frontend/e2e/analysis/site3d.spec.ts`）** 只留两条不可替代的，标 `@p1`：
   ① 勾选后 dock 内出现 `data-site3d-canvas`，且 canvas 实测盒宽/盒高非零（真 WebGL 出图，按 R2⑤ 先 `count()` 再取 `boundingBox()`）；
@@ -180,7 +183,9 @@
 
 - 不改后端任何端点、序列化或分箱逻辑。
 - 不进导出报告（导出是 `apps/export/charts.py` 的 matplotlib Agg 服务端重绘，前端 ECharts 图本来都不进导出）。用户 2026-11-04：「后期再说」。
-- 不做 3D 专属设置面板（`fill`、机位、渐隐先固定为实测值；后续要调再说）。
+- 不做 3D 专属设置面板（`wFill`/`dFill`、机位、渐隐先固定为实测值；后续要调再说）。
+  唯一例外是 §4 那个「回到默认视角」图标——它是 §12「任意角度不可保证」那条风险的兜底，
+  不是设置项，不带任何可调参数。
 - 不做多文件分析 / 相关性 tab 的 3D。
 - 不做归一化开关（§1 已说明单一编码同时承载量与形状）。
 - 不做「WebGL 不可用时退化成 2D 分组柱」。
