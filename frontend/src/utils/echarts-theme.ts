@@ -10,6 +10,13 @@ import { useThemeStore } from '../stores/theme'
 import { computed } from 'vue'
 import { chartFontSize, fontFamily } from '../theme/typography'
 import { useUserSettingsStore } from '../stores/userSettings'
+import {
+  echartsColorsFor,
+  grid3DStyle,
+  type EChartsColors,
+} from './echarts-tokens'
+
+export type { EChartsColors, Grid3DStyle } from './echarts-tokens'
 
 // ============================================================
 //  渲染器模式 — 全局单一切换点，改为 'canvas' 即可切回
@@ -57,99 +64,13 @@ export function useEChartsTheme() {
 
   const isDark = computed(() => themeStore.currentTheme === 'night')
 
-  // 基础颜色配置
-  const colors = computed(() => {
-    if (isDark.value) {
-      return {
-        // 背景色
-        backgroundColor: 'transparent',
+  // 两套值与「键集必须对称」的约束都在 utils/echarts-tokens.ts（那份是纯数据，
+  // 双主题对称由 test/unit/echartsTokens.spec.ts 对真值断言）。这里只做 store 接线，
+  // 选板本身也委托给 echartsColorsFor——映射写在这行就摸不进 T2，选反了没人红。
+  const colors = computed<EChartsColors>(() => echartsColorsFor(isDark.value))
 
-        // 文本色（对齐指南 §6.2：--text / --text-2 / --text-3）
-        textColor: 'rgba(255, 255, 255, 0.76)',
-        titleColor: '#ffffff',
-        subtextColor: 'rgba(255, 255, 255, 0.55)',
-
-        // 轴线颜色（--border / --bar-grid）
-        axisLineColor: 'rgba(255, 255, 255, 0.10)',
-        axisLabelColor: 'rgba(255, 255, 255, 0.76)',
-        splitLineColor: 'rgba(255, 255, 255, 0.04)',
-
-        // 边框颜色
-        borderColor: 'rgba(255, 255, 255, 0.10)',
-
-        // 图例颜色
-        legendTextColor: 'rgba(255, 255, 255, 0.76)',
-
-        // 工具提示（--card-glass / --border-2 / --text）
-        tooltipBg: 'rgba(19, 19, 39, 0.88)',
-        tooltipBorder: 'rgba(255, 255, 255, 0.18)',
-        tooltipText: '#ffffff',
-
-        // 语义状态色：与 design-tokens.css 的 --success/--warn/--error/--info/--brand
-        // 同源（night 分支取 --p-teal-600 / --p-amber-500 / --p-red-500 /
-        // --p-sky-600 / --p-amber-500）。ECharts 走 canvas/svg 渲染，**不解析**
-        // CSS 变量也不解析 color-mix()，所以 setOption 里的颜色必须取这里的
-        // JS 常量；DOM 模板里才用 var(--token)。两个主题分支的键集必须对称，
-        // 否则 TS 会把返回值推成联合类型、访问时报错。
-        successColor: '#11998e',
-        warnColor: '#f9a825',
-        errorColor: '#f5576c',
-        infoColor: '#4facfe',
-        brandColor: '#f9a825',
-        /** 品牌色 45% 透明——替代 CSS color-mix(in srgb, var(--brand) 45%, transparent) */
-        brandColorSoft: 'rgba(249, 168, 37, 0.45)',
-
-        // 系列颜色：2026-08-29 新色板（--chart-1..8）CVD 复验未通过
-        // （tasks/cvd_verify.mjs：light 灰/青绿 deutan ΔE=7.6、night 浅蓝/粉红 deutan ΔE=13.6），
-        // 按指南 §6.2 维持现状；轴系/文本/tooltip 已对齐。
-        seriesColors: [
-          '#fdd835', // 金色
-          '#14b8a6', // 青绿
-          '#4facfe', // 蓝色
-          '#fb7185', // 粉红
-          '#38ef7d', // 绿色
-          '#b45309', // 棕色（替代原浅金：与金色在色盲视角下不可分）
-          '#00f2fe', // 浅蓝
-          '#ff9f43', // 橙色（替代原浅粉：与青绿在 protan 视角下不可分）
-        ]
-      }
-    } else {
-      return {
-        // 浅色主题配置（对齐指南 §6.2）
-        backgroundColor: 'transparent',
-        textColor: '#6b7280',
-        titleColor: '#1f2937',
-        subtextColor: '#9ca3af',
-        axisLineColor: '#e5e7eb',
-        axisLabelColor: '#6b7280',
-        splitLineColor: '#eef0f3',
-        borderColor: '#e5e7eb',
-        legendTextColor: '#6b7280',
-        tooltipBg: 'rgba(255, 255, 255, 0.92)',
-        tooltipBorder: '#e5e7eb',
-        tooltipText: '#1f2937',
-        // 语义状态色：与 night 分支同一组键，取 light 语义层
-        // （--p-teal-700 / --p-amber-800 / --p-red-700 / --p-sky-700 / --p-blue-600）
-        successColor: '#047857',
-        warnColor: '#92400e',
-        errorColor: '#b91c1c',
-        infoColor: '#0369a1',
-        brandColor: '#2563eb',
-        brandColorSoft: 'rgba(37, 99, 235, 0.45)',
-        // 系列颜色：同 night 分支说明，CVD 复验未过维持现状
-        seriesColors: [
-          '#2563eb', // 专业蓝
-          '#047857', // 绿色
-          '#d97706', // 琥珀（替代橙：橙与红在 deutan 下不可分）
-          '#b91c1c', // 红色
-          '#0284c7', // 蓝色
-          '#86198f', // 李子（替代紫：紫与蓝在 deutan 下不可分）
-          '#475569', // 深灰（替代深橙）
-          '#0d9488', // 青色
-        ]
-      }
-    }
-  })
+  /** grid3D（3D 站点柱阵）样式件：与 getBaseOption 同一个 colors 源，不散写 */
+  const grid3DTheme = computed(() => grid3DStyle(colors.value))
 
   /**
    * 获取ECharts通用配置
@@ -252,6 +173,7 @@ export function useEChartsTheme() {
   return {
     isDark,
     colors,
-    getBaseOption
+    getBaseOption,
+    grid3DTheme
   }
 }
