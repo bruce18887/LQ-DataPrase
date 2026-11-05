@@ -136,7 +136,7 @@ journalctl -u lqdp -f          # 看 bootstrap 与访问日志，见 §7 验收
 前端路由 `/pages/analysis` 同样 200，不会 404）。没有 nginx，静态资源也归 Django 发。
 目录不存在时会在启动时给一条可见警告，届时浏览器打开根路径会 404。
 
-**升级前端的正确顺序：`npm run build` → 重启服务。**
+**升级前端的正确顺序：`npm run build` → 重启服务。**（完整升级发布流程见 §8。）
 `DEBUG=False` 下 Django 的缓存模板加载器会把 SPA 的 `index.html` 常驻进程内存，只换磁盘文件的话，
 进程仍在发旧 HTML，而旧 HTML 引用的 chunk 名已被新构建替换 → **整页空白且没有任何报错**
 （2026-10-14 实测：`#app` 零子节点，`document.scripts` 还指向上一次的 hash）。
@@ -326,3 +326,124 @@ Windows 上没有真正的 SIGTERM 投递，所以它是「按源码应有」而
 
 再加两条只能在真机上做的：**导出一次批量图表并打开 PNG 看中文有没有变方块**（§1.2），
 以及 **在客户端 Electron 里把后端地址填成这台服务器**跑一遍登录（D1 的那条通路）。
+
+## 8. 升级发布（已有服务器）
+
+本节只覆盖「已在跑方案 A 的服务器，从旧版本换到新版本」；首次安装见 `deploy/README.md` 与 §3。
+发版提交只应从已并入 `master` 的提交出（收口门禁见 `docs/reference/testing-gates.md`），
+不要在服务器上直接检出一个功能分支。
+
+### 8.1 固定顺序
+
+```
+备份库 → 更新源码 → 装依赖（有变更才需要）→ 构建前端 → 重启 → 验收
+```
+
+其中只有 **构建前端 → 重启** 不能交换，原因见 §8.2；其余步骤被打乱的代价见 §8.5。
+
+```bash
+# 0) 载入部署环境；下面所有 manage.py / backup_db 都依赖这些变量
+set -a; . /etc/lqdp/server.env; set +a
+cd /srv/lqdp-src
+
+# 1) 先备份（§4）。服务器档会固定多一条「未携带 secret.key」警告，那是预期输出
+.venv/bin/python manage.py backup_db --dest /srv/lqdp-backup
+
+# 2) 更新源码。git 与 rsync 二选一；前端产物不在 git 里，两种方式都要走第 4 步
+git fetch --all --tags
+git checkout master
+git pull --ff-only
+# 或者：从开发机 rsync 源码树到 /srv/lqdp-src（保留服务器上的 .venv）
+
+# 3) Python 依赖。requirements/ 没变时这条是空操作
+.venv/bin/pip install -r requirements/base.txt
+
+# 4) 构建前端。frontend/dist/ 被 .gitignore 排除，git pull 不会带来它
+cd frontend
+npm ci
+npm run build
+cd ..
+
+# 5) 重启。standalone.py 在起服务前自动跑 migrate --run-syncdb（standalone.py:97）
+sudo systemctl restart lqdp
+journalctl -u lqdp -f
+```
+
+几点约束：
+
+- **依赖只装 `requirements/base.txt`**。`production.txt` 只多一条 gunicorn，那是方案 B 的东西，
+  方案 A 不装（§6）。
+- **`npm ci` 需要 Node ≥ 22.12 / npm ≥ 10**（`frontend/package.json` 的 `engines`）。
+- **服务器没有 Node 时**，在 Windows 开发机执行 `cd frontend && npm run build`，再把
+  `frontend/dist/` 同步到 `/srv/lqdp-src/frontend/dist/`。服务器走 http 同源，普通构建即可；
+  `VITE_ELECTRON=true` 是给 Electron 的 `file://` 用的，不需要。
+- **`/srv/lqdp-src` 应保持工作树干净**，`git pull` 才不会被本地改动挡住；`frontend/dist/`
+  被忽略，不会挡路。
+- **`deploy/` 下的单元或环境文件模板有变更时**（`git diff --stat <旧版本>..HEAD -- deploy/`
+  可查），按 `deploy/README.md` 重新 install 模板并 `systemctl daemon-reload`。
+  `/etc/lqdp/server.env` 本身不要覆盖——`SECRET_KEY` / `SFTP_CONFIG_KEY` 只在那里（§4）。
+
+### 8.2 为什么必须「先构建、再重启」
+
+`DEBUG=False` 下有两处缓存会把旧产物钉在进程里：
+
+1. Django 的缓存模板加载器把 SPA 的 `index.html` 常驻内存（§3）；
+2. WhiteNoise 在 `WHITENOISE_AUTOREFRESH=False` 下于启动时建静态索引
+   （`config/settings/server.py:140-141`），新 chunk 文件同样要重启后才会被看见。
+
+只换磁盘文件、不重启的典型症状是**整页空白且没有任何报错**：进程仍在发旧 HTML，而旧 HTML
+引用的 chunk 名已被新构建替换（2026-10-14 实测，见 §3）。
+
+### 8.3 升级后验收
+
+复用 §7 的判据，最小集：
+
+```bash
+BASE=http://127.0.0.1:8000
+
+systemctl is-active lqdp                                               # active
+journalctl -u lqdp -n 50 --no-pager | grep -E '\[bootstrap\]|\[server\]'  # 迁移完成 + 已监听
+curl -s -o /dev/null -w '%{http_code} %{size_download}\n' $BASE/       # 200，约 1.7KB 的 index.html
+curl -s -o /dev/null -w '%{http_code}\n' $BASE/pages/analysis          # 200
+# 再登录一次，确认账号与 JWT 正常（§7 第 4 条）
+```
+
+§3 说的 `RuntimeWarning: Accessing the database during app initialization` 每次启动都会出现，
+不是升级失败。本次改动若涉及导出/字体，补做 §1.2 的中文字体自证；若涉及权限，补做 §7 的
+viewer 403 对照。
+
+### 8.4 回滚
+
+```bash
+set -a; . /etc/lqdp/server.env; set +a
+cd /srv/lqdp-src
+
+git checkout <上一个发布提交或 tag>
+.venv/bin/pip install -r requirements/base.txt      # 依赖可能变
+cd frontend && npm ci && npm run build && cd ..    # 必须重建，chunk 名要对得上
+sudo systemctl restart lqdp
+```
+
+这次发布如果跑了不可逆的迁移，只退代码不够：按 §4 的恢复流程停服务，用升级前那份
+`backup_db` 覆盖 `db.sqlite3`，再起服务。备份放在升级前，就是为了这条。
+
+### 8.5 不成立的做法
+
+- **不要热替换、不要指望零停机。** `systemctl restart` 会断掉在途请求；LAN 20 人档接受
+  秒级中断（§5/§6）。
+- **不要在还有作业在跑时升级。** 重启会把所有 `running` 作业判成 `error`
+  （`apps/jobs/apps.py:31-47`），提示「进程重启，作业中断，请重试」。要么等它们跑完，
+  要么接受用户重试。
+- **不要把 service 复制成多份或加 worker。** 理由同 §3：SQLite 写并发 + 两处进程内状态。
+- **不要用旧库覆盖服务器库来「升级」。** schema 变更由启动时的 migrate 完成；手工替换库
+  只会丢服务器数据。
+- **不要在升级时重建管理员或跑 `seed_users`。** 见 §2。
+- **不要只备份库就宣布稳了。** 服务器档没有 `secret.key` 文件，`SECRET_KEY` /
+  `SFTP_CONFIG_KEY` 的备份责任在部署配置那一侧（§4）。
+
+### 8.6 版本号
+
+服务器形态没有安装包命名消费端，版本号只影响 UI 徽章与「关于」对话框。要让它随发布变化，
+在**构建前端之前**改 `frontend/package.json` 的 `version`（单一事实源，见
+`docs/reference/version-management.md`）；根目录 `package.json` 的 `version` 固定 `0.0.0`，
+不要动。
