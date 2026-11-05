@@ -963,10 +963,19 @@ describe('Site3DChart.vue 的视角记忆接线（specs/2026-11-05 §4.2）', ()
 
   it('交互结束后保存：pointerup + wheel 静置，keep-alive 失活/卸载立即冲刷', () => {
     expect(code).toContain("addEventListener('pointerup'")
-    expect(code).toContain("addEventListener('wheel'")
+    expect(code).toContain("addEventListener('wheel', onWheel)")
     expect(code).toMatch(/onDeactivated\(/)
     expect(code).toMatch(/onBeforeUnmount\(/)
     expect(code).toMatch(/saveChartState\(\s*\{\s*site3dView/)
+  })
+
+  it('滚轮不按事件当刻的相机相等来跳过（阻尼在后续帧才落地）', () => {
+    const start = code.indexOf('function onWheel')
+    const wheel = code.slice(start, code.indexOf('watch(', start))
+    expect(wheel).toMatch(/viewDecided = true/)
+    expect(wheel).toMatch(/scheduleSettle\(\)/)
+    // 事件当刻 getOrthographicSize 还没变；这里若比较相等，单次滚轮永远不落库
+    expect(wheel).not.toMatch(/isSameSite3DView/)
   })
 
   it('复位同时落库默认视角（否则下一次重渲染被旧视角拉回去）', () => {
@@ -1089,10 +1098,17 @@ function flushView() {
   }
   const live = readLiveView(chartInstance.value)
   if (!live) return
+  const prev = currentView.value
   currentView.value = live
   if (!userTouched) return // 没动过：已加载的机位（或默认机位）不该被当成用户改动落库
   userTouched = false
+  // 静置后再比一次：滚轮在事件当刻还没落到相机上，只有这里才能判出真变化
+  if (prev && isSameSite3DView(prev, live)) return
   saveChartState({ site3dView: live })
+}
+function scheduleSettle() {
+  if (settleTimer) clearTimeout(settleTimer)
+  settleTimer = setTimeout(flushView, 400)
 }
 function onInteractionSettled() {
   const live = readLiveView(chartInstance.value)
@@ -1102,8 +1118,14 @@ function onInteractionSettled() {
   if (currentView.value && isSameSite3DView(live, currentView.value)) return
   userTouched = true
   viewDecided = true
-  if (settleTimer) clearTimeout(settleTimer)
-  settleTimer = setTimeout(flushView, 400)
+  scheduleSettle()
+}
+function onWheel() {
+  // 滚轮只改 gl 的 `_zoomSpeed`，阻尼在后续帧才落到相机：事件当刻读不出变化，
+  // 不能按「与 currentView 相等」跳过，否则单次滚轮永远不落库。
+  viewDecided = true
+  userTouched = true
+  scheduleSettle()
 }
 
 // 容器可能被 v-if 换掉（有/无 Site、WebGL 分支），绑在 ref 上而不是 onMounted 一次
@@ -1111,9 +1133,9 @@ watch(
   chartRef,
   (el, old) => {
     old?.removeEventListener('pointerup', onInteractionSettled)
-    old?.removeEventListener('wheel', onInteractionSettled)
+    old?.removeEventListener('wheel', onWheel)
     el?.addEventListener('pointerup', onInteractionSettled)
-    el?.addEventListener('wheel', onInteractionSettled)
+    el?.addEventListener('wheel', onWheel)
   },
   { flush: 'post' },
 )
@@ -1122,7 +1144,7 @@ watch(
 onDeactivated(flushView)
 onBeforeUnmount(() => {
   chartRef.value?.removeEventListener('pointerup', onInteractionSettled)
-  chartRef.value?.removeEventListener('wheel', onInteractionSettled)
+  chartRef.value?.removeEventListener('wheel', onWheel)
   flushView()
 })
 

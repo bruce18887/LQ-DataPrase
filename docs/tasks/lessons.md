@@ -2864,3 +2864,8 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
 - **规则三**：交互判据要比较相机（`isSameSite3DView`，浮点容差）；「用户已决定」与「是否要保存」用显式标记（viewDecided / userTouched），不复用渲染回退值。
 - **现象四（node 环境测 pagehide）**：`useChartMemory` 只在导入时按 `typeof document !== 'undefined'` 注册 pagehide；vitest 环境是 node，不桩 document 则该通道不存在，用例空转。`vi.hoisted` 里桩 document 时，Vue runtime-dom 导入期会 `document.createElement('template')`，只桩 `addEventListener` 会崩。
 - **规则四**：测模块级 DOM 监听：`vi.hoisted`（早于 import）桩 `document`，至少给 `createElement` 与 `addEventListener`；pagehide 用例要构造「加载前排队 + 加载完成即关页」的时序，否则 latest 已含基底，测不出合并逻辑。
+
+## 2026-11-05 补记：滚轮视角的阻尼时序
+
+- **现象**：拖拽在 pointerup 当刻就能读出相机变化，滚轮不行——echarts-gl 的 wheel 只写 `_zoomSpeed`，阻尼在后续 zr 帧才落到 `getOrthographicSize()`。用「事件当刻与 currentView 相等就不记用户改动」的判据会把**单次滚轮**整个吃掉（不排静置、不落库），用户缩放后切页/刷新就丢。
+- **规则**：滚轮事件无条件排静置并置 `viewDecided`；「有没有真变化」的判等推迟到 400ms 静置之后（`flushView` 里比较再决定是否 PUT）。判据用例要覆盖 ortho（e2e 已加滚轮步），不能只测拖拽的 alpha/beta。

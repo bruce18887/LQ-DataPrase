@@ -78,6 +78,10 @@ export interface Site3DView {
 > `isSameSite3DView(live, currentView)` 为假时置位，flush 保存后清掉）。`currentView` 只作渲染
 > 回退值，不再兼任「用户已决定」判据。e2e 等落库也据此改为解析 postData 比 alpha 值（基底合并后
 > 每份 PUT 都带 site3dView，只判键存在会误命中）。
+>
+> 另一处时序差异：滚轮只写 gl 的 `_zoomSpeed`，阻尼在后续帧才落到 `getOrthographicSize()`，
+> 事件当刻读相机仍是旧值。因此 `wheel` 走独立处理器：**无条件**排静置并置 `viewDecided`，
+> 「有没有真变化」的判等推迟到 400ms 静置后的 `flushView`（比较后再决定是否 PUT）。
 
 ### 4.3 记忆载荷（防整份冲洗）
 
