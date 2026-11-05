@@ -147,10 +147,17 @@ function flushView() {
   }
   const live = readLiveView(chartInstance.value)
   if (!live) return
+  const prev = currentView.value
   currentView.value = live
   if (!userTouched) return // 没动过：已加载的机位（或默认机位）不该被当成用户改动落库
   userTouched = false
+  // 静置后再比一次：滚轮在事件当刻还没落到相机上，只有这里才能判出真变化
+  if (prev && isSameSite3DView(prev, live)) return
   saveChartState({ site3dView: live })
+}
+function scheduleSettle() {
+  if (settleTimer) clearTimeout(settleTimer)
+  settleTimer = setTimeout(flushView, 400)
 }
 function onInteractionSettled() {
   const live = readLiveView(chartInstance.value)
@@ -160,8 +167,14 @@ function onInteractionSettled() {
   if (currentView.value && isSameSite3DView(live, currentView.value)) return
   userTouched = true
   viewDecided = true
-  if (settleTimer) clearTimeout(settleTimer)
-  settleTimer = setTimeout(flushView, 400)
+  scheduleSettle()
+}
+function onWheel() {
+  // 滚轮只改 gl 的 `_zoomSpeed`，阻尼在后续帧才落到相机：事件当刻读不出变化，
+  // 不能按「与 currentView 相等」跳过，否则单次滚轮永远不落库。
+  viewDecided = true
+  userTouched = true
+  scheduleSettle()
 }
 
 // 容器可能被 v-if 换掉（有/无 Site、WebGL 分支），绑在 ref 上而不是 onMounted 一次
@@ -169,9 +182,9 @@ watch(
   chartRef,
   (el, old) => {
     old?.removeEventListener('pointerup', onInteractionSettled)
-    old?.removeEventListener('wheel', onInteractionSettled)
+    old?.removeEventListener('wheel', onWheel)
     el?.addEventListener('pointerup', onInteractionSettled)
-    el?.addEventListener('wheel', onInteractionSettled)
+    el?.addEventListener('wheel', onWheel)
   },
   { flush: 'post' },
 )
@@ -180,7 +193,7 @@ watch(
 onDeactivated(flushView)
 onBeforeUnmount(() => {
   chartRef.value?.removeEventListener('pointerup', onInteractionSettled)
-  chartRef.value?.removeEventListener('wheel', onInteractionSettled)
+  chartRef.value?.removeEventListener('wheel', onWheel)
   flushView()
 })
 

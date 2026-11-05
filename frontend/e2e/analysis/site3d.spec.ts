@@ -157,34 +157,69 @@ test.describe('@p1 3D 站点柱阵', { tag: ['@p1', '@analysis'] }, () => {
 
       await viewPut // 视角已落库
 
-      // 切到另一个参数：重渲染必须带着同一机位
+      // 滚轮缩放：gl 的阻尼在后续帧才落到相机，事件当刻读不到变化 ⇒ 必须等落库后的 ortho
+      const beforeZoom = (await readView())!
+      const zoomPut = page.waitForResponse(
+        (r) => {
+          if (!r.url().includes('/auth/settings/') || r.request().method() !== 'PUT') return false
+          try {
+            const v = JSON.parse(r.request().postData() || '{}')?.analysis_chart_state?.site3dView
+            // PUT 存的是模型值（生效值 − 1）
+            return typeof v?.orthographicSize === 'number' &&
+              Math.abs(v.orthographicSize - (beforeZoom.ortho - 1)) > 0.5
+          } catch {
+            return false
+          }
+        },
+        { timeout: 20_000 },
+      )
+      await page.mouse.move(cx, cy)
+      await page.mouse.wheel(0, -300)
+      await expect
+        .poll(async () => (await readView())!.ortho, { timeout: 5_000, message: '滚轮应改变正交视口尺寸' })
+        .not.toBeCloseTo(beforeZoom.ortho, 1)
+      await zoomPut
+      const zoomed = (await readView())!
+
+      // 切到另一个参数：重渲染必须带着同一机位（含 ortho，钉住 base 1 的换算）
       const params = await listParams(page)
       const next = params.find((p) => p !== 'Vth' && p !== 'Vth_Post') ?? params[1]
       await selectParam(page, next)
       await waitLoadingGone(page.locator(SINGLE))
       await page.waitForTimeout(1200)
       const afterSwitch = (await readView())!
-      expect(afterSwitch.alpha).toBeCloseTo(rotated.alpha, 0)
-      expect(afterSwitch.beta).toBeCloseTo(rotated.beta, 0)
+      expect(afterSwitch.alpha).toBeCloseTo(zoomed.alpha, 0)
+      expect(afterSwitch.beta).toBeCloseTo(zoomed.beta, 0)
+      expect(afterSwitch.ortho).toBeCloseTo(zoomed.ortho, 0)
 
       // 刷新：账号记忆里应还是这个机位
       await page.reload()
       await enter3D(page)
       await page.waitForTimeout(1200)
       const afterReload = (await readView())!
-      expect(afterReload.alpha).toBeCloseTo(rotated.alpha, 0)
-      expect(afterReload.beta).toBeCloseTo(rotated.beta, 0)
+      expect(afterReload.alpha).toBeCloseTo(zoomed.alpha, 0)
+      expect(afterReload.beta).toBeCloseTo(zoomed.beta, 0)
+      expect(afterReload.ortho).toBeCloseTo(zoomed.ortho, 0)
 
-      // 收尾：复位并等落库，别把旋转后的视角留给后续用例/手工检查
+      // 收尾：复位并等落库，别把旋转/缩放后的视角留给后续用例/手工检查。
+      // 按默认机位（site3dOption.ts 的 SITE3D_VIEW，T2 已钉住）比值，不能只判键存在。
       const resetPut = page.waitForResponse(
-        (r) =>
-          r.url().includes('/auth/settings/') &&
-          r.request().method() === 'PUT' &&
-          (r.request().postData() || '').includes('site3dView'),
+        (r) => {
+          if (!r.url().includes('/auth/settings/') || r.request().method() !== 'PUT') return false
+          try {
+            const v = JSON.parse(r.request().postData() || '{}')?.analysis_chart_state?.site3dView
+            return v?.alpha === 28 && v?.beta === 30
+          } catch {
+            return false
+          }
+        },
         { timeout: 20_000 },
       )
       await page.getByLabel('回到默认视角').click()
       await resetPut
+      const afterReset = (await readView())!
+      expect(afterReset.alpha).toBeCloseTo(28, 0)
+      expect(afterReset.beta).toBeCloseTo(30, 0)
     } finally {
       await ensureChartToggles(page, { site3d: false })
     }

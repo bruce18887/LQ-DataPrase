@@ -184,10 +184,19 @@ describe('Site3DChart.vue 的视角记忆接线（specs/2026-11-05 §4.2）', ()
 
   it('交互结束后保存：pointerup + wheel 静置，keep-alive 失活/卸载立即冲刷', () => {
     expect(code).toContain("addEventListener('pointerup'")
-    expect(code).toContain("addEventListener('wheel'")
+    expect(code).toContain("addEventListener('wheel', onWheel)")
     expect(code).toMatch(/onDeactivated\(/)
     expect(code).toMatch(/onBeforeUnmount\(/)
     expect(code).toMatch(/saveChartState\(\s*\{\s*site3dView/)
+  })
+
+  it('滚轮不按事件当刻的相机相等来跳过（阻尼在后续帧才落地）', () => {
+    const start = code.indexOf('function onWheel')
+    const wheel = code.slice(start, code.indexOf('watch(', start))
+    expect(wheel).toMatch(/viewDecided = true/)
+    expect(wheel).toMatch(/scheduleSettle\(\)/)
+    // 事件当刻 getOrthographicSize 还没变；这里若比较相等，单次滚轮永远不落库
+    expect(wheel).not.toMatch(/isSameSite3DView/)
   })
 
   it('复位同时落库默认视角（否则下一次重渲染被旧视角拉回去）', () => {
