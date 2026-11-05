@@ -12,14 +12,17 @@ import { chartFontSize } from '../../../theme/typography'
 import { formatAxisValue, formatPercent, getSiteColors8 } from '../../../utils/chart-bar'
 import type { EChartsColors, Grid3DStyle } from '../../../utils/echarts-tokens'
 import { activeBinIndices, type OutlierBounds, type OutlierMode } from './histogramBins'
+import type { Site3DView } from './site3dView'
 
 /** 箱体（世界单位）。barSize 的两个 fill 只有和这组尺寸绑在一起才等价，换尺寸要同步重算（§6.3）。 */
 export const SITE3D_BOX = { width: 132, height: 74, depth: 120 }
 /**
  * 默认机位：alpha 低于 25 时后排被前排整根挡住；beta 取负会把值轴甩到左后方。
  * 初始 option 与面板头「回到默认视角」共用这一份（§10 判据 ⑧）。
+ * 用 `orthographicSize` 而不是 `zoom`：gl 的 grid3D 不读 zoom（它只服务 mapbox/maptalks），
+ * 正交视野的旋钮是 orthographicSize；150 与「不设置时 gl 的默认值」等价（生效 151）。
  */
-export const SITE3D_VIEW = { alpha: 28, beta: 30, distance: 245, zoom: 1 }
+export const SITE3D_VIEW = { alpha: 28, beta: 30, distance: 245, orthographicSize: 150 }
 /**
  * 柱截面占格比例。宽度一度取过 0.85：正机位没问题，转到 alpha 35 / beta −25 时
  * 相邻 bin 沿 x 粘成一条斜脊（§6.6），0.62 才在任意角度保持单根可辨；
@@ -50,6 +53,8 @@ export interface Site3DBuildOptions {
   rangeType: string
   /** 当前参数名，进 x 轴名 */
   param: string
+  /** 当前机位（账号记忆回放）；缺省用默认机位。灵敏度/投影不在可记忆范围内 */
+  view?: Site3DView
 }
 
 /** 后端 histogram 响应里本图消费的那几项 */
@@ -76,25 +81,44 @@ export function site3dBarSize(binCount: number, siteCount: number): [number, num
   return [bandX * SITE3D_BAR_FILL.width, bandY * SITE3D_BAR_FILL.depth]
 }
 
-/** 正交 + 实测机位：初始 option 与复位按钮的共同来源 */
-export function defaultViewControl(): Record<string, unknown> {
+/** 默认视角（SITE3D_VIEW + 居中）：初始 option、复位、复位落库共用 */
+export function defaultSite3DView(): Site3DView {
+  return { ...SITE3D_VIEW, center: [0, 0, 0] as [number, number, number] }
+}
+
+/** 视角 → gl 的 viewControl；投影与灵敏度是固定项，不进可记忆视角 */
+export function viewControlFromView(view: Site3DView): Record<string, unknown> {
   return {
     projection: 'orthographic',
-    alpha: SITE3D_VIEW.alpha,
-    beta: SITE3D_VIEW.beta,
-    distance: SITE3D_VIEW.distance,
-    zoom: SITE3D_VIEW.zoom,
+    alpha: view.alpha,
+    beta: view.beta,
+    distance: view.distance,
+    orthographicSize: view.orthographicSize,
+    center: view.center,
     rotateSensitivity: 0.8,
     zoomSensitivity: 0.7,
   }
 }
 
-/** 复位：合并写 viewControl（原型 :256 的同形写法；notMerge 会把柱数据一起换掉） */
+/** 默认 viewControl 的便捷别名：初始 option 与复位都直接走 viewControlFromView(defaultSite3DView()) */
+export function defaultViewControl(): Record<string, unknown> {
+  return viewControlFromView(defaultSite3DView())
+}
+
+/** 应用任意视角（记忆迟到加载/复位共用）；merge 写，不碰 series */
+export function applyView(
+  chart: { setOption: (...args: any[]) => unknown } | null | undefined,
+  view: Site3DView,
+): void {
+  if (!chart) return
+  chart.setOption({ grid3D: { viewControl: viewControlFromView(view) } })
+}
+
+/** 复位：合并写默认 viewControl（原型 :256 的同形写法；notMerge 会把柱数据一起换掉） */
 export function applyDefaultView(
   chart: { setOption: (...args: any[]) => unknown } | null | undefined,
 ): void {
-  if (!chart) return
-  chart.setOption({ grid3D: { viewControl: defaultViewControl() } })
+  applyView(chart, defaultSite3DView())
 }
 
 /**
@@ -138,6 +162,9 @@ export function buildSite3DOption(
       // 零占比不生成柱体：满矩阵是 8 Site × 26 bin = 208 格，全画会让 GL 侧的拾取射线
       // 命中零高柱、tooltip 弹出一堆 0%。空格占比随数据变（仓内无可重跑的实测口径），
       // 所以这里不写「多少成是空的」，只由「零占比不生成」那条判据钉行为。
+      // 副作用：柱数 = 非零 (bin, Site) 数，随参数变；gl 的顶点动画只在
+      // 「前后柱数相同」时播放（echarts-gl.js 的 updateVertexAnimation），
+      // 所以有时有动画有时没有。这是有意保留的行为，别为动画补 0 高柱。
       if (!(v > 0)) return
       rows.push({ value: [x, s, v] })
     })
@@ -191,7 +218,7 @@ export function buildSite3DOption(
       boxWidth: SITE3D_BOX.width,
       boxHeight: SITE3D_BOX.height,
       boxDepth: SITE3D_BOX.depth,
-      viewControl: defaultViewControl(),
+      viewControl: viewControlFromView(opts.view ?? defaultSite3DView()),
     },
     // x 用 category（官方两个结构型 bar3D 示例都是 category，柱宽由 category 轴等分）
     // ⇒ 规格限只能吸附到最近的 bin，画出来是误导性的精确，本图不画 LSL/USL（§7）。

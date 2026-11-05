@@ -240,9 +240,15 @@ git commit -m "feat(analysis): 3D 视角纯模块（形状校验 + 从 gl 相机
 ```ts
   defaultSite3DView,
   viewControlFromView,
-  type Site3DView,
+  applyView,
 ```
 （加在既有 `import { ... } from '../../src/pages/analysis/composables/site3dOption'` 的括号里。）
+
+**`Site3DView` 类型从它自己的模块取**（`site3dOption` 只 import 类型、没有 re-export，写成 `import type { Site3DView } from '.../site3dOption'` 会被 `vue-tsc -b` 判 TS2724，而 vitest 的 esbuild 会静默剥掉类型、看不出问题）：
+
+```ts
+import type { Site3DView } from '../../src/pages/analysis/composables/site3dView'
+```
 
 2. `const build = ...` 的 `over` 类型加上 `view?: Site3DView`：
 
@@ -273,14 +279,16 @@ const build = (r: any, over: Partial<{ mode: 'clip' | 'exclude' | 'off'; rangeTy
   })
 
   it('applyView 写任意视角、applyDefaultView 写默认（都是 merge，不碰 series）', () => {
-    const calls: any[] = []
-    const chart = { setOption: (o: any) => calls.push(o) }
+    const calls: any[][] = []
+    const chart = { setOption: (...args: any[]) => calls.push(args) }
     const v: Site3DView = { alpha: 5, beta: 6, distance: 200, orthographicSize: 90, center: [0, 1, 0] }
     applyView(chart, v)
     applyDefaultView(chart)
-    expect(calls[0].grid3D.viewControl).toEqual(viewControlFromView(v))
-    expect(calls[1].grid3D.viewControl).toEqual(viewControlFromView(defaultSite3DView()))
-    expect(calls.every((c) => c.series === undefined)).toBe(true)
+    expect(calls[0][0].grid3D.viewControl).toEqual(viewControlFromView(v))
+    expect(calls[1][0].grid3D.viewControl).toEqual(viewControlFromView(defaultSite3DView()))
+    // 只传一个参数：setOption(opt, true) 是 notMerge，会把柱数据一起换掉
+    expect(calls.map((a) => a.length)).toEqual([1, 1])
+    expect(calls.every((a) => a[0].series === undefined)).toBe(true)
   })
 ```
 
