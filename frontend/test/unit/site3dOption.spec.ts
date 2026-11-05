@@ -20,12 +20,16 @@ import {
   SITE3D_LIGHT_SLOT7,
   SITE3D_VIEW,
   applyDefaultView,
+  applyView,
   buildSite3DOption,
+  defaultSite3DView,
   defaultViewControl,
   site3dBarSize,
   site3dPalette,
+  viewControlFromView,
   type Site3DTheme,
 } from '../../src/pages/analysis/composables/site3dOption'
+import type { Site3DView } from '../../src/pages/analysis/composables/site3dView'
 import { activeBinIndices } from '../../src/pages/analysis/composables/histogramBins'
 import { formatAxisValue } from '../../src/utils/chart-bar'
 import {
@@ -74,7 +78,7 @@ function mkResult(over: Record<string, unknown> = {}): any {
   }
 }
 
-const build = (r: any, over: Partial<{ mode: 'clip' | 'exclude' | 'off'; rangeType: string; param: string }> = {}, isDark = false) =>
+const build = (r: any, over: Partial<{ mode: 'clip' | 'exclude' | 'off'; rangeType: string; param: string; view: Site3DView }> = {}, isDark = false) =>
   buildSite3DOption(r, theme(isDark), { mode: 'off', rangeType: 'RDL', param: 'Kelvin_VIN', ...over })
 
 describe('① 轴型与 bin 网格', () => {
@@ -332,12 +336,34 @@ describe('⑦ 与 2D 同一套 bin 口径（§8）', () => {
 
 describe('⑧ 机位常量单一来源', () => {
   it('初始 viewControl 与复位目标读同一份 SITE3D_VIEW', () => {
-    expect(SITE3D_VIEW).toEqual({ alpha: 28, beta: 30, distance: 245, zoom: 1 })
+    expect(SITE3D_VIEW).toEqual({ alpha: 28, beta: 30, distance: 245, orthographicSize: 150 })
     const vc = build(mkResult())!.grid3D.viewControl
     expect(vc.alpha).toBe(SITE3D_VIEW.alpha)
     expect(vc.beta).toBe(SITE3D_VIEW.beta)
     expect(vc.distance).toBe(SITE3D_VIEW.distance)
+    expect(vc.orthographicSize).toBe(SITE3D_VIEW.orthographicSize)
+    expect(vc.center).toEqual([0, 0, 0])
     expect(vc).toEqual(defaultViewControl())
+  })
+
+  it('opts.view 生效：机位逐字段来自传入视角（记忆回放）', () => {
+    const v: Site3DView = { alpha: 12, beta: -34, distance: 300, orthographicSize: 88, center: [1, 2, 3] }
+    const vc = build(mkResult(), { view: v })!.grid3D.viewControl
+    expect(vc).toEqual(viewControlFromView(v))
+    expect(vc).toMatchObject(v)
+  })
+
+  it('applyView 写任意视角、applyDefaultView 写默认（都是 merge，不碰 series）', () => {
+    const calls: any[][] = []
+    const chart = { setOption: (...args: any[]) => calls.push(args) }
+    const v: Site3DView = { alpha: 5, beta: 6, distance: 200, orthographicSize: 90, center: [0, 1, 0] }
+    applyView(chart, v)
+    applyDefaultView(chart)
+    expect(calls[0][0].grid3D.viewControl).toEqual(viewControlFromView(v))
+    expect(calls[1][0].grid3D.viewControl).toEqual(viewControlFromView(defaultSite3DView()))
+    // 只传一个参数：setOption(opt, true) 是 notMerge，会把柱数据一起换掉
+    expect(calls.map((a) => a.length)).toEqual([1, 1])
+    expect(calls.every((a) => a[0].series === undefined)).toBe(true)
   })
 
   it('applyDefaultView 用同一份值做合并写（不是 notMerge 全量重建）', () => {
