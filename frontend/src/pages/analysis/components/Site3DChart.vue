@@ -50,7 +50,7 @@ const webglProbe = detectWebGL()
 </script>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, onBeforeUnmount, onDeactivated, ref, watch } from 'vue'
 // 副作用式注册：echarts-gl 只有被 import 进来才会把 bar3D/grid3D 注册到同一个 echarts
 // 实例上。**少了这一行，option 里写 `type: 'bar3D'` 会静默画不出任何东西**（容器在、
 // canvas 在、系列不存在）。必须是**静态**副作用导入：实测 `import('echarts-gl')`/
@@ -61,7 +61,20 @@ import { computed, watch } from 'vue'
 import 'echarts-gl'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
-import { applyDefaultView, buildSite3DOption, type Site3DTheme } from '../composables/site3dOption'
+import {
+  applyDefaultView,
+  applyView,
+  buildSite3DOption,
+  defaultSite3DView,
+  type Site3DTheme,
+} from '../composables/site3dOption'
+import { isSameSite3DView, readLiveView, type Site3DView } from '../composables/site3dView'
+import {
+  getCachedChartState,
+  isMemoryEnabled,
+  loadChartMemory,
+  saveChartState,
+} from '../../../composables/useChartMemory'
 import type { OutlierMode } from '../composables/histogramBins'
 
 const props = defineProps<{
@@ -83,15 +96,34 @@ const hasSites = computed(() => Object.keys(props.result?.site_histograms ?? {})
 const binCount = computed(() => props.result?.bin_centers?.length ?? 0)
 const siteCount = computed(() => Object.keys(props.result?.site_histograms ?? {}).length)
 
+/**
+ * 当前机位（specs/2026-11-05 §4）：同步读账号记忆缓存；没有就等 loadChartMemory 迟到补。
+ * 记忆关闭（用户主动关）时不读不写，等价于「始终默认机位」。
+ */
+const currentView = ref<Site3DView | null>(
+  isMemoryEnabled() === false ? null : (getCachedChartState()?.site3dView ?? null),
+)
+// 首帧是否已带账号视角：有就不必再被迟到加载「补」一次
+const hadCachedView = currentView.value !== null
+// 用户（含复位）是否已定过视角：迟到加载不许覆盖刚调好的机位
+let viewDecided = false
+// 是否有尚未落库的用户改动：没动过的默认机位不许在切页/卸载时当成改动写账号
+let userTouched = false
+
 function buildOption() {
+  // 重渲染（切参数/切主题/keep-alive 恢复）**之前**先把真实相机读回来，直接带进新
+  // option —— 不依赖 reset 事件或任何时序。读不到（实例尚未创建）才用 currentView。
+  const live = readLiveView(chartInstance.value)
+  // 同步回退值：实例被重建时 buildOption 读不到 live，不能拿过期机位把用户拉回去。
+  // （这不等于「用户已定过视角」——迟到加载的守卫用的是显式标记。）
+  if (live) currentView.value = live
   const theme: Site3DTheme = { isDark: isDark.value, colors: colors.value, grid3D: grid3DTheme.value }
-  // 模板的两条 v-if 只挡「无 WebGL」与「无 Site 列」。空网格（bin_centers 为空）线上
-  // 不可达——后端只要有 result 就发 26 个中心；真发生的话 buildSite3DOption 会返回 null，
-  // 这里回退 {}，结果是空 canvas 而不是崩溃（与 HistogramChart 的 binCenters 空守卫同族）。
+  // null（无 Site 列 / 空网格）不该走到这里：模板那两条 v-if 已经把容器挡住了
   return buildSite3DOption(props.result, theme, {
     mode: props.outlierHandling,
     rangeType: props.rangeType,
     param: props.param,
+    view: live ?? currentView.value ?? undefined,
   }) ?? {}
 }
 
@@ -106,9 +138,75 @@ const { chartRef, chartInstance } = useChart(
 )
 void chartRef // 绑模板 <div ref="chartRef">（noUnusedLocals 需要显式消费一次）
 
-// 合并式复位：只写 grid3D.viewControl，不动 series（notMerge 会把柱数据一起换掉）。
-// 视角常量单一来源在 site3dOption.ts（T2 ⑧ 钉住初始机位与复位同源）。
-watch(() => props.resetEpoch, () => applyDefaultView(chartInstance.value))
+/** 读一次实时相机并落账号记忆（防抖在记忆模块内，这里只管 400ms 静置） */
+let settleTimer: ReturnType<typeof setTimeout> | null = null
+function flushView() {
+  if (settleTimer) {
+    clearTimeout(settleTimer)
+    settleTimer = null
+  }
+  const live = readLiveView(chartInstance.value)
+  if (!live) return
+  currentView.value = live
+  if (!userTouched) return // 没动过：已加载的机位（或默认机位）不该被当成用户改动落库
+  userTouched = false
+  saveChartState({ site3dView: live })
+}
+function onInteractionSettled() {
+  const live = readLiveView(chartInstance.value)
+  if (!live) return
+  // 单击/tooltip 也会来 pointerup：机位没动就不算用户决定——否则会挡住迟到加载，
+  // 还会把未动过的默认机位写进账号。
+  if (currentView.value && isSameSite3DView(live, currentView.value)) return
+  userTouched = true
+  viewDecided = true
+  if (settleTimer) clearTimeout(settleTimer)
+  settleTimer = setTimeout(flushView, 400)
+}
+
+// 容器可能被 v-if 换掉（有/无 Site、WebGL 分支），绑在 ref 上而不是 onMounted 一次
+watch(
+  chartRef,
+  (el, old) => {
+    old?.removeEventListener('pointerup', onInteractionSettled)
+    old?.removeEventListener('wheel', onInteractionSettled)
+    el?.addEventListener('pointerup', onInteractionSettled)
+    el?.addEventListener('wheel', onInteractionSettled)
+  },
+  { flush: 'post' },
+)
+
+// keep-alive 切页/组件销毁：立即冲刷最后一段机位（实例此时还在，可读）
+onDeactivated(flushView)
+onBeforeUnmount(() => {
+  chartRef.value?.removeEventListener('pointerup', onInteractionSettled)
+  chartRef.value?.removeEventListener('wheel', onInteractionSettled)
+  flushView()
+})
+
+// 记忆首帧没赶上（少见：进页时设置还没取到）：迟到补写一次。
+// 用显式标记判「要不要补」——实时机位在重渲染时也会被读，但那不是用户的决定。
+loadChartMemory().then((r) => {
+  if (r.memoryEnabled === false || !r.state.site3dView) return
+  if (hadCachedView || viewDecided) return
+  currentView.value = r.state.site3dView
+  applyView(chartInstance.value, r.state.site3dView)
+}).catch(() => { /* 记忆拿不到就走默认机位 */ })
+
+// 合并式复位：写默认机位；同时更新 currentView 与账号记忆，
+// 否则下一次重渲染（切参数/切主题）会按旧视角把刚复位的图拉回去。
+watch(() => props.resetEpoch, () => {
+  // 防抖窗口里残留的拖拽可能落在 animateTo 中途，先取消再复位
+  if (settleTimer) {
+    clearTimeout(settleTimer)
+    settleTimer = null
+  }
+  userTouched = false
+  viewDecided = true
+  applyDefaultView(chartInstance.value)
+  currentView.value = defaultSite3DView()
+  saveChartState({ site3dView: defaultSite3DView() })
+})
 </script>
 
 <style scoped>

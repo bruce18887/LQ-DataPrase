@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { readLiveView, sanitizeSite3DView, type Site3DView } from '../../src/pages/analysis/composables/site3dView'
+import { isSameSite3DView, readLiveView, sanitizeSite3DView, type Site3DView } from '../../src/pages/analysis/composables/site3dView'
 
 const GOOD: Site3DView = { alpha: 31.5, beta: -12, distance: 260, orthographicSize: 149, center: [1, 2, 3] }
 
@@ -52,6 +52,26 @@ describe('sanitizeSite3DView', () => {
     delete holey[1]
     expect(sanitizeSite3DView({ ...GOOD, center: holey })).toBeNull()
     expect(sanitizeSite3DView({ ...GOOD, extra: 'ignored' })).toEqual(GOOD)
+  })
+})
+
+describe('isSameSite3DView — 「镜头动没动」的判据', () => {
+  const base: Site3DView = { alpha: 31.5, beta: -12, distance: 245, orthographicSize: 150, center: [0, 0, 0] }
+
+  it('完全相等 / 浮点微差 → true（单击 tooltip 不该被当成拖动）', () => {
+    expect(isSameSite3DView(base, { ...base, center: [...base.center] })).toBe(true)
+    expect(isSameSite3DView(base, { ...base, alpha: base.alpha + 0.005 })).toBe(true)
+    expect(isSameSite3DView(base, { ...base, center: [0.005, -0.005, 0] })).toBe(true)
+  })
+
+  it('任一分量真的变了 → false', () => {
+    expect(isSameSite3DView(base, { ...base, alpha: base.alpha + 0.02 })).toBe(false)
+    expect(isSameSite3DView(base, { ...base, beta: base.beta - 0.02 })).toBe(false)
+    expect(isSameSite3DView(base, { ...base, distance: base.distance + 0.02 })).toBe(false)
+    expect(isSameSite3DView(base, { ...base, orthographicSize: base.orthographicSize - 0.02 })).toBe(false)
+    expect(isSameSite3DView(base, { ...base, center: [0.02, 0, 0] })).toBe(false)
+    expect(isSameSite3DView(base, { ...base, center: [0, -0.02, 0] })).toBe(false)
+    expect(isSameSite3DView(base, { ...base, center: [0, 0, 0.02] })).toBe(false)
   })
 })
 
