@@ -72,6 +72,13 @@ export interface Site3DView {
 4. **复位**：现有 ↺ 调 `applyDefaultView(chart)`，同时把 `currentView` 置为默认并 `saveView(默认)`——否则下一次重渲染会把刚复位的图又拉回旧视角。
 5. **记忆开关关闭**：不读不写视角（`saveChartState` 内部已按开关拦截；读取侧在开关为 false 时忽略持久化值，用默认机位）。
 
+> **实现补充（2026-11-05 复审，已落地）**：`pointerup` 在单击 tooltip 时也会触发，直接把它当
+> 「用户改了视角」会挡掉迟到加载、并在切页/卸载时把未动过的默认机位写进账号。最终接线用两个
+> 显式标记：`viewDecided`（交互处理器里**立即**置位，迟到加载据此跳过）与 `userTouched`（只在
+> `isSameSite3DView(live, currentView)` 为假时置位，flush 保存后清掉）。`currentView` 只作渲染
+> 回退值，不再兼任「用户已决定」判据。e2e 等落库也据此改为解析 postData 比 alpha 值（基底合并后
+> 每份 PUT 都带 site3dView，只判键存在会误命中）。
+
 ### 4.3 记忆载荷（防整份冲洗）
 
 `analysis_chart_state` 现有形状 `{ layout, toggles }`，新增可选 `site3dView`。
