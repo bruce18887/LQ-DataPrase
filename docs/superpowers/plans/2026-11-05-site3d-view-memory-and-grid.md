@@ -930,15 +930,35 @@ git commit -m "feat(theme): 3D 网格线取 gridLineColor（light 对齐直方�
 describe('Site3DChart.vue 的视角记忆接线（specs/2026-11-05 §4.2）', () => {
   const code = codeOf(read('pages/analysis/components/Site3DChart.vue'))
 
-  it('buildOption 先读实时相机，再把 currentView 交给 builder', () => {
+  it('buildOption 先读实时相机，实时值优先于 currentView 交给 builder', () => {
     expect(code).toMatch(/readLiveView\(/)
-    expect(code).toMatch(/view:\s*currentView\.value/)
+    expect(code).toMatch(/view:\s*live \?\? currentView\.value/)
   })
 
   it('首帧走同步缓存，异步加载只做迟到补写', () => {
     expect(code).toContain('getCachedChartState(')
     expect(code).toMatch(/loadChartMemory\(\)/)
     expect(code).toMatch(/applyView\(/)
+  })
+
+  it('迟到加载有显式守卫：读实时机位 ≠ 用户已改；未动过的机位不落库', () => {
+    expect(code).toMatch(/let viewDecided = false/)
+    expect(code).toMatch(/let userTouched = false/)
+    expect(code).toMatch(/if \(hadCachedView \|\| viewDecided\) return/)
+    expect(code).toMatch(/if \(!userTouched\) return/)
+  })
+
+  it('只有镜头真的动了才记用户决定（单击 tooltip 不算）', () => {
+    expect(code).toMatch(/isSameSite3DView\(live, currentView\.value\)/)
+    // 注释已被 codeOf 剥掉，切片终点要用代码锚点（下一个 watch 调用）
+    const start = code.indexOf('function onInteractionSettled')
+    const handler = code.slice(start, code.indexOf('watch(', start))
+    expect(handler).toMatch(/viewDecided = true/)
+    expect(handler).not.toMatch(/saveChartState/)
+  })
+
+  it('buildOption 同步 currentView 回退值（实例被重建时不会拿过期机位）', () => {
+    expect(code).toMatch(/if \(live\) currentView\.value = live/)
   })
 
   it('交互结束后保存：pointerup + wheel 静置，keep-alive 失活/卸载立即冲刷', () => {
@@ -990,7 +1010,7 @@ import {
   defaultSite3DView,
   type Site3DTheme,
 } from '../composables/site3dOption'
-import { readLiveView, type Site3DView } from '../composables/site3dView'
+import { isSameSite3DView, readLiveView, type Site3DView } from '../composables/site3dView'
 import {
   getCachedChartState,
   isMemoryEnabled,
@@ -1025,11 +1045,19 @@ const siteCount = computed(() => Object.keys(props.result?.site_histograms ?? {}
 const currentView = ref<Site3DView | null>(
   isMemoryEnabled() === false ? null : (getCachedChartState()?.site3dView ?? null),
 )
+// 首帧是否已带账号视角：有就不必再被迟到加载「补」一次
+const hadCachedView = currentView.value !== null
+// 用户（含复位）是否已定过视角：迟到加载不许覆盖刚调好的机位
+let viewDecided = false
+// 是否有尚未落库的用户改动：没动过的默认机位不许在切页/卸载时当成改动写账号
+let userTouched = false
 
 function buildOption() {
-  // 重渲染（切参数/切主题/keep-alive 恢复）**之前**先把真实相机读回来，
-  // 让新 option 带着同一机位 —— 不依赖 reset 事件或任何时序。
+  // 重渲染（切参数/切主题/keep-alive 恢复）**之前**先把真实相机读回来，直接带进新
+  // option —— 不依赖 reset 事件或任何时序。读不到（实例尚未创建）才用 currentView。
   const live = readLiveView(chartInstance.value)
+  // 同步回退值：实例被重建时 buildOption 读不到 live，不能拿过期机位把用户拉回去。
+  // （这不等于「用户已定过视角」——迟到加载的守卫用的是显式标记。）
   if (live) currentView.value = live
   const theme: Site3DTheme = { isDark: isDark.value, colors: colors.value, grid3D: grid3DTheme.value }
   // null（无 Site 列 / 空网格）不该走到这里：模板那两条 v-if 已经把容器挡住了
@@ -1037,7 +1065,7 @@ function buildOption() {
     mode: props.outlierHandling,
     rangeType: props.rangeType,
     param: props.param,
-    view: currentView.value ?? undefined,
+    view: live ?? currentView.value ?? undefined,
   }) ?? {}
 }
 
@@ -1062,9 +1090,18 @@ function flushView() {
   const live = readLiveView(chartInstance.value)
   if (!live) return
   currentView.value = live
+  if (!userTouched) return // 没动过：已加载的机位（或默认机位）不该被当成用户改动落库
+  userTouched = false
   saveChartState({ site3dView: live })
 }
 function onInteractionSettled() {
+  const live = readLiveView(chartInstance.value)
+  if (!live) return
+  // 单击/tooltip 也会来 pointerup：机位没动就不算用户决定——否则会挡住迟到加载，
+  // 还会把未动过的默认机位写进账号。
+  if (currentView.value && isSameSite3DView(live, currentView.value)) return
+  userTouched = true
+  viewDecided = true
   if (settleTimer) clearTimeout(settleTimer)
   settleTimer = setTimeout(flushView, 400)
 }
@@ -1089,10 +1126,11 @@ onBeforeUnmount(() => {
   flushView()
 })
 
-// 记忆首帧没赶上（少见：分析页进页已加载）：迟到补写一次；用户已先动了就不覆盖
+// 记忆首帧没赶上（少见：进页时设置还没取到）：迟到补写一次。
+// 用显式标记判「要不要补」——实时机位在重渲染时也会被读，但那不是用户的决定。
 loadChartMemory().then((r) => {
   if (r.memoryEnabled === false || !r.state.site3dView) return
-  if (currentView.value) return
+  if (hadCachedView || viewDecided) return
   currentView.value = r.state.site3dView
   applyView(chartInstance.value, r.state.site3dView)
 }).catch(() => { /* 记忆拿不到就走默认机位 */ })
@@ -1100,6 +1138,13 @@ loadChartMemory().then((r) => {
 // 合并式复位：写默认机位；同时更新 currentView 与账号记忆，
 // 否则下一次重渲染（切参数/切主题）会按旧视角把刚复位的图拉回去。
 watch(() => props.resetEpoch, () => {
+  // 防抖窗口里残留的拖拽可能落在 animateTo 中途，先取消再复位
+  if (settleTimer) {
+    clearTimeout(settleTimer)
+    settleTimer = null
+  }
+  userTouched = false
+  viewDecided = true
   applyDefaultView(chartInstance.value)
   currentView.value = defaultSite3DView()
   saveChartState({ site3dView: defaultSite3DView() })
@@ -1107,6 +1152,10 @@ watch(() => props.resetEpoch, () => {
 ```
 
 > `buildOption` 里引用 `chartInstance`（声明在后面的 `useChart` 返回值里）是安全的：`useChart` 只在 `onMounted`/`nextTick` 之后才调用它，不会在 setup 同步体里触发 TDZ。以后若给 `useChart` 加「同步首渲染」，这里要改成先声明实例 ref。
+>
+> 复审补充：本任务同时给 `site3dView.ts` 增加 `isSameSite3DView(a, b)`（五个量按 `VIEW_EPS=0.01` 判等）
+> 与 `site3dView.spec.ts` 的两条 T2 用例；`pointerup` 在单击 tooltip 时也会触发，不比较机位就会
+> 把「没动过」当成用户决定（挡住迟到加载 + 把默认机位写进账号）。
 
 - [ ] **Step 4：跑接线测试与类型**
 

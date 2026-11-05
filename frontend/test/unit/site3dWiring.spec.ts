@@ -144,3 +144,58 @@ describe('HistogramChart.vue 的 bin 显隐走共享纯函数（2D 半边不能�
     expect(code).not.toMatch(/clipMin|clipMax/)
   })
 })
+
+describe('Site3DChart.vue 的视角记忆接线（specs/2026-11-05 §4.2）', () => {
+  const code = codeOf(read('pages/analysis/components/Site3DChart.vue'))
+
+  it('buildOption 先读实时相机，实时值优先于 currentView 交给 builder', () => {
+    expect(code).toMatch(/readLiveView\(/)
+    expect(code).toMatch(/view:\s*live \?\? currentView\.value/)
+  })
+
+  it('首帧走同步缓存，异步加载只做迟到补写', () => {
+    expect(code).toContain('getCachedChartState(')
+    expect(code).toMatch(/loadChartMemory\(\)/)
+    expect(code).toMatch(/applyView\(/)
+  })
+
+  it('迟到加载有显式守卫：读实时机位 ≠ 用户已改；未动过的机位不落库', () => {
+    // 用 currentView 判「要不要补」会被 buildOption 的实时读取误挡（首帧渲染后就恒为真）；
+    // 同理 flushView 若无条件保存，切页/卸载会把默认机位写成账号视角。
+    expect(code).toMatch(/let viewDecided = false/)
+    expect(code).toMatch(/let userTouched = false/)
+    expect(code).toMatch(/if \(hadCachedView \|\| viewDecided\) return/)
+    expect(code).toMatch(/if \(!userTouched\) return/)
+  })
+
+  it('只有镜头真的动了才记用户决定（单击 tooltip 不算）', () => {
+    expect(code).toMatch(/isSameSite3DView\(live, currentView\.value\)/)
+    // 交互处理器里就要标记，不能拖到 400ms 静置之后（否则加载回来的旧视角会把刚拖的机位拉回去）
+    // 注释已被 codeOf 剥掉，切片终点要用代码锚点（下一个 watch 调用）
+    const start = code.indexOf('function onInteractionSettled')
+    const handler = code.slice(start, code.indexOf('watch(', start))
+    expect(handler).toMatch(/viewDecided = true/)
+    expect(handler).not.toMatch(/saveChartState/)
+  })
+
+  it('buildOption 同步 currentView 回退值（实例被重建时不会拿过期机位）', () => {
+    expect(code).toMatch(/if \(live\) currentView\.value = live/)
+  })
+
+  it('交互结束后保存：pointerup + wheel 静置，keep-alive 失活/卸载立即冲刷', () => {
+    expect(code).toContain("addEventListener('pointerup'")
+    expect(code).toContain("addEventListener('wheel'")
+    expect(code).toMatch(/onDeactivated\(/)
+    expect(code).toMatch(/onBeforeUnmount\(/)
+    expect(code).toMatch(/saveChartState\(\s*\{\s*site3dView/)
+  })
+
+  it('复位同时落库默认视角（否则下一次重渲染被旧视角拉回去）', () => {
+    expect(code).toContain('defaultSite3DView()')
+    expect(code).toMatch(/applyDefaultView\(/)
+  })
+
+  it('视角只走账号记忆，不直接碰 localStorage（单一事实来源）', () => {
+    expect(code).not.toContain('localStorage')
+  })
+})

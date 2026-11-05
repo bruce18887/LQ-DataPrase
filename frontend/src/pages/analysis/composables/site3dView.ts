@@ -58,6 +58,26 @@ export function sanitizeSite3DView(raw: unknown): Site3DView | null {
   }
 }
 
+/** 相机读数的浮点容差：小于它的差异视为「没动过」（angles 单位是度，其余是 gl 世界单位） */
+const VIEW_EPS = 0.01
+
+/**
+ * 两份机位是否等价。用途：`pointerup` 在单击/tooltip 时也会触发，不能把「没动镜头」
+ * 当成用户决定（否则会挡住迟到加载，还会把未动过的默认机位写进账号）。
+ */
+export function isSameSite3DView(a: Site3DView, b: Site3DView): boolean {
+  const close = (x: number, y: number) => Math.abs(x - y) <= VIEW_EPS
+  return (
+    close(a.alpha, b.alpha) &&
+    close(a.beta, b.beta) &&
+    close(a.distance, b.distance) &&
+    close(a.orthographicSize, b.orthographicSize) &&
+    close(a.center[0], b.center[0]) &&
+    close(a.center[1], b.center[1]) &&
+    close(a.center[2], b.center[2])
+  )
+}
+
 /** 从已初始化的 echarts 实例读当前机位；实例/视图/字段缺失时返回 null */
 export function readLiveView(chart: unknown): Site3DView | null {
   try {
