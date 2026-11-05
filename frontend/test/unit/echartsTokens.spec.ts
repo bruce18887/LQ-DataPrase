@@ -64,9 +64,18 @@ describe('grid3DStyle — 逐项取 token，不写死', () => {
     expect(light.axisLine.lineStyle.color).toBe(ECHARTS_COLORS_LIGHT.splitLineColor)
     expect(night.axisLine.lineStyle.color).toBe(ECHARTS_COLORS_NIGHT.splitLineColor)
     expect(night.axisLine.lineStyle.color).not.toBe(light.axisLine.lineStyle.color)
+    expect(light.splitLine.lineStyle.color).toBe(ECHARTS_COLORS_LIGHT.gridLineColor)
+    expect(night.splitLine.lineStyle.color).toBe(ECHARTS_COLORS_NIGHT.gridLineColor)
     expect(light.axisLabel.color).toBe(ECHARTS_COLORS_LIGHT.axisLabelColor)
     expect(night.axisLabel.color).toBe(ECHARTS_COLORS_NIGHT.axisLabelColor)
     expect(light.nameTextStyle.color).toBe(ECHARTS_COLORS_LIGHT.textColor)
+  })
+
+  it('网格线对齐 2D 直方图：light #dbdee4（ECharts neutral15），night 保持淡白', () => {
+    // ECharts 6 默认 axisSplitLine = tokens.color.neutral15 = #dbdee4；
+    // 直方图没有覆写 splitLine，所以它在两个主题下画的就是这个灰。
+    expect(ECHARTS_COLORS_LIGHT.gridLineColor).toBe('#dbdee4')
+    expect(ECHARTS_COLORS_NIGHT.gridLineColor).toBe('rgba(255, 255, 255, 0.04)')
   })
 
   it('axisLabel 三件平铺在本级（嵌套 textStyle 只靠 ECharts 6 兼容层拆平，getOption 里 textStyle 为 null）', () => {

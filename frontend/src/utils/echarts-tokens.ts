@@ -20,6 +20,8 @@ export interface EChartsColors {
   axisLineColor: string
   axisLabelColor: string
   splitLineColor: string
+  /** 3D 网格线（对齐 2D 直方图的 ECharts 默认网格色） */
+  gridLineColor: string
   borderColor: string
   legendTextColor: string
   tooltipBg: string
@@ -48,6 +50,7 @@ export const ECHARTS_COLORS_NIGHT: EChartsColors = {
   axisLineColor: 'rgba(255, 255, 255, 0.10)',
   axisLabelColor: 'rgba(255, 255, 255, 0.76)',
   splitLineColor: 'rgba(255, 255, 255, 0.04)',
+  gridLineColor: 'rgba(255, 255, 255, 0.04)',
 
   // 边框颜色
   borderColor: 'rgba(255, 255, 255, 0.10)',
@@ -101,6 +104,8 @@ export const ECHARTS_COLORS_LIGHT: EChartsColors = {
   axisLineColor: '#e5e7eb',
   axisLabelColor: '#6b7280',
   splitLineColor: '#eef0f3',
+  // ECharts 6 默认网格线（neutral15）——直方图实际画的就是它，3D 跟它对齐
+  gridLineColor: '#dbdee4',
   borderColor: '#e5e7eb',
   legendTextColor: '#6b7280',
   tooltipBg: 'rgba(255, 255, 255, 0.92)',
@@ -143,7 +148,7 @@ export function echartsColorsFor(isDark: boolean): EChartsColors {
 
 /** 3D 图消费的 token（T2 逐个断言两分支都有，缺一个就是运行时 undefined） */
 export const GRID3D_TOKEN_KEYS = [
-  'textColor', 'axisLabelColor', 'splitLineColor',
+  'textColor', 'axisLabelColor', 'splitLineColor', 'gridLineColor',
   'tooltipBg', 'tooltipBorder', 'tooltipText',
 ] as const
 
@@ -182,8 +187,9 @@ export function grid3DStyle(colors: EChartsColors): Grid3DStyle {
     // package-lock.json 都是），脱离 lockfile 重装可能拿到别的 2.x，届时先重跑上面那条 grep。
     // 想彻底抹掉轴线的正确写法是保持 show:true + 全透明色，不是关 show（spec §6.6）。
     axisLine: { show: true, lineStyle: { color: colors.splitLineColor, width: 1 } },
-    // 深底上 gl 默认的 #ccc 会糊成一片，与轴面同取极淡底色
-    splitLine: { show: true, lineStyle: { color: colors.splitLineColor, width: 1 } },
+    // 网格线：2D 直方图用的是 ECharts 默认 #dbdee4（见 token 注释）；
+    // 3D 之前用 splitLineColor（#eef0f3）在白底上几乎看不见（用户 2026-11-05 反馈）。
+    splitLine: { show: true, lineStyle: { color: colors.gridLineColor, width: 1 } },
     axisTick: { show: false },
     axisLabel: {
       show: true,
