@@ -2853,3 +2853,14 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
 - **规则三**：新增图表开关的任务必须扫 `grep -rn "toHaveCount(" e2e/analysis e2e/settings`，给按面板/行数断言的 enter 函数补该键为 `false`；只收敛自己用到的键不够。
 - **现象四**：逐任务提交后跑收口门禁，worktree 干净时 `scripts/e2e_affected.mjs` 自动基线只剩 `HEAD~1..HEAD`，打 `RESULT: NO AFFECTED TESTS —— 本轮没有档执行，不等于绿灯`。
 - **规则四**：收口轮显式 `--base master` 取整条分支并集；`NO AFFECTED TESTS` 不是绿。本次 31 文件命中 GLOBAL 清单 ⇒ 兜底升全量池 429 例（基线 427 + 本批 2）。
+
+## 2026-11-05 3D 视角记忆与网格线：四条「看起来对、跑起来错」的判据
+
+- **现象一（动画时有时无）**：切参数时 3D 柱阵有时有入场动画、有时直接跳出，首帧永远没有动画。根因在 echarts-gl 的 `graphicGL.updateVertexAnimation`：仅当新旧 mesh 的 `vertexCount` 相等才做过渡（源码注释 "Only animate when bar count are not changed"）。本图零占比柱不生成 ⇒ 每个参数的柱数随数据变，柱数撞上才有动画；首次挂载没有 previousMesh，必无动画。
+- **规则一**：判「3D 动画是否正常」不能按是否播动画断言；要改动画行为只能改数据形状（与本项目「零占比不生成」冲突），先记口径再决定。别为动画给零占比补假柱。
+- **现象二（PUT 整份替换 × 高频键）**：后端 `analysis_chart_state` 是整份 JSON 替换。旧 `saveChartState` 只累积防抖窗口内的键，给视角加高频上报后，「只报 site3dView」会把 layout/toggles 冲掉。配套坑：基底合并后**每份** settings PUT 都带 `site3dView`，e2e 用「postData 含 site3dView」等落库会被切勾选/旧值 PUT 误命中。
+- **规则二**：任何新增 chart-state 键都要以 `knownState` 为 PUT 基底（发送时合并，覆盖加载前排队的上报）；e2e 等视角落库要解析 postData 比**值**（本次拖拽后的 alpha），不能只判键存在。
+- **现象三（pointerup ≠ 用户改了视角）**：单击 tooltip 也会触发 pointerup。用它无条件置「用户已定视角」会挡掉迟到加载，并在切页/卸载时把未动过的默认机位写进账号；反过来，用 `currentView` 判「要不要迟到补」又会被 buildOption 的实时相机读取永久置真。
+- **规则三**：交互判据要比较相机（`isSameSite3DView`，浮点容差）；「用户已决定」与「是否要保存」用显式标记（viewDecided / userTouched），不复用渲染回退值。
+- **现象四（node 环境测 pagehide）**：`useChartMemory` 只在导入时按 `typeof document !== 'undefined'` 注册 pagehide；vitest 环境是 node，不桩 document 则该通道不存在，用例空转。`vi.hoisted` 里桩 document 时，Vue runtime-dom 导入期会 `document.createElement('template')`，只桩 `addEventListener` 会崩。
+- **规则四**：测模块级 DOM 监听：`vi.hoisted`（早于 import）桩 `document`，至少给 `createElement` 与 `addEventListener`；pagehide 用例要构造「加载前排队 + 加载完成即关页」的时序，否则 latest 已含基底，测不出合并逻辑。
