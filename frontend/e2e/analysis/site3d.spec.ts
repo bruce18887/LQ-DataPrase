@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile, selectParam, ensureChartToggles } from '../helpers/params'
+import { selectAnalysisFile, selectParam, ensureChartToggles, listParams } from '../helpers/params'
 import { waitLoadingGone } from '../helpers/charts'
 import { SEEDED_FILES } from '../fixtures/test-data'
 
@@ -103,6 +103,88 @@ test.describe('@p1 3D 站点柱阵', { tag: ['@p1', '@analysis'] }, () => {
           labelColor: 'rgba(255, 255, 255, 0.76)',
           nameColor: 'rgba(255, 255, 255, 0.76)',
         })
+    } finally {
+      await ensureChartToggles(page, { site3d: false })
+    }
+  })
+
+  /**
+   * 视角记忆（specs/2026-11-05 §4）：拖拽 → 切参数 → 刷新，机位都要保留。
+   * 落库链路是 400ms 静置 + 800ms 防抖，所以等**带着本次拖拽后 alpha 的 PUT**：
+   * V3 起每份 settings PUT 都携带已知 site3dView，只判「postData 含 site3dView」
+   * 会被切勾选/旧值 PUT 误命中。
+   */
+  test('视角在切参数与刷新后保持', async ({ page }) => {
+    try {
+      await enter3D(page)
+      const readView = () =>
+        page.evaluate((sel) => {
+          const dom = document.querySelector(sel) as any
+          const inst = dom?.__echartsInstance__
+          const view = inst?.getViewOfComponentModel?.(inst.getModel().getComponent('grid3D'))
+          const c = view?._control
+          return c
+            ? { alpha: c.getAlpha(), beta: c.getBeta(), distance: c.getDistance(), ortho: c.getOrthographicSize() }
+            : null
+        }, HOST)
+
+      const host = page.locator(HOST)
+      await host.scrollIntoViewIfNeeded()
+      const bb = (await host.boundingBox())!
+      const cx = bb.x + bb.width / 2
+      const cy = bb.y + bb.height / 2
+      const before = (await readView())!
+      const viewPut = page.waitForResponse(
+        (r) => {
+          if (!r.url().includes('/auth/settings/') || r.request().method() !== 'PUT') return false
+          try {
+            const v = JSON.parse(r.request().postData() || '{}')?.analysis_chart_state?.site3dView
+            return typeof v?.alpha === 'number' && Math.abs(v.alpha - before.alpha) > 1
+          } catch {
+            return false
+          }
+        },
+        { timeout: 20_000 },
+      )
+
+      await page.mouse.move(cx, cy)
+      await page.mouse.down()
+      await page.mouse.move(cx + 140, cy - 60, { steps: 12 })
+      await page.mouse.up()
+      await page.waitForTimeout(800) // damping 余量
+      const rotated = (await readView())!
+      expect(Math.abs(rotated.alpha - before.alpha), '拖拽应改变机位').toBeGreaterThan(1)
+
+      await viewPut // 视角已落库
+
+      // 切到另一个参数：重渲染必须带着同一机位
+      const params = await listParams(page)
+      const next = params.find((p) => p !== 'Vth' && p !== 'Vth_Post') ?? params[1]
+      await selectParam(page, next)
+      await waitLoadingGone(page.locator(SINGLE))
+      await page.waitForTimeout(1200)
+      const afterSwitch = (await readView())!
+      expect(afterSwitch.alpha).toBeCloseTo(rotated.alpha, 0)
+      expect(afterSwitch.beta).toBeCloseTo(rotated.beta, 0)
+
+      // 刷新：账号记忆里应还是这个机位
+      await page.reload()
+      await enter3D(page)
+      await page.waitForTimeout(1200)
+      const afterReload = (await readView())!
+      expect(afterReload.alpha).toBeCloseTo(rotated.alpha, 0)
+      expect(afterReload.beta).toBeCloseTo(rotated.beta, 0)
+
+      // 收尾：复位并等落库，别把旋转后的视角留给后续用例/手工检查
+      const resetPut = page.waitForResponse(
+        (r) =>
+          r.url().includes('/auth/settings/') &&
+          r.request().method() === 'PUT' &&
+          (r.request().postData() || '').includes('site3dView'),
+        { timeout: 20_000 },
+      )
+      await page.getByLabel('回到默认视角').click()
+      await resetPut
     } finally {
       await ensureChartToggles(page, { site3d: false })
     }
