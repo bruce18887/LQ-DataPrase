@@ -108,6 +108,13 @@ describe('toggles 向后兼容', () => {
   })
 })
 
+describe('site3dView 向后兼容', () => {
+  it('旧账号 state 没有 site3dView → 快照为 null（默认机位），不报错', async () => {
+    const r = await loadChartMemory()
+    expect(r.state.site3dView).toBeNull()
+  })
+})
+
 describe('toggles 整体丢失时由布局反推（快速 F5 的真实竞态）', () => {
   it('布局里有 site3d ⇒ 反推为 true（否则默认关会把已存的 5 格裁回 4 格）', async () => {
     const r = await loadChartMemory()

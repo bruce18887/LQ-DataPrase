@@ -3,10 +3,11 @@
  * ────────────────────────────────────────────────
  * - 取数走 stores/userSettings（Task 6b）：本模块**不再**自己 GET，分析页多个消费方
  *   （useChartDock / SingleParamTab）共享的是 store 的单飞 + 自己这份已解析结果的 memo。
- * - save() 防抖合并：layout（useChartDock 各 persist 点）与 toggles（勾选 watch）
- *   各自上报，800ms 内合并为一次部分 PUT；pagehide 立即冲刷防丢最后一次改动。
- *   两条 PUT 通道都经 store（save / saveKeepalive），raw 随之更新，不再有「模块知道但
- *   store 是旧的」这种分叉。
+ * - save() 防抖合并：layout（useChartDock 各 persist 点）、toggles（勾选 watch）与
+ *   3D 视角各自上报，800ms 内合并为一次**完整** PUT（后端该字段整份替换，所以载荷
+ *   必须以 knownState 为基底，不能只带本窗口内改过的键）；pagehide 立即冲刷防丢
+ *   最后一次改动。两条 PUT 通道都经 store（save / saveKeepalive），raw 随之更新，
+ *   不再有「模块知道但 store 是旧的」这种分叉。
  * - 开关三态：null=settings 未返回或拉取失败（localStorage 照写、后端不写——
  *   与「用户关开关」区分开，避免一次网络抖动被当成主动关闭而清掉本机布局）/
  *   true=正常同步 / false=用户已关闭（两层都阻断）。
@@ -24,11 +25,19 @@
 import { useUserSettingsStore } from '../stores/userSettings'
 import { safeRemoveItem } from '../utils/safeStorage'
 import { DOCK_LAYOUT_STORAGE_KEY, isValidLayout, type DockLayout } from '../pages/analysis/composables/useChartDock'
+import { sanitizeSite3DView, type Site3DView } from '../pages/analysis/composables/site3dView'
 
 const DEBOUNCE_MS = 800
 
 export interface ChartToggles { hist: boolean; serial: boolean; qq: boolean; box: boolean; site3d: boolean }
-export interface ChartMemorySnapshot { layout: DockLayout | null; toggles: ChartToggles | null }
+export interface ChartMemorySnapshot {
+  layout: DockLayout | null
+  toggles: ChartToggles | null
+  site3dView: Site3DView | null
+}
+
+/** 可上报/可落库的记忆键（省略 = 本次没改） */
+type MemoryPatch = { layout?: DockLayout; toggles?: ChartToggles; site3dView?: Site3DView }
 export interface ChartMemoryLoadResult {
   memoryEnabled: boolean | null
   fetchFailed: boolean
@@ -38,7 +47,12 @@ export interface ChartMemoryLoadResult {
 /** load() 结果的 memo：请求的单飞在 store 里，这里只是「同一份解析结果只算一次」。 */
 let loadPromise: Promise<ChartMemoryLoadResult> | null = null
 let memoryEnabled: boolean | null = null
-let latest: { layout?: DockLayout; toggles?: ChartToggles } | null = null
+let latest: MemoryPatch | null = null
+// 服务端最近一次加载/确认的完整状态：每次 PUT 都以它为基底，避免「只带一个键」
+// 把整份 JSON 覆盖掉（视角是高频写入，这条窄缝会把布局/勾选冲没）
+let knownState: MemoryPatch = {}
+// 已解析快照的同步读面（Site3DChart 首帧就要拿到视角，等不了 promise）
+let cachedState: ChartMemorySnapshot | null = null
 let timer: ReturnType<typeof setTimeout> | null = null
 
 /** 当前记忆开关（null = settings 未返回或拉取失败，非用户主动关闭） */
@@ -63,9 +77,26 @@ export function parseToggles(raw: unknown): ChartToggles | null {
 }
 
 function parseState(raw: unknown): ChartMemorySnapshot {
-  if (!raw || typeof raw !== 'object') return { layout: null, toggles: null }
+  if (!raw || typeof raw !== 'object') return { layout: null, toggles: null, site3dView: null }
   const o = raw as Record<string, unknown>
-  return { layout: isValidLayout(o.layout) ? o.layout : null, toggles: parseToggles(o.toggles) }
+  return {
+    layout: isValidLayout(o.layout) ? o.layout : null,
+    toggles: parseToggles(o.toggles),
+    site3dView: sanitizeSite3DView(o.site3dView),
+  }
+}
+
+function pickKnown(state: ChartMemorySnapshot): MemoryPatch {
+  return {
+    ...(state.layout ? { layout: state.layout } : {}),
+    ...(state.toggles ? { toggles: state.toggles } : {}),
+    ...(state.site3dView ? { site3dView: state.site3dView } : {}),
+  }
+}
+
+/** 同步读最近一次已解析的账号记忆；未加载/已清空时 null */
+export function getCachedChartState(): ChartMemorySnapshot | null {
+  return cachedState
 }
 
 export function loadChartMemory(): Promise<ChartMemoryLoadResult> {
@@ -76,7 +107,9 @@ export function loadChartMemory(): Promise<ChartMemoryLoadResult> {
       if (store.raw === null) {
         memoryEnabled = null
         latest = null
-        return { memoryEnabled, fetchFailed: true, state: { layout: null, toggles: null } }
+        knownState = {}
+        cachedState = null
+        return { memoryEnabled, fetchFailed: true, state: { layout: null, toggles: null, site3dView: null } }
       }
       const d = store.raw as Record<string, unknown>
       memoryEnabled = d.analysis_chart_memory !== false
@@ -95,6 +128,9 @@ export function loadChartMemory(): Promise<ChartMemoryLoadResult> {
           site3d: keys.has('site3d'),
         }
       }
+      knownState = pickKnown(state)
+      // 开关关闭时不暴露同步快照：重挂载的图应回默认机位，不能把账号里的旧视角当「当前」
+      cachedState = memoryEnabled ? state : null
       if (memoryEnabled && latest) scheduleFlush()
       else if (memoryEnabled === false) latest = null
       return { memoryEnabled, fetchFailed: false, state }
@@ -111,23 +147,36 @@ function scheduleFlush() {
 function flush() {
   timer = null
   if (memoryEnabled !== true || !latest) return
-  const payload = latest
+  // 发送时才合并基底：loadChartMemory 解析前就排队的上报（用户进页立刻拖视角）
+  // 当时 knownState 还是空的，只靠 saveChartState 里那次合并会漏掉布局/勾选。
+  const payload = { ...knownState, ...latest }
   latest = null
+  // 乐观记账：请求失败只会让下次 PUT 重复携带（同一客户端不丢数据）
+  knownState = { ...payload }
+  if (cachedState) cachedState = { ...cachedState, ...payload }
   useUserSettingsStore().save({ analysis_chart_state: { ...payload } }).catch(() => {
     /* 后台静默同步：失败不打扰用户 */
   })
 }
 
-/** layout / toggles 变化上报（内部判开关 + 防抖合并为一次 PUT） */
-export function saveChartState(patch: { layout?: DockLayout; toggles?: ChartToggles }) {
+/** layout / toggles / 视角变化上报（内部判开关 + 防抖合并为一次完整 PUT） */
+export function saveChartState(patch: MemoryPatch) {
   if (memoryEnabled === false) return // 用户已关：不积累、不发送
-  latest = { ...(latest ?? {}), ...patch }
+  latest = { ...knownState, ...(latest ?? {}), ...patch }
+  // 同步快照跟着上报一起走：dock 勾掉再勾回会重建图组件，重挂载只读得到
+  // cachedState，不同步就会在防抖窗口内闪回加载时的旧视角/布局。
+  if (cachedState) cachedState = { ...cachedState, ...patch }
   if (memoryEnabled === true) scheduleFlush()
 }
 
 /** 清空账号状态 + 本机布局。「保存为关」传 { disableMemory: true } 同步断写 */
 export async function clearChartMemoryState(opts: { disableMemory?: boolean } = {}): Promise<boolean> {
   latest = null
+  knownState = {}
+  cachedState = null
+  // 作废解析 memo：留着会把清空前的旧结果原样喂给下一次 load（恢复默认后重进分析页
+  // 仍套用旧布局/勾选）。
+  loadPromise = null
   if (timer) {
     clearTimeout(timer)
     timer = null
@@ -145,18 +194,23 @@ export async function clearChartMemoryState(opts: { disableMemory?: boolean } = 
 /** 设置页「保存为开」时调用：SPA 会话内把开关拨回 true（布局套用下次进入分析页生效） */
 export function setChartMemoryEnabled(enabled: boolean) {
   memoryEnabled = enabled
+  // 重开必须丢弃旧解析结果：memo 里可能是「关」或拉取失败时的快照，knownState 也是空的，
+  // 不重取就会让下一次单键上报退回整份冲洗。
+  if (enabled) loadPromise = null
 }
 
 /**
  * 登录/登出/账号切换时重置本模块态。⚠ 它**不**负责 store —— store.reset() 由
- * stores/auth.ts 的 resetUserSettingsCaches() 另调一次；本模块留下的三样
- * （memoryEnabled 三态 / 待冲刷的 latest / loadPromise memo）都不是账号设置本身，
- * 是分析页自己的运行时状态，store 治不到。
+ * stores/auth.ts 的 resetUserSettingsCaches() 另调一次；本模块留下的开关三态、
+ * 待冲刷的 latest、PUT 基底 knownState、同步快照 cachedState 与 loadPromise memo
+ * 都不是账号设置本身，是分析页自己的运行时状态，store 治不到。
  */
 export function resetChartMemoryCache() {
   loadPromise = null
   memoryEnabled = null
   latest = null
+  knownState = {}
+  cachedState = null
   if (timer) {
     clearTimeout(timer)
     timer = null
@@ -174,7 +228,9 @@ if (typeof document !== 'undefined') {
       timer = null
     }
     if (memoryEnabled !== true || !latest) return
-    const payload = latest
+    // 与 flush() 同口径：PUT 是整份替换，未加载完就排队的改动必须带上基底
+    const payload = { ...knownState, ...latest }
+    knownState = { ...payload }
     latest = null
     useUserSettingsStore().saveKeepalive({ analysis_chart_state: { ...payload } })
   })
