@@ -2869,3 +2869,9 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
 
 - **现象**：拖拽在 pointerup 当刻就能读出相机变化，滚轮不行——echarts-gl 的 wheel 只写 `_zoomSpeed`，阻尼在后续 zr 帧才落到 `getOrthographicSize()`。用「事件当刻与 currentView 相等就不记用户改动」的判据会把**单次滚轮**整个吃掉（不排静置、不落库），用户缩放后切页/刷新就丢。
 - **规则**：滚轮事件无条件排静置并置 `viewDecided`；「有没有真变化」的判等推迟到 400ms 静置之后（`flushView` 里比较再决定是否 PUT）。判据用例要覆盖 ortho（e2e 已加滚轮步），不能只测拖拽的 alpha/beta。
+
+## 2026-11-09 「禁用默认 user/viewer 会报错」：被报的那层是绿的，红在下游
+
+- **现象**：用户反馈禁用种子账号 `user`/`viewer` 会报错。分层取证后：后端 `PUT /auth/users/<id>/ {is_active:false}` 两条都 **200**（守卫只拦禁自己 / 拆最后一个管理员）；真实浏览器点「禁用」也 200 + 提示「状态已更新」、无 pageerror。红的是下游——`frontend/e2e/fixtures/auth.setup.ts:88` 硬性以 `user`/`user123` 实时登录铸 storageState，`user` 一停用该 setup 就停在 `/login` 变红，并连带所有依赖它的用例；`viewer` 没有这个依赖（setup 只用 admin/user）。同时确认两处**设计内**后果：被禁账号再登录 403 `account_disabled`、其在线会话旧 access 401 `user_inactive` / 旧 refresh 401。
+- **规则一**：用户报「X 操作会报错」时，先把「操作本身」和「操作后果」分层各测一次（接口码 + 真实 UI 提示 + 控制台异常都抄下来），不要顺着描述直接改被报的那层。因果要双向验证才算证据：置 0 → setup 红，回 1 → setup 绿。
+- **规则二**：幂等种子命令的修复集必须覆盖「账号可用」这件事本身。`seed_users` 原先只修 `role`/`display_name`/`is_staff`/`is_superuser`，**从不碰 `is_active`**（2026-09-20 条目把它列为「管理员锁死」的第④条断头路），于是夹具账号一旦停用，重跑 seed 只打印 `User already exists`，坏状态永久留下。现把 `is_active=True` 补进修复集，**范围只限三个种子账号**：管理员主动停用的真实账号仍保持停用（`test_accounts_bootstrap.SeedUsersRepairTests` 两条新用例分别钉这两侧）。
