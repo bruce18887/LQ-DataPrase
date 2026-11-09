@@ -13,6 +13,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.permissions import role_can
 from apps.common.constants import PAGE_SIZE_MAX
 from apps.common.errors import error_response
 from apps.common.grid_filters import (
@@ -245,10 +246,10 @@ class DataBrowserView(APIView):
         return HttpResponse(payload, content_type='application/json; charset=utf-8')
 
 
-# Consistency-check write actions and the roles allowed to run them. Delete is
-# destructive, so it is restricted to administrators; import/fix are additive
-# and mirror upload privileges (administrator + user). Viewers may read the
-# check results (GET stays IsAuthenticated) but cannot mutate anything.
+# Consistency-check write actions. Delete is destructive, so it is gated by
+# FEATURE_PERMISSIONS['data_delete']; import/fix only add or repair rows and are
+# gated by ['data_repair_mutate']. The role sets live in that table, not here.
+# GET stays IsAuthenticated: reading the report is not a mutation.
 _DELETE_ACTIONS = ('delete_orphaned_db', 'delete_orphaned_disk', 'delete_duplicates')
 _MUTATE_ACTIONS = ('import_orphaned_disk', 'fix_product_codes')
 _ALL_ACTIONS = _DELETE_ACTIONS + _MUTATE_ACTIONS
@@ -342,9 +343,9 @@ class DataConsistencyCheckView(APIView):
 
         user = request.user
         role = getattr(user, 'role', '')
-        if action in _DELETE_ACTIONS and role != 'administrator':
+        if action in _DELETE_ACTIONS and not role_can(role, 'data_delete'):
             return error_response('forbidden', '仅管理员可执行删除操作', 403)
-        if action in _MUTATE_ACTIONS and role not in ('administrator', 'user'):
+        if action in _MUTATE_ACTIONS and not role_can(role, 'data_repair_mutate'):
             return error_response('forbidden', '当前角色无权执行该操作', 403)
 
         if action == 'delete_orphaned_db':
