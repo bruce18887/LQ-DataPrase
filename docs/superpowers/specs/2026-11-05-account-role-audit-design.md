@@ -70,7 +70,7 @@ role_can(role, feature) -> bool
 
 1. 历史模型中的 `viewer` 且 `is_superuser=False`：批量改为 `user`。
 2. 历史模型中的 `viewer` 且 `is_superuser=True`：批量改为 `administrator`。
-3. 所有 `is_superuser=True` 但 role 非 administrator 的历史遗留行：改为 administrator，和启动期 `_promote_legacy_superusers` 口径一致。
+3. 所有 `is_superuser=True` 但 role 非 administrator 的历史遗留行：改为 administrator，和启动期 `_promote_superusers`（`standalone.py:62`，实测同时写 `role` 与 `is_staff`）口径一致。
 4. AlterField 将 `role.choices` 收敛为 administrator/user。
 
 迁移逻辑抽成可独立调用/测试的纯函数，避免只能靠人工跑 migration 验证。反向 `run_python` 显式 no-op：历史 viewer 的独立身份按既定决策不再恢复，只允许 choices migration 自身回退。
