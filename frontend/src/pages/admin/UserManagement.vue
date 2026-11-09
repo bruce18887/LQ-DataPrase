@@ -269,7 +269,9 @@ async function resetPassword(user: User) {
   }
   try {
     await api.post(`/auth/users/${user.id}/reset_password/`, { new_password: value })
-    ElMessage.success(`已重置 ${user.username} 的密码`)
+    ElMessage.success(`已重置 ${user.username} 的密码，请告知其登录后修改`)
+    // 后端重置会同时清锁定；刷新表格让「锁定用户」KPI 与行状态立即收敛。
+    loadUsers()
   } catch {
     // 真实错误 toast 由拦截器弹出
   }

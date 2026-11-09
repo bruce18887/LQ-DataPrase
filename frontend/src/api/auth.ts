@@ -140,8 +140,14 @@ export const authApi = {
   login(username: string, password: string) {
     return api.post('/auth/login/', { username, password })
   },
-  logout(refresh: string) {
-    return api.post('/auth/logout/', { refresh })
+  logout(refresh: string, access?: string) {
+    // 显式带 access：store.logout() 紧接着会 clearSession()，而 axios 请求
+    // 拦截器是异步执行的，靠 localStorage 取 token 时会读到已被清空的值。
+    return api.post(
+      '/auth/logout/',
+      { refresh },
+      access ? { headers: { Authorization: `Bearer ${access}` } } : undefined,
+    )
   },
   /**
    * Exchange a refresh token for a new access token.
@@ -160,6 +166,16 @@ export const authApi = {
   },
   getProfile() {
     return api.get('/auth/profile/')
+  },
+  updateProfile(data: { display_name?: string; email?: string }) {
+    return api.put('/auth/profile/', data)
+  },
+  changePassword(data: {
+    old_password: string
+    new_password: string
+    confirm_password: string
+  }) {
+    return api.post('/auth/change-password/', data)
   },
   getSettings() {
     return api.get('/auth/settings/')

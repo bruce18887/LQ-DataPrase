@@ -17,7 +17,9 @@ from apps.common.errors import error_response
 from .models import User, UserSetting
 from .permissions import FeaturePermission
 from .serializers import (
+    AdminResetPasswordSerializer,
     LoginSerializer,
+    PasswordChangeSerializer,
     TokenResponseSerializer,
     UserCreateSerializer,
     UserProfileSerializer,
@@ -25,6 +27,7 @@ from .serializers import (
     UserSettingSerializer,
 )
 from .services import get_user_setting
+from .tokens import revoke_refresh_tokens
 
 MAX_LOGIN_ATTEMPTS = 5
 LOCKOUT_DURATION = timedelta(minutes=15)
@@ -193,7 +196,10 @@ class LoginView(APIView):
 
 
 class LogoutView(APIView):
-    permission_classes = [IsAuthenticated]
+    # 登出要能在 access 已过期时仍然生效：被吊销的凭据在 body 的 refresh 里，
+    # 不能因为 Authorization 头过期就先 401 掉。
+    permission_classes = [AllowAny]
+    authentication_classes: list = []
 
     def post(self, request):
         try:
@@ -277,6 +283,21 @@ class UserSettingsView(APIView):
         return Response(serializer.data)
 
 
+class ChangePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = PasswordChangeSerializer(
+            data=request.data, context={'user': request.user}
+        )
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            request.user.set_password(serializer.validated_data['new_password'])
+            request.user.save(update_fields=['password'])
+            revoke_refresh_tokens(request.user)
+        return Response({'detail': '密码已修改，请重新登录。'})
+
+
 class UserManagementViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     permission_classes = [IsAuthenticated, FeaturePermission]
@@ -348,15 +369,19 @@ class UserManagementViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def reset_password(self, request, pk=None):
         user = self.get_object()
-        new_password = request.data.get('new_password')
-        if not new_password or len(new_password) < 8:
-            return Response(
-                {'detail': 'Password must be at least 8 characters.'},
-                status=status.HTTP_400_BAD_REQUEST,
+        serializer = AdminResetPasswordSerializer(
+            data=request.data, context={'user': user}
+        )
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            user.set_password(serializer.validated_data['new_password'])
+            user.login_attempts = 0
+            user.lockout_until = None
+            user.save(
+                update_fields=['password', 'login_attempts', 'lockout_until']
             )
-        user.set_password(new_password)
-        user.save()
-        return Response({'detail': 'Password reset successfully.'})
+            revoke_refresh_tokens(user)
+        return Response({'detail': '密码已重置，请告知用户登录后立即修改。'})
 
     @action(detail=True, methods=['post'])
     def unlock(self, request, pk=None):

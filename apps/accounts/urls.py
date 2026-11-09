@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
+    ChangePasswordView,
     LoginView,
     LogoutView,
     UserManagementViewSet,
@@ -21,6 +22,7 @@ urlpatterns = [
     # config/settings/base.py (ROTATE_REFRESH_TOKENS / BLACKLIST_AFTER_ROTATION).
     path('refresh/', TokenRefreshView.as_view(), name='token-refresh'),
     path('profile/', UserProfileView.as_view(), name='profile'),
+    path('change-password/', ChangePasswordView.as_view(), name='change-password'),
     path('settings/', UserSettingsView.as_view(), name='settings'),
     path('', include(router.urls)),
 ]
