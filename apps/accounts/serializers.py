@@ -37,7 +37,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
     Deliberately narrower than :class:`UserSerializer`. That endpoint only
     requires ``IsAuthenticated``, and ``FeaturePermission`` re-reads ``role``
-    from the DB on every request — so a writable ``role`` let any viewer
+    from the DB on every request — so a writable ``role`` let any regular user
     promote itself with ``PUT /auth/profile/ {"role": "administrator"}`` and
     then reach user management / data delete / system config. A writable
     ``is_active`` likewise allowed self-unlock after a lockout, and a writable

@@ -1,7 +1,7 @@
 """viewer → user/administrator 的归并内核。
 
-现由迁移 `0012_normalize_user_roles`（历史库升级）调用；Task 3 会把 `seed_users`
-接成第二个调用点（dev/e2e 夹具库的幂等兜底）。收模型类为参数，迁移里传的是
+两个调用点：迁移 `0012_normalize_user_roles`（历史库升级）与 `seed_users`
+（dev/e2e 夹具库的幂等兜底，choices 收敛后每次预跑都会归并一遍残留行）。收模型类为参数，迁移里传的是
 RunPython 的历史模型，测试里传的是真实模型 —— 因此本模块**不得 import models**
 （一旦被 models 侧引用就成了真实循环；而迁移若在 RunPython 里直接用当前模型类，
 读到的也不是 0011 那一刻的状态，而是未来 schema）。
@@ -31,8 +31,10 @@ def normalize_roles(UserModel):
     * 三支的行集互斥（第 2 支只看还剩的 viewer，第 3 支排除已是 administrator 的
       且非 superuser 的行进不来），所以 `sum(counts.values())` 就等于被改动的行数
       —— 判「有没有改数据」请用 `any(counts.values())`，别挑单个键。
-    * 幂等：第二次调用三项全 0（Task 3 把 `seed_users` 接成第二个调用点时靠这条
-      保证每次 e2e 预跑不会重复出声）。
+    * 幂等：第二次调用三项全 0 —— `seed_users` 每次都跑本函数，靠这条保证 e2e
+      预跑不会重复出声。判据在 test_accounts_bootstrap 的兜底用例：它连跑两次，
+      第二次要求 `Seed users completed.` 在场（证明分支真跑到了）却不许再出现计数
+      键名 —— 把出声条件写成 `if True:` 只有这一条会红。
     """
     to_admin = UserModel.objects.filter(
         role=VIEWER, is_superuser=True

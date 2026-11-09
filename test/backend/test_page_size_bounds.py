@@ -225,4 +225,4 @@ if __name__ == '__main__':
     from django.conf import settings as dj_settings
 
     runner = get_runner(dj_settings)(['test.backend.test_page_size_bounds'], verbosity=2)
-    sys.exit(runner.run_tests())
+    sys.exit(runner.run_tests(['test.backend.test_page_size_bounds']))

@@ -34,7 +34,7 @@ export const SCOPE_PATHSPECS = ['*.py', '*.ts', '*.vue']
 export const EXEMPT = [
   {
     path: 'apps/datafiles/tests.py',
-    lines: 1968,
+    lines: 1959,
     reason:
       '2026-09-02 批次 3 已按主题拆过一轮（那条把同族 tests.py 从 2468 行拆开），' +
       '剩余部分要先量跨类 fixture 依赖（类之间互借道具、有 class 子(父) 继承），' +

@@ -260,14 +260,14 @@ class UserManagementViewSetTests(TestCase):
                 'username': 'victim',
                 'email': 'victim@example.com',
                 'display_name': 'Victim User',
-                'role': 'viewer',
+                'role': 'administrator',
                 'is_active': True,
             }, format='json',
         )
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.target.refresh_from_db()
         self.assertEqual(self.target.email, 'victim@example.com')
-        self.assertEqual(self.target.role, 'viewer')
+        self.assertEqual(self.target.role, 'administrator')
 
     def test_put_to_nonexistent_user_returns_404(self):
         resp = self.client.put(

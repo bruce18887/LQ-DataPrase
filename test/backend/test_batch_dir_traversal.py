@@ -72,7 +72,7 @@ class BatchDirTraversalTests(TestCase):
         self.addCleanup(shutil.rmtree, self._tmp, True)
 
         self.attacker = User.objects.create_user(
-            username='attacker', password='strong-pass-123', role='viewer')
+            username='attacker', password='strong-pass-123', role='user')
         self.victim = User.objects.create_user(
             username='victim', password='strong-pass-123', role='user')
 

@@ -11,7 +11,9 @@ def merge_viewer_roles(apps, schema_editor):
     # flush 是仓内惯例（standalone.py 15 条启动期打印全部带），Electron 侧按行
     # 消费后端 stdout。文案刻意 ASCII：局域网服务器上人手跑 `manage.py migrate`
     # 且输出被重定向、系统码页非 CJK 时，中文 print 会抛 UnicodeEncodeError，
-    # 而那正好发生在迁移事务里 —— 数据无损，但升级当场趴下。
+    # 而那正好发生在迁移事务里 —— 数据无损，但升级当场趴下。钉它的是
+    # test/backend/test_role_normalization.py 的 MigrationPrintCodepageTests：
+    # 拿 cp1252 的流真跑一次本函数，而不是查这一行的字符串。
     if any(counts.values()):
         print(f"[0012] role normalization: {counts}", flush=True)
 

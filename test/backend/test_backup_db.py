@@ -353,4 +353,4 @@ if __name__ == '__main__':
     from django.test.utils import get_runner
 
     runner = get_runner(dj_settings)(['test.backend.test_backup_db'], verbosity=2)
-    sys.exit(runner.run_tests())
+    sys.exit(runner.run_tests(['test.backend.test_backup_db']))

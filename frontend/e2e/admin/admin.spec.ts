@@ -140,7 +140,7 @@ test.describe('用户管理 / 权限', { tag: ['@admin'] }, () => {
     const table = page.locator('.el-table')
     await expect(table).toBeVisible()
 
-    // 唯一的一次性用户名，避免污染种子账号（admin/user/viewer）
+    // 唯一的一次性用户名，避免污染种子账号（admin/user）
     const uniqueName = `e2e_user_${Date.now()}`
 
     // 添加表单（UserManagement.vue「➕ 添加用户」区块，inline el-form）：
@@ -234,7 +234,7 @@ test.describe('用户管理 / 权限', { tag: ['@admin'] }, () => {
       const headers = { Authorization: `Bearer ${(await login.json()).token}` }
       const created = await ctx.request.post('/api/v1/auth/users/', {
         headers,
-        data: { username, password: 'e2e-initial-password', role: 'viewer' },
+        data: { username, password: 'e2e-initial-password', role: 'user' },
       })
       expect(created.ok(), `临时用户创建失败：${await created.text()}`).toBe(true)
       userId = (await created.json()).id

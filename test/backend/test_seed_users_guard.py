@@ -2,9 +2,9 @@
 
 为什么需要这条钉子（2026-10-14 部署整改批 2）：`standalone.py:104-111` 已经有一道互锁
 —— 非回环绑定 + 内置默认口令 = 拒绝启动。但它只管 `_bootstrap` 建 superuser 那一条路。
-`seed_users` 是**第二条**能落地弱口令的通路：它硬编码 `admin/admin123`、`user/user123`、
-`viewer/viewer123`，无参数，且实测不检查任何条件。在服务器形态上跑一次它，就等于把三个
-已知口令挂到内网端口上，而上面那道互锁完全看不见这件事。
+`seed_users` 是**第二条**能落地弱口令的通路：它硬编码 `admin/admin123`、`user/user123`，
+无参数，且实测不检查任何条件。在服务器形态上跑一次它，就等于把两个已知口令挂到内网
+端口上，而上面那道互锁完全看不见这件事。
 
 判据落在「一个用户都没被创建」上，而不是只断言抛错 —— 半路抛错但已经建了 admin 是最坏形态。
 
@@ -58,7 +58,7 @@ class SeedUsersGuardTests(TestCase):
             os.environ.pop('LQDP_ALLOW_WEAK_SEED', None)
             with self.assertRaises(CommandError):
                 self._run()
-        self.assertEqual(User.objects.filter(username__in=('admin', 'user', 'viewer')).count(), 0)
+        self.assertEqual(User.objects.filter(username__in=('admin', 'user')).count(), 0)
 
     @override_settings(DEBUG=False)
     def test_explicit_opt_in_allows(self):
@@ -68,11 +68,14 @@ class SeedUsersGuardTests(TestCase):
 
     @override_settings(DEBUG=True)
     def test_dev_profile_unchanged(self):
-        """开发/e2e 依赖这三个种子账号，默认必须照旧放行。"""
+        """开发/e2e 依赖这两个种子账号，默认必须照旧放行。"""
         with mock.patch.dict(os.environ, {}, clear=True):
             os.environ.pop('LQDP_ALLOW_WEAK_SEED', None)
             self._run()
-        self.assertEqual(User.objects.filter(username__in=('admin', 'user', 'viewer')).count(), 3)
+        self.assertEqual(User.objects.filter(username__in=('admin', 'user')).count(), 2)
+        # 只数这两条的话，「种子表又被塞回第三个账号」不会被发现 —— 建库后表里
+        # 只有 seed 建的行，所以总体数也要钉住。
+        self.assertEqual(User.objects.count(), 2)
 
 
 if __name__ == '__main__':
@@ -80,4 +83,4 @@ if __name__ == '__main__':
     from django.test.utils import get_runner
 
     runner = get_runner(dj_settings)(['test.backend.test_seed_users_guard'], verbosity=2)
-    sys.exit(runner.run_tests())
+    sys.exit(runner.run_tests(['test.backend.test_seed_users_guard']))

@@ -24,7 +24,7 @@ class SystemPathsApiTests(APITestCase):
     def setUp(self):
         self.admin = self._mkuser('sysadmin', 'administrator')
         self.plain = self._mkuser('sysuser', 'user')
-        self.viewer = self._mkuser('sysviewer', 'viewer')
+        self.plain2 = self._mkuser('sysplain2', 'user')
         # isolate the config file into a temp location — never pollute the repo
         self._cfg_dir = tempfile.TemporaryDirectory()
         self._cfg_file = Path(self._cfg_dir.name) / 'system_config.json'
@@ -56,7 +56,7 @@ class SystemPathsApiTests(APITestCase):
         self.assertEqual(resp.status_code, 401)
 
     def test_get_shape_and_editable_flag(self):
-        resp = self._auth_client(self.viewer).get('/api/v1/system/paths/')
+        resp = self._auth_client(self.plain2).get('/api/v1/system/paths/')
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         for key in ('data_dir', 'db_path', 'media_path', 'temp_dir', 'config_file',
@@ -73,7 +73,7 @@ class SystemPathsApiTests(APITestCase):
         self.assertTrue(resp.json()['editable'])
 
     # --- SYSTEM_PATHS_VISIBLE_TO_ALL -------------------------------------
-    # 桌面形态里「viewer 能看本机路径」不是秘密（上面那条用例就是它的契约）；
+    # 桌面形态里「非管理员能看本机路径」不是秘密（上面那条用例就是它的契约）；
     # 同一份代码跑在局域网服务器上时，这些绝对路径披露的是服务器的目录结构、
     # 数据库文件位置和配置文件位置，普通账号没有理由读到。闸门放在 API 上而不是
     # 只藏在界面里（lessons R3②：前端隐藏不等于权限）。
@@ -83,7 +83,7 @@ class SystemPathsApiTests(APITestCase):
 
     @override_settings(SYSTEM_PATHS_VISIBLE_TO_ALL=False)
     def test_hidden_get_forbidden_for_non_admin(self):
-        for user in (self.plain, self.viewer):
+        for user in (self.plain, self.plain2):
             with self.subTest(user=user.username):
                 resp = self._auth_client(user).get('/api/v1/system/paths/')
                 self.assertEqual(resp.status_code, 403)
@@ -107,13 +107,13 @@ class SystemPathsApiTests(APITestCase):
 
     @override_settings(SYSTEM_PATHS_VISIBLE_TO_ALL=False)
     def test_hidden_put_still_forbidden_for_non_admin(self):
-        resp = self._auth_client(self.viewer).put(
+        resp = self._auth_client(self.plain2).put(
             '/api/v1/system/paths/', {'temp_dir': tempfile.gettempdir()}, format='json',
         )
         self.assertEqual(resp.status_code, 403)
 
     def test_put_forbidden_for_non_admin(self):
-        for user in (self.plain, self.viewer):
+        for user in (self.plain, self.plain2):
             with self.subTest(user=user.username):
                 resp = self._auth_client(user).put(
                     '/api/v1/system/paths/',

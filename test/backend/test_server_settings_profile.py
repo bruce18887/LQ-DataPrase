@@ -191,7 +191,7 @@ class ServerProfileValuesTests(unittest.TestCase):
     def test_storage_paths_hidden_from_non_admins(self):
         """``GET /api/v1/system/paths/`` 在服务器形态只对管理员披露。
 
-        桌面形态下这五个字段是用户自己的磁盘（viewer 看了不构成秘密，且界面要给他
+        桌面形态下这五个字段是用户自己的磁盘（非管理员看了不构成秘密，且界面要给他
         看「数据在哪」）；同一份代码跑在局域网服务器上时，它们披露的是服务器的
         目录结构、数据库文件与配置文件位置 —— 与使用者是谁无关。默认值留在
         base.py=True，所以必须由本档显式关掉，本用例就是钉住这一步。
