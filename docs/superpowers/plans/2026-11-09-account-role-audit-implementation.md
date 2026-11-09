@@ -1080,6 +1080,20 @@ Expected: `Ran 7 tests … OK`
 
 > 判读提示：`test_change_password_still_succeeds_when_audit_insert_fails` 会在日志里打一条故意的 `DatabaseError('no such table: mock')`。CI 注解指向 `raise` 那一行的属于噪音，判读口径见 `docs/reference/testing-gates.md:28-37`。
 
+- [ ] **Step 5.5: 实施期校正与两轮复审回写（2026-11-10 控制器，全部实测）**
+
+1. **Step 1 的最后一条用例是空判据。** `test_change_password_still_succeeds_when_audit_insert_fails` 把 `audit._insert` 换成抛异常再 POST 改密端点，但**本批还没有任何调用点**（接线在 Task 6/7），于是 `_insert` 一次都没被调到，`status_code == 200` 与 `AuditEvent.objects.count() == 0` 都是白过。落地换成直接对机制下判据的两条（外层 `atomic()` 里写业务行 → 调 `record()` → 再写一条 → 退出后两行都必须在），并在 docstring 写明调用点还没接。
+2. **控制器（我）给的一处更正是错的，被实施方量出来驳回 —— 这条要留着当反面教材。** 我用 2×2 探针得出「无内层 atomic + 真错误时业务行照样活着」，据此要求把计划正文那句「少一个 savepoint 就会把改密一起带走」降级成「不押在后端行为上的防线」。实施方改用**真** DB 错误重测：`Model._save` 对无父表模型包着 `transaction.mark_for_rollback_on_error()`，真错误没有 savepoint 可退时把**整笔**外层事务标死，下一条写语句抛 `TransactionManagementError`，业务行确实没了。我的探针之所以活着，是因为 mock 抛的是 Python 异常、**SQL 根本没发出去**。结论：计划正文那句成立，savepoint 支保留，四格表与各自落点写进 `test_audit_writer.py` 模块头（第四格「无 atomic + mock 抛」没有单独判据，也如实标出来）。
+3. **复审两处 Critical（都已修 + 都有判据）**：① 取用户那几行原本在 `try` 外面，`request.user` 这个属性自己抛（DRF 懒解析的形状）时异常直接溢到调用方 —— 违反「业务动作永远优先」，接线时会 500 端点 ⇒ 整段搬进 `try`，判据 `test_request_user_property_that_raises_is_swallowed`；② `target=` 交给一个已 `delete()` 的实例时 `Model.save()` 抛 `ValueError`，被 best-effort 咽掉的后果是**整行丢失**，而 Task 7 的 `user_deleted` 正是这个形状 ⇒ 新增 `_live()`（只把有主键的实例当 FK 交出去，FK 留 None、快照照写），并如实写下罩不住的那层：pk 还在但行已不在（陈旧实例）时本仓 `PRAGMA foreign_keys=1` 会让 INSERT 在**外层提交时**抛 IntegrityError 到调用方身上，所以删除类事件必须走 `target_username=` 那种写法。
+4. **两支重复整个 `_insert(...)` 参数表是缺陷，不是风格问题。** 实测三记「只改其中一份拷贝」的变异（savepoint 支的 `actor_username` 不截断 / autocommit 支的 `target_username` 不截断 / 两份都不截断）全部 10 例绿 —— 本仓「每份拷贝各配一记变异」的前提在这里做不到 ⇒ 合并成一次组装 `fields = dict(...)`、两支共用 `_insert(**fields)`，合并后 M-branch 与 M-nosavepoint 各自仍只红一条（已复跑）。
+5. **列宽不抄第二份**：`USERNAME_MAX_LENGTH = 150` 抄死时，把模型列收窄到 60 全绿 ⇒ 改成 `AuditEvent._meta.get_field('actor_username').max_length`，并由 Meta 判据钉住两列同宽。
+6. **规格复审点的两处 Missing 已补**：spec §5.1 明写的「删号后事件仍读得出来」（本文件原本 0 个 `delete()` 调用）与「Meta 形状无人判」（复合改 Meta —— 翻 ordering + 撤 `event` 索引 + `db_index=False` —— 原本 10 例全绿；Task 8 的查询靠这两样，漂了只表现为审计页一次全表扫）。
+7. **两条边界按量到的行为写死，不假装兜住**：未登记的码名**照写 + warning**（拒写会把「码名写错」升级成「事件丢失」）；`detail` 不可 JSON 序列化时整行静默丢失，所以 spec §5.3 的 ISO 字符串约定必须由接线方遵守（Task 6 传 `locked_until` 前要自己转），这条也写进了模块头。
+8. **形状判据合并成一记**：原来「`_dml == ['INSERT']`」+「`_dml == 全体`」两记可被逐个击破 —— 实测把第二记换成恒真再叠 M-branch（永远包 atomic）⇒ 全绿；合并成 `assertEqual(_verbs(cap), ['INSERT'])` 后同一变异必红（N8a 绿 / N8b 红，都复跑过）。`_dml`/`_DML` 随之删除。
+9. **注释出处一律按符号名 + 版本**，不写 `.venv` 里的行号：那份树被 `.gitignore` 排除，Django 升级时行号会静默腐烂（本批原本引了 `base.py:957`、`transaction.py:122-125/:275/:279-280` 四处，已全部改成 `Model._save` / `mark_for_rollback_on_error` / `Atomic.__exit__` + 「Django 6.0.9」）。
+10. **变异表（两轮）**：首轮 11 记里 N2（`actor=` 交裸实例）、N7（`actor_username` 不截断）、N8（形状断言）三记**存活** ⇒ 补 `test_unsaved_actor_falls_back_to_snapshot_only`（用未保存实例，同时钉 `_live` 的 actor 侧与 `_snapshot` 的 actor 侧）并把形状断言合并；二轮 N2/N7 各 1 红、N8a 绿 N8b 红、R1a（dict 里插注释）绿；R1b（`fields` 整体改名）在变异脚本里误红，独立复跑 `python test/backend/test_audit_writer.py` = 18 例 OK，判为探针脚本自身缺陷而非判据问题。
+11. **基线**：`test_audit_writer` 18 例（计划正文 Step 4 那句「Ran 7 tests」已过期）+ `test_login_path_statements` 5 例 = 23 OK；定向 177 例 OK（含 `apps.accounts`、`apps.common`、登录族、角色三批的判据）；`makemigrations --check --dry-run` = `No changes detected`；0014 由 `makemigrations` 生成，`dependencies` 自动挂 0013，Task 3 的单叶判据 `test_single_leaf_and_parentage` 因此继续绿。
+
 - [ ] **Step 5: 提交**
 
 ```bash

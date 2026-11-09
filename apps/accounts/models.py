@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth.models import AbstractUser, UserManager as DjangoUserManager
 from django.db import models
 
@@ -116,3 +117,38 @@ class UserSetting(models.Model):
 
     def __str__(self):
         return f'Settings for {self.user.username}'
+
+
+class AuditEvent(models.Model):
+    """账号安全事件流水：只追加，产品内不提供改/删入口（spec §5.1）。
+
+    username 快照与 FK 分开存：账号删除后事件仍要能读出「当时是谁对谁做了什么」，
+    而 `target` 的 SET_NULL 会把那条关联抹平。
+    """
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    event = models.CharField(max_length=32)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='audit_actions',
+    )
+    actor_username = models.CharField(max_length=150, blank=True, default='')
+    target = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='audit_targets',
+    )
+    target_username = models.CharField(max_length=150, blank=True, default='')
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    detail = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = 'accounts_audit_event'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['event', 'created_at']),
+            models.Index(fields=['actor_username', 'created_at']),
+            models.Index(fields=['target_username', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.event} {self.actor_username or "-"} → {self.target_username or "-"}'
