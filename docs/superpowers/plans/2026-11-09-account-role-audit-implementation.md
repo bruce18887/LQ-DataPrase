@@ -251,6 +251,36 @@ git add apps/accounts/role_migration.py apps/accounts/migrations/0012_normalize_
 git commit -m "feat(accounts): 落 viewer 归并内核与 0012 数据迁移（choices 暂不动，先保证每步绿灯）"
 ```
 
+### Step 6.5 实施期校正（已回写，后续任务以此为准）
+
+实施 + 双重复审后，上面三个代码块有 5 处偏离，树里落的是校正后的版本：
+
+- **两条 superuser 分支都带 `is_staff=True`**（`.update(role=ADMINISTRATOR, is_staff=True)`）。理由实测在 `standalone.py:73-76`：启动期 `_promote_superusers` 同时写两个字段，且只挑 `exclude(role='administrator')` 的行——0012 若只改 role，那两行启动期再也看不见，`is_staff` 永久留 False，而 admin 准入是 `is_active and is_staff`（`django/contrib/admin/sites.py:208`）。等价性只到「挑哪些行、写哪些值」，不含 save/信号（这里走 queryset.update()，与 spec §4「批量改为」一致）。哨兵用例：`test_promotion_keeps_staff_flag_in_sync`。
+- **迁移的打印条件改 `if any(counts.values()):` 且带 `flush=True`**。计划原写法在「库里只有遗留 superuser、没有 viewer」时（`superuser_promoted=1`）会一声不响地改数据，与内核 docstring「不静默改数据」正面冲突；`flush` 是本仓启动期打印惯例（`standalone.py` 15 处）且 Electron 按行消费后端 stdout（`electron/backend.ts:314`）。
+- **`test_migration_0012_is_applied` 换成 `test_migration_0012_wires_the_kernel`**：原条只查 `MigrationRecorder` 有无那行，把 `merge_viewer_roles` 函数体改成 `counts = {}` 全仓不红（纯存在性绊线）。新条直接 `importlib` 拿迁移模块调 `merge_viewer_roles(django_apps, None)`，断两支归并结果 + `is_staff` + 「不再残留 viewer」+ stdout 里两类计数都在文案里。变异自证：摘掉内核接线 ⇒ 恰好这一条红（`Ran 6 tests / FAILED (failures=1)`），按字节还原后 `sha256` 与还原前一致。
+- **用例数 5 → 6**，故 Step 5 的 `Expected: Ran 5 tests … OK` 实为 `Ran 6 tests in 2.9s / OK`。
+- **内核 docstring 两处措辞**：`seed_users` 的接入是 Task 3（当下 grep 只有迁移 + 测试两处引用，计划原文「被两处调用」在落地当时是假话）；「循环引用」改成条件句（models 侧目前不引用它）。
+- **spec 勘误**：`§4` 第 3 步原文写的 `_promote_legacy_superusers` 全仓不存在，真实是 `standalone.py:62 _promote_superusers`，已就地改 spec。
+
+**连带要求（Task 3 必须照此办，否则把刚修掉的漏洞装回去）**：Task 3 Step 3 里 `seed_users` 的打印条件同样必须写 `if any(merged.values()):`，不是 `merged['viewer_to_user'] or merged['viewer_to_administrator']`。
+
+Task 1 的门禁实测：`npm run test:e2e:affected` → 4 档全跑（`lint:e2e ok / vitest ok / backend ok / e2e:全量 ok`）、`RESULT: PASS`，池 `结论 MEASURED`；后端全量 `Ran 2388 tests … OK (skipped=8)`。
+
+**质量复审后追加（最终形态以此为准）**：11 记变异里 3 记存活，全是断言缺口而非代码错，已补齐并逐记重验：
+
+- `test_migration_prints_when_only_superuser_promoted`（新）：杀「打印条件退回两类 or」。夹具只有一条遗留 superuser、无 viewer ⇒ 计划原写法静默改数据且全仓不红。
+- `test_healthy_rows_untouched` 补 `administrator + is_superuser` 这一行（真实库里最常见的健康行，由 `models.py:22-27` 与 `standalone.py:114` 建出）：杀「promoted 分支丢 `exclude(role=administrator)`」，此前只被计数顺带撞到。
+- `test_plain_viewer_becomes_user` 改整行快照，且**先把夹具摆成 `viewer + is_staff=True`**（真实可达：`apps/accounts/admin.py:17` 把 is_staff 列为可编辑字段）：杀「viewer→user 顺手剥掉 is_staff」。**第一版补的快照仍抓不住这记**，因为 `create_user` 自带 `is_staff=False`，整行比对照样相等 —— 又一个「夹具自带断言值」的形状，后续任务写快照类判据时先确认夹具不是零差异起点。
+- `0012` 的打印文案改 ASCII（`[0012] role normalization: {counts}`）：局域网服务器上人手 `manage.py migrate` 且输出重定向、码页非 CJK 时，中文 print 抛 `UnicodeEncodeError` 会连带回滚整个迁移 —— 数据无损但「升级当场趴」。`docs/reference/server-deployment.md` 的升级步骤已在要求 `PYTHONIOENCODING=utf-8`，这条是双保险。
+- 测试文件补 `if __name__ == '__main__'` runner：有 preamble 没 runner 时，直跑是 `EXIT=0 且 0 条用例` 的假绿形状。
+- 内核 docstring 补两条调用方契约（三支互斥 ⇒ `sum(counts.values())` 即被改动行数、判「有没有改」用 `any()` 而不是挑单键；幂等 ⇒ 第二次全 0），这两条正是 Task 3 兜底调用点的地基。
+- 删掉一条恒真断言（`'accounts_user' in table_names()` 与 0012 有无无关）；把描述旧版本的现在时句子改成过去时。
+- 措辞更正：本文档 Task 1 标题处的「纯函数」不准确 —— `normalize_roles` 会写库、返回值不承载新状态，是**命令**；准确说法是「可脱离 RunPython 独立测试的迁移内核」。
+- 采纳复审对控制器一处质疑的否证：`RunPython` 上下文里**没有** `stdout` 可用（Django 6.0.9 `special.py:199` 只传 `(apps, schema_editor)`，`BaseDatabaseSchemaEditor` 无 stdout；而 `standalone.py:97` 用 `verbosity=0` 跑 migrate），所以裸 `print` + `flush=True` 是正解，不是偷懒。
+- 推迟到 Task 3 再处理：`superuser_promoted` 键名改成与另两键同构（`superuser_to_administrator`）、用 `MigrationLoader(...).leaf_migrations('accounts')` 换掉 recorder 存在性断言（顺带钉住 Task 3 的依赖边，此刻改会立刻被 0013 翻掉）。
+
+Task 1 最终自证（控制器亲自跑，逐记还原后 sha256 与原始字节一致）：基线 `Ran 7 tests … OK`；M3→1 红、M2→2 红、M6→1 红；`python test/backend/test_role_normalization.py` 直跑 `EXIT=0 Ran 7 OK`。
+
 ---
 
 ## Task 2: 权限表收敛与 `role_can`
