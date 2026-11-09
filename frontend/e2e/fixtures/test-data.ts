@@ -29,11 +29,15 @@ export {
 /** 样例数据根目录 */
 export const SAMPLE_DATA_DIR = path.join(PROJECT_ROOT, 'Data', 'SampleData')
 
-/** 种子账号（来自 apps/accounts/management/commands/seed_users.py） */
+/**
+ * 种子账号（来自 apps/accounts/management/commands/seed_users.py）。
+ * 只有这两个：第三种角色 viewer 已由迁移 0012 归并掉（普通行归并进 user，
+ * superuser 那种行归并进 administrator），choices 由 0013 删除，
+ * 所以这里的键就是 `Role` 的全部取值 —— 加一个账号就得同时加种子命令里的条目。
+ */
 export const ACCOUNTS = {
   admin: { username: 'admin', password: 'admin123', role: 'administrator', displayName: '管理员' },
   user: { username: 'user', password: 'user123', role: 'user', displayName: '普通用户' },
-  viewer: { username: 'viewer', password: 'viewer123', role: 'viewer', displayName: '查看者' },
 } as const
 
 export type Role = keyof typeof ACCOUNTS

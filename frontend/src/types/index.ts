@@ -3,7 +3,7 @@ export interface User {
   username: string
   email: string
   display_name: string
-  role: 'administrator' | 'user' | 'viewer'
+  role: 'administrator' | 'user'
 }
 
 export type ExportTypeKey =

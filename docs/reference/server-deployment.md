@@ -239,9 +239,13 @@ cd /srv/lqdp-src && .venv/bin/python manage.py migrate --run-syncdb
    所以 `SYSTEM_PATHS_VISIBLE_TO_ALL=False` 让 `GET /api/v1/system/paths/` 对非管理员返回 403，
    该页只显示「存储路径仅管理员可见」。连带影响：用户指南里「去设置页找落盘目录」这条路径
    在服务器形态只对管理员成立。（2026-10-23 本机实跑：管理员带 token `GET` 返回 200 且 `data_dir`
-   就是 `LQDP_SERVER_BASE_DIR`；未认证 `GET` 返回 401；`viewer` 角色 `GET` 返回
-   **403 `code:"forbidden"`**，而同一个 viewer 的 token 读 `/api/v1/auth/profile/` 是 200
-   —— 有这条对照，403 才只能是权限闸门，不是账号失效。）
+   就是 `LQDP_SERVER_BASE_DIR`；未认证 `GET` 返回 401；非管理员角色 `GET` 返回
+   **403 `code:"forbidden"`**，而同一个 token 读 `/api/v1/auth/profile/` 是 200
+   —— 有这条对照，403 才只能是权限闸门，不是账号失效。那次跑用的是当时还在的第三种角色
+   `viewer`，它已由迁移 0012 归并进 `user`、choices 由 0013 删除；闸门读的是
+   `FEATURE_PERMISSIONS['system_config'] = ['administrator']`（`apps/common/views.py`
+   的 `SystemPathsView.required_feature`），与角色名无关，所以这条对照现在照旧成立，
+   只是探针账号换成 `user`。）
 6. **`media/` 没有自动回收通路**。全仓唯一的清理命令是
    `apps/jobs/management/commands/prune_jobs.py`，它只删 7 天前处于 done/error/cancelled
    的**作业产物**，不动 SFTP 取回的数据文件；`requirements/*.txt` 与 `config/settings/server.py`
@@ -309,11 +313,14 @@ TOK=$(curl -s -X POST $BASE/api/v1/auth/login/ -H 'Content-Type: application/jso
   | .venv/bin/python -c 'import sys,json;print(json.load(sys.stdin)["token"])')
 curl -s -w '\nHTTP %{http_code}\n' $BASE/api/v1/system/paths/ \
   -H "Authorization: Bearer $TOK"                                          # 期望 200，data_dir == LQDP_SERVER_BASE_DIR
-#    未认证同一请求应 401；viewer 角色应 403（本机已实跑，含对照：同一 viewer 的 token
-#    读 /api/v1/auth/profile/ 返回 200，所以 403 确实出自权限闸门）。建探针账号：
+#    未认证同一请求应 401；user 角色应 403。闸门是 `FEATURE_PERMISSIONS['system_config']
+#    = ['administrator']`（apps/common/views.py 的 SystemPathsView.required_feature），
+#    只问「是不是管理员」，所以普通用户与当初那个第三种角色同样被拦 —— 2026-10-23 那次实跑的
+#    对照用的是当时还在的 viewer（现已由迁移 0012 归并进 user），形状不变：同一个 token
+#    读 /api/v1/auth/profile/ 返回 200，所以 403 确实出自权限闸门。建探针账号：
 #    curl -s -X POST $BASE/api/v1/auth/users/ -H "Authorization: Bearer $TOK" \
 #      -H 'Content-Type: application/json' \
-#      -d '{"username":"probe_viewer","password":"<够长的口令>","role":"viewer"}'      # 期望 201
+#      -d '{"username":"probe_user","password":"<够长的口令>","role":"user"}'          # 期望 201
 
 # 6) 优雅停止：SIGTERM 会先关 DB 连接（WAL checkpoint）再退出
 systemctl stop lqdp && journalctl -u lqdp -n 20 --no-pager
@@ -410,7 +417,7 @@ curl -s -o /dev/null -w '%{http_code}\n' $BASE/pages/analysis          # 200
 
 §3 说的 `RuntimeWarning: Accessing the database during app initialization` 每次启动都会出现，
 不是升级失败。本次改动若涉及导出/字体，补做 §1.2 的中文字体自证；若涉及权限，补做 §7 的
-viewer 403 对照。
+user 403 对照。
 
 ### 8.4 回滚
 

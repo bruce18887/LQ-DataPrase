@@ -4,6 +4,10 @@
 > 评审范围：`apps/`（Django 后端）、`config/`、`frontend/src/`、`electron/`、构建打包链路、测试基础设施
 > 评审方式：源码与配置实测（`wc -l` / `grep` / 逐文件阅读），结论均附 `路径:行号` 证据
 > 评审基线：`.claude/CLAUDE.md` 硬性约束 + `docs/tasks/lessons.md` R1–R8 + 全栈开发工程规范
+> ⚠ **本文是历史快照，不随后续改动重写**：所有结论按 2026-10-15 那棵树成立。收口账号收敛时
+> 复核到的过期处已在原句就地标注（§3 第 2 条的 RBAC 项数/角色数），§1 评分卡与 §2.3 结构图里
+> 的「RBAC 15 项」读的是同一个当时事实、同样已过期，以那条 ⚠ 更正为准。文中的 `路径:行号`
+> 也都是易腐数据，复核按符号名而不是按行号。
 
 ---
 
@@ -119,7 +123,14 @@
 2. **认证与权限是 fail-closed 的**
    - `base.py:160-162` `DEFAULT_PERMISSION_CLASSES = IsAuthenticated`，注释点明「23 个 DRF 视图都显式声明了权限，这条只拦未来忘记声明的视图」——防的是**将来**的漏洞。
    - `base.py:173-186`：ACCESS 30min + REFRESH 7d + `ROTATE_REFRESH_TOKENS` + `BLACKLIST_AFTER_ROTATION`，并特别把 `token_blacklist` app 写进 INSTALLED_APPS 并注释「否则 blacklist() 被静默吞掉、旧 refresh token 永久有效」。
-   - `accounts/permissions.py:21` `FeaturePermission` 以 `FEATURE_PERMISSIONS` 表驱动 15 项功能 × 3 角色的 RBAC。
+   - `accounts/permissions.py` 的 `FeaturePermission` 以 `FEATURE_PERMISSIONS` 表驱动 RBAC。
+     ⚠ **这句的数是 2026-10-15 当天实测（15 项功能 × 3 角色），现已过期**：账号收敛那批
+     （提交 `2f636a8`、`4813aa2`）之后该表是 **5 项功能 × 2 角色**（`administrator` / `user`；
+     第三种角色由迁移 `0012` 归并（普通行进 `user`，superuser 那种行进
+     `administrator`）、`0013` 从 choices 删除）。现在这张表的读入口是
+     同文件的 `role_can`（`FeaturePermission` 与自带判定的视图共用）。按
+     `docs/tasks/lessons.md` 2026-10-13「处置清单里的行号是易腐数据」那条，此处只按
+     符号名指代，不写行号。
    - `SIMPLE_JWT` 的 `LQDP_ACCESS_TOKEN_MINUTES` 环境变量附带一段实测记录（30min 前红率 1%、30min 后 90%），这是把「测试基建的约束」写进了生产配置并解释了为何不污染默认值。
 
 3. **前端抽象层做得干净，重复已被消灭**
