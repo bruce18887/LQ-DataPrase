@@ -290,7 +290,7 @@ Task 1 最终自证（控制器亲自跑，逐记还原后 sha256 与原始字�
 - Modify: `apps/datafiles/views/browse_views.py:248-254`（注释）与 `:343-348`（判定）
 - Test: `test/backend/test_role_can.py`
 
-行为中性可证：被删的 4 个键（`dashboard_view`/`data_export`/`analysis_view`/`report_view`）全仓**没有消费者**（`required_feature` 只出现在 `apps/accounts/views.py:304`、`apps/common/views.py:37` 与 `:77`）；`data_delete`/`data_repair_mutate` 的角色集合逐字等于 `browse_views.py:345/347` 现有的硬编码判定。
+行为中性可证：改动前 `FEATURE_PERMISSIONS` 有 **14** 个键，收敛后 5 个 ⇒ **删 10、加 1（`data_repair_mutate`）、留 4**（控制器 2026-11-09 实测；本句原先写「被删的 4 个键」，那个数是错的）。这 10 个键全仓**没有消费者**：`required_feature` 只出现在 `apps/accounts/views.py:304`（`user_management`）与 `apps/common/views.py:37` 与 `:77`（`system_config`），被删键名在任何 `*.py/*.ts/*.vue/*.js/*.mjs` 里都不出现（只剩注释与文档 prose）。`data_delete`/`data_repair_mutate` 的角色集合逐字等于 `browse_views.py:345/347` 现有的硬编码判定。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -458,6 +458,33 @@ Expected: 两条一起 `OK`。`ConsistencyCheckTests.test_post_role_permissions`
 cd frontend && npm run test:e2e:affected
 ```
 Expected: 末行 `RESULT: PASS …`；若出现 `RESULT: NO AFFECTED TESTS` 说明本轮没有档执行，**不算绿**，改跑 `node scripts/e2e_pool.mjs --slots=4`。
+
+- [ ] **Step 5.5: 实施期校正与质量复审回写（2026-11-09 控制器，均已实测）**
+
+1. **Step 1 的测试片段有两处不可直接照抄**：① 死码——`import re`、`_client()`、`APIClient`、`PASSWORD` 在那五条断言里一个都没被用到，落地时要么派上用场（`re` 现在是守卫区正则的承重件）要么删掉；② **真值表只钉了 10 格里的 7 格**：照正文抄，把 `system_config` 放宽成 `['administrator','user']` 实测 `Ran 5 tests / OK` 全绿（变异 M12 存活）。落地补成 2×5 逐格 `subTest` 网格（`EXPECTED_CAN`），M12 立刻红在该格上。网格是**独立 oracle**（按 spec §3.2 的口径重述，不是把表抄一遍），所以它有意义；补的两条判据各钉一句原本只活在注释里的话：「未声明 `required_feature` ⇒ 放行」（M10：`return True`→`False` 全仓只红这一条）与 `has_object_permission` 转发（M11）。
+2. **Step 4 那句注释不能照抄**：`import/fix are additive and mirror upload privileges (administrator + user)` 在本树是假文档——`FileUploadView`（`apps/datafiles/views/file_views.py:520-521`）只有 `IsAuthenticated`，普通账号今天能上传却被 import/fix 拦，「mirror」说不成立。落地改成只指两处表键，并明写角色集合住在表里。
+3. **`permissions.py` 头部不许写「历史教训：表、文档、实现三处漂过」**：`git grep -c FEATURE_PERMISSIONS -e 权限表 -- docs/tasks/lessons.md docs/tasks/lessons-archive.md` → 0 命中，那句话没有仓内出处（本仓反复出现的缺陷类）。落地写法见下：规则 + 两条**已知例外**（都不是门禁）：`apps/accounts/views.py` 的「最后一个启用管理员」校验、`apps/common/views.py` 下发给前端的 `editable` 提示。
+4. **质量复审抓到一个 staleness 洞（本批最值钱的一条）**：Step 1 的 `assertNotIn("role not in ('administrator', 'user')", src)` 只覆盖 mutate 行；落地初版把 ban 侧缩到守卫区，仍漏「在守卫区之外/分发行之下再手写一处角色比较」。实测：`role = getattr(user, 'role', '') or 'administrator'`（E1）与在分发行之下插入 `_legacy_gate = role != 'administrator'`（E2）都**只红于新增的全文判据**，require 侧与行为矩阵全绿。最终判据 = 两条各管一头：
+
+```python
+    def test_browse_views_has_no_handwritten_role_gate(self):
+        with open(BROWSE_VIEWS, encoding='utf-8') as handle:
+            src = handle.read()
+        offenders = []
+        for line in src.splitlines():
+            if line.lstrip().startswith('#'):
+                continue
+            if not re.search(r'\brole\b', line):
+                continue
+            if any(f"'{name}'" in line for name in _ROLE_NAMES):
+                offenders.append(line.strip())
+        self.assertEqual(offenders, [], '视图里仍有手写的角色门禁')
+```
+
+   同时**纠正实施报告与本计划正文的一处假话**：「把 delete 行退回硬编码就没有任何判据会红」不成立——退回硬编码会让那处的 `role_can` 调用消失，require 侧正则当场红（M4 实测 2 红）。ban 侧的独家价值是**升权/旁路赋值**（表调用还在、实参被改写），不是防退回。
+5. **三记「必须保持绿」的反向探针实测通过**：R1 把 `role_can(role, 'data_delete')` 拆成两行、R2 把局部变量 `role` 改名 `guard_role`、R3 在守卫区上方加一行**注释**里出现 `'administrator'`（判据跳过整行注释）。反向探针不是客套：没有它们，这两条源码判据下次重排时就会误报，然后被后人当噪声删掉。
+6. **本批变异表最终 14/14 如预期**（M1/M2/M4/M5/M6/M9/M10/M11/M12/E1/E2 红，R1/R2/R3 绿），基线 `Ran 29 tests / OK`（`test_role_can` 7 例 + `ConsistencyCheckTests` 22 例），每次还原都按脚本自己的字节快照 `write_bytes` 回写并校 sha256。
+7. **Task 4 追加一条触点**：`docs/reference/architecture-review-2026-10-15.md:122` 那句「`FeaturePermission` 以 `FEATURE_PERMISSIONS` 表驱动 15 项功能 × 3 角色的 RBAC」现在双重过期（键数与角色数），要一并改成 5 键 × 2 角色口径。
 
 - [ ] **Step 6: 提交**
 
@@ -651,7 +678,7 @@ git commit -m "feat(accounts): role choices 去掉 viewer，全仓后端引用�
 **Files:**
 - Modify: `frontend/src/types/index.ts:6`、`frontend/src/components/layout/Topbar.vue:129`、`frontend/src/components/layout/AccountDialog.vue:185`、`frontend/src/pages/admin/UserManagement.vue:113,173,179`
 - Modify: `frontend/e2e/fixtures/test-data.ts:33-37`、`frontend/e2e/README.md:32,135`、`frontend/e2e/auth/account.spec.ts:8`
-- Modify: `README.md:34,180`、`docs/reference/server-deployment.md:242-243,305-317,413`
+- Modify: `README.md:34,180`、`docs/reference/server-deployment.md:242-243,305-317,413`、`docs/reference/architecture-review-2026-10-15.md:122`（Task 2 回写追加：那句「15 项功能 × 3 角色」键数与角色数双双过期）
 
 `docs/user-guide/` 整目录被 `.gitignore:170` 忽略（源页与 dist 都不入库）——本任务只在 Task 13 里就地改本机文件并说明「改不了入库」，不在这里动。
 
