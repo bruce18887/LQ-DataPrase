@@ -663,13 +663,31 @@ Expected: 末行 `OK`，条数与改前一致（`apps/datafiles` 少了一处断
 ```
 Expected: `No changes detected`。
 
+- [ ] **Step 6.5: 实施期校正与两轮复审回写（2026-11-09 控制器，全部实测）**
+
+1. **Step 1 的片段不能照抄三处**：① 类里把用户模型 import 了三种方式（`get_user_model`、模块内 `from apps.accounts.models import User as U` × 2），落地统一用文件顶部已有的 `User`；② 两条 400 断言分不清「role 被 choices 拒」与「别的字段 400」——复审把 PUT 改成因 `is_active` 而 400，三条全绿，落地补 `assertIn('role', resp.json()['detail'])`（信封里 `detail` 才是 DRF 的原生字段字典，见 `apps/common/exceptions.py`）；③ 类 docstring 那句「只能在 AlterField 之后跑」**是假的**。
+2. **choices 收敛与那道 AlterField 没有因果关系，计划正文与 Step 1 注释都把两者混为一谈**：拒 `viewer` 走的是 Python 侧 choices（ModelSerializer → ChoiceField），`manage.py sqlmigrate accounts 0013` 在本仓六个 settings 档（全是 sqlite3）实测都是 `(no-op)`；倒序（0013 挂 0011、0012 挂 0013）在任何内置后端都不会真的约束住行 —— `_field_db_check` 只按 `data_type_check_constraints` 生成 CHECK，那张表里只有 Positive* 三类整数。落地把注释改成实话，并**新增 `test_0013_declaration_matches_the_model_field`**：迁移里那条 role AlterField 的 `choices/default/max_length` 必须逐字等于 `User._meta.get_field('role')`。没有它时，把 0013 的 choices 加回 viewer、或把 default 改成 administrator、或改 max_length，29 例全绿；而 `makemigrations --check` 会退 1，却**不在本仓任何一档门禁里**（已 grep `package.json`/`scripts/*.mjs`/CI 确认）。
+3. **Step 3 的出声条件按正文写会漏第三支**（`if merged['viewer_to_user'] or merged['viewer_to_administrator']:` ⇒ `superuser_promoted` 静默改写），改 `if any(merged.values()):`。更根本的是**计划完全没有给这条兜底配判据**：删掉 `normalize_roles(User)` 调用本可以一条不红。落地补 `test_seed_users_falls_back_to_role_normalization`（两条历史行 + 连跑两次 + 逐支计数值 + 第二次不许出声）与 `test_seed_users_prints_when_only_superuser_promoted`。实测坏法落点：调用换成等价空计数 ⇒ 2 红；条件改回正文那个 or ⇒ 1 红；条件写成 `if True:` ⇒ 1 红（第二条断言先确认 `Seed users completed.` 在场，才让「没有计数」不是空话）。
+4. **计数断言要钉值不钉名**：`assertIn('viewer_to_user', text)` 放过 `{dict.fromkeys(merged, 0)}`（谎报全 0，实测 29 例全绿）。落地用 `_assert_counter(text, name, value)`，模式 `['\"]name['\"]\s*:\s*value(?![0-9])` —— 右侧收尾不写的话 `12`、`100` 都满足「=1」；引号两侧都允许，所以 dict repr 与 JSON 两种打印形态都不误报（前缀改写也照样绿）。
+5. **ASCII 判据从「查一行」升级成「跑整条命令」**：初版 `lines[0].encode('ascii')` 是双向放行的代理——把与归并无关的 SUCCESS 行换成中文全绿，而同一命令在 cp1252 stdout 下真抛 `UnicodeEncodeError`。落地 `test_seed_users_writes_clean_under_non_cjk_codepage` 用 `TextIOWrapper(BytesIO(), 'cp1252')` 连跑三条分支（建号 / 修复 / 幂等），并要求五种哨兵行（`Created user:`、`Updated user:`、`User already exists:`、`viewer_to_user`、`Seed users completed.`）**都真的出现**，否则「任何一行都判」这句就是空话；反向探针 P4（把夹具里 `is_active=False` 那行删掉 ⇒ marker 断言红）证明这条链有牙。0012 那句裸 print 同族补 `MigrationPrintCodepageTests`（`redirect_stdout` 收裸 print）。
+6. **计划正文与初版注释都过声称 e2e**：三条自动通路（`frontend/e2e/global-setup.ts:25`、`scripts/e2e_pool.mjs:77`、`electron/backend-env.ts:36`）都强制 `PYTHONIOENCODING=utf-8`，实测中文 stdout 在那种环境下 rc=0，所以「e2e 预跑因此判失败」不成立，文案改成「只管手动与第三方脚本调用」。另外量到两条：本仓把 console handler 指向 **stdout**（`config/settings/base.py:62`，判据 `test/backend/test_logging_streams.py`），中文日志记录在 cp1252 下不崩而是被吞成 `--- Logging error ---`（静默丢行，不在 stderr 豁免之列）；`CommandError` 走 stderr，标准库对 stderr 用 backslashreplace，确实安全。
+7. **控制器给的建议被证证一次**：`MigrationLoader` 在 Django 6.0.9 里**没有** `leaf_migrations`，取叶子是 `MigrationGraph.leaf_nodes(app)`（`requirements/base.txt:27` 钉的版本，实测 `hasattr` 为假）。落地不断言叶子叫什么名字（Task 5 会合法新增 0014，焊名字必假红），只断结构：单叶 + 0012/0013 都在图里 + 0013 声明在 0012 之后。三种坏法的落点也量清了：并列两叶与父节点缺失都在**建库期**就炸（`CommandError: Conflicting migrations detected…` / `NodeNotFoundError`），只有倒序是这条判据独家红。
+8. **连带必要修改（计划 Step 7 的 `git add` 清单原本没有）**：`scripts/line-limit.mjs` 的 frozen 行数 1968→1959 —— `findStaleExemptions` 判的是 `now < frozen.lines`，不改就 T2 红（`frontend/test/unit/lineLimit.spec.ts:158`）；`test/backend/test_server_settings_profile.py:194` 一处 prose；`role_migration.py` 两处「Task 3 会把…」的将来时（本批做完就成了假话）。另修一处既有 bug：Django 6.0.9 的 `DiscoverRunner.run_tests(self, test_labels, **kwargs)` 没有默认值，`test/backend/test_seed_users_guard.py:86`、`test_backup_db.py:356`、`test_page_size_bounds.py:228` 三处 `run_tests()` 直跑必 `TypeError` —— 三处一起补 label，只补其一是最坏状态（三个 `__main__` 现在分别跑通 4/9/21 例）。
+9. **实施方撞 maxTurns 被中断**：它停在自己那张变异表跑到一半，本机留下一个仍在跑的 `mut2.py reject_no_notify` 变异进程。控制器动作是按纪律先盘现场（`git status` + 逐文件行数 + 四个生产文件 sha256 + 定向跑一遍 + 查残留进程），确认活已全落、树未带变异，杀掉进程后由控制器自己补跑完整变异表（`tasks/t3-mut/` 三个脚本：9/9、7/7、5/5 全部如预期，最终树重跑），再进复审。
+10. **基线**：三档 29 例 OK（`test_role_normalization` + `test_accounts_bootstrap` + `test_seed_users_guard`），Step 6 全档 341 例 OK，`makemigrations --check --dry-run` → `No changes detected`，T2 `lineLimit` + `e2eAffectedDecide` 49 例通过。
+
 - [ ] **Step 7: 提交（含 e2e 那一行）**
 
 ```bash
-git add apps/accounts/models.py apps/accounts/migrations/0013_remove_viewer_role_choice.py apps/accounts/management/commands/seed_users.py apps/accounts/serializers.py test/backend apps/common/tests_metrics.py apps/common/tests_system_paths.py apps/datafiles/tests.py frontend/e2e/admin/admin.spec.ts
+git add apps/accounts/models.py apps/accounts/migrations/0013_remove_viewer_role_choice.py \
+  apps/accounts/management/commands/seed_users.py apps/accounts/serializers.py \
+  apps/accounts/role_migration.py apps/accounts/tests.py \
+  test/backend apps/common/tests_metrics.py apps/common/tests_system_paths.py \
+  apps/datafiles/tests.py frontend/e2e/admin/admin.spec.ts \
+  scripts/line-limit.mjs docs/superpowers/plans/2026-11-09-account-role-audit-implementation.md
 git commit -m "feat(accounts): role choices 去掉 viewer，全仓后端引用与种子账号同步收敛"
 ```
-（`git add` 路径请按实际改到的文件列全，别用 `.`；提交前 `git status --porcelain` 复核没有把 `docs/tasks/todo.md` 或别人的未跟踪稿卷进来。）
+（`git add` 路径请按实际改到的文件列全，别用 `.`；本批实际还连带 `test/backend/test_server_settings_profile.py`（prose）、`test/backend/test_backup_db.py` 与 `test/backend/test_page_size_bounds.py`（`run_tests()` 缺 label 的真 bug），它们都被 `test/backend` 这一条覆盖；提交前 `git status --porcelain` 复核没有把 `docs/tasks/todo.md` 或别人的未跟踪稿卷进来。计划正文原清单漏了 `role_migration.py`、`apps/accounts/tests.py`、`scripts/line-limit.mjs` 与本回写文件，2026-11-09 已补齐。）
 
 ---
 

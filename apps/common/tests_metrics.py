@@ -125,8 +125,8 @@ class MetricsEndpointTests(TestCase):
     def setUp(self):
         self.admin = User.objects.create_user('met_admin', 'ma@localhost', PASSWORD,
                                               role='administrator')
-        self.viewer = User.objects.create_user('met_viewer', 'mv@localhost', PASSWORD,
-                                               role='viewer')
+        self.other_plain = User.objects.create_user('met_plain2', 'p2@localhost', PASSWORD,
+                                                    role='user')
         metrics._samples.clear()
 
     def _get(self, user=None):
@@ -139,8 +139,8 @@ class MetricsEndpointTests(TestCase):
         self.assertIn(self._get().status_code, (401, 403))
 
     def test_non_admin_is_forbidden(self):
-        """运维数字里有路径、作业量、内存 —— viewer 不该看到。"""
-        self.assertEqual(self._get(self.viewer).status_code, 403)
+        """运维数字里有路径、作业量、内存 —— 普通用户不该看到。"""
+        self.assertEqual(self._get(self.other_plain).status_code, 403)
 
     def test_admin_gets_the_whole_payload(self):
         """逐键点名：少一个键就是少一类归因能力，不能让「返回 200」当绿灯。"""

@@ -1208,20 +1208,11 @@ class ConsistencyCheckTests(APITestCase):
     # ── 权限：POST 按 action 分角色 ─────────────────────────────────
 
     def test_post_role_permissions(self):
-        viewer = User.objects.create_user(username='cc_viewer', password='pw')
-        viewer.role = 'viewer'
-        viewer.save()
-        self.client.force_authenticate(viewer)
-        self.assertEqual(self._get().status_code, 200)  # viewer may check
-        for action in ('delete_orphaned_db', 'delete_orphaned_disk',
-                       'delete_duplicates', 'import_orphaned_disk',
-                       'fix_product_codes'):
-            self.assertEqual(self._post(action).status_code, 403, action)
-
         regular = User.objects.create_user(username='cc_user', password='pw')
         regular.role = 'user'
         regular.save()
         self.client.force_authenticate(regular)
+        self.assertEqual(self._get().status_code, 200)
         self.assertEqual(self._post('delete_orphaned_db').status_code, 403)
         self.assertEqual(self._post('delete_orphaned_disk').status_code, 403)
         self.assertEqual(self._post('delete_duplicates').status_code, 403)
