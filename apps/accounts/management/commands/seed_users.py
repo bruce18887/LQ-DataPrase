@@ -53,11 +53,19 @@ class Command(BaseCommand):
                 # standalone bootstrap, whose role fell back to 'user') keeps
                 # its stale role/flags. Repair those here. Passwords of
                 # existing users are never reset.
+                #
+                # ``is_active`` belongs in this set: these three are the dev/e2e
+                # fixture accounts, and ``frontend/e2e/fixtures/auth.setup.ts``
+                # logs in as ``user`` to mint storageState — once it is disabled
+                # the setup project fails and takes every dependent spec with it,
+                # and nothing else re-enables it (2026-11-09). Non-seed users are
+                # out of reach here, so an admin's deliberate disable still sticks.
                 expected = {
                     'role': user_data['role'],
                     'display_name': user_data['display_name'],
                     'is_staff': user_data['role'] == 'administrator',
                     'is_superuser': user_data['role'] == 'administrator',
+                    'is_active': True,
                 }
                 changed = [k for k, v in expected.items() if getattr(user, k) != v]
                 if changed:

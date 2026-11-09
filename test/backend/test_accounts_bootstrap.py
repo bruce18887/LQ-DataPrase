@@ -9,8 +9,8 @@ pin the three fixes:
 
   * ``UserManager.create_superuser`` forces role='administrator';
   * ``standalone._promote_superusers`` upgrades legacy superusers (self-heal);
-  * ``seed_users`` repairs mismatched role/flags on existing users and
-    never resets their passwords.
+  * ``seed_users`` repairs mismatched role/flags/activation on existing users
+    and never resets their passwords.
 
 Run directly:  python test/backend/test_accounts_bootstrap.py
 (Runs against an isolated test DB via DiscoverRunner — dev db.sqlite3 is
@@ -137,6 +137,39 @@ class SeedUsersRepairTests(TestCase):
             self.assertEqual(user.is_staff, role == 'administrator')
             self.assertTrue(user.check_password(passwords[username]))
             self.assertTrue(UserSetting.objects.filter(user=user).exists())
+
+    def test_reactivates_disabled_seed_accounts_without_resetting_password(self):
+        """``seed_users`` 必须把三个种子账号钉回可用态，含 ``is_active``。
+
+        它们是 dev/e2e 的夹具账号（``frontend/e2e/fixtures/auth.setup.ts`` 实时以
+        ``user``/``user123`` 登录取 storageState），一旦被停用，setup 前置红 → 依赖它的
+        用例全部报错；而修复集原先只有 role/display_name/is_staff/is_superuser，重跑
+        seed 只打印「User already exists」，停用状态永久留下（2026-11-09 实测）。
+        """
+        call_command('seed_users')
+        User.objects.filter(username__in=('admin', 'user', 'viewer')).update(is_active=False)
+
+        call_command('seed_users')
+
+        for username, password in (('admin', 'admin123'), ('user', 'user123'), ('viewer', 'viewer123')):
+            user = User.objects.get(username=username)
+            self.assertTrue(user.is_active, f'{username} 应被重新启用')
+            self.assertTrue(
+                user.check_password(password),
+                '恢复启用不得顺带重置口令（否则等于给停用账号开后门）',
+            )
+
+    def test_does_not_reactivate_non_seed_users(self):
+        """只管三个夹具账号：管理员主动停用的真实账号不能被 seed 悄悄放回来。"""
+        call_command('seed_users')
+        real = User.objects.create_user('ops_zhang', 'z@localhost', PASSWORD, role='user')
+        real.is_active = False
+        real.save(update_fields=['is_active'])
+
+        call_command('seed_users')
+
+        real.refresh_from_db()
+        self.assertFalse(real.is_active)
 
 
 if __name__ == '__main__':
