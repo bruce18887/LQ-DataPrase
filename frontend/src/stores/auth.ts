@@ -88,8 +88,9 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function logout() {
+    const access = token.value ?? undefined
     if (refreshToken.value) {
-      authApi.logout(refreshToken.value).catch(() => {
+      authApi.logout(refreshToken.value, access).catch(() => {
         // silently ignore logout errors
       })
     }

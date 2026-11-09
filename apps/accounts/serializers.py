@@ -3,6 +3,7 @@ from rest_framework import serializers
 from apps.common.constants import PAGE_SIZE_MAX, PAGE_SIZE_MIN
 from apps.common.export_naming import EXPORT_TEMPLATE_DEFAULTS, MAX_TEMPLATE_LENGTH
 from .models import User, UserSetting, DEFAULT_HIDDEN_COLUMNS
+from .password_policy import validate_password_or_raise
 
 # 图表 DPI 合法区间：须与设置页 el-input-number 的 min/max（ChartSettingsForm.vue）
 # 以及 apps/export/charts.py 的 EXPORT_DPI_MIN/MAX 三处一致，
@@ -57,7 +58,11 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, min_length=8)
+    password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+        error_messages={'min_length': '密码至少 8 位'},
+    )
 
     class Meta:
         model = User
@@ -66,6 +71,14 @@ class UserCreateSerializer(serializers.ModelSerializer):
             'password', 'is_active',
         ]
         read_only_fields = ['id']
+
+    def validate(self, attrs):
+        # 相似度校验需要 username/email，用户尚未落库时先构造内存实例。
+        validate_password_or_raise(
+            attrs['password'],
+            User(username=attrs.get('username', ''), email=attrs.get('email', '')),
+        )
+        return attrs
 
     def create(self, validated_data):
         password = validated_data.pop('password')
@@ -170,12 +183,30 @@ class UserSettingSerializer(serializers.ModelSerializer):
 
 class PasswordChangeSerializer(serializers.Serializer):
     old_password = serializers.CharField()
-    new_password = serializers.CharField(min_length=8)
-    confirm_password = serializers.CharField(min_length=8)
+    new_password = serializers.CharField(
+        min_length=8, error_messages={'min_length': '密码至少 8 位'}
+    )
+    confirm_password = serializers.CharField(
+        min_length=8, error_messages={'min_length': '密码至少 8 位'}
+    )
 
     def validate(self, data):
+        user = self.context.get('user')
+        if user is not None and not user.check_password(data['old_password']):
+            raise serializers.ValidationError('当前密码不正确')
         if data['new_password'] != data['confirm_password']:
-            raise serializers.ValidationError(
-                {'confirm_password': 'New passwords do not match.'}
-            )
+            raise serializers.ValidationError('两次输入的新密码不一致')
+        validate_password_or_raise(data['new_password'], user)
         return data
+
+
+class AdminResetPasswordSerializer(serializers.Serializer):
+    new_password = serializers.CharField(
+        min_length=8, error_messages={'min_length': '密码至少 8 位'}
+    )
+
+    def validate(self, attrs):
+        validate_password_or_raise(
+            attrs['new_password'], self.context.get('user')
+        )
+        return attrs

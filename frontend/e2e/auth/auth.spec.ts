@@ -61,6 +61,28 @@ test.describe('认证与路由守卫', { tag: ['@auth'] }, () => {
     expect(token).toBeNull()
   })
 
+  test('@p1 登出会吊销 refresh_token，旧 refresh 不能再续签', async ({
+    page,
+    request,
+  }) => {
+    await loginAs(page, 'admin')
+    const refresh = await page.evaluate(() =>
+      localStorage.getItem('refresh_token'),
+    )
+    expect(refresh).toBeTruthy()
+
+    await logout(page)
+    await expect(page).toHaveURL(/\/login/)
+
+    // 回归：store.logout() 先发请求再 clearSession()，请求拦截器若从
+    // localStorage 取 token 会读到已清空的值 → /auth/logout/ 恒 401，
+    // refresh token 从未被服务端吊销。
+    const resp = await request.post('/api/v1/auth/refresh/', {
+      data: { refresh },
+    })
+    expect(resp.status()).toBe(401)
+  })
+
   test('@p1 401 响应在 refresh_token 也失效时清除登录态并跳登录', async ({ page }) => {
     // access_token 失效时拦截器会尝试 refresh；只有当 refresh_token
     // 也无效时才会真正走 logout 重定向。这里同时损坏两个 token 来

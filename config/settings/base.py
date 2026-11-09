@@ -247,6 +247,9 @@ SIMPLE_JWT = {
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
+    # token 内带 password hash 指纹，改密后旧 access/refresh 立即认证失败。
+    # 代价：升级到本配置后，无该 claim 的存量 token 会全部失效一次（需重新登录）。
+    'CHECK_REVOKE_TOKEN': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 

@@ -88,6 +88,11 @@
       </el-dropdown>
     </div>
   </header>
+
+  <AccountDialog
+    :visible="accountDialogVisible"
+    @update:visible="accountDialogVisible = $event"
+  />
 </template>
 
 <script setup lang="ts">
@@ -96,6 +101,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import { Search, Bell, User, ArrowDown, Setting, SwitchButton } from '@element-plus/icons-vue'
 import ThemeToggle from '../common/ThemeToggle.vue'
+import AccountDialog from './AccountDialog.vue'
 import { useAboutDialog } from '../../composables/useAboutDialog'
 import { APP_VERSION } from '../../utils/version'
 
@@ -107,6 +113,7 @@ const { open: openAbout } = useAboutDialog()
 const searchQuery = ref('')
 const notificationCount = ref(0)
 const dropdownVisible = ref(false)
+const accountDialogVisible = ref(false)
 
 const onDropdownVisibleChange = (visible: boolean) => {
   dropdownVisible.value = visible
@@ -134,7 +141,7 @@ const identity = computed(() => {
 const handleCommand = (command: string) => {
   switch (command) {
     case 'profile':
-      // 个人资料功能开发中，暂不跳转
+      accountDialogVisible.value = true
       break
     case 'settings':
       router.push('/settings')
