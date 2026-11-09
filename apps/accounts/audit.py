@@ -18,18 +18,22 @@ spec §5.4 给了五条规则，本模块落地成下面四条（第四条不在
    * autocommit 这支：包一层 `atomic()` 的净代价是 BEGIN/COMMIT 两条（本机实测裸写
      1 条 INSERT vs 包一层的 BEGIN/INSERT/COMMIT 3 条，判据 `WriterAutocommitShapeTests`），
      而 `AUDIT_EVENTS` 十个码里挂在登录上的有 3 个（`login_success` / `login_failure` /
-     `account_locked`，spec §5.2 触发点表逐行可数）—— Task 6 接线后每次会话至少发一条，
-     剩下 7 个才是低频管理动作。接线时 `test_login_path_statements.py` 的形状判据要随之
-     重测：那边**现在**还没有审计 INSERT。
+     `account_locked`，spec §5.2 触发点表逐行可数）—— Task 6 已接线，每次会话至少发一条，
+     剩下 7 个才是低频管理动作。`test_login_path_statements.py` 的形状判据已按实跑重钉
+     （登录在 `TestCase` 里走 savepoint 支 ⇒ 那边钉的是 DML 序列 + 一记含簿记的完整序列，
+     autocommit 支仍由本文件的 `WriterAutocommitShapeTests` 量）。
 3. username 快照一律截到列宽（`USERNAME_MAX_LENGTH`，从模型字段读），非字符串取值落空串
    而不是 `repr()`；未知账号的探测输入不许把登录请求带崩。判据
    `test_overlong_username_is_truncated_not_raised` 与
-   `test_non_string_username_snapshot_is_empty`（端点侧的承重要等 Task 6 把 `record()`
-   接进 LoginView 才成立）。
+   `test_non_string_username_snapshot_is_empty`（端点侧那一半自 Task 6 起也有判据：
+   `test_audit_login_events.py::test_overlong_username_is_truncated_not_500`）。
 4. `detail` 必须 JSON 可序列化。这条不是 spec §5.4 的规则，是量出来的边界：传 datetime/
    Decimal 时整行写不进去（`TypeError` 被咽掉 ⇒ 事件静默丢失），而 spec §5.3 约定 detail 里
-   本来就该写 ISO 字符串。接线批（Task 6 的 `locked_until`）必须自己转，别指望写入器兜住。
-   判据 `test_unserializable_detail_drops_the_row_and_is_logged`。
+   本来就该写 ISO 字符串。调用方必须自己转（Task 6 的 `locked_until` 交的是 `.isoformat()`），
+   别指望写入器兜住 —— 端点侧那一半的判据只有 `test_audit_login_events.py`
+   `::test_fifth_failure_records_failure_then_lock` 一条：全仓只有它把 datetime 交给过
+   `detail`，其余分支交上去的都是字符串与整数，行照样落得了。
+   机制侧判据 `test_unserializable_detail_drops_the_row_and_is_logged`。
 """
 
 import ipaddress

@@ -44,8 +44,9 @@ GET 交出去的 JSON 与 HEAD「先建行再序列化」逐字节等价（`test
 HEAD 就有的洞）。判据 `SettingsPutAtomicityTests` 三条：注入失败的第二次写、越界 DPI 的 400、
 以及与 HEAD 正文同轮对照的代价（净 +2 条簿记语句，SELECT/INSERT/UPDATE 计数不变）。
 
-**登录**：不在本模块 —— 成功路径 4 → 3、`get`→`first` 省不掉语句、过期 `lockout_until`
-那半句为什么不许删，全部连同实测数字搬到了 `test/backend/test_login_path_statements.py`。
+**登录**：不在本模块 —— `get`→`first` 省不掉语句、成功路径的形状（含 2026-11-09 起
+`last_login` 那条无条件写与审计 INSERT）、过期 `lockout_until` 现在靠什么被清掉，
+全部连同实测数字在 `test/backend/test_login_path_statements.py`。
 """
 import json
 import re

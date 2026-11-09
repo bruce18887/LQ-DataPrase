@@ -1377,10 +1377,23 @@ Expected: 全绿。**若某条形状断言红，把失败消息里打印的 `实
 ```
 Expected: `OK`。`test_login_throttle.test_configured_rate_survives_a_normal_burst` 守的是 200/min 的档位放宽值，**别为了审计用例去调低它**。
 
+- [ ] **Step 5.5: 实施期校正与两轮复审回写（2026-11-10 控制器，全部实测）**
+
+1. **Step 2 的成功路径代码块把 `tokens = get_tokens_for_user(user)` 写重复了。** 现状里那一行本来就在（`views.py` 取 token 在写库之后），整块替换会变成**取两次 token** ⇒ outstanding token INSERT 多一笔、refresh 轮换账多一环。计划正文那块应当只把 `audit.record(...)` 接在既有那一行**之后**，不要连取 token 一起抄进去。（这条只有 Step 4 的形状数组能看见，注释与端点状态码全都照常绿。）
+2. **Step 3 ③ 的数组只是 DML，完整动词表实测含簿记**：`TestCase` 的外层原子块让 `record()` 走 savepoint 支，干净账号成功路径的**全体**动词是 `['SELECT', 'SELECT', 'UPDATE', 'INSERT', 'SAVEPOINT', 'INSERT', 'RELEASE']`。只钉 DML 一记是 Task 5 评审抓到的漂移口（「多包一层原子块」这类改动在 DML 数组上隐形），所以干净账号那条用例额外把含簿记的完整序列钉一记 —— 两记的分工写在用例注释里。autocommit 支（生产登录）仍由 `test_audit_writer.py::WriterAutocommitShapeTests` 量，本批没动它。
+3. **Step 4 那句「用 `self.assertIn('accounts_audit_event', _sqls(cap)[-1])` 钉住」按位置取数，不许照抄。** 位置式（`[-1]`）在语句顺序一变时就悄悄指到别的语句上，判据当场恒真。落地按**内容**认领：动词是 INSERT **且** SQL 里有 `"{AuditEvent._meta.db_table}"`，两者成对判定（`_audit_inserts()`），并且和 outstanding token 那条各钉「恰好 1 条」，把 ① 里两个 INSERT 槽填满。
+4. **Step 2 里 `detail={'retry_after_minutes': 15}` 的字面 15 被换成从 `LOCKOUT_DURATION` 推导**（新模块常量 `_AUDIT_LOCKOUT_MINUTES`）。审计是事后取证的，常量若调，抄来的数字开始说谎。反过来，`_error(...)` 载荷里那两个字面 15 **故意不动** —— 那是已下发的 API 契约（`LoginPage.vue` 按 `retry_after_minutes` 出提示、`apps/accounts/tests.py::test_login_5_wrong_attempts_locks_account` 按它取值）。两记判据各钉一边：M5a（审计侧退回字面 15 + 常量改 20 分钟）只有 `test_fifth_failure_records_failure_then_lock` 红；M5b（只把常量改 20 分钟，实现不变）**全绿**，证明审计侧确实同源推导、载荷侧确实不跟着漂。
+5. **Step 2 注释里「此前全仓没有任何通路写入 `last_login`」是说过头了，已改口。** 实测：`config/urls.py` 无条件挂着 `path('admin/', admin.site.urls)`，`django.contrib.admin` 在 `base.py` 的 `INSTALLED_APPS` 里，`AdminSite.login` → `contrib.auth.views.LoginView.form_valid` → `auth_login` → `user_logged_in` → `update_last_login`。用测试库探一次 admin 表单登录：302，且 `last_login` 落值。`seed_users.py` 给 administrator `is_staff=True`，所以这条路对真实账号是通的。准确口径是「**本仓这条 JWT 登录通路**从来没写过它」—— Django admin 那条要 session 且要 `is_staff`，产品里没有入口，所以「管理页那一列一直是空的」在实际使用中成立。落点在 `views.py` 成功路径注释、`test_login_path_statements.py` 模块头、`test_audit_login_events.py` 断言消息三处。**同样的话 `docs/tasks/todo.md` 末尾那段也说过一遍，但那个文件此刻带着另一个会话未提交的改动，本批不许碰 ⇒ 留给 Task 14 收口时改。**
+6. **Step 1 的用例草稿只数行、不判「恰好一行」**：`self._rows()[0]` 单独用会放过「多记一笔」。落地加了 `_only_row()`（每个分支恰好 1 行）与第 5 次失败的 `AuditEvent.objects.count() == MAX_LOGIN_ATTEMPTS + 1`（四次失败 + 第五次两行）。停用/锁定那条原本也是 `_rows()[0]`，复评审指出「在 `login_failure` 之前多插一笔」能放过它 ⇒ 换成整表比对 `[(event, reason, target_username)] == [两行]`，一记同时钉住行数、倒序时间线与两支的 reason。另外「`detail` 不可序列化 ⇒ 整行静默丢失」这条边界**只有** `test_fifth_failure_records_failure_then_lock` 判得到（全仓只有 `account_locked` 那支交过 datetime），原本两处说法写成「每条用例的行数断言」，`audit.py` 模块头与本文件模块头口径 3 都已收窄成点名那一条。
+7. **复评审抓到的一处「列宽抄第二份」我判为不成立**：`test_audit_login_events.py` 里 `len(...) == 150` 与 `test_audit_writer.py` 的 `test_overlong_username_is_truncated_not_raised`、`test_unsaved_actor_falls_back_to_snapshot_only` 同口径，是**独立 oracle**（收窄模型列宽时它必须红），和 Task 5 第 5 条改掉的那个是两回事 —— 那条是**实现**里抄死 `USERNAME_MAX_LENGTH = 150`，本仓实现早已从 `AuditEvent._meta` 读。判据侧留字面值。
+8. **变异表（本机复跑 `tasks/mut6.py`，字节快照回写、sha256 校验通过；每记跑 `test_audit_login_events` + `test_login_path_statements` = 12 例）**。对照两记：**M0 无变异** 12 例绿、**M5b 只改常量** 12 例绿。摘掉某一笔 `audit.record` 的 6 记（M1 成功 / M2 未知用户名 / M7 `account_locked` / M8 非第 5 次密码错误 / M9 停用 / M10 第 5 次那笔 `login_failure`）分别红 4 / 3 / 1 / 3 / 1 / 1 例，落点全在预期那条上。三记形状类：M3（照抄计划里重复的取 token）红 3 条成功形状；M4（退回「只在脏时才写」）红 3 例，其中 `test_login_success_reset_path_still_writes` **故意绿** —— 那个账号 attempts=2，条件成立照样写，它管的是「计数确实清零」而不是「写是无条件的」；M11（`last_login` 原地自赋值，UPDATE 仍在、形状不动）红 2 例，钉住的是值不是语句。M6（在锁定分支的 `login_failure` **之前**多插一笔）红 1 例，正是复评审指出「`_rows()[0]` 放过它」后换成整表比对的那条 —— 改回按位置取数则 M6 全绿。M5a 红 1 例（见第 4 条）。
+9. **基线**：Step 4 的两个模块 + `test_audit_writer` = 30 例 OK；Step 5 的回归集（`test_login_throttle` / `test_accounts_write_paths` / `apps.accounts` / `test_account_password_change` / 本批两模块 / `test_audit_writer`）= 114 例 OK；系统 Python（Django 6.0.5）跑本批判据同样绿。
+10. **Step 6 的 `git add` 清单不够**：本批还改了 `apps/accounts/audit.py`（模块头三处未来时态改现在时，「Task 6 接线后…」已经是事实）、`test/backend/test_audit_writer.py` 与 `test/backend/test_accounts_write_paths.py`（同理由的注释校正），以及本计划文件本身。
+
 - [ ] **Step 6: 提交**
 
 ```bash
-git add apps/accounts/views.py test/backend/test_audit_login_events.py test/backend/test_login_path_statements.py
+git add apps/accounts/views.py apps/accounts/audit.py test/backend/test_audit_login_events.py test/backend/test_login_path_statements.py test/backend/test_audit_writer.py test/backend/test_accounts_write_paths.py docs/superpowers/plans/2026-11-09-account-role-audit-implementation.md
 git commit -m "feat(accounts): 登录写 last_login 并记 login_success/failure/locked（语句形状按实跑重钉）"
 ```
 
