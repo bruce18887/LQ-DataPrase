@@ -21,7 +21,7 @@
             <el-input :model-value="auth.user?.username ?? ''" disabled />
           </el-form-item>
           <el-form-item label="角色">
-            <el-input :model-value="roleLabel" disabled />
+            <el-input :model-value="roleLabel(auth.user?.role)" disabled />
           </el-form-item>
           <el-form-item label="显示名" prop="display_name">
             <el-input
@@ -116,6 +116,9 @@ import { useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { authApi } from '../../api/auth'
 import { useAuthStore } from '../../stores/auth'
+// 角色标签的唯一语义来源是 utils/roleLabel（§7.3 兜底理由写在那份文件的注释里）；
+// 这里只做委托，别在本文件再写一份 roleLabel。
+import { roleLabel } from '../../utils/roleLabel'
 
 const props = defineProps<{
   visible: boolean
@@ -178,13 +181,6 @@ const passwordRules: FormRules = {
     { validator: validateConfirm, trigger: 'blur' },
   ],
 }
-
-const roleLabel = computed(() => {
-  const role = auth.user?.role
-  if (role === 'administrator') return '管理员'
-  if (role === 'viewer') return '查看者'
-  return '用户'
-})
 
 function resetPasswordForm() {
   passwordForm.old_password = ''

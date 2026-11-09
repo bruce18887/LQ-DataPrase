@@ -65,7 +65,7 @@
           </div>
           <div class="user-info">
             <span class="user-name">{{ displayName }}</span>
-            <span class="user-role">{{ roleLabel }}</span>
+            <span class="user-role">{{ roleLabel(authStore.user?.role) }}</span>
           </div>
           <el-icon class="dropdown-icon" aria-hidden="true"><ArrowDown /></el-icon>
         </button>
@@ -104,6 +104,9 @@ import ThemeToggle from '../common/ThemeToggle.vue'
 import AccountDialog from './AccountDialog.vue'
 import { useAboutDialog } from '../../composables/useAboutDialog'
 import { APP_VERSION } from '../../utils/version'
+// 角色标签的唯一语义来源是 utils/roleLabel（§7.3 兜底理由写在那份文件的注释里）；
+// 这里只做委托，别在本文件再写一份 roleLabel。
+import { roleLabel } from '../../utils/roleLabel'
 
 const route = useRoute()
 const router = useRouter()
@@ -121,13 +124,6 @@ const onDropdownVisibleChange = (visible: boolean) => {
 
 const displayName = computed(() => {
   return authStore.user?.display_name || authStore.user?.username || '用户'
-})
-
-const roleLabel = computed(() => {
-  const role = authStore.user?.role
-  if (role === 'administrator') return '管理员'
-  if (role === 'viewer') return '查看者'
-  return '用户'
 })
 
 /** 页面身份 = route.meta：名 + 徽章图标 + 副行（上级 › 说明）。上级与说明都可缺省。 */

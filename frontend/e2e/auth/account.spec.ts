@@ -5,7 +5,7 @@ import { uiLogin } from '../helpers/auth'
  * 自助改密的端到端接线：
  * Topbar 用户菜单 → 个人资料 → 修改密码 → 旧会话清空 → 新密码可登录。
  *
- * 账号自建自删，不碰种子账号（admin/user/viewer 是共享 storageState 的持有者）。
+ * 账号自建自删，不碰种子账号（admin/user 是共享 storageState 的持有者）。
  */
 test.describe('账号安全', { tag: ['@auth'] }, () => {
   test.use({ storageState: { cookies: [], origins: [] } })

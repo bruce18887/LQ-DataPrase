@@ -29,7 +29,7 @@ npm run test:e2e:report
 
 ### 环境前置
 - 后端依赖：`.venv` 中安装 `requirements/base.txt`（需 matplotlib 等）。
-- 种子账号：`python manage.py seed_users`（admin/admin123、user/user123、viewer/viewer123）。
+- 种子账号：`python manage.py seed_users`（admin/admin123、user/user123）。
 - 样例数据：`Data/SampleData/`（已随仓库提供）。
 - 浏览器：使用 Edge（`channel: 'msedge'`）。如未安装可改 `playwright.config.ts`。
 
@@ -132,8 +132,8 @@ VSCode 操作：
 ### 预植入数据集
 
 测试启动前，`globalSetup` 自动执行：
-1. `python manage.py seed_users` — 创建 admin / user / viewer
-2. `python manage.py seed_test_data --clear` — 把 `Data/SampleData/` 下全部 CSV 导入 DataFile 表
+1. `python manage.py seed_users` — 创建 admin / user
+2. `python manage.py seed_test_data --refresh` — 清 `e2e_*` 残留并把 `Data/SampleData/` 下**变化的** CSV 增量导入 DataFile 表（全量是 714MB，未变化时秒级完成）
 
 各用例直接使用数据库中的已解析文件，无需通过 UI 逐个上传。若需重置数据：
 ```bash

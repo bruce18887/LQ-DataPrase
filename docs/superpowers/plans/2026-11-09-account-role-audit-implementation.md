@@ -760,12 +760,31 @@ cd frontend && npm run test:e2e:affected
 ```
 Expected: 末行 `RESULT: PASS`（命中 `auth` + `admin` + `settings` 档）。
 
+- [ ] **Step 5.5: 实施期校正与两轮复审回写（2026-11-09/10 控制器，全部实测）**
+
+1. **Step 1 的「三份 roleLabel 各删一行」这个形状本身被复审否掉了。** 删完之后 spec §7.3（迁移没跑到的机器不得显示第三种角色名）在全仓**没有任何判据**：T3 只有 `global.spec.ts` 的「Topbar 与角色」两条（管理员→「管理员」、普通用户→「用户」），而它们测不到兜底 —— 把 viewer 分支加回去那两条照样绿。三份拷贝 + Task 10 还要往这页加编辑弹窗（spec §7.2）= 第四份拷贝在路上。落地按仓内既有做法收敛：**逻辑搬进纯模块 `frontend/src/utils/roleLabel.ts`，三处组件只留委托**，判语义而不是判语法。
+2. **初版源扫描判据的四处缺陷（逐条实测，别照抄那一版）**：① `bodyOf` 取的是函数名后第一个 `{` 而不是函数体，所以把 `roleLabel` 重构成三元式/查表时，红的是**邻居函数**（消息 `函数体里一个 return 字符串都没有`）——诊断指错方向；② 文件头那句「重构成查表会红，不是静默放行」**实测为假**：同一文件里放 `ROLE_LABELS = {administrator, guest}` 再加任何后面的链式 helper，9/9 全绿；第 4 个文件写 `if (role === 'guest')` 也绿，因为禁条只禁字面量 `viewer`；③ 下拉锚在字面 `v-model="newUser.role"` 上，Task 10 那种 `<el-select v-model="editForm.role">` 完全看不见（M3 实测）；④ 把 `['administrator','user']` 硬编码进「前端下拉 ↔ 模型 choices」交叉检查，就成了第三个编辑点（T1 已有两处：`test_model_choices_have_two_roles`、`test_0013_declaration_matches_the_model_field`）。
+3. **落地后的判据**：`roleLabel` 的语义表（`administrator`→管理员，其余一切——含 `viewer`、`guest`、`undefined`——落「用户」）是真单位测试，任何新增第三角色都被它抓住；委托判据只查「从 `utils/roleLabel` 导入」+「本文件不再定义 roleLabel」，格式容忍多行 import 与无关局部变量改名（两记**必须保持绿**的反向探针实测通过）；交叉检查改成扫**每一个** `v-model="….role"` 下拉、与 `apps/accounts/models.py` 解析出的 `ROLE_CHOICES` 比集合，且**不硬编码期望值**，消息点名动的是哪一侧（M3：前端多加 `guest` ⇒ 1 红说「改页面，本测试不用动」；M4：模型加 `tester` ⇒ T2 1 红说「前端没跟上」+ T1 2 红，都在该改的那一侧）。
+4. **明确放弃的三处覆盖（记下来，后来人才不会当噪声删掉别的判据）**：`roleIcon` 的兜底判据（表情符号不属 §7.3，但 roleIcon 里新增第三分支仍被语义禁条抓住 —— M3_ALIAS 实测）；`User.role` 联合类型 ↔ choices 的等值检查（交叉检查的失败消息已经把 `types/index.ts` 点名为同批要改的地方，它只是同一件事的第三次红）；以及「别名取值」这一记洞 —— `const r = u.role` 再 `r === 'guest'` 绕过禁条（实测 `['guest']` vs `[]`），闭它要 AST，T2 不值当，已写在该文件头部。
+5. **`.gitignore` 的事实更正**（控制器 brief 与本计划都错过）：被忽略的只有 `/docs/tasks/*.bak-*.md`，`lessons.md` / `lessons-archive.md` / `todo.md` **是跟踪文件**（`git ls-files docs/tasks/` 三条都在，`git check-ignore docs/tasks/lessons.md` 退出 1）。只有 `docs/user-guide/` 整目录忽略。所以引用 lessons 里那条 2026-10-13「处置清单里的行号是易腐数据」是合法出处。
+6. **带日期的实跑记录不改写，只补理由**：`server-deployment.md:245`、`:319` 保留「2026-10-23 那次用的是当时还在的 viewer」的身份，另起一句说明这条对照为什么现在照旧成立（闸门读 `FEATURE_PERMISSIONS['system_config'] = ['administrator']`，与角色名无关）；`docs/reference/renderer-memory-baseline-2026-10-22.md:120` 是那份基线文档自己的命令产出摘录，按它自己「只写有命令产出过的数字」的规矩原样留着。`architecture-review-2026-10-15.md` 加头部 ⚠ 快照说明，正文那句「15 项功能 × 3 角色」改成 5 项 × 2 角色并只按符号名指代 —— 初版补的半句「原判据 `permissions.py:21` 已不指向 `FeaturePermission`」**是假的**（21 行确实是 `class FeaturePermission`），规格复审抓到后删掉。`归并进 user` 那种半句话也补全：0012 把 superuser+viewer 行归并进 `administrator`。
+7. **顺手修一处既有过期**：`frontend/e2e/README.md` 说 globalSetup 跑 `seed_test_data --clear`，实际 `frontend/e2e/global-setup.ts:51` 跑 `--refresh`（`--clear` 只保留在「若需重置数据」那段，两个 flag 都真实存在，见 `apps/accounts/management/commands/seed_test_data.py:36-37`）。
+8. **Step 4 的门禁预期过期**：`Topbar.vue` / `AccountDialog.vue` / `types/index.ts` 都命中 `scripts/affected-rules.mjs` 的全局清单 ⇒ decide 判的是**全量**（82 文件），不是正文那句「命中 auth + admin + settings 档」。
+9. **基线与变异表（最终树重跑）**：vitest 55 文件 / 741 例（742→741，roleLabel spec 9→8 例）；`npm run build`（`vue-tsc -b`）干净；`npm run lint:e2e` exit 0。变异：M1 util 加 guest 分支 ⇒ 2 红；M1_TABLE 只放一张含 guest 的查表 ⇒ 1 红（这条就是禁条存在的理由）；M2 Topbar 再留一份本地定义 ⇒ 3 红（控制器亲自复跑）；M3 editForm.role 下拉加 guest ⇒ 1 红（控制器亲自复跑，消息指向前端侧）；M3_ALIAS ⇒ 1 红；M4 模型加 tester ⇒ T2 1 红 + T1 2 红；M5 管理员标签写坏 ⇒ 1 红；**M6 把三元式换成查表必须保持绿**（正是旧版谎报的那件事）。
+
 - [ ] **Step 5: 提交**
 
 ```bash
-git add frontend/src/types/index.ts frontend/src/components/layout/Topbar.vue frontend/src/components/layout/AccountDialog.vue frontend/src/pages/admin/UserManagement.vue frontend/e2e/fixtures/test-data.ts frontend/e2e/README.md frontend/e2e/auth/account.spec.ts README.md docs/reference/server-deployment.md
+git add frontend/src/types/index.ts frontend/src/utils/roleLabel.ts \
+  frontend/src/components/layout/Topbar.vue frontend/src/components/layout/AccountDialog.vue \
+  frontend/src/pages/admin/UserManagement.vue \
+  frontend/test/unit/roleLabelHygiene.spec.ts \
+  frontend/e2e/fixtures/test-data.ts frontend/e2e/README.md frontend/e2e/auth/account.spec.ts \
+  README.md docs/reference/server-deployment.md docs/reference/architecture-review-2026-10-15.md \
+  docs/superpowers/plans/2026-11-09-account-role-audit-implementation.md
 git commit -m "refactor(roles): 前端角色展示与部署探针去掉 viewer，README/部署文档同步两级"
 ```
+（计划正文原清单漏了 `frontend/src/utils/roleLabel.ts`、`frontend/test/unit/roleLabelHygiene.spec.ts`、`docs/reference/architecture-review-2026-10-15.md`（它自己的 Files 清单要求改）与本回写文件；`docs/reference/renderer-memory-baseline-2026-10-22.md` 刻意不改，理由见 Step 5.5 第 6 条。提交前 `git status --short` 复核 `docs/tasks/todo.md` 与别人的未跟踪稿没被卷进来。）
 
 ---
 
