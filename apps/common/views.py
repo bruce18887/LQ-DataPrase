@@ -17,6 +17,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts import audit
 from apps.accounts.permissions import FeaturePermission
 from apps.common import system_config
 
@@ -95,8 +96,19 @@ class SystemPathsView(APIView):
         before = system_config.load_config(config_file)
         system_config.save_config(config_file, data_dir, temp_dir)
         after = system_config.load_config(config_file)
+        restart_required = before != after
+        # 审计里的 restart_required 与响应载荷同一个比较结果算一次：两处不一致时，
+        # 事后取证读到的那条会跟用户当时看到的那条对不上。
+        audit.record(
+            request, 'system_paths_changed', actor=request.user,
+            detail={
+                'before': {k: before.get(k) for k in ('data_dir', 'temp_dir')},
+                'after': {k: after.get(k) for k in ('data_dir', 'temp_dir')},
+                'restart_required': restart_required,
+            },
+        )
         return Response(
-            self._payload(request.user, restart_required=before != after)
+            self._payload(request.user, restart_required=restart_required)
         )
 
     # ------------------------------------------------------------------

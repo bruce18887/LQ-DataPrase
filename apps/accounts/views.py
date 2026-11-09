@@ -330,6 +330,10 @@ class ChangePasswordView(APIView):
             request.user.set_password(serializer.validated_data['new_password'])
             request.user.save(update_fields=['password'])
             revoke_refresh_tokens(request.user)
+        # 审计写在 atomic 块之后（不是里面）：生产上是 autocommit，record() 因此只发一条
+        # INSERT；写进块里整条通路多一对 SAVEPOINT/RELEASE（本机实跑 5 条 vs 7 条）。
+        audit.record(request, 'password_changed',
+                     actor=request.user, target=request.user)
         return Response({'detail': '密码已修改，请重新登录。'})
 
 
@@ -337,6 +341,8 @@ class UserManagementViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     permission_classes = [IsAuthenticated, FeaturePermission]
     required_feature = 'user_management'
+    # 审计 detail 的白名单（spec §5.3）：按构造排除其余一切，含任何口令字段。
+    AUDITABLE_FIELDS = ('username', 'email', 'display_name', 'role', 'is_active')
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -358,16 +364,44 @@ class UserManagementViewSet(viewsets.ModelViewSet):
         kwargs['partial'] = True
         return super().update(request, *args, **kwargs)
 
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        audit.record(
+            self.request, 'user_created', actor=self.request.user, target=instance,
+            detail={'role': instance.role, 'is_active': instance.is_active},
+        )
+
     def perform_update(self, serializer):
         self._guard_lockout(
             self.request, serializer.instance, serializer.validated_data
         )
-        serializer.save()
+        instance = serializer.save()
+        # 变更集 = 白名单 ∩ 本次 validated_data，values 因此就是「改完之后」的那几个值。
+        # 口径要说清：记的是「这次请求带了哪些字段」，不是「哪些字段的值真的变了」—— 重发
+        # 当前值也算 changed。这跟同一条路上另外两方对齐（守卫与 serializer 都只看请求带了
+        # 什么），审计若自己比 before/after 就成了另一条时间线。判据见
+        # test_user_updated_records_requested_fields_not_a_diff。
+        changed = {
+            key: value for key, value in serializer.validated_data.items()
+            if key in self.AUDITABLE_FIELDS
+        }
+        audit.record(
+            self.request, 'user_updated', actor=self.request.user, target=instance,
+            detail={'changed_fields': sorted(changed), 'values': changed},
+        )
 
     def perform_destroy(self, instance):
         # 删除没有 serializer，构造等价的「停用」变更集交给同一守卫。
         self._guard_lockout(self.request, instance, {'is_active': False})
+        # 快照要在 delete 之前抓：行一没就只剩这份内存实例可读。Django 删完只把 pk 置
+        # None、其余属性留着，但那是实现细节，不押它 —— 先取到局部变量再动手。
+        username, role = instance.username, instance.role
         instance.delete()
+        # 删除类事件一律用 target_username= 而不是 target=：理由见 apps/accounts/audit.py 的 `_live`。
+        audit.record(
+            self.request, 'user_deleted', actor=self.request.user,
+            target_username=username, detail={'role': role},
+        )
 
     @staticmethod
     def _guard_lockout(request, target, changes):
@@ -416,12 +450,19 @@ class UserManagementViewSet(viewsets.ModelViewSet):
                 update_fields=['password', 'login_attempts', 'lockout_until']
             )
             revoke_refresh_tokens(user)
+        # lockout_cleared 恒真而不是条件：上面那段无条件把这两个字段清干净，
+        # 把它写成「仅在确有锁定时才 true」反而会让审计谎报。审计写在块外，同 ChangePasswordView。
+        audit.record(self.request, 'password_reset', actor=self.request.user,
+                     target=user, detail={'lockout_cleared': True})
         return Response({'detail': '密码已重置，请告知用户登录后立即修改。'})
 
     @action(detail=True, methods=['post'])
     def unlock(self, request, pk=None):
         user = self.get_object()
+        # update_fields 只写这两列：整行 save() 会把 password 等其余列一起 SET 回去，
+        # 而同批其余写路径（reset_password / ChangePasswordView）早已是这个口径。
         user.login_attempts = 0
         user.lockout_until = None
-        user.save()
-        return Response({'detail': 'Account unlocked successfully.'})
+        user.save(update_fields=['login_attempts', 'lockout_until'])
+        audit.record(request, 'account_unlocked', actor=request.user, target=user)
+        return Response({'detail': '账号已解锁。'})

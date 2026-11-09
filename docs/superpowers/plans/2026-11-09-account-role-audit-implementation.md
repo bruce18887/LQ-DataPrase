@@ -1652,10 +1652,26 @@ Expected: 全部红（`None` 无行 / 0 条）
 ```
 Expected: 末段全 `OK`（`test.backend` 整目录兜住意外接线）。
 
+- [ ] **Step 4.5: 实施期校正与两轮复审回写（2026-11-10 控制器，全部实测）**
+
+1. **`unlock` 没有按计划正文包 `transaction.atomic()`。** 正文那段把「业务写 + 审计」罩进一层原子块，但审计是 best-effort：块内失败被 `record()` 咽掉，块并不会因此回滚业务写，代价只有 BEGIN/COMMIT。实跑（`TransactionTestCase` 真 autocommit）：不包 = 1 SELECT + 1 UPDATE + 1 INSERT，包 = 多一对 BEGIN/COMMIT。同理 `ChangePasswordView` 与 `reset_password` 的 `audit.record` 一律放在**既有** atomic 块**之外**：块内 7 条（SAVEPOINT/INSERT/RELEASE）vs 块外 5 条；`reset_password` 8 条 vs 6 条。`TestCase` 里量不出这个差别（`in_atomic_block` 恒真），必须用 `TransactionTestCase`。
+2. **测试从正文的 5+1 条长到 14 条**，每条都有落点：整表 `_rows()`（正文的 `_row(event)` 用 `.order_by('-id').first()`，放过「同一次动作多写一笔」与「把别的事件码也写成这一次」）；`_ROW_FIELDS` 七列整值比对，含 `ip_address`（写入器侧只证「给了合法 IP 就存下来」，端点侧要证的是接线时真的把 `request` 传进了 `record()` —— 变异 Q5：把 `request` 换成 `None` ⇒ `ip_address` 落 None，红 1 条）；两条「被拒不留痕」用例（守卫那条 / 序列化器那条，失守位置不同）；`changed_fields` 排序那条（不排序 ⇒ 数组跟着 `Meta.fields` 的写法漂）；requested-not-diffed 那条（见第 6 条）；`unlock` 的 UPDATE 列集合那条（见第 8 条）；配置带第三个键那条（见第 7 条）。
+3. **`_WritablePasswordSerializer` 是形状夹具，不是生产形状。** 白名单只作用于 update 这条路，而 `UserSerializer` 没有可写口令字段 ⇒ 白名单今天挡不到任何东西，所以用手造的 subclass（`Meta.fields + ['password']`）把差异顶出来。它会明文写进 `password` 列（生产序列化器不允许），用例只取审计那一行 —— 别把这条判据读成「视图里已经在记口令」。变异 A（`AUDITABLE_FIELDS` 加上 `password`）与 B（干脆去掉白名单过滤）各自红 1 条。
+4. **控制器（我）写的两处注释被复审量出来是错的，都改了**：① 「眼前三条写路径的序列化器都没有可写口令字段」——假。`UserCreateSerializer.password`、`AdminResetPasswordSerializer.new_password`、`PasswordChangeSerializer` 那三个都是可写字段；那三条安全是因为 detail 手搓、不过白名单。② 「守卫那条 400 发生在视图写完业务之后」——假。`perform_update` 先 `_guard_lockout` 再 `serializer.save()`，两条路的 400 都在业务写之前。教训同 Task 5 那条：**注释里的位置/时序断言要照着代码跑一遍再抄**，散文看着顺不等于对得上号。
+5. **`values` 是改完之后**（改之前 `is_active` 是 True，记旧值会把「停用了谁」写成「谁本来就是启用的」）；`user_deleted` 的 `role` 是删除前，靠 `perform_destroy` 里先取局部变量。Django 删完只把 pk 置 None、其余属性留着，但那是实现细节，不押它。
+6. **`changed_fields` 记的是「请求带了哪些可记字段」，不是值差集**：重发当前值也算 changed。这是与 `_guard_lockout`、`serializer.save()` 对齐（两者都只看请求带了什么），审计自己比 before/after 就成了第二条时间线；代价是那行不能说「这个人被改动了」。判据 `test_user_updated_records_requested_fields_not_a_diff`；变异 Q2（把 detail 改成值差集）红 3 条。
+7. **`system_paths_changed` 的 `restart_required` 按整份字典比，detail 只投影两个键 —— 这个不一致是**已知语义**并被钉住了**：`save_config` 整份重写且只写 `data_dir`/`temp_dir`，所以配置里手改出来的第三个键会被这次 PUT 抹掉 ⇒ 载荷说「要重启」是对的，而 detail 的 before/after 看着相等。变异 Q4（把比较也收窄成投影字典）红 1 条 —— 收窄会把「真的少了个键」报成「不用重启」。
+8. **`unlock` 从整行 `save()` 换成 `update_fields` 窄写，唯一判据是 UPDATE 的 SET 列集合**：窄写与整行写在返回体、审计行、两列的最终值上都不可区分。列集合按整值判（`sorted(cols) == ['lockout_until', 'login_attempts']`），不逐列 `assertIn`/`assertNotIn` —— 后者漏掉的那几列恰好最贵（`password`/`last_login`/`is_superuser`/`first_name` 都会被整行 SET 一遍）。取列助手在本文件另写一份、锚 `"accounts_user"`：与 `test_accounts_write_paths.py` 里同名助手只差锚表，合并要把锚参数化、两边注释都会对不上号。变异 Q1（退回整行 save）红 1 条。
+9. **响应文案从英文 `'Account unlocked successfully.'` 换成中文**：全仓与前端都没钉住旧串（`UserManagement.vue` 的 `unlockUser` 只 POST、不读响应体），钉新串在那条形状判据里。
+10. **变异表（四轮，`tasks/mut7.py` / `mut7b.py` / `mut7c.py` / `mut7d.py`，字节快照 + sha256 校验回写）**。两组跑位要分清：**窄组** = 只跑本文件 14 例，**宽组** = `test_audit_account_events` + `test_admin_lockout` + `apps.accounts` + `test_account_password_change`（81 例）。摘掉七笔 `audit.record`（窄组，各红的条数）：`user_updated` 4、`system_paths_changed` 2、`user_created`/`user_deleted`/`account_unlocked`/`password_changed`/`password_reset` 各 1（`password_reset` 与 `user_created` 那两记是在宽组量的，同样 1）。其余：C（去掉 `sorted`）宽组红 1；A（白名单加上 `password`）宽组红 1；B（去掉白名单过滤）宽组红 1；E2（把 `user_updated` 的 record 挪到守卫之前）宽组红 1；Q2（detail 改成值差集）窄组红 3；Q3（create 的 detail 交空）窄组红 1；Q1（`unlock` 退回整行 save）窄组红 1；Q5（`record(None, ...)` 丢 request）窄组红 1；Q6（`password_changed` 记在校验之前）窄组红 2；Q4/D2（`restart_required` 收窄成投影比较 / 写死 True）窄组各红 1；H（`user_deleted` 交 `target=instance` 而不是 `target_username=`）**全绿** —— 删除后实例 pk 已被 Django 置 None，`audit._live()` 把两种写法折成同一行，这个调用点分辨不了，管住该形状的是写入器侧 `test_audit_writer.py::test_deleted_target_instance_still_records_the_snapshot`。对照（无变异）每轮绿。
+11. **变异脚本自己的一个坑（记下来当规矩）**：`mut7.py` 只在 `finally` 里回写快照，于是一轮里换文件下手时，下一记（含对照）跑在上一记没被覆盖的那个文件上 —— 对照组实际带着 `I` 那记变异，是个假信号（当时看不出来纯属侥幸：`I` 恰好还没有判据）。改成**每记跑完立刻按快照全量回写所有被改文件**，`mut7b/c/d` 都这么写。
+12. **本批没修、留给 Task 14 记台账的一条**：`perform_create` + `UserCreateSerializer.create`（`user.save()` 之后 `UserSetting.objects.create`）不在同一笔事务里，`UserSetting` 失败会留下「有用户、无 `user_created` 事件」的半截状态 —— 与审计无关的既有缺陷，接线只是把它暴露成「审计少一行」。要修就是给 create 那条路补一层 `atomic()`，属于行为变更，不放在接线批里顺手做。（另：`docs/tasks/todo.md` 里那句过宽的 `last_login` 说明也归 Task 14，出处见 Task 6 的 Step 5.5 第 5 条。）
+13. **基线**：本文件 14 例；Step 4 那组（本文件 + `test_account_password_change` + `apps.accounts` + `test_profile_privilege` + `test.backend` 整目录）= **1714 例 OK（skipped=8）**；窄一组（再加 `test_admin_lockout` + `apps.common` + `test_accounts_write_paths`）= 172 例 OK。
+
 - [ ] **Step 5: 提交**
 
 ```bash
-git add apps/accounts/views.py apps/common/views.py test/backend/test_audit_account_events.py
+git add apps/accounts/views.py apps/common/views.py test/backend/test_audit_account_events.py docs/superpowers/plans/2026-11-09-account-role-audit-implementation.md
 git commit -m "feat(accounts): 账号 CRUD/重置/解锁/改密与存储路径变更写入审计（detail 白名单，绝不含口令）"
 ```
 
