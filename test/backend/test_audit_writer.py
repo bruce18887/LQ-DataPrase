@@ -257,9 +257,10 @@ class WriterTests(TestCase):
 class WriterIsolationTests(TestCase):
     """审计 INSERT 失败不能把外层业务事务一起带走 —— 改密/重置/账号变更都在真事务里。
 
-    生产调用点分两批接进来：登录族在 Task 6，改密 / 账号 CRUD / 存储路径在 Task 7，
-    **今天两处都还没有** `audit.record` 调用。这两条因此直接对机制下判据
-    （外层 `atomic()` 里写业务行 + 调 `record()`），不走端点。
+    生产调用点分两批接进来：登录族在 Task 6（**已落地**，端点侧判据 `test_audit_login_events.py`），
+    改密 / 账号 CRUD / 存储路径在 Task 7（还没有 `audit.record` 调用）。这两条因此直接对机制
+    下判据（外层 `atomic()` 里写业务行 + 调 `record()`），不走端点 —— 端点接没接线与本文件的
+    隔离判据无关。
     """
 
     def setUp(self):
@@ -299,8 +300,8 @@ class WriterIsolationTests(TestCase):
         """真 DB 错误的隔离判据 —— savepoint 支的存在理由，也是它唯一的判据。
 
         失败是真的：`event=None` 让 INSERT 撞 `accounts_audit_event.event` 的 NOT NULL
-        约束（0014 建表时带的），SQLite 报 IntegrityError，Django 的
-        `Model._save` 那层 `mark_for_rollback_on_error`（模块头引的 base.py:957）就把这笔
+        约束（0014 建表时带的），SQLite 报 IntegrityError，Django 6.0.9 的
+        `Model._save` 那层 `mark_for_rollback_on_error()`（模块头引的符号名）就把这笔
         写标成「要回滚」。
         有内层 savepoint ⇒ 只回滚审计自己，业务行照常提交；
         摘掉内层 `atomic()`（变异 M-nosavepoint）⇒ 本文件头四格表左列下格那个形状复现：

@@ -14,6 +14,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.common.errors import error_response
 
+from . import audit
 from .models import User, UserSetting
 from .permissions import FeaturePermission
 from .serializers import (
@@ -31,6 +32,16 @@ from .tokens import revoke_refresh_tokens
 
 MAX_LOGIN_ATTEMPTS = 5
 LOCKOUT_DURATION = timedelta(minutes=15)
+
+# 审计 detail 里的等待时长从这个常量推导，**不**抄字面 15：常量若调，抄来的数字会
+# 开始说谎，而审计是事后取证的。下面 `_error(...)` 载荷里那两个字面 15（文案那句
+# 「已被锁定 15 分钟」与 `retry_after_minutes=15`）反过来是**故意**抄死的 —— 那是已下发的
+# API 契约（`LoginPage.vue` 按 `retry_after_minutes` 出提示，`apps/accounts/tests.py` 与
+# `test_audit_login_events.py` 按它取值）。抄死的代价要讲清楚：真的调常量时**没人会 notice**
+# 载荷在说谎（M5b 实测：常量改 20 分钟，114 例全绿，因为那两处本来就返回字面 15），
+# 所以改常量属于契约变更，得单独一次改动并同时复核那两处字面值与两条载荷判据。
+# 判据：test/backend/test_audit_login_events.py 同时钉「detail 跟着常量」与「载荷仍是 15」。
+_AUDIT_LOCKOUT_MINUTES = int(LOCKOUT_DURATION.total_seconds() // 60)
 
 # Stable error codes the front-end branches on. Never rename — the
 # front-end LoginPage.vue switches on these strings to pick a Chinese
@@ -103,9 +114,14 @@ class LoginView(APIView):
         password = serializer.validated_data['password']
 
         # `filter().first()` 而非 `get()`：两条路径的语句数实测相同（各 1 条 SELECT，
-        # 见 test_accounts_write_paths.py 模块注释），差异只在 SQL 形状与不走异常控制流。
+        # 见 test/backend/test_login_path_statements.py 的缺失/命中形状判据），
+        # 差异只在 SQL 形状与不走异常控制流。
         user = User.objects.filter(username=username).first()
         if user is None:
+            # 库里没有这一行 ⇒ `target=` 无从给起，快照列 target_username 就是全部线索；
+            # 探测用的超长用户名由写入器的 `_snapshot` 截到列宽（spec §5.4 规则 2）。
+            audit.record(request, 'login_failure', target_username=username,
+                         detail={'reason': 'unknown_user'})
             return _error(
                 LOGIN_ERROR_CODES['USER_NOT_FOUND'],
                 f'用户名「{username}」不存在，请确认后重试',
@@ -116,6 +132,8 @@ class LoginView(APIView):
         # stable, fixable message ("ask the admin to re-enable") rather
         # than a confusing "try again in 15 minutes".
         if not user.is_active:
+            audit.record(request, 'login_failure', target=user,
+                         detail={'reason': 'account_disabled'})
             return _error(
                 LOGIN_ERROR_CODES['ACCOUNT_DISABLED'],
                 '账号已被禁用，请联系管理员',
@@ -126,6 +144,9 @@ class LoginView(APIView):
             remaining_minutes = max(
                 1, (user.lockout_until - timezone.now()).seconds // 60 + 1
             )
+            audit.record(request, 'login_failure', target=user,
+                         detail={'reason': 'account_locked',
+                                 'retry_after_minutes': remaining_minutes})
             return _error(
                 LOGIN_ERROR_CODES['ACCOUNT_LOCKED'],
                 f'登录失败次数过多，账号已被锁定，请在 {remaining_minutes} 分钟后重试',
@@ -144,6 +165,15 @@ class LoginView(APIView):
                 user.lockout_until = timezone.now() + LOCKOUT_DURATION
                 user.login_attempts = 0
                 user.save()
+                # 两条行、顺序即时间线：先记「这一次为什么失败」，再记「它触发了锁定」
+                # 这个状态变化（spec §5.2 把 account_locked 定义为状态变化，不是第五次
+                # 失败的别名 —— 计数已被清零，不单独留这一笔就查不到锁于何时）。
+                audit.record(request, 'login_failure', target=user,
+                             detail={'reason': 'bad_password',
+                                     'remaining_attempts': 0})
+                audit.record(request, 'account_locked', target=user,
+                             detail={'retry_after_minutes': _AUDIT_LOCKOUT_MINUTES,
+                                     'locked_until': user.lockout_until.isoformat()})
                 return _error(
                     LOGIN_ERROR_CODES['ACCOUNT_LOCKED'],
                     f'连续 {MAX_LOGIN_ATTEMPTS} 次登录失败，账号已被锁定 15 分钟',
@@ -153,6 +183,9 @@ class LoginView(APIView):
                 )
             user.save()
             remaining = MAX_LOGIN_ATTEMPTS - user.login_attempts
+            audit.record(request, 'login_failure', target=user,
+                         detail={'reason': 'bad_password',
+                                 'remaining_attempts': remaining})
             return _error(
                 LOGIN_ERROR_CODES['INVALID_CREDENTIALS'],
                 '密码错误，请重试',
@@ -160,26 +193,28 @@ class LoginView(APIView):
                 remaining_attempts=remaining,
             )
 
-        # 成功即清零计数，但只在**确有东西要清**时写：干净账号（attempts=0、无 lockout）
-        # 原来那句无条件 `user.save()` 是把库里已有的默认值再 UPDATE 一遍（no-op 写，
-        # 成功路径实测 4 条里的第 3 条）。收敛后干净账号 3 条、需重置的仍 4 条。
-        # `or user.lockout_until is not None` 这半句不许跟着删。锁定期**已过期**的账号
-        # `login_attempts` 也是 0，只靠前半句就永远不清它，而过期之后**没有任何通路会自我修复**：
-        # 本视图的锁定判定看 `> timezone.now()`（上面第 122 行，过期即放行、不写回）；DRF 两条
-        # 序列化通路把 `lockout_until` 钉成 read_only（`serializers.py:31`/`:55`），API 写不掉；
-        # 前端管理页的 `isLocked()` 同样按 `> now` 判（`UserManagement.vue` 里的状态 chip 与
-        # `kpi.locked` 都走它）⇒ 过期值不渲染成锁定，连「解锁」按钮
-        # （`v-if="isLocked(row)"`）都不出现，`unlock` 那条唯一的清除通路从页面上到不了。
-        # 于是它的实际代价是：**这条过期值永久留在库里，并随 `UserSerializer` 的载荷
-        # （用户列表接口）一次次下发**；今天唯一真看得见它的界面是 Django admin
-        # （`admin.py:17` 的 `list_display` 与 `:23` 的 fieldset 都列了这列）。
-        # 判据 `test/backend/test_login_path_statements.py::LoginPathTests`。
-        if user.login_attempts or user.lockout_until is not None:
-            user.login_attempts = 0
-            user.lockout_until = None
-            user.save()
+        # 成功登录统一落三件事：最后登录时刻、失败计数清零、锁定时间清空。
+        # 这里不再做「只在确有东西要清时写」的条件判断 —— 「最后登录」是产品要求显示的
+        # 字段（用户管理页一直在渲染它），而**本仓这条 JWT 登录通路从来没写过它**：本视图走
+        # `authenticate()` → ModelBackend，它不发 `user_logged_in`（只有
+        # `contrib.auth.login()` 发，签 JWT 从不调它），Django 挂在信号上的
+        # `update_last_login` 接收器因此一次都没跑过。
+        # 唯一早就在写它的是 Django admin 的登录页（`config/urls.py` 挂了 `admin/`，
+        # `AdminSite.login` → `contrib.auth.views.LoginView.form_valid` → `auth_login`），
+        # 那条走 session 且要 `is_staff`，产品里没有入口，普通 `user` 角色也进不去 ——
+        # 所以「管理页那一列一直是空的」在实际使用中成立，但别把话说过成「全仓没有通路」。
+        # 顺带被这次无条件写清掉的：过期的 `lockout_until`。原来那半个条件
+        # （`lockout_until is not None`）的全部理由就是「过期之后没有通路会碰它」——
+        # 现在成功登录就是那条通路，条件本身不再是区分点，连同理由一起删。
+        # 代价：干净账号的成功路径比 2026-10-30 那次收敛多一条 UPDATE，
+        # 语句形状判据已随之重测（`test/backend/test_login_path_statements.py` 模块头）。
+        user.last_login = timezone.now()
+        user.login_attempts = 0
+        user.lockout_until = None
+        user.save(update_fields=['last_login', 'login_attempts', 'lockout_until'])
 
         tokens = get_tokens_for_user(user)
+        audit.record(request, 'login_success', actor=user, target=user)
 
         response_data = TokenResponseSerializer({
             'token': tokens['access'],
