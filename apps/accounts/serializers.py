@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from apps.common.constants import PAGE_SIZE_MAX, PAGE_SIZE_MIN
 from apps.common.export_naming import EXPORT_TEMPLATE_DEFAULTS, MAX_TEMPLATE_LENGTH
-from .models import User, UserSetting, DEFAULT_HIDDEN_COLUMNS
+from .models import AuditEvent, User, UserSetting, DEFAULT_HIDDEN_COLUMNS
 from .password_policy import validate_password_or_raise
 
 # 图表 DPI 合法区间：须与设置页 el-input-number 的 min/max（ChartSettingsForm.vue）
@@ -210,3 +210,22 @@ class AdminResetPasswordSerializer(serializers.Serializer):
             attrs['new_password'], self.context.get('user')
         )
         return attrs
+
+
+class AuditEventSerializer(serializers.ModelSerializer):
+    """审计事件的对外读形（spec §6）；`fields` 清单与顺序都是 Task 11 那页的契约。
+
+    整表 read-only 不是省事而是语义：`AuditEvent` 只由 `apps/accounts/audit.record()`
+    追加（spec §5.1），序列化器一旦有可写字段，就出现「用 API 改审计」这条路 ——
+    而取证记录能被改，等于没有记录。判据在
+    `test/backend/test_audit_api.py::AccessAndShapeTests::test_serializer_exposes_no_writable_fields`
+    （它比 `Meta.read_only_fields` 那句声明看的是 `_writable_fields` 这个事实）。
+    `actor`/`target` 两个 FK 刻意不暴露：快照列已经带「当时是谁」，FK 在账号被删之后
+    是 None，读出来只会让页面在「空用户名」和「快照用户名」之间二选一。
+    """
+
+    class Meta:
+        model = AuditEvent
+        fields = ['id', 'created_at', 'event', 'actor_username',
+                  'target_username', 'ip_address', 'detail']
+        read_only_fields = fields

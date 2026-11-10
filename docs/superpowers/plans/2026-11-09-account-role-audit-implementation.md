@@ -1931,6 +1931,22 @@ class AuditEventListView(ListAPIView):
     path('audit-events/', AuditEventListView.as_view(), name='audit-events'),
 ```
 
+- [ ] **Step 4.5: 实施期校正与两轮复审回写（2026-11-10 控制器，全部实测）**
+
+1. **正文的 `AUDIT_USERNAME_MAX_LENGTH = 150` 删掉，改用 `audit.USERNAME_MAX_LENGTH`。** Task 5 已经量过「实现里抄第二份列宽」是缺陷（当时把模型列收窄到 60 全绿），这里同理：两份一旦漂移，坏的方向是「一个存得进快照列的用户名被查询侧拒掉」，于是审计页永远搜不到那笔事件，而那串字符看着完全合法。变异 M8real（视图中两处换成字面 150 **且**把 `actor_username` 收窄到 120）⇒ 红 4 条（API 1 + 写入器侧 3），两侧都有牙。**注意 M8 的第一版是假变异**：只把引用换成字面 150、列宽不动，本机行为一模一样 ⇒ 全绿，什么都没证。
+2. **`max_page_size` 刻意不设**，DRF 3.18.3 `PageNumberPagination.get_page_size()` 现量：`0`/`-5`/`abc`/`2.5`/`''` 一律静默回落默认 50，`101` 只有在配了 `max_page_size` 时才静默截到 100，**一个 400 都不发**。所以显式校验是唯一那道闸，配了 clamp 反而误导（「超限是被 clamp 掉的」）。变异：删掉显式校验 ⇒ 红 1（`test_page_size_that_drf_would_silently_absorb`）；`page_size_query_param=None` ⇒ 红 2。
+3. **排序补了 `-id`，正文对排序完全没提这件事**。只按 `-created_at` 排不是全序，翻页会重复/漏行；但**本机删掉 `-id` 在可观察层面什么都没错** —— `EXPLAIN QUERY PLAN` 现量这条 SELECT 走 `accounts_audit_event_created_at_763e7054`，平手次序恰好等于 `-id` 要的。所以「顺序/页边界」那条判据抓不住它，另加一条钉**发出的 ORDER BY 文本**的判据才抓得住（删 `-id` ⇒ 只红这条；翻成 `id` ⇒ 两条一起红）。另外量清了两件事：200 次「同一请求里连记两笔」实测 0 次相同时间戳（相差 134–149 µs，一次 INSERT 本身的代价），而 2000 次相邻 `timezone.now()` 有 1402 次撞成同一个值 —— 所以「平手不会出现」不能写进注释当理由，视图里那段注释按这个实测口径改过一遍（复审第一轮抓的就是我原来那句「第五次失败后那两笔会平手」，它在本机不成立）。
+4. **测试从正文的 8 条长到 29 条**，分六个类：`AccessAndShapeTests`（权限三态 + 载荷形状 + 序列化器无可写字段 + 十个码逐个可查）、`FilterTests`（event / username 两侧 icontains / 两参数 AND / 空参数语义）、`LocalDayBoundaryTests`（今天两端含、相邻日各自、开区间、窗口整体落在数据外 ⇒ 空页而非 400、边界是本地不是 UTC）、`PaginationTests`（默认 50 而不是全局 20、界内界外、整页走查不重不漏、同瞬间全序 + 页边界、ORDER BY 文本、非法 `page` ⇒ 404）、`BadParamTests`（七种坏参数各自的 400 信封与 `code`）、`ReadOnlyTests`（四种写方法、无 detail 路由、读不写行）。
+5. **`_parse_day_bound` 多一个 `name=` 形参**：400 的中文 `message` 要点名是 `date_from` 还是 `date_to`（spec §10），不然用户只看到「日期格式应为 YYYY-MM-DD」而不知道自己填的是哪一格。这些中文 message 从本批起是 Task 11 可见的契约。
+6. **两处与正文预期不同、且是 DRF 决定的**：非法 `page` 走分页自己的 `NotFound` ⇒ **404 `not_found`**（正文没写，Task 11 要按 404 处理）；405 只有权限过了才拿得到（DRF `dispatch` 先 `initial()`），所以只读判据是以管理员身份发的，`/audit-events/<id>/` ⇒ 404（没有 detail 路由）。
+7. **`username=''` 那一腿是不可判的**，注释里如实写明：`icontains ''` 匹配所有非 NULL，跳过筛选同样是全部，两种实现给同一个结果。有牙的是 `event=''`（少了 `if event` 就筛出零行；变异 ⇒ 红 14 条）与两条空日期腿（去掉 `_parse_day_bound` 的空串入口判断 ⇒ 红 18 条）。
+8. **`__lte(当天 23:59:59)` 这个回归本批一度抓不住**：种子行都落在整数秒上，截断到秒与次日零点 `__lt` 给同一个结果。复审第二轮要求把 `late_today` 种成 `23:59:59.123456`（`created_at` 存微秒，现量写 123456 读回还是 123456），改完这一行后「上界截到秒」那记变异红 4 条。**同一条教训适用于第 1 条那个 M8**：变异必须改掉某个可观察的东西，否则它只是文本改动。
+9. **成本事实（不设判据，只记录）**：每次请求两条查询（页 + `count`，`count` 是 spec §6 要的）；`username` 那对 `icontains` 是两次全表扫，`(actor_username, created_at)` / `(target_username, created_at)` 两根索引在 `LIKE '%x%'` 下用不上（`EXPLAIN` 现量）。Task 11 若把默认筛选做成「必须填用户名」，这条成本会变成常态，届时再判要不要加窗口约束。
+10. **DST 在这里测不到**，如实记录：`TIME_ZONE='Asia/Shanghai'` 无夏令时，Django 6 的 `timezone.make_aware` 是 `replace(tzinfo=...)`（`fold=0`），没有任何用例假装覆盖它。边界用「本地今天 00:30 在 UTC 里是昨天 16:30」这个偏移事实钉（`test_bounds_are_local_not_utc` 钉前提，红在这里说明时区配置变了而不是筛选写错）。
+11. **结构**：`views.py` 现在 579/600 行（`scripts/line-limit.mjs` exit 0），审计读端这一整块约 110 行是本文件最后一块还能整块搬走的；本批**不**切（Task 9–14 都不碰 `views.py`），切分理由与时机写在 `AuditEventListView` 的 docstring 末段，给下一个要往这里加东西的人。
+12. **变异表（三轮，`tasks/mut8.py` / `mut8b.py` / `mut8c.py`，字节快照 + sha256 校验、每记跑完立刻全量回写）**：窄组 = `test_audit_api`（29 例）。删 `-id` 1 红；username 只搜 actor 2 红；上界截到秒 4 红；按 UTC 判边界 5 红；去掉 event 白名单 1 红；`required_feature` 换成别的键 1 红；`pagination_class=None` 28 红；去掉 `read_only_fields` 1 红；去掉倒置检查 1 红；去掉 page_size 校验 1 红；去掉空串判断 18 红；去掉日期筛选 4 红；event 无条件筛选 14 红；字面 150 + 列宽 120 红 4（含写入器侧 3）。对照（无变异）每轮绿。
+13. **基线**：本模块 29 例；审计五兄弟（writer 18 + login 7 + account 14 + statements 5 + api 29）= 80 例 OK；`test.backend + apps.accounts + apps.common` = **1808 例 OK（skipped=8）**；`makemigrations --check --dry-run` = `No changes detected`。
+
 - [ ] **Step 5: 跑到绿**
 
 ```
@@ -1946,7 +1962,7 @@ Expected: `OK`。
 - [ ] **Step 6: 提交**
 
 ```bash
-git add apps/accounts/serializers.py apps/accounts/views.py apps/accounts/urls.py test/backend/test_audit_api.py
+git add apps/accounts/serializers.py apps/accounts/views.py apps/accounts/urls.py test/backend/test_audit_api.py docs/superpowers/plans/2026-11-09-account-role-audit-implementation.md
 git commit -m "feat(accounts): 只读审计查询端点 /auth/audit-events/（按项目时区取整日边界，参数错误走统一信封）"
 ```
 

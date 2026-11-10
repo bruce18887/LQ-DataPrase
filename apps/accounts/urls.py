@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
+    AuditEventListView,
     ChangePasswordView,
     LoginView,
     LogoutView,
@@ -24,5 +25,7 @@ urlpatterns = [
     path('profile/', UserProfileView.as_view(), name='profile'),
     path('change-password/', ChangePasswordView.as_view(), name='change-password'),
     path('settings/', UserSettingsView.as_view(), name='settings'),
+    # 只读端点：没有 detail 路由、没有任何写方法（spec §6「该端点只读」）。
+    path('audit-events/', AuditEventListView.as_view(), name='audit-events'),
     path('', include(router.urls)),
 ]
