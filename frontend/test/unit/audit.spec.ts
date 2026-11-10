@@ -226,6 +226,21 @@ describe('buildAuditQuery：只发后端接受的东西', () => {
     }
   })
 
+  it('清空后的日期是 null（EP 的 date-picker 交回 null，不是空串）：不发这个键，而不是发出 date_from=null', () => {
+    // 这一腿钉的是 Task 11 的表单态与纯层之间那根线：AuditFilters 的日期两格声明为
+    // string | null，所以 null 必须在纯层就收成「不发」，而不是靠组件里一个 queryFilters()
+    // 把它折成 ''。折叠那一层当初能跑，是因为 buildAuditQuery 对 null 调 .trim() 会抛，
+    // 而抛在 load() 的 try 里被 catch 咽掉 —— 症状是「一个请求都不发 + 表格空」，
+    // 单看浏览器什么错也没有。把可空性收进契约之后，这条判据才是抓得住它的那只手。
+    const q = buildAuditQuery({ ...defaultAuditFilters(), dateFrom: null, dateTo: null })
+    expect(Object.hasOwn(q, 'date_from'), `null 日期被发了出去：${JSON.stringify(q)}`).toBe(false)
+    expect(Object.hasOwn(q, 'date_to'), `null 日期被发了出去：${JSON.stringify(q)}`).toBe(false)
+    expect(q).toEqual({ page: 1, page_size: 50 })
+    // 单边 null 也一样：另一半照常发出去，别把两个键一起吞掉。
+    expect(buildAuditQuery({ ...defaultAuditFilters(), dateFrom: null, dateTo: '2026-3-9' }))
+      .toEqual({ page: 1, page_size: 50, date_to: '2026-03-09' })
+  })
+
   it('日期只校验形状不校验历法：2 月 30 日照发，让后端那句 400 当唯一一道闸', () => {
     // 前端再造一遍日历就是第二份历法实现，两份不一致时坏的方向是「后端收得下的日期被前端吞掉」，
     // 用户在页面上看着日期填对了却查不到东西。后端判据：test_audit_api.py::BadParamTests。
@@ -454,5 +469,126 @@ describe('抽取器自证（否则上面的双向绊线是在比空集合）', (
     expect(extractEventCodes(crlf)).toHaveLength(Object.keys(SPEC_LABELS).length)
     expect(extractIntConst('AUDIT_PAGE_SIZE_MAX = 100\r\n', 'AUDIT_PAGE_SIZE_MAX', 'x')).toBe(100)
     expect(extractColumnWidth('    actor_username = models.CharField(max_length=150)\r\n', 'actor_username', 'x')).toBe(150)
+  })
+})
+
+// ------------------------------------------------ Task 11（审计页）带来的两份新副本
+// 响应字段名（序列化器 ↔ AuditEventRow）与 detail 键名（写路径 → 裸贴 JSON 的展开行）。
+// 形状与上面那四份同病：手抄、漂了不会自己响，所以照同一口径刮源码。
+// （Task 11 那份 e2e 清场前缀表的判据在 test/unit/e2eTempAccounts.spec.ts —— 那颗绊线的家。）
+
+const SERIALIZERS_PY = 'apps/accounts/serializers.py'
+const COMMON_VIEWS_PY = 'apps/common/views.py'
+const API_AUDIT_TS = 'frontend/src/api/audit.ts'
+
+/** `class AuditEventSerializer` 之后**第一个** `fields = [...]`（即 Meta.fields）；
+ *  `read_only_fields = fields` 没有方括号，不会误命中。抽不到/空/项形不认识一律抛。 */
+function extractSerializerFields(src: string): string[] {
+  const m = /^class AuditEventSerializer\b[\s\S]*?fields = \[([\s\S]*?)\]/m.exec(src)
+  if (!m) throw new Error(`${SERIALIZERS_PY}: 找不到 class AuditEventSerializer 之后的 fields = [...]`)
+  const items = m[1].split(',').map((s) => s.trim()).filter((s) => s !== '')
+  if (!items.length) throw new Error(`${SERIALIZERS_PY}: AuditEventSerializer 的 fields 清单是空的`)
+  return items.map((s) => {
+    const k = /^'([a-z_]+)'$/.exec(s)
+    if (!k) throw new Error(`${SERIALIZERS_PY}: fields 清单里出现不认识的项 ${JSON.stringify(s)}`)
+    return k[1]
+  })
+}
+
+/** `export interface AuditEventRow { 键: 类型 … }` 的键清单（每行恰好一对「键: 类型」）。 */
+function extractRowKeys(src: string): string[] {
+  const m = /^export interface AuditEventRow \{([\s\S]*?)^\}/m.exec(src)
+  if (!m) throw new Error(`${API_AUDIT_TS}: 找不到顶格的 export interface AuditEventRow { … }`)
+  const lines = m[1].split(/\r?\n/).map((l) => l.trim()).filter((l) => l !== '')
+  if (!lines.length) throw new Error(`${API_AUDIT_TS}: AuditEventRow 是空的，等式会两边同时为空`)
+  return lines.map((l) => {
+    const k = /^([a-z_]+): \S/.exec(l)
+    if (!k) throw new Error(`${API_AUDIT_TS}: AuditEventRow 里出现不认识的行 ${JSON.stringify(l)}（要求每行「键: 类型」）`)
+    return k[1]
+  })
+}
+
+/** `detail={` 之后那整个字典字面量：括号配对扫描，认单/双引号与反斜杠转义。 */
+function dictBody(src: string, open: number, file: string): string {
+  let depth = 0
+  let quote = ''
+  for (let i = open; i < src.length; i++) {
+    const c = src[i]
+    if (quote) {
+      if (c === '\\') i++
+      else if (c === quote) quote = ''
+    } else if (c === "'" || c === '"') quote = c
+    else if ('{[('.includes(c)) depth++
+    else if ('}])'.includes(c) && --depth === 0) return src.slice(open + 1, i)
+  }
+  throw new Error(`${file}: detail={ 的花括号没有配对，抽取器定不出界`)
+}
+
+/** 一份视图源码里每个 `detail=` 写字典的**全部**引号键名（含嵌套层：展开行裸贴的是整棵 JSON 树，
+ *  嵌套键同样会被原样贴出来，所以这里刻意不比「顶层」更窄 —— 窄了就是漏检，不是保守）。 */
+function detailKeysFrom(src: string, file: string): string[] {
+  const sites = [...src.matchAll(/detail=\{/g)]
+  if (!sites.length) throw new Error(`${file}: 一个 detail={ 写入点都没刮到（返回空集等于绊线恒绿）`)
+  const keys: string[] = []
+  for (const m of sites) {
+    keys.push(...[...dictBody(src, src.indexOf('{', m.index), file).matchAll(/'([a-z_][a-z0-9_]*)':/g)].map((x) => x[1]))
+  }
+  if (!keys.length) throw new Error(`${file}: detail 字典里一个键名都没刮到`)
+  return keys
+}
+
+/** 异源判据：spec §6 那行「响应字段」。 */
+const SPEC_ROW_FIELDS = ['id', 'created_at', 'event', 'actor_username', 'target_username', 'ip_address', 'detail']
+/** 异源判据：2026-11-10 逐条枚举 14 个 audit.record 调用点（accounts/views.py 13 + common/views.py 1）后抄下来的 detail 键全集；`grep -rn --include='*.py' "audit\.record(" apps/` 的 15 条里，serializers.py:218 那条是 docstring 的散文不是调用点，别改回 15。 */
+const SPEC_DETAIL_KEYS = ['reason', 'remaining_attempts', 'retry_after_minutes', 'locked_until', 'role',
+  'is_active', 'changed_fields', 'values', 'lockout_cleared', 'before', 'after', 'restart_required']
+
+describe('响应字段名（第五份跨语言副本）：序列化器 ↔ AuditEventRow', () => {
+  const backend = () => extractSerializerFields(read(SERIALIZERS_PY))
+  const front = () => extractRowKeys(read(API_AUDIT_TS))
+
+  it('两边各非空，且集合逐字相等（后端改名而这里不动，页面渲染出来的是空白列，不是错误）', () => {
+    const b = [...new Set(backend())].sort()
+    const f = [...new Set(front())].sort()
+    expect(b, `${SERIALIZERS_PY}: fields 抽到空集`).not.toEqual([])
+    expect(f, `${API_AUDIT_TS}: AuditEventRow 抽到空集`).not.toEqual([])
+    expect(f, `AuditEventRow ${f.join('/')} 与 AuditEventSerializer.Meta.fields ${b.join('/')} 对不上（前端少一个就是一列空白）`).toEqual(b)
+  })
+
+  it('抽取器自证：两侧各改一个名字等式当场判红，抽不到形状就抛（选的是「两边都刮源码」而不是 import 类型 —— TS 的类型运行时不存在，import 过来没法跟 Python 比）', () => {
+    expect([...backend()].sort()).toEqual([...SPEC_ROW_FIELDS].sort())
+    expect([...front()].sort()).toEqual([...SPEC_ROW_FIELDS].sort())
+    const renamedBack = backend().map((k) => (k === 'ip_address' ? 'client_ip' : k)).sort()
+    expect(renamedBack, '后端字段改名而前端没跟上 ⇒ 本条必须红').not.toEqual(front().sort())
+    const renamedFront = front().map((k) => (k === 'actor_username' ? 'actor_name' : k)).sort()
+    expect(renamedFront, '前端 interface 改名 ⇒ 本条必须红').not.toEqual(backend().sort())
+    expect(() => extractSerializerFields('class OtherSerializer(View):\n    fields = [\'a\']\n')).toThrow(/找不到/)
+    expect(() => extractRowKeys('export interface AuditEventRow {\n  id: number\n  这不是键值行\n}\n')).toThrow(/不认识的行/)
+  })
+})
+
+describe('裸贴 JSON 的展开行：闸在写路径，判据也钉在写路径', () => {
+  /** 与 utils/audit 的 SECRET_KEY_RE 同一条启发式（那份没导出）；第三条腿用 summarizeDetail 把两边连起来。 */
+  const SECRET_RE = /pass|token|secret/i
+  const allDetailKeys = () => [...new Set([
+    ...detailKeysFrom(read(VIEWS_PY), VIEWS_PY),
+    ...detailKeysFrom(read(COMMON_VIEWS_PY), COMMON_VIEWS_PY),
+  ])]
+
+  it('每个 detail= 的键名都不命中口令/令牌/密钥启发式（命中就是审计页取证记录里躺着明文）', () => {
+    const hit = allDetailKeys().filter((k) => SECRET_RE.test(k))
+    expect(hit, `detail 键 ${hit.join('/')} 会被展开行原样贴出来：改的是写路径的键名/白名单，前端打码管不到那一格`).toEqual([])
+  })
+
+  it('抽取器自证①：两份真实视图刮出的键全集就是逐条枚举过的那十二个', () => {
+    expect(allDetailKeys().sort()).toEqual([...SPEC_DETAIL_KEYS].sort())
+  })
+
+  it('抽取器自证②：合成源里的 refresh_token 必须被抓到，且与 UI 那条打码同判；抽不到就抛', () => {
+    const synth = "audit.record(request, 'user_created', detail={'role': r, 'refresh_token': t})\n"
+    expect(detailKeysFrom(synth, 'x.py').filter((k) => SECRET_RE.test(k)), '合成源里的 refresh_token 没被抓到 ⇒ 绊线看不见新写进去的键名').toEqual(['refresh_token'])
+    expect(summarizeDetail({ refresh_token: 'x' }), '两道闸的启发式必须同判：摘要不打码就等于裸贴').toBe('refresh_token=•••')
+    expect(() => detailKeysFrom('class V(View):\n    pass\n', 'x.py')).toThrow(/一个 detail=/)
+    expect(() => detailKeysFrom("detail={'a': {b}\n", 'x.py')).toThrow(/没有配对/)
   })
 })

@@ -28,11 +28,29 @@ export const AUDIT_EVENT_LABELS: Record<string, string> = {
 export const auditEventLabel = (event: string): string =>
   Object.hasOwn(AUDIT_EVENT_LABELS, event) ? AUDIT_EVENT_LABELS[event] : event
 
+/**
+ * 表单里的日期两格：EP 的 date-picker 清空时交回的是 `null` 而不是空串，所以契约里就得让它可为
+ * null —— 可空性在纯层收口，组件不再自己维护第二份「页面态」类型，也不再有个 `queryFilters()`
+ * 把 null 折成 `''`：那一层是第三次拷贝，折叠写漏一格的症状不是报错，而是 `null.trim()` 抛在
+ * `load()` 的 try 里被 catch 咽掉（判据见 test/unit/audit.spec.ts 的 null 腿）。
+ *
+ * 三件控件清空时给的回执**不一样**（逐条对着本仓装的 element-plus 2.14.0 源码量过，别照官方
+ * 文档想当然）：`el-input` 交回 `''`（input.vue_…_lang.mjs:302-307 的 `clear()`），
+ * `el-date-picker` 交回 `null`（time-picker/src/common/picker.vue_…_lang.mjs:47 给
+ * `useEmptyValues(props, null)`、:161-167 的 `onClear` 走 `emitInput(该值)`，而
+ * use-common-picker.mjs:17-23 的 `emitInput` 对假值「不套 valueFormat、原样发出」；单选日期
+ * 那一侧的 panel-date-pick 没有注册 `handleClear`，所以没有另一条通路），
+ * `el-select`（单选、clearable）交回的既不是 `''` 也不是 `null`，而是 **`undefined`**
+ * （select/src/useSelect.mjs:315-321 的 `deleteSelected` 发的是 `valueOnClear.value`，而 :60
+ * 调的是 `useEmptyValues(props)` —— 没给默认值，hooks/use-empty-values/index.mjs:48-54 一路落空
+ * 就返回 `undefined`）。这就是 `event` 与两格日期同为「可空」、`username` 却是 `string` 的理由；
+ * 纯层那把 `trimText` 对三种都收口，别指望组件里的 v-model 替我们分辨。
+ */
 export interface AuditFilters {
-  event: string
+  event: string | null | undefined
   username: string
-  dateFrom: string
-  dateTo: string
+  dateFrom: string | null
+  dateTo: string | null
   page: number
   pageSize: number
 }
@@ -49,8 +67,9 @@ export const AUDIT_PAGE_SIZE_MAX = 100
  */
 export const USERNAME_QUERY_MAX = 150
 
-/** 表格一格里只放一行：120 是给「不折行、不撑破列宽」定的预算，看全量交给详情弹窗。
- *  这道打码只管摘要这一行 —— 弹窗要展示原始 detail，就得走同一套键名规则，别裸贴 JSON。 */
+/** 表格一格里只放一行：120 是给「不折行、不撑破列宽」定的预算，看全量交给展开行的裸 JSON。
+ *  这里的按键名打码只是摘要那一行的第二道兜底；裸 JSON 敢摆上界面靠的是**写路径**那道闸：
+ *  test/unit/audit.spec.ts 的 detail 键名 describe 刮每个 detail= 的任意深度键名，命中启发式即在 T2 红。 */
 const DETAIL_SUMMARY_MAX = 120
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -58,14 +77,22 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const LOOSE_DATE_RE = /^(\d{4})-(\d{1,2})-(\d{1,2})$/
 
 /**
+ * 文本条件的收口：三件控件清空后交回的形状不一样（`''` / `null` / `undefined`，逐条见
+ * `AuditFilters` 上面那段），纯层一律收成「空串 = 不发这个条件」。
+ * 不在这里区分 null 与 undefined：区分了也没事可做 —— 两种都意味着管理员把那一格清了。
+ */
+const trimText = (raw: string | null | undefined): string => (raw ?? '').trim()
+
+/**
  * 把日期收成后端线里的 `YYYY-MM-DD`：完整的补零（`2026-1-5` → `2026-01-05`），
- * 真半截的（`2026-11`）交回空串 = 不发这个条件。
+ * 真半截的（`2026-11`）与清空后的 `null` 都交回空串 = 不发这个条件。
  * 不这么做的后果不是「后端报 400」而是**静默丢条件**：用户填了 `2026-1-5`，前端不发日期，
  * 于是拿到一份看着像「全部事件」的结果 —— 取证页上一份合理但错的行集，比一个错误提示坏得多。
  */
-const normalizeDay = (raw: string): string => {
-  if (DATE_RE.test(raw)) return raw
-  const m = LOOSE_DATE_RE.exec(raw)
+const normalizeDay = (raw: string | null): string => {
+  const value = trimText(raw)
+  if (DATE_RE.test(value)) return value
+  const m = LOOSE_DATE_RE.exec(value)
   if (!m) return ''
   return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
 }
@@ -76,7 +103,8 @@ const SECRET_KEY_RE = /pass|token|secret/i
 const REDACTED = '•••'
 const EMPTY_TEXT = '空'
 const ELLIPSIS = '…'
-const PLACEHOLDER = '—'
+/** 「这一格没东西」的显示值：审计页的空列（操作者、目标、IP）与两个格式化器共用，别在组件里再抄一份。 */
+export const AUDIT_PLACEHOLDER = '—'
 
 export const defaultAuditFilters = (): AuditFilters => ({
   event: '',
@@ -102,13 +130,13 @@ export function buildAuditQuery(filters: AuditFilters): Record<string, string | 
     page: normalizePage(filters.page),
     page_size: normalizePageSize(filters.pageSize),
   }
-  const event = filters.event.trim()
+  const event = trimText(filters.event)
   if (event) query.event = event
-  const username = filters.username.trim()
+  const username = trimText(filters.username)
   if (username) query.username = username
-  const dateFrom = normalizeDay(filters.dateFrom.trim())
+  const dateFrom = normalizeDay(filters.dateFrom)
   if (dateFrom) query.date_from = dateFrom
-  const dateTo = normalizeDay(filters.dateTo.trim())
+  const dateTo = normalizeDay(filters.dateTo)
   if (dateTo) query.date_to = dateTo
   return query
 }
@@ -130,11 +158,41 @@ function renderValue(value: unknown): string {
  *  `JSONField(default=dict)` 只管缺省、不约束类型，`audit._insert()` 那句 `detail or {}`
  *  也会照收一个非空的 list —— 所以这里的非对象分支不是「不会走到」。 */
 export function summarizeDetail(detail: unknown): string {
-  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return PLACEHOLDER
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return AUDIT_PLACEHOLDER
   const parts = Object.entries(detail).map(([key, value]) =>
     SECRET_KEY_RE.test(key) ? `${key}=${REDACTED}` : `${key}=${renderValue(value)}`,
   )
-  if (!parts.length) return PLACEHOLDER
+  if (!parts.length) return AUDIT_PLACEHOLDER
   const text = parts.join('，')
   return text.length > DETAIL_SUMMARY_MAX ? `${text.slice(0, DETAIL_SUMMARY_MAX - 1)}${ELLIPSIS}` : text
+}
+
+/**
+ * 时间列给到秒：审计页要在同一分钟内区分两笔事件（连续三次登录失败就是这么留下的），
+ * 所以不用 utils/format 的 formatTime（那是 MM-DD HH:mm 的短形态，给列表行用）。
+ *
+ * 走的是**浏览器本地时区**的 getter，与后端那条 `-created_at` 倒序、以及 `_parse_day_bound`
+ * 按 `TIME_ZONE` 取的整日边界不是同一根线：本机 dev 的 TZ 与 Django 的 Asia/Shanghai 一致，
+ * 所以看着是一回事；把部署机挪到别的时区，日期筛选与这一列就会各说各话。判据见
+ * `test/unit/auditFormat.spec.ts`（它把 TZ 钉成 Asia/Shanghai 来量这条线，换机器不用重测）。
+ */
+export function formatAuditTime(value: string): string {
+  if (!value) return AUDIT_PLACEHOLDER
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} `
+    + `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+/**
+ * 展开行给的是**未打码**的原始 detail。裸 JSON 敢摆上界面，靠的是后端写路径那道闸：
+ * test/unit/audit.spec.ts 刮 apps/accounts/views.py 与 apps/common/views.py 里每个 detail=
+ * 字典的**任意深度**键名（整棵树，嵌套键也照样贴出来），断言没有一个命中口令/令牌/密钥启发式
+ * （判据在写入侧，不在这里）。
+ * 摘要那一行的按键名打码是第二道兜底，管不到这一格 —— 别把它当成已经打码了。
+ */
+export function auditDetailJson(detail: Record<string, unknown> | null | undefined): string {
+  if (!detail || typeof detail !== 'object' || !Object.keys(detail).length) return AUDIT_PLACEHOLDER
+  return JSON.stringify(detail, null, 2)
 }
