@@ -2187,10 +2187,26 @@ cd frontend && npx vitest run && npm run build
 ```
 Expected: 全绿；`build` 里 `vue-tsc -b` 无错误。
 
-- [ ] **Step 4: 提交**
+- [ ] **Step 4.5: 实施期校正与两轮复审回写（2026-11-10 控制器，全部实测）**
+
+1. **测试从正文的 12 条长到 32 条，七个 `describe`**：审计事件标签 4（异源十对逐字、双向同集合、查表通路本身、未知码与三个原型名回退）、`defaultAuditFilters` 2、`buildAuditQuery` 8（只发非空条件、两侧 trim、日期补零与半截、形状不校验历法、页码、`page_size` 接受域、超长 username 不截）、`summarizeDetail` 10（占位符、六种真实形状逐句、「空」的两种写法、打码含误伤与递归、启发式抓不住值、循环引用、120 预算两端、最长真实一行）、与后端参数名同源 1、与后端数字同源 2、抽取器自证 5。正文 Step 3 那句 `Tests 12 passed` 以这条为准。
+2. **第四份副本是查询参数名，正文完全没有它**（复审第一轮找出，是本轮唯一的 Critical）。`buildAuditQuery` 发出的 `event`/`username`/`date_from`/`date_to`/`page_size` 抄的是 `AuditEventListView.get_queryset` 里那五个 `params.get('…')`；实测把 `views.py` 的 `params.get('date_from', '')` 改成 `params.get('from_date', '')`，**改判据前 32 例全绿**——DRF 对不认识的参数静默忽略，审计页于是拿到一份看着像全量的时间线，一声不吭，正是本文件第 60–64 行自己排在最坏的那一类（合理但错的行集）。补了 `extractAuditParamNames`：只切 `class AuditEventListView` 到下一个顶格 `class` 那段类体（整份 `views.py` 一起刮会把接受域宽成一个谁都不看的集合），找不到类或一个名字都没刮到就抛。判据是「前端可能发出的键名全集 == 后端真读的名字 ∪ `page`」，全集从实现取（填满 / 半截日期 / 空白三种输入各发一次再收集），所以前端改名也一起红。`page` 只能点名：它是 `PageNumberPagination.page_query_param` 的默认名，源码里不出现 `params.get('page')`，它改名的判据在 T1 的整页走查。变异 N13（后端改名）红 2、N14（前端改名）红 4。
+3. **`event` 与日期的不对称按「用户说完了没有」收口**（正文只写了日期那条线）：`event` 现在与 `username` 一样先 `trim()`，全空白 = 不发；日期先 `normalizeDay` —— 完整的补零（`2026-1-5` → `2026-01-05`），真半截的（`2026-11`、`2026/11/09`、`20261109`）交回空串不发。理由：后端 `strptime('%Y-%m-%d')` **实测**连 `2026-1-5` 都收，所以「只认两位」是前端自己画的线，不是后端的；画了这条线又不补零，就是把用户已经填完的条件静默丢掉。判据在 `test_audit_api.py::BadParamTests` 与这里的日期形状用例两头各钉一遍。
+4. **`auditEventLabel` 查表改走 `Object.hasOwn`**，正文那句 `AUDIT_EVENT_LABELS[event] ?? event` 有原型泄漏：`'toString'` 会从原型上取到一个 Function，而 `??` 只挡 `null`/`undefined`，页面就把「function toString(){…}」显示成事件名。后端对未登记的码只留 warning、不拒写（`test_audit_writer.py::WriterTests::test_event_list_is_the_single_source`），所以这种字符串真会进表；用例把 `toString`/`constructor`/`__proto__` 三个原型名与三个真旧码一起钉住。
+5. **正文里 `REAL_DETAILS` 那句「后端 detail 的六个真实形状，摘要判据全部建立在它们之上」是假说明，已按实测改写**。十个码逐个看过调用点：`login_success`、`password_changed`、`account_unlocked` **根本不写 `detail`**（`audit._insert` 那句 `detail or {}` 兜成空 dict，摘要给占位符），`system_paths_changed` 那份「前后两串 Windows 路径 + 布尔」最长、单独钉在 120 预算那条；`login_failure` 一个码有四种形状（`{reason}`、`{reason, remaining_attempts}`、`{reason, retry_after_minutes}`、加 `account_locked` 的 `{retry_after_minutes, locked_until}`），表里只取 `bad_password` 那一形。顺带把 `summarizeDetail` 注释里那句「`audit.record()` 里 `detail or {}`」改成 `_insert()`，那半句在 `apps/accounts/audit.py:102`，不在 `record` 里。
+6. **后端那十个键名一个都不匹配 `/pass|token|secret/i`**（逐条数过：`reason`/`remaining_attempts`/`retry_after_minutes`/`locked_until`/`role`/`is_active`/`changed_fields`/`values`/`lockout_cleared`/`before`/`after`/`restart_required`），所以前端的按键名打码是**纵深防御**而不是现役堵漏；它只覆盖摘要这一行，正文 Task 11 的弹窗是裸 `JSON.stringify(row.detail, null, 2)`（本文件 2647 行）。这句话已写进 `DETAIL_SUMMARY_MAX` 的注释，弹窗要不要复用同一套键名规则归 Task 11 判。
+7. **刮取一律在用例内部调用，不在模块顶层跑**：顶层抛错会被 vitest 报成一次收集失败（整文件 0 例），而 house style 是「读源码可以顶层、判定必须在 `it` 里」（`portWiring.spec.ts` 顶层只 read、`roleLabelHygiene.spec.ts` 连 parse 都在 `it` 内）。形状坏了要红的是**那一条命名用例**：变异 N11（块里挤进一行注释）与 N12（`AUDIT_EVENTS = (` 换成 `[`）各红 2 条，而不是整文件红。
+8. **删掉两处不增加杀伤力的判据**（复审第二轮点的）：`extra`/`missing` 两条已经隐含「排序后逐字相等」，第三条纯重复；`toContain('login_success')` 被同一条同集合判据吞掉；「后端把上限挪小时夹出来的值仍在新接受域内」那条整块与 `page_size` 用例里的恒等式循环同输入同界——把它独有的性质（**夹的参照物来自实现而不是测试**）并进那段循环的注释，界仍取 `backendPageSizeMax()`。
+9. **`USERNAME_QUERY_MAX` 与 `AUDIT_PAGE_SIZE_MAX` 目前是「无消费者的导出」**，Task 11 必须绑上去而不是重抄：正文 2608 行 `maxlength="150"` 要改成 `:maxlength="USERNAME_QUERY_MAX"`，2676 行 `:page-sizes="[20, 50, 100]"` 要由 `AUDIT_PAGE_SIZE_MAX`（加默认 50）推出来。按原文抄死就是把本模块刚消灭的第二副本又搬回组件里，而且那份抄本没有绊线。
+10. **序列化器响应字段名是第五份副本，本批刻意不钉**：`AuditEventSerializer` 的七个 `fields` 现在前端还没有消费者，为假想读者写判据是空的。Task 11 落 `api/audit.ts` 时一起钉（同一套刮 `serializers.py` 的做法，找不到就抛）。
+11. **`audit.py` 里 `AUDIT_EVENTS` 上方那段注释从将来时改成现在时**（正文写的「Task 9 会加一条绊线」已经落地）：现在点名绊线在 `frontend/test/unit/audit.spec.ts`、未登记码的回退是 warning 不拒写、以及块形要求（顶格 `AUDIT_EVENTS = (`、每项独占一行、只有单引号小写名 + 逗号）——最后这条是**给刮取器看的契约**，改形之前先想红的是哪几条。
+12. **变异表（`tasks/mut9c.mjs`，15 记，字节快照 + sha256 校验，每记跑完立刻全量回写）**：Z 对照绿；N1 后端加码 2 红；N2 后端删码 2 红；N3 `AUDIT_PAGE_SIZE_MAX` 挪宽 1 红；N4 默认值改 30 1 红；N5 模型列收窄到 120 1 红；N6 前端不夹 `page_size` 1 红；N7 打码不递归 1 红；N8 刮取静默返回空集合 1 红；N9 摘要不截断 2 红；N10 标签表多贴一码 2 红；N11 块里挤注释 2 红；N12 块括号换方括号 2 红；N13 后端改参数名 2 红；N14 前端改参数名 4 红。
+13. **基线**：本模块 32 例；全量 `npx vitest run` = 56 文件 / 773 例；`npm run build`（含 `vue-tsc -b`）干净；`node scripts/line-limit.mjs` exit 0；后端 `test_audit_api` 29 例 OK（本批只改了 `audit.py` 的注释，没动任何后端判据）。
+
+- [ ] **Step 5: 提交**
 
 ```bash
-git add frontend/src/utils/audit.ts frontend/test/unit/audit.spec.ts
+git add frontend/src/utils/audit.ts frontend/test/unit/audit.spec.ts apps/accounts/audit.py docs/superpowers/plans/2026-11-09-account-role-audit-implementation.md
 git commit -m "feat(audit): 审计纯函数（标签/筛选转参/详情摘要）与后端事件码双向绊线"
 ```
 

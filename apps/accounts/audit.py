@@ -46,10 +46,12 @@ from .models import AuditEvent
 logger = logging.getLogger(__name__)
 
 # 事件码的唯一清单 = spec §5.2 那十个（触发点表逐行对得上）。
-# Task 9 会新增前端标签表 `frontend/src/utils/audit.ts` 与它的 T2 绊线
-# `frontend/test/unit/audit.spec.ts`；那两个文件此刻还不存在，落地时**必须**与本元组
-# 双向钉死（标签表覆盖且只覆盖这些码）。在那之前，本元组唯一的判据是
-# `test_audit_writer.py::WriterTests::test_event_list_is_the_single_source`。
+# 前端那份标签表（frontend/src/utils/audit.ts）与本元组双向钉死：绊线是
+# frontend/test/unit/audit.spec.ts，它刮这份清单跟前端比集合，两侧各自多出来的码都会被点名
+# —— 加/删事件码必须两边一起改。码名写错这里只留 warning、不拒写，所以未登记的码会漏到前端，
+# 前端对它的行为是回退显示原码；那条回退、以及「本清单只能长成下面这种形状（顶格块首、
+# 每项独占一行带逗号，否则绊线当场抛而不是安静少刮一个码）」，都由同一条绊线钉着。
+# 本元组自身的判据仍是 test_audit_writer.py::WriterTests::test_event_list_is_the_single_source。
 AUDIT_EVENTS = (
     'login_success',
     'login_failure',
