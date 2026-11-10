@@ -94,6 +94,19 @@ const routes = [
         },
       },
       {
+        path: 'admin/audit',
+        name: 'AuditLog',
+        component: () => import('../pages/admin/AuditLogPage.vue'),
+        meta: {
+          title: '操作审计',
+          requiresAdmin: true,
+          icon: Search,
+          desc: '登录、锁定、改密与账号变更的留痕',
+          // 同 admin/users：「系统管理」是侧栏分组名而不是路由，不给 to，否则面包屑链到不存在的 /admin
+          parent: { label: '系统管理' },
+        },
+      },
+      {
         path: 'settings',
         name: 'Settings',
         component: () => import('../pages/settings/SettingsPage.vue'),

@@ -1,5 +1,6 @@
 /**
- * T2：`e2e/admin/admin.spec.ts` 的「残留前缀表」与「实际建号名字」不许各自漂移。
+ * T2：`e2e/admin/admin.spec.ts`（Task 11 起还有 `e2e/admin/audit.spec.ts`）的「残留前缀表」与
+ * 「实际建号名字」不许各自漂移。
  *
  * 为什么要这颗绊线：该文件的 afterAll 有两条清理规则 —— `mine`（本 worker 建过的名字，无条件
  * 回收）与「命中残留前缀表 **且** 建号满 10 分钟」（跨轮尸体兜底）。前者只活在单个 worker 的内存
@@ -10,7 +11,8 @@
  * 池 = 各 slot 自己那份，见 `docs/reference/testing-gates.md` §1），且没有任何测试会红。这正是本仓
  * 用源扫描 T2 钉死的形状（同 `roleLabelHygiene.spec.ts`、`localStorageHygiene.spec.ts`）。
  *
- * 判据三类、共 7 例：① 集合相等（双向，红字指名动的是哪一侧）+ 两侧非空；② 抽取器自证 —— 合成源
+ * 判据三类、共 10 例（Task 11 起覆盖两份 spec：admin.spec.ts 七例 + audit.spec.ts 三例）：
+ * ① 集合相等（双向，红字指名动的是哪一侧）+ 两侧非空；② 抽取器自证 —— 合成源
  * 里加一个家族，抽取集合必须真的长出来（否则 ① 是在比两个空集合），真实漂移形状（`edit`→`edit2`）
  * 要走等式而不是抛，表里抹掉一个家族要报缺，不认识的形状必须抛；③ 反向探针必须保持绿：改变量名 /
  * 换正则里分支的先后顺序，两侧集合都不许变（判据不能焊在版式上）。
@@ -78,6 +80,8 @@ function residueFamilies(src: string): Set<string> {
  * 「抽取器自证」那一条命名用例上——名字里写着「形状不认识」，这才是要给人看的那句话。
  */
 const SRC = readFileSync(ADMIN_SPEC, 'utf8')
+/** Task 11 起有第二份表：`e2e/admin/audit.spec.ts` 自己建临时账号、自己清场，表在它自己文件里。 */
+const AUDIT_SRC = readFileSync(new URL('../../e2e/admin/audit.spec.ts', import.meta.url), 'utf8')
 const GEN = () => generatedFamilies(SRC)
 const RES = () => residueFamilies(SRC)
 
@@ -157,5 +161,35 @@ describe('抽取器自证与反向探针', () => {
     const reordered = SRC.replace('e2e_(user|toggle|edit|reset)_', 'e2e_(reset|edit|toggle|user)_')
     expect(reordered, '探针没改动源码，等于什么都没测').not.toBe(SRC)
     expect(residueFamilies(reordered), '残留表判据焊在分支顺序上了').toEqual(RES())
+  })
+})
+
+/**
+ * Task 11 起有**第二份表**：`e2e/admin/audit.spec.ts` 自己建临时账号（e2e_audit_）、自己清场。
+ * 判据必须**按文件各算一次**，而不是把两张表并成一张 —— 并表等于让 audit 那边的漏项由 admin
+ * 的 afterAll 代偿，而 admin 的 worker 根本不知道 audit 的 worker 建了什么（`mine` 是进程内的）。
+ */
+describe('第二份表（audit.spec.ts）：等式在各自文件内闭合', () => {
+  const BQ = '`'
+
+  it('audit.spec.ts 的建号家族 == 它自己 afterAll 的残留表家族', () => {
+    const gen = generatedFamilies(AUDIT_SRC)
+    expect([...gen].sort(), '建号侧空集 ⇒ 下面的等式是在比两个空集合').not.toEqual([])
+    expect(drift(gen, residueFamilies(AUDIT_SRC)), 'audit.spec.ts 的两份清单对不上（红字会指名动的是哪一侧）')
+      .toEqual({ onlyGenerated: [], onlyInTable: [] })
+  })
+
+  it('两张表不互抄：admin 的表里没有 audit 族，audit 的表里只有 audit 族', () => {
+    expect(RES().has('audit'), '把 audit 族塞进 admin.spec.ts 的表：那边根本没有对应的建号用例，跨文件的兜底也不存在').toBe(false)
+    expect([...generatedFamilies(AUDIT_SRC)].sort()).toEqual(['audit'])
+    expect([...residueFamilies(AUDIT_SRC)].sort()).toEqual(['audit'])
+    expect([...RES()].sort()).toEqual(['edit', 'reset', 'toggle', 'user'])
+  })
+
+  it('抽取器自证（audit 侧）：合成副本里加一个家族要被 drift 点名；把表抹掉、形状改坏都要抛', () => {
+    const grown = generatedFamilies(`${AUDIT_SRC}\nconst madeUp = ${BQ}e2e_unlock_\${Date.now()}${BQ}\n`)
+    expect(drift(grown, residueFamilies(AUDIT_SRC)).onlyGenerated, '漏进表的家族必须被点名，否则只有 mine 会收它').toEqual(['unlock'])
+    expect(() => residueFamilies(AUDIT_SRC.replace('/^e2e_(audit)_/', 'u.username'))).toThrow(/恰好一条/)
+    expect(() => generatedFamilies(`${AUDIT_SRC}\nconst odd = ${BQ}e2e_odd_\${Math.random()}${BQ}\n`)).toThrow(/不认识的形状/)
   })
 })
