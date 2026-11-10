@@ -61,8 +61,20 @@
             {{ formatDate(row.last_login) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" min-width="240">
+        <!-- 操作列下限 340 的来源（2026-11-10 按**已装的 element-plus 2.14.0** 的 dist CSS 实测算出，
+             与视口无关；下面几个常数是版本相关的实现细节，升级 EP 后这段要重量一次，别当定律）。
+             数值一律写成散文而不是声明形状 —— 源码级字号守门（e2e/global/fonts.spec.ts:155）只放过
+             行首是注释的写法，模板注释的续行照样会被它扫到，写成 CSS 声明就是在给自己造红。
+             最宽形态是**锁定行**：五枚 small 按钮同时出现（编辑 / 禁用或启用 / 重置密码 / 解锁 / 删除）。
+             .el-button--small 的内距 5px 与 11px、字号 12px，加 CJK 字宽 12px ⇒ 单枚 48/48/72/48/48，
+             合计 264；相邻按钮的外距 12px × 4 = 48；单元格内距 12px × 2 = 24 ⇒ 总计 336px。
+             340 是盖过 336 的第一个整十值；往下退到 330 就不够了 —— .cell 允许折行，
+             最后一枚按钮会被折到第二行（按钮自身不折，因为它 white-space 是 nowrap）。 -->
+        <el-table-column label="操作" min-width="340">
           <template #default="{ row }">
+            <el-button size="small" type="primary" plain @click="openEdit(row)">
+              编辑
+            </el-button>
             <el-button
               size="small"
               :disabled="isSelf(row)"
@@ -96,6 +108,43 @@
       </el-table>
     </el-card>
 
+    <el-dialog
+      v-model="editVisible"
+      title="编辑账号"
+      width="460px"
+      :close-on-click-modal="false"
+      append-to-body
+      class="user-edit-dialog"
+    >
+      <el-form
+        ref="editFormRef"
+        :model="editForm"
+        :rules="editRules"
+        label-width="72px"
+        @submit.prevent="saveEdit"
+      >
+        <el-form-item label="用户名" data-testid="edit-username">
+          <el-input :model-value="editing?.username" disabled />
+        </el-form-item>
+        <el-form-item label="显示名" data-testid="edit-display-name">
+          <el-input v-model="editForm.display_name" maxlength="150" />
+        </el-form-item>
+        <el-form-item label="邮箱" prop="email" data-testid="edit-email">
+          <el-input v-model="editForm.email" placeholder="可留空" />
+        </el-form-item>
+        <el-form-item label="角色" data-testid="edit-role">
+          <el-select v-model="editForm.role">
+            <el-option label="用户" value="user" />
+            <el-option label="管理员" value="administrator" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveEdit">保存</el-button>
+      </template>
+    </el-dialog>
+
     <el-divider />
     <h3>➕ 添加用户</h3>
     <el-card>
@@ -122,7 +171,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import api from '../../api'
 import { collectAllPages } from '../../utils/paging'
 import { useAuthStore } from '../../stores/auth'
@@ -133,6 +182,7 @@ import { roleLabel } from '../../utils/roleLabel'
 interface User {
   id: number
   username: string
+  email: string
   display_name: string
   role: string
   is_active: boolean
@@ -143,6 +193,21 @@ interface User {
 
 const users = ref<User[]>([])
 const newUser = ref({ username: '', password: '', role: 'user' })
+const editVisible = ref(false)
+const editing = ref<User | null>(null)
+const saving = ref(false)
+const editForm = ref({ display_name: '', email: '', role: 'user' })
+const editFormRef = ref<FormInstance>()
+/**
+ * 与 AccountDialog 的 `profileRules` 同一条规则、同一段文案（那份在
+ * `components/layout/AccountDialog.vue:155-157`）：两个弹窗都能改 email，措辞不许分叉。
+ * 只管格式，**不**加 required —— 邮箱列是 `CharField(blank=True)`，留空合法（async-validator 的
+ * type 校验对「空值且非 required」直接放行）。display_name 不设规则：后端对它没有任何约束
+ * （blank=True、无校验器），前端编一条只会凭空造出「后端收、前端拒」的第二套判据。
+ */
+const editRules: FormRules = {
+  email: [{ type: 'email', message: '邮箱格式不正确', trigger: 'blur' }],
+}
 const auth = useAuthStore()
 
 /**
@@ -218,8 +283,9 @@ async function loadUsers() {
 }
 
 async function addUser() {
-  // 后端 apps/accounts/serializers.py:60 是 password = CharField(min_length=8)：
-  // 不前置检查，短密码要跑到后端被 400 再弹一句英文 detail。
+  // 后端 apps/accounts/serializers.py:61-65 就是 UserCreateSerializer 的
+  // password = CharField(write_only=True, min_length=8)（类声明在 :60）：不前置检查，
+  // 短密码要绕一圈网络、被后端 400 挡回来才显示（文案见同处 :64 的 error_messages）。
   if (newUser.value.password.length < 8) {
     ElMessage.warning('密码至少 8 位')
     return
@@ -234,6 +300,55 @@ async function addUser() {
   }
 }
 
+function openEdit(user: User) {
+  editing.value = user
+  // 直接取值，不写 `?? ''`：interface User 把这两列声明成非空 string（本文件 :185-186），后端
+  // 侧它们是 `CharField(blank=True)`（display_name 见 apps/accounts/models.py:43，email 来自
+  // Django 的 AbstractUser），NOT NULL ⇒ 库里只有空串没有 NULL（2026-11-10 只读现量：dev 与
+  // e2e 夹具两份库各 3 行，`sum(col is null)` 全 0、typeof 全 'text'）。
+  editForm.value = { display_name: user.display_name, email: user.email, role: user.role }
+  // 弹窗不销毁重建（没有 destroy-on-close），上一次校验失败的红字会留在 DOM 里，故开一次清一次
+  // —— 与 AccountDialog 的 initForms 同法（:195）。
+  editFormRef.value?.clearValidate()
+  editVisible.value = true
+}
+
+async function saveEdit() {
+  const user = editing.value
+  if (!user) return
+  // 前置校验：形状照 AccountDialog 的 saveProfile（:205-206）。validate() 不过会 reject，
+  // `.catch(() => false)` 把它折成布尔。少这一步，填错的邮箱要绕一圈网络才由拦截器弹出后端文案。
+  const valid = await editFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+  saving.value = true
+  try {
+    // PUT 是整份替换语义的例外：后端 update() 强制 partial=True
+    // （apps/accounts/views.py:478-491），所以只发这三字段不会把 is_active 冲洗掉。
+    await api.put(`/auth/users/${user.id}/`, {
+      display_name: editForm.value.display_name.trim(),
+      email: editForm.value.email.trim(),
+      role: editForm.value.role,
+    })
+    ElMessage.success('账号已更新')
+    editVisible.value = false
+    loadUsers()
+    // 改的就是登录账号自己时补拉一次 profile。为什么现在才需要：`_guard_lockout` 只拦「拆掉最后
+    // 一个启用的管理员」，种子里 admin 是唯一的 ⇒ 自我降级原本必被拒；本批的编辑弹窗让「先把别人
+    // 提成第二个管理员、再给自己降级」成为通路，而降级成功后 Pinia 的 user.role/isAdmin 还停在旧值
+    // （stores/auth.ts:35 读的是内存态）⇒ 侧边栏与菜单继续按管理员渲染，直到刷新才收敛。
+    // fetchProfile 失败会先 logout() 再抛（stores/auth.ts:63-73），而账号此刻已经存好了，所以就地
+    // 吞掉：不能让成功路径反过来吃一条错误 toast。auth.user 为 null（硬刷新后本页不自拉 profile，
+    // 见上面 isSelf 的注释）时 isSelf 恒假 —— 那种形态下 isAdmin 本来就是 false，没有陈旧可清。
+    // 刻意**不写 e2e 判据**：跑通它要把种子里唯一的 admin 降级掉，之后每条 spec 的 afterAll 登录
+    // 与整个池的种子态都会塌（本批已知的未覆盖分支）。
+    if (isSelf(user)) await auth.fetchProfile().catch(() => undefined)
+  } catch {
+    // 守卫失败（例如拆掉最后一个管理员）由拦截器弹文案，列表保持原样
+  } finally {
+    saving.value = false
+  }
+}
+
 async function toggleUser(user: User) {
   try {
     await api.put(`/auth/users/${user.id}/`, { is_active: !user.is_active })
@@ -245,9 +360,12 @@ async function toggleUser(user: User) {
 }
 
 async function resetPassword(user: User) {
-  // 旧实现发的是硬编码 '123456'（6 位），而后端 apps/accounts/views.py:300 对
-  // len<8 一律 400 ⇒ 「重置密码」这个按钮从来没成功过一次。改成管理员当场输入新密码，
-  // 长度门槛与后端同值（views.py:300 与 serializers.py:173 都是 8）。
+  // 旧实现发的是硬编码 '123456'（6 位），而后端 apps/accounts/serializers.py:203-206 的
+  // AdminResetPasswordSerializer.new_password 是 min_length=8 ⇒ 「重置密码」这个按钮从来没
+  // 成功过一次。改成管理员当场输入新密码，长度门槛与后端同值：本页 inputPattern /^.{8,}$/
+  // 的 8 == serializers.py:205 的 8（强度校验另见 :208-212 的 validate_password_or_raise，
+  // 前端不复制它，弱密码由后端 400 兜住）。自助改密是另一个 Serializer：
+  // PasswordChangeSerializer :184-191，同样 8。
   let value: string
   try {
     ({ value } = await ElMessageBox.prompt(
