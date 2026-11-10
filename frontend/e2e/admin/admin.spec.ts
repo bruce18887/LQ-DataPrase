@@ -42,12 +42,12 @@ function addUserField(page: Page, label: string): Locator {
  * 因此本文件整体清空 storageState，统一用 loginAs(page, role) 实时登录，
  * 并尽量用侧边栏点击（不刷新页面）保持 Pinia user 存活。
  *
- * 路由实情（src/router/index.ts beforeEach）：
- *   守卫只判断 `to.meta.requiresAuth && !auth.isLoggedIn`，而 isLoggedIn = !!token。
- *   —— 没有任何基于角色/管理员的拦截。
- *   因此普通用户（持有 token）直接访问 /admin/users 不会被重定向，路由会渲染；
- *   仅靠侧边栏菜单项的 `.hidden`(display:none) CSS 隐藏入口（Sidebar.vue 第 23/79/179 行）。
- *   本测试按此“实情”断言：菜单入口隐藏 + 直达不被拦截（并 log 说明）。
+ * 路由实情（src/router/index.ts beforeEach，2026-11-10 实测确认）：
+ *   beforeEach 依次判 requiresAuth、/login 回访、requiresAdmin；普通用户直达
+ *   /admin/users 会被 next('/dashboard') 送回仪表板（纵深防御，后端 403 是第一道）。
+ *   侧栏按 v-if 过滤管理员项 ⇒ 不在 DOM 里，不是 .hidden(display:none)。
+ *   断言一律取守卫跑完后的最终 URL：守卫含一次 fetchProfile 往返，
+ *   抢在它之前断 goto 的目标地址会假绿（2026-11-09/10 踩实两次，见计划 Task 12）。
  */
 test.describe('用户管理 / 权限', { tag: ['@admin'] }, () => {
   // 清空注入的 storageState，强制走实时 UI 登录使 user/isAdmin 生效
@@ -118,26 +118,17 @@ test.describe('用户管理 / 权限', { tag: ['@admin'] }, () => {
     }
   })
 
-  test('@p1 普通用户：侧边栏无“用户管理”入口，且直达 /admin/users 不被路由拦截', async ({
-    page,
-  }) => {
+  test('@p1 普通用户：侧边栏无“用户管理”入口，直达被守卫送回仪表板', async ({ page }) => {
     await loginAs(page, 'user')
 
-    // 侧边栏菜单项存在于 DOM 但通过 .menu-item.hidden{display:none} 隐藏 → toBeHidden 成立
+    // Sidebar.vue 走 v-if 过滤 ⇒ 管理员项不在 DOM 里，toBeHidden 对「不存在」成立。
     await expect(sidebarLink(page, '用户管理')).toBeHidden()
 
-    // 直达 /admin/users。注意：这是一次硬跳转/刷新，会使 Pinia user 变 null，
-    // 但 isLoggedIn=!!token 仍为真，故路由守卫放行（无管理员拦截）。
     await page.goto('/admin/users')
-
-    // 实情断言：未被重定向到 /login 或 /dashboard，路由确实可达并渲染主布局。
-    await expect(page).toHaveURL(/\/admin\/users/)
+    // 断最终落点而不是 goto 之后那一瞬的 URL：守卫里有一次 fetchProfile 往返，
+    // 抢在它前面断目标地址会假绿（文件头「路由实情」记的就是这条坑，2026-11-10 踩实）。
+    await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 })
     await expect(page.locator('.main-layout')).toBeVisible()
-    // eslint-disable-next-line no-console
-    console.log(
-      '[router 实情] /admin/users 对普通用户无重定向：守卫仅校验 token(isLoggedIn)，' +
-        '无角色拦截；入口仅靠侧边栏 .hidden(display:none) 隐藏。',
-    )
   })
 
   test('@p1 管理员：经侧边栏进入 /admin/users，用户表格渲染并含 admin', async ({ page }) => {

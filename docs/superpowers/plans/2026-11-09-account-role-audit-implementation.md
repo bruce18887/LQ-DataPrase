@@ -2976,6 +2976,13 @@ cd frontend && npm run lint:e2e
 ```
 Expected: 全绿（含 Task 10 的编辑弹窗用例）。临时插段已删。
 
+- [ ] **Step 3.5: 实测收口（2026-11-10 控制器，全部现量）**
+
+1. **Step 1 那段「临时插 2.5 秒再 log 落点」的取证被更硬的证据替掉了**，没有留下插段：改后的用例断 `/dashboard` 且 `timeout: 15_000`，它绿 = 守卫确实把人送回仪表板 = 旧断言 `/\/admin\/users/` 只是在 `toHaveURL` 第一次轮询时抢在 `fetchProfile` 往返之前匹配上。旧文案里两条事实也当场核掉：`router/index.ts:197-201` 确有 `to.meta.requiresAdmin && !auth.isAdmin ⇒ next('/dashboard')`；`Sidebar.vue:236` 的注释写着「移除 .menu-item.hidden 规则：已改用 v-if 条件渲染」，所以「`.hidden`(display:none)」那句和它引的三个行号一起作废。
+2. **正文那段替换稿里的 `src/router/index.ts:184` 没照抄**，写成了不带行号的「beforeEach」：行号会漂（Task 9 的 `views.py` 计数就是这条教训），而这一处指认靠的是判据本身，不是行号。日期也从「2026-11-09 踩实」写成「2026-11-09/10 踩实两次」——09 是取证，10 是把它改绿的那一轮。
+3. **跑到绿**：`npx playwright test e2e/admin/admin.spec.ts --retries=0` 连跑 3 轮 = `9 passed (28.8s)`、**1 failed（红在 `setup` 项目，见第 4 条，不是本用例）**、`9 passed (27.8s)`；`npm run lint:e2e` 干净；本批收口的 affected 门禁（runId `063322-34872`，4 slot / 438 例）里 `admin.spec.ts:121` 这条**已经在树上是改后的版本**并随池跑过，unexpected 0。
+4. **`setup` 那条 500 第三次目击**（同 Task 10 第 15 条的形状：`fixtures-auth.setup.ts-authenticate-as-user-setup`，红的是 `PUT 规范账号态应成功`，retry #1 即过）。这次多一条有用信息：**同一个 4-slot 池跑里 `grep -c "Internal Server Error" slot*.run.log` 四份全是 0**，`auth/settings/` 也没有 500 行 —— 也就是说它在这轮的池模式下**没有**出现，出现的是我单文件直跑那一轮。候选排序因此变了：① 单文件直跑走 `playwright.config.ts` 的 `webServer` 那条通路（`reuseExistingServer: !process.env.CI && !CURRENT_SLOT`），与池模式不同的正是「谁起的 server、起了多久、有没有并发第二个」；② 原第 15 条列的 SQLite deferred-transaction 写死锁仍然活着，但它现在解释的是「并发跑的时候更容易」。仍未归因，**别照抄任何一条猜测**。下一次抓到它要把 webServer 的 stdout 整段留进文件（这次用 `| grep -E "passed|failed"` 截掉了，traceback 因此丢了一次——与本批 Task 11 后端档「tail 截吞掉用例名」是同一个错误，两处都记进 Task 14）。
+
 - [ ] **Step 4: 提交**
 
 ```bash
