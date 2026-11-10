@@ -1,11 +1,14 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.contrib.auth import authenticate
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.generics import ListAPIView
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
@@ -15,10 +18,11 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from apps.common.errors import error_response
 
 from . import audit
-from .models import User, UserSetting
+from .models import AuditEvent, User, UserSetting
 from .permissions import FeaturePermission
 from .serializers import (
     AdminResetPasswordSerializer,
+    AuditEventSerializer,
     LoginSerializer,
     PasswordChangeSerializer,
     TokenResponseSerializer,
@@ -335,6 +339,124 @@ class ChangePasswordView(APIView):
         audit.record(request, 'password_changed',
                      actor=request.user, target=request.user)
         return Response({'detail': '密码已修改，请重新登录。'})
+
+
+# 审计查询的分页边界，取 spec §6 那两个数（默认 50、最大 100）。
+# 这三套页大小各有域、别去「对齐」：`REST_FRAMEWORK['PAGE_SIZE']=20` 是全局默认，
+# `apps/common/constants.py` 的 `PAGE_SIZE_MIN/MAX`（50–500）管数据浏览侧的序列化器，
+# 这两数只管审计页（50，1–100）。`AUDIT_PAGE_SIZE_DEFAULT` 与 `PAGE_SIZE_MIN` 相等纯属巧合。
+AUDIT_PAGE_SIZE_DEFAULT = 50
+AUDIT_PAGE_SIZE_MAX = 100
+
+
+class AuditEventPagination(PageNumberPagination):
+    """`page_size_query_param` 必须显式声明：全局分页类那个值是 None，参数会被整个忽略。
+
+    刻意**不**设 `max_page_size`：上限由 `AuditEventListView.get_queryset` 判成 400，
+    那层 clamp 一次都够不到 —— 留着它只会让后来人以为「超限是被 clamp 掉的」而去删校验。
+    DRF 3.18.3 原生对 `page_size` 一个 400 都不发（现量 `get_page_size()`：`0`/`-5`/
+    `abc`/`2.5`/空串一律静默回落默认值，`101` 在配了 max_page_size 时静默截到上限），
+    所以显式校验是唯一那道闸，判据是
+    `test/backend/test_audit_api.py::BadParamTests::test_page_size_that_drf_would_silently_absorb`。
+    """
+
+    page_size = AUDIT_PAGE_SIZE_DEFAULT
+    page_size_query_param = 'page_size'
+
+
+def _parse_day_bound(raw, *, name, end_of_day):
+    """`YYYY-MM-DD` → 项目时区里的整日边界；`end_of_day` 交回**次日零点**，配 `__lt` 用。
+
+    用「次日零点 + `__lt`」而不是「当天 23:59:59 + `__lte`」：`created_at` 存到微秒，
+    现量 23:59:59.123456 那一行在 `__lte(23:59:59)` 下会被筛掉、在 `__lt(次日零点)` 下留着。
+    边界一律 `timezone.make_aware(...)`（默认取当前时区 = `TIME_ZONE`），不拿 UTC 拼
+    —— spec §10 要的就是这一条。
+    """
+    if not raw:
+        return None
+    try:
+        day = datetime.strptime(raw, '%Y-%m-%d').date()
+    except ValueError:
+        raise ValidationError(f'{name} 必须是 YYYY-MM-DD：{raw}')
+    if end_of_day:
+        day = day + timedelta(days=1)
+    return timezone.make_aware(datetime(day.year, day.month, day.day))
+
+
+class AuditEventListView(ListAPIView):
+    """审计时间线的读端点（spec §6）：只读、管理员专用、参数不合契约就给 400 信封。
+
+    校验全部排在过滤之前：倒置的日期区间若直接进 filter，得到的是一个形状完好的空页，
+    用户读到的是「那两天没有事件」而不是「日期填反了」。`page` 不归这里管 —— 非法页码
+    由 DRF 分页自己抛 `NotFound`（404 `not_found`），判据
+    `test_audit_api.py::PaginationTests::test_invalid_page_number_is_404_not_400`。
+
+    这组东西（分页类 + `_parse_day_bound` + 本视图，约 110 行）是 `views.py` 里最后一块
+    还能整块搬走的：本文件现在 579 行、上限 600，再往里加东西之前先切出
+    `apps/accounts/audit_views.py`（本仓没有 `views` 包，只有 `apps/datafiles/views/`
+    那个目录先例），别靠削注释腾地方。
+    """
+
+    queryset = AuditEvent.objects.all()
+    serializer_class = AuditEventSerializer
+    permission_classes = [IsAuthenticated, FeaturePermission]
+    required_feature = 'audit_log_view'
+    pagination_class = AuditEventPagination
+
+    def get_queryset(self):
+        params = self.request.query_params
+
+        event = params.get('event', '')
+        if event and event not in audit.AUDIT_EVENTS:
+            raise ValidationError(f'未知审计事件码：{event}')
+
+        username = params.get('username', '')
+        # 上限取模型列宽（`audit.USERNAME_MAX_LENGTH` 由 `actor_username.max_length` 现推），
+        # 不在这里抄第二份：两份一旦漂移，坏的方向是「一个存得进快照列的用户名被筛掉」，
+        # 于是审计页永远搜不到那笔事件，而搜的那串字符本身看着完全合法。
+        if len(username) > audit.USERNAME_MAX_LENGTH:
+            raise ValidationError(f'username 最长 {audit.USERNAME_MAX_LENGTH} 字符')
+
+        date_from = _parse_day_bound(params.get('date_from', ''),
+                                     name='date_from', end_of_day=False)
+        date_to = _parse_day_bound(params.get('date_to', ''),
+                                   name='date_to', end_of_day=True)
+        # 同一天不算倒置：`date_to` 已经是次日零点，所以判据是 `>=` 而不是 `>`。
+        if date_from is not None and date_to is not None and date_from >= date_to:
+            raise ValidationError('date_from 不能晚于 date_to')
+
+        # 空值走默认（与 DRF 同侧：空串在它那里也是回落默认 50）；解析用 `int()`，
+        # 和 DRF 后面那次 `int()` 同一个口径，两边不会把同一个值读成两个数。
+        size_raw = params.get('page_size') or ''
+        if size_raw:
+            try:
+                size = int(size_raw)
+            except ValueError:
+                raise ValidationError('page_size 必须是整数')
+            if not 1 <= size <= AUDIT_PAGE_SIZE_MAX:
+                raise ValidationError(f'page_size 必须在 1–{AUDIT_PAGE_SIZE_MAX} 之间')
+
+        qs = self.queryset
+        if event:
+            qs = qs.filter(event=event)
+        if username:
+            # actor 与 target 两侧都搜：管理员来这一页多半是在问「我的账号被人动过没有」，
+            # 只搜操作者那一侧对这个问题一律答「没有记录」。
+            qs = qs.filter(Q(actor_username__icontains=username)
+                           | Q(target_username__icontains=username))
+        if date_from is not None:
+            qs = qs.filter(created_at__gte=date_from)
+        if date_to is not None:
+            qs = qs.filter(created_at__lt=date_to)
+        # `-id` 是为了让排序成为**全序**：只按 `-created_at` 排时，时间戳相同的两笔谁在前
+        # 由执行计划决定，翻页就会重复/漏行。本机现量（200 次连记两笔）量不出平手 —— 两次
+        # INSERT 之间天然差约 134–149 µs；但那是「一次写要花时间」的副产品，不是引擎的
+        # 承诺：相邻两次 `timezone.now()` 在同一进程里 2000 次有 1402 次撞成同一个值，
+        # 换后端、换索引、或将来把两笔审计并到同一次写里，平手就会真的出现。
+        # 两支判据（同瞬间的顺序/页边界 + 发出的 ORDER BY 文本）都在
+        # `test_audit_api.py::PaginationTests` 里 —— 前者在本机抓不到删掉 `-id`，
+        # 唯一抓得住它的是后者，理由写在那条用例的 docstring。
+        return qs.order_by('-created_at', '-id')
 
 
 class UserManagementViewSet(viewsets.ModelViewSet):
