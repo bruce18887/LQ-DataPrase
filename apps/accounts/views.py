@@ -392,7 +392,7 @@ class AuditEventListView(ListAPIView):
     `test_audit_api.py::PaginationTests::test_invalid_page_number_is_404_not_400`。
 
     这组东西（分页类 + `_parse_day_bound` + 本视图，约 110 行）是 `views.py` 里最后一块
-    还能整块搬走的：本文件现在 579 行、上限 600，再往里加东西之前先切出
+    还能整块搬走的：本文件现在 594 行（会漂，动前先量）、上限 600，再往里加东西之前先切出
     `apps/accounts/audit_views.py`（本仓没有 `views` 包，只有 `apps/datafiles/views/`
     那个目录先例），别靠削注释腾地方。
     """
@@ -460,7 +460,11 @@ class AuditEventListView(ListAPIView):
 
 
 class UserManagementViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.all()
+    # 无序集合不能分页：`User.Meta` 无 ordering、`.query.order_by` 空 ⇒ 两次 LIMIT 查询之间不保证同一
+    # 次序，页间可重复/漏行（还每次都命中 django/core/paginator.py 那条 UnorderedObjectListWarning），
+    # 而 kpi 统计与 admin.spec.ts 的 afterAll 都要走完全表。取 `id`＝今天 SQLite 的 rowid 序，可见顺序
+    # 不变、只把凑巧变成保证（同 `AuditEventListView` 的 `-id`）；判据 test_user_list_pagination.py
+    queryset = User.objects.all().order_by('id')
     permission_classes = [IsAuthenticated, FeaturePermission]
     required_feature = 'user_management'
     # 审计 detail 的白名单（spec §5.3）：按构造排除其余一切，含任何口令字段。
