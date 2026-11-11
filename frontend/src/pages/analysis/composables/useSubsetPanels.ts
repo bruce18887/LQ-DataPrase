@@ -3,7 +3,7 @@
  * 模块单例仿 useChartDock；切文件/切参数清空（R5），换账号由 auth 复位调
  * resetSubsetPanels()。请求体构造是纯函数 buildSubsetRequest（T2 承载）。
  */
-import { ref, reactive, watch } from 'vue'
+import { ref, reactive, watch, effectScope } from 'vue'
 import api from '../../../api'
 import { formatError } from '../../../utils/error'
 import { useSingleTabStore } from '../../../stores/analysisTabs'
@@ -71,7 +71,13 @@ function create() {
     if (p) void load(p)
   }
 
-  watch([() => store.fileId, () => store.selectedParam], clearAll)
+  // detached scope：单例 watch 不能绑在首个调用组件的作用域上——登出/401 卸载
+  // MainLayout 会停掉它，而单例不重建、resetSubsetPanels 只清不重臂 ⇒ 重新登录后
+  // 切文件/参数不再清面板（R5 泄漏）。effectScope(true) 脱离组件作用域常驻。
+  const scope = effectScope(true)
+  scope.run(() => {
+    watch([() => store.fileId, () => store.selectedParam], clearAll)
+  })
 
   return { panels, create: createPanel, remove, clearAll, retry }
 }
