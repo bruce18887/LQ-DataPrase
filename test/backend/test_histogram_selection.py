@@ -104,12 +104,20 @@ class ParseSelectionTests(SimpleTestCase):
         _, err = parse_selection({'kind': 'serials', 'serials': [float('nan')]})
         self.assertEqual(err.data['code'], 'invalid_selection')
 
+    def test_serials_inf_element_rejected(self):
+        _, err = parse_selection({'kind': 'serials', 'serials': [float('inf')]})
+        self.assertEqual(err.data['code'], 'invalid_selection')
+
     def test_serials_over_cap_rejected(self):
         _, err = parse_selection({'kind': 'serials', 'serials': list(range(100001))})
         self.assertEqual(err.data['code'], 'invalid_selection')
 
     def test_serial_col_non_string_rejected(self):
         _, err = parse_selection({'kind': 'serials', 'serials': [1], 'serial_col': 5})
+        self.assertEqual(err.data['code'], 'invalid_selection')
+
+    def test_serial_col_empty_string_rejected(self):
+        _, err = parse_selection({'kind': 'serials', 'serials': [1], 'serial_col': ''})
         self.assertEqual(err.data['code'], 'invalid_selection')
 
     def test_unknown_kind_rejected(self):
@@ -182,3 +190,29 @@ class FilterDfTests(SimpleTestCase):
     def test_empty_subset_rejected(self):
         _, err = filter_df_by_selection(_frame(), PARAM, {'kind': 'value_range', 'lo': 100.0, 'hi': 200.0})
         self.assertEqual(err.data['code'], 'empty_selection')
+
+    def test_value_range_drops_dirty_rows(self):
+        df = pd.DataFrame({'Serial_No': [1, 2, 3, 4], 'P1': ['1.0', 'abc', None, '10.0']})
+        out, err = filter_df_by_selection(df, PARAM, {'kind': 'value_range', 'lo': 0.0, 'hi': None})
+        self.assertIsNone(err)
+        self.assertEqual(len(out), 2)
+        self.assertEqual(sorted(pd.to_numeric(out[PARAM]).tolist()), [1.0, 10.0])
+
+    def test_value_range_unbounded_lo(self):
+        out, err = filter_df_by_selection(_frame(), PARAM, {'kind': 'value_range', 'lo': None, 'hi': 2.5})
+        self.assertIsNone(err)
+        self.assertEqual(sorted(out[PARAM].tolist()), [1.0, 2.0])
+
+    def test_value_range_lo_equals_hi_inclusive(self):
+        out, err = filter_df_by_selection(_frame(), PARAM, {'kind': 'value_range', 'lo': 2.0, 'hi': 2.0})
+        self.assertIsNone(err)
+        self.assertEqual(out[PARAM].tolist(), [2.0])
+
+    def test_all_unmatched_serials_empty_selection(self):
+        _, err = filter_df_by_selection(_frame(), PARAM, {'kind': 'serials', 'serials': [999, 1000]})
+        self.assertEqual(err.data['code'], 'empty_selection')
+
+    def test_serials_numeric_column_string_wanted_coerces(self):
+        out, err = filter_df_by_selection(_frame(), PARAM, {'kind': 'serials', 'serials': ['4']})
+        self.assertIsNone(err)
+        self.assertEqual(out[PARAM].tolist(), [10.0])
