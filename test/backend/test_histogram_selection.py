@@ -286,6 +286,16 @@ class HistogramViewSelectionTests(SimpleTestCase):
         self.assertEqual(r.status_code, 400)
         self.assertEqual(r.data['code'], 'invalid_selection')
 
+    def test_selection_param_filtered_out_400_not_500(self):
+        # ignore_no_limit 把唯一参数滤掉 → params=[] → 必须 400 invalid_selection，
+        # 不得 params[0] IndexError 500（终审复现的回归）
+        md = {'format': 'CTA8290D', 'units': {PARAM: 'V'}, 'mins': {}, 'maxs': {}}
+        r = self._post(self._base(ignore_no_limit=True,
+                                  selection={'kind': 'value_range', 'lo': 0.0, 'hi': 5.0}),
+                       metadata=md)
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.data['code'], 'invalid_selection')
+
     def test_invalid_kind_400(self):
         r = self._post(self._base(selection={'kind': 'magic'}))
         self.assertEqual(r.status_code, 400)
