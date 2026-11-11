@@ -275,3 +275,8 @@ runbook：`docs/reference/deployment-tls-termination-runbook-2026-11-11.md`；�
 - **发现并修复缺陷（本批新页面）**：`/admin/users`、`/admin/audit` 深链/刷新被 Django admin catch-all 302 到 `/admin/login/`（侧栏客户端路由正常）。修法：`config/urls.py` 在 admin 挂载前把两条精确路径交给 SPA（commit `0d4067c`），T1 新增 3 例（含「/admin/ 仍归 admin」对照组），RED 302→GREEN。门禁 4 档 PASS：lint / vitest / backend 1704 例 OK / e2e 438 例 unexpected 0。**该修复尚未部署**（服务器仍是 4bb5bcd）：待 push 后做第二轮小升级 = `git pull --ff-only` + 重启（无迁移、无 dist 重建）。
 - **已知不拦收口**：Topbar 版本按钮 aria-label 含未插值的 `{{ APP_VERSION }}`（可见文本正常 v0.8.0，仅无障碍名；既有缺陷，非本批引入，另记）。
 - 升级形态仍是 dev_spa 档（DEBUG=True、无 systemd）——切 server 档与 nginx 硬化维持既有 follow-up 工单，本批不夹带。
+
+## review 追加（修复部署，2026-11-11）
+
+- **已 push + 已部署**：`4bb5bcd..154205c` 推到 origin 后，服务器 `git pull --ff-only` + 背靠背重启（**无迁移、无 dist 重建**，中断约半分钟），服务器 HEAD=`154205c`，health 200。
+- **部署后复验（公网 https）**：`/admin/users`、`/admin/audit` 整页加载均 200（1707B = SPA 外壳）；`/admin/` 仍 302 到 admin 登录（对照组不变）；浏览器**整页刷新**两页均正常渲染（用户管理 21 账号 + 编辑/添加表单、审计页 20 条事件）。修复闭环。
