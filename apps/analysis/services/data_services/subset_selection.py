@@ -54,7 +54,7 @@ def parse_selection(raw):
             if isinstance(s, float) and not math.isfinite(s):
                 return None, error_response('invalid_selection', 'serials 不允许 NaN/inf')
         serial_col = raw.get('serial_col')
-        if serial_col is not None and not isinstance(serial_col, str):
+        if serial_col is not None and (not isinstance(serial_col, str) or serial_col == ''):
             return None, error_response('invalid_selection', 'serial_col 必须是字符串')
         out = {'kind': 'serials', 'serials': serials}
         if serial_col:
@@ -64,7 +64,10 @@ def parse_selection(raw):
 
 
 def filter_df_by_selection(df, param, selection):
-    """按选区过滤行 → (df, 400 响应 | None)。param 已由 guard_all_missing 保证在列里。"""
+    """按选区过滤行 → (df, 400 响应 | None)。param 已由 guard_all_missing 保证在列里。
+
+    selection 必须非 None（调用方以 `if selection is not None` 守卫）；本函数不再重复判空。
+    """
     if selection['kind'] == 'value_range':
         values = pd.to_numeric(df[param], errors='coerce')
         # pandas 3.x 的 between(None, …) 全 False（None 不是无界），用 ±inf 表达无界侧；
