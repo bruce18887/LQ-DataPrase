@@ -200,7 +200,7 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
         if sel_err is not None:
             return sel_err
         if selection is not None:
-            if len(params) != 1:
+            if len(params) > 1:
                 return error_response('invalid_selection', '选区只支持单参数请求')
             df, sel_err = filter_df_by_selection(df, params[0], selection)
             if sel_err is not None:
