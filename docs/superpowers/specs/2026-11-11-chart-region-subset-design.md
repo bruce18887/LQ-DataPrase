@@ -64,7 +64,8 @@ A 的核心：选区 = 现有统计管线的一个前置行级过滤步骤，前
 **之前**对 df 做行级过滤，然后照常走 `compute_histogram_stats`：
 
 - `value_range`：`pd.to_numeric(df[param], errors='coerce')` 后 `.between(lo, hi)`
-  过滤行（R4：coerce + 向量化，不用 apply；pandas between 的 None 边界即无界）。
+  过滤行（R4：coerce + 向量化，不用 apply；pandas 3.x 的 `between(None)` 全 False，
+  None 边界先映射 ±inf 再 between）。
 - `serials`：序列列解析复用 `get_serial_column(df)`（serial_distribution 同款）；
   请求带 `serial_col` 时校验该列存在于 df，否则 400。匹配双方做类型容错
   （数值列 coerce 后 isin；字符串列直接 isin）；未匹配的 serial 静默忽略，
