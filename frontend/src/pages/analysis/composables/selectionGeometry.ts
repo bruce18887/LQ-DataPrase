@@ -67,11 +67,16 @@ export function valueRangeWithOverflow(
   return { lo: L, hi: H }
 }
 
+/** 仅用于标题展示：6 位有效数字，消除 convertFromPixel 浮点噪声（不改请求体数值）。 */
+function fmtBound(v: number): string {
+  return String(Number(v.toPrecision(6)))
+}
+
 export function subsetPanelTitle(param: string, sel: ChartSelection, n: number | null): string {
   const base = n != null ? `${param} 子集 · n=${n}` : `${param} 子集`
   if (sel.kind === 'value_range') {
-    const lo = sel.lo != null ? String(sel.lo) : '-∞'
-    const hi = sel.hi != null ? String(sel.hi) : '+∞'
+    const lo = sel.lo != null ? fmtBound(sel.lo) : '-∞'
+    const hi = sel.hi != null ? fmtBound(sel.hi) : '+∞'
     return `${base} · [${lo}, ${hi}]`
   }
   return `${base} · ${sel.serials.length} 颗序列`
@@ -95,7 +100,7 @@ export function buildSubsetRequest(ctx: SubsetRequestCtx, param: string, selecti
     file_id: ctx.fileId,
     params: [param],
     ignore_no_limit: ctx.ignoreNoLimit,
-    range_type: 'DR',
+    range_type: 'DR' as const,
     custom_low: null,
     custom_high: null,
     iqr_multiplier: ctx.iqrMultiplier,

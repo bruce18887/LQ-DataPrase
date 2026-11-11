@@ -89,12 +89,16 @@ describe('subsetPanelTitle', () => {
     expect(subsetPanelTitle('P1', { kind: 'value_range', lo: 0, hi: 1 }, null))
       .toBe('P1 子集 · [0, 1]')
   })
+  it('rounds float bounds for display', () => {
+    expect(subsetPanelTitle('P1', { kind: 'value_range', lo: 0.30000000000000004, hi: 1.2000000000000002 }, 2))
+      .toBe('P1 子集 · n=2 · [0.3, 1.2]')
+  })
 })
 
 describe('buildSubsetRequest', () => {
   const ctx = {
-    fileId: 7, ignoreNoLimit: false, ignoreNoTestValue: false, dataOnlyBin1: true,
-    onlyFailTestItem: false, onlyLowCpk: false, iqrMultiplier: 2.0,
+    fileId: 7, ignoreNoLimit: true, ignoreNoTestValue: true, dataOnlyBin1: true,
+    onlyFailTestItem: true, onlyLowCpk: true, iqrMultiplier: 2.0,
     chartConfig: ['limit', 'kde', 'kde_full'],
   }
   it('forces DR + null custom limits + carries selection', () => {
@@ -107,12 +111,22 @@ describe('buildSubsetRequest', () => {
     expect(body.custom_high).toBeNull()
     expect(body.data_only_bin1).toBe(true)
     expect(body.iqr_multiplier).toBe(2.0)
+    expect(body.ignore_no_limit).toBe(true)
+    expect(body.ignore_no_test_value).toBe(true)
+    expect(body.only_fail_test_item).toBe(true)
+    expect(body.only_low_cpk).toBe(true)
     expect(body.selection).toEqual(sel)
   })
   it('kde_variant all when kde_full checked', () => {
     const body = buildSubsetRequest(ctx, 'P1', { kind: 'value_range', lo: 0, hi: 1 })
     expect(body.include_kde).toBe(true)
     expect(body.kde_variant).toBe('all')
+  })
+  it('kde_variant filtered when kde checked without kde_full', () => {
+    const body = buildSubsetRequest({ ...ctx, chartConfig: ['limit', 'kde'] }, 'P1',
+      { kind: 'value_range', lo: 0, hi: 1 })
+    expect(body.include_kde).toBe(true)
+    expect(body.kde_variant).toBe('filtered')
   })
   it('kde off when not configured', () => {
     const body = buildSubsetRequest({ ...ctx, chartConfig: ['limit'] }, 'P1',
