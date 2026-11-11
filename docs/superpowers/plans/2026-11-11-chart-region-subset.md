@@ -307,7 +307,11 @@ def filter_df_by_selection(df, param, selection):
     """按选区过滤行 → (df, 400 响应 | None)。param 已由 guard_all_missing 保证在列里。"""
     if selection['kind'] == 'value_range':
         values = pd.to_numeric(df[param], errors='coerce')
-        out = df[values.between(selection['lo'], selection['hi'])]
+        # pandas 3.x 的 between(None, …) 全 False（None 不是无界），用 ±inf 表达无界侧；
+        # NaN 与 ±inf 比较仍为 False，脏值行自动落选。
+        lo = selection['lo'] if selection['lo'] is not None else -math.inf
+        hi = selection['hi'] if selection['hi'] is not None else math.inf
+        out = df[values.between(lo, hi)]
     else:
         preferred = selection.get('serial_col')
         if preferred and preferred not in df.columns:
