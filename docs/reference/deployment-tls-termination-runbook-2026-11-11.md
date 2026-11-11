@@ -355,3 +355,10 @@ Task 1 的两处代码改动**无需回滚**：没有反代传头时 `SECURE_PRO
 - 审计回环集合未含 IPv4 映射形态 `::ffff:127.0.0.1`（`apps/common/shutdown.py` 的 `_LOOPBACK_ADDRESSES` 含它，且有 Windows 真机教训）。本 runbook 钉死 IPv4 回环绑定（`127.0.0.1:$DJANGO_PORT`）故不受影响；若未来 Django 改双栈监听，需补该形态 + 一条用例（质量复审 Minor #1）。
 - `config/settings/server.py` 文件头「无 nginx / 无反向代理」的描述在本批后过时，后续顺手更新。
 - DRF 节流 `get_ident` 在 `NUM_PROXIES` 未设时用整条 XFF 拼串做 key：反代后诚实客户端仍按真实 IP 限速，无新回归；攻击者轮换左侧伪造条目可绕 login 限速属 DRF 既有行为（直连同样可绕），要修另立工单评估 `NUM_PROXIES=1` 对直连档的影响，别塞进本批。
+
+## 公网安全 follow-up（质量复审 surfaced，均为服务器既有形态、非本批引入，另立工单）
+
+- **登录 IP 限流可被 XFF 伪造绕过**：DRF `NUM_PROXIES=None` 时 `get_ident` 用整条 XFF 拼串，左侧条目客户端可伪造；**直连 Django 同样可绕**（反代未引入），且每账号 5 次失败锁定（423，`apps/accounts/views.py`）仍在兜底。修法：后端 `REST_FRAMEWORK['NUM_PROXIES']=1`（取最右=网关 IP，关伪造；本拓扑网关 NAT 后公网源本就单一，粒度损失为零），需评估对直连/桌面档影响 + 补测试，另立工单。
+- **DEBUG=True + 匿名 API 文档 + Django admin 公网暴露**：服务器跑 dev 档（`tasks.dev_spa`→development，`API_DOCS_ENABLED=True`），`/api/schema/`、`/api/schema/swagger/` 匿名可读全部端点结构，`/admin/`（Django admin）公网可达，DEBUG 报错页泄露路径。正解：切 `config.settings.server` 档（DEBUG=False/文档关/ALLOWED_HOSTS 收敛）。边缘临时硬化（可选）：本块加 `location ^~ /api/schema/ { return 404; }` 与 `location ^~ /admin/ { return 404; }`——**已核实 Vue 管理页走 hash 路由 `/#/admin/users`（`config/urls.py:100` catch-all + `router/index.ts`），边缘拦 `/admin/` 只挡 Django admin、不误伤 Vue 管理页**。
+- **nginx 可选硬化（Minor）**：`client_max_body_size` 设大值（如 4g）而非 0（防未鉴权超大 POST 落盘填盘，`proxy_request_buffering` 默认 on）；497 跳转改 `=308`（保方法保体）；`ssl_session_cache shared:SSL:10m`；显式 AEAD cipher + `ssl_prefer_server_ciphers on`；全局 `server_tokens off`（影响 tplms/discuzq，慎动）。
+- **审计 IP 归因局限**：网关把源 NAT 成其内网地址，nginx 追加的 XFF 最右一条是网关 IP 而非真实客户端——审计上线后对公网用户只能记到网关 IP（抗伪造但缺真实客户端归因），除非网关注入真实客户端 XFF。审计模块当前未部署到该服务器，暂无实际影响。
