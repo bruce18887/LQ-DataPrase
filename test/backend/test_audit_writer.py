@@ -253,6 +253,34 @@ class WriterTests(TestCase):
                                        actor_username='a', target_username='b')),
                          'user_updated a → b')
 
+    def test_loopback_proxy_takes_rightmost_xff_entry(self):
+        """本机 TLS 反代：REMOTE_ADDR 恒为回环，真实客户端在 XFF 最右一条
+        （nginx $proxy_add_x_forwarded_for 追加）；左侧条目客户端可伪造，不许取。"""
+        request = self._request(ip='127.0.0.1')
+        request.META['HTTP_X_FORWARDED_FOR'] = '203.0.113.9, 198.51.100.7'
+        audit.record(request, 'login_success', actor=self.admin, target=self.admin)
+        self.assertEqual(AuditEvent.objects.get().ip_address, '198.51.100.7')
+
+    def test_non_loopback_source_ignores_xff(self):
+        """直连（非回环）时 XFF 整条都不可信，仍记 REMOTE_ADDR。"""
+        request = self._request(ip='10.99.0.31')
+        request.META['HTTP_X_FORWARDED_FOR'] = '203.0.113.9'
+        audit.record(request, 'login_success', actor=self.admin, target=self.admin)
+        self.assertEqual(AuditEvent.objects.get().ip_address, '10.99.0.31')
+
+    def test_loopback_without_xff_unchanged(self):
+        """桌面档 Electron 直连回环、没有 XFF：行为与改前逐字相同。"""
+        audit.record(self._request(ip='::1'), 'login_success',
+                     actor=self.admin, target=self.admin)
+        self.assertEqual(AuditEvent.objects.get().ip_address, '::1')
+
+    def test_loopback_with_garbage_xff_rightmost_leaves_null(self):
+        """替换后的值仍过 ip_address 校验：最右一条非法 → None，不入库脏值。"""
+        request = self._request(ip='127.0.0.1')
+        request.META['HTTP_X_FORWARDED_FOR'] = '203.0.113.9, not-an-ip'
+        audit.record(request, 'login_success', actor=self.admin, target=self.admin)
+        self.assertIsNone(AuditEvent.objects.get().ip_address)
+
 
 class WriterIsolationTests(TestCase):
     """审计 INSERT 失败不能把外层业务事务一起带走 —— 改密/重置/账号变更都在真事务里。

@@ -30,6 +30,11 @@ DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('1', 'true', 'yes', '
 
 ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', '*').split(',')
 
+# TLS 反代（服务器入口终结）后让 request.is_secure() 认出 https：DRF 分页的
+# next/previous 是绝对 URL，缺了它 https 页面会拿到 http 链接被浏览器拦掉。
+# 仅在请求带 X-Forwarded-Proto: https 时生效；该头必须由反代覆盖设置，直连档不受影响。
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 # In production, refuse to start with the default secret key — it is signed
 # ``django-insecure-`` and is publicly known. CI/dev set ``DJANGO_DEBUG=True``
 # so the fallback is fine for those.
