@@ -10,17 +10,26 @@
       :mode="outlierHandling || 'off'"
       :outlier-info="data?.outlier_info ?? null"
     />
+    <ChartContextMenu
+      :menu="brush.menu"
+      @create="brush.createAndClose"
+      @clear="brush.clearSelection"
+      @close="brush.closeMenu"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { chartFontSize } from '../../../theme/typography'
-import { computed } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
 import { formatAxisValue, getSiteColors8, buildChartToolbox } from '../../../utils/chart-bar'
 import { resolveSerialYBounds, jitterForPoint } from '../composables/serial-axis-range'
+import { useChartBrushSelect, type ChartSelection } from '../composables/useChartBrushSelect'
+import type { DataPoint } from '../composables/selectionGeometry'
 import OutlierHintBar from './OutlierHintBar.vue'
+import ChartContextMenu from './ChartContextMenu.vue'
 
 const props = withDefaults(defineProps<{
   data: any
@@ -35,8 +44,15 @@ const props = withDefaults(defineProps<{
   rangeType?: string
   /** 纵向抖动：把同一量化电平上的点上下微移以显出层内密度（默认关） */
   jitter?: boolean
-}>(), { splitBySite: false, symbolSize: 6, opacity: 0.85, rangeType: '', jitter: false })
+  /** 框选子集（spec §5.3）：默认关，仅单参数 Serial 面板开启 */
+  enableSelection?: boolean
+}>(), { splitBySite: false, symbolSize: 6, opacity: 0.85, rangeType: '', jitter: false, enableSelection: false })
 const { colors, isDark } = useEChartsTheme()
+
+const emit = defineEmits<{ 'create-subset': [sel: ChartSelection] }>()
+// 各 lane 绘制点集（x=轴下标, y=绘制值含 jitter/锚定, serial=真实序列号）。
+// 只在 buildOption 里同步写出、只在框选 mouseup 时读——不 watch，避免渲染循环。
+const displayLanes = ref<{ points: DataPoint[] }[]>([])
 
 // 大数据量（≥5000 点）启用 ECharts 官方 large 模式：每个系列只渲染 1 个
 // path 元素（类型化数组 + 单次绘制），SVG/canvas 渲染器下均生效，避免
@@ -51,7 +67,7 @@ const isLarge = computed(() => pointCount.value >= 5000)
 // props.opacity/props.splitBySite。
 
 function buildOption() {
-  if (!props.data) return {}
+  if (!props.data) { displayLanes.value = []; return {} }
   const tc = colors.value.textColor
   const d = props.data
   const param = d.param || ''
@@ -127,6 +143,16 @@ function buildOption() {
       .map((p: number[]) => toPoint(p, bounds[0], bounds[1]))
       .filter((pt: any) => pt !== null)
   })
+  // lane 口径 = grid 口径：拆分一 site 一 lane；合并模式所有 site 同画 grid 0，
+  // 必须并成单 lane——否则 mouseup 按 grids[i] 取 lanes[i] 只命中首个 site 的点
+  const laneGroups: any[][] = split ? siteData : [siteData.flat()]
+  displayLanes.value = laneGroups.map((arr) => ({
+    points: arr.map((pt: any) => ({
+      x: typeof pt.value[0] === 'number' ? pt.value[0] : continuousSerials.indexOf(pt.realSerial),
+      y: pt.value[1] as number,
+      serial: pt.realSerial as number | string,
+    })),
+  }))
   // 绘制序：最密垫底（spec §1.2）——按点数降序赋 z；数组序保持 site 升序
   // （图例顺序与直方图等其它图表一致的既有约定）。密度口径取实际绘制点数
   // （fail/超界点随 Site 系列着色、参与带层叠），与视觉上的散点带浓淡一致。
@@ -303,12 +329,23 @@ function buildOption() {
 
 // 大数据量强制 canvas（SVG 渲染器对 large 符号仍会为每点发射 DOM 元素；
 // canvas 无 DOM 节点，官方推荐大数据散点必用 canvas）；小数据量跟随用户全局设置
-const { chartRef } = useChart(
+const { chartRef, chartInstance } = useChart(
   buildOption,
   [() => props.data, () => props.outlierHandling, () => props.symbolSize, () => props.opacity, () => props.splitBySite, () => props.rangeType, () => props.jitter],
   'chartRef',
   () => (isLarge.value ? 'canvas' : getChartRenderer()),
 )
+
+// reactive 包一层：模板里 brush.menu 需要解包后的 BrushMenu（裸对象里的 ref 不自动解包）
+const brush = reactive(useChartBrushSelect({
+  mode: 'rect',
+  chartInstance,
+  container: chartRef,
+  enabled: () => props.enableSelection,
+  getLanes: () => displayLanes.value,
+  serialCol: () => props.data?.serial_col,
+  onCreate: (sel) => emit('create-subset', sel),
+}))
 void chartRef // bound to <div ref="chartRef"> in template
 </script>
 

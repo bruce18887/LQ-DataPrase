@@ -5,16 +5,25 @@
       :mode="outlierHandling || 'off'"
       :outlier-info="result?.outlier_info ?? null"
     />
+    <ChartContextMenu
+      :menu="brush.menu"
+      @create="brush.createAndClose"
+      @clear="brush.clearSelection"
+      @close="brush.closeMenu"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
+import { reactive } from 'vue'
 import { chartFontSize } from '../../../theme/typography'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
 import { clampBarValue, formatPercent, formatAxisValue, getBarGroupPad, getMaxBarWidthPercent, getSiteColors8, buildChartToolbox } from '../../../utils/chart-bar'
 import { activeBinIndices } from '../composables/histogramBins'
+import { useChartBrushSelect, type ChartSelection } from '../composables/useChartBrushSelect'
 import OutlierHintBar from './OutlierHintBar.vue'
+import ChartContextMenu from './ChartContextMenu.vue'
 
 const props = withDefaults(defineProps<{
   result: any
@@ -25,11 +34,16 @@ const props = withDefaults(defineProps<{
   barOverlapPercent?: number
   selectedParam: string
   outlierHandling?: 'clip' | 'exclude' | 'off'
+  /** 框选子集（spec §5.3）：默认关，仅单参数直方图面板开启 */
+  enableSelection?: boolean
 }>(), {
   barOverlapPercent: 5,
+  enableSelection: false,
 })
 
 const { colors, isDark } = useEChartsTheme()
+
+const emit = defineEmits<{ 'create-subset': [sel: ChartSelection] }>()
 
 /**
  * 柱数据 [x, 渲染值, 真实值, 计数]：非零小百分比（如 0.002%）钳制到最小
@@ -291,7 +305,17 @@ function buildOption() {
   }
 }
 
-const { chartRef } = useChart(buildOption, [() => props.result, () => props.chartConfig, () => props.rangeType, () => props.barWidthPercent, () => props.barOverlapPercent, () => props.selectedParam, () => props.outlierHandling])
+const { chartRef, chartInstance } = useChart(buildOption, [() => props.result, () => props.chartConfig, () => props.rangeType, () => props.barWidthPercent, () => props.barOverlapPercent, () => props.selectedParam, () => props.outlierHandling])
+
+// reactive 包一层：模板里 brush.menu 需要解包后的 BrushMenu（裸对象里的 ref 不自动解包）
+const brush = reactive(useChartBrushSelect({
+  mode: 'value-range',
+  chartInstance,
+  container: chartRef,
+  enabled: () => props.enableSelection,
+  getBinCenters: () => props.result?.bin_centers ?? [],
+  onCreate: (sel) => emit('create-subset', sel),
+}))
 void chartRef // bound to <div ref="chartRef"> in template
 </script>
 
