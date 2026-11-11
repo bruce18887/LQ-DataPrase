@@ -42,6 +42,10 @@ let filename = ''
 let csvPath = ''
 
 test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
+  // 共享夹具（beforeAll 上传一次）：必须串行，否则 fullyParallel 下多 worker 的
+  // afterAll 按前缀整表删会误杀兄弟 worker 的在测夹具（同账号清理教训）。
+  test.describe.configure({ mode: 'serial' })
+
   test.beforeAll(async ({ browser }) => {
     filename = `${PREFIX}${Date.now()}.csv`
     csvPath = path.join(os.tmpdir(), filename)
@@ -119,6 +123,7 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
     await expect(panel).toHaveCount(1)
     await expect(panel).toHaveAttribute('data-subset-n', '3', { timeout: 15_000 })
     await expect(panel.locator('.stat-item', { hasText: 'CPK' })).toBeVisible()
+    await expect(panel.locator('.stat-item', { hasText: 'CPK' }).locator('.stat-value')).not.toHaveText('-')
   })
 
   test('散点矩形框选 → 右键新建子集面板（serials，n=3）', async ({ page }) => {
@@ -144,6 +149,9 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
     const resp = await respPromise
     const body = resp.request().postData() ?? ''
     expect(body).toContain('"kind":"serials"')
+    // 钉身份：n=3  alone 不够（反选 {1,2,3} 也是 3 颗）；必须是超界的 {4,5,6}
+    const sentSerials = JSON.parse(body).selection.serials as number[]
+    expect([...sentSerials].sort((a, b) => a - b)).toEqual([4, 5, 6])
 
     const panel = page.locator('[data-subset-panel]')
     await expect(panel).toHaveCount(1)
