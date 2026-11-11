@@ -35,6 +35,8 @@ server.env
 # PEM 私钥与库快照（backup_db 产出 lqdp-*.sqlite3；若将来要在 test/fixtures/ 放 sqlite 夹具需就近写例外）
 *.pem
 *.sqlite3
+# 本机 SSH 连接备忘（含主机/账号/口令），公开仓库严禁入库
+ssh.txt
 
 # ================== Python ==================
 __pycache__/
