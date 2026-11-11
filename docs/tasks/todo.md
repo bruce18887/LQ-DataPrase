@@ -280,3 +280,36 @@ runbook：`docs/reference/deployment-tls-termination-runbook-2026-11-11.md`；�
 
 - **已 push + 已部署**：`4bb5bcd..154205c` 推到 origin 后，服务器 `git pull --ff-only` + 背靠背重启（**无迁移、无 dist 重建**，中断约半分钟），服务器 HEAD=`154205c`，health 200。
 - **部署后复验（公网 https）**：`/admin/users`、`/admin/audit` 整页加载均 200（1707B = SPA 外壳）；`/admin/` 仍 302 到 admin 登录（对照组不变）；浏览器**整页刷新**两页均正常渲染（用户管理 21 账号 + 编辑/添加表单、审计页 20 条事件）。修复闭环。
+
+# 任务：开发垃圾统一回收器（扩展 test_data_gc.py，2026-11-11）
+
+背景：只读盘点实测当前可回收 ≈6.3GB（测试槽 5GB + 构建产物 1GB + tasks 草稿 133M + 缓存 37M + Electron profile 缓存 474M）。现有 `scripts/test_data_gc.py` 只覆盖 3 棵测试树、无触发机制（18 天内槽从 1.1GB 涨回 5GB，这是垃圾反复堆积的根因）。用户拍板：**统一工具·手动触发**（不挂 cron）。
+
+设计：复用现有护栏管线（dry-run 默认 / 白名单 / 真实数据禁区 / 龄限守卫 / inode 去重），泛化成分类回收器。新增类别 `artifacts`/`caches`/`scratch`/`electron`(opt-in)。新增「被 git 跟踪的文件绝不删」守卫。**600 行硬约束**：实施中引擎与测试都触顶，已拆出 `scripts/gc_categories.py`（纯注册表+选择器，166 行）与 `test/backend/test_gc_categories.py`（96 行），引擎测试加载器把 `scripts/` 加进 sys.path 解析 sibling import。终态四文件行数：引擎 468 / 注册表 166 / 引擎测试 537 / 注册表测试 96，均 < 600。
+
+## TDD 清单（先红后绿，全在临时目录，绝不指真实根）
+
+- [x] C1 `self` 模式 + DataRoot 扩字段（category/keep/age_guard）：整目录成候选、保护区拒绝、正对照（合法路径必须放行）
+- [x] C2 `artifacts` 注册表：out/dist/build/frontend-dist/electron-dist 进候选（可再生，无龄限）
+- [x] C3 `caches`：显式缓存目录 + `__pycache__` 递归发现（pycache 模式），不碰 node_modules/.venv 本体
+- [x] C4 `scratch`：tasks/* 龄限 + 保 LATEST.md/latest.json/最新轮；根 db 备份（glob）；probe.local；空 worktree 残壳
+- [x] C5 跟踪文件守卫：候选自身或内含被跟踪文件则拒绝（LATEST.md 承重断言：跑完 --apply 仍在）
+- [x] C6 `electron`(opt-in)：只清白名单缓存子目录，media/secret.key/Local Storage 跑完 --apply 仍原样
+- [x] C7 CLI：`--only` 接受类别名 / `--all` 含 electron / 默认不含 electron；报告按类别分组
+- [x] C8 npm `clean` / `clean:apply`（根 package.json，cross-env PYTHONUTF8=1 + .venv python）
+- [x] C9 文档：testing-gates.md §1 回收段（「自动触发待拍板」→「统一手动回收入口」）+ 脚本 docstring
+- [x] 收口：后端全套 + 600 行判据（lineLimit.spec.ts）+ 现跑 du 交叉核对体积
+
+## 收口验证（2026-11-11，全绿）
+
+- 回收器套件 `test.backend.test_test_data_gc test.backend.test_gc_categories`：`Ran 39 … OK (skipped=1)`（skip 是 Windows 目录联接需特权那条，交真机）。
+- 后端全套 `manage.py test test.backend apps.<12 个目录>`：`Ran 2509 … OK (skipped=11)` / 714.8s（日志末尾 verdict 为准，非 exit code）。
+- T2 `npm run test:unit`（在 frontend/）：`58 文件 / 802 例 OK`，含 `lineLimit.spec.ts` 15 例 ⇒ 四文件均 < 600 行得证。
+- 现跑 dry-run `npm run clean`：四类分组（test-data/artifacts/caches/scratch），electron 默认不含；合计「删完即掉」**6387.1MB**。slots 表观 22904.1M → 唯一 4440.8M（硬链接去重），2 轮在跑被龄限挡下。
+- du 交叉核对：`du -sh C:\lqdp-e2e\slots` = 4.4G ≈ 唯一 4440.8M。**du 连 `--apparent-size` 也按 inode 去重**，核对的是「唯一」不是表观 22.4G（已把这条口径写进 testing-gates.md §1）。
+- electron opt-in `--only electron`：只注册 6 个白名单 Chromium 缓存子目录（433.2MB），media/secret.key/Local Storage/Network 一律不进候选。
+- 跟踪守卫承重核对：`git ls-files tasks/` 仅 `tasks/e2e-nightly/LATEST.md` 一条（keep + 跟踪双重保护）；`db.sqlite3.bak*` glob 只命中 3.3M 备份，活库 `db.sqlite3` 永不成候选。
+
+## 禁区（绝不自动碰）
+
+`~/LQ-DataPrase`、`Data/`、`C:\lqdp-e2e\template`、Electron profile 的 media/secret.key/Local Storage/Preferences、node_modules/.venv 本体、任何被 git 跟踪的文件。

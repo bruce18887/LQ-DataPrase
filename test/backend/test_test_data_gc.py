@@ -15,6 +15,7 @@ import importlib.util
 import io
 import os
 import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -25,7 +26,11 @@ REPO = Path(__file__).resolve().parents[2]
 
 
 def _load_gc():
-    path = REPO / 'scripts' / 'test_data_gc.py'
+    scripts = REPO / 'scripts'
+    # importlib 不会把 scripts/ 放进 sys.path，而引擎要 import 同目录的 gc_categories。
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    path = scripts / 'test_data_gc.py'
     spec = importlib.util.spec_from_file_location('lqdp_test_data_gc', path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -33,18 +38,6 @@ def _load_gc():
 
 
 GC = _load_gc()
-
-
-class RunDirNameTests(SimpleTestCase):
-    def test_accepts_pool_run_ids(self):
-        """池的 RUN_ID = `HHMMSS-<pid>`，复跑再带 `-recheckN`（e2e_pool.mjs:40,351）。"""
-        self.assertTrue(GC.is_run_dir_name('075407-43428'))
-        self.assertTrue(GC.is_run_dir_name('003042-29280-recheck0'))
-
-    def test_rejects_everything_else(self):
-        for name in ('template', 'slots', '.lock', 'slot0', '2026-10-24',
-                     'abcd-1234', '7540-43428', '075407', 'notes'):
-            self.assertFalse(GC.is_run_dir_name(name), name)
 
 
 class PathGuardTests(SimpleTestCase):
@@ -269,3 +262,276 @@ class CliGuardTests(SimpleTestCase):
         """`--older-than-days 0` 等于关掉在跑守卫，`--apply` 会删掉别的会话正在用的槽。"""
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(2, GC.main(['--older-than-days', '0', '--apply']))
+
+
+class SelfPatternTests(SimpleTestCase):
+    """`self` 模式：整目录本身成一个候选（可再生构建产物用），复用同一套保护区护栏。
+
+    与 run_dir/children 的区别：候选是「这棵树自己」而不是它的子项 —— 删 out/ 是整目录端掉，
+    不是只删 out/ 里的子目录。`inside()` 对「树自己」返回 False，所以 self 走独立分支。
+    """
+
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp(prefix='lqdp-gc-'))
+        self.addCleanup(shutil.rmtree, self.base, True)
+        self.artifact = self.base / 'out'
+        (self.artifact / 'sub').mkdir(parents=True)
+        (self.artifact / 'sub' / 'app.exe').write_bytes(b'x' * 2048)
+
+    def test_self_yields_the_whole_dir_not_its_children(self):
+        # 变异：若 build_plan 把 'self' 当 'children' 处理，候选会是 [out/sub] 而非 [out]。
+        # 这条同时是「合法路径必须放行」的正对照（否则护栏恒 False，工具变空壳还全绿）。
+        plan = GC.build_plan(GC.DataRoot('out', self.artifact, 'self'), time.time(), 1.0, [])
+        self.assertEqual([self.artifact], [p for p, _s, _m in plan.candidates])
+        self.assertEqual(2048, plan.unique_bytes)
+        self.assertEqual(2048, plan.freeable_bytes, 'self 没有幸存树共享，删完即掉全部')
+
+    def test_self_refuses_a_protected_path(self):
+        # 变异：若 'self' 分支漏掉 is_protected，真实数据目录会被整目录端掉。
+        plan = GC.build_plan(GC.DataRoot('out', self.artifact, 'self'),
+                             time.time(), 1.0, [self.artifact.resolve()])
+        self.assertEqual([], plan.candidates)
+        self.assertEqual(1, len(plan.refused_protected))
+
+    def test_self_missing_path_is_empty_not_error(self):
+        # 变异：若 'self' 不判存在性就去 scandir/stat，缺失目录会抛 OSError 而非空计划。
+        plan = GC.build_plan(GC.DataRoot('out', self.base / 'nope', 'self'),
+                             time.time(), 1.0, [])
+        self.assertEqual([], plan.candidates)
+
+
+class PycacheDiscoveryTests(SimpleTestCase):
+    """__pycache__ 递归发现：只收仓库自有代码的，依赖/工作树里的不算（也不是我们的垃圾）。"""
+
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp(prefix='lqdp-gc-'))
+        self.addCleanup(shutil.rmtree, self.base, True)
+        (self.base / 'apps' / '__pycache__').mkdir(parents=True)
+        (self.base / 'scripts' / '__pycache__').mkdir(parents=True)
+        (self.base / 'node_modules' / 'pkg' / '__pycache__').mkdir(parents=True)
+        (self.base / '.venv' / 'lib' / '__pycache__').mkdir(parents=True)
+        (self.base / '.worktrees' / 'x' / '__pycache__').mkdir(parents=True)
+        self.want = {self.base / 'apps' / '__pycache__',
+                     self.base / 'scripts' / '__pycache__'}
+
+    def test_find_pycache_skips_deps_and_worktrees(self):
+        # 变异：若 os.walk 不剪 node_modules/.venv/.worktrees，依赖里的 __pycache__ 会混进来。
+        self.assertEqual(self.want, set(GC.find_pycache_dirs(self.base)))
+
+    def test_pycache_pattern_yields_each_pycache_dir(self):
+        # 变异：若 'pycache' 分支只收第一个或当成 self，候选集合不等于两个目录。
+        plan = GC.build_plan(GC.DataRoot('pycache', self.base, 'pycache',
+                                         category='caches'), time.time(), 1.0, [])
+        self.assertEqual(self.want, {p for p, _s, _m in plan.candidates})
+
+
+class GlobPatternTests(SimpleTestCase):
+    """glob 模式：按 glob 选子项（含散文件），keep 命名保护 + keep_newest 保最新 + 龄限。"""
+
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp(prefix='lqdp-gc-'))
+        self.addCleanup(shutil.rmtree, self.base, True)
+        self.now = time.time()
+
+    def _mk(self, rel, age_days, is_dir=True):
+        p = self.base / rel
+        if is_dir:
+            p.mkdir(parents=True)
+            (p / 'f.txt').write_text('x' * 1024, encoding='utf-8')
+        else:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text('x' * 1024, encoding='utf-8')
+        os.utime(p, (self.now - age_days * 86400, self.now - age_days * 86400))
+        return p
+
+    def test_glob_keeps_named_children_and_age_guards(self):
+        # 变异：若 glob 不认 keep，e2e-nightly 会被删；若不龄限，fresh 也进候选。
+        old = self._mk('perf-old', 5)
+        self._mk('perf-fresh', 0.1)
+        self._mk('e2e-nightly', 9)
+        root = GC.DataRoot('tasks', self.base, 'glob', category='scratch',
+                           glob='*', keep=frozenset({'e2e-nightly'}))
+        plan = GC.build_plan(root, self.now, 1.0, [])
+        self.assertEqual([old], [p for p, _s, _m in plan.candidates])
+        self.assertEqual(1, plan.skipped_newer)
+
+    def test_glob_keep_newest_protects_latest_round(self):
+        # 变异：若 keep_newest 失效，最新一轮（虽超龄）会被删，LATEST.md 的本地明细引用就断。
+        old = self._mk('2026-09-01', 30)
+        newest = self._mk('2026-10-27', 15)
+        self._mk('LATEST.md', 15, is_dir=False)
+        root = GC.DataRoot('e2e-nightly', self.base, 'glob', category='scratch',
+                           glob='*', keep=frozenset({'LATEST.md', 'latest.json'}),
+                           keep_newest=True)
+        plan = GC.build_plan(root, self.now, 1.0, [])
+        self.assertEqual([old], [p for p, _s, _m in plan.candidates])
+        self.assertTrue(newest.is_dir(), '最新一轮必须留着')
+
+    def test_glob_candidates_include_files(self):
+        # 变异：若 glob 沿用 children 的「只收目录」，db 备份散文件永远进不了候选。
+        bak = self._mk('db.sqlite3.bak-old', 5, is_dir=False)
+        root = GC.DataRoot('db-backups', self.base, 'glob', category='scratch',
+                           glob='db.sqlite3.bak*')
+        plan = GC.build_plan(root, self.now, 1.0, [])
+        self.assertEqual([bak], [p for p, _s, _m in plan.candidates])
+        self.assertEqual(1024, plan.unique_bytes)
+
+
+class TrackedGuardTests(SimpleTestCase):
+    """被 git 跟踪的文件绝不删：候选自身或内含跟踪文件则拒绝（与 keep 白名单相互独立）。"""
+
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp(prefix='lqdp-gc-'))
+        self.addCleanup(shutil.rmtree, self.base, True)
+        self.now = time.time()
+
+    def _mk(self, rel, age_days, is_dir=True):
+        p = self.base / rel
+        if is_dir:
+            p.mkdir(parents=True)
+            (p / 'f.txt').write_text('x' * 1024, encoding='utf-8')
+        else:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text('x' * 1024, encoding='utf-8')
+        os.utime(p, (self.now - age_days * 86400, self.now - age_days * 86400))
+        return p
+
+    def test_has_tracked_matches_self_and_descendant_not_sibling(self):
+        # 变异：若只比相等不查后代，含跟踪文件的目录会被漏放；若前缀不带分隔符，
+        # 'round' 会误命中 'round-clean'。空集必须放行（正对照，否则守卫恒 True 变空壳）。
+        f = self._mk('round/a.txt', 5, is_dir=False)
+        tracked = frozenset({f.resolve()})
+        self.assertTrue(GC.has_tracked(self.base / 'round', tracked), '内含跟踪文件')
+        self.assertTrue(GC.has_tracked(f, tracked), '候选自己就是跟踪文件')
+        self.assertFalse(GC.has_tracked(self.base / 'round-clean', tracked), '兄弟目录不算')
+        self.assertFalse(GC.has_tracked(self.base, frozenset()), '空跟踪集放行')
+
+    def test_glob_refuses_candidate_containing_tracked_file(self):
+        # 变异：若 glob 不查 tracked，含入库文件的轮次会被删；未跟踪的兄弟轮必须照常进候选。
+        dirty = self._mk('round-tracked', 5)
+        clean = self._mk('round-clean', 5)
+        root = GC.DataRoot('tasks', self.base, 'glob', category='scratch', glob='*')
+        plan = GC.build_plan(root, self.now, 1.0, [], frozenset({(dirty / 'f.txt').resolve()}))
+        self.assertEqual([clean], [p for p, _s, _m in plan.candidates])
+        self.assertEqual([str(dirty)], plan.refused_tracked)
+
+    def test_apply_keeps_tracked_file_even_without_keep_whitelist(self):
+        # 承重：LATEST.md 仅靠 tracked 守卫（故意不进 keep）也要在 --apply 后原样留着。
+        nightly = self.base / 'e2e-nightly'
+        old = self._mk('e2e-nightly/2026-09-01', 30)
+        latest = self._mk('e2e-nightly/LATEST.md', 30, is_dir=False)
+        root = GC.DataRoot('e2e-nightly', nightly, 'glob', category='scratch', glob='*')
+        plan = GC.build_plan(root, self.now, 1.0, [], frozenset({latest.resolve()}))
+        deleted, failed = GC.execute([plan], True)
+        self.assertTrue(latest.is_file(), '跟踪文件 LATEST.md 必须在 --apply 后仍在')
+        self.assertFalse(old.exists(), '未跟踪的旧轮该删掉（正对照）')
+        self.assertEqual((1, 0), (deleted, failed))
+
+    def test_tracked_files_lists_real_tracked_and_excludes_ignored(self):
+        # 真实 git ls-files（只读）：manage.py 必在库，.venv 里的文件必不在（gitignored）。
+        tracked = GC.tracked_files(REPO)
+        self.assertIn((REPO / 'manage.py').resolve(), tracked)
+        self.assertNotIn((REPO / '.venv' / 'pyvenv.cfg').resolve(), tracked)
+
+
+class ElectronRootsTests(SimpleTestCase):
+    """electron(opt-in)：只清白名单缓存子目录；media/secret.key/Local Storage 绝不动。
+
+    Electron 的 userData 同时是 Django 的 LQDP_BASE_DIR（electron/backend-env.ts:37），
+    里面住着 media/secret.key 等真实数据 —— 所以只能逐个注册缓存子目录，绝不注册 profile 根。
+    """
+
+    def setUp(self):
+        self.profile = Path(tempfile.mkdtemp(prefix='lqdp-gc-'))
+        self.addCleanup(shutil.rmtree, self.profile, True)
+        (self.profile / 'Cache').mkdir()
+        (self.profile / 'Cache' / 'junk.bin').write_bytes(b'x' * 2048)
+        (self.profile / 'Code Cache').mkdir()
+        (self.profile / 'Code Cache' / 'c.bin').write_bytes(b'y' * 1024)
+        (self.profile / 'media').mkdir()
+        (self.profile / 'media' / 'user.csv').write_text('precious', encoding='utf-8')
+        (self.profile / 'secret.key').write_text('KEY', encoding='utf-8')
+        (self.profile / 'Local Storage').mkdir()
+        (self.profile / 'Local Storage' / 'leveldb').write_text('state', encoding='utf-8')
+
+    def test_electron_roots_only_whitelisted_cache_subdirs(self):
+        # 变异：若把 profile 根或 media/Network 注册成根，真实数据会被整目录端掉。
+        roots = GC.electron_roots(self.profile)
+        for r in roots:
+            self.assertEqual('electron', r.category)
+            self.assertEqual('self', r.pattern)
+        paths = {r.path for r in roots}
+        self.assertIn(self.profile / 'Cache', paths)
+        self.assertIn(self.profile / 'Code Cache', paths)
+        for forbidden in ('media', 'secret.key', 'Local Storage', 'Network',
+                          'Session Storage', 'Preferences', ''):
+            self.assertNotIn(self.profile / forbidden, paths, forbidden)
+
+    def test_apply_cleans_cache_but_keeps_precious_data(self):
+        # 承重：跑完 --apply，缓存没了，media/secret.key/Local Storage 一个字节都不动。
+        roots = GC.electron_roots(self.profile)
+        plans = [GC.build_plan(r, time.time(), 1.0, []) for r in roots]
+        deleted, failed = GC.execute(plans, True)
+        self.assertEqual((2, 0), (deleted, failed))
+        self.assertFalse((self.profile / 'Cache').exists())
+        self.assertFalse((self.profile / 'Code Cache').exists())
+        self.assertEqual('precious',
+                         (self.profile / 'media' / 'user.csv').read_text(encoding='utf-8'))
+        self.assertEqual('KEY', (self.profile / 'secret.key').read_text(encoding='utf-8'))
+        self.assertTrue((self.profile / 'Local Storage' / 'leveldb').is_file())
+
+    def test_electron_profile_defaults_to_appdata_lowercase(self):
+        # dev 档 userData 是小写 lq-dataprase（Windows 大小写不敏感，与打包档同目录）。
+        old = os.environ.get('APPDATA')
+        os.environ['APPDATA'] = str(self.profile.parent)
+        self.addCleanup(lambda: os.environ.__setitem__('APPDATA', old)
+                        if old is not None else os.environ.pop('APPDATA', None))
+        self.assertEqual((self.profile.parent / 'lq-dataprase').resolve(),
+                         GC.electron_profile())
+
+
+class CliSelectionTests(SimpleTestCase):
+    """C7：collect_roots 汇总五类；select_roots 默认剔 electron，--all/显式 --only 才收。"""
+
+    def _roots(self):
+        return [GC.DataRoot('slots', Path('x'), 'run_dir'),
+                GC.DataRoot('vite', Path('z'), 'self', category='caches'),
+                GC.DataRoot('electron-cache', Path('w'), 'self', category='electron')]
+
+    def test_collect_roots_spans_all_five_categories(self):
+        # 变异：漏接某一类注册表 ⇒ 类别集合不等。collect_roots 只造对象，不碰盘。
+        cats = {r.category for r in GC.collect_roots()}
+        self.assertEqual({'test-data', 'artifacts', 'caches', 'scratch', 'electron'}, cats)
+
+    def test_default_excludes_electron(self):
+        sel = GC.select_roots(self._roots(), set(), False)
+        self.assertEqual({'slots', 'vite'}, {r.name for r in sel})
+
+    def test_all_includes_electron(self):
+        sel = GC.select_roots(self._roots(), set(), True)
+        self.assertEqual({'slots', 'vite', 'electron-cache'}, {r.name for r in sel})
+
+    def test_only_accepts_category_and_explicit_electron(self):
+        # --only 认类别名（caches）；显式 --only electron 即 opt-in，无需 --all。
+        self.assertEqual(['vite'],
+                         [r.name for r in GC.select_roots(self._roots(), {'caches'}, False)])
+        self.assertEqual(['electron-cache'],
+                         [r.name for r in GC.select_roots(self._roots(), {'electron'}, False)])
+
+
+class ReportGroupingTests(SimpleTestCase):
+    def test_report_emits_a_subtotal_per_category(self):
+        # 变异：若 report 平铺不分组，类别小计消失（count=0）⇒ 红；两类各一条小计。
+        a = GC.Plan(root='out', category='artifacts')
+        a.candidates.append((Path('out'), 2048, 0))
+        a.unique_bytes = a.freeable_bytes = 2048
+        c = GC.Plan(root='vite', category='caches')
+        c.candidates.append((Path('vite'), 1024, 0))
+        c.unique_bytes = c.freeable_bytes = 1024
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            GC.report([a, c], False, False, 0, 0)
+        text = buf.getvalue()
+        self.assertEqual(2, text.count('小计'))
+        self.assertIn('artifacts', text)
+        self.assertIn('caches', text)
