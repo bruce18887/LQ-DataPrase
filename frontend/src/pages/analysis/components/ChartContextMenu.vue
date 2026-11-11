@@ -45,7 +45,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .chart-ctx-menu {
   position: fixed;
-  z-index: 3000;
+  z-index: 10000000;
   min-width: 160px;
   padding: 4px;
   background: var(--bg-2, #fff);

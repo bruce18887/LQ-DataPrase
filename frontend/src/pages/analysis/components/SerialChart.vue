@@ -21,7 +21,7 @@
 
 <script setup lang="ts">
 import { chartFontSize } from '../../../theme/typography'
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
 import { formatAxisValue, getSiteColors8, buildChartToolbox } from '../../../utils/chart-bar'
@@ -83,6 +83,10 @@ function buildOption() {
   const serialIndex = new Map<number, number>()
   continuousSerials.forEach((s: unknown, i: number) => {
     if (typeof s === 'number') serialIndex.set(s, i)
+  })
+  const serialLabelIndex = new Map<string, number>()
+  continuousSerials.forEach((s: unknown, i: number) => {
+    if (typeof s === 'string') serialLabelIndex.set(s, i)
   })
 
   // —— Y 轴范围：数据自适应 ∪ 规格限窗 ——
@@ -148,7 +152,7 @@ function buildOption() {
   const laneGroups: any[][] = split ? siteData : [siteData.flat()]
   displayLanes.value = laneGroups.map((arr) => ({
     points: arr.map((pt: any) => ({
-      x: typeof pt.value[0] === 'number' ? pt.value[0] : continuousSerials.indexOf(pt.realSerial),
+      x: typeof pt.value[0] === 'number' ? pt.value[0] : (serialLabelIndex.get(pt.realSerial) ?? -1),
       y: pt.value[1] as number,
       serial: pt.realSerial as number | string,
     })),
@@ -192,7 +196,7 @@ function buildOption() {
     }))
     xAxes = siteSeriesRaw.map((_, i) => xAxisDef(i, i === laneCount - 1))
     yAxes = siteSeriesRaw.map((sd, i) => yAxisDef(i, laneBounds[i], sd.name, siteColors[i % 8]))
-    dataZoom = [{ type: 'inside', xAxisIndex: siteSeriesRaw.map((_, i) => i) }]
+    dataZoom = [{ type: 'inside', xAxisIndex: siteSeriesRaw.map((_, i) => i), moveOnMouseMove: !props.enableSelection }]
   } else {
     // 合并单面板：显式收紧四边留白（旧实现 left/right 走 ECharts 默认 10%，
     // 超宽屏下左右各浪费上百像素）；right 留出 markLine 的 end 位置标签；
@@ -201,7 +205,7 @@ function buildOption() {
     grids = [{ left: 60, right: 48, top: 48, bottom: 68 }]
     xAxes = [xAxisDef(0, true)]
     yAxes = [yAxisDef(0, laneBounds[0], null)]
-    dataZoom = [{ type: 'inside', xAxisIndex: [0] }]
+    dataZoom = [{ type: 'inside', xAxisIndex: [0], moveOnMouseMove: !props.enableSelection }]
   }
 
   /** markLine 贴边钳制：超出该 lane 可见范围的参考线钉到轴边并加 ↑/↓（副标题
@@ -346,6 +350,8 @@ const brush = reactive(useChartBrushSelect({
   serialCol: () => props.data?.serial_col,
   onCreate: (sel) => emit('create-subset', sel),
 }))
+// 切参数清选区（R5）：data.param 变化即清，避免旧 serial 集合套到新参数
+watch(() => props.data?.param, () => brush.clearSelection())
 void chartRef // bound to <div ref="chartRef"> in template
 </script>
 
