@@ -23,6 +23,7 @@
 - `HistogramChart.vue`（315 行）props.result 即后端单参数结果；`SerialChart.vue`（329 行）props.data.series_data 每点 `[serial,value,is_fail,anchor]`，buildOption 内 `toPoint` 产出 `{value:[xIdx,yDisp,...],realY,realSerial}`（:104-120），`siteData`（:124-129）是各 lane 绘制点集。
 - `SingleParamTab.vue` **578 行**（600 上限）：只允许 ~6 行新增。right-panel 模板里 `ChartDock v-if` 与 `el-empty v-else-if`（:241-245）是 if/else 链——`<SubsetPanelArea/>` 必须放在该 el-empty **之后**，不能插中间。
 - store `useSingleTabStore`（`stores/analysisTabs.ts:81`）：fileId/selectedParam/chartConfig/rangeType/barWidthPercent/barOverlapPercent/customLow/customHigh + 过滤开关（ignoreNoLimit/ignoreNoTestValue/dataOnlyBin1/onlyFailTestItem/onlyLowCpk/outlierHandling/iqrMultiplier）。setup store 返回值在实例上**已解包**（取布尔/数值直接 `store.x`，要 ref 用 storeToRefs）。
+- `api`（`frontend/src/api/index.ts`）是 axios 实例，响应拦截器**返回完整 AxiosResponse**（:185 `return response`，不解包）；`.data` 解包发生在 `useAsyncData`。直连 `api.post` 取响应体须 `resp.data?.…`（Task 5 实现期实测纠正）。
 - auth 复位：`stores/auth.ts:22` `resetUserSettingsCaches()` 内调 `resetChartDockMemoryState()`（:25）——子集面板复位挂同一处。
 - `StatsSummary.vue` props `statCards:{label,value,color?}[]`，按固定顺序排（N/Mean/STD/CPK 在内，未知 label 追加末尾）；类名 `.stats-summary/.stat-item` 是 e2e 契约。
 - `ErrorBanner.vue` props `message/title?/showRetry?`，emit `retry`。
@@ -1307,7 +1308,9 @@ function create() {
         buildSubsetRequest(ctx, panel.param, panel.selection),
         { silent: true },
       )
-      panel.result = resp?.results?.[panel.param] ?? null
+      // api.post 返回完整 AxiosResponse（拦截器不解包，解包在 useAsyncData）；
+      // 这里直连 api.post，须自取 resp.data；响应体形如 { results: { [param]: {...} } }
+      panel.result = resp.data?.results?.[panel.param] ?? null
       if (!panel.result) panel.error = '选区内无有效数值数据'
     } catch (e) {
       panel.error = formatError(e, '子集数据加载失败')
