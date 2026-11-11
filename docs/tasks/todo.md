@@ -222,3 +222,48 @@ runbook：`docs/reference/deployment-tls-termination-runbook-2026-11-11.md`；�
 - 质量复审 Minor 未做项已记 runbook「已知边界」与「公网安全 follow-up」：`::ffff:127.0.0.1` 映射形态、server.py 文件头描述过时、DRF 节流 XFF 既有行为、DEBUG=True+匿名文档/admin 暴露（切 server 档）、nginx 可选硬化（均另立工单）。
 - 仓库卫生：根目录 `ssh.txt`（含凭据）已按用户指示加入 `.gitignore`（Secrets 段），origin PUBLIC 误 push 风险解除；本批已本地 FF 并入 master（**未 push**）。
 - 取证文档 §8 收口提交同时带入上一会话未提交的 §9 服务器侧取证正文（同主题、已完整）。
+
+# 任务：服务器整体升级 a02be88 → 4bb5bcd（92 提交，方案待拍板，2026-11-11）
+
+前置事实：本地 92 提交已于 2026-11-11 push 到 origin（prepush-history-check RESULT: PASS，上一批台账「未 push」状态就此失效）。
+服务器 git ls-remote 直连 GitHub 可达 ⇒ 走 git pull，不需要 rsync 源码。
+
+## 事实基线（2026-11-11 全部现测）
+
+- 服务器 bpsemi-CD：`ssh -i ~/.ssh/lq_windows bpsemi@100.121.94.114`；仓库 `/home/bpsemi/project/LQ_DataPrase`，master@a02be88（10-28），是本地 HEAD 直接祖先，FF 无分叉。
+- 运行形态：`start_backend.sh 18000 127.0.0.1`（runserver **带 autoreload**，PPID=1）；`DJANGO_SETTINGS_MODULE=tasks.dev_spa`、`DJANGO_DEBUG=True`；nginx 8124 TLS → 127.0.0.1:18000，公网 125.69.67.169:18124。**不是 systemd 方案 A**，server-deployment.md §8 的 systemctl 命令不适用，按本条目执行。
+- 数据库：`/home/bpsemi/LQ-DataPrase/db.sqlite3`（WAL，-shm/-wal 在）；media 同目录；无 system_config.json（默认 data_dir）。
+- Python 3.13.17；**无 Node** ⇒ 前端在开发机构建传 dist。requirements 无变更 ⇒ 不动 pip；package.json 仅 +echarts-gl（本地 dist 已含）。
+- 服务器漂移：`base.py` 仅 TLS 外科区块（与本地 04f4515 逐字一致，已核对）；`playwright.config.ts` 为 PW_CHANNEL Linux 适配（92 提交未触碰该文件 ⇒ stash pop 无冲突）；未跟踪 start_backend.sh/.bat、base.py.bak-tls 保留。
+- 新增迁移 3 条：accounts 0012 角色归并（**不可逆**，reverse=no_op；服务器现有 1 个 viewer 账号将归并为 user）、0013 choices 收敛、0014 AuditEvent 表。
+- 本地 dist 新鲜：构建 11-11 12:51 晚于最后前端源码变更 d5666f8（11-10 14:43）；web 构建绝对路径、57 assets、含 AuditLogPage/Site3DChart。服务器 dist 是 11-05 旧构建（52 assets，无审计页/3D）。
+- 账号：21 个，admin=administrator/superuser；**zhuliqun 是 role=user** ⇒ 审计页验收需 admin 凭据（用户提供或用户自验）。
+
+## 步骤（单一维护窗口，预计 2–5 分钟；停→升→起在同一 SSH 会话背靠背）
+
+- [ ] 0 预检：health 200；`manage.py shell` 打印 DATABASES NAME 确认库路径；记录 runserver 父子 PID；当日再核 base.py 漂移仍只有 TLS 区块
+- [ ] 1 备份：`DJANGO_SETTINGS_MODULE=tasks.dev_spa .venv/bin/python manage.py backup_db --dest ~/lqdp-backup`（VACUUM INTO，WAL 安全）；`tar czf ~/dist-backup-a02be88.tar.gz -C frontend dist`
+- [ ] 2 停后端：kill runserver 父进程，确认 18000 释放（先停再拉代码，避开 autoreload 的「新代码+旧 schema」窗口）
+- [ ] 3 解漂移：`git checkout -- config/settings/base.py`（TLS 区块由 04f4515 原样带回，.bak-tls 仍在）；`git stash push -m "pw-channel-linux" -- frontend/playwright.config.ts`
+- [ ] 4 更新：`git fetch origin && git merge --ff-only origin/master`（a02be88→4bb5bcd）；`git stash pop`（恢复 PW_CHANNEL 适配）
+- [ ] 5 迁移：`DJANGO_SETTINGS_MODULE=tasks.dev_spa .venv/bin/python manage.py migrate`（0012 会打印 role counts；showmigrations 确认 0012/0013/0014 已应用）
+- [ ] 6 传 dist：开发机 `tar czf dist.tar.gz -C frontend dist` → scp → 服务器解包覆盖 frontend/dist；两侧 index.html sha256 一致
+- [ ] 7 起后端：`nohup ./start_backend.sh 18000 127.0.0.1 >> ~/lqdp-backend.log 2>&1 &`（脚本自动选 dev_spa）；health 200
+- [ ] 8 验收：服务器本地 `/` 200 且 index 哈希=新、`/pages/analysis` 200；公网 https 登录（zhuliqun）→ PUT /auth/settings/ 200 → 分页 next=https；viewer 账号 role=user（0012 生效）；tplms/discuzq :80 回归 200；审计页 /admin/audit 与 3D 站点柱阵按凭据/数据可得性验（缺则显式记跳过）
+- [ ] 9 回写：本条目收口 + review；有新教训追 lessons
+
+## 回滚
+
+- 代码层：`git checkout a02be88` + 解开 dist 备份 + 重启；**base.py 需从 base.py.bak-tls 恢复 TLS 区块**（a02be88 没有该行，丢了会致 https 入口分页 next 变 http）。
+- 数据层：0012 不可逆 ⇒ 需停服后用步骤 1 备份恢复 db.sqlite3（连同 -wal/-shm 一起处置），再起服务。
+
+## 明确不做（另立工单，勿夹带）
+
+- 切 server 档（DEBUG=False）：已知 follow-up；会牵动 SFTP 存密 KDF 差异（re-key 未解决），本次保持 dev_spa 原档。
+- nginx 硬化 / 限流 XFF / systemd 化（方案 A）/ 服务器装 Node：均不在本次范围。
+
+## 已知边界
+
+- 自签证书：浏览器验收需 ignoreHTTPSErrors（同上批）。
+- 0012 归并 viewer 是已批准决策的产品行为，不是事故；升级后该账号以 user 身份登录。
+- 服务器 media 无自动回收（既有约束），升级不改变磁盘累积趋势。
