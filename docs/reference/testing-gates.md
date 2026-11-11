@@ -70,12 +70,20 @@
   ⚠ 后端全量的 label **别手打 `apps.*`**：那不是合法标签，会当成模块名去 import，
   实测只跑 1104 例并带一条 `ModuleNotFoundError: No module named 'apps.*'` 的 error（看着像回归）。
   取法与夜跑同源：`scripts/e2e_nightly.mjs:129-136` 枚举 `apps/` 下每个目录成 `apps.<name>`。
-- **落盘面要定期回收，但大头在仓库外**：`scripts/test_data_gc.py`（默认 dry-run，`--apply` 才删）
-  管三棵树 —— `C:\lqdp-e2e\slots`（池的孤儿轮，2026-10-24 实测 185 轮 / 唯一字节 4.8GB）、
-  `test/e2e-data`、`test/unit-data`。池自己只在**正常退出**时 `rmSync` 本轮目录
-  （`e2e_pool.mjs:105,373,483`），崩池轮与被杀的会话必然留下孤儿。
-  体积别按 `st_size` 加总：夹具是**硬链接**进每个 slot 的（`e2e_pool.mjs:113`），
-  同一 inode 实测最多被 34 轮共享 ⇒ 表观 25.4GB 里只有 4.8GB 真占着磁盘（`du -sh` 可交叉核对）。
+- **落盘面要定期回收，大头在仓库外**：统一回收入口 `npm run clean`（报告，默认 dry-run）/
+  `npm run clean:apply`（真删），底层 `scripts/test_data_gc.py`（引擎）+ `scripts/gc_categories.py`（注册表/选择器）。
+  **手动触发，不挂 cron** —— 垃圾反复堆积的根因就是旧工具没有触发机制（槽 18 天内从 1.1GB 涨回 5GB）。
+  五类：`test-data`（`C:\lqdp-e2e\slots` 池孤儿轮 + `test/e2e-data` + `test/unit-data`）、
+  `artifacts`（out/dist/build/frontend-dist/electron-dist，可再生）、`caches`（.vite/.pytest_cache/`__pycache__` 等）、
+  `scratch`（tasks 草稿 + 夜跑轮次 + 根 db 备份 + probe.local）、`electron`（**opt-in**：`--all` 或
+  `--only electron` 才收，只清 Chromium 缓存子目录 —— userData 同时是 Django 数据根，media/secret.key 绝不碰）。
+  护栏：默认 dry-run、白名单、真实数据禁区（`~/LQ-DataPrase` 整棵树拒绝）、龄限守卫（`--older-than-days` 不能为 0）、
+  **被 git 跟踪的文件绝不删**（`tasks/e2e-nightly/LATEST.md` 靠 keep 白名单 + 跟踪守卫双重保护）。
+  池自己只在**正常退出**时 `rmSync` 本轮目录（`e2e_pool.mjs:105,373,483`），崩池轮与被杀的会话必然留下孤儿。
+  体积别按 `st_size` 加总：夹具是**硬链接**进每个 slot 的（`e2e_pool.mjs:113`），同一 inode 实测最多被 34 轮共享
+  ⇒ 2026-11-11 实测 slots 表观 22.4GB 里只有 4.3GB 真占盘，全类合计「删完即掉」≈6.2GB。
+  交叉核对用 `du -sh C:\lqdp-e2e\slots`（实测 4.4G ≈ 唯一 4440.8M）—— **du 按 inode 去重，连 `--apparent-size`
+  也去重**，所以它核对的是「唯一」口径，复现不出表观 22.4GB（那是逐条目 `st_size` 不去重的朴素加总，只有回收器的「表观」列给）。
 
 ## 2. 三层判据（写新断言之前先选层）
 
