@@ -139,3 +139,66 @@
   且 `strictTemplates` 关 ⇒ 漏注册在类型层不可见。
 - 建议顺序：先补一层「关键交互态 × 双主题」的截图回归（dialog/dropdown/popover/table/loading 各一），
   再单独开工按需，配一条 T2 绊线枚举 src 里全部 `el-*` 标签 ⊆ 注册清单。要我做第 1 步请点名。
+# 任务：账号角色收敛与操作审计（2026-11-09）
+
+## 边界
+
+- 本批 14 笔提交（`126ee48` viewer 归并内核 … `da63bac` 教训与计划回写）现在都在**本地 `master`** 上；过程分支 `feat/account-role-audit` 已删（合并方式见下面「并入 master」一节）。**全程未 push**：`origin` 是公开仓库，一次 push 即全球发布——本批确实误发过一次并已撤回，也记在那一节。
+- 只动账号 / 审计面。数据面零改动；真实 dev 库 `~/LQ-DataPrase/db.sqlite3` 收口实测 mtime 仍是本轮开跑之前的值，e2e 与 T1 都落在 `test/e2e-data` / `test/unit-data` / 各 slot 目录。
+- `docs/user-guide/**` 整目录被 `.gitignore:170` 忽略 ⇒ Task 13 的用户指南同步只能本机生效，无入库文件可提。
+- 本节原先按 Task 14 Step 6 的约定「只本机追加、不提交」（当时 todo.md 里压着另一会话 396 行未提交正文，`git add` 会把别人的正文一起带进来）。后来那一坨被它自己提交走了，本批收尾又并进了 master，所以这条约定作废：现在这节是**随本批一起入库**的，且只含本节自己的正文。
+
+## 各批（每批收口都跑 affected 门禁，判据来自 `docs/reference/testing-gates.md`）
+
+- [x] **Task 1** `126ee48`：`apps/accounts/role_migration.py` 归并内核 + `0012_normalize_user_roles`（三类计数任一非零必出声，文案刻意 ASCII —— cp1252 下中文 print 会在迁移事务里趴下，判据 `test_role_normalization.MigrationPrintCodepageTests`）。
+- [x] **Task 2** `2f636a8`：`apps/accounts/permissions.py` 收敛为五项 + `role_can`；未列出的功能名一律拒绝（fail closed）。
+- [x] **Task 3** `4813aa2`：`role` choices 去掉 viewer，后端引用与 `seed_users` 同步。
+- [x] **Task 4** `caf4aac`：前端角色标签 / 部署探针去 viewer，`README` 与 `docs/reference/server-deployment.md` 两级。
+- [x] **Task 5** `2edc632`：`AuditEvent` 模型 + `apps/accounts/audit.py` best-effort 写入器（外层已在事务里时走 savepoint）。
+- [x] **Task 6** `1ad0182`：登录写 `last_login` 并记 `login_success` / `login_failure` / `account_locked`。
+- [x] **Task 7** `9d56163`：账号 CRUD / 重置 / 解锁 / 改密 + 存储路径变更写审计，detail 走白名单（绝不含口令）。
+- [x] **Task 8** `ca09a53`：只读查询端点 `/api/v1/auth/audit-events/`，按项目时区取整日边界，参数错误走统一信封。
+- [x] **Task 9** `cad0540`：`frontend/src/utils/audit.ts` 纯函数 + `test/unit/audit.spec.ts` 与后端源码的双向绊线（事件码 / 两个分页数 / username 列宽 / 查询参数名）。
+- [x] **Task 10** `9f169f0`：用户管理编辑弹窗（用户名只读、角色两级、走 partial PUT 不冲洗启用态）；顺带修掉后端 `/auth/users/` 的**无序分页**（`views.py` 补 `.order_by('id')`，判据 `test/backend/test_user_list_pagination.py`）与清理脚本误杀兄弟 worker 活账号的 flaky（`mine` 登记 + `Date.now()` 年龄闸）。
+- [x] **Task 11** `d5666f8`：`/admin/audit` 页（筛选 + 倒序分页 + 展开行原始 JSON）、`requiresAdmin` 守卫与侧栏入口；失败与空态分开写；可空性收进纯层契约；两个格式化器搬进 `utils/audit.ts`，判据新建 `test/unit/auditFormat.spec.ts`。
+- [x] **Task 12** `ae43c3b`：`frontend/e2e/admin/admin.spec.ts` 直达用例改断守卫**最终**落点（旧断言抢在 `fetchProfile` 往返之前匹配，钉的是假事实），文件头那段「没有任何基于角色的拦截」与 `.hidden(display:none)` 一并作废。
+- [x] **Task 13**（本机生效）：`docs/user-guide/README.md` / `01-quickstart.md` / `08-admin.md` 去 viewer，权限矩阵重写为两级并**逐条对齐** `apps/accounts/permissions.py`（旧表把「删除数据文件」写成 user ✅(自己的)，与代码里的 `data_delete: ['administrator']` 不符）；新增「编辑账号」「操作审计」两节；`npm run build` 后 `dist/` 三份 HTML 的 `grep -c viewer` 全为 0，顺带补齐原先落后的 3 份 `dist/reference/*.html`。
+
+## 收口（判据来自 `docs/reference/testing-gates.md`，每条都是可复制的原始输出行）
+
+- **后端全量**：`CODEBUDDY_SAFE_DELETE_ENABLED=0 .venv/Scripts/python.exe -X utf8 manage.py test` ⇒ `Ran 2477 tests in 529.203s` / `OK (skipped=8)`，整段落盘在 `tasks/t14-backend-full.log`，`grep -cE "^(FAIL|ERROR):"` = **0**。（计划稿 §Step 1 写的 1652 是上一轮基线，本批只增不减：2477。）
+- **T2**：`npx vitest run` ⇒ `Test Files  58 passed (58)` / `Tests  802 passed (802)`（Task 10 收口是 57 / 780）。
+- **前端构建与 e2e 类型档**：`npm run build`（含 `vue-tsc -b`）⇒ `✓ built in 810ms`；`npm run lint:e2e` ⇒ 静默通过（exit 0）。
+- **全量池（收口那一轮）**：runId `063322-34872`，4 slot ⇒ `[pool] 用例 438 · 墙钟 8.7min · 单价 3.14s/例 · 效率 2.50（目标 ≥2.8） · unexpected 0 · flaky 1 · skipped 21` + `[pool] 结论 MEASURED`，affected 门禁末行 `RESULT:   PASS · 计划 3 档全部执行`。**没有 VOID**。
+  - 口径要说清：这一轮跑在 14:33–14:42，树里已经是 Task 11 + Task 12 的**最终字节**（两笔提交只是把同样的内容记进历史），此后只动过 `docs/`（计划、lessons、本台账）⇒ 直接当收口轮的 e2e 结论用，不再重跑一遍同样的东西（核对方式：`git diff --stat ae43c3b da63bac` 只有 `lessons.md` 9 行 + 计划文档 27 行，代码零改动）。
+  - `flaky 1` 是 `e2e/data/view-data.spec.ts:1393 › @p2 顶部带：操作按钮在文件横幅内，表格高度与实测占位对齐`（首跑失败、retry #1 过）。本批没碰过 `e2e/data/` 与该页任何组件，形状与 lessons 里「dev server 长时间运行后劣化」同族 ⇒ 判为存量抖动，不因此调重试或跳过。
+- **手工验收**：spec §13 七条逐条现量 + light/night 双主题计算值对照，记录在计划 Task 14 Step 3.5。核心几条：登录后审计页倒序第一行就是那次 `登录成功`（14:56:53，`Total 2564`）；按事件筛 `login_failure` 得 43 行且事件列全是中文；展开行给 `{"reason": "unknown_user"}` 原文；倒置日期区间 ⇒ 400 + 空态说「审计记录加载失败，请调整条件后重试」而**不是**「暂无符合条件的审计记录」，三个输入框的值全保留。
+- **升级路径**：历史 viewer 的**副本**上 `migrate` ⇒ `[0012] role normalization: {'viewer_to_administrator': 0, 'viewer_to_user': 1, 'superuser_promoted': 0}`，终态 `viewer rows left: 0`；`seed_users` 之后仍是 `administrator 1 / user 2`。源库未被写过：`test/e2e-data/db.sqlite3` 角色分布不变，`~/LQ-DataPrase/db.sqlite3` mtime 仍是本轮开跑前的值。
+- **未 push**：`git log --oneline master..HEAD` 共 12 笔（`126ee48` … `ae43c3b`），全部只在本地分支 `feat/account-role-audit`。
+
+
+## 并入 master 与一次误推（2026-11-10 收口之后）
+
+- **误推**：界面上点错了，本批那条分支被 push 到公开 origin（`git ls-remote origin` 当时真有 `refs/heads/feat/account-role-audit = 293e022`，本地 reflog 记 `update by push`）。处置按既有口径**只删远端引用**：`git push origin --delete feat/account-role-audit` ⇒ `- [deleted]`，复看远端只剩 `refs/heads/master a02be88` 与历史遗留的 `refs/pull/1/head`；顺带 `git branch --unset-upstream` 清掉悬空跟踪，免得一句普通 `git push` 把公开分支原地重建。诚实记一句：那条引用公开挂过几分钟，删引用只是关掉入口，不保证已缓存/被抓取的副本同步消失。
+- **合并**：`master` 是分支尖的祖先（`git rev-list --count HEAD..master` = 0），所以是纯快进，`git merge-base` 与 tree 双向核过：合并前后 `master^{tree}` == 分支 `^{tree}` == `71f37d32baaebf6be7a39f819ce3e1c6f40cd9e7` ⇒ 上面那三档收口证据原样覆盖合并结果，不重跑。
+- **一处故意偏离仓里既有手续**：没走 `git checkout master && git merge --ff-only`，改用 `git branch -f master <sha>`。原因是这是**共享工作树**，另一会话正在同一条分支上提交（`293e022` 就是它刚落的），切 HEAD 会把它下一笔提交静悄悄送进 master。
+- **排除与安置**：按用户点名，master 最终指 `da63bac`（本批自己的尖），不带那会话的 `293e022`（Site 山脊图规范 137 行 + 它自己的 todo 正文 396 行）。`git branch -d` 先按预期拒了一次（`not fully merged`），留 `backup/other-session-293e022` 之后才 `-D` 删分支。回退点：`backup/master-3392781`（合并前的 master）。
+- **一条连带教训**：那笔 `293e022` 提交时把本节**当时还未提交**的台账正文一起卷走了（+451 行 = 它的 396 + 本节 ~55）。所以排除它也等于把本节从磁盘抹掉，`git status` 干净这件事完全看不出这层耦合 —— 台账正文当时逐字留在 `tasks/t14-todo-entry.md` 才没真丢。**规则**：共享工作树里判断「谁拥有什么」不能只看 `git status`，未提交的追加段落会被别人的 `git add` 顺走；要么当场提交自己的，要么别把正文只留在工作树。
+
+## 明确不做
+
+- 跨用户文件共享与「真正只读 viewer」（spec §14）—— 删掉 viewer 的代价就是这条：没有跨用户数据共享的产品里，viewer 只剩「不能上传」这一条与 user 不同，不值得第三份角色语义。
+- 数据操作级审计（上传 / 删单文件 / SFTP 下载）、邮件自助找回密码、MFA/SSO、Django Groups、TLS/CORS 整改、审计日志自动过期与批量删除 UI（均 spec §14）。
+- 删除用户时清理磁盘上传目录与作业产物 —— 现状「删除用户不会删除该用户上传的数据文件」仍是产品事实，用户指南里明写着。
+- 审计写入的「必须成功」语义：`audit.record()` 仍是 best-effort（外层提交时抛出的 IntegrityError 罩不住），已接受的取舍见 `apps/accounts/audit.py` 的 `_live` 注释。
+
+## 遗留（交给下一轮，别当已解决）
+
+- `setup` 项目 `PUT /api/v1/auth/settings/` 的 500：三次目击（Task 10 两次、Task 12 一次），**同一轮 4-slot 池跑里 `Internal Server Error` 计数为 0** ⇒ 方向是「单文件直跑的 webServer 通路」，不是池。未归因，两条候选（SQLite deferred-transaction 写死锁 / 别的）都别照抄，拿到 traceback 再判。
+- `:deep(.el-select .el-input__wrapper)` 这条恒不命中的死规则仍在 `frontend/src/pages/admin/UserManagement.vue:555` 与 `frontend/src/styles/element-plus-theme.css:598`；且**主题一致性本身没有自动化判据**（Task 11 变异表 C 记：删掉那条生效规则，vitest 与 e2e 全绿）。
+- **night 下审计页筛选行的控件底色是分叉的**（Task 14 手工验收现量）：日期/账号框走全局 night 的 `rgba(255,255,255,.05)`（叠在卡片 `rgb(22,33,62)` 上合成 ≈ `rgb(34,44,72)`），事件下拉走 scoped 的 `var(--bg)` = `rgb(26,26,46)`。根因是特异度账（全局 `:root[data-theme="night"] .el-input__wrapper` (0,3,0) 压过 scoped (0,2,0)），修法属于「night/light 块对称」那一批全局收敛，不在本批扩面 —— 详见 Task 11 Step 4.5 第 6 条的订正段。
+- **审计页没有 URL 状态**：筛选条件只活在组件里，刷新/粘贴链接都回默认视图，也没法把一次取证结果分享给另一个管理员。spec 没要求，本轮按现状交付；要做要先定「query 参数与 `buildAuditQuery` 谁 owns 形状」。
+- `frontend/.vitest`（vitest 缓存目录）没被任何忽略规则覆盖：`.gitignore` 与 `frontend/.gitignore` 里 `grep -n vitest` 均 0 命中。本轮该目录不存在，所以只是记一笔——一旦出现就会以未跟踪文件的形式混进 `git status`。
+- `apps/accounts/views.py` 的 `perform_create` 非原子（建号成功而审计行失败时不回滚）。
+- 自我降级那条 `fetchProfile` 分支目前无法被任何判据覆盖（拿不到可观察差异）。
+- `docs/tasks/todo.md:335` 那句「另核清 `last_login` 从来没人写」是 D2 那批的现量，Task 6 之后**不再成立**（现在登录会写）。该行属于历史评审稿，本批不就地改——改别人的历史结论要单独点名。
