@@ -81,7 +81,10 @@ export function useChartBrushSelect(opts: {
       if (!g) return
       const x0 = sel.lo != null ? (chart.convertToPixel({ xAxisIndex: 0 }, sel.lo) as number) : g.x
       const x1 = sel.hi != null ? (chart.convertToPixel({ xAxisIndex: 0 }, sel.hi) as number) : g.x + g.width
-      makeOverlay({ x0: Math.min(x0, x1), y0: g.y, x1: Math.max(x0, x1), y1: g.y + g.height })
+      const inter = intersectRects(
+        { x0: Math.min(x0, x1), y0: g.y, x1: Math.max(x0, x1), y1: g.y + g.height },
+        { x0: g.x, y0: g.y, x1: g.x + g.width, y1: g.y + g.height })
+      if (inter) makeOverlay(inter)
       return
     }
     for (const rl of rectLanes) {
@@ -97,8 +100,10 @@ export function useChartBrushSelect(opts: {
     }
   }
 
-  function localPoint(ev: MouseEvent) {
-    const r = opts.container.value!.getBoundingClientRect()
+  function localPoint(ev: MouseEvent): { x: number; y: number } | null {
+    const el = opts.container.value
+    if (!el) return null
+    const r = el.getBoundingClientRect()
     return { x: ev.clientX - r.left, y: ev.clientY - r.top }
   }
 
@@ -116,7 +121,16 @@ export function useChartBrushSelect(opts: {
 
   function onWinMove(ev: MouseEvent) {
     if (!drag) return
-    drag.cur = localPoint(ev)
+    if (!(ev.buttons & 1)) {
+      window.removeEventListener('mousemove', onWinMove)
+      window.removeEventListener('mouseup', onWinUp)
+      drag = null
+      clearOverlays()
+      return
+    }
+    const p = localPoint(ev)
+    if (!p) return
+    drag.cur = p
     const chart = opts.chartInstance.value
     if (!chart) return
     clearOverlays()
@@ -133,7 +147,9 @@ export function useChartBrushSelect(opts: {
     window.removeEventListener('mousemove', onWinMove)
     window.removeEventListener('mouseup', onWinUp)
     if (!drag) return
-    drag.cur = localPoint(ev)
+    const p = localPoint(ev)
+    if (!p) { drag = null; clearOverlays(); return }
+    drag.cur = p
     const r = normalizeRect(drag.start, drag.cur)
     drag = null
     if (r.x1 - r.x0 < MIN_DRAG_PX && r.y1 - r.y0 < MIN_DRAG_PX) { clearOverlays(); return }
@@ -200,13 +216,16 @@ export function useChartBrushSelect(opts: {
 
   function unbind() {
     if (bound) {
-      bound.getZr().off('mousedown', onZrMouseDown)
-      bound.off('rendered', onRendered)
+      if (!bound.isDisposed()) {
+        bound.getZr().off('mousedown', onZrMouseDown)
+        bound.off('rendered', onRendered)
+      }
       bound = null
     }
     opts.container.value?.removeEventListener('contextmenu', onContextMenu)
     window.removeEventListener('mousemove', onWinMove)
     window.removeEventListener('mouseup', onWinUp)
+    drag = null
     clearOverlays()
   }
 

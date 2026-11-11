@@ -15,7 +15,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive } from 'vue'
+import { reactive, watch } from 'vue'
 import { chartFontSize } from '../../../theme/typography'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
@@ -316,6 +316,8 @@ const brush = reactive(useChartBrushSelect({
   getBinCenters: () => props.result?.bin_centers ?? [],
   onCreate: (sel) => emit('create-subset', sel),
 }))
+// 切参数清选区（R5）：histResult 切参数时不清空，旧值域会套到新参数上
+watch(() => props.selectedParam, () => brush.clearSelection())
 void chartRef // bound to <div ref="chartRef"> in template
 </script>
 
