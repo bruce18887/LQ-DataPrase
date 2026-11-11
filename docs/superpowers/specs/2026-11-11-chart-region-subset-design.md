@@ -50,8 +50,9 @@ A 的核心：选区 = 现有统计管线的一个前置行级过滤步骤，前
 `/analysis/histogram/`（POST）计算路径新增可选字段，两种形态：
 
 ```jsonc
-// 直方图框选：值域（不需要序列列）
-{ "kind": "value_range", "lo": 1.23, "hi": 1.45 }
+// 直方图框选：值域（不需要序列列）。lo/hi 各为有限数或 null，null = 该侧无界，
+// 至少一个非 null。框住 underflow/overflow 兜底柱时对应侧置 null（见 D6）。
+{ "kind": "value_range", "lo": 1.23, "hi": null }
 // 散点框选：serial 集合；serial_col 可选，缺省自动检测
 { "kind": "serials", "serials": [1, 2, 3], "serial_col": "Serial_No" }
 ```
@@ -63,7 +64,7 @@ A 的核心：选区 = 现有统计管线的一个前置行级过滤步骤，前
 **之前**对 df 做行级过滤，然后照常走 `compute_histogram_stats`：
 
 - `value_range`：`pd.to_numeric(df[param], errors='coerce')` 后 `.between(lo, hi)`
-  过滤行（R4：coerce + 向量化，不用 apply）。
+  过滤行（R4：coerce + 向量化，不用 apply；pandas between 的 None 边界即无界）。
 - `serials`：序列列解析复用 `get_serial_column(df)`（serial_distribution 同款）；
   请求带 `serial_col` 时校验该列存在于 df，否则 400。匹配双方做类型容错
   （数值列 coerce 后 isin；字符串列直接 isin）；未匹配的 serial 静默忽略，
@@ -74,7 +75,7 @@ A 的核心：选区 = 现有统计管线的一个前置行级过滤步骤，前
 | 情形 | code |
 |---|---|
 | kind 不在白名单 / selection 非 dict | `invalid_selection` |
-| value_range 的 lo/hi 非有限数或 lo > hi | `invalid_selection` |
+| value_range 的 lo/hi 非「有限数或 null」、两者皆 null、或双非 null 时 lo > hi | `invalid_selection` |
 | serials 空 / 非 list / 元素非 number\|string / 长度 > 100000 | `invalid_selection` |
 | selection 存在但请求参数数 ≠ 1 | `invalid_selection`（选区只对单参数有定义） |
 | serial_col 不在 df 列 | `invalid_selection` |
@@ -93,6 +94,11 @@ fast path（无 params 的参数列表发现）忽略 selection。stale param �
   仍沿用当前 tab 上下文（请求照带现有过滤参数）。
 - **D3 规格限线落在子集轴范围内才画**；在范围外时统计卡照常显示原规格限数值 + CPK，
   不强行扩轴（否则子集被压成一小簇）。响应里的 lower_limit/upper_limit 仍是原规格限。
+- **D6 兜底柱无界语义（计划阶段发现，2026-11-11 补）**：直方图「limit 边缘外」的柱是
+  underflow/overflow 兜底柱，柱内芯片真实值远在轴范围之外——若按框选的轴值域过滤会选空
+  （恰是用户主场景）。规则：框选区间触达 underflow 柱中心（`bin_centers[0]`）→ `lo=null`；
+  触达 overflow 柱中心（`bin_centers[-1]`）→ `hi=null`；两侧都触达 = 全选，前端视为无选区。
+  判定在前端（持有父图 bin_centers），后端只消费 null 边界。
 
 ## 5. 前端设计
 
@@ -103,7 +109,8 @@ SingleParamTab 只加约 3 行（挂 `<SubsetPanelArea/>` + 两图各一个 `ena
 
 | 新文件（frontend/src/pages/analysis/ 下） | 职责 |
 |---|---|
-| `composables/useChartBrushSelect.ts` | 两图共用：brush option 注入、brushEnd 取 coordRange、选区状态、右键菜单开关与位置。直方图 lineX / 散点 rect |
+| `composables/useChartBrushSelect.ts` | 两图共用：zrender 拖拽 → 选区、DOM 高亮浮层、右键菜单状态（机制见 §5.3）。直方图 value-range / 散点 rect |
+| `composables/selectionGeometry.ts` | 纯函数：矩形归一/求交、点集命中取 serial、跨 lane 去重、兜底柱无界判定、面板标题 |
 | `composables/useSubsetPanels.ts` | 模块单例（仿 useChartDock 模式）：面板列表 {id, selection, result, loading, error}；create 读 useSingleTabStore 拼请求（现有过滤参数 + selection + range_type='DR'）；remove；watch fileId/selectedParam 清空 |
 | `components/SubsetPanelArea.vue` | ChartDock 下方独立区域：网格（每行 ≤2）渲染面板、标题/×关闭/loading/ErrorBanner，内嵌复用 HistogramChart（outlier-handling 固定 'off'）+ 统计卡 |
 | `components/ChartContextMenu.vue` | 自绘右键浮层（Teleport to body，CSS 主题变量，dark/light 双维护） |
@@ -121,19 +128,31 @@ HistogramChart / SerialChart 各加约 20 行：接 `enable-selection` prop，
   超界点，圈住即选中，收集 `realSerial`。框选常驻：左键拖=选择，滚轮缩放保留，
   散点图拖拽平移让位（brush 与 inside dataZoom 的左键冲突；直方图无 dataZoom 无冲突）。
 
-### 5.3 brush 技术要点
+### 5.3 框选技术要点（计划阶段定型：zrender 指针事件 + DOM 浮层）
 
-- 直方图：brush lineX、xAxisIndex 0、brushMode single、隐藏 brush toolbox，
-  挂载后 `dispatchAction(takeGlobalCursor)` 常驻激活；brushEnd 的
-  `areas[0].coordRange` 即值域 [lo, hi]（value 轴直接是数据坐标）。
-- 散点：brush rect；split-by-site 多 lane 时 xAxisIndex/yAxisIndex 配 'all'，
-  逐 lane 取 coordRange 过滤各自点集后合并去重。x 是 category 轴，
-  coordRange 给的是轴下标——点集 value[0] 本来就是下标（serialIndex 映射），直接可比。
-- **large 模式（≥5000 点）不依赖 `brushSelected` 的 dataIndex**：自己用 coordRange
-  过滤点集取 realSerial，大数据量下稳定。
-- 右键：容器 DOM `contextmenu`（preventDefault）+ 自绘浮层，不依赖 ECharts 命中；
-  选区为空不弹。菜单动作直接调 useSubsetPanels 单例，不经 SingleParamTab 中转。
-- 新建面板后父图选区保留（可继续调整再建）；「清除选择」= `dispatchAction({type:'brush', areas:[]})`。
+不用 ECharts brush 组件，改用 zrender `mousedown` + window `mousemove/mouseup` +
+`convertFromPixel`，选区高亮是容器内的绝对定位 DOM 浮层。原因：useChart 每次渲染
+`setOption(notMerge:true)` 会清掉 brush 的 areas 与光标激活态，而本仓图表重渲染频繁
+（主题/数据/resize）；自有状态 + DOM 浮层可在重渲染后按数据坐标重定位，且 large 模式
+与多 lane 行为完全确定。交互契约（拖拽框选、高亮、右键菜单）不变。
+
+- 直方图（value-range 模式）：拖拽只取 X 分量，浮层占满 grid 全高；松手后
+  `convertFromPixel({xAxisIndex:0}, px)` 得值域，再按 D6 做兜底柱无界判定。
+- 散点（rect 模式）：逐 lane 取 `grid.coordinateSystem.getRect()` 与拖拽矩形求交，
+  交集为空跳过该 lane；交矩形角点 `convertFromPixel` 得 X 轴下标区间与 Y 值区间，
+  过滤该 lane 点集（x=轴下标、y=绘制值含 jitter/锚定，D5 WYSIWYG）取 `realSerial`，
+  跨 lane 合并去重。点集由 SerialChart 在 buildOption 里同步写出的 `displayLanes`
+  提供（只在 mouseup 时读，不 watch，避免渲染循环）。
+- **large 模式（≥5000 点）天然兼容**：命中判定是我们自己的点集过滤，不依赖
+  ECharts 的 brushSelected/dataIndex。
+- 拖拽起点可在容器内任意位置（含标题留白），选区矩形与各 grid 矩形求交后再换算——
+  这样锚定在轴顶/底边缘的超界点也能被框住；与所有 grid 都不相交则不产生选区。
+  位移 <3px 视为点击，不产生选区。
+- 右键：容器 DOM `contextmenu`（有选区才 preventDefault）+ 自绘浮层；选区为空不弹。
+  图组件 emit `create-subset(selection)`，SingleParamTab 转给 useSubsetPanels（约 6 行，
+  578+6 < 600 行约束内）。
+- 新建面板后父图选区保留（可继续调整再建）；「清除选择」清状态 + 移除浮层。
+  图实例重建（渲染器切换/容器 v-if）时选区清空；重渲染/resize 后浮层按数据坐标重定位。
 
 ### 5.4 请求复用
 
