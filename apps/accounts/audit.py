@@ -84,6 +84,12 @@ def _snapshot(value):
 
 def _client_ip(request):
     raw = (request.META.get('REMOTE_ADDR') or '') if request else ''
+    if raw in ('127.0.0.1', '::1'):
+        # 本机反代转发时 REMOTE_ADDR 恒为回环；XFF 最右一条是 nginx 追加的
+        # 真实客户端地址，左侧条目可被客户端伪造，不能取。
+        xff = request.META.get('HTTP_X_FORWARDED_FOR') or ''
+        if xff:
+            raw = xff.split(',')[-1].strip()
     try:
         ipaddress.ip_address(raw)
     except ValueError:

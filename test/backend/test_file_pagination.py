@@ -77,6 +77,19 @@ class FilePaginationTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(len(resp.data['results']), FILE_COUNT)
 
+    def test_next_link_is_https_behind_tls_proxy(self):
+        """TLS 反代后分页 next 必须是 https：缺 SECURE_PROXY_SSL_HEADER 时
+        https 页面拿到 http 链接，浏览器按混合内容拦掉，collectAllPages 断在第二页。"""
+        resp = self.client.get('/api/v1/files/', {'page_size': 1},
+                               HTTP_X_FORWARDED_PROTO='https')
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.data['next'].startswith('https://'), resp.data['next'])
+
+    def test_next_link_stays_http_without_proxy_header(self):
+        """不带代理头（桌面/直连档）行为不变：仍是 http，不被强制升级。"""
+        resp = self.client.get('/api/v1/files/', {'page_size': 1})
+        self.assertTrue(resp.data['next'].startswith('http://'), resp.data['next'])
+
 
 if __name__ == '__main__':
     # Isolated test DB (never touches dev db.sqlite3) + transaction rollback.
