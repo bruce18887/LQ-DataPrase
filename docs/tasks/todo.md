@@ -202,3 +202,21 @@
 - `apps/accounts/views.py` 的 `perform_create` 非原子（建号成功而审计行失败时不回滚）。
 - 自我降级那条 `fetchProfile` 分支目前无法被任何判据覆盖（拿不到可观察差异）。
 - `docs/tasks/todo.md:335` 那句「另核清 `last_login` 从来没人写」是 D2 那批的现量，Task 6 之后**不再成立**（现在登录会写）。该行属于历史评审稿，本批不就地改——改别人的历史结论要单独点名。
+
+# 任务：部署入口 TLS 终结（方案2，2026-11-11）
+
+runbook：`docs/reference/deployment-tls-termination-runbook-2026-11-11.md`；取证：`deployment-http-method-block-forensics-2026-11-11.md` §9.7 方案2。分支 `feat/tls-proxy-support`。根因：公网入口认证网关按方法拦 PUT/DELETE，TLS 终结让写请求以密文穿过。
+
+- [x] Task1 代码适配：base.py `SECURE_PROXY_SSL_HEADER` + audit `_client_ip` 取 XFF 最右 + 6 测试（提交 `04f4515`，spec/质量双复审通过）
+- [ ] Task2 服务器 base.py 外科插入（服务器落后本地 86 提交、audit.py 不存在 ⇒ 只插 base.py 一行）
+- [ ] Task4 自签证书（IP SAN，10 年）
+- [ ] Task5 nginx TLS server 块（8124 ssl → 127.0.0.1:18000）
+- [ ] Task6 Django 换绑回环（start_backend.sh 18000 127.0.0.1）
+- [ ] Task7 nginx reload 接管 8124
+- [ ] Task8 验收 + 回写取证 §8
+
+## review
+
+- 门禁：lint:e2e / vitest / e2e 全量（438 例 unexpected 0）ok；backend 首跑 1 红 `test_sftp_host_keys::test_forget_removes_entry`，单文件 17 绿 + 原命令全套 1753 复跑 OK ⇒ 判既有顺序抖动（与本批无调用交集）。证据 `tasks/tls-task1-gate.log` + `tls-task1-backend-rerun.log`。
+- 质量复审 Minor 未做项已记 runbook「已知边界」：`::ffff:127.0.0.1` 映射形态、server.py 文件头描述过时、DRF 节流 XFF 既有行为（均另立工单）。
+- 仓库卫生：根目录 `ssh.txt` 含凭据、未被 .gitignore 覆盖、origin 是 PUBLIC ⇒ 待用户处置（忽略或移出仓库）。
