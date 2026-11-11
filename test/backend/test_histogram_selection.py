@@ -253,8 +253,9 @@ class HistogramViewSelectionTests(SimpleTestCase):
                                   selection={'kind': 'value_range', 'lo': 9.0, 'hi': None}))
         self.assertEqual(r.status_code, 200, r.content)
         centers = r.data['results'][PARAM]['bin_centers']
-        self.assertGreater(centers[0], 5.0)   # 不跨原规格限 [0,5]
-        self.assertLess(centers[-1], 15.0)
+        # DR 跨度 hugs 子集 {10,11,12}（centers≈9.7–12.3）；S3/RDL 都会越界
+        self.assertGreater(centers[0], 9.0)
+        self.assertLess(centers[-1], 13.0)
 
     def test_serials_subset(self):
         r = self._post(self._base(selection={'kind': 'serials', 'serials': [2, 4, 6]}))
@@ -265,6 +266,19 @@ class HistogramViewSelectionTests(SimpleTestCase):
         r = self._post(self._base(selection={'kind': 'value_range', 'lo': 100.0, 'hi': 200.0}))
         self.assertEqual(r.status_code, 400)
         self.assertEqual(r.data['code'], 'empty_selection')
+
+    def test_selection_rows_present_but_param_all_nan_empty_selection(self):
+        # 选中行存在但 P1 全 NaN → compute 返回 None → 视图 empty_selection 分支
+        df = pd.DataFrame({'Serial_No': [1, 2, 3], 'P1': [1.0, float('nan'), float('nan')]})
+        r = self._post(self._base(selection={'kind': 'serials', 'serials': [2, 3]}), df=df)
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.data['code'], 'empty_selection')
+
+    def test_selection_mixed_nan_counts_finite_only(self):
+        df = pd.DataFrame({'Serial_No': [1, 2, 3], 'P1': [1.0, float('nan'), 3.0]})
+        r = self._post(self._base(selection={'kind': 'serials', 'serials': [1, 2, 3]}), df=df)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.data['results'][PARAM]['total_count'], 2)
 
     def test_selection_requires_single_param(self):
         r = self._post(self._base(params=[PARAM, 'Site_No'],
