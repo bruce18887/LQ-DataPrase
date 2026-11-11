@@ -220,5 +220,5 @@ runbook：`docs/reference/deployment-tls-termination-runbook-2026-11-11.md`；�
 - 门禁：lint:e2e / vitest / e2e 全量（438 例 unexpected 0）ok；backend 首跑 1 红 `test_sftp_host_keys::test_forget_removes_entry`，单文件 17 绿 + 原命令全套 1753 复跑 OK ⇒ 判既有顺序抖动（与本批无调用交集）。证据 `tasks/tls-task1-gate.log` + `tls-task1-backend-rerun.log`。
 - **验收全绿（三方一致：本地真实客户端 + 服务器 hairpin + 独立复审）**：公网 PUT/DELETE 探针 → Django 形状 404（不再 RST；明文 PUT 仍 RST 作对照，公网与上游 Content-Length 恒差 5=URL 前缀差）；`PUT /auth/settings/`、`PUT /auth/profile/` 均 200；分页 `next=https://<公网host:port>/api/v1/files/?page=2…`；浏览器（ignoreHTTPSErrors）登录→/dashboard→/analysis（自动加载文件）→勾 QQ 图 PUT 200→**刷新勾选保留**→还原，全程 consoleErrors/reqFailed 均空。管理端 CRUD/审计 IP 跳过（账号 role=user、审计未部署）。
 - 质量复审 Minor 未做项已记 runbook「已知边界」与「公网安全 follow-up」：`::ffff:127.0.0.1` 映射形态、server.py 文件头描述过时、DRF 节流 XFF 既有行为、DEBUG=True+匿名文档/admin 暴露（切 server 档）、nginx 可选硬化（均另立工单）。
-- 仓库卫生：根目录 `ssh.txt` 含凭据、未被 .gitignore 覆盖、origin 是 PUBLIC ⇒ 待用户处置（忽略或移出仓库）。
+- 仓库卫生：根目录 `ssh.txt`（含凭据）已按用户指示加入 `.gitignore`（Secrets 段），origin PUBLIC 误 push 风险解除；本批已本地 FF 并入 master（**未 push**）。
 - 取证文档 §8 收口提交同时带入上一会话未提交的 §9 服务器侧取证正文（同主题、已完整）。
