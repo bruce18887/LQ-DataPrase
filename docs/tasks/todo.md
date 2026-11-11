@@ -208,15 +208,17 @@
 runbook：`docs/reference/deployment-tls-termination-runbook-2026-11-11.md`；取证：`deployment-http-method-block-forensics-2026-11-11.md` §9.7 方案2。分支 `feat/tls-proxy-support`。根因：公网入口认证网关按方法拦 PUT/DELETE，TLS 终结让写请求以密文穿过。
 
 - [x] Task1 代码适配：base.py `SECURE_PROXY_SSL_HEADER` + audit `_client_ip` 取 XFF 最右 + 6 测试（提交 `04f4515`，spec/质量双复审通过）
-- [ ] Task2 服务器 base.py 外科插入（服务器落后本地 86 提交、audit.py 不存在 ⇒ 只插 base.py 一行）
-- [ ] Task4 自签证书（IP SAN，10 年）
-- [ ] Task5 nginx TLS server 块（8124 ssl → 127.0.0.1:18000）
-- [ ] Task6 Django 换绑回环（start_backend.sh 18000 127.0.0.1）
-- [ ] Task7 nginx reload 接管 8124
-- [ ] Task8 验收 + 回写取证 §8
+- [x] Task2 服务器 base.py 外科插入（区块 sha256 与本地逐字节一致；服务器落后 86 提交、audit.py 不存在 ⇒ 只插 base.py 一行）
+- [x] Task4 自签证书（IP SAN 三地址，10 年，key 600，RSA2048，配对一致）
+- [x] Task5 nginx TLS server 块（8124 ssl → 127.0.0.1:18000，全文哈希一致，nginx -t 通过）
+- [x] Task6 Django 换绑回环（start_backend.sh 18000 127.0.0.1，PPID=1 脱离会话，env 保留，health 200）
+- [x] Task7 nginx reload 接管 8124（reload 非 restart，tplms/discuzq 零回归）
+- [x] Task8 验收 + 回写取证 §8（已提交）
 
 ## review
 
 - 门禁：lint:e2e / vitest / e2e 全量（438 例 unexpected 0）ok；backend 首跑 1 红 `test_sftp_host_keys::test_forget_removes_entry`，单文件 17 绿 + 原命令全套 1753 复跑 OK ⇒ 判既有顺序抖动（与本批无调用交集）。证据 `tasks/tls-task1-gate.log` + `tls-task1-backend-rerun.log`。
-- 质量复审 Minor 未做项已记 runbook「已知边界」：`::ffff:127.0.0.1` 映射形态、server.py 文件头描述过时、DRF 节流 XFF 既有行为（均另立工单）。
+- **验收全绿（三方一致：本地真实客户端 + 服务器 hairpin + 独立复审）**：公网 PUT/DELETE 探针 → Django 形状 404（不再 RST；明文 PUT 仍 RST 作对照，公网与上游 Content-Length 恒差 5=URL 前缀差）；`PUT /auth/settings/`、`PUT /auth/profile/` 均 200；分页 `next=https://<公网host:port>/api/v1/files/?page=2…`；浏览器（ignoreHTTPSErrors）登录→/dashboard→/analysis（自动加载文件）→勾 QQ 图 PUT 200→**刷新勾选保留**→还原，全程 consoleErrors/reqFailed 均空。管理端 CRUD/审计 IP 跳过（账号 role=user、审计未部署）。
+- 质量复审 Minor 未做项已记 runbook「已知边界」与「公网安全 follow-up」：`::ffff:127.0.0.1` 映射形态、server.py 文件头描述过时、DRF 节流 XFF 既有行为、DEBUG=True+匿名文档/admin 暴露（切 server 档）、nginx 可选硬化（均另立工单）。
 - 仓库卫生：根目录 `ssh.txt` 含凭据、未被 .gitignore 覆盖、origin 是 PUBLIC ⇒ 待用户处置（忽略或移出仓库）。
+- 取证文档 §8 收口提交同时带入上一会话未提交的 §9 服务器侧取证正文（同主题、已完整）。
