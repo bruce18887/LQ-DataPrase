@@ -35,6 +35,10 @@ from apps.analysis.services.data_services import (
 from apps.datafiles.services import get_cached_parsed_file
 from apps.common.params import get_param, get_param_float, get_param_list
 from apps.common.errors import error_response
+from apps.analysis.services.data_services.subset_selection import (
+    parse_selection,
+    filter_df_by_selection,
+)
 
 from .file_correlation_views import FileCorrelationActions
 from .param_actions import ParamStatActions
@@ -190,6 +194,19 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
         params, all_missing = guard_all_missing(df, params)
         if all_missing is not None:
             return all_missing
+        # 选区（子集直方图）：既有过滤链之后做行级过滤；分箱强制 DR（子集自身
+        # 值域，spec D1），CPK 仍锚定原规格限（compute_histogram_stats 不随 range_type 变）。
+        selection, sel_err = parse_selection(get_param(request, 'selection'))
+        if sel_err is not None:
+            return sel_err
+        if selection is not None:
+            if len(params) != 1:
+                return error_response('invalid_selection', '选区只支持单参数请求')
+            df, sel_err = filter_df_by_selection(df, params[0], selection)
+            if sel_err is not None:
+                return sel_err
+            range_type = 'DR'
+            custom_low = custom_high = None
         skipped_params = []
         for param in params:
             # 计算路径不吞异常：任何意外内部错误直接 500 暴露（param 不在 df
@@ -207,6 +224,8 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
                 # 无效对齐 boxplot 的 400 no_valid_params
                 skipped_params.append(param)
         if not results:
+            if selection is not None:
+                return error_response('empty_selection', '选区内无有效数值数据')
             return error_response(
                 'no_valid_params', '请求的参数均无有效数值数据',
                 requested=params, skipped=skipped_params)

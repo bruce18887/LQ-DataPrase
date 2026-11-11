@@ -216,3 +216,87 @@ class FilterDfTests(SimpleTestCase):
         out, err = filter_df_by_selection(_frame(), PARAM, {'kind': 'serials', 'serials': ['4']})
         self.assertIsNone(err)
         self.assertEqual(out[PARAM].tolist(), [10.0])
+
+
+class HistogramViewSelectionTests(SimpleTestCase):
+    def _post(self, payload, df=None, metadata=None):
+        df = df if df is not None else _frame()
+        metadata = metadata if metadata is not None else _md()
+        restore = test_support.patch_df_loader(df, fake_datafile(), metadata)
+        try:
+            request = APIRequestFactory().post(
+                '/api/v1/analysis/histogram/', dict(payload), format='json')
+            force_authenticate(request, user=_fake_user())
+            response = AnalysisViewSet.as_view({'post': 'histogram'})(request)
+            response.render()
+            return response
+        finally:
+            restore()
+
+    def _base(self, **extra):
+        return dict({'file_id': 1, 'params': [PARAM]}, **extra)
+
+    def test_value_range_subset_count_and_limits(self):
+        r = self._post(self._base(selection={'kind': 'value_range', 'lo': 9.0, 'hi': None}))
+        self.assertEqual(r.status_code, 200, r.content)
+        res = r.data['results'][PARAM]
+        self.assertEqual(res['total_count'], 3)
+        # 规格限仍是原参数（D1/D2）：CPK 锚 RDL，不随子集变
+        self.assertEqual(res['lower_limit'], 0.0)
+        self.assertEqual(res['upper_limit'], 5.0)
+        # 子集 mean=11 → CPK 为负（USL=5 远小于 mean）
+        self.assertLess(res['cpk'], 0)
+
+    def test_selection_forces_dr_binning(self):
+        # 客户端故意传 RDL：后端必须强制 DR，子集 {10,11,12} 的 bin 跨度 hugs 自身值域
+        r = self._post(self._base(range_type='RDL',
+                                  selection={'kind': 'value_range', 'lo': 9.0, 'hi': None}))
+        self.assertEqual(r.status_code, 200, r.content)
+        centers = r.data['results'][PARAM]['bin_centers']
+        self.assertGreater(centers[0], 5.0)   # 不跨原规格限 [0,5]
+        self.assertLess(centers[-1], 15.0)
+
+    def test_serials_subset(self):
+        r = self._post(self._base(selection={'kind': 'serials', 'serials': [2, 4, 6]}))
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.data['results'][PARAM]['total_count'], 3)
+
+    def test_empty_selection_400(self):
+        r = self._post(self._base(selection={'kind': 'value_range', 'lo': 100.0, 'hi': 200.0}))
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.data['code'], 'empty_selection')
+
+    def test_selection_requires_single_param(self):
+        r = self._post(self._base(params=[PARAM, 'Site_No'],
+                                  selection={'kind': 'value_range', 'lo': 0.0, 'hi': 5.0}))
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.data['code'], 'invalid_selection')
+
+    def test_invalid_kind_400(self):
+        r = self._post(self._base(selection={'kind': 'magic'}))
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.data['code'], 'invalid_selection')
+
+    def test_fast_path_ignores_selection(self):
+        r = self._post(self._base(params=[], selection={'kind': 'magic'}))
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertIn(PARAM, r.data['results'])
+
+    def test_bin1_context_applies_before_selection(self):
+        df = _frame()
+        df['SW_Bin'] = ['1', '1', '1', '5', '5', '5']
+        md = _md()
+        md['units']['SW_Bin'] = ''
+        md['mins']['SW_Bin'] = ''
+        md['maxs']['SW_Bin'] = ''
+        # Bin1 只剩 {1,2,3}；选区 lo=9 在 Bin1 行里无匹配 → empty_selection
+        r = self._post(self._base(data_only_bin1=True,
+                                  selection={'kind': 'value_range', 'lo': 9.0, 'hi': None}),
+                       df=df, metadata=md)
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.data['code'], 'empty_selection')
+
+    def test_no_selection_keeps_old_behavior(self):
+        r = self._post(self._base())
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.data['results'][PARAM]['total_count'], 6)
