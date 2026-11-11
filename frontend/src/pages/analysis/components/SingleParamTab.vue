@@ -86,6 +86,7 @@
             :bar-overlap-percent="barOverlapPercent"
             :selected-param="localSelectedParam"
             :outlier-handling="outlierHandling"
+            enable-selection @create-subset="subsetPanels.create"
           />
           <el-empty v-else description="直方图数据加载中" />
         </template>
@@ -109,6 +110,7 @@
             :opacity="effOpacity"
             :range-type="rangeType"
             :jitter="jitter"
+            enable-selection @create-subset="subsetPanels.create"
           />
           <el-empty v-else description="当前参数无序列分布数据，请选择其他参数" />
         </template>
@@ -243,6 +245,7 @@
         class="chart-empty"
         description="未选择任何图表，请勾选上方图表显示"
       />
+      <SubsetPanelArea />
     </template>
   </AnalysisTabLayout>
 </template>
@@ -271,6 +274,8 @@ import QQPlotStatsTable from './QQPlotStatsTable.vue'
 import BoxPlotStatsTable from './distribution/BoxPlotStatsTable.vue'
 import AnalysisTabLayout from './AnalysisTabLayout.vue'
 import ChartDock from './ChartDock.vue'
+import SubsetPanelArea from './SubsetPanelArea.vue'
+import { useSubsetPanels } from '../composables/useSubsetPanels'
 import ErrorBanner from '../../../components/common/ErrorBanner.vue'
 import { useHistogram } from '../composables/useHistogram'
 import { useSerialDistribution } from '../composables/useSerialDistribution'
@@ -337,6 +342,7 @@ const {
 } = useChartToggles()
 // 面板头「回到默认视角」图标每点一次 +1，Site3DChart watch 它做合并式 viewControl 复位
 const site3dResetEpoch = ref(0)
+const subsetPanels = useSubsetPanels()
 
 // Composable: Histogram
 const {
