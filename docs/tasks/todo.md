@@ -267,3 +267,11 @@ runbook：`docs/reference/deployment-tls-termination-runbook-2026-11-11.md`；�
 - 自签证书：浏览器验收需 ignoreHTTPSErrors（同上批）。
 - 0012 归并 viewer 是已批准决策的产品行为，不是事故；升级后该账号以 user 身份登录。
 - 服务器 media 无自动回收（既有约束），升级不改变磁盘累积趋势。
+
+## review（2026-11-11 升级收口）
+
+- **执行形态修正**：用户提示「可能已执行了一些」→ 现查证实整套升级**已由先前执行完成**（HEAD=4bb5bcd、0012–0014 已应用、dist 哈希与本地一致、后端 15:27 已重启、DB 备份 15:24、旧 dist 留档 `dist.old-a02be88`、.bak-tls 在位）。本轮只做核证 + 验收，未重跑任何已完成步骤。
+- **验收全绿（实测证据）**：公网 https `/` 200（新 index 1707B）、`/pages/analysis` 200；admin/zlq0104. 登录 OK；`GET/PUT /auth/settings/` 200 且写入生效；审计端点分页 `next=https://…`；审计 API 200 + 页面 13 条事件（真实 XFF IP、失败行带 reason）；viewer 归并：角色计数 0、原 viewer 账号 role=user；分析页 1017 列含 `Site_No`，勾选「显示3D柱状图」→ 真数据渲染（Site3 × 26 bins，console 零错误、同页 API 全 200）；用户管理页 21 账号 + 编辑/重置/启停入口在线；tplms `:80`、discuzq `:18081` 均 200 零回归。
+- **发现并修复缺陷（本批新页面）**：`/admin/users`、`/admin/audit` 深链/刷新被 Django admin catch-all 302 到 `/admin/login/`（侧栏客户端路由正常）。修法：`config/urls.py` 在 admin 挂载前把两条精确路径交给 SPA（commit `0d4067c`），T1 新增 3 例（含「/admin/ 仍归 admin」对照组），RED 302→GREEN。门禁 4 档 PASS：lint / vitest / backend 1704 例 OK / e2e 438 例 unexpected 0。**该修复尚未部署**（服务器仍是 4bb5bcd）：待 push 后做第二轮小升级 = `git pull --ff-only` + 重启（无迁移、无 dist 重建）。
+- **已知不拦收口**：Topbar 版本按钮 aria-label 含未插值的 `{{ APP_VERSION }}`（可见文本正常 v0.8.0，仅无障碍名；既有缺陷，非本批引入，另记）。
+- 升级形态仍是 dev_spa 档（DEBUG=True、无 systemd）——切 server 档与 nginx 硬化维持既有 follow-up 工单，本批不夹带。
