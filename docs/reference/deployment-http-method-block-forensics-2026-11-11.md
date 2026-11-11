@@ -4,6 +4,9 @@
 > `PUT /api/v1/auth/settings/` `ERR_CONNECTION_RESET` 发生在请求到达 Django 之前：
 > 链路中间设备放行 GET/POST/OPTIONS，对 PUT/DELETE 直接重置连接，并用自己的 404 页
 > 替换 Django 的 404/405。公网入口、账号、令牌与测试数据已脱敏，原值只在运维记录中保留。
+>
+> 2026-11-11 补充：拿到服务器 SSH 后按 §5 复测，确认应用与服务器本机均正常；
+> 拦截点是公网入口的**认证/行为管理网关**（tcpdump 证据与网关指纹见 §9）。
 
 ## 1. 环境与范围
 
@@ -100,6 +103,9 @@
 
 ## 5. 定位与修复顺序
 
+> **2026-11-11 已执行步骤 1–2**：服务器本机、内网 IP、Tailscale 入口的 PUT/DELETE
+> 全部正常到达 Django；只有公网入口异常。方法矩阵与 tcpdump 证据见 §9。
+
 1. **服务器本机自测**（端口换成入口实际映射的后端本地端口）：
    - Linux：`curl -i -X PUT http://127.0.0.1:<backend_port>/api/v1/__probe__/`
    - Windows：`curl.exe -i -X PUT http://127.0.0.1:<backend_port>/api/v1/__probe__/`
@@ -146,11 +152,106 @@ curl -i -X PUT http://example.com/          # 期望 405
 
 ## 8. 状态
 
-- 2026-11-11：**未修复**。应用代码未改；等待入口设备放行 PUT/DELETE，
-  或改为 TCP 模式映射/VPN。
+- 2026-11-11（当日修复）：**已修复，方案 2（TLS 终结）落地**。公网入口认证网关仍拦明文
+  PUT/DELETE（未动网关），但在服务器映射端口加 nginx TLS 终结、反代到挪去回环的 Django，
+  写请求以密文穿过网关。落地步骤与验收见
+  `docs/reference/deployment-tls-termination-runbook-2026-11-11.md`。
+  - 应用侧配套（本地分支 `feat/tls-proxy-support`，提交 `04f4515`）：base.py 加
+    `SECURE_PROXY_SSL_HEADER`（分页 next 认 https）、audit `_client_ip` 取 XFF 最右真实 IP。
+    服务器代码落后本地 86 提交、无审计模块，故只外科插入 base.py 一行（审计修复随未来升级生效）。
+  - 验收（公网 https 入口，真实账号 + 本地真实客户端路径 + 服务器 hairpin 三方一致）：
+    PUT/DELETE 探针拿到 Django 形状 404（不再 RST；明文 PUT 仍 RST 作对照）；
+    `PUT /auth/settings/`、`PUT /auth/profile/` 均 200；分页 next 为 https（host:port 正确）；
+    浏览器登录→分析页切测试项/勾 QQ 图→**刷新后勾选保留**，控制台零错误、零失败请求；
+    tplms/discuzq 无回归。管理端 CRUD 与审计 IP 因复现账号为普通用户、审计未部署而跳过。
+  - 公网安全 follow-up（既有形态、非本批引入，另立工单）：登录限流 XFF 伪造（`NUM_PROXIES`）、
+    DEBUG=True + 匿名 API 文档/Django admin 暴露（切 `config.settings.server` 档）——见 runbook「公网安全 follow-up」。
+- 2026-11-11（修复前快照）：未修复。应用代码未改；入口设备的 PUT/DELETE 白名单仍未放行。
+  可用绕过已实测：Tailscale 直连（§9.5）；根治步骤见 §9.7。
 - 复现账号为普通用户；管理端路径未实机进入，按 API 层推断。
 - 本报告只记录取证与修复路径；两个前端小问题待单独授权后按
   `docs/reference/testing-gates.md` 选层修复。
+
+## 9. 2026-11-11 服务器侧复测与入口定位（SSH）
+
+拿到服务器 SSH 后，按 §5 的步骤 1–2 复测。结论：**应用与 Django 仍然无罪**，
+拦截发生在公网入口的认证/行为管理网关上；服务器本机与其它入口均正常。
+
+### 9.1 服务器形态（只读核对）
+
+- 应用服务器为 Ubuntu 26.04；LQ-DataPrase 后端由
+  `manage.py runserver 0.0.0.0:<backend_port>` 直接对外（手动启动，不是部署文档里的
+  systemd + `standalone.py` 形态；本文不把它当故障原因）。
+- `:80` 上的 nginx 属于同一台机器上的另一个项目（tplms），与 LQ-DataPrase 无关。
+- `ufw` 未启用；`iptables -S` / `nft list ruleset` 只有 Tailscale 自带规则；
+  未安装安全狗、云锁、宝塔防火墙等按 HTTP 方法拦截的软件。
+
+### 9.2 方法矩阵（同一命令，四个入口）
+
+| 入口 | GET / POST / OPTIONS | PUT / DELETE | 结论 |
+|---|---|---|---|
+| 服务器本机 `127.0.0.1:<backend_port>` | Django 响应 | Django 响应 | 正常 |
+| 服务器内网 IP `:<backend_port>` | Django 响应 | Django 响应 | 正常 |
+| Tailscale 地址 `:<backend_port>` | Django 响应 | Django 响应 | 正常 |
+| 公网入口 | 有 HTTP 响应 | `ECONNRESET`，0 字节 | **异常** |
+
+- 对不存在的路径，前三种入口返回 Django 的 404；公网入口返回一个无 `Server` 头、
+  0 字节、头部畸形的 404（curl 报 `Header without colon`）。
+- `PUT /api/v1/auth/settings/`（不带 token）在前三种入口返回 Django 的 401，
+  且带 `Allow: GET, PUT, HEAD, OPTIONS`；在公网入口被 RST。
+
+### 9.3 tcpdump：PUT 到网关即被丢弃
+
+在服务器上对 `tcp port <backend_port> or tcp port <entry_port>` 抓包，并从服务器
+回打公网入口（hairpin）复现：
+
+- GET：请求字节被转发到 `<backend_port>`，Django 返回 401，响应再被转发回客户端；
+- PUT：请求字节只到达网关，**没有**被转发到 `<backend_port>`；网关随后向客户端回
+  `RST`（抓包中源为公网入口地址）。
+- 同一 TCP 连接上的 GET/PUT 表现不同 ⇒ 不是连接级/L4 拦截，而是 HTTP 方法级。
+- NAT 后的源地址是上游认证网关的内网地址（见 9.4），不是应用服务器自身。
+
+### 9.4 网关指纹
+
+- 公网映射/NAT 的下一跳是一台「身份认证系统」设备：
+  `GET http://<gateway>/` 返回 200，页面标题「身份认证系统」，登录入口 `/webAuth/`，
+  `Server` 头为空，页面 `Last-Modified: 2021-08-14`。
+- 它同时承担 NAT/端口映射与 HTTP 过滤；具体型号与管理入口见运维记录。
+- 未登录其管理界面，未尝试任何默认口令；本节只记录外部可观测指纹。
+
+### 9.5 已验证的绕过（不改服务器、不改应用）
+
+- 用 Tailscale 直连 `http://<tailnet_addr>:<backend_port>`：
+  登录 → `/analysis` → 切换测试项 → 勾选「显示QQ图」；
+  `PUT /api/v1/auth/settings/` 返回 200（`POST /api/v1/analysis/qqplot/` 也 200）；
+  刷新页面后勾选仍保留；控制台无业务错误（只有 HTTP 明文导致的 COOP 告警）。
+- 验收后已把测试账号的图表设置还原（QQ 图未勾选、参数仍为 `Part_No`），
+  未改服务器、未改应用代码。
+
+### 9.6 绕过路径实测（同日下午补测）
+
+- **PATCH 不可靠**：带 token 的 PATCH 能到 Django（`/files/999999/` 返回 404、
+  `/auth/settings/` 返回 405、`/auth/users/999999/` 返回 403，状态码与 Django 一致），
+  但网关会把响应头弄坏（curl 报 `Header without colon`、无响应体）；
+  真实浏览器 `fetch` 3s 超时。⇒ **不要只把 PUT 改成 PATCH**。
+- **TLS 可以穿过**：从公网入口发 TLS ClientHello，抓包显示 `\x16\x03\x01…`
+  原样到达 `<backend_port>`，Django 回 `HTTP/1.1 400 Bad request syntax ('\x16\x03\x01\x06')`；
+  网关既没有终止 TLS，也没有按方法重置。⇒ 在 `<backend_port>` 前放 TLS 终结
+  （nginx/stunnel，自签或正式证书）可让 PUT/DELETE 以密文通过。
+- **POST 正常**：登录、上传、分析、SFTP 等 POST 通路长期验证无问题；⇒ 应用侧
+  增加 POST 别名（或 `X-HTTP-Method-Override` 中间件）可作为不碰网关的方案。
+
+### 9.7 修复顺序（未执行，按优先级）
+
+1. 在认证网关上把该入口映射改为**纯 L4/TCP 转发**，或在「行为管理 / HTTP 管控 /
+   防火墙」里对该服务器/端口放行 `PUT`/`DELETE`（加入白名单或免认证）。这是根治。
+2. 必须保留现有公网 URL、但拿不到网关权限：在 `<backend_port>` 前加 TLS 终结
+   （§9.6），让 PUT/DELETE 以密文穿过；自签证书需要用户接受一次警告，
+   有域名时用正式证书更好。
+3. 远程用户可安装 Tailscale：直连 `<tailnet_addr>:<backend_port>`（§9.5，
+   零改动，已验证）。
+4. 最后才考虑应用侧把写接口改成 POST 兼容：需同时改前端、后端路由与测试，
+   且 DELETE 没有等价的 POST 语义，影响面大；不应先做这条。
 
 ## 外部参考
 

@@ -318,7 +318,7 @@ curl -sk "https://$PUB_IP:$ENTRY_PORT/api/v1/files/?page_size=1" \
 curl -i http://127.0.0.1:80/
 ```
 
-Expected: PUT/DELETE 返回 `HTTP/1.1 404` 且带 `Server: WSGIServer` 头（**不是** `ECONNRESET`、不是无 Server 头的网关 404 页）；`"next":"https://…"`；tplms 响应与改前一致。
+Expected: PUT/DELETE 返回 **Django 形状 404**（Django 技术 404 页 body + Django 安全中间件头，**不是** `ECONNRESET`、不是无 Server 头的网关 404 页）。注意公网 `Server` 头是 **nginx**（反代默认隐藏上游 Server 头）——判据是「body 与直连上游同形」，直连 `http://127.0.0.1:$DJANGO_PORT/api/v1/__probe__/` 才见 `Server: WSGIServer`，两者 Content-Length 仅差内嵌 Request URL 前缀长度。`"next":"https://…"`；tplms 响应与改前一致。
 
 - [ ] **Step 2: 浏览器清单（同事视角，首次访问接受一次证书警告）**
 
