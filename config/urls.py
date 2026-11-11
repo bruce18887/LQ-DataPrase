@@ -7,7 +7,15 @@ from django.urls import include, path, re_path
 from django.views.generic import RedirectView, TemplateView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
+_spa_index = TemplateView.as_view(template_name='index.html')
+
 urlpatterns = [
+    # 前端管理页与 Django admin 同前缀：/admin/users、/admin/audit 是前端路由
+    # （2026-11-05 账号审计 spec），必须有精确路径在 admin 挂载之前交给 SPA catch-all。
+    # 否则整页加载 / 刷新 / 分享链接会被 admin 的 catch-all 302 到 /admin/login/
+    # （2026-11-11 部署实测）；e2e 跑的是 Vite，自带 history fallback，覆盖不到
+    # 单端口形态。其余 /admin/**（含 /admin/ 本身）仍归 Django admin。
+    re_path(r'^admin/(?:users|audit)/?$', _spa_index),
     path('admin/', admin.site.urls),
     path('api/v1/auth/', include('apps.accounts.urls')),
     path('api/v1/', include('apps.datafiles.urls')),
@@ -97,5 +105,5 @@ urlpatterns += [
 # registered (i.e. in standalone mode); in dev mode the Vite dev server
 # handles routing.
 urlpatterns += [
-    re_path(r'^(?!api/|assets/|favicon\.svg|icons\.svg).*$', TemplateView.as_view(template_name='index.html')),
+    re_path(r'^(?!api/|assets/|favicon\.svg|icons\.svg).*$', _spa_index),
 ]
