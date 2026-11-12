@@ -421,20 +421,31 @@ class RealPoolQueueWindowTests(TransactionTestCase):
     """
 
     def test_cancellability_flips_at_workers_plus_extra_queued_calls(self):
-        workers, hold = 2, 2.0
+        workers = 2
         capacity = workers + EXTRA_QUEUED_CALLS
         tmpdir = tempfile.mkdtemp(prefix='c1_realpool_')
         self.addCleanup(shutil.rmtree, tmpdir, True)
-        pool = ProcessPoolExecutor(max_workers=workers,
-                                   mp_context=multiprocessing.get_context('spawn'))
+        ctx = multiprocessing.get_context('spawn')
+        pool = ProcessPoolExecutor(max_workers=workers, mp_context=ctx)
         # `cancel_futures` 是关键字限定参数（本机 3.13.12），addCleanup 传不了位置参 ⇒ 用闭包
         self.addCleanup(lambda: pool.shutdown(wait=False, cancel_futures=True))
+        # 每个 worker 一条单向管道：child 阻塞在 recv_end.recv()，父进程 send 才放行。
+        # 不用 Event/Condition：同步原语过不了池的 call queue（RuntimeError「Condition
+        # objects should only be shared between processes through inheritance」，
+        # 2026-11-12 探针实测）；Connection 走 DupHandle 可以（同探针验证）。
+        # 父进程崩池时写端句柄随进程关闭 ⇒ child recv 收 EOFError 自行退出，不留孤儿。
+        pipes = [ctx.Pipe(duplex=False) for _ in range(workers)]
+        # LIFO：先关写端（放行/EOF 掉被占住的 worker）再关池 —— 失败路径也不留孤儿
+        for _, send_end in pipes:
+            self.addCleanup(send_end.close)
 
-        # 1) 把 worker 全占住（`time.sleep` 在子进程里跑，父 future 立刻 RUNNING）
-        busy = [pool.submit(time.sleep, hold) for _ in range(workers)]
+        # 1) 把 worker 全占住：child 阻塞在管道读上，何时放行由用例决定。旧写法
+        #    time.sleep(2.0) 是固定窗口：并发门禁负载下管理线程插队（翻 RUNNING 的那步）
+        #    被 spawn/调度延迟吃掉窗口 ⇒ 形状轮询耗尽偶发红（2026-11-12 实测签名
+        #    「worker 里的那几条必须是 RUNNING」）。管道占用把窗口变成无界，判据不变。
+        busy = [pool.submit(recv_end.recv) for recv_end, _ in pipes]
         # 2) 再提交超出 call queue 容量的两条：第一条挤进队列（RUNNING 但没 child 拿过），
-        #    第二条排在队列外（PENDING ⇒ 可取消）。管理线程只在 submit/结果时醒，
-        #     child 腾出的空格不会立刻被补 ⇒ 这个前沿是稳的。
+        #    第二条排在队列外（PENDING ⇒ 可取消）。worker 被管道占住 ⇒ 前沿一旦形成就稳定。
         markers = [os.path.join(tmpdir, f'{i}.progress') for i in range(2)]
         queued = [pool.submit(write_progress, p, 1, 3) for p in markers]
         buffered, outside = queued[:EXTRA_QUEUED_CALLS], queued[EXTRA_QUEUED_CALLS:]
@@ -446,8 +457,9 @@ class RealPoolQueueWindowTests(TransactionTestCase):
         # `add_call_item_to_queue`；翻 RUNNING 发生在**管理线程**里的那次
         # `add_call_item_to_queue`（`:337` → `:395`）。实测：submit 返回后立刻读，队首
         # 那条仍是 PENDING，约 20ms 后才 RUNNING ⇒ 去掉轮询等于把判据交给线程调度。
-        # 有界（2s）且以「前沿形状出现」为退出条件：等得到，等不到就当场红（不是空转）。
-        stop = time.monotonic() + 2.0
+        # 有界（30s 负载宽限，与 RealPoolEndToEndTests 同量级）且以「前沿形状出现」
+        # 为退出条件：正常 ~20ms 早退，等不到就当场红（不是空转）。
+        stop = time.monotonic() + 30.0
         while time.monotonic() < stop:
             if all(f.running() for f in busy + buffered) and \
                     all(not f.running() for f in outside):
@@ -465,9 +477,11 @@ class RealPoolQueueWindowTests(TransactionTestCase):
                          '排在队列容量之外的那几条本该可取消')
         self.assertTrue(all(f.cancelled() for f in outside))
         # 取消掉的作业从未进过 worker ⇒ 侧车（产物前身）不该出现。**等收工，不等常数**：
-        # `shutdown(wait=True)` 之后管理线程与 child 都结束了，此刻的「不存在」才是
-        # 「从来没跑过」的证据；旧写法 `time.sleep(0.5)` 在慢机器上只是碰巧没跑完（假绿）。
+        # 放行 worker 后 `shutdown(wait=True)`，管理线程与 child 都结束了，此刻的「不存在」
+        # 才是「从来没跑过」的证据；旧写法 `time.sleep(0.5)` 在慢机器上只是碰巧没跑完（假绿）。
         # 队尾已被上面的 `cancel()` 翻成 CANCELLED，这里只会等真在跑的那几条收工。
+        for _, send_end in pipes:
+            send_end.send(b'release')
         pool.shutdown(wait=True)
         self.assertEqual([os.path.exists(p) for p in markers[EXTRA_QUEUED_CALLS:]],
                          [False] * len(outside), '取消成功的作业写出了产物')
