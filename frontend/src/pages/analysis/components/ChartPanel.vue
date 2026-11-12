@@ -8,10 +8,14 @@
     class="chart-panel chart-wrapper"
     :class="[variantClass, { 'chart-panel--dragging': dragging, 'is-drop-left': dropSide === 'left', 'is-drop-right': dropSide === 'right', 'is-drop-above': dropSide === 'above', 'is-drop-below': dropSide === 'below', 'is-drop-swap': dropSide === 'swap' }]"
     :data-chart-key="chartKey"
+    :data-subset-panel="subsetId != null ? '' : undefined"
+    :data-subset-id="subsetId ?? undefined"
+    :data-subset-n="subsetId != null ? (subsetN ?? '') : undefined"
   >
     <div class="chart-h">
       <span
         class="chart-h__grip"
+        :data-subset-grip="subsetId != null ? '' : undefined"
         role="button"
         tabindex="0"
         aria-label="拖拽以重新排列图表"
@@ -19,7 +23,7 @@
         @pointerdown="onGripDown"
         @keydown="onGripKey"
       >⠿</span>
-      <span class="chart-h__title">{{ title }}</span>
+      <span class="chart-h__title" :class="{ 'subset-panel__title': subsetId != null }">{{ title }}</span>
       <span class="chart-h__grow" />
       <!-- controls 在 grow 之后 = 标题栏右上角（齿轮设置 / 箱线图控件） -->
       <span class="chart-h__controls"><slot name="controls" /></span>
@@ -34,8 +38,8 @@
         v-if="closable"
         class="chart-h__btn"
         type="button"
-        title="关闭"
-        aria-label="关闭图表"
+        :title="subsetId != null ? '关闭子集面板' : '关闭'"
+        :aria-label="subsetId != null ? '关闭子集面板' : '关闭图表'"
         @click="emit('close')"
       >×</button>
     </div>
@@ -45,10 +49,10 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { ChartKey } from '../composables/useChartDock'
+import type { DockKey } from '../composables/useChartDock'
 
 const props = withDefaults(defineProps<{
-  chartKey: ChartKey
+  chartKey: DockKey
   title: string
   /** 直方图用 --top、其余用 --bottom，兼容 e2e `.chart-wrapper--top/--bottom svg` */
   variant?: 'top' | 'bottom'
@@ -59,6 +63,9 @@ const props = withDefaults(defineProps<{
   closable?: boolean
   maximizable?: boolean
   maximized?: boolean
+  /** 会话级子集面板（guest）：非 null 时挂 data-subset-* 契约与手柄标记 */
+  subsetId?: number | null
+  subsetN?: number | string | null
 }>(), {
   variant: 'bottom',
   dragging: false,
@@ -66,10 +73,12 @@ const props = withDefaults(defineProps<{
   closable: false,
   maximizable: true,
   maximized: false,
+  subsetId: null,
+  subsetN: null,
 })
 
 const emit = defineEmits<{
-  (e: 'dragstart', key: ChartKey, ev: PointerEvent): void
+  (e: 'dragstart', key: DockKey, ev: PointerEvent): void
   (e: 'close'): void
   (e: 'maximize'): void
   (e: 'restore'): void

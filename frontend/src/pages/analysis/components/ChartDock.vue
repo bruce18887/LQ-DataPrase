@@ -30,12 +30,15 @@
             :dragging="drag?.key === row[0]"
             :drop-side="dropSideOf(row[0])"
             :data-key="row[0]"
+            :subset-id="isGuestKey(row[0]) ? guestIdOf(row[0]) : null"
+            :subset-n="panelOf(row[0])?.result?.total_count ?? null"
             @dragstart="onDragStart"
-            @close="emit('close', row[0])"
+            @close="onClose(row[0])"
             @maximize="toggleMax(row[0])"
             @restore="toggleMax(null)"
           >
-            <slot :name="row[0]" />
+            <SubsetPanelBody v-if="isGuestKey(row[0]) && panelOf(row[0])" :panel="panelOf(row[0])!" />
+            <slot v-else :name="row[0]" />
             <template v-if="$slots['controls-' + row[0]]" #controls>
               <slot :name="'controls-' + row[0]" />
             </template>
@@ -58,12 +61,15 @@
                 :dragging="drag?.key === key"
                 :drop-side="dropSideOf(key)"
                 :data-key="key"
+                :subset-id="isGuestKey(key) ? guestIdOf(key) : null"
+                :subset-n="panelOf(key)?.result?.total_count ?? null"
                 @dragstart="onDragStart"
-                @close="emit('close', key)"
+                @close="onClose(key)"
                 @maximize="toggleMax(key)"
                 @restore="toggleMax(null)"
               >
-                <slot :name="key" />
+                <SubsetPanelBody v-if="isGuestKey(key) && panelOf(key)" :panel="panelOf(key)!" />
+                <slot v-else :name="key" />
                 <template v-if="$slots['controls-' + key]" #controls>
                   <slot :name="'controls-' + key" />
                 </template>
@@ -110,7 +116,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import ChartPanel from './ChartPanel.vue'
-import { useChartDock, pctFromPx, DOCK_BODY_MIN_H, DOCK_BODY_MAX_H, type ChartKey } from '../composables/useChartDock'
+import SubsetPanelBody from './SubsetPanelBody.vue'
+import { useChartDock, pctFromPx, isGuestKey, guestIdOf, DOCK_BODY_MIN_H, DOCK_BODY_MAX_H, type ChartKey, type DockKey } from '../composables/useChartDock'
+import { useSubsetPanels } from '../composables/useSubsetPanels'
+import { subsetPanelTitle } from '../composables/selectionGeometry'
 import { MIN_ROW_H, defaultRowPcts, effBodyH, rowBars } from '../composables/dockGeometry'
 
 const props = defineProps<{ activeKeys: ChartKey[] }>()
@@ -118,15 +127,27 @@ const emit = defineEmits<{ (e: 'close', key: ChartKey): void }>()
 
 const dock = useChartDock(() => props.activeKeys)
 const { rows, rowPcts, colPcts, bodyH } = dock
+const subsetPanels = useSubsetPanels()
 
 const TITLES: Record<ChartKey, string> = {
   hist: '直方图', serial: '序列分布', qq: 'QQ 图', box: '箱线图', site3d: '3D柱状图',
 }
-const titleOf = (k: ChartKey) => TITLES[k] ?? k
+const panelOf = (k: DockKey) => isGuestKey(k) ? subsetPanels.panels.value.find((p) => p.id === guestIdOf(k)) ?? null : null
+const titleOf = (k: DockKey) => {
+  if (isGuestKey(k)) {
+    const p = panelOf(k)
+    return p ? subsetPanelTitle(p.param, p.selection, p.result?.total_count ?? null) : k
+  }
+  return TITLES[k] ?? k
+}
+const onClose = (k: DockKey) => {
+  if (isGuestKey(k)) { dock.removeGuest(k); subsetPanels.remove(guestIdOf(k)); return }
+  emit('close', k)
+}
 
 // 最大化：临时只显示某一张（视图态，不持久化）
-const maxKey = ref<ChartKey | null>(null)
-function toggleMax(k: ChartKey | null) {
+const maxKey = ref<DockKey | null>(null)
+function toggleMax(k: DockKey | null) {
   maxKey.value = k
 }
 
@@ -144,7 +165,7 @@ watch(() => props.activeKeys.join(','), () => {
 }, { immediate: true })
 
 const visibleRows = computed(() => rows.value.filter((r) => r.length > 0))
-const displayRows = computed<ChartKey[][]>(() => {
+const displayRows = computed<DockKey[][]>(() => {
   if (maxKey.value && visibleRows.value.some((r) => r.includes(maxKey.value!))) return [[maxKey.value]]
   return visibleRows.value
 })
@@ -246,16 +267,16 @@ function onReset() {
 }
 
 /* ── 拖拽换布局 ───────────────────────────────── */
-const drag = ref<{ key: ChartKey; x: number; y: number } | null>(null)
-const dropTarget = ref<{ key: ChartKey; dir: DropDir } | null>(null)
+const drag = ref<{ key: DockKey; x: number; y: number } | null>(null)
+const dropTarget = ref<{ key: DockKey; dir: DropDir } | null>(null)
 type DropDir = 'left' | 'right' | 'above' | 'below' | 'swap'
 
-const dropSideOf = (key: ChartKey): DropDir | null =>
+const dropSideOf = (key: DockKey): DropDir | null =>
   dropTarget.value && dropTarget.value.key === key && drag.value && drag.value.key !== key
     ? dropTarget.value.dir
     : null
 
-function onDragStart(key: ChartKey, ev: PointerEvent) {
+function onDragStart(key: DockKey, ev: PointerEvent) {
   drag.value = { key, x: ev.clientX, y: ev.clientY }
   window.addEventListener('pointermove', onPointerMove)
   window.addEventListener('pointerup', onPointerUp)
@@ -270,10 +291,10 @@ function onPointerMove(ev: PointerEvent) {
 }
 
 /** 命中指针下的面板，按象限给出放置方向 */
-function hitTest(x: number, y: number): { key: ChartKey; dir: DropDir } | null {
+function hitTest(x: number, y: number): { key: DockKey; dir: DropDir } | null {
   const el = document.elementFromPoint(x, y)?.closest('[data-key]') as HTMLElement | null
   if (!el) return null
-  const key = el.dataset.key as ChartKey
+  const key = el.dataset.key as DockKey
   if (!key || key === drag.value?.key) return null
   const r = el.getBoundingClientRect()
   const rx = (x - r.left) / r.width

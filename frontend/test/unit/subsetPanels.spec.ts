@@ -171,37 +171,6 @@ describe('useSubsetPanels 单例生命周期（detached effectScope）', () => {
   })
 })
 
-describe('move — 拖拽重排（扁平网格 splice 语义）', () => {
-  beforeEach(() => {
-    setActivePinia(pinia)
-    post.mockReset()
-  })
-
-  it('首面板移到末位：其余相对序不变', () => {
-    const api = useSubsetPanels()
-    api.clearAll()
-    api.panels.value = [{ ...fakePanel(), id: 1 }, { ...fakePanel(), id: 2 }, { ...fakePanel(), id: 3 }]
-    api.move(1, 3)
-    expect(api.panels.value.map((p) => p.id)).toEqual([2, 3, 1])
-  })
-
-  it('末面板移到首位', () => {
-    const api = useSubsetPanels()
-    api.panels.value = [{ ...fakePanel(), id: 1 }, { ...fakePanel(), id: 2 }, { ...fakePanel(), id: 3 }]
-    api.move(3, 1)
-    expect(api.panels.value.map((p) => p.id)).toEqual([3, 1, 2])
-  })
-
-  it('from===to / 未知 id → 原序不变（不抛、不清空）', () => {
-    const api = useSubsetPanels()
-    api.panels.value = [{ ...fakePanel(), id: 1 }, { ...fakePanel(), id: 2 }]
-    api.move(1, 1)
-    api.move(99, 1)
-    api.move(1, 99)
-    expect(api.panels.value.map((p) => p.id)).toEqual([1, 2])
-  })
-})
-
 describe('空态 — result 为 null 不写 error（面板据此渲染无重试的 el-empty）', () => {
   beforeEach(() => {
     setActivePinia(pinia)

@@ -14,7 +14,7 @@
  * 纯算术，不碰 DOM、不碰存储；持久化与指针拖拽各在 useChartDock.ts / ChartDock.vue。
  */
 
-export type DockRow = 'hist' | 'serial' | 'qq' | 'box' | 'site3d'
+export type DockRow = 'hist' | 'serial' | 'qq' | 'box' | 'site3d' | `subset:${number}`
 
 /** 直方图行目标高度：沿用旧默认布局下它的实测渲染高（1380×58% − 11.6 ≈ 789）取整 */
 export const HIST_ROW_PX = 780

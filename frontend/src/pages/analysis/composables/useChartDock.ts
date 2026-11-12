@@ -20,6 +20,12 @@ import { MAX_BODY_H, defaultRowPcts, reconcileRowPcts, reconcileRows } from './d
 
 export type ChartKey = 'hist' | 'serial' | 'qq' | 'box' | 'site3d'
 const ALL_KEYS: ChartKey[] = ['hist', 'serial', 'qq', 'box', 'site3d']
+/** 会话级子集面板作为 dock「guest」：与主图同排拖拽，但绝不进持久化（R5/D4）。 */
+export type GuestKey = `subset:${number}`
+export type DockKey = ChartKey | GuestKey
+export const isGuestKey = (k: string): k is GuestKey => k.startsWith('subset:')
+export const guestKeyOf = (id: number): GuestKey => `subset:${id}`
+export const guestIdOf = (k: GuestKey): number => Number(k.slice('subset:'.length))
 export const DOCK_LAYOUT_STORAGE_KEY = 'lqdp-analysis-chart-layout'
 // 存档版本：加一个 ChartKey 是**向后兼容**的变换（isValidLayout 只要求 key ∈ ALL_KEYS），
 // 所以不升档。升档会让 `p.v !== VERSION` 命中，把每个用户存过的布局（本机 localStorage
@@ -111,26 +117,66 @@ export function loadLayout(): DockLayout | null {
   }
 }
 
+/**
+ * 持久化前的 guest 剥离（纯函数，T2 承载）：子集面板是会话级，绝不进 localStorage/账号。
+ * 无 guest 时**原样返回**（不重排、不归一），保证既有存档逐字不变（chart-memory 契约）。
+ * 有 guest 时：剔除 guest 列/空行，保留主图相对顺序，占比按存活项归一。
+ */
+export function guestFreeSnapshot(
+  rows: DockKey[][], rowPcts: number[], colPcts: number[][], bodyH: number | null,
+): DockLayout {
+  if (!rows.some((r) => r.some(isGuestKey))) {
+    return { rows: rows as ChartKey[][], rowPcts, colPcts, bodyH }
+  }
+  const outRows: ChartKey[][] = []
+  const outRowPcts: number[] = []
+  const outColPcts: number[][] = []
+  rows.forEach((r, i) => {
+    const keptIdx: number[] = []
+    const kept: ChartKey[] = []
+    r.forEach((k, ci) => { if (!isGuestKey(k)) { kept.push(k); keptIdx.push(ci) } })
+    if (kept.length === 0) return
+    outRows.push(kept)
+    outRowPcts.push(Number.isFinite(rowPcts[i]) ? rowPcts[i] : 0)
+    const prevCol = colPcts[i] ?? []
+    const keptCol = keptIdx.map((ci) => (Number.isFinite(prevCol[ci]) ? prevCol[ci] : 0))
+    const colSum = keptCol.reduce((a, b) => a + b, 0)
+    outColPcts.push(colSum > 0 ? keptCol.map((v) => (v / colSum) * 100) : kept.map(() => 100 / kept.length))
+  })
+  const rowSum = outRowPcts.reduce((a, b) => a + b, 0)
+  return {
+    rows: outRows,
+    rowPcts: rowSum > 0 ? outRowPcts.map((v) => (v / rowSum) * 100) : outRows.map(() => 100 / outRows.length),
+    colPcts: outColPcts,
+    bodyH,
+  }
+}
+
 export interface ChartDockApi {
-  rows: Ref<ChartKey[][]>
+  rows: Ref<DockKey[][]>
   rowPcts: Ref<number[]>
   colPcts: Ref<number[][]>
   /** 整体高度覆盖（px，null=自动）；拖拽中直接写、松手调 setBodyH 落盘 */
   bodyH: Ref<number | null>
   /**
    * 让 rows 覆盖到 active 集合：补新、去旧，保留既有相对顺序。
+   * 会话级 guest（子集面板）不在 active 里但会被保留，不被勾选 reconcile 裁掉。
    * { persist: false } 只改内存不落盘——挂载首次对齐（勾选可能尚未从账号
    * 记忆恢复，此时落盘会把已存布局裁剪降级）与恢复后的权威对齐区分开。
    */
   reconcile: (active: ChartKey[], opts?: { persist?: boolean }) => void
-  moveTo: (from: ChartKey, to: ChartKey, dir: 'left' | 'right' | 'above' | 'below' | 'swap') => void
+  moveTo: (from: DockKey, to: DockKey, dir: 'left' | 'right' | 'above' | 'below' | 'swap') => void
   reset: (active: ChartKey[]) => void
   /** 行内列 resize-end 折回百分比 */
   setRowPcts: (pcts: number[]) => void
   setColPcts: (rowIndex: number, pcts: number[]) => void
   /** 底部横条松手/双击复原时落盘整体高度 */
   setBodyH: (h: number | null) => void
-  findPos: (key: ChartKey) => { ri: number; ci: number } | null
+  findPos: (key: DockKey) => { ri: number; ci: number } | null
+  /** 子集面板进 dock：追加一行 [guest]，只改内存不落盘（guest 会话级） */
+  addGuest: (key: GuestKey) => void
+  /** 子集面板离 dock：移除 guest，只改内存不落盘 */
+  removeGuest: (key: GuestKey) => void
 }
 
 let singleton: ChartDockApi | null = null
@@ -150,7 +196,7 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
   if (!singleton) {
     const stored = loadLayout()
     const init = stored ?? defaultLayout(getActive())
-    const rows = ref<ChartKey[][]>(init.rows.map((r) => [...r]))
+    const rows = ref<DockKey[][]>(init.rows.map((r) => [...r]))
     const rowPcts = ref<number[]>([...init.rowPcts])
     const colPcts = ref<number[][]>(init.colPcts.map((c) => [...c]))
     const bodyH = ref<number | null>(init.bodyH ?? null)
@@ -174,18 +220,20 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
     }
 
     const persist = () => {
+      // guest（子集面板）会话级，剥离后再落盘；无 guest 时逐字不变（存档契约）
+      const free = guestFreeSnapshot(rows.value, rowPcts.value, colPcts.value, bodyH.value)
       const payload = {
         v: VERSION,
-        rows: rows.value,
-        rowPcts: rowPcts.value,
-        colPcts: colPcts.value,
-        bodyH: bodyH.value,
+        rows: free.rows,
+        rowPcts: free.rowPcts,
+        colPcts: free.colPcts,
+        bodyH: free.bodyH,
       }
       if (isMemoryEnabled() !== false) safeSetItem(DOCK_LAYOUT_STORAGE_KEY, JSON.stringify(payload))
       saveChartState({ layout: payload })
     }
 
-    const findPos = (key: ChartKey) => {
+    const findPos = (key: DockKey) => {
       for (let ri = 0; ri < rows.value.length; ri++) {
         const ci = rows.value[ri].indexOf(key)
         if (ci >= 0) return { ri, ci }
@@ -196,13 +244,41 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
     const reconcile: ChartDockApi['reconcile'] = (active, opts) => {
       const prevRows = rows.value.map((r) => [...r])
       const prevPcts = [...rowPcts.value]
-      const { rows: next, srcIdx } = reconcileRows(prevRows, active)
+      // guest 不在勾选 active 里，但必须随 reconcile 保留（否则一切换勾选子集就消失）
+      const guests = prevRows.flat().filter(isGuestKey)
+      const { rows: next, srcIdx } = reconcileRows(prevRows, [...active, ...guests])
       rows.value = next
       // 增删勾选不得把 rowPcts 整表抹回模板：未手调时跟随像素目标（新行正好拿到
       // 辅助行目标高度、已有行一格不掉），手调过则保留存活行之间的比值。
       rowPcts.value = reconcileRowPcts(prevRows, prevPcts, next, srcIdx)
       normalizeSizes()
       if (opts?.persist !== false) persist()
+    }
+
+    const addGuest: ChartDockApi['addGuest'] = (key) => {
+      if (findPos(key)) return
+      const prevRows = rows.value.map((r) => [...r])
+      const prevPcts = [...rowPcts.value]
+      const next = [...prevRows, [key]]
+      rows.value = next
+      rowPcts.value = reconcileRowPcts(prevRows, prevPcts, next, [...prevRows.map((_, i) => i), -1])
+      normalizeSizes()
+      // 只改内存：guest 会话级，主图存档不被 guest 的加入改写
+    }
+
+    const removeGuest: ChartDockApi['removeGuest'] = (key) => {
+      const pos = findPos(key)
+      if (!pos) return
+      const next = rows.value.map((r) => [...r])
+      next[pos.ri].splice(pos.ci, 1)
+      if (next[pos.ri].length === 0) {
+        next.splice(pos.ri, 1)
+        rowPcts.value = rowPcts.value.filter((_, i) => i !== pos.ri)
+        colPcts.value = colPcts.value.filter((_, i) => i !== pos.ri)
+      }
+      rows.value = next
+      normalizeSizes()
+      // 只改内存：同 addGuest
     }
 
     const moveTo: ChartDockApi['moveTo'] = (from, to, dir) => {
@@ -247,10 +323,13 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
     const reset = (active: ChartKey[]) => {
       userTouched = true
       safeRemoveItem(DOCK_LAYOUT_STORAGE_KEY)
+      const guests = rows.value.flat().filter(isGuestKey)
       const d = defaultLayout(active)
-      rows.value = d.rows
-      rowPcts.value = d.rowPcts
-      colPcts.value = d.colPcts
+      // 重置只复位主图；会话级子集面板保留，追加在默认布局之后
+      const nextRows: DockKey[][] = [...d.rows, ...guests.map((g) => [g])]
+      rows.value = nextRows
+      rowPcts.value = defaultRowPcts(nextRows)
+      colPcts.value = nextRows.map((r) => equalPct(r.length))
       bodyH.value = null
       persist()
     }
@@ -327,6 +406,7 @@ export function useChartDock(getActive: () => ChartKey[]): ChartDockApi {
     singleton = {
       rows, rowPcts, colPcts, bodyH,
       reconcile, moveTo, reset, setRowPcts, setColPcts, setBodyH, findPos,
+      addGuest, removeGuest,
     }
   }
   refCount++
