@@ -6,7 +6,7 @@ import { gotoApp } from '../helpers/nav'
 import { uploadFile } from '../helpers/upload'
 import { cleanupQuiet } from '../helpers/cleanup'
 import { expectChartRendered, waitLoadingGone } from '../helpers/charts'
-import { selectAnalysisFile, selectParam } from '../helpers/params'
+import { selectAnalysisFile, selectParam, enableChartAndWait } from '../helpers/params'
 
 /**
  * 序列分布：散点图 fail 数量与文件 bin 汇总颗数一致（回归钉）。
@@ -72,15 +72,15 @@ test.describe('序列分布：fail 数量与 bin 汇总颗数一致', { tag: ['@
     await selectParam(page, 'KELVIN_VIN')
     await waitLoadingGone(page.locator(SINGLE))
 
-    const respPromise = page.waitForResponse(
+    const resp = await enableChartAndWait(
+      page,
+      'serial',
       (r) =>
         r.url().includes('/analysis/serial_distribution/') &&
         r.request().method() === 'POST' &&
         r.request().postData()?.includes('"param":"KELVIN_VIN"') === true,
-      { timeout: 20_000 },
+      30_000,
     )
-    await page.getByText('显示序列分布').click()
-    const resp = await respPromise
     expect(resp.status()).toBe(200)
     const body = await resp.json()
 

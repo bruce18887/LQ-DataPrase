@@ -1,5 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test'
 
+type Box = NonNullable<Awaited<ReturnType<Locator['boundingBox']>>>
+
 /**
  * 断言 ECharts 图表已正确渲染。
  * 兼容 SVG（默认）和 Canvas 两种渲染器：
@@ -33,8 +35,15 @@ export async function expectChartRendered(
 
   if (svgCount > 0) {
     await expect(svg, 'ECharts SVG 应可见').toBeVisible({ timeout })
-    const box = await svg.boundingBox()
-    expect(box, 'SVG 应有有效布局尺寸').not.toBeNull()
+    // 一次性 boundingBox 会在「可见判定 → 读取」之间被重渲染 detach 成 null
+    // （负载下窗口变宽，2026-11-12 wafermap:73 实测）⇒ 条件轮询重试，判据不变。
+    let box: Box | null = null
+    await expect
+      .poll(async () => {
+        box = await svg.boundingBox()
+        return box
+      }, { timeout })
+      .not.toBeNull()
     expect(box!.width, 'SVG 宽度应 > 0').toBeGreaterThan(0)
     expect(box!.height, 'SVG 高度应 > 0').toBeGreaterThan(0)
     return
@@ -43,8 +52,13 @@ export async function expectChartRendered(
   // Canvas 渲染回退
   const canvas = root.locator('canvas').nth(index)
   await expect(canvas, 'ECharts canvas 应存在且可见').toBeVisible({ timeout })
-  const box = await canvas.boundingBox()
-  expect(box, 'canvas 应有有效布局尺寸').not.toBeNull()
+  let box: Box | null = null
+  await expect
+    .poll(async () => {
+      box = await canvas.boundingBox()
+      return box
+    }, { timeout })
+    .not.toBeNull()
   expect(box!.width, 'canvas 宽度应 > 0').toBeGreaterThan(0)
   expect(box!.height, 'canvas 高度应 > 0').toBeGreaterThan(0)
 }
