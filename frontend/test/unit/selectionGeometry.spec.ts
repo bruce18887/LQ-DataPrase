@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   normalizeRect, intersectRects, normalizeRange, pickSerials, mergeSerials,
-  valueRangeWithOverflow, subsetPanelTitle, buildSubsetRequest,
+  valueRangeWithOverflow, fixateSelection, subsetPanelTitle, buildSubsetRequest,
   type DataPoint,
 } from '../../src/pages/analysis/composables/selectionGeometry'
 
@@ -73,6 +73,43 @@ describe('valueRangeWithOverflow (D6)', () => {
   })
   it('short centers array leaves range unchanged', () => {
     expect(valueRangeWithOverflow(0.4, 2.1, [1.0])).toEqual({ lo: 0.4, hi: 2.1 })
+  })
+})
+
+describe('fixateSelection（value_range 首次加载成功后固化 serials）', () => {
+  const range = { kind: 'value_range' as const, lo: 9, hi: null }
+
+  it('value_range + 非空 serials（含 serial_col）→ serials 选区', () => {
+    const out = fixateSelection(range, { selection_serials: [4, 5, 6], selection_serial_col: 'Serial_No' })
+    expect(out).toEqual({ kind: 'serials', serials: [4, 5, 6], serial_col: 'Serial_No' })
+    // 纯函数：不改原选区
+    expect(range).toEqual({ kind: 'value_range', lo: 9, hi: null })
+  })
+  it('value_range + 非空 serials（无 serial_col）→ serials 选区，serial_col 缺席', () => {
+    const out = fixateSelection(range, { selection_serials: [4, 5, 6] })
+    expect(out).toEqual({ kind: 'serials', serials: [4, 5, 6] })
+    expect((out as { serial_col?: string }).serial_col).toBeUndefined()
+  })
+  it('字符串 serials 原样透传（契约允许 str）', () => {
+    expect(fixateSelection(range, { selection_serials: ['A1', 'B2'], selection_serial_col: 'QR_Code' }))
+      .toEqual({ kind: 'serials', serials: ['A1', 'B2'], serial_col: 'QR_Code' })
+  })
+  it('value_range + 字段缺席 → 原样返回（同一引用，面板冻结）', () => {
+    expect(fixateSelection(range, { results: {} })).toBe(range)
+  })
+  it('value_range + respData 为 null/undefined → 原样返回', () => {
+    expect(fixateSelection(range, null)).toBe(range)
+    expect(fixateSelection(range, undefined)).toBe(range)
+  })
+  it('value_range + 空数组 → 原样返回', () => {
+    expect(fixateSelection(range, { selection_serials: [], selection_serial_col: 'Serial_No' })).toBe(range)
+  })
+  it('value_range + 非数组字段 → 原样返回（容错）', () => {
+    expect(fixateSelection(range, { selection_serials: '4,5,6' })).toBe(range)
+  })
+  it('serials kind → 原样返回（不重复固化，即使响应带字段）', () => {
+    const sel = { kind: 'serials' as const, serials: [1, 2], serial_col: 'Serial_No' }
+    expect(fixateSelection(sel, { selection_serials: [4, 5, 6], selection_serial_col: 'Serial_No' })).toBe(sel)
   })
 })
 
