@@ -110,13 +110,14 @@ IO 壳与全仓断言 `frontend/test/unit/lineLimit.spec.ts`（T2 档，`cd fron
 
 ## 产品介绍书定期维护（docs/intro/）
 
-介绍书是**随版本交付的活文档**，不是一次性产物：单一事实源 `docs/intro/`（单文件 HTML + 合成数据截图），
-dev/preview/Electron/服务器四形态经 `frontend/vite.config.ts` 的 `introBooklet()` 插件与 `config/urls.py` 的
-`intro` 挂载同源 serving；应用顶栏入口为 `[data-testid=open-intro]`（新标签页/新窗口）。
+介绍书是**随版本交付的活文档**，不是一次性产物：单一事实源 `docs/intro/`（**VitePress 工程**：markdown 章节 +
+`.vitepress/theme/data.ts` 文案数据 + Vue 复刻组件），构建产物经 `frontend/vite.config.ts` 的 `introBooklet()`
+插件与 `config/urls.py` 的 `intro` 挂载 serving；应用顶栏入口为 `[data-testid=open-intro]`（新标签页/新窗口；
+Electron file:// 下经后端 origin）。双击 file:// 形态已放弃（ES module CORS）。
 
 - **触发时机**：① 每次版本发布；② 任何改动 UI 页签/列名/按钮/判定口径的批次收口时；③ 新增主功能页或子页签；④ 每季度一次对照应用逐章走读。
-- **动作**：同步版本两处（顶栏徽标、封面芯片）与版本时间线 → `node scripts/intro/check.mjs` 必须 PASS →
-  按 `docs/reference/testing-gates.md` 选门禁档（serving 三文件 urls/vite.config/Topbar 命中全局清单 → 全量档）→
-  浏览器走读改动章节（桌面 + 420px，控制台零报错）后再提交。
+- **动作**：版本徽标由 config.mts 自动注入只需同步 `guide/11-versions.md` 时间线 → `npm run intro:build`（app build 自动链）→
+  `node scripts/intro/check.mjs` 必须 PASS → 按 `docs/reference/testing-gates.md` 选门禁档（serving 三文件 urls/vite.config/Topbar 命中全局清单 → 全量档）→
+  浏览器走读改动章节（桌面 + 420px，`npm run intro:dev` 或 preview，控制台零报错）后再提交。
 - **规格与截图复现配方**：`docs/superpowers/specs/2026-11-12-intro-booklet-design.md`；
   红线（真实料号/外迁兄弟工程名/凭据字面量/私有样例名）由 check.mjs 扫描，截图严禁真实数据入镜。

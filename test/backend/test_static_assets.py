@@ -183,8 +183,11 @@ class IntroBookletServingTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('html', response.headers.get('Content-Type', ''))
         body = b''.join(response.streaming_content) if response.streaming else response.content
-        self.assertIn(b'id="cover"', body, 'expected the intro booklet, not the SPA shell')
-        self.assertNotIn(b'<div id="app">', body)
+        # VitePress 与 SPA 都挂 #app，判别符用 VPContent + 书名 + 资源前缀互斥：
+        # SPA 外壳引 /assets/index-*.js，介绍书 base=/intro/ 引 /intro/assets/*。
+        self.assertIn(b'VPContent', body, 'expected the VitePress intro booklet, not the SPA shell')
+        self.assertIn('产品介绍书'.encode(), body)
+        self.assertNotIn(b'src="/assets/', body)
 
     def test_intro_index_deep_link_returns_booklet(self):
         self._assert_booklet(self.client.get('/intro/index.html'))
