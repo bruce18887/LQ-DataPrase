@@ -162,5 +162,54 @@ class SpaAdminRouteServingTests(unittest.TestCase):
         self.assertIn('/admin/login/', response.headers.get('Location', ''))
 
 
+@unittest.skipUnless(
+    (_frontend_dist() / 'intro' / 'index.html').is_file(),
+    'frontend/dist/intro not built — run `npm run build` in frontend/',
+)
+class IntroBookletServingTests(unittest.TestCase):
+    """产品介绍书挂在 /intro/：单端口形态下地址栏/刷新必须直达书本体。
+
+    2026-11-11 教训：e2e 跑 Vite 自带 history fallback，覆盖不到 Django URL 层；
+    若 intro 挂载漏在 SPA catch-all 之后，/intro/index.html 会返回应用外壳
+    （<div id="app">）而不是介绍书。对照组断言 catch-all 与 admin 归属不变。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.client = Client()
+
+    def _assert_booklet(self, response):
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('html', response.headers.get('Content-Type', ''))
+        body = b''.join(response.streaming_content) if response.streaming else response.content
+        self.assertIn(b'id="cover"', body, 'expected the intro booklet, not the SPA shell')
+        self.assertNotIn(b'<div id="app">', body)
+
+    def test_intro_index_deep_link_returns_booklet(self):
+        self._assert_booklet(self.client.get('/intro/index.html'))
+
+    def test_intro_bare_and_trailing_slash_return_booklet(self):
+        self._assert_booklet(self.client.get('/intro'))
+        self._assert_booklet(self.client.get('/intro/'))
+
+    def test_intro_png_asset_served_as_png(self):
+        response = self.client.get('/intro/assets/02-dashboard.png')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('png', response.headers.get('Content-Type', ''))
+        body = b''.join(response.streaming_content)
+        self.assertGreater(len(body), 10000)
+
+    def test_intro_traversal_returns_404(self):
+        response = self.client.get('/intro/../config/urls.py')
+        self.assertEqual(response.status_code, 404)
+
+    def test_spa_catch_all_still_owns_client_routes(self):
+        """对照组：让出 intro 前缀不等于把 catch-all 弄坏。"""
+        response = self.client.get('/dashboard')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'<div id="app">', response.content)
+
+
 if __name__ == '__main__':
     unittest.main()

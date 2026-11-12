@@ -95,6 +95,11 @@ def _serve_frontend_file(rel_path: str):
 # referenced by index.html with absolute paths.
 urlpatterns += [
     re_path(r'^assets/(?P<path>.+)$', _serve_frontend_file('assets')),
+    # 产品介绍书（docs/intro 构建期拷入 dist/intro）：必须挂在 SPA catch-all 之前，
+    # 否则 /intro/index.html 会被 catch-all 返回应用 index.html。
+    re_path(r'^intro/(?P<path>.+)$', _serve_frontend_file('intro')),
+    path('intro/', _serve_frontend_file('intro/index.html')),
+    path('intro', _serve_frontend_file('intro/index.html')),
     path('favicon.svg', _serve_frontend_file('favicon.svg')),
     path('icons.svg', _serve_frontend_file('icons.svg')),
 ]
@@ -105,5 +110,5 @@ urlpatterns += [
 # registered (i.e. in standalone mode); in dev mode the Vite dev server
 # handles routing.
 urlpatterns += [
-    re_path(r'^(?!api/|assets/|favicon\.svg|icons\.svg).*$', _spa_index),
+    re_path(r'^(?!api/|assets/|intro/|intro$|favicon\.svg|icons\.svg).*$', _spa_index),
 ]

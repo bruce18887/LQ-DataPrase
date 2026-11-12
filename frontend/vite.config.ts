@@ -1,11 +1,55 @@
 import { defineConfig } from 'vite'
+import type { Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import { readFileSync } from 'node:fs'
+import { cpSync, createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { execSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// 介绍书单一事实源是仓库 docs/intro：dev 由中间件挂 /intro，build 原样拷进 dist/intro，
+// 于是 preview、Electron file://、服务器档 Django 挂载四种形态共用同一相对路径 intro/index.html。
+const INTRO_DIR = path.resolve(__dirname, '../docs/intro')
+function introBooklet(): Plugin {
+  const types: Record<string, string> = {
+    '.html': 'text/html; charset=utf-8',
+    '.png': 'image/png',
+    '.svg': 'image/svg+xml',
+  }
+  let outDir = path.resolve(__dirname, 'dist')
+  let isBuild = false
+  return {
+    name: 'intro-booklet',
+    configResolved(cfg) {
+      isBuild = cfg.command === 'build'
+      outDir = path.resolve(cfg.root, cfg.build.outDir)
+    },
+    configureServer(server) {
+      server.middlewares.use('/intro', (req, res, next) => {
+        let rel: string
+        try {
+          rel = decodeURIComponent((req.url || '/').split('?')[0])
+        } catch {
+          next()
+          return
+        }
+        const file = path.resolve(INTRO_DIR, '.' + (rel === '/' ? '/index.html' : rel))
+        if (!file.startsWith(INTRO_DIR + path.sep) || !existsSync(file) || !statSync(file).isFile()) {
+          next()
+          return
+        }
+        res.setHeader('Content-Type', types[path.extname(file)] || 'application/octet-stream')
+        createReadStream(file).pipe(res)
+      })
+    },
+    closeBundle() {
+      if (isBuild && existsSync(INTRO_DIR)) {
+        cpSync(INTRO_DIR, path.join(outDir, 'intro'), { recursive: true })
+      }
+    },
+  }
+}
 
 // 版本单一事实源：frontend/package.json —— electron-builder 打包版本
 // （app.getVersion()，因 directories.app 指向 frontend 而读取该文件）
@@ -34,7 +78,7 @@ export default defineConfig({
     __BUILD_COMMIT__: JSON.stringify(gitShortHash()),
     __BUILD_DATE__: JSON.stringify(new Date().toISOString().slice(0, 10)),
   },
-  plugins: [vue()],
+  plugins: [vue(), introBooklet()],
   server: {
     host: '0.0.0.0',
     // 默认 3000（electron:dev 的 wait-on 写死它）；同机并发跑两套 e2e 时，

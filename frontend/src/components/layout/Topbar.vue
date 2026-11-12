@@ -36,6 +36,21 @@
         />
       </div>
 
+      <!-- 产品介绍书：新标签页打开（Electron 形态为新窗口）。
+           相对 document.baseURI 解析：dev/preview 走 http 同源 /intro/，
+           Electron file:// 走 dist/intro/，服务器档走 Django 的 intro 挂载。 -->
+      <el-button
+        text
+        circle
+        class="icon-btn"
+        data-testid="open-intro"
+        title="产品介绍书（新标签页打开）"
+        aria-label="在新标签页打开产品介绍书"
+        @click="openIntro"
+      >
+        <el-icon :size="18" aria-hidden="true"><Reading /></el-icon>
+      </el-button>
+
       <!-- 主题切换 -->
       <ThemeToggle />
 
@@ -99,7 +114,7 @@
 import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
-import { Search, Bell, User, ArrowDown, Setting, SwitchButton } from '@element-plus/icons-vue'
+import { Search, Bell, User, ArrowDown, Setting, SwitchButton, Reading } from '@element-plus/icons-vue'
 import ThemeToggle from '../common/ThemeToggle.vue'
 import AccountDialog from './AccountDialog.vue'
 import { useAboutDialog } from '../../composables/useAboutDialog'
@@ -120,6 +135,10 @@ const accountDialogVisible = ref(false)
 
 const onDropdownVisibleChange = (visible: boolean) => {
   dropdownVisible.value = visible
+}
+
+const openIntro = () => {
+  window.open(new URL('intro/index.html', document.baseURI).href, '_blank', 'noopener')
 }
 
 const displayName = computed(() => {
