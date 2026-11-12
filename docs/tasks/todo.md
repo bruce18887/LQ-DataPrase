@@ -313,3 +313,17 @@ runbook：`docs/reference/deployment-tls-termination-runbook-2026-11-11.md`；�
 ## 禁区（绝不自动碰）
 
 `~/LQ-DataPrase`、`Data/`、`C:\lqdp-e2e\template`、Electron profile 的 media/secret.key/Local Storage/Preferences、node_modules/.venv 本体、任何被 git 跟踪的文件。
+
+# 任务：圈选子图四点跟进改动（2026-11-12）
+
+计划：`docs/superpowers/plans/2026-11-12-subset-followup.md`（SDD 子代理驱动，台账在
+`.superpowers/sdd/2026-11-12-subset-followup/progress.md`，gitignored）。
+Spec：`docs/superpowers/specs/2026-11-11-chart-region-subset-design.md`（四处决策经用户批准反转，
+修订节由 Task 6 写回）。
+
+- [ ] Task 1 后端 value_range 选区固化 serials（selection_serials/selection_serial_col，T1 TDD）
+- [ ] Task 2 子集面板跟随测试项切换（fixateSelection + epoch 竞态守卫 + e2e 反转）
+- [ ] Task 3 选区一次性消费 + 光标 bug（preventDefault + user-select:none，先复现）
+- [ ] Task 4 serial 圈选改跨参数芯片高亮（useSerialHighlight 单例 + 叠加系列 + 菜单 highlight 模式）
+- [ ] Task 5 直方子图滚轮缩放 + 拖拽平移（enableDataZoom 默认关，仅子图开）
+- [ ] Task 6 收口：e2e 补强 + spec 修订 + 全量门禁（4-slot 池 + 后端全套）
