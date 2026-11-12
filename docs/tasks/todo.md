@@ -463,3 +463,12 @@ Spec：`docs/superpowers/specs/2026-11-11-chart-region-subset-design.md`（四�
 - e2e subset-drilldown 10/10：含「子集拖到直方图同排」+「guest 不进持久化」+ 手柄重排 + 空态 + 关闭。
 - affected 门禁 RESULT: PASS（真红 0）；settings/chart-memory 独占 unexpected 0（账号契约 intact）。
 - 注意：应用滚动在内层容器，e2e 跨行拖拽须 scrollIntoView+调 ancestor.scrollTop、并加高视口（1200/1600）。
+
+# 任务：子图展示联动 serial 芯片高亮，关子图才取消（2026-11-12 跟进）
+
+用户：子图展示后若开启 serial 分布，也应高亮这些芯片，直到关掉子图才取消。
+`useSerialHighlight` 的高亮集合改为 **brush ∪ 子集面板**（computed 并集去重保序）：
+子集 selection 固化为 serials 后即贡献高亮（serial 后开启也立即可见、跨参数保持）；
+右键「清除高亮」只清 brush；关闭子集/切文件清空后子集贡献自然消失。
+T2 serialHighlight.spec 钉并集/清除/关子集归零；e2e 补「子图→后开 serial 高亮 {4,5,6}→关子图取消」。
+验证：subset-drilldown 11/11；affected 门禁 RESULT: PASS（真红 0）。

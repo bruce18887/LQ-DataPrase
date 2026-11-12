@@ -1,73 +1,86 @@
-import { describe, it, expect } from 'vitest'
-import { pickHighlightPoints } from '../../src/pages/analysis/composables/serialHighlight'
+/**
+ * serial 高亮 = brush ∪ 子集面板（T2，node 环境）。
+ *
+ * 承重判据（2026-11-12 跟进：子图展示即高亮其芯片，关掉子图才取消）：
+ *  ① 子集面板（selection 固化为 serials）打开即贡献高亮，serial 图后开启也可见；
+ *  ② 右键「清除高亮」(clear) 只清 brush，子集贡献仍在；
+ *  ③ 关闭子集面板（clearAll/remove）后子集贡献消失，无 brush 时高亮归零；
+ *  ④ 并集去重保序；value_range（未固化）面板不贡献。
+ *
+ * 单例约束同 subsetPanels.spec：全文件共享一份 pinia；面板直接推 panels.value，
+ * 不调 create()（避免真实 histogram 请求）；api 已 mock 切断 import 副作用链。
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { setActivePinia, createPinia } from 'pinia'
+import { nextTick } from 'vue'
 
-/** 绘制点全字段（与 SerialChart laneGroups 的点对象同形）：tooltip 需要这些字段原样保留。 */
-interface DrawPoint {
-  value: [number, number, number, number]
-  realY: number
-  realSerial: number | string
-  isFail: boolean
-  anchor: number
+const post = vi.fn()
+vi.mock('../../src/api', () => ({ default: { post: (...args: any[]) => post(...args) } }))
+
+import { useSubsetPanels, type SubsetPanel } from '../../src/pages/analysis/composables/useSubsetPanels'
+import { useSerialHighlight } from '../../src/pages/analysis/composables/useSerialHighlight'
+
+const pinia = createPinia()
+
+function serialsPanel(id: number, serials: (number | string)[]): SubsetPanel {
+  return {
+    id, param: 'P1',
+    selection: { kind: 'serials', serials, serial_col: 'Serial_No' },
+    result: null, loading: false, error: null, epoch: 0,
+  }
 }
 
-function pt(realSerial: number | string, y = 1): DrawPoint {
-  return { value: [0, y, 0, 0], realY: y, realSerial, isFail: false, anchor: 0 }
-}
-
-describe('pickHighlightPoints', () => {
-  it('逐 lane 精确匹配：各 lane 只留命中点，保持 lane 结构与顺序', () => {
-    const a0 = pt(1); const a1 = pt(2); const a2 = pt(3)
-    const b0 = pt(4); const b1 = pt(5)
-    const lanes = [[a0, a1, a2], [b0, b1]]
-    const out = pickHighlightPoints(lanes, [2, 4])
-    expect(out).toEqual([[a1], [b0]])
-    // lane 数不变（即使某 lane 无命中也保留空 lane）
-    expect(out.length).toBe(2)
+describe('useSerialHighlight — brush ∪ 子集', () => {
+  beforeEach(() => {
+    setActivePinia(pinia)
+    post.mockReset()
   })
 
-  it('点对象原样保留（同一引用，全字段不丢）', () => {
-    const a = pt(7, 3.5)
-    const out = pickHighlightPoints([[a]], [7])
-    expect(out[0][0]).toBe(a) // 引用相等 ⇒ value/realY/realSerial/isFail/anchor 全在
-    expect(out[0][0].realY).toBe(3.5)
-    expect(out[0][0].value).toEqual([0, 3.5, 0, 0])
+  it('brush 单独贡献；clear 清零', () => {
+    const hl = useSerialHighlight()
+    const panels = useSubsetPanels()
+    panels.clearAll()
+    hl.clear()
+    hl.set({ kind: 'serials', serials: [1, 2], serial_col: 'Serial_No' })
+    expect(hl.serials.value).toEqual([1, 2])
+    hl.clear()
+    expect(hl.serials.value).toEqual([])
   })
 
-  it('严格类型：数值 4 不匹配字符串 "4"（与后端 isin 口径一致）', () => {
-    const num = pt(4)
-    const str = pt('4')
-    const lanes = [[num, str]]
-    expect(pickHighlightPoints(lanes, [4])).toEqual([[num]])
-    expect(pickHighlightPoints(lanes, ['4'])).toEqual([[str]])
-    // 混合 serials 各取各的，互不串配
-    expect(pickHighlightPoints(lanes, [4, '4'])).toEqual([[num, str]])
+  it('子集打开即贡献；clear(brush) 后子集仍在；关子集才归零', async () => {
+    const hl = useSerialHighlight()
+    const panels = useSubsetPanels()
+    panels.clearAll()
+    hl.clear()
+    await nextTick()
+
+    panels.panels.value = [serialsPanel(1, [4, 5, 6])]
+    await nextTick()
+    expect(hl.serials.value, '子图展示即高亮其芯片').toEqual([4, 5, 6])
+
+    // 右键清除高亮只清 brush，子集贡献保持
+    hl.clear()
+    expect(hl.serials.value).toEqual([4, 5, 6])
+
+    // 关掉子图才取消
+    panels.clearAll()
+    await nextTick()
+    expect(hl.serials.value).toEqual([])
   })
 
-  it('空 serials → 各 lane 空（lane 结构仍在）', () => {
-    const lanes = [[pt(1), pt(2)], [pt(3)]]
-    expect(pickHighlightPoints(lanes, [])).toEqual([[], []])
-  })
+  it('并集去重保序（brush 在前）；value_range 不贡献', async () => {
+    const hl = useSerialHighlight()
+    const panels = useSubsetPanels()
+    panels.clearAll()
+    hl.clear()
+    await nextTick()
 
-  it('serials 重复 → 点只出现一次（Set 成员判定，不按 serials 次数复制）', () => {
-    const a = pt(4)
-    const lanes = [[a, pt(5)]]
-    const out = pickHighlightPoints(lanes, [4, 4, 4])
-    expect(out).toEqual([[a]])
-    expect(out[0].length).toBe(1)
-  })
-
-  it('未命中 serial → 空 lane', () => {
-    const lanes = [[pt(1), pt(2)], [pt(3)]]
-    expect(pickHighlightPoints(lanes, [99, 'nope'])).toEqual([[], []])
-  })
-
-  it('空 laneGroups → 空数组', () => {
-    expect(pickHighlightPoints([], [1, 2])).toEqual([])
-  })
-
-  it('字符串序列号路径：按 label 精确匹配', () => {
-    const a = pt('A1'); const b = pt('A2'); const c = pt('B1')
-    const out = pickHighlightPoints([[a, b, c]], ['A2', 'B1'])
-    expect(out).toEqual([[b, c]])
+    hl.set({ kind: 'serials', serials: [1, 2], serial_col: 'Serial_No' })
+    panels.panels.value = [
+      serialsPanel(1, [2, 3]),
+      { ...serialsPanel(2, []), selection: { kind: 'value_range', lo: 0, hi: 1 } },
+    ]
+    await nextTick()
+    expect(hl.serials.value).toEqual([1, 2, 3])
   })
 })
