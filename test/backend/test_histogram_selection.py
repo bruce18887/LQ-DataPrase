@@ -15,13 +15,14 @@ import django  # noqa: E402
 
 django.setup()
 
+import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from django.test import SimpleTestCase  # noqa: E402
 from rest_framework.test import APIRequestFactory, force_authenticate  # noqa: E402
 
 from apps.analysis import test_support  # noqa: E402
 from apps.analysis.services.data_services.subset_selection import (  # noqa: E402
-    parse_selection, filter_df_by_selection, resolve_selection_serials,
+    MAX_SERIALS, parse_selection, filter_df_by_selection, resolve_selection_serials,
 )
 from apps.analysis.test_support import fake_datafile  # noqa: E402
 from apps.analysis.views import AnalysisViewSet  # noqa: E402
@@ -257,6 +258,22 @@ class ResolveSelectionSerialsTests(SimpleTestCase):
     def test_row_order_preserved(self):
         df = pd.DataFrame({'Serial_No': [5, 2, 9], 'P1': [1.0, 2.0, 3.0]})
         self.assertEqual(resolve_selection_serials(df), ([5, 2, 9], 'Serial_No'))
+
+    def test_serials_at_cap_returns_list(self):
+        # 边界含等号：恰好 MAX_SERIALS 仍固化（parse_selection 允许 1..MAX_SERIALS）
+        df = pd.DataFrame({'Serial_No': np.arange(MAX_SERIALS),
+                           'P1': np.arange(MAX_SERIALS, dtype=float)})
+        result = resolve_selection_serials(df)
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result[0]), MAX_SERIALS)
+        self.assertEqual(result[1], 'Serial_No')
+
+    def test_serials_over_cap_returns_none(self):
+        # 超上限的 serials 跨参数重查必被 parse_selection 400 ⇒ 不固化（None，
+        # 响应两字段缺席，前端保持 value_range），不得截断丢芯片身份
+        df = pd.DataFrame({'Serial_No': np.arange(MAX_SERIALS + 1),
+                           'P1': np.arange(MAX_SERIALS + 1, dtype=float)})
+        self.assertIsNone(resolve_selection_serials(df))
 
 
 class HistogramViewSelectionTests(SimpleTestCase):

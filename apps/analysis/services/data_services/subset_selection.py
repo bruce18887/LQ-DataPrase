@@ -100,7 +100,8 @@ def resolve_selection_serials(df):
 
     供前端把选区固化成 serials 跨参数重查（契约 Global Constraints #11）。
     numpy 标量转 Python 原生（int/float），字符串保持 str；丢弃 NaN/None，
-    保持行序。无序列列或丢弃后为空 → None（响应两字段缺席，旧口径不变）。
+    保持行序。无序列列、丢弃后为空或超 MAX_SERIALS → None（响应两字段缺席，
+    旧口径不变）。
     """
     serial_col = get_serial_column(df)
     if serial_col is None:
@@ -113,5 +114,10 @@ def resolve_selection_serials(df):
             v = v.item()
         serials.append(v)
     if not serials:
+        return None
+    # 上限与 parse_selection 的 serials 守卫对齐：超限固化会在跨参数重查时被
+    # parse_selection 判 400（面板卡死、重试也失败）。宁可不固化（返回 None，
+    # 两字段缺席，前端保持 value_range），也不截断——截断会静默丢芯片身份。
+    if len(serials) > MAX_SERIALS:
         return None
     return serials, serial_col
