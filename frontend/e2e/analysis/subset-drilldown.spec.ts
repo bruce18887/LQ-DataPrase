@@ -105,6 +105,21 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
     return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 }
   }
 
+  /** 应用滚动发生在内层容器（非 window）：把目标顶滚到视口 y，避开 sticky 顶栏。 */
+  async function scrollToPanelTop(page: import('@playwright/test').Page, sel: string, y = 150) {
+    await page.evaluate(([s, yy]) => {
+      const el = document.querySelector(s) as HTMLElement
+      el.scrollIntoView({ block: 'start' })
+      let n: HTMLElement | null = el.parentElement
+      while (n && n !== document.body) {
+        const oy = getComputedStyle(n).overflowY
+        if (oy === 'auto' || oy === 'scroll') { n.scrollTop -= yy; return }
+        n = n.parentElement
+      }
+      window.scrollBy(0, -yy)
+    }, [sel, y] as [string, number])
+  }
+
   /** 读图表 inside dataZoom 窗口；缺席/空返回 null（主直方图默认关缩放）。 */
   function zoomWindow(host: import('@playwright/test').Locator) {
     return host.evaluate((el: any) => {
@@ -404,6 +419,8 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
   })
 
   test('拖拽手柄重排面板（⠿ 拖到目标面板 → move 语义）', async ({ page }) => {
+    // 高视口：两个子集行需同屏，拖拽落点才够得着
+    await page.setViewportSize({ width: 1400, height: 1200 })
     await openAnalysis(page)
     await expectChartRendered(page.locator(`${SINGLE} [data-chart-key="hist"]`))
     const histB = `${SINGLE} [data-chart-key="hist"] .chart-b`
@@ -424,7 +441,8 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
 
     // 拖第一张手柄到第二张面板中心 → move(1,2) → 顺序 [2,1]
     const grip = panels.nth(0).locator('[data-subset-grip]')
-    await grip.evaluate((el) => el.scrollIntoView({ block: 'center' }))
+    // 确定性滚动：第一张面板顶放到 y=150（避开 sticky 顶栏），第二张中心仍在 1200 视口内
+    await scrollToPanelTop(page, '[data-subset-panel]', 150)
     const gb = await grip.boundingBox()
     const tb = await panels.nth(1).boundingBox()
     expect(gb).not.toBeNull()
@@ -438,6 +456,48 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
       async () => (await panels.evaluateAll((els) => els.map((e) => e.getAttribute('data-subset-id')))).join(','),
       { timeout: 10_000 },
     ).toBe('2,1')
+  })
+
+  test('子集可拖到直方图同排（左右并排），且 guest 不进持久化', async ({ page }) => {
+    // 高视口 + 关掉序列行：hist 行(780) + 子集行头部需同屏，真实指针拖拽才够得着
+    await page.setViewportSize({ width: 1400, height: 1600 })
+    await openAnalysis(page)
+    await ensureChartToggles(page, { serial: false })
+    await waitLoadingGone(page.locator(SINGLE))
+    await expectChartRendered(page.locator(`${SINGLE} [data-chart-key="hist"]`))
+    const { cx, cy } = await drag(page, `${SINGLE} [data-chart-key="hist"] .chart-b`, 0.82, 0.5, 0.97, 0.5)
+    await page.mouse.click(cx, cy, { button: 'right' })
+    await expectMenuVisible(page)
+    await page.locator('[data-menu-create-subset]').click()
+    const panel = page.locator('[data-subset-panel]')
+    await expect(panel).toHaveCount(1)
+    await expect(panel).toHaveAttribute('data-subset-n', '3', { timeout: 15_000 })
+    // hist 顶放到 y=60：hist 右半落点(~450)与子集手柄(~860)同屏（1600 视口）
+    await scrollToPanelTop(page, `${SINGLE} [data-chart-key="hist"]`, 60)
+
+    // 拖子集手柄到直方图右半 → dir=right → 两者同排并排
+    const grip = panel.locator('[data-subset-grip]')
+    const gb = await grip.boundingBox()
+    const hb = await page.locator(`${SINGLE} [data-chart-key="hist"]`).boundingBox()
+    expect(gb).not.toBeNull()
+    expect(hb).not.toBeNull()
+    await page.mouse.move(gb!.x + gb!.width / 2, gb!.y + gb!.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(hb!.x + hb!.width * 0.9, hb!.y + hb!.height * 0.5, { steps: 12 })
+    await page.mouse.up()
+
+    await expect.poll(async () => page.evaluate(() => {
+      const h = document.querySelector('[data-chart-key="hist"]')
+      const s = document.querySelector('[data-subset-panel]')
+      return !!h && !!s && h.closest('.chart-dock__row') === s.closest('.chart-dock__row')
+    }), { timeout: 10_000 }).toBe(true)
+
+    // guest 会话级：localStorage 布局存档不得携带 subset:（R5/D4 账号记忆契约）
+    const stored = await page.evaluate(() => localStorage.getItem('lqdp-analysis-chart-layout'))
+    if (stored) {
+      const rows = JSON.parse(stored).rows as string[][]
+      expect(rows.flat().some((k) => k.startsWith('subset:')), 'guest 不得进持久化').toBe(false)
+    }
   })
 
   test('选区无数据 → 中性空态（el-empty，无重试按钮、无错误横幅）', async ({ page }) => {

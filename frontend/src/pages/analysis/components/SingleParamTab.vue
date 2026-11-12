@@ -241,11 +241,10 @@
         </template>
       </ChartDock>
       <el-empty
-        v-else-if="!anyChartVisible"
+        v-else-if="!anyChartVisible && !hasSubsets"
         class="chart-empty"
         description="未选择任何图表，请勾选上方图表显示"
       />
-      <SubsetPanelArea />
     </template>
   </AnalysisTabLayout>
 </template>
@@ -274,7 +273,7 @@ import QQPlotStatsTable from './QQPlotStatsTable.vue'
 import BoxPlotStatsTable from './distribution/BoxPlotStatsTable.vue'
 import AnalysisTabLayout from './AnalysisTabLayout.vue'
 import ChartDock from './ChartDock.vue'
-import SubsetPanelArea from './SubsetPanelArea.vue'
+import { useSubsetDockBridge } from '../composables/useSubsetDockBridge'
 import { useSubsetPanels } from '../composables/useSubsetPanels'
 import ErrorBanner from '../../../components/common/ErrorBanner.vue'
 import { useHistogram } from '../composables/useHistogram'
@@ -344,6 +343,9 @@ const {
 // 面板头「回到默认视角」图标每点一次 +1，Site3DChart watch 它做合并式 viewControl 复位
 const site3dResetEpoch = ref(0)
 const subsetPanels = useSubsetPanels()
+// 子集面板并入 dock 作为 guest：可与直方图同排拖拽（会话级，不持久化）
+useSubsetDockBridge(() => activeChartKeys.value)
+const hasSubsets = computed(() => subsetPanels.panels.value.length > 0)
 
 // Composable: Histogram
 const {
@@ -469,8 +471,10 @@ const {
 // ========== Chart dock（可停靠拼格布局）==========
 // 勾选 key 列表与「× 关闭」都在 useChartToggles（顺序即 ChartDock 的 reconcile 依据）。
 // dock 显隐：其余图由各自 showX 决定挂载，唯直方图需要数据才渲染有意义——
-// 当直方图是唯一选中项且数据未到时先不挂 dock，避免空图
-const dockVisible = computed(() => anyChartVisible.value && (!showHistogram.value || !!histResult.value))
+// 当直方图是唯一选中项且数据未到时先不挂 dock，避免空图。
+// 子集 guest 自带数据：只要有子集面板就挂 dock（即使主图全不勾选）。
+const dockVisible = computed(() =>
+  hasSubsets.value || (anyChartVisible.value && (!showHistogram.value || !!histResult.value)))
 
 // ========== Store sync ==========
 // 无：图表配置全部经 storeToRefs 直接读写 store（见上方 state 声明），

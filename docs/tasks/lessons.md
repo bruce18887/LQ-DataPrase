@@ -2985,3 +2985,18 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   程序化 v-model / 自动回退首项都不触发）。若把自动回退也写进记忆，「先访问分析页→再上传新文件→
   重进」会被旧记忆钉死，且破坏依赖「默认最新」的既有 e2e。读侧 `pickFallbackFile` 对失效记忆
   （删文件/换账号，文件按 owner 过滤）回退最新，跨账号安全无需登出清键（R5 后端那层天然成立）。
+
+## 2026-11-12 子集要「和直方图一起拖」必须进 dock 当 guest；e2e 跨行拖拽的两个几何坑
+
+- **现象**：上一批给独立子集区加了 ⠿ 手柄（内部重排），用户仍反馈「无法拖到和直方图一起」。
+  独立区域与 dock 是两套布局，跨区拖拽没有落点。**规则**：要让子集与主图同排对比，子集必须成为
+  dock 布局的成员（guest `subset:<id>`），复用 dock 象限拖拽；单独再建一个可拖区域满足不了「一起」。
+  守 D4/R5 的办法是 guest 只进内存 rows，`persist` 前 `guestFreeSnapshot` 剥离（无 guest 逐字原样，
+  有 guest 剔除归一），账号/localStorage 永不携带 `subset:`。
+- **坑①（滚动容器）**：应用页面滚动发生在**内层容器**（非 window）。e2e 里 `window.scrollTo/scrollBy`
+  是 no-op，拖拽落点算错→选区/重排静默失败（症状是断言值不变，不是报错）。正解：`el.scrollIntoView`
+  后向上找 `overflowY:auto|scroll` 的祖先调 `scrollTop`（见 subset-drilldown `scrollToPanelTop`）。
+- **坑②（行高 vs 视口）**：dock 行有像素目标（hist 780/辅助 460），两个子集行或 hist+子集行在默认
+  720 视口里**不可能同屏**，真实指针拖拽够不着落点。e2e 跨行拖拽须 `setViewportSize` 加高（1200/1600）
+  并确定性滚动把「源手柄」与「目标落点」同时放进视口；必要时关掉无关行（如 serial）缩短 dock。
+  这也解释了为什么用户在自己较高的屏幕上能拖、而矮视口 e2e 拖不动。

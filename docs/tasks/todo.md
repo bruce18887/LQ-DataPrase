@@ -441,3 +441,25 @@ Spec：`docs/superpowers/specs/2026-11-11-chart-region-subset-design.md`（四�
 
 **遗留**：仪表板「最新 ready 每次挂载重算」是文档化设计（e2e README:193），本批未改；
 收口全量池 + 后端全套待并入 master 前按 testing-gates §1 跑（本批为 affected 档验证）。
+
+# 任务：子集面板并入 dock，可与直方图同排拖拽（2026-11-12 跟进）
+
+用户反馈「拖动手柄有了但是无法拖到和直方图一起」——上一批的独立子集区只能内部重排，
+不能与主图同排。本批把子集面板升级为 dock 的会话级 **guest**（`subset:<id>`），复用 dock
+既有的象限拖拽（左/右/上/下/交换），即可拖到直方图旁边并排对比。
+
+## 设计（守住 D4/R5 账号记忆契约）
+
+- guest 只存在于内存 rows；`persist()` 经 `guestFreeSnapshot` 剥离 guest 后再写 localStorage/账号，
+  **无 guest 时逐字原样**（既有存档不被改写，chart-memory 契约绿）。
+- `reconcile` 把 guest 计入 active 保留（切换勾选不丢子集）；`addGuest/removeGuest` 只改内存不落盘。
+- `useSubsetDockBridge` 单向把面板集合投影成 guest（新增→addGuest、关/切文件→removeGuest），dock 内拖拽不回环。
+- 渲染：ChartDock 对 guest 用 ChartPanel（挂 data-subset-* 契约 + ⠿ data-subset-grip + 关闭子集面板）+ SubsetPanelBody。
+- 删除独立 SubsetPanelArea 与 useSubsetPanels.move（重排改由 dock.moveTo 承载）。
+
+## 验证
+
+- T2：dockGuests.spec（guestFreeSnapshot 无 guest 逐字/有 guest 剥离归一、reconcileRows 保留 guest）+ 全量 867 例绿。
+- e2e subset-drilldown 10/10：含「子集拖到直方图同排」+「guest 不进持久化」+ 手柄重排 + 空态 + 关闭。
+- affected 门禁 RESULT: PASS（真红 0）；settings/chart-memory 独占 unexpected 0（账号契约 intact）。
+- 注意：应用滚动在内层容器，e2e 跨行拖拽须 scrollIntoView+调 ancestor.scrollTop、并加高视口（1200/1600）。
