@@ -2963,3 +2963,25 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   MEASURED**（flakefix-close2.log）。flaky 2 均在未触碰文件（tiny-fail-bar:79 五万行上传 120s
   toast 超时 / view-data:1393 1px 布局抖动），独占复跑 38/38 零重试（flakefix-recheck2.log）
   ⇒ 负载抖动，非产品缺陷。
+
+## 2026-11-12 子集面板三改：「没数据」走的是 400 empty_selection 的 catch 分支，不是 200 null 的 try 分支
+
+- **现象**：用户反馈子集直方图「没数据时重试按钮多余」。第一版按前端代码假设修——删掉
+  `useSubsetPanels.load` try 分支里 `if (!panel.result) panel.error='选区内无有效数值数据'`，
+  以为空态来自「200 但缺该参数 key」。T2 绿、build 绿，但 e2e 真实渲染**仍显示重试按钮**。
+- **根因**：后端 `analysis_views.histogram:235` 对空选区回的是 **400 `error_response('empty_selection', …)`**，
+  axios 抛错走 load 的 **catch** 分支 → `formatError` 把后端 message 写成 `panel.error` →
+  ErrorBanner+重试。用户截图里「子集数据加载失败 / 选区内无有效数值数据」正是这条 catch 路径，
+  不是 try 分支。**规则**：区分「空态 vs 失败」前先看后端**实际返回形态**（状态码 + code），
+  别凭前端某一行代码反推；同一句中文文案可能由 try（缺 key）与 catch（400）两条路径产出，
+  只改一条等于没改。正解：catch 里按 `e.response.data.code==='empty_selection'` 判空态
+  （result=null、error 保持 null → 面板 v-else 渲染中性 el-empty），其余错误才写 error。
+  T2 必须分别钉 200 缺参 / 400 empty_selection / 400 其它码（后者保留 error）三条。
+- **第二条（e2e 框选坐标）**：用 echarts `convertToPixel` 把目标值映射成像素再框选时，
+  **必须先 `scrollIntoView`**——直方图 grid 可高于 720 视口，不滚动时 grid 中线落在折叠线以下，
+  鼠标事件打在 `<html>` 背景上 → zrender mousedown 不触发 → 选区建不起来 → 右键菜单不开
+  （失败形状是 `expectMenuVisible` 超时，不是断言值错）。同既有 drag helper 的 scrollIntoView 注释。
+- **第三条（文件记忆写侧）**：「记住上次选择」的落盘只认**用户交互**（el-select `change`，
+  程序化 v-model / 自动回退首项都不触发）。若把自动回退也写进记忆，「先访问分析页→再上传新文件→
+  重进」会被旧记忆钉死，且破坏依赖「默认最新」的既有 e2e。读侧 `pickFallbackFile` 对失效记忆
+  （删文件/换账号，文件按 owner 过滤）回退最新，跨账号安全无需登出清键（R5 后端那层天然成立）。

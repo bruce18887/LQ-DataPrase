@@ -170,3 +170,99 @@ describe('useSubsetPanels 单例生命周期（detached effectScope）', () => {
     expect(post).toHaveBeenCalledTimes(4)
   })
 })
+
+describe('move — 拖拽重排（扁平网格 splice 语义）', () => {
+  beforeEach(() => {
+    setActivePinia(pinia)
+    post.mockReset()
+  })
+
+  it('首面板移到末位：其余相对序不变', () => {
+    const api = useSubsetPanels()
+    api.clearAll()
+    api.panels.value = [{ ...fakePanel(), id: 1 }, { ...fakePanel(), id: 2 }, { ...fakePanel(), id: 3 }]
+    api.move(1, 3)
+    expect(api.panels.value.map((p) => p.id)).toEqual([2, 3, 1])
+  })
+
+  it('末面板移到首位', () => {
+    const api = useSubsetPanels()
+    api.panels.value = [{ ...fakePanel(), id: 1 }, { ...fakePanel(), id: 2 }, { ...fakePanel(), id: 3 }]
+    api.move(3, 1)
+    expect(api.panels.value.map((p) => p.id)).toEqual([3, 1, 2])
+  })
+
+  it('from===to / 未知 id → 原序不变（不抛、不清空）', () => {
+    const api = useSubsetPanels()
+    api.panels.value = [{ ...fakePanel(), id: 1 }, { ...fakePanel(), id: 2 }]
+    api.move(1, 1)
+    api.move(99, 1)
+    api.move(1, 99)
+    expect(api.panels.value.map((p) => p.id)).toEqual([1, 2])
+  })
+})
+
+describe('空态 — result 为 null 不写 error（面板据此渲染无重试的 el-empty）', () => {
+  beforeEach(() => {
+    setActivePinia(pinia)
+    post.mockReset()
+  })
+
+  it('响应缺该参数 → result null / error null / loading false', async () => {
+    const store = useSingleTabStore()
+    const api = useSubsetPanels()
+    api.clearAll()
+    store.fileId = 1
+    store.selectedParam = 'P1'
+    await nextTick()  // 冲掉 fileId/param 复位触发的 watch，隔离本次 create
+
+    post.mockResolvedValue({ data: { results: {} } })
+    api.create({ kind: 'value_range', lo: 0, hi: 1 })
+    const panel = api.panels.value[0]
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(panel.result).toBeNull()
+    // 承重：空态不是失败。旧实现此处写 error='选区内无有效数值数据' → 面板显示
+    // ErrorBanner+重试按钮（用户反馈多余）；现在 error 必须保持 null。
+    expect(panel.error, '空态不得写 error，否则面板会渲染重试按钮').toBeNull()
+    expect(panel.loading).toBe(false)
+  })
+
+  it('后端 400 empty_selection（用户实测路径）→ 空态，不写 error', async () => {
+    const store = useSingleTabStore()
+    const api = useSubsetPanels()
+    api.clearAll()
+    store.fileId = 1
+    store.selectedParam = 'P1'
+    await nextTick()
+
+    // 后端对空选区回 400 {code:'empty_selection'}（analysis_views.histogram），
+    // axios 抛错走 catch——必须按空态处理，而不是 formatError 写成失败横幅。
+    post.mockRejectedValue({ response: { data: { code: 'empty_selection', message: '选区内无有效数值数据' } } })
+    api.create({ kind: 'value_range', lo: 0.75, hi: 0.85 })
+    const panel = api.panels.value[0]
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(panel.result).toBeNull()
+    expect(panel.error, 'empty_selection 是空态，不得写 error（否则显示重试按钮）').toBeNull()
+    expect(panel.loading).toBe(false)
+  })
+
+  it('真实失败（网络/其它错误码）仍写 error → 保留重试', async () => {
+    const store = useSingleTabStore()
+    const api = useSubsetPanels()
+    api.clearAll()
+    store.fileId = 1
+    store.selectedParam = 'P1'
+    await nextTick()
+
+    post.mockRejectedValue({ response: { data: { code: 'internal_error', message: '服务器内部错误' } } })
+    api.create({ kind: 'value_range', lo: 0, hi: 1 })
+    const panel = api.panels.value[0]
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(panel.result).toBeNull()
+    expect(panel.error, '真实失败必须写 error，面板据此显示 ErrorBanner+重试').toBe('服务器内部错误')
+    expect(panel.loading).toBe(false)
+  })
+})

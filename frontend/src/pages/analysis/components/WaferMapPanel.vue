@@ -106,6 +106,7 @@ const { fileId, params, loading: listLoading } = storeToRefs(useWaferTabStore())
 useTabFileParams({
   ctx: { fileId, params, loading: listLoading },
   files: computed(() => props.files),
+  memoryKey: 'wafer',
 })
 
 // 判定参数可选：不入 store，换文件/换列表后若已不在候选集里就回到「无」

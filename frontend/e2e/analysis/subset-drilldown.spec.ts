@@ -402,4 +402,75 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
     // 交互后主图仍无 dataZoom
     expect(await zoomWindow(mainHost), '交互后主直方图仍不应有缩放').toBeNull()
   })
+
+  test('拖拽手柄重排面板（⠿ 拖到目标面板 → move 语义）', async ({ page }) => {
+    await openAnalysis(page)
+    await expectChartRendered(page.locator(`${SINGLE} [data-chart-key="hist"]`))
+    const histB = `${SINGLE} [data-chart-key="hist"] .chart-b`
+    // 连建两张面板（同值域），钉住重排是「按 id 移动」而非重建
+    for (let i = 0; i < 2; i++) {
+      const { cx, cy } = await drag(page, histB, 0.82, 0.5, 0.97, 0.5)
+      await page.mouse.click(cx, cy, { button: 'right' })
+      await expectMenuVisible(page)
+      await page.locator('[data-menu-create-subset]').click()
+      await expect(page.locator('.chart-brush-overlay')).toHaveCount(0)
+    }
+    const panels = page.locator('[data-subset-panel]')
+    await expect(panels).toHaveCount(2)
+    await expect(panels.nth(1)).toHaveAttribute('data-subset-n', '3', { timeout: 15_000 })
+    // 每张面板一个手柄（用户反馈「看不到拖动手柄」的回归钉）
+    await expect(page.locator('[data-subset-grip]')).toHaveCount(2)
+    expect(await panels.evaluateAll((els) => els.map((e) => e.getAttribute('data-subset-id')))).toEqual(['1', '2'])
+
+    // 拖第一张手柄到第二张面板中心 → move(1,2) → 顺序 [2,1]
+    const grip = panels.nth(0).locator('[data-subset-grip]')
+    await grip.evaluate((el) => el.scrollIntoView({ block: 'center' }))
+    const gb = await grip.boundingBox()
+    const tb = await panels.nth(1).boundingBox()
+    expect(gb).not.toBeNull()
+    expect(tb).not.toBeNull()
+    await page.mouse.move(gb!.x + gb!.width / 2, gb!.y + gb!.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(tb!.x + tb!.width / 2, tb!.y + tb!.height / 2, { steps: 12 })
+    await page.mouse.up()
+
+    await expect.poll(
+      async () => (await panels.evaluateAll((els) => els.map((e) => e.getAttribute('data-subset-id')))).join(','),
+      { timeout: 10_000 },
+    ).toBe('2,1')
+  })
+
+  test('选区无数据 → 中性空态（el-empty，无重试按钮、无错误横幅）', async ({ page }) => {
+    await openAnalysis(page)
+    await expectChartRendered(page.locator(`${SINGLE} [data-chart-key="hist"]`))
+    const histHost = `${SINGLE} [data-chart-key="hist"] .histogram-chart-wrapper .chart-container`
+    // 夹具 KELVIN_VIN=[1,1.5,0.5,10,11,12]：0.75~0.85 是无数据空档（远离 overflow 兜底柱）。
+    // 用 echarts convertToPixel 把空档值精确映射成像素再框选，不靠轴几何猜测。
+    // 先把图滚进视口：直方图 grid 可高于 720 视口，不滚动时 grid 中线落在折叠线以下，
+    // 鼠标事件打在 <html> 背景上 → zrender mousedown 不触发 → 选区建不起来（同 drag helper）。
+    await page.locator(histHost).evaluate((el) => el.scrollIntoView({ block: 'center' }))
+    const coords = await page.locator(histHost).evaluate((el) => {
+      const chart = (el as any).__echartsInstance__
+      const r = el.getBoundingClientRect()
+      const g = chart.getModel().getComponent('grid', 0).coordinateSystem.getRect()
+      const x0 = chart.convertToPixel({ xAxisIndex: 0 }, 0.75) as number
+      const x1 = chart.convertToPixel({ xAxisIndex: 0 }, 0.85) as number
+      return { x0: r.left + x0, x1: r.left + x1, y: r.top + g.y + g.height / 2 }
+    })
+    await page.mouse.move(coords.x0, coords.y)
+    await page.mouse.down()
+    await page.mouse.move(coords.x1, coords.y, { steps: 8 })
+    await page.mouse.up()
+    await page.mouse.click((coords.x0 + coords.x1) / 2, coords.y, { button: 'right' })
+    await expectMenuVisible(page)
+    await page.locator('[data-menu-create-subset]').click()
+
+    const panel = page.locator('[data-subset-panel]')
+    await expect(panel).toHaveCount(1)
+    // 空态文案可见；重试按钮与错误横幅都不得出现（用户反馈「没数据时重试不需要」）
+    await expect(panel.locator('.el-empty__description')).toContainText('选区内无有效数值数据', { timeout: 15_000 })
+    await expect(panel.getByRole('button', { name: '重试' })).toHaveCount(0)
+    await expect(panel.locator('[data-testid="error-banner"]')).toHaveCount(0)
+    await expect(panel).toHaveAttribute('data-subset-n', '')
+  })
 })

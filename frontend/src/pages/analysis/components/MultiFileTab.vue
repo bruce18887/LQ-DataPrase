@@ -166,6 +166,7 @@ import { computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useMultiTabStore } from '../../../stores/analysisTabs'
 import { useMultiFile } from '../composables/useMultiFile'
+import { recallFileIds } from '../composables/fileMemory'
 import { getMaxBarWidthPercent, mapLotColorToTheme, SITE_COLORS_8_LIGHT } from '../../../utils/chart-bar'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
 import ChartConfigPanel from './ChartConfigPanel.vue'
@@ -409,6 +410,12 @@ function pruneDeadFileIds() {
 
 onMounted(() => {
   multiStore.initFromQuery()
+  // URL query 优先（刷新/分享链接）；query 缺席且 store 为空时恢复本 tab 记忆的上次多选。
+  // 记忆 id 的有效性由 pruneDeadFileIds 对当前文件列表求交把关（files 异步到达时会再 prune 一次）。
+  if (fileIds.value.length === 0) {
+    const remembered = recallFileIds('multi')
+    if (remembered.length) fileIds.value = remembered
+  }
   pruneDeadFileIds()
   if (fileIds.value.length >= 2) reloadParams()
 })

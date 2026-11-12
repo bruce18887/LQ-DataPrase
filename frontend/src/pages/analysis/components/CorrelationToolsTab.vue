@@ -210,6 +210,7 @@ const corrFlags = computed(() => ({
 useTabFileParams({
   ctx: { fileId, params, loading: listLoading },
   files: computed(() => props.files),
+  memoryKey: 'correlation',
   filters: () => corrFlags.value,
 })
 

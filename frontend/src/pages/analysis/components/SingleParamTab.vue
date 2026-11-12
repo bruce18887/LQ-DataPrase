@@ -322,6 +322,7 @@ const {
 useTabFileParams({
   ctx: { fileId, params, loading: tabLoading, selectedParam: localSelectedParam },
   files: computed(() => props.files),
+  memoryKey: 'single',
   filters: () => ({
     ignore_no_limit: ignoreNoLimit.value,
     ignore_no_test_value: ignoreNoTestValue.value,
