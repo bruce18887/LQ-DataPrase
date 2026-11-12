@@ -7,7 +7,7 @@ import { uploadFile } from '../helpers/upload'
 import { cleanupQuiet, deleteFilesByNameQuiet } from '../helpers/cleanup'
 import { loginAs } from '../helpers/auth'
 import { expectChartRendered, waitLoadingGone } from '../helpers/charts'
-import { selectAnalysisFile, selectParam, listParams } from '../helpers/params'
+import { selectAnalysisFile, selectParam, listParams, enableChartAndWait } from '../helpers/params'
 
 /**
  * 序列分布：无 Serial_No 列文件的错误提示 + Dut_No 回退 + Site12358 样本文件
@@ -141,15 +141,15 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
     await waitLoadingGone(page.locator(SINGLE))
 
-    const respPromise = page.waitForResponse(
+    const resp = await enableChartAndWait(
+      page,
+      'serial',
       (r) =>
         r.url().includes('/analysis/serial_distribution/') &&
         r.request().method() === 'POST' &&
         r.status() < 500,
-      { timeout: 20_000 },
+      30_000,
     )
-    await page.getByText('显示序列分布').click()
-    const resp = await respPromise
     expect(resp.status(), '无序列号列必须返回 400（此前 200 静默空白）').toBe(400)
     const body = await resp.json()
     expect(body.code).toBe('no_serial_column')
@@ -176,15 +176,15 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
     await selectParam(page, 'CONT_GATE')
     await waitLoadingGone(page.locator(SINGLE))
 
-    const respPromise = page.waitForResponse(
+    const resp = await enableChartAndWait(
+      page,
+      'serial',
       (r) =>
         r.url().includes('/analysis/serial_distribution/') &&
         r.request().method() === 'POST' &&
         r.request().postData()?.includes('"param":"CONT_GATE"') === true,
-      { timeout: 20_000 },
+      30_000,
     )
-    await page.getByText('显示序列分布').click()
-    const resp = await respPromise
     expect(resp.status(), 'STS8200 文件必须回退到 PART_ID 并返回 200').toBe(200)
 
     // 响应体：serial_col=PART_ID、每行一个点（8 行）、bin 判定 7 pass / 1 fail
@@ -212,15 +212,15 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
     await selectParam(page, 'CONT_GATE')
     await waitLoadingGone(page.locator(SINGLE))
 
-    const respPromise = page.waitForResponse(
+    const resp = await enableChartAndWait(
+      page,
+      'serial',
       (r) =>
         r.url().includes('/analysis/serial_distribution/') &&
         r.request().method() === 'POST' &&
         r.request().postData()?.includes('"param":"CONT_GATE"') === true,
-      { timeout: 20_000 },
+      30_000,
     )
-    await page.getByText('显示序列分布').click()
-    const resp = await respPromise
     expect(resp.status()).toBe(200)
     const body = await resp.json()
     expect(body.serial_col).toBe('PART_ID')
@@ -266,15 +266,15 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
     // 选一个有规格限的参数，切到序列分布
     await selectParam(page, 'KELVIN_VIN')
     await waitLoadingGone(page.locator(SINGLE))
-    const respPromise = page.waitForResponse(
+    const resp = await enableChartAndWait(
+      page,
+      'serial',
       (r) =>
         r.url().includes('/analysis/serial_distribution/') &&
         r.request().method() === 'POST' &&
         r.request().postData()?.includes('"param":"KELVIN_VIN"') === true,
-      { timeout: 20_000 },
+      30_000,
     )
-    await page.getByText('显示序列分布').click()
-    const resp = await respPromise
     expect(resp.status()).toBe(200)
 
     // 响应体：Dut_No 回退，每行一个序列点 → 共 500 点（5 Site × 100 Dut_No）
@@ -299,15 +299,15 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
 
     await selectParam(page, 'KELVIN_VIN')
     await waitLoadingGone(page.locator(SINGLE))
-    const respPromise = page.waitForResponse(
+    const resp = await enableChartAndWait(
+      page,
+      'serial',
       (r) =>
         r.url().includes('/analysis/serial_distribution/') &&
         r.request().method() === 'POST' &&
         r.request().postData()?.includes('"param":"KELVIN_VIN"') === true,
-      { timeout: 20_000 },
+      30_000,
     )
-    await page.getByText('显示序列分布').click()
-    const resp = await respPromise
     expect(resp.status()).toBe(200)
 
     // 多候选：优先级 serial > dut，自动选 Serial_No；响应携带完整候选供选择器使用
@@ -325,16 +325,16 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
 
     await selectParam(page, 'KELVIN_VIN')
     await waitLoadingGone(page.locator(SINGLE))
-    const firstResp = page.waitForResponse(
+    await enableChartAndWait(
+      page,
+      'serial',
       (r) =>
         r.url().includes('/analysis/serial_distribution/') &&
         r.request().method() === 'POST' &&
         r.request().postData()?.includes('"param":"KELVIN_VIN"') === true &&
         !r.request().postData()?.includes('serial_col'),
-      { timeout: 20_000 },
+      30_000,
     )
-    await page.getByText('显示序列分布').click()
-    await firstResp
 
     // 候选 >1 → 选择器可见，当前值为自动检测的 Serial_No
     const selector = page.locator(`${SINGLE} .serial-col-selector`)
@@ -349,7 +349,7 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
         r.url().includes('/analysis/serial_distribution/') &&
         r.request().method() === 'POST' &&
         r.request().postData()?.includes('"serial_col":"Dut_No"') === true,
-      { timeout: 20_000 },
+      { timeout: 30_000 },
     )
     const sel = selector.locator('.el-select')
     await sel.click()
@@ -371,15 +371,15 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
 
     await selectParam(page, 'KELVIN_VIN')
     await waitLoadingGone(page.locator(SINGLE))
-    const respPromise = page.waitForResponse(
+    await enableChartAndWait(
+      page,
+      'serial',
       (r) =>
         r.url().includes('/analysis/serial_distribution/') &&
         r.request().method() === 'POST' &&
         r.request().postData()?.includes('"param":"KELVIN_VIN"') === true,
-      { timeout: 20_000 },
+      30_000,
     )
-    await page.getByText('显示序列分布').click()
-    await respPromise
     await expect(page.locator(`${SINGLE} .serial-chart-wrapper`)).toBeVisible({ timeout: 15_000 })
     await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
 
@@ -410,9 +410,17 @@ test.describe('序列分布：无序列号列错误提示 + Site12358 修复验�
     await waitLoadingGone(page.locator(SINGLE))
     await selectParam(page, 'KELVIN_VIN')
     await waitLoadingGone(page.locator(SINGLE))
-    await page.getByText('显示序列分布').click()
+    await enableChartAndWait(
+      page,
+      'serial',
+      (r) =>
+        r.url().includes('/analysis/serial_distribution/') &&
+        r.request().method() === 'POST' &&
+        r.request().postData()?.includes('"param":"KELVIN_VIN"') === true,
+      30_000,
+    )
     const wrapper = page.locator(`${SINGLE} .serial-chart-wrapper`)
-    await expect(wrapper).toBeVisible({ timeout: 15_000 })
+    await expect(wrapper).toBeVisible({ timeout: 20_000 })
     await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
 
     // 读 ECharts 实例的图例交互状态（useChart 特意在容器 DOM 暴露 __echartsInstance__ 供测试）
