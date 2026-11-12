@@ -1,7 +1,8 @@
 /**
  * serial 芯片高亮的纯匹配函数（T2 承载，无 DOM 无网络）。
  * 从各 lane 的绘制点全字段数组里挑出命中 serial 的点，供 SerialChart 叠加高亮系列。
- * 与后端 isin 口径一致：**严格类型**成员判定（数值 4 不匹配字符串 '4'）。
+ * 前端同源类型（高亮 serials 恒取自本图 realSerial），故用**严格类型**成员判定
+ * （数值 4 不匹配字符串 '4'）；后端 filter_df_by_selection 另有类型容错，口径不同。
  * 保持 lane 结构（逐 lane 返回）与点对象原样（同一引用，tooltip 需要
  * value/realY/realSerial/isFail/anchor 全字段）。
  */
