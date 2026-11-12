@@ -13,19 +13,26 @@
 - v2 反馈：① 每章只介绍一个功能 → 改为全子功能巡礼；② 截图变形 → 修根因并让表格/表单页脱离截图；③ 部分页面可不用截图 → 可操作 HTML 复刻。
 - v3 反馈：① 最大化右侧留白 → 宽屏流式居中；② 正式项目顶栏加入口（新标签页打开）；③ 快速上手加入服务器形态访问网址 `https://125.69.67.169:18124`。
 
-## 2. 形态与分发（四形态同源）
+## 2. 形态与分发（VitePress 工程，三 serving 形态 + 本地 dev）
 
-单一事实源 = `docs/intro/`。不复制第二份内容进 frontend/public（防漂移）。
+单一事实源 = `docs/intro/`（VitePress 工程）。**v4 起由单文件 HTML 迁移为 VitePress**：
+markdown 章节（`index.md` + `guide/01…12`）写散文，`.vitepress/theme/data.ts` 集中文案数据/热点/种子，
+`.vitepress/theme/components/` 23 个 Vue 组件承载复刻界面与交互演示，`custom.css` 承载视觉语言。
+维护只碰小文件；构建产物 `.vitepress/dist` 由 `frontend/vite.config.ts` 的 `introBooklet()` 插件
+在 app build 时自动构建并拷入 `frontend/dist/intro`。
 
 | 形态 | 路径 | 机制 |
 | --- | --- | --- |
-| 本地双击 | `docs/intro/index.html` | 自包含：内联 CSS/JS + 相对 assets，无外部资源 |
-| dev / preview | `/intro/index.html` | `frontend/vite.config.ts` 的 `introBooklet()` 插件：dev 中间件挂 `/intro`（含穿越防护），build `closeBundle` 拷入 `dist/intro` |
-| Electron 打包 | `file://…/dist/intro/index.html` | spec 整树打包 `frontend/dist` → `frontend_dist`；顶栏按钮相对 `document.baseURI` 解析 |
-| 服务器单端口 | `/intro/index.html` | `config/urls.py` 的 `intro` 挂载（`_serve_frontend_file('intro')`），前缀让出 SPA catch-all |
+| 本地 live 编辑 | `http://localhost:18235/intro/` | `npm run intro:dev`（frontend scripts，VitePress dev） |
+| dev / preview | `/intro/` | vite 中间件 serving `.vitepress/dist`（含穿越防护）；preview  serving `dist/intro` |
+| Electron 打包 | 后端 origin `/intro/` | 顶栏按钮在 file:// 下改经 `window.__backendUrl__` 打开（ES module 无法 file:// 加载）；Django intro 挂载 serving `frontend_dist/intro` |
+| 服务器单端口 | `/intro/` | `config/urls.py` 的 `intro` 挂载（`_serve_frontend_file('intro')`），前缀让出 SPA catch-all |
+
+**已放弃**：双击 file:// 离线打开（VitePress 产物为 ES module，file:// 下被 CORS 拦）——用户 2026-11-12 拍板接受该 trade-off。
+离线分发改为「随应用 serving」：桌面档经内嵌后端、服务器档经 Django，均无需外网。
 
 顶栏入口：`frontend/src/components/layout/Topbar.vue` 的 `[data-testid=open-intro]` 书本图标按钮，
-`window.open(new URL('intro/index.html', document.baseURI).href, '_blank', 'noopener')`。
+`window.open(new URL('intro/', (window.__backendUrl__ || location.origin) + '/'), '_blank', 'noopener')`。
 浏览器形态 = 新标签页；Electron 形态 = 新窗口（无主进程改动）。
 
 ## 3. 内容模型
@@ -64,11 +71,11 @@
 **触发时机**：① 每次版本发布（版本号两处＋时间线新增节点）；② 任何改动 UI 页签/列名/按钮/判定口径的批次收口时；③ 新增主功能页或子页签；④ 每季度一次全量走读（对照应用逐章点验）。
 
 **步骤**：
-1. 改内容：直接编辑 `docs/intro/index.html`（功能卡/复刻/热点/文案）；新增截图走 §8 配方。
-2. 同步版本：改顶栏徽标与封面芯片（或发布时统一替换），时间线追加节点。
-3. `node scripts/intro/check.mjs` 必须 PASS。
+1. 改内容：散文改 `guide/*.md`；文案数据/热点/种子改 `.vitepress/theme/data.ts`；交互改对应组件；视觉改 `custom.css`。新增截图走 §8 配方并放 `public/assets/`。
+2. 同步版本：顶栏徽标与导航版本由 `config.mts` 从 `frontend/package.json` 自动注入（无需手改）；仅 `guide/11-versions.md` 时间线需追加节点。
+3. `npm run intro:build`（或 app `npm run build` 自动链）→ `node scripts/intro/check.mjs` 必须 PASS。
 4. 门禁：按 `docs/reference/testing-gates.md` 选档；涉及 serving 三文件（urls/vite.config/Topbar）走全量档。
-5. 浏览器走读改动章节（桌面 + 420px），控制台零报错后提交。
+5. 浏览器走读改动章节（桌面 + 420px，`npm run intro:dev` 或 preview），控制台零报错后提交。
 
 **截图复现配方**（合成数据演示环境，scratch 脚本在 `tasks/intro-demo/`，gitignored；角色如下，丢失时按此重建）：
 - `make_demo_data.py`：生成 DEMO_FT_LOTA–D / DEMO_CP_WAFER01 等合成 CSV；
@@ -80,12 +87,15 @@
 
 ## 8. 已知限制
 
-- 单文件 2600+ 行：文案与框架混排，编辑需定位；复刻逻辑与_app_ UI 无自动联动，靠维护流程②人工同步（check.mjs 只钉结构/红线/版本，不钉语义）。
+- 复刻逻辑与应用 UI 无自动联动，靠维护流程②人工同步（check.mjs 钉结构/红线/版本同源，不钉语义）。
 - 热点坐标手工标定：换截图必须重标（配方截图视口固定以复用坐标）。
 - Electron 形态入口为新窗口而非标签页（壳无 tab 概念）；服务器形态自签证书需用户信任一次。
+- 双击 file:// 离线打开已放弃（v4 trade-off）；离线阅读依赖应用 serving 形态。
+- 多一道构建步骤：改内容后需 `intro:build`（app build 会自动链）；live 编辑用 `intro:dev`。
 
 ## 9. 验收记录
 
 - v1（2026-11-12 上午）：18 截图 + 64 热点 + 目录/版本/双主题/直方图演示；桌面 + 420px 实测、控制台零报错。
 - v2（同日下午）：修变形根因；10 张表格类截图换 15 复刻；78 功能卡；4 演示；2.1MB；三档宽度实测；修 `.tag` 窄屏竖排。
-- v3（同日傍晚）：宽屏流式（2545 实测左右 259/259 对称）；顶栏入口四形态实测（preview 登录→新标签直达）；快速上手网址；T1 五例；check.mjs PASS。
+- v3（同日傍晚）：宽屏流式（2545 实测左右 259/259 对称）；顶栏入口四形态实测（preview 登录→新标签直达）；快速上手网址；T1 五例；check.mjs PASS。提交 ab1490a / 7a0faba。
+- v4（同日夜）：迁移 VitePress（14 md + data.ts + 23 组件）；放弃 file:// 双击、Electron 改经后端 origin；T1 判别符改 VPContent+书名+资源前缀；check.mjs 重写为工程结构判据；门禁复跑（后端原命令全量 OK、e2e 池 MEASURED unexpected 0）。

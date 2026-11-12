@@ -219,3 +219,6 @@ db.sqlite3.bak*
 # superpowers 代理自身的运行目录：brainstorm/sdd 会话产物、.last-port/.last-token 等运行时文件。
 # 其 sdd/ 子目录自带 `*` 规则，已表明该工具不打算入库；此处统一忽略（原 brainstorm/ 曾误入库 4 个文件）
 /.superpowers/
+# 介绍书 VitePress 构建产物（源在 docs/intro，产物不入库）
+docs/intro/.vitepress/dist/
+docs/intro/.vitepress/cache/

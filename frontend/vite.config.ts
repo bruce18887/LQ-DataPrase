@@ -8,14 +8,21 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-// 介绍书单一事实源是仓库 docs/intro：dev 由中间件挂 /intro，build 原样拷进 dist/intro，
-// 于是 preview、Electron file://、服务器档 Django 挂载四种形态共用同一相对路径 intro/index.html。
-const INTRO_DIR = path.resolve(__dirname, '../docs/intro')
+// 介绍书单一事实源是仓库 docs/intro（VitePress 工程：markdown 章节 + 数据文件 + Vue 复刻组件）。
+// dev 中间件与 build 拷贝都指向 VitePress 构建产物 .vitepress/dist，于是 preview、
+// 服务器档 Django 挂载、Electron 经后端 origin 三种 serving 形态共用 /intro/ 前缀。
+// file:// 双击形态已放弃（ES module 被 CORS 拦）；本地_live 编辑用 npm run intro:dev。
+const INTRO_ROOT = path.resolve(__dirname, '../docs/intro')
+const INTRO_DIST = path.join(INTRO_ROOT, '.vitepress', 'dist')
 function introBooklet(): Plugin {
   const types: Record<string, string> = {
     '.html': 'text/html; charset=utf-8',
     '.png': 'image/png',
     '.svg': 'image/svg+xml',
+    '.js': 'text/javascript; charset=utf-8',
+    '.css': 'text/css; charset=utf-8',
+    '.woff2': 'font/woff2',
+    '.json': 'application/json; charset=utf-8',
   }
   let outDir = path.resolve(__dirname, 'dist')
   let isBuild = false
@@ -34,8 +41,8 @@ function introBooklet(): Plugin {
           next()
           return
         }
-        const file = path.resolve(INTRO_DIR, '.' + (rel === '/' ? '/index.html' : rel))
-        if (!file.startsWith(INTRO_DIR + path.sep) || !existsSync(file) || !statSync(file).isFile()) {
+        const file = path.resolve(INTRO_DIST, '.' + (rel === '/' ? '/index.html' : rel))
+        if (!file.startsWith(INTRO_DIST + path.sep) || !existsSync(file) || !statSync(file).isFile()) {
           next()
           return
         }
@@ -43,10 +50,11 @@ function introBooklet(): Plugin {
         createReadStream(file).pipe(res)
       })
     },
-    closeBundle() {
-      if (isBuild && existsSync(INTRO_DIR)) {
-        cpSync(INTRO_DIR, path.join(outDir, 'intro'), { recursive: true })
-      }
+    async closeBundle() {
+      if (!isBuild || !existsSync(INTRO_ROOT)) return
+      const { build: buildIntro } = await import('vitepress')
+      await buildIntro(INTRO_ROOT)
+      cpSync(INTRO_DIST, path.join(outDir, 'intro'), { recursive: true })
     },
   }
 }

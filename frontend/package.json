@@ -29,7 +29,9 @@
     "test:e2e:p0": "playwright test --project=P0",
     "test:e2e:p1": "playwright test --project=P1",
     "test:e2e:p2": "playwright test --project=P2",
-    "test:e2e:report": "playwright show-report"
+    "test:e2e:report": "playwright show-report",
+    "intro:dev": "vitepress dev ../docs/intro --port 18235",
+    "intro:build": "vitepress build ../docs/intro"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",

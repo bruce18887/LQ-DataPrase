@@ -37,8 +37,8 @@
       </div>
 
       <!-- 产品介绍书：新标签页打开（Electron 形态为新窗口）。
-           相对 document.baseURI 解析：dev/preview 走 http 同源 /intro/，
-           Electron file:// 走 dist/intro/，服务器档走 Django 的 intro 挂载。 -->
+           http 形态（dev/preview/服务器）走同源 /intro/；Electron file:// 下
+           ES module 无法本地加载，改经后端 origin 的 Django intro 挂载。 -->
       <el-button
         text
         circle
@@ -138,7 +138,8 @@ const onDropdownVisibleChange = (visible: boolean) => {
 }
 
 const openIntro = () => {
-  window.open(new URL('intro/index.html', document.baseURI).href, '_blank', 'noopener')
+  const base = window.__backendUrl__ || location.origin
+  window.open(new URL('intro/', base.endsWith('/') ? base : base + '/').href, '_blank', 'noopener')
 }
 
 const displayName = computed(() => {
