@@ -111,6 +111,12 @@ export function useChartBrushSelect(opts: {
     const ev = e.event as MouseEvent
     if (ev.button !== 0 || !opts.enabled()) return
     if (!opts.chartInstance.value || !opts.container.value) return
+    // 光标 bug：按下非可选画布时，浏览器把折叠 caret 塞进当前焦点可编辑节点
+    // （实测落在参数选择器 el-select 的隐藏 input）。该放置发生在事件派发前的
+    // 输入处理阶段，pointerdown/mousedown 的 preventDefault 都拦不住（e2e 实测）；
+    // 且拖拽移动期间浏览器会反复往焦点编辑框重放 caret——故按下/移动/抬起三处
+    // 都清文档选区，保证拖拽全程与结束后选区为空。
+    window.getSelection()?.removeAllRanges()
     clearOverlays()
     selection.value = null
     rectLanes = []
@@ -119,8 +125,22 @@ export function useChartBrushSelect(opts: {
     window.addEventListener('mouseup', onWinUp)
   }
 
+  /**
+   * 阻断原生文本选择（光标 bug 双保险之一）。
+   * 注意不能在 zrender 的 e.event 上 preventDefault——zrender 6 收到的是 pointerdown，
+   * 按 Pointer Events 规范取消它会连带抑制 compat mouseup，框选依赖的 window mouseup
+   * 收不到事件 → 选区永远建不起来。改在 compat mousedown 的 capture 阶段拦左键默认
+   * 动作：文本选择被阻断，mousemove/mouseup 链与右键 contextmenu 不受影响（e2e 实测）。
+   * 折叠插入光标不走默认动作链，由 onZrMouseDown 的 removeAllRanges 负责清除。
+   */
+  function onNativeMouseDown(ev: MouseEvent) {
+    if (ev.button === 0 && opts.enabled()) ev.preventDefault()
+  }
+
   function onWinMove(ev: MouseEvent) {
     if (!drag) return
+    // 拖拽移动会把折叠 caret 反复重放进焦点编辑框（见 onZrMouseDown 注释），随移随清
+    window.getSelection()?.removeAllRanges()
     if (!(ev.buttons & 1)) {
       window.removeEventListener('mousemove', onWinMove)
       window.removeEventListener('mouseup', onWinUp)
@@ -146,6 +166,8 @@ export function useChartBrushSelect(opts: {
   function onWinUp(ev: MouseEvent) {
     window.removeEventListener('mousemove', onWinMove)
     window.removeEventListener('mouseup', onWinUp)
+    // 抬起同样可能重放 caret：拖拽结束再清一次，钉死「拖拽后选区为空」判据
+    window.getSelection()?.removeAllRanges()
     if (!drag) return
     const p = localPoint(ev)
     if (!p) { drag = null; clearOverlays(); return }
@@ -208,6 +230,7 @@ export function useChartBrushSelect(opts: {
     if (el) {
       el.style.position = 'relative'
       el.addEventListener('contextmenu', onContextMenu)
+      el.addEventListener('mousedown', onNativeMouseDown, true)
     }
     chart.getZr().on('mousedown', onZrMouseDown)
     chart.on('rendered', onRendered)
@@ -223,6 +246,7 @@ export function useChartBrushSelect(opts: {
       bound = null
     }
     opts.container.value?.removeEventListener('contextmenu', onContextMenu)
+    opts.container.value?.removeEventListener('mousedown', onNativeMouseDown, true)
     window.removeEventListener('mousemove', onWinMove)
     window.removeEventListener('mouseup', onWinUp)
     drag = null
@@ -238,7 +262,8 @@ export function useChartBrushSelect(opts: {
   function closeMenu() { menu.value.visible = false }
   function createAndClose() {
     if (selection.value) opts.onCreate(selection.value)
-    menu.value.visible = false
+    // 选区在创建时刻被消费（只展示一次）：clearSelection 已含关菜单 + 清浮层 + 清 rectLanes。
+    clearSelection()
   }
 
   watch(opts.chartInstance, (chart) => {

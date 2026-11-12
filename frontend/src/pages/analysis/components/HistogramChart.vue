@@ -333,6 +333,8 @@ void chartRef // bound to <div ref="chartRef"> in template
   flex: 1;
   min-height: 0;
   width: 100%;
+  /* 框选拖拽双保险：越出画布也不选到周边文本（配合 onNativeMouseDown preventDefault） */
+  user-select: none;
 }
 
 .outlier-hint-bar {
