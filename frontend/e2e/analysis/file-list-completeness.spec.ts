@@ -1,10 +1,11 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Response } from '@playwright/test'
 import path from 'node:path'
 import os from 'node:os'
 import fs from 'node:fs'
 import { gotoApp } from '../helpers/nav'
-import { uploadMultipleFiles, expectUploadSuccess } from '../helpers/upload'
-import { cleanupQuiet } from '../helpers/cleanup'
+import { uploadFile } from '../helpers/upload'
+import { cleanupQuiet, deleteFilesByNameQuiet } from '../helpers/cleanup'
+import { loginAs } from '../helpers/auth'
 import { filePicker } from '../helpers/params'
 
 /**
@@ -48,31 +49,57 @@ test.describe('文件列表完整性：分析页下拉与数据管理页数量�
     }
   })
 
-  test.afterAll(() => {
+  test.afterAll(async ({ browser }) => {
     for (const p of paths) cleanupQuiet(p)
+    // 上传产生的 DataFile 行必须一并删：磁盘-only 清理留下的残留行按 -created_at
+    // 顶到 files[0]，污染后续用例的文件选择（同 serial-no-column afterAll 的实测教训）。
+    // storageState 显式清空：newContext 会继承 admin.json 登录态，/login 被弹回。
+    const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
+    const page = await ctx.newPage()
+    await loginAs(page, 'admin')
+    await deleteFilesByNameQuiet(page, 'e2e_page_list_')
+    await ctx.close()
   })
 
   test('分析页文件下拉显示全部文件，与数据管理页总数一致', async ({ page }) => {
-    // 上传 21 个文件（el-upload multiple 一次注入；multiple 模式逐文件发 POST，
-    // toast 出现不代表全部完成——下方轮询文件列表直至 21 个全到位）
+    // 上传 21 个文件（> PAGE_SIZE=20 的临界形态）。旧实现一次注入 21 个 + 「重进 /data
+    // 读分页 total」轮询等待，有三个叠加缺陷（2026-11-12 全量+独占实测）：
+    // ① 阈值「≥21」被种子库背景计数（≥21）第一轮就满足，等待形同虚设；
+    // ② 轮询里的 gotoApp 整页导航会中断在飞的上传 POST，21 个里只有 ~13 个真正落库；
+    // ③ el-upload multiple 并发 21 个 POST 时 vite preview 代理会丢响应（后端 21×201
+    //    全部落库，浏览器侧只收到 16 个响应）——数响应也等不齐。
+    // 最后一个上传落在「分页读 → API 读」之间就是 99≠100 flake。
+    // 改为逐个上传 + 逐个等 POST /upload/ 的 2xx 响应（响应驱动、期间不导航、不压代理）。
+    // 本用例判的是文件数一致性，不是并发上传性能；桌面版直连 Django origin 无此代理层。
+    test.setTimeout(120_000)
     await gotoApp(page, '/data')
     await page.locator('button').filter({ hasText: '上传文件' }).click()
-    await uploadMultipleFiles(page, paths)
-    await expectUploadSuccess(page)
 
-    let totalCount = 0
-    await expect.poll(
-      async () => {
-        await gotoApp(page, '/data') // 重进触发 loadFiles，分页 total 为全量 count
-        const t = await page
-          .locator('.el-pagination__total').first()
-          .textContent({ timeout: 10_000 })
-          .catch(() => null)
-        totalCount = Number((t ?? '').match(/\d+/)?.[0] ?? 0)
-        return totalCount
-      },
-      { timeout: 120_000, message: '上传的 21 个文件未全部进入文件列表' },
-    ).toBeGreaterThanOrEqual(FILE_COUNT)
+    let uploaded = 0
+    const onUploadResp = (r: Response) => {
+      if (r.url().includes('/api/v1/upload/') && r.request().method() === 'POST' &&
+          r.status() >= 200 && r.status() < 300) uploaded++
+    }
+    page.on('response', onUploadResp)
+    try {
+      for (let i = 0; i < paths.length; i++) {
+        await uploadFile(page, paths[i])
+        await expect.poll(() => uploaded, {
+          timeout: 30_000,
+          message: `第 ${i + 1}/${paths.length} 个文件上传未落库（POST /upload/ 2xx 计数）`,
+        }).toBeGreaterThanOrEqual(i + 1)
+      }
+    } finally {
+      page.off('response', onUploadResp)
+    }
+
+    // 全部落库后读一次分页 total（文件列表 Tab 只含 single，与 API singles 同口径）
+    await gotoApp(page, '/data')
+    const totalText = await page
+      .locator('.el-pagination__total').first()
+      .textContent({ timeout: 15_000 })
+    const totalCount = Number((totalText ?? '').match(/\d+/)?.[0] ?? 0)
+    expect(totalCount, '分页 total 应读到正数').toBeGreaterThan(0)
 
     // 分析页：打开文件下拉，数选项
     await gotoApp(page, '/analysis')
