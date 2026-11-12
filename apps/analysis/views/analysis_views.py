@@ -38,6 +38,7 @@ from apps.common.errors import error_response
 from apps.analysis.services.data_services.subset_selection import (
     parse_selection,
     filter_df_by_selection,
+    resolve_selection_serials,
 )
 
 from .file_correlation_views import FileCorrelationActions
@@ -199,6 +200,7 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
         selection, sel_err = parse_selection(get_param(request, 'selection'))
         if sel_err is not None:
             return sel_err
+        selection_serials = selection_serial_col = None
         if selection is not None:
             if len(params) != 1:
                 return error_response('invalid_selection', '选区只支持单参数请求')
@@ -207,6 +209,12 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
                 return sel_err
             range_type = 'DR'
             custom_low = custom_high = None
+            if selection['kind'] == 'value_range':
+                # 选区固化：回传命中行序列号，前端据此以 serials 跨参数重查
+                # （契约 #11）；无序列列/空列表 → None，两字段缺席。
+                resolved = resolve_selection_serials(df)
+                if resolved is not None:
+                    selection_serials, selection_serial_col = resolved
         skipped_params = []
         for param in params:
             # 计算路径不吞异常：任何意外内部错误直接 500 暴露（param 不在 df
@@ -230,13 +238,17 @@ class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
                 'no_valid_params', '请求的参数均无有效数值数据',
                 requested=params, skipped=skipped_params)
 
-        return Response(clean_data({
+        payload = {
             'file_id': datafile.id,
             'filename': datafile.filename,
             'format_type': datafile.format_type,
             'results': results,
             'skipped_params': skipped_params,
-        }))
+        }
+        if selection_serials is not None:
+            payload['selection_serials'] = selection_serials
+            payload['selection_serial_col'] = selection_serial_col
+        return Response(clean_data(payload))
 
     @action(detail=False, methods=['get', 'post'])
     def wafer_map(self, request):

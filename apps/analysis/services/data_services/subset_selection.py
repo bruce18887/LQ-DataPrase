@@ -93,3 +93,25 @@ def filter_df_by_selection(df, param, selection):
     if len(out) == 0:
         return out, error_response('empty_selection', '选区内没有数据行')
     return out, None
+
+
+def resolve_selection_serials(df):
+    """value_range 选区命中行的序列号 + 列名 → (serials, col) | None。
+
+    供前端把选区固化成 serials 跨参数重查（契约 Global Constraints #11）。
+    numpy 标量转 Python 原生（int/float），字符串保持 str；丢弃 NaN/None，
+    保持行序。无序列列或丢弃后为空 → None（响应两字段缺席，旧口径不变）。
+    """
+    serial_col = get_serial_column(df)
+    if serial_col is None:
+        return None
+    serials = []
+    for v in df[serial_col].tolist():
+        if pd.isna(v):
+            continue
+        if hasattr(v, 'item'):  # numpy 标量 → 原生；str 无 item，原样保留
+            v = v.item()
+        serials.append(v)
+    if not serials:
+        return None
+    return serials, serial_col
