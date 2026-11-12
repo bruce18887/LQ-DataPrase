@@ -359,3 +359,30 @@ Spec：`docs/superpowers/specs/2026-11-11-chart-region-subset-design.md`（四�
 - 补强落地：菜单等待硬化（attached+visible 20s，判据不削弱）；关闭按钮 × 用例（双面板按 id
   移除→计数 0→区域撤下）；epoch 交错双 load T2 案（变异刀自证承重：禁守卫→RED→还原→绿）；
   滚轮缩放补 end<100 收窄判据；EOF 换行 ×5。独占验证轮 7/7 绿（tasks/t6-solo-e2e.log）。
+
+# 任务：flake 治理批（2026-11-12）
+
+承接「圈选子图四点跟进」收口遗留两项 + 验证中新发现一项。只改测试/e2e helper，产品代码零改动。
+根因与规则详见 lessons.md「2026-11-12 flake 治理批」；证据日志在仓库根 tasks/flakefix-*。
+
+- [x] waitForResponse 负载族：9 处 raw 序列开关迁 enableChartAndWait（30s）+ expectChartRendered boundingBox 条件轮询 + :406 补响应同步
+- [x] test_job_cancel 真池时序：管道占用替代 time.sleep(2.0) 固定窗口（Event 过不了 call queue，探针实测；判据逐字未动）
+- [x] file-list-completeness 上传等待三缺陷（弱阈值/导航中断/代理丢响应）：串行上传 + 逐文件响应等待 + afterAll 删 DB 行
+
+## 提交清单（git log 现读）
+
+| 笔 | 提交 | 摘要 |
+|---|---|---|
+| 1 | `4b0156c` | e2e 负载族治理（charts.ts + serial-no-column + serial-fail-count） |
+| 2 | `977c4a5` | file-list-completeness 上传等待三缺陷修复 |
+| 3 | `6e52a93` | jobs 真池取消窗口用例改管道占用 |
+| 4 | 本提交 | lessons 三条根因与规则 + 本条目 |
+
+## 门禁（最终树，全绿）
+
+- 前端三件套：vitest 61 文件 843 例全过 / lint:e2e 无错 / build ✓。
+- 后端全套（与池并跑）：**Ran 2573 tests / OK (skipped=16)**（2573 = T6 账 2571 + 修复轮 F1 边界 2 例）。
+- 4-slot 全量池 runId 094319-22016：**445 例 · unexpected 0 · flaky 2 · skipped 21 · MEASURED**。
+  flaky 2 均在未触碰文件（tiny-fail-bar:79 / view-data:1393），独占复跑 38/38 零重试 ⇒ 负载抖动。
+- 目标四文件（serial-no-column / wafermap-redesign / serial-fail-count / file-list-completeness）
+  全量池零 flaky；独占回归 14/14 + file-list 串行版 ×2 零 flaky。

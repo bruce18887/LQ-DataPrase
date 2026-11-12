@@ -2901,3 +2901,65 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
 - **规则②：让出同前缀时要留对照组**：本次三例里第三条断言 `/admin/` 仍 302 到 admin 登录，证明只让出两条精确路径，不是把整个命名空间交给 SPA。
 - **规则③：验收「页面可达」要分形态各敲一次**——侧栏点击一次、地址栏/刷新一次；前者绿不代表后者绿（本次差点只验前者就收口）。
 - 修法落点：`config/urls.py` 把 `^admin/(?:users|audit)/?$` 前置到 admin 挂载之前（commit `0d4067c`），T1 落在 `test/backend/test_static_assets.py` 的 `SpaAdminRouteServingTests`。
+
+## 2026-11-12 flake 治理批：三个根因（负载族硬化 / 真池固定窗口 / 上传等待三缺陷）
+
+承接圈选子图批收口（T6）遗留两项 + 验证中新发现一项。只改测试与 e2e helper，产品代码零改动；
+最终树全量池 445 例 MEASURED、unexpected 0，目标四文件零 flaky。
+
+### 1. waitForResponse 负载族（serial-no-column ×5 / wafermap ×1）：定性要细化到代码硬化点
+
+- T6 判「负载抖动」没错但不终端：负载是诱因，代码有三处可硬化——① serial-no-column 8 处 +
+  serial-fail-count 1 处 raw `getByText('显示序列分布').click()` 没走 2026-10-13 就抽好的
+  `enableChartAndWait`（收敛到关→注册→点开 + is-checked 轮询）；② 20s 窗口比 helper 实证
+  零 flaky 的 30s 窄；③ `expectChartRendered` 的 boundingBox 是**一次性读**：可见判定通过 →
+  读取之间被重渲染 detach 成 null（wafermap:73 本体，与它自己注释里 count() 竞态同族）。
+- **排除开关污染**（别照搬 2026-10-13 根因）：e2e 种子 `analysis_chart_memory=False`
+  （seed_users.py:86）、写回 gated by memoryEnabled（useChartMemory.ts:149）、同文件前 3 条
+  同样 raw click 却绿 ⇒ 状态污染不成立；注册顺序本就合规（R2④）。失败集中在 slot2 连续 5 条、
+  每条烧满 20s、retry 3-5s 绿 ⇒ 持续负载窗口。
+- 修：9 处全迁 `enableChartAndWait`（谓词逐字保留、30s）；boundingBox 改 expect.poll 条件轮询
+  （SVG/canvas 两分支，宽高断言不变）；serial-no-column:406 补上原本缺失的响应同步。
+- **规则**：可见性判定后的一次性几何读（boundingBox）是竞态族，一律条件轮询；「负载抖动」
+  定性后仍要扫代码硬化点——helper 已存在就用 helper，别留 raw 点击。
+
+### 2. test_job_cancel 真池用例：固定 sleep 窗口 → 管道占用（stdlib 限制探针）
+
+- 签名「worker 里的那几条必须是 RUNNING」= 2s 形状轮询窗耗尽：并发门禁负载下管理线程插队
+  （翻 RUNNING 的那步，process.py:395）被 spawn/调度延迟吃掉。
+- 修：`time.sleep(2.0)` 占 worker 改**每 worker 一条单向管道**，child 阻塞 `recv_end.recv()`，
+  父进程 `send` 才放行 ⇒ 窗口无界、前沿一旦形成就稳定；形状轮询 30s 条件早退（正常 ~20ms）；
+  LIFO cleanup 先关写端再关池。判据（cancel 前沿 = workers+EXTRA_QUEUED_CALLS）逐字未动。
+- **stdlib 硬限制（tasks/probe_event_pickle.py / probe_pipe_pool.py 实测）**：Event/Condition
+  **过不了池的 call queue**——`RuntimeError: Condition objects should only be shared between
+  processes through inheritance`（只在 spawn 建进程时可继承）；Connection 走 DupHandle **可以**。
+  附带红利：父进程崩池 → 写端句柄关闭 → child recv 收 EOFError 自退，不留孤儿。
+- **规则**：真池时序用例用信号占用（管道），不用固定 sleep；同步原语别当池任务参数传。
+  第一版 Event 方案就是被探针否掉的——仓内没用过的 API 先跑探针（R2② 家族）。
+
+### 3. file-list-completeness:55（验证中新发现）：上传等待三缺陷叠加
+
+- 表象 99≠100（分页 total vs API singles），独占也复现 ⇒ 不是负载。挖出三层：
+  ① 等待阈值「total ≥ 21」被种子库背景计数（~79）第一轮就满足——**等待形同虚设**；
+  ② 轮询里 `gotoApp('/data')` 整页导航**中断在飞上传 POST**，21 个只有 ~13 个落库
+  （旧用例 2s「绿」是假象：两次读数落在同一个被中断的稳态上）；
+  ③ 改真实阈值后暴露第三层：el-upload multiple 并发 21 POST 时 **vite preview 代理丢响应**
+  ——run.log [WebServer] 21×201 全落库、浏览器侧 response 监听只数到 16、preview 零报错。
+- 修：**逐个上传 + 逐个等 POST /upload/ 2xx 响应**（响应驱动、期间不导航、不压代理），全部
+  落库后才读 UI；test.setTimeout(120s)；afterAll 补 DB 行清理（deleteFilesByNameQuiet，旧版
+  只删磁盘文件——残留行按 -created_at 顶到 files[0] 污染别家，serial-no-column 同款教训）。
+- **规则**：等待阈值必须排除背景计数（「≥N」在背景 ≥N 时不承重）；等请求落库期间禁止整页
+  导航；e2e 代理层并发丢响应是基建怪癖（桌面版直连 Django origin 无代理），用例避开并发饱和
+  而不是数浏览器侧响应；上传 spec 的 afterAll 必须删 DB 行。
+
+### 验证（最终树，日志均在仓库根 tasks/）
+
+- 前端三件套：vitest 61 文件 843 例全过 / lint:e2e 无错 / build ✓（flakefix-vitest/lint/build.log）。
+- 后端全套与池并跑：**Ran 2573 tests / OK (skipped=16)**（flakefix-backend.log；2573 = T6 账
+  2571 + 修复轮 a1afd98 的 F1 边界 2 例）。job_cancel 单文件 19 OK 7.2s（flakefix-jobcancel.log）。
+- 目标族独占 14/14 零 flaky（flakefix-solo.log）；file-list 串行版独占 ×2 零 flaky
+  （flakefix-flc-6/7.log；flc-1/2/3 硬红与 flc-5 flaky 是修复中间态，留档作证据链）。
+- 最终 4-slot 全量池 runId 094319-22016：**445 例 · 9.2min · unexpected 0 · flaky 2 · skipped 21 ·
+  MEASURED**（flakefix-close2.log）。flaky 2 均在未触碰文件（tiny-fail-bar:79 五万行上传 120s
+  toast 超时 / view-data:1393 1px 布局抖动），独占复跑 38/38 零重试（flakefix-recheck2.log）
+  ⇒ 负载抖动，非产品缺陷。
