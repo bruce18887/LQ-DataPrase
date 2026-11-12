@@ -8,8 +8,13 @@
       role="menu"
       @contextmenu.prevent
     >
-      <button type="button" role="menuitem" data-menu-create-subset @click="emit('create')">新建子集直方图</button>
-      <button type="button" role="menuitem" data-menu-clear-selection @click="emit('clear')">清除选择</button>
+      <template v-if="mode === 'highlight'">
+        <button type="button" role="menuitem" data-menu-clear-highlight @click="emit('clear')">清除高亮</button>
+      </template>
+      <template v-else>
+        <button type="button" role="menuitem" data-menu-create-subset @click="emit('create')">新建子集直方图</button>
+        <button type="button" role="menuitem" data-menu-clear-selection @click="emit('clear')">清除选择</button>
+      </template>
     </div>
   </Teleport>
 </template>
@@ -18,7 +23,7 @@
 import { watch, onBeforeUnmount } from 'vue'
 import type { BrushMenu } from '../composables/useChartBrushSelect'
 
-const props = defineProps<{ menu: BrushMenu }>()
+const props = withDefaults(defineProps<{ menu: BrushMenu; mode?: 'subset' | 'highlight' }>(), { mode: 'subset' })
 const emit = defineEmits<{ create: []; clear: []; close: [] }>()
 
 function onWindowDown(ev: MouseEvent) {

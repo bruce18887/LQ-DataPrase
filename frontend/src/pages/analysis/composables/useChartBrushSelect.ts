@@ -30,6 +30,11 @@ export function useChartBrushSelect(opts: {
   getBinCenters?: () => number[]
   serialCol?: () => string | undefined
   onCreate: (sel: ChartSelection) => void
+  /** rect 模式：mouseup 算出选区后立即消费（onCreate + clearSelection），不等右键菜单；
+   *  value-range 模式忽略此项（直方图仍走「框选 → 右键 → 新建子集」）。 */
+  immediate?: boolean
+  /** 右键菜单开门的附加条件：无选区但它返回 true 也允许开门（如高亮激活时右键「清除高亮」）。 */
+  canMenu?: () => boolean
 }) {
   const menu = ref<BrushMenu>({ visible: false, x: 0, y: 0 })
   const selection = ref<ChartSelection | null>(null)
@@ -214,13 +219,21 @@ export function useChartBrushSelect(opts: {
     const serials = mergeSerials(groups)
     if (!serials.length) { clearOverlays(); rectLanes = []; return }
     selection.value = { kind: 'serials', serials, serial_col: opts.serialCol?.() }
+    if (opts.immediate) {
+      // rect 立即消费（Task 4）：高亮接管，浮层只在拖拽期间闪一次，mouseup 即清，
+      // 不等右键菜单。等价于 createAndClose，但触发点在 mouseup（选区一次性消费）。
+      opts.onCreate(selection.value)
+      clearSelection()
+      return
+    }
     drawOverlays()
   }
 
   function onRendered() { if (selection.value) drawOverlays() }
 
   function onContextMenu(ev: MouseEvent) {
-    if (!opts.enabled() || !selection.value) return
+    // 无选区但 canMenu() 为真也开门（高亮激活时右键「清除高亮」）；两者皆无才不开。
+    if (!opts.enabled() || !(selection.value || opts.canMenu?.())) return
     ev.preventDefault()
     menu.value = { visible: true, x: ev.clientX, y: ev.clientY }
   }
