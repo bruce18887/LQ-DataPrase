@@ -21,7 +21,7 @@ from rest_framework.test import APIRequestFactory, force_authenticate  # noqa: E
 
 from apps.analysis import test_support  # noqa: E402
 from apps.analysis.services.data_services.subset_selection import (  # noqa: E402
-    parse_selection, filter_df_by_selection,
+    parse_selection, filter_df_by_selection, resolve_selection_serials,
 )
 from apps.analysis.test_support import fake_datafile  # noqa: E402
 from apps.analysis.views import AnalysisViewSet  # noqa: E402
@@ -218,6 +218,47 @@ class FilterDfTests(SimpleTestCase):
         self.assertEqual(out[PARAM].tolist(), [10.0])
 
 
+class ResolveSelectionSerialsTests(SimpleTestCase):
+    """value_range 选区固化：命中行序列号 + 列名（契约 Global Constraints #11）。"""
+
+    def test_numeric_serial_column(self):
+        result = resolve_selection_serials(_frame())
+        self.assertEqual(result, ([1, 2, 3, 4, 5, 6], 'Serial_No'))
+        # numpy 标量必须转 Python 原生 int（JSON 序列化与前端芯片比对都依赖）
+        self.assertTrue(all(type(s) is int for s in result[0]))
+
+    def test_string_serial_column(self):
+        df = _frame()
+        df['Serial_No'] = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6']
+        result = resolve_selection_serials(df)
+        self.assertEqual(result, (['S1', 'S2', 'S3', 'S4', 'S5', 'S6'], 'Serial_No'))
+        self.assertTrue(all(type(s) is str for s in result[0]))
+
+    def test_no_serial_column_returns_none(self):
+        self.assertIsNone(resolve_selection_serials(pd.DataFrame({'P1': [1.0, 10.0]})))
+
+    def test_nan_serial_rows_dropped(self):
+        df = pd.DataFrame({'Serial_No': [1.0, float('nan'), 3.0],
+                           'P1': [1.0, 2.0, 3.0]})
+        result = resolve_selection_serials(df)
+        self.assertEqual(result, ([1.0, 3.0], 'Serial_No'))
+        self.assertTrue(all(type(s) is float for s in result[0]))
+
+    def test_all_nan_serials_returns_none(self):
+        df = pd.DataFrame({'Serial_No': [float('nan'), float('nan')],
+                           'P1': [1.0, 2.0]})
+        self.assertIsNone(resolve_selection_serials(df))
+
+    def test_empty_df_returns_none(self):
+        df = pd.DataFrame({'Serial_No': pd.Series([], dtype='int64'),
+                           'P1': pd.Series([], dtype='float64')})
+        self.assertIsNone(resolve_selection_serials(df))
+
+    def test_row_order_preserved(self):
+        df = pd.DataFrame({'Serial_No': [5, 2, 9], 'P1': [1.0, 2.0, 3.0]})
+        self.assertEqual(resolve_selection_serials(df), ([5, 2, 9], 'Serial_No'))
+
+
 class HistogramViewSelectionTests(SimpleTestCase):
     def _post(self, payload, df=None, metadata=None):
         df = df if df is not None else _frame()
@@ -324,3 +365,31 @@ class HistogramViewSelectionTests(SimpleTestCase):
         r = self._post(self._base())
         self.assertEqual(r.status_code, 200, r.content)
         self.assertEqual(r.data['results'][PARAM]['total_count'], 6)
+
+    def test_value_range_returns_selection_serials(self):
+        # lo=9 命中 P1∈{10,11,12} 三行 → 固化 serials=[4,5,6] 供跨参数重查
+        r = self._post(self._base(selection={'kind': 'value_range', 'lo': 9.0, 'hi': None}))
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.data['selection_serials'], [4, 5, 6])
+        self.assertEqual(r.data['selection_serial_col'], 'Serial_No')
+
+    def test_serials_kind_omits_selection_serial_fields(self):
+        r = self._post(self._base(selection={'kind': 'serials', 'serials': [1, 2]}))
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertNotIn('selection_serials', r.data)
+        self.assertNotIn('selection_serial_col', r.data)
+
+    def test_no_selection_omits_selection_serial_fields(self):
+        r = self._post(self._base())
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertNotIn('selection_serials', r.data)
+        self.assertNotIn('selection_serial_col', r.data)
+
+    def test_value_range_without_serial_column_omits_fields(self):
+        # 无序列列 → 解析 None → 两字段缺席，统计照常（旧口径）
+        r = self._post(self._base(selection={'kind': 'value_range', 'lo': 9.0, 'hi': None}),
+                       df=pd.DataFrame({'P1': [1.0, 10.0]}), metadata=_md())
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertNotIn('selection_serials', r.data)
+        self.assertNotIn('selection_serial_col', r.data)
+        self.assertEqual(r.data['results'][PARAM]['total_count'], 1)
