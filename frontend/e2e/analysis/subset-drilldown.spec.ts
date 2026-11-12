@@ -10,10 +10,11 @@ import { expectChartRendered, waitLoadingGone } from '../helpers/charts'
 import { selectAnalysisFile, selectParam, ensureChartToggles } from '../helpers/params'
 
 /**
- * 框选 → 右键 → 子集直方图面板（接线证明，组合判据在 T1）。
+ * 框选 → 子集直方图面板 / 芯片高亮（接线证明，组合判据在 T1/T2）。
  * 夹具 6 颗 die：KELVIN_VIN [1,1.5,0.5,10,11,12]，限值 [0,2]。
  *  - 直方图右缘框选（触达 overflow 兜底柱）→ hi=null → 子集 {10,11,12} n=3；
- *  - 散点右上框选（锚定轴顶的超界点，D5 WYSIWYG）→ serials {4,5,6} n=3；
+ *  - 散点右上框选（锚定轴顶的超界点，D5 WYSIWYG）→ 立即高亮芯片 {4,5,6}，
+ *    不建面板；切测试项高亮保持；右键只留「清除高亮」；
  *  - 切参数 → 面板跟随（value_range 首载固化 serials 后对新参数重查；R5 显式例外）；
  *  - 选区一次性消费：点「新建子集直方图」即清浮层（只展示一次）；拖拽不触发原生文本选择。
  * 上传型用例：afterAll 删 DataFile 行（lessons R2③，deleteFilesByNameQuiet）。
@@ -142,7 +143,22 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
     await expect(panel.locator('.stat-item', { hasText: 'CPK' }).locator('.stat-value')).not.toHaveText('-')
   })
 
-  test('散点矩形框选 → 右键新建子集面板（serials，n=3）', async ({ page }) => {
+  /** 读 serial 图高亮态：叠加系列点集（realSerial）、底层 site 系列透明度、当前标题。 */
+  function highlightState(host: import('@playwright/test').Locator) {
+    return host.evaluate((el: any) => {
+      const opt = el.__echartsInstance__?.getOption?.()
+      const series = opt?.series ?? []
+      const hl = series.filter((s: any) => s.name === '高亮芯片')
+      const sites = series.filter((s: any) => /^Site /.test(s.name))
+      return {
+        title: (opt?.title?.[0]?.text ?? '') as string,
+        hlPoints: hl.flatMap((s: any) => s.data ?? []).map((p: any) => p.realSerial) as (number | string)[],
+        siteOpacities: sites.map((s: any) => (s.itemStyle?.opacity ?? 1) as number),
+      }
+    })
+  }
+
+  test('散点框选 → 芯片高亮（不建面板，跨参数保持）', async ({ page }) => {
     await openAnalysis(page)
     // EP 原生 input.el-checkbox__original 为 0×0 隐藏态，getByRole('checkbox').check()
     // 点不到；走 helpers 的 ensureChartToggles 点可见的 .el-checkbox 标签并收敛到「开」。
@@ -150,30 +166,51 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
     await waitLoadingGone(page.locator(SINGLE))
     await expectChartRendered(page.locator(`${SINGLE} [data-chart-key="serial"]`))
 
-    const respPromise = page.waitForResponse(
-      (r) => r.url().includes('/analysis/histogram/')
-        && r.request().method() === 'POST'
-        && r.request().postData()?.includes('"kind":"serials"') === true
-        && r.status() < 500,
-      { timeout: 20_000 },
-    )
     // 右上矩形：x 55%→98% 覆盖 serial 4/5/6；y 从标题留白到 grid 40% 覆盖轴顶锚定点
-    const { cx, cy } = await drag(page, `${SINGLE} [data-chart-key="serial"] .chart-b`, 0.55, 0.06, 0.98, 0.45)
-    await page.mouse.click(cx, cy, { button: 'right' })
-    await expect(page.locator('[data-chart-context-menu]')).toBeVisible()
-    await page.locator('[data-menu-create-subset]').click()
-    // 选区一次性消费：rect 模式浮层同样在创建时刻清空
+    await drag(page, `${SINGLE} [data-chart-key="serial"] .chart-b`, 0.55, 0.06, 0.98, 0.45)
+    // mouseup 即消费：不建子集面板、浮层只闪一次（高亮接管，无残留选区浮层）
+    await expect(page.locator('[data-subset-panel]')).toHaveCount(0)
     await expect(page.locator('.chart-brush-overlay')).toHaveCount(0)
-    const resp = await respPromise
-    const body = resp.request().postData() ?? ''
-    expect(body).toContain('"kind":"serials"')
-    // 钉身份：n=3  alone 不够（反选 {1,2,3} 也是 3 颗）；必须是超界的 {4,5,6}
-    const sentSerials = JSON.parse(body).selection.serials as number[]
-    expect([...sentSerials].sort((a, b) => a - b)).toEqual([4, 5, 6])
 
-    const panel = page.locator('[data-subset-panel]')
-    await expect(panel).toHaveCount(1)
-    await expect(panel).toHaveAttribute('data-subset-n', '3', { timeout: 15_000 })
+    const host = page.locator(`${SINGLE} .serial-chart-wrapper div[_echarts_instance_]`)
+    // 叠加系列 3 点 + 底层 site 系列降透明（≤0.25）
+    await expect.poll(async () => {
+      const s = await highlightState(host)
+      return { n: s.hlPoints.length, dim: s.siteOpacities.length > 0 && s.siteOpacities.every((o) => o <= 0.25) }
+    }, { timeout: 15_000 }).toEqual({ n: 3, dim: true })
+    // 钉身份：必须是超界的 {4,5,6}，不是反选的 {1,2,3}
+    const st = await highlightState(host)
+    expect([...st.hlPoints].sort((a, b) => Number(a) - Number(b))).toEqual([4, 5, 6])
+
+    // 切测试项高亮保持（R5 显式例外）：同一批 die 在 VCC 图上重画。
+    // 标题含 VCC 钉住「读的是新参数的图」，防止旧图残留造成假绿。
+    await selectParam(page, 'VCC')
+    await waitLoadingGone(page.locator(SINGLE))
+    await expectChartRendered(page.locator(`${SINGLE} [data-chart-key="serial"]`))
+    await expect.poll(async () => {
+      const s = await highlightState(host)
+      return { vcc: s.title.includes('VCC'), n: s.hlPoints.length }
+    }, { timeout: 15_000 }).toEqual({ vcc: true, n: 3 })
+    const st2 = await highlightState(host)
+    expect([...st2.hlPoints].sort((a, b) => Number(a) - Number(b))).toEqual([4, 5, 6])
+
+    // 右键菜单只留「清除高亮」：无「新建子集直方图」。先把图滚回视口再取落点
+    // （selectParam 会把页面滚到顶部参数选择器，旧拖拽坐标可能已出视口）。
+    const chartB = page.locator(`${SINGLE} [data-chart-key="serial"] .chart-b`)
+    await chartB.evaluate((el) => el.scrollIntoView({ block: 'start' }))
+    const box = await chartB.boundingBox()
+    expect(box).not.toBeNull()
+    await page.mouse.click(box!.x + box!.width * 0.75, box!.y + box!.height * 0.25, { button: 'right' })
+    await expect(page.locator('[data-chart-context-menu]')).toBeVisible()
+    await expect(page.locator('[data-menu-create-subset]')).toHaveCount(0)
+    const clearItem = page.locator('[data-menu-clear-highlight]')
+    await expect(clearItem).toBeVisible()
+    await clearItem.click()
+    // 清除后：叠加系列消失（或 0 点）、底层透明度恢复 > 0.25
+    await expect.poll(async () => {
+      const s = await highlightState(host)
+      return { n: s.hlPoints.length, bright: s.siteOpacities.length > 0 && s.siteOpacities.every((o) => o > 0.25) }
+    }, { timeout: 15_000 }).toEqual({ n: 0, bright: true })
   })
 
   test('切参数 → 面板跟随（serials 固化）', async ({ page }) => {
@@ -227,5 +264,16 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
     // night 下菜单文字不得是纯黑（var(--text) 应提亮），否则深底不可读
     const color = await item.evaluate((el) => getComputedStyle(el).color)
     expect(color).not.toBe('rgb(0, 0, 0)')
+
+    // 高亮菜单（serial 框选 → 右键「清除高亮」）：night 下同样不得纯黑
+    await ensureChartToggles(page, { serial: true })
+    await waitLoadingGone(page.locator(SINGLE))
+    await expectChartRendered(page.locator(`${SINGLE} [data-chart-key="serial"]`))
+    const { cx: sx, cy: sy } = await drag(page, `${SINGLE} [data-chart-key="serial"] .chart-b`, 0.55, 0.06, 0.98, 0.45)
+    await page.mouse.click(sx, sy, { button: 'right' })
+    const hlItem = page.locator('[data-menu-clear-highlight]')
+    await expect(hlItem).toBeVisible()
+    const hlColor = await hlItem.evaluate((el) => getComputedStyle(el).color)
+    expect(hlColor).not.toBe('rgb(0, 0, 0)')
   })
 })

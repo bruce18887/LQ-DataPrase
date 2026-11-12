@@ -12,8 +12,8 @@
     />
     <ChartContextMenu
       :menu="brush.menu"
-      @create="brush.createAndClose"
-      @clear="brush.clearSelection"
+      mode="highlight"
+      @clear="highlight.clear()"
       @close="brush.closeMenu"
     />
   </div>
@@ -21,12 +21,14 @@
 
 <script setup lang="ts">
 import { chartFontSize } from '../../../theme/typography'
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
 import { formatAxisValue, getSiteColors8, buildChartToolbox } from '../../../utils/chart-bar'
 import { resolveSerialYBounds, jitterForPoint } from '../composables/serial-axis-range'
-import { useChartBrushSelect, type ChartSelection } from '../composables/useChartBrushSelect'
+import { useChartBrushSelect } from '../composables/useChartBrushSelect'
+import { useSerialHighlight } from '../composables/useSerialHighlight'
+import { pickHighlightPoints } from '../composables/serialHighlight'
 import type { DataPoint } from '../composables/selectionGeometry'
 import OutlierHintBar from './OutlierHintBar.vue'
 import ChartContextMenu from './ChartContextMenu.vue'
@@ -49,7 +51,9 @@ const props = withDefaults(defineProps<{
 }>(), { splitBySite: false, symbolSize: 6, opacity: 0.85, rangeType: '', jitter: false, enableSelection: false })
 const { colors, isDark } = useEChartsTheme()
 
-const emit = defineEmits<{ 'create-subset': [sel: ChartSelection] }>()
+// 会话级芯片高亮单例（Task 4）：rect 框选立即消费 → 按 serial 高亮，跨参数保持。
+// 渲染以 props.enableSelection 为闸，其它页面的 SerialChart 不显示单参数 tab 的高亮。
+const highlight = useSerialHighlight()
 // 各 lane 绘制点集（x=轴下标, y=绘制值含 jitter/锚定, serial=真实序列号）。
 // 只在 buildOption 里同步写出、只在框选 mouseup 时读——不 watch，避免渲染循环。
 const displayLanes = ref<{ points: DataPoint[] }[]>([])
@@ -167,12 +171,15 @@ function buildOption() {
     .sort((a, b) => counts[b] - counts[a])
     .forEach((idx, rank) => zOfSite.set(idx, 2 + rank))
 
+  // 高亮激活闸（Task 4）：仅 enableSelection 开且有命中 serial 时生效。
+  // 激活时底层 site 系列降透明（≤0.25），让高亮芯片凸显；其它页面不受影响。
+  const highlightActive = props.enableSelection && highlight.serials.value.length > 0
   const series: any[] = siteSeriesRaw.map((sd, idx) => ({
     name: sd.name, type: 'scatter',
     data: siteData[idx],
     ...(split ? { xAxisIndex: idx, yAxisIndex: idx } : {}),
     symbolSize: props.symbolSize,
-    itemStyle: { color: siteColors[idx % 8], opacity: props.opacity },
+    itemStyle: { color: siteColors[idx % 8], opacity: highlightActive ? Math.min(props.opacity, 0.25) : props.opacity },
     ...(split ? {} : { z: zOfSite.get(idx) }),
     ...(isLarge.value ? { large: true } : {}),
   }))
@@ -288,6 +295,25 @@ function buildOption() {
   const markNames = (d.marks || []).map((m: any) => m.name)
   const legendData = split ? markNames : series.map((s: any) => s.name)
 
+  // 高亮叠加层（Task 4）：必须在 legendData 计算之后 push——图例不含「高亮芯片」。
+  // 点对象原样复用 laneGroups（全字段 value/realY/realSerial/isFail/anchor），
+  // tooltip 沿用现有 formatter。品牌色读 CSS 变量，双主题自动跟随。
+  if (highlightActive) {
+    const brand = getComputedStyle(document.documentElement).getPropertyValue('--brand').trim() || '#409eff'
+    const hitLanes = pickHighlightPoints(laneGroups, highlight.serials.value)
+    hitLanes.forEach((pts, lane) => {
+      if (!pts.length) return
+      series.push({
+        name: '高亮芯片', type: 'scatter', data: pts,
+        ...(split ? { xAxisIndex: lane, yAxisIndex: lane } : {}),
+        symbolSize: props.symbolSize + 2,
+        itemStyle: { color: brand, opacity: 1 },
+        z: markZ + 1,
+        ...(isLarge.value ? { large: true } : {}),
+      })
+    })
+  }
+
   let subtext = unit ? `Unit: ${unit}` : ''
   if (d.lower_limit != null && d.upper_limit != null) {
     subtext += ` [${d.lower_limit.toFixed(4)}, ${d.upper_limit.toFixed(4)}]`
@@ -335,7 +361,7 @@ function buildOption() {
 // canvas 无 DOM 节点，官方推荐大数据散点必用 canvas）；小数据量跟随用户全局设置
 const { chartRef, chartInstance } = useChart(
   buildOption,
-  [() => props.data, () => props.outlierHandling, () => props.symbolSize, () => props.opacity, () => props.splitBySite, () => props.rangeType, () => props.jitter],
+  [() => props.data, () => props.outlierHandling, () => props.symbolSize, () => props.opacity, () => props.splitBySite, () => props.rangeType, () => props.jitter, () => highlight.serials.value],
   'chartRef',
   () => (isLarge.value ? 'canvas' : getChartRenderer()),
 )
@@ -348,10 +374,13 @@ const brush = reactive(useChartBrushSelect({
   enabled: () => props.enableSelection,
   getLanes: () => displayLanes.value,
   serialCol: () => props.data?.serial_col,
-  onCreate: (sel) => emit('create-subset', sel),
+  // Task 4：mouseup 立即消费选区 → 高亮接管（浮层只闪一次）；无选区但有高亮也可右键
+  immediate: true,
+  canMenu: () => highlight.serials.value.length > 0,
+  onCreate: (sel) => { if (sel.kind === 'serials') highlight.set(sel) },
 }))
-// 切参数清选区（R5）：data.param 变化即清，避免旧 serial 集合套到新参数
-watch(() => props.data?.param, () => brush.clearSelection())
+// 切参数不清高亮（R5 显式例外）：选区已在 mouseup 消费为会话级 serial 集合，
+// 同一批芯片跨参数重画；切文件由 useSerialHighlight 内部 watch(fileId) 清。
 void chartRef // bound to <div ref="chartRef"> in template
 </script>
 

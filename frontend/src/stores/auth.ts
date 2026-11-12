@@ -5,6 +5,7 @@ import { useUserSettingsStore } from './userSettings'
 import { resetChartMemoryCache } from '../composables/useChartMemory'
 import { resetChartDockMemoryState } from '../pages/analysis/composables/useChartDock'
 import { resetSubsetPanels } from '../pages/analysis/composables/useSubsetPanels'
+import { resetSerialHighlight } from '../pages/analysis/composables/useSerialHighlight'
 import { safeGetItem, safeSetItem, safeRemoveItem } from '../utils/safeStorage'
 import type { User } from '../types'
 
@@ -25,6 +26,7 @@ function resetUserSettingsCaches(): void {
   resetChartMemoryCache()
   resetChartDockMemoryState()
   resetSubsetPanels()
+  resetSerialHighlight()
 }
 
 export const useAuthStore = defineStore('auth', () => {
