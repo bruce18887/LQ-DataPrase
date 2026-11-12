@@ -36,9 +36,13 @@ const props = withDefaults(defineProps<{
   outlierHandling?: 'clip' | 'exclude' | 'off'
   /** 框选子集（spec §5.3）：默认关，仅单参数直方图面板开启 */
   enableSelection?: boolean
+  /** inside dataZoom（滚轮缩放/拖拽平移）：默认关，仅子集面板开启；
+   *  主图传 enable-selection 时拖拽是框选，开缩放会冲突，故两处互斥使用 */
+  enableDataZoom?: boolean
 }>(), {
   barOverlapPercent: 5,
   enableSelection: false,
+  enableDataZoom: false,
 })
 
 const { colors, isDark } = useEChartsTheme()
@@ -302,6 +306,9 @@ function buildOption() {
     xAxis: { type: 'value', name: '', nameLocation: 'middle', nameGap: 28, min: xAxisMin, max: xAxisMax, axisLabel: { rotate: 45, show: true, interval: 0, fontSize: chartFontSize.micro, formatter: formatAxisValue, color: tc }, splitNumber: 24 },
     yAxis: yAxes,
     series,
+    // 子集面板滚轮缩放/拖拽平移（默认关）：enableSelection 关时 brush 不绑 mousedown，
+    // 与 inside dataZoom 的拖拽平移无冲突；主图不传此 prop ⇒ 保持无缩放。
+    ...(props.enableDataZoom ? { dataZoom: [{ type: 'inside', xAxisIndex: 0 }] } : {}),
   }
 }
 

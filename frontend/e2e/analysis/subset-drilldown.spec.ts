@@ -16,7 +16,9 @@ import { selectAnalysisFile, selectParam, ensureChartToggles } from '../helpers/
  *  - 散点右上框选（锚定轴顶的超界点，D5 WYSIWYG）→ 立即高亮芯片 {4,5,6}，
  *    不建面板；切测试项高亮保持；右键只留「清除高亮」；
  *  - 切参数 → 面板跟随（value_range 首载固化 serials 后对新参数重查；R5 显式例外）；
- *  - 选区一次性消费：点「新建子集直方图」即清浮层（只展示一次）；拖拽不触发原生文本选择。
+ *  - 选区一次性消费：点「新建子集直方图」即清浮层（只展示一次）；拖拽不触发原生文本选择；
+ *  - 子集直方图 inside dataZoom：滚轮缩放 + 拖拽平移（主直方图默认关、保持无缩放）；
+ *  - serial 滚轮回归：框选开启态（moveOnMouseMove=false）不影响滚轮缩放（Task 3 只拦 mousedown）。
  * 上传型用例：afterAll 删 DataFile 行（lessons R2③，deleteFilesByNameQuiet）。
  */
 
@@ -100,6 +102,25 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
     await page.mouse.move(x1, y1, { steps: 8 })
     await page.mouse.up()
     return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 }
+  }
+
+  /** 读图表 inside dataZoom 窗口；缺席/空返回 null（主直方图默认关缩放）。 */
+  function zoomWindow(host: import('@playwright/test').Locator) {
+    return host.evaluate((el: any) => {
+      const dz = el.__echartsInstance__?.getOption?.()?.dataZoom
+      if (!Array.isArray(dz) || dz.length === 0) return null
+      return { start: dz[0].start as number, end: dz[0].end as number, pan: dz[0].moveOnMouseMove as boolean }
+    })
+  }
+
+  /** 在容器盒内分数坐标处滚轮：inside dataZoom 只在 grid 内响应滚轮，落点须在绘图区。 */
+  async function wheelAt(page: import('@playwright/test').Page, sel: string,
+                         fx: number, fy: number, deltaY: number) {
+    await page.locator(sel).evaluate((el) => el.scrollIntoView({ block: 'start' }))
+    const box = await page.locator(sel).boundingBox()
+    expect(box).not.toBeNull()
+    await page.mouse.move(box!.x + box!.width * fx, box!.y + box!.height * fy)
+    await page.mouse.wheel(0, deltaY)
   }
 
   test('直方图框选 → 右键新建子集面板（n=3，CPK 非空）', async ({ page }) => {
@@ -275,5 +296,62 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
     await expect(hlItem).toBeVisible()
     const hlColor = await hlItem.evaluate((el) => getComputedStyle(el).color)
     expect(hlColor).not.toBe('rgb(0, 0, 0)')
+  })
+
+  // 回归排在缩放用例之前：serial 模式一红后续全 skip，RED 轮要先拿到「回归绿」信号。
+  test('serial 图滚轮缩放不受框选 preventDefault 影响（回归）', async ({ page }) => {
+    await openAnalysis(page)
+    await ensureChartToggles(page, { serial: true })
+    await waitLoadingGone(page.locator(SINGLE))
+    await expectChartRendered(page.locator(`${SINGLE} [data-chart-key="serial"]`))
+
+    const host = page.locator(`${SINGLE} .serial-chart-wrapper div[_echarts_instance_]`)
+    const before = await zoomWindow(host)
+    expect(before).not.toBeNull()
+    expect(before!.start, '初始窗口应为全量').toBe(0)
+    // 钉住「框选开启态」：moveOnMouseMove=false（拖拽让位框选），滚轮缩放仍须可用。
+    // Task 3 的 preventDefault 只拦 compat mousedown、不拦 wheel——本用例钉这一点。
+    expect(before!.pan, 'serial 框选开启态应关闭拖拽平移').toBe(false)
+
+    await wheelAt(page, `${SINGLE} [data-chart-key="serial"] .serial-canvas`, 0.5, 0.5, -240)
+    await expect.poll(async () => (await zoomWindow(host))?.start ?? -1, { timeout: 10_000 }).toBeGreaterThan(0)
+  })
+
+  test('子集直方图滚轮缩放 + 拖拽平移（主直方图保持无缩放）', async ({ page }) => {
+    await openAnalysis(page)
+    await expectChartRendered(page.locator(`${SINGLE} [data-chart-key="hist"]`))
+
+    // 复用既有流程建面板：右缘框选 → 右键 → 新建子集（n=3）
+    const { cx, cy } = await drag(page, `${SINGLE} [data-chart-key="hist"] .chart-b`, 0.82, 0.5, 0.97, 0.5)
+    await page.mouse.click(cx, cy, { button: 'right' })
+    await page.locator('[data-menu-create-subset]').click()
+    const panel = page.locator('[data-subset-panel]')
+    await expect(panel).toHaveCount(1)
+    await expect(panel).toHaveAttribute('data-subset-n', '3', { timeout: 15_000 })
+
+    const subSel = '[data-subset-panel] .histogram-chart-wrapper .chart-container'
+    const subHost = page.locator(subSel)
+    const mainHost = page.locator(`${SINGLE} [data-chart-key="hist"] .histogram-chart-wrapper .chart-container`)
+    // 主图不传 enable-data-zoom ⇒ dataZoom 缺席或空（prop 默认关）
+    expect(await zoomWindow(mainHost), '主直方图应保持无缩放').toBeNull()
+
+    // 滚轮缩放：deltaY=-240 放大，窗口 start 离开 0。子图不传 enable-selection ⇒
+    // brush 不绑 mousedown，与 inside dataZoom 无冲突。
+    await wheelAt(page, subSel, 0.5, 0.5, -240)
+    await expect.poll(async () => (await zoomWindow(subHost))?.start ?? -1, { timeout: 10_000 }).toBeGreaterThan(0)
+    const zoomed = await zoomWindow(subHost)
+    expect(zoomed).not.toBeNull()
+
+    // 拖拽平移：向左拖 ⇒ 窗口右移，start 继续增大（子图 brush 关，拖拽是平移不是框选）
+    await drag(page, subSel, 0.65, 0.5, 0.35, 0.5)
+    await expect.poll(async () => {
+      const w = await zoomWindow(subHost)
+      return w != null && w.start > zoomed!.start
+    }, { timeout: 10_000 }).toBe(true)
+    // 交互不得把选区浮层带回来（brush 未绑定的可观察侧面）
+    await expect(page.locator('[data-subset-panel] .chart-brush-overlay')).toHaveCount(0)
+
+    // 交互后主图仍无 dataZoom
+    expect(await zoomWindow(mainHost), '交互后主直方图仍不应有缩放').toBeNull()
   })
 })

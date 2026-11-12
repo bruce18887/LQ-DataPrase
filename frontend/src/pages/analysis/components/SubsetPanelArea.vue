@@ -37,6 +37,7 @@
           :bar-overlap-percent="store.barOverlapPercent"
           :selected-param="panel.param"
           outlier-handling="off"
+          enable-data-zoom
         />
       </div>
     </div>
