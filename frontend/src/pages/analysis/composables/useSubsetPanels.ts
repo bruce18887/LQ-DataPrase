@@ -54,13 +54,22 @@ function create() {
       // api 拦截器返回完整 AxiosResponse（.data 解包在 useAsyncData 里做，
       // 这里直连 api.post，须自取 resp.data；响应体形如 { results: { [param]: {...} } }）
       panel.result = resp.data?.results?.[panel.param] ?? null
-      if (!panel.result) panel.error = '选区内无有效数值数据'
+      // result 为 null = 选区内无有效数值数据，是**空态**不是失败：不写 error，
+      // 由面板渲染中性 el-empty（无重试按钮）。真实请求失败才走 catch 写 error。
       // 首次加载成功：value_range 固化为 serials（后端回传命中行序列号），
       // 之后切参数以 serials 对新参数重查；无回传则保持 value_range（冻结）
       panel.selection = fixateSelection(panel.selection, resp.data)
     } catch (e) {
       if (panel.epoch !== myEpoch) return
-      panel.error = formatError(e, '子集数据加载失败')
+      // 后端对「选区内无有效数值数据」回 400 empty_selection（analysis_views.histogram）——
+      // 这是空态不是失败：不写 error，面板据此渲染中性 el-empty（无重试按钮）。
+      // 其余错误（网络/500/参数守卫）才写 error 走 ErrorBanner+重试。
+      const code = (e as { response?: { data?: { code?: string } } })?.response?.data?.code
+      if (code === 'empty_selection') {
+        panel.result = null
+      } else {
+        panel.error = formatError(e, '子集数据加载失败')
+      }
     } finally {
       if (panel.epoch === myEpoch) panel.loading = false
     }
@@ -83,6 +92,17 @@ function create() {
     const p = panels.value.find((x) => x.id === id)
     if (p) void load(p)
   }
+  /** 拖拽重排：把 fromId 面板移到 toId 面板的位次（splice 语义，扁平网格无行列结构）。 */
+  function move(fromId: number, toId: number) {
+    if (fromId === toId) return
+    const list = [...panels.value]
+    const from = list.findIndex((p) => p.id === fromId)
+    const to = list.findIndex((p) => p.id === toId)
+    if (from < 0 || to < 0) return
+    const [p] = list.splice(from, 1)
+    list.splice(to, 0, p)
+    panels.value = list
+  }
 
   // detached scope：单例 watch 不能绑在首个调用组件的作用域上——登出/401 卸载
   // MainLayout 会停掉它，而单例不重建、resetSubsetPanels 只清不重臂 ⇒ 重新登录后
@@ -103,7 +123,7 @@ function create() {
     })
   })
 
-  return { panels, create: createPanel, remove, clearAll, retry }
+  return { panels, create: createPanel, remove, clearAll, retry, move }
 }
 
 let singleton: ReturnType<typeof create> | null = null

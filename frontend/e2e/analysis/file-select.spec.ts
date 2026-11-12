@@ -168,4 +168,44 @@ test.describe('FileSelect 通用文件选择组件', { tag: ['@p1', '@analysis']
       .toBeLessThanOrEqual(itemBox!.y + itemBox!.height + 1)
     await page.keyboard.press('Escape')
   })
+
+  test('文件选择记忆：选非最新文件 → 刷新后恢复该文件（而非默认最新）', async ({ page }) => {
+    const picker = fileSelect(page)
+    // 等初始自动选中（最新）落定，读出它的文件名作为「最新」基准
+    await expect(picker).toContainText('.csv', { timeout: 15_000 })
+    const newest = (await picker.innerText()) ?? ''
+    // 选一个确定不是最新的种子文件（若最新恰为 gage_m_S1 则改选 QA1，保证 target ≠ 最新）
+    const target = newest.includes('gage_m_S1') ? SEEDED_FILES.BUYOFF_QA1 : SEEDED_FILES.GAGE_S1
+    await selectAnalysisFile(page, target)
+    await expect(picker).toContainText(target, { timeout: 15_000 })
+
+    // 刷新：记忆应恢复 target；若记忆失效才会回退最新（≠ target）→ 红
+    await page.reload()
+    await expect(picker).toBeVisible({ timeout: 15_000 })
+    await expect(picker, '刷新后应恢复上次选择的文件，而非默认最新').toContainText(target, { timeout: 15_000 })
+  })
+
+  test('多文件记忆：选 2 个文件 → 无 query 重进 → 恢复多选', async ({ page }) => {
+    await page.getByRole('tab', { name: /多文件分析/ }).click()
+    const select = filePicker(page, 'multi')
+    await expect(select).toBeVisible({ timeout: 20_000 })
+    await select.click()
+    const dropdown = page.locator('.dp-file-picker-multi:visible .el-select-dropdown__item')
+    await expect(dropdown.first()).toBeVisible({ timeout: 15_000 })
+    await dropdown.filter({ hasText: SEEDED_FILES.BUYOFF_FT }).first().click()
+    await dropdown.filter({ hasText: SEEDED_FILES.BUYOFF_QA1 }).first().click()
+    await page.keyboard.press('Escape')
+
+    // 干净 URL 重进（page.goto 全量加载 → Pinia 复位、无 mf_ids query）：从记忆恢复多选
+    await gotoApp(page, '/analysis')
+    await page.getByRole('tab', { name: /多文件分析/ }).click()
+    const select2 = filePicker(page, 'multi')
+    await expect(select2).toBeVisible({ timeout: 20_000 })
+    await select2.click()
+    const dd2 = page.locator('.dp-file-picker-multi:visible .el-select-dropdown__item')
+    await expect(dd2.first()).toBeVisible({ timeout: 15_000 })
+    await expect(dd2.filter({ hasText: SEEDED_FILES.BUYOFF_FT }).first()).toHaveClass(/is-selected/, { timeout: 15_000 })
+    await expect(dd2.filter({ hasText: SEEDED_FILES.BUYOFF_QA1 }).first()).toHaveClass(/is-selected/)
+    await page.keyboard.press('Escape')
+  })
 })

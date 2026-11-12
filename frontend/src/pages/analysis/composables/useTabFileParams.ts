@@ -1,6 +1,7 @@
 import { onScopeDispose, watch, type Ref } from 'vue'
 import api from '../../../api'
 import type { DataFile } from '../../../types'
+import { recallFileId, pickFallbackFile } from './fileMemory'
 
 /**
  * useTabFileParams —— 「一个 tab 选自己的文件、拉自己的参数列表」
@@ -42,8 +43,10 @@ export function useTabFileParams(opts: {
   files: Ref<DataFile[]>
   /** 该 tab 的开关现值；不传则按中性值请求（晶圆图：后端不读这些字段） */
   filters?: () => TabFilterPayload
+  /** 文件选择记忆的 scope（single/wafer/correlation）；不传则不记忆，回退最新 */
+  memoryKey?: string
 }) {
-  const { ctx, files, filters } = opts
+  const { ctx, files, filters, memoryKey } = opts
   let refreshTimer: ReturnType<typeof setTimeout> | null = null
 
   // 请求序号：过期守卫不能只比 file_id——同一文件、不同筛选口径的并发响应
@@ -104,7 +107,8 @@ export function useTabFileParams(opts: {
     }, DEBOUNCE_MS)
   }
 
-  // 文件：优先跟随用户已选，失效或为空时回落到列表首项
+  // 文件：优先跟随用户已选；失效或为空时先试本 tab 记忆的上次选择，记忆也失效才回退最新。
+  // 记忆只在用户交互时写（AnalysisFilePicker @change），此处的自动回退不落盘。
   watch(
     [() => ctx.fileId.value, files],
     ([id, list]) => {
@@ -112,7 +116,10 @@ export function useTabFileParams(opts: {
         if (id !== null) ctx.fileId.value = null
         return
       }
-      if (id === null || !list.some((f) => f.id === id)) ctx.fileId.value = list[0].id
+      if (id === null || !list.some((f) => f.id === id)) {
+        const remembered = memoryKey ? recallFileId(memoryKey) : null
+        ctx.fileId.value = pickFallbackFile(list, remembered)
+      }
     },
     { immediate: true },
   )

@@ -386,3 +386,58 @@ Spec：`docs/superpowers/specs/2026-11-11-chart-region-subset-design.md`（四�
   flaky 2 均在未触碰文件（tiny-fail-bar:79 / view-data:1393），独占复跑 38/38 零重试 ⇒ 负载抖动。
 - 目标四文件（serial-no-column / wafermap-redesign / serial-fail-count / file-list-completeness）
   全量池零 flaky；独占回归 14/14 + file-list 串行版 ×2 零 flaky。
+
+# 任务：分析页子集面板手柄 / 文件选择记忆 / 无数据态去重试（2026-11-12）
+
+用户实测反馈三条（截图：子集面板无拖动手柄；文件选择器默认开最新文件；子集无数据态多余重试按钮）。
+
+## 范围与决策
+
+1. **子集面板拖动手柄**：`SubsetPanelArea.vue` 头部补 ⠿ 手柄（对齐 `ChartPanel.chart-h__grip` 视觉），
+   指针拖拽在扁平网格里重排面板（move 语义：splice 到目标 index）。`useSubsetPanels` 加纯函数 `move(fromId,toId)`（T2 承载）。
+   不做 dock 那套象限分行/分列——子集区是均匀网格，无行列结构可管。
+2. **文件选择按 tab 记忆**：新增 `composables/fileMemory.ts`（safeStorage 封装 + 纯函数 `pickFallbackFile`）。
+   - 写侧只在**用户交互**落盘：`AnalysisFilePicker` 的 `@change`（el-select change 仅用户触发，程序化 v-model 不触发）
+     → `rememberFile(scope, value)`，键 `analysis.lastFile.<scope>`。**自动回退首项不写记忆**——否则「先访问分析页→再上传新文件→重进」会被旧记忆钉死，且破坏依赖「默认最新」的 e2e。
+   - 读侧：`useTabFileParams` 加 `memoryKey`，回退时 `pickFallbackFile(list, recallFileId(key))`（记忆失效→最新）；
+     `MultiFileTab.onMounted` 在 `initFromQuery` 后、store 为空时 `recallFileIds('multi')`（URL query 优先）。
+   - 跨账号安全：文件按 owner 过滤，记忆 id 不在新账号列表→自动回退最新（R5 双层防御的后端那层天然成立），无需登出清键。
+   - 仪表板「最新 ready 每次挂载重算」是文档化设计（e2e README:193），**不在本批改动**。
+3. **子集无数据态去重试**：`useSubsetPanels.load` 对「result 为 null」不再写 `error`（那是空态不是失败）；
+   `SubsetPanelArea` 末尾 `v-else` 渲染中性 `el-empty`（无重试、无红横幅）。真实网络失败仍走 ErrorBanner+重试。
+   对齐 ErrorBanner 注释「失败与没有数据要区分」。
+
+## 清单
+
+- [x] fileMemory.ts + T2（pickFallbackFile / recall 解析 / remember 写删）
+- [x] useTabFileParams 接 memoryKey；三 tab 传 scope；MultiFileTab 读侧恢复
+- [x] AnalysisFilePicker @change 写记忆
+- [x] useSubsetPanels.move + load 空态不写 error；T2 补 move/空态用例
+- [x] SubsetPanelArea 手柄 + 拖拽重排 + 空态 el-empty（双主题）
+- [x] e2e：subset-drilldown 补手柄重排 + 无数据态；file-select 补记忆恢复
+- [x] 门禁：affected（analysis 模块档）+ 前端三件套；收口全量池 + 后端
+
+## review
+
+**实现要点（含一处自我纠错）**：
+- 子集「没数据」的真实路径是后端 **400 `empty_selection`**（`analysis_views.histogram:235`），
+  走前端 load 的 **catch** 分支，不是 200 null result 的 try 分支。第一版只改了 try 分支
+  （`if(!panel.result) panel.error=…` 删除），e2e 真实渲染当场抓出仍显示重试按钮 → 补 catch
+  分支按 `e.response.data.code==='empty_selection'` 判空态（result=null、error 保持 null），
+  面板 `v-else` 渲染中性 `el-empty`（无重试）。真实失败仍写 error 走 ErrorBanner+重试。
+  T2 三条钉：200 缺参 / 400 empty_selection / 400 internal_error（后者必须保留 error）。
+- 文件记忆**只在用户交互写**（AnalysisFilePicker `@change`，el-select change 仅用户触发）；
+  自动回退首项不落盘 → 不破坏「默认最新」的既有 e2e，也不把「先访问→再上传新文件→重进」钉死。
+  读侧 `pickFallbackFile(list, recalled)`：记忆失效（删文件/换账号，文件按 owner 过滤）→ 回退最新。
+- 子集手柄拖拽用 move（splice）语义，扁平网格无行列结构，不做 dock 象限分行/分列。
+
+**门禁（最终树）**：
+- 前端三件套：vitest 62 文件 863 例全过（+fileMemory 14 / subsetPanels +6）/ lint:e2e 无错 / build ✓。
+- `npm run test:e2e:affected` → **RESULT: PASS · 计划 4 档全部执行**（lint:e2e / vitest / e2e:analysis / e2e:附带P0）。
+  analysis 档 163 例 · unexpected 1 · flaky 2 · 复跑判级**真红 0**；唯一 flaky 是**既有**「散点框选→芯片高亮」
+  在 3-slot 负载下的高亮 poll 超时（独占复跑绿），非本批新增用例引入。
+- 新增 e2e 独占复跑均绿：手柄重排（[1,2]→[2,1]）、无数据空态（el-empty 文案 + 重试 0 + error-banner 0）、
+  单文件记忆刷新恢复、多文件无 query 重进恢复。
+
+**遗留**：仪表板「最新 ready 每次挂载重算」是文档化设计（e2e README:193），本批未改；
+收口全量池 + 后端全套待并入 master 前按 testing-gates §1 跑（本批为 affected 档验证）。

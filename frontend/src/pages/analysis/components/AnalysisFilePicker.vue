@@ -16,7 +16,7 @@
       :popper-class="popperClass"
       class="picker-select"
       @update:model-value="emit('update:modelValue', $event)"
-      @change="emit('change', $event)"
+      @change="onChange"
     />
     <!-- 加载状态由本组件的常驻槽位呈现，**不能**透传给 el-select 的 loading：
          EP 会往后缀插槽里放一个 `is-loading` 无限旋转图标，reference 的 rect
@@ -42,6 +42,7 @@
 import type { DataFile } from '../../../types'
 import FileSelect from '../../../components/common/FileSelect.vue'
 import CircularProgress from '../../../components/common/CircularProgress.vue'
+import { rememberFile } from '../composables/fileMemory'
 
 type PickerScope = 'single' | 'wafer' | 'correlation' | 'multi'
 
@@ -72,6 +73,13 @@ const emit = defineEmits<{
   (e: 'update:modelValue', val: number | number[] | null): void
   (e: 'change', val: number | number[] | null): void
 }>()
+
+// el-select 的 change 只在用户交互时触发（程序化 v-model / 自动回退不触发），
+// 因此这里落盘的就是「用户上一次选择」，按 scope 分键，四个 tab 互不影响。
+function onChange(val: number | number[] | null) {
+  rememberFile(props.scope, val)
+  emit('change', val)
+}
 
 const inputId = `analysis-file-${props.scope}`
 /**

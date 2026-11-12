@@ -4,11 +4,21 @@
       v-for="panel in panels"
       :key="panel.id"
       class="subset-panel"
+      :class="{ 'subset-panel--dragging': dragId === panel.id, 'subset-panel--drop': dropId === panel.id && dragId !== panel.id }"
       data-subset-panel
       :data-subset-id="panel.id"
       :data-subset-n="panel.result?.total_count ?? ''"
     >
       <div class="subset-panel__h">
+        <span
+          class="subset-panel__grip"
+          data-subset-grip
+          role="button"
+          tabindex="0"
+          aria-label="拖拽以重新排列子集面板"
+          title="按住拖拽以重新排列子集面板"
+          @pointerdown="onGripDown(panel.id, $event)"
+        >⠿</span>
         <span class="subset-panel__title">{{ titleOf(panel) }}</span>
         <span class="subset-panel__grow" />
         <button
@@ -39,12 +49,14 @@
           outlier-handling="off"
           enable-data-zoom
         />
+        <el-empty v-else :image-size="64" description="选区内无有效数值数据" />
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { ref, onBeforeUnmount } from 'vue'
 import { useSingleTabStore } from '../../../stores/analysisTabs'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
 import { subsetPanelTitle } from '../composables/selectionGeometry'
@@ -54,8 +66,44 @@ import StatsSummary from './StatsSummary.vue'
 import ErrorBanner from '../../../components/common/ErrorBanner.vue'
 
 const store = useSingleTabStore()
-const { panels, remove, retry } = useSubsetPanels()
+const { panels, remove, retry, move } = useSubsetPanels()
 const { isDark } = useEChartsTheme()
+
+/* ── 拖拽重排（扁平网格，move 语义）─────────────────────────
+   手柄起拖 → window 指针监听 → elementFromPoint 命中目标面板 → 落点 splice。
+   与 ChartDock 同形，但子集区是均匀网格、无行列结构，故只做重排不做分行/分列。 */
+const dragId = ref<number | null>(null)
+const dropId = ref<number | null>(null)
+
+function onGripDown(id: number, ev: PointerEvent) {
+  if (ev.button !== 0) return
+  dragId.value = id
+  dropId.value = null
+  window.addEventListener('pointermove', onDragMove)
+  window.addEventListener('pointerup', onDragUp)
+  window.addEventListener('pointercancel', onDragUp)
+}
+
+function onDragMove(ev: PointerEvent) {
+  if (dragId.value === null) return
+  const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-subset-id]') as HTMLElement | null
+  const id = el ? Number(el.dataset.subsetId) : NaN
+  dropId.value = Number.isFinite(id) && id !== dragId.value ? id : null
+}
+
+function onDragUp() {
+  if (dragId.value !== null && dropId.value !== null) move(dragId.value, dropId.value)
+  cleanupDrag()
+}
+
+function cleanupDrag() {
+  dragId.value = null
+  dropId.value = null
+  window.removeEventListener('pointermove', onDragMove)
+  window.removeEventListener('pointerup', onDragUp)
+  window.removeEventListener('pointercancel', onDragUp)
+}
+onBeforeUnmount(cleanupDrag)
 
 function titleOf(panel: SubsetPanel) {
   return subsetPanelTitle(panel.param, panel.selection, panel.result?.total_count ?? null)
@@ -105,7 +153,10 @@ function cardsOf(panel: SubsetPanel) {
   border: 1px solid var(--border-2, #e4e7ed);
   border-radius: 6px;
   overflow: hidden;
+  transition: box-shadow 120ms ease, opacity 120ms ease;
 }
+.subset-panel--dragging { opacity: 0.4; }
+.subset-panel--drop { box-shadow: inset 0 0 0 2px var(--brand); }
 .subset-panel__h {
   display: flex;
   align-items: center;
@@ -117,8 +168,20 @@ function cardsOf(panel: SubsetPanel) {
   font-size: var(--p-fs-dense);
   font-weight: 600;
   color: var(--text);
+  user-select: none;
   flex: 0 0 auto;
 }
+.subset-panel__grip {
+  cursor: grab;
+  touch-action: none;
+  color: var(--text-3, #9ca3af);
+  padding: 0 4px;
+  font-size: var(--p-fs-base);
+  line-height: 1;
+  border-radius: 3px;
+}
+.subset-panel__grip:hover { color: var(--brand); background: color-mix(in srgb, var(--brand) 10%, transparent); }
+.subset-panel__grip:active { cursor: grabbing; }
 .subset-panel__title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .subset-panel__grow { flex: 1; }
 .subset-panel__btn {
@@ -135,5 +198,13 @@ function cardsOf(panel: SubsetPanel) {
   grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
   padding: 4px;
+}
+/* 空态（选区内无有效数值数据）：中性提示，无重试。描述色随主题，双主题可读。 */
+.subset-panel__b :deep(.el-empty) {
+  --el-empty-description-color: var(--text-2);
+  padding: 8px 0;
+}
+.subset-panel__b :deep(.el-empty__description p) {
+  font-size: var(--p-fs-dense);
 }
 </style>
