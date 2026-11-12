@@ -10,6 +10,9 @@
  *    watch 若随组件 scope 死掉，param 不更新、请求不发，必红。
  * ② 切参数不再清空（本计划对 R5 的显式例外）：serials 面板用新参数重查，
  *    value_range 面板（后端没回 serials）冻结在原参数原结果。
+ * ③ epoch 双 load 竞态（T2-M2 补强）：同一面板连发 load，过期响应/过期拒绝
+ *    都不得碰 result/error/loading；loading 由最新一次 load 接管（旧 finally
+ *    不得提前收起骨架）。mock api.post 返回受控 deferred，人为交错落地顺序。
  *
  * 单例约束：useSubsetPanels 是模块单例，watch 绑定首次调用时活跃的 store 实例 ⇒
  * 全文件共享同一份 pinia（模块顶层创建），勿逐用例 createPinia()，否则第二条用例
@@ -100,5 +103,70 @@ describe('useSubsetPanels 单例生命周期（detached effectScope）', () => {
     expect(serialsPanel.result).toEqual({ total_count: 3 })
     expect(serialsPanel.loading).toBe(false)
     expect(serialsPanel.error).toBeNull()
+  })
+
+  it('epoch 守卫：交错双 load，过期响应与过期拒绝都不得碰 result/error/loading', async () => {
+    const store = useSingleTabStore()
+    const api = useSubsetPanels()
+    // 先清面板再复位参数：否则 selectedParam 变化会对上一条用例遗留的
+    // serials 面板触发重查，污染 post 计数。
+    api.clearAll()
+    store.fileId = 1
+    store.selectedParam = 'P1'
+    await nextTick()
+
+    // 受控 deferred：resolve/reject 时机由用例掌握，模拟响应乱序到达
+    function deferred() {
+      let resolve!: (v: any) => void
+      let reject!: (e: any) => void
+      const promise = new Promise<any>((res, rej) => { resolve = res; reject = rej })
+      return { promise, resolve, reject }
+    }
+    const flush = () => new Promise((r) => setTimeout(r, 0))
+
+    // ① 过期响应：create(load#1) + retry(load#2) 连发，#2 先落地、#1 晚到
+    const d1 = deferred()
+    const d2 = deferred()
+    post.mockImplementationOnce(() => d1.promise).mockImplementationOnce(() => d2.promise)
+    api.create({ kind: 'serials', serials: [4, 5, 6], serial_col: 'Serial_No' })
+    const panel = api.panels.value[0]
+    api.retry(panel.id)
+    expect(panel.loading).toBe(true)
+    expect(post).toHaveBeenCalledTimes(2)
+
+    d2.resolve({ data: { results: { P1: { total_count: 3 } } } })
+    await flush()
+    expect(panel.result).toEqual({ total_count: 3 })
+    expect(panel.loading).toBe(false)
+    expect(panel.error).toBeNull()
+
+    // #1 带着不同结果晚到：epoch 不匹配，result/loading/error 一律不得被碰
+    d1.resolve({ data: { results: { P1: { total_count: 999 } } } })
+    await flush()
+    expect(panel.result, '过期响应不得覆盖新结果').toEqual({ total_count: 3 })
+    expect(panel.loading, '过期响应的 finally 不得改 loading').toBe(false)
+    expect(panel.error).toBeNull()
+
+    // ② 过期拒绝：retry×2 连发（#3/#4），#3 在 #4 仍 pending 时拒绝——
+    //    不得写 error，也不得提前收起骨架（loading 归最新 load 所有）
+    const d3 = deferred()
+    const d4 = deferred()
+    post.mockImplementationOnce(() => d3.promise).mockImplementationOnce(() => d4.promise)
+    api.retry(panel.id)
+    api.retry(panel.id)
+    expect(panel.loading).toBe(true)
+    d3.reject(new Error('stale boom'))
+    await flush()
+    expect(panel.error, '过期拒绝不得写 error').toBeNull()
+    expect(panel.loading, '过期拒绝不得提前收起骨架').toBe(true)
+    expect(panel.result, '过期拒绝不得碰 result').toEqual({ total_count: 3 })
+
+    // #4 正常落地：最新 load 收尾
+    d4.resolve({ data: { results: { P1: { total_count: 5 } } } })
+    await flush()
+    expect(panel.result).toEqual({ total_count: 5 })
+    expect(panel.loading).toBe(false)
+    expect(panel.error).toBeNull()
+    expect(post).toHaveBeenCalledTimes(4)
   })
 })
