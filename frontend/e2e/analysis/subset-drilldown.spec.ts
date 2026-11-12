@@ -533,4 +533,33 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
     await expect(panel.locator('[data-testid="error-banner"]')).toHaveCount(0)
     await expect(panel).toHaveAttribute('data-subset-n', '')
   })
+
+  test('子图展示 → 后开启 serial 即高亮其芯片；关子图才取消', async ({ page }) => {
+    await openAnalysis(page)
+    await expectChartRendered(page.locator(`${SINGLE} [data-chart-key="hist"]`))
+    // 建子集（overflow → 固化 serials {4,5,6}），此时 serial 尚未开启
+    const { cx, cy } = await drag(page, `${SINGLE} [data-chart-key="hist"] .chart-b`, 0.82, 0.5, 0.97, 0.5)
+    await page.mouse.click(cx, cy, { button: 'right' })
+    await expectMenuVisible(page)
+    await page.locator('[data-menu-create-subset]').click()
+    const panel = page.locator('[data-subset-panel]')
+    await expect(panel).toHaveAttribute('data-subset-n', '3', { timeout: 15_000 })
+
+    // 子图展示后才开启 serial：高亮应立即出现（无需重新框选）
+    await ensureChartToggles(page, { serial: true })
+    await waitLoadingGone(page.locator(SINGLE))
+    await expectChartRendered(page.locator(`${SINGLE} [data-chart-key="serial"]`))
+    const host = page.locator(`${SINGLE} .serial-chart-wrapper div[_echarts_instance_]`)
+    await expect.poll(async () => {
+      const s = await highlightState(host)
+      return { n: s.hlPoints.length, dim: s.siteOpacities.length > 0 && s.siteOpacities.every((o) => o <= 0.25) }
+    }, { timeout: 15_000 }).toEqual({ n: 3, dim: true })
+    const st = await highlightState(host)
+    expect([...st.hlPoints].sort((a, b) => Number(a) - Number(b))).toEqual([4, 5, 6])
+
+    // 关掉子图 → 高亮取消（叠加层消失）
+    await panel.getByRole('button', { name: '关闭子集面板' }).click()
+    await expect(panel).toHaveCount(0)
+    await expect.poll(async () => (await highlightState(host)).hlPoints.length, { timeout: 10_000 }).toBe(0)
+  })
 })
