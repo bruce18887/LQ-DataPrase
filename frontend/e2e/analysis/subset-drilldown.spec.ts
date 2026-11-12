@@ -14,7 +14,7 @@ import { selectAnalysisFile, selectParam, ensureChartToggles } from '../helpers/
  * 夹具 6 颗 die：KELVIN_VIN [1,1.5,0.5,10,11,12]，限值 [0,2]。
  *  - 直方图右缘框选（触达 overflow 兜底柱）→ hi=null → 子集 {10,11,12} n=3；
  *  - 散点右上框选（锚定轴顶的超界点，D5 WYSIWYG）→ serials {4,5,6} n=3；
- *  - 切参数 → 面板清空（R5）。
+ *  - 切参数 → 面板跟随（value_range 首载固化 serials 后对新参数重查；R5 显式例外）。
  * 上传型用例：afterAll 删 DataFile 行（lessons R2③，deleteFilesByNameQuiet）。
  */
 
@@ -158,17 +158,41 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
     await expect(panel).toHaveAttribute('data-subset-n', '3', { timeout: 15_000 })
   })
 
-  test('切参数 → 子集面板清空', async ({ page }) => {
+  test('切参数 → 面板跟随（serials 固化）', async ({ page }) => {
     await openAnalysis(page)
     await expectChartRendered(page.locator(`${SINGLE} [data-chart-key="hist"]`))
     const { cx, cy } = await drag(page, `${SINGLE} [data-chart-key="hist"] .chart-b`, 0.82, 0.5, 0.97, 0.5)
     await page.mouse.click(cx, cy, { button: 'right' })
     await page.locator('[data-menu-create-subset]').click()
-    await expect(page.locator('[data-subset-panel]')).toHaveCount(1)
+    const panel = page.locator('[data-subset-panel]')
+    await expect(panel).toHaveCount(1)
+    // 等首载落地：result 与「value_range 固化成 serials {4,5,6}」同帧写入，
+    // n=3 可见即固化已完成，此后切参数才会走 serials 重查而非冻结。
+    await expect(panel).toHaveAttribute('data-subset-n', '3', { timeout: 15_000 })
 
+    // 切参数须以 serials 对 VCC 重查（R2①：waitForResponse 先于触发动作注册）。
+    // 主图 histogram 请求体不带 selection 字段，"kind":"serials" 只会命中子集重查。
+    const requery = page.waitForResponse(
+      (r) => r.url().includes('/analysis/histogram/')
+        && r.request().method() === 'POST'
+        && r.request().postData()?.includes('"kind":"serials"') === true
+        && r.request().postData()?.includes('"params":["VCC"]') === true,
+      { timeout: 20_000 },
+    )
     await selectParam(page, 'VCC')
+    const resp = await requery
+    expect(resp.status()).toBe(200)
+    // 钉身份：必须是首载固化的超界 3 颗 {4,5,6}，不是重新框选
+    expect(resp.request().postData()).toContain('"serials":[4,5,6]')
+
     await waitLoadingGone(page.locator(SINGLE))
-    await expect(page.locator('[data-subset-panel]')).toHaveCount(0)
+    // 面板不清空：同 3 颗 die 对 VCC 查（夹具 VCC[4..6]=[3.3,3.2,3.3] 均在限内 → n=3），
+    // 标题跟随新参数并显示序列颗数
+    await expect(panel).toHaveCount(1)
+    await expect(panel).toHaveAttribute('data-subset-n', '3', { timeout: 15_000 })
+    const title = panel.locator('.subset-panel__title')
+    await expect(title).toContainText('VCC 子集')
+    await expect(title).toContainText('3 颗序列')
   })
 
   test('夜间主题：右键菜单可见可读', async ({ page }) => {

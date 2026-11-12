@@ -67,6 +67,19 @@ export function valueRangeWithOverflow(
   return { lo: L, hi: H }
 }
 
+/**
+ * 首次加载成功后把 value_range 选区固化成 serials（消费 histogram 响应顶层的
+ * selection_serials / selection_serial_col）：之后切参数用 serials 对新参数重查。
+ * 字段缺席 / 空数组 / 非数组 / 非 value_range → 原样返回 sel（面板冻结在原参数原结果）。
+ */
+export function fixateSelection(sel: ChartSelection, respData: any): ChartSelection {
+  const serials = respData?.selection_serials
+  if (sel.kind === 'value_range' && Array.isArray(serials) && serials.length > 0) {
+    return { kind: 'serials', serials, serial_col: respData.selection_serial_col }
+  }
+  return sel
+}
+
 /** 仅用于标题展示：6 位有效数字，消除 convertFromPixel 浮点噪声（不改请求体数值）。 */
 function fmtBound(v: number): string {
   return String(Number(v.toPrecision(6)))
