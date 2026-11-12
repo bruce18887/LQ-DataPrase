@@ -194,3 +194,71 @@ useSubsetPanels 复用 useHistogram 的请求构造（同一 API 函数加可选
 - 预设区域菜单项（「USL 右侧」等）——框选已覆盖，需要时后加。
 - 选区导出 serial 列表 / 子集导出文件。
 - 多文件 tab、晶圆图、相关性页的框选。
+
+## 修订（2026-11-12）
+
+用户需求日期 **2026-11-12**：四点跟进改动经用户批准，反转原文四处决策。
+实施计划 `docs/superpowers/plans/2026-11-12-subset-followup.md`（SDD 六任务，
+提交 5902485 T1 / 3956bf7 T2 / 6b7577a T3 / c148315 T4 / 4c2ee07 T5 / Task 6 收口，
+清单见 `docs/tasks/todo.md` 对应条目）。**原文正文保留不改**（历史规格），
+本节逐条记录反转与修复；引用原文时以「原 §x」标注。
+
+### 反转 1：切参数清空 → 面板跟随 + serials 固化（原 §1 生命周期表、§3.4、§5.1 useSubsetPanels 行、§6）
+
+- 原口径：切文件/切参数清空全部面板。
+- 新口径：**切文件仍清空**（R5 不变）；**切参数不清空**——首次加载成功时后端随
+  histogram 响应回传 `selection_serials` / `selection_serial_col`（T1），前端
+  `fixateSelection` 把 `value_range` 选区固化成 `serials`；切参数时 serials 面板
+  对新参数重查（`load` 带 epoch 代际守卫，过期响应/过期拒绝一律丢弃，loading 由
+  最新一次 load 接管）；后端没回 serials 的 value_range 面板冻结在原参数原结果。
+- 这是 R5「上下文切换清持久态」的**显式例外**（用户批准）；换账号仍由
+  `resetSubsetPanels()` 显式清空，不赌 fileId 一定变。
+- 判据反转：原 §7 T3③「切参数后面板清空」→「切参数面板跟随 + serials 固化重查」
+  （e2e 钉请求体 `"kind":"serials"` + `"serials":[4,5,6]` + 标题跟随新参数）。
+
+### 反转 2：选区保留 → 创建即消费（原 §5.3 末条「新建面板后父图选区保留」）
+
+- 原口径：新建面板后父图选区保留（可继续调整再建）。
+- 新口径：点「新建子集直方图」**即消费选区**——`createAndClose` 清浮层 + 关菜单，
+  选区只展示一次；serial 散点改为 mouseup 立即消费（见反转 3）。
+  可继续框选再建（每次拖拽产生新选区），但旧选区不残留。
+
+### 反转 3：serial 建面板 → 跨参数芯片高亮（原 §1 表、§3.1–3.2、§7 T3②）
+
+- 原口径：serial 散点框选 → 右键「新建子集直方图」面板。
+- 新口径：serial 框选 **mouseup 立即高亮**命中芯片，不建面板——叠加「高亮芯片」
+  系列 + 底层 site 系列降透明（≤0.25）；高亮是会话单例（`useSerialHighlight`），
+  **切测试项按 serial 对新参数重画**（跨参数保持，同反转 1 的 R5 显式例外）；
+  右键菜单只留「清除高亮」（无「新建子集直方图」）；登出/换账号
+  `resetSerialHighlight()`。命中语义仍按 D5 WYSIWYG（收集 `realSerial`）。
+- 判据反转：原 §7 T3②「serial 框选→建面板」→「serial 框选→芯片高亮 + 跨参数保持」
+  （e2e 钉叠加系列点集恰为 {4,5,6}、底层降透明、切 VCC 后标题与点集双钉）。
+
+### 反转 4：子图无缩放 → inside dataZoom（原 §5.2 D5 括注「直方图无 dataZoom」、§5.1 HistogramChart 行）
+
+- 原口径：直方图无 dataZoom，子图复用 HistogramChart 亦无缩放。
+- 新口径：HistogramChart 新增 `enableDataZoom` prop（**默认关**）；子集面板开
+  inside dataZoom（滚轮缩放 + 拖拽平移），**主直方图保持无缩放**；子图不传
+  `enable-selection` ⇒ brush 不绑 mousedown，与 inside dataZoom 无左键冲突。
+  serial 图框选开启态 `moveOnMouseMove=false`（拖拽让位框选），滚轮缩放不受影响
+  （Task 3 的 preventDefault 只拦 compat mousedown，不拦 wheel）。
+- e2e 钉：子图滚轮后窗口 start>0 且 end<100（收窄，区分缩放与平移）、拖拽后 start
+  继续增大；主图交互前后 dataZoom 缺席（null）。
+
+### 光标 bug 修复（Task 3，随反转 2 落地）
+
+- 现象：框选拖拽后浏览器留下插入光标/文本选区。
+- 根因：折叠 caret 被浏览器塞进焦点可编辑节点（el-select 隐藏 input），放置先于
+  事件派发，拖拽移动期间反复重放；zrender 6 的 `e.event` 是 pointerdown，直接
+  取消它会抑制框选依赖的 compat mouseup（菜单永不出现）且拦不住 caret。
+- 修法：**按下/移动/抬起三清** `window.getSelection().removeAllRanges()` +
+  **compat mousedown capture 阶段 preventDefault** + 容器 `user-select:none`。
+- 承重断言：e2e 拖拽后断言 `selection.toString()===''` **且 `rangeCount===0`**——
+  toString 在 headless 恒真（zrender SVG 自带 user-select:none），rangeCount 才抓
+  得到折叠 caret（RED rc=1 → GREEN rc=0 实测）。
+
+### 不变项
+
+**D1**（子集分箱强制 DR）、**D2**（不做 IQR 再剔除）、**D4**（面板不进 ChartDock）、
+**D5**（散点 WYSIWYG 命中）、**D6**（兜底柱无界语义）全部不变；后端守卫表（原 §4.3）
+不变，`selection_serials` 回传为增量字段；CPK 仍锚定原参数规格限（RDL）。

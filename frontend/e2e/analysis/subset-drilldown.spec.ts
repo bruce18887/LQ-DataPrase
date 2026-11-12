@@ -16,6 +16,7 @@ import { selectAnalysisFile, selectParam, ensureChartToggles } from '../helpers/
  *  - 散点右上框选（锚定轴顶的超界点，D5 WYSIWYG）→ 立即高亮芯片 {4,5,6}，
  *    不建面板；切测试项高亮保持；右键只留「清除高亮」；
  *  - 切参数 → 面板跟随（value_range 首载固化 serials 后对新参数重查；R5 显式例外）；
+ *  - 面板关闭 ×：按 id 移除（双面板关一留一）、计数归零后区域整体撤下；
  *  - 选区一次性消费：点「新建子集直方图」即清浮层（只展示一次）；拖拽不触发原生文本选择；
  *  - 子集直方图 inside dataZoom：滚轮缩放 + 拖拽平移（主直方图默认关、保持无缩放）；
  *  - serial 滚轮回归：框选开启态（moveOnMouseMove=false）不影响滚轮缩放（Task 3 只拦 mousedown）。
@@ -123,6 +124,18 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
     await page.mouse.wheel(0, deltaY)
   }
 
+  /**
+   * 菜单可见性硬化（T2-M1 遗留）：3-slot 负载下右键菜单渲染偶发超过默认 10s
+   * expect 超时（独占复跑绿 = 负载抖动，非产品缺陷）。先等 attached 再放宽
+   * visible 到 20s——只放宽等待窗口，不放宽判据：菜单仍必须真可见，
+   * 菜单项计数仍按精确值断言（toHaveCount(0) 等不放宽）。
+   */
+  async function expectMenuVisible(page: import('@playwright/test').Page) {
+    const menu = page.locator('[data-chart-context-menu]')
+    await expect(menu).toBeAttached({ timeout: 20_000 })
+    await expect(menu).toBeVisible({ timeout: 20_000 })
+  }
+
   test('直方图框选 → 右键新建子集面板（n=3，CPK 非空）', async ({ page }) => {
     await openAnalysis(page)
     await expectChartRendered(page.locator(`${SINGLE} [data-chart-key="hist"]`))
@@ -150,7 +163,7 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
     expect(sel.text, '框选拖拽不得触发原生文本选择').toBe('')
     expect(sel.rangeCount, '框选拖拽不得留下插入光标').toBe(0)
     await page.mouse.click(cx, cy, { button: 'right' })
-    await expect(page.locator('[data-chart-context-menu]')).toBeVisible()
+    await expectMenuVisible(page)
     await page.locator('[data-menu-create-subset]').click()
     // 选区在创建时刻被消费：浮层立即消失（只展示一次）
     await expect(page.locator('.chart-brush-overlay')).toHaveCount(0)
@@ -222,7 +235,7 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
     const box = await chartB.boundingBox()
     expect(box).not.toBeNull()
     await page.mouse.click(box!.x + box!.width * 0.75, box!.y + box!.height * 0.25, { button: 'right' })
-    await expect(page.locator('[data-chart-context-menu]')).toBeVisible()
+    await expectMenuVisible(page)
     await expect(page.locator('[data-menu-create-subset]')).toHaveCount(0)
     const clearItem = page.locator('[data-menu-clear-highlight]')
     await expect(clearItem).toBeVisible()
@@ -271,6 +284,35 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
     await expect(title).toContainText('3 颗序列')
   })
 
+  test('面板关闭按钮 × → 按 id 移除，计数归零（区域整体撤下）', async ({ page }) => {
+    await openAnalysis(page)
+    await expectChartRendered(page.locator(`${SINGLE} [data-chart-key="hist"]`))
+    const histB = `${SINGLE} [data-chart-key="hist"] .chart-b`
+    // 连建两张面板（选区创建即消费，第二次拖拽重新框选同一值域）。
+    // 双面板才能钉住 remove(id) 是「按 id 移除」而不是 clearAll()。
+    for (let i = 0; i < 2; i++) {
+      const { cx, cy } = await drag(page, histB, 0.82, 0.5, 0.97, 0.5)
+      await page.mouse.click(cx, cy, { button: 'right' })
+      await expectMenuVisible(page)
+      await page.locator('[data-menu-create-subset]').click()
+      await expect(page.locator('.chart-brush-overlay')).toHaveCount(0)
+    }
+    const panels = page.locator('[data-subset-panel]')
+    await expect(panels).toHaveCount(2)
+    await expect(panels.nth(1)).toHaveAttribute('data-subset-n', '3', { timeout: 15_000 })
+
+    // 关第一张：剩 1 张，且必须是 id=2 那张（精确身份，不是「还剩一张就行」）
+    await panels.nth(0).getByRole('button', { name: '关闭子集面板' }).click()
+    await expect(panels).toHaveCount(1)
+    await expect(panels.first()).toHaveAttribute('data-subset-id', '2')
+    // 关第二张：计数归零，区域 v-if 整体撤下（不是隐藏）
+    await panels.first().getByRole('button', { name: '关闭子集面板' }).click()
+    await expect(panels).toHaveCount(0)
+    await expect(page.locator('[data-subset-area]')).toHaveCount(0)
+    // 关面板不得波及主直方图
+    await expectChartRendered(page.locator(`${SINGLE} [data-chart-key="hist"]`))
+  })
+
   test('夜间主题：右键菜单可见可读', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('theme', 'night'))
     await openAnalysis(page)
@@ -279,7 +321,7 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
     const { cx, cy } = await drag(page, `${SINGLE} [data-chart-key="hist"] .chart-b`, 0.82, 0.5, 0.97, 0.5)
     await page.mouse.click(cx, cy, { button: 'right' })
     const menu = page.locator('[data-chart-context-menu]')
-    await expect(menu).toBeVisible()
+    await expectMenuVisible(page)
     const item = menu.locator('[data-menu-create-subset]')
     await expect(item).toBeVisible()
     // night 下菜单文字不得是纯黑（var(--text) 应提亮），否则深底不可读
@@ -292,6 +334,7 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
     await expectChartRendered(page.locator(`${SINGLE} [data-chart-key="serial"]`))
     const { cx: sx, cy: sy } = await drag(page, `${SINGLE} [data-chart-key="serial"] .chart-b`, 0.55, 0.06, 0.98, 0.45)
     await page.mouse.click(sx, sy, { button: 'right' })
+    await expectMenuVisible(page)
     const hlItem = page.locator('[data-menu-clear-highlight]')
     await expect(hlItem).toBeVisible()
     const hlColor = await hlItem.evaluate((el) => getComputedStyle(el).color)
@@ -315,6 +358,9 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
 
     await wheelAt(page, `${SINGLE} [data-chart-key="serial"] .serial-canvas`, 0.5, 0.5, -240)
     await expect.poll(async () => (await zoomWindow(host))?.start ?? -1, { timeout: 10_000 }).toBeGreaterThan(0)
+    // 收窄判据：滚轮放大必须使 end 离开 100——区分「真缩放」与「仅平移/start 漂移」
+    const after = await zoomWindow(host)
+    expect(after!.end, '滚轮放大应收窄窗口（end < 100）').toBeLessThan(100)
   })
 
   test('子集直方图滚轮缩放 + 拖拽平移（主直方图保持无缩放）', async ({ page }) => {
@@ -341,6 +387,8 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
     await expect.poll(async () => (await zoomWindow(subHost))?.start ?? -1, { timeout: 10_000 }).toBeGreaterThan(0)
     const zoomed = await zoomWindow(subHost)
     expect(zoomed).not.toBeNull()
+    // 收窄判据：滚轮放大必须使 end 离开 100（光 start>0 抓不到「只平移不缩放」）
+    expect(zoomed!.end, '滚轮放大应收窄窗口（end < 100）').toBeLessThan(100)
 
     // 拖拽平移：向左拖 ⇒ 窗口右移，start 继续增大（子图 brush 关，拖拽是平移不是框选）
     await drag(page, subSel, 0.65, 0.5, 0.35, 0.5)

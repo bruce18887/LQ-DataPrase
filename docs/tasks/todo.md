@@ -319,11 +319,43 @@ runbook：`docs/reference/deployment-tls-termination-runbook-2026-11-11.md`；�
 计划：`docs/superpowers/plans/2026-11-12-subset-followup.md`（SDD 子代理驱动，台账在
 `.superpowers/sdd/2026-11-12-subset-followup/progress.md`，gitignored）。
 Spec：`docs/superpowers/specs/2026-11-11-chart-region-subset-design.md`（四处决策经用户批准反转，
-修订节由 Task 6 写回）。
+修订节已由 Task 6 写回：「修订（2026-11-12）」）。
 
-- [ ] Task 1 后端 value_range 选区固化 serials（selection_serials/selection_serial_col，T1 TDD）
-- [ ] Task 2 子集面板跟随测试项切换（fixateSelection + epoch 竞态守卫 + e2e 反转）
-- [ ] Task 3 选区一次性消费 + 光标 bug（preventDefault + user-select:none，先复现）
-- [ ] Task 4 serial 圈选改跨参数芯片高亮（useSerialHighlight 单例 + 叠加系列 + 菜单 highlight 模式）
-- [ ] Task 5 直方子图滚轮缩放 + 拖拽平移（enableDataZoom 默认关，仅子图开）
-- [ ] Task 6 收口：e2e 补强 + spec 修订 + 全量门禁（4-slot 池 + 后端全套）
+- [x] Task 1 后端 value_range 选区固化 serials（selection_serials/selection_serial_col，T1 TDD）
+- [x] Task 2 子集面板跟随测试项切换（fixateSelection + epoch 竞态守卫 + e2e 反转）
+- [x] Task 3 选区一次性消费 + 光标 bug（preventDefault + user-select:none，先复现）
+- [x] Task 4 serial 圈选改跨参数芯片高亮（useSerialHighlight 单例 + 叠加系列 + 菜单 highlight 模式）
+- [x] Task 5 直方子图滚轮缩放 + 拖拽平移（enableDataZoom 默认关，仅子图开）
+- [x] Task 6 收口：e2e 补强 + spec 修订 + 全量门禁（4-slot 池 + 后端全套）
+
+## 提交清单（2026-11-12 收口，git log 现读）
+
+| 任务 | 提交 | 摘要 |
+|---|---|---|
+| T1 | `5902485` | value_range 选区固化 serials 随 histogram 响应回传 + T1 |
+| T2 | `3956bf7` | 子集面板跟随测试项切换（fixateSelection + epoch 竞态守卫）+ T2/T3 反转 |
+| T3 | `6b7577a` | 选区一次性消费 + 框选插入光标修复（按下/移动/抬起三清选区） |
+| T4 | `c148315` | serial 框选改跨参数芯片高亮（mouseup 立即消费 + 会话单例按 serial 重画）+ T2/T3 |
+| T5 | `4c2ee07` | 子集直方图 inside dataZoom 滚轮缩放/拖拽平移（enableDataZoom 默认关）+ T3 |
+| T6 | 本提交 | 收口：e2e 补强（关闭按钮用例 + 菜单等待硬化 + 缩放收窄判据）+ epoch 竞态 T2 + EOF×5 + spec 修订节 + 本条目 |
+
+（用户 intro 提交 ab1490a/7a0faba 插在 T4 与 T5 之间、d207806 插在 T5 与 T6 之间，
+属正常历史，非本任务产物。）
+
+## 收口验证（2026-11-12，全绿）
+
+- 前端三件套（frontend/）：`npx vitest run` **61 文件 / 843 例全过**（含新增 epoch 竞态案）；
+  `npm run lint:e2e` 无错；`npm run build`（vue-tsc -b + vite build）✓。日志 `tasks/t6-vitest-lint-build.log`。
+- 4-slot 全量池（仓库根，runId 065504-26520）：`用例 445 · 墙钟 9.3min · 单价 3.04s/例 ·
+  unexpected 0 · flaky 6 · skipped 21` → **`结论 MEASURED`**。日志 `tasks/t6-close-e2e.log`，
+  明细 `tasks/t6-close-e2e/merged.json` + `main-run-slots/`（slot 日志已归档）。
+  效率 2.31<2.8 不判退化（本轮有 retry，testing-gates §4「效率只在无重跑时判」）。
+- 后端全套（仓库根，与池并跑，落盘面已分离）：**`Ran 2571 tests in 601.848s` / `OK (skipped=16)`**。
+  日志 `tasks/t6-backend.log`（例数多于旧账 1789：用户 intro 批新增 test_static_assets 等，以 OK 行为准）。
+- flaky 6 定性＝**负载抖动**（serial-no-column ×5：waitForResponse 20s ×4 + 图表可见 15s ×1；
+  wafermap-redesign ×1：SVG 布局 null；全部未触碰文件、retry #1 转绿）。独占复跑
+  （runId 070642-48704，`--slots=1` 两文件）**13/13 绿 · unexpected 0 · flaky 0 · MEASURED**，
+  日志 `tasks/t6-close-e2e/recheck-solo.log` + `recheck-solo/`。multi-file:152 本轮未再现。
+- 补强落地：菜单等待硬化（attached+visible 20s，判据不削弱）；关闭按钮 × 用例（双面板按 id
+  移除→计数 0→区域撤下）；epoch 交错双 load T2 案（变异刀自证承重：禁守卫→RED→还原→绿）；
+  滚轮缩放补 end<100 收窄判据；EOF 换行 ×5。独占验证轮 7/7 绿（tasks/t6-solo-e2e.log）。
