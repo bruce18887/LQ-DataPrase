@@ -14,7 +14,8 @@ import { selectAnalysisFile, selectParam, ensureChartToggles } from '../helpers/
  * 夹具 6 颗 die：KELVIN_VIN [1,1.5,0.5,10,11,12]，限值 [0,2]。
  *  - 直方图右缘框选（触达 overflow 兜底柱）→ hi=null → 子集 {10,11,12} n=3；
  *  - 散点右上框选（锚定轴顶的超界点，D5 WYSIWYG）→ serials {4,5,6} n=3；
- *  - 切参数 → 面板跟随（value_range 首载固化 serials 后对新参数重查；R5 显式例外）。
+ *  - 切参数 → 面板跟随（value_range 首载固化 serials 后对新参数重查；R5 显式例外）；
+ *  - 选区一次性消费：点「新建子集直方图」即清浮层（只展示一次）；拖拽不触发原生文本选择。
  * 上传型用例：afterAll 删 DataFile 行（lessons R2③，deleteFilesByNameQuiet）。
  */
 
@@ -111,11 +112,26 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
         && r.status() < 500,
       { timeout: 20_000 },
     )
-    // 右缘 82%→97%：触达 overflow 兜底柱 → hi=null；lo≈1.7+ 排除限内点
+    // 右缘 82%→97%：触达 overflow 兜底柱 → hi=null；lo≈1.7+ 排除限内点。
+    // 先清掉前置交互（选参数等）可能残留的选区，隔离出「本次拖拽产生的选区」。
+    await page.evaluate(() => window.getSelection()?.removeAllRanges())
     const { cx, cy } = await drag(page, `${SINGLE} [data-chart-key="hist"] .chart-b`, 0.82, 0.5, 0.97, 0.5)
+    // 光标 bug：框选拖拽后不得留下任何浏览器选区——文本选择与插入光标都算。
+    //  - toString 守文本选择（brief 判据）；
+    //  - rangeCount 守折叠插入光标：headless 实测 caret 被浏览器塞进参数选择器
+    //    el-select 的隐藏 input（焦点可编辑节点），且拖拽移动期间会反复重放；
+    //    toString() 恒为空抓不到，须用 rangeCount 判。
+    const sel = await page.evaluate(() => {
+      const s = window.getSelection()
+      return { text: s?.toString() ?? '', rangeCount: s?.rangeCount ?? 0 }
+    })
+    expect(sel.text, '框选拖拽不得触发原生文本选择').toBe('')
+    expect(sel.rangeCount, '框选拖拽不得留下插入光标').toBe(0)
     await page.mouse.click(cx, cy, { button: 'right' })
     await expect(page.locator('[data-chart-context-menu]')).toBeVisible()
     await page.locator('[data-menu-create-subset]').click()
+    // 选区在创建时刻被消费：浮层立即消失（只展示一次）
+    await expect(page.locator('.chart-brush-overlay')).toHaveCount(0)
     const resp = await respPromise
     expect(resp.request().postData()).toContain('"hi":null')
 
@@ -146,6 +162,8 @@ test.describe('框选子集直方图', { tag: ['@p1', '@analysis'] }, () => {
     await page.mouse.click(cx, cy, { button: 'right' })
     await expect(page.locator('[data-chart-context-menu]')).toBeVisible()
     await page.locator('[data-menu-create-subset]').click()
+    // 选区一次性消费：rect 模式浮层同样在创建时刻清空
+    await expect(page.locator('.chart-brush-overlay')).toHaveCount(0)
     const resp = await respPromise
     const body = resp.request().postData() ?? ''
     expect(body).toContain('"kind":"serials"')
