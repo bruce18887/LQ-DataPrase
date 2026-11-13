@@ -9,6 +9,7 @@ import {
   pickSensitivity,
   listParams,
   selectParam,
+  setActiveAnalysisTab,
   closeFilePopper,
 } from '../helpers/params'
 import { waitLoadingGone } from '../helpers/charts'
@@ -112,10 +113,22 @@ test.describe('@p1 分析页 tab 独立文件选择', { tag: ['@p1', '@analysis'
     await selectParam(page, params[0])
     await waitLoadingGone(page.locator(SINGLE))
 
+    // 快路径列表请求是 **tab 级**的：相关性 pane 一挂载、一换文件就自己发一发。
+    // 切 tab **之前**必须声明 scope（helpers/params 的 setActiveAnalysisTab），
+    // 否则那一发会被记进单文件桶、把它的 lastFast 顶到别的文件上，
+    // listParams(page) 只能干等 15s 超时 —— 2026-11-13 复审 I-4 说的就是这个形状
+    // （当时 0 个活受害者，因为跨 tab 的读法还没有；这条用例是它的守门人）。
+    setActiveAnalysisTab(page, 'correlation')
     await page.getByRole('tab', { name: /相关性对比/ }).click()
     await pickTabFile(page, 'correlation', RECOMMENDED.gage[0])
     await expect(filePicker(page, 'correlation')).toContainText('gage_m_S1')
 
+    const corrParams = await listParams(page, 'correlation')
+    expect(corrParams.length, '相关性 tab 该拿到自己那份参数列表').toBeGreaterThan(0)
+    // 单文件桶仍是它自己那一发已结算的列表（没被相关性那发改写）
+    expect(await listParams(page, 'single'), '单文件参数列表不该被相关性 tab 顶掉').toEqual(params)
+
+    setActiveAnalysisTab(page, 'single')
     await page.getByRole('tab', { name: /单文件分析/ }).click()
     await expect(filePicker(page, 'single')).toContainText('DA35_BPC50338')
     await expect(page.locator(`${SINGLE} .param-selector`)).toContainText(params[0])
