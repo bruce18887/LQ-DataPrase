@@ -31,196 +31,22 @@
 
 ---
 
-## Task 1: 探针——迁移动产品代码前先把 v2 的四件事量出来
+## Task 1: ~~探针~~ **已取消 —— 四问并入 Task 5 的 T3 运行**
 
-**为什么先跑探针**：本仓 `el-select-v2` **零先例**（`grep -rn "el-select-v2" frontend/src` 只有 `constants/dropdown.ts:4-5` 那句「虚拟化的是自带的 el-select-v2」的说明）。lessons 的规矩是「仓内没用过的 API 先跑探针」，2026-11-12 那条 Event/Condition 过不了池的教训就是第一版方案被探针否掉的。探针不过 → 回设计，不许硬迁。
+**为什么取消（2026-11-13 开工前核实的，不是执行中才发现）**：原方案要在 `frontend/e2e/probe/` 下起一个裸 html 最小页驱动 v2。但本仓 e2e 默认起的是 `npm run build && npm run preview`（`frontend/playwright.config.ts:192-198`），**vite preview 只伺服 `dist/`**，`e2e/probe/*.html` 不在其中；而 preview 带 history fallback ⇒ 请求它不会 404，会静默返回 SPA 的 `index.html`。结果就是探针「跑通、打出数字」，量的却是整个应用外壳 —— 这是最坏的一种失败形状（同 lessons 2026-11-11「e2e 跑 Vite 自带 history fallback，覆盖不到 Django URL 层」同族）。
 
-**Files:**
-- Create: `frontend/e2e/probe/select-v2-probe.spec.ts`（**临时**，Task 12 前删除）
-- Read: `frontend/e2e/fixtures/*.ts`（找现成的多参数夹具与 `gotoApp` 用法）
+**替代方案（已落到 Task 5）**：四问的答案由「先迁 ParamSelector，再跑它自己的 T3」给出。三条断言恰好就是 Q1/Q2/Q4，窗口行数与耗时在同一次运行里打印。这不牺牲严谨性 —— 量的是**真实产品入口**，比最小页更接近结论。
 
-- [ ] **Step 1: 先读一份现成 analysis 用例，照它的登录与选文件写法起探针**
+| 原四问 | 现在由谁回答 |
+|---|---|
+| Q1 `#footer` 是否渲染、是否在虚拟窗口外 | Task 5 Step 1 第一条断言（footer 可见且文案等于全量数） |
+| Q2 `filter-method` 是否真的不过滤 | Task 5 Step 1 第二条（输入关键词后能搜到列表末尾项）+ Task 2 的反向探针 |
+| Q3 虚拟窗口 DOM 行数 | Task 5 Step 1.5 打印 `items.count()` |
+| Q4 4,570 项首屏与滚到底耗时 | Task 5 Step 1.5 打印两个 `ms` |
 
-Run: `cd frontend && sed -n '1,40p' e2e/analysis/histogram-fail-bins.spec.ts`
-Expected: 看到 `test.describe.configure` / `storageState` / `gotoApp('/analysis')` / `selectAnalysisFile` 的既有用法。探针照抄这套前置，**不要自造登录**。
+**放行条件不变**：Q1 不成立（footer 不渲染）或 Q4 不成立（滚不动/明显卡顿）⇒ 停止本批，回设计。这两条写在 Task 5 Step 1.5 的 Expected 里。
 
-- [ ] **Step 2: 写探针（四问各一条，打印数值，不断言产品行为）**
-
-Create `frontend/e2e/probe/select-v2-probe.spec.ts`：
-
-```ts
-import { expect, test } from '@playwright/test'
-
-import { gotoApp } from '../helpers/nav'
-import { selectAnalysisFile } from '../helpers/params'
-
-/**
- * 临时探针（2026-11-13 批1 Task 1）：迁 el-select-v2 前量四件事。
- * 跑完即删，结论写回 spec §2.6。不断言产品行为，只打印实测值。
- */
-test.describe('probe: el-select-v2 四问', () => {
-  test.use({ storageState: 'e2e/.auth/admin.json' })
-
-  test('Q1 footer slot / Q2 filter-method / Q3 Enter / Q4 首屏耗时', async ({ page }) => {
-    const errors: string[] = []
-    page.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
-
-    await gotoApp(page, '/analysis')
-    await selectAnalysisFile(page)
-
-    // 用 v2 起一个一次性实例：把 ParamSelector 的 popper 当观察对象不现实（还没迁）
-    // 所以这里直接在页面里挂一个 v2 —— 通过真实产品入口不行，改成量 EP 本身：
-    // 打开任意一个已存在的 el-select，确认 v2 的类名差异只影响定位器不影响渲染。
-    const t0 = Date.now()
-    await page.evaluate(() => {
-      const el = document.createElement('div')
-      el.id = 'probe-v2-root'
-      document.body.appendChild(el)
-    })
-    console.log('PROBE-Q4-mount-dom-ms', Date.now() - t0)
-
-    // Q1/Q2/Q3 需要真实 v2 组件，改由 Step 4 的手工最小页承担（见下）。
-    // 这里只留控制台噪声采集，证明 gotoApp 通路本身干净。
-    console.log('PROBE-consoleErrors', JSON.stringify(errors))
-    expect(errors.filter((e) => !/favicon|ResizeObserver/.test(e))).toEqual([])
-  })
-})
-```
-
-- [ ] **Step 3: 建手工最小页（v2 四问的真判据在这里）**
-
-Create `frontend/e2e/probe/select-v2-min.html`：
-
-```html
-<!DOCTYPE html>
-<html lang="zh">
-  <head><meta charset="utf-8" /><title>v2 probe</title></head>
-  <body>
-    <div id="app"></div>
-    <script type="module" src="./select-v2-min.mjs"></script>
-  </body>
-</html>
-```
-
-Create `frontend/e2e/probe/select-v2-min.mjs`：
-
-```js
-import { createApp, h, ref } from 'vue'
-import ElementPlus from 'element-plus'
-import 'element-plus/dist/index.css'
-
-// 4570 项，与用户报的真实量级对齐
-const PARAMS = Array.from({ length: 4570 }, (_, i) => `MTP_page1_${(i + 1).toString(36).toUpperCase()}`)
-
-const Probe = {
-  setup() {
-    const value = ref('')
-    const query = ref('')
-    const footerHits = ref(0)
-    const options = (q) =>
-      q ? PARAMS.filter((p) => p.toLowerCase().includes(q.toLowerCase())) : PARAMS
-    return () =>
-      h(ElementPlus.ElConfigProvider ?? 'div', {}, [
-        h('div', { id: 'probe-state' }, [
-          h('span', { id: 'probe-total' }, String(options(query.value).length)),
-          h('span', { id: 'probe-dom' }, String(document.querySelectorAll('.el-select-dropdown__item').length)),
-        ]),
-        h(
-          resolveSelectV2(),
-          {
-            modelValue: value.value,
-            'onUpdate:modelValue': (v) => { value.value = v },
-            options: options(query.value).map((p) => ({ value: p, label: p })),
-            filterable: true,
-            clearable: true,
-            'filter-method': (q) => { query.value = q },
-            popperClass: 'probe-popper',
-          },
-          {
-            footer: () => { footerHits.value++; return h('div', { id: 'probe-footer' }, `共 ${options(query.value).length} 项`) },
-            default: ({ item }) => h('div', { class: 'probe-opt' }, String(item.label)),
-          },
-        ),
-      ])
-  },
-}
-
-function resolveSelectV2() {
-  // el-select-v2 的全局注册名是 ElSelectV2
-  return ElementPlus.ElSelectV2
-}
-
-createApp(Probe).use(ElementPlus).mount('#app')
-```
-
-> 上面这个最小页故意把 `#footer` 的调用次数记下来（`footerHits`），用来回答 Q1「footer 到底渲染不渲染、在不在虚拟滚动容器外面」。`resolveSelectV2()` 单独抽出来，是为了在 EP 导出名不对时**当场报错而不是静默**（`h(undefined)` 会抛，抛了就是探针的结论之一）。
-
-- [ ] **Step 4: 跑探针，逐条记录四问的实测答案**
-
-Run: `cd frontend && npx playwright test e2e/probe/select-v2-probe.spec.ts --project=P0 --reporter=list`
-Expected: 1 passed；`PROBE-consoleErrors []`、`PROBE-Q4-mount-dom-ms` 是个位数毫秒。
-
-手工量 v2 四问（用 `page.evaluate` 起最小页太绕，直接用 Playwright 驱动真实页面更准）—— 建 `frontend/e2e/probe/run-v2-questions.spec.ts`：
-
-```ts
-import { expect, test } from '@playwright/test'
-
-/**
- * 四问的判据版（Task 1 用完即删）。
- * 结论必须逐条抄回 spec §2.6 与本计划 Task 5-8 的注释里。
- */
-test('v2 四问', async ({ page }) => {
-  await page.goto('/probe/select-v2-min.html')   // 见 Step 5 的挂载方式
-  const opts = page.locator('.el-select-dropdown__item')
-
-  // Q1: #footer 是否渲染、是否在虚拟窗口之外
-  await page.locator('.el-select-v2__wrapper').click()
-  await expect(page.locator('#probe-footer')).toBeVisible()
-  console.log('Q1-footer-rendered', await page.locator('#probe-footer').innerText())
-
-  // Q2: filter-method 是否真的不过滤（父算 :options 才生效）
-  await page.locator('.el-select-v2__input').fill('MTP_page1_100')
-  console.log('Q2-total', await page.locator('#probe-total').innerText())
-  console.log('Q2-dom-count', await opts.count())
-
-  // Q3: 虚拟窗口 DOM 行数（对照 defaults.mjs:100,107 的 274/34 ≈ 8）
-  console.log('Q3-dom-window-rows', await opts.count())
-
-  // Q4: 4570 项首屏 + 滚到底
-  const t0 = Date.now()
-  await page.locator('.el-select-v2__input').fill('')
-  await page.locator('.el-select-dropdown__item').first().hover()
-  await page.mouse.wheel(0, 200_000)
-  console.log('Q4-scroll-to-end-ms', Date.now() - t0)
-  console.log('Q4-last-visible', (await opts.last().innerText()).trim())
-})
-```
-
-Expected（**这三条是放行判据，任一不成立就停下回设计**）：
-- `Q1-footer-rendered` 打印出「共 4570 项」⇒ `#footer` 有渲染且不受窗口影响（源码依据 `select-v2/src/select-dropdown.mjs:177`）。
-- `Q2-total` 是过滤后的条数、`Q2-dom-count` ≤ 约 10 ⇒ **证明 v2 自己不过滤**（`useSelect.mjs:114-132`），必须由父算 `:options`。
-- `Q4-last-visible` 是列表**末尾**那一项的文本 ⇒ 证明滚到底能拿到最后一项，且 `Q4-scroll-to-end-ms` 远小于 1000ms。
-
-- [ ] **Step 5: 若最小页挂载路径不通，改走「直接驱动已迁移的 ParamSelector」**
-
-如果 `/probe/select-v2-min.html` 在现有 playwright `baseURL` 下取不到（Vite 不会伺服 `e2e/` 下的裸 html），**不要为了跑通而加新配置**。退路是：先做 Task 5（只改 ParamSelector 一个组件），把四问的打印临时加进 Task 5 的 T3 用例里，量完再删。这条退路写在这里是为了避免 Task 1 卡住整批。
-
-- [ ] **Step 6: 把四问结论写回 spec 与台账**
-
-Modify: `docs/superpowers/specs/2026-11-13-ux-batch-dropdown-admin-dedup-intro-usage-design.md` §2.6 —— 在四条后面各追一句实测值。
-Modify: `docs/tasks/todo.md` —— 新增/追加「批1」条目，记 `Q1..Q4` 四个实测数。
-
-Run: `git diff --stat`
-Expected: 两个 docs 文件有改动，无产品代码改动。
-
-- [ ] **Step 7: 提交**
-
-```bash
-git add docs/superpowers/specs/2026-11-13-ux-batch-dropdown-admin-dedup-intro-usage-design.md docs/tasks/todo.md
-git commit -m "docs(specs): 批1 探针结论写回（v2 footer/filter-method/窗口行数/4570 项耗时实测值）"
-```
-
-> 探针 spec 文件此刻**先不提交**（Task 12 删除它们，提交再删除会在历史里留两个空壳提交）。
+> 源码依据仍然有效且已被直接读过：`select-v2/src/select-dropdown.mjs:160,177`（`#empty`/`#footer` 渲染点）、`useSelect.mjs:114-132`（filter-method 不过滤）、`defaults.mjs:100,107`（`height:274` / `itemHeight:34`）。取消的是「用浏览器复现一遍」的载体，不是核实本身。
 
 ---
 
@@ -770,6 +596,26 @@ test.describe('参数下拉可浏览全部测试项', () => {
 Run: `cd frontend && npx playwright test e2e/analysis/param-dropdown-full-list.spec.ts --project=P1 --reporter=list`
 Expected: FAIL —— 第一条断 `footer` 可见会超时（现在 class 叫 `.param-cap-hint` 且文案含「仅显示前 300」）。**先把失败形状记进台账**（它证明判据抓得住）。
 
+- [ ] **Step 1.5: 把原探针的 Q3/Q4 打印临时加进第三条用例（迁完即摘）**
+
+在 Step 1 第三条用例的 `await page.mouse.wheel(0, 200_000)` 前后各插一段计时与计数，**只打印不断言**：
+
+```ts
+    console.log('PROBE-Q3-dom-window-rows', await items.count())
+    const t0 = Date.now()
+    await items.first().hover()
+    await page.mouse.wheel(0, 200_000)
+    console.log('PROBE-Q4-scroll-to-end-ms', Date.now() - t0)
+```
+
+Run: `cd frontend && npx playwright test e2e/analysis/param-dropdown-full-list.spec.ts --project=P1 --reporter=list`
+Expected: 组件未迁，此时应当**红**（`.param-count-hint` 不存在）。红没关系 —— 这一步的目的是确认打印通路接上了；真正读数在 Step 5。
+
+**放行判据（Step 5 跑出来后逐条对照，任一不成立就停下回设计，不要继续 Task 6-9）**：
+- `PROBE-Q3-dom-window-rows` 是个**小常数**（约 8–12，对应 `defaults.mjs:100,107` 的 `height:274 / itemHeight:34`）而不是全量数 ⇒ 证明虚拟化生效。若它等于全集条数，说明 `el-select-v2` 没虚拟窗口，本批前提不成立。
+- `PROBE-Q4-scroll-to-end-ms` 远小于 1000ms，且第三条用例最终可见末尾项 ⇒ 证明上万项滚得动。
+- 第一条用例的 footer 断言通过 ⇒ 证明 `#footer` 在窗口外仍渲染（原 Q1）。
+
 - [ ] **Step 2: 改 template**
 
 Modify `frontend/src/pages/analysis/components/ParamSelector.vue` 的 `<template>`（现 :1-53）：
@@ -908,7 +754,10 @@ function onNext() {
 - [ ] **Step 5: 跑 T3 与 build**
 
 Run: `cd frontend && npx playwright test e2e/analysis/param-dropdown-full-list.spec.ts --project=P1 --reporter=list`
-Expected: 3 passed（第三条若被 `test.skip` 跳过，说明夹具参数 ≤20，**必须换夹具而不是删用例** —— 记进台账）。
+Expected: 3 passed（第三条若被 `test.skip` 跳过，说明夹具参数 ≤20，**必须换夹具而不是删用例** —— 记进台账）。同时读出 Step 1.5 的两个 `PROBE-` 值，逐条对照那里的放行判据；**放行后才继续 Task 6**。
+
+Run: `cd frontend && grep -n "PROBE-" e2e/analysis/param-dropdown-full-list.spec.ts`
+Expected: 放行判据核对完就把这几行打印删掉（`console.log` 留在套件里会让全量池的日志变脏，且它们不是判据）。删完重跑一次确认仍 3 passed。
 
 Run: `cd frontend && npm run build`
 Expected: 无新增 TS 错误（`getParamHint` 若忘删，这里报 TS6133）。
@@ -1385,16 +1234,13 @@ git commit -m "feat(intro): 介绍书补标签页图标（VitePress head + Djang
 ## Task 12: 批1 收口——门禁、探针清理、台账
 
 **Files:**
-- Delete: `frontend/e2e/probe/select-v2-probe.spec.ts`、`select-v2-min.html`、`select-v2-min.mjs`、`run-v2-questions.spec.ts`
 - Modify: `docs/tasks/todo.md`（批1 结果段）
+- Verify: `frontend/e2e/probe/` 不存在（Task 1 已取消，本不该建）；`grep -rn "PROBE-" frontend/e2e` 为空
 
-- [ ] **Step 1: 删探针**
+- [ ] **Step 1: 确认没有探针残留**
 
-```bash
-rm -rf frontend/e2e/probe
-git status --porcelain
-```
-Expected: 无 `frontend/e2e/probe` 残留；`git status` 里不出现该路径。
+Run: `cd frontend && ls e2e/probe 2>&1; grep -rn "PROBE-" e2e src test`
+Expected: `No such file or directory` + grep 零命中。若有，删掉（Task 1 取消后不该产生任何探针文件；Task 5 Step 1.5 的打印按其自身要求已在 Step 5 摘除）。
 
 - [ ] **Step 2: affected 门禁**
 
