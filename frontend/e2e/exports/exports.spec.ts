@@ -5,7 +5,8 @@ import fs from 'node:fs'
 import { PRIMARY_SAMPLE_FILE, SEEDED_FILES } from '../fixtures/test-data'
 import { gotoApp } from '../helpers/nav'
 import { uploadFile, expectUploadSuccess } from '../helpers/upload'
-import { elSelectByPlaceholder } from '../helpers/elplus'
+import { elSelectByPlaceholder, EXPORT_PARAM_POPPER, popperOf } from '../helpers/elplus'
+import { paramKeysFromHistogram, pickBoundedKeyword } from '../helpers/params'
 
 /**
  * 导出能力（@p2）：Gage Summary / Buyoff Form。
@@ -128,6 +129,10 @@ async function pickOptionByName(page: Page, sel: Locator, name: string): Promise
   }
   return false
 }
+
+/** 一次批量导出带的参数上限：旧实现按位置点 `min(渲染项数, 20)` 个，那个 20 躲的是「参数过多时
+ *  后端导出超时」。换成「输入关键词 → Enter 全选匹配集」后这个界必须保住，否则一次全选出上千个。 */
+const EXPORT_PARAM_SELECT_CAP = 20
 
 test.describe('@p2 导出 - Gage Summary', { tag: ['@p2', '@exports'] }, () => {
   test('Gage tab 控件渲染', async ({ page }) => {
@@ -430,28 +435,32 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     await dropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
     await histogramResp
 
-    // 全选参数：E2E 环境参数过多时可能导致后端超时，因此最多选 20 个
+    // 「选哪些参数、选几个」从**响应**算，选中走产品自己的「输入关键词 → Enter 全选匹配」。
+    // 旧实现是数 DOM 选项再按位置点前 min(count, 20) 行：迁 el-select-v2 后 DOM 只有虚拟窗口那
+    // 约 11 行，nth(11..19) 根本不存在，而「按位置取数」本身也不是合法判据（2026-11-13 批1 Task 8）。
     const panel = page.locator('.export-tools')
     const paramSelect = panel.locator('.el-select').filter({ hasText: '点击选择要导出的参数' }).first()
     await paramSelect.click()
-    const paramDropdown = page.locator('.el-select-dropdown:visible')
-    await paramDropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
-    const paramOptions = paramDropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
-    const paramCount = await paramOptions.count()
-    if (paramCount === 0) {
+    const paramPopper = popperOf(page, EXPORT_PARAM_POPPER)
+    await expect(paramPopper).toBeVisible({ timeout: 5_000 })
+    const P = await paramKeysFromHistogram(histogramResp)
+    if (P.length < 2) {
       await page.keyboard.press('Escape')
-      test.skip(true, '该文件无可导出参数')
+      test.skip(true, '该文件可导出参数不足 2 个')
       return
     }
-    const selectLimit = Math.min(paramCount, 20)
-    for (let i = 0; i < selectLimit; i++) {
-      await paramOptions.nth(i).click()
-    }
+    const bound = pickBoundedKeyword(P, EXPORT_PARAM_SELECT_CAP)
+    // 造不出「≥2 且有界」的关键词时**红**而不是 skip：skip 等于把这条判据删掉
+    // （param-dropdown-full-list.spec.ts:132 同一条纪律）—— 换夹具或改策略，别放行。
+    if (!bound) throw new Error(`参数全集 ${P.length} 项里造不出匹配数 ∈ [2, ${EXPORT_PARAM_SELECT_CAP}] 的关键词`)
+    const input = panel.locator('.el-select__input').first()
+    await input.fill(bound.kw)
+    // footer 的匹配数来自组件的 matches（渲染侧读数），期望值来自响应 ⇒ 异源交叉
+    await expect(paramPopper.locator('.match-hint')).toContainText(`匹配 ${bound.count} 项`)
+    await input.press('Enter')
+    await expect(panel.locator('.step-count')).toContainText(`已选 ${bound.count} / 共 ${P.length} 个`)
     await page.keyboard.press('Escape')
-    await paramDropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
-
-    // 确认已选计数
-    await expect(panel.locator('.step-count')).toContainText(`已选 ${selectLimit}`)
+    await expect(paramPopper).toBeHidden({ timeout: 5_000 })
 
     // 批量导出 Excel 已改走作业（提交 202 → 轮询 → 下载），这里等的是作业端点。
     // 大图渲染仍可能慢，保留 180s。
@@ -532,25 +541,16 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     // 打开参数下拉：点选第 2 个（合并语义基线：已选 1，下拉保持打开）
     const paramSelect = panel.locator('.el-select').filter({ hasText: '点击选择要导出的参数' }).first()
     await paramSelect.click()
-    const paramDropdown = page.locator('.el-select-dropdown:visible')
-    await paramDropdown.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
-    const paramOptions = paramDropdown.locator('.el-select-dropdown__item:not(.is-disabled)')
+    const paramPopper = popperOf(page, EXPORT_PARAM_POPPER)
+    await expect(paramPopper).toBeVisible({ timeout: 5_000 })
+    const paramOptions = paramPopper.locator('.el-select-dropdown__item:not(.is-disabled)')
     await waitForOptions(paramOptions)
 
-    // 参数全集取**响应的 results 键**（= ExportToolsTab.vue:78 自己用的那份），
-    // 不取渲染出来的 option：下拉渲染封顶到 DROPDOWN_RENDER_CAP=300
-    // （constants/dropdown.ts），从 DOM 数出来的是截断后的列表，会让「共 M 个」的 M
-    // 和 Enter 全选的预期集合一起失真。被测契约恰恰是：过滤/计数/Enter 全选
-    // 作用于完整集合，只有渲染被截断。
-    const histResp = await histogramResp
-    const P: string[] = histResp
-      ? Object.keys((((await histResp.json()) as Record<string, unknown>)?.results ?? {}) as Record<string, unknown>)
-      : []
-    if (P.length < 2) {
-      await page.keyboard.press('Escape')
-      test.skip(true, '该文件参数不足 2 个')
-      return
-    }
+    // 参数全集取**响应的 results 键**（取法与「为什么不用 listParams」见 helpers/params.ts），不数 DOM：
+    // 本控件迁 el-select-v2（2026-11-13 批1 Task 8）**之前**，DOM 里是被 DROPDOWN_RENDER_CAP=300
+    // 截断的渲染项，数出来已经小于全集；迁完截断没了，但 DOM 只剩虚拟窗口那约 11 行 ——
+    // 两头都不等于全集，被测契约始终是「过滤/计数/Enter 全选作用于完整集合，只有渲染成窗口」。
+    const P = await paramKeysFromHistogram(histogramResp)
     if (P.length < 2) {
       await page.keyboard.press('Escape')
       test.skip(true, '该文件参数不足 2 个')
@@ -565,10 +565,11 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     const N = matchesArr.length
     expect(N, '关键字应至少匹配 1 个参数').toBeGreaterThanOrEqual(1)
 
-    // filterable 输入框（EP 将 aria-label 绑在 input 本身，见 select2.mjs:217）：填入关键字 → 下拉过滤 + footer 提示匹配数
+    // filterable 输入框（v2 把 aria-label 绑在 input 本身，见 `select-v2/src/select.mjs:209`）：
+    // 填入关键字 → 下拉过滤 + footer 提示匹配数
     const input = panel.locator('.el-select__input').first()
     await input.fill(kw)
-    await expect(paramDropdown.locator('.match-hint')).toContainText(`匹配 ${N} 项，按 Enter 全选`)
+    await expect(paramPopper.locator('.match-hint')).toContainText(`匹配 ${N} 项，按 Enter 全选`)
 
     // Enter 全选：已选 = {P[1]} ∪ 匹配集（P[1] 可能在匹配集中，用 Set 算实际值）
     const expected = new Set([P[1], ...matchesArr]).size
