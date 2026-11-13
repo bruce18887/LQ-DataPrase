@@ -6,6 +6,13 @@
       <span class="step-count">已选 {{ modelValue.length }} / 共 {{ params.length }} 个</span>
     </div>
     <div class="step-body">
+      <!--
+        `popper-class="dp-export-param-popper"` 是**实例级**下拉身份：面板 teleport 到 body，与导出页
+        文件横幅的 FileSelect、`ExportActions.vue:11` 的 Sigma 下拉共用 `.el-select-dropdown` 类名，
+        而收起那 ~150ms 的 leave 过渡里 `aria-hidden` 与 `display` 同拍才翻转，全局查询会挑中正在退出
+        的那一份（机理见 `e2e/helpers/params.ts:28-49` 的采样表）。e2e 侧的名字在
+        `e2e/helpers/elplus.ts` 的 `EXPORT_PARAM_POPPER`，改这里必须同步改它。
+      -->
       <el-select-v2
         ref="selectRef"
         :model-value="modelValue"
@@ -37,13 +44,6 @@
 import { ref, computed } from 'vue'
 import { filterByKeyword, toOptions } from '../../../../utils/selectOptions'
 
-/**
- * `popper-class="dp-export-param-popper"` 是**实例级**下拉身份：面板 teleport 到 body，与导出页
- * 文件横幅的 FileSelect、`ExportActions.vue:11` 的 Sigma 下拉共用 `.el-select-dropdown` 类名，
- * 而收起那 ~150ms 的 leave 过渡里 `aria-hidden` 与 `display` 同拍才翻转，全局查询会挑中正在退出
- * 的那一份（机理见 `e2e/helpers/params.ts:28-49` 的采样表）。e2e 侧的名字在
- * `e2e/helpers/elplus.ts` 的 `EXPORT_PARAM_POPPER`，改这里必须同步改它。
- */
 interface Props {
   params: string[]
   modelValue: string[]

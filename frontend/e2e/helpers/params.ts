@@ -165,6 +165,9 @@ export async function pickSensitivity(page: Page, label: string, scope = 'single
  * scope 缺省 'single'（首屏唯一非 lazy 的 pane）。跨 tab 用例必须**在点 tab 之前**调
  * `setActiveAnalysisTab` —— 单文件与相关性两个 tab 的快路径请求体键集逐字相同、产品没在
  * 请求里留 tab 身份，helper 无法自己分辨那两者（见 paramList.ts 顶部）。
+ *
+ * **导出工具 tab 不走这里**，那页的取法见 `paramKeysFromHistogram`：它发的是 `{file_id, params: []}`，
+ * 被 `paramListCore.ts:67` 判成「算某个参数」而不是「拉全集」，原理上就进不了这台捕获器（别硬套）。
  */
 export async function listParams(page: Page, scope: ParamListScope = 'single'): Promise<string[]> {
   await expect
@@ -201,7 +204,15 @@ export async function listParams(page: Page, scope: ParamListScope = 'single'): 
  */
 export async function paramKeysFromHistogram(resp: Promise<Response | null>): Promise<string[]> {
   const r = await resp
-  if (!r) return []
+  if (!r) {
+    // 和 listParams 同一条纪律（宁可红也不吐空值）：`[]` 只留给「响应真的 200 且 results 为空」。
+    // 这里 null 的唯一来源是调用方那发 waitForResponse 超时/注册晚了 ⇒ 用例接线坏了，
+    // 伪装成「这个文件没有参数」会让上层 test.skip 把判据静默删掉。
+    throw new Error(
+      'paramKeysFromHistogram：没拿到 histogram 响应 ⇒ 用例接线坏了（waitForResponse 超时或注册晚于点击），' +
+        '不是「这个文件没有参数」。见 R2④：注册必须先于触发点击。',
+    )
+  }
   const body = (await r.json()) as Record<string, unknown>
   return Object.keys((body?.results ?? {}) as Record<string, unknown>)
 }

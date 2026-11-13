@@ -731,7 +731,7 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     const selector = viewScope(page).locator('.test-col-selector:has(input[aria-label="显示测试列"])').first()
     await selector.locator('.el-select__wrapper').click()
     const input = selector.locator('input[aria-label="显示测试列"]')
-    // filterable 下拉：fill 不触发过滤，必须逐键输入
+    // fill 也派发 input ⇒ 与逐键一样触发过滤（旧注释「必须逐键输入」是 2026-08 的错账，机理见计划订正）
     await input.pressSequentially(kw)
 
     // footer 提示「匹配 N 项，按 Enter 全选」（空关键词时那条反例见上面 @p1 那条用例）
