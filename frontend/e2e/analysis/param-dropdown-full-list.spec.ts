@@ -15,8 +15,7 @@ import {
  *
  * 三条判据各挡一种回退：
  *  - footer 逐字等于「共 N 项」且 N = 响应条数：挡「把截断偷偷放回来」。截断时 N 仍会写
- *    成全量，所以光这条不够，必须配合第 3 条；`toHaveText` 是整句精确匹配，「仅显示前」
- *    再出现时它自己就红，不需要另加一条子串断言（那条会被它严格蕴含，是装饰）
+ *    成全量，所以光这条不够，必须配合第 3 条
  *  - 搜到列表末尾那一项并选中：挡「过滤这一步本身退化成只在已渲染子集里找」
  *    （把 v2 的 `filter-method` 当成真过滤器用、或 `:options` 改回喂窗口那几行，都是这种）。
  *    旧的那个「截断到 300」的 bug **不由它兜**：旧实现是先在完整集合上过滤、再截断到 300，
@@ -30,23 +29,27 @@ import {
  * 夹具哪天变小就是红而不是静默跳过（换夹具，别删用例）。
  *
  * 参数全集一律走 `listParams()`（响应侧，见 helpers/paramList.ts），**不是**数 DOM ——
- * 虚拟窗口里 DOM 只有约 8 行，数条数从本批起不再是「列表有多少项」的判据。
+ * 虚拟窗口里 DOM 只有十来行，数条数从本批起不再是「列表有多少项」的判据。
  * 「下拉真的把响应里那些项渲染出来了」这一维由本文件兜（paramList.ts 的捕获与产品同源）。
  */
 const POPPER = PARAM_POPPER_SINGLE
 const BIG_FILE = 'BPD93204_FT1_ETS163550_12252024'
 
-/** 旧实现的渲染封顶。写死数字而**不 import** `DROPDOWN_RENDER_CAP`：那个常量本批 Task 9 就删，
- *  判据要活过它，删完还留着引用等于把这条用例和一段死代码焊在一起。 */
+/**
+ * 旧实现的渲染封顶。写死数字而**不 import** `DROPDOWN_RENDER_CAP`：那个常量本批 Task 9 就删，
+ * 判据要活过它 —— 删完还留着引用，等于把这条用例和一段死代码焊在一起。
+ */
 const LEGACY_RENDER_CAP = 300
 
 /**
  * 虚拟窗口允许出现的最大行数。上界由 EP 默认值推出：`select-v2/src/defaults.mjs` 的
  * `height:274 / itemHeight:34` ≈ 9 行，加 overscan 实测 11 行（2026-11-13）。留到 20 是
  * 给「以后有人调高面板」的余量；真正的判据是「远小于全集」，不是「等于 11」。
+ *
+ * 它同时是「不虚拟化、但也不截断」这种回退的唯一哨兵：那种实现下 DOM 会等于全集
+ * （1723 行），这条必红，而上面两条都照样绿。
  */
 const MAX_WINDOW_ROWS = 20
-
 
 /** 本实例 popper 里的选项行（v2 的虚拟窗口只渲染这几行） */
 function paramItems(page: import('@playwright/test').Page) {
@@ -103,8 +106,9 @@ test.describe('@p1 参数下拉可浏览全部测试项', { tag: ['@p1', '@analy
     await sel.click()
     const footer = page.locator(`.el-popper.${POPPER}[aria-hidden="false"] .param-count-hint`)
     await expect(footer).toBeVisible()
-    await expect(footer).not.toContainText('仅显示前')
-    // 逐字整句：footer 里的数字必须就是响应里的条数（toHaveText 会重试到组件收到那发响应）
+    // 只这一句就够：`toHaveText` 拿**整串**比，footer 里再出现「仅显示前 300」之类的
+    // 任何多余文字它自己就红，失败信息里连被截断的原文一起打出来。以前另配的一条
+    // `not.toContainText('仅显示前')` 被它严格蕴含，是装饰性判据，已删（复审 #6）。
     await expect(footer).toHaveText(`共 ${all.length} 项`)
   })
 
