@@ -88,7 +88,9 @@ describe('highlightSegments', () => {
   it('空关键词返回单个不标亮的整段', () => {
     expect(highlightSegments('ABC', '')).toEqual([{ text: 'ABC', mark: false }])
   })
-  // ParamSelector.vue:145-149 记的 XSS 修复：不走 v-html，列名里的尖括号必须是字面文本。
+  // XSS 修复的来处：ParamSelector 的 highlightSegments 历史实现（提交 03ba0c5
+  // 「参数选择器XSS」）——不走 v-html，列名里的尖括号必须是字面文本。
+  // 锚点写符号+提交而不是行号：组件那边一改一删行号就指错地方（2026-11-13 批1 Task 5）。
   it('反向探针：列名含 HTML 片段时仍是字面文本，绝不产出标签', () => {
     const evil = '<img src=x onerror=alert(1)>'
     const segs = highlightSegments(evil, 'img')
@@ -113,7 +115,9 @@ describe('buildParamOptions', () => {
     expect(r.total).toBe(2)
   })
   // 这条是「高亮按需」的承重判据：options 里一旦出现 segments 字段，
-  // 就等于把 ParamSelector.vue:97-99 注释里 d1146dd 治掉的「每次击键建 N 份」放回来。
+  // 就等于把性能批 d1146dd 治掉的「每次击键给全部匹配项建一份 segments」（原注释在
+  // ParamSelector 的 listView 历史实现里，1,702 项的文件上每次击键建 1,702 份）放回来。
+  // 锚点用提交号而不是组件行号：本批 Step 3 就把那段删掉了。
   it('反向探针：options 只带 value/label，**不得**预建高亮片段', () => {
     const r = buildParamOptions(['PAR1', 'PAR2'], 'par')
     for (const o of r.options) {
@@ -135,5 +139,23 @@ describe('buildParamOptions', () => {
     const r = buildParamOptions(many, '')
     expect(r.total).toBe(4570)
     expect(r.options.length).toBe(4570)
+  })
+  // I-1 的真判据：过滤侧与高亮侧共用同一归一化契约 ⇒ 凡被 buildParamOptions 放行的项，
+  // 用同一个原始 query 去算高亮必须至少命中一段。两侧各自 trim 不等于二者一致。
+  it('不变量：被过滤命中的每一项，高亮必命中至少一段', () => {
+    const params = ['PAR1', 'OTHER', 'A B', 'a  b', 'Kelvin_VIN', 'IBLK', 'V+(1)', 'XPAR1', 'P AR', 'par1x', '']
+    for (const query of ['  ', 'par', 'PAR ', ' a b ', 'kelvin', '+(', 'P AR', 'XPAR1 ', 'PAR1', 'A', '']) {
+      const { options } = buildParamOptions(params, query)
+      for (const o of options) {
+        const segs = highlightSegments(String(o.label), query)
+        expect(segs.map((s) => s.text).join(''), `拼接无损: ${query}/${o.label}`).toBe(o.label)
+        if (query.trim()) {
+          expect(
+            segs.some((s) => s.mark),
+            `过滤命中但高亮没命中: query=${JSON.stringify(query)} label=${o.label}`,
+          ).toBe(true)
+        }
+      }
+    }
   })
 })

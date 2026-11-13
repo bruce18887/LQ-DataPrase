@@ -42,8 +42,10 @@ async function openElSelect(sel: Locator) {
  * 所以别把 `aria-hidden` 当「哪一个下拉开着」的判据抄走 —— 去掉 popperClass 就是原 bug。
  * 仓内旁证（窗口量级）：`frontend/e2e/data/file-correlation.spec.ts:31` 早就用
  * `page.waitForTimeout(600)` 睡眠躲同一个坑。
- * popper-class 同时挂在外层 .el-popper 与内层 .el-select-dropdown 上，
- * 所以限定必须落在外层 .el-popper（裸类名会 strict violation）。
+ * popper-class 挂在**外层 .el-popper** 上（`el-select-v2` 也只挂这一层：它的内层
+ * `.el-select-dropdown` 不再复制 popperClass，见 `select-v2/src/select-dropdown.mjs:155`
+ * 的 class 绑定里没有它 —— v1 的 `select/src/select-dropdown.mjs:10` 才有那一份）。
+ * 所以限定必须落在外层 `.el-popper`，两条路都只有一处可落；裸类名会 strict violation。
  */
 function visibleOptions(page: Page, popperClass: string) {
   return page.locator(`.el-popper.${popperClass}[aria-hidden="false"] .el-select-dropdown__item`)

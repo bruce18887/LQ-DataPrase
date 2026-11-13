@@ -187,12 +187,18 @@ describe('T2 已钉住的纯 util：改它由 vitest 验收，不开浏览器', 
       expect(matchRule(f), f).toEqual([GLOBAL])
       expect(staysFast([f]).global, f).toBe(true)
     }
-    // 形状判据：utils 的**放行**条目（处置恰为 `['unit']` 的那些）逐条必须精确到 .ts 文件。
+    // 形状判据：utils 的**放行**条目（处置首元素为 `unit` 的那些）逐条必须精确到 .ts 文件。
     // 目录兜底 `frontend/src/utils/` 自己仍是 GLOBAL，两者并存才构成白名单语义 ——
     // 有人「顺手把放行收成整目录」时这条先红，而不是等某次改动把没被 T2 钉住的 util 静默降级。
+    // ⚠ 判**首元素**而不是判整个数组：本表里合法写法还有 `['unit', 'none:理由']`（带 note 的
+    // 放行，见 nightly-gates / pool-core / icon-audit 那几条），旧写法 `JSON.stringify(mods)
+    // === '["unit"]'` 会**放过**「目录级 + note」这种形状 —— 正是本条要拦的那一种（复审 Minor）。
+    // 行为探针（下面那句 .ts 结尾）仍兜得住误放行的目录条目。
     const utilsAllowed = RULES.filter(
       ([prefix, mods]) =>
-        String(prefix).startsWith('frontend/src/utils/') && JSON.stringify(mods) === '["unit"]',
+        String(prefix).startsWith('frontend/src/utils/') &&
+        Array.isArray(mods) &&
+        mods[0] === 'unit',
     )
     expect(utilsAllowed.length, '放行条目应当是看得见的一串精确路径').toBeGreaterThanOrEqual(5)
     for (const [prefix] of utilsAllowed) expect(String(prefix)).toMatch(/\.ts$/)

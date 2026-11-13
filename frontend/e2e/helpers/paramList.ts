@@ -22,7 +22,14 @@ import {
  * 「数 `.el-select-dropdown__item` 条数」不再等于「列表有多少项」。
  * 而产品自己拿全集的路径就在那儿 —— `useTabFileParams.ts:79-82` 发一次
  * **不带 `params`** 的 POST /analysis/histogram/，用 `Object.keys(results)` 当参数全集。
- * 本 helper 挂同一个响应，取同一个键，判据与实现异源（DOM 是渲染，响应是数据源）。
+ *
+ * ⚠ 同源/异源要说准（2026-11-13 Task 5 订正；本文件旧写「判据与实现异源」，Task 4 之后
+ * 那句是反的）：本 helper 读**同一个响应**、同一个 `Object.keys(results)`、同一条
+ * `trim()` 过滤 ⇒ 在「有哪些参数」这一维上与产品**同源**，它钉的是「产品收到的数据里
+ * 有什么」，不是「下拉里画出了什么」。真正异源的是 `paramListGuard.spec.ts` 钉的那三条
+ * 竞态守卫（假事件序列，见 paramListCore.ts 顶部那条纪律）。
+ * 「下拉真的把这些项渲染出来了、并且够得着」这一维响应答不出来，唯一兜它的是
+ * `e2e/analysis/param-dropdown-full-list.spec.ts`（footer 计数 / 搜到末项 / 滚到底末项进窗口）。
  *
  * 过滤条件与前端逐字一致（`p && p.trim() !== ''`）：后端 `analysis_views.py:139`
  * 回的是 `{p: {} for p in params}`，脏列名在前端就被丢掉，捕获侧不能把它放回来。

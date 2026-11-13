@@ -108,7 +108,7 @@ function novelUncovered(uncovered: string[]): string[] {
   )
 }
 
-/** 清单全集：模板 49 + 服务式 2 + 指令 1。 */
+/** 清单全集：模板 50 + 服务式 2 + 指令 1。 */
 const ALL_NAMES = [...EP_TEMPLATE_COMPONENTS, ...EP_PROGRAMMATIC, ...EP_DIRECTIVES]
 
 /**
@@ -323,8 +323,10 @@ test.describe('@theme Element Plus 样式落地回归网', { tag: ['@p2', '@them
   test('@p2 每件自己的 theme-chalk 样式都在页面上（与渲染状态无关的指纹判据）', async ({ page }) => {
     const { fingerprints, noOwnStyle } = ownStyleFingerprints()
     expect(noOwnStyle.sort()).toEqual([...NO_OWN_STYLE].sort())
-    // 52 件里 47 件有自有样式，去重后 46 个指纹（dialog 与 message-box 共用
-    // el-popup-parent--hidden）—— 数字变了说明 EP 换了文件结构，要重新看这条
+    // 53 件里 48 件有自有样式，去重后 46 个指纹（dialog 与 message-box 共用
+    // el-popup-parent--hidden；select-v2 与 select 的 theme-chalk 逐字相同、共用
+    // el-select-dropdown 那一个指纹，2026-11-13 md5 实测同一份）
+    // —— 数字变了说明 EP 换了文件结构，要重新看这条
     expect(fingerprints.length).toBe(46)
     await openRoute(page, '/data')
     const out = await page.evaluate(probeBody, {
