@@ -479,7 +479,10 @@ T2 serialHighlight.spec 钉并集/清除/关子集归零；e2e 补「子图→�
 批1 Task 9A 只做谓词入口（`popperOf`）统一、**不碰这批 `:visible`**，同时按 lessons R③
 「台账里的计数一律现跑再引用」重数了一遍：**那个 48/19 与实数差一个量级，别照它排工**。
 
-现数（`frontend/`，逐行剔除注释行后数出现点，**2026-11-14 批1 收口重跑**，命令都写在这里、下一批照抄再跑，别信任何一处抄走的数字）：
+现数（`frontend/`，**口径 = 剔掉注释行后的「命中行数」**，`grep -rn ... | grep -v 注释 | wc -l`；
+一条里出现两次 `:visible` 的写法确实存在，所以 occurrence 口径会比行数多（现跑 `grep -roE ':visible'`
+连注释一起数是 213）——**排工只认下面这两条命令的行数口径**。数字一律 **2026-11-14 批1 收口重跑**，
+命令写在这里，下一批照抄再跑，别信任何一处抄走的数字）：
 
 - **全部 `:visible`：190 处 / 35 个文件**（`grep -rn ":visible" e2e --include=*.ts | grep -vE ':[[:space:]]*(//|\*|/\*)' | wc -l`）。
 - **其中属于「下拉/弹层族」的（`.el-select-dropdown__item` / `.el-popper` / `.el-select-dropdown`
@@ -494,12 +497,14 @@ T2 serialHighlight.spec 钉并集/清除/关子集归零；e2e 补「子图→�
   `outlier-handling.spec.ts` 14、`exports.spec.ts` 8、`view-data.spec.ts` 7、`data.spec.ts` 6、
   `multi-file.spec.ts` 5（上一条把 view-data 记在 exports 前面，实跑 exports 更多）。
 
-排工提醒（不是本批的活）：`view-data.spec.ts` 与 `exports.spec.ts` 都被 `scripts/line-limit.mjs` 的
-`EXEMPT` 账按**精确行数**冻着 —— 那张账是唯一事实来源，**别在计划/台账里抄那个数字**（抄一次就会像
-这里原来写的「1802」一样，下一批加完断言之后已经是错的，还会把后排工的人带偏）。要改这两个文件：
-先 `cd frontend && wc -l e2e/data/view-data.spec.ts` 现跑，同批把 `EXEMPT` 登记值同步（多一行 `grew` 红、
-少一行反向断言红），并在该条 `reason` 里说明这一增一减是哪个工单（本轮现跑：`view-data.spec.ts` 1857、
-`exports.spec.ts` 592 ⇒ 距 600 硬闸 8 行，只能就地替换）。这两条决定了摊开时谁能加注释、谁只能就地替换。
+排工提醒（不是本批的活）：`e2e/data/` 那两个超限文件（`view-data.spec.ts`、`data.spec.ts`）被
+`scripts/line-limit.mjs` 的 `EXEMPT` 账按**精确行数**冻着 —— 那张账是唯一事实来源，**别在计划/台账里
+抄那个数字**（抄一次就会像这里原来写的「1802」一样，下一批加完断言之后已经是错的，还会把后排工的人带偏）。
+要改这两个文件：先 `cd frontend && wc -l e2e/data/view-data.spec.ts` 现跑，同批把 `EXEMPT` 登记值同步
+（多一行 `grew` 红、少一行反向断言红），并在该条 `reason` 里说明这一增一减是哪个工单。
+`exports.spec.ts` **不在这张账上**，它受的是通用 `lines > 600` 那道闸（`scripts/line-limit.mjs:197` 是
+`<=` 才放行 ⇒ **600 本身合法、601 就红**）⇒ 改它同样要现跑 `wc -l`，且加不进注释行只能就地替换。
+这两条差别决定了摊开时谁能加注释、谁只能就地替换。
 
 2026-11-14 批1 Task 9B 复审把上面这本账订正了一遍：`exports.spec.ts` **不在** `EXEMPT` 名单里（名单中的
 e2e 文件只有 `data.spec.ts` / `view-data.spec.ts`），受的是通用 `lines > 600` 那道闸 ⇒ 「两个文件都被
@@ -561,7 +566,7 @@ admin/settings 那一族（`AuditLogPage.vue` 事件枚举、`UserManagement.vue
 
 ## 门禁实跑（全部这一轮现跑，别引用上一轮）
 
-- **affected**：`node scripts/e2e_affected.mjs --base master` ⇒ changed 44 文件、8 条命中全局清单
+- **affected**：`node scripts/e2e_affected.mjs --base master` ⇒ changed **46 文件**、8 条命中全局清单
   （`config/urls.py` + 7 份 `e2e/helpers/`）⇒ `decide: 全量 e2e（兜底命中）`，计划 4 档
   lint:e2e / vitest / backend / e2e 全量。**升全量是预期**，不是异常。
   ⚠ **如实记：这一条是 `--dry-run` 跑的**（末行 `RESULT: PASS · 计划 4 档全部执行 · dry-run（未真正执行）`），
@@ -573,11 +578,13 @@ admin/settings 那一族（`AuditLogPage.vue` 事件枚举、`UserManagement.vue
 - **那 1 条真红 = `analysis/param-dropdown-full-list.spec.ts` 五条全红在 `gotoApp`**，判据一条都没跑到。
   根因与教训见 `docs/tasks/lessons.md` 2026-11-14 同日条目 + 提交 `fa2200d`。要点：**这个文件从没进过
   slot 档**，串行档里两条路等价所以每轮都绿。
-- **全量池第 2 轮（最终树）**：文件 87 · 用例 460（expected 446 / flaky 1 / skipped 21 /
-  **unexpected 0**）· 墙钟 `wallMs 571916` = 9.5min · `passMs 1271818` · 单价 2.90s/例 ·
-  结论 `MEASURED` · 退出码 0。**效率 2.23 < 池自己给的目标 2.8**：四个 slot 的用例数是
-  73 / 116 / 93 / 178（`merged.json.health` 现读）——LPT 是按**时长**分区不是按条数，条数悬殊不等于
-  分区坏了；本批判据取 unexpected / flaky，效率只作观察。⇒ 第 1 轮那 13.8min 里含一次
+- **全量池第 2 轮（最终树）**：文件 87 · 用例 460（stats 口径 expected 446 / flaky 1 / skipped 21 /
+  **unexpected 0**；446+1+21 = **468 ≠ 460**，差的 8 条正是 4 个 slot 各 2 条 `auth.setup`——
+  `用例` 走 `realTests()` 把 setup 剔了（`scripts/e2e_pool.mjs:229-233` 的注释就在说这件事），
+  `stats` 没有 ⇒ 两套数本来就差 2×slot，别拿 460 去对 468）· 墙钟 `wallMs 571916` = 9.5min ·
+  `passMs 1271818` · 单价 2.90s/例 · 结论 `MEASURED` · 退出码 0。**效率 2.23 < 池自己给的目标 2.8**：
+  四个 slot 的用例数是 73 / 116 / 93 / 178（`merged.json.health` 现读）——LPT 是按**时长**分区不是按条数，
+  条数悬殊不等于分区坏了；本批判据取 unexpected / flaky，效率只作观察。⇒ 第 1 轮那 13.8min 里含一次
   「逐文件独占 slot 复跑判级」，**两轮墙钟不可直接比**。
 - **flaky 那 1 条不归属本批**：`view-data.spec.ts:1474`「@p2 顶部带：操作按钮在文件横幅内，表格高度与
   实测占位对齐」——两轮池都是首发红（`表格上缘位置变了，但 TABLE_TOP_OFFSET 没跟着重量`，实测 y≠413）、
@@ -592,7 +599,7 @@ admin/settings 那一族（`AuditLogPage.vue` 事件枚举、`UserManagement.vue
 - **lint:e2e**（`tsc -p tsconfig.e2e.json`）干净；**`npm run build`** 干净（第 2 轮池跑的就是重建后的 dist）。
 - **后端全量**：`Ran 2576 tests in 539.961s` / `OK (skipped=16)`。标签枚举照
   `scripts/e2e_nightly.mjs:129-136` 的形状：`test.backend` + 12 个 `apps.*`（**排除 `__*` 目录**），
-  绝不写 `apps.*` 通配。日志 `tasks/t12-backend-full.log`。
+  绝不写 `apps.*` 通配。日志 `tasks/t12-backend-full.log`（`tasks/` 未入库，只是当轮取证用，别去找它）。
 - **行数账（现跑 `wc -l`）**：`exports.spec.ts` 599（600 硬闸内，不在 EXEMPT 名单）、
   `view-data.spec.ts` 1883 = EXEMPT 登记值逐字未变、`file-correlation.spec.ts` 459、
   `param-dropdown-full-list.spec.ts` 154、`selectOptions.ts` 127。`lineLimit.spec.ts` 15 例随 vitest 全绿。
@@ -617,7 +624,8 @@ admin/settings 那一族（`AuditLogPage.vue` 事件枚举、`UserManagement.vue
 
 ## e2e 改写条数（现跑，不是设计稿 §2.7 估的 15–20）
 
-`node tasks/t12-rewritten-e2e.mjs`（按「describe 链 + 用例标题」当身份，比 master 与 HEAD 的块体正文）：
+`node scripts/e2e-rewritten-census.mjs`（按「describe 链 + 用例标题」当身份，比 master 与 HEAD 的块体正文；
+已入库，`tasks/` 那版在 `.gitignore:162` 的忽略面里，下一批跑不到）：
 **新增 8 条 / 改写 16 条 / 删除 0 条**（源码 `test(` 计数；`intro-icon-contrast` 是 light/night 循环
 ⇒ 运行条 +9）。按文件：`param-dropdown-full-list` +5、`view-data` +1（千列那条）/ ~5、
 `file-correlation` ~5、`exports` ~2、`chart-filter-switches` ~2、`tab-independent-files` ~1、
@@ -650,7 +658,9 @@ admin/settings 那一族（`AuditLogPage.vue` 事件枚举、`UserManagement.vue
   **不是本批回归**：`git show master:` 版同样 0 处，v1 时代就是这个形状 ⇒ 与「加载期间显示『无匹配序列』」
   同属文案错位的独立工单（提案留档 `tasks/2026-11-13-loading-slot-proposal.patch`）。
 - **v2 的 `popper-class` 会同时挂到 `collapse-tags` 溢出标签 tooltip**（`select-v2/src/select.mjs:117`
-  `tagTooltip?.popperClass ?? popperClass`）⇒ 三颗 collapse-tags 下拉的 `.el-popper.dp-*-popper`
+  `tagTooltip?.popperClass ?? popperClass`）⇒ 五颗里**四颗**命中（现跑
+  `grep -rn "^[[:space:]]*collapse-tags$" frontend/src` = Serial / TestColumn / Export / 固定列，单选的
+  ParamSelector 没有），这四份 class 的 `.el-popper.dp-*-popper`
   **可能有两份**，眼下靠同文件 `:108` 的 `disabled: dropdownMenuVisible` 让两者不同时可见。已在
   `popperOf` 注释里写死处置（真报 strict violation 就给 tooltip 单独传类，**不许退成 `.first()`**）。
 - `config/urls.py:122` 的 SPA catch-all lookahead 没列 `favicon\.ico`：现在无害（`path()` 排在它之前，
