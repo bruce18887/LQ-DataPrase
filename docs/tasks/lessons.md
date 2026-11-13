@@ -3048,3 +3048,26 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   宁可多派几轮短任务，也不要一个跑到上限的长任务。
 - 与上一条（2026-11-13「提交信息里的错误归因」规则③）互补：那条讲**自述缺席时控制器怎么补**（结论旁并列
   「已证 / 未证」），这条讲**怎么让自述别丢**。
+
+## 2026-11-14 批1 收口池抓到一条「串行档永远绿、池档永远红」的用例：字面量 storageState 路径
+
+- **现象**：`frontend/e2e/analysis/param-dropdown-full-list.spec.ts` 单跑（`--project=P1`）连着好几轮全绿，
+  收口全量池里 **5 条全红**，而且红的位置不是任何下拉判据 —— 全部红在 `helpers/nav.ts:14` 的
+  `expect(page.locator('.main-layout')).toBeVisible()`（15s 等不到，独占 slot 复跑仍红 ⇒ 真红，不是负载抖动）。
+- **根因**：该文件写了 `test.use({ storageState: 'e2e/.auth/admin.json' })`。池档里 slot 的登录态在
+  `C:\lqdp-e2e\slots\<run>\slotN\auth\admin.json`（`e2e/helpers/slot.ts:39` 按 slot.json 算），而那个**字面量**
+  读到的是上一次串行跑留下的旧文件 —— 旧 `SECRET_KEY` 签的 access token 在 slot 后端必然验不过 ⇒ 401 ⇒
+  路由守卫弹回 `/login` ⇒ 布局根本没渲染。关键是：**四个业务项目的 `use.storageState` 早就是 slot-aware 的
+  `ADMIN_STATE`**（`playwright.config.ts:121/130/137/144`），所以那行本来就是多余的，多余且有害。
+- **规则①：用例侧禁止写 storageState 的字面量路径。** 要么不写（继承项目级），要么显式清空成
+  `{ cookies: [], origins: [] }` 再走 `loginAs`（`e2e/admin/admin.spec.ts:54`、`audit.spec.ts:36` 的既有形状）。
+  绊线：`grep -rn "storageState: '" frontend/e2e` 必须零命中。
+- **规则②：新增 spec 的绿灯，只有进过 slot 档才算数。** 判据是「这个文件有没有依赖登录态 / 落盘路径 / 端口 /
+  media 位置」—— 沾上任何一条，就必须至少跑一次 `node scripts/e2e_pool.mjs --slots=1 -- <file>`（本批实测
+  4 个文件 3.6 分钟，比事后在收口档里发现便宜得多）。本批这条花掉的钱是全量池跑了两遍多。
+- **规则③：红在 helper 的第一步（`gotoApp` / `loginAs` / 取夹具）而不是红在业务断言上，先查环境，别改判据。**
+  这次五条判据本身是对的，是它们的前置（已登录）从未成立过 —— 去动断言等于把唯一的线索抹掉。
+- **顺带一条判据形状纪律**：同一个文件里「Enter 全选」那条的关键词界原来写 `匹配数 ≥ 1`，收口时按终审改成
+  「与基线那颗的并集 ≥ 3」，**当场红**（该夹具上 `P[0]` 前 6 字符恰好只命中 1 项）。红是好事：它证明旧界把
+  「Enter 全选」与「v2 只选中高亮那一行」两种实现放在一起放行了。⇒ **界必须由「要区分的实现个数」倒推**，
+  不能由「至少要有匹配」正推；写界时把要区分的那两种实现写进注释，下一轮复审才有东西可对。

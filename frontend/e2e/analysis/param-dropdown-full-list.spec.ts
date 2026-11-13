@@ -57,8 +57,12 @@ function paramFooter(page: import('@playwright/test').Page) {
 }
 
 test.describe('@p1 参数下拉可浏览全部测试项', { tag: ['@p1', '@analysis'] }, () => {
-  test.use({ storageState: 'e2e/.auth/admin.json' })
-
+  // 登录态**不在这里给**：四个业务项目的 `use.storageState` 已经是 `ADMIN_STATE`
+  // （playwright.config.ts:121/130/137/144），那个常量由 helpers/slot.ts 按 slot.json 算。
+  // 这里曾写过字面量 `'e2e/.auth/admin.json'`：串行档两条路等价所以全绿，池档里 slot 的
+  // admin.json 在 `C:\lqdp-e2e\slots\<run>\slotN\auth\`，字面量读到的却是上一次串行跑的**旧
+  // SECRET_KEY 签的 token** ⇒ 401 弹回 /login ⇒ 五条用例全红在 `gotoApp` 的 `.main-layout`
+  // 上（2026-11-14 批1 收口全量池实测，独占 slot 复跑仍红）。别把这类"路径写死"再放回来。
   test.beforeEach(async ({ page }) => {
     await gotoApp(page, '/analysis')
     await selectAnalysisFile(page, BIG_FILE)
