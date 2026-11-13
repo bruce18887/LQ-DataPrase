@@ -73,7 +73,9 @@ function paramFooter(page: import('@playwright/test').Page) {
 function tailRowState(page: import('@playwright/test').Page, last: string) {
   return page.evaluate(({ popper, target }) => {
     // 与 `helpers/elplus.ts` 的 `popperOf` 同一套谓词（`[aria-hidden="false"]`）：
-    // 这里是页内 querySelector，够不到 helper，所以谓词只能重写一遍 —— 两种写法并存
+    // 这里是页内 querySelector，够不到 helper，所以谓词只能重写一遍 —— 两种写法并存是
+    // 故意的，代价是改谓词时必须两处同改：只改 helper 而漏掉这里，本条判的就是另一个
+    // 面板（已关闭的那个 aria-hidden="true" 的兄弟 popper），于是 inDom 恒 false ⇒ 假红。
     const panel = document.querySelector(`.el-popper.${popper}[aria-hidden="false"]`)
     const rows = panel ? [...panel.querySelectorAll('.el-select-dropdown__item')] : []
     const hit = rows.find((r) => (r.textContent ?? '').trim() === target)
@@ -125,7 +127,9 @@ test.describe('@p1 参数下拉可浏览全部测试项', { tag: ['@p1', '@analy
     const kw = '1'
     // 命中数在测试侧独立算一遍（子串 + 忽略大小写），不 import src 的 filterByKeyword：
     // 判据与实现异源，否则产品把过滤写坏时这条跟着一起绿。
-    const matched = all.filter((p) => p.toLowerCase().includes(kw))
+    // kw 也在**测试侧**归一化一次（与产品同语义、不同实现）：'1' 恰好是小写才让
+    // `includes(kw)` 成立，不归一化的话将来有人把关键词换成大写就是假红。
+    const matched = all.filter((p) => p.toLowerCase().includes(kw.toLowerCase()))
     expect(matched.length, `夹具里没有含 "${kw}" 的参数`).toBeGreaterThan(0)
     expect(matched.length, `关键词 "${kw}" 命中了整个夹具，两支文案分不开`).toBeLessThan(all.length)
 
@@ -137,6 +141,17 @@ test.describe('@p1 参数下拉可浏览全部测试项', { tag: ['@p1', '@analy
     const footer = paramFooter(page)
     await expect(footer).toBeVisible()
     await expect(footer).toHaveText(`匹配 ${matched.length} 项`)
+  })
+
+  test('纯空格等于没输入：footer 必须是「共 N 项」（N = 全集，不是某个命中数）', async ({ page }) => {
+    const all = await listParams(page)
+    const sel = page.locator('.param-selector .el-select')
+    await sel.click()
+    // `hasKeyword` 判的是 trim() 后非空，而 `buildSelectView` 对纯空格返回全量 `total`
+    // ⇒ 去掉那个 trim() 会让 footer 改口「匹配 1723 项」（拿全集冒充命中数）。
+    // 本条就是那一格的判据：2026-11-13 现测判别力 —— 摘掉 trim() 这条必红。
+    await sel.locator('input').first().fill('   ')
+    await expect(paramFooter(page)).toHaveText(`共 ${all.length} 项`)
   })
 
   test('搜到列表最后一项并选中它', async ({ page }) => {
