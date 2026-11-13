@@ -437,12 +437,12 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     const P = await paramKeysFromHistogram(histogramResp)
     const bound = pickBoundedKeyword(P, EXPORT_PARAM_SELECT_CAP)
     // 造不出「≥2 且有界」的关键词时**红**而不是 skip：skip 等于把这条判据删掉
-    // （param-dropdown-full-list.spec.ts:132 同一条纪律）—— 换夹具或改策略，别放行。
+    // （param-dropdown-full-list.spec.ts 的「夹具哪天变小就是红而不是静默跳过」同一条纪律）—— 换夹具或改策略，别放行。
     if (!bound) throw new Error(`参数全集 ${P.length} 项里造不出匹配数 ∈ [2, ${EXPORT_PARAM_SELECT_CAP}] 的关键词`)
     const input = panel.locator('.el-select__input').first()
     await input.fill(bound.kw)
     // footer 的匹配数来自组件的 matches（渲染侧读数），期望值来自响应 ⇒ 异源交叉。
-    // 逐字（与下面 :581 那条同一纪律）：只 `toContainText('匹配 N 项')` 时文案后半句怎么改都不红。
+    // 逐字（与「输入关键字按 Enter 可全选匹配参数」那条同一纪律）：只 `toContainText('匹配 N 项')` 时文案后半句怎么改都不红。
     await expect(paramPopper.locator('.match-hint')).toHaveText(`匹配 ${bound.count} 项，按 Enter 全选`)
     await input.press('Enter')
     await expect(panel.locator('.step-count')).toContainText(`已选 ${bound.count} / 共 ${P.length} 个`)
@@ -583,7 +583,7 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     await input.fill(bound.kw)
     await expect(paramPopper.locator('.match-hint')).toHaveText(`匹配 ${N} 项，按 Enter 全选`)
 
-    // Enter 全选：已选 = {picked} ∪ 匹配集（picked 可能在匹配集中，用上面算好的 Set 大小）
+    // Enter 全选：已选 = 匹配集 + 基线那颗；上面那条前置已把 picked 挡在匹配集外 ⇒ 并集就是 N + 1
     await input.press('Enter')
     await expect(panel.locator('.step-count')).toContainText(`已选 ${expected} / 共 ${P.length} 个`)
 
