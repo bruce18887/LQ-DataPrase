@@ -12,7 +12,8 @@ export default defineConfig({
   // file:// 双击形态已放弃（ES module 被 CORS 拦），见 spec §2。
   base: '/intro/',
   // 标签页图标（设计稿 §3.2）：本数组过去为空 ⇒ 构建产物里没有 <link rel="icon"> ⇒
-  // 浏览器无条件兜底请求 /favicon.ico，而 Django 只在根路径挂 /favicon.svg ⇒ 404 ⇒ 标签页空白。
+  // 浏览器无条件兜底请求 /favicon.ico，而 Django 只在根路径挂 /favicon.svg ⇒ 该请求落
+  // catch-all，拿到 200 + text/html 的 SPA 壳（实测不是 404）⇒ 图标解不出来、标签页空白。
   // href 必须写绝对根路径：base 是 /intro/，相对 href（favicon.svg）会被解析成
   // /intro/favicon.svg，但 Django 的该路由挂在站点根（config/urls.py），/intro/ 前缀下没有这份文件。
   // 判据：test/backend/test_intro_serving.py（T1）+ frontend/e2e/theme/intro-favicon.spec.ts（T3）；
