@@ -37,6 +37,9 @@ describe('filterByKeyword', () => {
     const items = ['B', 'A']
     expect(filterByKeyword(items, '')).toEqual(['B', 'A'])
   })
+  it('关键词无需调用方预归一化：原始大小写同样匹配', () => {
+    expect(filterByKeyword(['Kelvin_VIN', 'IBLK'], 'KEL')).toEqual(['Kelvin_VIN'])
+  })
 })
 
 describe('sortPrefixFirst', () => {
@@ -47,6 +50,9 @@ describe('sortPrefixFirst', () => {
     const items = ['b', 'a']
     sortPrefixFirst(items, '')
     expect(items).toEqual(['b', 'a'])
+  })
+  it('关键词原始大小写不影响前缀优先', () => {
+    expect(sortPrefixFirst(['XPAR1', 'PAR1'], 'PAR1')).toEqual(['PAR1', 'XPAR1'])
   })
 })
 
@@ -94,6 +100,16 @@ describe('buildParamOptions', () => {
     for (const o of r.options) {
       expect(Object.keys(o).sort()).toEqual(['label', 'value'])
     }
+  })
+  // 与另外三个同族下拉一致（Serial/TestColumn/Export 三处都 trim，只有 ParamSelector
+  // 过去不 trim）。纯空格查询 = 「没输入」，显示全量而不是空列表。
+  it('纯空格关键词等价于无关键词：返回全量', () => {
+    const r = buildParamOptions(['A', 'B'], '   ')
+    expect(r.options.map((o) => o.value)).toEqual(['A', 'B'])
+    expect(r.total).toBe(2)
+  })
+  it('关键词首尾空格被忽略，中间空格保留', () => {
+    expect(buildParamOptions(['A B', 'AB', 'A  B'], '  a b ').options.map((o) => o.value)).toEqual(['A B'])
   })
   it('4570 项量级：total 是全量，且没有渲染截断', () => {
     const many = Array.from({ length: 4570 }, (_, i) => `P${i}`)

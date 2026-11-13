@@ -28,17 +28,19 @@ export function toOptions(items: Array<string | number>): SelectOption[] {
   return items.map((value) => ({ value, label: String(value) }))
 }
 
-/** 大小写不敏感子串匹配；空关键词返回原集合 */
+/** 大小写不敏感子串匹配（关键词与条目都在函数内归一化）；空关键词返回原集合 */
 export function filterByKeyword(items: string[], keyword: string): string[] {
-  if (!keyword) return items
-  return items.filter((it) => it.toLowerCase().includes(keyword))
+  const q = keyword.trim().toLowerCase()
+  if (!q) return items
+  return items.filter((it) => it.toLowerCase().includes(q))
 }
 
-/** 前缀匹配优先，其余按 localeCompare。返回新数组，不改入参。 */
+/** 前缀匹配优先，其余按 localeCompare。关键词在函数内归一化；返回新数组，不改入参。 */
 export function sortPrefixFirst(items: string[], keyword: string): string[] {
+  const q = keyword.trim().toLowerCase()
   return [...items].sort((a, b) => {
-    const aStarts = a.toLowerCase().startsWith(keyword)
-    const bStarts = b.toLowerCase().startsWith(keyword)
+    const aStarts = a.toLowerCase().startsWith(q)
+    const bStarts = b.toLowerCase().startsWith(q)
     if (aStarts && !bStarts) return -1
     if (!aStarts && bStarts) return 1
     return a.localeCompare(b)
