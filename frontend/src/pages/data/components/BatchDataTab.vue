@@ -476,7 +476,7 @@ defineExpose({ loadBatchDirs })
   border-radius: 10px;
 }
 
-/* 明细截断说明：与 .param-cap-hint / .preview-more 同族，两主题都只走语义 token */
+/* 明细截断说明：与 .param-count-hint / .preview-more 同族，两主题都只走语义 token */
 .batch-cap-hint {
   font-size: var(--p-fs-micro);
   color: var(--text-2);
