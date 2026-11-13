@@ -1,8 +1,9 @@
 <template>
   <div class="serial-selector">
-    <el-select
+    <el-select-v2
       ref="selectRef"
       :model-value="modelValue"
+      :options="selectOptions"
       multiple
       filterable
       automatic-dropdown
@@ -11,6 +12,7 @@
       collapse-tags-tooltip
       class="seri-select"
       aria-label="对比序列"
+      popper-class="dp-serial-popper"
       :loading="loading"
       :disabled="options.length === 0"
       :multiple-limit="MAX_SELECTED"
@@ -19,19 +21,13 @@
       @keydown.capture="onSelectKeydown"
       @visible-change="onVisibleChange"
     >
-      <el-option v-for="s in filteredItems" :key="s" :label="String(s)" :value="s" />
       <template #empty>
         <div class="empty-hint">无匹配序列</div>
       </template>
       <template #footer>
-        <div v-if="kw && matches.length > 0" class="match-hint">
-          匹配 {{ matches.length }} 项{{ matches.length > DROPDOWN_RENDER_CAP ? `（显示前 ${DROPDOWN_RENDER_CAP}）` : '' }}，按 Enter 全选
-        </div>
-        <div v-else-if="!kw && options.length > DROPDOWN_RENDER_CAP" class="match-hint">
-          仅显示前 {{ DROPDOWN_RENDER_CAP }} 项，可搜索或直接全选
-        </div>
+        <div v-if="kw && matches.length > 0" class="match-hint">匹配 {{ matches.length }} 项，按 Enter 全选</div>
       </template>
-    </el-select>
+    </el-select-v2>
     <div class="seri-actions">
       <el-button size="small" link type="primary" :disabled="options.length === 0" @click="selectAll">
         全选
@@ -45,12 +41,17 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick } from 'vue'
-import { DROPDOWN_RENDER_CAP } from '../../../../constants/dropdown'
+import { toOptions } from '../../../../utils/selectOptions'
 
 /**
  * 对比序列选择器：交互与查看数据「搜索测试项」输入框（TestColumnSelector）
  * 一致——输入关键词 → 按 Enter 全选匹配（合并语义增量累计）。
  * 选项 = 两文件公共序列（升序），默认由父级勾选前 10 颗。
+ *
+ * 模板上的 `popper-class="dp-serial-popper"` 是**实例级**下拉身份：面板 teleport 到 body，
+ * 与本页两个文件选择器的 `.el-select-dropdown` 同名，而收起的 ~150ms leave 过渡里
+ * `aria-hidden` 与 `display` 同拍才翻转，全局查询会挑中正在退出的那一份。
+ * e2e 侧的名字在 `e2e/helpers/elplus.ts` 的 `SERIAL_POPPER`，改这里必须同步改它。
  */
 interface Props {
   /** 已选序列 */
@@ -68,8 +69,6 @@ const emit = defineEmits<{
 /** 已选序列上限（el-table 无列虚拟化：200 序列 × 4 列 ≈ 800 列已到现实极限） */
 const MAX_SELECTED = 200
 
-// 渲染封顶值取 constants/dropdown 的 DROPDOWN_RENDER_CAP（与各 el-select 下拉同源）
-
 const filterText = ref('')
 const selectRef = ref<{ $el: HTMLElement }>()
 
@@ -80,23 +79,36 @@ const matches = computed(() =>
   kw.value ? props.options.filter((s) => String(s).toLowerCase().includes(kw.value)) : [],
 )
 
-/** 下拉选项：有关键字显示过滤结果，否则全量；渲染层一律截断到前 N */
-const filteredItems = computed(() =>
-  (kw.value ? matches.value : props.options).slice(0, DROPDOWN_RENDER_CAP))
+/**
+ * 下拉选项 = 匹配集（有关键词）或全量（无关键词），**不截断**。
+ * `el-select-v2` 的 filter-method 不过滤（`select-v2/src/useSelect.mjs:114-132`：
+ * 判到 filterMethod 合法后 `isValidOption` 恒 true ⇒ `filteredOptions` = 传进去的
+ * `props.options` 原样），所以这里必须给已经过滤好的数组；虚拟化让上万条序列可浏览，
+ * 旧「靠 300 封顶防冻结」的前提（el-select 无虚拟化）已随本次迁移作废。
+ *
+ * ⚠ 名字必须是 `selectOptions`，不能叫 `options`：props 里已有一个 `options: number[]`
+ * （模板里的 `options` 就是它）。两边同名会让 `:disabled="options.length === 0"` 从「有没有
+ * 公共序列」变成「过滤后有没有匹配项」——空关键词时两者恰好等价，正常路径看不出差别，
+ * 只有搜一个不存在的序列号时才把整个控件禁掉。
+ */
+const selectOptions = computed(() => toOptions(kw.value ? matches.value : props.options))
 
 /** 超限裁剪：保留前 N（配合 multiple-limit 双保险） */
 function clamp(sel: number[]): number[] {
   return sel.length > MAX_SELECTED ? sel.slice(0, MAX_SELECTED) : sel
 }
 
-/** 接管 EP 内置过滤（el-select filterable 模式下 query 变化回调） */
+/** 只是记下关键词：v2 的 filter-method 不过滤（见上面 selectOptions 的注释），过滤由 kw/matches 承担 */
 function filterMethod(query: string) {
   filterText.value = query
 }
 
 /**
  * 捕获阶段拦截 Enter：输入框有关键字且有匹配时 = 全选。
- * EP 的 handleKeydown 在冒泡阶段处理 Enter 并 stopPropagation，捕获阶段先执行才能抢先。
+ * v2 里 Enter 绑在过滤 input 自己身上（`select-v2/src/select.mjs:227`：
+ * `withKeys(withModifiers(onKeyboardSelect, ["stop", "prevent"]), ["enter"])`），
+ * 目标上的监听器晚于祖先的捕获阶段 ⇒ 挂在根 div 的 capture 监听必先执行，
+ * 这里 preventDefault + stopPropagation 才能抢在它（「选中键盘高亮那一项」）之前。
  * 输入框为空（kw 空）时不拦截，保留 EP 原行为（选中高亮项）。
  */
 function onSelectKeydown(e: KeyboardEvent) {
