@@ -564,6 +564,9 @@ admin/settings 那一族（`AuditLogPage.vue` 事件枚举、`UserManagement.vue
 - **affected**：`node scripts/e2e_affected.mjs --base master` ⇒ changed 44 文件、8 条命中全局清单
   （`config/urls.py` + 7 份 `e2e/helpers/`）⇒ `decide: 全量 e2e（兜底命中）`，计划 4 档
   lint:e2e / vitest / backend / e2e 全量。**升全量是预期**，不是异常。
+  ⚠ **如实记：这一条是 `--dry-run` 跑的**（末行 `RESULT: PASS · 计划 4 档全部执行 · dry-run（未真正执行）`），
+  四档随后**各自单独实跑**（下面逐条），所以判定读了、执行没走脚本。这么切的理由：`--dry-run` 之外它还会
+  把四档串成一条命令跑，而本轮需要「先修第 1 轮池的真红，再跑第 2 轮」——串跑会把还没修好的树判成红。
 - **全量池第 1 轮（修复前）**：`--slots=4` · 文件 87 · 用例 460 · 墙钟 13.8min · 单价 2.89s/例 ·
   效率 1.52 · unexpected 5 · flaky 1 · skipped 21 · 结论 `MEASURED` · **复跑判级真红 1**
   （独占 slot 仍红，不是负载抖动）。
