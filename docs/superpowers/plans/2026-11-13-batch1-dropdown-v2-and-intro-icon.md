@@ -1246,6 +1246,70 @@ git commit -m "feat(export): 导出参数下拉迁 el-select-v2；条数判据�
 
 ---
 
+## Task 8 落地后的订正 + **Task 9 重新切分**（2026-11-13，四个下拉已全部迁完）
+
+落地 = `5378292`（迁移 + 判据改造）+ `b36343a`（合并复审的四条小账）。
+迁移面到此收口：`grep -rn DROPDOWN_RENDER_CAP frontend/src` 现测只剩 `constants/dropdown.ts:14`
+（定义本身）与 `utils/selectOptions.ts` 的一处历史注释 ⇒ **Task 9 的原始范围（删常量）已无阻塞**。
+
+### 三条实测事实（别再重新论证）
+
+1. **`fill()` 与 `pressSequentially()` 一样触发过滤**，「必须逐键输入」作废（该错账原文活了
+   2026-08-21 到 2026-11-13，`view-data.spec.ts:734`，已在 `b36343a` 删成一行正确事实）。
+   机理：Playwright 的 `fill` 派发 `input` 事件，v1（`select/src/useSelect.mjs:270→185`）与
+   v2（`select-v2/src/useSelect.mjs:447→251`）走同一条
+   `onInput→onInputChange→handleQueryChange→filterMethod` 链。边界只有三条：
+   ① input 必须可编辑（v2 `select.mjs:215` 的 `readonly: !filterable`）⇒ 只有 `filterable` 下拉能 fill；
+   ② 值与 `states.previousQuery` 相同时 `useSelect.mjs:251` 直接 return ⇒ 同一个词连填两次不重发
+   （Enter 清空后再填可以）；③ 未开面板时 query 照样变，但 footer 读不到。
+2. **导出页的 histogram 请求原理上进不了 `paramList.ts` 那台捕获器**：`ExportToolsTab.vue:77`
+   发的是 `{file_id, params: []}`，而 `paramListCore.ts:67` 把带 `params` 的请求判为「算某参数」
+   ⇒ 永不进桶；`ParamListScope` 也只有分析页三个 tab。全仓因此**恰有两套**取参数全集的机制
+   （监听式 `listParams` / 自注册的 `paramKeysFromHistogram`），两者在 `params.ts` 里互相指认。
+   **不要为了「统一」再引第三份。**
+3. **`exports.spec.ts` 在默认 6 workers 下有 1-3 条条件跳过**（走文件头 `:13-18` 的「可选文件 < 2
+   则 skip」，跳过点是 `waitForOptions` 5s 预算内 `/files/` 选项数为 0；`git blame` 是 2026-08/09
+   的既有负载敏感点，**不是本批引入**）。⇒ **Task 12 读这个文件必须固定 `--workers=2`**
+   （实测 `--workers=2` ⇒ 10 passed / 0 skipped），否则门禁会把被改的那两条读成 skip。
+
+### Task 9 待办清单（复审一路攒下来的，比正文大得多）
+
+**9A 收口删除与统一**（= 下面「Task 9: 删掉 `DROPDOWN_RENDER_CAP` 与那份说明文件」一节的原范围 + 三条同族统一）
+- [ ] 删 `DROPDOWN_RENDER_CAP` 与 `constants/dropdown.ts`（正文原任务）+ `pickTabFile` 的陈旧注释
+- [ ] **footer 措辞统一**：ParamSelector 搜索态显示的是命中数却写「共 N 项」，另三个写「匹配 N 项」
+      —— 既是歧义也是同族不一致（Task 5 复审记的）。改文案会连带 `param-dropdown-full-list`
+      第 1 条的 `toHaveText` 精确匹配，必须同批改。
+- [ ] `buildParamOptions` → `buildSelectView`（名字为唯一消费者写窄了，签名对四个下拉通用）
+- [ ] **谓词入口统一**：现在同一个谓词有三处写法（`params.ts:51` 私有 `visibleOptions`、
+      `elplus.ts` 的 `popperOf`、`file-correlation.spec.ts:244` 与 `params.ts:117/133/141` 内联串）
+      ⇒ 导出 `popperOf`，其余从它组合 `.locator('.el-select-dropdown__item')`。
+      同批把 48 处内联 `:visible`（19 个 spec）与 `colfilter.ts` 的 3 处摊开清点：**能收的收，
+      收不完的写进 todo 作为下一批专项**，别默默扩大。
+
+**9B 反截断正向判据（三族补齐，形式已定死：不新建 spec、不新建夹具）**
+- [ ] 把 `param-dropdown-full-list.spec.ts` 的 `tailRowState` 与 `MAX_WINDOW_ROWS` 提到
+      `e2e/helpers/selectV2.ts`，在序列 / 测试列 / 导出三族的**既有**用例里各加 1 条
+      `items.count() < 20` + 1 条 footer 逐字。
+- [ ] 导出族要先换夹具才有牙齿：现在那条走 `options.first()`、默认文件只有 **41** 个参数
+      （< 旧封顶 300），迁不迁 v2 都绿 ⇒ 换 `BPD93204_FT1_ETS163550_12252024`（现测 1,723 列）。
+- [ ] `pickBoundedKeyword` 是带 throw 的纯启发式且零 T2 ⇒ 拆纯 + 补 4 例（阶梯跳带 / 首字符全唯一 /
+      空数组 / cap=1）。判据：`EXPORT_PARAM_SELECT_CAP=20` 与「匹配数 ≥2」两处边界必须能各自红。
+- [ ] ⚠ `exports.spec.ts` 现 **588 行**，不在 EXEMPT 账上 ⇒ 距 600 硬闸只剩 12 行，
+      加断言前**先腾行**。
+- [ ] 记在案但不做（除非要动的那条用例顺手）：「空关键词 + Enter」行为零判据；
+      `clearFilterInput()` 是否真洗掉 EP 内部 query（col 族被 `:744` 兜了一半，序列族零覆盖）。
+
+**9C 第五个下拉 —— 设计漏项，等用户拍板是否并入本批**
+- `DataBrowserToolbar.vue:54-67` 的「固定列」`el-select` 是**未封顶的 v1 实现**
+  （`v-for="c in allCols"`，无 `DROPDOWN_RENDER_CAP`），`allCols` = 表格 `headers`
+  （`DataBrowserAgGrid.vue:521`），ETS88_FT 实测 **1,728 列** ⇒ 打开即挂 1,728 个 `el-option`，
+  正是 `constants/dropdown.ts:8` 记的那个冻结风险；它也是 Task 7/8 复审里唯一反复红的业务用例
+  （`view-data.spec.ts:309/322`，15s 等不到选项）。
+  设计稿 §2 只承诺「四个下拉」、§8 的「明确不做」里也没有它 ⇒ 属**设计漏项**而非范围蔓延。
+  机制与 Task 7 同形（约 1 小时工作量），但**批 1 已越过原设计范围，必须先问用户**。
+
+---
+
 ## Task 9: 删掉 `DROPDOWN_RENDER_CAP` 与那份说明文件
 
 **Files:**
