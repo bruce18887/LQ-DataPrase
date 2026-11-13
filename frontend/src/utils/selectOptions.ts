@@ -1,11 +1,12 @@
 /**
  * 大列表下拉（`el-select-v2`）的选项准备：过滤 → 排序 → 映射。
  *
- * 四个下拉真正共享的是 `toOptions`（`:options` 必须是对象数组）；`filterByKeyword` /
- * `sortPrefixFirst` 拆成独立导出是为了能单测。当下的消费者（2026-11-13 现数）：
- * `toOptions` = ParamSelector（经 `buildSelectView`）+ SerialSelector（自己映射），
- * `filterByKeyword` = `buildSelectView` + SerialSelector，`sortPrefixFirst` 只有
- * `buildSelectView`。改 `filterByKeyword` 会同时牵动两个下拉，但仍是纯函数、无 DOM。
+ * 五个下拉真正共享的是 `toOptions`（`:options` 必须是对象数组）；`filterByKeyword` /
+ * `sortPrefixFirst` 拆成独立导出是为了能单测。消费者（2026-11-14 现数，`grep -rn
+ * "utils/selectOptions" frontend/src`）：`toOptions` = `buildSelectView` + TestColumn /
+ * Serial / Export / DataBrowserToolbar 固定列共 5 处，`filterByKeyword` = `buildSelectView`
+ * + TestColumn / Serial / Export 共 4 处，`sortPrefixFirst` 只有 `buildSelectView`，
+ * `highlightSegments` 只有 ParamSelector。改 `filterByKeyword` 牵动四个下拉，但仍是纯函数、无 DOM。
  *
  * 为什么必须有这份文件：`el-select-v2` 的 `filter-method` 在 2.14.0 里**退化成纯回调**
  * （`select-v2/src/useSelect.mjs:114-132` 判到 filterMethod 合法后让 `isValidOption` 恒 true ⇒
