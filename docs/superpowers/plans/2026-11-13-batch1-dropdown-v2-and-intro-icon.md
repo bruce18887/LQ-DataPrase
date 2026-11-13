@@ -507,6 +507,39 @@ git commit -m "test(e2e): 参数全集改从 histogram 无 params 响应取；�
 
 ---
 
+### Task 4 复审后的第二轮订正（2026-11-13，commit `0590002` + `c986c2c`）
+
+复审判 ❌，最关键的一条是：**`RESULT: PASS` 掩盖了两条恒真断言**。守卫从「比 `file_id`」升级成「比 `seq` + 显式结算态」后才闭合，判定逻辑同时下沉成可注入纯核 `frontend/e2e/helpers/paramListCore.ts`（零 Playwright），配 39 例 T2（`frontend/test/unit/paramListGuard.spec.ts`）—— 原来这两条竞态守卫只由 e2e 全量池兜，是 `testing-gates.md` 里最贵的一档，且回归症状毫无可读性。
+
+**① 「比 file_id」不够，实测复现**：同 `file_id=1`、body 加 `only_fail_test_item:true` 后 `lastFast` 已推进到新 seq，但 `fileId` 相等 ⇒ 旧守卫放行 ⇒ 返回**上一个口径**的列表，且 `poll(length>0)` 一次都不等。后端确认这是真实形状：`analysis_views.py:91-140` 的快路径 `params` 由 `ignore_no_limit` / `filter_test_items(...)` / `filter_bin1_rows` 逐层决定，`column_profile.py:83-107` 在行收窄后**再筛一次空列**；`useTabFileParams.ts:131-133` → `scheduleRefresh`（250ms 防抖）→ `:79` 重发快路径时 **file_id 不变、seq 变**。⇒ 后续任何「按 file_id 判定列表是否新鲜」的想法都要走这条证据。
+
+**② 空结果集必须能表达**。旧 `keys.length > 0` 那道拒写空集的闸与 `status() !== 200` 功能冗余（400 体没有 `results`，keys 必空），而它让「当前口径真的返回 0 项」被静默报告成上一口径的全量 —— 与 `chart-filter-switches.spec.ts:114` 注释「可能为空集——允许为空但请求必须正确」直接契约冲突。现在任何快路径响应（200/4xx/5xx、含 0 项、json 解析失败）都落一条捕获，「已结算」与「非空」彻底分开。
+
+**③ `aria-hidden` 那条判据的机理，先前记错了 —— 这条影响整批的 e2e 约定**（真 `/analysis` 页，Escape 关参数下拉后逐帧采样）：
+
+```
+Escape+0ms    aria-hidden=false  display=block  ariaFalsePoppers=2  items=87
+Escape+30ms   aria-hidden=false  display=block  ariaFalsePoppers=2  items=267
+Escape+80ms   aria-hidden=false  display=block  ariaFalsePoppers=2  items=267
+Escape+160ms  aria-hidden=true   display=none   ariaFalsePoppers=0  items=0
+```
+
+⇒ **`aria-hidden` 与 `display` 是同一拍翻转的**（EP 源码 `ariaHidden` 只在 `onAfterLeave` 翻回 true：`tooltip/src/content.vue_…_lang.mjs:46-50,108`），两者都在约 150ms 的 `el-zoom-in-top-leave-*` 窗口内保持「还开着」。**不带 popperClass 时 `[aria-hidden="false"]` 与 `:visible` 给的是同一个 267，完全等价、并不更安全。** 真正起作用的是 `.el-popper.<popperClass>` 的**每实例限定**。
+后果与处置：`visibleOptions` 的 `popperClass` 已改成**必填**（可选分支就是那个等价于旧 bug 的形状）；机理注释按实测重写，并点名 `file-correlation.spec.ts:31` 的 `waitForTimeout(600)` 作窗口量级的仓内旁证。
+⚠ **这条与项目记忆里的一条既有结论冲突**：记忆条目「Element Plus e2e 定位器陷阱」第 ③ 条把 `.el-popper[aria-hidden="false"] .el-select-dropdown` 记成 `:visible` 的正解。按本次实测，那个 flake 真正被修掉靠的是 popper 实例限定，不是 `aria-hidden`。**批3 的两页 admin 改造会直接引用这条约定**（`audit.spec.ts` 里「每页条数候选」那族），所以批3 开工前要先把记忆条目按实测订正，否则会把同一个坑再抄一遍。
+
+**④ I-4 的核实结论：三个 tab 里两个无法从请求体分辨**。`SingleParamTab.vue:321-333` 与 `CorrelationToolsTab.vue:200-216` 的 `filters()` 键集**逐字相同**，产品不在请求里留 tab 身份 ⇒ 单文件↔相关性没有可靠判据，改用显式声明 `setActiveAnalysisTab(page, scope)`（必须在点 tab **之前**调）；晶圆图可以自动分辨（`WaferMapPanel.vue:105-109` 拉列表不传 filters），由 `resolveScope()` 承担，**前提若变（晶圆图开始传 filters）这条必须删**。
+**残留缺口（已知、未修）**：漏声明或声明晚了不会静默给脏值（读不到就 15s 超时并在消息里点名该调哪个声明），但防不住「勾选单文件开关后 250ms 防抖还没发、用例已切到相关性并声明」这种跨切 tab 的错位。根因在产品侧没有 tab 身份 —— 要真修得给快路径请求加一个来源标识，属独立工单。
+
+**⑤ 光补守卫不足以让那两条断言有牙**（实现者的发现，复审没说到）：勾选开关后列表那一发是 250ms 防抖后才离开浏览器，`lastFast` 还停在旧口径时 `listParams` 返回旧口径**是正确行为**，比较仍是自己比自己。修法是在勾选**之前**注册一次**不带 params 的快路径** `waitForResponse`（同文件 `:88-103` 的既有范式），让「新口径那一发已发出且已响应」成为读列表的前提。⇒ **凡是「改筛选 → 读列表 → 比前后」的用例，都必须先等那一发快路径**，这条要写进批3 的 e2e 约定。
+
+**⑥ 内联 `:visible` 的完整清点（批末专项，不在本批）**：helper 层已统一，但 spec 内联仍有 **19 个文件 48 处**活的内联 `.el-select-dropdown__item:visible`（`outlier-handling` 14、`view-data` 12、`analysis.spec` 4、`custom-limit-cpk` 3、`multi-file` 3、`file-select` 3，余 13 个文件各 1-2 处），另有 `colfilter.ts:13,18,22` 三处（其中 `:22` 是**无 popperClass** 的那个等价于旧 bug 的形状），被 `data.spec.ts` / `file-list-sort-filter.spec.ts` 共 13 处调用。最刺眼的是同一份 spec 内两套判据并存：`outlier-handling.spec.ts:175,178,199` 用裸 `:visible` 点异常值处理下拉，而 `pickOutlierMode` 已经是 aria-hidden+popperClass。
+**为什么本批不动它们**：这些下拉选出来的都是小的固定候选集（RowDataLimit / 裁剪范围 / 3 Sigma / 按 Bin 分组），不在本批四个被虚拟化的组件里 ⇒ 虚拟化不会打红它们，属判据一致性问题而非本批回归。**留一个专项**：统一成 `visibleOptions(page, popperClass)` 的形态，并把 `popperClass` 必填这条推广到所有 helper。
+
+**⑦ Task 4 的验证覆盖面（如实记）**：`npm run test:e2e:affected` 在干净工作树下只比 `HEAD~1..HEAD`，而 Task 4 分两个 commit ⇒ 实跑那一轮**没把 `frontend/e2e/helpers/` 算进改动集**。用 `--base HEAD~2 --dry-run` 核过：两个 commit 一起看时判定是 `decide: 全量 e2e（兜底命中）`。**Task 12 收口的全量池必须覆盖这条**，不能沿用 Task 4 那轮的 PASS。
+
+---
+
 ## Task 5: `ParamSelector.vue` 迁 `el-select-v2`（含高亮按需 + footer 计数）
 
 **Files:**
