@@ -524,7 +524,40 @@ git commit -m "test(e2e): 参数全集改从 histogram 无 params 响应取；�
 
 **Files:**
 - Modify: `frontend/src/pages/analysis/components/ParamSelector.vue`（281 行）
+- Modify: `frontend/test/unit/selectOptions.spec.ts`（承接 Task 2 复审遗留的 1 条 Important + 1 条 Minor）
+- Modify: `frontend/test/unit/e2eAffectedDecide.spec.ts`（承接 Task 2 复审的 1 条 Minor）
 - Test: `frontend/e2e/analysis/param-dropdown-full-list.spec.ts`（新建，T3 接线）
+
+**从 Task 2 回环复审转来的三项（Task 5 必须一并落，否则就是「说了但没人出资」）**：
+
+- **[I-1 真判据] 跨函数不变量「过滤命中 ⇒ 必高亮」目前没有断言钉住。** Task 2 只在两侧各钉了归一化单测，缺的是组合本身。在 `describe('buildParamOptions')` 里补一条：
+
+```ts
+  // I-1 的真判据：过滤侧与高亮侧共用同一归一化契约 ⇒ 凡被 buildParamOptions 放行的项，
+  // 用同一个原始 query 去算高亮必须至少命中一段。两侧各自 trim 不等于二者一致。
+  it('不变量：被过滤命中的每一项，高亮必命中至少一段', () => {
+    const params = ['PAR1', 'OTHER', 'A B', 'a  b', 'Kelvin_VIN', 'IBLK', 'V+(1)', 'XPAR1', 'P AR', 'par1x', '']
+    for (const query of ['  ', 'par', 'PAR ', ' a b ', 'kelvin', '+(', 'P AR', 'XPAR1 ', 'PAR1', 'A', '']) {
+      const { options } = buildParamOptions(params, query)
+      for (const o of options) {
+        const segs = highlightSegments(String(o.label), query)
+        expect(segs.map((s) => s.text).join(''), `拼接无损: ${query}/${o.label}`).toBe(o.label)
+        if (query.trim()) {
+          expect(
+            segs.some((s) => s.mark),
+            `过滤命中但高亮没命中: query=${JSON.stringify(query)} label=${o.label}`,
+          ).toBe(true)
+        }
+      }
+    }
+  })
+```
+
+  落地前先证明它**不是空转**：临时把 `highlightSegments` 的 `query.trim().toLowerCase()` 改回 `query.toLowerCase()` ⇒ 这条必须红（Task 2 的那条单侧断言也会红，两者都算证据）；手工改回 ⇒ 绿。
+
+- **[锚点] `selectOptions.spec.ts:91` 与 `:116` 用 `ParamSelector.vue:145-149` / `:97-99` 这种**行号**锚点，而本 Task Step 3 会删掉那些行 ⇒ 锚点届时指向错的位置。** 在本 Task 里把这两处改写成符号+提交锚点（`ParamSelector 的 highlightSegments 历史实现 / 提交 d1146dd`），与 `selectOptions.ts:69` 已采用的范式一致。
+
+- **[门禁形状判据] `e2eAffectedDecide.spec.ts:193-195` 的形状扫描过滤条件是「处置恰为 `['unit']`」**，会放过 `['frontend/src/utils/', ['unit', 'none:理由']]` 这种带 note 的目录级放行（本表其它处的合法写法）。改成按首元素判：`Array.isArray(mods) && mods[0] === 'unit'`。行为探针仍兜得住，这条只是把纵深补全。改完跑到红（用一次刻意造的坏形状变异）再改回。
 
 - [ ] **Step 1: 写失败的 T3 用例**
 
