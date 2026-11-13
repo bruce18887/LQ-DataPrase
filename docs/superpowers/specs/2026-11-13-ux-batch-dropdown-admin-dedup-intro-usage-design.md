@@ -43,7 +43,17 @@
 
 用户要的是「下拉里能看到全部测试项」，不是「看到更大的数字」。所以：
 
-- **删除渲染截断**：`frontend/src/constants/dropdown.ts:14` 的 `DROPDOWN_RENDER_CAP = 300` 连同四处 footer 提示整条删除，无残留消费者（该常量只有这 4 个组件引用）。
+- **删除渲染截断**（Task 9A 落地订正，2026-11-13）：`DROPDOWN_RENDER_CAP = 300` 连同 `frontend/src/constants/dropdown.ts`
+  整文件删除，无残留消费者 —— 该常量只有 §2.3 那 4 个组件引用；第五个「固定列」下拉本来就没引它（它原先是未封顶的
+  v1 实现，见 §2.9，编号以 §2.9 为准，不是 §2.5）。
+  **但「四处 footer 提示整条删除」这句与落地不符**，实际状态是三支不同形状，逐条按代码记：
+  - `ParamSelector.vue:43-44`（单选）**保留两支措辞** ——「匹配 N 项」/「共 N 项」，class 仍是 `.param-count-hint`；
+    单选控件没有「按 Enter 全选匹配」这个动作，无关键词时报全集规模对用户有用。
+  - `SerialSelector.vue:28`、`ExportParamSelector.vue:34`（multiple）**只删掉「仅显示前 N」那半句**，
+    `match-hint` 那一行（`v-if="kw && matches.length > 0"` ⇒「匹配 N 项，按 Enter 全选」）保留；这两个的 footer
+    在无关键词时确实不出字。
+  - `TestColumnSelector.vue:26-34` 要单独纠正：它的 `#footer` 里**全选/清空两个按钮是无条件常显的**（只有 `match-hint`
+    那行带 `v-if`），所以「另三个下拉无关键词时什么都不显示」这句话不准 —— 那个下拉的 footer 任何时候都有内容。
 - **不变量**：过滤/计数/全选的作用对象本来就是完整集合（那份文件的注释 :10 已写明「封顶只作用于渲染」），迁移后仍然如此 —— 本次只把「渲染前 300」换成「渲染全部但虚拟窗口化」。
 
 ### 2.2 已核实的库事实（EP 2.14.0，读的是 `frontend/node_modules` 里的已安装产物）

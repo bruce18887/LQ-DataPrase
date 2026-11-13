@@ -84,6 +84,26 @@
   ⇒ 2026-11-11 实测 slots 表观 22.4GB 里只有 4.3GB 真占盘，全类合计「删完即掉」≈6.2GB。
   交叉核对用 `du -sh C:\lqdp-e2e\slots`（实测 4.4G ≈ 唯一 4440.8M）—— **du 按 inode 去重，连 `--apparent-size`
   也去重**，所以它核对的是「唯一」口径，复现不出表观 22.4GB（那是逐条目 `st_size` 不去重的朴素加总，只有回收器的「表观」列给）。
+- **一条 bash 命令只跑一个 playwright 档位**（2026-11-13 实测立，起因见 `docs/tasks/lessons.md` 同日条目）：
+  要跑多个档就分多次工具调用，**每次跑前 `netstat -ano | grep LISTENING` 确认那一档的端口空闲、跑后核对日志末尾的汇总行**。
+  根因不是用例、也不是产品：`playwright.config.ts:190-191` 记着「preview 会无声消失」，而那层监督器
+  `scripts/e2e_preview_supervised.mjs` 只挂在 **slot 档**（`:195` 的 `CURRENT_SLOT` 分支），非 slot 档没人记退出码 ⇒
+  串行两档时后一发继承前一发的死服务器，整档 `net::ERR_CONNECTION_REFUSED`（`page.goto` 就死，一条断言都没走到），
+  看着完全像产品回归。实测形状：同一条命令先 view-data（`36 passed`）再 exports ⇒ `8 failed / 2 passed`，
+  14 处失败逐字全是 `localhost:<前端口>` 拒连、`netstat` 那端口已无监听、日志里 `➜ Local:` 之后无声消失；
+  **单跑、换干净端口重跑都正常** ⇒ 与当批改动无关。**判绿前先排除这一档**：整档红 + 失败清一色拒连 = 服务器问题，别去改用例。
+- **下拉族的门禁档要含 `e2e/analysis/tab-independent-files.spec.ts`**（2026-11-13 补）：
+  `frontend/e2e/helpers/params.ts` 的 `pickOutlierMode`（`:132`）/ `pickSensitivity`（`:140`）在本批被统一改走
+  谓词入口 `popperOf`。`grep -rn` 现数（2026-11-13）：**`pickSensitivity` 全仓唯一调用方就是本文件**
+  （`:153`/`:188`）；`pickOutlierMode` 另有 5 处调用分布在 5 个文件（`analysis/` 的 histogram-fail-bins、
+  iqr-multiplier-propagation、outlier-handling、table-zoom-fit + `theme/night-visibility`）——
+  那 5 个文件是否已在档内**没有逐条核过**，别把这条读成已覆盖；不列本文件则是**确定**零门禁（`pickSensitivity` 那一半）。
+  跑法（同 §5 的定向档，一条命令只有这一发）：
+  `E2E_PORT=<空闲> E2E_FRONTEND_PORT=<空闲> E2E_SKIP_BUILD=1 npx playwright test e2e/analysis/tab-independent-files.spec.ts --project=P1 --workers=2`
+  → 复审实测 `1 failed / 8 passed (33.9s)`，那 4 处谓词调用全绿；红的 `:195`（「未选到有效文件时各 tab 自己出空态」）
+  **单跑 `3 passed (15.1s)`** ⇒ 既有 flake，不是本批引入、也不是这条新档位的门槛，别把它算成新伤。
+  2026-11-13 收口复跑同一条命令两次 `9 passed (19.0s / 19.2s)`，0 skipped / 0 flaky（含 `:195`）—— 与「flake 而非存量红」一致。
+  汇总口径：该文件 7 条用例 + 2 条 `auth.setup` ⇒ 末尾行就是 `9`，复审那轮的 `1 failed / 8 passed` 是同一个数。
 
 ## 2. 三层判据（写新断言之前先选层）
 

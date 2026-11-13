@@ -105,9 +105,10 @@ export function highlightSegments(text: string, query: string): HighlightSegment
 /**
  * 参数下拉的完整视图：`options` 交给 `:options`，`total` 交给 footer 计数。
  *
- * 顺序是「过滤 → 排序 → 映射」，**没有截断步骤**。历史上这里截断到 300
- * （旧 `DROPDOWN_RENDER_CAP`，非虚拟化 `el-select` 时代防冻结用的，本批迁
- * `el-select-v2` 后已随常量一起删除）—— 找回它等于把用户报的「只能看前 300 项」放回来。
+ * 顺序是「过滤 → 排序 → 映射」，**没有截断步骤**。历史上这里截断到 300 —— 那是**已经不存在
+ * 于树里**的旧 `DROPDOWN_RENDER_CAP`（非虚拟化 `el-select` 时代防冻结用的，本批迁
+ * `el-select-v2` 时连同定义一起删除，`constants/dropdown.ts` 整个文件已删），不是当下的约束：
+ * 找回那个数等于把用户报的「只能看前 300 项」放回来。
  * 排序必须留在映射之前：`el-select-v2` 按数组顺序渲染，映射后再排要重建对象。
  */
 export function buildSelectView(
