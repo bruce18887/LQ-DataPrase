@@ -1299,6 +1299,9 @@ git commit -m "feat(export): 导出参数下拉迁 el-select-v2；条数判据�
       ⇒ 导出 `popperOf`，其余从它组合 `.locator('.el-select-dropdown__item')`。
       同批把 48 处内联 `:visible`（19 个 spec）与 `colfilter.ts` 的 3 处摊开清点：**能收的收，
       收不完的写进 todo 作为下一批专项**，别默默扩大。
+      ⚠ **这三个数是初稿估的，实数见 :536 那条订正**：`.el-select-dropdown__item:visible` 现跑 38 处 /
+      15 个文件（master 上 39），`colfilter.ts` 那 3 处其实是 2× `.col-filter-popper:visible` + 1× item；
+      全部 `:visible` 是 190 处 / 35 个文件（剔注释行口径，命令在 `docs/tasks/todo.md`）。
 
 **9B 反截断正向判据（三族补齐，形式已定死：不新建 spec、不新建夹具）**
 - [ ] 把 `param-dropdown-full-list.spec.ts` 的 `tailRowState` 与 `MAX_WINDOW_ROWS` 提到
@@ -1630,7 +1633,7 @@ git commit -m "docs(todo): 批1 收口台账（v2 迁移实测值与 e2e 改写�
    ⇒ **没有同形计时可对照**。台账改成记形状与后果两条（footer「仅显示前 300」+ 固定列那颗 1,728 个
    `el-option` 把 `view-data` 那条 15s 等待拖成复审里唯一反复红的业务用例），并明写「别读成快了多少倍」。
    固定列那颗的打开耗时**没落断言**（9C 那条永不触发的耗时断言已在 `798e277` 删）。
-3. **Step 6 的「被改写的 e2e 条数」用脚本现跑，不引用 §2.7 的估算。** `node tasks/t12-rewritten-e2e.mjs`
+3. **Step 6 的「被改写的 e2e 条数」用脚本现跑，不引用 §2.7 的估算。** `node scripts/e2e-rewritten-census.mjs`
    按「describe 链 + 用例标题」当身份比 master/HEAD 的块体 ⇒ 新增 8 / 改写 16 / 删除 0（运行条 +9，
    `intro-icon-contrast` 是双主题循环）。与单文件 playwright 计数异源交叉：每文件 = 脚本条数 + 2 条 setup。
 4. **Step 3 那条「后端全量」的标签枚举要现跑取，别抄本文的写法。** 现跑 = `test.backend` + 12 个 `apps.*`
