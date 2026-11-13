@@ -144,7 +144,7 @@ describe('element-plus 用量绊线', () => {
     expect(new Set(list).size).toBe(list.length)
     const s = collect(realFiles())
     // 空扫描 / 目录拼错时这条先红，而不是让上面那条比一个空集合 == 空清单
-    expect(list.length).toBe(49)
+    expect(list.length).toBe(50)
     expect(s.occurrences).toBeGreaterThan(300)
     for (const must of ['button', 'select', 'form-item', 'table-column']) {
       expect(s.names.has(must), `缺少必然存在的 ${must}`).toBe(true)
@@ -168,7 +168,7 @@ describe('element-plus 用量绊线', () => {
     expect(collect(realFiles()).dynamicIs).toEqual([])
   })
 
-  it('注册名单逐字等于清单：installables = 模板 49 件 + 提供 v-loading 的 ElLoading', () => {
+  it('注册名单逐字等于清单：installables = 模板 50 件 + 提供 v-loading 的 ElLoading', () => {
     const p = pluginLists()
     expect(p.installed.length).toBe(new Set(p.installed).size)
     expect(p.installed.sort()).toEqual(
@@ -179,7 +179,22 @@ describe('element-plus 用量绊线', () => {
     expect(notImported, `installables 里有没 import 的名字: ${notImported.join(', ')}`).toEqual([])
   })
 
-  it('样式入口逐字等于清单全集（52 件），且没有重复行', () => {
+  // ElSelectV2 是 EP 里少数带数字的导出名。旧正则 [A-Z][A-Za-z]* 抓不到它 ⇒
+  // 注册写了、判据看不见。两条一起放宽才有意义（见 parsePluginListsFrom 的注释）。
+  it('解析正则认数字后缀：ElSelectV2 同时被 imported 与 installed 抓到', () => {
+    const source = [
+      "import { ElSelect, ElSelectV2 } from 'element-plus'",
+      'const installables = [',
+      '  ElSelect,',
+      '  ElSelectV2,',
+      ']',
+    ].join('\n')
+    const lists = parsePluginListsFrom(source)
+    expect(lists.imported).toContain('ElSelectV2')
+    expect(lists.installed).toContain('ElSelectV2')
+  })
+
+  it('样式入口逐字等于清单全集（53 件），且没有重复行', () => {
     const p = pluginLists()
     const expectStyled = [...EP_TEMPLATE_COMPONENTS, ...EP_PROGRAMMATIC, ...EP_DIRECTIVES].sort()
     expect(p.styled.length).toBe(new Set(p.styled).size)
@@ -208,18 +223,32 @@ function toPascal(kebab: string): string {
   return 'El' + kebab.split('-').map((s) => s[0].toUpperCase() + s.slice(1)).join('')
 }
 
-function pluginLists() {
-  const text = readFileSync(fileURLToPath(PLUGIN), 'utf-8')
+/**
+ * 纯解析：喂一段 `plugins/element-plus.ts` 的源码文本，折出三张名单。
+ *
+ * 拆出来的唯一理由：下面那条「解析正则认不认得带数字的导出名」必须能用**假源码**钉住，
+ * 而不是改真文件来验判据本身。行为与拆分前逐字相同（壳 `pluginLists()` 只做读文件）。
+ *
+ * ⚠ 两条 El 名单的正则必须 `[A-Za-z0-9]*` 而不是 `[A-Za-z]*`：`ElSelectV2` 是 EP 里少数
+ * 带数字的导出名，旧写法对它隐形 ⇒ 「清单写了、解析没解析出来」那种看着像产品坏了的红。
+ * 且**两条必须一起放宽**：只放宽 installed 那条，`:178` 的 `notImported` 会换成红。
+ * 与本文件 :29 的 TAG 正则（早就是 `[A-Za-z0-9]*`）同一套命名文法。
+ */
+function parsePluginListsFrom(text: string) {
   const installBlock = /const installables = \[([\s\S]*?)\n\]/.exec(text)
   const importBlock = /import \{([\s\S]*?)\} from 'element-plus'/.exec(text)
   const installed = installBlock
-    ? [...installBlock[1].matchAll(/^\s+(El[A-Z][A-Za-z]*),$/gm)].map((m) => m[1])
+    ? [...installBlock[1].matchAll(/^\s+(El[A-Z][A-Za-z0-9]*),$/gm)].map((m) => m[1])
     : []
   const imported = new Set(
-    importBlock ? [...importBlock[1].matchAll(/\b(El[A-Z][A-Za-z]*)\b/g)].map((m) => m[1]) : []
+    importBlock ? [...importBlock[1].matchAll(/\b(El[A-Z][A-Za-z0-9]*)\b/g)].map((m) => m[1]) : []
   )
   const styled = [...text.matchAll(/es\/components\/([a-z0-9-]+)\/style\/css'/g)].map((m) => m[1])
   return { installed, imported, styled }
+}
+
+function pluginLists() {
+  return parsePluginListsFrom(readFileSync(fileURLToPath(PLUGIN), 'utf-8'))
 }
 
 function statSyncExists(url: string): boolean {

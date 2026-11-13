@@ -54,6 +54,7 @@ export const EP_TEMPLATE_COMPONENTS = [
   'radio-group',
   'row',
   'select',
+  'select-v2',
   'skeleton',
   'slider',
   'splitter',

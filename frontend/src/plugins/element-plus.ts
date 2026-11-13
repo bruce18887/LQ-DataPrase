@@ -58,6 +58,7 @@ import {
   ElRadioGroup,
   ElRow,
   ElSelect,
+  ElSelectV2,
   ElSkeleton,
   ElSlider,
   ElSplitter,
@@ -115,6 +116,7 @@ import 'element-plus/es/components/radio-button/style/css'
 import 'element-plus/es/components/radio-group/style/css'
 import 'element-plus/es/components/row/style/css'
 import 'element-plus/es/components/select/style/css'
+import 'element-plus/es/components/select-v2/style/css'
 import 'element-plus/es/components/skeleton/style/css'
 import 'element-plus/es/components/slider/style/css'
 import 'element-plus/es/components/splitter/style/css'
@@ -128,7 +130,7 @@ import 'element-plus/es/components/tag/style/css'
 import 'element-plus/es/components/tooltip/style/css'
 import 'element-plus/es/components/upload/style/css'
 
-/** 带 install 的件：模板里的 49 个标签 + 提供 v-loading 指令的 ElLoading。 */
+/** 带 install 的件：模板里的 50 个标签 + 提供 v-loading 指令的 ElLoading。 */
 const installables = [
   ElAlert,
   ElBadge,
@@ -168,6 +170,7 @@ const installables = [
   ElRadioGroup,
   ElRow,
   ElSelect,
+  ElSelectV2,
   ElSkeleton,
   ElSlider,
   ElSplitter,
