@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page } from '@playwright/test'
+import { expect, type Locator, type Page, type Response } from '@playwright/test'
 import { capturedParamList, explainParamListCapture, type ParamListScope } from './paramList'
 
 // 跨 tab 用例声明当前 scope 用（判据与分桶都在 paramList.ts，这里只把入口摆在用例常引的文件上）
@@ -184,6 +184,47 @@ export async function listParams(page: Page, scope: ParamListScope = 'single'): 
     )
   }
   return keys
+}
+
+/**
+ * 参数全集 = **调用方自己注册的那发 histogram 响应**的 `results` 键。
+ *
+ * 给「不归 `paramList.ts` 那台捕获器管」的页面用（目前只有导出工具 tab，见
+ * `e2e/exports/exports.spec.ts` 的 Export Tools 两条用例）：捕获器把**带 `params` 的请求**判成
+ * 「算某个参数」而不是「拉全集」（`paramListCore.ts:67`），而导出页发的正是
+ * `{file_id, params: []}`（`ExportToolsTab.vue:77`）⇒ 永远进不了那个桶，且它的 scope
+ * 只覆盖分析页的三个 tab。
+ *
+ * 口径与产品逐字一致：`ExportToolsTab.vue:78` 就是 `Object.keys(data.results || {})`，
+ * **不做 trim 过滤** —— 导出页页头那句 `共 M 个` 数的正是这个长度，加过滤就对不上；
+ * 分析页相反，它自己先按 `useTabFileParams.ts:87` 的 `p.trim() !== ''` 洗过，所以那边走 `listParams`。
+ */
+export async function paramKeysFromHistogram(resp: Promise<Response | null>): Promise<string[]> {
+  const r = await resp
+  if (!r) return []
+  const body = (await r.json()) as Record<string, unknown>
+  return Object.keys((body?.results ?? {}) as Record<string, unknown>)
+}
+
+/**
+ * 从参数全集造一个**匹配数 ∈ [2, cap]** 的关键词，供「输入关键词 → Enter 全选」选中一小撮参数。
+ *
+ * 前缀越短匹配越多（单调），所以从短往长试，第一个落进区间的就是答案；只试前 12 个名字，
+ * 不在上千项的全集上做全量扫描。参数名与匹配数全部来自**响应**而不是 DOM —— 迁 `el-select-v2`
+ * 之后 DOM 里只有虚拟窗口那约 11 行，「数选项条数」与「按位置点第 i 行」都不再是合法判据形状
+ * （2026-11-13 批1 Task 8）。匹配规则这里是本地一行 `includes`，**没有**复用 src 的
+ * `filterByKeyword`：判据要与实现异源，否则产品把过滤写坏时这条跟着一起绿。
+ */
+export function pickBoundedKeyword(all: string[], cap: number): { kw: string; count: number } | null {
+  for (const name of all.slice(0, 12)) {
+    for (let len = 1; len <= name.length; len++) {
+      const kw = name.slice(0, len).toLowerCase()
+      const count = all.filter((p) => p.toLowerCase().includes(kw)).length
+      if (count >= 2 && count <= cap) return { kw, count }
+      if (count < 2) break
+    }
+  }
+  return null
 }
 
 /**
