@@ -533,7 +533,7 @@ Escape+160ms  aria-hidden=true   display=none   ariaFalsePoppers=0  items=0
 
 **⑤ 光补守卫不足以让那两条断言有牙**（实现者的发现，复审没说到）：勾选开关后列表那一发是 250ms 防抖后才离开浏览器，`lastFast` 还停在旧口径时 `listParams` 返回旧口径**是正确行为**，比较仍是自己比自己。修法是在勾选**之前**注册一次**不带 params 的快路径** `waitForResponse`（同文件 `:88-103` 的既有范式），让「新口径那一发已发出且已响应」成为读列表的前提。⇒ **凡是「改筛选 → 读列表 → 比前后」的用例，都必须先等那一发快路径**，这条要写进批3 的 e2e 约定。
 
-**⑥ 内联 `:visible` 的完整清点（批末专项，不在本批）**：helper 层已统一，但 spec 内联仍有 **19 个文件 48 处**活的内联 `.el-select-dropdown__item:visible`（`outlier-handling` 14、`view-data` 12、`analysis.spec` 4、`custom-limit-cpk` 3、`multi-file` 3、`file-select` 3，余 13 个文件各 1-2 处），另有 `colfilter.ts:13,18,22` 三处（其中 `:22` 是**无 popperClass** 的那个等价于旧 bug 的形状），被 `data.spec.ts` / `file-list-sort-filter.spec.ts` 共 13 处调用。最刺眼的是同一份 spec 内两套判据并存：`outlier-handling.spec.ts:175,178,199` 用裸 `:visible` 点异常值处理下拉，而 `pickOutlierMode` 已经是 aria-hidden+popperClass。
+**⑥ 内联 `:visible` 的完整清点（批末专项，不在本批）**：helper 层已统一，但 spec 内联仍有 **15 个文件 38 处**活的内联 `.el-select-dropdown__item:visible`（2026-11-14 批1 收口现跑：`git grep -hE "\.el-select-dropdown__item:visible" HEAD -- frontend/e2e | grep -vE '^[[:space:]]*(//|\*|/\*)' | wc -l`；分布 `outlier-handling` 14、`analysis.spec` 4、`data.spec` 3、`multi-file` 3、`custom-limit-cpk` 3、`view-data` 2，余 9 个文件各 1 处，含 helper 侧 `elplus.ts` 1 + `colfilter.ts` 1）。**订正：原稿那句「19 个文件 48 处」和「view-data 12」都不成立** —— 同一条命令在 master 上是 **39 处**（48 是初稿估的），`view-data.spec.ts` 在 master 就只剔注释 2 处、本批后仍 2 处 ⇒ 本批对这一族的净变化是**减 1 处**，没有"顺手清掉十个"。另有 `colfilter.ts:13,18,22` 三处（其中 `:22` 是**无 popperClass** 的那个等价于旧 bug 的形状），被 `data.spec.ts` / `file-list-sort-filter.spec.ts` 共 13 处调用。最刺眼的是同一份 spec 内两套判据并存：`outlier-handling.spec.ts:175,178,199` 用裸 `:visible` 点异常值处理下拉，而 `pickOutlierMode` 已经是 aria-hidden+popperClass。
 **为什么本批不动它们**：这些下拉选出来的都是小的固定候选集（RowDataLimit / 裁剪范围 / 3 Sigma / 按 Bin 分组），不在本批四个被虚拟化的组件里 ⇒ 虚拟化不会打红它们，属判据一致性问题而非本批回归。**留一个专项**：统一成 `visibleOptions(page, popperClass)` 的形态，并把 `popperClass` 必填这条推广到所有 helper。
 
 **⑦ Task 4 的验证覆盖面（如实记）**：`npm run test:e2e:affected` 在干净工作树下只比 `HEAD~1..HEAD`，而 Task 4 分两个 commit ⇒ 实跑那一轮**没把 `frontend/e2e/helpers/` 算进改动集**。用 `--base HEAD~2 --dry-run` 核过：两个 commit 一起看时判定是 `decide: 全量 e2e（兜底命中）`。**Task 12 收口的全量池必须覆盖这条**，不能沿用 Task 4 那轮的 PASS。
@@ -1025,9 +1025,11 @@ git commit -m "feat(correlation): 对比序列下拉迁 el-select-v2，取消 30
    `e2e/data/file-correlation.spec.ts` 的 describe 是 `tag: ['@p2','@data']` ⇒ P1 项目下
    `No tests found`，正解 `--project=P2`（10 条 = 8 业务 + 2 setup）。
    ⚠ **本条原稿说 `view-data.spec.ts` 归 Edge —— 是控制器写错的，Task 7 实现方实测反驳**：
-   Edge 项目是 `grepInvert: /@p[012]/`（`playwright.config.ts:124`），而该文件 35 条**用例标题
-   自带 `@pN`**（p0×1 / p1×13 / p2×20 / p3×1）⇒ `--project=Edge` 只选中 1 条，合跑口径是
-   `--project=Edge --project=P1 --project=P2` = 36 条（34 业务 + 2 setup）。
+   Edge 项目是 `grepInvert: /@p[012]/`（`playwright.config.ts:124`），而该文件**用例标题自带
+   `@pN`** ⇒ `--project=Edge` 只选中 1 条。条数一律现跑（`npx playwright test e2e/data/view-data.spec.ts
+   --project=P1 --list`，数 `[P1]` 行；setup 那 2 条每个项目都会带进来，别算进业务数）：
+   2026-11-14 收口实跑 = 业务 **36 条**（Edge 1 / P0 1 / P1 14 / P2 20），原稿记的「35 条、p1×13、
+   合跑 36（34 业务 + 2 setup）」是 Task 9C 新增那条千列用例**之前**的账。
    **Task 8 的 `exports.spec.ts`：tag 在 describe 上（4 处 `['@p2','@exports']`）⇒ 归 P2。**
    跑之前一律先 `--list` 数一遍，别按 describe 的 tag 猜项目。
 2. **`filterByKeyword` 现在是泛型** `<T extends string | number>(items: T[], keyword: string): T[]`。
@@ -1307,8 +1309,8 @@ git commit -m "feat(export): 导出参数下拉迁 el-select-v2；条数判据�
 - [ ] `pickBoundedKeyword` 是带 throw 的纯启发式且零 T2 ⇒ 拆纯 + 补 4 例（阶梯跳带 / 首字符全唯一 /
       空数组 / cap=1）。判据：`EXPORT_PARAM_SELECT_CAP=20` 与「匹配数 ≥2」两处边界必须能各自红。
 - [ ] ⚠ `exports.spec.ts` **不在** `scripts/line-limit.mjs` 的 EXEMPT 账上，所以它顶的是 600 硬闸本身；
-      本轮（2026-11-13）现跑 `wc -l` 是 **592**（计划原先记的 588 已过时）⇒ 距硬闸 8 行，
-      加断言前**先腾行**，别把这里的数字当长期事实，动手前重跑。
+   行数**一律现跑**（`cd frontend && wc -l e2e/exports/exports.spec.ts`）—— 本文件正文与台账里出现过的
+   588 / 592 / 597 都是某一轮的快照，收口那轮是 599 ⇒ 距硬闸 1 行，加断言前**先腾行**，别把任何数字当长期事实。
 - [ ] 记在案但不做（除非要动的那条用例顺手）：「空关键词 + Enter」行为零判据；
       `clearFilterInput()` 是否真洗掉 EP 内部 query（col 族被「@p2 显示测试列：输入关键词 + Enter 全选匹配项」
       那条 poll 之前的 `toHaveValue('')` 兜了一半，序列族零覆盖）。
@@ -1608,6 +1610,33 @@ Modify `docs/tasks/todo.md` 批1 结果段，逐条写：
 git add docs/tasks/todo.md
 git commit -m "docs(todo): 批1 收口台账（v2 迁移实测值与 e2e 改写条数）"
 ```
+
+---
+
+## Task 12 落地后的订正（2026-11-14，收口当天）
+
+落地 = `fa2200d`（池档抓到的真红 + 绊线）+ `a36f9cb`（终审三笔判据）+ `6255122`（消费者账/谓词债订正）
++ `1abe68b`（intro 声明源侧 T2）+ 本节的台账。**Step 2/3/4/5 的判据本身没变，全部按正文跑完**。
+四处与本文不同，以这里为准：
+
+1. **Step 3 的全量池实际跑了两轮，且第一轮是必须花的。** 本文没有任何一步要求「新增的 spec 进一次
+   slot 档」，于是 Task 5 新建的 `param-dropdown-full-list` 从没在池档跑过 —— 它把 `storageState`
+   写成字面量路径，串行档与 slot 档等价所以每轮全绿，收口池里 5 条全红在 `gotoApp` 的 `.main-layout`
+   上（判据一条都没跑到）。⇒ **补一条批内纪律**：新 spec 只要依赖登录态 / 落盘路径 / 端口 / media，
+   就得至少跑一次 `node scripts/e2e_pool.mjs --slots=1 -- <file>`（4 文件 3.6min，比事后重跑整池便宜
+   一个量级）。教训全文在 `docs/tasks/lessons.md` 2026-11-14。
+2. **Step 6 要的「4,570 项首屏与滚到底耗时，与迁移前对照」这份仓内给不出。** 实测最大夹具是
+   1,723 参数 / 1,728 列（同一个文件），4,570 是设计稿 §2 当初的假设值；旧实现封顶 300、从没打过 ms
+   ⇒ **没有同形计时可对照**。台账改成记形状与后果两条（footer「仅显示前 300」+ 固定列那颗 1,728 个
+   `el-option` 把 `view-data` 那条 15s 等待拖成复审里唯一反复红的业务用例），并明写「别读成快了多少倍」。
+   固定列那颗的打开耗时**没落断言**（9C 那条永不触发的耗时断言已在 `798e277` 删）。
+3. **Step 6 的「被改写的 e2e 条数」用脚本现跑，不引用 §2.7 的估算。** `node tasks/t12-rewritten-e2e.mjs`
+   按「describe 链 + 用例标题」当身份比 master/HEAD 的块体 ⇒ 新增 8 / 改写 16 / 删除 0（运行条 +9，
+   `intro-icon-contrast` 是双主题循环）。与单文件 playwright 计数异源交叉：每文件 = 脚本条数 + 2 条 setup。
+4. **Step 3 那条「后端全量」的标签枚举要现跑取，别抄本文的写法。** 现跑 = `test.backend` + 12 个 `apps.*`
+   （`fs.readdirSync(apps)` 剔 `__*`），结果 `Ran 2576 tests in 539.961s / OK (skipped=16)`。
+   另外 `npm run build` 必须在**最终树**上跑一次再开收口池：池档 preview 服务的是 `frontend/dist`，
+   改了 src 不重跑 build，池子测的就是旧产物。
 
 ---
 

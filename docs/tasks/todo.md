@@ -479,18 +479,20 @@ T2 serialHighlight.spec 钉并集/清除/关子集归零；e2e 补「子图→�
 批1 Task 9A 只做谓词入口（`popperOf`）统一、**不碰这批 `:visible`**，同时按 lessons R③
 「台账里的计数一律现跑再引用」重数了一遍：**那个 48/19 与实数差一个量级，别照它排工**。
 
-现数（`frontend/`，逐行剔除注释行后数出现点，2026-11-13 实跑）：
+现数（`frontend/`，逐行剔除注释行后数出现点，**2026-11-14 批1 收口重跑**，命令都写在这里、下一批照抄再跑，别信任何一处抄走的数字）：
 
-- **全部 `:visible`：193 处 / 35 个文件**（`e2e/**/*.ts`，逐行剔除注释行后数出现点；
-  spec 文件 188 处 / 32 个文件，另有 2 个 spec 只在注释里提到它；`helpers/` 5 处 / 3 个文件 ——
-  `elplus.ts` 的 `visibleSelectOptions` 1 + `params.ts` 的 `filterControl` 1 + `colfilter.ts` 3，
-  计划说的「colfilter 3 处」这条对得上）。
+- **全部 `:visible`：190 处 / 35 个文件**（`grep -rn ":visible" e2e --include=*.ts | grep -vE ':[[:space:]]*(//|\*|/\*)' | wc -l`）。
 - **其中属于「下拉/弹层族」的（`.el-select-dropdown__item` / `.el-popper` / `.el-select-dropdown`
-  直接带 `:visible`）：84 处 / 27 个文件**。这一族才是 `popperOf` 那套实例级谓词的替代品，
+  直接带 `:visible`）：81 处 / 27 个文件**（同一条命令把 pattern 换成 `\.(el-select-dropdown__item|el-popper|el-select-dropdown):visible`）。这一族才是 `popperOf` 那套实例级谓词的替代品，
   也是批末该收的范围；其余 109 处是 `p:visible` / `.el-tab-pane:visible` / `.ag-*:visible`
-  这类**不是同一个问题**，不要一并换算成「84 之外的债」。
-- 族内最重的五个文件：`outlier-handling.spec.ts` 16、`view-data.spec.ts` 8、`exports.spec.ts` 8、
-  `data.spec.ts` 6、`multi-file.spec.ts` 5。
+  这类**不是同一个问题**，不要一并换算成「81 之外的债」。
+- ⚠ **和上一条 2026-11-13 记的「193 / 84」不可比**：那条只写了「逐行剔注释后数出现点」这句话、没留命令，
+  现跑同一条 `git grep -hE` 在 master 上给的是 207 / 93 ⇒ 至少存在「数行」与「数 occurrence」两种口径。
+  排工时以本条命令的 190 / 81 为准，**别拿两次之差当本批工作量**（批1 在这一族的净变化用
+  `git grep -oE` 现核只有 1 处 `.el-select-dropdown__item:visible` 被换掉，39 → 38）。
+- 族内最重的五个文件（同一命令接 `| cut -d: -f1 | sort | uniq -c | sort -rn | head -5`）：
+  `outlier-handling.spec.ts` 14、`exports.spec.ts` 8、`view-data.spec.ts` 7、`data.spec.ts` 6、
+  `multi-file.spec.ts` 5（上一条把 view-data 记在 exports 前面，实跑 exports 更多）。
 
 排工提醒（不是本批的活）：`view-data.spec.ts` 与 `exports.spec.ts` 都被 `scripts/line-limit.mjs` 的
 `EXEMPT` 账按**精确行数**冻着 —— 那张账是唯一事实来源，**别在计划/台账里抄那个数字**（抄一次就会像
@@ -501,9 +503,12 @@ T2 serialHighlight.spec 钉并集/清除/关子集归零；e2e 补「子图→�
 
 2026-11-14 批1 Task 9B 复审把上面这本账订正了一遍：`exports.spec.ts` **不在** `EXEMPT` 名单里（名单中的
 e2e 文件只有 `data.spec.ts` / `view-data.spec.ts`），受的是通用 `lines > 600` 那道闸 ⇒ 「两个文件都被
-EXEMPT 冻着」那句对它不成立，同步登记值这一动作对它也不适用。现跑：592（上一条记的值）→ 598（Task 9B
-第 2 步补完窗口行数 / footer 逐字判据，只活在提交信息里）⇒ **距硬闸只剩 2 行**；本批把导出族那记
-`P.length < 2` 的 `test.skip` 换成 throw 之后回到 597。改这个文件前先 `wc -l` 现跑，别照抄这里任何数字。
+EXEMPT 冻着」那句对它不成立，同步登记值这一动作对它也不适用。**它的行数一律现跑**：
+`cd frontend && wc -l e2e/exports/exports.spec.ts`（2026-11-14 收口 + 终审修复后现跑 **599**，
+距 600 只剩 1 行 ⇒ 下一批动这个文件前先按本节命令重跑，只能就地替换、不能加注释行；
+真要塞进新判据就先在那两条长注释里腾）。
+批1 终审在这一档留下的净变化：删 `P.length < 2 ⇒ test.skip` 那段（−5）、导出族补「空关键词 footer
+不显示」与「并集 ≥3 判别力前提」（+3）、footer 两支措辞统一成 `toHaveText` 逐字（0）。
 
 2026-11-14 批1 Task 10/11 合并复审另记一笔（**只记账，不改产品代码、不加断言**）：设计稿 §7 第 3 条那句
 「铃铛/**用户菜单**仍 `--text-2`」字面不成立 —— 用户菜单那颗头像 `.user-avatar` 硬编码 `color: #fff`
@@ -547,3 +552,111 @@ admin/settings 那一族（`AuditLogPage.vue` 事件枚举、`UserManagement.vue
 **处置**：是否并入批 1（还是另起一批 + 每条先实测条数）由用户拍板；**未拍板前不动代码、不写判据**。
 拍板并入后，机制照 Task 7/9C 现成的形状（`toOptions` + `popper-class` 实例锚点 + 反截断判据），
 先跑 `wc -l` 再同步 `scripts/line-limit.mjs` 的登记值。
+
+# 任务：批1 收口门禁与台账（2026-11-14，计划 Task 12）
+
+分支 `feature/batch1-dropdown-v2-intro-icon`，**全程未 push**（`origin` 是公开仓库）。
+收口这一轮另加四笔：`fa2200d`（池档抓到的 storageState 真红 + 绊线）、`a36f9cb`（终审三笔判据）、
+`6255122`（消费者账与两笔谓词债订正）、`1abe68b`（intro 声明的源侧 T2）。
+
+## 门禁实跑（全部这一轮现跑，别引用上一轮）
+
+- **affected**：`node scripts/e2e_affected.mjs --base master` ⇒ changed 44 文件、8 条命中全局清单
+  （`config/urls.py` + 7 份 `e2e/helpers/`）⇒ `decide: 全量 e2e（兜底命中）`，计划 4 档
+  lint:e2e / vitest / backend / e2e 全量。**升全量是预期**，不是异常。
+- **全量池第 1 轮（修复前）**：`--slots=4` · 文件 87 · 用例 460 · 墙钟 13.8min · 单价 2.89s/例 ·
+  效率 1.52 · unexpected 5 · flaky 1 · skipped 21 · 结论 `MEASURED` · **复跑判级真红 1**
+  （独占 slot 仍红，不是负载抖动）。
+- **那 1 条真红 = `analysis/param-dropdown-full-list.spec.ts` 五条全红在 `gotoApp`**，判据一条都没跑到。
+  根因与教训见 `docs/tasks/lessons.md` 2026-11-14 同日条目 + 提交 `fa2200d`。要点：**这个文件从没进过
+  slot 档**，串行档里两条路等价所以每轮都绿。
+- **全量池第 2 轮（最终树）**：文件 87 · 用例 460（expected 446 / flaky 1 / skipped 21 /
+  **unexpected 0**）· 墙钟 `wallMs 571916` = 9.5min · `passMs 1271818` · 单价 2.90s/例 ·
+  结论 `MEASURED` · 退出码 0。**效率 2.23 < 池自己给的目标 2.8**：四个 slot 的用例数是
+  73 / 116 / 93 / 178（`merged.json.health` 现读）——LPT 是按**时长**分区不是按条数，条数悬殊不等于
+  分区坏了；本批判据取 unexpected / flaky，效率只作观察。⇒ 第 1 轮那 13.8min 里含一次
+  「逐文件独占 slot 复跑判级」，**两轮墙钟不可直接比**。
+- **flaky 那 1 条不归属本批**：`view-data.spec.ts:1474`「@p2 顶部带：操作按钮在文件横幅内，表格高度与
+  实测占位对齐」——两轮池都是首发红（`表格上缘位置变了，但 TABLE_TOP_OFFSET 没跟着重量`，实测 y≠413）、
+  retry #1 绿。本批对该文件最后一个 hunk 在新版 :894 之前（`git diff master...HEAD` 现读），:1474 未触碰
+  ⇒ **留给下一批**：几何绊线要么重量 `TABLE_TOP_OFFSET`，要么补显式等待条件，别当本批的账。
+- **skipped 21 条的归属**（现跑 `C:\lqdp-e2e\slots\<run>\slotN.results.json` 统计）：`data.spec` 5、
+  `sftp.spec` 4、`dashboard.spec` 3、`toolbar-sticky` 2、`batch` 2、`correlation-inline` /
+  `file-list-sort-filter` / `type-snapshot` / `html-report` / `renderer-memory` 各 1
+  ⇒ **本批改过的四个 spec 零 skip**（另：单独把导出族在 slot 档跑一轮是 skipped 0）。
+- **vitest**：`Test Files 68 passed (68)` / `Tests 940 passed (940)`；批前基线 66/934 ⇒ +2 文件 +6 例
+  就是这两道新绊线（`e2eAuthStateHygiene` 4 例、`introTabIconSource` 2 例）。
+- **lint:e2e**（`tsc -p tsconfig.e2e.json`）干净；**`npm run build`** 干净（第 2 轮池跑的就是重建后的 dist）。
+- **后端全量**：`Ran 2576 tests in 539.961s` / `OK (skipped=16)`。标签枚举照
+  `scripts/e2e_nightly.mjs:129-136` 的形状：`test.backend` + 12 个 `apps.*`（**排除 `__*` 目录**），
+  绝不写 `apps.*` 通配。日志 `tasks/t12-backend-full.log`。
+- **行数账（现跑 `wc -l`）**：`exports.spec.ts` 599（600 硬闸内，不在 EXEMPT 名单）、
+  `view-data.spec.ts` 1883 = EXEMPT 登记值逐字未变、`file-correlation.spec.ts` 459、
+  `param-dropdown-full-list.spec.ts` 154、`selectOptions.ts` 127。`lineLimit.spec.ts` 15 例随 vitest 全绿。
+
+## 探针 Q1–Q4 的实测值（Task 1 取消后由 Task 5 自己的 T3 给数，形状见计划 :38-47）
+
+| 问 | 实测 | 判据出处 |
+| --- | --- | --- |
+| Q1 `#footer` 是否在虚拟窗口外仍渲染 | **是**，footer 逐字「共 1723 项」 | `param-dropdown-full-list` 第 1 条（`243dff4`） |
+| Q2 `filter-method` 是否真的不过滤 | **不过滤**；搜到列表**末项**并选中 ✓ | 同文件第 2/4 条 + `filterByKeyword` 的 T2 |
+| Q3 虚拟窗口 DOM 行数 | **11 行**（1,723 项全集；界 20 由 `select-v2/src/defaults.mjs` 的 height 274 / itemHeight 34 推出） | 同文件第 5 条，Task 5 Step 1.5 打印后摘除 |
+| Q4 滚到底耗时 | **310ms**（hover 首行 + `mouse.wheel(0, 200_000)`） | 同上 |
+
+- **迁移前对照没有同形计时**：旧实现封顶 300、从没打过 ms。能拿的是形状与后果两条 —— footer 写
+  「仅显示前 300」，而 `固定列` 那颗从没封顶过、打开即挂 1,728 个 `el-option`，把
+  `view-data.spec.ts`「@p1 固定列：多选」那条的 `toBeVisible({ timeout: 15_000 })` 拖成 Task 7/8 复审里
+  唯一反复红的业务用例（迁完绿）。⇒ 「不冻结」这个前提成立，但**别把这句读成「快了多少倍」**。
+- 固定列（第 5 个，1,728 列）只有形状判据（窗口行数 < 界 + 每行是真实列名）；打开耗时**并进失败消息
+  label、未落断言**（那条永不触发的耗时断言已在 `798e277` 删）⇒ 想要实数得临时打印，别引用 label。
+- 设计稿/计划里假设的「4,570 项」在仓内**不存在**。实测最大夹具 = **1,723 参数 / 1,728 列**，同属
+  `BPD93204_FT1_ETS163550_12252024.csv`（= `SEEDED_FILES.ETS88_FT`，`fixtures/test-data.ts:60`）。
+
+## e2e 改写条数（现跑，不是设计稿 §2.7 估的 15–20）
+
+`node tasks/t12-rewritten-e2e.mjs`（按「describe 链 + 用例标题」当身份，比 master 与 HEAD 的块体正文）：
+**新增 8 条 / 改写 16 条 / 删除 0 条**（源码 `test(` 计数；`intro-icon-contrast` 是 light/night 循环
+⇒ 运行条 +9）。按文件：`param-dropdown-full-list` +5、`view-data` +1（千列那条）/ ~5、
+`file-correlation` ~5、`exports` ~2、`chart-filter-switches` ~2、`tab-independent-files` ~1、
+`element-plus-styles` ~1、`intro-favicon` +1、`intro-icon-contrast` +1。
+交叉核对（异源）：单文件 playwright 条数 = 本脚本条数 + 每项目 2 条 setup（相关性 8→10、参数 5→7、导出 8→10）。
+现有 e2e 规模：**87 个 spec 文件 / 460 条**（池口径）。
+
+## 终审（整批只读复审）5 笔 IMPORTANT 的处置
+
+1. `selectOptions.ts` 头注释的消费者账写窄（4→5 个下拉、`filterByKeyword` 2→4 处）—— **已改**，
+   命令写进注释（`6255122`）。
+2. 导出族「Enter 全选」的关键词界 `命中数 ≥1` 无判别力 —— **已改**成 `pickBoundedKeyword(others, cap)`
+   + 「基线那颗不许命中该关键词」前置；**改完当场红**，正是旧界放行无判别力形状的证据（`a36f9cb`）。
+3. `view-data.spec.ts:415` 那句「另四族各有各自那条空关键词反例」当时**不成立**（只有 col 族有）——
+   serial 与 export 各补一条 `toHaveCount(0)`，句子随之变成真的（`a36f9cb`）。
+4. 导出族那记 `P.length < 2 ⇒ test.skip` 与同文件下面那条 `throw` 并存 —— **已删**（skip 是 throw 的
+   前件子集，并存等于同一判据上两种出口）。
+5. `config.mts` 的 `<link rel=icon>` 声明在 CI 里**零守卫**（CI 四档无 Playwright，T1 ① 在 dist 缺失时
+   skip）—— 新增永不 skip 的源侧 T2（`1abe68b`）。
+
+## 记账不做（理由写清楚，别当已解决）
+
+- **三族接线逐字重复三份**：`kw` / `matches` / `filterMethod` / `clearFilterInput` / `onSelectKeydown` /
+  `onVisibleChange` / `selectAll` / `clearAll` / `selectMatches` 九个同名符号，位置
+  `SerialSelector.vue:75-166`、`TestColumnSelector.vue:72-149`、`ExportParamSelector.vue:60-136`
+  （现跑 grep 数出来的）。终审建议抽 `useSelectFilter` composable。**本批不抽**：批1 已越过原设计范围
+  （9C 本是漏项），而抽 composable 要同时动三个组件 + 四条判据，风险落在收口档之后。**上面第 2/3 两笔
+  就是这份重复的产物** ⇒ 下一批（批2/批3 起手）真要抽就一次做完，做完把这三段注释收敛成一份。
+- `ExportParamSelector` 没有 `#empty` 槽（搜不到时显示 EP 的 locale 文案 'No matching data'）。
+  **不是本批回归**：`git show master:` 版同样 0 处，v1 时代就是这个形状 ⇒ 与「加载期间显示『无匹配序列』」
+  同属文案错位的独立工单（提案留档 `tasks/2026-11-13-loading-slot-proposal.patch`）。
+- **v2 的 `popper-class` 会同时挂到 `collapse-tags` 溢出标签 tooltip**（`select-v2/src/select.mjs:117`
+  `tagTooltip?.popperClass ?? popperClass`）⇒ 三颗 collapse-tags 下拉的 `.el-popper.dp-*-popper`
+  **可能有两份**，眼下靠同文件 `:108` 的 `disabled: dropdownMenuVisible` 让两者不同时可见。已在
+  `popperOf` 注释里写死处置（真报 strict violation 就给 tooltip 单独传类，**不许退成 `.first()`**）。
+- `config/urls.py:122` 的 SPA catch-all lookahead 没列 `favicon\.ico`：现在无害（`path()` 排在它之前，
+  Django 按序匹配），但那份 lookahead 是挂载表的**第二副本**。**没改**——改 `config/urls.py` 命中
+  `testing-gates.md` §3 全局清单 ⇒ 又要升一次全量池，为一个 inert 的防御性改动不值。下一批动 urls.py
+  时顺手补，并把 lookahead 与 `urlpatterns` 的重复收成一份。
+- 内联 `:visible` 专项与 `visibleSelectOptions` 那 4 个文件的实例级类名：**批1 没做**（上面那节是实数与
+  命令）。`elplus.ts:80` 原文写「是本批收口的专项」是错的，已订正（`6255122`）。
+- `clearFilterInput()` 是否真洗掉 EP 内部 query、以及「空关键词 + Enter」行为：**零判据**，9B 就记过，
+  本批仍未补（要补就在上面那条 composable 工单里一起补）。
+- 上一节那两个同类漏项（`CorrelationToolsTab.vue:36/:41` 与 `FileSelect.vue:2/:29`）+ 两个次级候选
+  （`SftpSearchPage.vue:81/:83`、`CombineBatchDialog.vue:38`）：**等用户拍板**，未拍板前不动代码、不写判据。
