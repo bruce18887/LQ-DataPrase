@@ -58,7 +58,9 @@ async function pickFiles(page: Page, names: string[]) {
  *   因此不写死端点与请求体结构。
  *
  * 注意：el-tabs 非懒渲染，单文件 tab 的 ParamSelector 也在 DOM 里，
- * 定位必须作用域到 multi-file tab（helpers 的 listParams/selectParam 无作用域参数）。 */
+ * 定位必须作用域到 multi-file tab（helpers 的 listParams/selectParam 没有 pane 作用域参数；
+ * listParams 的 scope 指的是「哪个 tab 的快路径列表请求」，而多文件 tab 根本不发那一发，
+ * 见 paramList.ts 顶部与 MultiFileTab.vue 不接 useTabFileParams）。 */
 async function selectLimitsParam(
   page: Page,
   merged: import('@playwright/test').Response,

@@ -111,14 +111,32 @@ test.describe('@p1 图表配置数据筛选开关', { tag: ['@p1', '@analysis'] 
     const failParams = await listParams(page)
     expect(failParams.length, 'Fail 项列表不应为空').toBeGreaterThan(0)
 
-    // 叠加仅显示低 CPK 项（Fail∩低CPK，可能为空集——允许为空但请求必须正确）
+    // 叠加仅显示低 CPK 项。口径是 Fail∩低CPK：后端 filter_test_items 先按 fail 再按
+    // lowCPK 逐层收窄（analysis_views.py:91-140 → filters.py:168-184），
+    // **允许为空集** —— 空集是合法结果，本条只断「不会比 Fail 更多」，请求必须正确。
+    // 这里必须等**快路径**那一发（body 无 params）而不是只等计算路径：列表请求是
+    // 勾选后 250ms 防抖才发的（useTabFileParams.ts:131-133），只 waitLoadingGone 的话
+    // lastFast 还停在 Fail 那一发上，listParams 返回的就是 failParams 自己 ——
+    // 下面那条会退化成「自己比自己」的恒真（2026-11-13 复审 C-1 指的就是这个形状）。
+    const fastCpkResp = page.waitForResponse(
+      (r) =>
+        r.url().includes('/analysis/histogram/') &&
+        r.request().method() === 'POST' &&
+        r.request().postData()?.includes('"only_low_cpk":true') === true &&
+        r.request().postData()?.includes('"params":') === false &&
+        r.status() < 500,
+      { timeout: 20_000 },
+    )
     const cpkResp = page.waitForResponse(histogramReqWith('"only_low_cpk":true'), { timeout: 20_000 })
     await toggleFilter(page, '仅显示低CPK项')
     const cr = await cpkResp
     expect(cr.request().postData() || '').toContain('"only_low_cpk":true')
+    const fastCpk = await fastCpkResp
+    expect(fastCpk.request().postData() || '', '参数列表刷新请求应携带 only_low_cpk')
+      .toContain('"only_low_cpk":true')
     await waitLoadingGone(page.locator(SINGLE))
     const cpkParams = await listParams(page)
-    expect(cpkParams.length).toBeLessThanOrEqual(failParams.length)
+    expect(cpkParams.length, 'Fail∩低CPK 不应多于 Fail（空集算通过）').toBeLessThanOrEqual(failParams.length)
     await expectChartRendered(page.locator(`${SINGLE} .chart-wrapper`), 0)
   })
 
@@ -276,7 +294,22 @@ test.describe('@p1 图表配置数据筛选开关', { tag: ['@p1', '@analysis'] 
     const before = await listParams(page)
     expect(before.length).toBeGreaterThan(0)
 
+    // 先等**快路径**那一发落地再比列表：切换开关后的列表请求是 250ms 防抖之后才发出的
+    // （useTabFileParams.ts:131-133），不等它的话 lastFast 还停在勾选前那一发，
+    // listParams 返回的就是 before 自己 ⇒ 下面那条「保持不变」是恒真（复审 C-1）。
+    const fastBin1Resp = page.waitForResponse(
+      (r) =>
+        r.url().includes('/analysis/histogram/') &&
+        r.request().method() === 'POST' &&
+        r.request().postData()?.includes('"data_only_bin1":true') === true &&
+        r.request().postData()?.includes('"params":') === false &&
+        r.status() < 500,
+      { timeout: 20_000 },
+    )
     await toggleFilter(page, '仅用Pass数据(Bin1)')
+    const fastBin1 = await fastBin1Resp
+    expect(fastBin1.request().postData() || '', '参数列表刷新请求应携带 data_only_bin1')
+      .toContain('"data_only_bin1":true')
     await waitLoadingGone(page.locator(SINGLE))
     const after = await listParams(page)
     expect(after, '全 Pass 文件过滤后列表应保持不变').toEqual(before)
