@@ -364,6 +364,10 @@ head: [['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }]]
 1. 参数下拉打开后能**滚到并选中第 301 项**；4,570 项文件下首屏与滚动无冻结（打印实测值）。
 2. `grep -rn DROPDOWN_RENDER_CAP frontend/src` 为空；`elementPlusUsage.spec.ts` 绿且计数为 50。
 3. `[data-testid=open-intro]` 双主题 computed color = `--text`；铃铛/用户菜单仍 `--text-2`。
+   （实测偏差 2026-11-14，只标注不改写本条当时的决策：「用户菜单仍 `--text-2`」字面不成立 —— 那颗头像
+   `.user-avatar` 硬编码 `color: #fff`（`frontend/src/components/layout/Topbar.vue:387`，块起 `:379`），
+   两主题恒 `rgb(255, 255, 255)`、不吃 token；`intro-icon-contrast.spec.ts:13` 已显式声明「本文件不判它」。
+   属 `--brand` 底反白的另一个 affordance，不是产品缺陷；本条收口只现量「intro = `--text`」与「铃铛 = `--text-2`」两半。）
 4. `GET /intro/` 响应含 `rel="icon"`；`GET /favicon.ico` 返回 200；介绍书页浏览器标签页有图标；控制台零 404。
 5. 数据管理页 chip 显示磁盘占用；后端打印扫描实测耗时（>300ms 则回到设计，不偷偷加快照表）。
 6. 重复项：改选某组保留项 → 删除 → 终态留下的是被选那一份；51 组时第 51 组未被删；`keep_ids` 非法 id → 400。

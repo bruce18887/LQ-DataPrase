@@ -103,8 +103,9 @@ urlpatterns += [
     path('favicon.svg', _serve_frontend_file('favicon.svg')),
     # 浏览器的无条件兜底请求是 /favicon.ico：介绍书 HTML 已声明 link→/favicon.svg，
     # 常规加载不会再走到这里，但历史书签、部分代理/爬虫与未吃 <link> 的消费方仍直接要
-    # 这个路径——返回可用的 SVG 而不是 404 才是这条路由的目的。web 根下没有 .ico 资产
-    # （打包期 build/icon.ico 只给 Windows 外壳用），故复用同一份 favicon.svg。
+    # 这个路径——这条路由的目的是让该路径返回**可用的 SVG 字节**，而不是落进下面那个
+    # catch-all 拿到 200 + text/html 的 SPA 壳（修复前实测就是那个形状，并非 404）。
+    # web 根下没有 .ico 资产（打包期 build/icon.ico 只给 Windows 外壳用），故复用同一份 favicon.svg。
     # 实测 Content-Type：FileResponse 按**文件名**猜 MIME ⇒ 本 URL 回 image/svg+xml
     # （不是 image/x-icon），已由 test/backend/test_intro_serving.py ② 钉死；
     # Chromium/Firefox 对声明图标与兜底请求都按内容识别 SVG，2026-11-14 e2e 实测无告警。
