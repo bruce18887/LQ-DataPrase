@@ -1,5 +1,9 @@
 import { expect, type Locator, type Page } from '@playwright/test'
-import { capturedParamList } from './paramList'
+import { capturedParamList, explainParamListCapture, type ParamListScope } from './paramList'
+
+// 跨 tab 用例声明当前 scope 用（判据与分桶都在 paramList.ts，这里只把入口摆在用例常引的文件上）
+export { setActiveAnalysisTab } from './paramList'
+export type { ParamListScope } from './paramList'
 
 /**
  * Element Plus el-select 交互助手 + 分析页参数抽样。
@@ -24,16 +28,25 @@ async function openElSelect(sel: Locator) {
 /**
  * 当前**开着的那个**下拉里的选项。
  *
- * 不能用 `:visible`：EP 收起下拉走 Vue 的 leave 过渡，`display:none` 要等动画结束才落下，
- * 而 `aria-hidden` 绑在 visible 上、同一拍就翻成 true ⇒ 过渡帧里 `:visible` 数到的是
- * 正在退出的上一个（连 `toHaveCount(1)` 再取也照样挑中它）。2026-11-10 账号审计批实测，
- * 红字是「每页条数候选收到 10 项而不是 3 项」这种毫不相干的形状。
+ * ⚠ popperClass 是**必填**的：2026-11-13 在真 /analysis 页 Escape 关参数下拉后逐帧采样，
+ * `aria-hidden` 与 `display` 是**同一拍**翻转的（EP 源码里 ariaHidden 只在 onAfterLeave
+ * 才翻回 true：`element-plus/es/components/tooltip/src/content.vue_vue_type_script_setup_true_lang.mjs:46-50,108`）：
+ *   Escape+0ms   aria-hidden=false  display=block  ariaFalsePoppers=2  items=87
+ *   Escape+30ms  aria-hidden=false  display=block  ariaFalsePoppers=2  items=267
+ *   Escape+80ms  aria-hidden=false  display=block  ariaFalsePoppers=2  items=267
+ *   Escape+160ms aria-hidden=true   display=none   ariaFalsePoppers=0  items=0
+ * ⇒ 那个约 150ms 的 `el-zoom-in-top-leave-*` 窗口里，`:visible` 与 `[aria-hidden="false"]`
+ * **一起脏**（两个判据数到的都是上一个下拉的 267 项），换判据本身并不更安全。
+ * 真正起作用的是 `.el-popper.<popperClass>` 这层**每实例限定**：它让查询只能命中本控件
+ * 自己的 popper，正在退出的别人家的 popper 根本不进候选。
+ * 所以别把 `aria-hidden` 当「哪一个下拉开着」的判据抄走 —— 去掉 popperClass 就是原 bug。
+ * 仓内旁证（窗口量级）：`frontend/e2e/data/file-correlation.spec.ts:31` 早就用
+ * `page.waitForTimeout(600)` 睡眠躲同一个坑。
  * popper-class 同时挂在外层 .el-popper 与内层 .el-select-dropdown 上，
  * 所以限定必须落在外层 .el-popper（裸类名会 strict violation）。
  */
-function visibleOptions(page: Page, popperClass?: string) {
-  const cls = popperClass ? `.el-popper.${popperClass}` : '.el-popper'
-  return page.locator(`${cls}[aria-hidden="false"] .el-select-dropdown__item`)
+function visibleOptions(page: Page, popperClass: string) {
+  return page.locator(`.el-popper.${popperClass}[aria-hidden="false"] .el-select-dropdown__item`)
 }
 
 /** 分析页某 tab 的数据文件选择器（scope = 契约属性值，页内唯一） */
@@ -118,26 +131,47 @@ export async function pickSensitivity(page: Page, label: string, scope = 'single
 }
 
 /**
- * 分析页当前文件的**全部**参数名（后端返回顺序）。
+ * 分析页指定 tab（scope）当前这一发已结算的**全部参数名**（后端返回顺序）。
  *
  * 旧实现是「打开下拉 → 数 DOM 选项 → Escape」，在 `el-select` 时代等于全集（因为渲染被
  * 截断到 300，而测试文件都少于 300 项）；迁 `el-select-v2` 后 DOM 只有虚拟窗口那约 8 行，
  * 数 DOM 就不再是「列表有多少项」的判据。改成读产品取全集用的同一次响应（见 paramList.ts）。
  *
- * 轮询不是可选装饰：旧 DOM 实现里 `options.first()` 的 15s 可见等待顺带承担了
- * 「等新文件的列表响应落地」这一步；纯读捕获没有这一步，而 pickTabFileAndWaitCompute
- * 等的是计算**请求发出**（首发计算可能带旧参数 400，早于列表响应处理完成）——
- * 少了这步，chart-filter-switches:71 实测读到上一个文件的列表当全量基线。
+ * 轮询的条件不是「长度 > 0」而是「**这一发已结算**」（2026-11-13 复审 C-1/C-2）：
+ * 旧条件在两种真实形状下都立刻通过 —— ① 同文件换口径（勾选开关 → `useTabFileParams.ts:131-133`
+ * 的 250ms 防抖重发，file_id 不变 seq 变）时它当场返回上一个口径的列表，把调用方的
+ * 「列表收缩了」断言变成恒真；② 当前口径真返回 0 项时它死等 15s，然后把上一份列表当现值给出去。
+ * 超时消息现在由 `paramListCore.explainCapture` 打全四个量（captured.seq / lastFast.seq /
+ * 两侧 fileId / keys 数），四个成因（没选文件、监听装晚了、换口径未落地、真·空集）分得开。
+ *
+ * **空数组是合法结果**（当前口径 0 项）：要非空的用例自己断 `length`；反过来，断言
+ * 「列表收缩 / 保持不变」的用例必须先等到新口径那一发**已结算**再读，否则读到的还是
+ * 上一个口径。仓内范式：chart-filter-switches 的「仅显示Fail测试项 / 仅显示低CPK项」
+ * 与「全 Pass 文件（Gage）」两条，都在勾选**之前**注册不带 params 的快路径
+ * waitForResponse（该文件 :88-103 的形状），然后才 listParams。
+ *
+ * scope 缺省 'single'（首屏唯一非 lazy 的 pane）。跨 tab 用例必须**在点 tab 之前**调
+ * `setActiveAnalysisTab` —— 单文件与相关性两个 tab 的快路径请求体键集逐字相同、产品没在
+ * 请求里留 tab 身份，helper 无法自己分辨那两者（见 paramList.ts 顶部）。
  */
-export async function listParams(page: Page): Promise<string[]> {
+export async function listParams(page: Page, scope: ParamListScope = 'single'): Promise<string[]> {
   await expect
-    .poll(() => capturedParamList(page).length, {
+    .poll(() => explainParamListCapture(page, scope), {
       timeout: 15_000,
       message:
-        '参数全集未就绪：监听在 gotoApp 里装；空到这里 = 还没选文件 / 监听装晚了 / 新文件的列表请求还没完成（见 paramList.ts）',
+        `参数全集这一发未结算（scope=${scope}）。Received 行是诊断：未发出 / 未处理 / 未结算 ` +
+        '三态 + captured.seq / lastFast.seq / 两侧 fileId / keys 数；判据见 paramList.ts 与 paramListCore.ts',
     })
-    .toBeGreaterThan(0)
-  return capturedParamList(page)
+    .toMatch(/^settled/)
+  const keys = capturedParamList(page, scope)
+  if (keys === null) {
+    // 唯一走到这里的方式：轮询刚通过、读之前又发出了一发新口径。宁可喊，不吐旧口径。
+    throw new Error(
+      `listParams：轮询刚过、读时又未结算（scope=${scope}）—— 期间又有新口径发出。` +
+        `诊断：${explainParamListCapture(page, scope)}`,
+    )
+  }
+  return keys
 }
 
 /**
