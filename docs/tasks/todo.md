@@ -566,7 +566,8 @@ admin/settings 那一族（`AuditLogPage.vue` 事件枚举、`UserManagement.vue
 
 ## 门禁实跑（全部这一轮现跑，别引用上一轮）
 
-- **affected**：`node scripts/e2e_affected.mjs --base master` ⇒ changed **46 文件**、8 条命中全局清单
+- **affected**：`node scripts/e2e_affected.mjs --base master` ⇒ changed **46 文件**（这是收口那一轮现跑的快照，
+  **别对齐它，对齐命令** —— 同一天为这条台账又把普查器移进 `scripts/`，现在再跑就是 47）、8 条命中全局清单
   （`config/urls.py` + 7 份 `e2e/helpers/`）⇒ `decide: 全量 e2e（兜底命中）`，计划 4 档
   lint:e2e / vitest / backend / e2e 全量。**升全量是预期**，不是异常。
   ⚠ **如实记：这一条是 `--dry-run` 跑的**（末行 `RESULT: PASS · 计划 4 档全部执行 · dry-run（未真正执行）`），
