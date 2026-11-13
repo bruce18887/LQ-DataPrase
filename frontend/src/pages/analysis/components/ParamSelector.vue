@@ -35,8 +35,13 @@
         </div>
       </template>
       <template #footer>
-        <!-- 封顶取消了，但「一共多少项」仍然要说：用户需要知道自己在看的不是残缺列表 -->
-        <div class="param-count-hint">共 {{ total }} 项</div>
+        <!-- 封顶取消了，但列表规模仍然要说：用户需要知道自己在看的不是残缺列表。
+             两支措辞（2026-11-13 批1 Task 9 与另三个下拉统一）：`total` 是**过滤后**的
+             命中数，搜索态再写「共」就是拿 585 冒充全集规模（1,723 项的文件上搜 '1'）。
+             无关键词那支保留「共 N 项」——单选控件没有「全选匹配」这个动作，
+             报全集规模对用户有用，另三个 multiple 下拉的「按 Enter 全选」在这里没有对应物。 -->
+        <div v-if="hasKeyword" class="param-count-hint">匹配 {{ total }} 项</div>
+        <div v-else class="param-count-hint">共 {{ total }} 项</div>
       </template>
     </el-select-v2>
     <div class="nav-buttons">
@@ -53,7 +58,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 
-import { buildParamOptions, highlightSegments } from '../../../utils/selectOptions'
+import { buildSelectView, highlightSegments } from '../../../utils/selectOptions'
 
 const props = withDefaults(defineProps<{
   params: string[]
@@ -78,9 +83,13 @@ const emit = defineEmits<{
 const filterText = ref('')
 
 /** 视图 = 过滤 → 前缀优先排序 → {value,label} 映射；无截断（见 utils 的注释） */
-const view = computed(() => buildParamOptions(props.params, filterText.value))
+const view = computed(() => buildSelectView(props.params, filterText.value))
 const options = computed(() => view.value.options)
 const total = computed(() => view.value.total)
+
+/** footer 措辞的分支判据：与 `buildSelectView` 内部同一条归一化（trim 后非空才算有关键词）。
+ *  纯空格 = 「没输入」，那一支 `total` 就是全量，只能落在「共 N 项」。 */
+const hasKeyword = computed(() => filterText.value.trim() !== '')
 
 /** 由 #default 逐条渲染器调用 ⇒ 只对虚拟窗口内的项计算 */
 function segmentsFor(name: string) {

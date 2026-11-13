@@ -472,3 +472,26 @@ Spec：`docs/superpowers/specs/2026-11-11-chart-region-subset-design.md`（四�
 右键「清除高亮」只清 brush；关闭子集/切文件清空后子集贡献自然消失。
 T2 serialHighlight.spec 钉并集/清除/关子集归零；e2e 补「子图→后开 serial 高亮 {4,5,6}→关子图取消」。
 验证：subset-drilldown 11/11；affected 门禁 RESULT: PASS（真红 0）。
+
+# 任务：e2e 内联 `:visible` 清点（批1 Task 9A 记的实数，下一批专项按这个排工，2026-11-13）
+
+计划把这笔账写成「48 处内联 `:visible`（19 个 spec 文件）+ `colfilter.ts` 的 3 处」，
+批1 Task 9A 只做谓词入口（`popperOf`）统一、**不碰这批 `:visible`**，同时按 lessons R③
+「台账里的计数一律现跑再引用」重数了一遍：**那个 48/19 与实数差一个量级，别照它排工**。
+
+现数（`frontend/`，逐行剔除注释行后数出现点，2026-11-13 实跑）：
+
+- **全部 `:visible`：193 处 / 35 个文件**（`e2e/**/*.ts`，逐行剔除注释行后数出现点；
+  spec 文件 188 处 / 32 个文件，另有 2 个 spec 只在注释里提到它；`helpers/` 5 处 / 3 个文件 ——
+  `elplus.ts` 的 `visibleSelectOptions` 1 + `params.ts` 的 `filterControl` 1 + `colfilter.ts` 3，
+  计划说的「colfilter 3 处」这条对得上）。
+- **其中属于「下拉/弹层族」的（`.el-select-dropdown__item` / `.el-popper` / `.el-select-dropdown`
+  直接带 `:visible`）：84 处 / 27 个文件**。这一族才是 `popperOf` 那套实例级谓词的替代品，
+  也是批末该收的范围；其余 109 处是 `p:visible` / `.el-tab-pane:visible` / `.ag-*:visible`
+  这类**不是同一个问题**，不要一并换算成「84 之外的债」。
+- 族内最重的五个文件：`outlier-handling.spec.ts` 16、`view-data.spec.ts` 8、`exports.spec.ts` 8、
+  `data.spec.ts` 6、`multi-file.spec.ts` 5。
+
+排工提醒（不是本批的活）：`view-data.spec.ts` 被 `scripts/line-limit.mjs` 的 EXEMPT 精确冻结在
+**1802 行**，改它必须同行数替换或同步下调登记值；`exports.spec.ts` 现 **592 行**（计划记的 588
+已过时），距 600 硬闸 8 行。这两条决定了摊开时谁能加注释、谁只能就地替换。

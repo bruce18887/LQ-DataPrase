@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page, type Response } from '@playwright/test'
 import { capturedParamList, explainParamListCapture, type ParamListScope } from './paramList'
+import { popperOf } from './elplus'
 
 // 跨 tab 用例声明当前 scope 用（判据与分桶都在 paramList.ts，这里只把入口摆在用例常引的文件上）
 export { setActiveAnalysisTab } from './paramList'
@@ -46,9 +47,12 @@ async function openElSelect(sel: Locator) {
  * `.el-select-dropdown` 不再复制 popperClass，见 `select-v2/src/select-dropdown.mjs:155`
  * 的 class 绑定里没有它 —— v1 的 `select/src/select-dropdown.mjs:10` 才有那一份）。
  * 所以限定必须落在外层 `.el-popper`，两条路都只有一处可落；裸类名会 strict violation。
+ *
+ * 谓词本身**不在这里写**：它是 `helpers/elplus.ts` 的 `popperOf`（EP 通用层的唯一落点，
+ * 2026-11-13 批1 Task 9 统一）。本函数只补「选项行」那一层类名。
  */
 function visibleOptions(page: Page, popperClass: string) {
-  return page.locator(`.el-popper.${popperClass}[aria-hidden="false"] .el-select-dropdown__item`)
+  return popperOf(page, popperClass).locator('.el-select-dropdown__item')
 }
 
 /**
@@ -113,9 +117,7 @@ export async function pickTabFile(
   // teleport 到 body，隐藏 pane 的那一份仍会被全局 `:visible` 命中（它的
   // reference 尺寸为零 → popper 逐帧重定位→“element is not stable”，
   // 而且 `.first()` 会点到另一个 tab 的文件上）
-  const options = page.locator(
-    `.el-popper.dp-file-picker-${scope}[aria-hidden="false"] .el-select-dropdown__item`,
-  )
+  const options = popperOf(page, `dp-file-picker-${scope}`).locator('.el-select-dropdown__item')
   await expect(options.first()).toBeVisible({ timeout: 15_000 })
   const target = labelSubstring
     ? options.filter({ hasText: labelSubstring }).first()
@@ -129,17 +131,17 @@ export async function pickTabFile(
  */
 export async function pickOutlierMode(page: Page, mode: string, scope = 'single') {
   await openElSelect(filterControl(page, 'outlier-handling'))
-  await page.locator(
-    `.el-popper.dp-outlier-popper-${scope}[aria-hidden="false"] .el-select-dropdown__item`,
-  ).filter({ hasText: mode }).first().click()
+  await popperOf(page, `dp-outlier-popper-${scope}`)
+    .locator('.el-select-dropdown__item')
+    .filter({ hasText: mode }).first().click()
 }
 
 /** 选敏感度档位（如「宽松 (3.0x IQR)」） */
 export async function pickSensitivity(page: Page, label: string, scope = 'single') {
   await openElSelect(filterControl(page, 'iqr-multiplier'))
-  await page.locator(
-    `.el-popper.dp-iqr-popper-${scope}[aria-hidden="false"] .el-select-dropdown__item`,
-  ).filter({ hasText: label }).first().click()
+  await popperOf(page, `dp-iqr-popper-${scope}`)
+    .locator('.el-select-dropdown__item')
+    .filter({ hasText: label }).first().click()
 }
 
 /**

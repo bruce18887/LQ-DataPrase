@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 
+import { popperOf } from '../helpers/elplus'
 import { gotoApp } from '../helpers/nav'
 import {
   listParams,
@@ -36,7 +37,7 @@ const POPPER = PARAM_POPPER_SINGLE
 const BIG_FILE = 'BPD93204_FT1_ETS163550_12252024'
 
 /**
- * 旧实现的渲染封顶。写死数字而**不 import** `DROPDOWN_RENDER_CAP`：那个常量本批 Task 9 就删，
+ * 旧实现的渲染封顶。写死数字而**不 import** `DROPDOWN_RENDER_CAP`：那个常量已在批1 Task 9 删除，
  * 判据要活过它 —— 删完还留着引用，等于把这条用例和一段死代码焊在一起。
  */
 const LEGACY_RENDER_CAP = 300
@@ -53,7 +54,12 @@ const MAX_WINDOW_ROWS = 20
 
 /** 本实例 popper 里的选项行（v2 的虚拟窗口只渲染这几行） */
 function paramItems(page: import('@playwright/test').Page) {
-  return page.locator(`.el-popper.${POPPER}[aria-hidden="false"] .el-select-dropdown__item`)
+  return popperOf(page, POPPER).locator('.el-select-dropdown__item')
+}
+
+/** 本实例 popper 的 footer 文案（两支措辞的判据都从这一句逐字比） */
+function paramFooter(page: import('@playwright/test').Page) {
+  return popperOf(page, POPPER).locator('.param-count-hint')
 }
 
 /**
@@ -66,8 +72,8 @@ function paramItems(page: import('@playwright/test').Page) {
  */
 function tailRowState(page: import('@playwright/test').Page, last: string) {
   return page.evaluate(({ popper, target }) => {
-    // 与 `helpers/params.ts` 的 visibleOptions 同一套谓词（`[aria-hidden="false"]`）：
-    // 本文件里两种写法并存，将来 EP 改了绑定方式就会只红一半，根因看不出来。
+    // 与 `helpers/elplus.ts` 的 `popperOf` 同一套谓词（`[aria-hidden="false"]`）：
+    // 这里是页内 querySelector，够不到 helper，所以谓词只能重写一遍 —— 两种写法并存
     const panel = document.querySelector(`.el-popper.${popper}[aria-hidden="false"]`)
     const rows = panel ? [...panel.querySelectorAll('.el-select-dropdown__item')] : []
     const hit = rows.find((r) => (r.textContent ?? '').trim() === target)
@@ -104,12 +110,33 @@ test.describe('@p1 参数下拉可浏览全部测试项', { tag: ['@p1', '@analy
     const all = await listParams(page)
     const sel = page.locator('.param-selector .el-select')
     await sel.click()
-    const footer = page.locator(`.el-popper.${POPPER}[aria-hidden="false"] .param-count-hint`)
+    const footer = paramFooter(page)
     await expect(footer).toBeVisible()
     // 只这一句就够：`toHaveText` 拿**整串**比，footer 里再出现「仅显示前 300」之类的
     // 任何多余文字它自己就红，失败信息里连被截断的原文一起打出来。以前另配的一条
     // `not.toContainText('仅显示前')` 被它严格蕴含，是装饰性判据，已删（复审 #6）。
     await expect(footer).toHaveText(`共 ${all.length} 项`)
+  })
+
+  test('搜索态 footer 改口「匹配 N 项」，N 是响应侧命中数', async ({ page }) => {
+    const all = await listParams(page)
+    // '1' 在这份 1,723 项的夹具上命中约 585 项（2026-11-13 实测）：既要真的命中一些，
+    // 又必须**少于**全集，否则「匹配」与「共」两支在同一个数上分不开（红了就换关键词，别删用例）。
+    const kw = '1'
+    // 命中数在测试侧独立算一遍（子串 + 忽略大小写），不 import src 的 filterByKeyword：
+    // 判据与实现异源，否则产品把过滤写坏时这条跟着一起绿。
+    const matched = all.filter((p) => p.toLowerCase().includes(kw))
+    expect(matched.length, `夹具里没有含 "${kw}" 的参数`).toBeGreaterThan(0)
+    expect(matched.length, `关键词 "${kw}" 命中了整个夹具，两支文案分不开`).toBeLessThan(all.length)
+
+    const sel = page.locator('.param-selector .el-select')
+    await sel.click()
+    // `fill` 会派发 input 事件 ⇒ v2 的 filterMethod 照样被调用（2026-11-13 Task 8 实测，
+    // 逐键 pressSequentially 不是必需）
+    await sel.locator('input').first().fill(kw)
+    const footer = paramFooter(page)
+    await expect(footer).toBeVisible()
+    await expect(footer).toHaveText(`匹配 ${matched.length} 项`)
   })
 
   test('搜到列表最后一项并选中它', async ({ page }) => {
