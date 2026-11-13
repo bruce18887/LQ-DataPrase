@@ -296,61 +296,26 @@ git commit -m "feat(dropdown): 抽 selectOptions 纯函数（过滤/前缀排序
 
 ---
 
-## Task 3: 注册 `ElSelectV2`（三处，漏第三处是「产品能跑、单测红」）
+## Task 3: 注册 `ElSelectV2` —— **已取消，整体并入 Task 5 的那一次提交**
 
-**Files:**
-- Modify: `frontend/src/plugins/element-plus.ts:60` 与 `:170`
-- Modify: `frontend/src/constants/element-plus-usage.ts:56`
-- Test: `frontend/test/unit/elementPlusUsage.spec.ts:147`
+**为什么取消（2026-11-13 实现者判 BLOCKED 后核实，不是执行者能力问题，是计划错了）**：原计划把「先注册」排在「改组件」之前，动机是怕 Task 5 一写 `<el-select-v2>` 就因未注册而渲染不出。但 `frontend/test/unit/elementPlusUsage.spec.ts` 钉的是**三方双向逐字相等**：
 
-- [ ] **Step 1: 先读这三处的现形状，别凭行号猜**
-
-Run: `cd frontend && sed -n '55,65p;165,175p' src/plugins/element-plus.ts && sed -n '50,60p' src/constants/element-plus-usage.ts && sed -n '140,152p' test/unit/elementPlusUsage.spec.ts`
-Expected: 看到 `ElSelect` 在 import 列表与 install 列表各出现一次；usage 清单里 `'select'`；spec 里 `expect(list.length).toBe(49)`。
-
-- [ ] **Step 2: 改断言到 50 并加 `'select-v2'`（先红后绿）**
-
-Modify `frontend/test/unit/elementPlusUsage.spec.ts`：把 `expect(list.length).toBe(49)` 改成 `toBe(50)`，并按该文件既有的 `installed` 比对写法加上 `'select-v2'`（**照抄它现有的排序/大小写约定，不要自造**——它是逐字比对）。
-
-Run: `cd frontend && npx vitest run test/unit/elementPlusUsage.spec.ts`
-Expected: FAIL —— 计数仍是 49 / `installed` 缺 `select-v2`。
-
-- [ ] **Step 3: 注册组件**
-
-Modify `frontend/src/plugins/element-plus.ts`：在 `ElSelect` 所在的 import 块与 install 块各加一行 `ElSelectV2`（两处都要，位置紧跟 `ElSelect` 便于对照）。
-
-```ts
-// import 块（约 :60 附近，与 ElSelect 并列）
-  ElSelect,
-  ElSelectV2,
-// install / 组件表（约 :170 附近，与 ElSelect 并列）
-  ElSelect,
-  ElSelectV2,
+```
+真实 src 的 <el-*> 用量  ↔  EP_TEMPLATE_COMPONENTS 常量  ↔  installables 表
 ```
 
-Modify `frontend/src/constants/element-plus-usage.ts:56` 附近：
+实测 `grep -rl "<el-select-v2" frontend/src --include=*.vue` = 0 命中（首个 `<el-select-v2>` 要到 Task 5 才出现）⇒ Task 3 单独落地时：加常量则 `:139` 红（清单里多一件没人用的），不加常量只加注册则 `:174` 红。**两种组合都不可达绿。** 而该绊线的注释原话就是「这里多列一件没人用的 → 也红」——它是设计意图，不是 bug。所以「先注册后迁移」在这个仓的顺序前提本来就不成立。
 
-```ts
-  'select',
-  'select-v2',
-```
+**并进去之后还要带的两处计划漏项**：
 
-- [ ] **Step 4: 跑测试确认通过**
+1. **第四处注册点**：`frontend/src/plugins/element-plus.ts` 除 import 块（:60）与 `installables`（:170）外，还有第三张**样式入口表**（:76-129，`import 'element-plus/es/components/select/style/css'` 在 :117）。`elementPlusUsage.spec.ts:182/:186` 把 `styled` 与「模板+服务式+指令」全集逐字比对（49+2+1=52 ⇒ 加 v2 是 53），不补 `import 'element-plus/es/components/select-v2/style/css'` 就直接红。**Step 5 原本担心的「样式没挂上要到生产构建才炸」其实就是这一行。**
+2. **判据自身的盲区**：`elementPlusUsage.spec.ts:211-223` 的 `pluginLists()` 两条解析正则 `/^\s+(El[A-Z][A-Za-z]*),$/gm` 与 `/\b(El[A-Z][A-Za-z]*)\b/g` **不接受数字** ⇒ 模板里写了 `ElSelectV2,` 它也抓不到，`:174` 会红在「清单有、解析没有」。而同文件 `:29` 的 TAG 正则已经是 `[A-Za-z0-9]*` —— 即这两条解析正则与该文件自己的命名文法不一致。**两条必须一起放宽**，否则 `:178` 的 `notImported` 换成红在 `ElSelectV2` 上。这是通用修正，不只对本批有用。
 
-Run: `cd frontend && npx vitest run test/unit/elementPlusUsage.spec.ts`
-Expected: PASS。
+**顺带要订正的陈旧计数（注释与 `it` 标题，不是断言，不影响判绿，但不订正就是「标题承诺了但没断言」那一类）**：`elementPlusUsage.spec.ts:171`「模板 49 件」、`:182`「52 件」、`element-plus.ts:131`「模板里的 49 个标签」、`e2e/theme/element-plus-styles.spec.ts:111`「模板 49 + 服务式 2 + 指令 1」。
 
-- [ ] **Step 5: 确认样式入口存在（v2 的 style 文件没挂上会在生产构建期才炸）**
+**已静态核算过、不需要动的地方**（实现者实测，Task 5 收口时复核）：`e2e/theme/element-plus-styles.spec.ts:328` 的 `expect(fingerprints.length).toBe(46)` 与 `:325` 的 `NO_OWN_STYLE` 都从常量推导；`theme-chalk/el-select-v2.css` 存在且与 `el-select.css` **md5 相同**（`3b0587227aa8053c4b78d7def58a2d0f`）、首个类都是 `el-select-dropdown` ⇒ 去重后仍 46。**这条 md5 相同也是「v2 不需要新增主题变量」的依据**，若将来 EP 升级后两者不再相同，本批的「只提亮颜色不改主题」前提要重审。
 
-Run: `cd frontend && ls node_modules/element-plus/es/components/select-v2/style/css.mjs && npx vue-tsc -b`
-Expected: 文件存在；`vue-tsc -b` 无新增错误（对照 Step 3 之前先跑一次取基线，**别把存量噪音算成本批引入**——判断归属用 `git stash` 对照或 grep 自己改的文件名，见 lessons R8②）。
-
-- [ ] **Step 6: 提交**
-
-```bash
-git add frontend/src/plugins/element-plus.ts frontend/src/constants/element-plus-usage.ts frontend/test/unit/elementPlusUsage.spec.ts
-git commit -m "build(element-plus): 注册 ElSelectV2 并同步 usage 清单与计数判据"
-```
+**留给 Task 8/12 的一条**：Task 5-8 迁完后 `'option'` / `'option-group'` 是否仍在清单里，取决于剩下那些仍用 `<el-select>`/`<el-option>` 的页面（实测 10 个 `.vue` 用 `<el-select`，本批只迁 4 个下拉）⇒ `:147` 的最终计数在 Task 8 之后可能要再动一次。**Task 12 收口时必须现跑一次 `npx vitest run test/unit/elementPlusUsage.spec.ts` 并按实际值订正，不要沿用 Task 5 写的 50。**
 
 ---
 
@@ -524,9 +489,15 @@ git commit -m "test(e2e): 参数全集改从 histogram 无 params 响应取；�
 
 **Files:**
 - Modify: `frontend/src/pages/analysis/components/ParamSelector.vue`（281 行）
+- Modify: `frontend/src/plugins/element-plus.ts`（import 块 :60 / 样式入口表 :117 区 / `installables` :170）
+- Modify: `frontend/src/constants/element-plus-usage.ts`（`EP_TEMPLATE_COMPONENTS`，`'select'` 在 :56）
+- Modify: `frontend/test/unit/elementPlusUsage.spec.ts`（计数 :147、`pluginLists()` 两条正则 :211-223、注释 :171 与标题 :182）
+- Modify: `frontend/e2e/theme/element-plus-styles.spec.ts`（注释 :111 的计数；断言不动，见 Step 0.4）
 - Modify: `frontend/test/unit/selectOptions.spec.ts`（承接 Task 2 复审遗留的 1 条 Important + 1 条 Minor）
 - Modify: `frontend/test/unit/e2eAffectedDecide.spec.ts`（承接 Task 2 复审的 1 条 Minor）
 - Test: `frontend/e2e/analysis/param-dropdown-full-list.spec.ts`（新建，T3 接线）
+
+> **本 Task 承接原 Task 3 的全部注册工作**（原因见 Task 3 一节：三方逐字相等的绊线让「先注册、后迁移」在任何只改注册文件的组合下都不可达绿）。注册与**首个** `<el-select-v2>` 必须同一个 commit 落地。
 
 **从 Task 2 回环复审转来的三项（Task 5 必须一并落，否则就是「说了但没人出资」）**：
 
@@ -558,6 +529,76 @@ git commit -m "test(e2e): 参数全集改从 histogram 无 params 响应取；�
 - **[锚点] `selectOptions.spec.ts:91` 与 `:116` 用 `ParamSelector.vue:145-149` / `:97-99` 这种**行号**锚点，而本 Task Step 3 会删掉那些行 ⇒ 锚点届时指向错的位置。** 在本 Task 里把这两处改写成符号+提交锚点（`ParamSelector 的 highlightSegments 历史实现 / 提交 d1146dd`），与 `selectOptions.ts:69` 已采用的范式一致。
 
 - **[门禁形状判据] `e2eAffectedDecide.spec.ts:193-195` 的形状扫描过滤条件是「处置恰为 `['unit']`」**，会放过 `['frontend/src/utils/', ['unit', 'none:理由']]` 这种带 note 的目录级放行（本表其它处的合法写法）。改成按首元素判：`Array.isArray(mods) && mods[0] === 'unit'`。行为探针仍兜得住，这条只是把纵深补全。改完跑到红（用一次刻意造的坏形状变异）再改回。
+
+- [ ] **Step 0.1: 先放宽解析正则，并钉住它**
+
+`frontend/test/unit/elementPlusUsage.spec.ts` 的 `pluginLists()`（:211-223）两条解析正则**不接受数字**：
+
+```
+installed: /^\s+(El[A-Z][A-Za-z]*),$/gm
+imported:  /\b(El[A-Z][A-Za-z]*)\b/g
+```
+
+`ElSelectV2` 是 EP 里少数带数字的导出名 ⇒ 模板里写了它也解析不出来，`:174` 会红成「清单写了、解析没解析出来」这种看起来像产品坏了的形状。而同文件 `:29` 的 TAG 正则已经是 `[A-Za-z0-9]*` —— 这两条解析正则与该文件自己的命名文法不一致。**两条必须一起放宽**，只放宽一条的话 `:178` 的 `notImported` 换成红在 `ElSelectV2` 上。
+
+改成：
+
+```ts
+  installed: /^\s+(El[A-Z][A-Za-z0-9]*),$/gm,
+  imported: /\b(El[A-Z][A-Za-z0-9]*)\b/g,
+```
+
+补一条 T2 断言，钉住「数字后缀能被解析」：
+
+```ts
+  // ElSelectV2 是 EP 里少数带数字的导出名。旧正则 [A-Z][A-Za-z]* 抓不到它 ⇒
+  // 注册写了、判据看不见。两条一起放宽才有意义（见 pluginLists 的注释）。
+  it('解析正则认数字后缀：ElSelectV2 同时被 imported 与 installed 抓到', () => {
+    const source = [
+      'import { ElSelect, ElSelectV2 } from "element-plus"',
+      'const installables = [',
+      '  ElSelect,',
+      '  ElSelectV2,',
+      ']',
+    ].join('\n')
+    const lists = parsePluginListsFrom(source)
+    expect(lists.imported).toContain('ElSelectV2')
+    expect(lists.installed).toContain('ElSelectV2')
+  })
+```
+
+`pluginLists()` 现在直接读文件、无参数。为让上面这条能喂字符串，把解析体拆成**纯函数 `parsePluginListsFrom(source: string)` + 一层读文件的壳**（壳仍叫 `pluginLists()`，行为逐字不变）。这是本 Task 唯一允许的判据文件重构，且必须保持既有 10 条断言语义不变。**若拆分过程中任何既有断言的行为发生变化，停下来报告，不要为了写这条测试而改了判据本身。**
+
+**判别力证明**：临时把任一条正则改回 `[A-Za-z]*` ⇒ 新断言必须红；手工改回（禁 `git checkout --` / `git restore` / `git stash`）⇒ 绿。贴两次汇总行原文。
+
+- [ ] **Step 0.2: 常量 + 注册三张表**
+
+- `frontend/src/constants/element-plus-usage.ts`：`EP_TEMPLATE_COMPONENTS` 加 `'select-v2'`。该表**是字典序**（`'select' < 'select-v2' < 'skeleton'` 成立），插在 `'select'` 之后即符合既有排序。
+- `frontend/src/plugins/element-plus.ts` 三处，位置都紧跟 `select` 的对应条目：
+  - import 块（:60 区）加 `ElSelectV2,`
+  - **样式入口表**（:117 区，第三张表，Task 3 原计划漏掉的那处）加 `import 'element-plus/es/components/select-v2/style/css'`
+  - `installables`（:170 区）加 `ElSelectV2,`
+
+Run: `cd frontend && ls node_modules/element-plus/es/components/select-v2/style/css.mjs`
+Expected: 存在。
+
+- [ ] **Step 0.3: 计数与陈旧注释一起订正**
+
+- `elementPlusUsage.spec.ts:147` `toBe(49)` → `toBe(50)`
+- `elementPlusUsage.spec.ts:171` 注释「模板 49 件」→ 50；`:182` 标题「52 件」→ 53（49+2+1=52 ⇒ 加 v2 是 53）
+- `element-plus.ts:131` 注释「模板里的 49 个标签」→ 50
+- `e2e/theme/element-plus-styles.spec.ts:111` 注释「模板 49 + 服务式 2 + 指令 1」→ 50 + 2 + 1
+
+Run: `cd frontend && npx vitest run test/unit/elementPlusUsage.spec.ts`
+Expected: **11 条全绿**（三方逐字相等此刻才同时成立，因为 Step 3 会真的往模板写 `<el-select-v2>`）。
+⚠ 若在 Step 3 之前跑，`:139`「真实 src 的模板用量逐字等于清单」必红 —— 那是**预期的中间态**，不要为了让它绿而把 `<el-select-v2>` 提前塞进别的文件，也不要在这一步回退常量。正确做法是把 Step 0.1-0.3 与 Step 2-3 当作一次原子改动，只在 Step 5/6 之后统一验证与提交。
+
+- [ ] **Step 0.4: 复核主题侧不需要动**
+
+`e2e/theme/element-plus-styles.spec.ts:328` 的 `toBe(46)` 与 `:325` 的 `NO_OWN_STYLE` 都从常量推导。已静态核算：`theme-chalk/el-select-v2.css` 与 `el-select.css` **md5 相同**（`3b0587227aa8053c4b78d7def58a2d0f`）、首个类都是 `el-select-dropdown` ⇒ 去重后仍 46，这也是「v2 不需要新增主题变量」的依据。
+
+Run: `cd frontend && md5sum node_modules/element-plus/theme-chalk/el-select-v2.css node_modules/element-plus/theme-chalk/el-select.css`
+Expected: 两个 md5 相同。**不同就停下来报告** —— 那意味着 v2 有独立样式，spec §3.1「只提亮颜色不改主题」的前提要重审。
 
 - [ ] **Step 1: 写失败的 T3 用例**
 
