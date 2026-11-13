@@ -3,9 +3,9 @@
  *
  * 四个下拉真正共享的是 `toOptions`（`:options` 必须是对象数组）；`filterByKeyword` /
  * `sortPrefixFirst` 拆成独立导出是为了能单测。当下的消费者（2026-11-13 现数）：
- * `toOptions` = ParamSelector（经 `buildParamOptions`）+ SerialSelector（自己映射），
- * `filterByKeyword` = `buildParamOptions` + SerialSelector，`sortPrefixFirst` 只有
- * `buildParamOptions`。改 `filterByKeyword` 会同时牵动两个下拉，但仍是纯函数、无 DOM。
+ * `toOptions` = ParamSelector（经 `buildSelectView`）+ SerialSelector（自己映射），
+ * `filterByKeyword` = `buildSelectView` + SerialSelector，`sortPrefixFirst` 只有
+ * `buildSelectView`。改 `filterByKeyword` 会同时牵动两个下拉，但仍是纯函数、无 DOM。
  *
  * 为什么必须有这份文件：`el-select-v2` 的 `filter-method` 在 2.14.0 里**退化成纯回调**
  * （`select-v2/src/useSelect.mjs:114-132` 判到 filterMethod 合法后让 `isValidOption` 恒 true ⇒
@@ -105,10 +105,12 @@ export function highlightSegments(text: string, query: string): HighlightSegment
 /**
  * 参数下拉的完整视图：`options` 交给 `:options`，`total` 交给 footer 计数。
  *
- * 顺序是「过滤 → 排序 → 映射」，**没有截断步骤**（截断是旧 DROPDOWN_RENDER_CAP 的做法，
- * 本批删除）。排序必须留在映射之前：`el-select-v2` 按数组顺序渲染，映射后再排要重建对象。
+ * 顺序是「过滤 → 排序 → 映射」，**没有截断步骤**。历史上这里截断到 300
+ * （旧 `DROPDOWN_RENDER_CAP`，非虚拟化 `el-select` 时代防冻结用的，本批迁
+ * `el-select-v2` 后已随常量一起删除）—— 找回它等于把用户报的「只能看前 300 项」放回来。
+ * 排序必须留在映射之前：`el-select-v2` 按数组顺序渲染，映射后再排要重建对象。
  */
-export function buildParamOptions(
+export function buildSelectView(
   params: string[],
   query: string,
 ): { options: SelectOption[]; total: number } {

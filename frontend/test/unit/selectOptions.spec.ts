@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  buildParamOptions,
+  buildSelectView,
   filterByKeyword,
   highlightSegments,
   sortPrefixFirst,
@@ -125,14 +125,14 @@ describe('highlightSegments', () => {
   })
 })
 
-describe('buildParamOptions', () => {
+describe('buildSelectView', () => {
   it('无关键词：保持原顺序，total = 全量长度', () => {
-    const r = buildParamOptions(['B', 'A', 'C'], '')
+    const r = buildSelectView(['B', 'A', 'C'], '')
     expect(r.options.map((o) => o.value)).toEqual(['B', 'A', 'C'])
     expect(r.total).toBe(3)
   })
   it('有关键词：过滤 + 前缀优先，total = 匹配数而不是渲染数', () => {
-    const r = buildParamOptions(['XPAR1', 'PAR1', 'OTHER'], 'par1')
+    const r = buildSelectView(['XPAR1', 'PAR1', 'OTHER'], 'par1')
     expect(r.options.map((o) => o.value)).toEqual(['PAR1', 'XPAR1'])
     expect(r.total).toBe(2)
   })
@@ -141,7 +141,7 @@ describe('buildParamOptions', () => {
   // ParamSelector 的 listView 历史实现里，1,702 项的文件上每次击键建 1,702 份）放回来。
   // 锚点用提交号而不是组件行号：本批 Step 3 就把那段删掉了。
   it('反向探针：options 只带 value/label，**不得**预建高亮片段', () => {
-    const r = buildParamOptions(['PAR1', 'PAR2'], 'par')
+    const r = buildSelectView(['PAR1', 'PAR2'], 'par')
     for (const o of r.options) {
       expect(Object.keys(o).sort()).toEqual(['label', 'value'])
     }
@@ -149,16 +149,16 @@ describe('buildParamOptions', () => {
   // 与另外三个同族下拉一致（Serial/TestColumn/Export 三处都 trim，只有 ParamSelector
   // 过去不 trim）。纯空格查询 = 「没输入」，显示全量而不是空列表。
   it('纯空格关键词等价于无关键词：返回全量', () => {
-    const r = buildParamOptions(['A', 'B'], '   ')
+    const r = buildSelectView(['A', 'B'], '   ')
     expect(r.options.map((o) => o.value)).toEqual(['A', 'B'])
     expect(r.total).toBe(2)
   })
   it('关键词首尾空格被忽略，中间空格保留', () => {
-    expect(buildParamOptions(['A B', 'AB', 'A  B'], '  a b ').options.map((o) => o.value)).toEqual(['A B'])
+    expect(buildSelectView(['A B', 'AB', 'A  B'], '  a b ').options.map((o) => o.value)).toEqual(['A B'])
   })
   it('4570 项量级：total 是全量，且没有渲染截断', () => {
     const many = Array.from({ length: 4570 }, (_, i) => `P${i}`)
-    const r = buildParamOptions(many, '')
+    const r = buildSelectView(many, '')
     expect(r.total).toBe(4570)
     expect(r.options.length).toBe(4570)
   })
@@ -173,18 +173,18 @@ describe('buildParamOptions', () => {
   ]
   it('不变量（无损）：分段拼回去逐字等于原 label', () => {
     for (const query of INVARIANT_QUERIES) {
-      for (const o of buildParamOptions(INVARIANT_PARAMS, query).options) {
+      for (const o of buildSelectView(INVARIANT_PARAMS, query).options) {
         const segs = highlightSegments(String(o.label), query)
         expect(segs.map((s) => s.text).join(''), `拼接无损: ${query}/${o.label}`).toBe(o.label)
       }
     }
   })
-  // I-1 的真判据：过滤侧与高亮侧共用同一归一化契约 ⇒ 凡被 buildParamOptions 放行的项，
+  // I-1 的真判据：过滤侧与高亮侧共用同一归一化契约 ⇒ 凡被 buildSelectView 放行的项，
   // 用同一个原始 query 去算高亮必须至少命中一段。两侧各自 trim 不等于二者一致。
   it('不变量（一致）：被过滤命中的每一项，高亮必命中至少一段', () => {
     for (const query of INVARIANT_QUERIES) {
       if (!query.trim()) continue
-      for (const o of buildParamOptions(INVARIANT_PARAMS, query).options) {
+      for (const o of buildSelectView(INVARIANT_PARAMS, query).options) {
         expect(
           highlightSegments(String(o.label), query).some((s) => s.mark),
           `过滤命中但高亮没命中: query=${JSON.stringify(query)} label=${o.label}`,

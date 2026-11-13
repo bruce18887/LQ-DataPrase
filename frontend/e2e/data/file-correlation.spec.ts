@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { SEEDED_FILES } from '../fixtures/test-data'
 import { gotoApp } from '../helpers/nav'
-import { elSelectByPlaceholder, SERIAL_POPPER, visibleSelectOptions } from '../helpers/elplus'
+import { elSelectByPlaceholder, popperOf, SERIAL_POPPER, visibleSelectOptions } from '../helpers/elplus'
 
 /**
  * 文件相关性对比（数据管理「文件对比」tab，2026-08-21 重构 / 2026-08-28 优化）。
@@ -237,11 +237,11 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
     // 打开序列下拉 → 过滤 '1' → Enter 全选匹配（与搜索测试项一致的交互）。
     // 注意：已选序列后占位文本消失，不能再用占位符定位 → 用容器 class；
     // 下拉 teleport 到 body，footer 提示必须从**本控件自己的** popper 里取
-    // （`popper-class` 是实例级身份，谓词见 helpers/elplus.ts 的 SERIAL_POPPER：
-    // 本页还有两个文件选择器的 .el-select-dropdown，收起的过渡帧里全局 :visible
-    // 会挑中正在退出的那一份）。
+    // （`popper-class` 是实例级身份，谓词见 helpers/elplus.ts 的 SERIAL_POPPER +
+    // `popperOf`：本页还有两个文件选择器的 .el-select-dropdown，收起的过渡帧里
+    // 全局 :visible 会挑中正在退出的那一份）。
     const serialSel = section.locator('.fc-serial-sel .el-select')
-    const serialPopper = page.locator(`.el-popper.${SERIAL_POPPER}[aria-hidden="false"]`)
+    const serialPopper = popperOf(page, SERIAL_POPPER)
     // 首击即开（automatic-dropdown）且组件在打开时显式聚焦过滤框（EP 2.14 会把
     // 焦点困在 tabindex=-1 wrapper 上，不补聚焦则打字丢失）→ 打开即可直接打字
     await serialSel.click()
