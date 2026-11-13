@@ -412,7 +412,7 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
      * 全选」那句），所以能逐字钉住的事实是「什么都不显示」。两条各挡一种回退：
      *  - `.el-select-dropdown__footer` 不存在（v2 只在有 $slots.footer 时才渲染那层 div）：挡
      *    「把四族的 footer 复制过来却不接 kw/matches」—— 复制那支会显示「匹配 0 项」这种谎话，
-     *    而另四族有各自那条空关键词反例兜着，本控件没有，只有这条抓得住；
+     *    另四族各有空关键词反例兜着（col 本文件下方、export/serial 打字前各一条、param 族是「共 N 项」逐字），本控件只有这条抓得住；
      *  - 搜一个匹配不到的串 ⇒ 窗口 0 行（空态由 EP 内置 `__empty` 兜，2026-11-13 实测文案
      *    'No matching data'，刻意不把这句钉进断言：那是库的默认 locale 文案，不是产品文案）：
      *    本控件刻意**不传** filter-method（传了 v2 就把过滤整个交给回调、isValidOption 恒真，见

@@ -247,6 +247,9 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
     // 焦点困在 tabindex=-1 wrapper 上，不补聚焦则打字丢失）→ 打开即可直接打字
     await serialSel.click()
     await expect(serialPopper).toBeVisible()
+    // 未输入关键词时 footer 那句不许出现（`v-if="kw && matches.length > 0"`）—— 与 col 族
+    // view-data.spec.ts:739 同一条反例，挡「复制了 footer 却不接 kw」显示「匹配 0 项」这种谎话
+    await expect(serialPopper.locator('.match-hint')).toHaveCount(0)
     await page.keyboard.type('1')
     const matchHint = serialPopper.locator('.match-hint')
     await expect(matchHint).toContainText('按 Enter 全选', { timeout: 5000 })
