@@ -222,23 +222,18 @@ export async function paramKeysFromHistogram(resp: Promise<Response | null>): Pr
 /**
  * 从参数全集造一个**匹配数 ∈ [2, cap]** 的关键词，供「输入关键词 → Enter 全选」选中一小撮参数。
  *
- * 前缀越短匹配越多（单调），所以从短往长试，第一个落进区间的就是答案；只试前 12 个名字，
- * 不在上千项的全集上做全量扫描。参数名与匹配数全部来自**响应**而不是 DOM —— 迁 `el-select-v2`
- * 之后 DOM 里只有虚拟窗口那约 11 行，「数选项条数」与「按位置点第 i 行」都不再是合法判据形状
- * （2026-11-13 批1 Task 8）。匹配规则这里是本地一行 `includes`，**没有**复用 src 的
- * `filterByKeyword`：判据要与实现异源，否则产品把过滤写坏时这条跟着一起绿。
+ * **判定全在 `boundedKeywordCore.ts`（纯核：无 Playwright、无 DOM），这里只留入口** ——
+ * 与 `setActiveAnalysisTab` 从 `paramList` 再导出一条（文件顶部）同一种形状：用例常引的是
+ * `params.ts`，判据住在纯核里，于是三条界（扫描窗口 `BOUNDED_KEYWORD_SCAN_NAMES` / 下界
+ * `BOUNDED_KEYWORD_MIN_MATCHES` / 上限 cap）由 `frontend/test/unit/boundedKeyword.spec.ts`
+ * 用假名字表钉住（T2，不开浏览器），而不是只靠 e2e 那最贵的一档。
+ * 「为什么参数名与匹配数必须来自响应而不是 DOM」与「为什么不复用 src 的 `filterByKeyword`」
+ * 见纯核顶部注释（迁 `el-select-v2` 后 DOM 里只有虚拟窗口那约 11 行，2026-11-13 批1 Task 8）。
+ *
+ * 返回 `null` = 造不出「≥2 且有界」的关键词，**调用方必须红**，不许 skip（skip 等于把判据删掉）：
+ * 现有调用点 `e2e/exports/exports.spec.ts` 的 `if (!bound) throw new Error(...)`。
  */
-export function pickBoundedKeyword(all: string[], cap: number): { kw: string; count: number } | null {
-  for (const name of all.slice(0, 12)) {
-    for (let len = 1; len <= name.length; len++) {
-      const kw = name.slice(0, len).toLowerCase()
-      const count = all.filter((p) => p.toLowerCase().includes(kw)).length
-      if (count >= 2 && count <= cap) return { kw, count }
-      if (count < 2) break
-    }
-  }
-  return null
-}
+export { pickBoundedKeyword } from './boundedKeywordCore'
 
 /**
  * 选中指定参数（利用 filterable 输入过滤后点击）
