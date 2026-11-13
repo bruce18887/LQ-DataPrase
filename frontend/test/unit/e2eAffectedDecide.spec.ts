@@ -27,6 +27,7 @@ import {
   MAX_MODULES_BEFORE_FULL,
   MODULES,
   P0_SPEC_FILES,
+  RULES,
   backendLabels,
   decide,
   executePlan,
@@ -163,6 +164,38 @@ describe('假阳性：不是被测对象的落盘物，不得升级全量', () =
       ['frontend/e2e/helpers/nightly-gates.d.mts', 'frontend/e2e/helpers/nightly-gates.mjs', 'frontend/test/unit/e2eNightlyGates.spec.ts'],
     ]
     for (const files of cases) expect(staysFast(files).global, files.join(',')).toBe(false)
+  })
+})
+
+describe('T2 已钉住的纯 util：改它由 vitest 验收，不开浏览器', () => {
+  // 与 .gitignore / 图标工具那族不同：这个文件**是**产品代码，只是判据全在
+  // `test/unit/selectOptions.spec.ts`（毫秒级、不开浏览器），浏览器全量对它零判据价值。
+  // 而 `frontend/src/utils/` 那条目录兜底会把它升级成 ~9min 全量池（2026-11-13 复审 I-3）。
+  it('selectOptions 判出 unit 档：不升级全量、不进任何 e2e 模块', () => {
+    expect(matchRule('frontend/src/utils/selectOptions.ts')).toEqual(['unit'])
+    const r = staysFast(['frontend/src/utils/selectOptions.ts'])
+    expect(r.global).toBe(false)
+    expect(r.unit).toBe(true)
+    expect(r.modules).toEqual([])
+  })
+
+  // 反向（承重方向）：这条放行是**精确到文件**的白名单，不是整目录。
+  // 同目录里下一条还没有 T2 钉住的 util 必须仍是 GLOBAL —— §3「未知路径一律全量」
+  // 那道安全边界不许因为本表多了一条精确规则就顺带松掉（对照 `format.ts` 那四条同形）。
+  it('精确文件放行不外溢：同目录其它 util 仍升级全量', () => {
+    for (const f of ['frontend/src/utils/brand-new.ts', 'frontend/src/utils/requestCache.ts']) {
+      expect(matchRule(f), f).toEqual([GLOBAL])
+      expect(staysFast([f]).global, f).toBe(true)
+    }
+    // 形状判据：utils 的**放行**条目（处置恰为 `['unit']` 的那些）逐条必须精确到 .ts 文件。
+    // 目录兜底 `frontend/src/utils/` 自己仍是 GLOBAL，两者并存才构成白名单语义 ——
+    // 有人「顺手把放行收成整目录」时这条先红，而不是等某次改动把没被 T2 钉住的 util 静默降级。
+    const utilsAllowed = RULES.filter(
+      ([prefix, mods]) =>
+        String(prefix).startsWith('frontend/src/utils/') && JSON.stringify(mods) === '["unit"]',
+    )
+    expect(utilsAllowed.length, '放行条目应当是看得见的一串精确路径').toBeGreaterThanOrEqual(5)
+    for (const [prefix] of utilsAllowed) expect(String(prefix)).toMatch(/\.ts$/)
   })
 })
 

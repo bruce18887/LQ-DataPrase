@@ -122,10 +122,15 @@ export const RULES = [
   ['frontend/test/', ['unit']],
 
   // —— T2 已覆盖的纯函数：只需 vitest，不必开浏览器
+  // ⚠ 逐条精确到文件，**不是** `frontend/src/utils/` 整目录：下面没有列到的 util
+  // 仍走 §3 那条目录兜底 → GLOBAL（由 e2eAffectedDecide.spec.ts 钉住这个形状）。
   ['frontend/src/utils/format.ts', ['unit']],
   ['frontend/src/utils/minmax.ts', ['unit']],
   ['frontend/src/utils/error.ts', ['unit']],
   ['frontend/src/utils/batchAggregation.ts', ['unit']],
+  // 下拉选项准备的纯函数：判据全在 selectOptions.spec.ts（无 DOM、无网络），
+  // 浏览器全量对它零判据价值 —— 没有这条时每次改它都要拉 ~9min 全量池。
+  ['frontend/src/utils/selectOptions.ts', ['unit']],
 
   // —— 打包期图标工具：判据（内缩比例、审计阈值、ico 组装）全在 icon-lib.cjs 且已被
   // iconLib.spec.ts / appIcon.spec.ts 钉住；audit/metrics/gen 只是调用它们的壳。
