@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import { SEEDED_FILES } from '../fixtures/test-data'
 import { gotoApp } from '../helpers/nav'
 import { elSelectByPlaceholder, popperOf, SERIAL_POPPER, visibleSelectOptions } from '../helpers/elplus'
-import { expectWindowRows, windowItems } from '../helpers/selectV2'
+import { expectWindowRows, windowItems, MAX_WINDOW_ROWS } from '../helpers/selectV2'
 
 /**
  * 文件相关性对比（数据管理「文件对比」tab，2026-08-21 重构 / 2026-08-28 优化）。
@@ -255,11 +255,11 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
     // 前提（界由基线推出来，不是经验值）：v2 自己的 Enter 最多加 1 颗 ⇒ 要让下面
     // 「已选 ≥ min(匹配数, 200)」那句在 Enter 被 v2 抢走时**必红**，匹配数必须严格大于
     // 基线 + 1：只要求 > 基线的话，匹配数恰好 = 基线 + 1 时「v2 抢走 Enter 多加 1 颗」
-    // 也能凑到同一个数，判据就白写（红了换关键词，别删用例）。
+    // 也能凑到同一个数。另一半界须 > MAX_WINDOW_ROWS，否则下面那条窗口行数判据恒真（红了换关键词，别删用例）。
     expect(
       matchedCount,
-      `搜 '1' 只匹配 ${matchedCount} 项，不足以区分「全选匹配」与「只选中高亮项」`,
-    ).toBeGreaterThan(BASELINE_SERIALS + 1)
+      `搜 '1' 只匹配 ${matchedCount} 项：撑不起「全选 vs 只选高亮」，也让窗口行数那条判据失去牙齿`,
+    ).toBeGreaterThan(Math.max(BASELINE_SERIALS + 1, MAX_WINDOW_ROWS))
     /*
      * 反截断正向判据（Task 9B 给五族补齐的那两条，形式与 param-dropdown-full-list 逐字同构）：
      *  - 行数：已过滤状态下量，候选就是上面那个 matchedCount（2026-11-13 现测 1,113 项）。
