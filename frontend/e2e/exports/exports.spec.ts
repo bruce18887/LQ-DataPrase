@@ -556,7 +556,11 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
       test.skip(true, '该文件参数不足 2 个')
       return
     }
-    await paramOptions.nth(1).click()
+    // 点的仍是 DOM 第 2 行，但身份从这一行自己的文本取：按位置认作 P[1] 的话，虚拟窗口重排/点错行时期望值跟着一起错
+    const row2 = paramOptions.nth(1)
+    const picked = (await row2.textContent())?.trim() ?? ''
+    expect(picked, '第 2 行取到空文本 ⇒ 用例接线坏了，别让空串静默进 Set 少算一项').not.toBe('')
+    await row2.click()
     await expect(panel.locator('.step-count')).toContainText('已选 1 /')
 
     // 关键字 = 第一个参数名的前 6 字符（保证 ≥1 匹配），N 从页面参数列表自算
@@ -571,8 +575,8 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     await input.fill(kw)
     await expect(paramPopper.locator('.match-hint')).toContainText(`匹配 ${N} 项，按 Enter 全选`)
 
-    // Enter 全选：已选 = {P[1]} ∪ 匹配集（P[1] 可能在匹配集中，用 Set 算实际值）
-    const expected = new Set([P[1], ...matchesArr]).size
+    // Enter 全选：已选 = {picked} ∪ 匹配集（picked 可能在匹配集中，用 Set 算实际值）
+    const expected = new Set([picked, ...matchesArr]).size
     await input.press('Enter')
     await expect(panel.locator('.step-count')).toContainText(`已选 ${expected} / 共 ${P.length} 个`)
 
@@ -580,7 +584,7 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     await expect(input).toHaveValue('')
     const kw2 = P[0].slice(0, 5)
     const matchesArr2 = P.filter((p) => p.toLowerCase().includes(kw2.toLowerCase()))
-    const expected2 = new Set([P[1], ...matchesArr, ...matchesArr2]).size
+    const expected2 = new Set([picked, ...matchesArr, ...matchesArr2]).size
     await input.fill(kw2)
     await input.press('Enter')
     await expect(panel.locator('.step-count')).toContainText(`已选 ${expected2} / 共 ${P.length} 个`)
