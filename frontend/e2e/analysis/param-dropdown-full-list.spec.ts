@@ -8,6 +8,7 @@ import {
   selectAnalysisFile,
   selectParam,
 } from '../helpers/params'
+import { expectWindowRows, tailRowState, windowItems } from '../helpers/selectV2'
 
 /**
  * 用户报的原话是「参数选择框为啥只能看前 300 个测试项」。旧实现是 `el-select` +
@@ -32,6 +33,9 @@ import {
  * 参数全集一律走 `listParams()`（响应侧，见 helpers/paramList.ts），**不是**数 DOM ——
  * 虚拟窗口里 DOM 只有十来行，数条数从本批起不再是「列表有多少项」的判据。
  * 「下拉真的把响应里那些项渲染出来了」这一维由本文件兜（paramList.ts 的捕获与产品同源）。
+ *
+ * `tailRowState` 与 `MAX_WINDOW_ROWS` 本体住在 `helpers/selectV2.ts`（Task 9B 提出去给五族共用，
+ * 此前 Task 9C 在 `view-data.spec.ts` 复制了第二份界值）；本文件那四条判据一条没变弱、没变形。
  */
 const POPPER = PARAM_POPPER_SINGLE
 const BIG_FILE = 'BPD93204_FT1_ETS163550_12252024'
@@ -42,59 +46,14 @@ const BIG_FILE = 'BPD93204_FT1_ETS163550_12252024'
  */
 const LEGACY_RENDER_CAP = 300
 
-/**
- * 虚拟窗口允许出现的最大行数。上界由 EP 默认值推出：`select-v2/src/defaults.mjs` 的
- * `height:274 / itemHeight:34` ≈ 9 行，加 overscan 实测 11 行（2026-11-13）。留到 20 是
- * 给「以后有人调高面板」的余量；真正的判据是「远小于全集」，不是「等于 11」。
- *
- * 它同时是「不虚拟化、但也不截断」这种回退的唯一哨兵：那种实现下 DOM 会等于全集
- * （1723 行），这条必红，而上面两条都照样绿。
- */
-const MAX_WINDOW_ROWS = 20
-
 /** 本实例 popper 里的选项行（v2 的虚拟窗口只渲染这几行） */
 function paramItems(page: import('@playwright/test').Page) {
-  return popperOf(page, POPPER).locator('.el-select-dropdown__item')
+  return windowItems(page, POPPER)
 }
 
 /** 本实例 popper 的 footer 文案（两支措辞的判据都从这一句逐字比） */
 function paramFooter(page: import('@playwright/test').Page) {
   return popperOf(page, POPPER).locator('.param-count-hint')
-}
-
-/**
- * 末项在窗口里的状态：`{ inDom, inViewport }`。
- *
- * 为什么走 DOM 而不是 Playwright 定位器：`:text-is()` 只匹配**最小**的那个元素，而选项行
- * 里面还有 `.param-option > .param-name > span` 三层，`li:text-is("X")` 永不命中
- * （2026-11-13 实测假红一次）；`hasText` 反过来是子串匹配，'VTH' 会冒充 'VTH_2'。
- * 逐字比较只能在 DOM 侧做，`toBeVisible()` 也答不出「被滚动视口裁掉了」这一半。
- */
-function tailRowState(page: import('@playwright/test').Page, last: string) {
-  return page.evaluate(({ popper, target }) => {
-    // 与 `helpers/elplus.ts` 的 `popperOf` 同一套谓词（`[aria-hidden="false"]`）：
-    // 这里是页内 querySelector，够不到 helper，所以谓词只能重写一遍 —— 两种写法并存是
-    // 故意的，代价是改谓词时必须两处同改：只改 helper 而漏掉这里，本条判的就是另一个
-    // 面板（已关闭的那个 aria-hidden="true" 的兄弟 popper），于是 inDom 恒 false ⇒ 假红。
-    const panel = document.querySelector(`.el-popper.${popper}[aria-hidden="false"]`)
-    const rows = panel ? [...panel.querySelectorAll('.el-select-dropdown__item')] : []
-    const hit = rows.find((r) => (r.textContent ?? '').trim() === target)
-    if (!hit) return { inDom: false, inViewport: false }
-    // 最近的可滚祖先 = 虚拟列表的视口（不写死 EP 内部类名，v1/v2 都拿得到）。
-    // body/documentElement 必须排除：整页可滚时它们同样满足 scrollHeight>clientHeight，
-    // 一旦窗口自身没撑起来，末项就会被「页面滚动的位置」判成「在窗口里可见」—— 那是假绿，
-    // 而本用例唯一承重的就是「窗口滚到了末尾」。找不到合格祖先 ⇒ inViewport:false ⇒ 红。
-    let vp: HTMLElement | null = hit.parentElement
-    while (vp && vp.scrollHeight <= vp.clientHeight + 1 && vp !== document.body) {
-      vp = vp.parentElement
-    }
-    if (!vp || vp === document.body || vp === document.documentElement) {
-      return { inDom: true, inViewport: false }
-    }
-    const a = vp.getBoundingClientRect()
-    const b = hit.getBoundingClientRect()
-    return { inDom: true, inViewport: b.top >= a.top - 1 && b.bottom <= a.bottom + 1 }
-  }, { popper: POPPER, target: last })
 }
 
 test.describe('@p1 参数下拉可浏览全部测试项', { tag: ['@p1', '@analysis'] }, () => {
@@ -178,7 +137,7 @@ test.describe('@p1 参数下拉可浏览全部测试项', { tag: ['@p1', '@analy
     await items.first().hover()
     await page.mouse.wheel(0, 200_000)
     await expect
-      .poll(() => tailRowState(page, last), {
+      .poll(() => tailRowState(page, POPPER, last), {
         timeout: 10_000,
         message: `滚到底以后末项 "${last}" 必须既在窗口里又在视口里（inDom / inViewport 分开报，` +
           '分不清就是用例自己坏了）',
@@ -186,6 +145,6 @@ test.describe('@p1 参数下拉可浏览全部测试项', { tag: ['@p1', '@analy
       .toEqual({ inDom: true, inViewport: true })
     // 「虚拟窗口」这四个字只有这条兜得住：行数回到全量即等于虚拟化没生效，而上面两条
     // 在「不虚拟化但也不截断」的实现下一样会绿。Task 5 放行实测 11 行 / 滚到底 310ms。
-    expect(await items.count(), 'DOM 里只该有虚拟窗口那几行').toBeLessThan(MAX_WINDOW_ROWS)
+    await expectWindowRows(items, all.length, '参数下拉')
   })
 })
