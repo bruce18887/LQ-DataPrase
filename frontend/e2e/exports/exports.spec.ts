@@ -551,9 +551,8 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     // 两头都不等于全集，被测契约始终是「过滤/计数/Enter 全选作用于完整集合，只有渲染成窗口」。
     const P = await paramKeysFromHistogram(histogramResp)
     if (P.length < 2) {
-      await page.keyboard.press('Escape')
-      test.skip(true, '该文件参数不足 2 个')
-      return
+      // 走到这里 = 夹具形状变了（不是产品坏了）：换回千级参数的夹具，别把它降级成 skip ⇒ skip 会静默摘掉这条判据
+      throw new Error(`导出夹具 ${SEEDED_FILES.ETS88_FT} 只有 ${P.length} 个参数 ⇒ 换夹具，不接受 skip`)
     }
     // 反截断正向判据（Task 9B，与 param-dropdown-full-list / file-correlation 同构）：**未输入关键词**
     // 时量窗口行数 —— 这一屏的候选是整份 1,723 项全集 ⇒ 虚拟化没生效挂 1,723 行、旧封顶 300 放回来
