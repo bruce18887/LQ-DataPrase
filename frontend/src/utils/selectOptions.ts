@@ -2,8 +2,10 @@
  * 大列表下拉（`el-select-v2`）的选项准备：过滤 → 排序 → 映射。
  *
  * 四个下拉真正共享的是 `toOptions`（`:options` 必须是对象数组）；`filterByKeyword` /
- * `sortPrefixFirst` 拆成独立导出是为了能单测，目前唯一消费者是 `buildParamOptions`，
- * 改它们不会同时影响四个下拉。
+ * `sortPrefixFirst` 拆成独立导出是为了能单测。当下的消费者（2026-11-13 现数）：
+ * `toOptions` = ParamSelector（经 `buildParamOptions`）+ SerialSelector（自己映射），
+ * `filterByKeyword` = `buildParamOptions` + SerialSelector，`sortPrefixFirst` 只有
+ * `buildParamOptions`。改 `filterByKeyword` 会同时牵动两个下拉，但仍是纯函数、无 DOM。
  *
  * 为什么必须有这份文件：`el-select-v2` 的 `filter-method` 在 2.14.0 里**退化成纯回调**
  * （`select-v2/src/useSelect.mjs:114-132` 判到 filterMethod 合法后让 `isValidOption` 恒 true ⇒
@@ -38,14 +40,17 @@ export function toOptions(items: Array<string | number>): SelectOption[] {
  * 入参收 `string | number`：序列号下拉（`SerialSelector`）的候选是 `number[]`，而
  * `toOptions` 本来就收数字 —— 这三个函数口径必须一致，否则第二个消费者就得本地重写一份。
  *
+ * 泛型 `T` 是为了**保住返回类型的元素类型**：`SerialSelector` 把返回值直接喂给 `clamp()`
+ * 与 `emit('update:modelValue', …: number[])`，非泛型签名（返回 `Array<string | number>`）
+ * 在那两处都要重新断言一次，等于把复用换成本地转型。判据在
+ * `test/unit/selectOptions.spec.ts`（`const nums: number[] = filterByKeyword(…)` 那一行，
+ * 由 `npm run build` 的 `vue-tsc -b` 检查，vitest 本身不看类型）。
+ *
  * 空关键词返回**入参本身**（同一引用、零拷贝）—— 与 `sortPrefixFirst` 相反，后者总是
  * 返回新数组：`Array.prototype.sort` 原地改，不拷贝就会把调用方传进来的 `props.params` 排坏。
  * 这个不对称是有意的，两条判据分别用 `toBe` / `not.toBe` 钉住，别"顺手统一"。
  */
-export function filterByKeyword(
-  items: Array<string | number>,
-  keyword: string,
-): Array<string | number> {
+export function filterByKeyword<T extends string | number>(items: T[], keyword: string): T[] {
   const q = keyword.trim().toLowerCase()
   if (!q) return items
   return items.filter((it) => String(it).toLowerCase().includes(q))

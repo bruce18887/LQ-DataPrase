@@ -49,6 +49,17 @@ describe('filterByKeyword', () => {
     expect(filterByKeyword([1, 12, 21, 2], '1')).toEqual([1, 12, 21])
     expect(filterByKeyword([1, 12, 21, 2], '2')).toEqual([12, 21, 2])
   })
+  // 泛型签名（`T extends string | number`）的判据：SerialSelector 把返回值原样当 number[] 用
+  // （clamp() 的入参、emit('update:modelValue') 的载荷），签名退成 Array<string|number> 时
+  // 下面两行的赋值就红。注意 vitest **不做类型检查**，这条由 `npm run build` 的 `vue-tsc -b`
+  // 执行（tsconfig.json 引用 tsconfig.unit.json，其 include 覆盖 test/unit）——
+  // 删掉 `: number[]` / `: string[]` 标注本条就退化成普通运行时断言，判据即失声。
+  it('类型面：返回的元素类型 = 入参的元素类型（number[] 进 ⇒ number[] 出，无需转型）', () => {
+    const nums: number[] = filterByKeyword([1, 12, 21, 2], '1')
+    const strs: string[] = filterByKeyword(['Kelvin_VIN', 'IBLK'], 'kel')
+    expect(nums).toEqual([1, 12, 21])
+    expect(strs).toEqual(['Kelvin_VIN'])
+  })
 })
 
 describe('sortPrefixFirst', () => {

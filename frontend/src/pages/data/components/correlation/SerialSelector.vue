@@ -41,7 +41,7 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick } from 'vue'
-import { toOptions } from '../../../../utils/selectOptions'
+import { filterByKeyword, toOptions } from '../../../../utils/selectOptions'
 
 /**
  * 对比序列选择器：交互与查看数据「搜索测试项」输入框（TestColumnSelector）
@@ -74,10 +74,16 @@ const selectRef = ref<{ $el: HTMLElement }>()
 
 const kw = computed(() => filterText.value.trim().toLowerCase())
 
-/** 匹配项：大小写不敏感子串匹配（序列号转字符串比较） */
-const matches = computed(() =>
-  kw.value ? props.options.filter((s) => String(s).toLowerCase().includes(kw.value)) : [],
-)
+/**
+ * 匹配项：复用共享谓词 `filterByKeyword`（与参数下拉同一口径，含数字转字符串的子串匹配）。
+ *
+ * 空关键词这一支必须自己给 `[]`，不能把 `filterText` 透传进去让 `filterByKeyword` 处理：
+ * 它空串时返回**入参本身**（全量，`filterByKeyword` 的 `toBe` 判据钉着这条引用契约），
+ * 而这里「没有关键词」= 「没有可全选的匹配集」——footer 提示与 `onSelectKeydown` 的 Enter
+ * 拦截都以 matches 非空为前提，透传会把「没输入」变成「全匹配」，Enter 于是从 EP 的
+ * 「选中键盘高亮那一项」变成「全选上千颗序列」（`onSelectKeydown` 的注释就是要防这个）。
+ */
+const matches = computed(() => (kw.value ? filterByKeyword(props.options, filterText.value) : []))
 
 /**
  * 下拉选项 = 匹配集（有关键词）或全量（无关键词），**不截断**。
