@@ -1021,10 +1021,15 @@ git commit -m "feat(correlation): 对比序列下拉迁 el-select-v2，取消 30
 
 落地 = `19a1232`（迁移）+ `883753a`（删掉控制器给错的零消费者可选参数）+ `c9e0d67`（合并复审的修复）。
 
-1. **`--project` 必须按被测文件自己的 tag 选，别照抄本计划的 `--project=P1`。**
+1. **`--project` 按被测文件里**每条用例自己的 tag** 选，别照抄本计划的 `--project=P1`。**
    `e2e/data/file-correlation.spec.ts` 的 describe 是 `tag: ['@p2','@data']` ⇒ P1 项目下
-   `No tests found`。Task 7 的 `view-data.spec.ts` 只有 `@data`（归 **Edge** 项目），
-   Task 8 的 `exports.spec.ts` 自己 grep 一遍再定。跑之前先看文件里那行 `tag: [...]`。
+   `No tests found`，正解 `--project=P2`（10 条 = 8 业务 + 2 setup）。
+   ⚠ **本条原稿说 `view-data.spec.ts` 归 Edge —— 是控制器写错的，Task 7 实现方实测反驳**：
+   Edge 项目是 `grepInvert: /@p[012]/`（`playwright.config.ts:124`），而该文件 35 条**用例标题
+   自带 `@pN`**（p0×1 / p1×13 / p2×20 / p3×1）⇒ `--project=Edge` 只选中 1 条，合跑口径是
+   `--project=Edge --project=P1 --project=P2` = 36 条（34 业务 + 2 setup）。
+   **Task 8 的 `exports.spec.ts`：tag 在 describe 上（4 处 `['@p2','@exports']`）⇒ 归 P2。**
+   跑之前一律先 `--list` 数一遍，别按 describe 的 tag 猜项目。
 2. **`filterByKeyword` 现在是泛型** `<T extends string | number>(items: T[], keyword: string): T[]`。
    泛型不是装饰：`SerialSelector` 把返回值原样喂给 `clamp()` 与 `emit('update:modelValue', …: number[])`，
    非泛型签名在那两处都要重新断言一次。`sortPrefixFirst` 仍是 `Array<string|number>`（没人用它保类型）。
@@ -1116,6 +1121,46 @@ Expected: 全绿。`:687-691` 点 footer 里「清空」那条最容易红（foo
 git add frontend/src/pages/data/components/browser/TestColumnSelector.vue frontend/e2e/data/view-data.spec.ts
 git commit -m "feat(data): 测试列下拉迁 el-select-v2，取消渲染封顶"
 ```
+
+---
+
+## Task 7 落地后的订正（**Task 8/9 开工前必读**，2026-11-13）
+
+落地 = `1a0a4c3`（迁移 + `popper-class` + `popperOf`）+ `4dc1659`（合并复审的两条要紧项）。
+
+1. **谓词入口**：`e2e/helpers/elplus.ts` 新增 `popperOf(page, popperClass)`（返回 `.el-popper.<cls>[aria-hidden="false"]`
+   容器，7 处消费者），本控件身份串 `COL_POPPER = 'dp-col-popper'`。**同一个谓词现在有三处写法**
+   （`params.ts:51` 私有的 `visibleOptions`、`elplus.ts` 的 `popperOf`、`file-correlation.spec.ts:244`
+   与 `params.ts:117/133/141` 的内联模板串）⇒ 统一动作并入 Task 9（导出 `popperOf`，其余从它组合
+   `.locator('.el-select-dropdown__item')`），别在 Task 8 里顺手改。
+2. **实例级 popper-class 判为「预防性正确」不是投机**：查看数据页共用 `.el-select-dropdown` 类名的
+   实例有 **6 个**（本控件 + `DataBrowserToolbar.vue:15/28/41/54` + 横幅 `ActiveFileBanner.vue:12`），
+   且 `view-data.spec.ts:755` 那条在同一次交互里开两个下拉。**Task 9 给本族补正向判据时必须有实例锚点**，
+   这六个类名就是那批锚点的清单。诚实的一半：横幅侧 `:771` 仍是全局 `:visible`，本批只修了一半。
+3. **不需要 Task 6 那条 disabled 判据**：本组件 props 是 `cols`/`modelValue`，computed 叫
+   `selectOptions`，**没有撞名**，`:disabled="cols.length === 0"` 引用的仍是 props 全集。
+   可选的结构化灭法（`props.cols.length` 显式写死）记在这儿，未做。
+4. **两条被裁定的等价/加强替换**（后面别改回去）：`:807-811` 从「在列表里等 SITE_CHECK 出现」改成
+   「按名搜它再断可见」—— 旧写法在 v1 下其实多断了「它落在前 300 渲染项里」，真正承重的一直在
+   `:795-803`；`:745-752` 从「firstMatch 有 is-selected」改成「重搜同一词 ⇒ 窗口每一条都
+   is-selected 且行数 ≥2」（下界 2 挡「窗口只挂 1 行且它恰选中」时「全选」与「v2 加 1 颗」同形的假绿）。
+   ⚠ 变异自证只证到**半条**：摘掉 Enter 分支后红打在既有 `:744`（`toHaveValue('')`）上，
+   新 poll 自身的增量力**未实测**，靠推理成立。
+5. **`view-data.spec.ts` 被豁免账精确冻结在 1802 行**（`scripts/line-limit.mjs:58`）：多一行 `grew` 红，
+   少一行 `now < frozen.lines` 也要红（正解是**同步下调登记值**，不是把文件撑回去）。
+   要往本文件加断言，就得同批减行，或者下调登记值并说明理由。
+6. **⚠ 并入 Task 9 的第 4 件事（本批设计漏项，Task 7 复审时发现的）**：
+   `frontend/src/pages/data/components/browser/DataBrowserToolbar.vue:54-67` 的「固定列」`el-select`
+   是**未封顶的 v1 实现**（`v-for="c in allCols"`，无 `DROPDOWN_RENDER_CAP`）。`allCols` = 表格
+   `headers`（`DataBrowserAgGrid.vue:521`），ETS88_FT 实测 **1,728 列**（`view-data.spec.ts:1590`）⇒
+   打开即挂 1,728 个 `el-option`，正是 `constants/dropdown.ts:8` 记的那个冻结风险，且它是那轮唯一
+   红过的业务用例（`:322` 15s 等不到选项）。设计稿 §2 只说「四个下拉」、§8 的「明确不做」里也没有它
+   ⇒ **设计漏项，裁定并入本批 Task 9**（迁 v2 后模板全是现成的，机制与 Task 7 同形）。
+7. **记在案的行为缺口（本批不补）**：「空关键词 + Enter 会不会全选上千列」零判据（新增那条 footer
+   判据只有「matches 透传」+「`v-if` 丢掉 kw 一支」两个 mutation 同时成立才红）；
+   `clearFilterInput()` 有没有真把 EP 内部 query 洗掉，col 族被 `:744` 顺带兜住了一半，序列族仍零覆盖。
+8. **汇报纪律**：跑 e2e 报数必须带 **flake 数**（「36 passed」与「33 passed + 3 flaky」不是一回事）。
+   本轮实测既有负载 flake 两条：`:309` 固定列、`:1744` ETS88。
 
 ---
 
