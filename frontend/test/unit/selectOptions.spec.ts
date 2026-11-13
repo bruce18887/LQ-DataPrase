@@ -50,9 +50,10 @@ describe('sortPrefixFirst', () => {
     const items = ['b', 'a']
     sortPrefixFirst(items, '')
     expect(items).toEqual(['b', 'a'])
+    expect(sortPrefixFirst(items, '')).not.toBe(items)
   })
   it('关键词原始大小写不影响前缀优先', () => {
-    expect(sortPrefixFirst(['XPAR1', 'PAR1'], 'PAR1')).toEqual(['PAR1', 'XPAR1'])
+    expect(sortPrefixFirst(['APAR1', 'PAR1'], 'PAR1')).toEqual(['PAR1', 'APAR1'])
   })
 })
 
