@@ -1,10 +1,14 @@
 import { expect, type Page } from '@playwright/test'
+import { attachParamListCapture } from './paramList'
 
 /**
  * 导航到指定业务路由并等待主布局就绪。
  * 适用于已注入 storageState（已登录）的用例。
  */
 export async function gotoApp(page: Page, route: string) {
+  // 必须在 goto 之前装：参数全集那次请求发生在首屏选文件时，装晚了就永远捕不到，
+  // 而 listParams() 会静默返回空数组（见 paramList.ts 的注释）。
+  attachParamListCapture(page)
   await page.goto(route)
   // 主布局容器出现即认为进入应用（未登录会被守卫重定向到 /login）
   await expect(page.locator('.main-layout')).toBeVisible({ timeout: 15_000 })

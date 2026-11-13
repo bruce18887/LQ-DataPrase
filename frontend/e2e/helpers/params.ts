@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from '@playwright/test'
+import { capturedParamList } from './paramList'
 
 /**
  * Element Plus el-select 交互助手 + 分析页参数抽样。
@@ -20,10 +21,19 @@ async function openElSelect(sel: Locator) {
   await sel.click()
 }
 
-/** 当前可见下拉中的选项 */
+/**
+ * 当前**开着的那个**下拉里的选项。
+ *
+ * 不能用 `:visible`：EP 收起下拉走 Vue 的 leave 过渡，`display:none` 要等动画结束才落下，
+ * 而 `aria-hidden` 绑在 visible 上、同一拍就翻成 true ⇒ 过渡帧里 `:visible` 数到的是
+ * 正在退出的上一个（连 `toHaveCount(1)` 再取也照样挑中它）。2026-11-10 账号审计批实测，
+ * 红字是「每页条数候选收到 10 项而不是 3 项」这种毫不相干的形状。
+ * popper-class 同时挂在外层 .el-popper 与内层 .el-select-dropdown 上，
+ * 所以限定必须落在外层 .el-popper（裸类名会 strict violation）。
+ */
 function visibleOptions(page: Page, popperClass?: string) {
-  const scope = popperClass ? `.${popperClass} ` : ''
-  return page.locator(`${scope}.el-select-dropdown__item:visible`)
+  const cls = popperClass ? `.el-popper.${popperClass}` : '.el-popper'
+  return page.locator(`${cls}[aria-hidden="false"] .el-select-dropdown__item`)
 }
 
 /** 分析页某 tab 的数据文件选择器（scope = 契约属性值，页内唯一） */
@@ -78,7 +88,9 @@ export async function pickTabFile(
   // teleport 到 body，隐藏 pane 的那一份仍会被全局 `:visible` 命中（它的
   // reference 尺寸为零 → popper 逐帧重定位→“element is not stable”，
   // 而且 `.first()` 会点到另一个 tab 的文件上）
-  const options = page.locator(`.dp-file-picker-${scope}:visible .el-select-dropdown__item`)
+  const options = page.locator(
+    `.el-popper.dp-file-picker-${scope}[aria-hidden="false"] .el-select-dropdown__item`,
+  )
   await expect(options.first()).toBeVisible({ timeout: 15_000 })
   const target = labelSubstring
     ? options.filter({ hasText: labelSubstring }).first()
@@ -92,25 +104,40 @@ export async function pickTabFile(
  */
 export async function pickOutlierMode(page: Page, mode: string, scope = 'single') {
   await openElSelect(filterControl(page, 'outlier-handling'))
-  await page.locator(`.dp-outlier-popper-${scope}:visible .el-select-dropdown__item`)
-    .filter({ hasText: mode }).first().click()
+  await page.locator(
+    `.el-popper.dp-outlier-popper-${scope}[aria-hidden="false"] .el-select-dropdown__item`,
+  ).filter({ hasText: mode }).first().click()
 }
 
 /** 选敏感度档位（如「宽松 (3.0x IQR)」） */
 export async function pickSensitivity(page: Page, label: string, scope = 'single') {
   await openElSelect(filterControl(page, 'iqr-multiplier'))
-  await page.locator(`.dp-iqr-popper-${scope}:visible .el-select-dropdown__item`)
-    .filter({ hasText: label }).first().click()
+  await page.locator(
+    `.el-popper.dp-iqr-popper-${scope}[aria-hidden="false"] .el-select-dropdown__item`,
+  ).filter({ hasText: label }).first().click()
 }
 
-/** 打开参数下拉后取全部选项文本（限定单文件 tab 自己的 popper 面板） */
+/**
+ * 分析页当前文件的**全部**参数名（后端返回顺序）。
+ *
+ * 旧实现是「打开下拉 → 数 DOM 选项 → Escape」，在 `el-select` 时代等于全集（因为渲染被
+ * 截断到 300，而测试文件都少于 300 项）；迁 `el-select-v2` 后 DOM 只有虚拟窗口那约 8 行，
+ * 数 DOM 就不再是「列表有多少项」的判据。改成读产品取全集用的同一次响应（见 paramList.ts）。
+ *
+ * 轮询不是可选装饰：旧 DOM 实现里 `options.first()` 的 15s 可见等待顺带承担了
+ * 「等新文件的列表响应落地」这一步；纯读捕获没有这一步，而 pickTabFileAndWaitCompute
+ * 等的是计算**请求发出**（首发计算可能带旧参数 400，早于列表响应处理完成）——
+ * 少了这步，chart-filter-switches:71 实测读到上一个文件的列表当全量基线。
+ */
 export async function listParams(page: Page): Promise<string[]> {
-  await openElSelect(paramSelect(page))
-  const options = visibleOptions(page, 'dp-param-popper-single')
-  await expect(options.first()).toBeVisible({ timeout: 15_000 })
-  const texts = (await options.allInnerTexts()).map((t) => t.trim()).filter(Boolean)
-  await page.keyboard.press('Escape')
-  return texts
+  await expect
+    .poll(() => capturedParamList(page).length, {
+      timeout: 15_000,
+      message:
+        '参数全集未就绪：监听在 gotoApp 里装；空到这里 = 还没选文件 / 监听装晚了 / 新文件的列表请求还没完成（见 paramList.ts）',
+    })
+    .toBeGreaterThan(0)
+  return capturedParamList(page)
 }
 
 /**
