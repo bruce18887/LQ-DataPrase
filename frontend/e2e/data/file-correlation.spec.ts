@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { SEEDED_FILES } from '../fixtures/test-data'
 import { gotoApp } from '../helpers/nav'
-import { elSelectByPlaceholder, visibleSelectOptions } from '../helpers/elplus'
+import { elSelectByPlaceholder, SERIAL_POPPER, visibleSelectOptions } from '../helpers/elplus'
 
 /**
  * 文件相关性对比（数据管理「文件对比」tab，2026-08-21 重构 / 2026-08-28 优化）。
@@ -34,6 +34,23 @@ async function pickFilePair(
   await elSelectByPlaceholder(section, '文件2 (Bench)').click()
   await visibleSelectOptions(page).filter({ hasText: SEEDED_FILES.BUYOFF_QA1 }).first().click()
   await page.waitForTimeout(600)
+}
+
+/**
+ * 从 `.fc-serial-hint` 取「已选 N」的 N（解析不出返回 -1，让 poll 红得可读）。
+ *
+ * 为什么要有这个：Enter 全选那条判据原来只比 **形状** `/已选 (\d+) \/ 共 \d+ 颗/`，
+ * 而基线那 10 颗本身就在形状里 —— Enter 一点没生效也照样绿。迁 `el-select-v2` 后
+ * 这层盲区必须闭掉：v2 自己在过滤 input 上绑了 Enter（`select-v2/src/select.mjs:227`，
+ * `withKeys(withModifiers(onKeyboardSelect, ['stop','prevent']), ['enter'])`），
+ * 它与组件 `@keydown.capture` 的「全选匹配」是同一条键的两种结果（+1 vs +整个匹配集），
+ * 光比形状分辨不了。取数比较是唯一能分辨这两者的证据。
+ */
+function selectedSerialCount(section: import('@playwright/test').Locator): Promise<number> {
+  return section.locator('.fc-serial-hint').textContent().then((t) => {
+    const m = /已选 (\d+) \/ 共 (\d+) 颗/.exec(t ?? '')
+    return m ? Number(m[1]) : -1
+  })
 }
 
 test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, () => {
@@ -188,23 +205,46 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
 
     // 打开序列下拉 → 过滤 '1' → Enter 全选匹配（与搜索测试项一致的交互）。
     // 注意：已选序列后占位文本消失，不能再用占位符定位 → 用容器 class；
-    // 下拉 teleport 到 body，footer 提示需从可见 dropdown 中取。
+    // 下拉 teleport 到 body，footer 提示必须从**本控件自己的** popper 里取
+    // （`popper-class` 是实例级身份，谓词见 helpers/elplus.ts 的 SERIAL_POPPER：
+    // 本页还有两个文件选择器的 .el-select-dropdown，收起的过渡帧里全局 :visible
+    // 会挑中正在退出的那一份）。
     const serialSel = section.locator('.fc-serial-sel .el-select')
+    const serialPopper = page.locator(`.el-popper.${SERIAL_POPPER}[aria-hidden="false"]`)
     // 首击即开（automatic-dropdown）且组件在打开时显式聚焦过滤框（EP 2.14 会把
     // 焦点困在 tabindex=-1 wrapper 上，不补聚焦则打字丢失）→ 打开即可直接打字
     await serialSel.click()
-    await expect(page.locator('.el-select-dropdown:visible')).toBeVisible()
+    await expect(serialPopper).toBeVisible()
     await page.keyboard.type('1')
-    await expect(page.locator('.el-select-dropdown:visible .match-hint')).toContainText('按 Enter 全选', { timeout: 5000 })
+    const matchHint = serialPopper.locator('.match-hint')
+    await expect(matchHint).toContainText('按 Enter 全选', { timeout: 5000 })
+    // Enter **之前**取匹配数：Enter 后 selectMatches() 会清空过滤，footer 提示随之消失。
+    const matchedCount = Number(/匹配 (\d+) 项/.exec((await matchHint.textContent()) ?? '')?.[1])
+    // 前提：匹配集必须比「基线 10 颗 + 1」还大，否则 +1（v2 自己的 Enter）与 +全集
+    // （组件的 Enter 全选）在数字上分不开，这条判据就白写（红了换关键词，别删用例）。
+    expect(
+      matchedCount,
+      `搜 '1' 只匹配 ${matchedCount} 项，不足以区分「全选匹配」与「只选中高亮项」`,
+    ).toBeGreaterThan(11)
     await page.keyboard.press('Enter')
-    // Enter 全选匹配（含 '1' 的序列）→ 已选数应大于默认 10
+    // 形状判据（原有，保持不动）+ 语义判据：已选数必须严格大于基线 10
     await expect
       .poll(() => section.locator('.fc-serial-hint').textContent())
       .toMatch(/已选 (\d+) \/ 共 \d+ 颗/)
+    await expect.poll(() => selectedSerialCount(section), { timeout: 10_000 }).toBeGreaterThan(10)
+    const afterEnter = await selectedSerialCount(section)
+    // 并集 ⊇ 匹配集 ⇒ 已选数至少等于匹配数（超过 200 时被 MAX_SELECTED 裁到 200）。
+    // 这一句才是「Enter 归组件而不是归 v2」的证据：被 v2 抢走时 afterEnter 只有 11。
+    // 2026-11-13 现测：种子对 BPD60320_FT/BPD60320_QA1 搜 '1' 匹配 1,113 项，
+    // Enter 后已选 = 200（clamp 生效，v2 的 :multiple-limit 没有把这条 emit 半路截掉）。
+    expect(afterEnter).toBeGreaterThanOrEqual(Math.min(matchedCount, 200))
     await page.keyboard.press('Escape')
 
     // 全选按钮 → 触达上限 200（el-table 无列虚拟化的安全上限；
     // 已选数上限 < 总数时提示「已选 200 / 共 N 颗（最多 200）」）
+    // ⚠ 这条路走的是组件的 selectAll()→clamp()，**不经过** v2 的 :multiple-limit
+    // （那个只约束「在面板里点选」）；上面 Enter 那条的匹配集若超过 200，clamp 同样
+    // 把它裁到 200 —— 两处都由 MAX_SELECTED 兜底，本用例的 200 判据对两者都成立。
     await section.getByRole('button', { name: '全选' }).click()
     await expect
       .poll(() => section.locator('.fc-serial-hint').textContent())
