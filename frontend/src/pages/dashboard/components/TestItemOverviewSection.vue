@@ -431,7 +431,7 @@ function getCpkTagType(cpkColor: string | null): 'success' | 'warning' | 'danger
   color: var(--text-2);
 }
 
-/* 封顶说明（与 .param-cap-hint / .preview-more 同族）：两主题都只走语义 token */
+/* 封顶说明（与 .param-count-hint / .preview-more 同族）：两主题都只走语义 token */
 .overview-cap-hint {
   margin-left: 8px;
   font-size: var(--p-fs-micro);
