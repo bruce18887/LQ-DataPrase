@@ -42,7 +42,7 @@
       <el-button
         text
         circle
-        class="icon-btn"
+        class="icon-btn icon-btn--intro"
         data-testid="open-intro"
         title="产品介绍书（新标签页打开）"
         aria-label="在新标签页打开产品介绍书"
@@ -341,6 +341,15 @@ const handleCommand = (command: string) => {
   outline: 2px solid var(--brand);
   outline-offset: 2px;
   border-radius: 4px;
+}
+
+/* 介绍书入口比邻居醒目一档：同尺寸、只换主文本色。只提这一颗 —— 铃铛与它共用 `.icon-btn`
+   （`--text-2`），两颗一起提亮就没有层级差，用户要的是「找得到」不是「最亮」；
+   头像那颗是 `--brand` 底上的反白，属另一族，与本条无关。
+   hover 不另写一条：共享的 `.icon-btn:hover` 特异性 (0,3,0) 已盖过本条 (0,2,0)，
+   实测悬停即落 `--brand`（判据见 e2e/theme/intro-icon-contrast.spec.ts），再补一条是死代码。 */
+.icon-btn--intro {
+  color: var(--text);
 }
 
 /* 用户菜单 */
