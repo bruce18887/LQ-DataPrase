@@ -10,6 +10,10 @@ import { popperOf } from './elplus'
  * Task 9C 又在 `data/view-data.spec.ts` 里复制了**第二份** `MAX_WINDOW_ROWS`：两份界值
  * 各改各的，漂移时只红一族。Task 9B 要给序列 / 测试列 / 导出 / 固定列四族补同一条判据，
  * 再复制就是五份 ⇒ 收进来，五族共用一个界。
+ *
+ * 刻意**不**搬进来的一样东西：`LEGACY_RENDER_CAP`（旧封顶 300）。它只在参数族那条夹具前提里
+ * 用，是那份夹具的一次性上下文；抽成公共 API 等于替另外四族规定「夹具也必须过 300」，
+ * 而导出族当下只有 41 项 —— 一次性上下文不该被洗成共享契约。
  */
 
 /**
@@ -17,10 +21,11 @@ import { popperOf } from './elplus'
  * `height:274 / itemHeight:34` ≈ 9 行，加 overscan 实测 11 行（2026-11-13）。留到 20 是
  * 给「以后有人调高面板」的余量；真正的判据是「远小于全集」，不是「等于 11」。
  *
- * 它同时是「不虚拟化、但也不截断」这种回退的唯一哨兵：那种实现下 DOM 会等于全集
+ * 它同时是「不虚拟化、但也不截断」这种回退的唯一哨兵：那种实现下 DOM 会等于候选集
  * （Task 5 实测 1,723 行、Task 9C 实测 1,728 行），这条必红，而 footer 那一族判据照样绿。
  *
- * ⚠ 前提是「当下这一屏的候选数」严格大于它，候选数小于界时这条恒真（见 `expectWindowRows`）。
+ * ⚠ 牙齿的前提是**当下这一屏的候选数严格大于它**（候选数小于界时两种实现都只挂那么几行），
+ * 所以候选数必须跟着进消息；各用例自己的前提断言留在用例里（族的夹具是族的事）。
  */
 export const MAX_WINDOW_ROWS = 20
 
@@ -32,10 +37,11 @@ export function windowItems(page: Page, popperClass: string): Locator {
 /**
  * 「窗口行数上限」这条判据的可复用形状：断言 DOM 行数 `< MAX_WINDOW_ROWS`，返回实测值。
  *
- * `candidates`（当下这一屏真正够得着的候选数，**从响应侧取**而不是数 DOM）只进失败消息，
- * 不进断言 —— 前提本身留给各用例自己断（`param-dropdown-full-list` 断「夹具 > 旧封顶 300」，
- * `view-data` 断「夹具是千列级」），因为各族的前提语义不同，塞进公共入口就是替五族拍板。
- * `label` 也只进消息：五族共用同一条界，红了得一眼看出是哪一族。
+ * `candidates` = 当下这一屏真正够得着的候选数（未过滤时是全集，过滤后是命中数），
+ * **必须从响应侧取**而不是数 DOM —— 数 DOM 正是本条要防的东西。它只进失败消息不进断言：
+ * 各族的前提语义不同（参数族断「夹具 > 旧封顶 300」、固定列断「千列级」、导出族当下只有
+ * 41 项），把前提塞进公共入口等于替五族拍板。但它在消息里必须出现，否则红的时候没人知道
+ * 这条到底有没有牙齿。
  */
 export async function expectWindowRows(items: Locator, candidates: number, label: string): Promise<number> {
   const rows = await items.count()

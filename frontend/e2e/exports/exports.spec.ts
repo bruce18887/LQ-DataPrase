@@ -7,6 +7,7 @@ import { gotoApp } from '../helpers/nav'
 import { uploadFile, expectUploadSuccess } from '../helpers/upload'
 import { elSelectByPlaceholder, EXPORT_PARAM_POPPER, popperOf } from '../helpers/elplus'
 import { paramKeysFromHistogram, pickBoundedKeyword } from '../helpers/params'
+import { expectWindowRows, MAX_WINDOW_ROWS, windowItems } from '../helpers/selectV2'
 
 /**
  * 导出能力（@p2）：Gage Summary / Buyoff Form。
@@ -21,24 +22,17 @@ import { paramKeysFromHistogram, pickBoundedKeyword } from '../helpers/params'
  * 注意：组件下载走 Blob + 动态 <a download> 点击，会触发真实 download 事件，
  * 因此可用 captureDownload 捕获 .xlsx。
  *
- * 选择器依据（已对照源码）：
- *   - DataManagement.vue:12-17  el-tab-pane label="Buyoff Form" / "Gage Summary"
- *   - GageSummary.vue:18         8 个 <el-select placeholder="选择文件">（Site 槽位）
- *   - GageSummary.vue:58-66      生成按钮文本含「生成 Gage Summary」，<2 时 disabled
- *   - GageSummary.vue:5          gageApi.generateSummary → POST /gage/generate_summary/
- *   - BuyoffForm.vue:15          3 个 <el-select placeholder="选择文件">（FT/QA1/QA2）
- *   - BuyoffForm.vue:99-107      生成按钮文本含「生成 Buyoff Form」，<2 时 disabled
- *   - BuyoffForm.vue:8           buyoffApi.generateForm → POST /buyoff/generate_form/
- *   - api/index.ts baseURL='/api/v1' → 实际路径 /api/v1/<...>
+ * 定位与端点（行号会漂，所以只记符号）：两个 tab 由 `DataManagement.vue` 的 el-tab-pane 承接，
+ * 表单在 `GageSummary.vue`（POST /gage/generate_summary/，8 个 placeholder="选择文件"）与
+ * `BuyoffForm.vue`（POST /buyoff/generate_form/，3 个同名 placeholder）—— 正因为两边同名，
+ * 页面级定位会跨面板命中 8+3 个，必须用 `:visible` 限定到当前激活面板。api/index.ts 的
+ * baseURL='/api/v1' ⇒ 实际路径带该前缀。
  */
 
 /**
  * 切到指定 el-tab，等待其面板标题可见，返回“当前可见 tabpanel”作用域。
- *
- * 注意：el-tabs 默认会把所有 el-tab-pane 渲染进 DOM（非激活面板 display:none）。
- * GageSummary(8) 与 BuyoffForm(3) 都使用 placeholder="选择文件" 的 el-select，
- * 因此页面级定位会跨面板命中 8+3 个。必须用 :visible 过滤到当前激活面板，
- * 计数与交互才准确。
+ * el-tabs 把所有 pane 都渲染进 DOM（非激活的那块 display:none），所以作用域必须落在
+ * 可见面板上 —— 计数与交互都靠它，见上面文件头那条「两边同名 placeholder」。
  */
 async function openTab(page: Page, tabLabel: string, panelHeading: string) {
   await gotoApp(page, '/data')
@@ -51,9 +45,8 @@ async function openTab(page: Page, tabLabel: string, panelHeading: string) {
 }
 
 /**
- * 条件等待下拉选项就绪（数量 > 0）；超时仍为 0 时静默返回当前数量，
- * 由调用方决定是否走 Escape 重试 / skip 分支。
- * （替代固定 waitForTimeout(200)：选项就绪快慢不定，固定等待两头都不稳）
+ * 条件等待下拉选项就绪（数量 > 0）；超时仍为 0 时静默返回当前数量，由调用方决定是否走
+ * Escape 重试 / skip 分支。（替代固定 waitForTimeout(200)：选项就绪快慢不定，固定等待两头都不稳）
  */
 async function waitForOptions(options: Locator): Promise<number> {
   await expect
@@ -64,9 +57,8 @@ async function waitForOptions(options: Locator): Promise<number> {
 }
 
 /**
- * 依次为前 N 个 el-select 选择不同文件。
- * el-select 选项 teleport 到 body（.el-select-dropdown__item），逐个打开并取“可用项”。
- * 返回成功分配的数量。
+ * 依次为前 N 个 el-select 选择不同文件；选项 teleport 到 body（.el-select-dropdown__item），
+ * 逐个打开并取“可用项”，返回成功分配的数量。
  */
 async function assignFiles(page: Page, selects: Locator, want: number): Promise<number> {
   let assigned = 0
@@ -109,9 +101,8 @@ async function assignFiles(page: Page, selects: Locator, want: number): Promise<
 }
 
 /**
- * 在指定 el-select 中按文件名选择选项（返回是否成功）。
- * Gage 槽位 = 工位编号，需要把「含对应工位」的文件放到正确槽位，
- * 因此不能像 assignFiles 那样取任意可用项。
+ * 在指定 el-select 中按文件名选择选项（返回是否成功）。Gage 槽位 = 工位编号，需要把「含对应工位」
+ * 的文件放到正确槽位，因此不能像 assignFiles 那样取任意可用项。
  */
 async function pickOptionByName(page: Page, sel: Locator, name: string): Promise<boolean> {
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -505,7 +496,10 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     await gotoApp(page, '/data')
     await page.locator('.tab-btn').filter({ hasText: '导出工具' }).click()
 
-    // 选择第一个文件（重试一次：并行负载下 /files/ API 可能未返回、选项为 0）
+    // 选择**指定**文件（重试一次：并行负载下 /files/ API 可能未返回、选项为 0）。Task 9B 起不再是
+    // `options.first()`：默认那一发只有 41 个参数，「第 301 项够得着」这个用户报的形状在 41 项上
+    // 表示不出来（41 < 旧封顶 300，截不截断长成一个样）；ETS88 现测 1,723 个参数，与
+    // param-dropdown-full-list 同一份夹具。
     const fileSelect = page.locator('.active-file-banner:visible .el-select').first()
     await fileSelect.click()
     const dropdown = page.locator('.el-select-dropdown:visible')
@@ -532,7 +526,12 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
         { timeout: 15_000 },
       )
       .catch(() => null)
-    await options.first().click()
+    // 自动等到 /files/options/ 落地为止；夹具真的不在这台库里就是**红**，不改 skip
+    const bigFileOption = options.filter({ hasText: SEEDED_FILES.ETS88_FT }).first()
+    await expect(bigFileOption, `导出夹具里找不到 ${SEEDED_FILES.ETS88_FT} ⇒ 大列表判据无从谈起`).toBeVisible({
+      timeout: 15_000,
+    })
+    await bigFileOption.click()
     await dropdown.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
     await histogramResp
 
@@ -556,6 +555,12 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
       test.skip(true, '该文件参数不足 2 个')
       return
     }
+    // 反截断正向判据（Task 9B，与 param-dropdown-full-list / file-correlation 同构）：**未输入关键词**
+    // 时量窗口行数 —— 这一屏的候选是整份 1,723 项全集 ⇒ 虚拟化没生效挂 1,723 行、旧封顶 300 放回来
+    // 挂 300 行，两种都红（41 项的默认夹具上「300」压根表示不出来，这就是换夹具的意义）。
+    // 界与推导在 helpers/selectV2.ts；红了换更大的夹具，别改成 skip。
+    expect(P.length, `导出夹具的参数数应当 > 界 ${MAX_WINDOW_ROWS}，现测 ${P.length} 项`).toBeGreaterThan(MAX_WINDOW_ROWS)
+    await expectWindowRows(windowItems(page, EXPORT_PARAM_POPPER), P.length, '导出参数下拉（未输入关键词）')
     // 点的仍是 DOM 第 2 行，但身份从这一行自己的文本取：按位置认作 P[1] 的话，虚拟窗口重排/点错行时期望值跟着一起错
     const row2 = paramOptions.nth(1)
     const picked = (await row2.textContent())?.trim() ?? ''
@@ -570,10 +575,11 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     expect(N, '关键字应至少匹配 1 个参数').toBeGreaterThanOrEqual(1)
 
     // filterable 输入框（v2 把 aria-label 绑在 input 本身，见 `select-v2/src/select.mjs:209`）：
-    // 填入关键字 → 下拉过滤 + footer 提示匹配数
+    // 填入关键字 → 下拉过滤 + footer 提示匹配数。**逐字**（Task 9B）而 N 从响应侧的 P 算（与产品
+    // 异源）⇒ 挡「footer 数的是窗口那 11 行」「文案改回『共 N 项』」「加回『仅显示前 N』」三种回退。
     const input = panel.locator('.el-select__input').first()
     await input.fill(kw)
-    await expect(paramPopper.locator('.match-hint')).toContainText(`匹配 ${N} 项，按 Enter 全选`)
+    await expect(paramPopper.locator('.match-hint')).toHaveText(`匹配 ${N} 项，按 Enter 全选`)
 
     // Enter 全选：已选 = {picked} ∪ 匹配集（picked 可能在匹配集中，用 Set 算实际值）
     const expected = new Set([picked, ...matchesArr]).size

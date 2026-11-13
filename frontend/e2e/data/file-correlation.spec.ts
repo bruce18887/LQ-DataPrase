@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import { SEEDED_FILES } from '../fixtures/test-data'
 import { gotoApp } from '../helpers/nav'
 import { elSelectByPlaceholder, popperOf, SERIAL_POPPER, visibleSelectOptions } from '../helpers/elplus'
+import { expectWindowRows, windowItems } from '../helpers/selectV2'
 
 /**
  * 文件相关性对比（数据管理「文件对比」tab，2026-08-21 重构 / 2026-08-28 优化）。
@@ -259,6 +260,20 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
       matchedCount,
       `搜 '1' 只匹配 ${matchedCount} 项，不足以区分「全选匹配」与「只选中高亮项」`,
     ).toBeGreaterThan(BASELINE_SERIALS + 1)
+    /*
+     * 反截断正向判据（Task 9B 给五族补齐的那两条，形式与 param-dropdown-full-list 逐字同构）：
+     *  - 行数：已过滤状态下量，候选就是上面那个 matchedCount（2026-11-13 现测 1,113 项）。
+     *    挡的回退只有一种：**虚拟化没生效 / 有人把候选集原样挂回 DOM**（迁回 el-select，
+     *    或给 v2 配一个不裁剪的渲染层）—— 那种实现下这一屏是 1,113 行而不是约 11 行。
+     *    footer 与下面「已选 ≥ min(N, 上限)」两条在同一个实现下一样会绿，只有这条兜得住。
+     *    界与推导在 helpers/selectV2.ts；红了是换关键词（要匹配数 > 界），不是把这条删掉。
+     *  - footer 逐字：现存的 `toContainText('按 Enter 全选')` 与那条 `匹配 (\\d+) 项` 的解析
+     *    合起来仍放得过「匹配 N 项，按 Enter 全选，仅显示前 300」这种文案（两支各自都还成立），
+     *    整串比掉才叫逐字。N 是从这句 DOM 里解析的，它的**数值**正确性不由本条兜 ——
+     *    由下面 Enter 之后那句「已选 ≥ min(matchedCount, MAX_SELECTED)」跨源兜（DOM 计数 vs 已选集）。
+     */
+    await expectWindowRows(windowItems(page, SERIAL_POPPER), matchedCount, '序列下拉（搜 "1" 后）')
+    await expect(matchHint).toHaveText(`匹配 ${matchedCount} 项，按 Enter 全选`)
     await page.keyboard.press('Enter')
     // 形状判据（原有，保持不动）+ 语义判据：已选数必须严格大于基线
     await expect
