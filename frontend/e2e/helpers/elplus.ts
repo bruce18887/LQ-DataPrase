@@ -41,9 +41,8 @@ export const COL_POPPER = 'dp-col-popper'
  * 收起那 ~150ms 的 leave 过渡帧里 `:visible` 与 `[aria-hidden="false"]` **一起脏**，
  * 会挑中正在退出的上一个面板，reference 零尺寸还会让 popper 逐帧重定位、`.first()`
  * 点到别家的选项（2026-11-13 Task 4/5 实测，采样表见 `helpers/params.ts:28-49`）。
- * **唯一有效的隔离是实例级 popper-class** —— 新用例请照 `file-correlation.spec.ts`
- * 的序列那两条写：`.el-popper.${SERIAL_POPPER}[aria-hidden="false"] …`，别用本函数
- * 查跨控件的选项。同一个谓词现在有个入口：下面的 `popperOf(page, <实例级类名>)`。
+ * **唯一有效的隔离是实例级 popper-class** —— 新用例别用本函数查跨控件的选项，
+ * 用下面的 `popperOf(page, <实例级类名>)`（那条谓词只在那一处写，别再内联第三份）。
  *
  * 消费者口径（2026-11-13 `grep -rn visibleSelectOptions e2e src test` 现数）：**直接**调用它的是
  * **1 个文件 / 6 处**（`e2e/data/file-correlation.spec.ts`），另有 **3 个文件**经本文件的
