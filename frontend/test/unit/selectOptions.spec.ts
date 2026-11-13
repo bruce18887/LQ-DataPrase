@@ -43,6 +43,12 @@ describe('filterByKeyword', () => {
   it('关键词无需调用方预归一化：原始大小写同样匹配', () => {
     expect(filterByKeyword(['Kelvin_VIN', 'IBLK'], 'KEL')).toEqual(['Kelvin_VIN'])
   })
+  // 这条是「签名为什么收 Array<string|number>」的判据：Task 6 的序列号下拉候选是 number[]，
+  // 只把 TS 类型放宽而行为仍按 string 处理（`it.toLowerCase` 当场 TypeError），本条即红。
+  it('收 number[]：按十进制字面匹配，不是数值比较', () => {
+    expect(filterByKeyword([1, 12, 21, 2], '1')).toEqual([1, 12, 21])
+    expect(filterByKeyword([1, 12, 21, 2], '2')).toEqual([12, 21, 2])
+  })
 })
 
 describe('sortPrefixFirst', () => {
@@ -57,6 +63,11 @@ describe('sortPrefixFirst', () => {
   })
   it('关键词原始大小写不影响前缀优先', () => {
     expect(sortPrefixFirst(['APAR1', 'PAR1'], 'PAR1')).toEqual(['PAR1', 'APAR1'])
+  })
+  it('收 number[]：按字符串前缀与 localeCompare 排，不做数值排序', () => {
+    // '1' < '12' < '2' 是字符串序；数值序会把 2 排在 12 前面 —— 这条钉住走的是前者，
+    // 与 el-select-v2 实际显示的 label（`String(value)`）一致。
+    expect(sortPrefixFirst([12, 2, 1], '1')).toEqual([1, 12, 2])
   })
 })
 
@@ -140,21 +151,33 @@ describe('buildParamOptions', () => {
     expect(r.total).toBe(4570)
     expect(r.options.length).toBe(4570)
   })
-  // I-1 的真判据：过滤侧与高亮侧共用同一归一化契约 ⇒ 凡被 buildParamOptions 放行的项，
-  // 用同一个原始 query 去算高亮必须至少命中一段。两侧各自 trim 不等于二者一致。
-  it('不变量：被过滤命中的每一项，高亮必命中至少一段', () => {
-    const params = ['PAR1', 'OTHER', 'A B', 'a  b', 'Kelvin_VIN', 'IBLK', 'V+(1)', 'XPAR1', 'P AR', 'par1x', '']
-    for (const query of ['  ', 'par', 'PAR ', ' a b ', 'kelvin', '+(', 'P AR', 'XPAR1 ', 'PAR1', 'A', '']) {
-      const { options } = buildParamOptions(params, query)
-      for (const o of options) {
+  // 一条 it 只管一件事：下面两条同源于「过滤与高亮共用归一化契约」，但红法不同 ——
+  // 「拼接无损」红在 highlightSegments 丢/多字符，「必命中一段」红在两侧归一化不一致。
+  // 塞进同一条 it 时前者会先抛，后者这半个判据当场失声（2026-11-13 质量复审 #7）。
+  const INVARIANT_PARAMS = [
+    'PAR1', 'OTHER', 'A B', 'a  b', 'Kelvin_VIN', 'IBLK', 'V+(1)', 'XPAR1', 'P AR', 'par1x', '',
+  ]
+  const INVARIANT_QUERIES = [
+    '  ', 'par', 'PAR ', ' a b ', 'kelvin', '+(', 'P AR', 'XPAR1 ', 'PAR1', 'A', '',
+  ]
+  it('不变量（无损）：分段拼回去逐字等于原 label', () => {
+    for (const query of INVARIANT_QUERIES) {
+      for (const o of buildParamOptions(INVARIANT_PARAMS, query).options) {
         const segs = highlightSegments(String(o.label), query)
         expect(segs.map((s) => s.text).join(''), `拼接无损: ${query}/${o.label}`).toBe(o.label)
-        if (query.trim()) {
-          expect(
-            segs.some((s) => s.mark),
-            `过滤命中但高亮没命中: query=${JSON.stringify(query)} label=${o.label}`,
-          ).toBe(true)
-        }
+      }
+    }
+  })
+  // I-1 的真判据：过滤侧与高亮侧共用同一归一化契约 ⇒ 凡被 buildParamOptions 放行的项，
+  // 用同一个原始 query 去算高亮必须至少命中一段。两侧各自 trim 不等于二者一致。
+  it('不变量（一致）：被过滤命中的每一项，高亮必命中至少一段', () => {
+    for (const query of INVARIANT_QUERIES) {
+      if (!query.trim()) continue
+      for (const o of buildParamOptions(INVARIANT_PARAMS, query).options) {
+        expect(
+          highlightSegments(String(o.label), query).some((s) => s.mark),
+          `过滤命中但高亮没命中: query=${JSON.stringify(query)} label=${o.label}`,
+        ).toBe(true)
       }
     }
   })

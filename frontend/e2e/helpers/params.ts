@@ -51,6 +51,16 @@ function visibleOptions(page: Page, popperClass: string) {
   return page.locator(`.el-popper.${popperClass}[aria-hidden="false"] .el-select-dropdown__item`)
 }
 
+/**
+ * ParamSelector 单文件实例的 popper 身份串 —— e2e 侧只有这一份。
+ *
+ * 它是 `ParamSelector.vue` 里 `popperClass` 的默认值（产品侧的事实）。以前 helper 的
+ * `selectParam` 与直接查虚拟窗口的用例各内联一份，产品改默认值时两处静默失配 ——
+ * 红法会从「定位不到」变成「匹配到隐藏面板」那种看不出根因的。多文件 tab 是另一个
+ * 实例（`dp-param-popper-multi`），不归本常量管。
+ */
+export const PARAM_POPPER_SINGLE = 'dp-param-popper-single'
+
 /** 分析页某 tab 的数据文件选择器（scope = 契约属性值，页内唯一） */
 export function filePicker(page: Page, scope: 'single' | 'wafer' | 'correlation' | 'multi' = 'single') {
   return page.locator(`[data-file-picker="${scope}"]`)
@@ -185,7 +195,7 @@ export async function selectParam(page: Page, name: string) {
   // filterable：向内部 input 输入以过滤
   const input = sel.locator('input').first()
   await input.fill(name)
-  const options = visibleOptions(page, 'dp-param-popper-single')
+  const options = visibleOptions(page, PARAM_POPPER_SINGLE)
   await options.filter({ hasText: name }).first().click()
 }
 

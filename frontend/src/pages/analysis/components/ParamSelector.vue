@@ -22,8 +22,12 @@
       <template #default="{ item }">
         <div class="param-option">
           <span class="param-name">
+            <!-- 分段算的是 **label**：EP 自己的兜底渲染的也是 `getLabel(item)`
+                 （`select-v2/src/select-dropdown.mjs:110`）。今天 label===String(value)，
+                 换成 item.value 看不出差别，但后面三个下拉一旦 label≠value（序列号要有
+                 「SN-3」这类展示名），照抄的这段就会高亮一个屏幕上根本不存在的文本。 -->
             <span
-              v-for="(seg, i) in segmentsFor(String(item.value))"
+              v-for="(seg, i) in segmentsFor(String(item.label))"
               :key="i"
               :class="{ 'param-name__hit': seg.mark }"
             >{{ seg.text }}</span>
@@ -85,7 +89,7 @@ function segmentsFor(name: string) {
 
 /**
  * `el-select-v2` 的 filter-method 在 2.14.0 里**不过滤**，只是回调
- * （`useSelect.mjs:114-132`）。这里只记关键词，过滤由上面的 `view` 承担。
+ * （`select-v2/src/useSelect.mjs:114-132`）。这里只记关键词，过滤由上面的 `view` 承担。
  */
 function filterMethod(query: string) {
   filterText.value = query
