@@ -53,6 +53,37 @@ function selectedSerialCount(section: import('@playwright/test').Locator): Promi
   })
 }
 
+/**
+ * 默认勾选的序列数（本文件的「基线」）。
+ *
+ * 界从它推，不是经验值：
+ * - 现测来源 = `FileCorrelationSection.vue` 拉完公共序列后的 `list.slice(0, 10)`，
+ *   页面上的落点 = `FileCorrelationControls.vue` 的 `serialsHint`（`已选 N / 共 M 颗（最多 200）`）；
+ * - `已选 > 基线` = 「Enter 全选确实改变了选择」的下界；
+ * - `匹配数 > 基线 + 1` = 「已选 ≥ min(匹配数, 200)」那句在 Enter 被 v2 抢走时仍能红的前提
+ *   （v2 的 Enter 净增最多 1 颗，见下面那条用例里的变异实测）。
+ * 本文件其它用例里同型的「已选 10」形状断言也一并走 `BASELINE_HINT`，让基线值只有一个落点。
+ */
+const BASELINE_SERIALS = 10
+
+/**
+ * 已选序列上限（组件里 `SerialSelector.vue` 的 `MAX_SELECTED`，两处必须同值）。
+ *
+ * 界由它推，两处判据共用：`min(匹配数, 上限)` 是「Enter 全选后已选数」的下界，
+ * `已选 N / 共 M 颗（最多 N）` 是「全选按钮触到顶」的提示形状。上限的存在理由在组件侧
+ * （el-table 没有列虚拟化，200 序列 × 4 列 ≈ 800 列已到现实极限），本文件不复述。
+ */
+const MAX_SELECTED_SERIALS = 200
+
+/** 「已选 <基线> / 共 N 颗」的形状判据（数字部分仍由 `\\d+` 兜，只有基线提出来） */
+const BASELINE_HINT = new RegExp(`已选 ${BASELINE_SERIALS} / 共 \\d+ 颗`)
+
+/**
+ * 必然匹配不到的关键词：公共序列是 `number[]`，label 走 `String(序列号)` ⇒ 只可能是数字，
+ * 字母 `z` 永远匹配不到 ⇒ 用它把「匹配集为空」这个前提做实，代价是一行都渲染不出来。
+ */
+const NO_MATCH_QUERY = 'zzzznope'
+
 test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, () => {
   test('面板控件齐全：文件选择/阈值/规则/序列勾选器/ignore 勾选', async ({ page }) => {
     await gotoApp(page, '/data')
@@ -124,7 +155,7 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
 
     // 公共序列加载完成 → 默认勾选前 10 颗
     const hint = section.locator('.fc-serial-hint')
-    await expect(hint).toContainText(/已选 10 \/ 共 \d+ 颗/, { timeout: 15_000 })
+    await expect(hint).toContainText(BASELINE_HINT, { timeout: 15_000 })
 
     await section.getByRole('button', { name: '分析', exact: true }).click()
 
@@ -181,7 +212,7 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
     const section = page.locator('.file-corr-section')
     await expect(section).toBeVisible({ timeout: 10_000 })
     await pickFilePair(section, page)
-    await expect(section.locator('.fc-serial-hint')).toContainText(/已选 10 \/ 共 \d+ 颗/, { timeout: 15_000 })
+    await expect(section.locator('.fc-serial-hint')).toContainText(BASELINE_HINT, { timeout: 15_000 })
     await section.getByRole('button', { name: '分析', exact: true }).click()
     await expect(section.locator('.fc-table')).toBeVisible({ timeout: 20_000 })
 
@@ -191,7 +222,7 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
     await page.locator('.tab-btn').filter({ hasText: '文件对比' }).click()
     await expect(section.locator('.fc-summary')).toBeVisible({ timeout: 20_000 })
     await expect(section.locator('.fc-table')).toBeVisible({ timeout: 20_000 })
-    await expect(section.locator('.fc-serial-hint')).toContainText(/已选 10 \/ 共 \d+ 颗/)
+    await expect(section.locator('.fc-serial-hint')).toContainText(BASELINE_HINT)
   })
 
   test('序列勾选：搜索 Enter 全选匹配 / 清空 → 仅对比 Limit', async ({ page }) => {
@@ -201,7 +232,7 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
     const section = page.locator('.file-corr-section')
     await expect(section).toBeVisible({ timeout: 10_000 })
     await pickFilePair(section, page)
-    await expect(section.locator('.fc-serial-hint')).toContainText(/已选 10 \/ 共 \d+ 颗/, { timeout: 15_000 })
+    await expect(section.locator('.fc-serial-hint')).toContainText(BASELINE_HINT, { timeout: 15_000 })
 
     // 打开序列下拉 → 过滤 '1' → Enter 全选匹配（与搜索测试项一致的交互）。
     // 注意：已选序列后占位文本消失，不能再用占位符定位 → 用容器 class；
@@ -220,35 +251,74 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
     await expect(matchHint).toContainText('按 Enter 全选', { timeout: 5000 })
     // Enter **之前**取匹配数：Enter 后 selectMatches() 会清空过滤，footer 提示随之消失。
     const matchedCount = Number(/匹配 (\d+) 项/.exec((await matchHint.textContent()) ?? '')?.[1])
-    // 前提：匹配集必须比「基线 10 颗 + 1」还大，否则 +1（v2 自己的 Enter）与 +全集
-    // （组件的 Enter 全选）在数字上分不开，这条判据就白写（红了换关键词，别删用例）。
+    // 前提（界由基线推出来，不是经验值）：v2 自己的 Enter 最多加 1 颗 ⇒ 要让下面
+    // 「已选 ≥ min(匹配数, 200)」那句在 Enter 被 v2 抢走时**必红**，匹配数必须严格大于
+    // 基线 + 1：只要求 > 基线的话，匹配数恰好 = 基线 + 1 时「v2 抢走 Enter 多加 1 颗」
+    // 也能凑到同一个数，判据就白写（红了换关键词，别删用例）。
     expect(
       matchedCount,
       `搜 '1' 只匹配 ${matchedCount} 项，不足以区分「全选匹配」与「只选中高亮项」`,
-    ).toBeGreaterThan(11)
+    ).toBeGreaterThan(BASELINE_SERIALS + 1)
     await page.keyboard.press('Enter')
-    // 形状判据（原有，保持不动）+ 语义判据：已选数必须严格大于基线 10
+    // 形状判据（原有，保持不动）+ 语义判据：已选数必须严格大于基线
     await expect
       .poll(() => section.locator('.fc-serial-hint').textContent())
       .toMatch(/已选 (\d+) \/ 共 \d+ 颗/)
-    await expect.poll(() => selectedSerialCount(section), { timeout: 10_000 }).toBeGreaterThan(10)
+    await expect
+      .poll(() => selectedSerialCount(section), { timeout: 10_000 })
+      .toBeGreaterThan(BASELINE_SERIALS)
     const afterEnter = await selectedSerialCount(section)
     // 并集 ⊇ 匹配集 ⇒ 已选数至少等于匹配数（超过 200 时被 MAX_SELECTED 裁到 200）。
-    // 这一句才是「Enter 归组件而不是归 v2」的证据：被 v2 抢走时 afterEnter 只有 11。
-    // 2026-11-13 现测：种子对 BPD60320_FT/BPD60320_QA1 搜 '1' 匹配 1,113 项，
-    // Enter 后已选 = 200（clamp 生效，v2 的 :multiple-limit 没有把这条 emit 半路截掉）。
-    expect(afterEnter).toBeGreaterThanOrEqual(Math.min(matchedCount, 200))
+    // 这一句才是「Enter 归组件而不是归 v2」的量级证据。
+    // ⚠ 病状值是**基线本身**，不是「基线 +1」：2026-11-13 变异实测（把 onSelectKeydown 的
+    // Enter 分支改成不拦截）红在上一句 `Expected: > 10, Received: 10` —— v2 自己选中的那个
+    // 高亮项本来就在默认勾选的前 10 颗里，多选它净增 0 颗。所以上一句那个 `> 基线` 就是
+    // 「Enter 到底归谁」的开关；下面这句给出量级。
+    // 同轮现测：种子对 BPD60320_FT/BPD60320_QA1 搜 '1' 匹配 1113 项 ⇒ 下面等价于断
+    // 「已选 ≥ 200」，而 clamp 的上界正是 200，所以 Enter 后已选恰好 200
+    // （v2 的 :multiple-limit 没有把这条 emit 半路截掉）。
+    expect(afterEnter).toBeGreaterThanOrEqual(Math.min(matchedCount, MAX_SELECTED_SERIALS))
+
+    /*
+     * 命名陷阱判据（Task 6 复审的「头号陷阱」，此前在现仓**零覆盖**）。
+     *
+     * 组件里那个 computed 必须叫 `selectOptions`、不能叫 `options`：props 已有
+     * `options: number[]`（= 全部公共序列），两边同名时模板解析的是 setup 里的那个 computed，
+     * `:disabled="options.length === 0"` 就从「有没有公共序列」变成「过滤后有没有匹配项」。
+     * **空关键词时两者恰好等价**（computed 那支返回全量）⇒ 本文件其余用例在它改名后照样全绿
+     * （2026-11-13 变异实测），唯一露馅的时刻是「搜一个匹配不到的串」。下面这段就是那个时刻。
+     *
+     * 位置选在 Enter 全选**之后**：那时面板还开着（selectMatches 只清过滤框、不收面板），
+     * 不必重开下拉，也不用再碰文件选择器。
+     */
+    await page.keyboard.type(NO_MATCH_QUERY)
+    // 前提坐实「匹配集为空」：footer 的「按 Enter 全选」是 `v-if="kw && matches.length > 0"`
+    // ⇒ 消失；el-select-v2 在 `filteredOptions.length === 0` 时渲染 #empty 槽（组件里那支
+    // `.empty-hint`「无匹配序列」）。两句在正确实现与注入的 bug 下**都成立**，它们不判别，
+    // 只保证下面那句禁没禁的判断不是建立在「其实还有匹配项」上。
+    await expect(matchHint).toHaveCount(0)
+    await expect(serialPopper.locator('.empty-hint')).toBeVisible()
+    // 病状判据：匹配集为空**不等于**没有公共序列 ⇒ 控件不许变成禁用态。
+    // 定位器按 EP 2.14 源码取：`select-v2/src/select.mjs:55-61` 把 `is("disabled", selectDisabled)`
+    // 挂在 `.el-select__wrapper` 上，**不在** `.el-select` 根节点 —— 写根节点这条会恒绿。
+    await expect(serialSel.locator('.el-select__wrapper')).not.toHaveClass(/is-disabled/)
+    // 反向防呆：上面那句若写歪成恒真（定位器指向根本没这个类的节点），这里清掉关键词后
+    // 已选数必须还是 Enter 那次的值 —— 打字/清理都不该动到选择，动到了就是这段写坏了。
+    await serialSel.locator('input').first().fill('')
+    await expect.poll(() => selectedSerialCount(section), { timeout: 10_000 }).toBe(afterEnter)
+    await expect(serialSel.locator('.el-select__wrapper')).not.toHaveClass(/is-disabled/)
     await page.keyboard.press('Escape')
 
-    // 全选按钮 → 触达上限 200（el-table 无列虚拟化的安全上限；
-    // 已选数上限 < 总数时提示「已选 200 / 共 N 颗（最多 200）」）
+    // 全选按钮 → 触达上限（提示形状「已选 N / 共 M 颗（最多 N）」只在已选数触顶时出现）
     // ⚠ 这条路走的是组件的 selectAll()→clamp()，**不经过** v2 的 :multiple-limit
-    // （那个只约束「在面板里点选」）；上面 Enter 那条的匹配集若超过 200，clamp 同样
-    // 把它裁到 200 —— 两处都由 MAX_SELECTED 兜底，本用例的 200 判据对两者都成立。
+    // （那个只约束「在面板里点选」）；上面 Enter 那条的匹配集若超过上限，clamp 同样
+    // 把它裁到上限 —— 两处都由组件的 MAX_SELECTED 兜底，本用例的上限判据对两者都成立。
     await section.getByRole('button', { name: '全选' }).click()
     await expect
       .poll(() => section.locator('.fc-serial-hint').textContent())
-      .toMatch(/已选 200 \/ 共 \d+ 颗（最多 200）/)
+      .toMatch(
+        new RegExp(`已选 ${MAX_SELECTED_SERIALS} / 共 \\d+ 颗（最多 ${MAX_SELECTED_SERIALS}）`),
+      )
 
     // 清空 → 未选择提示
     await section.getByRole('button', { name: '清空' }).click()
@@ -267,7 +337,7 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
     const section = page.locator('.file-corr-section')
     await expect(section).toBeVisible({ timeout: 10_000 })
     await pickFilePair(section, page)
-    await expect(section.locator('.fc-serial-hint')).toContainText(/已选 10 \/ 共 \d+ 颗/, { timeout: 15_000 })
+    await expect(section.locator('.fc-serial-hint')).toContainText(BASELINE_HINT, { timeout: 15_000 })
 
     // 选规则 C（默认容差 30）→ 分析 → Limit 视图
     await section.locator('.el-radio-group').first()
@@ -348,7 +418,7 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
     const section = page.locator('.file-corr-section')
     await expect(section).toBeVisible({ timeout: 10_000 })
     await pickFilePair(section, page)
-    await expect(section.locator('.fc-serial-hint')).toContainText(/已选 10 \/ 共 \d+ 颗/, { timeout: 15_000 })
+    await expect(section.locator('.fc-serial-hint')).toContainText(BASELINE_HINT, { timeout: 15_000 })
 
     await section.getByRole('button', { name: '分析', exact: true }).click()
     await expect(section.locator('.fc-table')).toBeVisible({ timeout: 30_000 })

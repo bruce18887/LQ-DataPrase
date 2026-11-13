@@ -29,7 +29,15 @@ export const SERIAL_POPPER = 'dp-serial-popper'
  * 点到别家的选项（2026-11-13 Task 4/5 实测，采样表见 `helpers/params.ts:28-49`）。
  * **唯一有效的隔离是实例级 popper-class** —— 新用例请照 `file-correlation.spec.ts`
  * 的序列那两条写：`.el-popper.${SERIAL_POPPER}[aria-hidden="false"] …`，别用本函数
- * 查跨控件的选项。给现有 6 个消费者逐个补类名是本批收口的专项。
+ * 查跨控件的选项。
+ *
+ * 消费者口径（2026-11-13 `grep -rn visibleSelectOptions e2e src test` 现数）：**直接**调用它的是
+ * **1 个文件 / 6 处**（`e2e/data/file-correlation.spec.ts`），另有 **3 个文件**经本文件的
+ * `pickOption` 间接使用（`e2e/analysis/analysis.spec.ts`、`e2e/analysis/axis-label-precision.spec.ts`、
+ * `e2e/analysis/correlation-file-switch-reset.spec.ts`），合计 **4 个文件**。
+ * 「6」是调用点数不是文件数 —— 按它去补类名会多找两个并不存在的消费者
+ * （`e2e/exports/exports.spec.ts` 的 `pickOptionByName` 是它自己的本地函数，不走本 helper，别算进来）。
+ * 给这 4 个文件逐个补实例级类名是本批收口的专项。
  */
 export function visibleSelectOptions(page: Page): Locator {
   return page.locator('.el-select-dropdown__item:visible')
