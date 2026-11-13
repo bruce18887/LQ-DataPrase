@@ -4,17 +4,15 @@ import { gotoApp } from '../helpers/nav'
 import { openViewTab, openFileInViewTab } from '../helpers/viewTab'
 import { captureDownload } from '../helpers/download'
 import { COL_POPPER, elSelectByPlaceholder, PIN_COL_POPPER, popperOf } from '../helpers/elplus'
+import { expectWindowRows, MAX_WINDOW_ROWS, windowItems } from '../helpers/selectV2'
 
 /**
- * 固定列下拉（Task 9C 迁 el-select-v2 之后）的行数预算。上界由 EP `select-v2/src/defaults.mjs` 的
- * `height:274 / itemHeight:34` ≈ 9 行加 overscan 推出（Task 5 实测 11 行），留到 20 是给「以后有人调高
- * 面板」的余量 —— 真正的判据是「远小于全集」不是「等于 11」，Task 9B 会把它与
- * `param-dropdown-full-list.spec.ts` 那份 `MAX_WINDOW_ROWS` 一起提进 helper。不设「打开耗时」的 ms 界
- * （同族先例也只在注释记实测值）：2026-11-13 变异实测退回未封顶 v1 时整条 2.3–3.1s、与 v2 的 2.9s 同族
- * ⇒ 宽到能过的界永不触发，能分开两族的界又落在并行 workers 的噪声里必 flake。反冻结由这条 rows 判据 +
- * 既有 15s `toBeVisible` 承担，实测 ms 只并进失败消息供阅读。
+ * 窗口行数上界与「DOM 里只该有窗口那几行」那条判据的形状现在住在 `helpers/selectV2.ts`
+ * （Task 9B 收口，此前本文件复制过第二份界值）。不设「打开耗时」的 ms 界（同族先例也只在注释记
+ * 实测值）：2026-11-13 变异实测退回未封顶 v1 时整条 2.3–3.1s、与 v2 的 2.9s 同族 ⇒ 宽到能过的界
+ * 永不触发，能分开两族的界又落在并行 workers 的噪声里必 flake。反冻结由 rows 判据 + 既有 15s
+ * `toBeVisible` 承担，实测 ms 只并进失败消息供阅读。
  */
-const PIN_COL_WINDOW_ROWS_MAX = 20
 
 /** 查看数据 tab（当前可见 section）的顶层容器 */
 function viewScope(page: Page) {
@@ -385,12 +383,10 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     expect(cols.length, `夹具应是千列级，现测 ${cols.length} 列`).toBeGreaterThan(300)
 
     const pinSelect = viewScope(page).locator('.el-select:has(input[aria-label="固定列"])').first()
-    const items = popperOf(page, PIN_COL_POPPER).locator('.el-select-dropdown__item')
+    const items = windowItems(page, PIN_COL_POPPER)
     const t0 = Date.now()
     await pinSelect.locator('.el-select__wrapper').click()
     await expect(items.first()).toBeVisible({ timeout: 15_000 })
-    const firstRowMs = Date.now() - t0
-    const rows = await items.count()
     // 第二条判据抓的是「`:options` 喂了 string[]」：useProps 取不到 label ⇒ 每行空白，
     // 而行数照样是窗口那几行，只靠下面那条 rows 抓不到它。两条变异各证一半（2026-11-13 实测：
     // 喂 string[] 红在这里、退回未封顶 v1 红在 rows=1728）。
@@ -406,8 +402,27 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
         return false
       })
 
-    expect(rows, `DOM 里只该有虚拟窗口那几行（实测 ${rows} 行 / 打开耗时 ${firstRowMs}ms，全集 ${cols.length} 列）`).toBeLessThan(PIN_COL_WINDOW_ROWS_MAX)
+    // rows 判据从 Task 9B 起走共享入口（此前本文件复制了第二份 MAX_WINDOW_ROWS）；
+    // 打开耗时并进 label，红的时候看得出是不是「1,728 行全挂」那种卡死形状。
+    await expectWindowRows(items, cols.length, `固定列下拉 / 打开耗时 ${Date.now() - t0}ms`)
     expect(extras, `窗口里出现全集之外的行（空白行 = :options 喂了 string[]）`).toEqual([])
+
+    /*
+     * footer 那一侧：本控件**没有** footer（Task 9C 明确没加，另四族才有「匹配 N 项，按 Enter
+     * 全选」那句），所以能逐字钉住的事实是「什么都不显示」。两条各挡一种回退：
+     *  - `.el-select-dropdown__footer` 不存在（v2 只在有 $slots.footer 时才渲染那层 div）：挡
+     *    「把四族的 footer 复制过来却不接 kw/matches」—— 复制那支会显示「匹配 0 项」这种谎话，
+     *    而另四族有各自那条空关键词反例兜着，本控件没有，只有这条抓得住；
+     *  - 搜一个匹配不到的串 ⇒ 窗口 0 行（空态由 EP 内置 `__empty` 兜，2026-11-13 实测文案
+     *    'No matching data'，刻意不把这句钉进断言：那是库的默认 locale 文案，不是产品文案）：
+     *    本控件刻意**不传** filter-method（传了 v2 就把过滤整个交给回调、isValidOption 恒真，见
+     *    DataBrowserToolbar.vue 模板注释）⇒ 这条挡「照抄另四族的 filter-method（空实现）」。
+     */
+    await pinSelect.locator('input').first().fill('zzzz-不存在的列名')
+    const pinPopper = popperOf(page, PIN_COL_POPPER)
+    await expect(items).toHaveCount(0)
+    await expect(pinPopper.locator('.el-select-dropdown__footer')).toHaveCount(0)
+    await expect(pinPopper.locator('.el-select-dropdown__empty')).toBeVisible()
   })
 
   test('@p1 Pass/Fail 筛选：未选文件时预选，切文件后筛选重置（契约升级）', async ({ page }) => {
@@ -759,7 +774,7 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     await openViewTab(page, SEEDED_FILES.GAGE_S1)
 
     // 找出现频次最高的 3 字符前缀作为关键词（≥2 匹配是下面「窗口每一条都得 is-selected」的病状前提）
-    const { kw, matchCount } = await page.evaluate(async (filename) => {
+    const { kw, matchCount, testColCount } = await page.evaluate(async (filename) => {
       const token = localStorage.getItem('access_token')
       const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
       const files = await fetch(`/api/v1/files/?search=${encodeURIComponent(filename)}`, { headers }).then((r) => r.json())
@@ -778,20 +793,31 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
         if (n > bestCount) { best = p; bestCount = n }
       }
       const matched = best ? testCols.filter((c: string) => c.toLowerCase().includes(best)) : []
-      return { kw: best, matchCount: matched.length }
+      return { kw: best, matchCount: matched.length, testColCount: testCols.length }
     }, SEEDED_FILES.GAGE_S1)
     expect(kw).toBeTruthy()
     expect(matchCount).toBeGreaterThanOrEqual(2)
 
     const selector = viewScope(page).locator('.test-col-selector:has(input[aria-label="显示测试列"])').first()
     await selector.locator('.el-select__wrapper').click()
+    const colItems = windowItems(page, COL_POPPER)
+    await expect(colItems.first()).toBeVisible({ timeout: 5_000 })
+    // 反截断正向判据（Task 9B）：**未输入关键词**时量行数才有牙齿 —— 这一屏的候选是整份测试列
+    // 全集（现测 300+ 列），不虚拟化就必然把全集挂回 DOM；已过滤状态下候选可能只剩几项，
+    // 「< 20 行」在两种实现下都会绿。红了换更大的夹具，别改成 skip。
+    expect(testColCount, `夹具应是「测试列远多于窗口行数」的量级，现测 ${testColCount} 列`).toBeGreaterThan(MAX_WINDOW_ROWS)
+    await expectWindowRows(colItems, testColCount, '测试列下拉（未输入关键词）')
     const input = selector.locator('input[aria-label="显示测试列"]')
     // fill 也派发 input ⇒ 与逐键一样触发过滤（旧注释「必须逐键输入」是 2026-08 的错账，机理见计划订正）
     await input.pressSequentially(kw)
 
-    // footer 提示「匹配 N 项，按 Enter 全选」（空关键词时那条反例见上面 @p1 那条用例）
+    // footer 提示「匹配 N 项，按 Enter 全选」，**逐字**而不是 toContainText（Task 9B）：
+    // N 来自 API 侧的 testCols 命中数（与产品异源），整串比掉之后「匹配 / 项，按 Enter 全选」
+    // 这四段措辞与顺序都钉死 —— 挡的是「把四族的 footer 改回旧文案『共 N 项』或加回
+    // 『仅显示前 N』」，那种回退在 toContainText 下只会红一半（子串还在）。
+    // （空关键词时那条反例见上面 @p1 那条用例）
     const hint = popperOf(page, COL_POPPER).locator('.match-hint')
-    await expect(hint).toContainText(`匹配 ${matchCount} 项`, { timeout: 5_000 })
+    await expect(hint).toHaveText(`匹配 ${matchCount} 项，按 Enter 全选`, { timeout: 5_000 })
     await input.press('Enter')
 
     // 判据换成「重搜同一词 ⇒ 窗口里每一条都 is-selected」：Enter 清空过滤后 v2 只渲染窗口那十来行，
