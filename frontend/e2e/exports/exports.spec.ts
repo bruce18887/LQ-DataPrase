@@ -435,19 +435,15 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     const paramPopper = popperOf(page, EXPORT_PARAM_POPPER)
     await expect(paramPopper).toBeVisible({ timeout: 5_000 })
     const P = await paramKeysFromHistogram(histogramResp)
-    if (P.length < 2) {
-      await page.keyboard.press('Escape')
-      test.skip(true, '该文件可导出参数不足 2 个')
-      return
-    }
     const bound = pickBoundedKeyword(P, EXPORT_PARAM_SELECT_CAP)
     // 造不出「≥2 且有界」的关键词时**红**而不是 skip：skip 等于把这条判据删掉
     // （param-dropdown-full-list.spec.ts:132 同一条纪律）—— 换夹具或改策略，别放行。
     if (!bound) throw new Error(`参数全集 ${P.length} 项里造不出匹配数 ∈ [2, ${EXPORT_PARAM_SELECT_CAP}] 的关键词`)
     const input = panel.locator('.el-select__input').first()
     await input.fill(bound.kw)
-    // footer 的匹配数来自组件的 matches（渲染侧读数），期望值来自响应 ⇒ 异源交叉
-    await expect(paramPopper.locator('.match-hint')).toContainText(`匹配 ${bound.count} 项`)
+    // footer 的匹配数来自组件的 matches（渲染侧读数），期望值来自响应 ⇒ 异源交叉。
+    // 逐字（与下面 :581 那条同一纪律）：只 `toContainText('匹配 N 项')` 时文案后半句怎么改都不红。
+    await expect(paramPopper.locator('.match-hint')).toHaveText(`匹配 ${bound.count} 项，按 Enter 全选`)
     await input.press('Enter')
     await expect(panel.locator('.step-count')).toContainText(`已选 ${bound.count} / 共 ${P.length} 个`)
     await page.keyboard.press('Escape')
@@ -554,12 +550,12 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
       // 走到这里 = 夹具形状变了（不是产品坏了）：换回千级参数的夹具，别把它降级成 skip ⇒ skip 会静默摘掉这条判据
       throw new Error(`导出夹具 ${SEEDED_FILES.ETS88_FT} 只有 ${P.length} 个参数 ⇒ 换夹具，不接受 skip`)
     }
-    // 反截断正向判据（Task 9B，与 param-dropdown-full-list / file-correlation 同构）：**未输入关键词**
-    // 时量窗口行数 —— 这一屏的候选是整份 1,723 项全集 ⇒ 虚拟化没生效挂 1,723 行、旧封顶 300 放回来
-    // 挂 300 行，两种都红（41 项的默认夹具上「300」压根表示不出来，这就是换夹具的意义）。
-    // 界与推导在 helpers/selectV2.ts；红了换更大的夹具，别改成 skip。
+    // 反截断正向判据（Task 9B，与 param-dropdown-full-list / file-correlation 同构）：**未输入关键词**时量
+    // 窗口行数 —— 这一屏候选是整份 1,723 项全集 ⇒ 虚拟化没生效挂 1,723 行、旧封顶放回来挂 300 行，两种都红。
     expect(P.length, `导出夹具的参数数应当 > 界 ${MAX_WINDOW_ROWS}，现测 ${P.length} 项`).toBeGreaterThan(MAX_WINDOW_ROWS)
     await expectWindowRows(windowItems(page, EXPORT_PARAM_POPPER), P.length, '导出参数下拉（未输入关键词）')
+    // 空关键词时 footer 那句不许出现（组件里是 `v-if="kw && matches.length > 0"`）—— 与 col 族同一条反例，挡「复制 footer 却不接 kw」
+    await expect(paramPopper.locator('.match-hint')).toHaveCount(0)
     // 点的仍是 DOM 第 2 行，但身份从这一行自己的文本取：按位置认作 P[1] 的话，虚拟窗口重排/点错行时期望值跟着一起错
     const row2 = paramOptions.nth(1)
     const picked = (await row2.textContent())?.trim() ?? ''
@@ -567,21 +563,27 @@ test.describe('@p2 导出 - Export Tools Tab', { tag: ['@p2', '@exports'] }, () 
     await row2.click()
     await expect(panel.locator('.step-count')).toContainText('已选 1 /')
 
-    // 关键字 = 第一个参数名的前 6 字符（保证 ≥1 匹配），N 从页面参数列表自算
-    const kw = P[0].slice(0, 6)
-    const matchesArr = P.filter((p) => p.toLowerCase().includes(kw.toLowerCase()))
+    // 关键词由 `pickBoundedKeyword` 从「除基线那颗以外」的候选里造 ⇒ 命中数 ∈ [2, cap]。判别力前提是并集
+    // ≥3：只命中 1 项时「Enter 全选」与「v2 只选中高亮那一行」算出同一个数（旧 `N ≥ 1` 判不出，收口池
+    // 2026-11-14 实测 `P[0]` 前 6 字符在这份夹具上恰好只命中 1 项，当场红给我看）。
+    const others = P.filter((p) => p !== picked)
+    const bound = pickBoundedKeyword(others, EXPORT_PARAM_SELECT_CAP)
+    if (!bound) throw new Error(`除 ${picked} 外造不出匹配数 ∈ [2, ${EXPORT_PARAM_SELECT_CAP}] 的关键词 ⇒ 换夹具`)
+    // 基线那颗不许含这关键词：含了组件数到的匹配集就比这里多一项，footer 与并集两句都得跟着重算
+    expect(picked.toLowerCase().includes(bound.kw), `picked ${picked} 命中关键词 ${bound.kw}`).toBe(false)
+    const matchesArr = P.filter((p) => p.toLowerCase().includes(bound.kw.toLowerCase()))
     const N = matchesArr.length
-    expect(N, '关键字应至少匹配 1 个参数').toBeGreaterThanOrEqual(1)
+    // picked 已被上一条挡在匹配集外 ⇒ 并集 = 命中数 + 1，且 ≥3（下界 2 由 test/unit/boundedKeyword.spec.ts 钉着）
+    const expected = N + 1
 
-    // filterable 输入框（v2 把 aria-label 绑在 input 本身，见 `select-v2/src/select.mjs:209`）：
-    // 填入关键字 → 下拉过滤 + footer 提示匹配数。**逐字**（Task 9B）而 N 从响应侧的 P 算（与产品
-    // 异源）⇒ 挡「footer 数的是窗口那 11 行」「文案改回『共 N 项』」「加回『仅显示前 N』」三种回退。
+    // filterable 输入框（v2 把 aria-label 绑在 input 本身，见 `select-v2/src/select.mjs:209`）：填入关键字
+    // → footer 提示匹配数。**逐字**（Task 9B）而 N 从响应侧的 P 自算（与产品异源）⇒ 挡「footer 数的是窗口
+    // 那 11 行」「文案改回『共 N 项』」「加回『仅显示前 N』」三种回退。
     const input = panel.locator('.el-select__input').first()
-    await input.fill(kw)
+    await input.fill(bound.kw)
     await expect(paramPopper.locator('.match-hint')).toHaveText(`匹配 ${N} 项，按 Enter 全选`)
 
-    // Enter 全选：已选 = {picked} ∪ 匹配集（picked 可能在匹配集中，用 Set 算实际值）
-    const expected = new Set([picked, ...matchesArr]).size
+    // Enter 全选：已选 = {picked} ∪ 匹配集（picked 可能在匹配集中，用上面算好的 Set 大小）
     await input.press('Enter')
     await expect(panel.locator('.step-count')).toContainText(`已选 ${expected} / 共 ${P.length} 个`)
 
