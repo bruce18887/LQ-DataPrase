@@ -23,23 +23,15 @@ export const SERIAL_POPPER = 'dp-serial-popper'
 /**
  * 当前可见下拉选项。
  *
- * 传 `popperClass` 时限定在该控件**自己的** popper 内（谓词与 `helpers/params.ts` 的
- * `visibleOptions` 逐字相同：`.el-popper.<cls>[aria-hidden="false"]`）——同名 popper
- * 有多份实例时（隐藏 tab / 本页其它下拉），收起那 ~150ms leave 过渡帧里
- * `:visible` 与 `[aria-hidden="false"]` **一起脏**，会挑中正在退出的上一个面板，
- * reference 零尺寸还会让 popper 逐帧重定位、`.first()` 点到别家的选项。
- * **唯一有效的隔离是实例级 popper-class**（2026-11-13 Task 4/5 实测，详见
- * `helpers/params.ts:28-49` 的采样表）。
- *
- * 不传时保持旧的全局 `:visible` 行为：现有 6 个消费者文件仍按旧形状跑，
- * 给它们逐个补类名是本批收口的专项，不在本次改动面内。
+ * ⚠ 这是**全局**查询，同名 popper 有多份实例时不保险（隐藏 tab / 同页其它下拉）：
+ * 收起那 ~150ms 的 leave 过渡帧里 `:visible` 与 `[aria-hidden="false"]` **一起脏**，
+ * 会挑中正在退出的上一个面板，reference 零尺寸还会让 popper 逐帧重定位、`.first()`
+ * 点到别家的选项（2026-11-13 Task 4/5 实测，采样表见 `helpers/params.ts:28-49`）。
+ * **唯一有效的隔离是实例级 popper-class** —— 新用例请照 `file-correlation.spec.ts`
+ * 的序列那两条写：`.el-popper.${SERIAL_POPPER}[aria-hidden="false"] …`，别用本函数
+ * 查跨控件的选项。给现有 6 个消费者逐个补类名是本批收口的专项。
  */
-export function visibleSelectOptions(page: Page, popperClass?: string): Locator {
-  if (popperClass) {
-    return page.locator(
-      `.el-popper.${popperClass}[aria-hidden="false"] .el-select-dropdown__item`,
-    )
-  }
+export function visibleSelectOptions(page: Page): Locator {
   return page.locator('.el-select-dropdown__item:visible')
 }
 
