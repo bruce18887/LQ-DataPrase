@@ -3,7 +3,18 @@ import { SEEDED_FILES } from '../fixtures/test-data'
 import { gotoApp } from '../helpers/nav'
 import { openViewTab, openFileInViewTab } from '../helpers/viewTab'
 import { captureDownload } from '../helpers/download'
-import { COL_POPPER, elSelectByPlaceholder, popperOf } from '../helpers/elplus'
+import { COL_POPPER, elSelectByPlaceholder, PIN_COL_POPPER, popperOf } from '../helpers/elplus'
+
+/**
+ * 固定列下拉（Task 9C 迁 el-select-v2 之后）的两条预算。
+ * 行数上界由 EP `select-v2/src/defaults.mjs` 的 `height:274 / itemHeight:34` ≈ 9 行加 overscan
+ * 推出（Task 5 实测 11 行），留到 20 是给「以后有人调高面板」的余量 —— 真正的判据是「远小于
+ * 全集」而不是「等于 11」，Task 9B 会把它与 `param-dropdown-full-list.spec.ts` 那份
+ * `MAX_WINDOW_ROWS` 一起提进 helper。耗时那 3s 是并发 workers 的负载余量（虚拟窗口实测百毫秒级，
+ * 而它取代的那个未封顶 v1 在这里挂的是全集个组件实例）。
+ */
+const PIN_COL_WINDOW_ROWS_MAX = 20
+const PIN_COL_OPEN_MS_MAX = 3_000
 
 /** 查看数据 tab（当前可见 section）的顶层容器 */
 function viewScope(page: Page) {
@@ -171,7 +182,7 @@ async function fetchFirstTestCols(page: Page, filename: string) {
   }, filename)
 }
 
-/** 后端 page==1 下发的两个权威列名：Bin 列与序列列（四种格式序列列名各不相同） */
+/** 后端 page==1 下发的权威列口径：Bin 列 / 序列列（四种格式序列列名各不相同）/ 全部列名 */
 async function fetchPinDefaults(page: Page, filename: string) {
   return page.evaluate(async (filename) => {
     const token = localStorage.getItem('access_token')
@@ -183,6 +194,8 @@ async function fetchPinDefaults(page: Page, filename: string) {
       bin: (d.bin_column ?? '') as string,
       serial: (d.serial_column ?? '') as string,
       systemColumns: (d.system_columns ?? []) as string[],
+      // 产品侧固定列下拉的 allCols 就是这一个数组（DataBrowserAgGrid.vue:521 取 d.headers）
+      cols: (d.headers ?? []) as string[],
     }
   }, filename)
 }
@@ -311,29 +324,32 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     await openViewTab(page, SEEDED_FILES.GAGE_S1)
     await expect(page.locator('.ag-root').first()).toBeVisible({ timeout: 30_000 })
 
-    const { bin, serial, systemColumns } = await fetchPinDefaults(page, SEEDED_FILES.GAGE_S1)
+    const { bin, serial, systemColumns, cols } = await fetchPinDefaults(page, SEEDED_FILES.GAGE_S1)
     const skip = new Set([bin, serial, ...systemColumns])
 
     // 打开固定列下拉（多选）：用 aria-label 定位输入框所在 select，点击 wrapper 打开
     const pinSelect = viewScope(page).locator('.el-select:has(input[aria-label="固定列"])').first()
     await pinSelect.locator('.el-select__wrapper').click()
-    // 等待下拉动画完成、选项渲染（选项依赖 numericColumns 就位，负载下 5s 不够）
-    const options = page.locator('.el-select-dropdown:visible .el-select-dropdown__item')
+    // 等待下拉动画完成、选项渲染（选项依赖 numericColumns 就位，负载下 5s 不够）。
+    // 选项一律按实例取（谓词只在 popperOf 一处写）：本页 6 个下拉共用 .el-select-dropdown。
+    const options = popperOf(page, PIN_COL_POPPER).locator('.el-select-dropdown__item')
     await expect(options.first()).toBeVisible({ timeout: 15_000 })
-    const count = await options.count()
-    expect(count).toBeGreaterThan(2)
+    expect(await options.count()).toBeGreaterThan(2)
 
-    // 取两个「未固定且非系统列」的列作素材：系统列里的 Part_No/Dut_Pass/X_COORD 等
-    // 被「默认隐藏列」设置 hide 掉了，钉一个隐藏列在界面上没有任何可见结果。
-    const targets: string[] = []
-    for (let i = 0; i < count && targets.length < 2; i++) {
-      const t = (await options.nth(i).textContent())?.trim() ?? ''
-      if (t && !skip.has(t)) {
-        targets.push(t)
-        await options.nth(i).click()
-      }
-    }
+    // 素材改从 API 的列全集取、再按名搜出来点：原先那个「遍历 DOM 前 count 行」的循环在
+    // v2 下只会拿到虚拟窗口那约 11 行，而 gage 文件开头 11 列全是系统/Bin/序列列（2026-11-13
+    // 实测 targets 恒空）—— 让 DOM 位置兼任「列表里有哪些列」正是这批迁移要拆掉的耦合。
+    // 系统列本身也不能钉：它们被「默认隐藏列」设置 hide 掉了，钉一个隐藏列没有可见结果。
+    const targets = cols.filter((c) => !skip.has(c)).slice(0, 2)
     expect(targets, '应存在两个未固定的列可作素材').toHaveLength(2)
+    const pinInput = pinSelect.locator('input').first()
+    for (const t of targets) {
+      await pinInput.fill(t)
+      // role + exact 而不是 hasText：后者是子串匹配，'X_COORD' 会命中 'X_COORD_2'
+      await popperOf(page, PIN_COL_POPPER)
+        .getByRole('option', { name: t, exact: true })
+        .click()
+    }
     // 多选下拉点选项不收起，Escape 收回后再看表格
     await page.keyboard.press('Escape')
 
@@ -353,6 +369,46 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
         page.locator(`.ag-pinned-left-cols-container .ag-cell[col-id="${t}"]`).first(),
       ).toBeVisible()
     }
+  })
+
+  /**
+   * §2.9 的验收，也是本 Task 存在的唯一理由：固定列原先是**未封顶的 v1 el-select**，
+   * 在这份千列文件上打开就把每一列挂成完整组件实例 —— 正是已删除的 DROPDOWN_RENDER_CAP
+   * 防的那个主线程冻结，也是 Task 7/8 复审里唯一反复红的业务用例（15s 等不到选项）。
+   * 另三族（序列 / 测试列 / 导出）的反截断判据统一在 Task 9B，这里不顺手做全套。
+   */
+  test('@p1 固定列下拉：千列文件打开只渲染虚拟窗口，且每行是真实列名', async ({ page }) => {
+    await openViewTab(page, SEEDED_FILES.ETS88_FT)
+    // 全集走 API 而不是数 DOM：v2 的 DOM 里只有窗口那几行，数条数不再是「列表有多长」。
+    const { cols } = await fetchPinDefaults(page, SEEDED_FILES.ETS88_FT)
+    // 夹具变小就是在删这条判据：红了换更大的夹具，不要改成 skip。
+    expect(cols.length, `夹具应是千列级，现测 ${cols.length} 列`).toBeGreaterThan(300)
+
+    const pinSelect = viewScope(page).locator('.el-select:has(input[aria-label="固定列"])').first()
+    const items = popperOf(page, PIN_COL_POPPER).locator('.el-select-dropdown__item')
+    const t0 = Date.now()
+    await pinSelect.locator('.el-select__wrapper').click()
+    await expect(items.first()).toBeVisible({ timeout: 15_000 })
+    const firstRowMs = Date.now() - t0
+    const rows = await items.count()
+    // 第二条判据抓的是「`:options` 喂了 string[]」：useProps 取不到 label ⇒ 每行空白，
+    // 而行数照样是窗口那几行，只靠下面那条 rows 抓不到它。两条变异各证一半（2026-11-13 实测：
+    // 喂 string[] 红在这里、退回未封顶 v1 红在 rows=1728）。
+    // 按**次数**消耗全集而不是 includes —— ETS88 的 headers 里真有一个空名列，用 includes 时
+    // 「整窗全空白」也会被判成合法（第一次反向证明就是这么漏过去的，判据要跑变异才算数）。
+    const pool = [...cols]
+    const extras = (await items.allTextContents())
+      .map((t) => t.trim())
+      .filter((t) => {
+        const i = pool.indexOf(t)
+        if (i < 0) return true
+        pool.splice(i, 1)
+        return false
+      })
+
+    expect(rows, `DOM 里只该有虚拟窗口那几行（全集 ${cols.length} 列，实测 ${rows} 行）`).toBeLessThan(PIN_COL_WINDOW_ROWS_MAX)
+    expect(firstRowMs, `打开到首行可见耗时 ${firstRowMs}ms（${rows} 行 / 全集 ${cols.length} 列）`).toBeLessThan(PIN_COL_OPEN_MS_MAX)
+    expect(extras, `窗口里出现全集之外的行（空白行 = :options 喂了 string[]）`).toEqual([])
   })
 
   test('@p1 Pass/Fail 筛选：未选文件时预选，切文件后筛选重置（契约升级）', async ({ page }) => {

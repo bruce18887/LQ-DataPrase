@@ -26,7 +26,8 @@ export const SERIAL_POPPER = 'dp-serial-popper'
  * 与 `SERIAL_POPPER` 同族：它是组件上 `popper-class` 的字面值（产品侧事实，见
  * `src/pages/data/components/browser/TestColumnSelector.vue`），两边必须同步改，
  * 用例里不内联身份串。查看数据页上共用 `.el-select-dropdown` 这套类名的实例共 6 个
- * （本控件 + `DataBrowserToolbar.vue:15/28/41/54` 那四个 + 横幅的 FileSelect，
+ * （本控件 + `DataBrowserToolbar.vue` 那四个：Pass/Fail / Site / 列宽 三颗 `el-select`
+ * 与「固定列」那颗 `el-select-v2`（下面的 `PIN_COL_POPPER`）+ 横幅的 FileSelect，
  * 见 `ActiveFileBanner.vue:12`），而 `e2e/data/view-data.spec.ts:755` 那条用例在同一次
  * 交互里先开「显示测试列」再开横幅下拉（:769-771）：收起那 ~150ms 的 leave 过渡帧里
  * `:visible` 与 `[aria-hidden="false"]` 一起脏（机理见下面 `visibleSelectOptions`），
@@ -47,6 +48,17 @@ export const COL_POPPER = 'dp-col-popper'
  * 所以本控件的选项与 footer 从 Task 8 起一律按实例取，不赌「这次没有别的面板正在退场」。
  */
 export const EXPORT_PARAM_POPPER = 'dp-export-param-popper'
+
+/**
+ * `DataBrowserToolbar` 的「固定列」下拉面板的**实例级** class（2026-11-13 批1 Task 9C）。
+ *
+ * 与上面三个同族、同理由：它是组件上 `popper-class` 的字面值（产品侧事实，见
+ * `src/pages/data/components/browser/DataBrowserToolbar.vue`），两边必须同步改，用例里不内联
+ * 身份串。本控件是查看数据页那 6 个共用 `.el-select-dropdown` 类名的实例之一（清单见
+ * `COL_POPPER` 的注释），而它自己那两条用例都在「开固定列下拉 → 点选项 → 看表格」上，
+ * 全局 `:visible` 在收起的 leave 过渡帧里会挑中正在退出的上一个面板。
+ */
+export const PIN_COL_POPPER = 'dp-pin-col-popper'
 
 /**
  * 当前可见下拉选项。
@@ -75,7 +87,8 @@ export function visibleSelectOptions(page: Page): Locator {
  *
  * `visibleSelectOptions` 那条全局查询的唯一解药就是这里传的 `popperClass`，它必须来自
  * 组件模板上的 `popper-class`（`COL_POPPER` / `SERIAL_POPPER` / `EXPORT_PARAM_POPPER` /
- * `PARAM_POPPER_SINGLE`（在 `helpers/params.ts`）就是这四份身份串，产品侧改类名时用例侧只改这里）。谓词只用 `[aria-hidden="false"]`
+ * `PIN_COL_POPPER` / `PARAM_POPPER_SINGLE`（在 `helpers/params.ts`）就是这五份身份串，
+ * 产品侧改类名时用例侧只改这里）。谓词只用 `[aria-hidden="false"]`
  * 一种写法（2026-11-13 订正第 4 条）：写成 `:not([aria-hidden="true"])` 的话，EP 换了
  * 绑定方式只会红一半，根因看不出来。
  */
