@@ -171,7 +171,7 @@
 - **前端构建与 e2e 类型档**：`npm run build`（含 `vue-tsc -b`）⇒ `✓ built in 810ms`；`npm run lint:e2e` ⇒ 静默通过（exit 0）。
 - **全量池（收口那一轮）**：runId `063322-34872`，4 slot ⇒ `[pool] 用例 438 · 墙钟 8.7min · 单价 3.14s/例 · 效率 2.50（目标 ≥2.8） · unexpected 0 · flaky 1 · skipped 21` + `[pool] 结论 MEASURED`，affected 门禁末行 `RESULT:   PASS · 计划 3 档全部执行`。**没有 VOID**。
   - 口径要说清：这一轮跑在 14:33–14:42，树里已经是 Task 11 + Task 12 的**最终字节**（两笔提交只是把同样的内容记进历史），此后只动过 `docs/`（计划、lessons、本台账）⇒ 直接当收口轮的 e2e 结论用，不再重跑一遍同样的东西（核对方式：`git diff --stat ae43c3b da63bac` 只有 `lessons.md` 9 行 + 计划文档 27 行，代码零改动）。
-  - `flaky 1` 是 `e2e/data/view-data.spec.ts:1393 › @p2 顶部带：操作按钮在文件横幅内，表格高度与实测占位对齐`（首跑失败、retry #1 过）。本批没碰过 `e2e/data/` 与该页任何组件，形状与 lessons 里「dev server 长时间运行后劣化」同族 ⇒ 判为存量抖动，不因此调重试或跳过。
+  - `flaky 1` 是 `e2e/data/view-data.spec.ts` 的「@p2 顶部带：操作按钮在文件横幅内，表格高度与实测占位对齐」那条（首跑失败、retry #1 过）。本批没碰过 `e2e/data/` 与该页任何组件，形状与 lessons 里「dev server 长时间运行后劣化」同族 ⇒ 判为存量抖动，不因此调重试或跳过。
 - **手工验收**：spec §13 七条逐条现量 + light/night 双主题计算值对照，记录在计划 Task 14 Step 3.5。核心几条：登录后审计页倒序第一行就是那次 `登录成功`（14:56:53，`Total 2564`）；按事件筛 `login_failure` 得 43 行且事件列全是中文；展开行给 `{"reason": "unknown_user"}` 原文；倒置日期区间 ⇒ 400 + 空态说「审计记录加载失败，请调整条件后重试」而**不是**「暂无符合条件的审计记录」，三个输入框的值全保留。
 - **升级路径**：历史 viewer 的**副本**上 `migrate` ⇒ `[0012] role normalization: {'viewer_to_administrator': 0, 'viewer_to_user': 1, 'superuser_promoted': 0}`，终态 `viewer rows left: 0`；`seed_users` 之后仍是 `administrator 1 / user 2`。源库未被写过：`test/e2e-data/db.sqlite3` 角色分布不变，`~/LQ-DataPrase/db.sqlite3` mtime 仍是本轮开跑前的值。
 - **未 push**：`git log --oneline master..HEAD` 共 12 笔（`126ee48` … `ae43c3b`），全部只在本地分支 `feat/account-role-audit`。
@@ -383,7 +383,7 @@ Spec：`docs/superpowers/specs/2026-11-11-chart-region-subset-design.md`（四�
 - 前端三件套：vitest 61 文件 843 例全过 / lint:e2e 无错 / build ✓。
 - 后端全套（与池并跑）：**Ran 2573 tests / OK (skipped=16)**（2573 = T6 账 2571 + 修复轮 F1 边界 2 例）。
 - 4-slot 全量池 runId 094319-22016：**445 例 · unexpected 0 · flaky 2 · skipped 21 · MEASURED**。
-  flaky 2 均在未触碰文件（tiny-fail-bar:79 / view-data:1393），独占复跑 38/38 零重试 ⇒ 负载抖动。
+  flaky 2 均在未触碰文件（tiny-fail-bar:79 / `view-data.spec.ts` 的「@p2 顶部带：操作按钮在文件横幅内」那条），独占复跑 38/38 零重试 ⇒ 负载抖动。
 - 目标四文件（serial-no-column / wafermap-redesign / serial-fail-count / file-list-completeness）
   全量池零 flaky；独占回归 14/14 + file-list 串行版 ×2 零 flaky。
 
@@ -492,6 +492,45 @@ T2 serialHighlight.spec 钉并集/清除/关子集归零；e2e 补「子图→�
 - 族内最重的五个文件：`outlier-handling.spec.ts` 16、`view-data.spec.ts` 8、`exports.spec.ts` 8、
   `data.spec.ts` 6、`multi-file.spec.ts` 5。
 
-排工提醒（不是本批的活）：`view-data.spec.ts` 被 `scripts/line-limit.mjs` 的 EXEMPT 精确冻结在
-**1802 行**，改它必须同行数替换或同步下调登记值；`exports.spec.ts` 现 **592 行**（计划记的 588
-已过时），距 600 硬闸 8 行。这两条决定了摊开时谁能加注释、谁只能就地替换。
+排工提醒（不是本批的活）：`view-data.spec.ts` 与 `exports.spec.ts` 都被 `scripts/line-limit.mjs` 的
+`EXEMPT` 账按**精确行数**冻着 —— 那张账是唯一事实来源，**别在计划/台账里抄那个数字**（抄一次就会像
+这里原来写的「1802」一样，下一批加完断言之后已经是错的，还会把后排工的人带偏）。要改这两个文件：
+先 `cd frontend && wc -l e2e/data/view-data.spec.ts` 现跑，同批把 `EXEMPT` 登记值同步（多一行 `grew` 红、
+少一行反向断言红），并在该条 `reason` 里说明这一增一减是哪个工单（本轮现跑：`view-data.spec.ts` 1857、
+`exports.spec.ts` 592 ⇒ 距 600 硬闸 8 行，只能就地替换）。这两条决定了摊开时谁能加注释、谁只能就地替换。
+
+# 任务：下拉 v2 迁移面普查——9C 复审又数出两个从没上过清单的同类漏项（2026-11-13 记，**只记账不动代码**）
+
+批1 Task 9C（固定列迁 `el-select-v2`）的复审把「未封顶的 v1 `el-select` + `v-for`」这个形状重新数了一遍，
+结论：**设计稿 §2 承诺的四个 + §2.9 补的第五个并不是全集**。现跑统计（`frontend/`，`grep -rnE "<el-select([[:space:]>]|$)" src`，
+逐字剔掉 `el-select-v2`）：
+
+- `<el-select-v2>` **5 处**：`ParamSelector.vue:4` / `SerialSelector.vue:3` / `TestColumnSelector.vue:3` /
+  `ExportParamSelector.vue:16` / `DataBrowserToolbar.vue:63`（即批1 迁的那五个）。
+- v1 `<el-select>` **31 处**，其中**选项走 `v-for` 的 9 处**（`CorrelationToolsTab` 2、`FileSelect` 1、
+  `CombineBatchDialog` 1、`SftpSearchPage` 1、`DataBrowserToolbar` 的 Site 1、`ColumnHeaderFilter` 1、
+  `BatchBinSection` 1、`SearchCriteria` 1），其余 22 处是静态字面量选项。
+
+**9 处 `v-for` 里，两处的参数源与已迁控件同源，属复审点名的「从没上过任何清单」的同类形状（实测同形）：**
+
+1. `frontend/src/pages/analysis/components/CorrelationToolsTab.vue:36` 与 `:41`（X / Y 测试项下拉，
+   `el-option` 的 `v-for="p in params"` 在 `:38` / `:43`）。`params` 来自本 tab 的
+   `useTabFileParams`（`:210`），与已迁的 `ParamSelector` **同一个数据源** ⇒ 千级参数文件上同形，
+   一打开就挂 `params.length` 个完整 `el-option` 实例。
+2. `frontend/src/components/common/FileSelect.vue:2`（横幅那个文件选择器，`el-option` 的
+   `v-for="f in g.files"` 在 `:29`）。`groupedItems`（`:139` 的 computed）**没有任何 slice / 封顶**，
+   条数 = 文件列表条数；量级取决于用户库里有多少文件 ⇒ 形状相同、上限不同，**属待实测**。
+
+另两处**次级候选（形状同族、量级待实测，不预先断言它是千级）**：
+`frontend/src/pages/sftp/SftpSearchPage.vue:81`（`el-option` `:83` 遍历 `runOptions` = `store.runs`，
+运行记录会随使用单调增长）与 `frontend/src/pages/data/components/CombineBatchDialog.vue:38`
+（遍历 props 传入的 `batchOptions`，条数由调用方决定）。
+
+**有意保留的 v1（不是债，别并进这张清单）**：静态字面量选项与有界小集 ——
+`DataBrowserToolbar.vue` 另外三颗（Pass/Fail、Site、列宽，选项个位数到十几）、
+`ColumnHeaderFilter.vue`、`BatchBinSection.vue`（phases）、`SearchCriteria.vue`（presets）、
+admin/settings 那一族（`AuditLogPage.vue` 事件枚举、`UserManagement.vue` 角色、`TableSettingsForm.vue` 每页条数）。
+
+**处置**：是否并入批 1（还是另起一批 + 每条先实测条数）由用户拍板；**未拍板前不动代码、不写判据**。
+拍板并入后，机制照 Task 7/9C 现成的形状（`toOptions` + `popper-class` 实例锚点 + 反截断判据），
+先跑 `wc -l` 再同步 `scripts/line-limit.mjs` 的登记值。

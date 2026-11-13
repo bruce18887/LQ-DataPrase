@@ -120,7 +120,7 @@
 现状：`helpers/params.ts` 覆盖 ParamSelector 的全部 70 个调用点 / 23 个文件，改 helper 一处即传递性覆盖。SerialSelector 走 `helpers/elplus.ts`。TestColumnSelector 与 ExportParamSelector **在各 spec 内联定位，无 helper**。
 
 会红约 15–20 条，集中在两类：
-- **数 DOM 条数 / 取窗口外 nth**：`exports.spec.ts:433-455`（`count()` + `nth(i)` 循环）、`view-data.spec.ts:745-752/807-810`、`chart-filter-switches` 的 `listParams().length` 族。改法：按 `testing-gates.md` §2 冲突裁决下沉 —— 「列表完整性」是后端契约（T1 断响应 `results` 的 key 集合），e2e 只留一条「页面渲染出该下拉且可搜到目标项」的接线证明。`exports.spec.ts:540-544` 已有这条先例（注释明写「改从响应 `results` 键取全集、不数 DOM option」）。
+- **数 DOM 条数 / 取窗口外 nth**：`exports.spec.ts:433-455`（`count()` + `nth(i)` 循环）、`view-data.spec.ts` 的「@p2 显示测试列：输入关键词 + Enter 全选匹配项」与「@p2 系统列按格式权威下发：前缀同名测试项（SITE_CHECK）不误判」两条（本稿设计时记作 `:745-752`/`:807-810`，此后一律按用例标题认它，锚点 `1574012`）、`chart-filter-switches` 的 `listParams().length` 族。改法：按 `testing-gates.md` §2 冲突裁决下沉 —— 「列表完整性」是后端契约（T1 断响应 `results` 的 key 集合），e2e 只留一条「页面渲染出该下拉且可搜到目标项」的接线证明。`exports.spec.ts:540-544` 已有这条先例（注释明写「改从响应 `results` 键取全集、不数 DOM option」）。
 - **footer 移出可见窗口**：`file-correlation.spec.ts:198` 一类。
 
 不受影响约 45–50 条（靠 `.el-select` / `.el-select__wrapper` / `.el-select__input` / `.el-select__placeholder` / `aria-label`）。
@@ -135,11 +135,13 @@
 
 ### 2.9 落地时补的第五个下拉（2026-11-13，用户拍板并入批 1）
 
-Task 7/8 复审时发现的**设计漏项**，不是范围蔓延：`pages/data/components/browser/DataBrowserToolbar.vue:54-67`
-的「固定列」`el-select` 是**未封顶的 v1 实现** —— `v-for="c in allCols"` 且没有 `DROPDOWN_RENDER_CAP`，
-而 `allCols` 取自表格全部列（`DataBrowserAgGrid.vue:521`）。ETS88_FT 现测 **1,728 列** ⇒ 一打开就挂
+Task 7/8 复审时发现的**设计漏项**，不是范围蔓延：`pages/data/components/browser/DataBrowserToolbar.vue`
+的「固定列」下拉（迁 v2 之前的那颗 `el-select`，位置以 `1574012^` 为准）是**未封顶的 v1 实现** —— `v-for="c in allCols"` 且没有 `DROPDOWN_RENDER_CAP`，
+而 `allCols` 取自表格全部列（`DataBrowserAgGrid.vue` 里 `allCols.value = d.headers ?? []` 那一处）。ETS88_FT 现测 **1,728 列** ⇒ 一打开就挂
 1,728 个 `el-option` 实例，正是 §2.1 里 `constants/dropdown.ts:8` 那句「原样挂载即冻结主线程」描述的
-那个风险；它也是 Task 7/8 复审里唯一反复红的业务用例（`view-data.spec.ts:309`/`:322`，15s 等不到选项）。
+那个风险；它也是 Task 7/8 复审里唯一反复红的业务用例（`view-data.spec.ts` 的
+「@p1 固定列：多选，后选的列叠加而不是替换已钉住的列」那条，选项首行的 `toBeVisible({ timeout: 15_000 })`
+等不到；本稿设计时记作 `:309`/`:322`，此后按用例标题认它）。
 
 本稿 §2 原先只承诺四个下拉、§8「明确不做」里也没有它 ⇒ 属清单漏项。**用户 2026-11-13 拍板并入批 1**，
 理由：机制与 §2.3 的四个完全同形（`multiple` + `filterable` + `collapse-tags`，纯 label，工作量约 1 小时），
