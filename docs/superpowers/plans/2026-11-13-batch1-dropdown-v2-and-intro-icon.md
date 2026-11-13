@@ -905,6 +905,42 @@ git commit -m "feat(analysis): 参数下拉迁 el-select-v2，高亮改虚拟窗
 
 ---
 
+## Task 5 落地后的订正（**Task 6-9 开工前必读**，2026-11-13）
+
+实际落地是 4 个提交，不是一个：`243dff4`（迁移 + 注册）→ `8650885`（规格复审修复）→
+`35450af`（质量复审修复）→ `a0728d4`（补 `35450af` 漏删的半条判据）。上面 Step 7 那段
+`git add` 只列了 2 个文件，真实范围是 10 个（注册三张表 + 两份绊线判据 + 两份 helper 注释
++ 新 T3 + 组件）。**Step 7 的提交清单作废，以 `git log` 为准。**
+
+放行判据核对结果（Step 1.5 要求的三条，全部成立）：虚拟窗口 DOM **11 行**、滚到底 **310ms**、
+`#footer` 在窗口外仍渲染。footer 逐字 = 「共 1723 项」（夹具现测 1723 个参数）。
+
+后面四个 Task 会照抄 Task 5 的模板，以下 6 条与本文正文不同，**以这里为准**：
+
+1. **`#default` 里算分段用 `item.label`，不是 `item.value`**（正文 Step 2 的示例写的是
+   `String(item.value)`）。EP 自己的兜底渲染的就是 `getLabel(item)`
+   （`select-v2/src/select-dropdown.mjs:110`）；Task 6 的序列号一旦有展示名（label≠value），
+   照抄 `value` 会高亮一段屏幕上不存在的文本。
+2. **`filterByKeyword` / `sortPrefixFirst` 已加宽到 `Array<string | number>`**（Task 2 原文
+   是 `string[]`）。`SerialSelector` 的候选本来就是 `number[]`，直接传，别再 `map(String)`
+   一遍；`sortPrefixFirst` 走的是字符串序（`'1' < '12' < '2'`），与 v2 实际显示的 label 一致。
+3. **popper 身份串从 `e2e/helpers/params.ts` 导入了**：`PARAM_POPPER_SINGLE`。新用例不要再
+   内联 `'dp-param-popper-*'` 字面量；多文件实例的 `dp-param-popper-multi` 暂无导出，用到再补。
+4. **可见性谓词统一 `.el-popper.<cls>[aria-hidden="false"]`**，不要写 `:not([aria-hidden="true"])`。
+   同一个判据两套写法，将来 EP 改绑定方式时只会红一半，根因看不出来。
+5. **footer 文案的分歧记在案，Task 9 收口时一并拍板**：ParamSelector 用「共 N 项」，
+   Task 6/7/8 正文一律写「匹配 N 项」，现存三个未迁组件也都是「匹配 N 项」。
+   ParamSelector 搜索态显示的也是命中数，却写着「共」—— 既是歧义也是同族不一致。
+   本批不在此处改（改一次要动一条 T3 精确匹配判据），Task 9 删 `DROPDOWN_RENDER_CAP` 时统一。
+6. **`buildParamOptions` 这个名字为唯一消费者写窄了**（签名对四个下拉通用）。复审建议改叫
+   `buildSelectView`，但 Task 6/7/8 正文都按现名引用，**本批不改名**，同样并进 Task 9。
+
+另记两条已核清、不必再查的事实：`theme-chalk/el-select-v2.css` 与 `el-select.css` **md5 逐字
+相同**（`3b0587227aa8053c4b78d7def58a2d0f`，所以主题侧 46 个指纹不变）；EP 里 `select/src/` 与
+`select-v2/src/` **各有** `useSelect.mjs`，写锚点必须带目录前缀。
+
+---
+
 ## Task 6: `SerialSelector.vue` 迁 v2（multiple + Enter 全选 + `clamp`）
 
 **Files:**
