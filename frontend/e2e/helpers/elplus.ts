@@ -21,6 +21,20 @@ export function elSelectByPlaceholder(scope: Page | Locator, placeholder: string
 export const SERIAL_POPPER = 'dp-serial-popper'
 
 /**
+ * `TestColumnSelector`（查看数据页「显示测试列」）下拉面板的**实例级** class。
+ *
+ * 与 `SERIAL_POPPER` 同族：它是组件上 `popper-class` 的字面值（产品侧事实，见
+ * `src/pages/data/components/browser/TestColumnSelector.vue`），两边必须同步改，
+ * 用例里不内联身份串。查看数据页上共用 `.el-select-dropdown` 这套类名的实例共 6 个
+ * （本控件 + `DataBrowserToolbar.vue:15/28/41/54` 那四个 + 横幅的 FileSelect，
+ * 见 `ActiveFileBanner.vue:12`），而 `e2e/data/view-data.spec.ts:755` 那条用例在同一次
+ * 交互里先开「显示测试列」再开横幅下拉（:769-771）：收起那 ~150ms 的 leave 过渡帧里
+ * `:visible` 与 `[aria-hidden="false"]` 一起脏（机理见下面 `visibleSelectOptions`），
+ * 所以本控件的选项与 footer 一律按实例取，不赌「这次没有别的面板正在退场」。
+ */
+export const COL_POPPER = 'dp-col-popper'
+
+/**
  * 当前可见下拉选项。
  *
  * ⚠ 这是**全局**查询，同名 popper 有多份实例时不保险（隐藏 tab / 同页其它下拉）：
@@ -29,7 +43,7 @@ export const SERIAL_POPPER = 'dp-serial-popper'
  * 点到别家的选项（2026-11-13 Task 4/5 实测，采样表见 `helpers/params.ts:28-49`）。
  * **唯一有效的隔离是实例级 popper-class** —— 新用例请照 `file-correlation.spec.ts`
  * 的序列那两条写：`.el-popper.${SERIAL_POPPER}[aria-hidden="false"] …`，别用本函数
- * 查跨控件的选项。
+ * 查跨控件的选项。同一个谓词现在有个入口：下面的 `popperOf(page, <实例级类名>)`。
  *
  * 消费者口径（2026-11-13 `grep -rn visibleSelectOptions e2e src test` 现数）：**直接**调用它的是
  * **1 个文件 / 6 处**（`e2e/data/file-correlation.spec.ts`），另有 **3 个文件**经本文件的
@@ -41,6 +55,19 @@ export const SERIAL_POPPER = 'dp-serial-popper'
  */
 export function visibleSelectOptions(page: Page): Locator {
   return page.locator('.el-select-dropdown__item:visible')
+}
+
+/**
+ * **本控件自己的**下拉面板（`.el-popper.<实例级 class>[aria-hidden="false"]`）。
+ *
+ * `visibleSelectOptions` 那条全局查询的唯一解药就是这里传的 `popperClass`，它必须来自
+ * 组件模板上的 `popper-class`（`COL_POPPER` / `SERIAL_POPPER` / `PARAM_POPPER_SINGLE`
+ * 就是这三份身份串，产品侧改类名时用例侧只改这里）。谓词只用 `[aria-hidden="false"]`
+ * 一种写法（2026-11-13 订正第 4 条）：写成 `:not([aria-hidden="true"])` 的话，EP 换了
+ * 绑定方式只会红一半，根因看不出来。
+ */
+export function popperOf(page: Page, popperClass: string): Locator {
+  return page.locator(`.el-popper.${popperClass}[aria-hidden="false"]`)
 }
 
 /** 打开某占位文本的 select 并选择含指定文本的选项 */

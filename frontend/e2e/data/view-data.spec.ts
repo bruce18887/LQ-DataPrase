@@ -3,7 +3,7 @@ import { SEEDED_FILES } from '../fixtures/test-data'
 import { gotoApp } from '../helpers/nav'
 import { openViewTab, openFileInViewTab } from '../helpers/viewTab'
 import { captureDownload } from '../helpers/download'
-import { elSelectByPlaceholder } from '../helpers/elplus'
+import { COL_POPPER, elSelectByPlaceholder, popperOf } from '../helpers/elplus'
 
 /** 查看数据 tab（当前可见 section）的顶层容器 */
 function viewScope(page: Page) {
@@ -659,11 +659,14 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     expect(absentCol).toBeTruthy()
     expect(bin).toBeTruthy()
 
-    // 打开「显示测试列」多选下拉，勾选 testCol
+    // 打开「显示测试列」多选下拉，勾选 testCol（选项与 footer 只取本控件自己的 popper）
     const selector = viewScope(page).locator('.test-col-selector:has(input[aria-label="显示测试列"])').first()
     await selector.locator('.el-select__wrapper').click()
-    const options = page.locator('.el-select-dropdown:visible .el-select-dropdown__item')
+    const options = popperOf(page, COL_POPPER).locator('.el-select-dropdown__item')
     await expect(options.first()).toBeVisible({ timeout: 5_000 })
+    // 没输入关键词时 footer 不许出现「按 Enter 全选」（组件的 matches 那一支自己给 []：
+    // 透传 filterByKeyword 时空串返回全量，Enter 就从「选中高亮项」变成「全选上千列」）
+    await expect(popperOf(page, COL_POPPER).locator('.match-hint')).toHaveCount(0)
     await page.waitForTimeout(300)
     await options.filter({ hasText: testCol }).first().click()
     await page.keyboard.press('Escape')
@@ -681,14 +684,10 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
       timeout: 10_000,
     })
 
-    // 清空 → 恢复全部测试列（列数回到 346，水平滚动容器可滚动）。
-    // 全选/清空收进了下拉 footer（不再常驻控件下方），所以要先展开下拉再点。
+    // 清空 → 恢复全部测试列（列数回到 346，水平滚动容器可滚动）。全选/清空收进了下拉 footer
+    // （不再常驻控件下方），要先展开下拉再点；footer 在虚拟窗口之外但仍在本控件的 popper 里。
     await selector.locator('.el-select__wrapper').click()
-    await page
-      .locator('.el-select-dropdown:visible button')
-      .filter({ hasText: '清空' })
-      .first()
-      .click()
+    await popperOf(page, COL_POPPER).locator('.col-actions button').filter({ hasText: '清空' }).first().click()
     await page.keyboard.press('Escape')
     await expect
       .poll(
@@ -704,8 +703,8 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
   test('@p2 显示测试列：输入关键词 + Enter 全选匹配项', async ({ page }) => {
     await openViewTab(page, SEEDED_FILES.GAGE_S1)
 
-    // 找出现频次最高的 3 字符前缀作为关键词（保证 ≥2 匹配）
-    const { kw, matchCount, firstMatch } = await page.evaluate(async (filename) => {
+    // 找出现频次最高的 3 字符前缀作为关键词（≥2 匹配是下面「窗口每一条都得 is-selected」的病状前提）
+    const { kw, matchCount } = await page.evaluate(async (filename) => {
       const token = localStorage.getItem('access_token')
       const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
       const files = await fetch(`/api/v1/files/?search=${encodeURIComponent(filename)}`, { headers }).then((r) => r.json())
@@ -724,7 +723,7 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
         if (n > bestCount) { best = p; bestCount = n }
       }
       const matched = best ? testCols.filter((c: string) => c.toLowerCase().includes(best)) : []
-      return { kw: best, matchCount: matched.length, firstMatch: matched[0] ?? '' }
+      return { kw: best, matchCount: matched.length }
     }, SEEDED_FILES.GAGE_S1)
     expect(kw).toBeTruthy()
     expect(matchCount).toBeGreaterThanOrEqual(2)
@@ -735,20 +734,20 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     // filterable 下拉：fill 不触发过滤，必须逐键输入
     await input.pressSequentially(kw)
 
-    // footer 提示「匹配 N 项，按 Enter 全选」
-    const hint = page.locator('.el-select-dropdown:visible .match-hint')
+    // footer 提示「匹配 N 项，按 Enter 全选」（空关键词时那条反例见上面 @p1 那条用例）
+    const hint = popperOf(page, COL_POPPER).locator('.match-hint')
     await expect(hint).toContainText(`匹配 ${matchCount} 项`, { timeout: 5_000 })
     await input.press('Enter')
 
-    // 全选后输入框自动清空；下拉保持打开，匹配列全部呈选中态（is-selected）
+    // 全选后输入框自动清空；选中态改成「重新搜同一个关键词 ⇒ 窗口里每一条都必须 is-selected」：
+    // Enter 清空过滤后 v2 只渲染虚拟窗口那十来行，等 firstMatch 进 DOM 不再成立（2026-11-13 实测）。
     await expect(input).toHaveValue('')
+    await input.pressSequentially(kw)
     await expect
       .poll(async () => {
-        const opt = page
-          .locator('.el-select-dropdown:visible .el-select-dropdown__item')
-          .filter({ hasText: new RegExp(`^${firstMatch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) })
-          .first()
-        return (await opt.getAttribute('class'))?.includes('is-selected') ?? false
+        const win = popperOf(page, COL_POPPER)
+        const total = await win.locator('.el-select-dropdown__item').count()
+        return total > 0 && total === (await win.locator('.el-select-dropdown__item.is-selected').count())
       }, { timeout: 5_000 })
       .toBe(true)
   })
@@ -759,7 +758,7 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     const { testCol, absentCol } = await fetchFirstTestCols(page, SEEDED_FILES.GAGE_S1)
     const selector = viewScope(page).locator('.test-col-selector:has(input[aria-label="显示测试列"])').first()
     await selector.locator('.el-select__wrapper').click()
-    const options = page.locator('.el-select-dropdown:visible .el-select-dropdown__item')
+    const options = popperOf(page, COL_POPPER).locator('.el-select-dropdown__item')
     await expect(options.first()).toBeVisible({ timeout: 5_000 })
     await page.waitForTimeout(300)
     await options.filter({ hasText: testCol }).first().click()
@@ -803,11 +802,12 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     expect(sysHas).toBe(false)
     expect(testHas).toBe(true)
 
-    // 「显示测试列」下拉必须包含 SITE_CHECK（旧实现误判系统列 → 不可选）
+    // 「显示测试列」必须能选到 SITE_CHECK（旧实现把它误判成系统列 → 不可选）。按名搜它而不是
+    // 在列表里等它：v2 只渲染虚拟窗口那十来行，而过滤跑在全集上，第几列都该搜得到。
     const selector = viewScope(page).locator('.test-col-selector:has(input[aria-label="显示测试列"])').first()
     await selector.locator('.el-select__wrapper').click()
-    const options = page.locator('.el-select-dropdown:visible .el-select-dropdown__item')
-    await expect(options.first()).toBeVisible({ timeout: 5_000 })
+    await selector.locator('input[aria-label="显示测试列"]').pressSequentially('SITE_CHECK')
+    const options = popperOf(page, COL_POPPER).locator('.el-select-dropdown__item')
     await expect(options.filter({ hasText: 'SITE_CHECK' }).first()).toBeVisible({ timeout: 5_000 })
   })
 
