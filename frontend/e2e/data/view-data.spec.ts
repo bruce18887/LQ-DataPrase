@@ -6,15 +6,15 @@ import { captureDownload } from '../helpers/download'
 import { COL_POPPER, elSelectByPlaceholder, PIN_COL_POPPER, popperOf } from '../helpers/elplus'
 
 /**
- * 固定列下拉（Task 9C 迁 el-select-v2 之后）的两条预算。
- * 行数上界由 EP `select-v2/src/defaults.mjs` 的 `height:274 / itemHeight:34` ≈ 9 行加 overscan
- * 推出（Task 5 实测 11 行），留到 20 是给「以后有人调高面板」的余量 —— 真正的判据是「远小于
- * 全集」而不是「等于 11」，Task 9B 会把它与 `param-dropdown-full-list.spec.ts` 那份
- * `MAX_WINDOW_ROWS` 一起提进 helper。耗时那 3s 是并发 workers 的负载余量（虚拟窗口实测百毫秒级，
- * 而它取代的那个未封顶 v1 在这里挂的是全集个组件实例）。
+ * 固定列下拉（Task 9C 迁 el-select-v2 之后）的行数预算。上界由 EP `select-v2/src/defaults.mjs` 的
+ * `height:274 / itemHeight:34` ≈ 9 行加 overscan 推出（Task 5 实测 11 行），留到 20 是给「以后有人调高
+ * 面板」的余量 —— 真正的判据是「远小于全集」不是「等于 11」，Task 9B 会把它与
+ * `param-dropdown-full-list.spec.ts` 那份 `MAX_WINDOW_ROWS` 一起提进 helper。不设「打开耗时」的 ms 界
+ * （同族先例也只在注释记实测值）：2026-11-13 变异实测退回未封顶 v1 时整条 2.3–3.1s、与 v2 的 2.9s 同族
+ * ⇒ 宽到能过的界永不触发，能分开两族的界又落在并行 workers 的噪声里必 flake。反冻结由这条 rows 判据 +
+ * 既有 15s `toBeVisible` 承担，实测 ms 只并进失败消息供阅读。
  */
 const PIN_COL_WINDOW_ROWS_MAX = 20
-const PIN_COL_OPEN_MS_MAX = 3_000
 
 /** 查看数据 tab（当前可见 section）的顶层容器 */
 function viewScope(page: Page) {
@@ -194,7 +194,7 @@ async function fetchPinDefaults(page: Page, filename: string) {
       bin: (d.bin_column ?? '') as string,
       serial: (d.serial_column ?? '') as string,
       systemColumns: (d.system_columns ?? []) as string[],
-      // 产品侧固定列下拉的 allCols 就是这一个数组（DataBrowserAgGrid.vue:521 取 d.headers）
+      // 产品侧固定列下拉的 allCols 就是这一个数组（DataBrowserAgGrid.vue 里 `allCols.value = d.headers ?? []` 那一处，1574012）
       cols: (d.headers ?? []) as string[],
     }
   }, filename)
@@ -406,8 +406,7 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
         return false
       })
 
-    expect(rows, `DOM 里只该有虚拟窗口那几行（全集 ${cols.length} 列，实测 ${rows} 行）`).toBeLessThan(PIN_COL_WINDOW_ROWS_MAX)
-    expect(firstRowMs, `打开到首行可见耗时 ${firstRowMs}ms（${rows} 行 / 全集 ${cols.length} 列）`).toBeLessThan(PIN_COL_OPEN_MS_MAX)
+    expect(rows, `DOM 里只该有虚拟窗口那几行（实测 ${rows} 行 / 打开耗时 ${firstRowMs}ms，全集 ${cols.length} 列）`).toBeLessThan(PIN_COL_WINDOW_ROWS_MAX)
     expect(extras, `窗口里出现全集之外的行（空白行 = :options 喂了 string[]）`).toEqual([])
   })
 

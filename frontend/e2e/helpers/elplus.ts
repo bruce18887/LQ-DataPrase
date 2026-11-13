@@ -28,8 +28,9 @@ export const SERIAL_POPPER = 'dp-serial-popper'
  * 用例里不内联身份串。查看数据页上共用 `.el-select-dropdown` 这套类名的实例共 6 个
  * （本控件 + `DataBrowserToolbar.vue` 那四个：Pass/Fail / Site / 列宽 三颗 `el-select`
  * 与「固定列」那颗 `el-select-v2`（下面的 `PIN_COL_POPPER`）+ 横幅的 FileSelect，
- * 见 `ActiveFileBanner.vue:12`），而 `e2e/data/view-data.spec.ts:755` 那条用例在同一次
- * 交互里先开「显示测试列」再开横幅下拉（:769-771）：收起那 ~150ms 的 leave 过渡帧里
+ * 见 `ActiveFileBanner.vue:12`），而 `e2e/data/view-data.spec.ts` 里
+ * 「@p2 显示测试列：切换文件后选中集重置为全部显示」那条用例（锚点 `1574012`，本文件只按标题认它）
+ * 在同一次交互里先开「显示测试列」再开横幅下拉：收起那 ~150ms 的 leave 过渡帧里
  * `:visible` 与 `[aria-hidden="false"]` 一起脏（机理见下面 `visibleSelectOptions`），
  * 所以本控件的选项与 footer 一律按实例取，不赌「这次没有别的面板正在退场」。
  */

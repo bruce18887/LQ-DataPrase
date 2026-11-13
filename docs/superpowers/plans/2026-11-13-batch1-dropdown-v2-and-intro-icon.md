@@ -1134,33 +1134,44 @@ git commit -m "feat(data): 测试列下拉迁 el-select-v2，取消渲染封顶"
    与 `params.ts:117/133/141` 的内联模板串）⇒ 统一动作并入 Task 9（导出 `popperOf`，其余从它组合
    `.locator('.el-select-dropdown__item')`），别在 Task 8 里顺手改。
 2. **实例级 popper-class 判为「预防性正确」不是投机**：查看数据页共用 `.el-select-dropdown` 类名的
-   实例有 **6 个**（本控件 + `DataBrowserToolbar.vue:15/28/41/54` + 横幅 `ActiveFileBanner.vue:12`），
-   且 `view-data.spec.ts:755` 那条在同一次交互里开两个下拉。**Task 9 给本族补正向判据时必须有实例锚点**，
-   这六个类名就是那批锚点的清单。诚实的一半：横幅侧 `:771` 仍是全局 `:visible`，本批只修了一半。
+   实例有 **6 个**（本控件 + `DataBrowserToolbar.vue` 的 Pass/Fail / Site / 列宽 三颗 v1 与「固定列」
+   那颗 v2 + 横幅 `ActiveFileBanner.vue` 里那颗 `banner-file-select`），且 `view-data.spec.ts` 的
+   「@p2 显示测试列：切换文件后选中集重置为全部显示」那条（按标题认它，锚点 `1574012`）在同一次交互里
+   开两个下拉。**Task 9 给本族补正向判据时必须有实例锚点**，这六个类名就是那批锚点的清单。
+   诚实的一半：同一条用例里横幅那两步（点 `.banner-file-select` 后用全局 `.el-select-dropdown:visible`
+   取选项）仍是全局 `:visible`，本批只修了一半。
 3. **不需要 Task 6 那条 disabled 判据**：本组件 props 是 `cols`/`modelValue`，computed 叫
    `selectOptions`，**没有撞名**，`:disabled="cols.length === 0"` 引用的仍是 props 全集。
    可选的结构化灭法（`props.cols.length` 显式写死）记在这儿，未做。
-4. **两条被裁定的等价/加强替换**（后面别改回去）：`:807-811` 从「在列表里等 SITE_CHECK 出现」改成
-   「按名搜它再断可见」—— 旧写法在 v1 下其实多断了「它落在前 300 渲染项里」，真正承重的一直在
-   `:795-803`；`:745-752` 从「firstMatch 有 is-selected」改成「重搜同一词 ⇒ 窗口每一条都
-   is-selected 且行数 ≥2」（下界 2 挡「窗口只挂 1 行且它恰选中」时「全选」与「v2 加 1 颗」同形的假绿）。
-   ⚠ 变异自证只证到**半条**：摘掉 Enter 分支后红打在既有 `:744`（`toHaveValue('')`）上，
+4. **两条被裁定的等价/加强替换**（后面别改回去，位置一律按用例标题认，锚点 `1574012`）：
+   「@p2 系统列按格式权威下发：前缀同名测试项（SITE_CHECK）不误判」那条里「在列表里等 SITE_CHECK 出现」
+   改成「按名搜它再断可见」—— 旧写法在 v1 下其实多断了「它落在前 300 渲染项里」，真正承重的一直在同那条
+   用例前半的 `sysHas`/`testHas` 两个 API 侧断言；「@p2 显示测试列：输入关键词 + Enter 全选匹配项」那条
+   末尾的 poll 从「firstMatch 有 is-selected」改成「重搜同一词 ⇒ 窗口每一条都 is-selected 且行数 ≥2」
+   （下界 2 挡「窗口只挂 1 行且它恰选中」时「全选」与「v2 加 1 颗」同形的假绿）。
+   ⚠ 变异自证只证到**半条**：摘掉 Enter 分支后红打在上述那条 poll 之前的 `toHaveValue('')` 上，
    新 poll 自身的增量力**未实测**，靠推理成立。
-5. **`view-data.spec.ts` 被豁免账精确冻结在 1802 行**（`scripts/line-limit.mjs:58`）：多一行 `grew` 红，
-   少一行 `now < frozen.lines` 也要红（正解是**同步下调登记值**，不是把文件撑回去）。
-   要往本文件加断言，就得同批减行，或者下调登记值并说明理由。
+5. **`view-data.spec.ts` 被 `scripts/line-limit.mjs` 的 `EXEMPT` 账按精确行数冻着**（登记值的唯一事实来源
+   就是那张账，本计划刻意不抄数字——抄了就会像这里原来写的「1802」一样，下一批加完断言后已经是错的）：
+   多一行 `grew` 红，少一行 `now < frozen.lines` 也要红（正解是**同批同步下调登记值**，不是把文件撑回去）。
+   要往本文件加断言，先 `cd frontend && wc -l e2e/data/view-data.spec.ts` 现跑，再决定同批减行还是同步登记值。
 6. **⚠ 并入 Task 9 的第 4 件事（本批设计漏项，Task 7 复审时发现的）**：
-   `frontend/src/pages/data/components/browser/DataBrowserToolbar.vue:54-67` 的「固定列」`el-select`
+   迁 v2 之前的「固定列」那颗 `el-select`（`DataBrowserToolbar.vue`，位置以 `1574012^` 为准）
    是**未封顶的 v1 实现**（`v-for="c in allCols"`，无 `DROPDOWN_RENDER_CAP`）。`allCols` = 表格
-   `headers`（`DataBrowserAgGrid.vue:521`），ETS88_FT 实测 **1,728 列**（`view-data.spec.ts:1590`）⇒
+   `headers`（`DataBrowserAgGrid.vue` 里 `allCols.value = d.headers ?? []` 那一处），ETS88_FT 实测
+   **1,728 列**（数法见 `view-data.spec.ts` 的「千列文件：每页行数按列数预算压低且提示可见」那条里
+   `page_size` 被钳到 205 那句断言）⇒
    打开即挂 1,728 个 `el-option`，正是 `constants/dropdown.ts:8` 记的那个冻结风险，且它是那轮唯一
-   红过的业务用例（`:322` 15s 等不到选项）。设计稿 §2 只说「四个下拉」、§8 的「明确不做」里也没有它
+   红过的业务用例（「@p1 固定列：多选，后选的列叠加而不是替换已钉住的列」那条的
+   `toBeVisible({ timeout: 15_000 })`，15s 等不到选项）。设计稿 §2 只说「四个下拉」、§8 的「明确不做」里也没有它
    ⇒ **设计漏项，裁定并入本批 Task 9**（迁 v2 后模板全是现成的，机制与 Task 7 同形）。
 7. **记在案的行为缺口（本批不补）**：「空关键词 + Enter 会不会全选上千列」零判据（新增那条 footer
    判据只有「matches 透传」+「`v-if` 丢掉 kw 一支」两个 mutation 同时成立才红）；
-   `clearFilterInput()` 有没有真把 EP 内部 query 洗掉，col 族被 `:744` 顺带兜住了一半，序列族仍零覆盖。
+   `clearFilterInput()` 有没有真把 EP 内部 query 洗掉，col 族被「@p2 显示测试列：输入关键词 + Enter
+   全选匹配项」那条的 `toHaveValue('')` 顺带兜住了一半，序列族仍零覆盖。
 8. **汇报纪律**：跑 e2e 报数必须带 **flake 数**（「36 passed」与「33 passed + 3 flaky」不是一回事）。
-   本轮实测既有负载 flake 两条：`:309` 固定列、`:1744` ETS88。
+   本轮实测既有负载 flake 两条：「@p1 固定列：多选，后选的列叠加而不是替换已钉住的列」与
+   「@p2 ETS88 文件末尾不渲染 Data Collection 尾部元数据行」（均按标题认，锚点 `1574012`）。
 
 ---
 
@@ -1255,7 +1266,8 @@ git commit -m "feat(export): 导出参数下拉迁 el-select-v2；条数判据�
 ### 三条实测事实（别再重新论证）
 
 1. **`fill()` 与 `pressSequentially()` 一样触发过滤**，「必须逐键输入」作废（该错账原文活了
-   2026-08-21 到 2026-11-13，`view-data.spec.ts:734`，已在 `b36343a` 删成一行正确事实）。
+   2026-08-21 到 2026-11-13，已在 `b36343a` 删成一行正确事实；那行现在在
+   `view-data.spec.ts` 的「@p2 显示测试列：输入关键词 + Enter 全选匹配项」那条开头，按标题认，锚点 `1574012`）。
    机理：Playwright 的 `fill` 派发 `input` 事件，v1（`select/src/useSelect.mjs:270→185`）与
    v2（`select-v2/src/useSelect.mjs:447→251`）走同一条
    `onInput→onInputChange→handleQueryChange→filterMethod` 链。边界只有三条：
@@ -1294,17 +1306,21 @@ git commit -m "feat(export): 导出参数下拉迁 el-select-v2；条数判据�
       （< 旧封顶 300），迁不迁 v2 都绿 ⇒ 换 `BPD93204_FT1_ETS163550_12252024`（现测 1,723 列）。
 - [ ] `pickBoundedKeyword` 是带 throw 的纯启发式且零 T2 ⇒ 拆纯 + 补 4 例（阶梯跳带 / 首字符全唯一 /
       空数组 / cap=1）。判据：`EXPORT_PARAM_SELECT_CAP=20` 与「匹配数 ≥2」两处边界必须能各自红。
-- [ ] ⚠ `exports.spec.ts` 现 **588 行**，不在 EXEMPT 账上 ⇒ 距 600 硬闸只剩 12 行，
-      加断言前**先腾行**。
+- [ ] ⚠ `exports.spec.ts` **不在** `scripts/line-limit.mjs` 的 EXEMPT 账上，所以它顶的是 600 硬闸本身；
+      本轮（2026-11-13）现跑 `wc -l` 是 **592**（计划原先记的 588 已过时）⇒ 距硬闸 8 行，
+      加断言前**先腾行**，别把这里的数字当长期事实，动手前重跑。
 - [ ] 记在案但不做（除非要动的那条用例顺手）：「空关键词 + Enter」行为零判据；
-      `clearFilterInput()` 是否真洗掉 EP 内部 query（col 族被 `:744` 兜了一半，序列族零覆盖）。
+      `clearFilterInput()` 是否真洗掉 EP 内部 query（col 族被「@p2 显示测试列：输入关键词 + Enter 全选匹配项」
+      那条 poll 之前的 `toHaveValue('')` 兜了一半，序列族零覆盖）。
 
-**9C 第五个下拉 —— 设计漏项，等用户拍板是否并入本批**
-- `DataBrowserToolbar.vue:54-67` 的「固定列」`el-select` 是**未封顶的 v1 实现**
+**9C 第五个下拉 —— 设计漏项，等用户拍板是否并入本批**（2026-11-13 拍板并入，落地 `1574012`）
+- 迁 v2 之前 `DataBrowserToolbar.vue` 的「固定列」那颗 `el-select`（位置以 `1574012^` 为准）
+  是**未封顶的 v1 实现**
   （`v-for="c in allCols"`，无 `DROPDOWN_RENDER_CAP`），`allCols` = 表格 `headers`
-  （`DataBrowserAgGrid.vue:521`），ETS88_FT 实测 **1,728 列** ⇒ 打开即挂 1,728 个 `el-option`，
+  （`DataBrowserAgGrid.vue` 里 `allCols.value = d.headers ?? []` 那一处），ETS88_FT 实测 **1,728 列** ⇒ 打开即挂 1,728 个 `el-option`，
   正是 `constants/dropdown.ts:8` 记的那个冻结风险；它也是 Task 7/8 复审里唯一反复红的业务用例
-  （`view-data.spec.ts:309/322`，15s 等不到选项）。
+  （`view-data.spec.ts` 的「@p1 固定列：多选，后选的列叠加而不是替换已钉住的列」那条，
+  选项首行的 `toBeVisible({ timeout: 15_000 })` 等不到）。
   设计稿 §2 只承诺「四个下拉」、§8 的「明确不做」里也没有它 ⇒ 属**设计漏项**而非范围蔓延。
   机制与 Task 7 同形（约 1 小时工作量），但**批 1 已越过原设计范围，必须先问用户**。
 
