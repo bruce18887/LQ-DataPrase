@@ -1017,6 +1017,44 @@ git commit -m "feat(correlation): 对比序列下拉迁 el-select-v2，取消 30
 
 ---
 
+## Task 6 落地后的订正（**Task 7/8 开工前必读**，2026-11-13）
+
+落地 = `19a1232`（迁移）+ `883753a`（删掉控制器给错的零消费者可选参数）+ `c9e0d67`（合并复审的修复）。
+
+1. **`--project` 必须按被测文件自己的 tag 选，别照抄本计划的 `--project=P1`。**
+   `e2e/data/file-correlation.spec.ts` 的 describe 是 `tag: ['@p2','@data']` ⇒ P1 项目下
+   `No tests found`。Task 7 的 `view-data.spec.ts` 只有 `@data`（归 **Edge** 项目），
+   Task 8 的 `exports.spec.ts` 自己 grep 一遍再定。跑之前先看文件里那行 `tag: [...]`。
+2. **`filterByKeyword` 现在是泛型** `<T extends string | number>(items: T[], keyword: string): T[]`。
+   泛型不是装饰：`SerialSelector` 把返回值原样喂给 `clamp()` 与 `emit('update:modelValue', …: number[])`，
+   非泛型签名在那两处都要重新断言一次。`sortPrefixFirst` 仍是 `Array<string|number>`（没人用它保类型）。
+3. **「Enter 全选匹配」这一族的 `matches` 空关键词一支必须自己给 `[]`**，形如
+   `kw.value ? filterByKeyword(props.options, filterText.value) : []`。
+   `filterByKeyword` 空串返回**入参本身**（全量，那是它自己的引用契约），透传会把「没输入」
+   变成「全匹配」⇒ footer 冒出「按 Enter 全选」，且 Enter 从「选中键盘高亮那一项」变成
+   「全选上千颗」。本计划正文没写这一点，Task 7/8 的组件形状相同，照这条做。
+4. **命名陷阱（computed 与 `options` prop 撞名）现在有判据了**，在
+   `e2e/data/file-correlation.spec.ts:274-300`：搜一个匹配不到的串 ⇒ 断 `.el-select__wrapper`
+   **没有** `is-disabled`。**但这条钉的是 `:disabled="options.length === 0"` 这个具体形状，
+   是相关性页专属** —— Task 7/8 别复制粘贴，先读自己组件的 disabled 语义再决定要不要同类判据。
+   `is-disabled` 的落点是 EP 2.14 的 `.el-select__wrapper`（`select-v2/src/select.mjs:55-61`），
+   写在 `.el-select` 根节点上会**恒绿**。
+5. **序列 / 测试项 / 导出这三族没有「虚拟窗口真生效、第 301 项够得着」的正向判据**，这是**已知
+   且被接受**的债（设计稿 §7 验收第 1 条只点名参数下拉）。收口方式定在 **Task 9**，且要最省：
+   把 `param-dropdown-full-list.spec.ts` 的 `tailRowState` 与 `MAX_WINDOW_ROWS` 提到
+   `e2e/helpers/selectV2.ts`，在既有多族用例里各加 1 条 `items.count() < 20` + 1 条 footer 逐字；
+   **不新建 spec、不新建夹具**（现在给三族各写一份会被 Task 7/8 各改一遍）。
+6. **`clearFilterInput()` 到底有没有把 EP 内部 query 洗掉，全仓零判据**（症状：搜索后关面板
+   再打开，框里残留旧关键词）。Task 5 也没钉。记为已知缺口，批末若要补就在 `file-correlation`
+   那条已在跑的序列用例里加两句，别为它开新用例。
+7. 实测过的两条 EP 事实，不必再查：**v2 的 Enter 绑在过滤 input 自己身上**
+   （`select-v2/src/select.mjs:227`，`withKeys(withModifiers(onKeyboardSelect,['stop','prevent']),['enter'])`），
+   组件的 `@keydown.capture` 在祖先捕获阶段先跑 ⇒ 抢得到；**v2 的 `#empty` 与 v1 门条件逐字同构**
+   （`select.mjs:318` vs v1 `select2.mjs:344`），「加载中显示『无匹配序列』」是 v1 既有行为，
+   不是迁移回归（Task 4 那条否证继续成立）。
+
+---
+
 ## Task 7: `TestColumnSelector.vue` 迁 v2（全选/清空在 `#footer`）
 
 **Files:**
