@@ -3059,9 +3059,10 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   读到的是上一次串行跑留下的旧文件 —— 旧 `SECRET_KEY` 签的 access token 在 slot 后端必然验不过 ⇒ 401 ⇒
   路由守卫弹回 `/login` ⇒ 布局根本没渲染。关键是：**四个业务项目的 `use.storageState` 早就是 slot-aware 的
   `ADMIN_STATE`**（`playwright.config.ts:121/130/137/144`），所以那行本来就是多余的，多余且有害。
-- **规则①：用例侧禁止写 storageState 的字面量路径。** 要么不写（继承项目级），要么显式清空成
-  `{ cookies: [], origins: [] }` 再走 `loginAs`（`e2e/admin/admin.spec.ts:54`、`audit.spec.ts:36` 的既有形状）。
-  绊线：`grep -rn "storageState: '" frontend/e2e` 必须零命中。
+- **规则①：用例侧禁止写 storageState 的字面量路径，也不许绕变量塞进去。** 要么不写（继承项目级），要么显式
+  清空成 `{ cookies: [], origins: [] }` 再走 `loginAs`（`e2e/admin/admin.spec.ts:54`、`audit.spec.ts:36` 的既有
+  形状）。绊线：`frontend/test/unit/e2eAuthStateHygiene.spec.ts`（手查用
+  `grep -rnE "storageState:[[:space:]]*[\"'\`]" frontend/e2e`，注意反引号也要算，单引号那一版会漏模板串）。
 - **规则②：新增 spec 的绿灯，只有进过 slot 档才算数。** 判据是「这个文件有没有依赖登录态 / 落盘路径 / 端口 /
   media 位置」—— 沾上任何一条，就必须至少跑一次 `node scripts/e2e_pool.mjs --slots=1 -- <file>`（本批实测
   4 个文件 3.6 分钟，比事后在收口档里发现便宜得多）。本批这条花掉的钱是全量池跑了两遍多。
