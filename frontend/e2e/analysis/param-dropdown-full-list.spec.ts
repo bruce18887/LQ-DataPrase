@@ -1,7 +1,12 @@
 import { expect, test } from '@playwright/test'
 
 import { gotoApp } from '../helpers/nav'
-import { listParams, selectAnalysisFile, selectParam } from '../helpers/params'
+import {
+  listParams,
+  PARAM_POPPER_SINGLE,
+  selectAnalysisFile,
+  selectParam,
+} from '../helpers/params'
 
 /**
  * 用户报的原话是「参数选择框为啥只能看前 300 个测试项」。旧实现是 `el-select` +
@@ -9,8 +14,9 @@ import { listParams, selectAnalysisFile, selectParam } from '../helpers/params'
  * 是完整组件实例，原样挂载即冻结主线程），本批换成 `el-select-v2` 的虚拟窗口。
  *
  * 三条判据各挡一种回退：
- *  - footer 的「共 N 项」：挡「把截断偷偷放回来」的**说出来**那一半（footer 文案里
- *    不许再有「仅显示前」）——截断时 total 仍等于全量，所以它必须配合第 3 条
+ *  - footer 逐字等于「共 N 项」且 N = 响应条数：挡「把截断偷偷放回来」。截断时 N 仍会写
+ *    成全量，所以光这条不够，必须配合第 3 条；`toHaveText` 是整句精确匹配，「仅显示前」
+ *    再出现时它自己就红，不需要另加一条子串断言（那条会被它严格蕴含，是装饰）
  *  - 搜到列表末尾那一项并选中：挡「过滤这一步本身退化成只在已渲染子集里找」
  *    （把 v2 的 `filter-method` 当成真过滤器用、或 `:options` 改回喂窗口那几行，都是这种）。
  *    旧的那个「截断到 300」的 bug **不由它兜**：旧实现是先在完整集合上过滤、再截断到 300，
@@ -27,8 +33,20 @@ import { listParams, selectAnalysisFile, selectParam } from '../helpers/params'
  * 虚拟窗口里 DOM 只有约 8 行，数条数从本批起不再是「列表有多少项」的判据。
  * 「下拉真的把响应里那些项渲染出来了」这一维由本文件兜（paramList.ts 的捕获与产品同源）。
  */
-const POPPER = 'dp-param-popper-single'
+const POPPER = PARAM_POPPER_SINGLE
 const BIG_FILE = 'BPD93204_FT1_ETS163550_12252024'
+
+/** 旧实现的渲染封顶。写死数字而**不 import** `DROPDOWN_RENDER_CAP`：那个常量本批 Task 9 就删，
+ *  判据要活过它，删完还留着引用等于把这条用例和一段死代码焊在一起。 */
+const LEGACY_RENDER_CAP = 300
+
+/**
+ * 虚拟窗口允许出现的最大行数。上界由 EP 默认值推出：`select-v2/src/defaults.mjs` 的
+ * `height:274 / itemHeight:34` ≈ 9 行，加 overscan 实测 11 行（2026-11-13）。留到 20 是
+ * 给「以后有人调高面板」的余量；真正的判据是「远小于全集」，不是「等于 11」。
+ */
+const MAX_WINDOW_ROWS = 20
+
 
 /** 本实例 popper 里的选项行（v2 的虚拟窗口只渲染这几行） */
 function paramItems(page: import('@playwright/test').Page) {
@@ -45,14 +63,23 @@ function paramItems(page: import('@playwright/test').Page) {
  */
 function tailRowState(page: import('@playwright/test').Page, last: string) {
   return page.evaluate(({ popper, target }) => {
-    const panel = document.querySelector(`.el-popper.${popper}:not([aria-hidden="true"])`)
+    // 与 `helpers/params.ts` 的 visibleOptions 同一套谓词（`[aria-hidden="false"]`）：
+    // 本文件里两种写法并存，将来 EP 改了绑定方式就会只红一半，根因看不出来。
+    const panel = document.querySelector(`.el-popper.${popper}[aria-hidden="false"]`)
     const rows = panel ? [...panel.querySelectorAll('.el-select-dropdown__item')] : []
     const hit = rows.find((r) => (r.textContent ?? '').trim() === target)
     if (!hit) return { inDom: false, inViewport: false }
-    // 最近的可滚祖先 = 虚拟列表的视口（不写死 EP 内部类名，v1/v2 都拿得到）
+    // 最近的可滚祖先 = 虚拟列表的视口（不写死 EP 内部类名，v1/v2 都拿得到）。
+    // body/documentElement 必须排除：整页可滚时它们同样满足 scrollHeight>clientHeight，
+    // 一旦窗口自身没撑起来，末项就会被「页面滚动的位置」判成「在窗口里可见」—— 那是假绿，
+    // 而本用例唯一承重的就是「窗口滚到了末尾」。找不到合格祖先 ⇒ inViewport:false ⇒ 红。
     let vp: HTMLElement | null = hit.parentElement
-    while (vp && vp.scrollHeight <= vp.clientHeight + 1) vp = vp.parentElement
-    if (!vp) return { inDom: true, inViewport: false }
+    while (vp && vp.scrollHeight <= vp.clientHeight + 1 && vp !== document.body) {
+      vp = vp.parentElement
+    }
+    if (!vp || vp === document.body || vp === document.documentElement) {
+      return { inDom: true, inViewport: false }
+    }
     const a = vp.getBoundingClientRect()
     const b = hit.getBoundingClientRect()
     return { inDom: true, inViewport: b.top >= a.top - 1 && b.bottom <= a.bottom + 1 }
@@ -97,15 +124,13 @@ test.describe('@p1 参数下拉可浏览全部测试项', { tag: ['@p1', '@analy
     await page.locator('.param-selector .el-select').click()
     await expect(items.first()).toBeVisible({ timeout: 15_000 })
 
-    // 前提：夹具必须比旧封顶（300）大，否则「取消截断」这件事根本没进判据范围。
+    // 前提：夹具必须比旧封顶大，否则「取消截断」这件事根本没进判据范围。
     // 红了就换更大的夹具，不要把它改成 skip —— skip 等于把这条判据删掉。
-    expect(all.length, `夹具 ${BIG_FILE} 的参数数应当 > 旧封顶 300`).toBeGreaterThan(300)
+    expect(all.length, `夹具 ${BIG_FILE} 的参数数应当 > 旧封顶 ${LEGACY_RENDER_CAP}`)
+      .toBeGreaterThan(LEGACY_RENDER_CAP)
 
     await items.first().hover()
     await page.mouse.wheel(0, 200_000)
-    // Q3/Q4 两个临时打印是 Task 5 Step 1.5 的放行判据（实测 11 行 / 310ms），核对完摘掉：
-    // 常驻的 console.log 会把全量池日志弄脏，而「滚到底」这件事由下面的 poll 承重
-
     await expect
       .poll(() => tailRowState(page, last), {
         timeout: 10_000,
@@ -113,7 +138,8 @@ test.describe('@p1 参数下拉可浏览全部测试项', { tag: ['@p1', '@analy
           '分不清就是用例自己坏了）',
       })
       .toEqual({ inDom: true, inViewport: true })
-    // 窗口行数必须远小于全集，否则「虚拟窗口」这个词没被验到（放行判据 Q3 的常驻版本）
-    expect(await items.count(), 'DOM 里只该有虚拟窗口那几行').toBeLessThan(40)
+    // 「虚拟窗口」这四个字只有这条兜得住：行数回到全量即等于虚拟化没生效，而上面两条
+    // 在「不虚拟化但也不截断」的实现下一样会绿。Task 5 放行实测 11 行 / 滚到底 310ms。
+    expect(await items.count(), 'DOM 里只该有虚拟窗口那几行').toBeLessThan(MAX_WINDOW_ROWS)
   })
 })

@@ -6,9 +6,9 @@
  * 改它们不会同时影响四个下拉。
  *
  * 为什么必须有这份文件：`el-select-v2` 的 `filter-method` 在 2.14.0 里**退化成纯回调**
- * （`useSelect.mjs:114-132` 判到 filterMethod 合法后让 `isValidOption` 恒 true ⇒
+ * （`select-v2/src/useSelect.mjs:114-132` 判到 filterMethod 合法后让 `isValidOption` 恒 true ⇒
  * `filteredOptions` = 全量 `props.options`），组件自己不过滤。所以过滤必须由调用方算好
- * 塞进 `:options`。而 `:options` 的元素必须是对象（`useProps.mjs:25-28` 走
+ * 塞进 `:options`。而 `:options` 的元素必须是对象（`select-v2/src/useProps.mjs:25-28` 走
  * `lodash.get(option,'label'|'value')`），喂 `string[]` 是静默空白行。
  *
  * 高亮片段**不在这里算**：它由组件在 v2 的 `#default` 逐条渲染器里按需调用
@@ -35,25 +35,34 @@ export function toOptions(items: Array<string | number>): SelectOption[] {
 /**
  * 大小写不敏感子串匹配（关键词与条目都在函数内归一化）。
  *
+ * 入参收 `string | number`：序列号下拉（`SerialSelector`）的候选是 `number[]`，而
+ * `toOptions` 本来就收数字 —— 这三个函数口径必须一致，否则第二个消费者就得本地重写一份。
+ *
  * 空关键词返回**入参本身**（同一引用、零拷贝）—— 与 `sortPrefixFirst` 相反，后者总是
  * 返回新数组：`Array.prototype.sort` 原地改，不拷贝就会把调用方传进来的 `props.params` 排坏。
  * 这个不对称是有意的，两条判据分别用 `toBe` / `not.toBe` 钉住，别"顺手统一"。
  */
-export function filterByKeyword(items: string[], keyword: string): string[] {
+export function filterByKeyword(
+  items: Array<string | number>,
+  keyword: string,
+): Array<string | number> {
   const q = keyword.trim().toLowerCase()
   if (!q) return items
-  return items.filter((it) => it.toLowerCase().includes(q))
+  return items.filter((it) => String(it).toLowerCase().includes(q))
 }
 
 /** 前缀匹配优先，其余按 localeCompare。关键词在函数内归一化；返回新数组，不改入参。 */
-export function sortPrefixFirst(items: string[], keyword: string): string[] {
+export function sortPrefixFirst(
+  items: Array<string | number>,
+  keyword: string,
+): Array<string | number> {
   const q = keyword.trim().toLowerCase()
   return [...items].sort((a, b) => {
-    const aStarts = a.toLowerCase().startsWith(q)
-    const bStarts = b.toLowerCase().startsWith(q)
+    const aStarts = String(a).toLowerCase().startsWith(q)
+    const bStarts = String(b).toLowerCase().startsWith(q)
     if (aStarts && !bStarts) return -1
     if (!aStarts && bStarts) return 1
-    return a.localeCompare(b)
+    return String(a).localeCompare(String(b))
   })
 }
 
@@ -98,8 +107,12 @@ export function buildParamOptions(
   params: string[],
   query: string,
 ): { options: SelectOption[]; total: number } {
+  // 归一化只做一次（判「有没有关键词」用），两个 callee 各自还会再归一化一遍 ——
+  // 它们必须能独立被单测，不能假定调用方已经洗过。
   const kw = query.trim().toLowerCase()
-  const matched = filterByKeyword(params, kw)
-  const ordered = kw ? sortPrefixFirst(matched, kw) : matched
+  const matched = filterByKeyword(params, query)
+  // 无关键词时**不排序**：那一支返回 filterByKeyword 的原引用，列表顺序 = 文件列顺序。
+  // 去掉这个三元，用户没搜任何东西也会看到一次整体重排（localeCompare 结果）。
+  const ordered = kw ? sortPrefixFirst(matched, query) : matched
   return { options: toOptions(ordered), total: matched.length }
 }
