@@ -77,7 +77,8 @@ export const PIN_COL_POPPER = 'dp-pin-col-popper'
  * `e2e/analysis/correlation-file-switch-reset.spec.ts`），合计 **4 个文件**。
  * 「6」是调用点数不是文件数 —— 按它去补类名会多找两个并不存在的消费者
  * （`e2e/exports/exports.spec.ts` 的 `pickOptionByName` 是它自己的本地函数，不走本 helper，别算进来）。
- * 给这 4 个文件逐个补实例级类名是本批收口的专项。
+ * 给这 4 个文件逐个补实例级类名**批1 没做**（Task 9A 清点后与内联 `:visible` 一并推到下一批专项，
+ * 实数以 `docs/tasks/todo.md` 那本账为准，现跑 grep 取）—— 别把这句当成已完成。
  */
 export function visibleSelectOptions(page: Page): Locator {
   return page.locator('.el-select-dropdown__item:visible')
@@ -92,6 +93,12 @@ export function visibleSelectOptions(page: Page): Locator {
  * 产品侧改类名时用例侧只改这里）。谓词只用 `[aria-hidden="false"]`
  * 一种写法（2026-11-13 订正第 4 条）：写成 `:not([aria-hidden="true"])` 的话，EP 换了
  * 绑定方式只会红一半，根因看不出来。
+ *
+ * ⚠ `popper-class` 在 v2 里**不只挂下拉那一份 popper**：`select-v2/src/select.mjs:117` 把它同样给
+ * `collapse-tags` 的溢出标签 tooltip（`tagTooltip?.popperClass ?? popperClass`）。三颗 multiple +
+ * collapse-tags 的控件（序列 / 测试列 / 导出）因此**可能存在两份** `.el-popper.<同一 class>`，眼下靠
+ * 同文件 `:108` 的 `disabled: dropdownMenuVisible` 让两者不同时可见。哪天这条报 strict violation，
+ * **别改成 `.first()`**（那是把身份判据降级成位置判据），给 tooltip 传 `:tag-tooltip.popper-class`。
  */
 export function popperOf(page: Page, popperClass: string): Locator {
   return page.locator(`.el-popper.${popperClass}[aria-hidden="false"]`)
