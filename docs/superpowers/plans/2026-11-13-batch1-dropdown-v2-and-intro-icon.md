@@ -485,6 +485,28 @@ git commit -m "test(e2e): 参数全集改从 histogram 无 params 响应取；�
 
 ---
 
+### Task 4 落地后对计划的三处订正（2026-11-13，实现者判 DONE_WITH_CONCERNS 后控制器核实采纳）
+
+上面 Step 1/4 写的形状**在本仓真实数据上会造出两种真 flake**，实现者加了守卫才收敛。控制器独立核实其证据后**采纳偏离** —— 本节是新的权威形状，Step 1/4 的旧代码块按此读。
+
+**订正 1：捕获回写要带请求序号（采纳）**。计划版 handler 是 `await response.json()` 之后直接 `captured.set` —— 两个快路径响应的 json resolve 顺序**不保证**，旧文件（41 列）的晚 resolve 会把新文件（180 列）的列表回写覆盖掉。实现者实测：`outlier-handling:346` 首跑红、retry 绿。
+补守卫时先试了 `Request.timestamp()` —— **Node 版 Playwright 没有这个 API**（Python 版才有），因此 16 条全红；最终改成在 `request` 事件上自打序号（发出顺序严格单调），镜像产品侧 `useTabFileParams.ts:60,85` 的 `mySeq/loadSeq` 守卫。**这条要记住**：不能假定仓内既有等待形状对应的 Playwright API 存在，先探针（lessons「没用过的 API 先跑探针」在 e2e 侧同样成立）。
+
+**订正 2：`listParams` 必须自己等「新文件的列表已落地」（采纳）**。旧 DOM 版里 `options.first()` 那 15s 可见等待**顺带**承担了「新文件的列表响应已处理完」这一步；改成纯读捕获后这一步消失了 —— `pickTabFileAndWaitCompute` 等的是计算**请求发出**（首发带旧参数会 400，且早于列表响应处理完成），于是 `allParams` 读到上一个文件的 41 项当全量基线，Fail 收缩后的 80 项反而「不少于全量」。实现者实测：`chart-filter-switches:71` 红。
+修法两条：`capturedParamList` 只在「捕获所属 `file_id` == 最后一次快路径请求的 `file_id`」时给值；`listParams` 用 `expect.poll(15s)` 补回那一步等待。**这不是「为兼容而做一次无谓的下拉开合」**（Task 4 任务书里警告过的那种），是数据源侧的真判据。
+
+**订正 3：`maxTries` 语义变化目前不可观测**。`selectParamWithSpecLimits` 的 `slice(0, maxTries)` 从「渲染出的前 N 个」变成「全集里前 N 个」，但本仓**没有 >300 参数的测试夹具**（实测 DA35 是 180 参数：`found=Kelvin_VIN tried=9 of total=180 ms=18538`），新旧列表一致、试的个数与耗时同量级。⇒ 计划里「这条变化要靠收口全量池兜住」暂时无的放矢；**若将来引入 >300 参数的夹具，必须回来看这条**。
+
+**转给后续 Task 的两项**：
+- `frontend/e2e/helpers/elplus.ts:16` 的 `visibleSelectOptions` 仍是 `:visible`，同一「过渡帧挑中上一个 popper」的风险在这条通路上原样存在（`file-correlation` 等 8+ 文件在用）。**并入 Task 6**（相关性页正是 SerialSelector 的落点），不要留到 Task 12。
+- `pickTabFile` 上方注释里「隐藏 pane 的那一份仍会被全局 `:visible` 命中」的措辞在新判据下已过时（作用域限定本身仍然必要）。**并入 Task 9**（组件改完、注释集中收敛时一起改）。
+
+**一条被核实为假的前提，记录以免重复提出**：有人提议「迁 v2 后 `SerialSelector` 在 loading 期间会渲染 `#empty` 显示『无匹配序列』，而 v1 显示『加载中』，所以要补 `#loading` slot」。
+**不成立**：v1 的 `select/src/select2.mjs:343-346` 是 `renderSlot($slots,"empty", {}, () => [span emptyText])` —— `#empty` slot **本来就优先于** `emptyText`，后者只是兜底。v2 的 `select-v2/src/select-dropdown.mjs:160` 是 `slots.loading?.() || slots.empty?.()`，两侧同样被我们提供的 `#empty` 抢先。⇒ **v1 与 v2 行为逐字相同，不存在迁移回归。**
+真实情况是另一件事：**「加载期间显示『无匹配序列』」是本批之前就存在的文案错位**（把「还没拿到」说成「查过了没有」，与 `AuditLogPage.vue:52-55` 那条「失败不能写成空态」同类）。改它要新增用户可见文案，属独立工单，不在批1。提案留档在 `tasks/2026-11-13-loading-slot-proposal.patch`。
+
+---
+
 ## Task 5: `ParamSelector.vue` 迁 `el-select-v2`（含高亮按需 + footer 计数）
 
 **Files:**
