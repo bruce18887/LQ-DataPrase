@@ -33,9 +33,12 @@ describe('filterByKeyword', () => {
   it('大小写不敏感子串匹配', () => {
     expect(filterByKeyword(['Kelvin_VIN', 'IBLK'], 'kel')).toEqual(['Kelvin_VIN'])
   })
-  it('空关键词返回原集合（不复制、不改序）', () => {
+  it('空关键词返回入参本身（同一引用，零拷贝）', () => {
     const items = ['B', 'A']
     expect(filterByKeyword(items, '')).toEqual(['B', 'A'])
+    // 万级列表在「没输入」这条最常见路径上省一次拷贝；契约是**同一引用**，
+    // 改成 [...items] 本例即红（2026-11-13 质量复审 M-1/M-3）。
+    expect(filterByKeyword(items, '')).toBe(items)
   })
   it('关键词无需调用方预归一化：原始大小写同样匹配', () => {
     expect(filterByKeyword(['Kelvin_VIN', 'IBLK'], 'KEL')).toEqual(['Kelvin_VIN'])
@@ -64,8 +67,23 @@ describe('highlightSegments', () => {
       { text: '_VIN', mark: false },
     ])
   })
+  // 与 filterByKeyword/sortPrefixFirst 同一归一化契约：关键词首尾空格不影响高亮。
+  // 少了这一步就会出现「过滤命中、高亮不命中」的自相矛盾（2026-11-13 质量复审 I-1）。
+  it('关键词首尾空格不影响高亮命中', () => {
+    expect(highlightSegments('PAR1', '  PAR  ')).toEqual([
+      { text: 'PAR', mark: true },
+      { text: '1', mark: false },
+    ])
+  })
+  it('空文本仍返回一段（调用方可以安全地 v-for 而不必判空数组）', () => {
+    expect(highlightSegments('', 'x')).toEqual([{ text: '', mark: false }])
+  })
   it('多处命中全部标出，顺序与原文一致', () => {
-    expect(highlightSegments('AxAxA', 'ax').map((s) => s.text).join('')).toBe('AxAxA')
+    expect(highlightSegments('AxAxA', 'ax')).toEqual([
+      { text: 'Ax', mark: true },
+      { text: 'Ax', mark: true },
+      { text: 'A', mark: false },
+    ])
   })
   it('空关键词返回单个不标亮的整段', () => {
     expect(highlightSegments('ABC', '')).toEqual([{ text: 'ABC', mark: false }])

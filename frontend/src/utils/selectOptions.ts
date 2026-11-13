@@ -1,6 +1,10 @@
 /**
  * 大列表下拉（`el-select-v2`）的选项准备：过滤 → 排序 → 映射。
  *
+ * 四个下拉真正共享的是 `toOptions`（`:options` 必须是对象数组）；`filterByKeyword` /
+ * `sortPrefixFirst` 拆成独立导出是为了能单测，目前唯一消费者是 `buildParamOptions`，
+ * 改它们不会同时影响四个下拉。
+ *
  * 为什么必须有这份文件：`el-select-v2` 的 `filter-method` 在 2.14.0 里**退化成纯回调**
  * （`useSelect.mjs:114-132` 判到 filterMethod 合法后让 `isValidOption` 恒 true ⇒
  * `filteredOptions` = 全量 `props.options`），组件自己不过滤。所以过滤必须由调用方算好
@@ -18,7 +22,7 @@ export interface SelectOption {
   label: string
 }
 
-export interface ParamSegment {
+export interface HighlightSegment {
   text: string
   mark: boolean
 }
@@ -28,7 +32,13 @@ export function toOptions(items: Array<string | number>): SelectOption[] {
   return items.map((value) => ({ value, label: String(value) }))
 }
 
-/** 大小写不敏感子串匹配（关键词与条目都在函数内归一化）；空关键词返回原集合 */
+/**
+ * 大小写不敏感子串匹配（关键词与条目都在函数内归一化）。
+ *
+ * 空关键词返回**入参本身**（同一引用、零拷贝）—— 与 `sortPrefixFirst` 相反，后者总是
+ * 返回新数组：`Array.prototype.sort` 原地改，不拷贝就会把调用方传进来的 `props.params` 排坏。
+ * 这个不对称是有意的，两条判据分别用 `toBe` / `not.toBe` 钉住，别"顺手统一"。
+ */
 export function filterByKeyword(items: string[], keyword: string): string[] {
   const q = keyword.trim().toLowerCase()
   if (!q) return items
@@ -48,19 +58,22 @@ export function sortPrefixFirst(items: string[], keyword: string): string[] {
 }
 
 /**
- * 高亮分段：返回 {text, mark} 片段列表。
+ * 把 `text` 按关键词切成 {text, mark} 片段列表，供消费方逐段渲染。
  *
- * 不走 v-html：参数名来自上传文件的列头（用户可控输入），旧实现对 text 未转义，
- * 列名含 `<img src=x onerror=...>` 即成存储型 XSS，普通 `<`/`&` 也会被当标签/实体
- * 吞掉导致下拉显示错乱。大小写不敏感子串匹配与旧 `gi` 正则高亮等价，
- * 且无正则元字符转义问题。（本段说明从 ParamSelector.vue:145-149 原样搬来，
- * 搬动原因是 Serial/TestColumn/Export 三处也需要同一条判据的注释锚点。）
+ * **消费方必须把 `text` 当文本节点渲染（`{{ }}` 插值），禁止 `v-html`**：参数名来自上传
+ * 文件的列头（用户可控输入），旧实现对 text 未转义，列名含 `<img src=x onerror=...>` 即成
+ * 存储型 XSS。本函数只保证返回的文本无损，**拦不住**消费方用 v-html —— 判据是
+ * `test/unit/selectOptions.spec.ts` 里那条 XSS 反向探针 + 源码侧的 template 审查。
+ *
+ * 大小写不敏感子串匹配，与旧 `gi` 正则高亮等价且无正则元字符转义问题。
+ * 锚点：修复本体见 ParamSelector 的 highlightSegments 历史实现与提交 d1146dd。
  */
-export function highlightSegments(text: string, query: string): ParamSegment[] {
-  if (!query) return [{ text, mark: false }]
+export function highlightSegments(text: string, query: string): HighlightSegment[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return [{ text, mark: false }]
+  if (!text) return [{ text, mark: false }]
   const lower = text.toLowerCase()
-  const q = query.toLowerCase()
-  const segments: ParamSegment[] = []
+  const segments: HighlightSegment[] = []
   let i = 0
   while (i < text.length) {
     const idx = lower.indexOf(q, i)
