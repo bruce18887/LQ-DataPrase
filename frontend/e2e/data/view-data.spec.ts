@@ -739,15 +739,15 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     await expect(hint).toContainText(`匹配 ${matchCount} 项`, { timeout: 5_000 })
     await input.press('Enter')
 
-    // 全选后输入框自动清空；选中态改成「重新搜同一个关键词 ⇒ 窗口里每一条都必须 is-selected」：
-    // Enter 清空过滤后 v2 只渲染虚拟窗口那十来行，等 firstMatch 进 DOM 不再成立（2026-11-13 实测）。
+    // 判据换成「重搜同一词 ⇒ 窗口里每一条都 is-selected」：Enter 清空过滤后 v2 只渲染窗口那十来行，
+    // 等 firstMatch 进 DOM 不再成立；下界 2 挡的是「窗口只挂 1 行且它恰选中」时全选与「v2 加 1 颗」同形。
     await expect(input).toHaveValue('')
     await input.pressSequentially(kw)
     await expect
       .poll(async () => {
         const win = popperOf(page, COL_POPPER)
         const total = await win.locator('.el-select-dropdown__item').count()
-        return total > 0 && total === (await win.locator('.el-select-dropdown__item.is-selected').count())
+        return total >= 2 && total === (await win.locator('.el-select-dropdown__item.is-selected').count())
       }, { timeout: 5_000 })
       .toBe(true)
   })
