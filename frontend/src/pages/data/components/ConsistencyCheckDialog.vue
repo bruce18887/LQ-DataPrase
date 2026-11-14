@@ -43,9 +43,12 @@
       </el-descriptions>
 
       <!-- 清单/磁盘差值（规格 §4.6 + 计划订正③）：只陈述事实、不给动作按钮——
-           产品里没有任何路径会回写 file_size，「重新扫描」修不好这一行。 -->
+           产品里没有任何路径会回写 file_size，「重新扫描」修不好这一行。
+           data-testid 是给 e2e 的结构钩子：按文案筛的定位器抓不到「title 为空但这一行照样
+           渲染出来」的回归（2026-11-14 变异实测），而这一行的契约本来就是「出现 / 不出现」。 -->
       <el-alert
         v-if="mismatchLine"
+        data-testid="disk-mismatch-alert"
         :title="mismatchLine"
         type="warning"
         :closable="false"
