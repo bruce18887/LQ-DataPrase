@@ -708,9 +708,10 @@ admin/settings 那一族（`AuditLogPage.vue` 事件枚举、`UserManagement.vue
 
 ## 状态：**七档全绿，未并入 master，未 push**
 
-分支 `feature/batch2-disk-usage`。规模现读：`git rev-list --count master..HEAD` = **45 笔**，
-`git diff --shortstat master...HEAD` = **17 文件 / +5499 / −6**（这个加号里含计划台账本身，
-产品代码只占其中一小部分，逐笔标题 `git log --oneline master..HEAD`）。工作树干净。
+分支 `feature/batch2-disk-usage`。规模**只写命令不写数**（终审点名：本节初稿写的「45 笔 / 17 文件 /
++5499」在它自己那条规则上过期了——收口那一笔提交没法把自己算进去）：
+`git rev-list --count master..HEAD`、`git diff --shortstat master...HEAD`、逐笔标题
+`git log --oneline master..HEAD`。工作树状态现读 `git status --porcelain`。
 **并入要等用户点头**（批1 的先例是 `--ff-only` 并入本地 master，`origin` 是公开仓库，绝不 push）。
 
 ## 收口七档（每档取判据行，不取退出码）
