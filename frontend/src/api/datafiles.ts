@@ -297,3 +297,28 @@ export interface FixConsistencyResponse {
     reason: '' | 'no_match' | 'file_missing'
   }>
 }
+
+/** GET /files/usage/ 的返回体：口径全在 apps/datafiles/storage_usage.py。 */
+export interface UsageBucket {
+  bytes: number
+  count: number
+}
+
+export interface FileUsage {
+  data_dir: string
+  /** 表观口径，chip 显示的那一个数 */
+  bytes: number
+  /** inode 去重口径（绊线用，界面不显示） */
+  unique_bytes: number
+  file_count: number
+  /** 根下第一段目录名为键（single / batch，散文件为空串） */
+  by_type: Record<string, UsageBucket>
+  db_count: number
+  db_bytes: number
+  db_bytes_in_root: number
+  db_outside_root_count: number
+  db_outside_root_bytes: number
+  mismatch_over_threshold: boolean
+  mismatch_diff_bytes: number
+  scanned_at: string
+}
