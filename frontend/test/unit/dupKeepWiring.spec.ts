@@ -39,6 +39,24 @@ describe('重复文件卡的接线', () => {
     expect(c).toMatch(/data-testid="dup-keep-row"/)
     expect(c).toMatch(/:data-keep="f\.id === keepFor\(group\)/)
   })
+  it('策略标签不许承诺「默认」—— 默认恒为最早，只有点「应用」才轮到策略（终审 F2 的谎话控件）', () => {
+    const c = card()
+    /**
+     * 缺陷形状：标签写「未改选的组默认保留」+ 两颗 radio「最早导入 / 最新导入」，读起来像
+     * 「默认跟着这颗 radio 走」；而 `keepIdForGroup` 压根不读 `strategy`（默认恒为 `files[0]`
+     * =最早），alert 那句「未改选的组默认保留最早导入的那条」才是真相。同一个屏幕两句互斥，
+     * 用户拨到「最新导入」不点应用 ⇒ 被物理删掉的是最新那份（§5.5 已否掉回收站）。
+     * 判据只认**标签那个文本节点**（`class="dup-strategy-label">` 紧跟的那串），
+     * 因为模板里那段 WHY 注释按 `codeOf` 的逐行规则只有首行算注释、续行仍算代码 ——
+     * 它必然要写出「默认保留」这个词来讲明为什么禁它。`[B3A-F2A]` 在浏览器里钉同一句。
+     */
+    expect(c).toMatch(/class="dup-strategy-label">[^<]*只作用未改选的组[^<]*</)
+    expect(c, '标签一旦带上「默认」，就与 alert 那句「默认保留最早」打对台').not.toMatch(
+      /class="dup-strategy-label">[^<]*默认/,
+    )
+    // 真相那句必须还在 alert 里，且是「最早」而不是「按策略」
+    expect(c).toMatch(/未改选的组默认保留最早导入的那条/)
+  })
   it('fix 事件带 keep_ids 上行', () => {
     const c = card()
     /**

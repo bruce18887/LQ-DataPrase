@@ -137,23 +137,37 @@ describe('汇总与文案', () => {
   })
   it('truncatedNote：超过切片才说话，且说的是本批处理多少', () => {
     expect(truncatedNoteText(73, 50)).toBe(
-      '共 73 组重复，本批处理前 50 组，另有 23 组未处理 —— 重新检查后可继续。',
+      '共 73 组重复，本批处理前 50 组，其余 23 组本批不处理，重新检查后可继续。',
     )
     expect(truncatedNoteText(50, 50)).toBe('')
     expect(truncatedNoteText(1, 1)).toBe('')
   })
   it('旧的「删除操作将作用于全部」这句必须消失', () => {
-    // 独立输入（51/50 而不是上一例用过的 73/50）：同输入时这句被上面那条整句 toBe
+    // 独立输入（51/50 而不是上一例用过的 73/50）：同输入时这句被上面那条 toBe
     // 严格蕴含，永远出不了声 —— 2026-11-15 复审判它是装饰性断言。
     expect(truncatedNoteText(51, 50)).not.toMatch(/作用于全部|仅显示/)
     expect(truncatedNoteText(73, 51)).not.toMatch(/作用于全部|仅显示/)
+    // M12 同族：删前这句**不许承诺已经处理完**（`本批不处理` 必须在），
+    // 也不许写成「未处理」那种听上去像实测的说法 —— 见下面判定①那条交叉断言。
+    expect(truncatedNoteText(51, 50)).toMatch(/本批不处理/)
+    expect(truncatedNoteText(51, 50)).not.toMatch(/已处理|已完成/)
   })
   it('remainingGroupsNote：0 组不啰嗦', () => {
     expect(remainingGroupsNote(0)).toBe('')
-    expect(remainingGroupsNote(23)).toBe('，另有 23 组未处理')
+    expect(remainingGroupsNote(23)).toBe('，删除后仍判定为重复的有 23 组')
     // 0 由 `!remaining` 吃掉，负数与缺字段走 `<= 0` 那半 —— 不钉就是没人看管的分支
     expect(remainingGroupsNote(undefined)).toBe('')
     expect(remainingGroupsNote(-1)).toBe('')
+  })
+  it('删前那句与删后那句必须是**两个不同的说法**（终审 F2 判定①）', () => {
+    // 同一个屏幕上卡片（删前算术：总组数 − 已展示）与 toast（删后服务端实测 remaining_groups）
+    // 同时出现。共用「另有 N 组未处理」这个词就等于让算术值冒充实测值 —— 而
+    // `_duplicate_files.py` 的 docstring 明写实测是**刻意**选的（部分失败时两者不等）。
+    const card = truncatedNoteText(73, 50)
+    const receipt = remainingGroupsNote(23)
+    expect(card).not.toMatch(/仍判定为重复/)
+    expect(receipt).not.toMatch(/未处理|本批不处理/)
+    expect(card).not.toBe(receipt)
   })
   it('dupImportText 带年份（跨月的两份要分得出先后，短形态会跨年读错）', () => {
     expect(dupImportText('2026-08-10T14:09:42.332806+00:00')).toMatch(/2026/)

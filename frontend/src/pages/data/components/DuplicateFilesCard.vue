@@ -11,8 +11,17 @@
     }"
     :truncated-note="truncatedNote"
   >
+    <!-- 为什么这颗 radio 的标签**不写**「未改选的组默认保留」（终审 F2，2026-11-15 实测缺陷）：
+         `strategy` 全卡只被 `applyStrategy()` 读一次；未改选组的保留项走
+         `keepIdForGroup` → `defaultKeepId` = `files[0].id` = 最早那条，**不看 strategy**。
+         即「拨动策略 radio 不改变未改选组的默认值」，只有点右边那颗「应用到未改选的 N 组」
+         才真的生效。标签里出现「默认保留」就是在承诺一个不发生的行为 —— 而卡片上面那条 alert
+         已经在说「未改选的组默认保留最早导入的那条」，同一个屏幕两句互斥的话，用户拨到「最新导入」
+         却不点应用时，被物理删掉的是**最新那一份**（设计 §5.5 已否掉回收站，删了就没了）。
+         真相只留 alert 那一句；标签只说这颗策略的作用范围。类名 `dup-strategy` 不动（e2e 按它选）。
+      -->
     <div class="dup-strategy">
-      <span class="dup-strategy-label">未改选的组默认保留</span>
+      <span class="dup-strategy-label">一键策略（只作用未改选的组）</span>
       <el-radio-group v-model="strategy" size="small" :disabled="!canDelete">
         <el-radio value="earliest">最早导入</el-radio>
         <el-radio value="latest">最新导入</el-radio>
