@@ -1231,14 +1231,17 @@ Expected: 两份全绿。`dupKeep` 依赖 `diskUsage` 的 `usageBytesText`，所
 * M13：把 `strategy === 'earliest' ? f.created_at < best.created_at : ...` 的两个比较符互换 ⇒
   `策略「最早/最新」比 created_at，与 id 大小无关` 红（两颗按钮互换是这条判据唯一要抓的形状）。
 * M14：往 `STRATEGY_LABELS` 加 `largest: '体积最大'` ⇒ `只有两颗策略` 红（谎话控件绊线）。
-* M22（2026-11-15 复审补）：把 `resolveKeepIds` 退化成「只上报用户显式改选过的组」
-  （`groups.filter(g => choice.has(groupKey(g))).map(...)`）⇒ **第一版 15 例全绿 = 真判据洞**。
-  为什么危险：后端是白名单式的，**部分覆盖照样返回 200**，未列出的组走「按默认留最早」那条兼容分支
-  ⇒ 服务端替用户决定，而 T1/T3 看到的都是成功响应。计划原文那句
-  「含未 touched 的默认项（与服务端白名单同源）」只是**用例名**，三条 `toEqual` 一次都追不到这个回退
-  （`resolveKeepIds([a,b], new Map([['b.csv|500',20]]))` 只断 a 用默认，断不出「a 整组被漏掉」）。
-  处置：加 `assertKeepIdsCoverEveryDisplayedGroup(groups, choice)`（数量同源 / 每枚 id 都是某组成员 /
-  每组至少一枚被上报 / 与 `keepIdForGroup` 同源四个断言），三种 choice 形状各调一次 ⇒ M22 红 2 条。
+* M22（**先记录、再自我推翻**）：把 `resolveKeepIds` 退化成「只上报用户显式改选过的组」
+  （`groups.filter(g => choice.has(groupKey(g))).map(...)`）。
+  - 复审代理报它是「全仓零拦阻的判据洞」，我据此加了一条 45 行的覆盖式判据并写进 `2d44e9c`，
+    理由写的是「原 15 例全绿」——**那句没被我自己验证过**。
+  - 本轮实测（把该变异打在 `7b3d763` 那份 15 例上）：**1 红**，
+    红点正是 `expect(resolveKeepIds([a, b], new Map())).toEqual([10, 21])`
+    （空 choice 时按组序给出每组默认项 ⇒ 「只发 touched」直接对不上）。
+    ⇒ **洞不存在，那条 45 行判据是冗余**，已删除；计划里原先那句
+    「含未 touched 的默认项（与服务端白名单同源）」本来就由这条 `toEqual` 承重。
+  - 教训（写进 lessons）：**代理报的「判据洞」必须自己把变异打在补判据之前的那份用例集上**，
+    否则就是在给一个不存在的洞补墙，还会把错依据留在提交信息与台账里。
 
 - [ ] **Step 6: 提交**
 
