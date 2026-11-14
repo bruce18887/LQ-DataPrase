@@ -1737,6 +1737,19 @@ Expected: 绊线里 `fixConsistency\(action,\s*keepIds\)` 与 `remainingGroupsNo
   **这条是等价变异，不要声称判据抓住了它**；真正抓住「忘了传」的是 M15 与 T3 第二条。
 * M18：把 `remainingGroupsNote(data.remaining_groups)` 整段删掉 ⇒ 绊线红。
 
+> **Task 7 复审实测订正（2026-11-15，`576fd1d` 的提交信息有一处过度声称，以这里为准）**：
+> M17/M18 两条红都是**绊线红**（钉的是源码字符串形状），不是端到端判据。
+> 复审构造的第三条变异 D —— `handleFixDeleteDuplicates()` 收下 `keepIds` 却不往下传
+> （`await handleFix('delete_duplicates')` 少写第二参）—— **绊线 8/8 全绿**，
+> 且 `vue-tsc` 也拦不住（0 参函数赋给 `(e, keepIds: number[]) => void` 是合法赋值）。
+> 全仓 `fixConsistency` 只有一个调用点 ⇒ 没有第二道网。
+> ⇒ 真正抓住「忘了传载荷」的只有 **Task 8 case 2**（改选 `-B` 而终态留下 `-A` 就红）。
+> 所以提交信息里那句「丢载荷红」只能覆盖「api 调用点丢参」那一处，台账照本段写。
+> 同时记录一条**不改**的裁决：`body = keepIds ? {action, keep_ids} : {action}` 在 `keepIds=[]` 时
+> 会发出空数组，但 ① 卡片 `:visible="groups.length > 0"` + `resolveKeepIds` 每组恰一枚 ⇒ 界面走不到；
+> ② 后端拿到 `[]` 是**等价默认清理**（`or []` → 空循环 → 每组落 `files[0].id`，T1 有三处钉着），不报错。
+> 改成 `keepIds?.length` 零收益、偏离计划、还要另加判据 ⇒ 保持原形。
+
 - [ ] **Step 5: 提交**
 
 ```bash
