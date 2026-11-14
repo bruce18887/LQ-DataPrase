@@ -11,34 +11,18 @@
 * 取 inode **必须** ``os.lstat``：本机（Python 3.13.12 / Windows）实测
   ``os.DirEntry.stat()`` 的 ``st_dev``/``st_ino`` 恒为 0，用它去重会把整棵树压成
   「1 个 inode」，几 GB 直接报成几 MB。同一条教训的实现见
-  ``scripts/test_data_gc.py:144 walk_inodes()``。
-* DB 侧分两本账（计划头部订正②）：落在扫描根目录内的才与 ``bytes`` 可比；不在内的
-  （2026-08-21 前的绝对路径遗留、样例目录、跨盘）单独计，差值恒等式只用「在内」那一本。
+  ``scripts/test_data_gc.py:144 walk_inodes()``。这条不是只写在注释里：
+  ``test_硬链接按inode只计一次`` 用「一颗硬链对 + 一颗不同体积的独立文件」把它的
+  变异体（改成 ``entry.stat()``）钉成必红 —— 只有硬链对的话坏实现也会得出同一个数。
 
-本模块只有口径与缓存，不碰 HTTP——视图在 ``views/usage_views.py``。
+本模块只做磁盘侧口径。DB 侧的两本账与差值恒等式（``_db_map`` / ``_mismatch``）、
+进程内 TTL 缓存（``get_user_usage``）由后续任务加在本文件里；HTTP 视图在
+``views/usage_views.py``，这里不碰。
 """
 import os
-import time
 from collections import OrderedDict
 
 from django.conf import settings
-from django.utils import timezone
-
-from apps.common.keyed_lru import KeyedLRU
-from apps.datafiles.models import DataFile
-from apps.datafiles.utils import resolve_file_path
-
-# 规格 §4.4：进程内 TTL 缓存。分桶实现没有 per-key 过期，真实过期窗口在
-# [TTL, 2*TTL) 之间浮动 —— 所以浮层必须显示 scanned_at，让陈旧对用户可见。
-USAGE_CACHE_TTL_SECONDS = 30
-_USAGE_CACHE_MAX_ENTRIES = 64
-
-# 规格 §4.6 的阈值：只在超阈时提示，不做常驻的第二指标。
-# 「常态下差值为零」这句在旧口径（全量比全量）下实测不成立（本机 dev ratio=0.1775，全是已删文件
-# 造成的），改成订正⑤ 的交集口径后才成立 —— 改回全量比全量就会让这条阈值永远红。
-MISMATCH_RATIO_THRESHOLD = 0.05
-
-_usage_cache = KeyedLRU(_USAGE_CACHE_MAX_ENTRIES)
 
 
 def _user_data_root(username):
@@ -94,8 +78,11 @@ def _scan_tree(root, registered=None):
     ``_db_map`` 造）。在同一次走树里顺手把「注册行 ∩ 文件确实在盘上」这个交集的两侧各自
     累计出来 —— 这是订正⑤ 的实现位置：差值只比交集，所以缺文件与磁盘孤儿都不会混进来，
     而且**不用第二次走树**。不传就是纯总量扫描（Task 2 的测试与将来的独立复用都走这条）。
-    查表前必须 ``os.path.normcase(path)``：map 的键是 normcase 过的，而 ``entry.path`` 不是，
-    Windows 上少这一步交集恒为空 —— 表现成「差值全是清单值」而不是报错。
+
+    查表前必须 ``os.path.normcase(path)``（map 的键是 normcase 过的，``entry.path`` 不是）。
+    搞反方向的提醒：匹配不上时 ``reg_db`` 与 ``reg_disk`` 是在同一个分支里**一起**少加的，
+    所以差值会恒等于 0、该报的不报（假绿），而不是冒出一条虚高的差值。所以真正的护栏是
+    Task 3 那批用例断言 ``registered_count`` 非 0，别指望差值行替这条路把关。
     """
     total = 0
     count = 0

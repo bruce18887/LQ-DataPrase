@@ -328,11 +328,21 @@ class ScanTreeTests(SimpleTestCase):
 
 Run:
 ```bash
-CODEBUDDY_SAFE_DELETE_ENABLED=0 .venv/Scripts/python.exe -X utf8 manage.py test test.backend.test_storage_usage_scan > tasks/b2-task2.log 2>&1
+CODEBUDDY_SAFE_DELETE_ENABLED=0 .venv/Scripts/python.exe -X utf8 manage.py test test.backend.test_storage_usage_scan > tasks/b2-task2-red.log 2>&1
 ```
-Expected: ERROR —— `ModuleNotFoundError: No module named 'apps.datafiles.storage_usage'`（导入期就崩，还没进断言）。日志末尾**不该**出现 `OK`。
+Expected（2026-11-14 实跑校准过）：
+```
+ImportError: cannot import name 'storage_usage' from 'apps.datafiles'
+Ran 1 test in 0.000s
+FAILED (errors=1)
+```
+两个反直觉的点，别当成红错了：① 报的是 `ImportError` 而**不是** `ModuleNotFoundError`——因为测试用的是 `from apps.datafiles import storage_usage` 这种属性式导入，缺子模块时走的是 ImportError 分支；② 只 `Ran 1 test`——导入失败时 loader 用一个合成的 `_FailedTest` 顶位。日志末尾**不该**出现 `OK`。红绿两轮分别落 `tasks/b2-task2-red.log` 与 `tasks/b2-task2-green.log`，**别共用文件名**（初稿共用，结果那一轮红没留下证据）。
 
 - [ ] **Step 3: 写实现**
+
+> ⚠ 下面是初稿版本。**落地版有 5 处差异**（复审驱动），全部列在文末「Task 2 落地后的订正」——
+> 其中一处是初稿的测试**没有判别力**（把 `os.lstat` 换成 `os.DirEntry.stat()` 后 7 例仍全绿），
+> 已改掉。接手时以落地版 `apps/datafiles/storage_usage.py`（118 行）为准。
 
 ```python
 # apps/datafiles/storage_usage.py
@@ -525,7 +535,9 @@ class DbMapTests(TestCase):
 
     def test_map的键是normcase后的绝对路径(self):
         """交集靠这个键匹配。键的形态必须与 _scan_tree 查表时用的同一种，
-        否则「少算」会以差值的形式冒出来，而不是以报错冒出来 —— 最难查的方向。"""
+        否则「匹配不上」的方向是 reg_db 与 reg_disk 一起不加 ⇒ 差值恒为 0 ⇒
+        该报的不报（假绿），而不是冒出一条虚高差值。所以下面那条 registered_count
+        非 0 的断言才是真正的护栏，别指望差值行替这条路把关。"""
         with self.settings(MEDIA_ROOT=self.base):
             self._row('data/inroot/single/a.csv', 100)
             db = storage_usage._db_map(self.user, storage_usage._user_data_root('inroot'))
@@ -534,7 +546,9 @@ class DbMapTests(TestCase):
             os.path.join(self.base, 'data', 'inroot', 'single', 'a.csv'))))
         self.assertEqual(db['map'][key], 100)
 
-    def test_大小写不同的路径也能匹配上（Windows 路径不敏感）(self):
+    def test_大小写不同的路径也能匹配上(self):
+        """Windows 路径大小写不敏感：DB 里写 data/INROOT/... 而磁盘上是 data/inroot/。
+        不做 normcase 的话这一条会在交集里凭空消失。"""
         with self.settings(MEDIA_ROOT=self.base):
             self._row('data/INROOT/single/a.csv', 100)     # 只有大小写不同
             db = storage_usage._db_map(self.user, storage_usage._user_data_root('inroot'))
@@ -554,55 +568,69 @@ class JoinedScanTests(TestCase):
 
     这四条复刻 Task 1 探针在本机 dev 库实测到的形状（112 条在盘 + 73 条已删 + 漂移 0 B），
     也就是旧口径 ratio=0.1775 / 新口径 ratio=0.0000 那个差。
+
+    ⚠ 根目录必须在 ``self.settings(MEDIA_ROOT=self.base)`` **里面**再算：
+    ``_user_data_root`` 读的是 ``settings.MEDIA_ROOT``，在 setUp 里算好会在 override 生效之前
+    拿到真实 dev 目录 ⇒ 磁盘侧扫 A 树、DB 侧指向 B 树，交集恒空。用例照样会红，
+    但红的原因跟它声称判的东西无关（计划初稿就是这么埋的，2026-11-14 复审时拆出来）。
     """
 
     def setUp(self):
         self.base = tempfile.mkdtemp(prefix='lqdp-usage-join-')
         self.addCleanup(shutil.rmtree, self.base, True)
         self.user = User.objects.create_user('joiner', 'j@localhost', 'x-pass-12345678')
-        self.root = storage_usage._user_data_root('joiner')
 
     def _row(self, rel, file_size):
         return DataFile.objects.create(
             owner=self.user, filename=os.path.basename(rel),
-            file_path='data/joiner/' + rel.replace('\\', '/'), file_size=file_size,
+            file_path='data/joiner/' + rel, file_size=file_size,
             format_type='CTA8290D', status='ready',
         )
 
-    def test_文件已不在盘上时不报不一致（那是孤立记录卡的活）(self):
+    def _write_own(self, rel, size):
+        """在「当前 settings 的 MEDIA_ROOT」下写文件 —— 必须在 override 里调。"""
+        path = os.path.join(storage_usage._user_data_root('joiner'), *rel.split('/'))
+        return _write(path, size)
+
+    def _joined(self):
+        root = storage_usage._user_data_root('joiner')
+        db = storage_usage._db_map(self.user, root)
+        return storage_usage._scan_tree(root, registered=db['map'])
+
+    def test_文件已不在盘上时不报不一致(self):
+        """记录还在、文件早没了 —— 那是孤立记录卡的活；再用 MB 说一遍会让人以为有两个毛病。"""
         with self.settings(MEDIA_ROOT=self.base):
-            _write(os.path.join(self.root, 'single', 'a.csv'), 1000)
+            self._write_own('single/a.csv', 1000)
             self._row('single/a.csv', 1000)
-            self._row('single/deleted.csv', 5 * 1024 * 1024)   # 记录还在，文件早没了
-            db = storage_usage._db_map(self.user, self.root)
-            scan = storage_usage._scan_tree(self.root, registered=db['map'])
+            self._row('single/deleted.csv', 5 * 1024 * 1024)
+            scan = self._joined()
             flag, diff = storage_usage._mismatch(
                 scan['bytes'], scan['registered_disk_bytes'], scan['registered_db_bytes'])
-        self.assertEqual(scan['bytes'], 1000)
         self.assertEqual(scan['registered_count'], 1)          # 交集只有 a.csv
         self.assertEqual(scan['registered_db_bytes'], 1000)
         self.assertEqual(scan['registered_disk_bytes'], 1000)
+        self.assertEqual(scan['bytes'], 1000)
         self.assertFalse(flag)
         self.assertEqual(diff, 0)
 
     def test_同一条记录的size漂移才报不一致(self):
         with self.settings(MEDIA_ROOT=self.base):
-            _write(os.path.join(self.root, 'single', 'a.csv'), 1000)   # 实际 1000
-            self._row('single/a.csv', 100)                             # 清单还写着 100
-            db = storage_usage._db_map(self.user, self.root)
-            scan = storage_usage._scan_tree(self.root, registered=db['map'])
+            self._write_own('single/a.csv', 1000)              # 实际 1000
+            self._row('single/a.csv', 100)                     # 清单还写着 100
+            scan = self._joined()
             flag, diff = storage_usage._mismatch(
                 scan['bytes'], scan['registered_disk_bytes'], scan['registered_db_bytes'])
+        self.assertEqual(scan['registered_count'], 1)   # 键匹配真的匹配上了（防假绿）
         self.assertTrue(flag)
         self.assertEqual(diff, 900)
 
-    def test_磁盘孤儿不进差值（它有自己的孤立磁盘卡）(self):
+    def test_磁盘孤儿不进差值(self):
+        """盘上有、清单里没有的那颗（孤立磁盘文件）也不许混进差值。"""
         with self.settings(MEDIA_ROOT=self.base):
-            _write(os.path.join(self.root, 'single', 'a.csv'), 1000)
-            _write(os.path.join(self.root, 'batch', 'B1', 'orphan.csv'), 4000)  # 没有注册行
+            self._write_own('single/a.csv', 1000)
+            self._write_own('batch/B1/orphan.csv', 4000)       # 没有注册行
             self._row('single/a.csv', 1000)
-            db = storage_usage._db_map(self.user, self.root)
-            scan = storage_usage._scan_tree(self.root, registered=db['map'])
+            scan = self._joined()
         self.assertEqual(scan['bytes'], 5000)        # chip 显示的是全部占用
         self.assertEqual(scan['registered_disk_bytes'], 1000)   # 差值只看交集
         self.assertFalse(storage_usage._mismatch(
@@ -611,8 +639,8 @@ class JoinedScanTests(TestCase):
 
     def test_不传registered时只回四个总量键(self):
         with self.settings(MEDIA_ROOT=self.base):
-            _write(os.path.join(self.root, 'single', 'a.csv'), 10)
-            scan = storage_usage._scan_tree(self.root)
+            self._write_own('single/a.csv', 10)
+            scan = storage_usage._scan_tree(storage_usage._user_data_root('joiner'))
         self.assertEqual(
             set(scan), {'bytes', 'unique_bytes', 'file_count', 'by_type'})
 
@@ -649,11 +677,34 @@ Run:
 ```bash
 CODEBUDDY_SAFE_DELETE_ENABLED=0 .venv/Scripts/python.exe -X utf8 manage.py test test.backend.test_storage_usage_scan > tasks/b2-task3.log 2>&1
 ```
-Expected: `AttributeError: module 'apps.datafiles.storage_usage' has no attribute '_db_map'`（以及 `_mismatch`），且 `test_不传registered时只回四个总量键` 通过、`_scan_tree(root, registered=…)` 的三条以 `TypeError` 失败。日志末尾**不该**是 `OK`。
+Expected: `AttributeError: module 'apps.datafiles.storage_usage' has no attribute '_db_map'`（以及 `_mismatch`），且 `test_不传registered时只回四个总量键` 通过。日志末尾**不该**是 `OK`。
+
+注：Task 2 已经把 `_scan_tree(root, registered=...)` 的参数实现了，所以那三条走交集的用例第一次跑会先红在 `_db_map` 缺失上，而不是红在 `TypeError` —— 这是预期的（判据要看到 `_db_map`/`_mismatch` 确实不存在）。
 
 - [ ] **Step 3: 写实现**
 
-把 `apps/datafiles/storage_usage.py` 里的 `_db_totals` / `_mismatch` / `_compute_usage` 三个函数**整体替换**为下面这版（`_scan_tree` 已在 Task 2 支持 `registered`）：
+把 `apps/datafiles/storage_usage.py` 做两件事：**(a)** 在文件顶部的 import 段**增量补三行**（Task 2 复审指出「别为后面的任务预埋死代码」，所以只加本任务真正用到的；现有的 `import os`、`from collections import OrderedDict`、`from django.conf import settings` 不动）：
+
+```python
+from django.utils import timezone          # 本任务的 _compute_usage 用
+
+from apps.datafiles.models import DataFile   # 本任务的 _db_map 用
+from apps.datafiles.utils import resolve_file_path  # 本任务的 _db_map 用
+```
+
+再在 import 段之后加一个常量：
+
+```python
+# 规格 §4.6 的阈值：只在超阈时提示，不做常驻的第二指标。
+# 「常态下差值为零」这句在旧口径（全量比全量）下实测不成立（本机 dev ratio=0.1775，
+# 全部来自 73 条已删文件），换成订正⑤ 的交集口径后才成立 —— 改回全量比全量
+# 就会让这条阈值在每台有遗留数据的装机上永远红。
+MISMATCH_RATIO_THRESHOLD = 0.05
+```
+
+`time` / `KeyedLRU` / `USAGE_CACHE_TTL_SECONDS` / `_usage_cache` 是 Task 4 的 `get_user_usage` 要用的，**留给 Task 4 再加**，本任务不要提前带。
+
+**(b)** 在 `_scan_tree` 之后写入下面三个函数（Task 2 没有 `_db_map`/`_mismatch`/`_compute_usage`，本任务是它们的出处）：
 
 ```python
 def _db_map(user, root):
@@ -667,7 +718,9 @@ def _db_map(user, root):
 
     键统一 ``os.path.normcase(os.path.normpath(...))``：Windows 路径大小写不敏感，DB 里写
     ``data/INROOT/...`` 而磁盘上是 ``data/inroot/`` 时不做 normcase 会让那条在交集里**凭空
-    消失**；消失的方向是少算，于是它表现成一条差值而不是一声报错——最难查的那种。
+    消失**。注意消失的方向：``reg_db`` 与 ``reg_disk`` 是一起少的，所以差值会变成 0、
+    该报的不报（假绿），不是冒出一条虚高差值 —— 护栏是 Task 3 断言
+    ``registered_count == 1``，不是差值行。
 
     遍历形状照抄生产写法 ``views/browse_views.py:272-277``（同一份 values_list）。
     """
@@ -744,7 +797,7 @@ def _compute_usage(user):
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: 同 Step 2 的命令，落 `tasks/b2-task3.log`。
-Expected: `Ran 18 tests ... OK`（Task 2 的 7 条 + 本任务 11 条）。`test_大小写不同的路径也能匹配上` 若在非 Windows 上跑会失败——那是它本来的意思（大小写不敏感是 Windows 事实），别改成 skip；真到 Linux CI 上要按 CI 档另开一条带平台判据的用例，本批 CI 不跑 Playwright 而后端档在 Windows 本机（`.github/workflows/ci.yml` 只有 4 档）。
+Expected: `Ran 19 tests ... OK`（Task 2 的 7 条 + 本任务 12 条 = DbMapTests 4 + JoinedScanTests 4 + MismatchTests 4）。`test_大小写不同的路径也能匹配上` 若在非 Windows 上跑会失败——那是它本来的意思（大小写不敏感是 Windows 事实），别改成 skip；真到 Linux CI 上要按 CI 档另开一条带平台判据的用例，本批 CI 不跑 Playwright 而后端档在 Windows 本机（`.github/workflows/ci.yml` 只有 4 档）。
 
 - [ ] **Step 5: 提交**
 
@@ -863,12 +916,12 @@ class FileUsageApiTests(TestCase):
         self.assertEqual(mine['bytes'], 1000)
         self.assertEqual(mine['db_count'], 0)
 
-    def test_POST不接受(self):
-        self.assertIn(self._post_usage().status_code, (405,)) if False else None
-
     def _post_usage(self):
         with self.settings(MEDIA_ROOT=self.base):
             return self.client.post(USAGE_URL, {})
+
+    def test_只读不接受POST(self):
+        self.assertEqual(self._post_usage().status_code, 405)
 
     def test_清单外的遗留绝对路径单列一条不混进bytes(self):
         """订正②的形状：遗留绝对路径指向根目录外 ⇒ 只进 db_outside_root_*，
@@ -897,13 +950,6 @@ class FileUsageApiTests(TestCase):
         data = self._get().json()
         self.assertTrue(data['mismatch_over_threshold'])
         self.assertEqual(data['mismatch_diff_bytes'], 900)
-```
-
-删掉上面那两行占位形状（`test_POST不接受` 与 `_post_usage` 的三元式写法是我故意留给 Step 3 的错例——**不要**照它实现），改成正常的一条：
-
-```python
-    def test_只读不接受POST(self):
-        self.assertEqual(self._post_usage().status_code, 405)
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -962,7 +1008,7 @@ from .usage_views import (  # noqa: F401
     path('files/usage/', FileUsageView.as_view(), name='file-usage'),
 ```
 
-在 `apps/datafiles/storage_usage.py` 里补上测试要的公开入口与清缓存钩子（`_compute_usage` 之后）：
+在 `apps/datafiles/storage_usage.py` 里补上测试要的公开入口与清缓存钩子（`_compute_usage` 之后）。本任务才真正需要缓存，所以**这一步**才加 `import time`、`from apps.common.keyed_lru import KeyedLRU`、`USAGE_CACHE_TTL_SECONDS`、`_USAGE_CACHE_MAX_ENTRIES`、`_usage_cache = KeyedLRU(_USAGE_CACHE_MAX_ENTRIES)`，并把模块 docstring 末尾那句「进程内 TTL 缓存（`get_user_usage`）由后续任务加在本文件里」改成对它的一句话说明（分桶实现没有 per-key 过期 ⇒ 真实窗口在 `[TTL, 2*TTL)` 浮动 ⇒ 所以返回体带 `scanned_at` 让陈旧可见）：
 
 ```python
 def get_user_usage(user, fresh=False):
@@ -1046,7 +1092,10 @@ class CacheBehaviourTests(TestCase):
     def test_同一bucket内第二次调用不再算(self):
         with self.settings(MEDIA_ROOT=self.base):
             sink = []
-            with mock.patch.object(storage_usage, '_compute_usage', self._counting_compute(sink)):
+            # 三次调用都要钉住同一个 bucket：不锁 monotonic 的话，落在 30s 桶边界上
+            # 的第二次就会重算 —— 那是每 30 秒一次的定时 flaky，CI 上迟早自己冒出来。
+            with mock.patch.object(storage_usage.time, 'monotonic', return_value=1_000.0), \
+                    mock.patch.object(storage_usage, '_compute_usage', self._counting_compute(sink)):
                 first = storage_usage.get_user_usage(self.user)
                 second = storage_usage.get_user_usage(self.user)
         self.assertEqual(first['bytes'], 10)
@@ -1056,7 +1105,8 @@ class CacheBehaviourTests(TestCase):
     def test_fresh为True时强制重算(self):
         with self.settings(MEDIA_ROOT=self.base):
             sink = []
-            with mock.patch.object(storage_usage, '_compute_usage', self._counting_compute(sink)):
+            with mock.patch.object(storage_usage.time, 'monotonic', return_value=1_000.0), \
+                    mock.patch.object(storage_usage, '_compute_usage', self._counting_compute(sink)):
                 storage_usage.get_user_usage(self.user)
                 third = storage_usage.get_user_usage(self.user, fresh=True)
         self.assertEqual(sink, ['cacheuser', 'cacheuser'])
@@ -1066,7 +1116,8 @@ class CacheBehaviourTests(TestCase):
         other = User.objects.create_user('otheruser', 'o@localhost', 'x-pass-12345678')
         with self.settings(MEDIA_ROOT=self.base):
             sink = []
-            with mock.patch.object(storage_usage, '_compute_usage', self._counting_compute(sink)):
+            with mock.patch.object(storage_usage.time, 'monotonic', return_value=1_000.0), \
+                    mock.patch.object(storage_usage, '_compute_usage', self._counting_compute(sink)):
                 storage_usage.get_user_usage(self.user)
                 storage_usage.get_user_usage(other)
         self.assertEqual(sink, ['cacheuser', 'otheruser'])
@@ -1098,7 +1149,7 @@ Run:
 ```bash
 CODEBUDDY_SAFE_DELETE_ENABLED=0 .venv/Scripts/python.exe -X utf8 manage.py test test.backend.test_storage_usage_scan test.backend.test_files_usage_api > tasks/b2-task5b.log 2>&1
 ```
-Expected: `Ran 31 tests ... OK`（本文件 22 + 端点契约 9），且**没有** skip（`clear_usage_cache` 在 setUp/tearDown 各清一次，是这两份文件能同轮跑的前提）。
+Expected: `Ran 32 tests ... OK`（本文件 23 = 7+12+4，加端点契约 9），且**没有** skip（`clear_usage_cache` 在 setUp/tearDown 各清一次，是这两份文件能同轮跑的前提）。
 
 - [ ] **Step 4: 提交**
 
@@ -1918,6 +1969,22 @@ git commit -m "docs(ledger): 批2 磁盘占用收口实测与台账"
 
 ---
 
+## Task 2 落地后的订正（2026-11-14，规格复审驱动）
+
+提交 `0f12eb7` 之后跑 spec 复审，逐条核实后落地的差异。**其中第 1 条是真缺陷**，其余是措辞与卫生。
+
+1. **`test_硬链接按inode只计一次` 原本没有判别力（Critical）。** 初稿的树里只有「一对硬链接、两颗都是 4096 B」。把实现里的 `os.lstat(entry.path)` 换成被禁止的 `entry.stat()`（本机 `st_dev`/`st_ino` 恒 0）之后，所有条目塌到同一个 `(0, 0)` 键，`unique_bytes` 仍然是 4096 —— **7 例全绿**（`tasks/b2-mutation-lstat.log`：`Ran 7 tests / OK`）。也就是说规格 §4.2 最硬那条「取 inode 必须用 lstat」当时只活在注释里。
+   ⇒ 修法：再加一颗**不是硬链接、体积不同**的独立文件（1000 B），断言改成 `bytes == 4096*2+1000`、`unique_bytes == 4096+1000`、`file_count == 3`。
+   ⇒ 反证已做：改回 `entry.stat()` 后 `FAILED (failures=1)`，`AssertionError: 1000 != 5096`（`tasks/b2-task2-mutation2.log`），改回 `os.lstat` 后 `OK`（`tasks/b2-task2-green2.log`）。这条用例现在是能把已知坏实现杀掉的真判据。
+2. **`_scan_tree` docstring 里 normcase 那句把失败方向说反了（Important）。** 原写「少这一步交集恒为空 —— 表现成『差值全是清单值』」。事实：`reg_db` 与 `reg_disk` 在同一个分支里一起不加，交集为空时**差值恒为 0 ⇒ 该报的不报（假绿）**。护栏因此不能指望差值行，只能靠 Task 3 断言 `registered_count == 1`；本文件 Task 3 的 `test_同一条记录的size漂移才报不一致` 里已把这条断言加在最前面。
+3. **删掉了为后续任务预埋的死代码（Minor，复审指出）。** 初稿在 Task 2 就带上了 `import time`/`timezone`/`KeyedLRU`/`DataFile`/`resolve_file_path`、`USAGE_CACHE_TTL_SECONDS`、`_USAGE_CACHE_MAX_ENTRIES`、`_usage_cache`、`MISMATCH_RATIO_THRESHOLD` —— 全是当时没人用的。现按「用到的那一步再加」重新分配：`timezone`/`DataFile`/`resolve_file_path`/`MISMATCH_RATIO_THRESHOLD` 归 **Task 3**；`time`/`KeyedLRU`/两个缓存常量/`_usage_cache` 归 **Task 4**。附带实测：本仓**没有 Python 静态检查层**（pyproject 只有元数据，无 ruff/flake8/black/mypy），所以这类死导入不会被机器拦，只能靠人。
+4. **`_iter_files` docstring 少了一句假话。** 初稿尾巴那句「少算的部分由差值行兜出」在订正⑤ 之后**不成立**（扫不到的文件多半也是注册行，两侧一起少 ⇒ 差值仍是 0），落地版把它删了，只保留「一次权限问题不该让整颗 chip 消失，也不该让整个请求 500」。
+5. **`test_by_type_...` 的自洽性断言改成对着 `result` 自己比。** 初稿写死 `sum(...) == 1310` / `== 4`，那样「总量与分桶一起算错」查不出来，而那正是浮层与 chip 互相打脸的形状。现在断言 `sum(v['bytes'] ...) == result['bytes']`。
+
+落地文件行数：`apps/datafiles/storage_usage.py` **118**、`test/backend/test_storage_usage_scan.py` **115**（`node scripts/line-limit.mjs` 退出 0）。
+
+---
+
 ## Self-Review（写完计划后自查）
 
 **1. 规格覆盖（逐条 §4 → Task）**
@@ -1925,7 +1992,7 @@ git commit -m "docs(ledger): 批2 磁盘占用收口实测与台账"
 | 规格 | 落在 |
 |---|---|
 | §4.1 端点 + 返回体 8 个字段 | Task 2（scan 字段）+ Task 3（`_compute_usage` 组装）+ Task 4（视图与路由）；字段按订正②/③ 增加了 5 个 |
-| §4.2 口径纪律（lstat/inode、rglob 交叉核对、页面只显一个数） | Task 2 的 `test_硬链接按inode只计一次` 与 `test_口径交叉核对_用rglob独立加总必须相等`；只显一个数在 Task 7 的 `usageChipText` |
+| §4.2 口径纪律（lstat/inode、rglob 交叉核对、页面只显一个数） | Task 2 的 `test_硬链接按inode只计一次`（**已做变异反证**：坏实现必红，见「Task 2 落地后的订正」第 1 条）与 `test_口径交叉核对_用rglob独立加总必须相等`；只显一个数在 Task 7 的 `usageChipText` |
 | §4.3 数据源选扫盘 | Task 3 的两本账 + `db_bytes` 只作参考（Task 6 不把它放进 chip） |
 | §4.4 性能（TTL 缓存、失效、实测） | Task 4 `get_user_usage` + Task 5 四条行为判据 + Task 1 P2 + Task 10 Step 3 |
 | §4.5 展示（chip 文案、hover 拆分、字号 token） | Task 6（文案纯函数）+ Task 7（chip + 浮层 + `--p-fs-*` 复用 `.section-count`）+ Task 8（渲染与 hover） |
