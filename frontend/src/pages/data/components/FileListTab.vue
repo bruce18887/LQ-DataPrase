@@ -75,8 +75,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { datafilesApi } from '../../../api/datafiles'
-import type { FileUsage } from '../../../api/datafiles'
+import { datafilesApi, type FileUsage } from '../../../api/datafiles'
 import { useFilesStore } from '../../../stores/files'
 import FileListToolbar from './FileListToolbar.vue'
 import FileUploadArea from './FileUploadArea.vue'
