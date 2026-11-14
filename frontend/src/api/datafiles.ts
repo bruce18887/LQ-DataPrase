@@ -146,6 +146,16 @@ export const datafilesApi = {
   listFiles(params: ListFilesParams = {}) {
     return api.get('/files/', { params: cleanParams(params) })
   },
+  /**
+   * 当前用户的磁盘占用。fresh=true 绕过后端 30s 分桶缓存：本地做完一次写操作
+   * （上传/删除/组合/修复）后要立刻看到新数就带它。
+   */
+  getFileUsage(fresh = false) {
+    return api.get<FileUsage>(
+      '/files/usage/',
+      fresh ? { params: { fresh: 1 } } : {},
+    )
+  },
   bulkDelete(ids: number[]) {
     return api.post('/files/bulk_delete/', { ids })
   },
