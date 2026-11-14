@@ -7,8 +7,10 @@ Run directly: .venv/Scripts/python.exe -X utf8 manage.py test test.backend.test_
 import os
 import shutil
 import tempfile
+from unittest import mock
 
 from django.test import TestCase
+from django.urls import resolve
 from rest_framework.test import APIClient
 
 from apps.accounts.models import User
@@ -35,6 +37,11 @@ class FileUsageApiTests(TestCase):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
 
+    def tearDown(self):
+        # 缓存表是进程全局的，而它的键只有 (username, bucket) —— **不含 MEDIA_ROOT**。
+        # 不清的话，后面某个复用同名用户的用例在同一桶里会读到本用例那棵临时树的量。
+        storage_usage.clear_usage_cache()
+
     def _write(self, username, rel, size):
         path = os.path.join(self.base, 'data', username, rel)
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -53,14 +60,20 @@ class FileUsageApiTests(TestCase):
     def test_路由没被router的详情路由吞(self):
         """排序判据（订正①）：DefaultRouter 生成的是 `^files/(?P<pk>[^/.]+)/$`，
         `usage` 恰好匹配 `[^/.]+` ⇒ files/usage/ 必须排在 include(router.urls) 之前，
-        否则这里拿到的是 404/400 而不是 200。"""
+        否则这里拿到的是 404 而不是 200（2026-11-14 把 path 挪到 include 之后实测
+        `AssertionError: 404 != 200`，挪之前预探测直接打印 `MATCHED_VIEW=DataFileViewSet
+        KWARGS={'pk': 'usage'}`）。
+        再加一句 resolver 断言：光看 200 只能证明「有个视图接住了」，证明不了是**这条**
+        路由接住的（视图内改成 redirect 也照样 200）。"""
         self.assertEqual(self._get().status_code, 200)
+        self.assertEqual(resolve(USAGE_URL).url_name, 'file-usage')
 
     def test_返回体字段齐全且类型正确(self):
         self._write('usage_a', 'single/a.csv', 2048)
         data = self._get().json()
-        for field in FIELDS:
-            self.assertIn(field, data)
+        # 集合相等而不是逐个 assertIn：逐个判只能发现「少了」，发现不了「多了」——
+        # 多摆一个数就是规格 §4.6 否掉的二阶指标，得让它变红。
+        self.assertEqual(set(data), set(FIELDS))
         self.assertEqual(data['bytes'], 2048)
         self.assertEqual(data['file_count'], 1)
         self.assertEqual(data['by_type'], {'single': {'bytes': 2048, 'count': 1}})
@@ -97,6 +110,27 @@ class FileUsageApiTests(TestCase):
     def _post_usage(self):
         with self.settings(MEDIA_ROOT=self.base):
             return self.client.post(USAGE_URL, {})
+
+    def test_fresh是白名单_且1会立刻反映新写入(self):
+        """`fresh` 的 HTTP 契约在 T1 里原先一句都没有（Task 5 直接调函数、e2e 要到
+        Task 8 才有）⇒ 解析写错了没人拦。这里同时钉住白名单本身：
+        黑名单写法把 'no' / 'off' / 'TRUE' 全读成「绕缓存」，而绕一次的代价是清掉
+        **所有人**的缓存 —— fail-open 的那一侧是共享表，不是调用者自己。
+
+        锁死 monotonic：不锁的话两次 GET 之间跨了 30s 桶边界，第 ② 步会假红 ——
+        桶边界每 30 秒来一次，那是定时 flaky 的教科书形状。
+        """
+        self._write('usage_a', 'single/a.csv', 1000)
+        with mock.patch.object(storage_usage.time, 'monotonic', return_value=1_000.0):
+            first = self._get().json()['bytes']
+            self._write('usage_a', 'single/b.csv', 2000)
+            self.assertEqual(self._get().json()['bytes'], first)          # 没带 fresh ⇒ 吃缓存
+            # 非白名单一律不许绕。'TRUE' 不在这里面：解析先 strip().lower()，
+            # 所以它就是 'true' ⇒ **该**绕（2026-11-14 本条初稿把 TRUE 断成不绕，
+            # 是拿判据跟自己的白名单设计打架）。绕一次会清整表，所以白名单那两条放最后。
+            for ignored in ('0', 'no', 'off', '', 'False'):
+                self.assertEqual(self._get(fresh=ignored).json()['bytes'], first, ignored)
+            self.assertEqual(self._get(fresh='1').json()['bytes'], 3000)  # 白名单命中 ⇒ 重扫
 
     def test_只读不接受POST(self):
         self.assertEqual(self._post_usage().status_code, 405)
