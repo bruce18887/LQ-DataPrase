@@ -23,13 +23,17 @@ import { cleanupQuiet, deleteFilesByNameQuiet } from '../helpers/cleanup'
  * 手跑请用 `npx playwright test --project=P2 --workers=1 e2e/data/disk-usage-chip.spec.ts`，
  * 别用 `npm run test:e2e:p2`（它不锁 workers，config 是 `fullyParallel: true` +
  * `workers: min(6, cpus/2)`）。不加 `mode: 'serial'` 是有意的：serial 下一条红会把
- * 后面整片用例一起跳过，这个文件的九条各守一个独立契约，牺牲可诊断性不值。
+ * 后面整片用例一起跳过，而本文件每条用例各守一个独立契约，牺牲可诊断性不值。
  */
 
 const CHIP = '.toolbar-left [data-testid="disk-usage-chip"]'
 const USAGE_ROUTE = '**/api/v1/files/usage/**'
 
-/** 浏览器里读一次端点（与 repair-center.spec.ts:36 同一种拿法）。 */
+/**
+ * 浏览器里读一次端点（与 repair-center.spec.ts:36 同一种拿法）。
+ * 这是本仓**第二**份同名副本，够不上抽 helper（三条相似行好过过早抽象）；
+ * 出现第三份时就把它搬进 `e2e/helpers/`，别再往 spec 里复制。
+ */
 function apiGet(page: Page, url: string) {
   return page.evaluate(async (u) => {
     const token = localStorage.getItem('access_token')
@@ -67,9 +71,10 @@ function bytesText(bytes: number): string {
  */
 const TYPE_LABELS: Record<string, string> = { single: '单文件', batch: '批次', '': '根目录散文件' }
 function typeLabel(key: string): string {
-  // 与 src 同款 own-property 查表：`??` 只挡 null/undefined，键取自文件系统，
-  // constructor/toString 这类原型键会从原型上取到函数（utils/diskUsage.ts:75-80 的教训）。
-  return Object.prototype.hasOwnProperty.call(TYPE_LABELS, key) ? TYPE_LABELS[key] : key
+  // 与 src 同款 own-property 查表（同一个 `Object.hasOwn`，src 与本副本都在 Node 侧跑）：
+  // `??` 只挡 null/undefined，键取自文件系统，constructor/toString 这类原型键会从原型上
+  // 取到函数（utils/diskUsage.ts 里 Object.hasOwn 那段教训）。
+  return Object.hasOwn(TYPE_LABELS, key) ? TYPE_LABELS[key] : key
 }
 
 /** 注入桶（case 4）：GB 档 ⇒ bytesText 两位小数，与真实桶的 MB 档一位小数不同形；
@@ -123,11 +128,12 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
     await gotoApp(page, '/data')
     // 「不连累列表」必须由**列表自己**来钉：`.list-toolbar .section-count` 只是工具栏外壳，
     // 它在 `files` 被清空、表格整片消失时照样可见 ⇒ 光断它等于没断这句（2026-11-14 复审现读）。
-    // 取的是本仓既有写法（data.spec.ts:199 同一选择器、同样 15s）。
+    // 原先那句 `.section-count` 可见性已删——它是被这句**包住**的（工具栏在 `.content-section`
+    // 里，行都可见了它没有不可见），留着只会让下一个读者以为它就是「列表渲染」的判据。
+    // 选择器与超时取的是本仓既有写法（data.spec.ts:199 同一选择器）。
     await expect(
       page.locator('.content-section:visible .el-table .el-table__row').first(),
     ).toBeVisible({ timeout: 15_000 })
-    await expect(page.locator('.list-toolbar .section-count').first()).toBeVisible({ timeout: 20_000 })
     await expect(page.locator(CHIP)).toHaveCount(0)
   })
 
@@ -145,6 +151,10 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
     // 走，不跟着行数走」——**实测是反的**：该接口逐文件返回标量行（apps/datafiles/views/
     // file_views.py:288-294 的 `.values(...)`，一次一行，默认 limit 5000），它跟着的是**文件数**，
     // 与本文件的 CSV 行数无关（CSV 行数只进这一行的 `row_count`）。
+    // ⚠ 反方向也要知道：加大载荷**不是免费的**。单文件上传路径在请求里同步整读这份 CSV
+    // （apps/datafiles/views/_helpers.py:120-127：`parsed` 为 None 时就地 `parse_file_meta`，
+    // 批导入才走事务外预解析），52.4 万行进一次 `read_csv`，DataFrame 再进进程级解析缓存。
+    // 但把同一份体积换成「一行超长字符串」更糟（每个单元格都变成一个参数值），所以维持现形。
     // 若哪天树进 GB 档（步长变 0.01 GiB = 10.5 MB），这条会**响**而不是静默假绿 ⇒ 把这里加大。
     fs.writeFileSync(tmpPath, `col1,col2\n${'1,2\n'.repeat(512 * 1024)}`)
 
@@ -199,13 +209,19 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
     const cells = popper.locator('.el-descriptions__cell')
     const total = await cells.allInnerTexts()
     const joined = total.join(' ')
-    for (const key of Object.keys(captured.by_type ?? {})) {
+    // 前置守卫排在两条循环之前：`by_type` 缺失时循环**零次**执行 = 整段假绿，而 Playwright
+    // 在第一处失败就抛 ⇒ 守卫写晚了就当不上 killer（同 5b33828 的订正方向）。
+    expect(captured, 'app 应当真的拉过一次 /files/usage/').not.toBeNull()
+    expect(captured.by_type, '返回体必须带 by_type 对象；缺了它下面两条循环空转 ⇒ 假绿').toBeInstanceOf(Object)
+    // 两处都**不加** `?? {}`：src 那侧同样刻意去掉了它（utils/diskUsage.ts 的 by_type 注释，
+    // 仓规「不为不可能的状态写兜底」），spec 的异源副本留着就会比被测代码更宽容。
+    for (const key of Object.keys(captured.by_type)) {
       expect(joined, `浮层里必须有 ${key} 这一桶`).toContain(typeLabel(key))
     }
     // ⚠ 这条原先断的是 `String(captured.file_count)`（整棵树总数）。Task 6c 之后 chip 只显体积、
     // 浮层里给的是**每桶**的计数，总数不再以任何形式出现（两桶时它根本不在文本里 ⇒ 假红），
     // 所以改成按桶断计数串 —— 判据跟着文案分工走，不是跟着旧断言的字面走。
-    for (const [key, bucket] of Object.entries<any>(captured.by_type ?? {})) {
+    for (const [key, bucket] of Object.entries<any>(captured.by_type)) {
       const countText = `${bucket.count.toLocaleString()} 个文件`
       expect(joined, `浮层里必须有 ${key} 这一桶的「${countText}」`).toContain(countText)
       expect(joined, `浮层里必须有 ${key} 这一桶的体积`).toContain(bytesText(bucket.bytes))
