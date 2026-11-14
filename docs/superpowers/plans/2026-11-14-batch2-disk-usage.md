@@ -2822,3 +2822,160 @@ Task 7 不加 T2 用例这句是对的，既无回归也无新增）；`lineLimi
    ③ 每改一个跟踪文件，收尾时 `grep` 一遍计划里对该文件的裸行号引用（本批 29 行的头部摘要就还留着
    Task 7 之前的 `:322-327`，已改为符号式）。
    这条与既有纪律同源不同物：「台账写命令不写快照」管的是**门禁输出**，这条管的是**代码位置**。
+
+### 复审处置（Task 7 那一轮，2 Important + 5 Minor）
+
+接线改动收在 `1651aee`（2 文件 / +99 −8），本台账与**一处样本数字订正**在紧随的那个 docs 提交里：
+`FileListTab.vue` 顶上那段注释原本写「现量 3.45–6.61 ms/次、均值 4.22 ms」，那是第一轮脚本
+只打 min/max/mean 时的数，重跑让命令把五个样本都打出来后正文改成了样本可复算的那一组
+（理由与第 4 条同）。「一个提交」因此变成两个，拆法是按文件走的 per-file `git add`。
+本轮只动接线的两个组件；`utils/diskUsage.ts`
+与它的 T2、`api/datafiles.ts`、`ConsistencyCheckDialog.vue` 一行未动 —— 前两件是 Task 6
+的已定契约，对话框那半 `usage` 绑定仍是 Task 9 的活（上一节第 2 条那条「根节点没有
+`inheritAttrs: false`」的理由本轮复核仍然成立，复审也接受「故意留给 Task 9」）。
+本轮现跑（不引用上一节的数）：`npx vue-tsc -b --force --pretty false` ⇒ exit 0、日志 0 字节；
+`npx vitest run` ⇒ `Test Files 69 passed` / `Tests 967 passed`，**与派发前基线逐位相同**
+（本轮刻意不加 T2 用例，理由见第 6 条）；`npx vitest run test/unit/lineLimit.spec.ts` ⇒ `15 passed`。
+件数用 `wc -l frontend/src/pages/data/components/FileList*.vue` 现取：**465 / 191**
+（派发前 392 / 173，本轮各加 73 / 18 行，距 600 闸还有 135 / 409 行）。
+
+1. **Important ①：`loadUsage()` 从 `onMounted` 挪到 `onActivated`，只留一处、`fresh=false`。**
+   缺陷的真实代价不是「少一次刷新」而是**旗舰场景整个会话不生效**：用户从资源管理器把文件
+   拷进数据目录后，keep-alive 下 `onMounted` 一个会话只跑一次，chip 的数除非他恰好上传/删除
+   什么，否则永远不会变。`storage_usage.py` 头部那句「≤ TTL（30s）」是**后端内部**的界
+   （`get_user_usage` 的桶寿命），端到端不成立 —— 端到端把它钉回 ≤30s 的唯一入口就是
+   「导航回来重拉」，写操作那条 watch 只覆盖「他自己在应用里做的写」。
+   **翻倍算术（为什么是 activated 而不是 mounted + activated 两处）**：`MainLayout.vue:12` 的
+   `<keep-alive :max="10">` 没有 include/exclude ⇒ 本组件作为 `DataManagement` 的子孙一起被缓存，
+   首次进入 mounted 与 activated **同帧都触发**，两处各调一次就是首航 2 条 `/files/usage/`
+   （这正是 `DataManagement.vue` 里 `onActivated(loadFiles)` 上方那段注释记录的生产形状：
+   每条导航 ×2）；之后的 `/data → /仪表板 → /data` 只有 activated 会再跑（mounted 不重跑，
+   实例被缓存）⇒ 修好后是每次导航 **1** 条。本轮把 0 变成 1，代价是一条**命中后端 30s 分桶缓存**
+   的 GET（服务端只做一次 dict 命中，客户端往返本机现量 1.7–20.8 ms，见第 4 条），
+   换来的是这个读数不再是会话级快照。代码里那段注释按**上一节第 6 条**那条教训写
+   （认符号与判据名，别认行号），并明写「别把它挪回 onMounted」。
+   同仓先例两条，都已在生产里数过：`DataManagement.vue` 的 `onActivated(loadFiles)`，
+   和**子组件**用 activated 的 `dashboard/components/BatchYieldTab.vue`（本组件要的就是这一形）。
+   **留着的理由与代价（不是遗漏）**：同文件另外四个 loader 仍只挂 `onMounted` —— 改它们的
+   生命周期等于每次导航多 4 条请求，需要它自己的计数判据，不属这一批。代价现在**可见**了：
+   拷完文件回本页，chip 的数会动而表格不会 ⇒「chip 比列表新」是本轮引入的新不一致，
+   值得单独开一批（连同 `DataManagement.vue` 那份 `page_size=9999` 全量列表一起判）。
+
+2. **Important ②：`catch { usage.value = null }` 改成失败时不写 `usage`。** 三条各自独立的理由
+   （都写进代码注释了，因为这一处与本文件另外四个 loader 的裸 catch 相反，
+   下一个人会为了「一致」把它改回来）：
+   ① 拦截器已经为这条失败弹过 toast 并 `console.error`（`api/index.ts` 的
+   `NO_TOAST_ENDPOINTS = ['/auth/login/', '/auth/refresh/', '/auth/logout/']` 不含
+   `/files/usage/`，`getFileUsage` 也没带 `silent`）⇒ 再拿走 chip 是同一个故障发两条互相
+   矛盾的信号：一句「服务器错误」＋一次工具栏重排把数拿走。
+   ② 瞬时故障会被放大成长期故障：报错那一刻用户正看着这块面板，而本页没有重试路径，
+   下一个能重新拉到数的时机是写操作或离开再回来。
+   ③ `apps/datafiles/storage_usage.py` 对 `''` / `.` / `..` 直接 raise `ValueError`，
+   而它自己的注释就写了 Django 的 `UnicodeUsernameValidator` **接受** `..` 当用户名
+   ⇒ 这种账号每一次请求都是 500，置空等于这个 chip 永久消失。
+   没加重试、没加第二套 UI 状态、没加错误横幅 —— 陈旧窗口由载荷里的 `scanned_at` 披露。
+
+3. **Minor ③：序号守卫。** `let usageSeq = 0` / `const my = ++usageSeq` / 成功与失败都只在
+   `my === usageSeq` 时才允许生效，形状照 `composables/useAsyncData.ts` 的 seq（那边
+   「过期响应不写 data」有 T2 钉着）。**不用**在途标志：它会把**最后一次**写操作的刷新丢掉，
+   而那恰恰是唯一要紧的一次；也不做前端单飞。后端 `KeyedLRU` 的单飞只在两次到达重叠同一次
+   计算时合并，两次 `fresh=1` 隔几秒就是两份不同载荷，所以这一层必须自己判。
+   已知且刻意不处理的相互作用：写操作后**立刻**离开再回来时，activated 那条（后发、非 fresh）
+   会在守卫里赢过那条 fresh ⇒ 可能显示一个 ≤30s 桶里的旧值。窗口很窄（800 ms 的 trailing 与
+   一次导航撞在一起），且 `scanned_at` 会把这个旧如实说出来 ⇒ 记在这里，不动实现。
+
+4. **Minor ④：连发合并。** `useCoalescedCall((fresh: boolean) => loadUsage(fresh), 800)`，
+   watch 里改成 `reloadUsage(true)`，activated 那条仍然直连 `loadUsage()`。
+   突发的真实性本轮在**shipped 引擎**里复核过：`FileUploadArea.vue` 的 input 有 `multiple`、
+   `emit('upload-success')` 在 `httpRequest` 的成功分支里（每个文件一次），而
+   `element-plus/es/components/upload/src/upload-content.vue_vue_type_script_setup_true_lang.mjs`
+   （认字符串 `if (autoUpload) upload(rawFile)`，别认行号）里是
+   `for (const file of files) { … }` —— `upload` 是 async 且
+   **循环里不 await** ⇒ K 个 POST 同帧发出、响应各落各的 tick ⇒ K 次 watch 重入。
+   **每操作扫描数的界（改前 → 改后）**：本机现量 `get_user_usage(user, fresh=True)` 五连跑，
+   命令把五个样本都打出来（`manage.py shell -c "exec(open('…tmp.py').read())"`，脚本用完即删）：
+   `admin: samples_ms=[6.2, 3.29, 3.66, 3.21, 3.23]` ⇒ 最小 3.21 / 最大 6.20 / 均值 3.92 ms，
+   树是 admin 的 112 个文件；`user`/`viewer` 两棵空树 0.19–0.25 ms；dev 档用户实测三个
+   （`users= ['admin', 'user', 'viewer']`）。同一脚本早一轮跑过 3.45–6.61（均值 4.22），
+   两次同分布，**正文取第二轮**因为它的五个样本是命令打出来的、可复算。
+   改前：K 个文件 ⇒ K 条 `fresh=1` ⇒ K 次全盘扫描（50 个文件 ≈ 50 × 3.92 ≈ **196 ms** 后端 CPU）。
+   改后：**同一 burst ≤ 2 次**（leading 1 + trailing 1 ≈ 7.8 ms），且界是**单侧**的 ——
+   若相邻两次 emit 间隔超过窗口，窗口关掉重新武装，退化成每 emit 一次 leading，
+   最坏就是改前的 K，所以这个改动只会更少、不会更多。
+   窗口 800 ms 的选取（写在常量注释里，三条）：下界对着「两次 emit 的间隔 = 一次上传往返」，
+   本机一个走完整 Django 中间件的 GET 往返现量 1.7–20.8 ms
+   （`curl -s -o /dev/null -w %{time_total}` ×5 = 0.015373 / 0.002448 / 0.020797 / 0.001734 / 0.003120 s，
+   未鉴权、是下界），800 ≈ 最慢那次的 38 倍；上界对着「用户还把这一下当成刚才那次操作的回应」，
+   而 leading 已经把**单个**写操作（最常见路径）的感知延迟压到 0，付 800 ms 的只有真连发；
+   与后端 TTL 的关系是 30s 的 2.7%，且 trailing 带 `fresh=1` 本来就绕缓存 ⇒ 不会把结果推到换桶边缘。
+   **没抄 analysis 那四处 150 ms**（`useHistogram/useBoxPlot/useQQPlot/useSerialDistribution`）：
+   那四处的触发器是人手连点，间隔就是点击间隔；这里的触发器是服务端响应。
+
+5. **Minor ⑤⑥⑦**：⑤ `usageChipText(usage)` 从模板内联补齐成第四个 computed
+   （`FileListToolbar.vue` 的四个派生串现在同形；性能本来只是微秒级，改它的理由是一致）。
+   ⑥ `:key` 由裸 `row.label` 改成 `` `${row.label}:${index}` `` —— 选**复合键**而不是裸 index：
+   两者的 diff 行为对「无状态、整批替换」的行完全等价，而 label 留着在 devtools 里能读出这行是谁。
+   撞键路径确认不可达于现网（本机 dev 树第一段目录名只有 `single`/`batch`），但坏法对读数面板
+   不可接受：重复 key 时 keyed diff 只保留最后一个 index，下一次 `usage` 更新可能把**另一个桶**的
+   字节数 patch 到这个 label 下面，而 dev 只 warn 一声。下面三行静态 `el-descriptions-item`
+   （数据目录 / 目录外记录 / 统计时间）**不需要同样处理**：它们不在 v-for 里，而「数据目录」那行的
+   `v-if="!usageRows.length"` 与 v-for 互斥、永不同帧共存。⑦ `popper-class="disk-usage-popover"`
+   保留不动 —— 现在 `grep -rn disk-usage-popover frontend/src frontend/e2e frontend/test`
+   只有**定义处那一行**命中（CSS 选择器与定位符都是零），它的用处在**下一个任务**：
+   Task 8 Step 1 的 `.el-popper.disk-usage-popover` 定位钩子；没加 CSS。
+
+6. **七条里哪些今天有测试、哪些只有 Task 8 能证明。**
+   先说为什么**没写新 T2**：`vitest.config.ts:3-6` 的 T2 层是 `environment: 'node'`、
+   零 DOM，`@vue/test-utils` 不在依赖里，`test/unit` 全仓没有一件 mount 组件
+   （`grep -rln "mount(" test/unit` 零命中）⇒ 本轮改的四处行为（activated 才拉、失败保留、
+   burst 合并、`:key` 形状）都在组件里，vitest 看不见。**helper 层早就有钉，本轮没写装饰性用例**：
+   ④ 的 leading+trailing 由 `test/unit/asyncDataAbortCoalesce.spec.ts` 那六例钉死，
+   再写一件只会复述它；③ 的守卫**形状**由同文件「过期那趟晚到的成功响应不覆盖 data」钉死，
+   但那一例测的是 `useAsyncData.run`，**不是** `loadUsage` 里这份手写复制品 —— 这份复制品
+   本身今天无判据（见下面 ③ 那条）。
+   为新写的 composable 层用例付费的理由不存在，因为**本轮没有新 composable**。
+   ⇒ 下面这些**今天没有任何自动化测试证明**，Task 8 必须自己断到：
+   - **①：跨导航计数。** 进 `/data` ⇒ `/files/usage/` 恰好 **1** 条（这条同时钉住
+     「activated 真的触发」和「没有 mounted+activated 双发」）；
+     `/data → 仪表板 → /data` ⇒ 累计 **2** 条（不是 1 —— 1 意味着 activated 没跑；
+     不是 3 —— 3 意味着有人把 mounted 加回去了）。计数器必须装在 `goto` **之前**（lessons R2④）。
+   - **②：失败保留上次好值。** 先让 usage 成功、chip 可见，再把 `USAGE_ROUTE` 翻成 500，
+     离开再回来 ⇒ 断言 chip **仍然可见且是旧那个数**、`.el-message--error` 恰好 **1** 条。
+     现有 Task 8 第二条（500 ⇒ chip 不出现）**测不到这一处**：它拦的是首屏第一次，
+     `usage` 从来没被写过 ⇒ 照旧成立，但改坏 ② 也照样绿。两件事都需要各自的用例。
+   - **④：一次 burst ⇒ 2 条。** 多文件上传后断 `/files/usage/` 的请求数 `=== 2` 且两条都带
+     `fresh=1`，并断 chip 最终等于端点当时的 fresh 值。只断「chip 变了」抓不到回归 ——
+     去掉合并器它也变。
+   - **③：反序落地。** 可用 `page.route` 让第一次请求晚到、第二次早到（两份不同 payload），
+     断 chip 是**后发**那份。做不到的话就承认它只有代码评审在管，别写一条抓不住的假用例。
+   - **⑤⑥**：渲染层，且 ⑥ 的撞键要造一个叫「单文件」的一级目录才可达；建议不进 Task 8
+     （造它要动别的用户的数据根目录），由代码评审看注释。
+
+7. **门禁侧的三条连带结论（读断言得出的，没开浏览器池）。**
+   ① `e2e/data/data.spec.ts`「进数据管理页只发一次全量文件列表」的谓词是
+   `/\/files\/\?page_size=9999(&|$)/` ⇒ `/api/v1/files/usage/` 既没有 `page_size=9999`
+   也不同形，**不受本轮影响**；同文件第二条 `page.route` 也只 abort 那一个谓词，
+   它的「恰好 1 条 error toast」计数因此不会被本轮多出来的 usage 请求顶高。
+   ② **但 `e2e/global/error-handling.spec.ts` 里那两处 `page.route('**/api/v1/files/**')`
+   确实覆盖 `/files/usage/`**（现取：`grep -n "api/v1/files" frontend/e2e/global/error-handling.spec.ts`）
+   —— 那两条把整个 files 前缀 fulfill 成 500/400，进 `/data` 时
+   现在多一条 usage 请求也一起进这道闸。不炸的理由是实测过的机制而不是运气：
+   `src/api/index.ts` 的 `toastError`（现取：`grep -n "function toastError" src/api/index.ts`）
+   对**同一条文案** 2 s 内只响一次，
+   且那两条断言是 `.filter({ hasText }).toBeVisible()`（不是计数）⇒ 本轮不新增可见失败模式；
+   如果哪天有人给 usage 加了页面自己的第二声，这条会先红。
+   ③ **Task 8 Step 3 的排查表第 1 条已经过期**（它写「captured 是 null ⇒ `loadUsage()` 没进
+   `onMounted`」）：现在是 `onActivated`。它在上面、本轮不改上面，**Task 8 落地时按本条订正**，
+   否则下一个人在错误的方向上找这个 bug。
+
+8. **本轮唯一没能验的一件事**：「activated 对这个**子孙组件**真的每次进入都触发一次」这件事，
+   我只有两处间接证据 —— 本仓两处生产实测的同族约定（`DataManagement.vue` 的注释与
+   `BatchYieldTab.vue` 的用法）和 shipped 的 Vue 语义 —— **没有浏览器现量**（批内纪律：
+   不开池、不起新 dev server，8000/3000 上是别人已在跑的这份代码，PID 未动）。
+   所以第 6 条那条计数断言不是「补个覆盖」，它是这一条**第一次被证明**的地方；
+   如果它红在 0 条（activated 对这个子孙组件不触发），结论就是这条约定在这一形下不成立，
+   得换一个入口（`onMounted` 加一次性闸门会重新引入「会话级快照」，所以正确方向是路由级
+   监听或把取数上提到 `DataManagement`），并且这一条要重新记为**未解决**，别当已修。
+   顺带一条同源的小未验：窗口 800 ms 的真实判据是「一次上传往返」，我量的是**无鉴权 GET**
+   的往返（1.7–20.8 ms）当下界，没真跑过 K 文件上传去量相邻两次 emit 的间隔。
+
