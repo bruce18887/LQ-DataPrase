@@ -100,6 +100,25 @@ describe('usageBreakdownRows', () => {
     expect(rows[0]).toEqual({ label: 'staging', sizeText: '4.0 KB', countText: '3 个文件' })
   })
 
+  // 本仓第二次踩同一个坑（第一次见 utils/audit.ts:24-29 与其 test/unit/audit.spec.ts:160-170）。
+  // 一级目录名可以是任意字符串（_scan_tree 按路径第一段建桶，见 storage_usage.py:111-112、:138-163），
+  // 而 `TYPE_LABELS[key] ?? key` 里 `??` 只挡 null/undefined：constructor/toString/hasOwnProperty
+  // 会从原型取到 Function、__proto__ 取到 Object.prototype，原样递回就成了非字符串的 label，
+  // UsageRow.label 标 string 骗过 TS、不报错，浮层把「function toString(){…}」当桶名显示出来。
+  // 这几个键与上面 staging 那条不同类：staging 是「未知普通键」（本来就能原样显示），
+  // 它们是「原型键」（本来会被静默换成非字符串）。
+  it('原型名键（constructor/toString/hasOwnProperty/__proto__）的 label 必须是字符串键本身', () => {
+    const keys = ['constructor', 'toString', 'hasOwnProperty', '__proto__']
+    // Object.fromEntries 走 CreateDataProperty，能把 __proto__ 造成本身可枚举的自有键
+    // （对象字面量与 obj[k]= 都不行——会触发 __proto__ setter 改原型）。
+    const rows = usageBreakdownRows(
+      base({ by_type: Object.fromEntries(keys.map((k) => [k, { bytes: 1024, count: 1 }])) }),
+    )
+    expect(rows).toHaveLength(keys.length)
+    for (const r of rows) expect(typeof r.label, JSON.stringify(r.label)).toBe('string')
+    expect(rows.map((r) => r.label).sort()).toEqual([...keys].sort())
+  })
+
   it('根目录散文件的空串键显示为「根目录散文件」', () => {
     const rows = usageBreakdownRows(base({ by_type: { '': { bytes: 5, count: 1 } } }))
     expect(rows).toEqual([{ label: '根目录散文件', sizeText: '5 B', countText: '1 个文件' }])
@@ -111,13 +130,15 @@ describe('usageBreakdownRows', () => {
   })
 })
 
-describe('usageOutsideLine / usageMismatchLine / usageScannedText', () => {
+describe('usageOutsideLine', () => {
   it('目录外记录为 0 时不显（遗留装机才有）', () => {
     expect(usageOutsideLine(base())).toBeNull()
     expect(usageOutsideLine(base({ db_outside_root_count: 7, db_outside_root_bytes: 3072 })))
       .toBe('另有 7 条记录的文件不在数据目录内（3.0 KB）')
   })
+})
 
+describe('usageMismatchLine', () => {
   it('未超阈值不显差值行', () => {
     expect(usageMismatchLine(base())).toBeNull()
     // 反证 M8 加的第三条：后端 `_mismatch` 返回的是 `ratio > 阈值, diff` 两个独立量，
@@ -128,19 +149,29 @@ describe('usageOutsideLine / usageMismatchLine / usageScannedText', () => {
     expect(usageMismatchLine(base({ mismatch_over_threshold: true, mismatch_diff_bytes: 123456789 })))
       .toBe('清单与磁盘不一致（差 117.7 MB）：清单里的文件大小是导入当时的快照，此后不刷新')
   })
+})
 
+describe('usageScannedText', () => {
   it('scanned_at 缺失或不可解析时返回 null，不显空串', () => {
     expect(usageScannedText(base({ scanned_at: '' }))).toBeNull()
     expect(usageScannedText(base({ scanned_at: 'not-a-date' }))).toBeNull()
     expect(usageScannedText(null)).toBeNull()
   })
 
-  it('值只有时间本身，不带「统计时间」前缀（label 归调用方）', () => {
+  it('值只有时间本身（带时分秒、24 小时制、无「统计时间」前缀）', () => {
     // ⚠ 分工：`usageScannedText` 返回的是**浮层某一行的 value**，而那一行的 label
     // 由调用方（Task 7 的 `el-descriptions-item label="统计时间"`）给。返回值再自带
-    // 前缀就会读成「统计时间：统计时间 2026-11-14 …」。所以这里只钉形状，不钉前缀。
-    const text = usageScannedText(base())
+    // 前缀就会读成「统计时间：统计时间 2026-11-14 …」。
+    // 钉到「时分秒」这一分量是本条的承重改动：scanned_at 存在的唯一理由，就是把
+    // ≤30s 的分桶 TTL 缓存（storage_usage.py:21-22、:35）暴露给用户。只钉日期形状的话，
+    // 把 toLocaleString 换成 toLocaleDateString（丢掉时分秒）会让这一行「说谎说成当天最新」
+    // 而所有用例照绿 —— 时钟分量必须显式钉住（异源法沿用 format.spec.ts:42 的不钉精确串、
+    // :50-59 的 hour-cycle 边界思路，分隔符仍用 [-/] 两类都收，防 ICU/Node-vs-Chromium 漂）。
+    // 夹具取一个偏晚的时刻（本例独有，不动 base() 的共享默认），让 12 小时制的「下午」露馅。
+    const text = usageScannedText(base({ scanned_at: '2026-11-14T23:07:08+00:00' }))
     expect(text).toMatch(/^\d{4}[-/]\d{1,2}[-/]\d{1,2}/)
+    expect(text).toMatch(/\d{1,2}:\d{2}:\d{2}/)
+    expect(text).not.toMatch(/[上下]午/)
     expect(text).not.toMatch(/统计时间/)
   })
 })
