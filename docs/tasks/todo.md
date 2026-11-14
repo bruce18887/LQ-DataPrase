@@ -703,3 +703,89 @@ admin/settings 那一族（`AuditLogPage.vue` 事件枚举、`UserManagement.vue
   本批仍未补（要补就在上面那条 composable 工单里一起补）。
 - 上一节那两个同类漏项（`CorrelationToolsTab.vue:36/:41` 与 `FileSelect.vue:2/:29`）+ 两个次级候选
   （`SftpSearchPage.vue:81/:83`、`CombineBatchDialog.vue:38`）：**等用户拍板**，未拍板前不动代码、不写判据。
+
+# 任务：批2 磁盘占用（2026-11-14，计划 Task 10 收口；计划 `docs/superpowers/plans/2026-11-14-batch2-disk-usage.md`）
+
+## 状态：**七档全绿，未并入 master，未 push**
+
+分支 `feature/batch2-disk-usage`。规模现读：`git rev-list --count master..HEAD` = **45 笔**，
+`git diff --shortstat master...HEAD` = **17 文件 / +5499 / −6**（这个加号里含计划台账本身，
+产品代码只占其中一小部分，逐笔标题 `git log --oneline master..HEAD`）。工作树干净。
+**并入要等用户点头**（批1 的先例是 `--ff-only` 并入本地 master，`origin` 是公开仓库，绝不 push）。
+
+## 收口七档（每档取判据行，不取退出码）
+
+| 档 | 命令 | 实测判据行 |
+|---|---|---|
+| 全量池 | `node scripts/e2e_pool.mjs --slots=4` | 文件 **88** · 用例 **469** · 墙钟 **13.8min** · `unexpected 2 · flaky 2 · skipped 21` · `结论 MEASURED` · 复跑判级 **真红 0 · 负载抖动 1 · 悬而未决 0** |
+| 后端全量 | `CODEBUDDY_SAFE_DELETE_ENABLED=0 .venv/Scripts/python.exe -X utf8 manage.py test` | `Ran 2624 tests in 616.323s` / `OK (skipped=16)` / `grep -cE "^(FAIL|ERROR):"` = **0**（批1 基线 2576 + 本批 48） |
+| 前端构建 | `npm run build`（含 `vue-tsc -b`） | `✓ built in 853ms`，无 TS 诊断 |
+| 全量 vitest | `npx vitest run` | `Test Files 69 passed (69)` / `Tests 967 passed (967)` |
+| e2e 类型 | `npm run lint:e2e` | `error TS` **0** 处 |
+| 行数闸 | `npx vitest run test/unit/lineLimit.spec.ts` | `Tests 15 passed (15)`；**没有给任何文件加豁免** |
+| affected | `npm run test:e2e:affected`（Task 8、Task 9 前后各一次） | `RESULT: PASS · 计划 4 档全部执行` |
+
+三档测试数现读：T1 **48**（`test_storage_usage_scan.py` 34 + `test_storage_usage_cache.py` 4 +
+`test_files_usage_api.py` 10）/ T2 **16**（`diskUsage.spec.ts`）/ T3 **9**（`disk-usage-chip.spec.ts`，
+Task 8 落 7 + Task 9 追加 2）。
+
+## 那条池档的红：归因结论是「不属批2」
+
+全量池 `unexpected 2` 复跑判级只有 `负载抖动 1`，红点是 `combine.spec.ts:122`
+（`TimeoutError`：「组合为批次」按钮恒 `disabled`、`title="请先勾选文件"` ⇒ 勾行没生效）。
+批1 收口那一轮它是 unexpected 0，所以没有直接放行走「抖动」，做了三次目击 + 一次对照实验：
+
+1. 全量池 slots=4 ⇒ 同一行红（独占复跑判绿）。
+2. 只跑 data 档 11 个文件、同样 slots=4 ⇒ `用例 114 · unexpected 0 · flaky 1`，`^  x ` 还是那一行。
+3. **对照实验**（`tasks/b2_task10_attrib.py`）：把 `FileListTab.vue` filesVersion watch 里那一发
+   `reloadUsage(true)` 改成 `if (false) reloadUsage(true)`，让请求时序**回到批1**，同一批文件同样 slots=4 ⇒
+   `用例 114 · 5.7min · unexpected 2 · flaky 3`，**`combine.spec.ts:59` 与 `:122` 照样出 x 行**
+   （`:122` 两次 x 后 retry #2 才过）。⇒ **批2 的写后全盘重扫不是必要条件，这条红不属批2**。
+   附带损伤只有 disk-usage 的 case 3/7（判据要的行为被实验本身关掉 ⇒ 真红 1），符合预期。
+   实验自己废过两轮，都栽在**池的预检会跑 `npm run build`**：注释掉调用 ⇒ `TS6133 未读符号`；
+   变异串里写 `#` ⇒ `TS1127 Invalid character`。
+4. 机制仍是真的，而且比「批2 让后端变慢」更底层：表格是 EP 内建 `<el-table-column type="selection">`
+   （`FileListTable.vue:25`），**整份替换 `files` 数组会清掉已勾选**，`FileListToolbar.vue:57-58` 的
+   disabled 直接绑 `selectedCount < 1`；那条用例在 `uploadSingles` 之后不等列表落地就逐行勾
+   （同文件 `:144` 倒是等了）。⇒ 「刷新会吞掉用户刚做的勾选」是**产品缺陷**，修法
+   （`row-key` + `reserve-selection`，或刷新不接管勾选）批2 不做，记给 e2e 稳定性 / 交互专项。
+
+## 实现前探针的四个数（决定了实现形状，全部现跑）
+
+- **P2** 最大用户树 112 个文件 / 1,612,886,366 B / **11.4 ms** ⇒ ≤300ms ⇒ 走「实扫 + 30s 分桶缓存」，
+  **没有建快照表**（规格 §4.4 那条退路没有被触发，这条验收硬条现在有数背书）。
+- **P1** 注册行落在 `MEDIA_ROOT/data/<username>` 之外：**0 条 / 0 B** ⇒ 订正② 的两本账是防御性的；
+  「目录外 N 条」这句当前不会显示但保留（遗留装机需要）。
+- **P3** 根下第一段目录名：`{'single': 98, 'batch': 14}`，无散文件、无未知键 ⇒ `''` 档只能注入测（Task 8 case 4）。
+- **P4** `bytes == unique_bytes`：**True** ⇒ 硬链接目前只在 e2e slot 镜像（`scripts/e2e_pool.mjs:113` 的
+  `fs.linkSync`）；`unique_bytes` 是绊线字段、不进界面。**这条实测同时否决了 Task 8 初稿的一条判据**：
+  slot 树里两字段天然相等 ⇒ 「读错字段」在浏览器里不可见，必须注入差异才谈得上可失败（见计划 Task 8 处置 I2）。
+- 差值成因四量（`tasks/probe_batch2_diff_cause.py`，产出订正⑤）：A 磁盘实扫 112 / 1,612,886,366 B；
+  B 注册且在册 112 行、漂移 **0 B / 0 条**；C 注册但文件已删 **73 行 / 286,358,763 B**；D 盘上孤儿 0。
+  旧口径 ratio **0.1775**（每个装机常年挂一条修复中心已报过的事）／新口径 **0.0000**。
+
+## 两处用户拍板（代码已照此落）
+
+1. **占用 chip 只显体积**（`磁盘占用 1.20 GB`），文件数只在 hover 浮层的分桶行里。根因是左边那颗
+   `{{ total }} 个文件` 是列表作用域、chip 的 `file_count` 是整棵树；Task 7 改成激活刷新后
+   「Explorer 拷进来的文件更新 chip 却不更新表格」，两个都写就会真的打架。
+2. **dev 库里那条 `AuditEvent login_success` 原样保留**（测量登录造成，不删行、不动 `last_login`，
+   原值不可恢复），教训写进 lessons：**测量脚本不得对运行中的服务发登录**。
+
+## 批2 遗留清单（别当已完成，也别顺手改）
+
+- `combine.spec.ts` 的勾选被迟到列表响应清空（上面第 4 条）⇒ 产品级缺陷 + 争用 flake，两个账都记在这一条上。
+- 同形态原型键查表两处未动：`ChartDock.vue:141`、`ExportTemplateSettings.vue:91`（键都是闭合集合，当前不可达）
+  ⇒ 谁下次碰这两个文件就顺手换 `Object.hasOwn` 并补一条原型名键判据，别再攒第三次。
+- `FileListTab.vue` 那四个 sibling loader 仍是 `onMounted`-only ⇒ 表格不随激活刷新，与 chip 口径不一致；
+  要改需要自己的请求计数判据，另批做。
+- `USAGE_TRAIL_MS=800` 与 e2e 里那个 2000 ms drain 常数是硬耦合，改一处必须同改另一处。
+- `Task 7 的 ③（过期响应序号守卫）与 ⑤⑥` 仍只有代码没有判据。
+- `C:\lqdp-e2e\slots` 现有 **362** 个 RUN_ID 目录、`C:\lqdp-e2e` 共 **7.7 GB**（崩池/超时轮有意保留，内含日志与证据）
+  ⇒ 没清理，要不要清等用户说。
+
+## 下一步
+
+批3（重复项选保留 + 用户管理/操作审计两页 toolbar）仍有**两处开口等用户拍板**：① 删除作用范围是「只删已展示的组」
+还是沿用现状「显示前 N 组、删除作用于全部」；② 用户管理要不要前端搜索/角色筛选。
+批4 = 用户点名的未封顶下拉（`CorrelationToolsTab.vue:36/:41`、`FileSelect.vue:2/:29`）+ 批1 遗留合并一批，别塞进批2/批3。
