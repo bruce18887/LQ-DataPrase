@@ -405,8 +405,9 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
     await dialog.locator('button').filter({ hasText: '开始检查' }).click()
     await expect(dialog.locator('.el-descriptions')).toBeVisible({ timeout: 60_000 })
 
-    const alert = dialog.locator('.el-alert').filter({ hasText: '清单与磁盘不一致' })
+    const alert = dialog.locator('[data-testid="disk-mismatch-alert"]')
     await expect(alert).toBeVisible()
+    await expect(alert).toContainText('清单与磁盘不一致')
     await expect(alert).toContainText('差 117.7 MB')
     // 只陈述、不动作（计划订正③）：产品里没有任何路径回写 file_size，挂一个「重新扫描」
     // 就是谎话。这一句排在两条正判据之后仍然活着 —— 前两条在「有按钮」时照样绿。
@@ -426,6 +427,12 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
     await dialog.locator('button').filter({ hasText: '开始检查' }).click()
     // 正判据排在 count(0) 之前：检查结果没渲染出来时这一行当然「不存在」，那是假绿。
     await expect(dialog.locator('.el-descriptions')).toBeVisible({ timeout: 60_000 })
-    await expect(dialog.locator('.el-alert').filter({ hasText: '清单与磁盘不一致' })).toHaveCount(0)
+    // ⚠ 按 **testid 的结构存在性**判，不按文案筛：把 `v-if="mismatchLine"` 去掉后
+    // `:title` 是 null，EP 照样渲染出一条空的 warning 条，而 `.el-alert` 配
+    // `filter({ hasText: '清单与磁盘不一致' })` 抓不到它 ⇒ 实测整轮 unexpected 0（2026-11-14
+    // 变异轮）。这一条契约说的是「这一行出不出现」，不是「这行写了什么」。
+    // 检查完成后的分支里本对话框没有别的 el-alert（前置那条 info 在 `v-if="!result"` 分支），
+    // 所以按 testid 数比按 `.el-alert` 数更耐后续的卡片改动。
+    await expect(dialog.locator('[data-testid="disk-mismatch-alert"]')).toHaveCount(0)
   })
 })
