@@ -1837,7 +1837,9 @@ async function cleanupDup(dupName: string, ...dirs: string[]) {
       const group = card.locator('[data-testid="dup-group"]').filter({ hasText: dupName })
       const rowA = group.locator('[data-testid="dup-keep-row"]').filter({ hasText: pair.batchA })
       const rowB = group.locator('[data-testid="dup-keep-row"]').filter({ hasText: pair.batchB })
-      await expect(rowA).toHaveCount(1, '两个批次目录各成一行')
+      // ⚠ 说明文字挂在 expect 上，不是 toHaveCount 的第二参 —— Playwright 的
+      // `toHaveCount(n)` 只收一个参数，写错位置是 TS2559，且运行时那句话不会出现。
+      await expect(rowA, '两个批次目录各成一行').toHaveCount(1)
       await expect(rowB).toHaveCount(1)
       // 结构钩子，不按颜色/文案筛：画错行的「保留」在文案上照样通顺。
       await expect(rowA).toHaveAttribute('data-keep', 'keep')
@@ -1931,33 +1933,40 @@ Task 6 复审实测：把 `applyStrategyToUntouched(props.groups.slice(0, 3), �
       // ① 三组都未改选 ⇒ N=3
       await expect(applyBtn).toHaveText(/应用到未改选的 3 组/)
 
-      // ② 手改 K1：显式点它**较早**那一行（-A）。这一击的意义在「标记为 touched」，
-      //    而 -A 恰好也是默认值 ⇒ 只有「策略不许覆盖 touched」这条判据能分辨它有没有被记住。
-      const manual = rowOf(pairs[0], names[0])
+      // ② 手改 K1：显式点它**较晚**那一行（-B）。这一击的意义在「标记为改选过」。
+      //    ⚠ 本节原稿写的是「点较早那份（-A，恰好也是默认值）」—— **实测点不出来**：
+      //    已选中的那颗 radio 上再点一次，DOM 不发 change，EP 的 `use-radio.mjs:21` 那个
+      //    set 因此根本不触发 ⇒ `pick()` 没被调用 ⇒ 「未改选的 3 组」纹丝不动（首轮实测就是红在这里）。
+      //    改成「手改较晚那份 + 策略选最早」：判别力等价 —— 策略若覆盖了改选过的组，
+      //    K1 会被挪回 -A，而下面 ④ 那两条 `data-keep` 断言当场就红。
+      const manual = card.locator('[data-testid="dup-group"]')
+        .filter({ hasText: names[0] })
+        .locator('[data-testid="dup-keep-row"]')
+        .filter({ hasText: pairs[0].batchB })
       await manual.locator('.el-radio').click()
       await expect(manual).toHaveAttribute('data-keep', 'keep')
-      // ③ N 必须降到 2 —— 深追踪失效时这里就是唯一会红的地方
+      // ③ N 必须降到 2 —— Vue 对 `ref(new Map())` 的深追踪失效时这里就是唯一会红的地方
       await expect(applyBtn).toHaveText(/应用到未改选的 2 组/)
 
-      // ④ 策略选「最新导入」再一键应用：K2/K3 应落到 -B，K1 必须仍然 -A
-      await card.locator('.dup-strategy .el-radio').filter({ hasText: '最新导入' }).click()
+      // ④ 策略选「最早导入」再一键应用：K2/K3 应落到 -A，K1 必须仍然是手改的 -B
+      await card.locator('.dup-strategy .el-radio').filter({ hasText: '最早导入' }).click()
       await applyBtn.click()
       await expect(applyBtn).toBeDisabled()                 // N 归零
       await expect(manual).toHaveAttribute('data-keep', 'keep')
-      await expect(rowOf(pairs[0], names[0])).toHaveAttribute('data-keep', 'keep')
+      await expect(rowOf(pairs[0], names[0])).toHaveAttribute('data-keep', 'delete')
       for (let i = 1; i < 3; i++) {
-        const late = card.locator('[data-testid="dup-group"]')
+        const early = card.locator('[data-testid="dup-group"]')
           .filter({ hasText: names[i] })
           .locator('[data-testid="dup-keep-row"]')
-          .filter({ hasText: pairs[i].batchB })
-        await expect(late, `${tags[i]} 组应被策略落到较晚那份`).toHaveAttribute('data-keep', 'keep')
+          .filter({ hasText: pairs[i].batchA })
+        await expect(early, `${tags[i]} 组应被策略落到较早那份`).toHaveAttribute('data-keep', 'keep')
       }
 
       // ⑤ 删除后逐组终态：留下的正是上面选定的那三份
       await card.locator('.el-checkbox').click()
       await card.locator('button').filter({ hasText: '按选择删除 3 个' }).click()
       await expect(page.getByText(/已删除 3 个重复文件/).first()).toBeVisible({ timeout: 20_000 })
-      const want = [pairs[0].batchA, pairs[1].batchB, pairs[2].batchB].sort()
+      const want = [pairs[0].batchB, pairs[1].batchA, pairs[2].batchA].sort()
       await expect.poll(() => dupRemainingBatches(page, names), { timeout: 15_000 }).toEqual(want)
     } finally {
       for (let i = 0; i < tags.length; i++) {
@@ -1992,6 +2001,42 @@ async function dupRemainingBatches(page: Page, names: string[]): Promise<string[
 
 ⚠ 三条用例的 `dupName` 必须各自独立（`dup_def_` / `dup_pick_` / `dup_strategy_` + `ts`），
 否则它们会互相看到对方的重复组，`按选择删除 N 个` 那颗按钮的数字就会随执行顺序漂。
+
+### Task 8 落地后实测到的三件事（`21e0d2f`）
+
+1. **「已选中的 radio 再点一次」不发 `change` —— 由此暴露一个真实的界面缺口。**
+   通路已核到源码：`DuplicateFilesCard.vue:45` 的 `pick()` 挂在 `el-radio-group` 的
+   `@update:model-value` 上，而它由 `use-radio.mjs:20-24` 的 setter 驱动（`:21` 转
+   `radioGroup.changeEvent`），该 setter 只被 `radio.vue` 里的原生 `change` 链路调用。
+   浏览器对**已选中**的 radio 重复点击不产生 `change` ⇒ `pick()` 不会被调用 ⇒
+   那一组**永远标不出「改选过」**（首轮实测就是红在这里，不是推理）。
+   后果不只是用例写法（第 2b 节已按「手改较晚那份 + 策略选最早」绕开，判别力等价）：
+   **用户无法用界面表达「我确认就要默认这一份，别让一键策略动它」** —— 想保护默认项，
+   只能先改成另一份再改回来，而第二击同样不留痕迹。本批不改产品代码（改它要新增
+   「锁定本组」状态 + 相应判据，属另一个决定），在此点名并登记给批4 复核。
+
+2. **`toHaveCount(n, msg)` 是 TS2559。** Playwright 该匹配器只收一个参数，说明文字必须
+   挂在 `expect(value, message)` 上（与 T1 的 `expect(x, '…').toBe(y)` 同一纪律，
+   `dupKeep.spec.ts` 已钉过一次，这里第二次踩）。第 2 节的代码块已按落地版同步。
+
+3. **本 Task 的 affected 门禁结果与它抓到的东西都不属于批3a。**
+   档位是**重新用命令核过的**（不是回忆）：
+   `node scripts/e2e_affected.mjs --files "frontend/e2e/data/repair-center.spec.ts,apps/export/charts.py,apps/export/export_batch_charts_xlsx.py,test/backend/test_export_histogram_grid.py,apps/export/tests_histogram_style.py"`
+   ⇒ `decide: e2e 模块 [data, exports] + vitest`，档名 `e2e:data+exports`，共 **5 档**，
+   **不是全量池**（§0 第 6 条说的那次「全局清单升全量」是 `frontend/src/utils/dupKeep.ts`
+   刚落地、还没进 commit 时的工作区判定；commit 之后工作区 vs HEAD 已不再触发那条目录规则 ——
+   同一条命令去掉 dupKeep.ts 那次的改动集就退回模块档，日志见 `tasks/_b3a_t8_affected_files.log`）。
+   该档 `[backend]` 一档红在 `test_job_cancel.RealPoolQueueWindowTests`，
+   单模块重跑仍红 —— 归因是另一会话未提交的 `apps/export/*` 三文件把变更集扩进来了，
+   与批3a 无关。**这三份文件我没动、也没提交。**
+
+### Task 8 判据的自评（复审要看的两点）
+
+- M19/M20/M21 三个变异都是**打在真实后端**上红的（`Expected "1|…-PICK-B" / Received "1|…-PICK-A"`
+  等），不是 `route.fulfill` 遮响应的那种假绿 —— 这条纪律在 §0 第 5 条，别在后续 Task 里破。
+- 第三条用例的**后端侧覆盖是等价推断，不是实测**：`describe.serial` 在前一条失败时会 skip
+  后一条，变异只打在 K1/K2/K3 的界面选择上，后端收到的是什么 `keep_ids` 由第 2 条用例的
+  终态断言间接保证。写进台账时别把它说成「T3 直接钉住后端逐组映射」。
 
 ## Task 9: 介绍书联动（维护时机 ②）
 
