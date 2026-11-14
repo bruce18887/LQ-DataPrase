@@ -48,6 +48,26 @@ function bytesText(bytes: number): string {
   return `${(bytes / GiB).toFixed(2)} GB`
 }
 
+/**
+ * spec 侧再实现一遍 src `utils/diskUsage.ts` 的 TYPE_LABELS 查表（异源纪律同上）。
+ * 旧版这里是三元链 `key === 'single' ? … : key`，缺 `''` 分支：空串桶的期望串退化成
+ * `toContain('')`，而 `toContain('')` 对任何字符串恒真 ⇒ 那一行断言**不可能红**。
+ * 补全查表只是把期望串给对；这条判据真正的可失败性来自下面用例里的注入轮 ——
+ * 种子树造不出 `''` 桶（UI 也造不出，理由写在该用例注释里），不注入就没人能红。
+ */
+const TYPE_LABELS: Record<string, string> = { single: '单文件', batch: '批次', '': '根目录散文件' }
+function typeLabel(key: string): string {
+  // 与 src 同款 own-property 查表：`??` 只挡 null/undefined，键取自文件系统，
+  // constructor/toString 这类原型键会从原型上取到函数（utils/diskUsage.ts:75-80 的教训）。
+  return Object.prototype.hasOwnProperty.call(TYPE_LABELS, key) ? TYPE_LABELS[key] : key
+}
+
+/** 注入桶（case 4）：GB 档 ⇒ bytesText 两位小数，与真实桶的 MB 档一位小数不同形；
+ *  count ≥ 1000 ⇒ 千分位分隔符在 Node 侧与浏览器侧各走一遍（真实桶 87 个文件时根本碰不到）。 */
+const ROOT_LOOSE_KEY = ''
+const LOOSE_BYTES = 3.5 * 1024 ** 3 // 3758096384 ⇒ '3.50 GB'
+const LOOSE_COUNT = 2048 // '2,048'（en-US 与 zh-CN 分组符同为逗号，本仓浏览器 locale 下两侧一致）
+
 test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
   test('chip 文案与端点返回体逐字一致（透传捕获，不靠再猜一次缓存桶）', async ({ page }) => {
     // 用 route 透传把 app 自己那一次读取的响应体留下来 —— 不能再 apiGet 一次去比：
@@ -129,10 +149,13 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
 
   test('浮层能展开并给出与 chip 同一份拆分', async ({ page }) => {
     let captured: any = null
+    let injectLoose = false
     await page.route(USAGE_ROUTE, async (route) => {
       const response = await route.fetch()
       const json = await response.json()
-      captured = json
+      // captured 只存**真实**返回体：真实桶的期望串必须来自真实载荷，注入轮不许覆盖它。
+      if (!injectLoose) captured = json
+      else json.by_type[ROOT_LOOSE_KEY] = { bytes: LOOSE_BYTES, count: LOOSE_COUNT }
       await route.fulfill({ response, json })
     })
     await gotoApp(page, '/data')
@@ -144,11 +167,11 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
     // 用 :visible 判「哪个浮层开着」在同页多浮层时不可靠）。
     const popper = page.locator('.el-popper.disk-usage-popover')
     await expect(popper).toBeVisible({ timeout: 10_000 })
-    const total = await popper.locator('.el-descriptions__cell').allInnerTexts()
+    const cells = popper.locator('.el-descriptions__cell')
+    const total = await cells.allInnerTexts()
     const joined = total.join(' ')
     for (const key of Object.keys(captured.by_type ?? {})) {
-      const label = key === 'single' ? '单文件' : key === 'batch' ? '批次' : key
-      expect(joined, `浮层里必须有 ${key} 这一桶`).toContain(label)
+      expect(joined, `浮层里必须有 ${key} 这一桶`).toContain(typeLabel(key))
     }
     // ⚠ 这条原先断的是 `String(captured.file_count)`（整棵树总数）。Task 6c 之后 chip 只显体积、
     // 浮层里给的是**每桶**的计数，总数不再以任何形式出现（两桶时它根本不在文本里 ⇒ 假红），
@@ -158,6 +181,56 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
       expect(joined, `浮层里必须有 ${key} 这一桶的「${countText}」`).toContain(countText)
       expect(joined, `浮层里必须有 ${key} 这一桶的体积`).toContain(bytesText(bucket.bytes))
     }
+
+    /*
+     * —— 合成形状轮：`by_type['']`（根目录散文件）——
+     *
+     * 为什么是**注入**而不是造出真实数据：`''` 桶是后端的合法形状但**不可经 UI 达到** ——
+     * - `_iter_files` 按根下第一段建桶，直接躺在根下的散文件 `top === ''`
+     *   （apps/datafiles/storage_usage.py:74，建桶在 :147-152）⇒ 返回体里出现 `''` 是
+     *   契约内的事（资源管理器手工往数据根目录拷文件就会造出它，真实用户可达）。
+     * - 但 UI 的**每一条落盘路径**都经 `_user_upload_dir`（apps/datafiles/views/_helpers.py:183
+     *   把路径钉死为 `<user>/single|batch/`）：上传 file_views.py:549,568、组合为批次
+     *   file_views.py:336-338、移出批次 file_views.py:420-424、ZIP 注册 _helpers.py:450-452
+     *   ——没有任何视图把文件写到 `<user>/` 根下。所以「经由 UI 操作造出 '' 桶」做不到，
+     *   而本仓 e2e 数据纪律是夹具或响应拦截、不动 slot 树磁盘（磁盘手术会污染共用
+     *   这棵树的其它用例）。注入是**唯一不越界的造法**，不是因为它省事。
+     * - 诚实边界：注入只加 by_type['']、不动 bytes/file_count 总量 ⇒「各桶之和 = 总量」
+     *   这条后端恒等式（T1 钉着）在本轮载荷里是**被故意打破**的；浮层逐桶渲染
+     *   （usageBreakdownRows 不读总量），所以打破它不影响本轮判据所守的渲染契约。
+     *
+     * 可失败性（2026-11-14 实测）：把 src TYPE_LABELS 的 `''` 映射改坏（→「批次」）后独占
+     * slot 复跑，红**恰好落在这条注入段**且只有 case 4 红（其余 6 条仍绿）——首个红点是
+     * 下面 :220 的渲染等待（filter({ hasText: '根目录散文件' }) 超时，element(s) not found），
+     * 它替 :223 的 toContain 兜住了同一件事；行差值 :229 是第二道闸。
+     * 反过来，把查表退化回旧三元链并不会让本段红 —— 本段守的是**渲染**，不是 spec 自己的
+     * 期望串，这正是旧版 `toContain('')` 恒真装饰的病根所在。
+     */
+    expect(captured.by_type, '种子树不该已有空串桶（注入会覆盖真实值，让期望串失去异源）')
+      .not.toHaveProperty(ROOT_LOOSE_KEY)
+    injectLoose = true
+    // R2①：先挂等待再触发。第二轮走客户端路由激活刷新（与下面 case 5 同一条通路），
+    // 不能 gotoApp —— 整页重载会把 popper/hover 状态连带 route 之外的东西一起重置。
+    const refetched = page.waitForResponse((r) => r.url().includes('/api/v1/files/usage/'))
+    await navByMenu(page, '仪表板')
+    await navByMenu(page, '数据管理')
+    await refetched
+    await expect(chip).toBeVisible({ timeout: 15_000 })
+    await chip.hover()
+    await expect(popper).toBeVisible({ timeout: 10_000 })
+    // 响应返回 ≠ 组件已重渲染（还差 axios then + Vue tick），web-first 等注入行出现后再读文本；
+    // 直接 allInnerTexts 会抓到上一轮的 DOM。这一等同时也是「渲染得出」的正判据。
+    await expect(cells.filter({ hasText: typeLabel(ROOT_LOOSE_KEY) }).first()).toBeVisible({ timeout: 10_000 })
+    const looseCells = await cells.allInnerTexts()
+    const looseJoined = looseCells.join(' ')
+    expect(looseJoined, '注入的空串桶必须渲染成「根目录散文件」').toContain(typeLabel(ROOT_LOOSE_KEY))
+    expect(looseJoined, '注入桶体积必须出自 spec 自己的 bytesText（GB 档两位小数）').toContain(bytesText(LOOSE_BYTES))
+    expect(looseJoined, '注入桶计数必须带千分位（toLocaleString 两侧各走一遍）').toContain(`${LOOSE_COUNT.toLocaleString()} 个文件`)
+    // 不被真实桶循环吞掉：bordered descriptions 一行 = label + content 两个 .el-descriptions__cell
+    // （element-plus 2.14.0 descriptions-cell 源码，th.el-descriptions__cell + td.el-descriptions__cell），
+    // 第二轮比第一轮**恰好多一对**；组件把注入桶并进已有行或整行丢弃时差值就不是 2。
+    expect(looseCells.length - total.length, '注入桶必须多出一整行（2 个 cell）；被合并/去重吞掉时此差值变化')
+      .toBe(2)
     await expect(page.locator(CHIP)).toBeVisible()
   })
 
