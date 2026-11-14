@@ -3342,3 +3342,27 @@ unexpected 0 ⇒ 这条差异本身就是线索。做法是把批2 在争用路�
 
 **本批的收尾状态**：`feature/batch2-disk-usage` 上 **45 笔**（`git rev-list --count master..HEAD` 现读），
 工作树干净，**未 push、未并入 master**——批1 的先例是用户点头后 `--ff-only` 并入本地 master 并删过程分支。
+
+---
+
+#### 终审（整批一次）判定与处置（2026-11-14）
+
+`general-purpose` 前台跑（吸取 Task 8 复审被 150 轮砍断的教训：这次 brief 里写死 ≤35 次工具调用、
+禁跑池/浏览器/python、禁读三方库源码、≤600 字、必须落一行 `FINAL:`），交回 4 条。
+它现读的规模是 **46 笔 / 18 文件 / +5615**（比我台账里的 45/17/+5499 各多一笔一个文件——
+差的就是我自己那笔收口提交，见上一节 F4）；同时它复核通过了一批不用改的东西：13 个返回体字段在
+`storage_usage.py` / T1 的 `FIELDS` / `api/datafiles.ts` 三处逐字一致，`usage` 路由仍排在
+`include(router.urls)` 之前，Task 7 没判据的 ③⑤⑥ **没被后续修复悄悄改坏**，
+`ConsistencyCheckDialog` 新的必填 `usage` prop 只有一个调用点，
+`data.spec.ts:15` 与 `exports.spec.ts:260` 的 `/\/files\/?(\?|$)/` 匹配不到 `/files/usage/?fresh=1`，
+九个 e2e 用例各有具名 killer 且守卫都在自己保护的对象之前。
+
+| 条 | 判定 | 处置 |
+|---|---|---|
+| F1 `file-list-sort-filter.spec.ts` 的正向谓词还圈不干净 | **接受（Important）**，且它指的还是我 `bc976f7` 那次修法的**同一处**：`/api/v1/files/?` 也匹配 `DataManagement.vue:197` 的 `page_size=9999`（同一 watch 在 :264 发）与本文件 `fetchAllFiles` 的 `page_size=10000`，两者都不带 `product_code=` ⇒ 反向谓词照样被满足，假绿只是变窄没关掉 | 匹配器补 `file_type=single`（只有 tab 的加载器固定带它，`FileListTab.vue:162`，非空不被 `cleanParams` 丢）。`1434596`。判据性质要说明白：**这条是论证型而非反证型** —— 造「窗口里只有一发 9999」需要动别的组件的时序，代价不值；实测部分只有「改完 18 例 unexpected 0 + lint 0 处」证明没改坏 |
+| F2 spec 侧 `bytesText` 副本没有 `null/非有限 ⇒ '--'` 分支 | **部分接受（Minor）**：差异是真的，但「镜像那条分支」是**给到不了的状态写代码**（本文件的 `bytes` 全来自真实返回体），且 src 那条分支删掉时这里会红而不是绿 | 只把边界与代价写进注释，并注明钉它的是 T2 的非有限值例。`1434596` |
+| F3 用户名为 `..` / `.` 的账号 ⇒ 每次进 /data 都吃一条错误 toast | **验实但升级给用户**（Minor→按面扩大）：`_user_data_root` 对这些名字 raise ⇒ 500，而 `usage` 不在 `NO_TOAST_ENDPOINTS` 里，Task 7 又把它挂成激活刷新 ⇒ 从「一次都没有」变成「每次进门一条」。可创建性我也现读了：`UserCreateSerializer` 是 ModelSerializer，`username` 只走 Django 默认校验器（接受 `..`），`validate()` 只管密码相似度 ⇒ **这类账号真建得出来** | **不在本批里拍板**：两条路都要用户选——(a) 视图层把 ValueError 变成 204，前端 chip 自然缺席、不弹 toast（要改 T1 的 500 契约例）；(b) 在账号创建处校验掉 `.`/`..`，顺带修同一个根因的**更大问题**（`_user_upload_dir` 会拼出 `<MEDIA_ROOT>/data/../single`，上传路径对这种用户名是逃逸用户目录的）。加 toast 白名单这条我否掉了：它会同时静音真实故障，且直接和 case 6 钉住的「失败必须出声」对冲 |
+| F4 台账「45 笔 / 17 文件 / +5499」是快照数 | **接受（Minor）**，而且踩的正是本批 `c95a588` 刚写进规则的那一条 | todo 里换成三条现读命令。`1434596` |
+
+⇒ 本批的判据账因此更新一处：**F1 说明「加一个新子路由」的连带面不止「别人会不会误收它」，还包括
+「同一族里本来就有几发全量列表请求」**——反向谓词的假绿要按「这一族里有几发」来关，不是按「谁新来」来关。
