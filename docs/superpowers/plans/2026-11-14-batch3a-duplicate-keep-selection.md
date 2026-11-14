@@ -1882,50 +1882,74 @@ async function cleanupDup(dupName: string, ...dirs: string[]) {
 - [ ] **Step 2b: 再加第三条 —— 「一键策略」必须真在浏览器里被点过一次**
 
 Task 6 复审实测：把 `applyStrategyToUntouched(props.groups.slice(0, 3), …)` 传窄（只覆盖前三组），
-**五条源侧绊线全绿** —— 「按钮上的 N 与实际覆盖面同源」这条语义性质在 T2 钉不住，
-而 `[data-testid="dup-apply-strategy"]` 在整批计划里从来没被任何用例点过。所以本 Task 必须补：
+**五条源侧绊线全绿** —— 而 `[data-testid="dup-apply-strategy"]` 在整份计划里从来没被任何用例点过。
+所以本 Task 必须补第三条。**先说清这条能钉什么、不能钉什么**（别再把推断写成实测）：
+
+- **能钉**：① 一键策略不许覆盖用户手改过的那组；② 「N」随手改一组而递减、应用后归零并 `disabled`
+  （这是 Vue 对 `ref(new Map())` 深追踪真的生效的唯一可见签名 —— 深追踪丢了，N 不动、按钮不 disable）；
+  ③ 终态每组留下的正是「手改那组 = 手选的那份 / 其余 = 策略选的那份」。
+- **不能钉**：`groups.length - choice.size` 与 `filter(!choice.has)` 两式的分歧需要 `choice` 里
+  存在**切片外的陈旧键**，而界面点不出来（`watch` 在 groups 刷新时整体清零）⇒ 那一式只能由
+  绊线（形状禁令）拦，浏览器拦不住。谁以后写「同源这条由 T3 覆盖」都属于过度声称。
+
+前置事实（决定写法，不是猜测）：`seedDuplicatePair` 造的两份文件**同名同大小**，
+所以**同一次调用 = 一个组的两只成员**；三组必须用**三个不同文件名**，否则会塌成一组 6 个成员。
+`-A` 先导入 ⇒ id 最小、`created_at` 最早 ⇒ 默认与「最早导入」都落在 `-A`，「最新导入」落在 `-B`。
 
 ```ts
-  test('重复文件：改选过一组之后点「应用到未改选的 N 组」，只有未改选的那几组被改', async ({ page }) => {
-    const dupName = `dup_batch_${ts}.csv`
+  test('重复文件：一键策略只覆盖未改选的组，手改那组原样保留', async ({ page }) => {
     const tags = ['K1', 'K2', 'K3']
+    const names = tags.map((t) => `dup_strategy_${ts}_${t}.csv`)   // 三个不同文件名 = 三个组
     const pairs = []
-    for (const tag of tags) pairs.push(await seedDuplicatePair(page, dupName, tag))
+    for (let i = 0; i < tags.length; i++) {
+      pairs.push(await seedDuplicatePair(page, names[i], tags[i]))
+    }
     try {
       await openRepairCenter(page)
       const card = page.locator('[data-testid="duplicate-files-card"]')
       await expect(card).toBeVisible({ timeout: 15_000 })
       const applyBtn = card.locator('[data-testid="dup-apply-strategy"]')
-      // 三组都未改选 ⇒ N=3
+      const rowOf = (pair: { batchA: string }, name: string) =>
+        card.locator('[data-testid="dup-group"]')
+          .filter({ hasText: name })
+          .locator('[data-testid="dup-keep-row"]')
+          .filter({ hasText: pair.batchA })
+
+      // ① 三组都未改选 ⇒ N=3
       await expect(applyBtn).toHaveText(/应用到未改选的 3 组/)
-      // 手改第一组：选它里面**不是默认**的那一行
-      const g0 = card.locator('[data-testid="dup-group"]').filter({ hasText: pairs[0].batchA })
-      const manual = g0.locator('[data-testid="dup-keep-row"]').filter({ hasText: pairs[0].batchB })
+
+      // ② 手改 K1：显式点它**较早**那一行（-A）。这一击的意义在「标记为 touched」，
+      //    而 -A 恰好也是默认值 ⇒ 只有「策略不许覆盖 touched」这条判据能分辨它有没有被记住。
+      const manual = rowOf(pairs[0], names[0])
       await manual.locator('.el-radio').click()
       await expect(manual).toHaveAttribute('data-keep', 'keep')
-      // N 必须降到 2 —— 这是「Vue 对 Map 深追踪真的生效」唯一的可见签名
-      // （失效时 data-keep 也会不换行，但那一半上一条用例已抓；这一半抓的是「N 不动 + 按钮不 disable」）
+      // ③ N 必须降到 2 —— 深追踪失效时这里就是唯一会红的地方
       await expect(applyBtn).toHaveText(/应用到未改选的 2 组/)
-      await card.locator('.el-radio-group').first().locator('.el-radio').nth(0).click() // 占位：见下注
-      // 选「最新导入」策略后点应用
-      await card.locator('.dup-strategy').getByText('最新导入', { exact: true }).click()
+
+      // ④ 策略选「最新导入」再一键应用：K2/K3 应落到 -B，K1 必须仍然 -A
+      await card.locator('.dup-strategy .el-radio').filter({ hasText: '最新导入' }).click()
       await applyBtn.click()
-      // 手改那组原样不动（N 从 2 变 0 之后按钮必须禁用）
+      await expect(applyBtn).toBeDisabled()                 // N 归零
       await expect(manual).toHaveAttribute('data-keep', 'keep')
-      await expect(applyBtn).toBeDisabled()
-      // 其余两组：留下的必须是**各自较晚**那一份
+      await expect(rowOf(pairs[0], names[0])).toHaveAttribute('data-keep', 'keep')
+      for (let i = 1; i < 3; i++) {
+        const late = card.locator('[data-testid="dup-group"]')
+          .filter({ hasText: names[i] })
+          .locator('[data-testid="dup-keep-row"]')
+          .filter({ hasText: pairs[i].batchB })
+        await expect(late, `${tags[i]} 组应被策略落到较晚那份`).toHaveAttribute('data-keep', 'keep')
+      }
+
+      // ⑤ 删除后逐组终态：留下的正是上面选定的那三份
       await card.locator('.el-checkbox').click()
       await card.locator('button').filter({ hasText: '按选择删除 3 个' }).click()
       await expect(page.getByText(/已删除 3 个重复文件/).first()).toBeVisible({ timeout: 20_000 })
-      for (const p of [pairs[1], pairs[2]]) {
-        await expect.poll(() => dupEndState(page, dupName), { timeout: 15_000 }).not.toBe('3|—')
-      }
-      // 逐组终态：三组各剩 1 条，且 -K1 留的是手改的 B、-K2/-K3 留的是各自较晚的那条
-      await expect
-        .poll(() => dupRemainingBatches(page, dupName), { timeout: 15_000 })
-        .toEqual([pairs[0].batchB, pairs[1].batchB, pairs[2].batchB].sort())
+      const want = [pairs[0].batchA, pairs[1].batchB, pairs[2].batchB].sort()
+      await expect.poll(() => dupRemainingBatches(page, names), { timeout: 15_000 }).toEqual(want)
     } finally {
-      for (const p of pairs) await cleanupDup(dupName, p.dirA, p.dirB)
+      for (let i = 0; i < tags.length; i++) {
+        await cleanupDup(names[i], pairs[i].dirA, pairs[i].dirB)
+      }
     }
   })
 ```
@@ -1933,57 +1957,28 @@ Task 6 复审实测：把 `applyStrategyToUntouched(props.groups.slice(0, 3), �
 需要新增的 spec 局部助手（放在 Step 1 那三条旁边）：
 
 ```ts
-/** 终态批次名清单（排序后比对）：三组各剩一条时，留下的必须是**指定的那三份**。 */
-async function dupRemainingBatches(page: Page, dupName: string): Promise<string[]> {
+/**
+ * 终态批次名清单（排序后比对）：`names` 里每个文件各剩一条时，留下的必须正好是指定的那几份。
+ * 按 `batch_name` 认、不按 id 认、不按行序认 —— 后两者都把「后端 order_by('id')」那条契约
+ * 又依赖了一遍，而那是 T1 的判据，界面判据不该跟着它一起塌。
+ */
+async function dupRemainingBatches(page: Page, names: string[]): Promise<string[]> {
   const { body } = await apiGet(page, '/files/?page_size=9999')
   const list: any[] = Array.isArray(body) ? body : (body.results ?? [])
-  return list.filter((f: any) => f.filename === dupName).map((f: any) => f.batch_name).sort()
+  return list
+    .filter((f: any) => names.includes(f.filename))
+    .map((f: any) => f.batch_name)
+    .sort()
 }
 ```
 
-⚠ 三处写法要求，都是复审实测踩出来的：
-1. **`seedDuplicatePair` 要按 tag 收多份**（`pairs[]`），终态判据一律按 `batch_name` 认，**不按 id、不按行序**
-   （`files` 顺序由后端 `order_by('id')` 保证，但那是 T1 的契约，界面判据不该再依赖它一次）。
-2. `dupName` 每条用例独立（`dup_def_` / `dup_pick_` / `dup_batch_` 前缀 + `ts`），否则三条用例互看对方的组。
-3. 中间那行「占位」的 `.el-radio-group ... .nth(0)` 是**示意**：落地时删掉它，
-   选策略那颗用 `.dup-strategy` 里的 `el-radio`（`getByText('最新导入')`）——
-   留两粒同文案的 radio 会让 `getByText` strict mode 报多匹配。落地前先 `grep -n "dup-strategy" 组件`
-   确认类名，别照抄本段的类名假设。
+落地前必须先 `grep -n "dup-strategy\|dup-apply-strategy" frontend/src/pages/data/components/DuplicateFilesCard.vue`
+核对类名与 testid（本段按 Task 6 落地版写，但类名属于组件私有形状，改了要跟着改）。
+`.dup-strategy .el-radio` 用 `filter({ hasText: '最新导入' })` 而不是 `getByText(...)`：
+卡片别处不再出现这四个字，但 strict mode 下多匹配就红，用带类名的定位器更稳。
 
-- [ ] **Step 3: 类型体检 + 跑这一档**
-
-```bash
-cd frontend && npm run lint:e2e 2>&1
-cd .. && node scripts/e2e_pool.mjs --slots=1 -- e2e/data/repair-center.spec.ts 2>&1
-```
-Expected: `lint:e2e` 零 `error TS`；池末行 `结论 MEASURED` 且 `unexpected 0`，
-`x` 行只该出现本文件那 5–6 条用例（⚠ 判级取末行与 `unexpected`，不取退出码；
-`unexpected 1` 可能是负载抖动 —— 按 testing-gates §4 先看崩池判据再定）。
-
-- [ ] **Step 4: 变异反证（这一条必须跑在浏览器层）**
-
-* M19：把 `_delete_duplicate_files` 里 `keep = keep_by_key.get(...)` 那两行的回落改成恒取默认
-  （等价于「服务端不采纳 keep_ids」）⇒ 第二条用例必红（终态 `1|...-A`），第一条照旧绿。
-  **这条是 F3 教训的正面执行**：后端语义只在浏览器通路真跑（不用 `page.route` 遮响应）才可能红，
-  所以这一步跑的是真后端 + 真磁盘。
-* M20：把 `pending` 算成 `group['files'][1:]`（回到旧硬编码）⇒ 第二条红。
-* M21：把组件里 `data-keep` 的三元反过来 ⇒ 第一条就红（默认态判据），证明结构钩子有牙。
-
-- [ ] **Step 5: affected 门禁一次**
-
-```bash
-cd frontend && npm run test:e2e:affected 2>&1
-```
-Expected: 末行 `RESULT: PASS`。命中 `frontend/src/utils/` ⇒ 会升全量池（~10min），这是预期。
-
-- [ ] **Step 6: 提交**
-
-```bash
-git add frontend/e2e/data/repair-center.spec.ts
-git commit -m "test(e2e): 重复文件终态改按「留下的是被选那一份」判（补上旧用例断不出的那一半）"
-```
-
----
+⚠ 三条用例的 `dupName` 必须各自独立（`dup_def_` / `dup_pick_` / `dup_strategy_` + `ts`），
+否则它们会互相看到对方的重复组，`按选择删除 N 个` 那颗按钮的数字就会随执行顺序漂。
 
 ## Task 9: 介绍书联动（维护时机 ②）
 
