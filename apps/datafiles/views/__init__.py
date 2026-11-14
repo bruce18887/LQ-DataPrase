@@ -34,3 +34,7 @@ from .browse_views import (  # noqa: F401
     DataBrowserView,
     DataConsistencyCheckView,
 )
+
+from .usage_views import (  # noqa: F401
+    FileUsageView,
+)

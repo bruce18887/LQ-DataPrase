@@ -2319,3 +2319,38 @@ os.lstat()          st_dev / st_ino = 5494… / 1970…  ← 实现用这个
 os.link / os.symlink 本机都可建                      ← Task 2 的三条判据用例不会被 skip
 ```
 
+---
+
+## Task 4 落地后的订正（2026-11-14，端点契约实测）
+
+1. **Step 1 的 `test_清单外的遗留绝对路径单列一条不混进bytes` 照抄不可执行（Critical）。**
+   该用例只建了一条**根外**注册行（legacy.csv），却断言 `db_count == 2` 与
+   `db_bytes_in_root == 1000` —— 按 `_db_map` 的实现这两个数必为 `1` 与 `0`，红在数据构造
+   而不是红在口径上。⇒ 落地补上 `data/usage_a/single/a.csv` 的在根注册行（`file_size` 与
+   盘上相等的 1000），这条才真的钉住「两本账分开、交集差值仍是 0」的形状；其余 8 条与正文逐字相同。
+
+2. **Step 2 的期望形状只实现了一半（Important）。** 正文写「`AttributeError: … has no
+   attribute 'clear_usage_cache'`，以及 `test_路由没被router的详情路由吞` 以 404 失败」。
+   实测 `Ran 9 / FAILED (errors=9)`（`tasks/b2-task4-red.log`）：`clear_usage_cache()` 在
+   `setUp` 里，九条**全部先死在 setUp**，排序那条根本没走到断言。⇒ 排序的证据改由两处现读给出：
+   - 接线前 `resolve('/api/v1/files/usage/')` 实测 `MATCHED_VIEW=DataFileViewSet
+     KWARGS={'pk': 'usage'}`（`tasks/b2-task4-preprobe.log`）—— 订正① 说的那颗嘴本来就在；
+   - 落地后把 path 行挪到 `include(router.urls)` **之后**（`tasks/mutate_b2_task4_route.py`，
+     finally 逐字节还原并复核 `True`）⇒ `FAILED (failures=2, errors=5)`，其中
+     `test_路由没被router的详情路由吞` 是 `AssertionError: 404 != 200` —— 是 **404**，
+     不是 400/500：DRF 确实按 `pk='usage'` 去 `get_object_or_404`，`ValueError` 被转成
+     `Http404`。排错的表现为「端点说它不存在」，而 urls.py 里那行看着仍在。
+
+3. **`FileUsageView` 的导入位置按计划放不进字母序（Minor）。** 正文写「按字母序放在
+   `FileActivateView` 之后」，但 `FileUploadView < FileUsageView`（`p` < `s`）。落地取字母序。
+
+4. **连带确认**：Task 3「控制器复核后的再订正」第 2 条已在装配层堵上那个洞，所以本任务
+   **没有**补「注册行在、文件已删」的端点用例，`Ran 9` 与正文一致。
+
+现数：`Ran 9 tests / OK`（`tasks/b2-task4-green.log`；还原后复跑 `tasks/b2-task4-green2.log`
+亦 OK）；邻近回归 `Ran 24 / OK`（`tasks/b2-task4-regress.log`）；Task 3 口径档
+`Ran 34 / OK`（`tasks/b2-task4-scan-regress.log`）；行数 `storage_usage.py` **293**、
+`urls.py` **36**、`views/__init__.py` **40**、`views/usage_views.py` **26**、
+`test_files_usage_api.py` **138**；600 行门禁 `npx vitest run test/unit/lineLimit.spec.ts`
+→ `15 passed`。
+

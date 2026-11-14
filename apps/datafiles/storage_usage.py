@@ -17,16 +17,26 @@
 
 本模块只有口径，不碰 HTTP（视图在 ``views/usage_views.py``）。磁盘侧走树是上面的
 ``_iter_files`` / ``_scan_tree``；DB 侧的两本账与交集差值恒等式是下面的 ``_db_map`` /
-``_mismatch`` / ``_compute_usage``；进程内 TTL 缓存（``get_user_usage``）由后续任务加在
-本文件里。
+``_mismatch`` / ``_compute_usage``；对外入口是 ``get_user_usage``（进程内分桶 TTL 缓存）。
+分桶实现没有 per-key 过期 ⇒ 真实陈旧窗口在 ``[TTL, 2*TTL)`` 之间浮动，所以返回体必须带
+``scanned_at`` 让陈旧对用户可见。
 """
 import os
+import time
 
 from django.conf import settings
 from django.utils import timezone           # 本任务的 _compute_usage 用
 
+from apps.common.keyed_lru import KeyedLRU   # 本任务的 get_user_usage 用
 from apps.datafiles.models import DataFile   # 本任务的 _db_map 用
 from apps.datafiles.utils import resolve_file_path  # 本任务的 _db_map 用
+
+# 规格 §4.4：进程内 TTL 缓存。分桶实现没有 per-key 过期，真实过期窗口在
+# [TTL, 2*TTL) 之间浮动 —— 所以浮层必须显示 scanned_at，让陈旧对用户可见。
+USAGE_CACHE_TTL_SECONDS = 30
+_USAGE_CACHE_MAX_ENTRIES = 64
+
+_usage_cache = KeyedLRU(_USAGE_CACHE_MAX_ENTRIES)
 
 # 规格 §4.6 的阈值：只在超阈时提示，不做常驻的第二指标。
 # 「常态下差值为零」这句在旧口径（全量比全量）下实测不成立（本机 dev ratio=0.1775，
@@ -257,3 +267,27 @@ def _compute_usage(user):
         'mismatch_diff_bytes': diff,
         'scanned_at': timezone.now().isoformat(),
     }
+
+
+def get_user_usage(user, fresh=False):
+    """按用户取占用统计，带进程内分桶 TTL 缓存。
+
+    key = ``(username, bucket)``，``bucket = int(monotonic // TTL)``。为什么不用
+    ``functools.lru_cache`` 也不用精确过期：仓内已有 ``KeyedLRU``（唯一一份，按条数
+    封顶 + 每 key 单飞），而它只有 ``get_or_compute``/``clear`` 两个动作、没有 per-key
+    过期与 per-key 删除 ⇒ 用分桶把「过期」变成「换 key」。代价是真实窗口在
+    [30s, 60s) 浮动，所以返回体带 ``scanned_at`` 让陈旧可见。
+    ``fresh=True`` 清整表：会顺带让别的用户重扫一次，但触发它的只是某个用户自己的
+    一次写操作，代价是一次扫描，换来的是「漏挂失效钩子最多陈旧一分钟」而不是永久。
+    """
+    if fresh:
+        _usage_cache.clear()
+    bucket = int(time.monotonic() // USAGE_CACHE_TTL_SECONDS)
+    return _usage_cache.get_or_compute(
+        (str(user.username), bucket), lambda: _compute_usage(user)
+    )
+
+
+def clear_usage_cache():
+    """测试隔离入口（与 ``dashboard.services.clear_dashboard_summary_cache`` 同形）。"""
+    _usage_cache.clear()
