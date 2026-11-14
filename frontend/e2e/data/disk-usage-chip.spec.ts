@@ -379,4 +379,53 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
       for (const p of paths) cleanupQuiet(p)
     }
   })
+
+  /*
+   * 差值行的两条（Task 9）：注入一条钉「超阈值 ⇒ 多一行 + 差值取自 mismatch_diff_bytes」，
+   * 真实树一条钉「未超阈值 ⇒ 一行都不许出现」。两条都从 chip 可见起步 —— 那一句同时是
+   * `props.usage` 已就位的前置：占用没拉到时这一行本就不该出现，少了等待第二条会假绿。
+   */
+
+  test('占用差值超阈值时，数据修复中心多一行且文案带上那个差值', async ({ page }) => {
+    // 透传注入：只翻 mismatch 两个字段，其余（bytes/file_count/by_type）保持真实，
+    // 这样这一条同时钉住「行与 chip 读的是同一份数据」+「阈值驱动的是布尔而不是猜」。
+    await page.route(USAGE_ROUTE, async (route) => {
+      const response = await route.fetch()
+      const json: any = await response.json()
+      json.mismatch_over_threshold = true
+      json.mismatch_diff_bytes = 123456789 // ⇒ MB 档一位小数 ⇒ 渲染成「差 117.7 MB」
+      await route.fulfill({ response, json })
+    })
+
+    await gotoApp(page, '/data')
+    await expect(page.locator(CHIP)).toBeVisible({ timeout: 20_000 })
+    await page.locator('button').filter({ hasText: '数据修复' }).click()
+    const dialog = page.locator('.el-dialog').filter({ hasText: '数据修复中心' })
+    await expect(dialog).toBeVisible()
+    await dialog.locator('button').filter({ hasText: '开始检查' }).click()
+    await expect(dialog.locator('.el-descriptions')).toBeVisible({ timeout: 60_000 })
+
+    const alert = dialog.locator('.el-alert').filter({ hasText: '清单与磁盘不一致' })
+    await expect(alert).toBeVisible()
+    await expect(alert).toContainText('差 117.7 MB')
+    // 只陈述、不动作（计划订正③）：产品里没有任何路径回写 file_size，挂一个「重新扫描」
+    // 就是谎话。这一句排在两条正判据之后仍然活着 —— 前两条在「有按钮」时照样绿。
+    await expect(alert.locator('button')).toHaveCount(0)
+  })
+
+  test('未超阈值时数据修复中心不显差值行', async ({ page }) => {
+    // 不注入：读的是真实树。新口径（差值只比「注册行 ∩ 文件在盘」的交集，订正⑤）在本机
+    // dev 树实测 ratio=0.0000、漂移 0 条 ⇒ 这一条是诚实的绿，不是靠夹具凑出来的。
+    // 它若红了先跑 tasks/probe_batch2_diff_cause.py 归因：真有人改了盘上文件大小（合法出现，
+    // 按实测数更新台账）就是实现把孤立记录又混回了差值 —— 那种情况改实现，别改这条迁就。
+    await gotoApp(page, '/data')
+    await expect(page.locator(CHIP)).toBeVisible({ timeout: 20_000 })
+    await page.locator('button').filter({ hasText: '数据修复' }).click()
+    const dialog = page.locator('.el-dialog').filter({ hasText: '数据修复中心' })
+    await expect(dialog).toBeVisible()
+    await dialog.locator('button').filter({ hasText: '开始检查' }).click()
+    // 正判据排在 count(0) 之前：检查结果没渲染出来时这一行当然「不存在」，那是假绿。
+    await expect(dialog.locator('.el-descriptions')).toBeVisible({ timeout: 60_000 })
+    await expect(dialog.locator('.el-alert').filter({ hasText: '清单与磁盘不一致' })).toHaveCount(0)
+  })
 })
