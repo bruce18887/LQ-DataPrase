@@ -213,8 +213,8 @@ async function loadAllTags() {
 
 /**
  * 占用统计单独一趟，不并进 `loadFiles`：它要扫整棵目录树。本机 dev 树 112 个文件，
- * `get_user_usage(user, fresh=True)` 现量 3.45–6.61 ms/次、均值 4.22 ms（2026-11-14，
- * 各跑 5 次取全部分布；dev 档三个用户 admin/user/viewer 里只有 admin 有数据）；
+ * `get_user_usage(user, fresh=True)` 现量 5 次 = 3.21–6.20 ms（均值 3.92，2026-11-14；
+ * dev 档三个用户 admin/user/viewer 里只有 admin 有数据，两棵空树 0.19–0.25 ms）；
  * Task 1 探针在同类树上量到 11.4 ms，两者都远低于设计稿停下来回口径的那道 300ms。
  * **不 await** —— chip 缺席不能连累文件列表（Task 8 的 e2e 用 500 拦这条，钉的是
  * 「列表照常、chip 不出现」；首屏就失败时 `usage` 从来没被写过、仍是 null，那条判据照旧成立）。
