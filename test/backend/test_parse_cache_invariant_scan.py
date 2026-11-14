@@ -85,7 +85,7 @@ class EvictCallSiteScanTests(SimpleTestCase):
     CALL = 'evict_parse_cache_for_paths'
     DEFINITION_SITE = 'apps/datafiles/services.py'
     EXPECTED_SITES = {
-        'apps/datafiles/views/_helpers.py': 1,       # _delete_duplicate_files
+        'apps/datafiles/views/_duplicate_files.py': 1,  # _delete_duplicate_files
         'apps/datafiles/views/file_views.py': 4,     # destroy / bulk_delete / combine / uncombine
         'apps/datafiles/views/browse_views.py': 1,   # _delete_orphaned_db
         'apps/datafiles/views/batch_views.py': 2,    # 批次目录 / 子批目录
