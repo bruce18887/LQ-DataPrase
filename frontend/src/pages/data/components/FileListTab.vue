@@ -73,10 +73,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive, watch, onMounted } from 'vue'
+import { ref, computed, reactive, watch, onMounted, onActivated } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { datafilesApi, type FileUsage } from '../../../api/datafiles'
 import { useFilesStore } from '../../../stores/files'
+import { useCoalescedCall } from '../../../composables/useCoalescedCall'
 import FileListToolbar from './FileListToolbar.vue'
 import FileUploadArea from './FileUploadArea.vue'
 import ConsistencyCheckDialog from './ConsistencyCheckDialog.vue'
@@ -211,18 +212,69 @@ async function loadAllTags() {
 }
 
 /**
- * 占用统计单独一次异步拉：它要扫盘，可能几百毫秒。
- * **不 await**、失败也只把 usage 置空 —— chip 缺席不能连累文件列表（Task 8 的
- * e2e 用 500 拦这条，钉的就是「列表照常、chip 不出现」）。
+ * 占用统计单独一趟，不并进 `loadFiles`：它要扫整棵目录树。本机 dev 树 112 个文件，
+ * `get_user_usage(user, fresh=True)` 现量 3.45–6.61 ms/次、均值 4.22 ms（2026-11-14，
+ * 各跑 5 次取全部分布；dev 档三个用户 admin/user/viewer 里只有 admin 有数据）；
+ * Task 1 探针在同类树上量到 11.4 ms，两者都远低于设计稿停下来回口径的那道 300ms。
+ * **不 await** —— chip 缺席不能连累文件列表（Task 8 的 e2e 用 500 拦这条，钉的是
+ * 「列表照常、chip 不出现」；首屏就失败时 `usage` 从来没被写过、仍是 null，那条判据照旧成立）。
+ *
+ * `usageSeq` 是序号守卫，形状照 `composables/useAsyncData.ts` 的 seq（那边有 T2 钉着
+ * 「过期响应不写 data」）：loadUsage 发后即忘、**不取消**，两次在途就可能反序落地，
+ * 后到的旧载荷会把 chip 退回上一个数。后端的 KeyedLRU 单飞只合并「到达时间重叠同一次
+ * 计算」的两次请求，两次 `fresh=1` 隔几秒就是两份不同载荷，前端这一层必须自己判过期。
  */
+let usageSeq = 0
+
 async function loadUsage(fresh = false) {
+  const my = ++usageSeq
   try {
     const { data } = await datafilesApi.getFileUsage(fresh)
+    if (my !== usageSeq) return // 过期响应：丢弃，不覆盖更新的数
     usage.value = data
   } catch {
-    usage.value = null
+    // 过期那一趟的失败同样什么都不做（拦截器的 toast 已经响了，这里没法撤回，也不该撤回）。
+    if (my !== usageSeq) return
+    // 失败时刻意**不**把 usage 置空。这与本文件另外四个 loader（loadFiles /
+    // loadProductCodes / loadFormatTypes / loadAllTags）的「裸 catch + 重置状态」相反，
+    // 是**有意的偏差**，不是漏改 —— 为了「和邻居一致」把它改回来就会重新引入这个 bug。
+    // 三条各自独立的理由：
+    // ① 拦截器（`api/index.ts` 的 NO_TOAST_ENDPOINTS 不含 /files/usage/）已经为这次失败
+    //    弹过 toast 并 console.error 了，再让 chip 消失等于同一个故障发两条互相矛盾的
+    //    信号：一句「服务器错误」＋一次工具栏重排把数拿走。
+    // ② 瞬时故障会把它变成长期故障：报错的那一刻用户正看着这块面板，而本页没有任何
+    //    「重试」路径 —— 只有下一次写操作（上面那条 watch）或离开再回来（下面那段
+    //    onActivated）才会重新拉到一个数。置空 = 让他眼前的数消失到那时为止。
+    // ③ `apps/datafiles/storage_usage.py` 对 `''` / `.` / `..` 直接 raise ValueError，而
+    //    Django 的 UnicodeUsernameValidator **接受** `..` 当用户名 ⇒ 这种账号每一次请求
+    //    都是 500，置空等于这个 chip 永久消失。
+    // chip 缺席只应来自「成功但确实没数据」或「首屏那一次就失败」，不该来自一次瞬时故障。
+    // 陈旧量由载荷里的 `scanned_at` 自己披露，这里不加重试、不加第二套 UI 状态、不加错误横幅。
   }
 }
+
+/**
+ * 写操作后的失效刷新走合并器。为什么会有突发（不是假想）：`FileUploadArea.vue` 的
+ * input 带 `multiple`，每个成功文件 emit 一次 `upload-success`，而 Element Plus 的
+ * upload-content 逐条 dispatch、彼此不 await ⇒ K 个文件的响应落在 K 个 tick 上
+ * ⇒ K 次 filesVersion watch 重入 ⇒ K 次全盘扫描。
+ * leading+trailing ⇒ 单个写操作仍然立即刷新（零额外延迟），K 连发塌成 2 次，
+ * 且尾巴那一次看到的是最终状态。
+ *
+ * 窗口 800ms 是对着三个量选的（其中两个本机现量），不是抄 analysis 那四处 150ms：
+ * ① 下界必须盖住突发里两次 emit 的间隔 = 一次上传往返。本机现量：一个走完整 Django
+ *    中间件的 GET 往返 1.7–20.8 ms（`curl -w %{time_total}` ×5，未鉴权 ⇒ 是下界，真实
+ *    上传还要再叠一次落盘 + 解析），800ms ≈ 最慢那次的 38 倍，够一整条 burst 排在后面。
+ *    analysis 那四处用 150ms 是因为触发器是**人手连点**（间隔就是点击间隔），这里触发器
+ *    是服务端响应，不能照抄。
+ * ② 上界由「用户还把这一下当成刚才那次操作的回应」定：burst 期间用户本来就在看上传进度条，
+ *    而且 leading 已经把**单个**写操作（最常见路径）的感知延迟压到 0，付这 800ms 的只有
+ *    真正连发的那种场景。
+ * ③ 与后端 TTL 的关系：30s（`storage_usage.py` 的 `USAGE_CACHE_TTL_SECONDS`）的 2.7%，
+ *    且 trailing 带 `fresh=1` 本来就绕过缓存 ⇒ 窗口不会把结果推到换桶边缘。
+ */
+const USAGE_TRAIL_MS = 800
+const reloadUsage = useCoalescedCall((fresh: boolean) => loadUsage(fresh), USAGE_TRAIL_MS)
 
 // ── Toolbar event handlers ──────────────────────────────────────────
 function onSearch(text: string) {
@@ -342,7 +394,8 @@ watch(() => filesStore.filesVersion, () => {
   loadAllTags()
   // 每一条本地写路径（上传/删除/批量删除/组合/修复）都会 bump filesVersion，
   // 所以这一行覆盖全部「做完就要看到新数」的场景，不需要在各处分别挂失效。
-  loadUsage(true)
+  // 多文件上传会连发 K 次，所以这里经过合并器（见上面 USAGE_TRAIL_MS 那段）。
+  reloadUsage(true)
 })
 
 // 表头筛选值变化 → 刷新（FileListTable 内 ColumnHeaderFilter 写入 filters）
@@ -356,6 +409,26 @@ onMounted(() => {
   loadProductCodes()
   loadFormatTypes()
   loadAllTags()
+})
+
+// 占用 chip 的「进入即拉」挂 onActivated，**不挂** onMounted —— 与本仓既有的承重约定同形：
+// `MainLayout.vue:12` 用 `<keep-alive :max="10">` 包路由页且没有 include/exclude，本组件是
+// `DataManagement` 的子孙，跟着一起被缓存 ⇒ 首次进入 mounted 与 activated **都**触发，
+// 两处各拉一次就是每次进 /data 多发一条 `/files/usage/`（同一族的缺陷形态与实测见
+// `DataManagement.vue` 里 `onActivated(loadFiles)` 上方那段注释，判据是
+// `e2e/data/data.spec.ts`「进数据管理页只发一次全量文件列表」；子组件用 activated 的先例是
+// `dashboard/components/BatchYieldTab.vue` 的 `onActivated`）。别把它挪回 onMounted。
+//
+// 为什么这一趟必须是激活级而不是只在挂载时跑一次：用户从资源管理器把文件直接拷进数据目录
+// 是这块读数的旗舰场景，而 keep-alive 下 mounted 一个会话只跑一次 ⇒ 那些文件整个会话都不会
+// 出现在数里，除非他碰巧上传或删除了什么。`storage_usage.py` 头部那句「≤30s 陈旧」是**后端
+// 内部**的界，端到端不成立，所以载荷里放了 `scanned_at` 来披露这个窗口。写操作那条 watch
+// 只覆盖「他自己在应用里做的写」，所以导航回来这一趟是把端到端窗口钉回 ≤30s 的唯一入口。
+//
+// fresh=false ⇒ 命中后端 30s 分桶 TTL：导航来回最坏也只是多次缓存命中，不会变成「每次导航
+// 扫一遍盘」。另外四个 loader 仍挂在 onMounted（没跟着走 activated）是既有行为，本批不改，
+// 理由与代价见台账那条「留着的理由与代价」。
+onActivated(() => {
   loadUsage()
 })
 

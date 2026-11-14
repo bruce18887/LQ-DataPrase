@@ -15,11 +15,15 @@
       >
         <template #reference>
           <span class="section-count" data-testid="disk-usage-chip">
-            {{ usageChipText(usage) }}
+            {{ usageChip }}
           </span>
         </template>
         <el-descriptions :column="1" size="small" border>
-          <el-descriptions-item v-for="row in usageRows" :key="row.label" :label="row.label">
+          <el-descriptions-item
+            v-for="(row, index) in usageRows"
+            :key="`${row.label}:${index}`"
+            :label="row.label"
+          >
             {{ row.sizeText }} · {{ row.countText }}
           </el-descriptions-item>
           <el-descriptions-item v-if="!usageRows.length" label="数据目录">
@@ -110,9 +114,23 @@ const emit = defineEmits<{
   'combine-click': []
 }>()
 
+const usageChip = computed(() => usageChipText(props.usage))
 const usageRows = computed(() => usageBreakdownRows(props.usage))
 const usageOutside = computed(() => usageOutsideLine(props.usage))
 const usageScanned = computed(() => usageScannedText(props.usage))
+// 四个派生串一律走 computed，不在模板里直接调纯函数（Task 7 派发词原话「不在模板里重复调用
+// 纯函数」，落地时是三个，这一处补齐成四个）：内联调用会在每次工具栏重渲染时重跑，而搜索框
+// 是本地 state ⇒ 每敲一个字都重渲染这一片。代价本来是微秒级，改它的理由是**一致**。
+//
+// `:key` 用 `label:index` 而不是裸 `label`：`row.label` 的取值空间是
+// `{单文件, 批次, 根目录散文件} ∪ {每个未知一级目录名原样}`，而未知键来自**文件系统**
+// （`storage_usage.py` 按路径第一段建桶），所以数据根目录里真的可以有一个叫「单文件」的
+// 一级目录和 `single` 并排 ⇒ 撞键。撞了不是「难看」那么简单：keyed diff 对重复 key 只保留
+// 最后一个 index，之后 `usage` 再更新就可能把上一轮**另一个桶**的字节数 patch 到这个名字
+// 下面，而这是一块读数面板（dev 模式只会 warn 一声）。行本身无状态、整批替换，所以让 index
+// 参与 key 没有副作用；留着 label 是为了在 devtools 里读得出来这行是谁。
+// 下面三行（数据目录 / 目录外记录 / 统计时间）是静态 `el-descriptions-item`、不在 v-for 里，
+// 没有撞键问题：「数据目录」那行的 `v-if="!usageRows.length"` 与 v-for 互斥，永不同帧共存。
 
 const searchText = ref('')
 
