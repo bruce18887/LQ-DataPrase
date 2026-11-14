@@ -1799,7 +1799,7 @@ git commit -m "feat(data): 文件列表工具栏显示磁盘占用 chip 与拆�
 
 ---
 
-### Task 8: e2e（T3）——chip 的四条渲染判据
+### Task 8: e2e（T3）——chip 的七条渲染与刷新判据
 
 **Files:**
 - Create: `frontend/e2e/data/disk-usage-chip.spec.ts`
@@ -1813,8 +1813,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { ACCOUNTS } from '../fixtures/test-data'
-import { gotoApp } from '../helpers/nav'
-import { uploadFile } from '../helpers/upload'
+import { gotoApp, navByMenu } from '../helpers/nav'
+import { uploadFile, uploadMultipleFiles } from '../helpers/upload'
 import { cleanupQuiet, deleteFilesByNameQuiet } from '../helpers/cleanup'
 
 /**
@@ -1871,9 +1871,11 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
     await expect(chip).toBeVisible({ timeout: 20_000 })
     expect(captured, 'app 应当真的拉过一次 /files/usage/').not.toBeNull()
     expect(captured.file_count, 'seed 后 admin 至少该有一个文件').toBeGreaterThanOrEqual(1)
-    await expect(chip).toHaveText(
-      `磁盘占用 ${bytesText(captured.bytes)} · ${captured.file_count.toLocaleString()} 个文件`,
-    )
+    // 2026-11-14 用户拍板（Task 6c）：chip **只显体积**，文件数在浮层分桶行里。
+    // 左边那颗 `{{ total }} 个文件` 是列表作用域，chip 的 file_count 是整棵树，两个都写
+    // 「N 个文件」会打架 —— 尤其激活刷新之后，Explorer 拷进来的文件只动 chip 不动表格。
+    await expect(chip).toHaveText(`磁盘占用 ${bytesText(captured.bytes)}`)
+    await expect(chip).not.toContainText('个文件')
   })
 
   test('占用接口坏掉时列表照常渲染，chip 不出现', async ({ page }) => {
@@ -1946,8 +1948,109 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
       const label = key === 'single' ? '单文件' : key === 'batch' ? '批次' : key
       expect(joined, `浮层里必须有 ${key} 这一桶`).toContain(label)
     }
-    expect(joined).toContain(String(captured.file_count))
+    // ⚠ 这条原先断的是 `String(captured.file_count)`（整棵树总数）。Task 6c 之后 chip 只显体积、
+    // 浮层里给的是**每桶**的计数，总数不再以任何形式出现（两桶时它根本不在文本里 ⇒ 假红），
+    // 所以改成按桶断计数串 —— 判据跟着文案分工走，不是跟着旧断言的字面走。
+    for (const [key, bucket] of Object.entries<any>(captured.by_type ?? {})) {
+      const countText = `${bucket.count.toLocaleString()} 个文件`
+      expect(joined, `浮层里必须有 ${key} 这一桶的「${countText}」`).toContain(countText)
+      expect(joined, `浮层里必须有 ${key} 这一桶的体积`).toContain(bytesText(bucket.bytes))
+    }
     await expect(page.locator(CHIP)).toBeVisible()
+  })
+
+  /*
+   * 下面三条是 Task 7 复审修复轮**欠下的浏览器判据**：那五个修复里 ①激活刷新 ②失败保留旧值
+   * ④连发合并 都没有任何自动化测试能证明（T2 是 node 环境、仓内不装 @vue/test-utils，
+   * `grep -rln "mount(" test/unit` 零命中）。不补上，这三条就只是"看起来对"的实现。
+   */
+
+  test('占用请求按激活刷新：首屏一次，离开再回来第二次', async ({ page }) => {
+    // ⚠ 计数钩子必须在 gotoApp **之前**装：gotoApp 内部是 page.goto，落地那一刻首屏请求
+    //    已经发完，装晚了数组永远空 —— 那会让第一条断言红得看不出原因。
+    const urls: string[] = []
+    page.on('request', (req) => {
+      if (req.url().includes('/api/v1/files/usage/')) urls.push(req.url())
+    })
+    await gotoApp(page, '/data')
+    await expect(page.locator(CHIP)).toBeVisible({ timeout: 20_000 })
+    // 恰好 1 次才说明「进入即拉」只挂在一处：0 ⇒ onActivated 没挂上或挂错组件；
+    // 2 ⇒ 有人把 loadUsage() 又加回了 onMounted（keep-alive 首进 mounted+activated 都触发，
+    //    正是 DataManagement.vue:266-274 记过的那次双倍请求）。
+    expect(urls, '首屏应恰好一次占用请求').toHaveLength(1)
+
+    // 必须是**客户端路由**（点侧边栏），不能是 gotoApp：page.goto 是整页重载，
+    // 重载后 mounted 也会重新跑一次，那条「只挂 activated」的判据就变成永真。
+    await navByMenu(page, '仪表板')
+    await expect(page.getByTestId('page-identity')).toContainText('仪表板')
+    await navByMenu(page, '数据管理')
+    await expect(page.locator(CHIP)).toBeVisible({ timeout: 15_000 })
+    expect(urls, 'keep-alive 回来必须再拉一次（只挂 onMounted 时计数会停在 1）').toHaveLength(2)
+  })
+
+  test('占用接口先好后坏：chip 保留上一次的数，且只出声一条', async ({ page }) => {
+    let mode: 'ok' | 'fail' = 'ok'
+    await page.route(USAGE_ROUTE, async (route) => {
+      if (mode === 'fail') {
+        return route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 'internal_error', message: '服务器内部错误', detail: null }),
+        })
+      }
+      const response = await route.fetch()
+      return route.fulfill({ response, json: await response.json() })
+    })
+    await gotoApp(page, '/data')
+    const chip = page.locator(CHIP)
+    await expect(chip).toBeVisible({ timeout: 20_000 })
+    const good = await chip.innerText()
+    expect(good, '前置：首屏应真的拿到一个数').toMatch(/^磁盘占用 /)
+
+    mode = 'fail'
+    await navByMenu(page, '仪表板')
+    await navByMenu(page, '数据管理')
+    // 这一条就是 Fix 2 的正判据：改回「失败置空」的话，红在「chip 不见了」而不是别处。
+    await expect(chip, '瞬时故障不许把眼前的数拿走').toHaveText(good)
+    // 出声恰好一条：拦截器对同一消息 2s 去重（api/index.ts:26-32），页面自己不该再补一句。
+    // 计数**不加文案过滤**，理由同 data.spec.ts:970-975 —— 绕开拦截器的重复提示用文案筛不掉，
+    // 而 .filter({hasText}) + toBeVisible 在两条时会撞 strict mode，红得像是选择器坏了。
+    const errToasts = page.locator('.el-message--error')
+    await expect(errToasts, '刷新失败必须出声，且只出声一次').toHaveCount(1)
+    await expect(errToasts.first()).toContainText('服务器内部错误', { timeout: 10_000 })
+  })
+
+  test('连发三文件上传：写后刷新塌成 ≤2 次 fresh=1', async ({ page }) => {
+    const stamp = Date.now()
+    const paths = [0, 1, 2].map((i) => {
+      const p = path.join(os.tmpdir(), `e2e_usage_burst_${stamp}_${i}.csv`)
+      fs.writeFileSync(p, 'col1,col2\n1,2\n')
+      return p
+    })
+    const fresh: string[] = []
+    page.on('request', (req) => {
+      const u = req.url()
+      if (u.includes('/api/v1/files/usage/') && u.includes('fresh=1')) fresh.push(u)
+    })
+    try {
+      await gotoApp(page, '/data')
+      await expect(page.locator(CHIP)).toBeVisible({ timeout: 20_000 })
+      const first = page.waitForResponse((r) =>
+        r.url().includes('/api/v1/files/usage/') && r.url().includes('fresh=1'),
+      )
+      await page.locator('button').filter({ hasText: '上传文件' }).click()
+      await uploadMultipleFiles(page, paths)
+      await first
+      // 等合并窗口**彻底收干**再计数：常数是量过的那道闸（USAGE_TRAIL_MS=800）的 2 倍 + 余量，
+      // 不是拍脑袋。数早了会把「trailing 还没发」当成 ≤2 通过 —— 那是假绿。
+      await page.waitForTimeout(2000)
+      expect(fresh.length, 'leading 至少要有一次').toBeGreaterThan(0)
+      // 写成 ≤2 而不是 ==2：三个响应若恰好被 Vue 合到同一 tick，只有 leading 一次也合规。
+      expect(fresh.length, 'K 连发不许变成 K 次全盘扫描').toBeLessThanOrEqual(2)
+    } finally {
+      await deleteFilesByNameQuiet(page, 'e2e_usage_burst_')
+      for (const p of paths) cleanupQuiet(p)
+    }
   })
 })
 ```
@@ -1955,8 +2058,10 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
 **本批上面的浏览器用例共四条，初稿是五条、删掉一条占位的。** 先说清楚一条**计数教训**（控制器自己犯的）：
 初稿这一节标题写「三条」本来就少计了一条（实际四条真用例 + 一条占位 = 五条），
 我在删占位例时把标题顺着改成「两条」，等于**在错误的两个方向上各走了一步** ——
-两次都没数过。现号取法：`sed -n '<Task8 代码块行段>' … | grep -c "^  test("` ⇒ **4**，
-Task 9 段同样数法 ⇒ **2**，T3 共 **6** 例。
+两次都没数过。现号取法：`sed -n '<Task8 行段>' … | grep -c "^  test("`。
+**Task 7 复审修复轮之后本任务从 4 条涨到 7 条**（新增的三条是 ①激活刷新 ②先好后坏保留旧值
+④连发合并 这三处修复欠的浏览器判据 —— T2 是 node 环境、仓内不装 `@vue/test-utils`，
+组件行为没有任何自动化能替浏览器作证），Task 9 段同样数法 ⇒ **2**，**T3 共 9 例**。
 被删的那条占位用例是
 `test('新用户目录为空时 chip 说 0 B 而不是 --')`，正文写着「先别实现」、用例体里却留了一句
 `apiGet(page, '/files/usage/')` 占位 —— 2026-11-14 复核时直接删掉，理由是那条用例本身站不住：
@@ -1975,11 +2080,43 @@ cd frontend && node ../scripts/e2e_pool.mjs --slots=1 -- e2e/data/disk-usage-chi
 ```
 Expected: 日志末行 `RESULT:` 之前有 `[pool] 结论 MEASURED`、`unexpected 0`。**判绿取这两行，不取退出码**（lessons/testing-gates）。若日志里出现 `EADDRINUSE`/`21001-21004` 段，是上一轮孤儿 slot 目录占着端口——先 `node scripts/e2e_pool.mjs --gc`，别改 workers 数。
 
+⚠ **本机此刻 8000/3000 已经各有一个进程在听**（2026-11-14 控制器实测：`:3000` 是 node、`:8000` 是 python，`git worktree list` 只有主目录 ⇒ 不是别的工作树抢的）。**别 kill 它们** —— 那可能是用户自己开着的 dev 服务。先判这两台服务是不是本分支的代码，再决定复不复用，两条命令就够：
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/api/v1/files/usage/   # 401=路由在（Task 4 已加载）；404=服务的是旧代码
+curl -s "http://localhost:3000/src/pages/data/components/FileListToolbar.vue" | grep -c "disk-usage-chip"   # ≥1 = vite 正在服务 Task 7 的 markup
+```
+（控制器跑过：`401` 与命中数 `2` ⇒ 两个服务都是当前分支。）服务是旧的又不是本分支 ⇒ 那是**另一个会话**的进程，同样别动，改用空闲端口档跑，并在报告里写清楚是哪个 PID。
+
+另外一条与本任务无关但会被本任务踩到的既有耦合：`e2e/global/error-handling.spec.ts:17/32` 拦的是
+`**/api/v1/files/**`，**这个 glob 现在也盖住 `/files/usage/`**。它目前仍成立，理由不是运气而是两道具体的闸：
+`toastError` 对同一消息 2s 去重（`src/api/index.ts:26-32`），且它的断言是 `.filter({ hasText })` +
+`toBeVisible()`。⇒ 谁以后要在这份 spec 里加「同一条 route 让多个端点都坏」的用例，或者把
+`NO_TOAST_ENDPOINTS`/去重窗口改动，都得回来看这一条：`.filter()+toBeVisible()` 在命中两条时会撞
+strict mode（`data.spec.ts:970-975` 记过同一次）。
+
 - [ ] **Step 3: 若第一条红，按这个顺序排查（别先改代码）**
 
-1. `captured` 是 `null` ⇒ app 根本没发这一请求 ⇒ Task 7 的 `loadUsage()` 没进 `onMounted`。
+1. `captured` 是 `null` ⇒ app 根本没发这一请求。**⚠ 这一条在 Task 7 复审后已经翻反**：
+   `loadUsage()` 现在**刻意不在** `onMounted`，而是挂 `onActivated`（keep-alive 下「进入即拉」的
+   本仓约定，理由与判据见 Task 7「复审处置」第 1 条）。⇒ 排查顺序改成：
+   ①`grep -n onActivated FileListTab.vue` 确认那一行还在；②用例是否真的走进了 `/data`
+   （`gotoApp` 后停在别的 tab 或别的 route 就不会 activate）；③`onMounted` 里是否被谁又加回了一次
+   `loadUsage()`（加了会变两条请求，第一条用例的计数判据先红，而不是这条）。
+   老文案那句「没进 `onMounted`」留着就是叫下一个人去改一个正确的实现。
 2. `toHaveText` 只差千位分隔符 ⇒ `toLocaleString()` 的 locale 与 Node 不一致；改成在 spec 里也 `Number(x).toLocaleString('en-US')`，**两边同参**，别改组件。
 3. 第三条 `file_count + 1` 不成立 ⇒ 多半是 `fresh=1` 没带上（`params: { fresh: 1 }` 被 `paramsSerializer` 改写了）；打印 `resp.url()` 确认串里有 `fresh=1`。
+4. **第五条（激活计数）停在 1** ⇒ 十有八九是这一条自己写法错：用了 `gotoApp(page, '/data')` 当"回来"。
+   `gotoApp` 内部是 `page.goto`，那是**整页重载**，重载后 `onMounted` 也会重跑 ⇒ 「只挂 activated」这句
+   判据变成永真，测的是浏览器而不是 keep-alive。必须是 `navByMenu(page, '仪表板')` →
+   `navByMenu(page, '数据管理')`（模板见 `e2e/data/data.spec.ts:963-965`）。
+   反过来 **首屏数到 2** ⇒ 有人在 `onMounted` 里又加了一次 `loadUsage()`，那是回归，改代码不改判据。
+5. **第六条 `toHaveCount(1)` 数到 2** ⇒ 先看第二条 toast 的文案：若与第一条**不同文**，说明页面自己补了一句
+   （去重只对同一消息生效）⇒ 按约定该删页面那句；若**同文却响两次**，说明去重窗口被改动或两请求跨了 2s
+   ⇒ 那是 `api/index.ts:26-32` 的事实变化，来找我，别在 spec 里加 `first()` 把计数糊掉。
+   另外 `chip` 文案在失败后变了 ⇒ 检查序号守卫是否被摘掉（过期那趟成功响应会盖掉新值）。
+6. **第七条数到 3** ⇒ 合并器没生效：`grep -n "useCoalescedCall" FileListTab.vue` 看 watch 里调的是
+   `reloadUsage(true)` 还是裸 `loadUsage(true)`；若代码没问题，先确认 `waitForTimeout(2000)` 确实长于
+   `USAGE_TRAIL_MS`（改那道闸必须同步改这里的等待，两处不同步就会时红时绿）。
 
 - [ ] **Step 4: 提交**
 
@@ -2332,7 +2469,7 @@ HTTP 在 `views/usage_views.py`，TTL 缓存由 Task 4 加」。
 | §4.5 展示（chip 文案、hover 拆分、字号 token） | Task 6（文案纯函数）+ Task 7（chip + 浮层 + `--p-fs-*` 复用 `.section-count`）+ Task 8（渲染与 hover） |
 | §4.6 差值露出（阈值恒等式、修复对话框一行） | Task 3 的 MismatchTests 5 条 + JoinedScanTests 4 条（订正⑤：只比交集）+ Task 9 |
 | §4.7 配额只做到「当前用户」 | 全程无新字段、无逐用户列表；Task 10 Step 3 的「本批不做」清单写死 |
-| §4.8 测试（T1 齐全/空目录/隔离/缓存/交叉核对；T3 chip 渲染） | Task 2/3/4/5（T1 **48** 例 = scan 34 + cache 4 + api 10）+ Task 6（T2 **16** 例）+ Task 8/9（T3 **6** 例 = Task 8 4 + Task 9 2）—— 三个数都是 2026-11-14 现跑的：`grep -c "def test_" test/backend/test_storage_usage_{scan,cache}.py test/backend/test_files_usage_api.py`、`grep -c "  it(" frontend/test/unit/diskUsage.spec.ts`、代码块内 `grep -c "^  test("`。（初稿写的是 T1 23 / T2 15，两处都随复审与拆档过期：T1 多了装配层与缓存两族，T2 多了原型名键那一条。）|
+| §4.8 测试（T1 齐全/空目录/隔离/缓存/交叉核对；T3 chip 渲染） | Task 2/3/4/5（T1 **48** 例 = scan 34 + cache 4 + api 10）+ Task 6/6c（T2 **16** 例，chip 文案回退后 4→3、分桶 4→5，净零）+ Task 8/9（T3 **9** 例 = Task 8 **7** + Task 9 **2**）—— 三个数都是 2026-11-14 现跑的：`grep -c "def test_" test/backend/test_storage_usage_{scan,cache}.py test/backend/test_files_usage_api.py`、`grep -c "  it(" frontend/test/unit/diskUsage.spec.ts`、代码块内 `grep -c "^  test("`。（初稿写的是 T1 23 / T2 15 / T3 6，三处都随复审、拆档、文案回退与修复轮过期：T1 多了装配层与缓存两族，T2 多了原型名键一条，T3 欠了修复轮三条浏览器判据。）|
 
 **2. 占位符扫描**：无 TBD/「类似 Task N」/「加适当错误处理」。一处「故意写错再改」是显式教学步骤（Task 4 Step 1 的 `test_只读不接受POST`），写明了动作为什么。Task 8 原先还带一条「写进代码块、正文再叫作者删掉」的占位用例，2026-11-14 复核时判定它自己就是它警告的那种坑，已从正文移除并保留理由（见 Task 8 正文）。
 
@@ -2757,6 +2894,9 @@ UTC / Asia/Shanghai / America/New_York / Pacific/Midway / Europe/Warsaw），
 
 落地两个提交：`b925d2b`（3 文件 / +75 −2）与控制器补的 `0cc2b45`（一行导入合并）。
 现数：`api/datafiles.ts` **334**、`FileListTab.vue` **393**、`FileListToolbar.vue` **173**，
+（这三个数是 `b925d2b` 那一刻的快照，写晚了半拍就过期：我自己下一提交 `0cc2b45` 合并了两行导入，
+`FileListTab.vue` 当场变 **392**，复审修复轮 `1651aee` 之后是 **465**；`git show <sha>:<file> | wc -l`
+是唯一可靠的取法，别拿本行当现状 —— 这正是本页「行号会腐烂」那条纪律的第 4 个实例，前 3 个见第 6 条。）
 全部远离 600 闸（派发前量过：324 / 372 / 131，所以这一批不存在撞闸风险，那条纪律已经生效）。
 门禁现跑：`npx vue-tsc -b --force --pretty false` exit 0 且日志 **0 字节**；
 `npx vitest run` ⇒ `Test Files 69 passed` / `Tests 967 passed`（**与派发前逐位相同** ⇒
