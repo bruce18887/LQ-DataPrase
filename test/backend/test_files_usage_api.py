@@ -170,3 +170,39 @@ class FileUsageApiTests(TestCase):
         data = self._get().json()
         self.assertTrue(data['mismatch_over_threshold'])
         self.assertEqual(data['mismatch_diff_bytes'], 900)
+
+    def test_用户名拼不出安全目录时返回204而不是500(self):
+        """终审 F3（2026-11-14 用户拍板走 204）。
+
+        Django 默认的 ``UnicodeUsernameValidator`` 实测**接受** ``..`` 作用户名，而
+        ``MEDIA_ROOT/data/..`` 归一化就是 ``MEDIA_ROOT`` —— 所以这一族账号既不能给它扫到别人的树
+        （``_user_data_root`` 一直挡着，见 test_storage_usage_scan.py 的 raise 例），
+        也不该让它冒成 500：占用是**激活刷新**拉的，500 等于这个人每次进 /data 都吃一条错误 toast，
+        而「这个账号的数据根目录不合法」根本不是服务器故障。
+        反过来返回一串 0 更糟 —— 那是把「算不出来」谎报成「没占盘」。
+        """
+        bad = User.objects.create_user('..', 'dd@localhost', PASSWORD)
+        client = APIClient()
+        client.force_authenticate(user=bad)
+        # 先给正常账号铺一棵树：204 这一支不许读到它（同 MEDIA_ROOT 下的另一个目录）
+        self._write('usage_a', 'single/a.csv', 1000)
+        with self.settings(MEDIA_ROOT=self.base):
+            resp = client.get(USAGE_URL)
+        self.assertEqual(resp.status_code, 204)
+        self.assertEqual(resp.content, b'')
+        self.assertIsNone(resp.data)
+
+    def test_安全用户名照旧走完整返回体(self):
+        """204 那一支是**白名单式早退**，别把它写成「凡 ValueError 都吞」：
+        正常账号（含点号但不是 ..）必须照旧拿到 13 个字段的完整返回体。"""
+        dotted = User.objects.create_user('a.b', 'ab@localhost', PASSWORD)
+        client = APIClient()
+        client.force_authenticate(user=dotted)
+        self._write('a.b', 'single/x.csv', 700)
+        with self.settings(MEDIA_ROOT=self.base):
+            resp = client.get(USAGE_URL)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(set(data), set(FIELDS))
+        self.assertEqual(data['bytes'], 700)
+        self.assertEqual(data['file_count'], 1)

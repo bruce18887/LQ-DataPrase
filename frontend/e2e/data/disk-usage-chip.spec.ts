@@ -440,4 +440,23 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
     // 所以按 testid 数比按 `.el-alert` 数更耐后续的卡片改动。
     await expect(dialog.locator('[data-testid="disk-mismatch-alert"]')).toHaveCount(0)
   })
+
+  test('占用接口返回 204：chip 缺席，且一条错误提示都不许有', async ({ page }) => {
+    // 终审 F3 的**前端**半边：用户名为 `..` / `.` 这类拼不出安全数据根目录的账号，服务端早退成 204
+    // 而不是冒成 500。204 是成功响应 ⇒ 拦截器不出声，而 `usage` 拿到 falsy ⇒ chip 自然缺席。
+    // 与 case 2 成对：那条钉「500 要出声」，这条钉「不可算 ≠ 坏了」。
+    // ⚠ 这条**够不着后端**（2026-11-14 实测）：`page.route` 的 fulfill 把真实响应整个遮掉，
+    // 把视图那支改回 `Response(status=500)` 再跑池 ⇒ `unexpected 0`，十例全绿。所以后端契约
+    // 在 T1 钉（`test_files_usage_api.py` 的 `test_用户名拼不出安全目录时返回204而不是500`，
+    // 同一个变异过去恰好 FAIL 1 例、其余 11 例过）。
+    // 这条自己能被什么改红：前端给 falsy 的 usage 也画出一颗 `磁盘占用 --`，或给「成功但无返回体」
+    // 的响应补一条提示 —— 两者都归这里的两句 `toHaveCount(0)`。
+    await page.route(USAGE_ROUTE, (route) => route.fulfill({ status: 204 }))
+    await gotoApp(page, '/data')
+    await expect(
+      page.locator('.content-section:visible .el-table .el-table__row').first(),
+    ).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator(CHIP)).toHaveCount(0)
+    await expect(page.locator('.el-message--error')).toHaveCount(0)
+  })
 })
