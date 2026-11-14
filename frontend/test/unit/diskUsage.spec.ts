@@ -45,7 +45,8 @@ describe('usageBytesText', () => {
     expect(usageBytesText(1024 * 1024)).toBe('1.0 MB')
   })
 
-  // GB 档是本功能新增的：formatSize 最高只到 MB，改它要动 8 个调用点，不属本批。
+  // GB 档是本功能新增的：formatSize 最高只到 MB，改它要动既有调用点的显示（2026-11-14 现数：
+  // 导入 utils 版的 7 个文件、共 9 处调用），不属本批。判据见本文件 usageBytesText 那三档。
   it('≥1GiB 进 GB 档并保留两位', () => {
     expect(usageBytesText(1024 * 1024 * 1024)).toBe('1.00 GB')
     expect(usageBytesText(1024 * 1024 * 1024 - 1)).toBe('1024.0 MB')
