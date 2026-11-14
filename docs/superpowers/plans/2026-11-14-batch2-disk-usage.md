@@ -1682,6 +1682,17 @@ onMounted(() => {
     />
 ```
 
+⚠ **这一处落地时故意没做，Task 9 必须把两半一起补上。** 落地方选了「不给 dialog 加绑定」而不是
+照抄上面这行，理由经控制器复核成立：`ConsistencyCheckDialog.vue` 的模板根节点是**单个**
+`<el-dialog>`（`:1-6`）且组件**没写** `inheritAttrs: false`（`grep -n inheritAttrs` 该文件零命中），
+所以把一个它尚未声明的 `usage` prop 传进去，Vue 会把它当普通属性**透传到 el-dialog 根上**，
+在 Task 7→Task 9 这段窗口里页面上真会出现 `usage="[object Object]"`。
+三个选项里 (a) 现在加绑定 = 留一个能看到坏属性的窗口；(c) 现在给 dialog 补一个空 prop = 要动
+第四个跟踪文件、而 Step 5 的暂存清单刻意不含它，会留下未提交改动 + 跨任务隐身改动；
+(b) 跳过 = 窗口宽度为零（dialog 今天只声明 `visible`，不传就是它现在的行为），且 Task 9 本来就要改那个文件。
+⇒ **Task 9 的 Files 清单因此多一行：`frontend/src/pages/data/components/FileListTab.vue`（补 `:usage="usage"`）**。
+这不是「落地方漏做」，是决定，别在复审里当缺失报回来。
+
 - [ ] **Step 3: FileListToolbar 渲染 chip + 浮层**
 
 props 改成（`:62-65`）：
@@ -1978,6 +1989,12 @@ git commit -m "test(e2e): 磁盘占用 chip 的渲染与写后刷新判据"
 
 **Files:**
 - Modify: `frontend/src/pages/data/components/ConsistencyCheckDialog.vue:22-43`（`el-descriptions` 之后）、`:99-128`（props 与导入）
+- Modify: `frontend/src/pages/data/components/FileListTab.vue:59-63`（**补 Task 7 有意推迟的那半**：
+  `<ConsistencyCheckDialog … :usage="usage">`，理由见 Task 7 Step 2 的 ⚠ —— prop 声明与绑定必须同一批落地，
+  否则今天会有一条透传出来的 `usage="[object Object]"` 属性挂在 el-dialog 根上）
+- 行号提醒：Task 7 给 `FileListTab.vue` 加了 21 行，原先记为 `:220/225/256/283/306` 的五个
+  `notifyFilesChanged()` 调用点现在是 **`:237/242/273/300/323`**（内容没变，只有位置漂）。
+  ⇒ 本批所有引用这些位置的句子都要按现号复核，别照抄旧号（`grep -n notifyFilesChanged` 一条命令的事）。
 
 - [ ] **Step 1: 接 prop 与渲染**
 
@@ -2724,3 +2741,61 @@ UTC / Asia/Shanghai / America/New_York / Pacific/Midway / Europe/Warsaw），
 `AM/PM` 与点号时钟在 locale 字面量仍是 `'zh-CN'` 时不可达 ⇒ **现在不加**。
 这是给「假想未来的 ICU」加断言，而本批的判据纪律是给**当前可达形状**加断言；
 真要哪天翻红，那时补的成本低于现在多一条没人知道为什么存在的正则。
+
+---
+
+## Task 7 落地后的订正（2026-11-14，接线 + 一处有意的偏差）
+
+落地两个提交：`b925d2b`（3 文件 / +75 −2）与控制器补的 `0cc2b45`（一行导入合并）。
+现数：`api/datafiles.ts` **334**、`FileListTab.vue` **393**、`FileListToolbar.vue` **173**，
+全部远离 600 闸（派发前量过：324 / 372 / 131，所以这一批不存在撞闸风险，那条纪律已经生效）。
+门禁现跑：`npx vue-tsc -b --force --pretty false` exit 0 且日志 **0 字节**；
+`npx vitest run` ⇒ `Test Files 69 passed` / `Tests 967 passed`（**与派发前逐位相同** ⇒
+Task 7 不加 T2 用例这句是对的，既无回归也无新增）；`lineLimit.spec.ts` ⇒ `15 passed`。
+
+1. **`utils/diskUsage.ts` 与其 spec 一行未动（这是判据，不是巧合）。** 落地方的暂存清单里
+   刻意不含这两个文件，`git show --stat` 只有 3 个文件 ⇒ 复审定下的「前缀归属与查表形态收在
+   Task 6 内部」没有被跨任务改写。Task 7 只 import 四个函数（`usageChipText` /
+   `usageBreakdownRows` / `usageOutsideLine` / `usageScannedText`），`usageMismatchLine`
+   留给 Task 9、`usageBytesText` 由前四个内部调用，都不出现在 toolbar 里。
+
+2. **正文有一行是错的，落地方没照抄，而是停下来报了三个选项 —— 这是本批第一次「落地方推翻正文」。**
+   Step 2 让给 `ConsistencyCheckDialog` 也加 `:usage="usage"`。**不做的理由经复核成立**：
+   该组件模板根节点是单个 `<el-dialog>`（`ConsistencyCheckDialog.vue:1-6`）且全文
+   `grep -n inheritAttrs` **零命中** ⇒ 未声明的 prop 会按属性透传到根 DOM 上，
+   Task 7→Task 9 这段窗口里页面真会带一条 `usage="[object Object]"`。
+   三选一里 (a) 留一个肉眼可见的坏属性窗口、(c) 要动第四个跟踪文件（Step 5 暂存清单不含它 ⇒
+   未提交改动 + 隐身跨任务改动），(b) 窗口宽度为零。⇒ 采纳 (b)，
+   **Task 9 的 Files 清单因此多一行 `FileListTab.vue`**（已在上面 Task 9 处写明）。
+
+3. **`filesVersion` 的覆盖面比注释写的更大，注释仍成立。** 落地方复核五个
+   `notifyFilesChanged()` 调用点仍在（Task 7 加了 21 行，位置从
+   `220/225/256/283/306` 漂到 **`237/242/273/300/323`**，内容未变），
+   并且 `BatchDataTab`、`SftpBrowser` 这些**外部**写路径同样 bump ⇒ watch 一行覆盖得比声明的更多。
+   控制器按文件现数（`grep -rc "notifyFilesChanged()" src --include=*.vue --include=*.ts`）：
+   `BatchDataTab.vue` **5**、`FileListTab.vue` **5**、`SftpBrowser.vue` **4**、
+   `SftpSearchPage.vue` **1**（落地方没点这个文件，一并记上）、`stores/files.ts` **2**（定义 + 内部调用）
+   ⇒ 除 store 自身外**共 15 处**生产者，而 chip 只挂在 FileListTab 上，所以「一行覆盖全部」是真的覆盖了
+   **15 类写事件里落在本 tab 上的 5 类**，其余 10 类只要发生在别的 tab，也会经同一个 store 传到本 tab
+   的 watch（本 tab 挂载时才生效，未挂载不拉数 —— 这正是把取数放在 `FileListTab` 而非全局的含义）。
+   **唯一不 bump 的 FileListTab 内写操作是标签编辑**（`:35` `@tags-changed="loadAllTags"`，
+   走 `useTagEditing`→`setTags`，实测该处理器附近没有 `notifyFilesChanged`）—— 它改的是标签，
+   不改字节数与文件数，所以占用 chip 不需要为它失效。⇒ 注释那句「覆盖全部『做完就要看到新数』的场景」
+   在**本功能口径（bytes / count）**下是真的；如果哪天占用统计纳入跟标签有关的量，这句话就过期了。
+
+4. **`el-descriptions` + `v-for` 会不会渲染：推理过，但没在浏览器里证明。** 落地方按
+   element-plus 2.14.0 的 `descriptions/src/description.vue` 判定：它用
+   `flattedChildren(slots.default())` 递归展平，`v-for` 产生的 Fragment 会被展开，
+   再按 `node.type.name === COMPONENT_NAME` 过滤；`v-if` 为假时留下的是注释节点，被同一个过滤器丢掉
+   ⇒ 拆分行、空态行、目录外行、统计时间行都应当渲染。**置信度高，但这类判定 tsc 与 vitest 都看不见**，
+   所以 Task 8 的两条浏览器用例必须真的断到：hover 打开 `.el-popper.disk-usage-popover`、
+   popper 里每个 `by_type` 桶有一行、`by_type` 为空出「没有文件」、
+   `db_outside_root_count>0` 出「目录外记录」、统计时间那行的值是裸时间串（**不许出现「统计时间：统计时间」**）。
+   残留两条风险留给 Task 8 兜：一级目录名恰好叫「单文件」会让 `:key="row.label"` 撞键（不现实，不处理）；
+   popper 的 teleport 样式与 hover 行为完全未验。
+
+5. **派发前控制器改掉的两处正文缺陷**（都属于「正文会让落地方做错事」那一类）：
+   Step 5 的暂存清单原本带着 `utils/diskUsage.ts` 与它的 spec —— 与复审定下的边界矛盾，
+   照抄就会让跨任务改动在 diff 里隐身；Step 4 的基线还写着 `68 文件 / 951 例 ⇒ 69/966`
+   （Task 6 复审补例后真值是 69/**967**），且没写 `vue-tsc` 必须 `--force`
+   （本批实测过一次 tsbuildinfo 假绿）。
