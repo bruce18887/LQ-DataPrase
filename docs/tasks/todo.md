@@ -843,7 +843,9 @@ T3 **10**（`disk-usage-chip.spec.ts`，Task 8 落 7 + Task 9 追加 2 + F3 一�
 
 ## 状态：**已 `--ff-only` 并入本地 master，未 push**
 
-`master` = `0ecb39d`（`git rev-parse --short master` 现读），base = `77edb01`（批2 收口那一刻的 master）。
+`master` 在**并入那一刻** = `0ecb39d`（本批最后一笔），台账这一笔在它之后 ⇒ 谁再
+`git rev-parse --short master` 会数到更大的值，那是对的，别把它当本批的 tip。
+base = `77edb01`（批2 收口那一刻的 master）。
 过程分支 `feature/batch3a-dup-keep-selection` 已 `git branch -d` 删除（删除时它正指向 `0ecb39d`
 ⇒ 没有任何提交只活在分支上）。并入写法沿用批1/批2：先 `git merge-base --is-ancestor master <branch>`
 验 FF 可行，再 `git branch -f master <branch>`（不切工作树，避开「切分支会删只活在那条分支上的文件」），
