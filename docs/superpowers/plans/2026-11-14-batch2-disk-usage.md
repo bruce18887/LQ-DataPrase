@@ -2178,6 +2178,11 @@ git commit -m "test(e2e): 磁盘占用 chip 的渲染与写后刷新判据"
    ⇒ 后果是**假红不是假绿**，降为 Minor。落两条便宜的：case 7 前缀 `e2e_usage_burst_` → `e2e_burst_`
    （case 3 按前缀 `e2e_usage_` 清理，旧名是它的字符串前缀，会被一起删）+ 文件头写明并行边界。
 
+8. **M4（Minor，判为不改）** case 3/7 的夹具在 `try` **之前**写 tmp 文件 ⇒ 中途抛异常会漏在 `os.tmpdir()`。
+   控制器复核：仓内既有上传夹具同形（`upload-csv-only.spec.ts:40-48` 也是先写再进 try），且文件名带
+   `Date.now()` 不与他人撞；漏的是**临时目录**而不是 slot 媒体树，`--refresh` 清理只管 DB 与 media。
+   改了会让这一族的夹具与全仓分叉 ⇒ **不动**，只在此记账。
+
 **质量轮判定**（`general-purpose` 前台跑，brief 里禁掉一切池/浏览器/python 命令以防与在跑的 affected 档抢端口，
 40 轮内交回），提交 `e7c4e79` + `bc976f7`：
 
@@ -2339,6 +2344,46 @@ Expected: 末行 `RESULT: PASS`（档名逐条 `ok`）。跳过/失败要按 tes
 git add frontend/src/pages/data/components/ConsistencyCheckDialog.vue frontend/e2e/data/disk-usage-chip.spec.ts
 git commit -m "feat(data): 修复中心按阈值露出清单与磁盘差值"
 ```
+
+---
+
+#### Task 9 落地后的处置（2026-11-14）
+
+实现代理（`general-purpose`，56 次工具调用 / 17.8 分钟）按 Step 1-5 落 `c5d3567`：
+`ConsistencyCheckDialog.vue` 的 alert 块（放在 `v-else` 即「检查已完成」那一支，紧跟
+`</el-descriptions>`）、`FileUsage` 类型与 `usageMismatchLine` 导入、props 加 `usage`、
+`mismatchLine` computed；`FileListTab.vue:62` 补上 Task 7 有意推迟的那半条 `:usage="usage"`；
+spec 追加两条 ⇒ `grep -c "^  test("` 现取 **9**，文件 431 行。
+它自报的档位：单文件池 `用例 9 … unexpected 0` + `结论 MEASURED`、affected `RESULT: PASS · 计划 4 档全部执行`
+（`用例 124 … unexpected 0 · skipped 7` 与第二段 `用例 12 … unexpected 0`）、`vue-tsc -b` 与 `lint:e2e` 均 exit 0、
+`lineLimit` 15 passed。其中 skipped 从 Task 8 基线的 6 涨到 7 是 `e2e/exports/*` 被这一改动面拉进来的夹具守卫，
+不是本批文件（本批自己那轮报 skipped 0）—— 控制器复看该段日志确认归属。
+
+**控制器补的反证两轮（实现代理按步骤没做这一节，`tasks/b2_task9_falsify.py`）**：
+
+| 变异 | 实测 | 结论 |
+|---|---|---|
+| G1 去掉 `v-if="mismatchLine"`（差值行无条件渲染） | **`unexpected 0`，九条全绿** | 「未超阈值不显」那条**抓不到**：title 变 null 后 EP 仍渲染一条空的 warning 条，而定位器是 `.el-alert` + `filter({ hasText: '清单与磁盘不一致' })`，按文案筛 ⇒ 空条筛不到也不会红 |
+| G2 删掉 `FileListTab.vue` 上的 `:usage="usage"` | 池没跑起来：`[pool] 失败: 前端构建失败（exit=2）`，`vue-tsc` 报 **TS2345 Property 'usage' is missing** | 按仓规这算 `build-broken`、**不算 e2e 判据拦住**；但它说明那半条绑定已由类型系统钉住 ⇒ 不需要再为它花一次池跑（台账记下这条就够） |
+
+**G1 暴露的是真缺陷，修法与复验（`1fdc35d`）**：契约说的是「这一行出不出现」，不是「这行写了什么」，
+所以给 alert 加 `data-testid="disk-mismatch-alert"`（与 chip 同一套路子），未超阈值那条改按 testid 数元素；
+超阈值那条把句子本身补成显式 `toContainText('清单与磁盘不一致')`，免得文案没了没人管。
+现读确认检查完成那一支里本对话框没有别的 `.el-alert`（`v-if="!result"` 那条 info 在另一支，
+四个卡片组件里也没有 alert），但**仍按 testid 判**，理由是它不随后续卡片改动漂移。
+同一个 G1 重跑（`tasks/b2_task9d_falsify.py`，第 0 轮先当场重跑绿基线 `用例 9 … unexpected 0`）：
+**`真红 1`、`unexpected 1`**，红在 `disk-usage-chip.spec.ts:417` 的 `toHaveCount(0)`，
+`Expected: 0 / Received: 1` ⇒ 改前改后各实测一次，这条判据现在活着。
+修后再验：`npx vue-tsc -b` exit 0、`npm run lint:e2e` exit 0 且 `error TS` 0 处；
+`ConsistencyCheckDialog.vue` 198 行、spec 438 行，都在线内。
+
+**一条判级事实（与 Task 8 那节同源，只此一份）**：变异轮第一轮的红要走池的复跑判级，复跑没出 JSON 时
+被保守记成 `悬而未决`；G1 修复后那轮复跑仍红才拿到 `真红 1` ⇒ 反证证据一律取
+`C:\lqdp-e2e\slots\<run>\slot0.run.log` 的 Expected/Received，汇总行只用来数红了几条。
+
+**按文案筛是系统性盲区，不只是这一次**：本轮抓到的形状是「回归让元素出现但文案为空」，
+上一轮 Task 8 的 `toContain('')` 恒真、以及仓内那条「旧三元链缺 `''` 分支」都是它的另一面。
+⇒ 后续凡「不该出现 / 该出现」类判据，优先给结构钩子（testid 或元素数），文案只做正判据。
 
 ---
 
