@@ -116,6 +116,7 @@ import { CircleCheck } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { datafilesApi, type ConsistencyCheckResult, type ConsistencyFixAction, type FileUsage, type FixConsistencyResponse } from '../../../api/datafiles'
 import { usageMismatchLine } from '../../../utils/diskUsage'
+import { remainingGroupsNote } from '../../../utils/dupKeep'
 import { useAuthStore } from '../../../stores/auth'
 import OrphanedDbCard from './OrphanedDbCard.vue'
 import OrphanedDiskCard from './OrphanedDiskCard.vue'
@@ -166,7 +167,7 @@ function summarize(action: ConsistencyFixAction, data: FixConsistencyResponse): 
     case 'delete_orphaned_disk':
       return `已删除 ${data.deleted_count} 个孤立磁盘文件`
     case 'delete_duplicates':
-      return `已删除 ${data.deleted_count} 个重复文件`
+      return `已删除 ${data.deleted_count} 个重复文件${remainingGroupsNote(data.remaining_groups)}`
     case 'import_orphaned_disk': {
       const skipped = data.skipped_count ? `，${data.skipped_count} 个跳过` : ''
       return `已导入 ${data.imported_count} 个孤立文件${skipped}`
@@ -178,21 +179,22 @@ function summarize(action: ConsistencyFixAction, data: FixConsistencyResponse): 
   }
 }
 
-async function handleFix(action: ConsistencyFixAction) {
+async function handleFix(action: ConsistencyFixAction, keepIds?: number[]) {
   fixingAction.value = action
   try {
-    const { data } = await datafilesApi.fixConsistency(action)
+    const { data } = await datafilesApi.fixConsistency(action, keepIds)
     ElMessage.success(summarize(action, data))
     await runCheck()
     emit('done')
   } catch {
-    // 错误 toast 由 axios 拦截器统一弹出
+    // 错误 toast 由 axios 拦截器统一弹出（400 invalid_keep_id 走的就是这条通路：
+    // 后端 detail 是中文 ⇒ pickMessage 先读 message，前端不需要 ERROR_CODE_MAP 条目）
   } finally {
     fixingAction.value = null
   }
 }
 
-async function handleFixDeleteDuplicates() {
-  await handleFix('delete_duplicates')
+async function handleFixDeleteDuplicates(keepIds: number[]) {
+  await handleFix('delete_duplicates', keepIds)
 }
 </script>

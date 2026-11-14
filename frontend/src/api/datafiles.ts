@@ -217,13 +217,16 @@ export const datafilesApi = {
   checkConsistency() {
     return api.get<ConsistencyCheckResult>('/consistency-check/')
   },
-  fixConsistency(action: ConsistencyFixAction) {
+  fixConsistency(action: ConsistencyFixAction, keepIds?: number[]) {
     // import/fix may reparse many files — the axios default 30s timeout is
     // too tight for large orphan sets, so those calls get a 120s budget.
     const config = ['delete_orphaned_db', 'delete_orphaned_disk', 'delete_duplicates'].includes(action)
       ? {}
       : { timeout: 120_000 }
-    return api.post<FixConsistencyResponse>('/consistency-check/', { action }, config)
+    // keep_ids 只在 delete_duplicates 上有意义；undefined 时**不写这个键**，
+    // 让「老客户端不传」与服务端「按默认留最早」那条分支保持可区分（T1 钉着）。
+    const body = keepIds ? { action, keep_ids: keepIds } : { action }
+    return api.post<FixConsistencyResponse>('/consistency-check/', body, config)
   },
 }
 
@@ -295,6 +298,8 @@ export interface FixConsistencyResponse {
   status: string
   action: ConsistencyFixAction
   deleted_count?: number
+  /** 只作用于已展示组时，删完之后还剩几组（服务端删后实测，不是算术值） */
+  remaining_groups?: number
   imported_count?: number
   skipped_count?: number
   fixed_count?: number
