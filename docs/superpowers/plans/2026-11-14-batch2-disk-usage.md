@@ -2354,3 +2354,49 @@ os.link / os.symlink 本机都可建                      ← Task 2 的三条�
 `test_files_usage_api.py` **138**；600 行门禁 `npx vitest run test/unit/lineLimit.spec.ts`
 → `15 passed`。
 
+
+### 控制器复核后的再订正（Task 4 那一轮，五条落地）
+
+复审给的结论是 SPEC 合规、质量 APPROVED WITH NITS。两条 MED 与一条 LOW 我全盘接受，
+另外把我自己刚写错的一条判据一并改掉。反证脚本：`tasks/mutate_b2_task4_fresh.py`
+（跑整套 44 例，finally 逐字节还原并复核）。
+
+5. **`fresh` 解析从黑名单改成白名单（MED）。** 黑名单是 **fail-open** 的：实测 `no` / `off` /
+   `TRUE` / `abc` / `' '` 全被读成「绕缓存」，而绕一次的代价不是调用者多扫一棵树，是把
+   **所有人**的表清掉（`get_user_usage(fresh=True)` 走 `_usage_cache.clear()`）。
+   ⇒ 改成 `raw.strip().lower() in _FRESH_TRUE`，`_FRESH_TRUE = ('1', 'true', 'yes')`。
+   两个方向都有反证：退回黑名单 ⇒ 红；干脆不认 `fresh` ⇒ 也红。
+
+6. **我第一版判据跟自己选的设计打架（同一条改出来的）。** 新加的 `fresh` 契约用例最初把
+   `fresh='TRUE'` 断成「不许绕」—— 可解析里做了 `.lower()`，`'TRUE'` 就是 `'true'`，**该**绕。
+   写判据的人脑子里装着黑名单的旧结论，就会造出一条永远不可能绿的"判据"。
+   ⇒ 非白名单现在验 `'0' / 'no' / 'off' / '' / 'False'` 五个值，白名单只验 `'1'`，
+   并且白名单那一步放在最后：绕一次就清表，前面的「不绕」断言会跟着失真。
+
+7. **TTL 窗口的算术是错的，而且会传染（LOW，但必须改）。** 初稿在模块 docstring、常量注释、
+   `get_user_usage` 三处都写「真实陈旧窗口在 `[TTL, 2*TTL)` 浮动」「最多陈旧一分钟」。
+   事实：桶号在 **key 里**，一条结果的寿命最多到它所属桶的末尾 ⇒ **≤ 30s**，不是 30–60s。
+   值得改的原因是 Task 7 的浮层文案与 Task 10 的台账都要引用这个数 —— 写宽一倍等于
+   对着用户把陈旧说成两分钟。
+
+8. **`clear()` 不 fence 在途 `compute` 写进 docstring（LOW，不加机制）。**
+   `keyed_lru.py:53-59` 明确不清 pending，所以「写前开扫、写后发布」的那一次可能让紧随其后的
+   fresh 调用拿到写前的结果；窗口 = 一次扫描（实测 11.4ms / 112 文件），下一个桶自愈。
+   要消除得给条目加 epoch —— 给一个只读 chip 加事务机制不划算，写明「尽力而为」即可。
+
+9. **四条卫生。** (a) `FileUsageApiTests` 补 `tearDown` 清表：缓存键只有 `(username, bucket)`、
+   **不含 MEDIA_ROOT**，不清的话后面复用同名用户的用例会在同一桶里读到别人的临时树。
+   (b) 字段齐全从逐个 `assertIn` 改成 `set(data) == set(FIELDS)` —— 前者只能发现「少了」，
+   发现不了「多了」，而多摆一个数正是规格 §4.6 否掉的二阶指标。
+   (c) 排序那条再加一句 `resolve(USAGE_URL).url_name == 'file-usage'`：光看 200 只证明
+   「有视图接住了」，不证明是**这条**路由接住的。
+   (d) `data_dir` 留在返回体里但写明理由：UI 不消费它（Task 6/7 谁都不读），
+   留着是因为 Task 3 拿它当「两侧同一个根」的见证；它也不算泄露 ——
+   `batch_views.py:126` 早就返回 `<MEDIA_ROOT>/data/<user>/batch`、
+   `browse_views.py:292` 返回绝对文件路径，两条都按 owner 隔离。
+
+10. 顺手去掉 `storage_usage.py` 与 `usage_views.py` 第一行的自标签路径注释
+    （同目录的 `browse_views.py` / `file_views.py` / `utils.py` 都不写这一行）。
+
+现数：`Ran 44 tests / OK`（端点 10 + 口径 34，`tasks/b2-task4-green4.log`）；
+`storage_usage.py` **299**、`views/usage_views.py` **27**、`test_files_usage_api.py` **172**。

@@ -1,4 +1,3 @@
-# apps/datafiles/storage_usage.py
 """当前用户的磁盘占用统计（批2 · 第 5 项）。
 
 口径（唯一事实来源：specs/2026-11-13-ux-batch-dropdown-admin-dedup-intro-usage-design.md §4.2；
@@ -18,8 +17,9 @@
 本模块只有口径，不碰 HTTP（视图在 ``views/usage_views.py``）。磁盘侧走树是上面的
 ``_iter_files`` / ``_scan_tree``；DB 侧的两本账与交集差值恒等式是下面的 ``_db_map`` /
 ``_mismatch`` / ``_compute_usage``；对外入口是 ``get_user_usage``（进程内分桶 TTL 缓存）。
-分桶实现没有 per-key 过期 ⇒ 真实陈旧窗口在 ``[TTL, 2*TTL)`` 之间浮动，所以返回体必须带
-``scanned_at`` 让陈旧对用户可见。
+分桶实现没有 per-key 过期，靠「换桶即换 key」过期 ⇒ 一条结果的寿命最多到它所属桶的末尾，
+即 **≤ TTL（30s）**，不是 ``[TTL, 2*TTL)``（2026-11-14 复审纠正：初稿把窗口写宽了一倍，
+而 Task 7 的界面文案会照抄这个数）。返回体仍带 ``scanned_at``，让陈旧对用户可见。
 """
 import os
 import time
@@ -31,8 +31,8 @@ from apps.common.keyed_lru import KeyedLRU   # 本任务的 get_user_usage 用
 from apps.datafiles.models import DataFile   # 本任务的 _db_map 用
 from apps.datafiles.utils import resolve_file_path  # 本任务的 _db_map 用
 
-# 规格 §4.4：进程内 TTL 缓存。分桶实现没有 per-key 过期，真实过期窗口在
-# [TTL, 2*TTL) 之间浮动 —— 所以浮层必须显示 scanned_at，让陈旧对用户可见。
+# 规格 §4.4：进程内 TTL 缓存。没有 per-key 过期，靠换桶换 key ⇒ 一条结果寿命 ≤ TTL；
+# 所以浮层必须显示 scanned_at，让陈旧对用户可见。
 USAGE_CACHE_TTL_SECONDS = 30
 _USAGE_CACHE_MAX_ENTRIES = 64
 
@@ -276,9 +276,15 @@ def get_user_usage(user, fresh=False):
     ``functools.lru_cache`` 也不用精确过期：仓内已有 ``KeyedLRU``（唯一一份，按条数
     封顶 + 每 key 单飞），而它只有 ``get_or_compute``/``clear`` 两个动作、没有 per-key
     过期与 per-key 删除 ⇒ 用分桶把「过期」变成「换 key」。代价是真实窗口在
-    [30s, 60s) 浮动，所以返回体带 ``scanned_at`` 让陈旧可见。
+    ≤ 30s，所以返回体带 ``scanned_at`` 让陈旧可见。
     ``fresh=True`` 清整表：会顺带让别的用户重扫一次，但触发它的只是某个用户自己的
-    一次写操作，代价是一次扫描，换来的是「漏挂失效钩子最多陈旧一分钟」而不是永久。
+    一次写操作，代价是一次扫描（实测 11.4ms / 112 文件），换来的是「漏挂失效钩子最多
+    陈旧 30s」而不是永久。
+
+    **尽力而为，不是事务级的**：``KeyedLRU.clear()`` 明确不 fence 在途的 ``compute``
+    （``keyed_lru.py:53-59``），所以「写之前就开始扫、写完之后才发布」的那一次可能让
+    紧随其后的 fresh 调用拿到写前的结果。窗口等于一次扫描（十毫秒级），下一个桶自愈。
+    要真消除得给条目加 epoch —— 那是给一个只读 chip 加机制，不做。
     """
     if fresh:
         _usage_cache.clear()
