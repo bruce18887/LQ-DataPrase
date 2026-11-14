@@ -6,33 +6,66 @@
     tag-text="文件名与大小完全相同"
     tag-type="danger"
     :alert="{
-      title: '以下文件按「文件名 + 大小」判定重复。删除重复项时保留最早导入的一条（其余文件将从数据库与磁盘移除）。',
+      title: '以下文件按「文件名 + 大小」判定重复。每组保留一项、删除其余；未改选的组默认保留最早导入的那条。',
       type: 'warning',
     }"
     :truncated-note="truncatedNote"
   >
-    <div v-for="group in groups" :key="group.filename + '-' + group.file_size" class="dup-group">
+    <div class="dup-strategy">
+      <span class="dup-strategy-label">未改选的组默认保留</span>
+      <el-radio-group v-model="strategy" size="small" :disabled="!canDelete">
+        <el-radio value="earliest">最早导入</el-radio>
+        <el-radio value="latest">最新导入</el-radio>
+      </el-radio-group>
+      <el-button
+        size="small"
+        :disabled="!canDelete || untouched.length < 1"
+        data-testid="dup-apply-strategy"
+        @click="applyStrategy"
+      >
+        应用到未改选的 {{ untouched.length }} 组
+      </el-button>
+    </div>
+
+    <div
+      v-for="group in groups"
+      :key="groupKey(group)"
+      class="dup-group"
+      data-testid="dup-group"
+    >
       <div class="dup-group-header">
         <span class="dup-group-key mono">{{ group.filename }}</span>
         <span class="dup-group-size mono">{{ formatSize(group.file_size) }}</span>
         <span class="dup-group-count">{{ group.files.length }} 个</span>
       </div>
-      <el-tag
-        v-for="(f, i) in group.files"
-        :key="f.id"
-        :type="i === 0 ? 'success' : 'danger'"
-        :effect="i === 0 ? 'dark' : 'plain'"
-        size="small"
-        class="dup-file-tag"
-        :title="dupFileTitle(f)"
+      <el-radio-group
+        class="dup-keep-rows"
+        :model-value="keepFor(group)"
+        :disabled="!canDelete"
+        @update:model-value="(id: number) => pick(group, id)"
       >
-        {{ i === 0 ? '✓ 保留' : '删除' }} {{ f.file_type === 'batch' ? `[${f.batch_name}]` : '[单文件]' }} · #{{ f.id }}
-      </el-tag>
+        <div
+          v-for="f in group.files"
+          :key="f.id"
+          class="dup-file-row"
+          data-testid="dup-keep-row"
+          :data-keep="f.id === keepFor(group) ? 'keep' : 'delete'"
+        >
+          <el-radio :value="f.id">
+            <span class="dup-file-state">{{ f.id === keepFor(group) ? '保留' : '将删除' }}</span>
+            <span class="dup-file-loc mono">{{ f.file_type === 'batch' ? `[${f.batch_name}]` : '[单文件]' }}</span>
+            <span class="dup-file-id mono">#{{ f.id }}</span>
+            <span class="dup-file-time">{{ dupImportText(f.created_at) }}</span>
+            <span class="dup-file-size mono">{{ formatSize(f.file_size) }}</span>
+          </el-radio>
+        </div>
+      </el-radio-group>
     </div>
+
     <template #footer-left>
       <el-checkbox v-model="deleteConfirmed" :disabled="!canDelete">
         <span :style="{ color: canDelete ? 'var(--error)' : 'var(--text-3)', fontWeight: 600 }">
-          {{ canDelete ? '我已确认要删除全部重复项' : '仅管理员可删除重复文件' }}
+          {{ canDelete ? '我已确认按以上选择删除' : '仅管理员可删除重复文件' }}
         </span>
       </el-checkbox>
     </template>
@@ -42,9 +75,9 @@
         plain
         :disabled="!deleteConfirmed || !canDelete"
         :loading="fixing"
-        @click="emit('fix')"
+        @click="submit"
       >
-        <el-icon><Delete /></el-icon> 删除重复文件
+        <el-icon><Delete /></el-icon> {{ summaryText }}
       </el-button>
     </template>
   </MaintenanceCard>
@@ -53,13 +86,31 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { Delete } from '@element-plus/icons-vue'
-import type { DuplicateGroup, DuplicateGroupFile } from '../../../api/datafiles'
+import type { DuplicateGroup } from '../../../api/datafiles'
 import { formatSize } from '../../../utils/format'
+import {
+  applyStrategyToUntouched,
+  deleteSummaryText,
+  groupKey,
+  keepIdForGroup,
+  resolveKeepIds,
+  truncatedNoteText,
+  dupImportText,
+  type KeepStrategy,
+} from '../../../utils/dupKeep'
 import MaintenanceCard from './MaintenanceCard.vue'
 
+/**
+ * 重复文件卡（批3a）。这里原来的两支「✓ 保留 / 删除」是**只读 `el-tag`**，
+ * 没有 `@click`：文案把后端既定策略渲染成用户的承诺，而用户什么都选不了。
+ *
+ * 选择状态只有一份 `choice`（Map）。曾经考虑过再加一个 `touched` 集合，那是两份事实：
+ * `choice.has(key)` 就是「用户改选过」，删掉集合后「一键策略只碰未改选组」这条
+ * 由 `applyStrategyToUntouched` 自己判，不需要调用方再维护一个影子。
+ */
 const props = defineProps<{
   groups: DuplicateGroup[]
-  /** 总组数（groups 可能只显示前 N 组） */
+  /** 总组数（groups 只是展示切片） */
   totalCount: number
   fixing: boolean
   /** 当前用户是否有删除权限（管理员） */
@@ -67,45 +118,74 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  fix: []
+  fix: [keepIds: number[]]
 }>()
 
 const deleteConfirmed = ref(false)
-// 检查结果刷新后重置确认状态
+const choice = ref(new Map<string, number>())
+const strategy = ref<KeepStrategy>('earliest')
+
+// 检查结果刷新后：确认态与选择态一起清零。留着旧选择等于拿上一批 id 去删这一批 ——
+// 服务端会按白名单拒（400），但那只是兜底，界面不该先骗一次。
 watch(() => [props.groups, props.totalCount], () => {
   deleteConfirmed.value = false
+  choice.value = new Map()
 })
 
-const truncatedNote = computed(() =>
-  props.totalCount > props.groups.length
-    ? `共 ${props.totalCount} 组重复，仅显示前 ${props.groups.length} 组，删除操作将作用于全部。`
-    : '',
-)
+const untouched = computed(() =>
+  props.groups.filter((g) => !choice.value.has(groupKey(g))))
 
-function dupFileTitle(f: DuplicateGroupFile) {
-  const loc = f.file_type === 'batch' ? `批次：${f.batch_name || '—'} / 子批次：${f.sub_batch || '—'}` : '单文件'
-  return `ID ${f.id}｜${loc}｜大小 ${f.file_size} B`
+const truncatedNote = computed(() => truncatedNoteText(props.totalCount, props.groups.length))
+const summaryText = computed(() => deleteSummaryText(props.groups))
+
+function keepFor(group: DuplicateGroup): number {
+  return keepIdForGroup(group, choice.value)
+}
+
+function pick(group: DuplicateGroup, id: number) {
+  choice.value.set(groupKey(group), id)
+}
+
+function applyStrategy() {
+  choice.value = applyStrategyToUntouched(props.groups, choice.value, strategy.value)
+}
+
+function submit() {
+  emit('fix', resolveKeepIds(props.groups, choice.value))
 }
 </script>
 
 <style scoped>
+.dup-strategy {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.dup-strategy-label {
+  font-size: var(--p-fs-dense);
+  color: var(--text-2);
+}
+
 .dup-group {
   padding: 10px 12px;
   margin-bottom: 8px;
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 8px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
 }
 
 .dup-group-header {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
+  margin-bottom: 6px;
 }
 
 .dup-group-key {
@@ -131,8 +211,39 @@ function dupFileTitle(f: DuplicateGroupFile) {
   border-radius: 8px;
 }
 
-.dup-file-tag {
-  margin: 0;
+.dup-keep-rows {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.dup-file-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dup-file-state {
+  min-width: 3.5em;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.dup-file-row[data-keep='keep'] .dup-file-state {
+  color: var(--success);
+}
+
+.dup-file-row[data-keep='delete'] .dup-file-state {
+  color: var(--error);
+}
+
+.dup-file-loc,
+.dup-file-id,
+.dup-file-time,
+.dup-file-size {
+  font-size: var(--p-fs-micro);
+  color: var(--text-2);
 }
 
 .mono {
