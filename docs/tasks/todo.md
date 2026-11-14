@@ -560,9 +560,38 @@ admin/settings 那一族（`AuditLogPage.vue` 事件枚举、`UserManagement.vue
 
 # 任务：批1 收口门禁与台账（2026-11-14，计划 Task 12）
 
-分支 `feature/batch1-dropdown-v2-intro-icon`，**全程未 push**（`origin` 是公开仓库）。
-收口这一轮另加四笔：`fa2200d`（池档抓到的 storageState 真红 + 绊线）、`a36f9cb`（终审三笔判据）、
-`6255122`（消费者账与两笔谓词债订正）、`1abe68b`（intro 声明的源侧 T2）。
+## 并入 master（2026-11-14 收口完成）
+
+批1 的提交（笔数见下面「提交清单与规模」）以 **`--ff-only` 并入本地 `master`**，随后删掉过程分支
+`feature/batch1-dropdown-v2-intro-icon`。**全程未 push**：`origin` 是公开仓库，一次 push 即全球发布。
+并入后 `master` 领先 `origin/master` **55 笔**（前 14 批 6 笔 + 批1 全部）。
+
+**门禁为什么可以沿用而不重跑整池（说清依据，别说成"差不多"）**：
+- FF 后 `git rev-parse master^{tree}` 与被复审过的分支 tip **逐字相同**
+  （`87736ec72a241002a0cd8323eceacdd60ec2cee7`）⇒ 并入本身没带进任何东西。
+- 但**全量池 / 后端 / build 跑的是收口第 2 轮那一刻的树**，其后还落了几笔（逐笔标题现读：
+  `git log --oneline <池档那一刻>..master`，这里**不抄笔数**——本批已经因为把一次性快照写成长期事实
+  踩过三次：`:visible` 的 48/38、行数 592/597/599、changed 44/46/47）。改动面同样现读
+  `git diff --name-only <池档那一刻>..master`，核对下来只有四类：
+  `frontend/test/unit/`（两份绊线 spec）、`frontend/e2e/**` 的**注释**（`exports.spec.ts` 三处锚、
+  `helpers/elplus.ts` 两段）、`docs/`、`scripts/`——既不改产品行为也不改任何 e2e 断言。
+- 因此按**改动面**选档重验，不重跑 10 分钟量级的池：`npx vitest run` = 68 files / **951** tests、
+  `npm run lint:e2e`（`tsc -p tsconfig.e2e.json`）干净，两档都在 FF 后的 `master` 上现跑。
+- 想升级到池档：`node scripts/e2e_pool.mjs --slots=4`（约 10min），判据取末行 `结论 MEASURED`
+  与 `unexpected`，**别取退出码**。
+
+## 提交清单与规模（现读，别抄别处的快照）
+
+`git rev-list --count d807eea..master` = **49 笔**；`git diff --shortstat d807eea..master` =
+**47 文件 / +3745 / −429**。逐笔标题走 `git log --oneline d807eea..master`。
+
+分支 `feature/batch1-dropdown-v2-intro-icon` 上完成，**全程未 push**（`origin` 是公开仓库），
+收口后 `--ff-only` 并入本地 `master` 并删掉该分支（见上面「并入 master」）。
+收口这一轮另加九笔：`fa2200d`（池档抓到的 storageState 真红 + 绊线）、`a36f9cb`（终审三笔判据）、
+`6255122`（消费者账与两笔谓词债订正）、`1abe68b`（intro 声明的源侧 T2）、`10e12f0` + `69a2119`
+（本节台账与一条口径订正），以及**对修复再做复审**那一轮四笔：`2fd6882`（两条绊线重做成真抓得住）、
+`69e2901`（collapse-tags 是四颗 + 注释锚改按用例标题）、`ef68ff0`（台账六处重跑订正、普查器入库）、
+`4530c86`（changed 数改成"对齐命令不对齐快照"）。
 
 ## 门禁实跑（全部这一轮现跑，别引用上一轮）
 
