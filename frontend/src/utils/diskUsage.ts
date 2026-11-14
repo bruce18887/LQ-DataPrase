@@ -26,6 +26,16 @@ const TYPE_LABELS: Record<string, string> = {
   '': '根目录散文件',
 }
 
+/**
+ * 边界（三个数都是本轮现量，非推测）：
+ * - 只会喂非负整数。实测 `usageBytesText(-1073741824)` = `'-1073741824 B'`（负数进不了
+ *   KB/MB/GB 任何一档，因为每档比较只卡上界）、`usageBytesText(1023.6)` = `'1023.6 B'`。
+ *   今天的载荷造不出这两态（`bytes` 来自 `st_size`、`diff` 来自 `abs()`），故不钉负数断言；
+ *   但下一个消费者是 Task 9 的修复对话框，带符号差值正是有人会往里传的东西 —— 到时先加判据再喂。
+ * - GB 是**故意的天花板**。实测 `usageBytesText(1024 ** 4)` = `'1024.00 GB'`，即 6 TiB 目录
+ *   读成 `6144.00 GB`。别加 TB 档：sftp 的三个本地 `formatSize`（SftpBrowser.vue:510 /
+ *   SftpStatsBar.vue:52 / SftpFileTable.vue:207）同样封到 GB 为止，四处保持一个顶。
+ */
 export function usageBytesText(bytes: number | null | undefined): string {
   if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return '--'
   if (bytes < KiB) return `${bytes} B`
@@ -47,10 +57,18 @@ export interface UsageRow {
 
 export function usageBreakdownRows(usage: FileUsage | null): UsageRow[] {
   if (!usage) return []
-  return Object.entries(usage.by_type ?? {})
+  // by_type 不加 `?? {}`：后端四个环节都保证键必在（_scan_tree 先置 {} 并无条件返回、
+  // _compute_usage 逐字复制、视图无 serializer 过滤、缓存进程内不重新序列化），
+  // FileUsage 里它又是必填字段。仓规：不为不可能的状态写兜底（详见 storage_usage.py）。
+  return Object.entries(usage.by_type)
     .sort((a, b) => b[1].bytes - a[1].bytes)
     .map(([key, bucket]) => ({
-      label: TYPE_LABELS[key] ?? key,
+      // own-property 查表，不要退回 `TYPE_LABELS[key] ?? key`：`??` 只挡 null/undefined，
+      // 而一级目录名可以是 constructor/toString/hasOwnProperty/__proto__（_scan_tree 按路径
+      // 第一段建桶），这几个键会从原型取到 Function/Object.prototype 并原样递成 label，
+      // UsageRow.label 标 string 骗过 TS、静默显示「function toString(){…}」。
+      // 同一条纪律的先例与理由见 utils/audit.ts:24-29 —— 本仓第二次踩，勿再抄第三遍。
+      label: Object.hasOwn(TYPE_LABELS, key) ? TYPE_LABELS[key] : key,
       sizeText: usageBytesText(bucket.bytes),
       countText: `${bucket.count.toLocaleString()} 个文件`,
     }))
@@ -75,6 +93,12 @@ export function usageMismatchLine(usage: FileUsage | null): string | null {
  * （Task 7 的 `el-descriptions-item label="统计时间"`）给，值再自带前缀就读成
  * 「统计时间：统计时间 2026-11-14 …」。
  * 不对称的是 `usageMismatchLine` —— 它没有 label 可挂，所以自带整句。
+ *
+ * 这里也**故意不复用 `utils/format.ts` 的 `formatTime`**（两个理由都现量过）：
+ * 1. `formatTime` 是 MM-DD HH:mm 短形态，实测 `formatTime('2026-11-14T23:07:08+00:00')`
+ *    = `'11/15 07:07'` —— 没有年份，作为「统计时间」绝对值会跨年读错。
+ * 2. `formatTime` 内部 `TIME_FMT.format(new Date(val))`，实测 `formatTime('not-a-date')`
+ *    抛 `RangeError: Invalid time value`；下面那道 `Number.isNaN` 守卫就是为了不把它冒到界面。
  */
 export function usageScannedText(usage: FileUsage | null): string | null {
   if (!usage || !usage.scanned_at) return null

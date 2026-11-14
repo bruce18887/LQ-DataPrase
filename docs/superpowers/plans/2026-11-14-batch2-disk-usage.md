@@ -2562,3 +2562,89 @@ os.link / os.symlink 本机都可建                      ← Task 2 的三条�
    留着就是叫下一个人把断言改回错的一边；自审 §3 引的 `_db_totals` 与 `in_count`
    **两个名字都不存在**（真名 `_db_map` / `in_rows`，`grep -rn "_db_totals\|in_count" apps/` 零命中），
    实质结论「六个内部键没泄漏到前端」由复审独立复核成立。
+
+### 控制器复核后的再订正（Task 6 那一轮）
+
+代码质量复审给出 2 个 Important + 4 个 Minor。逐条核实后：两个 Important 都成立、各自补了能杀自己的判据；
+`?? {}` 四条链本机复核全成立后删掉；两条 Minor 是判据/结构与注释；Issue 6 的两项**明确不做**（附实测理由）。
+全部由 `tasks/mutate_b2_task6_fix.py` 现量（node 直连、两路 text/json 对账、`finally` 只做写回+flush+fsync+sha），
+跑完再由**外部** `git hash-object` + `diff` 独立复核源文件逐字节还原，不信脚本自己的话。
+
+1. **Important #1 —— 原型键查表：本仓第二次踩同一个坑，教训就在此。** `diskUsage.ts:53` 原写
+   `TYPE_LABELS[key] ?? key`。`??` 只挡 null/undefined，而一级目录名可以是
+   `constructor`/`toString`/`hasOwnProperty`/`__proto__`（`_scan_tree` 按路径第一段建桶，
+   `storage_usage.py:111-112`、`:138-163`；应用自建只有 `single/`、`batch/`，但 UI 已在显示未登记目录，
+   所以任意第一段是**受支持状态**不是假想），那几键会从原型取到 Function/`Object.prototype` 原样递成
+   `label`——`UsageRow.label` 标 `string` 骗过 TS、不抛错，浮层把「function toString(){…}」当桶名显示。
+   控制器独立复现：`JSON.stringify(label)` 得 `undefined`（值就是函数）。
+   ⇒ **改判据前先例已在**：`utils/audit.ts:24-29` 与 `test/unit/audit.spec.ts:160-170` 早修过**同一形状**，
+   注释原点名这个失败模式。先例存在、本轮落地方没查到——这才是教训：抽「键来自外部路径段」的查表 utils 时，
+   先 grep 同类查表有没有 own-property 先例。落地用同款 `Object.hasOwn(TYPE_LABELS, key) ? TYPE_LABELS[key] : key`，
+   注释一行指向先例（不复述理由，理由住在 audit.ts）。测试用 `Object.fromEntries`（走 CreateDataProperty，
+   能把 `__proto__` 造成真·自有键；对象字面量与 `obj[k]=` 都会误触 `__proto__` setter），对四个键断
+   `typeof label === 'string'` 且 label 集合 == 键集合。**TDD 先红**：`expected 'function' to be 'string'`。
+   保留原有 `staging`（未知普通键）那条——它与之是不同失败类（本来就能原样显示，vs 本会被静默换成非字符串）。
+
+2. **Important #2 —— 陈旧披露的时钟分量此前完全没钉。** `scanned_at` 进载荷的唯一理由就是把 ≤30s 分桶 TTL
+   缓存（`storage_usage.py:21-22`、`:35`）暴露给用户；旧判据只钉日期形状 `^\d{4}[-/]\d{1,2}[-/]\d{1,2}` ⇒
+   时钟对测试不可见。沿用仓内异源法（`format.spec.ts:42` 不钉精确串防 ICU 漂、`:50-59` 用 hour-cycle 边界）加
+   `toMatch(/\d{1,2}:\d{2}:\d{2}/)`（钉到时:分:秒）+ `not.toMatch(/[上下]午/)`（钉 24 小时制）。
+   夹具取偏晚时刻 `2026-11-14T23:07:08+00:00`，**只改本例、不动 `base()` 共享默认**——其余读 `scanned_at` 的用例
+   要么自带值、要么走 null 分支，改共享默认无收益、且要重新证明它不弱化别例（报告里也说明这一选择）。
+
+   ⚠ **对「删 `hour12:false`」这一变异的实测反驳（本机）**：本机 Node 24.15.0 / zh-CN ICU / TZ=+480 现量
+   `toLocaleString('zh-CN')` 与 `toLocaleString('zh-CN', { hour12: false })` **逐字节相同**（`2026-11-15 07:07:08`），
+   zh-CN 默认在本机已是 24 小时制 ⇒ 「删掉 `hour12:false`」在本机是**等价变异、任何行为断言都杀不掉**（N2 存活）。
+   复审「删了会变 12 小时 + 上午/下午」是**他那台 ICU 的本机事实**，不是通用结论（撞 CLAUDE.md「本机实测值」那条）。
+   守卫本身仍对：把 `{ hour12: false }` 翻成 `true`（N2b）本机出 `下午10:07:08`，被 `not.toMatch(/[上下]午/)` 杀掉，
+   证明这条断言有牙；而「真正要紧」的那条（`toLocaleString`→`toLocaleDateString` 丢时分秒，N3）本机必红（被秒针正则杀）。
+
+3. **Minor —— 删 `?? {}`（Issue 3）。** 四条链本机逐个复核成立：① `_scan_tree` 先置 `by_type = {}` 并无条件返回
+   （`storage_usage.py:138`、`:163`）；② `_compute_usage` 逐字复制 `'by_type': scan['by_type']`（`:258`）；
+   ③ 视图 `Response(get_user_usage(...))` 无 serializer 过滤（`usage_views.py:27`）；④ `KeyedLRU.get_or_compute`
+   进程内缓存 `compute` 原对象、不重新序列化（`keyed_lru.py:79-81` `value = compute()` → `self._data[key] = value`）。
+   ⇒ 四条全成立，`?? {}` 是死代码（且 `FileUsage.by_type` 必填，`datafiles.ts:315`，TS 侧也多余），删。
+   删除本身行为不变 ⇒ 无测可钉它；改用 sanity 变异 `Object.entries(by_type)`→`Object.entries({})`（N4）
+   证明 rows 判据确有牙（杀 3 条：已知键映射 + 原型名键 + 根目录散文件）。
+
+4. **Minor —— 拆 describe（Issue 4）。** 原 `diskUsage.spec.ts:114` 把三个不相干函数塞一个 describe，
+   与 `format.spec.ts`「一导出函数一 describe」相反。拆成 `usageOutsideLine` / `usageMismatchLine` / `usageScannedText`
+   三段。测试名与 `base(over: Partial<FileUsage>)` 都是 house practice，保留不动。
+
+5. **Minor —— 三处未写边界（Issue 5，纯注释）。** 每个数都本轮现量：
+   - `usageBytesText` 只喂非负整数：`(-1073741824)`=`'-1073741824 B'`（负数进不了 KB/MB/GB，各档只卡上界）、
+     `(1023.6)`=`'1023.6 B'`；今天载荷（bytes 来自 `st_size`、diff 来自 `abs()`）造不出这两态，故不钉负数断言，
+     但下一个消费者 Task 9 修复对话框正是会往里传带符号差值的地方。
+   - GB 是故意天花板：`(1024 ** 4)`=`'1024.00 GB'`，6 TiB 目录读成 `6144.00 GB`；sftp 三个本地 `formatSize`
+     （`SftpBrowser.vue:510`/`SftpStatsBar.vue:52`/`SftpFileTable.vue:207`）同样封到 GB，别加 TB 档。
+   - 不复用 `formatTime`：`formatTime('2026-11-14T23:07:08+00:00')`=`'11/15 07:07'`（无年份，跨年读错）、
+     `formatTime('not-a-date')` 抛 `RangeError: Invalid time value`（正是 `diskUsage.ts` 里 `Number.isNaN` 守卫要挡的）。
+
+6. **明确不做（Issue 6），附判据。**
+   - **不给等 `bytes` 桶加排序 tiebreaker**：浮层只 2–3 行（Task 1 P3 实测 tops 仅 `{'single':98,'batch':14}`），
+     同体积桶内容逐字相同，且本仓**没有像素快照判据**可钉顺序——`grep -rn "toHaveScreenshot" frontend/test` 零命中
+     （`dashboard-loading.spec.ts:105`、`type-snapshot.spec.ts:12` 两处正文明确写本仓不用 `toHaveScreenshot`）。加了只增复杂度。
+   - **不给计数的 `toLocaleString()` 强塞 locale**：`frontend/src` 有 **28** 处无参 `toLocaleString()` 走宿主 locale，
+     一致性压倒精确串，与 Issue 2「分隔符随 ICU 漂所以不钉精确串」同一条取舍。
+
+   变异表（`tasks/mutate_b2_task6_fix.py` 现量，两路对账一致）：
+
+   | 变异 | 期望杀它 | 实测 |
+   |---|---|---|
+   | N1 `hasOwn` → `TYPE_LABELS[key] ?? key` | 原型名键 | 杀掉（红 1，`typeof label` 得 `function`）|
+   | N2 删 `hour12: false` | —（复审变异1）| **存活：本机等价变异，见第 2 条** |
+   | N2b `hour12:false → true` | 值只有时间本身 | 杀掉（`下午10:07:08`，证 `not.toMatch(/[上下]午/)` 有牙）|
+   | N3 `toLocaleString → toLocaleDateString` | 值只有时间本身 | 杀掉（丢时分秒，秒针正则红）|
+   | N4 `entries(by_type) → entries({})` | 已知键映射 / 原型名键 / 根目录散文件 | 杀掉 3 条（rows 判据有牙）|
+   | M1–M9（复审原 9 档；M6/M9 锚点随 Issue1/2 迁到新行）| 逐条同 `mutate_b2_task6.py` | **9/9 全部仍被杀，无一脱钉** |
+
+7. **现数（本轮之后）：** `diskUsage.spec.ts` **16 passed**（+1 原型键例；拆 describe 不增不减）、全量
+   `69 files / 967 passed`（较复审基线 966 +1）、`lineLimit` `15 passed`、`vue-tsc -b --force` exit 0；
+   `diskUsage.ts` **84 → 108**、`diskUsage.spec.ts` **146 → 177** 行（均在 600 闸内）。还原独立复核：
+   `git hash-object frontend/src/utils/diskUsage.ts` == pristine（`e322de9c…`）、`diff` 逐字节 IDENTICAL、
+   `git status --short` 只剩两处意图内改动。
+
+8. **T3 本轮不跑，是有意的。** `node scripts/e2e_affected.mjs --dry-run` 按**路径**把 `diskUsage.ts` 判到
+   「全局清单 ⇒ 全量 e2e（兜底命中）」，但它此刻除测试外零 importer（Task 7 才接线，
+   `grep -rn diskUsage frontend/src` 只命中自身路径注释行），浏览器面无物可变 ⇒ **本轮不欠 T3**，
+   全量池 + 后端全量仍留 Task 10 收口档（与本节既有第 6 条的分工一致）。
