@@ -93,10 +93,22 @@ class ResolveKeepSelectionTests(TestCase):
         with self.assertRaises(InvalidKeepSelection):
             self._resolve([10, 11])
 
-    def test_非整数与布尔被拒(self):
-        for bad in (['10'], [10.0], [True], [None]):
+    def test_非整数被拒(self):
+        for bad in (['10'], [10.0], [None]):
             with self.assertRaises(InvalidKeepSelection, msg=repr(bad)):
                 self._resolve(bad)
+
+    def test_布尔被拒且拒在类型闸门(self):
+        """`True` 必须撞「必须是整数数组」那道闸门，而不是撞白名单那道。
+
+        为什么单独一条、还钉消息（2026-11-14 变异 M3 实测逼出来的）：fixture 的 id 空间
+        不含 1，而 `hash(True) == hash(1)` —— 只断异常类型时，删掉 bool 闸门后
+        `allowed.get(True)` 返回 None，改由**白名单**那条抛出，同一个异常类型把两条防线
+        的存在性混成一条，变异当场跑成全绿。探针实证删闸门后含 pk=1 的组 + `[True]`
+        会被**静默接受**并按「留 id 1」执行 —— 那就是本项要修的「替用户决定」。
+        """
+        with self.assertRaisesRegex(InvalidKeepSelection, '整数数组'):
+            self._resolve([True])
 
     def test_切片外的组不参与校验(self):
         """limit 之内没被选中的组，keep_by_key 里不该出现它的键。"""
