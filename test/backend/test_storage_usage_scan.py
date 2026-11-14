@@ -17,9 +17,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 
+from apps.accounts.models import User
 from apps.datafiles import storage_usage
+from apps.datafiles.models import DataFile
 
 
 def _write(path, size):
@@ -28,6 +30,26 @@ def _write(path, size):
     with open(path, 'wb') as fh:
         fh.write(b'a' * size)
     return path
+
+
+class _FakeRows:
+    """注入用的最小「查询集」：链上任何 ``.filter`` / ``.order_by`` / ``.values_list``
+    都返回自己，迭代时产出造好的行。
+
+    故意做成**任意链形状都通**：第一版写的是只认 ``filter().order_by().values_list()``
+    的嵌套 lambda，结果「去掉 ``order_by('id')``」那个变异顺带把它也弄红了（AttributeError
+    串味，2026-11-14 变异表实测），归因就失真了 —— 排序的判据只归
+    ``test_同一路径两条不同大小的注册行_按id最大那条定胜负`` 那一条。
+    """
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: self
+
+    def __iter__(self):
+        return iter(self._rows)
 
 
 class ScanTreeTests(SimpleTestCase):
@@ -251,3 +273,218 @@ class UserDataRootTests(SimpleTestCase):
             for bad in ('..', '.', '', 'a' + os.sep + 'b'):
                 with self.assertRaises(ValueError, msg=bad):
                     storage_usage._user_data_root(bad)
+
+
+class DbMapTests(TestCase):
+    """DB 侧两本账（订正②）：只有「resolve 后落在根目录内」的记录才可与磁盘比。
+
+    两套计数各有用途，别混：``in_rows`` / ``in_bytes`` 是**行**口径（进返回体的 db_*），
+    ``in_files`` 与 map 是**文件**口径（交集差值用它 —— 磁盘上只有那颗）。
+    """
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix='lqdp-usage-db-')
+        self.addCleanup(shutil.rmtree, self.base, True)
+        self.user = User.objects.create_user('inroot', 'ir@localhost', 'x-pass-12345678')
+
+    def _row(self, file_path, file_size):
+        return DataFile.objects.create(
+            owner=self.user, filename=os.path.basename(file_path),
+            file_path=file_path, file_size=file_size,
+            format_type='CTA8290D', status='ready',
+        )
+
+    def _map(self):
+        """造行不需要 MEDIA_ROOT，只有算根目录需要 —— 所以 override 只裹住这一次。"""
+        with self.settings(MEDIA_ROOT=self.base):
+            return storage_usage._db_map(
+                self.user, storage_usage._user_data_root('inroot'))
+
+    def test_相对路径进map_绝对路径落在根外单独记账(self):
+        self._row('data/inroot/single/a.csv', 100)
+        self._row('data/inroot/batch/B1/b.csv', 250)
+        self._row(os.path.join(self.base, 'elsewhere', 'c.csv'), 999)   # 遗留绝对路径
+        self._row(r'C:\SampleData\d.csv', 7)                            # 根外/跨盘
+        db = self._map()
+        self.assertEqual(db['in_rows'], 2)
+        self.assertEqual(db['in_bytes'], 350)
+        self.assertEqual(db['out_count'], 2)
+        self.assertEqual(db['out_bytes'], 1006)
+
+    def test_同一路径两条不同大小的注册行_按id最大那条定胜负(self):
+        """不加 order_by 的话 map 里的胜者取决于 values_list 的返回顺序 ⇒ 同一份数据
+        两次请求可以给出不同的差值，还在 30s TTL 里冻住一个。定死成 id 最大的那条
+        （与 _helpers.py:309 _group_duplicates 的 order_by('id') 同一条纪律）。"""
+        self._row('data/inroot/single/a.csv', 100)
+        self._row('data/inroot/single/a.csv', 250)
+        db = self._map()
+        self.assertEqual(db['in_rows'], 2)          # 行口径：两条都算
+        self.assertEqual(db['in_files'], 1)         # 文件口径：去重后只剩一颗
+        self.assertEqual(db['in_bytes'], 350)       # 行口径的合计
+        self.assertEqual(list(db['map'].values()), [250])   # 交集用 id 最大那条
+
+    def test_map的键是normcase后的绝对路径(self):
+        """交集靠这个键匹配。键的形态必须与 _scan_tree 查表时用的同一种，
+        否则「匹配不上」的方向是 reg_db 与 reg_disk 一起不加 ⇒ 差值恒为 0 ⇒
+        该报的不报（假绿），而不是冒出一条虚高差值。所以下面 joined 那批用例断言
+        registered_count 非 0 才是真正的护栏，别指望差值行替这条路把关。"""
+        self._row('data/inroot/single/a.csv', 100)
+        db = self._map()
+        key = next(iter(db['map']))
+        self.assertEqual(key, os.path.normcase(os.path.normpath(
+            os.path.join(self.base, 'data', 'inroot', 'single', 'a.csv'))))
+        self.assertEqual(db['map'][key], 100)
+
+    def test_大小写不同的路径也能匹配上(self):
+        """Windows 路径大小写不敏感：DB 里写 data/INROOT/... 而磁盘上是 data/inroot/。
+        不做 normcase 的话这一条会在交集里凭空消失。"""
+        self._row('data/INROOT/single/a.csv', 100)     # 只有大小写不同
+        db = self._map()
+        self.assertEqual(db['in_rows'], 1)
+        self.assertEqual(db['in_files'], 1)
+
+    def test_file_size_为_None_按0计不成报错(self):
+        """钉 ``_db_map`` 的 ``int(file_size or 0)``：清单值缺失时按 0 计，不炸整次扫描。
+
+        ⚠ 这一行**在真库里造不出来**：``file_size`` 是 ``BigIntegerField()``（null=False，
+        ``apps/datafiles/migrations/0001_initial.py:23``）。计划初稿写的是
+        ``DataFile.objects.filter(pk=row.pk).update(file_size=None)``，2026-11-14 实测
+        ``sqlite3.IntegrityError: NOT NULL constraint failed:
+        datafiles_datafile.file_size``（``tasks/b2-task3-green.log``）—— 红在建数据那一步，
+        压根没走到 ``_db_map``，什么也判不出来。所以改成注入一行 ``(路径, None)``：与本文件
+        「chmod 造不出 OSError 就注入」同一个道理，判据要打在兜底那层算术上，不是打在
+        SQLite 的约束上。变异判据：把 ``int(file_size or 0)`` 改成 ``int(file_size)``
+        ⇒ 本条必须红（``TypeError``）。
+        """
+        rows = [('data/inroot/single/a.csv', None)]
+        values = _FakeRows(rows)
+        fake_model = SimpleNamespace(objects=values)
+        with self.settings(MEDIA_ROOT=self.base), \
+                mock.patch.object(storage_usage, 'DataFile', fake_model):
+            db = storage_usage._db_map(
+                self.user, storage_usage._user_data_root('inroot'))
+        self.assertEqual(db['in_rows'], 1)
+        self.assertEqual(db['in_bytes'], 0)
+        self.assertEqual(list(db['map'].values()), [0])   # 交集侧也是 0，不是 None
+
+
+class JoinedScanTests(TestCase):
+    """订正⑤ 的核心：差值只比「注册行 ∩ 文件确实在盘上」这一交集。
+
+    这四条复刻 Task 1 探针在本机 dev 库实测到的形状（112 条在盘 + 73 条已删 + 漂移 0 B），
+    也就是旧口径 ratio=0.1775 / 新口径 ratio=0.0000 那个差。
+
+    ⚠ 根目录必须在 ``self.settings(MEDIA_ROOT=self.base)`` **里面**再算：
+    ``_user_data_root`` 读的是 ``settings.MEDIA_ROOT``，在 setUp 里算好会在 override 生效之前
+    拿到真实 dev 目录 ⇒ 磁盘侧扫 A 树、DB 侧指向 B 树，交集恒空。用例照样会红，
+    但红的原因跟它声称判的东西无关（计划初稿就是这么埋的，2026-11-14 复审时拆出来）。
+    """
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix='lqdp-usage-join-')
+        self.addCleanup(shutil.rmtree, self.base, True)
+        self.user = User.objects.create_user('joiner', 'j@localhost', 'x-pass-12345678')
+
+    def _row(self, rel, file_size):
+        return DataFile.objects.create(
+            owner=self.user, filename=os.path.basename(rel),
+            file_path='data/joiner/' + rel, file_size=file_size,
+            format_type='CTA8290D', status='ready',
+        )
+
+    def _write_own(self, rel, size):
+        """在「当前 settings 的 MEDIA_ROOT」下写文件 —— 必须在 override 里调。"""
+        path = os.path.join(storage_usage._user_data_root('joiner'), *rel.split('/'))
+        return _write(path, size)
+
+    def _joined(self):
+        root = storage_usage._user_data_root('joiner')
+        db = storage_usage._db_map(self.user, root)
+        return storage_usage._scan_tree(root, registered=db['map'])
+
+    def test_文件已不在盘上时不报不一致(self):
+        """记录还在、文件早没了 —— 那是孤立记录卡的活；再用 MB 说一遍会让人以为有两个毛病。
+
+        本条钉的是「已删的行不许进交集」：实测把 ``_scan_tree`` 的清单侧换成
+        ``sum(registered.values())``（清单全量）红在这里 —— ``5243880 != 1000``。
+        它**看不见** ``_mismatch`` 内部退回旧口径（磁盘总量比清单量）：本条三个入参
+        按构造全是 1000，任何两个相减都是 0。那一半归 ``test_磁盘孤儿不进差值`` 和
+        ``MismatchTests.test_分母是磁盘总量_空目录用1防除零``，两处都做过变异实测。
+        """
+        with self.settings(MEDIA_ROOT=self.base):
+            self._write_own('single/a.csv', 1000)
+            self._row('single/a.csv', 1000)
+            self._row('single/deleted.csv', 5 * 1024 * 1024)
+            scan = self._joined()
+            flag, diff = storage_usage._mismatch(
+                scan['bytes'], scan['registered_disk_bytes'], scan['registered_db_bytes'])
+        self.assertEqual(scan['registered_count'], 1)          # 交集只有 a.csv
+        self.assertEqual(scan['registered_db_bytes'], 1000)
+        self.assertEqual(scan['registered_disk_bytes'], 1000)
+        self.assertEqual(scan['bytes'], 1000)
+        self.assertFalse(flag)
+        self.assertEqual(diff, 0)
+
+    def test_同一条记录的size漂移才报不一致(self):
+        with self.settings(MEDIA_ROOT=self.base):
+            self._write_own('single/a.csv', 1000)              # 实际 1000
+            self._row('single/a.csv', 100)                     # 清单还写着 100
+            scan = self._joined()
+            flag, diff = storage_usage._mismatch(
+                scan['bytes'], scan['registered_disk_bytes'], scan['registered_db_bytes'])
+        self.assertEqual(scan['registered_count'], 1)   # 键匹配真的匹配上了（防假绿）
+        self.assertTrue(flag)
+        self.assertEqual(diff, 900)
+
+    def test_磁盘孤儿不进差值(self):
+        """盘上有、清单里没有的那颗（孤立磁盘文件）也不许混进差值。"""
+        with self.settings(MEDIA_ROOT=self.base):
+            self._write_own('single/a.csv', 1000)
+            self._write_own('batch/B1/orphan.csv', 4000)       # 没有注册行
+            self._row('single/a.csv', 1000)
+            scan = self._joined()
+        self.assertEqual(scan['bytes'], 5000)        # chip 显示的是全部占用
+        self.assertEqual(scan['registered_disk_bytes'], 1000)   # 差值只看交集
+        self.assertFalse(storage_usage._mismatch(
+            scan['bytes'], scan['registered_disk_bytes'],
+            scan['registered_db_bytes'])[0])
+
+    def test_不传registered时只回四个总量键(self):
+        with self.settings(MEDIA_ROOT=self.base):
+            self._write_own('single/a.csv', 10)
+            scan = storage_usage._scan_tree(storage_usage._user_data_root('joiner'))
+        self.assertEqual(
+            set(scan), {'bytes', 'unique_bytes', 'file_count', 'by_type'})
+
+
+class MismatchTests(SimpleTestCase):
+    """恒等式本身（规格 §4.6 + 订正⑤）：纯算术，不碰文件系统。"""
+
+    def test_阈值是严格大于_恰好5pct不算不一致(self):
+        flag, diff = storage_usage._mismatch(1000, 1000, 950)
+        self.assertFalse(flag)
+        self.assertEqual(diff, 50)
+
+    def test_略超5pct报不一致(self):
+        flag, diff = storage_usage._mismatch(1000, 1000, 949)
+        self.assertTrue(flag)
+        self.assertEqual(diff, 51)
+
+    def test_分母是磁盘总量_空目录用1防除零(self):
+        """bytes_total=0 时 max(...,1) 防除零。别顺手把分母改成 registered_disk_bytes ——
+        分母选「用户看得见的那个数」才能让 5% 读成「chip 显示的量的 5%」。"""
+        self.assertEqual(storage_usage._mismatch(0, 0, 0), (False, 0))
+        flag, diff = storage_usage._mismatch(0, 10, 30)
+        self.assertTrue(flag)
+        self.assertEqual(diff, 20)
+        # 上面两句**钉不住**分母的选择（2026-11-14 变异实测：把分母换成
+        # registered_disk_bytes 后这三句全绿 —— 这几笔数里 bytes_total 与
+        # registered_disk_bytes 要么相等、要么两侧都远越过阈值）。下面这一笔才是判据：
+        # 交集里漂 51 B，而用户看得见的是 100000 B ⇒ 真口径 0.051% 不报；
+        # 分母一旦换成 registered_disk_bytes 就变成 5.1% ⇒ 冒出一条假的不一致。
+        # 同一笔数也把「旧口径（拿磁盘总量当差值的一侧）」杀成 True（51 ⇒ 98,949）。
+        self.assertEqual(storage_usage._mismatch(100000, 1000, 1051), (False, 51))
+
+    def test_清单大还是磁盘大都算(self):
+        self.assertTrue(storage_usage._mismatch(10000, 1000, 2000)[0])
+        self.assertTrue(storage_usage._mismatch(10000, 2000, 1000)[0])

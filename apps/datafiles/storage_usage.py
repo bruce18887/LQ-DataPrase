@@ -15,13 +15,24 @@
   ``test_硬链接按inode只计一次`` 用「一颗硬链对 + 一颗不同体积的独立文件」把它的
   变异体（改成 ``entry.stat()``）钉成必红 —— 只有硬链对的话坏实现也会得出同一个数。
 
-本模块只做磁盘侧口径。DB 侧的两本账与差值恒等式（``_db_map`` / ``_mismatch``）、
-进程内 TTL 缓存（``get_user_usage``）由后续任务加在本文件里；HTTP 视图在
-``views/usage_views.py``，这里不碰。
+本模块只有口径，不碰 HTTP（视图在 ``views/usage_views.py``）。磁盘侧走树是上面的
+``_iter_files`` / ``_scan_tree``；DB 侧的两本账与交集差值恒等式是下面的 ``_db_map`` /
+``_mismatch`` / ``_compute_usage``；进程内 TTL 缓存（``get_user_usage``）由后续任务加在
+本文件里。
 """
 import os
 
 from django.conf import settings
+from django.utils import timezone           # 本任务的 _compute_usage 用
+
+from apps.datafiles.models import DataFile   # 本任务的 _db_map 用
+from apps.datafiles.utils import resolve_file_path  # 本任务的 _db_map 用
+
+# 规格 §4.6 的阈值：只在超阈时提示，不做常驻的第二指标。
+# 「常态下差值为零」这句在旧口径（全量比全量）下实测不成立（本机 dev ratio=0.1775，
+# 全部来自 73 条已删文件），换成订正⑤ 的交集口径后才成立 —— 改回全量比全量
+# 就会让这条阈值在每台有遗留数据的装机上永远红。
+MISMATCH_RATIO_THRESHOLD = 0.05
 
 # 用户名直接当目录名用（与 _helpers.py:183 同一种拼法），所以要挡住能改变指向的那几种写法。
 _UNSAFE_USERNAMES = ('', '.', '..')
@@ -146,3 +157,100 @@ def _scan_tree(root, registered=None):
         result['registered_db_bytes'] = reg_db
         result['registered_disk_bytes'] = reg_disk
     return result
+
+
+def _db_map(user, root):
+    """该用户的注册行，分成「根目录内（做成 map）」与「根目录外（只记账）」。
+
+    ``file_size`` 是注册那一刻的 ``os.path.getsize``（``_helpers.py:123``），此后永不刷新
+    ⇒ 只能当参考值。更要紧的是 ``store_file_path``（``utils.py:97``）对 MEDIA_ROOT 之外/
+    跨盘的路径**保持绝对路径**、``resolve_file_path`` 又原样透传 2026-08-21 前的遗留绝对
+    路径 ⇒ 那部分记录指向的文件根本不在本模块要扫的树里，混进合计就会常年报一条假的不一致
+    （计划订正②）。
+
+    键统一 ``os.path.normcase(os.path.normpath(...))``：Windows 路径大小写不敏感，DB 里写
+    ``data/INROOT/...`` 而磁盘上是 ``data/inroot/`` 时不做 normcase 会让那条在交集里**凭空
+    消失**。注意消失的方向：``reg_db`` 与 ``reg_disk`` 是一起少的，所以差值会变成 0、
+    该报的不报（假绿），不是冒出一条虚高差值 —— 护栏是 Task 3 断言
+    ``registered_count == 1``，不是差值行。
+
+    遍历形状照抄生产写法 ``views/browse_views.py:272-277``（同一份 values_list），但**加
+    ``order_by('id')``**：同一个路径上有重复注册行是已知状态（批3 整批就在处理它），
+    map 按路径去重 ⇒ 不加排序的话胜者取决于数据库返回顺序，差值会在两次请求之间翻脸，
+    还在 30s TTL 里冻住一个。``order_by('id')`` 把胜者定死成 id 最大的那条。
+
+    返回的口径分两套：``in_rows``/``in_bytes`` 是**行**口径（返回体里的 db_* 用它），
+    ``in_files`` = ``len(map)`` 与 map 本身是**文件**口径（交集差值用它）。
+    """
+    prefix = os.path.normcase(os.path.normpath(root)) + os.sep
+    registered = {}
+    in_rows = in_bytes = out_count = out_bytes = 0
+    for file_path, file_size in DataFile.objects.filter(owner=user).order_by('id').values_list(
+        'file_path', 'file_size'
+    ):
+        abs_path = os.path.normcase(os.path.normpath(resolve_file_path(file_path or '')))
+        size = int(file_size or 0)
+        if abs_path.startswith(prefix):
+            in_rows += 1
+            in_bytes += size
+            registered[abs_path] = size
+        else:
+            out_count += 1
+            out_bytes += size
+    return {
+        'map': registered,
+        'in_rows': in_rows,
+        'in_files': len(registered),
+        'in_bytes': in_bytes,
+        'out_count': out_count,
+        'out_bytes': out_bytes,
+    }
+
+
+def _mismatch(bytes_total, registered_disk_bytes, registered_db_bytes):
+    """规格 §4.6 的恒等式，但两侧都只取交集（订正⑤）。
+
+    ``registered_disk_bytes`` = 交集里每条的**实际** st_size 之和；
+    ``registered_db_bytes``   = 同一条条的**清单** file_size 之和。
+    于是这一行只说一件事：**清单里的大小数字过期了**。
+    文件已删（=孤立数据库记录）与磁盘孤儿（=孤立磁盘文件）各归修复中心自己的卡，
+    不再在这里用 MB 重复说一遍 —— 实测本机 dev 库旧口径 ratio=0.1775、新口径 0.0000。
+    分母用 ``bytes_total``（用户看得见的那个数），``max(..., 1)`` 只防空目录除零；
+    ``>`` 是严格大于，恰好等于阈值不算不一致。
+    """
+    diff = abs(registered_disk_bytes - registered_db_bytes)
+    ratio = diff / max(bytes_total, 1)
+    return ratio > MISMATCH_RATIO_THRESHOLD, diff
+
+
+def _compute_usage(user):
+    """扫盘 + 查库，组出端点返回体（口径见模块 docstring）。
+
+    交集的三个内部量（``registered_count`` / ``registered_disk_bytes`` /
+    ``registered_db_bytes``）**不进返回体**：界面只需要「超没超阈值 + 差多少」，
+    多摆三个数就是规格 §4.6 明确否掉的「没人看得懂的二阶数字」。它们的正确性由
+    Task 3 的 JoinedScanTests 直接打在 `_scan_tree` 上钉住。
+    """
+    root = _user_data_root(user.username)
+    db = _db_map(user, root)
+    scan = _scan_tree(root, registered=db['map'])
+    mismatch, diff = _mismatch(
+        scan['bytes'], scan['registered_disk_bytes'], scan['registered_db_bytes']
+    )
+    return {
+        'data_dir': root,
+        'bytes': scan['bytes'],
+        'unique_bytes': scan['unique_bytes'],
+        'file_count': scan['file_count'],
+        'by_type': scan['by_type'],
+        # db_count / db_bytes 是「全量参考」，走的是**行**口径（in_rows + out_count）；
+        # 差值恒等式走的是交集（文件口径），那三个内部量不进返回体。
+        'db_count': db['in_rows'] + db['out_count'],
+        'db_bytes': db['in_bytes'] + db['out_bytes'],
+        'db_bytes_in_root': db['in_bytes'],
+        'db_outside_root_count': db['out_count'],
+        'db_outside_root_bytes': db['out_bytes'],
+        'mismatch_over_threshold': mismatch,
+        'mismatch_diff_bytes': diff,
+        'scanned_at': timezone.now().isoformat(),
+    }
