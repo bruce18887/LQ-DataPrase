@@ -32,26 +32,6 @@ def _write(path, size):
     return path
 
 
-class _FakeRows:
-    """注入用的最小「查询集」：链上任何 ``.filter`` / ``.order_by`` / ``.values_list``
-    都返回自己，迭代时产出造好的行。
-
-    故意做成**任意链形状都通**：第一版写的是只认 ``filter().order_by().values_list()``
-    的嵌套 lambda，结果「去掉 ``order_by('id')``」那个变异顺带把它也弄红了（AttributeError
-    串味，2026-11-14 变异表实测），归因就失真了 —— 排序的判据只归
-    ``test_同一路径两条不同大小的注册行_按id最大那条定胜负`` 那一条。
-    """
-
-    def __init__(self, rows):
-        self._rows = rows
-
-    def __getattr__(self, name):
-        return lambda *args, **kwargs: self
-
-    def __iter__(self):
-        return iter(self._rows)
-
-
 class ScanTreeTests(SimpleTestCase):
     def setUp(self):
         self.base = tempfile.mkdtemp(prefix='lqdp-usage-')
@@ -280,6 +260,11 @@ class DbMapTests(TestCase):
 
     两套计数各有用途，别混：``in_rows`` / ``in_bytes`` 是**行**口径（进返回体的 db_*），
     ``in_files`` 与 map 是**文件**口径（交集差值用它 —— 磁盘上只有那颗）。
+
+    这里**没有** ``file_size is None`` 的用例，实现里也没有 ``or 0`` 兜底：
+    ``file_size`` 是 ``BigIntegerField(null=False)``（``0001_initial.py:23``），实测
+    ``update(file_size=None)`` 直接 ``sqlite3.IntegrityError`` —— 那个状态在真库里不存在，
+    为它写用例就得 mock 掉整个 ORM，只会让下一个人以为这种数据存在过。
     """
 
     def setUp(self):
@@ -343,29 +328,13 @@ class DbMapTests(TestCase):
         self.assertEqual(db['in_rows'], 1)
         self.assertEqual(db['in_files'], 1)
 
-    def test_file_size_为_None_按0计不成报错(self):
-        """钉 ``_db_map`` 的 ``int(file_size or 0)``：清单值缺失时按 0 计，不炸整次扫描。
-
-        ⚠ 这一行**在真库里造不出来**：``file_size`` 是 ``BigIntegerField()``（null=False，
-        ``apps/datafiles/migrations/0001_initial.py:23``）。计划初稿写的是
-        ``DataFile.objects.filter(pk=row.pk).update(file_size=None)``，2026-11-14 实测
-        ``sqlite3.IntegrityError: NOT NULL constraint failed:
-        datafiles_datafile.file_size``（``tasks/b2-task3-green.log``）—— 红在建数据那一步，
-        压根没走到 ``_db_map``，什么也判不出来。所以改成注入一行 ``(路径, None)``：与本文件
-        「chmod 造不出 OSError 就注入」同一个道理，判据要打在兜底那层算术上，不是打在
-        SQLite 的约束上。变异判据：把 ``int(file_size or 0)`` 改成 ``int(file_size)``
-        ⇒ 本条必须红（``TypeError``）。
-        """
-        rows = [('data/inroot/single/a.csv', None)]
-        values = _FakeRows(rows)
-        fake_model = SimpleNamespace(objects=values)
-        with self.settings(MEDIA_ROOT=self.base), \
-                mock.patch.object(storage_usage, 'DataFile', fake_model):
-            db = storage_usage._db_map(
-                self.user, storage_usage._user_data_root('inroot'))
-        self.assertEqual(db['in_rows'], 1)
-        self.assertEqual(db['in_bytes'], 0)
-        self.assertEqual(list(db['map'].values()), [0])   # 交集侧也是 0，不是 None
+    def test_空表返回全零而不是报错(self):
+        db = self._map()
+        self.assertEqual(
+            db,
+            {'map': {}, 'in_rows': 0, 'in_files': 0, 'in_bytes': 0,
+             'out_count': 0, 'out_bytes': 0},
+        )
 
 
 class JoinedScanTests(TestCase):
@@ -488,3 +457,106 @@ class MismatchTests(SimpleTestCase):
     def test_清单大还是磁盘大都算(self):
         self.assertTrue(storage_usage._mismatch(10000, 1000, 2000)[0])
         self.assertTrue(storage_usage._mismatch(10000, 2000, 1000)[0])
+
+
+class ComputeUsageTests(TestCase):
+    """装配层（`_compute_usage`）必须有自己的判据。
+
+    前面所有用例都直接打 `_scan_tree` / `_db_map` / `_mismatch`，于是「把哪个数喂给
+    恒等式」这件事在那些用例里完全看不见：把 `_compute_usage` 里的
+    ``scan['registered_db_bytes']`` 换成行口径的 ``db['in_bytes']``，29 条全绿
+    （2026-11-14 变异实测，`tasks/mutate_b2_task3.py` 追加的那一档）。下面几条就是堵这个洞的。
+    """
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix='lqdp-usage-asm-')
+        self.addCleanup(shutil.rmtree, self.base, True)
+        self.user = User.objects.create_user('assembler', 'a@localhost', 'x-pass-12345678')
+
+    def _row(self, rel, file_size):
+        return DataFile.objects.create(
+            owner=self.user, filename=os.path.basename(rel),
+            file_path='data/assembler/' + rel, file_size=file_size,
+            format_type='CTA8290D', status='ready',
+        )
+
+    def _write_own(self, rel, size):
+        root = storage_usage._user_data_root('assembler')
+        return _write(os.path.join(root, *rel.split('/')), size)
+
+    def _usage(self):
+        """必须在 ``self.settings(MEDIA_ROOT=self.base)`` **里面**调。
+
+        `manage.py test` 跑的是 ``config.settings.unit``，它的 MEDIA_ROOT 是
+        ``test/unit-data/media``（不是 tempdir！）⇒ 漏了 override 时 _write_own 会把文件
+        写进那份**跨用例共享**的沙箱，扫描侧却在 tempdir：表现为 usage['bytes'] == 0，
+        还在沙箱里留下一堆别人也会读到的残留。2026-11-14 这条初稿就踩上了。
+        """
+        return storage_usage._compute_usage(self.user)
+
+    def test_磁盘与清单一致时各字段各自成话(self):
+        with self.settings(MEDIA_ROOT=self.base):
+            self._write_own('single/a.csv', 1000)
+            self._row('single/a.csv', 1000)
+            usage = self._usage()
+        self.assertEqual(usage['bytes'], 1000)
+        self.assertEqual(usage['unique_bytes'], 1000)
+        self.assertEqual(usage['file_count'], 1)
+        self.assertEqual(usage['by_type'], {'single': {'bytes': 1000, 'count': 1}})
+        self.assertEqual(usage['db_count'], 1)
+        self.assertEqual(usage['db_bytes'], 1000)
+        self.assertFalse(usage['mismatch_over_threshold'])
+        self.assertEqual(usage['mismatch_diff_bytes'], 0)
+        self.assertTrue(usage['scanned_at'])
+        # 期望值按 self.base 自己拼，别再调一次 _user_data_root：那次调用落在
+        # override 外面，读到的会是 unit 档的 MEDIA_ROOT（test/unit-data/media），
+        # 与被测值（tempdir）根本不同源 —— 等于用两个不同口径去比口径。
+        self.assertEqual(
+            os.path.normcase(os.path.normpath(usage['data_dir'])),
+            os.path.normcase(os.path.join(self.base, 'data', 'assembler')))
+
+    def test_记录还在文件已删_恒等式必须吃交集而不是行口径(self):
+        """订正⑤ 在装配层的判据，也是本机 dev 库的真实形状（112 颗在盘 + 73 条已删）。
+        变异判据：喂 `db['in_bytes']` 给 `_mismatch` ⇒ 本条必须红（True is not false）。"""
+        with self.settings(MEDIA_ROOT=self.base):
+            self._write_own('single/a.csv', 1000)
+            self._row('single/a.csv', 1000)
+            self._row('single/deleted.csv', 5 * 1024 * 1024)
+            usage = self._usage()
+        self.assertEqual(usage['bytes'], 1000)                   # 磁盘上只剩一颗
+        self.assertEqual(usage['db_count'], 2)                   # 行口径照旧两条
+        self.assertEqual(usage['db_bytes'], 1000 + 5 * 1024 * 1024)
+        self.assertFalse(usage['mismatch_over_threshold'])       # ← 不许吃行口径
+        self.assertEqual(usage['mismatch_diff_bytes'], 0)
+
+    def test_size漂移在装配层也要冒出来(self):
+        with self.settings(MEDIA_ROOT=self.base):
+            self._write_own('single/a.csv', 1000)
+            self._row('single/a.csv', 100)
+            usage = self._usage()
+        self.assertTrue(usage['mismatch_over_threshold'])
+        self.assertEqual(usage['mismatch_diff_bytes'], 900)
+
+    def test_磁盘孤儿只进磁盘总量不进差值(self):
+        """装配层的另一侧：磁盘上多一颗没注册的文件 ⇒ chip 的 bytes 要含它（那就是占用的量），
+        而差值不许含它（磁盘孤儿有自己的孤立磁盘卡）。
+        变异判据：把 `_mismatch` 的磁盘侧换成 `scan['bytes']` ⇒ 本条必须红。"""
+        with self.settings(MEDIA_ROOT=self.base):
+            self._write_own('single/a.csv', 1000)
+            self._write_own('batch/B1/orphan.csv', 4000)
+            self._row('single/a.csv', 1000)
+            usage = self._usage()
+        self.assertEqual(usage['bytes'], 5000)
+        self.assertEqual(usage['file_count'], 2)
+        self.assertEqual(usage['db_count'], 1)
+        self.assertFalse(usage['mismatch_over_threshold'])
+        self.assertEqual(usage['mismatch_diff_bytes'], 0)
+
+    def test_交集的三个内部量不许进返回体(self):
+        """规格 §4.6 否掉的就是「没人看得懂的二阶数字」：内部量留在模块里，
+        判据打在 `_scan_tree` 与 `_mismatch` 上，不摆到端点去。"""
+        with self.settings(MEDIA_ROOT=self.base):
+            self._write_own('single/a.csv', 10)
+            usage = self._usage()
+        for leaked in ('registered_count', 'registered_db_bytes', 'registered_disk_bytes'):
+            self.assertNotIn(leaked, usage)

@@ -144,7 +144,7 @@ def _scan_tree(root, registered=None):
             db_size = registered.get(os.path.normcase(path))
             if db_size is not None:
                 reg_count += 1
-                reg_db += int(db_size or 0)
+                reg_db += int(db_size)
                 reg_disk += size
     result = {
         'bytes': total,
@@ -188,8 +188,11 @@ def _db_map(user, root):
     for file_path, file_size in DataFile.objects.filter(owner=user).order_by('id').values_list(
         'file_path', 'file_size'
     ):
-        abs_path = os.path.normcase(os.path.normpath(resolve_file_path(file_path or '')))
-        size = int(file_size or 0)
+        abs_path = os.path.normcase(os.path.normpath(resolve_file_path(file_path)))
+        # 没有 `or 0` 兜 None：file_size 是 BigIntegerField(null=False)，
+        # 实测 update(file_size=None) 直接 sqlite3.IntegrityError（0001_initial.py:23）
+        # ⇒ 那层兜底永远进不去，留着只会让下一个人以为这种数据存在过。
+        size = int(file_size)
         if abs_path.startswith(prefix):
             in_rows += 1
             in_bytes += size
