@@ -114,3 +114,232 @@ class ResolveKeepSelectionTests(TestCase):
         """limit 之内没被选中的组，keep_by_key 里不该出现它的键。"""
         _, keep_by_key = self._resolve([11], limit=1)
         self.assertEqual(keep_by_key, {('a.csv', 500): 11})
+
+
+class DeleteByKeepSelectionTests(TestCase):
+    """真删的三种结果：默认最早 / 指定最新 / 跨两组各留被选那份。
+
+    这一类**不经 HTTP**：视图接线归 Task 4，这里只钉「函数拿到 keep_ids 之后删对了谁」。
+    每条都要同时断磁盘（真删，不是只删 DB 行）与 DB 行。
+    """
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix='lqdp-dup-fn-')
+        self.addCleanup(shutil.rmtree, self.base, True)
+        self.user = User.objects.create_user('dup_fn_a', 'da@localhost', 'x-pass-12345678')
+
+    def _pair(self, filename, tag, size=10):
+        """同名同大小两行，落在两个目录（同目录会同名覆盖成一只物理文件）。"""
+        rows = []
+        for letter in ('p', 'q'):
+            directory = os.path.join(self.base, '%s_%s' % (tag, letter))
+            os.makedirs(directory, exist_ok=True)
+            path = os.path.join(directory, filename)
+            with open(path, 'wb') as fh:
+                fh.write(b'\0' * size)
+            rows.append(DataFile.objects.create(
+                owner=self.user, filename=filename, file_path=path, file_size=size,
+                format_type='CTA8290D',
+            ))
+        return rows
+
+    def _delete(self, keep_ids=()):
+        from apps.datafiles.views._duplicate_files import _delete_duplicate_files
+        with self.settings(MEDIA_ROOT=self.base):
+            return _delete_duplicate_files(self.user, keep_ids)
+
+    def test_不带keep_ids时保留最早并且磁盘文件真删(self):
+        first, second = self._pair('a.csv', 'def')
+        deleted, remaining = self._delete()
+        self.assertEqual((deleted, remaining), (1, 0))
+        self.assertTrue(DataFile.objects.filter(pk=first.id).exists(), '默认留 id 最小那条')
+        self.assertFalse(DataFile.objects.filter(pk=second.id).exists())
+        self.assertTrue(os.path.exists(first.file_path))
+        self.assertFalse(os.path.exists(second.file_path), '只删 DB 行不算删干净')
+
+    def test_指定保留最新时删掉最早那条(self):
+        first, second = self._pair('b.csv', 'latest')
+        deleted, remaining = self._delete([second.id])
+        self.assertEqual((deleted, remaining), (1, 0))
+        self.assertFalse(DataFile.objects.filter(pk=first.id).exists())
+        self.assertTrue(DataFile.objects.filter(pk=second.id).exists())
+        self.assertFalse(os.path.exists(first.file_path))
+        self.assertTrue(os.path.exists(second.file_path))
+
+    def test_跨两组各选一枚各自留被选那份(self):
+        a1, a2 = self._pair('c.csv', 'c')
+        b1, b2 = self._pair('d.csv', 'd')
+        deleted, remaining = self._delete([a2.id, b1.id])
+        self.assertEqual((deleted, remaining), (2, 0))
+        alive = set(DataFile.objects.filter(owner=self.user).values_list('id', flat=True))
+        self.assertEqual(alive, {a2.id, b1.id},
+                         '两枚保留项互不干扰：证明 keep 是**逐组**裁决而不是全局一枚')
+
+    def test_校验失败时一行都不删(self):
+        first, second = self._pair('e.csv', 'e')
+        with self.assertRaises(InvalidKeepSelection):
+            self._delete([999999])
+        alive = DataFile.objects.filter(owner=self.user).count()
+        self.assertEqual(alive, 2, '抛在删除之前 ⇒ 这条才是「不静默删一半」的证据')
+        self.assertTrue(os.path.exists(first.file_path) and os.path.exists(second.file_path))
+
+    def test_每组files按id升序_前端默认保留项直接取首条的前提(self):
+        """前端 `defaultKeepId` 取的是 `files[0].id`，`strategyKeepId` 的并列裁决也落在首条。
+
+        两边都不重排序 —— 所以「后端给的 files 是 id 升序」这条契约一旦变，前端两处会
+        一起静默选错，而 TS 与 e2e 都不会报（形状完全一样，错的只是哪一条在前）。
+
+        ⚠ 计划原文这条的函数名带全角括号，Python 里 U+FF08 不是合法标识符字符
+        （`SyntaxError: invalid character '（'`，实测）⇒ 名字改成下划线连接，判据不变。
+        """
+        first, second = self._pair('h.csv', 'h')
+        groups = _group_duplicates(self.user)
+        self.assertEqual(len(groups), 1)
+        ids = [f['id'] for f in groups[0]['files']]
+        self.assertEqual(ids, sorted(ids), 'files 必须 id 升序')
+        self.assertEqual(ids, [first.id, second.id])
+
+    def test_remaining_groups是删完重算的实测值(self):
+        """两组、塌掉一组后只处理 f ⇒ 剩 0，钉的是「删完重算」这条口径的实现。
+
+        ⚠ 计划原文预测本条能抓住 `len(groups) - len(displayed)` 的算术写法（M5），
+        **实测没抓住**（变异跑完 42 例全绿，2026-11-14 本批记录）。算术在那种写法下是
+        `1 - 1 == 0`：g 组是在**进函数之前**就塌掉的（本条先删了 g 的一行），所以两组形状
+        里 `len(groups) == len(displayed)`；而 51 组形状里第 51 组原样留着，算术也是 1。
+        ⇒ 现有形状分不出这两种写法（要分出来得让**已展示**的组在删除过程中活下来，
+        单线程夹具做不到，需注入并发/失败）。保留实测写法是因为它对并发与半途中止更稳，
+        不要因为本条绿着就以为算术版被挡住了。
+        """
+        self._pair('f.csv', 'f')
+        self._pair('g.csv', 'g')
+        self.assertEqual(len(_group_duplicates(self.user)), 2)
+        DataFile.objects.filter(filename='g.csv').first().delete()  # g 组塌成 1 行
+        deleted, remaining = self._delete()
+        self.assertEqual(deleted, 1, 'f 组删一条')
+        self.assertEqual(remaining, 0, '删完重算：g 组早就不是重复组了')
+
+
+from rest_framework.test import APIClient  # noqa: E402  与下方 HTTP 契约类同段，见计划 Task 4
+
+CHECK_URL = '/api/v1/consistency-check/'
+
+
+class DeleteDuplicatesHttpContractTests(TestCase):
+    """端点形状：keep_ids 上行、`invalid_keep_id` 下行、切片语义、以及 GET 没被改动。
+
+    与 Task 3 的分工：Task 3 钉「函数删对谁」，本类钉「载荷形状与响应字段」。
+    400 家族在这里重跑一遍**带 HTTP 状态码与 code 字段**的形状，是因为
+    前端 toast 读的是 `{code, message}` 那层 —— 函数层的异常名对界面不可观察。
+    """
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix='lqdp-dup-api-')
+        self.addCleanup(shutil.rmtree, self.base, True)
+        self.user = User.objects.create_user('dup_api_a', 'da@localhost', 'x-pass-12345678')
+        self.user.role = 'administrator'
+        self.user.save()
+        self.other = User.objects.create_user('dup_api_b', 'db@localhost', 'x-pass-12345678')
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    def _pair(self, filename, owner=None, tag=None, size=10):
+        owner = owner or self.user
+        rows = []
+        for letter in ('p', 'q'):
+            directory = os.path.join(self.base, '%s%s' % (tag or filename[:-4], letter))
+            os.makedirs(directory, exist_ok=True)
+            path = os.path.join(directory, filename)
+            with open(path, 'wb') as fh:
+                fh.write(b'\0' * size)
+            rows.append(DataFile.objects.create(
+                owner=owner, filename=filename, file_path=path, file_size=size,
+                format_type='CTA8290D',
+            ))
+        return rows
+
+    def _post(self, extra=None):
+        payload = {'action': 'delete_duplicates'}
+        payload.update(extra or {})
+        with self.settings(MEDIA_ROOT=self.base):
+            return self.client.post(CHECK_URL, payload, format='json')
+
+    def _get(self):
+        with self.settings(MEDIA_ROOT=self.base):
+            return self.client.get(CHECK_URL)
+
+    def test_不带keep_ids时响应仍是旧形状加一个新字段(self):
+        self._pair('a.csv', tag='a')
+        resp = self._post()
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data['action'], 'delete_duplicates')
+        self.assertEqual(resp.data['deleted_count'], 1)
+        self.assertEqual(resp.data['remaining_groups'], 0, '新字段必须在，且是实测值')
+
+    def test_keep_ids不是数组时400(self):
+        self._pair('b.csv', tag='b')
+        resp = self._post({'keep_ids': 123})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data['code'], 'invalid_keep_id')
+        self.assertEqual(DataFile.objects.filter(owner=self.user).count(), 2)
+
+    def test_五态非法keep_ids全部400且一行都没删(self):
+        first, second = self._pair('c.csv', tag='c')
+        stranger = self._pair('s.csv', owner=self.other, tag='s')
+        lone = DataFile.objects.create(
+            owner=self.user, filename='lone.csv', file_path=os.path.join(self.base, 'lone.csv'),
+            file_size=999, format_type='CTA8290D',
+        )
+        bad_payloads = {
+            '不存在的 id': [999999],
+            '他人的 id': [stranger[0].id],
+            '非重复文件的 id': [lone.id],
+            '同组两枚': [first.id, second.id],
+            '非整数': ['%d' % first.id],
+        }
+        for label, keep_ids in bad_payloads.items():
+            resp = self._post({'keep_ids': keep_ids})
+            self.assertEqual(resp.status_code, 400, label)
+            self.assertEqual(resp.data['code'], 'invalid_keep_id', label)
+            self.assertTrue(resp.data['message'], 'detail 必须带中文，前端才不用再加 ERROR_CODE_MAP 条目')
+        self.assertEqual(DataFile.objects.filter(owner=self.user).count(), 3,
+                         '五条 400 之后：本用户 3 行（重复组 2 + lone 1）一行都没少')
+        self.assertTrue(os.path.exists(first.file_path), '磁盘上也一行没动')
+
+    def test_指定保留最新经端点也生效(self):
+        first, second = self._pair('d.csv', tag='d')
+        resp = self._post({'keep_ids': [second.id]})
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data['deleted_count'], 1)
+        alive = DataFile.objects.filter(owner=self.user, filename='d.csv')
+        self.assertEqual([r.id for r in alive], [second.id])
+
+    def test_51组时只处理前50组第51组仍在(self):
+        """本批语义反转的那一条。旧行为没有任何用例钉住（五例逐条核过），
+        所以这里既是新契约也是「旧契约不许回来」的绊线。"""
+        for i in range(1, 52):
+            self._pair('dup%02d.csv' % i, tag='g%02d' % i)
+        checked = self._get()
+        self.assertEqual(checked.status_code, 200)
+        self.assertEqual(checked.data['duplicate_group_count'], 51)
+        self.assertEqual(len(checked.data['duplicate_groups']), DUPLICATE_DISPLAY_LIMIT,
+                         'GET 的展示切片仍是 50，本批没动它')
+
+        resp = self._post()
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data['deleted_count'], 50, '前 50 组各删一条')
+        self.assertEqual(resp.data['remaining_groups'], 1)
+        tail = DataFile.objects.filter(owner=self.user, filename='dup51.csv')
+        self.assertEqual(tail.count(), 2, '第 51 组一行都没被删（用户没见过它）')
+
+        again = self._get()
+        self.assertEqual(again.data['duplicate_group_count'], 1,
+                         '重新检查后它就成了下一批的已展示组 —— 循环是有出口的')
+
+    def test_切片外组的保留项被拒(self):
+        for i in range(1, 52):
+            self._pair('dup%02d.csv' % i, tag='h%02d' % i)
+        tail = DataFile.objects.filter(owner=self.user, filename='dup51.csv').order_by('id')
+        resp = self._post({'keep_ids': [tail[1].id]})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.data['code'], 'invalid_keep_id')
+        self.assertEqual(DataFile.objects.filter(owner=self.user).count(), 102)
