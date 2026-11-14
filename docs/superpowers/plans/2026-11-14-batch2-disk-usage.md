@@ -26,7 +26,7 @@
 ⇒ 处置：差值行**只陈述事实、不带动作**（文案见 Task 9），并且把「补一个 `refresh_file_sizes` 修复动作」留给配额批。理由另有一条：批3 的重复判定口径是 `(filename, file_size)` 精确相等，真去回写 `file_size` 会连带改变重复组的划分，那属于跨批影响，不该在本批顺手做。
 
 **订正④（§4.4 的「主动失效」改成客户端驱动）** 稿子要「上传/删除/修复成功后主动失效」，但满足它的服务端钩子有 8 处（`_register_file`、`_delete_datafile_file_only`、`bulk_delete`、两处 `shutil.rmtree`、两处 `shutil.move`、修复动作分发器），漏挂一处就**永久**陈旧到进程重启。
-⇒ 处置：`KeyedLRU` 分桶 TTL 做正确性下界（漏挂最多陈旧 **≤30s**：桶号在 key 里，一条结果的寿命最多到它所属桶的末尾 —— 初稿这里写的「30–60s」宽了一倍，订正见文末 Task 4 复核第 5 条），刷新入口做成 `?fresh=1`，由 `FileListTab.vue` 在**已经存在**的 `filesStore.filesVersion` watch（`frontend/src/pages/data/components/FileListTab.vue:322-327`）里带 `fresh=true` 重拉——上传/删除/批量删除/组合/修复五条流全都调 `filesStore.notifyFilesChanged()`（`FileListTab.vue:220/225/256/283/306`；2026-11-14 拆档后复核，第 4 处从 288 漂到 **283**，其余没动），所以**一行覆盖全部**，SFTP 后台导入这类无前端信号的路径由 TTL 兜底，浮层里显示「统计时间」让陈旧可见。
+⇒ 处置：`KeyedLRU` 分桶 TTL 做正确性下界（漏挂最多陈旧 **≤30s**：桶号在 key 里，一条结果的寿命最多到它所属桶的末尾 —— 初稿这里写的「30–60s」宽了一倍，订正见文末 Task 4 复核第 5 条），刷新入口做成 `?fresh=1`，由 `FileListTab.vue` 在**已经存在**的 `filesStore.filesVersion` watch 里带 `fresh=true` 重拉（⚠ 这里原本写死 `:322-327`，Task 7 之后该 watch 已在 **`:338-346`** —— **行号会随任何同文件改动漂**，取法：`grep -n "watch(() => filesStore.filesVersion" frontend/src/pages/data/components/FileListTab.vue`）——上传/删除/批量删除/组合/修复五条流全都调 `filesStore.notifyFilesChanged()`（现号取法：`grep -n "notifyFilesChanged()" frontend/src/pages/data/components/FileListTab.vue` ⇒ **236/241/272/299/322**；本行历史上一串号 `220/225/256/283/306` 是 Task 7 之前的，`237/242/273/300/323` 是 Task 7 与导入合并之间的一分钟快照，都别再照抄），所以**一行覆盖全部**，SFTP 后台导入这类无前端信号的路径由 TTL 兜底，浮层里显示「统计时间」让陈旧可见。
 
 **订正⑤（§4.6 的恒等式在真实数据上会说一件已经被别人说过的事）** Task 1 追加探针 `tasks/probe_batch2_diff_cause.py` 在本机 dev 库实测拆开四个量：
 
@@ -1992,9 +1992,10 @@ git commit -m "test(e2e): 磁盘占用 chip 的渲染与写后刷新判据"
 - Modify: `frontend/src/pages/data/components/FileListTab.vue:59-63`（**补 Task 7 有意推迟的那半**：
   `<ConsistencyCheckDialog … :usage="usage">`，理由见 Task 7 Step 2 的 ⚠ —— prop 声明与绑定必须同一批落地，
   否则今天会有一条透传出来的 `usage="[object Object]"` 属性挂在 el-dialog 根上）
-- 行号提醒：Task 7 给 `FileListTab.vue` 加了 21 行，原先记为 `:220/225/256/283/306` 的五个
-  `notifyFilesChanged()` 调用点现在是 **`:237/242/273/300/323`**（内容没变，只有位置漂）。
-  ⇒ 本批所有引用这些位置的句子都要按现号复核，别照抄旧号（`grep -n notifyFilesChanged` 一条命令的事）。
+- 行号提醒：Task 7 给 `FileListTab.vue` 加了 21 行、`0cc2b45` 又合并掉一行导入 ⇒ 该文件里所有旧行号
+  都已漂过，**别照抄任何写死的号**。现取：
+  `grep -n "notifyFilesChanged()" frontend/src/pages/data/components/FileListTab.vue` ⇒ 236/241/272/299/322；
+  `grep -n "ConsistencyCheckDialog" frontend/src/pages/data/components/FileListTab.vue` ⇒ 绑定处与导入处各一。
 
 - [ ] **Step 1: 接 prop 与渲染**
 
@@ -2769,8 +2770,9 @@ Task 7 不加 T2 用例这句是对的，既无回归也无新增）；`lineLimi
    **Task 9 的 Files 清单因此多一行 `FileListTab.vue`**（已在上面 Task 9 处写明）。
 
 3. **`filesVersion` 的覆盖面比注释写的更大，注释仍成立。** 落地方复核五个
-   `notifyFilesChanged()` 调用点仍在（Task 7 加了 21 行，位置从
-   `220/225/256/283/306` 漂到 **`237/242/273/300/323`**，内容未变），
+   `notifyFilesChanged()` 调用点**内容都在、位置漂了两次**（Task 7 加 21 行 ⇒ 220/225/256/283/306 →
+   237/242/273/300/323；`0cc2b45` 合并一行导入 ⇒ 再到 **236/241/272/299/322**，这是本条的现号，
+   现取一律用 `grep -n "notifyFilesChanged()" FileListTab.vue`，见下面第 6 条），
    并且 `BatchDataTab`、`SftpBrowser` 这些**外部**写路径同样 bump ⇒ watch 一行覆盖得比声明的更多。
    控制器按文件现数（`grep -rc "notifyFilesChanged()" src --include=*.vue --include=*.ts`）：
    `BatchDataTab.vue` **5**、`FileListTab.vue` **5**、`SftpBrowser.vue` **4**、
@@ -2799,3 +2801,16 @@ Task 7 不加 T2 用例这句是对的，既无回归也无新增）；`lineLimi
    照抄就会让跨任务改动在 diff 里隐身；Step 4 的基线还写着 `68 文件 / 951 例 ⇒ 69/966`
    （Task 6 复审补例后真值是 69/**967**），且没写 `vue-tsc` 必须 `--force`
    （本批实测过一次 tsbuildinfo 假绿）。
+
+6. **行号是一种会腐烂的引用，本批已经被它咬了三次 —— 规矩改成「符号 + 现取命令」。**
+   第 3 条那串号在**同一天内漂了两次**：Task 7 给文件加 21 行（220/225/256/283/306 →
+   237/242/273/300/323），紧接着控制器自己那一行导入合并（`0cc2b45`）又把它整体减 1
+   （→ 236/241/272/299/322）—— 而后一条提交**没有碰这四个调用点里的任何一行**，
+   这正是危险所在：改动与被引号无关，号却照样失效。
+   规格复审抓到的是第三例（它指出台账与 Task 9 Files 清单里的号都是上一分钟的快照）。
+   ⇒ 三条落地规矩：① 台账/正文引位置时**优先引符号名 + grep 命令**
+   （`grep -n "watch(() => filesStore.filesVersion" FileListTab.vue`），必须写号就同排这条命令；
+   ② 写号要标「截至哪一次提交」，否则下一个人无从判断它是否还活着；
+   ③ 每改一个跟踪文件，收尾时 `grep` 一遍计划里对该文件的裸行号引用（本批 29 行的头部摘要就还留着
+   Task 7 之前的 `:322-327`，已改为符号式）。
+   这条与既有纪律同源不同物：「台账写命令不写快照」管的是**门禁输出**，这条管的是**代码位置**。
