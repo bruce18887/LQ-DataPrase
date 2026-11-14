@@ -879,7 +879,12 @@ Expected: 本文件全绿（**落地实测 20 例**：Task 2 拆完 bool 闸门�
 - [ ] **Step 5: 变异反证**
 
 * M7：把 `keep_ids = request.data.get('keep_ids') or []` 改成整个传 `request.data.get('keep_ids')`
-  （即 `None` 直接进函数）⇒ `for raw in None` 抛 `TypeError` ⇒ 500，HTTP 类红。
+  （即 `None` 直接进函数）⇒ 计划原预测「`for raw in None` 抛 `TypeError` ⇒ 500」**不成立**。
+  实测红 3 条 + 1 error，机制是视图那道 `isinstance(keep_ids, list)` 先把「缺键」翻成 **400**
+  （`None` 不是 list），红在 `test_不带keep_ids时…`、`test_51组…`（都 `400 != 200`）与旧
+  `keeps_earliest`、`batch_file_only`（`KeyError: 'deleted_count'`）
+  ⇒ `or []` 承重的语义是「不带 keep_ids ⇒ 走默认清理」这条通路，不是「防 TypeError」。
+  算抓住，但台账要写清是被哪道闸门抓住的。
 * M8：把 `except InvalidKeepSelection` 换成 `except ValueError` ⇒ 本类仍全绿（它是子类），
   **但** `test_keep_ids不是数组时400` 里的 `isinstance` 那道挡不住时也一样红 —— 记录这个
   「等价变异」为**已知不可区分**，别声称这条判据抓得住它（判据可达性纪律）。
