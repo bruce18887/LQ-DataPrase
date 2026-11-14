@@ -26,7 +26,7 @@
 ⇒ 处置：差值行**只陈述事实、不带动作**（文案见 Task 9），并且把「补一个 `refresh_file_sizes` 修复动作」留给配额批。理由另有一条：批3 的重复判定口径是 `(filename, file_size)` 精确相等，真去回写 `file_size` 会连带改变重复组的划分，那属于跨批影响，不该在本批顺手做。
 
 **订正④（§4.4 的「主动失效」改成客户端驱动）** 稿子要「上传/删除/修复成功后主动失效」，但满足它的服务端钩子有 8 处（`_register_file`、`_delete_datafile_file_only`、`bulk_delete`、两处 `shutil.rmtree`、两处 `shutil.move`、修复动作分发器），漏挂一处就**永久**陈旧到进程重启。
-⇒ 处置：`KeyedLRU` 分桶 TTL 做正确性下界（漏挂最多陈旧 30–60s），刷新入口做成 `?fresh=1`，由 `FileListTab.vue` 在**已经存在**的 `filesStore.filesVersion` watch（`frontend/src/pages/data/components/FileListTab.vue:322-327`）里带 `fresh=true` 重拉——上传/删除/批量删除/组合/修复五条流全都调 `filesStore.notifyFilesChanged()`（`FileListTab.vue:220/225/256/288/306`），所以**一行覆盖全部**，SFTP 后台导入这类无前端信号的路径由 TTL 兜底，浮层里显示「统计时间」让陈旧可见。
+⇒ 处置：`KeyedLRU` 分桶 TTL 做正确性下界（漏挂最多陈旧 **≤30s**：桶号在 key 里，一条结果的寿命最多到它所属桶的末尾 —— 初稿这里写的「30–60s」宽了一倍，订正见文末 Task 4 复核第 5 条），刷新入口做成 `?fresh=1`，由 `FileListTab.vue` 在**已经存在**的 `filesStore.filesVersion` watch（`frontend/src/pages/data/components/FileListTab.vue:322-327`）里带 `fresh=true` 重拉——上传/删除/批量删除/组合/修复五条流全都调 `filesStore.notifyFilesChanged()`（`FileListTab.vue:220/225/256/283/306`；2026-11-14 拆档后复核，第 4 处从 288 漂到 **283**，其余没动），所以**一行覆盖全部**，SFTP 后台导入这类无前端信号的路径由 TTL 兜底，浮层里显示「统计时间」让陈旧可见。
 
 **订正⑤（§4.6 的恒等式在真实数据上会说一件已经被别人说过的事）** Task 1 追加探针 `tasks/probe_batch2_diff_cause.py` 在本机 dev 库实测拆开四个量：
 
@@ -1154,6 +1154,8 @@ from .usage_views import (  # noqa: F401
 
 在 `apps/datafiles/storage_usage.py` 里补上测试要的公开入口与清缓存钩子（`_compute_usage` 之后）。本任务才真正需要缓存，所以**这一步**才加 `import time`、`from apps.common.keyed_lru import KeyedLRU`、`USAGE_CACHE_TTL_SECONDS`、`_USAGE_CACHE_MAX_ENTRIES`、`_usage_cache = KeyedLRU(_USAGE_CACHE_MAX_ENTRIES)`，并把模块 docstring 末尾那句「进程内 TTL 缓存（`get_user_usage`）由后续任务加在本文件里」改成对它的一句话说明（分桶实现没有 per-key 过期 ⇒ 真实窗口在 `[TTL, 2*TTL)` 浮动 ⇒ 所以返回体带 `scanned_at` 让陈旧可见）：
 
+⚠ **下面这块 docstring 里的窗口口径已过期，别照抄。** 「`[TTL, 2*TTL)` 浮动」「最多陈旧一分钟」是初稿算法：桶号在 **key 里**，一条结果最多活到它所属桶的末尾 ⇒ 真实上界是 **≤30s**。落地文本以 `apps/datafiles/storage_usage.py:14-24` 为准，订正理由见文末「Task 4 落地后的订正」第 5 条。这一段保留原样只是为了让「谁在哪一步改了什么」可追溯。
+
 ```python
 def get_user_usage(user, fresh=False):
     """按用户取占用统计，带进程内分桶 TTL 缓存。
@@ -1392,7 +1394,7 @@ describe('usageBytesText', () => {
     expect(usageBytesText(1024 * 1024)).toBe('1.0 MB')
   })
 
-  // GB 档是本功能新增的：formatSize 最高只到 MB，改它要动 8 个调用点，不属本批。
+  // GB 档是本功能新增的：formatSize 最高只到 MB，改它要动既有调用点的显示（现数 7 个文件 9 处调用），不属本批。
   it('≥1GiB 进 GB 档并保留两位', () => {
     expect(usageBytesText(1024 * 1024 * 1024)).toBe('1.00 GB')
     expect(usageBytesText(1024 * 1024 * 1024 - 1)).toBe('1024.0 MB')
@@ -1461,9 +1463,19 @@ describe('usageOutsideLine / usageMismatchLine / usageScannedText', () => {
       .toBe('清单与磁盘不一致（差 117.7 MB）：清单里的文件大小是导入当时的快照，此后不刷新')
   })
 
-  it('统计时间缺失时返回 null，不显「统计时间 」', () => {
+  it('scanned_at 缺失或不可解析时返回 null，不显空串', () => {
     expect(usageScannedText(base({ scanned_at: '' }))).toBeNull()
-    expect(usageScannedText(base())?.startsWith('统计时间')).toBe(true)
+    expect(usageScannedText(base({ scanned_at: 'not-a-date' }))).toBeNull()
+    expect(usageScannedText(null)).toBeNull()
+  })
+
+  it('值只有时间本身，不带「统计时间」前缀（label 归调用方）', () => {
+    // ⚠ 分工：`usageScannedText` 返回的是**浮层某一行的 value**，而那一行的 label
+    // 由调用方（Task 7 的 `el-descriptions-item label="统计时间"`）给。返回值再自带
+    // 前缀就会读成「统计时间：统计时间 2026-11-14 …」。所以这里只钉形状，不钉前缀。
+    const text = usageScannedText(base())
+    expect(text).toMatch(/^\d{4}[-/]\d{1,2}[-/]\d{1,2}/)
+    expect(text).not.toMatch(/统计时间/)
   })
 })
 ```
@@ -1487,7 +1499,8 @@ Expected: FAIL —— `Failed to resolve import "../../src/utils/diskUsage"`。
  * 与 `utils/format.ts` 的 `formatSize` 的关系：**故意不复用**。两个理由都各有测试钉着：
  * 1. `formatSize(0)` 返回 `'--'` 是 `format.spec.ts:23-25` 的既有契约（那边「没大小」与
  *    「0 字节」同形无妨），但「空目录 0 字节」是本功能的合法状态，chip 必须说成 `0 B`。
- * 2. `formatSize` 最高只到 MB；GB 档要加就得动 8 个既有调用点的显示，不属本批范围。
+ * 2. `formatSize` 最高只到 MB；GB 档要加就得动既有调用点的显示（2026-11-14 现数：导入
+ *    utils 版的 7 个文件、共 9 处调用；sftp 那 3 个文件各有同名本地函数，不受影响），不属本批范围。
  */
 import type { FileUsage } from '../api/datafiles'
 
@@ -1550,7 +1563,7 @@ export function usageScannedText(usage: FileUsage | null): string | null {
   if (!usage || !usage.scanned_at) return null
   const date = new Date(usage.scanned_at)
   if (Number.isNaN(date.getTime())) return null
-  return `统计时间 ${date.toLocaleString('zh-CN', { hour12: false })}`
+  return date.toLocaleString('zh-CN', { hour12: false })
 }
 ```
 
@@ -1740,7 +1753,7 @@ const usageOutside = computed(() => usageOutsideLine(props.usage))
 const usageScanned = computed(() => usageScannedText(props.usage))
 ```
 
-⚠ `usageScannedText` 的返回值已经自带「统计时间 」前缀，而上面 `el-descriptions-item` 的 `label` 也是「统计时间」——这会读成「统计时间：统计时间 2026-11-14 …」。二选一：把那一行的 value 改成 `usage.scanned_at` 的裸时间串。**Task 7 采用的做法**：`utils/diskUsage.ts` 的 `usageScannedText` 改为**不带前缀**（返回 `date.toLocaleString(...)` 本身），Task 6 的 T2 断言同步改成「非空且匹配 `/^\d{4}[/\-]\d{2}[/\-]\d{2}/`」而不是 `startsWith('统计时间')`；`usageOutsideLine` 保留自带的那句完整话（它没有 label 可依附）。改完两处的注释都要说清「label 由调用方给，值只有内容」这条分工，别留给下一个人猜。
+⚠ 「统计时间」这一行**不要双份**：上面 `el-descriptions-item` 的 `label` 已经是「统计时间」，所以 value 只能是裸时间串。这条分工**已在 Task 6 正文里定死**（`usageScannedText` 返回 `date.toLocaleString(...)` 本身、T2 断言 `not.toMatch(/统计时间/)`），Task 7 **不要再动 `utils/diskUsage.ts`** —— 原稿把这个改动挂在 Task 7 上，2026-11-14 复核时挪回 Task 6，理由是这个前缀归属只有 utils 的作者能钉住，跨任务改别人的文件必然漏一边。`usageOutsideLine` 相反，它没有 label 可依附，所以保留自带的那句完整话。
 
 - [ ] **Step 4: 类型检查与全量 vitest**
 
@@ -1759,7 +1772,7 @@ git commit -m "feat(data): 文件列表工具栏显示磁盘占用 chip 与拆�
 
 ---
 
-### Task 8: e2e（T3）——chip 的三条渲染判据
+### Task 8: e2e（T3）——chip 的两条渲染判据
 
 **Files:**
 - Create: `frontend/e2e/data/disk-usage-chip.spec.ts`
@@ -1909,17 +1922,17 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
     expect(joined).toContain(String(captured.file_count))
     await expect(page.locator(CHIP)).toBeVisible()
   })
-
-  test('新用户目录为空时 chip 说 0 B 而不是 --', async ({ page }) => {
-    // 这条钉的是「空目录是合法状态」：formatSize 的 0 → '--' 在别处合理，
-    // 在这里会被读成「还没算出来」。判据在 T2（diskUsage.spec.ts）也钉了一份。
-    const body = await apiGet(page, '/files/usage/') // 需要登录态：见下面的 todo
-    expect(body.status).toBe(200)
-  })
 })
 ```
 
-最后那条「新用户」用例先**别实现**：它要一个没有数据目录的账号，而 P2 project 的 `storageState` 固定是 `ADMIN_STATE`（`playwright.config.ts:144`），换账号得走 `helpers/auth.ts` 的登录路径，代价比判据值钱——而 0 B 这条形状已经被 Task 6 的 T2 完整钉住（`usageChipText(base())` ⇒ `'磁盘占用 0 B · 0 个文件'`）。**删掉它**，并在文件头注释里写明「空目录态由 T2 钉，不在浏览器里重算」。留一条半成品用例会变成下一个人的坑。
+**本批只有上面两条浏览器用例，没有第三条。** 初稿在这里还有一条
+`test('新用户目录为空时 chip 说 0 B 而不是 --')`，正文写着「先别实现」、用例体里却留了一句
+`apiGet(page, '/files/usage/')` 占位 —— 2026-11-14 复核时直接删掉，理由是那条用例本身站不住：
+它要一个没有数据目录的账号，而 P2 project 的 `storageState` 固定是 `ADMIN_STATE`
+（`playwright.config.ts:144`），换账号得走 `helpers/auth.ts` 的登录路径，代价比判据值钱；
+而 0 B 这条形状已经被 Task 6 的 T2 完整钉住（`usageChipText(base())` ⇒
+`'磁盘占用 0 B · 0 个文件'`）。**留着占位用例就是它自己正文里警告的「下一个人的坑」。**
+⇒ 落地时把这句理由写进 spec 文件头注释：「空目录态由 T2 钉，不在浏览器里重算」。
 
 - [ ] **Step 2: 跑用例（单文件自起服务，先确认端口没被抢）**
 
@@ -2280,9 +2293,9 @@ HTTP 在 `views/usage_views.py`，TTL 缓存由 Task 4 加」。
 | §4.7 配额只做到「当前用户」 | 全程无新字段、无逐用户列表；Task 10 Step 3 的「本批不做」清单写死 |
 | §4.8 测试（T1 齐全/空目录/隔离/缓存/交叉核对；T3 chip 渲染） | Task 2/3/4/5（T1，共 23 例）+ Task 6（T2，15 例）+ Task 8/9（T3，6 例） |
 
-**2. 占位符扫描**：无 TBD/「类似 Task N」/「加适当错误处理」。两处「故意写错再改」是显式教学步骤（Task 4 Step 1 的 `test_只读不接受POST`、Task 8 Step 1 末尾删掉那条用例），都写明了删/改的动作为什么，不是留白。
+**2. 占位符扫描**：无 TBD/「类似 Task N」/「加适当错误处理」。一处「故意写错再改」是显式教学步骤（Task 4 Step 1 的 `test_只读不接受POST`），写明了动作为什么。Task 8 原先还带一条「写进代码块、正文再叫作者删掉」的占位用例，2026-11-14 复核时判定它自己就是它警告的那种坑，已从正文移除并保留理由（见 Task 8 正文）。
 
-**3. 类型一致性**：`_scan_tree` 返回的键（`bytes`/`unique_bytes`/`file_count`/`by_type`）= `_compute_usage` 用的键 = `FileUsage` 的字段 = e2e 的 `captured.*`。`_db_totals` 的 `in_count/in_bytes/out_count/out_bytes` 只在 Task 3/4 内部与 `_compute_usage` 的映射处出现，未泄漏到前端。`get_user_usage(user, fresh=…)` / `clear_usage_cache()` 在 Task 4/5 用法一致。前端 6 个函数名在 Task 6 定义、Task 7/9 调用，逐字相同。Task 7 Step 3 的 ⚠ 要求 `usageScannedText` 去掉前缀并同步 Task 6 的断言——这条改动要在 Task 6→7 之间落地，别只改一边。
+**3. 类型一致性**：`_scan_tree` 返回的键（`bytes`/`unique_bytes`/`file_count`/`by_type`）= `_compute_usage` 用的键 = `FileUsage` 的字段 = e2e 的 `captured.*`。`_db_totals` 的 `in_count/in_bytes/out_count/out_bytes` 只在 Task 3/4 内部与 `_compute_usage` 的映射处出现，未泄漏到前端。`get_user_usage(user, fresh=…)` / `clear_usage_cache()` 在 Task 4/5 用法一致。前端 6 个函数名在 Task 6 定义、Task 7/9 调用，逐字相同。`usageScannedText` 的前缀归属**已收在 Task 6 内部**（返回裸时间串 + T2 断言 `not.toMatch(/统计时间/)`），Task 7 只负责给 label，不再回改 utils —— 原稿写成「Task 7 去改 Task 6 的文件」，2026-11-14 复核时挪回 Task 6，因为跨任务改别人的文件必然漏一边。
 
 ---
 
