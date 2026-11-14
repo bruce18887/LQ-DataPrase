@@ -48,6 +48,18 @@ MISMATCH_RATIO_THRESHOLD = 0.05
 _UNSAFE_USERNAMES = ('', '.', '..')
 
 
+def is_safe_username(username):
+    """用户名能不能安全当数据目录名用。**视图也用它**：早退成 204 比让异常冒成 500 诚实
+    （500 会让前端每次进门弹一条错误 toast，而这件事本来就不是「服务器坏了」）。
+    把判据放这儿而不是各写一份，是为了它和 ``_user_data_root`` 永远同进同退。"""
+    name = str(username)
+    return not (
+        name in _UNSAFE_USERNAMES
+        or os.sep in name
+        or (os.altsep and os.altsep in name)
+    )
+
+
 def _user_data_root(username):
     """当前用户的数据根目录 = ``MEDIA_ROOT/data/<username>``。
 
@@ -60,11 +72,10 @@ def _user_data_root(username):
     已知同形状的老入口 ``_helpers.py:172 _user_upload_dir`` 没挡这一条（上传侧同样能
     被 ``..`` 顶到 MEDIA_ROOT），那是既有事实、不属本批，记进台账。
     """
-    name = str(username)
-    if name in _UNSAFE_USERNAMES or os.sep in name or (os.altsep and os.altsep in name):
-        raise ValueError('用户名不能安全地用作数据目录名：%r' % name)
+    if not is_safe_username(username):
+        raise ValueError('用户名不能安全地用作数据目录名：%r' % str(username))
     return os.path.normpath(
-        os.path.join(str(settings.MEDIA_ROOT), 'data', name)
+        os.path.join(str(settings.MEDIA_ROOT), 'data', str(username))
     )
 
 
