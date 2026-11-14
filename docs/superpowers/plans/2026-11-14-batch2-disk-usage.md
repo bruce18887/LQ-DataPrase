@@ -2232,9 +2232,11 @@ const mismatchLine = computed(() => usageMismatchLine(props.usage))
   })
 ```
 
-- [ ] **Step 3: 跑本文件的六条**
+- [ ] **Step 3: 跑本文件的全部用例**
 
-Run:
+条数**别照抄本计划里的任何数字**（Task 8 落地时这里写的「六条」已经是错的——实际当时就落成了 7 条）。现取：
+`grep -c "^  test(" frontend/e2e/data/disk-usage-chip.spec.ts` ⇒ 应为 **本计划 Task 8 的落数 + 2**（Step 2 追加的两条）。
+跑法不变（整个文件都在跑，不靠条数选例）：
 ```bash
 cd frontend && node ../scripts/e2e_pool.mjs --slots=1 -- e2e/data/disk-usage-chip.spec.ts > ../tasks/b2-task9.log 2>&1
 ```
@@ -2277,7 +2279,9 @@ npx vitest run
 npm run lint:e2e
 ```
 Expected:
-- 池：`[pool] 结论 MEASURED`、`unexpected 0`、末行 `RESULT:`；批1 基线是 87 文件 / 460 例，本批 **+1 文件 / +6 例**，但**以现读数为准**。
+- 池：`[pool] 结论 MEASURED`、`unexpected 0`、末行 `RESULT:`；批1 基线是 87 文件 / 460 例，本批到 Task 9 收口时
+  **预期 +1 文件 / +9 例**（`git diff --stat master...HEAD -- frontend/e2e` 现读只有 `disk-usage-chip.spec.ts` 一个新建文件，
+  9 例 = Task 8 落的 7 + Task 9 追加的 2，`grep -c "^  test("` 现读），但**以现读数为准**，上面这两个数只是预测。
 - 后端：`OK`（批1 基线 `Ran 2576 … OK (skipped=16)`，**本批 +48 例**：`test_storage_usage_scan.py` 34 +
   `test_storage_usage_cache.py` 4 + `test_files_usage_api.py` 10，三个文件全是本批新建 ⇒ 期望总量 ≈ 2624，
   **数字现跑现取**，别拿这个和当判据），`grep -cE "^(FAIL|ERROR):"` 必须是 **0**。
