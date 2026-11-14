@@ -59,6 +59,7 @@
     <!-- Consistency Check Dialog -->
     <ConsistencyCheckDialog
       v-model:visible="showConsistencyCheck"
+      :usage="usage"
       @done="onConsistencyDone"
     />
 

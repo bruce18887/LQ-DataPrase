@@ -42,6 +42,17 @@
         </el-descriptions-item>
       </el-descriptions>
 
+      <!-- 清单/磁盘差值（规格 §4.6 + 计划订正③）：只陈述事实、不给动作按钮——
+           产品里没有任何路径会回写 file_size，「重新扫描」修不好这一行。 -->
+      <el-alert
+        v-if="mismatchLine"
+        :title="mismatchLine"
+        type="warning"
+        :closable="false"
+        show-icon
+        style="margin-bottom: 12px"
+      />
+
       <!-- 孤立数据库记录 -->
       <OrphanedDbCard
         :items="result.orphaned_db"
@@ -100,7 +111,8 @@
 import { ref, computed } from 'vue'
 import { CircleCheck } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { datafilesApi, type ConsistencyCheckResult, type ConsistencyFixAction, type FixConsistencyResponse } from '../../../api/datafiles'
+import { datafilesApi, type ConsistencyCheckResult, type ConsistencyFixAction, type FileUsage, type FixConsistencyResponse } from '../../../api/datafiles'
+import { usageMismatchLine } from '../../../utils/diskUsage'
 import { useAuthStore } from '../../../stores/auth'
 import OrphanedDbCard from './OrphanedDbCard.vue'
 import OrphanedDiskCard from './OrphanedDiskCard.vue'
@@ -109,6 +121,7 @@ import DuplicateFilesCard from './DuplicateFilesCard.vue'
 
 const props = defineProps<{
   visible: boolean
+  usage: FileUsage | null
 }>()
 
 const emit = defineEmits<{
@@ -126,6 +139,10 @@ const visible = computed({
 const checking = ref(false)
 const fixingAction = ref<ConsistencyFixAction | null>(null)
 const result = ref<ConsistencyCheckResult | null>(null)
+
+// 差值行读的是**已经拉过的那次占用**，不在这个对话框里再扫一遍盘（规格 §4.6：
+// 它只是一个「清单与磁盘对不上」的提示，不是一个第二指标）。
+const mismatchLine = computed(() => usageMismatchLine(props.usage))
 
 async function runCheck() {
   checking.value = true
