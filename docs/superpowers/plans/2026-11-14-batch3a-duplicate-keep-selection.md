@@ -2004,16 +2004,19 @@ async function dupRemainingBatches(page: Page, names: string[]): Promise<string[
 
 ### Task 8 落地后实测到的三件事（`21e0d2f`）
 
-1. **「已选中的 radio 再点一次」不发 `change` —— 由此暴露一个真实的界面缺口。**
-   通路已核到源码：`DuplicateFilesCard.vue:45` 的 `pick()` 挂在 `el-radio-group` 的
-   `@update:model-value` 上，而它由 `use-radio.mjs:20-24` 的 setter 驱动（`:21` 转
-   `radioGroup.changeEvent`），该 setter 只被 `radio.vue` 里的原生 `change` 链路调用。
-   浏览器对**已选中**的 radio 重复点击不产生 `change` ⇒ `pick()` 不会被调用 ⇒
-   那一组**永远标不出「改选过」**（首轮实测就是红在这里，不是推理）。
-   后果不只是用例写法（第 2b 节已按「手改较晚那份 + 策略选最早」绕开，判别力等价）：
-   **用户无法用界面表达「我确认就要默认这一份，别让一键策略动它」** —— 想保护默认项，
-   只能先改成另一份再改回来，而第二击同样不留痕迹。本批不改产品代码（改它要新增
-   「锁定本组」状态 + 相应判据，属另一个决定），在此点名并登记给批4 复核。
+1. **「已选中的 radio 再点一次」不发 `change`（这条成立）；但我由它推出的那句
+   「所以用户表达不出『就要默认这份』」是**错的**，复审已把它撤回。**
+   成立的半条：通路已核到源码 —— `DuplicateFilesCard.vue:45` 的 `pick()` 挂在
+   `el-radio-group` 的 `@update:model-value` 上，由 `use-radio.mjs:18-23` 的 setter 驱动
+   （`:21` 转 `radioGroup.changeEvent`），而该 setter 只被 `radio.vue_…setup:50` 那条原生
+   `onChange` 链路调用。浏览器对**已选中**的 radio 重复点击不产生 `change` ⇒ 单点一次点不出
+   （首轮实测就是红在这里，不是推理）。
+   **错的半条**：`pick()` 是无条件 `choice.set(key, id)`（`:145-147`，不比较新旧值），
+   所以「点另一份、再点回来」这两击都会发 `change` ⇒ 第二击就把该组标成**已改选**，
+   值仍是默认那份。**用户能表达「我确认就要默认这一份」**，代价是两次点击。
+   ⇒ 这属人机工效（缺一枚「锁定本组」），不属能力缺失，登记给批4 时按前者谈。
+   而它同时是第 2b 节用例的重写前提：手改那组可以**停在默认值上**，
+   于是策略可以选「最新导入」（≠ 默认）—— 见下一节复审发现 2。
 
 2. **`toHaveCount(n, msg)` 是 TS2559。** Playwright 该匹配器只收一个参数，说明文字必须
    挂在 `expect(value, message)` 上（与 T1 的 `expect(x, '…').toBe(y)` 同一纪律，
@@ -2037,6 +2040,29 @@ async function dupRemainingBatches(page: Page, names: string[]): Promise<string[
 - 第三条用例的**后端侧覆盖是等价推断，不是实测**：`describe.serial` 在前一条失败时会 skip
   后一条，变异只打在 K1/K2/K3 的界面选择上，后端收到的是什么 `keep_ids` 由第 2 条用例的
   终态断言间接保证。写进台账时别把它说成「T3 直接钉住后端逐组映射」。
+
+### Task 8 复审发现（只读复审 8 条，其中 5 条成立，本批处置如下）
+
+复审是**只读**的（不改文件、不跑门禁），所以下面每条都标了「成立与否由我核过」：
+
+| # | 级别 | 发现 | 我核过没有 | 处置 |
+|---|------|------|-----------|------|
+| 1 | BLOCKER | 上面「界面缺口」那句是假的：两击（改选再改回）就能标 touched | ✅ 已核源码 `DuplicateFilesCard.vue:145-147` 无条件 `set`；正文已按「单击点不出、两击点得出」改写 | 撤回假话 + 用例 3 重写（见下） |
+| 2 | IMPORTANT | 用例 3 用「最早导入」当策略，而 `earliest` 在两颗成员的组里**恰等于默认** ⇒ 「策略被无视、内部硬编码 earliest」这个变异三档全绿；`grep 最新导入` 在 e2e 里 0 命中 | ✅ 已核 `strategy` 初值 `'earliest'`（:126）+ `applyStrategy()` 用 `strategy.value`（:151） | 用例 3 改成「手改两击落回默认 + 策略选**最新导入**」：一个用例同时杀「无视策略」与「覆盖改选组」两个变异 |
+| 3 | IMPORTANT | 同意闸没钉：删掉 `:disabled="!deleteConfirmed \|\| !canDelete"` 三条用例照样全绿（每条都先点 checkbox，从没断过点之前的 disabled） | ✅ 复核描述与 `:76`、`spec:338/368/434` 一致 | 用例 1 点 checkbox **之前**补一条 `toBeDisabled()` |
+| 4 | IMPORTANT | 两条泄漏通路：① 播种在 `try` 之外（`spec:321/355/387-389`），播种中途抛 ⇒ 盘目录与 DB 行都不清；② `cleanupDup` 先 `rmSync` 再删 DB 行且空 catch 吞异常（`spec:122-127`）⇒ 失败时留下「有记录无文件」的孤立行，而 `spec:449` 恰好断言该卡片 hidden | ✅ 与文件一致 | 播种进 `try`；先删 DB 行再删盘；catch 里打日志不静默 |
+| 5 | IMPORTANT（低估而非夸大） | 「后端侧只是等价推断」说过头了：`--grep '一键策略'` 能单跑用例 3，T1 也已逐组钉过（`test_duplicate_keep_selection.py:169-176`） | ⚠ 未实测单跑 —— 交给重写那轮一起测，测完把这句改成实测口径 | 单跑并把「推断」改「实测」 |
+| 6 | NIT | `watch` 清零（`:130-133`）在 T3 观察不到：全部删成功后每组只剩 1 成员、卡片 `visible=false`，删掉这条 watch 三档全绿；唯一会看见它的流程是「>50 组续删」，按 §5.6 只由 T1 钉 | ✅ | 台账里写清「此路由 T1 独占，T3 不覆盖」，别声称浏览器覆盖了它 |
+| 7 | NIT | `spec:292-293` 那句「全仓 e2e 磁盘判据 0 处」字面真但误导 —— 磁盘**内容**判据在 `e2e/exports/html-report.spec.ts:33-36`、`e2e/sftp/search.spec.ts:363-365` 早有 | ✅ | 把措辞收窄到 `existsSync` |
+| 8 | NIT | `toContainText('2 个')` 是继承来的弱判据（12 成员的组也匹配）；两条断言都隐含「本 slot 种子数据贡献 0 个重复组」这个未写明的前提 | ✅ | 保留但补一行写明前提（种子确实 0 组，`按选择删除 1 个` 是真正的计数钉） |
+
+**复审认为干净、我抽查过的两类**（记下来免得下批重复审）：
+① 定位器无 strict-mode 风险 —— `MaintenanceCard.vue:24-27` 不插 checkbox，策略组radio 在
+`.dup-strategy` 内、逐组 radio 在其外，`.el-radio` ≠ `.el-checkbox`；
+`filter({ hasText: batchA })` 唯一，因为行内渲染的是 `[batch_name]`（`:56`）而 `-A` 不是 `-B` 的子串。
+② `cleanupDup` 打到的是 slot 库不是 dev 库 —— `playwright.config.ts:19-20` 把 `shellDjango`
+绑到 slot settings 与 slot 目录（`helpers/slot.ts:83`）。f-string 拼 SQL 在这批是惰性的
+（`dupName` 是固定前缀 + 时间戳字面量），但按教训「拼 SQL 要有闸」补一道引号/反斜杠断言。
 
 ## Task 9: 介绍书联动（维护时机 ②）
 
