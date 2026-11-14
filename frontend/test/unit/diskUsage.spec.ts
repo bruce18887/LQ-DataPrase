@@ -74,9 +74,11 @@ describe('usageChipText', () => {
 
   it('chip 只有体积，不带文件数（与工具栏左边那颗「N 个文件」口径不同）', () => {
     const text = usageChipText(base({ bytes: 1288490188, file_count: 3412 }))
-    expect(text).toBe('磁盘占用 1.20 GB')
-    // 反向守卫：把计数加回 chip 就必须红 —— 这条文案的分工不能只靠注释维持。
+    // 反向守卫必须排在 toBe **之前**：同一条 it 里 vitest 在第一个失败断言就抛，
+    // 排在整串断言后面它永远当不了 killer（2026-11-14 实测：把计数加回去死在 toBe，
+    // 行号 77/83，不是这一行），那样它就只是注释而不是判据。
     expect(text).not.toMatch(/个文件/)
+    expect(text).toBe('磁盘占用 1.20 GB')
   })
 
   it('空目录也只说体积，不再出现「· 0 个文件」那种半句话', () => {
@@ -175,9 +177,12 @@ describe('usageScannedText', () => {
     // 本机 UTC+8 下这条 UTC 串渲染成**次日 07:07**（h12 版是 `上午7:07:08`），日期部分与输入
     // 不同一天 —— 上面只钉日期形状、不钉日期值，所以跨年/跨日都不影响判据，别去"修"这个夹具。
     const text = usageScannedText(base({ scanned_at: '2026-11-14T23:07:08+00:00' }))
+    // 两条反向守卫排在正向之前，理由与上面 chip 那条同一个（同 it 内第一个失败就抛）：
+    // 实测「把统计时间前缀加回去」原本死在 ^\d{4}[-/]… 那条形状断言上（:178），
+    // 这条 not.toMatch 从未当过 killer —— 排在前面它才真的是判据。
+    expect(text).not.toMatch(/统计时间/)
+    expect(text).not.toMatch(/[上下]午/)
     expect(text).toMatch(/^\d{4}[-/]\d{1,2}[-/]\d{1,2}/)
     expect(text).toMatch(/\d{1,2}:\d{2}:\d{2}/)
-    expect(text).not.toMatch(/[上下]午/)
-    expect(text).not.toMatch(/统计时间/)
   })
 })
