@@ -3366,3 +3366,35 @@ unexpected 0 ⇒ 这条差异本身就是线索。做法是把批2 在争用路�
 
 ⇒ 本批的判据账因此更新一处：**F1 说明「加一个新子路由」的连带面不止「别人会不会误收它」，还包括
 「同一族里本来就有几发全量列表请求」**——反向谓词的假绿要按「这一族里有几发」来关，不是按「谁新来」来关。
+
+---
+
+#### 用户拍板后的 F3 落地与并入（2026-11-14 收口）
+
+三条拍板：批2 **`--ff-only` 并入本地 master**、F3 **在批2 内修视图 204**、`C:\lqdp-e2e` 的 362 个 slot
+目录 / 7.7 GB **先不清**（都是崩池轮有意保留的证据）。
+
+F3 的落地形状与上一节预测的不同之处，全部是实测逼出来的（提交 `2698383`）：
+
+1. **判据提成共用函数而不是复制**：`storage_usage.is_safe_username`。上一节写过「视图层 catch ValueError」，
+   真去做的时候否掉了——`_scan_tree` 里也有一处 `raise ValueError`（`storage_usage.py:134`，root 不是绝对路径
+   的编程错误），`except ValueError` 会把它一起吞成 204。改成视图**先查后返回**，异常路径一字不动。
+2. **T1 加了两条而不是一条**：`..` ⇒ 204/空 body/`data is None`；再加一条 `a.b`（带点号的正常用户名）
+   ⇒ 照旧 200 全 13 字段。第二条专门用来钉「这是白名单式早退，不是把 ValueError 全吞」——
+   没有它，`except ValueError` 那种写法也能骗过第一条。
+3. **反证跑错了层，被实测推翻**：新加的 T3 用例（mock 返回 204 ⇒ chip 缺席、零条错误提示）我先写了句
+   「视图改回 500 这条会红」。真把 `Response(status=204)` 改成 500 跑独占池 ⇒ **`unexpected 0`，十例全绿**：
+   `page.route().fulfill()` 把真实响应整个遮掉，后端状态码在浏览器这条通路上不可观察。
+   同一个变异拿去 T1 ⇒ `Ran 12 tests … FAILED (failures=1)`，且只 FAIL 新加那条（其余 11 条过）。
+   ⇒ 注释改成实话，并在 T1/T3 两边互点名。**教训已单独进 `docs/tasks/lessons.md`**：
+   写「这条能被什么改红」之前先问「变异要穿过哪一层才到得了这里」。
+4. 改了产品代码 ⇒ 收口两档重跑而不是沿用：后端 `Ran 2626 / OK (skipped=16) / FAIL|ERROR 0`，
+   全量池 `文件 88 · 用例 470 · unexpected 0 · flaky 3 · 结论 MEASURED`（三条 flaky 是 wafermap 两条 +
+   批1 记过名的 `view-data.spec.ts:1474`，无一属本批）；`npx vue-tsc`/`lint:e2e` 干净，
+   `lineLimit` 全过（`disk-usage-chip.spec.ts` 现 462 行）。
+
+**并入**：先 `git merge-base --is-ancestor master feature/batch2-disk-usage` 验 FF 可行，再
+`git branch -f master feature/batch2-disk-usage`（**不切工作树**——本仓记过「切分支会删只活在那条分支上的文件」），
+然后 `git checkout master` + `git branch -d feature/batch2-disk-usage`（删除时分支与 master 同指一笔）。
+结果：`master` = `69419a5`，工作树干净，`master...origin/master [ahead 107]`，**全程未 push**。
+并入后在 master 上补跑 `npx vitest run`（69 文件 passed）与 `npm run lint:e2e`（0 处 `error TS`）。
