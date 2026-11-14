@@ -53,8 +53,17 @@ describe('usageBytesText', () => {
     expect(usageBytesText(1.5 * 1024 * 1024 * 1024)).toBe('1.50 GB')
   })
 
-  it('负数与 NaN 不产生 NaN 字样', () => {
+  it('非有限值（NaN/±Infinity）不产生 NaN 字样', () => {
     expect(usageBytesText(Number.NaN)).toBe('--')
+    // 这两条不是装饰：把守卫 `!Number.isFinite(bytes)` 换成**同极性**的
+    // `Number.isNaN(bytes)`（只拦 NaN）时，NaN 那条连同其余 14 条**全部照样绿**，
+    // 只有这两条红 —— `+Infinity` 一路穿到 GB 档 ⇒ `'Infinity GB'`，
+    // `-Infinity` 穿到 B 档 ⇒ `'-Infinity B'`（各压一档，所以两条都要留）。
+    // 实测：1 failed / 14 passed。
+    // 另一极性 `!Number.isNaN(bytes)` 是更粗暴的坏实现（所有有限值都变 `--`，
+    // 11 条同时红），它杀不动「只有 Infinity 能杀」这件事，所以不作为本条的理由。
+    expect(usageBytesText(Number.POSITIVE_INFINITY)).toBe('--')
+    expect(usageBytesText(Number.NEGATIVE_INFINITY)).toBe('--')
   })
 })
 

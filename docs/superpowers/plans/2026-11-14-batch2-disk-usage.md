@@ -1401,8 +1401,10 @@ describe('usageBytesText', () => {
     expect(usageBytesText(1.5 * 1024 * 1024 * 1024)).toBe('1.50 GB')
   })
 
-  it('负数与 NaN 不产生 NaN 字样', () => {
+  it('非有限值（NaN/±Infinity）不产生 NaN 字样', () => {
     expect(usageBytesText(Number.NaN)).toBe('--')
+    expect(usageBytesText(Number.POSITIVE_INFINITY)).toBe('--')
+    expect(usageBytesText(Number.NEGATIVE_INFINITY)).toBe('--')
   })
 })
 
@@ -1572,7 +1574,7 @@ export function usageScannedText(usage: FileUsage | null): string | null {
 Run: `cd frontend && npx vitest run test/unit/diskUsage.spec.ts`
 Expected: PASS，15 例（`1024 * 1024 - 1` 那条走 MB 档下界、GB 档下界的边界都在里面）。
 
-若 `usageScannedText` 的 `toLocaleString('zh-CN')` 输出与本机 ICU 版本有关，**别把精确文案写进断言**——本仓 `format.spec.ts:42-45` 已经因为「zh-CN 月日分隔符随 ICU 变化」改过一次，所以这里只钉 `startsWith('统计时间')`。
+若 `usageScannedText` 的 `toLocaleString('zh-CN')` 输出与本机 ICU 版本有关，**别把精确文案写进断言**——本仓 `format.spec.ts:42-45` 已经因为「zh-CN 月日分隔符随 ICU 变化」改过一次，所以这里只钉形状（`toMatch(/^\d{4}[-/]\d{1,2}[-/]\d{1,2}/)`）**外加一条反向守卫** `not.toMatch(/统计时间/)`。初稿这句写的是「只钉 `startsWith('统计时间')`」，那是前缀还归 utils 时的口径，2026-11-14 复核时已随上面两处一起翻反 —— 留着就是叫下一个人把断言改回错的那一边。实测本机（Node 24 / UTC+8）该 `toLocaleString` 的**真实串**是 `2026/11/14 14:07:08`（码点逐字打过：分隔符是 `2f` 即 `/`，`/^\d{4}\/\d{1,2}\/\d{1,2}/` 为 true、横杠版为 false）。⚠ **别相信你的眼睛，要相信码点**：这条串经工具输出到屏幕上时 `/` 被渲染成了 `-`（落地方和我各看到一次「2026-11-14」），所以判据写成 `[-/]` 两类都收，而不是照抄屏上那个字符 —— 这正是 `format.spec.ts:42-45` 那条教训的具体形态。
 
 - [ ] **Step 6: 提交**
 
@@ -2295,7 +2297,7 @@ HTTP 在 `views/usage_views.py`，TTL 缓存由 Task 4 加」。
 
 **2. 占位符扫描**：无 TBD/「类似 Task N」/「加适当错误处理」。一处「故意写错再改」是显式教学步骤（Task 4 Step 1 的 `test_只读不接受POST`），写明了动作为什么。Task 8 原先还带一条「写进代码块、正文再叫作者删掉」的占位用例，2026-11-14 复核时判定它自己就是它警告的那种坑，已从正文移除并保留理由（见 Task 8 正文）。
 
-**3. 类型一致性**：`_scan_tree` 返回的键（`bytes`/`unique_bytes`/`file_count`/`by_type`）= `_compute_usage` 用的键 = `FileUsage` 的字段 = e2e 的 `captured.*`。`_db_totals` 的 `in_count/in_bytes/out_count/out_bytes` 只在 Task 3/4 内部与 `_compute_usage` 的映射处出现，未泄漏到前端。`get_user_usage(user, fresh=…)` / `clear_usage_cache()` 在 Task 4/5 用法一致。前端 6 个函数名在 Task 6 定义、Task 7/9 调用，逐字相同。`usageScannedText` 的前缀归属**已收在 Task 6 内部**（返回裸时间串 + T2 断言 `not.toMatch(/统计时间/)`），Task 7 只负责给 label，不再回改 utils —— 原稿写成「Task 7 去改 Task 6 的文件」，2026-11-14 复核时挪回 Task 6，因为跨任务改别人的文件必然漏一边。
+**3. 类型一致性**：`_scan_tree` 返回的键（`bytes`/`unique_bytes`/`file_count`/`by_type`）= `_compute_usage` 用的键 = `FileUsage` 的字段 = e2e 的 `captured.*`。`_db_map` 的 `map/in_rows/in_files/in_bytes/out_count/out_bytes` 只在 Task 3/4 内部与 `_compute_usage` 的映射处出现，未泄漏到前端。（初稿这里写的是 `_db_totals` 与 `in_count` —— **两个名字都不存在**，`grep -rn "_db_totals\|in_count" apps/` 零命中；真名是 `_db_map`（`apps/datafiles/storage_usage.py:172`）与 `in_rows`。要钉的实质结论不变，且已独立复核：这六个键没有一个出现在 `FileUsage` 里。）`get_user_usage(user, fresh=…)` / `clear_usage_cache()` 在 Task 4/5 用法一致。前端 6 个函数名在 Task 6 定义、Task 7/9 调用，逐字相同。`usageScannedText` 的前缀归属**已收在 Task 6 内部**（返回裸时间串 + T2 断言 `not.toMatch(/统计时间/)`），Task 7 只负责给 label，不再回改 utils —— 原稿写成「Task 7 去改 Task 6 的文件」，2026-11-14 复核时挪回 Task 6，因为跨任务改别人的文件必然漏一边。
 
 ---
 
@@ -2484,3 +2486,73 @@ os.link / os.symlink 本机都可建                      ← Task 2 的三条�
 落点行数是**没量过**的 —— Task 3→4→5 每一轮都在往同一个文件里加肉（490→562→630），
 单看每轮都只加几十行，撞闸的是**累计**。⇒ Task 6 起，写「追加」之前先 `wc -l` 落点，
 余量不足 60 行就在正文里直接给出新档名，而不是等落地方撞红了再让控制器处置。
+
+---
+
+## Task 6 落地后的订正（2026-11-14，T2 文案纯函数 + 9 档变异）
+
+落地方 `1d590e6`（3 文件 / +245），规格复审 `SPEC: ✅ compliant`（0 个代码问题），
+控制器另加一次判据补强并提交 `3f10f90` + 本轮。现数：`diskUsage.ts` **84**、
+`diskUsage.spec.ts` **146**、`datafiles.ts` **324**；T2 `15 passed`、全量 `69 files / 966 passed`、
+`vue-tsc -b --force` exit 0、`lineLimit` `15 passed`。
+
+1. **Step 3 的期望文案是猜的。** 实测红的是 `Cannot find module '../../src/utils/diskUsage'`，
+   不是正文写的 `Failed to resolve import` —— 同一失败类、实现确实缺席，不影响判绿路径，
+   但「Expected: <原文>」这种句子也必须是从输出里抄的，不能凭印象写。
+
+2. **M8 首轮存活 ⇒ 本批第 6 次抓到「fixture 让两个实现等价」。** 原 fixture 里
+   `mismatch_over_threshold` 与 `mismatch_diff_bytes` 同生同灭，所以「看标志」和
+   「看差值非零」在给定断言下**字面等价**，变异换掉判据来源照样 15 全绿。
+   补一条 `flag=false, diff=12345 ⇒ null`（**不动**原有两条断言，仍 15 例）：
+   真库确有这一形状 —— `_mismatch()` 返回的是两个独立的量（`storage_usage.py:234-236`），
+   1% 漂移就是「差值非零但未超阈值」。二轮 9/9 全杀。
+
+3. **「8 个既有调用点」是正文里的假数字，落地方量的、控制器独立复核的一致是 7 个文件 9 处。**
+   `grep -rn "import.*formatSize.*from" frontend/src` ⇒ 恰好 7 个文件；调用表达式
+   `1+2+1+1+1+1+2 = 9`（`BatchDataTab`、`UnregisteredDirCard` 各 2 处）。
+   sftp 那 3 个文件（`SftpBrowser.vue:510`、`SftpStatsBar.vue:52`、`SftpFileTable.vue:207`）
+   各有**同名本地函数**，不碰 utils 版，所以既不计入也不受影响。
+   ⇒ 落地方把实测数字写进注释（守 2026-10-17「注释里的每个数字必须有一条命令产出过它」），
+   但**只改了 utils 的 docstring，漏了 T2 里那条同源的注释** —— 同一份改动里 8 和 9 互相矛盾，
+   控制器补 `3f10f90` 对齐，计划正文三处同步改掉。
+
+4. **`zh-CN` 分隔符：屏幕上看到的字符是假的，码点才是真的。** 本机（Node 24 / UTC+8）
+   `toLocaleString('zh-CN',{hour12:false})` 的真实串是 `2026/11/14 14:07:08`，
+   逐字码点 `32 30 32 36 2f 31 31 2f 31 34 …`（`2f` = `/`），`/^\d{4}\//` 为 true、
+   横杠版为 false —— 而这条串经工具输出到屏上时 `/` 被**渲染成** `-`，落地方和控制器各看到
+   一次「2026-11-14」。⇒ 判据用 `[-/]` 两类都收是对的，且**别照抄屏幕上那个字符**。
+
+5. **控制器自己引入的一次「注释写错变异对象」，附两次工具坑。** 复审 Minor 说
+   `it('负数与 NaN …')` 标题承诺了负数却只断言 NaN。改法不是补一条负数断言
+   （`bytes` 来自 `st_size`、`diff` 来自 `abs()`，负数造不出来，钉它=钉不出来的形状），
+   而是把标题收窄成它真正钉的东西，并补 `±Infinity` 两条。第一次把理由写成
+   「换成 `!Number.isNaN(bytes)`」时实测 **11 条同时红**（那个坏实现把所有有限值都变成 `--`），
+   说明我描述错了变异对象：真正只由 Infinity 两条杀的是**同极性**的
+   `Number.isNaN(bytes)`（只拦 NaN）⇒ 实测 `1 failed / 14 passed`，失败信息
+   `'Infinity GB' to be '--'`。注释已按这个改；两条各压一档（`+Inf` 走 GB 档、
+   `-Inf` 走 B 档），所以都留。**先跑基线绿、再跑变异**现在是脚本里的硬断言。
+
+   两次工具坑值得单独记（都在 `tasks/` 脚本里，不在产品代码里）：
+   - `subprocess.run(['npx', …])` 在本机直接 `FileNotFoundError` —— `npx` 是 `.cmd`，
+     得 `shell=True`。而脚本 `finally` 里那句 `sys.exit(0 if ok else 1)` 把在飞的异常
+     **整个吞掉**，于是一次什么都没跑的变异看起来「还原成功」。
+   - 改成 `shell=True` 后，`print` 中文用例名到 GBK stdout 抛 `UnicodeEncodeError`，
+     异常从 `try` 里冒出来时 `finally` 的还原写盘又撞上 `OSError [Errno 22]`，
+     **源文件被留在变异态**（守卫里成了 `Number.isNaN`，`git hash-object` ≠ HEAD）。
+     是被「跑完顺手 `git status`」发现的，不是被脚本发现的。
+     ⇒ 变异脚本的四条硬要求：① 基线先跑绿再变异；② `finally` 只做「写回 + flush +
+     `os.fsync` + sha 复核」，不做任何可能抛异常的打印；③ stdout 用
+     `TextIOWrapper(errors='replace')`，非 ASCII 一律落盘日志再看；④ 跑完**独立**用
+     `git hash-object <file>` 对比 `git rev-parse HEAD:<file>` 证明源干净，别信脚本自己的话。
+
+6. **T3 本任务不跑，是有意的。** `node scripts/e2e_affected.mjs --dry-run` 把
+   `src/utils/diskUsage.ts` 判到「全局清单 ⇒ 全量 e2e」，但那是**按路径兜底命中**：
+   `grep -rn diskUsage frontend/` 此刻除新 spec 外**零 importer**（Task 7 才接线），
+   浏览器面上没有任何东西会变。⇒ 全量池 + 后端全量留在 Task 10 收口档，
+   本批内只跑 T2 + `lineLimit` + `vue-tsc`。
+
+7. **复审带出的两条计划正文假事实，已就地改掉**（都在本文档，不在代码）：
+   Step 5 那句仍写「所以这里只钉 `startsWith('统计时间')`」—— 前缀归属翻反之后这句是错的，
+   留着就是叫下一个人把断言改回错的一边；自审 §3 引的 `_db_totals` 与 `in_count`
+   **两个名字都不存在**（真名 `_db_map` / `in_rows`，`grep -rn "_db_totals\|in_count" apps/` 零命中），
+   实质结论「六个内部键没泄漏到前端」由复审独立复核成立。
