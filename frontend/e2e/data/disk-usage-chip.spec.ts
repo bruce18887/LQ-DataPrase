@@ -241,7 +241,7 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
      *   契约内的事（资源管理器手工往数据根目录拷文件就会造出它，真实用户可达）。
      * - 但 UI 的**每一条落盘路径**都经 `_user_upload_dir`（apps/datafiles/views/_helpers.py:183
      *   把路径钉死为 `<user>/single|batch/`）：上传 file_views.py:549,568、组合为批次
-     *   file_views.py:336-338、移出批次 file_views.py:420-424、ZIP 注册 _helpers.py:450-452
+     *   file_views.py:336-338、移出批次 file_views.py:420-424、ZIP 注册 _helpers.py:378-380
      *   ——没有任何视图把文件写到 `<user>/` 根下。所以「经由 UI 操作造出 '' 桶」做不到，
      *   而本仓 e2e 数据纪律是夹具或响应拦截、不动 slot 树磁盘（磁盘手术会污染共用
      *   这棵树的其它用例）。注入是**唯一不越界的造法**，不是因为它省事。
