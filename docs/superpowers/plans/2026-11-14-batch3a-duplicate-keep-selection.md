@@ -2219,3 +2219,49 @@ cd .. && node scripts/e2e_pool.mjs --slots=4 2>&1 > tasks/b3a_pool.log
    `(displayed, keep_by_key)` 与 Task 3 的调用一致；`keep_by_key` 的键是 `_group_key(group)` 元组，
    前端 `groupKey()` 是字符串 —— 两份**互不流通**（服务端键不出模块，客户端键不发网络），
    上行载荷只有 id 列表，这点在 Task 4 的 `keep_ids` 契约里钉着。
+
+---
+
+## 终审（整批一次，只读代理）与两轮修复 —— 2026-11-15
+
+终审对象是 `master..HEAD` 整批 diff。它给了 7 组发现，**每条我都回源码自己核了一遍**，
+分三类处置（第三类最重要：代理的结论不等于事实）。
+
+### 成立、且本批就修掉的（两条 BLOCKER + 两条 IMPORTANT + 两个判据洞 + 三处文字假话）
+
+| 发现 | 我核到的位置 | 修法 | commit |
+|------|-------------|------|--------|
+| B-1 卡片在同一屏说两句互斥的话：标签「未改选的组默认保留」+radio「最新导入」，而 `strategy` 只被 `applyStrategy()` 读（`DuplicateFilesCard.vue:126/149-151`），未改选恒取 `files[0]`（`dupKeep.ts:33-36`）⇒ 拨 radio 不点应用＝什么都不改，用户以为保最新、实际物理删最新 | 三处都逐行读过，成立 | 措辞改成「一键策略（只作用未改选的组）」；行为不动（动它等于改「未改选」的定义，不是用户拍板过的口径）；新增 T3 `[B3A-F2A]`「拨了策略没点应用 ⇒ 留下的仍是最早」+ 标签文本断言 | `3495e85` |
+| B-2 白名单只有正向 ⇒ 载荷漏掉的已展示组走 `files[0]` 默认回落被静默删光。可达路径：GET 与 POST 之间多导入一条、或某组塌成一行让第 51 组滑进来 | `_duplicate_files.py:78-90` 只判 `⊆`，`:138/:147` 的 `.get(key, files[0])` 就是那个出口 | 非空载荷必须逐组覆盖 `displayed`，否则 `InvalidKeepSelection` 且一行不删；**空载荷仍走 legacy 分支**（F1b 专门证我没把兼容写死）；判据取 `keep_by_key` 是否为空，不取 `keep_ids` 真假值 | `c0b48bf` |
+| I-3 `deleted_count` 把「`os.remove` 抛 `OSError`」也计进去了，而 §5.2 明说那个数字是不可撤销操作上唯一的闸 | `_helpers.py:226-244` 对「本来不在盘上」与「删不掉」返回同一个 `None` | 本调用点自己 `resolve_file_path` 一次、删后复查 `os.path.exists`，还在盘上就不计数（**不改共享 helper 的返回契约**，那有四家共用）；遗留文件由下一次检查报成孤立磁盘文件 | `c0b48bf` |
+| I-4 卡片用算术 `总数−已展示`、回执用实测，两边共用「另有 N 组未处理」这个词 | `dupKeep.ts:103-107` vs `:122-128` + `ConsistencyCheckDialog.vue:169` | 拆成两种事实：卡片「其余 N 组**本批不处理**」（删前算术）、回执「删除后**仍判定为重复**的有 M 组」（删后实测） | `3495e85` |
+| 洞-5 `:truncated-note` 绑定摘掉三档全绿（`grep truncated-note` 在 e2e/test 里 0 命中） | 成立，但见下面「F2c 的实测修正」 | 新增 T3 `[B3A-F2NOTE]`：`route.fulfill` 造 `total > displayed` 的形状，断言那句话真渲染出来，并断反向形状（`total ≤ displayed` ⇒ 不渲染） | `3495e85` |
+| 文字假话-a `test_storage_usage_scan.py:302` 引 `_duplicate_files.py:39` 当 `order_by('id')`，`:39` 其实是 `InvalidKeepSelection` docstring 里的空行 | `grep -n "order_by('id')"` = `:113` | 改成 `:113`（终审给的是 `:87`，那是它按当时行号算的；子代理改完口径段又挪了一次，回源码重测才对） | `c0b48bf` |
+| 文字假话-b 设计稿写「搬完 552→482」 | `wc -l` = **480** | 订正为 480 并标「现量」 | `c0b48bf` |
+| 文字假话-c `repair-center.spec.ts:342` 引 `DuplicateFilesCard.vue:151` 读 `strategy.value`，实际在 `:150` | 读过函数体 | 改 `:150` | `3495e85` |
+
+### 成立但不在本批做的（记口子，不是推脱）
+
+- **`repair-center.spec.ts` 现在 591/600 行**：本批合法，但重复块已占掉大头，续删/锁定态/FIX-1 的对照用例
+  还要往里加 ⇒ 落成设计稿 §10 的**硬前置**（先拆 `e2e/data/duplicate-keep.spec.ts` 再动它）。
+  拆分的三条前置我已核：`@data/@p2` 标签、`affected` 按目录枚举（`--files` 试算过）、
+  `P0_SPEC_FILES` 是按磁盘 @p0 集合由 `e2eAffectedDecide.spec.ts` 钉着的（新文件不带 @p0 就不涉及它）。
+- **`browse_views.py:339-385` 混着「4 个内联分支 + 4 个转调兄弟」**：终审建议把 `delete_duplicates`
+  抽成 `_delete_duplicates(user, action)`。本批不抽 —— 该文件 520/600，抽它是形状重构而不是修缺陷，
+  且批4 的选项真加进来时才知道要什么形状。记在遗留里。
+
+### 终审自己看错的一条（按纪律推翻，代码原样不动）
+
+它说 `repair-center.spec.ts:335-337` 关于 **M20** 的归因（「`in_bulk` 拿不到那只 -A ⇒ 一行都没删」）是假的，
+真实原因是循环里 `if item['id'] == keep: continue`。**不成立**：M20 把 `pending` 变成 `files[1:]`，
+而 `dup_pick` 那组里被改选的 -B 恰是 `files[1]` ⇒ `rows` 只有 B；删的那只是 A，
+`rows.get(A)` 是 `None` 才跳过 —— 那句 `continue` 对应的是 B（正确行为，它本来就该被留）。
+所以注释维持原文，`3495e85` 里明确写了「不要动这段」。
+这是本批第三次推翻「别人（含我自己）写下来的结论」，前两次是 M5 与 M22（见 `b5f1fef`、`2d44e9c` 的订正）。
+
+### F2c 的实测修正（终审说「摘绑定全绿」，实际差一层）
+
+按字面只摘 `:truncated-note="truncatedNote"` 时，**池跑不起来**：`globalSetup` 会先 `npm run build`，
+`vue-tsc` 立刻报 `TS6133`（computed 与 import 都变未读）。所以「三档全绿」只在 **T2 层**成立
+（25 例确实全绿），而 `build` 是测试之外的第二道闸。台账与 lessons 按这个口径写，
+不许写成「摘掉绑定浏览器层毫无反应」。
