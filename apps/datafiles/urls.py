@@ -10,6 +10,7 @@ from apps.datafiles.views import (
     DataFileViewSet,
     FileActivateView,
     FileUploadView,
+    FileUsageView,
     ParseHistoryListView,
     SubBatchDeleteView,
 )
@@ -18,6 +19,10 @@ router = DefaultRouter()
 router.register(r'files', DataFileViewSet, basename='datafile')
 
 urlpatterns = [
+    # 必须排在 router include 之前：DefaultRouter 生成的详情路由是
+    # `^files/(?P<pk>[^/.]+)/$`（lookup 是 `[^/.]+`，不是 <int>，见 routers.py:143），
+    # 会把 `files/usage/` 当成 pk='usage' 的详情请求吞掉。
+    path('files/usage/', FileUsageView.as_view(), name='file-usage'),
     path('', include(router.urls)),
     path('upload/', FileUploadView.as_view(), name='file-upload'),
     path('activate/<int:pk>/', FileActivateView.as_view(), name='file-activate'),
