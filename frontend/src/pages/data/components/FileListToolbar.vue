@@ -3,6 +3,36 @@
     <div class="toolbar-left">
       <span class="section-title">📋 文件列表</span>
       <span class="section-count">{{ total }} 个文件</span>
+      <!-- 磁盘占用：复用 .section-count 的外观（同一族 chip，不新增字号声明，
+           过 e2e/global/fonts.spec.ts 那条禁硬编码 px 的闸），浮层用 el-descriptions
+           而不是自定义样式 —— popper 被 teleport 到 body，scoped CSS 够不着它。 -->
+      <el-popover
+        v-if="usage"
+        placement="bottom-start"
+        :width="300"
+        trigger="hover"
+        popper-class="disk-usage-popover"
+      >
+        <template #reference>
+          <span class="section-count" data-testid="disk-usage-chip">
+            {{ usageChipText(usage) }}
+          </span>
+        </template>
+        <el-descriptions :column="1" size="small" border>
+          <el-descriptions-item v-for="row in usageRows" :key="row.label" :label="row.label">
+            {{ row.sizeText }} · {{ row.countText }}
+          </el-descriptions-item>
+          <el-descriptions-item v-if="!usageRows.length" label="数据目录">
+            没有文件
+          </el-descriptions-item>
+          <el-descriptions-item v-if="usageOutside" label="目录外记录">
+            {{ usageOutside }}
+          </el-descriptions-item>
+          <el-descriptions-item v-if="usageScanned" label="统计时间">
+            {{ usageScanned }}
+          </el-descriptions-item>
+        </el-descriptions>
+      </el-popover>
     </div>
     <div class="toolbar-right">
       <el-input
@@ -56,12 +86,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { Search, Delete, Upload, Tools, Collection } from '@element-plus/icons-vue'
+import type { FileUsage } from '../../../api/datafiles'
+import {
+  usageBreakdownRows,
+  usageChipText,
+  usageOutsideLine,
+  usageScannedText,
+} from '../../../utils/diskUsage'
 
-defineProps<{
+const props = defineProps<{
   total: number
   selectedCount: number
+  usage: FileUsage | null
 }>()
 
 const emit = defineEmits<{
@@ -71,6 +109,10 @@ const emit = defineEmits<{
   'bulk-delete': []
   'combine-click': []
 }>()
+
+const usageRows = computed(() => usageBreakdownRows(props.usage))
+const usageOutside = computed(() => usageOutsideLine(props.usage))
+const usageScanned = computed(() => usageScannedText(props.usage))
 
 const searchText = ref('')
 

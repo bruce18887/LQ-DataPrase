@@ -4,6 +4,7 @@
     <FileListToolbar
       :total="total"
       :selected-count="selectedIds.length"
+      :usage="usage"
       @search="onSearch"
       @upload-click="showUpload = !showUpload"
       @fix-click="showConsistencyCheck = true"
@@ -75,6 +76,7 @@
 import { ref, computed, reactive, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { datafilesApi } from '../../../api/datafiles'
+import type { FileUsage } from '../../../api/datafiles'
 import { useFilesStore } from '../../../stores/files'
 import FileListToolbar from './FileListToolbar.vue'
 import FileUploadArea from './FileUploadArea.vue'
@@ -97,6 +99,7 @@ const total = ref(0)
 const currentPage = ref(1)
 const pageSize = 20
 
+const usage = ref<FileUsage | null>(null)
 const productCodes = ref<string[]>([])
 const formatTypes = ref<string[]>([])
 const allTags = ref<string[]>([])
@@ -205,6 +208,20 @@ async function loadAllTags() {
     allTags.value = Array.isArray(data?.tags) ? data.tags : []
   } catch {
     allTags.value = []
+  }
+}
+
+/**
+ * 占用统计单独一次异步拉：它要扫盘，可能几百毫秒。
+ * **不 await**、失败也只把 usage 置空 —— chip 缺席不能连累文件列表（Task 8 的
+ * e2e 用 500 拦这条，钉的就是「列表照常、chip 不出现」）。
+ */
+async function loadUsage(fresh = false) {
+  try {
+    const { data } = await datafilesApi.getFileUsage(fresh)
+    usage.value = data
+  } catch {
+    usage.value = null
   }
 }
 
@@ -324,6 +341,9 @@ watch(() => filesStore.filesVersion, () => {
   loadProductCodes()
   loadFormatTypes()
   loadAllTags()
+  // 每一条本地写路径（上传/删除/批量删除/组合/修复）都会 bump filesVersion，
+  // 所以这一行覆盖全部「做完就要看到新数」的场景，不需要在各处分别挂失效。
+  loadUsage(true)
 })
 
 // 表头筛选值变化 → 刷新（FileListTable 内 ColumnHeaderFilter 写入 filters）
@@ -337,6 +357,7 @@ onMounted(() => {
   loadProductCodes()
   loadFormatTypes()
   loadAllTags()
+  loadUsage()
 })
 
 defineExpose({ reload: loadFiles })
