@@ -12,8 +12,9 @@
 2. **展示切片 == 处理切片**：GET 与 POST 都取 ``_group_duplicates(user)[:50]``。
    ``groups.sort`` 的键就是分组键本身 ⇒ 全序，两边切到的必然是同一批 50 组。
    这是「只删已展示的组」的**实现**，不靠两个 limit 常数互相对齐 —— 对齐写法总有一天会漂。
-3. **每组恰一枚保留 id**；未指定 = 该组 id 最小（``files`` 按 id 升序，:309 那条 order_by），
-   即历史行为。Task 2/3 在这里加 ``_resolve_keep_selection`` 与 ``InvalidKeepSelection``。
+3. **每组恰一枚保留 id**；未指定 = 该组 id 最小（``files`` 按 id 升序，见下面
+   ``_group_duplicates`` 里的 ``order_by('id')``），即历史行为。
+   Task 2/3 在这里加 ``_resolve_keep_selection`` 与 ``InvalidKeepSelection``。
 """
 
 from django.db import transaction

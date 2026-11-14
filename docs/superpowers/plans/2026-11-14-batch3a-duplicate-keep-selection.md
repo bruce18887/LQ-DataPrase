@@ -76,11 +76,13 @@ vitest（T2，node 环境、**不装 jsdom、不用 `@vue/test-utils`**）、Pla
 
 ```bash
 cd frontend && npx vitest run test/unit/lineLimit.spec.ts 2>&1
-cd .. && .venv/Scripts/python.exe -X utf8 manage.py test test.backend.apps_datafiles_deletion \
+cd .. && .venv/Scripts/python.exe -X utf8 manage.py test \
   test.backend.test_parse_cache_scoped_invalidation test.backend.test_parse_cache_invariant_scan 2>&1
 ```
 把两份输出的 `Tests 15 passed` / `Ran N tests ... OK` 记进 `tasks/b3a_task1_baseline.txt`（gitignore 区内）。
 ⚠ 判绿取末尾 `OK` / `Tests N passed` 行，**不取 `$?`**。
+⚠ 本步原写的 label `test.backend.apps_datafiles_deletion` **不存在**（实测 `ModuleNotFoundError`
++ `FAILED (errors=1)`，Task 1 复审核过）⇒ 已从两处命令里删掉。别为它改用例，更别把它读成回归。
 
 - [ ] **Step 2: 新建模块并搬入三个函数（逐字搬，不改一行逻辑）**
 
@@ -101,8 +103,8 @@ cd .. && .venv/Scripts/python.exe -X utf8 manage.py test test.backend.apps_dataf
 2. **展示切片 == 处理切片**：GET 与 POST 都取 ``_group_duplicates(user)[:50]``。
    ``groups.sort`` 的键就是分组键本身 ⇒ 全序，两边切到的必然是同一批 50 组。
    这是「只删已展示的组」的**实现**，不靠两个 limit 常数互相对齐 —— 对齐写法总有一天会漂。
-3. **每组恰一枚保留 id**；未指定 = 该组 id 最小（``files`` 按 id 升序，:309 那条 order_by），
-   即历史行为。
+3. **每组恰一枚保留 id**；未指定 = 该组 id 最小（``files`` 按 id 升序，见下面
+   ``_group_duplicates`` 里的 ``order_by('id')``），即历史行为。
 """
 
 from django.db import transaction
@@ -228,12 +230,14 @@ from ._duplicate_files import (
 
 ```bash
 cd frontend && npx vitest run test/unit/lineLimit.spec.ts 2>&1
-cd .. && .venv/Scripts/python.exe -X utf8 manage.py test test.backend.apps_datafiles_deletion \
+cd .. && .venv/Scripts/python.exe -X utf8 manage.py test \
   test.backend.test_parse_cache_scoped_invalidation test.backend.test_parse_cache_invariant_scan 2>&1
 .venv/Scripts/python.exe -X utf8 manage.py test apps.datafiles 2>&1
 ```
 Expected: 前两条与 Step 1 输出一致；第三条 `OK`（既有重复文件那五条用例是本步的承重判据，
-它们**不许被改动**）。行数：`_helpers.py` 482、新模块 103、都不超 600。
+它们**不许被改动**）。行数**落地实测**（`b736237`）：`_helpers.py` 552→**480**、新模块 **99**、
+`browse_views.py` 495→497，都 < 600。本步原写 482/103 是计划自己算错的估计值，已按实数订正；
+删块时把其后 2 个分隔空行一并带走才对（留下就是 4 连空行）。
 
 - [ ] **Step 6: 提交**
 
