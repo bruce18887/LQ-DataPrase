@@ -90,6 +90,10 @@ describe('保留项裁决', () => {
     // 重复判定口径是 (filename, file_size) 精确相等 ⇒ 组内 file_size 恒等（实测 73/73 组），
     // 「体积最大」在数学上永远等于「按 id 最小」。谁加回来这条就红。
     expect(Object.keys(STRATEGY_LABELS).sort()).toEqual(['earliest', 'latest'])
+    // 基数之外还要钉**文案归谁**：只比 keys 时，把两枚 label 互换（点「最早导入」拿到最新那份）
+    // 是 16 例全绿的（2026-11-15 复审变异 MF）—— 那颗按钮照样是谎话控件，只是换了个谎法。
+    expect(STRATEGY_LABELS.earliest).toBe('最早导入')
+    expect(STRATEGY_LABELS.latest).toBe('最新导入')
   })
 })
 
@@ -109,58 +113,15 @@ describe('applyStrategyToUntouched', () => {
 
 describe('resolveKeepIds', () => {
   it('每组一枚、按 groups 顺序、含未改选的默认值', () => {
-    // 归因：这条抓的是**顺序**（`[10, 20]` 而非 `[20, 10]`）与**逐组全覆盖**
-    // （未 touched 的 a.csv 里出现默认值 10）。它抓不到「整体漏掉未改选的组」——
-    // 那个回退由下面那条 assertKeepIdsCoverEveryDisplayedGroup 专门钉住
-    // （2026-11-15 复审实测：只改这一条时「只发 touched」变异 15 例全绿）。
+    // 归因：`[10, 20]` 钉**顺序**，`[10, 21]`（空 choice）钉**逐组全覆盖** ——
+    // 后者就是「前端退化成只上报改选过的组」那个回退的拦阻（2026-11-15 变异实测 1 红）。
+    // 后端对白名单内的部分覆盖照样返回 200、未列出的组按默认留最早 ⇒ 这个回退在 T1/T3 都不可见，
+    // 只有这一条看得见，别再把它当重复断言删掉。
     const a = group('a.csv', files([10, 't1'], [11, 't2']))
     const b = group('b.csv', files([21, 't1'], [20, 't2']))
     expect(resolveKeepIds([a, b], new Map([['b.csv|500', 20]]))).toEqual([10, 20])
     expect(resolveKeepIds([a, b], new Map())).toEqual([10, 21])
     expect(resolveKeepIds([], new Map())).toEqual([])
-  })
-  it('上行载荷必须逐组全覆盖：漏送默认项会被后端静默按最早删（判据洞补丁）', () => {
-    // 后端 `_resolve_keep_selection` 是白名单式的，**部分覆盖照样返回 200** ——
-    // 「未列出的组按默认留最早」那条兼容分支就是这条通路。所以前端一旦退化成
-    // 「只上报用户显式改选过的组」，未改选的组会被服务端按默认替用户决定，
-    // 而 T1、T3 全都看不出（它们看到的都是成功响应）。
-    // 这条断言是这条回退在**全仓唯一的拦阻**，别再把它当冗余删掉。
-    const assertKeepIdsCoverEveryDisplayedGroup = (
-      groups: DuplicateGroup[],
-      choice: Map<string, number>,
-    ) => {
-      const ids = resolveKeepIds(groups, choice)
-      // 数量同源：每组恰好一枚 ⇒ 长度 == 组数
-      expect(ids.length, '每组必须贡献一枚 id').toBe(groups.length)
-      // 值合法：每枚 id 都必须是**某一组的成员**，不能凭空造
-      const memberIds = new Set(groups.flatMap((g) => g.files.map((f) => f.id)))
-      for (const id of ids) expect(memberIds.has(id), `id ${id} 不属于任何已展示组`).toBe(true)
-      // 集合覆盖：每组至少有一枚 id 出现在载荷里
-      for (const g of groups) {
-        expect(ids.some((id) => g.files.some((f) => f.id === id)),
-          `组 ${groupKey(g)} 没有任何一枚 id 被上报`).toBe(true)
-      }
-      // 同源谓词：每组恰好一枚，取的就是 keepIdForGroup
-      for (const g of groups) {
-        const expected = keepIdForGroup(g, choice)
-        expect(ids).toContain(expected)
-      }
-    }
-
-    const groups = [
-      group('a.csv', files([10, '2026-01-01'], [11, '2026-01-02'])),
-      group('b.csv', files([20, '2026-01-01'], [21, '2026-01-02'])),
-      group('c.csv', files([30, '2026-01-01'], [31, '2026-01-02'])),
-    ]
-    // ① 空 choice：三组各自的默认项都要在载荷里
-    assertKeepIdsCoverEveryDisplayedGroup(groups, new Map())
-    // ② 部分 touched：改选过的那组用新值，其余两组仍要各出现一枚
-    assertKeepIdsCoverEveryDisplayedGroup(groups, new Map([['b.csv|500', 21]]))
-    // ③ 全 touched：逐组取改选值
-    assertKeepIdsCoverEveryDisplayedGroup(
-      groups,
-      new Map([['a.csv|500', 11], ['b.csv|500', 21], ['c.csv|500', 31]]),
-    )
   })
 })
 
@@ -182,15 +143,25 @@ describe('汇总与文案', () => {
     expect(truncatedNoteText(1, 1)).toBe('')
   })
   it('旧的「删除操作将作用于全部」这句必须消失', () => {
-    expect(truncatedNoteText(73, 50)).not.toMatch(/作用于全部|仅显示/)
+    // 独立输入（51/50 而不是上一例用过的 73/50）：同输入时这句被上面那条整句 toBe
+    // 严格蕴含，永远出不了声 —— 2026-11-15 复审判它是装饰性断言。
+    expect(truncatedNoteText(51, 50)).not.toMatch(/作用于全部|仅显示/)
+    expect(truncatedNoteText(73, 51)).not.toMatch(/作用于全部|仅显示/)
   })
   it('remainingGroupsNote：0 组不啰嗦', () => {
     expect(remainingGroupsNote(0)).toBe('')
     expect(remainingGroupsNote(23)).toBe('，另有 23 组未处理')
+    // 0 由 `!remaining` 吃掉，负数与缺字段走 `<= 0` 那半 —— 不钉就是没人看管的分支
+    expect(remainingGroupsNote(undefined)).toBe('')
+    expect(remainingGroupsNote(-1)).toBe('')
   })
   it('dupImportText 带年份（跨月的两份要分得出先后，短形态会跨年读错）', () => {
     expect(dupImportText('2026-08-10T14:09:42.332806+00:00')).toMatch(/2026/)
     expect(dupImportText('2026-08-10T14:09:42.332806+00:00')).not.toMatch(/[上下]午/)
+    // 时钟分量必须有：同一天两次导入是这张卡的常态（实测样本差两个月，但重跑导入就差几秒），
+    // 只剩日期时「最早/最新」两行的时间列逐字相同 —— 变异把 toLocaleString 换成
+    // toLocaleDateString 后 16 例全绿（2026-11-15 复审 ME），就是缺这一条。
+    expect(dupImportText('2026-08-10T14:09:42.332806+00:00')).toMatch(/\d{1,2}:\d{2}:\d{2}/)
     expect(dupImportText('')).toBe('--')
     expect(dupImportText('not-a-date')).toBe('--')
   })
