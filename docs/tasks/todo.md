@@ -706,7 +706,17 @@ admin/settings 那一族（`AuditLogPage.vue` 事件枚举、`UserManagement.vue
 
 # 任务：批2 磁盘占用（2026-11-14，计划 Task 10 收口；计划 `docs/superpowers/plans/2026-11-14-batch2-disk-usage.md`）
 
-## 状态：**七档全绿，未并入 master，未 push**
+## 状态：**已 `--ff-only` 并入本地 master，未 push**
+
+`master` = `69419a5`（`git rev-parse master` 现读），过程分支 `feature/batch2-disk-usage` 已删
+（`git branch -d`，删除时它指向同一笔 ⇒ 没有任何提交只活在分支上）。全程**没有 push**：`origin` 是公开仓库，
+一次 push 即全球发布。并入方式沿用批1：先 `git merge-base --is-ancestor master <branch>` 验 FF 可行，
+再 `git branch -f master <branch>`（不切工作树，避免那条「切分支会删只活在分支上的文件」的老风险），
+最后 `git checkout master` + `git branch -d`。
+并入后在 master 上补跑轻量两档：`npx vitest run` = `Test Files 69 passed (69)` exit 0、
+`npm run lint:e2e` = 0 处 `error TS`。批2 规模**只写命令**：`git rev-list --count 463b5f4..master`、
+`git diff --shortstat 463b5f4..master`（`463b5f4` 是并入那一刻的 master，即批2 的 base；
+用 `d95f2ef` 当 base 数出来的是批1+批2 合计 107 笔，别混）。
 
 分支 `feature/batch2-disk-usage`。规模**只写命令不写数**（终审点名：本节初稿写的「45 笔 / 17 文件 /
 +5499」在它自己那条规则上过期了——收口那一笔提交没法把自己算进去）：
@@ -718,17 +728,17 @@ admin/settings 那一族（`AuditLogPage.vue` 事件枚举、`UserManagement.vue
 
 | 档 | 命令 | 实测判据行 |
 |---|---|---|
-| 全量池 | `node scripts/e2e_pool.mjs --slots=4` | 文件 **88** · 用例 **469** · 墙钟 **13.8min** · `unexpected 2 · flaky 2 · skipped 21` · `结论 MEASURED` · 复跑判级 **真红 0 · 负载抖动 1 · 悬而未决 0** |
-| 后端全量 | `CODEBUDDY_SAFE_DELETE_ENABLED=0 .venv/Scripts/python.exe -X utf8 manage.py test` | `Ran 2624 tests in 616.323s` / `OK (skipped=16)` / `grep -cE "^(FAIL|ERROR):"` = **0**（批1 基线 2576 + 本批 48） |
+| 全量池 | `node scripts/e2e_pool.mjs --slots=4` | 第一轮（F3 之前）：文件 **88** · 用例 **469** · 墙钟 **13.8min** · `unexpected 2 · flaky 2 · skipped 21` · `结论 MEASURED` · 复跑判级 **真红 0 · 负载抖动 1 · 悬而未决 0**。<br>第二轮（F3 之后重跑）：文件 **88** · 用例 **470** · 墙钟 **9.7min** · **`unexpected 0` · flaky 3 · skipped 21** · `结论 MEASURED`；三条 flaky 落在 `wafermap-model-not-found.spec.ts:44`、`wafermap-redesign.spec.ts:73`、`view-data.spec.ts:1474`（批1 就记过名的几何 flake），**一条都不是批2 的** |
+| 后端全量 | `CODEBUDDY_SAFE_DELETE_ENABLED=0 .venv/Scripts/python.exe -X utf8 manage.py test` | 第一轮 `Ran 2624 tests in 616.323s` / `OK (skipped=16)` / `grep -cE "^(FAIL|ERROR):"` = **0**；第二轮（F3 加了两条 T1 之后）`Ran 2626 tests in 557.748s` / `OK (skipped=16)` / 计数同样 **0**（基线 2576 + 本批 50） |
 | 前端构建 | `npm run build`（含 `vue-tsc -b`） | `✓ built in 853ms`，无 TS 诊断 |
 | 全量 vitest | `npx vitest run` | `Test Files 69 passed (69)` / `Tests 967 passed (967)` |
 | e2e 类型 | `npm run lint:e2e` | `error TS` **0** 处 |
 | 行数闸 | `npx vitest run test/unit/lineLimit.spec.ts` | `Tests 15 passed (15)`；**没有给任何文件加豁免** |
 | affected | `npm run test:e2e:affected`（Task 8、Task 9 前后各一次） | `RESULT: PASS · 计划 4 档全部执行` |
 
-三档测试数现读：T1 **48**（`test_storage_usage_scan.py` 34 + `test_storage_usage_cache.py` 4 +
-`test_files_usage_api.py` 10）/ T2 **16**（`diskUsage.spec.ts`）/ T3 **9**（`disk-usage-chip.spec.ts`，
-Task 8 落 7 + Task 9 追加 2）。
+三档测试数现读：T1 **50**（`test_storage_usage_scan.py` 34 + `test_storage_usage_cache.py` 4 +
+`test_files_usage_api.py` 12，其中 2 条是终审 F3 加的）/ T2 **16**（`diskUsage.spec.ts`）/
+T3 **10**（`disk-usage-chip.spec.ts`，Task 8 落 7 + Task 9 追加 2 + F3 一条 204）。
 
 ## 那条池档的红：归因结论是「不属批2」
 
@@ -773,15 +783,29 @@ Task 8 落 7 + Task 9 追加 2）。
 2. **dev 库里那条 `AuditEvent login_success` 原样保留**（测量登录造成，不删行、不动 `last_login`，
    原值不可恢复），教训写进 lessons：**测量脚本不得对运行中的服务发登录**。
 
+## 终审与 F3 那一轮（2026-11-14，并入前完成）
+
+整批终审交回 4 条，逐条复验后处置见计划同一文件的「终审（整批一次）判定与处置」一节
+（提交 `1434596` 三条 + `2698383` F3）。这里只记 F3 的**结果与代价**，因为它改了产品代码：
+
+- 用户拍板选 (a)：**视图早退 204**，不冒 500。实现把「用户名能否当目录名」这条判据从
+  `_user_data_root` 的 raise 条件里提成 `storage_usage.is_safe_username`，视图与存储层共用一份
+  （不是各写一份再指望它们同步）。顺手改掉视图头注那句「没有目录穿越面」——用户名照样拼进路径，
+  穿越面是有的，只是挡在这一层。
+- 判据分两层且互点名字：T1 钉「`..` ⇒ 204 / 空 body / `data is None`」+「带点号的正常账号 `a.b`
+  照旧 200 全 13 字段」（后一条证明这是**白名单式早退**，不是「凡 ValueError 都吞」）；
+  T3 钉前端半边「204 ⇒ 不画 chip、零条错误提示」。
+- **反证跑在错误的层上，被实测当场推翻**：我在 T3 注释里写「视图改回 500 这条必然红」，真改完跑独占池 ⇒
+  `unexpected 0` 十例全绿。根因是 `page.route().fulfill()` 把真实响应整个遮掉，后端状态码在这条通路上
+  不可观察。同一个变异拿去 T1 ⇒ `Ran 12 … FAILED (failures=1)`，只 FAIL 新加那条 ⇒ 契约归位，
+  注释也已改成实话。这是本批第四次「推理说成立的判据，实测一层都过不去」（前三次见计划 Task 8/9 处置）。
+
 ## 批2 遗留清单（别当已完成，也别顺手改）
 
-- **等用户拍板的一条（终审 F3）**：用户名为 `..` / `.` 的账号每次进 /data 都会吃一条错误 toast
-  （`_user_data_root` raise ⇒ 500，而 Task 7 把占用拉取挂成了激活刷新；可创建性已现读——
-  `UserCreateSerializer` 的 `username` 只走 Django 默认校验器，它接受 `..`）。
-  两条路：(a) 视图把 ValueError 变 204，chip 自然缺席且不弹（要改 T1 的 500 契约例）；
-  (b) 在账号创建处校验掉 `.`/`..`，顺带修同根因的**更大问题**：`_user_upload_dir` 对这种用户名会拼出
-  `<MEDIA_ROOT>/data/../single`，上传路径等于逃逸用户目录。加 toast 白名单已被否（会静音真实故障、
-  且与 e2e case 6 钉的「失败必须出声」对冲）。
+- **F3 的另一半仍待排批（用户选的是只收 (a)）**：同根因的更大那条没动——`_helpers.py:172`
+  `_user_upload_dir` 对 `..` 这种用户名会拼出 `<MEDIA_ROOT>/data/../single`，**上传路径等于逃逸用户目录**。
+  正解是在账号创建处挡掉 `.`/`..`（`UserCreateSerializer` 是 ModelSerializer，`username` 目前只走
+  Django 默认校验器，实测接受 `..`），属 accounts 层，建议并进批4 或单独一小批。
 - `combine.spec.ts` 的勾选被迟到列表响应清空（上面第 4 条）⇒ 产品级缺陷 + 争用 flake，两个账都记在这一条上。
 - 同形态原型键查表两处未动：`ChartDock.vue:141`、`ExportTemplateSettings.vue:91`（键都是闭合集合，当前不可达）
   ⇒ 谁下次碰这两个文件就顺手换 `Object.hasOwn` 并补一条原型名键判据，别再攒第三次。
