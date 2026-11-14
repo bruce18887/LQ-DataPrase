@@ -1572,7 +1572,7 @@ export function usageScannedText(usage: FileUsage | null): string | null {
 - [ ] **Step 5: 跑测试确认通过**
 
 Run: `cd frontend && npx vitest run test/unit/diskUsage.spec.ts`
-Expected: PASS，15 例（`1024 * 1024 - 1` 那条走 MB 档下界、GB 档下界的边界都在里面）。
+Expected: PASS，**16 例**（正文初稿写 15，Task 6 复审补了「原型名键」那一条 ⇒ 16；`1024 * 1024 - 1` 那条走 MB 档下界、GB 档下界的边界都在里面）。现数取法：`grep -c "  it(" frontend/test/unit/diskUsage.spec.ts`。
 
 若 `usageScannedText` 的 `toLocaleString('zh-CN')` 输出与本机 ICU 版本有关，**别把精确文案写进断言**——本仓 `format.spec.ts:42-45` 已经因为「zh-CN 月日分隔符随 ICU 变化」改过一次，所以这里只钉形状（`toMatch(/^\d{4}[-/]\d{1,2}[-/]\d{1,2}/)`）**外加一条反向守卫** `not.toMatch(/统计时间/)`。初稿这句写的是「只钉 `startsWith('统计时间')`」，那是前缀还归 utils 时的口径，2026-11-14 复核时已随上面两处一起翻反 —— 留着就是叫下一个人把断言改回错的那一边。实测本机（Node 24 / UTC+8）该 `toLocaleString` 的**真实串**是 `2026/11/14 14:07:08`（码点逐字打过：分隔符是 `2f` 即 `/`，`/^\d{4}\/\d{1,2}\/\d{1,2}/` 为 true、横杠版为 false）。⚠ **别相信你的眼睛，要相信码点**：这条串经工具输出到屏幕上时 `/` 被渲染成了 `-`（落地方和我各看到一次「2026-11-14」），所以判据写成 `[-/]` 两类都收，而不是照抄屏上那个字符 —— 这正是 `format.spec.ts:42-45` 那条教训的具体形态。
 
@@ -1799,7 +1799,7 @@ git commit -m "feat(data): 文件列表工具栏显示磁盘占用 chip 与拆�
 
 ---
 
-### Task 8: e2e（T3）——chip 的两条渲染判据
+### Task 8: e2e（T3）——chip 的四条渲染判据
 
 **Files:**
 - Create: `frontend/e2e/data/disk-usage-chip.spec.ts`
@@ -1952,7 +1952,12 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
 })
 ```
 
-**本批只有上面两条浏览器用例，没有第三条。** 初稿在这里还有一条
+**本批上面的浏览器用例共四条，初稿是五条、删掉一条占位的。** 先说清楚一条**计数教训**（控制器自己犯的）：
+初稿这一节标题写「三条」本来就少计了一条（实际四条真用例 + 一条占位 = 五条），
+我在删占位例时把标题顺着改成「两条」，等于**在错误的两个方向上各走了一步** ——
+两次都没数过。现号取法：`sed -n '<Task8 代码块行段>' … | grep -c "^  test("` ⇒ **4**，
+Task 9 段同样数法 ⇒ **2**，T3 共 **6** 例。
+被删的那条占位用例是
 `test('新用户目录为空时 chip 说 0 B 而不是 --')`，正文写着「先别实现」、用例体里却留了一句
 `apiGet(page, '/files/usage/')` 占位 —— 2026-11-14 复核时直接删掉，理由是那条用例本身站不住：
 它要一个没有数据目录的账号，而 P2 project 的 `storageState` 固定是 `ADMIN_STATE`
@@ -2121,7 +2126,9 @@ npm run lint:e2e
 ```
 Expected:
 - 池：`[pool] 结论 MEASURED`、`unexpected 0`、末行 `RESULT:`；批1 基线是 87 文件 / 460 例，本批 **+1 文件 / +6 例**，但**以现读数为准**。
-- 后端：`OK`（批1 基线 `Ran 2576 … OK (skipped=16)`，本批 +23 例左右），`grep -cE "^(FAIL|ERROR):"` 必须是 **0**。
+- 后端：`OK`（批1 基线 `Ran 2576 … OK (skipped=16)`，**本批 +48 例**：`test_storage_usage_scan.py` 34 +
+  `test_storage_usage_cache.py` 4 + `test_files_usage_api.py` 10，三个文件全是本批新建 ⇒ 期望总量 ≈ 2624，
+  **数字现跑现取**，别拿这个和当判据），`grep -cE "^(FAIL|ERROR):"` 必须是 **0**。
 - `npm run build`（含 `vue-tsc -b`）成功；`npx vitest run` 全绿；`npm run lint:e2e` 干净。
 - 后端档**整段落盘再 grep**，不要用 `| tail`（lessons 2026-11-10：`tail` 会吞失败名）。
 
@@ -2325,7 +2332,7 @@ HTTP 在 `views/usage_views.py`，TTL 缓存由 Task 4 加」。
 | §4.5 展示（chip 文案、hover 拆分、字号 token） | Task 6（文案纯函数）+ Task 7（chip + 浮层 + `--p-fs-*` 复用 `.section-count`）+ Task 8（渲染与 hover） |
 | §4.6 差值露出（阈值恒等式、修复对话框一行） | Task 3 的 MismatchTests 5 条 + JoinedScanTests 4 条（订正⑤：只比交集）+ Task 9 |
 | §4.7 配额只做到「当前用户」 | 全程无新字段、无逐用户列表；Task 10 Step 3 的「本批不做」清单写死 |
-| §4.8 测试（T1 齐全/空目录/隔离/缓存/交叉核对；T3 chip 渲染） | Task 2/3/4/5（T1，共 23 例）+ Task 6（T2，15 例）+ Task 8/9（T3，6 例） |
+| §4.8 测试（T1 齐全/空目录/隔离/缓存/交叉核对；T3 chip 渲染） | Task 2/3/4/5（T1 **48** 例 = scan 34 + cache 4 + api 10）+ Task 6（T2 **16** 例）+ Task 8/9（T3 **6** 例 = Task 8 4 + Task 9 2）—— 三个数都是 2026-11-14 现跑的：`grep -c "def test_" test/backend/test_storage_usage_{scan,cache}.py test/backend/test_files_usage_api.py`、`grep -c "  it(" frontend/test/unit/diskUsage.spec.ts`、代码块内 `grep -c "^  test("`。（初稿写的是 T1 23 / T2 15，两处都随复审与拆档过期：T1 多了装配层与缓存两族，T2 多了原型名键那一条。）|
 
 **2. 占位符扫描**：无 TBD/「类似 Task N」/「加适当错误处理」。一处「故意写错再改」是显式教学步骤（Task 4 Step 1 的 `test_只读不接受POST`），写明了动作为什么。Task 8 原先还带一条「写进代码块、正文再叫作者删掉」的占位用例，2026-11-14 复核时判定它自己就是它警告的那种坑，已从正文移除并保留理由（见 Task 8 正文）。
 
@@ -2535,7 +2542,8 @@ os.link / os.symlink 本机都可建                      ← Task 2 的三条�
 2. **M8 首轮存活 ⇒ 本批第 6 次抓到「fixture 让两个实现等价」。** 原 fixture 里
    `mismatch_over_threshold` 与 `mismatch_diff_bytes` 同生同灭，所以「看标志」和
    「看差值非零」在给定断言下**字面等价**，变异换掉判据来源照样 15 全绿。
-   补一条 `flag=false, diff=12345 ⇒ null`（**不动**原有两条断言，仍 15 例）：
+   补一条 `flag=false, diff=12345 ⇒ null`（**不动**原有两条断言；**当时**仍 15 例 —— 这个 15 是本轮的快照，
+   复审又补了「原型名键」一条，现号是 **16**，取法见 Step 5 那句）：
    真库确有这一形状 —— `_mismatch()` 返回的是两个独立的量（`storage_usage.py:234-236`），
    1% 漂移就是「差值非零但未超阈值」。二轮 9/9 全杀。
 
@@ -2790,7 +2798,7 @@ Task 7 不加 T2 用例这句是对的，既无回归也无新增）；`lineLimi
    `flattedChildren(slots.default())` 递归展平，`v-for` 产生的 Fragment 会被展开，
    再按 `node.type.name === COMPONENT_NAME` 过滤；`v-if` 为假时留下的是注释节点，被同一个过滤器丢掉
    ⇒ 拆分行、空态行、目录外行、统计时间行都应当渲染。**置信度高，但这类判定 tsc 与 vitest 都看不见**，
-   所以 Task 8 的两条浏览器用例必须真的断到：hover 打开 `.el-popper.disk-usage-popover`、
+   所以 Task 8 的**四条**浏览器用例必须真的断到：hover 打开 `.el-popper.disk-usage-popover`、
    popper 里每个 `by_type` 桶有一行、`by_type` 为空出「没有文件」、
    `db_outside_root_count>0` 出「目录外记录」、统计时间那行的值是裸时间串（**不许出现「统计时间：统计时间」**）。
    残留两条风险留给 Task 8 兜：一级目录名恰好叫「单文件」会让 `:key="row.label"` 撞键（不现实，不处理）；
