@@ -14,8 +14,14 @@ import { openHeaderFilter, selectHeaderFilterOption } from '../helpers/colfilter
 
 /** 当前可见 section 内文件列表的 API 请求（GET 查询参数在 URL） */
 async function waitFilesRequest(page: Page, predicate: (url: string) => boolean) {
+  // `includes('/files/')` 在批2 之后不再只等于「列表请求」：`/api/v1/files/usage/` 也匹配它。
+  // 本文件里那条**反向**谓词（`waitFilesRequest(page, url => !url.includes('product_code='))`，
+  // 「清筛选 → 恢复全量」那一步）会被占用响应收下来，于是「清完筛选真的发过一次全量列表
+  // 请求」这句悄悄变成假绿。占用请求今天不落在该窗口里（只在激活/写入时发），所以现在是
+  // 潜伏态 —— 但假绿不该靠时序侥幸存活，这里显式排掉。
   return page.waitForResponse(
-    (r) => r.url().includes('/files/') && predicate(r.url()) && r.status() === 200,
+    (r) => r.url().includes('/files/') && !r.url().includes('/files/usage/')
+      && predicate(r.url()) && r.status() === 200,
     { timeout: 15_000 },
   )
 }
