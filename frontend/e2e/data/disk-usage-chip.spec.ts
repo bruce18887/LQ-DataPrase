@@ -51,6 +51,11 @@ function apiGet(page: Page, url: string) {
  * （那里有实测说明为什么非注入不可）。Task 6c 之后 chip 只有体积，所以浏览器侧唯一活的
  * 读错字段路径就是 `bytes ↔ unique_bytes`；计数类字段（file_count/db_count）不再出现在
  * chip 上，它们的分工由浮层那一条（case 4）与 T2 钉。
+ * ⚠ 边界要说明白：这份副本**只覆盖有限数**，没有 src 那条 `null/undefined/非有限 ⇒ '--'` 的分支
+ * （`utils/diskUsage.ts` 的 `usageBytesText` 有）。这里刻意不补：本文件的 `bytes` 全部来自真实
+ * 返回体，非有限值到不了 ⇒ 补了就是给不可能的状态写代码。代价也说清楚——万一 src 那条 `'--'`
+ * 分支被删（`null` 会渲染成 `null B`），浏览器侧不会红，是 T2 的「非有限值不产生 NaN 字样」那条
+ * 在钉它（2026-11-14 终审点名，控制器判为「注释补齐」而非「加断码」）。
  */
 function bytesText(bytes: number): string {
   const KiB = 1024

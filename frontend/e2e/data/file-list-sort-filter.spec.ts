@@ -21,10 +21,14 @@ async function waitFilesRequest(page: Page, predicate: (url: string) => boolean)
   // 全量列表请求」会悄悄变成假绿。更要紧的是 `FileListTab.vue` 的 filesVersion watch 把
   // loadFiles / loadProductCodes / loadFormatTypes / loadAllTags 一起发（:390-394），
   // 它们本来就在同一个突发里，不是「将来某次导航才可能撞上」。
-  // 恒等式：列表 URL 一定带查询串 —— `listFiles` 固定送 `page` 与 `file_type:'single'`
-  // （FileListTab.vue:159-169），`cleanParams` 只丢空值不丢它们（api/datafiles.ts:109-115）。
+  // 恒等式要用**满**：光 `/api/v1/files/?` 还排除不掉另外两发全量列表 ——
+  // `DataManagement.vue:197` 的 `?page_size=9999`（同一个 filesVersion watch 在 :264 发）与
+  // 本文件自己 `fetchAllFiles` 的 `?page_size=10000`，它们同样不含 `product_code=` ⇒ 反向谓词照样满足。
+  // 只有工具栏那个 tab 的加载器固定带 `file_type=single`（`FileListTab.vue:162`，非空值不会被
+  // `cleanParams` 丢掉），所以把它写进匹配器，恒等式才真的只圈住这一族请求。
   return page.waitForResponse(
-    (r) => r.url().includes('/api/v1/files/?') && predicate(r.url()) && r.status() === 200,
+    (r) => r.url().includes('/api/v1/files/?') && r.url().includes('file_type=single')
+      && predicate(r.url()) && r.status() === 200,
     { timeout: 15_000 },
   )
 }
