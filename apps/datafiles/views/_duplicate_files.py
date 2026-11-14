@@ -28,6 +28,52 @@ from ._helpers import _delete_datafile_file_only
 DUPLICATE_DISPLAY_LIMIT = 50
 
 
+class InvalidKeepSelection(ValueError):
+    """`keep_ids` 与本次可处理的重复组对不上（四态之一，见 `_resolve_keep_selection`）。
+
+    继承 `ValueError` 只为让视图一句 `except` 就能翻成 400，不必再往 `browse_views`
+    引一个新异常名。
+    """
+
+
+def _group_key(group):
+    """分组键本身（`(filename, file_size)`，全库唯一 ⇒ 可当 dict 键）。"""
+    return (group['filename'], group['file_size'])
+
+
+def _resolve_keep_selection(groups, keep_ids, limit=DUPLICATE_DISPLAY_LIMIT):
+    """把 `keep_ids` 落成「每组一枚保留 id」，返回 ``(displayed, keep_by_key)``。
+
+    判据是**白名单**：每一枚 id 必须出现在已展示切片（前 ``limit`` 组）的成员里。
+    四态越界即抛，且抛在任何删除动作之前 —— 顺序就是「一行都不许删」那句的实现：
+
+    * 不存在的 id / 他人的文件 / 非重复文件：压根进不了 ``allowed``；
+    * **切片之外的组**：用户以为改了它，服务端根本不碰。静默接受等于按默认
+      删掉用户以为改选过的那份，正是本项要修的缺陷的变体；
+    * 同一组两枚：radio 的不变量是「一组恰一枚」，出现两枚说明载荷与界面状态不一致，
+      此时删谁都是替用户决定。
+
+    非整数（含 `bool`：`isinstance(True, int)` 在 Python 里是真的，不挡就会拿 `True`
+    当 id 1 去查表）同样拒 —— 这是 HTTP 入口，不是内部调用。
+    """
+    displayed = groups[:limit]
+    allowed = {}
+    for group in displayed:
+        for item in group['files']:
+            allowed[item['id']] = _group_key(group)
+    keep_by_key = {}
+    for raw in keep_ids:
+        if isinstance(raw, bool) or not isinstance(raw, int):
+            raise InvalidKeepSelection('keep_ids 必须是整数数组')
+        key = allowed.get(raw)
+        if key is None:
+            raise InvalidKeepSelection('保留项不属于本次可处理的重复组（已失效或不在本批 50 组内）')
+        if key in keep_by_key:
+            raise InvalidKeepSelection('同一组只能有一枚保留项')
+        keep_by_key[key] = raw
+    return displayed, keep_by_key
+
+
 def _group_duplicates(user):
     """Group the user's files by exact (filename, file_size) match.
 
