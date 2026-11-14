@@ -2078,7 +2078,22 @@ Run:
 netstat -ano | grep -E ":8000|:3000" | head -5
 cd frontend && node ../scripts/e2e_pool.mjs --slots=1 -- e2e/data/disk-usage-chip.spec.ts > ../tasks/b2-task8.log 2>&1
 ```
-Expected: 日志末行 `RESULT:` 之前有 `[pool] 结论 MEASURED`、`unexpected 0`。**判绿取这两行，不取退出码**（lessons/testing-gates）。若日志里出现 `EADDRINUSE`/`21001-21004` 段，是上一轮孤儿 slot 目录占着端口——先 `node scripts/e2e_pool.mjs --gc`，别改 workers 数。
+Expected: 日志末行 `RESULT:` 之前有 `[pool] 结论 MEASURED`、`unexpected 0`。**判绿取这两行，不取退出码**（lessons/testing-gates）。
+
+⚠ **本行原先写的「先 `node scripts/e2e_pool.mjs --gc`」是我编的，那个开关不存在**（Task 8 实测：
+`[pool] 未知参数：--gc —— 拒绝启动`，exit 2；`grep -c gc scripts/e2e_pool.mjs` ⇒ **0**，
+接受的参数只有 `slots / timeout-min / only-slot / dry-run / keep-slots`，见 `e2e_pool.mjs:49`）。
+已核对的真实机制，按源码说：
+- **端口撞了不是「目录占着端口」**：slot 端口是一段区间，`allocatePortBlock`（`pool-core.mjs:58`）
+  从 `SLOT_BACKEND_BASE=21001` / `SLOT_FRONTEND_BASE=22001` 起**逐端口探活挑空块**
+  （`prefetchPorts` 预扫 60 个，`e2e_pool.mjs:180-191`），所以残留目录不会引起 EADDRINUSE。
+  真引起冲突的是**上一轮没被树杀的活进程**（脚本自己的注释记过：Windows 上 `SIGKILL` 只掀 `cmd`，
+  留下 4 个 runserver + 6 个 node ≈ 5 GB）。处置 = `netstat -ano | grep -E ":210|:220"` 取 PID，
+  `Get-Process -Id <pid>` 确认**确实是 e2e slot 起的 node/python** 才停；
+  **绝不停 `:3000`/`:8000` 那两个**（那是本分支的开发服务，可能是用户自己开着的）。
+- **`C:\lqdp-e2e\slots\<RUN_ID>` 会累积**（2026-11-14 实测现有 **329** 个目录）：脚本只在
+  `keepSlots` 为假**且**结论 MEASURED 时才 `rmSync` 本次 dataDir（`:482-483`），崩池/超时轮就整目录留着。
+  这些目录里有日志与证据根（`evidenceRoot`），**属于有意保留** ⇒ 别顺手批量删；要清理由控制器问用户。
 
 ⚠ **本机此刻 8000/3000 已经各有一个进程在听**（2026-11-14 控制器实测：`:3000` 是 node、`:8000` 是 python，`git worktree list` 只有主目录 ⇒ 不是别的工作树抢的）。**别 kill 它们** —— 那可能是用户自己开着的 dev 服务。先判这两台服务是不是本分支的代码，再决定复不复用，两条命令就够：
 ```bash
