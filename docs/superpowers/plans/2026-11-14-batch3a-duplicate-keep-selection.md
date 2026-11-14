@@ -2149,6 +2149,27 @@ cd .. && node scripts/e2e_pool.mjs --slots=4 2>&1 > tasks/b3a_pool.log
 
 `--ff-only` 并入本地 master，**绝不 push**（`origin` 是公开仓库）。
 
+- [ ] **Step 5: 本批攒下的两处「看着无害的形状」要一起清（都已核到当前行号）**
+
+1. `apps/datafiles/views/_helpers.py:16` 的 `from apps.datafiles.services import
+   evict_parse_cache_for_paths, put_cached_parsed_file` —— **`evict_...` 那半边已是死导入**：
+   Task 1 把 `_delete_duplicate_files` 搬走后，本文件里 `evict_parse_cache_for_paths` 只剩
+   `:219` 那处**文档字符串里的提及**（不是调用）。`put_cached_parsed_file` 仍在 `:156` 被用，
+   所以只删前半个名字。删完跑 `node scripts/line-limit.mjs` 与 T1 的
+   `test_parse_cache_invariant_scan.py`（`EXPECTED_SITES` 里本就没有 `_helpers.py`，
+   所以这条清理不会动登记表；反过来说：谁要是哪天在 `_helpers.py` 里真调它，登记表必须先加）。
+2. `frontend/e2e/data/disk-usage-chip.spec.ts:244` 的锚点 `_helpers.py:450-452` **已漂**（逐条回源码核过，
+   不是按位移推算）：那是 `_register_zip_batch`，搬动前整个函数从 `:435` 起、写盘那一行在 `:450`；
+   现在函数从 `:363` 起、`dest_dir = os.path.join(_user_upload_dir(user, 'batch'), batch_name)` 在 **`:378`**。
+   ⇒ 正确改法是把 `450-452` 换成 `376-378`（或单指 `:378`）。
+   ⚠ 同段 `:242` 那句 `_helpers.py:183` **不要跟着改** —— 我第一版草稿把它也算成漂了，
+   实测 `def _user_upload_dir` 与 `path = os.path.join(...)` 在搬动前后都停在 `172 / 183`：
+   被搬走的三个函数（`_group_duplicates` / `_find_duplicate_groups` / `_delete_duplicate_files`）
+   在文件里排在它们**之后**，所以前面的行号一动不动。
+   教训形状：**同一文件里的多个行号锚点不共享一个位移**，逐条回源码，别用「整体 ±N」推。
+
+另：批3a 攒下但未处理的机器状态 —— `C:\lqdp-e2e` 下 slot 目录累计约 7.7 GB，用户明确说先不清。
+
 ---
 
 ## Self-Review 结论（写完自查，已就地修正）
