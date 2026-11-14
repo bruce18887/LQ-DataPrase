@@ -70,13 +70,17 @@ describe('重复文件卡的接线', () => {
 })
 
 /**
- * Task 7 的接线判据：先按形状钉在这里，**当前 skip** —— 本 Task（Task 6）不许改
- * `ConsistencyCheckDialog.vue` 与 `api/datafiles.ts`，那两处仍是旧签名（`fixConsistency(action)`、
- * 请求体无 `keep_ids`），断言现在挂着就是永久红。Task 6 交付的是「组件 emit 载荷、
- * 父组件暂时忽略」这个预期中间态。
- * ⇒ Task 7 落地的同一批里把 `describe.skip` 改回 `describe`，那是它自己的判据。
+ * Task 7 的接线判据：**源码派生守卫，不用人记得改回来**。
+ *
+ * 为什么不是 `describe.skip`：skip 的解除是一个人工步骤，而本批已经出现过一次
+ * 「解除动作只活在注释里」的形状（Task 6 交付时台账还没建、计划 Task 7 又写着
+ * 「此刻这两条应该正红着」—— 与 skip 的现状互相矛盾）。
+ * 判据自己看磁盘：`api/datafiles.ts` 里出现 `keep_ids` == Task 7 已落地 == 这两条真跑；
+ * 没落地就 skip，且 skipped 数会随 Task 7 归零（台账按实测 skipped 数对账）。
+ * 判例同 `firstScreenChunks.spec.ts` 的 `describe.skipIf(!built)`。
  */
-describe.skip('对话框与 api 的接线（Task 7 解除 skip）', () => {
+const API_LANDED = /keep_ids/.test(api())
+describe.skipIf(!API_LANDED)('对话框与 api 的接线（api 出现 keep_ids 即自动生效）', () => {
   it('对话框把 keep_ids 交给 api，并把 remaining_groups 拼进回执', () => {
     const d = dialog()
     expect(d).toMatch(/fixConsistency\(action,\s*keepIds\)/)

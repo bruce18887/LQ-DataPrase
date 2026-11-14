@@ -1254,6 +1254,23 @@ git commit -m "feat(data): 重复项保留选择纯函数层 + T2（两颗策略
 
 ## Task 6: 卡片改造成 radio 行（结构钩子 + 源侧绊线）
 
+> **本 Task 会造成一条既有用例转红，落地时必须声明**（2026-11-15 复审实测）：
+> 按钮文案从「删除重复文件」变成 `按选择删除 N 个（X MB）`，
+> 而 `frontend/e2e/data/repair-center.spec.ts:246` 是按旧文案 `filter({ hasText: '删除重复文件' })`
+> 找那颗按钮的 ⇒ Task 6 落地到 Task 8 重写它之间，**那条 e2e 是确定红的**（timeout，不是断言不符）。
+> 这不是 Task 6 的缺陷，是语义反转的必然中间态；把它写在这里是为了别让收口那轮把它读成「新伤的」。
+> 判据去向：Task 8 的两条用例（默认留最早 / 改选留被选）就是它的替代。
+>
+> **另两处计划文本缺陷（Task 6 落地时实测）**：
+> ① Step 3 代码块那行 `import type { DuplicateGroup, DuplicateGroupFile }` **不可编译** ——
+> 新模板不再给 `dupFileTitle` 做形参标注，`DuplicateGroupFile` 成了未使用符号，
+> `tsconfig.app.json` 的 `noUnusedLocals` 报 `TS6196`（复审代理按计划原文加回去跑 `vue-tsc -b --force` 复现，exit=2）。
+> 落地版只 import `DuplicateGroup`。
+> ② Step 4 的 M15 原判据 `/emit\('fix',\s*resolveKeepIds\(/` **无牙**：把 `@click="submit"`
+> 改成 `@click="emit('fix')"` 后，`submit()` 变死代码但字符串仍在文件里 ⇒ 变异前后都匹配（node 实测四个组合）。
+> 落地版改成钉整条链（`@click="submit"` 与 `function submit() { emit('fix', resolveKeepIds(` 两条 +
+> `not.toMatch(/emit\('fix',\s*\[/)` 禁「只送 choice 残值」）。
+
 **Files:**
 - Modify: `frontend/src/pages/data/components/DuplicateFilesCard.vue`
 - Test: `frontend/test/unit/dupKeepWiring.spec.ts`
@@ -1595,6 +1612,13 @@ describe('反向探针（改注释/换行/无关改名都不许红）', () => {
 
 - [ ] **Step 3: 跑 T2 两档 + 构建**
 
+> **Task 6 落地订正**：本步原写「若 `(id: number) => pick(group, id)` 报 TS2345 就改 `Number(val)`」——
+> 实测 EP 2.14 + `vue-tsc -b --force` **不报**（0 诊断），落地保留计划原形，没有引入 `Number()`。
+> 另外两条 Task 7 的接线断言**不在这里长期 skip**：绊线用源码派生守卫
+> `describe.skipIf(!/keep_ids/.test(api()))` ⇒ Task 7 一落地**自动解除**，
+> 不留「靠人记得把 `describe.skip` 改回来」的活口（判例 `firstScreenChunks.spec.ts` 的 `skipIf`）。
+> 台账核对方式：Task 7 之前 `npx vitest run` 的 `skipped` 含这 2 条，Task 7 之后该归零。
+
 ```bash
 cd frontend && npx vitest run test/unit/dupKeep.spec.ts test/unit/dupKeepWiring.spec.ts 2>&1
 npm run build 2>&1
@@ -1701,8 +1725,10 @@ TS 侧那三处的签名是 `(keepIds?: number[])` 兼容。**别顺手改成 `@
 cd frontend && npx vitest run test/unit/dupKeep.spec.ts test/unit/dupKeepWiring.spec.ts 2>&1
 npm run build 2>&1
 ```
-Expected: 绊线里 `fixConsistency\(action,\s*keepIds\)` 与 `remainingGroupsNote\(` 两条此刻才第一次为真
-⇒ Step 1/2 之前它们应该正红着（先红后绿，顺序不许倒）。
+Expected: 绊线里 `fixConsistency\(action,\s*keepIds\)` 与 `remainingGroupsNote\(` 两条**在本步之前是
+`skipIf` 状态（不是红，是没参与判定）**，Task 7 落地后守卫自动放开 ⇒ 这两条第一次真跑，
+判据是 `npx vitest run test/unit/dupKeepWiring.spec.ts` 末尾的 `skipped` 从 2 变 0。
+**别把「解除 skip」写成人工步骤**（Task 6 复审为此把 `describe.skip` 换成了源码派生的 `describe.skipIf`）。
 
 - [ ] **Step 4: 变异反证**
 
@@ -1852,6 +1878,77 @@ async function cleanupDup(dupName: string, ...dirs: string[]) {
 
 ⚠ 原用例的 `2 个` 断言与卡片可见性断言都保留在第一条里；`修复后本批次问题全部消失` 那条不动
 （它按 `BATCH` 名前缀检查另三类卡片，与本批两条无交集）。
+
+- [ ] **Step 2b: 再加第三条 —— 「一键策略」必须真在浏览器里被点过一次**
+
+Task 6 复审实测：把 `applyStrategyToUntouched(props.groups.slice(0, 3), …)` 传窄（只覆盖前三组），
+**五条源侧绊线全绿** —— 「按钮上的 N 与实际覆盖面同源」这条语义性质在 T2 钉不住，
+而 `[data-testid="dup-apply-strategy"]` 在整批计划里从来没被任何用例点过。所以本 Task 必须补：
+
+```ts
+  test('重复文件：改选过一组之后点「应用到未改选的 N 组」，只有未改选的那几组被改', async ({ page }) => {
+    const dupName = `dup_batch_${ts}.csv`
+    const tags = ['K1', 'K2', 'K3']
+    const pairs = []
+    for (const tag of tags) pairs.push(await seedDuplicatePair(page, dupName, tag))
+    try {
+      await openRepairCenter(page)
+      const card = page.locator('[data-testid="duplicate-files-card"]')
+      await expect(card).toBeVisible({ timeout: 15_000 })
+      const applyBtn = card.locator('[data-testid="dup-apply-strategy"]')
+      // 三组都未改选 ⇒ N=3
+      await expect(applyBtn).toHaveText(/应用到未改选的 3 组/)
+      // 手改第一组：选它里面**不是默认**的那一行
+      const g0 = card.locator('[data-testid="dup-group"]').filter({ hasText: pairs[0].batchA })
+      const manual = g0.locator('[data-testid="dup-keep-row"]').filter({ hasText: pairs[0].batchB })
+      await manual.locator('.el-radio').click()
+      await expect(manual).toHaveAttribute('data-keep', 'keep')
+      // N 必须降到 2 —— 这是「Vue 对 Map 深追踪真的生效」唯一的可见签名
+      // （失效时 data-keep 也会不换行，但那一半上一条用例已抓；这一半抓的是「N 不动 + 按钮不 disable」）
+      await expect(applyBtn).toHaveText(/应用到未改选的 2 组/)
+      await card.locator('.el-radio-group').first().locator('.el-radio').nth(0).click() // 占位：见下注
+      // 选「最新导入」策略后点应用
+      await card.locator('.dup-strategy').getByText('最新导入', { exact: true }).click()
+      await applyBtn.click()
+      // 手改那组原样不动（N 从 2 变 0 之后按钮必须禁用）
+      await expect(manual).toHaveAttribute('data-keep', 'keep')
+      await expect(applyBtn).toBeDisabled()
+      // 其余两组：留下的必须是**各自较晚**那一份
+      await card.locator('.el-checkbox').click()
+      await card.locator('button').filter({ hasText: '按选择删除 3 个' }).click()
+      await expect(page.getByText(/已删除 3 个重复文件/).first()).toBeVisible({ timeout: 20_000 })
+      for (const p of [pairs[1], pairs[2]]) {
+        await expect.poll(() => dupEndState(page, dupName), { timeout: 15_000 }).not.toBe('3|—')
+      }
+      // 逐组终态：三组各剩 1 条，且 -K1 留的是手改的 B、-K2/-K3 留的是各自较晚的那条
+      await expect
+        .poll(() => dupRemainingBatches(page, dupName), { timeout: 15_000 })
+        .toEqual([pairs[0].batchB, pairs[1].batchB, pairs[2].batchB].sort())
+    } finally {
+      for (const p of pairs) await cleanupDup(dupName, p.dirA, p.dirB)
+    }
+  })
+```
+
+需要新增的 spec 局部助手（放在 Step 1 那三条旁边）：
+
+```ts
+/** 终态批次名清单（排序后比对）：三组各剩一条时，留下的必须是**指定的那三份**。 */
+async function dupRemainingBatches(page: Page, dupName: string): Promise<string[]> {
+  const { body } = await apiGet(page, '/files/?page_size=9999')
+  const list: any[] = Array.isArray(body) ? body : (body.results ?? [])
+  return list.filter((f: any) => f.filename === dupName).map((f: any) => f.batch_name).sort()
+}
+```
+
+⚠ 三处写法要求，都是复审实测踩出来的：
+1. **`seedDuplicatePair` 要按 tag 收多份**（`pairs[]`），终态判据一律按 `batch_name` 认，**不按 id、不按行序**
+   （`files` 顺序由后端 `order_by('id')` 保证，但那是 T1 的契约，界面判据不该再依赖它一次）。
+2. `dupName` 每条用例独立（`dup_def_` / `dup_pick_` / `dup_batch_` 前缀 + `ts`），否则三条用例互看对方的组。
+3. 中间那行「占位」的 `.el-radio-group ... .nth(0)` 是**示意**：落地时删掉它，
+   选策略那颗用 `.dup-strategy` 里的 `el-radio`（`getByText('最新导入')`）——
+   留两粒同文案的 radio 会让 `getByText` strict mode 报多匹配。落地前先 `grep -n "dup-strategy" 组件`
+   确认类名，别照抄本段的类名假设。
 
 - [ ] **Step 3: 类型体检 + 跑这一档**
 
