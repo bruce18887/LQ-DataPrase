@@ -506,13 +506,16 @@ git commit -m "feat(datafiles): 磁盘占用走树核心（表观/inode 去重/�
 
 ```python
 class DbMapTests(TestCase):
-    """DB 侧两本账（订正②）：只有「resolve 后落在根目录内」的记录才可与磁盘比。"""
+    """DB 侧两本账（订正②）：只有「resolve 后落在根目录内」的记录才可与磁盘比。
+
+    两套计数各有用途，别混：``in_rows`` / ``in_bytes`` 是**行**口径（进返回体的 db_*），
+    ``in_files`` 与 map 是**文件**口径（交集差值用它 —— 磁盘上只有那颗）。
+    """
 
     def setUp(self):
         self.base = tempfile.mkdtemp(prefix='lqdp-usage-db-')
         self.addCleanup(shutil.rmtree, self.base, True)
         self.user = User.objects.create_user('inroot', 'ir@localhost', 'x-pass-12345678')
-        self.root = os.path.join(self.base, 'data', 'inroot')
 
     def _row(self, file_path, file_size):
         return DataFile.objects.create(
@@ -521,26 +524,42 @@ class DbMapTests(TestCase):
             format_type='CTA8290D', status='ready',
         )
 
-    def test_相对路径进map_绝对路径落在根外单独记账(self):
+    def _map(self):
+        """造行不需要 MEDIA_ROOT，只有算根目录需要 —— 所以 override 只裹住这一次。"""
         with self.settings(MEDIA_ROOT=self.base):
-            self._row('data/inroot/single/a.csv', 100)
-            self._row('data/inroot/batch/B1/b.csv', 250)
-            self._row(os.path.join(self.base, 'elsewhere', 'c.csv'), 999)   # 遗留绝对路径
-            self._row(r'C:\SampleData\d.csv', 7)                            # 根外/跨盘
-            db = storage_usage._db_map(self.user, storage_usage._user_data_root('inroot'))
-        self.assertEqual(db['in_count'], 2)
+            return storage_usage._db_map(
+                self.user, storage_usage._user_data_root('inroot'))
+
+    def test_相对路径进map_绝对路径落在根外单独记账(self):
+        self._row('data/inroot/single/a.csv', 100)
+        self._row('data/inroot/batch/B1/b.csv', 250)
+        self._row(os.path.join(self.base, 'elsewhere', 'c.csv'), 999)   # 遗留绝对路径
+        self._row(r'C:\SampleData\d.csv', 7)                            # 根外/跨盘
+        db = self._map()
+        self.assertEqual(db['in_rows'], 2)
         self.assertEqual(db['in_bytes'], 350)
         self.assertEqual(db['out_count'], 2)
         self.assertEqual(db['out_bytes'], 1006)
 
+    def test_同一路径两条不同大小的注册行_按id最大那条定胜负(self):
+        """不加 order_by 的话 map 里的胜者取决于 values_list 的返回顺序 ⇒ 同一份数据
+        两次请求可以给出不同的差值，还在 30s TTL 里冻住一个。定死成 id 最大的那条
+        （与 _helpers.py:309 _group_duplicates 的 order_by('id') 同一条纪律）。"""
+        self._row('data/inroot/single/a.csv', 100)
+        self._row('data/inroot/single/a.csv', 250)
+        db = self._map()
+        self.assertEqual(db['in_rows'], 2)          # 行口径：两条都算
+        self.assertEqual(db['in_files'], 1)         # 文件口径：去重后只剩一颗
+        self.assertEqual(db['in_bytes'], 350)       # 行口径的合计
+        self.assertEqual(list(db['map'].values()), [250])   # 交集用 id 最大那条
+
     def test_map的键是normcase后的绝对路径(self):
         """交集靠这个键匹配。键的形态必须与 _scan_tree 查表时用的同一种，
         否则「匹配不上」的方向是 reg_db 与 reg_disk 一起不加 ⇒ 差值恒为 0 ⇒
-        该报的不报（假绿），而不是冒出一条虚高差值。所以下面那条 registered_count
-        非 0 的断言才是真正的护栏，别指望差值行替这条路把关。"""
-        with self.settings(MEDIA_ROOT=self.base):
-            self._row('data/inroot/single/a.csv', 100)
-            db = storage_usage._db_map(self.user, storage_usage._user_data_root('inroot'))
+        该报的不报（假绿），而不是冒出一条虚高差值。所以下面 joined 那批用例断言
+        registered_count 非 0 才是真正的护栏，别指望差值行替这条路把关。"""
+        self._row('data/inroot/single/a.csv', 100)
+        db = self._map()
         key = next(iter(db['map']))
         self.assertEqual(key, os.path.normcase(os.path.normpath(
             os.path.join(self.base, 'data', 'inroot', 'single', 'a.csv'))))
@@ -549,17 +568,16 @@ class DbMapTests(TestCase):
     def test_大小写不同的路径也能匹配上(self):
         """Windows 路径大小写不敏感：DB 里写 data/INROOT/... 而磁盘上是 data/inroot/。
         不做 normcase 的话这一条会在交集里凭空消失。"""
-        with self.settings(MEDIA_ROOT=self.base):
-            self._row('data/INROOT/single/a.csv', 100)     # 只有大小写不同
-            db = storage_usage._db_map(self.user, storage_usage._user_data_root('inroot'))
-        self.assertEqual(db['in_count'], 1)
+        self._row('data/INROOT/single/a.csv', 100)     # 只有大小写不同
+        db = self._map()
+        self.assertEqual(db['in_rows'], 1)
+        self.assertEqual(db['in_files'], 1)
 
     def test_file_size_为_None_按0计不成报错(self):
-        with self.settings(MEDIA_ROOT=self.base):
-            self._row('data/inroot/single/a.csv', 0)
-            DataFile.objects.filter(owner=self.user).update(file_size=None)
-            db = storage_usage._db_map(self.user, storage_usage._user_data_root('inroot'))
-        self.assertEqual(db['in_count'], 1)
+        row = self._row('data/inroot/single/a.csv', 0)
+        DataFile.objects.filter(pk=row.pk).update(file_size=None)
+        db = self._map()
+        self.assertEqual(db['in_rows'], 1)
         self.assertEqual(db['in_bytes'], 0)
 
 
@@ -722,25 +740,34 @@ def _db_map(user, root):
     该报的不报（假绿），不是冒出一条虚高差值 —— 护栏是 Task 3 断言
     ``registered_count == 1``，不是差值行。
 
-    遍历形状照抄生产写法 ``views/browse_views.py:272-277``（同一份 values_list）。
+    遍历形状照抄生产写法 ``views/browse_views.py:272-277``（同一份 values_list），但**加
+    ``order_by('id')``**：同一个路径上有重复注册行是已知状态（批3 整批就在处理它），
+    map 按路径去重 ⇒ 不加排序的话胜者取决于数据库返回顺序，差值会在两次请求之间翻脸，
+    还在 30s TTL 里冻住一个。``order_by('id')`` 把胜者定死成 id 最大的那条。
+
+    返回的口径分两套：``in_rows``/``in_bytes`` 是**行**口径（返回体里的 db_* 用它），
+    ``in_files`` = ``len(map)`` 与 map 本身是**文件**口径（交集差值用它）。
     """
     prefix = os.path.normcase(os.path.normpath(root)) + os.sep
     registered = {}
-    out_count = out_bytes = 0
-    for file_path, file_size in DataFile.objects.filter(owner=user).values_list(
+    in_rows = in_bytes = out_count = out_bytes = 0
+    for file_path, file_size in DataFile.objects.filter(owner=user).order_by('id').values_list(
         'file_path', 'file_size'
     ):
         abs_path = os.path.normcase(os.path.normpath(resolve_file_path(file_path or '')))
         size = int(file_size or 0)
         if abs_path.startswith(prefix):
+            in_rows += 1
+            in_bytes += size
             registered[abs_path] = size
         else:
             out_count += 1
             out_bytes += size
     return {
         'map': registered,
-        'in_count': len(registered),
-        'in_bytes': sum(registered.values()),
+        'in_rows': in_rows,
+        'in_files': len(registered),
+        'in_bytes': in_bytes,
         'out_count': out_count,
         'out_bytes': out_bytes,
     }
@@ -782,8 +809,9 @@ def _compute_usage(user):
         'unique_bytes': scan['unique_bytes'],
         'file_count': scan['file_count'],
         'by_type': scan['by_type'],
-        # db_count / db_bytes 是「全量参考」；差值恒等式用的是交集，不进返回体。
-        'db_count': db['in_count'] + db['out_count'],
+        # db_count / db_bytes 是「全量参考」，走的是**行**口径（in_rows + out_count）；
+        # 差值恒等式走的是交集（文件口径），那三个内部量不进返回体。
+        'db_count': db['in_rows'] + db['out_count'],
         'db_bytes': db['in_bytes'] + db['out_bytes'],
         'db_bytes_in_root': db['in_bytes'],
         'db_outside_root_count': db['out_count'],
@@ -797,7 +825,7 @@ def _compute_usage(user):
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: 同 Step 2 的命令，落 `tasks/b2-task3.log`。
-Expected: `Ran 19 tests ... OK`（Task 2 的 7 条 + 本任务 12 条 = DbMapTests 4 + JoinedScanTests 4 + MismatchTests 4）。`test_大小写不同的路径也能匹配上` 若在非 Windows 上跑会失败——那是它本来的意思（大小写不敏感是 Windows 事实），别改成 skip；真到 Linux CI 上要按 CI 档另开一条带平台判据的用例，本批 CI 不跑 Playwright 而后端档在 Windows 本机（`.github/workflows/ci.yml` 只有 4 档）。
+Expected: `Ran 29 tests ... OK`（Task 2 落地后的 16 条 + 本任务 13 条 = DbMapTests 5 + JoinedScanTests 4 + MismatchTests 4）。`test_大小写不同的路径也能匹配上` 若在非 Windows 上跑会失败——那是它本来的意思（大小写不敏感是 Windows 事实），别改成 skip；真到 Linux CI 上要按 CI 档另开一条带平台判据的用例，本批 CI 不跑 Playwright 而后端档在 Windows 本机（`.github/workflows/ci.yml` 只有 4 档）。
 
 - [ ] **Step 5: 提交**
 
@@ -1149,7 +1177,7 @@ Run:
 ```bash
 CODEBUDDY_SAFE_DELETE_ENABLED=0 .venv/Scripts/python.exe -X utf8 manage.py test test.backend.test_storage_usage_scan test.backend.test_files_usage_api > tasks/b2-task5b.log 2>&1
 ```
-Expected: `Ran 32 tests ... OK`（本文件 23 = 7+12+4，加端点契约 9），且**没有** skip（`clear_usage_cache` 在 setUp/tearDown 各清一次，是这两份文件能同轮跑的前提）。
+Expected: `Ran 42 tests ... OK`（本文件 33 = 16+13+4，加端点契约 9），且**没有** skip。
 
 - [ ] **Step 4: 提交**
 
@@ -1982,6 +2010,35 @@ git commit -m "docs(ledger): 批2 磁盘占用收口实测与台账"
 5. **`test_by_type_...` 的自洽性断言改成对着 `result` 自己比。** 初稿写死 `sum(...) == 1310` / `== 4`，那样「总量与分桶一起算错」查不出来，而那正是浮层与 chip 互相打脸的形状。现在断言 `sum(v['bytes'] ...) == result['bytes']`。
 
 落地文件行数：`apps/datafiles/storage_usage.py` **118**、`test/backend/test_storage_usage_scan.py` **115**（`node scripts/line-limit.mjs` 退出 0）。
+
+### 同一轮的代码质量复审又挖出 6 条（都核实过，都已落地）
+
+复审给出的每条我都在本机复现或反证过，其中前两条是**复审自己也没量准**的（见下表最后一列），所以文字按实测写。
+
+| # | 发现 | 实测 | 落地 |
+|---|---|---|---|
+| 6 | **junction 会被走进树里**（Critical）。模块 docstring 与 `_iter_files` 都写着「目录联接跳过」，而实现只判了 `is_symlink()` | 本机 `mklink /J` 造的条目实测 `is_symlink()=False`、`is_dir(follow_symlinks=False)=True`、`is_junction()=True`；旧写法会把目标目录的体积算到这个用户头上，自引用 junction 还能递归到 MAX_PATH 才停 —— 而那声 OSError 恰好被「跳过坏条目」那条咽掉，表现为一个偏大的数而不是报错 | `if entry.is_symlink() or entry.is_junction(): continue` + 一条 `mklink /J` 用例（造不出就 skipTest，同 `test_test_data_gc.py:157` 的写法） |
+| 7 | **`registered` 命中依赖绝对 root**（Important）。`entry.path` 的绝对性是从 root 继承的 | 相对 root 实测 `registered_count=0`（而 `bytes`/`count` 照旧正常）——正是假绿方向 | `_scan_tree` 带 `registered` 时 `not os.path.isabs(root)` ⇒ `raise ValueError`（用 raise 不用 assert：`-O` 会剥掉 assert） |
+| 8 | **`st_ino` 恒 0 的文件系统会把整棵树塌成一份** | 网络盘/部分虚拟盘的已知形状；后果与 lessons 2026-10-24 那次「5.0GB 报成 0.07MB」同一个形状，只是换了成因 | 去重键改成 `(dev, ino) if ino else (dev, ino, path)` —— ino 为 0 时**不去重**（宁可高估，不去猜） |
+| 9 | **用户名可以就是 `..`**（复审建议用 `os.path.basename(username)` 防，**那条防护无效**） | 实测 `UnicodeUsernameValidator()('..')` **接受**（点号是合法字符）；实测 `os.path.basename('..') == '..'`。`MEDIA_ROOT/data/..` 归一化后就是 `MEDIA_ROOT` ⇒ 这一个用户会看到所有人的量 | `_user_data_root` 对 `('', '.', '..')` 与含分隔符的用户名 `raise ValueError`，并把「别拿 basename 当防护」写进 docstring。同形状的老入口 `_helpers.py:183 _user_upload_dir` 没挡 ⇒ 记进台账，不属本批 |
+| 10 | **`test_目录内不可读条目…` 那条 chmod 用例其实杀不掉任何东西** | 实测 `os.chmod(0o000)` 之后 `os.lstat` **仍然成功**，所以 `except OSError` 分支根本没进过；`assertLessEqual(file_count, 1)` 在「全跳过」和「全没跳」两种实现下都绿 | 换成注入：wrapper 只对指定路径抛 `OSError`、其余委托真实现（窗口内不波及 Django 自己的调用）。条目分支与目录分支**各一条**（两处不同的 `continue`）；顺带把「根不存在 / 根是空目录 / 根是一个文件」拆成三条（原来那条名为「空目录」实际测的是目录不存在） |
+| 11 | `OrderedDict` 又立刻 `dict()` 拍平、`os.path.basename(entry.name)` ≡ `entry.name` | —— | 直接用 dict（插入序即输出序）+ `entry.name` |
+| 12 | `registered_count` 数的是**文件**不是**行**：map 按路径去重，重复行只留一条；而计划初稿的 `_db_map` **没有 `order_by`** | 同一路径两条不同 `file_size` 的行 ⇒ 胜者取决于 `values_list` 顺序 ⇒ 差值会在 30 s TTL 里翻脸。`_helpers.py:309 _group_duplicates` 恰好是 `order_by('id')` 的 | 契约写进 `_scan_tree` docstring；**Task 3 的 `_db_map` 改成 `order_by('id')` + 单独数 `in_rows`**（`db_count` 用行数，不用 `len(map)`），并补一条重复行用例 |
+
+**六条变异的反证**（`tasks/mutate_b2_task2.py`，跑完自动还原原文 + `git diff` 复核）：
+
+```
+去掉 junction 跳过            → test_目录联接junction不进树            杀掉
+条目分支 continue 改 raise     → test_单个文件读不到时其余照常计入且不抛错   杀掉
+目录分支 continue 改 raise     → test_单个子目录读不到时其余照常计入且不抛错  杀掉
+退回「无脑按 (dev,ino) 去重」   → test_ino为0时不去重_宁可高估            杀掉
+去掉绝对路径守卫               → test_带registered时root必须是绝对路径     杀掉
+去掉用户名守卫                 → test_点点点之类的用户名直接报错           杀掉
+```
+
+一个锚点教训（记进 lessons 候选）：给变异脚本写文本锚点时，`'        except OSError:\n            continue'` 这种**纯缩进区分**的片段会先命中外层那条更宽缩进的分支（20/24 空格的尾巴里含同样的 8/12 子串），于是「改目录分支」实际改的是条目分支、判据被误判成杀不掉。锚点要带上下一行（`\n\n\ndef _scan_tree`）才唯一。
+
+落地文件行数（本轮之后）：`apps/datafiles/storage_usage.py` **148**、`test/backend/test_storage_usage_scan.py` **253**；`Ran 16 tests / OK`，零 skip。
 
 ---
 
