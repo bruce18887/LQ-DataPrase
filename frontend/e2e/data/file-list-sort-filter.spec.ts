@@ -14,14 +14,17 @@ import { openHeaderFilter, selectHeaderFilterOption } from '../helpers/colfilter
 
 /** 当前可见 section 内文件列表的 API 请求（GET 查询参数在 URL） */
 async function waitFilesRequest(page: Page, predicate: (url: string) => boolean) {
-  // `includes('/files/')` 在批2 之后不再只等于「列表请求」：`/api/v1/files/usage/` 也匹配它。
-  // 本文件里那条**反向**谓词（`waitFilesRequest(page, url => !url.includes('product_code='))`，
-  // 「清筛选 → 恢复全量」那一步）会被占用响应收下来，于是「清完筛选真的发过一次全量列表
-  // 请求」这句悄悄变成假绿。占用请求今天不落在该窗口里（只在激活/写入时发），所以现在是
-  // 潜伏态 —— 但假绿不该靠时序侥幸存活，这里显式排掉。
+  // **正向**匹配列表端点，而不是 `includes('/files/')` 再逐个排除：后者在批2 之后会一路收
+  // 子路由（`/files/usage/` 已经中招，`product_codes/`、`format_types/`、`options/` 同理），
+  // 而本文件「清筛选 → 恢复全量」那条用的是**反向**谓词 `!url.includes('product_code=')`
+  // （注意 `product_codes/` 里没有 `product_code=`），这些 URL 全都满足它 ⇒ 「确实发过一次
+  // 全量列表请求」会悄悄变成假绿。更要紧的是 `FileListTab.vue` 的 filesVersion watch 把
+  // loadFiles / loadProductCodes / loadFormatTypes / loadAllTags 一起发（:390-394），
+  // 它们本来就在同一个突发里，不是「将来某次导航才可能撞上」。
+  // 恒等式：列表 URL 一定带查询串 —— `listFiles` 固定送 `page` 与 `file_type:'single'`
+  // （FileListTab.vue:159-169），`cleanParams` 只丢空值不丢它们（api/datafiles.ts:109-115）。
   return page.waitForResponse(
-    (r) => r.url().includes('/files/') && !r.url().includes('/files/usage/')
-      && predicate(r.url()) && r.status() === 200,
+    (r) => r.url().includes('/api/v1/files/?') && predicate(r.url()) && r.status() === 200,
     { timeout: 15_000 },
   )
 }
