@@ -2042,6 +2042,71 @@ git commit -m "docs(ledger): 批2 磁盘占用收口实测与台账"
 
 ---
 
+## Task 3 落地后的订正（2026-11-14，变异反证驱动）
+
+Step 2/Step 4 的期望形状与实测一致（红：`Ran 29 / FAILED (errors=12)`，全是
+`AttributeError: ... has no attribute '_db_map'` / `'_mismatch'`，且
+`test_不传registered时只回四个总量键` 当时就过；绿：`Ran 29 / OK` 零 skip）。下面四条是
+计划文本与可执行代码的差，都由 `tasks/mutate_b2_task3.py`（8 个变异，跑完自动还原并复核
+逐字节复现）量出来的。
+
+1. **`test_file_size_为_None_按0计不成报错` 照抄不可执行（Critical）。**
+   `DataFile.objects.filter(pk=row.pk).update(file_size=None)` 实测
+   `sqlite3.IntegrityError: NOT NULL constraint failed: datafiles_datafile.file_size`
+   —— `file_size` 是 `BigIntegerField()`（`apps/datafiles/migrations/0001_initial.py:23`），
+   真库里造不出 NULL，于是这条红在**建数据那一步**、根本没走到 `_db_map`，什么都没判。
+   ⇒ 落地改成注入一行 `(路径, None)`（本文件「chmod 造不出 OSError 就注入」同一个道理），
+   并补一条 `list(db['map'].values()) == [0]`。反证：`int(file_size or 0)` → `int(file_size)`
+   ⇒ `TypeError: int() argument ... not 'NoneType'`（`tasks/b2-task3-mut4.log`）。
+   ⇒ 连带的教训：注入用的 fake 第一版只认 `filter().order_by().values_list()` 这条链，
+   结果「去掉 `order_by`」的变异顺带把它也弄红（AttributeError 串味，归因失真）。改成
+   「任意链形状都通」的 stub（`_FakeRows`）后，每个变异只红在声称判它的那条上。
+
+2. **订正⑤ 的护栏分工和计划写的不一样（Important）。** 把 `_mismatch` 内部退回旧口径
+   （`diff = abs(bytes_total - registered_db_bytes)`）之后，
+   `test_文件已不在盘上时不报不一致` **不红** —— 该用例的三个入参按构造全是 1000，
+   任何两个相减都是 0，它对「差值取哪两侧」这件事**天生看不见**。实测杀到它的是
+   `JoinedScanTests.test_磁盘孤儿不进差值`（`AssertionError: True is not false`）和
+   `MismatchTests.test_分母是磁盘总量_空目录用1防除零`（`30 != 20`）。
+   ⇒ 那条命名用例仍然有牙，只是判的是另一件同样承重的事：已删行漏进交集
+   （`registered_db_bytes = sum(registered.values())` ⇒ `AssertionError: 5243880 != 1000`）。
+   ⇒ 落地：在它的 docstring 里写清「本条钉什么、旧口径那一半归谁」，不许再单独把它当
+   订正⑤ 的护栏（计划 Task 3 的类 docstring 与 2007 行那条都把它写成护栏）。
+
+3. **`test_分母是磁盘总量_空目录用1防除零` 原本钉不住它自己 docstring 里那句禁令。**
+   变异「分母换成 `registered_disk_bytes`」实测 29 例全绿：那三笔数里 `bytes_total` 与
+   `registered_disk_bytes` 要么相等，要么两侧都远越过 5%。
+   ⇒ 补一笔 `_mismatch(100000, 1000, 1051) == (False, 51)`（真口径 0.051% 不报；换分母就成
+   5.1% 假报），现在该变异红 `(True, 51) != (False, 51)`（`tasks/b2-task3-mut8.log`），
+   顺带也把第 2 条那个旧口径变异多杀一次。
+
+4. **`order_by('id')` 确实有判别力，不是巧合。** 去掉之后
+   `AssertionError: Lists differ: [100] != [250]`（`tasks/b2-task3-mut3.log`），且只红这一条。
+   起作用的是 `DataFile.Meta.ordering = ['-created_at']`（`apps/datafiles/models.py:67`）——
+   `values_list()` 会带上默认排序，而它把 id 序整个倒过来，所以「SQLite 恰好按插入序返回
+   ⇒ 测不出来」这个担心在 ORM 层不成立。计划预写的兜底（改成删低 id 行再读）**没启用**。
+
+5. **遗留一条给 Task 4（本批目前无人看守的形状）。** 变异「`_compute_usage` 接线错误：
+   清单侧喂 `db['in_bytes']`（在根内的全部注册行，含文件已删的那些）」实测 29 例**全绿**
+   （`tasks/b2-task3-mut6.log`）—— 本文件的判据按计划是打在 `_scan_tree` + `_mismatch`
+   上的，等于把调用点的接线复制了一遍写进测试，所以调用点自己写错抓不到。
+   Task 4 已有的端点用例里也没有「注册行在、文件已删」这一形状（954-980 只有根外绝对路径
+   与 size 漂移两种）。⇒ Task 4 的 `test_files_usage_api.py` 补一条：`single/a.csv` 在盘上
+   且清单准确 + 另一条注册行的文件已删 ⇒ `mismatch_over_threshold is False` 且
+   `db_count == 2`，把「缺文件不许变成 MB」这句在**端点**上钉住。
+
+6. **`node scripts/line-limit.mjs` 仍是空跑**（无 CLI 入口，exit 0 什么都不查，与
+   2026-11-01 的记录相同）。本批的 600 行证据改用该模块导出的纯函数按
+   `frontend/test/unit/lineLimit.spec.ts` 同款 IO 壳现数：959 个跟踪文件、
+   violations 0、stale-exemptions 0。落地文件行数：`apps/datafiles/storage_usage.py` **256**、
+   `test/backend/test_storage_usage_scan.py` **490**。
+
+顺带：模块 docstring 末尾那句「本模块只做磁盘侧口径……由后续任务加在本文件里」在本任务之后
+就不成立了（`_db_map` / `_mismatch` / `_compute_usage` 已在此），落地时改成「口径都在本文件，
+HTTP 在 `views/usage_views.py`，TTL 缓存由 Task 4 加」。
+
+---
+
 ## Self-Review（写完计划后自查）
 
 **1. 规格覆盖（逐条 §4 → Task）**
