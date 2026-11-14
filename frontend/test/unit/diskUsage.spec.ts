@@ -167,7 +167,10 @@ describe('usageScannedText', () => {
     // 把 toLocaleString 换成 toLocaleDateString（丢掉时分秒）会让这一行「说谎说成当天最新」
     // 而所有用例照绿 —— 时钟分量必须显式钉住（异源法沿用 format.spec.ts:42 的不钉精确串、
     // :50-59 的 hour-cycle 边界思路，分隔符仍用 [-/] 两类都收，防 ICU/Node-vs-Chromium 漂）。
-    // 夹具取一个偏晚的时刻（本例独有，不动 base() 的共享默认），让 12 小时制的「下午」露馅。
+    // 夹具用本例独有的 `scanned_at`（不动 base() 的共享默认）。⚠ 别把「取偏晚的时刻」当成
+    // 杀伤力的来源：秒针正则对任何小时都成立，`[上下]午` 两类都收，所以杀不杀与时值无关。
+    // 本机 UTC+8 下这条 UTC 串渲染成**次日 07:07**（h12 版是 `上午7:07:08`），日期部分与输入
+    // 不同一天 —— 上面只钉日期形状、不钉日期值，所以跨年/跨日都不影响判据，别去"修"这个夹具。
     const text = usageScannedText(base({ scanned_at: '2026-11-14T23:07:08+00:00' }))
     expect(text).toMatch(/^\d{4}[-/]\d{1,2}[-/]\d{1,2}/)
     expect(text).toMatch(/\d{1,2}:\d{2}:\d{2}/)
