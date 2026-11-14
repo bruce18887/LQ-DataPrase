@@ -28,6 +28,21 @@
 **订正④（§4.4 的「主动失效」改成客户端驱动）** 稿子要「上传/删除/修复成功后主动失效」，但满足它的服务端钩子有 8 处（`_register_file`、`_delete_datafile_file_only`、`bulk_delete`、两处 `shutil.rmtree`、两处 `shutil.move`、修复动作分发器），漏挂一处就**永久**陈旧到进程重启。
 ⇒ 处置：`KeyedLRU` 分桶 TTL 做正确性下界（漏挂最多陈旧 30–60s），刷新入口做成 `?fresh=1`，由 `FileListTab.vue` 在**已经存在**的 `filesStore.filesVersion` watch（`frontend/src/pages/data/components/FileListTab.vue:322-327`）里带 `fresh=true` 重拉——上传/删除/批量删除/组合/修复五条流全都调 `filesStore.notifyFilesChanged()`（`FileListTab.vue:220/225/256/288/306`），所以**一行覆盖全部**，SFTP 后台导入这类无前端信号的路径由 TTL 兜底，浮层里显示「统计时间」让陈旧可见。
 
+**订正⑤（§4.6 的恒等式在真实数据上会说一件已经被别人说过的事）** Task 1 追加探针 `tasks/probe_batch2_diff_cause.py` 在本机 dev 库实测拆开四个量：
+
+```
+A 磁盘实扫            : 112 个文件, 1,612,886,366 B (1.50 GB)
+B 注册行且文件在盘上   : 112 行, 清单 1,612,886,366 B, 实际 1,612,886,366 B   ← 漂移 0 B
+C 注册行但文件已不在盘 : 73 行, 清单 286,358,763 B   ← 修复中心已在报的「孤立数据库记录」
+D 盘上有文件但无注册行 : 0 个, 0 B                   ← 修复中心已在报的「孤立磁盘文件」
+旧口径 ratio=0.1775（永远红）／新口径 ratio=0.0000（安静）
+```
+
+按稿子的 `abs(bytes - db_bytes)/bytes`，本机现在就会常年挂一条「清单与磁盘不一致（差 273 MB）」，而它的**全部来源是那 73 条已经不存在的文件**——同一件事修复中心的孤立记录卡已经报过，只是单位不同（条 vs MB）。稿子 §4.6 自己说「常态下差值为零」，实测证明这句话只对「文件都在」的常态成立。
+⇒ 处置：差值恒等式只比**交集**——「注册行 ∩ 文件确实在盘上」这一集合里，`Σ file_size`（清单值）与 `Σ st_size`（实际值）的差。这样这一行从此只说一件事：**清单里的大小数字过期了**；文件缺失归孤立记录卡、磁盘孤儿归孤立磁盘卡，三个信号不再互相重复。
+⇒ 顺带的收益：Task 9 的「未超阈值时不显差值行」这条 e2e 在真实 dev 数据上是**诚实的绿**（新口径 ratio=0），不需要为了通过而注入假数据。
+
+
 ---
 
 ## 文件结构
@@ -48,6 +63,7 @@
 | `frontend/src/pages/data/components/ConsistencyCheckDialog.vue` | 改 | 差值 `el-alert` 行（只陈述，无按钮） |
 | `frontend/e2e/data/disk-usage-chip.spec.ts` | 新建 | T3：文案与端点数值异源核对 / usage 故障不影响列表 / 上传后以 fresh=1 刷新 / 差值行随注入出现 |
 | `docs/superpowers/plans/2026-11-14-batch2-disk-usage.md` | 本文件 | 计划 + 落地后的实测订正 |
+| `tasks/probe_batch2_disk_usage.py`、`tasks/probe_batch2_diff_cause.py` | 新建（**不入库**，`tasks/*` 被 gitignore） | Task 1 的两份探针；实测数回填本文件末尾「Task 1 实测结论」 |
 | `docs/tasks/todo.md`、`docs/tasks/lessons.md` | 改 | Task 10 写台账与实测耗时；踩到新坑才动 lessons |
 
 不新建快照表、不加配额字段、不动 `file_size` 的写路径（设计稿 §4.7 决策 B：本批只落「当前用户 + 口径正确的真实字节」）。
@@ -354,7 +370,9 @@ from apps.datafiles.utils import resolve_file_path
 USAGE_CACHE_TTL_SECONDS = 30
 _USAGE_CACHE_MAX_ENTRIES = 64
 
-# 规格 §4.6 的阈值：常态下差值为零，只在超阈时提示，不做常驻的第二指标。
+# 规格 §4.6 的阈值：只在超阈时提示，不做常驻的第二指标。
+# 「常态下差值为零」这句在旧口径（全量比全量）下实测不成立（本机 dev ratio=0.1775，全是已删文件
+# 造成的），改成订正⑤ 的交集口径后才成立 —— 改回全量比全量就会让这条阈值永远红。
 MISMATCH_RATIO_THRESHOLD = 0.05
 
 _usage_cache = KeyedLRU(_USAGE_CACHE_MAX_ENTRIES)
@@ -402,17 +420,26 @@ def _iter_files(root):
             continue
 
 
-def _scan_tree(root):
-    """扫描 ``root``，返回 ``{'bytes','unique_bytes','file_count','by_type'}``。
+def _scan_tree(root, registered=None):
+    """扫描 ``root``。返回 ``{'bytes','unique_bytes','file_count','by_type'}``，
+    传了 ``registered`` 再附 ``{'registered_count','registered_db_bytes','registered_disk_bytes'}``。
 
     ``by_type`` 的值是 ``{'bytes': int, 'count': int}``，键为根下第一段目录名
     （``single`` / ``batch``，散文件为空串）。各桶之和恒等于总量，这条自洽性由测试钉。
+
+    ``registered`` 是 ``{normcase 后的绝对路径: 清单里记的 file_size}``（Task 3 的
+    ``_db_map`` 造）。在同一次走树里顺手把「注册行 ∩ 文件确实在盘上」这个交集的两侧各自
+    累计出来 —— 这是订正⑤ 的实现位置：差值只比交集，所以缺文件与磁盘孤儿都不会混进来，
+    而且**不用第二次走树**。不传就是纯总量扫描（Task 2 的测试与将来的独立复用都走这条）。
+    查表前必须 ``os.path.normcase(path)``：map 的键是 normcase 过的，而 ``entry.path`` 不是，
+    Windows 上少这一步交集恒为空 —— 表现成「差值全是清单值」而不是报错。
     """
     total = 0
     count = 0
     seen = {}                      # (dev, ino) -> size
     by_type = OrderedDict()
-    for _path, top, dev, ino, size in _iter_files(root):
+    reg_count = reg_db = reg_disk = 0
+    for path, top, dev, ino, size in _iter_files(root):
         total += size
         count += 1
         seen[(dev, ino)] = size
@@ -422,12 +449,23 @@ def _scan_tree(root):
             by_type[top] = bucket
         bucket['bytes'] += size
         bucket['count'] += 1
-    return {
+        if registered is not None:
+            db_size = registered.get(os.path.normcase(path))
+            if db_size is not None:
+                reg_count += 1
+                reg_db += int(db_size or 0)
+                reg_disk += size
+    result = {
         'bytes': total,
         'unique_bytes': sum(seen.values()),
         'file_count': count,
         'by_type': dict(by_type),
     }
+    if registered is not None:
+        result['registered_count'] = reg_count
+        result['registered_db_bytes'] = reg_db
+        result['registered_disk_bytes'] = reg_disk
+    return result
 ```
 
 - [ ] **Step 4: 跑测试确认通过**
@@ -446,19 +484,19 @@ git commit -m "feat(datafiles): 磁盘占用走树核心（表观/inode 去重/�
 
 ---
 
-### Task 3: DB 两本账 + 差值恒等式
+### Task 3: DB 映射（两本账）+ 交集差值恒等式
 
 **Files:**
-- Modify: `apps/datafiles/storage_usage.py`（追加 3 个函数与常量使用）
-- Test: `test/backend/test_storage_usage_scan.py`（追加一个 TestCase 类）
+- Modify: `apps/datafiles/storage_usage.py`（追加 `_db_map` 与 `_mismatch`，改 `_compute_usage`）
+- Test: `test/backend/test_storage_usage_scan.py`（追加三个类）
 
 - [ ] **Step 1: 写失败测试**
 
 追加到 `test/backend/test_storage_usage_scan.py` 末尾（文件顶部再补这三行导入：`from django.test import TestCase`、`from apps.accounts.models import User`、`from apps.datafiles.models import DataFile`）：
 
 ```python
-class DbTotalsTests(TestCase):
-    """DB 侧两本账（订正②）：只有「resolve 后落在根目录内」的记录才与 bytes 可比。"""
+class DbMapTests(TestCase):
+    """DB 侧两本账（订正②）：只有「resolve 后落在根目录内」的记录才可与磁盘比。"""
 
     def setUp(self):
         self.base = tempfile.mkdtemp(prefix='lqdp-usage-db-')
@@ -473,63 +511,136 @@ class DbTotalsTests(TestCase):
             format_type='CTA8290D', status='ready',
         )
 
-    def test_相对路径计入根内_绝对路径计入根外(self):
+    def test_相对路径进map_绝对路径落在根外单独记账(self):
         with self.settings(MEDIA_ROOT=self.base):
             self._row('data/inroot/single/a.csv', 100)
             self._row('data/inroot/batch/B1/b.csv', 250)
             self._row(os.path.join(self.base, 'elsewhere', 'c.csv'), 999)   # 遗留绝对路径
             self._row(r'C:\SampleData\d.csv', 7)                            # 根外/跨盘
-            db = storage_usage._db_totals(self.user, storage_usage._user_data_root('inroot'))
+            db = storage_usage._db_map(self.user, storage_usage._user_data_root('inroot'))
         self.assertEqual(db['in_count'], 2)
         self.assertEqual(db['in_bytes'], 350)
         self.assertEqual(db['out_count'], 2)
         self.assertEqual(db['out_bytes'], 1006)
 
-    def test_空表返回全零(self):
+    def test_map的键是normcase后的绝对路径(self):
+        """交集靠这个键匹配。键的形态必须与 _scan_tree 查表时用的同一种，
+        否则「少算」会以差值的形式冒出来，而不是以报错冒出来 —— 最难查的方向。"""
         with self.settings(MEDIA_ROOT=self.base):
-            db = storage_usage._db_totals(self.user, storage_usage._user_data_root('inroot'))
-        self.assertEqual(
-            db, {'in_count': 0, 'in_bytes': 0, 'out_count': 0, 'out_bytes': 0}
-        )
+            self._row('data/inroot/single/a.csv', 100)
+            db = storage_usage._db_map(self.user, storage_usage._user_data_root('inroot'))
+        key = next(iter(db['map']))
+        self.assertEqual(key, os.path.normcase(os.path.normpath(
+            os.path.join(self.base, 'data', 'inroot', 'single', 'a.csv'))))
+        self.assertEqual(db['map'][key], 100)
+
+    def test_大小写不同的路径也能匹配上（Windows 路径不敏感）(self):
+        with self.settings(MEDIA_ROOT=self.base):
+            self._row('data/INROOT/single/a.csv', 100)     # 只有大小写不同
+            db = storage_usage._db_map(self.user, storage_usage._user_data_root('inroot'))
+        self.assertEqual(db['in_count'], 1)
 
     def test_file_size_为_None_按0计不成报错(self):
         with self.settings(MEDIA_ROOT=self.base):
             self._row('data/inroot/single/a.csv', 0)
             DataFile.objects.filter(owner=self.user).update(file_size=None)
-            db = storage_usage._db_totals(self.user, storage_usage._user_data_root('inroot'))
+            db = storage_usage._db_map(self.user, storage_usage._user_data_root('inroot'))
         self.assertEqual(db['in_count'], 1)
         self.assertEqual(db['in_bytes'], 0)
 
 
+class JoinedScanTests(TestCase):
+    """订正⑤ 的核心：差值只比「注册行 ∩ 文件确实在盘上」这一交集。
+
+    这四条复刻 Task 1 探针在本机 dev 库实测到的形状（112 条在盘 + 73 条已删 + 漂移 0 B），
+    也就是旧口径 ratio=0.1775 / 新口径 ratio=0.0000 那个差。
+    """
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix='lqdp-usage-join-')
+        self.addCleanup(shutil.rmtree, self.base, True)
+        self.user = User.objects.create_user('joiner', 'j@localhost', 'x-pass-12345678')
+        self.root = storage_usage._user_data_root('joiner')
+
+    def _row(self, rel, file_size):
+        return DataFile.objects.create(
+            owner=self.user, filename=os.path.basename(rel),
+            file_path='data/joiner/' + rel.replace('\\', '/'), file_size=file_size,
+            format_type='CTA8290D', status='ready',
+        )
+
+    def test_文件已不在盘上时不报不一致（那是孤立记录卡的活）(self):
+        with self.settings(MEDIA_ROOT=self.base):
+            _write(os.path.join(self.root, 'single', 'a.csv'), 1000)
+            self._row('single/a.csv', 1000)
+            self._row('single/deleted.csv', 5 * 1024 * 1024)   # 记录还在，文件早没了
+            db = storage_usage._db_map(self.user, self.root)
+            scan = storage_usage._scan_tree(self.root, registered=db['map'])
+            flag, diff = storage_usage._mismatch(
+                scan['bytes'], scan['registered_disk_bytes'], scan['registered_db_bytes'])
+        self.assertEqual(scan['bytes'], 1000)
+        self.assertEqual(scan['registered_count'], 1)          # 交集只有 a.csv
+        self.assertEqual(scan['registered_db_bytes'], 1000)
+        self.assertEqual(scan['registered_disk_bytes'], 1000)
+        self.assertFalse(flag)
+        self.assertEqual(diff, 0)
+
+    def test_同一条记录的size漂移才报不一致(self):
+        with self.settings(MEDIA_ROOT=self.base):
+            _write(os.path.join(self.root, 'single', 'a.csv'), 1000)   # 实际 1000
+            self._row('single/a.csv', 100)                             # 清单还写着 100
+            db = storage_usage._db_map(self.user, self.root)
+            scan = storage_usage._scan_tree(self.root, registered=db['map'])
+            flag, diff = storage_usage._mismatch(
+                scan['bytes'], scan['registered_disk_bytes'], scan['registered_db_bytes'])
+        self.assertTrue(flag)
+        self.assertEqual(diff, 900)
+
+    def test_磁盘孤儿不进差值（它有自己的孤立磁盘卡）(self):
+        with self.settings(MEDIA_ROOT=self.base):
+            _write(os.path.join(self.root, 'single', 'a.csv'), 1000)
+            _write(os.path.join(self.root, 'batch', 'B1', 'orphan.csv'), 4000)  # 没有注册行
+            self._row('single/a.csv', 1000)
+            db = storage_usage._db_map(self.user, self.root)
+            scan = storage_usage._scan_tree(self.root, registered=db['map'])
+        self.assertEqual(scan['bytes'], 5000)        # chip 显示的是全部占用
+        self.assertEqual(scan['registered_disk_bytes'], 1000)   # 差值只看交集
+        self.assertFalse(storage_usage._mismatch(
+            scan['bytes'], scan['registered_disk_bytes'],
+            scan['registered_db_bytes'])[0])
+
+    def test_不传registered时只回四个总量键(self):
+        with self.settings(MEDIA_ROOT=self.base):
+            _write(os.path.join(self.root, 'single', 'a.csv'), 10)
+            scan = storage_usage._scan_tree(self.root)
+        self.assertEqual(
+            set(scan), {'bytes', 'unique_bytes', 'file_count', 'by_type'})
+
+
 class MismatchTests(SimpleTestCase):
-    """差值恒等式（规格 §4.6 + 订正③：只陈述事实，不承诺「重新扫描」能修好）。"""
+    """恒等式本身（规格 §4.6 + 订正⑤）：纯算术，不碰文件系统。"""
 
     def test_阈值是严格大于_恰好5pct不算不一致(self):
-        # bytes=1000、db_in_root=950 ⇒ 差 50 ⇒ ratio=0.05 ⇒ 不报
-        flag, diff = storage_usage._mismatch(1000, 950)
+        flag, diff = storage_usage._mismatch(1000, 1000, 950)
         self.assertFalse(flag)
         self.assertEqual(diff, 50)
 
     def test_略超5pct报不一致(self):
-        flag, diff = storage_usage._mismatch(1000, 949)
+        flag, diff = storage_usage._mismatch(1000, 1000, 949)
         self.assertTrue(flag)
         self.assertEqual(diff, 51)
 
-    def test_完全没扫到文件但清单有量时报不一致(self):
-        """根目录空 + DB 里有几百 MB（外部删了文件/搬走数据目录）是最该报的一种。
-        分母 max(bytes,1) 在这里防的正是除零，别顺手改成除以 db_bytes。"""
-        flag, diff = storage_usage._mismatch(0, 500 * 1024 * 1024)
+    def test_分母是磁盘总量_空目录用1防除零(self):
+        """bytes_total=0 时 max(...,1) 防除零。别顺手把分母改成 registered_disk_bytes ——
+        分母选「用户看得见的那个数」才能让 5% 读成「chip 显示的量的 5%」。"""
+        self.assertEqual(storage_usage._mismatch(0, 0, 0), (False, 0))
+        flag, diff = storage_usage._mismatch(0, 10, 30)
         self.assertTrue(flag)
-        self.assertEqual(diff, 500 * 1024 * 1024)
+        self.assertEqual(diff, 20)
 
-    def test_两边都为零不算不一致(self):
-        flag, diff = storage_usage._mismatch(0, 0)
-        self.assertFalse(flag)
-        self.assertEqual(diff, 0)
-
-    def test_清单比磁盘大或小都算(self):
-        self.assertTrue(storage_usage._mismatch(1000, 2000)[0])
-        self.assertTrue(storage_usage._mismatch(2000, 1000)[0])
+    def test_清单大还是磁盘大都算(self):
+        self.assertTrue(storage_usage._mismatch(10000, 1000, 2000)[0])
+        self.assertTrue(storage_usage._mismatch(10000, 2000, 1000)[0])
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -538,70 +649,87 @@ Run:
 ```bash
 CODEBUDDY_SAFE_DELETE_ENABLED=0 .venv/Scripts/python.exe -X utf8 manage.py test test.backend.test_storage_usage_scan > tasks/b2-task3.log 2>&1
 ```
-Expected: `AttributeError: ... has no attribute '_db_totals'`（以及 `_mismatch`），日志末尾不是 `OK`。
+Expected: `AttributeError: module 'apps.datafiles.storage_usage' has no attribute '_db_map'`（以及 `_mismatch`），且 `test_不传registered时只回四个总量键` 通过、`_scan_tree(root, registered=…)` 的三条以 `TypeError` 失败。日志末尾**不该**是 `OK`。
 
 - [ ] **Step 3: 写实现**
 
-在 `apps/datafiles/storage_usage.py` 的 `_scan_tree` 之后追加：
+把 `apps/datafiles/storage_usage.py` 里的 `_db_totals` / `_mismatch` / `_compute_usage` 三个函数**整体替换**为下面这版（`_scan_tree` 已在 Task 2 支持 `registered`）：
 
 ```python
-def _db_totals(user, root):
-    """DB 侧合计，分成「根目录内」与「根目录外」两本账。
+def _db_map(user, root):
+    """该用户的注册行，分成「根目录内（做成 map）」与「根目录外（只记账）」。
 
-    ``file_size`` 是注册那一刻的 ``os.path.getsize``（``_helpers.py:123``），此后永不
-    刷新 ⇒ 它只能当参考值。但更要紧的是：``store_file_path``（``utils.py:97``）对
-    MEDIA_ROOT 之外/跨盘的路径**保持绝对路径**，``resolve_file_path`` 又原样透传 2026-08-21
-    前的遗留绝对路径 ⇒ 这些记录指向的文件不在本函数要扫的树里。把它们混进合计，
-    任何有遗留数据的装机都会常年报一条假的不一致。
+    ``file_size`` 是注册那一刻的 ``os.path.getsize``（``_helpers.py:123``），此后永不刷新
+    ⇒ 只能当参考值。更要紧的是 ``store_file_path``（``utils.py:97``）对 MEDIA_ROOT 之外/
+    跨盘的路径**保持绝对路径**、``resolve_file_path`` 又原样透传 2026-08-21 前的遗留绝对
+    路径 ⇒ 那部分记录指向的文件根本不在本模块要扫的树里，混进合计就会常年报一条假的不一致
+    （计划订正②）。
 
-    遍历形状照抄生产写法 ``views/browse_views.py:272-277``（同一份 `values_list`）。
+    键统一 ``os.path.normcase(os.path.normpath(...))``：Windows 路径大小写不敏感，DB 里写
+    ``data/INROOT/...`` 而磁盘上是 ``data/inroot/`` 时不做 normcase 会让那条在交集里**凭空
+    消失**；消失的方向是少算，于是它表现成一条差值而不是一声报错——最难查的那种。
+
+    遍历形状照抄生产写法 ``views/browse_views.py:272-277``（同一份 values_list）。
     """
-    prefix = os.path.normpath(root) + os.sep
-    in_count = in_bytes = out_count = out_bytes = 0
+    prefix = os.path.normcase(os.path.normpath(root)) + os.sep
+    registered = {}
+    out_count = out_bytes = 0
     for file_path, file_size in DataFile.objects.filter(owner=user).values_list(
         'file_path', 'file_size'
     ):
-        abs_path = os.path.normpath(resolve_file_path(file_path or ''))
+        abs_path = os.path.normcase(os.path.normpath(resolve_file_path(file_path or '')))
         size = int(file_size or 0)
         if abs_path.startswith(prefix):
-            in_count += 1
-            in_bytes += size
+            registered[abs_path] = size
         else:
             out_count += 1
             out_bytes += size
     return {
-        'in_count': in_count,
-        'in_bytes': in_bytes,
+        'map': registered,
+        'in_count': len(registered),
+        'in_bytes': sum(registered.values()),
         'out_count': out_count,
         'out_bytes': out_bytes,
     }
 
 
-def _mismatch(bytes_total, db_bytes_in_root):
-    """规格 §4.6 的恒等式，写成一条可测的判据而不是散文。
+def _mismatch(bytes_total, registered_disk_bytes, registered_db_bytes):
+    """规格 §4.6 的恒等式，但两侧都只取交集（订正⑤）。
 
-    分母取 ``bytes``（磁盘实扫 = 真值），``max(..., 1)`` 只防空目录除零 —— 别改成除以
-    ``db_bytes``，那会让「根目录空了但清单还有几百 MB」这种最该报的情况变成 100% 而
-    与「清单为 0」分不清。``>`` 是严格大于：恰好等于阈值不算不一致（钉在测试里）。
+    ``registered_disk_bytes`` = 交集里每条的**实际** st_size 之和；
+    ``registered_db_bytes``   = 同一条条的**清单** file_size 之和。
+    于是这一行只说一件事：**清单里的大小数字过期了**。
+    文件已删（=孤立数据库记录）与磁盘孤儿（=孤立磁盘文件）各归修复中心自己的卡，
+    不再在这里用 MB 重复说一遍 —— 实测本机 dev 库旧口径 ratio=0.1775、新口径 0.0000。
+    分母用 ``bytes_total``（用户看得见的那个数），``max(..., 1)`` 只防空目录除零；
+    ``>`` 是严格大于，恰好等于阈值不算不一致。
     """
-    diff = abs(bytes_total - db_bytes_in_root)
+    diff = abs(registered_disk_bytes - registered_db_bytes)
     ratio = diff / max(bytes_total, 1)
     return ratio > MISMATCH_RATIO_THRESHOLD, diff
 
 
 def _compute_usage(user):
-    """扫盘 + 查库，组出端点返回体（口径见模块 docstring）。"""
+    """扫盘 + 查库，组出端点返回体（口径见模块 docstring）。
+
+    交集的三个内部量（``registered_count`` / ``registered_disk_bytes`` /
+    ``registered_db_bytes``）**不进返回体**：界面只需要「超没超阈值 + 差多少」，
+    多摆三个数就是规格 §4.6 明确否掉的「没人看得懂的二阶数字」。它们的正确性由
+    Task 3 的 JoinedScanTests 直接打在 `_scan_tree` 上钉住。
+    """
     root = _user_data_root(user.username)
-    scan = _scan_tree(root)
-    db = _db_totals(user, root)
-    mismatch, diff = _mismatch(scan['bytes'], db['in_bytes'])
+    db = _db_map(user, root)
+    scan = _scan_tree(root, registered=db['map'])
+    mismatch, diff = _mismatch(
+        scan['bytes'], scan['registered_disk_bytes'], scan['registered_db_bytes']
+    )
     return {
         'data_dir': root,
         'bytes': scan['bytes'],
         'unique_bytes': scan['unique_bytes'],
         'file_count': scan['file_count'],
         'by_type': scan['by_type'],
-        # db_count / db_bytes 是「全量参考」；差值恒等式用的是 *_in_root 那一本。
+        # db_count / db_bytes 是「全量参考」；差值恒等式用的是交集，不进返回体。
         'db_count': db['in_count'] + db['out_count'],
         'db_bytes': db['in_bytes'] + db['out_bytes'],
         'db_bytes_in_root': db['in_bytes'],
@@ -615,14 +743,14 @@ def _compute_usage(user):
 
 - [ ] **Step 4: 跑测试确认通过**
 
-Run: 同 Step 3 前的命令，落 `tasks/b2-task3.log`。
-Expected: `Ran 15 tests ... OK`（7 + 8）。
+Run: 同 Step 2 的命令，落 `tasks/b2-task3.log`。
+Expected: `Ran 18 tests ... OK`（Task 2 的 7 条 + 本任务 11 条）。`test_大小写不同的路径也能匹配上` 若在非 Windows 上跑会失败——那是它本来的意思（大小写不敏感是 Windows 事实），别改成 skip；真到 Linux CI 上要按 CI 档另开一条带平台判据的用例，本批 CI 不跑 Playwright 而后端档在 Windows 本机（`.github/workflows/ci.yml` 只有 4 档）。
 
 - [ ] **Step 5: 提交**
 
 ```bash
 git add apps/datafiles/storage_usage.py test/backend/test_storage_usage_scan.py
-git commit -m "feat(datafiles): 占用统计的 DB 两本账与差值恒等式"
+git commit -m "feat(datafiles): 占用统计的 DB 映射与交集差值恒等式"
 ```
 
 ---
@@ -970,7 +1098,7 @@ Run:
 ```bash
 CODEBUDDY_SAFE_DELETE_ENABLED=0 .venv/Scripts/python.exe -X utf8 manage.py test test.backend.test_storage_usage_scan test.backend.test_files_usage_api > tasks/b2-task5b.log 2>&1
 ```
-Expected: `Ran 23 tests ... OK`，且**没有** skip（`clear_usage_cache` 在 setUp/tearDown 各清一次，是这两份文件能同轮跑的前提）。
+Expected: `Ran 31 tests ... OK`（本文件 22 + 端点契约 9），且**没有** skip（`clear_usage_cache` 在 setUp/tearDown 各清一次，是这两份文件能同轮跑的前提）。
 
 - [ ] **Step 4: 提交**
 
@@ -1710,7 +1838,7 @@ Run:
 cd frontend && node ../scripts/e2e_pool.mjs --slots=1 -- e2e/data/disk-usage-chip.spec.ts > ../tasks/b2-task9.log 2>&1
 ```
 Expected: `[pool] 结论 MEASURED` + `unexpected 0`。
-第二条（未超阈值不显）依赖**真实数据恰好没超 5%**——若本机 dev 库正好超阈值，它就会红。这条不许改成「先看一眼再断言」：红了就按 `docs/tasks/todo.md` 里 Task 1 记的差值实测归因，必要时给它也加一条透传注入（把 `mismatch_over_threshold` 强制 `false`），并在注释里写明是注入才成立，别把「常态下差值为零」当成前提。
+第二条（未超阈值不显）依赖**真实数据恰好没超 5%**。Task 1 追加探针在本机 dev 库实测新口径 ratio=0.0000（交集两侧都是 1,612,886,366 B，size 漂移 0 条），所以这条在 dev 上是**诚实的绿**，不需要注入假数据。它红了就先跑 `tasks/probe_batch2_diff_cause.py` 归因，两种可能：真有人在 media 里改过文件大小（合法出现，按实测数更新台账并说明是哪几条），或实现又把 C/D 混回了差值（回 Task 3 的判据改实现，**别改测试迁就**）。
 
 - [ ] **Step 4: affected 门禁（本批改动面全跑）**
 
@@ -1801,7 +1929,7 @@ git commit -m "docs(ledger): 批2 磁盘占用收口实测与台账"
 | §4.3 数据源选扫盘 | Task 3 的两本账 + `db_bytes` 只作参考（Task 6 不把它放进 chip） |
 | §4.4 性能（TTL 缓存、失效、实测） | Task 4 `get_user_usage` + Task 5 四条行为判据 + Task 1 P2 + Task 10 Step 3 |
 | §4.5 展示（chip 文案、hover 拆分、字号 token） | Task 6（文案纯函数）+ Task 7（chip + 浮层 + `--p-fs-*` 复用 `.section-count`）+ Task 8（渲染与 hover） |
-| §4.6 差值露出（阈值恒等式、修复对话框一行） | Task 3 `test_阈值是严格大于…` 等 5 条 + Task 9 |
+| §4.6 差值露出（阈值恒等式、修复对话框一行） | Task 3 的 MismatchTests 5 条 + JoinedScanTests 4 条（订正⑤：只比交集）+ Task 9 |
 | §4.7 配额只做到「当前用户」 | 全程无新字段、无逐用户列表；Task 10 Step 3 的「本批不做」清单写死 |
 | §4.8 测试（T1 齐全/空目录/隔离/缓存/交叉核对；T3 chip 渲染） | Task 2/3/4/5（T1，共 23 例）+ Task 6（T2，15 例）+ Task 8/9（T3，6 例） |
 
@@ -1811,6 +1939,38 @@ git commit -m "docs(ledger): 批2 磁盘占用收口实测与台账"
 
 ---
 
-## Task 1 实测结论（Step 3 回填，写代码前完成）
+## Task 1 实测结论（2026-11-14 已跑完，四条判据全过）
 
-（待填 —— 四条判据 + 最大树 ms/文件数 + 根外记录数 + bytes==unique 结果）
+两份探针都在本机 dev 档跑（`manage.py shell` ⇒ `config.settings.development` ⇒
+`MEDIA_ROOT = C:\Users\Administrator\LQ-DataPrase\media`，注册行只有 `admin` 一个用户）。
+
+**① `tasks/probe_batch2_disk_usage.py`**
+
+| 判据 | 实测 | 结论 |
+|---|---|---|
+| P2 实扫耗时 | 112 个文件 / 1,612,886,366 B / **11.4 ms** | ≤300ms ⇒ 按本计划走「实扫 + 30s 分桶缓存」，**不建快照表** |
+| P1 根目录外的注册行 | **0 条 / 0 B**（in_root=185 行） | 订正② 的两本账在本机是防御性的；「目录外 N 条」那句当前不会显示，但遗留装机仍需要它 ⇒ Task 7 保留、Task 8 不为它单开用例 |
+| P3 第一段目录名 | `{'single': 98, 'batch': 14}`，无散文件、无未知键 | `TYPE_LABELS` 的两个键够用；空串与未知键的兜底分支由 Task 6 的 T2 钉（不在浏览器里造没数据的分支） |
+| P4 `bytes == unique_bytes` | **True** | 硬链接目前只在 e2e slot 镜像（`scripts/e2e_pool.mjs:113`）；`unique_bytes` 确实是绊线字段，不进界面 |
+
+**② `tasks/probe_batch2_diff_cause.py`（差值成因拆解，直接产出订正⑤）**
+
+```
+A 磁盘实扫            : 112 个文件, 1,612,886,366 B (1.50 GB)
+B 注册行且文件在盘上   : 112 行, 清单 1,612,886,366 B, 实际 1,612,886,366 B   ← 漂移 0 B / 0 条
+C 注册行但文件已不在盘 : 73 行, 清单 286,358,763 B
+D 盘上有文件但无注册行 : 0 个, 0 B
+旧口径 ratio = 0.1775（永远红）    新口径 ratio = 0.0000（安静）
+```
+
+⇒ 结论写死进实现：差值恒等式两侧都只取交集（Task 3 的 `_mismatch(bytes_total,
+registered_disk_bytes, registered_db_bytes)`）。Task 9 的负例因此在 dev 上是诚实的绿。
+
+**③ 顺手实测的库能力（不是推测，是本机 Python 3.13.12 现跑）**
+
+```
+os.DirEntry.stat()  st_dev / st_ino = 0 / 0          ← 不能用它去重
+os.lstat()          st_dev / st_ino = 5494… / 1970…  ← 实现用这个
+os.link / os.symlink 本机都可建                      ← Task 2 的三条判据用例不会被 skip
+```
+
