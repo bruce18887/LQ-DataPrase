@@ -1933,48 +1933,57 @@ Task 6 复审实测：把 `applyStrategyToUntouched(props.groups.slice(0, 3), �
       // ① 三组都未改选 ⇒ N=3
       await expect(applyBtn).toHaveText(/应用到未改选的 3 组/)
 
-      // ② 手改 K1：显式点它**较晚**那一行（-B）。这一击的意义在「标记为改选过」。
-      //    ⚠ 本节原稿写的是「点较早那份（-A，恰好也是默认值）」—— **实测点不出来**：
-      //    已选中的那颗 radio 上再点一次，DOM 不发 change，EP 的 `use-radio.mjs:21` 那个
-      //    set 因此根本不触发 ⇒ `pick()` 没被调用 ⇒ 「未改选的 3 组」纹丝不动（首轮实测就是红在这里）。
-      //    改成「手改较晚那份 + 策略选最早」：判别力等价 —— 策略若覆盖了改选过的组，
-      //    K1 会被挪回 -A，而下面 ④ 那两条 `data-keep` 断言当场就红。
-      const manual = card.locator('[data-testid="dup-group"]')
-        .filter({ hasText: names[0] })
-        .locator('[data-testid="dup-keep-row"]')
-        .filter({ hasText: pairs[0].batchB })
-      await manual.locator('.el-radio').click()
-      await expect(manual).toHaveAttribute('data-keep', 'keep')
-      // ③ N 必须降到 2 —— Vue 对 `ref(new Map())` 的深追踪失效时这里就是唯一会红的地方
+      // ② 手改 K1 并**落回默认**：两击，先点 -B、再点 -A（返工轮 `ec458bc` 的现形状）。
+      //    两条实测事实：(a) 已选中 radio 上**单击**不发 DOM change ⇒ 单击点不出「已改选」
+      //    （首版就红在这里）；(b) `pick()` 是无条件 `choice.set`
+      //    （`DuplicateFilesCard.vue:145-147`，不比新旧值）⇒ 第二击（-B → -A）照常发 change，
+      //    把该组标成已改选、值落回默认 -A。于是 K1 停在「用户确认要默认这份」上，
+      //    且 改选值(-A) ≠ 策略(最新 -B) —— 两个方向的分歧各有一句断言承重，
+      //    这才是本条能同时杀 M22 与 M23 的前提。
+      const k1 = rowsOf(0)
+      await k1.b.locator('.el-radio').click()
+      await k1.a.locator('.el-radio').click()
+
+      // ③ N 数的是「被点过的组」，与落在哪份无关 ⇒ 两击后必须恰好降 1（3→2）。
+      //    Vue 对 `ref(new Map())` 的深追踪失效时这里是唯一会红的地方。
       await expect(applyBtn).toHaveText(/应用到未改选的 2 组/)
 
-      // ④ 策略选「最早导入」再一键应用：K2/K3 应落到 -A，K1 必须仍然是手改的 -B
-      await card.locator('.dup-strategy .el-radio').filter({ hasText: '最早导入' }).click()
+      // ④ 策略选「最新导入」（≠ 默认 earliest）再一键应用：一步杀两颗变异。
+      //    K2/K3 落 -B ⇒ 钉 M22（`applyStrategy` 无视 strategy.value 硬编码 earliest）；
+      //    K1 留 -A ⇒ 钉 M23（策略盖到已改选的组）。
+      await card.locator('.dup-strategy .el-radio').filter({ hasText: '最新导入' }).click()
+      await expect(k1.a, '应用前中间态：K1 两击后已改选，值 = 默认 -A').toHaveAttribute('data-keep', 'keep')
+      await expect(k1.b).toHaveAttribute('data-keep', 'delete')
       await applyBtn.click()
-      await expect(applyBtn).toBeDisabled()                 // N 归零
-      await expect(manual).toHaveAttribute('data-keep', 'keep')
-      await expect(rowOf(pairs[0], names[0])).toHaveAttribute('data-keep', 'delete')
+      await expect(applyBtn).toBeDisabled()                    // N 归零
+      await expect(k1.a, 'K1 已改选：策略不许越界将其挪去 -B').toHaveAttribute('data-keep', 'keep')
+      await expect(k1.b).toHaveAttribute('data-keep', 'delete')
       for (let i = 1; i < 3; i++) {
-        const early = card.locator('[data-testid="dup-group"]')
-          .filter({ hasText: names[i] })
-          .locator('[data-testid="dup-keep-row"]')
-          .filter({ hasText: pairs[i].batchA })
-        await expect(early, `${tags[i]} 组应被策略落到较早那份`).toHaveAttribute('data-keep', 'keep')
+        await expect(rowsOf(i).b, `${tags[i]} 组应被策略落到最新导入的 -B（≠ 默认）`)
+          .toHaveAttribute('data-keep', 'keep')
       }
 
-      // ⑤ 删除后逐组终态：留下的正是上面选定的那三份
+      // ⑤ 删 3 后终态按批次名认：K1 留手改确认的 -A，K2/K3 留策略的 -B。
+      //    后端 M19 让这句红（`--grep=B3A-T8C3` 单跑实测）⇒ 本条对后端独立承重。
       await card.locator('.el-checkbox').click()
       await card.locator('button').filter({ hasText: '按选择删除 3 个' }).click()
       await expect(page.getByText(/已删除 3 个重复文件/).first()).toBeVisible({ timeout: 20_000 })
-      const want = [pairs[0].batchB, pairs[1].batchA, pairs[2].batchA].sort()
+      const want = [pairs[0].batchA, pairs[1].batchB, pairs[2].batchB].sort()
       await expect.poll(() => dupRemainingBatches(page, names), { timeout: 15_000 }).toEqual(want)
     } finally {
+      // 确定性兜底：播种移进 try 后，中途抛也按 dupDirs(tag) 把 3 组 6 目录与 3 个文件名全清
+      // （rmSync force / 按名删行，对不存在的目录与行是 no-op）。
       for (let i = 0; i < tags.length; i++) {
-        await cleanupDup(names[i], pairs[i].dirA, pairs[i].dirB)
+        await cleanupDup(names[i], ...dupDirs(tags[i]))
       }
     }
   })
 ```
+
+⚠ 上面这段是 **`ec458bc` 落地版**。原稿「手改 -B + 策略选最早」已被复审第 2 条推翻：
+2 成员组里 `earliest` 恒等于默认，选它等于没选。落地后的完整形状以
+`frontend/e2e/data/repair-center.spec.ts:432-503` 为准；本段与它若漂移，**以文件为准**，
+按 Task 5 的同一纪律把这里同步回去 —— 计划不许当第二事实源。
 
 需要新增的 spec 局部助手（放在 Step 1 那三条旁边）：
 
@@ -2037,9 +2046,29 @@ async function dupRemainingBatches(page: Page, names: string[]): Promise<string[
 
 - M19/M20/M21 三个变异都是**打在真实后端**上红的（`Expected "1|…-PICK-B" / Received "1|…-PICK-A"`
   等），不是 `route.fulfill` 遮响应的那种假绿 —— 这条纪律在 §0 第 5 条，别在后续 Task 里破。
-- 第三条用例的**后端侧覆盖是等价推断，不是实测**：`describe.serial` 在前一条失败时会 skip
-  后一条，变异只打在 K1/K2/K3 的界面选择上，后端收到的是什么 `keep_ids` 由第 2 条用例的
-  终态断言间接保证。写进台账时别把它说成「T3 直接钉住后端逐组映射」。
+- ~~第三条用例的**后端侧覆盖是等价推断，不是实测**~~ ⇒ **返工轮已测翻（`ec458bc`）**：
+  用例 3 标题带 ASCII 标记 `[B3A-T8C3]`，用 `E2E_PW_ARGS="--grep=B3A-T8C3"` 单跑
+  （透传口见 `scripts/e2e_pool.mjs:36`），在 M19（后端 `keep` 恒取 `files[0].id`）下
+  **独立红**于 ⑤ 的终态 `dupRemainingBatches`：期望含 `K2-B / K3-B`，实收 `K2-A / K3-A`
+  （`tasks/_b3a_t8r_pool_m19_c3alone.log` + 那一轮 slot 的 `slot0.run.log`），
+  干净代码同口径单跑绿（`tasks/_b3a_t8r_pool_c3alone_green.log`）。
+  ⇒ 用例 3 对后端逐组映射**独立承重**；原先那句「靠 serial 顺序间接保证」作废。
+  仍然成立的边界：`groups.length - choice.size` 与 `filter(!choice.has)` 两式的分歧
+  需要**切片外陈旧键**，界面点不出来 ⇒ 那一式只由源码绊线拦，不许写成「由 T3 覆盖」。
+
+### Task 8 返工轮的变异反证（`ec458bc`，全部真浏览器 + 真后端）
+
+| 变异 | 打在哪 | 红的是谁 | 证据 |
+|------|--------|----------|------|
+| M22 `applyStrategy()` 无视 `strategy.value`、硬编码 `'earliest'` | `DuplicateFilesCard.vue:151` | 仅用例 3：`K2 组应被策略落到最新导入的 -B（≠ 默认）` Expected `keep` / Received `delete` | `tasks/_b3a_t8r_pool_m22.log` → slot `182834-54964/slot0.run.log` |
+| M23 `applyStrategyToUntouched` 不滤 `choice.has`（盖到所有组） | `utils/dupKeep.ts` | 仅用例 3：K1 被挪去 -B，那两条 `data-keep` 红 | `tasks/_b3a_t8r_pool_m23.log` |
+| M24 `:disabled` 去掉 `!deleteConfirmed \|\|`（同意闸） | `DuplicateFilesCard.vue:76` | 用例 1 勾同意框**之前**那句 `toBeDisabled()`（serial 使 2-4 skip） | `tasks/_b3a_t8r_pool_m24.log` |
+| M19 后端 `keep` 恒取 `files[0].id` | `_duplicate_files.py:140`+`:148` | 整跑红在用例 2；用例 3 **单跑也独立红**（上一节） | `tasks/_b3a_t8r_pool_m19.log`、`…_m19_c3alone.log` |
+
+基线：`用例 7 · unexpected 0 · skipped 0 · 结论 MEASURED`（`_b3a_t8r_pool_green.log`），
+每轮换完手工写回原字节、`git diff --stat` 归零后再跑一次复绿（`_b3a_t8r_pool_regreen.log`）。
+`lint:e2e` 0 error；`line-limit` 过（该 spec 516 行）。
+**未重测**：M20/M21 在新用例 3 下的表现（用例 1-2 形状未动，沿用首轮证据）——台账里要按「沿用」写，别写成这一轮测的。
 
 ### Task 8 复审发现（只读复审 8 条，其中 5 条成立，本批处置如下）
 
@@ -2047,11 +2076,11 @@ async function dupRemainingBatches(page: Page, names: string[]): Promise<string[
 
 | # | 级别 | 发现 | 我核过没有 | 处置 |
 |---|------|------|-----------|------|
-| 1 | BLOCKER | 上面「界面缺口」那句是假的：两击（改选再改回）就能标 touched | ✅ 已核源码 `DuplicateFilesCard.vue:145-147` 无条件 `set`；正文已按「单击点不出、两击点得出」改写 | 撤回假话 + 用例 3 重写（见下） |
-| 2 | IMPORTANT | 用例 3 用「最早导入」当策略，而 `earliest` 在两颗成员的组里**恰等于默认** ⇒ 「策略被无视、内部硬编码 earliest」这个变异三档全绿；`grep 最新导入` 在 e2e 里 0 命中 | ✅ 已核 `strategy` 初值 `'earliest'`（:126）+ `applyStrategy()` 用 `strategy.value`（:151） | 用例 3 改成「手改两击落回默认 + 策略选**最新导入**」：一个用例同时杀「无视策略」与「覆盖改选组」两个变异 |
-| 3 | IMPORTANT | 同意闸没钉：删掉 `:disabled="!deleteConfirmed \|\| !canDelete"` 三条用例照样全绿（每条都先点 checkbox，从没断过点之前的 disabled） | ✅ 复核描述与 `:76`、`spec:338/368/434` 一致 | 用例 1 点 checkbox **之前**补一条 `toBeDisabled()` |
-| 4 | IMPORTANT | 两条泄漏通路：① 播种在 `try` 之外（`spec:321/355/387-389`），播种中途抛 ⇒ 盘目录与 DB 行都不清；② `cleanupDup` 先 `rmSync` 再删 DB 行且空 catch 吞异常（`spec:122-127`）⇒ 失败时留下「有记录无文件」的孤立行，而 `spec:449` 恰好断言该卡片 hidden | ✅ 与文件一致 | 播种进 `try`；先删 DB 行再删盘；catch 里打日志不静默 |
-| 5 | IMPORTANT（低估而非夸大） | 「后端侧只是等价推断」说过头了：`--grep '一键策略'` 能单跑用例 3，T1 也已逐组钉过（`test_duplicate_keep_selection.py:169-176`） | ⚠ 未实测单跑 —— 交给重写那轮一起测，测完把这句改成实测口径 | 单跑并把「推断」改「实测」 |
+| 1 | BLOCKER | 上面「界面缺口」那句是假的：两击（改选再改回）就能标 touched | ✅ 已核源码 `DuplicateFilesCard.vue:145-147` 无条件 `set`；正文已按「单击点不出、两击点得出」改写 | ✅ 已落地 `ec458bc`：正文撤回假话 + 用例 3 建在两击上 |
+| 2 | IMPORTANT | 用例 3 用「最早导入」当策略，而 `earliest` 在两颗成员的组里**恰等于默认** ⇒ 「策略被无视、内部硬编码 earliest」这个变异三档全绿；`grep 最新导入` 在 e2e 里 0 命中 | ✅ 已核 `strategy` 初值 `'earliest'`（:126）+ `applyStrategy()` 用 `strategy.value`（:151） | ✅ 已落地：策略改选「最新导入」，M22 实测红在 K2 的 `-B`（见下表） |
+| 3 | IMPORTANT | 同意闸没钉：删掉 `:disabled="!deleteConfirmed \|\| !canDelete"` 三条用例照样全绿（每条都先点 checkbox，从没断过点之前的 disabled） | ✅ 复核描述与 `:76`、`spec:338/368/434` 一致 | ✅ 已落地：用例 1 勾之前补 `toBeDisabled()`，M24 实测红 |
+| 4 | IMPORTANT | 两条泄漏通路：① 播种在 `try` 之外（`spec:321/355/387-389`），播种中途抛 ⇒ 盘目录与 DB 行都不清；② `cleanupDup` 先 `rmSync` 再删 DB 行且空 catch 吞异常（`spec:122-127`）⇒ 失败时留下「有记录无文件」的孤立行，而 `spec:449` 恰好断言该卡片 hidden | ✅ 与文件一致 | ✅ 已落地：播种进 `try` + `finally` 按 `dupDirs(tag)` 确定性兜底；先删行再删盘 + `console.error` 不静默；`dupName` 拦引号/反斜杠 |
+| 5 | IMPORTANT（低估而非夸大） | 「后端侧只是等价推断」说过头了：`--grep` 能单跑用例 3，T1 也已逐组钉过（`test_duplicate_keep_selection.py:169-176`） | ✅ **返工轮实测**：`E2E_PW_ARGS="--grep=B3A-T8C3"` 单跑在 M19 下独立红 | ✅ 已落地：口径作废，用例 3 **独立承重**（见上表 M19 行） |
 | 6 | NIT | `watch` 清零（`:130-133`）在 T3 观察不到：全部删成功后每组只剩 1 成员、卡片 `visible=false`，删掉这条 watch 三档全绿；唯一会看见它的流程是「>50 组续删」，按 §5.6 只由 T1 钉 | ✅ | 台账里写清「此路由 T1 独占，T3 不覆盖」，别声称浏览器覆盖了它 |
 | 7 | NIT | `spec:292-293` 那句「全仓 e2e 磁盘判据 0 处」字面真但误导 —— 磁盘**内容**判据在 `e2e/exports/html-report.spec.ts:33-36`、`e2e/sftp/search.spec.ts:363-365` 早有 | ✅ | 把措辞收窄到 `existsSync` |
 | 8 | NIT | `toContainText('2 个')` 是继承来的弱判据（12 成员的组也匹配）；两条断言都隐含「本 slot 种子数据贡献 0 个重复组」这个未写明的前提 | ✅ | 保留但补一行写明前提（种子确实 0 组，`按选择删除 1 个` 是真正的计数钉） |
