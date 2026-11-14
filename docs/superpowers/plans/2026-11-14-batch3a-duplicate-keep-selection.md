@@ -355,10 +355,22 @@ class ResolveKeepSelectionTests(TestCase):
         with self.assertRaises(InvalidKeepSelection):
             self._resolve([10, 11])
 
-    def test_非整数与布尔被拒(self):
-        for bad in (['10'], [10.0], [True], [None]):
+    def test_非整数被拒(self):
+        for bad in (['10'], [10.0], [None]):
             with self.assertRaises(InvalidKeepSelection, msg=repr(bad)):
                 self._resolve(bad)
+
+    def test_布尔被拒且拒在类型闸门(self):
+        """`True` 必须撞「必须是整数数组」那道闸门，而不是撞白名单那道。
+
+        为什么单独一条、还钉消息（2026-11-14 变异 M3 实测逼出来的）：fixture 的 id 空间
+        不含 1，而 `hash(True) == hash(1)` —— 只断异常类型时，删掉 bool 闸门后
+        `allowed.get(True)` 返回 None，改由**白名单**那条抛出，同一个异常类型把两条防线
+        的存在性混成一条，变异当场跑成全绿。探针实证删闸门后含 pk=1 的组 + `[True]`
+        会被**静默接受**并按「留 id 1」执行 —— 那就是本项要修的「替用户决定」。
+        """
+        with self.assertRaisesRegex(InvalidKeepSelection, '整数数组'):
+            self._resolve([True])
 
     def test_切片外的组不参与校验(self):
         """limit 之内没被选中的组，keep_by_key 里不该出现它的键。"""
@@ -371,7 +383,10 @@ class ResolveKeepSelectionTests(TestCase):
 ```bash
 .venv/Scripts/python.exe -X utf8 manage.py test test.backend.test_duplicate_keep_selection 2>&1
 ```
-Expected: `ImportError: cannot import name 'InvalidKeepSelection'`（收集期就错，`Ran 0 tests`）。
+Expected: `ImportError: cannot import name 'InvalidKeepSelection'`（收集期就错）。
+**实测原文**（2026-11-14 落地）：`Found 1 test(s) ... Ran 1 test in 0.000s / FAILED (errors=1)` ——
+不是 `Ran 0 tests`：unittest loader 把收集期的 ImportError 包成一条合成的 `_FailedTest`，
+所以计数记 1。本处原写 `Ran 0 tests` 是计划自己的事实错，已订正。
 **这一条必须真红过**才往下写实现。
 
 - [ ] **Step 3: 实现 `_resolve_keep_selection`**
@@ -430,7 +445,7 @@ def _resolve_keep_selection(groups, keep_ids, limit=DUPLICATE_DISPLAY_LIMIT):
 ```bash
 .venv/Scripts/python.exe -X utf8 manage.py test test.backend.test_duplicate_keep_selection 2>&1
 ```
-Expected: `Ran 7 tests ... OK`。
+Expected: `Ran 8 tests ... OK`（落地实测原文）。
 
 - [ ] **Step 5: 变异反证（每条判据都要咬得住）**
 
@@ -441,7 +456,12 @@ Expected: `Ran 7 tests ... OK`。
 ```
 逐个手工改、跑、改回（**禁 `git checkout --` / `git restore`**，改回用 Edit 反着写）。
 Expected: M1 → `test_未进入切片的组的id被拒` 红；M2 → `test_同组两枚被拒` 红；
-M3 → `test_非整数与布尔被拒` 红。三个变异各记一行结果到台账。
+M3 → **第一版跑成了全绿**（本批第一次「反证没咬住」，落地实测）。根因不是变异等价，而是
+fixture 的 id 空间 `10/11/20/21/22` 不含 `1`，而 `hash(True) == hash(1)` ⇒ 删掉 bool 闸门后
+`[True]` 改由白名单那条抛出，异常类型撞对、用例照绿 —— **只断异常类型时，两条重叠防线互相掩盖**。
+处置：把那条用例拆成 `test_非整数被拒` + `test_布尔被拒且拒在类型闸门`（后者用
+`assertRaisesRegex(..., '整数数组')` 钉**是哪道闸门生效**），拆完重跑 M3 → `FAILED (failures=1)`
+且只红新那条（已实测）。三个变异各记一行结果到台账。
 
 - [ ] **Step 6: 提交**
 
