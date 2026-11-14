@@ -47,13 +47,15 @@ class ScanTreeTests(SimpleTestCase):
         _write(os.path.join(self.root, 'single', 'a.csv'), 100)
         _write(os.path.join(self.root, 'single', 'nested', 'b.csv'), 200)
         _write(os.path.join(self.root, 'batch', 'B1', 'c.csv'), 1000)
-        by = storage_usage._scan_tree(self.root)['by_type']
+        result = storage_usage._scan_tree(self.root)
+        by = result['by_type']
         self.assertEqual(by['single'], {'bytes': 300, 'count': 2})
         self.assertEqual(by['batch'], {'bytes': 1000, 'count': 1})
         self.assertEqual(by[''], {'bytes': 10, 'count': 1})
-        # 分桶必须自洽：各桶之和 == 总量，否则浮层与 chip 会互相打脸
-        self.assertEqual(sum(v['bytes'] for v in by.values()), 1310)
-        self.assertEqual(sum(v['count'] for v in by.values()), 4)
+        # 自洽性对着 result 自己比，不写死 1310/4：写死的话「总量与分桶一起算错」就查不出来，
+        # 而那正是浮层与 chip 互相打脸的形状。
+        self.assertEqual(sum(v['bytes'] for v in by.values()), result['bytes'])
+        self.assertEqual(sum(v['count'] for v in by.values()), result['file_count'])
 
     def test_口径交叉核对_用rglob独立加总必须相等(self):
         """判据异源（规格 §4.2）：实现走 os.scandir + os.lstat，这里用第二种机制
@@ -76,10 +78,16 @@ class ScanTreeTests(SimpleTestCase):
             os.link(src, os.path.join(self.root, 'single', 'b_hard.csv'))
         except OSError as exc:  # 跨卷/权限做不到就跳过这条判据（同 test_test_data_gc.py:157）
             self.skipTest('本机建不了硬链接：%s' % type(exc).__name__)
+        # 第三颗必须是「不是硬链接、体积也不同」的独立文件，这条用例才有判别力：
+        # 只放硬链对时，把取 inode 改成 os.DirEntry.stat()（本机填不出 inode ⇒ 所有
+        # 条目都塌到同一个 (0, 0) 键）算出来的 unique_bytes 与正确实现**一模一样**，
+        # 2026-11-14 按变异实测过：那样 7 例全绿。有了这颗不同体积的独立文件，坏实现
+        # 会把三颗全压成 1 个 inode，unique 直接少算。
+        _write(os.path.join(self.root, 'single', 'c_own.csv'), 1000)
         result = storage_usage._scan_tree(self.root)
-        self.assertEqual(result['bytes'], 8192)              # 表观：两个目录项各算一次
-        self.assertEqual(result['unique_bytes'], 4096)        # 唯一：同一个 inode
-        self.assertEqual(result['file_count'], 2)             # 目录项确实是 2 个
+        self.assertEqual(result['bytes'], 4096 * 2 + 1000)      # 表观：三个目录项各算一次
+        self.assertEqual(result['unique_bytes'], 4096 + 1000)    # 唯一：两个 inode
+        self.assertEqual(result['file_count'], 3)                # 目录项确实是 3 个
 
     def test_符号链接不计入(self):
         target = _write(os.path.join(self.base, 'outside.csv'), 5000)
