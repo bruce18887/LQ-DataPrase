@@ -474,6 +474,12 @@ git commit -m "feat(datafiles): keep_ids 白名单校验（切片外/同组两�
 
 ## Task 3: 删除侧按保留选择执行 + `remaining_groups` 实测
 
+> **落地订正（2026-11-14，`6e2d664`）**：Task 3 与 Task 4 **合成一批实现、一笔提交**。
+> 分开写会留下一笔必然红的中间提交 —— Task 3 把返回值改成元组之后、Task 4 接线之前，
+> `browse_views.py` 仍把元组当整数塞进 `deleted_count`，`apps.datafiles` 那五条重复文件用例
+> 当场红（实测形状 `AssertionError: (1, 0) != 1`）。「每一笔提交都全绿」优先于「按计划一步一提交」。
+> 下面两个 Task 的正文照原样读，只是提交合成一笔。
+
 **Files:**
 - Modify: `apps/datafiles/views/_duplicate_files.py:50-103`
 - Test: `test/backend/test_duplicate_keep_selection.py`
@@ -550,7 +556,9 @@ class DeleteByKeepSelectionTests(TestCase):
         self.assertEqual(alive, 2, '抛在删除之前 ⇒ 这条才是「不静默删一半」的证据')
         self.assertTrue(os.path.exists(first.file_path) and os.path.exists(second.file_path))
 
-    def test_每组files按id升序（前端默认保留项直接取首条的前提）(self):
+    def test_每组files按id升序_前端默认保留项直接取首条的前提(self):
+        # ⚠ 落地订正：原计划这条用例名里带全角括号 `（…）`，实测 SyntaxError
+        # （全角括号不是合法标识符字符）。中文标识符本身合法，括号不合法 ⇒ 换成下划线。
         """前端 `defaultKeepId` 取的是 `files[0].id`，`strategyKeepId` 的并列裁决也落在首条。
 
         两边都不重排序 —— 所以「后端给的 files 是 id 升序」这条契约一旦变，前端两处会
@@ -644,8 +652,13 @@ Expected: 新增类全绿；`apps.datafiles` 仍 `OK` ⇒ **默认分支的向�
 
 * M4：把默认回落从 `group['files'][0]['id']` 换成 `group['files'][-1]['id']` ⇒
   `test_不带keep_ids时保留最早…` 与 `apps.datafiles` 那条**同时**红（后者是既有承重判据，红了就说明变异被接住）。
-* M5：把 `remaining_groups` 换成 `len(groups) - len(displayed)` ⇒
-  `test_remaining_groups是删完重算的实测值` 红（算术写法在「塌组」形状下报 1 而非 0）。
+* M5：把 `remaining_groups` 换成 `len(groups) - len(displayed)` ⇒ **实测全绿（判据洞，计划预测错）**。
+  计划原话「算术在塌组形状下报 1 而非 0」算错了：那条用例里 g 组是在**进函数之前**就塌的，
+  于是 `len(groups) == len(displayed) == 1`，算术也得 0；51 组形状下两种写法同样恒等。
+  根因是结构性的：**每个已展示组跑完必塌成 1 行**（每组删掉 `len-1` 条），所以
+  「实测剩余组数」与「总数 − 已处理数」在当下所有可达形状里相等，任何不注入失败的夹具都分不开它们。
+  ⇒ 处置：代码保持实测（它不依赖那个前提），docstring 与用例说明改成实话；这条记进 lessons
+  （判据抓不到的第二种原因：两种写法在可达状态空间上恒等，不是等价变异而是**无可观察差异的边界**）。
 * M6：把校验挪到删除循环之后（先删再校验）⇒ `test_校验失败时一行都不删` 红。
 
 - [ ] **Step 6: 提交**
@@ -860,7 +873,7 @@ from ._duplicate_files import (
 .venv/Scripts/python.exe -X utf8 manage.py test test.backend.test_duplicate_keep_selection 2>&1
 .venv/Scripts/python.exe -X utf8 manage.py test test.backend apps.datafiles 2>&1
 ```
-Expected: 本文件全绿（19 例：Task 2 的 7 + Task 3 的 6 + Task 4 的 6）；`test.backend apps.datafiles` `OK`
+Expected: 本文件全绿（**落地实测 20 例**：Task 2 拆完 bool 闸门那条是 8 + Task 3 的 6 + Task 4 的 6）；`test.backend apps.datafiles` `OK`
 （⚠ 这一档**不是**后端全量，实测约 1988 例，别写成「全量」）。
 
 - [ ] **Step 5: 变异反证**

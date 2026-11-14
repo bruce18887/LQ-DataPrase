@@ -14,7 +14,8 @@
    这是「只删已展示的组」的**实现**，不靠两个 limit 常数互相对齐 —— 对齐写法总有一天会漂。
 3. **每组恰一枚保留 id**；未指定 = 该组 id 最小（``files`` 按 id 升序，见下面
    ``_group_duplicates`` 里的 ``order_by('id')``），即历史行为。
-   Task 2/3 在这里加 ``_resolve_keep_selection`` 与 ``InvalidKeepSelection``。
+   越界的 ``keep_ids`` 由 ``_resolve_keep_selection`` 拒成 ``InvalidKeepSelection``，
+   视图把它翻成 400（口径 3 与拒绝的五种形状在 ``test/backend/test_duplicate_keep_selection.py``）。
 """
 
 from django.db import transaction
@@ -128,7 +129,9 @@ def _delete_duplicate_files(user, keep_ids=()):
       不该替他删（设计 §5.4 的语义反转，2026-11-14 用户拍板）。
 
     ``remaining_groups`` 是删完再跑一遍 `_group_duplicates` 的**实测**长度，不是
-    ``总数 - len(displayed)`` 的算术：某行已不在 DB 时那组当场塌掉，算术会虚报。
+    ``总数 - len(displayed)`` 的算术。两句在当下所有可达形状里**恒等**（M5 实测：算术版跑全绿，
+    因为每个已展示组跑完必塌成 1 行），所以这条**不是**判据能钉住的分歧 —— 选实测的理由是
+    它不依赖「每组都恰好删到只剩 1 行」这个前提，而那个前提由上面的循环写法维持，不由数据库约束维持。
     """
     groups = _group_duplicates(user)
     displayed, keep_by_key = _resolve_keep_selection(groups, keep_ids)
