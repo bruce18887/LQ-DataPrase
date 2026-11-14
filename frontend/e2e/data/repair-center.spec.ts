@@ -322,7 +322,10 @@ test.describe.serial('数据修复中心', { tag: ['@p2', '@data'] }, () => {
    *
    * ⚠ **一律跑真后端 + 真磁盘，不用 `page.route().fulfill()`**（批2 F3 的教训：
    * 遮掉响应之后后端语义的变异在浏览器层根本红不了）。变异反证（每轮换完手工写回原字节、
-   * `git diff` 核对归零；M19-M21 首测 2026-11-15，M22-M24 与用例 3 单跑为返工轮实测）：
+   * `git diff` 核对归零；M19-M21 首测 2026-11-15，M25/M23/M24 与用例 3 单跑为返工轮实测。
+   * ⚠ 编号订正：返工轮原把下面那颗「applyStrategy 硬编码 earliest」记成 **M22**，与
+   * `utils/dupKeep.spec.ts` 那边已用过的 M22（`resolveKeepIds` 只上报 touched）撞号，
+   * 现改称 **M25**；`ec458bc` 的 commit 正文仍写 M22，以这里为准。）：
    * - **M19** `_duplicate_files.py:140`+`:148` 两处 `keep` 取成恒默认 ⇒ 第 2 条红
    *   （末尾那句 `dupEndState` 轮询：Expected `1|…-PICK-B` / Received `1|…-PICK-A`），
    *   第 1 条仍绿 —— 恒默认在「没改选」时本来就是对的，只有改选那条分得开。
@@ -336,7 +339,7 @@ test.describe.serial('数据修复中心', { tag: ['@p2', '@data'] }, () => {
    *   （两条 `toHaveAttribute` 里的第一支：Expected `keep` / Received `delete`）。
    *   此时「保留/将删除」两支文案照旧通顺，正是这句要拦的「画错行但文案对得上」——
    *   按文案筛的定位器在这里是系统性盲区。
-   * - **M22** `DuplicateFilesCard.vue:151` 的 `applyStrategy()` 无视 `strategy.value`、
+   * - **M25** `DuplicateFilesCard.vue:151` 的 `applyStrategy()` 无视 `strategy.value`、
    *   内部硬编码 `'earliest'` ⇒ 第 3 条红（④ 段 K2/K3 落 -A，那两条「策略落到较新那份」
    *   当场红）。旧版用例 3 策略就选「最早导入」，对这颗变异**整条失明**（三档全绿，
    *   返工轮发现 2）—— 2 成员组里 earliest 恒等于默认，选它等于没选。
@@ -470,7 +473,7 @@ test.describe.serial('数据修复中心', { tag: ['@p2', '@data'] }, () => {
 
       // ④ 策略选「最新导入」（≠ 默认 earliest）再一键应用。一步同时杀两颗变异：
       //    K2/K3 必须落到 -B —— 钉「applyStrategy 无视 strategy.value 硬编码 earliest」
-      //    （M22，DuplicateFilesCard.vue:151；旧版策略选 earliest，2 成员组里恒等于默认，
+      //    （M25，DuplicateFilesCard.vue:151；旧版策略选 earliest，2 成员组里恒等于默认，
       //    对该变异整条失明）；K1 必须留在 -A —— 钉「策略覆盖已改选的组」（M23 的界面面）。
       await card.locator('.dup-strategy .el-radio').filter({ hasText: '最新导入' }).click()
       await expect(k1.a, '应用前中间态：K1 两击后已改选，值 = 默认 -A').toHaveAttribute('data-keep', 'keep')

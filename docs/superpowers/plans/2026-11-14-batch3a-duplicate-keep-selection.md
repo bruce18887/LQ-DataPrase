@@ -1939,7 +1939,7 @@ Task 6 复审实测：把 `applyStrategyToUntouched(props.groups.slice(0, 3), �
       //    （`DuplicateFilesCard.vue:145-147`，不比新旧值）⇒ 第二击（-B → -A）照常发 change，
       //    把该组标成已改选、值落回默认 -A。于是 K1 停在「用户确认要默认这份」上，
       //    且 改选值(-A) ≠ 策略(最新 -B) —— 两个方向的分歧各有一句断言承重，
-      //    这才是本条能同时杀 M22 与 M23 的前提。
+      //    这才是本条能同时杀 M25 与 M23 的前提。
       const k1 = rowsOf(0)
       await k1.b.locator('.el-radio').click()
       await k1.a.locator('.el-radio').click()
@@ -1949,7 +1949,7 @@ Task 6 复审实测：把 `applyStrategyToUntouched(props.groups.slice(0, 3), �
       await expect(applyBtn).toHaveText(/应用到未改选的 2 组/)
 
       // ④ 策略选「最新导入」（≠ 默认 earliest）再一键应用：一步杀两颗变异。
-      //    K2/K3 落 -B ⇒ 钉 M22（`applyStrategy` 无视 strategy.value 硬编码 earliest）；
+      //    K2/K3 落 -B ⇒ 钉 M25（`applyStrategy` 无视 strategy.value 硬编码 earliest）；
       //    K1 留 -A ⇒ 钉 M23（策略盖到已改选的组）。
       await card.locator('.dup-strategy .el-radio').filter({ hasText: '最新导入' }).click()
       await expect(k1.a, '应用前中间态：K1 两击后已改选，值 = 默认 -A').toHaveAttribute('data-keep', 'keep')
@@ -2058,9 +2058,14 @@ async function dupRemainingBatches(page: Page, names: string[]): Promise<string[
 
 ### Task 8 返工轮的变异反证（`ec458bc`，全部真浏览器 + 真后端）
 
+⚠ **编号订正**：返工那一轮把「applyStrategy 硬编码 earliest」写成 M22，**和 §Task 5 的
+M22（`resolveKeepIds` 退化成只上报 touched，`:1234`）撞号了** —— 是我写反证表时没先查计划里
+已用过的编号。下表起该变异改称 **M25**；M23/M24 未与既有编号冲突，沿用。
+`ec458bc` 的 commit 正文里仍写着 M22，那是历史，不改写 —— 以本表为准。
+
 | 变异 | 打在哪 | 红的是谁 | 证据 |
 |------|--------|----------|------|
-| M22 `applyStrategy()` 无视 `strategy.value`、硬编码 `'earliest'` | `DuplicateFilesCard.vue:151` | 仅用例 3：`K2 组应被策略落到最新导入的 -B（≠ 默认）` Expected `keep` / Received `delete` | `tasks/_b3a_t8r_pool_m22.log` → slot `182834-54964/slot0.run.log` |
+| M25（返工轮原写作 M22）`applyStrategy()` 无视 `strategy.value`、硬编码 `'earliest'` | `DuplicateFilesCard.vue:151` | 仅用例 3：`K2 组应被策略落到最新导入的 -B（≠ 默认）` Expected `keep` / Received `delete` | `tasks/_b3a_t8r_pool_m22.log` → slot `182834-54964/slot0.run.log` |
 | M23 `applyStrategyToUntouched` 不滤 `choice.has`（盖到所有组） | `utils/dupKeep.ts` | 仅用例 3：K1 被挪去 -B，那两条 `data-keep` 红 | `tasks/_b3a_t8r_pool_m23.log` |
 | M24 `:disabled` 去掉 `!deleteConfirmed \|\|`（同意闸） | `DuplicateFilesCard.vue:76` | 用例 1 勾同意框**之前**那句 `toBeDisabled()`（serial 使 2-4 skip） | `tasks/_b3a_t8r_pool_m24.log` |
 | M19 后端 `keep` 恒取 `files[0].id` | `_duplicate_files.py:140`+`:148` | 整跑红在用例 2；用例 3 **单跑也独立红**（上一节） | `tasks/_b3a_t8r_pool_m19.log`、`…_m19_c3alone.log` |
@@ -2077,7 +2082,7 @@ async function dupRemainingBatches(page: Page, names: string[]): Promise<string[
 | # | 级别 | 发现 | 我核过没有 | 处置 |
 |---|------|------|-----------|------|
 | 1 | BLOCKER | 上面「界面缺口」那句是假的：两击（改选再改回）就能标 touched | ✅ 已核源码 `DuplicateFilesCard.vue:145-147` 无条件 `set`；正文已按「单击点不出、两击点得出」改写 | ✅ 已落地 `ec458bc`：正文撤回假话 + 用例 3 建在两击上 |
-| 2 | IMPORTANT | 用例 3 用「最早导入」当策略，而 `earliest` 在两颗成员的组里**恰等于默认** ⇒ 「策略被无视、内部硬编码 earliest」这个变异三档全绿；`grep 最新导入` 在 e2e 里 0 命中 | ✅ 已核 `strategy` 初值 `'earliest'`（:126）+ `applyStrategy()` 用 `strategy.value`（:151） | ✅ 已落地：策略改选「最新导入」，M22 实测红在 K2 的 `-B`（见下表） |
+| 2 | IMPORTANT | 用例 3 用「最早导入」当策略，而 `earliest` 在两颗成员的组里**恰等于默认** ⇒ 「策略被无视、内部硬编码 earliest」这个变异三档全绿；`grep 最新导入` 在 e2e 里 0 命中 | ✅ 已核 `strategy` 初值 `'earliest'`（:126）+ `applyStrategy()` 用 `strategy.value`（:151） | ✅ 已落地：策略改选「最新导入」，M25（返工轮原记 M22，见上方编号订正）实测红在 K2 的 `-B` |
 | 3 | IMPORTANT | 同意闸没钉：删掉 `:disabled="!deleteConfirmed \|\| !canDelete"` 三条用例照样全绿（每条都先点 checkbox，从没断过点之前的 disabled） | ✅ 复核描述与 `:76`、`spec:338/368/434` 一致 | ✅ 已落地：用例 1 勾之前补 `toBeDisabled()`，M24 实测红 |
 | 4 | IMPORTANT | 两条泄漏通路：① 播种在 `try` 之外（`spec:321/355/387-389`），播种中途抛 ⇒ 盘目录与 DB 行都不清；② `cleanupDup` 先 `rmSync` 再删 DB 行且空 catch 吞异常（`spec:122-127`）⇒ 失败时留下「有记录无文件」的孤立行，而 `spec:449` 恰好断言该卡片 hidden | ✅ 与文件一致 | ✅ 已落地：播种进 `try` + `finally` 按 `dupDirs(tag)` 确定性兜底；先删行再删盘 + `console.error` 不静默；`dupName` 拦引号/反斜杠 |
 | 5 | IMPORTANT（低估而非夸大） | 「后端侧只是等价推断」说过头了：`--grep` 能单跑用例 3，T1 也已逐组钉过（`test_duplicate_keep_selection.py:169-176`） | ✅ **返工轮实测**：`E2E_PW_ARGS="--grep=B3A-T8C3"` 单跑在 M19 下独立红 | ✅ 已落地：口径作废，用例 3 **独立承重**（见上表 M19 行） |
