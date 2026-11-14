@@ -99,6 +99,11 @@ export function usageMismatchLine(usage: FileUsage | null): string | null {
  *    = `'11/15 07:07'` —— 没有年份，作为「统计时间」绝对值会跨年读错。
  * 2. `formatTime` 内部 `TIME_FMT.format(new Date(val))`，实测 `formatTime('not-a-date')`
  *    抛 `RangeError: Invalid time value`；下面那道 `Number.isNaN` 守卫就是为了不把它冒到界面。
+ *
+ * `{ hour12: false }` 在**本机是等价变异**，别当冗余删掉：实测 Node 24.15.0 / zh-CN /
+ * TZ+480 下 `toLocaleString('zh-CN')` 与带这一项逐字节相同（zh-CN 默认已是 24 小时制），
+ * 所以删掉它 16 条全绿。真正守 24 小时制这个契约的是 T2 那句 `not.toMatch(/[上下]午/)`
+ * （实测把这一项翻成 `true` 就红），这一项留着是让换 ICU / 换 locale 时不悄悄翻回 12 小时制。
  */
 export function usageScannedText(usage: FileUsage | null): string | null {
   if (!usage || !usage.scanned_at) return null

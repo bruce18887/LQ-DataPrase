@@ -2648,3 +2648,26 @@ os.link / os.symlink 本机都可建                      ← Task 2 的三条�
    「全局清单 ⇒ 全量 e2e（兜底命中）」，但它此刻除测试外零 importer（Task 7 才接线，
    `grep -rn diskUsage frontend/src` 只命中自身路径注释行），浏览器面无物可变 ⇒ **本轮不欠 T3**，
    全量池 + 后端全量仍留 Task 10 收口档（与本节既有第 6 条的分工一致）。
+
+9. **同类缺陷在仓内还有两处，本批不动，记为遗留。** 控制器全仓 grep `tbl[key] ?? key` 形态的
+   查表（`grep -rnE "[A-Z_]{3,}\[[a-z]+\] (\?\?|\|\|)" frontend/src`）⇒ 三处命中，除本文件的
+   `TYPE_LABELS`（已修）外还有：
+   - `frontend/src/pages/analysis/components/ChartDock.vue:141` `TITLES[k] ?? k` —— 表是
+     `Record<ChartKey, string>`（**闭合联合类型**），键是 dock key；风险只来自「持久化布局里
+     被写坏/被改过的 key」，今天没有正常路径能喂进原型名。
+   - `frontend/src/pages/settings/components/ExportTemplateSettings.vue:91`
+     `EXPORT_TEMPLATE_VARIABLE_LABELS[v] ?? v` —— 表是 `Record<string, string>`（开放），但
+     `v` 来自 `constants/export-templates.ts` 里 `EXPORT_TEMPLATE_META[*].variables` 这份
+     **人工维护的清单**，喂进原型名要有人故意往清单里写。
+   ⇒ 判据：**同一形态、不同可达性**。`diskUsage` 这一处之所以是真 bug，唯一理由是它的键来自
+   **文件系统一级目录名**（无界输入，`storage_usage.py:111-112`），另外两处的键集是闭合的。
+   所以不在本批顺手改（改它们各需要自己的用例，且都不属于磁盘占用这一批），
+   但**遗留清单要写明「下次谁动这两个文件，顺手换成 `Object.hasOwn` 形态并补一条原型名键的
+   判据」**，别再攒第三次。`frontend/src/utils/audit.ts:24-29` 是这一族的第一次，本文件是第二次。
+
+10. **本轮控制器补的一条注释**：`hour12: false` 是等价变异这件事只写在台账里不够 ——
+   下一个人看实现代码会把它当冗余参数删掉（删了确实全绿）。已在
+   `usageScannedText` 的 docstring 里补第 3 条，说明「契约由 T2 的 `not.toMatch(/[上下]午/)` 守，
+   这一项留着是给换 ICU / 换 locale 兜底」，并附上实测的两条（同串 / 翻 `true` 即红）。
+   ⇒ 补完现数：`diskUsage.ts` **108 → 113** 行（闸内）、T2 仍 `16 passed`、`lineLimit` `15 passed`、
+   `vue-tsc -b --force` exit 0；上面第 7 条的 108 是补注释前的数，留着不改是为了让「谁加了几行」可追溯。
