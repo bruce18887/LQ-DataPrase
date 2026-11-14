@@ -1205,6 +1205,8 @@ git commit -m "feat(api): GET /files/usage/ 只读当前用户磁盘占用"
 
 **Files:**
 - Modify: `test/backend/test_storage_usage_scan.py`（追加一个类）
+  ⚠ 落地后改拆档：追加使该文件 562→630 撞 600 硬闸，整类逐字节挪进新档
+  `test/backend/test_storage_usage_cache.py`。详见文末「Task 5 落地后的订正」第 3 条与「控制器处置」。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -2451,3 +2453,21 @@ os.link / os.symlink 本机都可建                      ← Task 2 的三条�
 （`tasks/b2-task5-api-regress.log`）、合档 `Ran 48 / OK`（`tasks/b2-task5-green-combined.log`）、
 还原后复跑 `Ran 38 / OK`（`tasks/b2-task5-green2.log`）；
 `test_storage_usage_scan.py` **630**（见上面第 3 条）。
+
+### 控制器处置（同一轮，第 3 条按 (a) 落地）
+
+**(a) 拆档，没挂绊线。** `CacheBehaviourTests` 整类（66 行，含 setUp/tearDown/`_counting_compute`）
+逐字节搬进新档 `test/backend/test_storage_usage_cache.py`，搬运前后各跑一次行级比对
+（`old[564:630] == new[new.index('class CacheBehaviourTests'):]` ⇒ `IDENTICAL`，66/66）——
+搬的是文本，不是重写，所以四条变异判据不会因为「顺手改一改」而失去效力。
+新档自己带 imports（`shutil`/`tempfile`/`mock`/`TestCase`/`User`/`storage_usage`），
+搬完用 AST 反查旧档未用 import ⇒ `UNUSED: []`（`mock` 在注入用例里仍要用，别顺手删）。
+
+现数：`test_storage_usage_scan.py` **562**、`test_storage_usage_cache.py` **85**，
+三档合跑 `Ran 48 tests in 19.479s / OK`（`tasks/b2-task5-split.log`，条数与拆分前一致 ⇒ 零丢失），
+门禁 `npx vitest run test/unit/lineLimit.spec.ts` ⇒ `15 passed (15)`（`tasks/b2-task5-split-linelimit.log`）。
+
+**留给后续任务的一条正文纪律：** 计划里凡是写「Modify：某文件（追加一个类/一批用例）」的步骤，
+落点行数是**没量过**的 —— Task 3→4→5 每一轮都在往同一个文件里加肉（490→562→630），
+单看每轮都只加几十行，撞闸的是**累计**。⇒ Task 6 起，写「追加」之前先 `wc -l` 落点，
+余量不足 60 行就在正文里直接给出新档名，而不是等落地方撞红了再让控制器处置。
