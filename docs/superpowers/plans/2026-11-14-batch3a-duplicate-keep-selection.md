@@ -908,6 +908,14 @@ git commit -m "feat(api): delete_duplicates 收 keep_ids、越界 400 不删、�
 
 - [ ] **Step 1: 写失败测试**
 
+> **落地订正（2026-11-15，`7b3d763`）**：本节代码块现在**就是实际交付的 `dupKeep.spec.ts` 全文**。
+> 原先手写的那份有两处自身缺陷，照抄会得到 4 条红 + 10 条 TS 诊断：
+> ① `files()` 的契约是「一个文件一个三元组」，而原文 9 处写成了扁平数组（`files([10,'t1',11,'t2'])`）
+> ⇒ 运行时只造出 **1 个**成员、第 4 个元素被当 `file_size` 吃掉 ⇒ `deleteSummary` 恒 0、
+> 策略永远退回 `files[0]`，四条判据静默失效；`npx vue-tsc -b` 当场报 9 条 `TS2345`（说明那份从没上过类型检查）。
+> ② `expect(x).toBe(20, '说明')` —— `toBe` 只收一参，那句说明会被静默丢弃（应写成
+> `expect(x, '说明').toBe(20)`）。期望值字面量一条未动。
+
 创建 `frontend/test/unit/dupKeep.spec.ts`（期望值一律写**字面量**，不重跑同一段代码）：
 
 ```ts
@@ -939,7 +947,11 @@ import {
 import type { DuplicateGroup } from '../../src/api/datafiles'
 
 function files(...pairs: Array<[number, string, number?]>) {
-  // [id, created_at, file_size?] —— file_size 默认 500，与所属组一致（分组键含它）
+  // [id, created_at, file_size?] —— **一个文件一个三元组**，不要把多个文件写进同一条扁平
+  // 数组：`files([10, 't1', 11, 't2'])` 在 helper 眼里只是「id=10、时间=t1、大小=11」这**一个**
+  // 文件（第 4 个元素超出元组长度），组里就只剩 1 份 ⇒ 该删 0 个、策略永远退回 files[0]。
+  // 这种形状 TS 会报 TS2345，`npm run build`（vue-tsc -b 含 test/unit）拦得住，别关掉它。
+  // file_size 缺省 500，与所属组一致（分组键含它 ⇒ 组内恒等）。
   return pairs.map(([id, created_at, file_size]) => ({
     id,
     filename: 'x.csv',
@@ -973,7 +985,7 @@ describe('groupKey', () => {
 })
 
 describe('保留项裁决', () => {
-  const g = group('a.csv', files([10, '2026-01-02T00:00:00+00:00', 11, '2026-01-01T00:00:00+00:00']))
+  const g = group('a.csv', files([10, '2026-01-02T00:00:00+00:00'], [11, '2026-01-01T00:00:00+00:00']))
   it('未改选时用默认保留项 = files[0] = id 最小', () => {
     expect(keepIdForGroup(g, new Map())).toBe(10)
   })
@@ -987,12 +999,12 @@ describe('保留项裁决', () => {
   })
   it('created_at 相同时裁决落在 id 最小（靠 files 已升序，不靠额外比 id）', () => {
     const same = '2026-01-01T00:00:00+00:00'
-    const tie = group('t.csv', files([29, same, 30, same]))
+    const tie = group('t.csv', files([29, same], [30, same]))
     expect(strategyKeepId(tie, 'earliest')).toBe(29)
     expect(strategyKeepId(tie, 'latest')).toBe(29)
     expect(keepIdForGroup(tie, new Map())).toBe(29)
     // 反向探针：数组顺序反过来就不是这个形状了（Task 3 有一条 T1 钉后端不会给这种输入）
-    const flipped = group('t.csv', files([30, same, 29, same]))
+    const flipped = group('t.csv', files([30, same], [29, same]))
     expect(strategyKeepId(flipped, 'earliest')).toBe(30)
   })
   it('只有两颗策略：体积最大是谎话控件，已作废', () => {
@@ -1003,21 +1015,23 @@ describe('保留项裁决', () => {
 })
 
 describe('applyStrategyToUntouched', () => {
-  const a = group('a.csv', files([10, '2026-01-01T00:00:00+00:00', 11, '2026-01-02T00:00:00+00:00']))
-  const b = group('b.csv', files([20, '2026-01-01T00:00:00+00:00', 21, '2026-01-02T00:00:00+00:00']))
+  const a = group('a.csv', files([10, '2026-01-01T00:00:00+00:00'], [11, '2026-01-02T00:00:00+00:00']))
+  const b = group('b.csv', files([20, '2026-01-01T00:00:00+00:00'], [21, '2026-01-02T00:00:00+00:00']))
   it('只覆盖未改选的组，改选过的原样保留', () => {
     const before = new Map<string, number>([['b.csv|500', 20]])
     const after = applyStrategyToUntouched([a, b], before, 'latest')
     expect(after.get('a.csv|500')).toBe(11)
-    expect(after.get('b.csv|500')).toBe(20, '用户手选过的那组不许被一键策略覆盖')
+    // 说明文字挂在 expect(value, message) 上，不是 toBe 的第二参（toBe 只收一个参数，
+    // 写错位置会 TS2554，且运行时那句话根本不会出现在失败信息里）。
+    expect(after.get('b.csv|500'), '用户手选过的那组不许被一键策略覆盖').toBe(20)
     expect(before.get('a.csv|500'), '原 Map 必须不被就地改').toBeUndefined()
   })
 })
 
 describe('resolveKeepIds', () => {
   it('每组一枚、按 groups 顺序、含未改选的默认值', () => {
-    const a = group('a.csv', files([10, 't1', 11, 't2']))
-    const b = group('b.csv', files([21, 't1', 20, 't2']))
+    const a = group('a.csv', files([10, 't1'], [11, 't2']))
+    const b = group('b.csv', files([21, 't1'], [20, 't2']))
     expect(resolveKeepIds([a, b], new Map([['b.csv|500', 20]]))).toEqual([10, 20])
     expect(resolveKeepIds([a, b], new Map())).toEqual([10, 21])
     expect(resolveKeepIds([], new Map())).toEqual([])
@@ -1025,8 +1039,8 @@ describe('resolveKeepIds', () => {
 })
 
 describe('汇总与文案', () => {
-  const g2 = group('a.csv', files([1, 't', 2, 't']), 500)
-  const g3 = group('b.csv', files([3, 't', 4, 't', 5, 't']), 1024)
+  const g2 = group('a.csv', files([1, 't'], [2, 't']), 500)
+  const g3 = group('b.csv', files([3, 't', 1024], [4, 't', 1024], [5, 't', 1024]), 1024)
   it('deleteSummary 只数已展示组：每组删 (len-1) 个', () => {
     expect(deleteSummary([g2, g3])).toEqual({ count: 3, bytes: 500 + 2 * 1024 })
   })
