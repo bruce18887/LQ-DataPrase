@@ -838,3 +838,96 @@ T3 **10**（`disk-usage-chip.spec.ts`，Task 8 落 7 + Task 9 追加 2 + F3 一�
 - 探针脚本 `tasks/probe_b3a_dup_shapes.py`（gitignore 区，只读、不写库、不发 HTTP）：
   五个数已写回设计稿 §5.2/§5.4 与计划头部，其中「体积最大」那颗策略按钮**因组内 `file_size`
   恒等而作废**。
+
+# 任务：批3a 重复项选保留（2026-11-15，计划 Task 10 收口；计划 `docs/superpowers/plans/2026-11-14-batch3a-duplicate-keep-selection.md`）
+
+## 状态：**已 `--ff-only` 并入本地 master，未 push**
+
+`master` = `0ecb39d`（`git rev-parse --short master` 现读），base = `77edb01`（批2 收口那一刻的 master）。
+过程分支 `feature/batch3a-dup-keep-selection` 已 `git branch -d` 删除（删除时它正指向 `0ecb39d`
+⇒ 没有任何提交只活在分支上）。并入写法沿用批1/批2：先 `git merge-base --is-ancestor master <branch>`
+验 FF 可行，再 `git branch -f master <branch>`（不切工作树，避开「切分支会删只活在那条分支上的文件」），
+最后 `git checkout master` + `git branch -d`。**全程没有 push**：`origin` 是公开仓库，
+一次 push 即全球发布（`git status` 那句「ahead of 'origin/master' by 141 commits」就是现状）。
+并入时工作树只有**另一会话**未提交的 4 个文件（`apps/export/charts.py`、
+`apps/export/export_batch_charts_xlsx.py`、`test/backend/test_export_histogram_grid.py`、
+未跟踪 `apps/export/tests_histogram_style.py`）——本批一律没碰、没 stage、没提交。
+
+规模**只写命令不写数**：`git rev-list --count 77edb01..master`、
+`git diff --shortstat 77edb01..master`、只算代码 `git diff --shortstat 77edb01..master -- ':(exclude)docs/'`、
+逐笔标题 `git log --oneline 77edb01..master`。
+
+## 收口七档（每档取判据行，不取退出码；输出整段落盘再 grep，禁 `| tail`）
+
+| 档 | 命令 | 实测判据行 |
+|---|---|---|
+| 后端全量 | `CODEBUDDY_SAFE_DELETE_ENABLED=0 .venv/Scripts/python.exe -X utf8 manage.py test` | 第一轮（终审修复前）`Ran 2651 tests in 936.674s` / `OK (skipped=16)`；**终审修复后重跑** `Ran 2662 tests in 936.338s` / `OK (skipped=16)`；两轮 `grep -cE "^(FAIL|ERROR):"` 都是 **0**（`tasks/b3a_backend_full.log` / `b3a_backend_full2.log`） |
+| 全量池 | `node scripts/e2e_pool.mjs --slots=4` | 第一轮 `文件 88 · 用例 472 · 墙钟 10.5min · unexpected 0 · flaky 4 · skipped 21 · 结论 MEASURED`；第二轮（修复后）`用例 474 · 10.8min · unexpected 0 · flaky 1 · skipped 21 · MEASURED`。两轮红点都**不是本批的文件**：第一轮四条是 `wafermap-redesign.spec.ts:41`、`wafermap-model-not-found.spec.ts:124`、`view-data.spec.ts:1474`、`element-plus-styles.spec.ts:343`；第二轮只剩最后那条（从 `slot213956-50964/slot*.run.log` 现挖，不在 merged.json 里） |
+| 全量 vitest | `npx vitest run` | `Test Files 71 passed (71)` / `Tests 992 passed (992)`（第一轮 990，终审 +2 条字面判据） |
+| e2e 类型 | `npm run lint:e2e` | `error TS` **0** 处 |
+| 前端构建 | `npm run build`（含 `vue-tsc -b`） | `✓ built in 823ms`，零 TS 诊断 |
+| 行数闸 | `npx vitest run test/unit/lineLimit.spec.ts` | `Tests 15 passed (15)`；**没有给任何文件加豁免** |
+| affected | 批内 `node scripts/e2e_affected.mjs`（Task 8 / Task 8 返工各一次）；收口 `--base master --dry-run` | 批内两轮 `RESULT: PASS · 计划 5 档全部执行`；收口判 `decide: 全量 e2e（兜底命中）` 4 档 = lint:e2e / vitest / backend / e2e:全量 ⇒ **上面几轮是它的超集**（`tasks/b3a_affected_base_master.log`） |
+
+三档测试数现读：T1 **31**（`test/backend/test_duplicate_keep_selection.py`，其中 11 条是终审修复轮
+`c0b48bf` 加的覆盖闸门与计数判据）/ T2 **25**（`dupKeep.spec.ts` 16 + `dupKeepWiring.spec.ts` 9）/
+T3 本批 **5** 条（`repair-center.spec.ts` 里 366/407/437/513/544 那五条；该文件共 9 条）。
+
+## 实现前探针的数（2026-11-15 收口时又跑一遍，`tasks/_b3a_probe_final.log`）
+
+只读脚本 `tasks/probe_b3a_dup_shapes.py`（不写库、不发 HTTP、不登录，跑 dev 库）：
+
+- **P0** 全库重复组 **73**，涉及用户 **1** 个（`admin`）。
+- **P1** 组内 distinct `file_size` 分布 `{1: 73}` ⇒ **「体积最大」在数学上不可能选出与「按 id 最小」
+  不同的东西**，那颗按钮于 2026-11-14 作废（用户拍板「宁可少一颗」）。
+- **P2** 组内 distinct `created_at` 分布 `{2: 73}`，73/73 可分先后 ⇒ 「最早/最新」两颗是真策略。
+  样本差的是「同一文件两次导入」，跨度可到两个月。
+- **P3** 每组 >2 文件的组数 **0**；单用户最大组数 73；**超过 50 组的用户 = `['admin']`**
+  ⇒ 展示切片边界在本机**现实可达**：一次点击只清前 50 组，剩下 23 组要重新检查再删一次。
+- **P4** `_group_duplicates(admin)` 两次调用逐字相同 `True`；但「前 50 组」≠「全量组」`False`
+  ⇒ 「展示切片 == 处理切片」必须由同一个排序键维持，不能靠两个 limit 常数互相对齐。
+- **P5** `DataFile` 总行数 185（读一遍的量级参考）。
+
+## 两处用户拍板 + 一处移出
+
+1. **决策 A：只删已展示的组**（2026-11-14「只删已展示的组，需要」）——语义反转，改前是
+   「显示前 N 组、删掉全部」。终审给这条补了**反向闸门**（§5.3 第 3bis 条）才算真钉住。
+2. **决策 D：两页 toolbar 的前端搜索/角色筛选移出批3、进批4**（「进批4」）⇒ 批3b 只交付壳。
+3. **批2 遗留两条产品级缺陷加入修复计划**（「加入修复计划」）⇒ 设计稿 §10 FIX-1..FIX-4，批4 承接。
+
+## 变异反证表（M1–M25 + F 系列；**等价变异与判据洞按实测写，不许标成「抓住」**）
+
+| 号 | 变异 | 结果 |
+|---|---|---|
+| M1 切片外 id 放行 / M2 删同组两枚的 raise / M4 默认回落取 `files[-1]` / M6 先删再校验 / M9 POST 切片改回全量 | 后端 | **红**，且红在预期的那一条 |
+| M3 去掉 `isinstance(raw, bool)` | **第一版全绿**（本批第一次「反证没咬住」）。根因不是变异等价，是断言只比异常类型（`hash(True)==hash(1)`）⇒ 拆成两条 + `assertRaisesRegex(..., '整数数组')` 钉**是哪道闸门生效**后重跑 `FAILED (failures=1)` |
+| M5 `remaining_groups` 回算术 `总数 − len(displayed)` | **实测全绿 = 判据洞**（计划当初预测它会红，错了）。两句在可达形状里恒等；顺带推翻我自己写的「算术会虚报」——塌组发生在调用之前。选实测的真实理由是**不依赖前提**，不是能钉分歧 |
+| M8 `except InvalidKeepSelection` → `except ValueError` | **已知不可区分**（子类关系），不许声称判据抓得住它 |
+| M7 `or []` 改成直传 `None` | 红，但**机制订正**：红在视图的 `isinstance(list)` 闸门，不是 `for raw in None` 抛 `TypeError`→500 |
+| M10 回落改 `files.at(-1)` / M11 一键策略不滤已改选 / M12 截断文案改回「作用于全部」/ M13 比较符互换 / M14 加回 `largest` 标签 | 前端纯函数与文案 | **红**（M12 两条、M13 双向） |
+| M15 `@click="submit"` → `@click="emit('fix')"`（丢载荷） | 原判据 `/emit\('fix',\s*resolveKeepIds\(/` **无牙**；换成形状判据后才红。另记：绊线红只覆盖 api 调用点，处理器内丢载荷仍 8/8 绿且 `vue-tsc` 看不见 ⇒ 只能由 T3 case2 抓（`dfb006d`） |
+| M16 删 `:data-keep` / M17 恒带 `keep_ids: undefined` / M18 删回执尾巴 | **红**（绊线 + T3） |
+| M19 后端 `keep` 恒取 `files[0].id` | 整跑红在 case2；**case3 单跑也独立红**（`--grep=B3A-T8C3`，终态 `K2-B` 期望 vs `K2-A` 实收）⇒ 我先写的「后端侧只是等价推断」作废 |
+| M20 `pending` 回 `files[1:]` / M21 `:data-keep` 三元反过来 | **红**（M20 红在终态不是 toast；M21 红在 `toHaveAttribute` 而两支文案照旧通顺） |
+| M22 `resolveKeepIds` 只上报 touched | **1 红**（打在 7b3d763 的 15 例上）。⚠ 我曾把「全仓零拦阻」写进提交 `2d44e9c`，那是没实测就传播的结论，`75507fb` 撤回 |
+| M23 一键策略盖到所有组 / M24 `:disabled` 去掉 `!deleteConfirmed` / M25 `applyStrategy` 硬编码 `earliest` | 返工轮（`ec458bc`）**各自红**：M23/M25 在 case3，M24 在 case1 那句 `toBeDisabled()`。M25 在返工**前**三档全绿 ⇒ 那颗策略选项当时在全仓是隐形的 |
+| F-1a 摘掉反向覆盖闸门 | 3 例红，其中 HTTP 那条报 `200 != 400 : {'deleted_count': 2}` —— 就是那次静默删除本身 |
+| F-1b 覆盖闸门不分空载荷（把兼容写死） | module 8 / tier3 9 条红，含 `test_51组…` `400 != 200` 与 `apps.datafiles` 2 条 ⇒ 反向证明 legacy 分支**真有靶子**，不是空话 |
+| F-2 `deleted_count += 1` 改回无条件 | 恰 1 条红（`2 != 1 : 被占用那只不算进计数`）。`本来就没有文件` 那条**故意不红** —— 它防的是反向过度修正 `if unlinked is None: continue` |
+| F2-a 标签改回「未改选的组默认保留」 | T2 绊线 + T3 `[B3A-F2A]` `toHaveText` 红（Exp「一键策略…」/ Recv「未改选的组默认保留」） |
+| F2-b 未改选也跟随策略（回落 `strategyKeepId(g,'latest')`） | T3 `[B3A-F2A]` 的 `data-keep` 与终态红 + T2 `resolveKeepIds` 红 |
+| F2-c 摘掉 `:truncated-note` | **分层实测**：T2 层 25 例全绿（缺口属实）；但按字面只摘绑定时**池跑不起来** —— `globalSetup` 先 `npm run build`，`vue-tsc` 立刻 `TS6133`。摘干净（binding+computed+import）才走到 T3 `[B3A-F2NOTE]` 红在 `toContainText`。⇒ 证据链写成「T2 缺口 + build 是第二道闸」，不许写成「浏览器层毫无反应」 |
+| F2-d 卡片文案回旧字面量 | T2 两条红（整句 `toBe` 与新加的 `toMatch(/本批不处理/)`） |
+
+## 遗留清单（都不在本批做，各有归属）
+
+1. **`frontend/e2e/data/repair-center.spec.ts` 现 591/600 行** ⇒ 批4/批3b 动它之前必须先拆
+   `e2e/data/duplicate-keep.spec.ts`（设计稿 §10 已写成硬前置，含拆分时要核的三件事）。
+2. **`browse_views.py`（520 行）形状**：4 个内联分支 + 4 个转调兄弟混在一个 `post()` 里；终审建议抽
+   `_delete_duplicates(user, action)`。本批不抽 —— 那是形状重构不是修缺陷，且批4 加选项才知道要什么形状。
+3. **§10.1 UX-1**：单击已选中 radio 标不出「已改选」，要两击才能表达「就要默认这份」。工效缺口，归批4。
+4. **`C:\lqdp-e2e` 下 slot 目录累计约 7.7 GB**，用户明确说先不清。
+5. **本机 dev 库 admin 仍有 73 组真实重复**未清理（是用户的实数据，批3a 只给它选了保留的口子，
+   没替用户删任何东西）。
+6. **另一会话的 `apps/export/*` 未提交改动**还挂在共享工作树上；收口两轮后端全量数
+   （2651 → 2662）里含它们那 5 条测试，对账见上表。
