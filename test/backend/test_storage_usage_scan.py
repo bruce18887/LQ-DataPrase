@@ -299,7 +299,7 @@ class DbMapTests(TestCase):
     def test_同一路径两条不同大小的注册行_按id最大那条定胜负(self):
         """不加 order_by 的话 map 里的胜者取决于 values_list 的返回顺序 ⇒ 同一份数据
         两次请求可以给出不同的差值，还在 30s TTL 里冻住一个。定死成 id 最大的那条
-        （与 _duplicate_files.py:39 _group_duplicates 的 order_by('id') 同一条纪律）。"""
+        （与 _duplicate_files.py:113 _group_duplicates 的 order_by('id') 同一条纪律）。"""
         self._row('data/inroot/single/a.csv', 100)
         self._row('data/inroot/single/a.csv', 250)
         db = self._map()
