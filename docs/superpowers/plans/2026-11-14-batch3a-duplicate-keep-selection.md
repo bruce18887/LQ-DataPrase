@@ -1231,6 +1231,14 @@ Expected: 两份全绿。`dupKeep` 依赖 `diskUsage` 的 `usageBytesText`，所
 * M13：把 `strategy === 'earliest' ? f.created_at < best.created_at : ...` 的两个比较符互换 ⇒
   `策略「最早/最新」比 created_at，与 id 大小无关` 红（两颗按钮互换是这条判据唯一要抓的形状）。
 * M14：往 `STRATEGY_LABELS` 加 `largest: '体积最大'` ⇒ `只有两颗策略` 红（谎话控件绊线）。
+* M22（2026-11-15 复审补）：把 `resolveKeepIds` 退化成「只上报用户显式改选过的组」
+  （`groups.filter(g => choice.has(groupKey(g))).map(...)`）⇒ **第一版 15 例全绿 = 真判据洞**。
+  为什么危险：后端是白名单式的，**部分覆盖照样返回 200**，未列出的组走「按默认留最早」那条兼容分支
+  ⇒ 服务端替用户决定，而 T1/T3 看到的都是成功响应。计划原文那句
+  「含未 touched 的默认项（与服务端白名单同源）」只是**用例名**，三条 `toEqual` 一次都追不到这个回退
+  （`resolveKeepIds([a,b], new Map([['b.csv|500',20]]))` 只断 a 用默认，断不出「a 整组被漏掉」）。
+  处置：加 `assertKeepIdsCoverEveryDisplayedGroup(groups, choice)`（数量同源 / 每枚 id 都是某组成员 /
+  每组至少一枚被上报 / 与 `keepIdForGroup` 同源四个断言），三种 choice 形状各调一次 ⇒ M22 红 2 条。
 
 - [ ] **Step 6: 提交**
 
