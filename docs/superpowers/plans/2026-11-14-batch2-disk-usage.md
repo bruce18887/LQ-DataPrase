@@ -2400,3 +2400,54 @@ os.link / os.symlink 本机都可建                      ← Task 2 的三条�
 
 现数：`Ran 44 tests / OK`（端点 10 + 口径 34，`tasks/b2-task4-green4.log`）；
 `storage_usage.py` **299**、`views/usage_views.py` **27**、`test_files_usage_api.py` **172**。
+
+---
+
+## Task 5 落地后的订正（2026-11-14，四条补齐 + 反证）
+
+四条 `CacheBehaviourTests` 在 Task 4 的实现下**首跑即绿**（`Ran 4 / OK`，`tasks/b2-task5-class.log`），
+所以本提交按 Step 2 的说法是「行为判据补齐」，**不是**红绿循环产物。判别力由
+`tasks/mutate_b2_task5.py`（4 档变异，跑「口径 + 端点」两套 48 例，`finally` 逐字节还原并复核
+`True`，还原后复跑仍 38 OK）现量：
+
+| 变异 | 实测杀掉它的用例（在哪个文件） |
+|---|---|
+| M1 去掉 `if fresh: _usage_cache.clear()` 那一支 | `test_fresh为True时强制重算`（本文件）**外加** `test_fresh是白名单_且1会立刻反映新写入`（api 文件）—— 2 条 |
+| M2 `bucket` 换成常量（永不换桶） | **只有** `test_bucket随TTL变化_用假时钟证明换桶必重算`（本文件）—— 1 条 |
+| M3 key 去掉 username（全体共享一份缓存） | **只有** `test_不同用户不共享缓存`（本文件）—— 1 条，且**整个 api 文件全绿** |
+| M4 每次直接 `return _compute_usage(user)`（缓存整体失效） | `test_同一bucket内第二次调用不再算`（本文件）**外加** api 那条里「没带 fresh ⇒ 吃缓存」那一句 —— 2 条 |
+
+四条与计划给的表逐条相符，没有「该谁杀却由别人杀」的错位。两处值得记的实测事实：
+
+1. **M3 揭出一个本批的看守空缺（Important）。** 去掉 key 里的 username 后端点契约一条不红：
+   `FileUsageApiTests` 每条用例都只用自己的那个 user 发请求，且 setUp/tearDown 都清表
+   （Task 4「四条卫生」第 9a 条），所以同一次请求序列里永远不会出现两个用户 ⇒
+   「缓存 key 含 username」这件事在 **HTTP 层一句判据都没有**，本批只有 M3 这条函数级用例守着。
+   留给 Task 10 台账：真要在端点上钉，得造「A 先请求、B 后请求、两侧 `bytes` 必须不同」一条。
+
+2. **计划正文两处数过期（Minor）。** Step 1 括注「文件顶部补 `from unittest import mock`」——
+   Task 2 起本文件第 18 行就已有，不用补；Step 3 期望 `Ran 42 tests / OK（本文件 33 = 16+13+4，
+   加端点契约 9）`—— Task 3/4 两轮复审都往里加过例，现数是**本文件 38（34 + 4）+ 端点 10 =
+   `Ran 48 / OK`**，零 skip。
+
+3. **「追加一个类」这条撞了 600 行硬闸（Critical，处置留给控制器）。** 正文只写
+   「Modify: `test/backend/test_storage_usage_scan.py`（追加一个类）」，没量过落点行数：本文件
+   Task 3 时 490、Task 4 收口时 562，逐字追加这 68 行（类体 66 + 两个空行）后是 **630 > 600**。
+   测试文件确实在适用面内（`.claude/CLAUDE.md`「600 行约束的适用面」：2026-10-27 实测超阈的
+   **全部**是测试文件），实测 `cd frontend && npx vitest run test/unit/lineLimit.spec.ts`
+   ⇒ `15 tests | 4 failed`（`tasks/b2-task5-linelimit.log`）：
+   `❌ test/backend/test_storage_usage_scan.py 630 行 > 阈值 600（不在豁免账里）`，`kind: 'new'`。
+   ⇒ 本任务**没有**擅自改 `scripts/line-limit.mjs` 的豁免账（那是闸自己的账，理由要写「哪一次
+   工单、为什么不该由本闸拦当下改动」），也**没有**删别人的用例腾地方，二选一：
+   - **(a) 拆档**：四个方法 + setUp/tearDown/`_counting_compute` 挪进
+     `test/backend/test_storage_usage_cache.py`（新档要有 `__init__` 树内的位置：`test/backend/`
+     已是一个包，直接放即可），本文件回到 562，条数不变（`Ran 34` + `Ran 4` 两档）。
+   - **(b) 挂绊线**：`EXEMPT` 记 `test/backend/test_storage_usage_scan.py` 精确 **630** 行 + 理由。
+   取舍：(a) 不动闸、账不膨胀，代价是本批口径判据从此分两档跑；(b) 一行账搞定，代价是豁免清单
+   单向膨胀。推荐 (a) —— 本文件的类边界本来就是现成接缝（走树 / inode / 根守卫 / 两本账 /
+   交集 / 算术 / 装配 / 缓存），且 Step 3 用两个 label 跑两套已经证明类之间互不依赖。
+
+现数：单档 `Ran 38 tests / OK`（`tasks/b2-task5-green.log`）、端点档 `Ran 10 / OK`
+（`tasks/b2-task5-api-regress.log`）、合档 `Ran 48 / OK`（`tasks/b2-task5-green-combined.log`）、
+还原后复跑 `Ran 38 / OK`（`tasks/b2-task5-green2.log`）；
+`test_storage_usage_scan.py` **630**（见上面第 3 条）。
