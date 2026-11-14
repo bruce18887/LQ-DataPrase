@@ -16,6 +16,14 @@ import { cleanupQuiet, deleteFilesByNameQuiet } from '../helpers/cleanup'
  * P2 project 的 storageState 固定是 ADMIN_STATE（playwright.config.ts:144），换账号
  * 要走 helpers/auth.ts 的登录路径，代价比那条判据值钱，而它已被
  * `test/unit/diskUsage.spec.ts` 的 `usageChipText(base())` 完整钉住。
+ *
+ * ⚠ **本文件不是 intra-file 并行安全的**：case 3 的 `file_count + 1` 与 case 7 的 `fresh ≤ 2`
+ * 读的是同一账号在同一棵树上的全局量，同文件用例并跑会互相推动计数（后果是**假红**，
+ * 不是假绿）。门禁档 `scripts/e2e_pool.mjs:215` 固定 `--workers=1` 已经挡住了；
+ * 手跑请用 `npx playwright test --project=P2 --workers=1 e2e/data/disk-usage-chip.spec.ts`，
+ * 别用 `npm run test:e2e:p2`（它不锁 workers，config 是 `fullyParallel: true` +
+ * `workers: min(6, cpus/2)`）。不加 `mode: 'serial'` 是有意的：serial 下一条红会把
+ * 后面整片用例一起跳过，这个文件的九条各守一个独立契约，牺牲可诊断性不值。
  */
 
 const CHIP = '.toolbar-left [data-testid="disk-usage-chip"]'
@@ -34,9 +42,11 @@ function apiGet(page: Page, url: string) {
 
 /**
  * 判据异源：spec 里**自己再实现一遍**四档格式化。
- * 不是为了省一次比对，而是为了让「组件偷偷读错字段」（bytes ↔ unique_bytes、
- * file_count ↔ db_count）这条路必须红——复用 src 里的同一个函数就只会证明同一条
- * 代码等于自己。
+ * 复用 src 里的同一个函数只会证明同一段代码等于自己：档/小数位/取整方向都跟着一起错。
+ * 「组件偷偷读错字段」这条路要红，靠的是 case 1 里把 `unique_bytes` 注入成与 `bytes` 不同
+ * （那里有实测说明为什么非注入不可）。Task 6c 之后 chip 只有体积，所以浏览器侧唯一活的
+ * 读错字段路径就是 `bytes ↔ unique_bytes`；计数类字段（file_count/db_count）不再出现在
+ * chip 上，它们的分工由浮层那一条（case 4）与 T2 钉。
  */
 function bytesText(bytes: number): string {
   const KiB = 1024
@@ -76,6 +86,14 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
     await page.route(USAGE_ROUTE, async (route) => {
       const response = await route.fetch()
       const json = await response.json()
+      // ⚠ 必须**造出**两字段的差异，这句保护才活着：slot 的媒体树是 `fs.linkSync` 一一对硬链
+      // 镜像（scripts/e2e_pool.mjs:113），实测模板树 91 个文件 / 重复 inode 0 个
+      // ⇒ 树里每个 inode 只出现一次 ⇒ `unique_bytes` 天然等于 `bytes`，读错字段在这棵树上
+      // 是**看不见的**（2026-11-14 复审现读，别把它当成已钉住）。
+      // ⚠ 差异必须**大于显示档的最小步长**才看得见，算术与下面 case 3 同一条：MB 档一位小数
+      // ⇒ 步长 0.1 MiB = 104,858 B，GB 档两位小数 ⇒ 10.49 MB。取 20 MiB 同时跨过两档，
+      // 且不动 `bytes` 本身（chip 的期望串仍取自 `captured.bytes`）。
+      json.unique_bytes = json.bytes - 20 * 1024 * 1024
       captured = json
       await route.fulfill({ response, json })
     })
@@ -88,8 +106,10 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
     // 2026-11-14 用户拍板（Task 6c）：chip **只显体积**，文件数在浮层分桶行里。
     // 左边那颗 `{{ total }} 个文件` 是列表作用域，chip 的 file_count 是整棵树，两个都写
     // 「N 个文件」会打架 —— 尤其激活刷新之后，Explorer 拷进来的文件只动 chip 不动表格。
-    await expect(chip).toHaveText(`磁盘占用 ${bytesText(captured.bytes)}`)
+    // 反向守卫排在精确串**之前**：`toHaveText` 一红就先抛，排在它后面的 `not.toContainText`
+    // 永远当不上 killer（同 5b33828 那次的订正，装饰性断言比没有更坏）。
     await expect(chip).not.toContainText('个文件')
+    await expect(chip).toHaveText(`磁盘占用 ${bytesText(captured.bytes)}`)
   })
 
   test('占用接口坏掉时列表照常渲染，chip 不出现', async ({ page }) => {
@@ -101,7 +121,12 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
       }),
     )
     await gotoApp(page, '/data')
-    // 列表必须照常（占用是附赠信息，不许连累主功能）
+    // 「不连累列表」必须由**列表自己**来钉：`.list-toolbar .section-count` 只是工具栏外壳，
+    // 它在 `files` 被清空、表格整片消失时照样可见 ⇒ 光断它等于没断这句（2026-11-14 复审现读）。
+    // 取的是本仓既有写法（data.spec.ts:199 同一选择器、同样 15s）。
+    await expect(
+      page.locator('.content-section:visible .el-table .el-table__row').first(),
+    ).toBeVisible({ timeout: 15_000 })
     await expect(page.locator('.list-toolbar .section-count').first()).toBeVisible({ timeout: 20_000 })
     await expect(page.locator(CHIP)).toHaveCount(0)
   })
@@ -114,8 +139,12 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
     // ⇒ 步长 0.1 MiB = 104,858 B：12 字节推不动最后一位。2026-11-14 池实测三连红
     // `Received: "磁盘占用 710.1 MB"`，而同一条用例里在它之前的 `file_count + 1` 是**绿的**
     // ⇒ 红的是判据的载荷，不是实现（后端计入、fresh 重拉、渲染都成立）。
-    // 取 2 MiB ≈ 步长的 20 倍，跨档余量足够；值仍是 1/2 两个短整数 ⇒ unique 值集不随行数膨胀
-    // （`files/options/` 的大小跟着 unique 值走，不跟着行数走，别拿长字符串凑体积）。
+    // 取 2 MiB ≈ 步长的 20 倍，跨档余量足够；值仍是 1/2 两个短整数 ⇒ 这一列的 distinct 值
+    // 恒为 2 个，分析页参数选择器与元数据缓存不随行数膨胀（别拿长字符串凑体积，那样每个
+    // 单元格都变成一个唯一参数值）。⚠ 原先这里写的是「`files/options/` 的大小跟着 unique 值
+    // 走，不跟着行数走」——**实测是反的**：该接口逐文件返回标量行（apps/datafiles/views/
+    // file_views.py:288-294 的 `.values(...)`，一次一行，默认 limit 5000），它跟着的是**文件数**，
+    // 与本文件的 CSV 行数无关（CSV 行数只进这一行的 `row_count`）。
     // 若哪天树进 GB 档（步长变 0.01 GiB = 10.5 MB），这条会**响**而不是静默假绿 ⇒ 把这里加大。
     fs.writeFileSync(tmpPath, `col1,col2\n${'1,2\n'.repeat(512 * 1024)}`)
 
@@ -200,9 +229,12 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
      *   （usageBreakdownRows 不读总量），所以打破它不影响本轮判据所守的渲染契约。
      *
      * 可失败性（2026-11-14 实测）：把 src TYPE_LABELS 的 `''` 映射改坏（→「批次」）后独占
-     * slot 复跑，红**恰好落在这条注入段**且只有 case 4 红（其余 6 条仍绿）——首个红点是
-     * 下面 :220 的渲染等待（filter({ hasText: '根目录散文件' }) 超时，element(s) not found），
-     * 它替 :223 的 toContain 兜住了同一件事；行差值 :229 是第二道闸。
+     * slot 复跑，红**恰好落在这条注入段**且只有 case 4 红（其余 6 条仍绿）。首个红点是下面
+     * 那句 `cells.filter({ hasText: typeLabel(ROOT_LOOSE_KEY) }).first()` 的渲染等待
+     * （超时，element(s) not found），它替紧随其后的那句 `toContain(typeLabel(...))` 兜住了
+     * 同一件事；再下面的「比第一轮恰好多一对 cell」是第二道闸。
+     * ⚠ 这里一律**用语句本身当锚点、不写本文件行号**：这一段初稿写的是 `:220/:223/:229`，
+     * d999853 在它上方加了 3 行就整体漂了（复审现读）——同文件的行号谁都守不住。
      * 反过来，把查表退化回旧三元链并不会让本段红 —— 本段守的是**渲染**，不是 spec 自己的
      * 期望串，这正是旧版 `toContain('')` 恒真装饰的病根所在。
      */
@@ -297,8 +329,10 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
 
   test('连发三文件上传：写后刷新塌成 ≤2 次 fresh=1', async ({ page }) => {
     const stamp = Date.now()
+    // 前缀**刻意不用** `e2e_usage_`：case 3 的清理是按前缀删的，而 `e2e_usage_burst_` 恰好以它
+    // 开头 ⇒ 并行跑（`npm run test:e2e:p2` 不锁 workers）时 case 3 会把这三行一起删掉。
     const paths = [0, 1, 2].map((i) => {
-      const p = path.join(os.tmpdir(), `e2e_usage_burst_${stamp}_${i}.csv`)
+      const p = path.join(os.tmpdir(), `e2e_burst_${stamp}_${i}.csv`)
       fs.writeFileSync(p, 'col1,col2\n1,2\n')
       return p
     })
@@ -315,15 +349,17 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
       )
       await page.locator('button').filter({ hasText: '上传文件' }).click()
       await uploadMultipleFiles(page, paths)
+      // 「至少刷新过一次」这句归下面这行：零次时它按超时红，消息直接说没等到响应。
+      // 因此**不再**补一句 `expect(fresh.length).toBeGreaterThan(0)` —— 它排在 await 之后，
+      // 0 根本走不到那行，是一句不可能红的装饰（同 5b33828 订正的那一类）。
       await first
       // 等合并窗口**彻底收干**再计数：常数是量过的那道闸（USAGE_TRAIL_MS=800）的 2 倍 + 余量，
       // 不是拍脑袋。数早了会把「trailing 还没发」当成 ≤2 通过 —— 那是假绿。
       await page.waitForTimeout(2000)
-      expect(fresh.length, 'leading 至少要有一次').toBeGreaterThan(0)
       // 写成 ≤2 而不是 ==2：三个响应若恰好被 Vue 合到同一 tick，只有 leading 一次也合规。
       expect(fresh.length, 'K 连发不许变成 K 次全盘扫描').toBeLessThanOrEqual(2)
     } finally {
-      await deleteFilesByNameQuiet(page, 'e2e_usage_burst_')
+      await deleteFilesByNameQuiet(page, 'e2e_burst_')
       for (const p of paths) cleanupQuiet(p)
     }
   })
