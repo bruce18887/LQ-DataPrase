@@ -72,18 +72,15 @@ describe('usageChipText', () => {
     expect(usageChipText(null)).toBeNull()
   })
 
-  it('文案形态：磁盘占用 X · N 个文件', () => {
-    expect(usageChipText(base({ bytes: 1288490188, file_count: 3412 })))
-      .toBe('磁盘占用 1.20 GB · 3,412 个文件')
+  it('chip 只有体积，不带文件数（与工具栏左边那颗「N 个文件」口径不同）', () => {
+    const text = usageChipText(base({ bytes: 1288490188, file_count: 3412 }))
+    expect(text).toBe('磁盘占用 1.20 GB')
+    // 反向守卫：把计数加回 chip 就必须红 —— 这条文案的分工不能只靠注释维持。
+    expect(text).not.toMatch(/个文件/)
   })
 
-  it('空目录也出一句完整的话，而不是「磁盘占用 -- · 0 个文件」', () => {
-    expect(usageChipText(base())).toBe('磁盘占用 0 B · 0 个文件')
-  })
-
-  it('千位分隔走 toLocaleString（与仓内既有写法同形）', () => {
-    expect(usageChipText(base({ bytes: 10, file_count: 1234567 })))
-      .toBe('磁盘占用 10 B · 1,234,567 个文件')
+  it('空目录也只说体积，不再出现「· 0 个文件」那种半句话', () => {
+    expect(usageChipText(base())).toBe('磁盘占用 0 B')
   })
 })
 
@@ -127,6 +124,12 @@ describe('usageBreakdownRows', () => {
   it('没有文件或还没扫时返回空数组（浮层靠它决定显不显空态）', () => {
     expect(usageBreakdownRows(base())).toEqual([])
     expect(usageBreakdownRows(null)).toEqual([])
+  })
+
+  it('分桶行的文件数带千位分隔（计数从 chip 移到浮层之后，判据也跟到这里）', () => {
+    const rows = usageBreakdownRows(base({ by_type: { batch: { bytes: 2048, count: 1234567 } } }))
+    expect(rows).toHaveLength(1)
+    expect(rows[0].countText).toBe('1,234,567 个文件')
   })
 })
 

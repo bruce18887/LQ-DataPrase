@@ -44,9 +44,18 @@ export function usageBytesText(bytes: number | null | undefined): string {
   return `${(bytes / GiB).toFixed(2)} GB`
 }
 
+/**
+ * chip 只显体积，**不返回「个文件」**——这是契约，由 T2 的 `not.toMatch(/个文件/)` 守着。
+ * 理由（代码里看不出来的那部分）：工具栏左边同款式还挂着一颗 `{{ total }} 个文件`
+ * （筛选后当页口径），这颗原本是整树口径；两个「N 个文件」并排、无任何线索区分。
+ * 且 chip 随 onActivated 刷新而表格只在 onMounted 拉，用户从资源管理器拷文件进数据目录
+ * 后两数**本来就会不一致**（2026-11-14 用户机现症）。文件数移交浮层分桶行
+ * （`usageBreakdownRows` 的 `countText`，逐桶 `sizeText · countText`），也符合设计 §4.2
+ * 「页面只显一个数」。
+ */
 export function usageChipText(usage: FileUsage | null): string | null {
   if (!usage) return null
-  return `磁盘占用 ${usageBytesText(usage.bytes)} · ${usage.file_count.toLocaleString()} 个文件`
+  return `磁盘占用 ${usageBytesText(usage.bytes)}`
 }
 
 export interface UsageRow {
