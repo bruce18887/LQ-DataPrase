@@ -364,7 +364,7 @@ class UnlinkedPathReturnContractTests(_CacheSwapBase):
     """⑦ 调用点交出去的「动过的路径」必须是**真 unlink 掉的那一条**（finding 5）。
 
     ``_delete_datafile_file_only`` 把「这次到底删掉了什么」作为返回值交出来，三个调用点
-    （``file_views`` 的 destroy / bulk_delete 与 ``_helpers._delete_duplicate_files``）
+    （``file_views`` 的 destroy / bulk_delete 与 ``_duplicate_files._delete_duplicate_files``）
     直接 append 它、不再各自重算一遍路径 ⇒ 这根线两个方向都会撒谎：
     没删也报路径 = 淘汰集合声称删过一只其实还在盘上的文件（而且把「重算」与「真删」两份
     路径变成两个事实来源，早晚对不上）；删了却报 ``None`` = 白占预算的条目留在原地。

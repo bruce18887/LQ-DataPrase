@@ -40,6 +40,8 @@ from ._helpers import (
     _resolve_product_code,
     _scan_orphaned_disk,
     _user_upload_dir,
+)
+from ._duplicate_files import (
     _find_duplicate_groups,
     _delete_duplicate_files,
 )
