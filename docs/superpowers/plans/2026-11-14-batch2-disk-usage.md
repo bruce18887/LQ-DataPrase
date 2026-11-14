@@ -1767,16 +1767,24 @@ const usageScanned = computed(() => usageScannedText(props.usage))
 
 Run:
 ```bash
-cd frontend && npx vue-tsc -b --pretty false && npx vitest run
+cd frontend && npx vue-tsc -b --force --pretty false && npx vitest run
 ```
-Expected: `vue-tsc` 无输出；`npx vitest run` 全绿（基线 68 文件 / 951 例，本批 +1 文件 / +15 例 ⇒ 69 / 966）。**数字必须现跑现取**，别对齐本行写的快照（lessons 的「台账写命令不写快照」）。
+Expected: `vue-tsc` 无输出；`npx vitest run` 全绿。**数字必须现跑现取**，别对齐本行写的快照（lessons 的「台账写命令不写快照」）。
+本批 Task 6 落地并复审后的**实测基线**：`Test Files 69 passed`、`Tests 967 passed`（`diskUsage.spec.ts` 16 例 +
+其余既有）。⇒ Task 7 只加接线、不加 T2 用例，跑出来**应当还是 967**；若变了要么是回归要么是新增了用例，要在报告里说清是哪一种。
+`--force` 是必须的：不加时 `tsbuildinfo` 缓存会把「没类型错误」报成假绿（本批 Task 6 实测过一次）。
 
 - [ ] **Step 5: 提交**
 
 ```bash
-git add frontend/src/api/datafiles.ts frontend/src/pages/data/components/FileListTab.vue frontend/src/pages/data/components/FileListToolbar.vue frontend/src/utils/diskUsage.ts frontend/test/unit/diskUsage.spec.ts
+git add frontend/src/api/datafiles.ts frontend/src/pages/data/components/FileListTab.vue frontend/src/pages/data/components/FileListToolbar.vue
 git commit -m "feat(data): 文件列表工具栏显示磁盘占用 chip 与拆分浮层"
 ```
+
+⚠ **暂存清单里刻意没有 `utils/diskUsage.ts` 与它的 spec** —— 那两个文件归 Task 6，且复审已定死
+「前缀归属与查表形态都收在 Task 6 内部，Task 7 不回改 utils」（见「Task 6 落地后的订正」）。
+⇒ 如果落地时你**需要**改那两个文件才能接通，那不是一个可以顺手做的决定：停下来报告需要改什么、为什么，
+由控制器决定是回 Task 6 补判据还是在本批加例。把 utils 一起 `git add` 进来会让这件事在 diff 里隐身。
 
 ---
 
