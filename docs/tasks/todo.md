@@ -775,6 +775,13 @@ Task 8 落 7 + Task 9 追加 2）。
 
 ## 批2 遗留清单（别当已完成，也别顺手改）
 
+- **等用户拍板的一条（终审 F3）**：用户名为 `..` / `.` 的账号每次进 /data 都会吃一条错误 toast
+  （`_user_data_root` raise ⇒ 500，而 Task 7 把占用拉取挂成了激活刷新；可创建性已现读——
+  `UserCreateSerializer` 的 `username` 只走 Django 默认校验器，它接受 `..`）。
+  两条路：(a) 视图把 ValueError 变 204，chip 自然缺席且不弹（要改 T1 的 500 契约例）；
+  (b) 在账号创建处校验掉 `.`/`..`，顺带修同根因的**更大问题**：`_user_upload_dir` 对这种用户名会拼出
+  `<MEDIA_ROOT>/data/../single`，上传路径等于逃逸用户目录。加 toast 白名单已被否（会静音真实故障、
+  且与 e2e case 6 钉的「失败必须出声」对冲）。
 - `combine.spec.ts` 的勾选被迟到列表响应清空（上面第 4 条）⇒ 产品级缺陷 + 争用 flake，两个账都记在这一条上。
 - 同形态原型键查表两处未动：`ChartDock.vue:141`、`ExportTemplateSettings.vue:91`（键都是闭合集合，当前不可达）
   ⇒ 谁下次碰这两个文件就顺手换 `Object.hasOwn` 并补一条原型名键判据，别再攒第三次。
