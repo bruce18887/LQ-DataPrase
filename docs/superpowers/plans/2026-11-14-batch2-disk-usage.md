@@ -1725,7 +1725,7 @@ import {
           popper-class="disk-usage-popover"
         >
           <template #reference>
-            <span class="section-count usage-chip" data-testid="disk-usage-chip">
+            <span class="section-count" data-testid="disk-usage-chip">
               {{ usageChipText(usage) }}
             </span>
           </template>
@@ -1756,6 +1756,12 @@ const usageScanned = computed(() => usageScannedText(props.usage))
 ```
 
 ⚠ 「统计时间」这一行**不要双份**：上面 `el-descriptions-item` 的 `label` 已经是「统计时间」，所以 value 只能是裸时间串。这条分工**已在 Task 6 正文里定死**（`usageScannedText` 返回 `date.toLocaleString(...)` 本身、T2 断言 `not.toMatch(/统计时间/)`），Task 7 **不要再动 `utils/diskUsage.ts`** —— 原稿把这个改动挂在 Task 7 上，2026-11-14 复核时挪回 Task 6，理由是这个前缀归属只有 utils 的作者能钉住，跨任务改别人的文件必然漏一边。`usageOutsideLine` 相反，它没有 label 可依附，所以保留自带的那句完整话。
+
+⇒ 另：上面那颗 chip 的 class 只有 `section-count`，**初稿还带一个 `usage-chip`，2026-11-14 预检时删掉**。
+理由：全仓 grep 下来 `usage-chip` 没有任何 CSS 规则、没有用例选它（Task 8 的 `CHIP` 走
+`[data-testid="disk-usage-chip"]`，而 `data-testid` 是本仓既有约定 —— src 里 120 处、e2e 里 80 处），
+`popper-class="disk-usage-popover"` 则是**真的被 Task 8 的 locator 依赖**，两者命运不同，别一起删。
+留一个谁都不用的 class 就是给下一个人「这是不是该有样式？」的疑问。
 
 - [ ] **Step 4: 类型检查与全量 vitest**
 
