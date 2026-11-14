@@ -335,7 +335,7 @@ head: [['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }]]
 :1255 保留最早 / :1277 只删批次内文件）**逐字不动**，靠它们证明向后兼容。
 同理 `apps/datafiles/views/_helpers.py` 是 552/600，本批要加的保留项解析带注释约 60 行 ⇒
 **必须先把它那三个重复文件函数搬进新模块** `apps/datafiles/views/_duplicate_files.py`（纯搬迁，
-不改一行语义），搬完 552→482。搬动会挪走一处 `evict_parse_cache_for_paths` 调用点，
+不改一行语义），搬完 552→480（2026-11-15 现量订正，原写 482）。搬动会挪走一处 `evict_parse_cache_for_paths` 调用点，
 而调用点是**结构判据**钉着的：`test/backend/test_parse_cache_invariant_scan.py:87-93`
 的 `EXPECTED_SITES` 要同步改（`_helpers.py: 1` → `_duplicate_files.py: 1`），否则那条扫描先红。
 
