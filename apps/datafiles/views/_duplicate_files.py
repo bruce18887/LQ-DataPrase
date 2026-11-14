@@ -117,23 +117,35 @@ def _find_duplicate_groups(user, limit=DUPLICATE_DISPLAY_LIMIT):
     return groups[:limit], len(groups)
 
 
-def _delete_duplicate_files(user):
-    """Delete duplicate files (same filename+size), keeping the lowest id per
-    group (the earliest registered). Returns the number of deleted rows.
+def _delete_duplicate_files(user, keep_ids=()):
+    """按保留选择删除重复文件，返回 ``(deleted_count, remaining_groups)``。
 
-    Per-file transaction so a mid-way failure never rolls back completed
-    deletions; the action is idempotent. Only the duplicate file is removed —
-    an existing batch directory and its remaining files are untouched.
+    * ``keep_ids`` 为空 ⇒ 每组留 id 最小（== 搬迁前的历史行为，向后兼容由
+      ``apps/datafiles/tests.py:1255`` 与本文件的默认例共同钉住）；
+    * 校验先于删除（`_resolve_keep_selection` 抛出来时一行都没动）；
+    * 逐文件 ``transaction.atomic()`` 照旧：中途失败不回滚已删的，动作幂等；
+    * **只处理已展示切片**（口径 2）—— 第 51 组之后的东西用户根本没看见，
+      不该替他删（设计 §5.4 的语义反转，2026-11-14 用户拍板）。
+
+    ``remaining_groups`` 是删完再跑一遍 `_group_duplicates` 的**实测**长度，不是
+    ``总数 - len(displayed)`` 的算术：某行已不在 DB 时那组当场塌掉，算术会虚报。
     """
+    groups = _group_duplicates(user)
+    displayed, keep_by_key = _resolve_keep_selection(groups, keep_ids)
+    pending = []
+    for group in displayed:
+        keep = keep_by_key.get(_group_key(group), group['files'][0]['id'])
+        pending.extend(item['id'] for item in group['files'] if item['id'] != keep)
     deleted_count = 0
     deleted_paths = []
-    groups = _group_duplicates(user)
-    # 一次取回全部待删行：曾是「每个重复文件一次 SELECT」，几十组重复时就是几十次
-    # 往返。owner=user 与 _group_duplicates 同源，是越权防线，不是冗余条件。
-    pending = [item['id'] for group in groups for item in group['files'][1:]]
+    # 一次取回全部待删行（批2 之前的写法是每个重复文件一次 SELECT）。
+    # owner=user 与 _group_duplicates 同源，是越权防线，不是冗余条件。
     rows = DataFile.objects.filter(owner=user, pk__in=pending).in_bulk()
-    for group in groups:
-        for item in group['files'][1:]:
+    for group in displayed:
+        keep = keep_by_key.get(_group_key(group), group['files'][0]['id'])
+        for item in group['files']:
+            if item['id'] == keep:
+                continue
             df = rows.get(item['id'])
             if df is None:
                 continue
@@ -143,4 +155,4 @@ def _delete_duplicate_files(user):
             deleted_paths.append(unlinked)
             deleted_count += 1
     evict_parse_cache_for_paths(deleted_paths)
-    return deleted_count
+    return deleted_count, len(_group_duplicates(user))

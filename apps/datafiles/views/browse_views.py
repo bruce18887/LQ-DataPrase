@@ -44,6 +44,7 @@ from ._helpers import (
 from ._duplicate_files import (
     _find_duplicate_groups,
     _delete_duplicate_files,
+    InvalidKeepSelection,
 )
 
 logger = logging.getLogger(__name__)
@@ -336,8 +337,17 @@ class DataConsistencyCheckView(APIView):
         })
 
     def post(self, request):
-        """Fix consistency issues. Actions always recompute the full affected
-        set server-side (not the GET's 50-row display slice)."""
+        """Fix consistency issues.
+
+        ``delete_orphaned_db`` / ``delete_orphaned_disk`` / ``import_orphaned_disk``
+        / ``fix_product_codes`` still recompute the full affected set server-side.
+
+        ``delete_duplicates`` deliberately does **not**: it acts on the same first
+        ``DUPLICATE_DISPLAY_LIMIT`` groups the GET handed to the UI, because a file
+        the user never saw is a file they cannot be asked to consent about
+        (spec §5.4, 2026-11-14 用户拍板「只删已展示的组」). Both sides read the
+        slice out of one function, so no constant pair can drift apart.
+        """
         action = request.data.get('action')
         if action not in _ALL_ACTIONS:
             return error_response(
@@ -355,10 +365,23 @@ class DataConsistencyCheckView(APIView):
         elif action == 'delete_orphaned_disk':
             return self._delete_orphaned_disk(user, action)
         elif action == 'delete_duplicates':
+            keep_ids = request.data.get('keep_ids') or []
+            if not isinstance(keep_ids, list):
+                # 数组形状在这里挡：进 `_resolve_keep_selection` 之前它是别的类型，
+                # 里面只逐条判元素，不判容器。
+                return error_response('invalid_keep_id', 'keep_ids 必须是数组')
+            try:
+                deleted_count, remaining_groups = _delete_duplicate_files(user, keep_ids)
+            except InvalidKeepSelection as exc:
+                # detail 是中文 ⇒ apps/common/errors.py:29 会把它复制进 message，
+                # 前端 pickMessage 优先读 message，所以不需要给 ERROR_CODE_MAP 加条目
+                # （先例见 test/backend/test_login_throttle.py:68）。
+                return error_response('invalid_keep_id', str(exc))
             return Response({
                 'status': 'ok',
                 'action': action,
-                'deleted_count': _delete_duplicate_files(user),
+                'deleted_count': deleted_count,
+                'remaining_groups': remaining_groups,
             })
         elif action == 'import_orphaned_disk':
             return self._import_orphaned_disk(user, action)
