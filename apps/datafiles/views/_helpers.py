@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import BaseATEParser, get_parser
-from apps.datafiles.services import evict_parse_cache_for_paths, put_cached_parsed_file
+from apps.datafiles.services import put_cached_parsed_file
 from apps.datafiles.utils import extract_product_code, resolve_file_path, store_file_path
 
 logger = logging.getLogger(__name__)
