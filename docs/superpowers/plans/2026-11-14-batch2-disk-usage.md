@@ -2142,6 +2142,88 @@ git commit -m "test(e2e): 磁盘占用 chip 的渲染与写后刷新判据"
 
 ---
 
+#### Task 8 两轮复审的处置（2026-11-14 落地后补）
+
+**先记一条流程事实**：规格复审代理跑到 **150 轮上限被截断**（185 次工具调用 / 53 分钟 / 未产出任何正文，
+`grep` 其 transcript 的 assistant text blocks = 0）。它的结论只存在于思考日志里，控制器把判定捞出来
+（`tasks/b2-task8-review-think.txt`，150 个 thinking block）后**逐条自己复验**，没有一条照单接受。
+教训两条：① 复审代理的 brief 必须自带范围闸门（它这次把预算花在读 element-plus 与 playwright 源码上）；
+② 被截断不等于没做完——先捞日志再决定重派，别原样重发同一个 brief。
+
+**规格轮判定（全部经控制器复验或实测）**，提交 `4cbf5b3` + `52ea324`：
+
+1. **I1（Important）** case 2 原先只断 `.list-toolbar .section-count` 可见 ⇒ 表格整片消失时它照样可见，
+   标题那句「不连累列表」没钉住。补 `.content-section:visible .el-table .el-table__row`（选择器与 15s
+   取的是 `data.spec.ts:199` 的既有写法）。
+2. **I2（Important）** case 1 的注释宣称 spec 侧再实现 `bytesText` 能让「读错字段（bytes ↔ unique_bytes、
+   file_count ↔ db_count）」必红——**实测两条都不成立**：slot 媒体树是 `fs.linkSync` 一一对硬链镜像
+   （`scripts/e2e_pool.mjs:113`），现量 template 树
+   `node -e` 扫描 ⇒ **91 文件 / 747,646,742 B / 重复 inode 0 个** ⇒ 树里每个 inode 只出现一次 ⇒
+   `unique_bytes` 天然等于 `bytes`；而 Task 6c 之后 chip 不显任何计数，`file_count ↔ db_count` 那条路
+   在浏览器里根本没有出口。修：透传轮注入 `json.unique_bytes = json.bytes - 20 * 1024 * 1024`
+   （20 MiB 同时跨过 MB 档 0.1 MiB 与 GB 档 10.49 MB 两级步长，算术同 case 3 那条），注释按实测改写。
+3. **I3（Important）** case 7 的 `expect(fresh.length).toBeGreaterThan(0)` 排在 `await first` 之后 ⇒
+   0 次时 `first` 先超时抛错，这句永远当不上 killer。删掉，注释改指 `await first` 才是「至少刷新一次」的判据。
+4. **I4（Important）** case 1 的 `not.toContainText('个文件')` 排在精确串之后 ⇒ 同一个装饰类别，
+   按 `5b33828` 的方向调到它前面。
+5. **M1/M6（Minor，注释说谎类）** case 4 注释里的三个**同文件**行号（`:220/:223/:229`）实测已漂 3 行
+   （`d999853` 在它上方加了 3 行）⇒ 改成语句锚点；case 3 注释里「`files/options/` 的大小跟着 unique 值走」
+   与实现相反（`file_views.py:288-294` 逐文件返回标量行，默认 limit 5000）⇒ 改正并补一条反向边界
+   （单文件上传在请求里同步整读 2 MiB CSV，`_helpers.py:120-127` 的 `parsed is None ⇒ parse_file_meta`）。
+6. **M5（Minor，跨文件串味）** 新端点 `/api/v1/files/usage/` 会落进 `waitFilesRequest` 的
+   `includes('/files/')` ⇒ 该 helper 的反向谓词调用（「清筛选 → 恢复全量」）可被占用响应顶掉 = 假绿。
+7. **M2（Minor，判级降级后接受）** `fullyParallel: true` + `workers: min(6, cpus/2)` 下本文件不是
+   intra-file 并行安全的（case 3 的 `+1` 与 case 7 的 `≤2` 读全局量）。控制器复核：门禁档
+   `e2e_pool.mjs:215` 固定 `--workers=1`，且 `testing-gates.md` 的文档手跑路径本身就带 `--workers=1`
+   ⇒ 后果是**假红不是假绿**，降为 Minor。落两条便宜的：case 7 前缀 `e2e_usage_burst_` → `e2e_burst_`
+   （case 3 按前缀 `e2e_usage_` 清理，旧名是它的字符串前缀，会被一起删）+ 文件头写明并行边界。
+
+**质量轮判定**（`general-purpose` 前台跑，brief 里禁掉一切池/浏览器/python 命令以防与在跑的 affected 档抢端口，
+40 轮内交回），提交 `e7c4e79` + `bc976f7`：
+
+1. **Q2（Important）** case 4 两条逐桶循环留着 `captured.by_type ?? {}` ⇒ 键缺失时**零次迭代 = 整段假绿**，
+   而 src 那侧同一份兜底在 Task 6 已按仓规删掉（「不为不可能的状态写兜底」）——异源副本不该比被测代码更宽容。
+   去掉两处 `?? {}`，并把 `captured` / `captured.by_type` 两道前置守卫排到循环之前。
+2. **Q5（Important，指向我上一轮的修法本身）** 只排除 `usage/` 是**形状错**：`product_codes/`、`format_types/`、
+   `options/` 的 URL 同样不含 `product_code=`（注意 `product_codes/` ≠ `product_code=`），全都满足那条反向谓词；
+   而且 `FileListTab.vue:390-394` 的 filesVersion watch 把 `loadFiles` 与这三个**一起发**，不是我注释里写的
+   「今天不落在窗口里、属潜伏态」。改正向匹配 `includes('/api/v1/files/?')`，依据的恒等式现读自
+   `FileListTab.vue:159-169`（固定送 `page` 与 `file_type:'single'`）+ `datafiles.ts:109-115`（`cleanParams`
+   不丢非空值）。8 个调用点逐个看过，等的全是列表请求。
+3. **Q4（Minor）** case 2 的 `.section-count` 那句已被新加的行判据**包住**（工具栏就在 `.content-section` 里），
+   留着反而误导 ⇒ 删。
+4. **Q1（Minor）** 我写的头注「这个文件的九条」是把 Task 9 的增量提前算进去了（现读 7 条），改成不随条数漂移的说法。
+5. **Q3 + 两处 nit** case 4 补 case 1 那句 `captured` 前置；`typeLabel` 副本从 `hasOwnProperty.call` 改成
+   `Object.hasOwn`，让「与 src 同款」这句注释成真；`apiGet` 副本标注「第三份就搬进 `e2e/helpers/`」。
+6. **控制器给出的三条「不加」**：不加 per-case helper（6 次重复但超时值 20s/15s 编码的是不同期望，两行而已）；
+   不加 `mode: 'serial'`（一条红会跳过后面整片，本文件每条守一个独立契约）；不加「晚到清空」的额外断据 ——
+   见下一条 F3。
+
+**五轮变异反证**（harness 在 `tasks/b2_task8c_falsify.py` / `_falsify2.py` / `_falsify3.py` 与
+`tasks/b2_task8d_falsify.py`，全部 finally 写回 + fsync + sha 复核；动的源文件是三个——
+`utils/diskUsage.ts`（F1/F2）、`FileListTab.vue`（F3/F4）、spec 自身（F5），每轮跑完现取
+`git hash-object` 与跑前记录值相等，五轮全部还原成功）：
+
+| 变异 | 实测结果 |
+|---|---|
+| F1 `usageChipText` 改读 `unique_bytes` | 真红 1，红在 case 1 精确串：`Expected "磁盘占用 710.1 MB"` / `Received "磁盘占用 690.1 MB"`（差值恰为注入的 20 MiB）⇒ I2 的注入把这条路救活了 |
+| F2 chip 文案追加 `（87 个文件）` | 真红 1，红在 `not.toContainText` 那一句（不是精确串）⇒ I4 的换序确实让它当上 killer |
+| F3 `loadUsage` catch 里插 `files.value = []` | **七条全绿**。归因不是判据死，而是**变异没造出用户可见状态**：mock 的 500 比真实列表请求先回来，清空抢在 `FileListTab.vue:174` 赋值之前，随后被覆盖回去 ⇒ 这是个 correct no-op 变异，也正是「不加晚到清空断据」的理由 |
+| F4 模板 `:files="files"` → `:files="usage ? files : []"`（唯一能让表格在占用坏时真空的形状） | 真红 1，红在 case 2 新加的 `.el-table__row` 那一句；case 6 仍绿 ⇒ 反过来钉住 Task 7「失败不置空」的实现 |
+| F5 透传轮 `delete json.by_type` | 真红 1，红在 `toBeInstanceOf(Object)` 守卫（`Received value: undefined`）⇒ Q2 的守卫排在循环之前，没退化成裸 TypeError 也没绿过去 |
+
+**一条判级事实值得下批复用**：变异轮的「红」在池里要走复跑判级，复跑没出 JSON 时被保守记成
+`悬而未决`（F1/F2 两轮就是 `真红 0 · 悬而未决 1`）⇒ 变异轮的**证据取 slot0.run.log 的失败详情**，
+池汇总行只用来确认红了几条；F4/F5 复跑仍红才拿到 `真红 1`。
+
+**这一轮的门禁实测**：`npm run lint:e2e` exit 0 / `error TS` 0 处；affected 档
+`RESULT: PASS · 计划 4 档全部执行`（两段池分别 `用例 112 … unexpected 0 · skipped 6` 与
+`用例 12 … unexpected 0`）；收尾两文件独占复跑 `用例 16 … unexpected 0 · flaky 0 · skipped 1`；
+`wc -l` 现取 `disk-usage-chip.spec.ts` 382 / `file-list-sort-filter.spec.ts` 306，都在线内。
+提交：`4cbf5b3`、`52ea324`、`e7c4e79`、`bc976f7`。
+
+---
+
 ### Task 9: 数据修复中心的差值行
 
 **Files:**
