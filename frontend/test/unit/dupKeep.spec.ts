@@ -109,11 +109,58 @@ describe('applyStrategyToUntouched', () => {
 
 describe('resolveKeepIds', () => {
   it('每组一枚、按 groups 顺序、含未改选的默认值', () => {
+    // 归因：这条抓的是**顺序**（`[10, 20]` 而非 `[20, 10]`）与**逐组全覆盖**
+    // （未 touched 的 a.csv 里出现默认值 10）。它抓不到「整体漏掉未改选的组」——
+    // 那个回退由下面那条 assertKeepIdsCoverEveryDisplayedGroup 专门钉住
+    // （2026-11-15 复审实测：只改这一条时「只发 touched」变异 15 例全绿）。
     const a = group('a.csv', files([10, 't1'], [11, 't2']))
     const b = group('b.csv', files([21, 't1'], [20, 't2']))
     expect(resolveKeepIds([a, b], new Map([['b.csv|500', 20]]))).toEqual([10, 20])
     expect(resolveKeepIds([a, b], new Map())).toEqual([10, 21])
     expect(resolveKeepIds([], new Map())).toEqual([])
+  })
+  it('上行载荷必须逐组全覆盖：漏送默认项会被后端静默按最早删（判据洞补丁）', () => {
+    // 后端 `_resolve_keep_selection` 是白名单式的，**部分覆盖照样返回 200** ——
+    // 「未列出的组按默认留最早」那条兼容分支就是这条通路。所以前端一旦退化成
+    // 「只上报用户显式改选过的组」，未改选的组会被服务端按默认替用户决定，
+    // 而 T1、T3 全都看不出（它们看到的都是成功响应）。
+    // 这条断言是这条回退在**全仓唯一的拦阻**，别再把它当冗余删掉。
+    const assertKeepIdsCoverEveryDisplayedGroup = (
+      groups: DuplicateGroup[],
+      choice: Map<string, number>,
+    ) => {
+      const ids = resolveKeepIds(groups, choice)
+      // 数量同源：每组恰好一枚 ⇒ 长度 == 组数
+      expect(ids.length, '每组必须贡献一枚 id').toBe(groups.length)
+      // 值合法：每枚 id 都必须是**某一组的成员**，不能凭空造
+      const memberIds = new Set(groups.flatMap((g) => g.files.map((f) => f.id)))
+      for (const id of ids) expect(memberIds.has(id), `id ${id} 不属于任何已展示组`).toBe(true)
+      // 集合覆盖：每组至少有一枚 id 出现在载荷里
+      for (const g of groups) {
+        expect(ids.some((id) => g.files.some((f) => f.id === id)),
+          `组 ${groupKey(g)} 没有任何一枚 id 被上报`).toBe(true)
+      }
+      // 同源谓词：每组恰好一枚，取的就是 keepIdForGroup
+      for (const g of groups) {
+        const expected = keepIdForGroup(g, choice)
+        expect(ids).toContain(expected)
+      }
+    }
+
+    const groups = [
+      group('a.csv', files([10, '2026-01-01'], [11, '2026-01-02'])),
+      group('b.csv', files([20, '2026-01-01'], [21, '2026-01-02'])),
+      group('c.csv', files([30, '2026-01-01'], [31, '2026-01-02'])),
+    ]
+    // ① 空 choice：三组各自的默认项都要在载荷里
+    assertKeepIdsCoverEveryDisplayedGroup(groups, new Map())
+    // ② 部分 touched：改选过的那组用新值，其余两组仍要各出现一枚
+    assertKeepIdsCoverEveryDisplayedGroup(groups, new Map([['b.csv|500', 21]]))
+    // ③ 全 touched：逐组取改选值
+    assertKeepIdsCoverEveryDisplayedGroup(
+      groups,
+      new Map([['a.csv|500', 11], ['b.csv|500', 21], ['c.csv|500', 31]]),
+    )
   })
 })
 
