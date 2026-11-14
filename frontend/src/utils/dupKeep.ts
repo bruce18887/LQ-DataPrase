@@ -99,17 +99,33 @@ export function deleteSummaryText(groups: DuplicateGroup[]): string {
   return `按选择删除 ${count} 个（${usageBytesText(bytes)}）`
 }
 
-/** 超过切片才出这句话（MaintenanceCard 的空串即不渲染）。 */
+/**
+ * 超过切片才出这句话（MaintenanceCard 的空串即不渲染）。
+ *
+ * ⚠ **这句与下面 `remainingGroupsNote` 是两句不同的事实，不许共用措辞**（终审 F2，2026-11-15）：
+ * 这里是**删除之前**由 GET 的两个字段相减得到的算术余量（总组数 − 已展示组数），说的是
+ * 「还有多少组这一批**根本不碰**」；那里是**删除之后**服务端重跑 `_group_duplicates` 的实测，
+ * 说的是「还剩几组仍判定为重复」。两者只在「每个已展示组都恰好塌成一行」时相等 ——
+ * `_duplicate_files.py` 的 docstring 把这条记成 M5 实测（算术版全绿，因为前提恒成立），
+ * 部分失败（文件被占用没删掉 / 组里多于一枚被跳过）时就会同一屏里卡片与 toast 互相打脸。
+ * 分不开就都写成「另有 N 组未处理」，等于让一个算术值冒充实测值 —— 后端那段
+ * 「刻意不用算术」的理由（设计 §5.3 第 5 条）会被这句界面文案悄悄撤销。
+ */
 export function truncatedNoteText(totalCount: number, displayedCount: number): string {
   if (totalCount <= displayedCount) return ''
   return `共 ${totalCount} 组重复，本批处理前 ${displayedCount} 组，`
-    + `另有 ${totalCount - displayedCount} 组未处理 —— 重新检查后可继续。`
+    + `其余 ${totalCount - displayedCount} 组本批不处理，重新检查后可继续。`
 }
 
-/** 删除回执的尾巴。0 时说空话比说「另有 0 组」好读。 */
+/**
+ * 删除回执的尾巴，读的是服务端 `remaining_groups`（**删完再实测**，不是算术值），
+ * 所以只能说「仍判定为重复的有 M 组」：不许写回「未处理」——那是上面那句**删前**口径的词，
+ * 两句同词会让用户以为屏幕上那两个数是同一个量（终审 F2 判定①）。
+ * 0 时说空话比说「另有 0 组」好读。
+ */
 export function remainingGroupsNote(remaining: number | undefined): string {
   if (!remaining || remaining <= 0) return ''
-  return `，另有 ${remaining} 组未处理`
+  return `，删除后仍判定为重复的有 ${remaining} 组`
 }
 
 /**

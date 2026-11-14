@@ -300,11 +300,11 @@ test.describe.serial('数据修复中心', { tag: ['@p2', '@data'] }, () => {
   })
 
   /**
-   * 重复项选保留（批3a · 第 3 项）三条用例。
+   * 重复项选保留（批3a · 第 3 项 + 终审 F2）五条用例。
    *
-   * 分工：`utils/dupKeep.ts` 的派生文案与裁决在 T2（15 例）、`keep_ids` 上行 /
-   * `remaining_groups` 下行的接线在 `dupKeepWiring.spec.ts`（8 例，源码派生守卫）。
-   * **这三条只钉界面这一层**： radio 真渲染得出、`data-keep` 真跟着选择翻、
+   * 分工：`utils/dupKeep.ts` 的派生文案与裁决在 T2（16 例）、`keep_ids` 上行 /
+   * `remaining_groups` 下行的接线在 `dupKeepWiring.spec.ts`（9 例，源码派生守卫）。
+   * **这五条只钉界面这一层**： radio 真渲染得出、`data-keep` 真跟着选择翻、
    * 点下去之后**磁盘上少的是哪一只**。前两层全绿都不证明这三件事。
    *
    * 判据异源：终态一律按 `batch_name` 认（`dupEndState` / `dupRemainingBatches`），
@@ -320,8 +320,10 @@ test.describe.serial('数据修复中心', { tag: ['@p2', '@data'] }, () => {
    * `toContainText('2 个')` 与按钮上的 `按选择删除 1 个` 都以它为前提 ——
    * 种子一旦哪天自带重复，这两句的数字就开始漂（且 serial 下一条跟着漂）。
    *
-   * ⚠ **一律跑真后端 + 真磁盘，不用 `page.route().fulfill()`**（批2 F3 的教训：
-   * 遮掉响应之后后端语义的变异在浏览器层根本红不了）。变异反证（每轮换完手工写回原字节、
+   * ⚠ **这一族的默认档是真后端 + 真磁盘**：`page.route().fulfill()` 会整个替换响应，后端语义
+   * 的变异在浏览器层根本红不了（批2 F3 的教训）。唯一例外是下面 `[B3A-F2NOTE]` —— 它只钉
+   * 「截断提示这句话有没有被渲染进卡片」这一件**纯前端**事实，一句后端归因都不给。
+   * 变异反证（每轮换完手工写回原字节、
    * `git diff` 核对归零；M19-M21 首测 2026-11-15，M25/M23/M24 与用例 3 单跑为返工轮实测。
    * ⚠ 编号订正：返工轮原把下面那颗「applyStrategy 硬编码 earliest」记成 **M22**，与
    * `utils/dupKeep.spec.ts` 那边已用过的 M22（`resolveKeepIds` 只上报 touched）撞号，
@@ -335,17 +337,17 @@ test.describe.serial('数据修复中心', { tag: ['@p2', '@data'] }, () => {
    * - **M20** `:141` 的 `pending` 回到 `files[1:]` 硬编码 ⇒ 第 2 条红
    *   （同那句轮询，Expected `1|…-PICK-B` / Received `2|…-PICK-B`：`in_bulk` 拿不到那只 -A，
    *   一行都没删。回执那句「已删除 0 个」形状上仍匹配正则，所以红点落在终态而不是 toast）。
-   * - **M21** `DuplicateFilesCard.vue:52` 的 `:data-keep` 三元反过来 ⇒ 第 1 条红
+   * - **M21** `DuplicateFilesCard.vue:61` 的 `:data-keep` 三元反过来 ⇒ 第 1 条红
    *   （两条 `toHaveAttribute` 里的第一支：Expected `keep` / Received `delete`）。
    *   此时「保留/将删除」两支文案照旧通顺，正是这句要拦的「画错行但文案对得上」——
    *   按文案筛的定位器在这里是系统性盲区。
-   * - **M25** `DuplicateFilesCard.vue:151` 的 `applyStrategy()` 无视 `strategy.value`、
+   * - **M25** `DuplicateFilesCard.vue:159` 的 `applyStrategy()` 无视 `strategy.value`、
    *   内部硬编码 `'earliest'` ⇒ 第 3 条红（④ 段 K2/K3 落 -A，那两条「策略落到较新那份」
    *   当场红）。旧版用例 3 策略就选「最早导入」，对这颗变异**整条失明**（三档全绿，
    *   返工轮发现 2）—— 2 成员组里 earliest 恒等于默认，选它等于没选。
    * - **M23** `utils/dupKeep.ts` 的 `applyStrategyToUntouched` 不滤 `choice.has`、
    *   把策略盖到所有组 ⇒ 第 3 条红（K1 被挪去 -B，④ 段那两条 K1 的 `data-keep` 红）。
-   * - **M24** `DuplicateFilesCard.vue:76` 的 `:disabled` 去掉 `!deleteConfirmed ||` ⇒
+   * - **M24** `DuplicateFilesCard.vue:85` 的 `:disabled` 去掉 `!deleteConfirmed ||` ⇒
    *   第 1 条红（勾同意框**之前**那句 `toBeDisabled()`；旧版三条都先勾再断，从没钉过
    *   勾之前的闸门，返工轮发现 3）。
    *
@@ -353,7 +355,7 @@ test.describe.serial('数据修复中心', { tag: ['@p2', '@data'] }, () => {
    * 在**已选中**的 radio 上再点一次，DOM 不发 `change`，EP `use-radio.mjs:18-23` 的
    * setter（`:21` 转 `radioGroup.changeEvent`，只由 `radio.vue` 那条原生 onChange 链驱动）
    * 不触发 ⇒ 单击「点默认那份」不留任何痕迹（首版用例 3 就红在这里，不是推理）；
-   * 但 `pick()` 是**无条件** `choice.set(key, id)`（`DuplicateFilesCard.vue:145-147`，
+   * 但 `pick()` 是**无条件** `choice.set(key, id)`（`DuplicateFilesCard.vue:154-156`，
    * 不比较新旧值）⇒ 「点 -B、再点回 -A」这两击都会发 change，第二击把该组标成**已改选**
    * 且值落回默认。即「用户确认就要默认这份」界面可表达，用例 3 的现形状就建在这上面。
    * 与之相邻但**不同**的那条边界仍然成立：`groups.length - choice.size` 与
@@ -384,7 +386,7 @@ test.describe.serial('数据修复中心', { tag: ['@p2', '@data'] }, () => {
       await expect(rowB).toHaveAttribute('data-keep', 'delete')
 
       // 同意闸本身就是判据（发现 3 / M24）：勾之前按钮必须 disabled。
-      // 摘掉 `:disabled="!deleteConfirmed || …"`（DuplicateFilesCard.vue:76）后
+      // 摘掉 `:disabled="!deleteConfirmed || …"`（DuplicateFilesCard.vue:85）后
       // 三条旧用例照样全绿 —— 每条都先勾再断，闸门从没被钉过。
       await expect(card.locator('button').filter({ hasText: '按选择删除' })).toBeDisabled()
       await card.locator('.el-checkbox').click()
@@ -459,7 +461,7 @@ test.describe.serial('数据修复中心', { tag: ['@p2', '@data'] }, () => {
       //    a) 已选中的 radio 上**单击**不发 DOM change —— EP use-radio.mjs:18-23 的 setter
       //       （:21 转 radioGroup.changeEvent）只由 radio.vue 那条原生 onChange 链驱动，
       //       ⇒ 「直接点默认那份」标记不出「已改选」。
-      //    b) 但 pick() 是无条件 choice.set（DuplicateFilesCard.vue:145-147，不比新旧值）
+      //    b) 但 pick() 是无条件 choice.set（DuplicateFilesCard.vue:154-156，不比新旧值）
       //       ⇒ 第二击（-B → -A）照常发 change，把该组标成已改选、值落回默认 -A。
       //    所以 K1 停在「用户确认要默认这份」的形状上 —— 这是本条能同时杀两颗变异的前提：
       //    改选值(=默认 -A) ≠ 策略(最新 -B)，两个方向的分歧各有一句断言承重。
@@ -473,7 +475,7 @@ test.describe.serial('数据修复中心', { tag: ['@p2', '@data'] }, () => {
 
       // ④ 策略选「最新导入」（≠ 默认 earliest）再一键应用。一步同时杀两颗变异：
       //    K2/K3 必须落到 -B —— 钉「applyStrategy 无视 strategy.value 硬编码 earliest」
-      //    （M25，DuplicateFilesCard.vue:151；旧版策略选 earliest，2 成员组里恒等于默认，
+      //    （M25，DuplicateFilesCard.vue:159；旧版策略选 earliest，2 成员组里恒等于默认，
       //    对该变异整条失明）；K1 必须留在 -A —— 钉「策略覆盖已改选的组」（M23 的界面面）。
       await card.locator('.dup-strategy .el-radio').filter({ hasText: '最新导入' }).click()
       await expect(k1.a, '应用前中间态：K1 两击后已改选，值 = 默认 -A').toHaveAttribute('data-keep', 'keep')
@@ -501,6 +503,76 @@ test.describe.serial('数据修复中心', { tag: ['@p2', '@data'] }, () => {
         await cleanupDup(names[i], ...dupDirs(tags[i]))
       }
     }
+  })
+
+  /**
+   * 终审 F2 的谎话控件（旧标签「未改选的组默认保留」+ 两颗 radio ⇒ 读起来像「默认跟着 radio 走」，
+   * 而 `keepIdForGroup` 压根不读 `strategy`）。本条同时钉：标签文本、alert 那句真相、以及
+   * 「拨了没点应用 ⇒ 未改选组仍留最早」的**磁盘终态**（F2-a 红在标签那句，F2-b 红在 data-keep 与终态）。
+   */
+  test('拨了策略没点应用 ⇒ 未改选的组仍留最早（标签不许承诺默认）[B3A-F2A]', async ({ page }) => {
+    const dupName = `dup_lbl_${ts}.csv`
+    try {
+      const pair = await seedDuplicatePair(page, dupName, 'LBL')
+      await openRepairCenter(page)
+      const card = page.locator('[data-testid="duplicate-files-card"]')
+      await expect(card).toBeVisible({ timeout: 15_000 })
+      const label = card.locator('.dup-strategy-label')
+      await expect(label).toHaveText('一键策略（只作用未改选的组）')
+      await expect(label).not.toContainText('默认保留')
+      // 两句必须**不是同一句**：真相归 alert（默认恒为最早），标签只划这颗策略的作用范围。
+      await expect(card.locator('.el-alert').filter({ hasText: '未改选的组默认保留最早' })).toHaveCount(1)
+      const group = card.locator('[data-testid="dup-group"]').filter({ hasText: dupName })
+      const rowA = group.locator('[data-testid="dup-keep-row"]').filter({ hasText: pair.batchA })
+      const rowB = group.locator('[data-testid="dup-keep-row"]').filter({ hasText: pair.batchB })
+      await card.locator('.dup-strategy .el-radio').filter({ hasText: '最新导入' }).click()
+      await expect(rowA, '拨了策略没点应用：未改选组的保留项不许动').toHaveAttribute('data-keep', 'keep')
+      await expect(rowB).toHaveAttribute('data-keep', 'delete')
+      // 这颗 radio 不该把任何组标成「已改选」——N 仍是 1，否则标签那句「只作用未改选的组」又是假的
+      await expect(card.locator('[data-testid="dup-apply-strategy"]')).toHaveText(/应用到未改选的 1 组/)
+      await card.locator('.el-checkbox').click()
+      await card.locator('button').filter({ hasText: '按选择删除 1 个' }).click()
+      await expect(page.getByText(/已删除 \d+ 个重复文件/).first()).toBeVisible({ timeout: 20_000 })
+      await expect.poll(() => dupEndState(page, dupName), { timeout: 15_000 }).toBe(`1|${pair.batchA}`)
+      expect(fs.existsSync(path.join(pair.dirA, dupName)), '留下的必须是磁盘上最早那份 -A').toBe(true)
+      expect(fs.existsSync(path.join(pair.dirB, dupName)), '最新那份 -B 必须被删走').toBe(false)
+    } finally {
+      await cleanupDup(dupName, ...dupDirs('LBL'))
+    }
+  })
+
+  test('截断提示：总数 > 展示数才渲染进卡片，反向不渲染 [B3A-F2NOTE]', async ({ page }) => {
+    // ⚠ 这条**只钉前端渲染**：`fulfill` 整个替换了 GET 响应，所以它不证明任何后端语义
+    //   （批2 lesson 2026-11-14「反证要在判据够得着的那一层跑」）。50 组切片的真实语义在 T1
+    //   （`test/backend/test_duplicate_keep_selection.py`），这里只是把 `:truncated-note` 那根
+    //   线头钉住 —— 摘掉它 T1/T2/T3 此前都无牙（grep truncated-note 在 e2e/test = 0 命中）。
+    // 字段名取自 GET 的真形状：`duplicate_group_count` = 总组数、`duplicate_groups` = 展示切片。
+    const payload = (n: number, total: number) => ({
+      orphaned_db_count: 0, orphaned_db: [], orphaned_disk_count: 0, orphaned_disk: [],
+      missing_product_code_count: 0, missing_product_code: [],
+      duplicate_group_count: total,
+      duplicate_groups: Array.from({ length: n }, (_, i) => ({
+        filename: `dup_mock_${i}_${ts}.csv`, file_size: 500,
+        files: [1, 2].map((k) => ({
+          id: 900000 + i * 10 + k, filename: `dup_mock_${i}_${ts}.csv`, file_size: 500,
+          file_type: 'batch', batch_name: `MOCK-${k}`, sub_batch: '',
+          created_at: `2026-0${k}-01T00:00:00+00:00`,
+        })),
+      })),
+    })
+    let body = payload(3, 5) // 假 id ⇒ 本条绝不 POST（POST 会走真后端，400 是后端的判据）
+    await page.route('**/api/v1/consistency-check/**', (r) => r.fulfill({ json: body }))
+    await openRepairCenter(page)
+    const card = page.locator('[data-testid="duplicate-files-card"]')
+    await expect(card).toBeVisible({ timeout: 15_000 })
+    await expect(card).toContainText('共 5 组重复，本批处理前 3 组，其余 2 组本批不处理')
+    body = payload(2, 2) // 总数 == 展示数 ⇒ 这句话必须消失
+    // ⚠ 底部那颗「重新检查」只是 `result = null`（ConsistencyCheckDialog.vue:106），**不发请求**；
+    //   新载荷由第二次「开始检查」那一发吃到（route 的回调读的是上面那个 `let body`）。
+    await page.getByRole('button', { name: '重新检查' }).click()
+    await page.getByRole('button', { name: '开始检查' }).click()
+    await expect(card).toContainText(`dup_mock_1_${ts}`) // 卡片仍在（下条的「没有」才不是「整卡没了」）
+    await expect(card).not.toContainText('本批不处理')
   })
 
   test('修复后本批次问题全部消失', async ({ page }) => {
