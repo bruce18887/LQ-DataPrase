@@ -110,6 +110,7 @@ UI 实时展示每个分类的命中数 + 前 3 个测试项名；显示冲突�
   新错误码 `invalid_groups`、`invalid_page_size`、`groups_not_supported` 需同步
   `frontend/src/utils/error.ts` 的 `ERROR_CODE_MAP`；
 - `max_items_per_sheet` 仅允许 30/50/100，其余 400（错误码 `invalid_page_size`），缺省 50；
+  **未携带 `groups` 时该字段被忽略**（旧行为不变，归一化函数提前返回）；
 - `format=pptx` 时携带 `groups` 返回 400（`groups_not_supported`）：PPT 无 sheet 概念，
   不静默忽略。
 
