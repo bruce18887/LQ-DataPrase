@@ -148,7 +148,8 @@ def _collect_param_stats(df, metadata, params, site_col, th):
                 # 图标题要显示「参数名 (单位)」，单位来自元数据
                 'unit': stats.get('unit', ''),
                 # Site 按 data_series 索引对齐（屏幕口径）：参数值非有限的行不参与
-                # 站点统计。并行渲染与串行兜底共用这一份，避免各自重算漂移。
+                # 站点统计。并行渲染用这一份；串行兜底由 _create_histogram_chart 从 df
+                # 重算（同一个 _align_site_series，不漂移）。
                 'site_values': site_arrays[0],
                 'site_series': site_arrays[1],
             },
