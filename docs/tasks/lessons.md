@@ -3194,3 +3194,23 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
 5. **变异编号要先查已用号。** 我给返工轮那颗 earliest 变异发号 M22，而计划 `:1234` 的 M22 早在 Task 5
    就用了（`resolveKeepIds` 退化成只上报 touched）。已改称 M25；`ec458bc` 的 commit 正文是历史不改写，
    以代码注释与计划订正段为准。**规则**：台账类编号先 `grep` 已用集合再发号；撞号时新增号，别改历史。
+
+## 2026-11-15 批3b 并入：共享工作树里「删过程分支」和「不切 HEAD」天生互斥，先判归属再谈手续
+
+1. **现象**：批3b 收口后主工作树挂着另一会话的 9 个未提交/未跟踪文件（`apps/export/*`、
+   `apps/weight/xlsx.py`、`apps/common/sheet_names.py` 等），而它自己的分支
+   `feat/export-grouping@5fad467` 在 `.worktrees/` 里是**干净**的。
+   - **根因/规则**：文件名重合**不能**当作「主树那份是残留副本」的证据。逐文件比才对得上：
+     `cmp -s <(git show feat/export-grouping:$f) <(cat $f)` ⇒ `sheet_names.py` SAME，但
+     `charts.py`/`xlsx.py`/`test_export_histogram_grid.py` **DIFFERS** ⇒ 主树是更晚的一版，删了就真丢。
+2. **规则：checkout 会不会踩到别人，看交集不看心情。** 脏路径 ∩ `git diff --name-only master HEAD`
+   **为空**才是「两棵树里这些文件内容相同 ⇒ checkout 允许且原样带过去」的判据；非空就必须先让对方提交或搬迁。
+   执行前后各跑一次 `git status --porcelain -uall` 落文件比对，是这一步唯一的机械闸（`git checkout` 的
+   `M <file>` 提示只说明它把脏文件带走了，不证明没被改写）。
+3. **现象**：`git branch -d feature/batch3b-toolbars` 在主树 HEAD 仍指向它时不可能成功；而切 HEAD 正是
+   「账号收敛」批 line 184 规避共享树事故的那条手段。**规则**：FF 手续要拆成两个决定 ——
+   ①移动 ref（`git branch -f master <sha>`，纯快进时等价于 `--ff-only` 且零工作树变动）；
+   ②切 HEAD + 删分支（只有在两棵树同一提交、且用户点名接受「对方下一笔会落 master」时才做）。
+   混着做就会为了删分支顺手 `checkout`，把别人的提交送进 master。
+4. **规则：纯 FF 不配 `backup/master-*`。** 那套备份是给**排除提交/改写历史**用的（`backup/other-session-293e022`）；
+   快进没丢任何提交，回退就是 `git branch -f master <旧 sha>`，加备份只是给下一个人多出六条读不懂的分支。

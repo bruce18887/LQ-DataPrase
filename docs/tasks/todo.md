@@ -936,7 +936,7 @@ T3 本批 **5** 条（`repair-center.spec.ts` 里 366/407/437/513/544 那五条�
 
 # 任务：批3b 两页统一 toolbar（2026-11-15，计划 Task 7 收口）
 
-## 状态：**已收口（含人工视觉验收），未 push**
+## 状态：**已收口（含人工视觉验收）、已 FF 并入本地 master（tip `bce651f`），未 push**
 
 过程分支 `feature/batch3b-toolbars`，base = `5b3af88`（批3a 收口后的 master）。
 **收口时 tip = `8f1db98`**（计划与台账这最后一笔在它之后，别拿 `git rev-parse master` 当本批 tip）。
@@ -1014,3 +1014,29 @@ T3 本批 **5** 条（`repair-center.spec.ts` 里 366/407/437/513/544 那五条�
   `frontend/src/pages/settings/SettingsPage.vue:313` 仍有该规则，且该页模板零 `<el-select>`。
   批3b §6.5 只点了两处（`UserManagement.vue` 与全局主题层），这是写域外的第三处；
   属 settings 页，**归批4 或独立小批**，别在批3b 顺手改。
+
+## 并入本地 master（2026-11-15 收口后，用户点头，未 push）
+
+- master `5b3af88`（= 本批 base）→ **`bce651f`**，纯快进、无合并提交、**没有 push**（`origin` 是公开仓库，
+  现 ahead 160）。回退一条命令：`git branch -f master 5b3af88`。
+- **手续偏离①（FF 用 ref 不用 merge）**：共享工作树里另一会话有未提交的
+  `apps/export/charts.py`、`apps/export/export_batch_charts_xlsx.py`、`apps/weight/xlsx.py`、
+  `test/backend/test_export_histogram_grid.py` + 未跟踪 `apps/common/sheet_names.py`、
+  `apps/export/tests_histogram_style.py`、`apps/export/tests_sheet_links.py`（内容与
+  `feat/export-grouping@5fad467` **不同**，不是残留副本）。本批 20 个改动文件与之**零交集**
+  （`git diff --name-only master HEAD` ∩ 脏文件为空），并入全程没碰、没 stage。
+  FF 因此走 `git branch -f master <sha>`，同「账号收敛」批 line 184 的先例，不跑 `checkout && merge`。
+- **手续偏离②（切 HEAD 是用户点名的例外）**：删过程分支要求先离开它，故 `git checkout master` 一次。
+  两棵树指向同一提交 ⇒ 工作树零文件变动，实测 `git status --porcelain -uall` 前后逐字相同。
+  **已知代价**：另一会话若在主工作树提交，下一笔会直接落 master；`feature/batch3b-toolbars` 已 `-d` 删除
+  （fully merged，无需 `-D`）。
+- **没有为并入重跑全量池**：本批「收口七档」即门禁证据，测量尖 `8f1db98` 之后只有 `ea10565`/`bce651f`
+  两笔 todo.md 提交。当场重跑既与另一会话抢 slot 端口，又会把它的 `apps/export/*` 未提交改动算进本轮
+  （批3a 教训第 4 条：全量门禁跑的是工作区，不是分支）。
+- **批4 开场清单**（本批一律不做，逐条已有归属）：
+  ① 决策 D —— 用户管理左槽搜索/角色筛选（结构已由批3b 壳定死，只填内容）；
+  ② `frontend/src/pages/settings/SettingsPage.vue:313` 第三处 `.el-select .el-input__wrapper` 死规则；
+  ③ 1280 视口日期面板盖住右槽「查询」—— 产品/UX 拍板壳级修法；
+  ④ `frontend/e2e/data/repair-center.spec.ts`（591/600）拆出 `e2e/data/duplicate-keep.spec.ts` 的**硬前置**；
+  ⑤ 本次人工验收两项**可推翻**：`Stamp → Medal`、审计页 toolbar→table 28px 收成 12px
+     —— 各一行级改动，各需补一轮聚焦测试（双主题判据 + 对应 e2e 定位），不夹带进已归档的批3b 证据。
