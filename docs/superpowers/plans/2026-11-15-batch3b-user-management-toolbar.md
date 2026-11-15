@@ -933,17 +933,81 @@ git commit -m "test(e2e): 用户管理新增流程改走共用对话框并补 KP
 
 ---
 
-## Task 5: 两处死规则收敛 + night `.el-select__wrapper` T3
+## Task 5: 两处死规则收敛 + 主题 T3（含 B3 移交的对话框样式）
 
 **Files:**
 - Modify: `frontend/src/styles/element-plus-theme.css:597-600`
 - Modify: `frontend/src/pages/admin/AuditLogPage.vue:240-245`（过期注释）
+- Modify: `frontend/src/pages/admin/components/UserFormDialog.vue`（接手 input/footer 样式，B3 评审移交）
+- Modify: `frontend/src/pages/admin/UserManagement.vue`（删死 input 规则、恢复两条承重注释）
 - Create: `frontend/e2e/theme/admin-select-theme.spec.ts`
 - Modify: `frontend/test/unit/adminUserFormWiring.spec.ts`（追加主题源码判据）
 
 **Interfaces:**
 - Consumes: 第一份计划的审计页 `[data-testid=audit-event] .el-select`（night/light 测试靶子）；Task 3 已删除 `UserManagement.vue:555` 死规则。
-- Produces: 全局 night 规则 `.el-select__wrapper`（底色 + 边框）；焦点/悬停态仍走 `#f9a825`。
+- Produces: 全局 night 规则 `.el-select__wrapper`（底色 + 边框）；焦点/悬停态仍走 `#f9a825`；`UserFormDialog.vue` 自己承载 light 下 input/footer 的页面基线样式（B3 评审发现页面 scoped 规则够不到 teleport 子组件）。
+
+- [ ] **Step 0: 接手 B3 评审移交的两项（input/footer 样式 + 两条注释）**
+
+B3 把对话框拆成 `UserFormDialog.vue` 后，页面 scoped 的 `:deep(.el-input__wrapper)` 规则够不到 teleport 后的子组件 DOM（Vue 3.5 的子组件根 scope 继承在 Teleport 处停止），light 下对话框输入框会回退 EP 默认。先修这个，再动全局 select 规则。
+
+在 `UserFormDialog.vue` 末尾新增 `<style scoped>`（值逐字沿用原页面规则）：
+
+```vue
+<style scoped>
+/* 页面在批3b 把对话框拆成子组件后，原页面 scoped 的 input/footer 规则够不到 teleport 后的 DOM；
+ * 这里按原值接手，light 下的底色/描边与页面其余控件一致，night 由全局主题层 !important 覆盖。 */
+:deep(.el-input__wrapper) {
+  background-color: var(--bg);
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--border-2) inset;
+}
+
+:deep(.el-input__wrapper:hover) {
+  box-shadow: 0 0 0 1px var(--brand) inset;
+}
+
+:deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 1px var(--brand) inset;
+}
+
+:deep(.el-button) {
+  border-radius: 8px;
+}
+</style>
+```
+
+在 `UserManagement.vue` 删除三条已够不到的 input 规则（`__wrapper`、`:hover`、`.is-focus`），保留 `:deep(.el-button)`（表格操作按钮仍在页面模板里）。同时恢复 B3 丢的两条注释：
+
+```ts
+// 角色标签的唯一语义来源是 utils/roleLabel（§7.3 兜底理由写在那份文件的注释里）；
+// 这里只做委托，别在本文件再写一份 roleLabel。roleIcon 只此一份，留在本地。
+```
+
+```ts
+function roleIcon(role: string) {
+  if (role === 'administrator') return Stamp
+  // 兜底也吃掉迁移 0012 未跑到的机器上残留的第三种角色（见 2026-11-05-account-role-audit-design.md §7.3）
+  return UserFilled
+}
+```
+
+在 `adminUserFormWiring.spec.ts` 末尾追加这条 T2：
+
+```ts
+describe('B3 移交：input/footer 基线样式已由对话框接手', () => {
+  it('UserFormDialog 有 input/button 深规则，UserManagement 不再有 input 深规则', () => {
+    const dialog = read(DIALOG)
+    expect(dialog).toMatch(/:deep\(\.el-input__wrapper\)/)
+    expect(dialog).toMatch(/:deep\(\.el-button\)/)
+    const page = read(PAGE)
+    expect(page).not.toMatch(/:deep\(\.el-input__wrapper\)/)
+    expect(page).toMatch(/:deep\(\.el-button\)/)
+  })
+})
+```
+
+- [ ] **Step 1: 追加失败的主题源码 T2**
 
 - [ ] **Step 1: 追加失败的主题源码 T2**
 
@@ -1020,6 +1084,37 @@ test.describe('@theme 管理页 select 触发区主题覆写', { tag: ['@p2', '@
     expect(focused.shadow, '焦点环被静态 !important 阴影抹掉了').toContain('rgb(249, 168, 37)')
     await page.keyboard.press('Escape')
   })
+
+  test('@p2 新增账号对话框的输入框：light 吃页面基线，night 由全局覆写', async ({ page }) => {
+    await loginAs(page, 'admin')
+    // 审计页 light 下的输入框底色同为 var(--bg)，作为页面基线
+    await page.goto('/admin/audit')
+    await expect(page.locator('.main-layout')).toBeVisible({ timeout: 15_000 })
+    const baseline = await page
+      .locator('[data-testid="audit-username"] .el-input__wrapper')
+      .evaluate((el) => getComputedStyle(el).backgroundColor)
+
+    await page.goto('/admin/users')
+    await expect(page.locator('.main-layout')).toBeVisible({ timeout: 15_000 })
+    await page.getByRole('button', { name: '新增账号', exact: true }).click()
+    const input = page.locator(
+      '.user-form-dialog [data-testid="create-username"] .el-input__wrapper',
+    )
+    await expect(input).toBeVisible()
+    const read = () => input.evaluate((el) => getComputedStyle(el).backgroundColor)
+
+    const light = await read()
+    expect(light, '对话框输入框没吃到页面基线 ⇒ 样式没搬进子组件').toBe(baseline)
+
+    await page.addInitScript(() => localStorage.setItem('theme', 'night'))
+    await page.reload()
+    await expect(page.locator('.main-layout')).toBeVisible({ timeout: 15_000 })
+    await page.getByRole('button', { name: '新增账号', exact: true }).click()
+    await expect(input).toBeVisible()
+    const night = await read()
+    expect(night, 'night 下对话框输入框没被全局主题层接管').toBe('rgba(255, 255, 255, 0.05)')
+    expect(night).not.toBe(light)
+  })
 })
 ```
 
@@ -1065,7 +1160,7 @@ Run:
 cd frontend && npx vitest run test/unit/adminUserFormWiring.spec.ts 2>&1
 node scripts/e2e_pool.mjs --slots=1 -- e2e/theme/admin-select-theme.spec.ts 2>&1
 ```
-Expected: T2 全绿；主题 T3 `unexpected 0`，焦点态断言绿。
+Expected: T2 全绿；主题 T3 两条都绿（`unexpected 0`）：select wrapper 的 night/light 与焦点态，以及对话框输入框的 light 基线相等 + night 全局覆写。
 
 - [ ] **Step 6: 提交**
 
