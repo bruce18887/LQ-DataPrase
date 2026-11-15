@@ -437,7 +437,7 @@ Expected: `diff` 无输出且打印 `UNION_IDENTICAL`。
 再对账 serial/tag —— 这是拆文件最怕丢的两行（丢了不影响任何标题，但清理顺序契约与池的 project 归属就变了）：
 
 ```bash
-grep -n "test.describe.serial\|tag: \['@p2', '@data'\]" \n  frontend/e2e/data/repair-center.spec.ts frontend/e2e/data/duplicate-keep.spec.ts
+grep -n "test.describe.serial\|tag: \['@p2', '@data'\]" frontend/e2e/data/repair-center.spec.ts frontend/e2e/data/duplicate-keep.spec.ts
 ```
 
 Expected: **两处**各有一条 serial 声明 + 一条 `{ tag: ['@p2', '@data'] }`（留下的一半与拆出的一半各自完整），
