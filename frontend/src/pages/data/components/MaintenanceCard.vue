@@ -45,7 +45,7 @@ interface RepairAlert {
 }
 
 defineProps<{
-  /** 稳定测试位点：e2e 按 `[data-testid]` 选卡（repair-center.spec.ts），迁移时不许改值 */
+  /** 稳定测试位点：e2e 按 `[data-testid]` 选卡（`repair-center.spec.ts` 与 `duplicate-keep.spec.ts`），迁移时不许改值 */
   testId: string
   /** 卡片自身的显示条件（原各卡写在 el-card 上的 v-if） */
   visible: boolean
