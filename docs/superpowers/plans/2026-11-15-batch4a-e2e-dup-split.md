@@ -515,8 +515,9 @@ git commit -m "test(e2e): 重复项一族拆出 duplicate-keep.spec.ts，助手�
 - [ ] **Step 2: 证明没有残留假话**
 
 Run: `grep -rn "repair-center" frontend/test/unit frontend/e2e/data/duplicate-keep.spec.ts`
-Expected: 只剩 `duplicate-keep.spec.ts` 头部那句「从 `repair-center.spec.ts` 拆出来」的来历说明；
-两份 `dupKeep*.spec.ts` 不再出现 `repair-center`。
+Expected: `frontend/test/unit/` 下**零命中**；`duplicate-keep.spec.ts` 里允许**两处**真话引用 —— 头部来历那句
+（`:11`）与 `ADMIN_BATCH_DIR` 上方「与 `repair-center.spec.ts` 里的那条逐字相同」那句（`:19`，Task 3 刻意
+两边各留一行、不抽 helper 的说明，实测两行确实逐字相同）。**判据是「引用是否为真」，不是「引用条数为 1」**。
 
 - [ ] **Step 3: vitest 全绿（源码绊线不许被牵红）**
 
