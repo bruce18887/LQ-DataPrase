@@ -25,8 +25,9 @@ function reset() { ev.value = ''; acct.value = ''; from.value = '2026-11-01'; to
       <input v-model="from" type="date" class="m-input">
       <span class="m-label">至</span>
       <input v-model="to" type="date" class="m-input">
-      <button class="m-btn pri" @click="toast('审计查询完成（演示）· 筛选口径即时生效')">查询</button>
       <button class="m-btn" @click="reset">重置</button>
+      <span class="grow"></span>
+      <button class="m-btn pri" @click="toast('审计查询完成（演示）· 筛选口径即时生效')">查询</button>
     </div>
     <div class="m-table-wrap">
       <table class="m-table">
