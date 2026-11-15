@@ -936,7 +936,7 @@ T3 本批 **5** 条（`repair-center.spec.ts` 里 366/407/437/513/544 那五条�
 
 # 任务：批3b 两页统一 toolbar（2026-11-15，计划 Task 7 收口）
 
-## 状态：**已收口，未 push**
+## 状态：**已收口（含人工视觉验收），未 push**
 
 过程分支 `feature/batch3b-toolbars`，base = `5b3af88`（批3a 收口后的 master）。
 **收口时 tip = `8f1db98`**（计划与台账这最后一笔在它之后，别拿 `git rev-parse master` 当本批 tip）。
@@ -980,6 +980,20 @@ T3 本批 **5** 条（`repair-center.spec.ts` 里 366/407/437/513/544 那五条�
 - **A4 中间档的一次 backend 红**：默认 affected 只在未提交改动上选例（选到了另一会话的 exports），
   backend 红在 `test_job_cancel` 的负载时序用例；隔离复跑 `Ran 1 test ... OK` ⇒ 负载 flake，不属批3b。
   B7 收口后端全量 `OK`，该 flake 未复发。
+
+## 人工视觉验收（2026-11-15，spec §6.6 / §7.9 的两道人工闸）
+
+- **用户管理 `/admin/users` light + night**：KPI 四颗 chip 的 `UserFilled / CircleCheck / Lock / Stamp`
+  与角色列 SVG 图标均清晰；`Stamp` 呈「底座 + 手柄」印章形，与总用户的人形可区分，
+  **维持 `Stamp`，不换 `Medal`**。截图 `tasks/b3b_visual_users_light.png` / `_night.png` /
+  `b3b_visual_chips_light.png` / `_night.png` / `b3b_visual_role_admin_light.png` / `_role_user_light.png`。
+- **操作审计 light + night**：工具栏左右槽、查询/重置、表格与主题正常；
+  toolbar→table 垂直间距 28px（shell 12 + 页面 `gap: 16`），比用户管理页的 12px 略松，
+  **视觉可接受、不阻塞合并**；批4 往左槽加控件时可一并收成同一档。截图 `tasks/b3b_visual_audit_light2.png`。
+- **数据管理 night**：全局 `.el-select__wrapper` 规则未造成可见回归；截图 `tasks/b3b_visual_data_night.png`。
+- **介绍书 09 章桌面 + 420px**：`AdminPanel` 复刻渲染正常、console **0 error**；
+  420px 下复刻表格横向裁切是其既有行为，非本批引入。截图 `tasks/b3b_visual_intro_admin_desktop.png` / `_420.png`。
+- 视觉 spec 只作取证、**跑完已删除**（未入库）；六张 PNG 在 gitignored 的 `tasks/` 下。
 
 ## 明确不做（别在收口时顺手扩）
 
