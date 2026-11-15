@@ -14,6 +14,7 @@
 
         <template v-else>
           <ExportParamSelector v-model="localParams" :params="params" />
+          <ExportGroupingCard v-model="grouping" :params="localParams" />
           <ExportChartConfig
             v-model:chart-config="chartConfig"
             v-model:bar-width-percent="barWidthPercent"
@@ -43,8 +44,14 @@ import { jobFailureView } from '../../composables/jobPolling'
 import { useSingleTabStore } from '../../stores/analysisTabs'
 import ExportEmptyState from './components/export/ExportEmptyState.vue'
 import ExportParamSelector from './components/export/ExportParamSelector.vue'
+import ExportGroupingCard from './components/export/ExportGroupingCard.vue'
 import ExportChartConfig from './components/export/ExportChartConfig.vue'
 import ExportActions from './components/export/ExportActions.vue'
+import { safeGetItem, safeSetItem } from '../../utils/safeStorage'
+import {
+  hasGroupingRules, parseGroupingConfig, resolveGroups, validateGroupingConfig,
+  type GroupingConfig,
+} from './composables/exportGrouping'
 
 const props = defineProps<{
   files: any[]
@@ -61,6 +68,21 @@ const localSigma = ref(3)
 const chartConfig = ref<string[]>(singleTab.chartConfig)
 const barWidthPercent = ref(singleTab.barWidthPercent)
 const ignoreNoLimit = ref(singleTab.ignoreNoLimit)
+
+// 归类规则只存 localStorage（spec §9：不做服务端保存/跨设备同步），且按文件分键 ——
+// 每个文件的参数集合不同，规则混用只会让另一个文件满屏「其他」。
+const GROUPING_KEY = (fileId: number | null) => `lqdp.export.grouping.${fileId ?? 'none'}`
+
+const grouping = ref<GroupingConfig>(parseGroupingConfig(
+  props.fileId ? safeGetItem(GROUPING_KEY(props.fileId)) : null))
+
+watch(() => props.fileId, (fileId) => {
+  grouping.value = parseGroupingConfig(fileId ? safeGetItem(GROUPING_KEY(fileId)) : null)
+}, { immediate: false })
+
+watch(grouping, (value) => {
+  if (props.fileId) safeSetItem(GROUPING_KEY(props.fileId), JSON.stringify(value))
+}, { deep: true })
 
 const currentFileName = computed(() => {
   const f = props.files.find((item) => item.id === props.fileId)
@@ -94,13 +116,26 @@ function onExportSigma() {
 }
 
 function onExportBatch(format: string) {
-  const options = {
+  // 提交前自校验（R13）：分类名空/重名/占用「其他」都在这里拦下 —— 后端只做结构校验，
+  // 这类「用户少打了一个字」的错误不该走一趟作业再拿 400。
+  const groupingError = validateGroupingConfig(grouping.value)
+  if (groupingError) {
+    ElMessage.error(groupingError)
+    return
+  }
+  // 显式标成可扩展对象：分组是可选字段，只在「有有效规则」时出现，
+  // 无分组时请求体与旧版逐字相同（后端据此走「每项一 sheet」的老路径）。
+  const options: Record<string, any> = {
     show_limit: chartConfig.value.includes('limit'),
     show_3sigma: chartConfig.value.includes('s3'),
     show_4sigma: chartConfig.value.includes('s4'),
     show_6sigma: chartConfig.value.includes('s6'),
     show_normal: chartConfig.value.includes('normal'),
     show_kde: chartConfig.value.includes('kde'),
+  }
+  if (hasGroupingRules(grouping.value)) {
+    options.groups = resolveGroups(localParams.value, grouping.value.groups, grouping.value.strategy)
+    options.max_items_per_sheet = grouping.value.maxItemsPerSheet
   }
   // 走作业后 Promise 不会 reject（失败以 reason 返回），旧的 `.catch()` + 「导出超时」
   // 分支就成了死代码。文案统一由 `jobFailureView` 决定：gave-up 是 info，不是红条。

@@ -8,8 +8,11 @@ import {
   estimateSheetCount,
   hasGroupingRules,
   parseGroupingConfig,
+  previewGroups,
   resolveGroups,
+  validateGroupingConfig,
   type GroupRule,
+  type GroupingConfig,
 } from '../../src/pages/data/composables/exportGrouping'
 
 const rule = (id: string, name: string, patterns: GroupRule['patterns']): GroupRule => ({ id, name, patterns })
@@ -106,5 +109,78 @@ describe('preview helpers', () => {
 
   it('parseGroupingConfig(null) 返回默认配置', () => {
     expect(parseGroupingConfig(null)).toEqual(defaultGroupingConfig())
+  })
+})
+
+describe('previewGroups', () => {
+  const withEmpty = [RULES[0], rule('r9', 'EMPTY', [{ type: 'prefix', text: 'NOPE_' }]), RULES[1]]
+
+  it('每个已配置分类都出现（含 0 命中），「其他」永远最后，行序=声明序', () => {
+    const out = previewGroups(['lkg_a', 'misc_b'], withEmpty, 'first')
+    expect(out.rows.map((r) => r.name)).toEqual(['LKG', 'EMPTY', 'TRIM', OTHER_GROUP_NAME])
+    expect(out.rows[0].params).toEqual(['lkg_a'])
+    expect(out.rows[1].params).toEqual([])
+    expect(out.rows[3].params).toEqual(['misc_b'])
+  })
+
+  it('无有效规则时只剩「其他」一行，且它承载全部参数', () => {
+    expect(previewGroups(['a', 'b'], [], 'first').rows)
+      .toEqual([{ name: OTHER_GROUP_NAME, params: ['a', 'b'] }])
+    expect(previewGroups(['a'], [rule('x', ' ', [{ type: 'prefix', text: 'A' }])], 'first').rows)
+      .toEqual([{ name: OTHER_GROUP_NAME, params: ['a'] }])
+  })
+
+  it('多属：一项可同时占多行，sheet 数按参与项次计（不是按去重后的参数数）', () => {
+    const out = previewGroups(['lkg_trim_post'], RULES, 'multi', 50)
+    expect(out.rows.map((r) => r.name)).toEqual(['LKG', 'TRIM', 'POST', OTHER_GROUP_NAME])
+    expect(out.rows.map((r) => r.params.length)).toEqual([1, 1, 1, 0])
+    // 1 张总览 + 3 个各含 1 项的块 = 4；按「去重后 1 个参数」算只会得到 2
+    expect(out.sheets).toBe(4)
+  })
+
+  it('sheet 数按每页上限分页（ceil），与 estimateSheetCount 同口径', () => {
+    const many = Array.from({ length: 65 }, (_v, i) => `lkg_${i}`)
+    const out = previewGroups(many, [RULES[0]], 'first', 30)
+    expect(out.rows[0].params).toHaveLength(65)
+    expect(out.sheets).toBe(1 + Math.ceil(65 / 30))
+    // 不传上限时回退默认上限
+    expect(previewGroups(many, [RULES[0]], 'first').sheets)
+      .toBe(1 + Math.ceil(65 / DEFAULT_MAX_ITEMS))
+  })
+
+  it('冲突数沿用 countConflicts（命中多个分类的参数个数）', () => {
+    expect(previewGroups(['lkg_trim_post', 'misc'], RULES, 'first').conflicts).toBe(1)
+  })
+})
+
+describe('validateGroupingConfig', () => {
+  const config = (groups: GroupRule[]): GroupingConfig =>
+    ({ groups, strategy: 'first', maxItemsPerSheet: DEFAULT_MAX_ITEMS })
+  const onePattern = [{ type: 'prefix' as const, text: 'X' }]
+
+  it('分类名 trim 后为空 → 返回错误文案', () => {
+    expect(validateGroupingConfig(config([rule('a', '   ', onePattern)])))
+      .toBe('分类名不能为空')
+  })
+
+  it('分类名 trim 后重复 → 返回带名字的错误文案', () => {
+    expect(validateGroupingConfig(config([rule('a', 'LKG', onePattern), rule('b', ' LKG ', onePattern)])))
+      .toBe('分类名重复：LKG')
+  })
+
+  it('分类名不得占用「其他」这个保留名', () => {
+    expect(validateGroupingConfig(config([rule('a', OTHER_GROUP_NAME, onePattern)])))
+      .toBe('分类名不能是「其他」')
+    expect(validateGroupingConfig(config([rule('a', ` ${OTHER_GROUP_NAME} `, onePattern)])))
+      .toBe('分类名不能是「其他」')
+  })
+
+  it('合法配置（含无分类、空条件）返回 null', () => {
+    expect(validateGroupingConfig(defaultGroupingConfig())).toBe(null)
+    expect(validateGroupingConfig(config([rule('a', 'LKG', onePattern), rule('b', 'TRIM', onePattern)])))
+      .toBe(null)
+    // 空条件不参与匹配，但名字合法 ⇒ 不拦提交
+    expect(validateGroupingConfig(config([rule('a', 'LKG', [{ type: 'prefix', text: '  ' }])])))
+      .toBe(null)
   })
 })
