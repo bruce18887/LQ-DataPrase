@@ -26,6 +26,10 @@
   （`frontend/playwright.config.ts:123`）。所以基线标题文件是 **11 行**（9 业务 + 2 setup），
   单跑汇总行会是 `Running <业务数+2> tests`。判据一律取「**业务用例名逐条在、零 `failed`**」，
   不取总数 —— 两侧同现的 2 条对集合差没有影响。
+- **标题闸的盲区（Task 1 评审实测指出，本刀必须补）**：`--list` 只暴露用例标题，
+  `test.describe.serial(...)` 从 serial 改成非 serial、`{ tag: ['@p2','@data'] }` 被改、
+  `timeout`/`retries` 漂移，**标题行一个字都不变** ⇒ 集合差照样绿。所以每次搬运除了标题闸，
+  还要 grep 对账这两行的**原文**（命令见 Task 2 Step 4 / Task 3 Step 6），逐字相同才算「纯搬运」。
 
 ## 文件结构（本刀完成后）
 
@@ -220,7 +224,10 @@ Expected: 零条 `error TS`。（这一步是本仓的机械闸之一：e2e 不�
 - [ ] **Step 8: 跑第一个消费者的真实用例**
 
 Run: `cd frontend && npx playwright test e2e/data/disk-usage-chip.spec.ts`
-Expected: **零 `failed`**（汇总含 setup 两条，形状是 `Running <业务数+2> tests`，见 Global Constraints）。红了就是 helper 版与局部版不等价 —— **不许改用例迁就 helper**，回头 diff 函数体。
+Expected: **业务用例名逐条在，且红集合 ⊆ 基线红集合**（汇总含 setup 两条，形状是 `Running <业务数+2> tests`，
+见 Global Constraints）。基线红集合 = `disk-usage-chip` 的 case3「上传一个文件后以 fresh=1 重拉…」那条
+`not.toHaveText`（2026-11-15 台账已定性为**存量红**：载荷 2 MiB 跨不动 GB 档 10.49 MB 步长，
+与该用例 `:149` 注释预告的响法一致，且与 apiGet 的提供者无关）。红了就是 helper 版与局部版不等价 —— **不许改用例迁就 helper**，回头 diff 函数体。
 
 - [ ] **Step 9: Commit**
 
@@ -287,10 +294,22 @@ diff tasks/b4a_titles_baseline.txt tasks/b4a_titles_t2.txt && echo TITLES_IDENTI
 
 Expected: `diff` 无输出且打印 `TITLES_IDENTICAL`。有差异 = 搬运中丢/改了某条用例标题，当场回查，别往下走。
 
+标题闸看不见 serial 与 tag（Global Constraints 那条盲区），同一步再对账这两行的**原文**：
+
+```bash
+grep -n "test.describe.serial\|tag: \['@p2', '@data'\]" frontend/e2e/data/repair-center.spec.ts
+```
+
+Expected: 与 Task 1 之前现读的那一行逐字相同（serial 声明在 `:152`、标签是 `{ tag: ['@p2', '@data'] }`，
+中间只允许行号因上面的删除而左移）。
+
 - [ ] **Step 5: 单文件真跑**
 
 Run: `cd frontend && npx playwright test e2e/data/repair-center.spec.ts`
-Expected: repair-center 的 **9 条业务用例全部通过、零 `failed`**（汇总会是 `11 passed`，多的两条是 setup）。
+Expected: repair-center 的 **9 条业务用例名逐条在**，且红集合 ⊆ 基线红集合（本文件此刻的基线红集合是**空**，
+Task 1 没跑过它 ⇒ 第一次跑就给它立基线）。汇总会是 `11 passed` 形状（多两条 setup）。
+**若出现红**：先做 HEAD 对照轮（同一命令在 `git stash` 之外用 `git show HEAD:<file>` 落临时探针文件跑，
+跑完删除），定性成存量红还是本刀引入的，只有后者才进入修代码；结论与两条命令一起写进台账。
 有 `skipped` 时逐条核对原因必须是样例数据缺失 `PRIMARY_SAMPLE_FILE`，不得是断言失败。
 
 - [ ] **Step 6: 批内快门禁（本刀第一次真跑 affected）**
@@ -413,7 +432,16 @@ node tasks/b4a-titles.mjs data/repair-center.spec.ts data/duplicate-keep.spec.ts
 diff tasks/b4a_titles_baseline.txt tasks/b4a_titles_t3.txt && echo UNION_IDENTICAL
 ```
 
-Expected: `diff` 无输出且打印 `UNION_IDENTICAL`。这一步的语义是「4 + 5 = 拆前的 9，一条不多一条不少，
+Expected: `diff` 无输出且打印 `UNION_IDENTICAL`。
+
+再对账 serial/tag —— 这是拆文件最怕丢的两行（丢了不影响任何标题，但清理顺序契约与池的 project 归属就变了）：
+
+```bash
+grep -n "test.describe.serial\|tag: \['@p2', '@data'\]" \n  frontend/e2e/data/repair-center.spec.ts frontend/e2e/data/duplicate-keep.spec.ts
+```
+
+Expected: **两处**各有一条 serial 声明 + 一条 `{ tag: ['@p2', '@data'] }`（留下的一半与拆出的一半各自完整），
+且新文件那条的标题是「重复项选保留」。这一步的语义是「4 + 5 = 拆前的 9，一条不多一条不少，
 标题逐字相同」。任何差异都说明有用例被漏搬，或某条断言在搬运中被动了名。
 
 - [ ] **Step 7: 两个文件各自单跑**
