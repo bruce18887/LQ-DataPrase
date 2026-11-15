@@ -279,12 +279,32 @@ def _take_png(future):
         return None  # 单参数失败 → 串行兜底
 
 
-def _write_detail_sheet(wb, title, entry, png, df, metadata, site_col, flags, sheet_name):
-    """写一个参数的明细 sheet，返回图片 buffer（调用方须保留到 ``wb.save()`` 后）。
+def _block_image_row(start_row: int, site_rows: int) -> int:
+    """图块锚点行：统计/Site 表下方，至少留到 S+8（现状 S=1 → 第 9 行）。"""
+    return start_row + max(8, site_rows + 3)
+
+
+def _block_height(entry) -> int:
+    """一个块占用的行数：图锚点行距 + 450px（≈23 行）+ 1 行间隔。"""
+    return max(8, len(entry.get('site_stats') or []) + 3) + 24
+
+
+def _set_detail_column_widths(ws):
+    """明细 sheet 的列宽：前 5 列放统计项，6–10 列放 Site 表（每张 sheet 设一次）。"""
+    for col in range(1, 6):
+        ws.column_dimensions[get_column_letter(col)].width = 18
+    for col in range(6, 11):
+        ws.column_dimensions[get_column_letter(col)].width = 14
+
+
+def _write_block(ws, start_row, title, entry, png, df, metadata, site_col, flags):
+    """在 ws 的 start_row 起写一个「统计 + 图」块；返回图片 buffer（或 None）。
 
     ``png`` 为并行渲染结果；None 时就地串行渲染。渲染不出图（空 buffer）时
-    不建 sheet，返回 None。``sheet_name`` 由调用方统一分配（唯一且合法），
-    与总览里的超链接同源。
+    不写任何内容并返回 None —— 调用方可据此决定是否推进块偏移。
+    行号一律以 ``start_row`` 偏移：``start_row=1`` 与改造前的单页版式逐字一致。
+
+    调用方须保留返回的 buffer 到 ``wb.save()`` 之后。
     """
     stats_data = entry.get('stats_data', {})
     site_stats_list = entry.get('site_stats', [])
@@ -306,52 +326,47 @@ def _write_detail_sheet(wb, title, entry, png, df, metadata, site_col, flags, sh
         img_buffer.close()
         return None
 
-    ws = wb.create_sheet(title=sheet_name)
-
-    # Stats header
-    for col_idx, h in enumerate(DETAIL_HEADERS, 1):
-        cell = ws.cell(row=1, column=col_idx, value=h)
+    for col_idx, header in enumerate(DETAIL_HEADERS, 1):
+        cell = ws.cell(row=start_row, column=col_idx, value=header)
         cell.fill = HEADER_FILL
         cell.font = HEADER_FONT
         cell.alignment = HEADER_ALIGNMENT
 
     if stats_data:
-        ws.cell(row=2, column=1, value=stats_data.get('param_name', ''))
-        ws.cell(row=2, column=2, value=stats_data.get('low_limit', 0)).number_format = '0.0000'
-        ws.cell(row=2, column=3, value=stats_data.get('high_limit', 0)).number_format = '0.0000'
-        ws.cell(row=2, column=4, value=stats_data.get('unit', ''))
+        row_param = start_row + 1
+        ws.cell(row=row_param, column=1, value=stats_data.get('param_name', ''))
+        ws.cell(row=row_param, column=2, value=stats_data.get('low_limit', 0)).number_format = '0.0000'
+        ws.cell(row=row_param, column=3, value=stats_data.get('high_limit', 0)).number_format = '0.0000'
+        ws.cell(row=row_param, column=4, value=stats_data.get('unit', ''))
 
-        left_labels = [("Mean", "mean_val", 4, 1), ("STD", "std_val", 5, 1),
-                       ("Range", "data_range", 6, 1), ("数据点数", "count", 7, 1),
-                       ("CPK", "cpk_str", 8, 1)]
+        left_labels = [("Mean", "mean_val", start_row + 3, 1), ("STD", "std_val", start_row + 4, 1),
+                       ("Range", "data_range", start_row + 5, 1), ("数据点数", "count", start_row + 6, 1),
+                       ("CPK", "cpk_str", start_row + 7, 1)]
         for label, key, row, col in left_labels:
             ws.cell(row=row, column=col, value=label).fill = STATS_LABEL_FILL
             ws.cell(row=row, column=col).alignment = CENTER_ALIGNMENT
-            val = stats_data.get(key, '')
-            cell = ws.cell(row=row, column=col + 1, value=str(val))
+            cell = ws.cell(row=row, column=col + 1, value=str(stats_data.get(key, '')))
             cell.alignment = CENTER_ALIGNMENT
             if key == "cpk_str":
                 _apply_cpk_style(cell, stats_data.get('cpk_color', 'gray'))
             elif key in ("mean_val", "std_val"):
                 cell.number_format = '0.0000'
 
-    # Site stats table
     if site_stats_list:
-        ws.cell(row=1, column=6, value="Site统计").fill = HEADER_FILL
-        ws.cell(row=1, column=6).font = HEADER_FONT
-        ws.cell(row=1, column=6).alignment = HEADER_ALIGNMENT
-
-        for col_idx, h in enumerate(SITE_HEADERS, 1):
-            cell = ws.cell(row=2, column=col_idx + 5, value=h)
+        ws.cell(row=start_row, column=6, value="Site统计").fill = HEADER_FILL
+        ws.cell(row=start_row, column=6).font = HEADER_FONT
+        ws.cell(row=start_row, column=6).alignment = HEADER_ALIGNMENT
+        for col_idx, header in enumerate(SITE_HEADERS, 1):
+            cell = ws.cell(row=start_row + 1, column=col_idx + 5, value=header)
             cell.fill = HEADER_FILL
             cell.font = HEADER_FONT
             cell.alignment = HEADER_ALIGNMENT
-
         for row_offset, site_info in enumerate(site_stats_list):
             is_fail = _site_fail_count(site_info) > 0
             is_all = site_info.get('Site') == 'ALL Site'
             for col_idx, key in enumerate(SITE_HEADERS, 1):
-                cell = ws.cell(row=row_offset + 3, column=col_idx + 5, value=site_info.get(key, ''))
+                cell = ws.cell(row=start_row + 2 + row_offset, column=col_idx + 5,
+                               value=site_info.get(key, ''))
                 cell.alignment = CENTER_ALIGNMENT
                 if is_fail:
                     cell.fill = FAIL_FILL
@@ -361,26 +376,15 @@ def _write_detail_sheet(wb, title, entry, png, df, metadata, site_col, flags, sh
                 else:
                     cell.fill = NORMAL_FILL
 
-    # Column widths
-    for col in range(1, 6):
-        ws.column_dimensions[get_column_letter(col)].width = 18
-    for col in range(6, 11):
-        ws.column_dimensions[get_column_letter(col)].width = 14
-
-    # Return hyperlink
-    return_cell = ws.cell(row=8, column=5, value="← 返回总览")
+    return_cell = ws.cell(row=start_row + 7, column=5, value="← 返回总览")
     return_cell.hyperlink = "#'总览'!A1"
     return_cell.font = LINK_FONT
 
-    # Embed chart image
-    max_site_rows = 2 + len(site_stats_list) + 1 if site_stats_list else 2
-    chart_row = max(9, max_site_rows + 1)
-
     img_buffer.seek(0)
-    img = XlImage(img_buffer)
-    img.width = 800
-    img.height = 450
-    ws.add_image(img, f'A{chart_row}')
+    image = XlImage(img_buffer)
+    image.width = 800
+    image.height = 450
+    ws.add_image(image, f'A{_block_image_row(start_row, len(site_stats_list))}')
     return img_buffer
 
 
@@ -432,11 +436,14 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
     for idx, (title, entry) in enumerate(rows):
         if progress_cb:
             # 报的是「已装配到第几个」，总人数由调用方持有 —— 这里不猜百分比语义。
-            # 放在循环体第一行：下面渲染不出图时会跳过 sheet，放后面就漏报。
+            # 放在循环体第一行：下面渲染不出图时会跳过内容，放后面就漏报。
             progress_cb(idx + 1)
-        buffer = _write_detail_sheet(wb, title, entry,
-                                     png_results.get(title), df, metadata,
-                                     site_col, flags, sheet_names[title])
+        ws = wb.create_sheet(title=sheet_names[title])
+        _set_detail_column_widths(ws)
+        # 本任务仍是「每参数一页、块起始行 1」，与改造前的单页版式逐字一致；
+        # 分页装配由调用方按 _block_height 推进起始行（见后续任务）。
+        buffer = _write_block(ws, 1, title, entry, png_results.get(title),
+                              df, metadata, site_col, flags)
         if buffer is not None:
             open_buffers.append(buffer)
 
