@@ -286,11 +286,10 @@ describe('判据 ④：角色下拉与后端 ROLE_CHOICES 同步（清单从模�
     })
   })
 
-  it('角色下拉只剩 UserFormDialog 一处（UserManagement 不再自带第二个）', () => {
-    expect(roleSelectBlocks(readSrc(FILES.mgmt))).toEqual([])
-  })
 })
 ```
+
+> 反向断言「UserManagement 不再自带角色下拉」**不放这里**：B2 结束时旧页仍有两个角色下拉，这条要到 Task 3 重写页面后才能绿。它放在 Task 3 的页面源码扫描里（见那份 Task 的 Step 1）。
 
 - [ ] **Step 3: 跑 T2，确认两头都红**
 
@@ -519,6 +518,11 @@ describe('UserManagement：薄页——只有 chip 行、工具栏、表格与�
   it('页面代码行零 emoji（旧 KPI 与 roleIcon 已换 EP 图标）', () => {
     const code = codeOf(read(PAGE))
     expect(code).not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u)
+  })
+
+  it('页面不再自带角色下拉（唯一一个在 UserFormDialog）', () => {
+    const code = codeOf(read(PAGE))
+    expect(code).not.toMatch(/<el-select[^>]*v-model="[^"]*\.role"/)
   })
 })
 ```
