@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { collectAllPages } from '../../src/utils/paging'
 import { loginAs } from '../helpers/auth'
 import { sidebarLink } from '../helpers/nav'
@@ -34,6 +34,16 @@ const RESIDUE_MIN_AGE_MS = 10 * 60_000
  */
 test.describe('操作审计', { tag: ['@admin'] }, () => {
   test.use({ storageState: { cookies: [], origins: [] } })
+
+  /**
+   * fill() 只往输入框里塞字，不收起 EP 的日历面板；面板 343px 高，1280 宽下工具栏右槽折到
+   * 筛选行下面，面板正好压住「查询」按钮（实测按钮中心的命中目标是日历单元格），而 Playwright
+   * 不点被浮层盖住的元素。点页面标题让输入框失焦：面板收起，刚输入的值照常提交。
+   * 不用 Escape —— 实测它会把该输入框的值回退成模型里的旧值（空）。
+   */
+  const dismissDatePanel = async (page: Page) => {
+    await page.getByRole('heading', { name: '操作审计' }).click()
+  }
 
   // 清理判据（两条任一成立即删，与 admin.spec.ts 同规则；本文件的残留表只管自己这一族）：
   //  (a) 用户名在 `mine` 里 ⇒ 本 worker 自己建的，无条件回收。
@@ -286,6 +296,7 @@ test.describe('操作审计', { tag: ['@admin'] }, () => {
 
     // ② 日期填上 ⇒ 进请求；「重置」清空后（EP 交回的是 null）⇒ 从请求里消失，且另一半照常发。
     await dateFrom.fill('2026-01-01')
+    await dismissDatePanel(page)
     const [withDate] = await Promise.all([nextList(), query.click()])
     expect(decodeURIComponent(withDate.request().url()), '起日期没进请求 URL').toContain(
       'date_from=2026-01-01',
@@ -355,6 +366,7 @@ test.describe('操作审计', { tag: ['@admin'] }, () => {
     const dateTo = page.locator('[data-testid="audit-date-to"] input')
     await dateFrom.fill('2026-03-05')
     await dateTo.fill('2026-03-01')
+    await dismissDatePanel(page)
     const [resp] = await Promise.all([
       page.waitForResponse(
         (r) => r.url().includes('/auth/audit-events/') && r.request().method() === 'GET',
@@ -374,5 +386,34 @@ test.describe('操作审计', { tag: ['@admin'] }, () => {
 
     await expect(dateFrom).toHaveValue('2026-03-05')
     await expect(dateTo).toHaveValue('2026-03-01')
+  })
+
+  test('@p2 工具栏：四颗筛选控件的实测盒宽不低于声明下限', async ({ page }) => {
+    await loginAs(page, 'admin')
+    await sidebarLink(page, '操作审计').click()
+    await expect(page).toHaveURL(/\/admin\/audit/)
+    const box = page.locator('.admin-page-toolbar')
+    await expect(box).toBeVisible()
+    await expect(page.locator('[data-testid="audit-username"] .el-input')).toBeVisible()
+
+    const widths = await page.evaluate(() => {
+      const rect = (sel: string): number => {
+        const el = document.querySelector(sel)
+        return el ? el.getBoundingClientRect().width : 0
+      }
+      return {
+        event: rect('[data-testid="audit-event"] .el-select'),
+        username: rect('[data-testid="audit-username"] .el-input'),
+        from: rect('[data-testid="audit-date-from"] .el-date-editor'),
+        to: rect('[data-testid="audit-date-to"] .el-date-editor'),
+      }
+    })
+
+    // 阈值就是修复后 CSS 的声明值：select 160、input min-width 180、date 190。
+    // 不断「等于」：flex-basis 260 允许在宽视口里长，判据只防「被压成一条缝」。
+    expect(widths.event, '事件下拉被压窄了').toBeGreaterThanOrEqual(160)
+    expect(widths.username, '账号输入框被压到 180 以下').toBeGreaterThanOrEqual(180)
+    expect(widths.from, '起日期被压窄了').toBeGreaterThanOrEqual(190)
+    expect(widths.to, '止日期被压窄了').toBeGreaterThanOrEqual(190)
   })
 })

@@ -29,3 +29,38 @@ describe('AdminPageToolbar：两页共用的壳', () => {
     expect(code).not.toMatch(/#[0-9a-fA-F]{3,8}\b/)
   })
 })
+
+const AUDIT = '../../src/pages/admin/AuditLogPage.vue'
+
+const codeOf = (text: string): string =>
+  text.split('\n').filter((l) => !/^\s*(\/\/|\/\*|\*|<!--)/.test(l)).join('\n')
+
+describe('审计页接线：testid 不挪窝、宽度类真绑上', () => {
+  it('四个 data-testid 仍挂在 el-form-item 上，不挪到控件上', () => {
+    const code = codeOf(read(AUDIT))
+    for (const id of ['audit-event', 'audit-username', 'audit-date-from', 'audit-date-to']) {
+      expect(code, `${id} 不在 el-form-item 上`).toMatch(
+        new RegExp(`<el-form-item[^>]*data-testid="${id}"`),
+      )
+      expect(code, `${id} 被挪到了控件上`).not.toMatch(
+        new RegExp(`<(?:el-input|el-select|el-date-picker)[^>]*data-testid="${id}"`),
+      )
+    }
+  })
+
+  it('五颗筛选控件真的带上了宽度类', () => {
+    const code = read(AUDIT)
+    expect(code).toMatch(/<el-select[^>]*class="admin-filter-select"/)
+    expect(code).toMatch(/<el-input[^>]*class="admin-filter-input"/)
+    expect(code.match(/<el-date-picker[^>]*class="admin-filter-date"/g) ?? []).toHaveLength(2)
+  })
+
+  it('工具栏走壳的左右两个命名槽：重置在左、查询在右', () => {
+    const code = read(AUDIT)
+    expect(code).toContain('<AdminPageToolbar>')
+    const left = code.slice(code.indexOf('<template #left>'), code.indexOf('</template>', code.indexOf('<template #left>')))
+    const right = code.slice(code.indexOf('<template #right>'))
+    expect(left, '重置没有留在左槽').toContain('重置')
+    expect(right, '查询没有落在右槽').toContain('查询')
+  })
+})
