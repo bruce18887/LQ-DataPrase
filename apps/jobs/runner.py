@@ -163,7 +163,9 @@ def run_export_batch_charts(task: dict) -> dict:
         payload = build_batch_charts_xlsx_with_charts(
             df, metadata, params, site_col=get_site_column(df), **show,
             dpi=task['dpi'], cpk_thresholds=thresholds,
-            workers=1, progress_cb=_cb)
+            workers=1, progress_cb=_cb,
+            groups=task.get('groups'),
+            max_items_per_sheet=task.get('max_items_per_sheet', 50))
 
     size = _write_out(payload, task['out_path'])
     write_progress(progress, 3, 3)
