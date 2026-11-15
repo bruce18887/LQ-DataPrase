@@ -22,16 +22,24 @@ const mine = new Set<string>()
 const RESIDUE_MIN_AGE_MS = 10 * 60_000
 
 /**
- * 添加用户表单字段定位：el-form-item 的 label 在本应用不可靠地关联为可访问名
- * （沿用 sftp.spec.ts 的既有约定），故按 .el-form-item__label 文本过滤后取内部 input。
- * 限定在 .user-management 的 el-form 内，避免与表格列头「用户名」歧义。
+ * 新增账号对话框：批3b 起「添加用户」从页底内联表单移进 UserFormDialog（append-to-body），
+ * 页内 el-form 定位不再可达；字段用 create-* testid，与编辑弹窗的 edit-* 分开。
  */
-function addUserField(page: Page, label: string): Locator {
-  return page
-    .locator('.user-management .el-form .el-form-item')
-    .filter({ has: page.locator('.el-form-item__label', { hasText: label }) })
-    .locator('input')
-    .first()
+async function openCreateDialog(page: Page): Promise<Locator> {
+  await page.getByRole('button', { name: '新增账号', exact: true }).click()
+  const dialog = page.locator('.user-form-dialog')
+  await expect(dialog).toBeVisible()
+  return dialog
+}
+
+async function createUser(page: Page, username: string): Promise<Locator> {
+  const dialog = await openCreateDialog(page)
+  await dialog.locator('[data-testid="create-username"] input').fill(username)
+  await dialog.locator('[data-testid="create-password"] input').fill('e2ePass123')
+  await dialog.getByRole('button', { name: '创建', exact: true }).click()
+  await expect(page.getByText('用户已添加')).toBeVisible({ timeout: 15_000 })
+  await expect(dialog).toBeHidden()
+  return page.locator('.el-table tbody tr').filter({ hasText: username })
 }
 
 /**
@@ -189,18 +197,10 @@ test.describe('用户管理 / 权限', { tag: ['@admin'] }, () => {
 
     // 唯一的一次性用户名，避免污染种子账号（admin/user）
     const uniqueName = `e2e_user_${Date.now()}`
-    mine.add(uniqueName) // 先记名再建号：「添加」点击半路失败时账号也可能已经落库，本 worker 的 afterAll 才认它（e2e_user_ 如今也在残留表里，但那是满 10 分钟之后的跨轮兜底）
+    mine.add(uniqueName) // 先记名再建号：「创建」点击半路失败时账号也可能已经落库，本 worker 的 afterAll 才认它（e2e_user_ 如今也在残留表里，但那是满 10 分钟之后的跨轮兜底）
 
-    // 添加表单（UserManagement.vue「➕ 添加用户」区块，inline el-form）：
-    //   用户名 el-input / 密码 el-input(type=password) / 角色 el-select / 「添加」按钮(submit)
-    await addUserField(page, '用户名').fill(uniqueName)
-    await addUserField(page, '密码').fill('e2ePass123')
-    // 角色默认 user，无需更改。提交。
-    await page.getByRole('button', { name: '添加', exact: true }).click()
-
-    // 添加成功提示 + 表格刷新后出现该用户
-    await expect(page.getByText('用户已添加')).toBeVisible({ timeout: 15_000 })
-    const newRow = table.locator('tr').filter({ hasText: uniqueName })
+    await createUser(page, uniqueName)
+    const newRow = page.locator('.el-table tbody tr').filter({ hasText: uniqueName })
     await expect(newRow.getByText(uniqueName, { exact: true })).toBeVisible({ timeout: 15_000 })
 
     // 删除：该行内「删除」按钮（type=danger）
@@ -234,14 +234,9 @@ test.describe('用户管理 / 权限', { tag: ['@admin'] }, () => {
     await expect(table).toBeVisible()
 
     const uniqueName = `e2e_toggle_${Date.now()}`
-    mine.add(uniqueName) // 先记名再建号：「添加」点击半路失败时账号也可能已经落库，仍归本 worker 的 afterAll 收
-    await addUserField(page, '用户名').fill(uniqueName)
-    await addUserField(page, '密码').fill('e2ePass123')
-    await page.getByRole('button', { name: '添加', exact: true }).click()
-    await expect(page.getByText('用户已添加')).toBeVisible({ timeout: 15_000 })
-
-    const row = table.locator('tr').filter({ hasText: uniqueName })
-    await expect(row).toBeVisible({ timeout: 15_000 })
+    mine.add(uniqueName) // 先记名再建号：「创建」点击半路失败时账号也可能已经落库，仍归本 worker 的 afterAll 收
+    const row = await createUser(page, uniqueName)
+    await expect(row).toHaveCount(1)
 
     // 1) 禁用：点该行的「禁用」按钮 → 后端 200 → 状态变 disabled
     // （状态列文案 = statusLabel 的原始值 disabled/locked/active，非中文映射）
@@ -271,23 +266,16 @@ test.describe('用户管理 / 权限', { tag: ['@admin'] }, () => {
     // 这条钉的是「API 有、页面没有」的缺口：PUT /auth/users/<id>/ 早就支持
     // display_name/role，但管理页只有禁用/重置/删除，改名字只能直连接口。
     const username = `e2e_edit_${Date.now()}`
-    mine.add(username) // 先记名再建号：「添加」点击半路失败时账号也可能已经落库，仍归本 worker 的 afterAll 收
+    mine.add(username) // 先记名再建号：「创建」点击半路失败时账号也可能已经落库，仍归本 worker 的 afterAll 收
     await loginAs(page, 'admin')
     await sidebarLink(page, '用户管理').click()
     await expect(page).toHaveURL(/\/admin\/users/)
 
-    await addUserField(page, '用户名').fill(username)
-    await addUserField(page, '密码').fill('e2ePass123')
-    await page.getByRole('button', { name: '添加', exact: true }).click()
-    await expect(page.getByText('用户已添加')).toBeVisible({ timeout: 15_000 })
-
-    const row = page
-      .locator('.el-table tbody tr')
-      .filter({ has: page.getByText(username, { exact: true }) })
+    const row = await createUser(page, username)
     await expect(row).toHaveCount(1)
 
     await row.getByRole('button', { name: '编辑', exact: true }).click()
-    const dialog = page.locator('.user-edit-dialog')
+    const dialog = page.locator('.user-form-dialog')
     await expect(dialog).toBeVisible()
 
     // 用户名只读：input 必须 disabled，否则等于给管理员一条改名通路（登录身份会变）
@@ -423,5 +411,28 @@ test.describe('用户管理 / 权限', { tag: ['@admin'] }, () => {
       }
       await ctx.close()
     }
+  })
+
+  test('@p2 工具栏与 KPI：四个 chip 带 SVG 图标、左槽为空、右槽新增账号可达', async ({ page }) => {
+    await loginAs(page, 'admin')
+    await sidebarLink(page, '用户管理').click()
+    await expect(page).toHaveURL(/\/admin\/users/)
+
+    const chips = page.locator('.user-kpi-chips .kpi-chip')
+    await expect(chips).toHaveCount(4)
+    for (const label of ['总用户', '活跃', '锁定', '管理员']) {
+      const chip = chips.filter({ hasText: label })
+      await expect(chip).toHaveCount(1)
+      await expect(chip.locator('svg'), `${label} chip 没有 EP 矢量图标`).toHaveCount(1)
+      await expect(chip).toContainText(/\d+/)
+    }
+
+    // 决策 D 的左槽本批留空 ⇒ 壳不渲染空占位；右槽按钮可达
+    await expect(page.locator('.admin-page-toolbar__left')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: '新增账号', exact: true })).toBeVisible()
+
+    // 角色列也从 emoji 换成 SVG 图标
+    await expect(page.locator('.el-table .role-cell', { hasText: '管理员' }).first().locator('svg'))
+      .toHaveCount(1)
   })
 })
