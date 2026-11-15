@@ -1,11 +1,12 @@
 // frontend/e2e/data/disk-usage-chip.spec.ts
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect } from '@playwright/test'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { gotoApp, navByMenu } from '../helpers/nav'
 import { uploadFile, uploadMultipleFiles } from '../helpers/upload'
 import { cleanupQuiet, deleteFilesByNameQuiet } from '../helpers/cleanup'
+import { apiGet } from '../helpers/apiClient'
 
 /**
  * 磁盘占用 chip（批2 · 第 5 项）。
@@ -28,21 +29,6 @@ import { cleanupQuiet, deleteFilesByNameQuiet } from '../helpers/cleanup'
 
 const CHIP = '.toolbar-left [data-testid="disk-usage-chip"]'
 const USAGE_ROUTE = '**/api/v1/files/usage/**'
-
-/**
- * 浏览器里读一次端点（与 repair-center.spec.ts:36 同一种拿法）。
- * 这是本仓**第二**份同名副本，够不上抽 helper（三条相似行好过过早抽象）；
- * 出现第三份时就把它搬进 `e2e/helpers/`，别再往 spec 里复制。
- */
-function apiGet(page: Page, url: string) {
-  return page.evaluate(async (u) => {
-    const token = localStorage.getItem('access_token')
-    const res = await fetch(`/api/v1${u}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-    return { status: res.status, body: await res.json() }
-  }, url)
-}
 
 /**
  * 判据异源：spec 里**自己再实现一遍**四档格式化。
