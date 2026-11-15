@@ -3214,3 +3214,7 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
    混着做就会为了删分支顺手 `checkout`，把别人的提交送进 master。
 4. **规则：纯 FF 不配 `backup/master-*`。** 那套备份是给**排除提交/改写历史**用的（`backup/other-session-293e022`）；
    快进没丢任何提交，回退就是 `git branch -f master <旧 sha>`，加备份只是给下一个人多出六条读不懂的分支。
+6. **本轮自己的近失**：想查 `scripts/e2e_affected.mjs` 的开关跑了 `--help`，它**没有 help 分支**，
+   未知参数一律走默认 ⇒ 当场开跑 `lint:e2e` + `vitest run`（判据链后面还挂着 backend 全量与全量池）。
+   **规则**：本仓 `scripts/*.mjs` 探参数只读源码或跑 `--dry-run`（那条是显式实现的），别拿 `--help` 试；
+   共享工作树里一次误跑就是十几分钟 + 占 slot 端口，撞的是别人那轮池。
