@@ -276,6 +276,11 @@ import { shellDjango } from '../helpers/djangoShell'
 import { openRepairCenter } from '../helpers/repairCenterFlow'
 ```
 
+**勘误（Task 2 评审提出，已按实测回写）**：本步 import 段实际应保留 `type Page` —— 删掉四个局部助手之后，
+`Page` 仍被**留下的** dup 专属助手用着（Task 3 才搬走它们，实测 `:59` `seedDuplicatePair`、`:77` `dupEndState`、
+`:89` `dupRemainingBatches` 三处形参）。照本步原文删 `type Page` 会 TS2304，与本步 Step 3「零 error TS」自相矛盾。
+Task 3 Step 1/Step 4 已把这层双向耦合写死。**已完成的历史步骤不再重放**，此段仅供后来人对照。
+
 要点：`execSync`（原 `:4`）与 `PROJECT_ROOT`（原 `:5` 里的一项）在删掉 `PYTHON`/`shellDjango` 后**在本文件里没有别的用处**（现查：`execSync` 仅 `:30`，`PROJECT_ROOT` 仅 `:22`/`:31`），必须一起摘掉，否则 `lint:e2e` 报 TS6133。`path`/`fs`/`ACCOUNTS`/`DATA_DIR`/`PRIMARY_SAMPLE_FILE`/`gotoApp` 全都还有别的用处，保留。
 
 - [ ] **Step 3: 类型闸**
