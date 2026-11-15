@@ -40,6 +40,7 @@ from openpyxl.drawing.line import LineProperties
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from apps.common.sheet_names import unique_sheet_names
 from apps.export.fonts import EXCEL_FONT_FAMILY
 
 from .parser import WeightDoc, WeightGroup, WeightSeries
@@ -81,36 +82,16 @@ LINK_FONT = Font(name=EXCEL_FONT_FAMILY, size=11, color='0563C1')
 DEFAULT_PALETTE = ('2563EB', '047857', 'D97706', 'B91C1C', '0284C7', '86198F', '475569', '0D9488')
 _MEAN_COLOR_DEFAULT = '4B5563'
 _HEX_RE = re.compile(r'[0-9a-fA-F]{6}')
-# Excel sheet 名不能含 []:*?/\，且不能以 ' 开头/结尾；这里连同 ' 一起换掉，超链接引用就不用转义。
-_ILLEGAL_SHEET_CHARS = re.compile(r"[\[\]:*?/\\']")
-_RESERVED_SHEET_NAMES = {'总览', 'history'}
-
-
-def _clean_sheet_name(name: str) -> str:
-    """测试项名 → 合法 sheet 名：非法字符换 `_`、31 字符上限；空名给 `测试项`。"""
-    cleaned = _ILLEGAL_SHEET_CHARS.sub('_', (name or '').strip())[:31]
-    return cleaned or '测试项'
 
 
 def weight_detail_sheet_names(groups: Sequence[WeightGroup]) -> dict[int, str]:
     """按组序分配唯一 sheet 名：Excel 表名大小写不敏感，重名/截断冲突加 `_2`、`_3`。
 
     `总览` 与 Excel 保留名 `History` 不分配给测试项；只有可见组会被调用方传进来，
-    因此隐藏组不会占用名字。
+    因此隐藏组不会占用名字。规则实现住在 ``apps.common.sheet_names``（与批量导出共用）。
     """
-    used = {name.lower() for name in _RESERVED_SHEET_NAMES}
-    out: dict[int, str] = {}
-    for g in groups:
-        base = _clean_sheet_name(g.name)
-        candidate = base
-        n = 2
-        while candidate.lower() in used:
-            suffix = f'_{n}'
-            candidate = base[:31 - len(suffix)] + suffix
-            n += 1
-        used.add(candidate.lower())
-        out[g.index] = candidate
-    return out
+    names = unique_sheet_names([g.name for g in groups])
+    return {g.index: name for g, name in zip(groups, names)}
 
 
 def _sheet_link(sheet: str) -> str:

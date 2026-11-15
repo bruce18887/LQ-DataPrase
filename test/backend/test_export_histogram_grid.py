@@ -23,7 +23,8 @@ from matplotlib.axes import Axes
 
 from apps.analysis.services.data_services import compute_histogram_stats
 from apps.analysis.services.statistics import filter_finite
-from apps.export.charts import _render_histogram_payload
+from apps.export.charts import _create_histogram_chart, _render_histogram_payload
+from apps.export.export_batch_charts_xlsx import build_batch_charts_xlsx_with_charts
 from apps.export.export_ppt import build_batch_charts_pptx
 from apps.export.histogram_grid import build_histogram_grid, resolve_bin_range
 
@@ -225,11 +226,15 @@ class PhantomLimitChartNotEmptyTests(SimpleTestCase):
             float(TEMP.mean()), float(TEMP.std(ddof=0)), None, None,
         )
         self.addCleanup(buf.close)
-        self.assertEqual(len(recorded), 2, '两个 site 各画一组柱')
-        for _, heights in recorded:
-            self.assertAlmostEqual(sum(heights), 100.0, places=3,
-                                     msg='每个 site 内部归一，柱高之和应为 100%'
-                                         '（此前恒为 0 → 导出图空白）')
+        # 两个 site 各一组柱 + All Site（右轴半透明总分布）一组 = 3 组
+        self.assertEqual(len(recorded), 3, '两个 site + All Site 各画一组柱')
+        # 屏幕口径：Site 柱百分比分母 = 全量 die 数，两 site 各 4/8 → 各 50%
+        self.assertAlmostEqual(sum(recorded[0][1]), 50.0, places=3,
+                               msg='Site 柱分母应为全量（屏幕口径），4/8 → 50%')
+        self.assertAlmostEqual(sum(recorded[1][1]), 50.0, places=3)
+        self.assertAlmostEqual(sum(recorded[2][1]), 100.0, places=3,
+                               msg='All Site 分母=全量，柱高之和应为 100%'
+                                   '（此前恒为 0 → 导出图空白）')
 
 
 class PptxPhantomLimitTests(SimpleTestCase):
@@ -289,6 +294,98 @@ class TinyBarPrecisionTests(SimpleTestCase):
         self.assertAlmostEqual(min(nonzero), 0.002, places=6,
                                msg='1/50000 的柱不得被 round(…, 2) 归零')
         self.assertAlmostEqual(sum(heights), 100.0, places=3)
+
+
+class SitePercentageParityTests(SimpleTestCase):
+    """Site 柱百分比对齐屏幕 histogram 口径。
+
+    屏幕侧 ``histogram.py`` 的两条语义：
+    1. 分母 = 全量 die 数（``total_count = len(data_series)``），不是各 site 内部归一；
+    2. Site 列按 ``data_series.index`` 对齐 —— 参数值非有限的 die 不参与站点统计。
+    """
+
+    def test_denominator_is_total_count_not_per_site(self):
+        recorded = _spy_ax_bar(self)
+        data = np.array([1.0, 2.0, 3.0, 4.0])
+        site = np.array([1, 1, 1, 2])
+        buf = _render_histogram_payload(
+            'P', data, [1, 2], site,
+            float(data.mean()), float(data.std(ddof=0)), 0.0, 5.0,
+        )
+        self.addCleanup(buf.close)
+        # site1 = 3/4、site2 = 1/4；All Site = 4/4
+        self.assertAlmostEqual(sum(recorded[0][1]), 75.0, places=3)
+        self.assertAlmostEqual(sum(recorded[1][1]), 25.0, places=3)
+        self.assertAlmostEqual(sum(recorded[2][1]), 100.0, places=3)
+
+    def test_site_series_aligned_by_index_when_param_has_nan(self):
+        df = pd.DataFrame({'P': [1.0, np.nan, 3.0, 4.0], 'Site': [1, 1, 2, 2]})
+        data_series = filter_finite(df['P'])  # index = [0, 2, 3]
+        recorded = _spy_ax_bar(self)
+        buf = _create_histogram_chart(
+            df, {}, 'P', data_series, float(data_series.mean()),
+            float(data_series.std(ddof=0)), 0.0, 5.0, site_col='Site')
+        self.addCleanup(buf.close)
+        # 有限值 3 颗：site1 只有 row0=1.0（1/3），site2 是 3.0/4.0（2/3）
+        self.assertAlmostEqual(sum(recorded[0][1]), 100 / 3, places=3)
+        self.assertAlmostEqual(sum(recorded[1][1]), 200 / 3, places=3)
+        self.assertAlmostEqual(sum(recorded[2][1]), 100.0, places=3)
+
+    def test_align_site_series_keeps_only_finite_param_rows(self):
+        from apps.export.charts import _align_site_series
+        df = pd.DataFrame({'P': [1.0, np.nan, 3.0, 4.0],
+                           'Site': ['S1', 'S2', 'S1', 'S2']})
+        data_series = filter_finite(df['P'])
+        site_values, site_series = _align_site_series(df, 'Site', data_series)
+        self.assertEqual(site_values, ['S1', 'S2'])
+        self.assertEqual(list(site_series), ['S1', 'S1', 'S2'],
+                         'row1 的 S2 随 NaN 参数一起被排除')
+
+
+class MixedTypeSiteColumnTests(SimpleTestCase):
+    """回归：Site 列混合类型（int + str，ETS88 解析实测）不得让导出崩溃。
+
+    旧排序 key ``(isinstance(x, float), x)`` 把 int 与 str 放进同一桶后直接
+    比较 → ``TypeError: '<' not supported between instances of 'str' and 'int'``。
+    屏幕侧 histogram 服务早已改用 ``site_sort_key``（数值优先、字符串兜底），
+    导出侧两处排序（并行 setup 与串行渲染）此前漏迁。
+    """
+
+    PARAM = 'P'
+
+    def _df(self):
+        return pd.DataFrame({
+            self.PARAM: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            'Site': [1, 1, 2, 2, 'ALL', 'ALL'],
+        })
+
+    def test_align_site_series_sorts_mixed_types(self):
+        """Site 预提取必须支持混合类型（数值优先、字符串在后）。"""
+        from apps.export.charts import _align_site_series
+        df = self._df()
+        site_values, site_series = _align_site_series(df, 'Site', df[self.PARAM])
+        self.assertEqual(site_values, [1, 2, 'ALL'])
+        self.assertEqual(len(site_series), len(df))
+
+    def test_serial_chart_render_accepts_mixed_type_site(self):
+        """串行兜底路径（作业实际崩的位置）必须能出图。"""
+        df = self._df()
+        buf = _create_histogram_chart(
+            df, {}, self.PARAM, df[self.PARAM], 3.5, 1.7, 0.0, 7.0,
+            site_col='Site')
+        self.addCleanup(buf.close)
+        self.assertGreater(buf.getbuffer().nbytes, 0)
+
+    def test_batch_builder_accepts_mixed_type_site(self):
+        """完整装配（与作业同路径，workers=1 走串行）：不得抛错且产物非空。"""
+        df = self._df()
+        metadata = {
+            'units': {self.PARAM: 'V'}, 'mins': {self.PARAM: '0'},
+            'maxs': {self.PARAM: '7'}, 'format': 'CTA8290D',
+        }
+        payload = build_batch_charts_xlsx_with_charts(
+            df, metadata, [self.PARAM], site_col='Site', dpi=72, workers=1)
+        self.assertGreater(len(payload), 0)
 
 
 class GridGeometryTests(SimpleTestCase):
