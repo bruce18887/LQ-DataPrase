@@ -959,3 +959,7 @@ T3 本批 **5** 条（`repair-center.spec.ts` 里 366/407/437/513/544 那五条�
   且可能误选日期格。当前 e2e 用「点页面标题关面板」在两条既有日期流程里规避（Escape 实测会清空已输入值），
   没有削弱断言；产品侧修法属壳级（弹层 placement / 单行布局 / 右槽避让），不在批3b 范围。
   **归属：产品/UX 拍板，批4 或单独一批处理。**
+- **第三处 `.el-select .el-input__wrapper` 死规则**（2026-11-15 B5 复审现查）：
+  `frontend/src/pages/settings/SettingsPage.vue:313` 仍有该规则，且该页模板零 `<el-select>`。
+  批3b §6.5 只点了两处（`UserManagement.vue` 与全局主题层），这是写域外的第三处；
+  属 settings 页，**归批4 或独立小批**，别在批3b 顺手改。
