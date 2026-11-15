@@ -7,6 +7,7 @@ import {
   defaultGroupingConfig,
   estimateSheetCount,
   groupingExportBlocked,
+  groupingValidationError,
   hasGroupingRules,
   parseGroupingConfig,
   previewGroups,
@@ -62,6 +63,16 @@ describe('resolveGroups', () => {
       rule('e2', 'LATE', [{ type: 'contains', text: 'bcd' }]),
     ]
     expect(resolveGroups(['xabcdx'], rules, 'specific')).toEqual([{ name: 'EARLY', params: ['xabcdx'] }])
+  })
+
+  it('最具体：单规则内取最佳条件，而不是只看第一个条件', () => {
+    // X 的第一个条件 'zz' 不命中，第二个才命中 'abcd'；若实现只看首个条件，
+    // X 会被整体跳过，Y 凭同分同长胜出 —— 与本口径（同分并列取更早）相反。
+    const rules = [
+      rule('x', 'X', [{ type: 'contains', text: 'zz' }, { type: 'contains', text: 'abcd' }]),
+      rule('y', 'Y', [{ type: 'contains', text: 'abcd' }]),
+    ]
+    expect(resolveGroups(['xabcdx'], rules, 'specific')).toEqual([{ name: 'X', params: ['xabcdx'] }])
   })
 
   it('未命中进其他且永远最后', () => {
@@ -206,6 +217,36 @@ describe('validateGroupingConfig', () => {
       .toBe(null)
     // 空条件不参与匹配，但名字合法 ⇒ 不拦提交
     expect(validateGroupingConfig(config([rule('a', 'LKG', [{ type: 'prefix', text: '  ' }])])))
+      .toBe(null)
+  })
+})
+
+describe('groupingValidationError', () => {
+  const config = (groups: GroupRule[]): GroupingConfig =>
+    ({ groups, strategy: 'first', maxItemsPerSheet: DEFAULT_MAX_ITEMS })
+  const onePattern = [{ type: 'prefix' as const, text: 'X' }]
+
+  it('只有空壳分类（名字空 / 条件全空）→ null，不阻断导出', () => {
+    // 空壳分类本来就视为「未配置」（与 hasGroupingRules 同口径），
+    // 用户在「先加分类、后填条件」的中间态点导出必须照常放行。
+    expect(groupingValidationError(config([rule('a', '   ', onePattern)]))).toBe(null)
+    expect(groupingValidationError(config([rule('a', 'LKG', [{ type: 'prefix', text: '  ' }])]))).toBe(null)
+    expect(groupingValidationError(config([
+      rule('a', '  ', onePattern),
+      rule('b', 'TRIM', [{ type: 'contains', text: ' ' }]),
+    ]))).toBe(null)
+    expect(groupingValidationError(defaultGroupingConfig())).toBe(null)
+  })
+
+  it('有有效规则 + 另一条空壳分类 → 返回「分类名不能为空」', () => {
+    // 一旦确有规则要发出去，空名分类就会在请求里静默消失（预览与导出不一致），
+    // 所以这时必须拦下来 —— 这一点与「全是空壳」不同。
+    expect(groupingValidationError(config([rule('a', '  ', onePattern), rule('b', 'LKG', onePattern)])))
+      .toBe('分类名不能为空')
+  })
+
+  it('只有有效规则 → null', () => {
+    expect(groupingValidationError(config([rule('a', 'LKG', onePattern), rule('b', 'TRIM', onePattern)])))
       .toBe(null)
   })
 })

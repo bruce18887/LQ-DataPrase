@@ -1,5 +1,7 @@
 """批量参数分布图分组契约与装箱的 T1 判据。"""
 
+import re
+
 import numpy as np
 import pandas as pd
 from django.test import SimpleTestCase
@@ -194,6 +196,42 @@ class GroupedLayoutTests(SimpleTestCase):
         summary = wb['总览']
         # 第 3 个参数 P02 落在 G_2 的第一块
         self.assertEqual(summary.cell(4, 2).hyperlink.target, "#'G_2'!A1")
+
+    def test_illegal_and_overlong_group_names_yield_valid_sheets_and_links(self):
+        """分类名含 Excel 非法字符/超长时：sheet 名仍合法唯一，总览链接仍指向真实块。
+
+        `A[]:*?/\\B'` 与 40 字分类名是用户的正常输入，不是攻击样本。建表与链接
+        必须同源（同一份 `unique_sheet_names` 映射），否则会断链到不存在的表、
+        或两个分类经清洗后互指（2026-11-15 实测过的两类事故）。
+        """
+        long_name = 'G' * 40
+        wb = self._wb(self._build([
+            {'name': "A[]:*?/\\B'", 'params': ['P00', 'P01']},
+            {'name': long_name, 'params': ['P02', 'P03', 'P04']},
+        ]))
+
+        # 1) 所有 sheet 名合法：≤31 字符、无 Excel 禁用字符、大小写不敏感唯一
+        illegal = set("[]:*?/\\'")
+        for name in wb.sheetnames:
+            self.assertLessEqual(len(name), 31, f'sheet 名超过 31 字符: {name!r}')
+            self.assertFalse(illegal & set(name), f'sheet 名含 Excel 禁用字符: {name!r}')
+        lowered = [name.lower() for name in wb.sheetnames]
+        self.assertEqual(len(lowered), len(set(lowered)),
+                         f'sheet 名必须大小写不敏感唯一: {wb.sheetnames}')
+
+        # 2) 总览每条链接的目标表存在，且块起始行下方那行第 1 列就是该参数名
+        #    （A<S> 是「统计项」表头，参数名在 S+1 —— 见 §7.2 块布局）
+        summary = wb['总览']
+        for row in range(2, 2 + len(self.PARAMS)):
+            cell = summary.cell(row, 2)
+            match = re.match(r"^#'(.+)'!A(\d+)$", cell.hyperlink.target or '')
+            self.assertIsNotNone(match, f'链接形状异常: {cell.hyperlink.target!r}')
+            sheet_name, anchor_row = match.group(1), int(match.group(2))
+            self.assertIn(sheet_name, wb.sheetnames, '总览链接必须指向实际建出的表')
+            self.assertEqual(wb[sheet_name].cell(anchor_row, 1).value, '统计项',
+                             '链接的块起始行必须是该参数块的统计表头')
+            self.assertEqual(wb[sheet_name].cell(anchor_row + 1, 1).value, cell.value,
+                             '链接的块起始行必须落在该参数的块首')
 
     def test_multi_assign_embeds_block_twice_and_links_first(self):
         wb = self._wb(self._build([

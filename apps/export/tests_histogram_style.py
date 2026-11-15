@@ -15,11 +15,12 @@ from pathlib import Path
 
 from django.test import SimpleTestCase
 
-from apps.export import charts
+from apps.export import charts, grouping
 from apps.export.charts import _format_axis_value, _format_percent
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 CHART_BAR_TS = BASE_DIR / 'frontend' / 'src' / 'utils' / 'chart-bar.ts'
+GROUPING_TS = BASE_DIR / 'frontend' / 'src' / 'pages' / 'data' / 'composables' / 'exportGrouping.ts'
 
 
 class SitePaletteParityTests(SimpleTestCase):
@@ -35,6 +36,34 @@ class SitePaletteParityTests(SimpleTestCase):
             [c.upper() for c in frontend],
             '导出站点色板必须与前端 SITE_COLORS_8_LIGHT 逐值一致（改色两边同改）',
         )
+
+
+class GroupingConstantParityTests(SimpleTestCase):
+    """分类保留名与「每页上限」三常量必须与前端 `exportGrouping.ts` 逐值相同。
+
+    前端按这些值渲染下拉框与「其他」行，后端按它们做契约校验与装箱。单侧改动
+    没有任何运行时症状（导出照常出文件），只有用户选到后端不认的值时才 400 ——
+    所以同样用源码扫描把「逐值相等」钉成 T1 判据。
+    """
+
+    def test_frontend_literals_match_backend_grouping_constants(self):
+        source = GROUPING_TS.read_text(encoding='utf-8')
+
+        other = re.search(r"OTHER_GROUP_NAME\s*=\s*'([^']*)'", source)
+        self.assertIsNotNone(other, 'frontend exportGrouping.ts 的 OTHER_GROUP_NAME 未找到')
+        self.assertEqual(other.group(1), grouping.OTHER_GROUP_NAME,
+                         '「其他」保留名必须两边同值')
+
+        options = re.search(r'MAX_ITEMS_OPTIONS\s*=\s*\[([^\]]*)\]', source)
+        self.assertIsNotNone(options, 'frontend exportGrouping.ts 的 MAX_ITEMS_OPTIONS 未找到')
+        self.assertEqual([int(v) for v in re.findall(r'\d+', options.group(1))],
+                         list(grouping.ALLOWED_MAX_ITEMS_PER_SHEET),
+                         '每页上限可选值必须与后端白名单逐值一致（否则下拉能选出 400）')
+
+        default = re.search(r'DEFAULT_MAX_ITEMS\s*=\s*(\d+)', source)
+        self.assertIsNotNone(default, 'frontend exportGrouping.ts 的 DEFAULT_MAX_ITEMS 未找到')
+        self.assertEqual(int(default.group(1)), grouping.DEFAULT_MAX_ITEMS_PER_SHEET,
+                         '默认上限必须与后端缺省一致')
 
 
 class PercentFormatTests(SimpleTestCase):
