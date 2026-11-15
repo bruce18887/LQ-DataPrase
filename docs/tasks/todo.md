@@ -934,22 +934,59 @@ T3 本批 **5** 条（`repair-center.spec.ts` 里 366/407/437/513/544 那五条�
 6. **另一会话的 `apps/export/*` 未提交改动**还挂在共享工作树上；收口两轮后端全量数
    （2651 → 2662）里含它们那 5 条测试，对账见上表。
 
-# 任务：批3b 两页统一 toolbar（2026-11-15，**计划已写，待复核后开工**）
+# 任务：批3b 两页统一 toolbar（2026-11-15，计划 Task 7 收口）
 
-计划拆成两份，按顺序执行（第一份产出共享壳 `AdminPageToolbar.vue`，第二份消费它）：
+## 状态：**已收口，未 push**
 
-1. `docs/superpowers/plans/2026-11-15-batch3b-audit-toolbar.md` —— 共享壳 + 操作审计页；
-   只跑 affected 档与目标 T3，不跑批次收口全量。
+过程分支 `feature/batch3b-toolbars`，base = `5b3af88`（批3a 收口后的 master）。
+**收口时 tip = `8f1db98`**（计划与台账这最后一笔在它之后，别拿 `git rev-parse master` 当本批 tip）。
+全程**没有 push**；`origin` 是公开仓库。工作树里另一会话的
+`apps/export/*`、`apps/weight/xlsx.py`、`apps/common/sheet_names.py` 等未提交改动本批一律没碰、没 stage。
+
+两份计划（按顺序执行，第一份产出共享壳，第二份消费它）：
+
+1. `docs/superpowers/plans/2026-11-15-batch3b-audit-toolbar.md` —— 共享壳 `AdminPageToolbar.vue` + 操作审计页；
 2. `docs/superpowers/plans/2026-11-15-batch3b-user-management-toolbar.md` —— 用户管理页
-   （KPI chip / 共用表单对话框 / 工具栏右槽）+ §6.5 两处死规则收敛 + night
-   `.el-select__wrapper` T3 + 介绍书构建 + 批次收口全量档。
+   （KPI chip / 共用表单对话框 / 工具栏右槽）+ §6.5 死规则收敛 + 主题 T3 + 介绍书 + 收口。
 
-口径：
+## 收口七档（每档取判据行，不取退出码）
 
-- **决策 D（左槽搜索/角色筛选）仍归批4**，批3b 左槽留空；本批不动 `users` 列表过滤逻辑。
+| 档 | 命令 | 实测判据行 |
+|---|---|---|
+| 后端全量 | `CODEBUDDY_SAFE_DELETE_ENABLED=0 .venv/Scripts/python.exe -X utf8 manage.py test` | `Ran 2674 tests in 571.971s` / `OK (skipped=16)`；`^(FAIL|ERROR):` 0（`tasks/b3b_final_backend.log`） |
+| 全量池 | `node scripts/e2e_pool.mjs --slots=4` | `文件 89 · 加权总量 1061s · 计划 slot 4`；`用例 478 · 墙钟 9.8min · 单价 2.97s/例 · unexpected 0 · flaky 0 · skipped 21 · 结论 MEASURED`（`tasks/b3b_final_pool.log`） |
+| 全量 vitest | `npx vitest run` | `Test Files 73 passed (73)` / `Tests 1012 passed (1012)`（`tasks/b3b_final_vitest.log`） |
+| e2e 类型 | `npm run lint:e2e` | `error TS` **0** 处（`tasks/b3b_final_lint.log`） |
+| 前端构建 | `npm run build`（含 `vue-tsc -b`） | `✓ built in 829ms`，零 TS 诊断（`tasks/b3b_final_build.log`） |
+| 行数闸 | `npx vitest run test/unit/lineLimit.spec.ts` | `Tests 15 passed (15)`；**没有给任何文件加豁免**（`tasks/b3b_final_linelimit.log`） |
+| affected | `node scripts/e2e_affected.mjs --base master --dry-run` | `decide: 全量 e2e（兜底命中）` 4 档 = lint:e2e / vitest / backend / e2e:全量；`RESULT: PASS · dry-run` ⇒ 上面全量池+后端是它的**超集**（`tasks/b3b_final_affected_dry.log`） |
+| 介绍书 | `npm run intro:build` + `node scripts/intro/check.mjs` | `build complete in 2.09s`；`INTRO-CHECK PASS · 截图 8 · 导航 17 · 组件 23 · 源文件 41 · 版本 v0.8.0 同源`（`tasks/b3b_final_intro_*.log`） |
+
+三档测试数现读：**T1 0**（后端零改动；后端全量里的 2674 例是既有套件）/
+**T2 新增 20 条**（`adminToolbarWiring.spec.ts` 6 + `adminUserFormWiring.spec.ts` 14；`roleLabelHygiene.spec.ts`
+8 条不变、判据 ④ 的目标从 `UserManagement.vue` 迁到 `UserFormDialog.vue`）/
+**T3 新增 4 条**（审计页盒宽 1 + 用户管理 KPI/工具栏 1 + 主题 2）；`audit.spec.ts` 两条既有日期流程
+加了 `dismissDatePanel()`（点页面标题关面板），断言未削弱。
+
+## 实施期的偏差与判定
+
+- **审计页 1280 换行**：日期面板会盖住右槽「查询」，E2E 用点标题关面板规避（Escape 会清空已输入值）；
+  这是真实产品/UX 开口，已记下方「产品开口」，不在批3b 修。
+- **B3 评审发现对话框 input/footer 样式够不到 teleport 子组件**：B5 把三条 input 深规则搬进
+  `UserFormDialog.vue`、删掉页面死规则，并补了对话框输入框的 light 基线/night 覆写 T3。
+- **B5 复审发现第三处死规则** `SettingsPage.vue:313`：写域外，已记下方「产品开口」，归批4/独立小批。
+- **B6 复审前扩围**：`data.ts` 的管理功能卡仍写「创建账号 / 四卡」，与实现不符；已补一笔 docs 提交
+  `8f1db98` 同步，介绍书 build/check 通过。
+- **A4 中间档的一次 backend 红**：默认 affected 只在未提交改动上选例（选到了另一会话的 exports），
+  backend 红在 `test_job_cancel` 的负载时序用例；隔离复跑 `Ran 1 test ... OK` ⇒ 负载 flake，不属批3b。
+  B7 收口后端全量 `OK`，该 flake 未复发。
+
+## 明确不做（别在收口时顺手扩）
+
+- **决策 D（用户管理左槽搜索/角色筛选）仍归批4**；批3b 左槽留空，`users` 列表过滤逻辑未动。
 - 本批**不动** `frontend/e2e/data/repair-center.spec.ts`（591/600）；拆
-  `e2e/data/duplicate-keep.spec.ts` 是批4 的硬前置，别提前动。
-- 实现前按 `.claude/CLAUDE.md`「验证计划：实现前先 check-in」——两份计划复核通过后再开工。
+  `e2e/data/duplicate-keep.spec.ts` 是批4 的硬前置。
+- 不 push；并入本地 master 需用户点头（沿用批1/2/3a 的 `--ff-only` 流程）。
 
 ## 实现期发现的产品开口（待拍板，不阻塞批内收口）
 
