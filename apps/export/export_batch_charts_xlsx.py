@@ -505,6 +505,10 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
     open_buffers = []
     png_results = _render_chart_pngs(rows, flags, workers)
     done = set()
+    # 同一张图只渲染一次（spec §6.2）：多属参数在每个所属分类的页里各嵌一份块，
+    # 但图内容完全相同。按 title 缓存首块写成功后产出的 PNG 字节，后续块直接复用；
+    # buffer 对象不复用（_write_block 内部另建 BytesIO），因为 openpyxl 要各自持有到 save。
+    png_cache: dict[str, bytes] = {}
 
     for (_base, page_titles), sheet_name in zip(pages, sheet_names):
         ws = wb.create_sheet(title=sheet_name)
@@ -512,13 +516,19 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
         start = 1
         has_content = False
         for title in page_titles:
-            # 多属参数在每个所属分类的页里各嵌一份图（png 复用，buffer 各自新建）。
+            # 取图优先级：预渲染结果 → 首块缓存 → 就地串行渲染。
+            png = png_results.get(title)
+            if png is None:
+                png = png_cache.get(title)
             buffer = _write_block(ws, start, title, rows_by_title[title],
-                                  png_results.get(title), df, metadata, site_col, flags)
+                                  png, df, metadata, site_col, flags)
             if buffer is None:
                 continue
             has_content = True
             open_buffers.append(buffer)
+            if title not in png_cache:
+                # 写成功才缓存：渲染不出图的块已在上面返回 None，不会把空字节写进缓存。
+                png_cache[title] = buffer.getvalue()
             start += _block_height(rows_by_title[title])
             if title not in done:
                 done.add(title)
