@@ -22,6 +22,7 @@ const MODELS_PY = new URL('../../../apps/accounts/models.py', import.meta.url)
 const FILES = {
   util: 'utils/roleLabel.ts', topbar: 'components/layout/Topbar.vue',
   dialog: 'components/layout/AccountDialog.vue', mgmt: 'pages/admin/UserManagement.vue',
+  userForm: 'pages/admin/components/UserFormDialog.vue',
 } as const
 /** 展示白名单 ≠ 后端 choices 的副本：后端加新角色不等于前端立刻显示它（§7.3 要的是落兜底）。 */
 const DISPLAY_ROLES = ['administrator', 'user']
@@ -133,10 +134,10 @@ describe('判据 ③：全仓代码行不出现第三种角色', () => {
 })
 
 describe('判据 ④：角色下拉与后端 ROLE_CHOICES 同步（清单从模型读）', () => {
-  it('UserManagement.vue 里**每个** `v-model="….role"` 下拉都与模型同集合，并报出动的是哪一侧', () => {
+  it('UserFormDialog.vue 里**每个** `v-model="….role"` 下拉都与模型同集合，并报出动的是哪一侧', () => {
     const backend = roleChoices(readFileSync(MODELS_PY, 'utf8'))
-    const blocks = roleSelectBlocks(readSrc(FILES.mgmt))
-    expect(blocks.length, '一个角色下拉都没抓到：抽取锚点或页面结构变了，这条判据要重新对形状').toBeGreaterThan(0)
+    const blocks = roleSelectBlocks(readSrc(FILES.userForm))
+    expect(blocks.length, '一个角色下拉都没抓到：对话框搬家或结构变了，这条判据要重新对形状').toBeGreaterThan(0)
     blocks.forEach((opts, i) => {
       const extra = opts.filter((v) => !backend.includes(v))
       const missing = backend.filter((v) => !opts.includes(v))
@@ -144,6 +145,7 @@ describe('判据 ④：角色下拉与后端 ROLE_CHOICES 同步（清单从模�
       expect(missing, `第 ${i + 1} 个下拉缺 ${missing.join('/')} —— 后端 choices 已加而前端没跟上：下拉选项与 types 的 User.role 一起补`).toEqual([])
     })
   })
+
 })
 
 describe('抽取器自证（否则全仓断言是在比空集合）', () => {
