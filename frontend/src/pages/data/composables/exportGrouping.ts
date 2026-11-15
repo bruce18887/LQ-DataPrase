@@ -9,9 +9,16 @@ export type ConflictStrategy = 'first' | 'specific' | 'multi'
 export interface GroupPattern { type: PatternType; text: string }
 export interface GroupRule { id: string; name: string; patterns: GroupPattern[] }
 export interface GroupAssignment { name: string; params: string[] }
-/** 预览口径：行含 0 命中的分类，sheet 数按「参与项次」累加（多属会重复计）。 */
+/**
+ * 预览行：在请求分组形状上多一个 `configured` 标记。`false` 表示「名字已填、但没有一个
+ * 有效条件」——这类分类不参与导出（`resolveGroups` 不会输出它），但必须在预览里留一行，
+ * 否则用户刚打完分类名、还没来得及填条件时，那行会从预览里静默消失。
+ * 自动「其他」行不是未配置行，其 `configured` 恒为 `true`。
+ */
+export interface GroupPreviewRow extends GroupAssignment { configured: boolean }
+/** 预览口径：行含 0 命中的分类与未配置行，sheet 数按「参与项次」累加（多属会重复计）。 */
 export interface GroupPreview {
-  rows: GroupAssignment[]
+  rows: GroupPreviewRow[]
   sheets: number
   conflicts: number
 }
@@ -102,9 +109,11 @@ export function resolveGroups(
 }
 
 /**
- * 预览专用：**每个已配置分类都出行（含 0 命中）**，并恒追加自动「其他」行。
- * `resolveGroups` 会滤掉空分组（发请求时不需要它），但预览里「配了却没人命中」是
- * 用户最需要看见的信息，所以两者必须分开。
+ * 预览专用：**每个已命名分类都出行**，并恒追加自动「其他」行（最后）。
+ * `resolveGroups` 会滤掉空分组（发请求时不需要它），但预览里两种「空」都必须看得见：
+ * - 条件有效但 0 命中 → 正常计数行（`configured: true`，0 项）；
+ * - 名字已填但无有效条件 → 占位行（`configured: false`，params 为空，不参与导出）。
+ * 名字都空的新建行不出现 —— 那是还没开始的编辑，不是一份配置。
  *
  * sheet 数 = 1 张总览 + Σ ceil(行大小 / 上限)。多属策略下同一参数会出现在多行，
  * 因此这里的计数是**参与项次**（一处命中算一次），与后端按分类装箱的页数同口径。
@@ -113,9 +122,16 @@ export function previewGroups(
   params: string[], rules: GroupRule[], strategy: ConflictStrategy, maxItems?: number,
 ): GroupPreview {
   const { valid, buckets, other } = bucketize(params, rules, strategy)
-  const rows: GroupAssignment[] = valid
-    .map((r) => ({ name: r.name.trim(), params: buckets.get(r.id)! }))
-  rows.push({ name: OTHER_GROUP_NAME, params: other })
+  const validIds = new Set(valid.map((r) => r.id))
+  // 行序 = 声明序；有效分类与未配置分类各自在自己的位置出行，不重排
+  const rows: GroupPreviewRow[] = []
+  for (const r of rules) {
+    const name = r.name.trim()
+    if (!name) continue
+    if (validIds.has(r.id)) rows.push({ name, params: buckets.get(r.id)!, configured: true })
+    else rows.push({ name, params: [], configured: false })
+  }
+  rows.push({ name: OTHER_GROUP_NAME, params: other, configured: true })
   return {
     rows,
     sheets: estimateSheetCount(rows, maxItems ?? DEFAULT_MAX_ITEMS),
@@ -155,6 +171,19 @@ export function estimateSheetCount(groups: GroupAssignment[], maxItems: number):
 
 export function hasGroupingRules(config: GroupingConfig): boolean {
   return validRules(config.groups).length > 0
+}
+
+/**
+ * 导出格式闸（R15）：后端对 `pptx` 直接拒绝 groups（`groups_not_supported` → 400），
+ * 而作业提交是 arraybuffer 请求，前端读不到响应里的错误码，用户只会看到一句英文的
+ * 「Request failed with status code 400」。所以在提交前就把这条路显式堵死，给一句能执行的中文。
+ * 返回 null 表示放行；只拦「PPT + 确实配了有效规则」这一种组合，无规则时 PPT 照常导出。
+ */
+export function groupingExportBlocked(format: string, config: GroupingConfig): string | null {
+  if (format === 'pptx' && hasGroupingRules(config)) {
+    return 'PPT 不支持测试项归类：请先删除分类或改用 Excel 导出'
+  }
+  return null
 }
 
 // 容错解析：坏 JSON 整体回退默认；脏字段逐项丢弃或回退，不让一条坏数据毁掉整份配置

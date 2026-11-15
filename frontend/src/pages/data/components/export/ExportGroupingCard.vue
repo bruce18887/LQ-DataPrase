@@ -52,12 +52,18 @@
 
       <el-button size="small" data-testid="export-group-add" @click="addGroup">+ 添加分类</el-button>
 
-      <!-- 预览：每个已配置分类都出一行（0 命中也不例外），「其他」恒在最后。
-           0 命中行是用户最需要看见的反馈 —— 配了规则却一个人都没匹配上，只能在这里发现。 -->
+      <!-- 预览：每个已命名分类都出一行（0 命中也不例外），「其他」恒在最后。
+           条件有效但 0 命中 → 正常计数行（用户据此发现规则没匹配上）；
+           名字填了但条件还没填 → `configured: false` 的占位行，明说它不参与导出
+           （不能删掉这行：删掉就等于「打了个分类名，预览里凭空消失」）。 -->
       <div class="preview" data-testid="export-grouping-preview">
-        <div v-for="(row, ri) in preview.rows" :key="ri" class="preview-line">
-          {{ row.name }}：{{ row.params.length }} 项<template v-if="row.params.length">
-            （{{ row.params.slice(0, 3).join(', ') }}<template v-if="row.params.length > 3">…</template>）</template>
+        <div v-for="(row, ri) in preview.rows" :key="ri" class="preview-line"
+             :class="{ 'is-unconfigured': !row.configured }">
+          <template v-if="row.configured">
+            {{ row.name }}：{{ row.params.length }} 项<template v-if="row.params.length">
+              （{{ row.params.slice(0, 3).join(', ') }}<template v-if="row.params.length > 3">…</template>）</template>
+          </template>
+          <template v-else>{{ row.name }}：未配置条件（不参与导出）</template>
         </div>
         <div class="preview-meta">
           预计 {{ preview.sheets }} 张 sheet · 约 {{ preview.seconds }}s · {{ preview.size }}
@@ -161,6 +167,7 @@ const instanceCount = computed(() => preview.value.rows.reduce((sum, row) => sum
 .pattern-type { width: 90px; }
 .pattern-text { display: block; width: 220px; }
 .preview { font-size: var(--p-fs-dense); color: var(--text-2); display: flex; flex-direction: column; gap: 2px; }
+.is-unconfigured { color: var(--text-3); }
 .preview-meta { color: var(--text-3); }
 .preview-note { color: var(--text-3); }
 .grouping-help { font-size: var(--p-fs-micro); color: var(--text-3); line-height: 1.5; }
