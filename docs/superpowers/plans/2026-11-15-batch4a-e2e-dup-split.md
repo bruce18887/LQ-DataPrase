@@ -345,10 +345,12 @@ git commit -m "refactor(e2e): repair-center 改用三件共享助手，取数通
 
 - [ ] **Step 1: 建新文件骨架**
 
-Create `frontend/e2e/data/duplicate-keep.spec.ts`，内容如下（两处 `PASTE` 标记在 Step 2/3 用原文替换）：
+Create `frontend/e2e/data/duplicate-keep.spec.ts`，内容如下（两处 `PASTE` 标记在 Step 2/3 用原文替换）。
+`type Page` 必须带：搬过来的三个助手签名里就是 `page: Page`（现查源文件 `:59` `seedDuplicatePair`、
+`:77` `dupEndState`、`:89` `dupRemainingBatches`），漏了它 `lint:e2e` 直接 TS2304。
 
 ```ts
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import path from 'node:path'
 import fs from 'node:fs'
 import { ACCOUNTS, DATA_DIR } from '../fixtures/test-data'
@@ -420,6 +422,17 @@ test.describe.serial('重复项选保留', { tag: ['@p2', '@data'] }, () => {
 删除 Step 2 与 Step 3 复制走的整段（现在它们在新文件里）。然后核对留下的部分：
 `BATCH`、`REPAIR_FILE`、`orphanDir`、`afterEach`、`PRIMARY_SAMPLE_FILE` 仍在用，一个都不许顺手删。
 
+反向也要核：`type Page` 在 Task 2 之后**只**被 `seedDuplicatePair`/`dupEndState`/`dupRemainingBatches`
+三个函数用着（Task 2 的实现者正是因为这个才没摘它，实测见 `:59`/`:77`/`:89`）。这三段一旦被搬走，
+`repair-center.spec.ts` 里 `Page` 就**重新变成零用处** ⇒ 必须把 `:1` 改回
+`import { test, expect } from '@playwright/test'`，否则 TS6133。搬完现查一次再定：
+
+```bash
+grep -n ": Page\|type Page" frontend/e2e/data/repair-center.spec.ts
+```
+
+Expected: 摘除前它会列出那三处（搬走后应为空 ⇒ 摘 `:1`）。
+
 - [ ] **Step 5: 类型闸**
 
 Run: `cd frontend && npm run lint:e2e`
@@ -451,10 +464,15 @@ Expected: **两处**各有一条 serial 声明 + 一条 `{ tag: ['@p2', '@data']
 - [ ] **Step 7: 两个文件各自单跑**
 
 Run: `cd frontend && npx playwright test e2e/data/repair-center.spec.ts`
-Expected: 业务 4 条全通过、零 `failed`（汇总 `6 passed`，含 setup 两条）。
+Expected: 业务 4 条**零 `failed`**，其中 2 条会 `skipped` —— 它们是 `test.skip(!fs.existsSync(PRIMARY_SAMPLE_FILE))`
+守卫的那两条（`:178`/`:236`），而本机现测 `Data/SampleData` **不存在**（`/Data/` 被 `.gitignore:145` 整目录挡掉，
+属本机私有料）。所以形状是 `2 passed + 2 skipped`（外加 setup 两条）。**这 2 条 skip 不是回归**，2026-11-15
+Task 2 已实测确认；把它当异常去补料或删守卫都是越域。
 
 Run: `cd frontend && npx playwright test e2e/data/duplicate-keep.spec.ts`
-Expected: 业务 5 条全通过、零 `failed`（汇总 `7 passed`，含 setup 两条）。
+Expected: 业务 **5 条全通过、零 `failed`**（汇总 `7 passed`，含 setup 两条）。这 5 条**都不带** 
+PRIMARY_SAMPLE_FILE 守卫（现查：该常量的守卫只出现在 `:178`/`:236` 两条留下的用例里）⇒ 不该出现 skip；
+出现 skip 就是搬错了用例或动了守卫。
 
 分开设两步的原因：Task 3 之后「哪一半红了」必须能一句话回答；两半合起来跑的红点归因不了。
 
