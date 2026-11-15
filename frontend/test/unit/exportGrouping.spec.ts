@@ -6,6 +6,7 @@ import {
   countConflicts,
   defaultGroupingConfig,
   estimateSheetCount,
+  groupingExportBlocked,
   hasGroupingRules,
   parseGroupingConfig,
   previewGroups,
@@ -124,10 +125,34 @@ describe('previewGroups', () => {
   })
 
   it('无有效规则时只剩「其他」一行，且它承载全部参数', () => {
+    // 「其他」是自动行，不是「未配置」行：它照常参与导出，configured 恒为 true
     expect(previewGroups(['a', 'b'], [], 'first').rows)
-      .toEqual([{ name: OTHER_GROUP_NAME, params: ['a', 'b'] }])
+      .toEqual([{ name: OTHER_GROUP_NAME, params: ['a', 'b'], configured: true }])
+    // 名字都空的新建行不算配置，不占预览行
     expect(previewGroups(['a'], [rule('x', ' ', [{ type: 'prefix', text: 'A' }])], 'first').rows)
-      .toEqual([{ name: OTHER_GROUP_NAME, params: ['a'] }])
+      .toEqual([{ name: OTHER_GROUP_NAME, params: ['a'], configured: true }])
+  })
+
+  it('已命名但无有效条件的分类出现在声明序位置，configured=false 且参数为空', () => {
+    const rules = [RULES[0], rule('r8', 'NOCOND', [{ type: 'prefix', text: '  ' }]), RULES[1]]
+    const out = previewGroups(['lkg_a', 'misc'], rules, 'first')
+    expect(out.rows.map((r) => [r.name, r.configured]))
+      .toEqual([['LKG', true], ['NOCOND', false], ['TRIM', true], [OTHER_GROUP_NAME, true]])
+    expect(out.rows[1].params).toEqual([])
+    // 未配置行不占 sheet：与「没这条未配置分类」的同一份参数得到相同张数
+    const baseline = previewGroups(['lkg_a', 'misc'], [RULES[0], RULES[1]], 'first')
+    expect(out.sheets).toBe(baseline.sheets)
+  })
+
+  it('0 命中但条件有效的分类仍出现，且 configured=true', () => {
+    const out = previewGroups(['misc'], [RULES[0]], 'first')
+    expect(out.rows[0]).toEqual({ name: 'LKG', params: [], configured: true })
+  })
+
+  it('「其他」行恒在最后（有未命中参数时）', () => {
+    const rules = [RULES[0], rule('r8', 'NOCOND', [{ type: 'prefix', text: '  ' }])]
+    const out = previewGroups(['lkg_a', 'misc'], rules, 'first')
+    expect(out.rows.at(-1)).toEqual({ name: OTHER_GROUP_NAME, params: ['misc'], configured: true })
   })
 
   it('多属：一项可同时占多行，sheet 数按参与项次计（不是按去重后的参数数）', () => {
@@ -182,5 +207,25 @@ describe('validateGroupingConfig', () => {
     // 空条件不参与匹配，但名字合法 ⇒ 不拦提交
     expect(validateGroupingConfig(config([rule('a', 'LKG', [{ type: 'prefix', text: '  ' }])])))
       .toBe(null)
+  })
+})
+
+describe('groupingExportBlocked', () => {
+  const config = (groups: GroupRule[]): GroupingConfig =>
+    ({ groups, strategy: 'first', maxItemsPerSheet: DEFAULT_MAX_ITEMS })
+
+  it('PPT + 有有效规则 → 返回可执行的中文拦截提示（后端对 pptx 必 400）', () => {
+    expect(groupingExportBlocked('pptx', config(RULES)))
+      .toBe('PPT 不支持测试项归类：请先删除分类或改用 Excel 导出')
+  })
+
+  it('PPT + 无有效规则 → null（空壳分类不算配置，PPT 照常导出）', () => {
+    expect(groupingExportBlocked('pptx', defaultGroupingConfig())).toBe(null)
+    expect(groupingExportBlocked('pptx', config([rule('x', 'A', [{ type: 'prefix', text: ' ' }])])))
+      .toBe(null)
+  })
+
+  it('Excel + 有有效规则 → null（照常携带分组导出）', () => {
+    expect(groupingExportBlocked('xlsx', config(RULES))).toBe(null)
   })
 })

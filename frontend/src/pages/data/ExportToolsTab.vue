@@ -49,7 +49,7 @@ import ExportChartConfig from './components/export/ExportChartConfig.vue'
 import ExportActions from './components/export/ExportActions.vue'
 import { safeGetItem, safeSetItem } from '../../utils/safeStorage'
 import {
-  hasGroupingRules, parseGroupingConfig, resolveGroups, validateGroupingConfig,
+  groupingExportBlocked, hasGroupingRules, parseGroupingConfig, resolveGroups, validateGroupingConfig,
   type GroupingConfig,
 } from './composables/exportGrouping'
 
@@ -116,6 +116,13 @@ function onExportSigma() {
 }
 
 function onExportBatch(format: string) {
+  // PPT 带分组必 400（后端 `groups_not_supported`），而作业提交是 arraybuffer 请求，
+  // 读不到响应里的错误码 —— 用户只会看到一句英文的 400。这里先显式拦下（R15）。
+  const blocked = groupingExportBlocked(format, grouping.value)
+  if (blocked) {
+    ElMessage.warning(blocked)
+    return
+  }
   // 提交前自校验（R13）：分类名空/重名/占用「其他」都在这里拦下 —— 后端只做结构校验，
   // 这类「用户少打了一个字」的错误不该走一趟作业再拿 400。
   const groupingError = validateGroupingConfig(grouping.value)
