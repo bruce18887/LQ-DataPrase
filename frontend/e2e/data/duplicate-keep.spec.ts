@@ -9,7 +9,8 @@ import { openRepairCenter } from '../helpers/repairCenterFlow'
 
 /**
  * 重复项选保留的界面层（T3）。从 `repair-center.spec.ts` 拆出来，理由只有一个：
- * 那份文件 591/600 行已到闸口（`scripts/line-limit.mjs:18`），而 §5.4 续删、UX-1 锁定态、
+ * 拆出前该文件实测 551/600 行、逼近闸口（`scripts/line-limit.mjs:18`；设计稿引的 591 是
+ * Task 2 之前的 E1 快照，本句按拆出前实测订正），而 §5.4 续删、UX-1 锁定态、
  * FIX-1 的「刷新不吞勾选」对照用例都还要往这一族加判据 —— 先拆再加，别为凑行数砍判据。
  * 设计稿：`docs/superpowers/specs/2026-11-15-batch4a-e2e-split-and-username-guard-design.md` §2。
  */
