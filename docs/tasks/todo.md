@@ -1040,3 +1040,10 @@ T3 本批 **5** 条（`repair-center.spec.ts` 里 366/407/437/513/544 那五条�
   ④ `frontend/e2e/data/repair-center.spec.ts`（591/600）拆出 `e2e/data/duplicate-keep.spec.ts` 的**硬前置**；
   ⑤ 本次人工验收两项**可推翻**：`Stamp → Medal`、审计页 toolbar→table 28px 收成 12px
      —— 各一行级改动，各需补一轮聚焦测试（双主题判据 + 对应 e2e 定位），不夹带进已归档的批3b 证据。
+
+## 2026-11-15 导出分布图：测试项归类 + 每页上限装箱（feat/export-grouping）
+
+- 交付：归类规则 UI（前缀/后缀/包含，组内 OR、大小写不敏感，策略默认首个命中/最具体/多属）、每页上限 30/50/100（默认 50，装满再翻页）、总览「分类」列与块锚点超链接、多属只渲染一次、PPT 带分组显式拦截；同分支含导出图版式/口径对齐与 sheet 链接修复。
+- 契约：请求新增 `groups` / `max_items_per_sheet`；新错误码 `invalid_groups` / `invalid_page_size` / `groups_not_supported`；无 groups 保持旧版式，且此时页上限字段被忽略。
+- 门禁：后端 `apps.export apps.jobs apps.weight apps.analysis.tests_cpk_thresholds test.backend` 全量 **2313 OK（skipped=16）**；vitest **1043**；build/lint 绿；affected 门禁（`--base f2da685`）**PASS · 4 档全执行**，e2e 池 477 例 / 真红 0 / 2 例负载抖动（site3d、settings）复跑转绿；grouped-export e2e（P2）3 passed。
+- 残余（Minor，已裁决）：site 数组释放循环仅探针证据；空渲染页删除后的链接/锚点异常路径（R9）；ERROR_CODE_MAP 三条在 arraybuffer 提交路径读不到（R13，UI 已前置拦截）；在无 `.venv` 的工作树跑 e2e 需建 `.venv` 链接或覆盖 `PYTHON_BIN`。

@@ -28,6 +28,7 @@ from django.db import connections
 from django.utils import timezone
 
 from apps.export.filters import grid_filters_from
+from apps.export.grouping import DEFAULT_MAX_ITEMS_PER_SHEET
 from apps.jobs import monitor
 from apps.jobs.models import TERMINAL_STATUSES, Job
 from apps.jobs.runner import (
@@ -256,14 +257,19 @@ def build_export_excel_task(*, params, abs_path, fmt, hidden_columns,
 
 
 def build_batch_charts_task(*, params, abs_path, fmt, job_id, owner_id,
-                            dpi, cpk_thresholds, chart_format='xlsx') -> dict:
+                            dpi, cpk_thresholds, chart_format='xlsx',
+                            groups=None, max_items_per_sheet=None) -> dict:
     """批量图表：图形开关与 dpi/CPK 阈值都必须在主进程钳成纯标量再进 task。
 
     这里**没有** hidden_columns：隐藏列是表格/xlsx 数据区的概念，图表产物用不上。
+
+    `groups` / `max_items_per_sheet` **有分组才写进 task**：没有分组时少两个键，
+    worker 侧 `task.get('groups')` 取到 None ⇒ 装配层走旧版式，与接线前逐字一致
+    （空列表也算「没有分组」，别让它把旧 payload 形状改掉）。
     """
     show_keys = ('show_limit', 'show_3sigma', 'show_4sigma',
                  'show_6sigma', 'show_normal', 'show_kde')
-    return _base_task(params=params, abs_path=abs_path, fmt=fmt,
+    task = _base_task(params=params, abs_path=abs_path, fmt=fmt,
                       job_id=job_id, owner_id=owner_id) | {
         'params': list(params.get('params') or []),
         'chart_format': chart_format,
@@ -273,6 +279,11 @@ def build_batch_charts_task(*, params, abs_path, fmt, job_id, owner_id,
         **{k: params.get(k, True if k == 'show_limit' or k == 'show_6sigma' else False)
            for k in show_keys},
     }
+    if groups:
+        task['groups'] = groups
+        task['max_items_per_sheet'] = int(
+            max_items_per_sheet or DEFAULT_MAX_ITEMS_PER_SHEET)
+    return task
 
 
 def build_html_report_task(*, params, abs_path, fmt, job_id, owner_id,

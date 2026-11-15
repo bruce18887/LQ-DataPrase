@@ -46,6 +46,9 @@ export const ERROR_CODE_MAP: Record<string, string> = {
   weight_length_mismatch: '声明长度与实际数值个数不一致',
   weight_bad_number: '权重数值里有无法解析的项',
   weight_too_large: '权重文件超出可处理范围',
+  invalid_groups: '测试项归类无效，请检查后重试',
+  invalid_page_size: '每页测试项数不合法',
+  groups_not_supported: 'PPT 格式不支持测试项归类',
 }
 
 interface ErrorLike {
