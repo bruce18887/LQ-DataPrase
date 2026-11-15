@@ -141,3 +141,65 @@ class BlockLayoutTests(SimpleTestCase):
         self.assertEqual(anchor.row + 1, _block_image_row(1, 3))
         # 字面钉住：公式若退回 max(9, …) 一类形状则锚点漂到 10 行，这里立刻红
         self.assertEqual(anchor.row + 1, 9)
+
+
+class GroupedLayoutTests(SimpleTestCase):
+    """分组装配：sheet 装箱、总览分类列、每参数精确锚点、多属重复嵌入。"""
+
+    PARAMS = ['P00', 'P01', 'P02', 'P03', 'P04']
+
+    def _build(self, groups, max_items=50):
+        rng = np.random.default_rng(0)
+        df = pd.DataFrame({p: rng.normal(10, 1, 40) for p in self.PARAMS})
+        metadata = {
+            'units': {p: 'V' for p in self.PARAMS},
+            'mins': {p: '0' for p in self.PARAMS},
+            'maxs': {p: '20' for p in self.PARAMS},
+            'format': 'CTA8290D',
+        }
+        return build_batch_charts_xlsx_with_charts(
+            df, metadata, self.PARAMS, dpi=72, workers=1,
+            groups=groups, max_items_per_sheet=max_items)
+
+    @staticmethod
+    def _wb(payload):
+        import io
+        from openpyxl import load_workbook
+        return load_workbook(io.BytesIO(payload))
+
+    def test_groups_sheets_links_and_category_column(self):
+        wb = self._wb(self._build([
+            {'name': 'A', 'params': ['P00', 'P01']},
+            {'name': 'B', 'params': ['P02', 'P03', 'P04']},
+        ]))
+        self.assertEqual(wb.sheetnames, ['总览', 'A', 'B'])
+        summary = wb['总览']
+        self.assertEqual(summary.cell(1, 3).value, '分类')
+        self.assertEqual([summary.cell(r, 3).value for r in range(2, 7)], ['A', 'A', 'B', 'B', 'B'])
+        self.assertEqual(summary.cell(2, 2).hyperlink.target, "#'A'!A1")
+        # 无 Site → 块高 32：第二块从第 33 行开始
+        self.assertEqual(summary.cell(3, 2).hyperlink.target, "#'A'!A33")
+        self.assertEqual(summary.cell(4, 2).hyperlink.target, "#'B'!A1")
+        self.assertEqual(wb['A'].cell(2, 1).value, 'P00')
+        self.assertEqual(wb['A'].cell(34, 1).value, 'P01')
+        self.assertEqual(wb['B'].cell(2, 1).value, 'P02')
+
+    def test_page_cap_packs_full_pages_not_even_split(self):
+        groups = [{'name': 'G', 'params': self.PARAMS}]
+        wb = self._wb(self._build(groups, max_items=2))
+        self.assertEqual(wb.sheetnames, ['总览', 'G_1', 'G_2', 'G_3'])
+        summary = wb['总览']
+        # 第 3 个参数 P02 落在 G_2 的第一块
+        self.assertEqual(summary.cell(4, 2).hyperlink.target, "#'G_2'!A1")
+
+    def test_multi_assign_embeds_block_twice_and_links_first(self):
+        wb = self._wb(self._build([
+            {'name': 'A', 'params': ['P00', 'P01']},
+            {'name': 'B', 'params': ['P00', 'P02']},
+        ]))
+        summary = wb['总览']
+        self.assertEqual(summary.cell(2, 3).value, 'A / B')
+        self.assertEqual(summary.cell(2, 2).hyperlink.target, "#'A'!A1")
+        self.assertEqual(wb['B'].cell(2, 1).value, 'P00')
+        self.assertEqual(len(wb['A']._images), 2)
+        self.assertEqual(len(wb['B']._images), 2)
