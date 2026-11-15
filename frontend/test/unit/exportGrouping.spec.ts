@@ -29,6 +29,11 @@ describe('resolveGroups', () => {
     expect(out[2].params).toEqual(['zz_trim_post'])
   })
 
+  it('同一分类内多条件为或：命中任一条件即归入该分类', () => {
+    const rules = [rule('o1', 'MIX', [{ type: 'prefix', text: 'ZZZ_' }, { type: 'contains', text: 'abc' }])]
+    expect(resolveGroups(['xx_abc_yy'], rules, 'first')).toEqual([{ name: 'MIX', params: ['xx_abc_yy'] }])
+  })
+
   it('首个命中：按规则顺序归类', () => {
     const out = resolveGroups(['lkg_trim_post'], RULES, 'first')
     expect(out).toEqual([{ name: 'LKG', params: ['lkg_trim_post'] }])
@@ -37,6 +42,22 @@ describe('resolveGroups', () => {
   it('最具体：后缀优先于包含，包含优先于前缀', () => {
     const out = resolveGroups(['lkg_trim_post'], RULES, 'specific')
     expect(out).toEqual([{ name: 'POST', params: ['lkg_trim_post'] }])
+  })
+
+  it('最具体：同类型时条件文本更长者胜出', () => {
+    const rules = [
+      rule('s1', 'SHORT', [{ type: 'contains', text: 'trim' }]),
+      rule('s2', 'LONG', [{ type: 'contains', text: 'trim_post' }]),
+    ]
+    expect(resolveGroups(['lkg_trim_post'], rules, 'specific')).toEqual([{ name: 'LONG', params: ['lkg_trim_post'] }])
+  })
+
+  it('最具体：权重与长度并列时取声明更靠前的规则', () => {
+    const rules = [
+      rule('e1', 'EARLY', [{ type: 'contains', text: 'abc' }]),
+      rule('e2', 'LATE', [{ type: 'contains', text: 'bcd' }]),
+    ]
+    expect(resolveGroups(['xabcdx'], rules, 'specific')).toEqual([{ name: 'EARLY', params: ['xabcdx'] }])
   })
 
   it('未命中进其他且永远最后', () => {
@@ -61,6 +82,11 @@ describe('preview helpers', () => {
     expect(estimateSheetCount([], 50)).toBe(1)
   })
 
+  it('预计 sheet 数：上限 ≤0 时回退默认上限', () => {
+    expect(estimateSheetCount([], 0)).toBe(1)
+    expect(estimateSheetCount([{ name: 'A', params: Array(120).fill('p') }], 0)).toBe(4)
+  })
+
   it('hasGroupingRules 只看「有名字且有非空条件」', () => {
     expect(hasGroupingRules(defaultGroupingConfig())).toBe(false)
     expect(hasGroupingRules({ groups: RULES, strategy: 'first', maxItemsPerSheet: 50 })).toBe(true)
@@ -76,5 +102,9 @@ describe('preview helpers', () => {
     expect(parsed.strategy).toBe('first')
     expect(parsed.maxItemsPerSheet).toBe(DEFAULT_MAX_ITEMS)
     expect(parsed.groups[0].patterns).toEqual([{ type: 'prefix', text: 'P' }])
+  })
+
+  it('parseGroupingConfig(null) 返回默认配置', () => {
+    expect(parseGroupingConfig(null)).toEqual(defaultGroupingConfig())
   })
 })
