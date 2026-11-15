@@ -21,6 +21,11 @@
 - 池档 slot 内是 `--workers=1`（`scripts/e2e_pool.mjs:215`），serial 档是 `workers: min(6, cpus/2)` + `fullyParallel`（`frontend/playwright.config.ts:63/:69`）。设计稿 §2.4 已判定接受这个差异，本刀不加互斥。
 - 起全量池之前必查两件事（本机既有事故）：① `netstat` 确认 slot 基址端口 `21001+`/`22001+` 没被别的会话或孤儿进程占着；② 空闲**提交内存**低于预算（本机 8.0 GB）时任何并行度都不该开跑，先清进程或换时段，**不要**用降 `--slots` 硬扛。
 - 全程不 push（`origin` 是公开仓库）。
+- **计数形状**：`--list` 与实跑都会连带 `setup` 项目（`fixtures/auth.setup.ts`）那两条
+  `authenticate as admin` / `authenticate as user`，因为业务项目声明了 `dependencies: ['setup']`
+  （`frontend/playwright.config.ts:123`）。所以基线标题文件是 **11 行**（9 业务 + 2 setup），
+  单跑汇总行会是 `Running <业务数+2> tests`。判据一律取「**业务用例名逐条在、零 `failed`**」，
+  不取总数 —— 两侧同现的 2 条对集合差没有影响。
 
 ## 文件结构（本刀完成后）
 
@@ -97,7 +102,7 @@ node tasks/b4a-titles.mjs data/repair-center.spec.ts > tasks/b4a_titles_baseline
 wc -l < tasks/b4a_titles_baseline.txt
 ```
 
-Expected: `9`（repair-center 现有 9 条用例标题）。不是 9 就停下 —— 后面每一步都拿这份对账。
+Expected: **11 行** —— 2026-11-15 现测：9 条业务用例，加上 `--list` 连带列出的 `setup` 项目两条（`authenticate as admin` / `authenticate as user`）。不是 11 就停下 —— 后面每一步都拿这份对账。
 顺手现读一次 vitest 留底（Task 4 要比数）：`cd frontend && npx vitest run > ../tasks/b4a_vitest_before.log 2>&1`。
 
 - [ ] **Step 3: 建 `apiClient.ts`（函数体逐字来自 `repair-center.spec.ts:38-61`）**
@@ -215,7 +220,7 @@ Expected: 零条 `error TS`。（这一步是本仓的机械闸之一：e2e 不�
 - [ ] **Step 8: 跑第一个消费者的真实用例**
 
 Run: `cd frontend && npx playwright test e2e/data/disk-usage-chip.spec.ts`
-Expected: 该文件全部用例 `passed`、零 `failed`。红了就是 helper 版与局部版不等价 —— **不许改用例迁就 helper**，回头 diff 函数体。
+Expected: **零 `failed`**（汇总含 setup 两条，形状是 `Running <业务数+2> tests`，见 Global Constraints）。红了就是 helper 版与局部版不等价 —— **不许改用例迁就 helper**，回头 diff 函数体。
 
 - [ ] **Step 9: Commit**
 
@@ -243,7 +248,7 @@ git commit -m "test(e2e): 抽出 apiClient/djangoShell/repairCenterFlow 三件�
 - [ ] **Step 1: 证明闸本身可用（改前基线已存）**
 
 Run: `cat tasks/b4a_titles_baseline.txt | wc -l`
-Expected: `9`。若不是 9，停下 —— 后面每一步都拿这份文件对账。
+Expected: `11`（见 Global Constraints 计数形状：9 业务 + setup 两条）。不是 11 就停下。
 
 - [ ] **Step 2: 删局部助手，加 import**
 
@@ -285,7 +290,8 @@ Expected: `diff` 无输出且打印 `TITLES_IDENTICAL`。有差异 = 搬运中�
 - [ ] **Step 5: 单文件真跑**
 
 Run: `cd frontend && npx playwright test e2e/data/repair-center.spec.ts`
-Expected: `9 passed`（或 `9 passed` 中含 `skipped` 时，逐条核对跳过原因必须是样例数据缺失 `PRIMARY_SAMPLE_FILE`，不得是断言失败）。
+Expected: repair-center 的 **9 条业务用例全部通过、零 `failed`**（汇总会是 `11 passed`，多的两条是 setup）。
+有 `skipped` 时逐条核对原因必须是样例数据缺失 `PRIMARY_SAMPLE_FILE`，不得是断言失败。
 
 - [ ] **Step 6: 批内快门禁（本刀第一次真跑 affected）**
 
@@ -413,10 +419,10 @@ Expected: `diff` 无输出且打印 `UNION_IDENTICAL`。这一步的语义是「
 - [ ] **Step 7: 两个文件各自单跑**
 
 Run: `cd frontend && npx playwright test e2e/data/repair-center.spec.ts`
-Expected: `4 passed`。
+Expected: 业务 4 条全通过、零 `failed`（汇总 `6 passed`，含 setup 两条）。
 
 Run: `cd frontend && npx playwright test e2e/data/duplicate-keep.spec.ts`
-Expected: `5 passed`。
+Expected: 业务 5 条全通过、零 `failed`（汇总 `7 passed`，含 setup 两条）。
 
 分开设两步的原因：Task 3 之后「哪一半红了」必须能一句话回答；两半合起来跑的红点归因不了。
 
