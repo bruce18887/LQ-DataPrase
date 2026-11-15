@@ -499,6 +499,7 @@ git commit -m "test(e2e): 重复项一族拆出 duplicate-keep.spec.ts，助手�
 | `frontend/test/unit/dupKeep.spec.ts:9` | 「卡片渲染由 T3（`repair-center.spec.ts`）钉」 | 改成 `duplicate-keep.spec.ts`（拆后卡片渲染在那份里） |
 | `frontend/test/unit/dupKeepWiring.spec.ts:4` | 「`repair-center.spec.ts` 钉的是…」 | 同上 |
 | `frontend/e2e/data/disk-usage-chip.spec.ts:33` | 「与 `repair-center.spec.ts:36` 同一种拿法」 | Task 1 Step 6 已连同这段注释一起删掉那个函数，无需再动 |
+| `frontend/e2e/helpers/djangoShell.ts:13` | 把「`repair-center.spec.ts` 的 `afterEach`」与「`cleanupDup`」并列为同文件的两种吞错示例 | **Task 3 评审新增**：`cleanupDup` 现已住在 `duplicate-keep.spec.ts` ⇒ 那句「同文件」失准，改成点名两个文件（纯注释，不触判据）|
 
 **Files:**
 - Modify: `frontend/test/unit/dupKeep.spec.ts:9`、`frontend/test/unit/dupKeepWiring.spec.ts:4`
