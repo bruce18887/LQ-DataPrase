@@ -933,3 +933,20 @@ T3 本批 **5** 条（`repair-center.spec.ts` 里 366/407/437/513/544 那五条�
    没替用户删任何东西）。
 6. **另一会话的 `apps/export/*` 未提交改动**还挂在共享工作树上；收口两轮后端全量数
    （2651 → 2662）里含它们那 5 条测试，对账见上表。
+
+# 任务：批3b 两页统一 toolbar（2026-11-15，**计划已写，待复核后开工**）
+
+计划拆成两份，按顺序执行（第一份产出共享壳 `AdminPageToolbar.vue`，第二份消费它）：
+
+1. `docs/superpowers/plans/2026-11-15-batch3b-audit-toolbar.md` —— 共享壳 + 操作审计页；
+   只跑 affected 档与目标 T3，不跑批次收口全量。
+2. `docs/superpowers/plans/2026-11-15-batch3b-user-management-toolbar.md` —— 用户管理页
+   （KPI chip / 共用表单对话框 / 工具栏右槽）+ §6.5 两处死规则收敛 + night
+   `.el-select__wrapper` T3 + 介绍书构建 + 批次收口全量档。
+
+口径：
+
+- **决策 D（左槽搜索/角色筛选）仍归批4**，批3b 左槽留空；本批不动 `users` 列表过滤逻辑。
+- 本批**不动** `frontend/e2e/data/repair-center.spec.ts`（591/600）；拆
+  `e2e/data/duplicate-keep.spec.ts` 是批4 的硬前置，别提前动。
+- 实现前按 `.claude/CLAUDE.md`「验证计划：实现前先 check-in」——两份计划复核通过后再开工。
