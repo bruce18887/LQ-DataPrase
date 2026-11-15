@@ -1,7 +1,7 @@
 <template>
   <div class="step-card">
     <div class="step-header">
-      <span class="step-number">2</span>
+      <span class="step-number">3</span>
       <span class="step-title">图表配置</span>
     </div>
     <div class="step-body">

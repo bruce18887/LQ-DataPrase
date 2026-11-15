@@ -1,7 +1,7 @@
 <template>
   <div class="step-card">
     <div class="step-header">
-      <span class="step-number">3</span>
+      <span class="step-number">4</span>
       <span class="step-title">导出</span>
       <span v-if="!hasParams" class="step-hint">请先完成步骤 1 选择参数</span>
     </div>
