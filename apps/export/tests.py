@@ -337,8 +337,9 @@ class ExportApiTests(APITestCase):
             show_6sigma=False, show_normal=False,
         )
         wb = openpyxl.load_workbook(io.BytesIO(buf))
-        # 总览第 2 行（参数 Vth）第 10 列（ALL Site Yield）应为 fail 红底
-        cell = wb['总览'].cell(row=2, column=10)
+        # 总览第 2 行（参数 Vth）第 11 列（ALL Site Yield）应为 fail 红底
+        # （第 3 列插入「分类」后由第 10 列右移一位）
+        cell = wb['总览'].cell(row=2, column=11)
         self.assertEqual(cell.fill.start_color.rgb, '00F54927', '有 fail 的 ALL Site 行应为红色填充')
 
     def test_sigma_limit_data_only_bin1(self):

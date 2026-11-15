@@ -151,9 +151,9 @@ class BatchChartsExportCpkFollowsSettingsTests(SimpleTestCase):
         buf = build_batch_charts_xlsx_with_charts(
             SYNTH_DF, SYNTH_META, ['Param0'], cpk_thresholds=thresholds)
         ws = openpyxl.load_workbook(io.BytesIO(buf))['总览']
-        # 总览第 1 个参数行 = 第 2 行；CPK 在第 8 列（export_batch_charts_xlsx.py 的
-        # cell_cpk + _apply_cpk_style）
-        return ws.cell(row=2, column=8).fill.start_color.rgb
+        # 总览第 1 个参数行 = 第 2 行；CPK 在第 9 列（export_batch_charts_xlsx.py 的
+        # cell_cpk + _apply_cpk_style；第 3 列插入「分类」后由第 8 列右移一位）
+        return ws.cell(row=2, column=9).fill.start_color.rgb
 
     def test_fill_follows_thresholds(self):
         base = self._summary_cpk_fill(DEFAULT_CPK_THRESHOLDS)

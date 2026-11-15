@@ -31,6 +31,7 @@ from apps.export.export_batch_charts_xlsx import build_batch_charts_xlsx_with_ch
 from apps.export.export_ppt import build_batch_charts_pptx
 from apps.export.export_xlsx_optimized import export_to_xlsx_optimized
 from apps.export.filters import apply_export_filters
+from apps.export.grouping import DEFAULT_MAX_ITEMS_PER_SHEET
 from apps.export.html_report import build_single_html_report
 
 # 进度侧车：worker 没有 Django、写不了 DB，就把百分比落进作业目录里一个小文件，
@@ -163,7 +164,9 @@ def run_export_batch_charts(task: dict) -> dict:
         payload = build_batch_charts_xlsx_with_charts(
             df, metadata, params, site_col=get_site_column(df), **show,
             dpi=task['dpi'], cpk_thresholds=thresholds,
-            workers=1, progress_cb=_cb)
+            workers=1, progress_cb=_cb,
+            groups=task.get('groups'),
+            max_items_per_sheet=task.get('max_items_per_sheet', DEFAULT_MAX_ITEMS_PER_SHEET))
 
     size = _write_out(payload, task['out_path'])
     write_progress(progress, 3, 3)

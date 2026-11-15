@@ -98,7 +98,9 @@ def _build_task(kind, *, params, abs_path, fmt, job_id, owner_id, datafile, pref
             abs_path=abs_path, fmt=fmt,
             job_id=job_id, owner_id=owner_id,
             dpi=prefs['dpi'], cpk_thresholds=prefs['cpk_thresholds'],
-            chart_format='pptx' if str(params.get('format', 'xlsx')) == 'pptx' else 'xlsx')
+            chart_format='pptx' if str(params.get('format', 'xlsx')) == 'pptx' else 'xlsx',
+            groups=params.get('groups'),
+            max_items_per_sheet=params.get('max_items_per_sheet'))
     return executor.build_html_report_task(
         params={**params, 'result_name': prefs['result_name']},
         abs_path=abs_path, fmt=fmt, job_id=job_id, owner_id=owner_id,
@@ -126,9 +128,28 @@ class JobSubmitView(APIView):
         if not os.path.exists(abs_path):
             return error_response('file_not_found', '源文件已不在磁盘上', 404)
 
-        # params 存**用户的请求参数**本身；文件名/DPI/阈值等主进程偏好走 prefs，
-        # 不进快照 —— 否则 GET /jobs/ 会把内部钳位值当作用户意图回显出去。
+        # params 存**用户的请求参数**本身（除分组归一化外：groups /
+        # max_items_per_sheet 会被校验后的值覆盖）；文件名/DPI/阈值等主进程偏好走
+        # prefs，不进快照 —— 否则 GET /jobs/ 会把内部钳位值当作用户意图回显出去。
         params = {k: v for k, v in request.data.items() if k != 'result_name'}
+        if kind == 'export_batch_charts':
+            # 分组校验必须发生在**建作业行之前**：非法请求若先落一条 pending，
+            # 用户拿到的就是一个永远跑不出产物的号。合法时把归一化结果写回
+            # params，作业快照与 worker 收到的是同一份；没有分组则摘掉两个键，
+            # 保持接线前的 payload 形状。
+            from apps.export.grouping import GroupingError, normalize_batch_grouping
+            try:
+                groups, max_items = normalize_batch_grouping(
+                    params.get('groups'), params.get('max_items_per_sheet'),
+                    params.get('params') or [], str(params.get('format', 'xlsx')))
+            except GroupingError as exc:
+                return error_response(exc.code, None, 400, field=exc.field)
+            if groups:
+                params['groups'] = groups
+                params['max_items_per_sheet'] = max_items
+            else:
+                params.pop('groups', None)
+                params.pop('max_items_per_sheet', None)
         prefs = _flatten_prefs(request.user, params, datafile, kind)
         job = Job.objects.create(owner=request.user, kind=kind,
                                  status='pending', params=params)
