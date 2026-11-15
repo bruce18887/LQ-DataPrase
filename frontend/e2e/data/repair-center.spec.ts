@@ -1,9 +1,11 @@
 import { test, expect, type Page } from '@playwright/test'
 import path from 'node:path'
 import fs from 'node:fs'
-import { execSync } from 'node:child_process'
-import { ACCOUNTS, DATA_DIR, PRIMARY_SAMPLE_FILE, PROJECT_ROOT } from '../fixtures/test-data'
+import { ACCOUNTS, DATA_DIR, PRIMARY_SAMPLE_FILE } from '../fixtures/test-data'
 import { gotoApp } from '../helpers/nav'
+import { apiGet, apiPost } from '../helpers/apiClient'
+import { shellDjango } from '../helpers/djangoShell'
+import { openRepairCenter } from '../helpers/repairCenterFlow'
 
 /**
  * 数据修复中心（数据一致性检查升级版）e2e：
@@ -19,46 +21,10 @@ import { gotoApp } from '../helpers/nav'
 // 后端落盘位置跟着进程走：非 slot = `<仓库根>/test/e2e-data`，slot = 该 slot 自己的 data_dir。
 // 两处都不再是仓库根 —— 仓库根 media/ 是迁移前的搁浅副本，本轮已把它从测试通路里摘掉。
 const ADMIN_BATCH_DIR = path.join(DATA_DIR, 'media', 'data', ACCOUNTS.admin.username, 'batch')
-const PYTHON = process.env.PYTHON_BIN || path.join(PROJECT_ROOT, '.venv', 'Scripts', 'python.exe')
 
 const ts = Date.now()
 const BATCH = `REPAIR-E2E-${ts}`
 const REPAIR_FILE = `repair_x_${ts}.csv` // 无 B 前缀文件名（用于重读链）
-
-/** 执行 Django shell 代码（代码内只用单引号，外层双引号包裹兼容 cmd） */
-function shellDjango(code: string) {
-  execSync(`"${PYTHON}" manage.py shell -c "${code}"`, {
-    cwd: PROJECT_ROOT,
-    encoding: 'utf-8',
-    timeout: 60_000,
-    env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-  })
-}
-
-function apiGet(page: Page, url: string) {
-  return page.evaluate(async (u) => {
-    const token = localStorage.getItem('access_token')
-    const res = await fetch(`/api/v1${u}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-    return { status: res.status, body: await res.json() }
-  }, url)
-}
-
-function apiPost(page: Page, url: string, body: unknown) {
-  return page.evaluate(async ({ u, b }) => {
-    const token = localStorage.getItem('access_token')
-    const res = await fetch(`/api/v1${u}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(b),
-    })
-    return { status: res.status, body: await res.json() }
-  }, { u: url, b: body })
-}
 
 const DUP_PREFIX = `DUP-E2E-${ts}`
 const DUP_CONTENT = [
@@ -167,12 +133,6 @@ test.describe.serial('数据修复中心', { tag: ['@p2', '@data'] }, () => {
       // 环境清理失败不阻塞用例
     }
   })
-
-  async function openRepairCenter(page: Page) {
-    await page.locator('button').filter({ hasText: '数据修复' }).first().click()
-    await expect(page.getByRole('button', { name: '开始检查' })).toBeVisible({ timeout: 10_000 })
-    await page.getByRole('button', { name: '开始检查' }).click()
-  }
 
   test('孤立磁盘文件可导入到数据库', async ({ page }) => {
     test.skip(!fs.existsSync(PRIMARY_SAMPLE_FILE), '样例数据缺失，跳过')
