@@ -9,13 +9,13 @@ import { openRepairCenter } from '../helpers/repairCenterFlow'
 
 /**
  * 数据修复中心（数据一致性检查升级版）e2e：
- * 孤立磁盘文件导入 / 孤立 DB 记录删除 / 缺失产品名修复 / 重复项选保留（3 条，见下面那段
- * 「批3a · 第 3 项」的分层说明）/ 修复后问题消失。
+ * 孤立磁盘文件导入 / 孤立 DB 记录删除 / 缺失产品名修复（重读文件头）/ 修复后问题消失。
+ * 重复项选保留一族（现 5 条）已于 2026-11-15 拆出至 `duplicate-keep.spec.ts`，
+ * 其分层说明（「批3a · 第 3 项」）与 DUP 造数细节随该族一起搬到了那份文件。
  *
  * 造数方式：e2e 进程直接写后端 media（与 globalSetup seed 同模式），
  * 通过 API 导入 + Django shell 调整 DB 状态，UI 只做断言驱动。
- * 所有造数统一 REPAIR-E2E-<ts> 批次前缀，afterEach 清理；重复项那三条另用
- * DUP-E2E-<ts>-<TAG>-{A,B} 两组目录，各自 finally 清（按 filename 删行，不整表删）。
+ * 所有造数统一 REPAIR-E2E-<ts> 批次前缀，afterEach 清理。
  */
 
 // 后端落盘位置跟着进程走：非 slot = `<仓库根>/test/e2e-data`，slot = 该 slot 自己的 data_dir。
