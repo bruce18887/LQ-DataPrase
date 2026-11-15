@@ -105,3 +105,26 @@ describe('UserManagement：薄页——只有 chip 行、工具栏、表格与�
     expect(code).not.toMatch(/<el-select[^>]*v-model="[^"]*\.role"/)
   })
 })
+
+describe('B3 移交：input/footer 基线样式已由对话框接手', () => {
+  it('UserFormDialog 有 input/button 深规则，UserManagement 不再有 input 深规则', () => {
+    const dialog = read(DIALOG)
+    expect(dialog).toMatch(/:deep\(\.el-input__wrapper\)/)
+    expect(dialog).toMatch(/:deep\(\.el-button\)/)
+    const page = read(PAGE)
+    expect(page).not.toMatch(/:deep\(\.el-input__wrapper\)/)
+    expect(page).toMatch(/:deep\(\.el-button\)/)
+  })
+})
+
+const THEME = '../../src/styles/element-plus-theme.css'
+
+describe('批次级主题收敛：select 触发区由 .el-select__wrapper 承载', () => {
+  it('night 规则指向 .el-select__wrapper，死规则 .el-select .el-input__wrapper 已不存在', () => {
+    const theme = codeOf(read(THEME))
+    expect(theme).toMatch(/:root\[data-theme="night"\] \.el-select__wrapper/)
+    expect(theme).toMatch(/\.el-select__wrapper\.is-focused/)
+    expect(theme).not.toMatch(/\.el-select \.el-input__wrapper/)
+    expect(codeOf(read(PAGE)), '页面里还留着死规则').not.toMatch(/\.el-select \.el-input__wrapper/)
+  })
+})

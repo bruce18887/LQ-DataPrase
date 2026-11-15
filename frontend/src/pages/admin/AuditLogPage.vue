@@ -254,10 +254,9 @@ onMounted(load)
 }
 
 /* 本仓装的 element-plus 2.14.0 里，select 的触发区用的是它自己的 .el-select__wrapper：
-   theme-chalk/el-select.css 里有这个类，而 `.el-select .el-input__wrapper` 一条规则都没有 ⇒
-   旧写法恒不命中，事件下拉就成了筛选行里唯一没拿到 --bg 的控件（date-picker 今天还被上面
-   那条罩住，是因为它内部仍是 el-input 形状）。同一条死规则还留在 UserManagement.vue:555 与
-   src/styles/element-plus-theme.css:598，那两处属于全局主题收敛、不在本批动，已记进 Task 14。 */
+ * theme-chalk/el-select.css 里有这个类，而 `.el-select .el-input__wrapper` 一条规则都没有 ⇒
+ * 旧写法恒不命中。全局 night 覆写在 src/styles/element-plus-theme.css 的选择器段，同样只认
+ * .el-select__wrapper；这里保留 light 主题的底色基线。 */
 :deep(.el-select__wrapper) {
   background-color: var(--bg);
   border-radius: 8px;

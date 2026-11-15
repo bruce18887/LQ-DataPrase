@@ -594,9 +594,16 @@
   color: rgba(255, 255, 255, 0.4) !important;
 }
 
-/* 选择器强制覆盖 */
-:root[data-theme="night"] .el-select .el-input__wrapper {
+/* 选择器强制覆盖：EP 2.14 的 select 触发区是 .el-select__wrapper，
+ * `.el-select .el-input__wrapper` 在 theme-chalk/el-select.css 里一条规则都没有（恒不命中）。 */
+:root[data-theme="night"] .el-select__wrapper {
   background-color: rgba(255, 255, 255, 0.05) !important;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1) inset !important;
+}
+
+:root[data-theme="night"] .el-select__wrapper.is-focused,
+:root[data-theme="night"] .el-select__wrapper.is-hovering:not(.is-focused) {
+  box-shadow: 0 0 0 1px #f9a825 inset !important;
 }
 
 :root[data-theme="night"] .el-select-dropdown {
