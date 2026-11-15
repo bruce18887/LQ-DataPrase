@@ -4,9 +4,7 @@ import MockFrame from './MockFrame.vue'
 import { UM_SEED } from '../data'
 import { toast, dialog } from '../useUi'
 const users = ref(UM_SEED.map(u => ({ ...u })))
-const q = ref('')
 const emit = defineEmits<{ audit: [ev: string, op: string, tg: string, d: string] }>()
-const vis = computed(() => users.value.filter(u => !q.value || (u.u + u.disp).toLowerCase().includes(q.value.toLowerCase())))
 const kpi = computed(() => [users.value.length, users.value.filter(u => u.active).length, users.value.filter(u => u.locked).length, users.value.filter(u => u.role === 'administrator').length])
 function audit(ev: string, tg: string, d: string) { emit('audit', ev, 'admin', tg, d) }
 function edit(u: typeof users.value[number]) {
@@ -37,7 +35,7 @@ function del(u: typeof users.value[number]) {
   ])
 }
 function create() {
-  dialog('创建账号', '<p>用户名 / 显示名 / 角色三项；此处演示创建一个合成账号。</p>', [
+  dialog('新增账号', '<p>用户名 / 密码 / 角色三项；此处演示创建一个合成账号。</p>', [
     { label: '取消' },
     { label: '创建', cls: 'pri', fn: () => {
       const u = 'demo_wang'
@@ -58,15 +56,14 @@ function create() {
       <div class="sc"><div class="v">{{ kpi[3] }}</div><div class="l">管理员</div></div>
     </div>
     <div class="m-toolbar">
-      <input v-model="q" class="m-input" placeholder="搜索用户名 / 显示名" style="width:200px">
       <span class="grow"></span>
-      <button class="m-btn pri" @click="create">创建账号</button>
+      <button class="m-btn pri" @click="create">新增账号</button>
     </div>
     <div class="m-table-wrap">
       <table class="m-table">
         <thead><tr><th>用户名</th><th>显示名</th><th>角色</th><th>状态</th><th>创建时间</th><th>最后登录</th><th>操作</th></tr></thead>
         <tbody>
-          <tr v-for="u in vis" :key="u.u">
+          <tr v-for="u in users" :key="u.u">
             <td><b>{{ u.u }}</b> <span v-if="u.self" class="tag info">当前</span></td>
             <td>{{ u.disp }}</td>
             <td><span class="tag" :class="u.role === 'administrator' ? 'warn' : 'mut'">{{ u.role === 'administrator' ? '管理员' : '用户' }}</span></td>
