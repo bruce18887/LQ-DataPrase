@@ -10,8 +10,6 @@ import os
 from concurrent.futures import ProcessPoolExecutor
 from typing import NamedTuple
 
-import pandas as pd
-
 import matplotlib
 matplotlib.use('Agg')
 from openpyxl import Workbook
@@ -22,8 +20,9 @@ from openpyxl.drawing.image import Image as XlImage
 from apps.analysis.services.statistics import (
     get_1d_from, filter_finite, compute_range_statistics, compute_cpk, compute_site_stats,
 )
+from apps.common.sheet_names import unique_sheet_names
 from apps.common.user_settings import DEFAULT_CPK_THRESHOLDS
-from .charts import _create_histogram_chart, EXPORT_DPI_DEFAULT
+from .charts import _align_site_series, _create_histogram_chart, EXPORT_DPI_DEFAULT
 from .chart_workers import render_histogram_worker
 from .fonts import EXCEL_FONT_FAMILY, apply_matplotlib_fonts
 from .histogram_grid import finite_or_none
@@ -50,7 +49,6 @@ CPK_COLOR_MAP = {
 SUMMARY_HEADERS = ["序号", "参数", "数据点数", "Mean", "STD", "Min", "Max", "CPK", "CPK Level", "ALL Site Yield"]
 DETAIL_HEADERS = ["统计项", "Low Limit", "High Limit", "Unit"]
 SITE_HEADERS = ["Site", "Yield", "FailCount", "ExceedMin", "ExceedMax"]
-SHEET_NAME_MAX_LEN = 28
 
 
 class ChartFlags(NamedTuple):
@@ -92,12 +90,6 @@ def _get_text_width(text):
     return len(s) + cn_len + 2
 
 
-def _sheet_name(param: str) -> str:
-    """参数名 → 合法 sheet 名（Excel 禁用字符换下划线，限长 28）。"""
-    return (param.replace("/", "_").replace("\\", "_")
-                .replace(" ", "_").replace("-", "_"))[:SHEET_NAME_MAX_LEN]
-
-
 def _collect_param_stats(df, metadata, params, site_col, th):
     """逐参数算总览统计与图表输入，按文件列序排序。
 
@@ -114,6 +106,9 @@ def _collect_param_stats(df, metadata, params, site_col, th):
             continue
 
         stats = compute_range_statistics(data_series, metadata, selected_param)
+        # Site 数组按本参数过滤后的索引对齐：各参数的有限值集合可能不同，
+        # 不能像旧实现那样整列预提取一次共用（参数值为 NaN 的行会静默错位）。
+        site_arrays = _align_site_series(df, site_col, data_series)
         # 限值可能为 None（parse_limit_string 新语义）或非有限 → 统一收敛，下游
         # 的 ``is not None`` 守卫与图表回退才能真正生效（缺陷 #5）
         rdl_min = finite_or_none(stats['rdl'][0])
@@ -147,13 +142,23 @@ def _collect_param_stats(df, metadata, params, site_col, th):
                 'std_val': std_val,
                 'rdl_min': rdl_min,
                 'rdl_max': rdl_max,
+                # 图标题要显示「参数名 (单位)」，单位来自元数据
+                'unit': stats.get('unit', ''),
+                # Site 按 data_series 索引对齐（屏幕口径）：参数值非有限的行不参与
+                # 站点统计。并行渲染与串行兜底共用这一份，避免各自重算漂移。
+                'site_values': site_arrays[0],
+                'site_series': site_arrays[1],
             },
         }))
     return rows
 
 
-def _write_summary_sheet(ws_summary, rows):
-    """总览表头 + 每参数一行（含跳转链接与 ALL Site 良率着色）+ 列宽。"""
+def _write_summary_sheet(ws_summary, rows, sheet_names):
+    """总览表头 + 每参数一行（含跳转链接与 ALL Site 良率着色）+ 列宽。
+
+    ``sheet_names`` 是参数 → 实际建出的明细 sheet 名（统一分配后的一份映射）：
+    链接必须指向真实存在的表，不能拿参数名现拼（含非法字符/截断撞名时会断链或互指）。
+    """
     for col_idx, h in enumerate(SUMMARY_HEADERS, 1):
         cell = ws_summary.cell(row=1, column=col_idx, value=h)
         cell.fill = HEADER_FILL
@@ -168,7 +173,7 @@ def _write_summary_sheet(ws_summary, rows):
         site_stats_list = entry['site_stats']
 
         cell_param = ws_summary.cell(row=param_idx + 1, column=2, value=selected_param)
-        cell_param.hyperlink = f"#'{_sheet_name(selected_param)}'!A1"
+        cell_param.hyperlink = f"#'{sheet_names[selected_param]}'!A1"
         cell_param.font = LINK_FONT
 
         ws_summary.cell(row=param_idx + 1, column=1, value=param_idx).alignment = Alignment(horizontal="center")
@@ -224,19 +229,7 @@ def _pick_workers(workers):
     return min(8, max(2, os.cpu_count() or 4)) if workers is None else workers
 
 
-def _site_arrays(df, site_col):
-    """预提取 site 数据（可 pickle 的 ndarray/标量，供多进程任务）。"""
-    if not site_col or site_col not in df.columns:
-        return None, None
-    site_series_raw = df[site_col]
-    if isinstance(site_series_raw, pd.DataFrame):
-        site_series_raw = site_series_raw.iloc[:, 0]
-    site_values = sorted(site_series_raw.dropna().unique(),
-                         key=lambda x: (isinstance(x, float), x))
-    return site_series_raw.to_numpy(), site_values
-
-
-def _render_chart_pngs(rows, site_col, df, flags, workers):
+def _render_chart_pngs(rows, flags, workers):
     """多进程并行渲染全部参数图表（瓶颈在 matplotlib；worker 见 chart_workers.py）。
 
     返回 ``{param: png_bytes | None}``；``workers<=1`` 或并行整体失败时返回空
@@ -246,7 +239,6 @@ def _render_chart_pngs(rows, site_col, df, flags, workers):
     if n_workers <= 1:
         return {}
 
-    site_series, site_values = _site_arrays(df, site_col)
     try:
         with ProcessPoolExecutor(max_workers=n_workers) as ex:
             futures = {}
@@ -257,12 +249,14 @@ def _render_chart_pngs(rows, site_col, df, flags, workers):
                     {
                         'param': title,
                         'data_series': chart_data['data_series'].to_numpy(),
-                        'site_values': site_values,
-                        'site_series': site_series,
+                        # 每参数各自的索引对齐结果（_collect_param_stats 已算好）
+                        'site_values': chart_data.get('site_values'),
+                        'site_series': chart_data.get('site_series'),
                         'mean_val': chart_data['mean_val'],
                         'std_val': chart_data['std_val'],
                         'rdl_min': chart_data['rdl_min'],
                         'rdl_max': chart_data['rdl_max'],
+                        'unit': chart_data.get('unit', ''),
                         'show_limit': flags.show_limit,
                         'show_3sigma': flags.show_3sigma,
                         'show_4sigma': flags.show_4sigma,
@@ -285,11 +279,12 @@ def _take_png(future):
         return None  # 单参数失败 → 串行兜底
 
 
-def _write_detail_sheet(wb, idx, title, entry, png, df, metadata, site_col, flags):
+def _write_detail_sheet(wb, title, entry, png, df, metadata, site_col, flags, sheet_name):
     """写一个参数的明细 sheet，返回图片 buffer（调用方须保留到 ``wb.save()`` 后）。
 
     ``png`` 为并行渲染结果；None 时就地串行渲染。渲染不出图（空 buffer）时
-    不建 sheet，返回 None。
+    不建 sheet，返回 None。``sheet_name`` 由调用方统一分配（唯一且合法），
+    与总览里的超链接同源。
     """
     stats_data = entry.get('stats_data', {})
     site_stats_list = entry.get('site_stats', [])
@@ -303,7 +298,7 @@ def _write_detail_sheet(wb, idx, title, entry, png, df, metadata, site_col, flag
             show_limit=flags.show_limit, show_3sigma=flags.show_3sigma,
             show_4sigma=flags.show_4sigma, show_6sigma=flags.show_6sigma,
             show_normal=flags.show_normal, show_kde=flags.show_kde, site_col=site_col,
-            dpi=flags.dpi,
+            dpi=flags.dpi, unit=stats_data.get('unit', ''),
         )
     else:
         img_buffer = io.BytesIO(png)
@@ -311,10 +306,7 @@ def _write_detail_sheet(wb, idx, title, entry, png, df, metadata, site_col, flag
         img_buffer.close()
         return None
 
-    try:
-        ws = wb.create_sheet(title=_sheet_name(title))
-    except ValueError:
-        ws = wb.create_sheet(title=f"Chart_{idx}")
+    ws = wb.create_sheet(title=sheet_name)
 
     # Stats header
     for col_idx, h in enumerate(DETAIL_HEADERS, 1):
@@ -424,21 +416,27 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
     ws_summary.title = "总览"
 
     rows = _collect_param_stats(df, metadata, params, site_col, th)
-    _write_summary_sheet(ws_summary, rows)
+    # 先分配唯一 sheet 名，再用同一份映射写总览链接与建明细表 —— 两处各自
+    # 现拼会在非法字符/截断撞名时断链或互指（2026-11-15 实测）。
+    sheet_names = dict(zip(
+        (title for title, _entry in rows),
+        unique_sheet_names([title for title, _entry in rows]),
+    ))
+    _write_summary_sheet(ws_summary, rows, sheet_names)
 
     # openpyxl lazily reads image data during wb.save(), so we must keep each
     # buffer alive until after save() and close them all at the end.
     open_buffers = []
-    png_results = _render_chart_pngs(rows, site_col, df, flags, workers)
+    png_results = _render_chart_pngs(rows, flags, workers)
 
     for idx, (title, entry) in enumerate(rows):
         if progress_cb:
             # 报的是「已装配到第几个」，总人数由调用方持有 —— 这里不猜百分比语义。
             # 放在循环体第一行：下面渲染不出图时会跳过 sheet，放后面就漏报。
             progress_cb(idx + 1)
-        buffer = _write_detail_sheet(wb, idx, title, entry,
+        buffer = _write_detail_sheet(wb, title, entry,
                                      png_results.get(title), df, metadata,
-                                     site_col, flags)
+                                     site_col, flags, sheet_names[title])
         if buffer is not None:
             open_buffers.append(buffer)
 
