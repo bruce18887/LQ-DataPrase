@@ -6,7 +6,7 @@
  * 判据异源：所有期望值都是手写字面量（组数、字节数、id、整句文案）。
  * 拿实现去算期望值等于让同一段代码给自己盖章 —— 档/取整/键拼法错了会一起错。
  *
- * 组件层不在这里：卡片渲染由 T3（repair-center.spec.ts）钉，接线形状由
+ * 组件层不在这里：卡片渲染由 T3（duplicate-keep.spec.ts）钉，接线形状由
  * dupKeepWiring.spec.ts 的源侧绊线钉。本层不起组件（本仓无 jsdom）。
  */
 import { describe, expect, it } from 'vitest'
