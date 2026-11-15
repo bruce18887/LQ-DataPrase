@@ -1,51 +1,65 @@
 <template>
   <div class="audit-log">
-    <el-card class="filter-card">
-      <el-form :model="filters" inline @submit.prevent="applyFilters">
-        <!-- data-testid 一律挂在 el-form-item 上（同 UserManagement.vue 的编辑弹窗），定位器形状是
-             「[data-testid=…] input」与「[data-testid=audit-event] .el-select」：
-             ElInput 是 inheritAttrs: false 且把 attrs 并到原生 input 自己身上，挂在 el-input 上时
-             这两条都会落空；非 filterable 的 el-select 里那个 input 被排出文档流，点它永远等不到。 -->
-        <el-form-item label="事件" data-testid="audit-event">
-          <el-select v-model="filters.event" clearable placeholder="全部事件">
-            <el-option
-              v-for="(label, code) in AUDIT_EVENT_LABELS"
-              :key="code"
-              :label="label"
-              :value="code"
+    <el-form
+      :model="filters"
+      inline
+      class="audit-filter-form"
+      @submit.prevent="applyFilters"
+    >
+      <AdminPageToolbar>
+        <template #left>
+          <!-- data-testid 仍挂 el-form-item：ElInput 是 inheritAttrs:false 且把 attrs 并到原生
+               input 上，挂 el-input 上时「[data-testid] input」会命中 0 个；非 filterable 的
+               el-select 点外层 .el-select，不点那个被排出文档流的 input。 -->
+          <el-form-item label="事件" data-testid="audit-event">
+            <el-select
+              v-model="filters.event"
+              clearable
+              placeholder="全部事件"
+              class="admin-filter-select"
+            >
+              <el-option
+                v-for="(label, code) in AUDIT_EVENT_LABELS"
+                :key="code"
+                :label="label"
+                :value="code"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="账号" data-testid="audit-username">
+            <el-input
+              v-model="filters.username"
+              placeholder="操作者或目标账号"
+              clearable
+              :maxlength="USERNAME_QUERY_MAX"
+              class="admin-filter-input"
             />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="账号" data-testid="audit-username">
-          <el-input
-            v-model="filters.username"
-            placeholder="操作者或目标账号"
-            clearable
-            :maxlength="USERNAME_QUERY_MAX"
-          />
-        </el-form-item>
-        <el-form-item label="起" data-testid="audit-date-from">
-          <el-date-picker
-            v-model="filters.dateFrom"
-            type="date"
-            value-format="YYYY-MM-DD"
-            placeholder="开始日期"
-          />
-        </el-form-item>
-        <el-form-item label="止" data-testid="audit-date-to">
-          <el-date-picker
-            v-model="filters.dateTo"
-            type="date"
-            value-format="YYYY-MM-DD"
-            placeholder="结束日期"
-          />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" native-type="submit">查询</el-button>
+          </el-form-item>
+          <el-form-item label="起" data-testid="audit-date-from">
+            <el-date-picker
+              v-model="filters.dateFrom"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="开始日期"
+              class="admin-filter-date"
+            />
+          </el-form-item>
+          <el-form-item label="止" data-testid="audit-date-to">
+            <el-date-picker
+              v-model="filters.dateTo"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="结束日期"
+              class="admin-filter-date"
+            />
+          </el-form-item>
           <el-button @click="resetFilters">重置</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
+        </template>
+        <template #right>
+          <el-button type="primary" native-type="submit">查询</el-button>
+        </template>
+      </AdminPageToolbar>
+    </el-form>
 
     <el-card class="table-card">
       <el-table v-loading="loading" :data="rows" class="audit-table" row-key="id" stripe>
@@ -121,6 +135,8 @@ import {
   type AuditFilters,
 } from '../../utils/audit'
 
+import AdminPageToolbar from './components/AdminPageToolbar.vue'
+
 /**
  * 每页条数候选：20 是 DRF 的全局 PAGE_SIZE（config/settings/base.py:214-215，本端点的分页类
  * 没覆写 page_size 之外的字段），刻意**不**进 utils/audit 那对被后端源码钉住的常量；
@@ -193,8 +209,8 @@ onMounted(load)
   gap: 16px;
 }
 
-.filter-card :deep(.el-form--inline .el-form-item) {
-  margin-bottom: 0;
+.audit-filter-form :deep(.el-form-item) {
+  margin: 0;
 }
 
 .audit-pagination {
