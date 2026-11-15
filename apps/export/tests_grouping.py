@@ -148,17 +148,20 @@ class GroupedLayoutTests(SimpleTestCase):
 
     PARAMS = ['P00', 'P01', 'P02', 'P03', 'P04']
 
-    def _build(self, groups, max_items=50):
+    def _build(self, groups, max_items=50, params=None):
+        # params 默认取全量；只测部分参数时显式收窄，否则未覆盖的参数会被
+        # _plan_pages 兜底塞进「其他」页，多出预期之外的块。
+        params = list(params or self.PARAMS)
         rng = np.random.default_rng(0)
-        df = pd.DataFrame({p: rng.normal(10, 1, 40) for p in self.PARAMS})
+        df = pd.DataFrame({p: rng.normal(10, 1, 40) for p in params})
         metadata = {
-            'units': {p: 'V' for p in self.PARAMS},
-            'mins': {p: '0' for p in self.PARAMS},
-            'maxs': {p: '20' for p in self.PARAMS},
+            'units': {p: 'V' for p in params},
+            'mins': {p: '0' for p in params},
+            'maxs': {p: '20' for p in params},
             'format': 'CTA8290D',
         }
         return build_batch_charts_xlsx_with_charts(
-            df, metadata, self.PARAMS, dpi=72, workers=1,
+            df, metadata, params, dpi=72, workers=1,
             groups=groups, max_items_per_sheet=max_items)
 
     @staticmethod
@@ -203,3 +206,26 @@ class GroupedLayoutTests(SimpleTestCase):
         self.assertEqual(wb['B'].cell(2, 1).value, 'P00')
         self.assertEqual(len(wb['A']._images), 2)
         self.assertEqual(len(wb['B']._images), 2)
+
+    def test_multi_assign_renders_each_param_once(self):
+        """多属参数只渲染一次 PNG（spec §6.2「同一张图只渲染一次」）。
+
+        A 组 3 块 + B 组 2 块 = 5 次块出现，唯一参数 3 个 → 应只渲染 3 次。
+        ``workers=1`` 时 ``_render_chart_pngs`` 返回空 dict，串行兜底是唯一渲染
+        入口，用 spy 计数即可钉住「不重复渲染」；嵌图次数不受缓存影响。
+        """
+        from unittest.mock import patch
+
+        from apps.export import export_batch_charts_xlsx as mod
+
+        with patch.object(mod, '_create_histogram_chart',
+                          wraps=mod._create_histogram_chart) as spy:
+            wb = self._wb(self._build([
+                {'name': 'A', 'params': ['P00', 'P01', 'P02']},
+                {'name': 'B', 'params': ['P00', 'P01']},
+            ], params=['P00', 'P01', 'P02']))
+        # 5 次块出现全部落表（缓存只省渲染，不省嵌图）
+        self.assertEqual(len(wb['A']._images), 3)
+        self.assertEqual(len(wb['B']._images), 2)
+        self.assertEqual(spy.call_count, 3,
+                         f'3 个唯一参数应只渲染 3 次，实得 {spy.call_count}')
