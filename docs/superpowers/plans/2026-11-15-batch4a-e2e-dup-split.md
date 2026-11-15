@@ -322,8 +322,8 @@ Task 1 没跑过它 ⇒ 第一次跑就给它立基线）。汇总会是 `11 pas
 Run: `node scripts/e2e_affected.mjs --dry-run`（落 `tasks/b4a_affected_t2.log`）
 Expected: `decide:` 行会因 `frontend/e2e/helpers/` 命中 `GLOBAL` 而判全量 e2e + 后端；`RESULT:` 行带
 `dry-run` 字样。**为什么这里不许真跑**：这脚本没有 `--help` 分支，未知参数一律当默认**直接开跑整条判据链**
-（`docs/tasks/lessons.md` 2026-11-15 新记那条），而真跑 = 起一次全量池 + 后端全套，那是 Task 5 的活。
-**裁定**：批内一律 `--dry-run` 留判据行，真跑全量档集中在 Task 5 一次做完并覆盖整刀（设计稿 §3.7 的排法，
+（`docs/tasks/lessons.md` 2026-11-15 新记那条），而真跑 = 起一次全量池 + 后端全套，那是 Task 6 的活。
+**裁定**：批内一律 `--dry-run` 留判据行，真跑全量档集中在 Task 6 一次做完并覆盖整刀（设计稿 §3.7 的排法，
 与批3a「收口判全量 ⇒ 上面几轮是它的超集」同形）。把 `decide:`/`RESULT:` 两行原样贴进台账。
 
 - [ ] **Step 7: Commit**
@@ -507,7 +507,7 @@ git commit -m "test(e2e): 重复项一族拆出 duplicate-keep.spec.ts，助手�
 **Interfaces:**
 - Consumes: Task 3 的产出文件名 `frontend/e2e/data/duplicate-keep.spec.ts`
 
-- [ ] **Step 1: 改两处注释**
+- [ ] **Step 1: 改三处注释（表格加了第三行后，正文与 add 清单同步扩围）**
 
 把两份文件里指向 `repair-center.spec.ts` 的那句改成指向 `duplicate-keep.spec.ts`，其余文字一字不动
 （这两句是 T2 层「我为什么不在这层钉」的理由，改文件名的同时不能改口径）。
@@ -528,13 +528,70 @@ Expected: 与拆前**同数量**的 `Test Files passed` / `Tests passed`。对�
 - [ ] **Step 4: 提交**
 
 ```bash
-git add frontend/test/unit/dupKeep.spec.ts frontend/test/unit/dupKeepWiring.spec.ts
+git add frontend/test/unit/dupKeep.spec.ts frontend/test/unit/dupKeepWiring.spec.ts frontend/e2e/helpers/djangoShell.ts
 git commit -m "docs(test): 重复项 T2 的 T3 指向随拆文件改到 duplicate-keep"
 ```
 
 ---
 
-### Task 5: 收口档（一次全量，覆盖整刀）+ 台账
+### Task 5: 再订正两处「拆文件后失准」的仓内指向
+
+Task 4 的评审用全仓搜法捞出两处，都不在 Task 4 写域内，但都是**这次拆文件制造的假话**，
+按 Task 3 那条裁定（描述「哪里有什么」的注释属于该随拆而改的那一类）一并修掉，并且**赶在跑门禁之前**，
+这样「验过的树」与「提交的树」逐字节相同，Task 6 不必为它重跑任何档。
+
+**Files:**
+- Modify: `frontend/src/pages/data/components/MaintenanceCard.vue:47`
+- Modify: `docs/reference/e2e-tier-triage.md:101`
+
+**Interfaces:**
+- Consumes: Task 3 的产出（`frontend/e2e/data/duplicate-keep.spec.ts` 里 5 条 `[B3A-*]`/`[data-testid="duplicate-files-card"]` 判据）
+- Produces: 无新接口，纯指向订正
+
+- [ ] **Step 1: 改 `MaintenanceCard.vue` 的 testid 括注**
+
+现文：`/** 稳定测试位点：e2e 按 `[data-testid]` 选卡（repair-center.spec.ts），迁移时不许改值 */`。
+`DuplicateFilesCard.vue` 用的就是这颗 `MaintenanceCard` + `test-id="duplicate-files-card"`，而选它的判据现在在
+`duplicate-keep.spec.ts`。改成点名两份 spec：`（`repair-center.spec.ts` 与 `duplicate-keep.spec.ts`）`，
+**「迁移时不许改值」这句约束原样保留**（它是契约，不是说明）。
+
+- [ ] **Step 2: 改 `e2e-tier-triage.md` 那句 serial 前置**
+
+现文：「代理已就 `repair-center` 系列明确给出这个警告：其第 5 例的前置是前 3 例执行后的清理结果。」
+这句在拆文件后读起来会指错对象（那份文件现在只有 4 例）。改成：说明这条警告**现在落在拆后的
+`repair-center.spec.ts` 内部**（`修复后本批次问题全部消失` 仍是第 4 例，依赖前 3 例的 `afterEach` 清理），
+并点名「重复项那 5 例已于 2026-11-15 拆至 `duplicate-keep.spec.ts`」。⚠ 这是 **reference 活文档**，
+按维护约定要订正；而 `docs/tasks/todo.md:876`（批3a 台账里那条 T3 行号与条数）与 `docs/tasks/lessons.md`
+里的历史取证行号属**历史条目**，按同一约定**不回改** —— 两种处置的差别要写进台账，别混成一条规矩。
+
+- [ ] **Step 3: 机械证明本轮只有注释/文档行**
+
+```bash
+git diff --stat
+git diff | grep -E "^[+-][+-]" | grep -vE "^[+-][+-][+-]" | wc -l
+```
+
+Expected：`MaintenanceCard.vue` 的变更行必须落在 `/** … */` 内（`*.vue` 里是注释，不进模板也不进脚本），
+`e2e-tier-triage.md` 是 markdown。给一条你自己的筛法证明没有任何代码形态的行被改。
+
+- [ ] **Step 4: 两道闸**
+
+Run: `cd frontend && npm run lint:e2e` → 零 `error TS`。
+Run: `cd frontend && npx vitest run` → 必须仍是基线的 **74 files / 1045 tests**（Task 1 留底 `tasks/b4a_vitest_before.log`）。
+`MaintenanceCard.vue` 是被产品代码引的组件，但它改的是注释块 ⇒ 行数闸也要现读一次：
+`npx vitest run test/unit/lineLimit.spec.ts` → `Tests 15 passed`。
+**不跑 `npm run build`**（纯注释；Task 6 的全量档会覆盖它）。
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add frontend/src/pages/data/components/MaintenanceCard.vue docs/reference/e2e-tier-triage.md
+git commit -m "docs: 拆文件后再订正 testid 括注与 T3 分层说明里的 serial 前置指向"
+```
+
+---
+
+### Task 6: 收口档（一次全量，覆盖整刀）+ 台账
 
 **Files:**
 - Modify: `docs/tasks/todo.md`（新增刀一条目）
