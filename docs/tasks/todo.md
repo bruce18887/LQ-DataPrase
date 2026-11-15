@@ -1047,3 +1047,107 @@ T3 本批 **5** 条（`repair-center.spec.ts` 里 366/407/437/513/544 那五条�
 - 契约：请求新增 `groups` / `max_items_per_sheet`；新错误码 `invalid_groups` / `invalid_page_size` / `groups_not_supported`；无 groups 保持旧版式，且此时页上限字段被忽略。
 - 门禁：后端 `apps.export apps.jobs apps.weight apps.analysis.tests_cpk_thresholds test.backend` 全量 **2313 OK（skipped=16）**；vitest **1043**；build/lint 绿；affected 门禁（`--base f2da685`）**PASS · 4 档全执行**，e2e 池 477 例 / 真红 0 / 2 例负载抖动（site3d、settings）复跑转绿；grouped-export e2e（P2）3 passed。
 - 残余（Minor，已裁决）：site 数组释放循环仅探针证据；空渲染页删除后的链接/锚点异常路径（R9）；ERROR_CODE_MAP 三条在 arraybuffer 提交路径读不到（R13，UI 已前置拦截）；在无 `.venv` 的工作树跑 e2e 需建 `.venv` 链接或覆盖 `PYTHON_BIN`。
+
+
+# 任务：批4 刀一 重复项一族拆文件 + 三件共享助手（2026-11-15，计划 Task 6 收口；计划 `docs/superpowers/plans/2026-11-15-batch4a-e2e-dup-split.md`）
+
+## 状态：**已收口（六档测量+台账全部落地）、未并入 master、未 push**
+
+过程分支 `feature/batch4a-e2e-dup-split`，base = `b797d1f`（开刀那一刻的 master）。
+收口测量与台账写作时 tip = `a41e92a`；**本台账这笔提交是刀一最后一笔，排在 `a41e92a` 之后**——
+谁再 `git rev-parse --short` 会数到更大值，那是对的。并入 master 需要用户点头（计划 Task 6 Step 9，
+纯快进 `git branch -f`，纪律见 `docs/tasks/todo.md:184`），本刀不自行 FF、不 push（`origin` 是公开仓库）。
+
+本刀提交清单（`git log --oneline b797d1f..HEAD` 台账时现取，17 笔，新→旧）：
+`a41e92a` docs: 拆文件后再订正 testid 括注与 T3 分层说明里的 serial 前置指向 /
+`83649e3` docs(plan): 新增 Task 5 收两处仓内指向订正，收口档顺延为 Task 6 /
+`4692ab3` docs(plan): Task 4 Step 2 的 Expected 改成「引用是否为真」 /
+`7bfe165` docs(e2e): 三处因拆文件失准的注释指向改到 duplicate-keep.spec.ts /
+`04d6d33` docs(e2e): 订正拆文件后两处失准的文件头注释 /
+`10537e5` docs(plan): Task 4 扩围——补 djangoShell.ts:13 失准吞错示例 /
+`590776d` test(e2e): 重复项一族拆出 duplicate-keep.spec.ts，助手指向 helpers /
+`1a7b009` docs(plan): Task 2 Step 2 加 type Page 勘误 /
+`3e0d37a` docs(plan): Task 3 补 type Page 双向处置与两条实跑 Expected 实测形状 /
+`9ca679f` refactor(e2e): repair-center 改用三件共享助手，取数通路逐字不变 /
+`bbd6b4d` docs(plan): Task 2 Step 6 改 --dry-run 并修字面反斜杠-n /
+`0f95df6` docs(plan): 修 serial/tag 对账命令字面反斜杠-n /
+`a858c23` docs(plan): 刀一补 serial/tag 对账闸与红集合判据口径 /
+`4793696` docs(plan): 刀一计划计数形状订正——--list 与实跑连带 setup 两条 /
+`e651774` test(e2e): 抽出 apiClient/djangoShell/repairCenterFlow 三件共享助手，占用 chip 先落地 /
+`2f7cbfe` docs(plan): 批4 刀一实现计划 / `6e70a33` docs(spec): 批4 刀一/刀二设计。
+
+## 收口各档（每档取判据行原文，不取退出码；日志绝对路径一起给）
+
+| 档 | 命令 | 实测判据行原文 | 日志/取证 |
+|---|---|---|---|
+| 后端全量 | `CODEBUDDY_SAFE_DELETE_ENABLED=0 .venv/Scripts/python.exe -X utf8 manage.py test` | `Ran 2701 tests in 491.983s` / `OK (skipped=50)`；`grep -cE "^(FAIL\|ERROR):"` = **0** | `C:\Users\Administrator\Desktop\DataPrase\LQ-DataPrase\tasks\b4a_final_backend.log` |
+| 全量池 | `node scripts/e2e_pool.mjs --slots=4` | `文件 91 · 加权总量 1061s（原始 1149s ÷ 争用系数 1.08） · 计划 slot 4`；`用例 479 · 墙钟 9.6min · 单价 2.83s/例 · 效率 2.16（目标 ≥2.8） · unexpected 10 · flaky 2 · skipped 29`；`结论 MEASURED`；`复跑判级：真红 4 · 负载抖动 0 · 悬而未决 0` | `C:\Users\Administrator\Desktop\DataPrase\LQ-DataPrase\tasks\b4a_final_pool.log`（slot 产物 `C:\lqdp-e2e\slots\151428-15064\`） |
+| 全量 vitest | `cd frontend && npx vitest run`（Task 5 于 `a41e92a` 现测） | `Test Files 74 passed (74)` / `Tests 1045 passed (1045)`，与基线 `tasks\b4a_vitest_before.log` 逐数一致 | 取证记录 `C:\Users\Administrator\Desktop\DataPrase\LQ-DataPrase\.superpowers\sdd\2026-11-15-batch4a-e2e-dup-split\task-5-report.md` §4 |
+| e2e 类型 | `cd frontend && npm run lint:e2e`（同上现测） | `grep -c "error TS"` = **0** | 同上 §3 |
+| 行数闸 | `cd frontend && npx vitest run test/unit/lineLimit.spec.ts`（同上现测） | `Tests 15 passed (15)`；**没有给任何文件加豁免** | 同上 §4 |
+| 前端构建 | `cd frontend && npm run build` | `✓ built in 831ms`，`error TS` 0 处（另见 `building client + server bundles... ✓` / `rendering pages... ✓` / `build complete in 2.11s.`） | `C:\Users\Administrator\Desktop\DataPrase\LQ-DataPrase\tasks\b4a_final_build.log` |
+| affected | `node scripts/e2e_affected.mjs --base master --dry-run` | `decide:   全量 e2e（兜底命中，见上 why）`（why = helpers 三件套 → 全局清单；`changed:  12 个文件`）；`RESULT:   PASS · 计划 3 档全部执行 · dry-run（未真正执行）` ⇒ 上表 vitest/lint:e2e/全量池是其超集 | `C:\Users\Administrator\Desktop\DataPrase\LQ-DataPrase\tasks\b4a_final_affected_dry.log` |
+| 行数现量 | `wc -l frontend/e2e/data/repair-center.spec.ts frontend/e2e/data/duplicate-keep.spec.ts` | repair-center **186** / duplicate-keep **394**（拆前 repair-center 591/600，两数都显著低于 600） | 本档现测 |
+
+三档 vitest/lint/lineLimit 的取证发生在 HEAD `a41e92a`；此后到收口测量前树未变——
+举证 = 两棒开工时 `git status --porcelain` 皆空 + `git rev-parse --short HEAD` 皆 `a41e92a`（日志只落 gitignore 区、台账笔未落）。
+后端 skipped=50 vs 批3b 的 16：本档零红、判据成立，差异未逐条归因（默认 verbosity 不列 skip 名），不给推测数；
+如需归因另开 `-v 2` 档。本刀改动集 12 文件**零 `.py`** ⇒ 后端档是回归兜底，与刀一无因果交集。
+
+## 四档红项定性（池判据 `unexpected 10`≠0 的红集合，逐条按失败原文归因）
+
+1. **缺料 ×3**：`batch/batch-phase.spec.ts`、`data/data.spec.ts`、`exports/exports.spec.ts` 独占复跑仍红 ⇒ 真红。
+   失败原文（`slot0/slot1.run.log` 现挖）：`Error: ENOENT: no such file or directory, open 'C:\...\Data\SampleData\Buyoff\BPD60320_QA2.csv'`
+   与 `ENOENT ... copyfile '...\Data\SampleData\CTA8290D\BPD60320_C01F40#...csv'` 两形态。
+   根因：`Data/SampleData` 本机不存在（`Data/` 目录空；`/Data/` 被 `.gitignore:145` 整目录挡掉，属本机私有料）。
+2. **1px 几何 ×1**：`settings/chart-memory.spec.ts` 独占复跑仍红 ⇒ 真红。原文（`slot3.results.json` 现挖）：
+   `Error: 表格上缘位置变了，但 TABLE_TOP_OFFSET 没跟着重量 / Expected: 413 / Received: 414`。
+   与缺料无关；`TABLE_TOP_OFFSET` 最近一次被改是提交 `33649829`，早于本刀。
+3. **与本刀零因果**：`git diff --name-only b797d1f..HEAD` = 12 文件（docs 3 = triage/plan/spec + helpers 3 + e2e spec 3 + `MaintenanceCard.vue` 1 + T2 2），
+   四个红文件不在集合内；且四红文件逐文件 grep `helpers/(apiClient|djangoShell|repairCenterFlow)` import 计数 = **0**。
+4. **收口欠账（环境项，如实挂账）**：本机 `Data/SampleData` 缺料 ⇒ **全量档此刻到不了 `unexpected 0`**。
+   恢复料之后需重跑一轮 `node scripts/e2e_pool.mjs --slots=4` 拿到 `unexpected 0` 判据行，e2e 档才算真全绿；
+   本轮收口判级为「红集合已逐条定性、与本刀无因果」，不是「e2e 全绿」。chart-memory 那条 1px 同属欠账（早于本刀存在，非本刀引入，修它要重量 `TABLE_TOP_OFFSET`，独立小活）。
+
+## 本刀三文件的逐条形状（主轮 `slot3.results.json` 按 `status` 逐条现读，不按 `ok` 粗算）
+
+- `duplicate-keep.spec.ts`：**5/5 expected（passed）**——拆出去的半区在权威档跑绿，零 skip 零 failed。
+- `repair-center.spec.ts`：**2 passed + 2 skipped**——skip 的正是 :49/:107 两条 `test.skip(!fs.existsSync(PRIMARY_SAMPLE_FILE), '样例数据缺失，跳过')` 守卫用例，与红项定性 1 同因（本机缺料），非回归。
+- `disk-usage-chip.spec.ts`：**10/10 expected（passed）**。
+  ⚠ 口径按档写清：上一棒在**单文件 serial 档**（仓根数据根）见过的 case3 红（1.50 GB 档步长），在本轮主池的 **slot 副本数据根**没有复现
+  ⇒ 「case3 基线红」只在 serial 仓根档成立，**不是恒红**；后续载荷加大改判据时按档处理。
+
+## 等价性证明（拆文件 + 抽助手不改一行业务判据，逐格有物证）
+
+- **标题并集**：`tasks\b4a_titles_baseline.txt` 11 行 vs `tasks\b4a_titles_t2.txt` 11 行，本档现测双向集合差为空；
+  构成 = 9 条业务用例 + `fixtures/auth.setup.ts` 2 条（`--list` 与实跑连带 setup 的计数形状，见提交 `4793696`）。
+- **serial/tag 闸**：两文件各恰一条 describe，原文现读——
+  `repair-center.spec.ts:29` `test.describe.serial('数据修复中心', { tag: ['@p2', '@data'] }, () => {`；
+  `duplicate-keep.spec.ts:114` `test.describe.serial('重复项选保留', { tag: ['@p2', '@data'] }, () => {`。
+- **变异台账逐字保留**：M19–M25 与返工轮发现 4①/4②/7/8 原文都在 `duplicate-keep.spec.ts` docblock（本档现读行号 M19:148 / M20:154 / M21:157 / M25:161 / M23:165 / M24:167；发现 4①:52 / 4②:95 / 7:131 / 8:136）。
+  变异红是历史实测，本刀**未重放**（重放既耗时且无新信息，task-3-report §风险登记）。
+- **两段搬动字节级相同**：`sed -n` 切源区间（29,116 与 262,536）拼接组装，`diff` 切片 vs 原区间零差异（task-3-report §2）；不是手抄。
+- **git diff 变更行筛除注释形态后为空**：Task 4、Task 5 各跑一次机械判据，均空（task-4-report §[1] / task-5-report）。
+
+## 三档测试数现读
+
+**T1 0 / T2 0 / T3 新增 0**——本刀没加没删任何测试（vitest 74 files/1045 tests 与基线逐数一致是同一事实的另一面）。
+9 条既有 T3 用例改**文件归属**：4 条留 `repair-center.spec.ts` + 5 条搬 `duplicate-keep.spec.ts`（`grep -c` 顶层 `test(` 计数 = 4/5）。
+说明：批3a 条目（`docs/tasks/todo.md:876`）里「366/407/437/513/544 in repair-center.spec.ts」的行号与归属在拆文件后已失准——
+按本仓维护约定**不回改历史条目**（历史条目只追加；reference 活文档才订正，Task 5 已记入 `docs/reference/e2e-tier-triage.md`）；
+正确形状 = 重复项一族 5 条现居 `frontend/e2e/data/duplicate-keep.spec.ts`。
+
+## 介绍书
+
+本刀**不触发**介绍书：未改任何页签/列名/按钮文案/判定口径（纯 e2e 拆文件 + 助手抽取），CLAUDE.md 维护时机 ② 不命中。
+
+## 遗留与挂账（逐条给归属，都不在本刀做）
+
+1. **`disk-usage-chip` case3 载荷加大**（跨 0.01 GiB 步长，属改判据）：等用户拍板；progress.md 已裁决归**刀四/独立小批**，不许在本刀顺手改判据。
+2. **`C:\lqdp-e2e` 测试盘残留清理**：批3a 遗留 4 已记 ~7.7 GB、用户明确先不清；本轮主池 + 4 复跑 slot（`151428-15064`）再加存量，同一挂账。
+3. **刀二 FIX-2**（`..` 用户名上传逃逸双层防御）：分支 `feature/batch4b-username-guard`，刀一 FF 后再切；探针已证本机零存量（设计稿 §3），升全量档（§E8）。
+4. **刀三 FIX-1 + FIX-4**（刷新不吞勾选 / sibling loader 随激活刷新）：判据必须分两条用例；FIX-1 对照用例落点（进 `duplicate-keep.spec.ts` 还是 data 侧别处）刀三自定——本刀只是把 591/600 的余量还出来。
+5. **刀四** = 决策 D（用户管理左槽搜索/角色筛选）+ `SettingsPage.vue:313` 死规则 + 两项可推翻 + 1280 日期面板盖右槽（待产品/UX 拍板形状）；**刀五** = 未封顶下拉两处（`CorrelationToolsTab.vue:36/:41`、`FileSelect.vue:2/:29`）+ `useSelectFilter` 抽取 + 批1 遗留。归属设计稿 §5。
+6. **§2.4 serial 档跨文件并发**（`database is locked` / 重复组计数漂移）：本刀判定**接受**；serial 轮若出现该红，回设计稿那一节做文件间互斥，**不许**削判据。
+7. **其余 fetch 变体统一**（§2.1 非目标、§4）与 **`page.request` 通路统一**（`cleanup.ts:34-47` 那条更干净路子）：各自独立工单。
+8. **全量 e2e 欠账**（红项定性第 4 条）：本机 `Data/SampleData` 恢复料后重跑全量池至 `unexpected 0`；`chart-memory` 1px 重量的修复独立挂账（早于本刀存在，非本刀引入）。
