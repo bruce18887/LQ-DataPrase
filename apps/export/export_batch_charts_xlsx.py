@@ -22,6 +22,7 @@ from apps.analysis.services.statistics import (
 )
 from apps.common.sheet_names import unique_sheet_names
 from apps.common.user_settings import DEFAULT_CPK_THRESHOLDS
+from apps.export.grouping import DEFAULT_MAX_ITEMS_PER_SHEET, OTHER_GROUP_NAME
 from .charts import _align_site_series, _create_histogram_chart, EXPORT_DPI_DEFAULT
 from .chart_workers import render_histogram_worker
 from .fonts import EXCEL_FONT_FAMILY, apply_matplotlib_fonts
@@ -46,7 +47,8 @@ CPK_COLOR_MAP = {
     'darkorange': ("FF7043", "FFFFFF"), 'red': ("F44336", "FFFFFF"),
 }
 
-SUMMARY_HEADERS = ["序号", "参数", "数据点数", "Mean", "STD", "Min", "Max", "CPK", "CPK Level", "ALL Site Yield"]
+SUMMARY_HEADERS = ["序号", "参数", "分类", "数据点数", "Mean", "STD", "Min", "Max",
+                   "CPK", "CPK Level", "ALL Site Yield"]
 DETAIL_HEADERS = ["统计项", "Low Limit", "High Limit", "Unit"]
 SITE_HEADERS = ["Site", "Yield", "FailCount", "ExceedMin", "ExceedMax"]
 
@@ -153,67 +155,119 @@ def _collect_param_stats(df, metadata, params, site_col, th):
     return rows
 
 
-def _write_summary_sheet(ws_summary, rows, sheet_names):
-    """总览表头 + 每参数一行（含跳转链接与 ALL Site 良率着色）+ 列宽。
+def _plan_pages(rows, groups, max_items):
+    """按分组顺序装箱：每页装满后开新页，末页放余数。
 
-    ``sheet_names`` 是参数 → 实际建出的明细 sheet 名（统一分配后的一份映射）：
-    链接必须指向真实存在的表，不能拿参数名现拼（含非法字符/截断撞名时会断链或互指）。
+    组内顺序 = rows 的文件列序；组内参数若不在 rows（列不存在/无数据）则跳过；
+    rows 中未被任何组覆盖的参数兜底进「其他」（前端已发，装配层再兜一次）。
     """
-    for col_idx, h in enumerate(SUMMARY_HEADERS, 1):
-        cell = ws_summary.cell(row=1, column=col_idx, value=h)
+    order = [title for title, _entry in rows]
+    pages, assigned = [], set()
+    for group in groups:
+        wanted = set(group['params'])
+        members = [t for t in order if t in wanted]
+        if not members:
+            continue
+        parts = [members[i:i + max_items] for i in range(0, len(members), max_items)]
+        for i, part in enumerate(parts, 1):
+            base = group['name'] if len(parts) == 1 else f"{group['name']}_{i}"
+            pages.append((base, part))
+        assigned.update(members)
+    rest = [t for t in order if t not in assigned]
+    if rest:
+        parts = [rest[i:i + max_items] for i in range(0, len(rest), max_items)]
+        for i, part in enumerate(parts, 1):
+            base = OTHER_GROUP_NAME if len(parts) == 1 else f'{OTHER_GROUP_NAME}_{i}'
+            pages.append((base, part))
+    return pages
+
+
+def _groups_by_param(titles, groups):
+    """参数 → 所属分类名列表（保持分组入参顺序，重复出现只记一次）。"""
+    out = {title: [] for title in titles}
+    for group in groups:
+        for title in group['params']:
+            if title in out and group['name'] not in out[title]:
+                out[title].append(group['name'])
+    for names in out.values():
+        if not names:
+            names.append(OTHER_GROUP_NAME)
+    return out
+
+
+def _plan_targets(pages, sheet_names, rows_by_title):
+    """参数 → 首次出现处的 ``(sheet 名, 块起始行)``；多属只记第一次。"""
+    targets = {}
+    for (base, titles), sheet_name in zip(pages, sheet_names):
+        start = 1
+        for title in titles:
+            targets.setdefault(title, (sheet_name, start))
+            start += _block_height(rows_by_title[title])
+    return targets
+
+
+def _write_summary_sheet(ws_summary, rows, group_names_by_param, targets):
+    """总览：序号/参数/分类/统计…；参数超链接指向实际 sheet 的块起始行。
+
+    ``targets`` 是参数 → ``(sheet 名, 块起始行)``，由 ``_plan_targets`` 按装箱结果
+    算出：链接必须指向真实存在的表与实际块位置，不能拿参数名现拼（含非法字符/
+    截断撞名时会断链或互指）。
+    """
+    for col_idx, header in enumerate(SUMMARY_HEADERS, 1):
+        cell = ws_summary.cell(row=1, column=col_idx, value=header)
         cell.fill = HEADER_FILL
         cell.font = HEADER_FONT
         cell.alignment = HEADER_ALIGNMENT
 
-    col_max_widths = {i: _get_text_width(SUMMARY_HEADERS[i - 1])
-                      for i in range(1, len(SUMMARY_HEADERS) + 1)}
+    col_max_widths = {i: _get_text_width(SUMMARY_HEADERS[i - 1]) for i in range(1, len(SUMMARY_HEADERS) + 1)}
 
     for param_idx, (selected_param, entry) in enumerate(rows, 1):
         stats_data = entry['stats_data']
-        site_stats_list = entry['site_stats']
-
-        cell_param = ws_summary.cell(row=param_idx + 1, column=2, value=selected_param)
-        cell_param.hyperlink = f"#'{sheet_names[selected_param]}'!A1"
+        row = param_idx + 1
+        cell_param = ws_summary.cell(row=row, column=2, value=selected_param)
+        sheet_name, anchor_row = targets[selected_param]
+        cell_param.hyperlink = f"#'{sheet_name}'!A{anchor_row}"
         cell_param.font = LINK_FONT
 
-        ws_summary.cell(row=param_idx + 1, column=1, value=param_idx).alignment = Alignment(horizontal="center")
-        ws_summary.cell(row=param_idx + 1, column=3, value=stats_data['count']).alignment = Alignment(horizontal="center")
-        ws_summary.cell(row=param_idx + 1, column=4, value=str(stats_data['mean_val'])).alignment = Alignment(horizontal="center")
-        ws_summary.cell(row=param_idx + 1, column=5, value=str(stats_data['std_val'])).alignment = Alignment(horizontal="center")
+        ws_summary.cell(row=row, column=1, value=param_idx).alignment = Alignment(horizontal="center")
+        ws_summary.cell(row=row, column=3,
+                        value=' / '.join(group_names_by_param.get(selected_param, []))).alignment = Alignment(horizontal="center")
+        ws_summary.cell(row=row, column=4, value=stats_data['count']).alignment = Alignment(horizontal="center")
+        ws_summary.cell(row=row, column=5, value=str(stats_data['mean_val'])).alignment = Alignment(horizontal="center")
+        ws_summary.cell(row=row, column=6, value=str(stats_data['std_val'])).alignment = Alignment(horizontal="center")
 
         range_parts = str(stats_data['data_range']).split(' ~ ')
-        ws_summary.cell(row=param_idx + 1, column=6, value=range_parts[0] if len(range_parts) > 0 else '').alignment = Alignment(horizontal="center")
-        ws_summary.cell(row=param_idx + 1, column=7, value=range_parts[1] if len(range_parts) > 1 else '').alignment = Alignment(horizontal="center")
+        ws_summary.cell(row=row, column=7, value=range_parts[0] if len(range_parts) > 0 else '').alignment = Alignment(horizontal="center")
+        ws_summary.cell(row=row, column=8, value=range_parts[1] if len(range_parts) > 1 else '').alignment = Alignment(horizontal="center")
 
-        cell_cpk = ws_summary.cell(row=param_idx + 1, column=8, value=stats_data['cpk_str'])
+        cell_cpk = ws_summary.cell(row=row, column=9, value=stats_data['cpk_str'])
         _apply_cpk_style(cell_cpk, stats_data.get('cpk_color', 'gray'))
-        ws_summary.cell(row=param_idx + 1, column=9, value=str(stats_data['cpk_str'])).alignment = Alignment(horizontal="center")
+        ws_summary.cell(row=row, column=10, value=str(stats_data['cpk_str'])).alignment = Alignment(horizontal="center")
 
         all_site_yield = "100.00%"
-        for si in site_stats_list:
-            if si.get('Site') == 'ALL Site':
-                all_site_yield = si.get('Yield', '100.00%')
+        for site_info in entry['site_stats']:
+            if site_info.get('Site') == 'ALL Site':
+                all_site_yield = site_info.get('Yield', '100.00%')
                 break
-        cell_yield = ws_summary.cell(row=param_idx + 1, column=10, value=all_site_yield)
+        cell_yield = ws_summary.cell(row=row, column=11, value=all_site_yield)
         cell_yield.alignment = Alignment(horizontal="center")
-        for si in site_stats_list:
-            if si.get('Site') == 'ALL Site':
-                if _site_fail_count(si) > 0:
+        for site_info in entry['site_stats']:
+            if site_info.get('Site') == 'ALL Site':
+                if _site_fail_count(site_info) > 0:
                     cell_yield.fill = FAIL_FILL
                     cell_yield.font = FAIL_FONT
                 else:
                     cell_yield.fill = NORMAL_FILL
                 break
 
-        row_vals = [(1, param_idx), (2, selected_param), (3, stats_data['count']),
-                     (4, str(stats_data['mean_val'])), (5, str(stats_data['std_val'])),
-                     (6, range_parts[0] if len(range_parts) > 0 else ''),
-                     (7, range_parts[1] if len(range_parts) > 1 else ''),
-                     (8, str(stats_data['cpk_str'])), (9, str(stats_data['cpk_str'])), (10, all_site_yield)]
+        row_vals = [(1, param_idx), (2, selected_param), (3, ' / '.join(group_names_by_param.get(selected_param, []))),
+                    (4, stats_data['count']), (5, str(stats_data['mean_val'])), (6, str(stats_data['std_val'])),
+                    (7, range_parts[0] if len(range_parts) > 0 else ''), (8, range_parts[1] if len(range_parts) > 1 else ''),
+                    (9, str(stats_data['cpk_str'])), (10, str(stats_data['cpk_str'])), (11, all_site_yield)]
         for col_i, val in row_vals:
-            w = _get_text_width(val)
-            if w > col_max_widths.get(col_i, 0):
-                col_max_widths[col_i] = w
+            width = _get_text_width(val)
+            if width > col_max_widths.get(col_i, 0):
+                col_max_widths[col_i] = width
 
     for col in range(1, len(SUMMARY_HEADERS) + 1):
         ws_summary.column_dimensions[get_column_letter(col)].width = min(col_max_widths.get(col, 15), 40)
@@ -394,7 +448,9 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
                                          show_normal=False, show_kde=False,
                                          dpi=EXPORT_DPI_DEFAULT,
                                          cpk_thresholds=None,
-                                         workers=None, progress_cb=None):
+                                         workers=None, progress_cb=None,
+                                         groups=None,
+                                         max_items_per_sheet=DEFAULT_MAX_ITEMS_PER_SHEET):
     """Build batch charts Excel with embedded histogram images.
 
     ``cpk_thresholds``（CpkThresholds）= 当前账号的 CPK 分级阈值，决定总览 CPK 单元格
@@ -406,6 +462,12 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
 
     ``progress_cb(percent:int)``：每装配完一个参数回调一次，供作业把进度落进侧车文件。
     只在**调用方进程**里执行，绝不跨进程传（lambda 不可 pickle）。
+
+    ``groups``：已校验的分组 ``[{'name', 'params'}]``（见 ``normalize_batch_grouping``）。
+    None 时沿用「每参数一张 sheet、链接指向 A1」的旧版式；给了分组就按组顺序装箱，
+    每页最多 ``max_items_per_sheet`` 个块，总览链接指向块起始行，同一参数命中多个
+    分类时按组各嵌一份图（链接只指向首次出现处）。``max_items_per_sheet`` 只在
+    有分组时生效。
 
     Ported from old project's export_batch_distribution_chart_excel + _export_charts_to_xlsx.
     Returns bytes of the .xlsx file.
@@ -420,32 +482,53 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
     ws_summary.title = "总览"
 
     rows = _collect_param_stats(df, metadata, params, site_col, th)
+    rows_by_title = dict(rows)
+    titles = [title for title, _entry in rows]
+
+    if groups:
+        page_cap = int(max_items_per_sheet or DEFAULT_MAX_ITEMS_PER_SHEET)
+        pages = _plan_pages(rows, groups, page_cap)
+        group_names = _groups_by_param(titles, groups)
+    else:
+        # 无分组 = 旧版式：每参数一页、每页一个块，与改造前逐字一致。
+        pages = [(title, [title]) for title in titles]
+        group_names = {title: [] for title in titles}
+
     # 先分配唯一 sheet 名，再用同一份映射写总览链接与建明细表 —— 两处各自
     # 现拼会在非法字符/截断撞名时断链或互指（2026-11-15 实测）。
-    sheet_names = dict(zip(
-        (title for title, _entry in rows),
-        unique_sheet_names([title for title, _entry in rows]),
-    ))
-    _write_summary_sheet(ws_summary, rows, sheet_names)
+    sheet_names = unique_sheet_names([base for base, _titles in pages])
+    targets = _plan_targets(pages, sheet_names, rows_by_title)
+    _write_summary_sheet(ws_summary, rows, group_names, targets)
 
     # openpyxl lazily reads image data during wb.save(), so we must keep each
     # buffer alive until after save() and close them all at the end.
     open_buffers = []
     png_results = _render_chart_pngs(rows, flags, workers)
+    done = set()
 
-    for idx, (title, entry) in enumerate(rows):
-        if progress_cb:
-            # 报的是「已装配到第几个」，总人数由调用方持有 —— 这里不猜百分比语义。
-            # 放在循环体第一行：下面渲染不出图时会跳过内容，放后面就漏报。
-            progress_cb(idx + 1)
-        ws = wb.create_sheet(title=sheet_names[title])
+    for (_base, page_titles), sheet_name in zip(pages, sheet_names):
+        ws = wb.create_sheet(title=sheet_name)
         _set_detail_column_widths(ws)
-        # 本任务仍是「每参数一页、块起始行 1」，与改造前的单页版式逐字一致；
-        # 分页装配由调用方按 _block_height 推进起始行（见后续任务）。
-        buffer = _write_block(ws, 1, title, entry, png_results.get(title),
-                              df, metadata, site_col, flags)
-        if buffer is not None:
+        start = 1
+        has_content = False
+        for title in page_titles:
+            # 多属参数在每个所属分类的页里各嵌一份图（png 复用，buffer 各自新建）。
+            buffer = _write_block(ws, start, title, rows_by_title[title],
+                                  png_results.get(title), df, metadata, site_col, flags)
+            if buffer is None:
+                continue
+            has_content = True
             open_buffers.append(buffer)
+            start += _block_height(rows_by_title[title])
+            if title not in done:
+                done.add(title)
+                if progress_cb:
+                    # 报的是「已装配完几个参数」，总数由调用方持有 —— 这里不猜百分比语义。
+                    # 多属参数只报一次，否则进度会超过总数。
+                    progress_cb(len(done))
+        if not has_content:
+            # 整页一个块都渲染不出图时不留空 sheet（总览链接会指向该页，见残余风险）。
+            wb.remove(ws)
 
     output = io.BytesIO()
     wb.save(output)
