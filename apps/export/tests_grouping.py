@@ -67,17 +67,27 @@ class BlockLayoutTests(SimpleTestCase):
 
     PARAMS = ['P00', 'P01', 'P02']
 
-    def _build(self, **kwargs):
-        rng = np.random.default_rng(0)
-        df = pd.DataFrame({p: rng.normal(10, 1, 40) for p in self.PARAMS})
-        metadata = {
+    def _metadata(self):
+        return {
             'units': {p: 'V' for p in self.PARAMS},
             'mins': {p: '0' for p in self.PARAMS},
             'maxs': {p: '20' for p in self.PARAMS},
             'format': 'CTA8290D',
         }
+
+    def _build(self, **kwargs):
+        rng = np.random.default_rng(0)
+        df = pd.DataFrame({p: rng.normal(10, 1, 40) for p in self.PARAMS})
         return build_batch_charts_xlsx_with_charts(
-            df, metadata, self.PARAMS, dpi=72, workers=1, **kwargs)
+            df, self._metadata(), self.PARAMS, dpi=72, workers=1, **kwargs)
+
+    def _build_with_site(self):
+        """带 Site 列的一档：3 个 site 值（[1,1,2,2,3,3] 重复两轮 = 12 行）。"""
+        rng = np.random.default_rng(0)
+        df = pd.DataFrame({p: rng.normal(10, 1, 12) for p in self.PARAMS})
+        df['Site'] = [1, 1, 2, 2, 3, 3] * 2
+        return build_batch_charts_xlsx_with_charts(
+            df, self._metadata(), self.PARAMS, site_col='Site', dpi=72, workers=1)
 
     def test_block_math(self):
         self.assertEqual(_block_height({}), 32)
@@ -99,3 +109,35 @@ class BlockLayoutTests(SimpleTestCase):
         self.assertEqual(len(ws._images), 1)
         # 总览链接仍指向 A1
         self.assertEqual(wb['总览'].cell(2, 2).hyperlink.target, "#'P00'!A1")
+
+    def test_site_branch_layout_rows_and_anchor(self):
+        """有 Site 行时的块版式：Site 表 6–10 列、数据行 S+2+i、图锚点在其下方。
+
+        这是重构里唯一改了公式形状的分支（旧 ``max(9, n+4)`` ↔ 新 ``S + max(8, n+3)``），
+        无 Site 用例钉不到它：只在本分支才写的第 6 列与 ``A{锚点行}`` 此前全无所指。
+        """
+        from openpyxl import load_workbook
+        import io
+        wb = load_workbook(io.BytesIO(self._build_with_site()))
+        ws = wb['P00']
+
+        # Site 表：S 行第 6 列是横幅表头，S+1 行起是列头，S+2+i 是数据行。
+        # compute_site_stats 每个 site 一行后再追加 'ALL Site'：3 个 site → 4 行。
+        self.assertEqual(ws.cell(1, 6).value, 'Site统计')
+        self.assertEqual(ws.cell(2, 6).value, 'Site')
+        self.assertEqual(ws.cell(3, 6).value, 'Site1')      # 第一条 site 数据（site 值 1）
+        self.assertEqual(ws.cell(6, 6).value, 'ALL Site')   # 数据块末行 = S+2+3
+
+        # 左侧统计沿用无 Site 用例的版式（代表两条：参数行与首个标签）
+        self.assertEqual(ws.cell(2, 1).value, 'P00')
+        self.assertEqual(ws.cell(4, 1).value, 'Mean')
+
+        self.assertEqual(ws.cell(8, 5).value, '← 返回总览')
+
+        self.assertEqual(len(ws._images), 1)
+        # openpyxl 无公开的锚点行读数；OneCellAnchor._from 是 0-based AnchorMarker
+        anchor = ws._images[0].anchor._from
+        self.assertEqual(anchor.col + 1, 1)                 # A 列
+        self.assertEqual(anchor.row + 1, _block_image_row(1, 3))
+        # 字面钉住：公式若退回 max(9, …) 一类形状则锚点漂到 10 行，这里立刻红
+        self.assertEqual(anchor.row + 1, 9)
