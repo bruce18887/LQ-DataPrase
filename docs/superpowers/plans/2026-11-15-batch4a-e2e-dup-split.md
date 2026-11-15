@@ -312,10 +312,14 @@ Task 1 没跑过它 ⇒ 第一次跑就给它立基线）。汇总会是 `11 pas
 跑完删除），定性成存量红还是本刀引入的，只有后者才进入修代码；结论与两条命令一起写进台账。
 有 `skipped` 时逐条核对原因必须是样例数据缺失 `PRIMARY_SAMPLE_FILE`，不得是断言失败。
 
-- [ ] **Step 6: 批内快门禁（本刀第一次真跑 affected）**
+- [ ] **Step 6: 记录本次改动集的判档（用 `--dry-run`，不许真跑）**
 
-Run: `node scripts/e2e_affected.mjs`
-Expected: 判档行含 `frontend/e2e/helpers/` ⇒ `GLOBAL` ⇒ 它会计划全量 e2e + 后端。**这一步按仓规「每批 commit 前跑 affected」执行，但不必为它单独再等一轮全量池**：全量档留到 Task 5 一次跑完并覆盖整刀（设计稿 §3.7 的排法，与批3a「收口判全量 ⇒ 上面几轮是它的超集」同形）。把 affected 打印的 `decide:`/`RESULT:` 行原样记进 `tasks/b4a_affected_t2.log`。
+Run: `node scripts/e2e_affected.mjs --dry-run`（落 `tasks/b4a_affected_t2.log`）
+Expected: `decide:` 行会因 `frontend/e2e/helpers/` 命中 `GLOBAL` 而判全量 e2e + 后端；`RESULT:` 行带
+`dry-run` 字样。**为什么这里不许真跑**：这脚本没有 `--help` 分支，未知参数一律当默认**直接开跑整条判据链**
+（`docs/tasks/lessons.md` 2026-11-15 新记那条），而真跑 = 起一次全量池 + 后端全套，那是 Task 5 的活。
+**裁定**：批内一律 `--dry-run` 留判据行，真跑全量档集中在 Task 5 一次做完并覆盖整刀（设计稿 §3.7 的排法，
+与批3a「收口判全量 ⇒ 上面几轮是它的超集」同形）。把 `decide:`/`RESULT:` 两行原样贴进台账。
 
 - [ ] **Step 7: Commit**
 
