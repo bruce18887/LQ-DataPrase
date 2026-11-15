@@ -1094,20 +1094,56 @@ T3 本批 **5** 条（`repair-center.spec.ts` 里 366/407/437/513/544 那五条�
 后端 skipped=50 vs 批3b 的 16：本档零红、判据成立，差异未逐条归因（默认 verbosity 不列 skip 名），不给推测数；
 如需归因另开 `-v 2` 档。本刀改动集 12 文件**零 `.py`** ⇒ 后端档是回归兜底，与刀一无因果交集。
 
-## 四档红项定性（池判据 `unexpected 10`≠0 的红集合，逐条按失败原文归因）
+## 四档红项定性（池判据 `unexpected 10` 的红集合，逐条按 (目录, slot, 文件, 用例标题) 四元组归因）
 
-1. **缺料 ×3**：`batch/batch-phase.spec.ts`、`data/data.spec.ts`、`exports/exports.spec.ts` 独占复跑仍红 ⇒ 真红。
-   失败原文（`slot0/slot1.run.log` 现挖）：`Error: ENOENT: no such file or directory, open 'C:\...\Data\SampleData\Buyoff\BPD60320_QA2.csv'`
-   与 `ENOENT ... copyfile '...\Data\SampleData\CTA8290D\BPD60320_C01F40#...csv'` 两形态。
-   根因：`Data/SampleData` 本机不存在（`Data/` 目录空；`/Data/` 被 `.gitignore:145` 整目录挡掉，属本机私有料）。
-2. **1px 几何 ×1**：`settings/chart-memory.spec.ts` 独占复跑仍红 ⇒ 真红。原文（`slot3.results.json` 现挖）：
-   `Error: 表格上缘位置变了，但 TABLE_TOP_OFFSET 没跟着重量 / Expected: 413 / Received: 414`。
-   与缺料无关；`TABLE_TOP_OFFSET` 最近一次被改是提交 `33649829`，早于本刀。
-3. **与本刀零因果**：`git diff --name-only b797d1f..HEAD` = 12 文件（docs 3 = triage/plan/spec + helpers 3 + e2e spec 3 + `MaintenanceCard.vue` 1 + T2 2），
-   四个红文件不在集合内；且四红文件逐文件 grep `helpers/(apiClient|djangoShell|repairCenterFlow)` import 计数 = **0**。
-4. **收口欠账（环境项，如实挂账）**：本机 `Data/SampleData` 缺料 ⇒ **全量档此刻到不了 `unexpected 0`**。
-   恢复料之后需重跑一轮 `node scripts/e2e_pool.mjs --slots=4` 拿到 `unexpected 0` 判据行，e2e 档才算真全绿；
-   本轮收口判级为「红集合已逐条定性、与本刀无因果」，不是「e2e 全绿」。chart-memory 那条 1px 同属欠账（早于本刀存在，非本刀引入，修它要重量 `TABLE_TOP_OFFSET`，独立小活）。
+⚠ 本节上一版有两处错账，本波按两目录 JSON 重导订正：旧版把 `settings/chart-memory.spec.ts` 记成
+「1px 几何 ×1」、缺料记成 ×3。机理见「取证纪律（本轮代价）」一节——主轮 slot3（view-data 几何 flake）
+与复跑轮 slot3（chart-memory 缺料真红）slot 号相同、目录不同、文件不同，被缝成了一条。
+
+1. **真红 4 文件全部是缺料**（`Data/SampleData` 本机不存在；`Data/` 目录空、`/Data/` 被 `.gitignore:145`
+   整目录挡掉，属本机私有料）。逐条五要素：
+   - 主轮 `C:\lqdp-e2e\slots\151428-15064\` · `slot0` · `settings/chart-memory.spec.ts` ·
+     「主流程：UI 开记忆 → 布局+勾选跨刷新保持 → finally 清场」（:88）·
+     原文 `Error: ENOENT: no such file or directory, open 'C:\...\Data\SampleData\Buyoff\BPD60320_QA2.csv'`。
+   - 主轮 · `slot1` · `data/data.spec.ts` · 6 条：「@p1 文件类型标签」(:54)、「@p2 删除唯一命名文件」(:74)、
+     「@p2 多文件上传」(:131)、「@p2 批量删除」(:261)、「@p2 产品筛选刷新(#6)」(:334)、「@p2 删除后无残留(#4)」(:362) ·
+     原文均为 `ENOENT ... copyfile '...\Data\SampleData\CTA8290D\BPD60320_C01F40#...csv' -> <临时文件/slot media 目标>`。
+   - 主轮 · `slot1` · `data/data.spec.ts` · 「@p2 查看数据：当前文件下拉显示文件富信息行」(:751) ·
+     原文 `expect(...).toMatch`，实收 `"CTA8280F · 8 行 · 589 B · 11/15 23:16"`（少 format 段）——
+     **这条不是缺料**：该文件独占复跑里它转绿、未列入复跑红；data.spec.ts 以 6 条缺料计入真红文件。
+     即主轮 `unexpected 10` = 缺料 9 条 + 本条 toMatch 1 条。
+   - 主轮 · `slot1` · `batch/batch-phase.spec.ts` · 「@p2 阶段胶囊过滤 + 树形汇总 + 短文件名回退」(:62) ·
+     原文 `ENOENT ... copyfile '...\Data\SampleData\CTA8290D\...csv'`。
+   - 主轮 · `slot1` · `exports/exports.spec.ts` · 「@p2 导出 - 文件列表与数据库同步 上传新文件后 Gage / Buyoff
+     下拉无需 reload 即可见新文件」(:248) · 原文同型 `ENOENT copyfile`。
+   - 复跑轮 `C:\lqdp-e2e\slots\151428-15064-recheck0\` `unexpected 9` **全部** ENOENT：batch-phase `slot0`、
+     data.spec 6 条 `slot1`、exports `slot2`、chart-memory `slot3`（`open '...\SampleData\Buyoff\BPD60320_QA2.csv'`，
+     错误原文与主轮 slot0 一致）⇒ 复跑判级「真红 4 · 负载抖动 0 · 悬而未决 0」里四个真红文件的复现原文全是缺料。
+2. **那条 1px 几何属 `data/view-data.spec.ts`，不在本刀红集合里**：四元组 = 主轮 · `slot3` ·
+   `data/view-data.spec.ts` · 「@p2 顶部带：操作按钮在文件横幅内，表格高度与实测占位对齐」（用例 :1474，
+   断言 :1499 `expect(Math.round(band!.y), '表格上缘位置变了，但 TABLE_TOP_OFFSET 没跟着重量').toBe(413)`，实收 414）。
+   主轮判级 overall=flaky（attempts `['failed','passed']`，retry 转绿），复跑四个真红文件不含它 ⇒ 它计入本轮
+   `flaky 2`，**不是真红**。`flaky 2` 另一条 = 主轮 `slot1` `analysis/wafermap-hidden-tab-init.spec.ts` :65
+   「隐藏 tab 超时后打开晶圆图…」（`Pass 散点应已渲染` Expected > 0 / Received 0）。
+   ⚠ view-data:1474 不是新目击：本文件 `:619`、`:731`、`:867` 三处早就记它为「批1 就记过名的几何 flake」。
+   按设计稿 §10 的批4 定义，它归**刀五**（批1 遗留三项之一）；本刀只是重新目击（见「遗留与挂账」第 9 条）。
+3. **与本刀零因果**：`git diff --name-only b797d1f..a41e92a` = 12 文件（docs 3 = triage/plan/spec + helpers 3 +
+   e2e spec 3 + `MaintenanceCard.vue` 1 + T2 2），四个红文件不在集合内；且四红文件逐文件 grep
+   `helpers/(apiClient|djangoShell|repairCenterFlow)` import 计数 = **0**。（本台账波之后只多 `docs/tasks/todo.md` 一笔，不改变该结论。）
+4. **收口欠账（环境项，如实挂账）**：四条真红全部源于本机 `Data/SampleData` 缺料 ⇒ **全量档此刻到不了
+   `unexpected 0`**。恢复料之后需重跑一轮 `node scripts/e2e_pool.mjs --slots=4` 拿到 `unexpected 0` 判据行，
+   e2e 档才算真全绿；本轮收口判级是「红集合已按四元组逐条定性、与本刀无因果」，**不是**「e2e 全绿」。
+
+## 取证纪律（本轮代价）
+
+- 红项归因必须按 **(目录, slot 号, spec 文件, 用例标题)** 四元组定位，**禁止按 slot 号对齐两轮**。
+  本轮的代价实例：主轮 `151428-15064/slot3`（view-data 几何 flake）与复跑轮
+  `151428-15064-recheck0/slot3`（chart-memory 缺料真红）slot 号相同、目录与文件都不同，被缝成一条，
+  于是旧台账把 chart-memory 记成「1px 几何」、把缺料记成 ×3。
+- 为什么这条纪律承重：台账是下一批的定位输入；错账会让下一批照着去改一个根本没为此红的文件
+  （给 chart-memory 重量 `TABLE_TOP_OFFSET`），同时让真正该接手的刀五丢了 view-data:1474 的记录。
+  规则：台账每一句归因数字要能指回一条可复现的读取命令（本节全部结论 = python 解析两目录
+  `slot*.results.json` 的 `status=unexpected|flaky` 逐条现读 + `tasks/b4a_final_pool.log` 判据行）。
 
 ## 本刀三文件的逐条形状（主轮 `slot3.results.json` 按 `status` 逐条现读，不按 `ok` 粗算）
 
@@ -1148,6 +1184,17 @@ T3 本批 **5** 条（`repair-center.spec.ts` 里 366/407/437/513/544 那五条�
 3. **刀二 FIX-2**（`..` 用户名上传逃逸双层防御）：分支 `feature/batch4b-username-guard`，刀一 FF 后再切；探针已证本机零存量（设计稿 §3），升全量档（§E8）。
 4. **刀三 FIX-1 + FIX-4**（刷新不吞勾选 / sibling loader 随激活刷新）：判据必须分两条用例；FIX-1 对照用例落点（进 `duplicate-keep.spec.ts` 还是 data 侧别处）刀三自定——本刀只是把 591/600 的余量还出来。
 5. **刀四** = 决策 D（用户管理左槽搜索/角色筛选）+ `SettingsPage.vue:313` 死规则 + 两项可推翻 + 1280 日期面板盖右槽（待产品/UX 拍板形状）；**刀五** = 未封顶下拉两处（`CorrelationToolsTab.vue:36/:41`、`FileSelect.vue:2/:29`）+ `useSelectFilter` 抽取 + 批1 遗留。归属设计稿 §5。
-6. **§2.4 serial 档跨文件并发**（`database is locked` / 重复组计数漂移）：本刀判定**接受**；serial 轮若出现该红，回设计稿那一节做文件间互斥，**不许**削判据。
+6. **§2.4 serial 档跨文件并发**（`database is locked` / 重复组计数漂移）：本刀判定是**带条件、未验证的接受**——
+   本轮盘面从未检验过它：`repair-center.spec.ts` 与 `duplicate-keep.spec.ts` 落在同一 slot
+   （主轮 `151428-15064/slot3`，现读两文件同在该 `slot3.results.json`），而池 slot 内是 `--workers=1` 串行
+   （`slot3.run.log` 现读）⇒ 同进程 `workers>1` 的并发形态本刀没有真跑过。首次真检验 = 恢复
+   `Data/SampleData` 之后那轮全量池重跑。serial 轮若出现该红，回设计稿那一节做文件间互斥，**不许**削判据。
+   最终评审另在本族发现一条设计稿没列的通道（登记一句）：拆文件后在 serial 档里，duplicate-keep 的 dup
+   播种可能给 `repair-center.spec.ts` 第 1 条用例（孤立磁盘文件导入，它对磁盘批次目录用 `first()` 勾选）
+   提供一个本不该存在的可选行——失效形状是「响的」（断言红），不是静默假绿。
 7. **其余 fetch 变体统一**（§2.1 非目标、§4）与 **`page.request` 通路统一**（`cleanup.ts:34-47` 那条更干净路子）：各自独立工单。
-8. **全量 e2e 欠账**（红项定性第 4 条）：本机 `Data/SampleData` 恢复料后重跑全量池至 `unexpected 0`；`chart-memory` 1px 重量的修复独立挂账（早于本刀存在，非本刀引入）。
+8. **全量 e2e 欠账**（红项定性第 4 条）：四条真红全部源于本机 `Data/SampleData` 缺料；恢复料后重跑全量池
+   （`node scripts/e2e_pool.mjs --slots=4`）至拿到 `unexpected 0` 判据行，e2e 档才算真全绿。
+9. **`data/view-data.spec.ts:1474` TABLE_TOP_OFFSET 1px 几何 flake**：归属**刀五（批1 遗留三项之一）**，
+   见设计稿 §10。本刀对它只是**重新目击**（主轮 slot3 flaky、retry 转绿，计入 `flaky 2`），非本刀引入、
+   也非本刀该修；`TABLE_TOP_OFFSET` 最近一次被改是提交 `33649829`，早于本刀。既有记录：本文件 `:619`、`:731`、`:867`。
