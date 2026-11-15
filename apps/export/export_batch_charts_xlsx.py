@@ -7,6 +7,7 @@ BytesIO 必须活到 save() 之后，由编排层持有并在收尾统一关闭�
 
 import io
 import os
+from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from typing import NamedTuple
 
@@ -170,6 +171,8 @@ def _plan_pages(rows, groups, max_items):
             continue
         parts = [members[i:i + max_items] for i in range(0, len(members), max_items)]
         for i, part in enumerate(parts, 1):
+            # 单页分组是有意省略 `_页码` 后缀：此时 sheet 名就是分类名本身（最好认），
+            # 只有真拆成多页才加 `_1..n`（spec §7.2）。
             base = group['name'] if len(parts) == 1 else f"{group['name']}_{i}"
             pages.append((base, part))
         assigned.update(members)
@@ -438,7 +441,7 @@ def _write_block(ws, start_row, title, entry, png, df, metadata, site_col, flags
     image = XlImage(img_buffer)
     image.width = 800
     image.height = 450
-    ws.add_image(image, f'A{_block_image_row(start_row, len(site_stats_list))}')
+    ws.add_image(image, f'A{_block_image_row(start_row, len(site_stats_list or []))}')
     return img_buffer
 
 
@@ -504,10 +507,17 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
     # buffer alive until after save() and close them all at the end.
     open_buffers = []
     png_results = _render_chart_pngs(rows, flags, workers)
+    # site 数组只服务并行渲染；串行路径由 _create_histogram_chart 从 df 重算。
+    # 不释放会随 rows_by_title 活到 save() 之后，大导出按「行数×参数数」白占内存。
+    for _entry in rows_by_title.values():
+        _entry['chart_data'].pop('site_values', None)
+        _entry['chart_data'].pop('site_series', None)
     done = set()
     # 同一张图只渲染一次（spec §6.2）：多属参数在每个所属分类的页里各嵌一份块，
     # 但图内容完全相同。按 title 缓存首块写成功后产出的 PNG 字节，后续块直接复用；
     # buffer 对象不复用（_write_block 内部另建 BytesIO），因为 openpyxl 要各自持有到 save。
+    # 只缓存「出现 >1 次」的 title：单属参数的缓存副本没有任何消费者，等于按项多存一份 PNG。
+    occurrences = Counter(title for _base, titles in pages for title in titles)
     png_cache: dict[str, bytes] = {}
 
     for (_base, page_titles), sheet_name in zip(pages, sheet_names):
@@ -526,7 +536,7 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
                 continue
             has_content = True
             open_buffers.append(buffer)
-            if title not in png_cache:
+            if occurrences[title] > 1 and title not in png_cache:
                 # 写成功才缓存：渲染不出图的块已在上面返回 None，不会把空字节写进缓存。
                 png_cache[title] = buffer.getvalue()
             start += _block_height(rows_by_title[title])

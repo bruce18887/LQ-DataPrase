@@ -49,7 +49,7 @@ import ExportChartConfig from './components/export/ExportChartConfig.vue'
 import ExportActions from './components/export/ExportActions.vue'
 import { safeGetItem, safeSetItem } from '../../utils/safeStorage'
 import {
-  groupingExportBlocked, hasGroupingRules, parseGroupingConfig, resolveGroups, validateGroupingConfig,
+  groupingExportBlocked, groupingValidationError, hasGroupingRules, parseGroupingConfig, resolveGroups,
   type GroupingConfig,
 } from './composables/exportGrouping'
 
@@ -124,8 +124,9 @@ function onExportBatch(format: string) {
     return
   }
   // 提交前自校验（R13）：分类名空/重名/占用「其他」都在这里拦下 —— 后端只做结构校验，
-  // 这类「用户少打了一个字」的错误不该走一趟作业再拿 400。
-  const groupingError = validateGroupingConfig(grouping.value)
+  // 这类「用户少打了一个字」的错误不该走一趟作业再拿 400。只在「确有有效规则」时校验：
+  // 全是空壳分类时请求不带分组、走旧版式，拦下来只会挡住正常的编辑中间态。
+  const groupingError = groupingValidationError(grouping.value)
   if (groupingError) {
     ElMessage.error(groupingError)
     return

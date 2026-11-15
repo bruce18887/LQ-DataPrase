@@ -158,6 +158,18 @@ export function validateGroupingConfig(config: GroupingConfig): string | null {
   return null
 }
 
+/**
+ * 导出前的分类名闸：**只有确有有效规则时**才跑 `validateGroupingConfig`。
+ *
+ * 全是空壳分类（名字没填、或条件全空）时导出请求根本不带 `groups`，
+ * 旧版式照常工作 —— 这时拦下来只会让「先加分类、后填条件」的中间态没法导出。
+ * 一旦确有规则要发出去，空名分类就会在请求里静默消失（预览有行、导出没块），
+ * 所以那种情况仍按 `validateGroupingConfig` 拦。返回 null 表示放行。
+ */
+export function groupingValidationError(config: GroupingConfig): string | null {
+  return hasGroupingRules(config) ? validateGroupingConfig(config) : null
+}
+
 export function countConflicts(params: string[], rules: GroupRule[]): number {
   const valid = validRules(rules)
   return params.filter((p) => valid.filter((r) => matchScore(p, r) !== null).length > 1).length

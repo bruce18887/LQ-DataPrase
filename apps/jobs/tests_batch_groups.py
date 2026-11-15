@@ -125,7 +125,9 @@ class BatchChartsRunnerGroupingTests(SimpleTestCase):
         groups = [{'name': 'LKG', 'params': ['VOLT']}]
         task = self._task('grouped.xlsx')
         task['groups'] = groups
-        task['max_items_per_sheet'] = 50
+        # 用 30 而不是 50：50 恰好等于契约缺省，runner 若把 `task.get(key, 50)` 写成
+        # 字面量回退，这里照样绿 —— 换一个非缺省值才能区分「原样透传」与「回退到 50」。
+        task['max_items_per_sheet'] = 30
 
         result = self.runner.run_export_batch_charts(task)
 
@@ -133,7 +135,7 @@ class BatchChartsRunnerGroupingTests(SimpleTestCase):
         kwargs = self.calls[0]['kwargs']
         self.assertEqual(kwargs.get('groups'), groups,
                          'task 里的 groups 必须原样递到 builder，否则退回旧版式')
-        self.assertEqual(kwargs.get('max_items_per_sheet'), 50,
+        self.assertEqual(kwargs.get('max_items_per_sheet'), 30,
                          'task 里的页上限必须原样递到 builder')
         self.assertEqual(result['bytes_written'], len(self.payload))
         with open(task['out_path'], 'rb') as fh:

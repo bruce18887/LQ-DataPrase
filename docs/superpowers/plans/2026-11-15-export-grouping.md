@@ -1,5 +1,7 @@
 # 批量参数分布图：测试项归类 + 每页上限装箱 Implementation Plan
 
+**状态：已实施（2026-11-15）**
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 让批量参数分布图导出支持「按测试项名前缀/后缀/包含归类」并按每页最大项数装箱，总览超链接逐项指向实际 sheet 的块起始行。
@@ -52,7 +54,7 @@
 
 **背景：** 当前工作树混有批3a 的未提交改动（`apps/datafiles/views/_duplicate_files.py`、`apps/datafiles/views/browse_views.py`、`test/backend/test_duplicate_keep_selection.py`），**不得**把它们带进本功能。
 
-- [ ] **Step 1: 确认工作树与待提交文件**
+- [x] **Step 1: 确认工作树与待提交文件**
 
 ```bash
 git status --porcelain
@@ -61,7 +63,7 @@ git diff --stat
 
 预期：批3a 三个文件保持未提交；导出相关改动如下。
 
-- [ ] **Step 2: 经用户确认后，按三个逻辑提交归档导出侧改动**
+- [x] **Step 2: 经用户确认后，按三个逻辑提交归档导出侧改动**
 
 ```bash
 git add apps/export/charts.py apps/export/tests_histogram_style.py test/backend/test_export_histogram_grid.py
@@ -79,7 +81,7 @@ git commit -m "docs(export): 测试项归类与分页设计稿"
 
 注意：`export_batch_charts_xlsx.py` 同时含「unit 传参 + Site 口径 + 链接修复」，按主导变更归入第二笔即可；若用户不接受拆单，可改为一笔 `feat(export)` 并说明。
 
-- [ ] **Step 3: 建隔离工作树**
+- [x] **Step 3: 建隔离工作树**
 
 ```bash
 git worktree add .worktrees/feat-export-grouping -b feat/export-grouping HEAD
@@ -113,7 +115,7 @@ cd .worktrees/feat-export-grouping
   - `parseGroupingConfig(raw: string | null): GroupingConfig`
   - `newGroupId(): string`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```ts
 // frontend/test/unit/exportGrouping.spec.ts
@@ -199,7 +201,7 @@ describe('preview helpers', () => {
 })
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd frontend && npx vitest run test/unit/exportGrouping.spec.ts
@@ -207,7 +209,7 @@ cd frontend && npx vitest run test/unit/exportGrouping.spec.ts
 
 预期：FAIL（模块不存在）。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```ts
 // frontend/src/pages/data/composables/exportGrouping.ts
@@ -331,7 +333,7 @@ export function parseGroupingConfig(raw: string | null): GroupingConfig {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 cd frontend && npx vitest run test/unit/exportGrouping.spec.ts
@@ -339,7 +341,7 @@ cd frontend && npx vitest run test/unit/exportGrouping.spec.ts
 
 预期：PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add frontend/src/pages/data/composables/exportGrouping.ts frontend/test/unit/exportGrouping.spec.ts
@@ -360,7 +362,7 @@ git commit -m "feat(export): 测试项归类纯函数（匹配/策略/预览计�
   - `class GroupingError(ValueError)`，属性 `code: str`、`field: str`
   - `normalize_batch_grouping(raw_groups, raw_max, params, fmt='xlsx') -> (list[dict] | None, int)`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # apps/export/tests_grouping.py
@@ -425,7 +427,7 @@ class NormalizeGroupingTests(SimpleTestCase):
         self.assertEqual([g['params'] for g in groups], [['A', 'B'], ['A', 'C']])
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 .venv/Scripts/python.exe manage.py test apps.export.tests_grouping.NormalizeGroupingTests
@@ -433,7 +435,7 @@ class NormalizeGroupingTests(SimpleTestCase):
 
 预期：FAIL / ERROR（模块不存在）。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 ```python
 # apps/export/grouping.py
@@ -496,7 +498,7 @@ def normalize_batch_grouping(raw_groups, raw_max, params, fmt='xlsx'):
     return normalized, max_items
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 .venv/Scripts/python.exe manage.py test apps.export.tests_grouping.NormalizeGroupingTests
@@ -504,7 +506,7 @@ def normalize_batch_grouping(raw_groups, raw_max, params, fmt='xlsx'):
 
 预期：PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/export/grouping.py apps/export/tests_grouping.py
@@ -527,7 +529,7 @@ git commit -m "feat(export): 分组请求校验纯函数（结构/页上限/PPT 
   - `_block_image_row(start_row, site_rows) -> int` = `start_row + max(8, site_rows + 3)`
 - Consumes: 现有 `_create_histogram_chart`、`unique_sheet_names`、`_render_chart_pngs`。
 
-- [ ] **Step 1: 写失败测试（现状不变量 + 行距公式）**
+- [x] **Step 1: 写失败测试（现状不变量 + 行距公式）**
 
 ```python
 # 追加到 apps/export/tests_grouping.py
@@ -573,7 +575,7 @@ class BlockLayoutTests(SimpleTestCase):
         self.assertEqual(wb['总览'].cell(2, 2).hyperlink.target, "#'P00'!A1")
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 .venv/Scripts/python.exe manage.py test apps.export.tests_grouping.BlockLayoutTests
@@ -581,7 +583,7 @@ class BlockLayoutTests(SimpleTestCase):
 
 预期：FAIL / ERROR（`_block_height` 不存在）。
 
-- [ ] **Step 3: 实现块布局**
+- [x] **Step 3: 实现块布局**
 
 把现有 `_write_detail_sheet` 改造成「在给定起始行写一个块」，行号统一以 `start_row` 偏移（`S=1` 时与现状逐字一致）：
 
@@ -712,7 +714,7 @@ def _set_detail_column_widths(ws):
 
 删除旧 `_write_detail_sheet`。
 
-- [ ] **Step 4: 跑测试与全套回归**
+- [x] **Step 4: 跑测试与全套回归**
 
 ```bash
 .venv/Scripts/python.exe manage.py test apps.export.tests_grouping.BlockLayoutTests apps.export test.backend.test_export_histogram_grid
@@ -720,7 +722,7 @@ def _set_detail_column_widths(ws):
 
 预期：全部 PASS（现有用例钉住版式未变）。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/export/export_batch_charts_xlsx.py apps/export/tests_grouping.py
@@ -743,7 +745,7 @@ git commit -m "refactor(export): 明细 sheet 改为可偏移的块布局（S=1 
   - `_groups_by_param(titles, groups) -> dict[str, list[str]]`
   - `_plan_targets(pages, sheet_names, rows_by_title) -> dict[str, tuple[str, int]]`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # 追加到 apps/export/tests_grouping.py
@@ -807,7 +809,7 @@ class GroupedLayoutTests(SimpleTestCase):
         self.assertEqual(len(wb['B']._images), 2)
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 .venv/Scripts/python.exe manage.py test apps.export.tests_grouping.GroupedLayoutTests
@@ -815,7 +817,7 @@ class GroupedLayoutTests(SimpleTestCase):
 
 预期：FAIL（builder 不认 `groups`）。
 
-- [ ] **Step 3: 实现装箱与总览改造**
+- [x] **Step 3: 实现装箱与总览改造**
 
 在 `export_batch_charts_xlsx.py` 增加：
 
@@ -996,7 +998,7 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
 
 注意：`sheet_names` 与 `pages` 数量一致；`targets` 用 `setdefault` 保证多属只记第一次。
 
-- [ ] **Step 4: 跑测试**
+- [x] **Step 4: 跑测试**
 
 ```bash
 .venv/Scripts/python.exe manage.py test apps.export.tests_grouping apps.export test.backend.test_export_histogram_grid
@@ -1004,7 +1006,7 @@ def build_batch_charts_xlsx_with_charts(df, metadata, params, site_col=None,
 
 预期：PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/export/export_batch_charts_xlsx.py apps/export/tests_grouping.py
@@ -1024,7 +1026,7 @@ git commit -m "feat(export): 按分组装箱分页并让总览链接指向块锚
 - Consumes: Task 2 `normalize_batch_grouping` / `GroupingError`；Task 4 builder 参数。
 - Produces: task dict 键 `groups`（`list[dict]`）与 `max_items_per_sheet`（`int`）；view 对非法请求返回 400。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # apps/jobs/tests_batch_groups.py
@@ -1054,7 +1056,7 @@ class BatchChartsTaskGroupingTests(SimpleTestCase):
         self.assertNotIn('max_items_per_sheet', task)
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 .venv/Scripts/python.exe manage.py test apps.jobs.tests_batch_groups
@@ -1062,7 +1064,7 @@ class BatchChartsTaskGroupingTests(SimpleTestCase):
 
 预期：FAIL（`build_batch_charts_task` 不接受新参数）。
 
-- [ ] **Step 3: 实现接线**
+- [x] **Step 3: 实现接线**
 
 `executor.py`：
 
@@ -1143,13 +1145,13 @@ def build_batch_charts_task(*, params, abs_path, fmt, job_id, owner_id,
   groups_not_supported: 'PPT 格式不支持测试项归类',
 ```
 
-- [ ] **Step 4: 跑测试**
+- [x] **Step 4: 跑测试**
 
 ```bash
 .venv/Scripts/python.exe manage.py test apps.jobs.tests_batch_groups apps.jobs.tests_jobs
 ```
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add apps/jobs/views.py apps/jobs/executor.py apps/jobs/runner.py frontend/src/utils/error.ts apps/jobs/tests_batch_groups.py
@@ -1171,7 +1173,7 @@ git commit -m "feat(jobs): 批量导出作业透传测试项分组与页上限�
 - Consumes: Task 1 全部导出；后端请求字段 `groups` / `max_items_per_sheet`。
 - Produces: 卡片 `v-model` 为 `GroupingConfig`；导出按钮请求携带分组（仅当 `hasGroupingRules` 为真）。
 
-- [ ] **Step 1: 写 e2e 失败测试（接线证明）**
+- [x] **Step 1: 写 e2e 失败测试（接线证明）**
 
 ```ts
 // frontend/e2e/exports/grouped-export.spec.ts
@@ -1226,7 +1228,7 @@ test.describe('@p2 导出 - 测试项归类', { tag: ['@p2', '@exports'] }, () =
 })
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd frontend && E2E_PORT=<空闲> E2E_FRONTEND_PORT=<空闲> npx playwright test e2e/exports/grouped-export.spec.ts --project=P1 --workers=1
@@ -1234,7 +1236,7 @@ cd frontend && E2E_PORT=<空闲> E2E_FRONTEND_PORT=<空闲> npx playwright test 
 
 预期：FAIL（找不到 `export-group-add`）。
 
-- [ ] **Step 3: 写卡片组件**
+- [x] **Step 3: 写卡片组件**
 
 ```vue
 <!-- frontend/src/pages/data/components/export/ExportGroupingCard.vue -->
@@ -1389,7 +1391,7 @@ const preview = computed(() => {
 </style>
 ```
 
-- [ ] **Step 4: 接线 `ExportToolsTab.vue`**
+- [x] **Step 4: 接线 `ExportToolsTab.vue`**
 
 在现有引用后追加：
 
@@ -1442,7 +1444,7 @@ watch(grouping, (value) => {
 
 步骤号：`ExportChartConfig.vue` 的 `<span class="step-number">2</span>` → `3`；`ExportActions.vue` 的 `3` → `4`。
 
-- [ ] **Step 5: 跑测试**
+- [x] **Step 5: 跑测试**
 
 ```bash
 cd frontend && npx vitest run test/unit/exportGrouping.spec.ts && npm run lint:e2e
@@ -1451,7 +1453,7 @@ E2E_PORT=<空闲> E2E_FRONTEND_PORT=<空闲> npx playwright test e2e/exports/gro
 
 预期：PASS。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add frontend/src/pages/data/components/export/ExportGroupingCard.vue \
@@ -1468,7 +1470,7 @@ git commit -m "feat(export): 测试项归类 UI 与导出接线（规则仅存 l
 
 **Files:** 无新增源码（可能补 `docs/tasks/todo.md` 台账，按项目约定）。
 
-- [ ] **Step 1: 后端定向 + 全量受影响档**
+- [x] **Step 1: 后端定向 + 全量受影响档**
 
 ```bash
 .venv/Scripts/python.exe manage.py test apps.export apps.jobs apps.weight test.backend
@@ -1477,13 +1479,13 @@ cd frontend && npm run test:e2e:affected
 
 判绿看末行 `RESULT:`，不看 `$?`。
 
-- [ ] **Step 2: 浏览器定向档（分类导出）**
+- [x] **Step 2: 浏览器定向档（分类导出）**
 
 ```bash
 cd frontend && E2E_PORT=<空闲> E2E_FRONTEND_PORT=<空闲> npx playwright test e2e/exports --project=P1 --workers=2
 ```
 
-- [ ] **Step 3: 提交收口记录（若项目要求）**
+- [x] **Step 3: 提交收口记录（若项目要求）**
 
 在 `docs/tasks/todo.md` 追加本批台账（完成项、门禁数字、残余风险），提交：
 
