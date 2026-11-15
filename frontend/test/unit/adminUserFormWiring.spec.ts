@@ -63,3 +63,45 @@ describe('UserFormDialog：edit-* 不挪窝，create-* 独立，载荷按 mode �
     expect(code).toMatch(/mode: 'edit';\s*display_name: string;\s*email: string;\s*role: string/)
   })
 })
+
+const PAGE = '../../src/pages/admin/UserManagement.vue'
+
+describe('UserManagement：薄页——只有 chip 行、工具栏、表格与对话框', () => {
+  it('三个管理页组件都接上了', () => {
+    const code = read(PAGE)
+    expect(code).toContain('<UserKpiChips')
+    expect(code).toContain('<AdminPageToolbar>')
+    expect(code).toContain('<UserFormDialog')
+  })
+
+  it('页内不再自带对话框/内联添加表单', () => {
+    const code = codeOf(read(PAGE))
+    expect(code).not.toContain('<el-dialog')
+    expect(code).not.toContain('添加用户')
+    expect(code).not.toContain('el-divider')
+  })
+
+  it('左槽留空（决策 D 归批4），右槽有「新增账号」', () => {
+    const code = read(PAGE)
+    expect(code).not.toContain('<template #left>')
+    expect(code).toContain('<template #right>')
+    expect(code).toContain('新增账号')
+  })
+
+  it('KPI 四个数逐项传给 chip 组件', () => {
+    const code = read(PAGE)
+    for (const prop of ['total', 'active', 'locked', 'admins']) {
+      expect(code, `KPI prop ${prop} 没传给 UserKpiChips`).toContain(`:${prop}="kpi.${prop}"`)
+    }
+  })
+
+  it('页面代码行零 emoji（旧 KPI 与 roleIcon 已换 EP 图标）', () => {
+    const code = codeOf(read(PAGE))
+    expect(code).not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u)
+  })
+
+  it('页面不再自带角色下拉（唯一一个在 UserFormDialog）', () => {
+    const code = codeOf(read(PAGE))
+    expect(code).not.toMatch(/<el-select[^>]*v-model="[^"]*\.role"/)
+  })
+})
