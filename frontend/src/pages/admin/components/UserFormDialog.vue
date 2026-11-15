@@ -126,3 +126,25 @@ async function submit() {
     </template>
   </el-dialog>
 </template>
+
+<style scoped>
+/* 页面在批3b 把对话框拆成子组件后，原页面 scoped 的 input/footer 规则够不到 teleport 后的 DOM；
+ * 这里按原值接手，light 下的底色/描边与页面其余控件一致，night 由全局主题层 !important 覆盖。 */
+:deep(.el-input__wrapper) {
+  background-color: var(--bg);
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--border-2) inset;
+}
+
+:deep(.el-input__wrapper:hover) {
+  box-shadow: 0 0 0 1px var(--brand) inset;
+}
+
+:deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 1px var(--brand) inset;
+}
+
+:deep(.el-button) {
+  border-radius: 8px;
+}
+</style>

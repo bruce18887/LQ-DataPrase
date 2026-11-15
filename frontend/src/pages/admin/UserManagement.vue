@@ -108,6 +108,8 @@ import { Stamp, UserFilled } from '@element-plus/icons-vue'
 import api from '../../api'
 import { collectAllPages } from '../../utils/paging'
 import { useAuthStore } from '../../stores/auth'
+// 角色标签的唯一语义来源是 utils/roleLabel（§7.3 兜底理由写在那份文件的注释里）；
+// 这里只做委托，别在本文件再写一份 roleLabel。roleIcon 只此一份，留在本地。
 import { roleLabel } from '../../utils/roleLabel'
 import AdminPageToolbar from './components/AdminPageToolbar.vue'
 import UserKpiChips from './components/UserKpiChips.vue'
@@ -157,7 +159,9 @@ function isLocked(user: User): boolean {
 }
 
 function roleIcon(role: string) {
-  return role === 'administrator' ? Stamp : UserFilled
+  if (role === 'administrator') return Stamp
+  // 兜底也吃掉迁移 0012 未跑到的机器上残留的第三种角色（见 2026-11-05-account-role-audit-design.md §7.3）
+  return UserFilled
 }
 
 function statusClass(user: User): string {
@@ -367,20 +371,6 @@ onMounted(loadUsers)
   --el-table-border-color: var(--border-2);
   --el-table-text-color: var(--text);
   --el-table-row-hover-bg-color: var(--bg-3);
-}
-
-:deep(.el-input__wrapper) {
-  background-color: var(--bg);
-  border-radius: 8px;
-  box-shadow: 0 0 0 1px var(--border-2) inset;
-}
-
-:deep(.el-input__wrapper:hover) {
-  box-shadow: 0 0 0 1px var(--brand) inset;
-}
-
-:deep(.el-input__wrapper.is-focus) {
-  box-shadow: 0 0 0 1px var(--brand) inset;
 }
 
 :deep(.el-button) {
