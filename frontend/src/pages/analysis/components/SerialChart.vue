@@ -14,7 +14,7 @@
       :menu="brush.menu"
       mode="highlight"
       @open-subset="openSubsetFromHighlight"
-      @clear="highlight.clear()"
+      @clear="onClearHighlight"
       @close="brush.closeMenu"
     />
   </div>
@@ -385,17 +385,34 @@ const brush = reactive(useChartBrushSelect({
 // 切参数不清高亮（R5 显式例外）：选区已在 mouseup 消费为会话级 serial 集合，
 // 同一批芯片跨参数重画；切文件由 useSerialHighlight 内部 watch(fileId) 清。
 
+/** 「清除高亮」只清 brush 那份，菜单必须一并收起——否则留下一个点了没反应的菜单。 */
+function onClearHighlight() {
+  highlight.clear()
+  brush.closeMenu()
+}
+
 /**
  * A 案：菜单对「当前高亮集合」开子图，不是「刚刚框的那一下」。
- * immediate 模式下 mouseup 已消费选区，此时手上只有高亮集合本身。
+ * 面板并集贡献时 brush 的 serialCol 可能已被清空；优先沿用面板选区记录的列，
+ * 再退回图表现行解析出的列，避免用自动探测的另一序列列静默圈错芯片。
  */
 function openSubsetFromHighlight() {
   const serials = highlight.serials.value
-  if (!serials.length) return
+  if (!serials.length) {
+    brush.closeMenu()
+    return
+  }
+  const panelCols = new Set<string>()
+  for (const p of subsetPanels.panels.value) {
+    if (p.selection.kind === 'serials' && p.selection.serial_col) {
+      panelCols.add(p.selection.serial_col)
+    }
+  }
+  const panelCol = panelCols.size === 1 ? [...panelCols][0] : undefined
   subsetPanels.create({
     kind: 'serials',
     serials: [...serials],
-    serial_col: highlight.serialCol.value,
+    serial_col: highlight.serialCol.value ?? panelCol ?? props.data?.serial_col,
   })
   brush.closeMenu()
 }
