@@ -16,6 +16,7 @@
 - **双主题**：只认 CSS token，不新增裸色。本次复用 `ChartContextMenu` 现有 `role="menuitem"` 样式，dark/light 自动跟随，不写新样式块。
 - **版本控制**：从 master 另开 `feature/gap-review-quick-wins`；master 上不提交产品代码；不 push（origin 是公开仓库）。
 - **门禁节奏**：每笔 commit 前 `cd frontend && npm run test:e2e:affected`；收口/并入 master 前 `node scripts/e2e_pool.mjs --slots=4` + 后端全套。判绿取日志末尾 `RESULT:` / `OK` 行，不取退出码。
+- **docs-only commit 的 affected 判据**：`docs/**` 与 `*.md` 在 `scripts/affected-rules.mjs` 里映射为空集，纯文档 commit 前跑 affected 必然输出 `RESULT: NO AFFECTED TESTS`。这不是产品代码的绿灯：记录该行并注明「docs-only，无测试承重」；本批的产品代码 commit（Task 2/3）各自提交前必须拿到 `RESULT: PASS`。
 - **一条 bash 命令只跑一个 Playwright 档位**；跑前确认端口空闲，跑后释放。
 - **本计划只做报告 §8 的刀一 + 报告入库**；不做 prune timer、`jobs/` 占用统计、管理员跨用户、过载提示、SFTP 保留期、桌面日志轮转。
 - **语义假设（已按用户方向预设）**：§5 取 **A 案**（菜单对「当前高亮集合」开子图，不是「刚刚框的那一下」）；§3.2-① 取 **补 `progress_cb`**。若拍板不同，先改计划再动代码。
@@ -543,7 +544,7 @@ Expected: `Test Files ... passed`、`Tests ... passed`，exit 0。
 cd frontend && npm run test:e2e:affected
 ```
 
-Expected: 末行 `RESULT: PASS`；`NO AFFECTED TESTS` 不是绿灯。
+Expected: 若本步在产品代码提交前执行，末行 `RESULT: PASS`。若工作树只剩 docs 台账改动（Task 4 的常态），输出 `RESULT: NO AFFECTED TESTS`；记录该行并注明「docs-only，无测试承重」。本批产品代码的绿灯判据是 Task 2/3 各自提交前那两次 affected 的 `RESULT: PASS`。
 
 - [ ] **Step 3: 行数闸**
 
