@@ -104,15 +104,36 @@ test.describe('serial 高亮开子集直方图', { tag: ['@p1', '@analysis'] }, 
     })
   }
 
+  /**
+   * 池内负载下 hit-test 偶发不落点：有界重拖，最多 3 次；
+   * 判据仍是最终高亮 {4,5,6}，不放松断言。
+   */
+  async function dragUntilHighlighted(
+    page: import('@playwright/test').Page,
+    chartB: string,
+    host: import('@playwright/test').Locator,
+  ) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await drag(page, chartB, 0.55, 0.06, 0.98, 0.45)
+      try {
+        await expect.poll(async () => (await highlightSerials(host)).length,
+          { timeout: 5_000 }).toBe(3)
+        return
+      } catch {
+        // 下一次重拖
+      }
+    }
+    await expect.poll(async () => (await highlightSerials(host)).length,
+      { timeout: 5_000 }).toBe(3)
+  }
+
   test('框选高亮 → 右键打开子集直方图（n=3，高亮保持）', async ({ page }) => {
     await openSerial(page)
     const chartB = `${SINGLE} [data-chart-key="serial"] .chart-b`
     // 与 subset-drilldown.spec.ts:219 同一块已知矩形：右上覆盖 serial 4/5/6，
     // mouseup 立即消费为高亮。
-    await drag(page, chartB, 0.55, 0.06, 0.98, 0.45)
     const host = page.locator(`${SINGLE} .serial-chart-wrapper div[_echarts_instance_]`)
-    await expect.poll(async () => (await highlightSerials(host)).length,
-      { timeout: 15_000 }).toBe(3)
+    await dragUntilHighlighted(page, chartB, host)
     expect([...(await highlightSerials(host))].sort((a, b) => Number(a) - Number(b)))
       .toEqual([4, 5, 6])
 
@@ -146,7 +167,42 @@ test.describe('serial 高亮开子集直方图', { tag: ['@p1', '@analysis'] }, 
     await expect(title).toContainText('KELVIN_VIN 子集')
     await expect(title).toContainText('3 颗序列')
     // 面板展示即贡献高亮（并集语义）；开子图后高亮不得丢。
-    await expect.poll(async () => (await highlightSerials(host)).length,
-      { timeout: 15_000 }).toBeGreaterThanOrEqual(3)
+    await expect.poll(async () => {
+      const s = await highlightSerials(host)
+      return [...s].sort((a, b) => Number(a) - Number(b))
+    }, { timeout: 15_000 }).toEqual([4, 5, 6])
+
+    // A 案判别：清掉 brush 高亮后，子集面板仍贡献 {4,5,6}；再次打开子图必须
+    // 仍带这批 serials 与列名。若实现读 last-brush，这里不会发出请求。
+    await page.locator(chartB).evaluate((el) => el.scrollIntoView({ block: 'start' }))
+    const box2 = await page.locator(chartB).boundingBox()
+    expect(box2).not.toBeNull()
+    await page.mouse.click(box2!.x + box2!.width * 0.75, box2!.y + box2!.height * 0.25,
+      { button: 'right' })
+    await expect(page.locator('[data-menu-clear-highlight]')).toBeVisible({ timeout: 20_000 })
+    await page.locator('[data-menu-clear-highlight]').click()
+    await expect(page.locator('[data-chart-context-menu]')).toHaveCount(0)
+    await expect.poll(async () => {
+      const s = await highlightSerials(host)
+      return [...s].sort((a, b) => Number(a) - Number(b))
+    }, { timeout: 10_000 }).toEqual([4, 5, 6])
+
+    const requery2 = page.waitForResponse(
+      (r) => r.url().includes('/analysis/histogram/')
+        && r.request().method() === 'POST'
+        && r.request().postData()?.includes('"kind":"serials"') === true
+        && r.request().postData()?.includes('"serials":[4,5,6]') === true,
+      { timeout: 20_000 },
+    )
+    await page.mouse.click(box2!.x + box2!.width * 0.75, box2!.y + box2!.height * 0.25,
+      { button: 'right' })
+    await expect(page.locator('[data-menu-open-subset]')).toBeVisible({ timeout: 20_000 })
+    await page.locator('[data-menu-open-subset]').click()
+    const resp2 = await requery2
+    expect(resp2.status()).toBe(200)
+    expect(resp2.request().postData()).toContain('"serial_col"')
+    await expect(page.locator('[data-subset-panel]')).toHaveCount(2)
+    await expect(page.locator('[data-subset-panel]').nth(1))
+      .toHaveAttribute('data-subset-n', '3', { timeout: 15_000 })
   })
 })
