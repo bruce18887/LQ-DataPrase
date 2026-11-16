@@ -3218,3 +3218,22 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
    未知参数一律走默认 ⇒ 当场开跑 `lint:e2e` + `vitest run`（判据链后面还挂着 backend 全量与全量池）。
    **规则**：本仓 `scripts/*.mjs` 探参数只读源码或跑 `--dry-run`（那条是显式实现的），别拿 `--help` 试；
    共享工作树里一次误跑就是十几分钟 + 占 slot 端口，撞的是别人那轮池。
+
+## 2026-11-16 判据命令的「空输出 + rc=0」与浏览器的禁用端口表：两次都是我把装置错当成被测对象
+
+1. **现象**：§2.4 并发检验的跑批脚本在选端口那步抛 `TypeError: expected string or bytes-like object, got 'NoneType'`。
+   单独探 `netstat -ano`：**rc=0、stdout=None**。根因是中文 Windows 的 `netstat`/`netsh` 输出是 **GBK**，
+   而我按本仓惯例给了 `text=True`（`PYTHONIOENCODING=utf-8`）⇒ 读线程解码失败，`stdout` 落 None。
+   - **根因**：解码异常发生在 reader 线程，不影响进程退出码。
+   - **最阴的地方**：我第一版修法若是 `out = r.stdout or ''`，那道「端口空闲」检查会**永远返回空闲**，
+     于是每轮都敢抢正在被占的端口，跑出一片红再去查产品。屏幕上一个字没错，闸却完全没跑。
+   - **规则：任何用作放行判据的外部命令，要 (a) 自己按 GBK→UTF-8 双试解 bytes，不用 `text=True`；
+     (b) 空输出/缺关键段（这里要求看到 `TCP`）直接 `raise`，绝不当成「通过」。**
+     这与「`grep | tail` 丢退出码」「`No tests found` 却 exit 0」是同一条假安全的第三个面。
+2. **现象**：另一轮直接红在 `Error: page.net::ERR_UNSAFE_PORT at http://localhost:1719/login`，`2 failed / 9 did not run`，
+   形状看着像应用启动故障，实为**我挑的端口在 Chromium 的 restricted ports 表里**（1719/1720 都在）。
+   - **规则：给 e2e/预览选端口要同时避开两张表**——本机 OS 动态区间（现测 1024–15000）**和**浏览器禁用端口表；
+     只避前者会撞后者。`did not run` 那一串是 serial 套件在首条红后放弃，不是九个真红。
+   - 连带一条流程教训：**同一次调查里我拿到两种不同的红形状（`.main-layout` 超时 vs `ERR_UNSAFE_PORT`），
+     第一反应想归给 §2.4 那条「接受并发」的裁定**。若当时就下结论，就会把两次装置错误记成被测对象的一次竞态。
+     先把装置的变量（端口、复用、背靠背）逐条摘干净，再谈被测结论。
