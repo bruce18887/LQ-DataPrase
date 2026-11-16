@@ -1234,3 +1234,67 @@ T3 本批 **5** 条（`repair-center.spec.ts` 里 366/407/437/513/544 那五条�
 - 恢复之后**必须重跑一轮** `node scripts/e2e_pool.mjs --slots=4`，拿到 `unexpected 0` 判据行，
   e2e 档才算真全绿；那一轮同时是设计稿 §2.4「两文件并发」这条接受意见的**首次真检验**
   （本刀那轮 repair-center 与 duplicate-keep 同在 slot3，而 slot 内 `--workers=1`，并发形态从未跑过）。
+
+## 刀一 收口欠账的了结（2026-11-16，料恢复 + §2.4 真检验）
+
+### 1. 夹具恢复（用户点名执行）
+
+- `Data/SampleData/` 重建，**11 个文件全部到位**（写入 11 / 跳过 0 / 失败 0），源用
+  `test/e2e-data/media/data/admin/single/`（87 csv，原始大小写）。复制走 `shutil.copy2`，
+  size + mtime 一起带走 ⇒ `seed_test_data --refresh` 现读
+  `完成: 处理 0 个文件，跳过 11 个（已存在且未变化）`，幂等判断照旧成立。
+- 取证与恢复脚本留在 `tasks/`（gitignore 区，本机）：`_sampledata_inventory.py`（缺哪些 + 三处恢复源）、
+  `_restore_sampledata.py`（**默认 dry-run**，`--apply` 才动盘；只认那四条硬编码子目录形状）。
+- 旁证：`manage.py test apps.export.tests_chart_dpi` → `Ran 15 tests in 4.250s / OK`
+  （缺料时这一族被 `skipUnless(Gage 目录不存在)` 整片挡掉）。
+
+### 2. 恢复后的全量池（原「unexpected 0」欠账的了结）
+
+命令 `node scripts/e2e_pool.mjs --slots=4`，日志 `tasks/b4a_final_pool2.log`，判据行原文：
+
+- `文件 91 · 加权总量 1061s（原始 1149s ÷ 争用系数 1.08） · 计划 slot 4`
+- `用例 479 · 墙钟 11.2min · 单价 3.02s/例 · 效率 2.06（目标 ≥2.8） · unexpected 0 · flaky 6 · skipped 21`
+- `结论 MEASURED`
+
+三条读数要一起读，别单独引用 `unexpected 0`：
+
+1. **`skipped` 29 → 21**，与批3b 那轮的 21 对齐——这是「缺料造成的 8 条跳过重新跑起来」的反向证据。
+2. **墙钟 9.6min → 11.2min、效率 2.16 → 2.06**：同一条命令、同一 479 例，变慢的成因是料回来后
+   那批用例第一次真的解析真实文件（此前是 ENOENT 秒失败或直接跳过）。**不是退化**，
+  但「目标 ≥2.8」这格本刀没达到，留给下一轮全量池观察（别拿这个数去调 `--slots`）。
+3. **`flaky 6` 逐条认出**（自己解析 `C:/lqdp-e2e/slots/001403-48484/slot*.results.json`，非采信他人）：
+   `wafermap-redesign`、`data.spec 导出工具下拉`、`file-list-completeness`、`multi-file-filter`、
+   `chart-error-state`、`view-data:1474`。后五条里 `view-data:1474` 正是本次订正过归属的那条批1 几何 flake
+   —— 它在料恢复后仍是 flaky 而非真红，归因方向自洽；其余四条属「料回来才开始真跑」的族，
+   **下轮若仍 flaky 要单独定性**，别默认它们是老面孔。
+
+### 3. §2.4 的检验结论：**验过了，7 轮并发 + 2 轮对照全绿**
+
+⚠ 先订正我自己写错的一句：本条目上面「恢复料后那轮全量池是 §2.4 的首次真检验」**不成立**。
+池档每个 slot 内是 `--workers=1`（`scripts/e2e_pool.mjs:215`），两个文件同 slot 也只顺序跑 ⇒
+**池从构造上就测不到同工位并发**。真正的检验只能是 serial 模式下单命令多 worker。
+
+跑法 `tasks/_s24_runner.py`（逐轮重新选端口：排除 OS 动态区间现测 1024–15000、排除 Chromium 禁用端口表、
+跑前 `netstat` 确认两 port 无人监听、跑后确认释放），日志 `tasks/b4a_s24_runner.log`，全部 `--retries=0`：
+
+- 并发 7 轮（`--workers=2`，两个文件的先后顺序逐轮交替）：`11 passed` ×7，rc 全 0。
+- 对照 2 轮（`--workers=1`，不并发）：`11 passed` ×2。
+- §2.4 预言的失效形状（dup 播种污染 `toContainText('2 个')` / 「按选择删除 N 个」这类全局计数判据，
+  以及 dup 播种给 `repair-center` 第 1 条的 `first()` 勾选提供一个可选行）**一次都没出现**。
+
+### 4. 过程中我制造并纠正的两次装置错误（都是我的账，不是被测对象的）
+
+1. 端口 **1719 在 Chromium 的 restricted ports 表里**，报
+   `net::ERR_UNSAFE_PORT at http://localhost:1719/login`、`2 failed / 9 did not run`。
+   选端口只避 OS 动态区间不够，还要避浏览器禁用表。
+2. 判据脚本里 `subprocess.run(['netstat','-ano'], text=True)` 在中文 Windows 上拿到
+   **rc=0 但 stdout=None**（netstat 输出是 GBK，解码死在 reader 线程）。
+   若当时写成 `or ''`，那道「端口空闲」检查会**永远报空闲**并放行去抢别人的口——典型的假安全。
+   已改成自己按 GBK→UTF-8 双试解 bytes、空输出或缺 `TCP` 段直接 raise。规则进 `docs/tasks/lessons.md` 2026-11-16 那条。
+
+还有一条**未定性、但已排除与 §2.4 关联**的观察：背靠背挤在同一对 17001/17002 上时出现过一次
+「整页空白 + 失败期间后端零请求 + 0 条连接级征兆」（`helpers/nav.ts:14` 的 `.main-layout` 等不到）。
+在逐轮独立端口 + 等释放的条件下，7 轮并发 + 2 轮对照没有复现它 ⇒ 嫌疑落在
+serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务。**原始截图/录像已被我自己下一轮覆写**
+（该在起下一轮前抢救，次序搞反了），所以这条只剩读数没有现场，按「装置侧、未结案」挂着：
+真复现时先跑前 `netstat` 抓 port 属主，再看 assets 是不是 404，别去动产品代码。
