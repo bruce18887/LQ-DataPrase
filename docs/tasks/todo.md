@@ -1298,3 +1298,29 @@ T3 本批 **5** 条（`repair-center.spec.ts` 里 366/407/437/513/544 那五条�
 serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务。**原始截图/录像已被我自己下一轮覆写**
 （该在起下一轮前抢救，次序搞反了），所以这条只剩读数没有现场，按「装置侧、未结案」挂着：
 真复现时先跑前 `netstat` 抓 port 属主，再看 assets 是不是 404，别去动产品代码。
+
+---
+
+# 任务：审查刀一（serial 开子集 + pptx 进度，2026-11-16）
+
+计划：`docs/superpowers/plans/2026-11-16-gap-review-quick-wins.md`
+依据：`docs/reference/feature-gap-review-2026-11-16.md` §5（A 案）、§3.2-①、§8-1。
+
+## 勾选清单
+
+- [ ] T1：pptx `progress_cb` builder 侧 + runner 接线
+- [ ] T3：serial 高亮右键「打开子集直方图」
+- [ ] 收口：`npx vitest run` / `npm run lint:e2e` / `npm run build` / `npm run test:e2e:affected` / 行数闸
+- [ ] 并入 master（需用户点头；并入前全量池 + 后端全套）
+
+## 门禁记录（执行时填判据行）
+
+| 档 | 命令 | 实测判据行 |
+|---|---|---|
+| T1 | `manage.py test test.backend.test_jobs_chart_params test.backend.test_export_ppt_progress` | |
+| T3 | `npx playwright test e2e/analysis/serial-subset-panel.spec.ts --project=P1 --workers=1` | |
+| 全量 vitest | `npx vitest run` | |
+| e2e 类型 | `npm run lint:e2e` | |
+| 前端构建 | `npm run build` | |
+| affected | `npm run test:e2e:affected` | |
+| 行数闸 | `npx vitest run test/unit/lineLimit.spec.ts` | |
