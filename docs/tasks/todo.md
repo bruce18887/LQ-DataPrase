@@ -1308,19 +1308,28 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 
 ## 勾选清单
 
-- [ ] T1：pptx `progress_cb` builder 侧 + runner 接线
-- [ ] T3：serial 高亮右键「打开子集直方图」
-- [ ] 收口：`npx vitest run` / `npm run lint:e2e` / `npm run build` / `npm run test:e2e:affected` / 行数闸
+- [x] T1：pptx `progress_cb` builder 侧 + runner 接线（`d771093`）
+- [x] T3：serial 高亮右键「打开子集直方图」（`347e70f`）
+- [x] 收口：`npx vitest run` / `npm run lint:e2e` / `npm run build` / `npm run test:e2e:affected` / 行数闸
 - [ ] 并入 master（需用户点头；并入前全量池 + 后端全套）
 
-## 门禁记录（执行时填判据行）
+## 门禁记录（2026-11-16 实测）
 
 | 档 | 命令 | 实测判据行 |
 |---|---|---|
-| T1 | `manage.py test test.backend.test_jobs_chart_params test.backend.test_export_ppt_progress` | |
-| T3 | `npx playwright test e2e/analysis/serial-subset-panel.spec.ts --project=P1 --workers=1` | |
-| 全量 vitest | `npx vitest run` | |
-| e2e 类型 | `npm run lint:e2e` | |
-| 前端构建 | `npm run build` | |
-| affected | `npm run test:e2e:affected` | |
-| 行数闸 | `npx vitest run test/unit/lineLimit.spec.ts` | |
+| T1 | `manage.py test test.backend.test_jobs_chart_params test.backend.test_export_ppt_progress` | `Ran 4 tests in 0.145s` / `OK` |
+| T3 | `npx playwright test e2e/analysis/serial-subset-panel.spec.ts --project=P1 --workers=1` | RED `[data-menu-open-subset]` not found → GREEN `3 passed (45.0s)`；池内新用例 `ok ... serial-subset-panel.spec.ts:107:3 ... (2.4s)` |
+| 全量 vitest | `npx vitest run` | `Test Files 74 passed (74)` / `Tests 1045 passed (1045)` |
+| e2e 类型 | `npm run lint:e2e` | `tsc -p tsconfig.e2e.json`，`error TS` 0 处 |
+| 前端构建 | `npm run build` | `✓ built in 827ms`；intro `build complete in 2.39s`，无 TS 诊断 |
+| affected（产品代码） | `npm run test:e2e:affected` | Task 2：后端档 `Ran 2011 tests / OK (skipped=16)`；e2e 池 `merged.json` `runId 060119-39388` · `verdict MEASURED` · `unexpected 0` · `flaky 1` · `skipped 21` · `expected 465`（门禁自身 `RESULT:` 行随父进程丢失，分段证据见 `progress.md`）。Task 3：`RESULT: PASS · 计划 4 档全部执行`（`e2e:analysis` 40 文件 / 171 例 / 6.0min；`unexpected 1` 由池判负载抖动；`e2e:附带P0` ok） |
+| affected（docs-only） | `npm run test:e2e:affected` | `RESULT:   NO AFFECTED TESTS —— 1 files（本轮没有档执行，不等于绿灯）`（docs-only，无测试承重） |
+| 行数闸 | `npx vitest run test/unit/lineLimit.spec.ts` | `Tests 15 passed (15)`；`ChartContextMenu.vue` 78 / `SerialChart.vue` 421 / 新 spec 152，未新增 `EXEMPT` |
+
+## 提交
+
+- `ad29f97` docs(plan): 审查刀一计划与五项核查报告入库
+- `8b36dbc` docs(plan): 澄清 docs-only commit 的 affected 判据
+- `d771093` feat(export): pptx 批量图表逐参数上报进度
+- `347e70f` feat(analysis): serial 高亮右键开子集直方图
+- 本笔 docs(todo): 审查刀一收口门禁记录
