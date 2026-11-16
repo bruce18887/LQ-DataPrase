@@ -117,3 +117,8 @@ class JobChartParamsTests(SimpleTestCase):
         sidecar = os.path.join(self.tmpdir, runner.PROGRESS_FILENAME)
         with open(sidecar, encoding='utf-8') as fh:
             self.assertEqual(fh.read(), '50', '1/2 个参数应写成 50%')
+
+    def test_xlsx_branch_still_receives_progress_cb(self):
+        captured = self._capture(chart_format='xlsx', params=['F32', 'I32'])
+        self.assertTrue(callable(captured['kwargs'].get('progress_cb')),
+                        'xlsx 分支的回调接线不得在提取 _cb 时丢失')
