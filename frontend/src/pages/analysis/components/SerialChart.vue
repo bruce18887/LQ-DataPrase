@@ -13,6 +13,7 @@
     <ChartContextMenu
       :menu="brush.menu"
       mode="highlight"
+      @open-subset="openSubsetFromHighlight"
       @clear="highlight.clear()"
       @close="brush.closeMenu"
     />
@@ -28,6 +29,7 @@ import { formatAxisValue, getSiteColors8, buildChartToolbox } from '../../../uti
 import { resolveSerialYBounds, jitterForPoint } from '../composables/serial-axis-range'
 import { useChartBrushSelect } from '../composables/useChartBrushSelect'
 import { useSerialHighlight } from '../composables/useSerialHighlight'
+import { useSubsetPanels } from '../composables/useSubsetPanels'
 import { pickHighlightPoints } from '../composables/serialHighlight'
 import type { DataPoint } from '../composables/selectionGeometry'
 import OutlierHintBar from './OutlierHintBar.vue'
@@ -54,6 +56,7 @@ const { colors, isDark } = useEChartsTheme()
 // 会话级芯片高亮单例（Task 4）：rect 框选立即消费 → 按 serial 高亮，跨参数保持。
 // 渲染以 props.enableSelection 为闸，其它页面的 SerialChart 不显示单参数 tab 的高亮。
 const highlight = useSerialHighlight()
+const subsetPanels = useSubsetPanels()
 // 各 lane 绘制点集（x=轴下标, y=绘制值含 jitter/锚定, serial=真实序列号）。
 // 只在 buildOption 里同步写出、只在框选 mouseup 时读——不 watch，避免渲染循环。
 const displayLanes = ref<{ points: DataPoint[] }[]>([])
@@ -381,6 +384,21 @@ const brush = reactive(useChartBrushSelect({
 }))
 // 切参数不清高亮（R5 显式例外）：选区已在 mouseup 消费为会话级 serial 集合，
 // 同一批芯片跨参数重画；切文件由 useSerialHighlight 内部 watch(fileId) 清。
+
+/**
+ * A 案：菜单对「当前高亮集合」开子图，不是「刚刚框的那一下」。
+ * immediate 模式下 mouseup 已消费选区，此时手上只有高亮集合本身。
+ */
+function openSubsetFromHighlight() {
+  const serials = highlight.serials.value
+  if (!serials.length) return
+  subsetPanels.create({
+    kind: 'serials',
+    serials: [...serials],
+    serial_col: highlight.serialCol.value,
+  })
+  brush.closeMenu()
+}
 void chartRef // bound to <div ref="chartRef"> in template
 </script>
 

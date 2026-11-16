@@ -9,6 +9,7 @@
       @contextmenu.prevent
     >
       <template v-if="mode === 'highlight'">
+        <button type="button" role="menuitem" data-menu-open-subset @click="emit('open-subset')">打开子集直方图</button>
         <button type="button" role="menuitem" data-menu-clear-highlight @click="emit('clear')">清除高亮</button>
       </template>
       <template v-else>
@@ -24,7 +25,7 @@ import { watch, onBeforeUnmount } from 'vue'
 import type { BrushMenu } from '../composables/useChartBrushSelect'
 
 const props = withDefaults(defineProps<{ menu: BrushMenu; mode?: 'subset' | 'highlight' }>(), { mode: 'subset' })
-const emit = defineEmits<{ create: []; clear: []; close: [] }>()
+const emit = defineEmits<{ create: []; clear: []; 'open-subset': []; close: [] }>()
 
 function onWindowDown(ev: MouseEvent) {
   const inside = (ev.target as HTMLElement)?.closest?.('[data-chart-context-menu]')
