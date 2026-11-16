@@ -1311,20 +1311,22 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - [x] T1：pptx `progress_cb` builder 侧 + runner 接线（`d771093`）
 - [x] T3：serial 高亮右键「打开子集直方图」（`347e70f`）
 - [x] 收口：`npx vitest run` / `npm run lint:e2e` / `npm run build` / `npm run test:e2e:affected` / 行数闸（Task 2 门禁 RESULT: 行丢失，分段证据见门禁表）
-- [ ] 并入 master（需用户点头；并入前全量池 + 后端全套）
+- [x] 并入本地 master（2026-11-16 用户点头；master `0a435d1 → 5f08159`，过程分支已删，未 push）
 
 ## 门禁记录（2026-11-16 实测）
 
 | 档 | 命令 | 实测判据行 |
 |---|---|---|
 | T1 | `manage.py test test.backend.test_jobs_chart_params test.backend.test_export_ppt_progress` | `Ran 4 tests in 0.145s` / `OK`（Task 4 补 xlsx 分支与第二条跳过路径后 5 例：`Ran 5 tests` / `OK`） |
-| T3 | `E2E_PORT=21061 E2E_FRONTEND_PORT=22061 npx playwright test e2e/analysis/serial-subset-panel.spec.ts --project=P1 --workers=1`（8000/3000 被其它进程占用，改用动态区间外的端口） | RED `[data-menu-open-subset]` not found → GREEN `3 passed (45.0s)`；池内新用例 `ok ... serial-subset-panel.spec.ts:107:3 ... (2.4s)` |
+| T3 | `E2E_PORT=21061 E2E_FRONTEND_PORT=22061 npx playwright test e2e/analysis/serial-subset-panel.spec.ts --project=P1 --workers=1`（8000/3000 被其它进程占用，改用动态区间外的端口） | RED `[data-menu-open-subset]` not found → GREEN `3 passed (30.2s)`（Task 3 首跑 45.0s）；池内新用例 `ok ... serial-subset-panel.spec.ts:130:3 ... (2.2s)`（修复波前为 `:107:3 / 2.4s`） |
 | 全量 vitest（Task 4 复跑） | `npx vitest run` | `Test Files 74 passed (74)` / `Tests 1045 passed (1045)` |
 | e2e 类型 | `npm run lint:e2e` | `tsc -p tsconfig.e2e.json`，`error TS` 0 处 |
 | 前端构建（Task 4 复跑） | `npm run build` | `✓ built in 849ms`；intro `build complete in 2.32s`，无 TS 诊断 |
 | affected（产品代码） | `npm run test:e2e:affected` | Task 2：后端档 `Ran 2011 tests / OK (skipped=16)`；e2e 池 `runId 060119-39388` 的不可变分片 `C:\lqdp-e2e\slots\060119-39388\slot{0..3}.results.json` 合计 · `verdict MEASURED` · `unexpected 0` · `flaky 1` · `skipped 21` · `expected 465`（门禁自身 `RESULT:` 行随父进程丢失，分段证据见 `progress.md`；`tasks/e2e-pool/latest/merged.json` 已被 Task 3 的 P0 跑覆写，不可再当证据）。Task 3：`RESULT: PASS · 计划 4 档全部执行`（`e2e:analysis` 40 文件 / 171 例 / 6.0min；`unexpected 1` 由池判负载抖动；`e2e:附带P0` ok）。Task 4（本次修复波）：`RESULT: PASS · 计划 5 档全部执行`（backend 档 `Ran 1884 tests / OK (skipped=16)`；`e2e:analysis` 40 文件 / 171 例 / 5.8min，`unexpected 1` 独占复跑绿 ⇒ 判负载抖动；`e2e:附带P0` ok） |
 | affected（docs-only） | `npm run test:e2e:affected` | `RESULT:   NO AFFECTED TESTS —— 1 files（本轮没有档执行，不等于绿灯）`（docs-only，无测试承重） |
 | 行数闸（Task 4 复跑） | `npx vitest run test/unit/lineLimit.spec.ts` | `Tests 15 passed (15)`；`ChartContextMenu.vue` 78 / `SerialChart.vue` 438 / 新 spec 208，未新增 `EXEMPT` |
+| 并入前全量池 | `node scripts/e2e_pool.mjs --slots=4` | `用例 480 · 墙钟 10.2min · unexpected 0 · flaky 0 · skipped 21` · `结论 MEASURED` · exit 0；与后端全套并跑，效率 2.29 属并发代价（本项目并跑验收口径：红集合相等 + 例数相同） |
+| 并入前后端全套 | `.venv/Scripts/python.exe -X utf8 manage.py test` | `Ran 2704 tests in 640.028s` / `OK (skipped=16)`；`grep -cE "^(FAIL\|ERROR):"` = 0 |
 
 ## 提交
 
@@ -1332,4 +1334,15 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - `8b36dbc` docs(plan): 澄清 docs-only commit 的 affected 判据
 - `d771093` feat(export): pptx 批量图表逐参数上报进度
 - `347e70f` feat(analysis): serial 高亮右键开子集直方图
-- 本笔 docs(todo): 审查刀一收口门禁记录
+- `4662acc` docs(todo): 审查刀一收口门禁记录
+- `627df32` fix(analysis): serial 子集列回退与并集判据，加固拖拽重试
+- `507c166` test(export): 补 xlsx 进度回调与 pptx 跳过路径判据
+- `5f08159` docs(todo): 订正审查刀一门禁产物指针与复跑标注
+- 本笔 docs(todo): 审查刀一 并入本地 master（未 push）
+
+## 并入记录（2026-11-16）
+
+- `git merge --ff-only feature/gap-review-quick-wins`：master `0a435d1 → 5f08159`。
+- 过程分支 `feature/gap-review-quick-wins` 已 `git branch -d`（fully merged）。
+- 未 push：origin 是公开仓库。
+- 并入前后 `git status --short` 为空；本笔台账提交只改 `docs/tasks/todo.md`，代码/测试树与全量门禁所验的 `5f08159` 逐字节相同。
