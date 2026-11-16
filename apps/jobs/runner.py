@@ -151,16 +151,17 @@ def run_export_batch_charts(task: dict) -> dict:
                                  'show_6sigma', 'show_normal', 'show_kde')}
     write_progress(progress, 1, 3)
 
+    total = max(1, len(params))
+
+    def _cb(done: int, _total=total, _p=progress):
+        write_progress(_p, done, _total)
+
     if task.get('chart_format') == 'pptx':
         payload = build_batch_charts_pptx(
             _datafile_proxy(task), df, metadata, params, **show,
-            dpi=task['dpi'], cpk_thresholds=thresholds)
+            dpi=task['dpi'], cpk_thresholds=thresholds,
+            progress_cb=_cb)
     else:
-        total = max(1, len(params))
-
-        def _cb(done: int, _total=total, _p=progress):
-            write_progress(_p, done, _total)
-
         payload = build_batch_charts_xlsx_with_charts(
             df, metadata, params, site_col=get_site_column(df), **show,
             dpi=task['dpi'], cpk_thresholds=thresholds,
