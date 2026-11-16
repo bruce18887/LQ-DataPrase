@@ -1051,7 +1051,7 @@ T3 本批 **5** 条（`repair-center.spec.ts` 里 366/407/437/513/544 那五条�
 
 # 任务：批4 刀一 重复项一族拆文件 + 三件共享助手（2026-11-15，计划 Task 6 收口；计划 `docs/superpowers/plans/2026-11-15-batch4a-e2e-dup-split.md`）
 
-## 状态：**已收口（六档测量+台账全部落地）、未并入 master、未 push**
+## 状态：**已收口（六档测量+台账全部落地）、已 FF 并入本地 master（`b797d1f` → 本台账这笔），未 push**
 
 过程分支 `feature/batch4a-e2e-dup-split`，base = `b797d1f`（开刀那一刻的 master）。
 收口测量与台账写作时 tip = `a41e92a`；**本台账这笔提交是刀一最后一笔，排在 `a41e92a` 之后**——
@@ -1129,7 +1129,8 @@ T3 本批 **5** 条（`repair-center.spec.ts` 里 366/407/437/513/544 那五条�
    按设计稿 §10 的批4 定义，它归**刀五**（批1 遗留三项之一）；本刀只是重新目击（见「遗留与挂账」第 9 条）。
 3. **与本刀零因果**：`git diff --name-only b797d1f..a41e92a` = 12 文件（docs 3 = triage/plan/spec + helpers 3 +
    e2e spec 3 + `MaintenanceCard.vue` 1 + T2 2），四个红文件不在集合内；且四红文件逐文件 grep
-   `helpers/(apiClient|djangoShell|repairCenterFlow)` import 计数 = **0**。（本台账波之后只多 `docs/tasks/todo.md` 一笔，不改变该结论。）
+   `helpers/(apiClient|djangoShell|repairCenterFlow)` import 计数 = **0**。（本台账波之后又多两笔文档改动——`docs/tasks/todo.md` 与 `docs/reference/e2e-tier-triage.md`，
+   都不含代码，不改变该结论。）
 4. **收口欠账（环境项，如实挂账）**：四条真红全部源于本机 `Data/SampleData` 缺料 ⇒ **全量档此刻到不了
    `unexpected 0`**。恢复料之后需重跑一轮 `node scripts/e2e_pool.mjs --slots=4` 拿到 `unexpected 0` 判据行，
    e2e 档才算真全绿；本轮收口判级是「红集合已按四元组逐条定性、与本刀无因果」，**不是**「e2e 全绿」。
