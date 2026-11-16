@@ -1199,3 +1199,38 @@ T3 本批 **5** 条（`repair-center.spec.ts` 里 366/407/437/513/544 那五条�
 9. **`data/view-data.spec.ts:1474` TABLE_TOP_OFFSET 1px 几何 flake**：归属**刀五（批1 遗留三项之一）**，
    见设计稿 §10。本刀对它只是**重新目击**（主轮 slot3 flaky、retry 转绿，计入 `flaky 2`），非本刀引入、
    也非本刀该修；`TABLE_TOP_OFFSET` 最近一次被改是提交 `33649829`，早于本刀。既有记录：本文件 `:619`、`:731`、`:867`。
+
+## 并入本地 master（2026-11-16，用户点头，未 push）
+
+- master `b797d1f`（= 本刀 base）→ **`8b84bba`**，纯快进、无合并提交、**没有 push**
+  （`origin` 是公开仓库；现在 ahead 199）。手续：`git branch -f master <分支尖>` 移 ref（零工作树变动）→
+  `git checkout master` → `git branch -d feature/batch4a-e2e-dup-split`（fully merged，无需 `-D`）。
+  **并入那一刻的本刀 tip = `8b84bba`**；本段这一笔在它之后，别拿 `git rev-parse master` 当本刀 tip。
+- 机械举证：并入前后 `git status --porcelain -uall` 逐字相同（两棵树同一提交 ⇒ 零文件变动）。
+  与批3a/批3b 那两次不同，**这次并入时工作树没有任何别的会话的未提交改动**需要避让
+  （export 那批已在 `b797d1f` 里，过程分支与 worktree 都被它会话自己收掉并删了）。
+- 过程分支已删，`feature/*` 归零；主检出 HEAD 现在停在 master。刀二（FIX-2）按惯例从 master 另开
+  `feature/batch4b-username-guard` 再动，**不要在 master 上直接提交产品代码**。
+
+### e2e 档带账并入的代价与恢复料的确切形状（本轮现测，别下次再量）
+
+四条真红全部源于本机缺夹具 ⇒ 本刀是**带着「红集合已逐条定性、与本刀零因果」并入的，不是带 e2e 全绿并入的**。
+恢复料的清单与路子（`tasks/_sampledata_inventory.py`，只读、跑完即可复现）：
+
+- 夹具要求 **11 个文件**（键名与文件名逐条来自 `frontend/e2e/fixtures/test-data.ts:54-72`），本机
+  `Data/SampleData` **11 个全缺**（`Data/` 目录存在但为空；`/Data/` 被 `.gitignore:145` 整目录挡掉，
+  属本机私有料，不随 clone 传播）。
+- **三处都留着全 11 个的原件副本**，任选其一即可：
+  `test/e2e-data/media/data/admin/single/`（87 csv，原始大小写）｜
+  `C:/lqdp-e2e/template/media/data/admin/single/`（87 csv，原始大小写）｜
+  `~/LQ-DataPrase/media/data/admin/single/`（98 csv，其中 4 个是小写名，Windows 不分大小写故可用，
+  但 `--refresh` 走 size+mtime 比较，改名会触发重解析）。
+- 子目录形状**只有两条硬约束**（其余随意，因为 `apps/accounts/management/commands/seed_test_data.py:165`
+  是「扁平复制到 single/，避免复制整棵 SampleData 树」）：
+  ① `Data/SampleData/CTA8290D/BPD60320_C01F40#AAA12603030006_FT1-FT1-1_R2603030042_20260305_204439.csv`
+  —— `test-data.ts:106` 的 `PRIMARY_SAMPLE_FILE` 把这个子目录写死了；
+  ② `Data/SampleData/Buyoff/BPD60320_QA2.csv` —— 池失败原文里的路径（`chart-memory.spec.ts:88` 与
+  `batch-phase.spec.ts:62` 按此路径读文件）。
+- 恢复之后**必须重跑一轮** `node scripts/e2e_pool.mjs --slots=4`，拿到 `unexpected 0` 判据行，
+  e2e 档才算真全绿；那一轮同时是设计稿 §2.4「两文件并发」这条接受意见的**首次真检验**
+  （本刀那轮 repair-center 与 duplicate-keep 同在 slot3，而 slot 内 `--workers=1`，并发形态从未跑过）。
