@@ -28,7 +28,8 @@ def build_batch_charts_pptx(datafile, df, metadata, params,
                             show_4sigma=False, show_6sigma=True,
                             show_normal=False, show_kde=False,
                             dpi=EXPORT_DPI_DEFAULT,
-                            cpk_thresholds=None):
+                            cpk_thresholds=None,
+                            progress_cb=None):
     """Build batch charts PPTX with histogram slides.
 
     ``cpk_thresholds``（CpkThresholds）= 当前账号的 CPK 分级阈值，决定幻灯片标题里
@@ -49,6 +50,8 @@ def build_batch_charts_pptx(datafile, df, metadata, params,
         Parameter (column) names to chart.
     show_limit, show_3sigma, show_4sigma, show_6sigma, show_normal, show_kde : bool
         与前端图表配置一一对应的叠加开关。
+    progress_cb : callable, optional
+        ``progress_cb(done:int)``，每真实产出一张 slide 调一次；总数由调用方持有。
 
     Returns
     -------
@@ -59,6 +62,9 @@ def build_batch_charts_pptx(datafile, df, metadata, params,
     # blank layout
     blank_layout = prs.slide_layouts[6]
     th = cpk_thresholds or DEFAULT_CPK_THRESHOLDS
+    # 只数真实产出的 slide：参数不在 df 里 / 无有限值会被 continue 跳过，
+    # 拿 enumerate 的下标当进度会虚报（回调收到 3/3 却只有 2 张图）
+    rendered = 0
 
     apply_matplotlib_fonts()
 
@@ -149,6 +155,10 @@ def build_batch_charts_pptx(datafile, df, metadata, params,
         left = Inches(0.5)
         top = Inches(0.5)
         slide.shapes.add_picture(buf, left, top, width=Inches(9), height=Inches(5.5))
+
+        rendered += 1
+        if progress_cb:
+            progress_cb(rendered)
 
     buffer = io.BytesIO()
     prs.save(buffer)

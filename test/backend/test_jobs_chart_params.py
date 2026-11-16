@@ -108,3 +108,12 @@ class JobChartParamsTests(SimpleTestCase):
         params = list(captured['args'][2])
         self.assertEqual(params, ['F32', 'I32'],
                          'F32/I32 必须在内；bool、文本、SW_Bin 必须在外')
+
+    def test_pptx_branch_receives_progress_cb(self):
+        captured = self._capture(chart_format='pptx', params=['F32', 'I32'])
+        cb = captured['kwargs'].get('progress_cb')
+        self.assertTrue(callable(cb), 'pptx 分支必须与 xlsx 一样收到进度回调')
+        cb(1)
+        sidecar = os.path.join(self.tmpdir, runner.PROGRESS_FILENAME)
+        with open(sidecar, encoding='utf-8') as fh:
+            self.assertEqual(fh.read(), '50', '1/2 个参数应写成 50%')
