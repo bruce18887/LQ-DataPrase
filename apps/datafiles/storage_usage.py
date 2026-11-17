@@ -28,6 +28,7 @@ from django.conf import settings
 from django.utils import timezone           # 本任务的 _compute_usage 用
 
 from apps.common.keyed_lru import KeyedLRU   # 本任务的 get_user_usage 用
+from apps.common.usernames import is_safe_username
 from apps.datafiles.models import DataFile   # 本任务的 _db_map 用
 from apps.datafiles.utils import resolve_file_path  # 本任务的 _db_map 用
 
@@ -44,21 +45,6 @@ _usage_cache = KeyedLRU(_USAGE_CACHE_MAX_ENTRIES)
 # 就会让这条阈值在每台有遗留数据的装机上永远红。
 MISMATCH_RATIO_THRESHOLD = 0.05
 
-# 用户名直接当目录名用（与 _helpers.py:183 同一种拼法），所以要挡住能改变指向的那几种写法。
-_UNSAFE_USERNAMES = ('', '.', '..')
-
-
-def is_safe_username(username):
-    """用户名能不能安全当数据目录名用。**视图也用它**：早退成 204 比让异常冒成 500 诚实
-    （500 会让前端每次进门弹一条错误 toast，而这件事本来就不是「服务器坏了」）。
-    把判据放这儿而不是各写一份，是为了它和 ``_user_data_root`` 永远同进同退。"""
-    name = str(username)
-    return not (
-        name in _UNSAFE_USERNAMES
-        or os.sep in name
-        or (os.altsep and os.altsep in name)
-    )
-
 
 def _user_data_root(username):
     """当前用户的数据根目录 = ``MEDIA_ROOT/data/<username>``。
@@ -69,8 +55,8 @@ def _user_data_root(username):
     那个端点就会把**所有用户**的量报给这一个用户。``os.path.basename('..')`` 也是
     ``'..'``，所以别拿它当防护。
 
-    已知同形状的老入口 ``_helpers.py:172 _user_upload_dir`` 没挡这一条（上传侧同样能
-    被 ``..`` 顶到 MEDIA_ROOT），那是既有事实、不属本批，记进台账。
+    ``_helpers.py`` 的上传入口已经用同一个 ``is_safe_username`` 挡住同一条；
+    两侧共用 ``apps.common.usernames``，判据不会再漂。
     """
     if not is_safe_username(username):
         raise ValueError('用户名不能安全地用作数据目录名：%r' % str(username))

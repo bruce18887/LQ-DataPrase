@@ -11,6 +11,8 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from apps.common.exceptions import UnsafeUsernameError
+from apps.common.usernames import is_safe_username
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import BaseATEParser, get_parser
 from apps.datafiles.services import put_cached_parsed_file
@@ -174,12 +176,14 @@ def _user_upload_dir(user, file_type='single'):
 
     The directory is named after the user's login name (not the numeric id) so
     that paths are stable across id changes and human-readable in shell
-    listings. Django's UnicodeUsernameValidator guarantees the username only
-    contains characters that are safe in filesystem paths on every supported
-    platform (POSIX + Windows), so no further sanitization is performed.
+    listings.  Usernames that cannot be a single directory name (``''`` /
+    ``'.'`` / ``'..'`` / separators) are rejected by ``is_safe_username``;
+    raising ``UnsafeUsernameError`` keeps that failure a 400, not a 500.
     """
     if user is None:
         raise ValueError('_user_upload_dir requires a user instance')
+    if not is_safe_username(user.username):
+        raise UnsafeUsernameError()
     path = os.path.join(settings.MEDIA_ROOT, 'data', str(user.username), file_type)
     os.makedirs(path, exist_ok=True)
     return path

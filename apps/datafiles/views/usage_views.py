@@ -8,7 +8,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.datafiles.storage_usage import get_user_usage, is_safe_username
+from apps.common.usernames import is_safe_username
+from apps.datafiles.storage_usage import get_user_usage
 
 # 白名单而不是黑名单：黑名单是 fail-open 的（实测 'no' / 'off' / 'TRUE' / 'abc' / ' '
 # 全被当成真），而这里的「为真」代价不是多算一次自己的数，是把**所有人**的缓存清掉。

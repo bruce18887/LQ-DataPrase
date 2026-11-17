@@ -16,6 +16,7 @@ import logging
 from django.conf import settings
 from django.http import Http404
 from rest_framework.exceptions import (
+    APIException,
     AuthenticationFailed,
     MethodNotAllowed,
     NotAuthenticated,
@@ -32,6 +33,14 @@ logger = logging.getLogger(__name__)
 
 _INTERNAL_ERROR = '服务器内部错误'
 
+
+class UnsafeUsernameError(APIException):
+    """账号名不能当数据目录名用；400 而不是 500（不是服务器坏了）。"""
+    status_code = 400
+    default_detail = '账号名无法用作数据目录名'
+    default_code = 'unsafe_username'
+
+
 # (异常类型, code) -> 中文消息
 _KNOWN_EXCEPTIONS = (
     (NotFound, 'not_found', '资源不存在'),
@@ -41,6 +50,7 @@ _KNOWN_EXCEPTIONS = (
     (ParseError, 'bad_request', '请求格式错误'),
     (Throttled, 'throttled', '请求过于频繁，请稍后再试'),
     (MethodNotAllowed, 'method_not_allowed', '请求方法不允许'),
+    (UnsafeUsernameError, 'unsafe_username', '账号名无法用作数据目录名'),
 )
 
 
