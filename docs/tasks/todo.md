@@ -1357,7 +1357,7 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - [x] 判据抽到 `apps/common/usernames.py`，上传目录第二层抛 `UnsafeUsernameError`（`8910d64`）
 - [x] `UserCreateSerializer.validate_username` 第一层（`880502a`）
 - [x] 全量门禁（GLOBAL：池 + 后端全套 + vitest + lint）
-- [ ] 并入 master（需用户点头；不 push）
+- [x] 并入本地 master（2026-11-17 用户点头；master `24fa25c → 96fb367`，过程分支已删，未 push）
 
 ## 已知边界（2026-11-16 评审裁定）
 
@@ -1379,4 +1379,13 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - `8910d64` feat(datafiles): 上传目录拒绝不安全的用户名
 - `880502a` feat(accounts): 建号时拒绝不能作为目录名的用户名
 - `6b9a2f4` docs(plan): 批4 刀二计划与台账
-- 本笔 docs(todo): 批4 刀二收口门禁
+- `96fb367` docs(todo): 批4 刀二收口门禁
+- 本笔 docs(todo): 批4 刀二 并入本地 master（未 push）
+
+## 并入记录（2026-11-17）
+
+- `git merge --ff-only feature/batch4b-username-guard`：master `24fa25c → 96fb367`。
+- 过程分支 `feature/batch4b-username-guard` 已 `git branch -d`（fully merged）。
+- 未 push：origin 是公开仓库。
+- 并入前后 `git status --short` 为空；本笔台账提交只改 `docs/tasks/todo.md`，代码/测试树与全量门禁所验的 `880502a` 逐字节相同。
+- 池 `用例 480 / 效率 2.23` 与上一轮同值，不是本刀增量；3 条 flaky 均为既有前端用例（wafermap-model-not-found / sftp-search cancel / file-list-completeness）。
