@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from apps.common.constants import PAGE_SIZE_MAX, PAGE_SIZE_MIN
 from apps.common.export_naming import EXPORT_TEMPLATE_DEFAULTS, MAX_TEMPLATE_LENGTH
+from apps.common.usernames import is_safe_username
 from .models import AuditEvent, User, UserSetting, DEFAULT_HIDDEN_COLUMNS
 from .password_policy import validate_password_or_raise
 
@@ -71,6 +72,11 @@ class UserCreateSerializer(serializers.ModelSerializer):
             'password', 'is_active',
         ]
         read_only_fields = ['id']
+
+    def validate_username(self, value):
+        if not is_safe_username(value):
+            raise serializers.ValidationError('账号名无法用作数据目录名')
+        return value
 
     def validate(self, attrs):
         # 相似度校验需要 username/email，用户尚未落库时先构造内存实例。
