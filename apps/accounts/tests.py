@@ -312,6 +312,38 @@ class UserManagementViewSetTests(TestCase):
         )
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_create_rejects_unsafe_username(self):
+        resp = self.client.post(
+            '/api/v1/auth/users/',
+            {'username': '..', 'password': 'strong-pass-123'},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(resp.data['code'], 'validation_error')
+        self.assertIn('username', resp.data['detail'])
+        self.assertFalse(User.objects.filter(username='..').exists())
+
+    def test_create_allows_dotted_username(self):
+        resp = self.client.post(
+            '/api/v1/auth/users/',
+            {'username': 'a.b', 'password': 'strong-pass-123',
+             'email': 'ab@example.com', 'display_name': 'AB'},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data['username'], 'a.b')
+        self.assertTrue(User.objects.filter(username='a.b').exists())
+
+    def test_create_rejects_dot_and_empty_username(self):
+        for bad in ('.', ''):
+            resp = self.client.post(
+                '/api/v1/auth/users/',
+                {'username': bad, 'password': 'strong-pass-123'},
+                format='json',
+            )
+            self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST, repr(bad))
+            self.assertIn('username', resp.data['detail'], repr(bad))
+
 
 class UserSettingsApiTests(APITestCase):
     """GET/PUT /api/v1/auth/settings/ with export_filename_templates."""
