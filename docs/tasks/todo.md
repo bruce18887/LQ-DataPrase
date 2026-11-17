@@ -1356,7 +1356,7 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 
 - [x] 判据抽到 `apps/common/usernames.py`，上传目录第二层抛 `UnsafeUsernameError`（`8910d64`）
 - [x] `UserCreateSerializer.validate_username` 第一层（`880502a`）
-- [ ] 全量门禁（GLOBAL：池 + 后端全套 + vitest + lint）
+- [x] 全量门禁（GLOBAL：池 + 后端全套 + vitest + lint）
 - [ ] 并入 master（需用户点头；不 push）
 
 ## 已知边界（2026-11-16 评审裁定）
@@ -1371,11 +1371,12 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 | T1 | `manage.py test apps.accounts test.backend.test_usernames test.backend.test_batch_dir_traversal test.backend.test_storage_usage_scan` | `Ran 109 tests in 36.873s` / `OK` |
 | 全量 vitest | `npx vitest run` | `Test Files 74 passed (74)` / `Tests 1045 passed (1045)` |
 | e2e 类型 | `npm run lint:e2e` | `tsc -p tsconfig.e2e.json`，`error TS` 0 处 |
-| 全量池 | `node scripts/e2e_pool.mjs --slots=4` | 待填（控制器正在跑） |
-| 后端全套 | `manage.py test` | 待填（控制器正在跑） |
+| 全量池 | `node scripts/e2e_pool.mjs --slots=4` | `用例 480 · 墙钟 10.7min · 单价 3.06s/例 · 效率 2.23（与后端全套并跑，效率低于 2.8 属并发代价） · unexpected 0 · flaky 3 · skipped 21` · `结论 MEASURED` · exit 0。flaky 点名：`analysis/wafermap-model-not-found.spec.ts`、`sftp/search.spec.ts`（取消用例）、`analysis/file-list-completeness.spec.ts`，均与本刀纯后端改动无交集 |
+| 后端全套 | `manage.py test` | `Ran 2712 tests in 654.760s` / `OK (skipped=16)`；`grep -cE "^(FAIL\|ERROR):"` = 0 |
 
 ## 提交
 
 - `8910d64` feat(datafiles): 上传目录拒绝不安全的用户名
 - `880502a` feat(accounts): 建号时拒绝不能作为目录名的用户名
-- 本笔 docs(plan): 批4 刀二计划与台账
+- `6b9a2f4` docs(plan): 批4 刀二计划与台账
+- 本笔 docs(todo): 批4 刀二收口门禁
