@@ -1346,3 +1346,36 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - 过程分支 `feature/gap-review-quick-wins` 已 `git branch -d`（fully merged）。
 - 未 push：origin 是公开仓库。
 - 并入前后 `git status --short` 为空；本笔台账提交只改 `docs/tasks/todo.md`，代码/测试树与全量门禁所验的 `5f08159` 逐字节相同。
+
+# 任务：批4 刀二（用户名路径双层防御，2026-11-16）
+
+设计：`docs/superpowers/specs/2026-11-15-batch4a-e2e-split-and-username-guard-design.md` §3
+计划：`docs/superpowers/plans/2026-11-16-batch4b-username-guard.md`
+
+## 勾选清单
+
+- [x] 判据抽到 `apps/common/usernames.py`，上传目录第二层抛 `UnsafeUsernameError`（`8910d64`）
+- [x] `UserCreateSerializer.validate_username` 第一层（`880502a`）
+- [ ] 全量门禁（GLOBAL：池 + 后端全套 + vitest + lint）
+- [ ] 并入 master（需用户点头；不 push）
+
+## 已知边界（2026-11-16 评审裁定）
+
+- 管理员 API 改名（`PATCH/PUT /auth/users/<id>/ {"username": ".."}`）走 `UserSerializer`，不经第一层；第二层 `_user_upload_dir` fail-closed，该账号上传会 400 `unsafe_username`，改名审计可追溯。若要堵第一层，另开小改（给 `UserSerializer` 加同构 `validate_username`），不塞进本刀。设计稿 §3.2/§3.4 的旁路清单原未点名这条，按本评审补记。
+- `is_safe_username` 仍放行尾随点号（`a.`）；Windows 上可能与 `a` 共目录，属既有问题且在设计 §3.2 的规则边界外，留待独立评估。
+
+## 门禁记录
+
+| 档 | 命令 | 实测判据行 |
+|---|---|---|
+| T1 | `manage.py test apps.accounts test.backend.test_usernames test.backend.test_batch_dir_traversal test.backend.test_storage_usage_scan` | `Ran 109 tests in 36.873s` / `OK` |
+| 全量 vitest | `npx vitest run` | `Test Files 74 passed (74)` / `Tests 1045 passed (1045)` |
+| e2e 类型 | `npm run lint:e2e` | `tsc -p tsconfig.e2e.json`，`error TS` 0 处 |
+| 全量池 | `node scripts/e2e_pool.mjs --slots=4` | 待填（控制器正在跑） |
+| 后端全套 | `manage.py test` | 待填（控制器正在跑） |
+
+## 提交
+
+- `8910d64` feat(datafiles): 上传目录拒绝不安全的用户名
+- `880502a` feat(accounts): 建号时拒绝不能作为目录名的用户名
+- 本笔 docs(plan): 批4 刀二计划与台账
