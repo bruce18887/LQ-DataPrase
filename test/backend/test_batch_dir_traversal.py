@@ -16,11 +16,15 @@ MEDIA_ROOT is redirected to a temp dir so the real ``media/`` is never touched.
 import os
 import shutil
 import tempfile
+from types import SimpleNamespace
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase, TestCase, override_settings
+from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.accounts.models import User
+from apps.common.exceptions import UnsafeUsernameError
 from apps.datafiles.models import DataFile
 from apps.datafiles.views._helpers import _safe_batch_dir, _user_upload_dir
 
@@ -174,3 +178,46 @@ class BatchDirTraversalTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(os.path.isdir(sub))
         self.assertTrue(os.path.isdir(lot))
+
+
+class UserUploadDirGuardTests(SimpleTestCase):
+    """Unit level: ``_user_upload_dir`` refuses an unusable username."""
+
+    def setUp(self):
+        self.media = tempfile.mkdtemp(prefix='lqdp-usernames-')
+        self.addCleanup(shutil.rmtree, self.media, True)
+        override = override_settings(MEDIA_ROOT=self.media)
+        override.enable()
+        self.addCleanup(override.disable)
+
+    def test_unsafe_username_raises_and_creates_nothing(self):
+        with self.assertRaises(UnsafeUsernameError):
+            _user_upload_dir(SimpleNamespace(username='..'), 'single')
+        self.assertFalse(os.path.isdir(os.path.join(self.media, 'single')))
+
+    def test_dotted_username_is_allowed(self):
+        path = _user_upload_dir(SimpleNamespace(username='a.b'), 'single')
+        self.assertTrue(os.path.isdir(path))
+        self.assertTrue(path.startswith(os.path.join(self.media, 'data')))
+
+
+class UnsafeUsernameUploadTests(TestCase):
+    """HTTP level: the second layer surfaces as 400 + ``unsafe_username``."""
+
+    def setUp(self):
+        self.media = tempfile.mkdtemp(prefix='lqdp-usernames-http-')
+        self.addCleanup(shutil.rmtree, self.media, True)
+        override = override_settings(MEDIA_ROOT=self.media)
+        override.enable()
+        self.addCleanup(override.disable)
+        self.user = User.objects.create_user(
+            username='..', password='strong-pass-123', role='user')
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    def test_upload_returns_400_unsafe_username(self):
+        upload = SimpleUploadedFile('x.csv', b'a,b\n1,2\n', content_type='text/csv')
+        resp = self.client.post('/api/v1/upload/', {'file': upload}, format='multipart')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(resp.data.get('code'), 'unsafe_username')
+        self.assertFalse(os.path.isdir(os.path.join(self.media, 'single')))
