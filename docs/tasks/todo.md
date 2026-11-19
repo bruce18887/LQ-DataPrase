@@ -1485,7 +1485,7 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 | 前端构建 | `npm run build` | `build complete in 2.08s`，无 TS 诊断 |
 | 相关性 X/Y | `npx playwright test e2e/analysis/{correlation-inline,correlation-file-switch-reset,axis-label-precision}.spec.ts --project=P2/P1 --workers=1` | `correlation-inline` P2 `3 passed / 1 skipped`；另两文件 P1 `9 passed`；迁移后 `KELVIN_SW` 需按关键词选轴，spec 已适配（共享 `pickOption` 未动） |
 | 额外 @p1 扇出 | `npx playwright test e2e/analysis/{tab-request-fanout,legend-color,multi-file-filter}.spec.ts --project=P1 --workers=1` | `13 passed`（三个从下拉点 `Index_No` 的用例，确认迁移无漏伤） |
-| 全量池 | `node scripts/e2e_pool.mjs --slots=4` | 待填（控制器正在跑） |
+| 全量池 | `node scripts/e2e_pool.mjs --slots=4` | `用例 485 · 墙钟 11.1min · 单价 2.99s/例 · 效率 2.09（既有套件规模趋势） · unexpected 0 · flaky 3 · skipped 21` · `结论 MEASURED` · exit 0。flaky 点名：`analysis/wafermap-redesign.spec.ts`「分区 checkbox」、`analysis/analysis.spec.ts`「抽样 5 个参数」、`analysis/file-select.spec.ts`「富信息行」；均为负载 flake（retry 绿）。`correlation-matrix-linkage` 的既有单跑红在本轮池内未成 unexpected |
 | 后端全套 | `manage.py test` | `Ran 2712 tests / OK (skipped=16)`（沿用刀三 d6c6e78 那轮；`git diff --stat d6c6e78..HEAD -- apps test config requirements` 为空，后端树未变） |
 
 ## 已知边界 / 挂账（不阻塞）
@@ -1505,4 +1505,5 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - `9e925a7` refactor(data): 测试列/导出参数下拉改用 useSelectFilter
 - `d099a0e` perf(analysis): 相关性 X/Y 下拉迁 el-select-v2
 - `6ceb6d5` test(e2e): X/Y v2 虚拟窗口下按关键词选轴
-- 本笔 docs(plan): 批4 刀五a 计划与台账
+- `03f94f6` docs(plan): 批4 刀五a 计划与台账
+- 本笔 docs(todo): 批4 刀五a 收口门禁
