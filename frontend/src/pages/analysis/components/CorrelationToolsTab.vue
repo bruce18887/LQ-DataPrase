@@ -33,15 +33,12 @@
       <!-- 散点对选择（双入口之一：X/Y 下拉；另一个入口是点矩阵格） -->
       <el-card shadow="hover" :body-style="{ padding: '12px' }">
         <label class="section-label">X 轴测试项</label>
-        <el-select v-model="localX" placeholder="选择 X 轴参数" filterable style="width: 100%"
-          popper-class="dp-corr-x-popper">
-          <el-option v-for="p in params" :key="p" :label="p" :value="p" />
-        </el-select>
+        <!-- 参数列表可能有上百项：v1 + v-for 全量挂 option → v2 虚拟窗口（批4 刀五a） -->
+        <el-select-v2 v-model="localX" :options="axisOptions" filterable
+          placeholder="选择 X 轴参数" popper-class="dp-corr-x-popper" style="width: 100%" />
         <label class="section-label" style="margin-top: 10px">Y 轴测试项</label>
-        <el-select v-model="localY" placeholder="选择 Y 轴参数" filterable style="width: 100%"
-          popper-class="dp-corr-y-popper">
-          <el-option v-for="p in params" :key="p" :label="p" :value="p" />
-        </el-select>
+        <el-select-v2 v-model="localY" :options="axisOptions" filterable
+          placeholder="选择 Y 轴参数" popper-class="dp-corr-y-popper" style="width: 100%" />
         <div style="margin-top: 10px">
           <el-switch v-model="showRegression" size="small" active-text="显示回归线" />
         </div>
@@ -164,6 +161,7 @@ import ErrorBanner from '../../../components/common/ErrorBanner.vue'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme, getChartRenderer } from '../../../utils/echarts-theme'
 import { minMax } from '../../../utils/minmax'
+import { toOptions } from '../../../utils/selectOptions'
 import { getSiteColors8 } from '../../../utils/chart-bar'
 import { useCorrelationTabStore } from '../../../stores/analysisTabs'
 import type { DataFile } from '../../../types'
@@ -213,6 +211,13 @@ useTabFileParams({
   memoryKey: 'correlation',
   filters: () => corrFlags.value,
 })
+
+/**
+ * X/Y 两颗下拉的 v2 选项（`el-select-v2` 的 `:options` 必须是 `{value,label}` 对象数组）。
+ * 不传 `filter-method`：v2 里它一旦传入，组件的 `isValidOption` 恒真 ⇒ 过滤失效
+ * （`utils/selectOptions.ts` 顶部注释有源码行号），内置 label 过滤才是我们要的。
+ */
+const axisOptions = computed(() => toOptions(params.value))
 
 // ===== Scatter mode =====
 const localX = ref('')
