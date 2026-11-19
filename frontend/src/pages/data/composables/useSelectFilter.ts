@@ -8,6 +8,7 @@ export interface UseSelectFilterOptions<T extends string | number> {
   selected: () => T[]
   onChange: (value: T[]) => void
   limit?: number
+  /** 面板打开后把焦点放进过滤 input（为什么必须等 nextTick，见 onVisibleChange） */
   focusOnOpen?: boolean
 }
 
@@ -48,6 +49,9 @@ export function useSelectFilter<T extends string | number>(
   const filterInput = (): HTMLInputElement | null | undefined =>
     selectRef.value?.$el?.querySelector('input')
 
+  /** EP 的 `states.inputValue` 是组件内部状态，只由过滤 input 的**原生 `input` 事件**
+   *  （且必须冒泡）回写；直接改 `input.value` 不会同步它 ⇒ 关键词已清空、面板却仍按旧词
+   *  过滤，所以最后要补发 `new Event('input', { bubbles: true })`。 */
   const clearFilterInput = () => {
     filterText.value = ''
     const input = filterInput()
@@ -73,6 +77,9 @@ export function useSelectFilter<T extends string | number>(
     }
   }
 
+  /** `automatic-dropdown` 在 wrapper 的 mousedown 上就开面板，此刻过滤 input 仍是
+   *  `display:none`，EP 的 `isFocusable` 守卫会跳过聚焦；所以要等 `nextTick` 让面板渲染
+   *  （input 恢复可聚焦）后再自己调 `focus()` —— 同步调用一定拿不到焦点。 */
   const onVisibleChange = (visible: boolean) => {
     if (!visible) return clearFilterInput()
     if (opts.focusOnOpen) nextTick(() => filterInput()?.focus())
