@@ -131,7 +131,18 @@ const ordering = ref('-created_at')
 const showUpload = ref(false)
 const showConsistencyCheck = ref(false)
 
-/** 表头排序变化（服务端排序：20 条/页必须后端排，不能本地 sort） */
+/**
+ * 表头排序变化（服务端排序：20 条/页必须后端排，不能本地 sort）
+ *
+ * 勾选策略（与 `FileListTable.vue:25` 的 `reserve-selection` 配套）：
+ * `reserve-selection` 让 EP 在 `setData` 收到新数组实例时不再 `cleanSelection()`，
+ * 于是「写后刷新」（`filesVersion` watch / `onUploadSuccess` / `onConsistencyDone`）
+ * 能按 row-key 还原选中行 —— 这是 FIX-1 要保留的行为。
+ * 但同一个机制也会让**用户驱动的列表变化**（搜索 / 筛选 / 翻页 / 排序）留下的
+ * `selectedIds` 指向已经不在当前列表里的行，批量删除就会删到看不见的文件。
+ * 所以凡是由用户的视图操作引发的 `loadFiles()`，一律先显式 `clearSelection()`
+ * （`selectedIds` 由 `selection-change` 跟着归零）。写后刷新那三条**不要**加。
+ */
 function onSortChange({ prop, order }: { prop: string; order: 'ascending' | 'descending' | null }) {
   if (!prop || !order) {
     ordering.value = '-created_at' // 取消排序 → 回默认最新在前
@@ -140,6 +151,7 @@ function onSortChange({ prop, order }: { prop: string; order: 'ascending' | 'des
     ordering.value = `${sign}${prop}`
   }
   currentPage.value = 1
+  tableRef.value?.clearSelection()
   loadFiles()
 }
 
@@ -150,6 +162,7 @@ function clearFilters() {
   filters.program = ''
   filters.tag = ''
   currentPage.value = 1
+  tableRef.value?.clearSelection()
   loadFiles()
 }
 
@@ -281,6 +294,7 @@ const reloadUsage = useCoalescedCall((fresh: boolean) => loadUsage(fresh), USAGE
 function onSearch(text: string) {
   currentSearch.value = text
   currentPage.value = 1
+  tableRef.value?.clearSelection() // 用户驱动的列表变化：不保留看不见行的勾选（见 onSortChange 上方）
   loadFiles()
 }
 
@@ -331,6 +345,7 @@ async function onCombineSubmit(batchName: string) {
 // ── Pagination ──────────────────────────────────────────────────────
 function onPageChange(page: number) {
   currentPage.value = page
+  tableRef.value?.clearSelection() // 翻页同属用户驱动的列表变化（见 onSortChange 上方）
   loadFiles()
 }
 
@@ -348,6 +363,8 @@ async function deleteFile(row: any) {
     )
     await datafilesApi.remove(row.id)
     ElMessage.success('文件已删除')
+    // 单条删除后不得留下指向已删行的勾选（reserve-selection 会按 row-key 试图还原它）
+    tableRef.value?.clearSelection()
     await loadFiles()
     filesStore.notifyFilesChanged()
   } catch {
@@ -402,6 +419,7 @@ watch(() => filesStore.filesVersion, () => {
 // 表头筛选值变化 → 刷新（FileListTable 内 ColumnHeaderFilter 写入 filters）
 watch(filters, () => {
   currentPage.value = 1
+  tableRef.value?.clearSelection() // 筛选属用户驱动的列表变化（见 onSortChange 上方）
   loadFiles()
 }, { deep: true })
 

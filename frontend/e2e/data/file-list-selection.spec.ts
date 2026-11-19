@@ -46,6 +46,9 @@ function bulkDeleteButton(page: Page) {
 }
 
 test.describe('文件列表刷新保留勾选', { tag: ['@p2', '@data'] }, () => {
+  // 两条用例共用 PREFIX 前缀清理（afterAll 按前缀删 DB 行与磁盘文件），串行保证互不干扰。
+  test.describe.configure({ mode: 'serial' })
+
   test.afterAll(async ({ browser }) => {
     for (const p of paths) cleanupQuiet(p)
     const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
@@ -73,5 +76,24 @@ test.describe('文件列表刷新保留勾选', { tag: ['@p2', '@data'] }, () =>
 
     // FIX-1 正判据：刷新后 selectedCount 仍是 2（旧实现会回到「批量删除」无计数）。
     await expect(bulkDeleteButton(page)).toContainText('批量删除 (2)')
+  })
+
+  test('搜索改变列表时清空勾选，避免批量删除看不见的行', async ({ page }) => {
+    test.skip(!fs.existsSync(PRIMARY_SAMPLE_FILE), '样例数据缺失，跳过')
+    await gotoApp(page, '/data')
+    const uploaded = await uploadSingles(page, 2)
+    for (const p of uploaded) {
+      await expect(rowByName(page, path.basename(p))).toBeVisible({ timeout: 15_000 })
+    }
+    for (const p of uploaded) {
+      await rowByName(page, path.basename(p)).locator('.el-checkbox').first().click()
+    }
+    await expect(bulkDeleteButton(page)).toContainText('批量删除 (2)')
+
+    // 用户驱动的列表变化（搜索）必须清空勾选；只有 filesVersion 写后刷新才保留。
+    await page.getByPlaceholder('按文件名/程序名/标签搜索').fill(path.basename(uploaded[0]))
+    await expect(rowByName(page, path.basename(uploaded[1]))).toHaveCount(0, { timeout: 15_000 })
+    await expect(bulkDeleteButton(page)).toBeDisabled()
+    await expect(bulkDeleteButton(page)).not.toContainText('批量删除 (2)')
   })
 })
