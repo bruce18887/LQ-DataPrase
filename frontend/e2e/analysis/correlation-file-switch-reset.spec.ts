@@ -1,6 +1,6 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { pickOption } from '../helpers/elplus'
+import { pickOption, elSelectByPlaceholder, visibleSelectOptions } from '../helpers/elplus'
 import { pickTabFile } from '../helpers/params'
 import { RECOMMENDED, SEEDED_FILES } from '../fixtures/test-data'
 
@@ -12,6 +12,22 @@ import { RECOMMENDED, SEEDED_FILES } from '../fixtures/test-data'
  * 方程无限期显示上一个文件的结果；新文件恰有同名参数时是静默错误数据。
  * 修复后 watch(fileId) 统一清空，界面回到「选择 X/Y 轴参数以分析相关性」空态。
  */
+
+/**
+ * 在 v2 虚拟窗口里按关键词选轴参数。
+ *
+ * 相关性 X/Y 下拉迁 `el-select-v2`（批4 刀五a）后只渲染窗口内约 8 行，参数排在
+ * 靠后的（如 KELVIN_SW）不在初始窗口 ⇒ 裸 `pickOption` 找不到它。共享
+ * `pickOption` 不动，这里先在下拉自带的 filter input 里输入关键词把目标项筛进
+ * 窗口再点（`el-select-v2` 不传 filter-method 时由组件按 label 过滤）。
+ */
+async function pickAxisByKeyword(page: Page, placeholder: string, keyword: string, scope: Locator) {
+  const select = elSelectByPlaceholder(scope, placeholder).first()
+  const input = select.locator('input').first()
+  await select.click()
+  await input.fill(keyword)
+  await visibleSelectOptions(page).filter({ hasText: keyword }).first().click()
+}
 
 test.describe('@p1 相关性 tab 切文件清空旧结果', { tag: ['@p1', '@analysis'] }, () => {
   test('选好 X/Y 后切文件 → 散点与指标卡清空、X/Y 回到占位符', async ({ page }) => {
@@ -30,7 +46,8 @@ test.describe('@p1 相关性 tab 切文件清空旧结果', { tag: ['@p1', '@ana
     await pickOption(page, '选择 X 轴参数', 'KELVIN_VIN', layout)
     // X 下拉关闭动画与 Y 下拉打开重叠会导致选项瞬时不稳定，间隔后再选 Y
     await page.waitForTimeout(600)
-    await pickOption(page, '选择 Y 轴参数', 'KELVIN_SW', layout)
+    // KELVIN_SW 在参数表里排得靠后，v2 虚拟窗口初始不含它 ⇒ 先输入关键词再点
+    await pickAxisByKeyword(page, '选择 Y 轴参数', 'KELVIN_SW', layout)
     const resp = await respPromise
     expect(resp.status()).toBe(200)
 

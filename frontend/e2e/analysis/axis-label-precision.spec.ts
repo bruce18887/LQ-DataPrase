@@ -1,8 +1,8 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
 import { selectAnalysisFile, pickTabFile, filePicker, enableChartAndWait } from '../helpers/params'
 import { waitLoadingGone } from '../helpers/charts'
-import { pickOption } from '../helpers/elplus'
+import { pickOption, elSelectByPlaceholder, visibleSelectOptions } from '../helpers/elplus'
 import { RECOMMENDED } from '../fixtures/test-data'
 import { chartFontSize } from '../../src/theme/typography'
 
@@ -20,6 +20,23 @@ import { chartFontSize } from '../../src/theme/typography'
  */
 
 const SINGLE = '.single-param-tab'
+
+/**
+ * 在 v2 虚拟窗口里按关键词选轴参数。
+ *
+ * 相关性 X/Y 下拉迁 `el-select-v2`（批4 刀五a）后只渲染窗口内约 8 行，参数排在
+ * 靠后的（如 KELVIN_SW）不在初始窗口 ⇒ 裸 `pickOption` 找不到它。共享
+ * `pickOption` 不动，这里先在下拉自带的 filter input 里输入关键词把目标项筛进
+ * 窗口再点（`el-select-v2` 不传 filter-method 时由组件按 label 过滤）。
+ */
+async function pickAxisByKeyword(page: Page, placeholder: string, keyword: string, scope: Locator) {
+  const select = elSelectByPlaceholder(scope, placeholder).first()
+  const input = select.locator('input').first()
+  await select.click()
+  await input.fill(keyword)
+  await visibleSelectOptions(page).filter({ hasText: keyword }).first().click()
+}
+
 /** 直方图 X 轴应输出（共享智能格式） */
 const SMART_CASES: Array<[number, string]> = [
   [12.34567, '12.3457'],
@@ -216,7 +233,8 @@ test.describe('@p1 轴刻度小数位精度（formatAxisValue 统一）', { tag:
     await pickOption(page, '选择 X 轴参数', 'KELVIN_VIN', layout)
     // X 下拉关闭动画与 Y 下拉打开重叠会导致选项瞬时不稳定，间隔后再选 Y
     await page.waitForTimeout(600)
-    await pickOption(page, '选择 Y 轴参数', 'KELVIN_SW', layout)
+    // KELVIN_SW 在参数表里排得靠后，v2 虚拟窗口初始不含它 ⇒ 先输入关键词再点
+    await pickAxisByKeyword(page, '选择 Y 轴参数', 'KELVIN_SW', layout)
     await respPromise
 
     // locator 用 :visible 唯一化；页面上下文用不带伪类的选择器（finder 内部判可见性）
