@@ -1459,3 +1459,50 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 |---|---|---|
 | 判据 | `npx vitest run test/unit/e2eAffectedDecide.spec.ts` | `Tests 37 passed (37)` |
 | affected | `npm run test:e2e:affected` | `RESULT: PASS · 计划 2 档全部执行`（`lint:e2e` ok / `vitest` ok；74 files / 1046 tests；`deploy/` 不再触发浏览器档） |
+
+# 任务：批4 刀五a（useSelectFilter + X/Y 迁 v2 + clearFilterInput，2026-11-17）
+
+设计：`docs/superpowers/specs/2026-11-13-ux-batch-dropdown-admin-dedup-intro-usage-design.md` §2.3/§2.9
+计划：`docs/superpowers/plans/2026-11-17-batch4d-knife5a-select-filter.md`
+
+## 勾选清单
+
+- [x] clearFilterInput T3（真正语义：收起期间无残留；EP 打开时自己会清 query）（`d9f9fdf`）
+- [x] useSelectFilter 抽取 + SerialSelector（`e239eb1` + 修复轮 `84bda18`）
+- [x] TestColumnSelector + ExportParamSelector（`9e925a7`）
+- [x] 相关性 X/Y 迁 el-select-v2（`d099a0e` + spec 适配 `6ceb6d5`）
+- [x] 全量门禁（GLOBAL）
+- [ ] 并入 master（需用户点头；不 push）
+
+## 门禁记录
+
+| 档 | 命令 | 实测判据行 |
+|---|---|---|
+| 序列 T3 | `npx playwright test e2e/data/file-correlation.spec.ts --project=P2 --workers=1` | `10 passed`（含 T3；变异：注释关闭分支 `clearFilterInput` → 红在收起 popper 的 `.empty-hint`） |
+| T2 | `npx vitest run test/unit/useSelectFilter.spec.ts` | `Tests 12 passed (12)`（含 `selectMatches` 200 上限、`focusOnOpen`、DOM input 同步） |
+| 全量 vitest | `npx vitest run` | `Test Files 75 passed (75)` / `Tests 1058 passed (1058)` |
+| e2e 类型 | `npm run lint:e2e` | `tsc -p tsconfig.e2e.json`，`error TS` 0 处 |
+| 前端构建 | `npm run build` | `build complete in 2.08s`，无 TS 诊断 |
+| 相关性 X/Y | `npx playwright test e2e/analysis/{correlation-inline,correlation-file-switch-reset,axis-label-precision}.spec.ts --project=P2/P1 --workers=1` | `correlation-inline` P2 `3 passed / 1 skipped`；另两文件 P1 `9 passed`；迁移后 `KELVIN_SW` 需按关键词选轴，spec 已适配（共享 `pickOption` 未动） |
+| 额外 @p1 扇出 | `npx playwright test e2e/analysis/{tab-request-fanout,legend-color,multi-file-filter}.spec.ts --project=P1 --workers=1` | `13 passed`（三个从下拉点 `Index_No` 的用例，确认迁移无漏伤） |
+| 全量池 | `node scripts/e2e_pool.mjs --slots=4` | 待填（控制器正在跑） |
+| 后端全套 | `manage.py test` | `Ran 2712 tests / OK (skipped=16)`（沿用刀三 d6c6e78 那轮；`git diff --stat d6c6e78..HEAD -- apps test config requirements` 为空，后端树未变） |
+
+## 已知边界 / 挂账（不阻塞）
+
+- `FileSelect.vue` 虚拟化、`SftpSearchPage` run-history 下拉、`CombineBatchDialog` 批次下拉：本刀 out of scope（刀五b）。
+- `view-data.spec.ts:1474` 是既有 1px 几何 flake（绝对 `413` 对实测 `414`，兄弟断言已是相对 `innerH - 290`）；单独工单。
+- `correlation-matrix-linkage.spec.ts` 一例红是既有问题（在 X/Y 首次交互之前就红；把 `.vue` 换回 base 同样复现），与本刀无关。
+- `frontend/src/utils/selectOptions.ts` 的消费者清单已过时（现应为 `useSelectFilter.ts` 单一漏斗）；该文件是 GLOBAL 路径，收口时未改，另单。
+- 三个 spec 的 `pickAxisByKeyword` 目前是三份 10 行副本；可后续合并进 `helpers/elplus.ts`（不动 `pickOption`）。
+- 另有一处 v2 行为的判据缺口：`correlation-matrix-linkage` 在 X/Y 标签渲染断言之前就红，因此“已选标签在 X/Y 内渲染”暂无绿色判据；静态核对 v2 会渲染，不属缺陷。
+
+## 提交
+
+- `d9f9fdf` test(e2e): 钉住序列下拉关后重开无残留过滤
+- `e239eb1` refactor(data): 抽出 useSelectFilter 并迁移 SerialSelector
+- `84bda18` test(data): 补 selectMatches 上限与 focusOnOpen 判据
+- `9e925a7` refactor(data): 测试列/导出参数下拉改用 useSelectFilter
+- `d099a0e` perf(analysis): 相关性 X/Y 下拉迁 el-select-v2
+- `6ceb6d5` test(e2e): X/Y v2 虚拟窗口下按关键词选轴
+- 本笔 docs(plan): 批4 刀五a 计划与台账
