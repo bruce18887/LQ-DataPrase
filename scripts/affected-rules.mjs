@@ -165,6 +165,8 @@ export const RULES = [
 
   // —— 无测试判据受影响
   ['docs/', []],
+  // 部署/运维模板：systemd unit、env 样例；产品运行时零依赖，由部署指南 §4 走查
+  ['deploy/', ['none:部署/运维模板（systemd unit、env 样例），产品运行时零依赖；由部署指南 §4 走查']],
   ['tasks/', []],
   ['.claude/', []],
   ['.qoder/', []],

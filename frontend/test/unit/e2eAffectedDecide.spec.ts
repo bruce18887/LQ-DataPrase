@@ -83,6 +83,14 @@ describe('假阳性：不是被测对象的落盘物，不得升级全量', () =
     }
   })
 
+  it('部署/运维模板：产品运行时零依赖，不升级浏览器档', () => {
+    const r = staysFast(['deploy/lqdp-prune-jobs.service', 'deploy/lqdp-prune-jobs.timer'])
+    expect(r.global).toBe(false)
+    expect(r.modules).toEqual([])
+    expect(r.unit).toBe(false)
+    expect(r.notes.join()).toMatch(/部署/)
+  })
+
   it('代理与工具的落盘物、CI 配置各归各位', () => {
     const r = staysFast([
       '.lqdp_startup.lock',

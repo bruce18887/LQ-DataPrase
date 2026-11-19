@@ -1444,3 +1444,18 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - 过程分支已 `git branch -d`（fully merged）；未 push；`git status --short` 为空。
 - 最终池 `用例 485 · unexpected 0 · flaky 0 · MEASURED`；后端全套 `Ran 2712 / OK (skipped=16)`（后端树与 d6c6e78 逐字节相同，修复波只动前端）；代码/测试树与 `52134ea` 逐字节相同。
 - 挂账：池效率 2.16 / 用例 485 超 `nightly-gates.mjs` 的 450 上限（既有趋势，另单重定基线）；`file-list-sort-filter.spec.ts:233` 的 onMounted→onActivated 过期注释；`reconcileSelection` 依赖 EP `clearSelection` 发 `selection-change`（EP 大版本升级复跑）。
+
+# 任务：运维 prune_jobs timer（2026-11-17）
+
+依据：`docs/reference/feature-gap-review-2026-11-16.md` §4.4-1；部署指南 §4.4-6。
+
+- [x] `deploy/lqdp-prune-jobs.{service,timer}` + README/部署指南
+- [x] affected 放行 `deploy/`（`e2eAffectedDecide.spec.ts` 钉住）
+- [ ] 保留期拍板（模板暂用命令默认 `--days=7`，拍板后只改 `ExecStart`）
+
+## 门禁
+
+| 档 | 命令 | 实测判据行 |
+|---|---|---|
+| 判据 | `npx vitest run test/unit/e2eAffectedDecide.spec.ts` | `Tests 37 passed (37)` |
+| affected | `npm run test:e2e:affected` | `RESULT: PASS · 计划 2 档全部执行`（`lint:e2e` ok / `vitest` ok；74 files / 1046 tests；`deploy/` 不再触发浏览器档） |
