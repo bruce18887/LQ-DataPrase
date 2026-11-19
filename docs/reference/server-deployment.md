@@ -202,6 +202,7 @@ journalctl -u lqdp-backup.service --no-pager     # 看到 [backup] ok 才算数
 ```
 
 `RandomizedDelaySec` 避开整点、`Persistent=true` 让关机错过的日子在开机后补跑（两条都在 timer 模板里）。
+作业产物清理用同一形态的 oneshot timer：`deploy/lqdp-prune-jobs.service` + `.timer`（见 §4.4-6）。
 
 - **没做过恢复演练的备份等于没有备份**。
 
@@ -246,14 +247,13 @@ cd /srv/lqdp-src && .venv/bin/python manage.py migrate --run-syncdb
    `FEATURE_PERMISSIONS['system_config'] = ['administrator']`（`apps/common/views.py`
    的 `SystemPathsView.required_feature`），与角色名无关，所以这条对照现在照旧成立，
    只是探针账号换成 `user`。）
-6. **`media/` 没有自动回收通路**。全仓唯一的清理命令是
-   `apps/jobs/management/commands/prune_jobs.py`，它只删 7 天前处于 done/error/cancelled
-   的**作业产物**，不动 SFTP 取回的数据文件；`requirements/*.txt` 与 `config/settings/server.py`
-   里也没有任何 cron/beat 入口。所以磁盘按**取回量 × 保留期**线性增长（按每天几十 GB 估，
-   30 天就是 TB 级），不是按「缓存窗口」自动收敛。上线前要么按保留期把盘配够，
-   要么先定「取回文件何时可删」这条策略并做成一个管理命令。
-   作业产物那一半可以先自动化：`manage.py prune_jobs --days=N` 挂进 §4 的 timer
-   （在 `lqdp-backup.service` 之外另开一个 oneshot 即可），但**取回的数据文件不在它范围内**。
+6. **`media/` 的作业产物已有自动回收，SFTP 取回文件没有**。清理命令是
+   `apps/jobs/management/commands/prune_jobs.py`，它只删 `--days` 前处于 done/error/cancelled
+   的**作业产物**，不动 SFTP 取回的数据文件；调度是 `deploy/lqdp-prune-jobs.service` +
+   `.timer`（每天 04:10，模板用命令默认 `--days=7`，保留期拍板后只改 `ExecStart`），
+   安装步骤见 `deploy/README.md`。所以磁盘的**取回文件那一半**仍按**取回量 × 保留期**线性增长
+   （按每天几十 GB 估，30 天就是 TB 级），不是按「缓存窗口」自动收敛；上线前要么按保留期把盘配够，
+   要么先定「取回文件何时可删」这条策略并做成第二个管理命令。
 
 ## 6. 已定 / 还等哪些拍板
 

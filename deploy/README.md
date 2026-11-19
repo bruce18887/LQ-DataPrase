@@ -10,6 +10,8 @@
 | `lqdp.service` | `/etc/systemd/system/lqdp.service` |
 | `lqdp-backup.service` | `/etc/systemd/system/lqdp-backup.service` |
 | `lqdp-backup.timer` | `/etc/systemd/system/lqdp-backup.timer` |
+| `lqdp-prune-jobs.service` | `/etc/systemd/system/lqdp-prune-jobs.service` |
+| `lqdp-prune-jobs.timer` | `/etc/systemd/system/lqdp-prune-jobs.timer` |
 
 ## 安装
 
@@ -23,15 +25,22 @@ install -o root -g lqdp -m 640 deploy/server.env.example /etc/lqdp/server.env
 $EDITOR /etc/lqdp/server.env
 grep -n CHANGE_ME /etc/lqdp/server.env     # 必须无输出，否则说明还有占位值没填
 
-systemd-analyze verify deploy/lqdp.service deploy/lqdp-backup.service deploy/lqdp-backup.timer
+systemd-analyze verify deploy/lqdp.service deploy/lqdp-backup.service deploy/lqdp-backup.timer \
+  deploy/lqdp-prune-jobs.service deploy/lqdp-prune-jobs.timer
 install -m 644 deploy/lqdp.service /etc/systemd/system/lqdp.service
 install -m 644 deploy/lqdp-backup.service /etc/systemd/system/lqdp-backup.service
 install -m 644 deploy/lqdp-backup.timer /etc/systemd/system/lqdp-backup.timer
+install -m 644 deploy/lqdp-prune-jobs.service /etc/systemd/system/lqdp-prune-jobs.service
+install -m 644 deploy/lqdp-prune-jobs.timer /etc/systemd/system/lqdp-prune-jobs.timer
 systemctl daemon-reload
 systemctl enable --now lqdp
 systemctl enable --now lqdp-backup.timer
+systemctl enable --now lqdp-prune-jobs.timer
 systemctl start lqdp-backup.service        # 先手跑一次，别等第二天
+systemctl start lqdp-prune-jobs.service    # 首次手跑，确认 prune 的判据行
 journalctl -u lqdp-backup.service --no-pager   # 看到 [backup] ok 才算数
+journalctl -u lqdp-prune-jobs.service --no-pager
+systemctl list-timers lqdp-prune-jobs.timer
 ```
 
 首次启动前必须设 `LQDP_BOOTSTRAP_ADMIN_PASSWORD`（绑非回环又没有它时进程会拒绝启动）；
@@ -47,10 +56,13 @@ journalctl -u lqdp-backup.service --no-pager   # 看到 [backup] ok 才算数
   （解析缓存、SFTP 连接池）都只在单进程下成立，多 worker 换来的是 `database is locked`。
 - **不要用 cron 跑 `backup_db`**。cron 拿不到 `EnvironmentFile`，命令会因缺
   `LQDP_SERVER_BASE_DIR` 直接拒跑；用 `lqdp-backup.timer`。
+- **不要用 cron 跑 `prune_jobs`**。同样拿不到 `EnvironmentFile`，作业目录需要
+  `LQDP_SERVER_BASE_DIR`；用 `lqdp-prune-jobs.timer`。`--days=7` 是命令默认值，
+  保留期拍板后只改 `ExecStart` 的 `--days`，不要改命令本体。
 - **不要在环境文件的值后面写 `#` 注释**。systemd 不剥行内注释，`#` 之后的内容会成为值的一部分。
 - **方案 B（gunicorn）的模板不在本目录**。启用前先完成指南 §6 的两件先决实验。
 
 ## 验收与恢复
 
 首启六条验收、字体自检、SIGTERM 路径与恢复演练见指南 §1.2、§4、§7。
-`media/` 不备份也不自动回收，上线前先按保留期把盘配够。
+`media/` 不备份；作业产物由 `lqdp-prune-jobs.timer` 按 `--days` 回收，SFTP 取回的数据文件仍不自动回收，上线前按保留期把盘配够。

@@ -1,0 +1,10 @@
+[Unit]
+Description=每天 04:10 清理 LQ-DataPrase 作业产物
+
+[Timer]
+OnCalendar=*-*-* 04:10:00
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
