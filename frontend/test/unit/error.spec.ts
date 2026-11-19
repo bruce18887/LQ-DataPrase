@@ -12,7 +12,7 @@ describe('ERROR_CODE_MAP', () => {
   })
 
   it('后端在用的高频守卫码都有映射（漏加会让界面裸显英文码）', () => {
-    for (const code of ['no_valid_params', 'no_site_column', 'no_data', 'no_serial_column']) {
+    for (const code of ['no_valid_params', 'no_site_column', 'no_data', 'no_serial_column', 'out_of_memory']) {
       expect(ERROR_CODE_MAP[code]).toBeTruthy()
     }
   })
