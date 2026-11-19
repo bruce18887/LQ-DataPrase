@@ -1389,3 +1389,46 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - 未 push：origin 是公开仓库。
 - 并入前后 `git status --short` 为空；本笔台账提交只改 `docs/tasks/todo.md`，代码/测试树与全量门禁所验的 `880502a` 逐字节相同。
 - 池 `用例 480 / 效率 2.23` 与上一轮同值，不是本刀增量；3 条 flaky 均为既有前端用例（wafermap-model-not-found / sftp-search cancel / file-list-completeness）。
+
+# 任务：批4 刀三（列表刷新保留勾选 + 激活刷新 + out_of_memory，2026-11-17）
+
+设计：`docs/superpowers/specs/2026-11-13-ux-batch-dropdown-admin-dedup-intro-usage-design.md` §10（FIX-1 / FIX-4）
+计划：`docs/superpowers/plans/2026-11-17-batch4c-data-refresh.md`
+审查报告：`docs/reference/feature-gap-review-2026-11-16.md` §2.1-A（out_of_memory）
+
+## 勾选清单
+
+- [x] `out_of_memory` 码表 + T2（`d37d40e`）
+- [x] FIX-1 `reserve-selection` + 刷新保留 e2e（`8dcd88f`）
+- [x] FIX-1 用户驱动清选守卫（搜索/筛选/翻页/排序/单删）（`6aad4ff`）
+- [x] FIX-4 四个 loader 迁 `onActivated` + 六类请求 e2e（`d6c6e78`）
+- [ ] 全量门禁（GLOBAL）
+- [ ] 并入 master（需用户点头；不 push）
+
+## 门禁记录
+
+| 档 | 命令 | 实测判据行 |
+|---|---|---|
+| T2 | `npx vitest run test/unit/error.spec.ts` | `Tests 10 passed (10)` |
+| FIX-1 | `npx playwright test e2e/data/file-list-selection.spec.ts --project=P2 --workers=1` | RED `批量删除 (2)` 丢失 → GREEN `4 passed`（2 条业务用例 + 2 条 auth.setup）；守卫用例 RED `toBeDisabled` got "enabled" |
+| FIX-4 | `npx playwright test e2e/data/file-list-activation.spec.ts --project=P2 --workers=1` | RED `pageList/productCodes/formatTypes/tags=0` → GREEN `3 passed`（1 条业务 + 2 条 auth.setup） |
+| 全量 vitest | `npx vitest run` | 待填（控制器正在跑） |
+| e2e 类型 | `npm run lint:e2e` | 待填（控制器正在跑） |
+| 前端构建 | `npm run build` | 待填（控制器正在跑） |
+| 全量池 | `node scripts/e2e_pool.mjs --slots=4` | 待填（控制器正在跑） |
+| 后端全套 | `manage.py test` | 待填（控制器正在跑） |
+
+## 已知边界（评审挂账，不阻塞）
+
+- FIX-1 只在**用户驱动的列表变化**（搜索/筛选/翻页/排序/单删）清选；写后刷新（`filesVersion` / 上传 / 一致性修复）保留勾选。这样 `data.spec.ts` 里「搜索会清勾选」的旧行为保持为真。
+- 激活刷新失败会清空列表（与既有写后刷新同一约定），未新增失败保留；首屏双发未在 e2e 钉住（当前只钉回程六类各一次）。
+- `onActivated` 依赖 `MainLayout.vue` 的 keep-alive；若将来本组件被渲染到 keep-alive 之外，loader 一次都不会跑（空表无报错），届时需补 `onMounted`。
+- `data.spec.ts` 那条「搜索响应替换会清勾选」的注释机制表述已过时（实际清选发生在 `onSearch`），本次未改该冻结文件。
+
+## 提交
+
+- `d37d40e` fix(utils): 补 out_of_memory 错误码中文映射
+- `8dcd88f` fix(data): 文件列表刷新保留勾选
+- `6aad4ff` fix(data): 搜索/筛选变化时清空勾选，避免删到不可见行
+- `d6c6e78` fix(data): 文件列表四个 loader 随激活刷新
+- 本笔 docs(plan): 批4 刀三计划与台账
