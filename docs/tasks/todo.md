@@ -1402,7 +1402,7 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - [x] FIX-1 `reserve-selection` + 刷新保留 e2e（`8dcd88f`）
 - [x] FIX-1 用户驱动清选守卫（搜索/筛选/翻页/排序/单删）（`6aad4ff`）
 - [x] FIX-4 四个 loader 迁 `onActivated` + 六类请求 e2e（`d6c6e78`）
-- [ ] 全量门禁（GLOBAL）
+- [x] 全量门禁（GLOBAL）
 - [ ] 并入 master（需用户点头；不 push）
 
 ## 门禁记录
@@ -1412,11 +1412,11 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 | T2 | `npx vitest run test/unit/error.spec.ts` | `Tests 10 passed (10)` |
 | FIX-1 | `npx playwright test e2e/data/file-list-selection.spec.ts --project=P2 --workers=1` | RED `批量删除 (2)` 丢失 → GREEN `4 passed`（2 条业务用例 + 2 条 auth.setup）；守卫用例 RED `toBeDisabled` got "enabled" |
 | FIX-4 | `npx playwright test e2e/data/file-list-activation.spec.ts --project=P2 --workers=1` | RED `pageList/productCodes/formatTypes/tags=0` → GREEN `3 passed`（1 条业务 + 2 条 auth.setup） |
-| 全量 vitest | `npx vitest run` | 待填（控制器正在跑） |
-| e2e 类型 | `npm run lint:e2e` | 待填（控制器正在跑） |
-| 前端构建 | `npm run build` | 待填（控制器正在跑） |
-| 全量池 | `node scripts/e2e_pool.mjs --slots=4` | 待填（控制器正在跑） |
-| 后端全套 | `manage.py test` | 待填（控制器正在跑） |
+| 全量 vitest | `npx vitest run` | `Test Files 74 passed (74)` / `Tests 1045 passed (1045)` |
+| e2e 类型 | `npm run lint:e2e` | `tsc -p tsconfig.e2e.json`，`error TS` 0 处 |
+| 前端构建 | `npm run build` | `build complete in 2.23s`，无 TS 诊断 |
+| 全量池 | `node scripts/e2e_pool.mjs --slots=4` | `用例 483 · 墙钟 11.1min · 单价 3.08s/例 · 效率 2.13（与后端全套并跑，效率低于 2.8 属并发代价） · unexpected 0 · flaky 1 · skipped 21` · `结论 MEASURED` · exit 0。flaky 点名：`data/view-data.spec.ts`「定位到 Fail 单元格」，与本刀（文件列表勾选/激活 + error 码表）无交集 |
+| 后端全套 | `manage.py test` | `Ran 2712 tests in 656.816s` / `OK (skipped=16)`；`grep -cE "^(FAIL\|ERROR):"` = 0 |
 
 ## 已知边界（评审挂账，不阻塞）
 
@@ -1431,4 +1431,5 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - `8dcd88f` fix(data): 文件列表刷新保留勾选
 - `6aad4ff` fix(data): 搜索/筛选变化时清空勾选，避免删到不可见行
 - `d6c6e78` fix(data): 文件列表四个 loader 随激活刷新
-- 本笔 docs(plan): 批4 刀三计划与台账
+- `3dee0dc` docs(plan): 批4 刀三计划与台账
+- 本笔 docs(todo): 批4 刀三收口门禁
