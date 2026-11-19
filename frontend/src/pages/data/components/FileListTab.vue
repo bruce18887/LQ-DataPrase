@@ -74,7 +74,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive, watch, onMounted, onActivated } from 'vue'
+import { ref, computed, reactive, watch, onActivated } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { datafilesApi, type FileUsage } from '../../../api/datafiles'
 import { useFilesStore } from '../../../stores/files'
@@ -423,13 +423,6 @@ watch(filters, () => {
   loadFiles()
 }, { deep: true })
 
-onMounted(() => {
-  loadFiles()
-  loadProductCodes()
-  loadFormatTypes()
-  loadAllTags()
-})
-
 // 占用 chip 的「进入即拉」挂 onActivated，**不挂** onMounted —— 与本仓既有的承重约定同形：
 // `MainLayout.vue:12` 用 `<keep-alive :max="10">` 包路由页且没有 include/exclude，本组件是
 // `DataManagement` 的子孙，跟着一起被缓存 ⇒ 首次进入 mounted 与 activated **都**触发，
@@ -445,9 +438,19 @@ onMounted(() => {
 // 只覆盖「他自己在应用里做的写」，所以导航回来这一趟是把端到端窗口钉回 ≤30s 的唯一入口。
 //
 // fresh=false ⇒ 命中后端 30s 分桶 TTL：导航来回最坏也只是多次缓存命中，不会变成「每次导航
-// 扫一遍盘」。另外四个 loader 仍挂在 onMounted（没跟着走 activated）是既有行为，本批不改，
-// 理由与代价见台账那条「留着的理由与代价」。
+// 扫一遍盘」。另外四个 loader 的挂载口径见下面 FIX-4 那段：同为 activation 级、首进恰好一次，
+// 判据 `e2e/data/file-list-activation.spec.ts`（六类请求各一次）。
+//
+// FIX-4（2026-11-17）：四个 sibling loader 与占用 chip 同一口径，全部挂 onActivated。
+// keep-alive 下 mounted 一个会话只跑一次；Explorer 直接拷文件进来 / 切页回来都要看到新列表。
+// 首进 mounted+activated 都触发，所以只挂 activated 恰好一次；判据
+// `e2e/data/file-list-activation.spec.ts`（六类请求各一次）与 `data.spec.ts`
+// 的「全量文件列表只拉一次」对照。
 onActivated(() => {
+  loadFiles()
+  loadProductCodes()
+  loadFormatTypes()
+  loadAllTags()
   loadUsage()
 })
 
