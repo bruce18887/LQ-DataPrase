@@ -1410,20 +1410,22 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 | 档 | 命令 | 实测判据行 |
 |---|---|---|
 | T2 | `npx vitest run test/unit/error.spec.ts` | `Tests 10 passed (10)` |
-| FIX-1 | `npx playwright test e2e/data/file-list-selection.spec.ts --project=P2 --workers=1` | RED `批量删除 (2)` 丢失 → GREEN `4 passed`（2 条业务用例 + 2 条 auth.setup）；守卫用例 RED `toBeDisabled` got "enabled" |
-| FIX-4 | `npx playwright test e2e/data/file-list-activation.spec.ts --project=P2 --workers=1` | RED `pageList/productCodes/formatTypes/tags=0` → GREEN `3 passed`（1 条业务 + 2 条 auth.setup） |
+| FIX-1 | `npx playwright test e2e/data/file-list-selection.spec.ts --project=P2 --workers=1` | RED `批量删除 (2)` 丢失 → GREEN `5 passed`（3 条业务用例 + 2 条 auth.setup）；守卫用例 RED `toBeDisabled` got "enabled"；失败刷新用例 RED 后由 `reconcileSelection` 修复；刷新保留用例同时断 `.el-checkbox.is-checked` 2 个 |
+| FIX-4 | `npx playwright test e2e/data/file-list-activation.spec.ts --project=P2 --workers=1` | RED `pageList/productCodes/formatTypes/tags=0` → GREEN `4 passed`（2 条业务 + 2 条 auth.setup）；首屏单发用例用「临时回加 `onMounted`」反证会红（五类变 2、`fullList` 仍 1） |
 | 全量 vitest | `npx vitest run` | `Test Files 74 passed (74)` / `Tests 1045 passed (1045)` |
 | e2e 类型 | `npm run lint:e2e` | `tsc -p tsconfig.e2e.json`，`error TS` 0 处 |
 | 前端构建 | `npm run build` | `build complete in 2.23s`，无 TS 诊断 |
-| 全量池 | `node scripts/e2e_pool.mjs --slots=4` | `用例 483 · 墙钟 11.1min · 单价 3.08s/例 · 效率 2.13（与后端全套并跑，效率低于 2.8 属并发代价） · unexpected 0 · flaky 1 · skipped 21` · `结论 MEASURED` · exit 0。flaky 点名：`data/view-data.spec.ts`「定位到 Fail 单元格」，与本刀（文件列表勾选/激活 + error 码表）无交集 |
-| 后端全套 | `manage.py test` | `Ran 2712 tests in 656.816s` / `OK (skipped=16)`；`grep -cE "^(FAIL\|ERROR):"` = 0 |
+| 全量池 | `node scripts/e2e_pool.mjs --slots=4` | 修复波后的最终池：`用例 485 · 墙钟 11.0min · 单价 3.07s/例 · 效率 2.16 · unexpected 0 · flaky 0 · skipped 21` · `结论 MEASURED` · exit 0。效率 2.16 低于 2.8、用例 485 超 `nightly-gates.mjs` 的 450 上限，属既有套件规模趋势（本刀 +5 例），另单重定基线，不归本刀 |
+| 后端全套 | `manage.py test` | `Ran 2712 tests in 656.816s` / `OK (skipped=16)`；`grep -cE "^(FAIL\|ERROR):"` = 0。修复波只动前端，`git diff --stat d6c6e78..HEAD -- apps test scripts config requirements` 为空，故该轮后端全量对最终树仍有效 |
 
 ## 已知边界（评审挂账，不阻塞）
 
 - FIX-1 只在**用户驱动的列表变化**（搜索/筛选/翻页/排序/单删）清选；写后刷新（`filesVersion` / 上传 / 一致性修复）保留勾选。这样 `data.spec.ts` 里「搜索会清勾选」的旧行为保持为真。
-- 激活刷新失败会清空列表（与既有写后刷新同一约定），未新增失败保留；首屏双发未在 e2e 钉住（当前只钉回程六类各一次）。
+- 刷新失败会清空列表；`reconcileSelection` 同时清掉不在新列表里的选中 id —— 空表上不会再留 `批量删除 (N)`，选中行滑出当前页也会收敛。该收敛依赖 EP `clearSelection()` 发 `selection-change`（2.14 实测）；EP 大版本升级时需复跑两条 data spec。
+- 首屏与回程各钉一条请求计数（首屏用例已用「临时回加 `onMounted`」反证会红），不再只钉回程。
 - `onActivated` 依赖 `MainLayout.vue` 的 keep-alive；若将来本组件被渲染到 keep-alive 之外，loader 一次都不会跑（空表无报错），届时需补 `onMounted`。
-- `data.spec.ts` 那条「搜索响应替换会清勾选」的注释机制表述已过时（实际清选发生在 `onSearch`），本次未改该冻结文件。
+- `data.spec.ts` 那条「搜索响应替换会清勾选」的注释机制表述已过时（实际清选发生在 `onSearch`），本次未改该冻结文件；`file-list-sort-filter.spec.ts:233` 仍写 listTags 在 onMounted（行为已改 onActivated），待后续注释轮。
+- 池效率 2.16 / 用例 485 超 `nightly-gates.mjs` 的 450 上限，属既有趋势（本刀 +5 例），另单重定基线。
 
 ## 提交
 
@@ -1432,4 +1434,5 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - `6aad4ff` fix(data): 搜索/筛选变化时清空勾选，避免删到不可见行
 - `d6c6e78` fix(data): 文件列表四个 loader 随激活刷新
 - `3dee0dc` docs(plan): 批4 刀三计划与台账
-- 本笔 docs(todo): 批4 刀三收口门禁
+- `52134ea` fix(data): 刷新失败/重排时收敛勾选，补首屏单发判据
+- 本笔 docs(todo): 批4 刀三 最终修复波门禁
