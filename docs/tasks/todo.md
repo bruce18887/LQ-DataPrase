@@ -1403,7 +1403,7 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - [x] FIX-1 用户驱动清选守卫（搜索/筛选/翻页/排序/单删）（`6aad4ff`）
 - [x] FIX-4 四个 loader 迁 `onActivated` + 六类请求 e2e（`d6c6e78`）
 - [x] 全量门禁（GLOBAL）
-- [ ] 并入 master（需用户点头；不 push）
+- [x] 并入本地 master（2026-11-17 用户点头；master `9308a8b → e745859`，过程分支已删，未 push）
 
 ## 门禁记录
 
@@ -1435,4 +1435,12 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - `d6c6e78` fix(data): 文件列表四个 loader 随激活刷新
 - `3dee0dc` docs(plan): 批4 刀三计划与台账
 - `52134ea` fix(data): 刷新失败/重排时收敛勾选，补首屏单发判据
-- 本笔 docs(todo): 批4 刀三 最终修复波门禁
+- `e745859` docs(todo): 批4 刀三 最终修复波门禁
+- 本笔 docs(todo): 批4 刀三 并入本地 master（未 push）
+
+## 并入记录（2026-11-17）
+
+- `git merge --ff-only feature/batch4c-data-refresh`：master `9308a8b → e745859`。
+- 过程分支已 `git branch -d`（fully merged）；未 push；`git status --short` 为空。
+- 最终池 `用例 485 · unexpected 0 · flaky 0 · MEASURED`；后端全套 `Ran 2712 / OK (skipped=16)`（后端树与 d6c6e78 逐字节相同，修复波只动前端）；代码/测试树与 `52134ea` 逐字节相同。
+- 挂账：池效率 2.16 / 用例 485 超 `nightly-gates.mjs` 的 450 上限（既有趋势，另单重定基线）；`file-list-sort-filter.spec.ts:233` 的 onMounted→onActivated 过期注释；`reconcileSelection` 依赖 EP `clearSelection` 发 `selection-change`（EP 大版本升级复跑）。
