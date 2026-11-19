@@ -134,14 +134,19 @@ const showConsistencyCheck = ref(false)
 /**
  * 表头排序变化（服务端排序：20 条/页必须后端排，不能本地 sort）
  *
- * 勾选策略（与 `FileListTable.vue:25` 的 `reserve-selection` 配套）：
- * `reserve-selection` 让 EP 在 `setData` 收到新数组实例时不再 `cleanSelection()`，
- * 于是「写后刷新」（`filesVersion` watch / `onUploadSuccess` / `onConsistencyDone`）
- * 能按 row-key 还原选中行 —— 这是 FIX-1 要保留的行为。
- * 但同一个机制也会让**用户驱动的列表变化**（搜索 / 筛选 / 翻页 / 排序）留下的
+ * 勾选策略（与 `FileListTable.vue:25` 的 `reserve-selection` 配套）——
+ * EP 2.14 的 `store/index.mjs` 在 `setData` 里是
+ * `if (reserveSelection) assertRowKey(); else if (dataInstanceChanged) clearSelection();
+ * else cleanSelection()`：勾了 `reserve-selection` 就走第一条，**后两条一起被短路**。
+ * 被跳过的正是「换了数组实例 ⇒ 全清」与「按 row-key 把已不在 data 里的行踢出选中集并
+ * emit `selection-change`」这两件事，于是「写后刷新」（`filesVersion` watch /
+ * `onUploadSuccess` / `onConsistencyDone`）能保住选中行 —— 这是 FIX-1 要保留的行为。
+ * 但同一个短路也会让**用户驱动的列表变化**（搜索 / 筛选 / 翻页 / 排序）留下的
  * `selectedIds` 指向已经不在当前列表里的行，批量删除就会删到看不见的文件。
  * 所以凡是由用户的视图操作引发的 `loadFiles()`，一律先显式 `clearSelection()`
  * （`selectedIds` 由 `selection-change` 跟着归零）。写后刷新那三条**不要**加。
+ * 兜底收敛在 `reconcileSelection()`（`loadFiles` 的 finally）：它只在「有选中 id 不在
+ * 当前列表里」时清选，写后刷新一行不动，覆盖失败清空与翻页/重排两种漏网。
  */
 function onSortChange({ prop, order }: { prop: string; order: 'ascending' | 'descending' | null }) {
   if (!prop || !order) {
@@ -167,6 +172,26 @@ function clearFilters() {
 }
 
 // ── Data loading ────────────────────────────────────────────────────
+
+/**
+ * 勾选只允许覆盖当前页可见行：刷新后选中 id 若已不在列表里（失败清空/翻页重排），立即清选。
+ *
+ * `reserve-selection` 短路了 EP 的 `clearSelection()` / `cleanSelection()`（见
+ * `onSortChange` 上方），而 `selectedIds` 只由 `selection-change` 重写 ⇒ 列表变空或整页
+ * 换掉时 EP 不 emit，勾选就会悬在看不见的行上（工具栏继续显示 `批量删除 (N)`，点下去删的
+ * 是用户已经看不到的文件）。这是**唯一**的兜底收敛点：只在「有选中 id 不在当前列表里」
+ * 时才动手，写后刷新（FIX-1）与挨个清选（EP 自己会 emit 空集）都不受影响。
+ *
+ * 必须在 `files.value` 之后同步跑：`clearSelection()` 在旧选择非空时 emit `[]`
+ * （EP `store/watcher.mjs` 里的 `selectedMap` 是从 `selection` 派生的，清完不会复活）。
+ */
+function reconcileSelection() {
+  const visible = new Set(files.value.map((f: any) => f.id))
+  if (selectedIds.value.some((id) => !visible.has(id))) {
+    tableRef.value?.clearSelection()
+  }
+}
+
 async function loadFiles() {
   loading.value = true
   try {
@@ -195,6 +220,7 @@ async function loadFiles() {
     emit('total-change', 0)
   } finally {
     loading.value = false
+    reconcileSelection()
   }
 }
 
@@ -441,11 +467,18 @@ watch(filters, () => {
 // 扫一遍盘」。另外四个 loader 的挂载口径见下面 FIX-4 那段：同为 activation 级、首进恰好一次，
 // 判据 `e2e/data/file-list-activation.spec.ts`（六类请求各一次）。
 //
-// FIX-4（2026-11-17）：四个 sibling loader 与占用 chip 同一口径，全部挂 onActivated。
-// keep-alive 下 mounted 一个会话只跑一次；Explorer 直接拷文件进来 / 切页回来都要看到新列表。
-// 首进 mounted+activated 都触发，所以只挂 activated 恰好一次；判据
-// `e2e/data/file-list-activation.spec.ts`（六类请求各一次）与 `data.spec.ts`
-// 的「全量文件列表只拉一次」对照。
+// FIX-4（2026-11-17）：四个 sibling loader 与占用 chip 同一口径，全部挂 onActivated，
+// **不要**再补一个 onMounted。机理是 Vue 把子孙组件的 `activated` 注册到最近的那个
+// keep-alive 根上（`runtime-core` 的 `registerKeepAliveHook`：先 `injectHook` 进组件自己，
+// 再沿 parent 链 `injectToKeepAliveRoot`）—— 于是一次挂载期内**首进就触发一次**
+// （KeepAlive 首次 patch 时 `instance.a` 随 mounted 一起排队），之后每次重新激活各一次。
+// 再加 onMounted 就是每个会话白白多发一整轮。
+// 判据：`e2e/data/file-list-activation.spec.ts` 的「首屏六类请求各一次」（计数器先装、
+// 再进页面，钉的就是这条）与「激活回 /data 六类各一次」；全量列表那一条对照
+// `data.spec.ts` 的「只拉一次」。
+// 已知代价（接受）：`onActivated` **只在 keep-alive 内生效**。若将来有入口不经
+// `MainLayout.vue` 的 `<keep-alive>` 直接渲染本组件，这里五个 loader 会**一次都不跑** ——
+// 表现为空表、且没有任何报错（不是 500、不是超时，是压根没发请求）。
 onActivated(() => {
   loadFiles()
   loadProductCodes()
