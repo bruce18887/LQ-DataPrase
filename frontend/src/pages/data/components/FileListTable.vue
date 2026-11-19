@@ -22,7 +22,7 @@
           <FileRowDetail :row="row" @remove-tag="removeTag" />
         </template>
       </el-table-column>
-      <el-table-column type="selection" width="44" align="center" />
+      <el-table-column type="selection" width="44" align="center" reserve-selection />
       <el-table-column prop="id" label="ID" min-width="64" align="center" sortable="custom">
         <template #default="{ row }">
           <span class="id-badge">#{{ row.id }}</span>
