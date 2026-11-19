@@ -40,8 +40,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { filterByKeyword, toOptions } from '../../../../utils/selectOptions'
+import { useSelectFilter } from '../../composables/useSelectFilter'
 
 /**
  * 显示测试列选择器：复用导出工具「选择参数」的交互模式——
@@ -66,87 +65,30 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: string[]): void
 }>()
 
-const filterText = ref('')
-const selectRef = ref<{ $el: HTMLElement }>()
-
-const kw = computed(() => filterText.value.trim().toLowerCase())
-
 /**
- * 匹配项：大小写不敏感子串匹配，复用共享谓词 `filterByKeyword`（与参数/序列下拉同一口径）。
+ * 九个符号（selectRef / kw / matches / selectOptions / filterMethod / onSelectKeydown /
+ * onVisibleChange / selectAll / clearAll）与 Serial / Export 两族同源，承重理由的 owner 是
+ * `composables/useSelectFilter.ts`：空关键词必须自己给 `[]`（`filterByKeyword` 空串返回入参
+ * 本身）、v2 的 filter-method 不过滤（`useSelect.mjs:114-132`）故选项要预过滤、EP 内部
+ * `states.inputValue` 只能靠冒泡的原生 input 事件同步、Enter 必须走祖先捕获阶段才抢在
+ * 「选中键盘高亮那一项」之前。选项 = 匹配集或全集，**不截断**（可浏览性交给虚拟化）。
+ * `selectMatches` / `clearFilterInput` 只在该 composable 内部用，本文件不取。
  *
- * 空关键词这一支必须自己给 `[]`：`filterByKeyword` 空串时返回**入参本身**（全量，那是它
- * 自己的引用契约），透传会把「没输入」变成「全匹配」⇒ footer 冒出「按 Enter 全选」，
- * 而 `onSelectKeydown` 于是从 EP 的「选中键盘高亮那一项」变成「全选上千列」。
- */
-const matches = computed(() => (kw.value ? filterByKeyword(props.cols, filterText.value) : []))
-
-/**
- * 下拉选项 = 匹配集（有关键词）或全量（无关键词），**不截断**。
- * `el-select-v2` 的 filter-method 不过滤（`select-v2/src/useSelect.mjs:114-132`：判到
- * filterMethod 合法后 `isValidOption` 恒 true ⇒ `filteredOptions` = 传进去的 `props.options`
- * 原样），所以这里必须给已经过滤好的数组；虚拟化让上千测试列可浏览，旧「靠 300 封顶
- * 防冻结」的前提（el-select 无虚拟化）已随本次迁移作废。
+ * 模板上两处不能顺手改：`ref="selectRef"`（清过滤靠它取 filter input）与 `@keydown.capture`。
  *
- * ⚠ 名字必须是 `selectOptions`（Task 6/7/8 三个下拉的统一约定）：本组件的 props 是
- * `cols`/`modelValue`，与它不撞名，所以 footer 上 `:disabled="cols.length === 0"` 引用的仍是
- * **全集**。哪天有人把 computed 改成顶掉 `cols` 的名字，「搜一个不存在的关键词」就会把全选
- * 按钮禁掉——空关键词时两者恰好等价，正常路径看不出差别（Task 6 的同款陷阱）。
+ * ⚠ `selectOptions` 不能改名成 `cols`：footer 的 `:disabled="cols.length === 0"` 引用的是
+ * **全集 props**。同名会让「搜一个不存在的关键词」把全选按钮禁掉——空关键词时两者恰好
+ * 等价，正常路径看不出差别。
  */
-const selectOptions = computed(() => toOptions(kw.value ? matches.value : props.cols))
+const { selectRef, kw, matches, selectOptions, filterMethod,
+        onSelectKeydown, onVisibleChange, selectAll, clearAll } =
+  useSelectFilter<string>({
+    source: () => props.cols,
+    selected: () => props.modelValue,
+    onChange: (v) => emit('update:modelValue', v),
+  })
 
-/** 只是记下关键词：v2 的 filter-method 不过滤（见上面 selectOptions 的注释），过滤由 kw/matches 承担 */
-function filterMethod(query: string) {
-  filterText.value = query
-}
-
-/**
- * 捕获阶段拦截 Enter：输入框有关键字且有匹配时 = 全选。
- * v2 里 Enter 绑在过滤 input 自己身上（`select-v2/src/select.mjs:227`：
- * `withKeys(withModifiers(onKeyboardSelect, ["stop", "prevent"]), ["enter"])`），
- * 目标上的监听器晚于祖先的捕获阶段 ⇒ 挂在根 div 的 capture 监听必先执行，
- * 这里 preventDefault + stopPropagation 才能抢在它（「选中键盘高亮那一项」）之前。
- * 输入框为空（kw 空）时不拦截，保留 EP 原行为（选中高亮项）。
- */
-function onSelectKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter' && matches.value.length > 0) {
-    e.preventDefault()
-    e.stopPropagation()
-    selectMatches()
-  }
-}
-
-/**
- * 清空过滤（含 EP 内部 query）：states.inputValue 是 EP 内部状态，外部只能
- * 通过原生 input 事件（onInput → handleQueryChange）同步，故置空后派发 input 事件。
- */
-function clearFilterInput() {
-  filterText.value = ''
-  const inputEl = selectRef.value?.$el?.querySelector('input')
-  if (inputEl) {
-    inputEl.value = ''
-    inputEl.dispatchEvent(new Event('input', { bubbles: true }))
-  }
-}
-
-/** 下拉关闭时清空过滤，避免残留过滤误导下一次打开 */
-function onVisibleChange(visible: boolean) {
-  if (!visible) clearFilterInput()
-}
-
-function selectAll() {
-  emit('update:modelValue', [...props.cols])
-}
-
-function clearAll() {
-  emit('update:modelValue', [])
-}
-
-/** 合并语义：已选 ∪ 匹配项（增量累计，误选靠清空/单项取消） */
-function selectMatches() {
-  if (matches.value.length === 0) return
-  emit('update:modelValue', [...new Set([...props.modelValue, ...matches.value])])
-  clearFilterInput()
-}
+void selectRef // 绑模板 ref="selectRef"（noUnusedLocals 要显式消费一次，同 SerialSelector）
 </script>
 
 <style scoped>
