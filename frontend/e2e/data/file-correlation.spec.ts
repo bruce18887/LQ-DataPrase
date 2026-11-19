@@ -327,6 +327,66 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
     await expect(serialSel.locator('.el-select__wrapper')).not.toHaveClass(/is-disabled/)
     await page.keyboard.press('Escape')
 
+    /*
+     * clearFilterInput 判据（批4 刀五a，T3）：**关掉之后，关键词不得残留**。
+     *
+     * 判的是 `kw` 派生的 UI，不是 input 的值：EP v2 在 `watch(expanded)` 的 `expanded:false`
+     * 分支里自己把 `states.inputValue` 置空（`select-v2/src/useSelect.mjs`）⇒「关后 input
+     * 为空」在组件侧一行清理都没有时也成立，那句只作辅助。
+     *
+     * 为什么残留会露馅：公共序列是 `number[]`，label 走 `String(序列号)` ⇒ 只可能是数字，
+     * 字母关键词永不命中；`kw` 一旦没清，`selectOptions = toOptions(matches)` 就是空数组
+     * ⇒ `#empty` 槽（`.empty-hint`「无匹配序列」）顶掉整个候选列表。空关键词时它回到全量。
+     *
+     * ⚠ 承重的是**收起那一刻**的隐藏面板，不是重开后的面板：`persistent` 默认 true
+     * （`select-v2/src/defaults.mjs:188`）⇒ 收起的 popper 内容仍挂在 DOM，漏清时它里面就
+     * 只剩一条 `.empty-hint`、候选 0 行。而**重开时 v2 自己会洗掉组件的 `kw`**：同一个
+     * `watch(expanded)` 的 `if (val)` 支调 `handleQueryChange("")` → `filterMethod("")`
+     * ⇒ `filterText = ''`。2026-11-19 变异实测：注释掉关闭分支的 `clearFilterInput()` 后，
+     * 「重开后 `.empty-hint` 为 0」照样绿（隐藏面板里那条是 1）—— 所以重开那几句只当
+     * 用户可见的收尾，牙齿全在下面那对 `[aria-hidden="true"]` 判据上。
+     *
+     * 关面板必须**点外部**、不能用 Escape：`select-v2/src/useSelect.mjs` 的 `handleEsc`
+     * 在 `inputValue` 非空时只清 query、不收面板 —— 那等于替被测的 `clearFilterInput`
+     * 把关键词洗掉，变异就证不出红。
+     */
+    await serialSel.click()
+    await expect(serialPopper).toBeVisible()
+    await page.keyboard.type(NO_MATCH_QUERY)
+    await expect(serialPopper.locator('.empty-hint')).toBeVisible()
+    // 点外部用控件**上方**那行 label，不点下面的 `.fc-serial-hint`：下拉面板正从控件下方展开，
+    // 会盖住那行提示文案（2026-11-19 实测换成点它 ⇒ 红在 `<div class="empty-hint">无匹配序列</div>
+    // … intercepts pointer events`，重试 15s 后 timeout）。
+    // 这条 label 没有 for= ⇒ 点它既不聚焦控件也不触发任何 handler，只走 v2 的
+    // `handleClickOutside` → expanded=false → visible-change(false)。
+    await section.locator('.fc-opt-label').filter({ hasText: '对比序列' }).click()
+    await expect(serialPopper).toBeHidden()
+    // ↓ 承重：收起的那份 popper（`aria-hidden="true"`）里 kw 必须已被组件清掉
+    const hiddenSerialPopper = page.locator(`.el-popper.${SERIAL_POPPER}[aria-hidden="true"]`)
+    await expect(
+      hiddenSerialPopper.locator('.empty-hint'),
+      '收起后 kw 已被清 ⇒ 隐藏面板里不该留下「无匹配序列」',
+    ).toHaveCount(0)
+    expect(
+      await hiddenSerialPopper.locator('.el-select-dropdown__item').count(),
+      '收起那份 popper 里应挂回全量候选；实测漏清时这里是 0 行（与上一条互为正反证）',
+    ).toBeGreaterThan(0)
+    // 用户可见的收尾：重开后面板同样是全量（v2 自己也会洗 query ⇒ 这两句不承重）
+    await serialSel.click()
+    await expect(serialPopper).toBeVisible()
+    await expect(serialPopper.locator('.empty-hint')).toHaveCount(0)
+    await expect(serialPopper.locator('.match-hint')).toHaveCount(0)
+    await expect(serialSel.locator('input').first()).toHaveValue('')
+    // 前提：重开后的候选数（= 全量公共序列，从提示文案的「共 N 颗」取）必须远大于窗口界，
+    // 否则「没有 .empty-hint」在漏清与清干净两种实现下都成立，上面那两条就没有牙齿。
+    const totalSerials = Number(
+      /共 (\d+) 颗/.exec((await section.locator('.fc-serial-hint').textContent()) ?? '')?.[1],
+    )
+    expect(totalSerials, '候选数须大于窗口界，否则上面那条没有牙齿').toBeGreaterThan(MAX_WINDOW_ROWS)
+    await expectWindowRows(windowItems(page, SERIAL_POPPER), totalSerials, '序列下拉（关后重开，应无残留过滤）')
+    await page.keyboard.press('Escape') // 空关键词 ⇒ EP 真的收起面板（非空时 handleEsc 只清 query）
+    await expect(serialPopper).toBeHidden()
+
     // 全选按钮 → 触达上限（提示形状「已选 N / 共 M 颗（最多 N）」只在已选数触顶时出现）
     // ⚠ 这条路走的是组件的 selectAll()→clamp()，**不经过** v2 的 :multiple-limit
     // （那个只约束「在面板里点选」）；上面 Enter 那条的匹配集若超过上限，clamp 同样
