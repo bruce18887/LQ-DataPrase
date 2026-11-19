@@ -76,6 +76,8 @@ test.describe('文件列表刷新保留勾选', { tag: ['@p2', '@data'] }, () =>
 
     // FIX-1 正判据：刷新后 selectedCount 仍是 2（旧实现会回到「批量删除」无计数）。
     await expect(bulkDeleteButton(page)).toContainText('批量删除 (2)')
+    // 用户可见的另一半：EP 内建的勾选框也真的还是勾上的（计数与画面不许各说各话）。
+    await expect(page.locator('.content-section:visible .el-table .el-table__row .el-checkbox.is-checked')).toHaveCount(2)
   })
 
   test('搜索改变列表时清空勾选，避免批量删除看不见的行', async ({ page }) => {
@@ -95,5 +97,23 @@ test.describe('文件列表刷新保留勾选', { tag: ['@p2', '@data'] }, () =>
     await expect(rowByName(page, path.basename(uploaded[1]))).toHaveCount(0, { timeout: 15_000 })
     await expect(bulkDeleteButton(page)).toBeDisabled()
     await expect(bulkDeleteButton(page)).not.toContainText('批量删除 (2)')
+  })
+
+  test('刷新失败时清空勾选，避免空表上仍可批量删除', async ({ page }) => {
+    test.skip(!fs.existsSync(PRIMARY_SAMPLE_FILE), '样例数据缺失，跳过')
+    await gotoApp(page, '/data')
+    const uploaded = await uploadSingles(page, 2)
+    for (const p of uploaded) {
+      await expect(rowByName(page, path.basename(p))).toBeVisible({ timeout: 15_000 })
+    }
+    for (const p of uploaded) {
+      await rowByName(page, path.basename(p)).locator('.el-checkbox').first().click()
+    }
+    await expect(bulkDeleteButton(page)).toContainText('批量删除 (2)')
+
+    await page.route(/\/api\/v1\/files\/\?(.*&)?file_type=single/, (route) => route.abort())
+    await uploadSingles(page, 1)
+    await expect(bulkDeleteButton(page)).toBeDisabled({ timeout: 15_000 })
+    await expect(page.locator('.content-section:visible .el-table .el-table__row')).toHaveCount(0, { timeout: 15_000 })
   })
 })
