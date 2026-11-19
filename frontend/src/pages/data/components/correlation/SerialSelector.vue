@@ -69,11 +69,13 @@ const emit = defineEmits<{
 const MAX_SELECTED = 200
 
 /**
- * 九符号（kw / matches / selectOptions / filterMethod / clearFilterInput /
- * onSelectKeydown / onVisibleChange / selectAll / clearAll / selectMatches）的实现
- * 收敛在 `useSelectFilter`，与 TestColumn / Export 两族同源；空关键词的 `[]`、
+ * 本组件从 `useSelectFilter` destructure 的九个符号（selectRef / kw / matches /
+ * selectOptions / filterMethod / onSelectKeydown / onVisibleChange / selectAll /
+ * clearAll）与 TestColumn / Export 两族同源；`selectMatches` / `clearFilterInput`
+ * 只在该 composable 内部用（Enter 全选、关面板清理），本文件不取。空关键词的 `[]`、
  * v2 filter-method 不过滤（`select-v2/src/useSelect.mjs:114-132`）、EP 内部
- * `states.inputValue` 只能靠原生 input 事件同步，这些承重理由都写在那一个文件里。
+ * `states.inputValue` 只能靠冒泡的原生 input 事件同步、automatic-dropdown 打开时
+ * input 还 `display:none` 故 isFocusable 跳过聚焦 —— 这些承重理由都写在那个文件里。
  *
  * 模板上两处不能顺手改：`ref="selectRef"`（clearFilterInput 靠它取 filter input）与
  * `@keydown.capture`（v2 的 Enter 绑在过滤 input 自己身上，`select-v2/src/select.mjs:227`

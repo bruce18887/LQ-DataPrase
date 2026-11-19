@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { useSelectFilter } from '../../src/pages/data/composables/useSelectFilter'
 
-function mount<T extends string | number>(src: T[], sel: T[], limit?: number) {
+function mount<T extends string | number>(src: T[], sel: T[], limit?: number, focusOnOpen = false) {
   const source = ref(src) as { value: T[] }
   const selected = ref(sel) as { value: T[] }
   const emitted: T[][] = []
@@ -11,6 +11,7 @@ function mount<T extends string | number>(src: T[], sel: T[], limit?: number) {
     selected: () => selected.value,
     onChange: (v) => emitted.push(v),
     limit,
+    focusOnOpen,
   })
   return { api, source, selected, emitted }
 }
@@ -50,6 +51,14 @@ describe('useSelectFilter', () => {
     expect(emitted[0]).toHaveLength(200)
   })
 
+  it('selectMatches 尊重 limit（Enter 全选不能绕过上限）', () => {
+    const many = Array.from({ length: 250 }, (_, i) => `s${i}`)
+    const { api, emitted } = mount<string>(many, [], 200)
+    api.filterMethod('s')
+    api.selectMatches()
+    expect(emitted[0]).toHaveLength(200)
+  })
+
   it('clearAll 发空数组', () => {
     const { api, emitted } = mount(['A'], ['A'])
     api.clearAll()
@@ -72,6 +81,7 @@ describe('useSelectFilter', () => {
     api.filterMethod('al')
     api.onSelectKeydown(ev as unknown as KeyboardEvent)
     expect(ev.preventDefault).toHaveBeenCalled()
+    expect(ev.stopPropagation).toHaveBeenCalled()
     expect(emitted[0]).toEqual(['Alpha'])
     const ev2 = { key: 'Enter', preventDefault: vi.fn(), stopPropagation: vi.fn() }
     api.filterMethod('zzz')
@@ -85,6 +95,15 @@ describe('useSelectFilter', () => {
     api.onVisibleChange(false)
     expect(api.kw.value).toBe('')
     expect(() => api.onVisibleChange(true)).not.toThrow()
+  })
+
+  it('focusOnOpen 时打开后聚焦过滤 input', async () => {
+    const { api } = mount(['A'], [], undefined, true)
+    const fakeInput = { value: '', focus: vi.fn() }
+    api.selectRef.value = { $el: { querySelector: () => fakeInput } } as unknown as typeof api.selectRef.value
+    api.onVisibleChange(true)
+    await nextTick()
+    expect(fakeInput.focus).toHaveBeenCalledTimes(1)
   })
 
   it('clearFilterInput 同步 EP 内部 input（DOM 契约）', () => {
