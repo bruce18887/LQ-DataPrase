@@ -45,7 +45,7 @@ describe('useSelectFilter', () => {
   })
 
   it('source 是响应式的：源列表异步换掉后 selectOptions 跟着走', () => {
-    const { api, source } = mount(['A', 'B'], [])
+    const { api, source } = mount<string>(['A', 'B'], [])
     expect(api.selectOptions.value.map((o) => o.value)).toEqual(['A', 'B'])
     source.value = ['C']
     expect(api.selectOptions.value.map((o) => o.value)).toEqual(['C'])
