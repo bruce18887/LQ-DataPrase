@@ -78,6 +78,7 @@
     <!-- 底部动作条：运行历史与再搜一次（下载/导出在结果表的动作带上，同一套互斥判据） -->
     <div class="ssp-bar">
       <span class="ssp-bar-label">本会话运行</span>
+      <!-- 运行历史上限 RUN_HISTORY_KEEP=20（stores/sftpSearch.ts）；有界小集，按设计稿「有意保留的 v1」不迁 v2。 -->
       <el-select v-model="pickedRunId" class="ssp-run-select" size="small" placeholder="选择一次运行"
                  data-testid="sftp-search-run-history">
         <el-option v-for="o in runOptions" :key="o.id" :label="o.label" :value="o.id" />
