@@ -394,7 +394,7 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
       /共 (\d+) 颗/.exec((await section.locator('.fc-serial-hint').textContent()) ?? '')?.[1],
     )
     expect(totalSerials, '候选数须大于窗口界，否则上面那条没有牙齿').toBeGreaterThan(MAX_WINDOW_ROWS)
-    await expectWindowRows(windowItems(page, SERIAL_POPPER), totalSerials, '序列下拉（收起后隐藏面板无残留过滤）')
+    await expectWindowRows(windowItems(page, SERIAL_POPPER), totalSerials, '序列下拉（重开后虚拟窗口）')
     await page.keyboard.press('Escape') // 空关键词 ⇒ EP 真的收起面板（非空时 handleEsc 只清 query）
     await expect(serialPopper).toBeHidden()
 

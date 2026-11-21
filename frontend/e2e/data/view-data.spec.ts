@@ -846,11 +846,11 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
     await page.keyboard.press('Escape')
     await expect(page.locator('.ag-header-cell').filter({ hasText: absentCol })).toHaveCount(0)
 
-    // banner 下拉切换文件 → 选中集重置，全部测试列恢复（水平滚动容器可滚动）
+    // banner 下拉切换文件 → 选中集重置，全部测试列恢复（水平滚动容器可滚动）；v2 只挂窗口约 10 行 ⇒ 先过滤再点
     const banner = page.locator('.active-file-banner:visible .banner-file-select').first()
     await banner.click()
-    const bannerOptions = page.locator('.el-select-dropdown:visible .el-select-dropdown__item')
-    await bannerOptions.filter({ hasText: SEEDED_FILES.GAGE_S2.slice(0, 12) }).first().click()
+    await banner.locator('input').first().fill(SEEDED_FILES.GAGE_S2.slice(0, 12))
+    await page.locator('.el-select-dropdown:visible .el-select-dropdown__item').filter({ hasText: SEEDED_FILES.GAGE_S2.slice(0, 12) }).first().click()
     await expect
       .poll(
         () => page.evaluate(() => {
@@ -1728,13 +1728,13 @@ test.describe('数据管理 → 查看数据页优化', { tag: ['@data'] }, () =
       ).toBeVisible({ timeout: 30_000 })
 
       // 同一标签内用横幅换文件（新开标签是另一条通路：那份 cache 天生就是新快照，测不到这个缺口）
+      // v2 只把窗口约 10 行挂 DOM，且选项按最新在前 ⇒ 先过滤再点，宽文件才点得到
       page1.length = 0
       const banner = page.locator('.active-file-banner:visible .banner-file-select').first()
       await banner.click()
-      await page
-        .locator('.el-select-dropdown:visible .el-select-dropdown__item')
-        .filter({ hasText: SEEDED_FILES.ETS88_FT.slice(0, 12) })
-        .first()
+      await banner.locator('input').first().fill(SEEDED_FILES.ETS88_FT.slice(0, 12))
+      await page.locator('.el-select-dropdown:visible .el-select-dropdown__item')
+        .filter({ hasText: SEEDED_FILES.ETS88_FT.slice(0, 12) }).first()
         .click()
 
       // ① 首块恰好一发 page=1（等一拍再判：多余的那发是同 tick 的 purge 造成的，晚不到哪儿去）
