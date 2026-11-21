@@ -44,6 +44,13 @@ describe('useSelectFilter', () => {
     expect(api.selectOptions.value.map((o) => o.value)).toEqual(['Beta'])
   })
 
+  it('source 是响应式的：源列表异步换掉后 selectOptions 跟着走', () => {
+    const { api, source } = mount(['A', 'B'], [])
+    expect(api.selectOptions.value.map((o) => o.value)).toEqual(['A', 'B'])
+    source.value = ['C']
+    expect(api.selectOptions.value.map((o) => o.value)).toEqual(['C'])
+  })
+
   it('selectAll 尊重 limit', () => {
     const many = Array.from({ length: 250 }, (_, i) => i)
     const { api, emitted } = mount(many, [], 200)
@@ -104,6 +111,15 @@ describe('useSelectFilter', () => {
     api.onVisibleChange(true)
     await nextTick()
     expect(fakeInput.focus).toHaveBeenCalledTimes(1)
+  })
+
+  it('focusOnOpen: false 时打开不回填焦点', async () => {
+    const { api } = mount(['A'], [], undefined, false)
+    const fakeInput = { value: '', focus: vi.fn() }
+    api.selectRef.value = { $el: { querySelector: () => fakeInput } } as unknown as typeof api.selectRef.value
+    api.onVisibleChange(true)
+    await nextTick()
+    expect(fakeInput.focus).not.toHaveBeenCalled()
   })
 
   it('clearFilterInput 同步 EP 内部 input（DOM 契约）', () => {
