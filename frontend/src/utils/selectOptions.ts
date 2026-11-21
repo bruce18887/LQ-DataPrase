@@ -2,12 +2,13 @@
  * 大列表下拉（`el-select-v2`）的选项准备：过滤 → 排序 → 映射。
  *
  * 大列表下拉真正共享的是 `toOptions`（`:options` 必须是对象数组）；`filterByKeyword` /
- * `sortPrefixFirst` 拆成独立导出是为了能单测。消费者（2026-11-21 现数，`grep -rn
- * "utils/selectOptions" frontend/src`）：
+ * `sortPrefixFirst` 拆成独立导出是为了能单测。
+ * 消费者（2026-11-21 现数，`grep -rn "utils/selectOptions" frontend/src`）：
  * `toOptions` = CorrelationToolsTab（X/Y）+ DataBrowserToolbar（固定列）+ useSelectFilter 共 3 处；
- * `filterByKeyword` = useSelectFilter 1 处；`sortPrefixFirst` / `buildSelectView` = ParamSelector 1 处；
- * `highlightSegments` = ParamSelector + FileSelect（刀五b）共 2 处。改 `filterByKeyword` 经
- * `useSelectFilter` 牵到 TestColumn / Serial / Export 三个下拉，但仍是纯函数、无 DOM。
+ * `filterByKeyword` = useSelectFilter 1 处 + 本文件 `buildSelectView` 1 处（后者被 ParamSelector 消费）
+ * ⇒ 改它经 `useSelectFilter` 牵到 TestColumn / Serial / Export、经 `buildSelectView` 牵到 ParamSelector，共 4 个下拉；
+ * `sortPrefixFirst` 无外部直调（仅 `buildSelectView` 内用）；`buildSelectView` = ParamSelector 1 处；
+ * `highlightSegments` = ParamSelector + FileSelect（刀五b）共 2 处。
  *
  * 为什么必须有这份文件：`el-select-v2` 的 `filter-method` 在 2.14.0 里**退化成纯回调**
  * （`select-v2/src/useSelect.mjs:114-132` 判到 filterMethod 合法后让 `isValidOption` 恒 true ⇒
