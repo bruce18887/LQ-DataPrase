@@ -1487,6 +1487,8 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 | 额外 @p1 扇出 | `npx playwright test e2e/analysis/{tab-request-fanout,legend-color,multi-file-filter}.spec.ts --project=P1 --workers=1` | `13 passed`（三个从下拉点 `Index_No` 的用例，确认迁移无漏伤） |
 | 全量池 | `node scripts/e2e_pool.mjs --slots=4` | `用例 485 · 墙钟 11.1min · 单价 2.99s/例 · 效率 2.09（既有套件规模趋势） · unexpected 0 · flaky 3 · skipped 21` · `结论 MEASURED` · exit 0。flaky 点名：`analysis/wafermap-redesign.spec.ts`「分区 checkbox」、`analysis/analysis.spec.ts`「抽样 5 个参数」、`analysis/file-select.spec.ts`「富信息行」；均为负载 flake（retry 绿）。`correlation-matrix-linkage` 的既有单跑红在本轮池内未成 unexpected |
 | 后端全套 | `manage.py test` | `Ran 2712 tests / OK (skipped=16)`（沿用刀三 d6c6e78 那轮；`git diff --stat d6c6e78..HEAD -- apps test config requirements` 为空，后端树未变） |
+| X/Y 虚拟窗口哨兵（终审补） | `npx playwright test e2e/analysis/correlation-file-switch-reset.spec.ts --project=P1 --workers=1` | `3 passed`（含 2 条 `[setup]` 认证）；annotation 实测 `DOM 11 行 / 候选 180 项 / 界 20`；变异把 X/Y 换回 v1 `<el-option v-for>` → 红在 `实测 180 行 / 当下候选 180 项，界 20`，还原后绿（`.vue` md5 未变） |
+| 序列 spec 复审 | `npx playwright test e2e/data/file-correlation.spec.ts --project=P2 --workers=1` | `10 passed`（T3 的「收起 popper 有候选行」已由一次性快照改 `expect.poll`） |
 
 ## 已知边界 / 挂账（不阻塞）
 
@@ -1494,8 +1496,10 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - `view-data.spec.ts:1474` 是既有 1px 几何 flake（绝对 `413` 对实测 `414`，兄弟断言已是相对 `innerH - 290`）；单独工单。
 - `correlation-matrix-linkage.spec.ts` 一例红是既有问题（在 X/Y 首次交互之前就红；把 `.vue` 换回 base 同样复现），与本刀无关。
 - `frontend/src/utils/selectOptions.ts` 的消费者清单已过时（现应为 `useSelectFilter.ts` 单一漏斗）；该文件是 GLOBAL 路径，收口时未改，另单。
-- 三个 spec 的 `pickAxisByKeyword` 目前是三份 10 行副本；可后续合并进 `helpers/elplus.ts`（不动 `pickOption`）。
+- 三个 spec 的 `pickAxisByKeyword` 目前是三份 10 行副本，且三份都用**全局** option 查询（`visibleSelectOptions`，正是 `helpers/elplus.ts:66-72` 警告的形态），X 那颗也仍免关键词（裸 `pickOption`）；建议刀五b 收敛成实例级 `dp-corr-x-popper` / `dp-corr-y-popper` 选择器并让 X 也走关键词（不动共享 `pickOption`）。
 - 另有一处 v2 行为的判据缺口：`correlation-matrix-linkage` 在 X/Y 标签渲染断言之前就红，因此“已选标签在 X/Y 内渲染”暂无绿色判据；静态核对 v2 会渲染，不属缺陷。
+- `frontend/e2e/helpers/elplus.ts:74-81` 的 `visibleSelectOptions` 调用者计数已过时：现为 **4 文件 / 9 处直接调用**（`e2e/data/file-correlation.spec.ts` 6 处，`e2e/analysis/{analysis,axis-label-precision,correlation-file-switch-reset}.spec.ts` 各 1 处）；后三者已不是注释里说的「经 `pickOption` 间接使用」，而是各自 `pickAxisByKeyword` 的直接调用。与 `selectOptions.ts` 的 census 一起走 GLOBAL 收口（2026-11-21 终审挂账）。
+- T2 未钉 `source` 响应式变化（源列表异步换掉后 `selectOptions` 是否跟着走）与 `focusOnOpen: false` 的负例（不回填焦点）；T3 的用例标题写「重开」而真正承重的是**收起那一刻**的隐藏 popper（重开时 v2 自己会洗 query）。后两条记为后续小项（2026-11-21 终审挂账）。
 
 ## 提交
 
@@ -1506,4 +1510,6 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - `d099a0e` perf(analysis): 相关性 X/Y 下拉迁 el-select-v2
 - `6ceb6d5` test(e2e): X/Y v2 虚拟窗口下按关键词选轴
 - `03f94f6` docs(plan): 批4 刀五a 计划与台账
-- 本笔 docs(todo): 批4 刀五a 收口门禁
+- `3e9747f` docs(todo): 批4 刀五a 收口门禁
+- `745e6c1` test(e2e): 钉住 X/Y 仍走虚拟窗口
+- 本笔 docs(todo): 批4 刀五a 终审挂账
