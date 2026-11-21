@@ -855,7 +855,9 @@ export async function expectWindowRows(items: Locator, candidates: number, label
 ```text
 消费者（2026-11-21 现数，`grep -rn "utils/selectOptions" frontend/src`）：
 `toOptions` = CorrelationToolsTab（X/Y）+ DataBrowserToolbar（固定列）+ useSelectFilter 共 3 处；
-`filterByKeyword` = useSelectFilter 1 处；`sortPrefixFirst` / `buildSelectView` = ParamSelector 1 处；
+`filterByKeyword` = useSelectFilter 1 处 + 本文件 `buildSelectView` 1 处（后者被 ParamSelector 消费）
+⇒ 改它经 `useSelectFilter` 牵到 TestColumn / Serial / Export、经 `buildSelectView` 牵到 ParamSelector，共 4 个下拉；
+`sortPrefixFirst` 无外部直调（仅 `buildSelectView` 内用）；`buildSelectView` = ParamSelector 1 处；
 `highlightSegments` = ParamSelector + FileSelect（刀五b）共 2 处。
 ```
 
