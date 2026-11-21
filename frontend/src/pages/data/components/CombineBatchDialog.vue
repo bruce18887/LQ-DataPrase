@@ -26,17 +26,16 @@
       :data-testid="'combine-new-name'"
       style="margin-top: 12px"
     />
-    <el-select
+    <el-select-v2
       v-else
       v-model="existingName"
+      :options="batchSelectOptions"
       filterable
       placeholder="选择目标批次"
       size="large"
       :data-testid="'combine-existing-select'"
       style="margin-top: 12px; width: 100%"
-    >
-      <el-option v-for="b in batchOptions" :key="b" :label="b" :value="b" />
-    </el-select>
+    />
     <div v-if="mode === 'new' && selectedCount < 2" class="combine-hint">
       ⚠️ 新建批次需勾选至少 2 个文件；追加到已有批次可移入 1 个文件
     </div>
@@ -73,6 +72,9 @@ const emit = defineEmits<{
 const mode = ref<'new' | 'existing'>('new')
 const newName = ref('')
 const existingName = ref('')
+const batchSelectOptions = computed(() =>
+  props.batchOptions.map((name) => ({ label: name, value: name })),
+)
 
 const valid = computed(() => {
   // 新建批次至少 2 个文件（首轮需求）；追加到已有批次 1 个即可
