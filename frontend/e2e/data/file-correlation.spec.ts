@@ -382,7 +382,7 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
         { message: '收起那份 popper 里应挂回全量候选；实测漏清时这里恒为 0 行' },
       )
       .toBeGreaterThan(0)
-    // 用户可见的收尾：重开后面板同样是全量（v2 自己也会洗 query ⇒ 这两句不承重）
+    // 用户可见收尾，不承重：重开后面板同样是全量（v2 自己也会洗 query）
     await serialSel.click()
     await expect(serialPopper).toBeVisible()
     await expect(serialPopper.locator('.empty-hint')).toHaveCount(0)
@@ -394,7 +394,7 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
       /共 (\d+) 颗/.exec((await section.locator('.fc-serial-hint').textContent()) ?? '')?.[1],
     )
     expect(totalSerials, '候选数须大于窗口界，否则上面那条没有牙齿').toBeGreaterThan(MAX_WINDOW_ROWS)
-    await expectWindowRows(windowItems(page, SERIAL_POPPER), totalSerials, '序列下拉（关后重开，应无残留过滤）')
+    await expectWindowRows(windowItems(page, SERIAL_POPPER), totalSerials, '序列下拉（收起后隐藏面板无残留过滤）')
     await page.keyboard.press('Escape') // 空关键词 ⇒ EP 真的收起面板（非空时 handleEsc 只清 query）
     await expect(serialPopper).toBeHidden()
 
@@ -461,13 +461,19 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
     const section = page.locator('.file-corr-section')
     await expect(section).toBeVisible({ timeout: 10_000 })
 
-    await elSelectByPlaceholder(section, '文件1 (ATE)').click()
+    // 与 `pickFilePair` 同一形状：FileSelect 走 `el-select-v2` 后 DOM 只有虚拟窗口那约 10 行，
+    // 不过滤就点等于赌目标文件恰在首屏（2026-11-22 收口）。先填文件名再点。
+    const file1 = elSelectByPlaceholder(section, '文件1 (ATE)')
+    await file1.click()
     await expect
       .poll(() => visibleSelectOptions(page).count(), { timeout: 15_000 })
       .toBeGreaterThan(0)
+    await file1.locator('input').first().fill(SEEDED_FILES.CTA8290D_FT)
     await visibleSelectOptions(page).filter({ hasText: SEEDED_FILES.CTA8290D_FT }).first().click()
     await page.waitForTimeout(600)
-    await elSelectByPlaceholder(section, '文件2 (Bench)').click()
+    const file2 = elSelectByPlaceholder(section, '文件2 (Bench)')
+    await file2.click()
+    await file2.locator('input').first().fill(SEEDED_FILES.CTA8280F_FT)
     await visibleSelectOptions(page).filter({ hasText: SEEDED_FILES.CTA8280F_FT }).first().click()
     await page.waitForTimeout(600)
 

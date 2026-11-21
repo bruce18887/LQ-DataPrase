@@ -95,13 +95,16 @@ export function visibleSelectOptions(page: Page): Locator {
  * 绑定方式只会红一半，根因看不出来。
  *
  * ⚠ `popper-class` 在 v2 里**不只挂下拉那一份 popper**：`select-v2/src/select.mjs:117` 把它同样给
- * `collapse-tags` 的溢出标签 tooltip（`tagTooltip?.popperClass ?? popperClass`）。五颗里**四颗**命中
- * （现跑 `grep -rn "^[[:space:]]*collapse-tags$" frontend/src` = Serial / TestColumn / Export /
+ * `collapse-tags` 的溢出标签 tooltip（`tagTooltip?.popperClass ?? popperClass`）。上面那五颗旧身份串里
+ * **四颗**命中（现跑 `grep -rn "^[[:space:]]*collapse-tags$" frontend/src` = Serial / TestColumn / Export /
  * DataBrowserToolbar 固定列，只有单选的 ParamSelector 没有）⇒ 这四个 class 都可能同时存在于两份
  * `.el-popper` 上，眼下靠同文件 `:108` 的 `disabled: dropdownMenuVisible` 让两者不同时可见。哪天这条
  * 报 strict violation，**别改成 `.first()`**（那是把身份判据降级成位置判据），给 tooltip 传
- * `:tag-tooltip.popper-class`。另两颗带 `:collapse-tags` 动态绑定的（`FileSelect.vue:7`、
- * `AnalysisFilePicker.vue:9`）是 v1 且**没有实例级 popperClass**，不在本谓词的管辖面内。
+ * `:tag-tooltip.popper-class`。另外两颗带 `:collapse-tags` **动态绑定**的（`FileSelect.vue:8`、
+ * `AnalysisFilePicker.vue:9`）当前状态不同：`FileSelect.vue:8` 已是 `el-select-v2`，并通过
+ * `:popper-class="dropdownClass"` 固定挂 `dp-file-select-dropdown` ⇒ 同一条「一份 class、两份 popper」
+ * 的约束对它同样成立，只是眼下没有用例用这个类名调 `popperOf`（故不在上面那份身份串枚举里）；
+ * `AnalysisFilePicker.vue:9` 的 `:collapse-tags` 是转发给内层 `FileSelect` 的动态绑定，自身不产生面板类。
  */
 export function popperOf(page: Page, popperClass: string): Locator {
   return page.locator(`.el-popper.${popperClass}[aria-hidden="false"]`)

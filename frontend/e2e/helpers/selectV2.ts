@@ -42,6 +42,8 @@ export function windowItems(page: Page, popperClass: string): Locator {
  * 各族的前提语义不同（参数族断「夹具 > 旧封顶 300」、固定列断「千列级」、导出族当下只有
  * 41 项），把前提塞进公共入口等于替五族拍板。但它在消息里必须出现，否则红的时候没人知道
  * 这条到底有没有牙齿。
+ *
+ * 调用前提：面板已展开／首行可见，否则会先红在可见性而不是行数。
  */
 export async function expectWindowRows(items: Locator, candidates: number, label: string): Promise<number> {
   await expect(items.first()).toBeVisible()
