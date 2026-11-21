@@ -367,10 +367,14 @@ test.describe('@p2 文件对比（数据管理）', { tag: ['@p2', '@data'] }, (
       hiddenSerialPopper.locator('.empty-hint'),
       '收起后 kw 已被清 ⇒ 隐藏面板里不该留下「无匹配序列」',
     ).toHaveCount(0)
-    expect(
-      await hiddenSerialPopper.locator('.el-select-dropdown__item').count(),
-      '收起那份 popper 里应挂回全量候选；实测漏清时这里是 0 行（与上一条互为正反证）',
-    ).toBeGreaterThan(0)
+    // 轮询而不是取一次快照：候选是收起那一刻才重新挂回的，差一帧就读到 0 行 —— 那是
+    // 时序噪声，不是漏清。真正漏清的实现永远停在 0 行（与上一条 `.empty-hint` 互为正反证）。
+    await expect
+      .poll(
+        () => hiddenSerialPopper.locator('.el-select-dropdown__item').count(),
+        { message: '收起那份 popper 里应挂回全量候选；实测漏清时这里恒为 0 行' },
+      )
+      .toBeGreaterThan(0)
     // 用户可见的收尾：重开后面板同样是全量（v2 自己也会洗 query ⇒ 这两句不承重）
     await serialSel.click()
     await expect(serialPopper).toBeVisible()

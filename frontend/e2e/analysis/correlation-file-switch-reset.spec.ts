@@ -1,6 +1,7 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { pickOption, elSelectByPlaceholder, visibleSelectOptions } from '../helpers/elplus'
+import { pickOption, elSelectByPlaceholder, popperOf, visibleSelectOptions } from '../helpers/elplus'
+import { expectWindowRows, windowItems, MAX_WINDOW_ROWS } from '../helpers/selectV2'
 import { pickTabFile } from '../helpers/params'
 import { RECOMMENDED, SEEDED_FILES } from '../fixtures/test-data'
 
@@ -29,6 +30,15 @@ async function pickAxisByKeyword(page: Page, placeholder: string, keyword: strin
   await visibleSelectOptions(page).filter({ hasText: keyword }).first().click()
 }
 
+/**
+ * 相关性 Y 轴下拉面板的**实例级** class（组件模板 `popper-class` 的字面值，产品侧事实，
+ * 见 `src/pages/analysis/components/CorrelationToolsTab.vue`）。
+ *
+ * 与 `helpers/elplus.ts` 那五份身份串同族，但本轮终审修复的写域不含 `e2e/helpers/`
+ * ⇒ 先内联；刀五b 把三份 `pickAxisByKeyword` 收敛进 helpers 时一并搬过去。
+ */
+const CORR_Y_POPPER = 'dp-corr-y-popper'
+
 test.describe('@p1 相关性 tab 切文件清空旧结果', { tag: ['@p1', '@analysis'] }, () => {
   test('选好 X/Y 后切文件 → 散点与指标卡清空、X/Y 回到占位符', async ({ page }) => {
     await gotoApp(page, '/analysis')
@@ -37,6 +47,53 @@ test.describe('@p1 相关性 tab 切文件清空旧结果', { tag: ['@p1', '@ana
 
     const layout = page.locator('.analysis-tab-layout:visible')
     await expect(layout).toBeVisible({ timeout: 10_000 })
+
+    /*
+     * 哨兵：X/Y 仍是**虚拟窗口**，不是 v1 的全量 option（批4 刀五a 终审，2026-11-21）。
+     *
+     * 缺口形态：迁移后 X/Y 在 DOM 上的形状（`.el-select` 容器 / 内部 `input` /
+     * `.el-select-dropdown__item` 选项行）与 v1 的 `el-select + v-for` **完全同形**
+     * ⇒ 把组件改回 v1、把参数全量挂成 option，本文件与其兄弟 spec 照样全绿。
+     * 唯一能分辨两种实现的 DOM 事实是「面板打开后到底挂了几行」：v2 只挂窗口那几行
+     * （≈8-11），v1 会挂**全部参数**（本夹具实测 180）。所以这里裸开 Y 下拉
+     * （**不输入关键词**，输入关键词会把候选筛到窗口以下、判据就失去牙齿）、数窗口行、
+     * 再按 Escape 收起 —— 不点任何选项，后面的 X 裸选 / Y 按关键词选不受影响。
+     *
+     * 前提（候选数 > 窗口界）按下面「选择参数（已选 M/N）」那段文案取 N：它是 X/Y 同一个
+     * `params` 源，且**不是**数 DOM 来的（数 DOM 正是本条要防的东西）；前提失败的消息里
+     * 带实测值，届时改挑别的夹具而不是放宽界。
+     */
+    const paramCountLabel = layout.locator('.section-label').filter({ hasText: '选择参数' }).first()
+    // 参数列表是异步到的（layout 先可见、`params` 后落地）⇒ 先轮询 N 落地。
+    // 不轮询就读到 `0/0`，前提判据等于拿空列表在比 —— 2026-11-21 首跑实测就是这么假红的。
+    await expect
+      .poll(
+        async () => Number(/已选 \d+\/(\d+)/.exec((await paramCountLabel.textContent()) ?? '')?.[1] ?? 0),
+        { message: '相关性的参数列表应已落地（已选 M/N 的 N > 0）' },
+      )
+      .toBeGreaterThan(0)
+    const paramTotal = Number(
+      /已选 \d+\/(\d+)/.exec((await paramCountLabel.textContent()) ?? '')?.[1] ?? 0,
+    )
+    expect(
+      paramTotal,
+      '夹具的参数数须严格大于窗口界，否则下面的窗口行数判据没有牙齿',
+    ).toBeGreaterThan(MAX_WINDOW_ROWS)
+    await elSelectByPlaceholder(layout, '选择 Y 轴参数').first().click()
+    const yPopper = popperOf(page, CORR_Y_POPPER)
+    await expect(yPopper).toBeVisible()
+    const windowRows = await expectWindowRows(
+      windowItems(page, CORR_Y_POPPER),
+      paramTotal,
+      '相关性 Y 下拉（未输入关键词时的虚拟窗口）',
+    )
+    expect(windowRows, '虚拟窗口里至少得有可见行，否则计数没意义').toBeGreaterThan(0)
+    test.info().annotations.push({
+      type: '虚拟窗口实测',
+      description: `相关性 Y 下拉未输入关键词：DOM ${windowRows} 行 / 候选 ${paramTotal} 项 / 界 ${MAX_WINDOW_ROWS}`,
+    })
+    await page.keyboard.press('Escape') // 空关键词 ⇒ EP 真的收起面板（非空时 handleEsc 只清 query）
+    await expect(yPopper).toBeHidden()
 
     // 选 X/Y 触发自动 correlation 请求（无「分析相关性」按钮）
     const respPromise = page.waitForResponse(
