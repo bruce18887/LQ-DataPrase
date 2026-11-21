@@ -1537,17 +1537,65 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 
 ## 勾选清单
 
-- [ ] fileSelectModel 纯函数 + T2
-- [ ] FileSelect.vue 迁 el-select-v2、删分组
-- [ ] FileSelect 虚拟窗口哨兵 + v1 变异自证
-- [ ] CombineBatchDialog 批次下拉迁 v2
-- [ ] SftpSearchPage no-op 注释
-- [ ] axis 助手收敛 + X 哨兵 + census + T3 判据文案
-- [ ] useSelectFilter 两条 T2
-- [ ] 收口门禁
+- [x] fileSelectModel 纯函数 + T2
+- [x] FileSelect.vue 迁 el-select-v2、删分组
+- [x] FileSelect 虚拟窗口哨兵 + v1 变异自证
+- [x] CombineBatchDialog 批次下拉迁 v2
+- [x] SftpSearchPage no-op 注释
+- [x] axis 助手收敛 + X 哨兵 + census + T3 判据文案
+- [x] useSelectFilter 两条 T2
+- [x] 收口门禁
 
 ## 门禁记录
 
 | 档 | 命令 | 实测判据行 |
 |---|---|---|
-| ... | ... | ... |
+| T2 模型 | `npx vitest run test/unit/fileSelectModel.spec.ts` | `Tests 7 passed (7)` |
+| T2 useSelectFilter | `npx vitest run test/unit/useSelectFilter.spec.ts` | `Tests 14 passed (14)` |
+| 全量单测 | `npm run test:unit` | `Test Files 76 passed (76)` / `Tests 1067 passed (1067)` |
+| 构建 | `npm run build` | `build complete in 2.12s` |
+| e2e 类型 | `npm run lint:e2e` | `tsc -p tsconfig.e2e.json`，无输出（0 错误） |
+| affected | `npm run test:e2e:affected` | `RESULT: PASS · 计划 2 档全部执行`；**base 默认 `HEAD~1..HEAD`，只覆盖最后一笔，不作收口证据** |
+| FileSelect e2e | `npx playwright test e2e/analysis/file-select.spec.ts --project=P1 --workers=1` | `10 passed`（8 用例 + 2 setup）；哨兵 annotation `DOM 10 行 / 候选 87 项 / 界 20` |
+| 组合批次 | `npx playwright test e2e/data/combine.spec.ts --project=P2 --workers=1` | `4 passed`（2 用例 + 2 setup） |
+| axis 三件 | `correlation-file-switch-reset` / `axis-label-precision` / `analysis`（均 P1） | `3 passed` / `8 passed` / `18 passed`；X/Y annotation 均 `DOM 11 / 候选 180 / 界 20` |
+| file-correlation | `npx playwright test e2e/data/file-correlation.spec.ts --project=P2 --workers=1` | `10 passed` |
+| 全量池（第一轮） | `node scripts/e2e_pool.mjs --slots=4` | `用例 486 · 墙钟 10.1min · 单价 2.80s/例 · 效率 2.13 · unexpected 4 · flaky 2 · skipped 22` ⇒ 复跑判级 真红 3（dashboard / file-list-completeness / element-plus-styles）、负载抖动 1（exports） |
+| 三处真红修复 | `be287c7` 后三条定向复跑 | dashboard P1 `11 passed`；file-list-completeness P1 `4 passed`；element-plus-styles P2 `7 passed` |
+| 全量池（第二轮，收口） | `node scripts/e2e_pool.mjs --slots=4` | `用例 486 · 墙钟 10.2min · 单价 2.80s/例 · 效率 2.12 · unexpected 1 · flaky 1 · skipped 22` · `结论 MEASURED` · **复跑判级：真红 0 · 负载抖动 1 · 悬而未决 0**（exports 独占复跑绿） |
+| 后端沿用 | `git diff --stat 858c0e4..HEAD -- apps test config requirements` | 空输出 ⇒ 沿用上一轮 `Ran 2712 / OK (skipped=16)` |
+| 变异自证 | Task 3 的 v1 回退 + 高度突变 | v1 因缺 footer 先红；保留 footer、`:height="100000"` 的突变红在 `DOM 87 行 / 候选 87 项，界 20`；还原后组件 diff 为空 |
+
+## 已知边界 / 挂账（不阻塞）
+
+- 全量池单价/效率（2.80s/例、2.12）低于目标 2.8，属既有套件规模趋势（刀五a 为 2.09）；另单重定基线。
+- `exports/exports.spec.ts` 在第二轮的 `unexpected 1` 是负载抖动，独占复跑绿；不是本刀回归。
+- FileSelect 紧凑（非 `showMeta`）34px 行没有独立的无裁剪几何判据；富信息 48px 行由 `data.spec.ts:736` 与 `file-select.spec.ts` 覆盖。
+- `FileSelect.vue:71` 的 prop 注释仍写「透传给 el-select」；`file-select.spec.ts:195` 的注释硬编码「87 个候选」。
+- `pickFilePair` 第二个 picker 没有 options-loaded poll（既有不对称，未观察到挂起）；过滤词假定保持唯一性，当前调用方都是唯一文件名。
+- `pickOption` 已零消费者（按 brief 保留，后续决定去留）；`correlation-inline.spec.ts:26` / `correlation-matrix-linkage.spec.ts:89` 仍内联 CORR popper 身份串。
+- `elplus.ts` 的「五颗里四颗」可进一步点名 `CORR_X` / `CORR_Y` 之外的五颗；T3 label 描述隐藏面板而断言数的是重开面板（精确判据已在 `file-correlation.spec.ts:382`）。
+- `task-6-brief.md` 是旧 census 文本的 scratch 副本；计划正文已在 `161fe4a` 修正。
+- `view-data.spec.ts:1474` 的 1px 几何 flake、`correlation-matrix-linkage` 的既有红仍在各自工单。
+- 本刀只做客户端虚拟化；FileSelect 远程分页加载不在范围。
+
+## 提交
+
+- `770bb4c` refactor(common): 抽出 FileSelect 过滤排序模型
+- `be3710a` perf(common): FileSelect 下拉迁 el-select-v2 虚拟化
+- `bbab6a1` chore(common): EP 用量清单同步删 option-group
+- `2183b15` test(e2e): 多文件记忆先过滤再点（v2 虚拟窗口）
+- `a08d7ee` test(e2e): FileSelect 虚拟窗口下先过滤再选文件
+- `b862aa5` test(e2e): 钉住 FileSelect 走虚拟窗口
+- `ce58632` perf(data): 组合批次下拉迁 el-select-v2
+- `ab36b7c` docs(sftp): 说明运行历史下拉不迁 v2 的依据
+- `638ba29` test(e2e): 收敛轴选择助手并补 X 哨兵
+- `1e7dee3` test(e2e): 收尾 file-correlation 与 census
+- `52926e4` docs(utils): 修正 selectOptions 消费者 census
+- `455a83b` + `45f831c` test(unit): 补 useSelectFilter 响应式与负例判据
+- `be287c7` test(e2e): 适配 FileSelect v2 后的三处全量判据
+- 计划/台账：`65e46a0`、`ba07e32`、`161fe4a` 与本笔 docs(todo)
+
+## 状态
+
+收口完成，**待用户点头 FF 并入本地 master**；未 push。
