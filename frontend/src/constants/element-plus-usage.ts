@@ -45,7 +45,6 @@ export const EP_TEMPLATE_COMPONENTS = [
   'input',
   'input-number',
   'option',
-  'option-group',
   'pagination',
   'popover',
   'progress',
