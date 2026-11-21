@@ -1594,8 +1594,16 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - `52926e4` docs(utils): 修正 selectOptions 消费者 census
 - `455a83b` + `45f831c` test(unit): 补 useSelectFilter 响应式与负例判据
 - `be287c7` test(e2e): 适配 FileSelect v2 后的三处全量判据
+- `bbfd1ff` test(e2e): 三处 FileSelect 先过滤再点 + T3 文案
 - 计划/台账：`65e46a0`、`ba07e32`、`161fe4a` 与本笔 docs(todo)
+
+## 终审（整枝，2026-11-22）
+
+- 终审 **With fixes**：三处 FileSelect 未过滤查找（`theme/night-visibility.spec.ts:143-144`、`data/view-data.spec.ts:850-853`、`:1732-1738`）在 v2 下只靠「目标恰好在最新 10 个文件里」过关；另有一条 T3 label 文案。
+- 修复 `bbfd1ff`：三处改为 fill-before-click，T3 label 改为「序列下拉（重开后虚拟窗口）」；定向 `night-visibility` P2 `3 passed`、`view-data` P2 `3 passed`、`view-data` P1 `3 passed`、`lint:e2e` 干净、`lineLimit` `15 passed`。
+- 终审 scoped re-review：两个 finding 均 ADDRESSED，无新增 Critical/Important；新增两条 Minor 挂账（`night-visibility` 可改用 `pickTabFile`、view-data 两处仍用全局 `.el-select-dropdown:visible`）。
+- 终审修复纯 e2e、无产品代码改动，未重跑全量池（终审建议 test-only 定向档）；全量池 `真红 0` 仍描述产品代码。
 
 ## 状态
 
-收口完成，**待用户点头 FF 并入本地 master**；未 push。
+终审完成，**待用户点头 FF 并入本地 master**；未 push。
