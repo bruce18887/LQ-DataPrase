@@ -21,18 +21,25 @@ async function pickFilePair(
   section: import('@playwright/test').Locator,
   page: import('@playwright/test').Page,
 ) {
-  await elSelectByPlaceholder(section, '文件1 (ATE)').click()
+  const file1 = elSelectByPlaceholder(section, '文件1 (ATE)')
+  await file1.click()
   await expect
     .poll(
       () => visibleSelectOptions(page).count(),
       { timeout: 15_000, message: '文件列表应加载出选项' },
     )
     .toBeGreaterThan(0)
+  // FileSelect 迁 `el-select-v2` 后 DOM 只有虚拟窗口那约 10 行：种子文件不在首屏时
+  // 按 hasText 硬找会等到超时（目标行根本没渲染）。先把文件名打进过滤框再点，
+  // 过滤后候选集只剩命中项，目标必在窗口内。
+  await file1.locator('input').first().fill(SEEDED_FILES.BUYOFF_FT)
   await visibleSelectOptions(page).filter({ hasText: SEEDED_FILES.BUYOFF_FT }).first().click()
   // 等上一个下拉的关闭动画结束，避免两个 dropdown 并存时 .first() 命中已隐藏选项
   await page.waitForTimeout(600)
 
-  await elSelectByPlaceholder(section, '文件2 (Bench)').click()
+  const file2 = elSelectByPlaceholder(section, '文件2 (Bench)')
+  await file2.click()
+  await file2.locator('input').first().fill(SEEDED_FILES.BUYOFF_QA1)
   await visibleSelectOptions(page).filter({ hasText: SEEDED_FILES.BUYOFF_QA1 }).first().click()
   await page.waitForTimeout(600)
 }
