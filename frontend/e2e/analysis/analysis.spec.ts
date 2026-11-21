@@ -1,4 +1,4 @@
-import { test, expect, type Locator, type Page } from '@playwright/test'
+import { test, expect } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
 import { expectChartRendered, waitLoadingGone } from '../helpers/charts'
 import {
@@ -11,7 +11,7 @@ import {
   ensureChartToggles,
   enableChartAndWait,
 } from '../helpers/params'
-import { pickOption, elSelectByPlaceholder, visibleSelectOptions } from '../helpers/elplus'
+import { pickOptionByKeyword, CORR_X_POPPER, CORR_Y_POPPER } from '../helpers/elplus'
 import { PARAM_SAMPLE_COUNT, RECOMMENDED, SINGLE_SITE_FILES } from '../fixtures/test-data'
 
 /**
@@ -23,22 +23,6 @@ import { PARAM_SAMPLE_COUNT, RECOMMENDED, SINGLE_SITE_FILES } from '../fixtures/
  */
 
 const SINGLE = '.single-param-tab'
-
-/**
- * 在 v2 虚拟窗口里按关键词选轴参数。
- *
- * 相关性 X/Y 下拉迁 `el-select-v2`（批4 刀五a）后只渲染窗口内约 8 行，参数排在
- * 靠后的（如 KELVIN_SW）不在初始窗口 ⇒ 裸 `pickOption` 找不到它。共享
- * `pickOption` 不动，这里先在下拉自带的 filter input 里输入关键词把目标项筛进
- * 窗口再点（`el-select-v2` 不传 filter-method 时由组件按 label 过滤）。
- */
-async function pickAxisByKeyword(page: Page, placeholder: string, keyword: string, scope: Locator) {
-  const select = elSelectByPlaceholder(scope, placeholder).first()
-  const input = select.locator('input').first()
-  await select.click()
-  await input.fill(keyword)
-  await visibleSelectOptions(page).filter({ hasText: keyword }).first().click()
-}
 
 async function enterAnalysis(page: import('@playwright/test').Page, filename?: string) {
   await gotoApp(page, '/analysis')
@@ -365,11 +349,11 @@ test.describe('@p1 测试项相关性分析', { tag: ['@p1', '@analysis'] }, () 
       (r) => r.url().includes('/analysis/correlation/') && r.request().method() === 'POST' && r.status() < 500,
       { timeout: 25_000 },
     )
-    await pickOption(page, '选择 X 轴参数', 'KELVIN_VIN', layout)
+    await pickOptionByKeyword(page, '选择 X 轴参数', 'KELVIN_VIN', layout, CORR_X_POPPER)
     // X 下拉关闭动画与 Y 下拉打开重叠会导致选项瞬时不稳定，间隔后再选 Y
     await page.waitForTimeout(600)
     // KELVIN_SW 在参数表里排得靠后，v2 虚拟窗口初始不含它 ⇒ 先输入关键词再点
-    await pickAxisByKeyword(page, '选择 Y 轴参数', 'KELVIN_SW', layout)
+    await pickOptionByKeyword(page, '选择 Y 轴参数', 'KELVIN_SW', layout, CORR_Y_POPPER)
     const r = await respPromise
     expect(r.status(), 'correlation API 应返回 200').toBe(200)
 
@@ -406,11 +390,11 @@ test.describe('@p1 测试项相关性分析', { tag: ['@p1', '@analysis'] }, () 
       (r) => r.url().includes('/analysis/correlation/') && r.request().method() === 'POST' && r.status() < 500,
       { timeout: 25_000 },
     )
-    await pickOption(page, '选择 X 轴参数', 'KELVIN_VIN', layout)
+    await pickOptionByKeyword(page, '选择 X 轴参数', 'KELVIN_VIN', layout, CORR_X_POPPER)
     // X 下拉关闭动画与 Y 下拉打开重叠会导致选项瞬时不稳定，间隔后再选 Y
     await page.waitForTimeout(600)
     // KELVIN_SW 在参数表里排得靠后，v2 虚拟窗口初始不含它 ⇒ 先输入关键词再点
-    await pickAxisByKeyword(page, '选择 Y 轴参数', 'KELVIN_SW', layout)
+    await pickOptionByKeyword(page, '选择 Y 轴参数', 'KELVIN_SW', layout, CORR_Y_POPPER)
     await respPromise
 
     // 展开坐标轴范围设置

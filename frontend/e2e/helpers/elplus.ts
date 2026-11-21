@@ -61,6 +61,10 @@ export const EXPORT_PARAM_POPPER = 'dp-export-param-popper'
  */
 export const PIN_COL_POPPER = 'dp-pin-col-popper'
 
+/** 相关性 X/Y 下拉面板的实例级 class（`CorrelationToolsTab.vue` 的 `popper-class` 字面值）。 */
+export const CORR_X_POPPER = 'dp-corr-x-popper'
+export const CORR_Y_POPPER = 'dp-corr-y-popper'
+
 /**
  * 当前可见下拉选项。
  *
@@ -71,14 +75,10 @@ export const PIN_COL_POPPER = 'dp-pin-col-popper'
  * **唯一有效的隔离是实例级 popper-class** —— 新用例别用本函数查跨控件的选项，
  * 用下面的 `popperOf(page, <实例级类名>)`（那条谓词只在那一处写，别再内联第三份）。
  *
- * 消费者口径（2026-11-13 `grep -rn visibleSelectOptions e2e src test` 现数）：**直接**调用它的是
- * **1 个文件 / 6 处**（`e2e/data/file-correlation.spec.ts`），另有 **3 个文件**经本文件的
- * `pickOption` 间接使用（`e2e/analysis/analysis.spec.ts`、`e2e/analysis/axis-label-precision.spec.ts`、
- * `e2e/analysis/correlation-file-switch-reset.spec.ts`），合计 **4 个文件**。
- * 「6」是调用点数不是文件数 —— 按它去补类名会多找两个并不存在的消费者
- * （`e2e/exports/exports.spec.ts` 的 `pickOptionByName` 是它自己的本地函数，不走本 helper，别算进来）。
- * 给这 4 个文件逐个补实例级类名**批1 没做**（Task 9A 清点后与内联 `:visible` 一并推到下一批专项，
- * 实数以 `docs/tasks/todo.md` 那本账为准，现跑 grep 取）—— 别把这句当成已完成。
+ * 消费者口径（2026-11-21 `grep -rn visibleSelectOptions e2e src test` 现数）：
+ * 直接调用是 `e2e/data/file-correlation.spec.ts` 6 处 + 本文件的 `pickOption` 1 处 /
+ * `pickOptionByKeyword` 1 处；`e2e/analysis/{analysis,axis-label-precision,correlation-file-switch-reset}.spec.ts`
+ * 已改经 `pickOptionByKeyword` 间接使用，不再各自直调。
  */
 export function visibleSelectOptions(page: Page): Locator {
   return page.locator('.el-select-dropdown__item:visible')
@@ -89,8 +89,8 @@ export function visibleSelectOptions(page: Page): Locator {
  *
  * `visibleSelectOptions` 那条全局查询的唯一解药就是这里传的 `popperClass`，它必须来自
  * 组件模板上的 `popper-class`（`COL_POPPER` / `SERIAL_POPPER` / `EXPORT_PARAM_POPPER` /
- * `PIN_COL_POPPER` / `PARAM_POPPER_SINGLE`（在 `helpers/params.ts`）就是这五份身份串，
- * 产品侧改类名时用例侧只改这里）。谓词只用 `[aria-hidden="false"]`
+ * `PIN_COL_POPPER` / `PARAM_POPPER_SINGLE`（在 `helpers/params.ts`）/ `CORR_X_POPPER` /
+ * `CORR_Y_POPPER` 就是这些身份串，产品侧改类名时用例侧只改这里）。谓词只用 `[aria-hidden="false"]`
  * 一种写法（2026-11-13 订正第 4 条）：写成 `:not([aria-hidden="true"])` 的话，EP 换了
  * 绑定方式只会红一半，根因看不出来。
  *
@@ -116,6 +116,23 @@ export async function pickOption(
 ) {
   await elSelectByPlaceholder(scope, selectPlaceholder).first().click()
   await visibleSelectOptions(page).filter({ hasText: optionText }).first().click()
+}
+
+/** 打开下拉 → 在过滤 input 输入关键词 → 点命中项；popperClass 给实例级面板时按实例取选项。 */
+export async function pickOptionByKeyword(
+  page: Page,
+  selectPlaceholder: string,
+  keyword: string,
+  scope: Page | Locator = page,
+  popperClass?: string,
+) {
+  const select = elSelectByPlaceholder(scope, selectPlaceholder).first()
+  await select.click()
+  await select.locator('input').first().fill(keyword)
+  const options = popperClass
+    ? popperOf(page, popperClass).locator('.el-select-dropdown__item')
+    : visibleSelectOptions(page)
+  await options.filter({ hasText: keyword }).first().click()
 }
 
 /** 点击 ElMessageBox 确认框的主按钮（兼容“确定/OK/删除”等不同文案） */

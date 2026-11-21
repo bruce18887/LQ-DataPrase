@@ -44,6 +44,7 @@ export function windowItems(page: Page, popperClass: string): Locator {
  * 这条到底有没有牙齿。
  */
 export async function expectWindowRows(items: Locator, candidates: number, label: string): Promise<number> {
+  await expect(items.first()).toBeVisible()
   const rows = await items.count()
   expect(
     rows,
