@@ -1472,7 +1472,7 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - [x] TestColumnSelector + ExportParamSelector（`9e925a7`）
 - [x] 相关性 X/Y 迁 el-select-v2（`d099a0e` + spec 适配 `6ceb6d5`）
 - [x] 全量门禁（GLOBAL）
-- [ ] 并入 master（需用户点头；不 push）
+- [x] 并入本地 master（2026-11-21 用户点头「先收刀五a」；master `c6f8bf9 → 7936ac4`，过程分支已删，未 push）
 
 ## 门禁记录
 
@@ -1500,6 +1500,7 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - 另有一处 v2 行为的判据缺口：`correlation-matrix-linkage` 在 X/Y 标签渲染断言之前就红，因此“已选标签在 X/Y 内渲染”暂无绿色判据；静态核对 v2 会渲染，不属缺陷。
 - `frontend/e2e/helpers/elplus.ts:74-81` 的 `visibleSelectOptions` 调用者计数已过时：现为 **4 文件 / 9 处直接调用**（`e2e/data/file-correlation.spec.ts` 6 处，`e2e/analysis/{analysis,axis-label-precision,correlation-file-switch-reset}.spec.ts` 各 1 处）；后三者已不是注释里说的「经 `pickOption` 间接使用」，而是各自 `pickAxisByKeyword` 的直接调用。与 `selectOptions.ts` 的 census 一起走 GLOBAL 收口（2026-11-21 终审挂账）。
 - T2 未钉 `source` 响应式变化（源列表异步换掉后 `selectOptions` 是否跟着走）与 `focusOnOpen: false` 的负例（不回填焦点）；T3 的用例标题写「重开」而真正承重的是**收起那一刻**的隐藏 popper（重开时 v2 自己会洗 query）。后两条记为后续小项（2026-11-21 终审挂账）。
+- X/Y 虚拟窗口哨兵只覆盖 Y；X-only 回退 v1 仍会绿（实际回退通常同时改两颗，但判据上留此缺口）。哨兵的行数是 `count()` 快照，未先等首行可见；4 次绿跑未复现，属硬化项（补 `await expect(windowItems(...).first()).toBeVisible()` 再计数）。
 
 ## 提交
 
@@ -1512,4 +1513,13 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - `03f94f6` docs(plan): 批4 刀五a 计划与台账
 - `3e9747f` docs(todo): 批4 刀五a 收口门禁
 - `745e6c1` test(e2e): 钉住 X/Y 仍走虚拟窗口
-- 本笔 docs(todo): 批4 刀五a 终审挂账
+- `7936ac4` docs(todo): 批4 刀五a 终审挂账
+- 本笔 docs(todo): 批4 刀五a 并入本地 master（未 push）
+
+## 并入记录（2026-11-21）
+
+- `git merge --ff-only feature/batch4d-knife5a-select-filter`：master `c6f8bf9 → 7936ac4`。
+- 过程分支已 `git branch -d`（fully merged）；未 push；`git status --short` 为空。
+- 最终池 `用例 485 · unexpected 0 · flaky 3 · MEASURED`；后端全套沿用 `Ran 2712 / OK (skipped=16)`（`git diff --stat d6c6e78..HEAD -- apps test config requirements` 为空）；代码/测试树与终审修复后的 `7936ac4` 逐字节相同。
+- 整枝终审 With fixes → X/Y 虚拟窗口哨兵（`745e6c1`）修复且 scoped 复审全 ADDRESSED；无新 Critical/Important。
+- 挂账：X/Y 哨兵只覆盖 Y、首行可见前置等待、`selectOptions.ts`/`elplus.ts` census、`pickAxisByKeyword` 全局查询/三副本、X 免关键词、T2 响应式/负例、T3 标题、`view-data:1474`、`correlation-matrix-linkage` 既有红——均另单或刀五b。
