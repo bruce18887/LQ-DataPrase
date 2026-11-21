@@ -49,7 +49,6 @@ import {
   ElInputNumber,
   ElLoading,
   ElOption,
-  ElOptionGroup,
   ElPagination,
   ElPopover,
   ElProgress,
@@ -107,7 +106,6 @@ import 'element-plus/es/components/loading/style/css'
 import 'element-plus/es/components/message/style/css'
 import 'element-plus/es/components/message-box/style/css'
 import 'element-plus/es/components/option/style/css'
-import 'element-plus/es/components/option-group/style/css'
 import 'element-plus/es/components/pagination/style/css'
 import 'element-plus/es/components/popover/style/css'
 import 'element-plus/es/components/progress/style/css'
@@ -130,7 +128,7 @@ import 'element-plus/es/components/tag/style/css'
 import 'element-plus/es/components/tooltip/style/css'
 import 'element-plus/es/components/upload/style/css'
 
-/** 带 install 的件：模板里的 50 个标签 + 提供 v-loading 指令的 ElLoading。 */
+/** 带 install 的件：模板里的 49 个标签 + 提供 v-loading 指令的 ElLoading。 */
 const installables = [
   ElAlert,
   ElBadge,
@@ -161,7 +159,6 @@ const installables = [
   ElInputNumber,
   ElLoading,
   ElOption,
-  ElOptionGroup,
   ElPagination,
   ElPopover,
   ElProgress,

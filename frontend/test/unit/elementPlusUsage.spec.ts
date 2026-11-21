@@ -144,7 +144,7 @@ describe('element-plus 用量绊线', () => {
     expect(new Set(list).size).toBe(list.length)
     const s = collect(realFiles())
     // 空扫描 / 目录拼错时这条先红，而不是让上面那条比一个空集合 == 空清单
-    expect(list.length).toBe(50)
+    expect(list.length).toBe(49)
     expect(s.occurrences).toBeGreaterThan(300)
     for (const must of ['button', 'select', 'form-item', 'table-column']) {
       expect(s.names.has(must), `缺少必然存在的 ${must}`).toBe(true)
@@ -168,7 +168,7 @@ describe('element-plus 用量绊线', () => {
     expect(collect(realFiles()).dynamicIs).toEqual([])
   })
 
-  it('注册名单逐字等于清单：installables = 模板 50 件 + 提供 v-loading 的 ElLoading', () => {
+  it('注册名单逐字等于清单：installables = 模板 49 件 + 提供 v-loading 的 ElLoading', () => {
     const p = pluginLists()
     expect(p.installed.length).toBe(new Set(p.installed).size)
     expect(p.installed.sort()).toEqual(
@@ -194,7 +194,7 @@ describe('element-plus 用量绊线', () => {
     expect(lists.installed).toContain('ElSelectV2')
   })
 
-  it('样式入口逐字等于清单全集（53 件），且没有重复行', () => {
+  it('样式入口逐字等于清单全集（52 件），且没有重复行', () => {
     const p = pluginLists()
     const expectStyled = [...EP_TEMPLATE_COMPONENTS, ...EP_PROGRAMMATIC, ...EP_DIRECTIVES].sort()
     expect(p.styled.length).toBe(new Set(p.styled).size)
