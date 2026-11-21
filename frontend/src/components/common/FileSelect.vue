@@ -1,7 +1,8 @@
 <template>
-  <el-select
+  <el-select-v2
     v-bind="attrs"
     :model-value="modelValue"
+    :options="options"
     :multiple="multiple"
     :clearable="clearable"
     :collapse-tags="collapseTags"
@@ -12,6 +13,8 @@
     :loading="loading"
     :id="id || undefined"
     :popper-class="dropdownClass"
+    :height="360"
+    :item-height="itemHeight"
     filterable
     :filter-method="onFilter"
     @update:model-value="onUpdate"
@@ -19,48 +22,38 @@
     @visible-change="onVisibleChange"
     @clear="onClear"
   >
-    <template v-if="groupBy">
-      <el-option-group
-        v-for="g in groupedItems"
-        :key="g.key"
-        :label="g.label"
-        :class="g.pinned ? 'dp-file-group--pinned' : ''"
-      >
-        <el-option v-for="f in g.files" :key="f.id" :label="f.filename" :value="f.id">
-          <div class="dp-file-option">
-            <span class="dp-file-option__name" v-html="f.filenameHtml" />
-            <span v-if="showMeta" class="dp-file-option__meta">{{ metaText(f) }}</span>
-          </div>
-        </el-option>
-      </el-option-group>
-    </template>
-    <el-option
-      v-else
-      v-for="f in filteredItems"
-      :key="f.id"
-      :label="f.filename"
-      :value="f.id"
-    >
+    <template #default="{ item }">
       <div class="dp-file-option">
-        <span class="dp-file-option__name" v-html="f.filenameHtml" />
-        <span v-if="showMeta" class="dp-file-option__meta">{{ metaText(f) }}</span>
+        <span class="dp-file-option__name">
+          <template v-for="(seg, i) in segmentsFor(item.file.filename ?? '')" :key="i">
+            <mark v-if="seg.mark">{{ seg.text }}</mark>
+            <template v-else>{{ seg.text }}</template>
+          </template>
+        </span>
+        <span v-if="showMeta" class="dp-file-option__meta">{{ metaText(item.file) }}</span>
       </div>
-    </el-option>
-    <!-- 自定义 filter-method 绕过 EP 内部过滤，空态判定只看到「0 个 option」→
-         no-match-text prop 不生效，须用 #empty 插槽提供文案 -->
+    </template>
     <template #empty>
       <div class="dp-empty-hint">无匹配文件</div>
     </template>
-  </el-select>
+    <template #footer>
+      <div class="dp-file-count-hint">{{ q ? '匹配' : '共' }} {{ options.length }} 项</div>
+    </template>
+  </el-select-v2>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, useAttrs } from 'vue'
 import type { DataFile } from '../../types'
-import { formatSize, formatTime } from '../../utils/format'
+import {
+  buildFileOptions,
+  matchFile,
+  metaText,
+  normalizeQuery,
+} from './fileSelectModel'
+import { highlightSegments } from '../../utils/selectOptions'
 
 type FileSelectSize = 'large' | 'default' | 'small' | ''
-type GroupKey = 'program_name' | 'format_type' | ''
 
 interface Props {
   /** 文件列表（由父级拉取后传入，组件不做远程加载） */
@@ -83,8 +76,6 @@ interface Props {
   popperClass?: string
   /** 富信息行：文件名 + program · format · 行数 · 大小 · 上传时间 */
   showMeta?: boolean
-  /** 按字段分组（空值归「未分组」；'' 不分组） */
-  groupBy?: GroupKey
   /** 多选模式已选文件置顶（单选恒保持 files 原序） */
   pinSelected?: boolean
 }
@@ -101,7 +92,6 @@ const props = withDefaults(defineProps<Props>(), {
   id: undefined,
   popperClass: '',
   showMeta: false,
-  groupBy: '',
   pinSelected: true,
 })
 
@@ -118,37 +108,38 @@ defineOptions({ inheritAttrs: false })
 
 const filterText = ref('')
 const q = computed(() => normalizeQuery(filterText.value))
-/** 已选文件 id 数组（保持选中顺序，多选置顶按此序） */
+
+/** 已选文件 id（保持选中顺序，多选置顶按此序） */
 const pinnedOrder = computed<number[]>(() =>
   props.multiple && props.pinSelected && Array.isArray(props.modelValue)
     ? [...props.modelValue]
-    : []
+    : [],
 )
-const pinnedIds = computed(() => new Set(pinnedOrder.value))
-const filteredItems = computed<DisplayFile[]>(() =>
-  toDisplay(
-    sortFiles(
-      props.files.filter((f) => matchFile(f, q.value)),
-      q.value,
-      pinnedIds.value,
-      pinnedOrder.value
-    ),
-    q.value
-  )
+
+const options = computed(() =>
+  buildFileOptions(
+    props.files.filter((f) => matchFile(f, q.value)),
+    q.value,
+    pinnedOrder.value,
+  ),
 )
-const groupedItems = computed<FileGroup[]>(() =>
-  props.groupBy ? groupFiles(filteredItems.value, props.groupBy, pinnedIds.value, pinnedOrder.value) : []
-)
+
+/** v2 的虚拟滚动要求固定行高：富信息行两行约 40px，取 48；紧凑行维持 34。 */
+const itemHeight = computed(() => (props.showMeta ? 48 : 34))
+
 const dropdownClass = computed(() =>
-  ['dp-file-select-dropdown', props.popperClass].filter(Boolean).join(' ')
+  ['dp-file-select-dropdown', props.popperClass].filter(Boolean).join(' '),
 )
+
+function segmentsFor(text: string) {
+  return highlightSegments(text, q.value)
+}
 
 // ---------- 事件流转 ----------
 function onFilter(query: string) {
   filterText.value = query
 }
 function onVisibleChange(visible: boolean) {
-  // 关闭下拉时清空过滤，下次打开恢复全量列表
   if (!visible) filterText.value = ''
   emit('visible-change', visible)
 }
@@ -161,151 +152,15 @@ function onChange(val: number | number[] | null) {
 function onClear() {
   emit('clear')
 }
-
-// ---------- 纯函数：过滤 / 高亮 / 排序 / 分组 ----------
-
-/** 查询归一化：去首尾空白 + 小写 */
-function normalizeQuery(raw: string): string {
-  return raw.trim().toLowerCase()
-}
-
-/** HTML 转义（v-html 注入前必须，文件名是外部数据防 XSS） */
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
-/** 正则元字符转义 */
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-/** 高亮匹配段：原文 HTML 转义后注入 <mark>（大小写不敏感）。
- *  正则由调用方按查询词编译一次传进来 —— 本函数对整表逐行调用（下拉上限 5000 行），
- *  写在函数体内等于每次输入编译几千个 RegExp。`String.replace` 对 /g 正则会归零
- *  lastIndex，因此同一实例跨行复用安全。 */
-function highlightMatch(text: string, re: RegExp | null): string {
-  const safe = escapeHtml(text)
-  if (!re) return safe
-  return safe.replace(re, '<mark>$1</mark>')
-}
-
-/** 编译高亮正则：先转义 HTML 再转义正则元字符（与旧内联写法同语义） */
-function buildHighlightRegex(query: string): RegExp | null {
-  if (!query) return null
-  return new RegExp(`(${escapeRegex(escapeHtml(query))})`, 'gi')
-}
-
-/** 匹配：filename / program_name / batch_name 任一包含（对齐后端 search_fields） */
-function matchFile(f: DataFile, query: string): boolean {
-  if (!query) return true
-  return [f.filename, f.program_name, f.batch_name]
-    .some((v) => (v ?? '').toLowerCase().includes(query))
-}
-
-/** 排序权重：0=filename 前缀 > 1=filename 包含 > 2=仅 program/batch 命中 */
-function fileRank(f: DataFile, query: string): number {
-  const name = (f.filename ?? '').toLowerCase()
-  if (name.startsWith(query)) return 0
-  if (name.includes(query)) return 1
-  return 2
-}
-
-/**
- * 排序：无 query 保持 files 原序（多选时已选置顶）；
- * 有 query 按权重排序 + localeCompare 平局决胜，多选时已选再置顶。
- * 置顶组按选中顺序（pinnedOrder），而非 files 原序。
- */
-function sortFiles(
-  list: DataFile[],
-  query: string,
-  pinned: Set<number>,
-  pinnedOrder: number[]
-): DataFile[] {
-  const ranked = query
-    ? [...list].sort((a, b) => {
-        const r = fileRank(a, query) - fileRank(b, query)
-        return r !== 0 ? r : a.filename.localeCompare(b.filename)
-      })
-    : list
-  if (pinned.size) {
-    const p = pinnedOrder
-      .map((id) => ranked.find((f) => f.id === id))
-      .filter((f): f is DataFile => Boolean(f))
-    const rest = ranked.filter((f) => !pinned.has(f.id))
-    return [...p, ...rest]
-  }
-  return ranked
-}
-
-interface DisplayFile extends DataFile {
-  /** 高亮后的文件名 HTML */
-  filenameHtml: string
-}
-function toDisplay(list: DataFile[], query: string): DisplayFile[] {
-  const re = buildHighlightRegex(query)
-  return list.map((f) => ({ ...f, filenameHtml: highlightMatch(f.filename ?? '', re) }))
-}
-
-/** 富信息行文本：program · format · N 行 · 大小 · 上传时间 */
-function metaText(f: DataFile): string {
-  return [
-    f.program_name,
-    f.format_type,
-    `${f.row_count ?? 0} 行`,
-    f.file_size ? formatSize(f.file_size) : '',
-    f.created_at ? formatTime(f.created_at) : '',
-  ]
-    .filter(Boolean)
-    .join(' · ')
-}
-
-interface FileGroup {
-  key: string
-  label: string
-  pinned: boolean
-  files: DisplayFile[]
-}
-/** 分组：已选成首组「已选 (n)」（按选中顺序），其余按字段首次出现顺序分组，空值归「未分组」 */
-function groupFiles(
-  list: DisplayFile[],
-  key: GroupKey,
-  pinned: Set<number>,
-  pinnedOrder: number[]
-): FileGroup[] {
-  const groups: FileGroup[] = []
-  const pinnedFiles = pinned.size
-    ? pinnedOrder
-        .map((id) => list.find((f) => f.id === id))
-        .filter((f): f is DisplayFile => Boolean(f))
-    : []
-  if (pinnedFiles.length) {
-    groups.push({ key: '__pinned__', label: `已选 (${pinnedFiles.length})`, pinned: true, files: pinnedFiles })
-  }
-  const map = new Map<string, DisplayFile[]>()
-  for (const f of list) {
-    if (pinned.has(f.id)) continue
-    const raw = key ? (f[key] ?? '') : ''
-    const label = raw || '未分组'
-    if (!map.has(label)) map.set(label, [])
-    map.get(label)!.push(f)
-  }
-  for (const [label, files] of map) {
-    groups.push({ key: label, label, pinned: false, files })
-  }
-  return groups
-}
 </script>
 
 <style scoped>
 .dp-file-option {
   display: flex;
   flex-direction: column;
+  justify-content: center;
   width: 100%;
+  height: 100%;
   line-height: normal;
 }
 
@@ -338,28 +193,15 @@ function groupFiles(
 
 <!-- 下拉 teleport 到 body，scoped 样式无法命中，需 unscoped + 命名空间前缀 -->
 <style>
-.dp-file-select-dropdown .el-select-dropdown__list {
-  max-height: 360px;
-}
-
 .dp-file-select-dropdown .el-select-dropdown__item {
   line-height: normal;
-  padding: 6px 20px;
-  /* 覆盖 EP 默认 height:34px + overflow:hidden——富信息行（文件名 + meta）约
-     40px 会被纵向裁剪，第二行显示不全；min-height 保证非 show-meta 场景
-     下拉项保持紧凑观感 */
-  height: auto;
-  min-height: 34px;
+  padding: 0 20px;
 }
 
-.dp-file-select-dropdown .el-select-group__title {
+.dp-file-select-dropdown .dp-file-count-hint {
+  font-size: var(--p-fs-micro);
   color: var(--text-2);
-  font-size: var(--p-fs-dense);
-}
-
-.dp-file-select-dropdown .dp-file-group--pinned .el-select-group__title {
-  color: var(--brand);
-  font-weight: 600;
+  text-align: center;
 }
 
 .dp-file-select-dropdown .el-select-dropdown__empty {
