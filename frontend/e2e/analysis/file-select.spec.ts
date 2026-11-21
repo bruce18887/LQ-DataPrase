@@ -192,7 +192,12 @@ test.describe('FileSelect 通用文件选择组件', { tag: ['@p1', '@analysis']
     await select.click()
     const dropdown = page.locator('.dp-file-picker-multi:visible .el-select-dropdown__item')
     await expect(dropdown.first()).toBeVisible({ timeout: 15_000 })
+    // v2 虚拟窗口：DOM 里只有可见的十来行，87 个候选中的种子文件不在窗口内。
+    // 每次点选前先填名把目标过滤进窗口（与上面「多选过滤 + 已选置顶」同构）。
+    const input = select.locator('input').first()
+    await input.fill(SEEDED_FILES.BUYOFF_FT)
     await dropdown.filter({ hasText: SEEDED_FILES.BUYOFF_FT }).first().click()
+    await input.fill(SEEDED_FILES.BUYOFF_QA1)
     await dropdown.filter({ hasText: SEEDED_FILES.BUYOFF_QA1 }).first().click()
     await page.keyboard.press('Escape')
 
@@ -204,7 +209,11 @@ test.describe('FileSelect 通用文件选择组件', { tag: ['@p1', '@analysis']
     await select2.click()
     const dd2 = page.locator('.dp-file-picker-multi:visible .el-select-dropdown__item')
     await expect(dd2.first()).toBeVisible({ timeout: 15_000 })
+    // 同样先填名：已选态只挂在虚拟窗口内的行上，未过滤时目标行可能根本没渲染
+    const input2 = select2.locator('input').first()
+    await input2.fill(SEEDED_FILES.BUYOFF_FT)
     await expect(dd2.filter({ hasText: SEEDED_FILES.BUYOFF_FT }).first()).toHaveClass(/is-selected/, { timeout: 15_000 })
+    await input2.fill(SEEDED_FILES.BUYOFF_QA1)
     await expect(dd2.filter({ hasText: SEEDED_FILES.BUYOFF_QA1 }).first()).toHaveClass(/is-selected/)
     await page.keyboard.press('Escape')
   })
