@@ -113,6 +113,12 @@ export async function pickTabFile(
 ) {
   const sel = filePicker(page, scope)
   await openElSelect(sel)
+  // 先把目标名打进过滤框，再找选项：`el-select-v2` 只把虚拟窗口那约 10 行挂上 DOM，
+  // 不输入关键词时第 11 项以后的文件在 DOM 里根本不存在 —— 直接按 hasText 找不到，
+  // 表现为 click 等到超时，而不是「文件不存在」。过滤后候选集缩到命中项，目标必在窗口内。
+  if (labelSubstring) {
+    await sel.locator('input').first().fill(labelSubstring)
+  }
   // 选项必须限定在**本 picker 自己的 popper** 里：四个 tab 的下拉面板都被
   // teleport 到 body，隐藏 pane 的那一份仍会被全局 `:visible` 命中（它的
   // reference 尺寸为零 → popper 逐帧重定位→“element is not stable”，
