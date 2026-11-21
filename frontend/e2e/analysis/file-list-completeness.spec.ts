@@ -18,8 +18,8 @@ import { filePicker } from '../helpers/params'
  * 下拉显示全部文件。
  *
  * 断言设计（修复前必失败）：
- *  - 上传 21 个文件（> PAGE_SIZE 20）后，分析页下拉选项数 ≥ 21（修复前 = 20）；
- *  - 数据管理页分页 total == 分析页下拉选项数（同一 /files/ 全量口径）。
+ *  - 上传 21 个文件（> PAGE_SIZE 20）后，分析页下拉 footer 的候选数 ≥ 21（修复前 = 20）；
+ *  - 数据管理页分页 total == 分析页下拉 footer 候选数（同一 /files/ 全量口径）。
  */
 
 const MIN_CSV = [
@@ -101,16 +101,17 @@ test.describe('文件列表完整性：分析页下拉与数据管理页数量�
     const totalCount = Number((totalText ?? '').match(/\d+/)?.[0] ?? 0)
     expect(totalCount, '分页 total 应读到正数').toBeGreaterThan(0)
 
-    // 分析页：打开文件下拉，数选项
+    // 分析页：打开文件下拉，读 footer 的候选数（v2 虚拟窗口只挂 ~10 行，数 DOM 行不等于全集）
     await gotoApp(page, '/analysis')
     await expect(page.getByRole('tab', { name: /单文件分析/ })).toBeVisible({ timeout: 20_000 })
     const fileSel = filePicker(page)
     await expect(fileSel).toBeVisible({ timeout: 15_000 })
     await fileSel.click()
-    const options = page.locator('.el-select-dropdown__item:visible')
-    await expect(options.first()).toBeVisible({ timeout: 15_000 })
-    const dropdownCount = await options.count()
-    // 修复前 page_size 被忽略 → 恒为 20；修复后 ≥ 21（我们上传的全部可见）
+    const countHint = page.locator('.dp-file-picker-single:visible .dp-file-count-hint')
+    await expect(countHint).toHaveText(/共 \d+ 项/)
+    const dropdownCount = Number(/共 (\d+) 项/.exec((await countHint.textContent()) ?? '')?.[1] ?? 0)
+    // v2 虚拟窗口只挂 ~10 行；全量以 footer 的候选数为准（组件 options.length）。
+    // 修复前 page_size 被忽略 → 恒为 20。
     expect(dropdownCount, '分析页下拉必须显示全部文件（修复前被截断为 20）').toBeGreaterThanOrEqual(FILE_COUNT)
     await page.keyboard.press('Escape')
 

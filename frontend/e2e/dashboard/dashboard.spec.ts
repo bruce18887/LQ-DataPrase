@@ -390,8 +390,9 @@ test.describe('仪表板', { tag: ['@dashboard'] }, () => {
     await expect(page.getByText('忽略无 Limit')).toBeVisible()
     await expect(page.getByText('忽略无测试值')).toBeVisible()
 
-    // 页脚统计与分页（总项数 = 过滤后行数）
-    await expect(page.getByText(/共 \d+ 项/)).toBeVisible()
+    // 页脚统计与分页（总项数 = 过滤后行数）。必须限定在 overview-footer：
+    // FileSelect 的下拉 footer 也有「共 N 项」，全局 getByText 会命中两处。
+    await expect(page.locator('.overview-footer').getByText(/共 \d+ 项/)).toBeVisible()
     await expect(page.locator('.overview-footer .el-pagination')).toBeVisible()
 
     // 下方两图已由新形态取代：CPK 饼图 → 四色堆叠比例条；Top 10 柱状 → 信息 chip 行（有数据时渲染）
