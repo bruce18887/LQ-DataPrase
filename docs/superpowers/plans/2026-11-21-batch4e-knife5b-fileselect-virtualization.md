@@ -787,7 +787,7 @@ export async function pickOptionByKeyword(
 `e2e/analysis/analysis.spec.ts`、`e2e/analysis/axis-label-precision.spec.ts`、`e2e/analysis/correlation-file-switch-reset.spec.ts`：
 
 1. 删除各自本地的 `pickAxisByKeyword` 函数。
-2. 从 `../helpers/elplus` 导入 `pickOptionByKeyword`；`analysis.spec.ts` / `axis-label-precision.spec.ts` 再导入 `CORR_Y_POPPER`（X 仍走 `pickOption`），`correlation-file-switch-reset.spec.ts` 导入 `CORR_X_POPPER` 与 `CORR_Y_POPPER`。
+2. 从 `../helpers/elplus` 导入 `pickOptionByKeyword`、`CORR_X_POPPER` 与 `CORR_Y_POPPER`（**X/Y 都走关键词**，不再保留裸 `pickOption` 的 X 分支——这是 `todo.md:1499` 挂账的收口）。
 3. `correlation-file-switch-reset.spec.ts` 删除本地 `const CORR_Y_POPPER = ...`。
 4. 把 Y 轴调用改成：
 
@@ -795,13 +795,13 @@ export async function pickOptionByKeyword(
 await pickOptionByKeyword(page, '选择 Y 轴参数', 'KELVIN_SW', layout, CORR_Y_POPPER)
 ```
 
-5. `correlation-file-switch-reset.spec.ts` 里原来的 X 裸选改成：
+5. 把三个文件里的 X 轴裸选改成：
 
 ```ts
 await pickOptionByKeyword(page, '选择 X 轴参数', 'KELVIN_VIN', layout, CORR_X_POPPER)
 ```
 
-6. 收敛后清掉因此不再使用的 import（`correlation-file-switch-reset` 的 `pickOption` / `visibleSelectOptions`、另两个文件的 `elSelectByPlaceholder` / `visibleSelectOptions` 若已无调用），以 `npm run lint:e2e` 无报错为准。
+6. 收敛后清掉因此不再使用的 import（`pickOption` / `visibleSelectOptions` / `elSelectByPlaceholder` 若已无调用），以 `npm run lint:e2e` 无报错为准。
 
 - [ ] **Step 3: `selectV2.ts` 补首行可见等待**
 
@@ -859,9 +859,26 @@ export async function expectWindowRows(items: Locator, candidates: number, label
 `highlightSegments` = ParamSelector + FileSelect（刀五b）共 2 处。
 ```
 
-- [ ] **Step 6: T3 判据文案订正**
+- [ ] **Step 6: file-correlation 收尾（T3 判据文案 + 残留未过滤查找）**
 
-`e2e/data/file-correlation.spec.ts:390` 的 `expectWindowRows` label 写的是「关后重开，应无残留过滤」，但真正承重的是**收起那一刻**的隐藏面板（重开时 v2 自己会洗 query，见 `todo.md:1502`）。把 label 改成「序列下拉（收起后隐藏面板无残留过滤）」，并把同段注释里「重开后面板同样是全量」标注为「用户可见收尾，不承重」；只改文案与注释，不动断言。
+1. `e2e/data/file-correlation.spec.ts:390` 的 `expectWindowRows` label 写的是「关后重开，应无残留过滤」，但真正承重的是**收起那一刻**的隐藏面板（重开时 v2 自己会洗 query，见 `todo.md:1502`）。把 label 改成「序列下拉（收起后隐藏面板无残留过滤）」，并把同段注释里「重开后面板同样是全量」标注为「用户可见收尾，不承重」；只改文案与注释，不动断言。
+2. 同文件 `:462-472`（「跨程序同名异拼法」）还有一处 FileSelect 未过滤查找（`elSelectByPlaceholder` + `visibleSelectOptions().filter()`），v2 下只是碰巧命中首屏窗口。按 `pickFilePair` 的形状改成先填过滤词再点：
+
+```ts
+    const file1 = elSelectByPlaceholder(section, '文件1 (ATE)')
+    await file1.click()
+    await expect
+      .poll(() => visibleSelectOptions(page).count(), { timeout: 15_000 })
+      .toBeGreaterThan(0)
+    await file1.locator('input').first().fill(SEEDED_FILES.CTA8290D_FT)
+    await visibleSelectOptions(page).filter({ hasText: SEEDED_FILES.CTA8290D_FT }).first().click()
+    await page.waitForTimeout(600)
+    const file2 = elSelectByPlaceholder(section, '文件2 (Bench)')
+    await file2.click()
+    await file2.locator('input').first().fill(SEEDED_FILES.CTA8280F_FT)
+    await visibleSelectOptions(page).filter({ hasText: SEEDED_FILES.CTA8280F_FT }).first().click()
+    await page.waitForTimeout(600)
+```
 
 - [ ] **Step 7: 跑三个 spec（一次一个 project）**
 
