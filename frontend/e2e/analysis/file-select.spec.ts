@@ -1,6 +1,7 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
 import { selectAnalysisFile, filePicker } from '../helpers/params'
+import { MAX_WINDOW_ROWS } from '../helpers/selectV2'
 import { RECOMMENDED, SEEDED_FILES } from '../fixtures/test-data'
 
 /**
@@ -216,5 +217,24 @@ test.describe('FileSelect 通用文件选择组件', { tag: ['@p1', '@analysis']
     await input2.fill(SEEDED_FILES.BUYOFF_QA1)
     await expect(dd2.filter({ hasText: SEEDED_FILES.BUYOFF_QA1 }).first()).toHaveClass(/is-selected/)
     await page.keyboard.press('Escape')
+  })
+
+  test('虚拟窗口：DOM 只挂窗口内十来行，不是全部候选', async ({ page }) => {
+    const dropdown = await openFileDropdown(page)
+    const countHint = dropdown.locator('.dp-file-count-hint')
+    await expect(countHint).toHaveText(/共 \d+ 项/)
+    const total = Number(/共 (\d+) 项/.exec((await countHint.textContent()) ?? '')?.[1] ?? 0)
+    expect(total, '夹具文件数须大于窗口界，否则本条没有牙齿').toBeGreaterThan(MAX_WINDOW_ROWS)
+    const items = dropdown.locator('.el-select-dropdown__item')
+    await expect(items.first()).toBeVisible()
+    const rows = await items.count()
+    expect(
+      rows,
+      `文件下拉应虚拟化：DOM ${rows} 行 / 候选 ${total} 项，界 ${MAX_WINDOW_ROWS}`,
+    ).toBeLessThan(MAX_WINDOW_ROWS)
+    test.info().annotations.push({
+      type: '虚拟窗口实测',
+      description: `文件下拉：DOM ${rows} 行 / 候选 ${total} 项 / 界 ${MAX_WINDOW_ROWS}`,
+    })
   })
 })
