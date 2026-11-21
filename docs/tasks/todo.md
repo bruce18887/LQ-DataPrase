@@ -1523,3 +1523,31 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - 最终池 `用例 485 · unexpected 0 · flaky 3 · MEASURED`；后端全套沿用 `Ran 2712 / OK (skipped=16)`（`git diff --stat d6c6e78..HEAD -- apps test config requirements` 为空）；代码/测试树与终审修复后的 `7936ac4` 逐字节相同。
 - 整枝终审 With fixes → X/Y 虚拟窗口哨兵（`745e6c1`）修复且 scoped 复审全 ADDRESSED；无新 Critical/Important。
 - 挂账：X/Y 哨兵只覆盖 Y、首行可见前置等待、`selectOptions.ts`/`elplus.ts` census、`pickAxisByKeyword` 全局查询/三副本、X 免关键词、T2 响应式/负例、T3 标题、`view-data:1474`、`correlation-matrix-linkage` 既有红——均另单或刀五b。
+
+# 任务：批4 刀五b（FileSelect 虚拟化 + 下拉收尾，2026-11-21）
+
+计划：`docs/superpowers/plans/2026-11-21-batch4e-knife5b-fileselect-virtualization.md`
+设计：`docs/superpowers/specs/2026-11-13-ux-batch-dropdown-admin-dedup-intro-usage-design.md` §2.3/§2.9
+
+## 前置实测
+
+- FileSelect 候选上限：分析页 `/files/options/` 默认 `limit=5000`（上限 20000）；数据管理页 `/files/?page_size=9999`。
+- SftpSearchPage 运行历史 `RUN_HISTORY_KEEP = 20`（`stores/sftpSearch.ts:37`）⇒ 判 no-op，不迁 v2。
+- FileSelect `groupBy` 零消费者、e2e 零断言 ⇒ 本刀删除分组死代码，保留 `pinSelected`。
+
+## 勾选清单
+
+- [ ] fileSelectModel 纯函数 + T2
+- [ ] FileSelect.vue 迁 el-select-v2、删分组
+- [ ] FileSelect 虚拟窗口哨兵 + v1 变异自证
+- [ ] CombineBatchDialog 批次下拉迁 v2
+- [ ] SftpSearchPage no-op 注释
+- [ ] axis 助手收敛 + X 哨兵 + census + T3 判据文案
+- [ ] useSelectFilter 两条 T2
+- [ ] 收口门禁
+
+## 门禁记录
+
+| 档 | 命令 | 实测判据行 |
+|---|---|---|
+| ... | ... | ... |
