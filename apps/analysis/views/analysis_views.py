@@ -225,6 +225,10 @@ class AnalysisViewSet(HeavyActionMixin, FileCorrelationActions,
                 if resolved is not None:
                     selection_serials, selection_serial_col = resolved
         skipped_params = []
+        # KDE 内存降级通道：内存不足时不让整条请求变 503，而是把「哪条曲线
+        # 没画出来」挂在对应参数的结果里由前端提示。list 在循环外建，服务侧
+        # 每次返回都会快照一份，各参数只看到自己的降级项。
+        degraded = []
         for param in params:
             # 计算路径不吞异常：任何意外内部错误直接 500 暴露（param 不在 df
             # 的情况已在上面作为 400 处理）
@@ -232,7 +236,8 @@ class AnalysisViewSet(HeavyActionMixin, FileCorrelationActions,
                 df, metadata, param, site_col,
                 range_type=range_type, custom_low=custom_low, custom_high=custom_high,
                 iqr_multiplier=iqr_multiplier, cpk_thresholds=cpk_thresholds,
-                include_kde=include_kde, kde_variant=kde_variant)
+                include_kde=include_kde, kde_variant=kde_variant,
+                degraded=degraded)
             if result is not None:
                 results[param] = result
             else:
