@@ -58,7 +58,7 @@ systemctl list-timers lqdp-prune-jobs.timer
   `LQDP_SERVER_BASE_DIR` 直接拒跑；用 `lqdp-backup.timer`。
 - **不要用 cron 跑 `prune_jobs`**。同样拿不到 `EnvironmentFile`，作业目录需要
   `LQDP_SERVER_BASE_DIR`；用 `lqdp-prune-jobs.timer`。`--days=7` 是命令默认值，
-  保留期拍板后只改 `ExecStart` 的 `--days`，不要改命令本体。
+  保留期已定 7 天（2026-11-22 拍板）；改口径只改 `ExecStart` 的 `--days`，不要改命令本体。
 - **不要在环境文件的值后面写 `#` 注释**。systemd 不剥行内注释，`#` 之后的内容会成为值的一部分。
 - **方案 B（gunicorn）的模板不在本目录**。启用前先完成指南 §6 的两件先决实验。
 
