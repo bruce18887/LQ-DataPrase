@@ -25,6 +25,7 @@
             :exporting="exporting"
             :batch-active="batchActive"
             :batch-progress="batchProgress"
+            :batch-queue-position="batchQueuePosition"
             :has-params="localParams.length > 0"
             @export-sigma="onExportSigma"
             @export-batch="onExportBatch"
@@ -89,7 +90,7 @@ const currentFileName = computed(() => {
   return f?.filename ?? ''
 })
 
-const { exporting, batchActive, batchProgress, exportSigmaLimit, exportBatchCharts } = useExport(() => props.fileId ?? null)
+const { exporting, batchActive, batchProgress, batchQueuePosition, exportSigmaLimit, exportBatchCharts } = useExport(() => props.fileId ?? null)
 
 // Load params when file changes
 watch(() => props.fileId, async (fileId) => {

@@ -37,6 +37,8 @@ export function useBrowserExport(ctx: BrowserExportContext) {
   const job = useJobExport()
   const exportingExcel = job.exporting
   const excelProgress = job.progress
+  /** Excel 作业还在队列里时排在前面的条数（DataBrowserAgGrid 的 chip 用它把 0% 换成排队文案）。 */
+  const excelQueuePosition = job.queuePosition
 
   /** 兜底名沿用旧口径：源文件名去掉 .csv 再拼后缀（与后端模板不一致时以响应头为准）。 */
   function resolveName(headers: Record<string, string> | undefined,
@@ -92,5 +94,5 @@ export function useBrowserExport(ctx: BrowserExportContext) {
     }
   }
 
-  return { exportingExcel, exportingCsv, excelProgress, exportExcel, exportCsv }
+  return { exportingExcel, exportingCsv, excelProgress, excelQueuePosition, exportExcel, exportCsv }
 }

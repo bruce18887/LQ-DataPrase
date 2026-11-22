@@ -12,7 +12,7 @@ import { onScopeDispose, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
 import { downloadJob, getJob, submitJob, type JobKind } from '../api/jobs'
-import { classifySubmit, formatJobFailure, jobFailureView, pollDecision, submitFailureMessage, type JobFailureReason } from './jobPolling'
+import { classifySubmit, formatJobFailure, jobFailureView, pollDecision, pollTimeoutMs, submitFailureMessage, type JobFailureReason } from './jobPolling'
 import {
   downloadBlob,
   extractFilenameFromContentDisposition,
@@ -44,6 +44,12 @@ export function useJobExport() {
   const progress = ref(0)
   /** 给界面文案用：排队 / 进行中 / 放弃等待。 */
   const phase = ref<'idle' | 'pending' | 'running' | 'gaveup'>('idle')
+  /**
+   * 同 owner 里排在我前面的作业数（0 = 下一个就轮到我）。
+   * 只在轮询拿到 `queue_position` 时更新，其余时刻归 0 —— chip 只在
+   * 「进行中 + 进度还是 0 + 前面有人」时把它显示成「排队中 · 前面 N 个」。
+   */
+  const queuePosition = ref(0)
 
   // 组件卸载时必须停轮询：否则旧标签页的请求会继续写这个已销毁实例的 ref
   let stopped = false
@@ -58,6 +64,7 @@ export function useJobExport() {
     exporting.value = true
     progress.value = 0
     phase.value = 'pending'
+    queuePosition.value = 0
 
     /** 统一的失败出口：`silent` 时不弹默认 toast，文案交给调用方（它同样走 `jobFailureView`）。 */
     const fail = (reason: JobFailureReason, message = ''): JobRunResult => {
@@ -99,8 +106,15 @@ export function useJobExport() {
       for (;;) {
         if (stopped) return { ok: false, reason: 'gave-up', message: '页面已切换，停止等待' }
         const now = Date.now()
-        const decision = pollDecision(await getJob(jobId), {
-          lastProgress, unchangedStreak: streak, startedAt, now,
+        const polled = await getJob(jobId)
+        // 上限跟着后端这条作业的超时（`timeout_seconds`，缺字段回退兜底值）。
+        // 写死 5 分钟会让 1 小时级的批量出图在「文件其实还算得出来」时被前端先放弃。
+        const decision = pollDecision(polled, {
+          lastProgress,
+          unchangedStreak: streak,
+          startedAt,
+          now,
+          maxMs: pollTimeoutMs(polled.data as Record<string, unknown> | null),
         })
 
         if (decision.kind === 'giveup') {
@@ -124,6 +138,7 @@ export function useJobExport() {
         }
 
         progress.value = decision.progress
+        queuePosition.value = decision.queuePosition
         phase.value = decision.progress > 0 ? 'running' : 'pending'
         lastProgress = decision.progress
         streak = decision.unchangedStreak
@@ -136,10 +151,12 @@ export function useJobExport() {
     } finally {
       exporting.value = false
       phase.value = 'idle'
+      // 完成 / 失败 / 放弃 / 卸载都从这里收口：chip 不显示排队，别再留着上一轮的数
+      queuePosition.value = 0
     }
   }
 
   onScopeDispose(() => { stopped = true })
 
-  return { exporting, progress, phase, run }
+  return { exporting, progress, phase, queuePosition, run }
 }

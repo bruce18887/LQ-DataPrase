@@ -12,8 +12,14 @@ export const POLL_BASE_MS = 1000
 export const POLL_SLOW_AFTER = 3
 /** 慢节奏间隔。 */
 export const POLL_SLOW_MS = 2000
-/** 轮询上限：超过就放弃等待（spec §6 的 5 分钟），**不许无限轮询**。 */
+/**
+ * 轮询上限的**兜底值**：拿不到后端 `timeout_seconds` 时才用它（spec §6 的 5 分钟），
+ * **不许无限轮询**。真实上限由 `pollTimeoutMs(job)` 从后端取 —— 写死 5 分钟会让
+ * `export_batch_charts`（后端 1 小时）在文件还算得出来的时候被前端先放弃。
+ */
 export const POLL_MAX_MS = 5 * 60 * 1000
+/** 后端超时之后再给的收尾余量：超时那一刻往往已经落盘/收尾，别差几秒就放弃。 */
+export const POLL_GRACE_MS = 60 * 1000
 
 export type SubmitVerdict =
   | { kind: 'poll'; jobId: number }
@@ -21,10 +27,43 @@ export type SubmitVerdict =
   | { kind: 'error'; message: string }
 
 export type PollVerdict =
-  | { kind: 'wait'; delay: number; unchangedStreak: number; progress: number }
+  | {
+    kind: 'wait'; delay: number; unchangedStreak: number; progress: number
+    /** 同 owner 里比我早的未收场作业数（0 = 下一个就轮到我）。 */
+    queuePosition: number
+  }
   | { kind: 'ready'; progress: number; resultName: string }
   | { kind: 'failed'; progress: number; error: string }
   | { kind: 'giveup'; progress: number }
+
+/**
+ * 后端这条作业的超时（`apps/jobs/executor.KIND_RUNNERS`，Task 10 起恒出现在 payload）
+ * → 前端该等多久。
+ *
+ * `timeout_seconds` 缺失/为 0/为负/非数字（遗留 kind 没有 timeout 表项）⇒ 回退兜底值。
+ * 读法与非数字容错刻意和 `clampPercent` 一致（`Number()` + 正数守卫），
+ * 免得两处对「脏值」给出不同的上限。
+ */
+export function pollTimeoutMs(job: Record<string, unknown> | null | undefined): number {
+  const seconds = Number(job?.timeout_seconds)
+  if (!Number.isFinite(seconds) || seconds <= 0) return POLL_MAX_MS
+  return seconds * 1000 + POLL_GRACE_MS
+}
+
+/**
+ * chip 上的排队文案；0（含脏值归一后的 0）不显示 —— 「前面 0 个」是噪声。
+ * 归一化只有一处：非有限值当 0，负值当 0，小数向下取整（位置是按条数数的）。
+ */
+export function queuePositionText(n: number): string | null {
+  const pos = normalizeQueuePosition(n)
+  return pos > 0 ? `排队中 · 前面 ${pos} 个` : null
+}
+
+function normalizeQueuePosition(value: unknown): number {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return 0
+  return Math.max(0, Math.floor(n))
+}
 
 /** 连续无变化 `streak` 次之后该等多久。 */
 export function nextPollDelay(streak: number): number {
@@ -63,10 +102,16 @@ export function submitFailureMessage(verdict: SubmitVerdict): string {
   return verdict.kind === 'error' ? verdict.message : ''
 }
 
-/** 一次轮询响应怎么解读。 */
+/** 一次轮询响应怎么解读。
+ *
+ * `state.maxMs` 是本轮的等待上限（调用方用 `pollTimeoutMs` 从上一份响应算出）；
+ * 不传时退回 `POLL_MAX_MS`，于是「后端没给 timeout」与旧行为逐字一致。
+ */
 export function pollDecision(
   resp: { status: number; data: unknown },
-  state: { lastProgress: number; unchangedStreak: number; startedAt?: number; now: number },
+  state: {
+    lastProgress: number; unchangedStreak: number; startedAt?: number; now: number; maxMs?: number
+  },
 ): PollVerdict {
   // 拿不到状态（404/500/被删）就是终态：进度条继续转只会让人以为还在跑
   if (resp.status !== 200) {
@@ -85,11 +130,18 @@ export function pollDecision(
   }
 
   // pending / running / 认不出的状态都继续等，但超过上限必须放弃
-  if (state.startedAt !== undefined && state.now - state.startedAt > POLL_MAX_MS) {
+  const maxMs = Number.isFinite(state.maxMs) ? Number(state.maxMs) : POLL_MAX_MS
+  if (state.startedAt !== undefined && state.now - state.startedAt > maxMs) {
     return { kind: 'giveup', progress }
   }
   const unchangedStreak = progress === state.lastProgress ? state.unchangedStreak + 1 : 0
-  return { kind: 'wait', delay: nextPollDelay(unchangedStreak), unchangedStreak, progress }
+  return {
+    kind: 'wait',
+    delay: nextPollDelay(unchangedStreak),
+    unchangedStreak,
+    progress,
+    queuePosition: normalizeQueuePosition(job.queue_position),
+  }
 }
 
 /**

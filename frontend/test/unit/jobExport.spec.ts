@@ -9,7 +9,8 @@
  * 1. **202 才轮询，200 是同步降级**：进程池建不起来时后端直接回文件流
  *    （`apps/jobs/views.py._sync_fallback`，带 `X-Job-Fallback: 1`）。
  *    前端若把 200 也当作业处理，桌面档一旦 spawn 失败就变成「点了没反应」。
- * 2. 节奏按 spec §6：1s 起，连续 3 次进度没变才降到 2s，最长 5 分钟后放弃轮询。
+ * 2. 节奏按 spec §6：1s 起，连续 3 次进度没变才降到 2s。上限默认 5 分钟，
+ *    但作业 payload 带了 `timeout_seconds` 时按后端超时走（判据在 `jobQueue.spec.ts`）。
  * 3. `error`/`cancelled` 都是终态，必须停止轮询并把后端文案交出去（重试要用同一份参数重 POST）。
  */
 import { describe, expect, it } from 'vitest'
@@ -73,7 +74,7 @@ describe('pollDecision：什么时候继续等、什么时候收工', () => {
     expect(pollDecision(
       { status: 200, data: { status: 'running', progress: 40, error: '' } },
       { lastProgress: 20, unchangedStreak: 2, ...at(0) },
-    )).toEqual({ kind: 'wait', delay: POLL_BASE_MS, unchangedStreak: 0, progress: 40 })
+    )).toEqual({ kind: 'wait', delay: POLL_BASE_MS, unchangedStreak: 0, progress: 40, queuePosition: 0 })
   })
 
   it('running 且进度不变 → streak+1，节奏按 streak 决定', () => {
@@ -82,7 +83,7 @@ describe('pollDecision：什么时候继续等、什么时候收工', () => {
     expect(pollDecision(
       { status: 200, data: { status: 'running', progress: 40, error: '' } },
       { lastProgress: 40, unchangedStreak: 3, ...at(0) },
-    )).toEqual({ kind: 'wait', delay: 2000, unchangedStreak: 4, progress: 40 })
+    )).toEqual({ kind: 'wait', delay: 2000, unchangedStreak: 4, progress: 40, queuePosition: 0 })
   })
 
   it('done → 可以去取文件', () => {
@@ -128,7 +129,7 @@ describe('pollDecision：什么时候继续等、什么时候收工', () => {
     expect(gaveUp.kind).toBe('giveup')
   })
 
-  it('上限是 5 分钟（spec §6 的口径，写死在这里以免被顺手改掉）', () => {
+  it('兜底上限仍是 5 分钟（spec §6 的口径；有 timeout_seconds 时改按后端超时）', () => {
     expect(POLL_MAX_MS).toBe(5 * 60 * 1000)
   })
 })
