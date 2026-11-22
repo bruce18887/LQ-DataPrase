@@ -4,9 +4,15 @@
 教训原文：docs/tasks/lessons.md 2026-10-24）：
 
 * ``bytes``        —— 逐文件 ``st_size`` 加总，**表观口径**，页面只显示这一个数。
+  范围**只有** ``MEDIA_ROOT/data/<username>/``；作业产物在另一棵树，见下面两条。
 * ``unique_bytes`` —— 按 ``(st_dev, st_ino)`` 去重后的加总，真占盘口径。产品树目前没有
   硬链接（Task 1 探针 P4 实测），所以两者相等；留着它是**绊线**：哪天有代码往用户
-  目录里硬链文件，它会先于 chip 说谎，逼人重新说明口径。
+  目录里硬链文件，它会先于 chip 说谎，逼人重新说明口径。同样只覆盖 ``data/``。
+* ``jobs_bytes`` / ``jobs_file_count`` —— ``MEDIA_ROOT/jobs/<user.id>/`` 的量，
+  与 ``bytes`` **分开报**：题库（data）与作业产物（jobs）的清退机制完全不同，
+  合成一个数就再也拆不开。``by_type`` 与 DB 两本账都不含 jobs。
+* ``total_bytes`` —— ``bytes + jobs_bytes``，给前端总量 chip 用的合计；服务端的
+  差值恒等式**不用**它当分母（分母必须是用户看得见的 data 量，见 ``_mismatch``）。
 * 取 inode **必须** ``os.lstat``：本机（Python 3.13.12 / Windows）实测
   ``os.DirEntry.stat()`` 的 ``st_dev``/``st_ino`` 恒为 0，用它去重会把整棵树压成
   「1 个 inode」，几 GB 直接报成几 MB。同一条教训的实现见
@@ -62,6 +68,22 @@ def _user_data_root(username):
         raise ValueError('用户名不能安全地用作数据目录名：%r' % str(username))
     return os.path.normpath(
         os.path.join(str(settings.MEDIA_ROOT), 'data', str(username))
+    )
+
+
+def _user_jobs_root(user):
+    """当前用户的作业产物根目录 = ``MEDIA_ROOT/jobs/<user.id>``。
+
+    用**整数 PK**，不拼用户名：作业产物本来就只按 ``owner_id`` 落
+    （``apps/jobs/executor.py:245`` 的 ``result_dirs()`` 是
+    ``os.path.join('jobs', str(owner_id), str(job_id))``）⇒ 统计侧拼用户名会让两侧
+    指向两个不同的目录，真实产物永远扫不到，而且**不报错、只安静地报 0**。
+
+    没有 ``_user_data_root`` 那层 ``is_safe_username``：``int(user.id)`` 拼不出 ``..``
+    也拼不出路径分隔符，这条拼接的穿越面按构造就不存在。
+    """
+    return os.path.normpath(
+        os.path.join(str(settings.MEDIA_ROOT), 'jobs', str(int(user.id)))
     )
 
 
@@ -236,6 +258,9 @@ def _mismatch(bytes_total, registered_disk_bytes, registered_db_bytes):
 def _compute_usage(user):
     """扫盘 + 查库，组出端点返回体（口径见模块 docstring）。
 
+    走**两棵树**：data（``_user_data_root``，带 registered 做交集）与 jobs
+    （``_user_jobs_root``，纯总量）。DB 只查一次 —— jobs 侧不参与任何一本账。
+
     交集的三个内部量（``registered_count`` / ``registered_disk_bytes`` /
     ``registered_db_bytes``）**不进返回体**：界面只需要「超没超阈值 + 差多少」，
     多摆三个数就是规格 §4.6 明确否掉的「没人看得懂的二阶数字」。它们的正确性由
@@ -244,6 +269,9 @@ def _compute_usage(user):
     root = _user_data_root(user.username)
     db = _db_map(user, root)
     scan = _scan_tree(root, registered=db['map'])
+    # jobs 那棵树**不传 registered**：作业产物没有 DataFile 行，塞进交集只会在
+    # 「清单外」那一侧凭空长出一笔差值。它只贡献总量与文件数，不参与两本账。
+    jobs_scan = _scan_tree(_user_jobs_root(user))
     mismatch, diff = _mismatch(
         scan['bytes'], scan['registered_disk_bytes'], scan['registered_db_bytes']
     )
@@ -253,6 +281,9 @@ def _compute_usage(user):
         'unique_bytes': scan['unique_bytes'],
         'file_count': scan['file_count'],
         'by_type': scan['by_type'],
+        'jobs_bytes': jobs_scan['bytes'],
+        'jobs_file_count': jobs_scan['file_count'],
+        'total_bytes': scan['bytes'] + jobs_scan['bytes'],
         # db_count / db_bytes 是「全量参考」，走的是**行**口径（in_rows + out_count）；
         # 差值恒等式走的是交集（文件口径），那三个内部量不进返回体。
         'db_count': db['in_rows'] + db['out_count'],

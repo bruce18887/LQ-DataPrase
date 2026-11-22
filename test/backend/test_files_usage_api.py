@@ -21,6 +21,7 @@ PASSWORD = 'x-pass-12345678'
 USAGE_URL = '/api/v1/files/usage/'
 FIELDS = (
     'data_dir', 'bytes', 'unique_bytes', 'file_count', 'by_type',
+    'jobs_bytes', 'jobs_file_count', 'total_bytes',
     'db_count', 'db_bytes', 'db_bytes_in_root',
     'db_outside_root_count', 'db_outside_root_bytes',
     'mismatch_over_threshold', 'mismatch_diff_bytes', 'scanned_at',
@@ -77,6 +78,12 @@ class FileUsageApiTests(TestCase):
         self.assertEqual(data['bytes'], 2048)
         self.assertEqual(data['file_count'], 1)
         self.assertEqual(data['by_type'], {'single': {'bytes': 2048, 'count': 1}})
+        # 三个新字段（jobs 口径）走 JSON 就是 int：前端拿它直接求和，null / 字符串
+        # 都会在那边变成 NaN 或 '0' 拼接，而 TypeScript 的 `number` 类型在这里
+        # 挡不住任何东西（响应体是 any）。所以类型判据留在这一侧。
+        for key in ('jobs_bytes', 'jobs_file_count', 'total_bytes'):
+            self.assertIsInstance(data[key], int, key)
+        self.assertEqual(data['total_bytes'], data['bytes'] + data['jobs_bytes'])
         self.assertFalse(data['mismatch_over_threshold'])
         self.assertIsInstance(data['scanned_at'], str)
 
@@ -194,7 +201,7 @@ class FileUsageApiTests(TestCase):
 
     def test_安全用户名照旧走完整返回体(self):
         """204 那一支是**白名单式早退**，别把它写成「凡 ValueError 都吞」：
-        正常账号（含点号但不是 ..）必须照旧拿到 13 个字段的完整返回体。"""
+        正常账号（含点号但不是 ..）必须照旧拿到 16 个字段的完整返回体。"""
         dotted = User.objects.create_user('a.b', 'ab@localhost', PASSWORD)
         client = APIClient()
         client.force_authenticate(user=dotted)
