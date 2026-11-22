@@ -6,6 +6,7 @@ import {
   usageBytesText,
   usageChipText,
   usageBreakdownRows,
+  usageJobsLine,
   usageMismatchLine,
   usageOutsideLine,
   usageScannedText,
@@ -16,6 +17,9 @@ const base = (over: Partial<FileUsage> = {}): FileUsage => ({
   bytes: 0,
   unique_bytes: 0,
   file_count: 0,
+  jobs_bytes: 0,
+  jobs_file_count: 0,
+  total_bytes: 0,
   by_type: {},
   db_count: 0,
   db_bytes: 0,
@@ -73,12 +77,24 @@ describe('usageChipText', () => {
   })
 
   it('chip 只有体积，不带文件数（与工具栏左边那颗「N 个文件」口径不同）', () => {
-    const text = usageChipText(base({ bytes: 1288490188, file_count: 3412 }))
+    // 2026-11-22 起 chip 读的是**总量** `total_bytes`（= data + 作业产物），不再是 `bytes`。
+    // 三个字段刻意落在三个不同的显示档值上：bytes 1.20 GB / jobs_bytes 512.0 MB /
+    // total_bytes 1.70 GB —— 读错字段（退回 `bytes`、或误读 `jobs_bytes`/`unique_bytes`）
+    // 时下面的 toBe 必红，而不会因为三档同形而假绿（唯一的同形危险是 `bytes=0` 的
+    // 空目录夹具，那一态由下一条用例单独钉）。
+    const text = usageChipText(base({
+      bytes: 1288490188,
+      jobs_bytes: 536870912,
+      jobs_file_count: 7,
+      total_bytes: 1825361100,
+      file_count: 3412,
+    }))
     // 反向守卫必须排在 toBe **之前**：同一条 it 里 vitest 在第一个失败断言就抛，
     // 排在整串断言后面它永远当不了 killer（2026-11-14 实测：把计数加回去死在 toBe，
     // 行号 77/83，不是这一行），那样它就只是注释而不是判据。
+    // 作业产物的文件数（夹具里 7）同样不许漏到 chip 上 —— 它只出现在浮层的作业产物行。
     expect(text).not.toMatch(/个文件/)
-    expect(text).toBe('磁盘占用 1.20 GB')
+    expect(text).toBe('磁盘占用 1.70 GB')
   })
 
   it('空目录也只说体积，不再出现「· 0 个文件」那种半句话', () => {
@@ -132,6 +148,30 @@ describe('usageBreakdownRows', () => {
     const rows = usageBreakdownRows(base({ by_type: { batch: { bytes: 2048, count: 1234567 } } }))
     expect(rows).toHaveLength(1)
     expect(rows[0].countText).toBe('1,234,567 个文件')
+  })
+})
+
+describe('usageJobsLine', () => {
+  // 作业产物（`media/jobs/<user.id>/`）与 data 是**两棵独立的树**，清退机制也不同
+  // （storage_usage.py 模块 docstring），所以浮层里这一行只报 jobs 自己那份，
+  // 不并入任何分桶行；它同时也是 chip 那笔总量与分桶线之和的差额说明。
+  it('没有作业产物（jobs_bytes 归零）时整行不显', () => {
+    expect(usageJobsLine(null)).toBeNull()
+    expect(usageJobsLine(base())).toBeNull()
+  })
+
+  // 闸门必须卡在 jobs_bytes 上，而不是「文件数 > 0」：真实态里两者同起同落，
+  // `base()` 与下一条用例都杀不动「按计数判空」的变异体（同本文件 mismatch 那条
+  // 「flag 与 diff 同起同落」的诊断）。所以这一条造一个只有计数非零的决策格 ——
+  // 它不可经真实载荷达到，存在的唯一理由就是让「按错了字段判空」变红。
+  it('判空看的是 jobs_bytes，不是 jobs_file_count', () => {
+    expect(usageJobsLine(base({ jobs_bytes: 0, jobs_file_count: 5, total_bytes: 1024 })))
+      .toBeNull()
+  })
+
+  it('有作业产物时给出体积与文件数（千分位与分桶行同源）', () => {
+    expect(usageJobsLine(base({ jobs_bytes: 3221225472, jobs_file_count: 1234, total_bytes: 3221225472 })))
+      .toBe('作业产物 3.00 GB · 1,234 个文件')
   })
 })
 

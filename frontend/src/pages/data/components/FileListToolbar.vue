@@ -29,6 +29,12 @@
           <el-descriptions-item v-if="!usageRows.length" label="数据目录">
             没有文件
           </el-descriptions-item>
+          <!-- 总量里分桶行覆盖不到的那部分（作业产物树）。这一项**不传 label**：
+               句子自带「作业产物」开头，再挂 `label="作业产物"` 会读成
+               「作业产物：作业产物 3.0 KB…」（见 diskUsage.ts 的 usageJobsLine 注释）。 -->
+          <el-descriptions-item v-if="usageJobs">
+            {{ usageJobs }}
+          </el-descriptions-item>
           <el-descriptions-item v-if="usageOutside" label="目录外记录">
             {{ usageOutside }}
           </el-descriptions-item>
@@ -96,6 +102,7 @@ import type { FileUsage } from '../../../api/datafiles'
 import {
   usageBreakdownRows,
   usageChipText,
+  usageJobsLine,
   usageOutsideLine,
   usageScannedText,
 } from '../../../utils/diskUsage'
@@ -116,10 +123,11 @@ const emit = defineEmits<{
 
 const usageChip = computed(() => usageChipText(props.usage))
 const usageRows = computed(() => usageBreakdownRows(props.usage))
+const usageJobs = computed(() => usageJobsLine(props.usage))
 const usageOutside = computed(() => usageOutsideLine(props.usage))
 const usageScanned = computed(() => usageScannedText(props.usage))
-// 四个派生串一律走 computed，不在模板里直接调纯函数（Task 7 派发词原话「不在模板里重复调用
-// 纯函数」，落地时是三个，这一处补齐成四个）：内联调用会在每次工具栏重渲染时重跑，而搜索框
+// 五个派生串一律走 computed，不在模板里直接调纯函数（Task 7 派发词原话「不在模板里重复调用
+// 纯函数」，落地时是三个，2026-11-22 补齐成五个）：内联调用会在每次工具栏重渲染时重跑，而搜索框
 // 是本地 state ⇒ 每敲一个字都重渲染这一片。代价本来是微秒级，改它的理由是**一致**。
 //
 // `:key` 用 `label:index` 而不是裸 `label`：`row.label` 的取值空间是

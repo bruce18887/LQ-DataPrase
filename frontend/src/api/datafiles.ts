@@ -321,12 +321,20 @@ export interface UsageBucket {
 
 export interface FileUsage {
   data_dir: string
-  /** 表观口径，chip 显示的那一个数 */
+  /** data 树（`media/data/<username>/`）的表观口径；浮层的分桶行加起来就是它 */
   bytes: number
-  /** inode 去重口径（绊线用，界面不显示） */
+  /** inode 去重口径（绊线用，界面不显示），同样只覆盖 data 树 */
   unique_bytes: number
   file_count: number
-  /** 根下第一段目录名为键（single / batch，散文件为空串） */
+  /**
+   * 作业产物树（`media/jobs/<user.id>/`）的表观体积与文件数。与 `bytes` **分开报**：
+   * 两棵树的清退机制不同，合成一个数就再也拆不开（口径见 storage_usage.py 模块 docstring）。
+   */
+  jobs_bytes: number
+  jobs_file_count: number
+  /** chip 显示的那一个数 = `bytes + jobs_bytes`；服务端的差值恒等式不用它当分母 */
+  total_bytes: number
+  /** 根下第一段目录名为键（single / batch，散文件为空串）；不含 jobs */
   by_type: Record<string, UsageBucket>
   db_count: number
   db_bytes: number

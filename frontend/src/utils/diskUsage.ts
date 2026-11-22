@@ -52,10 +52,16 @@ export function usageBytesText(bytes: number | null | undefined): string {
  * 后两数**本来就会不一致**（2026-11-14 用户机现症）。文件数移交浮层分桶行
  * （`usageBreakdownRows` 的 `countText`，逐桶 `sizeText · countText`），也符合设计 §4.2
  * 「页面只显一个数」。
+ *
+ * 2026-11-22 起读的是 `total_bytes`（= data + 作业产物），**不是** `bytes`：用户问的是
+ * 「我这账号占了多少盘」，而 jobs 同样是这个账号的产出。代价要写明白 —— 浮层分桶行加
+ * 起来等于 `bytes`（只 data），与本函数显示的差一笔 `jobs_bytes`；那一笔由
+ * `usageJobsLine` 在浮层里单独说明，两处对得上账。别再改回 `bytes`：那会让 chip 少报
+ * 整棵作业产物树，而这一行没有任何其它入口看得见。
  */
 export function usageChipText(usage: FileUsage | null): string | null {
   if (!usage) return null
-  return `磁盘占用 ${usageBytesText(usage.bytes)}`
+  return `磁盘占用 ${usageBytesText(usage.total_bytes)}`
 }
 
 export interface UsageRow {
@@ -81,6 +87,24 @@ export function usageBreakdownRows(usage: FileUsage | null): UsageRow[] {
       sizeText: usageBytesText(bucket.bytes),
       countText: `${bucket.count.toLocaleString()} 个文件`,
     }))
+}
+
+/**
+ * 浮层的「作业产物」一行 —— chip 那笔总量里、`by_type` 分桶覆盖不到的那部分。
+ *
+ * 为什么这句自带完整的标签而不是像 `usageOutsideLine` 那样配 `label`：本仓的
+ * `el-descriptions` 是 `border` 布局，每个 item 都会先渲染一格 label 再渲染内容格；
+ * 句子自带「作业产物」开头，再挂 `label="作业产物"` 就会读成「作业产物：作业产物 3.0 KB…」。
+ * 所以调用处这一项**不传 label**（那一格是空的），断定口径的仍是这句话本身。
+ *
+ * `jobs_bytes === 0` 时返回 null（调用方 v-if 决定整行出不出现）：作业产物树为空是常态，
+ * 显「作业产物 0 B · 0 个文件」只是在占位；而 `0 B` 对**数据目录**是合法状态（空目录照显），
+ * 这两处的分寸不同不是笔误。判空只认 `jobs_bytes`：字节与文件数在真实载荷里同起同落，
+ * 按计数判空是等价变异，由 T2 的那条决策格钉住。
+ */
+export function usageJobsLine(usage: FileUsage | null): string | null {
+  if (!usage || usage.jobs_bytes === 0) return null
+  return `作业产物 ${usageBytesText(usage.jobs_bytes)} · ${usage.jobs_file_count.toLocaleString()} 个文件`
 }
 
 export function usageOutsideLine(usage: FileUsage | null): string | null {

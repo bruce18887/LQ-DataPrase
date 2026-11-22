@@ -34,9 +34,10 @@ const USAGE_ROUTE = '**/api/v1/files/usage/**'
  * 判据异源：spec 里**自己再实现一遍**四档格式化。
  * 复用 src 里的同一个函数只会证明同一段代码等于自己：档/小数位/取整方向都跟着一起错。
  * 「组件偷偷读错字段」这条路要红，靠的是 case 1 里把 `unique_bytes` 注入成与 `bytes` 不同
- * （那里有实测说明为什么非注入不可）。Task 6c 之后 chip 只有体积，所以浏览器侧唯一活的
- * 读错字段路径就是 `bytes ↔ unique_bytes`；计数类字段（file_count/db_count）不再出现在
- * chip 上，它们的分工由浮层那一条（case 4）与 T2 钉。
+ * （那里有实测说明为什么非注入不可）。Task 6c 之后 chip 只有体积；2026-11-22 起它读的是
+ * `total_bytes`，所以浏览器侧活的读错字段路径是 `total_bytes ↔ bytes ↔ unique_bytes`
+ * 三条（三个数都在 case 1 里被推成不同形）。计数类字段（file_count/jobs_file_count）不出现在
+ * chip 上，它们的分工由浮层那条（case 4）与 T2 钉。
  * ⚠ 边界要说明白：这份副本**只覆盖有限数**，没有 src 那条 `null/undefined/非有限 ⇒ '--'` 的分支
  * （`utils/diskUsage.ts` 的 `usageBytesText` 有）。这里刻意不补：本文件的 `bytes` 全部来自真实
  * 返回体，非有限值到不了 ⇒ 补了就是给不可能的状态写代码。代价也说清楚——万一 src 那条 `'--'`
@@ -74,6 +75,30 @@ const ROOT_LOOSE_KEY = ''
 const LOOSE_BYTES = 3.5 * 1024 ** 3 // 3758096384 ⇒ '3.50 GB'
 const LOOSE_COUNT = 2048 // '2,048'（en-US 与 zh-CN 分组符同为逗号，本仓浏览器 locale 下两侧一致）
 
+/**
+ * 作业产物注入（case 1 与 case 4）。
+ *
+ * 为什么必须注入：2026-11-22 起 chip 读 `total_bytes`（= `bytes` + `jobs_bytes`），
+ * 而本文件的种子树是 data 那棵（`scripts/e2e_pool.mjs` 硬链进来的夹具），`jobs/` 下**通常
+ * 一个产物都没有** ⇒ `jobs_bytes = 0`、`total_bytes === bytes`，于是「组件读的是 bytes
+ * 而不是 total_bytes」这条错法在这棵树上**看不见**（假绿）。同理浮层那行
+ * `v-if="usageJobs"` 在 0 时不渲染，不注入就没有任何东西可断。
+ *
+ * 取值要**大于显示档的最小步长**（MB 档一位小数 ⇒ 0.1 MiB = 104,858 B，算术与 case 3 同源），
+ * 21 MiB 足够推得动最后一位；`jobs_file_count` 取 1024 让千分位也在这一行上走一遍。
+ * `total_bytes` 必须跟着重算 —— 真实后端给的就是 `bytes + jobs_bytes`（storage_usage.py
+ * 的 `_compute_usage`），只改 jobs 而留旧的 total 等于造一个自相矛盾的载荷，
+ * 那会让「chip 读 total」的断言通过而产品逻辑是错的。
+ */
+const JOBS_BYTES = 21 * 1024 * 1024 // ⇒ '21.0 MB'
+const JOBS_COUNT = 1024 // '1,024'
+
+function injectJobs(json: any): void {
+  json.jobs_bytes = JOBS_BYTES
+  json.jobs_file_count = JOBS_COUNT
+  json.total_bytes = json.bytes + JOBS_BYTES
+}
+
 test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
   test('chip 文案与端点返回体逐字一致（透传捕获，不靠再猜一次缓存桶）', async ({ page }) => {
     // 用 route 透传把 app 自己那一次读取的响应体留下来 —— 不能再 apiGet 一次去比：
@@ -88,8 +113,12 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
       // 是**看不见的**（2026-11-14 复审现读，别把它当成已钉住）。
       // ⚠ 差异必须**大于显示档的最小步长**才看得见，算术与下面 case 3 同一条：MB 档一位小数
       // ⇒ 步长 0.1 MiB = 104,858 B，GB 档两位小数 ⇒ 10.49 MB。取 20 MiB 同时跨过两档，
-      // 且不动 `bytes` 本身（chip 的期望串仍取自 `captured.bytes`）。
+      // 且不动 `bytes` 本身。
       json.unique_bytes = json.bytes - 20 * 1024 * 1024
+      // 作业产物同理必须注入，理由见上面 JOBS_BYTES 那段：jobs=0 时 total_bytes 与 bytes
+      // 同值，「chip 读了 bytes」在这棵树上不可见。注入后三个数两两不同形
+      // （bytes / bytes−20MiB / bytes+21MiB ⇒ 期望串取自 total_bytes）。
+      injectJobs(json)
       captured = json
       await route.fulfill({ response, json })
     })
@@ -104,8 +133,10 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
     // 「N 个文件」会打架 —— 尤其激活刷新之后，Explorer 拷进来的文件只动 chip 不动表格。
     // 反向守卫排在精确串**之前**：`toHaveText` 一红就先抛，排在它后面的 `not.toContainText`
     // 永远当不上 killer（同 5b33828 那次的订正，装饰性断言比没有更坏）。
+    // 2026-11-22 起 chip 读总量：期望串取自 `captured.total_bytes`（data + 作业产物），
+    // 不是 `bytes` —— 上面注入了 21 MiB 的作业产物，两者跨过 MB 档的显示步长。
     await expect(chip).not.toContainText('个文件')
-    await expect(chip).toHaveText(`磁盘占用 ${bytesText(captured.bytes)}`)
+    await expect(chip).toHaveText(`磁盘占用 ${bytesText(captured.total_bytes)}`)
   })
 
   test('占用接口坏掉时列表照常渲染，chip 不出现', async ({ page }) => {
@@ -183,6 +214,10 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
     await page.route(USAGE_ROUTE, async (route) => {
       const response = await route.fetch()
       const json = await response.json()
+      // 作业产物**两轮都注入**（理由见上面 JOBS_BYTES 那段）：真实树的 jobs 通常为 0，
+      // 那一行本就不渲染，没有东西可断。两轮一致还保住下面「注入空串桶恰好多一对 cell」
+      // 的差值 —— 若只在某一轮出现，那个 toBe(2) 会被这一行额外顶成 4。
+      injectJobs(json)
       // captured 只存**真实**返回体：真实桶的期望串必须来自真实载荷，注入轮不许覆盖它。
       if (!injectLoose) captured = json
       else json.by_type[ROOT_LOOSE_KEY] = { bytes: LOOSE_BYTES, count: LOOSE_COUNT }
@@ -217,6 +252,12 @@ test.describe('磁盘占用 chip', { tag: ['@p2', '@data'] }, () => {
       expect(joined, `浮层里必须有 ${key} 这一桶的「${countText}」`).toContain(countText)
       expect(joined, `浮层里必须有 ${key} 这一桶的体积`).toContain(bytesText(bucket.bytes))
     }
+    // 作业产物行（2026-11-22）：chip 那笔总量里、分桶行覆盖不到的那部分。
+    // 整句逐字断而不是只断「作业产物」三个字 —— 行缺失、读错字段（jobs_bytes /
+    // jobs_file_count）、格式化退化（体积档位或千分位）都会红。期望串由 spec 自己的
+    // bytesText + toLocaleString 拼，不复用 src 的 usageJobsLine（异源纪律同文件头）。
+    expect(joined, '浮层必须有作业产物行，且与注入值逐字一致')
+      .toContain(`作业产物 ${bytesText(JOBS_BYTES)} · ${JOBS_COUNT.toLocaleString()} 个文件`)
 
     /*
      * —— 合成形状轮：`by_type['']`（根目录散文件）——
