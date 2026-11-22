@@ -43,6 +43,9 @@ export const ERROR_CODE_MAP: Record<string, string> = {
   correlation_failed: '相关性分析失败',
   internal_error: '服务器内部错误',
   out_of_memory: '服务器内存不足，请关闭其他任务后重试',
+  // 准入内核拒绝（503）与限流（429）的信封码，文案与 apps/common/exceptions.py 同源
+  server_busy: '服务器繁忙，请稍后重试',
+  throttled: '请求过于频繁，请稍后再试',
   no_declaration: '文件里没有找到 double 权重声明',
   weight_length_mismatch: '声明长度与实际数值个数不一致',
   weight_bad_number: '权重数值里有无法解析的项',

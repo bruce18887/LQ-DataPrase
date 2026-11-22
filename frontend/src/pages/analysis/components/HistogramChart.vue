@@ -1,6 +1,13 @@
 <template>
   <div class="histogram-chart-wrapper">
     <div ref="chartRef" class="chart-container" />
+    <div
+      v-if="degradedText"
+      class="degraded-hint"
+      data-degraded-hint
+    >
+      {{ degradedText }}
+    </div>
     <OutlierHintBar
       :mode="outlierHandling || 'off'"
       :outlier-info="result?.outlier_info ?? null"
@@ -15,12 +22,13 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, watch } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import { chartFontSize } from '../../../theme/typography'
 import { useChart } from '../../../composables/useChart'
 import { useEChartsTheme } from '../../../utils/echarts-theme'
 import { clampBarValue, formatPercent, formatAxisValue, getBarGroupPad, getMaxBarWidthPercent, getSiteColors8, buildChartToolbox } from '../../../utils/chart-bar'
 import { activeBinIndices } from '../composables/histogramBins'
+import { histogramDegradedHint } from '../histogramDegraded'
 import { useChartBrushSelect, type ChartSelection } from '../composables/useChartBrushSelect'
 import OutlierHintBar from './OutlierHintBar.vue'
 import ChartContextMenu from './ChartContextMenu.vue'
@@ -46,6 +54,10 @@ const props = withDefaults(defineProps<{
 })
 
 const { colors, isDark } = useEChartsTheme()
+
+// KDE 内存降级提示：后端每个参数结果恒带 `degraded: string[]`（空数组 = 无降级），
+// 非空时曲线被省掉但其余统计量照旧 —— 文案与判据在 histogramDegraded.ts。
+const degradedText = computed(() => histogramDegradedHint(props.result?.degraded ?? []))
 
 const emit = defineEmits<{ 'create-subset': [sel: ChartSelection] }>()
 
@@ -346,5 +358,20 @@ void chartRef // bound to <div ref="chartRef"> in template
 
 .outlier-hint-bar {
   flex-shrink: 0;
+}
+
+/* KDE 内存降级提示：与 .outlier-hint-bar 同形态（同一条底部信息带、同样不参与
+   弹性分配），出现/消失只做 v-if 显隐，不加过渡——否则显隐动画期间图表高度抖动。
+   颜色只认语义 token（--warn 在 light/night 各取各的值，R7），不写夜间专用块。 */
+.degraded-hint {
+  flex-shrink: 0;
+  margin-top: 4px;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: var(--p-fs-dense);
+  line-height: 1.5;
+  color: var(--warn);
+  background-color: color-mix(in srgb, var(--warn) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
 }
 </style>
