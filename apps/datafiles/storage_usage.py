@@ -3,7 +3,8 @@
 口径（唯一事实来源：specs/2026-11-13-ux-batch-dropdown-admin-dedup-intro-usage-design.md §4.2；
 教训原文：docs/tasks/lessons.md 2026-10-24）：
 
-* ``bytes``        —— 逐文件 ``st_size`` 加总，**表观口径**，页面只显示这一个数。
+* ``bytes``        —— 逐文件 ``st_size`` 加总，**表观口径**，浮层分桶与差值分母用它
+  （界面 chip 显示的是 ``total_bytes``，见下条）。
   范围**只有** ``MEDIA_ROOT/data/<username>/``；作业产物在另一棵树，见下面两条。
 * ``unique_bytes`` —— 按 ``(st_dev, st_ino)`` 去重后的加总，真占盘口径。产品树目前没有
   硬链接（Task 1 探针 P4 实测），所以两者相等；留着它是**绊线**：哪天有代码往用户
@@ -11,8 +12,9 @@
 * ``jobs_bytes`` / ``jobs_file_count`` —— ``MEDIA_ROOT/jobs/<user.id>/`` 的量，
   与 ``bytes`` **分开报**：题库（data）与作业产物（jobs）的清退机制完全不同，
   合成一个数就再也拆不开。``by_type`` 与 DB 两本账都不含 jobs。
-* ``total_bytes`` —— ``bytes + jobs_bytes``，给前端总量 chip 用的合计；服务端的
-  差值恒等式**不用**它当分母（分母必须是用户看得见的 data 量，见 ``_mismatch``）。
+* ``total_bytes`` —— ``bytes + jobs_bytes``，**界面 chip 用它作为总量**（「磁盘占用 X」）；
+  服务端的差值恒等式**不用**它当分母（分母必须是 data 树里逐个文件加出来的那个数，
+  见 ``_mismatch``）。
 * 取 inode **必须** ``os.lstat``：本机（Python 3.13.12 / Windows）实测
   ``os.DirEntry.stat()`` 的 ``st_dev``/``st_ino`` 恒为 0，用它去重会把整棵树压成
   「1 个 inode」，几 GB 直接报成几 MB。同一条教训的实现见
@@ -247,7 +249,8 @@ def _mismatch(bytes_total, registered_disk_bytes, registered_db_bytes):
     于是这一行只说一件事：**清单里的大小数字过期了**。
     文件已删（=孤立数据库记录）与磁盘孤儿（=孤立磁盘文件）各归修复中心自己的卡，
     不再在这里用 MB 重复说一遍 —— 实测本机 dev 库旧口径 ratio=0.1775、新口径 0.0000。
-    分母用 ``bytes_total``（用户看得见的那个数），``max(..., 1)`` 只防空目录除零；
+    分母用 ``bytes_total``（data 树的总量，浮层的分桶行加起来就是它；chip 上那个
+    ``total_bytes`` 不是这个分母），``max(..., 1)`` 只防空目录除零；
     ``>`` 是严格大于，恰好等于阈值不算不一致。
     """
     diff = abs(registered_disk_bytes - registered_db_bytes)
