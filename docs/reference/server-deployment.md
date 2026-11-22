@@ -267,6 +267,15 @@ cd /srv/lqdp-src && .venv/bin/python manage.py migrate --run-syncdb
   的 `test_pool_mp_context_is_pinned_not_left_to_default` —— 它断言的是「实参存在」，
   所以在 Windows 上也能拦住「删掉这个参数」。
 
+**过载准入（2026-11-22 起可用）**：
+
+- 重活端点（分析 / Gage / Buyoff / 批次报告共 23 个 action）走准入信号量；
+  `histogram` 不带 `params` 的参数列表快路径不占槽。
+- `LQDP_HEAVY_CONCURRENCY` 默认 2（夹 1–8）；`LQDP_HEAVY_WAIT_S` 默认 10 秒（夹 0–60）。
+- 被拒返回 503 `server_busy` + `Retry-After: 5`；内存打爆仍是 503 `out_of_memory`。
+- 运维观察：`GET /api/v1/metrics/` 的 `admission` 段（`active/waiting/rejected/last_reason`）。
+  20 人档若频繁出现 `last_reason=queue`，先调大 `LQDP_HEAVY_CONCURRENCY` / `LQDP_HEAVY_WAIT_S`，不要改代码。
+
 **还等的两件**：
 
 - 无 TLS 的安全姿态（§5.1）。
