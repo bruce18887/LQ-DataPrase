@@ -45,10 +45,11 @@ def _timeout_seconds(job: Job):
     """这条作业的超时（秒）。唯一事实源是 `executor.KIND_RUNNERS`，别在这里抄数字。
 
     遗留行可能带着早已下线的 kind：取不到就回 None —— 轮询页不该因为一条考古行
-    500，前端把 None 当「不显示等待上限」。
+    500，前端把 None 当「不显示等待上限」。同理用 `get('timeout')` 而不是下标：
+    kind 还在表里、但那张表没登记 timeout 时，同样只能回 None。
     """
     spec = executor.KIND_RUNNERS.get(job.kind)
-    return spec['timeout'] if spec else None
+    return spec.get('timeout') if spec else None
 
 
 def _queue_position(job: Job) -> int:
@@ -70,8 +71,9 @@ def _queue_position(job: Job) -> int:
 def _job_payload(job: Job, *, with_queue: bool = False) -> dict:
     """轮询契约。`timeout_seconds` 恒出现；`queue_position` 只在 `with_queue` 时出现。
 
-    `queue_position` 每条一次 `count()`：提交 202 与详情都只算一条，列表页却会变成
-    N+1 ⇒ 列表刻意不查它（前端不需要按队列排序，字段缺席即「不显示」）。
+    提交 202 返回的就是这一份（外加一个 `job_id`），与详情同形；两者每条都只算一次
+    `count()`。列表页也走这里但**不**查队列：逐条 `count()` 就是 N+1，前端不需要按
+    队列排序，字段缺席即「不显示」。
     """
     payload = {
         'id': job.id,
@@ -247,10 +249,12 @@ class JobSubmitView(APIView):
             # 现场实测），而进程活着 ⇒ systemd 的 Restart=always 也救不回来。
             return self._sync_fallback(job, task)
         job.refresh_from_db()
-        # 202 也带排队数：提交方拿到号就能直接显示「前面还有几条」，不必等第一次轮询。
-        return Response({'job_id': job.id, 'status': job.status,
-                         'queue_position': _queue_position(job)},
-                        status=http_status.HTTP_202_ACCEPTED)
+        # 202 就是**首份轮询 payload**：提交方拿号即能显示「前面还有几条」与「最多等多久」，
+        # 不必等第一次轮询。`job_id` 额外保留一个 —— 前端 `classifySubmit` 只认这个键，
+        # 直接返回整份 `_job_payload` 会把它挤掉。
+        payload = _job_payload(job, with_queue=True)
+        payload['job_id'] = job.id
+        return Response(payload, status=http_status.HTTP_202_ACCEPTED)
 
     def _sync_fallback(self, job: Job, task: dict):
         """池建不起来时同步跑完 —— 行为退回作业化之前的今天，别 500。

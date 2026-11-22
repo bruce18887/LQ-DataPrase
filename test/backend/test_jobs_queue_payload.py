@@ -158,7 +158,13 @@ class PayloadSurfaceTests(JobPayloadCase):
         return self.client.post('/api/v1/jobs/export_excel/',
                                 {'file_id': self.datafile.id}, format='json')
 
-    def test_submit_202_carries_queue_position(self):
+    def test_submit_202_carries_the_full_poll_payload(self):
+        """202 是**首份轮询 payload**，不是「只有号」。
+
+        Task 11 拿它的 `timeout_seconds` 定轮询上限；缺这个键就退回 5 分钟默认值，
+        而 `export_batch_charts` 的预算有 3600 秒 —— 上限比作业短，等待会被提前掐断。
+        `job_id` 单独保留：前端 `classifySubmit` 只认它，少了就变成「没拿到作业号」。
+        """
         self._job(status='running', created_at=self.base)
         self._job(status='running', created_at=self.base + timedelta(seconds=1))
         self._job(status='pending', created_at=self.base + timedelta(seconds=2))
@@ -167,8 +173,18 @@ class PayloadSurfaceTests(JobPayloadCase):
 
         self.assertEqual(resp.status_code, 202, resp.content)
         body = resp.json()
+        # 键集合 = 详情那份 payload + `job_id`（提交侧的唯一旧键，不许被挤掉）
+        self.assertEqual(
+            set(body),
+            {'id', 'kind', 'status', 'progress', 'error', 'result_name',
+             'created_at', 'timeout_seconds', 'queue_position', 'job_id'})
+        self.assertEqual(body['job_id'], body['id'])
+        self.assertEqual(body['kind'], 'export_excel')
+        self.assertEqual(body['timeout_seconds'], KIND_TIMEOUT_SECONDS['export_excel'])
         self.assertEqual(body['queue_position'], 3)
-        self.assertEqual(Job.objects.get(pk=body['job_id']).status, 'running')
+        job = Job.objects.get(pk=body['job_id'])
+        self.assertEqual(job.status, 'running')
+        self.assertEqual(body['status'], job.status)
 
     def test_detail_carries_queue_position_and_timeout(self):
         job = self._job(created_at=self.base)
