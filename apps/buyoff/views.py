@@ -8,6 +8,7 @@ from django.http import FileResponse
 import excelize
 
 from apps.analysis.services.statistics import filter_bin1_rows
+from apps.common.admission import HeavyActionMixin
 from apps.common.errors import error_response
 from apps.datafiles.models import DataFile
 from apps.datafiles.services import get_cached_parsed_file
@@ -17,8 +18,11 @@ from apps.export.excelize_helpers import save_excelize
 from apps.common.export_naming import base_export_context, render_export_filename
 
 
-class BuyoffViewSet(viewsets.GenericViewSet):
+class BuyoffViewSet(HeavyActionMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
+
+    # 重活登记（内存治理 spec §6.1）：对齐与出表都要把多份文件同时驻留。
+    heavy_actions = frozenset({'identify_common_items', 'generate_form'})
 
     @action(detail=False, methods=['post'])
     def identify_common_items(self, request):

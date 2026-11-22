@@ -36,6 +36,7 @@ from apps.analysis.services.data_services import (
     compute_wafer_zone_stats,
 )
 from apps.common.params import get_param, get_param_float, get_param_list
+from apps.common.admission import HeavyActionMixin
 from apps.common.errors import error_response
 from apps.analysis.services.range_limits import site_table_limits
 
@@ -56,8 +57,15 @@ from ._helpers import (
 CORRELATION_PARAM_LIMIT = 50
 
 
-class StatisticsViewSet(viewsets.GenericViewSet):
+class StatisticsViewSet(HeavyActionMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
+
+    # 重活登记（内存治理 spec §6.1）。`site_stats` 刻意不登记：单参数站点表是轻端点，
+    # 登记它等于让「点开站点表」也可能收到 503。
+    heavy_actions = frozenset({
+        'detect_fail', 'bin_stats', 'zonal_yield', 'correlation_matrix',
+        'bin_trend', 'boxplot', 'param_trend',
+    })
 
     @action(detail=False, methods=['get', 'post'])
     def detect_fail(self, request):
