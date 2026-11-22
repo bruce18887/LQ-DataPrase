@@ -40,10 +40,19 @@ from apps.analysis.views import analysis_views as analysis_views_module  # noqa:
 from apps.analysis.views import AnalysisViewSet  # noqa: E402
 
 PARAM = 'lkg_VCC_EN_float_3P6V'
+# 多参数隔离用例的第二个参数：视图在所有参数间共用过同一个 degraded list，
+# 必须能证明 A 的降级项不会串到 B 上。
+PARAM_B = 'lkg_VCC_EN_float_3P6V_B'
 METADATA = {
     'mins': {PARAM: '8.0'},
     'maxs': {PARAM: '14.3'},
     'units': {PARAM: 'uA'},
+    'format': 'CTA8280F',
+}
+METADATA_TWO_PARAMS = {
+    'mins': {PARAM: '8.0', PARAM_B: '8.0'},
+    'maxs': {PARAM: '14.3', PARAM_B: '14.3'},
+    'units': {PARAM: 'uA', PARAM_B: 'uA'},
     'format': 'CTA8280F',
 }
 
@@ -145,13 +154,40 @@ class ComputeHistogramStatsDegradedTests(SimpleTestCase):
                                      range_type='RDL')
         self.assertEqual(r2['degraded'], [])
 
+    def test_filtered_variant_without_outliers_reports_raw_reason(self):
+        """``kde_variant='filtered'`` 但无异常值 → 回退算全量那条，reason 是 raw。"""
+        degraded = []
+        with mock.patch.object(histogram_module, 'compute_kde_curve',
+                               side_effect=MemoryError) as patched:
+            r = compute_histogram_stats(_df(_clean_vals()), METADATA, PARAM, None,
+                                        range_type='RDL', kde_variant='filtered',
+                                        degraded=degraded)
+        self.assertEqual(patched.call_count, 1)
+        self.assertEqual(r['degraded'], ['kde_curve'])
+        self.assertIsNone(r['kde_curve'])
+        self.assertIsNone(r['filtered_kde_curve'])
+
+    def test_both_curves_degraded_record_both_reasons_in_compute_order(self):
+        """两条曲线都降级：reason 按计算顺序（raw 先、filtered 后）各一条。"""
+        degraded = []
+        with mock.patch.object(histogram_module, 'compute_kde_curve',
+                               side_effect=MemoryError):
+            r = compute_histogram_stats(_df(_vals_with_outliers()), METADATA,
+                                        PARAM, None, range_type='DR',
+                                        degraded=degraded)
+        self.assertEqual(r['degraded'], ['kde_curve', 'filtered_kde_curve'])
+        self.assertIsNone(r['kde_curve'])
+        self.assertIsNone(r['filtered_kde_curve'])
+
 
 class HistogramViewDegradedTests(SimpleTestCase):
-    """视图接线：循环前建 degraded=[]，结果原样带进响应 JSON。"""
+    """视图接线：每个参数各自的 degraded list，结果原样带进响应 JSON。"""
 
-    def _post(self, payload):
+    def _post(self, payload, df=None, metadata=None):
         restore = test_support.patch_df_loader(
-            _df(_clean_vals()), fake_datafile(), METADATA)
+            df if df is not None else _df(_clean_vals()),
+            fake_datafile(),
+            metadata if metadata is not None else METADATA)
         try:
             request = APIRequestFactory().post(
                 '/api/v1/analysis/histogram/', dict(payload), format='json')
@@ -180,3 +216,19 @@ class HistogramViewDegradedTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200, response.content[:400])
         body = json.loads(response.content)
         self.assertEqual(body['results'][PARAM]['degraded'], ['kde_curve'])
+
+    def test_degraded_reasons_are_isolated_per_param(self):
+        """A 降级、B 正常：B 不能沾到 A 的 reason（也不能靠重复项暴露共用 list）。"""
+        two_param_df = pd.DataFrame({PARAM: _clean_vals(),
+                                     PARAM_B: _clean_vals()})
+        healthy_curve = [[0.0, 1.0]]
+        with mock.patch.object(histogram_module, 'compute_kde_curve',
+                               side_effect=[MemoryError, healthy_curve]):
+            response = self._post({'file_id': 1, 'params': [PARAM, PARAM_B]},
+                                  df=two_param_df, metadata=METADATA_TWO_PARAMS)
+        self.assertEqual(response.status_code, 200, response.content[:400])
+        results = json.loads(response.content)['results']
+        self.assertEqual(results[PARAM]['degraded'], ['kde_curve'])
+        self.assertIsNone(results[PARAM]['kde_curve'])
+        self.assertEqual(results[PARAM_B]['degraded'], [])
+        self.assertEqual(results[PARAM_B]['kde_curve'], healthy_curve)
