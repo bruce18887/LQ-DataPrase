@@ -105,6 +105,7 @@ const menuItems = [
   { path: '/admin/users', label: '用户管理', icon: User, requiresAdmin: true, groupStart: true, groupLabel: '系统管理' },
   // 不带 groupStart/groupLabel：分组线由上面那条画，这里只是同一组里的第二项
   { path: '/admin/audit', label: '操作审计', icon: Search, requiresAdmin: true },
+  { path: '/admin/files', label: '全部文件', icon: Folder, requiresAdmin: true },
   { path: '/settings', label: '系统设置', icon: Setting, requiresAdmin: false },
 ]
 
