@@ -130,9 +130,9 @@ class StaticAssetServingTests(unittest.TestCase):
 
 @unittest.skipUnless(_has_frontend_dist(), 'frontend/dist not built — run `npm run build` in frontend/')
 class SpaAdminRouteServingTests(unittest.TestCase):
-    """The two SPA admin pages share the ``/admin/`` prefix with Django admin.
+    """The three SPA admin pages share the ``/admin/`` prefix with Django admin.
 
-    整页加载 / 刷新 / 分享链接 /admin/users、/admin/audit 时必须落到 SPA 外壳；
+    整页加载 / 刷新 / 分享链接 /admin/users、/admin/audit、/admin/files 时必须落到 SPA 外壳；
     若被 Django admin 的 catch-all 先接住，会 302 到 /admin/login/（2026-11-11
     部署实测），深链与刷新在单端口形态下直接坏掉。客户端路由（侧栏点击）覆盖
     不了这条——e2e 跑的是 Vite，Vite 自带 history fallback。
@@ -155,8 +155,15 @@ class SpaAdminRouteServingTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'<div id="app">', response.content)
 
+    def test_admin_files_deep_link_returns_spa_shell(self):
+        response = self.client.get('/admin/files')
+        self.assertEqual(response.status_code, 200,
+                         'expected SPA shell, got a redirect/miss — Django admin '
+                         'catch-all is shadowing the front-end route')
+        self.assertIn(b'<div id="app">', response.content)
+
     def test_django_admin_still_owns_the_rest_of_the_prefix(self):
-        """Only the two exact front-end paths may be handed to the SPA."""
+        """Only the three exact front-end paths may be handed to the SPA."""
         response = self.client.get('/admin/')
         self.assertEqual(response.status_code, 302)
         self.assertIn('/admin/login/', response.headers.get('Location', ''))
