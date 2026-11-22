@@ -2,6 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from apps.datafiles.views import (
+    AdminFileUserUsageView,
     BatchDirDeleteView,
     BatchDirImportView,
     BatchDirListView,
@@ -23,6 +24,9 @@ urlpatterns = [
     # `^files/(?P<pk>[^/.]+)/$`（lookup 是 `[^/.]+`，不是 <int>，见 routers.py:143），
     # 会把 `files/usage/` 当成 pk='usage' 的详情请求吞掉。
     path('files/usage/', FileUsageView.as_view(), name='file-usage'),
+    # 管理员跨用户只读清单（Task 4）：与 router 的 `files/...` 前缀不重叠，
+    # 不会被 `^files/(?P<pk>[^/.]+)/$` 吞掉。
+    path('admin/files/users/', AdminFileUserUsageView.as_view(), name='admin-file-users'),
     path('', include(router.urls)),
     path('upload/', FileUploadView.as_view(), name='file-upload'),
     path('activate/<int:pk>/', FileActivateView.as_view(), name='file-activate'),

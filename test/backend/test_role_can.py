@@ -59,10 +59,10 @@ _ROLE_CAN_CALL = {
 # 功能键全集：多留一个历史键（收敛后只该有这些）或漏一个都算红。
 EXPECTED_FEATURES = {
     'user_management', 'system_config', 'audit_log_view',
-    'data_delete', 'data_repair_mutate',
+    'data_delete', 'data_repair_mutate', 'data_view_all',
 }
 
-# 两级角色 × 五个功能 = 10 格，逐格钉死真值表。这既是对契约的独立表述
+# 两级角色 × 六个功能 = 12 格，逐格钉死真值表。这既是对契约的独立表述
 # （不是把表抄一遍当断言），也保证「往某个键多加一个角色」这类变异必红。
 EXPECTED_CAN = {
     'user_management': {'administrator': True, 'user': False},
@@ -70,6 +70,8 @@ EXPECTED_CAN = {
     'audit_log_view': {'administrator': True, 'user': False},
     'data_delete': {'administrator': True, 'user': False},
     'data_repair_mutate': {'administrator': True, 'user': True},
+    # 管理员跨用户只读清单（Task 4）：只有管理员能按 owner_id 看别人的文件清单。
+    'data_view_all': {'administrator': True, 'user': False},
 }
 
 
@@ -82,6 +84,11 @@ class RoleCanTests(TestCase):
         self.assertTrue(role_can('user', 'data_repair_mutate'))
         self.assertFalse(role_can('user', 'data_delete'))
         self.assertFalse(role_can('user', 'user_management'))
+        # data_view_all（管理员跨用户只读清单）两条腿各自单独钉一次：
+        # 表里多加一个角色、或整条键被删掉，EXPECTED_CAN 那圈也红，但先在这里
+        # 把「管理员能、普通用户不能」写成可读的契约。
+        self.assertTrue(role_can('administrator', 'data_view_all'))
+        self.assertFalse(role_can('user', 'data_view_all'))
         # 上面 7 条是契约的可读表述，下面这段把 10 格补全（system_config/audit_log_view/
         # data_repair_mutate 各自的另一条腿原本没人钉）。
         for feature, by_role in EXPECTED_CAN.items():

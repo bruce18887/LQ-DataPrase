@@ -10,6 +10,9 @@ FEATURE_PERMISSIONS = {
     'audit_log_view': ['administrator'],
     'data_delete': ['administrator'],
     'data_repair_mutate': ['administrator', 'user'],
+    # 管理员跨用户**只读**文件清单（`/files/?owner_id=` 与 `/admin/files/users/`）。
+    # 只放开清单与占用：详情 / 下载 / 预览与所有写操作仍走 owner=request.user。
+    'data_view_all': ['administrator'],
 }
 
 

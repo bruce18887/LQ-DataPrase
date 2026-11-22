@@ -21,6 +21,10 @@ from .file_views import (  # noqa: F401
     FileUploadView,
 )
 
+from .admin_usage_views import (  # noqa: F401
+    AdminFileUserUsageView,
+)
+
 from .batch_views import (  # noqa: F401
     BatchDirListView,
     BatchDirImportView,
