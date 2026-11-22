@@ -165,6 +165,8 @@ def snapshot():
     """组装指标载荷。全部来自进程内状态，一次调用不写盘不打 DB 之外的网络。"""
     rss = process_rss_bytes()
     from apps.common import memory as memory_mod
+    # 懒导入：admission 会回头导入 exceptions/memory，放在模块顶部就成了循环。
+    from apps.common.admission import admission_snapshot
     return {
         'uptime_seconds': round(time.time() - _started_at),
         'pid': os.getpid(),
@@ -174,5 +176,6 @@ def snapshot():
         'parse_cache': _parse_cache_stats(),
         'summary_cache': _summary_cache_stats(),
         'jobs': _job_counts(),
+        'admission': admission_snapshot(),
         'requests': latency_summary(),
     }

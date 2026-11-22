@@ -41,6 +41,22 @@ class UnsafeUsernameError(APIException):
     default_code = 'unsafe_username'
 
 
+class ServerBusy(APIException):
+    """重活准入拒绝；503 而不是 500 —— 此刻拒绝是为了别把整机拖慢，不是坏了。
+
+    `reason` 区分瓶颈：``'queue'`` 是并发数占满（等超时），``'memory'`` 是内存过 hard 水位
+    （淘汰后仍不达标）。前端与运维按它决定「稍后重试」还是「先关掉别的任务」。
+    """
+    status_code = 503
+    default_detail = '服务器繁忙，请稍后重试'
+    default_code = 'server_busy'
+
+    def __init__(self, reason='queue', detail=None, code=None):
+        self.reason = reason
+        super().__init__(detail=detail if detail is not None else {'reason': reason},
+                         code=code)
+
+
 # (异常类型, code) -> 中文消息
 _KNOWN_EXCEPTIONS = (
     (NotFound, 'not_found', '资源不存在'),
@@ -51,6 +67,7 @@ _KNOWN_EXCEPTIONS = (
     (Throttled, 'throttled', '请求过于频繁，请稍后再试'),
     (MethodNotAllowed, 'method_not_allowed', '请求方法不允许'),
     (UnsafeUsernameError, 'unsafe_username', '账号名无法用作数据目录名'),
+    (ServerBusy, 'server_busy', '服务器繁忙，请稍后重试'),
 )
 
 
@@ -64,6 +81,7 @@ def _code_for_status(response_status):
         405: 'method_not_allowed',
         429: 'throttled',
         500: 'internal_error',
+        503: 'server_busy',
     }.get(response_status, f'http_{response_status}')
 
 
@@ -178,4 +196,8 @@ def custom_exception_handler(exc, context):
 
     message, code = _extract_message(exc, response.status_code)
     response.data = {'code': code, 'message': message, 'detail': response.data}
+    if isinstance(exc, ServerBusy):
+        # 503 的语义是「稍后再来」；不给 Retry-After，前端只能自己猜等多久。
+        # 与 MemoryError 那条 503 取同一个值：两者都是「此刻重试没意义，过几秒再说」。
+        response['Retry-After'] = '5'
     return response
