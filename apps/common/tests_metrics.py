@@ -151,7 +151,10 @@ class MetricsEndpointTests(TestCase):
         self.assertEqual(
             set(body), {'uptime_seconds', 'pid', 'rss_bytes', 'rss_available',
                         'memory', 'parse_cache', 'summary_cache', 'jobs',
-                        'requests'})
+                        'admission', 'requests'})
+        self.assertEqual(set(body['admission']), {
+            'capacity', 'active', 'waiting', 'rejected', 'relief', 'last_reason',
+        })
         self.assertEqual(set(body['memory']), {
             'budget_bytes', 'jobs_budget_bytes', 'web_budget_bytes',
             'cache_budget_bytes', 'private_bytes', 'used_ratio', 'level',
