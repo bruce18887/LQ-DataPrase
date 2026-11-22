@@ -1604,6 +1604,13 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - 终审 scoped re-review：两个 finding 均 ADDRESSED，无新增 Critical/Important；新增两条 Minor 挂账（`night-visibility` 可改用 `pickTabFile`、view-data 两处仍用全局 `.el-select-dropdown:visible`）。
 - 终审修复纯 e2e、无产品代码改动，未重跑全量池（终审建议 test-only 定向档）；全量池 `真红 0` 仍描述产品代码。
 
+## 并入记录（2026-11-22）
+
+- `git merge --ff-only feature/batch4e-knife5b-fileselect-v2`：master `858c0e4 → 110d757`。
+- `node scripts/prepush-history-check.mjs`：`RESULT: PASS`（257 个待推送提交；`Data/`、`.venv/` 无新增；守卫根/密钥/.gitignore 无漂移）。
+- 按用户指令 `git push origin master`；`origin/master` 是本地 master 的祖先，属快进，无需 force。本次 push 会同时带出此前本地未推送的批次提交。
+- 过程分支在 push 完成后 `git branch -d`；本笔并入记录随后提交。
+
 ## 状态
 
-终审完成，**待用户点头 FF 并入本地 master**；未 push。
+已 FF 并入本地 master（`858c0e4 → 110d757`），按用户指令 push origin/master；过程分支随后删除。
