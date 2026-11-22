@@ -16,6 +16,12 @@ describe('ERROR_CODE_MAP', () => {
       expect(ERROR_CODE_MAP[code]).toBeTruthy()
     }
   })
+
+  it('准入与限流码有映射（503 server_busy / 429 throttled）', () => {
+    // 文案与后端信封同源：apps/common/exceptions.py 的 CODE_TABLE
+    expect(ERROR_CODE_MAP.server_busy).toBe('服务器繁忙，请稍后重试')
+    expect(ERROR_CODE_MAP.throttled).toBe('请求过于频繁，请稍后再试')
+  })
 })
 
 describe('formatError', () => {
