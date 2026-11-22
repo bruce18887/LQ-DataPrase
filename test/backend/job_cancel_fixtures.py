@@ -33,7 +33,8 @@ PASSWORD = 'x-c1-jobs-12345678'
 # （`apps/jobs/views.py::_submit_export`）。
 DUMMY_CSV = 'Index_No,Dut_No,VOLT\n1,1,1.5\n'
 # 轮询契约（`_job_payload` 的键集合），取消的响应体必须是同一个形状。
-# `queue_position` 不在其中：只有提交 202 与详情用 `with_queue=True`（列表与取消都不查队列）。
+# `queue_position` 不在其中：提交 202 与详情给的是 `with_queue=True` 那一份（202 在此基础上
+# 多一个 `job_id`），而取消与列表都不查队列 —— 取消只回状态机的新终态，不该顺带计数。
 PAYLOAD_FIELDS = {'id', 'kind', 'status', 'progress', 'error',
                   'result_name', 'created_at', 'timeout_seconds'}
 
