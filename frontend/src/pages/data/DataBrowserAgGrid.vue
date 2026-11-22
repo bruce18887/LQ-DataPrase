@@ -14,7 +14,7 @@
           <el-icon><Download /></el-icon> 导出 Excel
         </el-button>
         <!-- 导出改成作业后请求会立刻返回，进度条是用户唯一的「它还在跑」凭据 -->
-        <JobProgressChip :percent="excelProgress" :active="exportingExcel" />
+        <JobProgressChip :percent="excelProgress" :active="exportingExcel" :queue-position="excelQueuePosition" />
         <el-button :loading="exportingCsv" :disabled="!props.fileId" @click="exportCsv">
           <el-icon><Document /></el-icon> 导出 CSV
         </el-button>
@@ -587,7 +587,7 @@ function currentGridModels(): { sort_model: string; filter_model: string } {
 }
 
 const {
-  exportingExcel, exportingCsv, excelProgress, exportExcel, exportCsv,
+  exportingExcel, exportingCsv, excelProgress, excelQueuePosition, exportExcel, exportCsv,
 } = useBrowserExport({
   fileId: () => props.fileId,
   passfail: () => passfail.value,

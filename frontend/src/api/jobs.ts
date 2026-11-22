@@ -25,6 +25,16 @@ export interface JobStatus {
   error: string
   result_name: string
   created_at: string
+  /**
+   * 同 owner 里比我早的未收场作业数（0 = 下一个就轮到我）。
+   * **只有详情与 202 提交响应带**（列表不查队列，见 `apps/jobs/views.py`），缺字段当 0。
+   */
+  queue_position?: number
+  /**
+   * 后端这条作业的超时（秒，来自 `executor.KIND_RUNNERS`）；遗留 kind 取不到时为 null。
+   * 前端等多久由它决定（`jobPolling.pollTimeoutMs`），缺字段回退 5 分钟。
+   */
+  timeout_seconds?: number | null
 }
 
 export interface SubmitResponse {

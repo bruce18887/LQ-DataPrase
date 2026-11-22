@@ -16,6 +16,8 @@ export function useExport(
   // batch_charts 已改成提交-轮询（它的在飞时间是轮询时长，不再是单个请求时长）。
   const exporting = computed(() => exportingSync.value || job.exporting.value)
   const batchProgress = job.progress
+  /** 批量作业还在队列里时排在前面的条数（界面用来把 0% 换成「排队中 · 前面 N 个」）。 */
+  const batchQueuePosition = job.queuePosition
 
   async function exportSigmaLimit(
     sigma: number,
@@ -68,6 +70,7 @@ export function useExport(
      *  （不能用 `exporting` —— sigma_limit 仍是同步在飞，那时显示的是上一次作业的残留值）。 */
     batchActive: job.exporting,
     batchProgress,
+    batchQueuePosition,
     exportSigmaLimit,
     exportBatchCharts,
   }

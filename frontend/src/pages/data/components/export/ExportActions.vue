@@ -30,7 +30,7 @@
           📽️ 批量导出 PPT
         </el-button>
       </el-tooltip>
-      <JobProgressChip :percent="batchProgress ?? 0" :active="!!batchActive" />
+      <JobProgressChip :percent="batchProgress ?? 0" :active="!!batchActive" :queue-position="batchQueuePosition ?? 0" />
     </div>
   </div>
 </template>
@@ -45,6 +45,8 @@ interface Props {
   /** 批量导出走作业：只有这条路径在飞时才显示进度条 */
   batchActive?: boolean
   batchProgress?: number
+  /** 批量作业还在队列里时排在我前面的条数（0 = 下一个就轮到我，chip 显示百分比）。 */
+  batchQueuePosition?: number
 }
 
 defineProps<Props>()

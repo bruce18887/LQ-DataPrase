@@ -3,7 +3,7 @@
     <el-button type="primary" size="large" :loading="exporting" @click="exportHtml">
       <span>📥</span> 保存 HTML 报表
     </el-button>
-    <JobProgressChip :percent="progress" :active="exporting" />
+    <JobProgressChip :percent="progress" :active="exporting" :queue-position="queuePosition" />
     <p class="dash-footer-note">📅 最后更新: {{ updateTime }} | LiqunData ATE 数据分析软件</p>
   </div>
 </template>
@@ -20,6 +20,7 @@ const props = defineProps<{
 const job = useJobExport()
 const exporting = job.exporting
 const progress = job.progress
+const queuePosition = job.queuePosition
 
 async function exportHtml() {
   if (!props.fileId) return
