@@ -109,12 +109,24 @@ test.describe('全部文件 / 管理员跨用户只读', { tag: ['@admin'] }, ()
       const rows = table.locator('tbody tr')
       await expect(rows.filter({ hasText: fileName }).first()).toBeVisible({ timeout: 15_000 })
 
-      // 三颗 KPI 的标签与「一个数」的形状（usage 为 null 时 usageBytesText 给 '--'）。
+      // 三颗 KPI 的标签与「确实是一个数」：`/^\d/` 不匹配 '--'。
+      // 旧写法 /^(\d|--)/ 把 '--' 也当合法 ⇒ 三颗全空也能绿，等于没断。
+      // 种子账号 'user' 的用户名可安全解析，usage 必为对象；本用例刚给它传过 CSV，
+      // data 段非 0，jobs 段可能是 '0 B'，但三颗都没有理由退回 '--'。
       const kpis = page.locator('.admin-files-kpis')
       for (const label of ['数据体积', '作业产物体积', '总占用']) {
         await expect(kpis).toContainText(label)
       }
-      await expect(page.locator('[data-testid="admin-files-total-bytes"]')).toHaveText(/^(\d|--)/)
+      for (const testid of [
+        'admin-files-data-bytes',
+        'admin-files-jobs-bytes',
+        'admin-files-total-bytes',
+      ]) {
+        await expect(
+          page.locator(`[data-testid="${testid}"]`),
+          `${testid} 退回了 '--'：usage 没绑到选中用户，或后端给了 null`,
+        ).toHaveText(/^\d/)
+      }
 
       // 只读承诺：整页无写操作/详情入口，行内也没有 action 列。
       for (const name of ['查看', '下载', '删除', '编辑']) {

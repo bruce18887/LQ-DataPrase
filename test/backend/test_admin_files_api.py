@@ -176,8 +176,15 @@ class AdminFilesSpaRouteTests(TestCase):
                 self.assertEqual(resolve(path).route, SPA_ADMIN_PATTERN)
 
     def test_admin根仍归django_admin(self):
-        """白名单只放开三个精确路径：``/admin/`` 本身不许被顺手交出去。"""
-        self.assertNotEqual(resolve('/admin/').route, SPA_ADMIN_PATTERN)
+        """白名单只放开三个精确路径：``/admin/`` 本身不许被顺手交出去。
+
+        两条判据分开断：``route`` 不相等只能证明「不是那条正则」，若正则将来
+        被改写（例如变成 catch-all 前缀），这一条会假绿；``app_name == 'admin'``
+        钉住它确实还在 Django admin 的命名空间里。
+        """
+        match = resolve('/admin/')
+        self.assertNotEqual(match.route, SPA_ADMIN_PATTERN)
+        self.assertEqual(match.app_name, 'admin')
 
 
 class AdminUserUsageListTests(AdminScopeBase):
