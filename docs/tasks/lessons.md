@@ -3237,3 +3237,29 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
    - 连带一条流程教训：**同一次调查里我拿到两种不同的红形状（`.main-layout` 超时 vs `ERR_UNSAFE_PORT`），
      第一反应想归给 §2.4 那条「接受并发」的裁定**。若当时就下结论，就会把两次装置错误记成被测对象的一次竞态。
      先把装置的变量（端口、复用、背靠背）逐条摘干净，再谈被测结论。
+
+## 2026-11-22 审查刀二/三/四：六处「看着对但判据/顺序有洞」的形态
+
+1. **准入取槽先于认证**：旧设计片段在 `initial()` 里先 `heavy_slot().__enter__()` 再 `super().initial()`，
+   匿名请求可白占 10s 等待窗口，soft 水位下还会反复把解析缓存淘汰到 50%。
+   **规则：重活准入必须先过认证/权限/节流再取槽**；`ServerBusy` 仍在 `APIView.dispatch()` 的 try 内，
+   503 信封与 `Retry-After: 5` 不变。判据要断「匿名请求 `heavy_slot` 未被调用」，不能只断 `active == 0`。
+2. **同一个 `degraded` list 跨参数复用**：`compute_histogram_stats` 在返回时 `list(degraded or [])` 快照，
+   循环外建一个 list 会让参数 A 的 reason 串到参数 B、两个都降级时重复累积。**规则：每参数一份 list**；
+   判据必须造「第一个参数 OOM、第二个正常」的两参数请求，只测单参数会假绿。
+3. **提交 202 与详情 payload 分叉**：202 曾只回 `{job_id,status,queue_position}`，详情才有 `timeout_seconds`；
+   前端「首响应定上限」会因缺字段回退 5 分钟。**规则：提交/详情共用 `_job_payload(with_queue=True)`，
+   202 额外补 `job_id`；键集合用 `set(body) == {...}` 钉住**，别只断 `job_id`。
+4. **`owner_id` 的搜索标签兜底仍按 `request.user` 查 `tag_ids`**，再把本人行 OR 回来，管理员自己的文件会混进他人清单。
+   **规则：作用域参数必须贯穿所有二次查询**（包括标签预过滤）；判据要造「双方同名标签、文件名不命中」的形状。
+5. **空 `params` 的参数列表快路径被按 action 取槽**：分析页切文件/筛选时这条常用路径也会排队 10s/503，
+   且前端失败后会把参数列表清空。**规则：按 action 的准入要允许视图用 `heavy_slot_required(action)` 排除轻分支**；
+   快路径判据必须与 action 内的 `get_param_list` 同源，不能另写一套 params 解析。带 params 但全被筛掉仍保守占槽。
+6. **单端口 SPA 白名单新增路径**：只改 `config/urls.py` 不够，`test_static_assets.py::SpaAdminRouteServingTests`
+   仍写「两条 SPA 路径」且漏了 `/admin/files` 的 response 级深链断言；Vite 自带 history fallback，e2e 覆盖不到。
+   **规则：新增 `/admin/<path>` 时三处同改——正则、SPA 深链响应测试、e2e 路由守卫**；
+   resolve-only 断言抓不到 middleware/模板层回归。
+7. **只读承诺的反证缺口**：详情 404 用例没带 `owner_id`，删掉 `action != 'list'` 仍全绿；
+   `options` 根本不走 `get_queryset`。**规则：安全边界测试必须带触发参数**（`?owner_id=`），
+   并做一次「删掉闸门看三条是否真红」的变异验证。
+

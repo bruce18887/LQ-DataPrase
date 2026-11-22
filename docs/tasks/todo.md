@@ -1624,17 +1624,36 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 
 ## 勾选清单
 
-- [ ] A1 `prune_jobs` 保留期定稿 7 天（docs/运维收口）
-- [ ] A2 `jobs/` 纳入后端占用统计
-- [ ] A3 前端占用 chip 展示作业产物总量
-- [ ] B1 管理员跨用户只读后端（`data_view_all` + `owner_id` + 用户占用列表）
-- [ ] B2 管理员跨用户只读前端页 `/admin/files`
-- [ ] C1 准入内核与 `server_busy` 信封
-- [ ] C2 重活动作接线与同步降级准入
-- [ ] C3 KDE 可见降级（后端）
-- [ ] C4 KDE 降级提示与错误码（前端）
-- [ ] C5 作业排队数与超时下发（后端）
-- [ ] C6 前端排队展示与等待上限对齐
-- [ ] 收口门禁（vitest / lint:e2e / build / 后端全套 / e2e 池）
-- [ ] 整枝终审
+- [x] A1 `prune_jobs` 保留期定稿 7 天（docs/运维收口，`fe51224`）
+- [x] A2 `jobs/` 纳入后端占用统计（`5d046ae` + `26bb030`）
+- [x] A3 前端占用 chip 展示作业产物总量（`3af35b1`）
+- [x] B1 管理员跨用户只读后端（`f5974f9` + `c87bab4`）
+- [x] B2 管理员跨用户只读前端页 `/admin/files`（`a47d2dc` + `563e0ee`）
+- [x] C1 准入内核与 `server_busy` 信封（`6990f44`）
+- [x] C2 重活动作接线与同步降级准入（`b4f0dbf` + `a144b96`）
+- [x] C3 KDE 可见降级（后端，`bce61a4` + `f89ec61`）
+- [x] C4 KDE 降级提示与错误码（前端，`271c073`）
+- [x] C5 作业排队数与超时下发（后端，`fc24b59` + `62bc75c`）
+- [x] C6 前端排队展示与等待上限对齐（`ccc25ef`）
+- [x] 整枝终审（With fixes → `02cf384` 修复波，复审全 ADDRESSED）
+- [x] 收口门禁（vitest / lint:e2e / build / 后端全套 / e2e 池）
+
+## 已知非阻塞
+
+- e2e 池效率 2.00 / 用例 489 超 `nightly-gates.mjs` 的 450 上限，属既有套件规模趋势（上批 486 / 2.06），另单重定基线。
+- `analysis/histogram-degraded.spec.ts` 在池内一次 flaky，独占复跑绿；新 spec 的列序依赖与 `ensureChartToggles` 自收敛已记在终审 Minor，不在本批阻塞。
+- `test_job_cancel.RealPoolQueueWindowTests` 与 `test_csv_download_streaming` 的负载时序 flake 在多次 affected 跑中出现，单类/整套干净复跑绿；本批后端全套 `Ran 2805 / OK` 为最终证据。
+
+## 门禁记录
+
+| 档 | 命令 | 实测判据行 |
+|---|---|---|
+| 前端全量单测 | `cd frontend && npx vitest run` | `Test Files 78 passed (78)` / `Tests 1088 passed (1088)` |
+| e2e 类型 | `cd frontend && npm run lint:e2e` | `tsc -p tsconfig.e2e.json`，无输出 |
+| 前端构建 | `cd frontend && npm run build` | `build complete in 2.16s` |
+| 后端全套 | `manage.py test test.backend apps.accounts apps.analysis apps.batch_report apps.buyoff apps.common apps.dashboard apps.datafiles apps.export apps.gage apps.jobs apps.sftp apps.weight` | `Ran 2805 tests in 610.542s` / `OK (skipped=17)`；`grep -cE "^(FAIL|ERROR):"` = 0 |
+| e2e 池 | `node scripts/e2e_pool.mjs --slots=4` | `用例 489 · 墙钟 10.9min · 单价 2.81s/例 · 效率 2.00 · unexpected 2 · flaky 2 · skipped 22` · `结论 MEASURED` · **复跑判级：真红 0 · 负载抖动 2 · 悬而未决 0**（`analysis/histogram-degraded.spec.ts` 新 spec 与 `exports/exports.spec.ts` 独占复跑均绿） |
+| push 历史自检 | `node scripts/prepush-history-check.mjs` | `RESULT: PASS`（守卫根/密钥/.gitignore 无漂移；`Data/`、`.venv/` 无新增） |
+
+已知非本批红：`test_job_cancel.RealPoolQueueWindowTests.test_cancellability_flips_at_workers_plus_extra_queued_calls` 与 `test_csv_download_streaming` 为 base 存量的负载时序 flake，单类复跑 OK；收口以一次干净运行结论为准。
 
