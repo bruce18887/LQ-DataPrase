@@ -149,6 +149,41 @@ class ScopedFileListTests(AdminScopeBase):
         self.assertEqual({row['owner'] for row in rows}, {self.target.username})
 
 
+class AdminScopeDoesNotLeakIntoNonListActionsTests(AdminScopeBase):
+    """``?owner_id=`` 只放开清单，详情 / 删除 / 改标签仍只看自己的文件。
+
+    「只放开 list」的反证：没有这三条，把 ``admin_scope.py`` 里
+    ``_resolve_scope_owner_id`` 的 ``action != 'list'`` 删掉仍然全绿 —— 而那样
+    管理员就能读他人详情的 ``file_path``/``metadata``、删他人文件、改他人标签。
+    三条都**带 owner_id** 且取**目标用户的 id**（不是文件 id）：带上错人的 id 时
+    作用域是「一个没有文件的用户」，404 与判定无关，变异仍会绿。
+    """
+
+    def test_详情带owner_id仍404(self):
+        resp = self._client(self.admin).get(
+            f'{FILES_URL}{self.theirs.id}/', {'owner_id': self.target.id})
+        self.assertEqual(resp.status_code, 404, resp.content)
+        self.assertEqual(resp.data['code'], 'not_found')
+
+    def test_删除带owner_id仍404且目标文件还在(self):
+        resp = self._client(self.admin).delete(
+            f'{FILES_URL}{self.theirs.id}/?owner_id={self.target.id}')
+        self.assertEqual(resp.status_code, 404, resp.content)
+        self.assertEqual(resp.data['code'], 'not_found')
+        self.assertTrue(DataFile.objects.filter(pk=self.theirs.id).exists(),
+                        '跨用户删除必须挡在 get_object 的 404 上，不能真删')
+
+    def test_改标签带owner_id仍404且标签未变(self):
+        """``set_tags`` 是 ``@action(detail=True, methods=['post'])``（见
+        ``file_views.py``），与详情同经 ``get_queryset`` 的 owner 作用域。"""
+        resp = self._client(self.admin).post(
+            f'{FILES_URL}{self.theirs.id}/set_tags/?owner_id={self.target.id}',
+            {'tags': ['leak']}, format='json')
+        self.assertIn(resp.status_code, (404, 405), resp.content)
+        self.theirs.refresh_from_db()
+        self.assertEqual(self.theirs.tags or [], [], '跨用户改标签必须一个字都没写进去')
+
+
 SPA_ADMIN_PATTERN = r'^admin/(?:users|audit|files)/?$'
 
 

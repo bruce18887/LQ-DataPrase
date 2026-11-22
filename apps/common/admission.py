@@ -246,13 +246,23 @@ class HeavyActionMixin:
     heavy_actions = frozenset()
     _heavy_ctx = None
 
+    def heavy_slot_required(self, action):
+        """该动作这一次要不要占重活槽；默认一律要（登记即占）。
+
+        给「同一 action 里有轻分支」的 ViewSet 一个覆写点：例如直方图在不带
+        `params` 时只回列名（不跑计算），那条快路径不该去排 10s 队再 503 ——
+        否则负载下点开分析页就清空参数列表。覆写方只按**请求内容**判分支，
+        不改登记名单本身（名单仍按 action 声明，测试仍逐项钉住）。
+        """
+        return True
+
     def initial(self, request, *args, **kwargs):
         # 认证 / 权限 / 节流先行：匿名刷重活不该占着槽，让真实用户排队。
         super().initial(request, *args, **kwargs)
         # 到这里 `self.action` 已被 `ViewSetMixin.initialize_request()` 填好。
         action = getattr(self, 'action', None)
         self._heavy_ctx = None
-        if action in self.heavy_actions:
+        if action in self.heavy_actions and self.heavy_slot_required(action):
             ctx = heavy_slot(action)
             ctx.__enter__()        # ServerBusy 因此位于 APIView.dispatch() 的 try 内
             self._heavy_ctx = ctx
