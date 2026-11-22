@@ -10,6 +10,7 @@
 
 import os
 
+from django.db.models import Q
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -26,7 +27,7 @@ from apps.common.export_naming import base_export_context, render_export_filenam
 from apps.datafiles.models import DataFile
 from apps.datafiles.utils import resolve_file_path
 from apps.jobs import executor
-from apps.jobs.models import Job
+from apps.jobs.models import TERMINAL_STATUSES, Job
 from apps.sftp.downloads import clamp_timeout as sftp_clamp_timeout
 
 LIST_LIMIT = 50
@@ -40,8 +41,39 @@ KIND_EXPORT_TYPE = {
 }
 
 
-def _job_payload(job: Job) -> dict:
-    return {
+def _timeout_seconds(job: Job):
+    """这条作业的超时（秒）。唯一事实源是 `executor.KIND_RUNNERS`，别在这里抄数字。
+
+    遗留行可能带着早已下线的 kind：取不到就回 None —— 轮询页不该因为一条考古行
+    500，前端把 None 当「不显示等待上限」。
+    """
+    spec = executor.KIND_RUNNERS.get(job.kind)
+    return spec['timeout'] if spec else None
+
+
+def _queue_position(job: Job) -> int:
+    """同 owner、仍在排队的作业里，**比我早**的条数（0 = 下一个就轮到我）。
+
+    「早」= `created_at` 更早；同刻按 `id` 更小 —— `auto_now_add` 只到微秒，批量
+    建行撞同刻是常态，少了这道次序就会把同刻的几条算成并列或漏计。
+    terminal 行恒 0：已经收场的作业没有队列可言，也不该让前端把 0 当成「排第一」。
+    """
+    if job.status in TERMINAL_STATUSES:
+        return 0
+    ahead = Q(created_at__lt=job.created_at) | (
+        Q(created_at=job.created_at) & Q(pk__lt=job.pk))
+    return Job.objects.filter(
+        ahead, owner_id=job.owner_id,
+        status__in=('pending', 'running')).count()
+
+
+def _job_payload(job: Job, *, with_queue: bool = False) -> dict:
+    """轮询契约。`timeout_seconds` 恒出现；`queue_position` 只在 `with_queue` 时出现。
+
+    `queue_position` 每条一次 `count()`：提交 202 与详情都只算一条，列表页却会变成
+    N+1 ⇒ 列表刻意不查它（前端不需要按队列排序，字段缺席即「不显示」）。
+    """
+    payload = {
         'id': job.id,
         'kind': job.kind,
         'status': job.status,
@@ -49,7 +81,11 @@ def _job_payload(job: Job) -> dict:
         'error': job.error,
         'result_name': job.result_name,
         'created_at': job.created_at.isoformat() if job.created_at else None,
+        'timeout_seconds': _timeout_seconds(job),
     }
+    if with_queue:
+        payload['queue_position'] = _queue_position(job)
+    return payload
 
 
 def _flatten_prefs(user, params, datafile, kind) -> dict:
@@ -211,7 +247,9 @@ class JobSubmitView(APIView):
             # 现场实测），而进程活着 ⇒ systemd 的 Restart=always 也救不回来。
             return self._sync_fallback(job, task)
         job.refresh_from_db()
-        return Response({'job_id': job.id, 'status': job.status},
+        # 202 也带排队数：提交方拿到号就能直接显示「前面还有几条」，不必等第一次轮询。
+        return Response({'job_id': job.id, 'status': job.status,
+                         'queue_position': _queue_position(job)},
                         status=http_status.HTTP_202_ACCEPTED)
 
     def _sync_fallback(self, job: Job, task: dict):
@@ -269,7 +307,7 @@ class JobDetailView(APIView):
 
     def get(self, request, pk):
         job = get_object_or_404(Job, pk=pk, owner=request.user)
-        return Response(_job_payload(job))
+        return Response(_job_payload(job, with_queue=True))
 
 
 class JobDownloadView(APIView):

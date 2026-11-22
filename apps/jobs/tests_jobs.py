@@ -201,7 +201,7 @@ class JobsApiTests(APITestCase):
         body = self.client.get(f'/api/v1/jobs/{job_id}/').json()
         self.assertEqual(
             set(body), {'id', 'kind', 'status', 'progress', 'error',
-                        'result_name', 'created_at'})
+                        'result_name', 'created_at', 'timeout_seconds', 'queue_position'})
         self.assertEqual(body['id'], job_id)
 
     def test_params_snapshot_is_stored_verbatim_and_reaches_worker(self):
