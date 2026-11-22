@@ -1614,3 +1614,26 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 ## 状态
 
 已 FF 并入本地 master（`858c0e4 → 110d757`），按用户指令 push origin/master；过程分支随后删除。
+
+# 任务：审查刀二/三/四（prune+jobs 占用、管理员跨用户只读、过载准入，2026-11-22）
+
+设计：`docs/superpowers/specs/2026-11-22-gap-review-knife2-4-design.md`
+计划：`docs/superpowers/plans/2026-11-22-gap-review-knife2-4.md`
+依据：`docs/reference/feature-gap-review-2026-11-16.md` §1、§2、§4.4
+
+## 勾选清单
+
+- [ ] A1 `prune_jobs` 保留期定稿 7 天（docs/运维收口）
+- [ ] A2 `jobs/` 纳入后端占用统计
+- [ ] A3 前端占用 chip 展示作业产物总量
+- [ ] B1 管理员跨用户只读后端（`data_view_all` + `owner_id` + 用户占用列表）
+- [ ] B2 管理员跨用户只读前端页 `/admin/files`
+- [ ] C1 准入内核与 `server_busy` 信封
+- [ ] C2 重活动作接线与同步降级准入
+- [ ] C3 KDE 可见降级（后端）
+- [ ] C4 KDE 降级提示与错误码（前端）
+- [ ] C5 作业排队数与超时下发（后端）
+- [ ] C6 前端排队展示与等待上限对齐
+- [ ] 收口门禁（vitest / lint:e2e / build / 后端全套 / e2e 池）
+- [ ] 整枝终审
+
