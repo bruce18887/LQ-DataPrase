@@ -39,6 +39,7 @@ from ._helpers import (
     _plan_file_moves,
     _UNSAFE_NAME_CHARS,
 )
+from .admin_scope import scoped_files
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,7 @@ class DataFileViewSet(viewsets.ModelViewSet):
     ordering_fields = ['id', 'created_at', 'source_mtime', 'filename', 'file_size']
 
     def get_queryset(self):
-        queryset = DataFile.objects.filter(owner=self.request.user)
+        queryset = scoped_files(self.request, self.action, DataFile.objects.filter(owner=self.request.user))
 
         # Custom search for tags (JSONField)
         search = self.request.query_params.get('search', '').strip()
