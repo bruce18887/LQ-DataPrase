@@ -21,7 +21,8 @@ from apps.analysis.services.range_limits import resolve_limits, site_table_limit
 from apps.common.user_settings import DEFAULT_CPK_THRESHOLDS
 
 
-def compute_kde_curve(data_series, bin_min, bin_max, n_points=200):
+def compute_kde_curve(data_series, bin_min, bin_max, n_points=200, *,
+                      degraded=None, reason='kde_curve'):
     """Gaussian KDE curve sampled over ``[bin_min, bin_max]``.
 
     Non-parametric density estimate: unlike the normal curve it adapts to
@@ -30,20 +31,53 @@ def compute_kde_curve(data_series, bin_min, bin_max, n_points=200):
     zero variance, failed fit) so the front-end simply skips the overlay.
     ``_dense_x_grid`` keeps tight distributions (σ << grid step) from
     slipping between the evenly spaced sample points.
+
+    ``degraded``/``reason``：内存不足时让调用方把「哪条曲线没画出来」带回响应
+    而不是 500。传 list 时捕获 ``MemoryError`` → ``degraded.append(reason)``
+    并返回 ``None``；不传（默认 None，multi_lot / 导出走这条路）时原样抛出。
+    只捕获 ``MemoryError``：拟合失败的既有兜底（``except Exception`` → None）
+    与其它异常的口径都不变。
     """
     vals = data_series.astype(float)
     if len(vals) < 3 or np.ptp(vals) == 0:
         return None
     try:
-        kde = GaussianKDE(vals, bw_method='silverman')
-    except Exception:
+        try:
+            kde = GaussianKDE(vals, bw_method='silverman')
+        except MemoryError:
+            # MemoryError 是 Exception 子类：不先重抛就会被下面的宽兜底
+            # 静默吞成 None，降级通道拿不到信号。
+            raise
+        except Exception:
+            return None
+        x = _dense_x_grid(bin_min, bin_max, n_points,
+                          float(vals.mean()), float(vals.std(ddof=0)))
+        y = kde(x)
+        if np.max(y) <= 0:
+            return None
+        return [[round(float(xi), 6), round(float(yi), 6)] for xi, yi in zip(x, y)]
+    except MemoryError:
+        if degraded is None:
+            raise
+        degraded.append(reason)
         return None
-    x = _dense_x_grid(bin_min, bin_max, n_points,
-                      float(vals.mean()), float(vals.std(ddof=0)))
-    y = kde(x)
-    if np.max(y) <= 0:
+
+
+def _kde_with_reason(data_series, bin_min, bin_max, degraded, reason):
+    """``compute_kde_curve`` 的第二道网：把逃出 KDE 管线的 ``MemoryError`` 归到
+    *reason* 上，而不是让整条直方图请求变 503。
+
+    ``compute_kde_curve`` 自己已经捕获一遍；这里兜的是它之外（以及将来换实现、
+    加前置分配）抛出的内存错误 —— 只有 ``degraded`` 给定时才降级，否则照旧抛。
+    """
+    try:
+        return compute_kde_curve(data_series, bin_min, bin_max,
+                                 degraded=degraded, reason=reason)
+    except MemoryError:
+        if degraded is None:
+            raise
+        degraded.append(reason)
         return None
-    return [[round(float(xi), 6), round(float(yi), 6)] for xi, yi in zip(x, y)]
 
 
 def resolve_bin_range(range_type, stats, custom_low, custom_high, data_series):
@@ -82,7 +116,7 @@ def resolve_bin_range(range_type, stats, custom_low, custom_high, data_series):
 def compute_histogram_stats(df, metadata, param, site_col,
                             range_type='RDL', custom_low=None, custom_high=None,
                             iqr_multiplier=1.5, cpk_thresholds=None,
-                            include_kde=True, kde_variant=None):
+                            include_kde=True, kde_variant=None, degraded=None):
     """Compute histogram binning, CPK stats, and per-site histograms.
 
     ``cpk_thresholds`` 是 ``apps.common.user_settings.CpkThresholds``：账号在系统设置
@@ -242,10 +276,11 @@ def compute_histogram_stats(df, metadata, param, site_col,
         want_raw = (kde_variant in (None, 'all')) or (
             kde_variant == 'filtered' and not want_filtered)
         if want_raw:
-            kde_curve = compute_kde_curve(data_series, x_lo, x_hi)
+            kde_curve = _kde_with_reason(data_series, x_lo, x_hi,
+                                         degraded, 'kde_curve')
         if want_filtered:
-            filtered_kde_curve = compute_kde_curve(
-                normal_data, x_lo, x_hi)
+            filtered_kde_curve = _kde_with_reason(normal_data, x_lo, x_hi,
+                                                  degraded, 'filtered_kde_curve')
 
     # 正态 PDF 曲线（与 KDE 同采样区间，覆盖整个可见 X 轴）：raw 与裁剪口径
     # 各一份，前端按异常值处理开关选择——公式单一来源 normal_pdf_curve
@@ -330,6 +365,8 @@ def compute_histogram_stats(df, metadata, param, site_col,
         'bin_counts': bin_counts,
         'kde_curve': kde_curve,
         'filtered_kde_curve': filtered_kde_curve,
+        # 降级上报：哪条曲线因内存不足没算出来（空数组也恒带，前端可直接读）
+        'degraded': list(degraded or []),
         'normal_curve': normal_curve,
         'filtered_normal_curve': filtered_normal_curve,
         'total_count': len(data_series),
