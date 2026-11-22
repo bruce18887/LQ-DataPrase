@@ -135,6 +135,19 @@ class ScopedFileListTests(AdminScopeBase):
         self.assertEqual(resp.status_code, 200, resp.content)
         self.assertEqual({row['id'] for row in resp.data['results']}, {self.own.id})
 
+    def test_owner_id搜索标签时不混入管理员自己的命中行(self):
+        """``?owner_id`` 已把清单换成目标用户的集：搜索的标签兜底若仍按
+        ``owner=request.user`` 自己重查一遍再并集回来，管理员自己的标签命中行
+        就会混进他人清单。两人标签同名、文件名都不含搜索词，命中只能来自标签。"""
+        DataFile.objects.filter(pk=self.own.id).update(tags=['shared'])
+        DataFile.objects.filter(pk=self.theirs.id).update(tags=['shared'])
+        resp = self._client(self.admin).get(
+            FILES_URL, {'owner_id': self.target.id, 'search': 'shared'})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        rows = resp.data['results']
+        self.assertEqual({row['id'] for row in rows}, {self.theirs.id})
+        self.assertEqual({row['owner'] for row in rows}, {self.target.username})
+
 
 class AdminUserUsageListTests(AdminScopeBase):
     def test_管理员200且路由与返回形状正确(self):

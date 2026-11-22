@@ -39,7 +39,7 @@ from ._helpers import (
     _plan_file_moves,
     _UNSAFE_NAME_CHARS,
 )
-from .admin_scope import scoped_files
+from .admin_scope import scoped_files, scoped_owner_id
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +130,7 @@ class DataFileViewSet(viewsets.ModelViewSet):
             search_lower = search.lower()
             tag_ids = [
                 row['id']
-                for row in DataFile.objects.filter(owner=self.request.user).values('id', 'tags')
+                for row in DataFile.objects.filter(owner_id=scoped_owner_id(self.request, self.action)).values('id', 'tags')
                 if any(
                     search_lower in str(t).lower()
                     for t in (row.get('tags') or []) if isinstance(t, str)
@@ -138,7 +138,7 @@ class DataFileViewSet(viewsets.ModelViewSet):
             ]
             if tag_ids:
                 queryset = queryset | DataFile.objects.filter(
-                    owner=self.request.user, id__in=tag_ids,
+                    owner_id=scoped_owner_id(self.request, self.action), id__in=tag_ids,
                 )
 
         # 表头列筛选：文件名 / 测试程序 contains（服务端生效，20 条/页必须后端过滤）
