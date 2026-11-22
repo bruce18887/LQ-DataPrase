@@ -34,6 +34,7 @@ from apps.analysis.services.data_services import (
 )
 from apps.datafiles.services import get_cached_parsed_file
 from apps.common.params import get_param, get_param_float, get_param_list
+from apps.common.admission import HeavyActionMixin
 from apps.common.errors import error_response
 from apps.analysis.services.data_services.subset_selection import (
     parse_selection,
@@ -60,9 +61,17 @@ from apps.common.user_settings import get_cpk_thresholds
 _cached_low_cpk_items = cached_low_cpk_items
 
 
-class AnalysisViewSet(FileCorrelationActions, ParamStatActions,
-                      viewsets.GenericViewSet):
+class AnalysisViewSet(HeavyActionMixin, FileCorrelationActions,
+                      ParamStatActions, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
+
+    # 重活登记（`docs/superpowers/specs/2026-10-21-backend-memory-governance-design.md` §6.1）：
+    # 这些动作的峰值内存是解析缓存的好几倍，同时跑两个就足以把整机拖慢 ⇒ 过准入。
+    heavy_actions = frozenset({
+        'histogram', 'wafer_map', 'multi_lot', 'correlation',
+        'file_correlation_serials', 'file_correlation', 'file_correlation_export',
+        'serial_distribution', 'cpk', 'qqplot', 'uph',
+    })
 
     @action(detail=False, methods=['get', 'post'])
     def histogram(self, request):

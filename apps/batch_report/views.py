@@ -13,6 +13,7 @@ from django.http import FileResponse
 from apps.export.excelize_helpers import make_header_style, make_data_style, save_excelize
 from apps.export.user_prefs import get_export_dpi
 from apps.export.html_report import build_batch_html_report
+from apps.common.admission import HeavyActionMixin
 from apps.common.errors import error_response
 from apps.common.export_naming import base_export_context, render_export_filename
 
@@ -27,8 +28,12 @@ from apps.batch_report.services import (
 )
 
 
-class BatchReportViewSet(viewsets.GenericViewSet):
+class BatchReportViewSet(HeavyActionMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
+
+    # 重活登记（内存治理 spec §6.1）。`list_batches` 是单条聚合查询、`batch_yield_data`
+    # 读的是已算好的批级汇总，两者都刻意不登记 —— 它们是列表页的常客。
+    heavy_actions = frozenset({'batch_html_report', 'generate_report'})
 
     @action(detail=False, methods=['get'])
     def list_batches(self, request):

@@ -7,6 +7,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from django.http import FileResponse
 
+from apps.common.admission import HeavyActionMixin
 from apps.common.errors import error_response
 from apps.datafiles.models import DataFile
 from apps.datafiles.services import get_cached_parsed_file
@@ -27,8 +28,11 @@ def _unique_sheet_name(stem: str, site, used: set) -> str:
     return name
 
 
-class GageViewSet(viewsets.GenericViewSet):
+class GageViewSet(HeavyActionMixin, viewsets.GenericViewSet):
     permission_classes = [IsAuthenticated]
+
+    # 重活登记（内存治理 spec §6.1）：多文件按工位建 Excel 是整机最重的一类导出。
+    heavy_actions = frozenset({'generate_summary'})
 
     @action(detail=False, methods=['post'])
     def generate_summary(self, request):

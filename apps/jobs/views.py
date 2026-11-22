@@ -19,7 +19,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.services import provision_user_setting
+from apps.common.admission import heavy_slot
 from apps.common.errors import error_response
+from apps.common.exceptions import ServerBusy
 from apps.common.export_naming import base_export_context, render_export_filename
 from apps.datafiles.models import DataFile
 from apps.datafiles.utils import resolve_file_path
@@ -213,10 +215,24 @@ class JobSubmitView(APIView):
                         status=http_status.HTTP_202_ACCEPTED)
 
     def _sync_fallback(self, job: Job, task: dict):
-        """池建不起来时同步跑完 —— 行为退回作业化之前的今天，别 500。"""
+        """池建不起来时同步跑完 —— 行为退回作业化之前的今天，别 500。
+
+        同步降级是**在请求线程里跑重活**，作业池不可用时它是唯一没被准入挡住的那条路
+        （`executor_available()` 判 False 时连 `_dispatch` 都绕过去了），所以这里自己取
+        同一个信号量：作业池一坏就被几十倍的重活压垮，正是准入要防的那件事。
+        """
         entry = executor.KIND_RUNNERS[job.kind]['entry']
         try:
-            result = entry(task)
+            with heavy_slot('sync_fallback'):
+                result = entry(task)
+        except ServerBusy:
+            # 拒绝必须**先**把行结算掉再上抛：这条作业已经建出来了（`_submit_export`
+            # 先落 pending 再派发），留一个永远没人领的 pending 行等于让用户对着
+            # 「排队中」等一个不存在的 worker。上抛是为了拿到统一 503 信封。
+            job.status, job.error = 'error', '服务器繁忙，请稍后重试'
+            job.finished_at = timezone.now()
+            job.save(update_fields=['status', 'error', 'finished_at'])
+            raise
         except Exception as exc:
             job.refresh_from_db()
             if job.status in ('done', 'error'):

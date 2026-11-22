@@ -27,13 +27,15 @@
 
 import contextlib
 import logging
+import sys
 import threading
 import time
 
 from apps.common.exceptions import ServerBusy
 from apps.common.memory import env_int
 
-__all__ = ['admission_snapshot', 'heavy_slot', 'relief_if_soft', 'reset_for_tests']
+__all__ = ['HeavyActionMixin', 'admission_snapshot', 'heavy_slot',
+           'relief_if_soft', 'reset_for_tests']
 
 logger = logging.getLogger(__name__)
 
@@ -223,3 +225,46 @@ def reset_for_tests():
                        'relief': 0, 'last_reason': None})
         _last_reject_log_at = 0.0
     _local.depth = 0
+
+
+class HeavyActionMixin:
+    """把 ViewSet 的重活动作接到准入信号量上（spec §6.1）。
+
+    用法：`class XViewSet(HeavyActionMixin, ...)` 并在类顶声明
+    `heavy_actions = frozenset({...})`。
+
+    取槽点在 `initial()` 而不是 `dispatch()`：`ViewSetMixin.initialize_request()`
+    才把 `self.action` 填好，而它跑在 `APIView.dispatch()` **内部** —— 覆写
+    `dispatch()` 时名单永远匹配不上（`self.action` 还是 `None`），在那里抛出的
+    `ServerBusy` 也落在 `APIView.dispatch()` 的 try 之外，会变成 500 而不是 503 信封。
+
+    槽的释放只有两处：`initial()` 自己抛异常时当场退出（否则异常路径泄漏信号量），
+    其余（含业务体抛异常）都由 `finalize_response()` 的 `finally` 兜住。
+    """
+
+    heavy_actions = frozenset()
+    _heavy_ctx = None
+
+    def initial(self, request, *args, **kwargs):
+        # 到这里 `self.action` 已被 `ViewSetMixin.initialize_request()` 填好。
+        action = getattr(self, 'action', None)
+        self._heavy_ctx = None
+        if action in self.heavy_actions:
+            ctx = heavy_slot(action)
+            ctx.__enter__()        # ServerBusy 因此位于 APIView.dispatch() 的 try 内
+            self._heavy_ctx = ctx
+        try:
+            return super().initial(request, *args, **kwargs)
+        except Exception:
+            if self._heavy_ctx is not None:
+                self._heavy_ctx.__exit__(*sys.exc_info())
+                self._heavy_ctx = None
+            raise
+
+    def finalize_response(self, request, response, *args, **kwargs):
+        try:
+            return super().finalize_response(request, response, *args, **kwargs)
+        finally:
+            if self._heavy_ctx is not None:
+                self._heavy_ctx.__exit__(None, None, None)
+                self._heavy_ctx = None
