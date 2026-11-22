@@ -76,9 +76,12 @@ HEAVY_ENDPOINTS = (
 
 
 def _real_actions(viewset_cls):
-    """该 ViewSet 由 `@action` 暴露的动作名（与 `self.action` 同一个来源：url_path）。"""
-    return {getattr(fn, 'url_path', fn.__name__)
-            for fn in viewset_cls.get_extra_actions()}
+    """该 ViewSet 由 `@action` 暴露的动作名（与 `self.action` 同一取值口径：方法名）。
+
+    `self.action` 来自 router 的 `action_map`（值是 `@action` 装饰的**方法名**），
+    `url_path=` 覆写只改 URL 不改它 —— 所以这里也取 `__name__`。
+    """
+    return {fn.__name__ for fn in viewset_cls.get_extra_actions()}
 
 
 def _normal_budget():
@@ -158,7 +161,7 @@ class HeavyActionDeclarationTests(SimpleTestCase):
 
 
 class HeavyActionRequestTests(TestCase):
-    """请求级：持槽 → 503 信封；未登记 → 不取槽；`initial()` 抛异常 → 先还槽。"""
+    """请求级：持槽 → 503 信封；未登记 → 不取槽；认证先于取槽；业务体异常 → finally 还槽。"""
 
     def setUp(self):
         admission.reset_for_tests()
@@ -209,14 +212,33 @@ class HeavyActionRequestTests(TestCase):
         self.assertEqual(site.status_code, 400, site.content)
         self.assertEqual(yield_data.status_code, 400, yield_data.content)
 
-    def test_slot_is_released_when_initial_raises_after_acquiring(self):
-        """未认证请求也会先取槽：`initial()` 的异常分支必须把槽还回去。"""
+    def test_anonymous_request_is_rejected_before_it_takes_a_slot(self):
+        """认证先于取槽：匿名请求不该先占住一个槽（再在 401 里还回去）。"""
         self.client.force_authenticate(user=None)
-        resp = self.client.post('/api/v1/analysis/histogram/',
-                                {'file_id': 1}, format='json')
+        with mock.patch('apps.common.admission.heavy_slot') as slot:
+            resp = self.client.post('/api/v1/analysis/histogram/',
+                                    {'file_id': 1}, format='json')
         self.assertEqual(resp.status_code, 401, resp.content)
+        slot.assert_not_called()
         self.assertEqual(admission.admission_snapshot()['active'], 0,
-                         'initial() 抛异常后槽泄漏了')
+                         '匿名请求不该占到槽')
+
+    def test_slot_is_released_when_the_business_body_raises(self):
+        """业务体抛 ValueError ⇒ 统一 500 信封，槽仍由 `finalize_response` 归还。
+
+        action 本体在请求期由 `getattr(self, action)` 取（`as_view` 的 view 闭包），
+        所以替掉类属性只换业务体；`self.action` 仍来自 `action_map`，取槽判定不受影响。
+        """
+        ctx = mock.MagicMock()
+        with mock.patch('apps.common.admission.heavy_slot', return_value=ctx), \
+                mock.patch.object(AnalysisViewSet, 'histogram',
+                                  side_effect=ValueError('boom')):
+            resp = self.client.post('/api/v1/analysis/histogram/',
+                                    {'file_id': 1}, format='json')
+        ctx.__enter__.assert_called_once_with()
+        ctx.__exit__.assert_called_once()
+        self.assertEqual(resp.status_code, 500, resp.content)
+        self.assertEqual(resp.json()['code'], 'internal_error')
 
 
 class SyncFallbackAdmissionTests(TestCase):

@@ -217,12 +217,14 @@ hits, misses, evictions, clears
 
 - `HeavyActionMixin`：ViewSet 类顶声明 `heavy_actions = frozenset({...})`；
   在 `initial()` 里按 `self.action` 取槽，在 `finalize_response()` 的 `finally`
-  释放；`initial()` 自身抛异常（含 `ServerBusy`）时先退出上下文再上抛。
+  释放（成功与业务体异常都走这一处）。**取槽在 `super().initial()` 之后**：
+  认证 / 权限 / 节流先过，匿名或无权请求不占槽、也不进等待队列
+  （2026-11-22：认证先行，避免匿名请求占槽）。
   **不要覆写 `dispatch()`**：DRF 在 `ViewSetMixin.initialize_request()` 里才设置
   `self.action`，而它在 `APIView.dispatch()` 内部执行 —— mixin 的 `dispatch()`
   覆写体运行时 `self.action` 仍是 `None`，名单里的动作永远不会取槽；且在那里
   抛出的 `ServerBusy` 位于 `APIView.dispatch()` 的 try/except 之外，会变成 500
-  而不是 503 信封。（`apps/common/admission.py` 需 `import sys`。）
+  而不是 503 信封。
 
   ```python
   class HeavyActionMixin:
@@ -230,19 +232,15 @@ hits, misses, evictions, clears
       _heavy_ctx = None
 
       def initial(self, request, *args, **kwargs):
+          # 认证 / 权限 / 节流先过：匿名请求不占槽（2026-11-22）。
+          super().initial(request, *args, **kwargs)
           # ViewSetMixin.initialize_request has already set self.action here.
           action = getattr(self, 'action', None)
           self._heavy_ctx = None
           if action in self.heavy_actions:
-              self._heavy_ctx = heavy_slot(action)
-              self._heavy_ctx.__enter__()      # ServerBusy is now inside APIView.dispatch's try
-          try:
-              return super().initial(request, *args, **kwargs)
-          except Exception:
-              if self._heavy_ctx is not None:
-                  self._heavy_ctx.__exit__(*sys.exc_info())
-                  self._heavy_ctx = None
-              raise
+              ctx = heavy_slot(action)
+              ctx.__enter__()      # ServerBusy is now inside APIView.dispatch's try
+              self._heavy_ctx = ctx
 
       def finalize_response(self, request, response, *args, **kwargs):
           try:
