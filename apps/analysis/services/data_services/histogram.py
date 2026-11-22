@@ -67,8 +67,9 @@ def _kde_with_reason(data_series, bin_min, bin_max, degraded, reason):
     """``compute_kde_curve`` 的第二道网：把逃出 KDE 管线的 ``MemoryError`` 归到
     *reason* 上，而不是让整条直方图请求变 503。
 
-    ``compute_kde_curve`` 自己已经捕获一遍；这里兜的是它之外（以及将来换实现、
-    加前置分配）抛出的内存错误 —— 只有 ``degraded`` 给定时才降级，否则照旧抛。
+    兜的是 ``compute_kde_curve`` **try 之外**的分配：``data_series.astype(float)``
+    等前置拷贝与参数预处理不受内层捕获保护，内存不足时会原样逃出。只有
+    ``degraded`` 给定时才降级，否则照旧抛。
     """
     try:
         return compute_kde_curve(data_series, bin_min, bin_max,

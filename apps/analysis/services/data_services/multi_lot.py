@@ -276,6 +276,8 @@ def compute_multi_lot_distribution(datasets, all_series, param,
         q3_v = round(float(series.quantile(0.75)), 6)
         kde = None
         if include_kde and len(series) >= 3:
+            # 本批 multi_lot 不降级：KDE OOM 有意上抛（2026-10-21 设计 §7），
+            # 不要改成 degraded=[] 静默少一条曲线。
             kde = compute_kde_curve(series, bin_min, bin_max)
         lot_data.append({
             'name': ds.get('name', fid),
