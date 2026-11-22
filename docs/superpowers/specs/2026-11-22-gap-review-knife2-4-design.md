@@ -198,6 +198,14 @@ release
 - `pollDecision` 的 state 增加 `maxMs`；`useJobExport` 在首个响应确定上限。
 - `useJobExport` 暴露 `queuePosition`；`JobProgressChip` 增可选 `queuePosition`，进度 0 且 >0 时显示「排队中 · 前面 N 个」。
 
+**口径说明（已知低估，不改语义）**：`queue_position` 只数**同一 owner** 的
+`pending`/`running` 作业，所以别人在排队时它是 0 —— 这不是「队列空了」，是
+「我的作业前面没有我自己的作业」。前端文案「前面 N 个」指「我的作业前面 N 个」，
+**不是全局队列长度**；把它读成全局数会在多人同时提交时显得过于乐观。
+若将来真要展示全局排队（例如运维看板），另立字段（如 `global_queue_depth`），
+**不要直接改 `queue_position` 的计数语义** —— 它是按用户隔离的提交反馈，
+换成全局口径会让每个用户都看到别人的积压。
+
 ## 6. 测试策略
 
 | 层 | 判据 |

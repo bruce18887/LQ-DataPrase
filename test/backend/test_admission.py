@@ -126,6 +126,26 @@ class SlotExclusionTests(SimpleTestCase):
         self.assertNotIn('error', outcome, outcome.get('error'))
         self.assertEqual(admission.admission_snapshot()['active'], 0)
 
+    def test_slot_is_returned_when_the_body_raises(self):
+        """业务体抛异常也必须还槽：`finally` 少了释放那一半，一次失败就吃掉一格容量。
+
+        容量 1 下这最刺眼 —— 失败之后再也取不到槽，进程慢慢变成「全部 503」。
+        计数与「还能再取」一起断：只看 active 的话，把 release 换成 _bump(-1)
+        仍能骗过读数，但第二次取槽会当场超时。
+        """
+        env, budget_patch, evict_patch = _patches(
+            ENV_ONE_SLOT_NO_WAIT, _budget('normal'))
+        with env, budget_patch, evict_patch:
+            with self.assertRaises(RuntimeError):
+                with admission.heavy_slot('boom'):
+                    raise RuntimeError('body failed')
+            snapshot = admission.admission_snapshot()
+            self.assertEqual(snapshot['active'], 0, '异常路径没还槽')
+            self.assertEqual(snapshot['waiting'], 0)
+            with admission.heavy_slot('after'):
+                self.assertEqual(admission.admission_snapshot()['active'], 1)
+        self.assertEqual(admission.admission_snapshot()['active'], 0)
+
     def test_nested_slot_takes_only_one_of_the_capacity(self):
         """容量 1 下嵌套若再取一次槽，内层会当场超时 → 本用例红。"""
         env, budget_patch, evict_patch = _patches(

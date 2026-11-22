@@ -25,6 +25,7 @@ import tempfile
 import threading
 from unittest import mock
 
+from django.http import QueryDict
 from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APIClient
 
@@ -69,8 +70,11 @@ LIGHT_ACTIONS = {
 }
 
 # 两个 ViewSet 各取一个重活：接线是在五个类上重复的同一段，抽两个证明「不止一个类连上了」。
+# histogram 这一条带 `params`：空 params 是「只回列名」的快路径，按
+# `heavy_slot_required` 钩子不占槽（见 `HistogramFastPathAdmissionTests`），
+# 要断准入就得到计算分支上去。
 HEAVY_ENDPOINTS = (
-    ('post', '/api/v1/analysis/histogram/', {'file_id': 1}),
+    ('post', '/api/v1/analysis/histogram/', {'file_id': 1, 'params': ['A']}),
     ('post', '/api/v1/batch-report/batch_html_report/', {}),
 )
 
@@ -160,6 +164,40 @@ class HeavyActionDeclarationTests(SimpleTestCase):
                                  f'{name} 是轻端点，登记进 heavy_actions 会让普通浏览也可能 503')
 
 
+class HistogramFastPathAdmissionTests(SimpleTestCase):
+    """histogram 空 params 是「只回列名」的快路径 —— 不占重活槽（其余重活照旧）。
+
+    分析页一打开就先发一次空 params 请求拿参数列表（只扫列名，不跑直方图计算）。
+    不豁免它，负载下这次「点开页面」就会排队 10s 再 503，参数列表整块清空 ——
+    一个只读列的请求被当成重活拒掉。判据分两层：钩子本身（本类）与请求级
+    （`HeavyActionRequestTests` 的两条），后者证明 `initial()` 真按钩子分支。
+    """
+
+    def _view(self, data, query=''):
+        """只装出钩子读的那两处：`request.data` 与 `request.query_params`。"""
+        view = AnalysisViewSet()
+        view.request = mock.Mock(data=data, query_params=QueryDict(query))
+        return view
+
+    def test_empty_params_histogram_does_not_need_the_slot(self):
+        self.assertFalse(self._view({}).heavy_slot_required('histogram'))
+
+    def test_histogram_with_params_still_needs_the_slot(self):
+        self.assertTrue(self._view({'params': ['A']}).heavy_slot_required('histogram'))
+
+    def test_histogram_params_in_query_string_also_count(self):
+        """params 走查询串（GET 形态）同样是计算路径，不能按「没传」放过。"""
+        self.assertTrue(self._view({}, 'params=A').heavy_slot_required('histogram'))
+
+    def test_other_heavy_actions_always_need_the_slot(self):
+        view = self._view({})
+        for action in sorted(AnalysisViewSet.heavy_actions - {'histogram'}):
+            self.assertTrue(view.heavy_slot_required(action), action)
+
+    def test_non_heavy_actions_are_unaffected(self):
+        self.assertTrue(self._view({}).heavy_slot_required('list'))
+
+
 class HeavyActionRequestTests(TestCase):
     """请求级：持槽 → 503 信封；未登记 → 不取槽；认证先于取槽；业务体异常 → finally 还槽。"""
 
@@ -201,6 +239,29 @@ class HeavyActionRequestTests(TestCase):
         self.assertEqual(resp.status_code, 400, resp.content)
         self.assertEqual(resp.json()['code'], 'param_required')
 
+    def test_empty_params_histogram_never_touches_heavy_slot(self):
+        """请求级：空 params 的「只回列名」分支不取槽（负载下不该排队再 503）。"""
+        with mock.patch('apps.common.admission.heavy_slot') as slot:
+            resp = self.client.post('/api/v1/analysis/histogram/',
+                                    {'file_id': 1}, format='json')
+        slot.assert_not_called()
+        # 业务体跑到了（文件不存在 → 400），不是被准入挡下的 503
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertEqual(resp.json()['code'], 'file_not_found')
+
+    def test_histogram_with_params_takes_the_slot(self):
+        """同一端点的计算路径照旧取槽：豁免只落在空 params 那一条分支上。"""
+        ctx = mock.MagicMock()
+        with mock.patch('apps.common.admission.heavy_slot',
+                        return_value=ctx) as slot:
+            resp = self.client.post('/api/v1/analysis/histogram/',
+                                    {'file_id': 1, 'params': ['A']}, format='json')
+        slot.assert_called_once_with('histogram')
+        ctx.__enter__.assert_called_once_with()
+        ctx.__exit__.assert_called_once()
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertEqual(resp.json()['code'], 'file_not_found')
+
     def test_unregistered_actions_never_touch_heavy_slot(self):
         with mock.patch('apps.common.admission.heavy_slot') as slot:
             listing = self.client.get('/api/v1/batch-report/list_batches/')
@@ -228,13 +289,14 @@ class HeavyActionRequestTests(TestCase):
 
         action 本体在请求期由 `getattr(self, action)` 取（`as_view` 的 view 闭包），
         所以替掉类属性只换业务体；`self.action` 仍来自 `action_map`，取槽判定不受影响。
+        带 `params` 走计算分支：空 params 的快路径按钩子不占槽。
         """
         ctx = mock.MagicMock()
         with mock.patch('apps.common.admission.heavy_slot', return_value=ctx), \
                 mock.patch.object(AnalysisViewSet, 'histogram',
                                   side_effect=ValueError('boom')):
             resp = self.client.post('/api/v1/analysis/histogram/',
-                                    {'file_id': 1}, format='json')
+                                    {'file_id': 1, 'params': ['A']}, format='json')
         ctx.__enter__.assert_called_once_with()
         ctx.__exit__.assert_called_once()
         self.assertEqual(resp.status_code, 500, resp.content)

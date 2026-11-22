@@ -231,13 +231,17 @@ hits, misses, evictions, clears
       heavy_actions = frozenset()
       _heavy_ctx = None
 
+      def heavy_slot_required(self, action):
+          # 登记即占；需要豁免「同一 action 里的轻分支」的 ViewSet 才覆写。
+          return True
+
       def initial(self, request, *args, **kwargs):
           # 认证 / 权限 / 节流先过：匿名请求不占槽（2026-11-22）。
           super().initial(request, *args, **kwargs)
           # ViewSetMixin.initialize_request has already set self.action here.
           action = getattr(self, 'action', None)
           self._heavy_ctx = None
-          if action in self.heavy_actions:
+          if action in self.heavy_actions and self.heavy_slot_required(action):
               ctx = heavy_slot(action)
               ctx.__enter__()      # ServerBusy is now inside APIView.dispatch's try
               self._heavy_ctx = ctx
@@ -250,6 +254,13 @@ hits, misses, evictions, clears
                   self._heavy_ctx.__exit__(None, None, None)
                   self._heavy_ctx = None
   ```
+
+- **同一 action 里的轻分支**（`heavy_slot_required(action)` 钩子，2026-11-22 终审修复）：
+  `AnalysisViewSet` 覆写为「`histogram` 且请求不带 `params` ⇒ 不占槽」—— 空 params
+  是只回列名、不跑直方图计算的快路径，负载下让它在 10s 等待后 503 等于「点开
+  分析页就清空参数列表」。登记名单本身不变（仍按 action 声明，测试逐项钉住）；
+  计算分支（带 `params`）与其余重活动作照旧取槽，请求级用例两条一起钉住。
+  新增豁免只能按**请求内容**判分支，不得把 action 从名单里删掉。
 
 - 加 mixin 的类：`AnalysisViewSet`、`StatisticsViewSet`、`GageViewSet`、
   `BuyoffViewSet`、`BatchReportViewSet`。

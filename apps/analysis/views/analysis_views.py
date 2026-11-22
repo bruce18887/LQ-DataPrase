@@ -73,6 +73,12 @@ class AnalysisViewSet(HeavyActionMixin, FileCorrelationActions,
         'serial_distribution', 'cpk', 'qqplot', 'uph',
     })
 
+    def heavy_slot_required(self, action):
+        # 空 params 是只回列名的快路径（不跑直方图计算），不占重活槽。
+        if action == 'histogram' and not get_param_list(self.request, 'params'):
+            return False
+        return True
+
     @action(detail=False, methods=['get', 'post'])
     def histogram(self, request):
         df, datafile, metadata, err = _load_df_from_request(request)
