@@ -27,7 +27,6 @@
 
 import contextlib
 import logging
-import sys
 import threading
 import time
 
@@ -238,14 +237,18 @@ class HeavyActionMixin:
     `dispatch()` 时名单永远匹配不上（`self.action` 还是 `None`），在那里抛出的
     `ServerBusy` 也落在 `APIView.dispatch()` 的 try 之外，会变成 500 而不是 503 信封。
 
-    槽的释放只有两处：`initial()` 自己抛异常时当场退出（否则异常路径泄漏信号量），
-    其余（含业务体抛异常）都由 `finalize_response()` 的 `finally` 兜住。
+    取槽在 `super().initial()` **之后**：认证 / 权限 / 节流先过，匿名或无权请求
+    不占槽、也不进 10s 等待队列去撞 401（2026-11-22）。取槽之后 `initial()` 里
+    不再有可抛点，所以不需要异常清场块；槽的释放只在 `finalize_response()` 的
+    `finally`（成功与业务体异常都走这一处）。
     """
 
     heavy_actions = frozenset()
     _heavy_ctx = None
 
     def initial(self, request, *args, **kwargs):
+        # 认证 / 权限 / 节流先行：匿名刷重活不该占着槽，让真实用户排队。
+        super().initial(request, *args, **kwargs)
         # 到这里 `self.action` 已被 `ViewSetMixin.initialize_request()` 填好。
         action = getattr(self, 'action', None)
         self._heavy_ctx = None
@@ -253,13 +256,6 @@ class HeavyActionMixin:
             ctx = heavy_slot(action)
             ctx.__enter__()        # ServerBusy 因此位于 APIView.dispatch() 的 try 内
             self._heavy_ctx = ctx
-        try:
-            return super().initial(request, *args, **kwargs)
-        except Exception:
-            if self._heavy_ctx is not None:
-                self._heavy_ctx.__exit__(*sys.exc_info())
-                self._heavy_ctx = None
-            raise
 
     def finalize_response(self, request, response, *args, **kwargs):
         try:
