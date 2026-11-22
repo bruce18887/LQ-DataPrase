@@ -250,7 +250,7 @@ cd /srv/lqdp-src && .venv/bin/python manage.py migrate --run-syncdb
 6. **`media/` 的作业产物已有自动回收，SFTP 取回文件没有**。清理命令是
    `apps/jobs/management/commands/prune_jobs.py`，它只删 `--days` 前处于 done/error/cancelled
    的**作业产物**，不动 SFTP 取回的数据文件；调度是 `deploy/lqdp-prune-jobs.service` +
-   `.timer`（每天 04:10，模板用命令默认 `--days=7`，保留期拍板后只改 `ExecStart`），
+   `.timer`（每天 04:10，模板用 `--days=7`；保留期已定 7 天（2026-11-22 拍板），改口径只改 `ExecStart`），
    安装步骤见 `deploy/README.md`。所以磁盘的**取回文件那一半**仍按**取回量 × 保留期**线性增长
    （按每天几十 GB 估，30 天就是 TB 级），不是按「缓存窗口」自动收敛；上线前要么按保留期把盘配够，
    要么先定「取回文件何时可删」这条策略并做成第二个管理命令。

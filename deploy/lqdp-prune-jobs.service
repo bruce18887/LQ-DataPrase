@@ -7,5 +7,5 @@ User=lqdp
 Group=lqdp
 WorkingDirectory=/srv/lqdp-src
 EnvironmentFile=/etc/lqdp/server.env
-# --days=7 是 prune_jobs 的命令默认值；保留期拍板后只改这里，不要改命令本体。
+# 保留期已定 7 天（2026-11-22 拍板）；改口径只改这里，不要改命令本体。
 ExecStart=/srv/lqdp-src/.venv/bin/python manage.py prune_jobs --days=7

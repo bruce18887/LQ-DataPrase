@@ -1451,7 +1451,8 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 
 - [x] `deploy/lqdp-prune-jobs.{service,timer}` + README/部署指南
 - [x] affected 放行 `deploy/`（`e2eAffectedDecide.spec.ts` 钉住）
-- [ ] 保留期拍板（模板暂用命令默认 `--days=7`，拍板后只改 `ExecStart`）
+- [x] 保留期拍板（模板暂用命令默认 `--days=7`，拍板后只改 `ExecStart`）
+  - 2026-11-22 拍板 7 天：`ExecStart` 已是 `--days=7`、命令默认也是 7，本次只改措辞，未动可执行逻辑
 
 ## 门禁
 
