@@ -149,6 +149,37 @@ class ScopedFileListTests(AdminScopeBase):
         self.assertEqual({row['owner'] for row in rows}, {self.target.username})
 
 
+SPA_ADMIN_PATTERN = r'^admin/(?:users|audit|files)/?$'
+
+
+class AdminFilesSpaRouteTests(TestCase):
+    """``/admin/files`` 的整页刷新通路（单端口形态）。
+
+    Vite dev server 自带 history fallback，e2e 走的永远是它 ⇒「这条路径有没有交给
+    SPA」在浏览器里**不可判**（testing-gates §2 的 T1 优先）。判据取 ``resolve().route``：
+    命中的必须是 SPA 白名单正则本身，而不是 ``path('admin/', admin.site.urls)`` 的
+    catch-all —— 后者会把整页加载 302 到 ``/admin/login/``（2026-11-11 部署实测）。
+    """
+
+    def test_admin_files命中SPA白名单而不是django_admin(self):
+        match = resolve('/admin/files')
+        self.assertEqual(match.route, SPA_ADMIN_PATTERN)
+        # 白名单挂的视图就是 SPA 壳（TemplateView(index.html)），不是 admin 的 redirect。
+        self.assertEqual(match.func.view_initkwargs['template_name'], 'index.html')
+
+    def test_带尾斜杠同样命中(self):
+        self.assertEqual(resolve('/admin/files/').route, SPA_ADMIN_PATTERN)
+
+    def test_白名单三兄弟共用同一条正则(self):
+        for path in ('/admin/users', '/admin/audit', '/admin/files'):
+            with self.subTest(path=path):
+                self.assertEqual(resolve(path).route, SPA_ADMIN_PATTERN)
+
+    def test_admin根仍归django_admin(self):
+        """白名单只放开三个精确路径：``/admin/`` 本身不许被顺手交出去。"""
+        self.assertNotEqual(resolve('/admin/').route, SPA_ADMIN_PATTERN)
+
+
 class AdminUserUsageListTests(AdminScopeBase):
     def test_管理员200且路由与返回形状正确(self):
         resp = self._client(self.admin).get(USERS_URL)

@@ -107,6 +107,19 @@ const routes = [
         },
       },
       {
+        path: 'admin/files',
+        name: 'AdminFiles',
+        component: () => import('../pages/admin/AdminFiles.vue'),
+        meta: {
+          title: '全部文件',
+          requiresAdmin: true,
+          icon: Folder,
+          desc: '跨用户的只读文件清单与占用（不含下载/删除）',
+          // 同 admin/users 与 admin/audit：「系统管理」是侧栏分组名而不是路由
+          parent: { label: '系统管理' },
+        },
+      },
+      {
         path: 'settings',
         name: 'Settings',
         component: () => import('../pages/settings/SettingsPage.vue'),

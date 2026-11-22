@@ -19,6 +19,12 @@ export interface BatchDirInfo {
 
 export interface ListFilesParams {
   page?: number
+  /**
+   * 每页条数。服务端 `DataFilePagination` 认它（`page_size_query_param`，见
+   * `apps/datafiles/views/file_views.py:87-97`）；这里此前漏声明，跨用户只读页
+   * 需要显式 20/50/100 三档，补上这个键而不是绕开类型。
+   */
+  page_size?: number
   search?: string
   product_code?: string
   format_type?: string
@@ -36,6 +42,12 @@ export interface ListFilesParams {
   /** 文件大小范围筛选（字节） */
   file_size__gte?: number
   file_size__lte?: number
+  /**
+   * 管理员跨用户只读清单：目标用户 id。后端只在 `action == 'list'` 且具备
+   * `data_view_all` 时认它，普通用户带它会 403（`apps/datafiles/views/admin_scope.py`）。
+   * 详情/options 不受它影响 —— 放开的口子只有清单这一条。
+   */
+  owner_id?: number
 }
 
 /** 下拉框用的轻量文件行（/files/options/ 契约：仅标量列，无 stage/data_date/owner） */
