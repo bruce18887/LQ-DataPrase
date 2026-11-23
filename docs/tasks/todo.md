@@ -1735,3 +1735,24 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 ## 状态
 
 已发布并部署完成：服务器 HEAD `c602573`，公网 v0.9.0 验收全绿。
+
+# 任务：文件隐藏（软隐藏 + 选择面默认排除，2026-11-23）
+
+设计：`docs/superpowers/specs/2026-11-23-file-hidden-design.md`
+计划：`docs/superpowers/plans/2026-11-23-file-hidden.md`
+
+口径：软隐藏——只影响选文件候选（`/files/` 默认排除、`/files/options/` 恒排除）；
+详情/更新/删除/按 id 取数不拦；批次数据/修复中心/存储统计照旧包含隐藏文件。
+存储为 `DataFile.is_hidden` 布尔字段（迁移 `0007`）。
+
+## 勾选清单
+
+- [ ] 分支 `feature/file-hidden` 与基线核盘
+- [ ] 后端模型/迁移/序列化器 + T1（PATCH 切换、他人 404）
+- [ ] 可见性过滤（列表/options/分面/仪表板 + 软隐藏边界，T1）
+- [ ] 前端类型/API + 隐藏状态筛选（工具栏 + FileListTab）
+- [ ] 表格徽标/置灰 + 隐藏切换按钮 + 管理员页只读可见
+- [ ] e2e 接线证明 `e2e/data/file-hidden.spec.ts`
+- [ ] intro 书文件管理章节
+- [ ] 收口门禁（vitest / lint:e2e / build / 后端全套 / e2e 池 / prepush 自检）
+
