@@ -61,6 +61,8 @@ export interface DataFile {
   program_name: string
   product_code?: string
   status: string
+  /** 软隐藏：只影响选文件候选（/files/options 恒排除）；文件管理列表仍可见 */
+  is_hidden?: boolean
   /** 文件字节数（DataFileListSerializer 已返回，FileSelect 富信息行展示用） */
   file_size?: number
   /** 源文件磁盘修改时间 */

@@ -45,6 +45,16 @@
       </el-popover>
     </div>
     <div class="toolbar-right">
+      <el-select
+        class="hidden-filter"
+        data-testid="hidden-filter"
+        :model-value="hiddenFilter"
+        @change="onHiddenFilterChange"
+      >
+        <el-option label="全部（含隐藏）" value="all" />
+        <el-option label="未隐藏" value="visible" />
+        <el-option label="已隐藏" value="hidden" />
+      </el-select>
       <el-input
         v-model="searchText"
         placeholder="按文件名/程序名/标签搜索"
@@ -107,10 +117,13 @@ import {
   usageScannedText,
 } from '../../../utils/diskUsage'
 
+export type HiddenFilter = 'all' | 'visible' | 'hidden'
+
 const props = defineProps<{
   total: number
   selectedCount: number
   usage: FileUsage | null
+  hiddenFilter: HiddenFilter
 }>()
 
 const emit = defineEmits<{
@@ -119,7 +132,12 @@ const emit = defineEmits<{
   'fix-click': []
   'bulk-delete': []
   'combine-click': []
+  'hidden-filter-change': [value: HiddenFilter]
 }>()
+
+function onHiddenFilterChange(value: HiddenFilter) {
+  emit('hidden-filter-change', value)
+}
 
 const usageChip = computed(() => usageChipText(props.usage))
 const usageRows = computed(() => usageBreakdownRows(props.usage))
@@ -191,6 +209,10 @@ function onSearchInput() {
 
 .search-input {
   width: 220px;
+}
+
+.hidden-filter {
+  width: 130px;
 }
 
 :root[data-theme="night"] .section-count {
