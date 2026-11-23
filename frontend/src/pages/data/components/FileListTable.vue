@@ -168,7 +168,8 @@
           <span class="size-badge">{{ formatSize(row.file_size) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="220" align="center" fixed="right">
+      <!-- 240 而不是 220：三颗按钮里最长的是「取消隐藏」四字，220 时会换行 -->
+      <el-table-column label="操作" width="240" align="center" fixed="right">
         <template #default="{ row }">
           <el-button size="small" type="primary" plain @click.stop="emit('view-file', row.id, row.filename)">查看</el-button>
           <el-button size="small" type="warning" plain @click.stop="emit('toggle-hidden', row)">
