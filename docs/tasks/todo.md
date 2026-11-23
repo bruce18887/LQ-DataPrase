@@ -1810,3 +1810,25 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 ## 留给拍板
 
 - 125% 缩放下 13 列最小宽合计 1608px，即使修完也只能横向滚动看全；若要求「不横滚同屏看全」，需要缩列/隐藏低优列（产品口径），不在本次范围。
+
+# 任务：文件下拉长文件名截断修复（2026-11-23）
+
+现象：分析页等文件下拉宽 320–360px；`el-select-v2` 的 `fit-input-width` 默认 true（v1 `el-select` 默认 false），
+长文件名被省略号截断且无 title，用户看不到全名（截图：`BPD60320_C01F40#AAA…`）。
+修复：`FileSelect.vue` 显式 `:fit-input-width="false"` 恢复 v1 自适应宽度（面板按当前候选最长 label 加宽，不足保持输入宽）。
+
+- [x] T3 几何断言先红（`e2e/analysis/file-select.spec.ts`：下拉宽于输入框 + 长名 `scrollWidth ≤ clientWidth+12`）
+- [x] `FileSelect.vue` 加 `:fit-input-width="false"`
+- [x] 单 spec 复跑 + 全量 vitest / build / lint:e2e + affected 门禁
+
+## 门禁记录
+
+| 档 | 命令 | 实测判据行 |
+|---|---|---|
+| T3 定向（先红） | `E2E_PORT=28100 E2E_FRONTEND_PORT=23100 E2E_SKIP_BUILD=1 npx playwright test e2e/analysis/file-select.spec.ts --project=P1 --workers=1 -g "长文件名不截断"` | `1 failed`（命中「下拉宽于输入框」机制断言）+ `2 passed`（auth.setup） |
+| T3 定向（修复后整文件） | 同上、不带 `-g` | `11 passed (24.2s)` |
+| 前端单测 / 类型 / 构建 | `npx vitest run` / `npm run lint:e2e` / `npm run build` | `78 files / 1088 tests` · tsc 无输出 · `build complete in 2.23s` |
+| affected 门禁（首次） | `cd frontend && npm run test:e2e:affected` | 池进程以 Windows 异常码 `3221226505` 崩溃、未生成轮次目录 ⇒ 按门禁口径判 VOID (infra)，不作为结论 |
+| affected 门禁（重跑） | 同上 | `档: lint:e2e ok / vitest ok / e2e:全量 ok` · `RESULT: PASS · 计划 3 档全部执行`；池 `用例 495 · 11.2min · 2.91s/例 · MEASURED · 真红 0 · 负载抖动 2`；跑后端口已释放 |
+
+已知非阻塞：affected 首轮为基础设施崩溃（VOID），重跑即结论；池效率 2.06 低于 nightly 目标 2.8（含 2 个负载抖动文件复跑，按 §4「效率只在无重跑时判」不作退化）。
