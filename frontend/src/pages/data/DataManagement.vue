@@ -115,7 +115,8 @@ import FileCorrelationSection from './components/correlation/FileCorrelationSect
 
 // 用于导出下拉与当前文件名解析的轻量全量列表（FileListTab 自管分页列表）。
 // shallowRef：page_size=9999 时这是全仓最大的一份列表（实测 9999 条 ≈ 51.8KB），
-// 它只在 loadFiles 里整体替换（:196），七处绑定（四候选 + 三元数据）全部只读或先拷贝再 sort。
+// 它只在 loadFiles 里整体替换（`files.value = data.results || data` 那一行），
+// 七处绑定（四候选 + 三元数据）全部只读或先拷贝再 sort。
 //
 // ⚠ 这份列表同时承担**两种互斥的消费**，取哪一份是每个绑定点自己的事：
 //  - 候选面（自带 FileSelect 的四处选择器：导出横幅 / 文件对比 / Gage / Buyoff）要的是
