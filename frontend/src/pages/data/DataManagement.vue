@@ -57,6 +57,8 @@
              （在册：docs/tasks/todo.md「整改后遗留清单」的「/summary/ 请求数无守卫」那条）。
              v-show 切换保住各实例的滚动位置 -->
         <template v-for="t in viewTabs" :key="t.id">
+          <!-- 传全量 `files`（不是 selectableFiles）：本组件用 col_count 算驻留上限，
+               隐藏文件也必须能被认出来，否则列数掉回兜底 -->
           <DataBrowserAgGrid
             v-if="t.everActive"
             v-show="t.id === activeViewTabId"
@@ -72,24 +74,25 @@
 
       <!-- 导出工具 -->
       <div v-show="activeTab === 'export'" role="tabpanel" class="content-section fade-in">
-        <ActiveFileBanner v-model="activeFileId" :files="files" />
+        <!-- 横幅是候选面（隐藏文件不该被选），下面那条 ExportToolsTab 是元数据面（要认得出隐藏文件） -->
+        <ActiveFileBanner v-model="activeFileId" :files="selectableFiles" />
         <ExportToolsTab :files="files" :file-id="activeFileId" />
       </div>
 
       <!-- 文件对比 -->
       <div v-show="activeTab === 'compare'" role="tabpanel" class="content-section fade-in">
         <!-- active 控制重型结果表格的挂载：切走即卸载 DOM，避免切 tab 卡顿 -->
-        <FileCorrelationSection :files="files" :active="activeTab === 'compare'" />
+        <FileCorrelationSection :files="selectableFiles" :active="activeTab === 'compare'" />
       </div>
 
       <!-- Gage Summary -->
       <div v-show="activeTab === 'gage'" role="tabpanel" class="content-section fade-in">
-        <GageSummary :files="files" />
+        <GageSummary :files="selectableFiles" />
       </div>
 
       <!-- Buyoff Form -->
       <div v-show="activeTab === 'buyoff'" role="tabpanel" class="content-section fade-in">
-        <BuyoffForm :files="files" />
+        <BuyoffForm :files="selectableFiles" />
       </div>
     </div>
   </div>
@@ -112,8 +115,19 @@ import FileCorrelationSection from './components/correlation/FileCorrelationSect
 
 // 用于导出下拉与当前文件名解析的轻量全量列表（FileListTab 自管分页列表）。
 // shallowRef：page_size=9999 时这是全仓最大的一份列表（实测 9999 条 ≈ 51.8KB），
-// 它只在 loadFiles 里整体替换（:196），六个消费组件全部只读或先拷贝再 sort。
+// 它只在 loadFiles 里整体替换（:196），七处绑定（四候选 + 三元数据）全部只读或先拷贝再 sort。
+//
+// ⚠ 这份列表同时承担**两种互斥的消费**，取哪一份是每个绑定点自己的事：
+//  - 候选面（自带 FileSelect 的四处选择器：导出横幅 / 文件对比 / Gage / Buyoff）要的是
+//    「能被选进一次新分析的文件」⇒ 隐藏文件不在内，用下面的 `selectableFiles`；
+//  - 元数据面（DataBrowserAgGrid 的 `col_count`、ExportToolsTab 与 `viewTabsWithLabel`
+//    的文件名解析）要的是「认得出我已经在看的那个文件」⇒ 隐藏文件也必须在内，用 `files`。
+// 所以请求本身是**全量**（带 `include_hidden=1`），排除隐藏只在候选那一侧做：
+// 若把排除塞进请求，行点击打开的隐藏文件在「查看数据」里会显示「未选择文件」、
+// `col_count` 还会掉回 useIrmSizing 的兜底值（终审 Important #1）。
 const files = shallowRef<any[]>([])
+/** 候选面用的子集：只去掉软隐藏文件，其余字段与 `files` 同源。 */
+const selectableFiles = computed(() => files.value.filter((f: any) => !f.is_hidden))
 const fileTotal = ref(0)
 const batchTotal = ref(0)
 const activeTab = ref('files')
@@ -193,8 +207,11 @@ const tabs = [
 
 async function loadFiles() {
   try {
-    // 查看数据/导出工具顶部的文件下拉需能选任意文件，不能受默认分页（20 条）限制
-    const { data } = await api.get('/files/', { params: { page_size: 9999 } })
+    // 查看数据/导出工具顶部的文件下拉需能选任意文件，不能受默认分页（20 条）限制。
+    // `page_size` 必须留在参数首位：`e2e/data/data.spec.ts` 的两条判据把
+    // `?page_size=9999` 紧跟在问号后锚住（位序变了计数会归零）。
+    // `include_hidden=1` = 全量（元数据面）—— 候选面的排除见 `selectableFiles`。
+    const { data } = await api.get('/files/', { params: { page_size: 9999, include_hidden: 1 } })
     files.value = data.results || data
   } catch {
     // ⚠ 这里**不能**清成 []（评审 A-1，2026-10-23 收口）：`files` 是每份表格实例

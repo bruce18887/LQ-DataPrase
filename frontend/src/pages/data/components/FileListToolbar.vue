@@ -45,9 +45,16 @@
       </el-popover>
     </div>
     <div class="toolbar-right">
+      <!-- popper-class 是实例级下拉身份：面板 teleport 到 body，全局
+           `.el-select-dropdown:visible` 在「上一个面板还在 leave 过渡」时会挑错家
+           （机理见 e2e/helpers/elplus.ts 的 popperOf）。e2e 侧身份串是
+           `dp-hidden-filter-popper`，产品侧改类名时两边一起改。
+           aria-label 与 intro 书里这一档的文案对齐（「隐藏状态」）。 -->
       <el-select
         class="hidden-filter"
         data-testid="hidden-filter"
+        popper-class="dp-hidden-filter-popper"
+        aria-label="隐藏状态"
         :model-value="hiddenFilter"
         @change="onHiddenFilterChange"
       >

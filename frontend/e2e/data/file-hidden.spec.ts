@@ -6,14 +6,21 @@ import { PRIMARY_SAMPLE_FILE } from '../fixtures/test-data'
 import { gotoApp } from '../helpers/nav'
 import { uploadFile, expectUploadSuccess } from '../helpers/upload'
 import { filePicker } from '../helpers/params'
+import { popperOf } from '../helpers/elplus'
 
 /**
  * 文件隐藏（软隐藏）接线证明：
  *  - 隐藏后文件列表仍可见（徽标 + 「已隐藏」筛选档）
+ *  - 隐藏文件仍能从行点击打开，且「查看数据」标签页显示真实文件名（元数据面不排除隐藏）
  *  - 分析页下拉候选默认排除隐藏文件
  *  - 取消隐藏后候选恢复
  * 组合语义（include_hidden / hidden_only / 分面 / 仪表板回退）由 T1
  * `apps/datafiles/tests_hidden.py` 承载，这里只证明接线不证明组合。
+ *
+ * 两处下拉一律按**实例级 popper-class** 取选项（`popperOf`），不用全局
+ * `.el-select-dropdown:visible`：收起那 ~150ms 的 leave 过渡帧里 `:visible` 与
+ * `[aria-hidden="false"]` 一起脏，会挑中正在退出的上一个面板（机理见
+ * `helpers/elplus.ts` 的 `popperOf` 注释）。
  */
 
 /**
@@ -97,16 +104,25 @@ test.describe('文件隐藏（软隐藏）', { tag: ['@p1', '@data'] }, () => {
       await row.locator('button').filter({ hasText: '隐藏' }).click()
       await expect(row).toContainText('已隐藏', { timeout: 10_000 })
 
-      // 隐藏状态筛选：未隐藏档看不到，已隐藏档能看到
+      // 行点击路径仍可用，且元数据完整：查看数据标签页应显示真实文件名（终审 Important #1 的护栏）。
+      // 元数据面（DataBrowserAgGrid 的 col_count、ViewFileTabs 的标签文案）走全量 `files`
+      // （带 include_hidden=1），候选面才排除隐藏 —— 若两者共用一份排除过的列表，这里会读到
+      // 「未选择文件」。
+      await row.locator('button').filter({ hasText: '查看' }).click()
+      await expect(page.locator('.tab-btn.active')).toContainText('查看数据')
+      await expect(page.locator('.view-file-tabs')).toContainText(name)
+      await page.locator('.tab-btn').filter({ hasText: '文件列表' }).click()
+
+      // 隐藏状态筛选：未隐藏档看不到，已隐藏档能看到。选项按本下拉自己的 popper 取
+      // （`popper-class="dp-hidden-filter-popper"`）。
       const filter = page.getByTestId('hidden-filter')
+      const filterOptions = popperOf(page, 'dp-hidden-filter-popper').locator('.el-select-dropdown__item')
       await filter.click()
-      await page.locator('.el-select-dropdown:visible .el-select-dropdown__item')
-        .filter({ hasText: '未隐藏' }).click()
+      await filterOptions.filter({ hasText: '未隐藏' }).click()
       await expect(row).toHaveCount(0, { timeout: 10_000 })
 
       await filter.click()
-      await page.locator('.el-select-dropdown:visible .el-select-dropdown__item')
-        .filter({ hasText: '已隐藏' }).click()
+      await filterOptions.filter({ hasText: '已隐藏' }).click()
       await expect(row).toHaveCount(1, { timeout: 10_000 })
 
       // 夜间置灰哨兵（两套主题各一遍）
@@ -121,9 +137,9 @@ test.describe('文件隐藏（软隐藏）', { tag: ['@p1', '@data'] }, () => {
       await expect(picker).toContainText('.csv', { timeout: 15_000 })
       await picker.click()
       await picker.locator('input').first().fill(name)
-      await expect(
-        page.locator('.el-select-dropdown:visible .el-select-dropdown__empty'),
-      ).toHaveText('无匹配文件', { timeout: 10_000 })
+      const pickerPopper = popperOf(page, 'dp-file-picker-single')
+      await expect(pickerPopper.locator('.el-select-dropdown__empty'))
+        .toHaveText('无匹配文件', { timeout: 10_000 })
       await page.keyboard.press('Escape')
 
       // 回文件列表取消隐藏
@@ -142,7 +158,7 @@ test.describe('文件隐藏（软隐藏）', { tag: ['@p1', '@data'] }, () => {
       await picker2.click()
       await picker2.locator('input').first().fill(name)
       await expect(
-        page.locator('.el-select-dropdown:visible .el-select-dropdown__item:visible').first(),
+        popperOf(page, 'dp-file-picker-single').locator('.el-select-dropdown__item').first(),
       ).toContainText(name, { timeout: 10_000 })
       await page.keyboard.press('Escape')
     } finally {
