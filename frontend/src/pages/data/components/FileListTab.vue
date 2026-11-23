@@ -5,7 +5,9 @@
       :total="total"
       :selected-count="selectedIds.length"
       :usage="usage"
+      :hidden-filter="hiddenFilter"
       @search="onSearch"
+      @hidden-filter-change="onHiddenFilterChange"
       @upload-click="showUpload = !showUpload"
       @fix-click="showConsistencyCheck = true"
       @bulk-delete="onBulkDelete"
@@ -79,7 +81,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { datafilesApi, type FileUsage } from '../../../api/datafiles'
 import { useFilesStore } from '../../../stores/files'
 import { useCoalescedCall } from '../../../composables/useCoalescedCall'
-import FileListToolbar from './FileListToolbar.vue'
+import FileListToolbar, { type HiddenFilter } from './FileListToolbar.vue'
 import FileUploadArea from './FileUploadArea.vue'
 import ConsistencyCheckDialog from './ConsistencyCheckDialog.vue'
 import CombineBatchDialog from './CombineBatchDialog.vue'
@@ -109,6 +111,17 @@ const tableRef = ref<InstanceType<typeof FileListTable>>()
 
 // Current global keyword search (toolbar)
 const currentSearch = ref('')
+
+// 隐藏状态筛选（服务端生效）：'all' = 含隐藏；'visible' = 缺省只返回未隐藏；'hidden' = 只看已隐藏。
+// 与表头筛选同属用户驱动的列表变化 ⇒ 切换时先 clearSelection（见 onSortChange 上方那段约定）。
+const hiddenFilter = ref<HiddenFilter>('all')
+
+function onHiddenFilterChange(value: HiddenFilter) {
+  hiddenFilter.value = value
+  currentPage.value = 1
+  tableRef.value?.clearSelection()
+  loadFiles()
+}
 
 // ── 表头筛选（服务端生效：20 条/页必须后端过滤；状态由 FileListTable 读写） ──
 const filters = reactive<FileFilters>({
@@ -204,6 +217,8 @@ async function loadFiles() {
       filename__icontains: filters.filename,
       program_name__icontains: filters.program,
       tag: filters.tag,
+      include_hidden: hiddenFilter.value === 'all' ? 1 : undefined,
+      hidden_only: hiddenFilter.value === 'hidden' ? 1 : undefined,
       ordering: ordering.value,
     })
     if (Array.isArray(data)) {

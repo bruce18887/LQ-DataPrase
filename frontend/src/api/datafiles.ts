@@ -48,6 +48,10 @@ export interface ListFilesParams {
    * 详情/options 不受它影响 —— 放开的口子只有清单这一条。
    */
   owner_id?: number
+  /** 列表包含已隐藏（文件管理页「全部」档）；缺省只返回未隐藏 */
+  include_hidden?: number
+  /** 只返回已隐藏（优先于 include_hidden） */
+  hidden_only?: number
 }
 
 /** 下拉框用的轻量文件行（/files/options/ 契约：仅标量列，无 stage/data_date/owner） */
@@ -218,6 +222,10 @@ export const datafilesApi = {
   },
 
   // File tags
+  /** 切换隐藏（软隐藏：只影响选文件候选；PATCH 单字段） */
+  setHidden(id: number, hidden: boolean) {
+    return api.patch<DataFile>(`/files/${id}/`, { is_hidden: hidden })
+  },
   setTags(id: number, tags: string[]) {
     return api.post<{ id: number; tags: string[] }>(`/files/${id}/set_tags/`, { tags })
   },
