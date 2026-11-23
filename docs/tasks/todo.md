@@ -1672,3 +1672,66 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 
 已知非本批红：`test_job_cancel.RealPoolQueueWindowTests.test_cancellability_flips_at_workers_plus_extra_queued_calls` 与 `test_csv_download_streaming` 为 base 存量的负载时序 flake，单类复跑 OK；收口以一次干净运行结论为准。
 
+
+# 任务：v0.9.0 发版与服务器升级（2026-11-23）
+
+用户指令：「版本更新到 0.9.0 → 远程推送 → 部署到服务器」（服务器 `bpsemi@100.121.94.114`，公网 `https://125.69.67.169:18124`）。
+
+## 版本（`c602573`，已 push）
+
+- 按 `docs/reference/version-management.md` 同步三处：`frontend/package.json`（单一事实源）、
+  `frontend/package-lock.json` 顶部两处、`pyproject.toml`；根 `package.json` 固定 `0.0.0` 未动。
+- 介绍书 `guide/11-versions.md`：当前版本行、v0.9.0 里程碑行（3D Site 柱阵、框选子集面板并 dock、
+  测试项归类批量导出与 PPT 进度、作业排队/超时与过载准入、KDE 降级提示、管理员跨用户只读、下拉虚拟化、介绍书迁 VitePress）、
+  编制日期改 2026-11-23。
+
+## 门禁（同树实测）
+
+| 档 | 命令 | 判据行 |
+|---|---|---|
+| 版本守卫 | `manage.py test test.backend.test_version_single_source` | `Ran 2 / OK` |
+| 前端单测 | `cd frontend && npx vitest run` | `78 files / 1088 tests passed` |
+| 构建 | `cd frontend && npm run build` | 通过，`dist` 内含 `0.9.0`（63 assets，index sha256 `cbf5924…`） |
+| 介绍书 | `npm run intro:build` + `node scripts/intro/check.mjs` | `INTRO-CHECK PASS · 版本 v0.9.0 同源` |
+| e2e 池 | `node scripts/e2e_pool.mjs --slots=4` | `用例 489 · 10.7min · unexpected 2 · flaky 0` · `MEASURED` · **真红 0**（`exports:491`、`histogram-degraded:35` 隔离复跑绿） |
+| 后端全套 | `manage.py test test.backend apps.*`（13 个模块） | `Ran 2805 / FAILED (failures=1, skipped=17)`；唯一失败 `test_job_cancel.RealPoolQueueWindowTests…` 为与池并跑的负载时序 flake，隔离复跑 `Ran 1 / OK`（与上批台账同形） |
+| push 自检 | `node scripts/prepush-history-check.mjs` | `RESULT: PASS` |
+
+- 受影响判据命中 `frontend/package*`、`pyproject.toml` 全局清单 ⇒ 兜底全量，故按收口档跑池 + 后端套件。
+- 池运行前清掉 11-22 遗留孤儿 slot 后端（PID 46904/11368，占 21002，父进程已死）。
+
+## 推送
+
+- `git push origin master`：`1a27604..c602573`；`git ls-remote` 复核 `origin/master = c602573`。
+
+## 部署（沿用 2026-11-11 台账的 ad-hoc 形态，非 systemd 方案 A）
+
+- 服务器形态未变：`start_backend.sh 18000 127.0.0.1`（dev_spa 档、autoreload、PPID=1）、
+  nginx `8124 ssl → 127.0.0.1:18000`、公网 `125.69.67.169:18124`；服务器无 Node ⇒ 本机构建传 dist。
+- 备份：`backup_db --dest ~/lqdp-backup` → `lqdp-20261123045200.sqlite3`（420KB，VACUUM INTO）；
+  `~/dist-backup-94a4895.tar.gz`（1.4MB，旧 dist）。
+  （首次跑因未带 `SECRET_KEY` 报互锁——dev_spa 档无 `secret.key`；`set -a; . ./.env` 后通过。）
+- 停机窗口：停 runserver → stash `playwright.config.ts` 漂移 → `git fetch && git merge --ff-only origin/master`
+  （`94a4895 → c602573`，316 笔提交）→ `stash pop` 复原漂移。
+- 迁移：`manage.py migrate --check` 退出 0（区间内无新迁移文件）。
+- dist：`rm -rf frontend/dist && tar xzf dist-090.tar.gz`，63 assets，index sha256 与本地一致 `cbf5924…`。
+- 启动：`nohup ./start_backend.sh 18000 127.0.0.1 >> ~/lqdp-backend.log 2>&1`；重启后日志 `Traceback|ERROR` 计数 0。
+- 服务器工作树只剩既有未跟踪件（`base.py.bak-tls`、`dist.old-a02be88/`、`start_backend.*`）与已 stash pop 的 PW 适配。
+
+## 验收
+
+- 服务器本地：health 200；`/` 200（1707B，新 index 引用 `assets/index-Cg7Sljvy.js`）；`/pages/analysis` 200（仅证明 SPA 外壳，见教训）。
+- 公网：`https://125.69.67.169:18124/` 200、`/analysis` 200；`POST /api/v1/auth/login/`（zhuliqun）200 返回 token。
+- 浏览器（Playwright + ignoreHTTPSErrors，自签证书）：登录后**顶栏徽标 `v0.9.0`**；
+  `/analysis`、`/data`、`/dashboard` 均正常渲染（分析页直方图与 Site 统计有数据）、console 错误 0。
+  截图在 `tasks/verify-090-*.png`，脚本 `tasks/verify-090-deploy.cjs`。
+- 邻站：服务器本机 `:80`（tplms）200、`:18081`（discuzq）200、nginx active；公网 80 未映射（000）非回归。
+- 作业：升级前 `running=0`，重启未中断用户作业。
+
+## 回滚
+
+- 代码：`git checkout 94a4895` + `tar xzf ~/dist-backup-94a4895.tar.gz -C /home/bpsemi/project/LQ_DataPrase/frontend` + 重启；无迁移 ⇒ 库无需回退（如需：停服后用 `~/lqdp-backup/lqdp-20261123045200.sqlite3` 替换）。
+
+## 状态
+
+已发布并部署完成：服务器 HEAD `c602573`，公网 v0.9.0 验收全绿。
