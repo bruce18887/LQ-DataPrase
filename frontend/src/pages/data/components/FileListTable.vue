@@ -474,16 +474,4 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
 :deep(.row-hidden) .size-badge {
   color: var(--text-2);
 }
-
-/* ============================
-   Night Theme Overrides
-   ============================ */
-:root[data-theme="night"] .size-badge {
-  color: var(--info);
-}
-
-/* 夜间主题下置灰需压过上面的夜间色（0,5,0 > 0,4,0） */
-:root[data-theme="night"] :deep(.row-hidden) .size-badge {
-  color: var(--text-2);
-}
 </style>
