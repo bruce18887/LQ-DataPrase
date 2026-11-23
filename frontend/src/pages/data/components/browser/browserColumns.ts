@@ -80,24 +80,36 @@ export function buildBrowserColumnDefs(opts: BuildBrowserColumnDefsOptions): any
   for (const col of opts.displayCols) {
     const meta = opts.colMeta[col]
     let header = col
+    let headerTooltip: string | undefined
+    let hasRange = false
     if (meta) {
       const parts = [col]
       if (meta.unit && meta.unit !== '-' && meta.unit !== 'None') {
         parts.push(` (${meta.unit})`)
       }
+      const nameLine = parts.join('')
       if (meta.min !== '' || meta.max !== '') {
-        parts.push(` [${meta.min || '-'}, ${meta.max || '-'}]`)
+        // 两行表头：第一行列名(单位)，第二行规格范围（次行小字由 .dp-header-2l 样式负责）
+        const rangeLine = `[${meta.min || '-'}, ${meta.max || '-'}]`
+        header = `${nameLine}\n${rangeLine}`
+        headerTooltip = `${nameLine} ${rangeLine}`
+        hasRange = true
+      } else {
+        header = nameLine
       }
-      header = parts.join('')
     }
 
     const colDef: any = {
       field: col,
       headerName: header,
+      // ag-grid v35 已无 defaultColWidth 选项（不配列宽时每列 200px）；收窄到 150 让单屏多显示约 1/3 列
+      width: 150,
       // 服务端列过滤（方案 A）：数值列挂 number filter（等/不等/大于/小于/区间），
       // 其余挂 text filter（包含/开头/结尾）——IRM 下 filter 类型必须显式指定
       filter: numericSet.has(col) ? 'agNumberColumnFilter' : 'agTextColumnFilter',
     }
+    if (headerTooltip) colDef.headerTooltip = headerTooltip
+    if (hasRange) colDef.headerClass = 'dp-header-2l'
     if (hiddenSet.has(col)) {
       colDef.hide = true
     }
