@@ -1644,6 +1644,14 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 - `analysis/histogram-degraded.spec.ts` 在池内一次 flaky，独占复跑绿；新 spec 的列序依赖与 `ensureChartToggles` 自收敛已记在终审 Minor，不在本批阻塞。
 - `test_job_cancel.RealPoolQueueWindowTests` 与 `test_csv_download_streaming` 的负载时序 flake 在多次 affected 跑中出现，单类/整套干净复跑绿；本批后端全套 `Ran 2805 / OK` 为最终证据。
 
+## 并入记录（2026-11-22）
+
+- `git merge --ff-only feature/gap-review-knife2-4`：master `89990cd → 9ac2554`（20 笔提交）。
+- 过程分支已 `git branch -d`（fully merged）；未 push；合并前后 `git status --short` 为空。
+- 全量门禁在并入的同一代码树（`9ac2554` 仅 docs 差异）：vitest `78 files / 1088 tests`、`lint:e2e` 干净、`build 2.16s`、后端 `Ran 2805 / OK (skipped=17)`、e2e 池 `489 例 / 10.9min / 真红 0 / MEASURED`、`prepush-history-check RESULT: PASS`。
+- 挂账：e2e 池效率 2.00 / 用例 489 超 `nightly-gates.mjs` 的 450 上限（既有套件规模趋势，另单重定基线）；`analysis/histogram-degraded.spec.ts` 池内一次 flaky 复跑绿；`test_job_cancel` / `test_csv_download_streaming` 为 base 存量负载时序 flake。
+
+
 ## 门禁记录
 
 | 档 | 命令 | 实测判据行 |
