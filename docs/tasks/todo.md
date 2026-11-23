@@ -1747,12 +1747,31 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 
 ## 勾选清单
 
-- [ ] 分支 `feature/file-hidden` 与基线核盘
-- [ ] 后端模型/迁移/序列化器 + T1（PATCH 切换、他人 404）
-- [ ] 可见性过滤（列表/options/分面/仪表板 + 软隐藏边界，T1）
-- [ ] 前端类型/API + 隐藏状态筛选（工具栏 + FileListTab）
-- [ ] 表格徽标/置灰 + 隐藏切换按钮 + 管理员页只读可见
-- [ ] e2e 接线证明 `e2e/data/file-hidden.spec.ts`
-- [ ] intro 书文件管理章节
-- [ ] 收口门禁（vitest / lint:e2e / build / 后端全套 / e2e 池 / prepush 自检）
+- [x] 分支 `feature/file-hidden` 与基线核盘
+- [x] 后端模型/迁移/序列化器 + T1（PATCH 切换、他人 404）
+- [x] 可见性过滤（列表/options/分面/仪表板 + 软隐藏边界，T1）
+- [x] 前端类型/API + 隐藏状态筛选（工具栏 + FileListTab）
+- [x] 表格徽标/置灰 + 隐藏切换按钮 + 管理员页只读可见
+- [x] e2e 接线证明 `e2e/data/file-hidden.spec.ts`
+- [x] intro 书文件管理章节
+- [x] 收口门禁（vitest / lint:e2e / build / 后端全套 / e2e 池 / prepush 自检）
+
+## 门禁记录（2026-11-23 实测，同树）
+
+| 档 | 命令 | 实测判据行 |
+|---|---|---|
+| 前端单测 | `cd frontend && npx vitest run` | `Test Files 78 passed (78)` / `Tests 1088 passed (1088)` |
+| e2e 类型体检 | `cd frontend && npm run lint:e2e` | `tsc -p tsconfig.e2e.json`，无输出 |
+| 前端构建 | `cd frontend && npm run build` | `build complete in 2.34s.`（introBooklet 的 client+server bundles 与 rendering pages 均 ✓） |
+| 后端全套 | `.venv/Scripts/python.exe manage.py test test.backend apps.accounts apps.analysis apps.batch_report apps.buyoff apps.common apps.dashboard apps.datafiles apps.export apps.gage apps.jobs apps.sftp apps.weight` | 并池轮 `Ran 2821 tests in 980.063s` / `FAILED (failures=1, skipped=17)`；solo 复跑 `Ran 2821 tests in 1030.438s` / `FAILED (failures=1, skipped=17)`（同一条红） |
+| e2e 全量池 | `node scripts/e2e_pool.mjs --slots=4` | `用例 490 · 墙钟 11.5min · 单价 3.27s/例 · 效率 2.22 · unexpected 2 · flaky 4 · skipped 22` · `结论 MEASURED` · 复跑判级 `真红 0 · 负载抖动 2 · 悬而未决 0`（`analysis/histogram-degraded.spec.ts`、`exports/exports.spec.ts` 独占复跑均绿） |
+| 介绍书（附带） | `node scripts/intro/check.mjs` | `INTRO-CHECK PASS · 截图 8 · 导航 17 · 组件 23 · 源文件 41 · 版本 v0.9.0 同源` |
+| push 历史自检 | `node scripts/prepush-history-check.mjs` | `RESULT: PASS`（守卫根/密钥/.gitignore 无漂移；`Data/`、`.venv/` 无新增） |
+
+已知非本批红：`test.backend.test_job_cancel.RealPoolQueueWindowTests.test_cancellability_flips_at_workers_plus_extra_queued_calls`
+（`test_job_cancel.py:476`，`AssertionError: Lists differ: [False] != [True]`）在两轮全套里各红一次；单类复跑 6/6
+`Ran 1 test` / `OK`、整模块 `Ran 19 tests` / `OK`。该用例自 `6e52a93`（2026-11-12）起在 master，本批 diff 与
+`apps/jobs` / `concurrent.futures` 零交集（且失败段在 `test.backend`，先于本批新增的 `apps.datafiles` 用例），
+判 base 存量时序脆弱、非本批引入——与 11-22 / 11-23 两批台账同形。池侧效率 2.22 低于 nightly 目标 2.8，
+属「两个红文件各触发一次独占复跑 + 与后端并跑」的口径，按 11-22 台账「效率只在无重跑时判」不作退化判据。
 
