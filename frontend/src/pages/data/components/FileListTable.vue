@@ -5,6 +5,8 @@
       :data="files"
       :row-key="(row: any) => row.id"
       stripe
+      :max-height="tableMaxHeight"
+      scrollbar-always-on
       style="width: 100%"
       v-loading="loading"
       :header-cell-style="{ background: 'var(--bg-2)', color: 'var(--text)', fontWeight: '600' }"
@@ -234,6 +236,17 @@ const {
 
 const tableRef = ref<InstanceType<typeof ElTable>>()
 
+/**
+ * 表头常驻：el-table 只有设了 height/max-height 才会把表头与表体拆成两个滚动容器。
+ * 不设时表头只是普通行，页面一滚就被吸顶页签条盖住（125% 缩放下用户实测）。
+ * 320 = 顶栏 56 + content-area 上下 padding 40 + 页签 45 + tab-content 上 padding 20
+ *     + 工具栏 32+16 + 分页 28+16 + 页面底部 24 + 表格边框 2（共 279）
+ *     + 表头筛选提示行约 32（出现时 page 不溢出，表头才不会被顶走）+ 余量 9。
+ * 表体在表格内部滚动，分页与工具栏常驻；窗口再矮也只是表体变短。
+ * 上传区展开时页面仍会整体滚动（它插在表格上方），这是可接受的：该状态是瞬时的。
+ */
+const tableMaxHeight = 'calc(100vh - 320px)'
+
 // ── 文件名显示（系统设置 filename_wrap，默认开启；设置页开关，本地无持久化） ──
 const wrapFilename = ref(true)
 onMounted(async () => {
@@ -406,6 +419,24 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
 /* ============================
    Table Styling（列压缩优化：min-width 下限 + 横向滚动条常显）
    ============================ */
+
+/* 行底必须不透明：EP 的 fixed 列是 sticky 单元格 + `background: inherit`，
+   继承的就是 tr 的底色。透明/半透明的行底会让横向滚到操作列下面的
+   「上传时间 / 测试日期 / 大小」文字从按钮缝隙里透出来（125% 缩放必现，
+   判据 e2e/data/file-list-layout.spec.ts）。light 行底就是 --bg；
+   night 的表底被全局主题钉为 --bg-2(#16213e)，所以两档取色不同。
+   `--file-op-bg-current` 是 highlight-current-row 当前行在操作列上的不透明等价色
+   （EP 默认取 `--el-color-primary-light-9`，是半透明的，sticky 单元格会透底）。 */
+.file-list-table {
+  --file-row-bg: var(--bg);
+  --file-op-bg-current: color-mix(in srgb, var(--brand) 12%, var(--bg));
+}
+
+:root[data-theme="night"] .file-list-table {
+  --file-row-bg: var(--bg-2);
+  --file-op-bg-current: color-mix(in srgb, var(--brand) 12%, var(--bg-2));
+}
+
 :deep(.el-table) {
   --el-table-border-color: var(--border);
   --el-table-bg-color: transparent;
@@ -427,11 +458,17 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
 }
 
 :deep(.el-table .row-even) {
-  --el-table-tr-bg-color: transparent;
+  --el-table-tr-bg-color: var(--file-row-bg);
 }
 
 :deep(.el-table .row-odd) {
   --el-table-tr-bg-color: var(--bg-2);
+}
+
+/* 当前行（highlight-current-row）的 fixed 操作列：EP 的当前行底色是半透明的
+   `--el-color-primary-light-9`，sticky 单元格上会重演透底；补不透明等价色。 */
+:deep(.el-table__body tr.current-row > td.el-table-fixed-column--right) {
+  background-color: var(--file-op-bg-current) !important;
 }
 
 :deep(.el-table .el-table__row) {
