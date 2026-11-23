@@ -48,7 +48,7 @@ class DashboardSummaryView(APIView):
             file_id = request.query_params.get('file_id')
             if not file_id:
                 datafile = DataFile.objects.filter(
-                    owner=request.user, status='ready'
+                    owner=request.user, status='ready', is_hidden=False
                 ).order_by('-created_at').first()
             else:
                 datafile = get_object_or_404(DataFile, pk=file_id, owner=request.user)

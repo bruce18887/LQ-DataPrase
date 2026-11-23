@@ -28,6 +28,7 @@ from apps.datafiles.serializers import (
 )
 from apps.datafiles.services import evict_parse_cache_for_paths
 from apps.datafiles.utils import store_file_path
+from apps.datafiles.visibility import apply_visibility
 
 from ._helpers import (
     _register_file,
@@ -190,7 +191,9 @@ class DataFileViewSet(viewsets.ModelViewSet):
         except ValueError:
             pass  # 非法数值静默跳过
 
-        return queryset
+        # 隐藏过滤放最后：上方标签搜索用 OR 拼回的 queryset 会绕过先前条件，
+        # 只有在这里收口才能保证隐藏行不被 OR 带回来（软隐藏，仅 list 生效）。
+        return apply_visibility(queryset, self.request.query_params, self.action)
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -246,7 +249,7 @@ class DataFileViewSet(viewsets.ModelViewSet):
     def product_codes(self, request):
         """Distinct non-empty product codes for the current user's files."""
         codes = (
-            DataFile.objects.filter(owner=request.user)
+            DataFile.objects.filter(owner=request.user).filter(is_hidden=False)
             .exclude(product_code='')
             .values_list('product_code', flat=True)
             .distinct()
@@ -258,7 +261,7 @@ class DataFileViewSet(viewsets.ModelViewSet):
     def format_types(self, request):
         """Distinct non-empty format types for the current user's files."""
         formats = (
-            DataFile.objects.filter(owner=request.user)
+            DataFile.objects.filter(owner=request.user).filter(is_hidden=False)
             .exclude(format_type='')
             .values_list('format_type', flat=True)
             .distinct()
@@ -280,6 +283,7 @@ class DataFileViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(status__in=['ready', 'error'])
         else:
             queryset = queryset.filter(status='ready')
+        queryset = queryset.filter(is_hidden=False)
         try:
             limit = int(request.query_params.get('limit', 5000))
         except (TypeError, ValueError):
@@ -497,7 +501,7 @@ class DataFileViewSet(viewsets.ModelViewSet):
         # Iterate over each file's tag list and collect distinct (case-insensitive)
         # entries, preferring the first-seen casing as the canonical form.
         for tag_list in (
-            DataFile.objects.filter(owner=request.user)
+            DataFile.objects.filter(owner=request.user).filter(is_hidden=False)
             .exclude(tags=[])
             .values_list('tags', flat=True)
         ):
