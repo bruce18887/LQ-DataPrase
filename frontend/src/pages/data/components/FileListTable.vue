@@ -46,6 +46,13 @@
               :class="{ 'file-name-wrap': wrapFilename }"
               :title="row.filename"
             >{{ wrapFilename ? row.filename : truncateMiddle(row.filename, 40) }}</span>
+            <el-tag
+              v-if="row.is_hidden"
+              size="small"
+              type="info"
+              effect="plain"
+              class="hidden-badge"
+            >已隐藏</el-tag>
           </div>
         </template>
       </el-table-column>
@@ -161,9 +168,12 @@
           <span class="size-badge">{{ formatSize(row.file_size) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="140" align="center" fixed="right">
+      <el-table-column label="操作" width="220" align="center" fixed="right">
         <template #default="{ row }">
           <el-button size="small" type="primary" plain @click.stop="emit('view-file', row.id, row.filename)">查看</el-button>
+          <el-button size="small" type="warning" plain @click.stop="emit('toggle-hidden', row)">
+            {{ row.is_hidden ? '取消隐藏' : '隐藏' }}
+          </el-button>
           <el-button size="small" type="danger" plain @click.stop="emit('delete-file', row)">
             <el-icon><Delete /></el-icon> 删除
           </el-button>
@@ -208,6 +218,7 @@ const emit = defineEmits<{
   'view-file': [id: number, filename: string]
   'row-click': [id: number, filename: string]
   'delete-file': [row: any]
+  'toggle-hidden': [row: any]
   'sort-change': [payload: { prop: string; order: 'ascending' | 'descending' | null }]
   'selection-change': [ids: number[]]
   'tags-changed': []
@@ -242,8 +253,9 @@ function onSelectionChange(rows: any[]) {
   emit('selection-change', rows.map((r) => r.id))
 }
 
-function tableRowClassName({ rowIndex }: { rowIndex: number }) {
-  return rowIndex % 2 === 0 ? 'row-even' : 'row-odd'
+function tableRowClassName({ row, rowIndex }: { row: any; rowIndex: number }) {
+  const parity = rowIndex % 2 === 0 ? 'row-even' : 'row-odd'
+  return row.is_hidden ? `${parity} row-hidden` : parity
 }
 
 defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
@@ -304,6 +316,10 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
   -webkit-line-clamp: 3;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.hidden-badge {
+  flex-shrink: 0;
 }
 
 /* ============================
@@ -449,6 +465,14 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
   font-weight: 600;
   color: var(--info);
   font-family: var(--font-mono);
+}
+
+/* 隐藏行置灰：只用 token，light/night 一致 */
+:deep(.row-hidden) .file-name,
+:deep(.row-hidden) .program-name-cell,
+:deep(.row-hidden) .time-text,
+:deep(.row-hidden) .size-badge {
+  color: var(--text-2);
 }
 
 /* ============================
