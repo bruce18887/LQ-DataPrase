@@ -73,7 +73,7 @@ class DataFileSerializer(serializers.ModelSerializer):
             'batch_name', 'sub_batch', 'row_count', 'col_count',
             'program_name', 'product_code', 'source_mtime',
             'metadata', 'tags', 'stage', 'data_date',
-            'status', 'status_display',
+            'is_hidden', 'status', 'status_display',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'owner', 'filename', 'created_at', 'updated_at']
@@ -114,7 +114,7 @@ class DataFileListSerializer(serializers.ModelSerializer):
             'batch_name', 'sub_batch', 'row_count', 'col_count', 'program_name',
             'product_code', 'source_mtime',
             'tags', 'stage', 'data_date',
-            'status', 'status_display', 'created_at', 'updated_at',
+            'is_hidden', 'status', 'status_display', 'created_at', 'updated_at',
         ]
 
     def get_stage(self, obj) -> str:
