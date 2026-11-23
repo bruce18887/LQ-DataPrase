@@ -3,7 +3,7 @@
     <!-- 当前文件横幅（与导出工具 tab 同款）：文件级操作挂在右端，不再单独占一行 -->
     <ActiveFileBanner
       :model-value="props.fileId"
-      :files="props.files"
+      :files="bannerFiles"
       @update:model-value="emit('update:fileId', $event)"
     >
       <template #actions>
@@ -183,7 +183,7 @@ ModuleRegistry.registerModules([AllCommunityModule])
 
 const props = defineProps<{
   fileId: number | null
-  /** 全量文件列表：横幅的文件下拉要用，导出文件名也从这里按 id 反查 */
+  /** 全量文件列表：col_count 与导出文件名反查用；横幅候选见下方 bannerFiles（已排除隐藏） */
   files: DataFile[]
   active?: boolean // v-show 下隐藏实例仍挂载 ⇒ 靠它决定要不要清块缓存（非激活标签释放）
 }>()
@@ -195,6 +195,7 @@ const emit = defineEmits<{
 const themeStore = useThemeStore()
 const filesStore = useFilesStore()
 const isDark = computed(() => themeStore.currentTheme === 'night')
+const bannerFiles = computed(() => props.files.filter((f: any) => !f.is_hidden)) // 横幅候选面：隐藏不进下拉；col_count/导出文件名仍用全量
 
 const passfail = ref('')
 const siteFilter = ref('')
@@ -218,8 +219,7 @@ const { tableHeight, gridWrapperStyle } = useGridHeight(290)
 
 onUnmounted(() => {
   if (passfailTimer) clearTimeout(passfailTimer)
-  // siteFilterTimer 也必须清：watcher 随组件作用域自动停止，但已排期的
-  // setTimeout 仍会在卸载后触发 reload() → 对已销毁的 grid 发幽灵请求。
+  // siteFilterTimer 也必须清：watcher 随组件作用域自动停止，但已排期的 setTimeout 仍会在卸载后触发 reload() → 对已销毁的 grid 发幽灵请求。
   if (siteFilterTimer) clearTimeout(siteFilterTimer)
   markGridDead() // grid 随组件一起销毁：此后任何 purge/滚动都不许再打到它（AG Grid #26）
 })

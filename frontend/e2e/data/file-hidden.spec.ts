@@ -11,7 +11,7 @@ import { popperOf } from '../helpers/elplus'
 /**
  * 文件隐藏（软隐藏）接线证明：
  *  - 隐藏后文件列表仍可见（徽标 + 「已隐藏」筛选档）
- *  - 隐藏文件仍能从行点击打开，且「查看数据」标签页显示真实文件名（元数据面不排除隐藏）
+ *  - 隐藏文件仍能从「查看」/行点击打开（同一 viewFile 链路），且「查看数据」标签页显示真实文件名（元数据面不排除隐藏）
  *  - 分析页下拉候选默认排除隐藏文件
  *  - 取消隐藏后候选恢复
  * 组合语义（include_hidden / hidden_only / 分面 / 仪表板回退）由 T1
@@ -104,15 +104,6 @@ test.describe('文件隐藏（软隐藏）', { tag: ['@p1', '@data'] }, () => {
       await row.locator('button').filter({ hasText: '隐藏' }).click()
       await expect(row).toContainText('已隐藏', { timeout: 10_000 })
 
-      // 行点击路径仍可用，且元数据完整：查看数据标签页应显示真实文件名（终审 Important #1 的护栏）。
-      // 元数据面（DataBrowserAgGrid 的 col_count、ViewFileTabs 的标签文案）走全量 `files`
-      // （带 include_hidden=1），候选面才排除隐藏 —— 若两者共用一份排除过的列表，这里会读到
-      // 「未选择文件」。
-      await row.locator('button').filter({ hasText: '查看' }).click()
-      await expect(page.locator('.tab-btn.active')).toContainText('查看数据')
-      await expect(page.locator('.view-file-tabs')).toContainText(name)
-      await page.locator('.tab-btn').filter({ hasText: '文件列表' }).click()
-
       // 隐藏状态筛选：未隐藏档看不到，已隐藏档能看到。选项按本下拉自己的 popper 取
       // （`popper-class="dp-hidden-filter-popper"`）。
       const filter = page.getByTestId('hidden-filter')
@@ -147,6 +138,18 @@ test.describe('文件隐藏（软隐藏）', { tag: ['@p1', '@data'] }, () => {
       const row2 = page.locator('.content-section:visible .el-table .el-table__row')
         .filter({ hasText: name })
       await expect(row2).toContainText('已隐藏', { timeout: 15_000 })
+
+      // 元数据护栏（终审 Important #1）：隐藏后重新进入 /data 会重拉全量列表
+      // （`include_hidden=1`），此时打开隐藏文件，「查看数据」标签页必须显示真实文件名。
+      // 必须等这次重拉完成再断言 —— 隐藏前的旧快照里该文件仍是未隐藏，拿它做判据
+      // 无论 `include_hidden` 在不在都绿（2026-11-22 lessons 第 7 条同形）。
+      await row2.locator('button').filter({ hasText: '查看' }).click()
+      await expect(page.locator('.tab-btn.active')).toContainText('查看数据')
+      await expect(page.locator('.view-file-tabs')).toContainText(name)
+      await page.locator('.tab-btn').filter({ hasText: '文件列表' }).click()
+      // 切回列表后行仍处隐藏态，接着走取消隐藏
+      await expect(row2).toContainText('已隐藏')
+
       await row2.locator('button').filter({ hasText: '取消隐藏' }).click()
       await expect(row2).not.toContainText('已隐藏', { timeout: 10_000 })
 
