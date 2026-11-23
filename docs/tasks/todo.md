@@ -1794,3 +1794,19 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 
 - e2e 池 `用例 490` 超 `frontend/e2e/helpers/nightly-gates.mjs` 的 450 上限，属既有套件规模趋势（上批 489），另单重定基线。
 - 最终树池内 3 个负载抖动文件（`analysis/histogram-degraded`、`analysis/subset-drilldown`、`exports/exports`）均独占复跑绿，与本批改动无归属关系。
+
+# 任务：文件列表 125% 缩放布局修复（2026-11-23）
+
+- [x] 复现：等效 1632×790 CSS 视口（Windows 125% × 应用 125%），实测表格可视宽 1270 / 内容宽 1608
+- [x] 根因① 表头遮挡：el-table 未限高 ⇒ 表头是普通行，页面滚动后被吸顶页签条盖住
+- [x] 根因② 右侧透字：fixed=right 操作列是 sticky 单元格 + `background: inherit`，而行底透明（light 偶数行）/半透明（night 条纹与悬停）⇒ 下层「上传时间/测试日期/大小」从按钮缝透出
+- [x] 修复：`FileListTable.vue` 加 `max-height: calc(100vh - 300px)` + `scrollbar-always-on`；行底改不透明（light `--bg` / night `--bg-2`）；当前行 fixed 单元格补不透明等价色；night 条纹/悬停改不透明合成色（`element-plus-theme.css`）
+- [x] 判据：新增 `frontend/e2e/data/file-list-layout.spec.ts`（light/night × 表头常驻 / 操作列 alpha=1，含悬停与当前行），修复前 4 红、修复后 4 绿
+- [x] 验证：vitest 1088 绿、`npm run build` 绿、双主题 1536/2040 截图目检
+- [x] 门禁：`node scripts/e2e_affected.mjs`（styles 命中全局清单 ⇒ 全量档）`RESULT: PASS`
+      — 池 `用例 494 · 墙钟 14.8min · unexpected 2 · flaky 3`，复跑判级 `真红 0 · 负载抖动 2`
+      （`analysis/subset-drilldown`、`exports/exports` 独占复跑均绿）
+
+## 留给拍板
+
+- 125% 缩放下 13 列最小宽合计 1608px，即使修完也只能横向滚动看全；若要求「不横滚同屏看全」，需要缩列/隐藏低优列（产品口径），不在本次范围。

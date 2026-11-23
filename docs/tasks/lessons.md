@@ -3295,3 +3295,29 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   漏了就会在库快照已写成之后才报错（快照本身有效，但整条命令判失败）。
 - **公网端口映射只对 18124 生效**：本机探 `http://125.69.67.169/`（tplms）000 属 NAT 未映射，
   不是 nginx 回归；邻站回归要在服务器本机 `curl 127.0.0.1:80` 验。
+
+## 2026-11-23 文件列表在 125% 缩放下「表头被挡住 + 右侧文字重叠」：sticky 单元格吃的是 tr 背景，`el-scrollbar__bar` 默认是 display:none
+
+- **现象（用户截图 + 实测复现）**：125% 缩放（Windows 125% × 应用 125%，等效 1632 CSS px 视口）下文件列表右侧
+  出现 `10/14`、`2`、`26`、`28` 一类重影，表头滚走后被吸顶页签条盖住、还在页签条上方露出一截。
+- **根因①（透字）**：13 列 min-width 合计 1608px > 表格可视宽 1270px ⇒ el-table 内横向滚动；`fixed="right"`
+  的操作列在 EP 2.x 是 **sticky 单元格 + `background: inherit`**，继承的就是 `tr` 的底色。本表把 tr/td 底色
+  设成透明（light 偶数行 `--el-table-tr-bg-color: transparent`）或半透明（night 条纹 `rgba(255,255,255,0.02)`、
+  悬停 8%），滑到操作列下面的「上传时间 / 测试日期 / 大小」就从按钮缝隙透出来。
+- **根因②（表头）**：el-table 不设 height/max-height 时表头只是普通行，`.content-area` 一滚它就进页签条底下；
+  而 `.tabs-wrapper` 的 sticky `top:0` 落点在 content-area 的 16px padding 之后（实测 stuck y = 页签条 72 =
+  content-area 顶 56 + 16），于是页签条上方还留一条缝让表头露出来。
+- **规则①：EP 的 fixed 列判据断「计算背景色 alpha = 1」，不要断可见性/文字。** 透底是像素级事实，
+  `toBeVisible` 和文本断言全程是绿的；且 Chromium 会把同一个不透明色按来源序列化成
+  `rgb()` / `color(srgb …)` / `oklab(…)` 三种，alpha 解析必须三种都认，读不出要返回 null 判红。
+- **规则②：主题文件里把 token 定在 `:root` 可能被 EP 挂在组件根上的同名 token 遮蔽。** 实测
+  `--el-table-current-row-bg-color` 在 night 下取到的是 EP 的 `--el-color-primary-light-9`（半透明琥珀 0.12），
+  文件里那条 `:root[data-theme=night]` 的定义根本没生效（EP 在 `.el-table` 上自己声明了同名变量）。
+  改主题 token 后必须回读 `getComputedStyle`，不能「改完就当生效」。
+- **规则③：`el-scrollbar__bar` 的隐藏是内联 `display:none`，不是 opacity。** 组件里那条
+  「横向滚动条常显」只压了 `opacity:1`，把 bar 的 display 留着 none —— 既有 e2e 也只断 opacity，于是 4 个月
+  都是假绿。真正常显要用 el-table 的 `scrollbar-always-on`。写「滚动条可达」判据时至少加一条 display 断言。
+- **修法与验证**：`FileListTable.vue` 加 `max-height: calc(100vh - 300px)`（表体内部滚动、表头常驻）+
+  `scrollbar-always-on`；行底不透明（light `--bg`、night `--bg-2`），当前行 fixed 单元格补不透明等价色；
+  night 条纹/悬停改「2%/8% 白叠在 #16213e 上」的不透明合成色。判据 `e2e/data/file-list-layout.spec.ts`
+  先红（4 条）后绿（4 条），双主题 1536/2040 截图目检通过。

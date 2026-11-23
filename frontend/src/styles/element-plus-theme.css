@@ -560,11 +560,15 @@
 }
 
 :root[data-theme="night"] .el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
-  background-color: rgba(255, 255, 255, 0.02) !important;
+  /* 必须给不透明结果色：EP 的 fixed 列是 sticky 单元格 + `background: inherit`，
+     半透明底色会让横向滚到它下面的列文字从按钮缝隙透出（125% 缩放下文件列表实测，
+     判据 e2e/data/file-list-layout.spec.ts）。这里写「2% 白叠在夜模式表底 #16213e 上」
+     的等价不透明色，观感与原来的 rgba(255,255,255,0.02) 一致。 */
+  background-color: color-mix(in srgb, white 2%, #16213e) !important;
 }
 
 :root[data-theme="night"] .el-table__body tr:hover > td.el-table__cell {
-  background-color: rgba(255, 255, 255, 0.08) !important;
+  background-color: color-mix(in srgb, white 8%, #16213e) !important;
 }
 
 :root[data-theme="night"] .el-table__empty-block {
