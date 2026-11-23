@@ -3263,3 +3263,17 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
    `options` 根本不走 `get_queryset`。**规则：安全边界测试必须带触发参数**（`?owner_id=`），
    并做一次「删掉闸门看三条是否真红」的变异验证。
 
+## 2026-11-22 CI 只在 frontend 里 `npm ci`：vite.config.ts 的根级 vitepress 在干净检出里失踪
+
+- **现象**：CI 前端 job 在 `npm run build` 的 `vue-tsc -b` 处报
+  `vite.config.ts(55,50): error TS2307: Cannot find module 'vitepress'`；本机同一命令绿。
+- **根因**：`frontend/vite.config.ts` 的 `introBooklet` 插件会 `await import('vitepress')`
+  （`docs/intro` 是 VitePress 工程），而 `vitepress` 只声明在**仓库根** `package.json`；
+  CI job 的 `defaults.run.working-directory: frontend` 只跑 frontend 的 `npm ci`，
+  干净检出没有根 `node_modules`。本机根 `node_modules` 早在（intro 迁移时装过），所以本地解析成功。
+- **规则**：凡构建期从子工程 import 根级依赖（或 docs 工程反向依赖根 `node_modules`），
+  CI 必须显式安装根依赖，并把根 `package-lock.json` 加进 `cache-dependency-path`；
+  判据是「干净检出可复现」，不是本机 build 绿。CI 失败先取
+  `gh run view <id> --log-failed`；本仓先例：2026-11-12 起三次失败全是同一行。
+
+
