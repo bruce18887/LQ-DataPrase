@@ -62,7 +62,17 @@ jobs:
           # 与 package.json 的 engines（node >=22.12）对齐；没有 .nvmrc，版本口径以 engines 为准
           node-version: '24'
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+
+      # vite.config.ts 的 introBooklet 插件会 import('vitepress')（docs/intro 是 VitePress 工程），
+      # 而 vitepress 只声明在仓库根的 package.json。CI 是干净检出，不装根依赖就会在
+      # `vue-tsc -b` 报 TS2307: Cannot find module 'vitepress' —— 本机靠根 node_modules 解析，
+      # 所以这句话只有 CI 会红。必须先把根依赖装上，再走 frontend 的 npm ci。
+      - name: Install root deps (vitepress for intro build)
+        run: npm ci
+        working-directory: .
 
       - name: Install
         run: npm ci
