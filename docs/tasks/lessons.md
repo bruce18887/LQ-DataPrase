@@ -3277,3 +3277,21 @@ system_config，以及「判别式用例要一条该红一条该绿」。）
   `gh run view <id> --log-failed`；本仓先例：2026-11-12 起三次失败全是同一行。
 
 
+
+## 2026-11-23 v0.9.0 发版部署：pkill 模式命中 SSH 自身、SPA 兜底让 200 冒充路由存在、备份互锁先看触发条件
+
+- **`ssh host 'pkill -f "manage.py runserver …"'` 会杀掉这条 SSH 自己的远程 shell。**
+  `pkill -f` 匹配的是**完整命令行**，而远程 `bash -c` 的 argv 里就含这串模式 ⇒ 自杀，SSH 返回 255、
+  后续命令一条没跑（本次只停在「已停后端」，stash/merge 未执行）。修法二选一：方括号防自匹配
+  `pkill -f "[m]anage.py runserver"`，或先 `ps` 取 PID 再 `kill <pid>`。判据是 SSH 退出码与
+  「端口是否已空」要分开验：这次端口确实空了，容易误以为整段成功。
+- **`/pages/analysis` 返回 200 不代表这条前端路由存在。** SPA 兜底（`config/urls.py` catch-all）对
+  任意未知路径都回 200 + `index.html`；本次据此在浏览器里得到的是客户端 404 页。真实路由是 `/analysis`
+  （`frontend/src/router/index.ts`）。`server-deployment.md` §8.3 的验收命令已按此订正：HTTP 200 只证明
+  外壳，路由可用性必须在浏览器里看渲染（或与 `router/index.ts` 对照）。
+- **`backup_db` 的「找不到 secret.key」是分支判据，不是坏库**：它的触发条件是
+  `os.environ.get('SECRET_KEY')`（`apps/common/management/commands/backup_db.py:68`）。
+  服务器 dev_spa 档的密钥在 `.env` 里，所以命令前必须 `set -a; . ./.env; set +a`；
+  漏了就会在库快照已写成之后才报错（快照本身有效，但整条命令判失败）。
+- **公网端口映射只对 18124 生效**：本机探 `http://125.69.67.169/`（tplms）000 属 NAT 未映射，
+  不是 nginx 回归；邻站回归要在服务器本机 `curl 127.0.0.1:80` 验。

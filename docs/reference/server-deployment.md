@@ -420,7 +420,9 @@ BASE=http://127.0.0.1:8000
 systemctl is-active lqdp                                               # active
 journalctl -u lqdp -n 50 --no-pager | grep -E '\[bootstrap\]|\[server\]'  # 迁移完成 + 已监听
 curl -s -o /dev/null -w '%{http_code} %{size_download}\n' $BASE/       # 200，约 1.7KB 的 index.html
-curl -s -o /dev/null -w '%{http_code}\n' $BASE/pages/analysis          # 200
+curl -s -o /dev/null -w '%{http_code}\n' $BASE/analysis                # 200（仅证明 SPA 外壳）
+# ⚠ SPA 兜底对任意未知路径都回 200 + index.html ⇒ 上一条不能证明前端路由存在；
+#   路由可用性必须在浏览器里看渲染结果，或与 frontend/src/router/index.ts 对照。
 # 再登录一次，确认账号与 JWT 正常（§7 第 4 条）
 ```
 
