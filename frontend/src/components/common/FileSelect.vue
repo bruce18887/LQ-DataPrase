@@ -17,6 +17,7 @@
     :item-height="itemHeight"
     filterable
     :filter-method="onFilter"
+    :fit-input-width="false"
     @update:model-value="onUpdate"
     @change="onChange"
     @visible-change="onVisibleChange"

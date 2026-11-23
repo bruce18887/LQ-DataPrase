@@ -219,6 +219,32 @@ test.describe('FileSelect 通用文件选择组件', { tag: ['@p1', '@analysis']
     await page.keyboard.press('Escape')
   })
 
+  test('长文件名不截断：下拉宽度随候选内容自适应（v1 行为）', async ({ page }) => {
+    const dropdown = await openFileDropdown(page)
+    const input = fileSelect(page).locator('input').first()
+
+    const longName = SEEDED_FILES.CTA8290D_FT
+    expect(longName.length, '种子长名须足够超过 360px 面板').toBeGreaterThan(60)
+    await input.fill('BPD60320_C01F40')
+    const nameEl = dropdown.locator('.dp-file-option__name').first()
+    await expect(nameEl).toContainText(longName, { timeout: 5_000 })
+
+    // 机制判据：v2 默认 fit-input-width=true 把面板钉成输入框宽（320–360px）；
+    // 恢复 v1 的自适应后，长名候选必须把面板撑宽。
+    const inputBox = await fileSelect(page).boundingBox()
+    const dropdownBox = await dropdown.boundingBox()
+    expect(inputBox && dropdownBox, '输入框与下拉都应有几何盒').toBeTruthy()
+    expect(
+      dropdownBox!.width,
+      `下拉应宽于输入框（输入 ${inputBox!.width}px / 下拉 ${dropdownBox!.width}px）`,
+    ).toBeGreaterThan(inputBox!.width + 80)
+
+    // 用户可见判据：长名不得被省略号截断。<mark> 高亮会让匹配段加粗并带 2px 内边距，留 12px 容差。
+    const clipped = await nameEl.evaluate((el) => el.scrollWidth > el.clientWidth + 12)
+    expect(clipped, '长文件名不应被省略号截断').toBe(false)
+    await page.keyboard.press('Escape')
+  })
+
   test('虚拟窗口：DOM 只挂窗口内十来行，不是全部候选', async ({ page }) => {
     const dropdown = await openFileDropdown(page)
     const countHint = dropdown.locator('.dp-file-count-hint')
