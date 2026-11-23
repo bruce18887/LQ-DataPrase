@@ -1765,6 +1765,7 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 | 前端构建 | `cd frontend && npm run build` | `build complete in 2.34s.`（introBooklet 的 client+server bundles 与 rendering pages 均 ✓） |
 | 后端全套 | `.venv/Scripts/python.exe manage.py test test.backend apps.accounts apps.analysis apps.batch_report apps.buyoff apps.common apps.dashboard apps.datafiles apps.export apps.gage apps.jobs apps.sftp apps.weight` | 并池轮 `Ran 2821 tests in 980.063s` / `FAILED (failures=1, skipped=17)`；solo 复跑 `Ran 2821 tests in 1030.438s` / `FAILED (failures=1, skipped=17)`（同一条红） |
 | e2e 全量池 | `node scripts/e2e_pool.mjs --slots=4` | `用例 490 · 墙钟 11.5min · 单价 3.27s/例 · 效率 2.22 · unexpected 2 · flaky 4 · skipped 22` · `结论 MEASURED` · 复跑判级 `真红 0 · 负载抖动 2 · 悬而未决 0`（`analysis/histogram-degraded.spec.ts`、`exports/exports.spec.ts` 独占复跑均绿） |
+| e2e 全量池（最终树 `d99d167`） | `node scripts/e2e_pool.mjs --slots=4` | `用例 490 · 墙钟 11.7min · 单价 3.00s/例 · 效率 1.96 · unexpected 3 · flaky 4 · skipped 31` · `结论 MEASURED` · 复跑判级 `真红 0 · 负载抖动 3 · 悬而未决 0`（`analysis/histogram-degraded`、`analysis/subset-drilldown`、`exports/exports` 各自独占复跑均绿；`file-hidden.spec.ts` 未进红集） |
 | 介绍书（附带） | `node scripts/intro/check.mjs` | `INTRO-CHECK PASS · 截图 8 · 导航 17 · 组件 23 · 源文件 41 · 版本 v0.9.0 同源` |
 | push 历史自检 | `node scripts/prepush-history-check.mjs` | `RESULT: PASS`（守卫根/密钥/.gitignore 无漂移；`Data/`、`.venv/` 无新增） |
 
@@ -1772,9 +1773,24 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 （`test_job_cancel.py:476`，`AssertionError: Lists differ: [False] != [True]`）在两轮全套里各红一次；单类复跑 6/6
 `Ran 1 test` / `OK`、整模块 `Ran 19 tests` / `OK`。该用例自 `6e52a93`（2026-11-12）起在 master，本批 diff 与
 `apps/jobs` / `concurrent.futures` 零交集（且失败段在 `test.backend`，先于本批新增的 `apps.datafiles` 用例），
-判 base 存量时序脆弱、非本批引入——与 11-22 / 11-23 两批台账同形。池侧效率 2.22 低于 nightly 目标 2.8，
-属「两个红文件各触发一次独占复跑 + 与后端并跑」的口径，按 11-22 台账「效率只在无重跑时判」不作退化判据。
+判 base 存量时序脆弱、非本批引入——与 11-22 / 11-23 两批台账同形。池侧效率低于 nightly 目标 2.8，
+属「红文件触发独占复跑 + 与后端并跑」的口径，按 `docs/reference/testing-gates.md` §4
+「效率只在无重跑时判」不作退化判据。
+
+## 终审与残余修复（2026-11-23）
+
+- 整枝终审（`fb72803..80828a1`）：**With fixes**——1 条 Important：`DataManagement` 的全量列表兼作元数据源，
+  隐藏文件经「查看」打开后 tab 标题显示「未选择文件」、`col_count` 丢失（违背软隐藏的「打开路径仍可用」）。
+- 修复波 1（`050629a`）：全量请求带 `include_hidden: 1`；新增 `selectableFiles` 只喂四个候选面
+  （导出横幅 / 文件对比 / Gage / Buyoff），`DataBrowserAgGrid`、`ExportToolsTab`、`viewTabsWithLabel` 保持全量；
+  e2e 收敛到 `popperOf`、补 `aria-label`、操作列 240px、台账补规模债行。
+- 修复波 2（`d99d167`）：定向复审指出 e2e 元数据护栏位置无效（隐藏后全量列表尚未重拉，红绿都成立不了）
+  ⇒ 移到 `gotoApp` 重载后并以**变异自证**：删 `include_hidden: 1` 时新断言红（`Received string: "1未选择文件 + "`），
+  恢复后 `3 passed`；同时 `DataBrowserAgGrid` 内嵌横幅改喂 `bannerFiles`，候选面不再泄漏隐藏文件。
+- 终审后两次 scoped 复审均干净（第二轮回「全部 ADDRESSED，无新增 Critical/Important」）。
+- 合并前已在最终树 `d99d167` 复跑 e2e 全量池（见上表），真红 0。
 
 ## 已知非阻塞
 
 - e2e 池 `用例 490` 超 `frontend/e2e/helpers/nightly-gates.mjs` 的 450 上限，属既有套件规模趋势（上批 489），另单重定基线。
+- 最终树池内 3 个负载抖动文件（`analysis/histogram-degraded`、`analysis/subset-drilldown`、`exports/exports`）均独占复跑绿，与本批改动无归属关系。
