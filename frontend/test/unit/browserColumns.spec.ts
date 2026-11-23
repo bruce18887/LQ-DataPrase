@@ -12,6 +12,7 @@ import {
   buildBrowserColumnDefs,
   headerMenuCopyLabel,
   resolveDisplayCols,
+  type BuildBrowserColumnDefsOptions,
 } from '../../src/pages/data/components/browser/browserColumns'
 
 const LIGHT_RED = { backgroundColor: 'var(--error-2)', color: '#ffffff', fontWeight: 'bold' }
@@ -64,15 +65,37 @@ describe('buildBrowserColumnDefs', () => {
     isDark: false,
   }
 
-  function defs(overrides: Partial<typeof opts> = {}) {
+  function defs(overrides: Partial<BuildBrowserColumnDefsOptions> = {}) {
     return buildBrowserColumnDefs({ ...opts, ...overrides })
   }
 
-  it('表头带单位与限值，系统列不带单位时不追加空括号', () => {
+  it('表头两行：第一行列名(单位)，第二行规格范围，系统列不追加空括号', () => {
     const byField = Object.fromEntries(defs().map((d: any) => [d.field, d]))
-    expect(byField.A.headerName).toBe('A (ohm) [0, 2]')
+    expect(byField.A.headerName).toBe('A (ohm)\n[0, 2]')
     expect(byField.B.headerName).toBe('B')
     expect(byField.SERIAL.headerName).toBe('SERIAL')
+  })
+
+  it('有规格的表头挂两行样式类，悬停提示保留单行全文', () => {
+    const byField = Object.fromEntries(defs().map((d: any) => [d.field, d]))
+    expect(byField.A.headerClass).toBe('dp-header-2l')
+    expect(byField.A.headerTooltip).toBe('A (ohm) [0, 2]')
+    expect(byField.B.headerClass).toBeUndefined()
+    expect(byField.B.headerTooltip).toBeUndefined()
+  })
+
+  it('单边规格以 - 占位', () => {
+    const byField = Object.fromEntries(
+      defs({ colMeta: { A: { unit: 'V', min: '', max: '5' } } }).map((d: any) => [d.field, d]),
+    )
+    expect(byField.A.headerName).toBe('A (V)\n[-, 5]')
+  })
+
+  it('默认列宽 150（ag-grid v35 无 defaultColWidth，只能写在 colDef 上）', () => {
+    const byField = Object.fromEntries(defs().map((d: any) => [d.field, d]))
+    expect(byField.A.width).toBe(150)
+    expect(byField.B.width).toBe(150)
+    expect(byField.SERIAL.width).toBe(150)
   })
 
   it('数值列挂 number filter，其余挂 text filter', () => {
@@ -92,7 +115,6 @@ describe('buildBrowserColumnDefs', () => {
     expect(byField.SERIAL.cellClass).toBe('row-highlight-trigger')
     expect(byField.SERIAL.headerTooltip).toContain('右键序列号')
     expect(byField.A.cellClass).toBeUndefined()
-    expect(byField.A.headerTooltip).toBeUndefined()
   })
 
   it('无序列列（触发列为空）时没有触发类', () => {

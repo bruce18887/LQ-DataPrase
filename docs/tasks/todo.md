@@ -1832,3 +1832,27 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 | affected 门禁（重跑） | 同上 | `档: lint:e2e ok / vitest ok / e2e:全量 ok` · `RESULT: PASS · 计划 3 档全部执行`；池 `用例 495 · 11.2min · 2.91s/例 · MEASURED · 真红 0 · 负载抖动 2`；跑后端口已释放 |
 
 已知非阻塞：affected 首轮为基础设施崩溃（VOID），重跑即结论；池效率 2.06 低于 nightly 目标 2.8（含 2 个负载抖动文件复跑，按 §4「效率只在无重跑时判」不作退化）。
+
+# 任务：查看数据两行表头 + 默认列宽收窄（2026-11-23）
+
+现象：查看数据页把「列名 (单位) [下限, 上限]」拼成一行，叠加 ag-grid v35 每列默认 200px，
+单屏只能看到 7~8 列（用户截图：`Cont_PWM5 (V) [-0.8050, -0.6050]`）。
+
+- [x] 方案拍板：规格范围常显，表头改两行（次行小字），默认列宽 200 → 150
+- [x] T2 先红：更新 `browserColumns.spec.ts`（两行 headerName / headerClass / headerTooltip / width），4 条先红后 16 条绿
+- [x] `browserColumns.ts`：headerName 换行两行 + 有规格列挂 `dp-header-2l` + `headerTooltip` + `width: 150`
+- [x] `data-browser-grid.css`：`.dp-header-2l` 下 `white-space: pre-line` + `::first-line` 首行常规字号、次行 11px 弱化
+- [x] T3 先红后绿：新增 `frontend/e2e/data/view-data-header.spec.ts`（light/night 各 1 条：行盒 2 组、首行字号 > 次行、双行异色、默认列宽 150）；变异成单行后该用例红
+- [x] 验证：vitest 1091 绿、`lint:e2e` 干净、`npm run build` 绿、双主题 1536 截图目检
+- [x] 门禁：`npm run test:e2e:affected` → `RESULT: PASS · 计划 4 档全部执行`
+      （池 `用例 142 · 墙钟 6.8min · unexpected 1 · flaky 1`，`exports/exports.spec.ts` 复跑判负载抖动、真红 0）
+
+## 门禁记录
+
+| 档 | 命令 | 实测判据行 |
+|---|---|---|
+| T2（先红） | `npx vitest run test/unit/browserColumns.spec.ts` | `4 failed / 12 passed`（headerName 无换行、无 headerClass/headerTooltip/width） |
+| T3（变异红） | `PW_DEV_SERVER=1 npx playwright test e2e/data/view-data-header.spec.ts --project=P2 -g light` | `Error: 表头应为两行，实际：“Serial_No (Unit) [Min, Max]”` |
+| T2 / e2e 类型 / 构建 | `npm run test:unit` / `npm run lint:e2e` / `npm run build` | `78 files / 1091 tests` · tsc 无输出 · `build complete in 2.16s` |
+| T3（修复后） | 同变异命令、不带 `-g`、light+night | `4 passed (19.6s)` |
+| affected 门禁 | `cd frontend && npm run test:e2e:affected` | `lint:e2e ok / vitest ok / e2e:data+exports ok / e2e:附带P0 ok` · `RESULT: PASS` |

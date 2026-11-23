@@ -75,6 +75,21 @@
   color: var(--text);
 }
 
+/* 两行表头（有规格的列，headerClass=dp-header-2l）：headerName 里带 \n，pre-line 保留换行；
+   次行规格范围用小字弱化，首行经 ::first-line 恢复常规字号与主色。
+   ::first-line 在本表的 flex 子项（.ag-header-cell-text）上实测生效（Chromium）。 */
+:deep(.ag-custom-theme.ag-theme-quartz .ag-header-cell.dp-header-2l .ag-header-cell-text) {
+  white-space: pre-line;
+  font-size: var(--p-fs-micro);
+  line-height: 1.25;
+  color: var(--text-2);
+}
+
+:deep(.ag-custom-theme.ag-theme-quartz .ag-header-cell.dp-header-2l .ag-header-cell-text::first-line) {
+  font-size: var(--p-fs-dense);
+  color: var(--text);
+}
+
 :deep(.ag-custom-theme.ag-theme-quartz .ag-pinned-left-cols-container) {
   border-right: 2px solid var(--text-3);
   box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
