@@ -1647,9 +1647,16 @@ serial 模式 `reuseExistingServer: true` 复用到上一轮正在拆的服务�
 ## 并入记录（2026-11-22）
 
 - `git merge --ff-only feature/gap-review-knife2-4`：master `89990cd → 9ac2554`（20 笔提交）。
-- 过程分支已 `git branch -d`（fully merged）；未 push；合并前后 `git status --short` 为空。
+- 过程分支已 `git branch -d`（fully merged）；合并时未 push（随后按用户指令 push，见下节）；合并前后 `git status --short` 为空。
 - 全量门禁在并入的同一代码树（`9ac2554` 仅 docs 差异）：vitest `78 files / 1088 tests`、`lint:e2e` 干净、`build 2.16s`、后端 `Ran 2805 / OK (skipped=17)`、e2e 池 `489 例 / 10.9min / 真红 0 / MEASURED`、`prepush-history-check RESULT: PASS`。
 - 挂账：e2e 池效率 2.00 / 用例 489 超 `nightly-gates.mjs` 的 450 上限（既有套件规模趋势，另单重定基线）；`analysis/histogram-degraded.spec.ts` 池内一次 flaky 复跑绿；`test_job_cancel` / `test_csv_download_streaming` 为 base 存量负载时序 flake。
+
+## 推送与 CI（2026-11-22）
+
+- 按用户指令 `git push origin master`：`89990cd..00891c9`，`origin/master = 00891c9`。
+- 新一轮 CI run `45104463308`：`conclusion=success`，前端（类型检查+构建+单测+e2e 静态体检）与后端全量两个 job 均 success。
+- 同轮修复既有 CI 红：`b3433f4` 在 CI 里先装仓库根依赖（vitepress），修掉 `vite.config.ts(55,50) TS2307: Cannot find module 'vitepress'`；该红自 2026-11-12 intro 迁移起连续三次同因，与本批功能无关。
+
 
 
 ## 门禁记录
