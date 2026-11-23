@@ -51,6 +51,9 @@ class DataFile(models.Model):
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default='pending'
     )
+    # 软隐藏：只影响选文件的候选列表（/files/ 默认排除、/files/options/ 恒排除），
+    # 详情/更新/删除/按 id 取数一律不拦。过滤内核见 apps/datafiles/visibility.py。
+    is_hidden = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
