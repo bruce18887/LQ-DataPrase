@@ -61,7 +61,12 @@
         <template #empty>
           <el-empty v-if="!loading" :description="emptyText" />
         </template>
-        <el-table-column prop="filename" label="文件名" min-width="280" show-overflow-tooltip />
+        <el-table-column prop="filename" label="文件名" min-width="280" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.filename }}
+            <el-tag v-if="row.is_hidden" size="small" type="info" effect="plain">已隐藏</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="产品" min-width="140">
           <template #default="{ row }">{{ row.product_code || PLACEHOLDER }}</template>
         </el-table-column>
@@ -188,6 +193,7 @@ async function loadFiles() {
       page_size: filters.pageSize,
       search: filters.search.trim(),
       ordering: '-created_at',
+      include_hidden: 1,
     })
     // 坏形状必须响在 catch 里：`?? []` 会把「后端给了个不该给的东西」粉饰成一次安静的空表。
     const page = resp.data as FilePage

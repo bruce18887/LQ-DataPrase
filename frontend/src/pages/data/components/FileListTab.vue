@@ -32,6 +32,7 @@
       @view-file="viewFile"
       @row-click="onRowClick"
       @delete-file="deleteFile"
+      @toggle-hidden="onToggleHidden"
       @sort-change="onSortChange"
       @selection-change="onSelectionChange"
       @tags-changed="loadAllTags"
@@ -392,6 +393,18 @@ function onPageChange(page: number) {
 
 function onSelectionChange(ids: number[]) {
   selectedIds.value = ids
+}
+
+// ── Hide / unhide（软隐藏：只影响选文件候选） ────────────────────────
+async function onToggleHidden(row: any) {
+  const next = !row.is_hidden
+  try {
+    await datafilesApi.setHidden(row.id, next)
+    ElMessage.success(next ? '文件已隐藏' : '已取消隐藏')
+    await loadFiles()
+  } catch {
+    // 出声交给 axios 拦截器（页面不自造错误 toast 的既有约定）；失败不做乐观更新。
+  }
 }
 
 // ── Delete operations ───────────────────────────────────────────────
