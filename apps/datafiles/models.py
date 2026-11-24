@@ -2,6 +2,34 @@ from django.conf import settings
 from django.db import models
 
 
+class DataCombination(models.Model):
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='data_combinations',
+    )
+    name = models.CharField(max_length=40)
+    name_key = models.CharField(max_length=80)
+    description = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['owner', 'name_key'],
+                name='uniq_combination_owner_name_key',
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        from apps.datafiles.combination_service import normalize_combination_name
+        self.name = normalize_combination_name(self.name)
+        self.name_key = self.name.casefold()
+        super().save(*args, **kwargs)
+
+
 class DataFile(models.Model):
     FORMAT_CHOICES = [
         ('CTA8290D', 'CTA8290D'),
@@ -48,6 +76,14 @@ class DataFile(models.Model):
     # "tag dimension" semantics. The list_tags action performs case-insensitive
     # de-dup server-side, so callers may send a sloppy payload.
     tags = models.JSONField(default=list, blank=True)
+    combination = models.ForeignKey(
+        'datafiles.DataCombination',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='files',
+    )
+    batch_no = models.CharField(max_length=40, blank=True, default='', db_index=True)
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default='pending'
     )
