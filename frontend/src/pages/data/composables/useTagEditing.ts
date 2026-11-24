@@ -62,6 +62,13 @@ export function useTagEditing(
       return
     }
     const current = Array.isArray(row.tags) ? row.tags : []
+    const managed = Array.isArray(row.managed_tags) ? row.managed_tags : []
+    if (managed.some((x: string) => x.toLowerCase() === t.toLowerCase())) {
+      ElMessage.warning('该标签由组合自动维护，不能作为手动标签重复添加')
+      editingId.value = null
+      newTagValue.value = ''
+      return
+    }
     if (current.some((x: string) => x.toLowerCase() === t.toLowerCase())) {
       ElMessage.warning(`标签「${t}」已存在`)
       editingId.value = null

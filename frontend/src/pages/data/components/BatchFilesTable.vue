@@ -14,15 +14,23 @@
       <el-table-column label="文件名" min-width="200">
         <template #default="{ row }">
           <div class="bf-name-cell">
-            <span v-if="row.status !== 'ready'" class="bf-error" title="解析失败或未就绪">
-              <el-icon :size="13"><WarningFilled /></el-icon>
-            </span>
-            <span
-              class="batch-filename"
-              :class="{ 'is-active': row.id === activeFileId, 'batch-filename-wrap': wrapFilename }"
-              :title="row.tags && row.tags.length ? `${row.filename}\n标签: ${row.tags.join(', ')}` : row.filename"
-              @click="emit('file-selected', row.id)"
-            >{{ row.filename }}</span>
+            <div class="bf-name-main">
+              <span v-if="row.status !== 'ready'" class="bf-error" title="解析失败或未就绪">
+                <el-icon :size="13"><WarningFilled /></el-icon>
+              </span>
+              <span
+                class="batch-filename"
+                :class="{ 'is-active': row.id === activeFileId, 'batch-filename-wrap': wrapFilename }"
+                :title="fileTitle(row)"
+                @click="emit('file-selected', row.id)"
+              >{{ row.filename }}</span>
+            </div>
+            <FileTagsCell
+              v-if="row.tags?.length || row.managed_tags?.length"
+              :row="row"
+              :show-close="false"
+              class="bf-tags"
+            />
           </div>
         </template>
       </el-table-column>
@@ -93,6 +101,7 @@ import type { ElTable } from 'element-plus'
 import type { DataFile } from '../../../types'
 import { formatSize } from '../../../utils/format'
 import { getFilenameWrap } from '../../../utils/filenameWrap'
+import FileTagsCell from './FileTagsCell.vue'
 
 const props = withDefaults(defineProps<{
   files: DataFile[]
@@ -133,6 +142,11 @@ function onRemoveClick(row: DataFile) {
   emit('remove-one', row)
 }
 
+function fileTitle(row: DataFile) {
+  const tags = [...(row.tags ?? []), ...(row.managed_tags ?? [])]
+  return tags.length ? `${row.filename}\n标签: ${tags.join(', ')}` : row.filename
+}
+
 /** 页内排序：大小（file_size） */
 function sortBySize(a: DataFile, b: DataFile) {
   return (Number(a.file_size) || 0) - (Number(b.file_size) || 0)
@@ -156,9 +170,21 @@ defineExpose({
 
 .bf-name-cell {
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  min-width: 0;
+}
+
+.bf-name-main {
+  display: flex;
   align-items: flex-start;
   gap: 5px;
   min-width: 0;
+}
+
+.bf-tags {
+  padding-left: 18px;
 }
 
 .bf-error {

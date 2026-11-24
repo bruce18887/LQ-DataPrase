@@ -1,6 +1,6 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
-import { deleteFilesByNameQuiet } from '../helpers/cleanup'
+import { deleteBatchQuiet, deleteFilesByNameQuiet } from '../helpers/cleanup'
 
 const CSV = [
   '[GENERAL],',
@@ -29,6 +29,19 @@ async function expectTokenColor(locator: Locator, property: 'color' | 'backgroun
     return { actual: getComputedStyle(el)[input.property], expected }
   }, { property, token })
   expect(actual, `${token} 应驱动 ${property}`).toBe(expected)
+}
+
+async function captureArea(
+  page: Page,
+  testInfo: import('@playwright/test').TestInfo,
+  theme: string,
+  step: string,
+  target: Locator,
+) {
+  await expect(target).toBeVisible()
+  const shot = testInfo.outputPath(`combination-${theme}-${step}.png`)
+  await page.screenshot({ path: shot })
+  await testInfo.attach(`combination-${theme}-${step}`, { path: shot, contentType: 'image/png' })
 }
 
 async function captureDialog(page: Page, testInfo: import('@playwright/test').TestInfo, theme: string, step: string) {
@@ -256,6 +269,214 @@ test.describe('组合数据', { tag: ['@p2', '@data'] }, () => {
           })
         }, combinationId)
       }
+    }
+  })
+
+  for (const theme of ['light', 'night'] as const) {
+    test(`${theme}：单文件保留手动标签并显示只读组合标签`, async ({ page }, testInfo) => {
+      await page.addInitScript((value) => localStorage.setItem('theme', value), theme)
+      await gotoApp(page, '/data')
+      const name = `e2e_combo_tags_${theme}_${Date.now()}`
+      const filename = `combo_single_${theme}_${Date.now()}.csv`
+      const comboId = await createCombination(page, name)
+      try {
+        await gotoApp(page, '/data')
+        await openCombinationTab(page)
+        await selectCombination(page, name)
+        const upload = page.getByTestId('combination-upload')
+        await expect(upload.getByTestId('import-combination').getByRole('combobox')).toBeDisabled()
+        await captureArea(page, testInfo, theme, 'upload-options', upload.locator('.upload-section'))
+        const manualTagInput = upload.getByTestId('import-manual-tags').locator('input[role="combobox"]')
+        const manualTagSelect = upload.getByTestId('import-manual-tags')
+        await manualTagInput.fill('manual')
+        await expect(page.getByRole('option', { name: 'manual', exact: true })).toBeVisible()
+        await manualTagInput.press('ArrowDown')
+        await manualTagInput.press('Enter')
+        await expect(manualTagSelect.locator('.el-select__selected-item:not(.el-select__input-wrapper)')).toHaveText('manual')
+        await manualTagInput.fill(name.toUpperCase())
+        await page.getByRole('option', { name: name.toUpperCase(), exact: true }).click()
+        await expect(manualTagSelect.locator('.el-select__selected-item:not(.el-select__input-wrapper)')).toHaveText('manual')
+        await expect(page.getByText('系统标签由组合自动维护，不能作为手动标签重复添加')).toBeVisible()
+        const uploadResponse = page.waitForResponse((response) =>
+          response.request().method() === 'POST' && response.url().endsWith('/api/v1/upload/'),
+        )
+        await upload.locator('input[type=file]').setInputFiles({
+          name: filename,
+          mimeType: 'text/csv',
+          buffer: Buffer.from(CSV),
+        })
+        const created = await (await uploadResponse).json() as Array<{ tags: string[] }>
+        expect(created[0].tags).toEqual(['manual'])
+
+        const files = page.getByTestId('combination-files')
+        await expect(files).toContainText(filename)
+        const row = files.locator('.el-table__row').filter({ hasText: filename })
+        await expect(row.getByTestId('manual-tag')).toHaveCount(1)
+        await expect(row.getByTestId('manual-tag')).toHaveText('manual')
+        await expect(row.getByTestId('managed-tag')).toHaveText(name)
+        await expect(row.getByTestId('managed-tag')).toHaveCount(1)
+        await expect(row.getByTestId('managed-tag').locator('.el-tag__close')).toHaveCount(0)
+        await captureArea(page, testInfo, theme, 'managed-tags', row)
+
+        await page.getByTestId('combination-rename').click()
+        await page.getByTestId('combination-name-input').fill(`${name}_lab`)
+        await page.getByTestId('combination-save').click()
+        await expect(row.getByTestId('managed-tag').filter({ hasText: `${name}_lab` })).toBeVisible()
+        await expect(row.getByTestId('manual-tag')).toHaveText('manual')
+
+        await page.getByRole('tab', { name: /文件列表/ }).click()
+        const listRow = page.locator('.file-list-tab .el-table__row').filter({ hasText: filename })
+        await expect(listRow).toBeVisible()
+        await expect(listRow.getByTestId('manual-tag')).toHaveText('manual')
+        await expect(listRow.getByTestId('manual-tag').locator('.el-tag__close')).toHaveCount(1)
+        await expect(listRow.getByTestId('managed-tag').locator('.el-tag__close')).toHaveCount(0)
+      } finally {
+        await deleteFilesByNameQuiet(page, filename)
+        await page.evaluate(async (id) => {
+          const token = localStorage.getItem('access_token')
+          await fetch(`/api/v1/combinations/${id}/`, {
+            method: 'DELETE',
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          })
+        }, comboId)
+      }
+    })
+  }
+
+  for (const theme of ['light', 'night'] as const) {
+    test(`${theme}：文件列表组合筛选与批量归组保留或清空批次号`, async ({ page }, testInfo) => {
+      await page.addInitScript((value) => localStorage.setItem('theme', value), theme)
+      await gotoApp(page, '/data')
+      const prefix = `e2e_as_${theme}_${Date.now()}`
+      const comboName = `${prefix}_combo`
+      const first = `${prefix}_a.csv`
+      const second = `${prefix}_b.csv`
+      const comboId = await createCombination(page, comboName)
+      try {
+        const firstId = await uploadCombinationFile(page, null, first, 'Keep-Lot', ['manual'])
+        await uploadCombinationFile(page, null, second)
+        await gotoApp(page, '/data')
+        const row = (name: string) => page.locator('.file-list-tab .el-table__row').filter({ hasText: name })
+        await expect(row(first)).toBeVisible()
+        await row(first).locator('.el-checkbox').first().click()
+        await row(second).locator('.el-checkbox').first().click()
+        await page.getByRole('button', { name: '加入组合', exact: true }).click()
+        const dialog = page.locator('.el-dialog')
+        await expect(dialog).toBeVisible()
+        await captureArea(page, testInfo, theme, 'assign-options', dialog)
+        await dialog.getByTestId('import-combination').click()
+        await page.getByRole('option', { name: comboName, exact: true }).click()
+        await expect(dialog.getByTestId('import-combination')).toContainText(comboName)
+        const assignRequest = page.waitForRequest((request) =>
+          request.method() === 'POST' && request.url().endsWith('/files/assign_combination/'),
+        )
+        await page.getByTestId('import-submit').click()
+        expect((await assignRequest).postDataJSON()).toEqual({
+          file_ids: [firstId, expect.any(Number)],
+          combination_id: comboId,
+        })
+        await expect(dialog).toBeHidden()
+        await expect(row(first).getByTestId('managed-tag')).toHaveText([
+          comboName,
+          `${comboName} / Keep-Lot`,
+        ])
+        await expect(row(first).getByTestId('managed-tag').locator('.el-tag__close')).toHaveCount(0)
+
+        await page.getByTestId('file-combination-filter').click()
+        await page.locator('.el-select-dropdown__item:visible').filter({ hasText: comboName }).first().click()
+        await expect(row(first)).toBeVisible()
+        await expect(row(second)).toBeVisible()
+
+        await row(first).locator('.add-tag-btn').click()
+        await row(first).locator('.tag-native-input').fill(comboName.toUpperCase())
+        await row(first).locator('.tag-native-input').press('Enter')
+        await expect(page.getByText('该标签由组合自动维护，不能作为手动标签重复添加')).toBeVisible()
+        await expect(row(first).getByTestId('manual-tag')).toHaveCount(1)
+
+        await row(first).locator('.el-checkbox').first().click()
+        await page.getByRole('button', { name: '加入组合', exact: true }).click()
+        await dialog.getByTestId('import-combination').click()
+        await page.getByRole('option', { name: comboName, exact: true }).click()
+        await expect(dialog.getByTestId('import-combination')).toContainText(comboName)
+        await page.getByTestId('import-clear-batch-no').click()
+        await expect(page.getByTestId('import-clear-batch-no').locator('input[type="checkbox"]')).toBeChecked()
+        const clearRequest = page.waitForRequest((request) =>
+          request.method() === 'POST' && request.url().endsWith('/files/assign_combination/'),
+        )
+        await page.getByTestId('import-submit').click()
+        expect((await clearRequest).postDataJSON()).toEqual({
+          file_ids: [firstId],
+          combination_id: comboId,
+          batch_no: '',
+        })
+        await expect(row(first).getByTestId('managed-tag')).toHaveText([comboName])
+        const saved = await page.evaluate(async (id) => {
+          const token = localStorage.getItem('access_token')
+          const response = await fetch(`/api/v1/files/${id}/`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          })
+          return response.json()
+        }, firstId)
+        expect(saved.batch_no).toBe('')
+        expect(saved.tags).toEqual(['manual'])
+      } finally {
+        await deleteFilesByNameQuiet(page, prefix)
+        await page.evaluate(async (id) => {
+          const token = localStorage.getItem('access_token')
+          await fetch(`/api/v1/combinations/${id}/`, {
+            method: 'DELETE',
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          })
+        }, comboId)
+      }
+    })
+  }
+
+  test('组合为批次提交可选组合与批次号', async ({ page }) => {
+    await gotoApp(page, '/data')
+    const prefix = `e2e_cb_${Date.now()}`
+    const comboName = `${prefix}_combo`
+    const batchName = `${prefix}_batch`
+    const first = `${prefix}_a.csv`
+    const second = `${prefix}_b.csv`
+    const comboId = await createCombination(page, comboName)
+    try {
+      await uploadCombinationFile(page, null, first)
+      await uploadCombinationFile(page, null, second)
+      await gotoApp(page, '/data')
+      const row = (name: string) => page.locator('.file-list-tab .el-table__row').filter({ hasText: name })
+      await row(first).locator('.el-checkbox').first().click()
+      await row(second).locator('.el-checkbox').first().click()
+      await page.getByRole('button', { name: '组合为批次', exact: true }).click()
+      await page.getByTestId('combine-new-name').fill(batchName)
+      await page.getByTestId('combine-combination').click()
+      await page.locator('.el-select-dropdown__item:visible').filter({ hasText: comboName }).first().click()
+      await page.getByTestId('combine-batch-no').fill('Combine-Lot')
+      await expect(page.getByTestId('combine-submit')).toBeEnabled()
+      const combineRequest = page.waitForRequest((request) =>
+        request.method() === 'POST' && request.url().endsWith('/files/combine/'),
+      )
+      await page.getByTestId('combine-submit').click()
+      expect((await combineRequest).postDataJSON()).toMatchObject({
+        batch_name: batchName,
+        combination_id: comboId,
+        batch_no: 'Combine-Lot',
+      })
+      await expect(page.getByText(/已组合 2 个文件为批次/).first()).toBeVisible()
+      await gotoApp(page, '/data')
+      await openCombinationTab(page)
+      await selectCombination(page, comboName)
+      await expect(page.getByTestId('combination-files')).toContainText(`${comboName} / Combine-Lot`)
+    } finally {
+      await deleteBatchQuiet(page, batchName)
+      await deleteFilesByNameQuiet(page, prefix)
+      await page.evaluate(async (id) => {
+        const token = localStorage.getItem('access_token')
+        await fetch(`/api/v1/combinations/${id}/`, {
+          method: 'DELETE',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        })
+      }, comboId)
     }
   })
 

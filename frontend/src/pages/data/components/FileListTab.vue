@@ -6,6 +6,10 @@
       :selected-count="selectedIds.length"
       :usage="usage"
       :hidden-filter="hiddenFilter"
+      :combinations="combinations"
+      :combination-id="combinationFilter"
+      @combination-change="onCombinationFilterChange"
+      @assign-click="openImportDialog"
       @search="onSearch"
       @hidden-filter-change="onHiddenFilterChange"
       @upload-click="showUpload = !showUpload"
@@ -18,6 +22,7 @@
     <FileUploadArea
       :visible="showUpload"
       :active="active"
+      :combinations="combinations"
       @upload-success="onUploadSuccess"
     />
 
@@ -72,7 +77,15 @@
       v-model:visible="showCombineDialog"
       :selected-count="selectedIds.length"
       :batch-options="combineBatchNames"
+      :combinations="combinations"
       @submit="onCombineSubmit"
+    />
+
+    <ImportOptionsDialog
+      v-model:visible="importDialogVisible"
+      :combinations="combinations"
+      :selected-count="selectedIds.length"
+      @submit="assignCombination"
     />
   </div>
 </template>
@@ -87,7 +100,9 @@ import FileListToolbar, { type HiddenFilter } from './FileListToolbar.vue'
 import FileUploadArea from './FileUploadArea.vue'
 import ConsistencyCheckDialog from './ConsistencyCheckDialog.vue'
 import CombineBatchDialog from './CombineBatchDialog.vue'
+import ImportOptionsDialog from './ImportOptionsDialog.vue'
 import FileListTable, { type FileFilters } from './FileListTable.vue'
+import { useCombinationSelection } from '../composables/useCombinationSelection'
 
 withDefaults(defineProps<{
   active?: boolean
@@ -116,6 +131,24 @@ const formatTypes = ref<string[]>([])
 const allTags = ref<string[]>([])
 const selectedIds = ref<number[]>([])
 const tableRef = ref<InstanceType<typeof FileListTable>>()
+
+const {
+  combinations, combinationFilter, importDialogVisible, loadCombinations,
+  onCombinationFilterChange, openImportDialog, assignCombination,
+} = useCombinationSelection({
+  selectedIds,
+  onFilterChange() {
+    currentPage.value = 1
+    tableRef.value?.clearSelection()
+    loadFiles()
+  },
+  async onAssigned() {
+    tableRef.value?.clearSelection()
+    selectedIds.value = []
+    await loadFiles()
+    filesStore.notifyFilesChanged()
+  },
+})
 
 // Current global keyword search (toolbar)
 const currentSearch = ref('')
@@ -225,6 +258,7 @@ async function loadFiles() {
       filename__icontains: filters.filename,
       program_name__icontains: filters.program,
       tag: filters.tag,
+      combination_id: combinationFilter.value ?? undefined,
       include_hidden: hiddenFilter.value === 'all' ? 1 : undefined,
       hidden_only: hiddenFilter.value === 'hidden' ? 1 : undefined,
       ordering: ordering.value,
@@ -377,9 +411,16 @@ async function onCombine() {
   showCombineDialog.value = true
 }
 
-async function onCombineSubmit(batchName: string) {
+async function onCombineSubmit(payload: {
+  batchName: string
+  combinationId?: number | null
+  batchNo?: string
+}) {
   try {
-    const { data } = await datafilesApi.combineFiles([...selectedIds.value], batchName)
+    const { data } = await datafilesApi.combineFiles([...selectedIds.value], payload.batchName, {
+      combinationId: payload.combinationId,
+      batchNo: payload.batchNo,
+    })
     ElMessage.success(`已组合 ${data.combined} 个文件为批次 "${data.batch_name}"`)
     tableRef.value?.clearSelection()
     selectedIds.value = []
@@ -519,6 +560,7 @@ onActivated(() => {
   loadProductCodes()
   loadFormatTypes()
   loadAllTags()
+  loadCombinations()
   loadUsage()
 })
 

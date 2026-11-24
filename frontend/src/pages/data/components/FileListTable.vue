@@ -22,6 +22,10 @@
       <el-table-column type="expand">
         <template #default="{ row }">
           <FileRowDetail :row="row" @remove-tag="removeTag" />
+          <div v-if="row.managed_tags && row.managed_tags.length" class="managed-detail-row">
+            <span class="detail-label">系统标签</span>
+            <FileTagsCell :row="row" :show-manual="false" :show-close="false" />
+          </div>
         </template>
       </el-table-column>
       <el-table-column type="selection" width="44" align="center" reserve-selection />
@@ -106,16 +110,7 @@
         </template>
         <template #default="{ row }">
           <div class="tag-cell-inner">
-            <el-tag
-              v-for="t in (row.tags || [])"
-              :key="t"
-              closable
-              size="small"
-              type="info"
-              effect="light"
-              class="file-tag"
-              @close="removeTag(row, t)"
-            >{{ t }}</el-tag>
+            <FileTagsCell :row="row" @remove-manual="removeTag" />
             <div v-if="editingId === row.id" class="tag-input-wrapper">
               <input
                 :ref="tagInputRef"
@@ -194,6 +189,7 @@ import { truncateMiddle, formatSize, formatTime } from '../../../utils/format'
 import { getFilenameWrap } from '../../../utils/filenameWrap'
 import { useTagEditing } from '../composables/useTagEditing'
 import FileRowDetail from './FileRowDetail.vue'
+import FileTagsCell from './FileTagsCell.vue'
 import ColumnHeaderFilter from './ColumnHeaderFilter.vue'
 
 /**
@@ -347,6 +343,25 @@ defineExpose({ clearSelection: () => tableRef.value?.clearSelection() })
   min-height: 28px;
   max-height: 80px;
   overflow-y: auto;
+}
+
+.managed-detail-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  min-height: 20px;
+}
+
+.managed-detail-row .detail-label {
+  flex-shrink: 0;
+  width: 96px;
+  padding-top: 1px;
+  color: var(--text-3);
+  font-size: var(--p-fs-dense);
+}
+
+.tag-cell-inner :deep(.file-tags-cell) {
+  flex: 1;
 }
 
 .file-tag {
