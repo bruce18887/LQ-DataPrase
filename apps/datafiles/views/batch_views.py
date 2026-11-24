@@ -171,8 +171,8 @@ class BatchDirImportView(APIView):
 
         created = []
         failed_paths = []
-        # The directory lock covers scan/registration; parsing remains outside
-        # each short DB transaction, so unrelated writes are not held up.
+        # Owner lock serializes imports for the same user; the directory lock
+        # narrows it to this batch. Parsing stays outside each short DB transaction.
         with import_owner_lock(request.user), import_path_lock(request.user, dir_path):
             for root, _dirs, files in os.walk(dir_path):
                 for f in files:

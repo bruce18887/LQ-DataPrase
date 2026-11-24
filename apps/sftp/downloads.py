@@ -20,7 +20,7 @@ import os
 import time
 from contextlib import contextmanager
 
-from apps.datafiles.views import _register_file
+from apps.datafiles.views.import_coordinator import register_import_row
 
 from . import pool
 from .local_paths import remove_partial as _remove_partial
@@ -215,7 +215,7 @@ def download_file_events(sftp, user, remote_path, file_path, timeout_sec):
 
     # 下载完成 → 注册（与 download / download_batch 同语义：下载即注册）
     try:
-        datafile = _register_file(user, file_path, 'single')
+        datafile = register_import_row(user, file_path, 'single')
     except Exception as e:
         pool.invalidate(user.id)
         _remove_partial(file_path)
@@ -317,7 +317,7 @@ def download_dir_events(sftp, user, file_list, local_dir, dir_name, timeout_sec)
                     success_count += 1
                     # 下载即注册（与单文件/旧目录下载同语义）
                     try:
-                        _register_file(user, local_file_path, 'batch', dir_name)
+                        register_import_row(user, local_file_path, 'batch', dir_name)
                     except Exception as re:
                         logger.warning(
                             f"Auto-register failed for {local_file_path}: {re}")

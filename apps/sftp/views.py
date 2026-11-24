@@ -7,7 +7,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.http import StreamingHttpResponse
-from apps.datafiles.views import _register_file, _is_summary_csv
+from apps.datafiles.views import _is_summary_csv
+from apps.datafiles.views.import_coordinator import register_import_row
 logger = logging.getLogger(__name__)
 
 from apps.common.errors import error_response
@@ -325,7 +326,7 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
             sftp.get(remote_path, file_path)
             file_size = os.path.getsize(file_path)
             # 下载到应用数据区即注册：数据管理列表可见，避免修复中心误报孤儿
-            datafile = _register_file(request.user, file_path, 'single')
+            datafile = register_import_row(request.user, file_path, 'single')
             return Response({
                 'status': 'ok',
                 'filename': os.path.basename(file_path),
@@ -459,7 +460,7 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
                         upload_dir, os.path.basename(remote_path))
                     sftp.get(remote_path, file_path)
                     # 与单文件下载同语义：下载即注册（single）
-                    _register_file(request.user, file_path, 'single')
+                    register_import_row(request.user, file_path, 'single')
                     saved.append({
                         'filename': os.path.basename(file_path),
                         'size': os.path.getsize(file_path),
@@ -519,7 +520,7 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
 
             sftp.get(remote_path, file_path)
 
-            datafile = _register_file(request.user, file_path, 'single')
+            datafile = register_import_row(request.user, file_path, 'single')
             return Response({
                 'status': 'ok',
                 'files': [{'id': datafile.id, 'filename': datafile.filename}],
@@ -559,7 +560,7 @@ class SftpViewSet(SftpConfigMixin, SftpSearchMixin, viewsets.GenericViewSet):
 
                     sftp.get(remote_path, file_path)
 
-                    datafile = _register_file(request.user, file_path, 'batch', batch_name)
+                    datafile = register_import_row(request.user, file_path, 'batch', batch_name)
                     created.append({'id': datafile.id, 'filename': datafile.filename})
                 except Exception as e:
                     # 旧实现是裸 ``except:``（会吞 KeyboardInterrupt/SystemExit）

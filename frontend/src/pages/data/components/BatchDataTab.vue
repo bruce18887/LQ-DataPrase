@@ -304,10 +304,10 @@ async function importDir(payload: {
   } catch {
     // 错误 toast 由 axios 拦截器统一弹出
   } finally {
+    importingDir.value = ''
     await loadBatchDirs()
     filesStore.notifyFilesChanged()
     emit('import-success')
-    importingDir.value = ''
   }
 }
 

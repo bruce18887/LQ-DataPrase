@@ -78,6 +78,23 @@ def import_owner_lock(owner):
         yield
 
 
+def register_import_row(user, file_path, file_type='single', batch_name='',
+                        sub_batch='', source_mtime=None, parsed=None,
+                        combination=None, batch_no_override='', tags=None):
+    """Parse outside the lock, then register one row under the owner lock."""
+    from ._helpers import parse_file_meta, _register_file
+
+    if parsed is None:
+        parsed = parse_file_meta(file_path)
+    with import_owner_lock(user):
+        with transaction.atomic():
+            return _register_file(
+                user, file_path, file_type, batch_name, sub_batch,
+                source_mtime=source_mtime, parsed=parsed, combination=combination,
+                batch_no_override=batch_no_override, tags=tags,
+            )
+
+
 def find_existing_import_row(owner, file_path, file_type, batch_name='', for_update=False):
     """Find an owner/type/batch row with the same normalized disk path."""
     target = import_path_key(file_path)

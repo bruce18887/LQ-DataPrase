@@ -166,6 +166,7 @@ export const datafilesApi = {
     appendUploadOptions(formData, options)
     return api.post('/upload/', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120_000,
       onUploadProgress: (e) => {
         if (e.total && onProgress) onProgress(Math.round((e.loaded * 100) / e.total))
       },
@@ -181,6 +182,7 @@ export const datafilesApi = {
     appendUploadOptions(formData, options)
     return api.post('/upload/', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120_000,
       onUploadProgress: (e) => {
         if (e.total && onProgress) onProgress(Math.round((e.loaded * 100) / e.total))
       },
@@ -260,7 +262,7 @@ export const datafilesApi = {
       dir_name: dirName,
       ...(options.combinationId != null ? { combination_id: options.combinationId } : {}),
       ...(options.batchNo ? { batch_no: options.batchNo } : {}),
-    })
+    }, { timeout: 120_000 })
   },
   deleteBatchDir(dirName: string) {
     return api.delete(`/batch-dirs/${encodeURIComponent(dirName)}/`)
