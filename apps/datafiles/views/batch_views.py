@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.common.errors import error_response
+from apps.datafiles.combination_service import managed_tags_for
 from apps.datafiles.models import DataFile
 from apps.datafiles.serializers import DataFileSerializer
 from apps.datafiles.services import evict_parse_cache_for_paths
@@ -61,6 +62,7 @@ class BatchDirListView(APIView):
             'id', 'filename', 'tags', 'batch_name', 'sub_batch', 'file_path',
             'format_type', 'row_count', 'col_count', 'program_name',
             'file_size', 'product_code', 'status', 'created_at',
+            'combination_id', 'combination__name', 'batch_no',
         ):
             registered_files.setdefault(df['batch_name'], set()).add(
                 os.path.normpath(resolve_file_path(df['file_path']))
@@ -78,6 +80,11 @@ class BatchDirListView(APIView):
                 'file_type': 'batch',
                 'batch_name': df['batch_name'],
                 'sub_batch': df['sub_batch'] or '',
+                'combination_id': df['combination_id'],
+                'combination_name': df['combination__name'] or '',
+                'batch_no': df['batch_no'] or '',
+                'managed_tags': managed_tags_for(
+                    df['combination__name'], df['batch_no'] or ''),
                 'status': df['status'],
                 'stage': extract_stage(df['filename'], df['program_name']),
                 'data_date': extract_data_date(df['filename']),

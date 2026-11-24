@@ -88,6 +88,8 @@ class DataFileSerializer(serializers.ModelSerializer):
     # 从文件名/程序名轻量解析（不落库）：测试阶段（FT/QA/UIS/CP）与测试日期
     stage = serializers.SerializerMethodField()
     data_date = serializers.SerializerMethodField()
+    combination_id = serializers.IntegerField(source='combination.id', read_only=True)
+    combination_name = serializers.CharField(source='combination.name', read_only=True)
     managed_tags = serializers.SerializerMethodField()
 
     class Meta:
@@ -97,7 +99,8 @@ class DataFileSerializer(serializers.ModelSerializer):
             'format_type', 'format_type_display', 'file_type', 'file_type_display',
             'batch_name', 'sub_batch', 'row_count', 'col_count',
             'program_name', 'product_code', 'source_mtime',
-            'metadata', 'tags', 'stage', 'data_date', 'managed_tags',
+            'metadata', 'tags', 'stage', 'data_date',
+            'combination_id', 'combination_name', 'batch_no', 'managed_tags',
             'is_hidden', 'status', 'status_display',
             'created_at', 'updated_at',
         ]
@@ -114,7 +117,7 @@ class DataFileSerializer(serializers.ModelSerializer):
 
     def get_managed_tags(self, obj) -> list[str]:
         combination_name = obj.combination.name if obj.combination_id else None
-        return managed_tags_for(combination_name, obj.batch_no)
+        return managed_tags_for(combination_name, obj.batch_no or '')
 
     def validate_tags(self, value):
         return normalize_tags(value)
@@ -134,6 +137,9 @@ class DataFileListSerializer(serializers.ModelSerializer):
     # 轻量解析字段（同 DataFileSerializer）
     stage = serializers.SerializerMethodField()
     data_date = serializers.SerializerMethodField()
+    combination_id = serializers.IntegerField(source='combination.id', read_only=True)
+    combination_name = serializers.CharField(source='combination.name', read_only=True)
+    managed_tags = serializers.SerializerMethodField()
 
     class Meta:
         model = DataFile
@@ -143,6 +149,7 @@ class DataFileListSerializer(serializers.ModelSerializer):
             'batch_name', 'sub_batch', 'row_count', 'col_count', 'program_name',
             'product_code', 'source_mtime',
             'tags', 'stage', 'data_date',
+            'combination_id', 'combination_name', 'batch_no', 'managed_tags',
             'is_hidden', 'status', 'status_display', 'created_at', 'updated_at',
         ]
 
@@ -151,6 +158,10 @@ class DataFileListSerializer(serializers.ModelSerializer):
 
     def get_data_date(self, obj) -> str:
         return extract_data_date(obj.filename)
+
+    def get_managed_tags(self, obj) -> list[str]:
+        combination_name = obj.combination.name if obj.combination_id else None
+        return managed_tags_for(combination_name, obj.batch_no or '')
 
     def validate_tags(self, value):
         return normalize_tags(value)

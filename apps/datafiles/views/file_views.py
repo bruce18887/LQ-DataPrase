@@ -8,10 +8,12 @@ import time
 from datetime import datetime, time as dtime
 
 from django.db import transaction
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.filters import OrderingFilter
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -40,17 +42,15 @@ from ._helpers import (
     _plan_file_moves,
     _UNSAFE_NAME_CHARS,
 )
-from .admin_scope import scoped_files, scoped_owner_id
+from .admin_scope import scoped_files
 
 logger = logging.getLogger(__name__)
 
 
 def _parse_date_bound(raw: str):
-    """容错解析日期边界参数：纯日期 → date；带时间 → datetime；非法 → None。
+    """解析日期边界；纯日期转 date，带时间转 datetime，非法值转 None。
 
-    注意：strptime 对纯日期格式也返回 datetime（零点）——必须按「输入是否含
-    时间分量」显式转 date，否则 _date_bound 的 isinstance(datetime) 分支恒真，
-    纯日期 lte 补不到当天末尾（当天文件被漏）。
+    必须按输入是否含时间分量显式区分，否则纯日期 lte 补不到当天末尾。
     """
     if not raw:
         return None
@@ -86,14 +86,9 @@ def _date_bound(raw: str, end_of_day: bool):
 
 
 class DataFilePagination(PageNumberPagination):
-    """PageNumberPagination that honors the ``page_size`` query param.
+    """Honor bounded ``page_size`` for full dropdown/dashboard loads.
 
-    The DRF default pagination class ignores ``page_size`` (its
-    ``page_size_query_param`` is None), so front-end "load all" calls
-    (``?page_size=9999`` for file dropdowns / dashboards) were silently
-    truncated to PAGE_SIZE=20 — the analysis dropdown showed 20 files while
-    the data-management table counted all of them.  ``max_page_size`` keeps
-    the param bounded so a huge value cannot balloon the response.
+    DRF otherwise truncates these callers to PAGE_SIZE=20.
     """
 
     page_size_query_param = 'page_size'
@@ -104,43 +99,48 @@ class DataFileViewSet(viewsets.ModelViewSet):
     serializer_class = DataFileSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = DataFilePagination
-    # 过滤器显式声明在视图上：曾在 settings 的 DEFAULT_FILTER_BACKENDS 里全局挂着，
-    # 但全仓只有这个视图用得到，留在全局只会让人以为所有列表都能过滤。
+    # 过滤器仅在本视图声明；搜索由 get_queryset 自管，以纳入标签命中。
     filter_backends = [DjangoFilterBackend, OrderingFilter]
-    # 搜索完全自管（get_queryset）：DRF SearchFilter 只查 search_fields 列，
-    # 会把「仅标签命中」的行过滤掉——标签搜索必须 OR 进查询集后再整集过滤。
     filterset_fields = ['product_code', 'format_type', 'file_type']
     ordering_fields = ['id', 'created_at', 'source_mtime', 'filename', 'file_size']
 
     def get_queryset(self):
-        queryset = scoped_files(self.request, self.action, DataFile.objects.filter(owner=self.request.user))
+        queryset = scoped_files(
+            self.request, self.action,
+            DataFile.objects.filter(owner=self.request.user).select_related('combination'),
+        )
 
-        # Custom search for tags (JSONField)
+        combination_id = (self.request.query_params.get('combination_id') or '').strip()
+        if combination_id:
+            try:
+                combination_id = int(combination_id)
+            except (TypeError, ValueError):
+                raise ValidationError({'combination_id': '必须是整数'})
+            queryset = queryset.filter(combination_id=combination_id)
+
+        batch_no = (self.request.query_params.get('batch_no') or '').strip()
+        if batch_no:
+            queryset = queryset.filter(batch_no__iexact=batch_no)
+
+        # Custom search for tags (JSONField) and derived managed tags.
         search = self.request.query_params.get('search', '').strip()
         if search:
-            # Search in filename, program_name, batch_name, and tags
-            from django.db.models import Q
-            q = (
+            from apps.datafiles.combination_service import managed_tags_for
+            search_lower = search.lower()
+            tag_match_ids = []
+            for row in queryset.values('id', 'tags', 'combination__name', 'batch_no'):
+                values = list(row.get('tags') or []) + managed_tags_for(
+                    row.get('combination__name'), row.get('batch_no') or '')
+                if any(search_lower in str(value).lower() for value in values):
+                    tag_match_ids.append(row['id'])
+            queryset = queryset.filter(
                 Q(filename__icontains=search)
                 | Q(program_name__icontains=search)
                 | Q(batch_name__icontains=search)
+                | Q(combination__name__icontains=search)
+                | Q(batch_no__icontains=search)
+                | Q(id__in=tag_match_ids)
             )
-            queryset = queryset.filter(q)
-            # 全文搜索承诺包含标签：JSONField 无法跨库 SQL 搜索，
-            # 与既有 tag 精确参数同款 Python 预过滤——命中标签的行 OR 回来。
-            search_lower = search.lower()
-            tag_ids = [
-                row['id']
-                for row in DataFile.objects.filter(owner_id=scoped_owner_id(self.request, self.action)).values('id', 'tags')
-                if any(
-                    search_lower in str(t).lower()
-                    for t in (row.get('tags') or []) if isinstance(t, str)
-                )
-            ]
-            if tag_ids:
-                queryset = queryset | DataFile.objects.filter(
-                    owner_id=scoped_owner_id(self.request, self.action), id__in=tag_ids,
-                )
 
         # 表头列筛选：文件名 / 测试程序 contains（服务端生效，20 条/页必须后端过滤）
         filename_ic = self.request.query_params.get('filename__icontains', '').strip()
@@ -150,25 +150,20 @@ class DataFileViewSet(viewsets.ModelViewSet):
         if program_ic:
             queryset = queryset.filter(program_name__icontains=program_ic)
 
-        # Filter by specific tag
+        # Filter by a manual or managed tag, case-insensitively.
         tag = self.request.query_params.get('tag', '').strip()
         if tag:
-            # Filter files that have this specific tag (case-insensitive)
-            # Since tags is a JSONField with a list, we need to check if the tag exists in the list
-            # This is database-specific; for SQLite we'll filter in Python
-            # For PostgreSQL, we could use __contains
             tag_lower = tag.lower()
             matching_ids = []
-            for df in queryset.values('id', 'tags'):
-                tags = df.get('tags') or []
-                if any(t.lower() == tag_lower for t in tags if isinstance(t, str)):
-                    matching_ids.append(df['id'])
+            for row in queryset.values('id', 'tags', 'combination__name', 'batch_no'):
+                from apps.datafiles.combination_service import managed_tags_for
+                values = list(row.get('tags') or []) + managed_tags_for(
+                    row.get('combination__name'), row.get('batch_no') or '')
+                if any(str(value).lower() == tag_lower for value in values):
+                    matching_ids.append(row['id'])
             queryset = queryset.filter(id__in=matching_ids)
 
-        # 上传时间范围筛选（文件列表表头筛选，2026-08-20）：created_at__gte/__lte
-        # 容错解析——非法日期静默跳过（对齐 ag-grid 列过滤的宽容跳过惯例，不 400）。
-        # 前端传纯日期（YYYY-MM-DD）：gte 取当天 00:00:00，lte 取当天 23:59:59.999999
-        #（否则「今天上传」的文件会被 lte 漏掉）。
+        # 上传时间范围：纯日期 gte/lte 覆盖当天；非法日期静默跳过。
         created_gte = self.request.query_params.get('created_at__gte', '').strip()
         created_lte = self.request.query_params.get('created_at__lte', '').strip()
         if created_gte:
@@ -191,8 +186,8 @@ class DataFileViewSet(viewsets.ModelViewSet):
         except ValueError:
             pass  # 非法数值静默跳过
 
-        # 隐藏过滤放最后：上方标签搜索用 OR 拼回的 queryset 会绕过先前条件，
-        # 只有在这里收口才能保证隐藏行不被 OR 带回来（软隐藏，仅 list 生效）。
+        # 隐藏过滤放最后，所有搜索与标签匹配都只收窄当前 queryset，
+        # 不得绕过组合/批次等前置条件（软隐藏，仅 list 生效）。
         return apply_visibility(queryset, self.request.query_params, self.action)
 
     def get_serializer_class(self):
@@ -271,12 +266,9 @@ class DataFileViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='options')
     def options(self, request):
-        """下拉框用的轻量文件清单：只返回标量列，不算 stage/data_date、不 join owner。
+        """轻量标量下拉清单：默认 ready，``include_error=1`` 包含 error。
 
-        列表序列化器逐行跑正则算 stage/data_date 并 join owner，文件多时是纯浪费；
-        下拉只需要标量字段。默认只返回 status='ready'（解析失败的行选中也无数据），
-        但既有前端下拉未过滤状态，保留 ``?include_error=1`` 兼容开关（ready + error）。
-        ``?limit=`` 默认 5000、上限 20000，避免响应无限膨胀。
+        ``limit`` 默认 5000、上限 20000。
         """
         queryset = DataFile.objects.filter(owner=request.user)
         if request.query_params.get('include_error') == '1':
@@ -295,8 +287,11 @@ class DataFileViewSet(viewsets.ModelViewSet):
                 'id', 'filename', 'file_type', 'batch_name', 'sub_batch',
                 'format_type', 'program_name', 'product_code', 'row_count',
                 'col_count', 'file_size', 'source_mtime', 'created_at', 'status',
+                'combination_id', 'combination__name', 'batch_no',
             )[:limit]
         )
+        for row in rows:
+            row['combination_name'] = row.pop('combination__name')
         return Response({'results': rows})
 
     @action(detail=False, methods=['post'])
@@ -490,36 +485,36 @@ class DataFileViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def list_tags(self, request):
-        """Return distinct, de-dup'd tags the current user has ever used.
-
-        Body (optional): ``{"prefix": "PR"}`` — case-insensitive prefix filter
-        used by the front-end autocomplete. Tags from every file the user
-        owns are aggregated and returned in lexicographic order.
-        """
+        """Return distinct manual/managed tags, optionally filtered by prefix."""
         prefix = (request.data.get('prefix') or '').strip()
         seen = {}
-        # Iterate over each file's tag list and collect distinct (case-insensitive)
-        # entries, preferring the first-seen casing as the canonical form.
-        for tag_list in (
-            DataFile.objects.filter(owner=request.user).filter(is_hidden=False)
-            .exclude(tags=[])
-            .values_list('tags', flat=True)
+        managed_seen = {}
+        for tags, combination_name, batch_no in (
+            DataFile.objects.filter(owner=request.user, is_hidden=False)
+            .values_list('tags', 'combination__name', 'batch_no')
         ):
-            if not isinstance(tag_list, list):
-                continue
-            for t in tag_list:
-                if not isinstance(t, str):
-                    continue
-                t = t.strip()
-                if not t:
-                    continue
-                key = t.lower()
-                if key in seen:
-                    continue
-                if prefix and not key.startswith(prefix.lower()):
-                    continue
-                seen[key] = t
-        return Response({'tags': sorted(seen.values(), key=str.lower)})
+            if isinstance(tags, list):
+                for tag in tags:
+                    if not isinstance(tag, str):
+                        continue
+                    cleaned = tag.strip()
+                    if cleaned:
+                        seen.setdefault(cleaned.lower(), cleaned)
+            from apps.datafiles.combination_service import managed_tags_for
+            for tag in managed_tags_for(combination_name, batch_no or ''):
+                managed_seen.setdefault(tag.lower(), tag)
+                seen.setdefault(tag.lower(), tag)
+        if prefix:
+            prefix_lower = prefix.lower()
+            seen = {key: value for key, value in seen.items() if key.startswith(prefix_lower)}
+            managed_seen = {
+                key: value for key, value in managed_seen.items()
+                if key.startswith(prefix_lower)
+            }
+        return Response({
+            'tags': sorted(seen.values(), key=str.lower),
+            'managed_tags': sorted(managed_seen.values(), key=str.lower),
+        })
 
 
 class FileUploadView(APIView):
