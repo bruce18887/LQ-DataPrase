@@ -128,6 +128,8 @@ test.describe('组合数据', { tag: ['@p2', '@data'] }, () => {
       await gotoApp(page, '/data')
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
       await openCombinationTab(page)
+      await expect(page.getByTestId('combination-select').getByRole('combobox'))
+        .toHaveAttribute('aria-label', '当前组合')
 
       const name = `e2e_combo_${theme}_${Date.now()}`
       const renamed = `${name}_lab`
