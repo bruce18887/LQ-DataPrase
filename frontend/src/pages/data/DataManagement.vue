@@ -30,12 +30,13 @@
         />
       </div>
 
-      <!-- 批次数据（ZIP/SFTP 导入 + 组合生成的批次） -->
+      <!-- 组合数据（组合文件 + 内嵌来源批次目录） -->
       <div v-show="activeTab === 'batch'" role="tabpanel" class="content-section fade-in">
-        <BatchDataTab
+        <CombinationDataTab
           :active-file-id="activeFileId ?? undefined"
           @file-selected="onFileManagerSelect"
           @total-change="batchTotal = $event"
+          @open-report="onOpenCombinationReport"
         />
       </div>
 
@@ -106,7 +107,7 @@ import { useFilesStore } from '../../stores/files'
 import ActiveFileBanner from './components/browser/ActiveFileBanner.vue'
 import ViewFileTabs, { type ViewFileTab } from './components/browser/ViewFileTabs.vue'
 import FileListTab from './components/FileListTab.vue'
-import BatchDataTab from './components/BatchDataTab.vue'
+import CombinationDataTab from './components/combination/CombinationDataTab.vue'
 import DataBrowserAgGrid from './DataBrowserAgGrid.vue'
 import ExportToolsTab from './ExportToolsTab.vue'
 import GageSummary from './GageSummary.vue'
@@ -196,9 +197,23 @@ function closeViewTab(id: number) {
   }
 }
 
+interface ReportContext {
+  kind: 'gage' | 'buyoff'
+  combinationId: number | null
+  combinationName: string | null
+  fileIds: number[]
+}
+
+const reportContext = ref<ReportContext | null>(null)
+
+function onOpenCombinationReport(payload: ReportContext) {
+  reportContext.value = payload
+  activeTab.value = payload.kind
+}
+
 const tabs = [
   { key: 'files', label: '文件列表', icon: '📋' },
-  { key: 'batch', label: '批次数据', icon: '📦' },
+  { key: 'batch', label: '组合数据', icon: '📦' },
   { key: 'view', label: '查看数据', icon: '🔍' },
   { key: 'export', label: '导出工具', icon: '📥' },
   { key: 'compare', label: '文件对比', icon: '📁' },
