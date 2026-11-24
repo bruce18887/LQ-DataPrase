@@ -52,6 +52,8 @@ export interface ListFilesParams {
   include_hidden?: number
   /** 只返回已隐藏（优先于 include_hidden） */
   hidden_only?: number
+  combination_id?: number
+  batch_no?: string
 }
 
 /** 下拉框用的轻量文件行（/files/options/ 契约：仅标量列，无 stage/data_date/owner） */
@@ -70,6 +72,9 @@ export interface FileOption {
   source_mtime: string | null
   created_at: string
   status: string
+  combination_id: number | null
+  combination_name: string | null
+  batch_no: string
 }
 
 export interface FileOptionsParams {
@@ -130,11 +135,35 @@ function cleanParams<T extends object>(params: T): Record<string, string | numbe
   return out
 }
 
+export interface UploadOptions {
+  combinationId?: number | null
+  batchNo?: string
+  tags?: string[]
+}
+
+export interface AssignCombinationInput {
+  fileIds: number[]
+  combinationId: number | null
+  batchNo?: string | null
+}
+
+export interface CombineFilesOptions {
+  combinationId?: number | null
+  batchNo?: string
+}
+
+function appendUploadOptions(formData: FormData, options: UploadOptions) {
+  if (options.combinationId != null) formData.append('combination_id', String(options.combinationId))
+  if (options.batchNo) formData.append('batch_no', options.batchNo)
+  if (options.tags?.length) formData.append('tags', JSON.stringify(options.tags))
+}
+
 export const datafilesApi = {
-  upload(file: File, onProgress?: (pct: number) => void) {
+  upload(file: File, onProgress?: (pct: number) => void, options: UploadOptions = {}) {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('last_modified', String(file.lastModified))
+    appendUploadOptions(formData, options)
     return api.post('/upload/', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       onUploadProgress: (e) => {
@@ -142,13 +171,14 @@ export const datafilesApi = {
       },
     })
   },
-  uploadMultiple(files: File[], onProgress?: (pct: number) => void) {
+  uploadMultiple(files: File[], onProgress?: (pct: number) => void, options: UploadOptions = {}) {
     const formData = new FormData()
     for (const f of files) {
       formData.append('files', f)
       // 与 files 同序追加原始修改时间（epoch ms），供后端记录 source_mtime
       formData.append('last_modified', String(f.lastModified))
     }
+    appendUploadOptions(formData, options)
     return api.post('/upload/', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       onUploadProgress: (e) => {
@@ -186,10 +216,24 @@ export const datafilesApi = {
     return api.get<{ results: FileOption[] }>('/files/options/', { params: cleanParams(params) })
   },
   /** 组合/追加多个单文件到批次（服务端物理移动到 batch/<name>/ 并更新记录；批次可已存在） */
-  combineFiles(ids: number[], batchName: string) {
+  combineFiles(ids: number[], batchName: string, options: CombineFilesOptions = {}) {
     return api.post<{ combined: number; batch_name: string; files: DataFile[] }>(
-      '/files/combine/', { ids, batch_name: batchName },
+      '/files/combine/', {
+        ids,
+        batch_name: batchName,
+        ...(options.combinationId !== undefined
+          ? { combination_id: options.combinationId }
+          : {}),
+        ...(options.batchNo ? { batch_no: options.batchNo } : {}),
+      },
     )
+  },
+  assignCombination(input: AssignCombinationInput) {
+    return api.post<DataFile[]>('/files/assign_combination/', {
+      file_ids: input.fileIds,
+      combination_id: input.combinationId,
+      ...(input.batchNo !== undefined ? { batch_no: input.batchNo } : {}),
+    })
   },
   /** 移出批次：批次文件物理移回 single/ 并恢复 file_type='single' */
   uncombineFiles(ids: number[]) {
@@ -230,7 +274,7 @@ export const datafilesApi = {
     return api.post<{ id: number; tags: string[] }>(`/files/${id}/set_tags/`, { tags })
   },
   listTags(prefix = '') {
-    return api.post<{ tags: string[] }>('/files/list_tags/', { prefix })
+    return api.post<{ tags: string[]; managed_tags: string[] }>('/files/list_tags/', { prefix })
   },
 
   // Data consistency check / repair center
