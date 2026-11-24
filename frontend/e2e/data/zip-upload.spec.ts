@@ -21,11 +21,16 @@ const MIN_CSV = [
   '',
 ].join('\n')
 
-/** 批次区已从文件列表 Tab 独立为「批次数据」Tab */
+/** 批次区已从文件列表 Tab 独立为「组合数据」Tab */
 async function gotoBatchTab(page: import('@playwright/test').Page) {
-  const batchTab = page.locator('.tabs-nav .tab-btn').filter({ hasText: '批次数据' })
+  const batchTab = page.locator('.tabs-nav .tab-btn').filter({ hasText: '组合数据' })
   await batchTab.click()
-  await expect(page.locator('.tab-btn.active')).toContainText('批次数据')
+  await expect(page.locator('.tab-btn.active')).toContainText('组合数据')
+  const collapseHeader = page.getByTestId('batch-directory-section').locator('.el-collapse-item__header')
+  if ((await collapseHeader.getAttribute('aria-expanded')) !== 'true') {
+    await collapseHeader.click()
+  }
+  await expect(collapseHeader).toHaveAttribute('aria-expanded', 'true')
 }
 
 test.describe('ZIP 压缩包上传：自动解析为批次数据', { tag: ['@p2', '@data'] }, () => {

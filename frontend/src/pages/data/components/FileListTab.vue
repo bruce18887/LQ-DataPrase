@@ -17,6 +17,7 @@
     <!-- Upload Area -->
     <FileUploadArea
       :visible="showUpload"
+      :active="active"
       @upload-success="onUploadSuccess"
     />
 
@@ -87,6 +88,12 @@ import FileUploadArea from './FileUploadArea.vue'
 import ConsistencyCheckDialog from './ConsistencyCheckDialog.vue'
 import CombineBatchDialog from './CombineBatchDialog.vue'
 import FileListTable, { type FileFilters } from './FileListTable.vue'
+
+withDefaults(defineProps<{
+  active?: boolean
+}>(), {
+  active: true,
+})
 
 const emit = defineEmits<{
   'view-file': [id: number, filename: string]

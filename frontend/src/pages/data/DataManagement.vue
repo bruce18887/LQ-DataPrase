@@ -24,6 +24,7 @@
       <!-- 文件列表（单文件：上传、表头筛选、组合批次） -->
       <div v-show="activeTab === 'files'" role="tabpanel" class="content-section fade-in">
         <FileListTab
+          :active="activeTab === 'files'"
           @view-file="viewFile"
           @row-click="onRowClick"
           @total-change="fileTotal = $event"
@@ -33,6 +34,7 @@
       <!-- 组合数据（组合文件 + 内嵌来源批次目录） -->
       <div v-show="activeTab === 'batch'" role="tabpanel" class="content-section fade-in">
         <CombinationDataTab
+          :active="activeTab === 'batch'"
           :active-file-id="activeFileId ?? undefined"
           @file-selected="onFileManagerSelect"
           @total-change="batchTotal = $event"

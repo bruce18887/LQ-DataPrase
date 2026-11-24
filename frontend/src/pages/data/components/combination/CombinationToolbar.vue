@@ -1,7 +1,7 @@
 <template>
   <div class="combination-toolbar">
     <div class="combination-picker">
-      <span class="combination-field-label">当前组合</span>
+      <span class="combination-field-label" aria-label="当前组合">当前组合</span>
       <el-select-v2
         class="combination-select"
         :model-value="activeId"
@@ -11,7 +11,7 @@
         placeholder="选择组合或查看未分组文件"
         popper-class="dp-combination-select-popper"
         data-testid="combination-select"
-        @update:model-value="emit('select', $event)"
+        @update:model-value="emit('select', $event ?? null)"
       />
     </div>
     <div class="combination-actions">
