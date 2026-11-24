@@ -27,6 +27,18 @@
       @delete="removeActiveCombination"
     />
 
+    <div class="combination-existing-action">
+      <div class="combination-existing-copy">
+        <strong>存量文件归组</strong>
+        <span>将全部 {{ ungroupedFiles.length }} 个未分组文件归入同一组合；批次号留空时保留原值。</span>
+      </div>
+      <el-button
+        :disabled="ungroupedFiles.length === 0"
+        data-testid="combination-existing"
+        @click="openExistingAssignment"
+      >存量归组（{{ ungroupedFiles.length }}）</el-button>
+    </div>
+
     <FileUploadArea
       visible
       :active="props.active"
@@ -73,17 +85,26 @@
       :initial-name="activeCombination?.name"
       @submit="saveCombination"
     />
+
+    <ImportOptionsDialog
+      v-model:visible="importDialogVisible"
+      :combinations="combinations"
+      :selected-count="ungroupedFiles.length"
+      @submit="assignExistingFiles"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
-import { ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { combinationsApi } from '../../../../api/combinations'
 import { datafilesApi } from '../../../../api/datafiles'
 import { useFilesStore } from '../../../../stores/files'
 import type { DataCombination, DataFile } from '../../../../types'
+import type { CombinationImportPayload } from '../../composables/useCombinationSelection'
 import FileUploadArea from '../FileUploadArea.vue'
+import ImportOptionsDialog from '../ImportOptionsDialog.vue'
 import CombinationToolbar from './CombinationToolbar.vue'
 import CombinationEditDialog from './CombinationEditDialog.vue'
 import CombinationFileGroups from './CombinationFileGroups.vue'
@@ -114,16 +135,24 @@ const activeId = ref<number | null>(null)
 const dialogMode = ref<'create' | 'rename'>('create')
 const dialogVisible = ref(false)
 const saving = ref(false)
+const importDialogVisible = ref(false)
+const assigningExisting = ref(false)
 
 const activeCombination = computed(() =>
   combinations.value.find((combination) => combination.id === activeId.value) ?? null,
 )
+const ungroupedFiles = computed(() => files.value.filter(
+  (file) => file.combination_id == null,
+))
 const visibleFiles = computed(() => files.value.filter(
   (file) => (file.combination_id ?? null) === activeId.value,
 ))
 const total = computed(() => visibleFiles.value.length)
 
 watch(total, (value) => emit('total-change', value), { immediate: true })
+watch(() => props.active, (active) => {
+  if (active) loadAll()
+})
 
 async function loadAll() {
   try {
@@ -207,6 +236,32 @@ async function handleUploadSuccess() {
   filesStore.notifyFilesChanged()
 }
 
+async function openExistingAssignment() {
+  if (ungroupedFiles.value.length === 0) return
+  await loadAll()
+  if (ungroupedFiles.value.length > 0) importDialogVisible.value = true
+}
+
+async function assignExistingFiles(payload: CombinationImportPayload) {
+  if (assigningExisting.value || ungroupedFiles.value.length === 0) return
+  assigningExisting.value = true
+  try {
+    await datafilesApi.assignCombination({
+      fileIds: ungroupedFiles.value.map(file => file.id),
+      combinationId: payload.combinationId,
+      ...(payload.batchNo !== undefined ? { batchNo: payload.batchNo } : {}),
+    })
+    importDialogVisible.value = false
+    ElMessage.success(`已将 ${ungroupedFiles.value.length} 个未分组文件加入组合`)
+    await loadAll()
+    filesStore.notifyFilesChanged()
+  } catch {
+    // 请求失败由 axios 统一管线提示；保留弹窗与选择，便于用户重试。
+  } finally {
+    assigningExisting.value = false
+  }
+}
+
 async function unassignFile(row: DataFile) {
   if (activeId.value == null) return
   try {
@@ -283,6 +338,35 @@ onActivated(loadAll)
   overflow-wrap: anywhere;
 }
 
+.combination-existing-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--p-space-4);
+  margin-top: var(--p-space-3);
+  padding: var(--p-space-3) var(--p-space-4);
+  border: 1px solid var(--border-2);
+  border-radius: var(--p-radius-lg);
+  background: var(--bg-2);
+}
+
+.combination-existing-copy {
+  display: grid;
+  gap: var(--p-space-1);
+  min-width: 0;
+}
+
+.combination-existing-copy strong {
+  color: var(--text);
+  font-size: var(--p-fs-small);
+  font-weight: var(--p-fw-semibold);
+}
+
+.combination-existing-copy span {
+  color: var(--text-2);
+  font-size: var(--p-fs-dense);
+}
+
 .combination-report-actions {
   display: flex;
   flex-wrap: wrap;
@@ -306,6 +390,11 @@ onActivated(loadAll)
   .combination-scope-summary {
     justify-items: start;
     width: 100%;
+  }
+
+  .combination-existing-action {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 </style>

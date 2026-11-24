@@ -1,6 +1,10 @@
 # 10 常见问题
 
-<details class="faq"><summary>支持哪些上传格式？上传后发生了什么？</summary><div class="faq-a">CSV 单文件 / 多选，以及 ZIP 批量包（自动解析为批次）。上传后后端自动解析：识别 CP/FT 阶段、测试程序、限值与测试列，写入本地数据库；文件列表可见解析状态与行列规模，失败会给出原因。</div></details>
+<details class="faq"><summary>支持哪些上传格式？上传后发生了什么？</summary><div class="faq-a">CSV 单文件 / 多选，以及 ZIP 批量包。ZIP 仍解析为「来源批次」，用于管理同一物理批次的文件；上传后后端自动解析 CP/FT 阶段、测试程序、限值与测试列并写入本地数据库。文件列表可见解析状态与行列规模，失败会给出原因。业务批次号来自文件 LotID 或用户填写，缺失时留空，不从文件名或目录自动猜测。</div></details>
+
+<details class="faq"><summary>组合数据会改变 ZIP / SFTP 的来源批次吗？</summary><div class="faq-a">不会。组合是实验室调试数据集，每个文件最多属于一个组合，可选批次号只用于组合内的业务区分；「来源批次目录」继续管理 ZIP / SFTP 的物理批次。归组或删除组合不会删除原文件，删除组合后文件恢复为未分组。</div></details>
+
+<details class="faq"><summary>组合的系统标签和手动标签会互相覆盖吗？</summary><div class="faq-a">不会。手动标签与系统标签分开保存、共同展示；系统标签由组合名及可选批次号生成，重命名组合后同步更新，手动标签保持不变。</div></details>
 
 <details class="faq"><summary>数据存在哪里？会出本机吗？</summary><div class="faq-a">SQLite 数据库 + 本地媒体目录，落盘位置可在「系统设置 → 存储路径」迁移（需重启并迁移存量）。桌面形态完全离线运行；只有主动使用 SFTP 功能时才连接你指定的服务器。</div></details>
 
