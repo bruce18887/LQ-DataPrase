@@ -46,6 +46,17 @@ export interface SettingsData {
   analysis_chart_memory: boolean
 }
 
+export interface DataCombination {
+  id: number
+  name: string
+  description: string
+  file_count: number
+  batched_file_count: number
+  unbatched_file_count: number
+  created_at: string
+  updated_at: string
+}
+
 export interface DataFile {
   id: number
   filename: string
@@ -71,6 +82,10 @@ export interface DataFile {
   status_display?: string
   created_at: string
   tags?: string[]
+  combination_id?: number | null
+  combination_name?: string | null
+  batch_no?: string
+  managed_tags?: string[]
 }
 
 export interface DashboardMetrics {
