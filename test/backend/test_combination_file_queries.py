@@ -77,6 +77,67 @@ class CombinationFileQueryTests(APITestCase):
         self.assertNotIn('tags', row)
         self.assertNotIn('managed_tags', row)
 
+    def test_list_serializer_exposes_complete_structured_fields(self):
+        resp = self.client.get('/api/v1/files/', {'include_hidden': 1})
+        self.assertEqual(resp.status_code, 200, resp.data)
+        row = next(item for item in resp.data['results'] if item['id'] == self.a.id)
+        self.assertEqual(set(row), {
+            'id', 'owner', 'filename', 'file_size', 'format_type',
+            'format_type_display', 'file_type', 'file_type_display',
+            'batch_name', 'sub_batch', 'row_count', 'col_count', 'program_name',
+            'product_code', 'source_mtime', 'tags', 'stage', 'data_date',
+            'combination_id', 'combination_name', 'batch_no', 'managed_tags',
+            'is_hidden', 'status', 'status_display', 'created_at', 'updated_at',
+        })
+        self.assertEqual(row['combination_name'], 'gage')
+        self.assertEqual(row['managed_tags'], ['gage', 'gage / BE01-1'])
+
+    def test_list_tags_prefix_is_case_insensitive_and_hides_owner_boundaries(self):
+        self.a.tags = ['Gage', 'Manual']
+        self.a.save(update_fields=['tags'])
+        hidden = self._file('hidden.csv', self.gage, '', ['HiddenOnly'])
+        hidden.is_hidden = True
+        hidden.save(update_fields=['is_hidden'])
+        other = get_user_model().objects.create_user('combo_query_other', password='x')
+        DataFile.objects.create(
+            owner=other, filename='other.csv', file_path='other.csv', file_size=1,
+            format_type='CTA8290D', status='ready', tags=['OtherOnly'],
+        )
+        resp = self.client.post('/api/v1/files/list_tags/', {'prefix': 'gAg'}, format='json')
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertIn('gage', [tag.lower() for tag in resp.data['tags']])
+        self.assertIn('gage / be01-1', [tag.lower() for tag in resp.data['tags']])
+        self.assertIn('gage / be01-1', [tag.lower() for tag in resp.data['managed_tags']])
+        self.assertIn('gage', resp.data['managed_tags'])
+        self.assertNotIn('HiddenOnly', resp.data['tags'])
+        self.assertNotIn('OtherOnly', resp.data['tags'])
+
+    def test_batch_dirs_exposes_combination_dto_and_managed_tags(self):
+        import os
+        import shutil
+        import tempfile
+        from django.test import override_settings
+        media = tempfile.mkdtemp(prefix='combo-query-media-')
+        self.addCleanup(shutil.rmtree, media, ignore_errors=True)
+        with override_settings(MEDIA_ROOT=media):
+            path = os.path.join(media, 'data', self.owner.username, 'batch', 'LOT', 'a.csv')
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'wb') as fh:
+                fh.write(b'x')
+            self.a.file_path = path
+            self.a.file_type = 'batch'
+            self.a.batch_name = 'LOT'
+            self.a.save(update_fields=['file_path', 'file_type', 'batch_name'])
+            resp = self.client.get('/api/v1/batch-dirs/')
+        self.assertEqual(resp.status_code, 200, resp.data)
+        batch = next(item for item in resp.data if item['name'] == 'LOT')
+        row = batch['files'][0]
+        self.assertEqual(row['combination_id'], self.gage.id)
+        self.assertEqual(row['combination_name'], 'gage')
+        self.assertEqual(row['batch_no'], 'BE01-1')
+        self.assertEqual(row['managed_tags'], ['gage', 'gage / BE01-1'])
+        self.assertEqual(batch['files_truncated'], 0)
+
     def test_twenty_manual_tags_do_not_consume_managed_tag_quota(self):
         tags = [f'tag-{index}' for index in range(20)]
         self.a.tags = tags

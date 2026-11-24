@@ -3,21 +3,28 @@
     <el-collapse-item name="source-directories" title="来源批次目录（ZIP / SFTP）">
       <BatchDataTab
         :active-file-id="activeFileId"
+        :combinations="combinations"
         @file-selected="emit('file-selected', $event)"
+        @import-success="emit('import-success')"
+        @combination-created="emit('combination-created', $event)"
       />
     </el-collapse-item>
   </el-collapse>
 </template>
 
 <script setup lang="ts">
+import type { DataCombination } from '../../../../types'
 import BatchDataTab from '../BatchDataTab.vue'
 
 defineProps<{
   activeFileId?: number
+  combinations: DataCombination[]
 }>()
 
 const emit = defineEmits<{
   'file-selected': [id: number]
+  'import-success': []
+  'combination-created': [combination: DataCombination]
 }>()
 </script>
 

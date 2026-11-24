@@ -345,6 +345,68 @@ class CombinationImportTests(APITestCase):
         self.assertEqual(row.batch_no, 'BE01-3')
         self.assertTrue(os.path.exists(resolve_file_path(row.file_path)))
 
+    def test_single_upload_accepts_file_and_files_multipart_keys(self):
+        for index, key in enumerate(('file', 'files')):
+            with self.subTest(key=key):
+                resp = self.client.post('/api/v1/upload/', {
+                    key: SimpleUploadedFile(f'shape-{index}.csv', MIN_CSV),
+                }, format='multipart')
+                self.assertEqual(resp.status_code, 201, resp.data)
+                self.assertEqual(resp.data[0]['filename'], f'shape-{index}.csv')
+
+    def test_import_rejects_invalid_batch_numbers_before_writing(self):
+        invalid = ('bad/value', 'bad\\value', 'bad\x01value', 'x' * 41)
+        for index, value in enumerate(invalid):
+            with self.subTest(value=value):
+                resp = self._upload(f'invalid-{index}.csv', MIN_CSV, batch_no=value)
+                self.assertEqual(resp.status_code, 400, resp.data)
+                self.assertEqual(resp.data['code'], 'validation_error')
+                self.assertFalse(DataFile.objects.filter(filename=f'invalid-{index}.csv').exists())
+                self.assertFalse(os.path.exists(os.path.join(
+                    _user_upload_dir(self.owner, 'single'), f'invalid-{index}.csv')))
+
+    def test_import_rejects_invalid_combination_values_before_writing(self):
+        for index, value in enumerate((0, -1, 'not-an-id')):
+            with self.subTest(value=value):
+                resp = self._upload(f'bad-combo-{index}.csv', MIN_CSV, combination_id=value)
+                self.assertEqual(resp.status_code, 400, resp.data)
+                self.assertFalse(DataFile.objects.filter(filename=f'bad-combo-{index}.csv').exists())
+
+    def test_import_validates_tag_type_count_and_length_before_writing(self):
+        invalid_tags = (
+            '{}', '123', '[1]', '[' + ','.join(f'"tag-{i}"' for i in range(21)) + ']',
+            json.dumps(['x' * 51]),
+        )
+        for index, tags in enumerate(invalid_tags):
+            with self.subTest(tags=tags):
+                resp = self._upload(f'bad-tag-{index}.csv', MIN_CSV, tags=tags)
+                self.assertEqual(resp.status_code, 400, resp.data)
+                self.assertFalse(DataFile.objects.filter(filename=f'bad-tag-{index}.csv').exists())
+        valid = [f'tag-{i}' for i in range(19)] + ['x' * 50]
+        resp = self._upload('tag-boundary.csv', MIN_CSV, tags=json.dumps(valid))
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(len(DataFile.objects.get(filename='tag-boundary.csv').tags), 20)
+
+    def test_json_directory_import_rejects_numeric_batch_number(self):
+        self._write_batch_csv('LOT-NUMERIC', 'a.csv')
+        resp = self.client.post('/api/v1/batch-dirs/import/', {
+            'dir_name': 'LOT-NUMERIC', 'batch_no': 123,
+        }, format='json')
+        self.assertEqual(resp.status_code, 400, resp.data)
+        self.assertFalse(DataFile.objects.filter(filename='a.csv').exists())
+
+    def test_json_directory_import_and_blank_combination_option(self):
+        self._write_batch_csv('LOT-JSON', 'a.csv')
+        resp = self.client.post('/api/v1/batch-dirs/import/', {
+            'dir_name': 'LOT-JSON', 'combination_id': '   ',
+            'batch_no': ' BE01-JSON ', 'tags': ['manual'],
+        }, format='json')
+        self.assertEqual(resp.status_code, 201, resp.data)
+        row = DataFile.objects.get(filename='a.csv')
+        self.assertIsNone(row.combination_id)
+        self.assertEqual(row.batch_no, 'BE01-JSON')
+        self.assertEqual(row.tags, ['manual'])
+
     def test_combine_rejects_other_owners_combination_before_moving(self):
         row = self._make_single()
         source = resolve_file_path(row.file_path)

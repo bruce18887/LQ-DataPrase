@@ -56,11 +56,9 @@ function uniqueTags(tags: string[] | undefined) {
 }
 
 const managedTags = computed(() => uniqueTags(props.row.managed_tags))
-const manualTags = computed(() => {
-  if (!props.showManual) return []
-  const managedKeys = new Set(managedTags.value.map((tag) => tag.toLowerCase()))
-  return uniqueTags(props.row.tags).filter((tag) => !managedKeys.has(tag.toLowerCase()))
-})
+const manualTags = computed(() => (
+  props.showManual ? uniqueTags(props.row.tags) : []
+))
 </script>
 
 <style scoped>

@@ -182,18 +182,30 @@ const roles = [
 
 // 数据库文件被删除后自动清理已失效的角色分配（keep-alive 下组件常驻，
 // 文件列表由父级刷新，这里负责把已不在列表中的 id 置空）
-watch(() => props.files, (list) => {
-  const ids = new Set(list.map(f => f.id))
-  for (const key of Object.keys(roleAssignments.value)) {
-    const id = roleAssignments.value[key]
-    if (id !== null && !ids.has(id)) {
-      roleAssignments.value[key] = null
+watch(
+  [() => props.files, () => props.combinationId],
+  ([list]) => {
+    const ids = new Set(filterReportFiles(list, props.combinationId).map(f => f.id))
+    for (const key of Object.keys(roleAssignments.value)) {
+      const id = roleAssignments.value[key]
+      if (id !== null && !ids.has(id)) {
+        roleAssignments.value[key] = null
+      }
     }
-  }
+    analysisResult.value = null
+  },
+  { immediate: true },
+)
+
+const scopedRoleAssignments = computed(() => {
+  const ids = new Set(filterReportFiles(props.files, props.combinationId).map(file => file.id))
+  return Object.fromEntries(Object.entries(roleAssignments.value).map(([role, id]) => [
+    role, id !== null && ids.has(id) ? id : null,
+  ]))
 })
 
 const assignedFileIds = computed(() => {
-  return Object.values(roleAssignments.value).filter((id): id is number => id !== null)
+  return Object.values(scopedRoleAssignments.value).filter((id): id is number => id !== null)
 })
 
 const partialCount = computed(() => {
@@ -254,7 +266,9 @@ async function generate() {
   }
   loading.value = true
   try {
-    const resp = await buyoffApi.generateForm(assignedFileIds.value, onlyBin1.value, roleAssignments.value)
+    const resp = await buyoffApi.generateForm(
+      assignedFileIds.value, onlyBin1.value, scopedRoleAssignments.value,
+    )
     const fname = extractFilenameFromContentDisposition(
       (resp.headers as Record<string, string>)?.['content-disposition'],
     ) ?? 'Buyoff_Form.xlsx'

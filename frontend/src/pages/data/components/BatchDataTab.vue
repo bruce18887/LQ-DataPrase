@@ -37,7 +37,9 @@
         :key="dir.name"
         :dir="dir"
         :importing="importingDir === dir.name"
+        :combinations="combinations"
         @import="importDir"
+        @combination-created="addCombination"
         @delete="deleteDir"
       />
     </template>
@@ -72,6 +74,9 @@
             <ArrowRight />
           </el-icon>
           <span class="batch-name">📦 {{ group.name }}</span>
+          <span class="batch-combination-status" data-testid="batch-combination-status">
+            {{ groupCombinationStatus(group) }}
+          </span>
           <span class="batch-count">{{ groupFileCount(group) }} 个文件</span>
           <!-- 明细封顶 500 条时的如实说明（大小/行数只覆盖已列出的明细，不冒充全量） -->
           <span v-if="group.truncated" class="batch-cap-hint" data-batch-files-cap>
@@ -152,6 +157,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { Upload, Delete, Search, ArrowRight, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { datafilesApi, type BatchDirInfo } from '../../../api/datafiles'
+import type { DataCombination } from '../../../types'
 import { useFilesStore } from '../../../stores/files'
 import { formatSize } from '../../../utils/format'
 import { groupStats, groupFilesBySub, filterBatchGroups, groupFileCount, groupFilesCapHint, sumFileCount, type BatchGroup } from '../composables/useBatchGroupStats'
@@ -161,11 +167,14 @@ import UnregisteredDirCard from './UnregisteredDirCard.vue'
 
 const props = defineProps<{
   activeFileId?: number
+  combinations: DataCombination[]
 }>()
 
 const emit = defineEmits<{
   'file-selected': [id: number]
   'total-change': [total: number]
+  'import-success': []
+  'combination-created': [combination: DataCombination]
 }>()
 
 const filesStore = useFilesStore()
@@ -192,6 +201,12 @@ const batchGroups = computed<BatchGroup[]>(() =>
     return { name: d.name, files: d.files, subBatchNames: [...subs].sort(), truncated: d.files_truncated ?? 0 }
   }),
 )
+
+function groupCombinationStatus(group: BatchGroup) {
+  const names = new Set(group.files.map(file => file.combination_name || ''))
+  if (names.size > 1) return '多个组合'
+  return [...names][0] || '未分组'
+}
 
 const filteredBatchGroups = computed<BatchGroup[]>(() => filterBatchGroups(batchGroups, batchSearch.value))
 
@@ -269,13 +284,25 @@ async function loadBatchDirs() {
 
 // ── 导入/删除目录 ───────────────────────────────────────────────────
 
-async function importDir(dir: BatchDirInfo) {
-  importingDir.value = dir.name
+function addCombination(combination: DataCombination) {
+  emit('combination-created', combination)
+}
+
+async function importDir(payload: {
+  dir: BatchDirInfo
+  combinationId: number | null
+  batchNo?: string
+}) {
+  importingDir.value = payload.dir.name
   try {
-    await datafilesApi.importBatchDir(dir.name)
-    ElMessage.success(`批次 "${dir.name}" 已导入`)
+    await datafilesApi.importBatchDir(payload.dir.name, {
+      combinationId: payload.combinationId,
+      batchNo: payload.batchNo,
+    })
+    ElMessage.success(`批次 "${payload.dir.name}" 已导入`)
     await loadBatchDirs()
     filesStore.notifyFilesChanged()
+    emit('import-success')
   } catch {
     // 错误 toast 由 axios 拦截器统一弹出
   } finally {
@@ -466,6 +493,16 @@ defineExpose({ loadBatchDirs })
   font-size: var(--p-fs-base);
   font-weight: 600;
   color: var(--text);
+}
+
+.batch-combination-status {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--p-radius-sm);
+  background: var(--bg);
+  color: var(--text-2);
+  font-size: var(--p-fs-micro);
+  white-space: nowrap;
 }
 
 .batch-count {

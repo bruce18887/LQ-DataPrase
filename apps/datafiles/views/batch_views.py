@@ -19,13 +19,11 @@ from apps.datafiles.utils import extract_data_date, extract_stage, resolve_file_
 
 from ._helpers import (
     _is_data_csv,
-    _refresh_existing_import_row,
-    _register_file,
     _safe_batch_dir,
     _user_upload_dir,
-    import_path_key,
     parse_file_meta,
 )
+from .import_coordinator import import_or_refresh_file, import_path_lock
 from .import_options import parse_import_options
 
 logger = logging.getLogger(__name__)
@@ -171,50 +169,31 @@ class BatchDirImportView(APIView):
             return error_response(
                 'batch_dir_not_found', f'目录 "{dir_name}" 不存在', 404)
 
-        # Get already-registered file paths for this batch (skip duplicates).
-        # Resolve stored relative paths and apply OS case semantics on both
-        # sides so Windows case-only renames still match existing rows.
-        existing_rows = {
-            import_path_key(row.file_path): row
-            for row in DataFile.objects.filter(
-                owner=request.user, file_type='batch', batch_name=dir_name,
-            )
-        }
-
         created = []
-        for root, _dirs, files in os.walk(dir_path):
-            for f in files:
-                if not _is_data_csv(f):
-                    continue
-                fp = os.path.join(root, f)
-                normalized = import_path_key(fp)
-                # 提取子批次名（相对路径的第一级目录）
-                rel_path = os.path.relpath(root, dir_path)
-                sub_batch = rel_path if rel_path != '.' else ''
-                # 全量解析放在事务外：解析一只 275MB 文件实测 3.2s，若整批
-                # 包在同一个 atomic 里，SQLite 全局写锁会被持有十几秒。
-                parsed = parse_file_meta(fp)
-                if normalized in existing_rows:
-                    _refresh_existing_import_row(
-                        existing_rows[normalized], combination,
-                        batch_no, manual_tags, parsed,
-                    )
-                    continue
-                try:
-                    with transaction.atomic():  # 只包 INSERT，毫秒级
-                        df = _register_file(
+        # The directory lock covers scan/registration; parsing remains outside
+        # each short DB transaction, so unrelated writes are not held up.
+        with import_path_lock(request.user, dir_path):
+            for root, _dirs, files in os.walk(dir_path):
+                for f in files:
+                    if not _is_data_csv(f):
+                        continue
+                    fp = os.path.join(root, f)
+                    rel_path = os.path.relpath(root, dir_path)
+                    sub_batch = rel_path if rel_path != '.' else ''
+                    try:
+                        df = import_or_refresh_file(
                             request.user, fp, 'batch', dir_name, sub_batch,
-                            parsed=parsed, combination=combination,
+                            parsed=parse_file_meta(fp), combination=combination,
                             batch_no_override=batch_no, tags=manual_tags,
                         )
-                        created.append(df)
-                    existing_rows[normalized] = df
-                except Exception:
-                    logger.warning(
-                        'BatchDirImportView: failed to register %s', fp,
-                        exc_info=True,
-                    )
-                    continue
+                        if df is not None and getattr(df, '_import_created', False):
+                            created.append(df)
+                    except Exception:
+                        logger.warning(
+                            'BatchDirImportView: failed to register %s', fp,
+                            exc_info=True,
+                        )
+                        continue
 
         return Response(
             DataFileSerializer(created, many=True).data,

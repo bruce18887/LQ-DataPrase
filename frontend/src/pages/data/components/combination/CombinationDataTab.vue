@@ -30,7 +30,7 @@
     <div class="combination-existing-action">
       <div class="combination-existing-copy">
         <strong>存量文件归组</strong>
-        <span>将全部 {{ ungroupedFiles.length }} 个未分组文件归入同一组合；批次号留空时保留原值。</span>
+        <span>从 {{ ungroupedFiles.length }} 个未分组文件中精确选择；批次号留空时保留原值。</span>
       </div>
       <el-button
         :disabled="ungroupedFiles.length === 0"
@@ -76,7 +76,10 @@
 
     <BatchDirectorySection
       :active-file-id="activeFileId"
+      :combinations="combinations"
       @file-selected="emit('file-selected', $event)"
+      @import-success="loadAll"
+      @combination-created="addCreatedCombination"
     />
 
     <CombinationEditDialog
@@ -86,10 +89,10 @@
       @submit="saveCombination"
     />
 
-    <ImportOptionsDialog
+    <ExistingAssignmentDialog
       v-model:visible="importDialogVisible"
+      :files="ungroupedFiles"
       :combinations="combinations"
-      :selected-count="ungroupedFiles.length"
       @submit="assignExistingFiles"
     />
   </div>
@@ -102,13 +105,12 @@ import { combinationsApi } from '../../../../api/combinations'
 import { datafilesApi } from '../../../../api/datafiles'
 import { useFilesStore } from '../../../../stores/files'
 import type { DataCombination, DataFile } from '../../../../types'
-import type { CombinationImportPayload } from '../../composables/useCombinationSelection'
 import FileUploadArea from '../FileUploadArea.vue'
-import ImportOptionsDialog from '../ImportOptionsDialog.vue'
 import CombinationToolbar from './CombinationToolbar.vue'
 import CombinationEditDialog from './CombinationEditDialog.vue'
 import CombinationFileGroups from './CombinationFileGroups.vue'
 import BatchDirectorySection from './BatchDirectorySection.vue'
+import ExistingAssignmentDialog from './ExistingAssignmentDialog.vue'
 
 const props = withDefaults(defineProps<{
   activeFileId?: number
@@ -158,10 +160,22 @@ async function loadAll() {
   try {
     const [comboResp, fileResp] = await Promise.all([
       combinationsApi.list(),
-      datafilesApi.listFiles({ page_size: 10000, include_hidden: 1 }),
+      datafilesApi.listFiles({ page: 1, page_size: 100, include_hidden: 1, ordering: 'id' }),
     ])
     combinations.value = Array.isArray(comboResp.data) ? comboResp.data : []
-    files.value = fileResp.data.results ?? fileResp.data
+    const firstBody = fileResp.data as { results?: DataFile[]; next?: string | null }
+    const loaded = [...(firstBody.results ?? [])]
+    let next = firstBody.next ?? null
+    while (next) {
+      const response = await datafilesApi.listFiles({
+        page: Number(new URL(next, window.location.origin).searchParams.get('page')) || undefined,
+        page_size: 100, include_hidden: 1, ordering: 'id',
+      })
+      const body = response.data as { results?: DataFile[]; next?: string | null }
+      loaded.push(...(body.results ?? []))
+      next = body.next ?? null
+    }
+    files.value = loaded
     if (activeId.value != null && !combinations.value.some((item) => item.id === activeId.value)) {
       activeId.value = null
     }
@@ -177,6 +191,12 @@ function openReport(kind: 'gage' | 'buyoff') {
     combinationName: activeCombination.value?.name ?? null,
     fileIds: visibleFiles.value.map(file => file.id),
   })
+}
+
+function addCreatedCombination(combination: DataCombination) {
+  if (!combinations.value.some(item => item.id === combination.id)) {
+    combinations.value = [...combinations.value, combination]
+  }
 }
 
 function openCreate() {
@@ -242,17 +262,21 @@ async function openExistingAssignment() {
   if (ungroupedFiles.value.length > 0) importDialogVisible.value = true
 }
 
-async function assignExistingFiles(payload: CombinationImportPayload) {
-  if (assigningExisting.value || ungroupedFiles.value.length === 0) return
+async function assignExistingFiles(payload: {
+  fileIds: number[]
+  combinationId: number
+  batchNo?: string
+}) {
+  if (assigningExisting.value || payload.fileIds.length === 0) return
   assigningExisting.value = true
   try {
     await datafilesApi.assignCombination({
-      fileIds: ungroupedFiles.value.map(file => file.id),
+      fileIds: payload.fileIds,
       combinationId: payload.combinationId,
       ...(payload.batchNo !== undefined ? { batchNo: payload.batchNo } : {}),
     })
     importDialogVisible.value = false
-    ElMessage.success(`已将 ${ungroupedFiles.value.length} 个未分组文件加入组合`)
+    ElMessage.success(`已将 ${payload.fileIds.length} 个未分组文件加入组合`)
     await loadAll()
     filesStore.notifyFilesChanged()
   } catch {

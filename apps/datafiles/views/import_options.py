@@ -23,6 +23,8 @@ def resolve_owned_combination(request, raw_id, required=False):
         combination_id = int(raw_id)
     except (TypeError, ValueError):
         return None, error_response('validation_error', 'combination_id 必须是整数')
+    if combination_id <= 0:
+        return None, error_response('validation_error', 'combination_id 必须是正整数')
     try:
         combination = DataCombination.objects.get(
             pk=combination_id, owner=request.user,

@@ -4,7 +4,6 @@ import logging
 import os
 import re
 import shutil
-import time
 from datetime import datetime, time as dtime
 
 from django.db import transaction
@@ -31,7 +30,6 @@ from apps.datafiles.utils import store_file_path
 from apps.datafiles.visibility import apply_visibility
 
 from ._helpers import (
-    _register_file,
     _register_zip_batch,
     _user_upload_dir,
     _parse_last_modified,
@@ -41,6 +39,7 @@ from ._helpers import (
     _UNSAFE_NAME_CHARS,
 )
 from .admin_scope import scoped_files
+from .import_coordinator import import_or_refresh_file, import_path_lock
 from .import_options import parse_combine_options, parse_import_options
 
 logger = logging.getLogger(__name__)
@@ -115,6 +114,8 @@ class DataFileViewSet(viewsets.ModelViewSet):
                 combination_id = int(combination_id)
             except (TypeError, ValueError):
                 raise ValidationError({'combination_id': '必须是整数'})
+            if combination_id <= 0:
+                raise ValidationError({'combination_id': '必须是正整数'})
             queryset = queryset.filter(combination_id=combination_id)
 
         batch_no = (self.request.query_params.get('batch_no') or '').strip()
@@ -574,24 +575,19 @@ class FileUploadView(APIView):
                 continue
 
             file_path = os.path.join(upload_dir, base_name)
-
-            # Handle filename collision
-            if os.path.exists(file_path):
-                ts = int(time.time())
-                name, _ext = os.path.splitext(base_name)
-                file_path = os.path.join(upload_dir, f"{name}_{ts}{_ext}")
-
-            # Save uploaded file
-            with open(file_path, 'wb+') as dest:
-                for chunk in uploaded_file.chunks():
-                    dest.write(chunk)
-
-            df = _register_file(
-                request.user, file_path, 'single',
-                source_mtime=browser_mtime, combination=combination,
-                batch_no_override=batch_no, tags=manual_tags,
-            )
-            created.append(df)
+            # Same normalized path means the same DataFile on every re-upload.
+            with import_path_lock(request.user, file_path):
+                with open(file_path, 'wb+') as dest:
+                    for chunk in uploaded_file.chunks():
+                        dest.write(chunk)
+                df = import_or_refresh_file(
+                    request.user, file_path, 'single',
+                    source_mtime=browser_mtime, combination=combination,
+                    batch_no_override=batch_no, tags=manual_tags,
+                    lock_target=False,
+                )
+            if df is not None:
+                created.append(df)
 
         return Response(
             DataFileSerializer(created, many=True).data,

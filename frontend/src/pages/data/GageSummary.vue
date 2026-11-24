@@ -146,29 +146,31 @@ const siteSlots = ref<SiteSlot[]>([
 
 // 数据库文件被删除后自动清理已失效的槽位分配（keep-alive 下组件常驻，
 // 文件列表由父级刷新，这里负责把已不在列表中的 fileId 置空）
-watch(() => props.files, (list) => {
-  const ids = new Set(list.map(f => f.id))
-  for (const slot of siteSlots.value) {
-    if (slot.fileId !== null && !ids.has(slot.fileId)) {
-      slot.fileId = null
+watch(
+  [() => props.files, () => props.combinationId],
+  ([list]) => {
+    const ids = new Set(filterReportFiles(list, props.combinationId).map(f => f.id))
+    for (const slot of siteSlots.value) {
+      if (slot.fileId !== null && !ids.has(slot.fileId)) {
+        slot.fileId = null
+      }
     }
-  }
-})
+  },
+  { immediate: true },
+)
 
 const assignedSlots = computed(() => {
+  const scoped = filterReportFiles(props.files, props.combinationId)
+  const ids = new Set(scoped.map(file => file.id))
   return siteSlots.value
-    .filter(slot => slot.fileId !== null)
+    .filter(slot => slot.fileId !== null && ids.has(slot.fileId))
     .map(slot => ({
       ...slot,
-      fileName: props.files.find(f => f.id === slot.fileId)?.filename || '-',
+      fileName: scoped.find(f => f.id === slot.fileId)?.filename || '-',
     }))
 })
 
-const assignedFileIds = computed(() => {
-  return siteSlots.value
-    .map(slot => slot.fileId)
-    .filter((id): id is number => id !== null)
-})
+const assignedFileIds = computed(() => assignedSlots.value.map(slot => slot.fileId as number))
 
 /**
  * 槽位可选文件：先按当前组合收敛。同一文件可能含多个工位，允许在多个槽位复用

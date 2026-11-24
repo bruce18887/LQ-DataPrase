@@ -5,7 +5,8 @@
       <span class="batch-count">{{ dir.file_count }} 个文件</span>
       <span class="batch-size">{{ formatSize(dir.total_size) }}</span>
       <div style="flex:1" />
-      <el-button size="small" type="success" @click="emit('import', dir)" :loading="importing">
+      <el-button size="small" data-testid="sftp-new-combination" @click="createVisible = true">新建组合</el-button>
+      <el-button size="small" type="success" @click="optionsVisible = true" :loading="importing">
         <el-icon><Upload /></el-icon> 导入
       </el-button>
       <el-button size="small" type="danger" plain @click="emit('delete', dir)">
@@ -21,23 +22,55 @@
         共 {{ dir.file_count }} 个文件，仅显示前 {{ dir.preview_files.length }} 个
       </div>
     </div>
+    <ImportOptionsDialog
+      v-model:visible="optionsVisible"
+      :combinations="combinations"
+      :selected-count="dir.file_count"
+      @submit="submitImport"
+    />
+    <CombinationEditDialog
+      v-model:visible="createVisible"
+      mode="create"
+      @submit="createCombination"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import { Upload, Delete } from '@element-plus/icons-vue'
+import { combinationsApi } from '../../../api/combinations'
 import type { BatchDirInfo } from '../../../api/datafiles'
+import type { DataCombination } from '../../../types'
 import { formatSize } from '../../../utils/format'
+import ImportOptionsDialog from './ImportOptionsDialog.vue'
+import CombinationEditDialog from './combination/CombinationEditDialog.vue'
 
-defineProps<{
+const props = defineProps<{
   dir: BatchDirInfo
   importing: boolean
+  combinations: DataCombination[]
 }>()
 
 const emit = defineEmits<{
-  import: [dir: BatchDirInfo]
+  import: [payload: { dir: BatchDirInfo; combinationId: number | null; batchNo?: string }]
+  'combination-created': [combination: DataCombination]
   delete: [dir: BatchDirInfo]
 }>()
+
+const optionsVisible = ref(false)
+const createVisible = ref(false)
+
+function submitImport(payload: { combinationId: number | null; batchNo?: string }) {
+  emit('import', { dir: props.dir, ...payload })
+  optionsVisible.value = false
+}
+
+async function createCombination(name: string) {
+  const { data } = await combinationsApi.create({ name })
+  emit('combination-created', data)
+  createVisible.value = false
+}
 </script>
 
 <style scoped>
