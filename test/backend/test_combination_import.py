@@ -4,6 +4,7 @@ import os
 import shutil
 import tempfile
 import zipfile
+from unittest import skipUnless
 from unittest.mock import patch
 
 import pandas as pd
@@ -13,6 +14,7 @@ from django.test import override_settings
 from rest_framework.test import APITestCase
 
 from apps.datafiles.models import DataCombination, DataFile
+from apps.datafiles.serializers import DataFileSerializer
 from apps.datafiles.utils import resolve_file_path
 from apps.datafiles.views import _helpers, _user_upload_dir
 
@@ -130,6 +132,85 @@ class CombinationImportTests(APITestCase):
         self.assertEqual(row.batch_no, '')
         self.assertEqual(resp.data[0]['managed_tags'], ['gage'])
 
+    def test_new_zip_row_prefers_explicit_batch_over_parser_lot_id(self):
+        parsed = (
+            'CTA8290D', pd.DataFrame({'col1': [1], 'col2': [2]}),
+            {'lot_id': 'BE01-PARSED'}, 1, 2, 'PTS',
+        )
+        with patch.object(_helpers, 'parse_file_meta', return_value=parsed):
+            resp = self._upload(
+                'LOT-EXPLICIT.zip', zip_bytes({'a.csv': MIN_CSV}),
+                combination_id=str(self.combo.id),
+                batch_no='BE01-EXPLICIT',
+            )
+        self.assertEqual(resp.status_code, 201, resp.data)
+        row = DataFile.objects.get(filename='a.csv')
+        self.assertEqual(row.batch_no, 'BE01-EXPLICIT')
+        self.assertEqual(resp.data[0]['managed_tags'], [
+            'gage', 'gage / BE01-EXPLICIT',
+        ])
+
+    def test_existing_zip_row_backfills_empty_batch_from_new_parser_lot_id(self):
+        parsed_without_lot = (
+            'CTA8290D', pd.DataFrame({'col1': [1], 'col2': [2]}),
+            {}, 1, 2, 'PTS',
+        )
+        with patch.object(_helpers, 'parse_file_meta', return_value=parsed_without_lot):
+            first = self._upload(
+                'LOT-BACKFILL.zip', zip_bytes({'a.csv': MIN_CSV}),
+                combination_id=str(self.combo.id),
+            )
+        self.assertEqual(first.status_code, 201, first.data)
+        row = DataFile.objects.get(filename='a.csv')
+        self.assertEqual(row.batch_no, '')
+        self.assertEqual(first.data[0]['managed_tags'], ['gage'])
+
+        parsed_with_lot = (
+            'CTA8290D', pd.DataFrame({'col1': [1], 'col2': [2]}),
+            {'lot_id': 'BE01-BACKFILL'}, 1, 2, 'PTS',
+        )
+        with patch.object(_helpers, 'parse_file_meta', return_value=parsed_with_lot):
+            second = self._upload(
+                'LOT-BACKFILL.zip', zip_bytes({'a.csv': MIN_CSV}),
+                combination_id=str(self.combo.id),
+            )
+        self.assertEqual(second.status_code, 201, second.data)
+        row.refresh_from_db()
+        self.assertEqual(row.batch_no, 'BE01-BACKFILL')
+        self.assertEqual(DataFileSerializer(row).data['managed_tags'], [
+            'gage', 'gage / BE01-BACKFILL',
+        ])
+
+    def test_existing_zip_row_keeps_batch_when_parser_lot_id_changes(self):
+        parsed_original = (
+            'CTA8290D', pd.DataFrame({'col1': [1], 'col2': [2]}),
+            {'lot_id': 'BE01-ORIGINAL'}, 1, 2, 'PTS',
+        )
+        with patch.object(_helpers, 'parse_file_meta', return_value=parsed_original):
+            first = self._upload(
+                'LOT-KEEP.zip', zip_bytes({'a.csv': MIN_CSV}),
+                combination_id=str(self.combo.id),
+            )
+        self.assertEqual(first.status_code, 201, first.data)
+        row = DataFile.objects.get(filename='a.csv')
+        self.assertEqual(row.batch_no, 'BE01-ORIGINAL')
+
+        parsed_changed = (
+            'CTA8290D', pd.DataFrame({'col1': [1], 'col2': [2]}),
+            {'lot_id': 'BE01-CHANGED'}, 1, 2, 'PTS',
+        )
+        with patch.object(_helpers, 'parse_file_meta', return_value=parsed_changed):
+            second = self._upload(
+                'LOT-KEEP.zip', zip_bytes({'a.csv': MIN_CSV}),
+                combination_id=str(self.combo.id),
+            )
+        self.assertEqual(second.status_code, 201, second.data)
+        row.refresh_from_db()
+        self.assertEqual(row.batch_no, 'BE01-ORIGINAL')
+        self.assertEqual(DataFileSerializer(row).data['managed_tags'], [
+            'gage', 'gage / BE01-ORIGINAL',
+        ])
+
     def test_reupload_updates_combination_and_merges_manual_tags(self):
         first = self._upload('LOT-R.zip', zip_bytes({'a.csv': MIN_CSV}), tags='["old"]')
         self.assertEqual(first.status_code, 201, first.data)
@@ -142,6 +223,62 @@ class CombinationImportTests(APITestCase):
         row = DataFile.objects.get(filename='a.csv')
         self.assertEqual(row.combination_id, self.combo.id)
         self.assertEqual({tag.lower() for tag in row.tags}, {'old', 'new'})
+
+    @skipUnless(os.name == 'nt', 'Windows paths are case-insensitive')
+    def test_zip_reimport_matches_filename_case_and_refreshes_metadata(self):
+        first = self._upload(
+            'LOT-CASE.zip', zip_bytes({'a.csv': MIN_CSV}), tags='["old"]')
+        self.assertEqual(first.status_code, 201, first.data)
+        second_combo = DataCombination.objects.create(owner=self.owner, name='buyoff')
+        second = self._upload(
+            'LOT-CASE.zip', zip_bytes({'A.csv': MIN_CSV}),
+            combination_id=str(second_combo.id),
+            batch_no='BE01-CASE', tags='["new"]',
+        )
+        self.assertEqual(second.status_code, 201, second.data)
+        self.assertEqual(DataFile.objects.filter(batch_name='LOT-CASE').count(), 1)
+        row = DataFile.objects.get(batch_name='LOT-CASE')
+        self.assertEqual(row.combination_id, second_combo.id)
+        self.assertEqual(row.batch_no, 'BE01-CASE')
+        self.assertEqual({tag.lower() for tag in row.tags}, {'old', 'new'})
+        self.assertEqual(DataFileSerializer(row).data['managed_tags'], [
+            'buyoff', 'buyoff / BE01-CASE',
+        ])
+
+    def test_zip_with_duplicate_normalized_target_registers_one_row(self):
+        resp = self._upload(
+            'LOT-DUP.zip', zip_bytes({'a.csv': MIN_CSV, './a.csv': MIN_CSV}),
+            combination_id=str(self.combo.id),
+        )
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(len(resp.data), 1)
+        self.assertEqual(DataFile.objects.filter(batch_name='LOT-DUP').count(), 1)
+
+    @skipUnless(os.name == 'nt', 'Windows paths are case-insensitive')
+    def test_batch_dir_reimport_matches_filename_case_and_refreshes_metadata(self):
+        path = self._write_batch_csv('LOT-DIR-CASE', 'a.csv')
+        first = self.client.post('/api/v1/batch-dirs/import/', {
+            'dir_name': 'LOT-DIR-CASE', 'tags': json.dumps(['old']),
+        }, format='json')
+        self.assertEqual(first.status_code, 201, first.data)
+        os.rename(path, os.path.join(os.path.dirname(path), 'A.csv'))
+
+        second_combo = DataCombination.objects.create(owner=self.owner, name='buyoff')
+        second = self.client.post('/api/v1/batch-dirs/import/', {
+            'dir_name': 'LOT-DIR-CASE',
+            'combination_id': second_combo.id,
+            'batch_no': 'BE01-DIR-CASE',
+            'tags': json.dumps(['new']),
+        }, format='json')
+        self.assertEqual(second.status_code, 201, second.data)
+        self.assertEqual(DataFile.objects.filter(batch_name='LOT-DIR-CASE').count(), 1)
+        row = DataFile.objects.get(batch_name='LOT-DIR-CASE')
+        self.assertEqual(row.combination_id, second_combo.id)
+        self.assertEqual(row.batch_no, 'BE01-DIR-CASE')
+        self.assertEqual({tag.lower() for tag in row.tags}, {'old', 'new'})
+        self.assertEqual(DataFileSerializer(row).data['managed_tags'], [
+            'buyoff', 'buyoff / BE01-DIR-CASE',
+        ])
 
     def test_batch_dir_import_and_reimport_update_metadata_without_duplicates(self):
         self._write_batch_csv('LOT-DIR', 'a.csv')

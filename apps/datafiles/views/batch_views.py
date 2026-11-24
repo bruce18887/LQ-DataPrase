@@ -23,6 +23,7 @@ from ._helpers import (
     _register_file,
     _safe_batch_dir,
     _user_upload_dir,
+    import_path_key,
     parse_file_meta,
 )
 from .import_options import parse_import_options
@@ -171,12 +172,10 @@ class BatchDirImportView(APIView):
                 'batch_dir_not_found', f'目录 "{dir_name}" 不存在', 404)
 
         # Get already-registered file paths for this batch (skip duplicates).
-        # normpath + resolve_file_path both sides: DB stores relative paths
-        # (data/<user>/...) while os.walk yields absolute disk paths — without
-        # resolving, the set diff never matches and re-import creates dupes.
-        # Mirrors BatchDirListView registered_files normalization above.
+        # Resolve stored relative paths and apply OS case semantics on both
+        # sides so Windows case-only renames still match existing rows.
         existing_rows = {
-            os.path.normpath(resolve_file_path(row.file_path)): row
+            import_path_key(row.file_path): row
             for row in DataFile.objects.filter(
                 owner=request.user, file_type='batch', batch_name=dir_name,
             )
@@ -188,7 +187,7 @@ class BatchDirImportView(APIView):
                 if not _is_data_csv(f):
                     continue
                 fp = os.path.join(root, f)
-                normalized = os.path.normpath(fp)
+                normalized = import_path_key(fp)
                 # 提取子批次名（相对路径的第一级目录）
                 rel_path = os.path.relpath(root, dir_path)
                 sub_batch = rel_path if rel_path != '.' else ''
@@ -209,6 +208,7 @@ class BatchDirImportView(APIView):
                             batch_no_override=batch_no, tags=manual_tags,
                         )
                         created.append(df)
+                    existing_rows[normalized] = df
                 except Exception:
                     logger.warning(
                         'BatchDirImportView: failed to register %s', fp,
