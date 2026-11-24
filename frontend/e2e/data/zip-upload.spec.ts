@@ -1,11 +1,11 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import path from 'node:path'
 import os from 'node:os'
 import fs from 'node:fs'
 import { gotoApp } from '../helpers/nav'
 import { uploadFile } from '../helpers/upload'
 import { makeZip } from '../helpers/zip'
-import { cleanupQuiet, deleteBatchQuiet } from '../helpers/cleanup'
+import { cleanupQuiet, deleteBatchQuiet, deleteFilesByNameQuiet } from '../helpers/cleanup'
 
 /** 最小可解析 CTA8290D CSV（marker + 表头/单位/下限/上限 + 数据行） */
 const MIN_CSV = [
@@ -22,7 +22,7 @@ const MIN_CSV = [
 ].join('\n')
 
 /** 批次区已从文件列表 Tab 独立为「组合数据」Tab */
-async function gotoBatchTab(page: import('@playwright/test').Page) {
+async function gotoBatchTab(page: Page) {
   const batchTab = page.locator('.tabs-nav .tab-btn').filter({ hasText: '组合数据' })
   await batchTab.click()
   await expect(page.locator('.tab-btn.active')).toContainText('组合数据')
@@ -31,6 +31,61 @@ async function gotoBatchTab(page: import('@playwright/test').Page) {
     await collapseHeader.click()
   }
   await expect(collapseHeader).toHaveAttribute('aria-expanded', 'true')
+}
+
+async function gotoCombinationTab(page: Page) {
+  await page.locator('.tabs-nav .tab-btn').filter({ hasText: '组合数据' }).click()
+  await expect(page.locator('.tab-btn.active')).toContainText('组合数据')
+  await expect(page.getByTestId('combination-upload').getByTestId('file-upload-area')).toBeVisible()
+}
+
+async function createCombination(page: Page, name: string): Promise<number> {
+  return page.evaluate(async (comboName) => {
+    const token = localStorage.getItem('access_token')
+    const response = await fetch('/api/v1/combinations/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ name: comboName }),
+    })
+    if (!response.ok) throw new Error(`创建组合失败：${response.status} ${await response.text()}`)
+    return (await response.json()).id as number
+  }, name)
+}
+
+async function deleteCombinationQuiet(page: Page, id: number | null) {
+  if (id == null) return
+  await page.evaluate(async (comboId) => {
+    const token = localStorage.getItem('access_token')
+    await fetch(`/api/v1/combinations/${comboId}/`, {
+      method: 'DELETE',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+  }, id)
+}
+
+async function selectCombination(page: Page, name: string) {
+  await page.getByTestId('combination-select').click()
+  await page.locator('.dp-combination-select-popper .el-select-dropdown__item')
+    .filter({ hasText: name }).click()
+  await expect(page.getByTestId('combination-current-name')).toHaveText(name)
+}
+
+async function listUngroupedIds(page: Page): Promise<number[]> {
+  return page.evaluate(async () => {
+    const token = localStorage.getItem('access_token')
+    const response = await fetch('/api/v1/files/?page_size=10000&include_hidden=1', {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+    if (!response.ok) throw new Error(`读取未分组文件失败：${response.status}`)
+    const body = await response.json()
+    const rows: Array<{ id: number; combination_id: number | null }> = Array.isArray(body)
+      ? body
+      : body.results
+    return rows.filter((row) => row.combination_id == null).map((row) => row.id)
+  })
 }
 
 test.describe('ZIP 压缩包上传：自动解析为批次数据', { tag: ['@p2', '@data'] }, () => {
@@ -135,6 +190,91 @@ test.describe('ZIP 压缩包上传：自动解析为批次数据', { tag: ['@p2'
       await expect(page.getByText(/不是 CSV 或 ZIP/)).toBeVisible({ timeout: 10_000 })
     } finally {
       cleanupQuiet(tmpPath)
+    }
+  })
+
+  test('ZIP 导入到组合后显示组合与批次标签', async ({ page }) => {
+    await gotoApp(page, '/data')
+    const name = `e2e_combo_zip_${Date.now()}`
+    const zipBase = `e2e_combo_zip_${Date.now()}`
+    const zipPath = path.join(os.tmpdir(), `${zipBase}.zip`)
+    const batchNo = 'BE01-2608130015'
+    let combinationId: number | null = null
+
+    try {
+      combinationId = await createCombination(page, name)
+      makeZip(zipPath, [{ name: 'root.csv', content: MIN_CSV }])
+      await gotoCombinationTab(page)
+      await selectCombination(page, name)
+      await expect(page.getByTestId('combination-upload')).toBeVisible()
+      await page.getByTestId('import-batch-no').fill(batchNo)
+      await page.getByTestId('combination-upload').locator('input[type=file]').setInputFiles(zipPath)
+
+      const files = page.getByTestId('combination-files')
+      await expect(files).toContainText('root.csv', { timeout: 60_000 })
+      const row = files.locator('.el-table__row').filter({ hasText: 'root.csv' })
+      await expect(row.getByTestId('managed-tag')).toHaveText([
+        name,
+        `${name} / ${batchNo}`,
+      ])
+    } finally {
+      await deleteBatchQuiet(page, zipBase)
+      cleanupQuiet(zipPath)
+      await deleteCombinationQuiet(page, combinationId)
+    }
+  })
+
+  test('存量归组省略空批次号并将未分组文件加入组合', async ({ page }) => {
+    await gotoApp(page, '/data')
+    const prefix = `e2e_combo_existing_${Date.now()}`
+    const comboName = `${prefix}_combo`
+    const filename = `${prefix}.csv`
+    const csvPath = path.join(os.tmpdir(), filename)
+    let combinationId: number | null = null
+    fs.writeFileSync(csvPath, MIN_CSV)
+
+    try {
+      await page.locator('button').filter({ hasText: '上传文件' }).click()
+      await uploadFile(page, csvPath)
+      await expect(page.getByText(`${filename} 上传成功`, { exact: true }))
+        .toBeVisible({ timeout: 60_000 })
+
+      combinationId = await createCombination(page, comboName)
+      await gotoCombinationTab(page)
+      const ungroupedIds = await listUngroupedIds(page)
+      expect(ungroupedIds.length).toBeGreaterThan(0)
+      const existingButton = page.getByTestId('combination-existing')
+      await expect(existingButton).toContainText(`存量归组（${ungroupedIds.length}）`)
+      await existingButton.click()
+
+      const dialog = page.locator('.el-dialog')
+      await expect(dialog).toBeVisible()
+      await expect(dialog).toContainText(`将选中的 ${ungroupedIds.length} 个文件归入组合`)
+      await dialog.getByTestId('import-combination').click()
+      await page.getByRole('option', { name: comboName, exact: true }).click()
+      await expect(dialog.getByTestId('import-combination')).toContainText(comboName)
+
+      const assignRequest = page.waitForRequest((request) =>
+        request.method() === 'POST' && request.url().endsWith('/files/assign_combination/'),
+      )
+      await page.getByTestId('import-submit').click()
+      const payload = (await assignRequest).postDataJSON()
+      expect(payload).toEqual({
+        file_ids: ungroupedIds,
+        combination_id: combinationId,
+      })
+      expect(payload).not.toHaveProperty('batch_no')
+
+      await expect(dialog).toBeHidden()
+      await selectCombination(page, comboName)
+      const files = page.getByTestId('combination-files')
+      await expect(files).toContainText(filename)
+      const row = files.locator('.el-table__row').filter({ hasText: filename })
+      await expect(row.getByTestId('managed-tag')).toHaveText([comboName])
+    } finally {
+      await deleteFilesByNameQuiet(page, prefix)
+      await deleteCombinationQuiet(page, combinationId)
+      cleanupQuiet(csvPath)
     }
   })
 })
