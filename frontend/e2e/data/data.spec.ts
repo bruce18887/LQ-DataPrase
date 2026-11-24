@@ -790,12 +790,12 @@ test.describe('数据管理 /data 已导入批次展开/折叠', { tag: ['@data'
     return (Array.isArray(data) ? data : []).filter((d) => d.registered)
   }
 
-  /** 进入 /data 并切换到「批次数据」Tab（批次区已从文件列表 Tab 独立出来） */
+  /** 进入 /data 并切换到「组合数据」Tab（批次区已从文件列表 Tab 独立出来） */
   async function gotoBatchTab(page: import('@playwright/test').Page) {
-    await gotoApp(page, '/data')
-    const batchTab = page.locator('.tabs-nav .tab-btn').filter({ hasText: '批次数据' })
-    await batchTab.click()
-    await expect(page.locator('.tab-btn.active')).toContainText('批次数据')
+    await gotoApp(page, '/data'); const batchTab = page.locator('.tabs-nav .tab-btn').filter({ hasText: '组合数据' })
+    await batchTab.click(); await expect(page.locator('.tab-btn.active')).toContainText('组合数据')
+    const collapseHeader = page.getByTestId('batch-directory-section').locator('.el-collapse-item__header'); if ((await collapseHeader.getAttribute('aria-expanded')) !== 'true') await collapseHeader.click()
+    await expect(collapseHeader).toHaveAttribute('aria-expanded', 'true')
   }
 
   test('@p1 默认折叠：进入页面后所有已导入批次不展示文件 tag', async ({ page }) => {

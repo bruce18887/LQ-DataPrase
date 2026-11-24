@@ -70,7 +70,13 @@ async function createCombination(page: Page, name: string): Promise<number> {
   }, name)
 }
 
-async function uploadCombinationFile(page: Page, combinationId: number | null, filename: string, batchNo?: string) {
+async function uploadCombinationFile(
+  page: Page,
+  combinationId: number | null,
+  filename: string,
+  batchNo?: string,
+  tags?: string[],
+): Promise<number> {
   const token = await page.evaluate(() => localStorage.getItem('access_token'))
   const response = await page.request.post('/api/v1/upload/', {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -79,10 +85,40 @@ async function uploadCombinationFile(page: Page, combinationId: number | null, f
       last_modified: String(Date.now()),
       ...(combinationId !== null ? { combination_id: String(combinationId) } : {}),
       ...(batchNo !== undefined ? { batch_no: batchNo } : {}),
+      ...(tags !== undefined ? { tags: JSON.stringify(tags) } : {}),
     },
     failOnStatusCode: false,
   })
   expect(response.status(), await response.text()).toBe(201)
+  const created = await response.json() as Array<{ id: number }>
+  expect(created).toHaveLength(1)
+  return created[0].id
+}
+
+async function selectCombination(page: Page, name: string) {
+  await page.getByTestId('combination-select').click()
+  await page.locator('.dp-combination-select-popper .el-select-dropdown__item')
+    .filter({ hasText: name }).click()
+  await expect(page.getByTestId('combination-current-name')).toHaveText(name)
+}
+
+async function clearCombination(page: Page) {
+  const select = page.getByTestId('combination-select')
+  await select.hover()
+  await select.locator('.el-select__clear').click()
+}
+
+async function getUngroupedCount(page: Page) {
+  return page.evaluate(async () => {
+    const token = localStorage.getItem('access_token')
+    const response = await fetch('/api/v1/files/?page_size=10000&include_hidden=1', {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+    if (!response.ok) throw new Error(`读取未分组文件失败：${response.status}`)
+    const body = await response.json()
+    const rows = Array.isArray(body) ? body : body.results
+    return rows.filter((row: { combination_id: number | null }) => row.combination_id == null).length
+  })
 }
 
 test.describe('组合数据', { tag: ['@p2', '@data'] }, () => {
@@ -164,6 +200,108 @@ test.describe('组合数据', { tag: ['@p2', '@data'] }, () => {
       await expect(batched).toContainText(first)
       await expect(batched).toContainText(second)
       await expect(files.locator('.combination-unbatched-group')).toContainText(unbatched)
+    } finally {
+      await deleteFilesByNameQuiet(page, prefix)
+      if (combinationId != null) {
+        await page.evaluate(async (id) => {
+          const token = localStorage.getItem('access_token')
+          await fetch(`/api/v1/combinations/${id}/`, {
+            method: 'DELETE',
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          })
+        }, combinationId)
+      }
+    }
+  })
+
+  test('清空当前组合后恢复未分组文件与计数', async ({ page }) => {
+    await gotoApp(page, '/data')
+    const prefix = `e2e_combo_clear_${Date.now()}`
+    const comboName = `${prefix}_combo`
+    const grouped = `${prefix}_grouped.csv`
+    const ungrouped = `${prefix}_ungrouped.csv`
+    let combinationId: number | null = null
+    try {
+      combinationId = await createCombination(page, comboName)
+      await uploadCombinationFile(page, combinationId, grouped)
+      await uploadCombinationFile(page, null, ungrouped)
+
+      await gotoApp(page, '/data')
+      await openCombinationTab(page)
+      const ungroupedCount = await getUngroupedCount(page)
+      const scopeCount = page.locator('.combination-scope-count')
+      const files = page.getByTestId('combination-files')
+      await expect(scopeCount).toHaveText(`${ungroupedCount} 个文件`)
+      await expect(files.getByText(ungrouped, { exact: true })).toBeVisible()
+
+      await selectCombination(page, comboName)
+      await expect(files.getByText(grouped, { exact: true })).toBeVisible()
+      await expect(files.getByText(ungrouped, { exact: true })).toHaveCount(0)
+
+      await clearCombination(page)
+      await expect(page.getByTestId('combination-current-name')).toHaveCount(0)
+      await expect(scopeCount).toHaveText(`${ungroupedCount} 个文件`)
+      await expect(files.getByText(ungrouped, { exact: true })).toBeVisible()
+      await expect(files.getByText(grouped, { exact: true })).toHaveCount(0)
+    } finally {
+      await deleteFilesByNameQuiet(page, prefix)
+      if (combinationId != null) {
+        await page.evaluate(async (id) => {
+          const token = localStorage.getItem('access_token')
+          await fetch(`/api/v1/combinations/${id}/`, {
+            method: 'DELETE',
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          })
+        }, combinationId)
+      }
+    }
+  })
+
+  test('解除组合只清组合并保留批次号和手动标签', async ({ page }) => {
+    await gotoApp(page, '/data')
+    const prefix = `e2e_combo_unassign_${Date.now()}`
+    const comboName = `${prefix}_combo`
+    const filename = `${prefix}.csv`
+    const batchNo = 'Lot-Keep'
+    const tags = ['manual-keep', 'qa-check']
+    let combinationId: number | null = null
+    try {
+      combinationId = await createCombination(page, comboName)
+      const fileId = await uploadCombinationFile(page, combinationId, filename, batchNo, tags)
+
+      await gotoApp(page, '/data')
+      await openCombinationTab(page)
+      await selectCombination(page, comboName)
+      const files = page.getByTestId('combination-files')
+      const row = files.locator('.el-table__row').filter({ hasText: filename })
+      await expect(row).toBeVisible()
+      await expect(row.getByRole('button', { name: '移出', exact: true })).toHaveCount(0)
+      const assignRequest = page.waitForRequest((request) =>
+        request.method() === 'POST' && request.url().endsWith('/files/assign_combination/'),
+      )
+      await row.getByRole('button', { name: '解除组合', exact: true }).click()
+      expect((await assignRequest).postDataJSON()).toEqual({
+        file_ids: [fileId],
+        combination_id: null,
+      })
+
+      await expect(row).toHaveCount(0)
+      await expect(page.locator('.combination-scope-count')).toHaveText('0 个文件')
+      await clearCombination(page)
+      await expect(files.getByText(filename, { exact: true })).toBeVisible()
+
+      const saved = await page.evaluate(async (id) => {
+        const token = localStorage.getItem('access_token')
+        const response = await fetch(`/api/v1/files/${id}/`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        })
+        if (!response.ok) throw new Error(`读取文件失败：${response.status}`)
+        return response.json()
+      }, fileId)
+      expect(saved.combination_id ?? null).toBeNull()
+      expect(saved.combination_name ?? null).toBeNull()
+      expect(saved.batch_no).toBe(batchNo)
+      expect([...saved.tags].sort()).toEqual([...tags].sort())
     } finally {
       await deleteFilesByNameQuiet(page, prefix)
       if (combinationId != null) {

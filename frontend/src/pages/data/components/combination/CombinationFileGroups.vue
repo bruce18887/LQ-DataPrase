@@ -20,7 +20,11 @@
         <BatchFilesTable
           :files="group.files"
           :active-file-id="activeFileId"
+          mode="combination"
+          :combination-id="combinationId"
+          :show-remove-button="combinationId !== null"
           @file-selected="emit('file-selected', $event)"
+          @remove-combination="emit('remove-combination', $event)"
         />
       </article>
     </section>
@@ -41,7 +45,11 @@
         <BatchFilesTable
           :files="groups.unbatched"
           :active-file-id="activeFileId"
+          mode="combination"
+          :combination-id="combinationId"
+          :show-remove-button="combinationId !== null"
           @file-selected="emit('file-selected', $event)"
+          @remove-combination="emit('remove-combination', $event)"
         />
       </div>
     </section>
@@ -60,12 +68,14 @@ import BatchFilesTable from '../BatchFilesTable.vue'
 
 const props = defineProps<{
   files: DataFile[]
+  combinationId: number | null
   combinationName: string | null
   activeFileId?: number
 }>()
 
 const emit = defineEmits<{
   'file-selected': [id: number]
+  'remove-combination': [row: DataFile]
 }>()
 
 const groups = computed(() => {

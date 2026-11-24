@@ -27,14 +27,16 @@
       @delete="removeActiveCombination"
     />
 
-    <FileUploadArea visible @upload-success="handleUploadSuccess" />
+    <FileUploadArea visible :active="props.active" @upload-success="handleUploadSuccess" />
 
     <section class="combination-files-panel" aria-label="组合文件">
       <CombinationFileGroups
         :files="visibleFiles"
         :combination-name="activeCombination?.name ?? null"
+        :combination-id="activeId"
         :active-file-id="activeFileId"
         @file-selected="emit('file-selected', $event)"
+        @remove-combination="unassignFile"
       />
     </section>
 
@@ -65,9 +67,12 @@ import CombinationEditDialog from './CombinationEditDialog.vue'
 import CombinationFileGroups from './CombinationFileGroups.vue'
 import BatchDirectorySection from './BatchDirectorySection.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   activeFileId?: number
-}>()
+  active?: boolean
+}>(), {
+  active: true,
+})
 
 const emit = defineEmits<{
   'file-selected': [id: number]
@@ -169,6 +174,20 @@ async function removeActiveCombination() {
 async function handleUploadSuccess() {
   await loadAll()
   filesStore.notifyFilesChanged()
+}
+
+async function unassignFile(row: DataFile) {
+  if (activeId.value == null) return
+  try {
+    await datafilesApi.assignCombination({
+      fileIds: [row.id],
+      combinationId: null,
+    })
+    await loadAll()
+    filesStore.notifyFilesChanged()
+  } catch {
+    // 请求失败由 axios 统一管线提示；保留当前组合与文件列表。
+  }
 }
 
 onMounted(loadAll)

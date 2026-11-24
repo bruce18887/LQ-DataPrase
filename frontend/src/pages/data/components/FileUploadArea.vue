@@ -1,6 +1,6 @@
 <template>
   <el-collapse-transition>
-    <div v-show="visible" class="upload-section">
+    <div v-if="visible && active" class="upload-section">
       <el-upload
         drag
         :http-request="handleUpload"
@@ -28,9 +28,12 @@ import { UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { datafilesApi } from '../../../api/datafiles'
 
-defineProps<{
+withDefaults(defineProps<{
   visible: boolean
-}>()
+  active?: boolean
+}>(), {
+  active: true,
+})
 
 const emit = defineEmits<{
   'upload-success': []

@@ -37,6 +37,15 @@ async function uploadSingles(page: Page, prefix: string, count: number): Promise
   return paths
 }
 
+/** 展开默认折叠的来源批次目录，不改产品的默认折叠行为 */
+async function expandSourceDirectory(page: Page) {
+  const collapseHeader = page.getByTestId('batch-directory-section').locator('.el-collapse-item__header')
+  if ((await collapseHeader.getAttribute('aria-expanded')) !== 'true') {
+    await collapseHeader.click()
+  }
+  await expect(collapseHeader).toHaveAttribute('aria-expanded', 'true')
+}
+
 /** 单文件列表行定位：必须限定在可见面板（批次 Tab 的隐藏表格行会污染全局 .el-table__row） */
 function rowByName(page: Page, name: string) {
   return page
@@ -81,9 +90,10 @@ test.describe('数据管理 → 组合为批次 / 批次文件管理', { tag: ['
         await expect(rowByName(page, n)).toHaveCount(0, { timeout: 15_000 })
       }
 
-      // 批次 Tab：表格化展示（行数 = 2，含行列/大小信息）
-      await page.locator('.tabs-nav .tab-btn').filter({ hasText: '批次数据' }).click()
-      await expect(page.locator('.tab-btn.active')).toContainText('批次数据')
+      // 组合数据 Tab：表格化展示（行数 = 2，含行列/大小信息）
+      await page.locator('.tabs-nav .tab-btn').filter({ hasText: '组合数据' }).click()
+      await expect(page.locator('.tab-btn.active')).toContainText('组合数据')
+      await expandSourceDirectory(page)
       const header = page.locator(`[data-testid="batch-header-${batchName}"]`)
       await expect(header).toBeVisible({ timeout: 15_000 })
       await expect(header.locator('.batch-count')).toHaveText('2 个文件')
@@ -152,8 +162,9 @@ test.describe('数据管理 → 组合为批次 / 批次文件管理', { tag: ['
       await expect(page.getByText(`已组合 1 个文件为批次 "${batchName}"`).first())
         .toBeVisible({ timeout: 20_000 })
 
-      // 批次 Tab 文件数 = 3
-      await page.locator('.tabs-nav .tab-btn').filter({ hasText: '批次数据' }).click()
+      // 组合数据 Tab 文件数 = 3
+      await page.locator('.tabs-nav .tab-btn').filter({ hasText: '组合数据' }).click()
+      await expandSourceDirectory(page)
       const header = page.locator(`[data-testid="batch-header-${batchName}"]`)
       await expect(header).toBeVisible({ timeout: 15_000 })
       await expect(header.locator('.batch-count')).toHaveText('3 个文件', { timeout: 10_000 })

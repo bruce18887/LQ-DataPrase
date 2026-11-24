@@ -70,10 +70,16 @@
           </span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="118" align="center" fixed="right">
+      <el-table-column label="操作" :width="mode === 'combination' ? 152 : 118" align="center" fixed="right">
         <template #default="{ row }">
           <el-button size="small" type="primary" plain @click.stop="emit('file-selected', row.id)">查看</el-button>
-          <el-button size="small" type="warning" plain @click.stop="emit('remove-one', row)">移出</el-button>
+          <el-button
+            v-if="showRemoveButton && (mode !== 'combination' || combinationId !== null)"
+            size="small"
+            type="warning"
+            plain
+            @click.stop="onRemoveClick(row)"
+          >{{ mode === 'combination' ? '解除组合' : '移出' }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -88,15 +94,23 @@ import type { DataFile } from '../../../types'
 import { formatSize } from '../../../utils/format'
 import { getFilenameWrap } from '../../../utils/filenameWrap'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   files: DataFile[]
   activeFileId?: number
-}>()
+  mode?: 'batch' | 'combination'
+  combinationId?: number | null
+  showRemoveButton?: boolean
+}>(), {
+  mode: 'batch',
+  combinationId: null,
+  showRemoveButton: true,
+})
 
 const emit = defineEmits<{
   'file-selected': [id: number]
   'selection-change': [ids: number[]]
   'remove-one': [row: DataFile]
+  'remove-combination': [row: DataFile]
 }>()
 
 const tableRef = ref<InstanceType<typeof ElTable>>()
@@ -109,6 +123,14 @@ onMounted(async () => {
 
 function onSelectionChange(rows: any[]) {
   emit('selection-change', rows.map((r) => r.id))
+}
+
+function onRemoveClick(row: DataFile) {
+  if (props.mode === 'combination') {
+    emit('remove-combination', row)
+    return
+  }
+  emit('remove-one', row)
 }
 
 /** 页内排序：大小（file_size） */
