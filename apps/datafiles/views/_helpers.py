@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import shutil
+import tempfile
 import time
 import zipfile
 
@@ -111,6 +112,24 @@ def parse_file_meta(file_path):
         )
 
     return format_type, df, metadata, row_count, col_count, program_name
+
+
+def _stage_single_upload(uploaded_file, file_path):
+    """Receive and parse beside the destination, then atomically replace it."""
+    fd, temp_path = tempfile.mkstemp(
+        prefix='.upload-', suffix='.tmp', dir=os.path.dirname(file_path),
+    )
+    os.close(fd)
+    try:
+        with open(temp_path, 'wb') as dest:
+            for chunk in uploaded_file.chunks():
+                dest.write(chunk)
+        parsed = parse_file_meta(temp_path)
+        os.replace(temp_path, file_path)
+        return parsed
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
 
 
 def _register_file(user, file_path, file_type='single', batch_name='', sub_batch='',
@@ -391,18 +410,19 @@ def _safe_extract_zip(zip_file, dest_dir):
 
 
 def _register_zip_batch(user, zip_file, filename, combination=None,
-                        batch_no_override='', tags=None):
+                        batch_no_override='', tags=None, failed_paths=None):
     """Serialize ZIP extraction/registration by owner and batch directory."""
     batch_name = _zip_base_name(filename)
     dest_dir = os.path.join(_user_upload_dir(user, 'batch'), batch_name)
     with import_path_lock(user, dest_dir):
         return _register_zip_batch_locked(
             user, zip_file, filename, combination, batch_no_override, tags,
+            failed_paths,
         )
 
 
 def _register_zip_batch_locked(user, zip_file, filename, combination=None,
-                               batch_no_override='', tags=None):
+                               batch_no_override='', tags=None, failed_paths=None):
     """Extract ``filename``'s zip and register every CSV inside as batch data.
 
     Returns ``(created, error_message)``:
@@ -435,6 +455,7 @@ def _register_zip_batch_locked(user, zip_file, filename, combination=None,
     from .import_coordinator import import_or_refresh_file
     batch_base = _user_upload_dir(user, 'batch')
     created = []
+    failed_paths = [] if failed_paths is None else failed_paths
     for fp in csv_paths:
         _, sub_batch = _batch_ctx(fp, batch_base)
         try:
@@ -443,14 +464,16 @@ def _register_zip_batch_locked(user, zip_file, filename, combination=None,
                 parsed=parse_file_meta(fp), combination=combination,
                 batch_no_override=batch_no_override, tags=tags,
             )
-            if row is not None and getattr(row, '_import_created', False):
+            if row is None:
+                failed_paths.append(fp)
+            elif getattr(row, '_import_created', False):
                 created.append(row)
         except Exception:
             logger.warning(
                 '_register_zip_batch: failed to register %s', fp,
                 exc_info=True,
             )
-            continue
+            failed_paths.append(fp)
     return created, None
 
 

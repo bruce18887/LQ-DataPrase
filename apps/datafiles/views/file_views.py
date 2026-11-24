@@ -31,6 +31,7 @@ from apps.datafiles.visibility import apply_visibility
 
 from ._helpers import (
     _register_zip_batch,
+    _stage_single_upload,
     _user_upload_dir,
     _parse_last_modified,
     _delete_datafile_file_only,
@@ -564,32 +565,34 @@ class FileUploadView(APIView):
 
             # ZIP: extract CSVs and register them as batch data.
             if ext == '.zip':
+                failed_paths = []
                 zip_created, zip_error = _register_zip_batch(
                     request.user, uploaded_file, base_name,
                     combination=combination, batch_no_override=batch_no,
-                    tags=manual_tags,
+                    tags=manual_tags, failed_paths=failed_paths,
                 )
                 if zip_error:
                     return error_response('zip_import_failed', zip_error)
+                if failed_paths:
+                    return error_response(
+                        'batch_import_incomplete', '部分文件注册失败', 409,
+                        failed_paths=failed_paths,
+                    )
                 created.extend(zip_created)
                 continue
 
             file_path = os.path.join(upload_dir, base_name)
-            # Same normalized path means the same DataFile on every re-upload.
             with import_path_lock(request.user, file_path):
-                with open(file_path, 'wb+') as dest:
-                    for chunk in uploaded_file.chunks():
-                        dest.write(chunk)
-                df = import_or_refresh_file(
-                    request.user, file_path, 'single',
-                    source_mtime=browser_mtime, combination=combination,
-                    batch_no_override=batch_no, tags=manual_tags,
-                    lock_target=False,
-                )
-            if df is not None:
-                created.append(df)
-
-        return Response(
-            DataFileSerializer(created, many=True).data,
-            status=status.HTTP_201_CREATED,
-        )
+                parsed = _stage_single_upload(uploaded_file, file_path)
+                for _attempt in range(2):
+                    df = import_or_refresh_file(
+                        request.user, file_path, 'single',
+                        source_mtime=browser_mtime, parsed=parsed, combination=combination,
+                        batch_no_override=batch_no, tags=manual_tags, lock_target=False,
+                    )
+                    if df is not None:
+                        break
+            if df is None:
+                return error_response('file_registration_failed', '文件注册失败，请重试', 409)
+            created.append(df)
+        return Response(DataFileSerializer(created, many=True).data, status=status.HTTP_201_CREATED)

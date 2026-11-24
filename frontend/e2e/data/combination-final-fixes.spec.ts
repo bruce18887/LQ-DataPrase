@@ -42,6 +42,31 @@ async function deleteCombination(page: Page, id: number) {
   })
 }
 
+/** 在 e2e 数据根下造一个已落盘的来源批次目录（导入端点从中注册文件行） */
+function seedBatchDir(batchName: string, filenames: string[]) {
+  const batchDir = path.join(DATA_DIR, 'media', 'data', 'admin', 'batch', batchName)
+  fs.mkdirSync(batchDir, { recursive: true })
+  for (const filename of filenames) fs.writeFileSync(path.join(batchDir, filename), CSV)
+}
+
+/** 调真实目录导入端点注册批次行，返回该批次的 DataFile 行 */
+async function importBatchDir(page: Page, batchName: string): Promise<Array<{ id: number; filename: string }>> {
+  const imported = await page.evaluate(async (dirName) => {
+    const token = localStorage.getItem('access_token')
+    const response = await fetch('/api/v1/batch-dirs/import/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ dir_name: dirName }),
+    })
+    return { status: response.status, rows: await response.json() }
+  }, batchName)
+  expect(imported.status).toBe(201)
+  return imported.rows as Array<{ id: number; filename: string }>
+}
+
 async function openCombinationTab(page: Page) {
   await page.locator('.tabs-nav .tab-btn').filter({ hasText: '组合数据' }).click()
   await expect(page.getByTestId('combination-upload')).toBeVisible()
@@ -69,8 +94,9 @@ test.describe('组合数据终审回归', { tag: ['@p2', '@data'] }, () => {
     const prefix = `e2e_final_tags_${Date.now()}`
     const comboName = `${prefix}_combo`
     const filename = `${prefix}.csv`
-    const combinationId = await createCombination(page, comboName)
+    let combinationId: number | null = null
     try {
+      combinationId = await createCombination(page, comboName)
       const fileId = await uploadFile(page, filename, combinationId, [comboName, 'manual'])
       await gotoApp(page, '/data')
       const row = page.locator('.file-list-tab .el-table__row').filter({ hasText: filename })
@@ -94,7 +120,7 @@ test.describe('组合数据终审回归', { tag: ['@p2', '@data'] }, () => {
       expect(saved.managed_tags).toEqual([comboName])
     } finally {
       await deleteFilesByNameQuiet(page, prefix)
-      await deleteCombination(page, combinationId)
+      if (combinationId !== null) await deleteCombination(page, combinationId)
     }
   })
 
@@ -106,8 +132,9 @@ test.describe('组合数据终审回归', { tag: ['@p2', '@data'] }, () => {
       const grouped = `${prefix}_grouped.csv`
       const outsideA = `${prefix}_outside_a.csv`
       const outsideB = `${prefix}_outside_b.csv`
-      const combinationId = await createCombination(page, comboName)
+      let combinationId: number | null = null
       try {
+        combinationId = await createCombination(page, comboName)
         await uploadFile(page, grouped, combinationId)
         await uploadFile(page, outsideA, null)
         await uploadFile(page, outsideB, null)
@@ -142,7 +169,7 @@ test.describe('组合数据终审回归', { tag: ['@p2', '@data'] }, () => {
         expect(requests).toEqual([])
       } finally {
         await deleteFilesByNameQuiet(page, prefix)
-        await deleteCombination(page, combinationId)
+        if (combinationId !== null) await deleteCombination(page, combinationId)
       }
     })
   }
@@ -154,26 +181,12 @@ test.describe('组合数据终审回归', { tag: ['@p2', '@data'] }, () => {
     const batch = `${prefix}_lot`
     const chosen = `${prefix}_chosen.csv`
     const control = `${prefix}_control.csv`
-    const combinationId = await createCombination(page, comboName)
-    const batchDir = path.join(DATA_DIR, 'media', 'data', 'admin', 'batch', batch)
-    fs.mkdirSync(batchDir, { recursive: true })
-    fs.writeFileSync(path.join(batchDir, chosen), CSV)
-    fs.writeFileSync(path.join(batchDir, control), CSV)
+    let combinationId: number | null = null
     try {
-      const imported = await page.evaluate(async (dirName) => {
-        const token = localStorage.getItem('access_token')
-        const response = await fetch('/api/v1/batch-dirs/import/', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({ dir_name: dirName }),
-        })
-        return { status: response.status, rows: await response.json() }
-      }, batch)
-      expect(imported.status).toBe(201)
-      const chosenId = imported.rows.find((row: { filename: string }) => row.filename === chosen).id as number
+      combinationId = await createCombination(page, comboName)
+      seedBatchDir(batch, [chosen, control])
+      const imported = await importBatchDir(page, batch)
+      const chosenId = imported.find(row => row.filename === chosen)!.id
       await gotoApp(page, '/data')
       await openCombinationTab(page)
       await page.getByTestId('combination-existing').click()
@@ -203,7 +216,50 @@ test.describe('组合数据终审回归', { tag: ['@p2', '@data'] }, () => {
       await expect(page.getByTestId('combination-files')).not.toContainText(control)
     } finally {
       await deleteBatchQuiet(page, batch)
-      await deleteCombination(page, combinationId)
+      if (combinationId !== null) await deleteCombination(page, combinationId)
+    }
+  })
+
+  test('存量归组来源批次全选跨筛选保留，取消一行只提交剩余 ID', async ({ page }) => {
+    await gotoApp(page, '/data')
+    const prefix = `cf_batch_all_${Date.now().toString().slice(-10)}`
+    const comboName = `${prefix}_combo`
+    const batch = `${prefix}_lot`
+    const chosen = `${prefix}_a.csv`
+    const kept1 = `${prefix}_b.csv`
+    const kept2 = `${prefix}_c.csv`
+    let combinationId: number | null = null
+    try {
+      combinationId = await createCombination(page, comboName)
+      seedBatchDir(batch, [chosen, kept1, kept2])
+      const imported = await importBatchDir(page, batch)
+      const ids = Object.fromEntries(imported.map(row => [row.filename, row.id]))
+      await gotoApp(page, '/data')
+      await openCombinationTab(page)
+      await page.getByTestId('combination-existing').click()
+      const dialog = page.locator('.el-dialog')
+      await dialog.getByTestId('existing-source-batch').click()
+      await page.locator('.el-select-dropdown__item:visible').filter({ hasText: batch }).click()
+      await dialog.getByTestId('existing-select-batch').click()
+      await expect(dialog.getByTestId('existing-selected-count')).toContainText('3')
+      await dialog.getByTestId('existing-search').fill(chosen)
+      const targetRow = dialog.locator('.el-table__row').filter({ hasText: chosen })
+      await expect(targetRow).toHaveCount(1)
+      await targetRow.locator('.el-checkbox').click()
+      await expect(dialog.getByTestId('existing-selected-count')).toContainText('2')
+      await dialog.getByTestId('import-combination').click()
+      await page.locator('.el-select-dropdown__item:visible').filter({ hasText: comboName }).click()
+      const request = page.waitForRequest((req) =>
+        req.method() === 'POST' && req.url().endsWith('/files/assign_combination/'),
+      )
+      await dialog.getByTestId('import-submit').click()
+      expect((await request).postDataJSON()).toEqual({
+        file_ids: [ids[kept1], ids[kept2]].sort((a, b) => a - b),
+        combination_id: combinationId,
+      })
+    } finally {
+      if (combinationId !== null) await deleteCombination(page, combinationId)
+      await deleteBatchQuiet(page, batch)
     }
   })
 
@@ -212,11 +268,10 @@ test.describe('组合数据终审回归', { tag: ['@p2', '@data'] }, () => {
     const prefix = `cf_sftp_${Date.now().toString().slice(-10)}`
     const comboName = `${prefix}_combo`
     const batch = `${prefix}_lot`
-    const combinationId = await createCombination(page, comboName)
-    const batchDir = path.join(DATA_DIR, 'media', 'data', 'admin', 'batch', batch)
-    fs.mkdirSync(batchDir, { recursive: true })
-    fs.writeFileSync(path.join(batchDir, `${prefix}.csv`), CSV)
+    let combinationId: number | null = null
     try {
+      combinationId = await createCombination(page, comboName)
+      seedBatchDir(batch, [`${prefix}.csv`])
       await gotoApp(page, '/data')
       await openCombinationTab(page)
       const section = page.getByTestId('batch-directory-section')
@@ -226,6 +281,7 @@ test.describe('组合数据终审回归', { tag: ['@p2', '@data'] }, () => {
       await expect(card).toBeVisible()
       await card.getByRole('button', { name: '导入', exact: true }).click()
       const dialog = page.locator('.el-dialog')
+      await expect(dialog.getByTestId('import-clear-batch-no')).toHaveCount(0)
       await dialog.getByTestId('import-combination').click()
       await page.locator('.el-select-dropdown__item:visible').filter({ hasText: comboName }).click()
       await dialog.getByTestId('import-batch-no').fill('BE01-SFTP')
@@ -242,25 +298,27 @@ test.describe('组合数据终审回归', { tag: ['@p2', '@data'] }, () => {
       await expect(page.getByTestId('combination-files')).toContainText(`${comboName} / BE01-SFTP`)
     } finally {
       await deleteBatchQuiet(page, batch)
-      await deleteCombination(page, combinationId)
+      if (combinationId !== null) await deleteCombination(page, combinationId)
     }
   })
 
-  test('来源批次头准确区分未分组、单一组合与混合组合', async ({ page }) => {
-    const cases = [
+  test('来源批次头准确区分未分组、单一组合、混合组合与截断状态', async ({ page }) => {
+    const cases: Array<{ name: string; names: string[]; expected: string; truncated?: number }> = [
       { name: 'status_ungrouped', names: ['', ''], expected: '未分组' },
       { name: 'status_single', names: ['Gage', 'Gage'], expected: 'Gage' },
       { name: 'status_mixed', names: ['Gage', ''], expected: '多个组合' },
       { name: 'status_multiple', names: ['Gage', 'Buyoff'], expected: '多个组合' },
+      { name: 'status_truncated', names: ['Gage', 'Gage'], expected: '状态不完整', truncated: 1 },
     ]
     await page.route('**/api/v1/batch-dirs/', async (route) => {
       await route.fulfill({
         json: cases.map((item) => ({
           name: item.name,
           path: `/virtual/${item.name}`,
-          file_count: item.names.length,
+          file_count: item.names.length + (item.truncated ?? 0),
           total_size: item.names.length,
           registered: true,
+          files_truncated: item.truncated ?? 0,
           files: item.names.map((name, index) => ({
             id: index + 1,
             filename: `${item.name}_${index}.csv`,
@@ -289,8 +347,9 @@ test.describe('组合数据终审回归', { tag: ['@p2', '@data'] }, () => {
     const comboName = `${prefix}_combo`
     const grouped = `${prefix}_grouped.csv`
     const control = `${prefix}_control.csv`
-    const combinationId = await createCombination(page, comboName)
+    let combinationId: number | null = null
     try {
+      combinationId = await createCombination(page, comboName)
       await uploadFile(page, grouped, combinationId)
       await uploadFile(page, control, null)
       await gotoApp(page, '/data')
@@ -311,7 +370,7 @@ test.describe('组合数据终审回归', { tag: ['@p2', '@data'] }, () => {
       await expect(row(grouped)).toBeVisible()
     } finally {
       await deleteFilesByNameQuiet(page, prefix)
-      await deleteCombination(page, combinationId)
+      if (combinationId !== null) await deleteCombination(page, combinationId)
     }
   })
 })

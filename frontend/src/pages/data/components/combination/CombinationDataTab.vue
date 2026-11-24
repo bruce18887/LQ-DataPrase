@@ -163,9 +163,9 @@ async function loadAll() {
       datafilesApi.listFiles({ page: 1, page_size: 100, include_hidden: 1, ordering: 'id' }),
     ])
     combinations.value = Array.isArray(comboResp.data) ? comboResp.data : []
-    const firstBody = fileResp.data as { results?: DataFile[]; next?: string | null }
-    const loaded = [...(firstBody.results ?? [])]
-    let next = firstBody.next ?? null
+    const firstBody = fileResp.data as DataFile[] | { results?: DataFile[]; next?: string | null }
+    const loaded = Array.isArray(firstBody) ? [...firstBody] : [...(firstBody.results ?? [])]
+    let next = Array.isArray(firstBody) ? null : (firstBody.next ?? null)
     while (next) {
       const response = await datafilesApi.listFiles({
         page: Number(new URL(next, window.location.origin).searchParams.get('page')) || undefined,

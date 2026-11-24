@@ -203,6 +203,7 @@ const batchGroups = computed<BatchGroup[]>(() =>
 )
 
 function groupCombinationStatus(group: BatchGroup) {
+  if ((group.truncated ?? 0) > 0) return '状态不完整'
   const names = new Set(group.files.map(file => file.combination_name || ''))
   if (names.size > 1) return '多个组合'
   return [...names][0] || '未分组'

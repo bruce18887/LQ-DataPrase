@@ -37,6 +37,7 @@
         />
       </label>
       <el-checkbox
+        v-if="allowClearBatchNo"
         v-model="clearBatchNo"
         data-testid="import-clear-batch-no"
       >清空批次号</el-checkbox>
@@ -58,11 +59,14 @@ import { computed, ref, watch } from 'vue'
 import type { DataCombination } from '../../../types'
 import type { CombinationImportPayload } from '../composables/useCombinationSelection'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   visible: boolean
   combinations: DataCombination[]
   selectedCount: number
-}>()
+  allowClearBatchNo?: boolean
+}>(), {
+  allowClearBatchNo: true,
+})
 
 const emit = defineEmits<{
   'update:visible': [value: boolean]

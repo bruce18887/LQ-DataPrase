@@ -26,6 +26,7 @@
       v-model:visible="optionsVisible"
       :combinations="combinations"
       :selected-count="dir.file_count"
+      :allow-clear-batch-no="false"
       @submit="submitImport"
     />
     <CombinationEditDialog

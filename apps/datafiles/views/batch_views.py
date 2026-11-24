@@ -170,6 +170,7 @@ class BatchDirImportView(APIView):
                 'batch_dir_not_found', f'目录 "{dir_name}" 不存在', 404)
 
         created = []
+        failed_paths = []
         # The directory lock covers scan/registration; parsing remains outside
         # each short DB transaction, so unrelated writes are not held up.
         with import_path_lock(request.user, dir_path):
@@ -186,15 +187,22 @@ class BatchDirImportView(APIView):
                             parsed=parse_file_meta(fp), combination=combination,
                             batch_no_override=batch_no, tags=manual_tags,
                         )
-                        if df is not None and getattr(df, '_import_created', False):
+                        if df is None:
+                            failed_paths.append(fp)
+                        elif getattr(df, '_import_created', False):
                             created.append(df)
                     except Exception:
                         logger.warning(
                             'BatchDirImportView: failed to register %s', fp,
                             exc_info=True,
                         )
-                        continue
+                        failed_paths.append(fp)
 
+        if failed_paths:
+            return error_response(
+                'batch_import_incomplete', '部分文件注册失败', 409,
+                failed_paths=failed_paths,
+            )
         return Response(
             DataFileSerializer(created, many=True).data,
             status=status.HTTP_201_CREATED,
