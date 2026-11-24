@@ -81,6 +81,11 @@ def _is_data_csv(filename):
     return filename.lower().endswith('.csv') and not _is_summary_csv(filename)
 
 
+def import_path_key(file_path):
+    """Canonical key for matching a disk path to a stored import path."""
+    return os.path.normcase(os.path.normpath(resolve_file_path(file_path)))
+
+
 def parse_file_meta(file_path):
     """解析文件，返回 (format_type, df, metadata, row_count, col_count, program_name)。
 
@@ -441,7 +446,7 @@ def _register_zip_batch(user, zip_file, filename, combination=None,
         return [], f'压缩包 {filename} 内未找到 CSV 数据文件'
 
     existing_rows = {
-        os.path.normpath(resolve_file_path(row.file_path)): row
+        import_path_key(row.file_path): row
         for row in DataFile.objects.filter(
             owner=user, file_type='batch', batch_name=batch_name,
         )
@@ -449,7 +454,7 @@ def _register_zip_batch(user, zip_file, filename, combination=None,
     batch_base = _user_upload_dir(user, 'batch')
     created = []
     for fp in csv_paths:
-        normalized = os.path.normpath(fp)
+        normalized = import_path_key(fp)
         if normalized in existing_rows:
             parsed = parse_file_meta(fp)
             _refresh_existing_import_row(
@@ -470,6 +475,7 @@ def _register_zip_batch(user, zip_file, filename, combination=None,
                         batch_no_override=batch_no_override, tags=tags,
                     )
                 )
+            existing_rows[normalized] = created[-1]
         except Exception:
             logger.warning(
                 '_register_zip_batch: failed to register %s', fp,
