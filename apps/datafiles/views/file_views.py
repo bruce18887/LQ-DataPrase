@@ -40,7 +40,7 @@ from ._helpers import (
     _UNSAFE_NAME_CHARS,
 )
 from .admin_scope import scoped_files
-from .import_coordinator import import_or_refresh_file, import_path_lock
+from .import_coordinator import import_or_refresh_file, import_owner_lock, import_path_lock
 from .import_options import parse_combine_options, parse_import_options
 
 logger = logging.getLogger(__name__)
@@ -582,16 +582,17 @@ class FileUploadView(APIView):
                 continue
 
             file_path = os.path.join(upload_dir, base_name)
-            with import_path_lock(request.user, file_path):
-                parsed = _stage_single_upload(uploaded_file, file_path)
-                for _attempt in range(2):
-                    df = import_or_refresh_file(
-                        request.user, file_path, 'single',
-                        source_mtime=browser_mtime, parsed=parsed, combination=combination,
-                        batch_no_override=batch_no, tags=manual_tags, lock_target=False,
-                    )
-                    if df is not None:
-                        break
+            with import_owner_lock(request.user):
+                with import_path_lock(request.user, file_path):
+                    parsed = _stage_single_upload(uploaded_file, file_path)
+                    for _attempt in range(2):
+                        df = import_or_refresh_file(
+                            request.user, file_path, 'single',
+                            source_mtime=browser_mtime, parsed=parsed, combination=combination,
+                            batch_no_override=batch_no, tags=manual_tags, lock_target=False,
+                        )
+                        if df is not None:
+                            break
             if df is None:
                 return error_response('file_registration_failed', '文件注册失败，请重试', 409)
             created.append(df)

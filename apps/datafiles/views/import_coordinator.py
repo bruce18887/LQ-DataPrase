@@ -71,6 +71,13 @@ else:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
+@contextmanager
+def import_owner_lock(owner):
+    """Serialize all import writes for one owner (SQLite has a single writer)."""
+    with import_path_lock(owner, os.path.join(settings.MEDIA_ROOT, '.owner-import')):
+        yield
+
+
 def find_existing_import_row(owner, file_path, file_type, batch_name='', for_update=False):
     """Find an owner/type/batch row with the same normalized disk path."""
     target = import_path_key(file_path)

@@ -160,11 +160,11 @@ async function handleUpload(options: { file: File }) {
       ? `${options.file.name} 上传成功，导入 ${count} 个文件`
       : `${options.file.name} 上传成功`
     ElMessage.success(message)
-    emit('upload-success')
   } catch {
     // 错误 toast 由 axios 拦截器统一弹出
   } finally {
     uploadProgress.value = 0
+    emit('upload-success')
   }
 }
 </script>
