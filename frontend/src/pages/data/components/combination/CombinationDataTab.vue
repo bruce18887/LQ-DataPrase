@@ -36,6 +36,21 @@
       @upload-success="handleUploadSuccess"
     />
 
+    <div v-if="activeCombination && visibleFiles.length" class="combination-report-actions">
+      <el-button
+        data-testid="combination-open-gage"
+        @click="openReport('gage')"
+      >
+        用当前组合打开 Gage 配置
+      </el-button>
+      <el-button
+        data-testid="combination-open-buyoff"
+        @click="openReport('buyoff')"
+      >
+        用当前组合打开 Buyoff 配置
+      </el-button>
+    </div>
+
     <section class="combination-files-panel" aria-label="组合文件">
       <CombinationFileGroups
         :files="visibleFiles"
@@ -124,6 +139,15 @@ async function loadAll() {
   } catch {
     // 请求失败由 axios 统一管线提示；保留上一次成功数据，避免页面闪空。
   }
+}
+
+function openReport(kind: 'gage' | 'buyoff') {
+  emit('open-report', {
+    kind,
+    combinationId: activeId.value,
+    combinationName: activeCombination.value?.name ?? null,
+    fileIds: visibleFiles.value.map(file => file.id),
+  })
 }
 
 function openCreate() {
@@ -257,6 +281,13 @@ onActivated(loadAll)
   font-size: var(--p-fs-base);
   font-weight: var(--p-fw-semibold);
   overflow-wrap: anywhere;
+}
+
+.combination-report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--p-space-3);
+  margin-top: var(--p-space-4);
 }
 
 .combination-files-panel {

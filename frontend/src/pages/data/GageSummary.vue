@@ -9,6 +9,13 @@
       <p class="tab-subtitle">为 8 个 Site 槽位分配文件：每个槽位对应其工位编号（S1→Site 1 … S8→Site 8），仅导出该工位的数据，生成多 Site 统计对比报表</p>
     </header>
 
+    <el-alert
+      v-if="combinationName"
+      :title="`当前组合：${combinationName}；候选文件已收敛，Site 仍需手动分配`"
+      type="info"
+      :closable="false"
+    />
+
     <!-- Site 槽位分配 -->
     <section class="section-card">
       <div class="card-header">
@@ -96,6 +103,7 @@ import { ElMessage } from 'element-plus'
 import { gageApi } from '../../api/gage'
 import { downloadBlob, extractFilenameFromContentDisposition } from '../../utils/download'
 import { formatError, parseBlobError } from '../../utils/error'
+import { filterReportFiles } from '../../utils/reportFileScope'
 import type { DataFile } from '../../types'
 import FileSelect from '../../components/common/FileSelect.vue'
 
@@ -110,9 +118,15 @@ interface SiteSlot {
 interface Props {
   /** 文件列表（由 DataManagement 维护刷新后传入，组件不自行拉取） */
   files: DataFile[]
+  combinationId?: number | null
+  combinationName?: string | null
 }
 
-const props = withDefaults(defineProps<Props>(), { files: () => [] })
+const props = withDefaults(defineProps<Props>(), {
+  files: () => [],
+  combinationId: null,
+  combinationName: null,
+})
 
 const onlyBin1 = ref(false)
 const ignoreNoLimit = ref(false)
@@ -157,11 +171,11 @@ const assignedFileIds = computed(() => {
 })
 
 /**
- * 槽位可选文件：返回全部文件。同一文件可能含多个工位，允许在多个槽位复用
+ * 槽位可选文件：先按当前组合收敛。同一文件可能含多个工位，允许在多个槽位复用
  * （各槽位只取对应工位的数据），因此不再按槽位互斥。
  */
 function availableFiles() {
-  return props.files
+  return filterReportFiles(props.files, props.combinationId)
 }
 
 async function generate() {

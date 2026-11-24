@@ -20,18 +20,22 @@ export function normalizeQuery(raw: string): string {
   return raw.trim().toLowerCase()
 }
 
-/** 匹配：filename / program_name / batch_name 任一包含（对齐后端 search_fields） */
+/** 匹配：文件名、程序、批次、组合名或批次号任一包含（对齐后端 search_fields） */
 export function matchFile(
-  f: Pick<DataFile, 'filename' | 'program_name' | 'batch_name'>,
+  f: Pick<DataFile, 'filename' | 'program_name' | 'batch_name' | 'combination_name' | 'batch_no'>,
   query: string,
 ): boolean {
   if (!query) return true
-  return [f.filename, f.program_name, f.batch_name].some((v) =>
-    (v ?? '').toLowerCase().includes(query),
-  )
+  return [
+    f.filename,
+    f.program_name,
+    f.batch_name,
+    f.combination_name,
+    f.batch_no,
+  ].some((value) => (value ?? '').toLowerCase().includes(query))
 }
 
-/** 排序权重：0=filename 前缀 > 1=filename 包含 > 2=仅 program/batch 命中 */
+/** 排序权重：0=filename 前缀 > 1=filename 包含 > 2=其它字段命中 */
 export function fileRank(f: Pick<DataFile, 'filename'>, query: string): number {
   const name = (f.filename ?? '').toLowerCase()
   if (name.startsWith(query)) return 0
@@ -76,11 +80,13 @@ export function buildFileOptions(
   }))
 }
 
-/** 富信息行：program · format · N 行 · 大小 · 上传时间（空值跳过） */
+/** 富信息行：program · 组合 · format · 批次号 · N 行 · 大小 · 上传时间（空值跳过） */
 export function metaText(f: DataFile): string {
   return [
     f.program_name,
+    f.combination_name,
     f.format_type,
+    f.batch_no,
     `${f.row_count ?? 0} 行`,
     f.file_size ? formatSize(f.file_size) : '',
     f.created_at ? formatTime(f.created_at) : '',
