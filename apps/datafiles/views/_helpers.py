@@ -20,7 +20,7 @@ from apps.datafiles.parsers import BaseATEParser, get_parser
 from apps.datafiles.serializers import normalize_tags
 from apps.datafiles.services import put_cached_parsed_file
 from apps.datafiles.utils import extract_product_code, resolve_file_path, store_file_path
-from .import_coordinator import import_path_key, import_path_lock
+from .import_coordinator import import_owner_lock, import_path_key, import_path_lock
 
 logger = logging.getLogger(__name__)
 
@@ -414,7 +414,7 @@ def _register_zip_batch(user, zip_file, filename, combination=None,
     """Serialize ZIP extraction/registration by owner and batch directory."""
     batch_name = _zip_base_name(filename)
     dest_dir = os.path.join(_user_upload_dir(user, 'batch'), batch_name)
-    with import_path_lock(user, dest_dir):
+    with import_owner_lock(user), import_path_lock(user, dest_dir):
         return _register_zip_batch_locked(
             user, zip_file, filename, combination, batch_no_override, tags,
             failed_paths,

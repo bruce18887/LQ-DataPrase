@@ -23,7 +23,7 @@ from ._helpers import (
     _user_upload_dir,
     parse_file_meta,
 )
-from .import_coordinator import import_or_refresh_file, import_path_lock
+from .import_coordinator import import_or_refresh_file, import_owner_lock, import_path_lock
 from .import_options import parse_import_options
 
 logger = logging.getLogger(__name__)
@@ -173,7 +173,7 @@ class BatchDirImportView(APIView):
         failed_paths = []
         # The directory lock covers scan/registration; parsing remains outside
         # each short DB transaction, so unrelated writes are not held up.
-        with import_path_lock(request.user, dir_path):
+        with import_owner_lock(request.user), import_path_lock(request.user, dir_path):
             for root, _dirs, files in os.walk(dir_path):
                 for f in files:
                     if not _is_data_csv(f):

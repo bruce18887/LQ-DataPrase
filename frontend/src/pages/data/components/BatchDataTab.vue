@@ -301,12 +301,12 @@ async function importDir(payload: {
       batchNo: payload.batchNo,
     })
     ElMessage.success(`批次 "${payload.dir.name}" 已导入`)
-    await loadBatchDirs()
-    filesStore.notifyFilesChanged()
-    emit('import-success')
   } catch {
     // 错误 toast 由 axios 拦截器统一弹出
   } finally {
+    await loadBatchDirs()
+    filesStore.notifyFilesChanged()
+    emit('import-success')
     importingDir.value = ''
   }
 }
