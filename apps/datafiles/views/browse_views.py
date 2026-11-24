@@ -36,11 +36,11 @@ from apps.analysis.services.statistics import (
 from apps.analysis.services.statistics.helpers import get_site_column
 
 from ._helpers import (
-    _register_file,
     _resolve_product_code,
     _scan_orphaned_disk,
     _user_upload_dir,
 )
+from .import_coordinator import register_import_row
 from ._duplicate_files import (
     _find_duplicate_groups,
     _delete_duplicate_files,
@@ -449,8 +449,7 @@ class DataConsistencyCheckView(APIView):
         skipped_count = 0
         for fp, batch_name, sub_batch in _scan_orphaned_disk(user):
             try:
-                with transaction.atomic():
-                    _register_file(user, fp, 'batch', batch_name, sub_batch)
+                register_import_row(user, fp, 'batch', batch_name, sub_batch)
                 imported_count += 1
             except Exception:
                 logger.warning(

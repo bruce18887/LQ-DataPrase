@@ -443,6 +443,48 @@ class CombinationIntegrityTests(TransactionTestCase):
                     )
                 self.assertEqual(settings.MEDIA_ROOT, self.media)
 
+    def test_owner_import_lock_serializes_same_owner(self):
+        from apps.datafiles.views.import_coordinator import import_owner_lock
+        active = 0
+        max_active = 0
+        guard = threading.Lock()
+
+        def run():
+            nonlocal active, max_active
+            with import_owner_lock(self.owner):
+                with guard:
+                    active += 1
+                    max_active = max(max_active, active)
+                time.sleep(0.05)
+                with guard:
+                    active -= 1
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(lambda _: run(), range(2)))
+        self.assertEqual(max_active, 1)
+
+    def test_owner_import_lock_allows_different_owners(self):
+        from apps.datafiles.views.import_coordinator import import_owner_lock
+        other = get_user_model().objects.create_user('integrity_other', password='x')
+        active = 0
+        max_active = 0
+        guard = threading.Lock()
+        barrier = threading.Barrier(2)
+
+        def run(user):
+            nonlocal active, max_active
+            with import_owner_lock(user):
+                with guard:
+                    active += 1
+                    max_active = max(max_active, active)
+                barrier.wait(timeout=2)
+                with guard:
+                    active -= 1
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(run, (self.owner, other)))
+        self.assertEqual(max_active, 2)
+
     def _request(self):
         from rest_framework.test import APIRequestFactory
         request = APIRequestFactory().post(
