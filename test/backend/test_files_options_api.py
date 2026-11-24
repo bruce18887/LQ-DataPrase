@@ -39,6 +39,7 @@ EXPECTED_KEYS = {
     'id', 'filename', 'file_type', 'batch_name', 'sub_batch',
     'format_type', 'program_name', 'product_code', 'row_count',
     'col_count', 'file_size', 'source_mtime', 'created_at', 'status',
+    'combination_id', 'combination_name', 'batch_no',
 }
 
 
