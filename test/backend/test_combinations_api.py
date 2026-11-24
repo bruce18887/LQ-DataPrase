@@ -1,4 +1,7 @@
+from unittest import mock
+
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError
 from rest_framework.test import APITestCase
 
 from apps.datafiles.models import DataCombination, DataFile
@@ -43,6 +46,48 @@ class CombinationApiTests(APITestCase):
             f'/api/v1/combinations/{combo_id}/', {'name': 'other'}, format='json')
         self.assertEqual(duplicate_rename.status_code, 400)
         self.assertEqual(duplicate_rename.data['code'], 'duplicate_combination')
+
+    def test_create_save_time_duplicate_rolls_back(self):
+        self.client.raise_request_exception = False
+        original_save = DataCombination.save
+
+        def save_then_fail(instance, *args, **kwargs):
+            original_save(instance, *args, **kwargs)
+            raise IntegrityError('simulated unique constraint race')
+
+        with mock.patch.object(
+            DataCombination, 'save', autospec=True, side_effect=save_then_fail,
+        ):
+            response = self.client.post(
+                '/api/v1/combinations/', {'name': 'gage'}, format='json')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data.get('code'), 'duplicate_combination')
+        self.assertFalse(DataCombination.objects.filter(
+            owner=self.owner, name_key='gage').exists())
+
+    def test_rename_save_time_duplicate_rolls_back(self):
+        combo = DataCombination.objects.create(owner=self.owner, name='gage')
+        original_updated_at = combo.updated_at
+        self.client.raise_request_exception = False
+        original_save = DataCombination.save
+
+        def save_then_fail(instance, *args, **kwargs):
+            original_save(instance, *args, **kwargs)
+            raise IntegrityError('simulated unique constraint race')
+
+        with mock.patch.object(
+            DataCombination, 'save', autospec=True, side_effect=save_then_fail,
+        ):
+            response = self.client.patch(
+                f'/api/v1/combinations/{combo.id}/',
+                {'name': 'caliper'}, format='json')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data.get('code'), 'duplicate_combination')
+        combo.refresh_from_db()
+        self.assertEqual(combo.name, 'gage')
+        self.assertEqual(combo.updated_at, original_updated_at)
 
     def test_rename_recomputes_tags_without_touching_file_row(self):
         combo = DataCombination.objects.create(owner=self.owner, name='gage')
@@ -108,6 +153,31 @@ class CombinationApiTests(APITestCase):
         row.refresh_from_db()
         self.assertIsNone(row.combination)
         self.assertEqual(row.batch_no, '')
+
+    def test_bulk_assign_rejects_non_integer_combination_ids_without_changes(self):
+        combo = DataCombination.objects.create(owner=self.owner, name='gage')
+        invalid_ids = [
+            True, False, float(combo.id), float(combo.id) + 0.9, str(combo.id),
+        ]
+        for index, invalid_id in enumerate(invalid_ids):
+            with self.subTest(combination_id=invalid_id):
+                row = self._file(
+                    self.owner, f'invalid-{index}.csv',
+                    combination=combo, batch_no='OLD',
+                )
+                original_updated_at = row.updated_at
+                response = self.client.post('/api/v1/files/assign_combination/', {
+                    'file_ids': [row.id],
+                    'combination_id': invalid_id,
+                    'batch_no': 'NEW',
+                }, format='json')
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.data.get('code'), 'validation_error')
+                row.refresh_from_db()
+                self.assertEqual(row.combination_id, combo.id)
+                self.assertEqual(row.batch_no, 'OLD')
+                self.assertEqual(row.updated_at, original_updated_at)
 
     def test_other_users_combination_is_not_visible_or_assignable(self):
         theirs = DataCombination.objects.create(owner=self.other, name='gage')

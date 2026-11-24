@@ -1,4 +1,4 @@
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
@@ -33,7 +33,11 @@ class DataCombinationViewSet(ModelViewSet):
             owner=request.user, name_key=name.strip().casefold(),
         ).exists():
             return error_response('duplicate_combination', '组合名已存在')
-        return super().create(request, *args, **kwargs)
+        try:
+            with transaction.atomic():
+                return super().create(request, *args, **kwargs)
+        except IntegrityError:
+            return error_response('duplicate_combination', '组合名已存在')
 
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -42,7 +46,11 @@ class DataCombinationViewSet(ModelViewSet):
             owner=request.user, name_key=name.strip().casefold(),
         ).exclude(pk=instance.pk).exists():
             return error_response('duplicate_combination', '组合名已存在')
-        return super().update(request, *args, **kwargs)
+        try:
+            with transaction.atomic():
+                return super().update(request, *args, **kwargs)
+        except IntegrityError:
+            return error_response('duplicate_combination', '组合名已存在')
 
 
 class AssignCombinationView(APIView):
@@ -60,9 +68,7 @@ class AssignCombinationView(APIView):
         combination_id = request.data.get('combination_id')
         combination = None
         if combination_id is not None:
-            try:
-                combination_id = int(combination_id)
-            except (TypeError, ValueError):
+            if not isinstance(combination_id, int) or isinstance(combination_id, bool):
                 return error_response('validation_error', 'combination_id 必须是整数')
             combination = get_object_or_404(
                 DataCombination, pk=combination_id, owner=request.user)
