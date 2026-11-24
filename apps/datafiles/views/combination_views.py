@@ -86,25 +86,34 @@ class AssignCombinationView(APIView):
             except ValueError as exc:
                 return error_response('validation_error', str(exc))
 
-        with transaction.atomic():
-            if combination is not None and not DataCombination.objects.filter(
-                pk=combination.pk, owner=request.user,
-            ).exists():
-                return error_response('combination_not_found', '组合不存在', 404)
-            rows = list(DataFile.objects.filter(owner=request.user, id__in=raw_ids))
-            if len(rows) != len(set(raw_ids)):
-                return error_response(
-                    'file_not_found_or_not_owned', '部分文件不存在或不属于当前用户', 404)
-            updates = {'combination_id': combination.pk if combination else None,
-                       'updated_at': timezone.now(),
-                       **update_values}
-            changed = DataFile.objects.filter(
-                owner=request.user, id__in=raw_ids,
-            ).update(**updates)
-            if changed != len(raw_ids):
-                transaction.set_rollback(True)
-                return error_response(
-                    'file_not_found_or_not_owned', '部分文件不存在或不属于当前用户', 404)
-            rows = list(DataFile.objects.filter(owner=request.user, id__in=raw_ids).order_by('id'))
+        try:
+            with transaction.atomic():
+                if combination is not None:
+                    combination = DataCombination.objects.select_for_update().filter(
+                        pk=combination_id, owner=request.user,
+                    ).first()
+                    if combination is None:
+                        return error_response('combination_not_found', '组合不存在', 404)
+                rows = list(DataFile.objects.select_for_update().filter(
+                    owner=request.user, id__in=raw_ids,
+                ))
+                if len(rows) != len(set(raw_ids)):
+                    return error_response(
+                        'file_not_found_or_not_owned', '部分文件不存在或不属于当前用户', 404)
+                updates = {'combination_id': combination.pk if combination else None,
+                           'updated_at': timezone.now(),
+                           **update_values}
+                changed = DataFile.objects.filter(
+                    owner=request.user, id__in=raw_ids,
+                ).update(**updates)
+                if changed != len(raw_ids):
+                    transaction.set_rollback(True)
+                    return error_response(
+                        'file_not_found_or_not_owned', '部分文件不存在或不属于当前用户', 404)
+                rows = list(DataFile.objects.filter(
+                    owner=request.user, id__in=raw_ids,
+                ).order_by('id'))
+        except IntegrityError:
+            return error_response('combination_not_found', '组合不存在', 404)
 
         return Response(DataFileSerializer(rows, many=True).data)

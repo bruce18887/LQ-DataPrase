@@ -24,9 +24,7 @@ def import_lock_key(owner, target_path):
     """Stable owner + normalized target key, shared by file and batch imports."""
     target = os.path.normcase(os.path.normpath(target_path))
     digest = hashlib.sha256(f'{owner.pk}\0{target}'.encode('utf-8')).hexdigest()
-    lock_dir = os.path.join(
-        settings.MEDIA_ROOT, 'data', str(owner.username), '.import-locks',
-    )
+    lock_dir = os.path.join(settings.MEDIA_ROOT, '.import-locks', str(owner.pk))
     os.makedirs(lock_dir, exist_ok=True)
     return os.path.join(lock_dir, digest + '.lock')
 
@@ -73,12 +71,14 @@ else:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
-def find_existing_import_row(owner, file_path, file_type, batch_name=''):
+def find_existing_import_row(owner, file_path, file_type, batch_name='', for_update=False):
     """Find an owner/type/batch row with the same normalized disk path."""
     target = import_path_key(file_path)
     rows = DataFile.objects.filter(
         owner=owner, file_type=file_type, batch_name=batch_name,
     )
+    if for_update:
+        rows = rows.select_for_update()
     return next((row for row in rows if import_path_key(row.file_path) == target), None)
 
 
@@ -112,7 +112,9 @@ def _refresh_in_transaction(row, combination, batch_no_override, tags, parsed):
 def refresh_existing_import_row(row, combination, batch_no_override, tags, parsed):
     """Re-read by owner/pk in a short transaction; deleted rows are skipped."""
     with transaction.atomic():
-        current = DataFile.objects.filter(pk=row.pk, owner_id=row.owner_id).first()
+        current = DataFile.objects.select_for_update().filter(
+            pk=row.pk, owner_id=row.owner_id,
+        ).first()
         if current is None:
             return False
         return _refresh_in_transaction(
@@ -132,7 +134,9 @@ def import_or_refresh_file(user, file_path, file_type='single', batch_name='',
         parsed = parse_file_meta(file_path)
     with import_path_lock(user, file_path) if lock_target else nullcontext():
         with transaction.atomic():
-            existing = find_existing_import_row(user, file_path, file_type, batch_name)
+            existing = find_existing_import_row(
+                user, file_path, file_type, batch_name, for_update=True,
+            )
             if existing is not None:
                 refreshed = _refresh_in_transaction(
                     existing, combination, batch_no_override, tags, parsed,

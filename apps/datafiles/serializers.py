@@ -23,7 +23,7 @@ def normalize_tags(raw):
     a list, even when the input is None / malformed. Raises
     ``serializers.ValidationError`` when limits are exceeded.
     """
-    if raw is None:
+    if raw is None or raw == '':
         return []
     if not isinstance(raw, list):
         raise serializers.ValidationError('tags 必须是列表')

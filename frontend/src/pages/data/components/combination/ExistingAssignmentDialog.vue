@@ -29,6 +29,7 @@
     </div>
 
     <el-table
+      ref="tableRef"
       :data="filteredFiles"
       row-key="id"
       max-height="360"
@@ -103,9 +104,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { DataCombination, DataFile } from '../../../../types'
 import FileTagsCell from '../FileTagsCell.vue'
+
+interface TableSelectionHandle {
+  toggleRowSelection: (row: DataFile, selected: boolean) => void
+  clearSelection: () => void
+}
 
 const props = defineProps<{
   visible: boolean
@@ -118,6 +124,7 @@ const emit = defineEmits<{
   submit: [payload: { fileIds: number[]; combinationId: number; batchNo?: string }]
 }>()
 
+const tableRef = ref<TableSelectionHandle | null>(null)
 const search = ref('')
 const sourceBatch = ref('')
 const combinationId = ref<number | null>(null)
@@ -154,11 +161,14 @@ function onSelectionChange(rows: DataFile[]) {
   selectedIds.value = new Set(rows.map(row => row.id))
 }
 
-function selectSourceBatch() {
+async function selectSourceBatch() {
   if (!sourceBatch.value) return
+  search.value = ''
+  await nextTick()
   const next = new Set(selectedIds.value)
-  for (const file of props.files) {
-    if (file.batch_name === sourceBatch.value) next.add(file.id)
+  for (const file of filteredFiles.value) {
+    tableRef.value?.toggleRowSelection(file, true)
+    next.add(file.id)
   }
   selectedIds.value = next
 }
@@ -169,6 +179,7 @@ function reset() {
   combinationId.value = null
   batchNo.value = ''
   selectedIds.value = new Set()
+  tableRef.value?.clearSelection()
 }
 
 function submit() {
