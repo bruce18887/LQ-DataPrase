@@ -9,6 +9,13 @@
       <p class="tab-subtitle">为每个文件分配 FT / QA1 / QA2 角色，生成对比分析报表</p>
     </header>
 
+    <el-alert
+      v-if="combinationName"
+      :title="`当前组合：${combinationName}；候选文件已收敛，角色仍需手动分配`"
+      type="info"
+      :closable="false"
+    />
+
     <!-- 角色分配 -->
     <section class="section-card">
       <div class="card-header">
@@ -134,6 +141,7 @@ import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { buyoffApi } from '../../api/buyoff'
 import { downloadBlob, extractFilenameFromContentDisposition } from '../../utils/download'
+import { filterReportFiles } from '../../utils/reportFileScope'
 import type { DataFile } from '../../types'
 import FileSelect from '../../components/common/FileSelect.vue'
 
@@ -147,9 +155,15 @@ interface AnalysisResult {
 interface Props {
   /** 文件列表（由 DataManagement 维护刷新后传入，组件不自行拉取） */
   files: DataFile[]
+  combinationId?: number | null
+  combinationName?: string | null
 }
 
-const props = withDefaults(defineProps<Props>(), { files: () => [] })
+const props = withDefaults(defineProps<Props>(), {
+  files: () => [],
+  combinationId: null,
+  combinationName: null,
+})
 
 const roleAssignments = ref<Record<string, number | null>>({
   FT: null,
@@ -200,10 +214,11 @@ const fileSpecificItems = computed(() => {
 })
 
 /**
- * 当前角色可选文件：排除其它角色已占用；当前角色已选文件即使被其它角色
- * 占用也并回 options（否则 el-select 对不在 options 中的值显示裸 id 数字）。
+ * 当前角色可选文件：先按组合收敛，再排除其它角色已占用；当前角色已选文件
+ * 即使被其它角色占用也并回 options（否则 el-select 显示裸 id 数字）。
  */
 function availableFiles(currentRole: string) {
+  const scopedFiles = filterReportFiles(props.files, props.combinationId)
   const usedIds = new Set<number>()
   for (const [role, id] of Object.entries(roleAssignments.value)) {
     if (role !== currentRole && id !== null) {
@@ -212,7 +227,7 @@ function availableFiles(currentRole: string) {
   }
   const own = roleAssignments.value[currentRole]
   if (own != null) usedIds.delete(own)
-  return props.files.filter(f => !usedIds.has(f.id))
+  return scopedFiles.filter(f => !usedIds.has(f.id))
 }
 
 async function analyze() {

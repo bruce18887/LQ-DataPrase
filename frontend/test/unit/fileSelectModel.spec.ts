@@ -39,6 +39,15 @@ describe('fileSelectModel', () => {
     expect(matchFile(f, '')).toBe(true)
   })
 
+  it('matchFile 命中组合名和批次号', () => {
+    const f = file(1, 'Alpha.csv', {
+      combination_name: 'Gage Lab',
+      batch_no: 'BE01-2608130015',
+    })
+    expect(matchFile(f, 'gage')).toBe(true)
+    expect(matchFile(f, 'be01')).toBe(true)
+  })
+
   it('fileRank 前缀 0 / 包含 1 / 其它 2', () => {
     expect(fileRank(file(1, 'Alpha'), 'al')).toBe(0)
     expect(fileRank(file(1, 'xAlpha'), 'al')).toBe(1)
@@ -73,5 +82,14 @@ describe('fileSelectModel', () => {
     })
     expect(metaText(f)).toContain('P · FT · 12 行')
     expect(metaText(file(2, 'b.csv'))).toBe('FT · 0 行')
+  })
+
+  it('metaText 展示组合名与批次号', () => {
+    const f = file(1, 'a.csv', {
+      combination_name: 'Gage Lab',
+      batch_no: 'BE01-2608130015',
+    })
+    expect(metaText(f)).toContain('Gage Lab')
+    expect(metaText(f)).toContain('BE01-2608130015')
   })
 })

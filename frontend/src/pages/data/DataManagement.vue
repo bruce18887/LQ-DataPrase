@@ -9,7 +9,7 @@
           role="tab"
           :aria-selected="activeTab === tab.key"
           :class="['tab-btn', { active: activeTab === tab.key }]"
-          @click="activeTab = tab.key"
+          @click="selectTab(tab.key)"
         >
           <span class="tab-icon">{{ tab.icon }}</span>
           <span class="tab-label">{{ tab.label }}</span>
@@ -90,12 +90,20 @@
 
       <!-- Gage Summary -->
       <div v-show="activeTab === 'gage'" role="tabpanel" class="content-section fade-in">
-        <GageSummary :files="selectableFiles" />
+        <GageSummary
+          :files="selectableFiles"
+          :combination-id="reportContext?.kind === 'gage' ? reportContext.combinationId : null"
+          :combination-name="reportContext?.kind === 'gage' ? reportContext.combinationName : null"
+        />
       </div>
 
       <!-- Buyoff Form -->
       <div v-show="activeTab === 'buyoff'" role="tabpanel" class="content-section fade-in">
-        <BuyoffForm :files="selectableFiles" />
+        <BuyoffForm
+          :files="selectableFiles"
+          :combination-id="reportContext?.kind === 'buyoff' ? reportContext.combinationId : null"
+          :combination-name="reportContext?.kind === 'buyoff' ? reportContext.combinationName : null"
+        />
       </div>
     </div>
   </div>
@@ -211,6 +219,11 @@ const reportContext = ref<ReportContext | null>(null)
 function onOpenCombinationReport(payload: ReportContext) {
   reportContext.value = payload
   activeTab.value = payload.kind
+}
+
+function selectTab(key: string) {
+  reportContext.value = null
+  activeTab.value = key
 }
 
 const tabs = [

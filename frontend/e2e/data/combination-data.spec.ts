@@ -1,6 +1,7 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { gotoApp } from '../helpers/nav'
 import { deleteBatchQuiet, deleteFilesByNameQuiet } from '../helpers/cleanup'
+import { popperOf } from '../helpers/elplus'
 
 const CSV = [
   '[GENERAL],',
@@ -271,6 +272,55 @@ test.describe('组合数据', { tag: ['@p2', '@data'] }, () => {
       }
     }
   })
+
+  for (const kind of ['gage', 'buyoff'] as const) {
+    test(`${kind}：组合入口收敛候选，手动切签清空上下文`, async ({ page }) => {
+      await gotoApp(page, '/data')
+      const prefix = `e2e_rep_${kind}_${Date.now()}`
+      const comboName = `${prefix}_combo`
+      const grouped = `${prefix}_grouped.csv`
+      const ungrouped = `${prefix}_control.csv`
+      try {
+        const combinationId = await createCombination(page, comboName)
+        await uploadCombinationFile(page, combinationId, grouped)
+        await uploadCombinationFile(page, null, ungrouped)
+        await gotoApp(page, '/data')
+        await openCombinationTab(page)
+        await selectCombination(page, comboName)
+        await page.getByTestId(`combination-open-${kind}`).click()
+
+        const manualTarget = kind === 'gage' ? 'Site 仍需手动分配' : '角色仍需手动分配'
+        const contextAlert = page.getByText(
+          `当前组合：${comboName}；候选文件已收敛，${manualTarget}`,
+          { exact: true },
+        )
+        await expect(contextAlert).toBeVisible()
+        const select = page.getByRole('combobox', {
+          name: kind === 'gage' ? '选择Gage文件' : '选择角色用户',
+        }).first()
+        const selectWrapper = select.locator('xpath=ancestor::div[contains(@class, "el-select__wrapper")][1]')
+        await selectWrapper.click()
+        const popper = popperOf(page, 'dp-file-select-dropdown')
+        const groupedOption = popper.locator('.el-select-dropdown__item').filter({ hasText: grouped })
+        const ungroupedOption = popper.locator('.el-select-dropdown__item').filter({ hasText: ungrouped })
+        await expect(groupedOption).toHaveCount(1)
+        await expect(ungroupedOption).toHaveCount(0)
+        await expect(select).toHaveValue('')
+
+        await page.keyboard.press('Escape')
+        await expect(popper).toHaveCount(0)
+        await page.getByRole('tab', {
+          name: kind === 'gage' ? /Gage Summary/ : /Buyoff Form/,
+        }).click()
+        await expect(contextAlert).toHaveCount(0)
+        await selectWrapper.click()
+        await expect(ungroupedOption).toHaveCount(1)
+      } finally {
+        await deleteFilesByNameQuiet(page, prefix)
+        await deleteCombinationByName(page, comboName)
+      }
+    })
+  }
 
   for (const theme of ['light', 'night'] as const) {
     test(`${theme}：单文件保留手动标签并显示只读组合标签`, async ({ page }, testInfo) => {
