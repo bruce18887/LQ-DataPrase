@@ -27,7 +27,14 @@
       @delete="removeActiveCombination"
     />
 
-    <FileUploadArea visible :active="props.active" @upload-success="handleUploadSuccess" />
+    <FileUploadArea
+      visible
+      :active="props.active"
+      :combinations="combinations"
+      :combination-id="activeId"
+      lock-combination
+      @upload-success="handleUploadSuccess"
+    />
 
     <section class="combination-files-panel" aria-label="组合文件">
       <CombinationFileGroups

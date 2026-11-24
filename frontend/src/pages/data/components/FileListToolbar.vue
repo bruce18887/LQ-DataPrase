@@ -45,6 +45,26 @@
       </el-popover>
     </div>
     <div class="toolbar-right">
+      <el-select-v2
+        class="combination-filter"
+        :model-value="combinationId"
+        :options="combinationOptions"
+        clearable
+        filterable
+        placeholder="全部组合"
+        aria-label="组合筛选"
+        data-testid="file-combination-filter"
+        @update:model-value="emit('combination-change', $event)"
+      />
+      <el-button
+        type="primary"
+        plain
+        :disabled="selectedCount < 1"
+        @click="emit('assign-click')"
+      >
+        <el-icon><Plus /></el-icon>
+        加入组合
+      </el-button>
       <!-- popper-class 是实例级下拉身份：面板 teleport 到 body，全局
            `.el-select-dropdown:visible` 在「上一个面板还在 leave 过渡」时会挑错家
            （机理见 e2e/helpers/elplus.ts 的 popperOf）。e2e 侧身份串是
@@ -114,8 +134,9 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Search, Delete, Upload, Tools, Collection } from '@element-plus/icons-vue'
+import { Search, Delete, Upload, Tools, Collection, Plus } from '@element-plus/icons-vue'
 import type { FileUsage } from '../../../api/datafiles'
+import type { DataCombination } from '../../../types'
 import {
   usageBreakdownRows,
   usageChipText,
@@ -131,6 +152,8 @@ const props = defineProps<{
   selectedCount: number
   usage: FileUsage | null
   hiddenFilter: HiddenFilter
+  combinations: DataCombination[]
+  combinationId: number | null
 }>()
 
 const emit = defineEmits<{
@@ -139,6 +162,8 @@ const emit = defineEmits<{
   'fix-click': []
   'bulk-delete': []
   'combine-click': []
+  'assign-click': []
+  'combination-change': [value: number | null]
   'hidden-filter-change': [value: HiddenFilter]
 }>()
 
@@ -151,6 +176,10 @@ const usageRows = computed(() => usageBreakdownRows(props.usage))
 const usageJobs = computed(() => usageJobsLine(props.usage))
 const usageOutside = computed(() => usageOutsideLine(props.usage))
 const usageScanned = computed(() => usageScannedText(props.usage))
+const combinationOptions = computed(() => props.combinations.map((combo) => ({
+  value: combo.id,
+  label: combo.name,
+})))
 // 五个派生串一律走 computed，不在模板里直接调纯函数（Task 7 派发词原话「不在模板里重复调用
 // 纯函数」，落地时是三个，2026-11-22 补齐成五个）：内联调用会在每次工具栏重渲染时重跑，而搜索框
 // 是本地 state ⇒ 每敲一个字都重渲染这一片。代价本来是微秒级，改它的理由是**一致**。
@@ -216,6 +245,10 @@ function onSearchInput() {
 
 .search-input {
   width: 220px;
+}
+
+.combination-filter {
+  width: 160px;
 }
 
 .hidden-filter {
