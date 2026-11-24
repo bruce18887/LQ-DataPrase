@@ -19,11 +19,13 @@ from apps.datafiles.utils import extract_data_date, extract_stage, resolve_file_
 
 from ._helpers import (
     _is_data_csv,
+    _refresh_existing_import_row,
     _register_file,
     _safe_batch_dir,
     _user_upload_dir,
     parse_file_meta,
 )
+from .import_options import parse_import_options
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +155,9 @@ class BatchDirImportView(APIView):
         dir_name = request.data.get('dir_name')
         if not dir_name:
             return error_response('param_required', 'dir_name is required')
+        combination, batch_no, manual_tags, options_error = parse_import_options(request)
+        if options_error is not None:
+            return options_error
 
         batch_base = _user_upload_dir(request.user, 'batch')
         # dir_name arrives in the request body, so it is not constrained by the
@@ -170,12 +175,12 @@ class BatchDirImportView(APIView):
         # (data/<user>/...) while os.walk yields absolute disk paths — without
         # resolving, the set diff never matches and re-import creates dupes.
         # Mirrors BatchDirListView registered_files normalization above.
-        existing_paths = set(
-            os.path.normpath(resolve_file_path(p)) for p in
-            DataFile.objects.filter(
-                owner=request.user, file_type='batch', batch_name=dir_name
-            ).values_list('file_path', flat=True)
-        )
+        existing_rows = {
+            os.path.normpath(resolve_file_path(row.file_path)): row
+            for row in DataFile.objects.filter(
+                owner=request.user, file_type='batch', batch_name=dir_name,
+            )
+        }
 
         created = []
         for root, _dirs, files in os.walk(dir_path):
@@ -183,18 +188,26 @@ class BatchDirImportView(APIView):
                 if not _is_data_csv(f):
                     continue
                 fp = os.path.join(root, f)
-                if os.path.normpath(fp) in existing_paths:
-                    continue  # already registered
+                normalized = os.path.normpath(fp)
                 # 提取子批次名（相对路径的第一级目录）
                 rel_path = os.path.relpath(root, dir_path)
                 sub_batch = rel_path if rel_path != '.' else ''
                 # 全量解析放在事务外：解析一只 275MB 文件实测 3.2s，若整批
                 # 包在同一个 atomic 里，SQLite 全局写锁会被持有十几秒。
                 parsed = parse_file_meta(fp)
+                if normalized in existing_rows:
+                    _refresh_existing_import_row(
+                        existing_rows[normalized], combination,
+                        batch_no, manual_tags, parsed,
+                    )
+                    continue
                 try:
                     with transaction.atomic():  # 只包 INSERT，毫秒级
-                        df = _register_file(request.user, fp, 'batch', dir_name,
-                                            sub_batch, parsed=parsed)
+                        df = _register_file(
+                            request.user, fp, 'batch', dir_name, sub_batch,
+                            parsed=parsed, combination=combination,
+                            batch_no_override=batch_no, tags=manual_tags,
+                        )
                         created.append(df)
                 except Exception:
                     logger.warning(

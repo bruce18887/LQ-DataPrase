@@ -13,8 +13,10 @@ from django.utils import timezone
 
 from apps.common.exceptions import UnsafeUsernameError
 from apps.common.usernames import is_safe_username
+from apps.datafiles.combination_service import resolve_batch_no
 from apps.datafiles.models import DataFile, ParseHistory
 from apps.datafiles.parsers import BaseATEParser, get_parser
+from apps.datafiles.serializers import normalize_tags
 from apps.datafiles.services import put_cached_parsed_file
 from apps.datafiles.utils import extract_product_code, resolve_file_path, store_file_path
 
@@ -111,7 +113,8 @@ def parse_file_meta(file_path):
 
 
 def _register_file(user, file_path, file_type='single', batch_name='', sub_batch='',
-                   source_mtime=None, parsed=None):
+                   source_mtime=None, parsed=None, combination=None,
+                   batch_no_override='', tags=None):
     """Parse a file and create DataFile + ParseHistory records.
 
     source_mtime: optional aware datetime of the original source file's
@@ -120,6 +123,7 @@ def _register_file(user, file_path, file_type='single', batch_name='', sub_batch
     sub_batch: optional sub-batch name (subdirectory name within the batch).
     parsed: 可选的 parse_file_meta() 结果。批量导入在事务外先解析好再传进来，
     避免全量解析期间持有 SQLite 全局写锁；为 None 时自行解析（单文件上传路径）。
+    combination/batch_no_override/tags 均为可选，保持 SFTP 等既有调用兼容。
     """
     filename = os.path.basename(file_path)
     file_size = os.path.getsize(file_path)
@@ -148,6 +152,9 @@ def _register_file(user, file_path, file_type='single', batch_name='', sub_batch
         # while data filenames may carry unrelated prefixes.
         product_code=extract_product_code(filename, program_name),
         source_mtime=source_mtime,
+        combination=combination,
+        batch_no=resolve_batch_no(batch_no_override, metadata),
+        tags=normalize_tags(tags or []),
         status='ready' if format_type != 'Unknown' else 'error',
     )
 
@@ -169,6 +176,44 @@ def _register_file(user, file_path, file_type='single', batch_name='', sub_batch
     )
 
     return datafile
+
+
+def _merge_tags(existing, incoming):
+    merged = list(existing or [])
+    seen = {str(tag).lower() for tag in merged}
+    for tag in normalize_tags(incoming or []):
+        if tag.lower() not in seen:
+            merged.append(tag)
+            seen.add(tag.lower())
+    return normalize_tags(merged)
+
+
+def _refresh_existing_import_row(row, combination, batch_no_override, tags, parsed):
+    """Refresh import metadata on an already-registered path without inserting."""
+    from rest_framework.exceptions import ValidationError
+
+    update_fields = []
+    if combination is not None and row.combination_id != combination.id:
+        row.combination = combination
+        update_fields.append('combination')
+    resolved = resolve_batch_no(batch_no_override, parsed[2])
+    if (batch_no_override or (resolved and not row.batch_no)) and row.batch_no != resolved:
+        row.batch_no = resolved
+        update_fields.append('batch_no')
+    if tags:
+        try:
+            merged = _merge_tags(row.tags, tags)
+        except ValidationError as exc:
+            logger.warning(
+                '_refresh_existing_import_row: tag merge rejected id=%s: %s',
+                row.id, exc,
+            )
+            merged = row.tags
+        if merged != row.tags:
+            row.tags = merged
+            update_fields.append('tags')
+    if update_fields:
+        row.save(update_fields=[*update_fields, 'updated_at'])
 
 
 def _user_upload_dir(user, file_type='single'):
@@ -364,7 +409,8 @@ def _safe_extract_zip(zip_file, dest_dir):
     return extracted
 
 
-def _register_zip_batch(user, zip_file, filename):
+def _register_zip_batch(user, zip_file, filename, combination=None,
+                        batch_no_override='', tags=None):
     """Extract ``filename``'s zip and register every CSV inside as batch data.
 
     Returns ``(created, error_message)``:
@@ -394,16 +440,23 @@ def _register_zip_batch(user, zip_file, filename):
             shutil.rmtree(dest_dir, ignore_errors=True)
         return [], f'压缩包 {filename} 内未找到 CSV 数据文件'
 
-    existing_paths = set(
-        os.path.normpath(resolve_file_path(p)) for p in
-        DataFile.objects.filter(owner=user, file_type='batch', batch_name=batch_name)
-        .values_list('file_path', flat=True)
-    )
+    existing_rows = {
+        os.path.normpath(resolve_file_path(row.file_path)): row
+        for row in DataFile.objects.filter(
+            owner=user, file_type='batch', batch_name=batch_name,
+        )
+    }
     batch_base = _user_upload_dir(user, 'batch')
     created = []
     for fp in csv_paths:
-        if os.path.normpath(fp) in existing_paths:
-            continue  # already registered (re-upload of the same zip)
+        normalized = os.path.normpath(fp)
+        if normalized in existing_rows:
+            parsed = parse_file_meta(fp)
+            _refresh_existing_import_row(
+                existing_rows[normalized], combination,
+                batch_no_override, tags, parsed,
+            )
+            continue
         _, sub_batch = _batch_ctx(fp, batch_base)
         # 解析（全量，实测 3.2s/275MB）必须在事务外：SQLite 的写事务是全局
         # 单写锁，整批包一个事务会让其他人的写请求一起等十几秒。
@@ -411,8 +464,11 @@ def _register_zip_batch(user, zip_file, filename):
         try:
             with transaction.atomic():  # 只包 INSERT，毫秒级
                 created.append(
-                    _register_file(user, fp, 'batch', batch_name, sub_batch,
-                                   parsed=parsed)
+                    _register_file(
+                        user, fp, 'batch', batch_name, sub_batch,
+                        parsed=parsed, combination=combination,
+                        batch_no_override=batch_no_override, tags=tags,
+                    )
                 )
         except Exception:
             logger.warning(
