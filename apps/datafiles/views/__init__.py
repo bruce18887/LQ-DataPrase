@@ -21,6 +21,11 @@ from .file_views import (  # noqa: F401
     FileUploadView,
 )
 
+from .combination_views import (  # noqa: F401
+    DataCombinationViewSet,
+    AssignCombinationView,
+)
+
 from .admin_usage_views import (  # noqa: F401
     AdminFileUserUsageView,
 )

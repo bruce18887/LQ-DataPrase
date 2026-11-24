@@ -3,10 +3,12 @@ from rest_framework.routers import DefaultRouter
 
 from apps.datafiles.views import (
     AdminFileUserUsageView,
+    AssignCombinationView,
     BatchDirDeleteView,
     BatchDirImportView,
     BatchDirListView,
     DataBrowserView,
+    DataCombinationViewSet,
     DataConsistencyCheckView,
     DataFileViewSet,
     FileActivateView,
@@ -18,8 +20,10 @@ from apps.datafiles.views import (
 
 router = DefaultRouter()
 router.register(r'files', DataFileViewSet, basename='datafile')
+router.register(r'combinations', DataCombinationViewSet, basename='combination')
 
 urlpatterns = [
+    path('files/assign_combination/', AssignCombinationView.as_view(), name='file-assign-combination'),
     # 必须排在 router include 之前：DefaultRouter 生成的详情路由是
     # `^files/(?P<pk>[^/.]+)/$`（lookup 是 `[^/.]+`，不是 <int>，见 routers.py:143），
     # 会把 `files/usage/` 当成 pk='usage' 的详情请求吞掉。
