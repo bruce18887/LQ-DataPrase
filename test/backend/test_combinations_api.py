@@ -2,6 +2,7 @@ from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
+from django.db.models.query import QuerySet
 from rest_framework.test import APITestCase
 
 from apps.datafiles.models import DataCombination, DataFile
@@ -46,6 +47,22 @@ class CombinationApiTests(APITestCase):
             f'/api/v1/combinations/{combo_id}/', {'name': 'other'}, format='json')
         self.assertEqual(duplicate_rename.status_code, 400)
         self.assertEqual(duplicate_rename.data['code'], 'duplicate_combination')
+
+    def test_create_and_rename_reject_missing_non_string_and_blank_names(self):
+        for index, payload in enumerate(({}, {'name': None}, {'name': 12}, {'name': '   '})):
+            with self.subTest(create=payload):
+                resp = self.client.post('/api/v1/combinations/', payload, format='json')
+                self.assertEqual(resp.status_code, 400, resp.data)
+                self.assertEqual(resp.data['code'], 'combination_name_required')
+        combo = DataCombination.objects.create(owner=self.owner, name='gage')
+        for payload in ({'name': None}, {'name': []}, {'name': ' \t '}):
+            with self.subTest(rename=payload):
+                resp = self.client.patch(
+                    f'/api/v1/combinations/{combo.id}/', payload, format='json')
+                self.assertEqual(resp.status_code, 400, resp.data)
+                self.assertEqual(resp.data['code'], 'combination_name_required')
+        combo.refresh_from_db()
+        self.assertEqual(combo.name, 'gage')
 
     def test_create_save_time_duplicate_rolls_back(self):
         self.client.raise_request_exception = False
@@ -124,6 +141,50 @@ class CombinationApiTests(APITestCase):
         self.assertEqual(resp.status_code, 404)
         mine.refresh_from_db()
         self.assertIsNone(mine.combination)
+
+    def test_bulk_assign_rolls_back_when_file_disappears_during_update(self):
+        combo = DataCombination.objects.create(owner=self.owner, name='gage')
+        survivor = self._file(self.owner, 'survivor.csv', batch_no='OLD')
+        disappearing = self._file(self.owner, 'disappearing.csv', batch_no='OLD')
+        original_update = QuerySet.update
+        updating_assignment = False
+
+        def update_with_disappearing_file(queryset, **kwargs):
+            nonlocal updating_assignment
+            if (queryset.model is DataFile and 'combination_id' in kwargs
+                    and not updating_assignment):
+                ids = set(queryset.values_list('pk', flat=True))
+                if ids == {survivor.pk, disappearing.pk}:
+                    updating_assignment = True
+                    try:
+                        # Simulate a concurrent owner change after the preflight read:
+                        # the victim leaves this request's scoped update, but its
+                        # database mutation must roll back with the survivor update.
+                        original_update(
+                            DataFile.objects.filter(pk=disappearing.pk),
+                            owner=self.other,
+                        )
+                        return original_update(
+                            queryset.exclude(pk=disappearing.pk), **kwargs)
+                    finally:
+                        updating_assignment = False
+            return original_update(queryset, **kwargs)
+
+        with mock.patch.object(QuerySet, 'update', autospec=True,
+                               side_effect=update_with_disappearing_file):
+            response = self.client.post('/api/v1/files/assign_combination/', {
+                'file_ids': [survivor.pk, disappearing.pk],
+                'combination_id': combo.pk,
+                'batch_no': 'NEW',
+            }, format='json')
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data.get('code'), 'file_not_found_or_not_owned')
+        for row in (survivor, disappearing):
+            row.refresh_from_db()
+            self.assertEqual(row.owner_id, self.owner.pk)
+            self.assertIsNone(row.combination_id)
+            self.assertEqual(row.batch_no, 'OLD')
 
     def test_bulk_assign_preserves_clears_and_sets_batch_number(self):
         combo = DataCombination.objects.create(owner=self.owner, name='gage')

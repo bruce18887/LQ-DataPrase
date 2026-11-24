@@ -23,7 +23,7 @@ def normalize_tags(raw):
     a list, even when the input is None / malformed. Raises
     ``serializers.ValidationError`` when limits are exceeded.
     """
-    if not raw:
+    if raw is None:
         return []
     if not isinstance(raw, list):
         raise serializers.ValidationError('tags 必须是列表')
@@ -104,7 +104,9 @@ class DataFileSerializer(serializers.ModelSerializer):
             'is_hidden', 'status', 'status_display',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'owner', 'filename', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id', 'owner', 'filename', 'batch_no', 'created_at', 'updated_at',
+        ]
 
     def get_file_path(self, obj) -> str:
         return resolve_file_path(obj.file_path)

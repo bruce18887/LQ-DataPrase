@@ -19,6 +19,7 @@ from apps.datafiles.parsers import BaseATEParser, get_parser
 from apps.datafiles.serializers import normalize_tags
 from apps.datafiles.services import put_cached_parsed_file
 from apps.datafiles.utils import extract_product_code, resolve_file_path, store_file_path
+from .import_coordinator import import_path_key, import_path_lock
 
 logger = logging.getLogger(__name__)
 
@@ -79,11 +80,6 @@ def _is_summary_csv(filename):
 def _is_data_csv(filename):
     """A CSV that holds real ATE data (i.e. a non-summary ``.csv``)."""
     return filename.lower().endswith('.csv') and not _is_summary_csv(filename)
-
-
-def import_path_key(file_path):
-    """Canonical key for matching a disk path to a stored import path."""
-    return os.path.normcase(os.path.normpath(resolve_file_path(file_path)))
 
 
 def parse_file_meta(file_path):
@@ -194,31 +190,11 @@ def _merge_tags(existing, incoming):
 
 
 def _refresh_existing_import_row(row, combination, batch_no_override, tags, parsed):
-    """Refresh import metadata on an already-registered path without inserting."""
-    from rest_framework.exceptions import ValidationError
-
-    update_fields = []
-    if combination is not None and row.combination_id != combination.id:
-        row.combination = combination
-        update_fields.append('combination')
-    resolved = resolve_batch_no(batch_no_override, parsed[2])
-    if (batch_no_override or (resolved and not row.batch_no)) and row.batch_no != resolved:
-        row.batch_no = resolved
-        update_fields.append('batch_no')
-    if tags:
-        try:
-            merged = _merge_tags(row.tags, tags)
-        except ValidationError as exc:
-            logger.warning(
-                '_refresh_existing_import_row: tag merge rejected id=%s: %s',
-                row.id, exc,
-            )
-            merged = row.tags
-        if merged != row.tags:
-            row.tags = merged
-            update_fields.append('tags')
-    if update_fields:
-        row.save(update_fields=[*update_fields, 'updated_at'])
+    """Refresh an existing import row only if it still exists for this owner."""
+    from .import_coordinator import refresh_existing_import_row
+    return refresh_existing_import_row(
+        row, combination, batch_no_override, tags, parsed,
+    )
 
 
 def _user_upload_dir(user, file_type='single'):
@@ -416,6 +392,17 @@ def _safe_extract_zip(zip_file, dest_dir):
 
 def _register_zip_batch(user, zip_file, filename, combination=None,
                         batch_no_override='', tags=None):
+    """Serialize ZIP extraction/registration by owner and batch directory."""
+    batch_name = _zip_base_name(filename)
+    dest_dir = os.path.join(_user_upload_dir(user, 'batch'), batch_name)
+    with import_path_lock(user, dest_dir):
+        return _register_zip_batch_locked(
+            user, zip_file, filename, combination, batch_no_override, tags,
+        )
+
+
+def _register_zip_batch_locked(user, zip_file, filename, combination=None,
+                               batch_no_override='', tags=None):
     """Extract ``filename``'s zip and register every CSV inside as batch data.
 
     Returns ``(created, error_message)``:
@@ -445,37 +432,19 @@ def _register_zip_batch(user, zip_file, filename, combination=None,
             shutil.rmtree(dest_dir, ignore_errors=True)
         return [], f'压缩包 {filename} 内未找到 CSV 数据文件'
 
-    existing_rows = {
-        import_path_key(row.file_path): row
-        for row in DataFile.objects.filter(
-            owner=user, file_type='batch', batch_name=batch_name,
-        )
-    }
+    from .import_coordinator import import_or_refresh_file
     batch_base = _user_upload_dir(user, 'batch')
     created = []
     for fp in csv_paths:
-        normalized = import_path_key(fp)
-        if normalized in existing_rows:
-            parsed = parse_file_meta(fp)
-            _refresh_existing_import_row(
-                existing_rows[normalized], combination,
-                batch_no_override, tags, parsed,
-            )
-            continue
         _, sub_batch = _batch_ctx(fp, batch_base)
-        # 解析（全量，实测 3.2s/275MB）必须在事务外：SQLite 的写事务是全局
-        # 单写锁，整批包一个事务会让其他人的写请求一起等十几秒。
-        parsed = parse_file_meta(fp)
         try:
-            with transaction.atomic():  # 只包 INSERT，毫秒级
-                created.append(
-                    _register_file(
-                        user, fp, 'batch', batch_name, sub_batch,
-                        parsed=parsed, combination=combination,
-                        batch_no_override=batch_no_override, tags=tags,
-                    )
-                )
-            existing_rows[normalized] = created[-1]
+            row = import_or_refresh_file(
+                user, fp, 'batch', batch_name, sub_batch,
+                parsed=parse_file_meta(fp), combination=combination,
+                batch_no_override=batch_no_override, tags=tags,
+            )
+            if row is not None and getattr(row, '_import_created', False):
+                created.append(row)
         except Exception:
             logger.warning(
                 '_register_zip_batch: failed to register %s', fp,

@@ -255,8 +255,12 @@ export const datafilesApi = {
   listBatchDirs() {
     return api.get<BatchDirInfo[]>('/batch-dirs/')
   },
-  importBatchDir(dirName: string) {
-    return api.post('/batch-dirs/import/', { dir_name: dirName })
+  importBatchDir(dirName: string, options: UploadOptions = {}) {
+    return api.post('/batch-dirs/import/', {
+      dir_name: dirName,
+      ...(options.combinationId != null ? { combination_id: options.combinationId } : {}),
+      ...(options.batchNo ? { batch_no: options.batchNo } : {}),
+    })
   },
   deleteBatchDir(dirName: string) {
     return api.delete(`/batch-dirs/${encodeURIComponent(dirName)}/`)

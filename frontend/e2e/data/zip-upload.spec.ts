@@ -73,19 +73,19 @@ async function selectCombination(page: Page, name: string) {
   await expect(page.getByTestId('combination-current-name')).toHaveText(name)
 }
 
-async function listUngroupedIds(page: Page): Promise<number[]> {
-  return page.evaluate(async () => {
+async function fileIdByName(page: Page, filename: string): Promise<number> {
+  return page.evaluate(async (name) => {
     const token = localStorage.getItem('access_token')
-    const response = await fetch('/api/v1/files/?page_size=10000&include_hidden=1', {
+    const response = await fetch(`/api/v1/files/?search=${encodeURIComponent(name)}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     })
-    if (!response.ok) throw new Error(`读取未分组文件失败：${response.status}`)
+    if (!response.ok) throw new Error(`读取文件失败：${response.status}`)
     const body = await response.json()
-    const rows: Array<{ id: number; combination_id: number | null }> = Array.isArray(body)
-      ? body
-      : body.results
-    return rows.filter((row) => row.combination_id == null).map((row) => row.id)
-  })
+    const rows: Array<{ id: number; filename: string }> = Array.isArray(body) ? body : body.results
+    const row = rows.find((item) => item.filename === name)
+    if (!row) throw new Error(`本用例文件不存在：${name}`)
+    return row.id
+  }, filename)
 }
 
 test.describe('ZIP 压缩包上传：自动解析为批次数据', { tag: ['@p2', '@data'] }, () => {
@@ -241,15 +241,18 @@ test.describe('ZIP 压缩包上传：自动解析为批次数据', { tag: ['@p2'
 
       combinationId = await createCombination(page, comboName)
       await gotoCombinationTab(page)
-      const ungroupedIds = await listUngroupedIds(page)
-      expect(ungroupedIds.length).toBeGreaterThan(0)
+      const fileId = await fileIdByName(page, filename)
       const existingButton = page.getByTestId('combination-existing')
-      await expect(existingButton).toContainText(`存量归组（${ungroupedIds.length}）`)
+      await expect(existingButton).toBeEnabled()
       await existingButton.click()
 
       const dialog = page.locator('.el-dialog')
       await expect(dialog).toBeVisible()
-      await expect(dialog).toContainText(`将选中的 ${ungroupedIds.length} 个文件归入组合`)
+      await dialog.getByTestId('existing-search').fill(filename)
+      const dialogRow = dialog.locator('.el-table__row').filter({ hasText: filename })
+      await expect(dialogRow).toHaveCount(1)
+      await dialogRow.locator('.el-checkbox').click()
+      await expect(dialog.getByTestId('existing-selected-count')).toContainText('1 个文件')
       await dialog.getByTestId('import-combination').click()
       await page.getByRole('option', { name: comboName, exact: true }).click()
       await expect(dialog.getByTestId('import-combination')).toContainText(comboName)
@@ -260,7 +263,7 @@ test.describe('ZIP 压缩包上传：自动解析为批次数据', { tag: ['@p2'
       await page.getByTestId('import-submit').click()
       const payload = (await assignRequest).postDataJSON()
       expect(payload).toEqual({
-        file_ids: ungroupedIds,
+        file_ids: [fileId],
         combination_id: combinationId,
       })
       expect(payload).not.toHaveProperty('batch_no')
