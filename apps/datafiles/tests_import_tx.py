@@ -96,6 +96,17 @@ class ImportTransactionBoundaryTests(TransactionTestCase):
             f'解析发生在事务内：{parser.in_atomic_block}（写锁会被长时间持有）',
         )
 
+    def test_combination_metadata_does_not_move_parse_into_transaction(self):
+        parser = self._patch_parser()
+        created, error = _helpers._register_zip_batch(
+            self.user, _build_zip(['a.csv']), 'combo-tx.zip',
+            combination=None, batch_no_override='BE01-1', tags=['manual'])
+        self.assertIsNone(error)
+        self.assertEqual(len(created), 1)
+        self.assertEqual(parser.in_atomic_block, [False])
+        self.assertEqual(created[0].batch_no, 'BE01-1')
+        self.assertEqual(created[0].tags, ['manual'])
+
     def test_each_file_gets_its_own_transaction(self):
         parser = self._patch_parser()
         original = _helpers._register_file

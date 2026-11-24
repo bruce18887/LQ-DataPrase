@@ -24,9 +24,7 @@ from rest_framework.views import APIView
 from apps.common.errors import error_response
 from apps.datafiles.models import DataFile
 from apps.datafiles.serializers import (
-    DataFileListSerializer,
-    DataFileSerializer,
-    normalize_tags,
+    DataFileListSerializer, DataFileSerializer, normalize_tags,
 )
 from apps.datafiles.services import evict_parse_cache_for_paths
 from apps.datafiles.utils import store_file_path
@@ -43,6 +41,7 @@ from ._helpers import (
     _UNSAFE_NAME_CHARS,
 )
 from .admin_scope import scoped_files
+from .import_options import parse_combine_options, parse_import_options
 
 logger = logging.getLogger(__name__)
 
@@ -320,6 +319,9 @@ class DataFileViewSet(viewsets.ModelViewSet):
             return error_response('param_required', 'batch_name is required')
         if re.search(r'[<>:"/\\|?*]', batch_name):
             return error_response('invalid_name_chars', 'batch_name 包含非法字符')
+        metadata_updates, options_error = parse_combine_options(request)
+        if options_error is not None:
+            return options_error
 
         # Owner-scoped and single-only: batch rows moving into another batch
         # would leave their original directory behind, breaking batch-dirs.
@@ -337,8 +339,6 @@ class DataFileViewSet(viewsets.ModelViewSet):
         batch_dir = os.path.join(batch_base, batch_name)
         os.makedirs(batch_dir, exist_ok=True)
 
-        # Phase 1: plan moves — basename/unsafe/collision rules live in
-        # _plan_file_moves (shared with uncombine).
         plans = _plan_file_moves(qs.order_by('id'), batch_dir, 'combine')
 
         if not plans:
@@ -348,7 +348,6 @@ class DataFileViewSet(viewsets.ModelViewSet):
                 'files': [],
             })
 
-        # Phase 2: DB changes inside transaction (no file I/O here).
         updated = []
         with transaction.atomic():
             for df, _src, target, new_filename, _src_dir in plans:
@@ -357,9 +356,11 @@ class DataFileViewSet(viewsets.ModelViewSet):
                 df.file_type = 'batch'
                 df.batch_name = batch_name
                 df.sub_batch = ''
+                for field, value in metadata_updates.items():
+                    setattr(df, field, value)
                 df.save(update_fields=[
                     'filename', 'file_path', 'file_type', 'batch_name',
-                    'sub_batch', 'updated_at',
+                    'sub_batch', *metadata_updates, 'updated_at',
                 ])
                 updated.append(df)
 
@@ -543,6 +544,10 @@ class FileUploadView(APIView):
                     'unsupported_file_type',
                     f'仅支持 CSV 或 ZIP 文件，无法上传 {uploaded_file.name}')
 
+        combination, batch_no, manual_tags, options_error = parse_import_options(request)
+        if options_error is not None:
+            return options_error
+
         # Optional per-file last_modified (epoch ms), parallel to the files list.
         last_modified_list = request.data.getlist('last_modified')
 
@@ -550,7 +555,6 @@ class FileUploadView(APIView):
         created = []
 
         for idx, uploaded_file in enumerate(files):
-            # Sanitized in the validation loop above: basename + charset check.
             base_name = os.path.basename(uploaded_file.name or '')
             ext = os.path.splitext(base_name)[1].lower()
 
@@ -559,7 +563,11 @@ class FileUploadView(APIView):
 
             # ZIP: extract CSVs and register them as batch data.
             if ext == '.zip':
-                zip_created, zip_error = _register_zip_batch(request.user, uploaded_file, base_name)
+                zip_created, zip_error = _register_zip_batch(
+                    request.user, uploaded_file, base_name,
+                    combination=combination, batch_no_override=batch_no,
+                    tags=manual_tags,
+                )
                 if zip_error:
                     return error_response('zip_import_failed', zip_error)
                 created.extend(zip_created)
@@ -580,7 +588,8 @@ class FileUploadView(APIView):
 
             df = _register_file(
                 request.user, file_path, 'single',
-                source_mtime=browser_mtime,
+                source_mtime=browser_mtime, combination=combination,
+                batch_no_override=batch_no, tags=manual_tags,
             )
             created.append(df)
 
